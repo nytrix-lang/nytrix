@@ -1,0 +1,27 @@
+shape dict_provenance_saturation {
+  family "runtime/containers"
+  generator "regression"
+  features [dict provenance saturation fallback]
+  template ny-test-case
+  timeout 120
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit -O0; --native-backend=llvm --jit --jit-engine=orc -O0; --nyr-run --nyr-run-max-steps=20000000"
+  expect compile_and_run
+  expect_message "DICT-SATURATION-OK"
+  source ny <<'NY'
+use core
+mut first = 0
+mut last = 0
+mut int i = 0
+while i < 70000 {
+   def d = dict(8)
+   d["index"] = i
+   if i == 0 { first = d }
+   last = d
+   i += 1
+}
+assert(first.get("index", -1) == 0)
+assert(last.get("index", -1) == 69999)
+assert(!is_dict("not a dictionary"))
+print("DICT-SATURATION-OK")
+NY
+}

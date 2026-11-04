@@ -11,6 +11,7 @@
 #include "pkg.h"
 #include "base/args.h"
 #include "base/process.h"
+#include "base/sha256.h"
 #include "base/util.h"
 #include "cmd/fmt/ui.h"
 #include "code/lang/pipeline/build.h"
@@ -27,7 +28,9 @@
 #include <termios.h>
 #endif
 #ifdef _WIN32
+#include "base/compat.h"
 #include <direct.h>
+#include <fcntl.h>
 #include <process.h>
 #define getcwd _getcwd
 #define getpid _getpid
@@ -134,7 +137,7 @@ static void ny_pkg_usage_section(const char *title,
 }
 
 static void ny_pkg_usage(void) {
-  static const ny_pkg_usage_entry_t commands[] = {
+  static const ny_pkg_usage_entry_t package_commands[] = {
       {"init [name]            ", "create ny.pkg.json"},
       {"add <name> <source>    ", "add, fetch, and lock a package"},
       {"get <name> [source]    ",
@@ -144,11 +147,13 @@ static void ny_pkg_usage(void) {
       {"sync                   ", "install manifest deps"},
       {"update [name]          ", "refresh git packages and lockfile"},
       {"list                   ", "list manifest dependencies"},
-      {"search [query]         ",
-       "fuzzy-search registries and package repositories"},
       {"path [name]            ", "print install root or package path"},
       {"info                   ", "print package metadata and deps"},
       {"venv                   ", "create/print .nytrix/venv/lib"},
+  };
+  static const ny_pkg_usage_entry_t discovery_commands[] = {
+      {"search [query]         ",
+       "fuzzy-search configured registries and repositories"},
       {"repo add <r> <source>  ", "add a package repository for name lookup"},
       {"repo list|sync|rm      ", "inspect, cache, or remove repositories"},
       {"registry [name]        ", "read NYTRIX_PKG_REGISTRY/.ny.registry"},
@@ -183,16 +188,22 @@ static void ny_pkg_usage(void) {
          nyt_clr(NYT_RESET), nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
   printf("       %sny install%s %s[name [source]]%s\n\n", nyt_clr(NYT_CYAN),
          nyt_clr(NYT_RESET), nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
-  ny_pkg_usage_section("commands", commands,
-                       sizeof(commands) / sizeof(commands[0]), NYT_CYAN);
+  ny_pkg_usage_section("Packages", package_commands,
+                       sizeof(package_commands) / sizeof(package_commands[0]),
+                       NYT_CYAN);
   printf("\n");
-  ny_pkg_usage_section("options", options, sizeof(options) / sizeof(options[0]),
+  ny_pkg_usage_section(
+      "Discovery and repositories", discovery_commands,
+      sizeof(discovery_commands) / sizeof(discovery_commands[0]), NYT_CYAN);
+  printf("\n");
+  ny_pkg_usage_section("Options", options, sizeof(options) / sizeof(options[0]),
                        NYT_GREEN);
   printf("\n%sSources:%s local dir/file, git+URL, git@host:path, URL.git, "
          "archive tar/zip, archive+PATH\n",
          nyt_clr(NYT_BOLD), nyt_clr(NYT_RESET));
-  printf("%sRepos:%s ny pkg repo add core git+https://host/pkgs.git; ny pkg "
-         "repo list; ny get pkgname\n",
+  printf("%sRepositories:%s none are configured by default. Add repositories "
+         "you trust; they provide package search and name lookup, while each "
+         "project declares its own dependencies.\n",
          nyt_clr(NYT_BOLD), nyt_clr(NYT_RESET));
 }
 
@@ -1069,7 +1080,8 @@ static int ny_pkg_copy_local(const char *source, const char *dest, bool force,
        * platform-dependent, so use the safer form: cp -R <src> <dst> where dst
        * is the parent.
        */
-      const char *cp_dir_argv[] = {"cp", "-R", /* filled below */ NULL, NULL};
+      const char *cp_dir_argv[] = {"cp", "-R", /* filled below */ NULL, NULL,
+                                   NULL};
       char src_slash[4096];
       snprintf(src_slash, sizeof(src_slash), "%s/.", source);
       cp_dir_argv[2] = src_slash;
@@ -1092,125 +1104,70 @@ static int ny_pkg_remove_path(const char *path, bool verbose) {
   return ny_pkg_run_argv(rm_argv, verbose);
 }
 
-static uint32_t ny_pkg_rotr32(uint32_t x, unsigned n) {
-  return (x >> n) | (x << (32u - n));
+static bool ny_pkg_archive_cache_path(const char *checksum, const char *source,
+                                      char *out, size_t out_len) {
+  if (!checksum || strncmp(checksum, "sha256:", 7) != 0 ||
+      strlen(checksum + 7) != 64)
+    return false;
+  for (const char *p = checksum + 7; *p; ++p)
+    if (!isxdigit((unsigned char)*p))
+      return false;
+  const char *suffix =
+      ny_pkg_ends_with_ci(ny_pkg_archive_source(source), ".zip") ? ".zip"
+                                                                 : ".tar";
+  int n = snprintf(out, out_len, "%s/pkg/archives/%s%s",
+                   ny_default_cache_root_dir(), checksum + 7, suffix);
+  return n > 0 && (size_t)n < out_len;
 }
 
-static void ny_pkg_sha256_block(uint32_t state[8],
-                                const unsigned char block[64]) {
-  static const uint32_t k[64] = {
-      0x428a2f98u, 0x71374491u, 0xb5c0fbcfu, 0xe9b5dba5u, 0x3956c25bu,
-      0x59f111f1u, 0x923f82a4u, 0xab1c5ed5u, 0xd807aa98u, 0x12835b01u,
-      0x243185beu, 0x550c7dc3u, 0x72be5d74u, 0x80deb1feu, 0x9bdc06a7u,
-      0xc19bf174u, 0xe49b69c1u, 0xefbe4786u, 0x0fc19dc6u, 0x240ca1ccu,
-      0x2de92c6fu, 0x4a7484aau, 0x5cb0a9dcu, 0x76f988dau, 0x983e5152u,
-      0xa831c66du, 0xb00327c8u, 0xbf597fc7u, 0xc6e00bf3u, 0xd5a79147u,
-      0x06ca6351u, 0x14292967u, 0x27b70a85u, 0x2e1b2138u, 0x4d2c6dfcu,
-      0x53380d13u, 0x650a7354u, 0x766a0abbu, 0x81c2c92eu, 0x92722c85u,
-      0xa2bfe8a1u, 0xa81a664bu, 0xc24b8b70u, 0xc76c51a3u, 0xd192e819u,
-      0xd6990624u, 0xf40e3585u, 0x106aa070u, 0x19a4c116u, 0x1e376c08u,
-      0x2748774cu, 0x34b0bcb5u, 0x391c0cb3u, 0x4ed8aa4au, 0x5b9cca4fu,
-      0x682e6ff3u, 0x748f82eeu, 0x78a5636fu, 0x84c87814u, 0x8cc70208u,
-      0x90befffau, 0xa4506cebu, 0xbef9a3f7u, 0xc67178f2u};
-  uint32_t w[64];
-  for (size_t i = 0; i < 16; ++i) {
-    size_t j = i * 4;
-    w[i] = ((uint32_t)block[j] << 24) | ((uint32_t)block[j + 1] << 16) |
-           ((uint32_t)block[j + 2] << 8) | (uint32_t)block[j + 3];
-  }
-  for (size_t i = 16; i < 64; ++i) {
-    uint32_t s0 = ny_pkg_rotr32(w[i - 15], 7) ^ ny_pkg_rotr32(w[i - 15], 18) ^
-                  (w[i - 15] >> 3);
-    uint32_t s1 = ny_pkg_rotr32(w[i - 2], 17) ^ ny_pkg_rotr32(w[i - 2], 19) ^
-                  (w[i - 2] >> 10);
-    w[i] = w[i - 16] + s0 + w[i - 7] + s1;
-  }
-  uint32_t a = state[0], b = state[1], c = state[2], d = state[3], e = state[4],
-           f = state[5], g = state[6], h = state[7];
-  for (size_t i = 0; i < 64; ++i) {
-    uint32_t S1 =
-        ny_pkg_rotr32(e, 6) ^ ny_pkg_rotr32(e, 11) ^ ny_pkg_rotr32(e, 25);
-    uint32_t ch = (e & f) ^ ((~e) & g);
-    uint32_t t1 = h + S1 + ch + k[i] + w[i];
-    uint32_t S0 =
-        ny_pkg_rotr32(a, 2) ^ ny_pkg_rotr32(a, 13) ^ ny_pkg_rotr32(a, 22);
-    uint32_t maj = (a & b) ^ (a & c) ^ (b & c);
-    uint32_t t2 = S0 + maj;
-    h = g;
-    g = f;
-    f = e;
-    e = d + t1;
-    d = c;
-    c = b;
-    b = a;
-    a = t1 + t2;
-  }
-  state[0] += a;
-  state[1] += b;
-  state[2] += c;
-  state[3] += d;
-  state[4] += e;
-  state[5] += f;
-  state[6] += g;
-  state[7] += h;
-}
-
-static bool ny_pkg_file_checksum(const char *path, char *out, size_t out_len) {
-  if (!path || !out || out_len < 72)
+static bool ny_pkg_copy_archive_to_cache(const char *source,
+                                         const char *checksum,
+                                         const char *source_name) {
+  char cache[4096], parent[4096], tmp[4096];
+  if (!ny_pkg_archive_cache_path(checksum, source_name, cache, sizeof(cache)))
     return false;
-  FILE *f = fopen(path, "rb");
-  if (!f)
+  if (ny_pkg_path_exists(cache)) {
+    char actual[80];
+    if (ny_sha256_file(cache, actual, sizeof(actual)) &&
+        strcmp(actual, checksum) == 0)
+      return true;
+    (void)remove(cache);
+  }
+  ny_dir_name(parent, sizeof(parent), cache);
+  ny_ensure_dir_recursive(parent);
+  int n = snprintf(tmp, sizeof(tmp), "%s.tmp-%ld", cache, (long)getpid());
+  if (n <= 0 || (size_t)n >= sizeof(tmp))
     return false;
-  uint32_t state[8] = {0x6a09e667u, 0xbb67ae85u, 0x3c6ef372u, 0xa54ff53au,
-                       0x510e527fu, 0x9b05688cu, 0x1f83d9abu, 0x5be0cd19u};
-  unsigned char block[64];
-  uint64_t total = 0;
-  size_t used = 0;
-  while (!feof(f)) {
-    size_t n = fread(block + used, 1, sizeof(block) - used, f);
-    total += n;
-    used += n;
-    if (used == sizeof(block)) {
-      ny_pkg_sha256_block(state, block);
-      used = 0;
+  FILE *in = fopen(source, "rb");
+  FILE *out = in ? fopen(tmp, "wb") : NULL;
+  if (!out) {
+    if (in)
+      fclose(in);
+    return false;
+  }
+  unsigned char buf[16384];
+  size_t used;
+  bool ok = true;
+  while ((used = fread(buf, 1, sizeof(buf), in)) != 0)
+    if (fwrite(buf, 1, used, out) != used) {
+      ok = false;
+      break;
     }
-    if (ferror(f)) {
-      fclose(f);
-      return false;
-    }
-  }
-  fclose(f);
-  uint64_t bits = total * UINT64_C(8);
-  block[used++] = 0x80;
-  if (used > 56) {
-    memset(block + used, 0, sizeof(block) - used);
-    ny_pkg_sha256_block(state, block);
-    used = 0;
-  }
-  memset(block + used, 0, 56 - used);
-  for (size_t i = 0; i < 8; ++i)
-    block[63 - i] = (unsigned char)(bits >> (i * 8));
-  ny_pkg_sha256_block(state, block);
-  char *w = out;
-  size_t left = out_len;
-  int n = snprintf(w, left, "sha256:");
-  if (n < 0 || (size_t)n >= left)
-    return false;
-  w += n;
-  left -= (size_t)n;
-  for (size_t i = 0; i < 8; ++i) {
-    n = snprintf(w, left, "%08x", state[i]);
-    if (n != 8 || (size_t)n >= left)
-      return false;
-    w += n;
-    left -= (size_t)n;
-  }
-  return true;
+  if (ferror(in))
+    ok = false;
+  if (fclose(out) != 0)
+    ok = false;
+  fclose(in);
+  if (ok && rename(tmp, cache) == 0)
+    return true;
+  (void)remove(tmp);
+  return ny_pkg_path_exists(cache);
 }
 
 static int ny_pkg_install_archive(const char *source, const char *dest,
                                   bool force, bool verbose,
-                                  bool strip_single_root, char *checksum,
+                                  bool strip_single_root,
+                                  const char *expected_checksum, char *checksum,
                                   size_t checksum_len) {
   source = ny_pkg_archive_source(source);
   if (checksum && checksum_len)
@@ -1219,7 +1176,7 @@ static int ny_pkg_install_archive(const char *source, const char *dest,
   ny_dir_name(parent, sizeof(parent), dest);
   ny_ensure_dir_recursive(parent);
   bool keep_existing = ny_pkg_path_exists(dest) && !force;
-  if (keep_existing && (!checksum || checksum_len == 0))
+  if (keep_existing && (!checksum || checksum_len == 0) && !expected_checksum)
     return 0;
 
   char tmp_dir[4096];
@@ -1235,10 +1192,6 @@ static int ny_pkg_install_archive(const char *source, const char *dest,
   }
 
   int rc = ny_pkg_remove_path(tmp_dir, verbose);
-  if (rc == 0 && !keep_existing)
-    rc = ny_pkg_remove_path(dest, verbose);
-  if (rc == 0 && !keep_existing)
-    ny_ensure_dir_recursive(dest);
   if (rc == 0) {
     const char *mkdir_argv[] = {"mkdir", "-p", tmp_dir, NULL};
     rc = ny_pkg_run_argv(mkdir_argv, verbose);
@@ -1256,8 +1209,22 @@ static int ny_pkg_install_archive(const char *source, const char *dest,
       rc = ny_pkg_run_argv(wget_argv, verbose);
     }
   }
-  if (rc == 0 && checksum && checksum_len &&
-      !ny_pkg_file_checksum(archive_path, checksum, checksum_len))
+  char actual_checksum[80] = {0};
+  if (rc == 0 &&
+      !ny_sha256_file(archive_path, actual_checksum, sizeof(actual_checksum)))
+    rc = 1;
+  if (rc == 0 && expected_checksum &&
+      strcmp(actual_checksum, expected_checksum) != 0) {
+    nyt_err("ny pkg", "archive checksum mismatch for %s", source);
+    rc = 1;
+  }
+  if (rc == 0 && checksum && checksum_len) {
+    if (snprintf(checksum, checksum_len, "%s", actual_checksum) >=
+        (int)checksum_len)
+      rc = 1;
+  }
+  if (rc == 0 &&
+      !ny_pkg_copy_archive_to_cache(archive_path, actual_checksum, source))
     rc = 1;
   if (keep_existing) {
     if (downloaded)
@@ -1265,6 +1232,10 @@ static int ny_pkg_install_archive(const char *source, const char *dest,
     (void)ny_pkg_remove_path(tmp_dir, verbose);
     return rc;
   }
+  if (rc == 0)
+    rc = ny_pkg_remove_path(dest, verbose);
+  if (rc == 0)
+    ny_ensure_dir_recursive(dest);
   if (rc == 0) {
     if (ny_pkg_ends_with_ci(source, ".zip")) {
       const char *unzip_argv[] = {"unzip", "-q",    archive_path,
@@ -1307,14 +1278,14 @@ static int ny_pkg_install_archive(const char *source, const char *dest,
         /*
          * Move contents of the single root directory into dest
          */
-        const char *cp_argv[] = {"cp", "-R", /* src/., dst */ NULL, NULL};
+        const char *cp_argv[] = {"cp", "-R", /* src/., dst */ NULL, NULL, NULL};
         char src_dot[4096];
         snprintf(src_dot, sizeof(src_dot), "%s/.", first_entry);
         cp_argv[2] = src_dot;
         cp_argv[3] = dest;
         rc = ny_pkg_run_argv(cp_argv, verbose);
       } else {
-        const char *cp_argv[] = {"cp", "-R", /* tmp/., dst */ NULL, NULL};
+        const char *cp_argv[] = {"cp", "-R", /* tmp/., dst */ NULL, NULL, NULL};
         char src_dot[4096];
         snprintf(src_dot, sizeof(src_dot), "%s/.", tmp_dir);
         cp_argv[2] = src_dot;
@@ -1322,7 +1293,7 @@ static int ny_pkg_install_archive(const char *source, const char *dest,
         rc = ny_pkg_run_argv(cp_argv, verbose);
       }
     } else {
-      const char *cp_argv[] = {"cp", "-R", /* tmp/., dst */ NULL, NULL};
+      const char *cp_argv[] = {"cp", "-R", /* tmp/., dst */ NULL, NULL, NULL};
       char src_dot[4096];
       snprintf(src_dot, sizeof(src_dot), "%s/.", tmp_dir);
       cp_argv[2] = src_dot;
@@ -1697,7 +1668,7 @@ static char *ny_pkg_repo_materialize(const char *repo_name,
                             opts && opts->verbose);
   } else {
     rc = ny_pkg_install_archive(repo_source, cache, opts && opts->force,
-                                opts && opts->verbose, false, NULL, 0);
+                                opts && opts->verbose, false, NULL, NULL, 0);
   }
   return rc == 0 ? ny_strdup(cache) : NULL;
 }
@@ -1856,6 +1827,15 @@ static bool ny_pkg_read_lock(const char *manifest_path, ny_pkg_lock_t *lock) {
   if (!txt)
     return false;
   const char *end = txt + strlen(txt);
+  const char *root_end = ny_pkg_find_matching_brace(txt, end);
+  char *schema =
+      root_end ? ny_pkg_json_object_string(txt, root_end, "schema") : NULL;
+  bool valid_schema = schema && strcmp(schema, "ny.pkg.lock.v2") == 0;
+  free(schema);
+  if (!valid_schema) {
+    free(txt);
+    return false;
+  }
   const char *packages = strstr(txt, "\"packages\"");
   const char *p = packages ? strchr(packages, '[') : NULL;
   if (!p || p >= end) {
@@ -1888,7 +1868,22 @@ static bool ny_pkg_read_lock(const char *manifest_path, ny_pkg_lock_t *lock) {
     char *path = ny_pkg_json_object_string(p, obj_end, "path");
     char *commit = ny_pkg_json_object_string(p, obj_end, "commit");
     char *checksum = ny_pkg_json_object_string(p, obj_end, "checksum");
-    if (!name || !source || !ny_pkg_name_ok(name)) {
+    bool valid_checksum = true;
+    if (checksum && *checksum) {
+      valid_checksum =
+          strncmp(checksum, "sha256:", 7) == 0 && strlen(checksum + 7) == 64;
+      for (const char *q = checksum + 7; valid_checksum && *q; ++q)
+        valid_checksum = isxdigit((unsigned char)*q) != 0;
+    }
+    bool valid_commit = true;
+    if (commit && *commit) {
+      size_t commit_len = strlen(commit);
+      valid_commit = commit_len == 40 || commit_len == 64;
+      for (const char *q = commit; valid_commit && *q; ++q)
+        valid_commit = isxdigit((unsigned char)*q) != 0;
+    }
+    if (!name || !source || !ny_pkg_name_ok(name) || !valid_checksum ||
+        !valid_commit) {
       free(name);
       free(source);
       free(ref);
@@ -1965,12 +1960,15 @@ static const ny_pkg_lock_entry_t *ny_pkg_lock_find(const ny_pkg_lock_t *lock,
   return NULL;
 }
 
-static int ny_pkg_install_manifest_offline(ny_pkg_manifest_t *m,
-                                           const ny_pkg_opts_t *opts,
-                                           const char *only_name) {
+static char *ny_pkg_resolve_declared_source(const char *source,
+                                            const char *declaring_root);
+
+static int ny_pkg_install_manifest_locked(ny_pkg_manifest_t *m,
+                                          const ny_pkg_opts_t *opts,
+                                          const char *only_name, bool offline) {
   ny_pkg_lock_t lock = {0};
   if (!ny_pkg_read_lock(m->path, &lock)) {
-    nyt_err("ny pkg", "offline install requires a readable %s.lock", m->path);
+    nyt_err("ny pkg", "install requires a readable %s.lock", m->path);
     return 1;
   }
   for (size_t i = 0; i < m->len; ++i) {
@@ -1978,9 +1976,12 @@ static int ny_pkg_install_manifest_offline(ny_pkg_manifest_t *m,
     if (only_name && *only_name && strcmp(dep->name, only_name) != 0)
       continue;
     const ny_pkg_lock_entry_t *e = ny_pkg_lock_find(&lock, dep->name);
-    if (!e || strcmp(e->dep.source, dep->source) != 0 ||
-        !ny_pkg_streq_nullable(e->dep.ref, dep->ref)) {
-      nyt_err("ny pkg", "offline lock does not match manifest dependency '%s'",
+    char *resolved = ny_pkg_resolve_declared_source(dep->source, m->root);
+    bool matches = e && resolved && strcmp(e->dep.source, resolved) == 0 &&
+                   ny_pkg_streq_nullable(e->dep.ref, dep->ref);
+    free(resolved);
+    if (!matches) {
+      nyt_err("ny pkg", "lock does not match manifest dependency '%s'",
               dep->name);
       ny_pkg_lock_free(&lock);
       return 1;
@@ -1989,60 +1990,117 @@ static int ny_pkg_install_manifest_offline(ny_pkg_manifest_t *m,
   char root[4096];
   ny_pkg_install_root(opts, m, root, sizeof(root));
   ny_ensure_dir_recursive(root);
+  bool *selected = calloc(lock.len, sizeof(*selected));
+  if (!selected) {
+    ny_pkg_lock_free(&lock);
+    return 1;
+  }
+  if (only_name && *only_name) {
+    for (size_t i = 0; i < lock.len; ++i)
+      selected[i] = strcmp(lock.items[i].dep.name, only_name) == 0;
+    bool changed;
+    do {
+      changed = false;
+      for (size_t j = 0; j < lock.edge_len; ++j) {
+        bool parent_selected = false;
+        for (size_t i = 0; i < lock.len; ++i)
+          if (selected[i] &&
+              strcmp(lock.items[i].dep.name, lock.edges[j].parent) == 0)
+            parent_selected = true;
+        if (!parent_selected)
+          continue;
+        for (size_t i = 0; i < lock.len; ++i)
+          if (!selected[i] &&
+              strcmp(lock.items[i].dep.name, lock.edges[j].child) == 0) {
+            selected[i] = true;
+            changed = true;
+          }
+      }
+    } while (changed);
+  } else {
+    for (size_t i = 0; i < lock.len; ++i)
+      selected[i] = true;
+  }
   for (size_t i = 0; i < lock.len; ++i) {
     const ny_pkg_lock_entry_t *e = &lock.items[i];
-    if (only_name && *only_name && strcmp(e->dep.name, only_name) != 0) {
-      /*
-       * Include transitive children reachable from the selected root package.
-       */
-      bool reachable = false;
-      for (size_t j = 0; j < lock.edge_len; ++j)
-        if (strcmp(lock.edges[j].parent, only_name) == 0 &&
-            strcmp(lock.edges[j].child, e->dep.name) == 0) {
-          reachable = true;
-          break;
-        }
-      if (!reachable)
-        continue;
-    }
+    if (!selected[i])
+      continue;
     char dest[4096];
     ny_pkg_join(dest, sizeof(dest), root, e->dep.name);
-    if (ny_pkg_path_exists(dest) && !opts->force)
-      continue;
-    const char *source = NULL;
+    const char *source = e->dep.source;
     char cache[4096];
-    if (ny_pkg_lock_entry_cache_path(e, cache, sizeof(cache)) &&
-        ny_pkg_is_dir(cache)) {
-      source = cache;
-    } else if (!ny_pkg_source_is_url(e->dep.source) &&
-               !ny_pkg_source_is_git(e->dep.source) &&
-               strncmp(e->dep.source, "repo+", 5) != 0) {
-      const char *local = ny_pkg_archive_source(e->dep.source);
-      if (ny_pkg_path_exists(local) && !ny_pkg_source_is_archive(e->dep.source))
-        source = local;
-    }
-    if (!source) {
-      nyt_err("ny pkg", "offline cache miss for '%s'", e->dep.name);
-      ny_pkg_lock_free(&lock);
-      return 1;
-    }
-    if (ny_pkg_copy_local(source, dest, true, opts->verbose) != 0) {
-      ny_pkg_lock_free(&lock);
-      return 1;
-    }
-    if (e->commit && *e->commit) {
-      char *actual = ny_pkg_git_commit(dest);
-      if (!actual || strcmp(actual, e->commit) != 0) {
-        nyt_err("ny pkg", "offline cache identity mismatch for '%s'",
-                e->dep.name);
-        free(actual);
-        ny_pkg_lock_free(&lock);
-        return 1;
+    char archive_cache[4096];
+    char *repo_source = NULL;
+    int rc = 0;
+    if (e->checksum && *e->checksum) {
+      if (!ny_pkg_archive_cache_path(e->checksum, source, archive_cache,
+                                     sizeof(archive_cache))) {
+        rc = 1;
+      } else {
+        char actual[80];
+        bool cache_valid =
+            ny_pkg_path_exists(archive_cache) &&
+            ny_sha256_file(archive_cache, actual, sizeof(actual)) &&
+            strcmp(actual, e->checksum) == 0;
+        if (cache_valid) {
+          source = archive_cache;
+        } else if (offline) {
+          rc = 1;
+        } else {
+          if (ny_pkg_path_exists(archive_cache))
+            (void)remove(archive_cache);
+          repo_source = ny_pkg_resolve_repo_source(source, opts);
+          if (repo_source)
+            source = repo_source;
+        }
       }
-      free(actual);
+      if (rc == 0)
+        rc = ny_pkg_install_archive(source, dest, true, opts->verbose, true,
+                                    e->checksum, NULL, 0);
+    } else if (e->commit && *e->commit) {
+      bool cached_git = false;
+      if (ny_pkg_lock_entry_cache_path(e, cache, sizeof(cache)) &&
+          ny_pkg_is_dir(cache)) {
+        source = cache;
+        cached_git = true;
+      }
+      if (cached_git) {
+        rc = ny_pkg_install_git(source, e->commit, dest, true, opts->verbose);
+      } else if (offline) {
+        rc = 1;
+      } else {
+        repo_source = ny_pkg_resolve_repo_source(source, opts);
+        if (repo_source)
+          source = repo_source;
+        rc = ny_pkg_install_git(source, e->commit, dest, true, opts->verbose);
+      }
+      if (rc == 0) {
+        char *actual = ny_pkg_git_commit(dest);
+        if (!actual || strcmp(actual, e->commit) != 0)
+          rc = 1;
+        free(actual);
+      }
+    } else if (ny_pkg_source_is_archive(source) ||
+               ny_pkg_source_is_git(source) || ny_pkg_source_is_url(source) ||
+               strncmp(source, "repo+", 5) == 0) {
+      rc = 1; /* Remote packages need a recorded content identity. */
+    } else if (ny_pkg_path_exists(source)) {
+      rc = ny_pkg_copy_local(source, dest, true, opts->verbose);
+    } else {
+      rc = 1;
     }
-    nyt_msg("PKG", NYT_GREEN, "offline %s -> %s", e->dep.name, dest);
+    free(repo_source);
+    if (rc != 0) {
+      nyt_err("ny pkg", "%s install failed for locked package '%s'",
+              offline ? "offline" : "locked", e->dep.name);
+      free(selected);
+      ny_pkg_lock_free(&lock);
+      return 1;
+    }
+    nyt_msg("PKG", NYT_GREEN, "%s %s -> %s", offline ? "offline" : "locked",
+            e->dep.name, dest);
   }
+  free(selected);
   ny_pkg_lock_free(&lock);
   return 0;
 }
@@ -2050,11 +2108,35 @@ static int ny_pkg_install_manifest_offline(ny_pkg_manifest_t *m,
 static int ny_pkg_write_lock(const char *manifest_path,
                              const ny_pkg_lock_t *lock) {
   char lock_path[4096];
-  snprintf(lock_path, sizeof(lock_path), "%s.lock",
-           manifest_path && *manifest_path ? manifest_path : "ny.pkg.json");
-  FILE *f = fopen(lock_path, "wb");
+  int n =
+      snprintf(lock_path, sizeof(lock_path), "%s.lock",
+               manifest_path && *manifest_path ? manifest_path : "ny.pkg.json");
+  if (n <= 0 || (size_t)n >= sizeof(lock_path))
+    return 1;
+  char temporary[4120];
+  n = snprintf(temporary, sizeof(temporary), "%s.XXXXXX", lock_path);
+  if (n <= 0 || (size_t)n >= sizeof(temporary))
+    return 1;
+#ifdef _WIN32
+  if (_mktemp_s(temporary, sizeof(temporary)) != 0)
+    return 1;
+  int fd = _open(temporary, _O_CREAT | _O_EXCL | _O_BINARY | _O_WRONLY,
+                 _S_IREAD | _S_IWRITE);
+  FILE *f = fd >= 0 ? _fdopen(fd, "wb") : NULL;
+#else
+  int fd = mkstemp(temporary);
+  FILE *f = fd >= 0 ? fdopen(fd, "wb") : NULL;
+#endif
   if (!f) {
-    nyt_err("ny pkg", "cannot write %s: %s", lock_path, strerror(errno));
+    if (fd >= 0) {
+#ifdef _WIN32
+      _close(fd);
+#else
+      close(fd);
+#endif
+      (void)remove(temporary);
+    }
+    nyt_err("ny pkg", "cannot write %s: %s", temporary, strerror(errno));
     return 1;
   }
   fputs("{\n  \"schema\": \"ny.pkg.lock.v2\",\n  \"packages\": [\n", f);
@@ -2091,7 +2173,21 @@ static int ny_pkg_write_lock(const char *manifest_path,
     fputs(i + 1 == lock->edge_len ? "\n" : ",\n", f);
   }
   fputs("  ]\n}\n", f);
-  fclose(f);
+  bool ok = !ferror(f);
+  if (fclose(f) != 0)
+    ok = false;
+#ifdef _WIN32
+  if (ok)
+    ok = MoveFileExA(temporary, lock_path, MOVEFILE_REPLACE_EXISTING) != 0;
+#else
+  if (ok)
+    ok = rename(temporary, lock_path) == 0;
+#endif
+  if (!ok) {
+    nyt_err("ny pkg", "cannot publish %s: %s", lock_path, strerror(errno));
+    (void)remove(temporary);
+    return 1;
+  }
   return 0;
 }
 
@@ -2216,7 +2312,7 @@ static int ny_pkg_install_dep(const ny_pkg_dep_t *dep,
   int rc = 0;
   char checksum[80] = {0};
   if (ny_pkg_source_is_archive(source)) {
-    rc = ny_pkg_install_archive(source, dest, opts->force, opts->verbose, true,
+    rc = ny_pkg_install_archive(source, dest, true, opts->verbose, true, NULL,
                                 checksum, sizeof(checksum));
   } else if (ny_pkg_source_is_git(source)) {
     rc = ny_pkg_install_git(source, dep->ref, dest, opts->force, opts->verbose);
@@ -2253,9 +2349,15 @@ static int ny_pkg_install_dep(const ny_pkg_dep_t *dep,
 
 static int ny_pkg_install_manifest(ny_pkg_manifest_t *m,
                                    const ny_pkg_opts_t *opts,
-                                   const char *only_name) {
+                                   const char *only_name, bool refresh) {
   if (opts && opts->offline)
-    return ny_pkg_install_manifest_offline(m, opts, only_name);
+    return ny_pkg_install_manifest_locked(m, opts, only_name, true);
+  char lock_path[4096];
+  int n = snprintf(lock_path, sizeof(lock_path), "%s.lock", m->path);
+  if (n <= 0 || (size_t)n >= sizeof(lock_path))
+    return 1;
+  if (!refresh && ny_pkg_path_exists(lock_path))
+    return ny_pkg_install_manifest_locked(m, opts, only_name, false);
   ny_pkg_lock_t lock = {0};
   int rc = 0;
   for (size_t i = 0; i < m->len; ++i) {
@@ -2271,6 +2373,66 @@ static int ny_pkg_install_manifest(ny_pkg_manifest_t *m,
   if (rc == 0)
     rc = ny_pkg_write_lock(m->path, &lock);
   ny_pkg_lock_free(&lock);
+  return rc;
+}
+
+static int ny_pkg_install_added_dep(ny_pkg_manifest_t *m,
+                                    const ny_pkg_opts_t *opts,
+                                    const char *added_name) {
+  if (!m || !added_name || !*added_name || (opts && opts->offline))
+    return ny_pkg_install_manifest(m, opts, NULL, true);
+  ny_pkg_lock_t previous = {0};
+  if (!ny_pkg_read_lock(m->path, &previous))
+    return ny_pkg_install_manifest(m, opts, NULL, true);
+  const ny_pkg_lock_entry_t *added = ny_pkg_lock_find(&previous, added_name);
+  if (added) {
+    ny_pkg_lock_free(&previous);
+    return ny_pkg_install_manifest(m, opts, NULL, true);
+  }
+  for (size_t i = 0; i < m->len; ++i) {
+    const ny_pkg_dep_t *dep = &m->items[i];
+    if (strcmp(dep->name, added_name) == 0)
+      continue;
+    const ny_pkg_lock_entry_t *old = ny_pkg_lock_find(&previous, dep->name);
+    char *resolved = ny_pkg_resolve_declared_source(dep->source, m->root);
+    bool matches = old && resolved && strcmp(old->dep.source, resolved) == 0 &&
+                   ny_pkg_streq_nullable(old->dep.ref, dep->ref);
+    free(resolved);
+    if (!matches) {
+      ny_pkg_lock_free(&previous);
+      nyt_err("ny pkg",
+              "existing lock does not match dependency '%s'; run "
+              "'ny pkg update' to refresh it",
+              dep->name);
+      return 1;
+    }
+  }
+  ny_pkg_lock_t next = {0};
+  int rc = 0;
+  for (size_t i = 0; i < previous.len && rc == 0; ++i) {
+    const ny_pkg_lock_entry_t *e = &previous.items[i];
+    ny_pkg_lock_result_t pushed =
+        ny_pkg_lock_push(&next, &e->dep, e->path, e->commit, e->checksum);
+    if (pushed != NY_PKG_LOCK_ADDED)
+      rc = 1;
+  }
+  for (size_t i = 0; i < previous.edge_len && rc == 0; ++i)
+    if (!ny_pkg_lock_add_edge(&next, previous.edges[i].parent,
+                              previous.edges[i].child))
+      rc = 1;
+  const ny_pkg_dep_t *new_dep = NULL;
+  for (size_t i = 0; i < m->len; ++i)
+    if (strcmp(m->items[i].name, added_name) == 0)
+      new_dep = &m->items[i];
+  if (!new_dep)
+    rc = 1;
+  if (rc == 0)
+    rc = ny_pkg_install_dep(new_dep, opts, m, m->root,
+                            m->name && *m->name ? m->name : "<root>", &next, 0);
+  if (rc == 0)
+    rc = ny_pkg_write_lock(m->path, &next);
+  ny_pkg_lock_free(&next);
+  ny_pkg_lock_free(&previous);
   return rc;
 }
 
@@ -2350,7 +2512,7 @@ static int ny_pkg_cmd_add(int argc, char **argv, ny_pkg_opts_t *opts,
   ny_pkg_manifest_push(&m, name, clean_source, clean_ref);
   int rc = ny_pkg_write_manifest(&m);
   if (rc == 0)
-    rc = ny_pkg_install_manifest(&m, opts, NULL);
+    rc = ny_pkg_install_added_dep(&m, opts, name);
   free(name);
   free(source);
   free(clean_source);
@@ -2368,7 +2530,7 @@ static int ny_pkg_cmd_install(int argc, char **argv, ny_pkg_opts_t *opts,
     nyt_err("ny pkg", "manifest not found: %s", opts->manifest);
     return 1;
   }
-  int rc = ny_pkg_install_manifest(&m, opts, NULL);
+  int rc = ny_pkg_install_manifest(&m, opts, NULL, false);
   ny_pkg_manifest_free(&m);
   return rc;
 }
@@ -3485,6 +3647,14 @@ int ny_pkg_main(int argc, char **argv) {
     ny_pkg_usage();
     return 0;
   }
+  if (nargs > 0 &&
+      (strcmp(args[0], "-h") == 0 || strcmp(args[0], "--help") == 0) &&
+      (strcmp(cmd, "add") == 0 || strcmp(cmd, "get") == 0 ||
+       strcmp(cmd, "install") == 0 || strcmp(cmd, "sync") == 0)) {
+    printf("Usage: ny pkg %s\n\n", cmd);
+    ny_pkg_usage();
+    return 0;
+  }
   if (strcmp(cmd, "init") == 0)
     return ny_pkg_cmd_init(nargs, args, &opts);
   if (strcmp(cmd, "new") == 0)
@@ -3498,17 +3668,17 @@ int ny_pkg_main(int argc, char **argv) {
     return ny_pkg_cmd_uninstall(nargs, args, &opts);
   if (strcmp(cmd, "update") == 0) {
     opts.force = false;
-    if (nargs > 0) {
-      ny_pkg_manifest_t m;
-      if (!ny_pkg_read_manifest(opts.manifest, &m)) {
-        nyt_err("ny pkg", "manifest not found: %s", opts.manifest);
-        return 1;
-      }
-      int rc = ny_pkg_install_manifest(&m, &opts, args[0]);
-      ny_pkg_manifest_free(&m);
-      return rc;
+    ny_pkg_manifest_t m;
+    if (!ny_pkg_read_manifest(opts.manifest, &m)) {
+      nyt_err("ny pkg", "manifest not found: %s", opts.manifest);
+      return 1;
     }
-    return ny_pkg_cmd_install(0, NULL, &opts, ref);
+    if (nargs > 0)
+      nyt_msg("PKG", NYT_YELLOW,
+              "updating the complete lock graph, including '%s'", args[0]);
+    int rc = ny_pkg_install_manifest(&m, &opts, NULL, true);
+    ny_pkg_manifest_free(&m);
+    return rc;
   }
   if (strcmp(cmd, "list") == 0)
     return ny_pkg_cmd_list(&opts);

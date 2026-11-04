@@ -40,23 +40,9 @@ int main(void) {
   int index = nyr_opt_const(&ir, 2);
   int store_address = indexed_address(&ir, base, index);
   int value = nyr_opt_const(&ir, 42);
-  (void)nyr_ir_emit(&ir, (nyr_inst_t){.op = NYIR_STORE_I64,
-                                     .dst = -1,
-                                     .a = store_address,
-                                     .b = -1,
-                                     .c = value,
-                                     .d = -1,
-                                     .e = -1,
-                                     .f = -1});
+  (void)nyr_opt_emit_abc(&ir, NYIR_STORE_I64, store_address, -1, value);
   int load_address = indexed_address(&ir, base, index);
-  int loaded = nyr_ir_emit(&ir, (nyr_inst_t){.op = NYIR_LOAD_I64,
-                                            .dst = -1,
-                                            .a = load_address,
-                                            .b = -1,
-                                            .c = -1,
-                                            .d = -1,
-                                            .e = -1,
-                                            .f = -1});
+  int loaded = nyr_opt_emit_abc(&ir, NYIR_LOAD_I64, load_address, -1, -1);
   nyr_opt_ret(&ir, loaded);
 
   bool ok = nyr_opt_verify(&ir, "x64-indexed-memory");

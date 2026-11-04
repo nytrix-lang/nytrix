@@ -7,7 +7,7 @@ shape bpf_portable_ror_i64_assembles {
   expect compile_and_run
   source ny <<'NY'
 use core
-use core.os (file_exists, file_remove, run_capture, temp_dir, pid)
+use core.os (env, file_exists, file_remove, run_capture, temp_dir, pid)
 
 def compiler = env("NYTRIX_NY_FULL_BIN")
 assert(is_str(compiler) && compiler.len > 0,
@@ -31,7 +31,7 @@ def program =
   "rotate_check(1) + memory_roundtrip(42)"
 def emitted = run_capture(
     [compiler, "--native-backend=bpf", "--native-only", "-O0",
-     "--nyir-verify", "--emit-asm=" + asm_path, "-no-std", "-emit-only",
+     "--nyr-verify", "--emit-asm=" + asm_path, "-no-std", "-emit-only",
      "-e", program],
     [], nil, false)
 def assembled =

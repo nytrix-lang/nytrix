@@ -8,8 +8,10 @@ use core
 use core.str as str
 
 fn _lower_byte(int byte) int {
-   def lowered = byte >= 65 && byte <= 90 ? byte + 32 : byte
-   lowered
+   if byte >= 65 {
+      if byte <= 90 { return byte + 32 }
+   }
+   byte
 }
 
 ;; Local min/max helpers: core min/max tail into conditional
@@ -51,9 +53,11 @@ fn _find_folded(str candidate, str query) int {
    mut int start = 0
    while start <= last {
       mut int index = 0
-      while index < query_len &&
-      _lower_byte(load8(candidate, start + index)) ==
-      _lower_byte(load8(query, index)) {
+      while index < query_len {
+         if _lower_byte(load8(candidate, start + index)) !=
+         _lower_byte(load8(query, index)) {
+            break
+         }
          index += 1
       }
       if index == query_len { return start }
@@ -82,26 +86,24 @@ fn fuzzy_score(str candidate, str query) int {
    mut qi = 0
    while qi < query_len {
       def qchar = _lower_byte(load8(query, qi))
-      mut found = false
       mut ci = last + 1
       if ci < 0 { ci = 0 }
       while ci < candidate_len {
          if _lower_byte(load8(candidate, ci)) == qchar {
-            found = true
-            score += 20
-            if _boundary(candidate, ci) { score += 20 }
-            if ci == last + 1 {
-               streak += 1
-               score += 15 + streak * 2
-            } else {
-               streak = 0
-            }
-            last = ci
             break
          }
          ci += 1
       }
-      if !found { return 0 }
+      if ci >= candidate_len { return 0 }
+      score += 20
+      if _boundary(candidate, ci) { score += 20 }
+      if ci == last + 1 {
+         streak += 1
+         score += 15 + streak * 2
+      } else {
+         streak = 0
+      }
+      last = ci
       qi += 1
    }
    score
@@ -113,20 +115,34 @@ fn _field(dict entry, str key) str {
    text
 }
 
+fn _compare_bytes(str left, str right) int {
+   def limit = left.len < right.len ? left.len : right.len
+   mut i = 0
+   while i < limit {
+      def a = load8(left, i) & 255
+      def b = load8(right, i) & 255
+      if a < b { return -1 }
+      if a > b { return 1 }
+      i += 1
+   }
+   if left.len < right.len { return -1 }
+   if left.len > right.len { return 1 }
+   0
+}
+
 fn _field_score(str value, str term, int weight) int {
    def result = fuzzy_score(value, term)
-   def weighted = result > 0 ? result + weight : 0
-   weighted
+   if result > 0 { return result + weight }
+   0
 }
 
 fn _query_terms(str query) list {
    mut terms = []
    mut start = -1
    mut i = 0
-   while i <= query.len {
-      def at_end = i == query.len
-      def byte = at_end ? 0 : load8(query, i)
-      def separator = at_end || byte == 32 || byte == 9 ||
+   while i < query.len {
+      def byte = load8(query, i)
+      def separator = byte == 32 || byte == 9 ||
       byte == 10 || byte == 13
       if separator {
          if start >= 0 {
@@ -138,18 +154,24 @@ fn _query_terms(str query) list {
       }
       i += 1
    }
+   if start >= 0 {
+      terms = terms.append(_byte_slice(query, start, query.len))
+   }
    terms
 }
 
 fn _score_terms(dict entry, str query) int {
    def full = _field(entry, "full_name")
    def name = _field(entry, "name")
+   def lower_full = str(str.lower(full))
+   def lower_name = str(str.lower(name))
+   def lower_query = str(str.lower(query))
    if query.len > 0 {
-      if str.lower(full) == str.lower(query) { return 1000000 }
-      if str.lower(name) == str.lower(query) { return 950000 }
+      if lower_full == lower_query { return 1000000 }
+      if lower_name == lower_query { return 950000 }
       def leaf_at = str.find_last(full, ".")
-      if leaf_at >= 0 && str.lower(_byte_slice(full, leaf_at + 1, full.len)) ==
-      str.lower(query) { return 925000 }
+      def lower_leaf = str(str.lower(_byte_slice(full, leaf_at + 1, full.len)))
+      if leaf_at >= 0 && lower_leaf == lower_query { return 925000 }
    }
    def terms_list = _query_terms(query)
    def terms = terms_list.len
@@ -267,10 +289,13 @@ fn rank(list entries, str query) list {
          def prior = int(result.get(at - 1))
          def prior_entry = entries.get(prior)
          def prior_score = int(scores.get(at - 1))
+         def item_kind = _field(item_entry, "kind")
+         def prior_kind = _field(prior_entry, "kind")
+         def kind_order = _compare_bytes(item_kind, prior_kind)
+         def name_order = _compare_bytes(_field(item_entry, "full_name"), _field(prior_entry, "full_name"))
          def before = item_score > prior_score ||
-         (item_score == prior_score && _field(item_entry, "kind") < _field(prior_entry, "kind")) ||
-         (item_score == prior_score && _field(item_entry, "kind") == _field(prior_entry, "kind") &&
-            _field(item_entry, "full_name") < _field(prior_entry, "full_name"))
+         (item_score == prior_score && kind_order < 0) ||
+         (item_score == prior_score && kind_order == 0 && name_order < 0)
          if !before { break }
          result[at] = prior
          scores[at] = prior_score

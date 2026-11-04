@@ -8,19 +8,19 @@
 #include "base/common.h"
 #include "base/loader.h"
 #include "base/options.h"
+#include "base/process.h"
 #include "base/util.h"
 #include "cmd/ny/repl/types.h"
 #include "code/backend/llvm/bridge.h"
 #include "code/backend/native.h"
+#include "code/backend/runtime/runtime.h"
+#include "code/backend/runtime/shared.h"
 #include "code/backend/wire/cache.h"
 #include "code/lang/code.h"
 #include "code/lang/llvm/jit.h"
 #include "code/lang/parse/json.h"
-#include "code/lang/pipeline/build.h"
 #include "code/lang/pipeline/native.h"
 #include "code/lang/priv.h"
-#include "code/lang/runtime/runtime.h"
-#include "code/lang/runtime/shared.h"
 #include "code/lang/types/pipeline.h"
 #include "priv.h"
 #include <ctype.h>
@@ -86,7 +86,6 @@ static VEC(repl_import_program_t) g_repl_import_programs = {0};
 static std_mode_t g_repl_std_override = STD_MODE_DEFAULT;
 static int g_repl_has_std_override = 0;
 
-static std_mode_t g_repl_effective_mode = STD_MODE_DEFAULT;
 static int g_repl_plain = 0;
 static int g_repl_max_errors = -1;
 static int g_repl_exit_hook_registered = 0;
@@ -1209,6 +1208,21 @@ static char *repl_rewrite_lazy_std_qualified_calls(const char *src,
   while (*p) {
     if (repl_lazy_skip_comment_or_string(&p))
       continue;
+    /*
+     * Never rewrite a module name inside a `use` declaration (for example,
+     * `use core.os (file_read_lines)`). Rewriting `core.os` to `os` changes
+     * the target module path into an undefined local/submodule name.
+     */
+    const char *line_start = p;
+    while (line_start > src && line_start[-1] != '\n')
+      line_start--;
+    while (line_start < p && (*line_start == ' ' || *line_start == '\t'))
+      line_start++;
+    if (line_start + 3 < p && strncmp(line_start, "use", 3) == 0 &&
+        isspace((unsigned char)line_start[3])) {
+      p++;
+      continue;
+    }
     int before_boundary =
         p == src || !(isalnum((unsigned char)p[-1]) || p[-1] == '_');
     if (!before_boundary || strncmp(p, "core.", 5) != 0) {
@@ -2008,7 +2022,7 @@ static void map_rt_syms_persistent(LLVMModuleRef mod,
     const char *n;
     void *p;
   } syms[] = {
-#include "code/lang/runtime/defs.h"
+#include "code/backend/runtime/defs.h"
       {NULL, NULL}};
 #undef RT_DEF
 #undef RT_GV
@@ -2136,8 +2150,7 @@ static void repl_init_engine(std_mode_t mode, doc_list_t *docs) {
                                           nyr_err, sizeof(nyr_err))) {
           std_init_fn_name = "_ny_top_entry";
         } else if (nyr_err[0]) {
-          fprintf(stderr, "REPL std initialization NYIR failed: %s\n",
-                  nyr_err);
+          fprintf(stderr, "REPL std initialization NYIR failed: %s\n", nyr_err);
           g_repl_cg.had_error = true;
         }
         ny_llvm_apply_host_attrs(mod);
@@ -2439,8 +2452,9 @@ static int repl_eval_snippet(const char *full_input, int is_stmt, char *an,
       std_mode != STD_MODE_NONE &&
       (tty_in || !is_stmt || (an && std_mode != STD_MODE_NONE));
   const char *repl_show_helper =
-      repl_show_possible ? "fn __repl_show(any x) any {\n   print(x)\n   x\n}\n"
-                         : "";
+      repl_show_possible
+          ? "fn __repl_show(any x) any {\n   print(repr(x))\n   x\n}\n"
+          : "";
   const char *use_inspect = "";
   const char *use_core = "";
   const char *use_os_prim = "";
@@ -3206,7 +3220,6 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
   if (!g_repl_has_std_override && std_mode == STD_MODE_DEFAULT)
     std_mode = STD_MODE_FULL;
 #endif
-  g_repl_effective_mode = std_mode;
   doc_list_t docs = {0};
   doc_list_t *p_docs = NULL;
   if (!batch_mode) {
@@ -3216,6 +3229,8 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
   }
   if (!repl_native_only())
     repl_init_engine(std_mode, p_docs);
+  if (options && options->args)
+    rt_set_args_raw(options->argc, options->args, NULL);
   g_repl_timing = 0;
   g_repl_phase_trace = 0;
   g_repl_exec_trace_enabled = 0;

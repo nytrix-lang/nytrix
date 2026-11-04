@@ -79,9 +79,6 @@ fn app(any req) dict {
    web.not_found("not found: " + path + "\n")
 }
 
-;; A fixture may cap accepted requests, the wait for each request, and the
-;; whole run. The server banner and readiness marker are flushed after bind
-;; succeeds.
 mut options = dict(6)
 options = dict_set(options, "name", "Ny Server")
 options = dict_set(options, "port", 8080)

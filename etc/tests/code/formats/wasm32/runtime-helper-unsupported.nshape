@@ -3,7 +3,7 @@ shape wasm32_unsupported_runtime_reallocator_fails_closed {
   generator "native"
   features [native object wasm32 runtime-helper nyir unsupported]
   template ny-test-case
-  flags "--no-effect-require-known --native-only --native-backend wasm --nyir-verify -no-std -emit-only --emit-asm=/tmp/nytrix-native-wasm32-runtime-helper.wat"
+  flags "--no-effect-require-known --native-only --native-backend wasm --nyr-verify -no-std -emit-only --emit-asm=/tmp/nytrix-native-wasm32-runtime-helper.wat"
   expect compile_fail
   expect_message "external call does not match a supported runtime helper"
   source ny <<'NY'
@@ -51,7 +51,7 @@ def source =
     "}\nload_value(0)"
 def compile = run_capture(
     [compiler, "--no-effect-require-known", "--native-backend=wasm",
-     "--native-only", "--nyir-verify",
+     "--native-only", "--nyr-verify",
      "--emit-asm=" + wat, "-no-std", "-emit-only", "-e", source],
     [], nil, false)
 def assemble = run_capture(["wat2wasm", wat, "-o", wasm], [], nil, false)
@@ -59,7 +59,7 @@ def execute = run_capture(
     ["wasmtime", "run", "--invoke", "rt_main", wasm], [], nil, false)
 def bad_compile = run_capture(
     [compiler, "--no-effect-require-known", "--native-backend=wasm",
-     "--native-only", "--nyir-verify", "--emit-asm=" + bad_wat,
+     "--native-only", "--nyr-verify", "--emit-asm=" + bad_wat,
      "-no-std", "-emit-only", "-e", "malloc(-1)"],
     [], nil, false)
 def bad_assemble = run_capture(["wat2wasm", bad_wat, "-o", bad_wasm],
@@ -68,7 +68,7 @@ def bad_execute = run_capture(
     ["wasmtime", "run", "--invoke", "rt_main", bad_wasm], [], nil, false)
 def large_compile = run_capture(
     [compiler, "--no-effect-require-known", "--native-backend=wasm",
-     "--native-only", "--nyir-verify", "--emit-asm=" + large_wat,
+     "--native-only", "--nyr-verify", "--emit-asm=" + large_wat,
      "-no-std", "-emit-only", "-e", "malloc(4294967296)"],
     [], nil, false)
 def large_assemble =

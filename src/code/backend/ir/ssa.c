@@ -160,7 +160,7 @@ void nyr_cfg_free(nyr_cfg_t *cfg) {
 }
 
 bool nyr_cfg_reverse_postorder(const nyr_cfg_t *cfg, size_t **out_blocks,
-                                size_t *out_len) {
+                               size_t *out_len) {
   if (!out_blocks || !out_len)
     return false;
   *out_blocks = NULL;
@@ -221,7 +221,7 @@ bool nyr_cfg_reverse_postorder(const nyr_cfg_t *cfg, size_t **out_blocks,
 }
 
 static bool nyr_cfg_build_impl(const nyr_func_t *f, nyr_cfg_t *cfg,
-                                bool need_dominance) {
+                               bool need_dominance) {
   if (!f || !cfg)
     return false;
   nyr_cfg_free(cfg);
@@ -234,7 +234,10 @@ static bool nyr_cfg_build_impl(const nyr_func_t *f, nyr_cfg_t *cfg,
     if (f->data[i].op == NYIR_LABEL)
       boundary[i] = true;
     if ((f->data[i].op == NYIR_BR || f->data[i].op == NYIR_BR_IF ||
-         f->data[i].op == NYIR_RET) &&
+         f->data[i].op == NYIR_RET ||
+         (f->data[i].op == NYIR_INLINE_ASM &&
+          (f->data[i].imm == -14 || f->data[i].imm == -82 ||
+           f->data[i].imm == -83))) &&
         i + 1 < n)
       boundary[i + 1] = true;
   }
@@ -310,8 +313,12 @@ static bool nyr_cfg_build_impl(const nyr_func_t *f, nyr_cfg_t *cfg,
     size_t end = nyr_block_last_non_nop(f, cfg, b);
     const nyr_inst_t *term =
         end > cfg->block_start[b] ? &f->data[end - 1] : NULL;
-    if (term && (term->op == NYIR_BR || term->op == NYIR_BR_IF)) {
-      int to = cfg_label_map_find(&labels, term->imm);
+    if (term &&
+        (term->op == NYIR_BR || term->op == NYIR_BR_IF ||
+         (term->op == NYIR_INLINE_ASM &&
+          (term->imm == -14 || term->imm == -82 || term->imm == -83)))) {
+      int64_t target_label = term->op == NYIR_INLINE_ASM ? term->c : term->imm;
+      int to = cfg_label_map_find(&labels, target_label);
       if (to >= 0 &&
           !cfg_add_successor(successors, successor_counts, b, (size_t)to)) {
         free(successors);
@@ -421,117 +428,92 @@ static bool nyr_cfg_build_impl(const nyr_func_t *f, nyr_cfg_t *cfg,
     nyr_cfg_free(cfg);
     return false;
   }
+  if (blocks == 1) {
+    cfg->idom[0] = -1;
+    cfg_set_dominates_bit(cfg, 0, 0);
+    return true;
+  }
   /*
-   * Iterative packed-bitset dominators. This keeps the required dominance
-   * relation while avoiding one byte per block-pair.
+   * Solve immediate dominators in reverse postorder by intersecting ancestor
+   * chains (Cooper-Harvey-Kennedy). This avoids repeatedly intersecting whole
+   * bitset rows and then enumerating every strict dominator to recover idom.
+   * Materialize the public bitsets once, from the completed dominator tree.
    */
-  uint64_t *dom_row = ny_malloc_array(cfg->dominator_words, sizeof(*dom_row));
-  if (!dom_row) {
+  size_t *rpo_blocks = NULL;
+  size_t rpo_len = 0;
+  if (!nyr_cfg_reverse_postorder(cfg, &rpo_blocks, &rpo_len)) {
     nyr_cfg_free(cfg);
     return false;
   }
-  uint64_t last_mask =
-      blocks % 64 ? (UINT64_C(1) << (blocks % 64)) - 1 : UINT64_MAX;
-  for (b = 0; b < blocks; ++b) {
-    uint64_t *row = &cfg->dominators[b * cfg->dominator_words];
-    for (size_t word = 0; word < cfg->dominator_words; ++word)
-      row[word] = b == 0 ? 0 : UINT64_MAX;
-    row[cfg->dominator_words - 1] &= last_mask;
-    if (b == 0)
-      cfg_set_dominates_bit(cfg, b, b);
-    cfg->idom[b] = -1;
+  size_t *rpo_position = ny_malloc_array(blocks, sizeof(*rpo_position));
+  if (!rpo_position) {
+    free(rpo_blocks);
+    nyr_cfg_free(cfg);
+    return false;
   }
+  for (b = 0; b < blocks; ++b)
+    cfg->idom[b] = -1;
+  for (size_t order = 0; order < rpo_len; ++order)
+    rpo_position[rpo_blocks[order]] = order;
+  /*
+   * The entry is its own temporary root, so chain intersection terminates.
+   */
+  cfg->idom[0] = 0;
   bool changed;
   do {
     changed = false;
-    for (b = 1; b < blocks; ++b) {
-      bool have_pred = false;
-      for (size_t word = 0; word < cfg->dominator_words; ++word)
-        dom_row[word] = UINT64_MAX;
-      dom_row[cfg->dominator_words - 1] &= last_mask;
+    for (size_t order = 1; order < rpo_len; ++order) {
+      b = rpo_blocks[order];
+      int dominator = -1;
       for (size_t edge = cfg->pred_offsets[b]; edge < cfg->pred_offsets[b + 1];
            ++edge) {
         size_t p = cfg->pred_blocks[edge];
         /*
-         * Dead fall-through blocks (created after explicit terminators) are
-         * unreachable with dom={self}; intersecting them would empty the
-         * merge's dominator set and strand the merge with idom=-1.
+         * Ignore unreachable and not-yet-visited predecessors.
          */
-        if (!cfg->reachable[p])
+        if (cfg->idom[p] < 0)
           continue;
-        if (!have_pred) {
-          memcpy(dom_row, &cfg->dominators[p * cfg->dominator_words],
-                 cfg->dominator_words * sizeof(*dom_row));
-          have_pred = true;
+        if (dominator < 0) {
+          dominator = (int)p;
         } else {
-          for (size_t word = 0; word < cfg->dominator_words; ++word)
-            dom_row[word] &= cfg->dominators[p * cfg->dominator_words + word];
+          size_t left = (size_t)dominator, right = p;
+          while (left != right) {
+            while (rpo_position[left] > rpo_position[right])
+              left = (size_t)cfg->idom[left];
+            while (rpo_position[right] > rpo_position[left])
+              right = (size_t)cfg->idom[right];
+          }
+          dominator = (int)left;
         }
       }
-      if (!have_pred) {
-        memset(dom_row, 0, cfg->dominator_words * sizeof(*dom_row));
-        dom_row[b / 64] |= UINT64_C(1) << (b % 64);
-      } else {
-        dom_row[b / 64] |= UINT64_C(1) << (b % 64);
+      if (cfg->idom[b] != dominator) {
+        cfg->idom[b] = dominator;
+        changed = true;
       }
-      uint64_t *row = &cfg->dominators[b * cfg->dominator_words];
-      for (size_t word = 0; word < cfg->dominator_words; ++word)
-        if (row[word] != dom_row[word]) {
-          row[word] = dom_row[word];
-          changed = true;
-        }
     }
   } while (changed);
+  free(rpo_position);
   /*
-   * Strict dominators of one block form a chain in the dominator tree.
-   * Therefore the immediate dominator is the strict dominator with the
-   * deepest dominator set.  Count each row once instead of testing every
-   * (block, candidate, ancestor) triple: the former cubic scan dominated
-   * large branch-heavy functions.
+   * Unreachable blocks retain self-only rows and idom=-1.
    */
-  size_t *dom_depth = ny_calloc_array(blocks, sizeof(*dom_depth));
-  if (!dom_depth) {
-    free(dom_row);
-    nyr_cfg_free(cfg);
-    return false;
+  for (b = 0; b < blocks; ++b)
+    if (!cfg->reachable[b])
+      cfg_set_dominates_bit(cfg, b, b);
+  cfg_set_dominates_bit(cfg, 0, 0);
+  for (size_t order = 1; order < rpo_len; ++order) {
+    b = rpo_blocks[order];
+    memcpy(&cfg->dominators[b * cfg->dominator_words],
+           &cfg->dominators[(size_t)cfg->idom[b] * cfg->dominator_words],
+           cfg->dominator_words * sizeof(*cfg->dominators));
+    cfg_set_dominates_bit(cfg, b, b);
   }
-  for (size_t d = 0; d < blocks; ++d) {
-    const uint64_t *row = &cfg->dominators[d * cfg->dominator_words];
-    for (size_t word = 0; word < cfg->dominator_words; ++word) {
-      uint64_t bits = row[word];
-      while (bits) {
-        bits &= bits - 1;
-        ++dom_depth[d];
-      }
-    }
-  }
-  for (b = 1; b < blocks; ++b) {
-    size_t best_depth = 0;
-    const uint64_t *row = &cfg->dominators[b * cfg->dominator_words];
-    for (size_t word = 0; word < cfg->dominator_words; ++word) {
-      uint64_t bits = row[word];
-      while (bits) {
-#if SIZE_MAX == UINT64_MAX
-        size_t bit = (size_t)__builtin_ctzll((unsigned long long)bits);
-#else
-        size_t bit = (size_t)__builtin_ctzl((unsigned long)bits);
-#endif
-        size_t d = word * 64 + bit;
-        bits &= bits - 1;
-        if (d >= blocks || d == b || dom_depth[d] <= best_depth)
-          continue;
-        cfg->idom[b] = (int)d;
-        best_depth = dom_depth[d];
-      }
-    }
-  }
-  free(dom_depth);
+  cfg->idom[0] = -1;
+  free(rpo_blocks);
   for (size_t pred = 0; pred < blocks; ++pred)
     for (size_t edge = cfg->succ_offsets[pred];
          edge < cfg->succ_offsets[pred + 1]; ++edge) {
       size_t succ = cfg->succ_blocks[edge];
-      cfg->backedge_edges[edge] =
-          pred != succ && cfg_dominates_bit(cfg, pred, succ);
+      cfg->backedge_edges[edge] = cfg_dominates_bit(cfg, pred, succ);
     }
   for (b = 0; b < blocks; ++b) {
     size_t pred_count = cfg->pred_offsets[b + 1] - cfg->pred_offsets[b];
@@ -547,7 +529,6 @@ static bool nyr_cfg_build_impl(const nyr_func_t *f, nyr_cfg_t *cfg,
       }
     }
   }
-  free(dom_row);
   return true;
 }
 
@@ -604,7 +585,6 @@ bool nyr_prune_phis(nyr_func_t *f) {
     }
     if (out == 1) {
       int src = phi->phi_incoming[0].value;
-      free(phi->phi_incoming);
       nir_make_copy(phi, src);
       continue;
     }
@@ -619,7 +599,7 @@ bool nyr_cfg_dominates(const nyr_cfg_t *cfg, size_t dominator, size_t block) {
 }
 
 bool nyr_cfg_is_backedge(const nyr_cfg_t *cfg, size_t predecessor,
-                          size_t successor) {
+                         size_t successor) {
   if (!cfg || predecessor >= cfg->block_count || successor >= cfg->block_count)
     return false;
   for (size_t edge = cfg->succ_offsets[predecessor];
@@ -630,8 +610,8 @@ bool nyr_cfg_is_backedge(const nyr_cfg_t *cfg, size_t predecessor,
 }
 
 bool nyr_cfg_natural_loop_blocks(const nyr_cfg_t *cfg, size_t latch,
-                                  size_t header, bool *member,
-                                  size_t member_count) {
+                                 size_t header, bool *member,
+                                 size_t member_count) {
   if (!cfg || !member || member_count < cfg->block_count ||
       latch >= cfg->block_count || header >= cfg->block_count ||
       !nyr_cfg_is_backedge(cfg, latch, header))
@@ -714,8 +694,8 @@ static int phi_at(const nyr_func_t *f, const nyr_cfg_t *cfg, size_t b,
       return (int)i;
   return -1;
 }
-static int zero_for_local(const nyr_type_map_t *types, size_t local,
-                          int zero_v, int zero_f64_v, int zero_f32_v) {
+static int zero_for_local(const nyr_type_map_t *types, size_t local, int zero_v,
+                          int zero_f64_v, int zero_f32_v) {
   if (types && types->local_f64 && types->local_f64[local])
     return zero_f64_v >= 0 ? zero_f64_v : zero_v;
   if (types && types->local_f32 && types->local_f32[local])
@@ -898,8 +878,8 @@ static bool rename_ssa(nyr_func_t *f, const nyr_cfg_t *cfg, bool *promote,
       if (phi->op != NYIR_PHI || !(phi->flags & NYIR_INST_F_MEM2REG_PHI) ||
           phi->imm < 0 || (size_t)phi->imm >= locals)
         continue;
-      int zero = zero_for_local(types, (size_t)phi->imm, zero_v,
-                                zero_f64_v, zero_f32_v);
+      int zero = zero_for_local(types, (size_t)phi->imm, zero_v, zero_f64_v,
+                                zero_f32_v);
       for (size_t k = 0; k < phi->phi_incoming_len; ++k)
         if (phi->phi_incoming[k].value < 0)
           phi->phi_incoming[k].value = zero;
@@ -914,40 +894,46 @@ static bool rename_ssa(nyr_func_t *f, const nyr_cfg_t *cfg, bool *promote,
   return ok;
 }
 
-/*
- * Nested promotion is enabled by default after the full downstream parity
- * matrix passed. NYTRIX_NESTED_MEM2REG=0 retains a per-run rollback switch.
- */
-static bool nyr_nested_mem2reg_enabled = true;
-static bool nyr_nested_mem2reg_env_read;
-void nyr_set_nested_mem2reg_enabled(bool enabled) {
-  nyr_nested_mem2reg_enabled = enabled;
-}
-static bool nyr_nested_mem2reg_active(void) {
-  if (!nyr_nested_mem2reg_env_read) {
-    nyr_nested_mem2reg_env_read = true;
-    const char *v = getenv("NYTRIX_NESTED_MEM2REG");
-    if (v && *v)
-      nyr_nested_mem2reg_enabled = strcmp(v, "0") != 0;
-  }
-  return nyr_nested_mem2reg_enabled;
+static bool nyr_mem2reg_rollback(nyr_func_t *f, nyr_func_t *backup) {
+  nyr_ir_func_free(f);
+  *f = *backup;
+  memset(backup, 0, sizeof(*backup));
+  return false;
 }
 
 bool nyr_mem2reg(nyr_func_t *f) {
   if (!f)
     return false;
-  size_t conditional_branches = 0;
-  for (size_t i = 0; i < f->len; ++i)
-    conditional_branches += f->data[i].op == NYIR_BR_IF;
-  if (conditional_branches > 1 && !nyr_nested_mem2reg_active()) {
-    if (ny_dbg_is_enabled(NY_DBG_HEURISTIC))
-      ny_dbg_heuristic_event(
-          "MEM2REG",
-          "rejected conditional-branches=%zu: downstream nested-SSA parity "
-          "unproven; locals remain in memory",
-          conditional_branches);
-    return true;
+  size_t local_count = 0;
+  for (size_t i = 0; i < f->len; ++i) {
+    const nyr_inst_t *in = &f->data[i];
+    if ((in->op == NYIR_LOAD_LOCAL || in->op == NYIR_STORE_LOCAL ||
+         in->op == NYIR_ADDR_LOCAL) &&
+        in->imm >= 0 && (size_t)in->imm + 1 > local_count)
+      local_count = (size_t)in->imm + 1;
   }
+  if (!local_count)
+    return true;
+  bool *address_taken = ny_calloc_array(local_count, sizeof(*address_taken));
+  if (!address_taken)
+    return false;
+  for (size_t i = 0; i < f->len; ++i) {
+    const nyr_inst_t *in = &f->data[i];
+    if (in->op == NYIR_ADDR_LOCAL && in->imm >= 0 &&
+        (size_t)in->imm < local_count)
+      address_taken[in->imm] = true;
+  }
+  bool has_candidate = false;
+  for (size_t i = 0; i < f->len && !has_candidate; ++i) {
+    const nyr_inst_t *in = &f->data[i];
+    if ((in->op == NYIR_LOAD_LOCAL || in->op == NYIR_STORE_LOCAL) &&
+        in->imm >= 0 && (size_t)in->imm < local_count &&
+        !address_taken[in->imm])
+      has_candidate = true;
+  }
+  free(address_taken);
+  if (!has_candidate)
+    return true;
   nyr_func_t backup = {0};
   if (!nyr_ir_func_clone(f, &backup))
     return false;
@@ -957,9 +943,31 @@ bool nyr_mem2reg(nyr_func_t *f) {
   if (f->len && f->data[0].op != NYIR_LABEL) {
     nyr_inst_t label = {
         .op = NYIR_LABEL, .dst = -1, .a = -1, .b = -1, .imm = next_label(f)};
-    if (!insert_inst(f, 0, label)) {
-      nyr_ir_func_free(&backup);
-      return false;
+    if (!insert_inst(f, 0, label))
+      return nyr_mem2reg_rollback(f, &backup);
+  }
+  /*
+   * An entry label may also be a loop header in local-memory IR. Parameter
+   * seeds and undefined-local constants must execute only on function entry,
+   * not on its backedges. Give that header a distinct initial predecessor.
+   */
+  if (f->len && f->data[0].op == NYIR_LABEL) {
+    int64_t entry_label = f->data[0].imm;
+    bool backedge = false;
+    for (size_t i = 1; i < f->len; ++i)
+      if ((f->data[i].op == NYIR_BR || f->data[i].op == NYIR_BR_IF) &&
+          f->data[i].imm == entry_label) {
+        backedge = true;
+        break;
+      }
+    if (backedge) {
+      nyr_inst_t label = {
+          .op = NYIR_LABEL, .dst = -1, .a = -1, .b = -1, .imm = next_label(f)};
+      nyr_inst_t branch = {
+          .op = NYIR_BR, .dst = -1, .a = -1, .b = -1, .imm = entry_label};
+      if (!insert_inst(f, 0, label) || !insert_inst(f, 1, branch)) {
+        return nyr_mem2reg_rollback(f, &backup);
+      }
     }
   }
   /*
@@ -974,10 +982,8 @@ bool nyr_mem2reg(nyr_func_t *f) {
     nyr_inst_t zero_inst = {
         .op = NYIR_CONST_I64, .dst = zero_v, .a = -1, .b = -1, .imm = 0};
     size_t entry_at = (f->len && f->data[0].op == NYIR_LABEL) ? 1 : 0;
-    if (!insert_inst(f, entry_at, zero_inst)) {
-      nyr_ir_func_free(&backup);
-      return false;
-    }
+    if (!insert_inst(f, entry_at, zero_inst))
+      return nyr_mem2reg_rollback(f, &backup);
   }
   int zero_f64_v = -1;
   int zero_f32_v = -1;
@@ -988,34 +994,30 @@ bool nyr_mem2reg(nyr_func_t *f) {
    * load's representation rather than guessing it from the source type.
    */
   for (size_t local = 0; local < f->param_count; ++local) {
-    bool stored = false, addressed = false, loaded = false;
+    bool addressed = false, loaded = false;
     nyr_inst_t seed = {0};
     for (size_t i = 0; i < f->len; ++i) {
       const nyr_inst_t *in = &f->data[i];
       if (in->imm != (int64_t)local)
         continue;
-      if (in->op == NYIR_STORE_LOCAL)
-        stored = true;
-      else if (in->op == NYIR_ADDR_LOCAL)
+      if (in->op == NYIR_ADDR_LOCAL)
         addressed = true;
       else if (in->op == NYIR_LOAD_LOCAL && !loaded) {
         seed = *in;
         loaded = true;
       }
     }
-    if (!stored || addressed || !loaded)
+    if (addressed || !loaded)
       continue;
     seed.dst = f->next_value++;
     size_t at = (f->len && f->data[0].op == NYIR_LABEL) ? 1 : 0;
-    if (!insert_inst(f, at, seed)) {
-      nyr_ir_func_free(&backup);
-      return false;
-    }
+    if (!insert_inst(f, at, seed))
+      return nyr_mem2reg_rollback(f, &backup);
   }
   nyr_cfg_t cfg = {0};
   if (!nyr_cfg_build(f, &cfg)) {
-    nyr_ir_func_free(&backup);
-    return false;
+    nyr_cfg_free(&cfg);
+    return nyr_mem2reg_rollback(f, &backup);
   }
   /*
    * Every block that can feed a PHI needs a stable label.  Loop bodies and
@@ -1029,13 +1031,13 @@ bool nyr_mem2reg(nyr_func_t *f) {
         .op = NYIR_LABEL, .dst = -1, .a = -1, .b = -1, .imm = next_label(f)};
     if (!insert_inst(f, cfg.block_start[b], label)) {
       nyr_cfg_free(&cfg);
-      return false;
+      return nyr_mem2reg_rollback(f, &backup);
     }
   }
   if (cfg.block_count > 0) {
     nyr_cfg_free(&cfg);
     if (!nyr_cfg_build(f, &cfg))
-      return false;
+      return nyr_mem2reg_rollback(f, &backup);
   }
   size_t locals = 0;
   for (size_t i = 0; i < f->len; ++i)
@@ -1066,18 +1068,16 @@ bool nyr_mem2reg(nyr_func_t *f) {
       has_store[in->imm] = true;
   }
   /*
-   * Any non-address-taken local with both loads and stores can be
-   * promoted: Cytron PHI placement at dominance frontiers handles loop
-   * back-edges and join points correctly.  The old per-load dominator
-   * check incorrectly rejected every loop induction variable (back-edge
-   * stores never dominate the loop header), forcing them to live in stack
-   * memory across every iteration.
+   * Every non-address-taken local belongs in SSA.  Loads without a prior
+   * definition use the language's typed zero/parameter seed, and stores with
+   * no reads disappear as dead definitions. Cytron PHI placement handles
+   * joins and loop backedges without imposing a reducible-CFG restriction.
    */
   bool has_f64_promote = false;
   bool has_f32_promote = false;
   size_t requested_promotions = 0;
   for (size_t l = 0; l < locals; ++l) {
-    if (!addr[l] && has_load[l] && has_store[l]) {
+    if (!addr[l] && (has_load[l] || has_store[l])) {
       promote[l] = true;
       requested_promotions++;
       if (types.local_f64 && types.local_f64[l])
@@ -1100,8 +1100,7 @@ bool nyr_mem2reg(nyr_func_t *f) {
         free(has_store);
         nyr_type_map_free(&types);
         nyr_cfg_free(&cfg);
-        nyr_ir_func_free(&backup);
-        return false;
+        return nyr_mem2reg_rollback(f, &backup);
       }
     }
   }
@@ -1119,8 +1118,7 @@ bool nyr_mem2reg(nyr_func_t *f) {
         free(has_store);
         nyr_type_map_free(&types);
         nyr_cfg_free(&cfg);
-        nyr_ir_func_free(&backup);
-        return false;
+        return nyr_mem2reg_rollback(f, &backup);
       }
     }
   }
@@ -1273,6 +1271,28 @@ bool nyr_mem2reg(nyr_func_t *f) {
     goto oom;
   bool ok = rename_ssa(f, &cfg, promote, locals, zero_v, &types, zero_f64_v,
                        zero_f32_v);
+  /*
+   * Dominator renaming starts at entry and leaves unreachable blocks alone.
+   * Their values cannot affect execution, so finish eligible local cleanup
+   * there too: replace unreadable local state with its typed zero and erase
+   * dead stores. This guarantees promoted slots do not survive in dead tails.
+   */
+  if (ok)
+    for (size_t i = 0; i < f->len; ++i) {
+      nyr_inst_t *in = &f->data[i];
+      size_t block = cfg.inst_block ? cfg.inst_block[i] : SIZE_MAX;
+      if (block < cfg.block_count && cfg.reachable[block])
+        continue;
+      if (in->imm < 0 || (size_t)in->imm >= locals || !promote[in->imm])
+        continue;
+      if (in->op == NYIR_LOAD_LOCAL) {
+        int zero = zero_for_local(&types, (size_t)in->imm, zero_v,
+                                  zero_f64_v, zero_f32_v);
+        nir_make_copy(in, zero);
+      } else if (in->op == NYIR_STORE_LOCAL) {
+        nyr_inst_discard(in);
+      }
+    }
   if (ok)
     for (size_t i = 0; i < f->len; ++i)
       f->data[i].flags &= ~NYIR_INST_F_MEM2REG_PHI;
@@ -1340,6 +1360,19 @@ typedef struct {
   size_t local_n;
   int mem_def; /* last general memory def (for NYIR_STORE_I64) */
 } ny_mssa_state_t;
+
+typedef struct {
+  int value;
+  size_t local;
+} ny_mssa_local_phi_t;
+
+static bool ny_mssa_phi_for_local(const ny_mssa_local_phi_t *phis,
+                                  size_t phi_count, int value, size_t local) {
+  for (size_t i = 0; i < phi_count; ++i)
+    if (phis[i].value == value && phis[i].local == local)
+      return true;
+  return false;
+}
 
 bool nyr_memory_ssa_forward(nyr_func_t *f) {
   if (!f || f->len == 0)
@@ -1421,6 +1454,36 @@ bool nyr_memory_ssa_forward(nyr_func_t *f) {
   }
 
   /*
+   * Local-memory PHIs need a predecessor label for every incoming edge.
+   * Some CFG blocks begin by falling through and have no explicit label in
+   * the instruction stream; give those blocks stable labels before building
+   * the incoming lists.
+   */
+  for (size_t b = cfg.block_count; b-- > 0;) {
+    if (cfg.block_label[b] >= 0)
+      continue;
+    int64_t label_id = next_label(f);
+    nyr_inst_t label = {.op = NYIR_LABEL,
+                        .dst = -1,
+                        .a = -1,
+                        .b = -1,
+                        .imm = label_id};
+    size_t at = cfg.block_start[b];
+    if (!insert_inst(f, at, label)) {
+      nyr_cfg_free(&cfg);
+      free(addr_taken);
+      return false;
+    }
+    for (size_t bb = 0; bb < cfg.block_count; ++bb) {
+      if (bb != b && cfg.block_start[bb] >= at)
+        cfg.block_start[bb]++;
+      if (bb == b || cfg.block_end[bb] > at)
+        cfg.block_end[bb]++;
+    }
+    cfg.block_label[b] = label_id;
+  }
+
+  /*
    * exit_def[b*local_n + l] = value id of local l at end of block b, or -1.
    */
   size_t exit_def_count = 0;
@@ -1431,20 +1494,37 @@ bool nyr_memory_ssa_forward(nyr_func_t *f) {
   }
   int *exit_def = ny_malloc_array(exit_def_count, sizeof(*exit_def));
   int *cur = ny_malloc_array(local_n, sizeof(*cur));
+  ny_mssa_local_phi_t *local_phis =
+      ny_malloc_array(exit_def_count, sizeof(*local_phis));
+  size_t local_phi_count = 0;
   size_t *rpo = NULL;
   size_t rpo_n = 0;
-  if (!exit_def || !cur || !nyr_cfg_reverse_postorder(&cfg, &rpo, &rpo_n)) {
+  if (!exit_def || !cur || !local_phis ||
+      !nyr_cfg_reverse_postorder(&cfg, &rpo, &rpo_n)) {
     free(exit_def);
     free(cur);
+    free(local_phis);
     free(rpo);
     free(addr_taken);
     nyr_cfg_free(&cfg);
     return false;
   }
+  bool *reachable = ny_calloc_array(cfg.block_count, sizeof(*reachable));
+  if (!reachable) {
+    free(exit_def);
+    free(cur);
+    free(local_phis);
+    free(rpo);
+    free(addr_taken);
+    nyr_cfg_free(&cfg);
+    return false;
+  }
+  for (size_t ri = 0; ri < rpo_n; ++ri)
+    reachable[rpo[ri]] = true;
   for (size_t i = 0; i < exit_def_count; ++i)
     exit_def[i] = -1;
   /*
-   * Pass 1: compute exit_def with same-value / const-equal joins.
+   * Pass 1: compute exit_def for values that agree by identity.
    */
   for (size_t ri = 0; ri < rpo_n; ++ri) {
     size_t b = rpo[ri];
@@ -1455,38 +1535,48 @@ bool nyr_memory_ssa_forward(nyr_func_t *f) {
         cur[l] = -1;
         continue;
       }
-      int p0 = -1, p1 = -1;
-      size_t n_def = 0;
       for (size_t e = cfg.pred_offsets[b]; e < cfg.pred_offsets[b + 1]; ++e) {
         size_t p = cfg.pred_blocks[e];
+        if (!reachable[p])
+          continue;
         int v = exit_def[p * local_n + l];
-        if (v >= 0) {
+        if (agreed == -2)
+          agreed = v;
+        else if (agreed != v)
+          agreed = -1;
+      }
+      if (agreed == -1) {
+        int p0 = -1, p1 = -1;
+        size_t n_def = 0;
+        for (size_t e = cfg.pred_offsets[b]; e < cfg.pred_offsets[b + 1]; ++e) {
+          size_t p = cfg.pred_blocks[e];
+          if (!reachable[p])
+            continue;
+          int v = exit_def[p * local_n + l];
+          if (v < 0)
+            continue;
           if (n_def == 0)
             p0 = v;
           else if (n_def == 1)
             p1 = v;
           n_def++;
         }
-        if (agreed == -2)
-          agreed = v;
-        else if (agreed != v)
-          agreed = -1;
-      }
-      if (agreed == -1 && n_def == 2 && p0 >= 0 && p1 >= 0 && p0 != p1) {
-        int64_t c0 = 0, c1 = 1;
-        bool k0 = false, k1 = false;
-        for (size_t i = 0; i < f->len; ++i) {
-          if (f->data[i].op == NYIR_CONST_I64 && f->data[i].dst == p0) {
-            k0 = true;
-            c0 = f->data[i].imm;
+        if (n_def == 2 && p0 != p1) {
+          int64_t c0 = 0, c1 = 1;
+          bool k0 = false, k1 = false;
+          for (size_t i = 0; i < f->len; ++i) {
+            if (f->data[i].op == NYIR_CONST_I64 && f->data[i].dst == p0) {
+              k0 = true;
+              c0 = f->data[i].imm;
+            }
+            if (f->data[i].op == NYIR_CONST_I64 && f->data[i].dst == p1) {
+              k1 = true;
+              c1 = f->data[i].imm;
+            }
           }
-          if (f->data[i].op == NYIR_CONST_I64 && f->data[i].dst == p1) {
-            k1 = true;
-            c1 = f->data[i].imm;
-          }
+          if (k0 && k1 && c0 == c1)
+            agreed = p0;
         }
-        if (k0 && k1 && c0 == c1)
-          agreed = p0;
       }
       cur[l] = agreed == -2 ? -1 : agreed;
     }
@@ -1513,8 +1603,10 @@ bool nyr_memory_ssa_forward(nyr_func_t *f) {
 
   /*
    * Pass 2: insert real PHIs when every pred has a concrete def, all pred
-   * labels are known, and values disagree. Skip blocks that already have a
-   * PHI for that local (mem2reg). Process high→low so indices stay valid.
+   * labels are known, and values disagree. Recognize only local-memory PHIs
+   * explicitly created by this pass; ordinary value PHIs also use `imm` and
+   * must not be mistaken for a local slot. Process high→low so indices stay
+   * valid.
    */
   for (size_t bi = cfg.block_count; bi-- > 0;) {
     size_t pc = cfg.pred_offsets[bi + 1] - cfg.pred_offsets[bi];
@@ -1530,8 +1622,13 @@ bool nyr_memory_ssa_forward(nyr_func_t *f) {
       bool all_def = true;
       int first = -2;
       bool disagree = false;
+      size_t reachable_pred_count = 0;
       for (size_t e = cfg.pred_offsets[bi]; e < cfg.pred_offsets[bi + 1]; ++e) {
-        int v = exit_def[cfg.pred_blocks[e] * local_n + l];
+        size_t pred = cfg.pred_blocks[e];
+        if (!reachable[pred])
+          continue;
+        reachable_pred_count++;
+        int v = exit_def[pred * local_n + l];
         if (v < 0) {
           all_def = false;
           break;
@@ -1541,15 +1638,16 @@ bool nyr_memory_ssa_forward(nyr_func_t *f) {
         else if (first != v)
           disagree = true;
       }
-      if (!all_def || !disagree)
+      if (!all_def || !disagree || reachable_pred_count < 2)
         continue;
       size_t at = cfg.block_start[bi];
-      if (at < cfg.block_end[bi] && f->data[at].op == NYIR_LABEL)
+      while (at < cfg.block_end[bi] && f->data[at].op == NYIR_LABEL)
         at++;
       bool have = false;
       for (size_t i = at; i < cfg.block_end[bi] && f->data[i].op == NYIR_PHI;
            ++i)
-        if (f->data[i].imm == (int64_t)l) {
+        if (ny_mssa_phi_for_local(local_phis, local_phi_count,
+                                  f->data[i].dst, l)) {
           have = true;
           break;
         }
@@ -1563,7 +1661,9 @@ bool nyr_memory_ssa_forward(nyr_func_t *f) {
       if (!phi.phi_incoming) {
         free(exit_def);
         free(cur);
+        free(local_phis);
         free(rpo);
+        free(reachable);
         free(addr_taken);
         nyr_cfg_free(&cfg);
         return false;
@@ -1572,28 +1672,41 @@ bool nyr_memory_ssa_forward(nyr_func_t *f) {
       for (size_t e = cfg.pred_offsets[bi]; e < cfg.pred_offsets[bi + 1]; ++e) {
         size_t p = cfg.pred_blocks[e];
         phi.phi_incoming[pi].predecessor_label = cfg.block_label[p];
-        phi.phi_incoming[pi].value = exit_def[p * local_n + l];
+        phi.phi_incoming[pi].value =
+            reachable[p] ? exit_def[p * local_n + l] : first;
         pi++;
       }
       if (!insert_inst(f, at, phi)) {
         free(phi.phi_incoming);
         free(exit_def);
         free(cur);
+        free(local_phis);
         free(rpo);
+        free(reachable);
         free(addr_taken);
         nyr_cfg_free(&cfg);
         return false;
       }
+      if (local_phi_count >= exit_def_count) {
+        free(exit_def);
+        free(cur);
+        free(local_phis);
+        free(rpo);
+        free(reachable);
+        free(addr_taken);
+        nyr_cfg_free(&cfg);
+        return false;
+      }
+      local_phis[local_phi_count++] =
+          (ny_mssa_local_phi_t){.value = phi_dst, .local = l};
       for (size_t bb = 0; bb < cfg.block_count; ++bb) {
-        if (cfg.block_start[bb] > at)
+        if (cfg.block_start[bb] >= at)
           cfg.block_start[bb]++;
-        if (cfg.block_end[bb] > at)
+        if (cfg.block_end[bb] >= at)
           cfg.block_end[bb]++;
       }
       if (cfg.block_end[bi] <= at)
         cfg.block_end[bi] = at + 1;
-      else
-        cfg.block_end[bi]++;
       /*
        * Seed exit_def so successors of this block see the PHI.
        */
@@ -1604,6 +1717,29 @@ bool nyr_memory_ssa_forward(nyr_func_t *f) {
   /*
    * Pass 3: forward loads using joins + PHIs.
    */
+  size_t value_count = f->next_value > 0 ? (size_t)f->next_value : 0;
+  int64_t *local_phi_for_value =
+      ny_malloc_array(value_count, sizeof(*local_phi_for_value));
+  if (value_count && !local_phi_for_value) {
+    free(exit_def);
+    free(cur);
+    free(local_phis);
+    free(local_phi_for_value);
+    free(rpo);
+    free(reachable);
+    free(addr_taken);
+    nyr_cfg_free(&cfg);
+    return false;
+  }
+  for (size_t i = 0; i < value_count; ++i)
+    local_phi_for_value[i] = -1;
+  for (size_t i = 0; i < local_phi_count; ++i) {
+    int value = local_phis[i].value;
+    if (value >= 0 && (size_t)value < value_count)
+      local_phi_for_value[value] = (int64_t)local_phis[i].local;
+  }
+  free(local_phis);
+
   for (size_t ri = 0; ri < rpo_n; ++ri) {
     size_t b = rpo[ri];
     size_t pc = cfg.pred_offsets[b + 1] - cfg.pred_offsets[b];
@@ -1614,7 +1750,10 @@ bool nyr_memory_ssa_forward(nyr_func_t *f) {
         continue;
       }
       for (size_t e = cfg.pred_offsets[b]; e < cfg.pred_offsets[b + 1]; ++e) {
-        int v = exit_def[cfg.pred_blocks[e] * local_n + l];
+        size_t pred = cfg.pred_blocks[e];
+        if (!reachable[pred])
+          continue;
+        int v = exit_def[pred * local_n + l];
         if (agreed == -2)
           agreed = v;
         else if (agreed != v)
@@ -1624,9 +1763,11 @@ bool nyr_memory_ssa_forward(nyr_func_t *f) {
     }
     for (size_t i = cfg.block_start[b]; i < cfg.block_end[b]; ++i) {
       nyr_inst_t *in = &f->data[i];
-      if (in->op == NYIR_PHI && in->imm >= 0 && (size_t)in->imm < local_n &&
-          in->dst >= 0) {
-        cur[in->imm] = in->dst;
+      if (in->op == NYIR_PHI && in->dst >= 0 &&
+          (size_t)in->dst < value_count &&
+          local_phi_for_value[in->dst] >= 0 &&
+          (size_t)local_phi_for_value[in->dst] < local_n) {
+        cur[local_phi_for_value[in->dst]] = in->dst;
       } else if (in->op == NYIR_CALL) {
         for (size_t l = 0; l < local_n; ++l)
           cur[l] = -1;
@@ -1653,6 +1794,8 @@ bool nyr_memory_ssa_forward(nyr_func_t *f) {
   free(exit_def);
   free(cur);
   free(rpo);
+  free(local_phi_for_value);
+  free(reachable);
   free(addr_taken);
   nyr_cfg_free(&cfg);
   return true;

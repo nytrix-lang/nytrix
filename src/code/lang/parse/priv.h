@@ -200,13 +200,14 @@ static inline bool parser_kind_after_return_type(token_kind kind) {
 
 static inline const char *
 parser_parse_return_type_suffix(parser_t *p, parser_type_ref_fn parse_type_ref,
-                                const char *err_msg) {
+                                const char *err_msg, bool allow_eof) {
   if (!parser_token_can_start_type_ref(p->cur))
     return NULL;
   parser_t probe = *p;
   probe.quiet = true;
   const char *type = parse_type_ref(&probe, NULL);
-  if (!type || !parser_kind_after_return_type(probe.cur.kind))
+  if (!type || !parser_kind_after_return_type(probe.cur.kind) ||
+      (!allow_eof && probe.cur.kind == NY_T_EOF))
     return NULL;
   return parse_type_ref(p, err_msg ? err_msg : "expected return type");
 }

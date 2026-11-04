@@ -2,44 +2,47 @@
 ;; Bounds-checked binary byte and string primitives for ELF readers.
 module core.os.rev.decomp.bytes(_u16, _u32, _u64, _slice, _slice_list, _cstring)
 use core
-use core.primitives (bor, bshl)
 use core.str as str
 
 fn _u16(str b, int off, bool le=true) int {
    if off < 0 || off + 1 >= b.len { return 0 }
    def a = load8(b, off)
    def c = load8(b, off + 1)
-   le ? bor(a, bshl(c, 8)) : bor(bshl(a, 8), c)
+   le ? (a | (c << 8)) : ((a << 8) | c)
 }
 
 fn _u32(str b, int off, bool le=true) int {
    if off < 0 || off + 3 >= b.len { return 0 }
    if le {
-      return bor(load8(b, off),
-         bor(bshl(load8(b, off + 1), 8),
-            bor(bshl(load8(b, off + 2), 16),
-               bshl(load8(b, off + 3), 24))))
+      return load8(b, off) |
+      (load8(b, off + 1) << 8) |
+      (load8(b, off + 2) << 16) |
+      (load8(b, off + 3) << 24)
    }
-   bor(bshl(load8(b, off), 24),
-      bor(bshl(load8(b, off + 1), 16),
-         bor(bshl(load8(b, off + 2), 8), load8(b, off + 3))))
+   (load8(b, off) << 24) |
+   (load8(b, off + 1) << 16) |
+   (load8(b, off + 2) << 8) |
+   load8(b, off + 3)
 }
 
 fn _u64(str b, int off, bool le=true) int {
    if off < 0 || off + 7 >= b.len { return 0 }
-   le ? bor(_u32(b, off, true), bshl(_u32(b, off + 4, true), 32)) :
-   bor(bshl(_u32(b, off, false), 32), _u32(b, off + 4, false))
+   le ? (_u32(b, off, true) | (_u32(b, off + 4, true) << 32)) :
+   ((_u32(b, off, false) << 32) | _u32(b, off + 4, false))
 }
 
 fn _slice(str b, int off, int n) str {
    if off < 0 || n <= 0 || off >= b.len { return "" }
    def end = min(b.len, off + n)
-   def base = malloc(max(1, end - off) + 16)
-   if base == 0 { return "" }
-   def p = base + 16
+   mut out = str.Builder(end - off)
    mut i = off
-   while i < end { store8(p, load8(b, i), i - off) i += 1 }
-   init_str(p, end - off)
+   while i < end {
+      out = str.builder_append_byte(out, load8(b, i))
+      i += 1
+   }
+   def result = str.builder_to_str(out)
+   str.builder_free(out)
+   result
 }
 
 fn _slice_list(str b, int off, int n) list {

@@ -112,15 +112,7 @@ static bool build_local_access_nest(nyr_func_t *f, bool write_in_loop,
   nyr_opt_br(f, 20);
 
   nyr_opt_label(f, 13);
-  int local_read = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_LOAD_LOCAL,
-                                              .dst = -1,
-                                              .a = -1,
-                                              .b = -1,
-                                              .c = -1,
-                                              .d = -1,
-                                              .e = -1,
-                                              .f = -1,
-                                              .imm = 0});
+  int local_read = nyr_opt_emit_imm(f, NYIR_LOAD_LOCAL, 0);
   if (write_in_loop) {
     int local_next = nyr_opt_binop(f, NYIR_ADD_I64, local_read, one);
     nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_STORE_LOCAL,
@@ -144,15 +136,7 @@ static bool build_local_access_nest(nyr_func_t *f, bool write_in_loop,
   nyr_opt_br(f, 10);
 
   nyr_opt_label(f, 30);
-  int result = write_in_loop ? nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_LOAD_LOCAL,
-                                                          .dst = -1,
-                                                          .a = -1,
-                                                          .b = -1,
-                                                          .c = -1,
-                                                          .d = -1,
-                                                          .e = -1,
-                                                          .f = -1,
-                                                          .imm = 0})
+  int result = write_in_loop ? nyr_opt_emit_imm(f, NYIR_LOAD_LOCAL, 0)
                              : outer_iv;
   nyr_opt_ret(f, result);
   f->data[outer_phi_at].phi_incoming[1].value = next_outer;

@@ -20,7 +20,7 @@ mut _cached_ubo_env = -1
 mut _cached_renderdoc_env = -1
 
 @inline
-fn store_mat4_cm_raw(any dst, any mat, bool allow_plain16=false) bool { render_shared.store_mat4_cm_raw(dst, mat, allow_plain16) }
+fn store_mat4_cm_raw(ptr dst, any mat, bool allow_plain16=false) bool { render_shared.store_mat4_cm_raw(dst, mat, allow_plain16) }
 
 fn pack_normal_tex_word(int normal_tex_id, int normal_uv_set, f64 normal_scale=1.0, bool clearcoat_only=false, bool mirrored_double_sided=false, bool double_sided=false) int { render_utils.pack_normal_tex_word(normal_tex_id, normal_uv_set, normal_scale, clearcoat_only, mirrored_double_sided, double_sided) }
 

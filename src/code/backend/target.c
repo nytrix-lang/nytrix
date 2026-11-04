@@ -83,6 +83,24 @@ static unsigned nyr_target_mach_avx_cap(nyr_backend_target_t target) {
 #endif
 }
 
+/*
+ * Packed 256-bit integer instructions require AVX2, not AVX.
+ */
+static unsigned nyr_target_mach_avx2_cap(nyr_backend_target_t target) {
+#if defined(__x86_64__) || defined(__i386__)
+  (void)target;
+#if defined(__GNUC__) || defined(__clang__)
+  __builtin_cpu_init();
+  if (__builtin_cpu_supports("avx2"))
+    return NY_NATIVE_CAP_MACH_AVX2;
+#endif
+  return 0;
+#else
+  (void)target;
+  return 0;
+#endif
+}
+
 static void nyr_target_trace(const nyr_target_request_t *request,
                              const ny_native_target_info_t *info,
                              const char *decision) {
@@ -213,6 +231,40 @@ bool nyr_target_info_init(ny_native_target_info_t *info,
                                               : NY_NATIVE_ABI_SYSV;
   }
   info->abi_name = nyr_abi_label(info->abi);
+  bool linux_target = false;
+  if (triple) {
+    linux_target = strstr(triple, "linux") != NULL;
+  } else {
+#if defined(__linux__)
+    linux_target = info->abi != NY_NATIVE_ABI_WIN64;
+#endif
+  }
+  if (linux_target) {
+    switch (info->target) {
+    case NY_NATIVE_TARGET_X86_64:
+      info->syscalls = (ny_native_syscall_adapter_t){
+          .available = true,
+          .write_nr = 1,
+          .mmap_nr = 9,
+          .munmap_nr = 11,
+          .clock_gettime_nr = 228,
+          .exit_nr = 60,
+      };
+      break;
+    case NY_NATIVE_TARGET_AARCH64:
+      info->syscalls = (ny_native_syscall_adapter_t){
+          .available = true,
+          .write_nr = 64,
+          .mmap_nr = 222,
+          .munmap_nr = 215,
+          .clock_gettime_nr = 113,
+          .exit_nr = 93,
+      };
+      break;
+    default:
+      break;
+    }
+  }
   info->object_format = nyr_triple_is_macho(triple)     ? "macho"
                         : nyr_triple_is_windows(triple) ? "coff"
                                                         : "elf";
@@ -238,6 +290,7 @@ bool nyr_target_info_init(ny_native_target_info_t *info,
                  NY_NATIVE_CAP_MACH_TRAP | NY_NATIVE_CAP_MACH_SDIV_POW2 |
                  NY_NATIVE_CAP_MACH_SCALED_LEA |
                  nyr_target_mach_avx_cap(info->target) |
+                 nyr_target_mach_avx2_cap(info->target) |
                  nyr_target_mach_fma_cap(info->target);
     if (strcmp(info->object_format, "elf") == 0)
       info->caps |= NY_NATIVE_CAP_ELF_OBJECT;
@@ -264,6 +317,7 @@ bool nyr_target_info_init(ny_native_target_info_t *info,
                  NY_NATIVE_CAP_MACH_TRAP | NY_NATIVE_CAP_MACH_SDIV_POW2 |
                  NY_NATIVE_CAP_MACH_SCALED_LEA |
                  nyr_target_mach_avx_cap(info->target) |
+                 nyr_target_mach_avx2_cap(info->target) |
                  nyr_target_mach_fma_cap(info->target);
     if (strcmp(info->object_format, "elf") == 0)
       info->caps |= NY_NATIVE_CAP_ELF_OBJECT;

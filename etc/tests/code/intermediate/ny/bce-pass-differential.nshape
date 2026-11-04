@@ -1,0 +1,31 @@
+shape nyir_bce_pass_differential {
+  family "runtime-native"
+  generator "native"
+  features [native nyir bce differential checksum]
+  template ny-test-case
+  flags_matrix "--native-only --native-backend=x86_64 -O3 --nyr-verify; --native-only --native-backend=x86_64 -O3 --nyr-verify --nyr-disable-pass=bounds_check_elim,irce"
+  expect compile_and_run
+  expect_stdout "2080"
+  source ny <<'NY'
+use core
+use core.tbuf (i64buf_new, i64buf_load, i64buf_store)
+
+fn sum_buffer() int {
+  def xs = i64buf_new(64)
+  mut int i = 0
+  while i < 64 {
+    i64buf_store(xs, i, i + 1)
+    i += 1
+  }
+  mut int sum = 0
+  mut int j = 0
+  while j < 64 {
+    sum += i64buf_load(xs, j)
+    j += 1
+  }
+  sum
+}
+
+print(sum_buffer())
+NY
+}

@@ -104,7 +104,8 @@ def tuple_get = comptime {
 assert(string_equal && repeated_string_equal,
        "closed string expressions compare consistently")
 assert(sequences_equal && !sequences_differ,
-       "nested list and tuple expressions compare consistently")
+       "nested sequence equality and boolean negation agree: same=" +
+           to_str(sequences_equal) + " different=" + to_str(sequences_differ))
 assert(dictionaries_equal,
        "closed dictionary literals memoize through duplicate-key lookup")
 assert(dictionary_missing_key,

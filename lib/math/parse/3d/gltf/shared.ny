@@ -249,7 +249,7 @@ fn _gltf_copy_bytes(any data, int start, int count) str {
    def out = malloc(n + 1)
    if !out { return "" }
    init_str(out, n)
-   memcpy(out, data + start, n)
+   memcpy(out, ptr_add(data, start), n)
    store8(out, 0, n)
    out
 }
@@ -824,15 +824,15 @@ fn _gltf_transform_aabb(any minv, any maxv, any m) list {
    if _gltf_float6_bad(x1, y1, z1, x2, y2, z2) { return [] }
    if x1 > x2 || y1 > y2 || z1 > z2 { return [] }
    def mm = _gltf_mat3x4_num(m)
-   def m00, m01 = mm.get(0), mm.get(1)
-   def m02, m03 = mm.get(2), mm.get(3)
-   def m10, m11 = mm.get(4), mm.get(5)
-   def m12, m13 = mm.get(6), mm.get(7)
-   def m20, m21 = mm.get(8), mm.get(9)
-   def m22, m23 = mm.get(10), mm.get(11)
+   def f64 m00 = float(mm[0]), m01 = float(mm[1])
+   def f64 m02 = float(mm[2]), m03 = float(mm[3])
+   def f64 m10 = float(mm[4]), m11 = float(mm[5])
+   def f64 m12 = float(mm[6]), m13 = float(mm[7])
+   def f64 m20 = float(mm[8]), m21 = float(mm[9])
+   def f64 m22 = float(mm[10]), m23 = float(mm[11])
    if _gltf_mat3x4_bad(mm) { return [] }
-   mut wmin_x, wmin_y, wmin_z = 1e9, 1e9, 1e9
-   mut wmax_x, wmax_y, wmax_z = -1e9, -1e9, -1e9
+   mut f64 wmin_x = 1e9, wmin_y = 1e9, wmin_z = 1e9
+   mut f64 wmax_x = -1e9, wmax_y = -1e9, wmax_z = -1e9
    mut used = 0
    mut ci = 0
    while ci < 8 {
@@ -850,7 +850,13 @@ fn _gltf_transform_aabb(any minv, any maxv, any m) list {
       ci += 1
    }
    if used <= 0 || wmin_x > wmax_x || wmin_y > wmax_y || wmin_z > wmax_z { return [] }
-   return [[wmin_x, wmin_y, wmin_z], [wmax_x, wmax_y, wmax_z]]
+   mut list low = []
+   low = low.append(wmin_x).append(wmin_y).append(wmin_z)
+   mut list high = []
+   high = high.append(wmax_x).append(wmax_y).append(wmax_z)
+   mut list bounds = []
+   bounds = bounds.append(low).append(high)
+   bounds
 }
 
 fn _gltf_anim_override_for_node(any overrides, int node_idx) any {

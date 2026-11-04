@@ -1,0 +1,27 @@
+shape dynamic-bool-formal {
+  family "probe-suite"
+  generator "regression"
+  features ["ny", "abi", "bool", "containers"]
+  template ny-test-case
+  expect compile_and_run
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect_stdout "DYNAMIC-BOOL-FORMAL-OK"
+  source ny <<'NY'
+use core
+fn branch(bool enabled) int { if enabled { return 1 } 0 }
+def flags = {"off": false, "on": true}
+def off = flags.get("off", true)
+def on = flags.get("on", false)
+assert(branch(off) == 0 && branch(on) == 1, "dictionary booleans become raw predicates")
+assert(branch(flags.get("off", true)) == 0, "direct dictionary read")
+def values = [false, true]
+assert(branch(values.get(0)) == 0 && branch(values.get(1)) == 1, "list booleans become raw predicates")
+mut any dynamic = false
+assert(branch(dynamic) == 0, "explicit any false")
+dynamic = true
+assert(branch(dynamic) == 1, "explicit any true")
+assert(branch(false) == 0 && branch(true) == 1, "literal predicates")
+assert(branch(3 == 4) == 0 && branch(3 == 3) == 1, "raw comparison predicates")
+print("DYNAMIC-BOOL-FORMAL-OK")
+NY
+}

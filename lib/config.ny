@@ -45,22 +45,29 @@ fn _valid_type(str type_name) bool {
 }
 
 fn _matches_type(str expected, any value) bool {
-   if expected == "any" {
-      return type(value) == "bool" || is_int(value) || is_float(value) ||
+   if str._str_eq(expected, "any") {
+      return str._str_eq(type(value), "bool") || is_int(value) || is_float(value) ||
       is_str(value) || is_list(value) || is_dict(value)
    }
-   if expected == "bool" { return type(value) == "bool" }
-   if expected == "int" { return is_int(value) && type(value) != "bool" }
-   if expected == "float" { return is_float(value) }
-   if expected == "str" { return is_str(value) }
-   if expected == "list" { return is_list(value) }
-   if expected == "dict" { return is_dict(value) }
+   if str._str_eq(expected, "bool") { return str._str_eq(type(value), "bool") }
+   if str._str_eq(expected, "int") { return is_int(value) && !str._str_eq(type(value), "bool") }
+   if str._str_eq(expected, "float") { return is_float(value) }
+   if str._str_eq(expected, "str") { return is_str(value) }
+   if str._str_eq(expected, "list") { return is_list(value) }
+   if str._str_eq(expected, "dict") { return is_dict(value) }
    false
 }
 
 fn _is_flag(any value) bool {
-   type(value) == "bool" ||
-   (is_int(value) && type(value) != "bool" && (value == 0 || value == 1))
+   if str._str_eq(type(value), "bool") { return true }
+   if !is_int(value) { return false }
+   def int numeric = int(value)
+   numeric == 0 || numeric == 1
+}
+
+fn _flag_value(any value) bool {
+   if str._str_eq(type(value), "bool") { return value }
+   int(value) != 0
 }
 
 fn _toml_text_supported(str value) bool {
@@ -184,14 +191,14 @@ fn schema(list fields, bool reject_unknown=true) dict {
                "E_CONFIG_SCHEMA", name,
                "required and has_default flags must be booleans"))
       }
-      def has_default = valid_flags && int(f.get("has_default")) != 0
+      def has_default = valid_flags && _flag_value(f.get("has_default"))
       if has_default {
          if !_matches_type(kind, f.get("default")) {
             errors = errors.append(_error(
                   "E_CONFIG_SCHEMA", name,
                   "default does not match field type '" + kind + "'"))
          }
-         if int(f.get("required")) != 0 {
+         if _flag_value(f.get("required")) {
             errors = errors.append(_error(
                   "E_CONFIG_SCHEMA", name,
                   "a defaulted field cannot also be required"))
@@ -222,7 +229,8 @@ fn table(str name, list fields, bool required=true) dict {
 }
 
 fn _schema_valid_depth(any spec, int depth) bool {
-   if depth > 32 || !is_dict(spec) || spec.get("schema", "") != _SCHEMA ||
+   if depth > 32 || !is_dict(spec) ||
+   !str._str_eq(spec.get("schema", ""), _SCHEMA) ||
    !_matches_type("int", spec.get("version")) ||
    int(spec.get("version")) != 1 ||
    !is_list(spec.get("fields", [])) ||
@@ -237,7 +245,7 @@ fn _schema_valid_depth(any spec, int depth) bool {
       def f = fields.get(i)
       if !is_dict(f) || !is_str(f.get("name")) ||
       !is_str(f.get("type")) ||
-      str(f.get("name")) == "" ||
+      str._str_eq(str(f.get("name")), "") ||
       names.contains(str(f.get("name"))) ||
       !_valid_type(str(f.get("type"))) ||
       !_is_flag(f.get("required")) ||
@@ -247,14 +255,14 @@ fn _schema_valid_depth(any spec, int depth) bool {
       def name = str(f.get("name"))
       def kind = str(f.get("type"))
       names[name] = true
-      def has_default = int(f.get("has_default")) != 0
+      def has_default = _flag_value(f.get("has_default"))
       if has_default &&
-      (int(f.get("required")) != 0 ||
+      (_flag_value(f.get("required")) ||
          !_matches_type(kind, f.get("default"))) {
          return false
       }
       if f.contains("nested_schema") &&
-      (kind != "dict" ||
+      (!str._str_eq(kind, "dict") ||
          !_schema_valid_depth(f.get("nested_schema"), depth + 1)) {
          return false
       }
@@ -303,10 +311,10 @@ fn validate(any values, any spec) dict {
       mut value = nil
       if present {
          value = values.get(name)
-      } else if int(f.get("has_default", 0)) != 0 {
+      } else if _flag_value(f.get("has_default", 0)) {
          value = f.get("default")
          present = true
-      } else if int(f.get("required", 1)) == 0 {
+      } else if !_flag_value(f.get("required", 1)) {
          present = false
       } else {
          errors = errors.append(_error("E_CONFIG_MISSING", name,
@@ -338,7 +346,7 @@ fn validate(any values, any spec) dict {
       }
       i += 1
    }
-   if int(spec.get("reject_unknown", 1)) != 0 {
+   if _flag_value(spec.get("reject_unknown", 1)) {
       def keys = sorted(dict_keys(values))
       mut k = 0
       while k < keys.len {

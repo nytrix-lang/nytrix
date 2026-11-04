@@ -53,15 +53,7 @@ static int64_t first_branch_target(const nyr_func_t *f) {
 
 static void build_unknown(nyr_func_t *f, int64_t *branch_target) {
   nyr_opt_begin(f);
-  int cond = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_LOAD_LOCAL,
-                                        .dst = -1,
-                                        .a = -1,
-                                        .b = -1,
-                                        .c = -1,
-                                        .d = -1,
-                                        .e = -1,
-                                        .f = -1,
-                                        .imm = 0});
+  int cond = nyr_opt_emit_imm(f, NYIR_LOAD_LOCAL, 0);
   nyr_opt_br(f, 10);
   nyr_opt_label(f, 10);
   nyr_opt_br_if(f, cond, 30);

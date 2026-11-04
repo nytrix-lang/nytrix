@@ -1,0 +1,37 @@
+shape dynamic-pointer-load32 {
+  family "probe-suite"
+  generator "regression"
+  features ["ny", "memory", "abi"]
+  template ny-test-case
+  expect compile_and_run
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect_stdout "DYNAMIC-POINTER-LOAD32-OK"
+  source ny <<'SOURCE'
+use core
+def p = malloc(256)
+memset(p, 0, 256)
+store32(p, 0x12345678, 136)
+store32(p, 0xABCDEF01, 141)
+def slot = malloc(8)
+store64(slot, p, 0)
+def handle = load64_h(slot, 0)
+def holder = {"pointer": handle}
+fn read(any address, int offset) int { load32_h(address, offset) }
+assert(load32(holder.get("pointer"), 136) == 0x12345678, "dynamic raw load")
+assert(load32_h(holder.get("pointer"), 136) == 0x12345678, "dynamic handle load")
+assert(read(holder.get("pointer"), 141) == 0xABCDEF01, "unaligned wrapper load")
+assert(load32_h(p, 136) == 0x12345678, "raw address remains valid")
+assert(load8(holder.get("pointer"), 136) == 0x78, "dynamic byte load")
+assert(load16(holder.get("pointer"), 136) == 0x5678, "dynamic word load")
+store8(holder.get("pointer"), 0x42, 10)
+store16(holder.get("pointer"), 0x4321, 12)
+store32(holder.get("pointer"), 0x87654321, 20)
+assert(load8(p, 10) == 0x42 && load16(p, 12) == 0x4321, "dynamic small stores")
+assert(load32(p, 20) == 0x87654321, "dynamic dword store")
+def shifted = ptr_add(holder.get("pointer"), 136)
+assert(load32(shifted, 0) == 0x12345678, "dynamic pointer addition")
+free(slot)
+free(p)
+print("DYNAMIC-POINTER-LOAD32-OK")
+SOURCE
+}

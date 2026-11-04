@@ -22,15 +22,7 @@ static bool check_sum(const ny_native_target_info_t *target, bool registers,
   ir.param_types[0] = ir.param_types[1] = NYIR_PARAM_I64;
   int inputs[2];
   for (int i = 0; i < 2; ++i)
-    inputs[i] = nyr_ir_emit(&ir, (nyr_inst_t){.op = NYIR_LOAD_LOCAL,
-                                              .dst = -1,
-                                              .a = -1,
-                                              .b = -1,
-                                              .c = -1,
-                                              .d = -1,
-                                              .e = -1,
-                                              .f = -1,
-                                              .imm = i});
+    inputs[i] = nyr_opt_emit_imm(&ir, NYIR_LOAD_LOCAL, i);
   int rhs = registers ? inputs[1] : nyr_opt_const(&ir, constant);
   int sum = nyr_opt_binop(&ir, NYIR_ADD_I64, inputs[0], rhs);
   int result = nyr_opt_binop(&ir, NYIR_XOR_I64, sum, inputs[0]);

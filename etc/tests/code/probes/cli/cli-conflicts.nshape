@@ -1,0 +1,43 @@
+shape contradictory_cli_options_fail_with_both_names {
+  family "probe-suite"
+  generator "regression"
+  features ["cli", "options", "conflicts", "diagnostics"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.subprocess (run_capture)
+use core.str as str
+
+def compiler = env("NYTRIX_NY_FULL_BIN")
+def pairs = [
+    ["--wasm", "--native-backend=x86_64"],
+    ["--strict-types", "--no-strict-types"],
+    ["--heap=gc", "--ownership"],
+    ["--heap=raii", "--rc-gc"],
+    ["--jit", "--native"],
+    ["--run=aot", "--jit"],
+    ["--release", "--debug"],
+    ["-run", "-emit-only"],
+    ["-gc", "-no-gc"],
+    ["--gpu=off", "--gpu-offload=force"],
+    ["--gpu=off", "--gpu-opt=offload=force"],
+    ["--gpu-backend=cuda", "--gpu-target=nvptx"],
+    ["--repl", "-c"],
+]
+for pair in pairs {
+  def left = str(pair.get(0))
+  def right = str(pair.get(1))
+  def args = [compiler, left, right, "-c", "print(1)"]
+  def result = run_capture(args, [], nil, false)
+  def output =
+      str(result.get("stderr", "")) + str(result.get("stdout", ""))
+  assert(int(result.get("code", 127)) == 2 &&
+         output.contains(left) && output.contains(right) &&
+         !output.contains("Usage:"),
+         "contradiction " + left + " + " + right +
+             " names both flags and exits 2")
+}
+print("CLI_CONFLICTS_OK")
+NY
+}

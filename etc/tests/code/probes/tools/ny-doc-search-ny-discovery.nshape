@@ -42,7 +42,7 @@ assert(rank_output == embedded_output,
 def expected = [
    "docs/spec/syntax.md#Syntax",
    "docs/spec/errors.md#Related",
-   "docs/CHANGELOG.md#[0.10] - 2026-10-13",
+   "docs/CHANGELOG.md#2026-10-07",
 ]
 mut previous = -1
 for expected_entry in expected {

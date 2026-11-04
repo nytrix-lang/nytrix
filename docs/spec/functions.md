@@ -5,11 +5,20 @@ Function rules are shared across execution backends; support for a particular
 native or foreign signature can still vary. See [Native](native.md) for ABI
 boundaries.
 
+## Contents
+
+- [Bindings and calls](#bindings-and-declarations)
+- [Attributes and effect rows](#attributes)
+- [Preconditions and termination](#preconditions-and-termination-measures)
+
 ## Bindings and declarations
 
 `def` declares an immutable binding; `mut` permits reassignment. An optional
 type annotation precedes the binding name. `del` clears a mutable binding; it
 does not free an object.
+
+> **Note:** Names, parameters, and bodies are placeholders; this is not a
+> standalone program.
 
 ```ny
 def name = expression
@@ -25,12 +34,27 @@ fn name(parameters) Type = expression
 A function's final expression is its result when no explicit `return` exits
 first. A string literal at the start of a function body is its docstring.
 
+## Rules
+
+1. `def` bindings cannot be reassigned; `mut` bindings can. `del` clears a
+   mutable binding but does not release or free the referenced object.
+2. Arguments are evaluated left to right. Omitted defaults are evaluated at
+   the call site in declaration order, and `...rest` receives extra positional
+   arguments.
+3. A function returns its final expression unless an explicit `return` exits
+   first. Calls do not implicitly copy managed containers.
+4. An attribute has only the guarantees implemented by its checker or selected
+   backend. Check the support boundary before relying on a partial contract.
+
 ## Parameters and calls
 
 Parameters may be inferred or explicitly typed. A parameter can have a default;
 `...rest` collects additional positional arguments. Arguments are evaluated
 left to right. Omitted defaults are evaluated at the call site in declaration
 order.
+
+> **Note:** These lines describe parameter and call forms; `...rest` is valid
+> only in a function parameter list.
 
 ```ny
 name
@@ -43,10 +67,19 @@ function(positional)
 function(name = value)
 ```
 
-A lambda uses `fn(parameters) { body }`. Function values and lambdas can capture
-bindings from their enclosing scope. Their parameter and return types may be
-inferred when the call site provides enough information. For explicit callable
-shapes, use `fnptr` where required by an API.
+A lambda body may be a block or one brace-free expression:
+
+```ny
+fn(parameters) { body }
+fn(parameters) expression
+```
+
+A brace-free body parses exactly one expression and returns its value
+implicitly. Blocks retain their existing scope and return behavior. Function
+values and lambdas can capture bindings from their enclosing scope. Their
+parameter and return types may be inferred when the call site provides enough
+information. For explicit callable shapes, use `fnptr` where required by an
+API.
 
 ## Return and container behavior
 
@@ -76,9 +109,25 @@ the extent the checker or selected backend implements them; see
 | Mark frequency or timing intent | `@hot`, `@cold`, `@constant_time` | Provide compiler policy metadata; target support varies. |
 | Request accelerator code | `@accel`, `@accel(spirv)` | Request a validated accelerator path or receive an unsupported-target error. |
 | Require target-specific code | `@naked`, `asm(...)`, `intrinsic(...)` | Use only on a backend that supports the requested form. |
+| Restrict memory access | `@readnone`, `@readonly`, `@writeonly`, `@argmemonly` | Contract on what memory the body may touch: `@readnone` reads nothing, `@readonly` only reads, `@writeonly` only writes, and `@argmemonly` touches only memory reached through arguments. |
+| Promise termination behavior | `@nounwind`, `@mustprogress` | `@nounwind` never unwinds through panic; `@mustprogress` eventually returns or performs an observable effect. |
 
 Use semantic contracts for portable behavior. Optimization hints do not replace
 measurement or change source-level operator precedence.
+
+The attribute namespace is open: any `@name` parses, and reflection keeps
+the parsed attributes queryable, so generated declarations can carry
+template-defined markers. Behavior attaches only to the recognized forms
+above. `@pure` and `@consteval` imply the full contract set
+(`@readnone`, `@nounwind`, `@willreturn`, `@mustprogress`); the backend
+lowers the contracts it models into optimizer facts on each route. The fixtures
+`etc/tests/lang/types/inference/attr.nshape` (memory and termination
+contracts preserve program behavior),
+`etc/tests/lang/comptime/comptime.nshape` (template
+expansion preserves attributes), and
+`etc/tests/lang/comptime/reflection/reflect-metadata.nshape` (reflection
+sees `@trace` and `@memoize(3)` as parsed attribute names) verify the
+contract and reflection halves.
 
 ### Effect rows
 

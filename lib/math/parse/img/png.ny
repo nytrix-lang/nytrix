@@ -1071,6 +1071,22 @@ fn decode(any data) any {
    _png_decode_flat_rows(raw, raw_len, pixels, w, h, stride, channels, bytes_per_sample, bytes_per_pixel, bit_depth, color_type, trns_gray, trns_r, trns_g, trns_b, idat, palette, palette_alpha, gray_lut, palette_lut)
 }
 
+fn _png_chunk_crc(ptr chunk, int count) int {
+   mut int crc = 4294967295
+   mut int i = 0
+   while i < count {
+      crc = crc ^ load8(chunk, i)
+      mut int bit = 0
+      while bit < 8 {
+         if (crc & 1) != 0 { crc = (crc >> 1) ^ 3988292384 }
+         else { crc = crc >> 1 }
+         bit += 1
+      }
+      i += 1
+   }
+   (crc ^ 4294967295) & 4294967295
+}
+
 fn _make_chunk(any chunk_type, any data) any {
    def length = data.len
    def total = 8 + length + 4
@@ -1083,14 +1099,7 @@ fn _make_chunk(any chunk_type, any data) any {
    store8(res, load8(to_int(chunk_type), 2), 6)
    store8(res, load8(to_int(chunk_type), 3), 7)
    if length > 0 { _copy_bytes_safe(res, 8, data, 0, length) }
-   def cs = init_str(malloc(length + 4 + 17+15), length + 4)
-   store8(cs, load8(to_int(chunk_type), 0), 0)
-   store8(cs, load8(to_int(chunk_type), 1), 1)
-   store8(cs, load8(to_int(chunk_type), 2), 2)
-   store8(cs, load8(to_int(chunk_type), 3), 3)
-   if length > 0 { _copy_bytes_safe(cs, 4, data, 0, length) }
-   def crc = math_hash.crc32(cs, 0, 0)
-   _png_free_tmp(cs)
+   def crc = _png_chunk_crc(ptr_add(res_p, 4), length + 4)
    _s32be(res, crc, 8 + length)
    res
 }
@@ -1101,9 +1110,10 @@ fn encode(any img) any {
    def w, h = img.get("width"), img.get("height")
    def pixels = img.get("data")
    if !w || !h || !pixels { return 0 }
-   def ch = img.get("channels", img.get("bpp", 4))
+   def int ch = int(img.get("channels", img.get("bpp", 4)))
    if ch != 3 && ch != 4 { return 0 }
-   def color_type = (ch == 4) ? 6 : 2
+   mut int color_type = 2
+   if ch == 4 { color_type = 6 }
    def ihdr_p = malloc(13 + 32)
    if !ihdr_p { return 0 }
    def ihdr = init_str(ihdr_p, 13)

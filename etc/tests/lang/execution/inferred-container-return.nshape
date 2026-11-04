@@ -1,0 +1,23 @@
+shape inferred_container_return {
+  family "runtime/compiler"
+  generator "regression"
+  features [ny inference abi container return]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --nyr-run"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+fn inferred_values(bool include_more) {
+   if include_more { return [5, 7, 9] }
+   [11, 13]
+}
+
+def full = inferred_values(true)
+def short = inferred_values(false)
+assert(is_list(full) && full.len == 3 && full[2] == 9,
+       "inferred list return retains its typed-buffer identity")
+assert(is_list(short) && short.len == 2 && short[1] == 13,
+       "implicit list return retains its typed-buffer identity")
+NY
+}

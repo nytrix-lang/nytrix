@@ -1,0 +1,27 @@
+shape missing_emit_asm_value {
+  family "compiler-errors/frontend"
+  generator "error"
+  features ["error", "frontend", "options", "negative"]
+  template ny-compile-fail
+  flags "--emit-asm --dump-ast"
+  expect compile_fail
+  expect_message "missing argument for --emit-asm"
+
+  source ny <<'NY'
+print("option value must not consume another flag")
+NY
+}
+
+shape missing_output_value_does_not_consume_another_flag {
+  family "compiler-errors/frontend"
+  generator "error"
+  features ["error", "frontend", "options", "negative"]
+  template ny-compile-fail
+  flags "--output --dump-ast"
+  expect compile_fail
+  expect_message "missing argument for --output before option --dump-ast"
+
+  source ny <<'NY'
+print("output value must not consume another flag")
+NY
+}

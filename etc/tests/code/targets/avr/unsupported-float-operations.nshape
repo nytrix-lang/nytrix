@@ -17,7 +17,7 @@ fn rejects(str name, str source) bool {
                  "-" + name + ".s"
   def result = run_capture(
       ["sh", "-c", "exec \"$@\" 2>&1", "sh", compiler,
-       "--native-backend=avr", "--native-only", "--nyir-verify",
+       "--native-backend=avr", "--native-only", "--nyr-verify",
        "--emit-asm=" + asm_path, "-no-std", "-emit-only", "-e", source],
       [], nil, false)
   def emitted = file_exists(asm_path)

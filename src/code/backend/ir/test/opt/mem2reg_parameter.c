@@ -59,5 +59,42 @@ int main(void) {
     if (!ok)
       return 1;
   }
+  nyr_func_t read_only;
+  nyr_opt_begin(&read_only);
+  read_only.param_types = malloc(sizeof(*read_only.param_types));
+  if (!read_only.param_types)
+    return 2;
+  read_only.param_types[0] = NYIR_PARAM_I64;
+  read_only.param_count = 1;
+  int value = read_only.next_value++;
+  nyr_ir_emit(&read_only, (nyr_inst_t){.op = NYIR_LOAD_LOCAL,
+                                       .dst = value,
+                                       .a = -1,
+                                       .b = -1,
+                                       .c = -1,
+                                       .d = -1,
+                                       .e = -1,
+                                       .f = -1,
+                                       .imm = 0});
+  nyr_opt_ret(&read_only, value);
+  bool read_only_ok =
+      nyr_opt_verify(&read_only, "parameter-read-only/before") &&
+      evaluate(&read_only, 7) && nyr_mem2reg(&read_only) &&
+      nyr_opt_verify(&read_only, "parameter-read-only/after") &&
+      evaluate(&read_only, 7);
+  size_t parameter_loads = 0;
+  for (size_t i = 0; i < read_only.len; ++i) {
+    parameter_loads += read_only.data[i].op == NYIR_LOAD_LOCAL;
+    if (read_only.data[i].op == NYIR_STORE_LOCAL)
+      read_only_ok = false;
+  }
+  /*
+   * The one remaining load is the ABI ingress value for parameter zero.
+   */
+  if (parameter_loads != 1)
+    read_only_ok = false;
+  nyr_ir_func_free(&read_only);
+  if (!read_only_ok)
+    return 1;
   return 0;
 }

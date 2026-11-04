@@ -419,11 +419,11 @@ static void print_ratios_json(FILE *out, compare_state_t *st) {
   compare_variant_t *ny_o3 = find_variant(st, "ny", "o3");
   compare_variant_t *ny_o3i = find_variant(st, "ny", "o3i");
   bool first = true;
-#define RATIO(name, num, den, field) \
-  do { if ((num) && (den) && (den)->field > 0.0) { \
-    if (!first) fputc(',', out); \
-    first = false; \
-    fprintf(out, "\"%s\":%.4f", (name), (num)->field / (den)->field); \
+#define RATIO(name, num, den, field)                                           \
+  do { if ((num) && (den) && (den)->field > 0.0) {                             \
+    if (!first) fputc(',', out);                                               \
+    first = false;                                                             \
+    fprintf(out, "\"%s\":%.4f", (name), (num)->field / (den)->field);          \
   } } while (0)
   fputc('{', out);
   if (!st->failure_count) {

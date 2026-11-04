@@ -3,7 +3,7 @@ shape nyir_metadata_bin {
   generator "native"
   features ["native", "nyir", "metadata", "binary"]
   template ny-test-case
-  flags "--nyir-dump-bin=/tmp/nytrix-native-nyir-metadata-bin.nyir --nyir-metadata=/tmp/nytrix-native-nyir-metadata-bin.txt --nyir-metadata-bin=/tmp/nytrix-native-nyir-metadata-bin.nyir"
+  flags "--dump-nyr=build/nyr-metadata-bin.nyr --nyr-metadata=build/nyr-metadata-bin.txt --nyr-metadata-bin=build/nyr-metadata-bin.nyr"
   expect compile_and_run
   source ny <<'NY'
 print(1 + 2)

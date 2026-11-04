@@ -5,7 +5,7 @@ shape ownership_exclusive_borrow_place_noalias_positive {
   template ny-test-case
   expect compile_and_run
   expect_message "[noalias]"
-  flags "--ownership-strict --native-only --nyir-verify --nyir-dump"
+  flags "--ownership-strict --native-only --nyr-verify --nyr-dump"
   source ny <<'NY'
 use core
 

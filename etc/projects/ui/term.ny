@@ -4,6 +4,7 @@
 ;; Unix Terminal Emulator
 use core
 use core.os (exit)
+use core.os.args as process_args
 use core.os.path as ospath
 use core.os.time (ticks, msleep)
 use core.os.process as process
@@ -274,9 +275,10 @@ fn _term_diag(str label, any value) any {
 }
 
 fn _term_verbose_arg() bool {
+   def cli_argv = process_args.args()
    mut i = 1
-   while i < argc() {
-      def str a = str.lower(str.strip(to_str(argv(i))))
+   while i < cli_argv.len {
+      def str a = str.lower(str.strip(to_str(cli_argv.get(i, ""))))
       if a == "-v" || a == "--verbose" || a == "-vv" || a == "-vvv" || a == "--debug" || a == "--debug-deep" { return true }
       i += 1
    }
@@ -337,9 +339,10 @@ fn _input_debug_event(str stage, int typ, any data) any {
 }
 
 fn _term_has_help_arg() bool {
+   def cli_argv = process_args.args()
    mut i = 1
-   while i < argc() {
-      def str a = str.lower(str.strip(to_str(argv(i))))
+   while i < cli_argv.len {
+      def str a = str.lower(str.strip(to_str(cli_argv.get(i, ""))))
       if a == "-h" || a == "--help" || a == "help" { return true }
       i += 1
    }
@@ -391,9 +394,10 @@ fn _term_print_help() any {
 }
 
 fn _term_force_window_arg() bool {
+   def cli_argv = process_args.args()
    mut i = 1
-   while i < argc() {
-      def str a = str.lower(str.strip(to_str(argv(i))))
+   while i < cli_argv.len {
+      def str a = str.lower(str.strip(to_str(cli_argv.get(i, ""))))
       if a == "--window" || a == "--gui" || a == "--term" || a == "--terminal" || a == "--no-direct" { return true }
       i += 1
    }
@@ -401,9 +405,10 @@ fn _term_force_window_arg() bool {
 }
 
 fn _term_force_direct_arg() bool {
+   def cli_argv = process_args.args()
    mut i = 1
-   while i < argc() {
-      def str a = str.lower(str.strip(to_str(argv(i))))
+   while i < cli_argv.len {
+      def str a = str.lower(str.strip(to_str(cli_argv.get(i, ""))))
       if a == "--direct" || a == "--run-direct" || a == "--host" { return true }
       i += 1
    }
@@ -411,11 +416,12 @@ fn _term_force_direct_arg() bool {
 }
 
 fn _term_command_line() str {
+   def cli_argv = process_args.args()
    mut line = ""
    mut passthrough = false
    mut i = 1
-   while i < argc() {
-      def arg = to_str(argv(i))
+   while i < cli_argv.len {
+      def arg = to_str(cli_argv.get(i, ""))
       if passthrough {
          if line.len > 0 { line = line + " " }
          line = line + arg
@@ -431,10 +437,11 @@ fn _term_command_line() str {
 }
 
 fn _term_command_first_arg() str {
+   def cli_argv = process_args.args()
    mut passthrough = false
    mut i = 1
-   while i < argc() {
-      def arg = to_str(argv(i))
+   while i < cli_argv.len {
+      def arg = to_str(cli_argv.get(i, ""))
       if passthrough { return str.lower(str.strip(arg)) }
       if arg == "--" {
          passthrough = true
@@ -595,7 +602,7 @@ fn _refresh_runtime_flags(int now_ticks) any {
 fn _refresh_dump_flags() any {
    _headless_mode = common.env_truthy("NY_UI_HEADLESS")
    _auto_dump_requested = ui_dump.auto_dump_enabled() || _headless_mode
-   _auto_dump_exit_enabled = _headless_mode || common.env_truthy("NYTRIX_AUTO_DUMP_EXIT")
+   _auto_dump_exit_enabled = (_headless_mode && !common.env_truthy("NYTRIX_UI_REPLAY")) || common.env_truthy("NYTRIX_AUTO_DUMP_EXIT")
    _auto_dump_delay_frames = ui_dump.auto_dump_delay_frames(_headless_mode ? 0 : 8)
    if _auto_dump_delay_frames < 0 { _auto_dump_delay_frames = 0 }
    _auto_dump_path = ui_dump.auto_dump_path("")
@@ -678,6 +685,10 @@ fn _init_vt() any {
    vt["px_w"] = int(float(cols) * cw)
    vt["px_h"] = int(float(rows) * ch)
    vt["window_id"] = win_id
+   if common.env_truthy("NYTRIX_UI_REPLAY") {
+      vt = vterm.put_text(vt, "Nytrix terminal replay\r\nfixed input and resize fixture\r\n")
+      return 0
+   }
    def launch = _term_launch_spec()
    def shell_path = launch.get("path", vterm.default_shell_path())
    def shell_args = launch.get("args", vterm.default_shell_args(common.env_truthy("NY_TERM_LOGIN")))
@@ -1328,6 +1339,7 @@ fn _resize_term() any {
 fn draw() any {
    def live = _live_window()
    if is_dict(live) { win = live }
+   if common.env_truthy("NYTRIX_UI_REPLAY") { _needs_draw = true }
    def dump_enabled = _auto_dump_requested && !_auto_dump_done
    if dump_enabled {
       if _auto_dump_ready_frame < 0 && _frame_count >= _auto_dump_delay_frames {
@@ -1399,7 +1411,7 @@ fn draw() any {
 
 if _term_has_help_arg() { _term_print_help() _term_exit(0) }
 if _term_should_direct_command() { _term_exit(_term_run_direct_command()) }
-if common.env_truthy("NY_UI_HEADLESS") { exit(0) }
+if common.env_truthy("NY_UI_HEADLESS") && !common.env_truthy("NYTRIX_UI_REPLAY") { exit(0) }
 startup()
 ready("term")
 ;; Keep the terminal's capture lifecycle in charge of its headless default;
@@ -1412,7 +1424,7 @@ _last_activity_ticks = startup_ticks
 mut live_win = _live_window()
 while live_win && !window.should_close(live_win) && tick_ui(fx) {
    if quit_key(next_ui_key(fx)) { break }
-   if mock_backend { break }
+   if mock_backend && !common.env_truthy("NYTRIX_UI_REPLAY") { break }
    win = live_win
    def now = ticks()
    _auto_close_if_idle(win, _last_activity_ticks)

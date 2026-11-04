@@ -7,13 +7,14 @@
 #include "base/trace.h"
 #include "base/util.h"
 #include "code/backend/abi.h"
+#include "code/backend/arch/x86_64/ast.h"
+#include "code/backend/ast.h"
 #include "code/backend/internal.h"
 #include "code/backend/ir/module.h"
 #include "code/backend/native.h"
 #include "code/backend/object/internal.h"
 #include "code/lang/lower.h"
 #include "code/lang/pipeline/build.h"
-#include "code/lang/pipeline/legacy_backend.h"
 #include "code/lang/pipeline/native.h"
 
 #include <errno.h>
@@ -133,7 +134,7 @@ static bool ny_wasm_collect_imports(const nyr_func_t *funcs, size_t func_count,
       int args[NYIR_CALL_MAX_ARGS];
       int argc = 0;
       if (!nyr_call_args(in, func->next_value, args, NYIR_CALL_MAX_ARGS, &argc,
-                          NULL, 0) ||
+                         NULL, 0) ||
           argc < 0)
         continue;
       nyr_wasm_import_type_t arg_types[NYIR_CALL_MAX_ARGS];
@@ -566,7 +567,7 @@ bool ny_pipeline_emit_asm_entry(const program_t *prog, const ny_options *opt,
   nyr_set_cf_mem2reg_enabled(!opt || opt->native_enable_cf_mem2reg);
   nyr_set_preserve_phis(true);
   nyr_set_pass_controls(opt ? opt->nyr_disable_pass : NULL,
-                         opt ? opt->nyr_stop_after : NULL);
+                        opt ? opt->nyr_stop_after : NULL);
   nyr_set_verify_each_pass(opt && opt->nyr_ir_verify);
   nyr_set_rollback_on_verify_fail(opt && opt->nyr_rollback_on_verify_fail);
   nyr_set_global_inst_cap(opt ? opt->nyr_global_inst_cap : 0);
@@ -810,67 +811,13 @@ bool ny_pipeline_emit_asm(const program_t *prog, const ny_options *opt,
                                     err_len);
 }
 
-/*
- * Assemble the same scalar machine form text stream used by --emit-asm into an
- * object. This is a narrow bridge while the internal object encoders are
- * migrated; false means "not this supported subset", so callers retain their
- * established NYIR object writer.
- */
-static bool ny_native_try_emit_x64_machine_object(
-    const nyr_func_t *top, const nyr_func_t *funcs, const char *const *names,
-    size_t func_count, const ny_native_target_info_t *target, const char *path,
-    const char *entry_symbol, bool tag_return, char *err, size_t err_len) {
-  if (!top || !target || target->target != NY_NATIVE_TARGET_X86_64)
-    return false;
-  nyr_writer_t text = {0};
-  char machine_err[256] = {0};
-  bool ok = true;
-  for (size_t i = 0; ok && i < func_count; ++i) {
-    char label[256];
-    snprintf(label, sizeof(label), "ny_fn_%s",
-             names[i] ? names[i] : "unknown_fn");
-    ok = nyr_emit_func(&text, target, &funcs[i], label, false, machine_err,
-                       sizeof(machine_err));
-  }
-  if (ok)
-    ok = nyr_emit_func(&text, target, top, entry_symbol, tag_return,
-                       machine_err, sizeof(machine_err));
-  if (ok && (!nyr_strtab_append_asm(&text, machine_err, sizeof(machine_err)) ||
-             !nyr_arraytab_append_asm(&text, machine_err, sizeof(machine_err))))
-    ok = false;
-  if (!ok) {
-    nyr_set_error(err, err_len, "machine form: %s",
-                  machine_err[0] ? machine_err : "unsupported machine shape");
-    free(text.data);
-    return false;
-  }
-  char asm_path[4096];
-  char asm_name[96];
-  snprintf(asm_name, sizeof(asm_name), "ny_machine_%ld_%llu.s", (long)getpid(),
-           (unsigned long long)ny_ticks_now());
-  ny_join_path(asm_path, sizeof(asm_path), ny_get_temp_dir(), asm_name);
-  nyr_ensure_parent_dir_for_path(path);
-  ok = ny_write_file(asm_path, text.data ? text.data : "", text.len) == 0;
-  free(text.data);
-  if (!ok)
-    return false;
-  const char *argv[] = {
-      ny_builder_choose_cc(), "-c", asm_path, "-o", path, NULL};
-  int rc = ny_exec_spawn(argv);
-  if (!getenv("NY_KEEP_ASM"))
-    unlink(asm_path);
-  else
-    fprintf(stderr, "[asm kept] %s\n", asm_path);
-  return rc == 0;
-}
-
 bool ny_pipeline_emit_program_object(const program_t *prog,
                                      const ny_options *opt, const char *path,
                                      const char *entry_name, bool tag_return,
                                      char *err, size_t err_len) {
   nyr_set_cf_mem2reg_enabled(!opt || opt->native_enable_cf_mem2reg);
   nyr_set_pass_controls(opt ? opt->nyr_disable_pass : NULL,
-                         opt ? opt->nyr_stop_after : NULL);
+                        opt ? opt->nyr_stop_after : NULL);
   nyr_set_verify_each_pass(opt && opt->nyr_ir_verify);
   nyr_set_tv_seed(opt ? opt->native_tv_seed_trials : 0);
   if (!prog || !opt || !path || !*path) {
@@ -945,7 +892,9 @@ bool ny_pipeline_emit_program_object(const program_t *prog,
         } else {
           obj_ok = nyr_native_emit_elf64_object_from_nirs(
               &rt_main_nir, func_nirs, func_names, func_count, &target, path,
-              obj_symbol, tag_return, obj_err, sizeof(obj_err));
+              obj_symbol, tag_return,
+              opt && opt->runtime_mode == NY_RUNTIME_MODE_BARE, obj_err,
+              sizeof(obj_err));
         }
       } else if (ny_native_target_has(&target, NY_NATIVE_CAP_COFF_OBJECT)) {
         obj_ok = nyr_native_emit_coff_x64_object_from_nirs(
@@ -982,23 +931,20 @@ bool ny_pipeline_emit_program_object(const program_t *prog,
           err[0] = '\0';
         return true;
       }
-      /*
-       * Keep the host-assembler bridge behind the internal writers.  Native
-       * object emission is normally self-contained; this only retains the
-       * existing machine form coverage while its direct byte encoder grows.
-       */
-      if (ny_native_try_emit_x64_machine_object(
-              &rt_main_nir, func_nirs, func_names, func_count, &target, path,
-              obj_symbol, tag_return, obj_err, sizeof(obj_err))) {
+      if (opt->native_only && obj_err[0]) {
+        nyr_set_error(err, err_len, "%s", obj_err);
         for (size_t i = 0; i < func_count; ++i)
           nyr_ir_func_free(&func_nirs[i]);
         nyr_ir_func_free(&rt_main_nir);
-        if (err && err_len > 0)
-          err[0] = '\0';
-        return true;
+        return false;
       }
-      if (opt->native_only && obj_err[0]) {
-        nyr_set_error(err, err_len, "%s", obj_err);
+      if (target.target == NY_NATIVE_TARGET_X86_64 &&
+          ny_native_target_has(&target, NY_NATIVE_CAP_ELF_OBJECT)) {
+        nyr_set_error(
+            err, err_len, "%s",
+            obj_err[0]
+                ? obj_err
+                : "x86-64 ELF object writer does not support this program");
         for (size_t i = 0; i < func_count; ++i)
           nyr_ir_func_free(&func_nirs[i]);
         nyr_ir_func_free(&rt_main_nir);
@@ -1030,6 +976,12 @@ bool ny_pipeline_emit_program_object(const program_t *prog,
     }
     if (err && err_len > 0)
       err[0] = '\0';
+  }
+  if (target.target == NY_NATIVE_TARGET_X86_64 &&
+      ny_native_target_has(&target, NY_NATIVE_CAP_ELF_OBJECT)) {
+    nyr_set_error(err, err_len,
+                  "x86-64 ELF object writer cannot encode this program");
+    return false;
   }
   char asm_path[4096];
   char asm_name[96];

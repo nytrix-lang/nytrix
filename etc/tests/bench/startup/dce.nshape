@@ -8,12 +8,19 @@ ci windows-skip
   source ny generate python <<'PY'
 print("use core")
 print("use core.os.time")
+print("def rounds = argc() + 16")
 print("def t0 = ticks()")
-print("mut x = 0")
+print("mut checksum = 0")
+print("mut round = 0")
+print("while round < rounds {")
+print("mut x = round")
 for i in range(500):
     print(f"if x == {i} {{ x = x + 1 }} else {{ x = x + 2 }}")
+print("checksum += x")
+print("round += 1")
+print("}")
 print("def t1 = ticks()")
-print('print("checksum=", x)')
+print('print("checksum=", checksum)')
 print('print("elapsed_ns=", t1 - t0)')
 PY
   source c <<'C'
@@ -27,17 +34,23 @@ static int64_t now_ns(void) {
   return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
 }
 
-int main(void) {
+int main(int argc, char **argv) {
+  (void)argv;
+  int rounds = argc + 16;
   int64_t t0 = now_ns();
-  int x = 0;
-  for (int i = 0; i <= 499; i++) {
-    if (x == i)
-      x = x + 1;
-    else
-      x = x + 2;
+  int checksum = 0;
+  for (int round = 0; round < rounds; round++) {
+    int x = round;
+    for (int i = 0; i <= 499; i++) {
+      if (x == i)
+        x = x + 1;
+      else
+        x = x + 2;
+    }
+    checksum += x;
   }
   int64_t t1 = now_ns();
-  printf("checksum=%d\n", x);
+  printf("checksum=%d\n", checksum);
   printf("elapsed_ns=%lld\n", (long long)(t1 - t0));
   return 0;
 }

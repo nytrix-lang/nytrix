@@ -20,6 +20,8 @@ use core.os.ui.render.shared as render_shared
 ;; through a module alias.
 def _STRIDE = render_shared.VERTEX_STRIDE
 def _OFF_X = render_shared.OFF_X
+def _OFF_U = render_shared.OFF_U
+def _OFF_U2 = render_shared.OFF_U2
 def _OFF_C = render_shared.OFF_C
 def _OFF_NX = render_shared.OFF_NX
 mut _cfg_gl_debug = false
@@ -52,6 +54,10 @@ fn _check_gl_error(str where) bool {
       fn _ny_glDepthMask(u32 flag) as "glDepthMask"
       fn _ny_glActiveTexture(u32 texture) as "glActiveTexture"
       fn _ny_glBindTexture(u32 target, u32 texture) as "glBindTexture"
+      fn _ny_glGenTextures(i32 count, ptr textures) as "glGenTextures"
+      fn _ny_glDeleteTextures(i32 count, ptr textures) as "glDeleteTextures"
+      fn _ny_glGenBuffers(i32 count, ptr buffers) as "glGenBuffers"
+      fn _ny_glDeleteBuffers(i32 count, ptr buffers) as "glDeleteBuffers"
       fn _ny_glTexParameteri(u32 target, u32 pname, i32 param) as "glTexParameteri"
       fn _ny_glPixelStorei(u32 pname, i32 param) as "glPixelStorei"
       fn _ny_glTexImage2D(u32 target, i32 level, i32 internalformat, i32 width, i32 height, i32 border, u32 format, u32 typ, ptr pixels) as "glTexImage2D"
@@ -187,9 +193,9 @@ mut any _model = nil
 mut _default_tex = 0
 mut _bound_tex = -999999
 mut _last_tex = -1
-mut _tex_live = dict(128)
-mut _tex_formats = dict(128)
-mut _tex_pixels = dict(128)
+mut dict _tex_live = dict(128)
+mut dict _tex_formats = dict(128)
+mut dict _tex_pixels = dict(128)
 mut _wireframe = false
 mut _lighting_enabled = false
 mut _depth_mask_enabled = true
@@ -674,12 +680,16 @@ fn _ensure_libgl() any {
 }
 
 fn _proc(str name) any {
+   if !is_dict(_procs) { _procs = dict(128) }
    if _procs.contains(name) { return _procs.get(name, 0) }
    mut p = lib_uiw.get_proc_address(name)
    if !p {
       def h = _ensure_libgl()
       if h { p = ffi.dlsym(h, name) }
    }
+   ;; Window backends return raw procedure addresses. Generic FFI calls need
+   ;; a native callable marker to unbox counts and use the C floating ABI.
+   if p { p = ffi.tag_native(p) }
    _procs[name] = p
    p
 }
@@ -725,6 +735,12 @@ fn _call1u(str name, any a) bool {
 
 fn _call2(str name, any a, any b) bool {
    if _call_trace_enabled() { print("[gl] call2 " + name) }
+   #linux {
+      if name == "glGenTextures" { _ny_glGenTextures(a, b) return true }
+      if name == "glDeleteTextures" { _ny_glDeleteTextures(a, b) return true }
+      if name == "glGenBuffers" { _ny_glGenBuffers(a, b) return true }
+      if name == "glDeleteBuffers" { _ny_glDeleteBuffers(a, b) return true }
+   }
    if name == "glBindTexture" { _ny_glBindTexture(a, b) return true }
    if name == "glBlendFunc" { _ny_glBlendFunc(a, b) return true }
    if name == "glColorMaterial" { _ny_glColorMaterial(a, b) return true }
@@ -1463,6 +1479,9 @@ fn set_material_from_slab_base(?ptr p, int fallback_base_tex_id=-1, int vc_mode=
 fn init(any win) bool {
    "Initializes a real OpenGL renderer for a window."
    if !win { return false }
+   if !is_dict(_tex_live) { _tex_live = dict(128) }
+   if !is_dict(_tex_formats) { _tex_formats = dict(128) }
+   if !is_dict(_tex_pixels) { _tex_pixels = dict(128) }
    _gl_refresh_config()
    _win = win
    _w = int(win.get("w", 0))
@@ -1502,6 +1521,15 @@ fn init(any win) bool {
    }
    _mvp = _default_ortho(_w, _h)
    _model = mat4_identity()
+   ;; A new context has fresh bindings even when a previous window used this
+   ;; renderer. Keep cached state in sync with the GL calls below.
+   _bound_array_buffer = 0
+   _bound_elem_buffer = 0
+   _bound_tex = -999999
+   _last_tex_env_mode = -1
+   _last_texture_xf0 = 0x7fffffff
+   _last_texture_xf1 = 0x7fffffff
+   _mesh_cull_enabled = false
    _apply_matrices()
    _call1("glDisable", GL_CULL_FACE)
    _call1("glEnable", GL_BLEND)
@@ -1513,8 +1541,12 @@ fn init(any win) bool {
    }
    _check_gl_error("init.blend")
    _ny_glEnable(GL_TEXTURE_2D)
+   _texture_2d_enabled = true
    _set_tex_env_mode(GL_MODULATE)
    _call1("glEnable", GL_DEPTH_TEST)
+   _depth_test_enabled = true
+   _ny_glDepthMask(1)
+   _depth_mask_enabled = true
    _call1("glDepthFunc", GL_LEQUAL)
    _call1("glEnable", GL_MULTISAMPLE)
    _multisample_enabled = true
@@ -1606,6 +1638,7 @@ fn begin_frame(any win=0, int w=0, int h=0) bool {
    if h > 0 { _h = h }
    _reset_frame_stats()
    if _soft_enabled() {
+      _soft_scissor = false
       if !_mvp { _mvp = _default_ortho(_w, _h) }
       if !_model { _model = mat4_identity() }
       _soft_ensure_surface()
@@ -1616,6 +1649,9 @@ fn begin_frame(any win=0, int w=0, int h=0) bool {
       _frame_open = true
       return true
    }
+   ;; UI clipping can be left enabled by a widget or interrupted draw. A frame
+   ;; clear must always cover the entire framebuffer before new clips are set.
+   _ny_glDisable(GL_SCISSOR_TEST)
    _call4("glViewport", 0, 0, _w, _h)
    _call1("glEnable", GL_MULTISAMPLE)
    _multisample_enabled = true

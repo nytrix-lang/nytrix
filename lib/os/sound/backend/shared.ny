@@ -49,8 +49,11 @@ fn probe_linux_library_once(int avail, any lib_handle, str name, str required_sy
    #linux {
       def h = ffi.dlopen(name, ffi.RTLD_NOW() | ffi.RTLD_GLOBAL())
       if h == 0 { return [0, 0] }
-      if ffi.dlsym(h, required_symbol) != 0 { return [1, h] }
-      ffi.dlclose(h)
+      if ffi.dlsym(h, required_symbol) == 0 {
+         ffi.dlclose(h)
+         return [0, 0]
+      }
+      return [1, h]
    }
    #endif
    [0, 0]

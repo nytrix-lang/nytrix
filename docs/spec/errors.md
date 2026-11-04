@@ -4,6 +4,32 @@
 Errors use assertions, panics, recoverable result values, and compiler
 diagnostics.
 
+## Contents
+
+- [Assertions and panic](#assertions)
+- [Recoverable results](#recoverable-results)
+- [Compiler diagnostics](#diagnostics)
+
+> **Note:** These are grammar shapes; `condition`, `err`, and handler functions
+> are placeholders.
+
+```ny
+assert(condition, "message")
+panic("failure")
+try { operation() } catch err { handler(err) }
+```
+
+## Rules
+
+1. Use `Result` when callers can recover; use `panic` or assertions when
+   continuing would be invalid.
+2. `try`/`catch` catches language/runtime failures. It does not turn invalid
+   source or failed compile-time proofs into runtime results.
+3. A `Result` is ordinary data; inspect its success/error shape before using a
+   payload when type refinement requires it.
+4. Use structured error values when callers need a machine-readable kind and
+   message; compiler diagnostics remain compile-time reports.
+
 ## Assertions
 
 ```ny

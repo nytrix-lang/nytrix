@@ -1,35 +1,17 @@
 <!-- nytrix-doc: {"audience":"user","featured":true,"group":"learn","order":10,"summary":"Compile and run a first Nytrix file, then find the next guide for your task."} -->
 # Start
 
-Use a file to check the compiler before setting up a larger project. If you
-already have Nytrix installed, confirm which executable is on your path:
+Here's your first program. Under a minute.
 
-```bash
-ny --version
-```
-
-From a source checkout, build and install first:
-
-```bash
-./make
-./make install
-```
-
-See [Build Nytrix](build.md) for toolchain checks and build configuration.
-
-## Run a program
+Prerequisites: a Nytrix compiler on `PATH`, or a source checkout with its build
+tools installed.
 
 Create `hello.ny`:
 
 ```ny
 use core
 
-fn greet(str name) str {
-   "hello, " + name
-}
-
-assert_eq(greet("Nytrix"), "hello, Nytrix", "greeting")
-print(greet("world"))
+print("hello, world")
 ```
 
 Run it:
@@ -38,15 +20,16 @@ Run it:
 ny hello.ny
 ```
 
-The assertion is silent when it passes; the final line prints `hello, world`.
+The program prints `hello, world`. If you are working from a source checkout
+instead of an installed compiler, build it first:
 
-## Continue
+```bash
+./make
+./make install
+```
 
-- Use [`ny new`](programs.md) or `ny new app` to start a project.
-- Read the [tour](tour.md) for the basic language forms.
-- Search standard-library APIs with `ny doc search --symbols name`; see
-  [Library](library.md).
-- Use [Programs](programs.md) for imports and module entry points, and
-  [Build](build.md) for repository builds.
-- Check [Implementation status](status.md) before relying on a target-specific
-  feature.
+Next:
+
+- [Tour](tour.md) — read a small program with functions, cases, and loops.
+- [Programs](programs.md) — organize scripts, modules, and imports.
+- [Build](build.md) — build from source or diagnose a toolchain.

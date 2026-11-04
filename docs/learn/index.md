@@ -2,7 +2,21 @@
 # Learn Nytrix
 
 Start with a small program, then choose a guide for your task.
-Use the [specification](../spec/index.md) for language rules.
+
+Prerequisites: none; start with the [first program](start.md).
+
+## How to read these docs
+
+- **Learn** pages teach workflows and concepts with examples.
+- **Spec** pages define language rules and implementation boundaries.
+- **Cookbook** recipes are copy-paste starting points; check linked contracts
+  before adapting them.
+
+Next:
+
+- [Start](start.md) — compile and run a program.
+- [Tour](tour.md) — read core language forms.
+- [Specification](../spec/index.md) — look up exact language rules.
 
 ## Start here
 
@@ -11,14 +25,19 @@ Use the [specification](../spec/index.md) for language rules.
 3. [Programs](programs.md): organize files, imports, and entry points.
 4. [Library](library.md): find an exported function with `ny doc`.
 
-## Language and application guides
+## First concepts
 
-- [Quick reference](quirks.md) for syntax and runtime behavior that commonly
-  surprises users.
-- [Ownership](ownership.md), [effects](effect.md), [concurrency](concurrency.md),
-  [compile-time programming](comptime.md), and [proofs](proofs.md).
-- [Numbers and vectors](numbers.md), [networking](networking.md),
-  [native interfaces](native.md), and [UI](ui.md).
+- [Quick reference](quirks.md) for syntax and behavior that commonly surprise
+  users.
+- [Numbers](numbers.md), [ownership](ownership.md), [effects](effect.md),
+  [proofs](proofs.md), and [compile-time programming](comptime.md).
+- [Concurrency](concurrency.md) and [native interfaces](native.md) when your
+  program needs those boundaries.
+
+## Application guides
+
+- [Networking](networking.md), [UI](ui.md), and
+  [browser and WebAssembly](browser.md).
 - [Cookbook](cookbook.md) for short task-oriented patterns.
 
 ## Workflows

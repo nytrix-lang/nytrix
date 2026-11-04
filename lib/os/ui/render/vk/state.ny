@@ -331,6 +331,32 @@ mut _last_frame_draw_calls = 0
 mut _last_frame_dynamic_draw_calls = 0
 mut _last_frame_static_draw_calls = 0
 mut _last_frame_indexed_draw_calls = 0
+
+fn record_draw_call(bool dynamic_draw, bool indexed_draw) bool {
+   _total_draw_calls += 1
+   _frame_draw_calls += 1
+   if dynamic_draw { _frame_dynamic_draw_calls += 1 }
+   else { _frame_static_draw_calls += 1 }
+   if indexed_draw { _frame_indexed_draw_calls += 1 }
+   true
+}
+
+fn reset_frame_draw_stats() bool {
+   _frame_draw_calls = 0
+   _frame_dynamic_draw_calls = 0
+   _frame_static_draw_calls = 0
+   _frame_indexed_draw_calls = 0
+   true
+}
+
+fn publish_frame_draw_stats() bool {
+   _last_frame_draw_calls = _frame_draw_calls
+   _last_frame_dynamic_draw_calls = _frame_dynamic_draw_calls
+   _last_frame_static_draw_calls = _frame_static_draw_calls
+   _last_frame_indexed_draw_calls = _frame_indexed_draw_calls
+   true
+}
+
 mut _last_flush_total = 0
 mut _last_pipeline_bind_count = 0
 mut _last_descriptor_bind_count = 0
@@ -401,9 +427,20 @@ fn _advance_vertex_offset(any n) int {
    0
 }
 
-fn _snapshot_model_matrix(any dst) any {
-   if dst && _current_model { memcpy(dst, _current_model, 64) return dst }
-   return _scratch_ident
+fn _snapshot_model_matrix(ptr dst) ptr {
+   if !_scratch_model_saved_a { _scratch_model_saved_a = _state_alloc(72) }
+   if !_scratch_model_saved_b { _scratch_model_saved_b = _state_alloc(72) }
+   if !dst { dst = _scratch_model_saved_a }
+   if _current_model {
+      memcpy(dst, _current_model, 64)
+   } else {
+      memset(dst, 0, 64)
+      store32_f32(dst, 1.0, 0)
+      store32_f32(dst, 1.0, 20)
+      store32_f32(dst, 1.0, 40)
+      store32_f32(dst, 1.0, 60)
+   }
+   dst
 }
 
 mut _scratch_model_saved_a = _state_alloc(72)

@@ -17,8 +17,11 @@
  */
 
 enum {
-  NYIR_BINARY_VERSION = 19,
+  NYIR_BINARY_VERSION = 23,
   NYIR_BINARY_MIN_VERSION = 1,
+  NYIR_CALL_CLASS_NORMALIZED_VERSION = 21,
+  NYIR_X86_RSP_VERSION = 22,
+  NYIR_I386_REGPARM_VERSION = 23,
   NYIR_PHI_VERSION = 8,
   NYIR_PARAM_TYPES_VERSION = 11,
   NYIR_PARAM_AGG_VERSION = 19,
@@ -174,8 +177,10 @@ static bool nyr_read_str(FILE *in, char **out, uint32_t max_len) {
 }
 
 static bool nyr_decode_opcode(uint16_t encoded, uint16_t version,
-                               uint16_t *decoded) {
+                              uint16_t *decoded) {
   if (!decoded)
+    return false;
+  if (version < NYIR_X86_RSP_VERSION && encoded >= NYIR_READ_X86_RSP)
     return false;
   if (version < NYIR_PHI_VERSION) {
     if (encoded >= NYIR_LEGACY_OP_COUNT)
@@ -210,7 +215,7 @@ bool nyr_dump_binary(FILE *out, const nyr_func_t *f, const char *name) {
       !nyr_write_u32le(out, (uint32_t)f->param_count))
     return false;
   for (size_t i = 0; i < f->param_count; ++i)
-    if (f->param_types[i] > NYIR_PARAM_AGGREGATE ||
+    if (f->param_types[i] > NYIR_PARAM_I8 ||
         !nyr_write_u8(out, (uint8_t)f->param_types[i]))
       return false;
   if (f->param_count && f->param_types) {
@@ -224,7 +229,9 @@ bool nyr_dump_binary(FILE *out, const nyr_func_t *f, const char *name) {
         if (f->param_types[i] != NYIR_PARAM_AGGREGATE)
           continue;
         uint32_t packed = f->param_abi[i];
-        if (NYIR_ARG_AGG_SIZE(packed) == 0 ||
+        if ((NYIR_ARG_AGG_SIZE(packed) == 0 &&
+             (NYIR_ARG_AGG_CLASS(packed, 0) != NYIR_ARG_CLASS_NONE ||
+              NYIR_ARG_AGG_CLASS(packed, 1) != NYIR_ARG_CLASS_NONE)) ||
             NYIR_ARG_AGG_CLASS(packed, 0) > NYIR_ARG_CLASS_AAPCS_INTEGER_A16 ||
             NYIR_ARG_AGG_CLASS(packed, 1) > NYIR_ARG_CLASS_AAPCS_INTEGER_A16)
           return false;
@@ -261,9 +268,11 @@ bool nyr_dump_binary(FILE *out, const nyr_func_t *f, const char *name) {
       if (!nyr_write_u32le(out, f->param_abi[i]))
         return false;
   }
-  if (!nyr_write_u32le(out, f->return_aggregate_size) ||
+  if (f->i386_regparm > 3 || !nyr_write_u32le(out, f->return_aggregate_size) ||
       !nyr_write_u8(out, f->return_aggregate_classes[0]) ||
-      !nyr_write_u8(out, f->return_aggregate_classes[1]))
+      !nyr_write_u8(out, f->return_aggregate_classes[1]) ||
+      !nyr_write_u8(out, f->i386_regparm) ||
+      !nyr_write_i64le(out, (int64_t)f->i386_wide_params))
     return false;
   for (size_t i = 0; i < f->len; ++i) {
     const nyr_inst_t *in = &f->data[i];
@@ -311,6 +320,8 @@ bool nyr_dump_binary(FILE *out, const nyr_func_t *f, const char *name) {
         !nyr_write_u8(out, (uint8_t)in->scalar_class))
       return false;
     if (in->op == NYIR_CALL) {
+      if (!nyr_write_i64le(out, (int64_t)in->i386_wide_args))
+        return false;
       uint8_t class_words = 0;
       for (uint8_t k = 0; k < NYIR_CALL_MAX_ARGS / 16; ++k)
         if (in->arg_scalar_classes[k])
@@ -350,7 +361,7 @@ bool nyr_dump_binary(FILE *out, const nyr_func_t *f, const char *name) {
 }
 
 bool nyr_load_binary(FILE *in, nyr_func_t *out, char *name, size_t name_len,
-                      char *err, size_t err_len) {
+                     char *err, size_t err_len) {
   if (!in || !out)
     return nyr_err(err, err_len, "native NYIR load: missing input");
   nyr_func_t loaded = {0};
@@ -368,17 +379,17 @@ bool nyr_load_binary(FILE *in, nyr_func_t *out, char *name, size_t name_len,
     goto malformed;
   if (version < NYIR_BINARY_MIN_VERSION || version > NYIR_BINARY_VERSION)
     return nyr_err(err, err_len, "native NYIR load: unsupported version %u",
-                    (unsigned)version);
+                   (unsigned)version);
   if (flags != 0)
     return nyr_err(err, err_len, "native NYIR load: unsupported flags 0x%x",
-                    (unsigned)flags);
+                   (unsigned)flags);
   if (!nyr_read_str(in, &loaded_name, 1024) ||
       !nyr_read_i32le(in, &next_value) || !nyr_read_u32le(in, &inst_count))
     goto malformed;
   if (next_value < 0 || next_value > NYIR_BINARY_MAX_VALUES ||
       inst_count > NYIR_BINARY_MAX_INSTRUCTIONS)
     return nyr_err(err, err_len,
-                    "native NYIR load: artifact exceeds decode budget");
+                   "native NYIR load: artifact exceeds decode budget");
   if (version >= NYIR_PARAM_TYPES_VERSION) {
     uint32_t param_count = 0;
     if (!nyr_read_u32le(in, &param_count) || param_count > INT32_MAX ||
@@ -394,7 +405,7 @@ bool nyr_load_binary(FILE *in, nyr_func_t *out, char *name, size_t name_len,
       loaded.param_count = param_count;
       for (uint32_t i = 0; i < param_count; ++i) {
         uint8_t type = 0;
-        if (!nyr_read_exact(in, &type, 1) || type > NYIR_PARAM_AGGREGATE)
+        if (!nyr_read_exact(in, &type, 1) || type > NYIR_PARAM_I8)
           goto malformed;
         loaded.param_types[i] = (nyr_param_type_t)type;
       }
@@ -427,8 +438,8 @@ bool nyr_load_binary(FILE *in, nyr_func_t *out, char *name, size_t name_len,
     if (has_param_abi) {
       if (!loaded.param_count || loaded.param_count > NYIR_BINARY_MAX_PARAMS)
         goto malformed;
-      loaded.param_abi = malloc((size_t)loaded.param_count *
-                                sizeof(*loaded.param_abi));
+      loaded.param_abi =
+          malloc((size_t)loaded.param_count * sizeof(*loaded.param_abi));
       if (!loaded.param_abi) {
         free(loaded_name);
         nyr_ir_func_free(&loaded);
@@ -438,7 +449,10 @@ bool nyr_load_binary(FILE *in, nyr_func_t *out, char *name, size_t name_len,
         if (!nyr_read_u32le(in, &loaded.param_abi[i]))
           goto malformed;
         uint32_t packed = loaded.param_abi[i];
-        if (NYIR_ARG_AGG_CLASS(packed, 0) > NYIR_ARG_CLASS_AAPCS_INTEGER_A16 ||
+        if ((NYIR_ARG_AGG_SIZE(packed) == 0 &&
+             (NYIR_ARG_AGG_CLASS(packed, 0) != NYIR_ARG_CLASS_NONE ||
+              NYIR_ARG_AGG_CLASS(packed, 1) != NYIR_ARG_CLASS_NONE)) ||
+            NYIR_ARG_AGG_CLASS(packed, 0) > NYIR_ARG_CLASS_AAPCS_INTEGER_A16 ||
             NYIR_ARG_AGG_CLASS(packed, 1) > NYIR_ARG_CLASS_AAPCS_INTEGER_A16)
           goto malformed;
       }
@@ -455,9 +469,18 @@ bool nyr_load_binary(FILE *in, nyr_func_t *out, char *name, size_t name_len,
           loaded.return_aggregate_classes[1])))
       goto malformed;
   }
+  if (version >= NYIR_I386_REGPARM_VERSION &&
+      (!nyr_read_exact(in, &loaded.i386_regparm, 1) || loaded.i386_regparm > 3))
+    goto malformed;
+  if (version >= NYIR_I386_REGPARM_VERSION) {
+    int64_t wide_params;
+    if (!nyr_read_i64le(in, &wide_params))
+      goto malformed;
+    loaded.i386_wide_params = (uint64_t)wide_params;
+  }
   if (inst_count > (uint32_t)(SIZE_MAX / sizeof(*loaded.data)))
     return nyr_err(err, err_len,
-                    "native NYIR load: instruction count too large");
+                   "native NYIR load: instruction count too large");
   if (inst_count > 0) {
     loaded.data = (nyr_inst_t *)calloc(inst_count, sizeof(*loaded.data));
     if (!loaded.data) {
@@ -505,8 +528,7 @@ bool nyr_load_binary(FILE *in, nyr_func_t *out, char *name, size_t name_len,
     if (!nyr_decode_opcode(op, version, &op))
       goto malformed;
     if (version >= 2) {
-      if (!nyr_read_u32le(in, &effects32) ||
-          !nyr_read_u32le(in, &debug_line) ||
+      if (!nyr_read_u32le(in, &effects32) || !nyr_read_u32le(in, &debug_line) ||
           !nyr_read_u32le(in, &debug_column) ||
           !nyr_read_exact(in, &has_min, 1) ||
           !nyr_read_exact(in, &has_max, 1) ||
@@ -610,7 +632,8 @@ bool nyr_load_binary(FILE *in, nyr_func_t *out, char *name, size_t name_len,
      * classes. Normalize that side data at the file boundary so an active
      * NYIR instruction carries its ABI class only in scalar_class.
      */
-    if (version < NYIR_BINARY_VERSION && (op == NYIR_CALL || op == NYIR_RET)) {
+    if (version < NYIR_CALL_CLASS_NORMALIZED_VERSION &&
+        (op == NYIR_CALL || op == NYIR_RET)) {
       const uint32_t legacy_class_bits =
           NYIR_LEGACY_INST_F_RET_F64 | NYIR_LEGACY_INST_F_RET_F32;
       uint32_t legacy_class = flags32 & legacy_class_bits;
@@ -626,6 +649,16 @@ bool nyr_load_binary(FILE *in, nyr_func_t *out, char *name, size_t name_len,
       flags32 &= ~legacy_class_bits;
     }
     if (version >= NYIR_CALL_SCALAR_CLASSES_VERSION && op == NYIR_CALL) {
+      if (version >= NYIR_I386_REGPARM_VERSION) {
+        int64_t wide_args;
+        if (!nyr_read_i64le(in, &wide_args)) {
+          free(arg_sizes);
+          free(extra);
+          free(symbol);
+          goto malformed;
+        }
+        inst.i386_wide_args = (uint64_t)wide_args;
+      }
       uint8_t class_words = 0;
       if (!nyr_read_exact(in, &class_words, 1) ||
           class_words > NYIR_CALL_MAX_ARGS / 16) {
@@ -694,8 +727,7 @@ bool nyr_load_binary(FILE *in, nyr_func_t *out, char *name, size_t name_len,
       const uint32_t legacy_float_arg_bits = 0xfc00u;
       for (unsigned arg = 0; arg < 6; ++arg)
         if (flags32 & (1024u << arg))
-          nyr_call_arg_class_set(inst.arg_scalar_classes, arg,
-                                  NYIR_SCALAR_F64);
+          nyr_call_arg_class_set(inst.arg_scalar_classes, arg, NYIR_SCALAR_F64);
       inst.flags &= ~legacy_float_arg_bits;
     }
     uint32_t phi_len = 0;

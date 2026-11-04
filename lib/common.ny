@@ -5,7 +5,6 @@
 module core.common(touch, yn, value_or, env_trim, env_lower, env_truthy, env_falsey, env_enabled, env_toggle, env_int_clamped, env_present, cached_env_truthy, cached_env_enabled, cached_env_toggle, cached_env_present, parse_nonneg_int, last_index_byte, env_hex, parse_toggle_arg)
 use core
 use core.str
-use core.os.prim
 
 fn touch(...args) int {
    "Consumes arguments intentionally and returns their count."
@@ -22,13 +21,15 @@ fn value_or(any value, any fallback) any {
    value ? value : fallback
 }
 
+@returns_owned
 fn env_trim(str name) str {
    "Returns environment variable `name` stripped of surrounding whitespace, or empty string."
-   def v = env(name)
-   if !v { return "" }
-   strip(to_str(v))
+   def v = __env_get(name)
+   if is_nil(v) { return init_str(malloc(1), 0) }
+   v
 }
 
+@returns_owned
 fn env_lower(str name) str {
    "Returns environment variable `name` stripped and lowercased, or empty string."
    lower(env_trim(name))
@@ -70,7 +71,7 @@ fn env_toggle(str name, bool default_value=false) bool {
 fn env_int_clamped(str name, int fallback, int minimum=0, int maximum=1000000) int {
    "Parses integer env `name`, returning `fallback` when unset and clamping to [minimum, maximum]."
    def raw = env_trim(name)
-   if raw.len == 0 { return fallback }
+   if is_nil(raw) || raw == "" { return fallback }
    def parsed = int(atof(raw))
    if parsed < minimum { return minimum }
    if parsed > maximum { return maximum }
@@ -79,7 +80,8 @@ fn env_int_clamped(str name, int fallback, int minimum=0, int maximum=1000000) i
 
 fn env_present(str name) bool {
    "Returns whether environment variable `name` is present and non-empty."
-   env_trim(name).len > 0
+   def raw = env_trim(name)
+   raw.len > 0
 }
 
 fn cached_env_truthy(int flag, str name) int {
@@ -119,7 +121,7 @@ fn parse_nonneg_int(any v) int {
 
 fn env_hex(str name, int def_val) int {
    "Parses a hex color from environment variable `name` (e.g. '0xff123456' or '123456')."
-   def v = env(name)
+   def v = __env_get(name)
    if !v || v.len == 0 { return def_val }
    mut s = strip(v)
    if startswith(s, "0x") { s = str_slice(s, 2, s.len) }

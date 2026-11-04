@@ -6,6 +6,7 @@
 module core.compiler.syntax.syntax(new_registry, clear_registry, clone_registry, merge_registry, register_macro, unregister_macro, register_attribute, unregister_attribute, get_macro_handler, get_attr_handler, is_macro_registered, is_attr_registered, list_macros, list_attributes, form, is_form, form_head, form_tail, expand_macro, expand_macro_fixpoint, expand_form, expand_form_deep, new_rewriter, clear_rewriter, register_rewrite, list_rewrites, rewrite_once, rewrite_fixpoint, apply_attribute)
 use core
 use core (is_str as core_is_str)
+use core.str as core_str
 use core.dict_mod
 use core.reflect as core_ref
 
@@ -45,15 +46,19 @@ fn _clone_list(list xs) list {
 
 fn _list_without(list xs, any want) list {
    def n = xs.len
+   def str target = core_str.cstr_to_str(want)
    mut out = list(n)
    mut i = 0
    while i < n {
       def x = xs.get(i, 0)
-      ; Registry names are immutable C-string values in native lists.  Keep
-      ; the equality in the positive branch: the native `!=` lowering has a
-      ; different boolean ABI for raw string pointers and can invert the
-      ; filter at this dynamic boundary.
-      if x == want { } else { out = out.append(x) }
+      ; Native lists can expose registry names as raw C strings. Canonicalize
+      ; both sides before comparing so removal matches the stored name by text.
+      def str item = core_str.cstr_to_str(x)
+      if core_str._str_eq(item, target) {
+         i += 1
+         continue
+      }
+      out = out.append(item)
       i += 1
    }
    out
@@ -355,13 +360,21 @@ fn is_form(any value, any head=0) bool {
    "Returns true when `value` is a list form with optional matching head."
    if !is_list(value) { return false }
    if value.len == 0 { return false }
-   if head == 0 { return true }
+   if is_int(head) && int(head) == 0 { return true }
    value.get(0, 0) == head
+}
+
+fn _form_string_head(list value) str {
+   value.get(0, "")
 }
 
 fn form_head(any value, any default=0) any {
    "Returns form head or `default`."
    if !is_form(value) { return default }
+   if core_str._str_eq(type(default), "str") {
+      def list form_value = value
+      return _form_string_head(form_value)
+   }
    value.get(0, default)
 }
 

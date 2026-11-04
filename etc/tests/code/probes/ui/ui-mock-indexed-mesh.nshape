@@ -1,0 +1,59 @@
+shape ui_mock_indexed_mesh {
+  family "runtime-ui"
+  generator "embedded"
+  features [ui mock indexed mesh framebuffer]
+  template ny-test-case
+  timeout 180
+  flags_matrix "--native-only --native-tier=baseline -O0; --native-backend=llvm --jit --jit-engine=mcjit -O0; --nyr-run --nyr-run-max-steps=50000000 -O0"
+  expect compile_and_run
+  expect_message "UI-MOCK-INDEXED-MESH-OK"
+  source ny <<'NY'
+use core
+use core.os.ui.render as gfx
+gfx.set_backend_type(gfx.BACKEND_MOCK)
+assert(gfx.init_window(16, 16, "indexed mesh", 0, false, false, 1), "mock window")
+def int stride = int(gfx.VERTEX_STRIDE)
+def ptr vertices = zalloc(4 * stride)
+;; The first three vertices are degenerate; the index buffer selects vertex 3.
+store32_f32(vertices, -0.8, 0) store32_f32(vertices, -0.8, 4)
+store32_f32(vertices, -0.8, stride) store32_f32(vertices, -0.8, stride + 4)
+store32_f32(vertices, 0.8, 2 * stride) store32_f32(vertices, -0.8, 2 * stride + 4)
+store32_f32(vertices, 0.0, 3 * stride) store32_f32(vertices, 0.8, 3 * stride + 4)
+store32(vertices, 0xff0000ff, 20)
+def ptr indices16 = zalloc(6)
+store16(indices16, 0, 0) store16(indices16, 2, 2) store16(indices16, 3, 4)
+def ptr indices32 = zalloc(12)
+store32(indices32, 0, 0) store32(indices32, 2, 4) store32(indices32, 3, 8)
+assert(gfx.begin_frame_clear([0.0, 0.0, 0.0, 1.0]), "begin unindexed frame")
+gfx.set_ortho_2d(-1.0, 1.0, -1.0, 1.0)
+assert(gfx.draw_mesh({"ptr": vertices, "count": 3}), "draw degenerate vertices")
+def fb0 = gfx.read_framebuffer()
+def ptr fb0_data = __ffi_untag_ptr(fb0.get("data", 0))
+assert(load8(fb0_data, (8 * 16 + 8) * 4) == 0, "unindexed first triangle is empty")
+free(fb0_data)
+assert(gfx.end_frame(), "finish unindexed frame")
+assert(gfx.begin_frame_clear([0.0, 0.0, 0.0, 1.0]), "begin indexed frame")
+gfx.set_ortho_2d(-1.0, 1.0, -1.0, 1.0)
+assert(gfx.draw_mesh({"ptr": vertices, "count": 4, "idx_ptr": indices16,
+   "index_count": 3, "index_type_u32": false}), "draw 16-bit indexed triangle")
+def fb16 = gfx.read_framebuffer()
+def ptr fb16_data = __ffi_untag_ptr(fb16.get("data", 0))
+assert(load8(fb16_data, (8 * 16 + 8) * 4) == 255, "16-bit indices select the visible triangle")
+free(fb16_data)
+assert(gfx.end_frame(), "finish indexed frame")
+assert(gfx.begin_frame_clear([0.0, 0.0, 0.0, 1.0]), "begin 32-bit frame")
+gfx.set_ortho_2d(-1.0, 1.0, -1.0, 1.0)
+assert(gfx.draw_mesh({"ptr": vertices, "count": 4, "idx_ptr": indices32,
+   "index_count": 3, "index_type_u32": true}), "draw 32-bit indexed triangle")
+def fb32 = gfx.read_framebuffer()
+def ptr fb32_data = __ffi_untag_ptr(fb32.get("data", 0))
+assert(load8(fb32_data, (8 * 16 + 8) * 4) == 255, "32-bit indices select the visible triangle")
+free(fb32_data)
+assert(gfx.end_frame(), "finish 32-bit frame")
+def gpu_only = {"parts": [], "gpu_parts_count": 1, "gpu_parts_slab": 0}
+assert(!gfx.draw_mesh_group(gpu_only), "GPU-only scene cannot index absent CPU parts")
+free(indices16) free(indices32) free(vertices)
+gfx.close_window()
+print("UI-MOCK-INDEXED-MESH-OK")
+NY
+}

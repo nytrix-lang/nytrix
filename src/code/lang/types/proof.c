@@ -127,6 +127,7 @@ static int ny_smt_env_add_binding(codegen_t *cg, scope *scopes, size_t depth,
     return -1;
   if (env->vars[i].has_range)
     return i;
+#if !defined(NYTRIX_RUNTIME_ONLY)
   size_t name_len = strlen(name);
   binding *b = lookup_binding_hash(cg, scopes, depth, name, name_len,
                                    ny_hash_name(name, name_len));
@@ -135,6 +136,11 @@ static int ny_smt_env_add_binding(codegen_t *cg, scope *scopes, size_t depth,
     env->vars[i].hi = b->int_max_raw;
     env->vars[i].has_range = true;
   }
+#else
+  (void)cg;
+  (void)scopes;
+  (void)depth;
+#endif
   return i;
 }
 
@@ -1340,19 +1346,10 @@ static bool ny_proof_try_z3(codegen_t *cg, scope *scopes, size_t depth,
 
 #else /* !NYTRIX_HAS_Z3 */
 
-static bool ny_proof_try_z3(codegen_t *cg, scope *scopes, size_t depth,
-                            expr_t *proposition, char *cex, size_t cex_cap,
-                            bool *counterexample_found) {
-  (void)cg;
-  (void)scopes;
-  (void)depth;
-  (void)proposition;
-  (void)cex;
-  (void)cex_cap;
-  if (counterexample_found)
-    *counterexample_found = false;
-  return false;
-}
+/*
+ * ny_proof_try_z3 is not used when Z3 is unavailable; calls are in #ifdef
+ * branch.
+ */
 
 #endif
 
@@ -1406,6 +1403,7 @@ static uint64_t ny_proof_try_solverr_context_hash(scope *scopes, size_t depth,
     size_t n = len < sizeof(name) - 1 ? len : sizeof(name) - 1;
     memcpy(name, start, n);
     name[n] = '\0';
+#if !defined(NYTRIX_RUNTIME_ONLY)
     binding *b = n > 0 && scopes
                      ? lookup_binding_hash_no_mark(scopes, depth, name, n,
                                                    ny_hash_name(name, n))
@@ -1417,6 +1415,9 @@ static uint64_t ny_proof_try_solverr_context_hash(scope *scopes, size_t depth,
     } else {
       h = ny_proof_hash_mix_u64(h, 0);
     }
+#else
+    h = ny_proof_hash_mix_u64(h, 0);
+#endif
   }
   return h;
 }
@@ -2228,6 +2229,66 @@ static bool ny_polc_eval_expr(expr_t *e, ny_smt_env_t *env, const int64_t *vals,
   return false;
 }
 
+#define NY_PROOF_MAX_ENUM_ASSIGNMENTS 65536
+
+static bool ny_polc_collect_names(expr_t *e, ny_smt_env_t *env, int depth) {
+  if (!e || depth > NY_SMT_MAX_DEPTH)
+    return false;
+  if (e->kind == NY_E_LITERAL)
+    return true;
+  if (e->kind == NY_E_IDENT && e->as.ident.name)
+    return ny_smt_env_add(env, e->as.ident.name) >= 0;
+  if (e->kind == NY_E_UNARY)
+    return ny_polc_collect_names(e->as.unary.right, env, depth + 1);
+  if (e->kind == NY_E_LOGICAL)
+    return ny_polc_collect_names(e->as.logical.left, env, depth + 1) &&
+           ny_polc_collect_names(e->as.logical.right, env, depth + 1);
+  if (e->kind == NY_E_BINARY)
+    return ny_polc_collect_names(e->as.binary.left, env, depth + 1) &&
+           ny_polc_collect_names(e->as.binary.right, env, depth + 1);
+  return false;
+}
+
+static bool ny_polc_enum_prove(expr_t *e, ny_smt_env_t *env, int64_t *vals,
+                               int var, bool *evaluable) {
+  if (var == env->nvars) {
+    int64_t result = 0;
+    if (!ny_polc_eval_expr(e, env, vals, &result, 0)) {
+      *evaluable = false;
+      return false;
+    }
+    return result != 0;
+  }
+  const ny_smt_var_t *current = &env->vars[var];
+  for (int64_t value = current->lo;; ++value) {
+    vals[var] = value;
+    if (!ny_polc_enum_prove(e, env, vals, var + 1, evaluable))
+      return false;
+    if (value == current->hi)
+      break;
+  }
+  return true;
+}
+
+static bool ny_polc_bounded_enum_proves(expr_t *e, ny_smt_env_t *env) {
+  int64_t vals[NY_SMT_MAX_VARS] = {0};
+  if (!ny_polc_collect_names(e, env, 0))
+    return false;
+  uint64_t assignments = 1;
+  for (int i = 0; i < env->nvars; ++i) {
+    const ny_smt_var_t *var = &env->vars[i];
+    if (!var->has_range)
+      return false;
+    __int128 width = (__int128)var->hi - (__int128)var->lo + 1;
+    if (width <= 0 || width > NY_PROOF_MAX_ENUM_ASSIGNMENTS ||
+        assignments > NY_PROOF_MAX_ENUM_ASSIGNMENTS / (uint64_t)width)
+      return false;
+    assignments *= (uint64_t)width;
+  }
+  bool evaluable = true;
+  return ny_polc_enum_prove(e, env, vals, 0, &evaluable) && evaluable;
+}
+
 int ny_proof_solver_check_canonical(const char *prop, const char *ranges,
                                     const char *mode, int max_vars,
                                     int max_cons, int max_depth, char *cex,
@@ -2249,35 +2310,36 @@ int ny_proof_solver_check_canonical(const char *prop, const char *ranges,
   ny_polc_ctx_t cx;
   if (!ny_polc_ctx_init(&cx))
     return NY_PROOF_VERDICT_UNKNOWN;
-  /*
-   * The kernels read binding ranges through a codegen context; the
-   * canonical front end carries all context in the obligation, so a zeroed
-   * codegen (no scopes, no registry) is the correct environment here -
-   * the same arrangement the in-file differential selftest uses.
-   */
-  codegen_t null_cg;
-  memset(&null_cg, 0, sizeof(null_cg));
   int root = ny_polc_parse(&cx, prop, strlen(prop), 0);
   int verdict = NY_PROOF_VERDICT_UNKNOWN;
   do {
     if (root < 0)
       break;
+    if (ny_polc_bounded_enum_proves(&cx.nodes[root], &env)) {
+      verdict = NY_PROOF_VERDICT_PROVED;
+      break;
+    }
     const char *m = mode && *mode ? mode : "auto";
     bool want_pres = strcmp(m, "presburger") == 0 || strcmp(m, "fm") == 0 ||
                      strcmp(m, "fourier-motzkin") == 0 ||
                      strcmp(m, "auto") == 0;
+#ifdef NYTRIX_HAS_Z3
     bool want_z3 = strcmp(m, "z3") == 0 || strcmp(m, "auto") == 0;
+#else
+    (void)strcmp(m, "z3");
+    (void)strcmp(m, "auto");
+#endif
     bool pres_proved = false;
     bool z3_proved = false;
     bool z3_counterexample = false;
     char z3_cex[128] = {0};
     if (want_pres)
       pres_proved =
-          ny_proof_presburger_env(&null_cg, NULL, 0, &env, &cx.nodes[root]);
+          ny_proof_presburger_env(NULL, NULL, 0, &env, &cx.nodes[root]);
 #ifdef NYTRIX_HAS_Z3
     if (want_z3 && !pres_proved)
-      z3_proved = ny_proof_z3_env(&null_cg, NULL, 0, &env, &cx.nodes[root],
-                                  z3_cex, sizeof(z3_cex), &z3_counterexample);
+      z3_proved = ny_proof_z3_env(NULL, NULL, 0, &env, &cx.nodes[root], z3_cex,
+                                  sizeof(z3_cex), &z3_counterexample);
 #endif
     if (pres_proved || z3_proved) {
       verdict = NY_PROOF_VERDICT_PROVED;

@@ -583,10 +583,10 @@ bool nyr_egraph_rewrite(nyr_func_t *f) {
   size_t out_len = 0;
 #define EG_PUSH(inst_)                                                         \
   {                                                                            \
-    nyr_inst_t _p = (inst_);                                                  \
+    nyr_inst_t _p = (inst_);                                                   \
     if (out_len == out_cap) {                                                  \
       size_t _nc = out_cap * 2;                                                \
-      nyr_inst_t *_n = ny_realloc_array(out, _nc, sizeof(*_n));               \
+      nyr_inst_t *_n = ny_realloc_array(out, _nc, sizeof(*_n));                \
       if (!_n)                                                                 \
         goto eg_oom;                                                           \
       out = _n;                                                                \

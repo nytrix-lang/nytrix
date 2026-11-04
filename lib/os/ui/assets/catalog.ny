@@ -330,8 +330,8 @@ fn _gltf_catalog_scan_dir(str dir, list names, dict paths, int depth) list {
       def entry = to_str(entries[i])
       def full = ospath.join(dir, entry)
       if osfs.is_file(full) {
-         def ext = str.lower(ospath.extname(entry))
-         if ext == ".gltf" || ext == ".glb" {
+         def str ext = str.lower(ospath.extname(entry))
+         if str._str_eq(ext, ".gltf") || str._str_eq(ext, ".glb") {
             def added = _gltf_catalog_add(names, paths, _gltf_catalog_name_for_file(full), full)
             names = added[0]
             paths = added[1]

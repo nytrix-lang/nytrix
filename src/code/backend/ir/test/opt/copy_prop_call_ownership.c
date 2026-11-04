@@ -21,14 +21,7 @@ int main(void) {
                         .semantic_ownership = NY_SEM_OWN_OWNED,
                         .effects = NYIR_EFFECT_CALL | NYIR_EFFECT_ALLOCATION,
                         .symbol = "rt_list_new_raw"});
-  int alias = nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_COPY,
-                                          .dst = -1,
-                                          .a = owned,
-                                          .b = -1,
-                                          .c = -1,
-                                          .d = -1,
-                                          .e = -1,
-                                          .f = -1});
+  int alias = nyr_opt_emit_abc(&f, NYIR_COPY, owned, -1, -1);
   size_t call_at = f.len;
   nyr_ir_emit(
       &f, (nyr_inst_t){.op = NYIR_CALL,

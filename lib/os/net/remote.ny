@@ -43,6 +43,19 @@ fn _ctx(dict io) str {
    out
 }
 
+fn _tube_flag(dict io, str key) bool {
+   def value = io.get(key, false)
+   if !is_bool(value) { return false }
+   bool(value)
+}
+
+fn _is_process_tube(dict io) bool {
+   def value = io.get("kind", "tcp")
+   if !is_str(value) { return false }
+   def str kind = str(value)
+   kind == "process"
+}
+
 fn _log_enabled(any io, str want) bool {
    if !is_dict(io) { return false }
    netctx.level_value(io.get("level", "quiet")) >= netctx.level_value(want)
@@ -181,7 +194,9 @@ fn replay(any rows, any level="", int chunk_size=0) dict { return tube_replay(ro
 fn process(str path, list args=[], any level="", int timeout_ms=-1, int chunk_size=0) any {
    "Starts a local process and returns a buffered tube over its stdin/stdout."
    mut argv = args
-   if args.len == 0 || args[0] != path {
+   def first_arg = args.get(0, "")
+   def has_argv0 = is_str(first_arg) && str(first_arg) == path
+   if args.len == 0 || !has_argv0 {
       argv = [path]
       mut i = 0
       while i < args.len {
@@ -284,8 +299,8 @@ fn transcript_text(any io) str {
 fn tube_kind(any io) str {
    "Returns `tcp`, `process`, `fixture`, or `invalid`."
    if !is_dict(io) { return "invalid" }
-   if io.get("offline", false) == true { return "fixture" }
-   io.get("kind", "tcp")
+   if _tube_flag(io, "offline") { return "fixture" }
+   str(io.get("kind", "tcp"))
 }
 
 fn remote(str host, int port, any level="", int timeout_ms=-1, int chunk_size=0) any {
@@ -313,7 +328,7 @@ fn remote_retry(str host, int port, int retries=20, int delay_ms=50, any level="
    while i < retries {
       if _level_enabled(lvl, "trace") { _log_connect(host, port, lvl, "retry " + to_str(i + 1) + "/" + to_str(retries)) }
       def r = remote(host, port, lvl, timeout_ms, chunk_size)
-      if r != 0 { return r }
+      if is_dict(r) { return r }
       if delay_ms > 0 { msleep(delay_ms) }
       i += 1
    }
@@ -343,9 +358,10 @@ fn pid(any io) int {
 fn connected(any io) bool {
    "Returns true while the tube is usable."
    if !is_dict(io) { return false }
-   if io.get("offline", false) == true { return io.get("closed", false) != true }
-   if io.get("kind", "tcp") == "process" { return is_dict(io.get("proc", 0)) && io.get("closed", false) != true }
-   return io.get("fd", -1) >= 0 && io.get("closed", false) != true
+   def closed = _tube_flag(io, "closed")
+   if _tube_flag(io, "offline") { return !closed }
+   if _is_process_tube(io) { return is_dict(io.get("proc", 0)) && !closed }
+   return int(io.get("fd", -1)) >= 0 && !closed
 }
 
 fn set_level(any io, any level="debug") any {
@@ -427,7 +443,7 @@ fn _read_more(dict io, int want) str {
    if !is_connected { return "" }
    if want < 1 { want = io.get("chunk", 4096) }
    if want > 1048576 { want = 1048576 }
-   if io.get("offline", false) == true {
+   if _tube_flag(io, "offline") {
       def script = io.get("script", "")
       if !is_str(script) || script.len == 0 { return "" }
       def take = (script.len < want) ? script.len : want
@@ -437,7 +453,7 @@ fn _read_more(dict io, int want) str {
       _trace(io, "[<]", "recv", got)
       return got
    }
-   if io.get("kind", "tcp") == "process" {
+   if _is_process_tube(io) {
       any p = dict_get(io, "proc", 0)
       if !is_dict(p) { return "" }
       def gotp = pio.recv(p, int(want))
@@ -452,7 +468,7 @@ fn _read_more(dict io, int want) str {
    while tries < 200 {
       def int fd = to_int(_raw_fd(io))
       def str got = sock.read_socket(fd, want)
-      if got != "" {
+      if got.len > 0 {
          _record(io, "recv", got)
          _trace(io, "[<]", "recv", got)
          return got
@@ -468,11 +484,11 @@ fn _send_all(any io, any data) int {
    if !is_dict(io) || !is_str(data) || !connected(io) { return -1 }
    def _trace_ignore = (data.len > 0) ? _trace(io, "[>]", "send", data) : 0
    _record(io, "send", data)
-   if io.get("offline", false) == true {
+   if _tube_flag(io, "offline") {
       set(io, "sent", get(io, "sent", "") + data)
       return data.len
    }
-   if io.get("kind", "tcp") == "process" {
+   if _is_process_tube(io) {
       match pio.send(io.get("proc", 0), data) {
          ok(_) -> { return data.len }
          err(_) -> { return -1 }
@@ -696,7 +712,7 @@ fn sendlineafter(any io, any needle, any data, int max_bytes=65536) str { return
 fn shutdown_send(any io) int {
    "Closes the sending side for process tubes. Socket tubes currently return 0."
    if !is_dict(io) { return -1 }
-   if io.get("kind", "tcp") == "process" {
+   if _is_process_tube(io) {
       def res = pio.shutdown_send(io.get("proc", 0))
       if is_ok(res) { return unwrap(res) }
       return -1
@@ -711,8 +727,8 @@ fn close(any io) int {
    _log(io, "info", "close")
    set(io, "fd", -1)
    set(io, "closed", true)
-   if io.get("offline", false) == true { return 0 }
-   if io.get("kind", "tcp") == "process" {
+   if _tube_flag(io, "offline") { return 0 }
+   if _is_process_tube(io) {
       ; A child such as `cat` waits for EOF on stdin before exiting. Close
       ; the sending side before reaping so `close` cannot block forever after
       ; a successful receive.

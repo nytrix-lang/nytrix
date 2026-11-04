@@ -16,7 +16,7 @@ program='fn rotate_right32_8(int value) int {
 (5 >> 1) + (7 << 1) +
 (rotate_right32_8(0x0123456789abcd2e) == 0x2e89abcd ? 0 : 1)'
 
-"$compiler" --native-backend=bpf --native-only -O3 --nyir-verify \
+"$compiler" --native-backend=bpf --native-only -O3 --nyr-verify \
   --emit-asm="$work/program.s" -no-std -emit-only -e "$program"
 clang --target=bpf -c "$work/program.s" -o "$work/program.o"
 llvm-objcopy -O binary --only-section=socket \

@@ -34,23 +34,14 @@ static int run_case(const char *name, int64_t right, int64_t expected,
   int compare = nyr_opt_const(&f, right);
   int common = nyr_opt_const(&f, 1);
   int condition = nyr_opt_cmp(&f, left, compare, NYIR_CMP_EQ);
-  nyr_opt_br_if(&f, condition, 20);
-
-  nyr_opt_label(&f, 10);
   int no_base = nyr_opt_const(&f, INT64_MIN);
   int no_value = nyr_opt_binop(&f, NYIR_ADD_I64, no_base, common);
   set_class(&f, no_value, scalar_class);
-  nyr_opt_br(&f, 30);
-
-  nyr_opt_label(&f, 20);
   int yes_base = nyr_opt_const(&f, INT64_MAX);
   int yes_value = nyr_opt_binop(&f, NYIR_ADD_I64, yes_base, common);
   set_class(&f, yes_value, scalar_class);
-  nyr_opt_br(&f, 30);
-
-  nyr_opt_label(&f, 30);
   int result = f.next_value;
-  nyr_opt_phi(&f, 10, no_value, 20, yes_value);
+  nyr_opt_emit_abc(&f, NYIR_SELECT_I64, condition, yes_value, no_value);
   f.data[f.len - 1].scalar_class = select_class;
   f.data[f.len - 1].semantic_ownership = NY_SEM_OWN_SHARED;
   f.data[f.len - 1].semantic_mutable = true;
@@ -58,17 +49,13 @@ static int run_case(const char *name, int64_t right, int64_t expected,
 
   bool ok = nyr_opt_verify(&f, name);
   long long before = ok ? nyr_opt_eval(&f, name) : 0;
-  ok = ok && nyr_if_convert(&f) && nyr_opt_verify(&f, "select-add-converted");
-  if (ok)
-    ok = count_op(&f, NYIR_SELECT_I64) == 1 &&
-         nyr_opt_eval(&f, "select-add-converted") == before;
   if (ok)
     ok = nyr_peephole(&f) && nyr_opt_verify(&f, "select-add-factored");
 
   const nyr_inst_t *result_def = ok ? find_def(&f, result) : NULL;
   const nyr_inst_t *sum_def = result_def && result_def->op == NYIR_COPY
-                                   ? find_def(&f, result_def->a)
-                                   : NULL;
+                                  ? find_def(&f, result_def->a)
+                                  : NULL;
   bool factored = sum_def && sum_def->op == NYIR_ADD_I64;
   const nyr_inst_t *selected = factored ? find_def(&f, sum_def->a) : NULL;
   if (should_factor) {

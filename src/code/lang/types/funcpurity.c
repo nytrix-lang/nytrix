@@ -63,7 +63,7 @@ static const ny_builtin_effect_contract_t ny_builtin_effect_contracts[] = {
   {name, effects, NY_BUILTIN_EFFECT_QUERY_RUN},
 #define NY_BUILTIN_OPTIONAL_HOF(name, effects)                                 \
   {name, effects, NY_BUILTIN_EFFECT_OPTIONAL_HOF},
-#include "code/lang/runtime/contracts.c"
+#include "code/lang/builtin.h"
 #undef NY_BUILTIN_OPTIONAL_HOF
 #undef NY_BUILTIN_QUERY_RUN
 #undef NY_BUILTIN_QUERY_PIPE

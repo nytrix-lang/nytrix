@@ -1,0 +1,25 @@
+shape inferred_mixed_return {
+  family "runtime/compiler"
+  generator "regression"
+  features [ny inference abi equality dynamic]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --nyr-run"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+fn mixed(flag) {
+   if flag { return 7 }
+   1.5
+}
+def integer = mixed(true)
+def floating = mixed(false)
+assert(integer == 7 && !is_float(integer), "integer return retains its value and type")
+assert(floating == 1.5 && is_float(floating), "floating return retains its value and type")
+fn outer(flag) {
+   def inner = fn() { 2.5 }
+   if flag { return 3 }
+   5
+}
+assert(outer(true) == 3 && outer(false) == 5, "nested lambda does not change outer ABI")
+NY
+}

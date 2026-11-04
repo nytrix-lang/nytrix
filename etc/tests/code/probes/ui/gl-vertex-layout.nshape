@@ -1,0 +1,24 @@
+shape gl-vertex-layout {
+  family "probe-suite"
+  generator "regression"
+  features ["ny", "render", "opengl", "vertex"]
+  template ny-test-case
+  expect compile_and_run
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect_stdout "GL-VERTEX-LAYOUT-OK"
+  source ny <<'SOURCE'
+use core
+use core.os.ui.render.gl.state as state
+use core.os.ui.render.gl.draw as draw
+use core.os.ui.render.shared as shared
+assert(state._base_uv_offset() == shared.OFF_U, "GL uses packed UV coordinates, not positions")
+def ptr vertices = zalloc(shared.VERTEX_STRIDE * 6)
+assert(draw._store_rect(vertices, 20.0, 30.0, 150.0, 80.0, 0xFF0000FF, 0.1, 0.2, 0.3, 0.4), "rectangle stored")
+assert(load32_f32(vertices, 0) == 20.0 && load32_f32(vertices, 4) == 30.0, "first position")
+assert(load32_f32(vertices, 128) == 170.0 && load32_f32(vertices, 132) == 110.0, "opposite position")
+assert(load32(vertices, shared.OFF_C) == 0xFF0000FF, "packed vertex color")
+assert(load32_f32(vertices, shared.OFF_U) > 0.09 && load32_f32(vertices, shared.OFF_U) < 0.11, "UV has its own field")
+free(vertices)
+print("GL-VERTEX-LAYOUT-OK")
+SOURCE
+}

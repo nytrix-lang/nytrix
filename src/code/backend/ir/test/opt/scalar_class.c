@@ -869,14 +869,7 @@ static bool verify_copied_call_class(void) {
                                           .e = -1,
                                           .f = -1,
                                           .scalar_class = NYIR_SCALAR_STRING});
-  int copy = nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_COPY,
-                                         .dst = -1,
-                                         .a = value,
-                                         .b = -1,
-                                         .c = -1,
-                                         .d = -1,
-                                         .e = -1,
-                                         .f = -1});
+  int copy = nyr_opt_emit_abc(&f, NYIR_COPY, value, -1, -1);
   nyr_inst_t call = {.op = NYIR_CALL,
                       .dst = -1,
                       .a = copy,
@@ -1087,14 +1080,7 @@ static bool verify_store_class(nyr_scalar_class_t producer,
                                const char *expected_error) {
   nyr_func_t f;
   nyr_opt_begin(&f);
-  int addr = nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_CONST_I64,
-                                         .dst = -1,
-                                         .a = -1,
-                                         .b = -1,
-                                         .c = -1,
-                                         .d = -1,
-                                         .e = -1,
-                                         .f = -1});
+  int addr = nyr_opt_emit_abc(&f, NYIR_CONST_I64, -1, -1, -1);
   nyr_op_t op = producer == NYIR_SCALAR_F32 ? NYIR_CONST_F32 : NYIR_CONST_F64;
   int value = nyr_ir_emit(&f, (nyr_inst_t){.op = op,
                                           .dst = -1,
@@ -1536,15 +1522,7 @@ static bool unknown_call_invalidates_local_ownership(void) {
                               .f = -1,
                               .imm = 0,
                               .semantic_ownership = NY_SEM_OWN_OWNED});
-  int address = nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_ADDR_LOCAL,
-                                            .dst = -1,
-                                            .a = -1,
-                                            .b = -1,
-                                            .c = -1,
-                                            .d = -1,
-                                            .e = -1,
-                                            .f = -1,
-                                            .imm = 0});
+  int address = nyr_opt_emit_imm(&f, NYIR_ADDR_LOCAL, 0);
   nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_CALL,
                               .dst = -1,
                               .a = address,

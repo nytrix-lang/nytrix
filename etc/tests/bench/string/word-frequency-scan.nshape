@@ -22,21 +22,25 @@ while i < length {
       while i < length && load8(corpus, i) != 32 { i += 1 }
       def int first = load8(corpus, start)
       ;; The generated vocabulary has a unique initial byte for each token.
-      if first == 97 { amber += 1 }
-      if first == 98 { birch += 1 }
-      if first == 99 { cobalt += 1 }
-      if first == 100 { delta += 1 }
-      if first == 101 { ember += 1 }
-      if first == 102 { fern += 1 }
-      if first == 103 { garnet += 1 }
-      if first == 104 { hazel += 1 }
-      if first == 105 { indigo += 1 }
+      match first {
+         97 -> { amber += 1 }
+         98 -> { birch += 1 }
+         99 -> { cobalt += 1 }
+         100 -> { delta += 1 }
+         101 -> { ember += 1 }
+         102 -> { fern += 1 }
+         103 -> { garnet += 1 }
+         104 -> { hazel += 1 }
+         105 -> { indigo += 1 }
+         _ -> {}
+      }
    }
 }
 def int checksum = amber + 2 * birch + 3 * cobalt + 4 * delta + 5 * ember +
    6 * fern + 7 * garnet + 8 * hazel + 9 * indigo
 def int t1 = ticks()
-assert(checksum == 1125000, "word-frequency scan checksum")
+assert(checksum == 1125000,
+       "word-frequency scan checksum: " + to_str(checksum))
 print("checksum=", checksum)
 print("elapsed_ns=", t1 - t0)
 NY

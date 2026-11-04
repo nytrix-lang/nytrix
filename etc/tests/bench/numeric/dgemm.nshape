@@ -5,7 +5,6 @@ shape dgemm {
   template ny-test-case
   expect compile_and_run
   source ny <<'NY'
-use core
 use core.os.time
 use core.tbuf
 ;; Dense double matrix multiply (64x64): integer-valued inputs keep results exact.
@@ -17,21 +16,46 @@ mut i = 0
 while i < M * M {
    f64buf_store(A, i, float((i / M) + 1))
    f64buf_store(B, i, float((i % M) + 1))
+   f64buf_store(C, i, 0.0)
    i += 1
 }
 def int t0 = ticks()
 mut r = 0
 while r < M {
-   mut cc = 0
-   while cc < M {
-      mut s = 0.0
-      mut k = 0
-      while k < M {
-         s += f64buf_load(A, r * M + k) * f64buf_load(B, k * M + cc)
-         k += 1
+   mut k = 0
+   ;; Unroll four k rows while preserving each output's ascending-k sum order.
+   ;; Keep the scalar tail so a future non-multiple M remains correct.
+   while k < M - 3 {
+      def a0 = f64buf_load(A, r * M + k)
+      def a1 = f64buf_load(A, r * M + k + 1)
+      def a2 = f64buf_load(A, r * M + k + 2)
+      def a3 = f64buf_load(A, r * M + k + 3)
+      mut cc = 0
+      while cc < M {
+         def cidx = r * M + cc
+         def bidx = k * M + cc
+         f64buf_store(C, cidx,
+                      f64buf_load(C, cidx) + a0 * f64buf_load(B, bidx))
+         f64buf_store(C, cidx,
+                      f64buf_load(C, cidx) + a1 * f64buf_load(B, bidx + M))
+         f64buf_store(C, cidx,
+                      f64buf_load(C, cidx) + a2 * f64buf_load(B, bidx + 2 * M))
+         f64buf_store(C, cidx,
+                      f64buf_load(C, cidx) + a3 * f64buf_load(B, bidx + 3 * M))
+         cc += 1
       }
-      f64buf_store(C, r * M + cc, s)
-      cc += 1
+      k += 4
+   }
+   while k < M {
+      def a = f64buf_load(A, r * M + k)
+      mut cc = 0
+      while cc < M {
+         def cidx = r * M + cc
+         f64buf_store(C, cidx,
+                      f64buf_load(C, cidx) + a * f64buf_load(B, k * M + cc))
+         cc += 1
+      }
+      k += 1
    }
    r += 1
 }
@@ -74,12 +98,28 @@ int main(void) {
         C[i] = 0.0;
     }
     int64_t start = now_ns();
-    for (int r = 0; r < M; r++)
-        for (int c = 0; c < M; c++) {
-            double s = 0.0;
-            for (int k = 0; k < M; k++) s += A[r * M + k] * B[k * M + c];
-            C[r * M + c] = s;
+    for (int r = 0; r < M; r++) {
+        int k = 0;
+        for (; k < M - 3; k += 4) {
+            double a0 = A[r * M + k];
+            double a1 = A[r * M + k + 1];
+            double a2 = A[r * M + k + 2];
+            double a3 = A[r * M + k + 3];
+            for (int c = 0; c < M; c++) {
+                int cidx = r * M + c;
+                int bidx = k * M + c;
+                C[cidx] += a0 * B[bidx];
+                C[cidx] += a1 * B[bidx + M];
+                C[cidx] += a2 * B[bidx + 2 * M];
+                C[cidx] += a3 * B[bidx + 3 * M];
+            }
         }
+        for (; k < M; k++) {
+            double a = A[r * M + k];
+            for (int c = 0; c < M; c++)
+                C[r * M + c] += a * B[k * M + c];
+        }
+    }
     int64_t end = now_ns();
     int conv = 1;
     for (int r = 0; r < M; r++)

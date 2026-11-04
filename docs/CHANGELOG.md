@@ -1,23 +1,2306 @@
 <!-- nytrix-doc: {"audience":"user","featured":true,"group":"project","order":10,"summary":"Release highlights with expandable development records for each version."} -->
 # Changelog
 
-Release highlights are followed by expandable development records. Dates,
-measurements, fixture paths, and local artifacts in those records describe the
-reported work, not a fresh test of the current checkout.
+Each release has short user-facing highlights followed by one expandable
+details section. Dates, measurements, fixture paths, and local
+artifacts there describe the recorded work, not a fresh test of this checkout.
 
 ## [0.10] - 2026-10-13
 
+### Highlights
+
+- NYIR verification now rejects functions whose scalar exits disagree on
+  the integer, f32, or f64 return calling convention. Tagged values and
+  handles retain their shared integer convention; aggregate return metadata
+  remains authoritative. The new `return_abi` regression checks 100 class
+  pairs and executes both paths of compatible pairs. It and `scalar_class`
+  pass, together with 20 cold ABI, fallthrough, argument-binding, and
+  global-shadowing variants. The completed verifier item was removed from
+  the TODO. The obsolete shadow-lookup tracing wrapper and its forced
+  no-inline/return-address instrumentation were also removed.
+- Dynamic accessor lengths now dispatch by the actual tagged value instead
+  of a contextual string guess. Cold runs pass `extensible`, `prolog`, both
+  parser fixtures, `proof-logic`, and `tactic-simp-ring`; Prolog completes in
+  4.8 seconds instead of timing out inside unification. The boolean ternary
+  fixture also passes all five routes after correcting its sibling import.
+  These resolved failures were removed from the TODO.
+- Five-argument binding coverage now checks individual slots, mixed dynamic
+  and string parameters, recursive calls, tail calls, runtime inputs, and
+  parameters shadowing module globals. All six cold NYR/LLVM AOT and JIT
+  variants pass. The obsolete shared-misbinding investigation was removed
+  from the TODO; the separately tracked parser failures remain open.
+- Guard-duplication execution coverage now includes a potentially trapping
+  division guard, which remains un-cloned. Zero/one/many-trip cases, live-out
+  PHIs, memory guards, and the cold native PHI/edge-copy fixtures pass.
+- The read-only x64 loop regression executes signed DIV/MOD with boundary and
+  random payloads under both SysV and Win64, including powers of two, general
+  and negative divisors, and zero/negative trip counts. The former
+  `x64_readonly_loop_gpr`, `licm_address_component`, and `portable_wasm`
+  failures do not reproduce in the current focused runs.
+- Benchmark documentation counts checksum/execution failures separately from
+  low-time/noisy measurements and fixture budget misses. Failure rows include
+  NYC checksums, route return codes, and NYC diagnostics; the synthetic report
+  regression checks classification and Markdown output.
+- Edge-ADD sinking bounds forward searches and instruction moves to 64
+  instructions. Boundary cases and an 8,192-instruction gap pass the scheduler
+  regression, avoiding quadratic scans in generated blocks.
+- NYC now keeps array dimensions through `typeof`-based pointer-to-array casts
+  when the array elements are aggregate pointers; Linux 7.3
+  `arch/x86/kernel/apic/vector.o` compiles with NYC and GNU `as`. File-scope
+  array sizing also accepts Linux's `__roundup_pow_of_two` constant builtin,
+  verified by the C frontend regression and `mm/vmalloc.o`.
+- C preprocessing now keeps multiline block comments inside continued
+  directives without truncating macro replacement lists. The runtime frontend
+  regression passes, and Linux 7.3 `fs/nfs/callback_xdr.o` compiles with NYC
+  and GNU `as`.
+- Block-scope C23 `auto` inference and GNU statement expressions ending in
+  control flow after multiple declarations now compile. Runtime frontend
+  regressions cover type preservation and aggregate locals; targeted Linux 7.3
+  `crypto/aes.o` compilation succeeds with NYC and GNU `as`.
+- GNU `typeof` now resolves `__builtin_constant_p` and `__builtin_ffs` result
+  types, indirect `void` calls remain valueless in conditional expressions,
+  and preprocessor branch state survives a macro argument closing inside a
+  conditional. Runtime frontend regressions cover each case; NYC compiles
+  Linux 7.3 `block/blk-merge.o`, `io_uring/tw.o`, and
+  `lib/decompress_inflate.o`.
+- Local aggregate arrays support arrow-member assignment through their first
+  element, and function-pointer arrays accept casted null initializers.
+  Runtime frontend regressions pass; Linux `io_uring/cmd_net.o` and
+  `block/partitions/core.o` compile with NYC and GNU `as`. The complete Linux
+  kernel acceptance build remains unresolved.
+- Aggregate fields now retain up to 32 array dimensions, and array-shape
+  metadata survives indexing through nested aggregate fields. A rank-four
+  field-access regression passes in the C frontend suite; Linux kernel
+  acceptance remains in progress.
+- The C frontend and x86-64 emitter now support `rep stosw`, `rep stosl`, and
+  `rep stosq` alongside `rep stosb`. Runtime coverage passes for all four
+  widths; Linux 7.3 `vgacon.o`, `iommu_amdv1.o`, `gen6_ppgtt.o`,
+  `gen7_renderclear.o`, and `intel_ggtt.o` compile with NYC and GNU `as`.
+- The C frontend now models the tied-output `mull %%edx` inline-assembly form
+  used by Linux x86 delay calibration, the fixed-register `mwaitx` instruction,
+  and the `delay_loop` timing sequence. Runtime C frontend regressions pass;
+  Linux `arch/x86/lib/delay.o` now compiles with NYC and GNU `as`.
+- Positional `mulq %3` inline assembly now lowers the low and high halves of
+  its 64×64 product. The runtime regression passes and Linux
+  `arch/x86/lib/kaslr.o` compiles with NYC and GNU `as`.
+- Linux's 4×8, 1×8, and 1×4 `movnti` usercopy loops now compile with NYC and
+  GNU `as`; runtime regression coverage verifies each store width.
+- File-scope integer arrays now infer incomplete outer bounds for two-
+  dimensional tables, including nested integer rows and character string rows
+  with sparse row designators. Rank-two string tables beginning with an
+  undesignated row now use the aggregate initializer path instead of the
+  flat-string path. The
+  runtime C frontend regressions cover sparse integer rows, `nonstring`/
+  `section` attributes, and the undesignated first character row; Linux
+  `lib/base64.o`, `drivers/acpi/tables.o`, and `drivers/tty/vt/consolemap.o`
+  compile with NYC and GNU `as`.
+- Local comma-separated pointer declarators now keep pointer depth per
+  declarator. Runtime coverage exercises nested pointer-array stores; Linux
+  `drivers/tty/vt/consolemap.o` compiles with NYC and GNU `as`.
+- Global pointer arrays now accept multidimensional designated initializers.
+  The C frontend regression checks a sparse pointer table, and Linux
+  `arch/x86/lib/inat.o` compiles with NYC and GNU `as`.
+- Opaque `void **` locals now retain enough pointer depth for indexed stores.
+  The runtime frontend regression exercises a copied pointer slot, and Linux
+  `lib/memcat_p.o` compiles with NYC and GNU `as`.
+- Aggregate-pointer globals now accept a following pointer declarator in the
+  same declaration, and aggregate-pointer arrays consume trailing file-scope
+  placement attributes. The C frontend regression suite passes. Linux
+  `net/netfilter/nf_log.o` advances past its `__read_mostly` declaration but
+  still fails on a multidimensional pointer-array subscript expression.
+- Rank-one aggregate arrays of pointers now decay to pointers to their
+  elements. The runtime regression checks `void **` subtraction against an
+  aggregate `void *` array, and Linux `lib/radix-tree.o` compiles with NYC and
+  GNU `as`; `objtool` still reports four unreachable-instruction warnings
+  there.
+- NYC lowers x86 `__builtin_extract_return_addr` as an identity operation.
+  The frontend regression verifies the returned pointer; Linux
+  `lib/vsprintf.o` now compiles with NYC and GNU `as`.
+- Pointers to `va_list` arrays now retain their va-list pointee through
+  aggregate fields and dereference. A variadic runtime regression copies a
+  list through such a field; `lib/vsprintf.o` compiles with one `objtool`
+  unreachable-instruction warning still under review.
+- Local comma-separated C declarations now accept attributes before each
+  declarator. A runtime frontend regression covers `__attribute__((unused))`,
+  and Linux `block/blk-iocost.o` compiles with NYC and GNU `as`.
+- Address-of now preserves lvalues through nested aggregate-array subscripts.
+  The runtime regression checks a rank-three struct array element, and Linux
+  `block/kyber-iosched.o` compiles with NYC and GNU `as`.
+- Linux 7.3 `drivers/pci/pci.o` now compiles with NYC and GNU `as`.
+- External multidimensional aggregate arrays now retain their declared
+  extents through address-of subscripting. The runtime frontend regression
+  passes; Linux 7.3 `security/selinux/hooks.o` compiles with NYC and GNU `as`,
+  with `objtool` warnings still under review.
+- Function-like macro expansion now accommodates up to 1,024 arguments for
+  generated Linux trace events. `fs/nfs/nfs4trace.o` compiles with NYC and GNU
+  `as`; the frontend regression suite passes.
+- NYC now lowers Linux's x86-64 `lock cmpxchg16b` try-compare template, including
+  its flag output and updated expected-value pair. The runtime frontend
+  regression covers successful and failed comparisons; Linux 7.3 `mm/slub.o`
+  compiles with NYC and GNU `as`. `objtool` still reports three unreachable
+  instructions and one missing-`__noreturn` warning in that object.
+- Aggregate-field assignment now supports a second subscript through pointer
+  array elements, covering Linux's `sym_val_to_name[value - 1]` update.
+  A runtime frontend regression covers the two-index store; Linux 7.3
+  `security/selinux/ss/policydb.o` compiles with NYC and GNU `as`, with four
+  unreachable-instruction warnings still to review.
+- File-scope function pointers returning aggregate pointers now pass through
+  the function-pointer declaration parser before aggregate declaration
+  collection. The runtime frontend regression checks an indirect call; Linux
+  7.3 `fs/nfs/pnfs_nfs.o` compiles with NYC and GNU `as`.
+- NYC now lowers Linux x86-64 futex compare-exchange exception-table asm and
+  its runtime-mask relocation. Linux 7.3 `kernel/futex/core.o` and
+  `kernel/futex/pi.o` compile with NYC and GNU `as`; `objtool` still reports
+  UACCESS-state warnings in both objects.
+- Faultable futex compare-exchange, exchange, and add asm now have runtime
+  regressions for successful and failed comparisons, memory updates, and the
+  error output register. Qualified nested function-pointer parameters now
+  parse and execute correctly; Linux 7.3 `crypto/ahash.o` compiles with NYC
+  and GNU `as`, with one unreachable-instruction warning.
+- Local pointer arrays now support indexed stores and nested pointer
+  dereferences; aggregate-pointer initializer slots remain valid while their
+  initializer is parsed. Runtime frontend regressions pass, and Linux 7.3
+  `security/selinux/ss/mls.o` and `fs/9p/vfs_super.o` compile with NYC and
+  GNU `as`. `kernel/futex/waitwake.o` now compiles after lowering the futex
+  bitwise retry loop; `objtool` reports three UACCESS-state warnings in
+  `arch_futex_atomic_op_inuser`, `futex_get_value_locked`, and
+  `futex_robust_unlock`.
+- File-scope aggregate initializers now size flexible scalar arrays from GNU
+  range designators, accept GNU zero-length aggregate arrays, and concatenate
+  braced adjacent narrow strings. File-scope GCC diagnostic `_Pragma` tokens
+  are accepted. Runtime frontend regressions cover those cases and aggregate
+  array compound literals. Linux 7.3 `mm/init-mm.o`, `fs/coredump.o`,
+  `kernel/crash_reserve.o`, and `kernel/cgroup/rstat.o` compile with NYC and
+  GNU `as`; the full kernel build remains blocked.
+- NYC accepts pointer-valued `put_user` operands; Linux 7.3
+  `kernel/futex/syscalls.o` compiles with NYC and GNU `as`. Segment-register
+  inline-assembly outputs to structure fields now lower, and
+  `kernel/crash_core.o` compiles with NYC and GNU `as`. Nested GNU statement
+  expression pointer stores now compile in `fs/quota/dquot.o`. Local static
+  multidimensional character arrays accept range-designated string rows; the
+  runtime regression passes and `fs/proc/task_mmu.o` compiles with NYC and
+  GNU `as`. Aggregate `__auto_type` initializers now copy into independent
+  local storage, covered by a runtime regression; `fs/proc/base.o` compiles.
+  Aggregate-array pointer shape survives nested pointer indexing, allowing
+  `kernel/cgroup/cpuset.o` to compile; its `objtool` unreachable-instruction
+  warning remains under review. Self-referential static address
+  initializers now retain their declared object's name during relocation
+  lowering; a runtime regression passes and `fs/kernfs/file.o` compiles.
+  `typeof` now resolves calls through function-pointer aggregate members;
+  `fs/netfs/objects.o` compiles. GNU omitted-middle conditional `?:` is
+  supported in `typeof`, with a runtime regression. Aggregate pointer fields
+  support postfix decrement, covered by a runtime regression; `fs/ext4/extents.o`
+  compiles. Known array-member bounds are now returned for
+  `__builtin_object_size` expressions without evaluating the operand, with a
+  runtime regression; `fs/ext4/ioctl.o` compiles. Function parameters
+  declared as arrays of pointers now decay to the correctly nested pointer
+  type, covered by an assignment regression; `mm/migrate.o` compiles with one
+  remaining `objtool` unreachable-instruction warning.
+- `const typeof(...)` preserves leading qualifiers through static type
+  resolution, fixing the Linux UDP `WRITE_ONCE` store; `fs/nfs/nfsroot.o` and
+  `kernel/audit.o` compile. GNU attributes after labels are parsed, and case
+  expressions with unary operators are no longer mistaken for C labels;
+  `fs/ext4/super.o` and `fs/nfs/nfs4proc.o` compile. `fs/ext4/super.o` still
+  emits unreachable-instruction and missing-`__noreturn` warnings. The
+  frontend regression suite passes; the full Linux build remains blocked by
+  other parser and inline-assembly failures.
+- File-scope aggregate compound literals now accept grouping parentheses in
+  pointer initializers and preserve relocation offsets through selected array
+  elements and members. Static null-based aggregate subobject addresses now
+  compute checked member and array offsets, and `&*` around a cast null pointer
+  remains null. Top-level comma expressions after indexed assignments bypass
+  the assignment-specific fast path. Aggregate array compound literals now
+  materialize elements in local storage for calls and pointer use; file-scope
+  and local character matrices accept unbraced string rows. The recorded
+  frontend regressions pass; targeted Linux 7.3 builds include
+  `drivers/gpu/drm/i915/{i915_hwmon,i915_pmu}.o`, `drivers/tty/sysrq.o`,
+  `net/core/neighbour.o`, `lib/zlib_deflate/deftree.o`,
+  `sound/hda/{core/i915,controllers/intel,core/intel-dsp-config}.o`. Some
+  objects retain `objtool` warnings, which remain under review.
+- Further recovered NYC kernel work resolved duplicate-compatible `_Generic`
+  associations in ACPI and retained boolean identity and pointer-member
+  qualifiers through aggregate fields. Targeted objects now compile with NYC
+  and GNU `as`, including ACPI helpers, `drivers/gpu/drm/i915/i915_params.o`,
+  `drivers/tty/vt/keyboard.o`, AES/Blake2s, selected Zstd objects,
+  `sound/core/seq/seq.o`, `net/sched/cls_api.o`, and `net/sunrpc/xprtsock.o`.
+  The full kernel build still fails before producing final artifacts; Zstd
+  decompression and other parser, typing, inline-assembly, and warning-review
+  work remains open.
+- Function-like macro invocations can span an active conditional branch and
+  its `#endif`, including the `pr_err` call in Linux 7.3's module namespace
+  check. The frontend regression passes and `kernel/module/main.o` compiles
+  with NYC and GNU `as`.
+- NYC pointer casts now update pointee qualifiers even when the underlying
+  pointer type is unchanged, and dereference stores use the resulting
+  expression qualifiers. Linux 7.3 `fs/binfmt_script.o` compiles with NYC and
+  GNU `as`. Valid uninitialized `const` local declarations are accepted;
+  `kernel/rcu/tree.o` also compiles, and the focused C frontend suite passes.
+- NYC preserves nested pointer-array typedef dimensions when completing an
+  external declaration and retains leading `const` on inline aggregate
+  definitions. The C frontend suite passes with a nested-array runtime
+  regression; Linux 7.3 `mm/slab_common.o` now compiles using NYC and GNU `as`.
+  Its three `objtool` warnings about `panic()` no-return metadata remain under
+  review; this is not a completed kernel acceptance build.
+- `./make nyc` builds the standalone C compiler and its backend dependencies;
+  the native `ny make` frontend accepts the same target. Focused NYC help works
+  before rebuilding `ny-make`, and both frontends accept the documented
+  `--debug` selector. `./make nyc -h` and `nyc --help` now expose one complete
+  compiler catalog, including target limits, compatibility-only flags, and
+  compile/link examples. Compiler and native build-tool help use Ny's shared
+  flag renderer with automatic colors, themed sections, intact option names,
+  and adaptive columns; bootstrap help also respects narrow terminal widths.
+- Compiler source, bitcode, native-image, and module caches now use bounded
+  atomic publication: 256 MiB and 4096 files per managed directory by default,
+  with a positive `NYTRIX_CACHE_MAX_MB` override. Active core/module inputs are
+  leased through consumption, and abandoned compiler temporaries are reclaimed.
+  Suite wrappers release frozen core snapshots while retaining diagnostics;
+  copied compiler snapshots no longer duplicate standard-source entries solely
+  because their executable pathname changed.
+- NYC's unevaluated-expression probes own their scratch value metadata,
+  preventing `sizeof` and related lookahead from invalidating the active
+  parser's allocation tables. Array-member and subarray sizes retain their
+  complete type instead of decaying to pointer size, including Linux's
+  extra-parenthesized `sizeof_field` expansion. Casts inside GNU `typeof` retain
+  the cast target's type metadata rather than inheriting an operand's array
+  shape, including Linux signal-frame byte-array casts. The Linux mac80211
+  header assertion and `net/mac80211/main.c` now compile with NYC; its assembled
+  object still reports an `objtool` unreachable-instruction warning. `typeof`
+  preserves global array types across the kernel's export redeclarations, and
+  flexible array members may specify fixed inner extents and infer their
+  outer extent from nested static initializers. `libata-scsi.c` and
+  `ata_piix.c` compile with NYC; both objects assemble with GNU `as`, and
+  `ata_piix.o` passes the configured `objtool` checks without warnings.
+  Unsigned `__builtin_bswap32`/`__builtin_bswap64` expressions now fold in
+  constant contexts; their width and value checks pass, and
+  `net/sunrpc/rpcb_clnt.c` compiles with NYC, assembles with GNU `as`, and
+  passes the configured `objtool` checks without warnings.
+- File-scope function-pointer array initializers now accept function-type
+  attributes between the declarator and `=`. The section-attributed direct
+  function-pointer array and `ms_abi` function-pointer typedef parser fixtures
+  pass in the complete C frontend suite, alongside the AArch64 aggregate ABI
+  check.
+  The same suite verifies `typeof` redeclarations after fixed-size initialized
+  arrays and inferred-size `const` arrays declared initially with incomplete
+  bounds, and the wide null character constant used in Linux EFI `vsprintf.c`.
+- Local indexed assignment now accepts every object-pointer type, including
+  opaque pointers, while still excluding function pointers. Its runtime
+  regression writes through `void **` with an unsigned index. Fixed-size local
+  character arrays also accept a string whose characters exactly fill the
+  array; the regression checks the final character at runtime without copying
+  the omitted terminator out of bounds.
+- Variadic builtins now accept the array-backed x86 `va_list` as well as
+  pointers that dereference to it. Runtime regressions copy a `va_list` and
+  fetch an argument through a `va_list *`, covering the operand shapes used by
+  Linux's EFI formatting and tracing code.
+- `unsigned short **` is now recognized as a pointer by NYC's common pointer
+  compatibility checks. A compile regression verifies its conversion to
+  `const void *`; this fixes that pointer classification gap but does not yet
+  unblock the Linux APIC per-CPU array expression.
+- File-scope, fixed-extent pointer arrays without initializers now receive
+  zero-initialized storage, preserving tentative-definition linkage. A runtime
+  regression checks their null entries, and Linux `kernel/power/suspend.c`
+  now compiles with NYC and assembles with GNU `as`; configured `objtool`
+  reports three unreachable-instruction warnings in that object.
+- Aggregate field arrays now accept extents above 65,536, and `sizeof` on an
+  indexed global aggregate member resolves the member rather than stopping at
+  the closing bracket. Type lookahead for GNU `offsetof` accepts runtime array
+  indices without evaluating them. Runtime regressions cover large aggregate
+  size, member-array `sizeof`, and dynamic-index `offsetof` type resolution;
+  the complete C frontend suite passes. Isolated NYC probes compile Linux
+  `kernel/power/swap.c` and `kernel/printk/printk.c`; this does not establish
+  full kernel acceptance.
+- Local `_Bool` assignments now use the same pointer-to-boolean conversion as
+  initializers and parameters. Static pointer initializers resolve a function
+  designator ahead of a same-named `typeof(function)` object declaration; the
+  aggregate-return function-pointer regression and complete C frontend suite
+  pass.
+- NYC lowers Linux's x86 runtime-constant right-shift asm and preserves its
+  allocated `runtime_shift_*` relocation section. A compile-link-run regression
+  checks the shifted value. With saved Linux 7.3 Kbuild flags, `fs/dcache.c`
+  now compiles and assembles with GNU `as`; configured `objtool` reports eight
+  unreachable instructions in that object. `kernel/irq/proc.c` also compiles
+  and assembles with those flags without configured `objtool` warnings.
+  Trailing attributes on inline aggregate global definitions are covered by a
+  compile-link-run frontend regression. NYC also lowers Linux's unsigned
+  runtime-pointer clamp asm, with a compile-link-run regression. Saved Kbuild
+  builds of `fs/readdir.c` and `fs/select.c` now complete; `objtool` reports
+  UACCESS-state warnings in both objects. Linux's locked `btsl` flag-output
+  pattern now compiles with a compile-link-run regression.
+- With saved Linux 7.3 x86-64 Kbuild flags, NYC compiles `lib/ctype.c`,
+  `drivers/usb/storage/scsiglue.c`, and EFI `vsprintf.c`; GNU `as` assembles
+  all three outputs. Configured `objtool` emits no warnings for `ctype` or
+  `scsiglue`; it reports unreachable instructions in `vsnprintf+0x1271` and
+  `get_number+0x341` for `vsprintf`. This is targeted TU coverage, not a
+  complete kernel build.
+- GNU asm memory inputs evaluate their address once without reading the
+  referenced object first, including nonfaulting prefetch operands. Repeated
+  references to one memory operand survive alternative instruction templates.
+- Local x86 asm outputs using the legacy `=rm` form now remain observable to
+  NYIR optimization and reload their actual stack-home values after the asm.
+  The existing compile-link-run memory-output regression passes. GNU
+  `+r`/`+m` qword `xadd` now preserves an unprefixed template and supports a
+  bare local memory operand; a compile-link-run regression checks both outputs.
+  GNU `nonnull` attributes now accept the standard no-argument form; the
+  pointer-attribute fixture compiles, links, and runs.
+- Statement-level inline asm beginning with unconditional `ud2` now terminates
+  C control flow through nested `do` statements, including named-immediate
+  bug-table templates. The regression fixture compiles and emits no branch
+  after `ud2`; Linux `sock_diag_init` still needs its separate objtool warning
+  investigated.
+- Linux-style tied `addl`/`adcl` register outputs now lower their 32-bit carry
+  semantics for both `adcl $0xffff` and `adcl $0` forms. Runtime regressions
+  cover carry and no-carry boundaries. Chained 32-bit checksum assembly with
+  three general inputs and a tied initial value is also lowered; the focused
+  fixture and Linux `selftests.c` / `tcp_output.c` translation units pass.
+  `net/ipv6/udp_offload.c` lowers through its separate five-operand qword
+  add-with-carry template.
+- The x86-64 IPv6 checksum's chained `addq`/`adcq` memory-input asm now lowers
+  as explicit wrapping additions with propagated carry. A runtime fixture
+  covers consecutive carries; NYC-generated `udp_offload.c` and `exthdrs.c`
+  assemble with GNU `as` and pass the configured `objtool` checks without
+  warnings.
+- NYC preserves aggregate-pointer array elements in uninitialized local
+  arrays, GNU attributes between pointer levels, aligned aggregate locals,
+  and unsigned wide-enum aliases. Automatic i386 pointer arrays use four-byte
+  slots and strides. Target-width size expressions and host varargs
+  consumers exercise `sizeof`, alignment, and member offsets across all four
+  `regparm` settings. Narrow symbol-address results no longer overwrite a
+  neighboring live i386 spill slot.
+- NYC completes tentative pointer-array declarations, zero-fills omitted
+  pointer initializers, and preserves GNU zero-length arrays. Signed and
+  unsigned character arrays accept string initializers.
+- Kbuild dependency files put the main source before forced headers, as
+  required by `fixdep`. Structured x86-64 assembly output also resolves C
+  external data names consistently with the legacy emitter.
+- Native Linux NYC invocations can discover system headers after explicit
+  include paths and modeled headers; `-nostdinc`, explicit targets, and
+  embedded frontend calls do not implicitly import the host include tree.
+  Abstract pointer-to-function-pointer parameters support real GMP header
+  declarations.
+- NYC's O2/O3 heuristic inliner considers ordinary discardable static helpers,
+  not only explicitly inline functions. GNU `noinline` survives declarations,
+  definitions, and unit compaction; address-taken and recursive helpers retain
+  correct executable behavior.
+- The shared optimizer removes redundant repeated sign extension to the same
+  or a wider integer width, preserving narrower truncations and signed
+  boundary values. A focused matched NYC `binary` comparison measured
+  12.652 ms before these two changes and 10.811 ms afterward, with checksum
+  `3360874588549334`; this does not close the runtime competitiveness target.
+- NYC accepts `-pthread` with the `_REENTRANT=1` header contract. Explicit
+  `-D`/`-U` options retain precedence regardless of the flag's position;
+  NYC-generated pthread create/join code passes a real execution smoke.
+- Mock rendering skips no-op TTF bitmap blits when glyphs have no CPU pixel
+  data, while still resolving and caching glyphs.
+- Anonymous functions accept a single brace-free expression body with an
+  implicit return; existing block bodies remain unchanged.
+- Manual memory remains the default; tracing garbage collection is optional.
+- String repetition and matrix workloads received performance and measurement
+  improvements.
+- Fresh `malloc_raw` allocations skip the raw-pointer registry's duplicate
+  lookup while retaining the registry entry needed for raw-pointer ownership
+  checks.
+- Raw-pointer unregistration avoids calling `free` when no registry slab
+  became empty.
+- Once the append-only map-oracle range table is full, allocation tracking
+  skips the per-thread page-dedup cache, which no longer affects oracle
+  behavior.
+- Loop-vector unrolling avoids cloning dense vector bodies, reducing live
+  vector pressure in the x86-64 native backend.
+- `core.calloc_raw` allocates zero-initialized unmanaged memory that can be
+  released with `free_raw`.
+- Native allocation calls keep their runtime entry point consistent with the
+  lowered argument representation. Generated core link names no longer send
+  a raw odd byte count to the legacy tagged-integer allocator (`17` previously
+  became `8`). Typed, dynamic, and inlined allocation-size boundaries pass the
+  focused native/LLVM fixture; explicit user C bindings retain their names.
+- NYC's x86-64 segment-register inline-assembly matcher now builds cleanly
+  under `-Werror=format-extra-args`.
+- The x86-64 encoder keeps a final-use remainder operand in its assigned
+  non-clobbered register instead of writing an unnecessary spill home.
+- Loop unswitching now handles natural loops whose preheader falls through
+  directly into the loop header; a focused optimizer regression checks both
+  semantics and that the loop is cloned.
+- Command-line help now has a concise default and registry-generated topic
+  references; Bash and Fish completions include valid values for registered
+  enums.
+- Compiler options now offer consolidated output, optimization, native-tuning,
+  DWARF, and NYR-pass controls while retaining legacy spellings.
+- `core.os.args.positionals_from` now keeps ordinary arguments when no `--`
+  separator is present and discards pre-separator options when one is present.
+- `core.os.args.flag_from` now honors the last positive or `--no-` flag, and
+  short value options accept `-o=value`.
+- Bare mode rejects inspection flags that its fast path cannot honor instead
+  of silently producing ordinary compiler output.
+- Invalid values for compiler mode options now report allowed choices and exit
+  with a usage error.
+- Raw OS descriptor reads retry when interrupted by `EINTR`.
+- The Brainfuck showcase now accepts inline source and writes assembly only
+  when requested; generated assembly no longer contaminates the program output.
+- The C frontend handles `__func__`, function attributes between the result
+  type and name, GNU function alias attributes, aggregate declarations in
+  `for`-loop initializers, fixed-register and external-global memory
+  inline-assembly inputs, and memory operands for scalar and aggregate lvalues,
+  including memory-plus-register bit operations and condition-code outputs, in
+  emitted x86-64 assembly.
+  Multidimensional aggregate arrays
+  and pointer-to-array aggregate fields and local declarations are supported,
+  along with file-scope `sizeof` array type constants.
+- The C frontend's CTest harness now keeps its C inputs as 190 checked-in
+  fixtures instead of generating them with embedded `file(WRITE)` snippets in
+  `run.cmake`. This preserves the test sources for review, avoids source-order
+  overwrites, and removes workspace-specific paths from the inline-assembly
+  immediate regression. Relocation inspection now uses CMake's discovered
+  `readelf` or `llvm-readelf` path and skips only those inspection checks when
+  neither tool is available. The frontend CTest passes after the migration.
+- `typeof` statement-expression lookahead now uses its own lvalue table rather
+  than sharing storage with the active parser, preventing table growth from
+  invalidating or freeing live parser state. A translation-unit regression
+  grows the lvalue table past its initial capacity; the Linux `core.c` input
+  also compiles and assembles with zero Valgrind errors.
+- NYC lowers Linux x86 clear-page alternatives through `memset`, clear-user
+  alternatives through the fault-aware `rep_stos_alternative` helper, and
+  LKGS plus typed segment-register save/load forms with exception-table
+  entries. Focused frontend regressions pass; current `fork.c` and `ldt.c`
+  preprocessed inputs compile with NYC and assemble with GNU `as`.
+- NYC models the common `<stdint.h>` integer types and limits/macros, evaluates
+  enum constants in automatic aggregate-array extents, and accepts floating
+  compound assignments, zero-initialized aggregate arrays, and larger local
+  scalar arrays; focused benchmark C blocks verify assembly generation.
+- The x86-64 C frontend lowers locked 32-bit memory add/sub, bitwise RMW, and
+  byte XOR condition-code inline assembly, and 64-bit `xadd`, preserving memory
+  updates, returned old values, and reported flags.
+- Locked qword OR assembly accepts the three-character `orq` mnemonic without
+  misclassifying it as a 32-bit operation; a compile-link-run regression checks
+  the memory update.
+- Classic byte and word compare-exchange assembly preserves memory boundaries
+  and old-value results on success and failure. Byte compare-exchange has a
+  distinct NYIR marker from trailing-zero-count assembly.
+- i386 `-mregparm=0..3` and GNU `regparm(N)` attributes now control argument
+  placement instead of accepting the real-mode register convention as a no-op.
+  Runtime host/NYC interoperability covers each register count, small and large
+  aggregates, hidden result pointers, scalar 64-bit values, floating-point
+  records, callbacks, and explicit cdecl overrides.
+- Integer literals select `int`, unsigned `int`, or the required wider
+  suffix/range type, including 32-bit i386 `long` suffixes. Unsuffixed small
+  integers no longer become 64-bit callback arguments on i386.
+- Static array-address initializers use the declared element/row stride rather
+  than applying pointer-size scaling to scalar element types.
+- NYIR copy propagation preserves `asm goto` targets as labels when label IDs
+  overlap aliased SSA values, preventing control-flow corruption after inlining.
+- NYC accepts three-level aggregate pointers in structure fields, parameters,
+  locals, and globals, including nested indexing, pointer subtraction, and
+  nested pointer updates; a compile-link-run regression covers their layout
+  and runtime behavior.
+- Aggregate-pointer arrays retain complete typedef dimensions through
+  `typeof`, address casts, and indexed assignment, including multidimensional
+  pointer tables used by per-CPU IRQ vectors.
+- Typed pointer elements in aggregate arrays now preserve aggregate pointer
+  depth past the `C_BAD` type-tag sentinel. A compile-link-run regression
+  exercises pointer-to-pointer array reads, member assignment, and a volatile
+  `WRITE_ONCE` store; Linux `kernel/rcu/rcu_segcblist.c` compiles with NYC and
+  assembles through the configured GNU `as` route.
+- Address-of now accepts aggregate array elements reached through a function
+  returning a pointer-to-pointer, and expression statements preserve indexing
+  after such a call for pointer assignment. A compile-link-run regression checks
+  both the returned address and the indexed store.
+- Transparent-union pointer parameters accept compatible pointer arguments and
+  lower them through the union's aggregate ABI representation. A
+  compile-link-run frontend regression passes; Linux `fs/splice.c` now compiles
+  with NYC and assembles with GNU `as`. Const-qualified pointer declarations in
+  `for` initializers are accepted; Linux `fs/binfmt_misc.c` also compiles and
+  assembles with the saved Kbuild configuration.
+- Parenthesized address-of now preserves direct global lvalues used by
+  `WRITE_ONCE`; the focused C frontend suite passes, and Linux `mm/folio.c`
+  compiles with NYC and assembles with GNU `as`.
+- NYC lowers runtime-constant pointer inline assembly for arbitrary C symbol
+  section names while retaining the immediate/constraint checks; a
+  compile-link-run regression covers a non-default section symbol.
+- NYC lowers faultable x86-64 user-memory loads with asm-goto exception-table
+  fixups for byte through qword widths, including aggregate-typed memory
+  operands; a compile-link-run regression checks returned values and preserves
+  the fault target through NYIR passes.
+- NYC lowers the non-asm-goto x86-64 user-load fallback with typed exception
+  table entries and register outputs; a compile-link-run regression exercises
+  a word load into a wider destination.
+- GNU `void *` increment now advances by one byte, matching Linux's
+  no-fault copy loops; a compile-link-run frontend fixture checks the result.
+- NYC accepts GNU `cleanup` attributes in the type-specifier position and runs
+  the cleanup function at scope exit; a compile-link-run regression checks it.
+- NYC's i386 GNU assembly route passes aggregates by value on the stack,
+  returns aggregates through the SysV hidden result pointer, and preserves
+  exact copy sizes and floating-point argument placement. A freestanding
+  32-bit execution regression exercises NYC/GCC interoperability in both
+  directions for three-byte, mixed-field, and larger aggregates.
+- i386 spill homes preserve their full byte ranges and loop-invariant
+  lifetimes across backedges, preventing overlapping homes from corrupting
+  floating-point fields and aggregate loops.
+- C variadic functions retain their call boundary instead of inlining
+  frame-dependent `va_start`/`va_arg` operations into callers.
+- Alias-based store sinking respects inline-assembly memory effects,
+  volatile operations, and other observable side effects; an optimized
+  atomic qword OR regression checks ordering with an earlier store.
+- Unsupported assembly in dead branches is discarded after control-flow
+  folding for non-static functions too; reachable unsupported assembly still
+  fails code generation. Linux's size-selected compare-exchange macros can
+  therefore discard their non-selected operand-width alternatives.
+- Aggregate C declarations now accept GNU type attributes after qualifiers,
+  including `__seg_gs __attribute__((no_instrument_function))`; a frontend
+  parser regression covers this Linux per-CPU declaration spelling.
+- The C frontend accepts the Linux flexible-array `__counted_by__` field
+  attribute, and `__typeof_unqual__` is recognized in type positions used by
+  `READ_ONCE`; focused parser regressions cover both forms.
+- NYC supports `-fplan9-extensions` for tagged aggregate members without a
+  declarator, preserving their layout and promoted fields; a static layout
+  regression checks the anonymous member offset and total size.
+- Block-scope function prototypes accept leading and trailing GNU attributes,
+  and NYC lowers Linux `unsigned __int128` multiply-by-32-bit and
+  multiply-by-64-bit, add, and right-shift sequences; linked regressions cover
+  `mul_u64_u32_add_u64_shr` and cross-limb 64-bit products. Casts to and from
+  the internal 128-bit representation also retain the correct low and high
+  words.
+- External aggregate references preserve their declared mutability when
+  taking member addresses, and explicit pointer casts retain pointee
+  qualifiers; a frontend regression covers the kernel's volatile `WRITE_ONCE`
+  cast pattern.
+- `__typeof_unqual__` participates in type lookahead inside nested `typeof`
+  expressions, covering Linux per-CPU pointer casts with a frontend regression.
+- The block-scope fallthrough statement accepts both `fallthrough` and
+  `__fallthrough__` GNU attribute spellings used by Linux switch helpers.
+- x86-64 inline-assembly `xaddb`, `xaddw`, and `xaddl` now lower alongside
+  `xaddq`; signed byte and word plus unsigned byte and signed dword and qword
+  compile-link-run cases check the updated memory and correctly extended prior
+  value.
+- Read-write qword `xchg` inline assembly now accepts compatible pointer
+  operands; compile-link-run coverage exercises integer and pointer exchanges
+  through direct and pointer-based memory lvalues.
+- `sizeof expression` now handles unparenthesized aggregate-member arrays, and
+  qword compare-exchange accepts compatible object-pointer operands such as a
+  `void *` null expected value. `typeof(function)` pointer casts retain a
+  callable function type; file-scope assembler definitions may provide symbols
+  declared as external callable functions.
+- `typeof(aggregate_pointer->scalar_field)` no longer inherits stale function-
+  pointer metadata from the expression that produced the aggregate pointer.
+  A compile-link-run regression covers volatile stores through that inferred
+  scalar type, matching Linux `WRITE_ONCE` expansions.
+- `typeof(*ops->callback)` declarations retain function-designator semantics;
+  indirect calls through a GNU statement expression now have a compile-link-run
+  regression, covering Linux static-call trampoline expansions.
+- x86-64 `syscall` lowering accepts fixed-register locals only when each
+  argument's declared register matches the syscall ABI slot. A getpid
+  compile-link-run regression exercises `rdi`/`rsi`/`rdx` bindings.
+- Static-function pruning now traverses reachable calls and asm references
+  once with a worklist instead of rescanning every reachable function per
+  discovery round; the C frontend regression suite passes.
+- Function declaration lookup now uses an open-addressed name index instead
+  of scanning the growing declaration table. Typedef-name lookup uses an
+  lazily rebuilt index after scope rollback; a compile-link-run regression
+  covers nested block typedef lookup and restoration.
+- C tokenization now dispatches multi-character punctuator checks by leading
+  byte instead of probing the full operator table for every punctuation token;
+  lexer and frontend regressions pass.
+- C tokenization skips runs of horizontal whitespace in one bounded scan while
+  preserving source columns; the lexer regression covers tab, form-feed,
+  vertical-tab, and spaces.
+- C token text equality rejects mismatched leading bytes before scanning the
+  candidate spelling; lexer regressions cover exact and near-match tokens.
+- Variadic functions that reserve a register-save area now use a frame whose
+  epilogue restores the dynamically adjusted stack pointer.
+- NYC specializes Linux's always-inline alternative WRMSR helper so its CPU
+  feature immediate remains static, emits the alternative and replacement
+  sections, and assembles the saved Linux 7.3 `efi_64.c` input with GNU `as`.
+  A compile-and-assemble fixture covers the metadata and replacement.
+- NYIR's general inliner now materializes a dead dummy result when cloning a
+  void call whose builder-assigned destination is unused, allowing the
+  alternative WRMSR helper's void return to inline safely.
+
+<details>
+<summary>Details</summary>
+
+- Tuple representation inference now bounds recursive global-alias and
+  `clone` traversal, conservatively handling cyclic initializers instead of
+  recursing until the compiler hangs. The focused
+  `recursive-global-alias-classification` fixture passes.
+- Dynamic-list classification now tracks active global/member aliases and
+  bounds recursive query depth. Cyclic aliases conservatively classify as
+  dynamic instead of overflowing the compiler stack. Cold focused runs passed
+  both the recursive-alias regression and Wayland repeated-focus fixture with
+  `NYTRIX_CORE_BC_THREADS=1`.
+- x86-64 fused bit-mask selects now keep the tested value live through the
+  select, preventing stack-home reuse from changing the branch result. A C
+  regression checks both set and clear mask cases; it also fixes SQLite's
+  `WITHOUT ROWID` root-page initialization path. Variadic `va_start` also
+  accounts for saved callee registers when locating stack-passed arguments;
+  the variadic regression covers a callee-saved loop home and an overflow
+  argument.
+
+### Performance
+
+- NYR redundant-load elimination forwards vector store values to later loads
+  from equivalent addresses when no intervening memory write or effectful call
+  can invalidate them. Tests cover equivalent computed addresses and the call
+  barrier. The `dgemm` checksum remains `1`; a focused 3+1 run measured
+  211 µs NYR versus 47 µs LLVM and 18 µs C, so its runtime target remains open.
+- The x86-64 AVX encoder now uses a spilled, unseeded vector operand's canonical
+  stack home directly when it is a binary operation's memory-capable RHS. The
+  SOR object no longer reloads and re-saves its broadcast multiplier each inner
+  iteration; checksum `1725461952` passed. Focused 3+1 and 7+2 runs measured
+  2.84 ms and 2.83 ms NYR, respectively, so this code-generation reduction has
+  not established a runtime speedup; SOR remains slower than LLVM and C.
+- The default benchmark `NYC` column reports execution of NYC-generated C code,
+  not compile throughput. The host driver assembles and links NYC output;
+  the C and NYC routes share their timing wrapper and checksum contract.
+  Build and execution failures remain visible instead of falling back to
+  host-compiled C. Terminal, JSON, CSV, and Markdown reports retain NYC runtime
+  samples, compiler identity, and diagnostics. `NYC/C` compares NYC runtime
+  against host-C runtime, with lower values indicating faster NYC execution.
+- `straight` now repeats the same runtime-seeded 31-bit integer recurrence in
+  Ny and C rather than timing a sum folded to a constant. NYR, LLVM, host C,
+  and NYC retain checksum `5050` and execute observable work above the
+  unchanged 1µs signal floor. The empty `startup` control remains empty.
+- The `revcomp` fixture processes four reverse-order bytes per loop iteration
+  and retains a scalar tail. NYR and C produce checksum `150000100000`; an
+  isolated 7+2 run measured 0.099 ms NYR and 0.011 ms C.
+- The `bce-matrix` benchmark now uses a contiguous `i64buf` matching the C
+  reference's 64-bit element layout. The focused benchmark passed with checksum
+  `14439925760000`; 3+1 samples measured 16.9 ms NYR versus 10.3 ms LLVM
+  (1.64x), within the native/LLVM gate.
+- The native backend recognizes exact bounded integer list fills and initializes
+  the typed buffer through a range helper instead of emitting an element-wise
+  append loop. `list-any-append` retained checksum `2,999,999`; seven isolated
+  samples measured 8.35 ms NYR versus 9.34 ms LLVM (0.89x).
+- Dynamic integer appends to descriptor-backed `Any` lists now write the
+  in-capacity slot directly after validating the buffer header, avoiding a
+  redundant generic append and tag-stamping pass. `list-any-append` retained
+  checksum `2,999,999`; seven isolated samples measured 2.63 ms NYR versus
+  3.80 ms LLVM (0.69x).
+- The `dgemm` benchmark imports only its required time and typed-buffer
+  modules instead of the umbrella core module. A cold phase profile measured
+  83.9 ms JIT compilation versus the prior 2.63 s, with checksum `1`; runtime
+  remains a separate optimization target.
+- BigInt now provides `bigint_mul_div` for a scalar multiply followed by scalar
+  division. Its runtime path performs both operations over one temporary limb
+  buffer and allocates only the final result; the PIDigits fixture uses it
+  without changing its recurrence. Focused BigInt tests cover multi-limb values,
+  signs, and truncation; the PIDigits performance comparison remains pending.
+- Native-only AOT now compiles runtime helpers with the selected speed profile
+  instead of always using size optimization. The cold 7+2 `append-scaling`
+  benchmark improved from 8.10 ms to 2.33 ms NYR; NYR/LLVM fell from 4.53x
+  to 1.08x, with checksum `15000003`.
+- The unified-dispatch parity probe now compares `get` and `install` help
+  byte-for-byte with canonical `pkg` commands and reports command failures
+  separately from output mismatches.
+- Benchmark rows with sub-1µs measurements retain nanosecond timings and report
+  `LOW` instead of `ok`; their ratios remain excluded below the signal floor.
+- Focused 3+1 runs report `dce` and `escape-loop` above the timer floor, with
+  matching NYR/C checksums (`16636` and `549732`). `gcbench` now allocates
+  zeroed 96-byte raw node blocks and a raw retained-pointer table matching its
+  C reference's `calloc`/`malloc` layout and release pattern. Raw pointer-range
+  removal is constant-time, and the provenance table has 65,536 buckets for
+  high-live-set workloads. The focused run preserved checksum `554061` and
+  measured 84.3 ms NYR, 88.0 ms LLVM, and 22.8 ms C, down from the earlier
+  140.1 ms NYR baseline; a 3.70× NYR/C gap remains.
+- The raw-pointer registry reuses metadata nodes from 256-node slabs and
+  releases excess empty slabs, avoiding one heap allocation per registration.
+  Its hash table now has 262,144 buckets rather than 65,536 to shorten chains
+  for large live sets. Focused `gcbench` runs preserved checksum `554061` and
+  measured 55.5–61.1 ms NYR, versus 66.0–73.4 ms controls; C was 22.2–23.7 ms
+  and LLVM was 51.2–64.6 ms across those runs. NYR still trails both
+  references, and environmental variation prevents claiming a stable
+  controlled improvement. `rt_free_raw` now checks the raw-allocation
+  registry first, skipping typed-buffer and managed-heap checks for registered
+  raw blocks. Checksums remained `554061`; with that change, the 65,536-bucket
+  control measured 56.7 ms NYR and the 262,144-bucket candidate measured
+  51.8 ms. A five-fixture startup cohort measured 49.8 ms NYR, 45.8 ms LLVM,
+  and 23.2 ms C on `gcbench`. These results suggest shorter chains help but
+  do not isolate the fast-free change against a baseline.
+- Signed division by a positive power of two now lowers through the exact
+  truncation-toward-zero bias formula when range analysis cannot prove the
+  dividend nonnegative. The x86-64 machine lowering fuses the single-use
+  sequence back to its immediate-divisor form. Focused signed-boundary and
+  machine-fusion tests pass; the `binary` fixture checksum passes with 4.75 ms
+  NYR, 438 µs LLVM, and 1.08 ms C, so NYR remains slower than both references.
+- In-loop if-conversion now admits up to 20 cost units and can hoist raw-i64
+  local reads only when a dominating store or parameter initializes the slot
+  and the slot is not address-taken. It also converts matched raw-i64 local
+  stores from both arms into a select and one store; unmatched writes and
+  arm-mutated reads remain excluded. Focused tests verify the paired-store
+  transformation, loop result, and rejection of uninitialized reads. The
+  focused `binary` run measured 1.86 ms NYR, 317 µs LLVM, 1.04 ms C, and
+  8.81 ms NYC with checksum passing; the captured optimized `branch_mix` still
+  contains a conditional branch, so the earlier 1.82–1.83 ms versus 4.78 ms
+  budget-10 timing difference is not attributed to this change. A focused
+  `sor` run measured 2.99 ms NYR, 571 µs LLVM, 593 µs C, and 10.9 ms NYC with
+  checksum passing. NYR remains slower than both runtime references.
+- The `sor` fixture now computes left/right row bases once per row in both Ny
+  and C, preserving the operation order and checksum `1725461952`. A focused
+  3+1 run measured 2.938 ms NYR versus 0.555 ms C, down from 3.347 ms NYR;
+  the remaining NYR/C gap is 5.29×. The one-vector unroll candidate was slower
+  and was not retained.
+- The x86-64 vector emitter now folds a YMM RHS load into the consuming
+  arithmetic instruction when its SIB index is spilled, reloading that index
+  into reserved RAX and using it directly in the memory operand. The SOR
+  checksum remained `1725461952`; a focused same-revision 3+1 comparison
+  measured 2.96 ms NYR for control and 2.83 ms with the fold; a repeat measured
+  2.80 ms. Separately, disabling/enabling RSI/RDI loop homes measured 2.88 ms
+  and 2.81 ms in focused 3+1 runs with checksum `1725461952`. NYR remains
+  slower than LLVM and C on SOR. The native read-only loop regression now
+  executes a variable shift and integer division while preserving its carried
+  values; focused loop-call, fixed-register, and vector tests pass.
+- SLP vectorization rejects store groups with non-contiguous destination
+  addresses before cloning candidate IR; full legality checks still govern
+  accepted pairs and quads.
+- SLP candidate checks now share the per-round use-def analysis instead of
+  rebuilding it for every candidate.
+- Integer-reduction loops can unroll two vector chunks while chaining each
+  cloned reduction into the loop-carried accumulator. Fixed-trip reductions
+  retain the scalar epilogue for non-multiple trip counts; `bce-matrix` kept
+  checksum `14439925760000` and measured 14.41 ms NYR versus 1.58 ms C in a
+  focused seven-run sample. A 101×101 tail case also matched NYR/C checksums.
+
+### Runtime correctness
+
+- String slices with an omitted start and stop and step `-1` now reverse
+  Unicode strings in the REPL and native execution paths.
+- Boolean ternary joins now normalize imported boolean calls and literal
+  arms consistently; this restores blending for OpenGL atlas text. Raw
+  callback stores preserve callable addresses, and JIT execution clears
+  artifact-origin code sections that could truncate callback relocations.
+  Focused regression and UI evidence is recorded in
+  [the consolidated TODO evidence record](TODO.md#archived-compiler-replay-and-ui-acceptance-evidence).
+- The native x86-64 encoder invalidates cached address-home tracking after
+  dereferencing memory, preserving loaded bytes when stack homes are reused.
+  Repeated snapshot ownership and PNG checksum/pixel checks now pass native,
+  MCJIT, ORC, and VM.
+- Sequence indexed stores decode boxed `any` indices before calling raw-index
+  runtime setters, fixing out-of-range writes during Vulkan font loading.
+- UI profiling clocks consistently use raw monotonic timestamps. The native
+  dictionary provenance cache keeps saturated-cache misses bounded while
+  retaining checked fallback for uncached dictionaries.
+- Wayland initializes its window registry at registration and normalizes
+  surface-address keys, restoring live keyboard lookup and paddle input.
+- Wayland xdg configure and close callbacks now stage per-window state in native
+  callback storage; the event pump applies resized geometry and close requests
+  in normal runtime context. Live Hyprland tiling now updates the client and
+  framebuffer sizes instead of leaving Pong at its initial 1280×720 extent.
+- Wayland cursor constraints now preserve manager proxies, destroy each
+  constrained-pointer proxy only once, and reuse existing locked/confined
+  proxies on repeated cursor-mode updates. This prevents live cursor-selection
+  updates from invalidating Wayland protocol objects or constraining a surface
+  twice.
+- UI auto-dump readiness now has an explicit `bool` return type, preserving its
+  result when assigned to native capture state. A live Vulkan run produced and
+  read back a PNG capture.
+- Pong scales the court and HUD to live Wayland framebuffer dimensions, keeps
+  side margins proportional in tiled layouts, clamps the ball after a resize,
+  and retains readable minimum HUD sizes. Wayland cancels keyboard repeat when
+  focus leaves; Pong frame pacing remains bounded when vsync is advisory.
+- Dynamically typed list indexing now uses the strict source-level bounds
+  contract, so out-of-range reads panic instead of returning the fallback value
+  used by generic `get` operations.
+- Native calls from within a stdlib module now retain their runtime bridge
+  binding when the callee is in the same module. This prevents AOT output from
+  referencing an un-emitted stdlib wrapper body.
+- `core.os.file_write` now returns the raw byte count in its `Result<int, int>`
+  payload instead of exposing the tagged integer encoding to AOT callers.
+- Core `Vector2`/`Vector3`/`Vector4` constructors now preserve floating-point
+  component carriers when forwarding optional components in native AOT code.
+- Sorting a native typed-buffer list now clones its buffer layout before
+  sorting, preserving element data and list/tuple tags instead of interpreting
+  the buffer header as a managed-list payload.
+- Documentation search subsequence scoring now uses the candidate position as
+  its match sentinel. This keeps private-name scores consistent between AOT
+  and native-only execution.
+- JSON string parsing now retains escape detection across its scan, so short
+  escapes and Unicode escapes—including U+0000 followed by more bytes—are
+  decoded instead of copied verbatim.
+- Image loading keeps file-read bytes string-typed and decode results dynamic
+  across the generic `Result` and `any` boundaries, preserving PNG dispatch.
+- UI replay traces report each scripted event once even when the event is
+  applied to multiple eligible windows.
+- NYIR VM nested calls skip per-instruction profile buffers and counters unless
+  profile data is requested; the existing evaluator API keeps its profiling
+  behavior unchanged.
+- Nested NYIR VM calls verify each immutable callee once per VM evaluation,
+  while the public evaluator entry points continue to verify every standalone
+  input.
+- Per-fixture test timeouts can now reach 420 seconds while the global
+  `--timeout` cap remains 300 seconds. The engine VM replay now uses a
+  five-frame event sequence, retaining the resize, key press/release, and close
+  checks while removing one redundant render from the slow VM route.
+
+### C frontend
+
+- Incomplete array typedefs now retain array identity and adjust to element
+  pointers in function parameters. A compile regression covers an incomplete
+  array typedef over a tagged aggregate.
+- Block-scope `extern` declarations for functions and external integer arrays
+  are now collected into the translation-unit symbol table. Frontend coverage
+  includes a late function prototype and an incomplete unsigned-byte array.
+- Aggregate double-pointer casts now retain the cast target's struct metadata
+  when the source already has the same pointer depth. A compile-link-run
+  regression covers SQLite's `sqlite3_vtab *` to `echo_vtab **` member access
+  pattern through a nested base struct.
+- Aggregate type qualifiers after a struct or union tag are now parsed before
+  pointer declarators, including `struct T const *` parameter forms.
+- The x86-64 machine backend now lowers SysV `va_start` and scalar `va_arg` for
+  integer and double values. A compile-link-run regression exercises both
+  register save areas, and the preprocessed SQLite `test_syscall.c` compiles
+  and assembles with NYC.
+- x86-64 constant rematerialization no longer recursively rescans earlier
+  shift instructions while checking for fixed-register clobbers. This lets the
+  preprocessed SQLite `test8.c` compile and assemble with NYC.
+- Function typedef declarations can be completed by later matching function
+  definitions, including the `Tcl_ObjCmdProc` pattern in SQLite's test sources.
+  Opaque pointer-array indexing, pointer atomics, `unsigned short **` stores,
+  and addresses of file-scope character-array elements now lower through the
+  C frontend.
+- A file-scope definition can now complete a compatible external string
+  pointer array declaration, preserving the signed `char *` element type. The
+  frontend regression links and checks the initialized second string. Nested
+  aggregate initializers also accept one-dimensional array designators such
+  as `.extent[0]`; the new regression runs successfully, and Linux 7.3's
+  `kernel/user.o` compiles with NYC (with an outstanding `objtool` warning
+  about `panic()`'s missing visible `__noreturn` annotation).
+- The x86-64 emitter supports functions with more than 16,384 virtual values.
+  Indexed memory fusion now extends base and index live ranges to the access,
+  preventing stack-home reuse from corrupting fused pointer-array stores.
+  Compiler-generated static aggregate initializer data also receives local
+  ELF binding, so separate translation units can use the same private symbol.
+- NYC assembly output provides weak unsigned-64-to-float conversion helpers.
+  The feature-flagged SQLite 3.46.0 testfixture now compiles and links with NYC,
+  GNU `as`, Tcl, and the host linker. x86-64 stack-argument loads now account
+  for saved callee registers in the prologue, and narrow global-array indexing
+  uses byte and halfword element strides. A compile-link-run regression covers
+  calculated indexes into a file-scope byte array, and the C frontend suite
+  passes. File-scope scalar-array address lowering now uses the element pointer
+  type, fixing SQLite keyword lookup's character-table offset; the fixture
+  executes `select 1`. Fresh-output JSON, cache, and lookaside suites pass under
+  Valgrind with no errors or leaks; a separate NYC-built shell without optional
+  line editing passes SQL, persistence, transaction, JSON/blob, `VACUUM`, and
+  integrity-check smoke queries. The upstream full `testrunner.tcl all` run is
+  underway.
+- `__builtin_ffs` now lowers zero and nonzero integer inputs correctly; a
+  compile-link-run regression covers both and checks several bit positions.
+- The x86-64 `bsfl` output plus `rm` input and tied `0` input form used by
+  Linux's `__ffs` lowers through the count-trailing-zero sequence while
+  preserving the `-1` zero-input result. A runtime regression checks both
+  zero and set-bit cases.
+- Linux file-scope asm now accepts bare section switches, default section
+  shorthands, `.global`, numeric `.short`, filled `.balign` and `.skip`,
+  `endbr64`, and PC-relative direct jumps. NYC also lowers x86 `inb`/`inw`/`inl`,
+  `outb`/`outw`/`outl` with Linux's `Nd` constraint, and volatile 32-bit
+  memory-load asm. The linked frontend regression passes, including a runtime
+  load check. Preserving Kbuild's `-fconserve-stack` flag selects NYC O1, and
+  targeted `kernel/sys.o` and `arch/x86/kernel/quirks.o` builds succeed with
+  NYC and GNU `as` without `objtool` warnings; full Linux `bzImage` and modules
+  acceptance remains open.
+- Port-output inline-asm IR now retains the recognized instruction template,
+  satisfying verifier checks for `outb`/`outw`/`outl`. The Linux frontend
+  fixture also checks a 32-bit-shaped paravirtual-call operand list; its linked
+  executable passes, and GNU `as` assembles the port-I/O function without
+  executing the privileged instruction.
+- Struct fields can use the SysV x86-64 `va_list` array type, with its 24-byte
+  size and 8-byte alignment. The frontend regression checks the resulting
+  structure size.
+- Indexed writes to file-scope character arrays now use byte elements instead
+  of treating the array as pointer storage. A compile-link-run regression
+  covers indexed writes observed through a pointer alias.
+- NYC recognizes `_Float32`, `_Float64`, and `_Float32x` as the corresponding
+  32-bit and 64-bit floating types. An x86-64 host-linked runtime probe checks
+  their argument and return ABI; SQLite fixture compilation now advances past
+  these declarations and stops at the unsupported `_Float128` type.
+- Function-name literals and function type attributes between the return type
+  and declarator are lowered, covering Linux kernel declarations such as
+  section-attributed functions.
+- Linux's `mov` input to x86 debug registers now lowers through both NYC's
+  direct object writer and x86-64 machine-form encoder. The C frontend suite
+  passes, and `arch/x86/kernel/traps.o` compiles with NYC and GNU `as`.
+- Function-scope aggregate definitions can shadow file-scope tags. A
+  compile-link-run regression checks a local `struct item` against a global
+  tag with the same name; the upstream SQLite `test1.c` probe now advances
+  through the previous duplicate-tag diagnostic.
+- Static initializer relocations can refer to a function-local static object,
+  using its generated data symbol. x86-64 NYC lowering also supports
+  truncating an F64 value to I64; the preprocessed SQLite `test1.c` now
+  compiles and assembles with the testfixture feature flags.
+- x86-64 `a`, `c`, and `d` inline-assembly input constraints lower to their
+  fixed registers. Scalar and aggregate memory inputs lower to address operands
+  in assembly output; memory plus `Ir` register inputs lower through `%rdx`.
+  External C data and function references use their linker-visible names in
+  emitted assembly, while internal NYIR names remain distinct.
+  Signed 32-bit `+r`/`+m` read-write pairs lower for x86-64 atomic
+  instructions such as `lock xaddl`; a host runtime regression checks both
+  returned register and updated memory values. The `=@ccz`, `+m`, `+a`, and
+  `r` compare-exchange combination preserves the observed old value and success
+  condition for signed and unsigned 32-bit values; runtime regressions cover
+  success, mismatch, and zero-extension. Named immediate-only asm inputs
+  preserve integer constants initialized through `__auto_type`. Named
+  `er` inputs are accepted with memory outputs and zero-flag results.
+  Named memory-asm register operands use the register width implied by the C
+  input type, including 32-bit operands such as `addl`.
+  x86-64 function emission accepts aggregate parameters and returns aggregate
+  register classes through the SysV result registers.
+  Function-type parameters written as direct function declarators are adjusted
+  to function pointers in function declarations.
+  File-scope integer constant expressions support bitwise AND, XOR, OR, and
+  complement, including aligned array bounds used by Linux headers.
+  Global function-pointer variables can be called from C functions, chained
+  aggregate array elements retain modifiable lvalues, and
+  `__builtin_prefetch` is accepted as a non-observable optimization hint.
+  `typeof` preserves the return type of aggregate-member function pointers
+  through local declarations and indirect calls.
+  Callback signatures now survive `_Generic` selections, including the
+  statement-expression and volatile dereference pattern used by Linux's
+  `READ_ONCE`. Taking an aggregate-member address through a selected `_Generic`
+  lvalue is supported. Parenthesized addresses of external aggregate-pointer
+  array elements now retain the pointer-to-pointer type, covering the
+  `READ_ONCE` cast; a compile-link-run regression checks the loaded element.
+  Label collection ignores `default:` associations in nested expressions
+  rather than treating them as duplicate function labels.
+  Aggregate local assignments and mixed-width integer inputs to signed
+  32-bit overflow builtins are supported. Empty aggregate parameters retain
+  zero-sized ABI metadata and consume no argument registers. File-scope
+  integer-array assignments use the element pointer type for indexed stores;
+  indexed signed and unsigned 32-bit global array reads retain modifiable
+  element lvalues in expression assignments, and pointer-array elements retain
+  their addresses. Assignments to file-scope pointer objects remain writable
+  when their pointee type is const. NYC assembly output preserves ELF section
+  merge, string, and thread-local flags and emits file-scope data relocations
+  in offset order;
+  `__builtin_memcmp` resolves to the standard comparison function. GNU
+  `,##__VA_ARGS__` removes the comma when optional variadic arguments are empty.
+  Falling off a non-aggregate non-void function emits a zero return for C's
+  undefined fallthrough case. Comma expressions parse through complete
+  `if`/`while`/`do-while` conditions. Prefix/postfix pointer increments retain
+  the pointed-to aggregate type for subsequent member access. Taking the
+  address of a function designator preserves its function-pointer type,
+  including when the designator is returned from a GNU statement expression
+  and called immediately.
+  Address-of on parenthesized character-array members preserves their address
+  for kernel control-block casts.
+  Switch cases accept constant expressions using `__builtin_bswap16`.
+  Static local arrays can carry section attributes and retain their static
+  storage duration. The x86-64 `tzcnt %1,%0` inline-assembly form with an
+  `=r` result and `rm` input lowers through the hardware `tzcntq` instruction.
+  Carry-flag output constraints `=@ccc` lower to a byte result after the
+  assembly template, and `=@ccnz` supports memory inputs plus register-valued
+  masks. Empty volatile asm with a register input and `memory` clobber is
+  accepted as a compiler barrier.
+  Named immediate and absolute operands substitute `%c[name]` and `%a[name]`
+  placeholders; integer locals initialized with integer constant expressions
+  are accepted as named `i` operands until written or address-taken. Named
+  Named `=q`/`=r` register outputs and global-address immediate inputs are supported.
+  Whole-unit optimization inlines `static inline` C helpers before assembly
+  emission; x86-64 Linux jump-label `asm goto` carries its label edge through
+  NYIR CFG construction, DCE, SSA compaction, and symbolic operand substitution.
+  `lock incq %0` with matching `=m` output and `m` input constraints lowers to
+  an atomic memory increment; a compile-link-run regression checks the update.
+  The `=@ccz`, `+a`, `+m`, and register-input `cmpxchgq` form supports 64-bit
+  operands with a GS-segment memory override and runtime coverage.
+  Optimized return-address and frame-address builtins now store through their
+  allocated NYIR value homes; an optimized assembly runtime regression covers
+  the frame-address path.
+  Indexed byte loads use a valid 32-bit destination register, and named
+  `movl` register outputs select the matching 32-bit register spelling.
+  `typeof` on a string literal preserves its character-array extent for
+  aggregate member declarations such as Linux ELF notes. File-scope
+  `_Generic` selections initialize integer and pointer fields; constant pointer
+  conditionals select their evaluated arm. Incomplete tentative character
+  arrays can be completed by a later initialized declaration, and a matching
+  `extern typeof(object)` declaration remains valid after its definition.
+  Comma-separated uninitialized scalar globals with section attributes are
+  collected as one declaration; file-scope function-pointer arrays accept
+  designated indices and preserve zero-initialized gaps. `typeof` recognizes
+  string literals nested in `sizeof` expressions used by constant array bounds.
+  `_Generic` association expressions are type-checked without evaluating every
+  branch; void-valued GNU statement expressions remain valid associations.
+  Address-of scalar compound literals, parenthesized aggregate compound
+  literals in constant initializers, direct aggregate-member addresses,
+  parenthesized file-scope object addresses in pointer initializers, pointer
+  arithmetic and indexed stores through file-scope pointers, and
+  dereferencing pointers to scalar typedef arrays are supported. Braced scalar
+  globals, scalar-array index/range designators, and aggregate array
+  designators preserve zero-initialized gaps;
+  conditional expressions infer compatible static types for `typeof` and
+  `sizeof`. x86 Linux static-CPU-feature asm-goto sequences lower to equivalent
+  runtime capability-byte tests; the x86 LA57 `task_size_max` alternative
+  selects the small/large task limit from `boot_cpu_data`, and the IBPB
+  alternative calls `write_ibpb` only when the boot CPU has the feature;
+  the AMD DIV0 workaround executes its safe division only for affected CPUs;
+  x86 register outputs unescape GNU `%%` register literals before emission.
+  Both `__attribute__` spellings are
+  accepted in type and function declarations, and file-scope typedef-based
+  pointer-array definitions complete matching extern declarations. The x86-64
+  frontend lowers dynamic `__builtin_alloca` sizes to aligned stack allocation;
+  GNU `__label__` declarations resolve repeated local label names by position,
+  and `__auto_type` locals with cleanup attributes are supported in `for`
+  initializers.
+  Linux-focused regressions assemble and execute these paths.
+  The native x86-64 backend reads global register variables bound to `%rsp`.
+  Named write-only memory outputs in GS-relative x86 asm lower with their
+  input operand preserved; a runtime regression assembles and exercises the
+  GS-relative byte store.
+  The x86 unsigned index-mask `cmp`/`sbb` idiom lowers to an unsigned bounds
+  comparison and all-ones/zero mask, with boundary runtime coverage.
+  File-scope object declarations accept GNU `visibility("hidden")` and
+  `visibility("default")` attributes used by the Linux vDSO data page.
+  Constant-size memory-copy builtins lower to inline struct copies, and
+  unreferenced function-local static pointer tables are omitted so vDSO
+  objects do not gain dynamic relocations from dead tables.
+  Static array-element pointer relocations remain recognized through nested
+  casts and aggregate fields named after function typedefs.
+  Empty GNU asm statements with read-write `+rm` operands preserve the
+  operand while emitting no machine instruction.
+  The x86 ordered-RDTSC alternative lowers to `lfence; rdtsc`, then splits
+  EDX:EAX into its requested high/low C locals.
+  The x86-64 vDSO syscall asm lowers to the Linux syscall call path, including
+  tied-number and fixed-argument-register constraints; the vDSO CPU/node
+  alternative uses its LSL implementation rather than feature-specific RDPID.
+  Local `rdi`/`rsi` register bindings used as syscall inputs are treated as
+  ordinary C locals because NYC passes their values through the syscall path.
+  The vDSO robust-futex unlock idiom lowers to 32-bit atomic compare-exchange,
+  preserving its pending-operation clear on success; unsigned division,
+  remainder, and right shift lower to native x86-64 instructions without
+  compiler-runtime helpers.
+  The x86 runtime pointer-constant asm retains its runtime relocation section
+  while returning the immediate through its register output.
+  The NYC driver accepts lower-case `-fpic` and enables its position-
+  independent code path for Linux vDSO translation units; the explicit
+  `-fno-omit-frame-pointer`, `-foptimize-sibling-calls`, and
+  `-fasynchronous-unwind-tables` spellings are accepted for kernel builds.
+  NYC does not yet emit unwind-table metadata.
+  x86-64 variadic functions save the SysV GP and vector argument registers in
+  the 176-byte register-save area; variadic C frontend runtime tests pass.
+  The C preprocessor's `__COUNTER__` builtin increments for each expansion.
+  Macro-expanded angle/quoted include names retry with path-separator
+  whitespace compacted, covering stringified Linux trace include paths.
+  External objects may be declared with an incomplete enum tag before that
+  enum is defined later in the translation unit.
+  `typeof` of an aggregate's function-pointer member retains its function
+  result type when used to declare a function symbol.
+  Aggregate field layout supports three-dimensional arrays.
+  Frontend regressions assemble and execute the forms that are safe to run.
+- Multidimensional external aggregate arrays retain row strides during
+  indexing. Pointer-to-array aggregate fields retain their pointee size for
+  `sizeof`; local pointer-to-array declarations are accepted. Runtime
+  regressions cover field sizing and local declaration behavior. Pointers
+  obtained with `typeof(&external_array)` retain multidimensional scalar array
+  extents through dereference and indexing. `sizeof(typeof(u64[64]))` also
+  uses the complete array size. External globals declared through
+  `typeof(u64[64])` retain their array extent, element type, and 64-bit indexed
+  loads; parenthesized element addresses preserve the closing delimiters.
+  `typeof(&multidimensional_array)` preserves pointee extents in local pointer
+  declarations and applies the correct stride at each index.
+  Address-of on a function-call aggregate member preserves pointer-valued
+  fields, and locals shadow same-named function declarations in address
+  expressions. `typeof` keeps aggregate-pointer type across `*&` expressions.
+  Parenthesized string pointers in static aggregate initializers retain their
+  relocations, and assignment of a compatible aggregate to a global emits a
+  byte-preserving copy. x86-64 `get_user` inline assembly lowers its helper
+  call and both register outputs without losing local values under
+  optimization, including local `asm("%rdx")` output declarations. Read-write
+  `bsrq` constraints preserve the initialized output when the input is zero
+  and return the most-significant-set-bit index otherwise. Read-write x86-64
+  `xchg` assembly supports byte, word, dword, and qword operands, including
+  signed byte and word results; compile-link-run coverage exercises each width.
+  Locked byte `xorb` supports `=@ccs` output and returns the post-operation
+  sign flag; a compile-link-run regression checks the flag and updated byte.
+  Locked 32-bit `addl` supports a read-write memory operand and register or
+  immediate input; runtime coverage checks the atomic memory result.
+  x86 POPCNT alternative templates use their software helper call,
+  preserving correct behavior without CPU-feature patching. `rdmsr` and
+  `rdpmc` retain their fixed-register contracts; `rdmsr` exception-table entries
+  are emitted with the instruction;
+  safe reads and writes preserve error-register encodings in exception fixups.
+  Read-write `addq`/`subq` memory operands lower to ordered volatile
+  load/operation/store sequences.
+  `__builtin_strlen` of adjacent narrow string literals is constant-evaluated
+  in file-scope expressions such as module metadata assertions.
+  `typeof` infers arithmetic expressions rooted in numeric or character literals.
+  File-scope aggregate arrays accept C99 index designators.
+  File-scope integer arrays retain section attributes after the declarator.
+  File-scope multidimensional integer arrays accept nested index designators.
+  File-scope arrays of pointer-array typedefs preserve the typedef's element
+  count and row stride; compile-link-run coverage checks row addresses.
+  Static pointer initializers may decay an aggregate's array member to the
+  member's address, with compile-link-run relocation coverage.
+  Parenthesized function-typed parameters adjust to function pointers and can
+  be invoked; a compile-link-run regression covers the call.
+  x86-64 assembly output honors external and inline retpoline options for
+  indirect calls; compile-link-run regressions exercise both modes.
+  Opaque object pointers support element-scaled pointer arithmetic.
+  File-scope function-pointer variables declared through typedef aliases
+  retain function-symbol relocations.
+  x86-64 `cpuid` inline assembly preserves fixed-register inputs and writes
+  all four outputs through their destination addresses; a compile-link-run
+  regression compares its results with the host compiler.
+  x86-64 named register-output asm and GS-relative per-CPU reads, increments,
+  decrements, register adds, and decrement-and-test outputs now lower to
+  machine code; per-CPU symbol reads use signed 32-bit ELF relocations;
+  `pushf`/`pop` save-flags outputs also compile. Tests assemble or compile each
+  form.
+  x86-64 `__put_user_%c[size]` inline assembly lowers the Linux user-copy
+  helper's `%rcx` pointer, `%rax` value, and `%ecx` result convention; a
+  compile-link-run regression verifies the store and return value.
+  x86-64 read-write `cmpxchgq` outputs also accept pointer-typed values, as
+  required by Linux's pointer ownership compare-exchange path.
+  The classic `"=a"`, `"+m"`, `"r"`, and `"0"` qword `cmpxchgq` form used by
+  Linux's `__raw_cmpxchg` now has compile-link-run success and failure coverage.
+  `__builtin_ctzll` lowers 64-bit trailing-zero counts; compile-link-run
+  coverage checks low, multi-bit, and high-bit inputs.
+  Unary bitwise complement follows integer promotions and retains its 32-bit
+  result width for signed and unsigned operands.
+  Constant integer casts now truncate and sign-extend according to the
+  destination width.
+  GNU `__volatile__` is accepted as a field type qualifier without changing
+  aggregate layout.
+  Aggregate `deprecated` and `unused` attributes are accepted as
+  layout-neutral metadata.
+  Function-pointer typedef variables with file-scope initializers no longer
+  collide with function-type declaration parsing; GNU placement attributes
+  retain the initializer relocation.
+  File-scope assembly labels are recognized only outside quoted operands, so
+  colons inside adjacent `.ascii` strings remain data instead of being parsed
+  as labels.
+  `sizeof` on a local array uses its full element count and element size,
+  including arrays of complete aggregates.
+  Overflow builtins accept unsigned 32-bit result pointers and detect wrap
+  for addition, subtraction, and multiplication.
+  GNU zero-length array typedefs retain array identity and contribute zero
+  bytes to aggregate layout; static assertions check the following field offset
+  and containing struct size. Fixed-size, zero-initialized file-scope static
+  pointer arrays now emit their storage, with compile-link-run coverage for
+  character and aggregate pointers. Addressing a subscripted static pointer
+  array through a parenthesized array expression also preserves the element
+  pointer type, as required by Linux parameter-array declarations.
+  x86-64 `lock andl`/`orl`/`xorl` accept a 32-bit `+m` output with an `ir`
+  input and lower to locked memory operations; the C frontend test assembles
+  and runs all three.
+  GNU `bsrl` with a tied `-1` output/input now preserves the zero-input sentinel
+  and reports the correct 32-bit highest-set-bit index.
+  GNU statement expressions can now end at a local label before their value
+  expression, including `goto` exits used by Linux wait macros; both paths have
+  runtime coverage.
+  Frontend regressions exercise the shadowing, type, helper-call, bit-scan,
+  and privileged-instruction paths.
+  Integer function-address initializers now
+  retain relocations, and file-scope x86 assembly accepts `ret`, `int3`, and
+  `nop`. File-scope aggregate-pointer arrays infer incomplete bounds from
+  initializers and preserve member-address relocations. Compile-link-run
+  regressions cover the array values, both relocation forms, and assembly shim.
+  Repeated compatible `extern` aggregate-pointer declarations coalesce with a
+  later definition instead of being treated as duplicate objects.
+  Aggregate fields of type `void *` retain generic pointer semantics,
+  including GNU comparisons with function-pointer sentinels and stores through
+  struct members and `void **` lvalues.
+  Incomplete aggregate arrays infer bounds from the highest C99 index
+  designator, continue positional elements after it, and zero-initialize
+  skipped entries, including local statics.
+  File-scope string-pointer arrays accept enum-valued C99 index designators,
+  preserve positional continuation, zero-fill gaps, and replace prior string
+  or null elements when an index is designated again.
+- File-scope aggregate initializers evaluate `sizeof` array type operands such
+  as `sizeof(char[8])` and aggregate member operands; the frontend suite covers
+  both constant initializers. Aggregate array bounds also evaluate valid
+  arithmetic with parenthesized negative operands.
+
+### Memory and locality
+
+- Native programs retain the manual-memory default; tracing garbage collection
+  remains opt-in.
+- `str.repeat` now uses a runtime helper with one exact-size allocation and
+  locality-friendly pattern copies. Copy blocks stay aligned to the source
+  length, preventing repeated strings from changing phase at the 4096-byte
+  boundary. The regression checks a non-divisor pattern across that boundary;
+  both affected word-frequency fixtures pass cold correctness and focused
+  benchmark runs. The seven-run focused benchmark measured 22.6 ms on NYR,
+  78.9 ms on LLVM, and 92.5 ms on C; its checksum passed.
+- `bce-matrix` runs a data-dependent row-major traversal long enough to clear
+  the timer floor. Its focused benchmark measured 34.8 ms on NYR, 11.0 ms on
+  LLVM, and 1.59 ms on C; NYR/LLVM was 3.16x, below the per-fixture limit.
+- Linux sound dispatch converts dictionary-backed backend IDs before selecting
+  open/start/write/stop operations. This fixes output initialization and
+  playback through the standard PulseAudio protocol, including PipeWire's
+  PulseAudio server in Wayland sessions; backend selection stays compositor-
+  independent. The shared one-time library probe now returns a retained handle
+  when its required symbol is present.
+- The Brainfuck showcase links `libnytrixrt.so` relative to its source file,
+  so running the script from outside the repository root no longer depends on
+  the caller's working directory.
+- Added `core.os.cli` for declared flags, typed and repeatable values, short
+  clusters and families, generated help/completions, subcommands, conflicts,
+  and response files. The Brainfuck example uses it for `-c CODE`,
+  `SOURCE.bf`, and optional `--asm[=PATH]`; program output remains on stdout,
+  while implicit assembly output goes to stderr.
+
+### Verification — 2026-10-29
+
+- HM guard narrowing now retains the binding's pre-guard type for assignments,
+  so flow-only refinements do not become new assignment obligations. Rebinding
+  expires the narrowed fact, including through nested guards. Cold tests pass
+  for `mutable_aggregate_length_refinement_survives_literal_prefix`,
+  `mutable_aggregate_append_preserves_nonempty_fact`,
+  `mutable_aggregate_element_store_preserves_nonempty_fact`, and the
+  constant/general-bound, exact-length/content, and nested-guard invalidation
+  cases across all four execution variants.
+- `json_for` now names its generated dictionary local consistently with the
+  working `load_fields_for` template; the four-backend `codegen-load` fixture
+  passes cold.
+- Mutable declarations inside `comptime{}` now shadow rather than overwrite
+  same-named outer HM bindings. The long-loop compile-time-limit negative case
+  again reaches its intended diagnostic and passes all four variants cold.
+- The reversed mutable-list length-bound regression now has a 120-second
+  fixture timeout; its four cold execution variants pass in 77.1 seconds.
+- The conjunctive mutable-list refinement transport regression now has a
+  120-second fixture timeout; its four cold execution variants pass in
+  81.0 seconds.
+- The known-suffix indexed refinement regression now has a 120-second fixture
+  timeout; its four cold execution variants pass in 88.6 seconds.
+- The constant-expression mutable refinement store regression now has a
+  120-second fixture timeout; its four cold execution variants pass in
+  78.8 seconds.
+- The proven indexed-store refinement regression now has a 120-second fixture
+  timeout; its four cold execution variants pass in 89.9 seconds.
+- The disjunctive indexed-refinement transport regression now has a
+  120-second fixture timeout; its four cold execution variants pass in
+  77.3 seconds.
+- The local-write-before-guard regression now has a 120-second fixture
+  timeout; its four cold execution variants pass in 76.1 seconds.
+- The readonly fresh-aggregate refinement regression now has a 120-second
+  fixture timeout; its four cold execution variants pass in 75.6 seconds.
+- The UI frame-history probe now has a 120-second fixture timeout; all three
+  cold variants pass in 122.5 seconds total.
+- The HTTP server and fixture helpers use a disambiguated `core.os.args`
+  alias, avoiding collision with `core.os.cli`; the CLI parser and fixture
+  protocol probes pass cold.
+- CLI help now renders a registry-based `--help all` reference and focused
+  option groups from registry metadata; `--help gpu` combines GPU and parallel
+  tuning options, including workload thresholds and asynchronous/fast-math
+  switches. `-Os` now selects size-oriented optimization, while bare `-O`
+  requires an explicit level and exits 2. Short help marks value-taking flags,
+  lists the run/check/dump and other topic references, and explains the script
+  argument boundary while staying within the 40-line limit. Bash enum
+  completions are
+  syntax-checked and exercised; Fish output includes enum candidates and no
+  longer interprets legacy single-dash words such as `-run` as short letters.
+  Compiler boundary scanning now gets separate-value behavior only from the
+  option registry; the duplicated value-flag list was removed.
+  `--gpu-opt=...` now consolidates GPU offload threshold, mode, target, object,
+  async, and fast-math settings; invalid items and an off/force contradiction
+  fail with exit 2. Equals and separate-value forms have cold regression
+  coverage. `--opt-level=0|1|2|3|s|z` now accepts equals and separate values;
+  `s` and `z` select size optimization consistently with `-Os` and `-Oz`.
+  `--use=artifact=PATH,refinement-interface=PATH,effect-interface=PATH,`
+  `native-bundle=PATH` now provides one canonical input-artifact option while
+  the older specialized spellings remain accepted. Refinement/effect interface
+  fixtures exercise the canonical form through NYR execution.
+  `--nyr-limit=global-inst-cap=N,pass-growth=X,run-steps=N,run-recursion=N`
+  groups NYR optimizer and VM limits; registry help and parser coverage expose
+  its accepted keys, and the existing individual flags remain available.
+  `--jit-opt=engine=...,opt-level=...,code-model=...,fast-isel,perf-map`
+  consolidates JIT configuration without removing the original individual
+  switches. `--nyr-check=verify,bisect,rollback,flaky,fingerprint,oracle,`
+  `oracle-per-pass,tv-seed=N,fuzz=N` consolidates NYR verification and native
+  translation-validation controls while retaining their individual legacy
+  options. Invalid list items report the complete accepted item set and exit 2.
+  `--native-tuning=budget=N,hot=N,cold=N,cache-score=N,prefer=vm|asm` and
+  `--dwarf=version=N,locals,no-locals,split-inlining,no-split-inlining,`
+  `profile-info,no-profile-info` consolidate existing native tier and DWARF
+  controls. `--nyr-pass=disable:NAME,stop-after:NAME` groups NYR pass controls;
+  all three lists validate items and preserve the original individual switches.
+  `--emit=KIND[=PATH],...` now selects assembly, LLVM IR/bitcode, object, Wasm,
+  NYR, metadata, report, artifact/interface, shapes, and native-bundle outputs.
+  Omitted output paths derive from the input stem; explicit per-kind paths keep
+  multiple outputs separate. The CLI registry probe runs its emission checks
+  from an isolated temporary directory and removes their generated outputs
+  instead of leaving files in the repository root. Object output uses the
+  compiler's existing object emitter, and Wasm still requires a Wasm-compatible
+  target. The Brainfuck CLI emits assembly only when `--asm` is present; its
+  probe now runs in a disposable working directory so accidental relative
+  outputs cannot pollute the repository.
+  `-n` / `--print-flags[=json]` now prints recognized compiler options in
+  canonical form and separates the exact program-argument array from them;
+  JSON mode escapes code and argument strings. Deprecated value-taking aliases
+  retain their values when rendered in canonical form.
+  The short-family clusters documented by `--help short` now normalize through
+  the same compiler option parser, including attached `-jN`, `-tTRIPLE`,
+  `-oPATH`, and `-cCODE` values. Legacy spellings are recognized before
+  cluster expansion; repeated list-family clusters merge into one canonical
+  option. The legacy `-timeout` spelling is now preserved before `-tTRIPLE`
+  expansion, so it canonicalizes to `--timeout` instead of being mistaken for
+  a target. The legacy `-prof=LIST` spelling now accepts equals-form lists and
+  canonicalizes to `--prof=LIST`. Ordinary long-option invocations bypass the
+  expansion buffer.
+  `+debug`, `+release`, `+ci`, `+inspect`, and `+perf` expand to discoverable
+  built-in presets; later command-line flags retain override precedence.
+  `--trace=LIST` selects lexer, parser, scope, inference, LLVM, register
+  allocation, execution, and metadata traces; it accepts equals and separate
+  values with exit-2 validation. `--dump=LIST` selects the available AST,
+  tokens, LLVM, NYR, VM, escape, proof, native, and expansion inspection
+  outputs, also with validated equals and separate forms.
+  `cli-help-registry.nshape` covers generated help, JSON metadata,
+  completions, option parsing, one-row-per-registered-option structure, and
+  parser-to-registry membership. Setting `NYTRIX_CHECK_OPTION_REGISTRY`
+  checks each successfully parsed option; CLI fixture runs exposed missing
+  registry rows for `--emit-bc`, `--eval`, and `-e`, which are now documented
+  and accepted as metadata aliases. CLI argument regressions now include executable
+  shebangs, the first watch-mode run, and signal termination across JIT, AOT,
+  and native execution. AOT child processes return the conventional
+  `128 + signal` status instead of collapsing signal death into `-1`.
+  `ny -c 'print(1)'` startup samples were
+  54/57/55 ms before the latest registry/parser changes
+  and 56/55/49 ms afterward (53.3 ms mean versus 55.3 ms); no measurable
+  startup regression appeared in these small samples. Follow-up samples after
+  `--gpu-opt` were 49/58/56 ms (54.3 ms mean), within the observed run-to-run
+  variation. Three direct `ny -c 'print(1)'` smoke samples after the latest
+  help and registry changes were 48/56/51 ms (51.7 ms mean), still within that
+  run-to-run variation. Three direct samples after the latest parser fixes
+  were 49/51/73 ms (57.7 ms mean); the 73 ms sample is an outlier against the
+  earlier 48–56 ms range, so these samples do not establish a startup change.
+  The option registry
+  still does not cover every parsed spelling, so this is not yet a complete
+  CLI reference. Registry-generated flag names, `=VALUE` placeholders, value
+  choices, descriptions, and group headings now use the shared terminal color
+  policy; `-h <topic>` routes to the same focused option references as
+  `--help <topic>`; the `completions` topic documents supported shell names.
+  Native translation-validation, NYR bisect/fingerprint,
+  and debug-trace switches missing from the generated reference are now grouped
+  under `dump`, `nyr`, `native`, and `trace`, including call-graph inspection
+  and NYR dump-path controls. The `--dump-nyr` reference now states that the
+  binary dump defaults to stdout and accepts `=PATH` to keep binary NYR separate
+  from program output. The generated reference also includes the
+  release/debug presets and compiler progress, glyph, linker, and
+  source-extraction controls. `--help config` and `--help presets` now expose
+  the existing configuration flags, environment path overrides, and compiler
+  preset flags. Effect, alias, standard-operator, debug, DWARF, optimizer, and
+  strip controls are represented in the option metadata. Legacy safety,
+  ownership, stdlib, timeout, profiling, and execution spellings now have
+  explicit replacements and are hidden from human help and completions while
+  remaining in JSON metadata. Focused `--help --flag`
+  lookups now suggest the nearest registered option for a misspelling.
+  Deprecated spellings with replacements emit a note under `--warn=all`;
+  post-script arguments are excluded. The
+  registry also records Wasm output, safe-run limits, fallback listing,
+  strict-type disable, gprof disable, cache-cleaning, native, core-bitcode,
+  and LTO compatibility spellings.
+  `--emit-report`
+  now accepts both `--emit-report=PATH` and `--emit-report PATH`, including
+  `-` for stdout. The native oracle's fuzz-count and profile-input options now
+  accept registry-backed equals and separated values. Optimization pipeline,
+  bundle-output, and dump-directory paths now accept separated values too.
+- `argv-empty-boundary.nshape` covers `positionals_from` with and without `--`,
+  last-flag precedence, short equals-form values, and dash-safe `value_from`.
+  A missing option value no longer consumes a following flag; lone `-` remains
+  a valid value.
+- `cli-bare-inspection.nshape` checks 17 inspection options. Unsupported
+  requests now exit 2 with a concise `--mode=bare` diagnostic; the matrix
+  passes against a fresh compiler build.
+- `cli-conflicts.nshape` checks the 12 documented contradictory-option pairs.
+  The matrix caught two gaps: `-gc` with `-no-gc` was order-dependent, and
+  `--repl` with `-c` escaped validation because the flag scanner skips command
+  strings. Both now fail with exit 2 and name the conflicting options.
+- Canonical `--std` and legacy `-std` now accept equals and separate-value
+  forms, and `--target=host|wasm|TRIPLE` routes through the existing target
+  settings.
+  Invalid-choice handling for run, runtime mode, heap, native backend,
+  optimization profile, GPU, parallelism, sanitizers, color, completions,
+  warnings, standard-library mode, stop stage, native tier, and JIT settings
+  plus native ABI, C frontend, solver, dump scope, accelerator target/object,
+  legacy GPU target, ARM float ABI, debug format, desugaring, JIT
+  optimization-level, profiling-mode, optimizer-list, check-list, and
+  warning, ownership-check, and dump-scope values are checked by 36
+  sequential compiler invocations in the cold
+  `cli-enum-errors.nshape` regression. A compile blocker in the C parser was
+  also fixed by declaring `statement_end` before its first use.
+- Added registry metadata for previously omitted options including
+  `--safe-mode`, `--entry-name`, `--profile-time`, `--wasm-info`,
+  `--nyr-verify`, ownership/effect policy switches, and profiling controls.
+  `--entry-name NAME` now accepts both separated and equals forms; the bare ELF
+  entry-name regression covers both. `--prof=timing,stats,gprof,compile,peak-rss`
+  is the consolidated profile list, with `--prof MODE` accepting separated
+  values. `--opt=LIST` combines optimizer switches and `--check=LIST` selects
+  type/effect/alias/ownership checks; both support `no-` items. `--warn=error`
+  enables warnings-as-errors, and `--ownership-check=off|advisory|strict`
+  provides named ownership diagnostic modes.
+  Invalid `--dump-scope` values now use the concise exit-2 enum diagnostic.
+  `--perf MODE` accepts a separated value;
+  invalid modes use a
+  one-line usage diagnostic and exit 2. Registry
+  duplicate validation identifies the conflicting spelling. Gprof aliases
+  and `-time` appear in the registry. `--timeout=SECONDS` and
+  `-timeout=SECONDS` now work alongside
+  separated timeout values; `-std=MODE` is also accepted. Output paths now
+  reject a following option as a missing value rather than silently choosing a
+  default, while `-` remains a valid path token.
+- NYC now parses GNU switch case ranges and lowers `__builtin_clzl`,
+  `__builtin_clz`, and `__builtin_ctzl`; the C frontend regression passes
+  runtime boundary checks. GNU statement expressions with braced `if`
+  statements now compile, link, and run in a reduced Kbuild-style fixture.
+  Anonymous aggregate `sizeof` also honors no-argument `aligned`; the C
+  frontend regression passes its compile-time 16-byte size assertion. The
+  frontend also lowers empty-template `=r`/`"0"` tied pointer copies, with a
+  compile-link-run check. Scalar `sizeof` expressions and void conditional arms
+  are covered by frontend assertions/runtime tests. Direct Linux 7.3 `prepare`
+  generates device-table offsets, passes modpost, and generates time constants.
+  A static-function-pruning false reference from diagnostic strings was fixed;
+  `typeof` member expressions, volatile member stores, GNU `void *` arithmetic,
+  and runtime `__builtin_types_compatible_p` now have coverage. The latest
+  direct Kbuild runs now pass `__builtin_object_size`, Linux's
+  `__is_constexpr`/`sizeof(void)` pattern, and void GNU statement expressions,
+  with frontend compile-link-run regressions for unknown object-size modes,
+  external multidimensional row decay, and empty statement-expression bodies.
+  Linux 6.9 `x86_64 defconfig` also generates; its direct `prepare` passes
+  `__indirect_branch__`, asm-goto statement-expression labels, compatible
+  repeated and multidimensional external aggregate-pointer arrays, and pointer
+  arithmetic inside `typeof`, with runtime row-stride and type regressions.
+  It now stops at `irqflags.h:28` on
+  `native_save_fl`'s unlowered `=rm` output.
+  The x86 global `rsp` `ASM_CALL_CONSTRAINT` `"+r"` form now compiles and
+  passes a compile-link-run regression for a single direct call with no operand
+  placeholders. NYC also lowers the `=rm` local-memory output form used by
+  `native_save_fl`, runtime aggregate compound literals, `__builtin_choose_expr`
+  branches, address-of one-byte aggregate array members, and
+  `alternative_input`'s immediate-plus-`%P1` memory operands. Nested local
+  aggregate initialization now copies parenthesized aggregate expressions
+  into storage; the frontend regression passes. Both Linux 6.9 and 7.3
+  `prepare` now advance past `thread_info.h`, `find.h`, and paravirt void
+  statement expressions. The typedef-array pointer decay and level-zero
+  `__builtin_return_address` now have compile-link-run coverage. Those
+  intermediate runs had stopped in Linux 6.9 `asm-offsets.c` and Linux 7.3
+  `asm-generic/qspinlock.h`; subsequent parser fixes resolve the Linux 7.3
+  `READ_ONCE`/`typeof` path, preserve flexible-array identity in type
+  compatibility checks, infer arithmetic `typeof` operands containing
+  `sizeof`, support static scalar-array designators and aggregate member
+  assignment, and lower constant-level-zero `__builtin_frame_address(0)` with
+  a frame pointer; other levels fail compilation.
+  Compile-link-run regressions cover flexible-array type checks, array
+  designators, aggregate assignment, and frame-address correctness. A fresh
+  clean-output direct Linux 7.3 and Linux 6.9 `prepare` runs now complete
+  through their generated offsets and host `objtool`.
+  SQLite 3.46.0's core amalgamation and shell both compile with NYC, link with
+  Clang's compiler-rt, and pass a transaction/savepoint/rollback plus
+  `integrity_check` CLI smoke test (`1|3`, `ok`).
+- `core.os.file_read_lines` now propagates file-read errors without inferring the
+  error arm as the function's string result. The ABI fixture checks trimming,
+  blank-line preservation, and error propagation; the focused replay of all
+  reported failing fixtures passed 14 selected cases across their routes.
+- NYR lowering now preserves an already-f64 value when an integer-to-f64
+  conversion is requested, matching the LLVM and native backend semantics.
+  Contextual integer subtraction inside `float(...)` had emitted a redundant
+  conversion that corrupted VM text widths. The fixture-protocol regression
+  passes all three fixture variants; the bounded monitor replay matches five
+  frames and state across native, JIT, and VM.
+- UI smoke fixtures now execute eight demos independently on native, JIT, and
+  VM with five scripted frames, resize/key/close events, state markers, and
+  framebuffer hashes. The cold UI suite passes 24/24; synth VM completes in
+  138.164 seconds with bounded mock text rendering and audio-source setup
+  disabled when the mock backend has no audio device. This proves each route
+  executes. At that point, the explicit parity harness matched monitor, input,
+  pong, and synth; editor and terminal native/JIT frame hashes still differed,
+  leaving full cross-route parity to a later run.
+- All eight UI demos now match per-frame state, event, and framebuffer-hash
+  markers across native, LLVM JIT, and VM (24 route runs). The engine replay
+  loads the `ui-triangle` scene, selects and translates it, applies resize/key/
+  close events, and verifies camera/matrix state and changed pixels.
+- NYC now implements `-fomit-frame-pointer` with RSP-relative frames for leaf
+  and call-containing functions. Stack arguments, temporary call-stack
+  adjustments, spills, aggregate homes, and callee-saved state are covered by
+  compile-link-run regression. Dynamic `alloca` and variadic-list functions
+  conservatively retain RBP frames; the existing variadic translation-unit
+  runtime fixture passes with the option enabled.
+- NYC whole-unit x86-64 objects now support `-fPIC` and `-fPIE`, lowering
+  symbol addresses through GOTPCREL and direct calls through PLT32. Runtime
+  regressions compile and link both modes as shared objects and executables,
+  covering external/local data addresses and external calls. The object check
+  also requires `R_X86_64_64` relocations for file-scope pointer initializers.
+  A current-source comparison compiled the same fixture with NYC, GCC, and
+  Clang under both flags; all six objects linked and ran against the same
+  oracle. Local-data relocation forms differ (NYC GOTPCREL, GCC/Clang
+  section-relative), with matching runtime behavior.
+- NYC resolves `typeof`/`__typeof__` of global register declarations and reads
+  integer- or pointer-typed x86-64 `rsp` bindings as volatile register values.
+  Compile-link-run regressions check both type spellings, the emitted
+  `mov %rsp` instruction, runtime stack alignment, and a pointer-typed read.
+  Taking the variable's address is rejected; register writes and bindings to
+  other registers remain unsupported.
+- NYC now accepts `-S` and `-fverbose-asm` and emits GNU x86-64 assembly for
+  simple whole-unit C sources. The C frontend regression assembles, links, and
+  runs the emitted output. It emits file-scope data/relocations and
+  local/sectioned functions. Input-only `"i"` operands with constant
+  expressions are substituted into inline-asm templates for `-S`; this
+  supports Linux's `DEFINE` offset macro.
+- NYC prunes unreferenced static functions and defers unsupported operand asm
+  or `asm goto` inside them. Reachable unsupported asm remains a hard error;
+  regressions cover both paths, including non-inline static functions. Direct
+  Linux 7.3 Kbuild generates and assembles `scripts/mod/devicetable-offsets.s`,
+  passes modpost, and generates `include/generated/timeconst.h` with the
+  cached `bc` package on `PATH`. GNU switch case ranges now lower with runtime
+  boundary coverage. Kbuild `prepare` advances through time-constant
+  generation, then stops compiling `kernel/bounds.s` at
+  `alternative.h:114` because the frontend treats `if` as an undeclared call
+  target in that path.
+- NYC accepts no-op GNU attributes on supported block-scope declarators,
+  including an `__unused__` attribute on a secondary aggregate-pointer
+  declarator. A compile-link-run frontend regression covers the case.
+- NYC infers scalar and pointer types for initialized block-scope
+  `__auto_type` declarations; a compile-link-run regression checks an
+  aggregate-pointer initializer.
+- LLVM-mode CMake now declares both generated core artifacts (`core.ny` and
+  `core_symbols.h`) as command outputs, so Make can build targets that depend
+  directly on the generated symbol header. The `ny-fmt-cloc` parity test also
+  runs from the repository root, as required by formatter root discovery. The
+  shared-core cache checker now compiles a root entry wrapper instead of
+  treating its library module as an executable entry point.
+- NYC now preserves floating-point element types when indexing pointer fields
+  in aggregates. The frontend regression checks a `double *` field read, and
+  a freshly rebuilt SQLite 3.46.0 fixture passes `fts5eb.test` (284/284),
+  including the BM25 scoring cases that previously returned integer
+  conversions of double bit patterns.
+- NYC now emits 32-bit loads for `u32` elements indexed through aggregate
+  pointer fields instead of reading 64 bits. A Linux guard-page regression
+  covers the four-byte boundary; Valgrind on the rebuilt SQLite fixture
+  reports zero errors.
+- NYC now preserves the pointee type when forming an address through an
+  aggregate pointer field, including 16-bit elements. The C frontend regression
+  verifies that taking the address of an indexed `unsigned short *` field
+  returns the correct typed element address. Relaxed 16-bit atomic builtins
+  now use width-specific memory operations; a Linux guard-page regression
+  covers atomic load/store at the end of a mapped page. Fresh SQLite
+  `incrvacuum3.test` (53/53) and `fts3auto.test` (922/922) pass with no leaks.
+- NYC now preserves aggregate metadata when dereferencing pointer-to-pointer
+  values, so `(*cursor)++` advances by the aggregate size rather than 8 bytes.
+  The 40-byte aggregate compile-link-run regression passes, and the rebuilt
+  SQLite fixture passes `fts3auto.test` (922/922) with no memory leaks.
+- NYC now classifies signed-character double pointers as arithmetic pointers.
+  This fixes `char **` predecrement using a one-byte step instead of the
+  pointer-sized step; whole-unit prefix and postfix compile-link-run
+  regressions pass.
+  A freshly compiled SQLite fixture passes `tableapi.test` (157/157, no leaks).
+- NYC now accepts unreachable statements after a non-void `return`. This fixes
+  configured production SQLite core compilation, where `UNUSED_PARAMETER`
+  follows a return in an FTS5 initialization function. A whole-unit
+  compile-link-run regression covers the return path.
+- NYC now sign-extends integer results from indirect calls according to the
+  declared return type. A runtime regression covers a function pointer
+  returning `-1`; this fixes SQLite's Unix VFS unlink-error handling. The
+  matched SQLite 3.46.0 `veryquick.test` run passes 388,779 tests with zero
+  errors and no leaks. A fresh 8 MiB-stack run on the spill-colored fixture
+  passes 389,203 tests with zero errors and no leaks.
+- The spill-colored SQLite fixture also passes the compact 8 MiB-stack
+  regression set: `json101.test` (278), `boundary2.test` (3022), and
+  `boundary4.test` (55), with zero errors and no memory leaks.
+- NYC evaluates runtime `__builtin_offsetof` expressions in constant-
+  expression contexts. The translation-unit runtime regression checks the
+  field offset returned from a function.
+- NYC sign-extends signed 32-bit values loaded through pointer dereferences,
+  including casts from unsigned storage. The translation-unit regression
+  exercises the `INT32_MIN` alias/load boundary; a freshly rebuilt
+  feature-complete SQLite fixture passes `boundary2.test` (3022/3022) and
+  `boundary4.test` (55/55) at O2.
+- NYC accepts Linux Kbuild's `-Os` flag and compiles through its conservative
+  NYR `-O2` pipeline; the C frontend regression links and runs the output.
+  NYC does not yet provide a distinct size-optimized pipeline.
+- NYC now emits valid empty x86-64 relocatable objects, including for Kbuild's
+  `-Werror` retpoline capability probe. This lets Linux Kbuild pass its
+  retpoline-compiler check. Whole-unit x86-64 ELF `.s` inputs now assemble
+  through the host GNU assembler; a compiled object linked to a C caller
+  returns the expected value. NYC's `-fconserve-stack` selects its NYR `-O1`
+  pipeline even when a higher `-O` level is also specified; compiling SQLite's
+  feature-complete amalgamation with `-O2 -fconserve-stack` reduces
+  `jsonTranslateTextToBlob`'s frame to 0x210 bytes. A generated
+  `-O3 -fconserve-stack` C fixture also links and executes with the expected
+  result. A fresh Linux 6.9 Kbuild now passes retpoline setup and the empty C
+  object, then stops at `scripts/mod/devicetable-offsets.s`: the driver rejects
+  Kbuild's `-fverbose-asm` argument on its C-to-assembly (`-S`) command. A
+  fresh Linux 7.3 `defconfig` build reaches the same blocker.
+- NYC's x86-64 object backend now reuses stack homes for spilled values with
+  disjoint, register-allocation-safe live intervals. The direct object-encoder
+  regression executes two high-pressure, non-overlapping value groups and
+  checks their combined result. A fresh production SQLite shell built with
+  NYC passes `json101.test` (278/278, no leaks) at the default 8 MiB stack,
+  including `json101-11.0`;
+  `jsonTranslateTextToBlob` reserves a 0x500-byte frame instead of 0x20f0.
+- Refreshed the SQLite compiler comparison from current sources. GCC and NYC
+  O0/O2 builds, links, SQL correctness cases, and compile-link-run features
+  pass. NYR O2 median runtimes remain slower than GCC O2: 9.24 s vs 6.23 s for
+  the speed workload and 5.67 s vs 1.61 s for the memory workload; runtime
+  performance remains report-only.
+- The `nytrix-embed-api` CTest now runs from the repository root, where the
+  embedded compiler resolves its standard-library modules. Running from the
+  build directory exhausted comptime fuel while compiling those modules; the
+  full CTest suite passes 51/51 with the corrected working directory.
+- Memory-SSA forwarding now treats self-edges as backedges and keeps block
+  ranges correct when inserting join PHIs. Dedicated optimizer regressions
+  pass, and a clean NYC `-O1` compile of SQLite's feature-complete amalgamation
+  succeeds after the fix. Equal constants stored on separate branch edges now
+  retain a join PHI instead of forwarding one branch-local definition into the
+  merge block, preserving SSA dominance. Inserting a PHI at an empty block
+  boundary now extends the target block and shifts the following block start,
+  so branches to its label cannot bypass the PHI.
+- Constant `__builtin_offsetof` evaluation now follows nested aggregate member
+  designators. A compile regression covers the Linux Hyper-V trailing-overlap
+  `_Static_assert` and its exact byte offset.
+- NYC now reports pointer-width `sizeof` for subscripting pointer-to-pointer
+  aggregate fields, rather than the pointed-to aggregate size. The regression
+  uses a 56-byte record so the incorrect 56-byte result cannot equal the
+  correct 8-byte pointer size.
+- Aggregate parsing now accepts `__attribute__((packed))` between `struct` or
+  `union` and its tag; a regression checks the resulting packed layout.
+- Global integer constant expressions now evaluate `__builtin_choose_expr`;
+  true and false branch-selection regressions pass in the C frontend suite.
+  The C frontend also determines `sizeof` for dereferenced pointer conditional
+  expressions, covering Linux's `__is_constexpr` probe. Unsigned 64-bit
+  constant arithmetic now wraps correctly; regressions cover the Linux
+  `GENMASK_ULL` assertions. Unsigned-int complement also preserves its width
+  for cast operands.
+- NYC lowers signed 64-bit and unsigned 64-bit `__builtin_add_overflow`,
+  `__builtin_sub_overflow`, and `__builtin_mul_overflow`. The unsigned path
+  computes the high product half without a runtime helper; boundary
+  compile-link-run tests cover wrap and non-wrap cases.
+- NYC's supported GNU inline-asm subset now accepts named operand labels and
+  concatenates adjacent string literals in constraints and clobbers, matching
+  C string-literal concatenation. The pointer-identity asm regression uses
+  named operands and a split `"=" "r"` constraint; compile-link-run passes.
+- NYC now lowers indirect calls through external `__x86_indirect_thunk_r11`
+  retpoline symbols or an inline retpoline sequence. Both modes have
+  compile-link-run coverage; the inline sequence's return path preserves the
+  caller's stack return address. Linux 7.3's x86 Makefile uses the matching
+  external and VDSO-inline modes when `CONFIG_CC_IS_NYC` is selected. The
+  current kernel build passes the retpoline gate, generates offset headers and
+  initramfs data, and compiles with PIC and `-Os` through the x86 boot startup
+  source. Kbuild now passes the `GENMASK_ULL` assertions and unsigned
+  `size_add`/`size_mul` builtins, then stops in `asm/preempt.h` on its `"m"`
+  input constraint. `init/main.c` has another unsupported asm output
+  constraint, and `init/do_mounts.c` reaches the `typeof`-array declaration in
+  Linux's kfifo header. Full Kbuild remains open.
+  NYC supports whole-unit `-fPIC`/`-fPIE` objects with GOTPCREL and PLT32
+  relocations.
+- Extended NYC C parsing/lowering for trailing commas in automatic array
+  initializers, switch labels inside parenthesized expressions such as
+  `_Generic`, implicit float conversions in local initializers and direct-call
+  arguments, F32 aggregate-field assignments, typed nested pointer indexing
+  and assignments, general `for` initializer/step expressions, and pointer
+  compound assignment. Member access and assignment through aggregate pointer
+  arrays and same-named function-local aggregate tags with distinct layouts
+  now have regression coverage.
+  `nyr-c-frontend` passes after these changes, including a compile-link-run
+  regression that checks selected pointer identity and null-pointer behavior
+  for a ternary-controlled `_Generic` expression.
+- The configured preprocessed SQLite amalgamation now compiles successfully
+  with NYC: 3,901 functions and 3,268 data symbols. The generic-selection
+  type-probe path now isolates emitted NYIR, fixing duplicate labels caused
+  by ternary control expressions. This is compile evidence only; upstream
+  SQLite test-suite compatibility remains open. A fresh object also linked
+  with the SQLite FTS3 test helper and Tcl dependency; API smokes passed
+  windowed queries, recursive CTEs, JSON extraction, blob reads, rollback,
+  integrity checks, and a disk database close/reopen.
+- Fixed file-scope linkage detection so `static` declarations inside a
+  preceding function no longer mark later globals local. A cross-translation-
+  unit compile-link-run regression covers this boundary. The rebuilt SQLite
+  object now exports the FTS3 test globals needed to link an isolated upstream
+  `testfixture`. Its `alter.test` run still fails: the temp-table schema
+  assertion differs, then `alter-1.3` aborts with `malloc(): invalid size
+  (unsorted)`. Valgrind reproduces invalid reads and writes in `whereLoopXfer`
+  while copying WhereLoop term storage; the first invalid read is one byte past
+  a 1,072-byte allocation. The fresh `autoindex1.test` run also segfaults in
+  `autoindex1-299`, with Valgrind reporting an invalid read in `sqlite3Update`.
+  GDB stops at the faulting `pChanges->a[i]` load: `pChanges->nExpr` is 1,
+  but the generated loop index in `%r14` is pointer-sized garbage. The fresh
+  `ext/intck/intck1.test` run likewise segfaults at `intck1-1.3`.
+  SQLite suite acceptance remains open.
+
+### Verification — 2026-10-28
+
+- The C frontend regression now models SQLite's `JsonCache` layout, including
+  indexed pointer insertion from the `nUsed` field, count update, and indexed
+  loads. The focused `nyr-c-frontend` compile-link-run test passes. This checks
+  the aggregate layout/access pattern but does not resolve the upstream JSON
+  cache invalid-free failure.
+- Global C object emission now applies natural scalar or aggregate alignment,
+  including function-local static aggregate arrays. A whole-unit compile-link-
+  run regression verifies file-scope and function-scope static aggregate
+  addresses, and `nyr-c-frontend` passes. A freshly compiled SQLite core also
+  passes API smoke, 512 concurrent in-memory open/close operations, and 2,000
+  repeated JSON extraction calls; the full SQLite test fixture still needs a
+  correctly configured rebuild.
+
+### Verification — 2026-10-27
+
+- Fixed x86-64 native DWARF source mapping: machine encoding had freed the
+  instruction-offset table before the object writer emitted line rows, leaving
+  Nytrix breakpoints pending in GDB DAP. The offset map now survives through
+  line-table generation. The DAP smoke passes launch, line-9 breakpoint stop,
+  source-mapped stack trace, and step-over; its embedded NShape case also
+  verifies a source-mapped breakpoint and stack frame.
+- Fixed LLVM debug locations so generated locations use a function-local
+  scope rather than the compile unit. This prevented an LLVM optimizer crash
+  during `ny --emit-ir ... -g -emit-only`; the debug IR smoke verifies the
+  emitted compile unit and LLVM's verifier accepts the module. Nytrix and
+  embedded NShape hover/definition protocol smoke passes.
+- The DAP bridge now parses JSON integer fields through the token delimiter, preserving request sequence numbers in initialize and disconnect responses. The protocol smoke verifies both request/response sequence pairs.
+- `decompile()` now lifts its decoded rows once and builds the raw pseudocode
+  and CFG view directly, instead of invoking the clean pseudocode renderer and
+  full `structured()` analysis on every call. Full SSA/VSA/SMT and type
+  analysis remain available through `function_model()`; clean rendering
+  remains available through `ny_pseudocode()`. The generated C ELF fixture
+  passes at `-O0` and `-O2`, including behavior checks, lifted LEA/arithmetic
+  effects, signed branch-predicate rendering, typed compare effects,
+  symbols/relocations, and unsupported-instruction diagnostics. On this host
+  the fixture took 57.9 s with execution caches disabled; a cold one-function
+  decompile smoke took 38.8 s total (38.1 s JIT compilation, 0.058 s
+  execution). Cold compilation remains the dominant cost; these measurements
+  describe only this fixture and sample.
+- C aggregate-local lowering now handles mixed declarator lists with a pointer
+  declarator before an aggregate object, fixing SQLite's uninitialized struct
+  copy in `autoindex1-900`. A focused C compile-link-run regression and the
+  rebuilt SQLite `autoindex1.test` suite pass (37/37). Host-checked member
+  access regressions cover interleaved pointer/integer fields and a
+  `JsonParse`-shaped record through its final pointer field. The kernel model
+  regression also verifies that in-range RIP-relative data links at kernel
+  addresses and the final linker rejects an out-of-range relocation.
+
+### Verification — 2026-10-26
+
+- Native lowering and the runtime ABI table now classify `rt_atoi` as raw
+  `i64`, matching its runtime return and the `int` result of `str.atoi`; source
+  calls were rendered through the tagged-value formatter and returned nil for
+  `"32"`/`"42"` or 15 for `"31"`. The focused regression covers the implicit
+  module context, signs, digit termination, and empty input across native
+  O0/O2 and LLVM MCJIT.
+- Implicit boolean returns now box the joined value when a trailing `case`
+  statement supplies the function result. The focused regression covers true
+  and false match arms plus loop-carried boolean state on native O0/O2 and
+  LLVM MCJIT. The context-sensitive `core_bc` regression was traced to the
+  missing `rt_atoi` raw-integer ABI entry; the same focused `atoi` and vterm
+  probes now pass with source-stocked and compiled-core paths.
+- Fixture verdicts: `etc/tests/code/probes/cli/terminal.nshape` and
+  `etc/tests/code/intermediate/ny/vm-disasm-artifact-diff.nshape` pass the real
+  single-fixture runner with gate-parity flags. vterm passes with caches off
+  against both compiled-core (18.6s) and source-stocked (21.7s) routes. vterm's
+  root cause was `str.atoi` miscompiling per source-stream context, collapsing
+  every SGR parameter to a reset; `_tcsi_args` in
+  `lib/os/ui/render/viewer/vterm.ny` now parses its arguments with a pure
+  byte-loop number parser and all SGR flow routes through
+  `_tcsihandle_fast -> _tsetattr_fast`, restoring background- and
+  multi-argument SGR. The independent `str.atoi` raw-`i64` ABI fix and
+  compiled-core regression are recorded above.
+- Bench verdict integrity, harness side (`src/cmd/test/init.c`): default
+  3-sample bench rows never computed the instability verdict (it was gated on
+  `count >= 5`), so one fixture published contradictory samples
+  (`call-chain` NYR 1.012ms / 230.6ms / 2645.3ms) as a stable 230.6ms row,
+  tripping its 30x `native_c_budget` as a fake REGRESS (814x published). The
+  verdict now runs at any sample count via `bench_samples_conflicting`, using
+  scaled-MAD noise plus a range/median >= 10x poison signature that captures
+  cases where two divergent samples agree with each other and outvote one
+  fast sample; small counts judge on a 3x-widened limit so µs-floor kernels
+  do not flag, and sub-1µs rows stay exempt. The sampling loop also spends its
+  spare retry slots on a conflict trap that adds two samples so unpoisoned
+  runs can outvote transient garble. Full-suite evidence:
+  `build/bench-reports/bench-20261026-221627-2829576.json` — under session
+  churn the new gate marked `list`/`dgemm`/`dict-oracle` NOISY exactly where
+  contradictory samples existed; on quiet conditions all four rows passed.
+- Benchmark noise classification now relies on scaled MAD rather than a
+  range/median tripwire. A single scheduler pause remains visible in the
+  reported min/max and p95 but no longer discards an otherwise stable median
+  or its ratios. When samples remain unstable, the runner now spends its
+  existing bounded retry budget two samples at a time and reevaluates before
+  returning `NOISY`; persistent spread still yields `NOISY`.
+- Bench std stability, make side: `NYTRIX_TEST_USE_STD_BC=auto` is the new
+  bench default — `./make bench` pins a per-run `core.bc` snapshot into the
+  run's trace dir and passes `--core-bc` to every sample, so per-sample std
+  stocking can no longer compile against a stdlib that changes mid-suite. A
+  missing bitcode keeps the previous source-stocking fallback; `=1` still
+  builds `core_bc` first. Scoped-run evidence:
+  `build/bench-reports/bench-20261026-222237-2892760.json` shows the pinned
+  argv and a `call-chain` row at 0.5% dispersion / 0.1% noise. The fixture was
+  never at fault: ~0.93-1.1ms native against 283µs C, checksum-stable across
+  40+ runs, three core snapshots, cold stencil cache, and emit storms.
+
+
+- NYC now seeds `__STDC__` and parses GNU `malloc` deallocator, `access`,
+  `cold`, and `hot` attributes as no-op metadata; the C frontend regression
+  covers the supported spellings.
+- Linux ELF64 x86-64/AArch64 bare runtime coverage now includes integer, float,
+  and `any` formatting, float bits/boxing and value tags, C-string conversion,
+  concatenation, comparison, replacement and UTF-8 slicing, plus builder
+  operations. Static typed-buffer clones preserve their headers; the x86-64
+  writer retains those header bytes, and typed-list pop returns the removed
+  element. `generate.py --check`, both selected-target payload harnesses
+  (1,000,000 x86-64 and 100,000 AArch64/QEMU float differentials), and all four
+  cold fixtures in `etc/tests/code/intermediate/ny/bare` pass. The backend IR
+  acceptance CTest passes as well. Other OS/architecture pairs remain
+  unsupported.
+- `core.os.file_read` now performs its first raw read before testing for EOF; the cold `file-roundtrip-abi.nshape` regression passes all three routes, including with shared stdlib bitcode disabled. The related `semantic-effect-artifact` fixture remains open; current failure details are tracked in [TODO](TODO.md#current-check-failures).
+- Standard-library `core.bc` generation now skips its standalone LLVM optimization pass; consumers optimize after linking. Three cold runs improved from a 170.333 s median to 134.776 s (20.9%) on the measured snapshot. The bitcode grew from 17.43 MB to 30.97 MB; cache identity and generated-flow consumer checks passed. Exact identities, commands, warm-hit timing, and input invalidation behavior are recorded in [measurements](learn/measurements.md#standard-library-core-bitcode-generation).
+
+- Docs: the portal built from 523 modules and 21,238 symbols. All 50 learn/spec pages passed frontmatter, code-fence, callout, navigation, mini-TOC, link, and anchor audits. All 123 runnable Ny snippets compiled; 35 grammar or unimplemented forms are explicitly labeled. Light/dark code and callout surfaces were reviewed.
+- Tests: an isolated `BUILD_DIR=/tmp/nytrix-phase-a-full-check ./make check --jobs 4` completed hygiene, format, parse, audit, backend scaling, and semantic-artifact checks. Its cold fixture run passed all 2,449/2,449 fixtures across Runtime (641), Native (923), Interop (73), Repl (19), Probe (131), Error (591), and Benchmark (71); the shapes audit found zero failing fixtures. The explicit 71-fixture benchmark parity/performance run also passed every gate. The overall check still reports `INVALIDATED: sources changed during the gate`, so this is full passing test evidence but not a clean source-stability verdict. All fixtures in the earlier failure report, including the comptime round-trip, bare assembly, AVR constants, and ELF32 cases, passed. VM listing/artifact parity now passes for source and serialized NYIR at `-O0` and `-O3`, with a tested first-divergent-opcode diagnostic.
+- Benchmarks: the full cold parity/performance run passed all 71 fixtures with three measured samples plus a warm-up and unchanged thresholds. Fixture measurements run serially by default; `--jobs N` and `NYTRIX_BENCH_JOBS=N` opt into throughput.
+- Runtime-operation symbol classification now lives in `src/code/backend/runtime_ops.c`, shared by the Ny compiler and standalone Nyr backend. The runtime alias and argument-ABI tables are lexically ordered; `runtime_call_contracts` and the cold bare `asm-artifacts.nshape` replay pass.
+- Bare C-string equality now has freestanding x86-64 emission as well as the existing AArch64 path. Equality covers identical pointers, null pointers, and bytewise comparison through the terminating NUL; both architecture paths classify the helper through the shared runtime-operation identity.
+- Bare C-string comparison now has x86-64 and AArch64 runtime adapters, with signed byte-difference results for lexical order and null-pointer cases. The bare assembly-artifact fixture exercises both paths.
+- Bare x86-64 printing no longer routes boolean comparison results through the raw-integer printer. The comparison fixture now checks ordering predicates and null behavior on both native targets.
+- Bare runtime-operation and syscall-adapter preflight checks pass; operation classification is shared, while each architecture still emits its own instruction sequence.
+- The bounded internal x86-64/AArch64 decoder inverse now covers the audited in-tree encoder forms, including scalar/vector arithmetic and moves, packed operations, VEX, floating-point conversions, AArch64 SIMD shifts and scaled floating-point memory access, bare syscall stubs, relocations, and ELF labels. The x86 encoder oracle, `native_vec4_f64`, and architecture decoder regressions pass; unsupported encodings remain explicit without Capstone. Generated ELF original/decompiled behavior checks pass for `x+1`, `x-5`, and `x ^ 7` at `-O0`/`-O2`; relocation types, resolved helper targets, aliases/local labels, structured LEA effective addresses, and function-named unsupported diagnostics are covered. With `NYTRIX_NO_CAPSTONE=1`, all 162 fixtures in `etc/tests/code/intermediate/ny` and `etc/tests/code/probes/tools` pass. EVEX, broad vendor-extension parity, and arbitrary real-binary behavior remain outside the bounded in-tree encoder inverse.
+- Disassembly target parsing now slices decimal and hexadecimal operands through the standard string API instead of an undefined helper; this keeps the source-built decompiler path executable.
+
+- Bare x86-64 and AArch64 assembly-artifact coverage now checks source-level byte reads with positive, negative, and out-of-range indices; direct x86-64 and QEMU AArch64 runs produce matching values. Freestanding float formatting and broader platform support remain open.
+- Raw Linux syscall forwarding now preserves the dynamic syscall-number value expected by the runtime ABI. The syscall-filter and file-read fixtures pass all routes cold after rebuilding `core.bc`.
+- Fixture children now default `NYTRIX_TEST_MODE=1`, so direct-entry `__main()` checks exercise the same compile-time and runtime contract without changing the test scheduler. `lang/modules/use/guard.nshape` passes all four cold routes.
+- NYC now lowers GNU scalar statement expressions and treats `__builtin_expect` as an identity builtin while evaluating both operands; local-static symbol relocations and function-address expressions have linked runtime coverage. The C frontend suite passes. Linux 7.3 Kbuild now passes the prior `init/main.c` statement-expression, builtin, and static-address cases, then stops at `arch/x86/include/asm/bug.h:160` on the `=r` output constraint for a local-label `lea`; general inline assembly remains unsupported.
+- NYC now lowers the named Linux bug-entry asm shape: `[addr] "=r"` outputs, `%[addr]` register placeholders, `%c[name]` string/numeric immediates, numbered local labels, RIP-relative bug/file fields, and size-based `.org`. A compile-link-run regression checks the returned table pointer, relative pointers, and metadata.
+- NYC now lowers a named `"+m"` read-write memory operand with one named register input and optional `memory`/`cc` clobbers; a compile-link-run regression verifies the updated memory value.
+- NYC's `typeof` inference now retains aggregate array element types, and GNU `__builtin_offsetof` lowers variable array indices. Function-pointer/null comparisons, parenthesized for-loop declarators, void statement expressions ending in control statements, zero-size aggregate symbols, trailing inline-asm clobber commas, numbered `%1` memory inputs in immediate-plus-memory asm, Linux `"+m"` plus `=@cce` condition-code output, and local GNU `cleanup` attributes now have compile-link-run coverage. Cleanup functions run in reverse declaration order on compound-scope exit, return, break, and continue; the x86-64 backend emits local functions with local linkage. Linux 6.9 x86-64 `prepare` completes with NYC at the kernel's conservative `-O1` mode.
+- NYC's x86-64 global-register contract now matches the Linux use of `current_stack_pointer`: volatile integer/pointer reads and the direct-call `ASM_CALL_CONSTRAINT` `"+r"` form work; writes, address-taking, and non-RSP bindings are explicitly rejected. Runtime and negative regressions cover the boundary.
+- NYC's Linux Kbuild path now accepts `memory`/`cc` clobber lists, block-scope `_Static_assert`, broader arithmetic `typeof`, qualified `_Generic` pointer associations, direct `&*pointer`, and chained subscripting through global pointer variables. Global scalar-array arguments decay to typed pointers; typedef-defined aggregate array rows retain stride and decay to aggregate pointers. Parenthesized nested aggregate-member address expressions now have compile-link-run coverage, and switch cases accept enum constants and constant-expression GNU range bounds. Empty GNU aggregate `sizeof(*pointer)` accepts complete zero-size types, typedef-defined pointer-array rows retain their inner extent and pointer element type, typedef-defined aggregate-array fields decay to element pointers, scalar `const T[]` compound literals lower to function-local storage, undeclared `__builtin_memcpy`/`__builtin_memmove` calls lower to the standard memory-copy symbols, undeclared `__builtin_strlen` calls lower to `strlen`, local `_Bool` initialization and function returns normalize pointers to zero/one values, and `typeof(__builtin_choose_expr(...))` infers the selected branch type. Compile-link-run regressions cover these behaviors. Linux 7.3 `prepare` now completes `asm-offsets.c` and passes the `cpumask_empty(policy->cpus)` typedef-array decay in `rq-offsets.c`, then stops at `include/linux/cpufreq.h:264` in `cpufreq_get_pressure` with `reference 'const' must name a function parameter or declared local` while lowering the `READ_ONCE` expansion. Linux 6.9 `prepare` passes.
+- NYC now parses function-pointer-return declarations, supports nested signed `char **` indexing and stores, `sizeof(pointer[index])`, local character-array string initializers, and block-scope enum declarations with branch scope restoration. It models additional hosted declarations used by SQLite's shell. Addressing a file-scope signed-char array element now keeps the element-pointer stride rather than scaling by pointer size; a frontend runtime regression covers indexing and dereferencing that address. File-scope `static` objects now receive local ELF binding, with a multi-translation-unit link/runtime regression for colliding private functions, data, and literals. NYC compiles and links SQLite 3.46.0's shell and core; the shell reports version `3.46.0` and successfully creates a table, inserts a row, and selects `42`. The upstream SQLite test suite remains unverified. NYC rejects `-fomit-frame-pointer` because non-leaf omission is not implemented.
+- NYC now accepts unnamed integer bit-fields used for ABI padding and preserves following field offsets; the frontend regression suite compares those offsets with host C. Regressions cover continued macro comments, incomplete and later-completed enum tags, repeated external declarations, pre-name section/alignment attributes, enum ternaries, constant `offsetof`/`__alignof__`, unsigned-int complement width, `__builtin_clzll`/`__ilog2_u64` array bounds, and aggregate pointer arrays. Compatible `extern` aggregate declarations now complete into definitions, and file-scope designated initializers resolve promoted anonymous struct/union members; the compound-initializer runtime fixture covers both. File-scope assembly supports a bounded subset of section, alignment, and PC-relative `.long` directives; a linked runtime regression exercises the emitted relocation. Linux 7.3 Kbuild passes preparation and `checksyscalls.sh`, compiles `scripts/mod/empty.o`, and reaches `init/main.o`; the former `NR_VMEMMAP_TAILS` constant-bound and tracepoint aggregate-initializer failures now pass. At this checkpoint, Kbuild stopped at `.pushsection .static_call.text, "ax"` in file-scope asm generated by `include/trace/events/initcall.h:10`; a later run passed that and the earlier `rip_rel_ptr`, `WARN`, `__builtin_expect`, and local static-address cases, then stopped at `arch/x86/include/asm/bug.h:160` on an operand-bearing asm output constraint. GCC compatibility macros identify version 12.0.0 for guarded headers, not full GCC compatibility. General function-scope inline assembly, global-register semantics, `-fPIC`, and complete kernel compatibility remain unverified.
+- NYC now lowers relational object-pointer comparisons as unsigned addresses; this fixes SQLite's `sqlite3Utf8CharLen(..., -1)` sentinel loop, with a compile-link-run regression. Block-scope scalar `extern` references and compound assignments to external globals also have translation-unit runtime coverage. Address-taken `float`/`double` locals now reload and store through their stack homes after address escape; a runtime regression covers a callee-written `double` passed alongside a pointer in the SysV floating-point argument register. The C frontend CTest passes; enum checks pass 64/64, include checks pass 60/60, assert checks pass 22/22, POSIX-header checks pass at O0/O2, preprocessing passes 86/86, and the sanitizer-backed stress suite passes 39/39. `build-cfe-asan.py` now snapshots the current split frontend sources instead of removed `nyc_frontend.c`/`c_lex.c` inputs. Full configured CTest passes 50/51; its sole failure remains `core-bc-cache-selector`, whose changed-core source hash checker exits 0 with a mismatch. NYC forwards Kbuild's exact `-Wa,--version` probe to the system assembler: Linux 7.3 `defconfig` passes, while `vmlinux` remains blocked by the enabled retpoline compiler gate. The current NYC SQLite core compiles and links into a non-PIE upstream fixture; `ext/intck/intck1.test` passes 70/70. GCC passes `alter.test` 120/120, while NYC segfaults at `alter-3.1.1` in `sqlite3VdbeExec` at both O0 and O2. GDB shows a heap-end store; measured `Mem` and `Vdbe` layouts match GCC, so the pointer calculation still needs diagnosis. Full SQLite acceptance remains open.
+- Current SQLite build/check/features and three-sample measurement runs pass all benchmark correctness checks at GCC/NYR O0/O2. Median speed-test time is 10.208 s on NYR O2 versus 4.337 s on GCC O2 (2.35×); memory-test time is 6.870 s versus 1.462 s (4.70×). The single-sample register-switch feature check passes, but NYR O2 takes 0.468 s versus 0.0260 s on GCC O2 (18.0×). These workloads are slower with NYR; measurements are not acceptable-performance certification because no threshold is defined.
+- The module-cache equivalence probe now clears inherited test mode before setting each child compiler's explicit environment, keeping its unset, empty, and enabled cache-key cases distinct. The focused cold probe passes.
+- `filter_map` now tests dynamic results with `is_nil` before retaining them; the shared collection and iterator assertions pass cold on all fixture routes.
+- The documentation site now uses theme tokens for code, callouts, cards, and navigation, with a light palette selected by `prefers-color-scheme`; browser previews confirmed readable code and callout surfaces in both palettes. Fixed the quick-reference link to the syntax bindings section.
+- Language-reference pages now mark grammar fragments and surrounding-program placeholders instead of presenting them as standalone code. Expression-based `#if(arch())` is identified as unsupported; platform guards remain the supported selection form.
+- Type inference now treats caught panic payloads as dynamic Ny values inside a scoped handler environment; `abi-conformance.nshape` passes all five cold routes, including the caught division and length errors.
+- Native comparisons now preserve the raw integer ABI of literal-initialized top-level globals when compared with proven scalar list reads; the cold append-built list ABI fixture passes all four backend variants.
+- Native match-expression conditions now normalize boolean-valued arm joins before branching. Result error-pattern bindings preserve dynamic string and integer payloads; generated reflected enum matching passes all four cold routes, and the Ny desugar budget probe reports its intended diagnostic.
+- AVR portable emission now lowers boxed `rt_flt_nan`/`rt_flt_inf` results directly to IEEE-754 constants when every use is an `rt_any_to_f64` conversion. The AVR float-runtime fixture splits comparison/conversion groups to fit the ATmega328P flash and passes its serial QEMU route.
+- AST signature and contract queries now narrow node-kind values to strings before classifying them, and typed statement/declaration constructors reject invalid quote metadata. The AST code-query fixture passes both variants.
+- Remote socket retries now recognize tube dictionaries explicitly, and socket reads detect received bytes by length rather than string comparison with the empty literal. Cold loopback socket and tube ping-pong probes pass.
+- The `--vm-disasm[=<name-filter>]` option prints sorted NYR instruction listings with available source and ABI annotations, including the bare entry function. Focused format fixtures pass; this listing is not native machine-code disassembly or a runtime trace.
+- VM listing fixtures now pin single-instruction formatting at `-O0` and `-O3` and compare the executed source listing byte-for-byte with the same program loaded from an NYIR bundle.
+- VM listing parity now compares direct source execution with execution from serialized NYIR at `-O0` and `-O3`. A failing comparison reports the first differing opcode line; the artifact-diff fixture passes cold.
+- MT19937 SMT recovery now narrows constraint-kind values from dynamic dictionaries to strings before matching `eq` and `hi` constraints; its cold solver fixture passes.
+- The bounded-JSON nesting probe now checks the decoder's boolean result directly, so its at-limit and over-limit cases assert the actual contract.
+- Standalone benchmarks now run fixture measurements serially by default; `--jobs` and `NYTRIX_BENCH_JOBS` remain explicit throughput overrides. The SOR Ny workload uses the same alternating source/destination-buffer loop as its C oracle, preserving its checksum and four-route fixture coverage.
+- Documentation Phase A now has verified navigation, frontmatter, callouts, fenced-language labels, spec mini-TOCs, and local links across all 50 learn/spec pages. All 123 runnable Ny blocks passed parse/type/trait/flow/ABI checks; 35 grammar or unimplemented forms are explicitly labeled. The portal parsed 523 modules and 21,238 symbols, built successfully, and its light/dark code and callout surfaces were reviewed.
+- Clean `./make check` passed 2,447/2,447 fixtures; its integrated benchmark gates passed. Standalone `./make bench` passed all 71 fixtures with the new serial-by-default measurement mode and unchanged thresholds.
+- Native x86 list-pop lowering recomputes the header address at its update store, avoiding an uninitialized branch-local stack home; the cold `result-list-mutate-x86-64` native oracle passes.
+- The `parallel_map` guides now use a runnable example; `parallel-map-jit-parity.nshape` passes all four JIT, native, and threaded routes.
+- Native `str(any)` formatting now checks the emitted tagged-value class before
+  applying sequence-specific formatting. This preserves strings returned by
+  dynamic lookups; the cold `semantic-effect-artifact.nshape` consumer passes
+  after rebuilding `core.bc`.
+- `core.os.io.recv_all` now treats invalid-stream integer sentinels as empty
+  input instead of reading `.len` from an integer. Bare x86-64 and AArch64
+  fixtures also cover owned C-string conversion, `str.chr`, and `str.repeat`.
 - Native code: register allocation, signed arithmetic, target ABIs, and object
   linking.
+- Runtime implementation sources and runtime API headers now live under
+  `src/code/backend/runtime/`; language builtin effect contracts remain under
+  `src/code/lang/`. CMake, compiler build/cache dependencies, embedded-runtime
+  tests, and documented source paths use the new ownership split.
+- Native AOT: x86-64 bare integer `eprint`, byte `rt_memset`, and page-rounded
+  mmap-backed `rt_malloc_i64`/`rt_free` work without a host assembler,
+  including multi-page writes, successful `free`, null `free`, and negative-size
+  allocation regressions. Runtime C-string concatenation and explicit
+  `rt_cstr_to_str` conversion now emit page-backed, tagged-length strings in
+  bare AArch64 ELF; x86-64 also supports concatenation. AArch64 directly
+  compares C-string contents, including equal and unequal null operands, and
+  computes C-string lengths. Bare AArch64 boolean formatting covers computed
+  true/false values, not only constants. The
+  cold fixture checks empty/nonempty operands, nested concatenation, `.len`,
+  and exact 4 KiB output on both targets. Freestanding binary64/`any`
+  formatting, replacement, UTF-8 slicing, and builders now pass on both
+  selected targets. x86-64 ELF object emission now fails closed through the
+  in-process writer rather than invoking an assembler fallback; all 60 tests in
+  `etc/tests/code/formats/elf64` pass cold under `CC=/nonexistent`.
+- Native x86-64 optimization retains range-proven 32-bit arithmetic, safe COPY
+  home coalescing, and non-overlapping stack-home reuse. The compiler defaults
+  to `-O2` with size optimization enabled; a bare arithmetic/output probe
+  measured 4,473 bytes at `-O0` and 4,423 bytes at `-O2`, with both printing
+  `81`. Focused `narrow` and machine-home semantic tests pass.
+- Native x86-64 no longer writes a canonical stack home for a colored value
+  whose proven final use is a same-block return; the return consumes the value
+  directly from its assigned register. The encoder oracle covers ordinary and
+  signed-wrap boundary inputs; the focused function shrank from 48 to 41 bytes.
+- NYC C frontend: whole-unit C objects now accept fixed-size zero-initialized
+  file-scope arrays of aggregate pointers, and modeled hosted headers expose
+  the common declarations needed to compile Linux 7.3 `fixdep.c`. Its NYR
+  object now runs with output matching GCC. The standalone driver supports
+  forced includes and Kbuild dependency files, with regression coverage for
+  both. Anonymous aggregate members now have promoted access and a layout
+  regression. Forced includes also work for standard-input sources. The
+  preprocessor seeds target-width and x86-64 platform macros and supports
+  variadic comma elision, conditional ternary/unsigned preprocessor expressions,
+  File-scope `_Static_assert`, `_Bool`, `__signed__`, aligned aggregate fields
+  (including attributes between a type and field name), `warn_unused_result`,
+  `__extension__`, parenthesized function typedefs, fixed array parameters,
+  allocation-related attributes, external aggregate-pointer globals, and
+  multiple external integer-array declarators are supported. Preprocessing
+  emits requested dependency files, including stdin input without a dependency
+  target crash; nested token-paste macro dispatch and comments within continued
+  macro replacements have regression coverage.
+  Array bounds support shifts, comparisons, conditional expressions, `sizeof`,
+  and `__alignof__`. A fresh local-adapter Linux 7.3 Kbuild run passes
+  preparation and `checksyscalls.sh`, compiles `scripts/mod/empty.o`, and
+  reaches NYC compilation of `init/main.o`; it fails at
+  `include/linux/seqlock.h:174` on the type near `seq = smp_load_acquire(...)`
+  while expanding `SEQCOUNT_LOCKNAME`. Direct compilation of the preprocessed
+  `init/main.c` reaches the same expansion and fails at
+  `build/cache/kernel-7.3/build/init/main-fresh.i:21841` near `seq=({ ... })`.
+  The no-SSE scalar-integer path is tested to emit
+  no SIMD registers and rejects floating-point/SIMD code. NYC seeds
+  `__GNUC__` 12.0.0 for GCC-guarded Linux declarations. `-mcmodel=kernel` and
+  `-mcmodel=small` are accepted using RIP-relative addressing, but full kernel
+  range constraints are unverified. General C inline assembly and global
+  register-variable semantics remain unsupported; `-fomit-frame-pointer` and
+  `-falign-functions=16` are accepted no-ops. Full kernel-build compatibility
+  is not established. The SQLite library/API comparison against GCC is
+  verified, but shell compilation and the upstream test suite are not.
+- Runtime fixtures: `lang/execution/defer.nshape` passes all five cold routes
+  on 2026-10-25; the stale MCJIT/ORC warning was removed from the control-flow
+  guide.
+- Runtime fixture: `lang/language/prolog.nshape` passes its cold routes on
+  2026-10-25.
+- Runtime fixture: the `lang/types/inference/type.nshape` alias/group prefix
+  passes explicit numeric alias and seeded group checks. Correct native assert
+  truthiness now exposes a later `lowercase type-first poly_ring lhs` failure;
+  the full fixture remains open.
+- Runtime fixture: `lang/comptime/reflection/reflect-metadata.nshape` passes all
+  four cold variants on 2026-10-25.
+- Documentation search ranking now uses its existing ASCII-folded byte matcher
+  for exact full-name, name, and leaf comparisons, plus bytewise lexical
+  comparisons for deterministic kind and full-name tie ordering. The `doc-rank`
+  fixture passes all four cold variants.
+- Documentation metadata collection uses bytewise route ordering, and its
+  fixture uses a monotonic suffix to avoid stale temporary-directory collisions;
+  all four cold routes pass.
+- The generated layout field-store regression now passes all four cold routes;
+  the earlier boolean writer mismatch did not reproduce on the current build.
+- SVG rasterization now keeps tag names typed and excludes `line`/`polyline`
+  fills through explicit byte matching. The pixel fixture verifies opaque
+  rectangles, icon coverage, and open-path behavior on all three cold routes.
+- Typed AST code envelopes now serialize the sequence marker as integer `0/1`,
+  matching the validator's required representation. The `ast-code-queries`
+  fixture advances past declaration-category validation; a separate qualified
+  `codeof` panic remains open.
+- Native assert lowering now converts tagged and dynamic conditions to raw
+  predicates before calling the C runtime, so tagged `false` fails as intended.
+  A new subprocess regression passes all four cold routes. The now-visible
+  TrueType face-load failure was later traced to FFI library-handle checks.
+- The font text-codepoint probe now selects the mock renderer to avoid requiring
+  a Vulkan device. Fixing pointer/integer zero checks in `core.os.ffi` lets
+  `dlopen_checked` retain a valid FreeType handle and resolve symbol pointers;
+  the codepoint and TrueType metrics probes pass all three cold routes. A new
+  checked-open fixture also passes native O0, MCJIT, ORC, and native-only routes.
+- The cold `ffi-pointer-handles` fixture reaches a separate odd-scalar conversion
+  mismatch (`__ffi_untag_ptr(83)` is observed as `41`); it remains open in TODO.
+- The expanded list-argument ABI fixture no longer reproduces its stale
+  receiver/index mismatch and passes all eight cold routes with source caching
+  disabled.
+- The captured-callback divergent effect-row fixture no longer reproduces its
+  earlier timeout; all five cold cases pass across native, MCJIT, ORC, and
+  native-only routes.
+- The generated-runtime ownership shadow differential no longer reproduces its
+  prior high-RSS timeout; all three cold routes pass in 18.2 seconds at 392 MiB
+  peak fixture RSS.
+- The semantic-effect artifact probe no longer reproduces its high-RSS timeout:
+  it emits the artifact in 8.5 seconds, then the native consumer reports an
+  unsupported typed semantic fact shape. That consumer gap remains open in TODO.
+- XML parsing now initializes the root node by checking its dict representation
+  instead of comparing a dynamic `any` root with integer zero; the cold
+  `xml-attr-probe` passes.
+- Process tubes now classify `kind`, `offline`, and `closed` through typed
+  checks, fixing process read/send routing; `interact-process` passes its cold
+  fixture. The related argv-spacing probe now advances to its spaced-argument
+  assertion.
+- WAV resource dispatch now normalizes the extension into a typed string so
+  `.wav` selects libsndfile; the bundled cold `sound-wav-resource` fixture
+  passes.
+- The cold virtual-terminal cell-output probe now passes all declared routes.
+- Request preparation now checks optional dynamic sentinels by type and keeps
+  integer query values during URL encoding; the strengthened GF2/import and
+  request-query fixture passes all bundled cold routes.
+- Process argv normalization now compares the first argument as a typed string;
+  the bundled cold process-recvuntil fixture passes its spaced-argument case.
+- UI event validation now checks the dynamic event tag as a typed string, and
+  per-window event drains use the queue's integer key; all bundled cold
+  ui-native-event-queue variants pass.
+- The X11 client-message close probe also passes its three cold variants with
+  the corrected event tag check.
+- Native calls: preserve floating-point argument classes when lowering calls
+  through runtime ABI aliases.
+- SysV AMD64 native object calls now set `%al` to the number of vector argument
+  registers before external calls, including variadic calls. The NYC regression
+  passes a `double` through a variadic C function and checks it with `va_arg`.
+- Native assembly: Linux x86-64 `__syscall_raw` calls emit the `syscall`
+  instruction directly instead of calling the C runtime helper.
+- Native backend tests: deterministic x86-64 encoder checks execute direct
+  object code and clang-assembled machine output against expected float
+  comparisons, immediate boundaries, and signed power-of-two division.
+- Bare AArch64: `rt_syscall_raw` lowers to Linux `svc #0` with AAPCS argument
+  registers translated to the Linux syscall ABI; unsupported OS targets remain
+  fail-closed.
+- Shared runtime-operation classification now identifies Linux syscalls once;
+  x86-64 and AArch64 platform lowering consume that classification instead of
+  duplicating the runtime-helper name check.
+- The shared classifier also covers bare print/conversion, clock, memory, and
+  C-string helpers; AArch64 bare lowering and fail-closed dependency checks use
+  those operation categories rather than repeating helper-name comparisons.
+- Native assembly: pooled strings use escaped `.ascii` data plus a terminator,
+  preserving embedded NUL and arbitrary byte values without one `.byte`
+  directive per character.
+- Native booleans: negate both raw predicates and canonical tagged boolean
+  values correctly.
+- Native environment lookup: `core.os.env` reads inherited variables through
+  the native-safe runtime getter.
 - Language tools: bounded refinements, callback effects, hygienic templates,
   and typed reflection.
 - Applications: UI rendering, audio playback, terminal behavior, and runtime
   representation fixes.
+- Documentation: reordered learning paths, clearer language references, and
+  theme-aware semantic callouts.
 - Documentation: public contributor guides, source-highlighted examples, and
   explicit implementation limits.
+- Documentation rendering: normalize indented line continuations in inline
+  text so list items do not retain source indentation as visible spaces.
 
-<details>
-<summary>Details</summary>
+### Documentation onboarding — 2026-10-24
+
+- The native guide now includes a runnable minimal C `sqrt` call. The testing
+  guide points readers who only need to run a program to the start guide, and
+  the contributor guide is included in manual navigation metadata.
+- The cookbook now labels its `parallel_map` snippet as unverified and points
+  to the concurrency guide's runtime warning.
+
+### Runtime fixture recovery — 2026-10-24
+
+- Cold native runs pass the path-normalization and JSON-state fixtures across
+  all declared routes; the extensible-syntax and indexing fixtures pass their
+  default route. Syntax form-head checks now distinguish the integer zero
+  sentinel from string heads and read string heads through a typed list
+  accessor. The proof-policy fixture passes all four cold routes. Other Phase A
+  failures remain open in `docs/TODO.md`.
+- AArch64 bare object emission now reserves integer/boolean formatting scratch
+  before the value and local slots, keeping its frame offset within the
+  immediate range even in large functions; the scalar-classes AArch64
+  and runtime-numeric-results AArch64 object-link-run fixtures pass. Native
+  global bool stores now normalize raw predicates and tagged values to the
+  canonical tagged cell representation; the ABI conformance fixture and the
+  general scalar-classes fixture pass all five routes cold.
+- Additional cold debug-failures checks pass for the ABI disassembly fixture,
+  bare entry-name and x86 typed-list-length fixtures, raw dynamic indexing,
+  logical loop branching, nine AST metadata/serialization/rewrite fixtures,
+  generated SOA representation and all three WASM32 runtime variants. The
+  SOR native-only O0 route now passes after the x64 backend keeps
+  stack-home floating-point memory LEAs materialized and reloads the canonical
+  address instead of rematerializing it through the scratch-index path. The
+  one-sample cold correctness benchmark reports NYR 3.70ms, LLVM 716µs, and C
+  1.03ms; ratios remain advisory for this single sample. The
+  x86-64 result-list oracle still fails after the rebuild with harness status
+  139; a `-vvvvvv` GDB repro localizes it to a null stack-home store in the
+  generated append/pop path, and it remains open. The remaining AST query failure is an out-of-range
+  `index_read`; generated store-fields fails its unknown-field assertion. The
+  SOR benchmark reports correct output, though its native-only O0 route returns
+  an incorrect checksum (863729793 instead of 1725461952). A one-iteration
+  reduction and standalone O0 typed-buffer fill/boundary probes narrow the issue
+  to the nested stencil loop path.
+- AVR cold checks also pass for divmod, scalar byte/global memory, scalar
+  calls, the complete stack-argument fixture (including both rejection cases
+  and QEMU execution), and the panic fixture through emission, assembly, link,
+  QEMU trap execution, rejection, and cleanup. The panic fixture exposed a
+  raw-bool runtime alias classified as tagged; call lowering now preserves the
+  runtime ABI result class through a source-level bool declaration. AVR float
+  comparison return branches now use absolute `jmp` instructions to the shared
+  epilogue, clearing the former `R_AVR_13_PCREL` link overflow; the exact QEMU
+  fixture now reaches execution but emits neither expected UART byte before its
+  timeout, so it remains open.
+  The BPF assembly fixtures now import `env` explicitly from `core.os`; both
+  portable-rotation and signed-opcode assembly checks pass cold. The ny-desugar
+  budget diagnostic and parity fixtures also pass (eight parity variants).
+  File-roundtrip ABI, all fixture-protocol cases, and the term quit-key probe
+  pass cold. Typing quit-key arguments as `int` avoids false results from
+  generic `any` comparisons for key codes. The GF(2) identity solve now
+  survives dynamic nested-list reads through explicit integer conversions;
+  its combined probe advances to the request query separator assertion, which
+  remains open. The documentation
+  markdown probe passes all four variants, while metadata collection and
+  ranking still fail their route-sorting and exact-name assertions.
+- The sound-source ABI probe passes all four cold variants. The WAV-resource,
+  XML-root-name, and TrueType face-metrics assertions still fail and remain in
+  the TODO.
+
+### Bare native output
+
+- Simple Linux x86-64 bare `print("...")` output now lowers string and newline
+  helpers to inline `write` syscalls in the ELF file. This path links and
+  runs with `CC=/nonexistent`, without libc, an interpreter, or a host
+  assembler. Other x86-64 runtime-backed bare programs still use the assembled
+  runtime shim.
+- Bare Linux x86-64 `__syscall_raw` calls encode directly into the ELF, so
+  syscall-only native programs need no `rt_syscall_raw` import or libc. A
+  direct `exit` syscall probe linked sectionlessly and exited with its requested
+  status.
+- Bare native output now applies `--entry-name=<symbol>` to both the emitted
+  entry function and the ELF linker entry; the assembler fallback validates
+  the symbol as a C-compatible identifier before inserting it into its startup
+  stub.
+- Bare x86-64 raw integer `print` now formats signed 64-bit values in a stack
+  buffer and writes directly to stdout. Zero, positive/negative values, and
+  `INT64_MIN` run through the internal ELF linker without a host assembler.
+- Bare Linux x86-64 `rt_monotonic_ns_raw` now uses the `clock_gettime` syscall
+  and returns plain nanoseconds. Dynamic raw/tagged booleans convert to
+  embedded `true`/`false` C strings, and bare C-string output now branches to
+  the `write` syscall after finding the terminator instead of skipping output.
+- Bare x86-64 now handles static literal `.len` through direct C-string length
+  scanning and keeps the C-string bridge as a borrowed pointer; no managed
+  string allocation or libc call is introduced for this supported case.
+- Bare x86-64 now lowers raw `memcpy` and `memset` byte loops directly in the
+  in-process ELF encoder. Raw `memcmp` compares unsigned bytes and sign-extends
+  the first-byte difference. Stack-backed copy/fill/compare probes run without
+  libc or a host assembler.
+- The x86-64 bare typed-buffer shim now keeps logical length separate from its
+  minimum allocation capacity. Bare typed-list length reads return the
+  requested element count; the executable remains static and has no dynamic
+  section.
+- Linux AArch64 bare objects now inline raw byte-copy and byte-compare helpers,
+  preserving the destination return from `memcpy` and zero-length `memcmp`
+  behavior without libc. Mismatch results are sign-extended to the 64-bit
+  runtime ABI; bare fixtures now check equal, empty, and both mismatch signs.
+- AArch64 bare `memset` raw byte fills are exercised alongside copy and compare
+  in the assembler-free memory fixture.
+- AArch64 bare `eprint` now formats string, integer, and boolean arguments and
+  writes them to stderr through direct C-string scanning and Linux syscalls.
+  The regression compiles with `CC=/nonexistent` and checks stderr under QEMU.
+- AArch64 bare function output can borrow a static C-string literal through the
+  direct writer without allocating or requiring a managed string runtime.
+  AArch64 bare AOT now clones compiler-emitted numeric-list literals into
+  anonymous mappings and supports length and positive/negative index reads
+  without libc. Native-list length and raw `pop` now lower to shared NYIR
+  memory/control-flow operations instead of target-specific helper dispatch,
+  including lengths of local typed lists; pop updates the count and returns
+  the removed value. A direct QEMU smoke confirmed local and static-list
+  lengths, returned and retained values, and nonzero termination when reading
+  the removed index. Bare lowering also
+  omits managed static-handle registration for compiler-emitted arrays, so
+  this hosted-runtime bookkeeping no longer needs an AArch64 backend shim.
+- Corrected the AArch64 NYIR bounds-check success branch to skip its trap
+  instruction. QEMU now confirms an in-range read after a list pop returns
+  the retained element; an out-of-range read still traps.
+
+### C frontend
+
+- Added native preprocessing with `-E`, optional line markers, standard input,
+  include search paths, ordered `-D`/`-U` object macros, and `-o` output.
+  Local headers now support nested includes, include guards, `#pragma once`,
+  missing-header diagnostics, and file-local conditional balancing.
+- Fixed replacement-text lifetime across macro redefinition and `#undef`.
+  Earlier tokens no longer reference freed buffers. Conditional preprocessing
+  now expands function macros and late-bound aliases with correct precedence,
+  protects `defined` operands, short-circuits logical operators, and skips
+  already-taken `#elif` branches.
+- Added truthful NYC identity/version macros and a build-version query.
+  NYC does not impersonate GCC or Clang. Object modes accept explicit NYR
+  optimization levels; external character arrays can be declared repeatedly
+  and completed by a compatible definition.
+- Unified modeled and filesystem headers under the same include pipeline.
+  Added Linux x86-64 password, directory, file-time, ioctl and resource-usage
+  declarations, checked against GCC layouts and real libc calls.
+- Added file-scope enum definitions, typedefs, integer constants, array extents
+  and enum function signatures. Empty definitions and duplicate enumerators
+  are diagnosed; enum constants currently must fit `int`.
+- Removed helper calls from disabled assertions and allowed `<assert.h>` to
+  be included again after changing `NDEBUG`. Preserved void-expression typing
+  and operand side effects.
+- Corrected function-pointer call precedence under unary operators and casts,
+  including calls whose result is discarded with `(void)`.
+- Lowered runtime expressions in automatic aggregate brace initializers,
+  including nested aggregates, arrays, floating-point conversions, pointers,
+  and bitfields. Preserved omitted-element zeroing and literal-only templates.
+- Added string-literal initialization for character-pointer globals and kept
+  mutable scalar globals as lvalues for prefix/postfix updates. Distinguished
+  pointer constness from pointee constness.
+- Fixed ownership of aggregate lookahead tags, exported relocation arrays,
+  borrowed call metadata, and runtime-helper symbols. Whole-unit data export
+  now uses one table sized to the objects produced by all functions.
+- Released incoming-edge arrays when eliminating NYR PHIs. Copy and constant
+  rewrites now release the replaced instruction's owned operand metadata.
+- Corrected argument prescan in nested function-like macros while preserving
+  raw arguments for `#` and `##`. Kept expanded `__LINE__` text alive through
+  translation-unit parsing instead of reusing a temporary buffer.
+- Removed translation-unit-sized local-table clearing from each C function;
+  parameters and local entries are fully initialized when inserted.
+- Added the variadic `printf` declaration to the modeled `<stdio.h>` header,
+  allowing ordinary C programs to call it without redeclaring the function.
+- Reserved fixed-size C automatic storage at function entry while preserving
+  declaration-time initialization and distinct allocation roots. Loops with
+  local arrays or aggregate temporaries no longer exhaust the stack.
+- Compiled the unmodified SQLite 3.46.0 amalgamation with `nyc --all` and ran
+  an NYR-compiled API driver. In-memory SQL and multi-page disk database
+  comparisons, including rollback, `VACUUM`, integrity checks, and reopening,
+  agree with GCC; this is not a full upstream SQLite test-suite result.
+- Corrected x86-64 aggregate arguments in the final integer registers, struct
+  copies with register-resident addresses, and transfers between integer and
+  floating-point register homes.
+- Corrected bitfield layout, sign extension, constant initialization, and
+  read-modify-write updates without changing neighboring fields.
+- Preserved signed-byte and signed-short values across calls, fields,
+  pointers, and narrowing. Two-byte compound lvalue stores no longer overwrite
+  adjacent fields.
+- Reloaded narrow C locals at their declared width after pointer writes, so
+  out-parameters cannot retain stale upper bytes from an eight-byte NYR slot.
+- Emitted scalar static locals as persistent data instead of automatic stack
+  slots, preserving their address and mutations across calls.
+- Corrected aggregate pointer-table indexing and parenthesized member
+  addresses. Taking an address no longer evaluates a load from that address.
+- Preserved full pointer width in aggregate arrays of byte pointers, including
+  their element stride and pointee type.
+- Evaluated constant `sizeof` from resolved types and aggregate layout instead
+  of guessing from token names; static method-table descriptors now retain the
+  actual size of their file objects.
+- Passed a whole automatic array's storage address to byte-oriented C APIs,
+  rather than the address of its internal pointer slot.
+- Kept C lexical scope separate from NYR logical slot identity so unrelated
+  floating-point and pointer locals cannot acquire each other's ABI class.
+- Preserved allocation initialization across SSA merges and pointer selects;
+  dead-store elimination must not discard headers returned through an
+  interior pointer.
+- Added a distinct entry predecessor when a local-memory function starts at a
+  loop header. SSA parameter initialization no longer resets an updated
+  parameter on every backedge.
+- The standalone C frontend now handles signed 32-bit `int` values, including
+  function ABI boundaries, narrowing from `long`, local updates, and typedef
+  aliases.
+- The standalone C frontend now tracks active `#define` / `#undef` names and
+  integer-valued macros for bounded conditional-expression evaluation,
+  including arithmetic, shift and bitwise operators, character constants,
+  line continuations, multiline comments, and compiler feature probes.
+  General file inclusion remains unsupported; conditional selection has
+  compile-link-run coverage.
+- The standalone C frontend expands recursively chained empty and multi-token
+  object-like macros in C source.
+- The standalone C frontend supports `char *` parameters, pointer arithmetic,
+  byte indexing, byte loads, and byte stores in its SysV x86-64 object path.
+  Byte loads zero-extend; signed `char` values with the high bit set remain
+  unsupported. File-scope character arrays initialized from string literals
+  are emitted as writable data symbols and can be indexed by compiled code.
+- The standalone C frontend supports `unsigned long long` ABI values and
+  arithmetic that preserves their 64-bit representation, unsigned relational
+  comparisons, and 64-bit integer literals. Division, remainder, and right
+  shift remain explicitly unsupported.
+- The standalone C frontend now preserves opaque and function-pointer values
+  through function signatures, supports pointer-to-pointer parameters, and
+  lays out signed `int` fields in tagged aggregates with native field loads
+  and stores. It also supports signed `int *` parameters, dereferences,
+  indexed loads, and stores. Variadic declarations parse, but indirect calls,
+  variadic definitions, and variadic calls remain unsupported.
+- The standalone C frontend now supports scalar `unsigned char` and `unsigned
+  int` values. Unsigned-int arithmetic wraps at 32 bits and relational
+  comparisons use unsigned ordering; division, remainder, and right shift
+  remain unsupported.
+- Whole-unit C objects now support numeric scalar and pointer globals,
+  including reads and simple writes; `extern` scalar data references resolve
+  to linker-provided C symbols. The translation-unit test links and runs
+  signed/unsigned integer, byte, pointer, double, and external-global cases.
+  Scalar `char` parameters, locals, and results use zero-extending byte
+  semantics; high-bit values do not match signed `char` on x86-64.
+- Whole-unit C objects also emit file-scope aggregates and initialized static
+  aggregate locals. The compile-link-run fixture verifies persistent field
+  updates through both storage forms.
+- SysV x86-64 C calls may now pass scalar arguments to variadic declarations.
+  The caller performs default promotions and sets `%al` for floating-point
+  register arguments; the frontend still cannot read variadic arguments.
 
 ### Documentation and contributor workflow
 
@@ -29,33 +2312,97 @@ reported work, not a fresh test of the current checkout.
 - Condensed the measurement archive into workload results, retained mechanisms,
   rejected experiments, and verification limits; contributor procedures remain
   in the public guides.
-- Replaced numeric AST-kind output with `--dump-ast` source trees, declaration
-  substring filtering, and checked `--dump-ast-typed` trees. Dumps include source
-  positions, child roles, defaults, fields, and available semantic facts without
-  executing the program; the former single-dash spelling was removed.
+- Replaced numeric AST-kind output with `--dump-ast` source trees and unified
+  typed/filter options. Grouped dump controls in compiler help; trees include
+  source positions, child roles, defaults, fields, and available semantic facts
+  without execution. Terminal syntax colors honor normal color detection.
 - Removed landing-page slogans, repetitive preambles, and decorative emphasis.
   Tightened reference prose and separated historical investigation notes from
   current acceptance work without changing source examples or measurements.
 - Replaced the linker roadmap with the implemented request fields, tool
   selection, entry conventions, and ELF limits.
+- Bare Linux x86-64 AOT now provides zero-filled `malloc`/`free` using anonymous
+  `mmap`/`munmap`; an end-to-end fixture checks allocation, memory access,
+  release, and absence of dynamic linkage.
+- Bare Linux x86-64 monotonic-clock encoding now uses the unsigned 32-bit
+  immediate writer for its syscall number and nanoseconds multiplier. A
+  `-no-std --native` `ticks()` smoke run returns a timestamp.
+- The in-process ELF64 linker now emits AArch64 executables from NyR-produced
+  ELF objects, applies AArch64 call relocations, and injects a Linux AArch64
+  entry stub. The public acceptance test links and runs a cross-function
+  result-returning executable under QEMU when available.
+- Dependency-free Linux x86-64 bare programs now use the in-process ELF linker
+  and encoded startup instead of invoking the host assembler. The internal
+  startup stub provides the same no-op AOT argument hook as the existing bare
+  runtime shim.
+- Constant-output Linux AArch64 bare programs now emit direct `write` syscalls
+  and a sectionless ELF image without invoking the host assembler.
+- AArch64 bare NYR now lowers runtime-backed signed integer printing and
+  constant-boolean formatting and newline output to direct `write` syscalls.
+  Decimal formatting handles zero, negative values, and `INT64_MIN` using
+  per-function stack scratch space; monotonic nanosecond ticks use the
+  `clock_gettime` syscall. QEMU coverage runs without a host compiler or
+  assembler.
+- AArch64 bare `malloc`/`free` now use anonymous `mmap`/`munmap` syscalls,
+  preserve the runtime allocation header, and reject size overflow. A
+  multi-page QEMU fixture verifies memory access and release without libc.
+- AArch64 bare typed-buffer allocation now uses `mmap`, writes the native
+  typed-buffer header, rejects multiplication/size overflow, and supports the
+  zero-filled `i64buf_new` load/store path without external runtime symbols.
+
+- Added native `ny-make` global and command-specific help (`help <command>`).
+  The wrapper uses it when built; the clean-checkout Python bootstrap now
+  prints only a compact overview and directs users to build `ny-make` for
+  detailed help. Help follows shared color and glyph settings; verbose builds
+  show underlying commands. Section rules align to rendered icon widths and
+  stop inheriting heading emphasis.
+- Routed `./make --version` through native `ny-make` when available; the
+  bootstrap retains the same short fallback for a clean checkout.
 - Consolidated execution/adoption guidance in the status guide, syntax
   extensions in the compile-time guide, vectors in the numbers guide, and
   effect-row coverage in the function reference.
 - Published debugging, profiling, graphics verification, and open acceptance
   work through `CONTRIBUTE.md`. Guides and measurements live under `learn/`;
   detailed development records stay with their release here.
+- Replaced overlapping optimizer inspection spellings with
+  `--inspect[=program|runtime]`, and bounded undefined-name edit-distance
+  checks to the supported two-character suggestion threshold.
+- Sparse CFG labels now use a sorted lookup index instead of rescanning the
+  function for each branch; dense labels keep direct lookup.
+- Clarified deep verbosity: `-vvvvv` omits imported-library internals;
+  `-vvvvvv` includes them.
+- Kept deep trace configuration summaries to tag counts by default, with full
+  names available through `NYTRIX_TRACE_CONFIG_VERBOSE=1`; removed the
+  duplicate `--native-dump-ir` spelling in favor of `--nyr-dump`.
+- Consolidated NYR dump modifiers into `--nyr-dump=raw,cfg,stats,passes`;
+  `--nyr-dump-to=PATH` now names text output files. Binary bundles use
+  `--dump-nyr[=PATH]`.
+- Standardized active dump switches on `--dump-*` names. Removed the duplicate
+  `--track-value` spelling and parser-accepted no-op dump flags; NYR pass stats
+  remain available through `--nyr-dump=stats`. Help groups source, NYR,
+  backend, and failure-artifact inspection. Token dumps exclude preloaded
+  library text; inspection flags bypass the tiny inline evaluator for `-c`.
+- Value-taking options no longer consume a following `--flag` as their value.
+  Missing values now produce a concise error; use `--option=VALUE` for
+  option-looking values.
+- Compacted symbol resolution to one key-value path/result record per lookup;
+  `NYTRIX_TRACE_RESOLVE_VERBOSE=1` enables candidate, alias, and cache details.
 - Clarified that package discovery has no default repository or implicit public
   fallback. Users add the source repositories they trust.
 - Corrected numeric literals, atomic return documentation, function syntax,
-  and Texinfo resource binding. Documented observed dictionary-return,
-  dynamic-nil, deferred-capture, and atomic-update failures without claiming
-  compiler fixes.
+  and Texinfo resource binding. Recorded the dictionary-return, dynamic-nil,
+  deferred-capture, and atomic-update findings; subsequent compiler fixes are
+  recorded below.
 - Fixed static paragraphs, wrapped inline code, escaped table pipes, ordered
   list continuations, indented closing fences, emphasis, disclosure blocks,
   heading anchors, metadata comments, explicit index links, and repository-source
   navigation.
   The renderer regression passed native AOT/JIT and LLVM MCJIT/ORC with library
   caches disabled.
+- Added prerequisites and short next-step routes across learn pages, reordered
+  the guides and specification by learning path, and added contents navigation
+  to long references. Markdown blockquotes now render as semantic callouts;
+  the generated page stylesheet defines dark and light callout/code colors.
 - Assigned topic-specific icons to learning and specification navigation,
   cards, and page headers. Added history, checklist, debugging, performance,
   contribution, workflow, and linking symbols; aligned the package/add-package
@@ -70,9 +2417,103 @@ reported work, not a fresh test of the current checkout.
   state and support Enter/Space; namespace and module links navigate separately
   from their arrows. Keep the selected page visible and prevent type-to-search
   from stealing keys from focused controls.
+- Re-verified the duplicate-scan preserved forms in source and dropped the
+  resolved note from `docs/TODO.md`: per-assertion selftest messages, existing
+  macros, explicit `NY_NATIVE_ENTRY`/`NY_NATIVE_ENTRY_FN` ABI spellings, direct
+  `&f->data[i]` optimizer iteration, and typed per-arity callback calls all
+  stay as written.
+
+### Compiler gates and optimization evidence
+
+- `str.repeat` now uses a managed runtime helper that allocates the exact
+  result size and copies the source with geometric doubling, replacing the
+  byte-at-a-time Ny loop. The full benchmark run passed the `repeat`,
+  `word-frequency`, and `word-frequency-scan` checksum fixtures. A fresh
+  compiler smoke also passed positive, zero, negative, and empty-string
+  repetition. The run still fails the string-class performance gate:
+  `word-frequency-scan` measured
+  52.0 ms on NYR versus 2.59 ms on LLVM (20.06x, against a 5.00x limit); no
+  benchmark limits or scanning semantics were changed.
+- Dynamic callback adapters share closure-safe callable preparation. The
+  arity-specific call paths remain typed, avoiding a generic argument-array
+  copy across ABI boundaries. Cold dynamic-callback VM and raw-result fixtures
+  completed without failures:
+
+  ```bash
+  NYTRIX_TEST_COLD=1 ./make test \
+    --pattern etc/tests/lang/execution/dynamic-callback-vm.nshape --failures-only
+  NYTRIX_TEST_COLD=1 ./make test \
+    --pattern etc/tests/lang/execution/dynamic-callback-raw-result.nshape --failures-only
+  ```
+
+- Split `ny-test` help rendering from argument handling and separated
+  benchmark fixture discovery and worker scheduling from the suite driver.
+  `./make ny test --help` retained the complete help surface; a one-run
+  correctness benchmark selected only the exact `repeat` fixture and passed.
+- Failure replay now treats `--native --run` as an explicit execution route,
+  matching the test runner instead of rewriting it to `--native-only`. The
+  renderer-color fixture checks its output marker across the configured route
+  matrix.
+- Test and benchmark gates hash fixture, standard-library, and generated
+  `core.ny` inputs at gate start and recheck before reporting a verdict. A live
+  source mutation now reports `INVALIDATED` and exits 2 rather than presenting
+  a pass or failure.
+- Loop-vectorizer attempt and rejection counts survive runs that make no IR
+  change. The vector unroll/tail bound now preserves the power-of-two step
+  required by its mask-based scalar epilogue; a nested dynamic-buffer regression
+  checks both vector accesses and every updated element. The cold dgemm bench
+  now matches NYR, LLVM, and C checksums and reports 31 attempts, 30 rejects,
+  and one vectorized loop. This single sample is correctness/counter evidence,
+  not a performance claim. Scalar epilogues remain in use; benchmark loop
+  counters do not count SLP groups, and the focused `slp_debug` test checks
+  source-location retention only. Full commands and results are in
+  [measurements](learn/measurements.md#selected-workload-results).
+- x64 stack-home reuse stays disabled in call-bearing blocks and for
+  floating-comparison predicate results, where block-local intervals can
+  miscompile live values. Cold spectral, nested-borrow, and optimized list-fill
+  fixtures pass on their affected routes.
+- The bounded x64 loop-GPR allocator now also handles vector-bearing functions
+  with indirect memory; scalar indirect-memory functions retain the
+  conservative stack-home path. A 9+3 SOR run matched NYR, LLVM, and C
+  checksums and measured 3.52 ms, 762 µs, and 1.48 ms respectively
+  (NYR/LLVM 4.62×, below the 5.00× fixture limit).
+- Deferred closures now keep read-only local captures as registration-time
+  snapshots and capture mutable bindings by address only when the deferred
+  body assigns them. This makes updates visible after LIFO scope cleanup
+  without changing read-only loop captures. The diagnostic VM now drains
+  deferred closures through its own resolver when a panic resumes a catch, and
+  treats null callbacks as no-ops. Cold `defer.nshape` and
+  `defer-loop-capture.nshape` matrices passed on native JIT, native-only, LLVM
+  MCJIT, LLVM ORC, and the diagnostic VM. They cover nested string updates,
+  raw-int updates, f64/f32 slots, panic unwinding, null callbacks, and
+  registration-time loop snapshots:
+
+  ```bash
+  NYTRIX_NO_PROGRESS=1 NYTRIX_TEST_COLD=1 ./make test \
+    --pattern etc/tests/lang/execution/defer.nshape --failures-only
+  NYTRIX_NO_PROGRESS=1 NYTRIX_TEST_COLD=1 ./make test \
+    --pattern etc/tests/lang/execution/defer-loop-capture.nshape --failures-only
+  ```
+
+- The pipeline reference now maps the shared source-to-NYIR lowerer to the
+  LLVM, owned-native, VM, and REPL consumers. It distinguishes active
+  `codegen_prepare()` metadata work from legacy AST-body emitters that are not
+  CLI or REPL execution routes. The defer matrices above exercise the live
+  backend routes.
 
 ### C frontend reliability
 
+- Added `nyc --all SOURCE.c OUTPUT.o` to emit all supported function definitions
+  in one source unit as a single x86-64 ELF object with their C symbol names.
+  The mode remains limited to the frontend's supported C subset and does not
+  yet handle general file-scope data.
+- The standalone frontend now skips inactive literal `#if 0` branches and
+  selects literal `#if` / `#elif` branches. It rejects macro-dependent
+  conditional compilation instead of compiling both paths as active.
+- The standalone `nyc` frontend resolves file-scope typedef chains for its
+  supported signed-`long` and `double` types, preserving `const` qualification.
+  The host-C differential suite covers parameters, calls, locals, loops, and
+  rejection of writes through a const alias.
 - The lexer and integer parser accept C23 numeric digit separators and standard
   `uUlLzZ` suffixes, including `1'000`, `0x1'0000`, `0b1'0101`, `42UL`, and
   `1'000ULL`. Punctuators use longest-match selection, following
@@ -109,12 +2550,25 @@ reported work, not a fresh test of the current checkout.
 - Windows failure replay retains compiler/debugger logs. Benchmark names and
   JSON reports handle native paths and escaped text across platforms.
 - `./make check` streams cold standard-library, failure-replay, and benchmark
-  checks. CI also has an explicit build/source-check mode and manual controls
-  for native platforms, filtered fixtures, replay, and serial benchmarks, with
-  retained logs and summaries.
+  checks and opts into auxiliary preflight drivers and CTests. CI also has an
+  explicit build/source-check mode and manual controls for native platforms,
+  filtered fixtures, replay, and serial benchmarks, with retained logs and
+  summaries.
+- Building `ny-test` also builds the standalone CLI tools used by command
+  parity and documentation-discovery fixtures.
 
 ### Native x86-64 backend
 
+- CFG construction solves immediate dominators by reverse-postorder ancestor
+  intersection, then builds the dominance bitsets once. Unreachable blocks
+  retain self-only dominance and do not affect reachable merges.
+- The opt-in loop-phi carry policy now applies to scalar FPR values as well as
+  GPR values. Its allocator regression and native float loop fixture pass with
+  carry enabled, including calls, CFG joins, and conversion scratch use; the
+  default policy is unchanged.
+- NYIR v2 bundles preserve native strings, arrays, constants, and global
+  symbols. `--native-from-nyr=PATH -o FILE` builds a native executable
+  directly from saved NYIR; v1 bundles remain VM-runnable but lack this data.
 - Signed remainder by a known power-of-two divisor now uses shift-one
   bit/remainder lowering instead of `idiv`; negative odd operands still
   produce `-1`, matching truncating signed remainder. The `collatz` benchmark
@@ -123,6 +2577,9 @@ reported work, not a fresh test of the current checkout.
   p95 comparison moved from 277 µs to 261 µs. Disassembly confirms the
   hot `% 2` path no longer contains `idiv`. `binary` stayed at 3.23 ms
   (5 runs, 2 warm-ups).
+- The internal ELF64 linker now copies section contents directly into the
+  zero-filled output image, avoiding temporary segment buffers and a second
+  segment-to-image copy. Multi-object and archive link acceptance passes.
 
 ### Project demos
 
@@ -183,6 +2640,10 @@ reported work, not a fresh test of the current checkout.
 
 ### UI renderer
 
+- Vulkan frame statistics now update in the owning state module, so static,
+  indexed, and dynamic draw submissions are reflected in the captured frame
+  counters. The focused `ui_replay_engine_native` fixture passed, and a live
+  Vulkan capture reported 45 draws (43 dynamic, 2 static, 1 indexed).
 - Dynamic string classification now validates the complete small-string header
   once, and address readability checks no longer query the map oracle twice
   for known mappings. Two matched six-second headless input-renderer profiles
@@ -244,6 +2705,58 @@ reported work, not a fresh test of the current checkout.
 
 ### Native backend performance
 
+- The x86-64 AVX2 `vbroadcastsd` encoder now emits the required `W=0` VEX
+  form. The old form trapped with `SIGILL` in `dgemm` and `sor`; the native
+  `native_vec4_f64` machine-emitter check now executes successfully, and both
+  fixtures return their expected checksums.
+- Native assembly no longer emits empty `.rodata` or `.data` sections when a
+  program has no corresponding literals. String-table data still follows code
+  without an explicit alignment directive and stays in non-executable
+  `.rodata`.
+- Linux x86-64 bare AOT now folds checked integer constant expressions in
+  `print`/`eprint` arguments, including unary signs, parentheses, and
+  `+`/`-`/`*`/`/`/`%` precedence; calls also accept multiple constant
+  arguments separated by spaces in output, including `true`, `false`, and
+  `nil`. Top-level typed/untyped integer `def` and `mut` bindings and checked
+  constant assignments are folded as well. Overflow and division by zero
+  reject the tiny path instead of emitting incorrect output. The bare artifact
+  regression executes a nine-write program and checks that its ELF has no
+  sections or dynamic linker metadata.
+- Bare AOT now falls back to the native x86-64 backend for programs outside
+  the constant-output subset, links with a syscall-only `_start`, no CRT or
+  libc, and section garbage collection. Syscall shims cover integer/boolean
+  conversion, string/integer/boolean `print`/`eprint`, and monotonic nanosecond
+  ticks from native functions; other unresolved runtime/external dependencies
+  still fail closed. Regressions execute function/control-flow programs,
+  verify no dynamic section, and exercise compiled functions with runtime
+  arguments.
+- Bare native AOT can allocate zeroed typed buffers without libc through the
+  Linux anonymous `mmap` syscall. The fixture checks typed-buffer header
+  behavior, indexed stores/loads, zero-filled untouched elements, and absence
+  of a dynamic section. Bare ELF executables now use Nytrix's in-process ELF
+  linker; the minimal startup/runtime shim object is still assembled by the
+  configured host C tool.
+- x86-64 NYIR parameter metadata now carries signed and unsigned byte widths
+  through binary serialization, machine lowering, and argument prologues.
+  `u8`/`bool` values zero-extend and `i8` values sign-extend from the first
+  three SysV registers or stack slots. The
+  `byte-argument-abi.nshape` linked-runtime regression covers byte identity,
+  mixed three-argument arithmetic, and signed/unsigned stack arguments.
+- The x86-64 NYIR assembly string pool no longer aligns byte-addressed literals
+  to four-byte boundaries. String references remain RIP-relative and the pool
+  remains in non-executable `.rodata`.
+- Eligible x86-64 integer leaves now consume immediate-copy operands directly
+  in the frameless register path. Compile-only assembly for `x + 1` contains
+  `movq %rdi, %rax; incq %rax; ret`; the linked ABI fixture exercises that
+  function alongside signed/unsigned byte arguments.
+
+- Reused CFG topology and definition positions within peephole range queries,
+  with invalidation after instruction insertion, value-count changes, or storage
+  moves. Skipped singleton refinement and rejected ineligible parity definitions
+  before scanning their uses. A validated editor profile pair fell from 69.7 to
+  23.7 minutes while preserving the 33,223,632-byte object and all recorded inline
+  decisions; see the [measurement record](learn/measurements.md#validated-editor-compile).
+
 - Fast glyph texture ids now decode the packed 32-bit sentinel as signed before
   validity checks. GL text no longer treats `0xffffffff` (the unavailable
   texture marker) as a usable texture; zero-ink fast glyphs are reported as
@@ -287,7 +2800,7 @@ reported work, not a fresh test of the current checkout.
 - The synthesized `rt_main` now keeps private F64 globals in entry-local slots
   when no user function references them. The n-body workload improved from
   5.22 ms to 4.67 ms NYR time; its matched 5-run/2-warm-up LLVM comparison
-  measured 1.98x LLVM/NYR, down from 2.23x.
+  measured 1.98x NYR/LLVM, down from 2.23x.
 - Native GPR loop-phi coalescing is opt-in with `NYTRIX_GPR_LOOP_CARRY=1`.
   The guarded-division regression showed that default carried-register
   residency could lose a loop accumulator update; normal builds now retain
@@ -383,6 +2896,12 @@ reported work, not a fresh test of the current checkout.
   call's scalar ABI class, preserving aggregate results across inlining.
   `inline_general` optimizer checks and the focused `inlined-guarded-division`,
   crypto-import, and aggregate-argument ABI fixtures pass.
+- PRE may now consider loop-local loads when its existing memory-stability
+  proof succeeds; other loop-block expressions remain excluded. The regression
+  fixture verifies the redundant load is removed without crossing a store.
+  Signed division by a power-of-two constant remains a signed divide unless
+  nonnegativity is proven; the machine lowerer still represents that constant
+  as an immediate.
 - Wasm internal calls now push every argument onto the operand stack instead
   of limiting argument loading to the native four-register count. AVR function
   setup reserves the return-address space below locals before calls. Focused
@@ -530,6 +3049,10 @@ reported work, not a fresh test of the current checkout.
 
 ### Benchmark output
 
+- Benchmark invalidation now fingerprints benchmark fixtures, not unrelated
+  code-test fixtures, while retaining stdlib invalidation. Graph BFS has a
+  workload-specific LLVM/native outlier ceiling of 5.5x, calibrated above its
+  recorded 4.62x baseline with modest headroom.
 - The Ny heapsort benchmark now stores its array in a typed i64 buffer rather
   than a generic list. Its isolated checksum-checked benchmark measured 7.80 ms
   NYR versus 19.3 ms before the change; the C reference and algorithm are
@@ -541,7 +3064,7 @@ reported work, not a fresh test of the current checkout.
   fixtures cannot distort per-row runtime ratios. `--jobs N` and
   `NYTRIX_BENCH_JOBS` still opt into bounded parallel runs. A full warm
   65-fixture run (three samples, one warm-up) passed all fixture budgets and
-  geomean gates; `binary` measured LLVM/NYR at 4.64x and `dict-set` at 1.04x.
+  geomean gates; `binary` measured NYR/LLVM at 4.64x and `dict-set` at 1.04x.
 - Benchmark summaries now render NYR consistently in console and Markdown
   output, and use one ratio formatter across fixture rows, hotspot callouts,
   geomeans, and gates. Ratios below 0.01x display as `<0.01x` rather than the
@@ -611,7 +3134,7 @@ reported work, not a fresh test of the current checkout.
 - Full benchmark validation passed all 65 fixtures with nine samples and
   three warm-ups, pinned to CPU 24 for a serial, affinity-controlled run.
   All repeated samples passed the existing noise check and checksum
-  comparisons; `binary` measured LLVM/NYR at 4.86x, below its unchanged 5.00x
+  comparisons; `binary` measured NYR/LLVM at 4.86x, below its unchanged 5.00x
   fixture limit. No benchmark threshold or workload was changed.
 - Fixed POSIX subprocess capture to merge child stderr into stdout, matching
   `core.os.subprocess.run_capture`'s contract and restoring generated
@@ -1584,7 +4107,7 @@ reported work, not a fresh test of the current checkout.
 
 - `NY_DUMP_FN=rt_main` now prints actual synthesized-entry NYIR snapshots
   around inlining and after the final post-inline optimizer; the leaf-wrapper
-  snapshot is named explicitly. `--nyir-dump` remains the AST-derived
+  snapshot is named explicitly. `--nyr-dump` remains the optimizer-IR
   diagnostic view.
 
 - The `loop-unswitch` benchmark's C reference no longer uses `volatile` for a
@@ -1742,7 +4265,7 @@ reported work, not a fresh test of the current checkout.
   inspectable in the same compact instruction row.
 
 - A missing-chain guard in attached-method suffix lookup prevents native
-  `--nyir-dump-stats --nyir-pass-stats` diagnostics from following a
+  `--nyr-dump=stats` diagnostics from following a
   zero-initialized function index as if it were a built snapshot.
 
 - Debug function filters now preserve nested context push/pop even when a
@@ -2056,6 +4579,10 @@ reported work, not a fresh test of the current checkout.
   LLVM 39.8 ms on `bigint-oracle`, and 339 µs versus 470 µs on `pidigits`
   (3 runs plus one warm-up each). The remaining NYR/C gap is shared with LLVM
   on `bigint-oracle`; the measured native path is not its current bottleneck.
+- Cached x86 BMI2/ADX detection after its first query, avoiding repeated CPUID
+  instructions in BigInt multiplication and division. The checksum-matched
+  `bigint-oracle` run measured 35.3 ms NYR versus the supplied 38.9 ms
+  checkpoint; the full benchmark gate passed.
 - Signed power-of-two division by two now uses the shared strength-reduction
   path. A checksum-identical five-run native A/B improved the `binary` fixture
   from 8.48 ms to 6.70 ms; keep this general reduction and focus remaining
@@ -2215,6 +4742,11 @@ reported work, not a fresh test of the current checkout.
 
 ### REPL
 
+- Native NYIR lowering now marks `ticks()`'s `rt_monotonic_ns_raw` result as
+  raw `i64`, matching the helper ABI before mixed integer/`f64` arithmetic or
+  dynamic-value conversion. A REPL regression checks nanoseconds-to-seconds
+  multiplication and confirms a fractional `f64` prints as a float.
+
 - `core.str`'s `_env_present` no longer walks the process environment
   manually: it resolves the entry with the native `__env_get` builtin in one
   call, fixing prefix-colliding name lookups (e.g. `NY_H` matching `NY_HOME`)
@@ -2325,10 +4857,11 @@ reported work, not a fresh test of the current checkout.
 - Native JIT allocation cleanup releases memory through the matching platform
   allocator, removing a Windows-only failure-path `munmap` reference.
 
-<details>
-<summary>Earlier implementation records</summary>
-
 ### Undated updates
+
+- Fixed x86 native list-pop lowering to recompute the header address at its
+  update store, avoiding an uninitialized branch-local stack home. The cold
+  `result-list-mutate-x86-64` native oracle passes.
 
 - Signed division by a positive power-of-two now uses a compact bias-and-shift
   sequence: negative values receive `(divisor - 1)` before arithmetic shift,
@@ -2409,6 +4942,181 @@ reported work, not a fresh test of the current checkout.
   stack homes and forms each neighbor address separately; LLVM keeps pointer
   and byte-offset recurrences in registers and uses constant load offsets.
   Loop-carried register residency remains the next native SOR target.
+
+### 2026-10-23
+
+- Landed the fmt/lsp shared context-scanner batch from the trim backlog
+  (smallest, low-risk item). Added `ny_scan_ctx_step` to
+  `src/base/util.h` and replaced 33 byte-exact scanner blocks in
+  `cmd/fmt/core.c` plus 1 in `cmd/tools/lsp/main.c`
+  (306 duplicate lines, zero behavior change; the exact 47x/36x
+  duplicate classes are gone — rerun scan now 9,117 classes / 563,605
+  tree lines vs the 9,355 / 566,004 baseline, with other trim batches
+  landing concurrently on the same tree). Validation: `./make build`
+  clean; all 23 `etc/tests/code/probes/tools/fmt-*.nshape` parity
+  fixtures pass (`ny-test --with-stdlib`, 23 total · 23 passed);
+  full `./make check` 2432/2433 with the sole failure the pre-existing
+  author-WIP `code/intermediate/ny/run-bin.nshape` (failure trace ends
+  `returned=yes result=58`, verified unrelated); bench `startup` class
+  ok at 53µs (0.93x, in bounds — no compile-speed trade) with the
+  `dgemm` checksum FAIL proving ambient (passes standalone,
+  1 total · 1 passed). Residue recorded: ~20 structurally different
+  `if (esc)` sites remain in `cmd/fmt/core.c` (braced variants and
+  differently nested contexts) — they were never part of an exact
+  duplicate class and stay for a later batch.
+
+- Final verification pass over the audit and sweep documentation. Probed
+  against the release binary: the reserved-spelling hints (`void` →
+  `none`, `printf` → `print`, `var` → `mut`/`def`), the trace master
+  switches (`NYTRIX_TRACE=all`, `NYTRIX_TRACE_DEEP`), all seven optimizer
+  profile names (unknown `--profile` names are rejected with
+  `invalid optimization profile`; unknown `NYTRIX_OPT_PROFILE` values
+  degrade to custom), both bigfloat precision clamp bounds, and the
+  `__is_nil`/`__is_int`/`__cstr_*` input contracts — which turned out to
+  be value-level ABI twins with narrower inputs than the managed
+  predicates, so [Values](spec/values.md) was rescoped (the C-string
+  helpers take raw FFI pointers; programs keep the unprefixed predicates)
+  and [Functions](spec/functions.md) gained the exact implied set
+  (`@pure`/`@consteval` imply `@readnone`/`@nounwind`/`@willreturn`/
+  `@mustprogress`). All 13 fixture citations were confirmed to exist.
+
+- Second docgap sweep (knob and spelling layer). Documented the
+  `NYTRIX_TRACE=all` and `NYTRIX_TRACE_DEEP` master switches in
+  [Debugging](learn/debugging.md) (probe-verified: trace output appears
+  only with the switch), the optimizer profile set
+  (`--profile=MODE` with `default`/`speed`/`peak`/`balanced`/`compile`/
+  `none`/`size` and its `NYTRIX_OPT_PROFILE` subprocess inheritance) in
+  [Performance](learn/performance.md), the bigfloat precision rules
+  (default 256 bits, 32..1048576 clamp, `NYTRIX_BIGFLOAT_PRECISION`
+  override cached on first use, `core.math.big`'s pinned `BF_PRECISION`,
+  and `bf_with_precision` for per-value precision) in
+  [Numbers](learn/numbers.md), and the remaining runtime-substrate
+  framing (`__str_*`/`__list_*`/`__dict_*`/`__gc_*` behind `lib/` APIs;
+  `__is_nil`/`__is_int` as the lib-facing predicate spellings) in
+  [Values](spec/values.md). Every claim is grounded in the source site
+  that reads the knob (`base/trace.c`, `base/options.c`,
+  `runtime/bigfloat.c`); the `AUTO_*` LLVM-legacy knobs were
+  deliberately left out as non-live-route internals.
+
+- Closed the language-surface audit batch. The three open items all landed:
+  the `__flt_*`/`__bigint_*`/`__cstr_*` boxed-value ABI layer gained a
+  paragraph in [Values](spec/values.md) with fixture citations; the
+  reserved-and-future-forms item closed empirically in
+  [Syntax](spec/syntax.md) (`impl`/`operator`/`with` were already
+  implemented and documented in Traits/Control flow — the audit's "no
+  operator form" premise was wrong — `macro` is retired, and no future
+  forms are advertised); and [Architecture](learn/architecture.md) gained
+  contributor-facing Substrate guides for the e-graph, ISLE selection,
+  tier planning, purity/effect analysis, null narrowing, the proof
+  substrate (`proof.c`/`policy.c`/`lib/proof.ny`), the fuzz harness, and
+  the SIMMD runtime, each grounded in file headers and pass wiring. With
+  every item documented, probe-verified, and its fixture citations
+  confirmed, the audit section was removed from TODO.md under the
+  close-on rule; this day's changelog entries keep the full record.
+
+- Completed a symbol-level audit of the language surface (93 token kinds,
+  keyword tables, `@`-attribute usage across fixtures, cross-checked
+  against the ebnf grammar and the full docs corpus), then documented the
+  previously unexplained pieces in the house style: tag/handle
+  introspection (`__tagof`, `__runtime_tag`, `__handle_valid`) under the
+  Native layout helpers; defer-queue diagnostics, `__jmpbuf_*`, and
+  `__get_backtrace` frames under Control flow; the open attribute
+  namespace plus the first-class memory and termination contract
+  attributes (`@readnone`, `@readonly`, `@writeonly`, `@nounwind`,
+  `@argmemonly`, `@mustprogress`) and two Quirks rows (reserved near-miss
+  spellings, open attribute namespace). Three initial audit claims were
+  corrected during
+  cross-checking: the `del` binding semantics, the contextual `quote`
+  rule, and the `dict.set` in-place/chaining contract were already
+  documented; the audit section in TODO.md now records which claims were
+  corrected, which items were closed by this pass, and which remain open
+  (remaining `__` conversion families, the reserved/future forms decision
+  page, and the contributor internals pages).
+
+- Closed the nil-literal ambiguity class rather than only the `is_nil`
+  symptom: the proof evaluator (`nyr_eval_proof_i64_env`,
+  `src/code/lang/lower.c`) now refuses `NY_T_NIL` literals where an `i64`
+  constant is required, so no integer fast path can fold `nil` into a
+  proven `0` again. All proof-eval consumers are integer-domain (index,
+  bounds, lemma, and return-value proofs, plus the `__is_nil` catch-all
+  that already intercepts `nil` earlier), so refusal is a no-op for provable
+  integers and only removes silent nil-to-zero folds. The invariant is
+  documented in [Values](spec/values.md) (`nil` literals parse with
+  `NY_T_NIL`; producers re-derive nil-ness from the token kind), and the
+  spec contract examples moved from out-of-tree probes to gate fixtures:
+  `etc/tests/lang/values/nil-dynamic-identity.nshape` (nil identity, `any`
+  boxed nil, dictionary nil keys) and
+  `etc/tests/lang/memory/atomic-cell-contract.nshape` (tagged atomic cell),
+  and the deferred-capture example from
+  [Control flow](spec/control-flow.md) was added verbatim to the existing
+  `etc/tests/lang/control-flow/control.nshape` defer fixture, so every
+  formerly failing spec example is now gate-covered and the spec pages name
+  their fixtures. Evidence, std caches disabled: both new fixtures pass cold
+  (`./build/release/ny-test --with-stdlib <fixture>…`, 2/2, three variants
+  each) and on `./build/release/ny-full` with and without `--native-only`
+  (`cc_values ok`, `cc_atomic ok`); the existing `lang/values/nil.nshape`
+  suite still passes both routes after the evaluator change, and
+  `lang/control-flow/control.nshape` passes with the added contract
+  (`deferred_order() == "ba"`, three variants).
+
+- Bench JSON rows now record the exact copy-pasteable Nytrix command lines
+  behind each result: `ny_argv` for the timed route and `ny_stats_argv` for
+  the counter/tier-report compile whose `facts` row feeds
+  `ny_vector_attempted`. Verified on a focused `startup/dce.nshape` bench:
+  `ny_argv` is `… -O3 --native-only --native-backend x86_64 -time -run <fixture>`
+  and `ny_stats_argv` carries the `--native-tier-report` variant. This makes
+  vectorizer-reach reports reproducible from a single artifact. The default
+  bench driver now also writes a dated JSON artifact under
+  `build/bench-reports/` unless `--bench-out-json` is given.
+
+- Diagnosed the dgemm vectorizer reach on the current build: the candidate
+  scan is reached (`facts vector_attempted=32`; `rt_main` attempts 14 loops),
+  and `NY_TRACE_VECTORIZE=1` enumerates the rejects — non-canonical loop
+  guards ×191, missing canonical +1 induction PHIs ×167, unsupported
+  loop-carried f64 PHIs ×22 (the `s += load*load` accumulator), plus small
+  counts of non-affine addresses, effect blocks, and unmodeled traps. The
+  earlier "zero attempts / silent trace" reading was a stale-binary artifact;
+  the TODO item now tracks `ny_vectorized > 0`.
+
+- Fixed `atomic_add`/`atomic_sub` corrupting `atomic_i64` cells. Atomic cells
+  hold tagged language words — the constructor, `atomic_store`, `exchange`,
+  and CAS all pass tagged words through unchanged (store(5) leaves `11`,
+  which reads back as 5) — but add/sub fetched with the raw untagged
+  magnitude, so `atomic_i64(0)` + `atomic_add(c,1)` left word `2` (the false
+  immediate) instead of tagged `1`, and every read printed `false`.
+  `rt_atomic_i64_delta` (`src/code/lang/runtime/memory.c`) now doubles the
+  untagged magnitude so the tag bit survives: `(2n+1) + 2k == 2(n+k)+1`.
+  Evidence on `./make`-built `build/release/ny-full`, std caches disabled:
+  the spec contract example passes (`assert(atomic_load(c) == 1)`), and the
+  extended probe covered load/store, add/sub with negative deltas,
+  exchange, CAS hit, and zero-store round-trips. No prior atomic coverage
+  existed in `etc/tests`; temporary probes first exposed the failures.
+
+- Fixed `is_nil` on top-level `def any boxed = nil` returning false while
+  the value had correct nil identity (`type` reported `nil`, calls and
+  compares agreed the word was nil). Root cause in the NYIR lowerer's
+  `__is_nil`/`is_nil` fold (`src/code/lang/lower/call.h`): nil literals
+  parse as `NY_LIT_INT` zero, so the proof evaluator folds a top-level
+  `def any` local mirror to its declaration constant — a proven `0` — and
+  the catch-all misread that proven zero as "raw integer zero" (the
+  raw-int ABI reserved in this comment block) and emitted `NY_IMM_FALSE`.
+  Proven zero under the tagged dynamic ABI is the nil immediate, not an
+  integer payload. The fold now routes tagged-dynamic arguments (any-
+  typed locals, `NY_SEM_REP_TAGGED_DYNAMIC`) to a literal nil compare of
+  their runtime word instead; raw-integer arguments keep the existing
+  false fold. Evidence: the `spec/values.md` example passes
+  (`is_nil(boxed) && type(boxed) == "nil"`), plus def/mut locals, param
+  views, and call-result shapes on the current build, std caches
+  disabled. Residual (pre-existing, separate store ABI): a top-level
+  `mut any` local reassigned with `m = nil` still reads `is_nil(m)`
+  false while `m == nil` agrees true; recorded for a follow-up store-side
+  fix.
+
+- Refreshed the 2026-10-22 documentation smoke limitations: the dict
+  setter-reassignment row passes on the current build (`s1 ok`), the atomic
+  row is fixed above, and the `is_nil` row is fixed above. Deferred mutable
+  capture was later fixed and verified across native and LLVM routes; see
+  [Compiler gates and optimization evidence](#compiler-gates-and-optimization-evidence).
 
 ### 2026-10-13
 
@@ -6554,9 +9262,9 @@ reported work, not a fresh test of the current checkout.
   `list<int>`.
 
 - Reviewed the related native lowering, x64 allocator/emitter, and runtime
-  pointer bridge changes; removed the superseded queue probes and captured
-  dumps from `tmp/`. The individual fixes remain documented with their owning
-  changes below and in earlier dated entries.
+  pointer bridge changes; removed superseded task-local probes and captured
+  dumps. The individual fixes remain documented with their owning changes
+  below and in earlier dated entries.
 
 - Removed `--legacy-llvm-dump` (the first step of the legacy-retirement Stage
   2): the option field, help entry, and parse branch are gone, the two
@@ -6567,13 +9275,12 @@ reported work, not a fresh test of the current checkout.
   `codegen_emit`/`codegen_emit_script` (their last external caller), the
   designed precondition for deleting the legacy emission TUs.
 
-- The removed P0 items stay removed; the repros are archived under `tmp/`
-  (`sound-source-length-probe.ny`, `bigint-promoted-mul-repro.ny`).
+- The removed P0 items stay removed. Their temporary reproducers are not part
+  of the public source tree.
 
-- The COW route-divergence item now points at the archived reproducer
-  (`tmp/cow-alias-append-repro.ny`), which still diverges — native 314384
-  versus VM 182928 after the list rework moved both sides of the original
-  split.
+- A temporary COW alias/append probe still showed a route difference after the
+  list rework: native returned 314384 and the VM returned 182928. This is a
+  historical observation, not a current route check.
 
 - Fast-math reciprocal factoring now marks its synthesized constant and
   reciprocal result as F64 and attaches the originating division location.
@@ -6878,7 +9585,111 @@ reported work, not a fresh test of the current checkout.
   proven BigInt carrier even when HM names it `int`; wide decimal literals
   bypass `rt_any_to_i64`.
 
-</details>
+### 2026-10-31
+
+- `core.pow` now checks runtime numeric tags directly, preserving float
+  operands across native calls. Added fractional/zero-base power regression
+  coverage; Vulkan sRGB conversion and camera smoothing use the float-power
+  intrinsic instead of dynamic dispatch.
+
+### 2026-11-01
+
+- Loop-vector unrolling now clones only bodies with at most four vector
+  operations. A focused DGEMM control/candidate reduced spills and reloads
+  while preserving checksum `1`; runtime timing remains noisy and the
+  NYR/LLVM/C gap is still open.
+- Address-of indexing for function-static pointers now loads the static
+  pointer value through its global storage. The C frontend regression covers
+  the address of a function-static pointer's indexed element.
+- Compare-fused selects keep their hidden comparison operands live through the
+  select, with C frontend regression coverage.
+- A file-scope aggregate-pointer array definition now replaces a compatible
+  prior `extern` declaration, including initialized definitions. The
+  translation-unit regression checks the resulting relocated pointer. Global
+  aggregate pointers also support indexed member paths such as
+  `pointer[index].array[index]` in reads and stores.
+- The C frontend accepts the kernel's GNU `__builtin_has_attribute` constant
+  check for unannotated `nonstring` fields, recognizes
+  `__builtin_counted_by_ref` as a `void *` in `_Generic`, and skips static
+  type inference for unselected generic arms. It also accepts `__noclone__`,
+  `__no_profile_instrument_function__`, and field-level `__nonstring__`, and
+  lowers `__builtin_isdigit` with runtime coverage. Linux `READ_ONCE`/`WRITE_ONCE`
+  64-bit memory loads and 32-bit register stores lower as volatile accesses;
+  an inline-assembly runtime regression covers the store. Jump-label lowering
+  preserves constant field offsets on global key addresses, with an
+  asm-goto regression using a nonzero offset; Linux's `uncore.o` now compiles
+  through Kbuild and GNU `as`. NYC also lowers generic 64-bit `bsr`, x86
+  `lock addl`/`subl` and `addq`/`subq` memory operations with sign-flag
+  outputs, legacy write-only memory outputs paired with read constraints, and
+  the named read-write `xaddq` form while preserving its unlocked instruction.
+  The general inliner leaves calls with a following `capture.ret` intact so
+  secondary ABI return registers remain adjacent to their call; an IR
+  regression covers the chain. NYC also lowers volatile `movb`/`movw` memory
+  reads and `movb`/`movw`/`movq` memory writes used by Linux I/O helpers, with
+  runtime coverage. The saved mailbox and `pcc.c` inputs now compile and
+  assemble.
+  Automatic local arrays now accept alignment attributes through the backend's
+  16-byte stack guarantee, with a runtime alignment regression; this advances
+  saved `efi_64.c` to its unsupported alternative-instruction asm block.
+  NYC also lowers fault-table `asm goto` stores for 8-, 16-, 32-, and 64-bit
+  memory operands while retaining the exception target through optimization.
+  Focused runtime coverage and frontend regressions pass; isolated Linux 7.3
+  `cred.c`, `file.c`, `signal_32.c`, `spinlock.c`, and `percpu-rwsem.c`
+  compiles plus GNU assembly pass. A frontend regression also covers pointer
+  preservation in `typeof(*&member)`. Sparse designated file-scope integer
+  arrays now preserve zero-filled gaps, including designated pointer-array
+  relocations. Local GNU range initializers and local multidimensional array
+  types in `_Static_assert` have runtime and compile-time coverage. Integer
+  type specifiers can put `long` after `int`. Local arrays with an explicit
+  8-byte alignment also pass a runtime address-alignment check.
+  File-scope aggregate redeclarations preserve an earlier initialized
+  definition. Constant conditional evaluation skips an unselected operand,
+  covering the Linux `_IOC` invalid-size fallback while still rejecting an
+  invalid selected operand. File-scope `_Generic` controls now apply array
+  decay, allowing saved kernel initializers to compile. Runtime regressions
+  cover file-scope generic array decay, nested scalar-pointer stores, and
+  indexed pointer-array member addresses. The saved `hidraw.c` and `pcc.c`
+  inputs compile and assemble with `-fplan9-extensions`; `hid-sony.c`,
+  `hiddev.c`,
+  `dm-raid1.c`, `dm-ioctl.c`, `dm-kcopyd.c`, `dm-rq.c`, `dm-sysfs.c`, and
+  `dm-stats.c` also compile and assemble. The saved `wmi-bmof.c` input compiles
+  and assembles with the same extension flag.
+- The NYC-built SQLite 3.46.0 `testfixture` completed all 10,379 jobs in the
+  upstream `testrunner.tcl all` matrix at `-O1`, with zero failed or omitted
+  jobs. The JSON, cache, lookaside, and API smoke fixtures passed under
+  Valgrind with no invalid accesses, invalid frees, or definite leaks.
+- NYC now lowers Linux's x86 `ip_fast_csum` inline-assembly sequence. The C
+  frontend regression executes header lengths 5 through 16 and compares the
+  assembly result with an independent checksum implementation.
+  `net/ipv4/{af_inet,raw,ipconfig,igmp}.o` and
+  `drivers/net/netconsole.o` now compile with NYC and GNU `as`. `objtool`
+  reports missing `panic()` `__noreturn` metadata in `inet_init` and `raw_init`,
+  plus one unreachable instruction in `igmp.o`; review remains open.
+  File-scope aggregate arrays now retain `aligned` attributes placed between
+  the type and declarator; a runtime regression checks every element's
+  alignment, and `net/ipv6/syncookies.o` compiles with NYC and GNU `as`.
+  Function-type typedef redeclarations retain their parameter signatures, and
+  `net/ipv6/esp6.o` compiles with NYC and GNU `as`, with two unreachable-
+  instruction warnings still under review. GNU `\e` character constants are
+  accepted, `-fno-builtin` disables implicit builtin lookup, and aggregate
+  values can pass through variadic calls. A host `va_arg` runtime regression
+  passes. Single-integer-register aggregate `va_arg` also passes a runtime
+  test, and `net/9p/{client,protocol}.o` compile with NYC and GNU `as`;
+  `protocol.o` reports one unreachable instruction. The per-CPU pointer type
+  fix also lets `net/sunrpc/svc.o` compile; `objtool` reports one unreachable
+  instruction in `svc_pool_map_init_pernode`. The complete C frontend test
+  passes with these regressions.
+  `net/ipv4/syncookies.o`, `net/netfilter/nf_log_syslog.o`, and
+  `net/sunrpc/{stats,svcsock}.o` also compile with NYC and GNU `as`;
+  `svcsock.o` reports three unreachable instructions.
+  Unsized local aggregate-pointer arrays now infer their extent from the
+  initializer; the frontend regression passes and
+  `drivers/dma-buf/sync_file.o` plus `drivers/gpu/drm/drm_syncobj.o` compile.
+  Aggregate `_Bool` fields retain their boolean type for pointer-to-bool
+  assignments; the runtime regression and `net/mac80211/parse.o` compile pass.
+  Typed scalar pointer-to-pointer fields retain their pointee type through
+  member access and `typeof`; a nested per-CPU pointer increment regression
+  passes at runtime.
 
 </details>
 
@@ -7140,6 +9951,50 @@ reported work, not a fresh test of the current checkout.
 
 ### Changed
 
+- Ordinary compilation now defaults to `-O2` with size-oriented native code
+  generation, including assembly emission and normal JIT/AOT routes. Explicit
+  `-O0` remains unoptimized, speed/peak profiles disable size tuning, and the
+  REPL retains its unoptimized startup behavior.
+- `--release` now selects size-oriented native code generation while retaining
+  optimized LLVM passes, runtime frame-pointer and unwind-table omission,
+  section garbage collection, no build ID, and stripping. Size-optimized ELF
+  links also remove residual unwind and compiler-ident sections. `-flto` now
+  applies host LTO to runtime compilation and final linking on non-Windows
+  hosts.
+- Linux x86-64 `--mode=bare` AOT accepts multiple independent top-level
+  `print`, `eprint`, and literal no-op statements from inline or file input as
+  a freestanding syscall executable. General functions and control flow remain
+  unsupported and are rejected rather than silently linking the regular
+  runtime. The tiny syscall writer clears `%eax` before each syscall-number
+  load through `%al`; the multi-statement write/exit code shrank by four
+  bytes for three writes, with a regression asserting the resulting 218-byte
+  ELF and its output.
+- Linux x86-64 bare machine lowering now implements C-string, signed-integer,
+  and newline output with direct `write` syscalls, and lowers typed-buffer
+  allocation, length, bounds-checked signed index reads, and typed pop without
+  the host assembler. The typed-list fixture exercises positive and negative
+  indexes, length mutation, and absence of dynamic ELF sections.
+- Successful native/LLVM artifact messages now report the emitted ELF/EXE,
+  object, bitcode, or assembly size in KB/MB when applicable, with the exact
+  byte count included in every report.
+- The x86-64 assembly emitter now uses the sign-extended 32-bit immediate
+  encoding for signed-32-bit scalar constants, and uses 32-bit zero-extending
+  moves for nonnegative `uint32` constants instead of needlessly emitting a
+  64-bit `movabs`.
+- The x86-64 machine assembly emitter gives exact two-argument `i64` binary
+  leaves (add, subtract, multiply, and/or/xor) frameless bodies using the ABI
+  argument registers. One-argument identity and constant-return leaves also
+  omit the frame. Straight-line `i64` leaves, including one-argument
+  immediate arithmetic and two-or-more-argument chains, keep intermediate
+  results in `%rax` and use ABI argument registers without frame homes. General
+  NYIR leaf emission uses `%rsp`-relative homes without a `%rbp` prologue or
+  epilogue when stack homes are needed; an `immediate_remat` regression checks
+  that path. Generic machine-leaf frame elimination remains open.
+  One-argument increment/decrement leaves
+  use `inc`/`dec` instead of immediate arithmetic and have linked disassembly
+  checks for both compact opcodes. Frameless constant-return leaves with
+  nonzero values through 255 clear `%eax` and load `%al`, with a disassembly
+  regression for the 42 return value.
 - Keep canonical stack homes current for dedicated loop GPRs, including
   non-resident CFG-exit consumers.
 - Loop GPR homes are enabled by default; `NYTRIX_DISABLE_LOOP_GPR=1` disables
@@ -7187,6 +10042,10 @@ reported work, not a fresh test of the current checkout.
 - Parser, Vulkan renderer core, and UI renderer split into focused modules.
 - Std module layout reorganized; numeric modules moved into `core.math`.
 - Python build/bundle tooling replaced with native tools.
+- Benchmark parity: fannkuch's C reference now uses 64-bit arrays like Ny;
+  thread-ring reports launch time separately from per-hop time. Quiet 7+2
+  runs passed, with thread-ring's measured NYR/C ratio falling from 5.06x to
+  1.59x after launch cost was excluded.
 
 ### Fixed
 

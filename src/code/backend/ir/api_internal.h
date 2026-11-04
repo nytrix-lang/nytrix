@@ -5,6 +5,7 @@
 
 void nyr_api_error(char *err, size_t err_len, const char *message);
 void nyr_api_clear_error(char *err, size_t err_len);
+void nyr_inline_set_c_unit_abi(bool enabled);
 bool nyr_api_target_has(const ny_native_target_info_t *target,
                         unsigned capability);
 bool nyr_target_info_for_triple(const char *triple,

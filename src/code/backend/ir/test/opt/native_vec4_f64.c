@@ -16,6 +16,26 @@
 
 typedef double (*vec4_f64_fn)(double *, double *, double *, double *);
 
+extern const char *nyr_internal_aarch64_disasm(const unsigned char *bytes,
+                                               int64_t length, int64_t address);
+extern const char *nyr_internal_x64_disasm(const unsigned char *bytes,
+                                           int64_t length, int64_t address);
+
+static bool a64_word_decodes(uint32_t word, const char *operation) {
+  unsigned char bytes[4] = {(unsigned char)word, (unsigned char)(word >> 8),
+                            (unsigned char)(word >> 16),
+                            (unsigned char)(word >> 24)};
+  const char *listing = nyr_internal_aarch64_disasm(bytes, sizeof(bytes), 0);
+  if (strstr(listing, "\tunsupported\t")) {
+    fprintf(stderr,
+            "[native-vec4-f64] AArch64 encoder emitted an undecoded %s word "
+            "0x%08x:\n%s",
+            operation, word, listing);
+    return false;
+  }
+  return true;
+}
+
 static int emit(nyr_func_t *f, nyr_op_t op, int a, int b, int c, int64_t imm) {
   return nyr_ir_emit(f, (nyr_inst_t){.op = op,
                                      .dst = -1,
@@ -182,10 +202,13 @@ static bool check_x64_machine_form(const nyr_func_t *f,
                                    const double *a, const double *b,
                                    const double *c) {
   nyr_mach_func_t machine = {0};
-  nyr_obj_buf_t code = {0};
+  nyr_obj_buf_t code = {0}, repeated = {0};
   nyr_x64_obj_symbol_def_t defs[4] = {0};
+  nyr_x64_obj_symbol_def_t repeated_defs[4] = {0};
   nyr_x64_obj_reloc_t relocs[4] = {0};
-  size_t def_count = 0, reloc_count = 0;
+  nyr_x64_obj_reloc_t repeated_relocs[4] = {0};
+  size_t def_count = 0, reloc_count = 0, repeated_def_count = 0;
+  size_t repeated_reloc_count = 0;
   char err[256] = {0};
   bool ok = nyr_mach_lower_nir(f, &machine, target->caps, err, sizeof(err));
   if (!ok) {
@@ -195,6 +218,10 @@ static bool check_x64_machine_form(const nyr_func_t *f,
   ok = nyr_x64_mach_append_function(
       &code, defs, &def_count, relocs, &reloc_count, &machine, target,
       "ny_test_vec4_f64_mach", false, err, sizeof(err));
+  ok = ok && nyr_x64_mach_append_function(
+                 &repeated, repeated_defs, &repeated_def_count, repeated_relocs,
+                 &repeated_reloc_count, &machine, target,
+                 "ny_test_vec4_f64_mach", false, err, sizeof(err));
   if (!ok) {
     fprintf(stderr, "machine form: bundle encode failed: %s\n", err);
     goto done;
@@ -202,7 +229,51 @@ static bool check_x64_machine_form(const nyr_func_t *f,
   {
     int symbol =
         nyr_x64_obj_def_index(defs, def_count, "ny_test_vec4_f64_mach");
-    ok = symbol >= 0;
+    int repeated_symbol = nyr_x64_obj_def_index(
+        repeated_defs, repeated_def_count, "ny_test_vec4_f64_mach");
+    ok = symbol >= 0 && defs[symbol].off <= code.len &&
+         defs[symbol].size <= code.len - defs[symbol].off &&
+         repeated_symbol >= 0 &&
+         defs[symbol].size == repeated_defs[repeated_symbol].size &&
+         repeated_defs[repeated_symbol].off <= repeated.len &&
+         repeated_defs[repeated_symbol].size <=
+             repeated.len - repeated_defs[repeated_symbol].off &&
+         memcmp(code.data + defs[symbol].off,
+                repeated.data + repeated_defs[repeated_symbol].off,
+                defs[symbol].size) == 0;
+    if (ok) {
+      const char *listing = nyr_internal_x64_disasm(
+          code.data + defs[symbol].off, defs[symbol].size, 0);
+      if (strstr(listing, "\tunsupported\t")) {
+        fprintf(stderr,
+                "machine form: x86-64 encoder emitted an undecoded "
+                "instruction:\n%s",
+                listing);
+        size_t dump_start = defs[symbol].off + 400;
+        if (dump_start > defs[symbol].off + defs[symbol].size)
+          dump_start = defs[symbol].off;
+        size_t dump_end = defs[symbol].off + defs[symbol].size;
+        if (dump_end > dump_start + 120)
+          dump_end = dump_start + 120;
+        fprintf(stderr, "machine form bytes:");
+        for (size_t byte_i = dump_start; byte_i < dump_end; ++byte_i)
+          fprintf(stderr, " %02x", code.data[byte_i]);
+        fputc('\n', stderr);
+        ok = false;
+      }
+      if (ok && (!strstr(listing, "\tmovdqu\txmm0, xmmword ptr") ||
+                 !strstr(listing, "\tmovq\txmm0, rax") ||
+                 !strstr(listing, "\tmovhlps\txmm15, xmm14") ||
+                 !strstr(listing, "\tvbroadcastsd\tymm0, qword ptr") ||
+                 !strstr(listing, "\tvextractf128\txmm14, ymm15, 0") ||
+                 !strstr(listing, "\tvfmadd213pd\tymm14, ymm15,") ||
+                 !strstr(listing, "\tvaddpd\tymm0, ymm0,"))) {
+        fprintf(stderr,
+                "machine form: x86-64 emitted vector listing mismatch:\n%s",
+                listing);
+        ok = false;
+      }
+    }
     bool has_ymm = false;
     for (size_t i = 0; ok && i + 1 < code.len; ++i)
       if (code.data[i] == 0xc4 && (code.data[i + 1] & 0x0f) <= 2)
@@ -241,6 +312,7 @@ static bool check_x64_machine_form(const nyr_func_t *f,
   }
 done:
   nyr_obj_free(&code);
+  nyr_obj_free(&repeated);
   nyr_mach_func_free(&machine);
   return ok;
 }
@@ -363,6 +435,8 @@ static bool check_aarch64_emission(nyr_func_t *f,
               nyr_op_name(ops[op_i]), keep);
       ok = false;
     }
+    for (size_t word_i = 0; ok && word_i < word_counts[op_i]; ++word_i)
+      ok = a64_word_decodes(word_sets[op_i][word_i], nyr_op_name(ops[op_i]));
     free(candidate.data);
     unlink(obj_path);
   }

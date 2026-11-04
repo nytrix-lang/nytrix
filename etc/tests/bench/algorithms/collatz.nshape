@@ -4,8 +4,8 @@ shape collatz {
   features ["c-vs-ny", "checksum"]
   template ny-test-case
   expect compile_and_run
-  ;; Translated from the QBE minic test: minic/test/collatz.c.
   source ny <<'NY'
+;; inspired from QBE: minic/test/collatz.c.
 def steps = i64buf_new(1000)
 mut best = 0
 mut nv = 1

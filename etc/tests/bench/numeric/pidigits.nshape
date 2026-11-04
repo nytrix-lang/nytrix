@@ -11,27 +11,29 @@ use core.os.time
 ;; Machin formula pi = 16*atan(1/5) - 4*atan(1/239), fixed-point 10^50.
 fn atan_inv(int x) bigint {
    def base = bigint_from_int(10)
-   def p50 = bigint_pow(base, bigint_from_int(50))
+   def p50 = base.pow(bigint_from_int(50))
    def xb = bigint_from_int(x)
-   mut term = bigint_div(p50, xb)
+   mut term = p50.div(xb)
    def zero = bigint_from_int(0)
    mut acc = bigint_from_int(0)
    mut k = 0
-   while bigint_cmp(term, zero) != 0 {
-      if k % 2 == 0 { acc = bigint_add(acc, term) } else { acc = bigint_sub(acc, term) }
+   while term.cmp(zero) != 0 {
+      if k % 2 == 0 {
+         acc = acc.add(term)
+      } else {
+         acc = acc.sub(term)
+      }
       k += 1
-      term = bigint_mul(term, 2 * k - 1)
-      term = bigint_div(term, 2 * k + 1)
-      term = bigint_div(term, x * x)
+      term = bigint_mul_div(term, 2 * k - 1, (2 * k + 1) * x * x)
    }
    acc
 }
 def int t0 = ticks()
 def a5 = atan_inv(5)
 def a239 = atan_inv(239)
-def pi = bigint_sub(bigint_mul(a5, bigint_from_int(16)), bigint_mul(a239, bigint_from_int(4)))
-def pi2 = bigint_div(pi, bigint_from_int(10000000000))
-def ck = bigint_mod(pi2, bigint_from_int(10000000000))
+def pi = a5.mul(bigint_from_int(16)).sub(a239.mul(bigint_from_int(4)))
+def pi2 = pi.div(bigint_from_int(10000000000))
+def ck = pi2.mod(bigint_from_int(10000000000))
 def int t1 = ticks()
 print("checksum=", bigint_to_str(ck))
 print("elapsed_ns=", t1 - t0)

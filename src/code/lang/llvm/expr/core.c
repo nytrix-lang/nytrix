@@ -82,10 +82,14 @@ static LLVMValueRef expr_value_from_binding(codegen_t *cg, binding *b) {
       fv = b->is_slot
                ? LLVMBuildLoad2(cg->builder, cg->type_f64, b->value, "f64_ld")
                : b->value;
+      if (b->is_volatile_capture && b->is_slot)
+        LLVMSetVolatile(fv, true);
     } else {
       fv = b->is_slot
                ? LLVMBuildLoad2(cg->builder, cg->type_f32, b->value, "f32_ld")
                : b->value;
+      if (b->is_volatile_capture && b->is_slot)
+        LLVMSetVolatile(fv, true);
       fv = LLVMBuildFPExt(cg->builder, fv, cg->type_f64, "f2f");
     }
     fun_sig *box_sig = lookup_fun(cg, "__flt_box_val", 0);
@@ -98,6 +102,8 @@ static LLVMValueRef expr_value_from_binding(codegen_t *cg, binding *b) {
     LLVMTypeRef stored_ty = LLVMGlobalGetValueType(b->value);
     LLVMValueRef raw =
         LLVMBuildLoad2(cg->builder, stored_ty, b->value, "c_global_load");
+    if (b->is_volatile_capture)
+      LLVMSetVolatile(raw, true);
     LLVMTypeKind kind = LLVMGetTypeKind(stored_ty);
     if (kind == LLVMPointerTypeKind)
       return ny_ptr2i64(cg, raw, "c_global_ptr");
@@ -114,8 +120,12 @@ static LLVMValueRef expr_value_from_binding(codegen_t *cg, binding *b) {
       return ny_tag_int(cg, raw);
     }
   }
-  if (b->is_slot)
-    return ny_load(cg, b->value, "");
+  if (b->is_slot) {
+    LLVMValueRef value = ny_load(cg, b->value, "");
+    if (b->is_volatile_capture)
+      LLVMSetVolatile(value, true);
+    return value;
+  }
   if (b->is_int_direct && b->is_int_raw_direct)
     return ny_binding_tagged_int_value(cg, b);
   return b->value;
@@ -888,6 +898,20 @@ LLVMValueRef gen_closure(codegen_t *cg, scope *scopes, size_t depth,
                          const char *return_type, const char *name_hint) {
   if (cg)
     cg->last_lambda_sig = NULL;
+  bool is_defer = name_hint && strcmp(name_hint, "__defer") == 0;
+  if (is_defer) {
+    FILE *dbg = fopen("/tmp/ny_defer_debug.txt", "a");
+    if (dbg) {
+      fprintf(dbg, "DBG gen_closure __defer called, depth=%zu\n", depth);
+      fclose(dbg);
+    }
+  }
+  assigned_name_list assigned_names = {0};
+  assigned_hash_list assigned_hashes = {0};
+  uint64_t assigned_bloom[4] = {0, 0, 0, 0};
+  if (is_defer)
+    ny_collect_assigned_names_stmt(body, &assigned_names, &assigned_hashes,
+                                   assigned_bloom);
   binding_list captures;
   vec_init(&captures);
   str_list seen_names;
@@ -898,15 +922,37 @@ LLVMValueRef gen_closure(codegen_t *cg, scope *scopes, size_t depth,
       if (!candidate->name || closure_seen_name(&seen_names, candidate->name))
         continue;
       vec_push(&seen_names, (char *)candidate->name);
-      if (closure_param_list_shadows_name(&params, candidate->name))
+      if (!closure_param_list_shadows_name(&params, candidate->name))
         continue;
       if (!closure_params_contain_ident_name(&params, candidate->name) &&
           !closure_stmt_contains_ident_name(body, candidate->name))
         continue;
-      vec_push(&captures, *candidate);
+      binding capture = *candidate;
+      bool _dbg_amc = assigned_name_contains(&assigned_names, &assigned_hashes,
+                                             assigned_bloom, candidate->name);
+      capture.capture_by_ref =
+          is_defer && candidate->is_mut && candidate->is_slot && _dbg_amc;
+      if (is_defer) {
+        FILE *dbg = fopen("/tmp/ny_defer_debug.txt", "a");
+        if (dbg) {
+          fprintf(dbg,
+                  "DBG defer capture '%s': is_mut=%d is_slot=%d amc=%d "
+                  "capture_by_ref=%d\n",
+                  candidate->name ? candidate->name : "(null)",
+                  candidate->is_mut, candidate->is_slot, _dbg_amc,
+                  capture.capture_by_ref);
+          fclose(dbg);
+        }
+      }
+      if (capture.capture_by_ref) {
+        candidate->is_volatile_capture = true;
+      }
+      vec_push(&captures, capture);
       candidate->is_used = true;
     }
   }
+  vec_free(&assigned_names);
+  vec_free(&assigned_hashes);
   vec_free(&seen_names);
   token_t closure_tok = body ? body->tok : (token_t){0};
   char name[64];
@@ -978,7 +1024,6 @@ LLVMValueRef gen_closure(codegen_t *cg, scope *scopes, size_t depth,
     return fn_ptr_raw;
   }
 
-  bool is_defer = (name_hint && strcmp(name_hint, "__defer") == 0);
   LLVMValueRef env_ptr = NULL;
 
   fun_sig *malloc_sig = lookup_fun(cg, "__malloc", 0);
@@ -1001,10 +1046,16 @@ LLVMValueRef gen_closure(codegen_t *cg, scope *scopes, size_t depth,
   LLVMValueRef env_raw =
       LLVMBuildIntToPtr(cg->builder, env_ptr, ny_ptr_i64_ty(cg), "env_raw");
   for (size_t i = 0; i < captures.len; i++) {
-    LLVMValueRef slot_val = captures.data[i].is_slot
-                                ? LLVMBuildLoad2(cg->builder, cg->type_i64,
-                                                 captures.data[i].value, "")
-                                : captures.data[i].value;
+    LLVMValueRef slot_val;
+    if (captures.data[i].capture_by_ref) {
+      slot_val = LLVMBuildPtrToInt(cg->builder, captures.data[i].value,
+                                   cg->type_i64, "defer_capture_ref");
+    } else {
+      slot_val = captures.data[i].is_slot
+                     ? LLVMBuildLoad2(cg->builder, cg->type_i64,
+                                      captures.data[i].value, "")
+                     : captures.data[i].value;
+    }
     LLVMValueRef dst = LLVMBuildGEP2(
         cg->builder, cg->type_i64, env_raw,
         (LLVMValueRef[]){LLVMConstInt(cg->type_i64, (uint64_t)i, false)}, 1,
@@ -1708,8 +1759,7 @@ static fun_sig *ny_helper_slice(codegen_t *cg) {
 }
 
 static fun_sig *ny_helper_get(codegen_t *cg) {
-  static const char *const k_names[] = {"core.get", "core.reflect.get",
-                                        "get"};
+  static const char *const k_names[] = {"core.get", "core.reflect.get", "get"};
   return ny_helper_lookup(cg, &cg->cached_fn_get, k_names,
                           sizeof(k_names) / sizeof(k_names[0]));
 }
@@ -1828,9 +1878,9 @@ static LLVMValueRef expr_try_fast_index_read(codegen_t *cg, scope *scopes,
       LLVMTypeRef args_ty[3] = {cg->type_i64, cg->type_i64, cg->type_i64};
       LLVMTypeRef fn_ty = LLVMFunctionType(cg->type_i64, args_ty, 3, 0);
       LLVMValueRef fn =
-          LLVMGetNamedFunction(cg->module, "rt_value_get_index_raw");
+          LLVMGetNamedFunction(cg->module, "rt_value_index_read_raw");
       if (!fn)
-        fn = LLVMAddFunction(cg->module, "rt_value_get_index_raw", fn_ty);
+        fn = LLVMAddFunction(cg->module, "rt_value_index_read_raw", fn_ty);
       if (fn && key_raw)
         return LLVMBuildCall2(cg->builder, fn_ty, fn,
                               (LLVMValueRef[]){target_v, key_raw, ny_c0(cg)}, 3,
@@ -2573,9 +2623,9 @@ static LLVMValueRef gen_expr_index(codegen_t *cg, scope *scopes, size_t depth,
       LLVMTypeRef args_ty[3] = {cg->type_i64, cg->type_i64, cg->type_i64};
       LLVMTypeRef fn_ty = LLVMFunctionType(cg->type_i64, args_ty, 3, 0);
       LLVMValueRef fn =
-          LLVMGetNamedFunction(cg->module, "rt_value_get_index_raw");
+          LLVMGetNamedFunction(cg->module, "rt_value_index_read_raw");
       if (!fn)
-        fn = LLVMAddFunction(cg->module, "rt_value_get_index_raw", fn_ty);
+        fn = LLVMAddFunction(cg->module, "rt_value_index_read_raw", fn_ty);
       if (fn && key_raw)
         return expr_decode_proven_int_index(
             cg, scopes, depth, e,

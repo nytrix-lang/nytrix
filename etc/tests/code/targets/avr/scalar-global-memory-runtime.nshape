@@ -18,7 +18,7 @@ def obj_path = stem + ".o"
 def start_obj_path = stem + "-start.o"
 def elf_path = stem + ".elf"
 def emitted = run_capture(
-    [compiler, "--native-backend=avr", "--native-only", "--nyir-verify",
+    [compiler, "--native-backend=avr", "--native-only", "--nyr-verify",
      "--emit-asm=" + asm_path, "-no-std", "-emit-only", "-e",
      "mut int cell = 0\n" +
      "@noinline\nfn update(int value) int {\n" +

@@ -3,7 +3,7 @@ shape logical_target {
   generator "native"
   features ["native", "nyir", "logical", "x86_64"]
   template ny-test-case
-  flags "--native-backend x86_64 --nyir-verify"
+  flags "--native-backend x86_64 --nyr-verify"
   expect compile_and_run
   expect_exit 1
   source ny <<'NY'

@@ -162,11 +162,11 @@ fn _toml_numeric_like(str v) bool {
    mut i = 0
    if load8(v, 0) == 45 { i = 1 }
    if i >= v.len { return false }
-   mut saw_digit = false
+   mut int saw_digit = 0
    mut dots = 0
    while i < v.len {
       def c = load8(v, i)
-      if c >= 48 && c <= 57 { saw_digit = true } elif c == 46 {
+      if c >= 48 && c <= 57 { saw_digit = 1 } elif c == 46 {
          dots += 1
          if dots > 1 { return false }
       } else {
@@ -174,15 +174,15 @@ fn _toml_numeric_like(str v) bool {
       }
       i += 1
    }
-   saw_digit
+   saw_digit != 0
 }
 
 fn _toml_scalar(any raw) any {
    mut v = str.strip(raw)
    if v.len == 0 { return "" }
    def lo = str.lower(v)
-   if lo == "true" { return true }
-   if lo == "false" { return false }
+   if str._str_eq(lo, "true") { return true }
+   if str._str_eq(lo, "false") { return false }
    if load8(v, 0) == 91 && load8(v, v.len - 1) == 93 {
       def inner = str.str_slice(v, 1, v.len - 1)
       def parts = _toml_split_array(inner)

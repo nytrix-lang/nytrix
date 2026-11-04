@@ -3,7 +3,7 @@ shape x86_64_object {
   generator "native"
   features ["native", "object", "x86_64"]
   template ny-test-case
-  flags "--native-backend x86_64 --nyir-verify -emit-only -o /tmp/nytrix-native-object-smoke.o"
+  flags "--native-backend x86_64 --nyr-verify -emit-only -o /tmp/nytrix-native-object-smoke.o"
   expect compile_and_run
   source ny <<'NY'
 1 + 2

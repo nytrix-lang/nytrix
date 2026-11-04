@@ -2,8 +2,8 @@
  * Thin ny entry: pure native-only -c arithmetic never loads LLVM/Z3/clang.
  * Everything else execs the full compiler (ny-full) next to this binary.
  */
-#include "pureexpr.h"
 #include "base/version.h"
+#include "pureexpr.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -106,8 +106,8 @@ static int ny_sibling_tool_path_from(const char *self, const char *tool,
     *slash = '\0';
   else
     tmp[0] = '\0';
-  return snprintf(out, out_len, "%s%s%s.exe", tmp, tmp[0] ? "\\" : "",
-                  tool) >= (int)out_len
+  return snprintf(out, out_len, "%s%s%s.exe", tmp, tmp[0] ? "\\" : "", tool) >=
+                 (int)out_len
              ? -1
              : 0;
 #endif
@@ -127,6 +127,8 @@ static const char *ny_native_tool_for(const char *command) {
     return "ny-doc";
   if (strcmp(command, "make") == 0 || strcmp(command, "build") == 0)
     return "ny-make";
+  if (strcmp(command, "nyc") == 0)
+    return "nyc";
   return NULL;
 }
 
@@ -165,8 +167,8 @@ static int ny_exec_native_tool(int argc, char **argv) {
 
   char tool_path[PATH_MAX];
   int found = 0;
-  if (ny_sibling_tool_path_from(argv[0], tool, tool_path,
-                                sizeof(tool_path)) == 0) {
+  if (ny_sibling_tool_path_from(argv[0], tool, tool_path, sizeof(tool_path)) ==
+      0) {
 #ifndef _WIN32
     found = access(tool_path, X_OK) == 0;
 #else
@@ -179,8 +181,8 @@ static int ny_exec_native_tool(int argc, char **argv) {
     ssize_t n = readlink("/proc/self/exe", self, sizeof(self) - 1);
     if (n > 0) {
       self[n] = '\0';
-      if (ny_sibling_tool_path_from(self, tool, tool_path,
-                                    sizeof(tool_path)) == 0)
+      if (ny_sibling_tool_path_from(self, tool, tool_path, sizeof(tool_path)) ==
+          0)
         found = access(tool_path, X_OK) == 0;
     }
   }
@@ -274,8 +276,9 @@ static int ny_check_fresh(const char *target) {
   int refuse = strict && *strict && strcmp(strict, "0") != 0;
   char theirs[1024];
   if (ny_read_target_id(target, theirs, sizeof(theirs)) != 0) {
-    fprintf(stderr, "ny: warning: cannot verify build identity of '%s' "
-                    "(predates --version-id); continuing\n",
+    fprintf(stderr,
+            "ny: warning: cannot verify build identity of '%s' "
+            "(predates --version-id); continuing\n",
             target);
     if (refuse) {
       fprintf(stderr, "ny: refusing (NYTRIX_REQUIRE_FRESH=1)\n");

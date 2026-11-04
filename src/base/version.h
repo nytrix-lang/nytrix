@@ -1,5 +1,8 @@
 #pragma once
 
+/* Immutable semantic version/build suffix, without the stdlib identity. */
+const char *ny_version_string(void);
+
 /*
  * Machine-readable build identity for stale-pair detection (audit A6).
  * version:  "<VERSION> head=<HEAD> dirty=<0|1> build=<N> std=<SHA12>:<FILES>"

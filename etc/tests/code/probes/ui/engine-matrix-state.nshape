@@ -1,0 +1,32 @@
+shape engine-matrix-state {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "sys", "render"]
+  template ny-test-case
+  expect compile_and_run
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect_stdout "ENGINE-MATRIX-STATE-OK"
+  source ny <<'NY'
+use core
+use core.os.ui.render.camera as camera
+use core.os.ui.render.viewer.engine.state
+fn setup_camera() {
+   camthreed = camera.init([22.0, 14.0, 26.0], -40.0, -16.0)
+   camera.set_fov(camthreed, 120.0)
+   cam = [[22.0, 14.0, 26.0], [0.0, 4.0, 0.0], [0.0, 1.0, 0.0], 120.0]
+}
+fn camera_fov() f64 { float(camthreed.get(16)) }
+fn camera_x() f64 { float(camthreed.get(0)) }
+fn facade_fov() f64 { float(cam.get(3)) }
+setup_camera()
+assert(is_list(camthreed) && is_list(cam), "camera globals retain list representation")
+assert(camera_fov() == 120.0 && camera_x() == 22.0, "camera created in one function remains readable in another")
+assert(facade_fov() == 120.0, "renderer camera retains its field of view")
+assert(ensure_matrices(), "engine initializes imported matrix state")
+assert(is_list(M_V) && M_V.len == 18, "engine view matrix exists")
+M_V[14] = 3.0
+assert(ensure_matrices(), "engine matrices can be reused")
+assert(float(M_V[14]) == 3.0, "engine matrix initialization preserves live transforms")
+print("ENGINE-MATRIX-STATE-OK")
+NY
+}

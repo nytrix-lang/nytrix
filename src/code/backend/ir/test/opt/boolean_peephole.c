@@ -20,25 +20,19 @@ static bool test_mod_parity(void) {
   nyr_func_t f;
   nyr_opt_begin(&f);
   int address = nyr_opt_const(&f, (int64_t)(intptr_t)&bool_cell_left);
-  int dividend = nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_LOAD_I64,
-                                             .dst = -1,
-                                             .a = address,
-                                             .b = -1,
-                                             .c = -1,
-                                             .d = -1,
-                                             .e = -1,
-                                             .f = -1});
+  int dividend = nyr_opt_emit_abc(&f, NYIR_LOAD_I64, address, -1, -1);
   int two = nyr_opt_const(&f, 2);
   int zero = nyr_opt_const(&f, 0);
-  int remainder = nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_MOD_I64,
-                                              .dst = -1,
-                                              .a = dividend,
-                                              .b = two,
-                                              .c = -1,
-                                              .d = -1,
-                                              .e = -1,
-                                              .f = -1,
-                                              .effects = NYIR_EFFECT_MAY_TRAP});
+  int remainder =
+      nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_MOD_I64,
+                                   .dst = -1,
+                                   .a = dividend,
+                                   .b = two,
+                                   .c = -1,
+                                   .d = -1,
+                                   .e = -1,
+                                   .f = -1,
+                                   .effects = NYIR_EFFECT_MAY_TRAP});
   for (size_t i = 0; i < f.len; ++i) {
     if (f.data[i].dst != remainder)
       continue;
@@ -46,14 +40,7 @@ static bool test_mod_parity(void) {
     f.data[i].range =
         (nyr_range_t){.has_min = true, .has_max = true, .min = -1, .max = 1};
   }
-  int copied = nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_COPY,
-                                           .dst = -1,
-                                           .a = remainder,
-                                           .b = -1,
-                                           .c = -1,
-                                           .d = -1,
-                                           .e = -1,
-                                           .f = -1});
+  int copied = nyr_opt_emit_abc(&f, NYIR_COPY, remainder, -1, -1);
   int odd = nyr_opt_cmp(&f, copied, zero, NYIR_CMP_NE);
   nyr_opt_ret(&f, odd);
   if (!nyr_opt_verify(&f, name)) {
@@ -137,22 +124,8 @@ int main(void) {
   nyr_opt_begin(&f);
   int left_address = nyr_opt_const(&f, (int64_t)(intptr_t)&bool_cell_left);
   int right_address = nyr_opt_const(&f, (int64_t)(intptr_t)&bool_cell_right);
-  int left = nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_LOAD_I64,
-                                         .dst = -1,
-                                         .a = left_address,
-                                         .b = -1,
-                                         .c = -1,
-                                         .d = -1,
-                                         .e = -1,
-                                         .f = -1});
-  int right = nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_LOAD_I64,
-                                          .dst = -1,
-                                          .a = right_address,
-                                          .b = -1,
-                                          .c = -1,
-                                          .d = -1,
-                                          .e = -1,
-                                          .f = -1});
+  int left = nyr_opt_emit_abc(&f, NYIR_LOAD_I64, left_address, -1, -1);
+  int right = nyr_opt_emit_abc(&f, NYIR_LOAD_I64, right_address, -1, -1);
   int zero = nyr_opt_const(&f, 0);
   int one = nyr_opt_const(&f, 1);
   int comparison = nyr_opt_cmp(&f, left, right, NYIR_CMP_LT);
@@ -167,16 +140,21 @@ int main(void) {
   long long before = nyr_opt_eval(&f, name);
   bool ok = nyr_peephole(&f) && nyr_opt_verify(&f, name) &&
             count_op(&f, NYIR_AND_I64) == 0;
+  const nyr_inst_t *normalized_def = NULL;
+  for (size_t i = 0; ok && i < f.len; ++i)
+    if (f.data[i].dst == normalized)
+      normalized_def = &f.data[i];
+  ok = ok && normalized_def && normalized_def->op == NYIR_COPY &&
+       normalized_def->a == comparison;
   const nyr_inst_t *result_def = NULL;
   for (size_t i = 0; ok && i < f.len; ++i)
     if (f.data[i].dst == inverted)
       result_def = &f.data[i];
   ok = ok && result_def && result_def->op == NYIR_CMP_I64 &&
-       result_def->a == left && result_def->b == right &&
-       result_def->cmp == NYIR_CMP_GE;
+       result_def->cmp == NYIR_CMP_EQ && result_def->b == zero;
   long long after = ok ? nyr_opt_eval(&f, name) : 0;
   if (!ok) {
-    fprintf(stderr, "[%s] comparison boolean wrapper was not simplified\n",
+    fprintf(stderr, "[%s] comparison boolean wrapper was not preserved\n",
             name);
     nyr_dump(stderr, &f, name);
   } else {

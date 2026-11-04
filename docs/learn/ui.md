@@ -5,6 +5,8 @@ Use `core.os.ui.window` for window and input state and
 `core.os.ui.render` for drawing. Native and browser targets have different host
 capabilities; a matching function name is not proof of matching behavior.
 
+Prerequisites: a supported display or browser host for the UI path being used.
+
 ## Start from a working project
 
 The repository has focused programs under [`etc/projects/ui/`](../../etc/projects/ui/):
@@ -145,3 +147,9 @@ variables belong to the demo or backend; use the narrowest relevant control.
 Diagnostic output perturbs timing, so repeat the quiet comparison after
 attribution. See [Performance](performance.md) for address validation, counters,
 and interpretation limits.
+
+Next:
+
+- [Browser](browser.md) — use the browser rendering route.
+- [Networking](networking.md) — inspect network and host APIs.
+- [Performance](performance.md) — measure frame cost.

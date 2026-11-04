@@ -6,7 +6,7 @@ defaults {
 
 shape aarch64_elf64_internal_link_run_aggregate_two_words {
   features [native object elf64 aarch64 aapcs64 qemu aggregate call return]
-  flags "--native-only --native-backend aarch64 --nyir-verify -emit-only -o /tmp/nytrix-aarch64-aggregate-two-words.o"
+  flags "--native-only --native-backend aarch64 --nyr-verify -emit-only -o /tmp/nytrix-aarch64-aggregate-two-words.o"
   expect object_link_run_i64_42
   source ny <<'NY'
 struct Pair {
@@ -28,7 +28,7 @@ NY
 
 shape aarch64_elf64_internal_link_run_aggregate_three_words {
   features [native object elf64 aarch64 aapcs64 qemu aggregate call return]
-  flags "--native-only --native-backend aarch64 --nyir-verify -emit-only -o /tmp/nytrix-aarch64-aggregate-three-words.o"
+  flags "--native-only --native-backend aarch64 --nyr-verify -emit-only -o /tmp/nytrix-aarch64-aggregate-three-words.o"
   expect object_link_run_i64_42
   source ny <<'NY'
 struct Triple {
@@ -51,7 +51,7 @@ NY
 
 shape aarch64_elf64_internal_link_run_aggregate_hfa_two_f64 {
   features [native object elf64 aarch64 aapcs64 qemu aggregate hfa f64 call return]
-  flags "--native-only --native-backend aarch64 --nyir-verify -emit-only -o /tmp/nytrix-aarch64-aggregate-hfa-two-f64.o"
+  flags "--native-only --native-backend aarch64 --nyr-verify -emit-only -o /tmp/nytrix-aarch64-aggregate-hfa-two-f64.o"
   expect object_link_run_f64_42.0
   source ny <<'NY'
 struct Pair {
@@ -73,7 +73,7 @@ NY
 
 shape aarch64_elf64_internal_link_run_aggregate_hfa_four_f64 {
   features [native object elf64 aarch64 aapcs64 qemu aggregate hfa f64 call return]
-  flags "--native-only --native-backend aarch64 --nyir-verify -emit-only -o /tmp/nytrix-aarch64-aggregate-hfa-four-f64.o"
+  flags "--native-only --native-backend aarch64 --nyr-verify -emit-only -o /tmp/nytrix-aarch64-aggregate-hfa-four-f64.o"
   expect object_link_run_f64_42.0
   source ny <<'NY'
 struct Quad {
@@ -97,7 +97,7 @@ NY
 
 shape aarch64_elf64_internal_link_run_aggregate_hfa_five_f64_indirect {
   features [native object elf64 aarch64 aapcs64 qemu aggregate hfa f64 indirect call return boundary]
-  flags "--native-only --native-backend aarch64 --nyir-verify -emit-only -o /tmp/nytrix-aarch64-aggregate-hfa-five-f64.o"
+  flags "--native-only --native-backend aarch64 --nyr-verify -emit-only -o /tmp/nytrix-aarch64-aggregate-hfa-five-f64.o"
   expect object_link_run_f64_42.0
   source ny <<'NY'
 struct Five {
@@ -122,7 +122,7 @@ NY
 
 shape aarch64_elf64_internal_link_run_aggregate_nested_hfa_f32 {
   features [native object elf64 aarch64 aapcs64 qemu aggregate hfa f32 nested call return]
-  flags "--native-only --native-backend aarch64 --nyir-verify -emit-only -o /tmp/nytrix-aarch64-aggregate-nested-hfa-f32.o"
+  flags "--native-only --native-backend aarch64 --nyr-verify -emit-only -o /tmp/nytrix-aarch64-aggregate-nested-hfa-f32.o"
   expect object_link_run_f32_42.0
   source ny <<'NY'
 struct F32Pair {
@@ -149,7 +149,7 @@ NY
 
 shape aarch64_elf64_internal_link_run_aggregate_hfa_v_register_spill {
   features [native object elf64 aarch64 aapcs64 qemu aggregate hfa f64 register spill call return]
-  flags "--native-only --native-backend aarch64 --nyir-verify -emit-only -o /tmp/nytrix-aarch64-aggregate-hfa-v-register-spill.o"
+  flags "--native-only --native-backend aarch64 --nyr-verify -emit-only -o /tmp/nytrix-aarch64-aggregate-hfa-v-register-spill.o"
   expect object_link_run_f64_42.0
   source ny <<'NY'
 struct Pair {
@@ -173,7 +173,7 @@ NY
 
 shape aarch64_elf64_internal_link_run_aggregate_align16_integer {
   features [native object elf64 aarch64 aapcs64 qemu aggregate align16 call return]
-  flags "--native-only --native-backend aarch64 --nyir-verify -emit-only -o /tmp/nytrix-aarch64-aggregate-align16.o"
+  flags "--native-only --native-backend aarch64 --nyr-verify -emit-only -o /tmp/nytrix-aarch64-aggregate-align16.o"
   expect object_link_run_i64_42
   source ny <<'NY'
 struct AlignedPair align(16) {
@@ -195,7 +195,7 @@ NY
 
 shape aarch64_elf64_internal_link_run_aggregate_mixed_i64_f64 {
   features [native object elf64 aarch64 aapcs64 qemu aggregate mixed call return]
-  flags "--native-only --native-backend aarch64 --nyir-verify -emit-only -o /tmp/nytrix-aarch64-aggregate-mixed-i64-f64.o"
+  flags "--native-only --native-backend aarch64 --nyr-verify -emit-only -o /tmp/nytrix-aarch64-aggregate-mixed-i64-f64.o"
   expect object_link_run_i64_42
   source ny <<'NY'
 struct Mixed {
@@ -221,7 +221,7 @@ NY
 
 shape aarch64_elf64_internal_link_run_aggregate_packed {
   features [native object elf64 aarch64 aapcs64 qemu aggregate packed call return]
-  flags "--native-only --native-backend aarch64 --nyir-verify -emit-only -o /tmp/nytrix-aarch64-aggregate-packed.o"
+  flags "--native-only --native-backend aarch64 --nyr-verify -emit-only -o /tmp/nytrix-aarch64-aggregate-packed.o"
   expect object_link_run_i64_42
   source ny <<'NY'
 struct Packed pack(1) {
@@ -247,7 +247,7 @@ NY
 
 shape aarch64_elf64_internal_link_run_aggregate_nested_by_value {
   features [native object elf64 aarch64 aapcs64 qemu aggregate nested call return]
-  flags "--native-only --native-backend aarch64 --nyir-verify -emit-only -o /tmp/nytrix-aarch64-aggregate-nested.o"
+  flags "--native-only --native-backend aarch64 --nyr-verify -emit-only -o /tmp/nytrix-aarch64-aggregate-nested.o"
   expect object_link_run_i64_42
   source ny <<'NY'
 struct Deep0 {

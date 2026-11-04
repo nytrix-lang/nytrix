@@ -173,8 +173,8 @@ static inline uint64_t ny_hash64_u64(uint64_t seed, uint64_t v) {
 #define NY_COMPILER_ASSERTF(cond, fmt, ...)                                    \
   do {                                                                         \
     if (ny_compiler_asserts_enabled() && !(cond))                              \
-      ny_compiler_assert_fail(__FILE__, __LINE__, __func__, #cond, (fmt),      \
-                              ##__VA_ARGS__);                                  \
+      ny_compiler_assert_fail(__FILE__, __LINE__, __func__, #cond,             \
+                              (fmt), ##__VA_ARGS__);                           \
   } while (0)
 
 #define NY_INVARIANT_ASSERT(cond, inv_name, src_file, src_line, src_col,       \
@@ -371,6 +371,15 @@ void ny_complexity_note(const char *file, int line, const char *func,
 
 const char *ny_src_root(void);
 const char *ny_default_cache_root_dir(void);
+/* Atomically publish a completed cache temporary in its managed directory.
+ * Old published entries are evicted under a directory lock to keep at most
+ * 4096 files and NYTRIX_CACHE_MAX_MB MiB (default 256) per directory.
+ * A rejected publication leaves the temporary owned by the caller. */
+bool ny_cache_publish_file(const char *temporary, const char *destination);
+/* Keep a selected cache input and its sidecars alive until consumed. Zero
+ * means unavailable; release a nonzero token before publishing to that dir. */
+intptr_t ny_cache_read_lock(const char *path);
+void ny_cache_read_unlock(intptr_t token);
 const char *ny_get_executable_path(void);
 char *ny_get_executable_dir(void);
 
@@ -418,6 +427,28 @@ static inline bool ny_parse_f64(const char *s, double *out) {
   if (end == s || *end != '\0' || errno == ERANGE)
     return false;
   *out = v;
+  return true;
+}
+
+/*
+ * Advance a quote/escape scanner over one character.
+ *
+ * `quote` holds the active string-delimiter character, or 0 when scanning
+ * outside a quoted run. Inside a run, escapes are consumed first and the
+ * matching delimiter closes it, exactly as the cmd tooling scanners did
+ * inline before sharing this helper. Returns true when the character was
+ * part of an open quoted run; false when scanner state is inactive and the
+ * caller should test its own delimiters or contexts.
+ */
+static inline bool ny_scan_ctx_step(int *quote, int *esc, char ch) {
+  if (!quote || !esc || !*quote)
+    return false;
+  if (*esc)
+    *esc = 0;
+  else if (ch == '\\')
+    *esc = 1;
+  else if (ch == *quote)
+    *quote = 0;
   return true;
 }
 

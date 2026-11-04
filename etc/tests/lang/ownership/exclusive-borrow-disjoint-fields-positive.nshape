@@ -4,7 +4,7 @@ shape ownership_rule_exclusive_borrow_disjoint_fields_positive {
   features ["ownership", "borrow", "exclusive", "aggregate", "disjoint-fields", "positive"]
   template ny-test-case
   expect compile_and_run
-  flags "--ownership-strict --nyir-verify --nyir-dump"
+  flags "--ownership-strict --nyr-verify --nyr-dump"
   expect_message "[noalias]"
   source ny <<'NY'
 use core
@@ -35,7 +35,7 @@ shape ownership_exclusive_borrow_disjoint_compound_index_write {
   features ["ownership", "borrow", "exclusive", "compound-write", "disjoint-index"]
   template ny-test-case
   expect compile_and_run
-  flags "--ownership-strict --nyir-verify"
+  flags "--ownership-strict --nyr-verify"
   expect_message "[noalias]"
   source ny <<'NY'
 use core
@@ -59,7 +59,7 @@ shape ownership_exclusive_borrow_overlapping_compound_index_write {
   features ["error", "ownership", "borrow", "exclusive", "compound-write", "overlap"]
   template ny-compile-fail
   expect compile_fail
-  flags "--ownership-strict --nyir-verify"
+  flags "--ownership-strict --nyr-verify"
   source ny <<'NY'
 use core
 
@@ -81,7 +81,7 @@ shape ownership_exclusive_borrow_disjoint_compound_constant_expression_index {
   features [ownership borrow exclusive compound-write constant-expression-index disjoint]
   template ny-test-case
   expect compile_and_run
-  flags "--ownership-strict --nyir-verify"
+  flags "--ownership-strict --nyr-verify"
   expect_message "[noalias]"
   source ny <<'NY'
 use core
@@ -105,7 +105,7 @@ shape ownership_exclusive_borrow_overlapping_compound_constant_expression_index 
   features [error ownership borrow exclusive compound-write constant-expression-index overlap]
   template ny-compile-fail
   expect compile_fail
-  flags "--ownership-strict --nyir-verify"
+  flags "--ownership-strict --nyr-verify"
   source ny <<'NY'
 use core
 

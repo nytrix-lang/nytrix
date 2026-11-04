@@ -127,7 +127,8 @@ static const nyr_runtime_effect_entry_t nyr_runtime_effects[] = {
     /*
      * Allocation-only helpers whose inputs are raw scalars.
      */
-    {"rt_tbuf_new_raw", NYIR_EFFECT_CALL | NYIR_EFFECT_ALLOCATION},
+    {"rt_tbuf_new_raw",
+     NYIR_EFFECT_CALL | NYIR_EFFECT_ALLOCATION | NYIR_EFFECT_MAY_TRAP},
     {"rt_dict_new_raw", NYIR_EFFECT_CALL | NYIR_EFFECT_ALLOCATION},
     {"rt_i64_to_cstr_raw", NYIR_EFFECT_CALL | NYIR_EFFECT_ALLOCATION},
     {"rt_bigint_from_i64_raw", NYIR_EFFECT_CALL | NYIR_EFFECT_ALLOCATION},
@@ -196,6 +197,8 @@ static const nyr_runtime_effect_entry_t nyr_runtime_effects[] = {
     /*
      * Mutating helpers. Some may grow storage and therefore allocate.
      */
+    {"rt_tbuf_new_typed_raw",
+     NYIR_EFFECT_CALL | NYIR_EFFECT_ALLOCATION | NYIR_EFFECT_MAY_TRAP},
     {"rt_tbuf_append_raw", NYIR_EFFECT_CALL | NYIR_EFFECT_READ_MEMORY |
                                NYIR_EFFECT_WRITE_MEMORY |
                                NYIR_EFFECT_ALLOCATION | NYIR_EFFECT_MAY_TRAP},
@@ -294,9 +297,13 @@ unsigned nyr_call_effect_summary(const nyr_inst_t *inst) {
   const char *name = inst->symbol;
   if (!name || !name[0])
     return NYIR_EFFECT_CALL | NYIR_EFFECT_FFI | NYIR_EFFECT_UNKNOWN_SIDE_EFFECT;
+  if (strncmp(name, "rt_", 3) != 0)
+    return NYIR_EFFECT_CALL | NYIR_EFFECT_FFI | NYIR_EFFECT_UNKNOWN_SIDE_EFFECT;
+  char family = name[3];
   for (size_t i = 0;
        i < sizeof(nyr_runtime_effects) / sizeof(nyr_runtime_effects[0]); ++i)
-    if (strcmp(name, nyr_runtime_effects[i].name) == 0)
+    if (family == nyr_runtime_effects[i].name[3] &&
+        strcmp(name, nyr_runtime_effects[i].name) == 0)
       return nyr_runtime_effects[i].effects;
   return NYIR_EFFECT_CALL | NYIR_EFFECT_FFI | NYIR_EFFECT_UNKNOWN_SIDE_EFFECT;
 }
@@ -322,8 +329,8 @@ unsigned nyr_effective_effects(const nyr_inst_t *inst) {
  * Effect / alias summary: collapse per-instruction effects into one mask.
  */
 bool nyr_effect_summary(const nyr_func_t *f, unsigned *out_mask,
-                         size_t *out_reads, size_t *out_writes,
-                         size_t *out_calls) {
+                        size_t *out_reads, size_t *out_writes,
+                        size_t *out_calls) {
   if (!f || !out_mask)
     return false;
   unsigned mask = 0;

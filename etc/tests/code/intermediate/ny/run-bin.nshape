@@ -3,13 +3,16 @@ shape nyir_run_bin {
   generator "native"
   features ["native", "nyir", "vm", "binary"]
   template ny-test-case
-  flags "--nyir-dump-bin=/tmp/nytrix-native-nyir-run-bin.nyir --nyir-run-bin=/tmp/nytrix-native-nyir-run-bin.nyir"
+  flags "--native-only --dump-nyr=build/nyr-run-bin.nyr --nyr-run-bin=build/nyr-run-bin.nyr --vm-disasm=vm_disasm_target -O0"
   expect compile_and_run
   expect_exit 58
   expect_message "result=58"
+  expect_message "function vm_disasm_target"
+  expect_message "0002  v2=add v0 v1 [abi=i64-raw]"
   source ny <<'NY'
 fn binary_f64_identity(f64 value) f64 { value }
 assert(binary_f64_identity(-0.0) == 0.0, "binary f64 scalar class")
-9 * 7 - 5
+fn vm_disasm_target(int value) int { value + 7 }
+vm_disasm_target(51)
 NY
 }

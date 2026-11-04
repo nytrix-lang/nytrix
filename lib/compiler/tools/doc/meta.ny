@@ -81,23 +81,38 @@ fn extract(str path) dict {
    }
 }
 
-fn _skip_dir(str name) bool {
-   name == ".git" || name == ".cache" || name == "build" || name == "tmp" ||
+fn _skip_dir(str name) int {
+   if name == ".git" || name == ".cache" || name == "build" || name == "tmp" ||
    name == "node_modules" || name == "__pycache__" ||
-   (name.len > 0 && load8(name, 0) == 46)
+   (name.len > 0 && load8(name, 0) == 46) { return 1 }
+   return 0
 }
 
-fn _supported(str file) bool {
-   path.extname(file) == ".md" || path.extname(file) == ".txt" ||
-   path.extname(file) == ".texi"
+fn _supported(str file) int {
+   if path.extname(file) == ".md" || path.extname(file) == ".txt" ||
+   path.extname(file) == ".texi" { return 1 }
+   return 0
 }
 
 fn _route(str root, str file) str {
-   def prefix = root.len > 0 && load8(root, root.len - 1) != 47 &&
-   load8(root, root.len - 1) != 92 ? root + path.sep() : root
+   mut int prefix_len = root.len
+   if prefix_len > 0 {
+      def int last = load8(root, prefix_len - 1)
+      if last != 47 && last != 92 { prefix_len += 1 }
+   }
+   mut int matches_root = prefix_len <= file.len ? 1 : 0
+   mut int i = 0
+   while matches_root && i < root.len {
+      if load8(file, i) != load8(root, i) { matches_root = 0 }
+      i += 1
+   }
+   if matches_root && prefix_len > root.len {
+      def int separator = load8(file, root.len)
+      if separator != 47 && separator != 92 { matches_root = 0 }
+   }
    mut relative = path.basename(file)
-   if str.startswith(file, prefix) {
-      relative = str._substr(file, prefix.len, file.len)
+   if matches_root != 0 {
+      relative = str._substr(file, prefix_len, file.len)
    }
    def without_ext = path.splitext(relative).get(0)
    str.str_replace(str.cstr_to_str(without_ext), "\\", "/")
@@ -105,26 +120,41 @@ fn _route(str root, str file) str {
 
 fn _route_title(str route) str {
    mut title = Builder(route.len + 8)
-   mut word_start = true
+   mut int word_start = 1
    mut i = 0
    while i < route.len {
       def byte = load8(route, i)
       if byte == 47 || byte == 92 {
          title = builder_append(title, " / ")
-         word_start = true
+         word_start = 1
       } elif byte == 45 || byte == 95 {
          title = builder_append(title, " ")
-         word_start = true
+         word_start = 1
       } else {
          def chr = str._substr(route, i, i + 1)
-         title = builder_append(title, word_start ? str.upper(chr) : chr)
-         word_start = false
+         title = builder_append(title, word_start != 0 ? str.upper(chr) : chr)
+         word_start = 0
       }
       i += 1
    }
    def result = builder_to_str(title)
    builder_free(title)
    result
+}
+
+fn _compare_bytes(str left, str right) int {
+   def int limit = left.len < right.len ? left.len : right.len
+   mut int i = 0
+   while i < limit {
+      def int a = load8(left, i)
+      def int b = load8(right, i)
+      if a < b { return -1 }
+      if a > b { return 1 }
+      i += 1
+   }
+   if left.len < right.len { return -1 }
+   if left.len > right.len { return 1 }
+   0
 }
 
 fn _path_depth(str root, str current) int {
@@ -160,10 +190,10 @@ fn _collect_tree(str root, int max_depth, int max_entries) any {
       def entries = is_list(listed) ? sorted(listed) : []
       if entries.len == 0 {
          if fs.is_dir(canonical) {
-            if _supported(canonical) { return nil }
+            if _supported(canonical) != 0 { return nil }
             continue
          }
-         if !_supported(canonical) { continue }
+         if _supported(canonical) == 0 { continue }
          match file_read(canonical) {
             ok(source) -> {
                def route = str.cstr_to_str(_route(root, canonical))
@@ -189,7 +219,7 @@ fn _collect_tree(str root, int max_depth, int max_entries) any {
       while i < entries.len {
          def name = str(entries.get(i))
          i += 1
-         if _skip_dir(name) { continue }
+         if _skip_dir(name) != 0 { continue }
          def child = str.cstr_to_str(path.join(canonical, name))
          pending = pending.append(child)
       }
@@ -200,7 +230,7 @@ fn _collect_tree(str root, int max_depth, int max_entries) any {
       mut at = ordered.len
       ordered = ordered.append(page)
       while at > 0 &&
-      str(ordered.get(at - 1).get("route")) > route {
+      _compare_bytes(str(ordered.get(at - 1).get("route")), route) > 0 {
          ordered[at] = ordered.get(at - 1)
          at -= 1
       }
@@ -215,7 +245,7 @@ fn collect(any root, int max_depth=32, int max_entries=100000) any {
    max_depth > _MAX_DEPTH || max_entries > _MAX_ENTRIES {
       return nil
    }
-   def normalized = path.normalize(root)
+   def str normalized = path.normalize(root)
    if !file_exists(normalized) || !fs.is_dir(normalized) { return nil }
    _collect_tree(normalized, max_depth, max_entries)
 }

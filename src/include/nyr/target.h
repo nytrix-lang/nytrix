@@ -3,6 +3,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 typedef enum {
   NY_NATIVE_BACKEND_LLVM = 0,
@@ -68,8 +69,20 @@ typedef enum {
   NY_NATIVE_CAP_MACH_SDIV_POW2 = 1u << 10,
   NY_NATIVE_CAP_MACH_SCALED_LEA = 1u << 11,
   NY_NATIVE_CAP_MACH_FMA = 1u << 12,
-  NY_NATIVE_CAP_MACH_AVX = 1u << 13
+  NY_NATIVE_CAP_MACH_AVX = 1u << 13,
+  NY_NATIVE_CAP_MACH_AVX2 = 1u << 14
 } nyr_target_cap_t;
+
+/* OS syscall numbers used by freestanding runtime legalization. Register
+ * conventions and trap instructions remain architecture-backend concerns. */
+typedef struct {
+  bool available;
+  uint32_t write_nr;
+  uint32_t mmap_nr;
+  uint32_t munmap_nr;
+  uint32_t clock_gettime_nr;
+  uint32_t exit_nr;
+} ny_native_syscall_adapter_t;
 
 typedef struct nyr_target_info_impl_t {
   nyr_backend_target_t target;
@@ -88,6 +101,7 @@ typedef struct nyr_target_info_impl_t {
   size_t stack_align;
   unsigned caps;
   bool red_zone;
+  ny_native_syscall_adapter_t syscalls;
   bool outline_machine_functions;
 } ny_native_target_info_t;
 

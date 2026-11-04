@@ -119,6 +119,12 @@ jobs:
           mkdir -p build/ci
           ./make check --no-test-suite 2>&1 | tee build/ci/checks.log
 
+      - name: Run test suite on pull requests
+        id: pr_tests
+        if: github.event_name == 'pull_request' && matrix.platform == 'ubuntu'
+        run: |
+          ./make -j 2 test --cold --with-stdlib --no-debug-failures 2>&1 | tee build/ci/pr-tests.log
+
       # Manual-only execution: full live output, exact exit status, no eval.
       - name: Install native Windows replay debugger
         if: matrix.platform == 'windows' && env.CI_REPLAY == 'true' && (env.CI_MODE == 'tests' || env.CI_MODE == 'full')
@@ -150,6 +156,7 @@ jobs:
           CI_PLATFORM: ${{ matrix.platform }}
           CI_ARCH: ${{ runner.arch }}
           CHECK_RESULT: ${{ steps.checks.outcome }}
+          PR_TEST_RESULT: ${{ steps.pr_tests.outcome }}
           TEST_RESULT: ${{ steps.tests.outcome }}
           BENCH_RESULT: ${{ steps.benchmarks.outcome }}
         run: |
@@ -158,6 +165,7 @@ jobs:
             printf 'Mode: `%s` · Filter: `%s`\n\n' "$CI_MODE" "${CI_PATTERN:-all fixtures}"
             printf '| Stage | Result |\n| --- | --- |\n'
             printf '| Native build and source checks | %s |\n' "$CHECK_RESULT"
+            printf '| Pull request full test suite | %s |\n' "$PR_TEST_RESULT"
             printf '| Fixtures and failure replay | %s |\n' "$TEST_RESULT"
             printf '| Serial benchmarks | %s |\n' "$BENCH_RESULT"
             printf '\nFull logs and failure diagnostics are in the run artifacts.\n'

@@ -53,22 +53,8 @@ static bool build_memory_forwarding(nyr_func_t *f) {
                              .f = -1,
                              .imm = 0});
   int address = nyr_opt_const(f, (int64_t)(intptr_t)&pass_order_cell);
-  int first = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_LOAD_I64,
-                                         .dst = -1,
-                                         .a = address,
-                                         .b = -1,
-                                         .c = -1,
-                                         .d = -1,
-                                         .e = -1,
-                                         .f = -1});
-  int second = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_LOAD_I64,
-                                          .dst = -1,
-                                          .a = address,
-                                          .b = -1,
-                                          .c = -1,
-                                          .d = -1,
-                                          .e = -1,
-                                          .f = -1});
+  int first = nyr_opt_emit_abc(f, NYIR_LOAD_I64, address, -1, -1);
+  int second = nyr_opt_emit_abc(f, NYIR_LOAD_I64, address, -1, -1);
   int sum = nyr_opt_binop(f, NYIR_ADD_I64, first, second);
   nyr_opt_ret(f, sum);
   return nyr_opt_verify(f, "pass-order/memory-build");
@@ -211,14 +197,7 @@ static bool build_f64_math(nyr_func_t *f) {
   int b = nyr_opt_const_f64(f, 4.0);
   int sum = nyr_opt_binop(f, NYIR_ADD_F64, a, b);
   int prod = nyr_opt_binop(f, NYIR_MUL_F64, sum, a);
-  int truncated = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_F64_TO_I64,
-                                             .dst = -1,
-                                             .a = prod,
-                                             .b = -1,
-                                             .c = -1,
-                                             .d = -1,
-                                             .e = -1,
-                                             .f = -1});
+  int truncated = nyr_opt_emit_abc(f, NYIR_F64_TO_I64, prod, -1, -1);
   nyr_opt_ret(f, truncated);
   return nyr_opt_verify(f, "pass-order/f64");
 }

@@ -172,7 +172,7 @@ fn dlerror() str {
 
 fn _try(str path, int flags) any {
    def h = __dlopen(path, flags)
-   if h != 0 { return h }
+   if h { return h }
    0
 }
 
@@ -181,10 +181,13 @@ fn dlopen_checked(any name, any required_symbol, int flags=0) any {
    mut eff_flags = flags
    if eff_flags == 0 { eff_flags = RTLD_NOW() | RTLD_GLOBAL() }
    def h = dlopen_any(name, eff_flags)
-   if h == 0 { return 0 }
-   if required_symbol && required_symbol.len > 0 && dlsym(h, required_symbol) == 0 {
-      dlclose(h)
-      return 0
+   if !h { return 0 }
+   if required_symbol && required_symbol.len > 0 {
+      def int symbol_addr = int(dlsym(h, required_symbol))
+      if symbol_addr == 0 {
+         dlclose(h)
+         return 0
+      }
    }
    h
 }
@@ -279,17 +282,21 @@ fn ffi_call(any fptr, list args) any {
    0
 }
 
-fn bind(any h, str name) any {
+fn _ffi_bind_symbol(any h, str name) any {
    "Returns a Nytrix function binding to external symbol `name` in library `h`."
    def fptr = dlsym(h, name)
-   if fptr != 0 { return fn(...args) { ffi_call(fptr, args) } }
+   if fptr { return fn(...args) { ffi_call(fptr, args) } }
    0
+}
+
+fn bind(any h, str name) any {
+   _ffi_bind_symbol(h, name)
 }
 
 fn call_ext(any h, str name, ...args) any {
    "Calls external symbol `name` in library `h` with provided arguments."
    def fptr = dlsym(h, name)
-   if fptr != 0 { return ffi_call(fptr, args) }
+   if fptr { return ffi_call(fptr, args) }
    0
 }
 
@@ -298,10 +305,10 @@ fn _bind_map(any h, list names, any target=0) dict {
    mut i, n = 0, names.len
    while i < n {
       def name = names.get(i)
-      def b = bind(h, name)
-      if b != 0 {
+      def b = _ffi_bind_symbol(h, name)
+      if b {
          res = res.set(name, b)
-         if target != 0 { target.set(name, b) }
+         if target { target.set(name, b) }
       }
       i += 1
    }
@@ -510,14 +517,14 @@ fn bind_lib(any name_or_h, list syms) any {
    assert(offsetof_struct(lyt, "a") == 0 && offsetof_struct(lyt, "b") == 4 && offsetof_struct(lyt, "c") == 6, "ffi struct offsets")
    assert(sizeof_struct(lyt) >= 8, "ffi struct size")
    def p = malloc(sizeof_struct(lyt))
-   assert(p != 0, "ffi malloc")
+   assert(p, "ffi malloc")
    assert(cstruct_set(p, lyt, "a", 0x11223344) && cstruct_set(p, lyt, "b", 0x5566) && cstruct_set(p, lyt, "c", 0x77), "ffi struct stores")
    assert(cstruct_get(p, lyt, "a") == 0x11223344 && cstruct_get(p, lyt, "b") == 0x5566 && cstruct_get(p, lyt, "c") == 0x77, "ffi struct loads")
    free(p)
-   assert(dlopen_any("__nytrix_missing_library_for_test__", RTLD_NOW()) == 0, "ffi missing dlopen")
+   assert(!dlopen_any("__nytrix_missing_library_for_test__", RTLD_NOW()), "ffi missing dlopen")
    ;; dlsym z3 probe
    def h = dlopen_checked("z3", "Z3_mk_config", RTLD_NOW() | RTLD_GLOBAL())
-   assert(h != 0, "dlopen z3")
+   assert(h, "dlopen z3")
    def p = dlsym(h, "Z3_get_version")
    print("Z3_get_version ptr = " + to_str(p))
    def p2 = dlsym(h, "Z3_mk_bv_sort")

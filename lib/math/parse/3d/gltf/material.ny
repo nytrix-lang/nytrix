@@ -110,7 +110,14 @@ fn _gltf_texture_uv_props(dict out, str prefix, any tex_info) dict {
    o
 }
 
-fn _gltf_scene_bounds_new() list { [1e9, 1e9, 1e9, -1e9, -1e9, -1e9] }
+fn _gltf_scene_bounds_new() list {
+   mut list bounds = []
+   def f64 high = 1e9
+   def f64 low = -1e9
+   bounds = bounds.append(high).append(high).append(high)
+   bounds = bounds.append(low).append(low).append(low)
+   bounds
+}
 
 fn _gltf_scene_bounds_accum(
    list state, f64 wmin_x, f64 wmin_y, f64 wmin_z, f64 wmax_x, f64 wmax_y, f64 wmax_z
@@ -136,11 +143,23 @@ fn _gltf_scene_bounds_accum(
 }
 
 fn _gltf_scene_bounds_result(list state) list {
-   mut pmin = [float(state.get(0, 1e9)), float(state.get(1, 1e9)), float(state.get(2, 1e9))]
-   mut pmax = [float(state.get(3, -1e9)), float(state.get(4, -1e9)), float(state.get(5, -1e9))]
-   if pmin.get(0, 1e9) > 1e8 { pmin = [-1.0, -1.0, -1.0] }
-   if pmax.get(0, -1e9) < -1e8 { pmax = [1.0, 1.0, 1.0] }
-   [pmin, pmax]
+   if state.len < 6 { state = _gltf_scene_bounds_new() }
+   mut list pmin = []
+   mut list pmax = []
+   def bool missing_min = float(state[0]) > 1e8
+   def bool missing_max = float(state[3]) < -1e8
+   mut i = 0
+   while i < 3 {
+      def f64 low = missing_min ? -1.0 : float(state[i])
+      def f64 high = missing_max ? 1.0 : float(state[i + 3])
+      pmin = pmin.append(low)
+      pmax = pmax.append(high)
+      i += 1
+   }
+   mut list result = []
+   result = result.append(pmin)
+   result = result.append(pmax)
+   result
 }
 
 fn _gltf_indexed_material_slots(

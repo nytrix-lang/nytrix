@@ -62,7 +62,7 @@ fn program(int index) str {
 fn compile_program(str source, str output) {
   run_capture([compiler, "--native-backend=avr", "--native-only",
                "--no-effect-require-known", "--no-alias-require-known",
-               "--nyir-verify", "--emit-asm=" + output, "-no-std",
+               "--nyr-verify", "--emit-asm=" + output, "-no-std",
                "-emit-only", "-e", source], [], nil, false)
 }
 def positive_compile = compile_program(program(0), positive_asm)

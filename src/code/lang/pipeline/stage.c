@@ -229,27 +229,26 @@ static uint64_t ny_stage_semantic_config_fingerprint(const ny_options *opt) {
     solver = (opt && opt->type_solver_raw) ? opt->type_solver_raw : "auto";
   const char *proof_solver = getenv("NYTRIX_PROOF_SOLVER");
   if (!proof_solver || !*proof_solver)
-    proof_solver = (opt && opt->proof_solver_raw) ? opt->proof_solver_raw : "auto";
+    proof_solver =
+        (opt && opt->proof_solver_raw) ? opt->proof_solver_raw : "auto";
   const char *frontend =
       (opt && opt->c_frontend_raw) ? opt->c_frontend_raw : "auto";
   char config[700];
-  snprintf(config, sizeof(config),
-           "semantic-config-v2|solver=%s|proof-solver=%s|strict-types=%u|safe=%u|"
-           "ownership-strict=%u|borrow-check=%u|dump-scope=%u|"
-           "native-backend=%u|native-only=%u|native-abi=%u|native-tier=%u|"
-           "native-cf-mem2reg=%u|profile=%s|target=%s|c-frontend=%s",
-           solver, proof_solver, opt && opt->strict_types ? 1u : 0u,
-           opt && opt->safe_mode ? 1u : 0u,
-           opt && opt->ownership_strict ? 1u : 0u,
-           opt && opt->borrow_check ? 1u : 0u,
-           opt ? (unsigned)opt->dump_scope : 0u,
-           opt ? (unsigned)opt->native_backend : 0u,
-           opt && opt->native_only ? 1u : 0u,
-           opt ? (unsigned)opt->native_abi : 0u,
-           opt ? (unsigned)opt->native_tier : 0u,
-           opt && opt->native_enable_cf_mem2reg ? 1u : 0u,
-           opt && opt->opt_profile ? opt->opt_profile : "default",
-           opt && opt->host_triple ? opt->host_triple : "host", frontend);
+  snprintf(
+      config, sizeof(config),
+      "semantic-config-v2|solver=%s|proof-solver=%s|strict-types=%u|safe=%u|"
+      "ownership-strict=%u|borrow-check=%u|dump-scope=%u|"
+      "native-backend=%u|native-only=%u|native-abi=%u|native-tier=%u|"
+      "native-cf-mem2reg=%u|profile=%s|target=%s|c-frontend=%s",
+      solver, proof_solver, opt && opt->strict_types ? 1u : 0u,
+      opt && opt->safe_mode ? 1u : 0u, opt && opt->ownership_strict ? 1u : 0u,
+      opt && opt->borrow_check ? 1u : 0u, opt ? (unsigned)opt->dump_scope : 0u,
+      opt ? (unsigned)opt->native_backend : 0u,
+      opt && opt->native_only ? 1u : 0u, opt ? (unsigned)opt->native_abi : 0u,
+      opt ? (unsigned)opt->native_tier : 0u,
+      opt && opt->native_enable_cf_mem2reg ? 1u : 0u,
+      opt && opt->opt_profile ? opt->opt_profile : "default",
+      opt && opt->host_triple ? opt->host_triple : "host", frontend);
   return ny_cache_semantic_fingerprint(config);
 }
 
@@ -263,8 +262,8 @@ static uint64_t ny_stage_semantic_config_fingerprint(const ny_options *opt) {
  * caller.  `err` receives a concise diagnostic when supplied.
  */
 static bool ny_stage_artifact_matches_source_file(const char *path,
-                                                  const char *source,
-                                                  char *err, size_t err_len) {
+                                                  const char *source, char *err,
+                                                  size_t err_len) {
   if (err && err_len)
     err[0] = '\0';
   char *json = path ? ny_read_file(path) : NULL;
@@ -280,9 +279,12 @@ static bool ny_stage_artifact_matches_source_file(const char *path,
   const char *artifact = strstr(json, artifact_key);
   const char *artifact_end = artifact ? strchr(artifact, '}') : NULL;
   const char *fingerprint =
-      artifact_end ? ny_stage_find_in_range(artifact, artifact_end, fingerprint_key) : NULL;
+      artifact_end
+          ? ny_stage_find_in_range(artifact, artifact_end, fingerprint_key)
+          : NULL;
   const char *bytes =
-      artifact_end ? ny_stage_find_in_range(artifact, artifact_end, bytes_key) : NULL;
+      artifact_end ? ny_stage_find_in_range(artifact, artifact_end, bytes_key)
+                   : NULL;
   bool valid = artifact_end &&
                ny_stage_find_in_range(artifact, artifact_end, schema) != NULL &&
                fingerprint && bytes;
@@ -310,12 +312,14 @@ static bool ny_stage_artifact_matches_source_file(const char *path,
     if (errno || end == bytes)
       valid = false;
   }
-  uint64_t expected_fingerprint = ny_cache_semantic_fingerprint(source ? source : "");
+  uint64_t expected_fingerprint =
+      ny_cache_semantic_fingerprint(source ? source : "");
   size_t expected_bytes = source ? strlen(source) : 0;
   if (valid && (found_fingerprint != expected_fingerprint ||
                 found_bytes != (unsigned long long)expected_bytes)) {
     if (err && err_len)
-      snprintf(err, err_len, "artifact source identity does not match this input");
+      snprintf(err, err_len,
+               "artifact source identity does not match this input");
     valid = false;
   }
   if (!valid && err && err_len && !err[0])
@@ -330,8 +334,7 @@ static bool ny_stage_artifact_matches_source_file(const char *path,
  * require this field so older snapshots remain inspectable; replaying typed
  * facts, however, must never cross a semantic implementation change.
  */
-static bool ny_stage_artifact_matches_compiler_file(const char *path,
-                                                    char *err,
+static bool ny_stage_artifact_matches_compiler_file(const char *path, char *err,
                                                     size_t err_len) {
   char *json = path ? ny_read_file(path) : NULL;
   if (!json) {
@@ -451,8 +454,7 @@ static bool ny_stage_artifact_reusable_for_semantics(const char *path,
     return false;
   if (!ny_stage_artifact_matches_compiler_file(path, err, err_len))
     return false;
-  if (!ny_stage_artifact_matches_semantic_config_file(path, opt, err,
-                                                       err_len))
+  if (!ny_stage_artifact_matches_semantic_config_file(path, opt, err, err_len))
     return false;
   char *json = ny_read_file(path);
   if (!json) {
@@ -729,8 +731,8 @@ static bool ny_stage_stmt_in_dump_scope(const ny_options *opt,
   return !is_std;
 }
 
-static void ny_stage_append_sig_effect_row(char **buf, size_t *len,
-                                          size_t *cap, const fun_sig *sig) {
+static void ny_stage_append_sig_effect_row(char **buf, size_t *len, size_t *cap,
+                                           const fun_sig *sig) {
   const stmt_func_t *fn = sig && sig->stmt_t && sig->stmt_t->kind == NY_S_FUNC
                               ? &sig->stmt_t->as.fn
                               : NULL;
@@ -743,19 +745,18 @@ static void ny_stage_append_sig_effect_row(char **buf, size_t *len,
                                 : (fn ? fn->effect_type : NULL);
   ny_type_arena_t arena;
   ny_type_arena_init(&arena);
-  ny_type_t *row = ny_type_effect_row_with_builtin_mask(&arena, mask,
-                                                        declared_row);
+  ny_type_t *row =
+      ny_type_effect_row_with_builtin_mask(&arena, mask, declared_row);
   char *serialized = row ? ny_type_effect_row_serialize(row) : NULL;
   ny_stage_append(buf, len, cap, ",\"effect_row\":");
   if (serialized)
     ny_stage_json_str(buf, len, cap, serialized);
   else
     ny_stage_append(buf, len, cap, "null");
-  ny_stage_append(buf, len, cap,
-                  ",\"effect_row_known\":%s,\"effect_row_source\":\"%s\"",
-                  contract_known || summary_known ? "true" : "false",
-                  contract_known ? "contract"
-                                 : (summary_known ? "inferred" : "unknown"));
+  ny_stage_append(
+      buf, len, cap, ",\"effect_row_known\":%s,\"effect_row_source\":\"%s\"",
+      contract_known || summary_known ? "true" : "false",
+      contract_known ? "contract" : (summary_known ? "inferred" : "unknown"));
   free(serialized);
   ny_type_arena_reset(&arena);
 }
@@ -863,10 +864,8 @@ static void ny_stage_append_shapes_json(char **buf, size_t *len, size_t *cap,
   for (size_t i = 0; cg && i < cg->tagged_types.len; ++i) {
     const ny_tagged_type_info_t *tagged = &cg->tagged_types.data[i];
     const char *tag = tagged->name;
-    bool is_std_tag =
-        (tagged->module_features & NY_MODULE_FEATURE_STDLIB) != 0;
-    bool is_user_tag =
-        (tagged->module_features & NY_MODULE_FEATURE_USER) != 0;
+    bool is_std_tag = (tagged->module_features & NY_MODULE_FEATURE_STDLIB) != 0;
+    bool is_user_tag = (tagged->module_features & NY_MODULE_FEATURE_USER) != 0;
     ny_dump_scope_t dump_scope = opt ? opt->dump_scope : NY_DUMP_SCOPE_PROGRAM;
     if ((dump_scope == NY_DUMP_SCOPE_PROGRAM && !is_user_tag) ||
         (dump_scope == NY_DUMP_SCOPE_LIB && !is_std_tag))
@@ -919,7 +918,8 @@ static char *ny_stage_artifact_json(const ny_options *opt,
    */
   const char *semantic_source = (prog && prog->raw_src) ? prog->raw_src : "";
   size_t semantic_source_len = (prog && prog->raw_src) ? prog->raw_src_len : 0;
-  uint64_t semantic_fingerprint = ny_cache_semantic_fingerprint(semantic_source);
+  uint64_t semantic_fingerprint =
+      ny_cache_semantic_fingerprint(semantic_source);
   uint64_t compiler_fingerprint = ny_cache_compiler_source_fingerprint();
   uint64_t semantic_config_fingerprint =
       ny_stage_semantic_config_fingerprint(opt);
@@ -929,13 +929,14 @@ static char *ny_stage_artifact_json(const ny_options *opt,
   ny_stage_json_str(&buf, &len, &cap, ny_stage_name(stage));
   ny_stage_append(&buf, &len, &cap, ",\"source\":");
   ny_stage_json_str(&buf, &len, &cap, source_name ? source_name : "");
-  ny_stage_append(&buf, &len, &cap,
-                  ",\"artifact\":{\"schema\":\"ny.semantic-artifact.v1\","
-                  "\"pointer_free\":true,\"source_fingerprint\":\"%016" PRIx64
-                  "\",\"source_bytes\":%zu,\"compiler_fingerprint\":\"%016" PRIx64
-                  "\",\"semantic_config_fingerprint\":\"%016" PRIx64 "\"}",
-                  semantic_fingerprint, semantic_source_len,
-                  compiler_fingerprint, semantic_config_fingerprint);
+  ny_stage_append(
+      &buf, &len, &cap,
+      ",\"artifact\":{\"schema\":\"ny.semantic-artifact.v1\","
+      "\"pointer_free\":true,\"source_fingerprint\":\"%016" PRIx64
+      "\",\"source_bytes\":%zu,\"compiler_fingerprint\":\"%016" PRIx64
+      "\",\"semantic_config_fingerprint\":\"%016" PRIx64 "\"}",
+      semantic_fingerprint, semantic_source_len, compiler_fingerprint,
+      semantic_config_fingerprint);
   ny_stage_append(
       &buf, &len, &cap,
       ",\"pipeline\":[\"parse\",\"hm\",\"trait\",\"flow\",\"abi\",\"opt\"]");
@@ -1110,12 +1111,14 @@ static bool ny_safe_raw_call_name_is(expr_t *e, const char *want) {
          ny_safe_raw_name_is(ny_safe_raw_callee_leaf(e->as.call.callee), want);
 }
 
-static bool ny_safe_raw_is_malloc_like(const char *leaf, bool *size_arg_is_one) {
+static bool ny_safe_raw_is_malloc_like(const char *leaf,
+                                       bool *size_arg_is_one) {
   if (size_arg_is_one)
     *size_arg_is_one = false;
   if (!leaf)
     return false;
   if (strcmp(leaf, "malloc") == 0 || strcmp(leaf, "malloc_raw") == 0 ||
+      strcmp(leaf, "calloc_raw") == 0 || strcmp(leaf, "__calloc_raw") == 0 ||
       strcmp(leaf, "zalloc") == 0 || strcmp(leaf, "__malloc") == 0) {
     return true;
   }
@@ -1173,8 +1176,7 @@ static void ny_safe_raw_forget_int(ny_safe_raw_ctx_t *ctx, const char *name) {
   if (!ctx || !name)
     return;
   for (size_t i = 0; i < ctx->ints.len;) {
-    if (ctx->ints.data[i].name &&
-        strcmp(ctx->ints.data[i].name, name) == 0) {
+    if (ctx->ints.data[i].name && strcmp(ctx->ints.data[i].name, name) == 0) {
       memmove(&ctx->ints.data[i], &ctx->ints.data[i + 1],
               (ctx->ints.len - i - 1) * sizeof(ctx->ints.data[0]));
       ctx->ints.len--;
@@ -1305,8 +1307,7 @@ static bool ny_safe_raw_expr_int_range(ny_safe_raw_ctx_t *ctx, expr_t *e,
       return true;
     }
     if (strcmp(op, "*") == 0 && lmin == lmax && rmin == rmax) {
-      if (lmin != 0 &&
-          (rmin > INT64_MAX / lmin || rmin < INT64_MIN / lmin))
+      if (lmin != 0 && (rmin > INT64_MAX / lmin || rmin < INT64_MIN / lmin))
         return false;
       int64_t v = lmin * rmin;
       if (out_min)
@@ -1349,8 +1350,7 @@ static int ny_safe_raw_width_for_store(const char *leaf, bool *intrinsic) {
   if (strcmp(leaf, "store16") == 0 || strcmp(leaf, "__store16_idx") == 0)
     return 2;
   if (strcmp(leaf, "store32") == 0 || strcmp(leaf, "store32_h") == 0 ||
-      strcmp(leaf, "store32_f32") == 0 ||
-      strcmp(leaf, "__store32_idx") == 0)
+      strcmp(leaf, "store32_f32") == 0 || strcmp(leaf, "__store32_idx") == 0)
     return 4;
   if (strcmp(leaf, "store64") == 0 || strcmp(leaf, "store64_h") == 0 ||
       strcmp(leaf, "store64_i") == 0 || strcmp(leaf, "store64_f64") == 0 ||
@@ -1361,8 +1361,8 @@ static int ny_safe_raw_width_for_store(const char *leaf, bool *intrinsic) {
   return 0;
 }
 
-static bool ny_safe_raw_api_shape(expr_t *e, expr_t **out_ptr,
-                                  expr_t **out_idx, int64_t *out_width) {
+static bool ny_safe_raw_api_shape(expr_t *e, expr_t **out_ptr, expr_t **out_idx,
+                                  int64_t *out_width) {
   if (out_ptr)
     *out_ptr = NULL;
   if (out_idx)
@@ -1418,8 +1418,8 @@ static void ny_safe_raw_validate_call(ny_safe_raw_ctx_t *ctx, expr_t *e) {
     return;
   int64_t idx_min = 0;
   int64_t idx_max = 0;
-  bool has_index = idx ? ny_safe_raw_expr_int_range(ctx, idx, &idx_min, &idx_max)
-                       : true;
+  bool has_index =
+      idx ? ny_safe_raw_expr_int_range(ctx, idx, &idx_min, &idx_max) : true;
   if (!has_index) {
     ny_diag_error(idx ? idx->tok : e->tok,
                   "safe-mode raw memory access requires a proven byte range "
@@ -1446,13 +1446,12 @@ static void ny_safe_raw_record_compile_range(ny_safe_raw_ctx_t *ctx,
   int64_t lo_min = 0, lo_max = 0, hi_min = 0, hi_max = 0;
   bool has_value =
       ny_safe_raw_expr_int_range(ctx, value, &value_min, &value_max);
-  bool has_bounds =
-      ny_safe_raw_expr_int_range(ctx, e->as.call.args.data[1].val, &lo_min,
-                                 &lo_max) &&
-      lo_min == lo_max &&
-      ny_safe_raw_expr_int_range(ctx, e->as.call.args.data[2].val, &hi_min,
-                                 &hi_max) &&
-      hi_min == hi_max;
+  bool has_bounds = ny_safe_raw_expr_int_range(ctx, e->as.call.args.data[1].val,
+                                               &lo_min, &lo_max) &&
+                    lo_min == lo_max &&
+                    ny_safe_raw_expr_int_range(ctx, e->as.call.args.data[2].val,
+                                               &hi_min, &hi_max) &&
+                    hi_min == hi_max;
   int64_t lo = lo_min, hi = hi_min;
   if (!has_bounds || lo > hi) {
     ny_diag_error(e->tok,
@@ -1467,10 +1466,11 @@ static void ny_safe_raw_record_compile_range(ny_safe_raw_ctx_t *ctx,
                       : "assert_compile_range is not proven in safe mode");
     if (has_value)
       ny_diag_hint("known range is [%lld, %lld], required [%lld, %lld]",
-                   (long long)value_min, (long long)value_max,
-                   (long long)lo, (long long)hi);
+                   (long long)value_min, (long long)value_max, (long long)lo,
+                   (long long)hi);
     else
-      ny_diag_hint("safe mode cannot use an unproven range assertion to allow raw memory access");
+      ny_diag_hint("safe mode cannot use an unproven range assertion to allow "
+                   "raw memory access");
     ctx->ok = false;
     return;
   }
@@ -1601,7 +1601,8 @@ static void ny_safe_raw_record_var_facts(ny_safe_raw_ctx_t *ctx, stmt_t *s) {
     return;
   stmt_var_t *var = &s->as.var;
   if (ctx->loop_proofs_only) {
-    size_t n = var->names.len < var->exprs.len ? var->names.len : var->exprs.len;
+    size_t n =
+        var->names.len < var->exprs.len ? var->names.len : var->exprs.len;
     for (size_t i = 0; i < var->names.len; ++i) {
       const char *name = var->names.data[i];
       if (!name)
@@ -1615,8 +1616,7 @@ static void ny_safe_raw_record_var_facts(ny_safe_raw_ctx_t *ctx, stmt_t *s) {
           ny_safe_raw_push_int(ctx, name, lo, hi);
         if (var->is_decl && value &&
             (value->kind == NY_E_LIST || value->kind == NY_E_TUPLE))
-          ny_safe_raw_push_len(ctx, name,
-                               (int64_t)value->as.list_like.len);
+          ny_safe_raw_push_len(ctx, name, (int64_t)value->as.list_like.len);
       }
     }
     return;
@@ -1682,14 +1682,13 @@ static bool ny_safe_raw_loop_step(ny_safe_raw_ctx_t *ctx, stmt_t *s,
                                   const char *name, int64_t *step) {
   if (!ctx || !s || !name || s->kind != NY_S_VAR || s->as.var.is_decl ||
       s->as.var.names.len != 1 || s->as.var.exprs.len != 1 ||
-      !s->as.var.names.data[0] ||
-      strcmp(s->as.var.names.data[0], name) != 0)
+      !s->as.var.names.data[0] || strcmp(s->as.var.names.data[0], name) != 0)
     return false;
   expr_t *value = s->as.var.exprs.data[0];
   if (!value || value->kind != NY_E_BINARY || !value->as.binary.op ||
       (strcmp(value->as.binary.op, "+") != 0 &&
-       strcmp(value->as.binary.op, "-") != 0) || !value->as.binary.left ||
-      value->as.binary.left->kind != NY_E_IDENT ||
+       strcmp(value->as.binary.op, "-") != 0) ||
+      !value->as.binary.left || value->as.binary.left->kind != NY_E_IDENT ||
       !value->as.binary.left->as.ident.name ||
       strcmp(value->as.binary.left->as.ident.name, name) != 0)
     return false;
@@ -1798,8 +1797,7 @@ static bool ny_safe_raw_seed_loop_range(ny_safe_raw_ctx_t *ctx, stmt_t *s,
   if (out_name)
     *out_name = NULL;
   if (!ctx || !s || s->kind != NY_S_WHILE || !s->as.whl.test ||
-      s->as.whl.test->kind != NY_E_BINARY ||
-      !s->as.whl.test->as.binary.op)
+      s->as.whl.test->kind != NY_E_BINARY || !s->as.whl.test->as.binary.op)
     return false;
   expr_t *test = s->as.whl.test;
   bool strict = strcmp(test->as.binary.op, "<") == 0;
@@ -1807,10 +1805,8 @@ static bool ny_safe_raw_seed_loop_range(ny_safe_raw_ctx_t *ctx, stmt_t *s,
   bool descending_strict = strcmp(test->as.binary.op, ">") == 0;
   bool descending_inclusive = strcmp(test->as.binary.op, ">=") == 0;
   expr_t *lhs = test->as.binary.left;
-  if ((!strict && !inclusive && !descending_strict &&
-       !descending_inclusive) ||
-      !lhs || lhs->kind != NY_E_IDENT ||
-      !lhs->as.ident.name)
+  if ((!strict && !inclusive && !descending_strict && !descending_inclusive) ||
+      !lhs || lhs->kind != NY_E_IDENT || !lhs->as.ident.name)
     return false;
   int64_t start = 0, bound = 0;
   if (!ny_safe_raw_exact_int(ctx, lhs, &start) ||
@@ -1832,8 +1828,8 @@ static bool ny_safe_raw_seed_loop_range(ny_safe_raw_ctx_t *ctx, stmt_t *s,
   if (s->as.whl.update) {
     size_t update_writes =
         ny_safe_raw_count_writes(s->as.whl.update, lhs->as.ident.name);
-    writes = SIZE_MAX - writes < update_writes ? SIZE_MAX
-                                               : writes + update_writes;
+    writes =
+        SIZE_MAX - writes < update_writes ? SIZE_MAX : writes + update_writes;
   }
   if (writes != 1)
     return false;

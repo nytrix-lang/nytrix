@@ -1,0 +1,22 @@
+shape tagged_sequence_store {
+  family "runtime/values"
+  generator "regression"
+  features [list index any tagged store]
+  template ny-test-case
+  timeout 120
+  flags_matrix "--native-only -O0; --native-only -O3; --native --run -O0; --native-backend=llvm --jit --jit-engine=mcjit -O0; --native-backend=llvm --jit --jit-engine=orc -O0; --nyr-run"
+  expect compile_and_run
+  expect_message "TAGGED-INDEX-STORE-OK"
+  source ny <<'NY'
+use core
+mut entries = [0,0,0,0,0,0,0,0,0]
+fn store(any index) bool {
+   if !is_int(index) || index < 0 || index >= entries.len { return false }
+   entries[index] = 47
+   true
+}
+assert(store(8))
+assert(entries[8] == 47)
+print("TAGGED-INDEX-STORE-OK")
+NY
+}

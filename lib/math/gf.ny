@@ -1290,7 +1290,7 @@ fn solve_gf2(list A, list b) any {
       mut int scan_idx = pivot_row
       mut found = false
       while scan_idx < nr {
-         if M[scan_idx][pivot_col] == 1 {
+         if int(M[scan_idx][pivot_col]) == 1 {
             def tmp = M[pivot_row]
             M[pivot_row] = M[scan_idx]
             M[scan_idx] = tmp
@@ -1302,11 +1302,11 @@ fn solve_gf2(list A, list b) any {
       if found {
          mut int j = 0
          while j < nr {
-            if j != pivot_row && M[j][pivot_col] == 1 {
+            if j != pivot_row && int(M[j][pivot_col]) == 1 {
                def rj, rp = M[j], M[pivot_row]
                mut int k = pivot_col
                while k <= nc {
-                  rj[k] = rj[k] ^ rp[k]
+                  rj[k] = int(rj[k]) ^ int(rp[k])
                   k += 1
                }
             }
@@ -1327,13 +1327,13 @@ fn solve_gf2(list A, list b) any {
       mut int first_one = -1
       mut int j = 0
       while j < nc {
-         if M[i][j] == 1 {
+         if int(M[i][j]) == 1 {
             first_one = j
             break
          }
          j += 1
       }
-      if first_one != -1 { x[first_one] = M[i][nc] } else { if M[i][nc] == 1 { return nil } }
+      if first_one != -1 { x[first_one] = int(M[i][nc]) } else { if int(M[i][nc]) == 1 { return nil } }
       i += 1
    }
    x

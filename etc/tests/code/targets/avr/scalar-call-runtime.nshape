@@ -65,7 +65,7 @@ def start_source =
 assert(is_ok(file_write(start_path, start_source)),
        "write AVR UART startup wrapper")
 def emitted = run_capture(
-    [compiler, "--native-backend=avr", "--native-only", "--nyir-verify",
+    [compiler, "--native-backend=avr", "--native-only", "--nyr-verify",
      "--emit-asm=" + asm_path, "-no-std", "-emit-only", "-e",
      "@noinline\nfn add(int left, int right) int { left + right }\n" +
      "@noinline\nfn sub(int left, int right) int { left - right }\n" +
@@ -135,7 +135,7 @@ assert(execution.get("code", 0) == 124 &&
        "arithmetic, bitwise and variable shifts, and every tagged result byte")
 
 def bswap_emitted = run_capture(
-    [compiler, "--native-backend=avr", "--native-only", "--nyir-verify",
+    [compiler, "--native-backend=avr", "--native-only", "--nyr-verify",
      "--emit-asm=" + bswap_asm_path, "-no-std", "-emit-only", "-e",
      "intrinsic(\"bswap.i64\", 0x0807060504030201)"],
     [], nil, false)
@@ -189,7 +189,7 @@ def bswap32_start_source =
 assert(is_ok(file_write(bswap32_start_path, bswap32_start_source)),
        "write AVR 32-bit byte-swap startup wrapper")
 def bswap32_emitted = run_capture(
-    [compiler, "--native-backend=avr", "--native-only", "--nyir-verify",
+    [compiler, "--native-backend=avr", "--native-only", "--nyr-verify",
      "--emit-asm=" + bswap32_asm_path, "-no-std", "-emit-only", "-e",
      "intrinsic(\"bswap.i32\", 0x01020304)"],
     [], nil, false)
@@ -220,7 +220,7 @@ def panic_asm_path = stem + "-panic.s"
 def panic_obj_path = stem + "-panic.o"
 def panic_elf_path = stem + "-panic.elf"
 def panic_emitted = run_capture(
-    [compiler, "--native-backend=avr", "--native-only", "--nyir-verify",
+    [compiler, "--native-backend=avr", "--native-only", "--nyr-verify",
      "--emit-asm=" + panic_asm_path, "-no-std", "-emit-only", "-e",
      "panic(\"literal AVR panic\")"],
     [], nil, false)
@@ -272,7 +272,7 @@ assert(is_ok(file_write(rotate_start_path, rotate_start_source)),
        "write AVR rotate UART startup wrapper")
 def rotate_emitted = run_capture(
     [compiler, "--native-backend=avr", "--native-only", "-O3",
-     "--nyir-verify", "--emit-asm=" + rotate_asm_path, "-no-std",
+     "--nyr-verify", "--emit-asm=" + rotate_asm_path, "-no-std",
      "-emit-only", "-e",
      "@noinline\nfn rotate_right(int value) int {\n" +
      "  def nonnegative = value & 0x1fffffff\n" +
@@ -320,7 +320,7 @@ assert(is_ok(file_write(rotate32_start_path, rotate32_start_source)),
        "write AVR 32-bit rotate UART startup wrapper")
 def rotate32_emitted = run_capture(
     [compiler, "--native-backend=avr", "--native-only", "-O3",
-     "--nyir-verify", "--emit-asm=" + rotate32_asm_path, "-no-std",
+     "--nyr-verify", "--emit-asm=" + rotate32_asm_path, "-no-std",
      "-emit-only", "-e",
      "@noinline\nfn rotate_right32_zero(int value) int {\n" +
      "  mut word = value & 0xffffffff\n" +
@@ -388,7 +388,7 @@ def compare_start_source =
 assert(is_ok(file_write(compare_start_path, compare_start_source)),
        "write AVR comparison UART startup wrapper")
 def compare_emitted = run_capture(
-    [compiler, "--native-backend=avr", "--native-only", "--nyir-verify",
+    [compiler, "--native-backend=avr", "--native-only", "--nyr-verify",
      "--emit-asm=" + compare_asm_path, "-no-std", "-emit-only", "-e",
      "@noinline\nfn equal(int left, int right) int {\n" +
      "  if left == right { 1 } else { 0 }\n}\n" +
@@ -432,7 +432,7 @@ assert(compare_execution.get("code", 0) == 124 &&
 
 def rejected_path = stem + "-unsupported.s"
 def rejected = run_capture(
-    [compiler, "--native-backend=avr", "--native-only", "--nyir-verify",
+    [compiler, "--native-backend=avr", "--native-only", "--nyr-verify",
      "--emit-asm=" + rejected_path, "-no-std", "-emit-only", "-e",
      "fn fail(int value) { panic(\"runtime failure \" + to_str(value)) }\n" +
      "fail(42)"],

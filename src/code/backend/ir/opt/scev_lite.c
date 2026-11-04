@@ -86,14 +86,7 @@ static bool compute_trip(nyr_scev_loop_t *l) {
 
 static bool block_for_label(const nyr_cfg_t *cfg, int64_t label,
                             size_t *out_block) {
-  for (size_t block = 0; cfg && block < cfg->block_count; ++block) {
-    if (cfg->block_label[block] != label)
-      continue;
-    if (out_block)
-      *out_block = block;
-    return true;
-  }
-  return false;
+  return nyr_cfg_block_for_label(cfg, label, out_block);
 }
 
 static bool append_loop(nyr_scev_info_t *out, const nyr_scev_loop_t *loop) {
@@ -382,6 +375,54 @@ static bool scev_dynamic_loop_iv_bounds_at(
   return false;
 }
 
+/*
+ * A length query immediately following a setter on a fresh typed buffer is
+ * at most the assigned nonnegative count. Keep zero in the interval: failed
+ * allocation makes both runtime calls return zero. Do not fold the query or
+ * carry the fact across a branch, another call, or a memory write.
+ */
+static bool scev_tbuf_length_upper_bound(const nyr_func_t *f, const int *defs,
+                                         const nyr_cfg_t *cfg, int value,
+                                         int64_t *upper) {
+  value = root_copy(f, defs, value);
+  int di = def_index(f, defs, value);
+  if (di < 0)
+    return false;
+  const nyr_inst_t *query = &f->data[di];
+  if (query->op != NYIR_CALL || !query->symbol ||
+      strcmp(query->symbol, "rt_tbuf_len_raw") != 0)
+    return false;
+  int base = root_copy(f, defs, query->a);
+  int base_i = def_index(f, defs, base);
+  if (base_i >= 0 && f->data[base_i].op == NYIR_CALL &&
+      f->data[base_i].symbol &&
+      strcmp(f->data[base_i].symbol, "rt_list_set_len_raw") == 0)
+    base = root_copy(f, defs, f->data[base_i].a);
+  base_i = def_index(f, defs, base);
+  if (base_i < 0)
+    return false;
+  const nyr_inst_t *alloc = &f->data[base_i];
+  if (alloc->op != NYIR_CALL || !alloc->symbol ||
+      (strcmp(alloc->symbol, "rt_list_new") != 0 &&
+       strcmp(alloc->symbol, "rt_list_new_raw") != 0 &&
+       strcmp(alloc->symbol, "rt_tbuf_new_raw") != 0))
+    return false;
+  size_t block = cfg->inst_block[di];
+  for (size_t i = (size_t)di; i > cfg->block_start[block];) {
+    const nyr_inst_t *in = &f->data[--i];
+    if (in->op == NYIR_CALL) {
+      return in->symbol &&
+             strcmp(in->symbol, "rt_list_set_len_raw") == 0 &&
+             root_copy(f, defs, in->a) == base &&
+             const_value(f, defs, in->b, upper) && *upper >= 0;
+    }
+    if (nyr_effective_effects(in) &
+        ~(NYIR_EFFECT_READ_LOCAL))
+      return false;
+  }
+  return false;
+}
+
 static bool scev_loop_iv_bounds_at(const nyr_func_t *f,
                                    const nyr_scev_info_t *info,
                                    const int *defs, const nyr_cfg_t *cfg,
@@ -429,6 +470,18 @@ static bool scev_loop_iv_bounds_at(const nyr_func_t *f,
       if (loop->step > 0) {
         *min_out = loop->init;
         *max_out = INT64_MAX - 1;
+        int64_t upper = 0;
+        size_t end = nyr_block_last_non_nop(f, cfg, loop->header_block);
+        size_t body = SIZE_MAX;
+        if (end > cfg->block_start[loop->header_block] &&
+            f->data[end - 1].op == NYIR_BR_IF &&
+            block_for_label(cfg, f->data[end - 1].imm, &body) &&
+            body != loop->header_block &&
+            nyr_cfg_dominates(cfg, body, at_block) &&
+            scev_tbuf_length_upper_bound(f, defs, cfg, loop->limit_value,
+                                          &upper) &&
+            upper > loop->init)
+          *max_out = upper - 1;
       } else {
         *min_out = INT64_MIN + 1;
         *max_out = loop->init;
@@ -685,6 +738,7 @@ static bool scev_tbuf_payload(const nyr_func_t *f, const int *defs, int value,
     return true;
   if (in->op == NYIR_CALL && in->symbol) {
     if (strcmp(in->symbol, "rt_tbuf_new_raw") == 0 ||
+        strcmp(in->symbol, "rt_list_new") == 0 ||
         strcmp(in->symbol, "rt_list_new_raw") == 0 ||
         strcmp(in->symbol, "malloc") == 0 ||
         strcmp(in->symbol, "calloc") == 0 ||

@@ -4,7 +4,7 @@ shape nyir_vm_profile {
   features ["native", "nyir", "vm", "profile", "call"]
   template ny-test-case
   ; Merges former vm-profile + vm-profile-detail (loop + direct call).
-  flags "--native --run --nyir-run-profile=/tmp/nytrix-nyir-vm-profile.txt"
+  flags "--native --run --nyr-run-profile=/tmp/nytrix-nyir-vm-profile.txt"
   expect compile_and_run
   source ny <<'NY'
 fn add(i64 x, i64 y) i64 {

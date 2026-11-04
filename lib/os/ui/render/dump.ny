@@ -32,6 +32,7 @@ module core.os.ui.render.dump(
 )
 
 use core
+use core.os.args as process_args
 use core.error
 use core.str as str
 use core.common as common
@@ -43,7 +44,7 @@ use core.os (file_read)
 use core.os.path as path
 use core.os.path as ospath
 use core.os.sys as ossys
-use core.os.ui.render (request_frame_capture, read_framebuffer, snapshot)
+use core.os.ui.render (request_frame_capture, read_framebuffer, snapshot, mock_framebuffer_hash_line)
 use core.os.ui.window
 use core.math.parse.img as img_mod
 
@@ -232,8 +233,9 @@ fn apply_verbose_argv(int start_index=1) bool {
    "Enables bounded UI/render/input diagnostics from argv; -vv and --trace-spam increase verbosity."
    mut i = int(max(0, start_index))
    mut level = 1
-   while i < argc() {
-      def lv = _argv_verbose_level(argv(i))
+   def cli_argv = process_args.args()
+   while i < cli_argv.len {
+      def lv = _argv_verbose_level(cli_argv.get(i, ""))
       if lv > level { level = lv }
       i += 1
    }
@@ -642,17 +644,17 @@ fn min_ms() f64 {
 
 fn now() int {
    "Returns monotonic nanoseconds."
-   __ticks_ns()
+   __monotonic_ns_raw()
 }
 
 fn elapsed_ns(int t0) int {
    "Returns nanoseconds elapsed since `t0`."
-   __ticks_ns() - int(t0)
+   __monotonic_ns_raw() - int(t0)
 }
 
 fn elapsed_ms(int t0) f64 {
    "Returns milliseconds elapsed since `t0`."
-   float(__ticks_ns() - int(t0)) / 1e6
+   float(__monotonic_ns_raw() - int(t0)) / 1e6
 }
 
 fn ms_between(int t1, int t0) f64 {
@@ -662,13 +664,13 @@ fn ms_between(int t1, int t0) f64 {
 
 fn elapsed_s(int t0) f64 {
    "Returns seconds elapsed since `t0`."
-   float(__ticks_ns() - int(t0)) / 1e9
+   float(__monotonic_ns_raw() - int(t0)) / 1e9
 }
 
 fn stage_ms_since(int t0) f64 {
    "Returns milliseconds elapsed since `t0`, or zero for inactive timestamps."
    if int(t0) <= 0 { return 0.0 }
-   float(__ticks_ns() - int(t0)) / 1e6
+   float(__monotonic_ns_raw() - int(t0)) / 1e6
 }
 
 fn format_tag(any tag) str {
@@ -725,7 +727,7 @@ fn mark(any label, int t0, any detail="") bool {
    if !enabled() { return false }
    def start = int(t0)
    if start <= 0 { return false }
-   log(label, float(__ticks_ns() - start) / 1e6, detail)
+   log(label, float(__monotonic_ns_raw() - start) / 1e6, detail)
    true
 }
 
@@ -733,7 +735,7 @@ fn mark_next(bool on, any label, int t0, any detail="") int {
    "Marks a profile sample and returns the next checkpoint timestamp."
    if on {
       mark(label, t0, detail)
-      def next_t = __ticks_ns()
+      def next_t = __monotonic_ns_raw()
       return next_t
    }
    int(t0)
@@ -1158,7 +1160,7 @@ fn trace_process_sample(int frame=0, str label="") bool {
       _proc_trace_next_frame = frame + every_frames
    }
    def every_ms = env_int_cached("NY_TRACE_PROC_EVERY_MS", 1000, 50, 60000)
-   def now_ns = __ticks_ns()
+   def now_ns = __monotonic_ns_raw()
    if frame <= 0 && _proc_trace_last_ns > 0 && now_ns - _proc_trace_last_ns < every_ms * 1000000 { return false }
    def lines = _proc_status_lines()
    if lines.len <= 0 { return false }
@@ -1458,6 +1460,13 @@ fn gizmo_mode(any name, any fallback) int {
 
 fn framebuffer_hash_line() str {
    "Returns a stable hash line for the current framebuffer."
+   def mock_hash_line = mock_framebuffer_hash_line()
+   if mock_hash_line.len > 0 {
+      ;; Snapshot hashes are one-shot and can describe an earlier capture.
+      ;; Replay parity must hash the active mock surface after this frame.
+      _last_framebuffer_hash_line = ""
+      return mock_hash_line
+   }
    if _last_framebuffer_hash_line.len > 0 {
       def cached = _last_framebuffer_hash_line
       _last_framebuffer_hash_line = ""
@@ -1480,6 +1489,17 @@ fn framebuffer_hash_line() str {
       return ""
    }
    memcpy(fb_bytes, data, fb_len)
+   ;; The mock framebuffer is displayed as an opaque surface. Its alpha bytes
+   ;; are not initialized by every drawing primitive, while snapshot() forces
+   ;; them to 255 before writing an image. Normalize only that copied hash
+   ;; input so hashes describe its visible pixels without touching live memory.
+   if fb_bpp == 4 && bool(fb.get("mock_opaque", false)) {
+      mut alpha_off = 3
+      while alpha_off < fb_len {
+         store8(fb_bytes, 255, alpha_off)
+         alpha_off += 4
+      }
+   }
    def line = "FB_HASH: " + str.to_hex(hash.xxh32(fb_bytes, 0, 0, fb_len))
    if data { free(data) }
    line

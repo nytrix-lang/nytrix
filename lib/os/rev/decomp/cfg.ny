@@ -5,8 +5,7 @@ use core
 use core.str as str
 use core.os.disasm as dasm
 use core.os.rev.decomp.elf
-use core.os.rev.decomp.collections (_list_has, _append_unique, _append_all_unique)
-use core.os.rev.decomp.cfg_sets (_set_intersection, _same_set, _list_without, _set_difference)
+use core.os.rev.decomp.collections (_append_unique)
 use core.os.rev.decomp.bytes (_u32, _u64)
 use core.os.rev.decomp.symbols (_slice_symbol_aliases)
 
@@ -411,23 +410,27 @@ fn cfg(any source, any target=0, int max_bytes=2048) dict {
    _cfg_from_blocks(bin, basic_blocks(bin, target, max_bytes))
 }
 
-fn _cfg_successors(dict graph, int addr) list {
+fn _cfg_successors(dict graph, any addr) list {
    def edges = graph.get("edges", [])
+   def addr_key = to_str(addr)
    mut out = []
    mut i = 0
    while i < edges.len {
-      if int(edges[i].get("from", 0)) == addr { out = _append_unique(out, int(edges[i].get("to", 0))) }
+      def edge = edges[i]
+      if to_str(edge.get("from", 0)) == addr_key { out = _cfg_addr_append_unique(out, edge.get("to", 0)) }
       i += 1
    }
    out
 }
 
-fn _cfg_predecessors(dict graph, int addr) list {
+fn _cfg_predecessors(dict graph, any addr) list {
    def edges = graph.get("edges", [])
+   def addr_key = to_str(addr)
    mut out = []
    mut i = 0
    while i < edges.len {
-      if int(edges[i].get("to", 0)) == addr { out = _append_unique(out, int(edges[i].get("from", 0))) }
+      def edge = edges[i]
+      if to_str(edge.get("to", 0)) == addr_key { out = _cfg_addr_append_unique(out, edge.get("from", 0)) }
       i += 1
    }
    out
@@ -438,75 +441,144 @@ fn _cfg_nodes_addrs(dict graph) list {
    mut out = []
    mut i = 0
    while i < nodes.len {
-      out = out.append(int(nodes[i].get("addr", 0)))
+      out = out.append(nodes[i].get("addr", 0))
       i += 1
    }
    out
 }
 
+fn _cfg_addr_has(list values, any addr) bool {
+   def key = to_str(addr)
+   mut i = 0
+   while i < values.len {
+      if to_str(values[i]) == key { return true }
+      i += 1
+   }
+   false
+}
+
+fn _cfg_addr_append_unique(list values, any addr) list {
+   _cfg_addr_has(values, addr) ? values : values.append(addr)
+}
+
+fn _cfg_addr_intersection(list a, list b) list {
+   mut out = []
+   mut i = 0
+   while i < a.len {
+      if _cfg_addr_has(b, a[i]) { out = _cfg_addr_append_unique(out, a[i]) }
+      i += 1
+   }
+   out
+}
+
+fn _cfg_addr_same_set(list a, list b) bool {
+   if a.len != b.len { return false }
+   mut i = 0
+   while i < a.len {
+      if !_cfg_addr_has(b, a[i]) { return false }
+      i += 1
+   }
+   true
+}
+
+fn _cfg_addr_without(list values, any addr) list {
+   def key = to_str(addr)
+   mut out = []
+   mut i = 0
+   while i < values.len {
+      if to_str(values[i]) != key { out = out.append(values[i]) }
+      i += 1
+   }
+   out
+}
+
+fn _cfg_addr_difference(list a, list b) list {
+   mut out = []
+   mut i = 0
+   while i < a.len {
+      if !_cfg_addr_has(b, a[i]) { out = _cfg_addr_append_unique(out, a[i]) }
+      i += 1
+   }
+   out
+}
+
+fn _cfg_addr_maps_same_set(list nodes, dict a, dict b) bool {
+   mut i = 0
+   while i < nodes.len {
+      def key = to_str(nodes[i])
+      if !_cfg_addr_same_set(a.get(key, []), b.get(key, [])) { return false }
+      i += 1
+   }
+   true
+}
+
 fn _cfg_dominators_for_graph(dict graph) dict {
    def all = _cfg_nodes_addrs(graph)
    if all.len == 0 { return {"entry": 0, "dominators": dict(), "nodes": []} }
-   def entry = int(graph.get("entry", all[0]))
+   def entry = graph.get("entry", all[0])
    mut dom = dict()
    mut i = 0
    while i < all.len {
-      def n = int(all[i])
-      dom = dom.set(to_str(n), n == entry ? [entry] : all)
+      def n = all[i]
+      dom = dom.set(to_str(n), to_str(n) == to_str(entry) ? [entry] : all)
       i += 1
    }
-   mut changed = true
-   while changed {
-      changed = false
+   mut converged = false
+   mut rounds = 0
+   while rounds <= all.len {
+      rounds += 1
+      mut next_dom = dict()
       i = 0
       while i < all.len {
-         def n = int(all[i])
-         if n != entry {
+         def n = all[i]
+         if to_str(n) == to_str(entry) {
+            next_dom = next_dom.set(to_str(n), [entry])
+         } else {
             def preds = _cfg_predecessors(graph, n)
             mut ndom = all
             mut pi = 0
             if preds.len == 0 { ndom = [] }
             while pi < preds.len {
-               ndom = _set_intersection(ndom, dom.get(to_str(preds[pi]), []))
+               ndom = _cfg_addr_intersection(ndom, dom.get(to_str(preds[pi]), []))
                pi += 1
             }
-            ndom = _append_unique(ndom, n)
-            if !_same_set(ndom, dom.get(to_str(n), [])) {
-               dom = dom.set(to_str(n), ndom)
-               changed = true
-            }
+            ndom = _cfg_addr_append_unique(ndom, n)
+            next_dom = next_dom.set(to_str(n), ndom)
          }
          i += 1
       }
+      converged = _cfg_addr_maps_same_set(all, dom, next_dom)
+      dom = next_dom
+      if converged { break }
    }
-   {"entry": entry, "dominators": dom, "nodes": all}
+   {"entry": entry, "dominators": dom, "nodes": all, "converged": converged, "rounds": rounds}
 }
 
 fn _cfg_idominators_from_dominfo(dict dominfo) dict {
    def all = dominfo.get("nodes", [])
    def dom = dominfo.get("dominators", dict())
-   def entry = int(dominfo.get("entry", all.len > 0 ? all[0] : 0))
+   def entry = dominfo.get("entry", all.len > 0 ? all[0] : 0)
    mut idom = dict()
    mut i = 0
    while i < all.len {
-      def n = int(all[i])
-      if n != entry {
-         def candidates = _list_without(dom.get(to_str(n), []), n)
+      def n = all[i]
+      if to_str(n) != to_str(entry) {
+         def candidates = _cfg_addr_without(dom.get(to_str(n), []), n)
          mut chosen = 0
          mut ci = 0
          while ci < candidates.len {
-            def c = int(candidates[ci])
+            def c = candidates[ci]
             mut closer = true
             mut oi = 0
             while oi < candidates.len {
-               def other = int(candidates[oi])
-               if other != c && _list_has(dom.get(to_str(other), []), c) { closer = false }
+               def other = candidates[oi]
+               if to_str(other) != to_str(c) && _cfg_addr_has(dom.get(to_str(other), []), c) { closer = false }
                oi += 1
             }
             if closer { chosen = c }
             ci += 1
          }
-         if chosen != 0 { idom = idom.set(to_str(n), chosen) }
+         if to_str(chosen) != "0" { idom = idom.set(to_str(n), chosen) }
       }
       i += 1
    }
@@ -519,22 +591,22 @@ fn _cfg_dominance_frontiers_for_graph(dict graph, dict dominfo) dict {
    mut frontier = dict()
    mut i = 0
    while i < nodes.len {
-      frontier = frontier.set(to_str(int(nodes[i])), [])
+      frontier = frontier.set(to_str(nodes[i]), [])
       i += 1
    }
    i = 0
    while i < nodes.len {
-      def n = int(nodes[i])
+      def n = nodes[i]
       def preds = _cfg_predecessors(graph, n)
       if preds.len >= 2 {
          mut pi = 0
          while pi < preds.len {
-            mut runner = int(preds[pi])
-            def stop = int(idom.get(to_str(n), 0))
+            mut runner = preds[pi]
+            def stop = idom.get(to_str(n), 0)
             mut guard = 0
-            while runner != 0 && runner != stop && guard < nodes.len + 4 {
-               frontier = frontier.set(to_str(runner), _append_unique(frontier.get(to_str(runner), []), n))
-               runner = int(idom.get(to_str(runner), 0))
+            while to_str(runner) != "0" && to_str(runner) != to_str(stop) && guard < nodes.len + 4 {
+               frontier = frontier.set(to_str(runner), _cfg_addr_append_unique(frontier.get(to_str(runner), []), n))
+               runner = idom.get(to_str(runner), 0)
                guard += 1
             }
             pi += 1
@@ -552,79 +624,81 @@ fn cfg_dominators(any source, any target=0, int max_bytes=2048) dict {
 }
 
 fn _cfg_exits(dict graph) list {
-   def nodes = graph.get("nodes", [])
+   def all = _cfg_nodes_addrs(graph)
    mut out = []
    mut i = 0
-   while i < nodes.len {
-      def n = int(nodes[i].get("addr", 0))
+   while i < all.len {
+      def n = all[i]
       if _cfg_successors(graph, n).len == 0 { out = out.append(n) }
       i += 1
    }
-   if out.len == 0 && nodes.len > 0 { out = out.append(int(nodes[nodes.len - 1].get("addr", 0))) }
+   if out.len == 0 && all.len > 0 { out = out.append(all[all.len - 1]) }
    out
 }
 
 fn _cfg_postdominators_for_graph(dict graph) dict {
-   def nodes = graph.get("nodes", [])
-   if nodes.len == 0 { return {"cfg": graph, "exits": [], "postdominators": dict(), "ipostdominators": dict(), "nodes": []} }
-   mut all = []
-   mut i = 0
-   while i < nodes.len { all = all.append(int(nodes[i].get("addr", 0))) i += 1 }
+   def all = _cfg_nodes_addrs(graph)
+   if all.len == 0 { return {"cfg": graph, "exits": [], "postdominators": dict(), "ipostdominators": dict(), "nodes": [], "converged": true, "rounds": 0} }
    def exits = _cfg_exits(graph)
    mut pdom = dict()
-   i = 0
+   mut i = 0
    while i < all.len {
-      def n = int(all[i])
-      pdom = pdom.set(to_str(n), _list_has(exits, n) ? [n] : all)
+      def n = all[i]
+      pdom = pdom.set(to_str(n), _cfg_addr_has(exits, n) ? [n] : all)
       i += 1
    }
-   mut changed = true
-   while changed {
-      changed = false
+   mut converged = false
+   mut rounds = 0
+   while rounds <= all.len {
+      rounds += 1
+      mut next_pdom = dict()
       i = 0
       while i < all.len {
-         def n = int(all[i])
-         if !_list_has(exits, n) {
+         def n = all[i]
+         if _cfg_addr_has(exits, n) {
+            next_pdom = next_pdom.set(to_str(n), [n])
+         } else {
             def succs = _cfg_successors(graph, n)
             mut next = all
             mut si = 0
             if succs.len == 0 { next = [] }
             while si < succs.len {
-               next = _set_intersection(next, pdom.get(to_str(succs[si]), []))
+               next = _cfg_addr_intersection(next, pdom.get(to_str(succs[si]), []))
                si += 1
             }
-            next = _append_unique(next, n)
-            if !_same_set(next, pdom.get(to_str(n), [])) {
-               pdom = pdom.set(to_str(n), next)
-               changed = true
-            }
+            next = _cfg_addr_append_unique(next, n)
+            next_pdom = next_pdom.set(to_str(n), next)
          }
          i += 1
       }
+      converged = _cfg_addr_maps_same_set(all, pdom, next_pdom)
+      pdom = next_pdom
+      if converged { break }
    }
    mut ipdom = dict()
    i = 0
    while i < all.len {
-      def n = int(all[i])
-      def candidates = _list_without(pdom.get(to_str(n), []), n)
+      def n = all[i]
+      def candidates = _cfg_addr_without(pdom.get(to_str(n), []), n)
       mut chosen = 0
       mut ci = 0
       while ci < candidates.len {
-         def c = int(candidates[ci])
+         def c = candidates[ci]
          mut closer = true
          mut oi = 0
          while oi < candidates.len {
-            def other = int(candidates[oi])
-            if other != c && _list_has(pdom.get(to_str(other), []), c) { closer = false }
+            def other = candidates[oi]
+            if to_str(other) != to_str(c) && _cfg_addr_has(pdom.get(to_str(other), []), c) { closer = false }
             oi += 1
          }
          if closer { chosen = c }
          ci += 1
       }
-      if chosen != 0 { ipdom = ipdom.set(to_str(n), chosen) }
+      if to_str(chosen) != "0" { ipdom = ipdom.set(to_str(n), chosen) }
       i += 1
    }
-   {"cfg": graph, "exits": exits, "postdominators": pdom, "ipostdominators": ipdom, "nodes": all}
+   {"cfg": graph, "exits": exits, "postdominators": pdom, "ipostdominators": ipdom, "nodes": all,
+      "converged": converged, "rounds": rounds}
 }
 
 fn cfg_postdominators(any source, any target=0, int max_bytes=2048) dict {
@@ -640,16 +714,16 @@ fn _cfg_control_dependence_for_graph(dict graph, dict post) dict {
    mut i = 0
    while i < edges.len {
       def e = edges[i]
-      def from = int(e.get("from", 0))
-      def to = int(e.get("to", 0))
-      if !_list_has(pdom.get(to_str(from), []), to) {
-         mut controlled = _set_difference(pdom.get(to_str(to), []), pdom.get(to_str(from), []))
+      def from = e.get("from", 0)
+      def to = e.get("to", 0)
+      if !_cfg_addr_has(pdom.get(to_str(from), []), to) {
+         mut controlled = _cfg_addr_difference(pdom.get(to_str(to), []), pdom.get(to_str(from), []))
          if controlled.len == 0 { controlled = [to] }
          regions = regions.append({"controller": from, "to": to, "edge": e, "condition": e.get("condition", ""), "kind": e.get("kind", ""), "nodes": controlled})
          mut ci = 0
          while ci < controlled.len {
-            def n = int(controlled[ci])
-            dependents = dependents.set(to_str(n), _append_unique(dependents.get(to_str(n), []), from))
+            def n = controlled[ci]
+            dependents = dependents.set(to_str(n), _cfg_addr_append_unique(dependents.get(to_str(n), []), from))
             ci += 1
          }
       }
@@ -673,9 +747,9 @@ fn _cfg_loops_for_graph(dict graph, dict dominfo) dict {
    mut i = 0
    while i < edges.len {
       def e = edges[i]
-      def from = int(e.get("from", 0))
-      def to = int(e.get("to", 0))
-      if _list_has(dom.get(to_str(from), []), to) {
+      def from = e.get("from", 0)
+      def to = e.get("to", 0)
+      if _cfg_addr_has(dom.get(to_str(from), []), to) {
          def e2 = clone(e).set("kind", "back_edge")
          back = back.append(e2)
          loops = loops.append({"header": to, "latch": from, "back_edge": e2, "body_hint": [to, from]})

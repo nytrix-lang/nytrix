@@ -3,7 +3,7 @@ shape aarch64_elf64_internal_link_run_pointer_memory {
   generator "native"
   features [native object elf64 aarch64 internal-link qemu pointer memory]
   template ny-test-case
-  flags "--native-backend aarch64 --nyir-verify -emit-only -o /tmp/nytrix-aarch64-link-pointer.o"
+  flags "--native-backend aarch64 --nyr-verify -emit-only -o /tmp/nytrix-aarch64-link-pointer.o"
   expect object_link_run_i64_42
   source ny <<'NY'
 use core

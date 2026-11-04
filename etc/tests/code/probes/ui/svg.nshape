@@ -1,0 +1,104 @@
+shape svg {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "sys"]
+  ci skip
+  template ny-test-case
+  expect compile_and_run
+  ci optional
+  source ny <<'NY'
+use core
+use core.error
+use core.math.parse.img.svg as svg
+
+def path = "etc/assets/images/icons/tree.svg"
+print("svg available=" + to_str(svg.available()) + " backend=" + svg.backend_name())
+def img = svg.load_path(path)
+assert(img, "svg load " + path + ": " + svg.last_error())
+def w = int(img.get("width", 0))
+def h = int(img.get("height", 0))
+def data = img.get("data", "")
+assert(w > 0, "svg width")
+assert(h > 0, "svg height")
+assert(img.get("channels", 0) == 4, "svg channels")
+assert(is_str(data) && data.len == w * h * 4, "svg rgba bytes")
+mut alpha_nonzero = 0
+mut i = 0
+while i < w * h {
+   def a = load8(data, i * 4 + 3) & 255
+   if a > 0 { alpha_nonzero += 1 }
+   i += 1
+}
+assert(alpha_nonzero > 0, "svg has visible pixels")
+assert(alpha_nonzero < w * h, "svg keeps transparent background")
+NY
+}
+
+shape svg_attrs_native_verifier {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "image", "native"]
+  template ny-test-case
+  expect compile_and_run
+  ci optional
+  source ny <<'NY'
+use core
+use core.math.parse.img.svg as svg
+
+def source = "<svg width=\"32\" height=\"24\" viewBox=\"0 0 32 24\"><rect x=\"2\" y=\"3\" width=\"12\" height=\"8\" fill=\"#204060\" stroke=\"#ffffff\" stroke-width=\"2\"/></svg>"
+def img = svg.decode(source)
+assert(is_dict(img), "SVG attribute parser returned an image")
+assert(int(img.get("width", 0)) > 0, "SVG width")
+assert(int(img.get("height", 0)) > 0, "SVG height")
+assert(int(img.get("channels", 0)) == 4, "SVG channels")
+def data = img.get("data", "")
+assert(is_str(data) && data.len == int(img.get("width", 0)) * int(img.get("height", 0)) * 4, "SVG RGBA payload")
+print("svg attribute parser native verifier ok")
+NY
+}
+
+shape svg-icon-pixels {
+  family "probe-suite"
+  generator "regression"
+  features ["ny", "svg", "render", "icons"]
+  template ny-test-case
+  expect compile_and_run
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  timeout 180
+  expect_stdout "SVG-ICON-PIXELS-OK"
+  source ny <<'NY'
+use core
+use core.math.parse.img.svg as svg
+def image = svg.decode("<svg width=\"16\" height=\"16\"><rect x=\"4\" y=\"4\" width=\"8\" height=\"8\" fill=\"#ff0000\"/></svg>", "", 16)
+assert(is_dict(image), "valid SVG root is recognized")
+assert(int(image.get("width")) == 16 && int(image.get("height")) == 16, "requested raster size")
+def pixels = image.get("data")
+assert(len(pixels) == 1024, "RGBA buffer has exact dimensions")
+def int center = (8 * 16 + 8) * 4
+assert(load8(pixels, center) == 255 && load8(pixels, center + 1) == 0 && load8(pixels, center + 2) == 0, "red rectangle center")
+assert(load8(pixels, center + 3) == 255 && load8(pixels, 3) == 0, "opaque center and transparent border")
+def open_paths = svg.decode("<svg width=\"16\" height=\"16\"><line x1=\"1\" y1=\"1\" x2=\"15\" y2=\"15\"/><polyline points=\"2,2 8,14 14,2\"/></svg>", "", 16)
+def open_pixels = open_paths.get("data")
+mut int open_coverage = 0
+mut int open_i = 3
+while open_i < len(open_pixels) { if load8(open_pixels, open_i) > 0 { open_coverage += 1 } open_i += 4 }
+assert(open_coverage == 0, "open line and polyline paths are not implicitly filled")
+def folder = svg.load_path("etc/assets/images/icons/folder.svg", 16)
+assert(is_dict(folder), "bundled path icon decodes")
+def folder_pixels = folder.get("data")
+mut int covered = 0
+mut int i = 3
+while i < len(folder_pixels) { if load8(folder_pixels, i) > 0 { covered += 1 } i += 4 }
+assert(covered > 0 && covered < 256,
+       "path icon has visible pixels and transparent margins (covered=" +
+       to_str(covered) + ")")
+def code = svg.load_path("etc/assets/images/icons/codeedit.svg", 32)
+assert(is_dict(code) && int(code.get("width")) == 32, "multi-path icon uses its requested raster size")
+def code_pixels = code.get("data")
+covered = 0
+i = 3
+while i < len(code_pixels) { if load8(code_pixels, i) > 0 { covered += 1 } i += 4 }
+assert(covered > 0 && covered < 1024, "multi-path icon has visible pixels and transparent margins")
+print("SVG-ICON-PIXELS-OK")
+NY
+}

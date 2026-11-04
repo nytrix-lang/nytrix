@@ -1,11 +1,11 @@
 /*
  * cc -std=gnu11 -D_GNU_SOURCE -ffunction-sections -fdata-sections -Isrc \
  *   etc/tests/lang/execution/native/callable-tags.c
- * src/code/lang/runtime/ffi.c \
+ * src/code/backend/runtime/ffi.c \
  *   -Wl,--gc-sections -ldl -pthread -o /tmp/nytrix-callable-tags && \
  *   /tmp/nytrix-callable-tags
  */
-#include "code/runtime/shared.h"
+#include "code/backend/runtime/shared.h"
 #include <assert.h>
 
 int main(void) {

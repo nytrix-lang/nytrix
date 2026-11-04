@@ -3,7 +3,7 @@ shape nyir_memcombine {
   generator "native"
   features ["native", "nyir", "optimizer", "memory", "memcombine"]
   template ny-test-case
-  flags "--native-only --native-backend=x86_64 -O3 --nyir-verify --native-result-oracle=0 --no-progress --color=never"
+  flags "--native-only --native-backend=x86_64 -O3 --nyr-verify --native-result-oracle=0 --no-progress --color=never"
   expect compile_and_run
   source ny <<'NY'
 def p = malloc(32)

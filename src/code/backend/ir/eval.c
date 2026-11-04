@@ -77,8 +77,7 @@ static int64_t *nyr_eval_global_cell(const char *name) {
       return &nyr_eval_globals[i].value;
   if (nyr_eval_global_len == nyr_eval_global_cap) {
     size_t cap = nyr_eval_global_cap ? nyr_eval_global_cap * 2u : 32u;
-    if (cap < nyr_eval_global_cap ||
-        cap > SIZE_MAX / sizeof(*nyr_eval_globals))
+    if (cap < nyr_eval_global_cap || cap > SIZE_MAX / sizeof(*nyr_eval_globals))
       return NULL;
     nyr_eval_global_t *grown =
         realloc(nyr_eval_globals, cap * sizeof(*nyr_eval_globals));
@@ -90,13 +89,14 @@ static int64_t *nyr_eval_global_cell(const char *name) {
   char *copy = strdup(name);
   if (!copy)
     return NULL;
+  int64_t initial = 0;
+  (void)nyr_consttab_get(name, &initial);
   nyr_eval_globals[nyr_eval_global_len] =
-      (nyr_eval_global_t){.name = copy, .value = 0};
+      (nyr_eval_global_t){.name = copy, .value = initial};
   return &nyr_eval_globals[nyr_eval_global_len++].value;
 }
 
-static bool nyr_eval_pool_begin(nyr_eval_pool_slot_t *slot,
-                                 size_t *depth_out) {
+static bool nyr_eval_pool_begin(nyr_eval_pool_slot_t *slot, size_t *depth_out) {
   if (!slot || !depth_out)
     return false;
   size_t depth = nyr_eval_pool.depth;
@@ -127,7 +127,7 @@ static void nyr_eval_pool_end(size_t depth, nyr_eval_pool_slot_t *slot) {
     nyr_eval_pool.depth--;
 }
 static bool nyr_eval_pool_stack(nyr_eval_pool_slot_t *slot,
-                                 const nyr_func_t *f) {
+                                const nyr_func_t *f) {
   if (!slot || !f)
     return false;
   size_t total = 0;
@@ -152,8 +152,7 @@ static bool nyr_eval_pool_stack(nyr_eval_pool_slot_t *slot,
 }
 
 static uintptr_t nyr_eval_alloca_addr(const nyr_eval_pool_slot_t *slot,
-                                       const nyr_func_t *f,
-                                       size_t inst_index) {
+                                      const nyr_func_t *f, size_t inst_index) {
   if (!slot || !f || inst_index >= f->len || !slot->stack_bytes)
     return 0;
   size_t off = 0;
@@ -168,7 +167,7 @@ static uintptr_t nyr_eval_alloca_addr(const nyr_eval_pool_slot_t *slot,
 }
 
 static bool nyr_eval_pool_values(nyr_eval_pool_slot_t *slot, size_t count,
-                                  int64_t **values, bool **known) {
+                                 int64_t **values, bool **known) {
   if (!slot || !values || !known)
     return false;
   if (count > slot->value_cap) {
@@ -208,7 +207,7 @@ static bool nyr_eval_pool_values(nyr_eval_pool_slot_t *slot, size_t count,
 }
 
 static bool nyr_eval_cached_labels(const nyr_func_t *f, size_t *label_count,
-                                    size_t **label_pc, bool **label_found) {
+                                   size_t **label_pc, bool **label_found) {
   if (!f || !label_count || !label_pc || !label_found)
     return false;
   size_t count = 0;
@@ -266,12 +265,12 @@ static bool nyr_eval_cached_labels(const nyr_func_t *f, size_t *label_count,
   }
   nyr_eval_pool.label_cache[nyr_eval_pool.label_cache_len++] =
       (nyr_eval_label_cache_t){.func = f,
-                                .data = f->data,
-                                .len = f->len,
-                                .signature = signature,
-                                .label_count = count,
-                                .pc = pc,
-                                .found = found};
+                               .data = f->data,
+                               .len = f->len,
+                               .signature = signature,
+                               .label_count = count,
+                               .pc = pc,
+                               .found = found};
   *label_count = count;
   *label_pc = pc;
   *label_found = found;
@@ -291,7 +290,7 @@ void nyr_eval_result_free(nyr_eval_result_t *result) {
 }
 
 static bool nyr_eval_note_edge(nyr_eval_result_t *result, size_t from,
-                                size_t to) {
+                               size_t to) {
   if (!result || from == SIZE_MAX)
     return true;
   for (size_t i = 0; i < result->edge_count; ++i) {
@@ -316,7 +315,7 @@ static bool nyr_eval_note_edge(nyr_eval_result_t *result, size_t from,
 }
 
 static bool nyr_eval_read_value(const int64_t *values, const bool *known,
-                                 int value, int64_t *out) {
+                                int value, int64_t *out) {
   if (!values || !known || !out || value < 0 || !known[value])
     return false;
   *out = values[value];
@@ -324,7 +323,7 @@ static bool nyr_eval_read_value(const int64_t *values, const bool *known,
 }
 
 static bool nyr_eval_read_vector(const nyr_eval_pool_slot_t *slot, int value,
-                                  unsigned width, const int64_t **out) {
+                                 unsigned width, const int64_t **out) {
   if (!slot || !out || value < 0 || (size_t)value >= slot->value_cap ||
       width > 4 || slot->vector_width[value] != width || !slot->known[value])
     return false;
@@ -342,17 +341,19 @@ static void nyr_eval_note_local(nyr_eval_result_t *result, int64_t local) {
     result->max_local_index = (size_t)local;
 }
 
-bool nyr_ir_eval_with_calls(const nyr_func_t *f, int64_t *locals,
-                          size_t local_count, size_t max_steps,
-                          nyr_eval_result_t *result,
-                          nyr_call_resolver_t resolver, void *resolver_ctx,
-                          char *err, size_t err_len) {
+static bool nyr_ir_eval_with_calls_profile_impl(
+    const nyr_func_t *f, int64_t *locals, size_t local_count, size_t max_steps,
+    nyr_eval_result_t *result, bool collect_profile, bool verify_input,
+    nyr_call_resolver_t resolver, void *resolver_ctx, char *err,
+    size_t err_len) {
   if (!f)
     return nyr_err(err, err_len, "native NYIR VM: missing function");
-  char verify_err[256] = {0};
-  if (!nyr_ir_verify(f, verify_err, sizeof(verify_err)))
-    return nyr_err(err, err_len, "native NYIR VM: verifier rejected input: %s",
-                    verify_err);
+  if (verify_input) {
+    char verify_err[256] = {0};
+    if (!nyr_ir_verify(f, verify_err, sizeof(verify_err)))
+      return nyr_err(err, err_len,
+                     "native NYIR VM: verifier rejected input: %s", verify_err);
+  }
   if (f->next_value < 0)
     return nyr_err(err, err_len, "native NYIR VM: invalid value count");
   size_t eval_depth = 0;
@@ -362,14 +363,14 @@ bool nyr_ir_eval_with_calls(const nyr_func_t *f, int64_t *locals,
   int64_t *values = NULL;
   bool *known = NULL;
   if (!nyr_eval_pool_values(&eval_slot, (size_t)f->next_value, &values,
-                             &known) ||
+                            &known) ||
       !nyr_eval_pool_stack(&eval_slot, f)) {
     nyr_eval_pool_end(eval_depth, &eval_slot);
     return nyr_err(err, err_len, NY_NATIVE_OOM);
   }
   if (result) {
     memset(result, 0, sizeof(*result));
-    if (f->len) {
+    if (collect_profile && f->len) {
       result->pc_counts = calloc(f->len, sizeof(*result->pc_counts));
       if (!result->pc_counts) {
         nyr_eval_pool_end(eval_depth, &eval_slot);
@@ -400,7 +401,7 @@ bool nyr_ir_eval_with_calls(const nyr_func_t *f, int64_t *locals,
   int64_t predecessor_label = -1;
   const nyr_inst_t *in = NULL;
   size_t inst_index = 0;
-  const bool profiling = (result != NULL);
+  const bool profiling = result != NULL && collect_profile;
   size_t previous_pc = SIZE_MAX;
   /*
    * Language `try` lowering calls _setjmp and branches to the catch arm on
@@ -546,9 +547,19 @@ bool nyr_ir_eval_with_calls(const nyr_func_t *f, int64_t *locals,
       if (ptr < 4096)
         goto unsupported;
       nyr_eval_note_value(result, in->dst);
-      values[in->dst] = (in->flags & NYIR_INST_F_MEM_BYTE)
-                            ? *(const uint8_t *)ptr
-                            : *(const int64_t *)ptr;
+      if (in->flags & NYIR_INST_F_MEM_BYTE) {
+        values[in->dst] = *(const uint8_t *)ptr;
+      } else if (in->flags & NYIR_INST_F_MEM_U16) {
+        uint16_t value;
+        memcpy(&value, (const void *)ptr, sizeof(value));
+        values[in->dst] = value;
+      } else if (in->flags & NYIR_INST_F_MEM_I32) {
+        int32_t value;
+        memcpy(&value, (const void *)ptr, sizeof(value));
+        values[in->dst] = value;
+      } else {
+        values[in->dst] = *(const int64_t *)ptr;
+      }
       known[in->dst] = true;
       break;
     }
@@ -614,6 +625,10 @@ bool nyr_ir_eval_with_calls(const nyr_func_t *f, int64_t *locals,
     case NYIR_COPY_STRUCT:
     case NYIR_CAPTURE_RET:
       goto unsupported;
+    case NYIR_VA_SAVE:
+    case NYIR_VA_START:
+    case NYIR_VA_ARG:
+      goto unsupported;
     case NYIR_STORE_I64: {
       int64_t val = 0;
       if (!nyr_eval_read_value(values, known, in->a, &a) ||
@@ -624,7 +639,13 @@ bool nyr_ir_eval_with_calls(const nyr_func_t *f, int64_t *locals,
         goto unsupported;
       if (in->flags & NYIR_INST_F_MEM_BYTE)
         *(uint8_t *)ptr = (uint8_t)val;
-      else
+      else if (in->flags & NYIR_INST_F_MEM_U16) {
+        uint16_t value = (uint16_t)val;
+        memcpy((void *)ptr, &value, sizeof(value));
+      } else if (in->flags & NYIR_INST_F_MEM_I32) {
+        int32_t value = (int32_t)val;
+        memcpy((void *)ptr, &value, sizeof(value));
+      } else
         *(int64_t *)ptr = val;
       break;
     }
@@ -866,13 +887,13 @@ bool nyr_ir_eval_with_calls(const nyr_func_t *f, int64_t *locals,
         nyr_eval_result_free(result);
         nyr_eval_pool_end(eval_depth, &eval_slot);
         return nyr_inst_err(err, err_len, in, inst_index,
-                             "NYIR VM does not execute external calls yet");
+                            "NYIR VM does not execute external calls yet");
       }
       if (in->imm < 0 || in->imm > NYIR_CALL_MAX_ARGS) {
         nyr_eval_result_free(result);
         nyr_eval_pool_end(eval_depth, &eval_slot);
         return nyr_inst_err(err, err_len, in, inst_index,
-                             "NYIR VM supports a bounded number of call args");
+                            "NYIR VM supports a bounded number of call args");
       }
       int64_t args[NYIR_CALL_MAX_ARGS];
       if (in->imm > 0 && !nyr_eval_read_value(values, known, in->a, &args[0]))
@@ -959,6 +980,8 @@ bool nyr_ir_eval_with_calls(const nyr_func_t *f, int64_t *locals,
     case NYIR_VEC4_SUB_I64:
     case NYIR_VEC8_SUB_I64:
     case NYIR_VEC4_SET1_I64:
+    case NYIR_VEC8_SAR_I64:
+    case NYIR_VEC8_SET1_I64:
     case NYIR_VEC4_AND_I64:
     case NYIR_VEC8_AND_I64:
     case NYIR_VEC4_OR_I64:
@@ -1005,7 +1028,20 @@ bool nyr_ir_eval_with_calls(const nyr_func_t *f, int64_t *locals,
           ptr[lane] = vec[lane];
         break;
       }
-      if (in->op == NYIR_VEC4_SET1_I64) {
+      if (in->op == NYIR_VEC8_SAR_I64) {
+        const int64_t *vec = NULL;
+        if (!nyr_eval_read_vector(&eval_slot, in->a, 4, &vec))
+          goto unsupported;
+        for (unsigned lane = 0; lane < 4; ++lane)
+          eval_slot.vector_values[(size_t)in->dst * 4 + lane] = vec[lane] >> in->imm;
+        eval_slot.vector_width[in->dst] = 4;
+        values[in->dst] = eval_slot.vector_values[(size_t)in->dst * 4];
+        known[in->dst] = true;
+        nyr_eval_note_value(result, in->dst);
+        break;
+      }
+      if (in->op == NYIR_VEC4_SET1_I64 ||
+          in->op == NYIR_VEC8_SET1_I64) {
         if (!nyr_eval_read_value(values, known, in->a, &a))
           goto missing_value;
         for (unsigned lane = 0; lane < width; ++lane)
@@ -1309,6 +1345,8 @@ bool nyr_ir_eval_with_calls(const nyr_func_t *f, int64_t *locals,
       nyr_eval_note_value(result, in->dst);
       break;
     }
+    case NYIR_INLINE_ASM:
+    case NYIR_READ_X86_RSP:
     case NYIR_OP_COUNT:
       goto unsupported;
     }
@@ -1324,39 +1362,71 @@ profile_oom:
   nyr_eval_result_free(result);
   nyr_eval_pool_end(eval_depth, &eval_slot);
   return nyr_inst_err(err, err_len, in, inst_index,
-                       "NYIR VM profile allocation failed");
+                      "NYIR VM profile allocation failed");
 missing_value:
   nyr_eval_result_free(result);
   nyr_eval_pool_end(eval_depth, &eval_slot);
   return nyr_inst_err(err, err_len, in, inst_index,
-                       "NYIR VM read an unavailable value");
+                      "NYIR VM read an unavailable value");
 bad_local:
   nyr_eval_result_free(result);
   nyr_eval_pool_end(eval_depth, &eval_slot);
   return nyr_inst_err(err, err_len, in, inst_index,
-                       "NYIR VM local slot is out of range");
+                      "NYIR VM local slot is out of range");
 missing_label:
   nyr_eval_result_free(result);
   nyr_eval_pool_end(eval_depth, &eval_slot);
   return nyr_inst_err(err, err_len, in, inst_index,
-                       "NYIR VM branch target is missing");
+                      "NYIR VM branch target is missing");
 bounds_violation:
   nyr_eval_result_free(result);
   nyr_eval_pool_end(eval_depth, &eval_slot);
   return nyr_inst_err(err, err_len, in, inst_index,
-                       "NYIR VM bounds check failed: offset out of range");
+                      "NYIR VM bounds check failed: offset out of range");
 unsupported:
   nyr_eval_result_free(result);
   nyr_eval_pool_end(eval_depth, &eval_slot);
   return nyr_inst_err(err, err_len, in, inst_index,
-                       "NYIR VM operation is unsupported for these operands");
+                      "NYIR VM operation is unsupported for these operands");
+}
+
+bool nyr_ir_eval_with_calls_profile(const nyr_func_t *f, int64_t *locals,
+                                    size_t local_count, size_t max_steps,
+                                    nyr_eval_result_t *result,
+                                    bool collect_profile,
+                                    nyr_call_resolver_t resolver,
+                                    void *resolver_ctx, char *err,
+                                    size_t err_len) {
+  return nyr_ir_eval_with_calls_profile_impl(
+      f, locals, local_count, max_steps, result, collect_profile, true,
+      resolver, resolver_ctx, err, err_len);
+}
+
+bool nyr_ir_eval_with_calls_profile_verified(
+    const nyr_func_t *f, int64_t *locals, size_t local_count, size_t max_steps,
+    nyr_eval_result_t *result, bool collect_profile,
+    nyr_call_resolver_t resolver, void *resolver_ctx, char *err,
+    size_t err_len) {
+  return nyr_ir_eval_with_calls_profile_impl(
+      f, locals, local_count, max_steps, result, collect_profile, false,
+      resolver, resolver_ctx, err, err_len);
+}
+
+bool nyr_ir_eval_with_calls(const nyr_func_t *f, int64_t *locals,
+                            size_t local_count, size_t max_steps,
+                            nyr_eval_result_t *result,
+                            nyr_call_resolver_t resolver, void *resolver_ctx,
+                            char *err, size_t err_len) {
+  return nyr_ir_eval_with_calls_profile(f, locals, local_count, max_steps,
+                                        result, result != NULL, resolver,
+                                        resolver_ctx, err, err_len);
 }
 
 bool nyr_ir_eval(const nyr_func_t *f, int64_t *locals, size_t local_count,
-               size_t max_steps, nyr_eval_result_t *result, char *err,
-               size_t err_len) {
+                 size_t max_steps, nyr_eval_result_t *result, char *err,
+                 size_t err_len) {
   return nyr_ir_eval_with_calls(f, locals, local_count, max_steps, result, NULL,
-                              NULL, err, err_len);
+                                NULL, err, err_len);
 }
 
 /*
@@ -1384,6 +1454,8 @@ bool nyr_is_pure_i64_straightline(const nyr_func_t *f) {
     case NYIR_CONST_F32:
     case NYIR_COPY:
     case NYIR_VEC4_SET1_I64:
+    case NYIR_VEC8_SAR_I64:
+    case NYIR_VEC8_SET1_I64:
     case NYIR_VEC4_REDUCE_ADD_I64:
     case NYIR_VEC4_ADD_I64:
     case NYIR_VEC4_SUB_I64:
@@ -1463,7 +1535,7 @@ static size_t nyr_tv_local_count(const nyr_func_t *f) {
 }
 
 static void nyr_tv_fill_locals(int64_t *locals, size_t n, int trial,
-                                uint64_t *rng) {
+                               uint64_t *rng) {
   if (!locals || n == 0)
     return;
   static const int64_t edges[] = {0,  1,  -1,  2,   -2,        7,        8,
@@ -1510,8 +1582,8 @@ static void nyr_tv_fill_locals(int64_t *locals, size_t n, int trial,
 }
 
 bool nyr_tv_equiv_straightline(const nyr_func_t *before,
-                                const nyr_func_t *after, int trials, char *err,
-                                size_t err_len) {
+                               const nyr_func_t *after, int trials, char *err,
+                               size_t err_len) {
   if (!before || !after)
     return nyr_err(err, err_len, "native TV: missing function");
   if (trials <= 0)
@@ -1559,11 +1631,10 @@ bool nyr_tv_equiv_straightline(const nyr_func_t *before,
       nyr_eval_result_free(&rb);
       free(locals_a);
       free(locals_b);
-      return nyr_err(
-          err, err_len,
-          "native TV: trial %d eval divergence (before=%s after=%s)", t,
-          ok_a ? "ok" : (ea[0] ? ea : "fail"),
-          ok_b ? "ok" : (eb[0] ? eb : "fail"));
+      return nyr_err(err, err_len,
+                     "native TV: trial %d eval divergence (before=%s after=%s)",
+                     t, ok_a ? "ok" : (ea[0] ? ea : "fail"),
+                     ok_b ? "ok" : (eb[0] ? eb : "fail"));
     }
     if (!ra.returned || !rb.returned) {
       int ret_a = (int)ra.returned;
@@ -1573,8 +1644,8 @@ bool nyr_tv_equiv_straightline(const nyr_func_t *before,
       free(locals_a);
       free(locals_b);
       return nyr_err(err, err_len,
-                      "native TV: trial %d missing return (before=%d after=%d)",
-                      t, ret_a, ret_b);
+                     "native TV: trial %d missing return (before=%d after=%d)",
+                     t, ret_a, ret_b);
     }
     if (ra.result != rb.result) {
       int64_t res_a = ra.result;
@@ -1584,9 +1655,9 @@ bool nyr_tv_equiv_straightline(const nyr_func_t *before,
       free(locals_a);
       free(locals_b);
       return nyr_err(err, err_len,
-                      "native TV: trial %d result mismatch before=%" PRId64
-                      " after=%" PRId64,
-                      t, res_a, res_b);
+                     "native TV: trial %d result mismatch before=%" PRId64
+                     " after=%" PRId64,
+                     t, res_a, res_b);
     }
     compared++;
     nyr_eval_result_free(&ra);
@@ -1619,7 +1690,7 @@ bool nyr_eval_with_calls(const nyr_func_t *func, int64_t *locals,
   if (result)
     nyr_eval_result_init(result);
   bool ok = nyr_ir_eval_with_calls(func, locals, local_count, max_steps, result,
-                                 resolver, resolver_ctx, err, err_len);
+                                   resolver, resolver_ctx, err, err_len);
   if (ok && err && err_len)
     err[0] = '\0';
   return ok;

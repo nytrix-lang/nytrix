@@ -3,7 +3,7 @@ shape ownership_allowance_interval_positive {
   generator "embedded"
   features ["ownership", "allowance", "positive", "control-flow", "backend-parity"]
   template ny-test-case
-  flags_matrix "--ownership-strict --nyir-verify --native --run; --ownership-strict --nyir-verify --native-backend=llvm --jit --jit-engine=mcjit; --ownership-strict --nyir-verify --native-backend=llvm --jit --jit-engine=orc; --ownership-strict --nyir-verify --native-only"
+  flags_matrix "--ownership-strict --nyr-verify --native --run; --ownership-strict --nyr-verify --native-backend=llvm --jit --jit-engine=mcjit; --ownership-strict --nyr-verify --native-backend=llvm --jit --jit-engine=orc; --ownership-strict --nyr-verify --native-only"
   expect compile_and_run
   source ny <<'NY'
 use core

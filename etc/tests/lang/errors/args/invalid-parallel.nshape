@@ -6,7 +6,7 @@ shape args-invalid-parallel {
   expect compile_fail
 
   flags "--parallel=bogus"
-  expect_message "unknown parallel mode"
+  expect_message "invalid --parallel"
   source ny <<'NY'
 use core
 print("ok")

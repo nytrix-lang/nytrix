@@ -3,7 +3,7 @@ shape byvalue_aggregate_backends {
   generator "embedded"
   features ["ny", "ffi", "aggregate", "byvalue", "abi"]
   template ny-test-case
-  flags_matrix "--nyir-verify --c-frontend=nytrix --native --run; --nyir-verify --c-frontend=nytrix --native-backend=llvm --jit --jit-engine=mcjit; --nyir-verify --c-frontend=nytrix --native-backend=llvm --jit --jit-engine=orc; --nyir-verify --c-frontend=nytrix --native-only --native-backend=x86_64"
+  flags_matrix "--nyr-verify --c-frontend=nytrix --native --run; --nyr-verify --c-frontend=nytrix --native-backend=llvm --jit --jit-engine=mcjit; --nyr-verify --c-frontend=nytrix --native-backend=llvm --jit --jit-engine=orc; --nyr-verify --c-frontend=nytrix --native-only --native-backend=x86_64"
   expect compile_and_run
   source ny <<'NY'
 #include "etc/tests/lang/interop/c/internal-byvalue-param-import.h" link "etc/tests/lang/interop/c/sum-pair.so"

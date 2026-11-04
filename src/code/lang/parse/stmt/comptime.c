@@ -3583,6 +3583,52 @@ static parser_ct_template_meta *parser_find_ct_template(parser_t *p,
   return NULL;
 }
 
+static void parser_skip_template_param_annotation(parser_t *p,
+                                                  unsigned angle_depth) {
+  unsigned paren_depth = 0;
+  unsigned bracket_depth = 0;
+  unsigned brace_depth = 0;
+  while (p && p->cur.kind != NY_T_EOF) {
+    if (angle_depth == 0 && paren_depth == 0 && bracket_depth == 0 &&
+        brace_depth == 0 &&
+        (p->cur.kind == NY_T_COMMA || p->cur.kind == NY_T_RPAREN))
+      return;
+    switch (p->cur.kind) {
+    case NY_T_LT:
+      angle_depth++;
+      break;
+    case NY_T_GT:
+      if (angle_depth > 0)
+        angle_depth--;
+      break;
+    case NY_T_LPAREN:
+      paren_depth++;
+      break;
+    case NY_T_RPAREN:
+      if (paren_depth > 0)
+        paren_depth--;
+      break;
+    case NY_T_LBRACK:
+      bracket_depth++;
+      break;
+    case NY_T_RBRACK:
+      if (bracket_depth > 0)
+        bracket_depth--;
+      break;
+    case NY_T_LBRACE:
+      brace_depth++;
+      break;
+    case NY_T_RBRACE:
+      if (brace_depth > 0)
+        brace_depth--;
+      break;
+    default:
+      break;
+    }
+    parser_advance(p);
+  }
+}
+
 static stmt_t *parse_comptime_template_stmt(parser_t *p) {
   token_t tok = p->cur;
   if (p->cur.kind == NY_T_COMPTIME)
@@ -3617,6 +3663,7 @@ static stmt_t *parse_comptime_template_stmt(parser_t *p) {
         parser_error(p, p->cur, "expected code category in template parameter",
                      "write `value: code<expr>`, `code<stmt>`, `code<decl>`, "
                      "or `code<ident>`");
+        parser_skip_template_param_annotation(p, 0);
       } else {
         parser_advance(p);
         parser_expect(p, NY_T_LT, "'<' after 'code'", NULL);
@@ -3631,9 +3678,12 @@ static stmt_t *parse_comptime_template_stmt(parser_t *p) {
         else
           parser_error(p, p->cur, "unknown comptime code category",
                        "supported categories are expr, stmt, decl, and ident");
-        if (category)
+        if (category) {
           parser_advance(p);
-        parser_expect(p, NY_T_GT, "'>' after code category", NULL);
+          parser_expect(p, NY_T_GT, "'>' after code category", NULL);
+        } else {
+          parser_skip_template_param_annotation(p, 1);
+        }
       }
     }
     vec_push_arena(p->arena, &tmpl.param_categories, category);

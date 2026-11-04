@@ -74,7 +74,7 @@ def program =
   "add_wide_negative(memory_roundtrip()) + integer_ops_check(-13, 5) + " +
   "(rotate_right32_8(0x0123456789abcd2e) == 0x2e89abcd ? 0 : 1)"
 def emitted = run_capture(
-    [compiler, "--native-backend=powerpc", "--native-only", "-O3", "--nyir-verify",
+    [compiler, "--native-backend=powerpc", "--native-only", "-O3", "--nyr-verify",
      "--emit-asm=" + asm_path, "-no-std", "-emit-only", "-e", program],
     [], nil, false)
 def linked = run_capture(
@@ -88,7 +88,7 @@ def disassembly =
 def checked_asm = stem + "-checked.s"
 def checked_exe = stem + "-checked"
 def checked_emit = run_capture(
-    [compiler, "--native-backend=powerpc", "--native-only", "--nyir-verify",
+    [compiler, "--native-backend=powerpc", "--native-only", "--nyr-verify",
      "--emit-asm=" + checked_asm, "-no-std", "-emit-only", "-e",
      "fn divide(int left, int right) int { left / right }\ndivide(9, 3)"],
     [], nil, false)
@@ -102,7 +102,7 @@ def zero_asm = stem + "-zero.s"
 def zero_exe = stem + "-zero"
 def zero_emit = run_capture(
     [compiler, "--native-backend=powerpc", "--native-only", "-O3",
-     "--nyir-verify", "--emit-asm=" + zero_asm, "-no-std", "-emit-only",
+     "--nyr-verify", "--emit-asm=" + zero_asm, "-no-std", "-emit-only",
      "-e", "fn divide(int left, int right) int { left / right }\n" +
      "mut int divisor = 1\nwhile divisor > 0 { divisor -= 1 }\n" +
      "divide(9, divisor)"],
@@ -116,7 +116,7 @@ def zero_execution = run_qemu("qemu-ppc64", zero_exe)
 def panic_asm = stem + "-panic.s"
 def panic_exe = stem + "-panic"
 def panic_emit = run_capture(
-    [compiler, "--native-backend=powerpc", "--native-only", "--nyir-verify",
+    [compiler, "--native-backend=powerpc", "--native-only", "--nyr-verify",
      "--emit-asm=" + panic_asm, "-no-std", "-emit-only", "-e",
      "panic(\"portable static panic\")"],
     [], nil, false)

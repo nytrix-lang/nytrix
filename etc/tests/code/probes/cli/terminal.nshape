@@ -1,0 +1,126 @@
+shape test_term_input_contract {
+  family "native/backend"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.term
+
+;; A redirected test process is not an interactive terminal.  Neither input
+;; API may manufacture a key or block forever in that state.
+assert(poll_key() == 0)
+assert(get_key() == 0)
+assert(is_quit_key(27))
+assert(is_quit_key(3))
+assert(!is_quit_key(0))
+NY
+}
+
+shape test_term_quit_key {
+  family "native/backend"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.term
+use core.os (file_exists)
+
+assert_eq(is_quit_key(27), true)
+assert_eq(is_quit_key(3), true)
+assert_eq(is_quit_key(0), false)
+assert_eq(is_quit_key(113), false)
+assert_eq(file_exists("."), true)
+NY
+}
+
+shape vterm-cell-output {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "sys"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.ui.render.viewer.vterm as vterm
+
+mut vt = vterm.new(4, 3, {"regular": 0, "bold": 0, "italic": 0, "emoji": 0}, 0, 0)
+assert(is_dict(vt), "vterm new returns terminal state")
+vt = vterm.put_text(vt, "AB")
+assert(is_dict(vt), "vterm write preserves terminal state")
+def ptr grid = vt.get("grid")
+assert(load32(grid, 0) == 65 && load32(grid, 16) == 66, "vterm writes adjacent printable cells")
+vt = vterm.put_text(vt, "\r\nCD")
+def ptr newline_grid = vt.get("grid")
+assert(load32(newline_grid, 4 * 16) == 67 && load32(newline_grid, 5 * 16) == 68, "vterm CRLF starts next row at column zero")
+vt = vterm.resize(vt, 8, 5)
+def ptr resized_grid = vt.get("grid")
+assert(load32(resized_grid, 0) == 65 && load32(resized_grid, 16) == 66, "vterm resize preserves first row cells")
+assert(load32(resized_grid, 8 * 16) == 67 && load32(resized_grid, 9 * 16) == 68, "vterm resize copies cells using old and new row strides")
+assert(load32(resized_grid, (8 * 4) * 16) == 32, "vterm resize leaves newly allocated rows blank")
+mut stream_vt = vterm.new(16, 3, {"regular": 0, "bold": 0, "italic": 0, "emoji": 0}, 0, 0)
+def ptr shared = stream_vt.get("shared")
+def ptr stream_buf = load64(shared, 8)
+def stream = "HELLO WORLD!\r\nCD"
+memcpy(stream_buf, cptr(stream), stream.len)
+store64(shared, stream.len, 16)
+stream_vt = vterm.update(stream_vt)
+def ptr streamed_grid = stream_vt.get("grid")
+assert(load32(streamed_grid, 0) == 72 && load32(streamed_grid, 5 * 16) == 32 && load32(streamed_grid, 6 * 16) == 87 && load32(streamed_grid, 11 * 16) == 33, "vterm streaming preserves printable cells and spaces")
+assert(load32(streamed_grid, 16 * 16) == 67 && load32(streamed_grid, 17 * 16) == 68, "vterm streaming preserves CRLF row")
+mut ansi_vt = vterm.new(8, 1, {"regular": 0, "bold": 0, "italic": 0, "emoji": 0}, 0, 0)
+def ptr ansi_shared = ansi_vt.get("shared")
+def ptr ansi_buf = load64(ansi_shared, 8)
+def ansi = "\033[32mG\033[36mC\033[0mD"
+memcpy(ansi_buf, cptr(ansi), ansi.len)
+store64(ansi_shared, ansi.len, 16)
+ansi_vt = vterm.update(ansi_vt)
+def ptr ansi_grid = ansi_vt.get("grid")
+def ptr ansi_palette = ansi_vt.get("palette")
+assert(load32(ansi_grid, 0) == 71 && load32(ansi_grid, 16) == 67 && load32(ansi_grid, 32) == 68,
+  "vterm ANSI streaming skips escape bytes and keeps ASCII cells adjacent")
+assert(load32(ansi_grid, 4) == load32(ansi_palette, 2 * 4),
+  "vterm SGR 32 applies the ANSI green palette entry (cell=" +
+  to_str(load32(ansi_grid, 4)) + ", palette=" +
+  to_str(load32(ansi_palette, 2 * 4)) + ")")
+assert(load32(ansi_grid, 20) == load32(ansi_palette, 6 * 4),
+  "vterm SGR 36 applies the ANSI cyan palette entry")
+assert(load32(ansi_grid, 36) == ansi_vt.get("def_fg"),
+  "vterm SGR 0 restores default foreground")
+assert(load32(ansi_vt.get("state"), 0) == 3,
+  "vterm ANSI stream advances cursor across three printable cells")
+print("vterm-cell-output ok")
+NY
+}
+
+shape vterm-key-state-open {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "sys"]
+  ci skip
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.ui.window.consts
+use core.os.ui.window.input as ui
+use core.os.ui.render.viewer.vterm as vterm
+mut vt = vterm.new(80, 24, {"regular": 0, "bold": 0, "italic": 0, "emoji": 0}, 0, 0)
+case vterm.open(vt, "/bin/sh", ["sh", "-c", "sleep 1"]){
+   ok(next_vt) -> { vt = next_vt }
+   err(e) -> { panic("vterm open failed: " + to_str(e)) }
+}
+def st0 = vt.get("state")
+assert(load32(st0, 0) == 0, "open initial cx")
+assert(load32(st0, 4) == 0, "open initial cy")
+vt = vterm.handle_event(vt, EVENT_KEY_PRESSED, {"key": ui.KEY_A, "action": 1, "mod": 0, "ww": 800.0, "wh": 480.0})
+def st1 = vt.get("state")
+assert(load32(st1, 0) == 0, "open key press preserves cx")
+assert(load32(st1, 4) == 0, "open key press preserves cy")
+vterm.close(vt)
+print("vterm-key-state-open ok")
+NY
+}

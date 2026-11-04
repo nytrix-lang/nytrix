@@ -48,7 +48,7 @@ fn _gltf_load_buffer_uri(any uri, str base_path="") any {
    def full_path = ospath.join(base_path, shr._gltf_url_decode(uri))
    def res = file_read(full_path)
    if is_err(res) { return 0 }
-   def raw = unwrap(res)
+   def str raw = unwrap(res)
    _gltf_stage_binary_blob(raw)
 }
 
@@ -316,7 +316,7 @@ fn load_gltf_file(str path) any {
    def dir = shr._gltf_path_dirname(path)
    def res = file_read(path)
    if is_err(res) { return {"error": "Failed to read glTF file: " + path} }
-   def raw = unwrap(res)
+   def str raw = unwrap(res)
    if is_str(raw) && raw.len >= 4 && u32le(raw, 0) == _GLB_MAGIC {
       mut glb = _gltf_parse_glb(raw, dir)
       if is_dict(glb) {
@@ -420,7 +420,7 @@ fn _gltf_resolve_accessor_data(any g, int acc_idx, any data) any {
    shr._gltf_ensure_caches()
    def accs = g.get("accessors", [])
    if acc_idx < 0 || acc_idx >= accs.len { return 0 }
-   def acc = accs.get(acc_idx)
+   def acc = accs[acc_idx]
    def sparse = acc.get("sparse", 0)
    def cacheable = !is_dict(sparse)
    def cache_key = cacheable ? (shr._gltf_cache_key_from_g(g) + ":data:" + to_str(to_int(data)) + ":acc:" + to_str(int(acc_idx))) : ""
@@ -439,14 +439,14 @@ fn _gltf_resolve_accessor_data(any g, int acc_idx, any data) any {
    mut stride = 0
    mut owned = false
    if bv_idx >= 0 && bv_idx < bv_list.len {
-      def bv = bv_list.get(bv_idx)
+      def bv = bv_list[bv_idx]
       def bv_ext = is_dict(bv) ? bv.get("extensions", 0) : 0
       def meshopt_ext = is_dict(bv_ext) ? bv_ext.get("EXT_meshopt_compression", bv_ext.get("KHR_meshopt_compression", 0)) : 0
       if is_dict(meshopt_ext) && !common.env_truthy("NY_GLTF_UNSAFE_UNDECODED_MESHOPT") { return 0 }
       def buf_idx = int(bv.get("buffer", 0))
       mut base_ptr = data
       if is_list(buffers_data) && buf_idx >= 0 && buf_idx < buffers_data.len {
-         def b = buffers_data.get(buf_idx, 0)
+         def b = buffers_data[buf_idx]
          def bp = shr._gltf_blob_ptr(b)
          if bp { base_ptr = bp }
       }

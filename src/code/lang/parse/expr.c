@@ -2,8 +2,8 @@
  * Expression parser: infix/precedence-climbing expression parsing
  * including operators, calls, lambdas, and dotted-field access.
  */
-#include "base/debug.h"
 #include "base/ascii.h"
+#include "base/debug.h"
 #include "priv.h"
 #include <ctype.h>
 #include <errno.h>
@@ -1660,7 +1660,7 @@ static expr_t *parse_primary(parser_t *p) {
       (void)expr_parse_type_ref(p, "expected return type after '->'");
     } else
       lam->as.lambda.return_type = parser_parse_return_type_suffix(
-          p, expr_parse_type_ref, "expected return type");
+          p, expr_parse_type_ref, "expected return type", false);
     stmt_t *body = NULL;
     if (p->cur.kind == NY_T_LBRACE) {
       body = p_parse_block(p);

@@ -1,0 +1,24 @@
+shape boolean_choice_provider {
+  family "runtime/modules/use"
+  generator "embedded"
+  features [bool ternary]
+  template ny-test-case
+  ci skip
+  expect compile_and_run
+  source ny <<'NY'
+module boolean_choice(choose_literal, choose_call)
+
+fn false_value() bool { false }
+fn true_value() bool { true }
+
+fn choose_literal(bool condition) bool {
+   def selected = condition ? false_value() : true
+   selected
+}
+
+fn choose_call(bool condition) bool {
+   def selected = condition ? true_value() : false
+   selected
+}
+NY
+}

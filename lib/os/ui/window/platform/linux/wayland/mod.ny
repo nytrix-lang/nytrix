@@ -286,7 +286,7 @@ fn _dbg(any msg) any { if _is_debug() { ui_profile.print_text("[wayland] " + msg
 fn _dbgu(any msg) any { if _is_debug() { ui_profile.print_text("[wayland:v] " + msg) } }
 
 fn _dbg_err(any msg) any { if _is_debug() { ui_profile.print_text("[wayland:ERROR] " + msg) } }
-mut _wayland_globals = 0
+mut any _wayland_globals = nil
 
 fn set_globals(any g) any {
    "Overrides the process-global Wayland state dictionary."
@@ -401,12 +401,25 @@ def _WG_PENDING_Y = 548
 def _WG_PENDING_BUTTON = 552
 def _WG_PENDING_ACTION = 556
 def _WG_SIZE = 560
+def _WRS_HANDLE = 0
+def _WRS_WIDTH = 8
+def _WRS_HEIGHT = 16
+def _WRS_CONFIGURE = 24
+def _WRS_CLOSE = 32
+def _WRS_MAXIMIZED = 40
+def _WRS_FULLSCREEN = 48
+def _WRS_ACTIVATED = 56
+def _WRS_FLAGS_DIRTY = 64
+def _WRS_SIZE = 72
 def _WP_PENDING_SURFACE = 1
 def _WP_PENDING_MOTION = 2
 def _WP_PENDING_BUTTON = 4
 def _WP_SET_CURSOR = 0
 def _WP_RELEASE = 1
-mut _windows = dict(8)
+
+;; Registry keys are numeric surface addresses on both creation and callback
+;; paths. A typed pointer and a load64_h integer have different dynamic keys.
+mut dict _windows = dict(8)
 mut _pending_events = []
 mut _clipboard_text = ""
 mut _clipboard_source = 0
@@ -507,6 +520,7 @@ fn _translate_wayland_scancode(any scancode) int { comptime match WaylandScancod
 fn _push_event(any win, int typ, any data=0) any {
    if !win { return 0 }
    def h = win.get("handle", 0)
+   if !is_list(_pending_events) { _pending_events = [] }
    _pending_events = _pending_events.append(ui_event.make_event(typ, h, h, data))
 }
 
@@ -515,7 +529,7 @@ fn _broadcast_event(int typ, any data=0) any {
    mut i = 0
    def keys_n = keys.len
    while i < keys_n {
-      def win = _windows.get(keys.get(i), 0)
+      def win = _windows.get(int(keys.get(i)), 0)
       if is_dict(win) { _push_event(win, typ, data) }
       i += 1
    }
@@ -1308,16 +1322,16 @@ fn xdg_toplevel_unset_maximized(any toplevel) any {
    if toplevel { _wl_proxy_marshal_void(toplevel, XDG_TOPLEVEL_UNSET_MAXIMIZED) }
 }
 
-fn _surface_handle_enter(any data, any surface, any output) any {
-   mut win = _windows.get(data, 0)
+fn _surface_handle_enter(ptr data, ptr surface, ptr output) any {
+   mut win = _windows.get(int(data), 0)
    if !win || !is_dict(win) { return 0 }
    def outputs = win.get("outputs", [])
    win = win.set("outputs", outputs.append(output))
-   _windows = _windows.set(data, win)
+   _windows = dict_set(_windows, int(data), win)
 }
 
-fn _surface_handle_leave(any data, any surface, any output) any {
-   mut win = _windows.get(data, 0)
+fn _surface_handle_leave(ptr data, ptr surface, ptr output) any {
+   mut win = _windows.get(int(data), 0)
    if !win || !is_dict(win) { return 0 }
    def outputs = win.get("outputs", [])
    mut next_outputs = []
@@ -1329,36 +1343,72 @@ fn _surface_handle_leave(any data, any surface, any output) any {
       i += 1
    }
    win = win.set("outputs", next_outputs)
-   _windows = _windows.set(data, win)
+   _windows = dict_set(_windows, int(data), win)
 }
 
-fn _xdg_surface_handle_configure(any surface, any xdg_surface, any serial) any {
-   if !xdg_surface { return 0 }
-   _dbgu("xdg_surface.configure surface=0x" + str.to_hex(surface) + " serial=" + to_str(from_int(serial)))
-   _wl_proxy_marshal_u(xdg_surface, XDG_SURFACE_ACK_CONFIGURE, int(from_int(serial)))
-   mut win = _windows.get(surface, 0)
-   if win {
-      def pw, ph = win.get("pending_w", 0), win.get("pending_h", 0)
-      win = win.set("configured", true)
-      if pw > 0 && ph > 0 && (pw != win.get("w", 0) || ph != win.get("h", 0)) {
-         mut next_win = win.set("w", pw)
-         next_win = next_win.set("h", ph)
-         next_win = next_win.set("configured", true)
-         _windows = _windows.set(surface, next_win)
-         mut data = dict(8)
-         data = data.set("w", pw)
-         data = data.set("h", ph)
-         _push_event(next_win, EVENT_WINDOW_RESIZED, data)
-      } else {
-         _windows = _windows.set(surface, win)
+fn _apply_shell_state(any win) any {
+   if !win || !is_dict(win) { return win }
+   def state = win.get("resize_state", 0)
+   def handle = win.get("handle", 0)
+   if !state || !handle { return win }
+   mut changed = false
+   if load64_h(state, _WRS_FLAGS_DIRTY) {
+      def maximized = !!load64_h(state, _WRS_MAXIMIZED)
+      def fullscreen = !!load64_h(state, _WRS_FULLSCREEN)
+      def activated = !!load64_h(state, _WRS_ACTIVATED)
+      if maximized != !!win.get("maximized", false) {
+         win = win.set("maximized", maximized)
+         _push_event(win, maximized ? EVENT_WINDOW_MAXIMIZED : EVENT_WINDOW_RESTORED, 0)
+         changed = true
       }
+      if fullscreen != !!win.get("fullscreen", false) {
+         win = win.set("fullscreen", fullscreen)
+         changed = true
+      }
+      if activated != !!win.get("focused", false) {
+         win = win.set("focused", activated)
+         _push_event(win, activated ? EVENT_FOCUS_IN : EVENT_FOCUS_OUT, 0)
+         changed = true
+      }
+      store64_h(state, 0, _WRS_FLAGS_DIRTY)
+   }
+   if load64_h(state, _WRS_CONFIGURE) == 2 {
+      def width = int(load64_h(state, _WRS_WIDTH))
+      def height = int(load64_h(state, _WRS_HEIGHT))
+      if width > 0 && height > 0 {
+         if width != win.get("w", 0) || height != win.get("h", 0) {
+            win = win.set("w", width).set("h", height).set("configured", true)
+            mut data = dict(4)
+            data = data.set("w", width).set("h", height)
+            _push_event(win, EVENT_WINDOW_RESIZED, data)
+            changed = true
+         } else {
+            win = win.set("configured", true)
+            changed = true
+         }
+      }
+      store64_h(state, 0, _WRS_CONFIGURE)
+   }
+   if load64_h(state, _WRS_CLOSE) {
+      _push_event(win, EVENT_QUIT, 0)
+      store64_h(state, 0, _WRS_CLOSE)
+   }
+   if changed { _windows = dict_set(_windows, int(handle), win) }
+   win
+}
+
+fn _xdg_surface_handle_configure(ptr resize_state, ptr xdg_surface, u32 serial) any {
+   if !xdg_surface { return 0 }
+   _dbgu("xdg_surface.configure serial=" + to_str(from_int(serial)))
+   _wl_proxy_marshal_u(xdg_surface, XDG_SURFACE_ACK_CONFIGURE, int(from_int(serial)))
+   if resize_state && load64_h(resize_state, _WRS_CONFIGURE) == 1 {
+      store64_h(resize_state, 2, _WRS_CONFIGURE)
    }
 }
 
-fn _xdg_toplevel_handle_configure(any surface, any toplevel, any width, any height, any states) any {
-   mut win = _windows.get(surface, 0)
-   if !win || !is_dict(win) { return 0 }
-   _dbgu("xdg_toplevel.configure surface=0x" + str.to_hex(surface) +
+fn _xdg_toplevel_handle_configure(ptr resize_state, ptr toplevel, i32 width, i32 height, ptr states) any {
+   if !resize_state { return 0 }
+   _dbgu("xdg_toplevel.configure handle=0x" + str.to_hex(load64_h(resize_state, _WRS_HANDLE)) +
       " width=" + to_str(int(from_int(width))) +
       " height=" + to_str(int(from_int(height))))
    mut next_maximized = false
@@ -1378,36 +1428,27 @@ fn _xdg_toplevel_handle_configure(any surface, any toplevel, any width, any heig
          }
       }
    }
-   def was_maximized = win.get("maximized", false)
-   if next_maximized != was_maximized {
-      win = win.set("maximized", next_maximized)
-      _push_event(win, next_maximized ? EVENT_WINDOW_MAXIMIZED : EVENT_WINDOW_RESTORED, 0)
-   }
-   def was_fullscreen = win.get("fullscreen", false)
-   if next_fullscreen != was_fullscreen { win = win.set("fullscreen", next_fullscreen) }
-   def was_focused = win.get("focused", false)
-   if next_activated != was_focused {
-      win = win.set("focused", next_activated)
-      _push_event(win, next_activated ? EVENT_FOCUS_IN : EVENT_FOCUS_OUT, 0)
-   }
    def cfg_w, cfg_h = int(from_int(width)), int(from_int(height))
    if cfg_w > 0 && cfg_h > 0 {
-      win = win.set("pending_w", cfg_w)
-      win = win.set("pending_h", cfg_h)
+      store64_h(resize_state, cfg_w, _WRS_WIDTH)
+      store64_h(resize_state, cfg_h, _WRS_HEIGHT)
+      store64_h(resize_state, 1, _WRS_CONFIGURE)
    }
-   _windows = _windows.set(surface, win)
+   store64_h(resize_state, next_maximized ? 1 : 0, _WRS_MAXIMIZED)
+   store64_h(resize_state, next_fullscreen ? 1 : 0, _WRS_FULLSCREEN)
+   store64_h(resize_state, next_activated ? 1 : 0, _WRS_ACTIVATED)
+   store64_h(resize_state, 1, _WRS_FLAGS_DIRTY)
 }
 
-fn _xdg_toplevel_handle_close(any win_obj, any toplevel) any {
-   def win = _windows.get(win_obj, 0)
-   if win { _push_event(win, 15, 0) }
+fn _xdg_toplevel_handle_close(ptr resize_state, ptr toplevel) any {
+   if resize_state { store64_h(resize_state, 1, _WRS_CLOSE) }
 }
 
-fn _decoration_handle_configure(any win_obj, any decoration, any mode) any {
-   mut win = _windows.get(win_obj, 0)
+fn _decoration_handle_configure(ptr win_obj, ptr decoration, u32 mode) any {
+   mut win = _windows.get(int(win_obj), 0)
    if win && is_dict(win) {
       win = win.set("decoration_mode", int(from_int(mode)))
-      _windows = _windows.set(win_obj, win)
+      _windows = dict_set(_windows, int(win_obj), win)
    }
 }
 
@@ -1418,6 +1459,13 @@ fn _create_shell_objects(any win) any {
    if !handle || !globals { return win }
    def wm_base = globals.get("wm_base", 0)
    if !wm_base { return win }
+   mut resize_state = win.get("resize_state", 0)
+   if !resize_state {
+      resize_state = zalloc(_WRS_SIZE)
+      if !resize_state { return win }
+      store64_h(resize_state, handle, _WRS_HANDLE)
+      win = win.set("resize_state", resize_state)
+   }
    def xdg_surface = create_xdg_surface(wm_base, handle)
    if !xdg_surface { return win }
    def toplevel = create_xdg_toplevel(xdg_surface)
@@ -1427,11 +1475,11 @@ fn _create_shell_objects(any win) any {
    }
    def xdg_surface_listener = zalloc(8)
    store64_h(xdg_surface_listener, _xdg_surface_handle_configure, 0)
-   wl_proxy_add_listener(xdg_surface, xdg_surface_listener, handle)
+   wl_proxy_add_listener(xdg_surface, xdg_surface_listener, resize_state)
    def toplevel_listener = zalloc(16)
    store64_h(toplevel_listener, _xdg_toplevel_handle_configure, 0)
    store64_h(toplevel_listener, _xdg_toplevel_handle_close, 8)
-   wl_proxy_add_listener(toplevel, toplevel_listener, handle)
+   wl_proxy_add_listener(toplevel, toplevel_listener, resize_state)
    xdg_toplevel_set_title(toplevel, win.get("title", "Untitled"))
    xdg_toplevel_set_app_id(toplevel, win.get("app_id", "nytrix"))
    def state = globals.get("listener_state", 0)
@@ -1518,7 +1566,11 @@ fn create_basic_window(any globals, str title, int width, int height, str app_id
          win = win.set("fractional_scale_listener", fs_listener)
       }
    }
-   _windows = _windows.set(surface, win)
+   if !is_dict(_windows) { _windows = dict(8) }
+   _windows = dict_set(_windows, int(surface), win)
+   if ui_profile.env_truthy_cached("NY_WAYLAND_KEY_TRACE") {
+      print("[wayland:registry] create=" + to_str(int(surface)) + " keys=" + to_str(dict_keys(_windows)))
+   }
    _wl_proxy_marshal_void(surface, WL_SURFACE_COMMIT)
    _dbgu("create_basic_window commit surface=0x" + str.to_hex(surface))
    def display = globals.get("handle", 0)
@@ -1527,7 +1579,7 @@ fn create_basic_window(any globals, str title, int width, int height, str app_id
       wl_display_roundtrip(display)
       _dbgu("create_basic_window roundtrip end surface=0x" + str.to_hex(surface))
    }
-   _windows.get(surface, win)
+   _windows.get(int(surface), win)
 }
 
 fn _wl_destroy_proxy_slot(dict win, str key_proxy, str key_listener="", str key_data="") bool {
@@ -1535,7 +1587,6 @@ fn _wl_destroy_proxy_slot(dict win, str key_proxy, str key_listener="", str key_
    def handle = win.get(key_proxy, 0)
    if !handle { return false }
    wl_proxy_marshal_flags_ptr(handle, 0, 0, 1, 1, 0)
-   destroy_proxy(handle)
    if key_listener {
       def listener = win.get(key_listener, 0)
       if listener { free(listener) }
@@ -1553,18 +1604,28 @@ fn destroy_basic_window(any win) bool {
    def surface = win.get("handle", 0)
    def xdg_surface = win.get("xdg_surface", 0)
    def toplevel = win.get("xdg_toplevel", 0)
+   def resize_state = win.get("resize_state", 0)
    _wl_destroy_proxy_slot(win, "locked_pointer", "lock_listener", "lock_data")
    _wl_destroy_proxy_slot(win, "relative_pointer", "rel_listener", "rel_data")
    if toplevel { destroy_proxy(toplevel) }
    if xdg_surface { destroy_proxy(xdg_surface) }
    if surface { destroy_proxy(surface) }
-   _windows = _windows.set(surface, 0)
+   if resize_state { free(resize_state) }
+   _windows = dict_set(_windows, int(surface), 0)
    true
 }
 
 fn get_size(any win) list {
    "Returns the Wayland window size as [width, height]."
    if !win || !is_dict(win) { return [0, 0] }
+   win = _apply_shell_state(win)
+   def handle = win.get("handle", 0)
+   if handle {
+      def current = _windows.get(int(handle), 0)
+      if is_dict(current) {
+         win = current
+      }
+   }
    [win.get("w", 0), win.get("h", 0)]
 }
 
@@ -1777,7 +1838,7 @@ fn _data_device_enter(any data, any device, any serial, any surface, any x, any 
    if !data { return 0 }
    store64_h(data, offer, _WG_DND_OFFER)
    store64_h(data, surface, _WG_DND_SURFACE)
-   def win = _windows.get(surface, 0)
+   def win = _windows.get(int(surface), 0)
    if win && is_dict(win) {
       mut ev = dict(8)
       ev = ev.set("x", int(x))
@@ -1796,7 +1857,7 @@ fn _data_device_motion(any data, any device, any time, any x, any y) any {
    if !data { return 0 }
    def surface = load64_h(data, _WG_DND_SURFACE)
    if !surface { return 0 }
-   def win = _windows.get(surface, 0)
+   def win = _windows.get(int(surface), 0)
    if win && is_dict(win) {
       mut ev = dict(8)
       ev = ev.set("x", int(x))
@@ -1811,7 +1872,7 @@ fn _data_device_drop(any data, any device) any {
    def surface = load64_h(data, _WG_DND_SURFACE)
    if !offer || !surface { return 0 }
    def display = load64_h(data, _WG_DISPLAY)
-   def win = _windows.get(surface, 0)
+   def win = _windows.get(int(surface), 0)
    if !win || !is_dict(win) { return 0 }
    def fds = malloc(8)
    if !fds { return 0 }
@@ -1965,7 +2026,7 @@ fn show_window(any win) bool {
    if !handle { _dbg("show_window: no handle") return false }
    mut next_win = _create_shell_objects(win)
    next_win = next_win.set("visible", true)
-   _windows = _windows.set(handle, next_win)
+   _windows = dict_set(_windows, int(handle), next_win)
    _wl_proxy_marshal_void(handle, WL_SURFACE_COMMIT)
    true
 }
@@ -1978,7 +2039,7 @@ fn hide_window(any win) bool {
    if !handle { return false }
    mut next_win = _destroy_shell_objects(win)
    next_win = next_win.set("visible", false)
-   _windows = _windows.set(handle, next_win)
+   _windows = dict_set(_windows, int(handle), next_win)
    wl_proxy_marshal_flags_ptr_obj(handle, WL_SURFACE_ATTACH, 0, int(get_proxy_version(handle)), 0, 0, 0)
    _wl_proxy_marshal_void(handle, WL_SURFACE_COMMIT)
    true
@@ -2134,7 +2195,7 @@ fn _store_output_name_if_empty(any out_state, any make, any model) any {
    if full.len > 0 { store64_h(out_state, strdup(cstr(full)), _WO_NAME) }
 }
 
-fn _output_handle_geometry(any data, any wl_output, any x, any y, any physical_width, any physical_height, any subpixel, any make, any model, any transform) any {
+fn _output_handle_geometry(ptr data, ptr wl_output, i32 x, i32 y, i32 physical_width, i32 physical_height, i32 subpixel, ptr make, ptr model, i32 transform) any {
    if !data { return 0 }
    store64_h(data, from_int(x), _WO_X)
    store64_h(data, from_int(y), _WO_Y)
@@ -2143,7 +2204,7 @@ fn _output_handle_geometry(any data, any wl_output, any x, any y, any physical_w
    _store_output_name_if_empty(data, make, model)
 }
 
-fn _output_handle_mode(any data, any wl_output, any flags, any width, any height, any refresh) any {
+fn _output_handle_mode(ptr data, ptr wl_output, u32 flags, i32 width, i32 height, i32 refresh) any {
    if !data { return 0 }
    def mode_flags = from_int(flags)
    if band(mode_flags, WL_OUTPUT_MODE_CURRENT) {
@@ -2153,7 +2214,7 @@ fn _output_handle_mode(any data, any wl_output, any flags, any width, any height
    }
 }
 
-fn _output_handle_done(any data, any wl_output) any {
+fn _output_handle_done(ptr data, ptr wl_output) any {
    if !data { return 0 }
    if load64_h(data, _WO_WIDTH_MM) <= 0 || load64_h(data, _WO_HEIGHT_MM) <= 0 {
       def w, h = load64_h(data, _WO_MODE_W), load64_h(data, _WO_MODE_H)
@@ -2170,7 +2231,7 @@ fn _output_handle_done(any data, any wl_output) any {
    }
 }
 
-fn _output_handle_scale(any data, any wl_output, any factor) any {
+fn _output_handle_scale(ptr data, ptr wl_output, i32 factor) any {
    if !data { return 0 }
    def next_scale = int(from_int(factor))
    store64_h(data, next_scale, _WO_SCALE)
@@ -2179,7 +2240,7 @@ fn _output_handle_scale(any data, any wl_output, any factor) any {
    def keys_n = keys.len
    while i < keys_n {
       def handle = keys.get(i)
-      def win = _windows.get(handle, 0)
+      def win = _windows.get(int(handle), 0)
       if is_dict(win) {
          def outputs = win.get("outputs", [])
          mut on_it = false
@@ -2195,13 +2256,13 @@ fn _output_handle_scale(any data, any wl_output, any factor) any {
    }
 }
 
-fn _output_handle_name(any data, any wl_output, any name) any {
+fn _output_handle_name(ptr data, ptr wl_output, ptr name) any {
    if !data { return 0 }
    _free_cstr_ptr(load64_h(data, _WO_NAME))
    store64_h(data, name ? strdup(name) : 0, _WO_NAME)
 }
 
-fn _output_handle_description(any data, any wl_output, any description) any {
+fn _output_handle_description(ptr data, ptr wl_output, ptr description) any {
    if !data { return 0 }
    _free_cstr_ptr(load64_h(data, _WO_DESCRIPTION))
    store64_h(data, description ? strdup(description) : 0, _WO_DESCRIPTION)
@@ -2345,23 +2406,23 @@ fn _pointer_apply_cursor(any data, any pointer, any serial, any win) any {
 }
 
 fn _pointer_push_motion(any surface, any x, any y) bool {
-   mut win = _windows.get(surface, 0)
+   mut win = _windows.get(int(surface), 0)
    if !win { return false }
    def prev_x = float(win.get("mouse_x", x))
    def prev_y = float(win.get("mouse_y", y))
    win = win.set("mouse_x", x)
    win = win.set("mouse_y", y)
-   _windows = _windows.set(surface, win)
+   _windows = dict_set(_windows, int(surface), win)
    def ev_data = {"x": x, "y": y, "dx": float(x) - prev_x, "dy": float(y) - prev_y, "relative": false, "raw": false, "mod": win.get("modifiers", 0)}
    _push_event(win, EVENT_MOUSE_POS_CHANGED, ev_data)
    true
 }
 
 fn _pointer_push_button(any surface, int btn, bool action) bool {
-   mut win = _windows.get(surface, 0)
+   mut win = _windows.get(int(surface), 0)
    if !win { return false }
    win = win.set("mouse_button_" + to_str(btn), action ? 1 : 0)
-   _windows = _windows.set(surface, win)
+   _windows = dict_set(_windows, int(surface), win)
    def ev_data = {
       "button": btn,
       "x": win.get("mouse_x", 0),
@@ -2373,10 +2434,10 @@ fn _pointer_push_button(any surface, int btn, bool action) bool {
    true
 }
 
-fn _pointer_handle_enter(any data, any pointer, any serial, any surface, any sx, any sy) any {
+fn _pointer_handle_enter(ptr data, ptr pointer, u32 serial, ptr surface, i32 sx, i32 sy) any {
    if !data { return 0 }
    store64_h(data, from_int(serial), _WG_POINTER_ENTER_SERIAL)
-   def win = _windows.get(surface, 0)
+   def win = _windows.get(int(surface), 0)
    if !win { return 0 }
    def fx, fy = float(from_int(sx)) / 256.0, float(from_int(sy)) / 256.0
    _pointer_set_pending(data, bor(_WP_PENDING_SURFACE, _WP_PENDING_MOTION))
@@ -2385,16 +2446,16 @@ fn _pointer_handle_enter(any data, any pointer, any serial, any surface, any sx,
    store32_f32(data, fy, _WG_PENDING_Y)
 }
 
-fn _pointer_handle_leave(any data, any pointer, any serial, any surface) any {
+fn _pointer_handle_leave(ptr data, ptr pointer, u32 serial, ptr surface) any {
    if !data { return 0 }
    _pointer_set_pending(data, _WP_PENDING_SURFACE)
    store64_h(data, 0, _WG_PENDING_SURFACE)
 }
 
-fn _pointer_handle_motion(any data, any pointer, any time, any sx, any sy) any {
+fn _pointer_handle_motion(ptr data, ptr pointer, u32 time, i32 sx, i32 sy) any {
    if !data { return 0 }
    def surface = _pointer_active_surface(data)
-   def win = _windows.get(surface, 0)
+   def win = _windows.get(int(surface), 0)
    if !win { return 0 }
    def fx = float(from_int(sx)) / 256.0
    def fy = float(from_int(sy)) / 256.0
@@ -2403,10 +2464,10 @@ fn _pointer_handle_motion(any data, any pointer, any time, any sx, any sy) any {
    store32_f32(data, fy, _WG_PENDING_Y)
 }
 
-fn _pointer_handle_button(any data, any pointer, any serial, any time, any button, any state) any {
+fn _pointer_handle_button(ptr data, ptr pointer, u32 serial, u32 time, u32 button, u32 state) any {
    if !data { return 0 }
    def surface = _pointer_active_surface(data)
-   def win = _windows.get(surface, 0)
+   def win = _windows.get(int(surface), 0)
    if !win { return 0 }
    store64_h(data, from_int(serial), _WG_POINTER_BUTTON_SERIAL)
    def btn = int(from_int(button)) - 0x110
@@ -2456,7 +2517,7 @@ fn _pointer_flush_scroll(any data) any {
    _pointer_reset_scroll(data)
    if dx == 0.0 && dy == 0.0 { return 0 }
    def surface = load64_h(data, _WG_POINTER_FOCUS)
-   def win = _windows.get(surface, 0)
+   def win = _windows.get(int(surface), 0)
    if !win { return 0 }
    def ev_data = {
       "dx": dx,
@@ -2481,12 +2542,12 @@ fn _pointer_flush_frame(any data, any pointer=0) any {
       def old_surface = load64_h(data, _WG_POINTER_FOCUS)
       def next_surface = load64_h(data, _WG_PENDING_SURFACE)
       if old_surface && old_surface != next_surface {
-         def old_win = _windows.get(old_surface, 0)
+         def old_win = _windows.get(int(old_surface), 0)
          if old_win { _push_event(old_win, EVENT_MOUSE_LEAVE, 0) }
       }
       store64_h(data, next_surface, _WG_POINTER_FOCUS)
       if next_surface && old_surface != next_surface {
-         def win = _windows.get(next_surface, 0)
+         def win = _windows.get(int(next_surface), 0)
          if win {
             _pointer_apply_cursor(data, common.value_or(pointer, load64_h(data, _WG_POINTER)), load64_h(data,
                   _WG_POINTER_ENTER_SERIAL),
@@ -2515,7 +2576,7 @@ fn _pointer_flush_frame(any data, any pointer=0) any {
    _pointer_reset_frame(data)
 }
 
-fn _pointer_handle_axis(any data, any pointer, any time, any axis, any value) any {
+fn _pointer_handle_axis(ptr data, ptr pointer, u32 time, u32 axis, i32 value) any {
    if !data { return 0 }
    def raw = float(from_int(value)) / 256.0
    def amag = raw < 0.0 ? (0.0 - raw) : raw
@@ -2527,14 +2588,14 @@ fn _pointer_handle_axis(any data, any pointer, any time, any axis, any value) an
    if load64_h(data, _WG_SEAT_VER) <= 5 { _pointer_flush_scroll(data) }
 }
 
-fn _pointer_handle_frame(any data, any pointer) any { _pointer_flush_frame(data, pointer) }
+fn _pointer_handle_frame(ptr data, ptr pointer) any { _pointer_flush_frame(data, pointer) }
 
-fn _pointer_handle_axis_source(any data, any pointer, any axis_source) any { if data { store32(data, int(from_int(axis_source)), _WG_SCROLL_AXIS_SOURCE) } }
+fn _pointer_handle_axis_source(ptr data, ptr pointer, u32 axis_source) any { if data { store32(data, int(from_int(axis_source)), _WG_SCROLL_AXIS_SOURCE) } }
 
-fn _pointer_handle_axis_stop(any data, any pointer, any time, any axis) any {
+fn _pointer_handle_axis_stop(ptr data, ptr pointer, u32 time, u32 axis) any {
 }
 
-fn _pointer_handle_axis_discrete(any data, any pointer, any axis, any discrete) any {
+fn _pointer_handle_axis_discrete(ptr data, ptr pointer, u32 axis, i32 discrete) any {
    if !data { return 0 }
    mut dx, dy = 0.0, 0.0
    if from_int(axis) == 0 { dy = -float(from_int(discrete)) }
@@ -2543,7 +2604,7 @@ fn _pointer_handle_axis_discrete(any data, any pointer, any axis, any discrete) 
    if load64_h(data, _WG_SEAT_VER) <= 5 { _pointer_flush_scroll(data) }
 }
 
-fn _pointer_handle_axis_value120(any data, any pointer, any axis, any value120) any {
+fn _pointer_handle_axis_value120(ptr data, ptr pointer, u32 axis, i32 value120) any {
    if !data { return 0 }
    def scroll_val = float(from_int(value120)) / 120.0
    mut dx, dy = 0.0, 0.0
@@ -2553,13 +2614,13 @@ fn _pointer_handle_axis_value120(any data, any pointer, any axis, any value120) 
    if load64_h(data, _WG_SEAT_VER) <= 5 { _pointer_flush_scroll(data) }
 }
 
-fn _pointer_handle_axis_relative_direction(any data, any pointer, any axis, any direction) any {
+fn _pointer_handle_axis_relative_direction(ptr data, ptr pointer, u32 axis, u32 direction) any {
 }
 
-fn _relative_pointer_handle_motion(any data, any rel_ptr, any utime_hi, any utime_lo, any dx, any dy, any dx_unaccel, any dy_unaccel) any {
+fn _relative_pointer_handle_motion(ptr data, ptr rel_ptr, u32 utime_hi, u32 utime_lo, i32 dx, i32 dy, i32 dx_unaccel, i32 dy_unaccel) any {
    if !data { return 0 }
    def surface = load64_h(data, 0)
-   mut win = _windows.get(surface, 0)
+   mut win = _windows.get(int(surface), 0)
    if !win { return 0 }
    def fdx, fdy = float(from_int(dx)) / 256.0, float(from_int(dy)) / 256.0
    mut mx, my = float(win.get("mouse_x", 0)), float(win.get("mouse_y", 0))
@@ -2567,7 +2628,7 @@ fn _relative_pointer_handle_motion(any data, any rel_ptr, any utime_hi, any utim
    my += fdy
    win = win.set("mouse_x", mx)
    win = win.set("mouse_y", my)
-   _windows = _windows.set(surface, win)
+   _windows = dict_set(_windows, int(surface), win)
    def ev_data = {
       "x": mx,
       "y": my,
@@ -2581,16 +2642,16 @@ fn _relative_pointer_handle_motion(any data, any rel_ptr, any utime_hi, any utim
    _push_event(win, EVENT_MOUSE_POS_CHANGED, ev_data)
 }
 
-fn _locked_pointer_handle_locked(any data, any locked_ptr) any {
+fn _locked_pointer_handle_locked(ptr data, ptr locked_ptr) any {
 }
 
-fn _locked_pointer_handle_unlocked(any data, any locked_ptr) any {
+fn _locked_pointer_handle_unlocked(ptr data, ptr locked_ptr) any {
 }
 
-fn _confined_pointer_handle_confined(any data, any confined_ptr) any {
+fn _confined_pointer_handle_confined(ptr data, ptr confined_ptr) any {
 }
 
-fn _confined_pointer_handle_unconfined(any data, any confined_ptr) any {
+fn _confined_pointer_handle_unconfined(ptr data, ptr confined_ptr) any {
 }
 
 fn _install_pointer_listener(any state) bool {
@@ -2645,7 +2706,7 @@ fn _get_xkb_mods(any data) int {
    mods
 }
 
-fn _keyboard_handle_keymap(any data, any keyboard, any keymap_format_raw, any fd, any size) any {
+fn _keyboard_handle_keymap(ptr data, ptr keyboard, u32 keymap_format_raw, i32 fd, u32 size) any {
    def keymap_format = from_int(keymap_format_raw)
    def keymap_fd = int(from_int(fd))
    def keymap_size = int(from_int(size))
@@ -2691,38 +2752,44 @@ fn _keyboard_handle_keymap(any data, any keyboard, any keymap_format_raw, any fd
    close(keymap_fd)
 }
 
-fn _keyboard_handle_enter(any data, any keyboard, any serial, any surface, any keys) any {
+fn _keyboard_handle_enter(ptr data, ptr keyboard, u32 serial, ptr surface, ptr keys) any {
    if !data { return 0 }
    store64_h(data, surface, _WG_KEYBOARD_FOCUS)
-   mut win = _windows.get(surface, 0)
+   mut win = _windows.get(int(surface), 0)
    if win && !win.get("focused", false) {
       win = win.set("focused", true)
-      _windows = _windows.set(surface, win)
+      _windows = dict_set(_windows, int(surface), win)
       _push_event(win, EVENT_FOCUS_IN, 0)
    }
 }
 
-fn _keyboard_handle_leave(any data, any keyboard, any serial, any surface) any {
+fn _keyboard_handle_leave(ptr data, ptr keyboard, u32 serial, ptr surface) any {
    if !data { return 0 }
    store64_h(data, 0, _WG_KEYBOARD_FOCUS)
-   mut win = _windows.get(surface, 0)
+   store64_h(data, 0, _WG_REPEAT_KEY)
+   store64_h(data, 0, _WG_REPEAT_SCANCODE)
+   mut win = _windows.get(int(surface), 0)
    if win {
       def ks_old = win.get("key_states", 0)
       if ks_old { win = win.set("key_states", dict(64)) }
       if win.get("focused", false) {
          win = win.set("focused", false)
-         _windows = _windows.set(surface, win)
+         _windows = dict_set(_windows, int(surface), win)
          _push_event(win, EVENT_FOCUS_OUT, 0)
       } else {
-         _windows = _windows.set(surface, win)
+         _windows = dict_set(_windows, int(surface), win)
       }
    }
 }
 
-fn _keyboard_handle_key(any data, any keyboard, any serial, any time, any key, any state) any {
+fn _keyboard_handle_key(ptr data, ptr keyboard, u32 serial, u32 time, u32 key, u32 state) any {
    if !data { return 0 }
    def surface = load64_h(data, _WG_KEYBOARD_FOCUS)
-   mut win = _windows.get(surface, 0)
+   mut win = _windows.get(int(surface), 0)
+   if ui_profile.env_truthy_cached("NY_WAYLAND_KEY_TRACE") {
+      print("[wayland:key] surface=" + to_str(surface) + " known=" + to_str(!!win) +
+         " raw=" + to_str(int(key)) + " state=" + to_str(int(state)) + " keys=" + to_str(dict_keys(_windows)))
+   }
    if !win { return 0 }
    def scancode = from_int(key)
    def key_state = from_int(state)
@@ -2733,10 +2800,13 @@ fn _keyboard_handle_key(any data, any keyboard, any serial, any time, any key, a
       def sym = xkb_state_key_get_one_sym(xkb_state, int(scancode + 8))
       nk = x11_keymap.translate_keysym(sym)
    }
+   if ui_profile.env_truthy_cached("NY_WAYLAND_KEY_TRACE") {
+      print("[wayland:key] translated=" + to_str(nk) + " logical_state=" + to_str(key_state))
+   }
    mut ks = win.get("key_states", dict(64))
    if nk != 0 { ks = ks.set(nk, (key_state == 1)) }
    win = win.set("key_states", ks)
-   _windows = _windows.set(surface, win)
+   _windows = dict_set(_windows, int(surface), win)
    def mods = _get_xkb_mods(data)
    def ev_data = {
       "key": nk,
@@ -2749,14 +2819,7 @@ fn _keyboard_handle_key(any data, any keyboard, any serial, any time, any key, a
    def rate = load64_h(data, _WG_REPEAT_RATE)
    if rate > 0 {
       if key_state == 1 {
-         def ts = malloc(16)
-         if !ts { return 0 }
-         memset(ts, 0, 16)
-         __clock_gettime(1, ts)
-         def sec = load64_h(ts, 0)
-         def nsec = load64_h(ts, 8)
-         def now_ns = from_int(sec) * 1000000000 + from_int(nsec)
-         free(ts)
+         def int now_ns = __monotonic_ns_raw()
          store64_h(data, nk, _WG_REPEAT_KEY)
          store64_h(data, scancode, _WG_REPEAT_SCANCODE)
          store64_h(data, now_ns, _WG_REPEAT_START_NS)
@@ -2803,26 +2866,23 @@ fn _keyboard_handle_key(any data, any keyboard, any serial, any time, any key, a
 }
 
 fn _synthesize_key_repeat(any win, any state) any {
-   if !state { return 0 }
+   if !state || !is_dict(win) { return 0 }
+   ;; Listener state is shared by all windows on a seat. Only its keyboard
+   ;; focus owner may receive repeats; leave also cancels a held repeat.
+   def focus = load64_h(state, _WG_KEYBOARD_FOCUS)
+   if !focus || int(focus) != int(win.get("handle", 0)) { return 0 }
    def repeat_key = load64_h(state, _WG_REPEAT_KEY)
    if !repeat_key { return 0 }
    def rate = load64_h(state, _WG_REPEAT_RATE)
-   if !rate { return 0 }
-   def delay_ms = load64_h(state, _WG_REPEAT_DELAY)
-   def ts = malloc(16)
-   if !ts { return 0 }
-   memset(ts, 0, 16)
-   __clock_gettime(1, ts)
-   def sec = load64_h(ts, 0)
-   def nsec = load64_h(ts, 8)
-   def now_ns = from_int(sec) * 1000000000 + from_int(nsec)
-   free(ts)
-   def start_ns = load64_h(state, _WG_REPEAT_START_NS)
-   def last_ns = load64_h(state, _WG_REPEAT_LAST_NS)
-   def elapsed_ms = (now_ns - start_ns) / 1000000
-   if elapsed_ms < from_int(delay_ms) { return 0 }
-   def interval_ns = 1000000000 / from_int(rate)
-   mut fire_ns = last_ns + interval_ns
+   if rate <= 0 { return 0 }
+   def int delay_ms = int(load64_h(state, _WG_REPEAT_DELAY))
+   def int now_ns = __monotonic_ns_raw()
+   def int start_ns = int(load64_h(state, _WG_REPEAT_START_NS))
+   def int last_ns = int(load64_h(state, _WG_REPEAT_LAST_NS))
+   def int first_fire_ns = start_ns + max(0, delay_ms) * 1000000
+   if now_ns < first_fire_ns { return 0 }
+   def int interval_ns = max(1, 1000000000 / int(rate))
+   mut int fire_ns = max(first_fire_ns, last_ns + interval_ns)
    def scancode = load64_h(state, _WG_REPEAT_SCANCODE)
    def mods = _get_xkb_mods(state)
    def ev_data = {
@@ -2832,17 +2892,23 @@ fn _synthesize_key_repeat(any win, any state) any {
       "mod": mods,
       "mods": mods
    }
-   while fire_ns <= now_ns {
+   ;; Preserve repeat timing during normal polling, but discard old backlog
+   ;; after a stall instead of flooding the event queue.
+   mut int emitted = 0
+   while fire_ns <= now_ns && emitted < 4 {
       _push_event(win, EVENT_KEY_PRESSED, ev_data)
       store64_h(state, fire_ns, _WG_REPEAT_LAST_NS)
-      fire_ns = fire_ns + interval_ns
+      fire_ns += interval_ns
+      emitted += 1
    }
+   if fire_ns <= now_ns { store64_h(state, now_ns, _WG_REPEAT_LAST_NS) }
 }
 
 fn poll_window_events(any win, int max_events=64) list {
    "Drains pending events for the given window from the shared backend queue."
    if !win || !is_dict(win) { return [win, []] }
    win = poll_joystick_events(win)
+   win = _apply_shell_state(win)
    def handle = win.get("handle", 0)
    def globals = win.get("globals", 0)
    def state = globals ? globals.get("listener_state", 0) : 0
@@ -2850,14 +2916,16 @@ fn poll_window_events(any win, int max_events=64) list {
       _pointer_flush_frame(state)
       _synthesize_key_repeat(win, state)
    }
-   mut out = []
-   mut remaining = []
-   mut i, n = 0, _pending_events.len
+   mut list out = []
+   mut list remaining = []
+   mut int i = 0
+   def int n = len(_pending_events)
+   _dbgu("poll_window_events: queued=" + to_str(n) + " handle=" + to_str(handle))
    mut count = 0
    while i < n {
-      def ev = _pending_events.get(i)
-      def ev_win = ev.get("window", 0)
-      def match_win = (ev_win == win) || (is_dict(ev_win) && ev_win.get("handle", 0) == handle)
+      def ev = _pending_events[i]
+      def ev_win = ui_event.event_window(ev)
+      def match_win = (is_int(ev_win) && int(ev_win) == int(handle)) || (ev_win == win) || (is_dict(ev_win) && int(ev_win.get("handle", 0)) == int(handle))
       if match_win && count < max_events {
          out = out.append(ev)
          count += 1
@@ -2867,12 +2935,13 @@ fn poll_window_events(any win, int max_events=64) list {
       i += 1
    }
    _pending_events = remaining
-   def latest_win = _windows.get(handle, win)
+   def latest_win = _windows.get(int(handle), win)
    _dbgu("poll_window_events: " + to_str(count) + " events dispatched, " + to_str(remaining.len) + " still pending")
-   [latest_win, out]
+   _dbgu("poll_window_events: output=" + to_str(len(out)))
+   return [latest_win, out]
 }
 
-fn _keyboard_handle_modifiers(any data, any keyboard, any serial, any mods_depres, any mods_latched, any mods_locked, any group) any {
+fn _keyboard_handle_modifiers(ptr data, ptr keyboard, u32 serial, u32 mods_depres, u32 mods_latched, u32 mods_locked, u32 group) any {
    if !data { return 0 }
    def depressed = from_int(mods_depres)
    def latched = from_int(mods_latched)
@@ -2883,7 +2952,7 @@ fn _keyboard_handle_modifiers(any data, any keyboard, any serial, any mods_depre
    if state { xkb_state_update_mask(state, depressed, latched, locked, 0, 0, layout_group) }
 }
 
-fn _keyboard_handle_repeat_info(any data, any keyboard, any rate, any delay) any {
+fn _keyboard_handle_repeat_info(ptr data, ptr keyboard, i32 rate, i32 delay) any {
    if !data { return 0 }
    store64_h(data, from_int(rate), _WG_REPEAT_RATE)
    store64_h(data, from_int(delay), _WG_REPEAT_DELAY)
@@ -2909,7 +2978,7 @@ fn _install_keyboard_listener(any state) bool {
    true
 }
 
-fn _seat_handle_capabilities(any data, any seat, any capabilities) any {
+fn _seat_handle_capabilities(ptr data, ptr seat, u32 capabilities) any {
    if !data { return 0 }
    def caps = from_int(capabilities)
    store64_h(data, caps, _WG_SEAT_CAPS)
@@ -2930,7 +2999,7 @@ fn _seat_handle_capabilities(any data, any seat, any capabilities) any {
    _ensure_seat_objects(data)
 }
 
-fn _seat_handle_name(any data, any seat, any name) any {
+fn _seat_handle_name(ptr data, ptr seat, ptr name) any {
    if !data { return 0 }
    def old = load64_h(data, _WG_SEAT_NAME)
    if old { free(old) }
@@ -2954,7 +3023,7 @@ fn _install_seat_listener(any state) bool {
    true
 }
 
-fn _xdg_wm_base_handle_ping(any data, any wm_base, any serial) any {
+fn _xdg_wm_base_handle_ping(ptr data, ptr wm_base, u32 serial) any {
    if !wm_base { return 0 }
    _wl_proxy_marshal_u(wm_base, XDG_WM_BASE_PONG, int(from_int(serial)))
 }
@@ -2987,7 +3056,8 @@ fn _bind_registry_iface_once(
    int ver_off=-1,
    int max_supported=1,
 ) bool {
-   if iface != want_iface || load64_h(data, slot_off) != 0 || !symbol { return false }
+   if !str._str_eq(iface, want_iface) ||
+   load64_h(data, slot_off) != 0 || !symbol { return false }
    def bind_ver = _bind_version(global_version, max_supported)
    def proxy = _wl_registry_bind(registry, global_name, symbol, bind_ver)
    if proxy {
@@ -2997,7 +3067,7 @@ fn _bind_registry_iface_once(
    true
 }
 
-fn _registry_handle_global(any data, any registry, any name, any iface_cstr, any version) any {
+fn _registry_handle_global(ptr data, ptr registry, u32 name, ptr iface_cstr, u32 version) any {
    if !data || !registry || !iface_cstr { return 0 }
    def iface = str.cstr_to_str(iface_cstr)
    def global_name = from_int(name)
@@ -3034,7 +3104,7 @@ fn _registry_handle_global(any data, any registry, any name, any iface_cstr, any
       _ensure_seat_objects(data)
       return 0
    }
-   if iface == "wl_output" {
+   if str._str_eq(iface, "wl_output") {
       def sym = _interface_symbol("wl_output_interface")
       if !sym || global_version < 2 { return 0 }
       def bind_ver = _bind_version(global_version, 4)
@@ -3051,7 +3121,7 @@ fn _registry_handle_global(any data, any registry, any name, any iface_cstr, any
       }
       return 0
    }
-   if iface == "xdg_wm_base" && load64_h(data, _WG_WM_BASE) == 0 {
+   if str._str_eq(iface, "xdg_wm_base") && load64_h(data, _WG_WM_BASE) == 0 {
       _init_xdg_interfaces()
       if _bind_registry_iface_once(
          data, registry, iface, "xdg_wm_base",
@@ -3060,7 +3130,7 @@ fn _registry_handle_global(any data, any registry, any name, any iface_cstr, any
       ){ _install_wm_base_listener(data) }
       return 0
    }
-   if iface == "zwp_relative_pointer_manager_v1" && load64_h(data, _WG_RELATIVE_POINTER_MANAGER) == 0 {
+   if str._str_eq(iface, "zwp_relative_pointer_manager_v1") && load64_h(data, _WG_RELATIVE_POINTER_MANAGER) == 0 {
       _init_unstable_interfaces()
       _bind_registry_iface_once(
          data, registry, iface, "zwp_relative_pointer_manager_v1",
@@ -3069,7 +3139,7 @@ fn _registry_handle_global(any data, any registry, any name, any iface_cstr, any
       )
       return 0
    }
-   if iface == "zwp_pointer_constraints_v1" && load64_h(data, _WG_POINTER_CONSTRAINTS) == 0 {
+   if str._str_eq(iface, "zwp_pointer_constraints_v1") && load64_h(data, _WG_POINTER_CONSTRAINTS) == 0 {
       _init_unstable_interfaces()
       _bind_registry_iface_once(
          data, registry, iface, "zwp_pointer_constraints_v1",
@@ -3078,7 +3148,7 @@ fn _registry_handle_global(any data, any registry, any name, any iface_cstr, any
       )
       return 0
    }
-   if iface == "zxdg_decoration_manager_v1" && load64_h(data, _WG_DECORATION_MANAGER) == 0 {
+   if str._str_eq(iface, "zxdg_decoration_manager_v1") && load64_h(data, _WG_DECORATION_MANAGER) == 0 {
       _init_unstable_interfaces()
       _bind_registry_iface_once(
          data, registry, iface, "zxdg_decoration_manager_v1",
@@ -3087,7 +3157,7 @@ fn _registry_handle_global(any data, any registry, any name, any iface_cstr, any
       )
       return 0
    }
-   if iface == "zwp_text_input_manager_v3" && load64_h(data, _WG_TEXT_INPUT_MANAGER) == 0 {
+   if str._str_eq(iface, "zwp_text_input_manager_v3") && load64_h(data, _WG_TEXT_INPUT_MANAGER) == 0 {
       _init_unstable_interfaces()
       _bind_registry_iface_once(
          data, registry, iface, "zwp_text_input_manager_v3",
@@ -3096,7 +3166,7 @@ fn _registry_handle_global(any data, any registry, any name, any iface_cstr, any
       )
       return 0
    }
-   if iface == "wp_viewporter" && load64_h(data, _WG_VIEWPORTER) == 0 {
+   if str._str_eq(iface, "wp_viewporter") && load64_h(data, _WG_VIEWPORTER) == 0 {
       _init_unstable_interfaces()
       _bind_registry_iface_once(
          data, registry, iface, "wp_viewporter",
@@ -3105,7 +3175,7 @@ fn _registry_handle_global(any data, any registry, any name, any iface_cstr, any
       )
       return 0
    }
-   if iface == "wp_fractional_scale_manager_v1" && load64_h(data, _WG_FRACTIONAL_SCALE_MANAGER) == 0 {
+   if str._str_eq(iface, "wp_fractional_scale_manager_v1") && load64_h(data, _WG_FRACTIONAL_SCALE_MANAGER) == 0 {
       _init_unstable_interfaces()
       _bind_registry_iface_once(
          data, registry, iface, "wp_fractional_scale_manager_v1",
@@ -3116,7 +3186,7 @@ fn _registry_handle_global(any data, any registry, any name, any iface_cstr, any
    }
 }
 
-fn _registry_handle_global_remove(any data, any registry, any name) any {
+fn _registry_handle_global_remove(ptr data, ptr registry, u32 name) any {
    if !data { return 0 }
    def index = _find_output_index_by_global_name(data, from_int(name))
    if index >= 0 { _remove_output_state(data, index) }
@@ -3482,8 +3552,10 @@ fn set_input_mode(any win, int mode, int value) dict {
       def surface = win.get("handle", 0)
       def pointer = globals.get("pointer", 0)
       if value == CURSOR_CAPTURED {
+         if _wl_destroy_proxy_slot(next_win, "locked_pointer", "lock_listener", "lock_data") { next_win = next_win.set("locked_pointer", 0) }
+         if _wl_destroy_proxy_slot(next_win, "relative_pointer", "rel_listener", "rel_data") { next_win = next_win.set("relative_pointer", 0) }
          def constraints = globals.get("pointer_constraints", 0)
-         if constraints && pointer {
+         if constraints && pointer && !next_win.get("confined_pointer", 0) {
             _init_unstable_interfaces()
             def conf_listener = zalloc(16)
             store64_h(conf_listener, _confined_pointer_handle_confined, 0)
@@ -3494,7 +3566,7 @@ fn set_input_mode(any win, int mode, int value) dict {
                2,
                _wp_confined_pointer_interface,
                1,
-               1,
+               0,
                0,
                surface,
                pointer,
@@ -3508,47 +3580,52 @@ fn set_input_mode(any win, int mode, int value) dict {
             }
          }
       } elif value == CURSOR_DISABLED {
+         if _wl_destroy_proxy_slot(next_win, "confined_pointer", "conf_listener", "conf_data") { next_win = next_win.set("confined_pointer", 0) }
          def constraints = globals.get("pointer_constraints", 0)
          def rel_mgr = globals.get("relative_pointer_manager", 0)
          if constraints && rel_mgr && pointer {
             _init_unstable_interfaces()
-            def lock_listener = zalloc(16)
-            store64_h(lock_listener, _locked_pointer_handle_locked, 0)
-            store64_h(lock_listener, _locked_pointer_handle_unlocked, 8)
-            def lock_data = zalloc(8)
-            store64_h(lock_data, surface, 0)
-            def locked_ptr = wl_proxy_marshal_flags_lock_ptr(constraints,
-               1,
-               _wp_locked_pointer_interface,
-               1,
-               1,
-               0,
-               surface,
-               pointer,
-               0,
-               2)
-            if locked_ptr {
-               wl_proxy_add_listener(locked_ptr, lock_listener, lock_data)
-               next_win = next_win.set("locked_pointer", locked_ptr)
-               next_win = next_win.set("lock_listener", lock_listener)
-               next_win = next_win.set("lock_data", lock_data)
+            if !next_win.get("locked_pointer", 0) {
+               def lock_listener = zalloc(16)
+               store64_h(lock_listener, _locked_pointer_handle_locked, 0)
+               store64_h(lock_listener, _locked_pointer_handle_unlocked, 8)
+               def lock_data = zalloc(8)
+               store64_h(lock_data, surface, 0)
+               def locked_ptr = wl_proxy_marshal_flags_lock_ptr(constraints,
+                  1,
+                  _wp_locked_pointer_interface,
+                  1,
+                  0,
+                  0,
+                  surface,
+                  pointer,
+                  0,
+                  2)
+               if locked_ptr {
+                  wl_proxy_add_listener(locked_ptr, lock_listener, lock_data)
+                  next_win = next_win.set("locked_pointer", locked_ptr)
+                  next_win = next_win.set("lock_listener", lock_listener)
+                  next_win = next_win.set("lock_data", lock_data)
+               }
             }
-            def rel_listener = zalloc(8)
-            store64_h(rel_listener, _relative_pointer_handle_motion, 0)
-            def rel_data = zalloc(8)
-            store64_h(rel_data, surface, 0)
-            def relative_ptr = wl_proxy_marshal_flags_rel_ptr(rel_mgr,
-               1,
-               _wp_relative_pointer_interface,
-               1,
-               1,
-               0,
-               pointer)
-            if relative_ptr {
-               wl_proxy_add_listener(relative_ptr, rel_listener, rel_data)
-               next_win = next_win.set("relative_pointer", relative_ptr)
-               next_win = next_win.set("rel_listener", rel_listener)
-               next_win = next_win.set("rel_data", rel_data)
+            if !next_win.get("relative_pointer", 0) {
+               def rel_listener = zalloc(8)
+               store64_h(rel_listener, _relative_pointer_handle_motion, 0)
+               def rel_data = zalloc(8)
+               store64_h(rel_data, surface, 0)
+               def relative_ptr = wl_proxy_marshal_flags_rel_ptr(rel_mgr,
+                  1,
+                  _wp_relative_pointer_interface,
+                  1,
+                  0,
+                  0,
+                  pointer)
+               if relative_ptr {
+                  wl_proxy_add_listener(relative_ptr, rel_listener, rel_data)
+                  next_win = next_win.set("relative_pointer", relative_ptr)
+                  next_win = next_win.set("rel_listener", rel_listener)
+                  next_win = next_win.set("rel_data", rel_data)
+               }
             }
          }
          def state = globals.get("listener_state", 0)
@@ -3595,9 +3672,9 @@ fn wl_proxy_marshal_flags_full_set_cursor(any pointer, int serial, any surface, 
    )
 }
 
-fn _text_input_handle_commit(any data, any text_input, any text) any {
+fn _text_input_handle_commit(ptr data, ptr text_input, ptr text) any {
    if !data || !text { return 0 }
-   def win = _windows.get(data, 0)
+   def win = _windows.get(int(data), 0)
    if !win || !is_dict(win) { return 0 }
    mut i = 0
    while true {
@@ -3629,28 +3706,28 @@ fn _text_input_handle_commit(any data, any text_input, any text) any {
    }
 }
 
-fn _text_input_handle_preedit(any data, any text_input, any text, any cursor_begin, any cursor_end) any {
+fn _text_input_handle_preedit(ptr data, ptr text_input, ptr text, i32 cursor_begin, i32 cursor_end) any {
 }
 
-fn _text_input_handle_delete_surrounding(any data, any text_input, any before_length, any after_length) any {
+fn _text_input_handle_delete_surrounding(ptr data, ptr text_input, u32 before_length, u32 after_length) any {
 }
 
-fn _text_input_handle_done(any data, any text_input, any serial) any {
+fn _text_input_handle_done(ptr data, ptr text_input, u32 serial) any {
 }
 
-fn _text_input_handle_enter(any data, any text_input, any surface) any {
+fn _text_input_handle_enter(ptr data, ptr text_input, ptr surface) any {
 }
 
-fn _text_input_handle_leave(any data, any text_input, any surface) any {
+fn _text_input_handle_leave(ptr data, ptr text_input, ptr surface) any {
 }
 
-fn _fractional_scale_handle_preferred_scale(any data, any fs_obj, any scale_120) any {
+fn _fractional_scale_handle_preferred_scale(ptr data, ptr fs_obj, u32 scale_120) any {
    if !data { return 0 }
-   mut win = _windows.get(data, 0)
+   mut win = _windows.get(int(data), 0)
    if !win || !is_dict(win) { return 0 }
    def scale = float(from_int(scale_120)) / 120.0
    win = win.set("content_scale", scale)
-   _windows = _windows.set(data, win)
+   _windows = dict_set(_windows, int(data), win)
 }
 
 fn _create_text_input(any state, any seat) any {
@@ -3765,6 +3842,14 @@ fn get_wayland_monitor(any mon) any {
    }
    assert(get_size(win) == [12, 9] && get_cursor_pos(win) == [3.0, 4.0], "wayland cached geometry")
    assert(get_key_state(win, KEY_A) == 1 && get_mouse_button_state(win, 0) == 1, "wayland cached input")
+   def event_win = {"handle": 12345}
+   _push_event(event_win, EVENT_KEY_PRESSED, {"key": KEY_A})
+   _push_event({"handle": 54321}, EVENT_KEY_RELEASED, {"key": KEY_A})
+   def event_result = poll_window_events(event_win)
+   def events = event_result.get(1, [])
+   assert(events.len == 1 && ui_event.event_type(events.get(0)) == EVENT_KEY_PRESSED, "wayland dispatches events to their window")
+   def other_result = poll_window_events({"handle": 54321})
+   assert(other_result.get(1, []).len == 1, "wayland preserves events for other windows")
    assert(get_window_attrib(win, FOCUSED) == 1, "wayland focused attrib")
    assert(get_window_content_scale(win) == [1.5, 1.5] && get_window_opacity(win) == 1.0, "wayland window scale")
    assert(get_window_frame_size(win) == [0, 0, 0, 0] && request_window_attention(win), "wayland frame fallback")
@@ -3793,5 +3878,26 @@ fn get_wayland_monitor(any mon) any {
    assert(get_monitor_name(monitor) == "probe-output" && get_video_mode(monitor).get("w", 0) == 800 && get_video_modes(monitor).len == 1, "wayland monitor mode")
    assert(get_wayland_monitor(monitor) == 123 && !get_gamma_ramp(monitor) && !set_gamma_ramp(monitor, 0), "wayland monitor handles")
    assert(create_surface(0, {"globals": {"handle": 0}, "handle": 0}, 0, 0) == -1, "wayland surface fallback")
+   def test_surface = 0x7fff1234
+   def stale_size = {"handle": test_surface, "w": 1280, "h": 720}
+   def configured_size = stale_size.set("w", 579).set("h", 1056)
+   def saved_windows = _windows
+   def saved_events = _pending_events
+   def resize_state = zalloc(_WRS_SIZE)
+   assert(resize_state, "Wayland configure state allocation")
+   store64_h(resize_state, test_surface, _WRS_HANDLE)
+   store64_h(resize_state, 579, _WRS_WIDTH)
+   store64_h(resize_state, 1056, _WRS_HEIGHT)
+   store64_h(resize_state, 2, _WRS_CONFIGURE)
+   def staged_size = {"handle": test_surface, "w": 1280, "h": 720, "resize_state": resize_state}
+   _windows = dict_set(dict(1), int(test_surface), configured_size)
+   assert(get_size(stale_size) == [579, 1056], "wayland size reflects latest configure")
+   _windows = dict_set(_windows, int(test_surface), staged_size)
+   def applied_size = _apply_shell_state(staged_size)
+   assert(applied_size.get("w", 0) == 579 && applied_size.get("h", 0) == 1056 &&
+      get_size(staged_size) == [579, 1056], "Wayland configure state updates live geometry")
+   free(resize_state)
+   _windows = saved_windows
+   _pending_events = saved_events
    print("✓ core.os.ui.window.platform.linux.wayland self-test passed")
 }

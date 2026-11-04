@@ -23,7 +23,7 @@ fn _text_debug_enabled() bool {
 
 @inline
 fn _match_at(str s, str sub, int at) bool {
-   def bound = sub.len
+   def int bound = sub.len
    mut j = 0
    while j < bound {
       if load8(s, at + j) != load8(sub, j) { return false }
@@ -33,18 +33,20 @@ fn _match_at(str s, str sub, int at) bool {
 }
 
 @inline
-fn _ascii_eq_fold(int a, int b) bool {
+fn _ascii_eq_fold(int a, int b) int {
    if a >= 65 && a <= 90 { a += 32 }
    if b >= 65 && b <= 90 { b += 32 }
-   a == b
+   if a == b { return 1 }
+   return 0
 }
 
 @inline
 fn _match_at_ascii_ci(str s, str sub, int at) bool {
-   if at < 0 || at + sub.len > s.len { return false }
+   def int sub_len = sub.len
+   if at < 0 || at + sub_len > s.len { return false }
    mut j = 0
-   while j < sub.len {
-      if !_ascii_eq_fold(load8(s, at + j), load8(sub, j)) { return false }
+   while j < sub_len {
+      if _ascii_eq_fold(load8(s, at + j), load8(sub, j)) == 0 { return false }
       j += 1
    }
    true
@@ -52,13 +54,15 @@ fn _match_at_ascii_ci(str s, str sub, int at) bool {
 
 fn len(any s) int {
    "Returns the number of bytes for strings, otherwise forwards to the value length."
+   if __is_nil(s) { return 0 }
    if __is_str_obj(s) { return __str_len(s) }
    return s.len
 }
 
 fn find(str s, str sub) int {
    "Returns the index of the first occurrence of `sub` in `s`, or -1."
-   mut int n, m = s.len, sub.len
+   def int n = s.len
+   def int m = sub.len
    if m == 0 { return 0 }
    if n < m { return -1 }
    mut int i = 0
@@ -71,7 +75,8 @@ fn find(str s, str sub) int {
 
 fn find_from(str s, str sub, int start) int {
    "Returns the index of the first occurrence of `sub` in `s` at/after `start`, or -1."
-   mut int n, m = s.len, sub.len
+   def int n = s.len
+   def int m = sub.len
    if m == 0 {
       if start < 0 { return 0 }
       if start > n { return n }
@@ -89,7 +94,8 @@ fn find_from(str s, str sub, int start) int {
 
 fn find_last(str s, str sub) int {
    "Returns the index of the last occurrence of `sub` in `s`, or -1."
-   mut int n, m = s.len, sub.len
+   def int n = s.len
+   def int m = sub.len
    if m == 0 { return n }
    if n < m { return -1 }
    mut int i = n - m
@@ -307,10 +313,14 @@ fn _substr(str s, int start, int stop) str {
       i += 1
    }
    store8(out, 0, len)
-   return out
+   return init_str(out, len)
 }
 
-fn _is_ws(int c) bool { c == 32 || c == 9 || c == 10 || c == 11 || c == 12 || c == 13 }
+@inline
+fn _str_is_space_byte(int c) int {
+   if c == 32 || c == 9 || c == 10 || c == 11 || c == 12 || c == 13 { return 1 }
+   return 0
+}
 
 fn strip(any s) str {
    "Returns `s` without leading/trailing ASCII whitespace."
@@ -318,9 +328,10 @@ fn strip(any s) str {
    mut n = s.len
    if n == 0 { return "" }
    mut start = 0
-   while start < n && _is_ws(load8(s, start)) { start += 1 }
+   while start < n && _str_is_space_byte(load8(s, start)) != 0 { start += 1 }
    mut end = n
-   while end > start && _is_ws(load8(s, end - 1)) { end -= 1 }
+   while end > start && _str_is_space_byte(load8(s, end - 1)) != 0 { end -= 1 }
+   if start == 0 && end == n { return s }
    return _substr(s, start, end)
 }
 
@@ -331,7 +342,7 @@ fn _split_impl(str s, str sep) list {
    mut int sep_len = sep.len
    if sep_len == 0 {
       def int chars = utf8_len(s)
-      mut out = list(chars)
+      mut list out = list(chars)
       mut ci = 0
       while ci < chars {
          out = _list_push_reserved(out, chr(ord_at(s, ci)))
@@ -350,7 +361,7 @@ fn _split_impl(str s, str sep) list {
          scan += 1
       }
    }
-   mut out = list(parts)
+   mut list out = list(parts)
    mut int i = 0
    mut int start = 0
    while i <= n - sep_len {
@@ -374,54 +385,63 @@ fn split(any s, any sep) list {
 }
 
 @returns_owned
-fn split_words(any s) list {
-   "Splits string `s` into words, automatically trimming and ignoring empty segments."
-   if !is_str(s) { return list(0) }
-   def int n = s.len
+fn _split_words_text(str text) list {
+   def int n = text.len
    mut int start = 0
-   while start < n && _is_ws(load8(s, start)) { start += 1 }
+   while start < n && _str_is_space_byte(load8(text, start)) { start += 1 }
    mut int end = n
-   while end > start && _is_ws(load8(s, end - 1)) { end -= 1 }
+   while end > start && _str_is_space_byte(load8(text, end - 1)) { end -= 1 }
    ;; Count nonempty tokens first so the result has its final capacity. Keep
    ;; the historical rule: literal spaces separate words; other whitespace is
    ;; trimmed only at the edges of each word.
    mut int count = 0
-   mut int scan = start
-   while scan < end {
-      while scan < end && load8(s, scan) == 32 { scan += 1 }
-      if scan < end {
-         def int token_start = scan
-         while scan < end && load8(s, scan) != 32 { scan += 1 }
-         mut int token_end = scan
-         while token_start < token_end && _is_ws(load8(s, token_start)) {
+   mut int position = start
+   while position < end {
+      while position < end && load8(text, position) == 32 { position += 1 }
+      if position < end {
+         def int token_start = position
+         while position < end && load8(text, position) != 32 { position += 1 }
+         mut int token_end = position
+         while token_start < token_end &&
+         _str_is_space_byte(load8(text, token_start)) != 0 {
             token_start += 1
          }
-         while token_end > token_start && _is_ws(load8(s, token_end - 1)) {
+         while token_end > token_start &&
+         _str_is_space_byte(load8(text, token_end - 1)) != 0 {
             token_end -= 1
          }
          if token_end > token_start { count += 1 }
       }
    }
-   mut out = list(count)
-   scan = start
-   while scan < end {
-      while scan < end && load8(s, scan) == 32 { scan += 1 }
-      if scan < end {
-         def int token_start = scan
-         while scan < end && load8(s, scan) != 32 { scan += 1 }
-         mut int token_end = scan
-         while token_start < token_end && _is_ws(load8(s, token_start)) {
+   mut list out = list(count)
+   position = start
+   while position < end {
+      while position < end && load8(text, position) == 32 { position += 1 }
+      if position < end {
+         def int token_start = position
+         while position < end && load8(text, position) != 32 { position += 1 }
+         mut int token_end = position
+         while token_start < token_end &&
+         _str_is_space_byte(load8(text, token_start)) != 0 {
             token_start += 1
          }
-         while token_end > token_start && _is_ws(load8(s, token_end - 1)) {
+         while token_end > token_start &&
+         _str_is_space_byte(load8(text, token_end - 1)) != 0 {
             token_end -= 1
          }
          if token_end > token_start {
-            out = _list_push_reserved(out, _substr(s, token_start, token_end))
+            out = _list_push_reserved(out, _substr(text, token_start, token_end))
          }
       }
    }
    out
+}
+
+@returns_owned
+fn split_words(any s) list {
+   "Splits string `s` into words, automatically trimming and ignoring empty segments."
+   if !is_str(s) { return list(0) }
+   _split_words_text(to_str(s))
 }
 
 @returns_owned
@@ -435,61 +455,45 @@ fn str_add(any a, any b) str {
    "Concatenates two strings."
    if !is_str(a) { return is_str(b) ? _substr(b, 0, b.len) : to_str(b) }
    if !is_str(b) { return _substr(a, 0, a.len) }
-   def n1, n2 = a.len, b.len
-   def total = n1 + n2
-   mut out = malloc(total + 1)
-   if !out { return "" }
-   init_str(out, total)
-   mut i = 0
-   while i < n1 {
-      store8(out, load8(a, i), i)
-      i += 1
-   }
-   mut j = 0
-   while j < n2 {
-      store8(out, load8(b, j), n1 + j)
-      j += 1
-   }
-   store8(out, 0, total)
-   return out
+   def str left = to_str(a)
+   def str right = to_str(b)
+   left + right
 }
 
 @returns_owned
 fn upper(any s) any {
    "Converts string `s` to uppercase."
-   if !is_str(s) { return s }
    mut int n = s.len
-   mut out = malloc(n + 1)
-   if !out { return "" }
-   init_str(out, n)
+   mut out_buf = Builder(n)
+   if !out_buf { return "" }
    mut i = 0
    while i < n {
       mut c = load8(s, i)
       if c >= 97 && c <= 122 { c = c - 32 }
-      store8(out, c, i)
+      out_buf = builder_append_byte(out_buf, c)
       i += 1
    }
-   store8(out, 0, n)
-   return __cstr_to_str(out)
+   def result = builder_to_str(out_buf)
+   builder_free(out_buf)
+   result
 }
 
 @returns_owned
 fn lower(any s) any {
    "Converts string `s` to lowercase."
-   if !is_str(s) { return s }
    mut int n = s.len
-   mut out = malloc(n + 1)
-   if !out { return "" }
-   init_str(out, n)
+   mut out_buf = Builder(n)
+   if !out_buf { return "" }
    mut i = 0
    while i < n {
       mut c = load8(s, i)
       if c >= 65 && c <= 90 { c = c + 32 }
-      store8(out, c, i)
+      out_buf = builder_append_byte(out_buf, c)
       i += 1
    }
-   store8(out, 0, n)
-   return __cstr_to_str(out)
+   def result = builder_to_str(out_buf)
+   builder_free(out_buf)
+   result
 }
 
 fn endswith(any s, any suffix) bool {
@@ -508,22 +512,22 @@ fn str_contains(any s, any sub) bool {
    ;; Keep this loop on the dynamic string ABI. Passing an exception payload
    ;; through the typed find(str, str) boundary can reinterpret a tagged
    ;; string as a raw pointer after a callback-heavy caller.
-   def n = s.len
-   def m = sub.len
+   def int n = __str_len(s)
+   def int m = __str_len(sub)
    if m == 0 { return true }
    if n < m { return false }
    mut int i = 0
    while i + m <= n {
       mut int j = 0
-      mut bool same = true
+      mut int same = 1
       while j < m {
          if load8(s, i + j) != load8(sub, j) {
-            same = false
+            same = 0
             break
          }
          j += 1
       }
-      if same { return true }
+      if same != 0 { return true }
       i += 1
    }
    false
@@ -571,7 +575,7 @@ fn join(list items, str sep="") str {
       i += 1
    }
    store8(out, 0, total)
-   out
+   init_str(out, total)
 }
 
 fn join_words(list items, str sep=" ", int start=0) str {
@@ -633,7 +637,7 @@ fn str_replace(any s, any old, any new) str {
       dst += 1
    }
    store8(out, 0, total)
-   out
+   init_str(out, total)
 }
 
 @returns_owned
@@ -648,7 +652,7 @@ fn to_hex(int n, int width=0) str {
       mut k = 0 while k < width - 1 { store8(out, 48, k) k += 1 }
       store8(out, 48, width - 1)
       store8(out, 0, width)
-      return out
+      return init_str(out, width)
    }
    mut val = n
    mut nib = 0
@@ -672,7 +676,7 @@ fn to_hex(int n, int width=0) str {
       i -= 1
    }
    store8(out, 0, w)
-   return out
+   return init_str(out, w)
 }
 
 @returns_owned
@@ -732,23 +736,16 @@ fn chr(int code) str {
    out
 }
 
+extern fn __cstr_concat(str a, str b) str as "rt_cstr_concat"
+extern fn __str_repeat(str s, int n) str as "rt_str_repeat_raw"
+
 @returns_owned
 fn repeat(str s, int n) str {
    "Returns string `s` repeated `n` times."
-   if !is_str(s) || n < 0 { return "" }
-   if n == 0 { return "" }
-   def slen = s.len
-   def total_len = slen * n
-   mut out = malloc(total_len + 1)
-   if !out { return "" }
-   init_str(out, total_len)
-   mut i = 0
-   while i < n {
-      memcpy(out + i * slen, s, slen)
-      i += 1
-   }
-   store8(out, 0, total_len)
-   return out
+   if n <= 0 || s.len == 0 { return "" }
+   ;; Keep the byte-length product within Ny's signed tagged-int range.
+   if n > 4611686018427387903 / s.len { return "" }
+   __str_repeat(s, n)
 }
 
 fn _is_utf8_cont(int c) bool {
@@ -934,7 +931,7 @@ fn ascii_is_alnum(int c) bool {
 @inline
 fn ascii_is_space(int c) bool {
    "Returns true for ASCII whitespace bytes."
-   _is_ws(c)
+   _str_is_space_byte(c) != 0
 }
 
 @inline
@@ -1081,7 +1078,7 @@ impl str {
    fn endswith(self s, str suffix) bool { endswith(s, suffix) }
    @inline
    fn strip(self s) str { strip(s) }
-   @inline
+   @returns_owned
    fn split(self s, str sep) list { _split_impl(s, sep) }
    @inline
    fn split_words(self s) list { split_words(s) }
@@ -1240,10 +1237,16 @@ fn _utf8_slice(str s, int start, int stop, int step=1) str {
       }
       mut int i = start
       while i < stop {
-         def width = _utf8_seq_len(s, byte_index, byte_len)
-         def code = width < 1 ? load8(s, byte_index) :
-         _utf8_decode_at(s, byte_index, width)
-         b = builder_append(b, chr(code))
+         def int width = _utf8_seq_len(s, byte_index, byte_len)
+         if width < 1 {
+            b = builder_append(b, chr(load8(s, byte_index)))
+         } else {
+            mut int byte_offset = 0
+            while byte_offset < width {
+               b = builder_append_byte(b, load8(s, byte_index + byte_offset))
+               byte_offset += 1
+            }
+         }
          mut int skipped = 0
          while skipped < step && byte_index < byte_len {
             def next_width = _utf8_seq_len(s, byte_index, byte_len)
@@ -1256,7 +1259,25 @@ fn _utf8_slice(str s, int start, int stop, int step=1) str {
    } else {
       mut int i = start
       while i > stop {
-         b = builder_append(b, chr(ord_at(s, i)))
+         def int byte_len = s.len
+         mut int byte_index = 0
+         mut int code_index = 0
+         while byte_index < byte_len && code_index < i {
+            def int width = _utf8_seq_len(s, byte_index, byte_len)
+            if width < 1 { byte_index += 1 }
+            else { byte_index += width }
+            code_index += 1
+         }
+         def int width = _utf8_seq_len(s, byte_index, byte_len)
+         if width < 1 {
+            b = builder_append(b, chr(load8(s, byte_index)))
+         } else {
+            mut int byte_offset = 0
+            while byte_offset < width {
+               b = builder_append_byte(b, load8(s, byte_index + byte_offset))
+               byte_offset += 1
+            }
+         }
          i += step
       }
    }

@@ -6,7 +6,7 @@
 #include "base/common.h"
 #include "base/loader.h"
 #include "base/util.h"
-#include "code/lang/runtime/runtime.h"
+#include "code/backend/runtime/runtime.h"
 #ifdef _WIN32
 #include <process.h>
 #include <windows.h>
@@ -240,8 +240,27 @@ static LLVMMCJITMemoryManagerRef ny_apple_arm64_jit_memory_manager(void) {
 }
 #endif
 
+static void ny_jit_prepare_sections(LLVMModuleRef mod) {
+  if (!mod)
+    return;
+  /*
+   * Origin sections are for inspecting emitted artifacts. LLVM treats an
+   * explicitly sectioned local function as small-model addressable, even
+   * with the large JIT code model, and can truncate its address in a store.
+   * JIT allocations have no such placement guarantee.
+   */
+  for (LLVMValueRef fn = LLVMGetFirstFunction(mod); fn;
+       fn = LLVMGetNextFunction(fn)) {
+    const char *section = LLVMGetSection(fn);
+    if (section && (strcmp(section, "ny.user.text") == 0 ||
+                    strcmp(section, "ny.std.text") == 0))
+      LLVMSetSection(fn, "");
+  }
+}
+
 void ny_jit_init_options(struct LLVMMCJITCompilerOptions *options,
                          LLVMModuleRef mod) {
+  ny_jit_prepare_sections(mod);
   LLVMInitializeMCJITCompilerOptions(options, sizeof(*options));
   bool apple_arm64 = ny_module_target_is_apple_arm64(mod);
 
@@ -877,7 +896,7 @@ void ny_jit_add_runtime_symbols(void) {
     (void)(doc);                                                               \
     LLVMAddSymbol(name, (void *)&p);                                           \
   } while (0);
-#include "code/lang/runtime/defs.h"
+#include "code/backend/runtime/defs.h"
 #undef RT_DEF
 #undef RT_GV
   /*
@@ -1035,11 +1054,14 @@ void ny_jit_add_runtime_symbols(void) {
   LLVMAddSymbol("rt_zalloc_raw", (void *)(uintptr_t)rt_zalloc_raw);
   LLVMAddSymbol("rt_malloc_i64", (void *)(uintptr_t)rt_malloc_i64);
   LLVMAddSymbol("rt_malloc_raw_i64", (void *)(uintptr_t)rt_malloc_raw_i64);
+  LLVMAddSymbol("rt_calloc_raw_i64", (void *)(uintptr_t)rt_calloc_raw_i64);
   LLVMAddSymbol("rt_zfree_raw", (void *)(uintptr_t)rt_zfree_raw);
   LLVMAddSymbol("rt_list_new_raw", (void *)(uintptr_t)rt_list_new_raw);
   LLVMAddSymbol("rt_list_new_sized", (void *)(uintptr_t)rt_list_new_sized);
   LLVMAddSymbol("rt_list_new_sized_uninit",
                 (void *)(uintptr_t)rt_list_new_sized_uninit);
+  LLVMAddSymbol("rt_list_new_i64_range",
+                (void *)(uintptr_t)rt_list_new_i64_range);
   LLVMAddSymbol("rt_simmd_popcnt64_i64",
                 (void *)(uintptr_t)rt_simmd_popcnt64_i64);
   LLVMAddSymbol("rt_simmd_ctz64_i64", (void *)(uintptr_t)rt_simmd_ctz64_i64);
@@ -1084,6 +1106,7 @@ void ny_jit_add_runtime_symbols(void) {
   LLVMAddSymbol("rt_bshr_raw", (void *)(uintptr_t)rt_bshr_raw);
   LLVMAddSymbol("rt_cstr_repeat", (void *)(uintptr_t)rt_cstr_repeat);
   LLVMAddSymbol("rt_cstr_slice", (void *)(uintptr_t)rt_cstr_slice);
+  LLVMAddSymbol("rt_cstr_reverse", (void *)(uintptr_t)rt_cstr_reverse);
   LLVMAddSymbol("rt_load8_raw", (void *)(uintptr_t)rt_load8_raw);
   LLVMAddSymbol("rt_store8_raw", (void *)(uintptr_t)rt_store8_raw);
   LLVMAddSymbol("rt_cstr_len", (void *)(uintptr_t)rt_cstr_len);
@@ -1111,6 +1134,10 @@ void ny_jit_add_runtime_symbols(void) {
   LLVMAddSymbol("rt_value_get_tagged", (void *)(uintptr_t)rt_value_get_tagged);
   LLVMAddSymbol("rt_value_get_index_raw",
                 (void *)(uintptr_t)rt_value_get_index_raw);
+  LLVMAddSymbol("rt_value_index_read_raw",
+                (void *)(uintptr_t)rt_value_index_read_raw);
+  LLVMAddSymbol("rt_value_index_read_tagged",
+                (void *)(uintptr_t)rt_value_index_read_tagged);
   LLVMAddSymbol("rt_load_item_any", (void *)(uintptr_t)rt_load_item_any);
   LLVMAddSymbol("rt_any_eq", (void *)(uintptr_t)rt_any_eq);
   LLVMAddSymbol("rt_dict_new_raw", (void *)(uintptr_t)rt_dict_new_raw);
@@ -1183,6 +1210,11 @@ void ny_jit_add_runtime_symbols(void) {
 #endif
 }
 
+static int64_t ny_jit_core_bytes_get(int64_t buffer, int64_t index,
+                                     int64_t fallback) {
+  return index < 0 ? fallback : rt_bytes_get_raw(buffer, index, fallback);
+}
+
 static void ny_jit_define_runtime_trampoline(LLVMModuleRef mod,
                                              const char *name, void *ptr) {
   if (!mod || !name || !*name || !ptr)
@@ -1246,6 +1278,12 @@ static void ny_jit_define_runtime_trampoline(LLVMModuleRef mod,
 }
 
 void ny_jit_define_runtime_trampolines(LLVMModuleRef mod) {
+  if (!mod)
+    return;
+  LLVMValueRef bytes_get = LLVMGetNamedFunction(mod, "ny_fn_core.bytes_get");
+  if (bytes_get && LLVMIsDeclaration(bytes_get))
+    ny_jit_define_runtime_trampoline(mod, "ny_fn_core.bytes_get",
+                                     (void *)(uintptr_t)ny_jit_core_bytes_get);
 #define RT_DEF(name, p, args, sig, doc)                                        \
   do {                                                                         \
     (void)(args);                                                              \
@@ -1261,7 +1299,7 @@ void ny_jit_define_runtime_trampolines(LLVMModuleRef mod) {
     (void)(p);                                                                 \
     (void)(doc);                                                               \
   } while (0);
-#include "code/lang/runtime/defs.h"
+#include "code/backend/runtime/defs.h"
 #undef RT_DEF
 #undef RT_GV
   /*
@@ -1459,6 +1497,11 @@ void ny_jit_define_runtime_trampolines(LLVMModuleRef mod) {
                                    (void *)(uintptr_t)rt_value_get_tagged);
   ny_jit_define_runtime_trampoline(mod, "rt_value_get_index_raw",
                                    (void *)(uintptr_t)rt_value_get_index_raw);
+  ny_jit_define_runtime_trampoline(mod, "rt_value_index_read_raw",
+                                   (void *)(uintptr_t)rt_value_index_read_raw);
+  ny_jit_define_runtime_trampoline(
+      mod, "rt_value_index_read_tagged",
+      (void *)(uintptr_t)rt_value_index_read_tagged);
   ny_jit_define_runtime_trampoline(mod, "rt_load_item_any",
                                    (void *)(uintptr_t)rt_load_item_any);
   ny_jit_define_runtime_trampoline(mod, "rt_any_eq",
@@ -1475,6 +1518,8 @@ void ny_jit_define_runtime_trampolines(LLVMModuleRef mod) {
                                    (void *)(uintptr_t)rt_list_new_sized);
   ny_jit_define_runtime_trampoline(mod, "rt_list_new_sized_uninit",
                                    (void *)(uintptr_t)rt_list_new_sized_uninit);
+  ny_jit_define_runtime_trampoline(mod, "rt_list_new_i64_range",
+                                   (void *)(uintptr_t)rt_list_new_i64_range);
   ny_jit_define_runtime_trampoline(mod, "rt_simmd_popcnt64_i64",
                                    (void *)(uintptr_t)rt_simmd_popcnt64_i64);
   ny_jit_define_runtime_trampoline(mod, "rt_simmd_ctz64_i64",
@@ -1725,6 +1770,8 @@ void ny_jit_define_runtime_trampolines(LLVMModuleRef mod) {
                                    (void *)(uintptr_t)rt_cstr_repeat);
   ny_jit_define_runtime_trampoline(mod, "rt_cstr_slice",
                                    (void *)(uintptr_t)rt_cstr_slice);
+  ny_jit_define_runtime_trampoline(mod, "rt_cstr_reverse",
+                                   (void *)(uintptr_t)rt_cstr_reverse);
   ny_jit_define_runtime_trampoline(mod, "rt_any_to_cstr",
                                    (void *)(uintptr_t)rt_any_to_cstr);
   ny_jit_define_runtime_trampoline(mod, "rt_i64_to_cstr_raw",
@@ -1888,7 +1935,7 @@ void register_jit_symbols(LLVMExecutionEngineRef ee, LLVMModuleRef mod,
       MAP_FULL(#p, p, args);                                                   \
   } while (0);
 #define RT_GV(name, p, t, doc) MAP_GV(name, &p);
-#include "code/lang/runtime/defs.h"
+#include "code/backend/runtime/defs.h"
 #undef RT_DEF
 #undef RT_GV
   MAP_FULL("rt_simmd_byte_class_reduce_raw", rt_simmd_byte_class_reduce_raw, 7);
@@ -2363,6 +2410,7 @@ bool ny_orc_jit_execute(codegen_t *cg, LLVMModuleRef module,
                         LLVMContextRef context, uint64_t *script_addr,
                         uint64_t *main_addr, void **out_rt,
                         bool *module_consumed, char **error_message) {
+  ny_jit_prepare_sections(module);
   if (script_addr)
     *script_addr = 0;
   if (main_addr)

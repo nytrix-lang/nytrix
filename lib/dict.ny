@@ -234,15 +234,15 @@ fn dict_get(dict d, any key, any default=0) any {
    _dict_native_get(d, key, default)
 }
 
-@inline
+@noinline
 fn dict_exists(dict d, any key) bool {
    "Returns **true** if `key` exists in dictionary `d`."
    if !is_dict(d) { return false }
-   if _is_native_dict(d) { return _dict_native_has(d, key) }
-   def t = __load64_idx(d, 16)
-   def off = _dict_find_off_raw(t, __load64_idx(d, 8), key)
-   if off < 0 || __load64_idx(t, off + 16) != 1 { return false }
-   true
+   ;; The runtime bridge normalizes tagged integers and strings for both
+   ;; managed and native dictionary layouts. Keep membership on that shared
+   ;; path so an `any` key does not get compared as an untagged table word.
+   if _dict_native_has(d, key) { return true }
+   return false
 }
 
 @inline

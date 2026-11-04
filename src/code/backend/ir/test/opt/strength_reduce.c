@@ -41,22 +41,8 @@ static void build_scaled_add(nyr_func_t *f, bool extra_scaled_use,
   int plus = nyr_opt_binop(f, NYIR_ADD_I64, x, one);
   int shift_one = nyr_opt_const(f, 1);
   int scaled = nyr_opt_binop(f, NYIR_SHL_I64, plus, shift_one);
-  int scaled_copy = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_COPY,
-                                                .dst = -1,
-                                                .a = scaled,
-                                                .b = -1,
-                                                .c = -1,
-                                                .d = -1,
-                                                .e = -1,
-                                                .f = -1});
-  int x_copy = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_COPY,
-                                           .dst = -1,
-                                           .a = x,
-                                           .b = -1,
-                                           .c = -1,
-                                           .d = -1,
-                                           .e = -1,
-                                           .f = -1});
+  int scaled_copy = nyr_opt_emit_abc(f, NYIR_COPY, scaled, -1, -1);
+  int x_copy = nyr_opt_emit_abc(f, NYIR_COPY, x, -1, -1);
   int result = nyr_opt_binop(f, NYIR_ADD_I64, scaled_copy, x_copy);
   if (extra_scaled_use)
     (void)nyr_opt_binop(f, NYIR_ADD_I64, scaled, one);
@@ -181,13 +167,13 @@ static bool test_signed_power_of_two_division_without_nonnegative_proof(void) {
     default:
       break;
     }
-  ok = ok && div_count == 1 && sar_count == 0 && and_count == 0 &&
-       add_count == 0;
+  ok = ok && div_count == 0 && sar_count == 2 && and_count == 1 &&
+       add_count == 1;
   for (size_t i = 0; ok && i < sizeof(inputs) / sizeof(inputs[0]); ++i)
     ok = before[i] == eval_input(&f, inputs[i]);
   if (!ok) {
-    fprintf(stderr, "[strength-reduce] signed power-of-two division without "
-                    "a nonnegative proof should remain unchanged\n");
+    fprintf(stderr, "[strength-reduce] signed power-of-two division rewrite "
+                    "must preserve truncation toward zero\n");
     nyr_dump(stderr, &f, "strength-reduce/signed-div");
   }
   nyr_ir_func_free(&f);
@@ -229,7 +215,7 @@ int main(void) {
       !test_signed_power_of_two_division_without_nonnegative_proof() ||
       !test_power_of_two_rewrite_preserves_dividend())
     return 1;
-  puts("[strength-reduce] wrapping reassociation, use checks, and conservative "
-       "signed division ok");
+  puts("[strength-reduce] wrapping reassociation, use checks, and signed "
+       "division semantics ok");
   return 0;
 }

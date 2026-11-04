@@ -810,8 +810,9 @@ void ny_llvm_apply_host_attrs(LLVMModuleRef module) {
   }
 }
 
-bool ny_llvm_emit_object(LLVMModuleRef module, const char *path,
-                         int opt_level) {
+static bool emit_file(LLVMModuleRef module, const char *path,
+                      LLVMCodeGenFileType kind, int opt_level,
+                      bool configure_layout) {
   if (!module || !path)
     return false;
   if (!ny_llvm_init_native())
@@ -869,20 +870,25 @@ bool ny_llvm_emit_object(LLVMModuleRef module, const char *path,
       LLVMDisposeMessage(host_features);
     return false;
   }
-  LLVMTargetDataRef td = LLVMCreateTargetDataLayout(tm);
-  char *layout = LLVMCopyStringRepOfTargetData(td);
-  if (layout) {
+  if (configure_layout) {
+    LLVMTargetDataRef td = LLVMCreateTargetDataLayout(tm);
+    char *layout = LLVMCopyStringRepOfTargetData(td);
+    if (layout) {
 
-    LLVMSetDataLayout(module, layout);
-    LLVMDisposeMessage(layout);
+      LLVMSetDataLayout(module, layout);
+      LLVMDisposeMessage(layout);
+    }
+    LLVMDisposeTargetData(td);
+    LLVMSetTarget(module, triple);
   }
-  LLVMDisposeTargetData(td);
-  LLVMSetTarget(module, triple);
   char *emit_err = NULL;
-  int res = LLVMTargetMachineEmitToFile(tm, module, (char *)path,
-                                        LLVMObjectFile, &emit_err);
+  int res =
+      LLVMTargetMachineEmitToFile(tm, module, (char *)path, kind, &emit_err);
   if (emit_err) {
-    NY_LOG_ERR("Object emission failed: %s\n", emit_err);
+    if (configure_layout)
+      NY_LOG_ERR("Object emission failed: %s\n", emit_err);
+    else
+      NY_LOG_ERR("Emission failed: %s\n", emit_err);
     LLVMDisposeMessage(emit_err);
   }
   if (env_triple && env_triple[0]) {
@@ -900,85 +906,14 @@ bool ny_llvm_emit_object(LLVMModuleRef module, const char *path,
   return res == 0;
 }
 
+bool ny_llvm_emit_object(LLVMModuleRef module, const char *path,
+                         int opt_level) {
+  return emit_file(module, path, LLVMObjectFile, opt_level, true);
+}
+
 bool ny_llvm_emit_file(LLVMModuleRef module, const char *path,
                        LLVMCodeGenFileType kind, int opt_level) {
-  if (!module || !path)
-    return false;
-  if (!ny_llvm_init_native())
-    return false;
-  char *raw_triple = NULL;
-  const char *env_triple = getenv("NYTRIX_HOST_TRIPLE");
-  if (env_triple && *env_triple)
-    raw_triple = ny_strdup(env_triple);
-  if (!raw_triple)
-    raw_triple = LLVMGetDefaultTargetTriple();
-  if (!raw_triple)
-    return false;
-  bool triple_needs_free = false;
-  char *triple = normalize_triple(raw_triple, &triple_needs_free);
-  LLVMTargetRef target;
-  char *err = NULL;
-  if (LLVMGetTargetFromTriple(triple, &target, &err)) {
-    NY_LOG_ERR("Invalid target triple: %s\n", err);
-    LLVMDisposeMessage(err);
-    if (triple_needs_free)
-      free(triple);
-    else
-      LLVMDisposeMessage(raw_triple);
-    return false;
-  }
-  char cpu_buf[128] = {0};
-  char feat_buf[256] = {0};
-  derive_host_target(triple, cpu_buf, sizeof(cpu_buf), feat_buf,
-                     sizeof(feat_buf));
-  char *host_features = NULL;
-  const char *cpu = cpu_buf[0] ? cpu_buf : "";
-  const char *features = feat_buf;
-  bool arm32 = triple && strstr(triple, "arm") && !strstr(triple, "aarch64") &&
-               !strstr(triple, "arm64");
-  if (!feat_buf[0] && !arm32 && target_matches_host_arch(triple)) {
-    host_features = LLVMGetHostCPUFeatures();
-    if (host_features)
-      features = host_features;
-  } else if (!feat_buf[0] && arm32) {
-    features = "";
-  }
-  apply_target_attrs(module, cpu, features);
-  LLVMCodeGenOptLevel cgo = ny_llvm_effective_codegen_level(opt_level);
-  LLVMTargetMachineRef tm =
-      LLVMCreateTargetMachine(target, triple, cpu, features ? features : "",
-                              cgo, LLVMRelocPIC, host_code_model());
-  ny_llvm_configure_emit_target_machine(tm, cgo);
-  if (!tm) {
-    NY_LOG_ERR("%s", "Failed to create target machine\n");
-    if (triple_needs_free)
-      free(triple);
-    else
-      LLVMDisposeMessage(raw_triple);
-    if (host_features)
-      LLVMDisposeMessage(host_features);
-    return false;
-  }
-  char *emit_err = NULL;
-  int res =
-      LLVMTargetMachineEmitToFile(tm, module, (char *)path, kind, &emit_err);
-  if (emit_err) {
-    NY_LOG_ERR("Emission failed: %s\n", emit_err);
-    LLVMDisposeMessage(emit_err);
-  }
-  if (env_triple && env_triple[0]) {
-    if (triple_needs_free)
-      free(triple);
-    free(raw_triple);
-  } else {
-    if (triple_needs_free)
-      free(triple);
-    LLVMDisposeMessage(raw_triple);
-  }
-  if (host_features)
-    LLVMDisposeMessage(host_features);
-  LLVMDisposeTargetMachine(tm);
-  return res == 0;
+  return emit_file(module, path, kind, opt_level, false);
 }
 
 LLVMTypeRef ny_llvm_ptr_type(LLVMContextRef ctx) {

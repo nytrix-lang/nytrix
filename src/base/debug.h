@@ -129,13 +129,13 @@ void ny_dbg_heuristic_event(const char *algorithm, const char *fmt, ...)
 
 /* printf-style variant: formats the reason line, then reuses the same
  * rewrite hook. The format buffer is bounded like ny_dbg_print. */
-#define NY_DBG_INST_FMT(before, after, fmt, ...) \
-    do { \
-      if (ny_dbg_enabled & NY_DBG_INST) { \
-        char ny_dbg_fmt_buf[256]; \
-        snprintf(ny_dbg_fmt_buf, sizeof(ny_dbg_fmt_buf), fmt, ##__VA_ARGS__); \
-        ny_dbg_inst_rewrite(before, after, ny_dbg_fmt_buf); \
-      } \
+#define NY_DBG_INST_FMT(before, after, fmt, ...)                               \
+    do {                                                                       \
+      if (ny_dbg_enabled & NY_DBG_INST) {                                      \
+        char ny_dbg_fmt_buf[256];                                              \
+        snprintf(ny_dbg_fmt_buf, sizeof(ny_dbg_fmt_buf), fmt, ##__VA_ARGS__);  \
+        ny_dbg_inst_rewrite(before, after, ny_dbg_fmt_buf);                    \
+      }                                                                        \
     } while (0)
 
 #define NY_DBG_VALUE(v, event, detail) \

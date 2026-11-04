@@ -1,6 +1,6 @@
 #!/usr/bin/env ny
 ;; Keywords: cli hexdump file bytes example
-;; A minimal xxd-style hex dump in Nytrix.
+;; A xxd-style hex dump
 ;;
 ;;   hexdump hello.txt
 ;;   00000000  48 65 6c 6c 6f 2c 20 43  21 0a                |Hello, C!.|

@@ -1,7 +1,9 @@
 /*
- * Multi-object static ELF64 x86-64 linker for relocatable code and archives.
+ * Multi-object static ELF64 linker for relocatable code and archives.
  */
 #include <nyr/nyr.h>
+#include "base/parallel.h"
+#include "code/backend/target.h"
 
 #include <ctype.h>
 #include <errno.h>
@@ -15,8 +17,9 @@
 #include <sys/wait.h>
 #include <unistd.h>
 #endif
-#if defined(__linux__) && defined(__x86_64__)
+#if defined(__linux__) && (defined(__x86_64__) || defined(__aarch64__))
 #include <fcntl.h>
+#include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #endif
@@ -26,11 +29,14 @@ static void l_error(char *err, size_t len, const char *message) {
     snprintf(err, len, "%s", message);
 }
 
-#if defined(__linux__) && defined(__x86_64__)
+#if defined(__linux__) && (defined(__x86_64__) || defined(__aarch64__))
+#define L_MMAP_THRESHOLD (64u * 1024u)
+
 enum {
   L_ET_REL = 1,
   L_ET_EXEC = 2,
   L_EM_X86_64 = 62,
+  L_EM_AARCH64 = 183,
   L_PT_LOAD = 1,
   L_SHT_PROGBITS = 1,
   L_SHT_SYMTAB = 2,
@@ -50,6 +56,11 @@ enum {
   L_R_X86_64_PLT32 = 4,
   L_R_X86_64_32 = 10,
   L_R_X86_64_32S = 11,
+  L_R_AARCH64_ABS64 = 257,
+  L_R_AARCH64_PREL32 = 261,
+  L_R_AARCH64_ADR_PREL_PG_HI21 = 275,
+  L_R_AARCH64_ADD_ABS_LO12_NC = 277,
+  L_R_AARCH64_CALL26 = 283,
 };
 
 typedef struct {
@@ -126,10 +137,42 @@ typedef struct {
   size_t member_count, member_cap;
 } l_archive_t;
 
-static const unsigned char l_start[] = {
-    0xf3, 0x0f, 0x1e, 0xfa, 0x31, 0xed, 0x48, 0x83, 0xe4, 0xf0, 0xe8, 0,
-    0,    0,    0,    0x89, 0xc7, 0xb8, 60,   0,    0,    0,    0x0f, 0x05};
+typedef struct {
+  l_input_t *inputs;
+  size_t count;
+  unsigned char *rx;
+  unsigned char *rw;
+} l_copy_sections_ctx_t;
 
+/*
+ * Each input owns disjoint, pre-laid-out output ranges.
+ */
+static bool l_copy_input_sections(size_t oi, void *opaque) {
+  l_copy_sections_ctx_t *ctx = (l_copy_sections_ctx_t *)opaque;
+  if (!ctx || oi >= ctx->count)
+    return false;
+  l_input_t *in = &ctx->inputs[oi];
+  for (size_t si = 1; si < in->eh.shnum; ++si) {
+    l_shdr_t *sec = &in->sections[si];
+    if (!in->segments[si] || sec->type == L_SHT_NOBITS || !sec->size)
+      continue;
+    unsigned char *dst = in->segments[si] == 1 ? ctx->rx : ctx->rw;
+    memcpy(dst + in->offsets[si], in->bytes + sec->offset,
+           (size_t)sec->size);
+  }
+  return true;
+}
+
+static const unsigned char l_start[] = {
+    0xf3, 0x0f, 0x1e, 0xfa, 0x31, 0xed, 0x48, 0x83, 0xe4,
+    0xf0, 0xe8, 0,    0,    0,    0,    0x89, 0xc7, 0xb8,
+    0,    0,    0,    0,    0x0f, 0x05, 0x31, 0xc0, 0xc3};
+static const uint32_t l_start_aarch64[] = {
+    0xaa1f03fd, /* mov x29, xzr */
+    0x94000000, /* bl main */
+    0xd2800008, /* mov x8, #0; patched from the Linux syscall adapter */
+    0xd4000001, /* svc #0 */
+};
 static bool l_range(size_t total, uint64_t off, uint64_t size) {
   return off <= total && size <= (uint64_t)total - off;
 }
@@ -215,7 +258,7 @@ static bool l_scan_open(l_scan_t *scan, const unsigned char *bytes,
       scan->eh.ident[2] != 'L' || scan->eh.ident[3] != 'F' ||
       scan->eh.ident[4] != 2 || scan->eh.ident[5] != 1 ||
       scan->eh.ident[6] != 1 || scan->eh.type != L_ET_REL ||
-      scan->eh.machine != L_EM_X86_64 ||
+      (scan->eh.machine != L_EM_X86_64 && scan->eh.machine != L_EM_AARCH64) ||
       scan->eh.shentsize != sizeof(l_shdr_t) || !scan->eh.shnum ||
       scan->eh.shstrndx >= scan->eh.shnum ||
       !l_range(len, scan->eh.shoff,
@@ -418,23 +461,58 @@ static bool l_archive_open(l_archive_t *archive, unsigned char *bytes,
   return true;
 }
 static bool l_read(const char *path, unsigned char **bytes, size_t *len) {
-  FILE *f = fopen(path, "rb");
-  if (!f)
+  if (!path || !bytes || !len)
     return false;
-  bool ok = fseek(f, 0, SEEK_END) == 0;
-  long n = ok ? ftell(f) : -1;
-  ok = ok && n >= (long)sizeof(l_ehdr_t) && n <= 256l * 1024l * 1024l &&
-       fseek(f, 0, SEEK_SET) == 0;
-  unsigned char *p = ok ? malloc((size_t)n) : NULL;
-  ok = ok && p && fread(p, 1, (size_t)n, f) == (size_t)n;
-  fclose(f);
+  int fd = open(path, O_RDONLY);
+  if (fd < 0)
+    return false;
+  struct stat st;
+  bool ok = fstat(fd, &st) == 0 && S_ISREG(st.st_mode) &&
+            st.st_size >= (off_t)sizeof(l_ehdr_t) &&
+            st.st_size <= (off_t)(256u * 1024u * 1024u);
   if (!ok) {
-    free(p);
+    close(fd);
     return false;
   }
+  size_t n = (size_t)st.st_size;
+  if (n >= L_MMAP_THRESHOLD) {
+    void *mapped = mmap(NULL, n, PROT_READ, MAP_PRIVATE, fd, 0);
+    close(fd);
+    if (mapped == MAP_FAILED)
+      return false;
+    *bytes = mapped;
+    *len = n;
+    return true;
+  }
+  unsigned char *p = malloc(n);
+  if (!p) {
+    close(fd);
+    return false;
+  }
+  size_t at = 0;
+  while (at < n) {
+    ssize_t got = read(fd, p + at, n - at);
+    if (got < 0 && errno == EINTR)
+      continue;
+    if (got <= 0) {
+      free(p);
+      close(fd);
+      return false;
+    }
+    at += (size_t)got;
+  }
+  close(fd);
   *bytes = p;
-  *len = (size_t)n;
+  *len = n;
   return true;
+}
+static void l_release_read_buffer(unsigned char *bytes, size_t len) {
+  if (!bytes)
+    return;
+  if (len >= L_MMAP_THRESHOLD)
+    (void)munmap(bytes, len);
+  else
+    free(bytes);
 }
 static bool l_write(const char *path, const unsigned char *data, size_t len) {
   size_t n = strlen(path);
@@ -472,6 +550,64 @@ static bool l_write(const char *path, const unsigned char *data, size_t len) {
 }
 static bool l_apply(unsigned char *segment, size_t seg_len, size_t off,
                     uint32_t type, uint64_t s, int64_t addend, uint64_t p) {
+  if (type == L_R_AARCH64_CALL26) {
+    if (!l_range(seg_len, off, sizeof(uint32_t)))
+      return false;
+    __int128 delta = (__int128)s + addend - p;
+    if ((delta & 3) != 0 || delta < -((__int128)1 << 27) ||
+        delta >= ((__int128)1 << 27))
+      return false;
+    uint32_t instruction;
+    memcpy(&instruction, segment + off, sizeof(instruction));
+    instruction = (instruction & 0xfc000000u) |
+                  ((uint32_t)(int64_t)(delta >> 2) & 0x03ffffffu);
+    memcpy(segment + off, &instruction, sizeof(instruction));
+    return true;
+  }
+  if (type == L_R_AARCH64_ADR_PREL_PG_HI21) {
+    if (!l_range(seg_len, off, sizeof(uint32_t)))
+      return false;
+    __int128 pages = (((__int128)s + addend) & ~(__int128)0xfff) -
+                     ((__int128)p & ~(__int128)0xfff);
+    if ((pages & 0xfff) != 0 || pages < -((__int128)1 << 32) ||
+        pages >= ((__int128)1 << 32))
+      return false;
+    uint32_t imm = (uint32_t)(int64_t)(pages >> 12);
+    uint32_t instruction;
+    memcpy(&instruction, segment + off, sizeof(instruction));
+    instruction &= ~((3u << 29) | (0x7ffffu << 5));
+    instruction |= ((imm & 3u) << 29) | (((imm >> 2) & 0x7ffffu) << 5);
+    memcpy(segment + off, &instruction, sizeof(instruction));
+    return true;
+  }
+  if (type == L_R_AARCH64_ADD_ABS_LO12_NC) {
+    if (!l_range(seg_len, off, sizeof(uint32_t)))
+      return false;
+    uint32_t instruction;
+    memcpy(&instruction, segment + off, sizeof(instruction));
+    instruction =
+        (instruction & ~(0xfffu << 10)) |
+        (((uint32_t)((uint64_t)((__int128)s + addend) & 0xfffu)) << 10);
+    memcpy(segment + off, &instruction, sizeof(instruction));
+    return true;
+  }
+  if (type == L_R_AARCH64_ABS64) {
+    if (!l_range(seg_len, off, sizeof(uint64_t)))
+      return false;
+    uint64_t value = (uint64_t)((__int128)s + addend);
+    memcpy(segment + off, &value, sizeof(value));
+    return true;
+  }
+  if (type == L_R_AARCH64_PREL32) {
+    if (!l_range(seg_len, off, sizeof(uint32_t)))
+      return false;
+    __int128 value = (__int128)s + addend - p;
+    if (value < INT32_MIN || value > INT32_MAX)
+      return false;
+    int32_t signed_value = (int32_t)value;
+    memcpy(segment + off, &signed_value, sizeof(signed_value));
+    return true;
+  }
   size_t width = type == L_R_X86_64_64 ? 8 : 4;
   if (!l_range(seg_len, off, width))
     return false;
@@ -510,7 +646,7 @@ static void l_destroy(l_input_t *inputs, size_t count) {
     return;
   for (size_t i = 0; i < count; ++i) {
     if (inputs[i].owns_bytes)
-      free(inputs[i].bytes);
+      l_release_read_buffer(inputs[i].bytes, inputs[i].len);
     free(inputs[i].sections);
     free(inputs[i].offsets);
     free(inputs[i].segments);
@@ -532,8 +668,10 @@ static bool l_link_objects(const char *const object_paths[],
   l_definition_t *defs = NULL;
   size_t *slots = NULL;
   unsigned char *rx = NULL, *rw = NULL, *image = NULL;
-  size_t rx_len = sizeof(l_start), rw_file_len = 0, rw_mem_len = 0;
+  size_t rx_len = 0, start_len = 0, entry_reloc_off = 0;
+  size_t rw_file_len = 0, rw_mem_len = 0;
   size_t image_len = 0, def_cap = 0, def_count = 0, slot_cap = 1;
+  uint16_t machine = 0;
   bool found_exec = false, ok = false;
   if (!inputs) {
     l_error(err, err_len, "internal linker: input allocation failed");
@@ -560,12 +698,20 @@ static bool l_link_objects(const char *const object_paths[],
     if (eh->ident[0] != 0x7f || eh->ident[1] != 'E' || eh->ident[2] != 'L' ||
         eh->ident[3] != 'F' || eh->ident[4] != 2 || eh->ident[5] != 1 ||
         eh->ident[6] != 1 || eh->type != L_ET_REL ||
-        eh->machine != L_EM_X86_64 || eh->ehsize != sizeof(*eh) ||
+        (eh->machine != L_EM_X86_64 && eh->machine != L_EM_AARCH64) ||
+        (machine && eh->machine != machine) || eh->ehsize != sizeof(*eh) ||
         eh->shentsize != sizeof(l_shdr_t) || !eh->shnum ||
         eh->shstrndx >= eh->shnum ||
         !l_range(in->len, eh->shoff, (uint64_t)eh->shnum * sizeof(l_shdr_t))) {
-      l_error(err, err_len, "internal linker: expected ELF64 x86-64 objects");
+      l_error(err, err_len, "internal linker: expected matching ELF64 objects");
       goto done;
+    }
+    if (!machine) {
+      machine = eh->machine;
+      start_len =
+          machine == L_EM_X86_64 ? sizeof(l_start) : sizeof(l_start_aarch64);
+      entry_reloc_off = machine == L_EM_X86_64 ? 11u : sizeof(uint32_t);
+      rx_len = start_len;
     }
     in->sections = malloc((size_t)eh->shnum * sizeof(*in->sections));
     in->offsets = calloc(eh->shnum, sizeof(*in->offsets));
@@ -663,8 +809,8 @@ static bool l_link_objects(const char *const object_paths[],
     l_error(err, err_len, "internal linker: no executable code section");
     goto done;
   }
-  defs = calloc(def_cap ? def_cap : 1, sizeof(*defs));
-  while (slot_cap < def_cap * 2 + 1) {
+  defs = calloc(def_cap + 1, sizeof(*defs));
+  while (slot_cap < (def_cap + 1) * 2 + 1) {
     if (slot_cap > SIZE_MAX / 2) {
       l_error(err, err_len, "internal linker: symbol table overflow");
       goto done;
@@ -712,6 +858,18 @@ static bool l_link_objects(const char *const object_paths[],
       }
     }
   }
+  if (machine == L_EM_X86_64) {
+    static const char bare_set_args[] = "_ny_aot_set_args";
+    size_t offset = sizeof(l_start) - 3;
+    size_t slot = (size_t)l_hash(bare_set_args) & (slot_cap - 1);
+    while (slots[slot] && strcmp(defs[slots[slot] - 1].name, bare_set_args))
+      slot = (slot + 1) & (slot_cap - 1);
+    if (!slots[slot]) {
+      defs[def_count] =
+          (l_definition_t){bare_set_args, SIZE_MAX, offset, false};
+      slots[slot] = ++def_count;
+    }
+  }
   size_t entry_slot = (size_t)l_hash(entry_symbol) & (slot_cap - 1);
   while (slots[entry_slot] &&
          strcmp(defs[slots[entry_slot] - 1].name, entry_symbol))
@@ -749,27 +907,66 @@ static bool l_link_objects(const char *const object_paths[],
   }
   image_len = rw_file_len ? rw_file_off + rw_file_len : rx_file_off + rx_len;
   image = calloc(1, image_len);
-  rx = calloc(1, rx_len);
-  rw = rw_file_len ? calloc(1, rw_file_len) : NULL;
-  if (!image || !rx || (rw_file_len && !rw)) {
+  if (!image) {
     l_error(err, err_len, "internal linker: output allocation failed");
     goto done;
   }
-  memcpy(rx, l_start, sizeof(l_start));
+  rx = image + rx_file_off;
+  rw = rw_file_len ? image + rw_file_off : NULL;
+  nyr_backend_t link_backend = machine == L_EM_X86_64
+                                   ? NY_NATIVE_BACKEND_X86_64
+                                   : NY_NATIVE_BACKEND_AARCH64;
+  nyr_abi_t link_abi = machine == L_EM_X86_64 ? NY_NATIVE_ABI_SYSV
+                                               : NY_NATIVE_ABI_AAPCS;
+  const char *link_triple = machine == L_EM_X86_64
+                                ? "x86_64-unknown-linux-gnu"
+                                : "aarch64-unknown-linux-gnu";
+  nyr_target_request_t target_request =
+      nyr_target_request_make(link_backend, link_abi, link_triple, false);
+  ny_native_target_info_t link_target = {0};
+  if (!nyr_target_info_init(&link_target, &target_request) ||
+      !link_target.syscalls.available) {
+    l_error(err, err_len,
+            "internal linker: no Linux syscall adapter for ELF machine");
+    goto done;
+  }
+  if (machine == L_EM_X86_64) {
+    memcpy(rx, l_start, sizeof(l_start));
+    uint32_t exit_nr = link_target.syscalls.exit_nr;
+    for (unsigned i = 0; i < 4; ++i)
+      rx[18 + i] = (unsigned char)(exit_nr >> (i * 8));
+  } else {
+    memcpy(rx, l_start_aarch64, sizeof(l_start_aarch64));
+    uint32_t mov_exit = UINT32_C(0xd2800008) |
+                        (link_target.syscalls.exit_nr << 5);
+    for (unsigned i = 0; i < 4; ++i)
+      rx[2 * sizeof(uint32_t) + i] =
+          (unsigned char)(mov_exit >> (i * 8));
+  }
+  size_t copy_work = 0;
   for (size_t oi = 0; oi < object_count; ++oi) {
     l_input_t *in = &inputs[oi];
     for (size_t si = 1; si < in->eh.shnum; ++si) {
       l_shdr_t *sec = &in->sections[si];
       if (!in->segments[si] || sec->type == L_SHT_NOBITS)
         continue;
-      unsigned char *dst = in->segments[si] == 1 ? rx : rw;
       size_t dst_len = in->segments[si] == 1 ? rx_len : rw_file_len;
       if (in->offsets[si] > dst_len || sec->size > dst_len - in->offsets[si]) {
         l_error(err, err_len, "internal linker: section copy out of range");
         goto done;
       }
-      memcpy(dst + in->offsets[si], in->bytes + sec->offset, (size_t)sec->size);
+      if (sec->size > SIZE_MAX - copy_work)
+        copy_work = SIZE_MAX;
+      else
+        copy_work += (size_t)sec->size;
     }
+  }
+  l_copy_sections_ctx_t copy_ctx = {
+      .inputs = inputs, .count = object_count, .rx = rx, .rw = rw};
+  if (!ny_parallel_for(object_count, copy_work, l_copy_input_sections,
+                       &copy_ctx)) {
+    l_error(err, err_len, "internal linker: section copy failed");
+    goto done;
   }
 
   const uint64_t rx_base = 0x400000, rw_base = rx_base + rw_file_off;
@@ -831,6 +1028,10 @@ static bool l_link_objects(const char *const object_paths[],
               slot = (slot + 1) & (slot_cap - 1);
             if (slots[slot]) {
               l_definition_t *def = &defs[slots[slot] - 1];
+              if (def->input == SIZE_MAX) {
+                symbol_value = rx_base + rx_file_off + def->symbol;
+                goto relocation_symbol_resolved;
+              }
               def_in = &inputs[def->input];
               def_sym_index = def->symbol;
               memcpy(&sym, def_in->symbols + def_sym_index * sizeof(sym),
@@ -860,6 +1061,7 @@ static bool l_link_objects(const char *const object_paths[],
                 def_in->offsets[sym.shndx] + sym.value;
           }
         }
+      relocation_symbol_resolved:;
         size_t patch = in->offsets[ti] + (size_t)rela.offset;
         if (!l_apply(target, target_len, patch, type, symbol_value, rela.addend,
                      target_vaddr + rela.offset)) {
@@ -870,15 +1072,15 @@ static bool l_link_objects(const char *const object_paths[],
       }
     }
   }
-  if (!l_apply(rx, rx_len, 11, L_R_X86_64_PC32,
-               rx_base + rx_file_off + entry_offset, -4,
-               rx_base + rx_file_off + 11)) {
+  uint32_t entry_reloc_type =
+      machine == L_EM_X86_64 ? L_R_X86_64_PC32 : L_R_AARCH64_CALL26;
+  int64_t entry_reloc_addend = machine == L_EM_X86_64 ? -4 : 0;
+  if (!l_apply(rx, rx_len, entry_reloc_off, entry_reloc_type,
+               rx_base + rx_file_off + entry_offset, entry_reloc_addend,
+               rx_base + rx_file_off + entry_reloc_off)) {
     l_error(err, err_len, "internal linker: entry relocation overflow");
     goto done;
   }
-  memcpy(image + rx_file_off, rx, rx_len);
-  if (rw_file_len)
-    memcpy(image + rw_file_off, rw, rw_file_len);
   l_ehdr_t out = {0};
   out.ident[0] = 0x7f;
   out.ident[1] = 'E';
@@ -888,7 +1090,7 @@ static bool l_link_objects(const char *const object_paths[],
   out.ident[5] = 1;
   out.ident[6] = 1;
   out.type = L_ET_EXEC;
-  out.machine = L_EM_X86_64;
+  out.machine = machine;
   out.version = 1;
   out.entry = rx_base + rx_file_off;
   out.phoff = sizeof(out);
@@ -919,8 +1121,6 @@ static bool l_link_objects(const char *const object_paths[],
     l_error(err, err_len, "internal linker: could not write executable");
 done:
   free(image);
-  free(rx);
-  free(rw);
   free(defs);
   free(slots);
   l_destroy(inputs, object_count);
@@ -942,11 +1142,16 @@ bool nyr_link_elf64_executable_objects(const char *const object_paths[],
   const char **link_paths = calloc(max_link_inputs, sizeof(*link_paths));
   const unsigned char **link_data = calloc(max_link_inputs, sizeof(*link_data));
   size_t *link_lens = calloc(max_link_inputs, sizeof(*link_lens));
+  unsigned char **owned_object_bytes = calloc(object_count,
+                                              sizeof(*owned_object_bytes));
+  size_t *owned_object_lens = calloc(object_count,
+                                     sizeof(*owned_object_lens));
   l_archive_t *archives = calloc(object_count, sizeof(*archives));
   l_symbol_map_t symbols = {0};
   size_t link_count = 0, archive_count = 0;
   bool ok = false;
-  if (!link_paths || !link_data || !link_lens || !archives) {
+  if (!link_paths || !link_data || !link_lens || !owned_object_bytes ||
+      !owned_object_lens || !archives) {
     l_error(err, err_len, "internal linker: input expansion allocation failed");
     goto cleanup;
   }
@@ -958,6 +1163,8 @@ bool nyr_link_elf64_executable_objects(const char *const object_paths[],
       l_error(err, err_len, "internal linker: cannot read input");
       goto cleanup;
     }
+    owned_object_bytes[i] = bytes;
+    owned_object_lens[i] = len;
     static const unsigned char archive_magic[] = "!<arch>\n";
     if (len >= sizeof(archive_magic) - 1 &&
         !memcmp(bytes, archive_magic, sizeof(archive_magic) - 1)) {
@@ -965,29 +1172,35 @@ bool nyr_link_elf64_executable_objects(const char *const object_paths[],
         for (size_t mi = 0; mi < archives[archive_count].member_count; ++mi)
           l_scan_close(&archives[archive_count].members[mi].scan);
         free(archives[archive_count].members);
-        free(bytes);
+        l_release_read_buffer(owned_object_bytes[i], owned_object_lens[i]);
+        owned_object_bytes[i] = NULL;
         l_error(err, err_len, "internal linker: malformed static archive");
         goto cleanup;
       }
+      /*
+       * The archive owns the backing bytes until all selected members link.
+       */
+      owned_object_bytes[i] = NULL;
       archive_count++;
       continue;
     }
     if (link_count == max_link_inputs) {
-      free(bytes);
       l_error(err, err_len, "internal linker: too many link inputs");
       goto cleanup;
     }
-    link_paths[link_count] = object_paths[i];
-    link_count++;
     l_scan_t scan;
     if (!l_scan_open(&scan, bytes, len) || !l_scan_symbols(&scan, &symbols)) {
       l_scan_close(&scan);
-      free(bytes);
       l_error(err, err_len, "internal linker: invalid ELF input symbol table");
       goto cleanup;
     }
     l_scan_close(&scan);
-    free(bytes);
+    /*
+     * Reuse the scanned object in the final link instead of reading it again.
+     */
+    link_data[link_count] = bytes;
+    link_lens[link_count] = len;
+    link_count++;
   }
   if (!archive_count) {
     ok = l_link_objects(link_paths, link_data, link_lens, link_count,
@@ -1039,10 +1252,15 @@ cleanup:
     for (size_t mi = 0; mi < archives[i].member_count; ++mi)
       l_scan_close(&archives[i].members[mi].scan);
     free(archives[i].members);
-    free(archives[i].bytes);
+    l_release_read_buffer(archives[i].bytes, archives[i].len);
   }
+  for (size_t i = 0; i < object_count; ++i)
+    if (owned_object_bytes && owned_object_lens)
+      l_release_read_buffer(owned_object_bytes[i], owned_object_lens[i]);
   l_map_destroy(&symbols);
   free(archives);
+  free(owned_object_bytes);
+  free(owned_object_lens);
   free(link_data);
   free(link_lens);
   free(link_paths);
@@ -1059,7 +1277,8 @@ bool nyr_link_elf64_executable_objects(const char *const object_paths[],
   (void)entry_symbol;
   (void)output_path;
   l_error(err, err_len,
-          "internal linker: ELF64 executable output requires Linux x86-64");
+          "internal linker: ELF64 executable output requires Linux x86-64 or "
+          "AArch64");
   return false;
 }
 #endif
@@ -1101,8 +1320,7 @@ static int nyr_link_run(const char *tool, const char *const argv[]) {
 #endif
 }
 
-static const char *nyr_link_tool(const char *env_name,
-                                const char *fallback) {
+static const char *nyr_link_tool(const char *env_name, const char *fallback) {
   const char *value = getenv(env_name);
   return value && *value ? value : fallback;
 }
@@ -1112,7 +1330,8 @@ static bool nyr_link_external(const nyr_link_request_t *request, char *err,
   bool wasm = nyr_link_has(request->target_triple, "wasm32") ||
               nyr_link_has(request->target_triple, "wasm64");
   if (wasm && request->kind == NYR_LINK_SHARED_LIBRARY) {
-    l_error(err, err_len, "linker: shared libraries are not supported for Wasm");
+    l_error(err, err_len,
+            "linker: shared libraries are not supported for Wasm");
     return false;
   }
   const char *tool = NULL;
@@ -1161,7 +1380,7 @@ static bool nyr_link_external(const nyr_link_request_t *request, char *err,
     }
     argv[n++] = "-fuse-ld=lld";
     bool freestanding = request->entry_symbol != NULL ||
-                       request->kind == NYR_LINK_SHARED_LIBRARY;
+                        request->kind == NYR_LINK_SHARED_LIBRARY;
     if (freestanding)
       argv[n++] = "-nostdlib";
     if (request->kind == NYR_LINK_SHARED_LIBRARY) {
@@ -1173,8 +1392,7 @@ static bool nyr_link_external(const nyr_link_request_t *request, char *err,
                nyr_link_has(request->target_triple, "msvc")) {
         argv[n++] = "-Wl,/dll";
         argv[n++] = "-Wl,/noentry";
-      }
-      else
+      } else
         argv[n++] = "-shared";
     } else if (nyr_link_has(request->target_triple, "windows") ||
                nyr_link_has(request->target_triple, "mingw") ||
@@ -1223,9 +1441,10 @@ static bool nyr_link_external(const nyr_link_request_t *request, char *err,
   free(argv);
   if (rc != 0) {
     if (err && err_len)
-      snprintf(err, err_len,
-               "linker: %s failed; verify the target toolchain and input objects",
-               tool);
+      snprintf(
+          err, err_len,
+          "linker: %s failed; verify the target toolchain and input objects",
+          tool);
     return false;
   }
   if (err && err_len)
@@ -1250,7 +1469,7 @@ bool nyr_link(const nyr_link_request_t *request, char *err, size_t err_len) {
   }
   if (request->kind == NYR_LINK_EXECUTABLE && request->entry_symbol &&
       !request->target_triple) {
-#if defined(__linux__) && defined(__x86_64__)
+#if defined(__linux__) && (defined(__x86_64__) || defined(__aarch64__))
     return nyr_link_elf64_executable_objects(
         request->input_paths, request->input_count, request->entry_symbol,
         request->output_path, err, err_len);

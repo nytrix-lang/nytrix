@@ -15,6 +15,7 @@ module core.os.ui.debug(
 )
 
 use core
+use core.os.args as process_args
 use core.common as common
 use core.os.path as path
 
@@ -38,7 +39,7 @@ fn env_trim_cached(any name) str { common.env_trim(to_str(name)) }
 
 fn env_lower_cached(any name) str { common.env_lower(to_str(name)) }
 
-fn elapsed_ms(int t0) f64 { float(__ticks_ns() - t0) / 1e6 }
+fn elapsed_ms(int t0) f64 { float(__monotonic_ns_raw() - t0) / 1e6 }
 
 fn debug_enabled() bool { env_truthy_cached("NY_DEBUG") }
 
@@ -58,7 +59,7 @@ fn text_immediate_enabled() bool {
 
 fn headless_gui_enabled() bool { env_truthy_cached("NY_UI_HEADLESS_GUI") }
 
-fn now() int { __ticks_ns() }
+fn now() int { __monotonic_ns_raw() }
 
 fn mark(any label, int t0, any detail="") bool {
    if !enabled() || t0 <= 0 { return false }
@@ -89,8 +90,9 @@ fn trace_process_sample(int frame=0, str label="") bool { false }
 fn apply_verbose_argv(int start_index=1) bool {
    mut i = max(0, start_index)
    mut found = false
-   while i < argc() {
-      def arg = to_str(argv(i))
+   def cli_argv = process_args.args()
+   while i < cli_argv.len {
+      def arg = to_str(cli_argv.get(i, ""))
       if arg == "-v" || arg == "-vv" || arg == "-vvv" || arg == "--verbose" || arg == "--debug" || arg == "--trace" {
          found = true
       }

@@ -1,0 +1,28 @@
+shape nil_dynamic_identity {
+  family "runtime/values"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+;; Spec contract: docs/spec/values.md "nil and other scalar types".
+;; nil is a distinct value, not integer zero. The first block is the
+;; value-level contract; the second is the dynamic-transport contract
+;; (any locals, dictionary keys, chained API results).
+use core
+
+assert(nil != 0, "nil identity")
+assert(!nil && !0, "falsy values")
+assert(to_str(nil) == "nil", "nil string")
+
+def any boxed = nil
+assert(is_nil(boxed) && type(boxed) == "nil", "any identity")
+
+mut d = {"_": 0}
+d = d.delete("_")
+d = d.set(nil, "missing")
+d = d.set(0, "zero")
+assert(d.get(nil) == "missing" && d.get(0) == "zero", "dictionary keys")
+print("✓ nil dynamic identity tests passed")
+NY
+}

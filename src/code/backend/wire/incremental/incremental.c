@@ -36,7 +36,7 @@
  */
 
 #define NY_INC_GRAPH_MAGIC 0x6e79696e63ULL /* "nyinc" */
-#define NY_INC_GRAPH_VERSION 1u
+#define NY_INC_GRAPH_VERSION 2u
 
 static const ny_incremental_config_t g_default_config = {
     .enable_incremental = true, .track_system_deps = false, .max_depth = 32};
@@ -94,22 +94,18 @@ void ny_incremental_shutdown(void) {
  * stable file fingerprint
  */
 
-bool ny_incremental_file_fingerprint(const char *file_path,
+static bool fingerprint_from_content(const char *file_path, const char *content,
+                                     size_t len,
                                      ny_file_fingerprint_t *out_fingerprint) {
-  if (!file_path || !*file_path || !out_fingerprint)
+  if (!file_path || !*file_path || !content || !out_fingerprint)
     return false;
-  memset(out_fingerprint, 0, sizeof(*out_fingerprint));
   struct stat st;
   if (stat(file_path, &st) != 0)
     return false;
-  if (!S_ISREG(st.st_mode))
+  if (!S_ISREG(st.st_mode) || st.st_size < 0 || (uint64_t)st.st_size != len)
     return false;
-  size_t len = 0;
-  char *content = ny_read_file_raw(file_path, &len);
-  if (!content)
-    return false;
+  memset(out_fingerprint, 0, sizeof(*out_fingerprint));
   out_fingerprint->content_hash = ny_hash64(content, len);
-  free(content);
   out_fingerprint->mtime_nsec = ny_stat_mtime_nsec(&st);
   out_fingerprint->size = (uint64_t)st.st_size;
 #ifndef _WIN32
@@ -120,6 +116,20 @@ bool ny_incremental_file_fingerprint(const char *file_path,
   out_fingerprint->dev = 0;
 #endif
   return true;
+}
+
+bool ny_incremental_file_fingerprint(const char *file_path,
+                                     ny_file_fingerprint_t *out_fingerprint) {
+  if (!file_path || !*file_path || !out_fingerprint)
+    return false;
+  memset(out_fingerprint, 0, sizeof(*out_fingerprint));
+  size_t len = 0;
+  char *content = ny_read_file_raw(file_path, &len);
+  if (!content)
+    return false;
+  bool ok = fingerprint_from_content(file_path, content, len, out_fingerprint);
+  free(content);
+  return ok;
 }
 
 static bool fingerprint_equal(const ny_file_fingerprint_t *a,
@@ -401,6 +411,10 @@ bool ny_incremental_build_graph(const char **source_files, size_t file_count,
     char *content = ny_read_file_raw(fp, &len);
     if (!content)
       continue;
+    ny_dep_node_t *node = graph_find_node(out_graph, fp, 0);
+    if (node && fingerprint_from_content(fp, content, len,
+                                         &node->fingerprint))
+      node->fingerprint_valid = true;
     char **deps = NULL;
     size_t dep_count = 0;
     if (ny_incremental_parse_dependencies(fp, content, len, &deps,
@@ -422,14 +436,6 @@ bool ny_incremental_build_graph(const char **source_files, size_t file_count,
     }
     strlist_free(deps, dep_count);
     free(content);
-  }
-  /*
-   * fill fingerprints for existing files
-   */
-  for (ny_dep_node_t *n = out_graph->nodes; n; n = n->next) {
-    ny_file_fingerprint_t fp = {0};
-    if (ny_incremental_file_fingerprint(n->file_path, &fp))
-      n->fingerprint = fp;
   }
   return true;
 }
@@ -502,8 +508,9 @@ bool ny_incremental_save_graph(const ny_dep_graph_t *graph,
             graph_write_u32(f, (uint32_t)graph->node_count);
   size_t written_nodes = 0;
   for (ny_dep_node_t *n = graph->nodes; ok && n; n = n->next) {
-    ok =
-        graph_write_cstr(f, n->file_path) && graph_write_fp(f, &n->fingerprint);
+    ok = graph_write_cstr(f, n->file_path) &&
+         graph_write_fp(f, &n->fingerprint) &&
+         graph_write_u32(f, n->fingerprint_valid ? 1u : 0u);
     /*
      * outgoing edges
      */
@@ -550,13 +557,17 @@ bool ny_incremental_load_graph(const char *cache_path,
   for (uint32_t i = 0; ok && i < node_count; ++i) {
     char *path = graph_read_cstr(f);
     ny_file_fingerprint_t fp = {0};
-    ok = path && graph_read_fp(f, &fp);
+    uint32_t fingerprint_valid = 0;
+    ok = path && graph_read_fp(f, &fp) &&
+         graph_read_u32(f, &fingerprint_valid) && fingerprint_valid <= 1;
     if (ok) {
       ny_dep_node_t *n = graph_add_or_get(out_graph, path);
       if (!n)
         ok = false;
-      else
+      else {
         n->fingerprint = fp;
+        n->fingerprint_valid = fingerprint_valid != 0;
+      }
     }
     free(path);
     if (ok) {
@@ -616,7 +627,7 @@ bool ny_incremental_check_changes(ny_dep_graph_t *graph, char ***out_changed,
   *out_changed_count = 0;
   size_t cap = 0;
   for (ny_dep_node_t *n = graph->nodes; n; n = n->next) {
-    if (!n->file_path)
+    if (!n->file_path || !n->fingerprint_valid)
       continue;
     ny_file_fingerprint_t cur = {0};
     if (ny_incremental_file_fingerprint(n->file_path, &cur)) {
@@ -788,12 +799,11 @@ ny_incremental_compile(const char **source_files, size_t file_count,
     ny_dep_node_t *cur_n = graph_find_node(&cur, n->file_path, 0);
     if (!cur_n)
       continue; /* removed file */
-    ny_file_fingerprint_t curfp = {0};
-    if (ny_incremental_file_fingerprint(n->file_path, &curfp)) {
-      if (!fingerprint_equal(&curfp, &n->fingerprint))
-        if (!strlist_push(&changed, &changed_count, &cap, n->file_path))
-          break;
-    }
+    if (!cur_n->fingerprint_valid)
+      continue;
+    if (!fingerprint_equal(&cur_n->fingerprint, &n->fingerprint))
+      if (!strlist_push(&changed, &changed_count, &cap, n->file_path))
+        break;
   }
   /*
    * If a graph already existed, newly-added files also count as changed.

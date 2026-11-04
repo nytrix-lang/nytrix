@@ -3,7 +3,7 @@ shape oracle_range_inclusive_modulo_x86_64 {
   generator "native"
   features [native x86_64 oracle loop range modulo register-home regression]
   template ny-test-case
-  flags_matrix "-O0 --nyir-verify --native-result-oracle=558389616; -O1 --nyir-verify --native-result-oracle=558389616; -O2 --nyir-verify --native-result-oracle=558389616; -O3 --nyir-verify --native-result-oracle=558389616"
+  flags_matrix "-O0 --nyr-verify --native-result-oracle=558389616; -O1 --nyr-verify --native-result-oracle=558389616; -O2 --nyr-verify --native-result-oracle=558389616; -O3 --nyr-verify --native-result-oracle=558389616"
   expect compile_and_run
   source ny <<'NY'
 fn main() int {

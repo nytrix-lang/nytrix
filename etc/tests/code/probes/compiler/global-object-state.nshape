@@ -1,0 +1,40 @@
+shape global_object_state_keeps_carriers {
+  family "runtime-native"
+  generator "embedded"
+  features [ny globals any list dict representation]
+  template ny-test-case
+  flags_matrix "--native-only --native-tier=baseline -O0; --native-backend=llvm --jit --jit-engine=mcjit -O0; --native-backend=llvm --jit --jit-engine=orc -O0; --nyr-run"
+  expect compile_and_run
+  expect_message "GLOBAL-OBJECT-STATE-OK"
+  source ny <<'NY'
+use core
+mut any active = nil
+mut list matrix = []
+mut dict context = dict(0)
+mut int count = 0
+fn publish(any value) {
+   active = value
+}
+fn publish_matrix(any value) {
+   matrix = value
+}
+fn publish_context(any value) {
+   context = value
+}
+fn publish_count(any value) {
+   count = value
+}
+publish([4, 4, 1.0, 0.0])
+assert(is_list(active) && active.len == 4, "dynamic global keeps list carrier")
+assert(is_ptr(active), "pointer predicate uses language boolean truth")
+publish_matrix([1.0, 0.0, 0.0, 1.0])
+assert(matrix.len == 4 && matrix.get(0) == 1.0, "list global keeps object carrier")
+publish_context({"ready": true})
+assert(context.get("ready", false), "dictionary global keeps object carrier")
+publish_count(11)
+assert(count == 11, "explicit integer global still decodes dynamic integer")
+publish({"kind": "context"})
+assert(is_dict(active) && active.get("kind", "") == "context", "dynamic global can change object kind")
+print("GLOBAL-OBJECT-STATE-OK")
+NY
+}

@@ -18,15 +18,7 @@ static bool build_function(nyr_func_t *ir, bool extra_predecessor) {
     return false;
   ir->param_types[0] = NYIR_PARAM_I64;
 
-  int arg = nyr_ir_emit(ir, (nyr_inst_t){.op = NYIR_LOAD_LOCAL,
-                                         .dst = -1,
-                                         .a = -1,
-                                         .b = -1,
-                                         .c = -1,
-                                         .d = -1,
-                                         .e = -1,
-                                         .f = -1,
-                                         .imm = 0});
+  int arg = nyr_opt_emit_imm(ir, NYIR_LOAD_LOCAL, 0);
   if (arg < 0)
     return false;
   if (extra_predecessor) {

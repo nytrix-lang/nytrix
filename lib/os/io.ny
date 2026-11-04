@@ -27,7 +27,10 @@ fn spawn(any path, any args) any {
    if !is_str(path) { return 0 }
    if !is_list(args) { return 0 }
    def res = popen(path, args)
-   if res == 0 { return 0 }
+   ;; popen uses an integer zero as its failure sentinel. Check the runtime
+   ;; representation first; comparing an `any` sentinel to a tagged integer
+   ;; let some native routes fall through to `res.get`.
+   if is_int(res) { return 0 }
    mut p = dict(4)
    p["pid"] = res.get(0)
    p["in"] = res.get(1)
@@ -104,9 +107,9 @@ fn recv_line(any p) str {
    while 1 {
       def int res = __read_fd_raw(fd, c_buf, 1)
       if res <= 0 { break }
-      def c = chr(load8(c_buf, 0))
-      b = builder_append(b, c)
-      if c == "\n" { break }
+      def byte = load8(c_buf, 0) & 255
+      b = builder_append_byte(b, byte)
+      if byte == 10 { break }
    }
    def out = builder_to_str(b)
    builder_free(b)
@@ -121,7 +124,7 @@ fn recv_all(any p, any n=1024) str {
    mut b = Builder(4096)
    while 1 {
       def chunk = recv(p, n)
-      if chunk.len == 0 { break }
+      if !is_str(chunk) || chunk.len == 0 { break }
       b = builder_append(b, chunk)
    }
    def out = builder_to_str(b)
@@ -171,6 +174,7 @@ fn close(any p) any {
    assert(strip(recv_line(cat)) == "hello world" && is_ok(close(cat)), "io recv cat")
    def sh = spawn(sh_cmd, sh_args)
    assert(is_dict(sh) && recv_all(sh, 64) == expected && is_ok(close(sh)), "io shell recv")
+   assert(recv_all(0, 1) == "", "io recv_all treats an invalid stream as empty")
    assert(spawn(123, ["/bin/cat"]) == 0 && spawn("/bin/cat", 123) == 0 && is_err(send(0, "x")) && recv(0, 1) == 0, "io validation")
    print("✓ core.os.io self-test passed")
 }

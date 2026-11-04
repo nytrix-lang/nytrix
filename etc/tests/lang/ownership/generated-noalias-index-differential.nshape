@@ -25,7 +25,7 @@ fn compile_generated(str source) dict {
   }
   args = args.append("--ownership-strict")
   args = args.append("--native-only")
-  args = args.append("--nyir-verify")
+  args = args.append("--nyr-verify")
   args = args.append("-c")
   args = args.append(source)
   process.run_capture(compiler, args, nil, false)

@@ -1389,8 +1389,7 @@ static int write_compare_reports(const char *out_root,
     csv_string(csv, rows[i].case_name);
     fputc(',', csv);
     csv_string(csv, rows[i].variant);
-    fprintf(csv,
-            ",%s,%d,%.3f,%.3f,%.3f,%.3f,%.2f,%s,%.3f,%.3f,%.3f,%.3f,%.3f,",
+    fprintf(csv, ",%s,%d,%.3f,%.3f,%.3f,%.3f,%.2f,%s,%.3f,%.3f,%.3f,%.3f,%.3f,",
             rows[i].ok ? "true" : "false", rows[i].rc, rows[i].wall_ms,
             rows[i].wall_p95_ms, rows[i].wall_min_ms, rows[i].wall_max_ms,
             rows[i].wall_noise_pct, rows[i].unstable ? "true" : "false",
@@ -2049,14 +2048,17 @@ static void usage(void) {
   printf(
       "  %scompare%s  Ny benchmark matrix or arbitrary executable targets\n\n",
       nyt_clr(NYT_CYAN), nyt_clr(NYT_RESET));
-  nyt_subheading("Options");
+  nyt_subheading("Benchmark setup");
   printf("  %s--bin BIN --write-baseline --freq HZ --out DIR%s\n",
          nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
   printf("  %s--samples N --scale PCT --limit N --timeout SEC%s\n",
          nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
-  printf("  %s--exec ELF --elf ELF --target NAME=ELF --color MODE --no-color "
-         "-- args...%s\n\n",
+  nyt_subheading("Execution targets");
+  printf("  %s--exec ELF --elf ELF --target NAME=ELF -- args...%s\n",
          nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
+  nyt_subheading("Output");
+  printf("  %s--color MODE --no-color%s\n\n", nyt_clr(NYT_GREEN),
+         nyt_clr(NYT_RESET));
   nyt_subheading("Examples");
   printf("  %sny perf gate --bin build/release/ny%s\n", nyt_clr(NYT_CYAN),
          nyt_clr(NYT_RESET));

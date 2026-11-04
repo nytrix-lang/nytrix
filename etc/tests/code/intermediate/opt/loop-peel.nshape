@@ -3,7 +3,7 @@ shape optcheck_loop_peel {
   generator "native"
   features [native x86_64 oracle optcheck loop peel first-iteration-guard noncanonical-rejection]
   template ny-test-case
-  flags "-O3 --native-backend x86_64 --nyir-verify --native-oracle-per-pass --native-result-oracle=31 --nyir-pass-stats"
+  flags "-O3 --native-backend x86_64 --nyr-verify --native-oracle-per-pass --native-result-oracle=31 --nyr-dump=passes"
   expect compile_and_run
   source ny <<'NY'
 fn first_iteration_guard(i64 n) i64 {

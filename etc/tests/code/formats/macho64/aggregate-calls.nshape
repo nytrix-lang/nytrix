@@ -3,7 +3,7 @@ shape x86_64_macho_sysv_aggregate_calls {
   generator "native"
   features [native object macho x86_64 aggregate sysv nyir]
   template ny-test-case
-  flags "--c-frontend=nytrix --native-backend x86_64 --host-triple x86_64-apple-darwin --native-abi sysv --nyir-verify -emit-only -o /tmp/nytrix-native-macho64-aggregate-calls.o"
+  flags "--c-frontend=nytrix --native-backend x86_64 --host-triple x86_64-apple-darwin --native-abi sysv --nyr-verify -emit-only -o /tmp/nytrix-native-macho64-aggregate-calls.o"
   expect compile_and_run
   source ny <<'NY'
 #include "etc/tests/lang/interop/c/internal-byvalue-param-import.h" link "etc/tests/lang/interop/c/sum-pair.so"

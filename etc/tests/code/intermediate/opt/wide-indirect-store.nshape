@@ -3,7 +3,7 @@ shape optcheck_wide_indirect_store {
   generator "native"
   features [native x86_64 oracle optcheck memory store64]
   template ny-test-case
-  flags "-O3 --native-backend x86_64 --native-result-oracle=4294967297 --nyir-verify"
+  flags "-O3 --native-backend x86_64 --native-result-oracle=4294967297 --nyr-verify"
   expect compile_and_run
   source ny <<'NY'
 use core

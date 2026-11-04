@@ -5,7 +5,7 @@
 use core
 use core.common as common
 use core.str as str
-use core.math (max, min)
+use core.math (max, min, ceil)
 use core.math.crypto.encoding.base as b64
 use core.os (exit, file_exists, file_read, file_write, ticks, msleep)
 use core.os.args as cli
@@ -48,16 +48,6 @@ fn _editor_color(str code, str text) str {
    esc + "[" + code + "m" + text + esc + "[0m"
 }
 
-fn _editor_has_help_arg() bool {
-   mut i = 1
-   while i < argc() {
-      def str a = str.lower(str.strip(to_str(argv(i))))
-      if a == "-h" || a == "--help" || a == "help" { return true }
-      i += 1
-   }
-   false
-}
-
 fn _editor_help_line(str left, str right) any {
    print("  " + _editor_color("1;36", left) + "  " + right)
    0
@@ -84,6 +74,7 @@ fn _editor_print_help() any {
    print(_editor_color("1;33", "Useful env"))
    _editor_help_line("NY_EDITOR_FONT_SIZE=n", "body font size")
    _editor_help_line("NY_EDITOR_DENSITY=x", "scale editor chrome density")
+   _editor_help_line("NY_EDITOR_PROJECT_ROOT=path", "root project tree and fallback README.md")
    _editor_help_line("NY_EDITOR_INPUT_TRACE=1", "editor input trace")
    _editor_help_line("NY_EDITOR_OMNI=1", "print compact WM/renderer/editor state for early frames")
    _editor_help_line("NY_EDITOR_FRAME_TRACE=1", "print per-frame update/draw/present timings")
@@ -101,8 +92,8 @@ fn _editor_print_help() any {
    0
 }
 
-def int START_W = int(common.env_int_clamped("NY_EDITOR_START_W", 1220, 240, 8192))
-def int START_H = int(common.env_int_clamped("NY_EDITOR_START_H", 760, 180, 8192))
+def int START_W = common.env_int_clamped("NY_EDITOR_START_W", 1220, 240, 8192)
+def int START_H = common.env_int_clamped("NY_EDITOR_START_H", 760, 180, 8192)
 def START_FLAGS = key.WINDOW_CENTER | key.WINDOW_FOCUS_ON_SHOW | key.WINDOW_ALLOW_DND
 def EDITOR_PRESENT_MODE = common.env_truthy("NY_EDITOR_FAST_PRESENT") ? "immediate" : "fifo"
 def UI_FONT_CANDIDATES = borrow([
@@ -138,15 +129,11 @@ fn _env_float_between(str name, f64 fallback, f64 lo, f64 hi) f64 {
    min(max(str.atof(raw), lo), hi)
 }
 
-fn _scaled_int(f64 value, f64 density, int lo, int hi) int {
-   int(min(max(value * density, float(lo)), float(hi)))
-}
-
 def UI_DENSITY = _env_float_between("NY_EDITOR_DENSITY", 0.82, 0.54, 1.25)
-def int FONT_TITLE_SIZE = int(common.env_int_clamped("NY_EDITOR_TITLE_FONT_SIZE", _scaled_int(24.0, UI_DENSITY, 12, 48), 8, 96))
-def int FONT_BODY_SIZE = int(common.env_int_clamped("NY_EDITOR_FONT_SIZE", _scaled_int(18.0, UI_DENSITY, 9, 36), 8, 96))
-def int FONT_SMALL_SIZE = int(common.env_int_clamped("NY_EDITOR_SMALL_FONT_SIZE", _scaled_int(15.0, UI_DENSITY, 8, 32), 8, 96))
-def int FONT_MODELINE_SIZE = int(common.env_int_clamped("NY_EDITOR_MODELINE_FONT_SIZE", max(13, _scaled_int(16.0, UI_DENSITY, 10, 32)), 8, 96))
+def int FONT_TITLE_SIZE = common.env_int_clamped("NY_EDITOR_TITLE_FONT_SIZE", 24, 8, 96)
+def int FONT_BODY_SIZE = common.env_int_clamped("NY_EDITOR_FONT_SIZE", 18, 8, 96)
+def int FONT_SMALL_SIZE = common.env_int_clamped("NY_EDITOR_SMALL_FONT_SIZE", 15, 8, 96)
+def int FONT_MODELINE_SIZE = common.env_int_clamped("NY_EDITOR_MODELINE_FONT_SIZE", 13, 8, 96)
 def TOP_H = max(21.0, 30.0 * UI_DENSITY)
 def RAIL_MIN_W = 38.0
 def EDIT_MIN_W = 56.0
@@ -154,7 +141,7 @@ def DOCK_MIN_H = 34.0
 def EDIT_MIN_H = 28.0
 def PANE_MAX = 4096.0
 
-if _editor_has_help_arg() { _editor_print_help() exit(0) }
+if cli.flag("-h") || cli.flag("--help") || cli.flag("help") { _editor_print_help() exit(0) }
 ui_dump.apply_verbose_argv()
 
 if common.env_truthy("NY_UI_HEADLESS") { gfx.set_backend_type(gfx.BACKEND_MOCK) }
@@ -168,7 +155,7 @@ mut win = gfx.init_window(START_W, START_H, "Nytrix Editor", START_FLAGS, EDITOR
 
 if !win { panic("window init failed") }
 window.set_exit_key(win, key.KEY_NULL)
-if is_dict(win) && !!win.get("_mock", false) {
+if is_dict(win) && !!win.get("_mock", false) && !common.env_truthy("NYTRIX_UI_REPLAY") {
    if gfx.begin_frame_clear([0.015, 0.015, 0.018, 1.0]) { gfx.end_frame() }
    gfx.close_window()
    exit(0)
@@ -495,7 +482,7 @@ mut tree_scroll_accum = 0.0
 mut outline_scroll_accum = 0.0
 mut git_scroll_accum = 0.0
 mut timeline_scroll_accum = 0.0
-mut project_state = project.new("")
+mut project_state = project.new(common.env_trim("NY_EDITOR_PROJECT_ROOT"))
 def auto_dump_delay = ui_dump.auto_dump_delay_frames(8)
 def timeout_limit = ui_runtime.timeout_ns(0)
 
@@ -533,7 +520,7 @@ def int BENCH_FRAME_LIMIT = int(common.env_int_clamped("NY_EDITOR_BENCH_FRAMES",
 def int BENCH_WARMUP_FRAMES = int(common.env_int_clamped("NY_EDITOR_BENCH_WARMUP_FRAMES", 1, 0, 10000))
 def bool FRAME_TRACE = common.env_truthy("NY_EDITOR_FRAME_TRACE")
 def int FRAME_TRACE_LIMIT = int(common.env_int_clamped("NY_EDITOR_FRAME_TRACE_FRAMES", 5, 1, 100000))
-def bool FRAME_HASH = common.env_truthy("NY_EDITOR_FRAME_HASH") || common.env_truthy("NY_UI_FRAME_HASH_LOCK")
+def bool FRAME_HASH = common.env_truthy("NY_EDITOR_FRAME_HASH") || common.env_truthy("NY_UI_FRAME_HASH_LOCK") || common.env_truthy("NYTRIX_UI_REPLAY")
 def int FRAME_HASH_FRAME = int(common.env_int_clamped("NY_EDITOR_FRAME_HASH_FRAME", 2, 0, 1000000))
 def str FRAME_HASH_EXPECT = common.env_trim("NY_EDITOR_FRAME_HASH_EXPECT")
 def bool OMNI_TRACE = common.env_truthy("NY_EDITOR_OMNI") || common.env_truthy("NY_EDITOR_STATE_DUMP")
@@ -765,12 +752,29 @@ fn _next_event() any {
 }
 
 fn _draw_icon(str name, f64 x, f64 y, f64 size, any tint=C_TEXT) int {
+   if name == "vcsbranches" {
+      def f64 t = float(max(1.0, size / 10.0))
+      def f64 sx = x + size * 0.27
+      def f64 mx = x + size * 0.68
+      def f64 top = y + size * 0.78
+      def f64 bottom = y + size * 0.22
+      _fill_rect(sx, bottom, t, top - bottom, tint)
+      _fill_rect(sx, top - t, mx - sx, t, tint)
+      _fill_rect(sx, bottom, mx - sx, t, tint)
+      _fill_rect(mx - t, bottom + t, t, top - bottom - t * 2.0, tint)
+      def f64 node = float(max(t * 2.2, size * 0.22))
+      _fill_rect(sx - node * 0.5, top - node * 0.5, node, node, tint)
+      _fill_rect(mx - node * 0.5, top - node * 0.5, node, node, tint)
+      _fill_rect(mx - node * 0.5, bottom - node * 0.5, node, node, tint)
+      return 0
+   }
    if gfx.get_backend_type() == RENDER_BACKEND_MOCK {
       if MOCK_BENCH_FAST { return 0 }
       _stroke_rect(x, y, size, size, tint, 1.0)
       return 0
    }
-   def tex = icons.icon_tex(name)
+   def int raster_size = int(max(16.0, ceil(size)))
+   def tex = icons.icon_tex(name, raster_size)
    if tex > 0 {
       _draw_tex_rect(tex, x, y, size, size, tint)
    } else {
@@ -1376,6 +1380,7 @@ fn _cache_append_project_ops(list rows, str prefix, list ops) list {
 }
 
 fn _restore_session_allowed() bool {
+   if common.env_truthy("NYTRIX_UI_REPLAY") { return false }
    cli.args().len <= 1 && !INPUT_PROBE && !CONTEXT_PROBE && !TERMINAL_PROBE && !TERMINAL_DUMP_PROBE && !SYNTAX_PROBE && !NAV_PROBE && !UNDO_PROBE && !ESCAPE_PROBE && !MODELINE_PROBE && !CHORD_PROBE && !FIND_PROBE && !PALETTE_PROBE && !WHICH_KEY_PROBE && !MULTICURSOR_PROBE && !ZOOM_PROBE && !SCROLLBAR_PROBE && !GOTO_PROBE && !GIT_PROBE && !TAB_PROBE && !SELECT_PROBE && !TEXTGRID_PROBE && !IMAGE_PROBE && !BENCH_PROBE
 }
 
@@ -5623,23 +5628,6 @@ fn _tok_color(int kind) any {
    }
 }
 
-fn _tok_color_u32(int kind) int {
-   case kind {
-      syntax.TOK_KEYWORD, syntax.TOK_DIRECTIVE -> U_KEYWORD
-      syntax.TOK_TYPE, syntax.TOK_STRUCT, syntax.TOK_TAG -> U_TYPE
-      syntax.TOK_STRING -> U_STRING
-      syntax.TOK_NUMBER, syntax.TOK_CONSTANT -> U_NUMBER
-      syntax.TOK_COMMENT -> U_COMMENT
-      syntax.TOK_FUNCTION -> U_FUNC
-      syntax.TOK_OPERATOR, syntax.TOK_PREPROC, syntax.TOK_PUNCT -> U_OPERATOR
-      syntax.TOK_PROPERTY, syntax.TOK_ATTR, syntax.TOK_KEY -> U_PROPERTY
-      syntax.TOK_PARAM, syntax.TOK_LABEL, syntax.TOK_REGISTER -> U_CYAN
-      syntax.TOK_VALUE -> U_STRING
-      syntax.TOK_VARIABLE -> U_TEXT
-      _ -> U_TEXT
-   }
-}
-
 fn _syntax_lang(str filename) str {
    if syntax_lang_cache.contains(filename) { return to_str(syntax_lang_cache.get(filename, "text")) }
    def lang = syntax.detect_language(filename)
@@ -5824,6 +5812,14 @@ fn _syntax_runs(str filename, str line, int li) list {
    syntax_run_cache.get(key, [])
 }
 
+fn _append_syntax_flat_run(list flat, str text, f64 x, int kind) list {
+   if text.len <= 0 { return flat }
+   flat = flat.append(text)
+   flat = flat.append(x)
+   flat = flat.append(kind)
+   flat
+}
+
 fn _syntax_rel_runs(str filename, str line, int li) list {
    if syntax_cache_rev != content_rev {
       syntax_cache_rev = content_rev
@@ -5834,17 +5830,33 @@ fn _syntax_rel_runs(str filename, str line, int li) list {
    if syntax_flat_cache.contains(key) { return syntax_flat_cache.get(key, []) }
    def runs = _syntax_runs(filename, line, li)
    mut flat = []
+   mut str pending_text = ""
+   mut f64 pending_x = 0.0
+   mut f64 pending_end = 0.0
+   mut int pending_kind = -1
    mut i = 0
    while i < runs.len {
       def run = runs.get(i)
       def text = to_str(run.get(0, ""))
       if text.len > 0 {
-         flat = flat.append(text)
-         flat = flat.append(float(run.get(2, 0.0)))
-         flat = flat.append(_tok_color_u32(int(run.get(1, syntax.TOK_TEXT))))
+         def xoff = float(run.get(2, 0.0))
+         def int kind = int(run.get(1, syntax.TOK_TEXT))
+         def width = _measure_ui(font_body, text, float(text.len) * FONT_BODY_ADV)
+         def f64 gap = abs(xoff - pending_end)
+         if pending_text.len > 0 && pending_kind == kind && gap <= 0.75 {
+            pending_text = pending_text + text
+            pending_end = max(pending_end, xoff + width)
+         } else {
+            flat = _append_syntax_flat_run(flat, pending_text, pending_x, pending_kind)
+            pending_text = text
+            pending_x = xoff
+            pending_end = xoff + width
+            pending_kind = kind
+         }
       }
       i += 1
    }
+   flat = _append_syntax_flat_run(flat, pending_text, pending_x, pending_kind)
    syntax_flat_cache[key] = borrow(flat)
    forget(flat)
    syntax_flat_cache.get(key, [])
@@ -5855,7 +5867,7 @@ fn _append_plain_run(list out, str line, f64 x, f64 y) list {
    out = out.append(line)
    out = out.append(x)
    out = out.append(y)
-   out = out.append(U_TEXT)
+   out = out.append(syntax.TOK_TEXT)
    out
 }
 
@@ -5864,19 +5876,34 @@ fn _diff_buffer_name(str filename) bool {
 }
 
 fn _diff_line_color(str line) int {
-   if str.startswith(line, "diff --git") { return U_CYAN }
-   if str.startswith(line, "+++") || str.startswith(line, "---") { return U_CYAN }
-   if str.startswith(line, "@@") { return U_ACCENT }
-   if str.startswith(line, "+") { return U_OK }
-   if str.startswith(line, "-") { return U_WARN }
-   if str.startswith(line, ">") { return U_OK }
-   if str.startswith(line, "<") { return U_WARN }
-   if str.startswith(line, "left:") || str.startswith(line, "right:") { return U_ACCENT_2 }
-   U_MUTED
+   if str.startswith(line, "diff --git") { return 10001 }
+   if str.startswith(line, "+++") || str.startswith(line, "---") { return 10001 }
+   if str.startswith(line, "@@") { return 10002 }
+   if str.startswith(line, "+") { return 10003 }
+   if str.startswith(line, "-") { return 10004 }
+   if str.startswith(line, ">") { return 10003 }
+   if str.startswith(line, "<") { return 10004 }
+   if str.startswith(line, "left:") || str.startswith(line, "right:") { return 10005 }
+   10006
+}
+
+fn _body_run_color(int kind) any {
+   if kind == 10001 { return C_CYAN }
+   if kind == 10002 { return C_ACCENT }
+   if kind == 10003 { return C_OK }
+   if kind == 10004 { return C_WARN }
+   if kind == 10005 { return C_ACCENT_2 }
+   if kind == 10006 { return C_MUTED }
+   _tok_color(kind)
 }
 
 fn _append_diff_run(list out, str line, f64 x, f64 y) list {
-   _append_text_run(out, line, x, y, _diff_line_color(line))
+   if line.len <= 0 { return out }
+   out = out.append(line)
+   out = out.append(x)
+   out = out.append(y)
+   out = out.append(_diff_line_color(line))
+   out
 }
 
 fn _append_text_run(list out, str text, f64 x, f64 y, int color) list {
@@ -5910,10 +5937,25 @@ fn _append_highlight_runs(list out, str filename, str line, int li, f64 x, f64 y
       out = out.append(to_str(runs.get(i, "")))
       out = out.append(x + float(runs.get(int(i + 1), 0)))
       out = out.append(y)
-      out = out.append(int(runs.get(int(i + 2), U_TEXT)))
+      out = out.append(int(runs.get(int(i + 2), syntax.TOK_TEXT)))
       i += 3
    }
    out
+}
+
+fn _draw_editor_body_runs(int font, list runs) int {
+   mut int drew = 0
+   mut int i = 0
+   while i + 3 < runs.len {
+      def str text = to_str(runs.get(i, ""))
+      def f64 x = float(runs.get(int(i + 1), 0.0))
+      def f64 y = float(runs.get(int(i + 2), 0.0))
+      def int kind = int(runs.get(int(i + 3), syntax.TOK_TEXT))
+      def color = _body_run_color(kind)
+      if gfx.draw_text(font, text, x, y, color) { drew = 1 }
+      i += 4
+   }
+   drew
 }
 
 fn _visible_runs_key(
@@ -6353,13 +6395,14 @@ fn _draw_rail_tabs(f64 x, f64 y, f64 w) int {
    while i < tabs.len {
       def t = tabs.get(i)
       def id = to_str(t.get(0, ""))
-	 def tx = _snap_px(x + float(i) * tab_w)
-	 def on = id == active
-	 def text_y = _row_text_y(font_small, y, RAIL_TABS_H)
-	 _fill_rect(tx, y, tab_w, RAIL_TABS_H, on ? gfx.color_alpha(C_ACCENT, 0.13) : C_PANE_2)
-	 _stroke_rect(tx, y, tab_w, RAIL_TABS_H, on ? C_ACCENT : C_LINE, 1.0)
-	 _draw_icon(to_str(t.get(1, "")), tx + 8.0, _center_y(y, RAIL_TABS_H, 15.0), 15.0, on ? C_ACCENT : C_MUTED)
-	 runs = _append_text_run(runs, widgets.preview(to_str(t.get(2, "")), int(max(4.0, (tab_w - 30.0) / 7.0))), tx + 29.0, text_y, on ? U_TEXT : U_MUTED)
+      def tx = _snap_px(x + float(i) * tab_w)
+      def on = id == active
+      def text_y = _row_text_y(font_small, y, RAIL_TABS_H)
+      def bg_color = on ? _pack(gfx.color_alpha(C_ACCENT, 0.13)) : _pack(C_PANE_2)
+      _fill_rect(tx, y, tab_w, RAIL_TABS_H, bg_color)
+      _stroke_rect(tx, y, tab_w, RAIL_TABS_H, on ? C_ACCENT : C_LINE, 1.0)
+      _draw_icon(to_str(t.get(1, "")), tx + 8.0, _center_y(y, RAIL_TABS_H, 15.0), 15.0, on ? C_ACCENT : C_MUTED)
+      runs = _append_text_run(runs, widgets.preview(to_str(t.get(2, "")), int(max(4.0, (tab_w - 30.0) / 7.0))), tx + 29.0, text_y, on ? U_TEXT : U_MUTED)
       i += 1
    }
    _flush_rects()
@@ -6444,6 +6487,23 @@ fn _draw_timeline_panel(f64 x, f64 y, f64 w, f64 h) int {
    i
 }
 
+fn _draw_tree_disclosure(bool open, f64 x, f64 y, any tint) int {
+   if open {
+      _fill_rect(x + 2.0, y + 7.0, 2.0, 2.0, tint)
+      _fill_rect(x + 4.0, y + 5.0, 2.0, 2.0, tint)
+      _fill_rect(x + 6.0, y + 3.0, 2.0, 2.0, tint)
+      _fill_rect(x + 8.0, y + 5.0, 2.0, 2.0, tint)
+      _fill_rect(x + 10.0, y + 7.0, 2.0, 2.0, tint)
+   } else {
+      _fill_rect(x + 2.0, y + 9.0, 2.0, 2.0, tint)
+      _fill_rect(x + 4.0, y + 7.0, 2.0, 2.0, tint)
+      _fill_rect(x + 6.0, y + 5.0, 2.0, 2.0, tint)
+      _fill_rect(x + 4.0, y + 3.0, 2.0, 2.0, tint)
+      _fill_rect(x + 2.0, y + 1.0, 2.0, 2.0, tint)
+   }
+   0
+}
+
 fn _draw_project_tree(f64 x, f64 y, f64 w, f64 h) int {
    _ensure_project_tree()
    def counts = project.counts(project_state)
@@ -6473,7 +6533,7 @@ fn _draw_project_tree(f64 x, f64 y, f64 w, f64 h) int {
       mut ix = x + 8.0 + float(depth) * 12.0
       def arrow_slot = 16.0
       if e.get("dir", false) {
-         _draw_icon(e.get("open", false) ? "guitreearrowdown" : "guitreearrowright", ix + 1.0, _center_y(yy, row_h, 12.0), 12.0, selected ? C_ACCENT : C_MUTED)
+         _draw_tree_disclosure(bool(e.get("open", false)), ix + 1.0, _center_y(yy, row_h, 12.0), selected ? C_ACCENT : C_MUTED)
       }
       ix += arrow_slot
       def file_x = ix
@@ -6653,7 +6713,7 @@ fn _draw_editor(dict lay, bool caret) int {
    if !big_file { _draw_color_swatches_visible(lines, scroll, rows, text_x, y, draw_limit) }
    _flush_rects()
    if line_runs.len > 0 { gfx.draw_text_runs_flat(font_small, line_runs, C_MUTED) }
-   if text_runs.len > 0 { gfx.draw_text_runs_flat_colors(font_body, text_runs) }
+   if text_runs.len > 0 { _draw_editor_body_runs(font_body, text_runs) }
    _draw_minimap(lay, rows, scroll, lines.len)
    if caret && int(st.get("cursor_line", 0)) >= scroll && int(st.get("cursor_line", 0)) < scroll + rows {
       def line = to_str(lines.get(int(st.get("cursor_line", 0)), ""))
@@ -7297,7 +7357,9 @@ fn _initial_buffers() list {
    if CHORD_PROBE { return [ed.buffer("chord-test.ny", "", "")] }
    if UNDO_PROBE { return [ed.buffer("undo-test.ny", "", "a")] }
    if INPUT_PROBE { return [ed.buffer("input-test.ny", "", PROBE_TEXT)] }
-   session.seed_buffers(cli.args())
+   def project_root = common.env_trim("NY_EDITOR_PROJECT_ROOT")
+   def fallback = project_root.len > 0 ? ospath.join(project_root, "README.md") : "README.md"
+   session.seed_buffers(cli.args(), fallback)
 }
 
 def initial_buffers = _initial_buffers()
@@ -7323,6 +7385,7 @@ st["timeline_scroll"] = 0
 st["rail_split"] = 0.0
 st["term_h"] = 220.0
 _load_ui_cache()
+if bool(st.get("show_project", true)) && bool(st.get("show_hierarchy", true)) { _ensure_project_tree() }
 if BENCH_PROBE && common.env_truthy("NY_UI_HEADLESS") {
    st["show_hierarchy"] = false
    st["show_project"] = false
@@ -7613,6 +7676,24 @@ while !gfx.window_should_close(win) {
    def top_h = bool(st.get("show_titlebar", true)) ? TOP_H : 0.0
    mut lay = ed.editor_layout(sw, sh, rail_w, top_h)
    lay = _layout_with_terminal(lay, sh)
+   if common.env_truthy("NYTRIX_UI_REPLAY") {
+      def replay_lines = ed.current_lines(st)
+      def replay_project_rows = project.tree(project_state)
+      print("NYTRIX_UI_APP_STATE demo=editor frame=" + to_str(frame_count + 1) +
+         " fps=" + to_str(fps) + " frame_ms=" + to_str(float(st.get("frame_ms", 0.0))) +
+         " focus=" + to_str(st.get("focus", "")) +
+         " active=" + to_str(int(st.get("active", 0))) +
+         " buffers=" + to_str(st.get("buffers", []).len) +
+         " lines=" + to_str(replay_lines.len) +
+         " cursor=" + to_str(int(st.get("cursor_line", 0))) + ":" +
+            to_str(int(st.get("cursor_col", 0))) +
+         " scroll=" + to_str(int(st.get("scroll", 0))) +
+         " project_rows=" + to_str(replay_project_rows.len) +
+         " hierarchy=" + to_str(bool(st.get("show_hierarchy", true))) +
+         " project=" + to_str(bool(st.get("show_project", true))) +
+         " outline=" + to_str(bool(st.get("show_outline", true))) +
+         " terminal=" + to_str(termpane.is_open(term_state)))
+   }
    def t_update = FRAME_TRACE ? ticks() : 0
    if TERMINAL_DUMP_PROBE && frame_count == 0 {
       assert(termpane.visible_cell_count(term_state) > 0, "terminal visual text survived layout")
@@ -7837,6 +7918,9 @@ while !gfx.window_should_close(win) {
    }
    if IMAGE_PROBE && frame_count >= 2 { window.set_should_close(win, true) }
    if BENCH_PROBE && frame_count >= BENCH_FRAME_LIMIT { window.set_should_close(win, true) }
+   if common.env_truthy("NYTRIX_UI_REPLAY") && frame_count >= common.env_int_clamped("NYTRIX_FIXTURE_FRAMES", 3, 1, 100000) {
+      window.set_should_close(win, true)
+   }
    if !BENCH_PROBE && gfx.get_time() >= next_cache_save_time {
       _save_ui_cache()
       next_cache_save_time = gfx.get_time() + float(CACHE_SAVE_SECONDS)
@@ -7851,3 +7935,4 @@ _save_ui_cache()
 term_state = termpane.close(term_state)
 _release_image_preview_cache()
 gfx.close_window()
+exit(0)

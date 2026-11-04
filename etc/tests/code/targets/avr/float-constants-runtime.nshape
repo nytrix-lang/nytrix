@@ -41,7 +41,7 @@ fn run_avr_case(str suffix, str value_source, list expected) bool {
   assert(is_ok(file_write(start_path, start_source)),
          "write AVR float-constant startup wrapper")
   def emitted = run_capture(
-      [compiler, "--native-backend=avr", "--native-only", "--nyir-verify",
+      [compiler, "--native-backend=avr", "--native-only", "--nyr-verify",
        "--emit-asm=" + asm_path, "-no-std", "-emit-only", "-e",
        value_source],
       [], nil, false)
@@ -89,7 +89,7 @@ fn run_avr_codegen_case(str suffix, str value_source, list expected_helpers) boo
   def asm_path = stem + ".s"
   def obj_path = stem + ".o"
   def emitted = run_capture(
-      [compiler, "--native-backend=avr", "--native-only", "--nyir-verify",
+      [compiler, "--native-backend=avr", "--native-only", "--nyr-verify",
        "--emit-asm=" + asm_path, "-no-std", "-emit-only", "-e",
        value_source],
       [], nil, false)
@@ -119,8 +119,8 @@ fn run_avr_codegen_case(str suffix, str value_source, list expected_helpers) boo
   valid
 }
 
-;; Keep each precision's ABI and comparison matrix in one compiler/QEMU run.
-;; The wrapper checks exact return bytes; each predicate group gates that return.
+;; The wrapper checks exact return bytes. Separate comparison groups keep each
+;; executable within the ATmega328P's 32 KiB flash limit.
 fn compare_helpers(str type) str {
   "@noinline\nfn lt(" + type + " a, " + type + " b) bool { a < b }\n" +
   "@noinline\nfn le(" + type + " a, " + type + " b) bool { a <= b }\n" +
@@ -130,46 +130,45 @@ fn compare_helpers(str type) str {
   "@noinline\nfn ne(" + type + " a, " + type + " b) bool { a != b }\n"
 }
 
-def f64_checks =
+fn run_avr_comparison_case(str suffix, str type, str source) bool {
+  run_avr_case(suffix, compare_helpers(type) + source,
+               [7, 0, 0, 0, 0, 0, 0, 0])
+}
+
+def f64_lt_le_check =
   "@noinline\nfn check_lt_le() bool {\n" +
   "if lt(-1.0, 0.0) { } else { return false }\n" +
   "if lt(0.0, -1.0) { return false }\n" +
   "if le(0.0, 0.0) { } else { return false }\n" +
-  "if le(1.0, 0.0) { return false }\nreturn true\n}\n" +
+  "if le(1.0, 0.0) { return false }\nreturn true\n}\n"
+def f64_gt_ge_check =
   "@noinline\nfn check_gt_ge() bool {\n" +
   "if gt(1.0, 0.0) { } else { return false }\n" +
   "if gt(0.0, 1.0) { return false }\n" +
   "if ge(0.0, 0.0) { } else { return false }\n" +
-  "if ge(-1.0, 0.0) { return false }\nreturn true\n}\n" +
+  "if ge(-1.0, 0.0) { return false }\nreturn true\n}\n"
+def f64_equality_check =
   "@noinline\nfn check_equality() bool {\n" +
   "if eq(-0.0, 0.0) { } else { return false }\n" +
   "if eq(0.0, 1.0) { return false }\n" +
   "if ne(0.0, 1.0) { } else { return false }\n" +
-  "if ne(-0.0, 0.0) { return false }\nreturn true\n}\n" +
+  "if ne(-0.0, 0.0) { return false }\nreturn true\n}\n"
+def f64_nan_ordering_check =
   "@noinline\nfn check_nan_ordering() bool {\n" +
   "if lt(__flt_nan(), 0.0) { return false }\n" +
   "if le(0.0, __flt_nan()) { return false }\n" +
   "if gt(__flt_nan(), 0.0) { return false }\n" +
-  "if ge(0.0, __flt_nan()) { return false }\nreturn true\n}\n" +
+  "if ge(0.0, __flt_nan()) { return false }\nreturn true\n}\n"
+def f64_nan_infinity_check =
   "@noinline\nfn check_nan_infinity() bool {\n" +
   "if eq(__flt_nan(), 0.0) { return false }\n" +
   "if ne(__flt_nan(), 0.0) { } else { return false }\n" +
   "if gt(__flt_inf(), 0.0) { } else { return false }\n" +
-  "if ge(__flt_inf(), __flt_inf()) { } else { return false }\nreturn true\n}\n" +
+  "if ge(__flt_inf(), __flt_inf()) { } else { return false }\nreturn true\n}\n"
+def f64_infinity_equality_check =
   "@noinline\nfn check_infinity_equality() bool {\n" +
   "if eq(__flt_inf(), __flt_inf()) { } else { return false }\n" +
-  "if ne(__flt_inf(), 0.0) { } else { return false }\nreturn true\n}\n" +
-  "@noinline\nfn comparisons() bool {\n" +
-  "if check_lt_le() { } else { return false }\n" +
-  "if check_gt_ge() { } else { return false }\n" +
-  "if check_equality() { } else { return false }\n" +
-  "if check_nan_ordering() { } else { return false }\n" +
-  "if check_nan_infinity() { } else { return false }\n" +
-  "if check_infinity_equality() { } else { return false }\nreturn true\n}\n"
-def f64_compare_prefix =
-  "@noinline\nfn pass_f64(int a, int b, int c, int d, f64 value) f64 {\n" +
-  "  value\n}\n" + compare_helpers("f64") +
-  f64_checks
+  "if ne(__flt_inf(), 0.0) { } else { return false }\nreturn true\n}\n"
 
 def f64_arithmetic_prefix =
   "@noinline\nfn f64_add(f64 a, f64 b) f64 { a + b }\n" +
@@ -177,30 +176,24 @@ def f64_arithmetic_prefix =
   "@noinline\nfn f64_mul(f64 a, f64 b) f64 { a * b }\n" +
   "@noinline\nfn f64_div(f64 a, f64 b) f64 { a / b }\n"
 
-def f32_checks =
+def f32_lt_le_check =
   "@noinline\nfn check_lt_le() bool {\n" +
   "if lt(-1.0f32, 0.0f32) { } else { return false }\n" +
   "if lt(0.0f32, -1.0f32) { return false }\n" +
   "if le(0.0f32, 0.0f32) { } else { return false }\n" +
-  "if le(1.0f32, 0.0f32) { return false }\nreturn true\n}\n" +
+  "if le(1.0f32, 0.0f32) { return false }\nreturn true\n}\n"
+def f32_gt_ge_check =
   "@noinline\nfn check_gt_ge() bool {\n" +
   "if gt(1.0f32, 0.0f32) { } else { return false }\n" +
   "if gt(0.0f32, 1.0f32) { return false }\n" +
   "if ge(0.0f32, 0.0f32) { } else { return false }\n" +
-  "if ge(-1.0f32, 0.0f32) { return false }\nreturn true\n}\n" +
+  "if ge(-1.0f32, 0.0f32) { return false }\nreturn true\n}\n"
+def f32_equality_check =
   "@noinline\nfn check_equality() bool {\n" +
   "if eq(-0.0f32, 0.0f32) { } else { return false }\n" +
   "if eq(0.0f32, 1.0f32) { return false }\n" +
   "if ne(0.0f32, 1.0f32) { } else { return false }\n" +
-  "if ne(-0.0f32, 0.0f32) { return false }\nreturn true\n}\n" +
-  "@noinline\nfn comparisons() bool {\n" +
-  "if check_lt_le() { } else { return false }\n" +
-  "if check_gt_ge() { } else { return false }\n" +
-  "if check_equality() { } else { return false }\nreturn true\n}\n"
-def f32_prefix =
-  "@noinline\nfn pass_f32(int a, int b, int c, int d, f32 value) f32 {\n" +
-  "  value\n}\n" + compare_helpers("f32") +
-  f32_checks
+  "if ne(-0.0f32, 0.0f32) { return false }\nreturn true\n}\n"
 
 def f32_arithmetic_prefix =
   "@noinline\nfn f32_add(f32 a, f32 b) f32 { a + b }\n" +
@@ -216,14 +209,19 @@ def f64_mul_div =
   f64_arithmetic_prefix +
   "if f64_mul(-1.5, 2.0) == -3.0 && " +
   "f64_div(3.0, 2.0) == 1.5 { 3 } else { 0 }"
-def f64_conversions =
+def f64_int_to_float =
   "@noinline\nfn int_to_f64(int value) f64 { value }\n" +
+  "if int_to_f64(16777217) == 16777217.0 { 3 } else { 0 }"
+def f64_float_to_int =
   "@noinline\nfn f64_to_int(f64 value) int { int(value) }\n" +
+  "if f64_to_int(1234.875) == 1234 && " +
+  "f64_to_int(-1234.875) == -1234 { 3 } else { 0 }"
+def f64_widen_f32 =
   "@noinline\nfn widen_f32(f32 value) f64 { value }\n" +
+  "if widen_f32(1.25f32) == 1.25 { 3 } else { 0 }"
+def f64_narrow_f32 =
   "@noinline\nfn narrow_f64(f64 value) f32 { value }\n" +
-  "if int_to_f64(16777217) == 16777217.0 && " +
-  "f64_to_int(1234.875) == 1234 && f64_to_int(-1234.875) == -1234 && " +
-  "widen_f32(1.25f32) == 1.25 && narrow_f64(1.5) == 1.5 { 3 } else { 0 }"
+  "if narrow_f64(1.5) == 1.5f32 { 3 } else { 0 }"
 
 def f32_add_sub =
   f32_arithmetic_prefix +
@@ -256,11 +254,32 @@ def avr_f64_runtime_available =
     str_contains(avr_libgcc_symbols.get("stdout", ""), "__extendsfdf2") &&
     str_contains(avr_libgcc_symbols.get("stdout", ""), "__truncdfsf2")
 
-assert(run_avr_case("f64-comparisons",
-                    f64_compare_prefix +
-                    "if comparisons() && pass_f64(1, 2, 3, 4, 1.5) == 1.5 { 3 } else { 0 }",
-                    [7, 0, 0, 0, 0, 0, 0, 0]),
-       "AVR f64 comparisons, NaN, infinity, and stack arguments")
+assert(run_avr_comparison_case(
+           "f64-lt-le", "f64",
+           "@noinline\nfn pass_f64(int a, int b, int c, int d, f64 value) f64 {\n" +
+           "  value\n}\n" + f64_lt_le_check +
+           "if check_lt_le() && pass_f64(1, 2, 3, 4, 1.5) == 1.5 { 3 } else { 0 }"),
+       "AVR f64 less/less-equal comparisons and stack arguments")
+assert(run_avr_comparison_case("f64-gt-ge", "f64",
+                               f64_gt_ge_check +
+                               "if check_gt_ge() { 3 } else { 0 }"),
+       "AVR f64 greater/greater-equal comparisons")
+assert(run_avr_comparison_case("f64-equality", "f64",
+                               f64_equality_check +
+                               "if check_equality() { 3 } else { 0 }"),
+       "AVR f64 equality and signed-zero comparisons")
+assert(run_avr_comparison_case("f64-nan-ordering", "f64",
+                               f64_nan_ordering_check +
+                               "if check_nan_ordering() { 3 } else { 0 }"),
+       "AVR f64 NaN ordering")
+assert(run_avr_comparison_case("f64-nan-infinity", "f64",
+                               f64_nan_infinity_check +
+                               "if check_nan_infinity() { 3 } else { 0 }"),
+       "AVR f64 NaN and infinity comparisons")
+assert(run_avr_comparison_case("f64-infinity-equality", "f64",
+                               f64_infinity_equality_check +
+                               "if check_infinity_equality() { 3 } else { 0 }"),
+       "AVR f64 infinity equality")
 if avr_f64_runtime_available {
   assert(run_avr_case("f64-add-sub", f64_add_sub,
                       [7, 0, 0, 0, 0, 0, 0, 0]),
@@ -268,7 +287,13 @@ if avr_f64_runtime_available {
   assert(run_avr_case("f64-mul-div", f64_mul_div,
                       [7, 0, 0, 0, 0, 0, 0, 0]),
          "AVR f64 multiplication and division")
-  assert(run_avr_case("f64-conversions", f64_conversions,
+  assert(run_avr_case("f64-int-to-float", f64_int_to_float,
+                      [7, 0, 0, 0, 0, 0, 0, 0]) &&
+         run_avr_case("f64-float-to-int", f64_float_to_int,
+                      [7, 0, 0, 0, 0, 0, 0, 0]) &&
+         run_avr_case("f64-widen-f32", f64_widen_f32,
+                      [7, 0, 0, 0, 0, 0, 0, 0]) &&
+         run_avr_case("f64-narrow-f32", f64_narrow_f32,
                       [7, 0, 0, 0, 0, 0, 0, 0]),
          "AVR signed i64/f64 and f32/f64 conversions")
 } else {
@@ -277,16 +302,30 @@ if avr_f64_runtime_available {
                               ["__adddf3", "__subdf3"]) &&
          run_avr_codegen_case("f64-mul-div", f64_mul_div,
                               ["__muldf3", "__divdf3"]) &&
-         run_avr_codegen_case("f64-conversions", f64_conversions,
-                              ["__floatdidf", "__fixdfdi",
-                               "__extendsfdf2", "__truncdfsf2"]),
+         run_avr_codegen_case("f64-int-to-float", f64_int_to_float,
+                              ["__floatdidf"]) &&
+         run_avr_codegen_case("f64-float-to-int", f64_float_to_int,
+                              ["__fixdfdi"]) &&
+         run_avr_codegen_case("f64-widen-f32", f64_widen_f32,
+                              ["__extendsfdf2"]) &&
+         run_avr_codegen_case("f64-narrow-f32", f64_narrow_f32,
+                              ["__truncdfsf2"]),
          "AVR f64 operations lower to libgcc helpers on toolchains without runtime support")
 }
-assert(run_avr_case("f32-comparisons",
-                    f32_prefix +
-                    "if comparisons() && pass_f32(1, 2, 3, 4, 1.5f32) == 1.5f32 { 3 } else { 0 }",
-                    [7, 0, 0, 0, 0, 0, 0, 0]),
-       "AVR f32 constants, stack arguments, comparisons, and signed zero")
+assert(run_avr_comparison_case(
+           "f32-lt-le", "f32",
+           "@noinline\nfn pass_f32(int a, int b, int c, int d, f32 value) f32 {\n" +
+           "  value\n}\n" + f32_lt_le_check +
+           "if check_lt_le() && pass_f32(1, 2, 3, 4, 1.5f32) == 1.5f32 { 3 } else { 0 }"),
+       "AVR f32 less/less-equal comparisons, signed zero, and stack arguments")
+assert(run_avr_comparison_case("f32-gt-ge", "f32",
+                               f32_gt_ge_check +
+                               "if check_gt_ge() { 3 } else { 0 }"),
+       "AVR f32 greater/greater-equal comparisons")
+assert(run_avr_comparison_case("f32-equality", "f32",
+                               f32_equality_check +
+                               "if check_equality() { 3 } else { 0 }"),
+       "AVR f32 equality and signed-zero comparisons")
 assert(run_avr_case("f32-add-sub", f32_add_sub,
                     [7, 0, 0, 0, 0, 0, 0, 0]),
        "AVR f32 addition and subtraction")

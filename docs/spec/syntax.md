@@ -5,7 +5,18 @@ Topic references define meaning, type rules, and backend limits for these source
 forms. The parser-oriented grammar is in
 [Info EBNF](../info/nytrix.ebnf).
 
+## Contents
+
+- [Comments and literals](#lexical-forms)
+- [Bindings and functions](#bindings)
+- [Statements, operators, and attributes](#statements-and-control-flow)
+
+> **Note:** The blocks below show grammar forms, not standalone programs.
+> [Runnable shape](#runnable-shape) is a complete example.
+
 ## Lexical forms
+
+### Spelling: comments
 
 `;` starts a line comment; it is not a statement separator or terminator. The
 lexer also supports delimited multiline comments: `;MARKER ... MARKER;` and
@@ -21,52 +32,50 @@ NOTE;
 ;{ ignored block };
 ```
 
+### Meaning: statement boundaries
+
 Adjacent statements are separated by the grammar and source layout. Blocks use
 braces. Newlines can separate statements; semicolons do not terminate them.
 
-## Literals and values
+Some spellings are reserved or retired so the diagnostics can name the
+supported form. `let`, `func`, `import`, `var`, `void`, and `printf` are
+rejected with a hint pointing at `def`/`mut`, `fn`, `use`, `none`, and `print`;
+`macro` is a retired statement form whose hint names `quote` with `${...}`
+splicing. Words that name live forms are documented where the form lives:
+`impl` and `operator` in [Traits](traits.md), `with` in
+[Control flow](control-flow.md#with). Nothing else is advertised as a future
+form; new syntax is announced in the changelog when it lands.
+
+## Literals
+
+### Spelling
+
+| Kind | Spellings |
+| --- | --- |
+| Nil and booleans | `nil`, `true`, `false` |
+| Integer bases | Decimal `123`; hexadecimal `0xff`; octal `0o77`; binary `0b1010` |
+| Fixed-width integers | `1i8`, `1i16`, `1i32`, `1i64`, `1u8`, `1u16`, `1u32`, `1u64` |
+| Floating point | `1.0f32`, `1.0f64`, `1.0f128` |
+| Strings | `"text"`, `'text'`, `"""text"""`, `'''text'''` |
+| Formatted strings | `f"value={x}"` |
+| Collections | `[1, 2, 3]`, `{"a": 1}` |
 
 ```ny
-nil  true  false
-123  0xff  0o77  0b1010
-1i8 1i16 1i32 1i64  1u8 1u16 1u32 1u64
-1.0f32 1.0f64 1.0f128
-"text"  'text'  """text"""  '''text'''  f"value={x}"
-[1, 2, 3]  {"a": 1, "b": 2}
+def count = 123
+def message = f"value={count}"
+def items = [1, 2, 3]
 ```
 
-`list(n)` creates an empty list with reserved capacity `n`; it does not create
-initialized elements. See [Values](values.md) for value and container behavior.
+### Meaning
 
-## Files, modules, and imports
+Integer suffixes and literal interpretation depend on type context. `list(n)`
+creates an empty list with reserved capacity `n`; it does not create initialized
+elements. See [Values](values.md) for value and container behavior.
 
-```ny
-use core
-use module.path
-use module.path as alias
-use module.path (name, other)
-use module.path (name as alias)
-use module.path:profile
-use "./relative.ny" as alias
-use "./relative.ny" (name)
-
-module name *
-module name (a, b, c)
-module name { export group(a, b) internal(_helper) }
-module name generated from Spec { key = value emit make_backend(Contract) }
-
-#main { body }
-```
-
-`#main` marks direct-entry work in a module. Import and export rules are in
-[Units](units.md).
-
-## Bindings and functions
+## Bindings
 
 Bindings use `def` for immutable names and `mut` for names that may be
-reassigned. Type annotations precede names. Functions can have inferred or
-explicit return types; the final expression in the body is the result when no
-`return` exits earlier.
+reassigned. Type annotations precede names.
 
 ```ny
 def name = expr
@@ -76,11 +85,19 @@ mut Type name = expr
 def a, b = expr
 mut a, b
 del name
+```
 
+## Functions
+
+Functions can have inferred or explicit return types; the final expression in
+the body is the result when no `return` exits earlier.
+
+```ny
 fn name(params) { body }
 fn name(params) Type { body }
 fn name(params) Type = expr
 fn(value) { expression }
+fn(value) expression
 
 parameter
 Type parameter
@@ -159,14 +176,9 @@ Unary `&expression` is borrow syntax. Binary `&` is bitwise-and, `^` is XOR,
 and both `**` and `^^` spell exponentiation. See [Operators](operators.md)
 for precedence and associativity.
 
-## Native declarations and attributes
+## Attributes
 
 ```ny
-#include <stdlib.h> as "c"
-#include "./header.h"
-extern "library" { fn symbol(Type argument) Type }
-layout Name { Type field, Type other }
-
 @pure
 @effects(none|io|alloc|ffi|thread|read|write|all)
 @consteval
@@ -176,8 +188,41 @@ layout Name { Type field, Type other }
 @borrows(name)  @consumes(name)  @mutates(name)
 ```
 
-See [Native](native.md) for FFI and ABI rules, and [Functions](functions.md)
-for attribute contracts.
+See [Functions](functions.md) for attribute contracts.
+
+## Native declarations
+
+```ny
+#include <stdlib.h> as "c"
+#include "./header.h"
+extern "library" { fn symbol(Type argument) Type }
+layout Name { Type field, Type other }
+```
+
+See [Native](native.md) for FFI and ABI rules.
+
+## Files, modules, and imports
+
+```ny
+use core
+use module.path
+use module.path as alias
+use module.path (name, other)
+use module.path (name as alias)
+use module.path:profile
+use "./relative.ny" as alias
+use "./relative.ny" (name)
+
+module name *
+module name (a, b, c)
+module name { export group(a, b) internal(_helper) }
+module name generated from Spec { key = value emit make_backend(Contract) }
+
+#main { body }
+```
+
+`#main` marks direct-entry work in a module. Import and export rules are in
+[Units](units.md).
 
 ## Compile-time and proof forms
 

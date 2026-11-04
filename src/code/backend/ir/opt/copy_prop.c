@@ -139,7 +139,7 @@ static void nir_call_refresh_argument_ownership(nyr_func_t *f, nyr_inst_t *in,
   int args[NYIR_CALL_MAX_ARGS];
   int argc = 0;
   if (!nyr_call_args(in, f->next_value, args, NYIR_CALL_MAX_ARGS, &argc, NULL,
-                      0))
+                     0))
     return;
   for (int i = 0; i < argc; ++i) {
     int value = args[i];
@@ -209,6 +209,8 @@ static bool copy_prop_cfg(nyr_func_t *f) {
   for (size_t i = 0; i < f->len; ++i) {
     nyr_inst_t *in = &f->data[i];
     if (in->dst < 0) {
+      bool asm_goto = in->op == NYIR_INLINE_ASM &&
+                      (in->imm == -14 || in->imm == -82 || in->imm == -83);
       /*
        * Branches and stores have no result, but their operands still obey
        * the same availability rule as result-producing instructions.  The
@@ -220,7 +222,7 @@ static bool copy_prop_cfg(nyr_func_t *f) {
         in->a = nir_alias_for_use(alias, alias_blk, &cfg, in->a, blk);
       if (in->b >= 0)
         in->b = nir_alias_for_use(alias, alias_blk, &cfg, in->b, blk);
-      if (in->c >= 0)
+      if (!asm_goto && in->c >= 0)
         in->c = nir_alias_for_use(alias, alias_blk, &cfg, in->c, blk);
       if (in->d >= 0)
         in->d = nir_alias_for_use(alias, alias_blk, &cfg, in->d, blk);
@@ -235,6 +237,8 @@ static bool copy_prop_cfg(nyr_func_t *f) {
       continue;
     }
     size_t blk = cfg.inst_block[i];
+    bool asm_goto = in->op == NYIR_INLINE_ASM &&
+                    (in->imm == -14 || in->imm == -82 || in->imm == -83);
     /*
      * Fold operands whose aliased source is available here.
      */
@@ -250,7 +254,7 @@ static bool copy_prop_cfg(nyr_func_t *f) {
                          nyr_cfg_dominates(&cfg, alias_blk[in->b], blk)))
         in->b = s;
     }
-    if (in->c >= 0) {
+    if (!asm_goto && in->c >= 0) {
       int s = nir_alias_find(alias, in->c);
       if (s != in->c && (alias_blk[in->c] == SIZE_MAX ||
                          nyr_cfg_dominates(&cfg, alias_blk[in->c], blk)))
@@ -383,11 +387,13 @@ bool nyr_copy_prop(nyr_func_t *f) {
     alias[i] = i;
   for (size_t i = 0; i < f->len; ++i) {
     nyr_inst_t *in = &f->data[i];
+    bool asm_goto = in->op == NYIR_INLINE_ASM &&
+                    (in->imm == -14 || in->imm == -82 || in->imm == -83);
     if (in->a >= 0)
       in->a = nir_alias_find(alias, in->a);
     if (in->b >= 0)
       in->b = nir_alias_find(alias, in->b);
-    if (in->c >= 0)
+    if (!asm_goto && in->c >= 0)
       in->c = nir_alias_find(alias, in->c);
     if (in->d >= 0)
       in->d = nir_alias_find(alias, in->d);

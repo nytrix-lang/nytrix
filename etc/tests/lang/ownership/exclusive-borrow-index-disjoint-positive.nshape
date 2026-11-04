@@ -4,7 +4,7 @@ shape ownership_rule_exclusive_borrow_index_disjoint_positive {
   features ["ownership", "borrow", "exclusive", "index", "branch", "positive"]
   template ny-test-case
   expect compile_and_run
-  flags "--ownership-strict --nyir-verify"
+  flags "--ownership-strict --nyr-verify"
   source ny <<'NY'
 use core
 

@@ -1,9 +1,17 @@
 <!-- nytrix-doc: {"audience":"contributor","featured":false,"group":"spec","order":46,"summary":"Link request fields, tool selection, and the in-process ELF executable linker."} -->
 # Linking
 
+> **Note:** Use `ny` for applications; use this API to link existing objects.
+
 The [Nyr C API](nyr.md) links object files and static archives through an
 in-process ELF linker or external LLVM tools. Source compilation and the
 compiler driver's application-link path are separate.
+
+## Contents
+
+- [Request fields and dispatch](#link-requests)
+- [ELF executable linking](#in-process-elf-executables)
+- [Coverage and failure boundaries](#coverage)
 
 Declarations are in [`<nyr/nyr.h>`](../../src/include/nyr/nyr.h);
 dispatch and ELF linking are implemented in
@@ -29,7 +37,7 @@ available. Paths and request storage remain caller-owned for the call.
 
 | Request | Implementation |
 | --- | --- |
-| Linux x86-64 host executable, `target_triple == NULL`, and an entry symbol | In-process ELF linker. |
+| Linux x86-64 or AArch64 host, executable, `target_triple == NULL`, and an entry symbol | In-process ELF linker. |
 | Static archive output | `llvm-ar rcs`. |
 | Wasm executable | `wasm-ld`; uses `--no-entry` when no entry is supplied. |
 | Other executable or shared-library output | `clang -fuse-ld=lld`, with target and output-kind options. |
@@ -49,10 +57,12 @@ structure has no general-purpose linker-argument or library-search-path field.
 
 ## In-process ELF executables
 
-`nyr_link_elf64_executable` links one ELF64 x86-64 relocatable object.
-`nyr_link_elf64_executable_objects` accepts several objects and static archives.
-These entry points are available on Linux x86-64 and do not start an external
-linker.
+`nyr_link_elf64_executable` links one ELF64 x86-64 or AArch64 relocatable
+object. `nyr_link_elf64_executable_objects` accepts several objects and static
+archives for one of those architectures. These entry points are available on
+Linux x86-64 and AArch64 hosts and do not start an external linker. The output
+architecture follows the input objects, so an x86-64 host can produce a static
+AArch64 executable without a cross-linker.
 
 The entry function takes no arguments and returns an `i64`. The linker adds a
 startup stub that calls it and uses the low byte of its result as the process
@@ -65,10 +75,11 @@ object files. Duplicate strong definitions, unresolved strong symbols,
 unsupported relocations, writable executable sections, and unsupported object
 formats are errors.
 
-This path produces a static executable. It does not provide shared-library
-loading, ordinary C startup, or the compiler driver's full runtime and link
-options. Use the external request path or the compiler driver when those are
-needed.
+This path supports the x86-64 and AArch64 relocation subsets emitted by
+Nytrix's object writers. It produces a static executable. It does not provide
+shared-library loading, ordinary C startup, or the compiler driver's full
+runtime and link options. Use the external request path or the compiler driver
+when those are needed.
 
 ### Request example
 
@@ -96,6 +107,8 @@ bool linked = nyr_link(&request, error, sizeof(error));
 The [public API acceptance program](../../src/code/backend/ir/test/public_acceptance.c)
 executes linked outputs and checks multiple objects, archive extraction,
 strong/weak resolution, duplicate definitions, and unresolved-symbol errors.
+It also checks AArch64 ELF output and runs that executable under `qemu-aarch64`
+when the emulator is installed.
 Run it after building the acceptance target:
 
 ```bash
@@ -106,3 +119,9 @@ build/release/nyr-backend-ir-acceptance
 Object emission and linking have separate capability boundaries. A target's
 object writer being available does not establish that the corresponding
 external linker, startup objects, or runtime libraries are installed.
+
+## Related
+
+- [Nyr](nyr.md) for object construction and the public link API.
+- [Native](native.md) for target and ABI requirements.
+- [Pipeline](pipeline.md) for compiler route selection.

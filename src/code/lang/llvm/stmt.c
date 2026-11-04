@@ -3137,11 +3137,16 @@ stmt_var_setup_local_binding(codegen_t *cg, scope *scopes, size_t depth,
    * consumer unboxes them.
    */
   if (!dynamic_call_any &&
+      depth > 0 &&
       (prefer_direct_locals ||
        can_bind_decl_direct(cg, name, var_stmt->as.var.is_mut))) {
     *bind_direct = true;
+    if (depth == 0)
+      fprintf(stderr, "DBG top_level bind_direct=true for %s\n", name);
     return;
   }
+  if (depth == 0)
+    fprintf(stderr, "DBG top_level bind_direct=false for %s slot=%p\n", name, (void*)*slot);
   bool use_f64_slot = false;
   bool use_f32_slot = false;
   bool use_int_slot = false;
@@ -3592,7 +3597,7 @@ enum {
   STMT_BRANCH_OP_NE = 1 << 5,
   STMT_BRANCH_OP_ALL = (1 << 6) - 1,
   STMT_BRANCH_OP_ORDER = STMT_BRANCH_OP_LT | STMT_BRANCH_OP_LE |
-                         STMT_BRANCH_OP_GT | STMT_BRANCH_OP_GE,
+      STMT_BRANCH_OP_GT | STMT_BRANCH_OP_GE,
   STMT_BRANCH_OP_EQUALITY = STMT_BRANCH_OP_EQ | STMT_BRANCH_OP_NE,
 };
 
@@ -4629,6 +4634,14 @@ static bool stmt_bindable_mut_inferred_type(const char *type_name) {
       strcmp(type_name, "void") == 0)
     return false;
   if (stmt_type_name_is_float_value(type_name))
+    return true;
+
+  /*
+   * Mutable booleans must retain their language tag across assignment.  If
+   * inferred as an untyped 0/1 slot, generic truth conversion confuses true
+   * with the tagged integer-zero word.
+   */
+  if (strcmp(type_name, "bool") == 0)
     return true;
 
   return ny_gencall_type_is_known_obj(type_name);
@@ -8098,6 +8111,11 @@ static void gen_stmt_defer(codegen_t *cg, scope *scopes, size_t depth,
                            stmt_t *s) {
   if (!s->as.de.body)
     return;
+  FILE *dbg = fopen("/tmp/ny_defer_stmt_debug.txt", "a");
+  if (dbg) {
+    fprintf(dbg, "DBG gen_stmt_defer called, depth=%zu\n", depth);
+    fclose(dbg);
+  }
   ny_param_list no_params = {0};
   LLVMValueRef cls = gen_closure(cg, scopes, depth, no_params, s->as.de.body,
                                  false, NULL, "__defer");
@@ -8163,6 +8181,8 @@ static void gen_stmt_struct(codegen_t *cg, stmt_t *s) {
 
 static void gen_stmt_module(codegen_t *cg, scope *scopes, size_t *depth,
                             stmt_t *s, size_t func_root, bool is_tail) {
+  fprintf(stderr, "DBG gen_stmt_module depth=%zu body.len=%zu\n",
+          *depth, s->as.module.body.len);
   const char *prev = cg->current_module_name;
   cg->current_module_name = s->as.module.name;
   bool direct_source_module =
@@ -8257,6 +8277,8 @@ void collect_labels(codegen_t *cg, LLVMValueRef func, stmt_t *s, size_t depth) {
  */
 static void gen_stmt_var(codegen_t *cg, scope *scopes, size_t *depth,
                          stmt_t *s) {
+  fprintf(stderr, "DBG gen_stmt_var depth=%zu names.len=%zu\n",
+          *depth, s->as.var.names.len);
   bool dest = s->as.var.is_destructure;
   NY_COMPILER_ASSERTF(s->as.var.names.len > 0,
                       "var stmt has no bindings at line %d", s->tok.line);
@@ -8754,6 +8776,24 @@ static void gen_stmt_var(codegen_t *cg, scope *scopes, size_t *depth,
       target_val = first_val;
     }
     stmt_restore_binding_int_proof(self_raw_snap);
+    /*
+     * Keep inferred/declared booleans in the canonical dynamic representation.
+     * Raw 0/1 values are ambiguous with the tagged integer representation at
+     * erased boundaries (`1` is also integer zero), which breaks reads after
+     * a mutable boolean assignment.
+     */
+    const char *stored_type = decl_type;
+    if (!s->as.var.is_decl) {
+      binding *cur = resolved_local ? resolved_local : resolved_global;
+      if (cur)
+        stored_type = binding_assign_type(cur);
+    }
+    if (stored_type && strcmp(stored_type, "bool") == 0 && target_val) {
+      LLVMValueRef truth = to_bool(cg, target_val);
+      if (truth)
+        target_val = ny_select(cg, truth, ny_ctrue(cg), ny_cfalse(cg),
+                               "canonical_mut_bool");
+    }
     if (!s->as.var.is_destructure) {
       const char *want = decl_type;
       if (!s->as.var.is_decl) {
@@ -9473,6 +9513,11 @@ static void gen_stmt_inner(codegen_t *cg, scope *scopes, size_t *depth,
                            stmt_t *s, size_t func_root, bool is_tail) {
   if (!s || cg->had_error)
     return;
+  FILE *dbg = fopen("/tmp/ny_gen_stmt_debug.txt", "a");
+  if (dbg) {
+    fprintf(dbg, "DBG gen_stmt_inner kind=%d\n", s ? (int)s->kind : -1);
+    fclose(dbg);
+  }
 
   ny_dbg_loc(cg, s->tok);
   if (cg->trace_exec)
@@ -9737,9 +9782,9 @@ static void gen_stmt_inner(codegen_t *cg, scope *scopes, size_t *depth,
     }
     if (s->as.macro.body) {
       if (verbose_enabled >= 2) {
-        ny_diag_hint(
-            "register '%s' in core.compiler.syntax to customize expansion behavior",
-            macro_name);
+        ny_diag_hint("register '%s' in core.compiler.syntax to customize "
+                     "expansion behavior",
+                     macro_name);
       }
       gen_stmt(cg, scopes, depth, s->as.macro.body, func_root, is_tail);
       break;

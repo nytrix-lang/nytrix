@@ -193,15 +193,7 @@ static bool build_random_fn(nyr_func_t *f, uint64_t seed, size_t steps) {
     return false;
   f->param_types[0] = NYIR_PARAM_I64;
   f->param_count = 1;
-  values[0] = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_LOAD_LOCAL,
-                                         .dst = -1,
-                                         .a = -1,
-                                         .b = -1,
-                                         .c = -1,
-                                         .d = -1,
-                                         .e = -1,
-                                         .f = -1,
-                                         .imm = 0});
+  values[0] = nyr_opt_emit_imm(f, NYIR_LOAD_LOCAL, 0);
   if (values[0] < 0)
     return false;
 

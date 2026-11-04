@@ -4,11 +4,36 @@
 The compiler checks source before selecting a code-generation route. Each
 backend has its own source-shape and host limits.
 
+> **Note:** Usually unnecessary unless a route differs or you need a compiler stage.
+
+## Contents
+
+- [Stage map and checking](#stage-map)
+- [Lowering and execution](#lowering-and-execution)
+- [Worked trace](#worked-trace)
+
 ## Stage map
 
+1. Parse source units and expand compile-time forms.
+2. Resolve names and check language and ownership contracts.
+3. Lower checked source into NYIR.
+4. Select a backend to execute or emit an artifact.
+
 Source units and the selected standard library pass through parsing, expansion,
-symbol resolution, and semantic checking before NYIR lowering. Ownership and
-provenance analysis run when enabled. The selected backend then consumes NYIR:
+symbol resolution, and semantic checking before one shared source-to-NYIR
+lowering step. Ownership and provenance analysis run when enabled. The selected
+backend then consumes NYIR:
+
+```mermaid
+flowchart LR
+    A[Source units] --> B[Parse and expand]
+    B --> C[Resolve and check]
+    C --> D[Lower to NYIR]
+    D --> E{Selected route}
+    E --> F[LLVM]
+    E --> G[Native NYIR]
+    E --> H[Browser Wasm]
+```
 
 | Route | Code generation |
 | --- | --- |
@@ -16,11 +41,11 @@ provenance analysis run when enabled. The selected backend then consumes NYIR:
 | Owned native | NYIR optimization, typed machine lowering, register allocation, and native object or JIT emission. |
 | Browser/Wasm | Supported Wasm lowering and explicit browser host imports. |
 
-The REPL's compatibility emitter is a separate incremental path, described
-under [Lowering and execution](#lowering-and-execution).
+The CLI and REPL share the source-to-NYIR lowerer. The REPL keeps incremental
+parsing and semantic preparation, then uses the same NYIR execution backends.
 
 The exact terminal path is selected by the command and backend. `--native-only`
-requires the NYIR/native path. On supported hosts, `-run` and `-o` select the
+requires the NYIR/native path. On supported hosts, `--run=aot` and `--output` select the
 owned native object encoder unless `--native-backend` explicitly chooses
 another backend; the browser tools use the Wasm path. Unsupported shapes
 diagnose at their owning boundary instead of selecting a different backend
@@ -129,23 +154,40 @@ cloning/solver cost off ordinary release compilation.
 
 ## Lowering and execution
 
-LLVM builds can optimize one linked module, execute it through the JIT, or emit
-an object for the host linker. `-flto` preserves LLVM optimization after
-parallel module bitcode is linked.
+`src/code/lang/lower.c` and `src/code/lang/lower/` own source-to-NYIR lowering.
+The CLI, REPL, native backends, LLVM backend, and NYIR VM use this shared
+representation; there is no supported AST-to-LLVM execution route.
 
-The native path lowers supported code into NYIR, runs its verified optimization
-pipeline, then lowers to typed machine form and emits an object. Native
-`-flto` selects the aggressive whole-program NYIR pipeline; it is not LLVM
-bitcode LTO. The browser path lowers the supported browser surface to Wasm and
-uses explicit host imports.
+The LLVM pipeline in `src/code/lang/pipeline/native.c` calls
+`nyr_build_ir()` and then `ny_llvm_emit_nyir_module()`. LLVM can optimize the
+linked module, execute it through MCJIT or ORC, or emit an object for the host
+linker. `-flto` preserves LLVM optimization after parallel module bitcode is
+linked.
 
-The CLI uses the NYIR-to-LLVM emitter for LLVM execution and AOT emission.
-`--legacy-llvm-dump=PATH` emits the quarantined AST-to-LLVM compatibility
-backend's IR for diagnostics without executing it. A NYIR lowering or emission
-failure is reported by that pipeline and does not silently retry through
-legacy codegen. The REPL still calls the compatibility emitter for standard
-initialization and snippet execution; migrating that incremental path is part
-of removing the legacy backend from CMake and the compiler.
+Owned-native execution also starts from NYIR, then runs the verified
+optimization pipeline, lowers to typed machine form, and emits native code.
+Native `-flto` selects the aggressive whole-program NYIR pipeline; it is not
+LLVM bitcode LTO. The NYIR VM interprets the same lowered functions. The
+browser path lowers its supported surface to Wasm with explicit host imports.
+
+`codegen_prepare()` in `src/code/lang/llvm/prepare.c` remains part of compiler
+preparation: it collects module, signature, effect, and link information used
+by the shared pipeline. The LLVM backend also uses selected helpers from
+`src/code/lang/llvm/` for declarations and globals. The older AST-body emitters
+(`gen_expr`, `gen_stmt`, and `gen_closure`) are not called by the CLI or REPL
+routes; changing them does not change current language behavior. The removed
+`--legacy-llvm-dump` option is rejected rather than selecting a second
+lowering route.
+
+The defer regression fixtures exercise the live routes with the same source:
+
+| Fixture | Routes | Invariants checked |
+| --- | --- | --- |
+| `etc/tests/lang/execution/defer.nshape` | `--run=native`, `--native-only`, LLVM MCJIT, LLVM ORC, `--nyr-run-profile` | LIFO scope cleanup, mutable captures, integer and float homes, panic unwinding, and null callbacks |
+| `etc/tests/lang/execution/defer-loop-capture.nshape` | Same five routes | Deferred loop reads capture the registration-time value |
+
+These are semantic route checks, not performance comparisons. Keep them
+aligned when changing shared lowering or a backend consumer.
 
 ## Imports, standard library, and caches
 
@@ -165,8 +207,8 @@ cannot be reused. Set `NYTRIX_TRACE_CACHE=1` to see `module cache hit` and
 use its whole-program cache.
 
 Runtime artifacts are rebuilt by the build driver when their owned runtime
-sources change. In particular, a change under `src/code/lang/runtime/` such as
-`src/code/lang/runtime/core.c` invalidates the runtime build input; this is build-time
+sources change. In particular, a change under `src/code/backend/runtime/` such as
+`src/code/backend/runtime/core.c` invalidates the runtime build input; this is build-time
 dependency tracking, not a runtime recompilation of a shared library.
 
 ## Worked trace
@@ -185,34 +227,37 @@ Compile it through each stage:
 
 ```bash
 ny --dump-ast hello.ny           # parsed source tree; no execution
-ny --dump-ast-typed --dump-ast-filter=square hello.ny  # checked declaration
+ny --dump-ast=typed,filter=square hello.ny  # checked declaration
 ny -vvvv hello.ny                # full compiler trace; save failure artifacts
 ny --dump-on-error --dump-dir=build/debug/case hello.ny
 ny --dump-diagnose --dump-dir=build/debug/case hello.ny
-ny -dump-llvm hello.ny           # LLVM IR to stderr (flag before the file)
-ny --emit-ir=build/trace/hello.ll -emit-only hello.ny   # IR to a file
-ny --nyir-dump-cfg --native-only hello.ny               # NYIR blocks
-ny --nyir-track-value=12 --native-only hello.ny         # follow SSA value 12
+ny --dump=llvm hello.ny          # LLVM IR to stderr
+ny --emit=ir=build/trace/hello.ll --run=none hello.ny   # IR to a file
+ny --dump=nyr --native-only hello.ny                     # NYR blocks
+ny --nyr-track-value=12 --native-only hello.ny           # follow SSA value 12
 ny -trace hello.ny               # runtime trace
 ```
 
 Flags come before the file argument. AST dumps stop before execution; the typed
 form first validates types and traits. See [AST inspection](../learn/debugging.md#ast-inspection)
-for node metadata and filtering. `-dump-llvm` prints LLVM IR; `--emit-ir`
-writes it to a path and `-emit-only` stops before execution. `-vvvv` and
+for node metadata and filtering. `--dump=llvm` prints LLVM IR; `--emit=ir=PATH`
+writes it to a path and `--run=none` stops before execution. `-vvvv` and
 `-vvvvv` enable the deepest compiler trace and save artifacts on failure under
 `build/debug/`; `--dump-dir` chooses another location. The failure manifest
 records the failing stage and which artifacts were actually written. At
 `-vvvvv`, optimizer candidate-decision hooks print without per-pass
 `NY_TRACE_*` setup; passes without candidate hooks still report their pass
-summary and whether the IR changed. A parse
+summary and whether the IR changed. `-vvvvv` keeps imported-library internals
+out of the trace; `-vvvvvv` includes them and adds phase timing and resource
+summary. A parse
 failure saves the input source and removes stale IR from an earlier run.
 `--dump-diagnose` writes the input source, pre/post LLVM IR, assembly, bitcode,
 statistics, and a summary when compilation succeeds. A failed run refreshes
 the source and summary with its exit status; artifacts from an earlier run are
 cleared first. On the native path,
-`--nyir-dump`, `--nyir-dump-raw`, `--nyir-dump-cfg`, and `--nyir-dump-stats`
-add focused diagnostics. `--nyir-track-value=N` follows zero-based NYIR SSA
+`--nyr-dump[=raw,cfg,stats,passes]` selects NYR details;
+`--nyr-dump-to=PATH` writes text output to a file.
+`--nyr-track-value=N` follows zero-based NYR SSA
 value `N` across optimization passes and reports its defining operation and
 use count, or that the pass removed it; the option enables those logs itself.
 Dump and trace runs bypass compilation caches, so do not use them as

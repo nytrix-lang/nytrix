@@ -36,7 +36,13 @@ fn _requests_empty_response(any url, any method, str transport="requests", str e
    out
 }
 
-fn _has(any d, str key) bool { is_dict(d) && d.get(key, nil) != nil }
+fn _has(any d, str key) bool { is_dict(d) && !__is_nil(d.get(key, nil)) }
+
+fn _missing(any value) bool {
+   if __is_nil(value) { return true }
+   if is_int(value) { return int(value) == 0 }
+   false
+}
 
 fn _truthy(any v, bool fallback=false) bool {
    if v == nil { return fallback }
@@ -107,7 +113,10 @@ fn _hex2(int c) str {
 }
 
 fn _quote(any value, bool plus=false) str {
-   def s = is_str(value) ? value : to_str(value)
+   mut s = ""
+   if is_str(value) { s = str(value) }
+   elif is_int(value) { s = to_str(int(value)) }
+   else { s = to_str(value) }
    mut b, i = Builder(s.len + 8), 0
    while i < s.len {
       def c = load8(s, i)
@@ -129,7 +138,7 @@ fn _append_pair(any builder, any key, any value, bool plus, bool prepend) any {
 }
 
 fn _encode_pairs(any params, bool plus=true) str {
-   if params == nil || params == 0 { return "" }
+   if _missing(params) { return "" }
    if is_str(params) {
       def p = strip(params)
       startswith(p, "?") ? slice(p, 1, p.len) : p
@@ -193,7 +202,7 @@ fn _append_query(str url, any params) str {
 }
 
 fn _cookie_string(any cookies) str {
-   if cookies == nil || cookies == 0 { return "" }
+   if _missing(cookies) { return "" }
    if is_str(cookies) { return cookies }
    if !is_dict(cookies) { return "" }
    def items = _d.dict_items(cookies)
@@ -406,14 +415,14 @@ fn prepare_request(any method, any url=0, any data=0, any headers=0, any options
    "Normalizes request options into `{method,url,body,headers,options}` without sending it."
    def ctx = netctx.context()
    mut spec = _d.dict(32)
-   if is_dict(method) && (url == nil || url == 0) {
+   if is_dict(method) && _missing(url) {
       spec = _d.dict_clone(method)
       if is_dict(options) { spec = _d.dict_merge(spec, options) }
    } else {
       if is_dict(options) { spec = _d.dict_clone(options) }
       spec["method"] = method
       spec["url"] = url
-      if !(data == nil || data == 0) { spec["data"] = data }
+      if !_missing(data) { spec["data"] = data }
       if is_dict(headers) { spec["headers"] = headers }
    }
    mut req_url = _str_opt(spec, "url", _str_opt(spec, "uri", ""))

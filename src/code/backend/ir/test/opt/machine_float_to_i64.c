@@ -18,26 +18,11 @@ static int64_t f32_bits(float value) {
 }
 
 static int emit_const(nyr_func_t *ir, nyr_op_t op, int64_t bits) {
-  return nyr_ir_emit(ir, (nyr_inst_t){.op = op,
-                                      .dst = -1,
-                                      .a = -1,
-                                      .b = -1,
-                                      .c = -1,
-                                      .d = -1,
-                                      .e = -1,
-                                      .f = -1,
-                                      .imm = bits});
+  return nyr_opt_emit_imm(ir, op, bits);
 }
 
 static int emit_unary(nyr_func_t *ir, nyr_op_t op, int value) {
-  return nyr_ir_emit(ir, (nyr_inst_t){.op = op,
-                                      .dst = -1,
-                                      .a = value,
-                                      .b = -1,
-                                      .c = -1,
-                                      .d = -1,
-                                      .e = -1,
-                                      .f = -1});
+  return nyr_opt_emit_abc(ir, op, value, -1, -1);
 }
 
 int main(void) {

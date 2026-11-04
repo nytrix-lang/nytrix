@@ -1,0 +1,66 @@
+shape ui_mock_framebuffer_pixels {
+  family "runtime/ui"
+  generator "embedded"
+  features [ny ui render framebuffer matrix differential]
+  template ny-test-case
+  timeout 180
+  flags_matrix "--native-only --native-tier=baseline -O0; --native-backend=llvm --jit --jit-engine=mcjit -O0; --native-backend=llvm --jit --jit-engine=orc -O0; --nyr-run"
+  expect compile_and_run
+  expect_message "UI-RENDER-PIXELS-OK"
+  source ny <<'NY'
+use core
+use core.math as math
+use core.os
+use core.os.ui.render as gfx
+def TEST_BG_COLOR = gfx.color_hex("#000000")
+
+assert(gfx._proj_fov == 120.0, "imported float initializer preserves its bits")
+assert(math.floor(-2.1) == -3 && math.ceil(2.1) == 3 &&
+       math.round(2.5) == 3 && math.round(-2.5) == -3,
+       "floating rounding wrappers match their integer runtime ABI")
+gfx.set_backend_type(gfx.BACKEND_MOCK)
+def win = gfx.init_window(16, 16, "pixel regression", 0, false, false, 1)
+assert(!!win, "mock framebuffer initialized")
+assert(gfx.begin_frame_clear(TEST_BG_COLOR), "begin frame")
+assert(gfx.get_delta_time() > 0.0, "fractional frame time survives global storage")
+gfx.set_ortho_2d(0.0, 16.0, 0.0, 16.0)
+assert(gfx.draw_rect(4.0, 4.0, 8.0, 8.0, [1.0, 0.0, 0.0, 1.0]), "submit rectangle")
+assert(gfx.draw_rect_fast(4.0, 4.0, 8.0, 8.0,
+   gfx.color_pack(0.0, 1.0, 0.0, 1.0)), "submit packed rectangle")
+assert(gfx.draw_rect_fast(4.0, 4.0, 8.0, 8.0,
+   gfx.color_pack(1.0, 0.0, 0.0, 0.5)), "submit translucent packed rectangle")
+assert(gfx.draw_circle(2.0, 2.0, 1.0, [0.0, 0.0, 1.0, 1.0]),
+       "submit software circle")
+assert(gfx.end_frame(), "present frame")
+def fb = gfx.read_framebuffer()
+assert(is_dict(fb), "read framebuffer")
+def ptr pixels = __ffi_untag_ptr(fb.get("data", 0))
+assert(int(gfx._snapshot_data_ptr(int(pixels) * 2 + 1)) == int(pixels),
+       "snapshot unwraps a tagged readback address")
+def int center = (8 * 16 + 8) * 4
+assert(load8(pixels, center) == 255 && load8(pixels, center + 1) == 0 &&
+       load8(pixels, center + 2) == 0 && load8(pixels, center + 3) == 127,
+       "translucent packed rectangle reaches framebuffer pixels")
+def int circle_center = (2 * 16 + 2) * 4
+assert(load8(pixels, circle_center) == 0 && load8(pixels, circle_center + 1) == 0 &&
+       load8(pixels, circle_center + 2) == 255 && load8(pixels, circle_center + 3) == 255,
+       "software circle reaches framebuffer pixels")
+assert(load8(pixels, 0) == 0 && load8(pixels, 3) == 255, "background remains opaque black")
+def screenshot_path = temp_dir() + "/nytrix-ui-pixels-" + to_str(ticks()) + ".png"
+assert(gfx.snapshot(screenshot_path), "save framebuffer as PNG")
+def screenshot_result = file_read(screenshot_path)
+assert(is_ok(screenshot_result), "saved PNG exists")
+def screenshot = unwrap(screenshot_result)
+assert(screenshot.len > 33 && load8(screenshot, 0) == 137 && load8(screenshot, 1) == 80 &&
+       load8(screenshot, 19) == 16 && load8(screenshot, 23) == 16 && load8(screenshot, 25) == 6,
+       "saved PNG has RGBA header and framebuffer dimensions")
+def screenshot_len = len(screenshot)
+assert(load8(screenshot, screenshot_len - 4) == 0xae && load8(screenshot, screenshot_len - 3) == 0x42 &&
+       load8(screenshot, screenshot_len - 2) == 0x60 && load8(screenshot, screenshot_len - 1) == 0x82,
+       "saved PNG has the correct IEND checksum")
+file_remove(screenshot_path)
+free(pixels)
+gfx.close_window()
+print("UI-RENDER-PIXELS-OK")
+NY
+}

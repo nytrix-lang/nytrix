@@ -89,9 +89,71 @@ check("1340780792994259709957402499820584612747936582059239337772356144372176403
 check("179769313486231590772930519078902473361797697894230657273430081157732675805500963132708477322407536021120113879871393357658789768814416622492847430639474124377767893424865485276302219601246094119453082952085005768838150682342462881473913110540827237163350510684586298239947245938479716304835356329624224137215", "13407807929942597099574024998205846127479365820592393377723561443721764030073546976801874298166903427690031858186486050853753882811946569946433649006084097", "2410312426921032588580116606028314112912093247945688951359675039065257391591803200669085024107346049663448766280888004787862416978794958324969612987890774831224526825613215997701301156820154861474543437368045093487678503590580404610424519830576830372533836761456180549022831014071386242828416656815216509844479939069185074211439934288784153850047219675113260685342937560183607209614322990741182041711330766169813490626817724908918027921305591252266900735557369855", "13407807929942597099574024998205846127479365820592393377723561443721764030073546976801874298166903427690031858186486050853753882811946569946433649006084095", "0")
 assert(bigint_to_str(bigint_div(bigint_from_int(25), 2)) == "12", "scalar divisor")
 assert(bigint_to_str(bigint_mod(bigint_from_int(-25), 2)) == "1", "scalar remainder")
+assert(bigint_cmp(bigint_from_int(25), bigint_from_int(25)) == 0,
+       "BigInt comparison")
+assert(bigint_cmp(25, 2) == 1, "integer comparison")
+assert(bigint_cmp("25", bigint_from_int(25)) == 0,
+       "string-to-BigInt comparison")
+assert(__bigint_cmp(bigint_from_int(25), 25) == 0,
+       "runtime comparison accepts a tagged integer operand")
+def bigint method_a = bigint_from_int(12345)
+def bigint method_b = bigint_from_int(67)
+assert(bigint_to_str(method_a.add(method_b)) == "12412", "typed add method")
+assert(bigint_to_str(method_a.sub(method_b)) == "12278", "typed sub method")
+assert(bigint_to_str(method_a.div(method_b)) == "184", "typed div method")
+assert(bigint_to_str(method_a.rem(method_b)) == "17", "typed remainder method")
+assert(bigint_to_str(bigint_from_int(12).pow(bigint_from_int(3))) == "1728",
+       "typed power method")
+assert(method_a.cmp(method_b) == 1, "typed compare method")
+def bigint demoted = method_a.rem(bigint_from_int(100))
+assert(bigint_to_str(demoted.add(bigint_from_int(5))) == "50",
+       "typed method accepts a demoted BigInt result")
+assert(bigint_to_str(method_a) == "12345" && bigint_to_str(method_b) == "67",
+       "typed methods preserve inputs")
+def word_max = bigint_from_str("18446744073709551615")
+assert(bigint_to_str(bigint_div(word_max, 4294967295)) == "4294967297",
+       "small-divisor quotient at u32 maximum")
+assert(bigint_to_str(bigint_mod(word_max, 4294967295)) == "0",
+       "small-divisor remainder at u32 maximum")
+assert(bigint_to_str(bigint_div(word_max, 4294967296)) == "4294967295",
+       "large-divisor quotient above u32 maximum")
+assert(bigint_to_str(bigint_mod(word_max, 4294967296)) == "4294967295",
+       "large-divisor remainder above u32 maximum")
+def two_word_max = bigint_from_str("340282366920938463463374607431768211455")
+assert(bigint_to_str(bigint_div(two_word_max - 1, 4294967295)) ==
+       "79228162532711081671548469248",
+       "multi-limb quotient by a u32 divisor")
+assert(bigint_to_str(bigint_mod(two_word_max - 1, 4294967295)) == "4294967294",
+       "multi-limb remainder by a u32 divisor")
+assert(bigint_to_str(bigint_div(bigint_neg(two_word_max - 1), 4294967295)) ==
+       "-79228162532711081671548469248",
+       "negative multi-limb quotient by a u32 divisor")
+assert(bigint_to_str(bigint_mod(bigint_neg(two_word_max - 1), 4294967295)) == "1",
+       "negative multi-limb floor remainder by a u32 divisor")
 print("ok bigint short arithmetic")
 ;; Power-of-two divisors across limb and sign boundaries.
 check("0", "1", "0", "0", "0")
+assert(bigint_to_str(bigint_mul_div(bigint_from_str("18446744073709551616"), 3, 2)) ==
+       "27670116110564327424", "fused BigInt multiply/divide above one limb")
+assert(bigint_to_str(bigint_mul_div(bigint_from_str("-18446744073709551616"), 3, 2)) ==
+       "-27670116110564327424", "fused BigInt multiply/divide negative value")
+assert(bigint_to_str(bigint_mul_div(bigint_from_int(5), 3, 2)) == "7",
+       "fused BigInt multiply/divide truncates toward zero")
+assert(bigint_to_str(bigint_mul_div(bigint_from_int(5), 3, -2)) == "-7",
+       "fused BigInt multiply/divide negative divisor")
+assert(bigint_to_str(bigint_mul_div(
+       bigint_from_str("18446744073709551615"), 4294967296, 4294967295)) ==
+       "18446744078004518912",
+       "fused BigInt multiply/divide with 32-bit scalar boundary")
+def fused_wide = bigint_from_str("123456789012345678901234567890123456789")
+assert(bigint_to_str(bigint_mul_div(fused_wide, 12345, 314159)) ==
+       bigint_to_str(bigint_div(bigint_mul(fused_wide, bigint_from_int(12345)),
+                                bigint_from_int(314159))),
+       "fused BigInt multiply/divide across multiple limbs")
+assert(bigint_to_str(bigint_mul_div(fused_wide, 12345, 4294967296)) ==
+       bigint_to_str(bigint_div(bigint_mul(fused_wide, bigint_from_int(12345)),
+                                bigint_from_int(4294967296))),
+       "fused BigInt multiply/divide with a 64-bit divisor")
 check("0", "-1", "0", "0", "0")
 check("0", "2", "0", "0", "0")
 check("0", "-2", "0", "0", "0")

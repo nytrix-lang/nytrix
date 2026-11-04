@@ -3,7 +3,7 @@ shape oracle_loop_vectorizer_adversarial_x86_64 {
   generator "native"
   features [native x86_64 oracle loop-vectorizer entry-global-tbuf overflow effects exits]
   template ny-test-case
-  flags_matrix "-O0 --native-result-oracle=0; -O1 --native-result-oracle=0; -O2 --native-result-oracle=0; -O3 --native-oracle-per-pass --nyir-verify --native-result-oracle=0"
+  flags_matrix "-O0 --native-result-oracle=0; -O1 --native-result-oracle=0; -O2 --native-result-oracle=0; -O3 --native-oracle-per-pass --nyr-verify --native-result-oracle=0"
   expect compile_and_run
   source ny <<'NY'
 use core

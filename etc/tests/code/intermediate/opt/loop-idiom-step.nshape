@@ -3,7 +3,7 @@ shape optcheck_loop_idiom_step {
   generator "native"
   features [native x86_64 oracle optcheck loop idiom positive-step]
   template ny-test-case
-  flags "-O3 --native-backend x86_64 --native-oracle-per-pass --native-result-oracle=40 --nyir-pass-stats"
+  flags "-O3 --native-backend x86_64 --native-oracle-per-pass --native-result-oracle=40 --nyr-dump=passes"
   expect compile_and_run
   source ny <<'NY'
 fn step_two() i64 {

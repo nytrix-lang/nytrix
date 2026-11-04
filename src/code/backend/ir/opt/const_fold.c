@@ -8,6 +8,7 @@
 #include "base/parallel.h"
 #include "code/backend/ir/internal.h"
 #include "code/backend/ir/opt/util.h"
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -28,15 +29,15 @@ static bool nir_constfold_parallel_task(size_t i, void *opaque) {
   if (in->a >= 0 && in->b >= 0 && ctx->known[in->a] && ctx->known[in->b]) {
     int64_t folded = 0;
     if (nyr_analyze_binary_fold(in->op, ctx->value[in->a], ctx->value[in->b],
-                                 &folded) ||
+                                &folded) ||
         (in->op == NYIR_CMP_I64 &&
          nyr_analyze_cmp_fold(in->cmp, ctx->value[in->a], ctx->value[in->b],
-                               &folded))) {
+                              &folded))) {
       nyr_inst_t folded_inst = {
           .op = NYIR_CONST_I64, .dst = in->dst, .imm = folded};
-      NY_DBG_INST_FMT(in, &folded_inst, "const_fold: %s %ld %ld -> %ld",
-                      nyr_op_name(in->op), ctx->value[in->a],
-                      ctx->value[in->b], folded);
+      NY_DBG_INST_FMT(in, &folded_inst, "const_fold: %s %" PRId64 " %" PRId64 " -> %" PRId64,
+                      nyr_op_name(in->op), ctx->value[in->a], ctx->value[in->b],
+                      folded);
       nir_make_const(in, folded);
       return true;
     }
@@ -63,9 +64,9 @@ static bool nir_constfold_parallel_task(size_t i, void *opaque) {
       }
       if (nyr_float_fold_binary(in->op, ab, bb, kind, &out, &out_kind)) {
         nyr_inst_t float_inst = {.op = out_kind == 3 ? NYIR_CONST_F32
-                                                      : NYIR_CONST_F64,
-                                  .dst = in->dst,
-                                  .imm = out};
+                                                     : NYIR_CONST_F64,
+                                 .dst = in->dst,
+                                 .imm = out};
         NY_DBG_INST_FMT(in, &float_inst, "const_fold: %s float -> %s",
                         nyr_op_name(in->op),
                         out_kind == 3 ? "CONST_F32" : "CONST_F64");
@@ -138,10 +139,10 @@ static bool nir_constfold_parallel_pure(nyr_func_t *f) {
       if (known[in->a] && known[in->b]) {
         int64_t folded = 0;
         bool can_fold = nyr_analyze_binary_fold(in->op, value[in->a],
-                                                 value[in->b], &folded) ||
+                                                value[in->b], &folded) ||
                         (in->op == NYIR_CMP_I64 &&
                          nyr_analyze_cmp_fold(in->cmp, value[in->a],
-                                               value[in->b], &folded));
+                                              value[in->b], &folded));
         if (can_fold)
           ny_dbg_heuristic_event(
               "CONST_FOLD",
@@ -334,7 +335,7 @@ bool nyr_const_fold(nyr_func_t *f) {
       int64_t out_imm = 0;
       unsigned char out_kind = 0;
       if (nyr_float_fold_binary(in->op, a_bits, b_bits, kind, &out_imm,
-                                 &out_kind)) {
+                                &out_kind)) {
         if (out_kind == 3) {
           nir_make_f32_const(in, out_imm);
           uint32_t u = (uint32_t)(unsigned)out_imm;
@@ -483,14 +484,13 @@ bool nyr_const_fold(nyr_func_t *f) {
     int64_t folded = 0;
     if (in->dst >= 0 && in->a >= 0 && in->b >= 0 && known[in->a] &&
         known[in->b] &&
-        (nyr_analyze_binary_fold(in->op, value[in->a], value[in->b],
-                                  &folded) ||
+        (nyr_analyze_binary_fold(in->op, value[in->a], value[in->b], &folded) ||
          (in->op == NYIR_CMP_I64 &&
           nyr_analyze_cmp_fold(in->cmp, value[in->a], value[in->b],
-                                &folded)))) {
+                               &folded)))) {
       nyr_inst_t folded_inst = {
           .op = NYIR_CONST_I64, .dst = in->dst, .imm = folded};
-      NY_DBG_INST_FMT(in, &folded_inst, "const_fold: %s %ld %ld -> %ld",
+      NY_DBG_INST_FMT(in, &folded_inst, "const_fold: %s %" PRId64 " %" PRId64 " -> %" PRId64,
                       nyr_op_name(in->op), value[in->a], value[in->b], folded);
       nir_make_const(in, folded);
       known[in->dst] = true;
@@ -517,17 +517,16 @@ bool nyr_const_fold(nyr_func_t *f) {
 }
 
 static bool nyr_sccp_fold_float(nyr_op_t op, int64_t a_imm, int64_t b_imm,
-                                 unsigned char a_kind, unsigned char b_kind,
-                                 int64_t *out_imm, unsigned char *out_kind) {
+                                unsigned char a_kind, unsigned char b_kind,
+                                int64_t *out_imm, unsigned char *out_kind) {
   if (a_kind != b_kind)
     return false;
   return nyr_float_fold_binary(op, a_imm, b_imm, a_kind, out_imm, out_kind);
 }
 
-static bool nyr_sccp_fold_float_cmp(nyr_op_t op, nyr_cmp_t cmp,
-                                     int64_t a_imm, int64_t b_imm,
-                                     unsigned char a_kind, unsigned char b_kind,
-                                     int64_t *out) {
+static bool nyr_sccp_fold_float_cmp(nyr_op_t op, nyr_cmp_t cmp, int64_t a_imm,
+                                    int64_t b_imm, unsigned char a_kind,
+                                    unsigned char b_kind, int64_t *out) {
   if ((op != NYIR_CMP_F64 && op != NYIR_CMP_F32) || a_kind != b_kind ||
       (a_kind != 2 && a_kind != 3))
     return false;
@@ -690,10 +689,10 @@ bool nyr_sccp(nyr_func_t *f) {
                    (size_t)in->b < values && known[in->a] && known[in->b] &&
                    constant_kind[in->a] == 1 && constant_kind[in->b] == 1) {
           have = nyr_analyze_binary_fold(in->op, constant[in->a],
-                                          constant[in->b], &value) ||
+                                         constant[in->b], &value) ||
                  (in->op == NYIR_CMP_I64 &&
                   nyr_analyze_cmp_fold(in->cmp, constant[in->a],
-                                        constant[in->b], &value));
+                                       constant[in->b], &value));
           kind = 1;
         } else if (in->a >= 0 && in->b >= 0 && (size_t)in->a < values &&
                    (size_t)in->b < values && known[in->a] && known[in->b] &&
@@ -701,8 +700,8 @@ bool nyr_sccp(nyr_func_t *f) {
                    constant_kind[in->a] == constant_kind[in->b]) {
           unsigned char fkind = 0;
           if (nyr_sccp_fold_float(in->op, constant[in->a], constant[in->b],
-                                   constant_kind[in->a], constant_kind[in->b],
-                                   &value, &fkind)) {
+                                  constant_kind[in->a], constant_kind[in->b],
+                                  &value, &fkind)) {
             have = true;
             kind = fkind;
           } else if (nyr_sccp_fold_float_cmp(

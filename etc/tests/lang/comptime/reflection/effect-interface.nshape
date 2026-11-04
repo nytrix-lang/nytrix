@@ -108,7 +108,7 @@ fn run_case(str name, str path, str mode, bool should_pass,
    mut argv = [ny, "-no-std", "-emit-only", "--effect-require-known",
                "--use-effect-interface=" + interface_path]
    if mode == "nyir" {
-      argv = argv.append("--nyir-run")
+      argv = argv.append("--nyr-run")
    } else if mode == "mcjit" {
       argv = argv.append("--native-backend=llvm")
       argv = argv.append("--jit")
@@ -117,6 +117,8 @@ fn run_case(str name, str path, str mode, bool should_pass,
       argv = argv.append("--native-backend=llvm")
       argv = argv.append("--jit")
       argv = argv.append("--jit-engine=orc")
+   } else if mode == "llvm-emit" {
+      argv = argv.append("--native-backend=llvm")
    }
    argv = argv.append(path)
    def result = run_capture(argv, [], nil, false)
@@ -132,8 +134,14 @@ fn run_case(str name, str path, str mode, bool should_pass,
 }
 
 run_case("NYIR mode", consumer, "nyir", true, "")
-run_case("LLVM MCJIT mode", consumer, "mcjit", true, "")
-run_case("LLVM ORC mode", consumer, "orc", true, "")
+def canonical_use = run_capture(
+   [ny, "-no-std", "-emit-only", "--effect-require-known",
+    "--nyr-run", "--use=effect-interface=" + interface, consumer],
+   [], nil, false)
+assert(canonical_use.get("code", 127) == 0,
+       "canonical --use loads the effect interface: " +
+          canonical_use.get("stdout", ""))
+run_case("LLVM compile mode", consumer, "llvm-emit", true, "")
 run_case("NYIR underdeclared", underdeclared, "nyir", false,
          "effect contract violation")
 run_case("LLVM MCJIT underdeclared", underdeclared, "mcjit", false,

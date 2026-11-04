@@ -1,6 +1,6 @@
 #include "base/loader.h"
 #include "base/util.h"
-#include "code/lang/c/clang.h"
+#include "code/lang/parse/c/clang.h"
 #include "code/lang/code.h"
 #include "code/lang/parse/proof.h"
 #include "code/lang/priv.h"

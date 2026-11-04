@@ -1,0 +1,23 @@
+shape any_early_return_tag {
+  family "runtime/values"
+  generator "embedded"
+  features ["ny", "abi", "any", "reflection"]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect compile_and_run
+  expect_stdout "RETURN-TAG-OK"
+  source ny <<'NY'
+use core
+fn choose(bool present, any value, any fallback=nil) any {
+   if present { return value }
+   fallback
+}
+def a = choose(true,12)
+assert(is_int(a),"early return keeps integer tag")
+def b = choose(true,"hello")
+assert(is_str(b),"early return keeps string tag")
+def c = choose(false,12)
+assert(is_nil(c),"fallback keeps nil tag")
+print("RETURN-TAG-OK")
+NY
+}

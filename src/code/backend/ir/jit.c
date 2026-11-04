@@ -499,7 +499,8 @@ static void nyr_native_jit_cache_save(const char *path,
     *slash = '\0';
     ny_ensure_dir_recursive(dir);
   }
-  n = snprintf(tmp, sizeof(tmp), "%s.XXXXXX", object_path);
+  n = snprintf(tmp, sizeof(tmp), "%s.tmp.%ld.XXXXXX", object_path,
+               (long)getpid());
   if (n <= 0 || (size_t)n >= sizeof(tmp))
     return;
   int fd = mkstemp(tmp);
@@ -521,7 +522,7 @@ static void nyr_native_jit_cache_save(const char *path,
             fwrite(relocs, sizeof(*relocs), reloc_count, f) == reloc_count;
   if (fclose(f) != 0)
     ok = false;
-  if (!ok || rename(tmp, object_path) != 0)
+  if (!ok || !ny_cache_publish_file(tmp, object_path))
     unlink(tmp);
 #else
   (void)path;

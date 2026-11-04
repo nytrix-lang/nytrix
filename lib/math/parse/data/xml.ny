@@ -144,7 +144,7 @@ fn parse(any data) any {
             }
             if p < n && load8(data, p) == 62 { p += 1 }
             def node = Node(name, attrs)
-            if root == 0 { root = node }
+            if !is_dict(root) { root = node }
             if stack.len > 0 {
                def parent = stack.get(stack.len - 1)
                mut children = parent.get("children")

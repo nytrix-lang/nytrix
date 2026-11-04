@@ -373,54 +373,53 @@ fn _normalize_path(any p) str {
    def sepch = sep()
    mut str s = to_str(p)
    #windows {
-      s = str_replace(s, "/", "\\")
+      s = str_replace(s, "/", "\\\\")
    } #else {
-      s = str_replace(s, "\\", "/")
+      s = str_replace(s, "\\\\", "/")
    } #endif
    def n = s.len
    mut str prefix = ""
-   mut abs = false
+   mut bool abs_path = load8(s, 0) == 47 || load8(s, 0) == 92
    mut str rest = s
    #windows {
-      if n >= 2 && _is_sep(load8(s, 0)) && _is_sep(load8(s, 1)) {
+      if n >= 2 && load8(s, 0) == 47 && load8(s, 1) == 47 {
          prefix = "\\\\"
-         abs = true
          rest = _substr(s, 2, n)
       } elif _is_drive_prefix(s) {
          prefix = _substr(s, 0, 2)
          rest = _substr(s, 2, n)
-         if rest.len > 0 && _is_sep(load8(rest, 0)) {
-            abs = true
+         if rest.len > 0 && (load8(rest, 0) == 47 || load8(rest, 0) == 92) {
+            abs_path = true
             rest = _substr(rest, 1, rest.len)
          }
-      } elif n > 0 && _is_sep(load8(s, 0)) {
-         abs = true
+      } elif n > 0 && load8(s, 0) == 47 {
          rest = _substr(s, 1, n)
       }
    } #else {
-      if _is_sep(load8(s, 0)) {
-         abs = true
+      if n > 0 && load8(s, 0) == 47 {
          rest = _substr(s, 1, n)
       }
    } #endif
    ;; Avoid allocating component lists for the common already-normalized path.
    if _path_components_are_normalized(rest, sepch) { return s }
    def raw_parts = split(rest, sepch)
-   mut list<str> parts = list(raw_parts.len)
+   def int raw_part_count = to_int(__list_len(raw_parts))
+   mut list<str> parts = list(raw_part_count)
    mut int i = 0
-   while i < raw_parts.len {
+   while i < raw_part_count {
       def str p_comp = raw_parts.get(i, "")
       if p_comp.len == 0 || p_comp == "." {
          i += 1
          continue
       }
       if p_comp == ".." {
-         if parts.len > 0 {
-            def last = parts.get(parts.len - 1, "")
-            if last != ".." {
-               mut shortened = list(parts.len - 1)
+         def int current_part_count = to_int(__list_len(parts))
+         if current_part_count > 0 {
+            def str last = parts.get(current_part_count - 1, "")
+            if !_str_eq(last, "..") {
+               mut shortened = list(current_part_count - 1)
                mut j = 0
-               while j < parts.len - 1 {
+               while j < current_part_count - 1 {
                   shortened = shortened.append(parts.get(j, ""))
                   j += 1
                }
@@ -429,7 +428,7 @@ fn _normalize_path(any p) str {
                continue
             }
          }
-         if !abs { parts = parts.append(p_comp) }
+         if !abs_path { parts = parts.append(p_comp) }
          i += 1
          continue
       }
@@ -437,34 +436,29 @@ fn _normalize_path(any p) str {
       i += 1
    }
    mut int idx = 0
-   def part_count = parts.len
+   def int part_count = to_int(__list_len(parts))
    mut str out = ""
-   mut has_out = false
-   mut last_is_sep = false
    if prefix.len > 0 {
       out = prefix
-      has_out = true
-      if abs && _is_drive_prefix(prefix) {
+      if abs_path && _is_drive_prefix(prefix) {
          out = out + sepch
-         last_is_sep = true
-      } else {
-         last_is_sep = _is_sep(load8(prefix, prefix.len - 1))
       }
-   } elif abs {
+   } elif abs_path {
       out = sepch
-      has_out = true
-      last_is_sep = true
    }
    while idx < part_count {
       def part = parts.get(idx, "")
-      if has_out && !last_is_sep { out = out + sepch }
+      if out.len > 0 {
+         def int last_byte = load8(out, out.len - 1)
+         if last_byte != load8(sepch, 0) && last_byte != 47 && last_byte != 92 {
+            out = out + sepch
+         }
+      }
       out = out + part
-      has_out = true
-      last_is_sep = false
       idx += 1
    }
    if out.len == 0 && part_count == 0 {
-      if abs { return sepch }
+      if abs_path { return sepch }
       if prefix.len > 0 { return prefix }
       if n == 0 { return "" }
       return "."

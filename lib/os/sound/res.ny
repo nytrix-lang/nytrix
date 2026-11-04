@@ -140,7 +140,7 @@ fn load(any filepath) any {
    mutex_unlock(_mtx)
    if cached { return cached }
    if !fs.is_file(full) { return 0 }
-   def ext = str.lower(path.extname(full))
+   def str ext = str(str.lower(path.extname(full)))
    mut any asset = 0
    if ext == ".wav" || ext == ".ogg" || ext == ".flac" || ext == ".mp3" || ext == ".aiff" || ext == ".aif" || ext == ".opus" {
       asset = _decode_sf(full)

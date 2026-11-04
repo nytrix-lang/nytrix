@@ -6,7 +6,7 @@ shape ownership_exclusive_borrow_noalias_positive {
   expect compile_and_run
   expect_exit 0
   expect_message "[noalias]"
-  flags "--ownership-strict --nyir-verify --nyir-dump"
+  flags "--ownership-strict --nyr-verify --nyr-dump"
   source ny <<'NY'
 use core
 

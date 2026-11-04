@@ -24,6 +24,7 @@
 #include "base/common.h"
 #include "base/compat.h"
 #include "base/debug.h"
+#include "code/backend/ir/api_internal.h"
 #include "code/backend/ir/internal.h"
 #include "code/backend/ir/opt/loop.h"
 #include "code/backend/ir/opt/util.h"
@@ -51,8 +52,7 @@ bool nyr_null_align_facts(nyr_func_t *f) {
     return true;
   nyr_value_fact_t *facts =
       ny_calloc_array((size_t)f->next_value, sizeof(*facts));
-  if (!facts ||
-      !nyr_analyze_values(f, facts, (size_t)f->next_value, NULL, 0)) {
+  if (!facts || !nyr_analyze_values(f, facts, (size_t)f->next_value, NULL, 0)) {
     free(facts);
     return false;
   }
@@ -170,7 +170,7 @@ bool nyr_iv_simplify(nyr_func_t *f) {
 }
 
 static int nyr_value_skip_copies(const nyr_func_t *f, const int *defs,
-                                  int value) {
+                                 int value) {
   for (int depth = 0;
        f && defs && value >= 0 && value < f->next_value && depth < 16;
        ++depth) {
@@ -185,8 +185,8 @@ static int nyr_value_skip_copies(const nyr_func_t *f, const int *defs,
   return value;
 }
 
-static bool nyr_const_i64_value(const nyr_func_t *f, const int *defs,
-                                 int value, int64_t *out) {
+static bool nyr_const_i64_value(const nyr_func_t *f, const int *defs, int value,
+                                int64_t *out) {
   value = nyr_value_skip_copies(f, defs, value);
   if (!f || !defs || value < 0 || value >= f->next_value)
     return false;
@@ -202,7 +202,7 @@ static bool nyr_const_i64_value(const nyr_func_t *f, const int *defs,
 }
 
 static bool nyr_scaled_base(const nyr_func_t *f, const int *defs, int value,
-                             int *base_out, unsigned *scale_out) {
+                            int *base_out, unsigned *scale_out) {
   value = nyr_value_skip_copies(f, defs, value);
   if (!f || !defs || value < 0 || value >= f->next_value)
     return false;
@@ -238,7 +238,7 @@ static bool nyr_scaled_base(const nyr_func_t *f, const int *defs, int value,
 }
 
 static bool nyr_values_same_at(const nyr_func_t *f, const int *defs, int a,
-                                int b, size_t at) {
+                               int b, size_t at) {
   a = nyr_value_skip_copies(f, defs, a);
   b = nyr_value_skip_copies(f, defs, b);
   return (a >= 0 && a == b) || nir_operands_same_value(f, a, b, at);
@@ -264,7 +264,7 @@ static bool nyr_guard_local_address_taken(const nyr_func_t *f, int64_t slot) {
 }
 
 static bool nyr_guard_unique_local_store(const nyr_func_t *f, int64_t slot,
-                                          int *value_out) {
+                                         int *value_out) {
   if (!f || slot < 0 || !value_out || nyr_guard_local_address_taken(f, slot))
     return false;
   bool found = false;
@@ -285,8 +285,8 @@ static bool nyr_guard_unique_local_store(const nyr_func_t *f, int64_t slot,
 }
 
 static bool nyr_guard_loads_same_local_value(const nyr_func_t *f,
-                                              const int *defs, int a, int b,
-                                              size_t at) {
+                                             const int *defs, int a, int b,
+                                             size_t at) {
   if (!f || !defs || a < 0 || b < 0 || a >= f->next_value || b >= f->next_value)
     return false;
   int ai = defs[a], bi = defs[b];
@@ -318,8 +318,8 @@ static bool nyr_guard_loads_same_local_value(const nyr_func_t *f,
 }
 
 static bool nyr_guard_load_last_store_value(const nyr_func_t *f,
-                                             const int *defs, int value,
-                                             int *stored_out) {
+                                            const int *defs, int value,
+                                            int *stored_out) {
   if (!f || !defs || !stored_out)
     return false;
   value = nyr_value_skip_copies(f, defs, value);
@@ -356,7 +356,7 @@ static bool nyr_guard_load_last_store_value(const nyr_func_t *f,
   if (!nyr_cfg_build(f, &cfg))
     return false;
   bool dominates = nyr_cfg_dominates(&cfg, cfg.inst_block[store_i],
-                                      cfg.inst_block[(size_t)load_i]);
+                                     cfg.inst_block[(size_t)load_i]);
   if (ny_trace_enabled("NY_TRACE_BCE"))
     ny_trace_line("BCE",
                   "bce: last-store load=v%d slot=%lld load_i=%d store_i=%zu "
@@ -370,9 +370,9 @@ static bool nyr_guard_load_last_store_value(const nyr_func_t *f,
   return *stored_out >= 0;
 }
 
-static bool nyr_guard_values_same_at_depth(const nyr_func_t *f,
-                                            const int *defs, int a, int b,
-                                            size_t at, unsigned depth) {
+static bool nyr_guard_values_same_at_depth(const nyr_func_t *f, const int *defs,
+                                           int a, int b, size_t at,
+                                           unsigned depth) {
   if (!f || !defs || depth > 12)
     return false;
   a = nyr_value_skip_copies(f, defs, a);
@@ -407,32 +407,31 @@ static bool nyr_guard_values_same_at_depth(const nyr_func_t *f,
   case NYIR_OR_I64:
   case NYIR_XOR_I64:
     return (nyr_guard_values_same_at_depth(f, defs, da->a, db->a, at,
-                                            depth + 1) &&
+                                           depth + 1) &&
             nyr_guard_values_same_at_depth(f, defs, da->b, db->b, at,
-                                            depth + 1)) ||
+                                           depth + 1)) ||
            (nyr_guard_values_same_at_depth(f, defs, da->a, db->b, at,
-                                            depth + 1) &&
+                                           depth + 1) &&
             nyr_guard_values_same_at_depth(f, defs, da->b, db->a, at,
-                                            depth + 1));
+                                           depth + 1));
   case NYIR_SUB_I64:
   case NYIR_SHL_I64:
   case NYIR_SAR_I64:
     return nyr_guard_values_same_at_depth(f, defs, da->a, db->a, at,
-                                           depth + 1) &&
-           nyr_guard_values_same_at_depth(f, defs, da->b, db->b, at,
-                                           depth + 1);
+                                          depth + 1) &&
+           nyr_guard_values_same_at_depth(f, defs, da->b, db->b, at, depth + 1);
   default:
     return false;
   }
 }
 
 static bool nyr_guard_values_same_at(const nyr_func_t *f, const int *defs,
-                                      int a, int b, size_t at) {
+                                     int a, int b, size_t at) {
   return nyr_guard_values_same_at_depth(f, defs, a, b, at, 0);
 }
 
 static bool nyr_value_is_minus_one_from(const nyr_func_t *f, const int *defs,
-                                         int value, int base, size_t at) {
+                                        int value, int base, size_t at) {
   value = nyr_value_skip_copies(f, defs, value);
   base = nyr_value_skip_copies(f, defs, base);
   if (!f || !defs || value < 0 || value >= f->next_value)
@@ -467,7 +466,7 @@ static size_t nyr_previous_non_nop(const nyr_func_t *f, size_t i) {
 }
 
 static size_t nyr_label_pred_count(const nyr_func_t *f, int label,
-                                    size_t label_i) {
+                                   size_t label_i) {
   size_t count = 0;
   for (size_t i = 0; f && i < f->len; ++i) {
     const nyr_inst_t *in = &f->data[i];
@@ -484,8 +483,8 @@ static size_t nyr_label_pred_count(const nyr_func_t *f, int label,
 }
 
 static bool nyr_cmp_proves_index_in_len(const nyr_func_t *f, const int *defs,
-                                         const nyr_inst_t *cmp, bool true_edge,
-                                         int index, int len, size_t at) {
+                                        const nyr_inst_t *cmp, bool true_edge,
+                                        int index, int len, size_t at) {
   if (!cmp || cmp->op != NYIR_CMP_I64)
     return false;
   int lhs = nyr_value_skip_copies(f, defs, cmp->a);
@@ -516,7 +515,7 @@ static bool nyr_cmp_proves_index_in_len(const nyr_func_t *f, const int *defs,
 }
 
 static const nyr_inst_t *nyr_branch_cmp(const nyr_func_t *f, const int *defs,
-                                          const nyr_inst_t *br) {
+                                        const nyr_inst_t *br) {
   if (!f || !defs || !br || br->op != NYIR_BR_IF)
     return NULL;
   int cond = nyr_value_skip_copies(f, defs, br->a);
@@ -527,7 +526,7 @@ static const nyr_inst_t *nyr_branch_cmp(const nyr_func_t *f, const int *defs,
 }
 
 static bool nyr_guard_local_load_is_slot(const nyr_func_t *f, const int *defs,
-                                          int value, int64_t slot) {
+                                         int value, int64_t slot) {
   if (!f || !defs || value < 0 || value >= f->next_value)
     return false;
   value = nyr_value_skip_copies(f, defs, value);
@@ -548,7 +547,7 @@ static bool nyr_guard_local_load_is_slot(const nyr_func_t *f, const int *defs,
  * pointer aliases, and call-visible locals.
  */
 static bool nyr_guard_local_value_nonnegative(const nyr_func_t *f,
-                                               const int *defs, int value) {
+                                              const int *defs, int value) {
   if (!f || !defs || value < 0 || value >= f->next_value)
     return false;
   value = nyr_value_skip_copies(f, defs, value);
@@ -599,7 +598,7 @@ static bool nyr_guard_local_value_nonnegative(const nyr_func_t *f,
  * every store must be a nonnegative constant and the slot must not escape.
  */
 static bool nyr_guard_local_constant_nonnegative(const nyr_func_t *f,
-                                                  const int *defs, int value) {
+                                                 const int *defs, int value) {
   if (!f || !defs || value < 0 || value >= f->next_value)
     return false;
   value = nyr_value_skip_copies(f, defs, value);
@@ -668,7 +667,7 @@ static bool nyr_cmp_proves_reverse_index_in_len(
 }
 
 static bool nyr_block_for_label_local(const nyr_cfg_t *cfg, int64_t label,
-                                       size_t *block_out) {
+                                      size_t *block_out) {
   if (!cfg)
     return false;
   for (size_t b = 0; b < cfg->block_count; ++b) {
@@ -682,10 +681,10 @@ static bool nyr_block_for_label_local(const nyr_cfg_t *cfg, int64_t label,
 }
 
 static bool nyr_cmp_edge_proves_nonnegative(const nyr_func_t *f,
-                                             const int *defs,
-                                             const nyr_inst_t *cmp,
-                                             bool true_edge, int value,
-                                             size_t at) {
+                                            const int *defs,
+                                            const nyr_inst_t *cmp,
+                                            bool true_edge, int value,
+                                            size_t at) {
   if (!f || !defs || !cmp || cmp->op != NYIR_CMP_I64 || cmp->a < 0 ||
       cmp->b < 0 || !nyr_guard_values_same_at(f, defs, cmp->a, value, at))
     return false;
@@ -700,7 +699,7 @@ static bool nyr_cmp_edge_proves_nonnegative(const nyr_func_t *f,
 }
 
 static bool nyr_cfg_single_pred_from(const nyr_cfg_t *cfg, size_t block,
-                                      size_t pred) {
+                                     size_t pred) {
   return cfg && block < cfg->block_count && pred < cfg->block_count &&
          cfg->pred_offsets[block + 1] - cfg->pred_offsets[block] == 1 &&
          cfg->pred_blocks[cfg->pred_offsets[block]] == pred;
@@ -710,9 +709,8 @@ static bool nyr_cfg_single_pred_from(const nyr_cfg_t *cfg, size_t block,
  * A branch edge that dominates the select may establish its source index is
  * nonnegative even when the mutable local can be negative on other paths.
  */
-static bool nyr_guarded_index_nonnegative(const nyr_func_t *f,
-                                           const int *defs, int value,
-                                           size_t at) {
+static bool nyr_guarded_index_nonnegative(const nyr_func_t *f, const int *defs,
+                                          int value, size_t at) {
   if (!f || !defs || at >= f->len)
     return false;
   nyr_cfg_t cfg = {0};
@@ -761,10 +759,9 @@ static bool nyr_guarded_index_nonnegative(const nyr_func_t *f,
   return proven;
 }
 
-static bool nyr_guard_proves_index_in_len(const nyr_func_t *f,
-                                           const int *defs, size_t label_i,
-                                           int label, int index, int len,
-                                           size_t at) {
+static bool nyr_guard_proves_index_in_len(const nyr_func_t *f, const int *defs,
+                                          size_t label_i, int label, int index,
+                                          int len, size_t at) {
   if (nyr_label_pred_count(f, label, label_i) != 1)
     return false;
   size_t prev = nyr_previous_non_nop(f, label_i);
@@ -820,7 +817,7 @@ static int nyr_bce_tbuf_root_value(nyr_bce_tbuf_roots_t *roots, int value);
  * paths, so it may reject a root but cannot omit a reaching mutation.
  */
 static bool nyr_bce_local_store_can_reach_load(nyr_bce_tbuf_roots_t *roots,
-                                                size_t store_i, size_t load_i) {
+                                               size_t store_i, size_t load_i) {
   if (!roots || !roots->cfg || store_i >= roots->f->len ||
       load_i >= roots->f->len || !roots->cfg->inst_block)
     return true;
@@ -911,17 +908,17 @@ static bool nyr_bce_call_cannot_mutate_memory(const nyr_inst_t *in) {
 }
 
 static bool nyr_bce_call_is_nonmutating_borrow(const nyr_inst_t *in, int root,
-                                                nyr_bce_tbuf_roots_t *roots) {
+                                               nyr_bce_tbuf_roots_t *roots) {
   int arg = nyr_bce_return_borrow_arg(in);
   return nyr_bce_call_has_nonmutating_borrow(in) && roots && arg >= 0 &&
          nyr_bce_tbuf_root_value(roots, arg) == root;
 }
 
 static int nyr_bce_tbuf_root(nyr_bce_tbuf_roots_t *roots, int value,
-                              unsigned depth);
+                             unsigned depth);
 
 static int nyr_bce_tbuf_root_uncached(nyr_bce_tbuf_roots_t *roots, int value,
-                                       unsigned depth) {
+                                      unsigned depth) {
   const nyr_func_t *f = roots->f;
   const int *defs = roots->defs;
   if (depth > 32)
@@ -933,6 +930,9 @@ static int nyr_bce_tbuf_root_uncached(nyr_bce_tbuf_roots_t *roots, int value,
   if (in->op == NYIR_CALL) {
     if (in->symbol && (strcmp(in->symbol, "rt_tbuf_new_raw") == 0 ||
                        strcmp(in->symbol, "rt_list_new_raw") == 0 ||
+                       strcmp(in->symbol, "rt_list_new") == 0 ||
+                       strcmp(in->symbol, "rt_list_new_sized") == 0 ||
+                       strcmp(in->symbol, "rt_list_new_sized_uninit") == 0 ||
                        strcmp(in->symbol, "i64buf_new") == 0 ||
                        strcmp(in->symbol, "f64buf_new") == 0 ||
                        strcmp(in->symbol, "f32buf_new") == 0))
@@ -1052,8 +1052,7 @@ static int nyr_bce_tbuf_root_uncached(nyr_bce_tbuf_roots_t *roots, int value,
     bool same = true;
     bool saw_cycle = false;
     for (size_t i = 0; i < in->phi_incoming_len; ++i) {
-      int next =
-          nyr_bce_tbuf_root(roots, in->phi_incoming[i].value, depth + 1);
+      int next = nyr_bce_tbuf_root(roots, in->phi_incoming[i].value, depth + 1);
       if (next == NYIR_BCE_TBUF_ROOT_CYCLE) {
         saw_cycle = true;
         continue;
@@ -1089,7 +1088,7 @@ static int nyr_bce_tbuf_root_uncached(nyr_bce_tbuf_roots_t *roots, int value,
 }
 
 static int nyr_bce_tbuf_root(nyr_bce_tbuf_roots_t *roots, int value,
-                              unsigned depth) {
+                             unsigned depth) {
   if (!roots || !roots->f || !roots->defs || !roots->roots || !roots->state ||
       depth > 32)
     return -1;
@@ -1120,16 +1119,16 @@ static int nyr_bce_tbuf_root_value(nyr_bce_tbuf_roots_t *roots, int value) {
 }
 
 static int nyr_bce_exit_value_limit(const nyr_func_t *f, const int *defs,
-                                     const nyr_scev_info_t *scev,
-                                     const nyr_cfg_t *cfg, int exit_value,
-                                     int guarded_index, size_t at) {
+                                    const nyr_scev_info_t *scev,
+                                    const nyr_cfg_t *cfg, int exit_value,
+                                    int guarded_index, size_t at) {
   if (!f || !defs || !scev || !cfg || exit_value < 0 || guarded_index < 0 ||
       at >= f->len)
     return -1;
   exit_value = nyr_value_skip_copies(f, defs, exit_value);
   nyr_scev_affine_t index_range = {0};
   if (!nyr_scev_affine_at_cfg(f, scev, defs, cfg, guarded_index, at,
-                               &index_range) ||
+                              &index_range) ||
       !index_range.range.has_min || index_range.range.min < 0)
     return -1;
   size_t use_block = cfg->inst_block[at];
@@ -1168,9 +1167,8 @@ static int nyr_bce_exit_value_limit(const nyr_func_t *f, const int *defs,
   return -1;
 }
 
-static bool nyr_bce_tbuf_header_offset(nyr_bce_tbuf_roots_t *roots,
-                                        int address, int root,
-                                        int64_t wanted_offset) {
+static bool nyr_bce_tbuf_header_offset(nyr_bce_tbuf_roots_t *roots, int address,
+                                       int root, int64_t wanted_offset) {
   const nyr_func_t *f = roots->f;
   const int *defs = roots->defs;
   address = nyr_value_skip_copies(f, defs, address);
@@ -1183,8 +1181,8 @@ static bool nyr_bce_tbuf_header_offset(nyr_bce_tbuf_roots_t *roots,
   if (in->op != NYIR_ADD_I64)
     return false;
   int64_t offset = 0;
-  if (nyr_const_i64_value(f, defs, in->a, &offset) &&
-      offset == wanted_offset && nyr_bce_tbuf_root_value(roots, in->b) == root)
+  if (nyr_const_i64_value(f, defs, in->a, &offset) && offset == wanted_offset &&
+      nyr_bce_tbuf_root_value(roots, in->b) == root)
     return true;
   return nyr_const_i64_value(f, defs, in->b, &offset) &&
          offset == wanted_offset &&
@@ -1199,11 +1197,11 @@ static bool nyr_bce_tbuf_header_offset(nyr_bce_tbuf_roots_t *roots,
  * consumed by the bounds check.
  */
 static bool nyr_bce_tbuf_length_value(const nyr_func_t *f, const int *defs,
-                                       const nyr_scev_info_t *scev, int base,
-                                       int loaded_length, int guarded_index,
-                                       size_t at, const nyr_cfg_t *cfg,
-                                       nyr_bce_tbuf_roots_t *roots,
-                                       int *length_out) {
+                                      const nyr_scev_info_t *scev, int base,
+                                      int loaded_length, int guarded_index,
+                                      size_t at, const nyr_cfg_t *cfg,
+                                      nyr_bce_tbuf_roots_t *roots,
+                                      int *length_out) {
   if (!cfg)
     return false;
   if (!f || !defs || !length_out || at >= f->len)
@@ -1308,7 +1306,7 @@ static bool nyr_bce_tbuf_length_value(const nyr_func_t *f, const int *defs,
   if (safe && selected_length >= 0 && selected_store != SIZE_MAX &&
       selected_store < (size_t)load_i &&
       nyr_cfg_dominates(cfg, cfg->inst_block[selected_store],
-                         cfg->inst_block[load_i])) {
+                        cfg->inst_block[load_i])) {
     int loop_limit = nyr_bce_exit_value_limit(
         f, defs, scev, cfg, selected_length, guarded_index, at);
     *length_out = loop_limit >= 0 ? loop_limit : selected_length;
@@ -1324,8 +1322,7 @@ static bool nyr_bce_tbuf_length_value(const nyr_func_t *f, const int *defs,
   return safe;
 }
 
-static bool
-nyr_bce_call_is_nondecreasing_tbuf_mutation(const nyr_inst_t *in) {
+static bool nyr_bce_call_is_nondecreasing_tbuf_mutation(const nyr_inst_t *in) {
   return in && in->op == NYIR_CALL && in->symbol &&
          (strcmp(in->symbol, "rt_tbuf_append_raw") == 0 ||
           strcmp(in->symbol, "rt_tbuf_append_i64_raw") == 0 ||
@@ -1333,7 +1330,7 @@ nyr_bce_call_is_nondecreasing_tbuf_mutation(const nyr_inst_t *in) {
 }
 
 static bool nyr_bce_call_passes_root(const nyr_inst_t *in, int root,
-                                      nyr_bce_tbuf_roots_t *roots) {
+                                     nyr_bce_tbuf_roots_t *roots) {
   if (!in || !roots || root < 0)
     return false;
   const int args[] = {in->a, in->b, in->c, in->d, in->e, in->f};
@@ -1355,10 +1352,10 @@ static bool nyr_bce_call_passes_root(const nyr_inst_t *in, int root,
  * Escapes, unknown writes, and direct header writes fail closed.
  */
 static bool nyr_bce_tbuf_length_guard_stable(const nyr_func_t *f,
-                                              const int *defs, int root,
-                                              size_t guard_call_i,
-                                              size_t check_i,
-                                              nyr_bce_tbuf_roots_t *roots) {
+                                             const int *defs, int root,
+                                             size_t guard_call_i,
+                                             size_t check_i,
+                                             nyr_bce_tbuf_roots_t *roots) {
   if (!f || !defs || !roots || root < 0 || guard_call_i >= check_i ||
       check_i >= f->len)
     return false;
@@ -1433,10 +1430,10 @@ static bool nyr_bce_tbuf_length_guard_stable(const nyr_func_t *f,
 
 static bool nyr_bce_trace_enabled(void);
 static void nyr_bce_trace(const nyr_func_t *f, size_t pc, const char *status,
-                           const char *reason);
+                          const char *reason);
 
 static bool nyr_bce_cmp_lower_bound(nyr_cmp_t cmp, bool true_edge,
-                                     int64_t constant, int64_t *minimum) {
+                                    int64_t constant, int64_t *minimum) {
   if (!minimum || constant < 0)
     return false;
   if (true_edge) {
@@ -1472,8 +1469,8 @@ static bool nyr_bce_tbuf_guarded_length_minimum(
     if (ny_trace_enabled("NY_TRACE_BCE")) {
       int base_def = base >= 0 && base < f->next_value ? defs[base] : -1;
       const nyr_inst_t *base_in = base_def >= 0 && (size_t)base_def < f->len
-                                       ? &f->data[base_def]
-                                       : NULL;
+                                      ? &f->data[base_def]
+                                      : NULL;
       ny_trace_line("BCE",
                     "bce: length-guard reject check=%zu base=v%d def=%d "
                     "op=%d symbol=%s: unknown root",
@@ -1530,8 +1527,7 @@ static bool nyr_bce_tbuf_guarded_length_minimum(
     nyr_cmp_t relation = cmp->cmp;
     if (cmp->a >= 0 && nyr_const_i64_value(f, defs, cmp->b, &constant)) {
       len_value = nyr_value_skip_copies(f, defs, cmp->a);
-    } else if (cmp->b >= 0 &&
-               nyr_const_i64_value(f, defs, cmp->a, &constant)) {
+    } else if (cmp->b >= 0 && nyr_const_i64_value(f, defs, cmp->a, &constant)) {
       len_value = nyr_value_skip_copies(f, defs, cmp->b);
       relation = nyr_cmp_swap_operands(relation);
     } else {
@@ -1615,7 +1611,7 @@ static bool nyr_bce_tbuf_guarded_length_minimum(
     int64_t index_max = 0;
     bool ranged = index >= 0 &&
                   nyr_scev_affine_at_cfg(f, scev, defs, cfg, index, check_i,
-                                          &index_range) &&
+                                         &index_range) &&
                   index_range.range.has_min && index_range.range.has_max;
     if (ranged) {
       index_min = index_range.range.min;
@@ -1661,11 +1657,10 @@ static bool nyr_bce_tbuf_guarded_length_minimum(
 }
 
 static bool nyr_bounds_check_guard_safe(const nyr_func_t *f, const int *defs,
-                                         size_t check_i, size_t label_i,
-                                         int label,
-                                         const nyr_scev_info_t *scev,
-                                         const nyr_cfg_t *cfg,
-                                         nyr_bce_tbuf_roots_t *roots) {
+                                        size_t check_i, size_t label_i,
+                                        int label, const nyr_scev_info_t *scev,
+                                        const nyr_cfg_t *cfg,
+                                        nyr_bce_tbuf_roots_t *roots) {
   const nyr_inst_t *check = &f->data[check_i];
   if (ny_trace_enabled("NY_TRACE_BCE") && check->op == NYIR_BOUNDS_CHECK)
     ny_trace_line("BCE", "bce: guard-entry check=%zu b=v%d c=v%d imm=%lld",
@@ -1687,16 +1682,16 @@ static bool nyr_bounds_check_guard_safe(const nyr_func_t *f, const int *defs,
   }
   int forwarded_length = -1;
   if (nyr_bce_tbuf_length_value(f, defs, scev, check->a, len, index, check_i,
-                                 cfg, roots, &forwarded_length))
+                                cfg, roots, &forwarded_length))
     len = nyr_value_skip_copies(f, defs, forwarded_length);
   if (nyr_guard_proves_index_in_len(f, defs, label_i, label, index, len,
-                                     check_i))
+                                    check_i))
     return true;
 
   int64_t guarded_length_minimum = 0;
   if (nyr_bce_tbuf_guarded_length_minimum(f, defs, scev, cfg, roots, check->a,
-                                           index, check_i,
-                                           &guarded_length_minimum)) {
+                                          index, check_i,
+                                          &guarded_length_minimum)) {
     if (ny_trace_enabled("NY_TRACE_BCE"))
       ny_trace_line("BCE",
                     "bce: runtime-length guard proves check=%zu index=v%d "
@@ -1729,7 +1724,7 @@ static bool nyr_bounds_check_guard_safe(const nyr_func_t *f, const int *defs,
         nyr_cmp_proves_index_in_len(f, defs, cmp, true, index, len, check_i);
     bool reverse =
         scev && nyr_cmp_proves_reverse_index_in_len(f, defs, scev, cfg, cmp,
-                                                     true, index, len, check_i);
+                                                    true, index, len, check_i);
     if (ny_trace_enabled("NY_TRACE_BCE"))
       ny_trace_line("BCE",
                     "bce: guard-candidate check=%zu br=%zu target=L%lld cmp=%d "
@@ -1746,7 +1741,7 @@ static bool nyr_bce_trace_enabled(void) {
 }
 
 static bool nyr_bounds_check_same_operands(const nyr_inst_t *a,
-                                            const nyr_inst_t *b) {
+                                           const nyr_inst_t *b) {
   return a && b && a->op == NYIR_BOUNDS_CHECK && b->op == NYIR_BOUNDS_CHECK &&
          a->a == b->a && a->b == b->b && a->c == b->c && a->imm == b->imm;
 }
@@ -1776,7 +1771,7 @@ static bool nyr_remove_dominated_bounds_checks(nyr_func_t *f) {
       if (!nyr_cfg_dominates(&cfg, def_block, use_block))
         continue;
       nyr_bce_trace(f, i, "eliminate",
-                     "identical earlier bounds check dominates this check");
+                    "identical earlier bounds check dominates this check");
       nyr_inst_discard(check);
       break;
     }
@@ -1786,7 +1781,7 @@ static bool nyr_remove_dominated_bounds_checks(nyr_func_t *f) {
 }
 
 static void nyr_bce_trace(const nyr_func_t *f, size_t pc, const char *status,
-                           const char *reason) {
+                          const char *reason) {
   if (!nyr_bce_trace_enabled())
     return;
   const nyr_inst_t *in = f && pc < f->len ? &f->data[pc] : NULL;
@@ -1832,15 +1827,15 @@ bool nyr_bounds_check_elim(nyr_func_t *f) {
     return false;
   }
   nyr_bce_tbuf_roots_t roots = {.f = f,
-                                 .defs = defs,
-                                 .cfg = NULL,
-                                 .roots = NULL,
-                                 .state = NULL,
-                                 .blocks_reaching_load = NULL,
-                                 .reach_queue = NULL,
-                                 .reach_capacity = 0,
-                                 .reach_load_i = SIZE_MAX,
-                                 .root_trace_remaining = 32};
+                                .defs = defs,
+                                .cfg = NULL,
+                                .roots = NULL,
+                                .state = NULL,
+                                .blocks_reaching_load = NULL,
+                                .reach_queue = NULL,
+                                .reach_capacity = 0,
+                                .reach_load_i = SIZE_MAX,
+                                .root_trace_remaining = 32};
   bool have_facts =
       nyr_analyze_values(f, facts, (size_t)f->next_value, NULL, 0);
   if (!nyr_remove_dominated_bounds_checks(f)) {
@@ -1888,8 +1883,7 @@ bool nyr_bounds_check_elim(nyr_func_t *f) {
               : NULL;
       bool canonical = cmp && cmp->op == NYIR_CMP_I64 &&
                        cmp->cmp == NYIR_CMP_LT && cmp->a >= 0 &&
-                       nyr_const_i64_value(f, defs, cmp->b, &zero) &&
-                       zero == 0;
+                       nyr_const_i64_value(f, defs, cmp->b, &zero) && zero == 0;
       bool same_index =
           canonical && nyr_guard_values_same_at(f, defs, in->c, cmp->a, i);
       bool nonnegative =
@@ -1898,7 +1892,7 @@ bool nyr_bounds_check_elim(nyr_func_t *f) {
         nyr_scev_affine_t index_range = {0};
         nonnegative = have_cfg &&
                       nyr_scev_affine_at_cfg(f, &scev, defs, &cfg, cmp->a, i,
-                                              &index_range) &&
+                                             &index_range) &&
                       index_range.range.has_min && index_range.range.min >= 0;
       }
       if (same_index && !nonnegative)
@@ -1908,8 +1902,8 @@ bool nyr_bounds_check_elim(nyr_func_t *f) {
         nir_make_copy(in, false_arm);
         ++normalized_index_elided;
         nyr_bce_trace(f, i, "simplify",
-                       "negative-index normalization is unreachable for a "
-                       "nonnegative local");
+                      "negative-index normalization is unreachable for a "
+                      "nonnegative local");
       }
     }
     if (in->op == NYIR_BOUNDS_CHECK && in->c >= 0 &&
@@ -1925,24 +1919,24 @@ bool nyr_bounds_check_elim(nyr_func_t *f) {
     }
     if (in->op == NYIR_BOUNDS_CHECK && current_label_i != SIZE_MAX &&
         nyr_bounds_check_guard_safe(f, defs, i, current_label_i, current_label,
-                                     have_scev ? &scev : NULL,
-                                     have_cfg ? &cfg : NULL, &roots)) {
+                                    have_scev ? &scev : NULL,
+                                    have_cfg ? &cfg : NULL, &roots)) {
       nyr_bce_trace(f, i, "eliminate",
-                     "dominating loop guard proves index within length");
+                    "dominating loop guard proves index within length");
       *in = (nyr_inst_t){.op = NYIR_NOP,
-                          .dst = -1,
-                          .a = -1,
-                          .b = -1,
-                          .c = -1,
-                          .d = -1,
-                          .e = -1,
-                          .f = -1};
+                         .dst = -1,
+                         .a = -1,
+                         .b = -1,
+                         .c = -1,
+                         .d = -1,
+                         .e = -1,
+                         .f = -1};
       continue;
     }
     if (in->op == NYIR_BOUNDS_CHECK && have_scev && have_cfg &&
         nyr_scev_tbuf_bounds_check_safe_cfg(f, &scev, defs, &cfg, i, in)) {
       nyr_bce_trace(f, i, "eliminate",
-                     "bounded affine tbuf offset is within tracked length");
+                    "bounded affine tbuf offset is within tracked length");
       nyr_inst_discard(in);
       continue;
     }
@@ -1976,7 +1970,7 @@ bool nyr_bounds_check_elim(nyr_func_t *f) {
       }
       if (proven) {
         nyr_bce_trace(f, i, "eliminate",
-                       "retained range facts prove byte offset within length");
+                      "retained range facts prove byte offset within length");
         nyr_inst_discard(in);
         continue;
       }
@@ -2108,6 +2102,7 @@ static const nyr_inline_callee_t *nyr_inline_callees;
 static size_t nyr_inline_callee_count;
 static const nyr_inline_callee_t **nyr_inline_callee_index;
 static size_t nyr_inline_callee_index_cap;
+static bool nyr_inline_c_unit_abi;
 typedef struct {
   uint64_t closure_formals;
   size_t closure_formal_limit;
@@ -2136,8 +2131,7 @@ static uint64_t nyr_inline_name_hash(const char *name) {
   return hash;
 }
 
-void nyr_set_inline_callees(const nyr_inline_callee_t *callees,
-                             size_t count) {
+void nyr_set_inline_callees(const nyr_inline_callee_t *callees, size_t count) {
   free(nyr_inline_callee_index);
   free(nyr_inline_callee_summaries);
   nyr_inline_callee_index = NULL;
@@ -2239,8 +2233,12 @@ void nyr_set_inline_callees(const nyr_inline_callee_t *callees,
   }
 }
 
+void nyr_inline_set_c_unit_abi(bool enabled) {
+  nyr_inline_c_unit_abi = enabled;
+}
+
 bool nyr_inline_callees_reference_symbol(const char *symbol,
-                                          const nyr_func_t *exclude) {
+                                         const nyr_func_t *exclude) {
   for (size_t i = 0; i < nyr_inline_callee_count; ++i) {
     const nyr_func_t *callee = nyr_inline_callees[i].func;
     if (!callee || callee == exclude)
@@ -2271,7 +2269,7 @@ static int nyr_private_entry_def(const nyr_func_t *f, int value) {
 }
 
 static bool nyr_private_entry_raw_int(const nyr_func_t *f, int value,
-                                       unsigned depth) {
+                                      unsigned depth) {
   if (!f || value < 0 || value >= f->next_value || depth > 12)
     return false;
   int di = nyr_private_entry_def(f, value);
@@ -2305,7 +2303,7 @@ static bool nyr_private_entry_raw_int(const nyr_func_t *f, int value,
 }
 
 static bool nyr_private_entry_f64(const nyr_func_t *f, int value,
-                                   unsigned depth) {
+                                  unsigned depth) {
   if (!f || value < 0 || value >= f->next_value || depth > 12)
     return false;
   int di = nyr_private_entry_def(f, value);
@@ -2338,7 +2336,7 @@ static bool nyr_private_entry_f64(const nyr_func_t *f, int value,
  * already annotated by the front end or copies of such values may qualify.
  */
 static bool nyr_private_entry_typed_buffer(const nyr_func_t *f, int value,
-                                            unsigned depth) {
+                                           unsigned depth) {
   if (!f || value < 0 || value >= f->next_value || depth > 12)
     return false;
   int di = nyr_private_entry_def(f, value);
@@ -2352,10 +2350,9 @@ static bool nyr_private_entry_typed_buffer(const nyr_func_t *f, int value,
   return nyr_private_entry_typed_buffer(f, in->a, depth + 1);
 }
 
-static bool nyr_private_entry_tbuf_source_symbol(const nyr_func_t *f,
-                                                  int value,
-                                                  const char **symbol,
-                                                  unsigned depth) {
+static bool nyr_private_entry_tbuf_source_symbol(const nyr_func_t *f, int value,
+                                                 const char **symbol,
+                                                 unsigned depth) {
   if (!f || !symbol || value < 0 || value >= f->next_value || depth > 12)
     return false;
   int di = nyr_private_entry_def(f, value);
@@ -2381,10 +2378,10 @@ static bool nyr_private_entry_tbuf_source_symbol(const nyr_func_t *f,
  * producer.
  */
 static bool nyr_private_entry_symbol_is_tbuf(const nyr_func_t *f,
-                                              const nyr_use_def_t *uses,
-                                              const char *symbol,
-                                              const char **stack,
-                                              unsigned depth, bool *has_seed) {
+                                             const nyr_use_def_t *uses,
+                                             const char *symbol,
+                                             const char **stack, unsigned depth,
+                                             bool *has_seed) {
   if (!f || !uses || !symbol || !stack || !has_seed || depth > 12)
     return false;
   *has_seed = false;
@@ -2404,7 +2401,8 @@ static bool nyr_private_entry_symbol_is_tbuf(const nyr_func_t *f,
          ui < uses->offsets[addr->dst + 1] && valid; ++ui) {
       const nyr_inst_t *user = &f->data[uses->users[ui]];
       if (user->a != addr->dst || user->op == NYIR_NOP ||
-          (user->flags & NYIR_INST_F_MEM_BYTE)) {
+          (user->flags & (NYIR_INST_F_MEM_BYTE | NYIR_INST_F_MEM_U16 |
+                          NYIR_INST_F_MEM_I32))) {
         valid = false;
       } else if (user->op == NYIR_LOAD_I64 &&
                  (user->scalar_class == NYIR_SCALAR_TYPED_BUFFER ||
@@ -2421,8 +2419,8 @@ static bool nyr_private_entry_symbol_is_tbuf(const nyr_func_t *f,
         const char *source = NULL;
         bool source_seed = false;
         if (!nyr_private_entry_tbuf_source_symbol(f, user->c, &source, 0) ||
-            !nyr_private_entry_symbol_is_tbuf(f, uses, source, stack,
-                                               depth + 1, &source_seed)) {
+            !nyr_private_entry_symbol_is_tbuf(f, uses, source, stack, depth + 1,
+                                              &source_seed)) {
           valid = false;
         } else {
           *has_seed |= source_seed;
@@ -2483,7 +2481,7 @@ static bool nyr_private_entry_tbuf_initialized_before_loads(
 
 static int64_t
 nyr_private_entry_slot_for(const nyr_private_entry_global_t *globals,
-                            size_t count, const char *symbol) {
+                           size_t count, const char *symbol) {
   for (size_t i = 0; i < count; ++i)
     if (globals[i].symbol && symbol && strcmp(globals[i].symbol, symbol) == 0)
       return globals[i].slot;
@@ -2544,10 +2542,9 @@ bool nyr_promote_private_entry_globals(nyr_func_t *f) {
     const char *tbuf_stack[13] = {0};
     bool tbuf_seed = false;
     if (nyr_private_entry_symbol_is_tbuf(f, &uses, addr->symbol, tbuf_stack, 0,
-                                          &tbuf_seed) &&
+                                         &tbuf_seed) &&
         tbuf_seed &&
-        nyr_private_entry_tbuf_initialized_before_loads(f, &uses,
-                                                         addr->symbol))
+        nyr_private_entry_tbuf_initialized_before_loads(f, &uses, addr->symbol))
       binding_class = NYIR_SCALAR_TYPED_BUFFER;
     const char *reject_reason = "none";
     for (size_t ai = 0; ai < f->len && safe; ++ai) {
@@ -2562,7 +2559,8 @@ bool nyr_promote_private_entry_globals(nyr_func_t *f) {
         size_t user_idx = uses.users[ui];
         const nyr_inst_t *user = &f->data[user_idx];
         if (user->a != symbol_addr->dst || user->op == NYIR_NOP ||
-            (user->flags & NYIR_INST_F_MEM_BYTE)) {
+            (user->flags & (NYIR_INST_F_MEM_BYTE | NYIR_INST_F_MEM_U16 |
+                            NYIR_INST_F_MEM_I32))) {
           safe = false;
           reject_reason = "address-escapes-or-noncanonical-use";
           break;
@@ -2600,8 +2598,8 @@ bool nyr_promote_private_entry_globals(nyr_func_t *f) {
             const char *source_stack[13] = {0};
             bool source_seed = false;
             if (nyr_private_entry_tbuf_source_symbol(f, user->c, &source, 0) &&
-                nyr_private_entry_symbol_is_tbuf(
-                    f, &uses, source, source_stack, 0, &source_seed) &&
+                nyr_private_entry_symbol_is_tbuf(f, &uses, source, source_stack,
+                                                 0, &source_seed) &&
                 source_seed)
               stored_class = NYIR_SCALAR_TYPED_BUFFER;
           } else if (nyr_private_entry_raw_int(f, user->c, 0)) {
@@ -2700,18 +2698,17 @@ bool nyr_promote_private_entry_globals(nyr_func_t *f) {
           .scalar_class = globals[i].scalar_class == NYIR_SCALAR_F64
                               ? NYIR_SCALAR_F64
                               : NYIR_SCALAR_I64_RAW};
-      f->data[i * 2 + 1] =
-          (nyr_inst_t){.op = NYIR_STORE_LOCAL,
-                        .dst = -1,
-                        .a = zero,
-                        .b = -1,
-                        .c = -1,
-                        .d = -1,
-                        .e = -1,
-                        .f = -1,
-                        .imm = globals[i].slot,
-                        .scalar_class = globals[i].scalar_class,
-                        .effects = NYIR_EFFECT_WRITE_LOCAL};
+      f->data[i * 2 + 1] = (nyr_inst_t){.op = NYIR_STORE_LOCAL,
+                                        .dst = -1,
+                                        .a = zero,
+                                        .b = -1,
+                                        .c = -1,
+                                        .d = -1,
+                                        .e = -1,
+                                        .f = -1,
+                                        .imm = globals[i].slot,
+                                        .scalar_class = globals[i].scalar_class,
+                                        .effects = NYIR_EFFECT_WRITE_LOCAL};
     }
     f->len = new_len;
     for (size_t i = init_count; i < f->len; ++i) {
@@ -2759,14 +2756,14 @@ bool nyr_promote_private_entry_globals(nyr_func_t *f) {
           nyr_private_entry_slot_for(globals, count, in->symbol) >= 0) {
         nyr_debug_loc_t debug = in->debug;
         *in = (nyr_inst_t){.op = NYIR_NOP,
-                            .dst = -1,
-                            .a = -1,
-                            .b = -1,
-                            .c = -1,
-                            .d = -1,
-                            .e = -1,
-                            .f = -1,
-                            .debug = debug};
+                           .dst = -1,
+                           .a = -1,
+                           .b = -1,
+                           .c = -1,
+                           .d = -1,
+                           .e = -1,
+                           .f = -1,
+                           .debug = debug};
       }
     }
     if (ny_dbg_is_enabled(NY_DBG_HEURISTIC))
@@ -2791,8 +2788,8 @@ nyr_find_inline_callee_entry(const char *name) {
     return NULL;
   name = nyr_inline_normalize_name(name);
   if (nyr_inline_callee_index && nyr_inline_callee_index_cap) {
-    size_t slot = (size_t)nyr_inline_name_hash(name) &
-                  (nyr_inline_callee_index_cap - 1u);
+    size_t slot =
+        (size_t)nyr_inline_name_hash(name) & (nyr_inline_callee_index_cap - 1u);
     for (size_t probes = 0; probes < nyr_inline_callee_index_cap; ++probes) {
       const nyr_inline_callee_t *entry = nyr_inline_callee_index[slot];
       if (!entry)
@@ -2830,7 +2827,7 @@ nyr_find_inline_callee_summary(const char *name) {
     return NULL;
   const size_t index = (size_t)(entry - nyr_inline_callees);
   return index < nyr_inline_callee_count ? &nyr_inline_callee_summaries[index]
-                                          : NULL;
+                                         : NULL;
 }
 
 static bool nyr_func_is_inline_candidate(const nyr_func_t *f) {
@@ -2841,7 +2838,10 @@ static bool nyr_func_is_inline_candidate(const nyr_func_t *f) {
   for (size_t i = 0; i < f->len; ++i) {
     const nyr_inst_t *in = &f->data[i];
     if (in->op == NYIR_CALL || in->op == NYIR_PHI || in->op == NYIR_BR ||
-        in->op == NYIR_BR_IF || (in->op == NYIR_LABEL && i > 0))
+        in->op == NYIR_BR_IF ||
+        (in->op == NYIR_INLINE_ASM &&
+         (in->imm == -14 || in->imm == -82 || in->imm == -83)) ||
+        (in->op == NYIR_LABEL && i > 0))
       return false;
     if (in->op == NYIR_STORE_LOCAL &&
         (in->imm < 0 || in->imm >= (int64_t)f->param_count))
@@ -2855,8 +2855,11 @@ static bool nyr_func_has_control_flow(const nyr_func_t *f) {
     return false;
   for (size_t i = 0; i < f->len; ++i) {
     nyr_op_t op = f->data[i].op;
-    if (op == NYIR_BR || op == NYIR_BR_IF || op == NYIR_PHI ||
-        (op == NYIR_LABEL && i > 0))
+    if (op == NYIR_BR || op == NYIR_BR_IF ||
+        (op == NYIR_INLINE_ASM &&
+         (f->data[i].imm == -14 || f->data[i].imm == -82 ||
+          f->data[i].imm == -83)) ||
+        op == NYIR_PHI || (op == NYIR_LABEL && i > 0))
       return true;
   }
   return false;
@@ -2917,8 +2920,8 @@ static bool nyr_ipa_i64_unop(nyr_op_t op) {
   return op == NYIR_BSWAP_I64 || op == NYIR_BSWAP32_I64;
 }
 
-static bool nyr_ipa_const_eval(nyr_op_t op, int64_t a, int64_t b,
-                                nyr_cmp_t cmp, int64_t *out) {
+static bool nyr_ipa_const_eval(nyr_op_t op, int64_t a, int64_t b, nyr_cmp_t cmp,
+                               int64_t *out) {
   uint64_t ua = (uint64_t)a;
   uint64_t ub = (uint64_t)b;
   if (!out)
@@ -3048,8 +3051,8 @@ static bool nyr_ipa_body_is_scalar_pure(const nyr_func_t *callee) {
 }
 
 static bool nyr_ipa_store_is_formal_pointer(const nyr_func_t *callee,
-                                             const nyr_inst_t *store,
-                                             int *formal_slot_out) {
+                                            const nyr_inst_t *store,
+                                            int *formal_slot_out) {
   if (!callee || !store || store->op != NYIR_STORE_I64 || store->a < 0 ||
       store->b >= 0 || store->c < 0)
     return false;
@@ -3130,9 +3133,8 @@ nyr_ipa_body_is_scalar_with_formal_stores(const nyr_func_t *callee) {
   return saw_formal_store;
 }
 
-static bool
-nyr_ipa_effectful_result_summary_matches(const nyr_inst_t *call,
-                                          const nyr_func_t *callee) {
+static bool nyr_ipa_effectful_result_summary_matches(const nyr_inst_t *call,
+                                                     const nyr_func_t *callee) {
   if (!call || !callee || (call->flags & NYIR_INST_F_EFFECTS_KNOWN) == 0 ||
       (call->effects & NYIR_EFFECT_CALL) == 0)
     return false;
@@ -3149,10 +3151,10 @@ nyr_ipa_effectful_result_summary_matches(const nyr_inst_t *call,
 }
 
 static bool nyr_ipa_eval_callee(const nyr_func_t *callee, const int64_t *args,
-                                 size_t arg_count, int64_t *result,
-                                 size_t *instruction_budget,
-                                 nyr_ipa_memory_writes_t *memory_writes,
-                                 unsigned recursion_depth) {
+                                size_t arg_count, int64_t *result,
+                                size_t *instruction_budget,
+                                nyr_ipa_memory_writes_t *memory_writes,
+                                unsigned recursion_depth) {
   if (!callee || !args || !result || arg_count != callee->param_count ||
       !instruction_budget || recursion_depth > 32 ||
       (recursion_depth == 0 && !nyr_ipa_body_is_scalar_pure(callee) &&
@@ -3350,7 +3352,7 @@ static bool nyr_ipa_eval_callee(const nyr_func_t *callee, const int64_t *args,
         int call_argc = 0;
         int64_t call_values[NYIR_CALL_MAX_ARGS];
         if (!nyr_call_args(in, callee->next_value, call_args,
-                            NYIR_CALL_MAX_ARGS, &call_argc, NULL, 0) ||
+                           NYIR_CALL_MAX_ARGS, &call_argc, NULL, 0) ||
             call_argc != in->imm) {
           ok = false;
           break;
@@ -3364,8 +3366,8 @@ static bool nyr_ipa_eval_callee(const nyr_func_t *callee, const int64_t *args,
           call_values[k] = facts[call_args[k]].value;
         }
         if (ok && !nyr_ipa_eval_callee(callee, call_values, (size_t)call_argc,
-                                        &value, instruction_budget, NULL,
-                                        recursion_depth + 1u))
+                                       &value, instruction_budget, NULL,
+                                       recursion_depth + 1u))
           ok = false;
         if (ok)
           facts[in->dst] = (nyr_ipa_const_fact_t){true, value};
@@ -3386,7 +3388,7 @@ static bool nyr_ipa_eval_callee(const nyr_func_t *callee, const int64_t *args,
             (size_t)in->b >= value_count || !facts[in->a].known ||
             !facts[in->b].known ||
             !nyr_ipa_const_eval(in->op, facts[in->a].value, facts[in->b].value,
-                                 in->cmp, &value)) {
+                                in->cmp, &value)) {
           ok = false;
           break;
         }
@@ -3406,7 +3408,7 @@ static bool nyr_ipa_eval_callee(const nyr_func_t *callee, const int64_t *args,
 }
 
 static bool nyr_ipa_collect_constants(const nyr_func_t *caller,
-                                       nyr_ipa_const_fact_t *facts) {
+                                      nyr_ipa_const_fact_t *facts) {
   if (!caller || !facts)
     return false;
   for (size_t i = 0; i < caller->len; ++i) {
@@ -3440,7 +3442,7 @@ static bool nyr_ipa_collect_constants(const nyr_func_t *caller,
                (size_t)in->b < (size_t)caller->next_value &&
                facts[in->a].known && facts[in->b].known &&
                nyr_ipa_const_eval(in->op, facts[in->a].value,
-                                   facts[in->b].value, in->cmp, &value)) {
+                                  facts[in->b].value, in->cmp, &value)) {
       facts[in->dst] = (nyr_ipa_const_fact_t){true, value};
     }
   }
@@ -3480,8 +3482,8 @@ bool nyr_ipa_constprop(nyr_func_t *f) {
       continue;
     int args[NYIR_CALL_MAX_ARGS];
     int argc = 0;
-    if (!nyr_call_args(in, f->next_value, args, NYIR_CALL_MAX_ARGS, &argc,
-                        NULL, 0) ||
+    if (!nyr_call_args(in, f->next_value, args, NYIR_CALL_MAX_ARGS, &argc, NULL,
+                       0) ||
         argc != in->imm)
       continue;
     int64_t arg_values[NYIR_CALL_MAX_ARGS];
@@ -3499,8 +3501,8 @@ bool nyr_ipa_constprop(nyr_func_t *f) {
     int64_t result = 0;
     nyr_ipa_memory_writes_t memory_writes = {0};
     if (!nyr_ipa_eval_callee(callee, arg_values, (size_t)argc, &result,
-                              &eval_budget,
-                              formal_store_body ? &memory_writes : NULL, 0))
+                             &eval_budget,
+                             formal_store_body ? &memory_writes : NULL, 0))
       continue;
     int forwarded_load_dst = -1;
     int64_t forwarded_load_value = 0;
@@ -3567,9 +3569,6 @@ bool nyr_ipa_constprop(nyr_func_t *f) {
             (nyr_ipa_const_fact_t){true, forwarded_load_value};
       }
     } else {
-      free(in->extra_args);
-      free(in->arg_sizes);
-      free(in->phi_incoming);
       nir_make_const(in, result);
     }
     facts[dst] = (nyr_ipa_const_fact_t){true, result};
@@ -3592,7 +3591,7 @@ static const char *nyr_inline_ool_last_reason;
 
 static void nyr_inline_ool_flush(const char *fn_name);
 static void nyr_inline_small_trace(size_t pc, const char *symbol,
-                                    const char *action, const char *reason) {
+                                   const char *action, const char *reason) {
   if (!ny_dbg_is_enabled(NY_DBG_HEURISTIC))
     return;
   if (action && strcmp(action, "keep-out-of-line") == 0) {
@@ -3609,13 +3608,13 @@ static void nyr_inline_small_trace(size_t pc, const char *symbol,
 static void nyr_inline_ool_flush(const char *fn_name) {
   if (!nyr_inline_ool_count)
     return;
-  ny_dbg_heuristic_event(
-      "INLINE_SMALL",
-      "%s: %zu calls stay out of line "
-      "(last reason=%s; NYTRIX_INLINE_TRACE_ALL=1 logs "
-      "each site)",
-      fn_name ? fn_name : "<fn>", nyr_inline_ool_count,
-      nyr_inline_ool_last_reason ? nyr_inline_ool_last_reason : "none");
+  ny_dbg_heuristic_event("INLINE_SMALL",
+                         "%s: %zu calls stay out of line "
+                         "(last reason=%s; NYTRIX_INLINE_TRACE_ALL=1 logs "
+                         "each site)",
+                         fn_name ? fn_name : "<fn>", nyr_inline_ool_count,
+                         nyr_inline_ool_last_reason ? nyr_inline_ool_last_reason
+                                                    : "none");
   nyr_inline_ool_count = 0;
   nyr_inline_ool_last_reason = NULL;
 }
@@ -3628,7 +3627,7 @@ static void nyr_inline_ool_flush(const char *fn_name) {
  * no verified summary retain the existing body-based legality checks.
  */
 static bool nyr_inline_summary_covered(const nyr_inst_t *call,
-                                        const nyr_func_t *callee) {
+                                       const nyr_func_t *callee) {
   if (!call || !callee || (call->flags & NYIR_INST_F_EFFECTS_KNOWN) == 0)
     return true;
   unsigned body_effects = 0;
@@ -3652,19 +3651,19 @@ bool nyr_inline_small(nyr_func_t *f) {
      */
     if (in->flags & NYIR_INST_F_EXTERN) {
       nyr_inline_small_trace(i, in->symbol, "keep-out-of-line",
-                              "foreign ABI call");
+                             "foreign ABI call");
       continue;
     }
     const nyr_func_t *callee = nyr_find_inline_callee(in->symbol);
     if (!callee || !nyr_func_is_inline_candidate(callee)) {
       nyr_inline_small_trace(i, in->symbol, "keep-out-of-line",
-                              callee ? "callee is not a small-inliner candidate"
-                                     : "no registered monomorphic callee body");
+                             callee ? "callee is not a small-inliner candidate"
+                                    : "no registered monomorphic callee body");
       continue;
     }
     if (!nyr_inline_summary_covered(in, callee)) {
       nyr_inline_small_trace(i, in->symbol, "keep-out-of-line",
-                              "call-site effects exceed cloned body summary");
+                             "call-site effects exceed cloned body summary");
       continue;
     }
     size_t callee_ret_count = 0;
@@ -3721,10 +3720,7 @@ bool nyr_inline_small(nyr_func_t *f) {
     }
     if (ret_const && saw_ret && in->dst >= 0) {
       nyr_inline_small_trace(i, in->symbol, "accept",
-                              "all returns share one unobservable constant");
-      free(in->extra_args);
-      free(in->arg_sizes);
-      free(in->phi_incoming);
+                             "all returns share one unobservable constant");
       nir_make_const(in, ret_imm);
       continue;
     }
@@ -3814,10 +3810,14 @@ bool nyr_inline_small(nyr_func_t *f) {
                    def->op == NYIR_DIV_F64 || def->op == NYIR_CMP_I64 ||
                    def->op == NYIR_CMP_F64) {
           int p0 = def->a, p1 = def->b;
-          int param0 = (p0 >= 0 && p0 < (int)callee->param_count) ? p0 : -1;
-          int param1 = (p1 >= 0 && p1 < (int)callee->param_count) ? p1 : -1;
+          int param0 = -1, param1 = -1;
+          bool p0_defined = false, p1_defined = false;
           for (size_t k = 0; k < callee->len; ++k) {
             const nyr_inst_t *c = &callee->data[k];
+            if (c->dst == p0)
+              p0_defined = true;
+            if (c->dst == p1)
+              p1_defined = true;
             if (c->dst == p0 && c->op == NYIR_LOAD_LOCAL && c->imm >= 0 &&
                 c->imm < (int64_t)callee->param_count)
               param0 = (int)c->imm;
@@ -3831,6 +3831,16 @@ bool nyr_inline_small(nyr_func_t *f) {
                 c->a < (int)callee->param_count)
               param1 = c->a;
           }
+          /*
+           * Some producers represent formal parameters directly as SSA
+           * values [0, param_count).  Do not mistake a constant or temporary
+           * with the same value number for such a formal: it has a definition
+           * in the callee and must be resolved through that definition.
+           */
+          if (!p0_defined && p0 >= 0 && p0 < (int)callee->param_count)
+            param0 = p0;
+          if (!p1_defined && p1 >= 0 && p1 < (int)callee->param_count)
+            param1 = p1;
           if (param0 >= 0 && param1 >= 0) {
             b_op = def->op;
             b_p0 = param0;
@@ -3852,10 +3862,10 @@ bool nyr_inline_small(nyr_func_t *f) {
             i, in->symbol, "accept",
             "single pure operation over two formal parameters");
         *in = (nyr_inst_t){.op = (nyr_op_t)b_op,
-                            .dst = in->dst,
-                            .a = arg0,
-                            .b = arg1,
-                            .cmp = b_cmp};
+                           .dst = in->dst,
+                           .a = arg0,
+                           .b = arg1,
+                           .cmp = b_cmp};
         continue;
       }
     }
@@ -4024,8 +4034,8 @@ static bool nyr_inline_trace_enabled(void) {
 }
 
 static void nyr_inline_trace(const nyr_func_t *caller, size_t call_idx,
-                              const char *callee, const char *status,
-                              const char *reason) {
+                             const char *callee, const char *status,
+                             const char *reason) {
   if (!nyr_inline_trace_enabled())
     return;
   const nyr_inst_t *call =
@@ -4046,7 +4056,7 @@ static void nyr_inline_trace(const nyr_func_t *caller, size_t call_idx,
 }
 
 static bool nyr_inline_value_is_const(const nyr_func_t *f, size_t before,
-                                       int value) {
+                                      int value) {
   if (!f || value < 0)
     return false;
   if (before > f->len)
@@ -4069,7 +4079,7 @@ static bool nyr_inline_value_is_const(const nyr_func_t *f, size_t before,
  * capped by the caller below.
  */
 static size_t nyr_inline_static_loop_depth_slow(const nyr_func_t *f,
-                                                 size_t call_idx) {
+                                                size_t call_idx) {
   if (!f || call_idx >= f->len)
     return 0;
   size_t depth = 0;
@@ -4114,7 +4124,7 @@ static uint64_t nyr_inline_label_hash(int64_t label) {
  * every branch and label in the function.
  */
 static bool nyr_inline_compute_loop_depths(const nyr_func_t *f,
-                                            uint8_t **out_depths) {
+                                           uint8_t **out_depths) {
   if (!out_depths)
     return false;
   *out_depths = NULL;
@@ -4200,8 +4210,8 @@ typedef struct {
 } nyr_inline_chain_t;
 
 static bool nyr_inline_expansion_allows(const nyr_inline_chain_t *chain,
-                                         nyr_inline_expansion_t expansion,
-                                         const char *callee_symbol) {
+                                        nyr_inline_expansion_t expansion,
+                                        const char *callee_symbol) {
   if (!chain || !callee_symbol)
     return false;
   for (size_t at = expansion; at != NYIR_INLINE_NO_EXPANSION;) {
@@ -4216,9 +4226,9 @@ static bool nyr_inline_expansion_allows(const nyr_inline_chain_t *chain,
 }
 
 static bool nyr_inline_chain_push(nyr_inline_chain_t *chain,
-                                   nyr_inline_expansion_t parent,
-                                   const char *symbol,
-                                   nyr_inline_expansion_t *out) {
+                                  nyr_inline_expansion_t parent,
+                                  const char *symbol,
+                                  nyr_inline_expansion_t *out) {
   if (!chain || !symbol || !out)
     return false;
   if (chain->len >= NYIR_INLINE_NO_EXPANSION)
@@ -4241,7 +4251,7 @@ static bool nyr_inline_chain_push(nyr_inline_chain_t *chain,
 }
 
 static bool nyr_inline_expansion_reserve(nyr_inline_expansion_t **expansions,
-                                          size_t *capacity, size_t needed) {
+                                         size_t *capacity, size_t needed) {
   if (needed <= *capacity)
     return true;
   size_t next_capacity = *capacity ? *capacity : 16;
@@ -4262,9 +4272,9 @@ static bool nyr_inline_expansion_reserve(nyr_inline_expansion_t **expansions,
 }
 
 static void nyr_inline_expansion_splice(nyr_inline_expansion_t *expansions,
-                                         size_t old_len, size_t call_idx,
-                                         size_t inserted,
-                                         nyr_inline_expansion_t child) {
+                                        size_t old_len, size_t call_idx,
+                                        size_t inserted,
+                                        nyr_inline_expansion_t child) {
   memmove(&expansions[call_idx + inserted], &expansions[call_idx + 1],
           (old_len - call_idx - 1) * sizeof(*expansions));
   for (size_t i = 0; i < inserted; ++i)
@@ -4276,17 +4286,20 @@ static void nyr_inline_expansion_splice(nyr_inline_expansion_t *expansions,
  * optimization-exposing operations add a bounded benefit credit, while a high
  * temporary-value count approximates post-inline register-pressure growth.
  */
-static bool nyr_should_inline_general(
-    const nyr_func_t *caller, const nyr_inst_t *call,
-    const nyr_func_t *callee, size_t call_idx,
-    const nyr_inline_chain_t *chain, nyr_inline_expansion_t expansion,
-    size_t static_loop_depth, const char *callee_symbol) {
+static bool nyr_should_inline_general(const nyr_func_t *caller,
+                                      const nyr_inst_t *call,
+                                      const nyr_func_t *callee, size_t call_idx,
+                                      const nyr_inline_chain_t *chain,
+                                      nyr_inline_expansion_t expansion,
+                                      size_t static_loop_depth,
+                                      const char *callee_symbol) {
   const char *symbol = call ? call->symbol : NULL;
   if (!caller || !call || !callee || callee == caller || callee->len == 0 ||
       call->imm < 0 || call->imm > NYIR_CALL_MAX_ARGS ||
-      (call->flags & (NYIR_INST_F_SRET | NYIR_INST_F_EXTERN))) {
+      (call->flags & NYIR_INST_F_SRET) ||
+      ((call->flags & NYIR_INST_F_EXTERN) && !nyr_inline_c_unit_abi)) {
     nyr_inline_trace(caller, call_idx, symbol, "reject",
-                      "unsupported call shape or recursive/sret callee");
+                     "unsupported call shape or recursive/sret callee");
     return false;
   }
   const nyr_inline_callee_summary_t *summary =
@@ -4294,7 +4307,7 @@ static bool nyr_should_inline_general(
 
   if (!nyr_inline_expansion_allows(chain, expansion, callee_symbol)) {
     nyr_inline_trace(caller, call_idx, symbol, "reject",
-                      "symbol-recursive inline expansion");
+                     "symbol-recursive inline expansion");
     return false;
   }
 
@@ -4308,7 +4321,7 @@ static bool nyr_should_inline_general(
    */
   if (summary && summary->direct_recursive) {
     nyr_inline_trace(caller, call_idx, symbol, "reject",
-                      "directly recursive callee remains out of line");
+                     "directly recursive callee remains out of line");
     return false;
   } else if (!summary) {
     for (size_t i = 0; i < callee->len; ++i) {
@@ -4316,11 +4329,25 @@ static bool nyr_should_inline_general(
       if (inst->op == NYIR_CALL && inst->symbol &&
           strcmp(inst->symbol, callee_symbol) == 0) {
         nyr_inline_trace(caller, call_idx, symbol, "reject",
-                          "directly recursive callee remains out of line");
+                         "directly recursive callee remains out of line");
         return false;
       }
     }
   }
+
+  /*
+   * Kernel alternatives encode the feature number in static section data.
+   * The C `i` constraint therefore requires this helper's feature argument
+   * to be specialized at its call site.  GCC expresses that contract with
+   * always_inline; NYC's C unit metadata currently records inline eligibility
+   * but not the stronger attribute, so keep this narrowly scoped to the
+   * alternative_wrmsr intrinsic and force its acyclic callsites through the
+   * same safe cloning path.
+   */
+  for (size_t i = 0; i < callee->len; ++i)
+    if (callee->data[i].op == NYIR_INLINE_ASM && callee->data[i].imm == -100) {
+      return true;
+    }
 
   uint64_t block_heat = ny_native_profile_block_hot(call_idx);
   uint64_t loop_heat = ny_native_profile_loop_hot(call_idx);
@@ -4332,10 +4359,10 @@ static bool nyr_should_inline_general(
 
   int args[NYIR_CALL_MAX_ARGS];
   int arity = 0;
-  if (!nyr_call_args(call, caller->next_value, args, NYIR_CALL_MAX_ARGS,
-                      &arity, NULL, 0)) {
+  if (!nyr_call_args(call, caller->next_value, args, NYIR_CALL_MAX_ARGS, &arity,
+                     NULL, 0)) {
     nyr_inline_trace(caller, call_idx, symbol, "reject",
-                      "malformed call argument vector");
+                     "malformed call argument vector");
     return false;
   }
 
@@ -4359,12 +4386,12 @@ static bool nyr_should_inline_general(
       }
     if (closure_formal_used) {
       nyr_inline_trace(caller, call_idx, symbol, "reject",
-                        "closure formal retains its native ABI boundary");
+                       "closure formal retains its native ABI boundary");
       return false;
     }
     if (summary->nested_closure_call) {
       nyr_inline_trace(caller, call_idx, symbol, "reject",
-                        "nested closure ABI call retains its native boundary");
+                       "nested closure ABI call retains its native boundary");
       return false;
     }
   } else {
@@ -4373,7 +4400,7 @@ static bool nyr_should_inline_general(
       if (in->op == NYIR_LOAD_LOCAL && in->imm >= 0 && in->imm < arity &&
           in->scalar_class == NYIR_SCALAR_CLOSURE) {
         nyr_inline_trace(caller, call_idx, symbol, "reject",
-                          "closure formal retains its native ABI boundary");
+                         "closure formal retains its native ABI boundary");
         return false;
       }
       /*
@@ -4424,7 +4451,7 @@ static bool nyr_should_inline_general(
                                constant_args * 8 + static_loop_depth * 12;
   if (summary && summary->invalid_local) {
     nyr_inline_trace(caller, call_idx, symbol, "reject",
-                      "callee has an invalid local-slot reference");
+                     "callee has an invalid local-slot reference");
     return false;
   }
   if (!summary) {
@@ -4440,7 +4467,7 @@ static bool nyr_should_inline_general(
            in->op == NYIR_ADDR_LOCAL) &&
           (in->imm < 0 || in->imm >= INT_MAX)) {
         nyr_inline_trace(caller, call_idx, symbol, "reject",
-                          "callee has an invalid local-slot reference");
+                         "callee has an invalid local-slot reference");
         return false;
       }
       if (in->op == NYIR_ALLOCA)
@@ -4482,7 +4509,7 @@ static bool nyr_should_inline_general(
                : nyr_func_has_control_flow(callee)) &&
       effective_size > pressure_cfg_limit) {
     nyr_inline_trace(caller, call_idx, symbol, "reject",
-                      "loop CFG exceeds native pressure budget");
+                     "loop CFG exceeds native pressure budget");
     return false;
   }
   size_t budget = max_callee_size;
@@ -4491,7 +4518,7 @@ static bool nyr_should_inline_general(
 
   if (nyr_inline_trace_enabled())
     nyr_inline_trace(caller, call_idx, symbol, "cost-model",
-                      hot ? "profile says hot" : "profile says cold");
+                     hot ? "profile says hot" : "profile says cold");
   if (ny_dbg_is_enabled(NY_DBG_HEURISTIC))
     ny_dbg_heuristic_event(
         "INLINE_COST",
@@ -4504,9 +4531,8 @@ static bool nyr_should_inline_general(
         pressure_penalty, optimization_credit, budget, effective_size);
 
   if (effective_size > budget) {
-    nyr_inline_trace(
-        caller, call_idx, symbol, "reject",
-        "code-size/register-pressure cost exceeds benefit budget");
+    nyr_inline_trace(caller, call_idx, symbol, "reject",
+                     "code-size/register-pressure cost exceeds benefit budget");
     return false;
   }
 
@@ -4597,8 +4623,8 @@ static int nyr_inline_local_count(const nyr_func_t *f) {
  * that slot agrees, leaving mixed/dynamic locals conservative.
  */
 static nyr_scalar_class_t nyr_inline_value_class(const nyr_func_t *f,
-                                                   const nyr_type_map_t *types,
-                                                   int value, unsigned depth) {
+                                                 const nyr_type_map_t *types,
+                                                 int value, unsigned depth) {
   if (!f || value < 0 || value >= f->next_value || depth > 32)
     return NYIR_SCALAR_UNKNOWN;
   const nyr_inst_t *def = NULL;
@@ -4659,9 +4685,9 @@ static nyr_scalar_class_t nyr_inline_value_class(const nyr_func_t *f,
  * continuation PHI, and nested calls retain deep-copied owned metadata.
  */
 static size_t nyr_inline_clone_body(nyr_func_t *caller, size_t call_idx,
-                                     const nyr_func_t *callee,
-                                     const int *arg_values, int arity,
-                                     int call_dst, int *out_ret_dst) {
+                                    const nyr_func_t *callee,
+                                    const int *arg_values, int arity,
+                                    int call_dst, int *out_ret_dst) {
   if (!caller || !callee || callee->len == 0 || call_idx >= caller->len ||
       arity < 0 || arity > NYIR_CALL_MAX_ARGS)
     return 0;
@@ -4688,7 +4714,7 @@ static size_t nyr_inline_clone_body(nyr_func_t *caller, size_t call_idx,
       !nyr_cfg_build_topology(caller, &ccfg))
     goto done;
   if (!nyr_type_map_init(&caller_types, caller,
-                          (size_t)nyr_inline_local_count(caller)))
+                         (size_t)nyr_inline_local_count(caller)))
     goto done;
   caller_local_count = nyr_inline_local_count(caller);
   callee_local_count = nyr_inline_local_count(&clone);
@@ -4805,14 +4831,14 @@ static size_t nyr_inline_clone_body(nyr_func_t *caller, size_t call_idx,
 
   for (size_t b = 0; b < fcfg.block_count; ++b) {
     if (!nyr_inline_push(&body, (nyr_inst_t){.op = NYIR_LABEL,
-                                               .dst = -1,
-                                               .a = -1,
-                                               .b = -1,
-                                               .c = -1,
-                                               .d = -1,
-                                               .e = -1,
-                                               .f = -1,
-                                               .imm = labels[b]}))
+                                             .dst = -1,
+                                             .a = -1,
+                                             .b = -1,
+                                             .c = -1,
+                                             .d = -1,
+                                             .e = -1,
+                                             .f = -1,
+                                             .imm = labels[b]}))
       goto done;
 
     if (b == 0) {
@@ -4828,18 +4854,18 @@ static size_t nyr_inline_clone_body(nyr_func_t *caller, size_t call_idx,
           ny_trace_line("inline-local",
                         "formal=%d actual=v%d class=%d local=%d", p, actual,
                         (int)actual_class, formal_local[p]);
-        if (!nyr_inline_push(
-                &body, (nyr_inst_t){.op = NYIR_STORE_LOCAL,
-                                     .dst = -1,
-                                     .a = actual,
-                                     .b = -1,
-                                     .c = -1,
-                                     .d = -1,
-                                     .e = -1,
-                                     .f = -1,
-                                     .imm = formal_local[p],
-                                     .scalar_class = actual_class,
-                                     .effects = NYIR_EFFECT_WRITE_LOCAL}))
+        if (!nyr_inline_push(&body,
+                             (nyr_inst_t){.op = NYIR_STORE_LOCAL,
+                                          .dst = -1,
+                                          .a = actual,
+                                          .b = -1,
+                                          .c = -1,
+                                          .d = -1,
+                                          .e = -1,
+                                          .f = -1,
+                                          .imm = formal_local[p],
+                                          .scalar_class = actual_class,
+                                          .effects = NYIR_EFFECT_WRITE_LOCAL}))
           goto done;
       }
     }
@@ -4854,32 +4880,48 @@ static size_t nyr_inline_clone_body(nyr_func_t *caller, size_t call_idx,
       if (in->op == NYIR_RET) {
         ret_labels[ret_at] = labels[b];
         if (call_dst >= 0) {
-          int value = nyr_inline_value(vmap, clone.next_value, in->a);
-          if (value < 0 || next_value == INT_MAX)
+          if (next_value == INT_MAX)
             goto done;
           ret_values[ret_at] = next_value;
-          if (!nyr_inline_push(
-                  &body, (nyr_inst_t){.op = NYIR_COPY,
-                                       .dst = next_value++,
-                                       .a = value,
-                                       .b = -1,
-                                       .c = -1,
-                                       .d = -1,
-                                       .e = -1,
-                                       .f = -1,
-                                       .scalar_class = call_result_class}))
+          if (in->a >= 0) {
+            int value = nyr_inline_value(vmap, clone.next_value, in->a);
+            if (value < 0 ||
+                !nyr_inline_push(
+                    &body, (nyr_inst_t){.op = NYIR_COPY,
+                                        .dst = next_value++,
+                                        .a = value,
+                                        .b = -1,
+                                        .c = -1,
+                                        .d = -1,
+                                        .e = -1,
+                                        .f = -1,
+                                        .scalar_class = call_result_class}))
+              goto done;
+          } else if (!nyr_inline_push(
+                         &body,
+                         (nyr_inst_t){.op = NYIR_CONST_I64,
+                                      .dst = next_value++,
+                                      .a = -1,
+                                      .b = -1,
+                                      .c = -1,
+                                      .d = -1,
+                                      .e = -1,
+                                      .f = -1,
+                                      .imm = 0,
+                                      .scalar_class = NYIR_SCALAR_I64_RAW})) {
             goto done;
+          }
         }
         ++ret_at;
         if (!nyr_inline_push(&body, (nyr_inst_t){.op = NYIR_BR,
-                                                   .dst = -1,
-                                                   .a = -1,
-                                                   .b = -1,
-                                                   .c = -1,
-                                                   .d = -1,
-                                                   .e = -1,
-                                                   .f = -1,
-                                                   .imm = continuation}))
+                                                 .dst = -1,
+                                                 .a = -1,
+                                                 .b = -1,
+                                                 .c = -1,
+                                                 .d = -1,
+                                                 .e = -1,
+                                                 .f = -1,
+                                                 .imm = continuation}))
           goto done;
         continue;
       }
@@ -4900,13 +4942,21 @@ static size_t nyr_inline_clone_body(nyr_func_t *caller, size_t call_idx,
           int pred = nyr_inline_block_for_label(
               &fcfg, in->phi_incoming[p].predecessor_label);
           int value = nyr_inline_value(vmap, clone.next_value,
-                                        in->phi_incoming[p].value);
+                                       in->phi_incoming[p].value);
           if (pred < 0 || value < 0)
             goto done;
           in->phi_incoming[p].predecessor_label = labels[pred];
           in->phi_incoming[p].value = value;
         }
       } else {
+        bool asm_goto = in->op == NYIR_INLINE_ASM &&
+                        (in->imm == -14 || in->imm == -82 || in->imm == -83);
+        if (asm_goto) {
+          int target = nyr_inline_block_for_label(&fcfg, in->c);
+          if (target < 0)
+            goto done;
+          in->c = labels[target];
+        }
         if ((in->op == NYIR_LOAD_LOCAL || in->op == NYIR_STORE_LOCAL ||
              in->op == NYIR_ADDR_LOCAL) &&
             in->imm >= 0) {
@@ -4931,12 +4981,12 @@ static size_t nyr_inline_clone_body(nyr_func_t *caller, size_t call_idx,
           goto done;
         int *ops[] = {&in->a, &in->b, &in->c, &in->d, &in->e, &in->f};
         for (size_t p = 0; p < sizeof(ops) / sizeof(ops[0]); ++p)
-          if (*ops[p] >= 0 && (*ops[p] = nyr_inline_value(
-                                   vmap, clone.next_value, *ops[p])) < 0)
+          if (!(asm_goto && p == 2) && *ops[p] >= 0 &&
+              (*ops[p] = nyr_inline_value(vmap, clone.next_value, *ops[p])) < 0)
             goto done;
         for (size_t p = 0; p < in->extra_args_len; ++p)
           if ((in->extra_args[p] = nyr_inline_value(vmap, clone.next_value,
-                                                     in->extra_args[p])) < 0)
+                                                    in->extra_args[p])) < 0)
             goto done;
       }
 
@@ -4946,14 +4996,14 @@ static size_t nyr_inline_clone_body(nyr_func_t *caller, size_t call_idx,
   }
 
   if (!nyr_inline_push(&body, (nyr_inst_t){.op = NYIR_LABEL,
-                                             .dst = -1,
-                                             .a = -1,
-                                             .b = -1,
-                                             .c = -1,
-                                             .d = -1,
-                                             .e = -1,
-                                             .f = -1,
-                                             .imm = continuation}))
+                                           .dst = -1,
+                                           .a = -1,
+                                           .b = -1,
+                                           .c = -1,
+                                           .d = -1,
+                                           .e = -1,
+                                           .f = -1,
+                                           .imm = continuation}))
     goto done;
   if (call_dst >= 0) {
     nyr_phi_incoming_t *incoming =
@@ -4963,17 +5013,17 @@ static size_t nyr_inline_clone_body(nyr_func_t *caller, size_t call_idx,
     for (size_t r = 0; r < ret_count; ++r)
       incoming[r] = (nyr_phi_incoming_t){ret_labels[r], ret_values[r]};
     if (!nyr_inline_push(&body,
-                          (nyr_inst_t){.op = NYIR_PHI,
-                                        .dst = call_dst,
-                                        .a = -1,
-                                        .b = -1,
-                                        .c = -1,
-                                        .d = -1,
-                                        .e = -1,
-                                        .f = -1,
-                                        .phi_incoming = incoming,
-                                        .phi_incoming_len = ret_count,
-                                        .scalar_class = call_result_class})) {
+                         (nyr_inst_t){.op = NYIR_PHI,
+                                      .dst = call_dst,
+                                      .a = -1,
+                                      .b = -1,
+                                      .c = -1,
+                                      .d = -1,
+                                      .e = -1,
+                                      .f = -1,
+                                      .phi_incoming = incoming,
+                                      .phi_incoming_len = ret_count,
+                                      .scalar_class = call_result_class})) {
       free(incoming);
       goto done;
     }
@@ -5059,7 +5109,7 @@ done:
 }
 
 static bool nyr_inline_value_is_i64_const(const nyr_func_t *f, int value,
-                                           int64_t expected, unsigned depth) {
+                                          int64_t expected, unsigned depth) {
   if (!f || value < 0 || value >= f->next_value || depth > 32)
     return false;
   for (size_t i = f->len; i > 0; --i) {
@@ -5127,6 +5177,12 @@ bool nyr_inline_general(nyr_func_t *f) {
       nyr_inst_t *call = &f->data[i];
       if (call->op != NYIR_CALL || !call->symbol)
         continue;
+      /*
+       * CAPTURE_RET reads an extra ABI return register and must stay adjacent
+       * to its call. This inliner models only the primary result.
+       */
+      if (i + 1 < f->len && f->data[i + 1].op == NYIR_CAPTURE_RET)
+        continue;
       saw_symbol_call = true;
 
       const nyr_inline_callee_t *entry =
@@ -5145,7 +5201,7 @@ bool nyr_inline_general(nyr_func_t *f) {
       }
       if (!nyr_inline_summary_covered(call, callee)) {
         nyr_inline_trace(f, i, call->symbol, "reject",
-                          "call-site effects exceed cloned body summary");
+                         "call-site effects exceed cloned body summary");
         continue;
       }
       /*
@@ -5169,12 +5225,12 @@ bool nyr_inline_general(nyr_func_t *f) {
           loop_depths ? loop_depths[i]
                       : nyr_inline_static_loop_depth_slow(f, i);
       if (!nyr_should_inline_general(f, call, callee, i, &chain, expansion,
-                                      static_loop_depth, entry->name))
+                                     static_loop_depth, entry->name))
         continue;
       int args[NYIR_CALL_MAX_ARGS];
       int arity = 0;
       if (!nyr_call_args(call, f->next_value, args, NYIR_CALL_MAX_ARGS, &arity,
-                          NULL, 0))
+                         NULL, 0))
         continue;
 
       /*
@@ -5192,7 +5248,7 @@ bool nyr_inline_general(nyr_func_t *f) {
       if (callee->len > (SIZE_MAX - 8u) / 2u ||
           f->len - 1 > SIZE_MAX - (callee->len * 2u + 8u) ||
           !nyr_inline_expansion_reserve(&expansions, &expansion_capacity,
-                                         f->len - 1 + callee->len * 2u + 8u)) {
+                                        f->len - 1 + callee->len * 2u + 8u)) {
         free(loop_depths);
         free(expansions);
         free(chain.data);
@@ -5243,7 +5299,7 @@ bool nyr_inline_general(nyr_func_t *f) {
         i += inserted - 1;
       } else {
         nyr_inline_trace(f, i, symbol, "reject",
-                          "callee clone/CFG splice legality check failed");
+                         "callee clone/CFG splice legality check failed");
       }
     }
     if (budget_exhausted) {
@@ -5487,7 +5543,7 @@ bool nyr_loop_unroll(nyr_func_t *f) {
     int _v = (v);                                                              \
     (out) = NULL;                                                              \
     for (int _depth = 0; _depth < 8 && _v >= 0; ++_depth) {                    \
-      const nyr_inst_t *_def = NULL;                                          \
+      const nyr_inst_t *_def = NULL;                                           \
       for (size_t _j = 0; _j < f->len; ++_j)                                   \
         if (f->data[_j].dst == _v) {                                           \
           _def = &f->data[_j];                                                 \
@@ -5952,8 +6008,8 @@ bool nyr_reassoc_add(nyr_func_t *f) {
         int aa = in->a;
         f->data[i] =
             (nyr_inst_t){.op = NYIR_ADD_I64, .dst = tdst, .a = aa, .b = r->a};
-        f->data[i + 1] = (nyr_inst_t){
-            .op = NYIR_ADD_I64, .dst = adst, .a = tdst, .b = r->b};
+        f->data[i + 1] =
+            (nyr_inst_t){.op = NYIR_ADD_I64, .dst = adst, .a = tdst, .b = r->b};
         i++;
       }
     }
@@ -6008,8 +6064,8 @@ bool nyr_rewrite_fuel(nyr_func_t *f) {
   return true;
 }
 
-static bool nyr_tbuf_const_before(const nyr_func_t *f, int value,
-                                   size_t before, int64_t *out) {
+static bool nyr_tbuf_const_before(const nyr_func_t *f, int value, size_t before,
+                                  int64_t *out) {
   if (!f || value < 0 || !out)
     return false;
   for (size_t i = 0; i < before && i < f->len; ++i) {
@@ -6043,7 +6099,7 @@ static bool nyr_tbuf_const_before(const nyr_func_t *f, int value,
 }
 
 static bool nyr_tbuf_uses_exact(const nyr_use_def_t *uses, int value,
-                                 size_t first, size_t second, bool two) {
+                                size_t first, size_t second, bool two) {
   if (!uses || value < 0 || (size_t)value >= uses->value_count)
     return false;
   size_t begin = uses->offsets[value];
@@ -6063,7 +6119,7 @@ static bool nyr_tbuf_uses_exact(const nyr_use_def_t *uses, int value,
 }
 
 static bool nyr_tbuf_linear_between(const nyr_func_t *f, size_t begin,
-                                     size_t end) {
+                                    size_t end) {
   if (!f || begin > end || end > f->len)
     return false;
   for (size_t i = begin; i < end; ++i) {
@@ -6084,6 +6140,17 @@ static bool nyr_tbuf_linear_between(const nyr_func_t *f, size_t begin,
  */
 bool nyr_tbuf_scalar_len(nyr_func_t *f) {
   if (!f || f->len == 0)
+    return true;
+  bool has_tbuf_allocation = false;
+  for (size_t i = 0; i < f->len; ++i) {
+    const nyr_inst_t *in = &f->data[i];
+    if (in->op == NYIR_CALL && in->symbol && in->dst >= 0 &&
+        strcmp(in->symbol, "rt_tbuf_new_raw") == 0) {
+      has_tbuf_allocation = true;
+      break;
+    }
+  }
+  if (!has_tbuf_allocation)
     return true;
   nyr_use_def_t uses = {0};
   if (!nyr_build_use_def(f, &uses))
@@ -6120,14 +6187,14 @@ bool nyr_tbuf_scalar_len(nyr_func_t *f) {
             int dst = user->dst;
             nyr_inst_discard(user);
             f->data[user_idx] = (nyr_inst_t){.op = NYIR_CONST_I64,
-                                              .dst = dst,
-                                              .a = -1,
-                                              .b = -1,
-                                              .c = -1,
-                                              .d = -1,
-                                              .e = -1,
-                                              .f = -1,
-                                              .imm = 0};
+                                             .dst = dst,
+                                             .a = -1,
+                                             .b = -1,
+                                             .c = -1,
+                                             .d = -1,
+                                             .e = -1,
+                                             .f = -1,
+                                             .imm = 0};
             nyr_inst_discard(alloc);
             nyr_use_def_free(&uses);
             return true;
@@ -6199,8 +6266,7 @@ bool nyr_tbuf_scalar_len(nyr_func_t *f) {
         bool safe = true;
         for (size_t a = 0; a < append_len; ++a) {
           size_t user = append_idx[a];
-          if (!nyr_tbuf_uses_exact(&uses, chain_values[a], user, user,
-                                    false)) {
+          if (!nyr_tbuf_uses_exact(&uses, chain_values[a], user, user, false)) {
             safe = false;
             break;
           }
@@ -6214,14 +6280,14 @@ bool nyr_tbuf_scalar_len(nyr_func_t *f) {
         int dst = in->dst;
         nyr_inst_discard(in);
         f->data[i] = (nyr_inst_t){.op = NYIR_CONST_I64,
-                                   .dst = dst,
-                                   .a = -1,
-                                   .b = -1,
-                                   .c = -1,
-                                   .d = -1,
-                                   .e = -1,
-                                   .f = -1,
-                                   .imm = (int64_t)append_len};
+                                  .dst = dst,
+                                  .a = -1,
+                                  .b = -1,
+                                  .c = -1,
+                                  .d = -1,
+                                  .e = -1,
+                                  .f = -1,
+                                  .imm = (int64_t)append_len};
         for (size_t a = 0; a < append_len; ++a)
           nyr_inst_discard(&f->data[append_idx[a]]);
         nyr_inst_discard(alloc);
@@ -6246,7 +6312,7 @@ bool nyr_tbuf_scalar_len(nyr_func_t *f) {
 }
 
 static bool nyr_tbuf_eval_const_offset(const nyr_func_t *f, int v, int base,
-                                        int64_t *out_off, int depth) {
+                                       int64_t *out_off, int depth) {
   if (depth > 16)
     return false;
   if (base >= 0 && v == base) {
@@ -6262,15 +6328,20 @@ static bool nyr_tbuf_eval_const_offset(const nyr_func_t *f, int v, int base,
         return nyr_tbuf_eval_const_offset(f, in->a, base, out_off, depth + 1);
       if (in->op == NYIR_ADD_I64) {
         int64_t off1 = 0, off2 = 0;
+        int64_t sum = 0;
         if (nyr_tbuf_eval_const_offset(f, in->a, base, &off1, depth + 1) &&
             nyr_tbuf_eval_const_offset(f, in->b, -1, &off2, depth + 1)) {
-          *out_off = off1 + off2;
-          return true;
+          if (!__builtin_add_overflow(off1, off2, &sum)) {
+            *out_off = sum;
+            return true;
+          }
         }
         if (nyr_tbuf_eval_const_offset(f, in->b, base, &off1, depth + 1) &&
             nyr_tbuf_eval_const_offset(f, in->a, -1, &off2, depth + 1)) {
-          *out_off = off1 + off2;
-          return true;
+          if (!__builtin_add_overflow(off1, off2, &sum)) {
+            *out_off = sum;
+            return true;
+          }
         }
       }
       if (in->op == NYIR_CONST_I64 && base == -1) {
@@ -6279,18 +6350,23 @@ static bool nyr_tbuf_eval_const_offset(const nyr_func_t *f, int v, int base,
       }
       if (in->op == NYIR_MUL_I64 && base == -1) {
         int64_t c1 = 0, c2 = 0;
+        int64_t product = 0;
         if (nyr_tbuf_eval_const_offset(f, in->a, -1, &c1, depth + 1) &&
             nyr_tbuf_eval_const_offset(f, in->b, -1, &c2, depth + 1)) {
-          *out_off = c1 * c2;
-          return true;
+          if (!__builtin_mul_overflow(c1, c2, &product)) {
+            *out_off = product;
+            return true;
+          }
         }
       }
       if (in->op == NYIR_SHL_I64 && base == -1) {
         int64_t c1 = 0, c2 = 0;
+        int64_t shifted = 0;
         if (nyr_tbuf_eval_const_offset(f, in->a, -1, &c1, depth + 1) &&
             nyr_tbuf_eval_const_offset(f, in->b, -1, &c2, depth + 1) &&
-            c2 >= 0 && c2 < 64) {
-          *out_off = c1 << c2;
+            c2 >= 0 && c2 < 63 &&
+            !__builtin_mul_overflow(c1, INT64_C(1) << c2, &shifted)) {
+          *out_off = shifted;
           return true;
         }
       }
@@ -6307,9 +6383,8 @@ static bool nyr_tbuf_eval_const_offset(const nyr_func_t *f, int v, int base,
  * checked scalar arithmetic are accepted.
  */
 static bool nyr_tbuf_eval_private_length(const nyr_func_t *f, int value,
-                                          const nyr_inst_t *alloc,
-                                          int alloc_dst, int64_t *out,
-                                          unsigned depth) {
+                                         const nyr_inst_t *alloc, int alloc_dst,
+                                         int64_t *out, unsigned depth) {
   if (!f || !alloc || !out || value < 0 || value >= f->next_value || depth > 12)
     return false;
   for (size_t i = 0; i < f->len; ++i) {
@@ -6322,7 +6397,7 @@ static bool nyr_tbuf_eval_private_length(const nyr_func_t *f, int value,
     }
     if (in->op == NYIR_COPY)
       return nyr_tbuf_eval_private_length(f, in->a, alloc, alloc_dst, out,
-                                           depth + 1);
+                                          depth + 1);
     if (in->op == NYIR_CALL && in->symbol &&
         strcmp(in->symbol, "rt_tbuf_len_raw") == 0 &&
         nyr_tbuf_eval_const_offset(f, in->a, alloc_dst, out, 0) && *out == 0)
@@ -6331,9 +6406,9 @@ static bool nyr_tbuf_eval_private_length(const nyr_func_t *f, int value,
         in->op == NYIR_SHL_I64) {
       int64_t a = 0, b = 0, result = 0;
       if (!nyr_tbuf_eval_private_length(f, in->a, alloc, alloc_dst, &a,
-                                         depth + 1) ||
+                                        depth + 1) ||
           !nyr_tbuf_eval_private_length(f, in->b, alloc, alloc_dst, &b,
-                                         depth + 1))
+                                        depth + 1))
         return false;
       bool overflow = false;
       if (in->op == NYIR_ADD_I64)
@@ -6373,7 +6448,7 @@ static bool nyr_tbuf_eval_private_length(const nyr_func_t *f, int value,
  * scratch arrays while failing closed for general tbuf values.
  */
 static bool nyr_tbuf_offset_guarded_before(const nyr_func_t *f, size_t at,
-                                            int base, int offset) {
+                                           int base, int offset) {
   if (!f || at > f->len || base < 0 || offset < 0)
     return false;
   for (size_t k = at; k > 0; --k) {
@@ -6387,8 +6462,16 @@ static bool nyr_tbuf_offset_guarded_before(const nyr_func_t *f, size_t at,
   return false;
 }
 
+static bool nyr_tbuf_access_fits(const nyr_func_t *f, int address, int root,
+                                 size_t bytes) {
+  int64_t offset = 0;
+  return bytes >= sizeof(int64_t) &&
+         nyr_tbuf_eval_const_offset(f, address, root, &offset, 0) &&
+         offset >= 0 && (uint64_t)offset <= bytes - sizeof(int64_t);
+}
+
 static bool nyr_tbuf_alloca_safe_uses(const nyr_func_t *f, size_t alloc_idx,
-                                       int root, size_t bytes) {
+                                      int root, size_t bytes) {
   if (!f || root < 0 || root >= f->next_value)
     return false;
   size_t value_count = (size_t)f->next_value;
@@ -6436,8 +6519,7 @@ static bool nyr_tbuf_alloca_safe_uses(const nyr_func_t *f, size_t alloc_idx,
                  (size_t)in->a < value_count && derived[in->a] &&
                  !derived[in->dst]) {
         int64_t off = 0;
-        bool const_off =
-            in->b >= 0 && nyr_tbuf_const_before(f, in->b, i, &off);
+        bool const_off = in->b >= 0 && nyr_tbuf_const_before(f, in->b, i, &off);
         bool safe_offset =
             const_off ? off >= 0
                       : nyr_tbuf_offset_guarded_before(f, i, in->a, in->b);
@@ -6538,7 +6620,8 @@ static bool nyr_tbuf_alloca_safe_uses(const nyr_func_t *f, size_t alloc_idx,
       break;
     }
     case NYIR_LOAD_I64:
-      safe = da && !db && !dc && !dd && !de && !df && !extra && !phi;
+      safe = da && !db && !dc && !dd && !de && !df && !extra && !phi &&
+             nyr_tbuf_access_fits(f, in->a, root, bytes);
       break;
     case NYIR_BOUNDS_CHECK:
       /*
@@ -6550,7 +6633,8 @@ static bool nyr_tbuf_alloca_safe_uses(const nyr_func_t *f, size_t alloc_idx,
       /*
        * a is address, c is value; never allow publishing the pointer.
        */
-      safe = da && !db && !dc && !dd && !de && !df && !extra && !phi;
+      safe = da && !db && !dc && !dd && !de && !df && !extra && !phi &&
+             nyr_tbuf_access_fits(f, in->a, root, bytes);
       break;
     case NYIR_STORE_LOCAL:
     case NYIR_LOAD_LOCAL:
@@ -6602,8 +6686,7 @@ bool nyr_tbuf_promote_alloca(nyr_func_t *f) {
       fprintf(stderr, "[tbuf-alloca] candidate pc=%zu dst=v%d a=v%d b=v%d\n", i,
               in->dst, in->a, in->b);
     int64_t count = 0, elem_size = 0;
-    if (in->a < 0 || in->b < 0 ||
-        !nyr_tbuf_const_before(f, in->a, i, &count) ||
+    if (in->a < 0 || in->b < 0 || !nyr_tbuf_const_before(f, in->a, i, &count) ||
         !nyr_tbuf_const_before(f, in->b, i, &elem_size) || count <= 0 ||
         elem_size <= 0 || (uint64_t)count > SIZE_MAX / (uint64_t)elem_size) {
       if (ny_trace_enabled("NY_TRACE_TBUF_ALLOCA"))
@@ -6642,52 +6725,52 @@ bool nyr_tbuf_promote_alloca(nyr_func_t *f) {
      */
     nyr_inst_discard(in);
     f->data[i] = (nyr_inst_t){.op = NYIR_ALLOCA,
-                               .dst = root,
-                               .a = -1,
-                               .b = -1,
-                               .c = -1,
-                               .d = -1,
-                               .e = -1,
-                               .f = -1,
-                               .imm = (int64_t)bytes,
-                               .scalar_class = scalar_class,
-                               .semantic_ownership = semantic_ownership,
-                               .semantic_mutable = semantic_mutable,
-                               .alias_class = alias_class,
-                               .debug = debug};
+                              .dst = root,
+                              .a = -1,
+                              .b = -1,
+                              .c = -1,
+                              .d = -1,
+                              .e = -1,
+                              .f = -1,
+                              .imm = (int64_t)bytes,
+                              .scalar_class = scalar_class,
+                              .semantic_ownership = semantic_ownership,
+                              .semantic_mutable = semantic_mutable,
+                              .alias_class = alias_class,
+                              .debug = debug};
     f->data[i].effects = nyr_inst_effects(&f->data[i]);
 
     if (!nyr_ensure_insert(f, i + 1u, 3u))
       return false;
     f->data[i + 1u] = (nyr_inst_t){.op = NYIR_CONST_I64,
-                                    .dst = zero_v,
-                                    .a = -1,
-                                    .b = -1,
-                                    .c = -1,
-                                    .d = -1,
-                                    .e = -1,
-                                    .f = -1,
-                                    .imm = 0};
+                                   .dst = zero_v,
+                                   .a = -1,
+                                   .b = -1,
+                                   .c = -1,
+                                   .d = -1,
+                                   .e = -1,
+                                   .f = -1,
+                                   .imm = 0};
     f->data[i + 2u] = (nyr_inst_t){.op = NYIR_CONST_I64,
-                                    .dst = bytes_v,
-                                    .a = -1,
-                                    .b = -1,
-                                    .c = -1,
-                                    .d = -1,
-                                    .e = -1,
-                                    .f = -1,
-                                    .imm = (int64_t)bytes};
+                                   .dst = bytes_v,
+                                   .a = -1,
+                                   .b = -1,
+                                   .c = -1,
+                                   .d = -1,
+                                   .e = -1,
+                                   .f = -1,
+                                   .imm = (int64_t)bytes};
     f->data[i + 3u] = (nyr_inst_t){.op = NYIR_CALL,
-                                    .dst = -1,
-                                    .a = root,
-                                    .b = zero_v,
-                                    .c = bytes_v,
-                                    .d = -1,
-                                    .e = -1,
-                                    .f = -1,
-                                    .imm = 3,
-                                    .flags = NYIR_INST_F_EXTERN,
-                                    .symbol = "rt_memset"};
+                                   .dst = -1,
+                                   .a = root,
+                                   .b = zero_v,
+                                   .c = bytes_v,
+                                   .d = -1,
+                                   .e = -1,
+                                   .f = -1,
+                                   .imm = 3,
+                                   .flags = NYIR_INST_F_EXTERN,
+                                   .symbol = "rt_memset"};
     f->has_symbol_calls = true;
     for (size_t k = i + 1u; k <= i + 3u; ++k)
       f->data[k].effects = nyr_inst_effects(&f->data[k]);
@@ -6697,9 +6780,9 @@ bool nyr_tbuf_promote_alloca(nyr_func_t *f) {
 }
 
 static int nyr_tbuf_private_store_value(const nyr_func_t *f,
-                                         const nyr_cfg_t *cfg,
-                                         size_t alloc_idx, int root,
-                                         int64_t byte_offset, size_t load_idx) {
+                                        const nyr_cfg_t *cfg, size_t alloc_idx,
+                                        int root, int64_t byte_offset,
+                                        size_t load_idx) {
   if (!f || !cfg || byte_offset < 0 ||
       byte_offset > INT64_MAX - (int64_t)sizeof(int64_t) || load_idx >= f->len)
     return -1;
@@ -6744,6 +6827,15 @@ static int nyr_tbuf_private_store_value(const nyr_func_t *f,
  */
 bool nyr_tbuf_private_object(nyr_func_t *f) {
   if (!f || f->len == 0 || f->next_value <= 0)
+    return true;
+  bool has_allocation = false;
+  for (size_t i = 0; i < f->len; ++i)
+    if (f->data[i].op == NYIR_CALL && f->data[i].symbol &&
+        strcmp(f->data[i].symbol, "rt_tbuf_new_raw") == 0) {
+      has_allocation = true;
+      break;
+    }
+  if (!has_allocation)
     return true;
   nyr_use_def_t uses = {0};
   if (!nyr_build_use_def(f, &uses))
@@ -6854,11 +6946,9 @@ bool nyr_tbuf_private_object(nyr_func_t *f) {
            * can be removed by scalar replacement.
            */
           int64_t index = 0, read_elem_size = 0, byte_offset = 0;
-          if (in->b < 0 ||
-              !nyr_tbuf_const_before(f, in->b, user_idx, &index) ||
+          if (in->b < 0 || !nyr_tbuf_const_before(f, in->b, user_idx, &index) ||
               index < 0 || alloc->b < 0 ||
-              !nyr_tbuf_const_before(f, alloc->b, alloc_idx,
-                                      &read_elem_size) ||
+              !nyr_tbuf_const_before(f, alloc->b, alloc_idx, &read_elem_size) ||
               read_elem_size != (int64_t)sizeof(int64_t) ||
               index > INT64_MAX / read_elem_size) {
             safe = false;
@@ -6904,8 +6994,8 @@ bool nyr_tbuf_private_object(nyr_func_t *f) {
           int64_t byte_offset = 0;
           int stored_val =
               nyr_tbuf_eval_const_offset(f, in->a, alloc->dst, &byte_offset, 0)
-                  ? nyr_tbuf_private_store_value(
-                        f, &cfg, alloc_idx, alloc->dst, byte_offset, user_idx)
+                  ? nyr_tbuf_private_store_value(f, &cfg, alloc_idx, alloc->dst,
+                                                 byte_offset, user_idx)
                   : -1;
           if (stored_val >= 0) {
             /*
@@ -6941,7 +7031,7 @@ bool nyr_tbuf_private_object(nyr_func_t *f) {
               alloc->a >= 0 && alloc->b >= 0 && in->b >= 0 &&
               nyr_tbuf_const_before(f, alloc->a, alloc_idx, &count) &&
               nyr_tbuf_const_before(f, alloc->b, alloc_idx,
-                                     &bounds_elem_size) &&
+                                    &bounds_elem_size) &&
               nyr_tbuf_const_before(f, in->b, user_idx, &byte_offset) &&
               nyr_tbuf_eval_const_offset(f, in->a, alloc->dst, &base_off, 0) &&
               (in->c < 0 ? (check_limit = in->imm, true)
@@ -7485,8 +7575,8 @@ static uint64_t nyr_layout_block_hot(const nyr_cfg_t *cfg, size_t block) {
 }
 
 static bool nyr_layout_blocks_are_ordered(size_t a, size_t b,
-                                           const size_t *order,
-                                           size_t block_count) {
+                                          const size_t *order,
+                                          size_t block_count) {
   for (size_t i = 0; i < block_count; ++i)
     if (order[i] == a)
       return true;
@@ -7501,8 +7591,8 @@ static bool nyr_layout_blocks_are_ordered(size_t a, size_t b,
  * has no distinct fallthrough edge.
  */
 static size_t nyr_layout_fallthrough_succ(const nyr_func_t *f,
-                                           const nyr_cfg_t *cfg, size_t block,
-                                           const nyr_inst_t *term) {
+                                          const nyr_cfg_t *cfg, size_t block,
+                                          const nyr_inst_t *term) {
   for (size_t e = cfg->succ_offsets[block]; e < cfg->succ_offsets[block + 1];
        ++e) {
     size_t s = cfg->succ_blocks[e];
@@ -7526,8 +7616,8 @@ static size_t nyr_layout_fallthrough_succ(const nyr_func_t *f,
  * unlabeled block after reordering.  Its terminator is the actual false-arm
  * label, so use that label when materialising the now-non-fallthrough edge.
  */
-static int64_t nyr_layout_block_label(const nyr_func_t *f,
-                                       const nyr_cfg_t *cfg, size_t block) {
+static int64_t nyr_layout_block_label(const nyr_func_t *f, const nyr_cfg_t *cfg,
+                                      size_t block) {
   if (!f || !cfg || block >= cfg->block_count)
     return -1;
   for (size_t i = cfg->block_start[block]; i < cfg->block_end[block]; ++i)

@@ -1,0 +1,23 @@
+shape recursive_add_recurrence_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features ["native", "x86_64", "recursion", "recurrence", "optimizer"]
+  template ny-test-case
+  flags_matrix "--native-only --native-backend x86_64 -O0; --native-only --native-backend x86_64 -O1; --native-only --native-backend x86_64 -O2; --native-only --native-backend x86_64 -O3"
+  expect compile_and_run
+  source ny <<'NY'
+fn fib(int n) int {
+  if n < 2 { return n }
+  fib(n - 1) + fib(n - 2)
+}
+
+assert(fib(-3) == -3)
+assert(fib(0) == 0)
+assert(fib(1) == 1)
+assert(fib(2) == 1)
+assert(fib(3) == 2)
+assert(fib(10) == 55)
+assert(fib(20) == 6765)
+assert(fib(28) == 317811)
+NY
+}

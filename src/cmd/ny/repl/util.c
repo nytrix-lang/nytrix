@@ -20,7 +20,8 @@ size_t g_repl_user_source_len = 0;
 static size_t g_repl_user_source_cap = 0;
 int repl_indent_next = 0;
 
-static bool repl_match_main_guard(const char *src, size_t i, const char *needle);
+static bool repl_match_main_guard(const char *src, size_t i,
+                                  const char *needle);
 static bool repl_is_ident_char(unsigned char ch);
 
 static char *repl_doc_normalize_module_name(const char *raw) {
@@ -181,7 +182,8 @@ int repl_write_session_source(const char *path) {
   FILE *f = fopen(path, "wb");
   if (!f)
     return -1;
-  const char *src = (g_repl_user_source && *g_repl_user_source) ? g_repl_user_source : "";
+  const char *src =
+      (g_repl_user_source && *g_repl_user_source) ? g_repl_user_source : "";
   size_t len = strlen(src);
   int ok = fwrite(src, 1, len, f) == len;
   if (ok && len > 0 && src[len - 1] != '\n')
@@ -191,9 +193,12 @@ int repl_write_session_source(const char *path) {
   return ok ? 0 : -1;
 }
 
-static bool repl_is_ident_char(unsigned char ch) { return isalnum(ch) || ch == '_'; }
+static bool repl_is_ident_char(unsigned char ch) {
+  return isalnum(ch) || ch == '_';
+}
 
-static bool repl_match_main_guard(const char *src, size_t i, const char *needle) {
+static bool repl_match_main_guard(const char *src, size_t i,
+                                  const char *needle) {
   size_t nlen = strlen(needle);
   if (strncmp(src + i, needle, nlen) != 0)
     return false;
@@ -275,9 +280,10 @@ void repl_append_user_source(const char *src) {
   size_t slen = strlen(src);
   int needs_newline = (src[slen - 1] != '\n');
   int needs_prefix_newline =
-      (g_repl_user_source_len > 0 && g_repl_user_source[g_repl_user_source_len - 1] != '\n');
-  size_t required =
-      g_repl_user_source_len + slen + (needs_newline ? 1 : 0) + (needs_prefix_newline ? 1 : 0) + 1;
+      (g_repl_user_source_len > 0 &&
+       g_repl_user_source[g_repl_user_source_len - 1] != '\n');
+  size_t required = g_repl_user_source_len + slen + (needs_newline ? 1 : 0) +
+                    (needs_prefix_newline ? 1 : 0) + 1;
   if (required >= g_repl_user_source_cap) {
     g_repl_user_source_cap = required + 1024;
     char *tmp = realloc(g_repl_user_source, g_repl_user_source_cap);
@@ -307,8 +313,8 @@ void repl_set_user_source(const char *src) {
     repl_append_user_source(src);
 }
 
-static int repl_stmt_is_boundary(const char *src, size_t i, int paren, int brack, int brace,
-                                 int in_str) {
+static int repl_stmt_is_boundary(const char *src, size_t i, int paren,
+                                 int brack, int brace, int in_str) {
   return src[i] == '\n' && paren == 0 && brack == 0 && brace == 0 && !in_str;
 }
 
@@ -365,7 +371,8 @@ static const char *repl_find_top_level_assign(const char *s) {
     else if (ch == '=' && paren == 0 && brack == 0 && brace == 0) {
       char prev = (p > s) ? p[-1] : '\0';
       char next = p[1];
-      if (prev == '=' || prev == '!' || prev == '<' || prev == '>' || next == '=')
+      if (prev == '=' || prev == '!' || prev == '<' || prev == '>' ||
+          next == '=')
         continue;
       return p;
     }
@@ -379,20 +386,33 @@ static int repl_expr_can_end_with(char ch) {
 }
 
 static int repl_expr_can_start_with(char ch) {
-  return isalpha((unsigned char)ch) || isdigit((unsigned char)ch) || ch == '_' ||
-         ch == '(' || ch == '[' || ch == '{' || ch == '.' || ch == '"' || ch == '\'';
+  return isalpha((unsigned char)ch) || isdigit((unsigned char)ch) ||
+         ch == '_' || ch == '(' || ch == '[' || ch == '{' || ch == '.' ||
+         ch == '"' || ch == '\'';
 }
 
 static int repl_keep_rhs_keyword(const char *s) {
-  return repl_word_at(s, "else") || repl_word_at(s, "elif") || repl_word_at(s, "catch");
+  return repl_word_at(s, "else") || repl_word_at(s, "elif") ||
+         repl_word_at(s, "catch");
 }
 
 static int repl_is_named_declaration(const char *code) {
   static const char *const prefixes[] = {
-      "fn ",       "use ",       "module ",  "extern ",
-      "enum ",     "struct ",    "class ",   "layout ",
-      "operator ", "impl ",      "macro ",   "comptime table ",
-      "comptime template ", "comptime diagnostic ", NULL,
+      "fn ",
+      "use ",
+      "module ",
+      "extern ",
+      "enum ",
+      "struct ",
+      "class ",
+      "layout ",
+      "operator ",
+      "impl ",
+      "macro ",
+      "comptime table ",
+      "comptime template ",
+      "comptime diagnostic ",
+      NULL,
   };
   for (size_t i = 0; prefixes[i]; i++) {
     if (!strncmp(code, prefixes[i], strlen(prefixes[i])))
@@ -409,7 +429,8 @@ static char *repl_trim_persistent_assignment(const char *stmt) {
   if (!*code)
     return copy;
   char *target = repl_assignment_target(code);
-  int starts_mutating = !strncmp(code, "def ", 4) || !strncmp(code, "mut ", 4) ||
+  int starts_mutating = !strncmp(code, "def ", 4) ||
+                        !strncmp(code, "mut ", 4) ||
                         (!repl_is_named_declaration(code) && target != NULL);
   free(target);
   if (!starts_mutating)
@@ -418,6 +439,11 @@ static char *repl_trim_persistent_assignment(const char *stmt) {
   if (!eq)
     return copy;
   const char *p = eq + 1;
+  const char *rhs = repl_skip_inline_ws(p);
+  bool rhs_is_function = (!strncmp(rhs, "fn", 2) &&
+                          (rhs[2] == '(' || isspace((unsigned char)rhs[2]))) ||
+                         (!strncmp(rhs, "lambda", 6) &&
+                          (rhs[6] == '(' || isspace((unsigned char)rhs[6])));
   int paren = 0, brack = 0, brace = 0, in_str = 0;
   char quote = '\0';
   const char *last = p;
@@ -469,8 +495,9 @@ static char *repl_trim_persistent_assignment(const char *stmt) {
           break;
         }
       }
-      if (*next && *next != '\n' && repl_expr_can_end_with(prev) &&
-          repl_expr_can_start_with(*next) && !repl_keep_rhs_keyword(next))
+      if (!rhs_is_function && *next && *next != '\n' &&
+          repl_expr_can_end_with(prev) && repl_expr_can_start_with(*next) &&
+          !repl_keep_rhs_keyword(next))
         break;
     }
     p++;
@@ -632,7 +659,8 @@ char *repl_assignment_target(const char *src) {
     else if (ch == '=' && paren == 0 && brack == 0 && brace == 0) {
       char prev = (p > trimmed) ? *(p - 1) : '\0';
       char next = *(p + 1);
-      if (prev == '=' || prev == '!' || prev == '<' || prev == '>' || next == '=')
+      if (prev == '=' || prev == '!' || prev == '<' || prev == '>' ||
+          next == '=')
         continue;
       eq = p;
       break;
@@ -649,10 +677,12 @@ char *repl_assignment_target(const char *src) {
     if (end < trimmed)
       return NULL;
     char *ident_end = end;
-    while (end >= trimmed && (isalnum((unsigned char)*end) || *end == '_' || *end == '.'))
+    while (end >= trimmed &&
+           (isalnum((unsigned char)*end) || *end == '_' || *end == '.'))
       end--;
     char *ident_start = end + 1;
-    if (ident_end >= ident_start && (*ident_start == '_' || isalpha((unsigned char)*ident_start))) {
+    if (ident_end >= ident_start &&
+        (*ident_start == '_' || isalpha((unsigned char)*ident_start))) {
       return ny_strndup(ident_start, (size_t)(ident_end - ident_start + 1));
     }
   }
@@ -669,15 +699,16 @@ int is_repl_stmt(const char *src) {
   }
   if (strchr(src, '{'))
     return 1;
-  const char *kw[] = {"def ",    "fn ",    "use ",    "module ", "del ",     "if ",   "while ",
-                      "for ",    "try ",   "return ", "break",   "continue", "goto ", "defer ",
-                      "struct ", "class ", "layout ", "extern ", "operator ", "impl ", "macro ",
-                      NULL};
+  const char *kw[] = {"def ",   "fn ",      "use ",    "module ",   "del ",
+                      "if ",    "while ",   "for ",    "try ",      "return ",
+                      "break",  "continue", "goto ",   "defer ",    "struct ",
+                      "class ", "layout ",  "extern ", "operator ", "impl ",
+                      "macro ", NULL};
   for (int i = 0; kw[i]; i++) {
     size_t len = strlen(kw[i]);
     if (strncmp(trimmed, kw[i], len) == 0) {
-      if (kw[i][len - 1] == ' ' || trimmed[len] == '\0' || isspace((unsigned char)trimmed[len]) ||
-          trimmed[len] == '(')
+      if (kw[i][len - 1] == ' ' || trimmed[len] == '\0' ||
+          isspace((unsigned char)trimmed[len]) || trimmed[len] == '(')
         return 1;
     }
   }
@@ -689,8 +720,8 @@ int is_repl_stmt(const char *src) {
   return 0;
 }
 
-void count_unclosed(const char *src, int *out_paren, int *out_brack, int *out_brace,
-                    int *out_in_str) {
+void count_unclosed(const char *src, int *out_paren, int *out_brack,
+                    int *out_brace, int *out_in_str) {
   int p = 0, b = 0, c = 0, in_str = 0;
   char quote = 0;
   const char *s = src;
@@ -808,12 +839,14 @@ void repl_print_error_snippet(const char *src, int line, int col) {
   size_t line_len = 0;
   int shown_line = line;
   if (!ny_extract_line(src, line, &line_start, &line_len) || !line_start) {
-    if (line <= 1 || !ny_extract_line(src, line - 1, &line_start, &line_len) || !line_start)
+    if (line <= 1 || !ny_extract_line(src, line - 1, &line_start, &line_len) ||
+        !line_start)
       return;
     shown_line = line - 1;
     col = (int)line_len + 1;
   }
-  while (line_len > 0 && (line_start[line_len - 1] == '\n' || line_start[line_len - 1] == '\r'))
+  while (line_len > 0 &&
+         (line_start[line_len - 1] == '\n' || line_start[line_len - 1] == '\r'))
     line_len--;
   fprintf(stderr, "%4d | %.*s\n", shown_line, (int)line_len, line_start);
   fprintf(stderr, "     | ");
@@ -821,7 +854,8 @@ void repl_print_error_snippet(const char *src, int line, int col) {
   if (caret_col > (int)line_len + 1)
     caret_col = (int)line_len + 1;
   for (int i = 1; i < caret_col; ++i)
-    fputc((i <= (int)line_len && line_start[i - 1] == '\t') ? '\t' : ' ', stderr);
+    fputc((i <= (int)line_len && line_start[i - 1] == '\t') ? '\t' : ' ',
+          stderr);
   fputs("^\n", stderr);
 }
 
@@ -846,12 +880,13 @@ int is_persistent_def(const char *src) {
       !strncmp(trimmed, "#link", 5)) {
     return 1;
   }
-  if (!strncmp(trimmed, "def ", 4) || !strncmp(trimmed, "mut ", 4) || !strncmp(trimmed, "fn ", 3) ||
-      !strncmp(trimmed, "use ", 4) || !strncmp(trimmed, "module ", 7) ||
-      !strncmp(trimmed, "extern ", 7) || !strncmp(trimmed, "enum ", 5) ||
-      !strncmp(trimmed, "struct ", 7) || !strncmp(trimmed, "class ", 6) ||
-      !strncmp(trimmed, "layout ", 7) || !strncmp(trimmed, "operator ", 9) ||
-      !strncmp(trimmed, "impl ", 5) || !strncmp(trimmed, "macro ", 6)) {
+  if (!strncmp(trimmed, "def ", 4) || !strncmp(trimmed, "mut ", 4) ||
+      !strncmp(trimmed, "fn ", 3) || !strncmp(trimmed, "use ", 4) ||
+      !strncmp(trimmed, "module ", 7) || !strncmp(trimmed, "extern ", 7) ||
+      !strncmp(trimmed, "enum ", 5) || !strncmp(trimmed, "struct ", 7) ||
+      !strncmp(trimmed, "class ", 6) || !strncmp(trimmed, "layout ", 7) ||
+      !strncmp(trimmed, "operator ", 9) || !strncmp(trimmed, "impl ", 5) ||
+      !strncmp(trimmed, "macro ", 6)) {
     return 1;
   }
   /*

@@ -65,6 +65,61 @@ static bool vector_target_init(ny_native_target_info_t *target,
   return nyr_target_info_init(target, &request);
 }
 
+/*
+ * Exercise the same live vector across a straight-line store, CFG edge,
+ * or scalar call. Keep target-specific opcode and reload checks in callers.
+ */
+static bool vector_sum_program(nyr_mach_func_t *mach,
+                               nyr_mach_opcode_t barrier) {
+  uint32_t block = 0, slots[3] = {0};
+  nyr_mach_reg_t values[3] = {0};
+  if (!nyr_mach_begin_block(mach, 0, &block))
+    return false;
+  for (size_t i = 0; i < 3; ++i)
+    if (!nyr_mach_alloc_typed_frame_slot(mach, 16, 16, NYR_MACH_TYPE_V128_F64,
+                                         false, &slots[i]))
+      return false;
+  for (size_t i = 0; i < 3; ++i)
+    if (!nyr_mach_alloc_typed_vreg(mach, NYR_MACH_TYPE_V128_F64, &values[i]))
+      return false;
+  for (size_t i = 0; i < 2; ++i)
+    if (!nyr_mach_emit(
+            mach, (nyr_mach_inst_t){.opcode = NYR_MACH_LOAD,
+                                    .dst = selftest_vreg(values[i]),
+                                    .src0 = selftest_frame(slots[i]),
+                                    .effects = NYR_MACH_EFFECT_READ_MEMORY}))
+      return false;
+  if (!nyr_mach_emit(mach, (nyr_mach_inst_t){.opcode = NYR_MACH_ADD,
+                                             .dst = selftest_vreg(values[2]),
+                                             .src0 = selftest_vreg(values[0]),
+                                             .src1 = selftest_vreg(values[1])}))
+    return false;
+  if (barrier == NYR_MACH_BR) {
+    if (!nyr_mach_emit(mach,
+                       (nyr_mach_inst_t){.opcode = NYR_MACH_BR,
+                                         .src1 = selftest_block(1),
+                                         .effects = NYR_MACH_EFFECT_CONTROL}) ||
+        !nyr_mach_begin_block(mach, 1, &block) || block != 1)
+      return false;
+  } else if (barrier == NYR_MACH_CALL) {
+    if (!nyr_mach_emit(
+            mach, (nyr_mach_inst_t){.opcode = NYR_MACH_CALL,
+                                    .src0 = selftest_symbol("rt_test_noop"),
+                                    .call_is_extern = true,
+                                    .effects = NYR_MACH_EFFECT_CALL}))
+      return false;
+  }
+  return nyr_mach_emit(
+             mach,
+             (nyr_mach_inst_t){.opcode = NYR_MACH_STORE,
+                               .dst = selftest_frame(slots[2]),
+                               .src0 = selftest_vreg(values[2]),
+                               .effects = NYR_MACH_EFFECT_WRITE_MEMORY}) &&
+         nyr_mach_emit(mach,
+                       (nyr_mach_inst_t){.opcode = NYR_MACH_RET,
+                                         .effects = NYR_MACH_EFFECT_CONTROL});
+}
+
 static bool vector_backend_selftest(nyr_backend_t backend,
                                     vector_bundle_builder_t build,
                                     const char *label, char *err,
@@ -81,41 +136,7 @@ static bool vector_backend_selftest(nyr_backend_t backend,
   }
 
   nyr_mach_func_t mach = {0};
-  uint32_t block = 0, a_slot = 0, b_slot = 0, out_slot = 0;
-  nyr_mach_reg_t a = 0, b = 0, sum = 0;
-  bool ok = nyr_mach_begin_block(&mach, 0, &block) &&
-            nyr_mach_alloc_typed_frame_slot(&mach, 16, 16, NYR_MACH_TYPE_V128_F64,
-                                           false, &a_slot) &&
-            nyr_mach_alloc_typed_frame_slot(&mach, 16, 16, NYR_MACH_TYPE_V128_F64,
-                                           false, &b_slot) &&
-            nyr_mach_alloc_typed_frame_slot(&mach, 16, 16, NYR_MACH_TYPE_V128_F64,
-                                           false, &out_slot) &&
-            nyr_mach_alloc_typed_vreg(&mach, NYR_MACH_TYPE_V128_F64, &a) &&
-            nyr_mach_alloc_typed_vreg(&mach, NYR_MACH_TYPE_V128_F64, &b) &&
-            nyr_mach_alloc_typed_vreg(&mach, NYR_MACH_TYPE_V128_F64, &sum);
-  if (ok)
-    ok = nyr_mach_emit(
-             &mach, (nyr_mach_inst_t){ .opcode = NYR_MACH_LOAD,
-                                     .dst = selftest_vreg(a),
-                                     .src0 = selftest_frame(a_slot),
-                                     .effects = NYR_MACH_EFFECT_READ_MEMORY }) &&
-         nyr_mach_emit(
-             &mach, (nyr_mach_inst_t){ .opcode = NYR_MACH_LOAD,
-                                     .dst = selftest_vreg(b),
-                                     .src0 = selftest_frame(b_slot),
-                                     .effects = NYR_MACH_EFFECT_READ_MEMORY }) &&
-         nyr_mach_emit(&mach, (nyr_mach_inst_t){ .opcode = NYR_MACH_ADD,
-                                              .dst = selftest_vreg(sum),
-                                              .src0 = selftest_vreg(a),
-                                              .src1 = selftest_vreg(b) }) &&
-         nyr_mach_emit(
-             &mach, (nyr_mach_inst_t){ .opcode = NYR_MACH_STORE,
-                                     .dst = selftest_frame(out_slot),
-                                     .src0 = selftest_vreg(sum),
-                                     .effects = NYR_MACH_EFFECT_WRITE_MEMORY }) &&
-         nyr_mach_emit(&mach,
-                      (nyr_mach_inst_t){ .opcode = NYR_MACH_RET,
-                                       .effects = NYR_MACH_EFFECT_CONTROL });
+  bool ok = vector_sum_program(&mach, NYR_MACH_NOP);
   if (ok && !nyr_mach_verify(&mach, 0, err, err_len))
     ok = false;
 
@@ -292,46 +313,7 @@ static bool x64_vector_cfg_selftest(char *err, size_t err_len) {
   }
 
   nyr_mach_func_t mach = {0};
-  uint32_t first = 0, second = 0, a_slot = 0, b_slot = 0, out_slot = 0;
-  nyr_mach_reg_t a = 0, b = 0, sum = 0;
-  bool ok = nyr_mach_begin_block(&mach, 0, &first) &&
-            nyr_mach_alloc_typed_frame_slot(&mach, 16, 16, NYR_MACH_TYPE_V128_F64,
-                                           false, &a_slot) &&
-            nyr_mach_alloc_typed_frame_slot(&mach, 16, 16, NYR_MACH_TYPE_V128_F64,
-                                           false, &b_slot) &&
-            nyr_mach_alloc_typed_frame_slot(&mach, 16, 16, NYR_MACH_TYPE_V128_F64,
-                                           false, &out_slot) &&
-            nyr_mach_alloc_typed_vreg(&mach, NYR_MACH_TYPE_V128_F64, &a) &&
-            nyr_mach_alloc_typed_vreg(&mach, NYR_MACH_TYPE_V128_F64, &b) &&
-            nyr_mach_alloc_typed_vreg(&mach, NYR_MACH_TYPE_V128_F64, &sum);
-  if (ok)
-    ok = nyr_mach_emit(
-             &mach, (nyr_mach_inst_t){ .opcode = NYR_MACH_LOAD,
-                                     .dst = selftest_vreg(a),
-                                     .src0 = selftest_frame(a_slot),
-                                     .effects = NYR_MACH_EFFECT_READ_MEMORY }) &&
-         nyr_mach_emit(
-             &mach, (nyr_mach_inst_t){ .opcode = NYR_MACH_LOAD,
-                                     .dst = selftest_vreg(b),
-                                     .src0 = selftest_frame(b_slot),
-                                     .effects = NYR_MACH_EFFECT_READ_MEMORY }) &&
-         nyr_mach_emit(&mach, (nyr_mach_inst_t){ .opcode = NYR_MACH_ADD,
-                                              .dst = selftest_vreg(sum),
-                                              .src0 = selftest_vreg(a),
-                                              .src1 = selftest_vreg(b) }) &&
-         nyr_mach_emit(&mach,
-                      (nyr_mach_inst_t){ .opcode = NYR_MACH_BR,
-                                       .src1 = selftest_block(1),
-                                       .effects = NYR_MACH_EFFECT_CONTROL }) &&
-         nyr_mach_begin_block(&mach, 1, &second) && second == 1 &&
-         nyr_mach_emit(
-             &mach, (nyr_mach_inst_t){ .opcode = NYR_MACH_STORE,
-                                     .dst = selftest_frame(out_slot),
-                                     .src0 = selftest_vreg(sum),
-                                     .effects = NYR_MACH_EFFECT_WRITE_MEMORY }) &&
-         nyr_mach_emit(&mach,
-                      (nyr_mach_inst_t){ .opcode = NYR_MACH_RET,
-                                       .effects = NYR_MACH_EFFECT_CONTROL });
+  bool ok = vector_sum_program(&mach, NYR_MACH_BR);
   if (ok && !nyr_mach_verify(&mach, 0, err, err_len))
     ok = false;
 
@@ -380,46 +362,7 @@ static bool x64_vector_call_selftest(char *err, size_t err_len) {
   }
 
   nyr_mach_func_t mach = {0};
-  uint32_t block = 0, a_slot = 0, b_slot = 0, out_slot = 0;
-  nyr_mach_reg_t a = 0, b = 0, sum = 0;
-  bool ok = nyr_mach_begin_block(&mach, 0, &block) &&
-            nyr_mach_alloc_typed_frame_slot(&mach, 16, 16, NYR_MACH_TYPE_V128_F64,
-                                           false, &a_slot) &&
-            nyr_mach_alloc_typed_frame_slot(&mach, 16, 16, NYR_MACH_TYPE_V128_F64,
-                                           false, &b_slot) &&
-            nyr_mach_alloc_typed_frame_slot(&mach, 16, 16, NYR_MACH_TYPE_V128_F64,
-                                           false, &out_slot) &&
-            nyr_mach_alloc_typed_vreg(&mach, NYR_MACH_TYPE_V128_F64, &a) &&
-            nyr_mach_alloc_typed_vreg(&mach, NYR_MACH_TYPE_V128_F64, &b) &&
-            nyr_mach_alloc_typed_vreg(&mach, NYR_MACH_TYPE_V128_F64, &sum);
-  if (ok)
-    ok = nyr_mach_emit(
-             &mach, (nyr_mach_inst_t){ .opcode = NYR_MACH_LOAD,
-                                     .dst = selftest_vreg(a),
-                                     .src0 = selftest_frame(a_slot),
-                                     .effects = NYR_MACH_EFFECT_READ_MEMORY }) &&
-         nyr_mach_emit(
-             &mach, (nyr_mach_inst_t){ .opcode = NYR_MACH_LOAD,
-                                     .dst = selftest_vreg(b),
-                                     .src0 = selftest_frame(b_slot),
-                                     .effects = NYR_MACH_EFFECT_READ_MEMORY }) &&
-         nyr_mach_emit(&mach, (nyr_mach_inst_t){ .opcode = NYR_MACH_ADD,
-                                              .dst = selftest_vreg(sum),
-                                              .src0 = selftest_vreg(a),
-                                              .src1 = selftest_vreg(b) }) &&
-         nyr_mach_emit(&mach,
-                      (nyr_mach_inst_t){ .opcode = NYR_MACH_CALL,
-                                       .src0 = selftest_symbol("rt_test_noop"),
-                                       .call_is_extern = true,
-                                       .effects = NYR_MACH_EFFECT_CALL }) &&
-         nyr_mach_emit(
-             &mach, (nyr_mach_inst_t){ .opcode = NYR_MACH_STORE,
-                                     .dst = selftest_frame(out_slot),
-                                     .src0 = selftest_vreg(sum),
-                                     .effects = NYR_MACH_EFFECT_WRITE_MEMORY }) &&
-         nyr_mach_emit(&mach,
-                      (nyr_mach_inst_t){ .opcode = NYR_MACH_RET,
-                                       .effects = NYR_MACH_EFFECT_CONTROL });
+  bool ok = vector_sum_program(&mach, NYR_MACH_CALL);
   if (ok && !nyr_mach_verify(&mach, 0, err, err_len))
     ok = false;
 
@@ -463,46 +406,7 @@ static bool aarch64_vector_cfg_selftest(char *err, size_t err_len) {
   }
 
   nyr_mach_func_t mach = {0};
-  uint32_t first = 0, second = 0, a_slot = 0, b_slot = 0, out_slot = 0;
-  nyr_mach_reg_t a = 0, b = 0, sum = 0;
-  bool ok = nyr_mach_begin_block(&mach, 0, &first) &&
-            nyr_mach_alloc_typed_frame_slot(&mach, 16, 16, NYR_MACH_TYPE_V128_F64,
-                                           false, &a_slot) &&
-            nyr_mach_alloc_typed_frame_slot(&mach, 16, 16, NYR_MACH_TYPE_V128_F64,
-                                           false, &b_slot) &&
-            nyr_mach_alloc_typed_frame_slot(&mach, 16, 16, NYR_MACH_TYPE_V128_F64,
-                                           false, &out_slot) &&
-            nyr_mach_alloc_typed_vreg(&mach, NYR_MACH_TYPE_V128_F64, &a) &&
-            nyr_mach_alloc_typed_vreg(&mach, NYR_MACH_TYPE_V128_F64, &b) &&
-            nyr_mach_alloc_typed_vreg(&mach, NYR_MACH_TYPE_V128_F64, &sum);
-  if (ok)
-    ok = nyr_mach_emit(
-             &mach, (nyr_mach_inst_t){ .opcode = NYR_MACH_LOAD,
-                                     .dst = selftest_vreg(a),
-                                     .src0 = selftest_frame(a_slot),
-                                     .effects = NYR_MACH_EFFECT_READ_MEMORY }) &&
-         nyr_mach_emit(
-             &mach, (nyr_mach_inst_t){ .opcode = NYR_MACH_LOAD,
-                                     .dst = selftest_vreg(b),
-                                     .src0 = selftest_frame(b_slot),
-                                     .effects = NYR_MACH_EFFECT_READ_MEMORY }) &&
-         nyr_mach_emit(&mach, (nyr_mach_inst_t){ .opcode = NYR_MACH_ADD,
-                                              .dst = selftest_vreg(sum),
-                                              .src0 = selftest_vreg(a),
-                                              .src1 = selftest_vreg(b) }) &&
-         nyr_mach_emit(&mach,
-                      (nyr_mach_inst_t){ .opcode = NYR_MACH_BR,
-                                       .src1 = selftest_block(1),
-                                       .effects = NYR_MACH_EFFECT_CONTROL }) &&
-         nyr_mach_begin_block(&mach, 1, &second) && second == 1 &&
-         nyr_mach_emit(
-             &mach, (nyr_mach_inst_t){ .opcode = NYR_MACH_STORE,
-                                     .dst = selftest_frame(out_slot),
-                                     .src0 = selftest_vreg(sum),
-                                     .effects = NYR_MACH_EFFECT_WRITE_MEMORY }) &&
-         nyr_mach_emit(&mach,
-                      (nyr_mach_inst_t){ .opcode = NYR_MACH_RET,
-                                       .effects = NYR_MACH_EFFECT_CONTROL });
+  bool ok = vector_sum_program(&mach, NYR_MACH_BR);
   if (ok && !nyr_mach_verify(&mach, 0, err, err_len))
     ok = false;
 
@@ -552,46 +456,7 @@ static bool aarch64_vector_call_selftest(char *err, size_t err_len) {
   }
 
   nyr_mach_func_t mach = {0};
-  uint32_t block = 0, a_slot = 0, b_slot = 0, out_slot = 0;
-  nyr_mach_reg_t a = 0, b = 0, sum = 0;
-  bool ok = nyr_mach_begin_block(&mach, 0, &block) &&
-            nyr_mach_alloc_typed_frame_slot(&mach, 16, 16, NYR_MACH_TYPE_V128_F64,
-                                           false, &a_slot) &&
-            nyr_mach_alloc_typed_frame_slot(&mach, 16, 16, NYR_MACH_TYPE_V128_F64,
-                                           false, &b_slot) &&
-            nyr_mach_alloc_typed_frame_slot(&mach, 16, 16, NYR_MACH_TYPE_V128_F64,
-                                           false, &out_slot) &&
-            nyr_mach_alloc_typed_vreg(&mach, NYR_MACH_TYPE_V128_F64, &a) &&
-            nyr_mach_alloc_typed_vreg(&mach, NYR_MACH_TYPE_V128_F64, &b) &&
-            nyr_mach_alloc_typed_vreg(&mach, NYR_MACH_TYPE_V128_F64, &sum);
-  if (ok)
-    ok = nyr_mach_emit(
-             &mach, (nyr_mach_inst_t){ .opcode = NYR_MACH_LOAD,
-                                     .dst = selftest_vreg(a),
-                                     .src0 = selftest_frame(a_slot),
-                                     .effects = NYR_MACH_EFFECT_READ_MEMORY }) &&
-         nyr_mach_emit(
-             &mach, (nyr_mach_inst_t){ .opcode = NYR_MACH_LOAD,
-                                     .dst = selftest_vreg(b),
-                                     .src0 = selftest_frame(b_slot),
-                                     .effects = NYR_MACH_EFFECT_READ_MEMORY }) &&
-         nyr_mach_emit(&mach, (nyr_mach_inst_t){ .opcode = NYR_MACH_ADD,
-                                              .dst = selftest_vreg(sum),
-                                              .src0 = selftest_vreg(a),
-                                              .src1 = selftest_vreg(b) }) &&
-         nyr_mach_emit(&mach,
-                      (nyr_mach_inst_t){ .opcode = NYR_MACH_CALL,
-                                       .src0 = selftest_symbol("rt_test_noop"),
-                                       .call_is_extern = true,
-                                       .effects = NYR_MACH_EFFECT_CALL }) &&
-         nyr_mach_emit(
-             &mach, (nyr_mach_inst_t){ .opcode = NYR_MACH_STORE,
-                                     .dst = selftest_frame(out_slot),
-                                     .src0 = selftest_vreg(sum),
-                                     .effects = NYR_MACH_EFFECT_WRITE_MEMORY }) &&
-         nyr_mach_emit(&mach,
-                      (nyr_mach_inst_t){ .opcode = NYR_MACH_RET,
-                                       .effects = NYR_MACH_EFFECT_CONTROL });
+  bool ok = vector_sum_program(&mach, NYR_MACH_CALL);
   if (ok && !nyr_mach_verify(&mach, 0, err, err_len))
     ok = false;
 

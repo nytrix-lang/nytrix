@@ -148,6 +148,11 @@ bool nyr_dead_store_elim(nyr_func_t *f) {
       observed[in->imm] = true;
     if (in->op == NYIR_ADDR_LOCAL && in->imm >= 0 && (size_t)in->imm < count)
       escaped[in->imm] = true;
+    if (in->op == NYIR_INLINE_ASM && in->imm > 0 &&
+        (size_t)(in->imm - 1) < count) {
+      observed[in->imm - 1] = true;
+      escaped[in->imm - 1] = true;
+    }
   }
   unsigned epoch = 1;
   for (size_t i = f->len; i-- > 0;) {
@@ -221,6 +226,31 @@ bool nyr_dead_store_elim(nyr_func_t *f) {
        */
       for (size_t i = 0; i < f->len; ++i) {
         const nyr_inst_t *in = &f->data[i];
+        /*
+         * A merge can hide several allocation roots from the single-root
+         * walker. Preserve initialization until a multi-root escape proof
+         * exists; treating an unresolved merged return as dead is unsound.
+         */
+        if (in->op == NYIR_PHI) {
+          if (in->phi_incoming_len && !in->phi_incoming) {
+            memset(alloc_escapes, 1,
+                   (size_t)f->next_value * sizeof(*alloc_escapes));
+          } else {
+            for (size_t k = 0; k < in->phi_incoming_len; ++k) {
+              int root = find_alloc_root(f, defs, in->phi_incoming[k].value);
+              if (root >= 0)
+                alloc_escapes[root] = true;
+            }
+          }
+        }
+        if (in->op == NYIR_SELECT_I64) {
+          int operands[2] = {in->b, in->c};
+          for (size_t k = 0; k < 2; ++k) {
+            int root = find_alloc_root(f, defs, operands[k]);
+            if (root >= 0)
+              alloc_escapes[root] = true;
+          }
+        }
         bool vec_load =
             in->op == NYIR_VEC4_LOAD_F64 || in->op == NYIR_VEC8_LOAD_F32 ||
             in->op == NYIR_VEC4_LOAD_I64 || in->op == NYIR_VEC8_LOAD_I64;
@@ -277,6 +307,17 @@ bool nyr_dead_store_elim(nyr_func_t *f) {
             if (escaped[in->imm])
               alloc_escapes[root] = true;
           }
+        }
+        /*
+         * A pointer written through memory may be read after this function
+         * returns. STORE_LOCAL is handled above with local escape facts;
+         * STORE_I64 can publish the allocation through a global or heap
+         * object, so retain its initialization stores conservatively.
+         */
+        if (in->op == NYIR_STORE_I64 && in->c >= 0) {
+          int root = find_alloc_root(f, defs, in->c);
+          if (root >= 0 && root < f->next_value)
+            alloc_escapes[root] = true;
         }
       }
       /*

@@ -3,7 +3,7 @@ shape native_f32_return_contract {
   generator "native"
   features [native x86_64 oracle types f32 scalar-class return-boundary]
   template ny-test-case
-  flags "-O2 --native-backend x86_64 --native-result-oracle=4 --nyir-pass-stats"
+  flags "-O2 --native-backend x86_64 --native-result-oracle=4 --nyr-dump=passes"
   expect compile_and_run
   source ny <<'NY'
 use core

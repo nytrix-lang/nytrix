@@ -1,5 +1,8 @@
 #include <nyr/nyr.h>
 
+#include "code/backend/internal.h"
+#include "code/backend/ir/api_internal.h"
+
 #include <elf.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -52,6 +55,19 @@ static bool write_duplicate_member_archive(const char *path,
   free(bytes);
   if (!ok)
     remove(path);
+  return ok;
+}
+
+static bool append_linker_mapping_padding(const char *path) {
+  static const unsigned char padding[4096] = {0};
+  FILE *file = fopen(path, "ab");
+  if (!file)
+    return false;
+  bool ok = true;
+  for (size_t i = 0; ok && i < 32; ++i)
+    ok = fwrite(padding, 1, sizeof(padding), file) == sizeof(padding);
+  if (fclose(file) != 0)
+    ok = false;
   return ok;
 }
 
@@ -129,24 +145,21 @@ static bool test_memory_emitters(char *error, size_t error_len) {
   nyr_func_t function;
   nyr_func_init(&function);
   int address = -1, value = -1, local = -1, loaded = -1;
-  bool ok = nyr_emit_const_i64(&function, 0, &address, error, error_len) &&
-            nyr_emit_const_i64(&function, 42, &value, error, error_len) &&
-            nyr_emit_store_local(&function, 0, value, error, error_len) &&
-            nyr_emit_load_local(&function, 0, &local, error, error_len) &&
-            nyr_emit_store_i64(&function, address, local, 8, error,
-                               error_len) &&
-            nyr_emit_load_i64(&function, address, 8, &loaded, error,
-                              error_len) &&
-            nyr_emit_return(&function, loaded, error, error_len) &&
-            nyr_verify(&function, error, error_len);
-  ok = ok && function.len == 7 &&
-       function.data[2].op == NYIR_STORE_LOCAL &&
+  bool ok =
+      nyr_emit_const_i64(&function, 0, &address, error, error_len) &&
+      nyr_emit_const_i64(&function, 42, &value, error, error_len) &&
+      nyr_emit_store_local(&function, 0, value, error, error_len) &&
+      nyr_emit_load_local(&function, 0, &local, error, error_len) &&
+      nyr_emit_store_i64(&function, address, local, 8, error, error_len) &&
+      nyr_emit_load_i64(&function, address, 8, &loaded, error, error_len) &&
+      nyr_emit_return(&function, loaded, error, error_len) &&
+      nyr_verify(&function, error, error_len);
+  ok = ok && function.len == 7 && function.data[2].op == NYIR_STORE_LOCAL &&
        function.data[3].op == NYIR_LOAD_LOCAL &&
        function.data[4].op == NYIR_STORE_I64 && function.data[4].imm == 8 &&
        function.data[5].op == NYIR_LOAD_I64 && function.data[5].imm == 8;
-  if (ok &&
-      (nyr_emit_load_local(&function, -1, &loaded, error, error_len) ||
-       !error[0]))
+  if (ok && (nyr_emit_load_local(&function, -1, &loaded, error, error_len) ||
+             !error[0]))
     ok = false;
   nyr_func_destroy(&function);
   nyr_func_t *allocated = nyr_func_create();
@@ -154,20 +167,219 @@ static bool test_memory_emitters(char *error, size_t error_len) {
     return false;
   int call_result = -1;
   bool external_call =
-      nyr_emit_extern_call(allocated, "getchar", NULL, 0,
-                           NYIR_SCALAR_I64_RAW, &call_result, error,
-                           error_len) &&
+      nyr_emit_extern_call(allocated, "getchar", NULL, 0, NYIR_SCALAR_I64_RAW,
+                           &call_result, error, error_len) &&
       allocated->len == 1 &&
       (allocated->data[0].flags & NYIR_INST_F_EXTERN) != 0;
   nyr_func_free(allocated);
   return ok && external_call;
 }
 
+static bool test_c_object_bundle(char *error, size_t error_len) {
+  nyr_func_t funcs[2];
+  nyr_func_init(&funcs[0]);
+  nyr_func_init(&funcs[1]);
+  int helper_value = -1, call_value = -1, addend = -1, result = -1;
+  bool ok =
+      nyr_emit_const_i64(&funcs[0], 40, &helper_value, error, error_len) &&
+      nyr_emit_return(&funcs[0], helper_value, error, error_len) &&
+      nyr_emit_extern_call(&funcs[1], "nyr_c_module_helper", NULL, 0,
+                           NYIR_SCALAR_I64_RAW, &call_value, error,
+                           error_len) &&
+      nyr_emit_const_i64(&funcs[1], 2, &addend, error, error_len) &&
+      nyr_emit_binary(&funcs[1], NYIR_ADD_I64, call_value, addend,
+                      NYIR_SCALAR_I64_RAW, &result, error, error_len) &&
+      nyr_emit_return(&funcs[1], result, error, error_len) &&
+      nyr_verify(&funcs[0], error, error_len) &&
+      nyr_verify(&funcs[1], error, error_len);
+  if (!ok)
+    goto done;
+  ny_native_target_info_t target = {0};
+  if (!nyr_target_info_for_triple("x86_64-unknown-linux-gnu", &target, error,
+                                  error_len))
+    goto done;
+  static const char *const names[] = {"nyr_c_module_helper",
+                                      "nyr_c_module_entry"};
+  char object_path[128], executable_path[128];
+  snprintf(object_path, sizeof(object_path), "/tmp/nyr-c-module-%ld.o",
+           (long)getpid());
+  snprintf(executable_path, sizeof(executable_path), "/tmp/nyr-c-module-%ld",
+           (long)getpid());
+  ok = nyr_native_emit_elf64_c_object_from_nirs(
+           funcs, names, sizeof(names) / sizeof(names[0]), &target, object_path,
+           error, error_len) &&
+       nyr_link_elf64_executable(object_path, names[1], executable_path, error,
+                                 error_len);
+  if (ok) {
+    pid_t child = fork();
+    if (child == 0) {
+      execl(executable_path, executable_path, (char *)NULL);
+      _exit(127);
+    }
+    int status = 0;
+    ok = child > 0 && waitpid(child, &status, 0) == child &&
+         WIFEXITED(status) && WEXITSTATUS(status) == 42;
+    if (!ok && error && error_len && !error[0])
+      snprintf(error, error_len,
+               "multi-symbol C object did not run with exit status 42");
+  }
+  remove(object_path);
+  remove(executable_path);
+done:
+  nyr_func_destroy(&funcs[0]);
+  nyr_func_destroy(&funcs[1]);
+  return ok;
+}
+
+static bool test_aarch64_internal_executable_link(char *error,
+                                                  size_t error_len) {
+#if !defined(__linux__)
+  (void)error;
+  (void)error_len;
+  return true;
+#else
+  nyr_target_request_t request =
+      nyr_target_request_make(NY_NATIVE_BACKEND_AARCH64, NY_NATIVE_ABI_AAPCS,
+                              "aarch64-unknown-linux-gnu", false);
+  ny_native_target_info_t target = {0};
+  nyr_func_t function, helper;
+  nyr_func_init(&function);
+  nyr_func_init(&helper);
+  int call = -1, helper_value = -1;
+  char object_path[128], executable_path[128];
+  snprintf(object_path, sizeof(object_path), "/tmp/nyr-aarch64-%ld.o",
+           (long)getpid());
+  snprintf(executable_path, sizeof(executable_path), "/tmp/nyr-aarch64-%ld",
+           (long)getpid());
+  bool ok = nyr_target_info_init(&target, &request) &&
+            nyr_emit_call(&function, "ny_fn_aarch64_helper", NULL, 0,
+                          NYIR_SCALAR_I64_RAW, &call, error, error_len) &&
+            nyr_emit_return(&function, call, error, error_len) &&
+            nyr_emit_const_i64(&helper, 42, &helper_value, error, error_len) &&
+            nyr_emit_return(&helper, helper_value, error, error_len) &&
+            nyr_verify(&function, error, error_len) &&
+            nyr_verify(&helper, error, error_len);
+  nyr_func_t functions[] = {helper};
+  const char *function_names[] = {"aarch64_helper"};
+  ok = ok && nyr_native_emit_elf64_aarch64_object_from_nirs(
+                 &function, functions, function_names, 1, &target, object_path,
+                 "nyr_aarch64_entry", false, error, error_len);
+  if (!ok)
+    goto done;
+  const char *inputs[] = {object_path};
+  nyr_link_request_t link_request = {
+      .input_paths = inputs,
+      .input_count = 1,
+      .output_path = executable_path,
+      .entry_symbol = "nyr_aarch64_entry",
+      .kind = NYR_LINK_EXECUTABLE,
+  };
+  ok = nyr_link(&link_request, error, error_len);
+  if (!ok)
+    goto done;
+  FILE *executable = fopen(executable_path, "rb");
+  Elf64_Ehdr header = {0};
+  ok = executable &&
+       fread(&header, 1, sizeof(header), executable) == sizeof(header) &&
+       header.e_ident[EI_CLASS] == ELFCLASS64 &&
+       header.e_ident[EI_DATA] == ELFDATA2LSB && header.e_type == ET_EXEC &&
+       header.e_machine == EM_AARCH64 && header.e_entry != 0;
+  if (executable)
+    fclose(executable);
+  if (!ok) {
+    if (error && error_len)
+      snprintf(error, error_len,
+               "linked output is not an AArch64 ELF executable");
+    goto done;
+  }
+  if (access("/usr/bin/qemu-aarch64", X_OK) == 0) {
+    pid_t child = fork();
+    if (child == 0) {
+      alarm(10);
+      execl("/usr/bin/qemu-aarch64", "qemu-aarch64", executable_path,
+            (char *)NULL);
+      _exit(127);
+    }
+    int status = 0;
+    ok = child > 0 && waitpid(child, &status, 0) == child &&
+         WIFEXITED(status) && WEXITSTATUS(status) == 42;
+    if (!ok && error && error_len)
+      snprintf(error, error_len,
+               "AArch64 ELF did not exit with the function's result");
+  }
+done:
+  remove(object_path);
+  remove(executable_path);
+  nyr_func_destroy(&function);
+  nyr_func_destroy(&helper);
+  return ok;
+#endif
+}
+
+static bool test_assembly_stdout(const nyr_func_t *function, char *error,
+                                 size_t error_len) {
+  FILE *capture = tmpfile();
+  if (!capture) {
+    snprintf(error, error_len, "could not create assembly capture stream");
+    return false;
+  }
+  if (fflush(stdout) != 0) {
+    fclose(capture);
+    snprintf(error, error_len,
+             "could not flush stdout before assembly capture");
+    return false;
+  }
+  int saved_stdout = dup(STDOUT_FILENO);
+  if (saved_stdout < 0 || dup2(fileno(capture), STDOUT_FILENO) < 0) {
+    if (saved_stdout >= 0)
+      close(saved_stdout);
+    fclose(capture);
+    snprintf(error, error_len,
+             "could not redirect stdout for assembly capture");
+    return false;
+  }
+
+  bool emitted =
+      nyr_emit_assembly(function, "-", "nyr_acceptance", error, error_len);
+  bool flushed = fflush(stdout) == 0;
+  bool restored = dup2(saved_stdout, STDOUT_FILENO) >= 0;
+  close(saved_stdout);
+  if (!emitted || !flushed || !restored) {
+    fclose(capture);
+    if (emitted && (!flushed || !restored))
+      snprintf(error, error_len,
+               "could not restore stdout after assembly capture");
+    return false;
+  }
+
+  rewind(capture);
+  char assembly[8192];
+  size_t length = fread(assembly, 1, sizeof(assembly) - 1, capture);
+  assembly[length] = '\0';
+  bool found = strstr(assembly, "# Nyr native x86-64 assembly") != NULL &&
+               strstr(assembly, "nyr_acceptance") != NULL;
+  fclose(capture);
+  if (!found)
+    snprintf(error, error_len,
+             "assembly stdout output was missing expected text");
+  return found;
+}
+
 int main(void) {
   char error[256] = {0};
+  if (!test_aarch64_internal_executable_link(error, sizeof(error))) {
+    fprintf(stderr, "backend NYIR AArch64 executable link failed: %s\n",
+            error[0] ? error : "unexpected AArch64 executable");
+    return 1;
+  }
   if (!test_memory_emitters(error, sizeof(error))) {
     fprintf(stderr, "backend NYIR memory emitter helpers failed: %s\n",
             error[0] ? error : "instruction contract mismatch");
+    return 1;
+  }
+  if (!test_c_object_bundle(error, sizeof(error))) {
+    fprintf(stderr, "backend NYIR C object bundle failed: %s\n",
+            error[0] ? error : "bundle execution mismatch");
     return 1;
   }
   nyr_target_t host = {0}, cross = {0};
@@ -285,6 +497,16 @@ int main(void) {
     nyr_func_destroy(&function);
     return 1;
   }
+  if (nyr_optimize_with_options(&function, NYR_OPT_O2, 1u << 31, error,
+                                sizeof(error)) ||
+      function.len != original_len || !error[0] ||
+      !nyr_verify(&function, error, sizeof(error))) {
+    fprintf(stderr,
+            "backend NYIR accepted an unknown optimization option: %s\n",
+            error[0] ? error : "expected rejection without mutation");
+    nyr_func_destroy(&function);
+    return 1;
+  }
   if (!nyr_optimize(&function, NYR_OPT_O2, error, sizeof(error)) ||
       !nyr_verify(&function, error, sizeof(error))) {
     fprintf(stderr, "backend NYIR optimization failed: %s\n",
@@ -296,7 +518,8 @@ int main(void) {
   snprintf(object_path, sizeof(object_path), "/tmp/nyr-public-%ld.o",
            (long)getpid());
   if (!nyr_emit_object(&function, object_path, "nyr_acceptance", error,
-                       sizeof(error))) {
+                       sizeof(error)) ||
+      !append_linker_mapping_padding(object_path)) {
     fprintf(stderr, "backend NYIR object emission failed: %s\n", error);
     nyr_func_destroy(&function);
     return 1;
@@ -305,8 +528,17 @@ int main(void) {
   snprintf(assembly_path, sizeof(assembly_path), "/tmp/nyr-public-%ld.s",
            (long)getpid());
   if (!nyr_emit_assembly(&function, assembly_path, "nyr_acceptance", error,
-                         sizeof(error)) || access(assembly_path, R_OK) != 0) {
+                         sizeof(error)) ||
+      access(assembly_path, R_OK) != 0) {
     fprintf(stderr, "backend NYIR assembly emission failed: %s\n", error);
+    remove(object_path);
+    remove(assembly_path);
+    nyr_func_destroy(&function);
+    return 1;
+  }
+  if (!test_assembly_stdout(&function, error, sizeof(error))) {
+    fprintf(stderr, "backend NYIR assembly stdout emission failed: %s\n",
+            error[0] ? error : "assembly text missing");
     remove(object_path);
     remove(assembly_path);
     nyr_func_destroy(&function);
@@ -371,10 +603,10 @@ int main(void) {
       _exit(127);
     }
     int generic_status = 0;
-    generic_linked = generic_child > 0 &&
-                     waitpid(generic_child, &generic_status, 0) == generic_child &&
-                     WIFEXITED(generic_status) &&
-                     WEXITSTATUS(generic_status) == 42;
+    generic_linked =
+        generic_child > 0 &&
+        waitpid(generic_child, &generic_status, 0) == generic_child &&
+        WIFEXITED(generic_status) && WEXITSTATUS(generic_status) == 42;
   }
   remove(generic_executable_path);
   if (!generic_linked) {
@@ -678,7 +910,7 @@ int main(void) {
   aggregate_call_inst.symbol = "host_aggregate";
   aggregate_call_inst.arg_sizes = &aggregate_size;
   nyr_call_arg_class_set(aggregate_call_inst.arg_scalar_classes, 0,
-                          NYIR_SCALAR_AGGREGATE);
+                         NYIR_SCALAR_AGGREGATE);
   bool aggregate_metadata_copied = nyr_emit_const_i64(
       &function, 0, &aggregate_argument, error, sizeof(error));
   aggregate_call_inst.a = aggregate_argument;

@@ -4,15 +4,7 @@
 #include "support.h"
 
 static int ny_load_local(nyr_func_t *f, int slot) {
-  return nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_LOAD_LOCAL,
-                                     .dst = -1,
-                                     .a = -1,
-                                     .b = -1,
-                                     .c = -1,
-                                     .d = -1,
-                                     .e = -1,
-                                     .f = -1,
-                                     .imm = slot});
+  return nyr_opt_emit_imm(f, NYIR_LOAD_LOCAL, slot);
 }
 
 static int ny_call(nyr_func_t *f, const char *symbol, int arg) {
@@ -46,6 +38,59 @@ static void ny_build_leaf(nyr_func_t *f) {
   int value = ny_load_local(f, 0);
   int one = nyr_opt_const(f, 1);
   nyr_opt_ret(f, nyr_opt_binop(f, NYIR_ADD_I64, value, one));
+}
+
+static size_t ny_count_calls(const nyr_func_t *f);
+
+static void ny_build_two_param_plus_one(nyr_func_t *f) {
+  nyr_opt_begin(f);
+  f->param_types = malloc(2 * sizeof(*f->param_types));
+  if (!f->param_types)
+    exit(2);
+  f->param_types[0] = NYIR_PARAM_I64;
+  f->param_types[1] = NYIR_PARAM_I64;
+  f->param_count = 2;
+  int first = ny_load_local(f, 0);
+  int one = nyr_opt_const(f, 1);
+  nyr_opt_ret(f, nyr_opt_binop(f, NYIR_ADD_I64, first, one));
+}
+
+static bool ny_check_small_inline_distinguishes_constant_from_parameter(void) {
+  nyr_func_t caller, callee;
+  ny_build_two_param_plus_one(&callee);
+  nyr_opt_begin(&caller);
+  int first = nyr_opt_const(&caller, 0);
+  int second = nyr_opt_const(&caller, 5);
+  int result = caller.next_value;
+  if (nyr_ir_emit(&caller, (nyr_inst_t){.op = NYIR_CALL,
+                                         .dst = result,
+                                         .a = first,
+                                         .b = second,
+                                         .c = -1,
+                                         .d = -1,
+                                         .e = -1,
+                                         .f = -1,
+                                         .symbol = "two_param_plus_one",
+                                         .imm = 2}) != result)
+    return false;
+  caller.next_value = result + 1;
+  nyr_opt_ret(&caller, result);
+
+  const nyr_inline_callee_t callees[] = {
+      {"two_param_plus_one", &callee}};
+  nyr_set_inline_callees(callees, 1);
+  bool ok = nyr_opt_verify(&callee, "inline-small-constant-param/callee") &&
+            nyr_opt_verify(&caller, "inline-small-constant-param/before") &&
+            nyr_inline_small(&caller) &&
+            nyr_opt_verify(&caller, "inline-small-constant-param/after") &&
+            ny_count_calls(&caller) == 0 &&
+            nyr_opt_eval(&caller, "inline-small-constant-param") == 1;
+  if (!ok)
+    nyr_dump(stderr, &caller, "inline-small-constant-param/after");
+  nyr_set_inline_callees(NULL, 0);
+  nyr_ir_func_free(&caller);
+  nyr_ir_func_free(&callee);
+  return ok;
 }
 
 static void ny_build_wrapper(nyr_func_t *f, const char *callee) {
@@ -357,14 +402,7 @@ static bool ny_check_inlining_preserves_pointer_write(void) {
   caller.data[call_at].flags = NYIR_INST_F_EFFECTS_KNOWN;
   caller.data[call_at].effects =
       NYIR_EFFECT_CALL | NYIR_EFFECT_WRITE_MEMORY | NYIR_EFFECT_MAY_TRAP;
-  int loaded = nyr_ir_emit(&caller, (nyr_inst_t){.op = NYIR_LOAD_I64,
-                                                 .dst = -1,
-                                                 .a = global,
-                                                 .b = -1,
-                                                 .c = -1,
-                                                 .d = -1,
-                                                 .e = -1,
-                                                 .f = -1});
+  int loaded = nyr_opt_emit_abc(&caller, NYIR_LOAD_I64, global, -1, -1);
   nyr_opt_ret(&caller, loaded);
 
   const nyr_inline_callee_t callees[] = {{"write_pointer", &callee}};
@@ -463,6 +501,57 @@ static bool ny_check_inlining_preserves_aggregate_return_abi(void) {
   return ok;
 }
 
+static bool ny_check_inlining_preserves_capture_return_chain(void) {
+  nyr_func_t caller, callee;
+  ny_build_leaf(&callee);
+  nyr_opt_begin(&caller);
+  int call_dst = caller.next_value;
+  int primary = nyr_ir_emit(&caller, (nyr_inst_t){
+                                        .op = NYIR_CALL,
+                                        .dst = call_dst,
+                                        .a = -1,
+                                        .b = -1,
+                                        .c = -1,
+                                        .d = -1,
+                                        .e = -1,
+                                        .f = -1,
+                                        .imm = 0,
+                                        .symbol = "aggregate_leaf",
+                                        .scalar_class = NYIR_SCALAR_AGGREGATE});
+  caller.next_value = call_dst + 1;
+  int second_dst = caller.next_value;
+  int second = nyr_ir_emit(&caller, (nyr_inst_t){
+                                         .op = NYIR_CAPTURE_RET,
+                                         .dst = second_dst,
+                                         .a = -1,
+                                         .b = -1,
+                                         .c = -1,
+                                         .d = -1,
+                                         .e = -1,
+                                         .f = -1,
+                                         .imm = 1,
+                                         .scalar_class = NYIR_SCALAR_I64_RAW});
+  caller.next_value = second_dst + 1;
+  int result = nyr_opt_binop(&caller, NYIR_ADD_I64, primary, second);
+  nyr_opt_ret(&caller, result);
+
+  const nyr_inline_callee_t callees[] = {{"aggregate_leaf", &callee}};
+  nyr_set_inline_callees(callees, 1);
+  bool ok = primary >= 0 && second >= 0 && result >= 0 &&
+            nyr_opt_verify(&callee, "inline-capture-ret/callee") &&
+            nyr_opt_verify(&caller, "inline-capture-ret/before") &&
+            nyr_inline_general(&caller) &&
+            nyr_opt_verify(&caller, "inline-capture-ret/after") &&
+            ny_count_calls(&caller) == 1 &&
+            caller.data[1].op == NYIR_CAPTURE_RET;
+  if (!ok)
+    nyr_dump(stderr, &caller, "inline-capture-ret/after");
+  nyr_set_inline_callees(NULL, 0);
+  nyr_ir_func_free(&caller);
+  nyr_ir_func_free(&callee);
+  return ok;
+}
+
 static bool ny_check_inlining_preserves_unrepresented_call_effects(void) {
   nyr_func_t caller, callee;
   ny_build_leaf(&callee);
@@ -489,15 +578,54 @@ static bool ny_check_inlining_preserves_unrepresented_call_effects(void) {
   return ok;
 }
 
+static bool ny_check_void_call_inline_defines_dead_result(void) {
+  nyr_func_t caller, callee;
+  nyr_opt_begin(&callee);
+  nyr_opt_ret(&callee, -1);
+
+  nyr_opt_begin(&caller);
+  int dead_result = caller.next_value;
+  if (nyr_ir_emit(&caller, (nyr_inst_t){.op = NYIR_CALL,
+                                         .dst = dead_result,
+                                         .a = -1,
+                                         .b = -1,
+                                         .c = -1,
+                                         .d = -1,
+                                         .e = -1,
+                                         .f = -1,
+                                         .symbol = "void_leaf",
+                                         .imm = 0}) != dead_result)
+    return false;
+  caller.next_value = dead_result + 1;
+  nyr_opt_ret(&caller, -1);
+
+  const nyr_inline_callee_t callees[] = {{"void_leaf", &callee}};
+  nyr_set_inline_callees(callees, 1);
+  bool ok = nyr_opt_verify(&callee, "inline-void-result/callee") &&
+            nyr_opt_verify(&caller, "inline-void-result/before") &&
+            nyr_inline_general(&caller) &&
+            nyr_opt_verify(&caller, "inline-void-result/after") &&
+            ny_count_calls(&caller) == 0;
+  if (!ok)
+    nyr_dump(stderr, &caller, "inline-void-result/after");
+  nyr_set_inline_callees(NULL, 0);
+  nyr_ir_func_free(&caller);
+  nyr_ir_func_free(&callee);
+  return ok;
+}
+
 int main(void) {
-  return ny_check_wrapper_chain() && ny_check_deep_acyclic_chain() &&
+  return ny_check_small_inline_distinguishes_constant_from_parameter() &&
+                 ny_check_wrapper_chain() && ny_check_deep_acyclic_chain() &&
                  ny_check_cfg_inline_preserves_loop_phis() &&
                  ny_check_growth_budget_stops_rounds() &&
                  ny_check_mutual_recursion() &&
                  ny_check_inlining_rebuilds_alias_classes() &&
                  ny_check_inlining_preserves_pointer_write() &&
                  ny_check_inlining_preserves_aggregate_return_abi() &&
-                 ny_check_inlining_preserves_unrepresented_call_effects()
+                 ny_check_inlining_preserves_capture_return_chain() &&
+                 ny_check_inlining_preserves_unrepresented_call_effects() &&
+                 ny_check_void_call_inline_defines_dead_result()
              ? 0
              : 1;
 }

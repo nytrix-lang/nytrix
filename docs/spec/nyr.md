@@ -1,4 +1,13 @@
+<!-- nytrix-doc: {"audience":"contributor","featured":false,"group":"spec","order":45,"summary":"The versioned C API for constructing, verifying, optimizing, and executing NYIR."} -->
 # Nyr API
+
+> **Note:** Usually needed only to implement a frontend, backend, or NYIR host.
+
+## Contents
+
+- [Construct and execute NYIR](#brainfuck-frontend)
+- [Ownership and errors](#ownership-and-errors)
+- [Targets and thread-safety](#target-and-operation-limits)
 
 The versioned C API in `<nyr/nyr.h>` and instruction model in `<nyr/ir.h>`
 let an independently authored frontend construct, verify, optimize,
@@ -45,8 +54,16 @@ deep copy to provide this guarantee, so optimization needs memory proportional
 to the function in addition to the pass workspace. Use `nyr_func_clone` when a
 frontend needs a second independently owned copy for other purposes.
 
+`nyr_cfg_build` in `<nyr/ir.h>` constructs CFG topology, reachability,
+dominators, and dominance frontiers. It solves immediate dominators by
+intersecting ancestor chains in reverse postorder, then materializes the
+dominance bitsets. Unreachable blocks have self-only dominance and `idom=-1`;
+the entry also has `idom=-1`. Use `nyr_cfg_build_topology` when only block
+membership, edges, and reachability are needed.
+
 On Linux x86-64, `nyr_emit_assembly` writes native x86-64 assembly text for a
-verified function. `nyr_jit_run` executes a verified no-argument `i64`
+verified function; pass `"-"` as its path to write to standard output without
+creating a file. `nyr_jit_run` executes a verified no-argument `i64`
 function in the in-process native JIT, resolving external symbols from the
 current process. It is intended for trusted code, not as a sandbox. The JIT
 runner currently requires a host x86-64 backend.
@@ -61,11 +78,13 @@ compiler driver's application build or supply a target runtime automatically.
 
 The complete frontend below is also maintained at `etc/projects/brainfuck.ny`.
 It includes `<nyr/nyr.h>`, builds NYIR directly with Nyr's constructors,
-verifies and optimizes it, asks Nyr to emit native assembly, then runs the same
-function in Nyr's in-process native JIT. The emitted Brainfuck function calls
-`calloc`, `getchar`, and `putchar` as external ABI symbols resolved by the JIT.
-No assembler, object linker, or disassembler subprocess is used by the
-frontend.
+verifies and optimizes it, emits native assembly, then runs the function in
+Nyr's in-process native JIT. Assembly is emitted to standard output before
+execution, without creating an assembly file; Brainfuck output follows it. The
+emitted function calls `calloc`, `getchar`, and `putchar` as external ABI
+symbols resolved by the JIT. Runtime failures produce a nonzero process
+status; the successful function return value is not presented as the program's
+output.
 
 Run the build and commands from the repository root, where the header search
 path and `build/release/libnytrixrt.so` link path used by the example resolve:
@@ -74,11 +93,14 @@ path and `build/release/libnytrixrt.so` link path used by the example resolve:
 cmake --build build/release --target nyr-backend-ir-acceptance-test nytrixrt ny
 printf '++++++++[>++++++++<-]>+.' > /tmp/hello.bf
 build/release/ny etc/projects/brainfuck.ny /tmp/hello.bf
+build/release/ny etc/projects/brainfuck.ny -c '++++++++[>++++++++<-]>+.'
 ```
 
-The JIT program writes `A`, reports its exit code, and the frontend prints the
-assembly to standard output and saves it as `out.s`. To give the Brainfuck
-program runtime input, pass the source file as before and pipe input separately:
+Both commands print the assembly listing first and then write `A`. `-c` takes
+Brainfuck source directly; otherwise the first argument is read as a source-file
+path. No assembly file is created, and the function's status value is not
+printed. To give the Brainfuck program runtime input, pass the source file as
+before and pipe input separately:
 
 ```sh
 printf ',.' > /tmp/echo.bf
@@ -148,3 +170,9 @@ compiler and runtime subsystems still contain process-global state. Do not run
 concurrent compiler pipeline invocations in one process. The embedding API
 provides raw-word host callbacks, not a general Ny value/GC handle API; the
 host remains responsible for object handles and value marshalling.
+
+## Related
+
+- [Linking](linker.md) for object and archive link requests.
+- [Embedding API](nytrix.md) for host-call resolution and runtime lifecycle.
+- [Pipeline](pipeline.md) for compiler route boundaries.

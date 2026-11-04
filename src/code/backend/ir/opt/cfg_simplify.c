@@ -34,58 +34,130 @@ static bool cfg_simplify_trace_enabled(void) {
  * straight-line monsters like the 500-diamond DCE bench.
  */
 typedef struct {
-  ptrdiff_t *label_pc; /* indexed by label, -1 = absent; NULL if too sparse */
+  ptrdiff_t *label_pc; /* indexed by label, -1 = absent */
   int64_t max_label;
   int8_t *has_phi; /* -1 unknown, 0 no, 1 yes; parallel to label_pc */
+  struct cfg_sparse_label_t {
+    int64_t label;
+    ptrdiff_t pc;
+    int8_t has_phi;
+  } *sparse;
+  size_t sparse_len;
 } cfg_simplify_cache_t;
 
 static void cfg_simplify_cache_init(cfg_simplify_cache_t *c) {
   c->label_pc = NULL;
   c->max_label = -1;
   c->has_phi = NULL;
+  c->sparse = NULL;
+  c->sparse_len = 0;
 }
 
 static void cfg_simplify_cache_free(cfg_simplify_cache_t *c) {
   free(c->label_pc);
   free(c->has_phi);
+  free(c->sparse);
   c->label_pc = NULL;
   c->has_phi = NULL;
+  c->sparse = NULL;
+  c->sparse_len = 0;
+}
+
+static int cfg_sparse_label_compare(const void *left, const void *right) {
+  const struct cfg_sparse_label_t *a = left;
+  const struct cfg_sparse_label_t *b = right;
+  if (a->label != b->label)
+    return a->label < b->label ? -1 : 1;
+  if (a->pc != b->pc)
+    return a->pc < b->pc ? -1 : 1;
+  return 0;
+}
+
+static ptrdiff_t cfg_sparse_label_find(const cfg_simplify_cache_t *c,
+                                       int64_t label) {
+  size_t lo = 0;
+  size_t hi = c->sparse_len;
+  while (lo < hi) {
+    size_t mid = lo + (hi - lo) / 2;
+    if (c->sparse[mid].label <= label)
+      lo = mid + 1;
+    else
+      hi = mid;
+  }
+  if (lo == 0 || c->sparse[lo - 1].label != label)
+    return -1;
+  return (ptrdiff_t)(lo - 1);
+}
+
+static ptrdiff_t cfg_simplify_label_pc(const cfg_simplify_cache_t *c,
+                                       int64_t label) {
+  if (label < 0)
+    return -1;
+  if (c->label_pc && label <= c->max_label)
+    return c->label_pc[label];
+  ptrdiff_t index = cfg_sparse_label_find(c, label);
+  return index >= 0 ? c->sparse[index].pc : -1;
 }
 
 static bool cfg_simplify_cache_build(const nyr_func_t *f,
                                      cfg_simplify_cache_t *c) {
   int64_t max_label = -1;
+  size_t label_count = 0;
   for (size_t i = 0; i < f->len; ++i)
-    if ((f->data[i].op == NYIR_LABEL || f->data[i].op == NYIR_BR ||
-         f->data[i].op == NYIR_BR_IF) &&
-        f->data[i].imm > max_label)
+    if (f->data[i].op == NYIR_LABEL && f->data[i].imm >= 0) {
+      if (f->data[i].imm > max_label)
+        max_label = f->data[i].imm;
+      label_count++;
+    } else if ((f->data[i].op == NYIR_BR || f->data[i].op == NYIR_BR_IF) &&
+               f->data[i].imm > max_label) {
       max_label = f->data[i].imm;
-  /*
-   * Guard against absurd sparse labels (hash map would be better, but labels
-   * are dense next_label++ ids in practice).
-   */
-  if (max_label < 0 || max_label > (int64_t)(f->len * 4 + 1024))
-    return false;
-  c->label_pc =
-      (ptrdiff_t *)malloc((size_t)(max_label + 1) * sizeof(ptrdiff_t));
-  c->has_phi = (int8_t *)malloc((size_t)(max_label + 1) * sizeof(int8_t));
-  if (!c->label_pc || !c->has_phi) {
-    cfg_simplify_cache_free(c);
-    return false;
+    }
+  size_t dense_limit =
+      f->len <= (SIZE_MAX - 1024) / 4 ? f->len * 4 + 1024 : SIZE_MAX;
+  if (max_label >= 0 && (uint64_t)max_label <= dense_limit) {
+    size_t entries = 0;
+    size_t pc_bytes = 0;
+    size_t phi_bytes = 0;
+    if (!ny_size_add_ok((size_t)max_label, 1, &entries) ||
+        !ny_size_mul_ok(entries, sizeof(*c->label_pc), &pc_bytes) ||
+        !ny_size_mul_ok(entries, sizeof(*c->has_phi), &phi_bytes))
+      return false;
+    c->label_pc = malloc(pc_bytes);
+    c->has_phi = malloc(phi_bytes);
+    if (!c->label_pc || !c->has_phi) {
+      cfg_simplify_cache_free(c);
+      return false;
+    }
+    for (size_t l = 0; l < entries; ++l) {
+      c->label_pc[l] = -1;
+      c->has_phi[l] = -1;
+    }
+    for (size_t i = 0; i < f->len; ++i)
+      if (f->data[i].op == NYIR_LABEL && f->data[i].imm >= 0 &&
+          f->data[i].imm <= max_label)
+        c->label_pc[f->data[i].imm] = (ptrdiff_t)i;
+    c->max_label = max_label;
+    return true;
   }
-  for (int64_t l = 0; l <= max_label; ++l) {
-    c->label_pc[l] = -1;
-    c->has_phi[l] = -1;
-  }
-  for (size_t i = 0; i < f->len; ++i)
-    if (f->data[i].op == NYIR_LABEL && f->data[i].imm >= 0 &&
-        f->data[i].imm <= max_label)
-      c->label_pc[f->data[i].imm] = (ptrdiff_t)i;
-  c->max_label = max_label;
+  if (label_count == 0)
+    return true;
+  size_t sparse_bytes = 0;
+  if (!ny_size_mul_ok(label_count, sizeof(*c->sparse), &sparse_bytes))
+    return false;
+  c->sparse = malloc(sparse_bytes);
+  if (!c->sparse)
+    return false;
+  for (size_t i = 0, index = 0; i < f->len; ++i)
+    if (f->data[i].op == NYIR_LABEL && f->data[i].imm >= 0)
+      c->sparse[index++] = (struct cfg_sparse_label_t){
+          .label = f->data[i].imm, .pc = (ptrdiff_t)i, .has_phi = -1};
+  c->sparse_len = label_count;
+  qsort(c->sparse, c->sparse_len, sizeof(*c->sparse), cfg_sparse_label_compare);
   return true;
 }
 
-static bool cfg_simplify_block_has_phi_cached(const nyr_func_t *f, int64_t label,
+static bool cfg_simplify_block_has_phi_cached(const nyr_func_t *f,
+                                              int64_t label,
                                               cfg_simplify_cache_t *c) {
   if (label < 0)
     return true;
@@ -106,8 +178,23 @@ static bool cfg_simplify_block_has_phi_cached(const nyr_func_t *f, int64_t label
     c->has_phi[label] = has ? 1 : 0;
     return has;
   }
+  ptrdiff_t sparse_index = cfg_sparse_label_find(c, label);
+  if (sparse_index >= 0) {
+    struct cfg_sparse_label_t *entry = &c->sparse[sparse_index];
+    if (entry->has_phi != -1)
+      return entry->has_phi != 0;
+    bool has = false;
+    for (size_t k = (size_t)entry->pc + 1; k < f->len; ++k) {
+      if (f->data[k].op == NYIR_NOP)
+        continue;
+      has = f->data[k].op == NYIR_PHI;
+      break;
+    }
+    entry->has_phi = has ? 1 : 0;
+    return has;
+  }
   /*
-   * Fallback: uncached linear scan (sparse labels).
+   * OOM fallback only: a missing cache entry must remain conservative.
    */
   size_t k = 0;
   while (k < f->len &&
@@ -147,7 +234,8 @@ bool nyr_cfg_simplify(nyr_func_t *f) {
   cfg_simplify_cache_t cache;
   cfg_simplify_cache_init(&cache);
   /*
-   * Best-effort: falls back to linear scans if labels are sparse.
+   * Best-effort: a sparse sorted index avoids allocations proportional to
+   * label values; linear scans remain only as an allocation-failure fallback.
    */
   (void)cfg_simplify_cache_build(f, &cache);
 
@@ -162,14 +250,14 @@ bool nyr_cfg_simplify(nyr_func_t *f) {
        */
       nyr_debug_loc_t debug = in->debug;
       *in = (nyr_inst_t){.op = NYIR_NOP,
-                          .dst = -1,
-                          .a = -1,
-                          .b = -1,
-                          .c = -1,
-                          .d = -1,
-                          .e = -1,
-                          .f = -1,
-                          .debug = debug};
+                         .dst = -1,
+                         .a = -1,
+                         .b = -1,
+                         .c = -1,
+                         .d = -1,
+                         .e = -1,
+                         .f = -1,
+                         .debug = debug};
     }
     if (in->op == NYIR_BR_IF && in->a >= 0 && known && known[in->a] &&
         value[in->a] != 0) {
@@ -188,15 +276,15 @@ bool nyr_cfg_simplify(nyr_func_t *f) {
       if (!fallthrough_has_phi) {
         nyr_debug_loc_t debug = in->debug;
         *in = (nyr_inst_t){.op = NYIR_BR,
-                            .dst = -1,
-                            .a = -1,
-                            .b = -1,
-                            .c = -1,
-                            .d = -1,
-                            .e = -1,
-                            .f = -1,
-                            .imm = in->imm,
-                            .debug = debug};
+                           .dst = -1,
+                           .a = -1,
+                           .b = -1,
+                           .c = -1,
+                           .d = -1,
+                           .e = -1,
+                           .f = -1,
+                           .imm = in->imm,
+                           .debug = debug};
         if (cfg_simplify_trace_enabled())
           ny_dbg_heuristic_event("CFG_SIMPLIFY",
                                  "fold constant-true branch @%zu to label=%lld",
@@ -227,13 +315,8 @@ bool nyr_cfg_simplify(nyr_func_t *f) {
       int hops = 0;
       for (int hop = 0; hop < 16; ++hop) {
         int64_t next_target = -1;
-        /*
-         * O(1) label lookup via cache; fallback to linear scan.
-         */
-        ptrdiff_t found = -1;
-        if (cache.label_pc && target >= 0 && target <= cache.max_label)
-          found = cache.label_pc[target];
-        else {
+        ptrdiff_t found = cfg_simplify_label_pc(&cache, target);
+        if (!cache.label_pc && !cache.sparse) {
           for (size_t k = 0; k < f->len; ++k)
             if (f->data[k].op == NYIR_LABEL && f->data[k].imm == target) {
               found = (ptrdiff_t)k;

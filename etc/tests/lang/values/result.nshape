@@ -9,6 +9,8 @@ use core.error
 use core
 
 fn float_result() Result<f64, int> { ok(1.25) }
+fn typed_error_result() Result<int, str> { err("typed failure") }
+fn typed_numeric_error_result() Result<int, int> { err(17) }
 
 print("Verifying Result allocation logic...")
 
@@ -22,6 +24,20 @@ assert(!is_err(r), "ok(42) should not be is_err")
 assert_eq(unwrap(r), 42, "unwrap(ok(42)) should be 42")
 assert(unwrap(float_result()) == 1.25,
        "typed Result<f64, int> unwrap preserves the f64 payload")
+match typed_error_result() {
+   ok(_) -> { assert(false, "typed error Result should not be Ok") }
+   err(reason) -> {
+      assert(is_str(reason), "typed Result error payload keeps its string type")
+      assert_eq(reason, "typed failure", "typed Result error payload")
+   }
+}
+match typed_numeric_error_result() {
+   ok(_) -> { assert(false, "typed numeric error Result should not be Ok") }
+   err(reason) -> {
+      assert(is_int(reason), "typed Result error payload keeps its integer type")
+      assert_eq(reason, 17, "typed Result integer error payload")
+   }
+}
 
 ;; Test Err creation and unwrapping
 def msg = "some error"

@@ -1,0 +1,111 @@
+[USAGE]
+nyc -c [OPTIONS] SOURCE.c -o OUTPUT.o|Compile every function in one C translation unit to an object.
+nyc -S [OPTIONS] SOURCE.c -o OUTPUT.s|Emit GNU assembly for one translation unit.
+nyc -E [OPTIONS] SOURCE.c [-o OUTPUT.i]|Preprocess to standard output or a file.
+nyc --all [OPTIONS] SOURCE.c OUTPUT.o|Whole-unit object mode with a positional output.
+nyc [OPTIONS] SOURCE.c OUTPUT.o SYMBOL|Legacy single-function object mode.
+[COMPILATION AND INPUT]
+-c|Compile all functions to one object; requires -o.
+-S|Emit GNU assembly for the whole unit; requires -o.
+-E|Preprocess only; write stdout unless -o is supplied.
+--all|Whole-unit object mode with a positional output.
+-o FILE|Set the output path (separate argument).
+-x c|Select C input; other languages are unsupported.
+--|Treat subsequent arguments as positional operands.
+-|Read the C source from standard input.
+SOURCE.c OUTPUT.o SYMBOL|Legacy mode: emit only the named C function.
+[PREPROCESSOR AND DEPENDENCIES]
+-I DIR, -IDIR|Add an include directory; repeatable.
+-include FILE, -includeFILE|Include FILE before the source; repeatable.
+-D NAME[=VALUE], -DNAME[=VALUE]|Define a macro. Explicit -D/-U order is retained.
+-U NAME, -UNAME|Undefine a macro.
+-nostdinc|Disable native system-header search.
+-P|Omit line markers from -E output.
+-dM|Dump macro definitions in preprocessing mode (-E).
+-pthread|Define _REENTRANT=1 before explicit -D/-U options. Pass -pthread to the external linker too.
+-Wp,-MMD,FILE|Write Make dependencies to FILE.
+-Wp,-MD,FILE|Alternate dependency-file spelling.
+-fmacro-prefix-map=OLD=NEW|Remap __FILE__ and __BASE_FILE__; last match wins.
+[LANGUAGE AND DATA LAYOUT]
+-std=gnu11|Accept the current GNU C dialect; no strict mode.
+-fshort-wchar|Use 16-bit wchar_t instead of the native default.
+-funsigned-char|Make plain char unsigned.
+-fms-extensions|Enable supported Microsoft C extensions.
+-fplan9-extensions|Enable supported Plan 9 C extensions.
+[OPTIMIZATION AND ASSEMBLY]
+-O0, -O1, -O2, -O3|Select the NYR optimization level; default -O2.
+-Os|Use the conservative -O2 pipeline, not a distinct size-optimization pipeline.
+-fconserve-stack|Cap optimization at -O1, even with -O2/-O3.
+-fverbose-asm|Annotate -S output with C function names.
+-fomit-frame-pointer|Use RSP-relative x86-64 whole-unit object frames.
+-falign-functions=16|Accept the backend's 16-byte object alignment.
+-fPIC, -fpic, -fPIE|Request position-independent whole-unit objects.
+-fno-pic, -fno-PIC|Disable the position-independent object request.
+-fno-pie, -fno-PIE|Alternate spellings for disabling that request.
+[TARGETS AND X86 CALLING CONVENTIONS]
+--target=TRIPLE|Set the target ABI/object format (equals spelling).
+-m64|Require an x86-64 target.
+-m32|Select i386 GNU assembly; use with -S.
+-m16|Select i386 .code16gcc assembly; use with -S.
+-mregparm=N|i386 integer argument registers, N=0..3; default 0.
+-march=x86-64|Require the x86-64 target.
+-march=i386|Accept the i386 baseline setting.
+-mcmodel=kernel|Require x86-64; final linking checks address range.
+-mindirect-branch=thunk-extern|Use external x86-64 indirect-call thunks.
+-mindirect-branch=thunk-inline|Use inline x86-64 indirect-call retpolines.
+-mindirect-branch-register|Accepted compatibility spelling; no extra mode.
+-mno-sse, -mno-sse2|Select the x86 integer-only, SIMD-disabled path.
+-mno-mmx, -mno-3dnow|Also select that same restricted path.
+-mno-avx, -mno-sse4a|Also select that same restricted path.
+-mno-80387, -mno-fp-ret-in-387|Also select that same restricted path. Unsupported floating-point/vector operations are rejected.
+-mskip-rax-setup|Compatibility switch; accepted only after one of the SIMD-disable switches above.
+[COMPATIBILITY]
+These switches do not enable an additional code-generation mode. Warning, debugging, and unwind flags below do not provide GCC-equivalent diagnostics or metadata.
+-ffreestanding|Accept freestanding compilation conventions.
+-fno-common|Use the existing non-common data definitions.
+-fno-strict-aliasing|Accept the current conservative alias behavior.
+-fno-strict-overflow|Accept the current overflow-optimization behavior.
+-fno-delete-null-pointer-checks|Accept the existing null-check behavior.
+-fno-stack-protector|No stack-protector instrumentation is emitted.
+-fno-stack-check|No stack-check instrumentation is emitted.
+-fno-builtin-wcslen|No wcslen builtin substitution is requested.
+-fno-builtin|Disable implicit standard-library builtin substitutions.
+-fno-function-sections|Use the existing shared text-section policy.
+-fno-data-sections|Use the existing shared data-section policy.
+-fno-jump-tables|Accept the current switch-lowering policy.
+-fno-gcse|No global CSE pass is used; local NYR optimizations remain enabled.
+-fno-asynchronous-unwind-tables|Do not request asynchronous unwind metadata.
+-fasynchronous-unwind-tables|Recognized, but does not add unwind metadata.
+-fno-omit-frame-pointer|Recognized; does not undo an earlier omit request.
+-foptimize-sibling-calls|Recognized; no separate optimization toggle.
+-g|Recognized; does not add GCC-style debug metadata.
+-mtune=generic|No CPU-specific tuning is selected.
+-mno-red-zone|Accept the existing no-red-zone frame policy.
+-mpreferred-stack-boundary=2|Accept the 4-byte preference; NYC retains stronger 16-byte frame/call alignment.
+-mpreferred-stack-boundary=3|Accept the 8-byte preference; NYC retains stronger 16-byte frame/call alignment.
+-mcmodel=small|Accept the backend's default code model.
+-W...|Warning switches are accepted but not implemented. Apart from the dependency and assembler-version forms listed here, -Wp/-Wa/-Wl are not forwarding interfaces to other tools.
+[INFORMATION]
+-h, --help|Show this complete compiler option list.
+--version|Show the NYC build identity.
+-Wa,--version|Ask GNU as for its version.
+-print-file-name=plugin|Print the compatibility query result "plugin"; this does not enable GCC compiler plugins.
+[ENVIRONMENT]
+NYC_OPT_O0|If set, change the default optimization to -O0; an explicit -O option still overrides it.
+NYC_DISABLE_PASS|Disable selected NYR passes for compiler debugging.
+NYTRIX_COLOR|Help colors: auto, always, or never; automatic terminal detection by default.
+NYTRIX_TOOL_COLOR|Shared build-tool color override; NYC uses it when NYTRIX_COLOR has no explicit setting.
+NYTRIX_GLYPHS|Help symbols: unicode (default) or ascii.
+COLUMNS|Help width; clamped to 40..112 columns, with terminal width detected otherwise.
+[COMPILER-SWAP EXAMPLES]
+nyc -std=gnu11 -O2 -Iinclude -DAPP=1 -c main.c -o main.o|Compile an application translation unit with NYC.
+cc main.o -o app|Link the resulting object with your platform's link driver.
+nyc -E -P -Iinclude main.c -o main.i|Preprocess C headers and macros.
+nyc -S -m32 main.c -o main.s|Emit i386 assembly instead of a native object.
+as --32 main.s -o main.o|Assemble i386 output with GNU as.
+cc -m32 main.o -o app|Link i386 objects; requires the platform's 32-bit runtime libraries.
+[CURRENT DRIVER LIMITS]
+NYC compiles objects/assembly; it does not link executables or libraries. Use CC=/absolute/path/to/nyc only for compile-only steps and retain a separate host link driver. A build that uses CC for linking is not a drop-in swap yet.
+Whole-unit -c/--all output is x86-64 ELF. Whole-unit -S also supports i386. Legacy single-symbol mode additionally supports supported AArch64 ELF and x86-64 Windows COFF targets. Choose one consistent target; do not mix conflicting --target and -m selections.
+nyc -c INPUT.s -o OUTPUT.o invokes GNU as for x86-64 ELF assembly input.
+NYC implements a C subset, not every GCC/Clang language extension or flag. Unlisted options are rejected, except for the recognized -W... family above.

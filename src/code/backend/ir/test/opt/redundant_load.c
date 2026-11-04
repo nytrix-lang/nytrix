@@ -16,78 +16,92 @@ static int emit_address(nyr_func_t *f, const void *address) {
 
 static int emit_symbol_address(nyr_func_t *f, const char *symbol) {
   return nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_ADDR_SYMBOL,
-                                    .dst = -1,
-                                    .a = -1,
-                                    .b = -1,
-                                    .c = -1,
-                                    .d = -1,
-                                    .e = -1,
-                                    .f = -1,
-                                    .symbol = symbol,
-                                    .scalar_class = NYIR_SCALAR_POINTER});
+                                     .dst = -1,
+                                     .a = -1,
+                                     .b = -1,
+                                     .c = -1,
+                                     .d = -1,
+                                     .e = -1,
+                                     .f = -1,
+                                     .symbol = symbol,
+                                     .scalar_class = NYIR_SCALAR_POINTER});
 }
 
 static void add_local_anchor(nyr_func_t *f) {
   int zero = nyr_opt_const(f, 0);
   nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_STORE_LOCAL,
-                             .dst = -1,
-                             .a = zero,
-                             .b = -1,
-                             .c = -1,
-                             .d = -1,
-                             .e = -1,
-                             .f = -1,
-                             .imm = 0});
+                              .dst = -1,
+                              .a = zero,
+                              .b = -1,
+                              .c = -1,
+                              .d = -1,
+                              .e = -1,
+                              .f = -1,
+                              .imm = 0});
 }
 
 static int emit_load(nyr_func_t *f, int address) {
-  return nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_LOAD_I64,
-                                    .dst = -1,
-                                    .a = address,
-                                    .b = -1,
-                                    .c = -1,
-                                    .d = -1,
-                                    .e = -1,
-                                    .f = -1});
+  return nyr_opt_emit_abc(f, NYIR_LOAD_I64, address, -1, -1);
 }
 
 static void emit_store(nyr_func_t *f, int address, int value) {
-  nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_STORE_I64,
-                             .dst = -1,
-                             .a = address,
-                             .b = -1,
-                             .c = value,
-                             .d = -1,
-                             .e = -1,
-                             .f = -1});
+  nyr_opt_emit_abc(f, NYIR_STORE_I64, address, -1, value);
+}
+
+static int emit_vec4_load_f64(nyr_func_t *f, int address) {
+  return nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_VEC4_LOAD_F64,
+                                     .dst = -1,
+                                     .a = address,
+                                     .b = -1,
+                                     .c = -1,
+                                     .d = -1,
+                                     .e = -1,
+                                     .f = -1,
+                                     .scalar_class = NYIR_SCALAR_F64,
+                                     .effects = NYIR_EFFECT_READ_MEMORY |
+                                                NYIR_EFFECT_MAY_TRAP});
+}
+
+static void emit_vec4_store_f64(nyr_func_t *f, int address, int value) {
+  nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_VEC4_STORE_F64,
+                              .dst = -1,
+                              .a = address,
+                              .b = value,
+                              .c = -1,
+                              .d = -1,
+                              .e = -1,
+                              .f = -1,
+                              .scalar_class = NYIR_SCALAR_F64,
+                              .effects = NYIR_EFFECT_WRITE_MEMORY |
+                                         NYIR_EFFECT_MAY_TRAP});
 }
 
 static void emit_copy_struct(nyr_func_t *f, int destination, int source) {
   nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_COPY_STRUCT,
-                             .dst = -1,
-                             .a = destination,
-                             .b = source,
-                             .c = -1,
-                             .d = -1,
-                             .e = -1,
-                             .f = -1,
-                             .imm = 8,
-                             .effects = NYIR_EFFECT_READ_MEMORY |
-                                        NYIR_EFFECT_WRITE_MEMORY |
-                                        NYIR_EFFECT_MAY_TRAP});
+                              .dst = -1,
+                              .a = destination,
+                              .b = source,
+                              .c = -1,
+                              .d = -1,
+                              .e = -1,
+                              .f = -1,
+                              .imm = 8,
+                              .effects = NYIR_EFFECT_READ_MEMORY |
+                                         NYIR_EFFECT_WRITE_MEMORY |
+                                         NYIR_EFFECT_MAY_TRAP});
 }
 
 static void emit_unknown_call(nyr_func_t *f) {
   nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_CALL,
-                             .dst = -1,
-                             .a = -1,
-                             .b = -1,
-                             .c = -1,
-                             .d = -1,
-                             .e = -1,
-                             .f = -1,
-                             .symbol = "unknown_memory_effect",
-                             .effects = NYIR_EFFECT_UNKNOWN_SIDE_EFFECT});
+                              .dst = -1,
+                              .a = -1,
+                              .b = -1,
+                              .c = -1,
+                              .d = -1,
+                              .e = -1,
+                              .f = -1,
+                              .symbol = "unknown_memory_effect",
+                              .effects = NYIR_EFFECT_UNKNOWN_SIDE_EFFECT});
 }
 
 static bool prepare(nyr_func_t *f, const char *name) {
@@ -103,6 +117,13 @@ static int count_loads(const nyr_func_t *f) {
   int count = 0;
   for (size_t i = 0; i < f->len; ++i)
     count += f->data[i].op == NYIR_LOAD_I64;
+  return count;
+}
+
+static int count_vec4_loads_f64(const nyr_func_t *f) {
+  int count = 0;
+  for (size_t i = 0; i < f->len; ++i)
+    count += f->data[i].op == NYIR_VEC4_LOAD_F64;
   return count;
 }
 
@@ -132,6 +153,86 @@ static bool run_positive(void) {
   }
   nyr_ir_func_free(&f);
   return ok && before == after;
+}
+
+static bool run_structural_store_load_forwarding(void) {
+  const char *name = "rle-equivalent-indexed-address";
+  nyr_func_t f;
+  nyr_opt_begin(&f);
+  int base = emit_address(&f, &rle_cell_a);
+  int index = nyr_opt_const(&f, 0);
+  int scale = nyr_opt_const(&f, 8);
+  int write_offset = nyr_opt_binop(&f, NYIR_MUL_I64, index, scale);
+  int read_offset = nyr_opt_binop(&f, NYIR_MUL_I64, scale, index);
+  int write_address = nyr_opt_binop(&f, NYIR_ADD_I64, base, write_offset);
+  int read_address = nyr_opt_binop(&f, NYIR_ADD_I64, read_offset, base);
+  int value = nyr_opt_const(&f, 41);
+  nyr_opt_emit_abc(&f, NYIR_STORE_I64, write_address, -1, value);
+  size_t load_at = f.len;
+  int loaded = nyr_opt_emit_abc(&f, NYIR_LOAD_I64, read_address, -1, -1);
+  nyr_opt_ret(&f, loaded);
+  if (!prepare(&f, name)) {
+    nyr_ir_func_free(&f);
+    return false;
+  }
+  bool ok = nyr_redundant_load_elim(&f) && nyr_opt_verify(&f, name) &&
+            f.data[load_at].op == NYIR_COPY && f.data[load_at].a == value;
+  if (!ok) {
+    fprintf(stderr, "[%s] equivalent indexed load was not forwarded\n", name);
+    nyr_dump(stderr, &f, name);
+  }
+  nyr_ir_func_free(&f);
+  return ok;
+}
+
+static bool run_vector_store_forwarding(bool call_barrier) {
+  const char *name = call_barrier ? "rle-vector-store-call-barrier"
+                                  : "rle-vector-store-forward";
+  static double vector_memory[4] = {3.0, 5.0, 7.0, 11.0};
+  nyr_func_t f;
+  nyr_opt_begin(&f);
+  int base = emit_address(&f, vector_memory);
+  int first_address, store_address, second_address;
+  if (call_barrier) {
+    int zero = nyr_opt_const(&f, 0);
+    first_address = nyr_opt_binop(&f, NYIR_ADD_I64, base, zero);
+    store_address = nyr_opt_binop(&f, NYIR_ADD_I64, base, zero);
+    second_address = nyr_opt_binop(&f, NYIR_ADD_I64, base, zero);
+  } else {
+    int index = nyr_opt_const(&f, 3);
+    int scale = nyr_opt_const(&f, 8);
+    int first_offset = nyr_opt_binop(&f, NYIR_MUL_I64, index, scale);
+    int store_offset = nyr_opt_binop(&f, NYIR_MUL_I64, scale, index);
+    int second_offset = nyr_opt_binop(&f, NYIR_MUL_I64, index, scale);
+    first_address = nyr_opt_binop(&f, NYIR_ADD_I64, base, first_offset);
+    store_address = nyr_opt_binop(&f, NYIR_ADD_I64, store_offset, base);
+    second_address = nyr_opt_binop(&f, NYIR_ADD_I64, base, second_offset);
+  }
+  int first = emit_vec4_load_f64(&f, first_address);
+  emit_vec4_store_f64(&f, store_address, first);
+  if (call_barrier)
+    emit_unknown_call(&f);
+  size_t second_load_at = f.len;
+  int second = emit_vec4_load_f64(&f, second_address);
+  int result = nyr_opt_const(&f, 0);
+  nyr_opt_ret(&f, result);
+  if (!prepare(&f, name)) {
+    nyr_ir_func_free(&f);
+    return false;
+  }
+  int expected_loads = call_barrier ? 2 : 1;
+  bool ok = nyr_redundant_load_elim(&f) && nyr_opt_verify(&f, name) &&
+            count_vec4_loads_f64(&f) == expected_loads &&
+            (call_barrier || (f.data[second_load_at].op == NYIR_COPY &&
+                              f.data[second_load_at].a == first)) &&
+            second >= 0;
+  if (!ok) {
+    fprintf(stderr, "[%s] vector store forwarding/barrier was incorrect\n",
+            name);
+    nyr_dump(stderr, &f, name);
+  }
+  nyr_ir_func_free(&f);
+  return ok;
 }
 
 static bool run_unknown_call_barrier(void) {
@@ -168,17 +269,17 @@ static bool run_raw_memset_call_barrier(void) {
   int length = nyr_opt_const(&f, 8);
   int first = emit_load(&f, tracked);
   nyr_ir_emit(&f, (nyr_inst_t){
-                    .op = NYIR_CALL,
-                    .dst = -1,
-                    .a = other,
-                    .b = fill,
-                    .c = length,
-                    .d = -1,
-                    .e = -1,
-                    .f = -1,
-                    .imm = 3,
-                    .symbol = "rt_memset_raw",
-                });
+                      .op = NYIR_CALL,
+                      .dst = -1,
+                      .a = other,
+                      .b = fill,
+                      .c = length,
+                      .d = -1,
+                      .e = -1,
+                      .f = -1,
+                      .imm = 3,
+                      .symbol = "rt_memset_raw",
+                  });
   size_t call_at = f.len - 1;
   int second = emit_load(&f, tracked);
   int sum = nyr_opt_binop(&f, NYIR_ADD_I64, first, second);
@@ -306,26 +407,26 @@ static bool run_local_forward_uses_source_value_provenance(void) {
   nyr_opt_begin(&f);
   int pointer = emit_symbol_address(&f, "rle.local.pointer");
   nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_STORE_LOCAL,
-                              .dst = -1,
-                              .a = pointer,
-                              .b = -1,
-                              .c = -1,
-                              .d = -1,
-                              .e = -1,
-                              .f = -1,
-                              .imm = 0});
+                               .dst = -1,
+                               .a = pointer,
+                               .b = -1,
+                               .c = -1,
+                               .d = -1,
+                               .e = -1,
+                               .f = -1,
+                               .imm = 0});
   size_t load_at = f.len;
   int loaded =
       nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_LOAD_LOCAL,
-                                  .dst = -1,
-                                  .a = -1,
-                                  .b = -1,
-                                  .c = -1,
-                                  .d = -1,
-                                  .e = -1,
-                                  .f = -1,
-                                  .imm = 0,
-                                  .scalar_class = NYIR_SCALAR_POINTER});
+                                   .dst = -1,
+                                   .a = -1,
+                                   .b = -1,
+                                   .c = -1,
+                                   .d = -1,
+                                   .e = -1,
+                                   .f = -1,
+                                   .imm = 0,
+                                   .scalar_class = NYIR_SCALAR_POINTER});
   nyr_opt_ret(&f, loaded);
   if (!prepare(&f, name)) {
     nyr_ir_func_free(&f);
@@ -353,8 +454,10 @@ static bool run_local_forward_uses_source_value_provenance(void) {
 }
 
 int main(void) {
-  return run_positive() && run_unknown_call_barrier() &&
-                 run_raw_memset_call_barrier() &&
+  return run_positive() && run_structural_store_load_forwarding() &&
+                 run_vector_store_forwarding(false) &&
+                 run_vector_store_forwarding(true) &&
+                 run_unknown_call_barrier() && run_raw_memset_call_barrier() &&
                  run_unknown_alias_store_barrier() &&
                  run_copy_struct_alias_barrier("copy-struct-disjoint-dst",
                                                false, false) &&

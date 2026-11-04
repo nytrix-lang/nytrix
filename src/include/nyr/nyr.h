@@ -36,6 +36,10 @@ typedef enum {
   NYR_OPT_O3 = 3,
 } nyr_opt_level_t;
 
+enum {
+  NYR_OPT_DISABLE_VECTORIZATION = 1u << 0,
+};
+
 /* Capabilities of this public Nyr API on a reported target. */
 enum {
   NYR_CAP_VM = 1u << 0,
@@ -113,8 +117,8 @@ bool nyr_emit_binary(nyr_func_t *func, nyr_op_t op, int lhs, int rhs,
                      size_t err_len);
 bool nyr_emit_load_local(nyr_func_t *func, int64_t slot, int *value_id,
                          char *err, size_t err_len);
-bool nyr_emit_store_local(nyr_func_t *func, int64_t slot, int value,
-                          char *err, size_t err_len);
+bool nyr_emit_store_local(nyr_func_t *func, int64_t slot, int value, char *err,
+                          size_t err_len);
 bool nyr_emit_load_i64(nyr_func_t *func, int address, int64_t offset,
                        int *value_id, char *err, size_t err_len);
 bool nyr_emit_store_i64(nyr_func_t *func, int address, int value,
@@ -122,11 +126,11 @@ bool nyr_emit_store_i64(nyr_func_t *func, int address, int value,
 bool nyr_emit_call(nyr_func_t *func, const char *symbol, const int *args,
                    size_t arg_count, nyr_scalar_class_t result_class,
                    int *value_id, char *err, size_t err_len);
-/* Emit a call to an external ABI symbol without the `ny_fn_` internal prefix. */
-bool nyr_emit_extern_call(nyr_func_t *func, const char *symbol,
-                          const int *args, size_t arg_count,
-                          nyr_scalar_class_t result_class, int *value_id,
-                          char *err, size_t err_len);
+/* Emit a call to an external ABI symbol without the `ny_fn_` internal prefix.
+ */
+bool nyr_emit_extern_call(nyr_func_t *func, const char *symbol, const int *args,
+                          size_t arg_count, nyr_scalar_class_t result_class,
+                          int *value_id, char *err, size_t err_len);
 bool nyr_emit_phi(nyr_func_t *func, const nyr_phi_incoming_t *incoming,
                   size_t incoming_count, int *value_id, char *err,
                   size_t err_len);
@@ -145,6 +149,10 @@ bool nyr_verify(const nyr_func_t *func, char *err, size_t err_len);
  * memory proportional to the function while optimization runs. */
 bool nyr_optimize(nyr_func_t *func, nyr_opt_level_t opt_level, char *err,
                   size_t err_len);
+/* Optimize with explicit target restrictions. Unknown option bits are errors.
+ * NYR_OPT_DISABLE_VECTORIZATION prevents loop and SLP vectorization. */
+bool nyr_optimize_with_options(nyr_func_t *func, nyr_opt_level_t opt_level,
+                               unsigned options, char *err, size_t err_len);
 /* Initialize fresh result storage; destroy before reusing a populated result.
  */
 void nyr_eval_result_init(nyr_eval_result_t *result);
@@ -174,11 +182,14 @@ bool nyr_emit_object(const nyr_func_t *func, const char *path,
 bool nyr_emit_object_for_target(const nyr_func_t *func, const char *path,
                                 const char *symbol, const char *target_triple,
                                 char *err, size_t err_len);
-/* Emit the verified function as native x86-64 assembly text for the host. */
+/* Emit the verified function as native x86-64 assembly text for the host.
+ * `path == "-"` writes the assembly to stdout instead of creating a file.
+ */
 bool nyr_emit_assembly(const nyr_func_t *func, const char *path,
                        const char *symbol, char *err, size_t err_len);
 /* Execute a verified no-argument i64 function through the host native JIT.
- * External symbols are resolved from the current process. Only run trusted IR. */
+ * External symbols are resolved from the current process. Only run trusted IR.
+ */
 bool nyr_jit_run(const nyr_func_t *func, int64_t *result, char *err,
                  size_t err_len);
 /* Link one self-contained ELF64 x86-64 relocatable object into a static

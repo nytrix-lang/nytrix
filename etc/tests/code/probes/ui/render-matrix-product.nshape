@@ -1,0 +1,59 @@
+shape render-matrix-product {
+  family "probe-suite"
+  generator "regression"
+  features ["ny", "render", "matrix", "simd"]
+  template ny-test-case
+  expect compile_and_run
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect_stdout "RENDER-MATRIX-PRODUCT-OK"
+  source ny <<'SOURCE'
+use core
+use core.os.ui.render.matrix as matrix
+use core.math.simmd as simd
+use core.os.ui.render.vk.renderer as vk
+use core.os.ui.render.vk.state (_current_model, _current_mvp, _scratch_model_saved_a, _snapshot_model_matrix)
+def scale = matrix.mat4_scale(2.0, 3.0, 4.0)
+def translation = matrix.mat4_translate(7.0, 11.0, 13.0)
+def output = matrix.mat4_identity()
+def expected = [4, 4, 2.0, 0.0, 0.0, 0.0, 0.0, 3.0, 0.0, 0.0, 0.0, 0.0, 4.0, 0.0, 14.0, 33.0, 52.0, 1.0]
+matrix.mat4_mul_into(scale, translation, output)
+mut i = 0
+while i < 18 { assert(float(output.get(i)) == float(expected.get(i)), "matrix product preserves layout and all components") i += 1 }
+matrix.mat4_mul_into(scale, translation, scale)
+i = 0
+while i < 18 { assert(float(scale.get(i)) == float(expected.get(i)), "output may alias the left operand") i += 1 }
+def plain = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 7.0, 11.0, 13.0, 1.0]
+def plain_out = simd.mat4_mul(plain, plain)
+assert(plain_out.len == 16, "plain SIMD matrices retain their layout")
+assert(float(plain_out.get(12)) == 14.0 && float(plain_out.get(13)) == 22.0 && float(plain_out.get(14)) == 26.0, "plain matrix product")
+_current_model = zalloc(64)
+_current_mvp = zalloc(64)
+vk.set_model_matrix(expected)
+vk.set_mvp(output)
+i = 0
+while i < 16 {
+   assert(float(load32_f32(_current_model, i * 4)) == float(expected.get(2 + i)),
+          "Vulkan model upload preserves each packed component")
+   assert(float(load32_f32(_current_mvp, i * 4)) == float(output.get(2 + i)),
+          "Vulkan view projection upload preserves each packed component")
+   i += 1
+}
+def ptr saved = _snapshot_model_matrix(_scratch_model_saved_a)
+assert(saved && !is_list(saved), "snapshot always returns raw matrix memory")
+i = 0
+while i < 16 {
+   assert(float(load32_f32(saved, i * 4)) == float(expected.get(2 + i)),
+          "lazy model snapshot retains all components")
+   i += 1
+}
+free(_current_model)
+free(_current_mvp)
+_current_model = 0
+_current_mvp = 0
+def ptr fallback = _snapshot_model_matrix(0)
+assert(float(load32_f32(fallback, 0)) == 1.0 && float(load32_f32(fallback, 20)) == 1.0 &&
+       float(load32_f32(fallback, 40)) == 1.0 && float(load32_f32(fallback, 60)) == 1.0,
+       "missing current model produces raw identity rather than list storage")
+print("RENDER-MATRIX-PRODUCT-OK")
+SOURCE
+}

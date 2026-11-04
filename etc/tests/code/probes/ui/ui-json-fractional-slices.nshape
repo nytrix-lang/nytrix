@@ -1,0 +1,30 @@
+shape ui_json_fractional_slices {
+  family "runtime-ui"
+  generator "embedded"
+  features [json utf8 slice gltf]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-backend=llvm --jit --jit-engine=mcjit; --nyr-run --nyr-run-max-steps=50000000 -O0"
+  expect compile_and_run
+  expect_message "UI-JSON-FRACTIONAL-SLICES-OK"
+  source ny <<'NY'
+use core
+use core.os (file_read)
+use core.str as text
+use core.math.parse.data.json as json
+assert(text.str_slice("[-0.5,0.5]", 1, 5) == "-0.5", "ASCII slice preserves odd characters")
+assert(text.utf8_slice("AéB", 1, 2) == "é", "Unicode slice preserves a multibyte character")
+assert(text.utf8_slice("AéB", 2, -4, -1) == "BéA", "reverse slice preserves Unicode characters")
+def fixture = unwrap(file_read("etc/tests/code/probes/ui/fixtures/ui-triangle.gltf"))
+assert(text.str_slice(fixture, 539, 543) == "-0.5", "slice preserves a number at a large offset")
+def array = json.json_decode("[-0.5,0.5]")
+assert(is_list(array) && float(array[0]) == -0.5 && float(array[1]) == 0.5,
+   "JSON array preserves fractional numbers")
+def object = json.json_decode("{\"x\":-0.5}")
+assert(is_dict(object) && float(object.get("x", 0)) == -0.5,
+   "JSON object preserves fractional numbers")
+def zero_and_null = json.json_decode("[0,null,1]")
+assert(is_int(zero_and_null[0]) && int(zero_and_null[0]) == 0 && is_nil(zero_and_null[1]),
+   "JSON zero remains distinct from null")
+print("UI-JSON-FRACTIONAL-SLICES-OK")
+NY
+}

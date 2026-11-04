@@ -125,7 +125,7 @@ fn check_mode(int mode, bool expected) int {
   def result = process.run_capture(
     compiler,
     ["--effect-require-known", "--strict-types", "--native-only",
-     "--nyir-verify", "-emit-only", "-c", source], nil, false)
+     "--nyr-verify", "-emit-only", "-c", source], nil, false)
   def output = result.get("stdout", "")
   def code = result.get("code", 127)
   def accepted = code == 0 && str.find(output, "error:") < 0

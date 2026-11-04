@@ -65,7 +65,7 @@ use core.math.parse.3d.gltf.math as math
 
 fn load_gltf_file(any a) any = sub_load.load_gltf_file(a)
 
-fn parse_gltf_str(any a, any b="", any c=0) any = sub_load.parse_gltf_str(a, b, c)
+fn parse_gltf_str(any a, any b="", any c=0) dict = sub_load.parse_gltf_str(a, b, c)
 
 fn gltf_mesh_count(any a) any = sub_mesh.gltf_mesh_count(a)
 

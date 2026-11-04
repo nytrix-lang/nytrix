@@ -3,7 +3,7 @@ shape mixed_numeric_list_descriptors {
   generator "native"
   features [native nyir x86_64 lists dynamic float]
   template ny-test-case
-  flags "--native-only --native-backend=x86_64 -O3 --nyir-verify --native-result-oracle=0 --no-progress --color=never"
+  flags "--native-only --native-backend=x86_64 -O3 --nyr-verify --native-result-oracle=0 --no-progress --color=never"
   expect compile_and_run
   source ny <<'NY'
 use core

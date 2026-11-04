@@ -191,6 +191,7 @@ bool nyr_strtab_append_defs(nyr_obj_buf_t *code, nyr_x64_obj_symbol_def_t *defs,
     defs[*def_count].off = off;
     defs[*def_count].size = ny_strtab[i].len + 1;
     defs[*def_count].is_data = true;
+    defs[*def_count].section = NULL;
     (*def_count)++;
   }
   return true;
@@ -336,6 +337,7 @@ bool nyr_consttab_append_defs(nyr_obj_buf_t *code,
     defs[*def_count].off = off;
     defs[*def_count].size = 8;
     defs[*def_count].is_data = true;
+    defs[*def_count].section = NULL;
     (*def_count)++;
   }
   return true;
@@ -437,6 +439,7 @@ bool nyr_globaltab_append_defs(nyr_obj_buf_t *code,
     defs[*def_count].off = off;
     defs[*def_count].size = 8;
     defs[*def_count].is_data = true;
+    defs[*def_count].section = NULL;
     ++*def_count;
   }
   return true;
@@ -576,13 +579,14 @@ bool nyr_arraytab_append_defs(nyr_obj_buf_t *code,
     return false;
   for (size_t i = 0; i < nyr_arraytab_len; ++i) {
     ny_arraytab_ent_t *e = &nyr_arraytab[i];
-    if (*def_count >= NY_NATIVE_MAX_DEFS) {
+    if (*def_count > NY_NATIVE_MAX_DEFS - 2) {
       nyr_set_error(err, err_len, "native arraytab: too many symbols");
       return false;
     }
     while (code->len & 7u)
       if (!nyr_obj_u8(code, 0))
         goto oom;
+    size_t header_off = code->len;
     uint64_t magic = NY_NATIVE_TBUF_MAGIC;
     for (int b = 0; b < 8; ++b)
       if (!nyr_obj_u8(code, (unsigned char)((magic >> (b * 8)) & 255)))
@@ -631,6 +635,20 @@ bool nyr_arraytab_append_defs(nyr_obj_buf_t *code,
     defs[*def_count].off = off;
     defs[*def_count].size = code->len - off;
     defs[*def_count].is_data = true;
+    defs[*def_count].section = NULL;
+    ++(*def_count);
+    /*
+     * The named array symbol points at its first element, while its 32-byte
+     * typed-buffer header immediately precedes that address. Some executable
+     * writers materialize only ranges covered by symbol definitions, so give
+     * the otherwise anonymous header its own range as well.
+     */
+    snprintf(defs[*def_count].name, sizeof(defs[*def_count].name), "%s.hdr",
+             e->name);
+    defs[*def_count].off = header_off;
+    defs[*def_count].size = 32;
+    defs[*def_count].is_data = true;
+    defs[*def_count].section = NULL;
     ++(*def_count);
   }
   return true;
@@ -640,18 +658,38 @@ oom:
   return false;
 }
 
+static bool nyr_asm_emit_ascii(nyr_writer_t *w, const char *bytes, size_t len) {
+  if (!nyr_put(w, "\t.ascii\t\""))
+    return false;
+  for (size_t i = 0; i < len; ++i) {
+    unsigned char byte = (unsigned char)bytes[i];
+    if (byte == '"' || byte == '\\') {
+      if (!nyr_printf(w, "\\%c", byte))
+        return false;
+    } else if (byte >= 0x20 && byte <= 0x7e) {
+      if (!nyr_printf(w, "%c", (int)byte))
+        return false;
+    } else if (!nyr_printf(w, "\\%03o", (unsigned)byte)) {
+      return false;
+    }
+  }
+  return nyr_put(w, "\"\n");
+}
+
 bool nyr_strtab_append_asm(nyr_writer_t *w, char *err, size_t err_len) {
   if (!w)
     return false;
-  if (!nyr_put(w, "\t.section\t.rodata\n\t.p2align\t2\n"))
+  if (ny_strtab_len == 0)
+    return true;
+  if (!nyr_put(w, "\t.section\t.rodata\n"))
     return false;
   for (size_t i = 0; i < ny_strtab_len; ++i) {
     if (!nyr_printf(w, "\t.globl\t%s\n%s:\n", ny_strtab[i].name,
                     ny_strtab[i].name))
       return false;
-    for (size_t j = 0; j < ny_strtab[i].len + 1; ++j)
-      if (!nyr_printf(w, "\t.byte\t%u\n", (unsigned char)ny_strtab[i].bytes[j]))
-        return false;
+    if (!nyr_asm_emit_ascii(w, ny_strtab[i].bytes, ny_strtab[i].len) ||
+        !nyr_put(w, "\t.byte\t0\n"))
+      return false;
   }
   if (!nyr_put(w, "\t.text\n"))
     return false;
@@ -663,6 +701,8 @@ bool nyr_strtab_append_asm(nyr_writer_t *w, char *err, size_t err_len) {
 bool nyr_arraytab_append_asm(nyr_writer_t *w, char *err, size_t err_len) {
   if (!w)
     return false;
+  if (nyr_arraytab_len == 0)
+    return true;
   /*
    * List literals live in this pool, and Ny lists are mutable
    * (`msg[1] = 7` mutates in place).  The pool must therefore land in a
@@ -701,9 +741,9 @@ bool nyr_arraytab_append_asm(nyr_writer_t *w, char *err, size_t err_len) {
       for (size_t k = 0; k < e->count; ++k) {
         if (!e->values[k].str)
           continue;
-        for (size_t j = 0; j < e->values[k].str_len + 1; ++j)
-          if (!nyr_printf(w, "\t.byte\t%u\n", (unsigned char)e->strings[k][j]))
-            return false;
+        if (!nyr_asm_emit_ascii(w, e->strings[k], e->values[k].str_len) ||
+            !nyr_put(w, "\t.byte\t0\n"))
+          return false;
       }
     }
   }
@@ -712,4 +752,237 @@ bool nyr_arraytab_append_asm(nyr_writer_t *w, char *err, size_t err_len) {
   (void)err;
   (void)err_len;
   return true;
+}
+
+static bool nyr_data_write_u32(FILE *out, uint32_t value) {
+  unsigned char b[4] = {(unsigned char)value, (unsigned char)(value >> 8),
+                        (unsigned char)(value >> 16),
+                        (unsigned char)(value >> 24)};
+  return fwrite(b, 1, sizeof(b), out) == sizeof(b);
+}
+
+static bool nyr_data_write_u64(FILE *out, uint64_t value) {
+  for (unsigned i = 0; i < 8; ++i)
+    if (fputc((int)((value >> (i * 8)) & 0xffu), out) == EOF)
+      return false;
+  return true;
+}
+
+static bool nyr_data_write_name(FILE *out, const char *name) {
+  size_t len = name ? strlen(name) : 0;
+  return len > 0 && len <= UINT16_MAX &&
+         fputc((int)(len & 0xffu), out) != EOF &&
+         fputc((int)((len >> 8) & 0xffu), out) != EOF &&
+         fwrite(name, 1, len, out) == len;
+}
+
+bool nyr_native_data_write(FILE *out, char *err, size_t err_len) {
+  if (!out || ny_strtab_len > UINT32_MAX || nyr_arraytab_len > UINT32_MAX ||
+      ny_consttab_len > UINT32_MAX || ny_globaltab_len > UINT32_MAX)
+    return nyr_set_error(err, err_len, "native NYIR data: invalid table size"),
+           false;
+  if (!nyr_data_write_u32(out, (uint32_t)ny_strtab_len) ||
+      !nyr_data_write_u32(out, (uint32_t)nyr_arraytab_len) ||
+      !nyr_data_write_u32(out, (uint32_t)ny_consttab_len) ||
+      !nyr_data_write_u32(out, (uint32_t)ny_globaltab_len))
+    goto io_error;
+  for (size_t i = 0; i < ny_strtab_len; ++i) {
+    if (ny_strtab[i].len > UINT32_MAX ||
+        !nyr_data_write_name(out, ny_strtab[i].name) ||
+        !nyr_data_write_u32(out, (uint32_t)ny_strtab[i].len) ||
+        fwrite(ny_strtab[i].bytes, 1, ny_strtab[i].len, out) !=
+            ny_strtab[i].len)
+      goto io_error;
+  }
+  for (size_t i = 0; i < nyr_arraytab_len; ++i) {
+    const ny_arraytab_ent_t *e = &nyr_arraytab[i];
+    if (e->count > UINT32_MAX || e->stride > UINT32_MAX ||
+        !nyr_data_write_name(out, e->name) ||
+        !nyr_data_write_u32(out, (uint32_t)e->count) ||
+        !nyr_data_write_u32(out, (uint32_t)e->stride))
+      goto io_error;
+    for (size_t j = 0; j < e->count; ++j) {
+      bool has_string = e->values[j].str != NULL;
+      size_t len = has_string ? e->values[j].str_len : 0;
+      if (len > UINT32_MAX ||
+          !nyr_data_write_u64(out, (uint64_t)e->values[j].value) ||
+          !nyr_data_write_u64(out, (uint64_t)e->values[j].tag) ||
+          fputc(has_string ? 1 : 0, out) == EOF ||
+          !nyr_data_write_u32(out, (uint32_t)len) ||
+          (len && fwrite(e->strings[j], 1, len, out) != len))
+        goto io_error;
+    }
+  }
+  for (size_t i = 0; i < ny_consttab_len; ++i)
+    if (!nyr_data_write_name(out, ny_consttab[i].name) ||
+        !nyr_data_write_u64(out, (uint64_t)ny_consttab[i].value))
+      goto io_error;
+  for (size_t i = 0; i < ny_globaltab_len; ++i)
+    if (!nyr_data_write_name(out, ny_globaltab[i].name))
+      goto io_error;
+  return true;
+
+io_error:
+  nyr_set_error(err, err_len, "native NYIR data: failed to write tables");
+  return false;
+}
+
+static bool nyr_data_read_u32(FILE *in, uint32_t *out) {
+  unsigned char b[4];
+  if (!in || !out || fread(b, 1, sizeof(b), in) != sizeof(b))
+    return false;
+  *out = (uint32_t)b[0] | ((uint32_t)b[1] << 8) | ((uint32_t)b[2] << 16) |
+         ((uint32_t)b[3] << 24);
+  return true;
+}
+
+static bool nyr_data_read_u64(FILE *in, uint64_t *out) {
+  uint64_t value = 0;
+  if (!in || !out)
+    return false;
+  for (unsigned i = 0; i < 8; ++i) {
+    int byte = fgetc(in);
+    if (byte == EOF)
+      return false;
+    value |= (uint64_t)(unsigned char)byte << (i * 8);
+  }
+  *out = value;
+  return true;
+}
+
+static bool nyr_data_read_name(FILE *in, char *name, size_t cap) {
+  int lo = fgetc(in), hi = fgetc(in);
+  if (lo == EOF || hi == EOF)
+    return false;
+  size_t len = (size_t)(unsigned char)lo | ((size_t)(unsigned char)hi << 8);
+  if (!len || len >= cap || fread(name, 1, len, in) != len)
+    return false;
+  name[len] = '\0';
+  return true;
+}
+
+bool nyr_native_data_read(FILE *in, char *err, size_t err_len) {
+  uint32_t strings = 0, arrays = 0, constants = 0, globals = 0;
+  size_t payload_bytes = 0;
+  nyr_strtab_clear();
+  nyr_arraytab_clear();
+  nyr_consttab_clear();
+  nyr_globaltab_clear();
+  if (!in || !nyr_data_read_u32(in, &strings) ||
+      !nyr_data_read_u32(in, &arrays) || !nyr_data_read_u32(in, &constants) ||
+      !nyr_data_read_u32(in, &globals) || strings > 65536u || arrays > 65536u ||
+      constants > 65536u || globals > 65536u)
+    goto malformed;
+  for (uint32_t i = 0; i < strings; ++i) {
+    char name[32] = {0};
+    uint32_t len = 0;
+    if (!nyr_data_read_name(in, name, sizeof(name)) ||
+        !nyr_data_read_u32(in, &len) || len > 64u * 1024u * 1024u)
+      goto malformed;
+    if (payload_bytes > 64u * 1024u * 1024u - len || nyr_strtab_get(name, NULL))
+      goto malformed;
+    payload_bytes += len;
+    size_t old_len = ny_strtab_len;
+    char *bytes = malloc((size_t)len + 1);
+    if (!bytes)
+      goto oom;
+    if (fread(bytes, 1, len, in) != len) {
+      free(bytes);
+      goto malformed;
+    }
+    bytes[len] = '\0';
+    const char *symbol = nyr_strtab_intern(bytes, len, NULL, 0);
+    free(bytes);
+    if (!symbol)
+      goto oom;
+    if (ny_strtab_len == old_len)
+      goto malformed;
+    snprintf((char *)symbol, sizeof(ny_strtab[0].name), "%s", name);
+  }
+  for (uint32_t i = 0; i < arrays; ++i) {
+    char name[32] = {0};
+    uint32_t count = 0, stride = 0;
+    if (!nyr_data_read_name(in, name, sizeof(name)) ||
+        !nyr_data_read_u32(in, &count) || !nyr_data_read_u32(in, &stride) ||
+        !count || count > 65536u || (stride != 8 && stride != 24) ||
+        nyr_arraytab_get(name, NULL, NULL, NULL))
+      goto malformed;
+    nyr_array_elem_t *values = calloc(count, sizeof(*values));
+    char **strings_data = calloc(count, sizeof(*strings_data));
+    if (!values || !strings_data) {
+      free(values);
+      free(strings_data);
+      goto oom;
+    }
+    bool read_ok = true;
+    for (uint32_t j = 0; j < count && read_ok; ++j) {
+      uint64_t value = 0, tag = 0;
+      uint32_t len = 0;
+      read_ok = nyr_data_read_u64(in, &value) && nyr_data_read_u64(in, &tag);
+      int has_string = read_ok ? fgetc(in) : EOF;
+      read_ok = read_ok && has_string != EOF &&
+                (has_string == 0 || has_string == 1) &&
+                nyr_data_read_u32(in, &len) && len <= 64u * 1024u * 1024u &&
+                (stride == 24 || !has_string) && (has_string || len == 0);
+      if (!read_ok)
+        break;
+      if (payload_bytes > 64u * 1024u * 1024u - len) {
+        read_ok = false;
+        break;
+      }
+      payload_bytes += len;
+      values[j].value = (int64_t)value;
+      values[j].tag = (int64_t)tag;
+      values[j].str_len = len;
+      if (has_string) {
+        strings_data[j] = malloc((size_t)len + 1);
+        if (!strings_data[j]) {
+          read_ok = false;
+          break;
+        }
+        read_ok = fread(strings_data[j], 1, len, in) == len;
+        strings_data[j][len] = '\0';
+        values[j].str = strings_data[j];
+      }
+    }
+    char symbol_name[32] = {0};
+    size_t old_len = nyr_arraytab_len;
+    const char *symbol =
+        read_ok ? nyr_arraytab_intern(values, count, stride, symbol_name,
+                                      sizeof(symbol_name))
+                : NULL;
+    for (uint32_t j = 0; j < count; ++j)
+      free(strings_data[j]);
+    free(strings_data);
+    free(values);
+    if (!read_ok)
+      goto malformed;
+    if (!symbol)
+      goto oom;
+    if (nyr_arraytab_len == old_len)
+      goto malformed;
+    snprintf((char *)symbol, sizeof(nyr_arraytab[0].name), "%s", name);
+  }
+  for (uint32_t i = 0; i < constants; ++i) {
+    char name[256] = {0};
+    uint64_t value = 0;
+    if (!nyr_data_read_name(in, name, sizeof(name)) ||
+        !nyr_data_read_u64(in, &value) || nyr_consttab_has(name) ||
+        !nyr_consttab_add(name, (int64_t)value))
+      goto malformed;
+  }
+  for (uint32_t i = 0; i < globals; ++i) {
+    char name[256] = {0};
+    if (!nyr_data_read_name(in, name, sizeof(name)) ||
+        nyr_globaltab_has(name) || !nyr_globaltab_add(name))
+      goto malformed;
+  }
+  return true;
+
+oom:
+  nyr_set_error(err, err_len, "native NYIR data: allocation failed");
+  return false;
+malformed:
+  nyr_set_error(err, err_len, "native NYIR data: malformed table section");
+  return false;
 }

@@ -3,7 +3,7 @@ shape x86_64_elf64_link_archive_data {
   generator "native"
   features [native object elf64 x86_64 nyir link-run archive data]
   template ny-test-case
-  flags "--nyir-verify --native-only --native-backend x86_64 -emit-only -o /tmp/nytrix-native-elf64-archive-data.o"
+  flags "--nyr-verify --native-only --native-backend x86_64 -emit-only -o /tmp/nytrix-native-elf64-archive-data.o"
   expect object_host_link_run_i64_42
   link "build/test-artifacts/objects/elf64/link/ar_helper_data.a"
   source ny <<'NY'

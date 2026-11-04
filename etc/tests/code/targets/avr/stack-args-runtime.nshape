@@ -97,7 +97,7 @@ assert(is_ok(file_write(start_path, start_source)),
 assert(is_ok(file_write(c_path, c_source)),
        "write AVR C ABI stack argument functions")
 def emitted = run_capture(
-    [compiler, "--native-backend=avr", "--native-only", "--nyir-verify",
+    [compiler, "--native-backend=avr", "--native-only", "--nyr-verify",
      "--emit-asm=" + asm_path, "-no-std", "-emit-only", "-e", source],
     [], nil, false)
 def assembled = run_capture(
@@ -160,13 +160,13 @@ assert(is_str(compiler) && compiler.len > 0,
 def asm_path = temp_dir() + "/ny-avr-extern-overflow-" + to_str(pid()) + ".s"
 def register_asm_path = asm_path + "-register.s"
 def rejected = run_capture(
-    [compiler, "--native-backend=avr", "--native-only", "--nyir-verify",
+    [compiler, "--native-backend=avr", "--native-only", "--nyr-verify",
      "--emit-asm=" + asm_path, "-no-std", "-emit-only", "-e",
      "extern \"c\" {\n  fn external_f64(i64 first, i64 second, f64 third) i64\n}\n" +
      "external_f64(1, 2, 3.0)"],
     [], nil, false)
 def register_rejected = run_capture(
-    [compiler, "--native-backend=avr", "--native-only", "--nyir-verify",
+    [compiler, "--native-backend=avr", "--native-only", "--nyr-verify",
      "--emit-asm=" + register_asm_path, "-no-std", "-emit-only", "-e",
      "extern \"c\" {\n  fn external_f64_register(f64 value) i64\n}\n" +
      "external_f64_register(1.5)"],
@@ -198,7 +198,7 @@ fn rejects(str name, str source) bool {
   def asm_path = temp_dir() + "/ny-avr-aggregate-" + to_str(pid()) +
                  "-" + name + ".s"
   def result = run_capture(
-      [compiler, "--native-backend=avr", "--native-only", "--nyir-verify",
+      [compiler, "--native-backend=avr", "--native-only", "--nyr-verify",
        "--emit-asm=" + asm_path, "-no-std", "-emit-only", "-e", source],
       [], nil, false)
   def emitted = file_exists(asm_path)

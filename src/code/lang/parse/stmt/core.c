@@ -1645,7 +1645,7 @@ static stmt_t *parse_extern_fn_decl(parser_t *p, token_t tok,
       (void)parse_type_ref(p, "expected return type");
   } else
     return_type = parser_parse_return_type_suffix(p, parse_type_ref,
-                                                  "expected return type");
+                                                  "expected return type", true);
   const char *link_name = NULL;
   if (parser_match(p, NY_T_AS)) {
     if (p->cur.kind == NY_T_STRING) {

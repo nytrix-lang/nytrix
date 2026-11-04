@@ -7,6 +7,7 @@ shape dynamic_list_float_fallback_is_boxed {
   expect compile_and_run
   source ny <<'NY'
 use core
+use core.math
 
 fn lookup(any values) any {
    values.get(4, 2.5)
@@ -14,6 +15,15 @@ fn lookup(any values) any {
 
 def result = lookup([1.25])
 assert(float(result) == 2.5, "dynamic list lookup preserves f64 fallback")
+def signed_values = [-36.0, 0.0, -0.045]
+assert(float(signed_values.get(0, 0.0)) == -36.0,
+       "negative float literal stays f64 through dynamic get")
+assert(float(signed_values[2]) == -0.045,
+       "negative float literal stays f64 through indexed read")
+assert(abs(tan(PI / 6.0) - 0.5773502691896257) < 0.000000001,
+       "tan returns f64 on the VM route")
+assert(abs(atan(1.0) - PI / 4.0) < 0.000000001,
+       "atan returns f64 on the VM route")
 print("DYNAMIC_LIST_FLOAT_DEFAULT_OK")
 NY
 }

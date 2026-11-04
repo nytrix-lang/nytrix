@@ -4,6 +4,32 @@
 #include "code/lang/parse/ast.h"
 #include "support.h"
 
+static void raw_phi(nyr_func_t *f, int64_t pred0, int value0, int64_t pred1,
+                    int value1) {
+  nyr_opt_phi(f, pred0, value0, pred1, value1);
+  f->data[f->len - 1].scalar_class = NYIR_SCALAR_I64_RAW;
+}
+
+static int raw_load_local(nyr_func_t *f, int64_t slot) {
+  nyr_inst_t load = nyr_opt_inst(NYIR_LOAD_LOCAL);
+  load.imm = slot;
+  load.scalar_class = NYIR_SCALAR_I64_RAW;
+  return nyr_ir_emit(f, load);
+}
+
+static void raw_store_local(nyr_func_t *f, int64_t slot, int value) {
+  nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_STORE_LOCAL,
+                              .dst = -1,
+                              .a = value,
+                              .b = -1,
+                              .c = -1,
+                              .d = -1,
+                              .e = -1,
+                              .f = -1,
+                              .imm = slot,
+                              .scalar_class = NYIR_SCALAR_I64_RAW});
+}
+
 static void build_diamond(nyr_func_t *f, int64_t right, bool side_effect,
                           bool bitmask_condition, bool true_first_block) {
   nyr_opt_begin(f);
@@ -41,7 +67,7 @@ static void build_diamond(nyr_func_t *f, int64_t right, bool side_effect,
   }
   nyr_opt_label(f, 30);
   int result = f->next_value;
-  nyr_opt_phi(f, 10, false_value, 20, true_value);
+  raw_phi(f, 10, false_value, 20, true_value);
   nyr_opt_ret(f, result);
 }
 
@@ -153,7 +179,7 @@ static int run_forward_trampoline_case(const char *name, int64_t input,
    */
   nyr_opt_label(&f, 30);
   int result = f.next_value;
-  nyr_opt_phi(&f, 10, false_value, 20, true_value);
+  raw_phi(&f, 10, false_value, 20, true_value);
   nyr_opt_ret(&f, result);
 
   if (!nyr_opt_verify(&f, name)) {
@@ -202,7 +228,7 @@ static int run_speculation_cost_case(void) {
   nyr_opt_br(&f, 30);
   nyr_opt_label(&f, 30);
   int result = f.next_value;
-  nyr_opt_phi(&f, 10, false_value, 20, true_value);
+  raw_phi(&f, 10, false_value, 20, true_value);
   nyr_opt_ret(&f, result);
   if (!nyr_opt_verify(&f, name)) {
     nyr_ir_func_free(&f);
@@ -246,7 +272,7 @@ static int run_multiply_speculation_cost_case(void) {
   nyr_opt_br(&f, 30);
   nyr_opt_label(&f, 30);
   int result = f.next_value;
-  nyr_opt_phi(&f, 10, false_value, 20, true_value);
+  raw_phi(&f, 10, false_value, 20, true_value);
   nyr_opt_ret(&f, result);
   if (!nyr_opt_verify(&f, name)) {
     nyr_ir_func_free(&f);
@@ -273,7 +299,7 @@ static int run_multiply_speculation_cost_case(void) {
 }
 
 static int run_loop_speculation_cost_case(void) {
-  const char *name = "if-convert-loop-duplicate-multiply-cost";
+  const char *name = "if-convert-loop-speculation-cost-boundary";
   nyr_func_t f;
   nyr_opt_begin(&f);
   int init = nyr_opt_const(&f, 0), trip = nyr_opt_const(&f, 2);
@@ -283,14 +309,24 @@ static int run_loop_speculation_cost_case(void) {
       f3 = nyr_opt_const(&f, 6);
   int t1 = nyr_opt_const(&f, 1), t2 = nyr_opt_const(&f, 2),
       t3 = nyr_opt_const(&f, 3);
+  nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_STORE_LOCAL,
+                               .dst = -1,
+                               .a = one,
+                               .b = -1,
+                               .c = -1,
+                               .d = -1,
+                               .e = -1,
+                               .f = -1,
+                               .imm = 0,
+                               .scalar_class = NYIR_SCALAR_I64_RAW});
   nyr_opt_br(&f, 10);
   nyr_opt_label(&f, 10);
   int iv = f.next_value;
   size_t iv_phi_index = f.len;
-  nyr_opt_phi(&f, -1, init, 50, -1);
+  raw_phi(&f, -1, init, 50, -1);
   int accum = f.next_value;
   size_t accum_phi_index = f.len;
-  nyr_opt_phi(&f, -1, zero, 50, -1);
+  raw_phi(&f, -1, zero, 50, -1);
   int truth = nyr_opt_cmp(&f, iv, zero, NYIR_CMP_EQ);
   int more = nyr_opt_cmp(&f, iv, trip, NYIR_CMP_LT);
   nyr_opt_br_if(&f, more, 20);
@@ -302,15 +338,23 @@ static int run_loop_speculation_cost_case(void) {
   int tv = nyr_opt_binop(&f, NYIR_MUL_I64, base, t1);
   tv = nyr_opt_binop(&f, NYIR_ADD_I64, tv, t3);
   tv = nyr_opt_binop(&f, NYIR_ADD_I64, tv, t2);
+  (void)raw_load_local(&f, 0);
+  (void)raw_load_local(&f, 0);
+  raw_store_local(&f, 1, tv);
+  raw_store_local(&f, 2, t3);
   nyr_opt_br(&f, 50);
   nyr_opt_label(&f, 40);
   int fv = nyr_opt_binop(&f, NYIR_MUL_I64, base, f1);
   fv = nyr_opt_binop(&f, NYIR_ADD_I64, fv, f3);
   fv = nyr_opt_binop(&f, NYIR_ADD_I64, fv, f2);
+  (void)raw_load_local(&f, 0);
+  (void)raw_load_local(&f, 0);
+  raw_store_local(&f, 1, fv);
+  raw_store_local(&f, 2, f3);
   nyr_opt_br(&f, 50);
   nyr_opt_label(&f, 50);
   int picked = f.next_value;
-  nyr_opt_phi(&f, 40, fv, 30, tv);
+  raw_phi(&f, 40, fv, 30, tv);
   int next_accum = nyr_opt_binop(&f, NYIR_ADD_I64, accum, picked);
   int next_iv = nyr_opt_binop(&f, NYIR_ADD_I64, iv, one);
   /*
@@ -320,7 +364,11 @@ static int run_loop_speculation_cost_case(void) {
   f.data[accum_phi_index].phi_incoming[1].value = next_accum;
   nyr_opt_br(&f, 10);
   nyr_opt_label(&f, 60);
-  nyr_opt_ret(&f, accum);
+  int stored_first = raw_load_local(&f, 1);
+  int stored_second = raw_load_local(&f, 2);
+  int stored_sum = nyr_opt_binop(&f, NYIR_ADD_I64, stored_first, stored_second);
+  int result = nyr_opt_binop(&f, NYIR_ADD_I64, accum, stored_sum);
+  nyr_opt_ret(&f, result);
 
   if (!nyr_opt_verify(&f, name)) {
     nyr_ir_func_free(&f);
@@ -333,13 +381,51 @@ static int run_loop_speculation_cost_case(void) {
   }
   long long after = nyr_opt_eval(&f, name);
   size_t selects = count_op(&f, NYIR_SELECT_I64);
+  size_t stores = count_op(&f, NYIR_STORE_LOCAL);
   nyr_ir_func_free(&f);
-  nyr_opt_check(name, before, after, 26);
-  if (selects != 0) {
+  nyr_opt_check(name, before, after, 51);
+  if (selects != 3 || stores != 3) {
     fprintf(stderr,
-            "[%s] loop-local duplicate multiplies should retain the branch "
-            "(got %zu selects)\n",
-            name, selects);
+            "[%s] expected value and two paired-store selects (select=%zu "
+            "store=%zu)\n",
+            name, selects, stores);
+    return 1;
+  }
+  return 0;
+}
+
+static int run_uninitialized_local_load_case(void) {
+  const char *name = "if-convert-uninitialized-local-load";
+  nyr_func_t f;
+  nyr_opt_begin(&f);
+  int condition = nyr_opt_const(&f, 1);
+  int zero = nyr_opt_const(&f, 0);
+  int one = nyr_opt_const(&f, 1);
+  nyr_opt_br_if(&f, condition, 20);
+  nyr_opt_br(&f, 10);
+  nyr_opt_label(&f, 10);
+  int false_value =
+      nyr_opt_binop(&f, NYIR_ADD_I64, raw_load_local(&f, 0), zero);
+  nyr_opt_br(&f, 30);
+  nyr_opt_label(&f, 20);
+  int true_value = nyr_opt_binop(&f, NYIR_ADD_I64, raw_load_local(&f, 0), one);
+  nyr_opt_br(&f, 30);
+  nyr_opt_label(&f, 30);
+  int result = f.next_value;
+  raw_phi(&f, 10, false_value, 20, true_value);
+  nyr_opt_ret(&f, result);
+
+  bool ok = nyr_opt_verify(&f, name);
+  long long before = ok ? nyr_opt_eval(&f, name) : 0;
+  ok = ok && nyr_if_convert(&f) && nyr_opt_verify(&f, name);
+  long long after = ok ? nyr_opt_eval(&f, name) : 0;
+  size_t selects = count_op(&f, NYIR_SELECT_I64);
+  size_t phis = count_op(&f, NYIR_PHI);
+  nyr_ir_func_free(&f);
+  nyr_opt_check(name, before, after, 1);
+  if (!ok || selects != 0 || phis != 1) {
+    fprintf(stderr, "[%s] must retain an uninitialized local read in its arm\n",
+            name);
     return 1;
   }
   return 0;
@@ -380,8 +466,39 @@ static int run_raw_i64_condition_case(void) {
   return 0;
 }
 
+static int run_unclassified_phi_case(int variant) {
+  nyr_func_t f;
+  build_diamond(&f, 4, false, false, false);
+  int arms = 0;
+  for (size_t i = 0; i < f.len; ++i) {
+    if (f.data[i].op == NYIR_ADD_I64) {
+      f.data[i].scalar_class =
+          arms++ == 0 && variant == 1 ? NYIR_SCALAR_I64_TAGGED
+          : arms == 1 && variant == 3 ? NYIR_SCALAR_UNKNOWN
+                                      : NYIR_SCALAR_I64_RAW;
+    } else if (f.data[i].op == NYIR_PHI) {
+      f.data[i].scalar_class =
+          variant == 2 ? NYIR_SCALAR_POINTER : NYIR_SCALAR_UNKNOWN;
+    }
+  }
+  bool ok = nyr_opt_verify(&f, "if-convert-inferred-class") &&
+            nyr_if_convert(&f) &&
+            nyr_opt_verify(&f, "if-convert-inferred-class") &&
+            nyr_opt_eval(&f, "if-convert-inferred-class") == 6 &&
+            count_op(&f, NYIR_SELECT_I64) == (variant == 0 ? 1u : 0u);
+  for (size_t i = 0; ok && i < f.len; ++i)
+    if (f.data[i].op == NYIR_SELECT_I64)
+      ok = f.data[i].scalar_class == NYIR_SCALAR_I64_RAW;
+  if (!ok)
+    fprintf(stderr, "[if-convert-inferred-class] variant=%d failed\n", variant);
+  nyr_ir_func_free(&f);
+  return ok ? 0 : 1;
+}
+
 int main(void) {
-  return run_phi_metadata_case() ||
+  return run_phi_metadata_case() || run_unclassified_phi_case(0) ||
+         run_unclassified_phi_case(1) || run_unclassified_phi_case(2) ||
+         run_unclassified_phi_case(3) ||
          run_case("if-convert-false", 7, false, false, false, 5, true) ||
          run_case("if-convert-true", 4, false, false, false, 6, true) ||
          run_case("if-convert-true-first-block", 7, false, false, true, 5,
@@ -390,10 +507,15 @@ int main(void) {
                   false) ||
          run_case("if-convert-side-effect", 7, true, false, false, 5, false) ||
          run_raw_i64_condition_case() ||
-         run_forward_trampoline_case("if-convert-trampoline-false", 0, 5, true) ||
-         run_forward_trampoline_case("if-convert-trampoline-true", 3, 6, true) ||
-         run_forward_trampoline_case("if-convert-unlabelled-false", 0, 5, false) ||
-         run_forward_trampoline_case("if-convert-unlabelled-true", 3, 6, false) ||
+         run_forward_trampoline_case("if-convert-trampoline-false", 0, 5,
+                                     true) ||
+         run_forward_trampoline_case("if-convert-trampoline-true", 3, 6,
+                                     true) ||
+         run_forward_trampoline_case("if-convert-unlabelled-false", 0, 5,
+                                     false) ||
+         run_forward_trampoline_case("if-convert-unlabelled-true", 3, 6,
+                                     false) ||
          run_speculation_cost_case() || run_multiply_speculation_cost_case() ||
-         run_loop_speculation_cost_case();
+         run_loop_speculation_cost_case() ||
+         run_uninitialized_local_load_case();
 }

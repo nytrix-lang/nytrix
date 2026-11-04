@@ -913,7 +913,7 @@ static const lsp_builtin_t g_core_builtins[] = {
 static const lsp_builtin_t g_rt_builtins[] = {
 #define RT_DEF(name, p, args, sig, doc) {name, sig, doc, LSP_SK_FUNCTION},
 #define RT_GV(name, p, t, doc) {name, "global", doc, LSP_SK_VARIABLE},
-#include "code/lang/runtime/defs.h"
+#include "code/backend/runtime/defs.h"
 #undef RT_DEF
 #undef RT_GV
 };
@@ -1017,15 +1017,8 @@ static int split_comment_index(const char *line) {
   int esc = 0;
   for (int i = 0; line[i]; ++i) {
     char ch = line[i];
-    if (quote) {
-      if (esc)
-        esc = 0;
-      else if (ch == '\\')
-        esc = 1;
-      else if (ch == quote)
-        quote = 0;
+    if (ny_scan_ctx_step(&quote, &esc, ch))
       continue;
-    }
     if (ch == '"' || ch == '\'') {
       quote = ch;
       continue;
@@ -1865,21 +1858,35 @@ static void visit_code_symbol(const char *text, const char *word,
       escaped = false;
       continue;
     }
-    if (comment) { col++; continue; }
-    if (quote) {
-      if (escaped) escaped = false;
-      else if (c == '\\') escaped = true;
-      else if (c == (unsigned char)quote) quote = 0;
+    if (comment) {
       col++;
       continue;
     }
-    if (c == ';') { comment = true; col++; continue; }
-    if (c == '"' || c == '\'') { quote = (char)c; col++; continue; }
+    if (quote) {
+      if (escaped)
+        escaped = false;
+      else if (c == '\\')
+        escaped = true;
+      else if (c == (unsigned char)quote)
+        quote = 0;
+      col++;
+      continue;
+    }
+    if (c == ';') {
+      comment = true;
+      col++;
+      continue;
+    }
+    if (c == '"' || c == '\'') {
+      quote = (char)c;
+      col++;
+      continue;
+    }
     bool left = i == 0 || !ny_symbol_path_char((unsigned char)text[i - 1]);
     bool fits = word_len <= text_len - i;
     size_t after = i + word_len;
-    bool right = fits &&
-        (text[after] == '\0' || !ny_symbol_path_char((unsigned char)text[after]));
+    bool right = fits && (text[after] == '\0' ||
+                          !ny_symbol_path_char((unsigned char)text[after]));
     if (left && fits && strncmp(text + i, word, word_len) == 0 && right)
       visit(context, line, col, word_len);
     col++;
@@ -1916,7 +1923,8 @@ typedef struct {
 static void append_reference_occurrence(void *opaque, int line, int col,
                                         size_t length) {
   lsp_reference_context_t *context = opaque;
-  if (!*context->first) sb_append(context->result, ",");
+  if (!*context->first)
+    sb_append(context->result, ",");
   sb_append(context->result, "{\"uri\":");
   sb_append_json(context->result, context->uri);
   sb_append(context->result, ",\"range\":");
@@ -2198,11 +2206,10 @@ static void handle_code_actions(const char *id, const char *body) {
     send_result(id, "[]");
   } else {
     sbuf_t result = {0};
-    sb_append(&result,
-              "[{\"title\":\"Check document with Nytrix\","
-              "\"kind\":\"source\",\"command\":{\"title\":"
-              "\"ny check\",\"command\":\"nytrix.check\","
-              "\"arguments\":[");
+    sb_append(&result, "[{\"title\":\"Check document with Nytrix\","
+                       "\"kind\":\"source\",\"command\":{\"title\":"
+                       "\"ny check\",\"command\":\"nytrix.check\","
+                       "\"arguments\":[");
     sb_append_json(&result, uri);
     sb_append(&result, "]}}]");
     send_result(id, result.data);
@@ -2216,7 +2223,8 @@ static void handle_execute_command(const char *id, const char *body) {
   char *uri = json_extract_string(body, "arguments");
   if (command && strcmp(command, "nytrix.check") == 0 && uri) {
     lsp_doc_t *doc = doc_find(uri);
-    if (doc) check_document(uri, doc->text);
+    if (doc)
+      check_document(uri, doc->text);
   }
   send_result(id, "null");
   free(command);
@@ -2230,9 +2238,10 @@ typedef struct {
 } lsp_rename_context_t;
 
 static void append_rename_occurrence(void *opaque, int line, int col,
-                                    size_t length) {
+                                     size_t length) {
   lsp_rename_context_t *context = opaque;
-  if (!*context->first) sb_append(context->edits, ",");
+  if (!*context->first)
+    sb_append(context->edits, ",");
   sb_append(context->edits, "{\"range\":");
   append_range(context->edits, line, col, line, col + (int)length);
   sb_append(context->edits, ",\"newText\":");
@@ -2243,7 +2252,8 @@ static void append_rename_occurrence(void *opaque, int line, int col,
 
 static void append_rename_edits(sbuf_t *edits, bool *first, const char *text,
                                 const char *word, const char *new_name) {
-  if (!edits || !first || !new_name) return;
+  if (!edits || !first || !new_name)
+    return;
   lsp_rename_context_t context = {edits, first, new_name};
   visit_code_symbol(text, word, append_rename_occurrence, &context);
 }

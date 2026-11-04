@@ -3,7 +3,7 @@ shape x86_target_deref_assign {
   generator "native"
   features [native x86 target pointer deref assign]
   template ny-test-case
-  flags "--native --nyir-run --native-backend x86 --emit-asm /tmp/nytrix-native-x86-deref-assign.s"
+  flags "--native --nyr-run --native-backend x86 --emit-asm /tmp/nytrix-native-x86-deref-assign.s"
   expect compile_and_run
   source ny <<'NY'
 use core

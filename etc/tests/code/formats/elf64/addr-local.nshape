@@ -3,7 +3,7 @@ shape x86_64_elf64_object_link_run_addr_local {
   generator "native"
   features [native object elf64 x86_64 nyir link-run pointer addr-local]
   template ny-test-case
-  flags "--native-only --native-backend x86_64 --nyir-verify -emit-only -o /tmp/nytrix-link-run-addr-local.o"
+  flags "--native-only --native-backend x86_64 --nyr-verify -emit-only -o /tmp/nytrix-link-run-addr-local.o"
   expect object_host_link_run_i64_42
   source ny <<'NY'
 use core

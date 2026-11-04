@@ -6,7 +6,7 @@ shape args-invalid-typesolver {
   expect compile_fail
 
   flags "--type-solver=bogus"
-  expect_message "invalid type solver"
+  expect_message "invalid --type-solver"
   source ny <<'NY'
 use core
 print("ok")

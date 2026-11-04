@@ -1,0 +1,32 @@
+shape brace_free_function_bodies {
+  family "runtime/language"
+  generator "regression"
+  features [functions lambdas implicit-return expression-body eof]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+def id = fn(x) x
+assert(id(2) == 2, "brace-free body returns its expression")
+
+def add = fn(a, b) a + b
+assert(add(2, 3) == 5, "brace-free body parses an operator expression")
+
+def nested = fn(x) fn(y) x + y
+assert(nested(2)(3) == 5, "brace-free bodies support nested functions and calls")
+
+def call_add = fn(a, b) add(a, b)
+assert(call_add(2, 3) == 5, "brace-free body parses a nested call")
+
+def block_id = fn(x) { x }
+assert(block_id(7) == 7, "braced lambda body remains supported")
+
+def explicit_return = fn(x) {
+  return x + 1
+  99
+}
+assert(explicit_return(4) == 5, "explicit return still exits a block body")
+
+def after = fn(x) x - 1
+assert(after(8) == 7, "the expression body stops at the next statement")
+NY
+}

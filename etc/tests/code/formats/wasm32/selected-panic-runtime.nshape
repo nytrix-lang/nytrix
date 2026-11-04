@@ -22,7 +22,7 @@ def unsupported_wat = stem + "-unsupported.wat"
 
 def first_compile = run_capture(
     [compiler, "--native-backend=wasm", "--native-only", "-O3",
-     "--nyir-verify", "--emit-asm=" + first_wat, "-no-std", "-emit-only",
+     "--nyr-verify", "--emit-asm=" + first_wat, "-no-std", "-emit-only",
      "-e",
      "mut condition = 0\nwhile condition < 1 { condition += 1 }\n" +
      "panic(if condition == 1 { \"selected first panic\" } else " +
@@ -36,7 +36,7 @@ def first_run =
 
 def second_compile = run_capture(
     [compiler, "--native-backend=wasm", "--native-only", "-O3",
-     "--nyir-verify", "--emit-asm=" + second_wat, "-no-std", "-emit-only",
+     "--nyr-verify", "--emit-asm=" + second_wat, "-no-std", "-emit-only",
      "-e",
      "mut condition = 0\nwhile condition < 2 { condition += 1 }\n" +
      "panic(if condition == 1 { \"unselected first panic\" } else " +
@@ -49,7 +49,7 @@ def second_run =
                 [], nil, false)
 
 def dynamic_compile = run_capture(
-    [compiler, "--native-backend=wasm", "--native-only", "--nyir-verify",
+    [compiler, "--native-backend=wasm", "--native-only", "--nyr-verify",
      "--emit-asm=" + dynamic_wat, "-no-std", "-emit-only", "-e",
      "mut value = 27\nwhile value < 28 { value += 1 }\n" +
      "panic(\"dynamic value: \" + to_str(value) + \"/\" + " +
@@ -62,7 +62,7 @@ def dynamic_run =
                 [], nil, false)
 
 def unsupported_compile = run_capture(
-    [compiler, "--native-backend=wasm", "--native-only", "--nyir-verify",
+    [compiler, "--native-backend=wasm", "--native-only", "--nyr-verify",
      "--emit-asm=" + unsupported_wat, "-no-std", "-emit-only", "-e",
      "panic(\"bigint: \" + to_str(-9223372036854775808))"],
     [], nil, false)

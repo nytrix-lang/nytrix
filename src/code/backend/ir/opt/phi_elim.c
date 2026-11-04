@@ -38,8 +38,8 @@ typedef struct {
  * f64 when values share a slot with a float along another path.
  */
 static nyr_scalar_class_t nyr_phi_value_class(const nyr_func_t *f,
-                                                const nyr_type_map_t *types,
-                                                int value, unsigned depth) {
+                                              const nyr_type_map_t *types,
+                                              int value, unsigned depth) {
   if (!f || value < 0 || value >= f->next_value || depth > 32)
     return NYIR_SCALAR_UNKNOWN;
   const nyr_inst_t *def = NULL;
@@ -244,10 +244,10 @@ bool nyr_phi_elim(nyr_func_t *f) {
       nyr_scalar_class_t scalar_class =
           nyr_phi_value_class(f, &value_types, value, 0);
       stores[store_count++] = (nyr_phi_store_t){.insert_at = insert_at,
-                                                 .slot = slot,
-                                                 .value = value,
-                                                 .scalar_class = scalar_class,
-                                                 .debug = in->debug};
+                                                .slot = slot,
+                                                .value = value,
+                                                .scalar_class = scalar_class,
+                                                .debug = in->debug};
     }
 
     /*
@@ -271,16 +271,17 @@ bool nyr_phi_elim(nyr_func_t *f) {
         result_class = incoming;
       }
     }
+    free(in->phi_incoming);
     *in = (nyr_inst_t){.op = NYIR_LOAD_LOCAL,
-                        .dst = dst,
-                        .imm = slot,
-                        .scalar_class = result_class,
-                        .semantic_ownership = semantic_ownership,
-                        .semantic_mutable = semantic_mutable,
-                        .alias_class = 0,
-                        .effects = NYIR_EFFECT_READ_LOCAL,
-                        .debug = debug,
-                        .range = range};
+                       .dst = dst,
+                       .imm = slot,
+                       .scalar_class = result_class,
+                       .semantic_ownership = semantic_ownership,
+                       .semantic_mutable = semantic_mutable,
+                       .alias_class = 0,
+                       .effects = NYIR_EFFECT_READ_LOCAL,
+                       .debug = debug,
+                       .range = range};
     ++slot;
   }
 
@@ -303,20 +304,19 @@ bool nyr_phi_elim(nyr_func_t *f) {
       ok = false;
       goto done;
     }
-    memmove(&f->data[at + 1], &f->data[at],
-            (f->len - at) * sizeof(nyr_inst_t));
+    memmove(&f->data[at + 1], &f->data[at], (f->len - at) * sizeof(nyr_inst_t));
     f->data[at] = (nyr_inst_t){.op = NYIR_STORE_LOCAL,
-                                .dst = -1,
-                                .a = stores[i].value,
-                                .b = -1,
-                                .c = -1,
-                                .d = -1,
-                                .e = -1,
-                                .f = -1,
-                                .imm = stores[i].slot,
-                                .scalar_class = stores[i].scalar_class,
-                                .effects = NYIR_EFFECT_WRITE_LOCAL,
-                                .debug = stores[i].debug};
+                               .dst = -1,
+                               .a = stores[i].value,
+                               .b = -1,
+                               .c = -1,
+                               .d = -1,
+                               .e = -1,
+                               .f = -1,
+                               .imm = stores[i].slot,
+                               .scalar_class = stores[i].scalar_class,
+                               .effects = NYIR_EFFECT_WRITE_LOCAL,
+                               .debug = stores[i].debug};
     ++f->len;
   }
 

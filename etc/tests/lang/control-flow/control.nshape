@@ -53,6 +53,19 @@ fn test_scoping() {
 
 test_scoping()
 assert(log == "IS|ID|OS|", "Defer scoping behavior")
+
+;; Spec contract: docs/spec/control-flow.md — deferred mutation of a
+;; captured function local, observed at scope exit through the return value.
+fn deferred_order() str {
+   mut order = ""
+   if true {
+      defer { order = order + "a" }
+      defer { order = order + "b" }
+   }
+   order
+}
+
+assert(deferred_order() == "ba", "defers run LIFO at scope exit")
 assert(__pop_run_defer() == nil, "__pop_run_defer accepts empty stack")
 assert(__push_defer(nil, nil) == nil, "__push_defer accepts null callback")
 assert(__run_defers_to(0) == nil, "__run_defers_to drains null callback")

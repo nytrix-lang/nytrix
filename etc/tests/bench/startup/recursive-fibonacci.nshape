@@ -1,0 +1,58 @@
+shape recursive_fibonacci {
+  family "perf-real"
+  generator "stress"
+  features ["perf", "c-vs-ny", "checksum", "calls", "recursion"]
+  budget {
+    max_native_c_ratio 2.0
+    max_native_llvm_ratio 2.0
+  }
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.time
+
+fn fib(int n) int {
+   if n < 2 { return n }
+   fib(n - 1) + fib(n - 2)
+}
+
+mut total = 0
+def int start = ticks()
+mut i = 0
+while i < 5 {
+   total += fib(28)
+   i += 1
+}
+def int finish = ticks()
+print("checksum=", total)
+print("elapsed_ns=", finish - start)
+NY
+  source c <<'C'
+#include <stdint.h>
+#include <stdio.h>
+#include <time.h>
+
+static int64_t now_ns(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0;
+    return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+}
+
+static int64_t fib(int64_t n) {
+    if (n < 2) return n;
+    return fib(n - 1) + fib(n - 2);
+}
+
+int main(void) {
+    int64_t start = now_ns();
+    int64_t total = 0;
+    for (int i = 0; i < 5; ++i) total += fib(28);
+    int64_t finish = now_ns();
+    printf("checksum=%lld\n", (long long)total);
+    if (finish <= start) finish = start + 1;
+    printf("elapsed_ns=%lld\n", (long long)(finish - start));
+    return 0;
+}
+C
+}

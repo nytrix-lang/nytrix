@@ -1,0 +1,46 @@
+shape bare_aot_rejects_unsupported_inspection_options {
+  family "probe-suite"
+  generator "regression"
+  features ["cli", "options", "bare"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.subprocess (run_capture)
+use core.str as str
+
+def compiler = env("NYTRIX_NY_FULL_BIN")
+def inspection = [
+   "--emit-asm=-",
+   "--emit-ir=-",
+   "--emit-bc=-",
+   "--emit-artifact=/tmp/ny-bare-inspection.artifact",
+   "--dump-llvm",
+   "--dump-funcs",
+   "--dump-nyr",
+   "--nyr-dump",
+   "--vm-disasm",
+   "-vv",
+   "--stack-frame",
+   "--regalloc-heat",
+   "--elf-dump",
+   "--callgraph",
+   "--native-tier-report",
+   "--stop-after=opt",
+   "--abi"
+]
+for option in inspection {
+   def result = run_capture(
+      [compiler, "--mode=bare", str(option), "-c", "print(1)"],
+      [], nil, false)
+   def diagnostic =
+      str(result.get("stderr", "")) + str(result.get("stdout", ""))
+   assert(int(result.get("code", 127)) == 2 &&
+          diagnostic.contains("bare") &&
+          !str(result.get("stdout", "")).contains("Usage:"),
+          str(option) + " must be honored or rejected by bare AOT (code=" +
+             to_str(result.get("code", 127)) + ", output=" + diagnostic + ")")
+}
+print("BARE_INSPECTION_REJECTIONS_OK")
+NY
+}

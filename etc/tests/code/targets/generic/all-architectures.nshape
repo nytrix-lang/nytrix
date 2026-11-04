@@ -8,7 +8,7 @@ shape native_all_architectures {
   # a stdlib dependency.
   # Avoid repeatedly initializing the core module for each target backend.
   # WebAssembly runtime parity has its own executable direct-text fixture.
-  flags_matrix "-no-std -O3 --nyir-verify --emit-asm=/tmp/nytrix-native-all-aarch64.s --native-backend aarch64; -no-std -O3 --nyir-verify --emit-asm=/tmp/nytrix-native-all-arm.s --native-backend arm --native-abi aapcs; -no-std -O3 --nyir-verify --emit-asm=/tmp/nytrix-native-all-bpf.s --native-backend bpf; -no-std -O3 --nyir-verify --emit-asm=/tmp/nytrix-native-all-mips.s --native-backend mips; -no-std -O3 --nyir-verify --emit-asm=/tmp/nytrix-native-all-powerpc.s --native-backend powerpc; -no-std -O3 --nyir-verify --emit-asm=/tmp/nytrix-native-all-riscv.s --native-backend riscv; -no-std -O3 --nyir-verify --emit-asm=/tmp/nytrix-native-all-x86.s --native-backend x86"
+  flags_matrix "-no-std -O3 --nyr-verify --emit-asm=/tmp/nytrix-native-all-aarch64.s --native-backend aarch64; -no-std -O3 --nyr-verify --emit-asm=/tmp/nytrix-native-all-arm.s --native-backend arm --native-abi aapcs; -no-std -O3 --nyr-verify --emit-asm=/tmp/nytrix-native-all-bpf.s --native-backend bpf; -no-std -O3 --nyr-verify --emit-asm=/tmp/nytrix-native-all-mips.s --native-backend mips; -no-std -O3 --nyr-verify --emit-asm=/tmp/nytrix-native-all-powerpc.s --native-backend powerpc; -no-std -O3 --nyr-verify --emit-asm=/tmp/nytrix-native-all-riscv.s --native-backend riscv; -no-std -O3 --nyr-verify --emit-asm=/tmp/nytrix-native-all-x86.s --native-backend x86"
   expect compile_and_run
   source ny <<'NY'
 fn mix(i64 a, i64 b) i64 {

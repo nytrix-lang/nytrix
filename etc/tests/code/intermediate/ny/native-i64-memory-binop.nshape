@@ -3,7 +3,7 @@ shape native_i64_memory_binop {
   generator "native"
   features ["native", "nyir", "i64", "x86_64", "regression"]
   template ny-test-case
-  flags "--native-only --native-backend=x86_64 -O3 --nyir-verify --no-progress"
+  flags "--native-only --native-backend=x86_64 -O3 --nyr-verify --no-progress"
   expect compile_and_run
   source ny <<'NY'
 use core

@@ -122,6 +122,8 @@ typedef struct binding {
   stmt_t *stmt_t;
   bool is_slot;
   bool is_mut;
+  bool capture_by_ref;
+  bool is_volatile_capture;
   bool is_used;
   bool owned;
   bool is_stable;
@@ -212,7 +214,7 @@ enum ny_effect_bits_t {
   NY_FX_READ_MEMORY = 1u << 4,
   NY_FX_WRITE_MEMORY = 1u << 5,
   NY_FX_ALL = NY_FX_IO | NY_FX_ALLOC | NY_FX_FFI | NY_FX_THREAD |
-              NY_FX_READ_MEMORY | NY_FX_WRITE_MEMORY
+      NY_FX_READ_MEMORY | NY_FX_WRITE_MEMORY
 };
 
 typedef enum ny_type_kind_t {

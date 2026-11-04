@@ -3,7 +3,7 @@
  * before the unified NYIR-to-LLVM emitter.
  */
 #include "base/util.h"
-#include "code/lang/c/clang.h"
+#include "code/lang/parse/c/clang.h"
 #include "code/lang/code.h"
 #include "code/lang/priv.h"
 
@@ -665,7 +665,7 @@ void codegen_export_extern_link_names(codegen_t *cg) {
   /*
    * Extern declarations declared with `as "cname"` carry their linker symbol
    * in link_name, but the LLVM value is emitted under the Nytrix name (for
-   * example `core.os.disasm._cs_version`). Calls already reference the value
+   * example `core.os.disasm._nyr_internal_x64_disasm`). Calls already reference the value
    * handle, so renaming the value right before object emission makes the
    * emitted relocation match the C symbol that the linked library exports.
    * Skip a rename when the linker name is already claimed by a different

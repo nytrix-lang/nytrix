@@ -1,0 +1,925 @@
+shape multistatement_artifact_and_assembly_size {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["bare", "aot", "assembly", "artifact-size", "regression"]
+  template ny-test-case
+  expect compile_and_run
+  ci windows-skip
+  source ny <<'NY'
+use core.os (file_exists, file_read, file_remove, file_write, pid, run_capture,
+             temp_dir)
+
+def compiler = env("NYTRIX_NY_FULL_BIN")
+assert(is_str(compiler) && compiler.len > 0,
+       "test runner provides the compiler path")
+def stem = temp_dir() + "/ny-bare-artifact-" + to_str(pid())
+def input = stem + ".ny"
+def binary = stem + ".bin"
+def inline_binary = stem + "-inline.bin"
+def overflow_input = stem + "-overflow.ny"
+def divide_zero_input = stem + "-divide-zero.ny"
+def immutable_input = stem + "-immutable.ny"
+def overflow_binary = stem + "-overflow.bin"
+def divide_zero_binary = stem + "-divide-zero.bin"
+def immutable_binary = stem + "-immutable.bin"
+def control_flow_binary = stem + "-control-flow.bin"
+def runtime_binary = stem + "-runtime.bin"
+def clock_binary = stem + "-clock.bin"
+def allocation_binary = stem + "-allocation.bin"
+def heap_binary = stem + "-heap.bin"
+def x86_string_binary = stem + "-x86-string.bin"
+def x86_integer_output_binary = stem + "-x86-integer-output.bin"
+def aarch64_binary = stem + "-aarch64.bin"
+def aarch64_runtime_binary = stem + "-aarch64-runtime.bin"
+def aarch64_function_string_binary = stem + "-aarch64-function-string.bin"
+def aarch64_float_binary = stem + "-aarch64-float.bin"
+def aarch64_eprint_binary = stem + "-aarch64-eprint.bin"
+def aarch64_eprint_stderr = stem + "-aarch64-eprint.stderr"
+def aarch64_runtime_call_binary = stem + "-aarch64-runtime-call.bin"
+def aarch64_clock_binary = stem + "-aarch64-clock.bin"
+def aarch64_heap_binary = stem + "-aarch64-heap.bin"
+def aarch64_string_binary = stem + "-aarch64-string.bin"
+def aarch64_buffer_binary = stem + "-aarch64-buffer.bin"
+def aarch64_memory_binary = stem + "-aarch64-memory.bin"
+def aarch64_list_length_binary = stem + "-aarch64-list-length.bin"
+def aarch64_pop_index_binary = stem + "-aarch64-pop-index.bin"
+def aarch64_pop_oob_binary = stem + "-aarch64-pop-oob.bin"
+def aarch64_list_oob_binary = stem + "-aarch64-list-oob.bin"
+def unsupported_target_binary = stem + "-unsupported-target.bin"
+def assembly = stem + ".s"
+def literal_assembly = stem + "-literal.s"
+def harness = stem + "-harness.s"
+def assembly_exe = stem + "-assembly"
+def assembly_source =
+    "fn small() int { 42 }\n" +
+    "fn wide() int { 4294967296 }\n" +
+    "fn add(int x, int y) int { x + y }\n" +
+    "fn sub(int x, int y) int { x - y }\n" +
+    "fn mul(int x, int y) int { x * y }\n" +
+    "fn band(int x, int y) int { x & y }\n" +
+    "fn bor(int x, int y) int { x | y }\n" +
+    "fn bxor(int x, int y) int { x ^ y }\n" +
+    "fn id(int x) int { x }\n" +
+    "fn answer() int { 42 }\n" +
+    "fn zero(int x) int { x - x }\n" +
+    "fn inc(int x) int { x + 1 }\n" +
+    "fn dec(int x) int { x - 1 }\n" +
+    "fn chain(int x, int y) int { x + y + x }\n" +
+    "fn sum3(int x, int y, int z) int { x + y + z }\n" +
+    "fn sum_to(int n) int { mut int total = 0 mut int i = 0 " +
+    "while i < n { total += i i += 1 } total }\n" +
+    "small() + wide() + add(20, 22) + sub(20, 22) + mul(6, 7) + " +
+    "band(42, 15) + bor(32, 10) + bxor(63, 21) + id(42) + answer() + " +
+    "sum3(10, 20, 30) + zero(42) + inc(41) + dec(42) + chain(20, 22)"
+def harness_source =
+    ".globl _start\n_start:\n" +
+    "movq $42, %rdi\ncall ny_fn_id\n" +
+    "cmpq $42, %rax\njne .Lfail\n" +
+    "call ny_fn_answer\ncmpq $42, %rax\njne .Lfail\n" +
+    "movq $42, %rdi\ncall ny_fn_zero\ncmpq $0, %rax\njne .Lfail\n" +
+    "movq $41, %rdi\ncall ny_fn_inc\ncmpq $42, %rax\njne .Lfail\n" +
+    "movq $42, %rdi\ncall ny_fn_dec\ncmpq $41, %rax\njne .Lfail\n" +
+    "movq $20, %rdi\nmovq $22, %rsi\ncall ny_fn_chain\n" +
+    "cmpq $62, %rax\njne .Lfail\n" +
+    "movq $10, %rdi\nmovq $20, %rsi\nmovq $30, %rdx\n" +
+    "call ny_fn_sum3\ncmpq $60, %rax\njne .Lfail\n" +
+    "movq $10, %rdi\ncall ny_fn_sum_to\n" +
+    "cmpq $45, %rax\njne .Lfail\n" +
+    "movq $20, %rdi\nmovq $22, %rsi\ncall ny_fn_add\n" +
+    "cmpq $42, %rax\njne .Lfail\n" +
+    "movq $20, %rdi\nmovq $22, %rsi\ncall ny_fn_sub\n" +
+    "cmpq $-2, %rax\njne .Lfail\n" +
+    "movq $6, %rdi\nmovq $7, %rsi\ncall ny_fn_mul\n" +
+    "cmpq $42, %rax\njne .Lfail\n" +
+    "movq $42, %rdi\nmovq $15, %rsi\ncall ny_fn_band\n" +
+    "cmpq $10, %rax\njne .Lfail\n" +
+    "movq $32, %rdi\nmovq $10, %rsi\ncall ny_fn_bor\n" +
+    "cmpq $42, %rax\njne .Lfail\n" +
+    "movq $63, %rdi\nmovq $21, %rsi\ncall ny_fn_bxor\n" +
+    "cmpq $42, %rax\njne .Lfail\n" +
+    "xorl %edi, %edi\nmovl $60, %eax\nsyscall\n" +
+    ".Lfail:\nmovl $1, %edi\nmovl $60, %eax\nsyscall\n"
+def wrote = file_write(input,
+    "print('first') ; inline comment\nprint('second')\n" +
+    "print((1 + 2) * (4 + 5))\n" +
+    "print('sum', 1 + 2, (4 + 5) * 3)\n" +
+    "def int base = 21\ndef int doubled = base * 2\n" +
+    "print('derived', doubled)\n" +
+    "mut int counter = 4\ncounter += 1\ncounter = counter * 3\n" +
+    "print('mutable', counter)\n" +
+    "print(true, false, nil)\n" +
+    "eprint('warning')\neprint(8 / 2)\n")
+assert(is_ok(wrote), "write the multi-statement bare source file")
+def compile_bare = run_capture(
+    ["env", "CC=/nonexistent", compiler, "--mode=bare", "--release", "-o",
+     binary, input],
+    [], nil, false)
+def compile_inline = run_capture(
+    ["env", "CC=/nonexistent", compiler, "--mode=bare", "--release", "-o",
+     inline_binary, "-e",
+     "def int seed = 20\nmut int value = seed + 1\nvalue *= 2\n" +
+     "print('inline', value)\nprint('length', 'abc'.len)"],
+    [], nil, false)
+def run_inline = run_capture([inline_binary], [], nil, false)
+def compile_control_flow = run_capture(
+    ["env", "CC=/nonexistent", compiler, "--mode=bare", "--release", "-o",
+     control_flow_binary, "-e",
+     "fn sum_to(int n) int { mut int total = 0 mut int i = 0 " +
+     "while i < n { total += i i += 1 } total } sum_to(7)"],
+    [], nil, false)
+def run_control_flow = run_capture([control_flow_binary], [], nil, false)
+def control_flow_dynamic =
+    run_capture(["readelf", "-d", control_flow_binary], [], nil, false)
+def compile_runtime_dependency = run_capture(
+    ["env", "CC=/nonexistent", compiler, "--mode=bare", "--release", "-o",
+     runtime_binary, "-e",
+     "fn show(int x) int { mut int y = x\ny += 1\nprint(y)\neprint(y)\ny } " +
+     "show(41)\n0"],
+    [], nil, false)
+def run_runtime_dependency = run_capture([runtime_binary], [], nil, false)
+def compile_clock = run_capture(
+    ["env", "CC=/nonexistent", compiler, "--mode=bare", "--release", "-o",
+     clock_binary, "-e",
+     "use core.os.time:ticks\nprint(ticks())"],
+    [], nil, false)
+def run_clock = run_capture([clock_binary], [], nil, false)
+def clock_dynamic = run_capture(["readelf", "-d", clock_binary], [], nil, false)
+def compile_allocation = run_capture(
+    ["env", "CC=/nonexistent", compiler, "--mode=bare", "--release", "-o",
+     allocation_binary, "-e",
+     "use core.tbuf (i64buf_new, i64buf_load, i64buf_store)\n" +
+     "def values = i64buf_new(4)\ni64buf_store(values, 0, 17)\n" +
+     "i64buf_store(values, 3, 25)\n" +
+     "print(int(i64buf_load(values, 0)) + int(i64buf_load(values, 3)), " +
+     "int(i64buf_load(values, 2)))"],
+    [], nil, false)
+def run_allocation = run_capture([allocation_binary], [], nil, false)
+def allocation_dynamic = run_capture(["readelf", "-d", allocation_binary], [], nil, false)
+def compile_heap = run_capture(
+    ["env", "CC=/nonexistent", compiler, "--mode=bare", "--release", "-o",
+     heap_binary, "-e",
+     "@effects(all)\nfn run() int { def p = malloc(16384) " +
+     "store64(p, 42, 8192) print(load64(p, 8192)) " +
+     "print(free(p), free(0)) print(malloc(-1)) 0 } run()"],
+    [], nil, false)
+def run_heap = run_capture([heap_binary], [], nil, false)
+def heap_dynamic = run_capture(["readelf", "-d", heap_binary], [], nil, false)
+def compile_x86_string = run_capture(
+    ["env", "CC=/nonexistent", compiler, "--mode=bare",
+     "--release", "-o",
+     x86_string_binary, "-e",
+     'use core.str as str\n' +
+     'fn join(str left, str right) str { left + right }\n' +
+     'fn byte_at(str text, int idx) int { if idx < 0 { idx = text.len + idx } ' +
+     'if idx < 0 || idx >= text.len { return 0 } return load8(text, idx) }\n' +
+     'extern fn cstr_eq(ptr left, ptr right) int as "rt_cstr_eq"\n' +
+     'extern fn cstr_cmp(ptr left, ptr right) int as "rt_cstr_cmp"\n' +
+     'fn grow_text() str { mut str s = "x" mut int i = 0 ' +
+     'while i < 12 { s = s + s i += 1 } return s }\n' +
+     'print("assembler-free bare output")\n' +
+     'print(join("hello", " world"))\n' +
+     'def str text = join("hello", " world")\n' +
+     'print(text, text.len)\n' +
+     'print(join("", "tail"), join("head", ""))\n' +
+     'print(join("", ""))\n' +
+     'print(join(join("a", "b"), "c"))\n' +
+     'print(cstr_eq("same", "same"), cstr_eq("same", "diff"), ' +
+     'cstr_eq(0, 0), cstr_eq(0, "x"), cstr_eq("x", 0), ' +
+     'cstr_eq("", ""), cstr_eq("same", join("sa", "me")))\n' +
+     'print(cstr_cmp("a", "c") < 0, cstr_cmp("c", "a") > 0, ' +
+     'cstr_cmp("same", "same") == 0, cstr_cmp(0, 0) == 0, ' +
+     'cstr_cmp(0, "x") < 0, cstr_cmp("x", 0) > 0)\n' +
+     'print(str.chr(233))\n' +
+     'print(str.repeat("ab", 3))\n' +
+     'print(str.repeat("ab", 0))\n' +
+     'print(str.repeat("ab", -2))\n' +
+     'print(str.repeat("", 4))\n' +
+     'print(byte_at("abc", 1), byte_at("abc", -1), byte_at("abc", 3))\n' +
+     'def str large = grow_text()\n' +
+     'print(large.len)\nprint(large)'],
+    [], nil, false)
+def run_x86_string = run_capture([x86_string_binary], [], nil, false)
+def x86_string_dynamic = run_capture(["readelf", "-d", x86_string_binary], [], nil, false)
+def compile_x86_integer_output = run_capture(
+    ["env", "CC=/nonexistent", compiler, "--mode=bare", "--release", "-o",
+     x86_integer_output_binary, "-e",
+     "fn show(int value) int { print(value) 0 } " +
+     "show(0) show(42) show(-42) show(21 + 21) " +
+     "show(-9223372036854775808)"],
+    [], nil, false)
+def run_x86_integer_output =
+    run_capture([x86_integer_output_binary], [], nil, false)
+def x86_integer_output_dynamic =
+    run_capture(["readelf", "-d", x86_integer_output_binary], [], nil, false)
+def compile_aarch64 = run_capture(
+    ["env", "CC=/nonexistent", compiler, "--native-backend=aarch64",
+     "--host-triple=aarch64-unknown-linux-gnu", "--mode=bare", "--native-only",
+     "--release", "-o", aarch64_binary, "-e",
+     "@effects(none)\nfn run() int { 42 }\nrun()"],
+    [], nil, false)
+def compile_aarch64_runtime = run_capture(
+    [compiler, "--native-backend=aarch64",
+     "--host-triple=aarch64-unknown-linux-gnu", "--mode=bare", "--native-only",
+     "--release", "-o", aarch64_runtime_binary, "-e",
+     'print("hello", 42, true, nil)'],
+    [], nil, false)
+def compile_aarch64_function_string = run_capture(
+    ["env", "CC=/nonexistent", compiler, "--native-backend=aarch64",
+     "--host-triple=aarch64-unknown-linux-gnu", "--mode=bare", "--native-only",
+     "--release", "-o", aarch64_function_string_binary, "-e",
+     'fn greet() int { print("hello from function") 0 } greet()'],
+    [], nil, false)
+def qemu_aarch64_available =
+    run_capture(["sh", "-c", "command -v qemu-aarch64 >/dev/null"], [], nil, false)
+def run_aarch64_function_string =
+    if int(qemu_aarch64_available.get("code", 1)) == 0 {
+      run_capture(["qemu-aarch64", aarch64_function_string_binary], [], nil,
+                  false)
+    } else {
+      nil
+    }
+def aarch64_function_string_dynamic =
+    run_capture(["readelf", "-d", aarch64_function_string_binary], [], nil,
+                false)
+def compile_aarch64_eprint = run_capture(
+    ["env", "CC=/nonexistent", compiler, "--native-backend=aarch64",
+     "--host-triple=aarch64-unknown-linux-gnu", "--mode=bare", "--native-only",
+     "--release", "-o", aarch64_eprint_binary, "-e",
+     'eprint("warning", 42, true)'],
+    [], nil, false)
+def aarch64_eprint_dynamic =
+    run_capture(["readelf", "-d", aarch64_eprint_binary], [], nil, false)
+def compile_aarch64_runtime_call = run_capture(
+    ["env", "CC=/nonexistent", compiler, "--native-backend=aarch64",
+     "--host-triple=aarch64-unknown-linux-gnu", "--mode=bare", "--native-only",
+     "--release", "-o", aarch64_runtime_call_binary, "-e",
+     "fn show(int value) int { print(value) 0 }\n" +
+     "fn show_bool() int { print(true) print(false) 0 }\n" +
+     "show(42)\nshow(-7)\nshow(0)\nshow(-9223372036854775808)\n" +
+     "show_bool()"],
+    [], nil, false)
+def compile_aarch64_clock = run_capture(
+    ["env", "CC=/nonexistent", compiler, "--native-backend=aarch64",
+     "--host-triple=aarch64-unknown-linux-gnu", "--mode=bare", "--native-only",
+     "--release", "-o", aarch64_clock_binary, "-e",
+     "use core.os.time:ticks\nfn run() bool { ticks() > 0 }\nrun()"],
+    [], nil, false)
+def compile_aarch64_heap = run_capture(
+    ["env", "CC=/nonexistent", compiler, "--native-backend=aarch64",
+     "--host-triple=aarch64-unknown-linux-gnu", "--mode=bare", "--native-only",
+     "--release", "-o", aarch64_heap_binary, "-e",
+     "@effects(all)\nfn run() int { def p = malloc(8192) " +
+     "print(load64(p, 0)) store64(p, 42, 0) store64(p, 84, 4096) " +
+     "print(load64(p, 0) + load64(p, 4096)) free(p) " +
+     "def bad = malloc(-1) print(bad == 0) free(bad) 0 } run()"],
+    [], nil, false)
+def compile_aarch64_string = run_capture(
+    ["env", "CC=/nonexistent", compiler, "--native-backend=aarch64",
+     "--host-triple=aarch64-unknown-linux-gnu", "--mode=bare", "--native-only",
+     "--release", "-o", aarch64_string_binary, "-e",
+     'use core.str as str\n' +
+     'fn join(str left, str right) str { left + right }\n' +
+     'fn byte_at(str text, int idx) int { if idx < 0 { idx = text.len + idx } ' +
+     'if idx < 0 || idx >= text.len { return 0 } return load8(text, idx) }\n' +
+     'extern fn promote_cstr(ptr text) str as "rt_cstr_to_str"\n' +
+     'extern fn cstr_eq(ptr left, ptr right) int as "rt_cstr_eq"\n' +
+     'extern fn cstr_cmp(ptr left, ptr right) int as "rt_cstr_cmp"\n' +
+     'extern fn cstr_len(ptr text) int as "rt_cstr_len"\n' +
+     'fn positive(int value) bool { value > 0 }\n' +
+     'fn grow_text() str { mut str s = "x" mut int i = 0 ' +
+     'while i < 12 { s = s + s i += 1 } return s }\n' +
+     'print(join("hello", " world"))\n' +
+     'print(promote_cstr("converted"))\n' +
+     'print(cstr_eq("same", "same"), cstr_eq("same", "different"), ' +
+     'cstr_eq(0, 0), cstr_eq(0, "x"), ' +
+     'cstr_eq("same", join("sa", "me")))\n' +
+     'print(cstr_cmp("a", "c") < 0, cstr_cmp("c", "a") > 0, ' +
+     'cstr_cmp("same", "same") == 0, cstr_cmp(0, 0) == 0, ' +
+     'cstr_cmp(0, "x") < 0, cstr_cmp("x", 0) > 0)\n' +
+     'print(cstr_len("length"), cstr_len(""), cstr_len(0))\n' +
+     'print(positive(1), positive(0))\n' +
+     'def str text = join("hello", " world")\nprint(text, text.len)\n' +
+     'print(join("", "tail"), join("head", ""))\n' +
+     'print(join("", ""))\nprint(join(join("a", "b"), "c"))\n' +
+     'print(str.chr(233))\n' +
+     'print(str.repeat("ab", 3))\n' +
+     'print(str.repeat("ab", 0))\n' +
+     'print(str.repeat("ab", -2))\n' +
+     'print(str.repeat("", 4))\n' +
+     'print(byte_at("abc", 1), byte_at("abc", -1), byte_at("abc", 3))\n' +
+     'def str large = grow_text()\nprint(large.len)\nprint(large)'],
+    [], nil, false)
+def run_aarch64_string =
+    if int(qemu_aarch64_available.get("code", 1)) == 0 {
+      run_capture(["qemu-aarch64", aarch64_string_binary], [], nil, false)
+    } else {
+      nil
+    }
+def aarch64_string_dynamic =
+    run_capture(["readelf", "-d", aarch64_string_binary], [], nil, false)
+def run_aarch64_heap =
+    if int(qemu_aarch64_available.get("code", 1)) == 0 {
+      run_capture(["qemu-aarch64", aarch64_heap_binary], [], nil, false)
+    } else {
+      nil
+    }
+def aarch64_heap_dynamic =
+    run_capture(["readelf", "-d", aarch64_heap_binary], [], nil, false)
+def compile_aarch64_buffer = run_capture(
+    ["env", "CC=/nonexistent", compiler, "--native-backend=aarch64",
+     "--host-triple=aarch64-unknown-linux-gnu", "--mode=bare", "--native-only",
+     "--release", "-o", aarch64_buffer_binary, "-e",
+     "use core.tbuf (i64buf_new, i64buf_load, i64buf_store)\n" +
+     "def values = i64buf_new(4)\n" +
+     "i64buf_store(values, 0, 17)\ni64buf_store(values, 3, 25)\n" +
+     "def oversized = i64buf_new(4611686018427387903)\n" +
+     "print(int(i64buf_load(values, 0)) + int(i64buf_load(values, 3)), " +
+     "int(i64buf_load(values, 2)), oversized == 0)"],
+    [], nil, false)
+def run_aarch64_buffer =
+    if int(qemu_aarch64_available.get("code", 1)) == 0 {
+      run_capture(["qemu-aarch64", aarch64_buffer_binary], [], nil, false)
+    } else {
+      nil
+    }
+def aarch64_buffer_dynamic =
+    run_capture(["readelf", "-d", aarch64_buffer_binary], [], nil, false)
+def compile_aarch64_memory = run_capture(
+    ["env", "CC=/nonexistent", compiler, "--native-backend=aarch64",
+     "--host-triple=aarch64-unknown-linux-gnu", "--mode=bare", "--native-only",
+     "--release", "-o", aarch64_memory_binary, "-e",
+     "extern fn bytecmp(ptr a, ptr b, int n) int as \"rt_memcmp_raw\"\n" +
+     "@effects(all)\nfn run() int { def dst = malloc(8) def src = malloc(8) " +
+     "store64(src, 42, 0) memcpy(dst, src, 8) " +
+     "store64(src, 43, 0) " +
+     "if bytecmp(dst, src, 8) >= 0 { print('bad negative compare') } " +
+     "if bytecmp(src, dst, 8) <= 0 { print('bad positive compare') } " +
+     "if bytecmp(dst, src, 0) != 0 { print('bad empty compare') } " +
+     "store64(src, 42, 0) if bytecmp(dst, src, 8) != 0 { print('bad equal compare') } " +
+     "memcpy(dst, src, -1) memset(src, 0, 1) " +
+     "if load8(src, 0) != 0 { print('bad memset') } " +
+     "print(load64(dst, 0), load64(src, 0)) " +
+     "free(dst) free(src) 0 } run()"],
+    [], nil, false)
+def run_aarch64_memory =
+    if int(qemu_aarch64_available.get("code", 1)) == 0 {
+      run_capture(["qemu-aarch64", aarch64_memory_binary], [], nil, false)
+    } else {
+      nil
+    }
+def aarch64_memory_dynamic =
+    run_capture(["readelf", "-d", aarch64_memory_binary], [], nil, false)
+def compile_aarch64_list_length = run_capture(
+    ["env", "CC=/nonexistent", compiler, "--native-backend=aarch64",
+     "--host-triple=aarch64-unknown-linux-gnu", "--mode=bare", "--native-only",
+     "--release", "-o", aarch64_list_length_binary, "-e",
+     "@effects(all)\nfn local_length() int { mut list<int> values = [10,20,30] values.len }\n" +
+     "print(local_length())\ndef values = [10, 20, 30]\n" +
+     "print(values.len, values[1], values[-1])\n" +
+     "mut changed = [10, 20, 30]\nprint(int(changed.pop()), changed[1])\n" +
+     "print(changed[2])"],
+    [], nil, false)
+def run_aarch64_list_length =
+    if int(qemu_aarch64_available.get("code", 1)) == 0 {
+      run_capture(["qemu-aarch64", aarch64_list_length_binary], [], nil, false)
+    } else {
+      nil
+    }
+def aarch64_list_length_dynamic =
+    run_capture(["readelf", "-d", aarch64_list_length_binary], [], nil, false)
+def compile_aarch64_pop_index = run_capture(
+    ["env", "CC=/nonexistent", compiler, "--native-backend=aarch64",
+     "--host-triple=aarch64-unknown-linux-gnu", "--mode=bare", "--native-only",
+     "--release", "-o", aarch64_pop_index_binary, "-e",
+     "@effects(all)\nfn run() int { mut list<int> values = [10, 20, 30] " +
+     "def popped = int(values.pop()) values[1] }\nprint(run())"],
+    [], nil, false)
+def run_aarch64_pop_index =
+    if int(qemu_aarch64_available.get("code", 1)) == 0 {
+      run_capture(["qemu-aarch64", aarch64_pop_index_binary], [], nil, false)
+    } else {
+      nil
+    }
+def compile_aarch64_pop_oob = run_capture(
+    ["env", "CC=/nonexistent", compiler, "--native-backend=aarch64",
+     "--host-triple=aarch64-unknown-linux-gnu", "--mode=bare", "--native-only",
+     "--release", "-o", aarch64_pop_oob_binary, "-e",
+     "@effects(all)\nfn run() int { mut list<int> values = [10, 20, 30] " +
+     "def popped = int(values.pop()) values[2] }\nprint(run())"],
+    [], nil, false)
+def run_aarch64_pop_oob =
+    if int(qemu_aarch64_available.get("code", 1)) == 0 {
+      run_capture(["qemu-aarch64", aarch64_pop_oob_binary], [], nil, false)
+    } else {
+      nil
+    }
+def compile_aarch64_list_oob = run_capture(
+    ["env", "CC=/nonexistent", compiler, "--native-backend=aarch64",
+     "--host-triple=aarch64-unknown-linux-gnu", "--mode=bare", "--native-only",
+     "--release", "-o", aarch64_list_oob_binary, "-e",
+     "def values = [10, 20, 30]\nprint(values[3])"],
+    [], nil, false)
+def run_aarch64_list_oob =
+    if int(qemu_aarch64_available.get("code", 1)) == 0 {
+      run_capture(["qemu-aarch64", aarch64_list_oob_binary], [], nil, false)
+    } else {
+      nil
+    }
+def compile_aarch64_float = run_capture(
+    [compiler, "--native-backend=aarch64",
+     "--host-triple=aarch64-unknown-linux-gnu", "--mode=bare", "--native-only",
+     "--release", "-o", aarch64_float_binary, "-e", "print(1.5 + 2)"],
+    [], nil, false)
+def run_aarch64_float =
+    if int(compile_aarch64_float.get("code", 127)) == 0 &&
+       int(qemu_aarch64_available.get("code", 1)) == 0 {
+      run_capture(["qemu-aarch64", aarch64_float_binary], [], nil, false)
+    } else { nil }
+def compile_unsupported_target = run_capture(
+    [compiler, "--native-backend=riscv",
+     "--host-triple=riscv64-unknown-linux-gnu", "--mode=bare", "--native-only",
+     "--release", "-o", unsupported_target_binary, "-e", "42"],
+    [], nil, false)
+def aarch64_header = run_capture(["readelf", "-h", aarch64_binary], [], nil, false)
+def aarch64_dynamic = run_capture(["readelf", "-d", aarch64_binary], [], nil, false)
+def aarch64_runtime_dynamic =
+    run_capture(["readelf", "-d", aarch64_runtime_binary], [], nil, false)
+def run_aarch64 =
+    if int(qemu_aarch64_available.get("code", 1)) == 0 {
+      run_capture(["qemu-aarch64", aarch64_binary], [], nil, false)
+    } else {
+      nil
+    }
+def run_aarch64_runtime =
+    if int(qemu_aarch64_available.get("code", 1)) == 0 {
+      run_capture(["qemu-aarch64", aarch64_runtime_binary], [], nil, false)
+    } else {
+      nil
+    }
+def run_aarch64_eprint =
+    if int(qemu_aarch64_available.get("code", 1)) == 0 {
+      run_capture(["sh", "-c",
+                   "qemu-aarch64 " + aarch64_eprint_binary + " 2>" +
+                       aarch64_eprint_stderr],
+                  [], nil, false)
+    } else {
+      nil
+    }
+def aarch64_eprint_stderr_text = file_read(aarch64_eprint_stderr)
+def run_aarch64_runtime_call =
+    if int(qemu_aarch64_available.get("code", 1)) == 0 {
+      run_capture(["qemu-aarch64", aarch64_runtime_call_binary], [], nil, false)
+    } else {
+      nil
+    }
+def run_aarch64_clock =
+    if int(qemu_aarch64_available.get("code", 1)) == 0 {
+      run_capture(["qemu-aarch64", aarch64_clock_binary], [], nil, false)
+    } else {
+      nil
+    }
+def wrote_overflow = file_write(overflow_input,
+    "mut limit = 9223372036854775807\nlimit += 1\n")
+def compile_overflow =
+    if is_ok(wrote_overflow) {
+      run_capture([compiler, "--mode=bare", "--release", "-o", overflow_binary,
+                   overflow_input], [], nil, false)
+    } else {
+      nil
+    }
+def wrote_divide_zero = file_write(divide_zero_input,
+    "mut divisor = 0\nprint(1 / divisor)\n")
+def compile_divide_zero =
+    if is_ok(wrote_divide_zero) {
+      run_capture([compiler, "--mode=bare", "--release", "-o", divide_zero_binary,
+                   divide_zero_input], [], nil, false)
+    } else {
+      nil
+    }
+def wrote_immutable = file_write(immutable_input,
+    "def fixed = 41\nfixed += 1\n")
+def compile_immutable =
+    if is_ok(wrote_immutable) {
+      run_capture([compiler, "--mode=bare", "--release", "-o", immutable_binary,
+                   immutable_input], [], nil, false)
+    } else {
+      nil
+    }
+def bare_size = run_capture(["stat", "-c", "%s", binary], [], nil, false)
+def bare_sections = run_capture(["readelf", "-S", binary], [], nil, false)
+def bare_dynamic = run_capture(["readelf", "-d", binary], [], nil, false)
+def run_bare = run_capture([binary], [], nil, false)
+def compile_assembly = run_capture(
+    [compiler, "--emit-asm=" + assembly, "--native-only", "-no-std",
+     "-emit-only", "-e", assembly_source],
+    [], nil, false)
+def assembly_text = file_read(assembly)
+def compile_literal_assembly = run_capture(
+    [compiler, "--emit-asm=" + literal_assembly, "--native-only", "-no-std",
+     "-emit-only", "-e", 'fn literal() str { "small literal" }'],
+    [], nil, false)
+def literal_assembly_text = file_read(literal_assembly)
+def literal_text =
+    if is_ok(literal_assembly_text) { unwrap(literal_assembly_text) } else { "" }
+def code_end = str.find(literal_text, "\t.size\trt_main")
+def literal_section = str.find(literal_text, "\t.section\t.rodata")
+def wrote_harness = file_write(harness, harness_source)
+def link_assembly =
+    if is_ok(wrote_harness) {
+      run_capture(["clang", "-nostdlib", "-static", "-no-pie",
+                   "-Wl,-e,_start", "-o", assembly_exe, assembly, harness],
+                  [], nil, false)
+    } else {
+      nil
+    }
+def run_assembly =
+    if is_str(assembly_exe) && file_exists(assembly_exe) {
+      run_capture([assembly_exe], [], nil, false)
+    } else {
+      nil
+    }
+def disassembled_assembly =
+    if is_str(assembly_exe) && file_exists(assembly_exe) {
+      run_capture(["objdump", "-d", assembly_exe], [], nil, false)
+    } else {
+      nil
+    }
+def removed_input = if file_exists(input) { is_ok(file_remove(input)) } else { true }
+def removed_inline_binary =
+    if file_exists(inline_binary) { is_ok(file_remove(inline_binary)) } else { true }
+def removed_control_flow_binary =
+    if file_exists(control_flow_binary) {
+      is_ok(file_remove(control_flow_binary))
+    } else {
+      true
+    }
+def removed_runtime_binary =
+    if file_exists(runtime_binary) { is_ok(file_remove(runtime_binary)) } else { true }
+def removed_clock_binary =
+    if file_exists(clock_binary) { is_ok(file_remove(clock_binary)) } else { true }
+def removed_allocation_binary =
+    if file_exists(allocation_binary) {
+      is_ok(file_remove(allocation_binary))
+    } else {
+      true
+    }
+def removed_heap_binary =
+    if file_exists(heap_binary) { is_ok(file_remove(heap_binary)) } else { true }
+def removed_x86_string_binary =
+    if file_exists(x86_string_binary) {
+      is_ok(file_remove(x86_string_binary))
+    } else {
+      true
+    }
+def removed_x86_integer_output_binary =
+    if file_exists(x86_integer_output_binary) {
+      is_ok(file_remove(x86_integer_output_binary))
+    } else {
+      true
+    }
+def removed_aarch64_binary =
+    if file_exists(aarch64_binary) {
+      is_ok(file_remove(aarch64_binary))
+    } else {
+      true
+    }
+def removed_aarch64_runtime_binary =
+    if file_exists(aarch64_runtime_binary) {
+      is_ok(file_remove(aarch64_runtime_binary))
+    } else {
+      true
+    }
+def removed_aarch64_function_string_binary =
+    if file_exists(aarch64_function_string_binary) {
+      is_ok(file_remove(aarch64_function_string_binary))
+    } else {
+      true
+    }
+def removed_aarch64_float_binary =
+    if file_exists(aarch64_float_binary) {
+      is_ok(file_remove(aarch64_float_binary))
+    } else {
+      true
+    }
+def removed_aarch64_eprint_binary =
+    if file_exists(aarch64_eprint_binary) {
+      is_ok(file_remove(aarch64_eprint_binary))
+    } else {
+      true
+    }
+def removed_aarch64_eprint_stderr =
+    if file_exists(aarch64_eprint_stderr) {
+      is_ok(file_remove(aarch64_eprint_stderr))
+    } else {
+      true
+    }
+def removed_aarch64_runtime_call_binary =
+    if file_exists(aarch64_runtime_call_binary) {
+      is_ok(file_remove(aarch64_runtime_call_binary))
+    } else {
+      true
+    }
+def removed_aarch64_clock_binary =
+    if file_exists(aarch64_clock_binary) {
+      is_ok(file_remove(aarch64_clock_binary))
+    } else {
+      true
+    }
+def removed_aarch64_heap_binary =
+    if file_exists(aarch64_heap_binary) {
+      is_ok(file_remove(aarch64_heap_binary))
+    } else {
+      true
+    }
+def removed_aarch64_string_binary =
+    if file_exists(aarch64_string_binary) {
+      is_ok(file_remove(aarch64_string_binary))
+    } else {
+      true
+    }
+def removed_aarch64_buffer_binary =
+    if file_exists(aarch64_buffer_binary) {
+      is_ok(file_remove(aarch64_buffer_binary))
+    } else {
+      true
+    }
+def removed_aarch64_memory_binary =
+    if file_exists(aarch64_memory_binary) {
+      is_ok(file_remove(aarch64_memory_binary))
+    } else {
+      true
+    }
+def removed_unsupported_target_binary =
+    if file_exists(unsupported_target_binary) {
+      is_ok(file_remove(unsupported_target_binary))
+    } else {
+      true
+    }
+def removed_overflow_input =
+    if file_exists(overflow_input) { is_ok(file_remove(overflow_input)) } else { true }
+def removed_divide_zero_input =
+    if file_exists(divide_zero_input) { is_ok(file_remove(divide_zero_input)) } else { true }
+def removed_immutable_input =
+    if file_exists(immutable_input) { is_ok(file_remove(immutable_input)) } else { true }
+def removed_binary = if file_exists(binary) { is_ok(file_remove(binary)) } else { true }
+def removed_overflow_binary =
+    if file_exists(overflow_binary) { is_ok(file_remove(overflow_binary)) } else { true }
+def removed_divide_zero_binary =
+    if file_exists(divide_zero_binary) { is_ok(file_remove(divide_zero_binary)) } else { true }
+def removed_immutable_binary =
+    if file_exists(immutable_binary) { is_ok(file_remove(immutable_binary)) } else { true }
+def removed_assembly =
+    if file_exists(assembly) { is_ok(file_remove(assembly)) } else { true }
+def removed_literal_assembly =
+    if file_exists(literal_assembly) { is_ok(file_remove(literal_assembly)) } else { true }
+def removed_harness =
+    if file_exists(harness) { is_ok(file_remove(harness)) } else { true }
+def removed_assembly_exe =
+    if file_exists(assembly_exe) { is_ok(file_remove(assembly_exe)) } else { true }
+assert(removed_input && removed_overflow_input && removed_divide_zero_input &&
+       removed_immutable_input && removed_binary && removed_inline_binary &&
+       removed_control_flow_binary && removed_runtime_binary &&
+       removed_clock_binary && removed_allocation_binary && removed_heap_binary &&
+       removed_x86_string_binary &&
+       removed_x86_integer_output_binary &&
+       removed_aarch64_binary &&
+       removed_aarch64_runtime_binary &&
+       removed_aarch64_function_string_binary &&
+       removed_aarch64_float_binary &&
+       removed_aarch64_eprint_binary &&
+       removed_aarch64_eprint_stderr &&
+       removed_aarch64_runtime_call_binary &&
+       removed_aarch64_clock_binary &&
+       removed_aarch64_heap_binary &&
+       removed_aarch64_string_binary &&
+       removed_aarch64_buffer_binary &&
+       removed_aarch64_memory_binary &&
+       removed_unsupported_target_binary &&
+       removed_overflow_binary &&
+       removed_divide_zero_binary && removed_immutable_binary && removed_assembly &&
+       removed_literal_assembly && removed_harness && removed_assembly_exe,
+       "remove generated bare and assembly artifacts")
+assert(int(compile_bare.get("code", 127)) == 0 &&
+       ((str(compile_bare.get("stdout", "")) + str(compile_bare.get("stderr", "")))).contains("Saved ELF: " + binary) &&
+       ((str(compile_bare.get("stdout", "")) + str(compile_bare.get("stderr", "")))).contains("bytes"),
+       "bare AOT reports the output path and exact small-file size")
+assert(int(compile_inline.get("code", 127)) == 0 && int(run_inline.get("code", 127)) == 0 &&
+       str(run_inline.get("stdout", "")) == "inline 42\nlength 3\n",
+       "inline bare source folds bindings and reads static C-string length")
+assert(int(compile_control_flow.get("code", 127)) == 0 &&
+       ((str(compile_control_flow.get("stdout", "")) + str(compile_control_flow.get("stderr", "")))).contains("bytes") &&
+       int(run_control_flow.get("code", 127)) == 21 &&
+       int(control_flow_dynamic.get("code", 127)) == 0 &&
+       (str(control_flow_dynamic.get("stdout", ""))).contains("There is no dynamic section"),
+       "bare native fallback links function/control flow without libc")
+assert(int(compile_runtime_dependency.get("code", 127)) == 0 &&
+       int(run_runtime_dependency.get("code", 127)) == 0 &&
+       str(run_runtime_dependency.get("stdout", "")) == "42\n42\n",
+       "bare native syscalls support integer print/eprint inside functions")
+assert(int(compile_clock.get("code", 127)) == 0 &&
+       int(run_clock.get("code", 127)) == 0 &&
+       int(str.strip(str(run_clock.get("stdout", "")))) > 0 &&
+       int(clock_dynamic.get("code", 127)) == 0 &&
+       (str(clock_dynamic.get("stdout", ""))).contains("There is no dynamic section"),
+       "bare monotonic ticks use the Linux clock_gettime syscall")
+mut str expected_large_text = "x"
+mut int expected_large_i = 0
+while expected_large_i < 12 {
+  expected_large_text = expected_large_text + expected_large_text
+  expected_large_i += 1
+}
+def aarch64_string_run_code =
+    if int(qemu_aarch64_available.get("code", 1)) == 0 {
+      to_str(int(run_aarch64_string.get("code", 127)))
+    } else {
+      "not run (qemu-aarch64 unavailable)"
+    }
+def aarch64_string_run_output =
+    if int(qemu_aarch64_available.get("code", 1)) == 0 {
+      str(run_aarch64_string.get("stdout", ""))
+    } else {
+      ""
+    }
+assert(int(compile_aarch64_heap.get("code", 127)) == 0 &&
+       int(aarch64_heap_dynamic.get("code", 127)) == 0 &&
+       (str(aarch64_heap_dynamic.get("stdout", ""))).contains("There is no dynamic section") &&
+       (int(qemu_aarch64_available.get("code", 1)) != 0 ||
+        (int(run_aarch64_heap.get("code", 127)) == 0 &&
+         str(run_aarch64_heap.get("stdout", "")) == "0\n126\ntrue\n")),
+       "AArch64 bare mmap allocation/free spans multiple pages without libc")
+assert(int(compile_aarch64_string.get("code", 127)) == 0 &&
+       int(aarch64_string_dynamic.get("code", 127)) == 0 &&
+       (str(aarch64_string_dynamic.get("stdout", ""))).contains("There is no dynamic section") &&
+       (int(qemu_aarch64_available.get("code", 1)) != 0 ||
+        (int(run_aarch64_string.get("code", 127)) == 0 &&
+         str(run_aarch64_string.get("stdout", "")) ==
+             "hello world\nconverted\n1 0 1 0 1\n" +
+             "true true true true true true\n6 0 0\ntrue false\nhello world 11\ntail head\n\nabc\né\nababab\n\n\n\n98 99 0\n4096\n" +
+                 expected_large_text + "\n")),
+       "AArch64 bare conversion, concatenation, chr, and repeat handle dynamic strings" +
+       " (compile=" + to_str(int(compile_aarch64_string.get("code", 127))) +
+       ", compiler-output=`" +
+           str(compile_aarch64_string.get("stdout", "")) +
+           str(compile_aarch64_string.get("stderr", "")) + "`" +
+       ", readelf=" + to_str(int(aarch64_string_dynamic.get("code", 127))) +
+       ", qemu=" + to_str(int(qemu_aarch64_available.get("code", 1))) +
+       ", run=" + aarch64_string_run_code +
+       ", stdout=" + aarch64_string_run_output + ")")
+assert(int(compile_aarch64_buffer.get("code", 127)) == 0 &&
+       int(aarch64_buffer_dynamic.get("code", 127)) == 0 &&
+       (str(aarch64_buffer_dynamic.get("stdout", ""))).contains("There is no dynamic section") &&
+       (int(qemu_aarch64_available.get("code", 1)) != 0 ||
+        (int(run_aarch64_buffer.get("code", 127)) == 0 &&
+         str(run_aarch64_buffer.get("stdout", "")) == "42 0 true\n")),
+       "AArch64 bare typed buffers zero-fill and reject size overflow")
+assert(int(compile_aarch64_memory.get("code", 127)) == 0 &&
+       int(aarch64_memory_dynamic.get("code", 127)) == 0 &&
+       (str(aarch64_memory_dynamic.get("stdout", ""))).contains("There is no dynamic section") &&
+       (int(qemu_aarch64_available.get("code", 1)) != 0 ||
+        (int(run_aarch64_memory.get("code", 127)) == 0 &&
+         str(run_aarch64_memory.get("stdout", "")) == "42 0\n")),
+       "AArch64 bare memcpy/memset/memcmp exercise raw byte memory operations")
+assert(int(compile_aarch64_list_length.get("code", 127)) == 0 &&
+       int(aarch64_list_length_dynamic.get("code", 127)) == 0 &&
+       (str(aarch64_list_length_dynamic.get("stdout", ""))).contains("There is no dynamic section") &&
+       (int(qemu_aarch64_available.get("code", 1)) != 0 ||
+        (int(run_aarch64_list_length.get("code", 0)) != 0 &&
+         str(run_aarch64_list_length.get("stdout", "")) ==
+             "3\n3 20 30\n30 20\n")),
+       "AArch64 bare numeric-list length and pop use checked generic NYIR paths")
+assert(int(compile_aarch64_pop_index.get("code", 127)) == 0 &&
+       (int(qemu_aarch64_available.get("code", 1)) != 0 ||
+        (int(run_aarch64_pop_index.get("code", 127)) == 0 &&
+         str(run_aarch64_pop_index.get("stdout", "")) == "20\n")),
+       "AArch64 NYIR bounds checks permit in-range reads after list pop")
+assert(int(compile_aarch64_pop_oob.get("code", 127)) == 0 &&
+       (int(qemu_aarch64_available.get("code", 1)) != 0 ||
+        int(run_aarch64_pop_oob.get("code", 0)) != 0),
+       "AArch64 NYIR bounds checks trap on an out-of-range read after pop")
+assert(int(compile_aarch64_list_oob.get("code", 127)) == 0 &&
+       (int(qemu_aarch64_available.get("code", 1)) != 0 ||
+        int(run_aarch64_list_oob.get("code", 0)) == 1),
+       "AArch64 bare numeric-list indexing exits on an out-of-range index")
+assert(int(compile_allocation.get("code", 127)) == 0 &&
+       int(run_allocation.get("code", 127)) == 0 &&
+       str(run_allocation.get("stdout", "")) == "42 0\n" &&
+       int(allocation_dynamic.get("code", 127)) == 0 &&
+       (str(allocation_dynamic.get("stdout", ""))).contains("There is no dynamic section"),
+       "bare mmap typed buffers preserve headers and zero-initialize payloads")
+assert(int(compile_heap.get("code", 127)) == 0 &&
+       int(run_heap.get("code", 127)) == 0 &&
+       str(run_heap.get("stdout", "")) == "42\n1 0\n0\n" &&
+       int(heap_dynamic.get("code", 127)) == 0 &&
+       (str(heap_dynamic.get("stdout", ""))).contains("There is no dynamic section"),
+       "bare general heap allocations support stores, loads, and free without libc")
+assert(int(compile_x86_string.get("code", 127)) == 0 &&
+       int(run_x86_string.get("code", 127)) == 0 &&
+       str(run_x86_string.get("stdout", "")) ==
+           "assembler-free bare output\nhello world\nhello world 11\n" +
+           "tail head\n\nabc\n1 0 1 0 0 1 1\ntrue true true true true true\n" +
+           "é\nababab\n\n\n\n98 99 0\n4096\n" +
+           expected_large_text + "\n" &&
+       int(x86_string_dynamic.get("code", 127)) == 0 &&
+       (str(x86_string_dynamic.get("stdout", ""))).contains("There is no dynamic section"),
+       "bare x86-64 dynamic strings work in a static ELF without host assembler" +
+       " (compile=" + to_str(int(compile_x86_string.get("code", 127))) +
+       ", compile-stderr=" + str(compile_x86_string.get("stderr", "")) +
+       ", run=" + to_str(int(run_x86_string.get("code", 127))) +
+       ", stdout=" + str(run_x86_string.get("stdout", "")) + ")")
+assert(int(compile_x86_integer_output.get("code", 127)) == 0 &&
+       int(run_x86_integer_output.get("code", 127)) == 0 &&
+       str(run_x86_integer_output.get("stdout", "")) ==
+           "0\n42\n-42\n42\n-9223372036854775808\n" &&
+       int(x86_integer_output_dynamic.get("code", 127)) == 0 &&
+       (str(x86_integer_output_dynamic.get("stdout", ""))).contains("There is no dynamic section"),
+       "bare x86-64 integer output covers zero, signs, and signed minimum")
+assert(int(compile_aarch64.get("code", 127)) == 0 &&
+       int(aarch64_header.get("code", 127)) == 0 &&
+       (str(aarch64_header.get("stdout", ""))).contains("Machine:                           AArch64") &&
+       int(aarch64_dynamic.get("code", 127)) == 0 &&
+       (str(aarch64_dynamic.get("stdout", ""))).contains("There is no dynamic section") &&
+       (int(qemu_aarch64_available.get("code", 1)) != 0 ||
+        (int(run_aarch64.get("code", 127)) == 42)),
+       "NyR emits and internally links a sectionless AArch64 bare executable")
+assert(int(compile_aarch64_runtime.get("code", 127)) == 0 &&
+       int(aarch64_runtime_dynamic.get("code", 127)) == 0 &&
+       (str(aarch64_runtime_dynamic.get("stdout", ""))).contains("There is no dynamic section") &&
+       (int(qemu_aarch64_available.get("code", 1)) != 0 ||
+        (int(run_aarch64_runtime.get("code", 127)) == 0 &&
+         str(run_aarch64_runtime.get("stdout", "")) == "hello 42 true nil\n")),
+       "AArch64 bare constant output emits direct write syscalls")
+assert(int(compile_aarch64_function_string.get("code", 127)) == 0 &&
+       int(aarch64_function_string_dynamic.get("code", 127)) == 0 &&
+       (str(aarch64_function_string_dynamic.get("stdout", ""))).contains("There is no dynamic section") &&
+       (int(qemu_aarch64_available.get("code", 1)) != 0 ||
+        (int(run_aarch64_function_string.get("code", 127)) == 0 &&
+         str(run_aarch64_function_string.get("stdout", "")) ==
+             "hello from function\n")),
+       "AArch64 bare function string output borrows literals without libc")
+assert(int(compile_aarch64_eprint.get("code", 127)) == 0 &&
+       int(aarch64_eprint_dynamic.get("code", 127)) == 0 &&
+       (str(aarch64_eprint_dynamic.get("stdout", ""))).contains("There is no dynamic section") &&
+       (int(qemu_aarch64_available.get("code", 1)) != 0 ||
+        (int(run_aarch64_eprint.get("code", 127)) == 0 &&
+         str(run_aarch64_eprint.get("stdout", "")) == "" &&
+         is_ok(aarch64_eprint_stderr_text) &&
+         unwrap(aarch64_eprint_stderr_text) == "warning 42 true\n")),
+       "AArch64 bare eprint writes only to file descriptor two")
+assert(int(compile_aarch64_runtime_call.get("code", 127)) == 0 &&
+       (int(qemu_aarch64_available.get("code", 1)) != 0 ||
+        (int(run_aarch64_runtime_call.get("code", 127)) == 0 &&
+         str(run_aarch64_runtime_call.get("stdout", "")) ==
+             "42\n-7\n0\n-9223372036854775808\ntrue\nfalse\n")),
+       "AArch64 runtime integer boundaries and boolean constants format directly")
+assert(int(compile_aarch64_clock.get("code", 127)) == 0 &&
+       (int(qemu_aarch64_available.get("code", 1)) != 0 ||
+        int(run_aarch64_clock.get("code", 127)) == 8),
+       "AArch64 bare monotonic ticks use the clock_gettime syscall")
+assert(int(compile_aarch64_float.get("code", 127)) == 0 &&
+       (int(qemu_aarch64_available.get("code", 1)) != 0 ||
+        (int(run_aarch64_float.get("code", 127)) == 0 &&
+         str(run_aarch64_float.get("stdout", "")) == "3.5\n")),
+       "AArch64 bare float formatting executes without a hosted runtime")
+assert(int(compile_unsupported_target.get("code", 0)) != 0 &&
+       !file_exists(unsupported_target_binary),
+       "bare output rejects targets without an in-process bare ELF path")
+assert(is_ok(wrote_overflow) && int(compile_overflow.get("code", 0)) != 0 &&
+       is_ok(wrote_divide_zero) && int(compile_divide_zero.get("code", 0)) != 0 &&
+       is_ok(wrote_immutable) && int(compile_immutable.get("code", 0)) != 0,
+       "bare constants reject overflow, division by zero, and immutable writes")
+assert(int(run_bare.get("code", 127)) == 0 &&
+       str(run_bare.get("stdout", "")) ==
+           "first\nsecond\n27\nsum 3 27\nderived 42\nmutable 15\n" +
+           "true false nil\nwarning\n4\n",
+       "bare syscalls print folded integers and boolean constants")
+assert(int(bare_sections.get("code", 127)) == 0 &&
+       (str(bare_sections.get("stdout", ""))).contains("There are no sections") &&
+       int(bare_dynamic.get("code", 127)) == 0 &&
+       (str(bare_dynamic.get("stdout", ""))).contains("There is no dynamic section"),
+       "bare ELF has no sections or dynamic libc linkage")
+assert(int(bare_size.get("code", 127)) == 0 &&
+       str(bare_size.get("stdout", "")) == "407\n",
+       "bare syscall encodings keep the sectionless nine-write ELF at 407 bytes")
+assert(int(compile_assembly.get("code", 127)) == 0 &&
+       ((str(compile_assembly.get("stdout", "")) + str(compile_assembly.get("stderr", "")))).contains("Saved assembly: " + assembly) &&
+       ((str(compile_assembly.get("stdout", "")) + str(compile_assembly.get("stderr", "")))).contains("KB;") &&
+       ((str(compile_assembly.get("stdout", "")) + str(compile_assembly.get("stderr", "")))).contains("bytes") &&
+       is_ok(assembly_text) &&
+       !(unwrap(assembly_text)).contains("\t.section\t.rodata") &&
+       !(unwrap(assembly_text)).contains("\t.section\t.data"),
+       "assembly reports its size and omits unused literal sections")
+assert(int(compile_literal_assembly.get("code", 127)) == 0 &&
+       code_end >= 0 && literal_section > code_end &&
+       (literal_text).contains("ny_str_0:") &&
+       !(literal_text).contains(".p2align"),
+       "string literal data follows generated code without alignment padding")
+assert(is_ok(wrote_harness) && int(link_assembly.get("code", 127)) == 0 &&
+       int(run_assembly.get("code", 127)) == 0,
+       "frameless x86-64 integer leaves obey argument and return ABI")
+assert(int(disassembled_assembly.get("code", 127)) == 0 &&
+       (str(disassembled_assembly.get("stdout", ""))).contains("inc") &&
+       (str(disassembled_assembly.get("stdout", ""))).contains("dec") &&
+       (str(disassembled_assembly.get("stdout", ""))).contains("0x2a,%al"),
+       "unit immediates and constant returns use compact valid encodings")
+NY
+}

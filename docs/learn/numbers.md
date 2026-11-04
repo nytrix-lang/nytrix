@@ -5,6 +5,11 @@ Choose a numeric type for the range and precision the program needs. Convert at
 boundaries rather than relying on mixed-width arithmetic. The type rules are in
 [Types](../spec/types.md).
 
+Prerequisites: basic [Nytrix syntax](tour.md).
+
+Skip this guide if ordinary inferred integers and floating-point values meet
+your range and precision needs.
+
 ## Integer types
 
 | Type | Use |
@@ -48,7 +53,13 @@ assert(x > 0.09 && x < 0.11, "range check for decimal")
 `core.math.big` provides arbitrary-precision integer helpers;
 `core.math.bigrat` provides exact rational arithmetic; and
 `core.math.complex` provides complex values. Query the owning module for the
-constructors, conversion rules, and available operations.
+constructors, conversion rules, and available operations. Bigfloat helpers
+called without an explicit precision use the runtime default of 256
+significand bits, clamped to the 32..1048576 range.
+`NYTRIX_BIGFLOAT_PRECISION=<bits>` overrides that default (the first use
+caches the value for the remaining run); `core.math.big` pins its own
+`BF_PRECISION = 256` for its constructors, and `bf_with_precision(x,
+precision)` selects per-value precision.
 
 ## Convert explicitly
 
@@ -81,3 +92,9 @@ shapes produce diagnostics. See [Native](../spec/native.md) and
 Keep a scalar implementation as the correctness reference and measure the same
 complete workload before adopting a vector path. Assembly output explains
 lowering, not performance; see [Performance](performance.md).
+
+Next:
+
+- [Types](../spec/types.md) — type and conversion rules.
+- [Native interfaces](native.md) — ABI widths and layouts.
+- [Performance](performance.md) — measure before choosing an optimization.

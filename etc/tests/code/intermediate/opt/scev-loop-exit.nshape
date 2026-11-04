@@ -3,7 +3,7 @@ shape optcheck_scev_loop_exit {
   generator "native"
   features [native x86_64 oracle optcheck scev loop-exit]
   template ny-test-case
-  flags "-O3 --native-backend x86_64 --native-oracle-per-pass --native-result-oracle=49995000 --nyir-pass-stats"
+  flags "-O3 --native-backend x86_64 --native-oracle-per-pass --native-result-oracle=49995000 --nyr-dump=passes"
   expect compile_and_run
   source ny <<'NY'
 mut sum = 0

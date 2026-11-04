@@ -1,0 +1,423 @@
+shape vk-draw {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "sys"]
+  ci skip
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.ui.render.vk.draw as draw
+assert(draw.draw_rect_fast(0.0, 0.0, 10.0, 10.0, 0xffffffff) == 0, "draw rect no frame")
+assert(draw.draw_rect_outline_fast(0.0, 0.0, 10.0, 10.0, 0xffffffff) == 0, "draw outline no frame")
+assert(draw.draw_line_fast(0.0, 0.0, 10.0, 10.0, 1.0, 0xffffffff) == 0, "draw line no frame")
+assert(draw.draw_rect(0.0, 0.0, 10.0, 10.0, 1.0, 0.0, 0.0, 1.0) == 0, "draw rect wrapper no frame")
+assert(draw.draw_rect_tex(0.0, 0.0, 10.0, 10.0, -1, 1.0, 1.0, 1.0, 1.0) == 0, "draw textured rect no frame")
+assert(draw.draw_rect_tex_uv(0.0, 0.0, 10.0, 10.0, -1, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0) == 0, "draw uv rect no frame")
+assert(draw.draw_glyph(0.0, 0.0, 8.0, 8.0, 0.0, 0.0, 1.0, 1.0, -1, 1.0, 1.0, 1.0, 1.0) == 0, "draw glyph no frame")
+assert(draw.draw_vertices(0, 1, -1) == false, "draw vertices no frame")
+assert(draw.draw_vertices_indexed_raw(0, 1, 0, 0, 1) == false, "draw indexed vertices no frame")
+assert(draw.draw_lines_raw(0, 1, 1.0) == false, "draw lines raw no frame")
+assert(draw.draw_points_raw(0, 1) == false, "draw points raw no frame")
+assert(draw.draw_triangle_3d(0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0) == 0, "draw triangle 3d no frame")
+assert(draw.draw_quad_3d(0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 1.0, 1.0) == 0, "draw quad 3d no frame")
+assert(draw.draw_rect_lines_2d(0.0, 0.0, 10.0, 10.0, 1.0, 1.0, 1.0, 1.0, 1.0) == 0, "draw rect lines no frame")
+assert(draw.draw_chamfer_rect_2d(0.0, 0.0, 10.0, 10.0, 2.0, 1.0, 1.0, 1.0, 1.0) == 0, "draw chamfer no frame")
+assert(draw.draw_rounded_rect_2d(0.0, 0.0, 10.0, 10.0, 2.0, 8, 1.0, 1.0, 1.0, 1.0) == 0, "draw rounded no frame")
+assert(draw.draw_fan_2d(0.0, 0.0, 5.0, 5.0, 8, 0.0, 6.28, 1.0, 1.0, 1.0, 1.0) == 0, "draw fan no frame")
+assert(draw.draw_ellipse_lines_2d(0.0, 0.0, 5.0, 5.0, 1.0, 16, 1.0, 1.0, 1.0, 1.0) == 0, "draw ellipse no frame")
+assert(draw.draw_arc_2d(0.0, 0.0, 5.0, 0.0, 3.14, 1.0, 8, 1.0, 1.0, 1.0, 1.0) == 0, "draw arc no frame")
+assert(draw.draw_sector_2d(0.0, 0.0, 1.0, 5.0, 0.0, 3.14, 8, 1.0, 1.0, 1.0, 1.0) == 0, "draw sector no frame")
+assert(draw.draw_star_2d(0.0, 0.0, 2.0, 5.0, 5, 0.0, 1.0, 1.0, 1.0, 1.0) == 0, "draw star no frame")
+assert(draw.draw_line_3d(0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.1, 1.0, 1.0, 1.0, 1.0) == 0, "draw line 3d no frame")
+assert(draw.draw_grid_3d(1.0, 0.5) == 0, "draw grid no frame")
+assert(draw.draw_axes_3d(1.0) == 0, "draw axes no frame")
+assert(draw.draw_line_strip_2d(0.0, 0.0, 10.0, 10.0, [0.0, 1.0], 1.0, 1.0, 1.0, 1.0, 1.0) == 0, "draw line strip no frame")
+assert(draw.draw_static_buffer({"handle": 123, "offset": 0, "count": 3}) == false, "draw static buffer no frame")
+assert(draw.draw_static_buffer_raw(123, 0, 3) == false, "draw static raw no frame")
+assert(draw.draw_static_buffer_indexed({"handle": 123, "offset": 0, "ioffset": 0}, 456, 3) == false, "draw static indexed no frame")
+assert(draw.draw_static_buffer_indexed_raw(123, 0, 456, 0, 3) == false, "draw static indexed raw no frame")
+def axes = draw.mesh_build_axes_3d(1.0, 0.2)
+assert(is_dict(axes), "axis mesh dict")
+assert(axes.get("cnt") == 108, "axis mesh vertex count")
+assert(axes.get("ptr") != 0, "axis mesh allocation")
+free(axes.get("ptr"))
+print("vk_draw_probe ok")
+NY
+}
+
+shape vk-mod {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "sys"]
+  ci skip
+  timeout 300
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.ui.render.vk as vk
+assert(is_str(vk.debug_stage()), "vk debug stage")
+assert(vk.create_texture(1, 1, 0) == -1, "vk create texture no device")
+assert(vk.create_texture_ex(1, 1, 0) == -1, "vk create texture ex no device")
+assert(vk.create_cubemap(1, []) == -1, "vk cubemap no device")
+assert(vk.draw_skybox(-1) == false, "vk skybox no device")
+assert(vk.update_texture_rect(-1, 0, 0, 1, 1, 0) == false, "vk update texture no device")
+assert(vk.texture_size(-1) == 0, "vk texture size no device")
+assert(vk.texture_format(-1) == 0, "vk texture format no device")
+assert(vk.texture_descriptor(-1) == 0, "vk texture descriptor no device")
+assert(vk.destroy_texture(-1) == 0, "vk destroy texture no device")
+assert(vk.read_framebuffer() == 0, "vk read framebuffer no device")
+assert(vk.blit_buffer(0, 1, 1) == 0, "vk blit no device")
+assert(vk.draw_rect_fast(0.0, 0.0, 1.0, 1.0, 0xffffffff) == 0, "vk draw rect no frame")
+assert(vk.draw_line_fast(0.0, 0.0, 1.0, 1.0, 1.0, 0xffffffff) == 0, "vk draw line no frame")
+assert(vk.draw_vertices(0, 1, -1) == false, "vk draw vertices no frame")
+assert(vk.draw_static_buffer({"handle": 1, "offset": 0, "count": 3}) == false, "vk static buffer no frame")
+assert(vk.draw_static_buffer_raw(1, 0, 3) == false, "vk static raw no frame")
+assert(vk.draw_static_buffer_indexed({"handle": 1, "offset": 0, "ioffset": 0}, 2, 3) == false, "vk static indexed no frame")
+assert(vk.draw_static_buffer_indexed_raw(1, 0, 2, 0, 3) == false, "vk static indexed raw no frame")
+def job = vk.tex_job_make(2, "textures/base.png", "image/png", {"filter": 1}, 5, "baseColorTexture")
+assert(job.get("index") == 2 && job.get("material") == 5, "vk texture job wrapper")
+def q = vk.tex_job_queue_make()
+vk.tex_job_queue_push(q, job)
+assert(vk.tex_job_queue_pop(q).get("uri") == "textures/base.png", "vk texture queue wrapper")
+assert(vk.tex_job_queue_pop(q) == 0, "vk texture queue empty")
+def ok = vk.tex_job_result_make(job, 4, 4, "rgba", true)
+assert(vk.tex_job_upload_plan([ok]).len == 1, "vk upload plan wrapper")
+assert(vk.tex_job_cache_key("a.png", "image/png", 1) == vk.tex_job_cache_key("a.png", "image/png", 1), "vk texture cache key stable")
+assert(vk.tex_job_worker_plan(2).get("workers") == 2, "vk worker plan wrapper")
+assert(vk.gltf_pass_plan(0, "OPAQUE").get(0) == vk.GLTF_PASS_OPAQUE, "vk gltf opaque pass")
+assert(vk.gltf_pass_plan(128, "BLEND").len >= 2, "vk gltf blend pass")
+assert(vk.gltf_material_layout().get("base_material_bytes") == 152, "vk material layout")
+assert(vk.gltf_gbuffer_layout().len == 4, "vk gbuffer layout")
+assert(vk.gltf_descriptor_plan().get("texture_array_binding") == 1, "vk descriptor layout")
+assert(vk.gltf_shader_defines(vk.COMPUTE_FEATURE_TRANSMISSION).contains("NY_GLTF_TRANSMISSION"), "vk shader defines")
+assert(vk.gltf_pipeline_key("OPAQUE", true, false, 7).contains("ds=1"), "vk pipeline key")
+assert(vk.gltf_variant_key(1, 2, 3) == "1:2:3", "vk variant key")
+assert(vk.gltf_alpha_sort_key(0.5, 4, 9).get("part") == 9, "vk alpha sort key")
+assert(vk.gltf_unwired_checklist().len >= 5, "vk checklist")
+def parts = [
+   {"idx_buf": 11, "idx_off": 0, "vbuf": 22, "voff": 0, "material": 1, "pipeline": 7, "index_count": 36},
+   {"idx_buf": 11, "idx_off": 0, "vbuf": 22, "voff": 0, "material": 1, "pipeline": 7, "index_count": 36},
+   {"idx_buf": 12, "idx_off": 0, "vbuf": 22, "voff": 0, "material": 2, "pipeline": 7, "index_count": 12}
+]
+assert(vk.indirect_count_groups(parts) == 2, "vk indirect group count")
+def groups = vk.indirect_build_groups(parts)
+assert(groups.len == 2, "vk indirect groups")
+assert(groups.get(0).get("instance_count") == 2, "vk indirect first group instances")
+def cmds = malloc(vk.INDIRECT_CMD_BYTES * groups.len)
+assert(cmds != 0, "vk indirect command allocation")
+assert(vk.indirect_write_group_cmds(cmds, groups, true) == 2, "vk indirect command write")
+assert(load32(cmds, 0) == 36, "vk indirect command index count")
+assert(load32(cmds, 4) == 2, "vk indirect command instance count")
+free(cmds)
+assert(vk.indirect_shader_prepare().contains("DrawIndexedIndirect"), "vk indirect shader")
+assert(vk.cull_aabb_visible([[1.0, 0.0, 0.0, 1.0]], -0.5, -0.5, -0.5, 0.5, 0.5, 0.5), "vk cull visible")
+assert(!vk.cull_aabb_visible([[1.0, 0.0, 0.0, -2.0]], -0.5, -0.5, -0.5, 0.5, 0.5, 0.5), "vk cull hidden")
+assert(vk.cull_stats(10, 4).get("culled") == 6, "vk cull stats")
+assert(vk.cull_shader().contains("visibleAabb"), "vk cull shader")
+print("vk_mod_probe ok")
+NY
+}
+
+shape vk-pipeline {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "sys"]
+  ci skip
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core.os.ui.render.vk.pipeline as pipe
+assert(pipe.shader_pc_bytes() == 256, "push constant byte size")
+assert(pipe.bind_pipeline(0) == 0, "bind default outside frame")
+assert(pipe.push_constants(0, 4) == 0, "push constants outside frame")
+assert(!pipe._ensure_nocull_pipeline(), "nocull pipeline waits for device")
+assert(!pipe._ensure_line_pipeline(), "line pipeline waits for device")
+assert(!pipe._ensure_point_pipeline(), "point pipeline waits for device")
+assert(!pipe._ensure_wire_pipeline(), "wire pipeline waits for device")
+assert(!pipe._ensure_circle_pipeline(), "circle pipeline waits for device")
+assert(!pipe._ensure_ring_pipeline(), "ring pipeline waits for device")
+assert(!pipe._ensure_skybox_pipeline(), "skybox pipeline waits for device")
+assert(pipe._get_default_pipeline() == 0, "default pipeline fallback")
+assert(pipe._get_nocull_pipeline() == 0, "nocull pipeline fallback")
+assert(pipe._get_unlit_nocull_pipeline() == 0, "unlit nocull fallback")
+assert(pipe._get_flip_pipeline() == 0, "flip pipeline fallback")
+assert(pipe._get_flip_unlit_pipeline() == 0, "flip unlit fallback")
+assert(pipe._get_mesh_opaque_pipeline() == 0, "mesh opaque fallback")
+assert(pipe._get_mesh_opaque_nocull_pipeline() == 0, "mesh opaque nocull fallback")
+assert(pipe._get_mesh_opaque_nocull_flip_pipeline() == 0, "mesh opaque nocull flip fallback")
+assert(pipe._get_mesh_opaque_unlit_pipeline() == 0, "mesh opaque unlit fallback")
+assert(pipe._get_mesh_opaque_unlit_nocull_pipeline() == 0, "mesh opaque unlit nocull fallback")
+assert(pipe._get_mesh_opaque_unlit_nocull_flip_pipeline() == 0, "mesh opaque unlit nocull flip fallback")
+assert(pipe._get_mesh_fast_opaque_pipeline() == 0, "fast opaque fallback")
+assert(pipe._get_mesh_fast_opaque_nocull_pipeline() == 0, "fast opaque nocull fallback")
+assert(pipe._get_mesh_fast_opaque_flip_pipeline() == 0, "fast opaque flip fallback")
+assert(pipe._get_mesh_fast_opaque_nocull_flip_pipeline() == 0, "fast opaque nocull flip fallback")
+assert(pipe._get_mesh_fast_env_opaque_pipeline() == 0, "fast env opaque fallback")
+assert(pipe._get_mesh_fast_env_opaque_nocull_pipeline() == 0, "fast env opaque nocull fallback")
+assert(pipe._get_mesh_fast_env_opaque_flip_pipeline() == 0, "fast env opaque flip fallback")
+assert(pipe._get_mesh_fast_env_opaque_nocull_flip_pipeline() == 0, "fast env opaque nocull flip fallback")
+assert(pipe._get_mesh_alpha_pipeline() == 0, "mesh alpha fallback")
+assert(pipe._get_mesh_alpha_nocull_pipeline() == 0, "mesh alpha nocull fallback")
+assert(pipe._get_mesh_alpha_nocull_flip_pipeline() == 0, "mesh alpha nocull flip fallback")
+assert(pipe._get_mesh_alpha_unlit_pipeline() == 0, "mesh alpha unlit fallback")
+assert(pipe._get_mesh_alpha_unlit_nocull_pipeline() == 0, "mesh alpha unlit nocull fallback")
+assert(pipe._get_mesh_alpha_unlit_nocull_flip_pipeline() == 0, "mesh alpha unlit nocull flip fallback")
+assert(pipe._get_mesh_alpha_flip_pipeline() == 0, "mesh alpha flip fallback")
+assert(pipe._get_mesh_alpha_unlit_flip_pipeline() == 0, "mesh alpha unlit flip fallback")
+print("vk_pipeline_probe passed")
+NY
+}
+
+shape vk-renderer {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "sys"]
+  ci skip
+  timeout 300
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.math.matrix
+use core.os.ui.render.vk.renderer as r
+r.renderer_config(false, 0, "", "", 1)
+assert(is_str(r.debug_stage()), "renderer debug stage")
+assert(is_list(r.get_swapchain_size()), "renderer swapchain size type")
+assert(is_int(r.get_swapchain_width()), "renderer swapchain width type")
+assert(is_int(r.get_swapchain_height()), "renderer swapchain height type")
+assert(r.notify_window_resize(0, 1) == false, "renderer reject invalid resize")
+assert(r.notify_window_resize(320, 240) == true, "renderer accept resize")
+assert(r.begin_frame() == false, "renderer begin without device")
+assert(r.end_frame() == false, "renderer end without frame")
+assert(r.clear(0.0, 0.0, 0.0, 1.0) == 0, "renderer clear without frame")
+assert(r.clear_depth() == 0, "renderer clear depth without frame")
+r.set_clear_color(0.1, 0.2, 0.3, 1.0)
+r.set_frame_time_sec(0.016)
+r.set_unlit(true)
+r.set_double_sided(true)
+r.set_vertex_color_mode(1)
+r.set_material([1.0, 0.5, 0.25, 1.0], 0.1, 0.8)
+r.set_material_packed(0xffffffff, 0)
+r.set_cam_pos(1.0, 2.0, 3.0)
+r.set_env_tex(-1)
+r.set_env_spec_tex(-1)
+r.set_mask(0)
+def m = mat4_identity()
+r.set_model_matrix(m)
+r.set_mvp(m)
+r.set_ortho(0.0, 100.0, 0.0, 100.0, -1.0, 1.0)
+r.set_perspective(1.0, 1.0, 0.1, 100.0)
+assert(is_list(r._mvp_matrix()), "renderer mvp matrix")
+def part_slab = malloc(256)
+memset(part_slab, 0, 256)
+assert(r.draw_parts_flat(part_slab, 1, 0) == 0, "renderer flat draw closed frame")
+assert(r.draw_parts_flat_range(part_slab, 0, 1, 0) == 0, "renderer flat range closed frame")
+assert(r.draw_part_flat_no_restore(part_slab, 0, 0) == 0, "renderer flat part closed frame")
+assert(r.draw_part0_flat_no_restore(part_slab) == 0, "renderer part0 inactive slab")
+assert(r.draw_part0_flat_state_no_restore(part_slab) == 0, "renderer part0 state closed frame")
+def mat_slab = malloc(160)
+memset(mat_slab, 0, 160)
+r.set_material_from_slab(mat_slab)
+r.set_scene_lights([])
+def light_slab = malloc(56)
+memset(light_slab, 0, 56)
+r.set_scene_lights_slab(light_slab, 0)
+assert(r._choose_composite_alpha(1, false) == 1, "renderer composite opaque")
+assert(r._choose_present_mode() >= 0, "renderer present mode fallback")
+r.shutdown()
+free(part_slab)
+free(mat_slab)
+free(light_slab)
+print("vk_renderer_probe ok")
+NY
+}
+
+shape vk-texture {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "sys"]
+  ci skip
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.ui.render.vk.texture as tex
+def job = tex.tex_job_make(3, "textures/albedo.png", "image/png", {"filter": 1}, 7, "baseColorTexture")
+assert(job.get("index") == 3, "texture job index")
+assert(job.get("uri") == "textures/albedo.png", "texture job uri")
+assert(job.get("mime") == "image/png", "texture job mime")
+assert(job.get("sampler").get("filter") == 1, "texture job sampler")
+assert(job.get("material") == 7, "texture job material")
+assert(job.get("slot") == "baseColorTexture", "texture job slot")
+def fallback_q = tex.tex_job_queue_push(0, job)
+assert(fallback_q.get("head") == 0, "texture queue fallback head")
+assert(fallback_q.get("items").len == 1, "texture queue fallback push")
+def q = tex.tex_job_queue_make()
+tex.tex_job_queue_push(q, job)
+tex.tex_job_queue_push(q, tex.tex_job_make(4, "textures/normal.png"))
+def first = tex.tex_job_queue_pop(q)
+def second = tex.tex_job_queue_pop(q)
+assert(first.get("index") == 3, "texture queue first")
+assert(second.get("index") == 4, "texture queue second")
+assert(tex.tex_job_queue_pop(q) == 0, "texture queue empty")
+assert(tex.tex_job_queue_pop(0) == 0, "texture queue invalid")
+def result_ok = tex.tex_job_result_make(job, 2, 2, "rgba", true)
+def result_bad = tex.tex_job_result_make(job, 0, 0, 0, false, "decode failed")
+assert(result_ok.get("ok") && result_ok.get("width") == 2 && result_ok.get("height") == 2, "texture result ok")
+assert(!result_bad.get("ok") && result_bad.get("error") == "decode failed", "texture result error")
+def plan = tex.tex_job_upload_plan([result_bad, result_ok, 0])
+assert(plan.len == 1, "texture upload plan filters failed results")
+assert(plan.get(0).get("pixels") == "rgba", "texture upload plan payload")
+assert(tex.tex_job_upload_plan(0).len == 0, "texture upload plan invalid")
+def key_a = tex.tex_job_cache_key("textures/a.png", "image/png", 1)
+def key_a2 = tex.tex_job_cache_key("textures/a.png", "image/png", 1)
+def key_b = tex.tex_job_cache_key("textures/a.png", "image/png", 2)
+assert(key_a == key_a2, "texture cache key stable")
+assert(key_a != key_b, "texture cache key flags")
+assert(key_a.len > 5, "texture cache key shape")
+def worker = tex.tex_job_worker_plan(3)
+assert(worker.get("workers") == 3, "texture worker count")
+assert(worker.get("worker_touches_renderer") == false, "texture worker renderer isolation")
+assert(worker.get("main_thread_upload") == true, "texture worker upload thread")
+assert(worker.get("preserve_material_ids") == true, "texture worker material ids")
+assert(tex.texture_count() >= 0, "texture count available")
+assert(is_int(tex.last_created_texture_id()), "texture last id type")
+assert(tex.material_descriptor(1, 2, 3, 4, 5) == 0, "texture material descriptor no device")
+assert(tex.texture_format(-1) == 37, "texture default format")
+assert(tex.texture_descriptor(123) == 0, "texture descriptor no device")
+assert(tex.set_texture_debug_meta(-1, "x", "y") == false, "texture debug meta invalid id")
+assert(tex.destroy_texture(-1) == 0, "texture destroy invalid id")
+assert(tex.read_framebuffer() == 0, "texture framebuffer no device")
+assert(tex.blit_buffer(0, 1, 1) == 0, "texture blit closed frame")
+print("vk_texture_probe ok")
+NY
+}
+
+shape vk-utils-async {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "sys"]
+  ci skip
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.async as aio
+use core.os.ui.render.vk.state as st
+use core.os.ui.render.vk.utils as vu
+fn near(any a, any b) bool {
+   def d = float(a) - float(b)
+   (d < 0.0 ? -d : d) < 0.0001
+}
+fn byte_buf(list bytes) any {
+   def n = bytes.len
+   def out = malloc(n)
+   assert(out != 0, "byte buffer allocation")
+   mut i = 0
+   while i < n {
+      store8(out, bytes.get(i), i)
+      i += 1
+   }
+   out
+}
+fn inc(any x) any { x + 1 }
+fn square(any x) any { x * x }
+assert(aio.backend() == "stackless", "async backend")
+assert(aio.await(aio.future(inc, 41)) == 42, "async future await")
+def vals = aio.await_all([aio.async(square, 2), aio.Future(square, 3)])
+assert(vals == [4, 9], "async await_all")
+assert(aio.await(aio.yield_now()) == 0, "async yield")
+def color = vu.__vkr_pack_color(1.0, 0.5, 0.0, 1.0)
+assert(((color >> 16) & 255) == 255, "pack color red")
+assert(((color >> 8) & 255) == 127, "pack color green")
+assert((color & 255) == 0, "pack color blue")
+assert(vu._vkr_color_u32([1.0, 0.0, 0.0, 1.0]) != 0, "list color pack")
+def rgba = vu.pack_rgba_u32([1.0, 0.0, 0.5, 1.0])
+assert((rgba & 255) == 255, "rgba red byte")
+assert(((rgba >> 16) & 255) == 128, "rgba blue byte")
+assert(((rgba >> 24) & 255) == 255, "rgba alpha byte")
+def normal_word = vu.pack_normal_tex_word(5, 1, 2.0, false, false, true)
+assert((normal_word & 0xffff) == 5, "normal tex id")
+assert((normal_word & 0x10000) != 0, "normal uv set")
+assert((normal_word & 0x40000) != 0, "normal double-sided bit")
+assert(((normal_word >> 24) & 127) == 127, "normal scale bits")
+def bsdf = {
+   "specular_factor": 1.0,
+   "transmission_factor": 0.5,
+   "sheen_color_factor": [0.25, 0.5, 0.75],
+   "thickness_factor": 2.0,
+   "attenuation_color": [1.0, 0.5, 0.0],
+   "attenuation_distance": 5.0,
+   "clearcoat_factor": 1.0,
+   "anisotropy_strength": 0.5,
+   "diffuse_transmission_factor": 1.0,
+   "refraction_factor": 0.5,
+   "alpha_coverage": 0.25
+}
+assert((vu.pack_bsdf0_u32(bsdf) & 255) == 255, "bsdf0 specular")
+assert((vu.pack_bsdf2_u32(bsdf) & 255) == 63, "bsdf2 sheen red")
+assert((vu.pack_bsdf4_u32(bsdf) & 255) == 255, "bsdf4 clearcoat")
+assert((vu.pack_bsdf5_u32(bsdf) & 255) == 255, "bsdf5 diffuse transmission")
+assert(vu.pack_emissive_u32([2.0, 1.0, 0.0], 2.0) != 0, "emissive packed")
+def mat0 = vu.pack_material_scalar_u32(0x0000ff00, "metallicFactor", 1.0)
+assert((mat0 & 255) == 255, "material metallic scalar")
+assert(((mat0 >> 8) & 255) == 255, "material roughness preserved")
+def alpha0 = vu.pack_alpha_cutoff_u32(0, 0.5)
+assert(((alpha0 >> 8) & 255) == 128, "alpha cutoff")
+def m = malloc(64)
+assert(vu.store_mat4_cm_raw(m, [1.0, 0.0, 0.0, 0.0,
+         0.0, 1.0, 0.0, 0.0,
+         0.0, 0.0, 1.0, 0.0,
+7.0, 8.0, 9.0, 1.0], true), "store plain mat4")
+assert(near(load32_f32(m, 0), 1.0), "mat4 first")
+assert(near(load32_f32(m, 48), 7.0), "mat4 translation x")
+free(m)
+def src = malloc(st.VERTEX_STRIDE * 3)
+def idx = malloc(6)
+assert(src != 0 && idx != 0, "vertex/index allocation")
+vu._vkr_store_vertex(src, 0, 1.0, 0.0, 0.0, 0.0, 0.0, 0xffffffff)
+vu._vkr_store_vertex(src, 1, 2.0, 0.0, 0.0, 0.0, 0.0, 0xffffffff)
+vu._vkr_store_vertex(src, 2, 3.0, 0.0, 0.0, 0.0, 0.0, 0xffffffff)
+store16(idx, 2, 0)
+store16(idx, 0, 2)
+store16(idx, 1, 4)
+def expanded = vu.gltf_expand_indexed_vertices(src, 3, idx, 3, false)
+assert(expanded != 0, "expand indexed vertices")
+assert(near(load32_f32(expanded, 0), 3.0), "expanded first vertex")
+assert(near(load32_f32(expanded, st.VERTEX_STRIDE), 1.0), "expanded second vertex")
+def rewound = vu.gltf_rewind_triangle_vertices(src, 3)
+assert(rewound != 0, "rewind triangle vertices")
+assert(near(load32_f32(rewound, st.VERTEX_STRIDE), 3.0), "rewound second vertex")
+free(src)
+free(idx)
+free(expanded)
+free(rewound)
+def bgra = byte_buf([1, 2, 3, 4])
+vu._vkr_bgra_to_rgba_if_needed(bgra, 4, 44)
+assert(load8(bgra, 0) == 3 && load8(bgra, 2) == 1, "bgra swap")
+free(bgra)
+def mesh = {"tex_id": -1, "count": 0}
+def part = {"mesh": mesh, "mat_idx": 2}
+def raw = {"vptr": 111, "vcnt": 3, "iptr": 222, "icnt": 6, "tex_id": 7, "material_slab": 333}
+def synced = vu.gltf_sync_drawable_part_from_raw(part, raw)
+assert(synced.get("vptr") == 111, "sync part vptr")
+assert(synced.get("mesh").get("count") == 3, "sync mesh count")
+assert(synced.get("mesh").get("tex_id") == 7, "sync mesh texture")
+def anim_part = {"mat_idx": 2, "mesh": {"mat_idx": 2}}
+def overridden = vu.gltf_anim_apply_material_pointer_overrides(anim_part, [
+      {"material": 2, "kind": "baseColorFactor", "value": [0.25, 0.5, 0.75, 1.0]},
+      {"material": 2, "kind": "uvOffset", "slot": "baseColorTexture", "value": [1.0, -1.0]}
+])
+assert(overridden.get("animated_color_override", false), "animated color flag")
+assert(overridden.get("base_uv_xf0", 0) != 0, "animated uv override")
+assert(overridden.get("mesh").get("base_uv_xf0", 0) == overridden.get("base_uv_xf0", 0), "mesh uv sync")
+def slab = vu.pack_material_slab({"base_color_u32": rgba, "material_u32": mat0, "tex_id": 7, "visible": true})
+assert(slab != 0, "material slab allocation")
+assert(load32(slab, 0) == rgba, "material slab base color")
+assert(load32(slab, 4) == mat0, "material slab material word")
+free(slab)
+print("vk_utils_async_probe ok")
+NY
+}

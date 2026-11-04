@@ -1,0 +1,32 @@
+shape case-bool-return {
+  family "probe-suite"
+  generator "regression"
+  features ["ny", "match", "bool", "native-abi"]
+  template ny-test-case
+  expect compile_and_run
+  flags_matrix "--native-only -O0; --native-only -O2; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect_stdout "CASE-BOOL-RETURN-OK"
+  source ny <<'NY'
+fn pred(int value) bool {
+   case value {
+      77 -> true
+      _ -> false
+   }
+}
+fn loop_flag(int count) bool {
+   mut bool found = false
+   mut int i = 0
+   while i < count {
+      if i == count - 1 { found = true }
+      i += 1
+   }
+   found
+}
+assert(pred(77), "case true reaches typed bool return")
+assert(!pred(76), "case false reaches typed bool return")
+assert(loop_flag(3), "loop-carried bool store survives the join")
+assert(!loop_flag(0), "untaken bool loop retains false")
+assert(pred(77) == true, "boxed bool equality")
+print("CASE-BOOL-RETURN-OK")
+NY
+}

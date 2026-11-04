@@ -4,6 +4,9 @@
 The checkout keeps runnable examples under `etc/projects/` and focused runtime
 checks under `etc/tests/`.
 
+Prerequisites: an installed Nytrix compiler; repository checks require the
+checkout and build tools.
+
 ## Runnable Projects
 
 | Area | Files |
@@ -21,7 +24,7 @@ ny etc/projects/conway.ny
 Build a native executable:
 
 ```bash
-ny -o build/conway etc/projects/conway.ny
+ny --output=build/conway etc/projects/conway.ny
 ```
 
 Build the browser Wasm runner:
@@ -68,9 +71,8 @@ ny test --pattern sieve
 Use the benchmark guide for compiler flags, warmups, checksums, and comparative
 measurements; a single fixture run is only a correctness check.
 
-## Related
+Next:
 
 - [Start](start.md) for the first file.
 - [Programs](programs.md) for script and module shape.
 - [Testing](testing.md) for test commands.
-- [Performance](performance.md) for measurement discipline.

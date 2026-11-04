@@ -87,64 +87,59 @@ static inline void nyr_opt_execmem_free(void *mapping, size_t size) {
 
 /* IR builders: every operand slot is explicitly filled so accidental
  * zero-value operands cannot masquerade as valid value ids. */
+static inline nyr_inst_t nyr_opt_inst(nyr_op_t op) {
+  return (nyr_inst_t){.op = op,
+                      .dst = -1,
+                      .a = -1,
+                      .b = -1,
+                      .c = -1,
+                      .d = -1,
+                      .e = -1,
+                      .f = -1};
+}
+
+static inline int nyr_opt_emit_imm(nyr_func_t *f, nyr_op_t op, int64_t imm) {
+  nyr_inst_t inst = nyr_opt_inst(op);
+  inst.imm = imm;
+  return nyr_ir_emit(f, inst);
+}
+
+static inline int nyr_opt_emit_abc(nyr_func_t *f, nyr_op_t op, int a, int b,
+                                   int c) {
+  nyr_inst_t inst = nyr_opt_inst(op);
+  inst.a = a;
+  inst.b = b;
+  inst.c = c;
+  return nyr_ir_emit(f, inst);
+}
+
+static inline int nyr_opt_emit_symbol(nyr_func_t *f, nyr_op_t op,
+                                      const char *symbol) {
+  nyr_inst_t inst = nyr_opt_inst(op);
+  inst.symbol = symbol;
+  return nyr_ir_emit(f, inst);
+}
+
 static inline int nyr_opt_label(nyr_func_t *f, int64_t id) {
-  return nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_LABEL,
-                                     .dst = -1,
-                                     .a = -1,
-                                     .b = -1,
-                                     .c = -1,
-                                     .d = -1,
-                                     .e = -1,
-                                     .f = -1,
-                                     .imm = id});
+  return nyr_opt_emit_imm(f, NYIR_LABEL, id);
 }
 
 static inline int nyr_opt_const(nyr_func_t *f, int64_t v) {
-  return nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_CONST_I64,
-                                     .dst = -1,
-                                     .a = -1,
-                                     .b = -1,
-                                     .c = -1,
-                                     .d = -1,
-                                     .e = -1,
-                                     .f = -1,
-                                     .imm = v});
+  return nyr_opt_emit_imm(f, NYIR_CONST_I64, v);
 }
 
 static inline int nyr_opt_const_f64(nyr_func_t *f, double v) {
   uint64_t bits;
   memcpy(&bits, &v, sizeof(bits));
-  return nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_CONST_F64,
-                                     .dst = -1,
-                                     .a = -1,
-                                     .b = -1,
-                                     .c = -1,
-                                     .d = -1,
-                                     .e = -1,
-                                     .f = -1,
-                                     .imm = (int64_t)bits});
+  return nyr_opt_emit_imm(f, NYIR_CONST_F64, (int64_t)bits);
 }
 
 static inline int nyr_opt_select(nyr_func_t *f, int cond, int tval, int fval) {
-  return nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_SELECT_I64,
-                                     .dst = -1,
-                                     .a = cond,
-                                     .b = tval,
-                                     .c = fval,
-                                     .d = -1,
-                                     .e = -1,
-                                     .f = -1});
+  return nyr_opt_emit_abc(f, NYIR_SELECT_I64, cond, tval, fval);
 }
 
 static inline int nyr_opt_binop(nyr_func_t *f, nyr_op_t op, int a, int b) {
-  return nyr_ir_emit(f, (nyr_inst_t){.op = op,
-                                     .dst = -1,
-                                     .a = a,
-                                     .b = b,
-                                     .c = -1,
-                                     .d = -1,
-                                     .e = -1,
-                                     .f = -1});
+  return nyr_opt_emit_abc(f, op, a, b, -1);
 }
 
 static inline int nyr_opt_cmp(nyr_func_t *f, int a, int b, nyr_cmp_t cmp) {
@@ -160,15 +155,7 @@ static inline int nyr_opt_cmp(nyr_func_t *f, int a, int b, nyr_cmp_t cmp) {
 }
 
 static inline void nyr_opt_br(nyr_func_t *f, int64_t label) {
-  nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_BR,
-                              .dst = -1,
-                              .a = -1,
-                              .b = -1,
-                              .c = -1,
-                              .d = -1,
-                              .e = -1,
-                              .f = -1,
-                              .imm = label});
+  nyr_opt_emit_imm(f, NYIR_BR, label);
 }
 
 static inline void nyr_opt_br_if(nyr_func_t *f, int cond, int64_t label) {
@@ -184,14 +171,7 @@ static inline void nyr_opt_br_if(nyr_func_t *f, int cond, int64_t label) {
 }
 
 static inline void nyr_opt_ret(nyr_func_t *f, int value) {
-  nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_RET,
-                              .dst = -1,
-                              .a = value,
-                              .b = -1,
-                              .c = -1,
-                              .d = -1,
-                              .e = -1,
-                              .f = -1});
+  nyr_opt_emit_abc(f, NYIR_RET, value, -1, -1);
 }
 
 /* Two-entry PHI with explicit predecessor labels; entry blocks are

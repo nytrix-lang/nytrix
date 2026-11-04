@@ -1,4 +1,7 @@
+<!-- nytrix-doc: {"audience":"contributor","featured":false,"group":"spec","order":47,"summary":"Embed the Nytrix runtime and execute source or NYIR through its C ABI."} -->
 # Nytrix Embedding API
+
+> **Note:** Usually needed only when embedding Nytrix in a host application.
 
 `<nytrix/nytrix.h>` provides a C ABI for embedding Nytrix in hosts such as
 Lisp and Lua. A host builds or imports NYIR functions through the
@@ -12,6 +15,12 @@ connect NYIR calls to its own functions. NYIR values are raw 64-bit words.
 Opaque value handles root GC-managed words and marshal nil, booleans, signed
 64-bit integers, doubles, and byte strings. Other Ny object layouts remain
 host-managed.
+
+## Contents
+
+- [Run programs and manage the runtime](#running-complete-programs)
+- [Lifecycle, host calls, and values](#lifecycle-and-ownership)
+- [Rooting and marshalling](#rooting-and-marshalling-values)
 
 ## Running complete programs
 
@@ -260,3 +269,9 @@ and Nyr API. Consumers include the installed headers and link `nytrixrt`.
 Standalone NYIR frontends that need
 verification, optimization, interpretation, and object emission without the
 Ny runtime should use the [Nyr API](nyr.md).
+
+## Related
+
+- [Nyr](nyr.md) for standalone NYIR construction and execution.
+- [Runtime](runtime.md) for process, ownership, and cleanup behavior.
+- [Native](native.md) for ABI and target requirements.

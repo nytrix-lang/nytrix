@@ -2,34 +2,61 @@ shape gcbench {
   family "perf-real"
   generator "stress"
   features ["perf", "gc", "alloc", "c-vs-ny", "native", "checksum", "time"]
+  budget {
+    max_native_c_ratio 2.0
+    max_native_llvm_ratio 2.0
+  }
   template ny-test-case
   expect compile_and_run
   source ny <<'NY'
 use core
 use core.os.time
 ;; Mixed-depth tree allocation with partial retention (GC survivability).
+mut ptr retained = malloc_raw(500000 * 8)
+mut retained_count = 0
+@effects(all)
 fn tree_count(int depth) int {
-   def n = [depth]
-   if depth <= 0 { return 1 }
-   1 + tree_count(depth - 1) + tree_count(depth - 1)
+   def ptr n = calloc_raw(32 + 8 * 8)
+   store64_i(n, depth)
+   mut count = depth + 1
+   if depth > 0 {
+      count += tree_count(depth - 1) + tree_count(depth - 1)
+   }
+   if depth % 3 == 0 {
+      store64(retained, n, retained_count * 8)
+      retained_count += 1
+   } else {
+      free_raw(n)
+   }
+   count
 }
+def shallow_depth = 3 + argc() % 2
+def deep_depth = 9 + argc() % 2
 def int t0 = ticks()
 mut total = 0
 mut i = 0
 while i < 1000 {
-   def c = tree_count(4)
+   def c = tree_count(shallow_depth)
    if i % 2 == 0 { total += c }
    i += 1
 }
 i = 0
 while i < 200 {
-   def c2 = tree_count(10)
+   def c2 = tree_count(deep_depth)
    if i % 3 == 0 { total += c2 }
    i += 1
 }
+total += retained_count
 def int t1 = ticks()
 print("checksum=", total)
 print("elapsed_ns=", t1 - t0)
+i = 0
+while i < retained_count {
+   def ptr n = load64(retained, i * 8)
+   free_raw(n)
+   i += 1
+}
+free_raw(retained)
 NY
   source c <<'C'
 #include <stdint.h>
@@ -43,26 +70,46 @@ static int64_t now_ns(void) {
     return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
 }
 
+static long **retained;
+static int retained_count;
+
 static long tree_count(int depth) {
-    long *n = (long *)malloc(16);
+    /* Match the Ny minimum tbuf capacity: 32-byte header plus eight slots. */
+    long *n = (long *)calloc(1, 32 + 8 * sizeof(*n));
+    if (!n) return 0;
     n[0] = (long)depth;
-    if (depth <= 0) return 1;
-    return 1 + tree_count(depth - 1) + tree_count(depth - 1);
+    long count = (long)depth + 1;
+    if (depth > 0)
+        count += tree_count(depth - 1) + tree_count(depth - 1);
+    if (depth % 3 == 0)
+        retained[retained_count++] = n;
+    else
+        free(n);
+    return count;
 }
 
-int main(void) {
+int main(int argc, char **argv) {
+    (void)argv;
+    retained = (long **)malloc(500000 * sizeof(*retained));
+    if (!retained) return 1;
+    int shallow_depth = 3 + argc % 2;
+    int deep_depth = 9 + argc % 2;
     int64_t start = now_ns();
     long total = 0;
     for (int i = 0; i < 1000; i++) {
-        long c = tree_count(4);
+        long c = tree_count(shallow_depth);
         if (i % 2 == 0) total += c;
     }
     for (int i = 0; i < 200; i++) {
-        long c = tree_count(10);
+        long c = tree_count(deep_depth);
         if (i % 3 == 0) total += c;
     }
     int64_t end = now_ns();
+    total += retained_count;
     printf("checksum=%ld\n", total);
+    for (int i = 0; i < retained_count; i++)
+        free(retained[i]);
+    free(retained);
     if (end <= start) end = start + 1;
     printf("elapsed_ns=%lld\n", (long long)(end - start));
     return 0;

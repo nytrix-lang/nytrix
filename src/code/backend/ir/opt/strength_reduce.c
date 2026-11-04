@@ -569,20 +569,6 @@ bool nyr_strength_reduce(nyr_func_t *f) {
       if (!nyr_strength_recover_const(f, facts, fact_count, in->b, &divisor))
         continue;
       bool power_of_two = divisor > 1 && (divisor & (divisor - 1)) == 0;
-      /*
-       * The x86 native backend miscompiles the expanded signed-division
-       * sequence in nested, unrolled loops. Keep the original operation
-       * unless range analysis proves the dividend nonnegative.
-       */
-      if (power_of_two && in->op == NYIR_DIV_I64 && !dividend_nonnegative) {
-        if (nyr_strength_trace_enabled())
-          ny_dbg_heuristic_event(
-              "STRENGTH_REDUCE",
-              "reject signed div @%zu: divisor=%lld without nonnegative "
-              "dividend proof",
-              i, (long long)divisor);
-        continue;
-      }
       if (!dividend_nonnegative && in->op == NYIR_MOD_I64 && power_of_two) {
         if (nyr_strength_trace_enabled())
           ny_dbg_heuristic_event(
@@ -598,12 +584,77 @@ bool nyr_strength_reduce(nyr_func_t *f) {
         int shift = 0;
         for (int64_t v = divisor; v > 1; v >>= 1)
           ++shift;
-        if (in->op == NYIR_DIV_I64)
-          replacement = shift;
         int saved_dst = in->dst;
         int saved_a = in->a;
         nyr_strength_result_metadata_t metadata =
             nyr_strength_result_metadata(in);
+        if (in->op == NYIR_DIV_I64 && !dividend_nonnegative) {
+          /*
+           * Truncating signed division by 2^shift is
+           * (x + ((x >> 63) & (2^shift - 1))) >> shift.
+           * x86 machine lowering fuses this exact single-use sequence back to
+           * its immediate-divisor form, avoiding the old nested-loop emitter
+           * bug while keeping the general IR semantics explicit.
+           */
+          if (shift >= 31)
+            continue;
+          int sign_shift_value = f->next_value++;
+          int sign_value = f->next_value++;
+          int mask_value = f->next_value++;
+          int bias_value = f->next_value++;
+          int biased_value = f->next_value++;
+          int shift_value = f->next_value++;
+          if (!nir_ensure_inst_space(f, 6)) {
+            free(facts);
+            free(uses);
+            return false;
+          }
+          memmove(&f->data[i + 6], &f->data[i],
+                  (f->len - i) * sizeof(*f->data));
+          f->len += 6;
+          f->data[i] = (nyr_inst_t){.op = NYIR_CONST_I64,
+                                    .dst = sign_shift_value,
+                                    .a = -1,
+                                    .b = -1,
+                                    .imm = 63};
+          f->data[i + 1] = (nyr_inst_t){.op = NYIR_SAR_I64,
+                                        .dst = sign_value,
+                                        .a = saved_a,
+                                        .b = sign_shift_value};
+          f->data[i + 2] = (nyr_inst_t){.op = NYIR_CONST_I64,
+                                        .dst = mask_value,
+                                        .a = -1,
+                                        .b = -1,
+                                        .imm = replacement};
+          f->data[i + 3] = (nyr_inst_t){.op = NYIR_AND_I64,
+                                        .dst = bias_value,
+                                        .a = sign_value,
+                                        .b = mask_value};
+          f->data[i + 4] = (nyr_inst_t){.op = NYIR_ADD_I64,
+                                        .dst = biased_value,
+                                        .a = saved_a,
+                                        .b = bias_value};
+          f->data[i + 5] = (nyr_inst_t){.op = NYIR_CONST_I64,
+                                        .dst = shift_value,
+                                        .a = -1,
+                                        .b = -1,
+                                        .imm = shift};
+          f->data[i + 6] = (nyr_inst_t){.op = NYIR_SAR_I64,
+                                        .dst = saved_dst,
+                                        .a = biased_value,
+                                        .b = shift_value};
+          nyr_strength_apply_result_metadata(&f->data[i + 6], metadata);
+          if (nyr_strength_trace_enabled())
+            ny_dbg_heuristic_event(
+                "STRENGTH_REDUCE",
+                "accept signed div @%zu dst=v%d: divisor=%lld; create "
+                "truncating bias sequence for machine fusion",
+                i, saved_dst, (long long)divisor);
+          i += 6;
+          continue;
+        }
+        if (in->op == NYIR_DIV_I64)
+          replacement = shift;
         nyr_op_t replacement_op =
             in->op == NYIR_DIV_I64 ? NYIR_SAR_I64 : NYIR_AND_I64;
         if (nyr_strength_trace_enabled())
@@ -646,7 +697,7 @@ bool nyr_strength_reduce(nyr_func_t *f) {
          * An earlier attempt at this rewrite used the low 64 bits of the
          * product, SAR, and a naive 2*r1 update whose overflow zeroed r1 and
          * made the search loop spin forever on real IR (repro: gcbench's
-         * rt_main at --nyir-dump with PHIs preserved, divisor 3).  It never
+         * rt_main at --nyr-dump with PHIs preserved, divisor 3).  It never
          * emitted correct code for any divisor, so it is removed rather than
          * patched; revisit with NYIR_SHR_I64 + NYIR_MULHI_I64 in place.
          */

@@ -1,0 +1,75 @@
+shape five_argument_binding {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "abi", "regression", "tailcall"]
+  template ny-test-case
+  flags_matrix "--native -O0 --run; --native -O3 --run; --native-backend=llvm -O0 --run; --native-backend=llvm -O3 --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+; Parameter classification must respect lexical shadowing of module values.
+def c = {"global": 99}
+def d = [99]
+
+fn check5(int a, int b, int c, int d, int e) {
+   assert(a == 1, "five arguments: first slot")
+   assert(b == 2, "five arguments: second slot")
+   assert(c == 3, "five arguments: third slot")
+   assert(d == 4, "five arguments: fourth slot")
+   assert(e == 5, "five arguments: fifth slot")
+}
+fn mixed5(int a, int b, str c, int d, int e) {
+   assert(a == 1 && b == 2 && c == "three" && d == 4 && e == 5,
+          "five arguments: mixed string and integer slots")
+}
+fn dynamic5(any a, str b, int c, int d, str e) {
+   assert(a == 1 && b == "two" && c == 3 && d == 4 && e == "five",
+          "five arguments: dynamic and string slots")
+}
+fn dict5(any a, str b, int c, dict d, int e) {
+   assert(a == 1 && b == "two" && c == 3 && d.get("key") == 4 && e == 5,
+          "five arguments: dynamic, string, integer, dictionary, integer")
+}
+fn recurse_mixed5(any a, str b, int c, dict d, int e) int {
+   d["count"] = int(d.get("count", 0)) + 1
+   if e == 0 {
+      if a != 1 || b != "two" || c != 3 { return -100 }
+      return c + int(d.get("count"))
+   }
+   return recurse_mixed5(a, b, c, d, e - 1)
+}
+fn recurse5(int a, int b, int c, int d, int e) list {
+   if a >= 4 { return [a, b, c, d, e] }
+   return recurse5(a + 1, b + 2, c + 4, d + 8, e + 16)
+}
+@tailcall
+fn tail5(int a, int b, int c, int d, int e) list {
+   if a >= 4 { return [a, b, c, d, e] }
+   return tail5(a + 1, b + 2, c + 4, d + 8, e + 16)
+}
+fn check_result(list result) {
+   assert(result.get(0) == 4 && result.get(1) == 6 &&
+          result.get(2) == 12 && result.get(3) == 24 && result.get(4) == 48,
+          "five arguments: recursive slot increments")
+}
+check5(1, 2, 3, 4, 5)
+mixed5(1, 2, "three", 4, 5)
+dynamic5(1, "two", 3, 4, "five")
+dict5(1, "two", 3, {"key":4}, 5)
+assert(recurse_mixed5(1, "two", 3, {"count":0}, 2) == 6,
+       "five arguments: recursive expanded ABI slots")
+check_result(recurse5(1, 0, 0, 0, 0))
+check_result(tail5(1, 0, 0, 0, 0))
+; The fixture supplies no user arguments, so this runtime string is empty.
+def one = argv(1).len + 1
+check5(one, one + 1, one + 2, one + 3, one + 4)
+mixed5(one, one + 1, "three", one + 3, one + 4)
+dynamic5(one, "two", one + 2, one + 3, "five")
+dict5(one, "two", one + 2, {"key":one + 3}, one + 4)
+assert(recurse_mixed5(one, "two", one + 2, {"count":0}, 2) == 6,
+       "five arguments: recursive expanded ABI slots with runtime inputs")
+check_result(recurse5(one, 0, 0, 0, 0))
+check_result(tail5(one, 0, 0, 0, 0))
+NY
+}

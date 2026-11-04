@@ -1,0 +1,16 @@
+shape ui_imported_scalar_state {
+  family "runtime/input"
+  generator "embedded"
+  features [ny ui module-globals initialization differential]
+  template ny-test-case
+  flags_matrix "--native-only --native-tier=baseline -O0; --native-backend=llvm --jit --jit-engine=mcjit -O0; --native-backend=llvm --jit --jit-engine=orc -O0; --nyr-run"
+  expect compile_and_run
+  expect_message "UI-IMPORTED-STATE-OK"
+  source ny <<'NY'
+use core
+use core.os.ui.window as window
+assert(window._replay_poll_frame == 1, "imported replay clock retains its nonzero initializer")
+assert(window._replay_events_applied_frame == 0, "zero initializer is preserved")
+print("UI-IMPORTED-STATE-OK")
+NY
+}

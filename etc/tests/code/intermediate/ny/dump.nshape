@@ -1,9 +1,9 @@
 shape nyir_dump {
   family "runtime-native"
   generator "native"
-  features ["native", "nyir", "dump", "optimizer"]
+  features ["native", "nyr", "dump", "optimizer"]
   template ny-test-case
-  flags "--nyir-dump --nyir-dump-raw --nyir-dump-stats --nyir-dump-bin"
+  flags "--nyr-dump=raw,stats --dump-nyr"
   expect compile_and_run
   expect_exit 7
   source ny <<'NY'

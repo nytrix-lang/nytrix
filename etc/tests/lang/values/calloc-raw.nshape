@@ -1,0 +1,57 @@
+shape calloc_raw_zeroes_memory_and_can_be_freed {
+  family "runtime/values"
+  generator "embedded"
+  features ["ny", "test", "runtime", "allocation", "raw-memory"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+extern "c" {
+   ;; C _Bool occupies the low byte of the integer return register.
+   fn rt_raw_ptr_registered(ptr address) u8
+}
+
+@noinline
+fn allocate_dynamic(any bytes) ptr { __calloc_raw(bytes) }
+
+@inline
+fn allocate_inline(any bytes) ptr { __calloc_raw(bytes) }
+
+def ptr p = calloc_raw(17)
+assert(p != nil, "calloc_raw returns an allocation")
+assert(load64(p, 0) == 0, "calloc_raw zeroes the first word")
+assert(load64(p, 8) == 0, "calloc_raw zeroes the second word")
+store64(p, 73, 8)
+assert(load64(p, 8) == 73, "calloc_raw memory is writable")
+store8(p, 42, 16)
+assert(load8(p, 16) == 42, "calloc_raw preserves odd allocation sizes")
+free_raw(p)
+
+def ptr intrinsic = __calloc_raw(17)
+assert(rt_raw_ptr_registered(intrinsic) != 0, "intrinsic allocation base is registered")
+assert(rt_raw_ptr_registered(intrinsic + 16) != 0,
+   "native intrinsic allocates all 17 requested bytes")
+assert(rt_raw_ptr_registered(intrinsic + 17) == 0,
+   "intrinsic range excludes its end address")
+assert(load8(intrinsic, 16) == 0, "intrinsic zeroes its last requested byte")
+free_raw(intrinsic)
+
+def int bytes = 31 + 2 * argc()
+def ptr dynamic = allocate_dynamic(bytes)
+assert(rt_raw_ptr_registered(dynamic + (bytes - 1)) != 0,
+   "dynamic any size is converted exactly once")
+assert(rt_raw_ptr_registered(dynamic + bytes) == 0,
+   "dynamic allocation range excludes its end address")
+free_raw(dynamic)
+
+def ptr inlined = allocate_inline(33)
+assert(rt_raw_ptr_registered(inlined + 32) != 0,
+   "inlined any integer preserves its requested allocation size")
+assert(rt_raw_ptr_registered(inlined + 33) == 0,
+   "inlined any integer is decoded exactly once")
+free_raw(inlined)
+0
+NY
+}

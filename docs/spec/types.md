@@ -5,6 +5,12 @@ Types describe the values a binding, parameter, return value, or container may
 hold. Start with the concrete type you expect; use `?T` only when absence is a
 possible result, and use `any` at a dynamic boundary.
 
+## Contents
+
+- [Everyday types](#everyday-forms)
+- [Refinements and proofs](#proof-and-refinement-types)
+- [Related runtime and ABI rules](#related)
+
 ## Everyday forms
 
 | Write | Meaning | Common use |
@@ -17,11 +23,6 @@ possible result, and use `any` at a dynamic boundary.
 | `enum Name` | A finite set of variants. | State and alternatives. |
 | `layout Name` | An ABI-shaped record. | FFI and raw memory only. |
 
-Pointers (`*T`), `handle`, and `fnptr` are distinct. Use `layout` for a
-record whose field order and representation are part of an ABI; use `struct`
-for an ordinary Nytrix value. Do not use a handle as a pointer unless the
-foreign API documents that conversion.
-
 ```ny
 layout Pixel {
    u8 r,
@@ -30,6 +31,23 @@ layout Pixel {
    u8 a
 }
 ```
+
+## Rules
+
+1. Prefer a concrete type. Use `?T` when `nil` is a valid result and `any` at a
+   dynamic boundary.
+2. Use `struct` for ordinary records and `layout` when field order and
+   representation are part of an ABI. Pointers, handles, and `fnptr` remain
+   distinct types.
+3. A refinement keeps its base representation and adds a compile-time
+   predicate; construction or calls require the compiler to prove that
+   predicate.
+4. `Fin<N>` requires a positive compile-time bound and proves
+   `0 <= value < N`. `proof<P>` is erased compile-time evidence, not a runtime
+   boolean.
+
+Do not use a handle as a pointer unless the foreign API documents that
+conversion.
 
 See [Native](native.md) for headers, ownership, strings, packing, and alignment.
 
@@ -45,8 +63,19 @@ refine Even = int where (v) { v % 2 == 0 }
 refine Positive = int where (v) { v > 0 }
 refine PositiveEven = Even where (v) { Positive(v) }
 
-assert(PositiveEven(4), "positive even")
+def PositiveEven n = 4
+assert(n == 4, "positive even binding")
+assert(Even(6), "even membership")
 ```
+
+> **Current limitation:** the intersection is enforced when a value is bound
+> or passed as a `PositiveEven`; `def PositiveEven n = 5` and `= -4` are both
+> rejected at compile time. Calling a refinement of a refinement as a
+> membership test, `PositiveEven(x)`, does not yet evaluate the intersection:
+> inside `assert` it was false for every value tried (4, 5, 6, -4), and at run
+> time it checked only the outer predicate (`PositiveEven(5)` returned true).
+> Use a base refinement such as `Even(6)` for membership tests. Observed on
+> `0.10.0+git.f05fdb2f6816`, 2026-10-29.
 
 `refine X = Base where (v) { pred }` introduces a new nominal type `X` whose
 representation is exactly `Base` (ABI-preserving), carrying the predicate as a

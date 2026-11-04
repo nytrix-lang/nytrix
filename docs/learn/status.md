@@ -6,6 +6,9 @@ execution routes, but code generation and host APIs have route-specific limits.
 For a project, test the features, ABI signatures, and host services it needs on
 the target it will use.
 
+Prerequisites: none; check the compiler revision and target before using this
+status information.
+
 ## Where Nytrix fits
 
 Small tools, native experiments, and compiler research can use C interop and
@@ -21,14 +24,15 @@ the owned native backend or in a browser.
 | Goal | Command | Boundary |
 | --- | --- | --- |
 | Run a file during development | `ny file.ny` | Default route; LLVM JIT on supported builds. |
-| Build and run an executable | `ny -run file.ny` | AOT compilation followed by execution. |
-| Save an executable | `ny -o app file.ny` | AOT compilation without execution; needs a compatible target to run. |
+| Build and run an executable | `ny --run=aot file.ny` | AOT compilation followed by execution. |
+| Save an executable | `ny --output=app file.ny` | AOT compilation without execution; needs a compatible target to run. |
 | Require the owned native path | `ny --native-only file.ny` | NYIR and native JIT; unsupported shapes fail without LLVM fallback. |
-| Emit WebAssembly | `ny --wasm file.ny` | Wasm target with explicit imports and its supported runtime surface. |
+| Emit WebAssembly | `ny --native-backend=wasm --emit=wasm=app.wasm file.ny` | Wasm target with explicit imports and its supported runtime surface. |
 | Test browser behavior | `./make web-test` | Browser host contract and browser-specific fixtures. |
-| Inspect interpreted NYIR | `ny --nyir-run file.ny` | Diagnostic VM, not native or LLVM execution. |
+| Inspect interpreted NYR | `ny --nyr-run file.ny` | Diagnostic VM, not native or LLVM execution. |
 
-`-o` implies compile-only. Combine `--native-only` with `-run` or `-o` when
+`--output` implies compile-only. Combine `--native-only` with `--run=aot` or
+`--output` when
 checking an AOT artifact rather than native JIT execution. Command defaults
 and available backends depend on the build; `ny --help` reports its options.
 See [Native](../spec/native.md) for target and ABI rules, [REPL](repl.md) for
@@ -61,20 +65,22 @@ interactive execution, and [Browser](browser.md) for browser capabilities.
 inputs and execution routes, not every member of a feature family. Changelog
 results are historical evidence, not a test of the current checkout.
 
-## Documentation smoke limitations
+## Previously observed smoke findings
 
-The 2026-10-22 manual smoke used `build/release/ny-full`
-(`0.10.0+git.60f30d2f0220`) on the default LLVM route, with
-`NYTRIX_STD_CACHE=0` and `NYTRIX_STD_BC_CACHE_AUTO=0`. It exposed these
-source-shape failures. They are implementation limits, not changes to the
-language contracts:
+A manual smoke on 2026-10-22 (`0.10.0+git.60f30d2f0220`, default route,
+library caches disabled) found four source-shape failures. Later fixes cover
+the dictionary setter reassignment, top-level `is_nil` folding, atomic
+tagged-word updates, and deferred mutation of captured locals. The defer and
+loop-capture fixtures now check LIFO mutation, integer and floating-point
+slots, panic unwinding, null callbacks, and registration-time snapshots across
+native JIT, native-only, LLVM MCJIT/ORC, and the diagnostic VM.
 
-| Source shape | Observed failure |
-| --- | --- |
-| Reassigning `counts = counts.set(...)` on a mutable `dict()` accumulator | The cookbook's two-increment check read `0` instead of `2`. In-place mutation is shown in the cookbook; the setter-return path is not established by that example. |
-| A top-level `def any boxed = nil` followed by `is_nil(boxed)` and `type(boxed)` | The value-specification example failed its dynamic nil identity assertion. |
-| Defers appending to a local string captured from a function | The control-flow example did not produce the specified `"ba"` at scope exit. |
-| `atomic_add` followed by `atomic_load` on an `atomic_i64` cell | The runtime example did not read the updated value `1`, including with qualified calls to `core.os.atomic`. |
+These are historical observations, not current route limitations. See the
+[changelog](../CHANGELOG.md#compiler-gates-and-optimization-evidence) for the
+defer fix and its focused test command.
 
-The affected examples describe the intended contract and identify their known
-failures. These observations cover only the tested route and compiler revision.
+Next:
+
+- [Testing](testing.md) — run a target-specific fixture.
+- [Troubleshooting](troubleshooting.md) — investigate an unsupported path.
+- [Execution pipeline](../spec/pipeline.md) — identify backend boundaries.

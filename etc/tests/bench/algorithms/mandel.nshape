@@ -4,8 +4,8 @@ shape mandel {
   features ["c-vs-ny", "checksum", "headless"]
   template ny-test-case
   expect compile_and_run
-  ;; Translated from the QBE minic test: minic/test/mandel.c (headless kernel).
   source ny <<'NY'
+;; inspired from QBE: minic/test/mandel.c.
 mut checksum = 0
 mut x = 0
 while x < 80 {

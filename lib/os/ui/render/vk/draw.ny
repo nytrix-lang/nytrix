@@ -484,9 +484,7 @@ fn _draw_static_cpu_copy(any p,
    cmd_draw(cb, count, 1, first_vert, 0)
    _vertex_offset += bytes
    _last_flush_offset = _vertex_offset
-   _total_draw_calls += 1
-   _frame_draw_calls += 1
-   _frame_static_draw_calls += 1
+   vk_state.record_draw_call(false, false)
    true
 }
 
@@ -745,10 +743,7 @@ fn draw_vertices_indexed_raw(any p,
    cmd_draw_indexed(cb, index_count, 1, 0, first_vert, 0)
    _vertex_offset += bytes
    _last_flush_offset = _vertex_offset
-   _total_draw_calls += 1
-   _frame_draw_calls += 1
-   _frame_dynamic_draw_calls += 1
-   _frame_indexed_draw_calls += 1
+   vk_state.record_draw_call(true, true)
    true
 }
 
@@ -1600,9 +1595,7 @@ fn draw_static_buffer_raw(any buf,
    def first_vertex = _bind_static_vertex_buffer(cb, buf, voff)
    if first_vertex < 0 { return false }
    cmd_draw(cb, count, 1, first_vertex, 0)
-   _total_draw_calls += 1
-   _frame_draw_calls += 1
-   _frame_static_draw_calls += 1
+   vk_state.record_draw_call(false, false)
    true
 }
 
@@ -1640,10 +1633,7 @@ fn draw_static_buffer_indexed_raw(any buf,
    if first_vertex < 0 { return false }
    def first_index = _bind_static_index_buffer(cb, idx_buf, ioff, index_type)
    cmd_draw_indexed(cb, index_count, 1, first_index, first_vertex, 0)
-   _total_draw_calls += 1
-   _frame_draw_calls += 1
-   _frame_static_draw_calls += 1
-   _frame_indexed_draw_calls += 1
+   vk_state.record_draw_call(false, true)
    true
 }
 

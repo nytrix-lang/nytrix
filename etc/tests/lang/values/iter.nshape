@@ -39,6 +39,8 @@ assert(it.drop([7], 1) == [], "drop single item list")
 assert(it.drop("z", 1) == "", "drop single item string")
 assert(it.reverse([1, 2, 3]) == [3, 2, 1], "reverse list")
 assert(it.reverse("abc") == "cba", "reverse string")
+assert(it.reverse("MMMMDCLXXII") == "IIXXLCDMMMM",
+       "reverse string with mixed Roman numeral characters")
 assert(it.reverse([]) == [], "reverse empty list")
 assert(it.reverse("") == "", "reverse empty string")
 assert(it.reverse([5]) == [5], "reverse single item list")

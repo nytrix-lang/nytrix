@@ -13,6 +13,8 @@
 #include "base/util.h"
 #include "base/version.h"
 #include "cmd/ny/repl/repl.h"
+#include "code/backend/abi.h"
+#include "code/backend/internal.h"
 #include "code/backend/ir/module.h"
 #include "code/backend/llvm/bridge.h"
 #include "code/backend/native.h"
@@ -42,6 +44,7 @@
 #include <llvm-c/Support.h>
 #include <llvm-c/Transforms/PassBuilder.h>
 #include <llvm/Config/llvm-config.h>
+#include <nyr/nyr.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -51,8 +54,7 @@
 #include <dlfcn.h>
 #include <sys/wait.h>
 #endif
-#if defined(__linux__) && defined(__x86_64__)
-#include <dlfcn.h>
+#ifdef __linux__
 #include <elf.h>
 #endif
 
@@ -65,11 +67,43 @@
 #else
 #include <io.h>
 #endif
-#if defined(__linux__) && defined(__x86_64__)
-#include <elf.h>
-#endif
 #include <ctype.h>
 #include <stdarg.h>
+
+static void ny_log_saved_artifact(const char *path, const char *kind) {
+  struct stat st;
+  if (path && strcmp(path, "-") != 0 && stat(path, &st) == 0 &&
+      st.st_size >= 0) {
+    uintmax_t bytes = (uintmax_t)st.st_size;
+    char display_size[64];
+    if (bytes >= UINT64_C(1000000))
+      snprintf(display_size, sizeof(display_size), "%.2f MB",
+               (double)bytes / 1000000.0);
+    else if (bytes >= UINT64_C(1000))
+      snprintf(display_size, sizeof(display_size), "%.2f KB",
+               (double)bytes / 1000.0);
+    else
+      snprintf(display_size, sizeof(display_size), "%" PRIuMAX " bytes", bytes);
+    if (bytes >= UINT64_C(1000))
+      NY_LOG_SUCCESS("Saved %s: %s (%s; %" PRIuMAX " bytes)\n", kind, path,
+                     display_size, bytes);
+    else
+      NY_LOG_SUCCESS("Saved %s: %s (%s)\n", kind, path, display_size);
+    return;
+  }
+  NY_LOG_SUCCESS("Saved %s: %s\n", kind ? kind : "artifact",
+                 path ? path : "(unknown)");
+}
+
+static void ny_log_saved_native_artifact(const char *path) {
+#ifdef _WIN32
+  ny_log_saved_artifact(path, "EXE");
+#elif defined(__APPLE__)
+  ny_log_saved_artifact(path, "Mach-O");
+#else
+  ny_log_saved_artifact(path, "ELF");
+#endif
+}
 
 static bool ny_pipeline_write_callgraph_for_program(const program_t *prog,
                                                     const ny_options *opt,
@@ -389,6 +423,7 @@ static LLVMModuleRef ny_prepare_ir_dump_module(const ny_options *opt,
                                                LLVMModuleRef module);
 static bool ny_is_llvm_special_global(const char *name);
 static void ny_ensure_parent_dir_for_path(const char *path);
+static bool ny_output_path_is_object(const char *path);
 
 typedef struct {
   int64_t (*entry)(void);
@@ -425,9 +460,614 @@ static int ny_native_jit_safe_child(void *raw) {
   return (int)(result & 0xff);
 }
 
+static bool ny_native_bare_symbol_valid(const char *symbol) {
+  if (!symbol || !symbol[0] ||
+      !((symbol[0] >= 'A' && symbol[0] <= 'Z') ||
+        (symbol[0] >= 'a' && symbol[0] <= 'z') || symbol[0] == '_'))
+    return false;
+  for (const char *p = symbol + 1; *p; ++p)
+    if (!((*p >= 'A' && *p <= 'Z') || (*p >= 'a' && *p <= 'z') ||
+          (*p >= '0' && *p <= '9') || *p == '_'))
+      return false;
+  return true;
+}
+
+static bool ny_native_bare_link(const char *cc, const char *object_path,
+                                const char *output_path,
+                                const char *entry_symbol) {
+  if (!object_path || !output_path)
+    return false;
+#ifdef __linux__
+  FILE *object = fopen(object_path, "rb");
+  Elf64_Ehdr header = {0};
+  bool is_elf64 = object &&
+                  fread(&header, 1, sizeof(header), object) == sizeof(header) &&
+                  header.e_ident[EI_CLASS] == ELFCLASS64;
+  if (object)
+    fclose(object);
+  if (is_elf64 &&
+      (header.e_machine == EM_AARCH64 || header.e_machine == EM_X86_64)) {
+    const char *objects[] = {object_path};
+    char link_error[512] = {0};
+    if (nyr_link_elf64_executable_objects(objects, 1, entry_symbol, output_path,
+                                          link_error, sizeof(link_error)))
+      return true;
+    if (header.e_machine == EM_AARCH64) {
+      NY_LOG_ERR("%s\n", link_error[0] ? link_error
+                                       : "bare AArch64 internal link failed");
+      return false;
+    }
+    NY_LOG_ERR("bare x86-64 internal link failed: %s\n",
+               link_error[0] ? link_error : "unknown linker error");
+    unlink(output_path);
+  }
+#endif
+  if (!cc || !*cc)
+    return false;
+  char start_path[4096], start_object[4096], start_name[96], start_obj_name[96];
+  snprintf(start_name, sizeof(start_name), "ny_bare_start_%ld_%llu.s",
+           (long)getpid(), (unsigned long long)ny_ticks_now());
+  snprintf(start_obj_name, sizeof(start_obj_name), "ny_bare_start_%ld_%llu.o",
+           (long)getpid(), (unsigned long long)ny_ticks_now());
+  ny_join_path(start_path, sizeof(start_path), ny_get_temp_dir(), start_name);
+  ny_join_path(start_object, sizeof(start_object), ny_get_temp_dir(),
+               start_obj_name);
+  static const char start_source[] =
+      ".text\n"
+      ".globl _start\n"
+      ".type _start,@function\n"
+      "_start:\n"
+      "  xorq %rbp,%rbp\n"
+      "  movq (%rsp),%rdi\n"
+      "  leaq 8(%rsp),%rsi\n"
+      "  leaq 16(%rsp,%rdi,8),%rdx\n"
+      "  andq $-16,%rsp\n"
+      "  call main\n"
+      "  movl %eax,%edi\n"
+      "  movl $60,%eax\n"
+      "  syscall\n"
+      ".size _start,.-_start\n"
+      ".globl rt_i64_to_cstr_raw\n"
+      ".type rt_i64_to_cstr_raw,@function\n"
+      "rt_i64_to_cstr_raw:\n"
+      "  leaq ny_bare_int_buf+31(%rip),%rsi\n"
+      "  movb $0,(%rsi)\n"
+      "  movq %rdi,%rax\n"
+      "  xorl %r8d,%r8d\n"
+      "  testq %rax,%rax\n"
+      "  jns .Lny_bare_int_digits\n"
+      "  movl $1,%r8d\n"
+      "  negq %rax\n"
+      ".Lny_bare_int_digits:\n"
+      "  xorl %edx,%edx\n"
+      "  movl $10,%r9d\n"
+      "  divq %r9\n"
+      "  addb $'0',%dl\n"
+      "  decq %rsi\n"
+      "  movb %dl,(%rsi)\n"
+      "  testq %rax,%rax\n"
+      "  jne .Lny_bare_int_digits\n"
+      "  testl %r8d,%r8d\n"
+      "  je .Lny_bare_int_done\n"
+      "  decq %rsi\n"
+      "  movb $'-',(%rsi)\n"
+      ".Lny_bare_int_done:\n"
+      "  movq %rsi,%rax\n"
+      "  ret\n"
+      ".size rt_i64_to_cstr_raw,.-rt_i64_to_cstr_raw\n"
+      ".globl rt_print_cstr\n"
+      ".type rt_print_cstr,@function\n"
+      "rt_print_cstr:\n"
+      "  movq %rdi,%rsi\n"
+      "  xorl %edx,%edx\n"
+      ".Lny_bare_print_len:\n"
+      "  cmpb $0,(%rsi,%rdx)\n"
+      "  je .Lny_bare_print_write\n"
+      "  incq %rdx\n"
+      "  jmp .Lny_bare_print_len\n"
+      ".Lny_bare_print_write:\n"
+      "  movl $1,%eax\n"
+      "  movl $1,%edi\n"
+      "  syscall\n"
+      "  xorl %eax,%eax\n"
+      "  ret\n"
+      ".size rt_print_cstr,.-rt_print_cstr\n"
+      ".globl rt_print_i64_raw\n"
+      ".type rt_print_i64_raw,@function\n"
+      "rt_print_i64_raw:\n"
+      "  call rt_i64_to_cstr_raw\n"
+      "  movq %rax,%rdi\n"
+      "  jmp rt_print_cstr\n"
+      ".size rt_print_i64_raw,.-rt_print_i64_raw\n"
+      ".globl rt_print_newline\n"
+      ".type rt_print_newline,@function\n"
+      "rt_print_newline:\n"
+      "  leaq .Lny_bare_newline(%rip),%rsi\n"
+      "  movl $1,%edx\n"
+      "  movl $1,%edi\n"
+      "  movl $1,%eax\n"
+      "  syscall\n"
+      "  xorl %eax,%eax\n"
+      "  ret\n"
+      ".size rt_print_newline,.-rt_print_newline\n"
+      ".globl rt_cstr_len\n"
+      ".type rt_cstr_len,@function\n"
+      "rt_cstr_len:\n"
+      "  xorl %eax,%eax\n"
+      "  testq %rdi,%rdi\n"
+      "  je .Lny_bare_cstr_len_done\n"
+      ".Lny_bare_cstr_len_loop:\n"
+      "  cmpb $0,(%rdi,%rax)\n"
+      "  je .Lny_bare_cstr_len_done\n"
+      "  incq %rax\n"
+      "  jmp .Lny_bare_cstr_len_loop\n"
+      ".Lny_bare_cstr_len_done:\n"
+      "  ret\n"
+      ".size rt_cstr_len,.-rt_cstr_len\n"
+      ".globl rt_bool_to_cstr\n"
+      ".type rt_bool_to_cstr,@function\n"
+      "rt_bool_to_cstr:\n"
+      "  cmpq $1,%rdi\n"
+      "  je .Lny_bare_bool_true\n"
+      "  cmpq $8,%rdi\n"
+      "  je .Lny_bare_bool_true\n"
+      "  leaq .Lny_bare_false(%rip),%rax\n"
+      "  ret\n"
+      ".Lny_bare_bool_true:\n"
+      "  leaq .Lny_bare_true(%rip),%rax\n"
+      "  ret\n"
+      ".size rt_bool_to_cstr,.-rt_bool_to_cstr\n"
+      ".globl rt_write_off_raw\n"
+      ".type rt_write_off_raw,@function\n"
+      "rt_write_off_raw:\n"
+      "  testq %rdi,%rdi\n"
+      "  js .Lny_bare_write_error\n"
+      "  testq %rdx,%rdx\n"
+      "  js .Lny_bare_write_error\n"
+      "  testq %rcx,%rcx\n"
+      "  js .Lny_bare_write_error\n"
+      "  addq %rcx,%rsi\n"
+      "  movl $1,%eax\n"
+      "  syscall\n"
+      "  ret\n"
+      ".Lny_bare_write_error:\n"
+      "  movq $-1,%rax\n"
+      "  ret\n"
+      ".size rt_write_off_raw,.-rt_write_off_raw\n"
+      ".globl rt_monotonic_ns_raw\n"
+      ".type rt_monotonic_ns_raw,@function\n"
+      "rt_monotonic_ns_raw:\n"
+      "  movl $228,%eax\n"
+      "  movl $1,%edi\n"
+      "  leaq ny_bare_timespec(%rip),%rsi\n"
+      "  syscall\n"
+      "  testq %rax,%rax\n"
+      "  js .Lny_bare_clock_error\n"
+      "  movq ny_bare_timespec(%rip),%rax\n"
+      "  imulq $1000000000,%rax,%rax\n"
+      "  addq ny_bare_timespec+8(%rip),%rax\n"
+      "  ret\n"
+      ".Lny_bare_clock_error:\n"
+      "  xorl %eax,%eax\n"
+      "  ret\n"
+      ".size rt_monotonic_ns_raw,.-rt_monotonic_ns_raw\n";
+  static const char start_runtime_source[] =
+      ".globl rt_tbuf_new_typed_raw\n"
+      ".type rt_tbuf_new_typed_raw,@function\n"
+      "rt_tbuf_new_typed_raw:\n"
+      "  pushq %r12\n"
+      "  pushq %r13\n"
+      "  pushq %r14\n"
+      "  testq %rdi,%rdi\n"
+      "  jns .Lny_bare_tbuf_count_ok\n"
+      "  xorl %edi,%edi\n"
+      ".Lny_bare_tbuf_count_ok:\n"
+      "  testq %rsi,%rsi\n"
+      "  jg .Lny_bare_tbuf_elem_ok\n"
+      "  movq $1,%rsi\n"
+      ".Lny_bare_tbuf_elem_ok:\n"
+      "  movq %rdi,%r14\n"
+      "  movq %rsi,%r13\n"
+      "  movq %r14,%r12\n"
+      "  cmpq $8,%r12\n"
+      "  jge .Lny_bare_tbuf_capacity_ok\n"
+      "  movq $8,%r12\n"
+      ".Lny_bare_tbuf_capacity_ok:\n"
+      "  movq %r12,%rax\n"
+      "  mulq %r13\n"
+      "  testq %rdx,%rdx\n"
+      "  jne .Lny_bare_tbuf_fail\n"
+      "  addq $32,%rax\n"
+      "  jc .Lny_bare_tbuf_fail\n"
+      "  movq %rax,%rsi\n"
+      "  xorl %edi,%edi\n"
+      "  movl $3,%edx\n"
+      "  movl $34,%r10d\n"
+      "  movq $-1,%r8\n"
+      "  xorl %r9d,%r9d\n"
+      "  movl $9,%eax\n"
+      "  syscall\n"
+      "  testq %rax,%rax\n"
+      "  js .Lny_bare_tbuf_fail\n"
+      "  movabsq $0x4e59544255464d47,%r10\n"
+      "  movq %r10,(%rax)\n"
+      "  movq %r14,8(%rax)\n"
+      "  movq %r13,16(%rax)\n"
+      "  movq %r12,24(%rax)\n"
+      "  addq $32,%rax\n"
+      "  popq %r14\n"
+      "  popq %r13\n"
+      "  popq %r12\n"
+      "  ret\n"
+      ".Lny_bare_tbuf_fail:\n"
+      "  xorl %eax,%eax\n"
+      "  popq %r14\n"
+      "  popq %r13\n"
+      "  popq %r12\n"
+      "  ret\n"
+      ".size rt_tbuf_new_typed_raw,.-rt_tbuf_new_typed_raw\n";
+  static const char start_allocator_source[] =
+      ".globl rt_malloc_i64\n"
+      ".type rt_malloc_i64,@function\n"
+      "rt_malloc_i64:\n"
+      "  pushq %r12\n"
+      "  pushq %r13\n"
+      "  testq %rdi,%rdi\n"
+      "  js .Lny_bare_malloc_fail\n"
+      "  movq %rdi,%r12\n"
+      "  addq $15,%r12\n"
+      "  jc .Lny_bare_malloc_fail\n"
+      "  js .Lny_bare_malloc_fail\n"
+      "  andq $-16,%r12\n"
+      "  movq %r12,%r13\n"
+      "  addq $32,%r13\n"
+      "  jc .Lny_bare_malloc_fail\n"
+      "  xorl %edi,%edi\n"
+      "  movq %r13,%rsi\n"
+      "  movl $3,%edx\n"
+      "  movl $34,%r10d\n"
+      "  movq $-1,%r8\n"
+      "  xorl %r9d,%r9d\n"
+      "  movl $9,%eax\n"
+      "  syscall\n"
+      "  testq %rax,%rax\n"
+      "  js .Lny_bare_malloc_fail\n"
+      "  movabsq $0x545249584e5954,%r10\n"
+      "  movq %r10,(%rax)\n"
+      "  leaq 1(%r12,%r12),%r10\n"
+      "  movq %r10,8(%rax)\n"
+      "  movq $0,16(%rax)\n"
+      "  movq $0,24(%rax)\n"
+      "  addq $32,%rax\n"
+      "  popq %r13\n"
+      "  popq %r12\n"
+      "  ret\n"
+      ".Lny_bare_malloc_fail:\n"
+      "  xorl %eax,%eax\n"
+      "  popq %r13\n"
+      "  popq %r12\n"
+      "  ret\n"
+      ".size rt_malloc_i64,.-rt_malloc_i64\n"
+      ".globl rt_malloc_raw_i64\n"
+      ".type rt_malloc_raw_i64,@function\n"
+      "rt_malloc_raw_i64:\n"
+      "  jmp rt_malloc_i64\n"
+      ".size rt_malloc_raw_i64,.-rt_malloc_raw_i64\n"
+      ".globl rt_calloc_raw_i64\n"
+      ".type rt_calloc_raw_i64,@function\n"
+      "rt_calloc_raw_i64:\n"
+      "  jmp rt_malloc_raw_i64\n"
+      ".size rt_calloc_raw_i64,.-rt_calloc_raw_i64\n"
+      ".globl rt_malloc_raw\n"
+      ".type rt_malloc_raw,@function\n"
+      "rt_malloc_raw:\n"
+      "  jmp rt_malloc_i64\n"
+      ".size rt_malloc_raw,.-rt_malloc_raw\n"
+      ".globl rt_zalloc_raw\n"
+      ".type rt_zalloc_raw,@function\n"
+      "rt_zalloc_raw:\n"
+      "  jmp rt_malloc_i64\n"
+      ".size rt_zalloc_raw,.-rt_zalloc_raw\n"
+      ".globl rt_malloc\n"
+      ".type rt_malloc,@function\n"
+      "rt_malloc:\n"
+      "  sarq $1,%rdi\n"
+      "  jmp rt_malloc_i64\n"
+      ".size rt_malloc,.-rt_malloc\n"
+      ".globl rt_malloc_uninit\n"
+      ".type rt_malloc_uninit,@function\n"
+      "rt_malloc_uninit:\n"
+      "  sarq $1,%rdi\n"
+      "  jmp rt_malloc_i64\n"
+      ".size rt_malloc_uninit,.-rt_malloc_uninit\n"
+      ".globl rt_free\n"
+      ".type rt_free,@function\n"
+      "rt_free:\n"
+      "  testq %rdi,%rdi\n"
+      "  je .Lny_bare_free_done\n"
+      "  leaq -32(%rdi),%rsi\n"
+      "  movabsq $0x545249584e5954,%rax\n"
+      "  cmpq %rax,(%rsi)\n"
+      "  jne .Lny_bare_free_done\n"
+      "  movq 8(%rsi),%rdx\n"
+      "  shrq $1,%rdx\n"
+      "  addq $15,%rdx\n"
+      "  jc .Lny_bare_free_done\n"
+      "  andq $-16,%rdx\n"
+      "  addq $32,%rdx\n"
+      "  jc .Lny_bare_free_done\n"
+      "  movq %rsi,%rdi\n"
+      "  movl $11,%eax\n"
+      "  syscall\n"
+      ".Lny_bare_free_done:\n"
+      "  xorl %eax,%eax\n"
+      "  ret\n"
+      ".size rt_free,.-rt_free\n"
+      ".globl rt_free_raw\n"
+      ".type rt_free_raw,@function\n"
+      "rt_free_raw:\n"
+      "  jmp rt_free\n"
+      ".size rt_free_raw,.-rt_free_raw\n"
+      ".globl rt_zfree_raw\n"
+      ".type rt_zfree_raw,@function\n"
+      "rt_zfree_raw:\n"
+      "  jmp rt_free\n"
+      ".size rt_zfree_raw,.-rt_zfree_raw\n"
+      ".globl rt_untag\n"
+      ".type rt_untag,@function\n"
+      "rt_untag:\n"
+      "  testb $1,%dil\n"
+      "  jz .Lny_bare_untag_done\n"
+      "  sarq $3,%rdi\n"
+      ".Lny_bare_untag_done:\n"
+      "  movq %rdi,%rax\n"
+      "  ret\n"
+      ".size rt_untag,.-rt_untag\n"
+      ".globl rt_tbuf_len_raw\n"
+      ".type rt_tbuf_len_raw,@function\n"
+      "rt_tbuf_len_raw:\n"
+      "  testq %rdi,%rdi\n"
+      "  je .Lny_bare_tbuf_len_empty\n"
+      "  movq -24(%rdi),%rax\n"
+      "  ret\n"
+      ".Lny_bare_tbuf_len_empty:\n"
+      "  xorl %eax,%eax\n"
+      "  ret\n"
+      ".size rt_tbuf_len_raw,.-rt_tbuf_len_raw\n"
+      ".globl rt_memset\n"
+      ".type rt_memset,@function\n"
+      "rt_memset:\n"
+      "  movq %rdi,%rax\n"
+      "  movb %sil,%cl\n"
+      "  testq %rdx,%rdx\n"
+      "  jle .Lny_bare_memset_done\n"
+      ".Lny_bare_memset_loop:\n"
+      "  movb %cl,(%rdi)\n"
+      "  incq %rdi\n"
+      "  decq %rdx\n"
+      "  jne .Lny_bare_memset_loop\n"
+      ".Lny_bare_memset_done:\n"
+      "  ret\n"
+      ".size rt_memset,.-rt_memset\n"
+      ".globl _ny_aot_set_args\n"
+      ".type _ny_aot_set_args,@function\n"
+      "_ny_aot_set_args:\n"
+      "  xorl %eax,%eax\n"
+      "  ret\n"
+      ".size _ny_aot_set_args,.-_ny_aot_set_args\n"
+      ".section .rodata\n"
+      ".Lny_bare_newline:\n"
+      "  .byte 10\n"
+      ".Lny_bare_true:\n"
+      "  .asciz \"true\"\n"
+      ".Lny_bare_false:\n"
+      "  .asciz \"false\"\n"
+      ".section .bss\n"
+      ".balign 8\n"
+      "ny_bare_int_buf:\n"
+      "  .zero 32\n"
+      ".balign 8\n"
+      "ny_bare_timespec:\n"
+      "  .zero 16\n"
+      ".section .note.GNU-stack,\"\",@progbits\n";
+  FILE *start_file = fopen(start_path, "wb");
+  bool wrote_start = start_file != NULL;
+  if (wrote_start) {
+    const char entry_call[] = "  call main\n";
+    const char *entry_call_at = strstr(start_source, entry_call);
+    size_t start_prefix_len =
+        entry_call_at ? (size_t)(entry_call_at - start_source) : 0;
+    size_t entry_call_suffix_off =
+        entry_call_at ? start_prefix_len + sizeof(entry_call) - 1 : 0;
+    wrote_start =
+        entry_call_at &&
+        fwrite(start_source, 1, start_prefix_len, start_file) ==
+            start_prefix_len &&
+        fprintf(start_file, "  call %s\n", entry_symbol) > 0 &&
+        fwrite(start_source + entry_call_suffix_off, 1,
+               sizeof(start_source) - 1 - entry_call_suffix_off, start_file) ==
+            sizeof(start_source) - 1 - entry_call_suffix_off &&
+        fwrite(start_runtime_source, 1, sizeof(start_runtime_source) - 1,
+               start_file) == sizeof(start_runtime_source) - 1 &&
+        fwrite(start_allocator_source, 1, sizeof(start_allocator_source) - 1,
+               start_file) == sizeof(start_allocator_source) - 1;
+  }
+  if (start_file && fclose(start_file) != 0)
+    wrote_start = false;
+  if (!wrote_start) {
+    unlink(start_path);
+    return false;
+  }
+  const char *assemble_argv[] = {cc,   "-c",         start_path,
+                                 "-o", start_object, NULL};
+  int rc = ny_exec_spawn(assemble_argv);
+  unlink(start_path);
+  if (rc != 0) {
+    unlink(start_object);
+    return false;
+  }
+  const char *objects[] = {object_path, start_object};
+  char link_error[512] = {0};
+  bool linked = nyr_link_elf64_executable_objects(
+      objects, sizeof(objects) / sizeof(objects[0]), "_start", output_path,
+      link_error, sizeof(link_error));
+  unlink(start_object);
+  if (!linked)
+    NY_LOG_ERR("bare x86-64 shim link failed: %s\n",
+               link_error[0] ? link_error : "unknown linker error");
+  return linked;
+}
+
+static bool ny_native_bare_aarch64_runtime_free(const program_t *prog,
+                                                const ny_options *opt,
+                                                char *err, size_t err_len) {
+  nyr_func_t rt_main = {0};
+  size_t func_cap = NYR_BUNDLE_MAX_FUNCS;
+  nyr_func_t *funcs = calloc(func_cap, sizeof(*funcs));
+  const char **names = calloc(func_cap, sizeof(*names));
+  size_t func_count = 0;
+  char build_err[256] = {0};
+  bool ok = funcs && names &&
+            nyr_build_ir(prog, opt, &rt_main, funcs, &func_count, names,
+                         func_cap, build_err, sizeof(build_err));
+  for (size_t f = 0; ok && f <= func_count; ++f) {
+    const nyr_func_t *func = f == func_count ? &rt_main : &funcs[f];
+    for (size_t i = 0; i < func->len; ++i) {
+      const nyr_inst_t *in = &func->data[i];
+      if (in->op != NYIR_CALL)
+        continue;
+      /*
+       * Runtime semantics are classified once in NYIR.  The object backend
+       * decides which operations it can legalize; duplicating this allowlist
+       * here made bare targets drift as new target-independent operations
+       * were added.
+       */
+      bool supported_runtime =
+          in->symbol &&
+          ny_native_runtime_operation(in->symbol) != NY_NATIVE_RUNTIME_OP_NONE;
+      if (!supported_runtime &&
+          ((in->flags & NYIR_INST_F_EXTERN) ||
+           (in->symbol && strncmp(in->symbol, "rt_", 3) == 0))) {
+        nyr_set_error(err, err_len,
+                      "bare AArch64 AOT currently rejects runtime helper "
+                      "or external call '%s'",
+                      in->symbol ? in->symbol : "<indirect>");
+        ok = false;
+        break;
+      }
+    }
+  }
+  for (size_t i = 0; i < func_count; ++i)
+    nyr_ir_func_free(&funcs[i]);
+  nyr_ir_func_free(&rt_main);
+  free(funcs);
+  free(names);
+  if (!ok && err && err_len && !err[0])
+    nyr_set_error(err, err_len, "bare AArch64 NYR construction failed: %s",
+                  build_err[0] ? build_err : "allocation failed");
+  return ok;
+}
+
+static int ny_spawn_compiled_program(const ny_options *opt,
+                                     const char *executable,
+                                     const char *workload) {
+  const char *const fallback_argv[] = {executable, NULL};
+  const char *const *argv =
+      opt && opt->args ? (const char *const *)opt->args : fallback_argv;
+  return ny_safe_run_requested(opt ? &opt->safe_run : NULL)
+             ? ny_safe_run_spawn_argv0(&opt->safe_run, executable, argv,
+                                       workload)
+             : ny_exec_spawn_argv0(executable, argv);
+}
+
+static int ny_run_native_bare(const program_t *prog, const ny_options *opt,
+                              const char *output_path, bool execute) {
+  if (!prog || !opt || !output_path || !*output_path)
+    return 1;
+  const char *entry_symbol =
+      opt->entry_name && opt->entry_name[0] ? opt->entry_name : "main";
+  if (!ny_native_bare_symbol_valid(entry_symbol)) {
+    NY_LOG_ERR("Bare native entry name must be a C-compatible identifier\n");
+    return 1;
+  }
+  if (opt->link_libs.len != 0 || opt->link_dirs.len != 0 || opt->sanitize ||
+      opt->gprof == 1) {
+    NY_LOG_ERR("Bare native AOT does not accept external libraries, "
+               "sanitizers, or profiling\n");
+    return 1;
+  }
+  if (opt->native_backend == NY_NATIVE_BACKEND_AARCH64) {
+    char runtime_err[256] = {0};
+    if (!ny_native_bare_aarch64_runtime_free(prog, opt, runtime_err,
+                                             sizeof(runtime_err))) {
+      NY_LOG_ERR("%s\n", runtime_err[0] ? runtime_err
+                                        : "bare AArch64 runtime check failed");
+      return 1;
+    }
+  }
+  char obj[4096], obj_name[96];
+  snprintf(obj_name, sizeof(obj_name), "ny_bare_native_%ld_%llu.o",
+           (long)getpid(), (unsigned long long)ny_ticks_now());
+  ny_join_path(obj, sizeof(obj), ny_get_temp_dir(), obj_name);
+  char err[512] = {0};
+  if (!ny_pipeline_emit_program_object(prog, opt, obj, entry_symbol, false, err,
+                                       sizeof(err))) {
+    NY_LOG_ERR("Bare native code generation failed: %s\n",
+               err[0] ? err : "unsupported native shape");
+    return 1;
+  }
+  ny_ensure_parent_dir_for_path(output_path);
+  bool linked = ny_native_bare_link(ny_builder_choose_cc(), obj, output_path,
+                                    entry_symbol);
+  unlink(obj);
+  if (!linked) {
+    unlink(output_path);
+    NY_LOG_ERR("Bare native link failed; the program uses unsupported "
+               "runtime or external symbols\n");
+    return 1;
+  }
+  ny_log_saved_native_artifact(output_path);
+  if (!execute)
+    return 0;
+  return ny_spawn_compiled_program(opt, output_path, output_path);
+}
+
+static int ny_runtime_speed_level(const ny_options *opt) {
+  ny_opt_profile_kind_t profile =
+      ny_opt_profile_kind_from_name(opt->opt_profile);
+  bool speed = opt->opt_level >= 3 || profile == NY_OPT_PROFILE_SPEED ||
+               profile == NY_OPT_PROFILE_PEAK ||
+               ny_env_enabled("NYTRIX_RUNTIME_SPEED");
+  int level = speed ? 3 : (opt->opt_size ? -1 : 0);
+  const char *override = ny_env_str_nonempty("NYTRIX_RUNTIME_OPT");
+  if (override) {
+    if (strcmp(override, "0") == 0 || strcmp(override, "size") == 0)
+      level = 0;
+    else if (strcmp(override, "2") == 0)
+      level = 2;
+    else if (strcmp(override, "3") == 0 || strcmp(override, "speed") == 0)
+      level = 3;
+  }
+  return level;
+}
+
+static bool ny_runtime_native_enabled(int speed_level) {
+  return speed_level >= 3 && ny_env_enabled_default_on("NYTRIX_RUNTIME_NATIVE");
+}
+
 static int ny_run_native_only(const program_t *prog, const ny_options *opt,
                               const char *output_path, bool execute,
                               bool remove_output) {
+  if (opt && opt->runtime_mode == NY_RUNTIME_MODE_BARE) {
+    if (ny_output_path_is_object(output_path)) {
+      if (execute) {
+        NY_LOG_ERR("Cannot run bare AOT from an object file\n");
+        return 1;
+      }
+    } else {
+      return ny_run_native_bare(prog, opt, output_path, execute);
+    }
+  }
   if (!execute && opt && opt->emit_only && output_path && *output_path) {
     char err[512] = {0};
     if (!ny_pipeline_emit_program_object(prog, opt, output_path, "main", false,
@@ -518,9 +1158,10 @@ static int ny_run_native_only(const program_t *prog, const ny_options *opt,
     return 1;
   }
   const char *cc = ny_builder_choose_cc();
-  int rt_speed = opt->opt_size ? -1 : 0;
+  int rt_speed = ny_runtime_speed_level(opt);
+  bool rt_native = ny_runtime_native_enabled(rt_speed);
   if (!ny_builder_compile_runtime(cc, rto, NULL, opt->debug_symbols,
-                                  opt->gprof == 1, rt_speed, false,
+                                  opt->gprof == 1, rt_speed, rt_native,
                                   opt->sanitize)) {
     NY_LOG_ERR("Native-only runtime compilation failed\n");
     unlink(obj);
@@ -540,24 +1181,24 @@ static int ny_run_native_only(const program_t *prog, const ny_options *opt,
   bool linked = ny_builder_link(
       cc, obj, rto, NULL, NULL, 0, (const char *const *)opt->link_dirs.data,
       opt->link_dirs.len, links.items, links.len, output_path,
-      opt->strip_override == 1, opt->debug_symbols, opt->gprof == 1,
-      opt->sanitize);
+      opt->strip_override == 1,
+      opt->opt_size && !opt->debug_symbols && opt->gprof != 1,
+      opt->debug_symbols, opt->gprof == 1, opt->sanitize);
   unlink(obj);
   unlink(rto);
   if (!linked) {
     NY_LOG_ERR("Native-only link failed\n");
     return 1;
   }
+  if (output_path && *output_path)
+    ny_log_saved_native_artifact(output_path);
 
   if (!execute)
     return 0;
 
-  const char *argv_exec[] = {output_path, NULL};
-  int rc = ny_safe_run_requested(&opt->safe_run)
-               ? ny_safe_run_spawn(&opt->safe_run, argv_exec,
-                                   opt->input_file ? opt->input_file
-                                                   : "native-only workload")
-               : ny_exec_spawn(argv_exec);
+  int rc = ny_spawn_compiled_program(opt, output_path,
+                                     opt->input_file ? opt->input_file
+                                                     : "native-only workload");
   if (remove_output)
     unlink(output_path);
   return rc;
@@ -584,17 +1225,17 @@ char *ny_pipeline_native_cache_path(const char *source, const ny_options *opt) {
       !ny_env_enabled_default_on("NYTRIX_STENCIL_CACHE") || opt->emit_only ||
       opt->output_file || opt->strict_types || opt->ownership_strict ||
       opt->trace_exec || opt->dump_tokens || opt->dump_ast || opt->expand ||
-      opt->dump_llvm || opt->dump_funcs || opt->dump_symbols ||
-      opt->dump_stats || opt->emit_ir_path || opt->emit_bc_path ||
-      opt->emit_asm_path || opt->native_dump_ir || opt->callgraph ||
-      opt->native_tier_report || opt->native_result_oracle ||
+      opt->dump_llvm || opt->dump_funcs || opt->emit_ir_path ||
+      opt->emit_bc_path || opt->emit_asm_path || opt->native_dump_ir ||
+      opt->callgraph || opt->native_tier_report || opt->native_result_oracle ||
       opt->native_oracle_per_pass || opt->native_tv_seed_trials ||
-      opt->nyr_run || opt->nyr_metadata_report || opt->nyr_pass_stats ||
-      opt->nyr_ir_verify || opt->nyr_bisect || opt->nyr_fingerprint ||
-      opt->nyr_flaky_check || opt->nyr_disable_pass || opt->nyr_stop_after ||
-      opt->nyr_global_inst_cap || opt->nyr_pass_growth_factor ||
-      opt->native_profile_use_path || opt->emit_report_path ||
-      opt->verbosity >= 2)
+      opt->nyr_dump_text || opt->nyr_dump_raw || opt->nyr_dump_cfg ||
+      opt->nyr_dump_stats || opt->nyr_run || opt->nyr_metadata_report ||
+      opt->nyr_pass_stats || opt->nyr_ir_verify || opt->nyr_bisect ||
+      opt->nyr_fingerprint || opt->nyr_flaky_check || opt->nyr_disable_pass ||
+      opt->nyr_stop_after || opt->nyr_global_inst_cap ||
+      opt->nyr_pass_growth_factor || opt->native_profile_use_path ||
+      opt->emit_report_path || opt->verbosity >= 2)
     return NULL;
   char *path = ny_jit_stencil_cache_path(
       source, opt->opt_level, opt->native_backend_raw, opt->native_tier_raw,
@@ -796,7 +1437,8 @@ static int ny_run_repl_session(ny_options *opt, bool supervised) {
     if (ny_env_enabled("NYTRIX_REPL_TRACE"))
       fprintf(stderr, "[repl-batch] bytes=%zu fast_candidate=%d\n",
               strlen(stdin_src), ny_repl_batch_can_fast_run(stdin_src) ? 1 : 0);
-    if (ny_repl_batch_can_fast_run(stdin_src)) {
+    if (ny_repl_batch_can_fast_run(stdin_src) ||
+        opt->program_args_explicitly_separated) {
       if (ny_env_enabled("NYTRIX_REPL_TRACE"))
         fprintf(stderr, "[repl-batch] dispatch=run\n");
       ny_options run_opt = *opt;
@@ -855,10 +1497,8 @@ static bool handle_non_compile_modes(ny_options *opt, int *exit_code) {
     return true;
   }
   if (opt->mode == NY_MODE_HELP) {
-    if (opt->help_env)
-      ny_options_usage_env(opt->argv0 ? opt->argv0 : "ny");
-    else
-      ny_options_usage(opt->argv0 ? opt->argv0 : "ny");
+    ny_options_print_help(opt->argv0 ? opt->argv0 : "ny",
+                          opt->help_env ? "env" : opt->help_topic);
     *exit_code = 0;
     return true;
   }
@@ -916,6 +1556,8 @@ static char *load_user_source(const ny_options *opt) {
   if (opt->command_string)
     return ny_normalize_command_source(opt->command_string);
   if (opt->input_file) {
+    if (strcmp(opt->input_file, "-") == 0)
+      return ny_read_stdin_all();
     if (strncmp(opt->input_file, "http://", 7) == 0 ||
         strncmp(opt->input_file, "https://", 8) == 0) {
       return ny_read_url(opt->input_file);
@@ -923,6 +1565,107 @@ static char *load_user_source(const ny_options *opt) {
     return ny_read_file(opt->input_file);
   }
   return ny_strdup("fn main() { return 0\n }");
+}
+
+static bool ny_source_mentions_program_args(const char *source) {
+  static const char *const names[] = {"argc", "argv", "args", "positionals",
+                                      "program"};
+  if (!source)
+    return false;
+  for (const char *p = source; *p;) {
+    if (!(isalpha((unsigned char)*p) || *p == '_')) {
+      p++;
+      continue;
+    }
+    const char *start = p++;
+    while (isalnum((unsigned char)*p) || *p == '_')
+      p++;
+    size_t len = (size_t)(p - start);
+    for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); ++i)
+      if (strlen(names[i]) == len && memcmp(start, names[i], len) == 0)
+        return true;
+  }
+  return strstr(source, "core.cli") != NULL;
+}
+
+static bool ny_cli_flag_like_program_arg(const char *arg) {
+  static const char *const exact[] = {"-o",
+                                      "-O2",
+                                      "-O3",
+                                      "-v",
+                                      "-vv",
+                                      "-run",
+                                      "-time",
+                                      "-std",
+                                      "-gc",
+                                      "-no-gc",
+                                      "-strip",
+                                      "--help",
+                                      "--emit-only",
+                                      "--native",
+                                      "--native-only",
+                                      "--watch",
+                                      "--hot-reload",
+                                      "--repl",
+                                      "--debug",
+                                      "--release",
+                                      "--strict-types",
+                                      "--no-strict-types",
+                                      "--run",
+                                      "--mode",
+                                      "--heap",
+                                      "--profile",
+                                      "--sanitize",
+                                      "--safe-run",
+                                      "--cross-run",
+                                      "--host-triple",
+                                      "--host-cflags",
+                                      "--host-ldflags",
+                                      "--opt-level",
+                                      "--opt-profile",
+                                      "--target",
+                                      "--gpu",
+                                      "--gpu-target",
+                                      "--output",
+                                      "--dump-llvm",
+                                      "--dump-nyr"};
+  if (!arg || arg[0] != '-')
+    return false;
+  for (size_t i = 0; i < sizeof(exact) / sizeof(exact[0]); ++i) {
+    size_t len = strlen(exact[i]);
+    if (strcmp(arg, exact[i]) == 0 ||
+        (strncmp(arg, exact[i], len) == 0 && arg[len] == '='))
+      return true;
+  }
+  return strncmp(arg, "--emit-", 7) == 0 || strncmp(arg, "--dump-", 7) == 0 ||
+         strncmp(arg, "-O", 2) == 0 || strncmp(arg, "-D", 2) == 0;
+}
+
+static void ny_maybe_note_program_option(const ny_options *opt,
+                                         const char *source) {
+  if (!opt || !opt->args || opt->program_args_explicitly_separated ||
+      ny_env_enabled("NYTRIX_NO_HINTS"))
+    return;
+  bool hint_enabled = opt->warn_level >= 2;
+#ifndef _WIN32
+  hint_enabled = hint_enabled || isatty(STDERR_FILENO);
+#endif
+  if (!hint_enabled)
+    return;
+  if (ny_source_mentions_program_args(source))
+    return;
+  for (int i = 1; i < opt->argc; ++i) {
+    const char *arg = opt->args[i];
+    if (!ny_cli_flag_like_program_arg(arg))
+      continue;
+    fprintf(stderr,
+            "note: '%s' comes after %s, so it goes to the program, not the "
+            "compiler. Put compiler flags before the script (ny -o out %s) "
+            "or separate with --.\n",
+            arg, opt->input_file ? opt->input_file : "-c",
+            opt->input_file ? opt->input_file : "-c");
+    return;
+  }
 }
 
 static bool ny_md_extract_name_eq(const char *a, size_t a_len, const char *b,
@@ -1804,8 +2547,7 @@ static bool ny_pipeline_configure_fast_compiler(ny_options *opt) {
   opt->debug_symbols = false;
   ny_setenv("NYTRIX_JIT_CACHE", "1", 0);
   ny_setenv("NYTRIX_JIT_OPT_LEVEL", low_overhead ? "0" : "1", 0);
-  if (!ny_jit_module_is_apple_arm64(NULL))
-    ny_setenv("NYTRIX_JIT_FAST_ISEL", "1", 0);
+  ny_setenv("NYTRIX_JIT_FAST_ISEL", "1", 0);
   return true;
 }
 
@@ -1852,6 +2594,7 @@ typedef struct {
   char *src;
   char *auto_bc_cache;
   const char *bc_cache;
+  intptr_t cache_lock;
   bool use_bc_cache;
   bool auto_bc_cache_needs_links;
   bool has_local;
@@ -1931,7 +2674,9 @@ static bool ny_pipeline_load_stdlib(ny_options *opt, char **uses,
           std->prebuilt_path, (const char *const *)uses, use_count,
           (int)std->mode, opt->debug_symbols,
           (unsigned long)ny_std_latest_mtime(), opt->argv0);
-      if (std->auto_bc_cache && ny_access(std->auto_bc_cache, R_OK) == 0) {
+      if (std->auto_bc_cache)
+        std->cache_lock = ny_cache_read_lock(std->auto_bc_cache);
+      if (std->cache_lock && ny_access(std->auto_bc_cache, R_OK) == 0) {
         bool cache_ok = true;
         if (ny_std_bc_cache_preverify_enabled()) {
           LLVMContextRef cache_ctx = LLVMContextCreate();
@@ -1953,6 +2698,10 @@ static bool ny_pipeline_load_stdlib(ny_options *opt, char **uses,
         } else if (!cache_ok) {
           (void)unlink(std->auto_bc_cache);
         }
+      }
+      if (!std->use_bc_cache) {
+        ny_cache_read_unlock(std->cache_lock);
+        std->cache_lock = 0;
       }
     }
   }
@@ -2236,9 +2985,41 @@ int ny_pipeline_run(ny_options *opt) {
   }
   if (opt->extract_code)
     return ny_run_code_extractor(opt);
+  int bare_aot_status = ny_try_bare_aot_command(opt, t_start);
+  if (bare_aot_status == -2) {
+    ny_options bare_native = *opt;
+    bare_native.bare_native_fallback = true;
+    bare_native.native_only = true;
+    if (!opt->native_backend_explicit ||
+        opt->native_backend == NY_NATIVE_BACKEND_LLVM) {
+      nyr_target_t host_target = {0};
+      char target_error[128] = {0};
+      const char *target = opt->host_triple;
+      if ((!target || !*target) &&
+          nyr_host_target(&host_target, target_error, sizeof(target_error)))
+        target = host_target.target;
+      if (target && (strstr(target, "aarch64") || strstr(target, "arm64")))
+        bare_native.native_backend = NY_NATIVE_BACKEND_AARCH64;
+      else if (target && (strstr(target, "x86_64") || strstr(target, "amd64")))
+        bare_native.native_backend = NY_NATIVE_BACKEND_X86_64;
+      else {
+        NY_LOG_ERR("Bare AOT has no NyR executable linker for target '%s'\n",
+                   target && *target ? target : "unknown");
+        return 1;
+      }
+    }
+    bare_native.native_backend_explicit = true;
+    bare_native.no_std = true;
+    bare_native.run_jit = false;
+    return ny_pipeline_run(&bare_native);
+  }
+  if (bare_aot_status >= 0)
+    return bare_aot_status;
   if (!ny_safe_run_requested(&opt->safe_run) &&
-      ny_try_fast_command_string(opt, t_start))
+      ny_try_fast_command_string(opt, t_start)) {
+    ny_maybe_note_program_option(opt, opt->command_string);
     return 0;
+  }
   bool debug_output = opt->trace_exec || debug_enabled;
   /*
    * Debug verbosity tells a story line-by-line; an animated progress bar
@@ -2286,6 +3067,8 @@ int ny_pipeline_run(ny_options *opt) {
   char *native_cache_file = NULL;
   void *native_cache_handle = NULL;
   void (*native_cache_entry)(void) = NULL;
+  ny_module_job *mod_jobs = NULL;
+  size_t mod_job_count = 0;
 #endif
   aot_run_temp = ny_pipeline_prepare_aot_run_output(
       opt, &output_path, aot_run_path, sizeof(aot_run_path));
@@ -2461,15 +3244,10 @@ int ny_pipeline_run(ny_options *opt) {
         if (ny_copy_file(aot_cache_path, output_path) == 0 &&
             ny_valid_native_artifact(output_path)) {
           NY_LOG_V2("AOT cache hit: %s\n", aot_cache_path);
-#ifdef _WIN32
-          NY_LOG_SUCCESS("Saved EXE: %s\n", output_path);
-#else
-          NY_LOG_SUCCESS("Saved ELF: %s\n", output_path);
-#endif
+          ny_log_saved_native_artifact(output_path);
           ny_trace_file_size("emit_native_cache_hit", output_path);
           if (opt->run_aot) {
-            const char *argv_exec[] = {output_path, NULL};
-            int rc = ny_exec_spawn(argv_exec);
+            int rc = ny_spawn_compiled_program(opt, output_path, output_path);
             if (rc != 0)
               exit_code = rc;
             if (aot_run_temp)
@@ -2749,6 +3527,7 @@ int ny_pipeline_run(ny_options *opt) {
     exit_code = 1;
     goto exit_success;
   }
+  ny_maybe_note_program_option(opt, user_src);
   if (ny_pipe_check_member_splices(&prog)) {
     ny_stage_maybe_emit_errors(opt, NY_STOP_AFTER_PARSE, parse_name,
                                "parse failed", 1);
@@ -2767,8 +3546,11 @@ int ny_pipeline_run(ny_options *opt) {
    */
   ny_pipeline_run_incremental(&prog, opt);
   if (ny_stop_after_is(opt, NY_STOP_AFTER_PARSE)) {
-    ny_stage_emit_artifact(opt, NY_STOP_AFTER_PARSE, &prog, NULL, parse_name,
-                           NULL, true);
+    if (!ny_stage_emit_artifact(opt, NY_STOP_AFTER_PARSE, &prog, NULL,
+                                parse_name, NULL, true)) {
+      NY_LOG_ERR("Failed to write compiler artifact\n");
+      exit_code = 1;
+    }
     goto exit_success;
   }
   if (opt->expand) {
@@ -2885,7 +3667,9 @@ int ny_pipeline_run(ny_options *opt) {
     native_bc.nyr_dump_text = false;
     native_bc.nyr_dump_bin_path = opt->emit_bc_path;
     char native_bc_err[512] = {0};
-    if (!ny_pipeline_dump_ir_for_program(&prog, &native_bc, native_bc_err,
+    if (!ny_pipeline_dump_vm_ir_for_program(&prog, &native_bc, native_bc_err,
+                                            sizeof(native_bc_err)) ||
+        !ny_pipeline_dump_ir_for_program(&prog, &native_bc, native_bc_err,
                                          sizeof(native_bc_err))) {
       NY_LOG_ERR("Native bytecode emission failed: %s\n",
                  native_bc_err[0] ? native_bc_err : "unknown error");
@@ -2914,11 +3698,14 @@ int ny_pipeline_run(ny_options *opt) {
         exit_code = 1;
         goto exit_success;
       }
+      ny_log_saved_artifact(opt->emit_asm_path, "assembly");
       ny_trace_file_size("emit_asm", opt->emit_asm_path);
     }
     if (opt->native_dump_ir) {
       char native_dump_err[512] = {0};
-      if (!ny_pipeline_dump_ir_for_program(&prog, opt, native_dump_err,
+      if (!ny_pipeline_dump_vm_ir_for_program(&prog, opt, native_dump_err,
+                                              sizeof(native_dump_err)) ||
+          !ny_pipeline_dump_ir_for_program(&prog, opt, native_dump_err,
                                            sizeof(native_dump_err))) {
         NY_LOG_ERR("Native-only precompile failed: %s\n",
                    native_dump_err[0] ? native_dump_err : "unknown error");
@@ -3257,8 +4044,9 @@ int ny_pipeline_run(ny_options *opt) {
           opt->stop_after == NY_STOP_AFTER_ABI)) ||
         (failed_type_stage == NY_TYPE_PIPELINE_STAGE_ABI &&
          opt->stop_after == NY_STOP_AFTER_ABI)) {
-      ny_stage_emit_artifact(opt, opt->stop_after, &prog, &cg, parse_name,
-                             cg.module, true);
+      if (!ny_stage_emit_artifact(opt, opt->stop_after, &prog, &cg, parse_name,
+                                  cg.module, true))
+        NY_LOG_ERR("Failed to write compiler artifact\n");
     }
     if (opt && opt->collect_errors && type_errors_json)
       ny_stage_write_default_artifact(opt, "errors.v1.json", type_errors_json);
@@ -3298,14 +4086,15 @@ int ny_pipeline_run(ny_options *opt) {
       opt->stop_after == NY_STOP_AFTER_TRAIT ||
       opt->stop_after == NY_STOP_AFTER_FLOW ||
       opt->stop_after == NY_STOP_AFTER_ABI) {
-    ny_stage_emit_artifact(opt, opt->stop_after, &prog, &cg, parse_name,
-                           cg.module, true);
+    if (!ny_stage_emit_artifact(opt, opt->stop_after, &prog, &cg, parse_name,
+                                cg.module, true)) {
+      NY_LOG_ERR("Failed to write compiler artifact\n");
+      exit_code = 1;
+    }
     goto exit_success;
   }
 
 #ifndef _WIN32
-  ny_module_job *mod_jobs = NULL;
-  size_t mod_job_count = 0;
   ny_tick_t t_parallel = 0;
   size_t mods_len = 0;
   if (!fast_compiler && !use_std_bc_cache && ny_parallel_modules_enabled(opt)) {
@@ -3355,9 +4144,6 @@ int ny_pipeline_run(ny_options *opt) {
             if (WIFEXITED(status))
               mod_jobs[i].exit_code = WEXITSTATUS(status);
             else
-              mod_jobs[i].exit_code = 1;
-            if (mod_jobs[i].exit_code == 0 &&
-                !ny_module_job_publish_cache(&mod_jobs[i]))
               mod_jobs[i].exit_code = 1;
             if (mod_jobs[i].exit_code != 0) {
               if (ny_env_enabled("NYTRIX_TRACE_CACHE"))
@@ -3457,6 +4243,8 @@ int ny_pipeline_run(ny_options *opt) {
       exit_code = 1;
       goto exit_success;
     }
+    ny_cache_read_unlock(std_load.cache_lock);
+    std_load.cache_lock = 0;
     codegen_rebind_llvm_symbols(&cg);
     ny_drop_jit_llvm_used_metadata(cg.module);
   }
@@ -3474,6 +4262,15 @@ int ny_pipeline_run(ny_options *opt) {
         goto exit_success;
       }
       codegen_rebind_llvm_symbols(&cg);
+      ny_cache_read_unlock(mod_jobs[i].cache_lock);
+      mod_jobs[i].cache_lock = 0;
+    }
+    /*
+     * Consume every selected module before taking an exclusive publication
+     * lock: other jobs can still hold read leases in the same directory.
+     */
+    for (size_t i = 0; i < mod_job_count; i++) {
+      (void)ny_module_job_publish_cache(&mod_jobs[i]);
       if (!mod_jobs[i].persistent)
         (void)unlink(mod_jobs[i].bc_path);
       ny_module_job_free(&mod_jobs[i]);
@@ -3592,15 +4389,22 @@ int ny_pipeline_run(ny_options *opt) {
      * emit a lightweight pass-through artifact so the caller sees success.
      */
     bool emit_full = opt->emit_artifact_path || opt->emit_shapes;
-    ny_stage_emit_artifact(opt,
-                           emit_full ? NY_STOP_AFTER_OPT : NY_STOP_AFTER_PARSE,
-                           &prog, &cg, parse_name, cg.module, true);
+    if (!ny_stage_emit_artifact(
+            opt, emit_full ? NY_STOP_AFTER_OPT : NY_STOP_AFTER_PARSE, &prog,
+            &cg, parse_name, cg.module, true)) {
+      NY_LOG_ERR("Failed to write compiler artifact\n");
+      exit_code = 1;
+    }
     goto exit_success;
   }
   if ((opt->emit_artifact_path || opt->emit_shapes) &&
       opt->stop_after == NY_STOP_AFTER_NONE) {
-    ny_stage_emit_artifact(opt, NY_STOP_AFTER_OPT, &prog, &cg, parse_name,
-                           cg.module, false);
+    if (!ny_stage_emit_artifact(opt, NY_STOP_AFTER_OPT, &prog, &cg, parse_name,
+                                cg.module, false)) {
+      NY_LOG_ERR("Failed to write compiler artifact\n");
+      exit_code = 1;
+      goto exit_success;
+    }
   }
   if (write_compile_caches && jit_cache_file) {
 #ifndef _WIN32
@@ -3670,11 +4474,13 @@ skip_compilation:
     }
   }
   if (opt->native_dump_ir &&
-      (opt->native_backend != NY_NATIVE_BACKEND_LLVM || opt->nyr_run ||
-       opt->nyr_metadata_report || opt->nyr_dump_bin)) {
+      (opt->vm_disasm || opt->native_backend != NY_NATIVE_BACKEND_LLVM ||
+       opt->nyr_run || opt->nyr_metadata_report || opt->nyr_dump_bin)) {
     char native_dump_err[512] = {0};
     ny_pipe_trace_phase_memory("native-ir-dump.begin");
-    if (!ny_pipeline_dump_ir_for_program(&prog, opt, native_dump_err,
+    if (!ny_pipeline_dump_vm_ir_for_program(&prog, opt, native_dump_err,
+                                            sizeof(native_dump_err)) ||
+        !ny_pipeline_dump_ir_for_program(&prog, opt, native_dump_err,
                                          sizeof(native_dump_err))) {
       const char *detail =
           native_dump_err[0] ? native_dump_err : "unknown error";
@@ -3772,6 +4578,7 @@ skip_compilation:
       exit_code = 1;
       goto exit_success;
     }
+    ny_log_saved_artifact(opt->emit_bc_path, "LLVM bitcode");
     ny_trace_file_size("emit_bc", opt->emit_bc_path);
   }
   /*
@@ -3802,6 +4609,7 @@ skip_compilation:
       }
     }
     ny_pipe_trace_phase_memory("assembly-emission.complete");
+    ny_log_saved_artifact(opt->emit_asm_path, "assembly");
     ny_trace_file_size("emit_asm", opt->emit_asm_path);
   }
   ny_dump_diagnose_finalize(opt, cg.module, opt->opt_level, user_src);
@@ -3828,7 +4636,7 @@ skip_compilation:
       ny_progress_task_end(progress_node);
       if (obj_ok) {
         maybe_log_phase_time(opt->do_timing, "Emit obj:", t_emit_obj);
-        NY_LOG_SUCCESS("Saved object: %s\n", output_path);
+        ny_log_saved_artifact(output_path, "object");
         ny_trace_file_size("emit_obj", output_path);
         if (opt->run_aot) {
           NY_LOG_ERR("Cannot run AOT from object file\n");
@@ -3872,26 +4680,8 @@ skip_compilation:
       snprintf(rto_name, sizeof(rto_name), "ny_rt_%ld_%llu.o", (long)getpid(),
                (unsigned long long)ny_ticks_now());
       ny_join_path(rto, sizeof(rto), ny_get_temp_dir(), rto_name);
-      ny_opt_profile_kind_t runtime_profile =
-          ny_opt_profile_kind_from_name(opt->opt_profile);
-      bool runtime_speed = opt->opt_level >= 3 ||
-                           runtime_profile == NY_OPT_PROFILE_SPEED ||
-                           runtime_profile == NY_OPT_PROFILE_PEAK ||
-                           ny_env_enabled("NYTRIX_RUNTIME_SPEED");
-      const char *runtime_opt_env = ny_env_str_nonempty("NYTRIX_RUNTIME_OPT");
-      int runtime_speed_level = runtime_speed ? 3 : (opt->opt_size ? -1 : 0);
-      if (runtime_opt_env) {
-        if (strcmp(runtime_opt_env, "0") == 0 ||
-            strcmp(runtime_opt_env, "size") == 0)
-          runtime_speed_level = 0;
-        else if (strcmp(runtime_opt_env, "2") == 0)
-          runtime_speed_level = 2;
-        else if (strcmp(runtime_opt_env, "3") == 0 ||
-                 strcmp(runtime_opt_env, "speed") == 0)
-          runtime_speed_level = 3;
-      }
-      bool runtime_native = runtime_speed_level >= 3 &&
-                            ny_env_enabled_default_on("NYTRIX_RUNTIME_NATIVE");
+      int runtime_speed_level = ny_runtime_speed_level(opt);
+      bool runtime_native = ny_runtime_native_enabled(runtime_speed_level);
       NY_LOG_V2(
           "Compiling runtime to %s using %s (debug=%d speed=%d native=%d)...\n",
           rto, cc, opt->debug_symbols, runtime_speed_level,
@@ -3930,8 +4720,9 @@ skip_compilation:
               cc, obj, rto, NULL, NULL, 0,
               (const char *const *)opt->link_dirs.data, opt->link_dirs.len,
               (const char *const *)merged_libs.data, merged_libs.len,
-              output_path, link_strip, opt->debug_symbols, opt->gprof == 1,
-              opt->sanitize)) {
+              output_path, link_strip,
+              opt->opt_size && !opt->debug_symbols && opt->gprof != 1,
+              opt->debug_symbols, opt->gprof == 1, opt->sanitize)) {
         ny_progress_task_end(progress_node);
         maybe_log_phase_time(opt->do_timing, "Link:", t_link);
         unlink(obj);
@@ -3958,11 +4749,7 @@ skip_compilation:
         if (ny_copy_file(output_path, aot_cache_path) == 0)
           (void)ny_cache_artifact_manifest_save(aot_cache_path, source);
       }
-#ifdef _WIN32
-      NY_LOG_SUCCESS("Saved EXE: %s\n", output_path);
-#else
-      NY_LOG_SUCCESS("Saved ELF: %s\n", output_path);
-#endif
+      ny_log_saved_native_artifact(output_path);
       ny_trace_file_size("emit_native", output_path);
     }
     if (show_progress)
@@ -3971,12 +4758,16 @@ skip_compilation:
       ny_sanitize_setup_env(opt->sanitize);
       bool use_safe_run = ny_safe_run_requested(&opt->safe_run) ||
                           (opt->sanitize && *opt->sanitize);
-      const char *argv_exec[] = {output_path, NULL};
       int rc = use_safe_run
-                   ? ny_safe_run_spawn(&opt->safe_run, argv_exec,
-                                       opt->input_file ? opt->input_file
-                                                       : output_path)
-                   : ny_exec_spawn(argv_exec);
+                   ? ny_safe_run_spawn_argv0(
+                         &opt->safe_run, output_path,
+                         opt->args ? (const char *const *)opt->args
+                                   : (const char *const[]){output_path, NULL},
+                         opt->input_file ? opt->input_file : output_path)
+                   : ny_exec_spawn_argv0(
+                         output_path,
+                         opt->args ? (const char *const *)opt->args
+                                   : (const char *const[]){output_path, NULL});
       if (rc != 0)
         exit_code = rc;
       if (aot_run_temp)
@@ -4206,6 +4997,8 @@ skip_compilation:
     }
   }
 exit_success:
+  ny_cache_read_unlock(std_load.cache_lock);
+  std_load.cache_lock = 0;
   if (exit_code != 0 && opt && opt->dump_on_error && !debug_bundle_written)
     dump_debug_bundle(opt, user_src, cg.module, "pipeline",
                       "compilation or execution returned a failure status");
@@ -4214,6 +5007,12 @@ exit_success:
   if (show_progress)
     ny_progress_finish();
 #ifndef _WIN32
+  for (size_t i = 0; i < mod_job_count; i++) {
+    if (mod_jobs[i].bc_path && !mod_jobs[i].persistent)
+      (void)unlink(mod_jobs[i].bc_path);
+    ny_module_job_free(&mod_jobs[i]);
+  }
+  free(mod_jobs);
   if (native_cache_handle)
     dlclose(native_cache_handle);
   if (native_cache_file)

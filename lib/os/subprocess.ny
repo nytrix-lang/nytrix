@@ -28,7 +28,9 @@ fn run_capture(any cmd, any args=[], any input=nil, bool check=true) dict {
    def argv = _cmd_args(cmd, args)
    def path = to_str(argv.get(0, ""))
    def p = pio.spawn(path, argv)
-   if p == 0 {
+   ;; io.spawn returns the process dictionary on success and integer zero on
+   ;; setup failure. Test the tagged runtime kind before reading process data.
+   if is_int(p) {
       if check { panic("spawn failed: " + repr(argv)) }
       mut fail = dict(4)
       fail["code"] = 127
@@ -37,7 +39,7 @@ fn run_capture(any cmd, any args=[], any input=nil, bool check=true) dict {
       fail["argv"] = argv
       return fail
    }
-   if input != nil && input != 0 {
+   if !is_nil(input) && (!is_int(input) || int(input) != 0) {
       def _ignored_send = pio.send(p, input)
       _ignored_send
    }

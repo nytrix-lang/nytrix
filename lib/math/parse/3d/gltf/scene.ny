@@ -19,7 +19,7 @@ fn _gltf_build_node_world_mats(any g, int node_idx, list parent_m, dict node_wor
    if !is_list(nodes) || node_idx < 0 || node_idx >= nodes.len { return node_world_mats }
    def visit_key = shr._gltf_node_visit_key(node_idx)
    if node_world_mats.get(visit_key, false) { return node_world_mats }
-   if node_world_mats.contains(node_idx) { return node_world_mats }
+   if is_list(node_world_mats.get(node_idx, 0)) { return node_world_mats }
    def node = nodes[node_idx]
    if !is_dict(node) { return node_world_mats }
    node_world_mats[visit_key] = true
@@ -170,9 +170,11 @@ fn _gltf_node_default_visibility(any g, int node_idx) bool {
    def node = nodes[node_idx]
    if !is_dict(node) { return true }
    def exts = node.get("extensions", 0)
-   def nv = is_dict(exts) ? exts.get("KHR_node_visibility", 0) : 0
+   if !is_dict(exts) { return true }
+   def nv = exts.get("KHR_node_visibility", 0)
    if is_dict(nv) && nv.contains("visible") {
       def v = nv.get("visible", true)
+      if is_bool(v) { return bool(v) }
       if is_int(v) { return v != 0 }
       if is_float(v) { return float(v) >= 0.5 }
       return !!v

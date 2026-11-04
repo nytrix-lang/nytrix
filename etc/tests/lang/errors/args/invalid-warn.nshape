@@ -6,7 +6,7 @@ shape args-invalid-warn {
   expect compile_fail
 
   flags "--warn=bogus"
-  expect_message "invalid warning level"
+  expect_message "invalid --warn 'bogus'"
   source ny <<'NY'
 use core
 print("ok")

@@ -128,7 +128,7 @@ comptime emit _prim_zero(errno, int, __errno, "Returns the last error number fro
 @jit
 @inline
 fn argv(int i) str {
-   "Returns the command-line argument at index `i`."
+   "Returns the command-line argument at index `i`, or an empty string when out of range."
    return __argv(i)
 }
 

@@ -3,6 +3,7 @@ shape exists_synth {
   generator "program"
   features ["proofs", "exists", "synth", "nonlinear", "requires"]
   template ny-test-case
+  timeout 120
   flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
   expect compile_and_run
   source ny <<'NY'

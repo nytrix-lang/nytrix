@@ -236,7 +236,7 @@ fn tui_canvas_loop(fnptr draw, int delay=16, int budget=0) int {
    0
 }
 
-fn is_quit_key(any key) bool {
+fn is_quit_key(int key) bool {
    "Returns true for quit keys in TUI mode(Esc or Ctrl+C)."
    key == 27 || key == 3
 }

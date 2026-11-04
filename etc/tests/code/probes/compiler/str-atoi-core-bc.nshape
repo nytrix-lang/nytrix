@@ -1,0 +1,20 @@
+shape str-atoi-core-bc {
+  family "probe-suite"
+  generator "regression"
+  features ["ny", "str", "atoi", "core-bc"]
+  template ny-test-case
+  expect compile_and_run
+  flags_matrix "--native-only -O0; --native-only -O2; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect_stdout "STR-ATOI-CORE-BC-OK"
+  source ny <<'NY'
+assert(str.atoi("32") == 32, "decimal 32")
+assert(str.atoi("42") == 42, "decimal 42")
+assert(str.atoi("0") == 0, "zero")
+assert(str.atoi("31") == 31, "decimal digits are not radix-mapped")
+assert(str.atoi("31") + 1 == 32, "atoi result remains a raw integer operand")
+assert(str.atoi("-31") == -31, "negative decimal")
+assert(str.atoi("42tail") == 42, "stops at first non-digit")
+assert(str.atoi("") == 0, "empty string")
+print("STR-ATOI-CORE-BC-OK")
+NY
+}

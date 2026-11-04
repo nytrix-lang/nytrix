@@ -65,7 +65,7 @@ shape thread_attr_vm_rejects {
   generator "embedded"
   features ["ny", "thread", "attr", "vm", "negative"]
   template ny-test-case
-  flags "--native-only --nyir-run"
+  flags "--native-only --nyr-run"
   expect compile_fail
   expect_message "thread callbacks require executable code"
   source ny <<'NY'

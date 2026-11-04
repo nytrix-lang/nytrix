@@ -39,6 +39,7 @@ typedef struct ny_dep_node_t {
     struct ny_dep_node_t *next;
     char *file_path;            /* File path (relative to project root) */
     ny_file_fingerprint_t fingerprint;
+    bool fingerprint_valid;     /* Fingerprint belongs to a readable source snapshot */
     ny_dep_edge_t *deps;        /* Files this node depends on */
     ny_dep_edge_t *rdeps;       /* Files that depend on this node (reverse deps) */
     bool needs_recompile;       /* Whether this file needs recompilation */

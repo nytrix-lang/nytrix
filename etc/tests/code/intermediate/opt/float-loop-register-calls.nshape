@@ -3,7 +3,7 @@ shape float_loop_register_calls {
   generator "native"
   features [native x86_64 regression float loop call register-coalescing]
   template ny-test-case
-  flags_matrix "--native-only --native-backend=x86_64 -O0 --nyir-verify; --native-only --native-backend=x86_64 -O3 --nyir-verify"
+  flags_matrix "--native-only --native-backend=x86_64 -O0 --nyr-verify; --native-only --native-backend=x86_64 -O3 --nyr-verify"
   expect compile_and_run
   source ny <<'NY'
 use core

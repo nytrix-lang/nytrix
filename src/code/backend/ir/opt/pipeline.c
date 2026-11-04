@@ -45,15 +45,23 @@
 static const char *nyr_debug_pass_name(bool (*pass)(nyr_func_t *));
 static void nyr_heu_noop_record(const char *pass_name, double ms);
 static void nyr_heu_noop_flush(void);
+/*
+ * State ownership: the pass-control options below (disabled/stop-after pass
+ * names, verify/rollback switches, budgets, oracle hooks) are process
+ * configuration written once before compilation starts. Everything a
+ * pipeline run mutates (stop flag, burst/no-op logs, pass history, value
+ * tracking, growth flag) is _Thread_local so concurrent compilations on
+ * different threads cannot observe each other's run state.
+ */
 static const char *nyr_disabled_pass = NULL;
 static const char *nyr_stop_after_pass = NULL;
-static bool nyr_pass_stopped = false;
+static _Thread_local bool nyr_pass_stopped = false;
 static bool nyr_verify_each_pass = false;
 static bool nyr_rollback_on_verify_fail = false;
-static int nyr_pass_burst_count = 0;
-static const char *nyr_pass_prev = "";
-static const char *nyr_pass_prev2 = "";
-static const char *nyr_pass_burst_first = NULL;
+static _Thread_local int nyr_pass_burst_count = 0;
+static _Thread_local const char *nyr_pass_prev = "";
+static _Thread_local const char *nyr_pass_prev2 = "";
+static _Thread_local const char *nyr_pass_burst_first = NULL;
 
 static void nyr_pass_burst_flush(void) {
   if (nyr_pass_burst_count >= 3)
@@ -70,9 +78,9 @@ static void nyr_pass_burst_flush(void) {
 /*
  * Value tracking across NYIR optimization passes.
  */
-static int nyr_track_value = -1;
-static bool nyr_track_enabled = false;
-static char nyr_track_first_def[128];
+static _Thread_local int nyr_track_value = -1;
+static _Thread_local bool nyr_track_enabled = false;
+static _Thread_local char nyr_track_first_def[128];
 
 void nyr_set_track_value(int value) {
   nyr_track_value = value;
@@ -103,13 +111,13 @@ static double nyr_pass_growth_factor = 0.0;
  * pipeline; gates the end-of-pipeline execution regression profile.
  */
 #if !defined(NYR_NO_EVAL)
-static bool nyr_pipeline_grew;
+static _Thread_local bool nyr_pipeline_grew;
 #endif
 
 static nyr_scalar_class_t
 nyr_pipeline_value_class(const nyr_func_t *f, const nyr_type_map_t *types,
-                          const nyr_inst_t *const *defs, int value,
-                          unsigned depth) {
+                         const nyr_inst_t *const *defs, int value,
+                         unsigned depth) {
   if (!f || value < 0 || value >= f->next_value || depth > 32)
     return NYIR_SCALAR_UNKNOWN;
   const nyr_inst_t *def = defs ? defs[value] : NULL;
@@ -251,7 +259,7 @@ static void nyr_stamp_local_store_classes(nyr_func_t *f) {
       size_t slot = (size_t)in->imm;
       if (slot_seen[slot] && !slot_mixed[slot] &&
           slot_class[slot] != NYIR_SCALAR_UNKNOWN &&
-          in->scalar_class != slot_class[slot]) {
+          in->scalar_class == NYIR_SCALAR_UNKNOWN) {
         in->scalar_class = slot_class[slot];
       }
     }
@@ -281,7 +289,8 @@ static void nyr_stamp_local_store_classes(nyr_func_t *f) {
           else if (types.value_f32[prev->a] && !types.value_f64[prev->a])
             cls = NYIR_SCALAR_F32;
         }
-        if (cls != NYIR_SCALAR_UNKNOWN)
+        if (cls != NYIR_SCALAR_UNKNOWN &&
+            load->scalar_class == NYIR_SCALAR_UNKNOWN)
           load->scalar_class = cls;
         break;
       }
@@ -303,6 +312,7 @@ bool nyr_loop_unswitch(nyr_func_t *f);
 bool nyr_iv_elim(nyr_func_t *f);
 bool nyr_gvn_pre(nyr_func_t *f);
 bool nyr_loop_vectorize(nyr_func_t *f);
+bool nyr_loop_vectorize_avx2(nyr_func_t *f);
 bool nyr_slp_vectorize(nyr_func_t *f);
 bool nyr_memcombine(nyr_func_t *f);
 bool nyr_alias_store_sink(nyr_func_t *f);
@@ -310,6 +320,16 @@ bool nyr_narrow(nyr_func_t *f);
 bool nyr_phi_elim(nyr_func_t *f);
 
 void nyr_set_pass_controls(const char *disable_pass, const char *stop_after) {
+  /*
+   * DEBUG ORACLE (remove after the in-loop call corruption is fixed):
+   * NYTRIX_IR_DISABLE_PASSES accepts a comma-separated pass list so a
+   * multi-pass interaction can be bisected from the environment.
+   */
+  if (!(disable_pass && disable_pass[0])) {
+    const char *env_list = getenv("NYTRIX_IR_DISABLE_PASSES");
+    if (env_list && env_list[0])
+      disable_pass = env_list;
+  }
   nyr_disabled_pass = disable_pass && disable_pass[0] ? disable_pass : NULL;
   nyr_stop_after_pass = stop_after && stop_after[0] ? stop_after : NULL;
 }
@@ -332,16 +352,28 @@ static void *nyr_oracle_userdata = NULL;
 static int nyr_tv_trials = 0;
 
 void nyr_set_per_pass_oracle(bool enable, nyr_per_pass_oracle_fn fn,
-                              void *userdata) {
+                             void *userdata) {
   nyr_per_pass_oracle = enable;
   nyr_oracle_fn = enable ? fn : NULL;
   nyr_oracle_userdata = enable ? userdata : NULL;
 }
 
-void nyr_set_tv_seed(int trials) { nyr_tv_trials = trials > 0 ? trials : 0; }
+void nyr_set_tv_seed(int trials) {
+  /*
+   * DEBUG ORACLE (remove after the in-loop call corruption is fixed):
+   * NYTRIX_IR_TV overrides every stage's TV tuning; it must stay strict so a
+   * corrupting pass is reported instead of silently accepted.
+   */
+  const char *tv_env = getenv("NYTRIX_IR_TV");
+  if (tv_env && tv_env[0]) {
+    int env_trials = atoi(tv_env);
+    nyr_tv_trials = env_trials > 0 ? env_trials : 0;
+    return;
+  }
+  nyr_tv_trials = trials > 0 ? trials : 0;
+}
 
-static bool nyr_oracle_checkpoint(const nyr_func_t *f,
-                                   const char *pass_name) {
+static bool nyr_oracle_checkpoint(const nyr_func_t *f, const char *pass_name) {
   if (!nyr_per_pass_oracle || !nyr_oracle_fn)
     return true;
   bool ok = nyr_oracle_fn(f, pass_name, nyr_oracle_userdata);
@@ -352,9 +384,8 @@ static bool nyr_oracle_checkpoint(const nyr_func_t *f,
   return ok;
 }
 
-static bool nyr_tv_checkpoint(const nyr_func_t *before,
-                               const nyr_func_t *after,
-                               const char *pass_name) {
+static bool nyr_tv_checkpoint(const nyr_func_t *before, const nyr_func_t *after,
+                              const char *pass_name) {
   if (nyr_tv_trials <= 0 || !before || !after)
     return true;
   char err[256] = {0};
@@ -364,7 +395,7 @@ static bool nyr_tv_checkpoint(const nyr_func_t *before,
   bool ok = nyr_tv_smt_equiv(before, after, err, sizeof(err));
   if (!ok && err[0] == '\0')
     ok = nyr_tv_equiv_straightline(before, after, nyr_tv_trials, err,
-                                    sizeof(err));
+                                   sizeof(err));
   if (ok)
     return true;
   fprintf(stderr, "native NYIR: translation validation failed after %s: %s\n",
@@ -387,7 +418,25 @@ static bool nyr_pass_is_skipped(bool (*pass)(nyr_func_t *)) {
   if (nyr_pass_stopped)
     return true;
   const char *name = nyr_debug_pass_name(pass);
-  return nyr_disabled_pass && strcmp(nyr_disabled_pass, name) == 0;
+  /*
+   * DEBUG ORACLE (remove after the in-loop call corruption is fixed):
+   * comma-separated disable lists (NYTRIX_IR_DISABLE_PASSES).
+   */
+  const char *list = nyr_disabled_pass;
+  while (list && *list) {
+    while (*list == ',' || *list == ' ')
+      ++list;
+    if (!*list)
+      break;
+    const char *end = list;
+    while (*end && *end != ',' && *end != ' ')
+      ++end;
+    size_t n = (size_t)(end - list);
+    if (strlen(name) == n && strncmp(name, list, n) == 0)
+      return true;
+    list = end;
+  }
+  return false;
 }
 
 static void nyr_finish_pass(bool (*pass)(nyr_func_t *)) {
@@ -427,14 +476,14 @@ static bool nyr_debug_const_fold_candidate(nyr_op_t op) {
 }
 
 static void nyr_debug_pattern_candidates(const nyr_func_t *f,
-                                          const char *pass_name) {
+                                         const char *pass_name) {
   if (!f || !pass_name || !ny_dbg_is_enabled(NY_DBG_OPT_MISS))
     return;
   if (strcmp(pass_name, "const_fold") == 0 && f->next_value > 0) {
     nyr_value_fact_t *facts = calloc((size_t)f->next_value, sizeof(*facts));
     char err[128] = {0};
-    if (facts && nyr_analyze_values(f, facts, (size_t)f->next_value, err,
-                                     sizeof(err))) {
+    if (facts &&
+        nyr_analyze_values(f, facts, (size_t)f->next_value, err, sizeof(err))) {
       unsigned shown = 0;
       for (size_t i = 0; i < f->len && shown < 8; ++i) {
         const nyr_inst_t *in = &f->data[i];
@@ -782,11 +831,10 @@ static bool timed_pass(nyr_func_t *f, bool (*pass)(nyr_func_t *),
     }
     if (def) {
       if (!nyr_track_first_def[0])
-        snprintf(nyr_track_first_def, sizeof(nyr_track_first_def), "%s",
-                 name);
+        snprintf(nyr_track_first_def, sizeof(nyr_track_first_def), "%s", name);
       NY_DBG(NY_DBG_VALUE, "v%d DEF@%s %s@%s uses=%s%zu", nyr_track_value,
-             nyr_track_first_def, have_uses && use_count ? "USE" : "LIVE",
-             name, have_uses ? "" : "?", have_uses ? use_count : 0);
+             nyr_track_first_def, have_uses && use_count ? "USE" : "LIVE", name,
+             have_uses ? "" : "?", have_uses ? use_count : 0);
     } else {
       if (existed_before)
         NY_DBG(NY_DBG_VALUE, "v%d DEF@%s KILL@%s uses=%zu", nyr_track_value,
@@ -834,8 +882,8 @@ typedef struct {
   int count;
 } pass_exec_t;
 
-static pass_exec_t pass_history[64];
-static int pass_history_len = 0;
+static _Thread_local pass_exec_t pass_history[64];
+static _Thread_local int pass_history_len = 0;
 
 static __attribute__((unused)) void record_pass_execution(const char *name,
                                                           size_t before_insts,
@@ -882,6 +930,11 @@ static const nyr_pass_control_t nyr_pass_controls[] = {
     {nyr_cfg_simplify, "cfg_simplify"},
     {nyr_phiopt, "phiopt"},
     {nyr_if_convert, "if_convert"},
+    {nyr_ilp_reassociate, "ilp_reassociate"},
+    {nyr_loop_global_promote, "loop_global_promote"},
+    {nyr_select_chain_fold, "select_chain_fold"},
+    {nyr_float_zero_guard_fold, "float_zero_guard_fold"},
+    {nyr_outer_loop_vectorize, "outer_loop_vectorize"},
     {nyr_licm, "licm"},
     {nyr_dce, "dce"},
     {nyr_dead_arg_elim, "dead_arg_elim"},
@@ -939,6 +992,7 @@ static const nyr_pass_control_t nyr_pass_controls[] = {
     {nyr_iv_elim, "iv_elim"},
     {nyr_gvn_pre, "gvn_pre"},
     {nyr_loop_vectorize, "loop_vectorize"},
+    {nyr_loop_vectorize_avx2, "loop_vectorize"},
     {nyr_slp_vectorize, "slp_vectorize"},
     {nyr_alias_store_sink, "alias_store_sink"},
     {nyr_narrow, "narrow"},
@@ -955,32 +1009,65 @@ static const nyr_pass_control_t nyr_pass_controls[] = {
 static bool nyr_pass_control_valid(const char *name) {
   if (!name || !name[0] || strcmp(name, "scalar_cleanup") == 0)
     return true;
-  for (size_t i = 0;
-       i < sizeof(nyr_pass_controls) / sizeof(nyr_pass_controls[0]); ++i)
-    if (strcmp(name, nyr_pass_controls[i].name) == 0)
-      return true;
-  return false;
+  /*
+   * DEBUG ORACLE (remove after the in-loop call corruption is fixed):
+   * accept comma-separated pass lists, one valid name per token.
+   */
+  const char *cursor = name;
+  while (*cursor) {
+    while (*cursor == ',' || *cursor == ' ')
+      ++cursor;
+    if (!*cursor)
+      break;
+    const char *end = cursor;
+    while (*end && *end != ',' && *end != ' ')
+      ++end;
+    size_t token = (size_t)(end - cursor);
+    bool found = false;
+    for (size_t i = 0;
+         i < sizeof(nyr_pass_controls) / sizeof(nyr_pass_controls[0]); ++i)
+      if (strlen(nyr_pass_controls[i].name) == token &&
+          strncmp(nyr_pass_controls[i].name, cursor, token) == 0) {
+        found = true;
+        break;
+      }
+    if (!found)
+      return false;
+    cursor = end;
+  }
+  return true;
 }
 
 static bool nyr_optimize_pipeline(nyr_func_t *f, nyr_opt_stats_t *stats,
-                                   int opt_level, FILE *dump);
+                                  int opt_level, unsigned options, FILE *dump);
 
 bool nyr_optimize_with_stats(nyr_func_t *f, nyr_opt_stats_t *stats,
-                              int opt_level) {
-  return nyr_optimize_pipeline(f, stats, opt_level, NULL);
+                             int opt_level) {
+  return nyr_optimize_with_stats_options(f, stats, opt_level, 0);
+}
+
+bool nyr_optimize_with_stats_options(nyr_func_t *f, nyr_opt_stats_t *stats,
+                                     int opt_level, unsigned options) {
+  return nyr_optimize_pipeline(f, stats, opt_level, options, NULL);
 }
 
 bool nyr_ir_optimize(nyr_func_t *f, int opt_level) {
+  return nyr_ir_optimize_with_options(f, opt_level, 0);
+}
+
+bool nyr_ir_optimize_with_options(nyr_func_t *f, int opt_level,
+                                  unsigned options) {
   /*
    * Execution-regression profiling needs the before/after counts, so the
    * no-stats variant supplies a scratch stats record when profiling is on.
    */
   if (getenv("NYTRIX_FINGERPRINT_PROFILE")) {
     nyr_opt_stats_t profile_stats;
-    bool ok = nyr_optimize_with_stats(f, &profile_stats, opt_level);
+    bool ok =
+        nyr_optimize_pipeline(f, &profile_stats, opt_level, options, NULL);
     return ok;
   }
-  return nyr_optimize_with_stats(f, NULL, opt_level);
+  return nyr_optimize_pipeline(f, NULL, opt_level, options, NULL);
 }
 
 /*
@@ -1008,7 +1095,7 @@ typedef struct {
   size_t total;
   size_t distinct;
 } nyr_noop_log_t;
-static nyr_noop_log_t g_nyir_noop;
+static _Thread_local nyr_noop_log_t g_nyir_noop;
 /*
  * Set when any pass grew a function's IR by more than 10% during this
  * pipeline; gates the end-of-pipeline execution regression profile.
@@ -1176,11 +1263,10 @@ static const char *nyr_pass_family(const char *pass) {
  * tokens, reporting the hidden remainder via out_hidden.
  */
 static void nyr_format_group_token(char *token, size_t token_n,
-                                    const char **run_names,
-                                    const size_t *run_counts, size_t start,
-                                    size_t end, size_t prefix,
-                                    size_t suffix_len, const char *suffix_str,
-                                    int kind) {
+                                   const char **run_names,
+                                   const size_t *run_counts, size_t start,
+                                   size_t end, size_t prefix, size_t suffix_len,
+                                   const char *suffix_str, int kind) {
   /*
    * kind: 1=prefix, 2=suffix, 3=family-bare
    */
@@ -1265,8 +1351,8 @@ static void nyr_format_group_token(char *token, size_t token_n,
 }
 
 static void nyr_format_pass_seq(char *out, size_t out_n, const char **seq,
-                                 size_t seq_len, size_t max_tokens,
-                                 size_t *out_tokens, size_t *out_hidden) {
+                                size_t seq_len, size_t max_tokens,
+                                size_t *out_tokens, size_t *out_hidden) {
   if (out_tokens)
     *out_tokens = 0;
   if (out_hidden)
@@ -1411,16 +1497,16 @@ static void nyr_format_pass_seq(char *out, size_t out_n, const char **seq,
       else
         snprintf(token, sizeof(token), "%s", disp);
     } else if (token_kind[t] == 1) {
-      nyr_format_group_token(token, sizeof(token), run_names, run_counts,
-                              start, end, token_affix[t], 0, NULL, 1);
+      nyr_format_group_token(token, sizeof(token), run_names, run_counts, start,
+                             end, token_affix[t], 0, NULL, 1);
     } else if (token_kind[t] == 2) {
       size_t alen = strlen(run_names[start]);
       const char *suf = run_names[start] + alen - token_affix[t];
-      nyr_format_group_token(token, sizeof(token), run_names, run_counts,
-                              start, end, 0, token_affix[t], suf, 2);
+      nyr_format_group_token(token, sizeof(token), run_names, run_counts, start,
+                             end, 0, token_affix[t], suf, 2);
     } else {
-      nyr_format_group_token(token, sizeof(token), run_names, run_counts,
-                              start, end, 0, 0, NULL, 3);
+      nyr_format_group_token(token, sizeof(token), run_names, run_counts, start,
+                             end, 0, 0, NULL, 3);
     }
     size_t need = strlen(token) + (tokens ? 2 : 1) + 1;
     if (used + need >= out_n)
@@ -1471,7 +1557,7 @@ static void nyr_noop_flush(FILE *dump) {
   if (g_nyir_noop.seq_len > 0) {
     size_t tokens = 0;
     nyr_format_pass_seq(grouped, sizeof(grouped), g_nyir_noop.seq,
-                         g_nyir_noop.seq_len, 12, &tokens, &hidden);
+                        g_nyir_noop.seq_len, 12, &tokens, &hidden);
     fputs(grouped, dump);
   } else {
     size_t shown = 0;
@@ -1492,7 +1578,7 @@ static void nyr_noop_flush(FILE *dump) {
 
 /*
  * Pending NYIR_PASS heuristic no-op records for the non-dump (-vvvvvv without
- * --nyir-verify) path.  Consecutive `no-rewrite` events carry no per-pass
+ * --nyr-verify) path.  Consecutive `no-rewrite` events carry no per-pass
  * information beyond the name, so they fold into one summary event per
  * rewrite boundary instead of ~70 lines per function.
  */
@@ -1503,7 +1589,7 @@ typedef struct {
   size_t total;
   double ms;
 } nyr_heu_noop_t;
-static nyr_heu_noop_t g_nyir_heu_noop;
+static _Thread_local nyr_heu_noop_t g_nyir_heu_noop;
 
 static void nyr_heu_noop_record(const char *pass_name, double ms) {
   g_nyir_heu_noop.total++;
@@ -1523,7 +1609,7 @@ static void nyr_heu_noop_flush(void) {
   size_t hidden = 0;
   size_t tokens = 0;
   nyr_format_pass_seq(grouped, sizeof(grouped), g_nyir_heu_noop.seq,
-                       g_nyir_heu_noop.len, 14, &tokens, &hidden);
+                      g_nyir_heu_noop.len, 14, &tokens, &hidden);
   char detail[2304] = {0};
   if (hidden)
     snprintf(detail, sizeof(detail), "no-op×%zu (%.2fms total):%s, +%zu more",
@@ -1695,10 +1781,9 @@ static bool timed_pass_verified(nyr_func_t *f, bool (*pass)(nyr_func_t *),
 }
 
 static void nyr_stats_append(nyr_opt_stats_t *stats, const char *name,
-                              double ms, size_t before_insts,
-                              size_t after_insts, int before_values,
-                              int after_values, size_t before_blocks,
-                              size_t after_blocks) {
+                             double ms, size_t before_insts, size_t after_insts,
+                             int before_values, int after_values,
+                             size_t before_blocks, size_t after_blocks) {
   if (!stats)
     return;
   stats->total_time_ms += ms;
@@ -1706,20 +1791,20 @@ static void nyr_stats_append(nyr_opt_stats_t *stats, const char *name,
     return;
   stats->passes[stats->pass_count++] =
       (nyr_pass_stat_t){.name = name,
-                         .time_ms = ms,
-                         .before_insts = before_insts,
-                         .after_insts = after_insts,
-                         .before_values = before_values,
-                         .after_values = after_values,
-                         .before_blocks = before_blocks,
-                         .after_blocks = after_blocks};
+                        .time_ms = ms,
+                        .before_insts = before_insts,
+                        .after_insts = after_insts,
+                        .before_values = before_values,
+                        .after_values = after_values,
+                        .before_blocks = before_blocks,
+                        .after_blocks = after_blocks};
 }
 
 /*
  * Shared O0–O3 pipeline. dump!=NULL enables verified+compact-diff mode.
  */
 static bool nyr_run_pass(nyr_func_t *f, bool (*pass)(nyr_func_t *),
-                          nyr_opt_stats_t *stats, FILE *dump, bool *ok) {
+                         nyr_opt_stats_t *stats, FILE *dump, bool *ok) {
   bool skipped = nyr_pass_is_skipped(pass);
   size_t before = f ? f->len : 0;
   int before_values = f ? f->next_value : 0;
@@ -1733,13 +1818,13 @@ static bool nyr_run_pass(nyr_func_t *f, bool (*pass)(nyr_func_t *),
     *ok = false;
   if (!skipped)
     nyr_stats_append(stats, nyr_debug_pass_name(pass), ms, before,
-                      f ? f->len : 0, before_values, f ? f->next_value : 0,
-                      before_blocks, nyr_block_count(f));
+                     f ? f->len : 0, before_values, f ? f->next_value : 0,
+                     before_blocks, nyr_block_count(f));
   return r;
 }
 
 static bool nyr_run_seq(nyr_func_t *f, bool (*const *passes)(nyr_func_t *),
-                         int n, nyr_opt_stats_t *stats, FILE *dump, bool *ok) {
+                        int n, nyr_opt_stats_t *stats, FILE *dump, bool *ok) {
   for (int i = 0; i < n && *ok; ++i)
     if (!nyr_run_pass(f, passes[i], stats, dump, ok))
       return false;
@@ -1747,7 +1832,7 @@ static bool nyr_run_seq(nyr_func_t *f, bool (*const *passes)(nyr_func_t *),
 }
 
 static bool nyr_run_finish_scalar(nyr_func_t *f, nyr_opt_stats_t *stats,
-                                   FILE *dump, bool *ok) {
+                                  FILE *dump, bool *ok) {
   if (!*ok || nyr_pass_stopped)
     return *ok;
   if (nyr_disabled_pass && strcmp(nyr_disabled_pass, "scalar_cleanup") == 0) {
@@ -1762,17 +1847,17 @@ static bool nyr_run_finish_scalar(nyr_func_t *f, nyr_opt_stats_t *stats,
     nyr_run_pass(f, nyr_compact, stats, dump, ok);
   } else {
     static bool (*const base[])(nyr_func_t *) = {nyr_const_fold,
-                                                  nyr_strength_reduce,
-                                                  nyr_narrow,
-                                                  nyr_peephole,
-                                                  nyr_apply_rules,
-                                                  nyr_copy_prop,
-                                                  nyr_redundant_load_elim,
-                                                  nyr_bounds_check_elim,
-                                                  nyr_cse,
-                                                  nyr_tbuf_scalar_len,
-                                                  nyr_tbuf_private_object,
-                                                  nyr_tbuf_promote_alloca};
+                                                 nyr_strength_reduce,
+                                                 nyr_narrow,
+                                                 nyr_peephole,
+                                                 nyr_apply_rules,
+                                                 nyr_copy_prop,
+                                                 nyr_redundant_load_elim,
+                                                 nyr_bounds_check_elim,
+                                                 nyr_cse,
+                                                 nyr_tbuf_scalar_len,
+                                                 nyr_tbuf_private_object,
+                                                 nyr_tbuf_promote_alloca};
     nyr_run_seq(f, base, 12, stats, dump, ok);
     if (*ok && has_locals) {
       static bool (*const memory[])(nyr_func_t *) = {
@@ -1785,7 +1870,7 @@ static bool nyr_run_finish_scalar(nyr_func_t *f, nyr_opt_stats_t *stats,
     }
     if (*ok && has_cf) {
       static bool (*const control[])(nyr_func_t *) = {nyr_polyhedral_nest,
-                                                       nyr_block_layout};
+                                                      nyr_block_layout};
       nyr_run_seq(f, control, 2, stats, dump, ok);
     }
     if (*ok) {
@@ -1804,7 +1889,7 @@ static bool nyr_run_finish_scalar(nyr_func_t *f, nyr_opt_stats_t *stats,
 }
 
 static bool nyr_optimize_pipeline(nyr_func_t *f, nyr_opt_stats_t *stats,
-                                   int opt_level, FILE *dump) {
+                                  int opt_level, unsigned options, FILE *dump) {
   /*
    * Read fast-math mode from env config each pipeline invocation.
    */
@@ -1821,7 +1906,7 @@ static bool nyr_optimize_pipeline(nyr_func_t *f, nyr_opt_stats_t *stats,
   if (stats) {
     memset(stats, 0, sizeof(*stats));
     nyr_collect_stats(f, &stats->before_insts, &stats->before_values,
-                       stats->before_ops, NYIR_OP_COUNT);
+                      stats->before_ops, NYIR_OP_COUNT);
   }
   /*
    * Opt-regression execution profiling: keep the pre-optimization snapshot
@@ -1860,22 +1945,24 @@ static bool nyr_optimize_pipeline(nyr_func_t *f, nyr_opt_stats_t *stats,
       nyr_run_finish_scalar(f, stats, dump, &ok);
   } else if (opt_level == 2) {
     static bool (*const p2[])(nyr_func_t *) = {nyr_devirtualize,
-                                                nyr_const_fold,
-                                                nyr_peephole,
-                                                nyr_copy_prop,
-                                                nyr_cse,
-                                                nyr_cfg_simplify,
-                                                nyr_if_convert,
-                                                nyr_dce,
-                                                nyr_dead_store_elim,
-                                                nyr_cfg_simplify,
-                                                nyr_compact_if_sparse};
+                                               nyr_const_fold,
+                                               nyr_peephole,
+                                               nyr_copy_prop,
+                                               nyr_cse,
+                                               nyr_cfg_simplify,
+                                               nyr_if_convert,
+                                               nyr_dce,
+                                               nyr_dead_store_elim,
+                                               nyr_cfg_simplify,
+                                               nyr_compact_if_sparse};
     nyr_run_seq(f, p2, 11, stats, dump, &ok);
+    if (ok && !nyr_pass_stopped)
+      nyr_run_pass(f, nyr_loop_global_promote, stats, dump, &ok);
     if (ok && !nyr_pass_stopped &&
         (!nyr_has_control_flow(f) || nyr_cf_mem2reg_enabled)) {
-      static bool (*const prom[])(nyr_func_t *) = {
-          nyr_mem2reg, nyr_sccp, nyr_dce, nyr_dead_store_elim,
-          nyr_compact_if_sparse};
+      static bool (*const prom[])(nyr_func_t *) = {nyr_mem2reg, nyr_sccp,
+                                                   nyr_dce, nyr_dead_store_elim,
+                                                   nyr_compact_if_sparse};
       nyr_run_seq(f, prom, 5, stats, dump, &ok);
     }
     if (ok && !nyr_pass_stopped)
@@ -1918,20 +2005,19 @@ static bool nyr_optimize_pipeline(nyr_func_t *f, nyr_opt_stats_t *stats,
      * CFG/SCEV rebuilds and bails with no change.
      */
     if (ok && !nyr_pass_stopped && nyr_has_loop(f)) {
-      static bool (*const loop_opts[])(nyr_func_t *) = {
-          nyr_loop_rotate,
-          nyr_scev_lite,
-          nyr_irce,
-          nyr_loop_idiom,
-          nyr_loop_memset,
-          nyr_loop_last_overwrite,
-          nyr_cfg_simplify,
-          nyr_dce,
-          nyr_licm,
-          nyr_cse,
-          nyr_scev_lite,
-          nyr_irce,
-          nyr_alias_store_sink};
+      static bool (*const loop_opts[])(nyr_func_t *) = {nyr_loop_rotate,
+                                                        nyr_scev_lite,
+                                                        nyr_irce,
+                                                        nyr_loop_idiom,
+                                                        nyr_loop_memset,
+                                                        nyr_loop_last_overwrite,
+                                                        nyr_cfg_simplify,
+                                                        nyr_dce,
+                                                        nyr_licm,
+                                                        nyr_cse,
+                                                        nyr_scev_lite,
+                                                        nyr_irce,
+                                                        nyr_alias_store_sink};
       /*
        * LICM/CSE can expose a simpler loop guard and can replace repeated
        * managed-buffer length helpers with one dominating SSA value.  Refresh
@@ -1948,8 +2034,12 @@ static bool nyr_optimize_pipeline(nyr_func_t *f, nyr_opt_stats_t *stats,
      * through vectorization, then let IV elimination and SLP clean up the
      * remaining scalar regions/tails.
      */
-    if (ok && !nyr_pass_stopped && nyr_has_loop(f))
-      nyr_run_pass(f, nyr_loop_vectorize, stats, dump, &ok);
+    if (ok && !(options & NYR_IR_OPT_DISABLE_VECTORIZATION) &&
+        !nyr_pass_stopped && nyr_has_loop(f))
+      nyr_run_pass(f, (options & NYR_IR_OPT_AVX2_VECTORIZE)
+                          ? nyr_loop_vectorize_avx2
+                          : nyr_loop_vectorize,
+                   stats, dump, &ok);
     if (ok && !nyr_pass_stopped && nyr_has_loop(f))
       nyr_run_pass(f, nyr_iv_elim, stats, dump, &ok);
     if (ok && !nyr_pass_stopped && nyr_has_loop(f))
@@ -1962,12 +2052,12 @@ static bool nyr_optimize_pipeline(nyr_func_t *f, nyr_opt_stats_t *stats,
       nyr_run_pass(f, nyr_loop_unroll, stats, dump, &ok);
     if (ok && !nyr_pass_stopped) {
       static bool (*const pre_slp[])(nyr_func_t *) = {nyr_redundant_load_elim,
-                                                       nyr_memory_ssa_forward,
-                                                       nyr_tbuf_private_object,
-                                                       nyr_tbuf_promote_alloca,
-                                                       nyr_sroa_scalar,
-                                                       nyr_dead_store_elim,
-                                                       nyr_dce};
+                                                      nyr_memory_ssa_forward,
+                                                      nyr_tbuf_private_object,
+                                                      nyr_tbuf_promote_alloca,
+                                                      nyr_sroa_scalar,
+                                                      nyr_dead_store_elim,
+                                                      nyr_dce};
       /*
        * SLP sees better trees after private/local memory has been forwarded
        * into SSA.  Keep this immediately before SLP so later scalar cleanup
@@ -1977,7 +2067,8 @@ static bool nyr_optimize_pipeline(nyr_func_t *f, nyr_opt_stats_t *stats,
       if (ok && !nyr_pass_stopped)
         nyr_run_pass(f, nyr_memcombine, stats, dump, &ok);
     }
-    if (ok && !nyr_pass_stopped)
+    if (ok && !(options & NYR_IR_OPT_DISABLE_VECTORIZATION) &&
+        !nyr_pass_stopped)
       nyr_run_pass(f, nyr_slp_vectorize, stats, dump, &ok);
     if (ok && !nyr_pass_stopped)
       nyr_run_finish_scalar(f, stats, dump, &ok);
@@ -1990,18 +2081,20 @@ static bool nyr_optimize_pipeline(nyr_func_t *f, nyr_opt_stats_t *stats,
         nyr_devirtualize, nyr_const_fold,   nyr_cfg_simplify,
         nyr_dce,          nyr_cfg_simplify, nyr_if_convert};
     nyr_run_seq(f, head, 6, stats, dump, &ok);
+    if (ok && !nyr_pass_stopped)
+      nyr_run_pass(f, nyr_loop_global_promote, stats, dump, &ok);
 
     bool has_cf = nyr_has_control_flow(f);
     if (ok && nyr_has_local_mem(f) && !nyr_pass_stopped &&
         (!has_cf || nyr_cf_mem2reg_enabled)) {
       static bool (*const early[])(nyr_func_t *) = {nyr_mem2reg,
-                                                     nyr_sccp,
-                                                     nyr_cfg_simplify,
-                                                     nyr_dce,
-                                                     nyr_alias_analysis,
-                                                     nyr_compact_if_sparse,
-                                                     nyr_redundant_load_elim,
-                                                     nyr_bounds_check_elim};
+                                                    nyr_sccp,
+                                                    nyr_cfg_simplify,
+                                                    nyr_dce,
+                                                    nyr_alias_analysis,
+                                                    nyr_compact_if_sparse,
+                                                    nyr_redundant_load_elim,
+                                                    nyr_bounds_check_elim};
       nyr_run_seq(f, early, 8, stats, dump, &ok);
     }
     if (ok && !nyr_pass_stopped)
@@ -2028,14 +2121,13 @@ static bool nyr_optimize_pipeline(nyr_func_t *f, nyr_opt_stats_t *stats,
       if (ok && !nyr_pass_stopped && !nyr_has_loop(f))
         nyr_run_pass(f, nyr_egraph_rewrite, stats, dump, &ok);
       static bool (*const mid_after_egraph[])(nyr_func_t *) = {
-          nyr_cfg_simplify,
-          nyr_if_convert,
-          nyr_dce,
-          nyr_null_check_elim,
-          nyr_overflow_check_elim,
-          nyr_vrp,
-          nyr_cvp};
+          nyr_cfg_simplify,        nyr_if_convert, nyr_dce, nyr_null_check_elim,
+          nyr_overflow_check_elim, nyr_vrp,        nyr_cvp};
       nyr_run_seq(f, mid_after_egraph, 7, stats, dump, &ok);
+      static bool (*const chain_fold[])(nyr_func_t *) = {
+          nyr_select_chain_fold, nyr_float_zero_guard_fold, nyr_copy_prop,
+          nyr_const_fold,        nyr_cfg_simplify,          nyr_dce};
+      nyr_run_seq(f, chain_fold, 6, stats, dump, &ok);
     }
     /*
      * Loop-only O3 passes: skip entirely for straight-line functions
@@ -2085,8 +2177,12 @@ static bool nyr_optimize_pipeline(nyr_func_t *f, nyr_opt_stats_t *stats,
        * eligible when the vector reducer preserves lane order; remaining
        * legality and profitability checks stay in the vectorizer.
        */
-      if (ok && !nyr_pass_stopped)
-        nyr_run_pass(f, nyr_loop_vectorize, stats, dump, &ok);
+      if (ok && !(options & NYR_IR_OPT_DISABLE_VECTORIZATION) &&
+          !nyr_pass_stopped)
+        nyr_run_pass(f, (options & NYR_IR_OPT_AVX2_VECTORIZE)
+                            ? nyr_loop_vectorize_avx2
+                            : nyr_loop_vectorize,
+                     stats, dump, &ok);
       /*
        * Prefetch insertion after loop structure is finalized.
        */
@@ -2111,20 +2207,28 @@ static bool nyr_optimize_pipeline(nyr_func_t *f, nyr_opt_stats_t *stats,
      */
     if (ok && !nyr_pass_stopped) {
       if (ok && !nyr_pass_stopped) {
-        static bool (*const pre_slp[])(nyr_func_t *) = {
-            nyr_redundant_load_elim,
-            nyr_memory_ssa_forward,
-            nyr_tbuf_private_object,
-            nyr_tbuf_promote_alloca,
-            nyr_sroa_scalar,
-            nyr_dead_store_elim,
-            nyr_dce,
-            nyr_alias_store_sink};
+        static bool (*const pre_slp[])(nyr_func_t *) = {nyr_redundant_load_elim,
+                                                        nyr_memory_ssa_forward,
+                                                        nyr_tbuf_private_object,
+                                                        nyr_tbuf_promote_alloca,
+                                                        nyr_sroa_scalar,
+                                                        nyr_dead_store_elim,
+                                                        nyr_dce,
+                                                        nyr_alias_store_sink};
         nyr_run_seq(f, pre_slp, 8, stats, dump, &ok);
+        /*
+         * Store-to-load forwarding above can expose constant loop seeds
+         * (for example a promoted global counter), which the select-chain
+         * fold needs to bound an induction PHI.
+         */
+        static bool (*const late_chain_fold[])(nyr_func_t *) = {
+            nyr_select_chain_fold, nyr_copy_prop, nyr_const_fold, nyr_dce};
+        nyr_run_seq(f, late_chain_fold, 4, stats, dump, &ok);
         if (ok && !nyr_pass_stopped)
           nyr_run_pass(f, nyr_memcombine, stats, dump, &ok);
       }
-      if (ok && !nyr_pass_stopped)
+      if (ok && !(options & NYR_IR_OPT_DISABLE_VECTORIZATION) &&
+          !nyr_pass_stopped)
         nyr_run_pass(f, nyr_slp_vectorize, stats, dump, &ok);
       if (ok && !nyr_pass_stopped)
         nyr_run_pass(f, nyr_compact_if_sparse, stats, dump, &ok);
@@ -2154,6 +2258,29 @@ static bool nyr_optimize_pipeline(nyr_func_t *f, nyr_opt_stats_t *stats,
       nyr_run_pass(f, nyr_dead_arg_elim, stats, dump, &ok);
     if (ok && !nyr_pass_stopped)
       nyr_run_finish_scalar(f, stats, dump, &ok);
+    /*
+     * Last scalar rewrite: earlier passes minimise instruction count and
+     * may lengthen loop-carried chains; this restores latency-optimal
+     * association once nothing else will refactor it.
+     */
+    if (ok && !nyr_pass_stopped && nyr_has_loop(f))
+      nyr_run_pass(f, nyr_ilp_reassociate, stats, dump, &ok);
+    /* Diagnostic: NYTRIX_DUMP_FINAL_NYIR=1 prints each function as it
+     * leaves the scalar pipeline (the module-level route). */
+    if (ok && getenv("NYTRIX_DUMP_FINAL_NYIR"))
+      nyr_dump(stderr, f, "final");
+    /*
+     * Widen loops over independent register-only iterations (including
+     * ones containing uniform inner loops) to four AVX2 lanes. It runs
+     * last so the body it clones is already fully simplified.
+     */
+    if (ok && !nyr_pass_stopped && nyr_has_loop(f) &&
+        (options & NYR_IR_OPT_AVX2_VECTORIZE) &&
+        !(options & NYR_IR_OPT_DISABLE_VECTORIZATION)) {
+      static bool (*const widen[])(nyr_func_t *) = {
+          nyr_outer_loop_vectorize, nyr_copy_prop, nyr_dce};
+      nyr_run_seq(f, widen, 3, stats, dump, &ok);
+    }
   }
 
   /*
@@ -2183,7 +2310,7 @@ static bool nyr_optimize_pipeline(nyr_func_t *f, nyr_opt_stats_t *stats,
 
   if (stats)
     nyr_collect_stats(f, &stats->after_insts, &stats->after_values,
-                       stats->after_ops, NYIR_OP_COUNT);
+                      stats->after_ops, NYIR_OP_COUNT);
   if (ok)
     nyr_refresh_metadata(f);
 
@@ -2236,11 +2363,11 @@ static bool nyr_optimize_pipeline(nyr_func_t *f, nyr_opt_stats_t *stats,
       }
       if (slot == agg_count && agg_count < NYIR_MAX_PASS_STATS) {
         agg[agg_count++] = (nyr_agg_t){.name = name,
-                                        .count = 0,
-                                        .time_ms = 0.0,
-                                        .before_insts = 0,
-                                        .after_insts = 0,
-                                        .max_delta = 0};
+                                       .count = 0,
+                                       .time_ms = 0.0,
+                                       .before_insts = 0,
+                                       .after_insts = 0,
+                                       .max_delta = 0};
       }
       if (slot >= NYIR_MAX_PASS_STATS)
         continue;
@@ -2284,7 +2411,7 @@ static bool nyr_optimize_pipeline(nyr_func_t *f, nyr_opt_stats_t *stats,
       size_t hidden = 0;
       size_t qtokens = 0;
       nyr_format_pass_seq(quiet_grouped, sizeof(quiet_grouped), quiet_seq,
-                           quiet_seq_len, 10, &qtokens, &hidden);
+                          quiet_seq_len, 10, &qtokens, &hidden);
       /*
        * Truncate to one line; the formatter already caps tokens.
        */
@@ -2351,8 +2478,8 @@ static bool nyr_optimize_pipeline(nyr_func_t *f, nyr_opt_stats_t *stats,
     char verr[192];
     for (int r = 0; r < runs && before_ok; ++r) {
       ny_tick_t t0 = ny_ticks_now();
-      before_ok =
-          nyr_ir_eval(&profile_before, NULL, 0, 4000000, &rb, verr, sizeof(verr));
+      before_ok = nyr_ir_eval(&profile_before, NULL, 0, 4000000, &rb, verr,
+                              sizeof(verr));
       before_ms += ny_ticks_elapsed_ms(t0);
     }
     for (int r = 0; r < runs && after_ok; ++r) {
@@ -2395,6 +2522,12 @@ static bool nyr_optimize_pipeline(nyr_func_t *f, nyr_opt_stats_t *stats,
 }
 
 bool nyr_optimize_debug(nyr_func_t *f, FILE *dump, nyr_opt_stats_t *stats,
-                         int opt_level) {
-  return nyr_optimize_pipeline(f, stats, opt_level, dump);
+                        int opt_level) {
+  return nyr_optimize_debug_with_options(f, dump, stats, opt_level, 0);
+}
+
+bool nyr_optimize_debug_with_options(nyr_func_t *f, FILE *dump,
+                                     nyr_opt_stats_t *stats, int opt_level,
+                                     unsigned options) {
+  return nyr_optimize_pipeline(f, stats, opt_level, options, dump);
 }

@@ -3,7 +3,7 @@ shape test_import_local {
   generator "embedded"
   features ["ny", "test"]
   template ny-test-case
-  flags_matrix "--nyir-verify --native --run; --nyir-verify --native-backend=llvm --jit --jit-engine=mcjit; --nyir-verify --native-backend=llvm --jit --jit-engine=orc; --nyir-verify --native-only"
+  flags_matrix "--nyr-verify --native --run; --nyr-verify --native-backend=llvm --jit --jit-engine=mcjit; --nyr-verify --native-backend=llvm --jit --jit-engine=orc; --nyr-verify --native-only"
   expect compile_and_run
   timeout 60
   source ny <<'NY'

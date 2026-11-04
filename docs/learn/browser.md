@@ -6,6 +6,8 @@ process, thread, audio, or Vulkan support merely because similarly named APIs
 exist on native targets. Check the capability used by the program on the exact
 browser route.
 
+Prerequisites: a compiler checkout with browser tooling and a WebAssembly-capable browser.
+
 ## Build and test
 
 ```bash
@@ -41,5 +43,11 @@ application code and [Networking](networking.md) for browser networking.
 
 Record the full command, target, browser, host capability, and first failing
 observable result. Separate a compile/link failure from a denied browser API or
-a missing service. See [Execution routes](status.md#execution-routes) for route differences and
+and a missing service. See [Execution routes](status.md#execution-routes) for route differences and
 [Testing](testing.md) for repository checks.
+
+Next:
+
+- [UI](ui.md) — build an application for the supported browser host.
+- [Networking](networking.md) — browser fetch and WebSocket boundaries.
+- [Implementation status](status.md) — compare route limits.

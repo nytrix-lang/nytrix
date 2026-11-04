@@ -85,11 +85,17 @@ fn test_semantic_snapshot() {
           semantic_get(semantic_get(expression, "obligations"), "version") == 1 &&
           semantic_get(origin, "line") == 7,
           "type, ownership, effect, origin, and obligation records survive freezing")
+   def located_call = semantic_find_call(function, 7, 4)
    assert(semantic_calls(function).len == 1 &&
-          semantic_find_call(function, 7, 4) == expression &&
+          str(semantic_get(located_call, "kind")) == "call",
+          "call lookup finds the direct call fact")
+   assert(int(semantic_get(semantic_get(located_call, "source_origin"),
+                           "line")) == 7,
+          "call location keeps its source line")
+   assert(
           semantic_get(semantic_call_effects(expression), "known") == false &&
           is_nil(semantic_call_effects(origin)),
-          "call lookup and effect access expose immutable call facts")
+          "effect access distinguishes calls from origin records")
    def obligations = semantic_obligations(function)
    def located_obligation = semantic_find_obligation(
       function, "requires", 7, 4, "semantic.ny")
@@ -190,6 +196,10 @@ fn test_semantic_snapshot() {
       "{\"schema\":\"typed_ast.v1\",\"stage\":\"hm\",\"typed\":{\"schema\":\"typed_ast.v1\",\"engine\":\"type-pipeline-v1\",\"functions\":[{\"name\":\"lookup\",\"expression_facts\":{\"schema\":\"nytrix.semantic.expressions\",\"version\":1,\"items\":[{\"kind\":\"call\",\"source_origin\":{\"file\":\"lookup.ny\",\"line\":3,\"column\":2}},{\"kind\":\"call\",\"source_origin\":{\"file\":\"other.ny\",\"line\":3,\"column\":2}}]}}],\"layouts\":[],\"diagnostics\":[]}}")
    def lookup_function = semantic_find_function(
       duplicate_expression_snapshot.get("value"), "lookup")
+   def filtered_call = semantic_find_call(lookup_function, 3, 2,
+      "other.ny")
+   def filtered_expression = semantic_find_expression(lookup_function,
+      "call", 3, 2, "other.ny")
    assert(semantic_expressions(lookup_function).len == 2 &&
           semantic_calls(lookup_function).len == 2 &&
           is_nil(semantic_find_expression(lookup_function, "call", 3, 2)) &&

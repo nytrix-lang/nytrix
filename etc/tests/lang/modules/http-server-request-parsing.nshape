@@ -4,7 +4,7 @@ shape test_http_server_request_parser_marks_valid_requests {
   features ["ny", "test", "stdlib", "http", "server", "request-parser"]
   estimate_ms 19000
   template ny-test-case
-  flags_matrix "--nyir-verify --native --run; --nyir-verify --native-backend=llvm --jit --jit-engine=mcjit; --nyir-verify --native-backend=llvm --jit --jit-engine=orc; --nyir-verify --native-only"
+  flags_matrix "--nyr-verify --native --run; --nyr-verify --native-backend=llvm --jit --jit-engine=mcjit; --nyr-verify --native-backend=llvm --jit --jit-engine=orc; --nyr-verify --native-only"
   expect compile_and_run
   timeout 60
   source ny <<'NY'

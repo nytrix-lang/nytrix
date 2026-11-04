@@ -118,9 +118,9 @@ fn atlas_destroy(any a) int {
    if tex_id >= 0 {
       _atlas_destroy_texture(tex_id, a)
    }
-   def cpu_buf = a.get("cpu_buf", 0)
+   def ptr cpu_buf = __ffi_untag_ptr(a.get("cpu_buf", 0))
    if cpu_buf { free(cpu_buf) }
-   def state_ptr = a.get("state_ptr", 0)
+   def ptr state_ptr = __ffi_untag_ptr(a.get("state_ptr", 0))
    if state_ptr { free(state_ptr) }
    0
 }
@@ -132,7 +132,7 @@ fn atlas_ensure_texture(any a) int {
    mut tex_id = int(a.get("tex_id", -1))
    def cur_backend = to_str(a.get("backend", ""))
    if tex_id >= 0 && cur_backend == _atlas_backend { return tex_id }
-   def cpu_buf = a.get("cpu_buf", 0)
+   def ptr cpu_buf = __ffi_untag_ptr(a.get("cpu_buf", 0))
    def aw = int(a.get("width", 0))
    def ah = int(a.get("height", 0))
    if !cpu_buf || aw <= 0 || ah <= 0 { return -1 }
@@ -158,13 +158,14 @@ fn _atlas_uv_rect(int aw, int ah, int cx, int cy, int w, int h, int filter) list
    ]
 }
 
-fn atlas_add(any a, any key, any w, any h, any pixels) any {
+fn atlas_add(any a, any key, int w, int h, any pixels) any {
    "Packs an image and returns [u1,v1,u2,v2]. Correctly updates packing state."
    if !is_dict(a) || w <= 0 || h <= 0 { return 0 }
    mut items = a.get("items")
    if items.contains(key) { return items.get(key) }
-   def aw, ah = a.get("width"), a.get("height")
-   def state_ptr = a.get("state_ptr", 0)
+   def int aw = int(a.get("width"))
+   def int ah = int(a.get("height"))
+   def ptr state_ptr = __ffi_untag_ptr(a.get("state_ptr", 0))
    if !state_ptr { return 0 }
    mut cx, cy = load32(state_ptr, 0), load32(state_ptr, 4)
    mut mrh = load32(state_ptr, 8)
@@ -173,7 +174,7 @@ fn atlas_add(any a, any key, any w, any h, any pixels) any {
       mrh = 0
    }
    if cy + h + 2 > ah { return 0 }
-   mut cpu_buf = a.get("cpu_buf", 0)
+   mut ptr cpu_buf = __ffi_untag_ptr(a.get("cpu_buf", 0))
    if !cpu_buf && pixels {
       cpu_buf = zalloc(aw * ah * 4)
       if !cpu_buf { return 0 }
@@ -207,16 +208,13 @@ fn atlas_add(any a, any key, any w, any h, any pixels) any {
          store8(cpu_buf, load8(pixels, right_src + 3) & 255, right_dst + 3)
          row += 1
       }
-      memcpy(
-         cpu_buf + (((cy - 1) * aw + (cx - 1)) * 4),
-         cpu_buf + ((cy * aw + (cx - 1)) * 4),
-         (w + 2) * 4
-      )
-      memcpy(
-         cpu_buf + (((cy + h) * aw + (cx - 1)) * 4),
-         cpu_buf + ((((cy + h) - 1) * aw + (cx - 1)) * 4),
-         (w + 2) * 4
-      )
+      def ptr top_dst = ptr_add(cpu_buf, int(((cy - 1) * aw + (cx - 1)) * 4))
+      def ptr top_src = ptr_add(cpu_buf, int((cy * aw + (cx - 1)) * 4))
+      def ptr bottom_dst = ptr_add(cpu_buf, int(((cy + h) * aw + (cx - 1)) * 4))
+      def ptr bottom_src = ptr_add(cpu_buf, int((((cy + h) - 1) * aw + (cx - 1)) * 4))
+      def int border_bytes = int((w + 2) * 4)
+      __copy_mem_raw(top_dst, top_src, border_bytes)
+      __copy_mem_raw(bottom_dst, bottom_src, border_bytes)
       mut dx1, dy1 = load32(state_ptr, 16), load32(state_ptr, 20)
       mut dx2, dy2 = load32(state_ptr, 24), load32(state_ptr, 28)
       if cx - 1 < dx1 { dx1 = cx - 1 }
@@ -239,38 +237,38 @@ fn atlas_add(any a, any key, any w, any h, any pixels) any {
 fn atlas_flush(any a) int {
    "Uploads dirty CPU pixels to the existing GPU atlas texture."
    if !is_dict(a) { return 0 }
-   def state_ptr = a.get("state_ptr", 0)
+   def ptr state_ptr = __ffi_untag_ptr(a.get("state_ptr", 0))
    if !state_ptr || load32(state_ptr, 12) == 0 { return 0 }
-   def cpu_buf = a.get("cpu_buf", 0)
-   def aw = a.get("width")
-   def ah = a.get("height")
+   def ptr cpu_buf = __ffi_untag_ptr(a.get("cpu_buf", 0))
+   def int aw = int(a.get("width", 0))
+   def int ah = int(a.get("height", 0))
    if !cpu_buf || aw <= 0 || ah <= 0 { return 0 }
    def tex_id = atlas_ensure_texture(a)
    if tex_id < 0 { return 0 }
-   mut dx1, dy1 = load32(state_ptr, 16), load32(state_ptr, 20)
-   mut dx2, dy2 = load32(state_ptr, 24), load32(state_ptr, 28)
+   mut int dx1 = int(load32(state_ptr, 16))
+   mut int dy1 = int(load32(state_ptr, 20))
+   mut int dx2 = int(load32(state_ptr, 24))
+   mut int dy2 = int(load32(state_ptr, 28))
    if dx1 < 0 { dx1 = 0 }
    if dy1 < 0 { dy1 = 0 }
    if dx2 > aw { dx2 = aw }
    if dy2 > ah { dy2 = ah }
-   def rw, rh = dx2 - dx1, dy2 - dy1
+   def int rw = dx2 - dx1
+   def int rh = dy2 - dy1
    if rw <= 0 || rh <= 0 { return 0 }
-   def bytes = rw * rh * 4
+   def int bytes = rw * rh * 4
    if bytes > _atlas_scratch_cap {
       if _atlas_scratch { free(_atlas_scratch) }
       _atlas_scratch = malloc(bytes)
       _atlas_scratch_cap = _atlas_scratch ? bytes : 0
    }
    if !_atlas_scratch { return 0 }
-   mut row = 0
+   def int row_bytes = rw * 4
+   mut int row = 0
    while row < rh {
       def ptr dst = ptr_add(_atlas_scratch, int(row * rw * 4))
       def ptr src = ptr_add(cpu_buf, int(((dy1 + row) * aw + dx1) * 4))
-      memcpy(
-         dst,
-         src,
-         rw * 4
-      )
+      __copy_mem_raw(dst, src, row_bytes)
       row += 1
    }
    _atlas_update_texture_rect(tex_id, dx1, dy1, rw, rh, _atlas_scratch, a)

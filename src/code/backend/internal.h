@@ -102,6 +102,15 @@ bool nyr_emit_func(nyr_writer_t *w, const ny_native_target_info_t *target,
 bool nyr_x86_64_emit_ir(nyr_writer_t *w, const ny_native_target_info_t *target,
                         const nyr_func_t *nyir, const char *func_name,
                         bool tag_return, char *err, size_t err_len);
+bool nyr_x86_64_emit_ir_local(nyr_writer_t *w,
+                              const ny_native_target_info_t *target,
+                              const nyr_func_t *nyir, const char *func_name,
+                              bool tag_return, char *err, size_t err_len);
+bool nyr_x86_64_emit_ir_with_options(
+    nyr_writer_t *w, const ny_native_target_info_t *target,
+    const nyr_func_t *nyir, const char *func_name, bool tag_return,
+    bool is_local, bool retpoline_indirect_calls, bool retpoline_inline_calls,
+    char *err, size_t err_len);
 /* First executable machine-form consumer. Scalar integer/control-flow subset;
  * callers retain NYIR encode as the explicit fallback for other shapes. */
 bool nyr_x86_64_emit_mach_scalar(nyr_writer_t *w,
@@ -158,6 +167,10 @@ bool nyr_arraytab_get(const char *name, const nyr_array_elem_t **elems_out,
                       size_t *count_out, size_t *stride_out);
 void *nyr_arraytab_data(const char *name);
 
+/* NYIP v2 native data-table transport. */
+bool nyr_native_data_write(FILE *out, char *err, size_t err_len);
+bool nyr_native_data_read(FILE *in, char *err, size_t err_len);
+
 bool nyr_aarch64_emit_ir(nyr_writer_t *w, const ny_native_target_info_t *target,
                          const nyr_func_t *nyir, const char *func_name,
                          bool tag_return, char *err, size_t err_len);
@@ -207,12 +220,52 @@ bool nyr_arm_emit_ir(nyr_writer_t *w, const ny_native_target_info_t *target,
 bool nyr_i386_emit_ir(nyr_writer_t *w, const ny_native_target_info_t *target,
                       const nyr_func_t *nyir, const char *func_name,
                       bool tag_return, char *err, size_t err_len);
+bool nyr_i386_emit_ir_with_linkage(
+    nyr_writer_t *w, const ny_native_target_info_t *target,
+    const nyr_func_t *nyir, const char *func_name, bool tag_return,
+    bool is_local, char *err, size_t err_len);
 
 bool nyr_native_emit_elf64_object_from_nirs(
     const nyr_func_t *rt_main, const nyr_func_t *funcs,
     const char *const *func_names, size_t func_count,
     const ny_native_target_info_t *target, const char *path,
-    const char *entry_symbol, bool tag_return, char *err, size_t err_len);
+    const char *entry_symbol, bool tag_return, bool bare_syscalls, char *err,
+    size_t err_len);
+bool nyr_native_emit_elf64_c_object_from_nirs(
+    const nyr_func_t *funcs, const char *const *func_names, size_t func_count,
+    const ny_native_target_info_t *target, const char *path, char *err,
+    size_t err_len);
+typedef struct {
+  size_t offset;
+  const char *symbol;
+  int64_t addend;
+  size_t width;
+  int type;
+} nyr_c_object_data_reloc_t;
+typedef struct {
+  const char *name;
+  const unsigned char *bytes;
+  size_t len;
+  const nyr_c_object_data_reloc_t *relocs;
+  size_t reloc_count;
+  /* NULL places the symbol in the default .data section; otherwise the
+   * symbol lands in its own PROGBITS ALLOC|WRITE ELF section of that name
+   * (__attribute__((__section__("..."))) from the C frontend). */
+  const char *section;
+  uint64_t section_flags;
+  size_t alignment;
+  size_t section_entsize;
+  bool function_symbol;
+  bool is_local;
+} nyr_c_object_data_t;
+bool nyr_native_emit_elf64_c_object_from_nirs_with_data(
+    const nyr_func_t *funcs, const char *const *func_names, size_t func_count,
+    const char *const *function_sections, const bool *function_local,
+    bool omit_frame_pointer, bool position_independent,
+    bool retpoline_indirect_calls, bool retpoline_inline_calls,
+    const nyr_c_object_data_t *data, size_t data_count,
+    const ny_native_target_info_t *target, const char *path, char *err,
+    size_t err_len);
 bool nyr_native_emit_elf64_aarch64_object_from_nirs(
     const nyr_func_t *rt_main, const nyr_func_t *funcs,
     const char *const *func_names, size_t func_count,

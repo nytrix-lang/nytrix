@@ -4,7 +4,7 @@ shape ownership_rule_exclusive_borrow_direct_deref_disjoint_positive {
   features ["ownership", "borrow", "exclusive", "dereference", "disjoint", "positive"]
   template ny-run
   expect compile_and_run
-  flags "--ownership-strict --native --run --nyir-verify"
+  flags "--ownership-strict --native --run --nyr-verify"
   source ny <<'NY'
 use core
 

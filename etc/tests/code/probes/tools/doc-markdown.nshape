@@ -15,13 +15,20 @@ def html = render_static(
    "learn/start")
 assert(str.str_contains(html, "id=\"types-and-calls\""),
    "heading anchors match links after inline-code punctuation is removed")
+def callout = render_static(
+   "> **Warning:** Check the ABI first.\n> Verify the declaration.\n\nNext.\n",
+   "learn/native")
+assert(str.str_contains(callout,
+   "<blockquote class=\"callout\">\n<p><strong>Warning:</strong> Check the ABI first.</p>\n<p>Verify the declaration.</p>\n</blockquote>\n<p>Next.</p>"),
+   "continued callout text stays in one semantic block and closes before prose")
 assert(str.str_contains(html, "<p>A <code>call( value)</code> keeps &lt;brackets&gt; &amp; café.</p>"),
    "wrapped inline code stays in one paragraph and text is HTML escaped")
 assert(!str.str_contains(html, "private metadata") && !str.str_contains(html, "not prose"),
    "multiline metadata comments do not appear as document text")
-assert(str.str_contains(html, "<ol>\n<li>Read the <strong>contract</strong>") &&
-       str.str_contains(html, "before calling.</li>\n<li>Check <em>errors</em>.</li>\n</ol>"),
-   "ordered steps retain continuation text and emphasis inside their list items")
+assert(str.str_contains(html,
+   "<ol>\n<li>Read the <strong>contract</strong> before calling.</li>\n" +
+   "<li>Check <em>errors</em>.</li>\n</ol>"),
+   "ordered item continuation stays inside its list item and before the next item")
 assert(str.str_contains(html, "<tr><td><code>a | b</code></td><td>bitwise OR</td></tr>"),
    "escaped operator pipes do not create extra table cells")
 assert(str.str_contains(html, "href=\"../../spec/types/#proof-and-refinement-types\""),
@@ -40,9 +47,11 @@ assert(str.str_contains(html, "<pre><code class=\"language-ny\">x &lt; 2\n</code
 def indented = render_static("  ```ny\n  x < 2\n  ```\n\n## After\n\n   ```sh\n# still code\n   ```\n\n## Done\n", "CHANGELOG")
 assert(str.str_contains(indented, "<pre><code class=\"language-ny\">  x &lt; 2\n</code></pre>"),
    "indented closing fences terminate code without discarding source indentation")
-assert(str.str_contains(indented, "<h2 id=\"after\">After</h2>") &&
-       str.str_contains(indented, "<h2 id=\"done\">Done</h2>"),
-   "headings following indented fences remain document structure")
+def after_heading = str.str_contains(indented, "<h2 id=\"after\">After</h2>")
+def done_heading = str.str_contains(indented, "<h2 id=\"done\">Done</h2>")
+assert(after_heading && done_heading,
+   "headings following indented fences remain document structure (after=" +
+   to_str(after_heading) + ", done=" + to_str(done_heading) + "): " + indented)
 assert(str.str_contains(indented, "<pre><code class=\"language-sh\"># still code\n</code></pre>"),
    "a subsequent shell block does not turn its comment into a heading")
 SRC

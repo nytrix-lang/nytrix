@@ -1,0 +1,21 @@
+shape fpr_rhs_live_at_result_x86_64 {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 oracle f64 regalloc rhs live result]
+  template ny-test-case
+  flags_matrix "-O0 --native-only --native-backend=x86_64; -O1 --native-only --native-backend=x86_64; -O2 --native-only --native-backend=x86_64; -O3 --native-only --native-backend=x86_64"
+  expect compile_and_run
+  source ny <<'NY'
+mut f64 x = 10.0
+mut i = 0
+mut bad = 0
+while i < 1 {
+  def f64 root = __flt_sqrt(x * x)
+  def f64 square = root * root
+  def f64 cube = square * root
+  if cube < 999.0 || cube > 1001.0 { bad = 1 }
+  i += 1
+}
+if bad == 0 { 0 } else { 1 }
+NY
+}

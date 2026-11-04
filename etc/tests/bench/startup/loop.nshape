@@ -2,17 +2,23 @@ shape bench_loop {
   family "perf-real"
   generator "stress"
   features ["perf", "loop", "c-vs-ny", "native", "checksum", "time"]
+  budget {
+    max_native_c_ratio 2.0
+    max_native_llvm_ratio 2.0
+  }
   template ny-test-case
   expect compile_and_run
   source ny <<'NY'
 use core
 use core.os.time
-def n = 1000000 * argc()
+def n = 250000 * argc()
+def salt = argc()
 mut acc = 0
 mut i = 0
 def int t0 = ticks()
-while i <= n {
-  acc += i
+while i < n {
+  ;; Keep the loop observable under closed-form induction optimizations.
+  acc = (acc * 33 + i + salt) % 1000003
   i += 1
 }
 def int t1 = ticks()
@@ -32,11 +38,12 @@ static int64_t now_ns(void) {
 
 int main(int argc, char **argv) {
   (void)argv;
-  int n = 1000000 * argc;
+  int64_t n = 250000LL * argc;
+  int64_t salt = argc;
   int64_t t0 = now_ns();
-  volatile int64_t acc = 0;
-  for (int64_t i = 0; i <= n; i++)
-    acc += i;
+  int64_t acc = 0;
+  for (int64_t i = 0; i < n; i++)
+    acc = (acc * 33 + i + salt) % 1000003;
   int64_t t1 = now_ns();
   printf("checksum=%lld\n", (long long)acc);
   printf("elapsed_ns=%lld\n", (long long)(t1 - t0));

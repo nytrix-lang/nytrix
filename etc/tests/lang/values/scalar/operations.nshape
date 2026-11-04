@@ -43,6 +43,9 @@ assert_eq(~1, -2)
 assert_eq(6 ** 3, 216)
 assert_eq(2 ** 8, 256)
 assert_eq(10 ** 0, 1)
+assert_eq(pow(0.0, 0.454545), 0.0, "float power accepts zero base")
+assert(pow(2.0, 0.5) > 1.4142 && pow(2.0, 0.5) < 1.4143, "float power preserves fractional exponent")
+assert_eq(pow(2, -3), 0.125, "integer negative exponent uses float power")
 
 ; POW with a variable base must lower through core.pow (bigint), not the
 ; tagged-int fast path — this is the regression that once returned ~4.7e13

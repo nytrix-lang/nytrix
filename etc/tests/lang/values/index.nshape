@@ -37,12 +37,52 @@ fn did_catch(thunk) {
 def xs = [10, 20, 30]
 assert(xs[0] == 10, "list index read")
 assert(xs[-1] == 30, "list negative index read")
+def guarded_empty = []
+def guarded_index = 3
+mut guarded_branch = false
+if guarded_index >= 5 && guarded_empty[guarded_index] == 0 {
+   guarded_branch = true
+}
+assert(!guarded_branch, "&& skips an invalid index after a false left operand")
+
+fn dynamic_list_probe(c) int {
+   print(c.len)
+   print(c[0])
+   c[1]
+}
+fn dynamic_list_first(c) int {
+   c[0]
+}
+assert(dynamic_list_first([99]) == 99,
+       "in-range indexing through an untyped list parameter preserves the value")
+assert(str_contains(capture(fn() { dynamic_list_probe([99]) }),
+                    "index_read out of range"),
+       "out-of-range access through an untyped list parameter must fail")
+
+fn computed_index_probe(c) int {
+   def n = c.len
+   def top = c[n-1]
+   assert(top == 99, "computed final index reads the actual list item")
+   mut d = (n-1)*9
+   while top > 0 {
+      d += 1
+      top = top/10
+   }
+   d
+}
+assert(computed_index_probe([99]) == 2,
+       "reusing the computed index does not corrupt its earlier read")
+
 def tp = (4, 5, 6)
 assert(tp[1] == 5, "tuple index read")
 assert(tp[-1] == 6, "tuple negative index read")
 def s = "abcd"
 assert(s[2] == "c", "string index read")
 assert(s[-2] == "c", "string negative index read")
+assert(s[::-1] == "dcba", "string slices reverse with a negative step")
+assert("αβγ"[::-1] == "γβα", "string reverse slices preserve UTF-8 scalars")
+assert(""[::-1] == "" && "a"[::-1] == "a",
+       "string reverse slices handle empty and single-scalar inputs")
 mut bytes bs = bytes(3)
 bs = bytes_set(bs, 0, 65)
 bs = bytes_set(bs, 1, 66)
@@ -99,6 +139,9 @@ assert(nested_sum == 21, "nested indexed loop read")
 def d = {"a": 1}
 assert(d["a"] == 1, "dict index read")
 assert(d["missing"] == 0, "dict index miss default")
+def integer_key_dict = {1: 4}
+assert(integer_key_dict[1] == 4,
+       "dynamic index handling preserves integer-key dictionary lookup")
 def decoded_dict = json_decode("{\"a\": 7}")
 assert(decoded_dict["a"] == 7,
    "dictionary index reads a JSON-decoded dynamic value")

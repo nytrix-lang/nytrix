@@ -355,9 +355,9 @@ static bool gvn_backedge(const nyr_cfg_t *cfg, size_t source, size_t target) {
  * defining block because that load executes again before the value is reused.
  */
 static bool gvn_load_stable_on_use_reentry(
-    const nyr_func_t *f, const nyr_cfg_t *cfg, size_t use_at,
-    size_t def_block, bool local_writes_can_alias, int64_t local_slot,
-    bool local_slot_escaped, const int *defs, int read_address) {
+    const nyr_func_t *f, const nyr_cfg_t *cfg, size_t use_at, size_t def_block,
+    bool local_writes_can_alias, int64_t local_slot, bool local_slot_escaped,
+    const int *defs, int read_address) {
   if (!f || !cfg || use_at >= f->len)
     return false;
   const size_t use_block = cfg->inst_block[use_at];
@@ -532,9 +532,9 @@ static bool gvn_loop_reexecutes_def(const nyr_cfg_t *cfg, size_t header,
  * the reuse. A backedge is ignored only when the definition is guaranteed to
  * execute again before this use.
  */
-static bool gvn_memory_stable_between(const nyr_func_t *f,
-                                      const nyr_cfg_t *cfg, size_t def_at,
-                                      size_t use_at, bool load_read,
+static bool gvn_memory_stable_between(const nyr_func_t *f, const nyr_cfg_t *cfg,
+                                      size_t def_at, size_t use_at,
+                                      bool load_read,
                                       bool local_writes_can_alias,
                                       int64_t local_slot,
                                       bool local_slot_escaped, const int *defs,
@@ -747,17 +747,17 @@ static bool gvn_load_pre(nyr_func_t *f, const nyr_cfg_t *cfg, size_t at,
   int dst = load->dst;
   nyr_inst_discard(load);
   *load = (nyr_inst_t){.op = NYIR_PHI,
-                        .dst = dst,
-                        .a = -1,
-                        .b = -1,
-                        .c = -1,
-                        .d = -1,
-                        .e = -1,
-                        .f = -1,
-                        .debug = debug,
-                        .range = range,
-                        .phi_incoming = incoming,
-                        .phi_incoming_len = last - first};
+                       .dst = dst,
+                       .a = -1,
+                       .b = -1,
+                       .c = -1,
+                       .d = -1,
+                       .e = -1,
+                       .f = -1,
+                       .debug = debug,
+                       .range = range,
+                       .phi_incoming = incoming,
+                       .phi_incoming_len = last - first};
   return true;
 }
 
@@ -933,7 +933,7 @@ static int gvn_canonical_value(int value, const int *copy_of,
 }
 
 static int gvn_canonical_operand(int value, const int *copy_of,
-                                const int *constant_of, size_t value_count) {
+                                 const int *constant_of, size_t value_count) {
   value = gvn_canonical_value(value, copy_of, value_count);
   if (value < 0 || (size_t)value >= value_count)
     return value;
@@ -941,13 +941,12 @@ static int gvn_canonical_operand(int value, const int *copy_of,
   return canonical >= 0 ? canonical : value;
 }
 
-static void gvn_canonicalize_operands(nyr_inst_t *key,
-                                      const int *copy_of,
+static void gvn_canonicalize_operands(nyr_inst_t *key, const int *copy_of,
                                       const int *constant_of,
                                       size_t value_count) {
 #define GVN_CANONICALIZE_OPERAND(field)                                        \
-  key->field = gvn_canonical_operand(key->field, copy_of, constant_of,         \
-                                     value_count)
+  key->field =                                                                 \
+      gvn_canonical_operand(key->field, copy_of, constant_of, value_count)
   GVN_CANONICALIZE_OPERAND(a);
   GVN_CANONICALIZE_OPERAND(b);
   GVN_CANONICALIZE_OPERAND(c);
@@ -1019,8 +1018,7 @@ static bool gvn_pass(nyr_func_t *f, int *vn_of_val, nyr_cfg_t *cfg) {
         if (!cfg->backedge_edges[edge])
           continue;
         if (!nyr_cfg_natural_loop_blocks(cfg, source, cfg->succ_blocks[edge],
-                                          loop_members,
-                                          cfg->block_count)) {
+                                         loop_members, cfg->block_count)) {
           loop_analysis_failed = true;
           break;
         }
@@ -1043,8 +1041,7 @@ static bool gvn_pass(nyr_func_t *f, int *vn_of_val, nyr_cfg_t *cfg) {
   vn_table_init(constant_table);
   for (size_t i = 0; i < f->len; ++i) {
     const nyr_inst_t *in = &f->data[i];
-    if (in->op != NYIR_CONST_I64 || in->dst < 0 ||
-        in->dst >= f->next_value)
+    if (in->op != NYIR_CONST_I64 || in->dst < 0 || in->dst >= f->next_value)
       continue;
     nyr_inst_t key = *in;
     key.scalar_class = in->scalar_class;
@@ -1111,7 +1108,8 @@ static bool gvn_pass(nyr_func_t *f, int *vn_of_val, nyr_cfg_t *cfg) {
       candidates++;
     size_t block = cfg->inst_block[i];
     if (loop_analysis_failed || !loop_blocks ||
-        (block < cfg->block_count && loop_blocks[block])) {
+        (block < cfg->block_count && loop_blocks[block] &&
+         in->op != NYIR_LOAD_I64)) {
       if (trace)
         excluded_loop++;
       continue;
@@ -1132,9 +1130,8 @@ static bool gvn_pass(nyr_func_t *f, int *vn_of_val, nyr_cfg_t *cfg) {
     gvn_canonicalize_operands(&key, copy_of, constant_of,
                               (size_t)f->next_value);
     if (trace_misses && in->op == NYIR_LOAD_I64) {
-      int address_def = in->a >= 0 && in->a < f->next_value
-                            ? val_def[in->a]
-                            : -1;
+      int address_def =
+          in->a >= 0 && in->a < f->next_value ? val_def[in->a] : -1;
       const nyr_inst_t *address =
           address_def >= 0 && (size_t)address_def < f->len
               ? &f->data[address_def]

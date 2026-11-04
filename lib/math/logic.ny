@@ -85,7 +85,7 @@ fn prop_iff(dict left, dict right) dict {
 ;; Returns true when the value is a well-formed proposition.
 fn prop_is(any value) bool {
    if !is_dict(value) { return false }
-   def kind = value.get("kind", "")
+   def str kind = value.get("kind", "")
    if kind == "true" || kind == "false" { return true }
    if kind == "atom" { return is_str(value.get("name", 0)) && value.get("name", "").len > 0 }
    if kind == "not" { return prop_is(value.get("value", 0)) }
@@ -98,7 +98,7 @@ fn prop_is(any value) bool {
 ;; Evaluates a proposition in the supplied environment.
 fn prop_eval(dict proposition, dict environment={}) bool {
    assert(prop_is(proposition), "prop_eval expects a proposition")
-   def kind = proposition.get("kind")
+   def str kind = proposition.get("kind")
    if kind == "true" { return true }
    if kind == "false" { return false }
    if kind == "atom" { return bool(environment.get(proposition.get("name"), false)) }
@@ -114,11 +114,11 @@ fn prop_eval(dict proposition, dict environment={}) bool {
 ;; Returns a simplified equivalent proposition.
 fn prop_simplify(dict proposition) dict {
    assert(prop_is(proposition), "prop_simplify expects a proposition")
-   def kind = proposition.get("kind")
+   def str kind = proposition.get("kind")
    if kind == "true" || kind == "false" || kind == "atom" { return proposition }
    if kind == "not" {
       def value = prop_simplify(proposition.get("value"))
-      def inner = value.get("kind")
+      def str inner = value.get("kind")
       if inner == "true" { return prop_false() }
       if inner == "false" { return prop_true() }
       if inner == "not" { return prop_simplify(value.get("value")) }
@@ -126,7 +126,8 @@ fn prop_simplify(dict proposition) dict {
    }
    def left = prop_simplify(proposition.get("left"))
    def right = prop_simplify(proposition.get("right"))
-   def lk, rk = left.get("kind"), right.get("kind")
+   def str lk = left.get("kind")
+   def str rk = right.get("kind")
    if kind == "and" {
       if lk == "false" || rk == "false" { return prop_false() }
       if lk == "true" { return right }
@@ -163,7 +164,7 @@ fn _prop_names_add(list names, str name) list {
 }
 
 fn _prop_variables_into(dict proposition, list names) list {
-   def kind = proposition.get("kind")
+   def str kind = proposition.get("kind")
    if kind == "atom" { return _prop_names_add(names, proposition.get("name")) }
    if kind == "not" { return _prop_variables_into(proposition.get("value"), names) }
    if kind == "and" || kind == "or" || kind == "implies" || kind == "iff" {
@@ -196,7 +197,7 @@ fn _prop_measure(dict proposition, int depth, int max_depth,
    }
    nodes += 1
    memory += 1
-   def kind = proposition.get("kind")
+   def str kind = proposition.get("kind")
    if kind == "not" {
       return _prop_measure(proposition.get("value"), depth + 1,
          max_depth, nodes, max_nodes, memory, max_memory)
@@ -379,7 +380,7 @@ fn prop_tautology(dict proposition, int max_variables=16,
 ;; Returns the canonical encoding of a proposition.
 fn prop_canonical(dict proposition) str {
    assert(prop_is(proposition), "prop_canonical expects a proposition")
-   def kind = proposition.get("kind")
+   def str kind = proposition.get("kind")
    if kind == "true" { return "T" }
    if kind == "false" { return "F" }
    if kind == "atom" {

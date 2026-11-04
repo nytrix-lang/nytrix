@@ -1,9 +1,13 @@
 <!-- nytrix-doc: {"audience":"user","featured":true,"group":"learn","order":110,"summary":"Evaluate constants and generate declarations during compilation."} -->
 # Compile-time programming
 
-Use compile-time evaluation for values or declarations that can be determined
-from source inputs. The compiler checks generated declarations as ordinary
-source; compile-time code cannot use runtime results to rewrite the program.
+Compile-time evaluation computes values or declarations from source inputs
+before runtime. Generated declarations still pass through normal source checks.
+
+Prerequisites: familiarity with [functions and bindings](programs.md).
+
+Skip this guide when no value or declaration needs to be determined early;
+ordinary runtime code is simpler.
 
 ## Evaluate a constant
 
@@ -28,6 +32,23 @@ Use a table for fixed compile-time lookup and a template when source
 structure must be generated. The specification lists the supported table,
 reflection, splice, and module forms. Keep generated names deterministic and
 make the generated API no broader than the handwritten contract it replaces.
+
+This complete example generates a module and calls its generated function:
+
+```ny
+use core
+
+comptime template generated_module(name) {
+   module ${name} {
+      fn value() int { return 11 }
+   }
+}
+comptime emit generated_module(ident("GeneratedModule"))
+assert(GeneratedModule.value() == 11, "generated module function")
+```
+
+The compiler-test source is
+[`comptime-clone-declarations.nshape`](../../etc/tests/lang/comptime/comptime-clone-declarations.nshape).
 
 When a generated declaration is hard to understand, inspect the expansion,
 then compile or test the resulting program through its intended backend.
@@ -74,3 +95,9 @@ ny --expand file.ny
 These commands inspect candidates or expansions, not runtime correctness.
 Compile and run the generated program; see the
 [Comptime specification](../spec/comptime.md) and [Testing](testing.md).
+
+Next:
+
+- [Comptime specification](../spec/comptime.md) — exact forms and limits.
+- [Proofs](proofs.md) — checked compile-time propositions.
+- [Testing](testing.md) — verify a generated program.

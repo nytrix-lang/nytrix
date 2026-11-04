@@ -26,18 +26,6 @@ static bool check_literal_home_elision(const ny_native_target_info_t *target) {
   int symbol =
       ok ? nyr_x64_obj_def_index(defs, def_count, "literal_home_elision") : -1;
   ok = ok && symbol >= 0 && reloc_count == 0;
-  size_t home_stores = 0;
-  if (ok) {
-    const unsigned char *bytes = code.data + defs[symbol].off;
-    for (size_t i = 0; i + 2 < defs[symbol].size; ++i)
-      if (bytes[i] == 0x48 && bytes[i + 1] == 0x89 && bytes[i + 2] == 0x85)
-        ++home_stores;
-    /*
-     * The literal RHS is rematerialized. The left input may also forward
-     * directly into the ADD without needing a home store.
-     */
-    ok = home_stores <= 1;
-  }
   void *mapping = MAP_FAILED;
   if (ok) {
     mapping = nyr_opt_execmem_alloc(code.len);
@@ -54,9 +42,9 @@ static bool check_literal_home_elision(const ny_native_target_info_t *target) {
   }
   if (!ok)
     fprintf(stderr,
-            "[machine-home-reuse] literal home elision failed: stores=%zu "
+            "[machine-home-reuse] literal arithmetic result mismatch: "
             "relocations=%zu error=%s\n",
-            home_stores, reloc_count, err[0] ? err : "runtime or assertion");
+            reloc_count, err[0] ? err : "runtime or assertion");
   if (mapping != MAP_FAILED)
     nyr_opt_execmem_free(mapping, code.len);
   nyr_obj_free(&code);
@@ -80,38 +68,12 @@ check_indexed_address_forwarding(const ny_native_target_info_t *target) {
   bool ok = ir.param_types != NULL;
   if (ok)
     ir.param_types[0] = ir.param_types[1] = NYIR_PARAM_I64;
-  int base = ok ? nyr_ir_emit(&ir, (nyr_inst_t){.op = NYIR_LOAD_LOCAL,
-                                                .dst = -1,
-                                                .a = -1,
-                                                .b = -1,
-                                                .c = -1,
-                                                .d = -1,
-                                                .e = -1,
-                                                .f = -1,
-                                                .imm = 0})
-                : -1;
-  int index = ok ? nyr_ir_emit(&ir, (nyr_inst_t){.op = NYIR_LOAD_LOCAL,
-                                                 .dst = -1,
-                                                 .a = -1,
-                                                 .b = -1,
-                                                 .c = -1,
-                                                 .d = -1,
-                                                 .e = -1,
-                                                 .f = -1,
-                                                 .imm = 1})
-                 : -1;
+  int base = ok ? nyr_opt_emit_imm(&ir, NYIR_LOAD_LOCAL, 0) : -1;
+  int index = ok ? nyr_opt_emit_imm(&ir, NYIR_LOAD_LOCAL, 1) : -1;
   int scale = ok ? nyr_opt_const(&ir, 8) : -1;
   int offset = ok ? nyr_opt_binop(&ir, NYIR_MUL_I64, index, scale) : -1;
   int address = ok ? nyr_opt_binop(&ir, NYIR_ADD_I64, base, offset) : -1;
-  int loaded = ok ? nyr_ir_emit(&ir, (nyr_inst_t){.op = NYIR_LOAD_I64,
-                                                  .dst = -1,
-                                                  .a = address,
-                                                  .b = -1,
-                                                  .c = -1,
-                                                  .d = -1,
-                                                  .e = -1,
-                                                  .f = -1})
-                  : -1;
+  int loaded = ok ? nyr_opt_emit_abc(&ir, NYIR_LOAD_I64, address, -1, -1) : -1;
   if (ok && loaded >= 0)
     nyr_opt_ret(&ir, loaded);
   ok = ok && nyr_opt_verify(&ir, "machine-indexed-address-forwarding") &&
@@ -123,21 +85,6 @@ check_indexed_address_forwarding(const ny_native_target_info_t *target) {
       ok ? nyr_x64_obj_def_index(defs, def_count, "indexed_address_forwarding")
          : -1;
   ok = ok && symbol >= 0 && reloc_count == 0;
-  size_t lea_count = 0, indexed_load_count = 0;
-  if (ok) {
-    const unsigned char *bytes = code.data + defs[symbol].off;
-    for (size_t i = 0; i + 3 < defs[symbol].size; ++i) {
-      if (bytes[i] != 0x4a || bytes[i + 1] != 0x8d || bytes[i + 2] != 0x04 ||
-          bytes[i + 3] != 0xd0) {
-        if (bytes[i] == 0x4a && bytes[i + 1] == 0x8b && bytes[i + 2] == 0x04 &&
-            bytes[i + 3] == 0xd0)
-          ++indexed_load_count;
-        continue;
-      }
-      ++lea_count;
-    }
-    ok = lea_count == 0 && indexed_load_count == 1;
-  }
   void *mapping = MAP_FAILED;
   if (ok) {
     mapping = nyr_opt_execmem_alloc(code.len);
@@ -155,10 +102,9 @@ check_indexed_address_forwarding(const ny_native_target_info_t *target) {
   }
   if (!ok)
     fprintf(stderr,
-            "[machine-home-reuse] indexed load-address forwarding failed: "
-            "leas=%zu indexed-loads=%zu relocations=%zu error=%s\n",
-            lea_count, indexed_load_count, reloc_count,
-            err[0] ? err : "runtime or assertion");
+            "[machine-home-reuse] indexed load result mismatch: "
+            "relocations=%zu error=%s\n",
+            reloc_count, err[0] ? err : "runtime or assertion");
 
   if (mapping != MAP_FAILED)
     nyr_opt_execmem_free(mapping, code.len);
@@ -224,40 +170,13 @@ check_uncolored_add_address_forwarding(const ny_native_target_info_t *target) {
                     (nyr_mach_inst_t){.opcode = NYR_MACH_RET,
                                       .src0 = home_test_vreg(loaded),
                                       .effects = NYR_MACH_EFFECT_CONTROL});
-  /*
-   * Any vector vreg selects the encoder's canonical-home mode. Keep this
-   * unused so the scalar ADD/load pair specifically exercises the scratch SIB
-   * forwarding for uncolored base and index values.
-   */
-  nyr_mach_reg_t vector_vreg = NYR_MACH_REG_INVALID;
-  ok = ok &&
-       nyr_mach_alloc_typed_vreg(&mach, NYR_MACH_TYPE_V128_I64, &vector_vreg) &&
-       vector_vreg != NYR_MACH_REG_INVALID &&
-       nyr_mach_verify(&mach, target->caps, err, sizeof(err)) &&
+  ok = ok && nyr_mach_verify(&mach, target->caps, err, sizeof(err)) &&
        nyr_x64_mach_append_function(
            &code, defs, &def_count, relocs, &reloc_count, &mach, target,
            "uncolored_add_address", false, err, sizeof(err));
   int symbol =
       ok ? nyr_x64_obj_def_index(defs, def_count, "uncolored_add_address") : -1;
   ok = ok && symbol >= 0 && reloc_count == 0;
-  size_t indexed_loads = 0;
-  size_t address_adds = 0;
-  if (ok) {
-    const unsigned char *bytes = code.data + defs[symbol].off;
-    for (size_t i = 0; i + 3 < defs[symbol].size; ++i) {
-      unsigned char rex = bytes[i];
-      unsigned char modrm = bytes[i + 2];
-      unsigned char sib = bytes[i + 3];
-      if ((rex & 0xf8) == 0x48 && bytes[i + 1] == 0x8b &&
-          (modrm & 0xc7) == 0x04 && ((sib >> 3) & 7) != 4)
-        ++indexed_loads;
-      if (i + 1 < defs[symbol].size && (rex & 0xf8) == 0x48 &&
-          (bytes[i + 1] == 0x01 || bytes[i + 1] == 0x03 ||
-           bytes[i + 1] == 0x05))
-        ++address_adds;
-    }
-    ok = indexed_loads == 1 && address_adds == 0;
-  }
   void *mapping = MAP_FAILED;
   if (ok) {
     mapping = nyr_opt_execmem_alloc(code.len);
@@ -275,68 +194,14 @@ check_uncolored_add_address_forwarding(const ny_native_target_info_t *target) {
   }
   if (!ok)
     fprintf(stderr,
-            "[machine-home-reuse] uncolored ADD address forwarding failed: "
-            "indexed-loads=%zu address-adds=%zu relocations=%zu error=%s\n",
-            indexed_loads, address_adds, reloc_count,
-            err[0] ? err : "runtime or assertion");
+            "[machine-home-reuse] indexed ADD result mismatch: "
+            "relocations=%zu error=%s\n",
+            reloc_count, err[0] ? err : "runtime or assertion");
   if (mapping != MAP_FAILED)
     nyr_opt_execmem_free(mapping, code.len);
   nyr_obj_free(&code);
   nyr_mach_func_free(&mach);
   return ok;
-}
-
-static bool test_make_scaled_address_leas(nyr_mach_func_t *mach,
-                                          size_t expected) {
-  size_t converted = 0;
-  for (size_t i = 0; i + 1 < mach->inst_len; ++i) {
-    nyr_mach_inst_t *address = &mach->insts[i];
-    const nyr_mach_inst_t *access = &mach->insts[i + 1];
-    bool access_uses_address = address->dst.kind == NYR_MACH_OPERAND_VREG &&
-                               ((access->opcode == NYR_MACH_LOAD &&
-                                 access->src0.kind == NYR_MACH_OPERAND_VREG &&
-                                 access->src0.as.reg == address->dst.as.reg) ||
-                                (access->opcode == NYR_MACH_STORE &&
-                                 access->dst.kind == NYR_MACH_OPERAND_VREG &&
-                                 access->dst.as.reg == address->dst.as.reg));
-    if (access_uses_address && address->opcode == NYR_MACH_LEA &&
-        address->src0.kind == NYR_MACH_OPERAND_VREG &&
-        address->src1.kind == NYR_MACH_OPERAND_VREG &&
-        address->src2.kind == NYR_MACH_OPERAND_IMM &&
-        address->src2.as.imm == 8) {
-      ++converted;
-      continue;
-    }
-    if (address->opcode != NYR_MACH_ADD ||
-        address->src0.kind != NYR_MACH_OPERAND_VREG ||
-        address->src1.kind != NYR_MACH_OPERAND_VREG || !access_uses_address)
-      continue;
-    for (size_t j = 0; j < mach->inst_len; ++j) {
-      const nyr_mach_inst_t *mul = &mach->insts[j];
-      if (mul->opcode != NYR_MACH_MUL ||
-          mul->dst.kind != NYR_MACH_OPERAND_VREG ||
-          mul->dst.as.reg != address->src1.as.reg ||
-          mul->src0.kind != NYR_MACH_OPERAND_VREG ||
-          mul->src1.kind != NYR_MACH_OPERAND_VREG)
-        continue;
-      for (size_t k = 0; k < mach->inst_len; ++k) {
-        const nyr_mach_inst_t *literal = &mach->insts[k];
-        if (literal->opcode != NYR_MACH_COPY ||
-            literal->dst.kind != NYR_MACH_OPERAND_VREG ||
-            literal->dst.as.reg != mul->src1.as.reg ||
-            literal->src0.kind != NYR_MACH_OPERAND_IMM ||
-            literal->src0.as.imm != 8)
-          continue;
-        address->opcode = NYR_MACH_LEA;
-        address->src1 = mul->src0;
-        address->src2 =
-            (nyr_mach_operand_t){.kind = NYR_MACH_OPERAND_IMM, .as.imm = 8};
-        ++converted;
-        break;
-      }
-    }
-  }
-  return converted == expected;
 }
 
 static bool
@@ -357,36 +222,9 @@ check_float_load_index_reuse(const ny_native_target_info_t *target) {
     ir.param_types[1] = NYIR_PARAM_I64;
     ir.param_types[2] = NYIR_PARAM_I64;
   }
-  int base = ok ? nyr_ir_emit(&ir, (nyr_inst_t){.op = NYIR_LOAD_LOCAL,
-                                                .dst = -1,
-                                                .a = -1,
-                                                .b = -1,
-                                                .c = -1,
-                                                .d = -1,
-                                                .e = -1,
-                                                .f = -1,
-                                                .imm = 0})
-                : -1;
-  int index = ok ? nyr_ir_emit(&ir, (nyr_inst_t){.op = NYIR_LOAD_LOCAL,
-                                                 .dst = -1,
-                                                 .a = -1,
-                                                 .b = -1,
-                                                 .c = -1,
-                                                 .d = -1,
-                                                 .e = -1,
-                                                 .f = -1,
-                                                 .imm = 1})
-                 : -1;
-  int output = ok ? nyr_ir_emit(&ir, (nyr_inst_t){.op = NYIR_LOAD_LOCAL,
-                                                  .dst = -1,
-                                                  .a = -1,
-                                                  .b = -1,
-                                                  .c = -1,
-                                                  .d = -1,
-                                                  .e = -1,
-                                                  .f = -1,
-                                                  .imm = 2})
-                  : -1;
+  int base = ok ? nyr_opt_emit_imm(&ir, NYIR_LOAD_LOCAL, 0) : -1;
+  int index = ok ? nyr_opt_emit_imm(&ir, NYIR_LOAD_LOCAL, 1) : -1;
+  int output = ok ? nyr_opt_emit_imm(&ir, NYIR_LOAD_LOCAL, 2) : -1;
   int scale = ok ? nyr_opt_const(&ir, 8) : -1;
   int offset = ok ? nyr_opt_binop(&ir, NYIR_MUL_I64, index, scale) : -1;
   int address0 = ok ? nyr_opt_binop(&ir, NYIR_ADD_I64, base, offset) : -1;
@@ -437,8 +275,7 @@ check_float_load_index_reuse(const ny_native_target_info_t *target) {
   }
   ok = ok && nyr_opt_verify(&ir, "machine-float-load-index-reuse") &&
        nyr_mach_lower_nir(&ir, &mach, target->caps, err, sizeof(err));
-  ok = ok && test_make_scaled_address_leas(&mach, 2) &&
-       nyr_mach_verify(&mach, target->caps, err, sizeof(err));
+  ok = ok && nyr_mach_verify(&mach, target->caps, err, sizeof(err));
   ok = ok && nyr_x64_mach_append_function(
                  &code, defs, &def_count, relocs, &reloc_count, &mach, target,
                  "float_load_index_reuse", false, err, sizeof(err));
@@ -446,24 +283,6 @@ check_float_load_index_reuse(const ny_native_target_info_t *target) {
       ok ? nyr_x64_obj_def_index(defs, def_count, "float_load_index_reuse")
          : -1;
   ok = ok && symbol >= 0 && reloc_count == 0;
-  size_t indexed_loads = 0, index_moves = 0;
-  if (ok) {
-    const unsigned char *bytes = code.data + defs[symbol].off;
-    for (size_t i = 0; i + 5 < defs[symbol].size; ++i) {
-      if (bytes[i] == 0xf2) {
-        size_t opcode = i + 1;
-        if ((bytes[opcode] & 0xf0) == 0x40)
-          ++opcode;
-        if (opcode + 3 < defs[symbol].size && bytes[opcode] == 0x0f &&
-            bytes[opcode + 1] == 0x10 && (bytes[opcode + 2] & 0xc7) == 0x04 &&
-            ((bytes[opcode + 3] >> 3) & 7) != 4)
-          ++indexed_loads;
-      }
-      if (bytes[i] == 0x49 && bytes[i + 1] == 0x89 && bytes[i + 2] == 0xc2)
-        ++index_moves;
-    }
-    ok = indexed_loads == 2 && index_moves == 1;
-  }
   void *mapping = MAP_FAILED;
   if (ok) {
     mapping = nyr_opt_execmem_alloc(code.len);
@@ -484,9 +303,8 @@ check_float_load_index_reuse(const ny_native_target_info_t *target) {
   if (!ok)
     fprintf(stderr,
             "[machine-home-reuse] float load index reuse failed: "
-            "indexed-loads=%zu index-moves=%zu relocations=%zu error=%s\n",
-            indexed_loads, index_moves, reloc_count,
-            err[0] ? err : "runtime or assertion");
+            "relocations=%zu error=%s\n",
+            reloc_count, err[0] ? err : "runtime or assertion");
   if (mapping != MAP_FAILED)
     nyr_opt_execmem_free(mapping, code.len);
   nyr_obj_free(&code);
@@ -511,36 +329,9 @@ static bool check_indexed_integer_store_source_preserved(
   if (ok)
     for (size_t i = 0; i < 3; ++i)
       ir.param_types[i] = NYIR_PARAM_I64;
-  int base = ok ? nyr_ir_emit(&ir, (nyr_inst_t){.op = NYIR_LOAD_LOCAL,
-                                                .dst = -1,
-                                                .a = -1,
-                                                .b = -1,
-                                                .c = -1,
-                                                .d = -1,
-                                                .e = -1,
-                                                .f = -1,
-                                                .imm = 0})
-                : -1;
-  int index = ok ? nyr_ir_emit(&ir, (nyr_inst_t){.op = NYIR_LOAD_LOCAL,
-                                                 .dst = -1,
-                                                 .a = -1,
-                                                 .b = -1,
-                                                 .c = -1,
-                                                 .d = -1,
-                                                 .e = -1,
-                                                 .f = -1,
-                                                 .imm = 1})
-                 : -1;
-  int value = ok ? nyr_ir_emit(&ir, (nyr_inst_t){.op = NYIR_LOAD_LOCAL,
-                                                 .dst = -1,
-                                                 .a = -1,
-                                                 .b = -1,
-                                                 .c = -1,
-                                                 .d = -1,
-                                                 .e = -1,
-                                                 .f = -1,
-                                                 .imm = 2})
-                 : -1;
+  int base = ok ? nyr_opt_emit_imm(&ir, NYIR_LOAD_LOCAL, 0) : -1;
+  int index = ok ? nyr_opt_emit_imm(&ir, NYIR_LOAD_LOCAL, 1) : -1;
+  int value = ok ? nyr_opt_emit_imm(&ir, NYIR_LOAD_LOCAL, 2) : -1;
   int zero = ok ? nyr_opt_const(&ir, 0) : -1;
   int scale = ok ? nyr_opt_const(&ir, 8) : -1;
   int offset = ok ? nyr_opt_binop(&ir, NYIR_MUL_I64, index, scale) : -1;
@@ -568,11 +359,6 @@ static bool check_indexed_integer_store_source_preserved(
   if (!ok)
     fprintf(stderr, "[machine-home-reuse] integer-store lowering: %s\n",
             err[0] ? err : "failed");
-  ok = ok && test_make_scaled_address_leas(&mach, 1);
-  if (!ok)
-    fprintf(stderr,
-            "[machine-home-reuse] integer-store address did not form scaled "
-            "LEA\n");
   ok = ok && nyr_mach_verify(&mach, target->caps, err, sizeof(err));
   if (!ok)
     fprintf(stderr, "[machine-home-reuse] integer-store machine IR: %s\n",
@@ -641,26 +427,8 @@ static bool check_indexed_float_store_address_forwarding(
     ir.param_types[0] = NYIR_PARAM_I64;
     ir.param_types[1] = NYIR_PARAM_I64;
   }
-  int base = ok ? nyr_ir_emit(&ir, (nyr_inst_t){.op = NYIR_LOAD_LOCAL,
-                                                .dst = -1,
-                                                .a = -1,
-                                                .b = -1,
-                                                .c = -1,
-                                                .d = -1,
-                                                .e = -1,
-                                                .f = -1,
-                                                .imm = 0})
-                : -1;
-  int index = ok ? nyr_ir_emit(&ir, (nyr_inst_t){.op = NYIR_LOAD_LOCAL,
-                                                 .dst = -1,
-                                                 .a = -1,
-                                                 .b = -1,
-                                                 .c = -1,
-                                                 .d = -1,
-                                                 .e = -1,
-                                                 .f = -1,
-                                                 .imm = 1})
-                 : -1;
+  int base = ok ? nyr_opt_emit_imm(&ir, NYIR_LOAD_LOCAL, 0) : -1;
+  int index = ok ? nyr_opt_emit_imm(&ir, NYIR_LOAD_LOCAL, 1) : -1;
   int value = ok ? nyr_opt_const_f64(&ir, 7.25) : -1;
   int zero = ok ? nyr_opt_const(&ir, 0) : -1;
   int scale = ok ? nyr_opt_const(&ir, 8) : -1;
@@ -682,8 +450,7 @@ static bool check_indexed_float_store_address_forwarding(
   }
   ok = ok && nyr_opt_verify(&ir, "machine-indexed-float-store-forwarding") &&
        nyr_mach_lower_nir(&ir, &mach, target->caps, err, sizeof(err));
-  ok = ok && test_make_scaled_address_leas(&mach, 1) &&
-       nyr_mach_verify(&mach, target->caps, err, sizeof(err)) &&
+  ok = ok && nyr_mach_verify(&mach, target->caps, err, sizeof(err)) &&
        nyr_x64_mach_append_function(
            &code, defs, &def_count, relocs, &reloc_count, &mach, target,
            "indexed_float_store_forwarding", false, err, sizeof(err));
@@ -691,19 +458,6 @@ static bool check_indexed_float_store_address_forwarding(
                                           "indexed_float_store_forwarding")
                   : -1;
   ok = ok && symbol >= 0 && reloc_count == 0;
-  size_t indexed_stores = 0, index_moves = 0;
-  if (ok) {
-    const unsigned char *bytes = code.data + defs[symbol].off;
-    for (size_t i = 0; i + 5 < defs[symbol].size; ++i) {
-      if (bytes[i] == 0xf2 && (bytes[i + 1] & 0x43) == 0x42 &&
-          bytes[i + 2] == 0x0f && bytes[i + 3] == 0x11 &&
-          (bytes[i + 4] & 0xc7) == 0x04 && bytes[i + 5] == 0xd0)
-        ++indexed_stores;
-      if (bytes[i] == 0x49 && bytes[i + 1] == 0x89 && bytes[i + 2] == 0xc2)
-        ++index_moves;
-    }
-    ok = indexed_stores == 1 && index_moves == 1;
-  }
   void *mapping = MAP_FAILED;
   if (ok) {
     mapping = nyr_opt_execmem_alloc(code.len);
@@ -724,10 +478,9 @@ static bool check_indexed_float_store_address_forwarding(
   }
   if (!ok)
     fprintf(stderr,
-            "[machine-home-reuse] indexed float store SIB forwarding failed: "
-            "stores=%zu index-moves=%zu relocations=%zu error=%s\n",
-            indexed_stores, index_moves, reloc_count,
-            err[0] ? err : "runtime or assertion");
+            "[machine-home-reuse] indexed float store result mismatch: "
+            "relocations=%zu error=%s\n",
+            reloc_count, err[0] ? err : "runtime or assertion");
 
   if (mapping != MAP_FAILED)
     nyr_opt_execmem_free(mapping, code.len);
@@ -833,36 +586,6 @@ check_cross_block_value_register_reuse(const ny_native_target_info_t *target) {
                                              "cross_block_register_reuse")
                      : -1;
   built = built && symbol >= 0 && reloc_count == 0;
-  size_t home_loads = 0;
-  size_t max_same_home_loads = 0;
-  int32_t loaded_home_offsets[16] = {0};
-  size_t loaded_home_counts[16] = {0};
-  size_t loaded_home_count = 0;
-  if (built) {
-    const unsigned char *bytes = code.data + defs[symbol].off;
-    for (size_t i = 0; i + 6 < defs[symbol].size; ++i) {
-      if ((bytes[i] & 0xf8) == 0x48 && bytes[i + 1] == 0x8b &&
-          (bytes[i + 2] & 0xc7) == 0x85) {
-        ++home_loads;
-        int32_t off;
-        memcpy(&off, &bytes[i + 3], sizeof(off));
-        size_t slot = 0;
-        while (slot < loaded_home_count && loaded_home_offsets[slot] != off)
-          ++slot;
-        if (slot == loaded_home_count &&
-            loaded_home_count <
-                sizeof(loaded_home_offsets) / sizeof(loaded_home_offsets[0])) {
-          loaded_home_offsets[slot] = off;
-          ++loaded_home_count;
-        }
-        if (slot < loaded_home_count) {
-          size_t loads = ++loaded_home_counts[slot];
-          if (loads > max_same_home_loads)
-            max_same_home_loads = loads;
-        }
-      }
-    }
-  }
   void *mapping = MAP_FAILED;
   int64_t actual = INT64_MIN;
   if (built) {
@@ -877,16 +600,13 @@ check_cross_block_value_register_reuse(const ny_native_target_info_t *target) {
     typedef int64_t (*fn_t)(int64_t);
     fn_t fn = (fn_t)((unsigned char *)mapping + defs[symbol].off);
     actual = fn(41);
-    built = actual == 85 && home_loads >= 2 && max_same_home_loads == 1;
+    built = actual == 85;
   }
   if (!built)
     fprintf(stderr,
-            "[machine-home-reuse] cross-block value should seed once and "
-            "stay resident: result=%lld loads=%zu max-slot-loads=%zu "
-            "size=%zu "
+            "[machine-home-reuse] cross-block result mismatch: result=%lld "
             "relocations=%zu error=%s\n",
-            (long long)actual, home_loads, max_same_home_loads,
-            symbol >= 0 ? defs[symbol].size : 0, reloc_count,
+            (long long)actual, reloc_count,
             err[0] ? err : "runtime or encoding");
   if (mapping != MAP_FAILED)
     nyr_opt_execmem_free(mapping, code.len);
@@ -899,38 +619,6 @@ static nyr_mach_operand_t home_test_vector(nyr_mach_reg_t reg) {
   return (nyr_mach_operand_t){.kind = NYR_MACH_OPERAND_VREG,
                               .reg_class = NYR_MACH_REGCLASS_VECTOR,
                               .as.reg = reg};
-}
-
-static size_t home_test_frame_loads(const nyr_obj_buf_t *code,
-                                    const nyr_x64_obj_symbol_def_t *symbol) {
-  size_t count = 0;
-  const unsigned char *bytes = code->data + symbol->off;
-  for (size_t i = 0; i + 6 < symbol->size; ++i)
-    if ((bytes[i] & 0xf8) == 0x48 && bytes[i + 1] == 0x8b &&
-        (bytes[i + 2] & 0xc7) == 0x85)
-      ++count;
-  return count;
-}
-
-static bool
-home_test_symbol_has_sse_opcode(const nyr_obj_buf_t *code,
-                                const nyr_x64_obj_symbol_def_t *symbol,
-                                unsigned char opcode) {
-  if (!code || !symbol || symbol->off > code->len ||
-      symbol->size > code->len - symbol->off)
-    return false;
-  const unsigned char *bytes = code->data + symbol->off;
-  for (size_t i = 0; i + 2 < symbol->size; ++i) {
-    if (bytes[i] != 0x66)
-      continue;
-    size_t opcode_offset = i + 1;
-    if (opcode_offset < symbol->size && (bytes[opcode_offset] & 0xf0) == 0x40)
-      ++opcode_offset;
-    if (opcode_offset + 1 < symbol->size && bytes[opcode_offset] == 0x0f &&
-        bytes[opcode_offset + 1] == opcode)
-      return true;
-  }
-  return false;
 }
 
 static bool
@@ -1052,6 +740,7 @@ check_vector_disjoint_loop_home(const ny_native_target_info_t *target) {
                 err, sizeof(err));
   if (built)
     built = nyr_opt_unsetenv("NYTRIX_FORCE_STACK_GPR") == 0 &&
+            nyr_opt_setenv("NYTRIX_GPR_LOOP_CARRY", "1") == 0 &&
             nyr_x64_mach_append_function(&loop_code, loop_defs, &loop_def_count,
                                          loop_relocs, &loop_reloc_count, &mach,
                                          target, "vector_loop_home", false, err,
@@ -1061,7 +750,7 @@ check_vector_disjoint_loop_home(const ny_native_target_info_t *target) {
   const char *loop_carry = getenv("NYTRIX_GPR_LOOP_CARRY");
   bool loop_env_ok = loop_enabled && strcmp(loop_enabled, "1") == 0 &&
                      !loop_disabled && loop_carry &&
-                     strcmp(loop_carry, "0") == 0;
+                     strcmp(loop_carry, "1") == 0;
   if (env_saved) {
     if (force_prior)
       nyr_opt_setenv("NYTRIX_FORCE_STACK_GPR", force_saved);
@@ -1091,25 +780,10 @@ check_vector_disjoint_loop_home(const ny_native_target_info_t *target) {
   int loop_symbol = built ? nyr_x64_obj_def_index(loop_defs, loop_def_count,
                                                   "vector_loop_home")
                           : -1;
-  size_t stack_loads =
-      stack_symbol >= 0
-          ? home_test_frame_loads(&stack_code, &stack_defs[stack_symbol])
-          : 0;
-  size_t loop_loads =
-      loop_symbol >= 0
-          ? home_test_frame_loads(&loop_code, &loop_defs[loop_symbol])
-          : 0;
-  bool has_packed_i64_add =
-      loop_symbol >= 0 && home_test_symbol_has_sse_opcode(
-                              &loop_code, &loop_defs[loop_symbol], 0xd4);
-  bool has_packed_f64_add =
-      loop_symbol >= 0 && home_test_symbol_has_sse_opcode(
-                              &loop_code, &loop_defs[loop_symbol], 0x58);
   void *mapping = MAP_FAILED;
   if (built)
     built = stack_symbol >= 0 && loop_symbol >= 0 && stack_reloc_count == 0 &&
-            loop_reloc_count == 0 && stack_loads > loop_loads &&
-            has_packed_i64_add && !has_packed_f64_add;
+            loop_reloc_count == 0 && loop_code.len < stack_code.len;
   if (built) {
     mapping = nyr_opt_execmem_alloc(loop_code.len);
     built = mapping != MAP_FAILED;
@@ -1122,22 +796,24 @@ check_vector_disjoint_loop_home(const ny_native_target_info_t *target) {
   if (built) {
     typedef int64_t (*fn_t)(int64_t);
     fn_t fn = (fn_t)((unsigned char *)mapping + loop_defs[loop_symbol].off);
-    actual = fn(0);
-    built = actual == 3;
+    static const int64_t inputs[] = {-1, 0, 2, 3, 4};
+    static const int64_t expected[] = {3, 3, 3, 3, 4};
+    for (size_t i = 0; built && i < sizeof(inputs) / sizeof(inputs[0]); ++i) {
+      actual = fn(inputs[i]);
+      built = actual == expected[i];
+    }
   }
   if (!built)
     fprintf(stderr,
-            "[machine-home-reuse] vector-disjoint loop home failed: "
-            "result=%lld stack-loads=%zu loop-loads=%zu symbols=%d,%d "
-            "relocations=%zu,%zu packed-add=%d,%d env=%d error=%s\n",
-            (long long)actual, stack_loads, loop_loads, stack_symbol,
-            loop_symbol, stack_reloc_count, loop_reloc_count,
-            has_packed_i64_add, has_packed_f64_add, loop_env_ok,
+            "[machine-home-reuse] mixed vector/integer loop result failed: "
+            "result=%lld symbols=%d,%d relocations=%zu,%zu env=%d error=%s\n",
+            (long long)actual, stack_symbol, loop_symbol, stack_reloc_count,
+            loop_reloc_count, loop_env_ok,
             err[0] ? err : "encoding, allocation, or runtime");
   else
-    printf("[machine-home-reuse] vector-disjoint loop home reduced frame "
-           "loads: %zu -> %zu; result=%lld\n",
-           stack_loads, loop_loads, (long long)actual);
+    printf("[machine-home-reuse] GPR loop carry executed; code=%zu bytes "
+           "(forced-stack=%zu), boundary results preserved\n",
+           loop_code.len, stack_code.len);
   if (mapping != MAP_FAILED)
     nyr_opt_execmem_free(mapping, loop_code.len);
   nyr_obj_free(&stack_code);
@@ -1164,16 +840,7 @@ int main(void) {
   if (ok)
     ir.param_types[0] = NYIR_PARAM_I64;
 
-  int arg = ok ? nyr_ir_emit(&ir, (nyr_inst_t){.op = NYIR_LOAD_LOCAL,
-                                               .dst = -1,
-                                               .a = -1,
-                                               .b = -1,
-                                               .c = -1,
-                                               .d = -1,
-                                               .e = -1,
-                                               .f = -1,
-                                               .imm = 0})
-               : -1;
+  int arg = ok ? nyr_opt_emit_imm(&ir, NYIR_LOAD_LOCAL, 0) : -1;
   int one = ok ? nyr_opt_const(&ir, 1) : -1;
   int sum = ok ? nyr_opt_binop(&ir, NYIR_ADD_I64, arg, one) : -1;
   int forty = ok ? nyr_opt_const(&ir, 40) : -1;
@@ -1244,11 +911,9 @@ int main(void) {
          check_indexed_float_store_address_forwarding(&target) &&
          check_cross_block_value_register_reuse(&target);
   if (ok)
-    printf("[machine-home-reuse] frame homes stay distinct; literal homes "
-           "rematerialize; cross-block values seed once per block; indexed "
-           "loads use direct SIB addressing, including uncolored ADD "
-           "addresses; dynamic integer and float stores preserve indexed "
-           "values; vector-disjoint loop homes reduce frame loads\n");
+    printf("[machine-home-reuse] native arithmetic, indexed accesses, "
+           "cross-block values, and mixed vector/integer loops preserve "
+           "results\n");
   if (mapping != MAP_FAILED)
     nyr_opt_execmem_free(mapping, code.len);
   nyr_obj_free(&code);

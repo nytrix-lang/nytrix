@@ -1,0 +1,27 @@
+shape byte_argument_abi {
+  family "runtime-native"
+  generator "native"
+  features [native nyir abi x86_64 regression]
+  template ny-test-case
+  flags "--native-only --native-backend=x86_64 --no-progress"
+  expect compile_and_run
+  expect_stdout "255\n-128\n264\n-107\n276\n42\n"
+  source ny <<'NY'
+fn identity(u8 x) int { x }
+fn signed_identity(i8 x) int { x }
+fn sum3(u8 a, u8 b, u8 c) int { a + b + c }
+fn increment(int x) int { x + 1 }
+fn stack_byte(int a, int b, int c, int d, int e, int f, u8 g) int {
+  a + b + c + d + e + f + g
+}
+fn stack_signed(int a, int b, int c, int d, int e, int f, i8 g) int {
+  a + b + c + d + e + f + g
+}
+print(identity(255))
+print(signed_identity(-128))
+print(sum3(255, 2, 7))
+print(stack_signed(1, 2, 3, 4, 5, 6, -128))
+print(stack_byte(1, 2, 3, 4, 5, 6, 255))
+print(increment(41))
+NY
+}

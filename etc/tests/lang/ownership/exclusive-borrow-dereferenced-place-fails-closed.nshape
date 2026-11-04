@@ -4,7 +4,7 @@ shape ownership_rule_exclusive_borrow_dereferenced_place_fails_closed {
   features ["error", "ownership", "borrow", "exclusive", "dereference", "fail-closed", "negative"]
   template ny-compile-fail
   expect compile_fail
-  flags "--ownership-strict --nyir-verify"
+  flags "--ownership-strict --nyr-verify"
 
   source ny <<'NY'
 use core

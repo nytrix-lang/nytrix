@@ -138,7 +138,9 @@ fn pixel_rect(f64 x, f64 y, f64 w, f64 h, int color, f64 alpha) int {
    if alpha <= 0.0 { return 0 }
    def int alpha8 = int(math.clamp01(alpha) * 255.0)
    def int packed = (color & 0x00FFFFFF) | (alpha8 << 24)
-   gfx.draw_rect_fast(math.round(x), math.round(y), math.ceil(w), math.ceil(h), packed)
+   def int rx, ry = math.round(x), math.round(y)
+   def int rw, rh = math.ceil(w), math.ceil(h)
+   gfx.draw_rect_fast(rx, ry, rw, rh, packed)
    0
 }
 
@@ -159,7 +161,7 @@ fn draw_logo_pass(f64 alpha, bool shadow) int {
             }
             def f64 px = LOGO_X0 + float(first) * CELL
             def f64 py = LOGO_Y0 + float(y) * CELL
-            def f64 width = float(x - first) * CELL
+            def f64 width = (x - first) * CELL
             if shadow {
                pixel_rect(px + SHADOW_X, py + SHADOW_Y, width, CELL, SHADOW_COLOR, SHADOW_ALPHA * alpha)
             } else {
@@ -310,6 +312,7 @@ while !window.should_close(win) && fixture.tick_ui(fx) {
    }
    def f64 frame_ms = float(math.clamp(dt, 0.0, 0.50)) * 1000.0
    timeline = float(math.fmod(timeline + frame_ms, CYCLE))
+
    mut f64 alpha = 1.0
    if timeline > HOLD_END { alpha = 1.0 - math.clamp01((timeline - HOLD_END) / FADE_DURATION) }
 
@@ -322,7 +325,12 @@ while !window.should_close(win) && fixture.tick_ui(fx) {
    }
    if timeline >= WORD_START {
       def int visible = int(math.min(6.0, math.floor((timeline - WORD_START) / WORD_INTERVAL) + 1.0))
-      draw_label(LETTER_ROWS, 45, 7, visible, WORD_X0, WORD_Y0, WORD_CELL, WORD_COLOR, alpha)
+      draw_label(LETTER_ROWS, 45, 7, visible, WORD_X0, WORD_Y0, WORD_CELL,
+         WORD_COLOR, alpha)
+   }
+   if ui_profile.env_truthy_cached("NYTRIX_UI_REPLAY") {
+      print("NYTRIX_UI_APP_STATE demo=animation timeline=" + to_str(timeline) +
+         " dt=" + to_str(dt) + " alpha=" + to_str(alpha))
    }
    gfx.end_frame()
 }

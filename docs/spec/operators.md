@@ -4,7 +4,16 @@
 Operators cover arithmetic, comparison, logic, bitwise work, ternary selection,
 coalescing, indexing, calls, and member access.
 
+## Contents
+
+- [Arithmetic and bitwise operations](#arithmetic)
+- [Precedence](#precedence)
+- [Custom operators](#custom-operators)
+
 ## Arithmetic
+
+> **Note:** The operands below are placeholders. This lists operator spellings,
+> not a standalone program.
 
 ```ny
 a + b
@@ -16,6 +25,17 @@ a ** b
 a ^^ b
 a ^ b
 ```
+
+## Rules
+
+1. Parentheses override the precedence table; custom declarations never change
+   precedence.
+2. `**` and `^^` are right-associative exponentiation spellings; `^` is
+   bitwise XOR.
+3. `>>` is arithmetic for signed integers. Use `bshr` when the operation must
+   fill with zero bits.
+4. Nytrix has no wrapping `+%` or `*%` operators. Use checked helpers when
+   signed overflow results or saturation are required.
 
 Arithmetic operators work on numeric values that the active type and runtime
 path accept. The value type and compiler mode choose overflow, widening, and
@@ -76,9 +96,14 @@ Consequences worth noting:
 Parentheses override any of these rules:
 
 ```ny
-(a + b) * c
-(flags & mask) != 0
-cond ? a : (b ?? fallback)
+use core
+
+def grouped = (1 + 2) * 3
+def masked = (5 & 1) != 0
+def selected = false ? 1 : (nil ?? 4)
+
+assert(grouped == 9 && masked && selected == 4,
+       "parentheses make expression grouping explicit")
 ```
 
 ## Custom operators
@@ -91,12 +116,21 @@ impl owner). Full grammar, top-level declarations, and trait-adjacent rules are
 in [Traits and impl](traits.md).
 
 ```ny
+use core
+
 impl Meter {
+   fn add(self left, self right) self {
+      Meter({"value": int(left.get("value", 0)) +
+                    int(right.get("value", 0))})
+   }
    operator + self: self = add
-   operator ** int: self = pow
-   operator ^ self: self = xor
-   operator == self: bool = same
 }
+
+def Meter left = Meter({"value": 19})
+def Meter right = Meter({"value": 23})
+def Meter total = left + right
+assert(int(total.get("value", 0)) == 42,
+       "the operator uses its declared target")
 ```
 
 The operator body is a named function. The colon separates the right operand

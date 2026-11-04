@@ -23,7 +23,7 @@ def start_source = ".text\n.global _start\n_start:\n  call rt_main\n1:\n  rjmp 1
 assert(is_ok(file_write(start_path, start_source)),
        "write AVR panic startup wrapper")
 def emitted = run_capture(
-    [compiler, "--native-backend=avr", "--native-only", "--nyir-verify",
+    [compiler, "--native-backend=avr", "--native-only", "--nyr-verify",
      "--emit-asm=" + asm_path, "-no-std", "-emit-only", "-e",
      "panic(\"avr panic marker\")"], [], nil, false)
 assert(emitted.get("code", 127) == 0 && file_exists(asm_path),
@@ -53,7 +53,7 @@ def execution = run_capture(
 assert(execution.get("code", 0) == 124,
        "QEMU executes the non-returning AVR panic path")
 def rejected = run_capture(
-    [compiler, "--native-backend=avr", "--native-only", "--nyir-verify",
+    [compiler, "--native-backend=avr", "--native-only", "--nyr-verify",
      "--emit-asm=" + rejected_path, "-no-std", "-emit-only", "-e",
      "fn fail(int value) int { panic(\"value: \" + to_str(value)) }\n" +
      "fail(7)"], [], nil, false)

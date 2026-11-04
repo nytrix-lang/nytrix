@@ -45,6 +45,20 @@ use core.math.big
 bigint_div(bigint_from_int(25), 0)
 NY
 }
+shape bigint_mul_div_zero_divisor {
+  family "runtime/values"
+  generator "embedded"
+  features ["ny", "test", "bigint", "division", "zero"]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit -O3; --native-backend=llvm --jit --jit-engine=orc -O3"
+  expect compile_and_run
+  expect_exit 1
+  source ny <<'NY'
+use core
+use core.math.big
+bigint_mul_div(bigint_from_int(25), 3, 0)
+NY
+}
 shape bigint_zero_modulus {
   family "runtime/values"
   generator "embedded"

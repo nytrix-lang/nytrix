@@ -20,24 +20,8 @@ static bool build_cmp(const ny_native_target_info_t *target, int64_t constant,
   if (!ir.param_types)
     return false;
   ir.param_types[0] = ir.param_types[1] = NYIR_PARAM_I64;
-  int lhs = nyr_ir_emit(&ir, (nyr_inst_t){.op = NYIR_LOAD_LOCAL,
-                                          .dst = -1,
-                                          .a = -1,
-                                          .b = -1,
-                                          .c = -1,
-                                          .d = -1,
-                                          .e = -1,
-                                          .f = -1,
-                                          .imm = 0});
-  int rhs = nyr_ir_emit(&ir, (nyr_inst_t){.op = NYIR_LOAD_LOCAL,
-                                          .dst = -1,
-                                          .a = -1,
-                                          .b = -1,
-                                          .c = -1,
-                                          .d = -1,
-                                          .e = -1,
-                                          .f = -1,
-                                          .imm = 1});
+  int lhs = nyr_opt_emit_imm(&ir, NYIR_LOAD_LOCAL, 0);
+  int rhs = nyr_opt_emit_imm(&ir, NYIR_LOAD_LOCAL, 1);
   int bound = nyr_opt_const(&ir, constant);
   int result = nyr_opt_cmp(&ir, lhs, compare_params ? rhs : bound, NYIR_CMP_LT);
   nyr_opt_ret(&ir, result);

@@ -56,31 +56,6 @@ fn _iter_utf8_len(any s) int {
 }
 
 @inline
-fn _iter_ord_at(any s, int idx) int {
-   if !is_str(s) || idx < 0 { return 0 }
-   def n = s.len
-   mut i = 0
-   mut pos = 0
-   while i < n {
-      def w = _iter_utf8_seq_len(s, i, n)
-      if pos == idx {
-         def b0 = load8(s, i) & 255
-         if w == 1 || w < 1 { return b0 }
-         if w == 2 { return ((b0 & 31) << 6) | (load8(s, i + 1) & 63) }
-         if w == 3 {
-            return ((b0 & 15) << 12) | ((load8(s, i + 1) & 63) << 6) |
-            (load8(s, i + 2) & 63)
-         }
-         return ((b0 & 7) << 18) | ((load8(s, i + 1) & 63) << 12) |
-         ((load8(s, i + 2) & 63) << 6) | (load8(s, i + 3) & 63)
-      }
-      if w < 1 { i += 1 } else { i += w }
-      pos += 1
-   }
-   0
-}
-
-@inline
 @returns_owned
 fn _iter_utf8_slice(any s, int start, int stop, int step=1) any {
    ; Keep iterator slicing on the local UTF-8 path.  Calling the attached
@@ -100,7 +75,7 @@ fn _iter_utf8_slice(any s, int start, int stop, int step=1) any {
    mut out = strmod.Builder((stop - start) * 2 + 8)
    mut i = start
    while i < stop {
-      out = strmod.builder_append(out, strmod.chr(_iter_ord_at(s, i)))
+      out = strmod.builder_append(out, s[i])
       i += step
    }
    def result = strmod.builder_to_str(out)
@@ -146,11 +121,10 @@ fn _iter_empty_like(any xs) any {
 
 fn any(seq xs, fnptr pred) bool {
    "Returns true when any item in `xs` matches `pred`."
-   def iter_predicate = __mark_dynamic_callable_tagged_args(pred)
    def n = _iter_seq_len(xs, "any")
    mut i = 0
    while i < n {
-      if iter_predicate(__tbuf_index_any_raw(xs, i)) { return true }
+      if pred(__tbuf_index_any_raw(xs, i)) { return true }
       i += 1
    }
    false
@@ -158,11 +132,10 @@ fn any(seq xs, fnptr pred) bool {
 
 fn all(seq xs, fnptr pred) bool {
    "Returns true when every item in `xs` matches `pred`."
-   def iter_predicate = __mark_dynamic_callable_tagged_args(pred)
    def n = _iter_seq_len(xs, "all")
    mut i = 0
    while i < n {
-      if !iter_predicate(__tbuf_index_any_raw(xs, i)) { return false }
+      if !pred(__tbuf_index_any_raw(xs, i)) { return false }
       i += 1
    }
    true
@@ -346,7 +319,7 @@ fn filter_map(seq xs, fnptr fn1) list {
    mut pos = 0
    while i < n {
       def res = fn1(__tbuf_index_any_raw(xs, i))
-      if res != nil {
+      if !is_nil(res) {
          _list_set(out, pos, res)
          pos += 1
       }
@@ -608,7 +581,10 @@ fn map(seq xs, fnptr fn1) any {
       mut out = strmod.Builder(n * 2 + 8)
       mut i = 0
       while i < cp_n {
-         def mapped = fn1(strmod.chr(_iter_ord_at(xs, i)))
+         ; Native string indexing performs the code-point load through the
+         ; string ABI. Re-decoding bytes from a `seq` formal can read the
+         ; dynamic string descriptor rather than the first payload byte.
+         def mapped = fn1(xs[i])
          ; builder_append already formats non-string callback results.  Keep
          ; managed strings on the canonical path instead of routing them
          ; through the raw C-string compatibility conversion.
@@ -639,7 +615,7 @@ fn filter(seq xs, fnptr pred) any {
       mut out = strmod.Builder(n + 8)
       mut i = 0
       while i < cp_n {
-         def v = strmod.chr(_iter_ord_at(xs, i))
+         def v = xs[i]
          if pred(v) { out = strmod.builder_append(out, v) }
          i += 1
       }
@@ -694,7 +670,7 @@ fn take(seq xs, int count) any {
       _list_set(out, i, __tbuf_index_any_raw(xs, i))
       i += 1
    }
-   _iter_finish_like(xs, out, lim)
+   _list_finish(out, lim)
 }
 
 @returns_owned
@@ -717,26 +693,24 @@ fn drop(seq xs, int count) any {
 }
 
 @returns_owned
+fn _iter_reverse_string(str source) str {
+   def cp_n = _iter_utf8_len(source)
+   strmod.utf8_slice(source, cp_n - 1, -cp_n - 1, -1)
+}
+
+@returns_owned
 fn reverse(seq xs) any {
    "Returns a reversed copy of `xs`."
+   ; Check the string representation before the generic sequence length path.
+   ; That path can lose the string tag on a `seq` formal in the native ABI.
+   def string_input = is_str(xs)
+   if string_input {
+      def str source = to_str(xs)
+      return _iter_reverse_string(source)
+   }
    def n = _iter_seq_len(xs, "reverse")
    if n == 0 { return _iter_empty_like(xs) }
-   if n == 1 {
-      if is_str(xs) { return xs }
-      return clone(xs)
-   }
-   if is_str(xs) {
-      def cp_n = _iter_utf8_len(xs)
-      mut out = strmod.Builder(n + 8)
-      mut i = cp_n - 1
-      while i >= 0 {
-         out = strmod.builder_append(out, strmod.chr(_iter_ord_at(xs, i)))
-         i -= 1
-      }
-      def s = strmod.builder_to_str(out)
-      strmod.builder_free(out)
-      return s
-   }
+   if n == 1 { return clone(xs) }
    mut out = list(n)
    mut i = 0
    while i < n {

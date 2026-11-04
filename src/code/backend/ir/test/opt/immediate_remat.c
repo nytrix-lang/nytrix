@@ -11,42 +11,26 @@
 #include <stdlib.h>
 #include <string.h>
 
-static bool emit_text(const nyr_func_t *f, const char *name,
-                      nyr_writer_t *out);
+static bool emit_text(const nyr_func_t *f, const char *name, nyr_writer_t *out);
 
 static int ny_copy(nyr_func_t *f, int source) {
-  return nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_COPY,
-                                    .dst = -1,
-                                    .a = source,
-                                    .b = -1,
-                                    .c = -1,
-                                    .d = -1,
-                                    .e = -1,
-                                    .f = -1});
+  return nyr_opt_emit_abc(f, NYIR_COPY, source, -1, -1);
 }
 
 static void ny_store_local(nyr_func_t *f, int value, int slot) {
   nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_STORE_LOCAL,
-                             .dst = -1,
-                             .a = value,
-                             .b = -1,
-                             .c = -1,
-                             .d = -1,
-                             .e = -1,
-                             .f = -1,
-                             .imm = slot});
+                              .dst = -1,
+                              .a = value,
+                              .b = -1,
+                              .c = -1,
+                              .d = -1,
+                              .e = -1,
+                              .f = -1,
+                              .imm = slot});
 }
 
 static int ny_load_local(nyr_func_t *f, int slot) {
-  return nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_LOAD_LOCAL,
-                                    .dst = -1,
-                                    .a = -1,
-                                    .b = -1,
-                                    .c = -1,
-                                    .d = -1,
-                                    .e = -1,
-                                    .f = -1,
-                                    .imm = slot});
+  return nyr_opt_emit_imm(f, NYIR_LOAD_LOCAL, slot);
 }
 
 static void build_boundaries(nyr_func_t *f) {
@@ -84,15 +68,15 @@ static void build_call(nyr_func_t *f) {
   int after_call_imm = nyr_opt_const(f, -11);
   int after_call_copy = ny_copy(f, after_call_imm);
   nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_CALL,
-                             .dst = -1,
-                             .a = -1,
-                             .b = -1,
-                             .c = -1,
-                             .d = -1,
-                             .e = -1,
-                             .f = -1,
-                             .imm = 0,
-                             .symbol = "touch"});
+                              .dst = -1,
+                              .a = -1,
+                              .b = -1,
+                              .c = -1,
+                              .d = -1,
+                              .e = -1,
+                              .f = -1,
+                              .imm = 0,
+                              .symbol = "touch"});
   int after_call = nyr_opt_binop(f, NYIR_ADD_I64, base, after_call_copy);
   (void)safe;
   nyr_opt_ret(f, after_call);
@@ -147,8 +131,8 @@ static bool check_nir_stack_home_coloring(void) {
   }
   nyr_opt_ret(&f, ny_load_local(&f, 0));
   bool ok = nyr_opt_verify(&f, "x64-nir-stack-home-coloring");
-  int64_t interpreted = ok ? nyr_opt_eval(&f, "x64-nir-stack-home-coloring")
-                           : 0;
+  int64_t interpreted =
+      ok ? nyr_opt_eval(&f, "x64-nir-stack-home-coloring") : 0;
   nyr_writer_t assembly = {0};
   ok = ok && emit_text(&f, "x64_nir_stack_home_coloring", &assembly);
   size_t frame = SIZE_MAX;
@@ -170,6 +154,32 @@ static bool check_nir_stack_home_coloring(void) {
             "[x64-nir-stack-home-coloring] expected result=78 and frame<=128 "
             "(result=%lld frame=%zu)\n%s",
             (long long)interpreted, frame,
+            assembly.data ? assembly.data : "<no assembly>\n");
+  free(assembly.data);
+  nyr_ir_func_free(&f);
+  return ok;
+}
+
+static bool check_leaf_frame_elision(void) {
+  nyr_func_t f;
+  nyr_opt_begin(&f);
+  f.param_count = 1;
+  f.param_types = malloc(sizeof(*f.param_types));
+  if (!f.param_types)
+    return false;
+  f.param_types[0] = NYIR_PARAM_I64;
+  int value = ny_load_local(&f, 0);
+  value = nyr_opt_binop(&f, NYIR_ADD_I64, value, nyr_opt_const(&f, 1));
+  nyr_opt_ret(&f, value);
+  bool ok = nyr_opt_verify(&f, "x64-nir-leaf-frame-elision");
+  nyr_writer_t assembly = {0};
+  ok = ok && emit_text(&f, "x64_nir_leaf_frame_elision", &assembly);
+  ok = ok && assembly.data && strstr(assembly.data, "\tret\n") &&
+       !strstr(assembly.data, "%rbp") && !strstr(assembly.data, "\tpushq\t") &&
+       !strstr(assembly.data, "\tpopq\t") &&
+       !strstr(assembly.data, "\tleave\n");
+  if (!ok)
+    fprintf(stderr, "[x64-nir-leaf-frame-elision] unexpected leaf frame\n%s",
             assembly.data ? assembly.data : "<no assembly>\n");
   free(assembly.data);
   nyr_ir_func_free(&f);
@@ -229,7 +239,7 @@ static bool emit_text(const nyr_func_t *f, const char *name,
 }
 
 int main(void) {
-  if (!check_nir_stack_home_coloring())
+  if (!check_nir_stack_home_coloring() || !check_leaf_frame_elision())
     return 1;
   nyr_func_t boundaries;
   build_boundaries(&boundaries);
@@ -344,7 +354,7 @@ int main(void) {
   char eval_err[256] = {0};
   bool eval_ok = nyr_opt_verify(&machine_ir, "immediate-machine-mul") &&
                  nyr_ir_eval(&machine_ir, locals, 1, 500, &eval, eval_err,
-                           sizeof(eval_err)) &&
+                             sizeof(eval_err)) &&
                  eval.returned && eval.result == INT64_C(4326231424);
   if (!eval_ok) {
     fprintf(stderr, "[immediate-machine-mul] evaluator failed: %s\n", eval_err);
@@ -356,7 +366,7 @@ int main(void) {
   nyr_mach_func_t machine = {0};
   char machine_err[256] = {0};
   bool lowered = nyr_mach_lower_nir(&machine_ir, &machine, 0, machine_err,
-                                   sizeof(machine_err)) &&
+                                    sizeof(machine_err)) &&
                  nyr_mach_verify(&machine, 0, machine_err, sizeof(machine_err));
   nyr_ir_func_free(&machine_ir);
   if (!lowered) {

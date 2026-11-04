@@ -1,0 +1,36 @@
+shape ffi_callback_memory {
+  family "runtime/ffi"
+  generator "regression"
+  features [ffi callback memory pointer]
+  template ny-test-case
+  timeout 120
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit -O0; --native-backend=llvm --jit --jit-engine=orc -O0"
+  expect compile_and_run
+  expect_message "FFI-CALLBACK-MEMORY-OK"
+  source ny <<'NY'
+use core
+fn receive(i32 signum) i32 {
+   if int(signum) == 10 { print("FFI-CALLBACK-MEMORY-OK") }
+   0
+}
+#linux {
+   extern "c" {
+      fn sigaction(i32 signum, ptr action, ptr previous) i32
+      fn raise_signal(i32 signum) i32 as "raise"
+   }
+   ;; The signal-handler union is the first field of Linux struct sigaction;
+   ;; zero-filled trailing mask/flags/restorer fields select an ordinary
+   ;; synchronous handler. Retain enough storage for the complete libc record.
+   def ptr action = zalloc(256)
+   def ptr previous = zalloc(256)
+   store64_h(action, receive)
+   assert(sigaction(10, action, previous) == 0, "install stored C callback")
+   assert(raise_signal(10) == 0, "invoke C callback from its memory slot")
+   assert(sigaction(10, previous, 0) == 0, "restore previous signal action")
+   free(action)
+   free(previous)
+} #else {
+   print("FFI-CALLBACK-MEMORY-OK")
+}
+NY
+}

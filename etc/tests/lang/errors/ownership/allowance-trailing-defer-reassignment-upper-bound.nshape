@@ -3,7 +3,7 @@ shape ownership_allowance_trailing_defer_reassignment_checks_pre_exit_epoch {
   generator "error"
   features [error ownership allowance trailing-defer reassignment upper-bound]
   template ny-compile-fail
-  flags_matrix "--ownership-strict --native --run --nyir-verify; --ownership-strict --native-backend=llvm --jit --jit-engine=mcjit --nyir-verify; --ownership-strict --native-backend=llvm --jit --jit-engine=orc --nyir-verify; --ownership-strict --native-only --nyir-verify"
+  flags_matrix "--ownership-strict --native --run --nyr-verify; --ownership-strict --native-backend=llvm --jit --jit-engine=mcjit --nyr-verify; --ownership-strict --native-backend=llvm --jit --jit-engine=orc --nyr-verify; --ownership-strict --native-only --nyr-verify"
   expect compile_fail
   expect_message "ownership allowance exceeded"
   source ny <<'NY'

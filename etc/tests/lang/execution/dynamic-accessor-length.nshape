@@ -1,0 +1,25 @@
+shape dynamic_accessor_length {
+  family "runtime/compiler"
+  generator "regression"
+  features [ny dynamic dict list string length]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --nyr-run"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+fn preserve_string(str value) str { value }
+fn string_member(any node) str { node.get("name") }
+fn check(any node) {
+   assert(node.get("name").len == 4, "dynamic string length")
+   assert(preserve_string(node.get("name")) == "word",
+      "dynamic getter crosses a typed string argument boundary")
+   assert(string_member(node) == "word",
+      "dynamic getter return is normalized to the declared string ABI")
+   assert(node.get("args").len == 3, "dynamic list length")
+   assert(node.get("attributes").len == 2, "dynamic dictionary length")
+   def children = node.get("args")
+   assert(children.len == 3, "dynamic length through a local")
+}
+check({"name":"word", "args":[1,2,3], "attributes":{"a":1,"b":2}})
+NY
+}

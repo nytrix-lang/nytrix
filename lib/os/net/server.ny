@@ -13,7 +13,7 @@ module core.os.net.server(
 use core
 use core.dict_mod as _d
 use core.str
-use core.os.args as cli
+use core.os.args as process_args
 use core.common as common
 use core.os.net.context as netctx
 use core.os.net.socket as sock
@@ -126,7 +126,7 @@ fn _opt_str(any options, str key, str fallback="") str {
 }
 
 fn _debug_enabled(any options=0) bool {
-   _opt_bool(options, "debug", false) || cli.flag("--debug") || cli.flag("--verbose") || cli.flag("-v")
+   _opt_bool(options, "debug", false) || process_args.flag("--debug") || process_args.flag("--verbose") || process_args.flag("-v")
 }
 
 fn _clip(any value, int limit) str {
@@ -496,9 +496,9 @@ fn serve_app(str host, int port, fnptr handler, int max_requests=-1, int timeout
 }
 
 fn _cli_port(any options) int {
-   def explicit = cli.int_value("--port", 0)
+   def explicit = process_args.int_value("--port", 0)
    if explicit > 0 { return explicit }
-   def ps = cli.positionals()
+   def ps = process_args.positionals()
    if ps.len > 0 {
       def p = atoi(to_str(ps[0]))
       if p > 0 { return p }
@@ -508,11 +508,11 @@ fn _cli_port(any options) int {
 
 fn serve_cli(fnptr handler, any options=0) dict {
    "Serves using CLI flags: `[port]`, `--port`, `--bind`/`--host`, `--once`, and `--requests`."
-   mut host = cli.value("--bind", "")
-   if host.len == 0 { host = cli.value("--host", _opt_str(options, "host", "127.0.0.1")) }
+   mut host = process_args.value("--bind", "")
+   if host.len == 0 { host = process_args.value("--host", _opt_str(options, "host", "127.0.0.1")) }
    def port = _cli_port(options)
    def fallback_requests = _opt_int(options, "max_requests", -1)
-   def max_requests = cli.int_value("--requests", cli.flag("--once") ? 1 : fallback_requests)
+   def max_requests = process_args.int_value("--requests", process_args.flag("--once") ? 1 : fallback_requests)
    def timeout_ms = _opt_int(options, "timeout_ms", 0)
    def deadline_ms = _opt_int(options, "deadline_ms", 0)
    serve_app(host, port, handler, max_requests, timeout_ms, options, deadline_ms)

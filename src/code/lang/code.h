@@ -255,6 +255,10 @@ static inline void assigned_name_add(assigned_name_list *names,
   ny_name_bloom_add(bloom, hash);
 }
 
+void ny_collect_assigned_names_stmt(stmt_t *stmt, assigned_name_list *out_names,
+                                    assigned_hash_list *out_hashes,
+                                    uint64_t out_bloom[4]);
+
 typedef struct label_binding {
   const char *name;
   LLVMBasicBlockRef bb;

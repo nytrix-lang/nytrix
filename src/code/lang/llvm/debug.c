@@ -783,13 +783,10 @@ LLVMMetadataRef codegen_debug_loc_scope(codegen_t *cg, token_t tok) {
   if (!cg || !cg->debug_symbols || !cg->di_builder || !cg->di_scope)
     return NULL;
   /*
-   * A lexical-block-file scope must be nested under a local scope (such as a
-   * subprogram), not directly under the compile unit. Top-level generated
-   * code can still be at the compile-unit scope here; keep that valid scope
-   * instead of creating metadata LLVM rejects during module verification.
+   * Debug locations require a local scope, not the compile unit itself.
    */
   if (cg->di_scope == cg->di_cu)
-    return cg->di_scope;
+    return NULL;
   if (!tok.filename || !*tok.filename)
     return cg->di_scope;
   if (cg->di_loc_file_scope && cg->di_loc_file_parent == cg->di_scope &&

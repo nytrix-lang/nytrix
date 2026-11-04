@@ -3,6 +3,7 @@ shape test_defer_loop_capture {
   generator "embedded"
   features ["ny", "test"]
   template ny-test-case
+  flags_matrix "--native --run; --native-only; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --nyr-run-profile"
   expect compile_and_run
   source ny <<'NY'
 use core

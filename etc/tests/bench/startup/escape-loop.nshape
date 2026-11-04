@@ -5,26 +5,28 @@ shape escape-loop {
   template ny-test-case
   tier "critical"
   budget {
-    max_native_c_ratio 16.0
+    max_native_c_ratio 2.0
+    max_native_llvm_ratio 2.0
     max_ny_compile_ms 3000
   }
   expect compile_and_run
   source ny <<'NY'
 use core
 use core.os.time
-;; Transient heap object per iteration (SROA / escape-analysis candidate).
-def N = 1000000 * argc()
+;; A rolling checksum prevents linear-reduction folding so the transient box
+;; path remains measurable on optimized routes.
+def N = 1000000
 def int t0 = ticks()
-mut acc = 0
+mut acc = 1
 mut i = 0
 while i < N {
-   def p = [i]
-   acc += p[0]
+   def box = [i]
+   acc = (acc * 33 + box[0]) % 1000003
    i += 1
 }
 def int t1 = ticks()
 print("checksum=", acc)
-print("elapsed_ns=", t1 - t0)
+print("bench_elapsed_ns=", t1 - t0)
 NY
   source c <<'C'
 #include <stdint.h>
@@ -40,9 +42,9 @@ static int64_t now_ns(void) {
 
 int main(int argc, char **argv) {
     (void)argv;
-    int N = 1000000 * argc;
+    const int N = 1000000;
     int64_t start = now_ns();
-    volatile int64_t acc = 0;
+    int64_t acc = 1;
     for (int i = 0; i < N; i++) {
         /* Transient heap box per iteration, matching the Ny side's `[i]`
          * list allocation: measures allocator/escape behavior, not register
@@ -51,7 +53,7 @@ int main(int argc, char **argv) {
         if (!box)
             return 1;
         *box = (int64_t)i;
-        acc += *box;
+        acc = (acc * 33 + *box) % 1000003;
         free(box);
     }
     int64_t end = now_ns();

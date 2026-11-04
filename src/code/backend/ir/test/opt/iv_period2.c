@@ -13,7 +13,7 @@ static size_t count_op(const nyr_func_t *f, nyr_op_t op) {
 }
 
 static bool build_periodic_sum(nyr_func_t *f, int64_t trips, int64_t step,
-                               int64_t offset) {
+                               int64_t offset, bool inverted_guard) {
   nyr_opt_begin(f);
   int trip_limit = nyr_opt_const(f, trips * step);
   int zero = nyr_opt_const(f, 0);
@@ -27,21 +27,19 @@ static bool build_periodic_sum(nyr_func_t *f, int64_t trips, int64_t step,
   nyr_opt_phi(f, -1, zero, 11, zero);
   int accumulator = f->next_value;
   nyr_opt_phi(f, -1, zero, 11, zero);
-  int keep_going = nyr_opt_cmp(f, iv, trip_limit, NYIR_CMP_LT);
-  nyr_opt_br_if(f, keep_going, 11);
-  nyr_opt_br(f, 12);
+  int source_guard = nyr_opt_cmp(f, iv, trip_limit, NYIR_CMP_LT);
+  /*
+   * Exercise the front-end form cmp(i, bound) != 0 used by counted loops.
+   */
+  int keep_going = nyr_opt_cmp(f, source_guard, zero,
+                               inverted_guard ? NYIR_CMP_EQ : NYIR_CMP_NE);
+  nyr_opt_br_if(f, keep_going, inverted_guard ? 12 : 11);
+  nyr_opt_br(f, inverted_guard ? 11 : 12);
   nyr_opt_label(f, 11);
   int sum = nyr_opt_binop(f, NYIR_ADD_I64, iv, offset_value);
   int parity = nyr_opt_binop(f, NYIR_AND_I64, sum, mask);
   int is_odd = nyr_opt_cmp(f, parity, zero, NYIR_CMP_NE);
-  int selected = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_SELECT_I64,
-                                            .dst = -1,
-                                            .a = is_odd,
-                                            .b = when_odd,
-                                            .c = when_even,
-                                            .d = -1,
-                                            .e = -1,
-                                            .f = -1});
+  int selected = nyr_opt_emit_abc(f, NYIR_SELECT_I64, is_odd, when_odd, when_even);
   int next_accumulator = nyr_opt_binop(f, NYIR_ADD_I64, accumulator, selected);
   int step_value = nyr_opt_const(f, step);
   int next_iv = nyr_opt_binop(f, NYIR_ADD_I64, iv, step_value);
@@ -87,14 +85,7 @@ static bool build_periodic_sum_with_early_exit(nyr_func_t *f) {
   nyr_opt_label(f, 14);
   int parity = nyr_opt_binop(f, NYIR_AND_I64, iv, mask);
   int is_odd = nyr_opt_cmp(f, parity, zero, NYIR_CMP_NE);
-  int selected = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_SELECT_I64,
-                                            .dst = -1,
-                                            .a = is_odd,
-                                            .b = when_odd,
-                                            .c = when_even,
-                                            .d = -1,
-                                            .e = -1,
-                                            .f = -1});
+  int selected = nyr_opt_emit_abc(f, NYIR_SELECT_I64, is_odd, when_odd, when_even);
   int next_accumulator = nyr_opt_binop(f, NYIR_ADD_I64, accumulator, selected);
   int one = nyr_opt_const(f, 1);
   int next_iv = nyr_opt_binop(f, NYIR_ADD_I64, iv, one);
@@ -117,9 +108,10 @@ static bool build_periodic_sum_with_early_exit(nyr_func_t *f) {
 }
 
 static bool run_case(const char *name, int64_t trips, int64_t step,
-                     int64_t offset, int64_t expected, bool should_fold) {
+                     int64_t offset, int64_t expected, bool should_fold,
+                     bool inverted_guard) {
   nyr_func_t f;
-  if (!build_periodic_sum(&f, trips, step, offset)) {
+  if (!build_periodic_sum(&f, trips, step, offset, inverted_guard)) {
     nyr_ir_func_free(&f);
     return false;
   }
@@ -163,13 +155,14 @@ static bool run_early_exit_case(void) {
 }
 
 int main(void) {
-  return run_case("iv-period2/even-offset-even-trip", 6, 1, 0, 894, true) &&
+  return run_case("iv-period2/even-offset-even-trip", 6, 1, 0, 894, true,
+                  false) &&
                  run_case("iv-period2/odd-offset-even-trip", 6, 1, 1, 894,
-                          true) &&
+                          true, true) &&
                  run_case("iv-period2/odd-trip-rejected", 5, 1, 0, 794,
-                          false) &&
+                          false, false) &&
                  run_case("iv-period2/even-step-rejected", 6, 2, 1, 600,
-                          false) &&
+                          false, false) &&
                  run_early_exit_case()
              ? 0
              : 1;

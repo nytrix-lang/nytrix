@@ -1,0 +1,69 @@
+shape bare_runtime_operation_matrix {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["bare", "aot", "runtime-ops", "regression"]
+  template ny-test-case
+  expect compile_and_run
+  ci windows-skip
+  source ny <<'NY'
+use core.os (file_exists, file_remove, file_write, pid, run_capture, temp_dir)
+
+def compiler = env("NYTRIX_NY_FULL_BIN")
+def stem = temp_dir() + "/ny-bare-ops-" + to_str(pid())
+def input = stem + ".ny"
+def program =
+    "extern fn intstr(int n) str as \"rt_i64_to_cstr_raw\"\n" +
+    "extern fn floatstr(float n) str as \"rt_f64_to_cstr_raw\"\n" +
+    "extern fn anystr(ptr n) str as \"rt_any_to_cstr\"\n" +
+    "extern fn word_tag(int n) ptr as \"rt_tag\"\n" +
+    "extern fn float_bits(float n) int as \"rt_f64_bits\"\n" +
+    "extern fn float_box(int bits) ptr as \"rt_flt_box_val\"\n" +
+    "extern fn replace(ptr s, ptr old, ptr replacement) str as \"rt_cstr_replace\"\n" +
+    "extern fn slice(ptr s, int begin, int end) str as \"rt_cstr_slice\"\n" +
+    "extern fn new_builder(ptr initial) ptr as \"rt_cstr_builder_new\"\n" +
+    "extern fn builder_add(ptr builder, ptr suffix) ptr as \"rt_cstr_builder_append\"\n" +
+    "extern fn known(ptr builder, ptr suffix, int length) ptr as \"rt_cstr_builder_append_known\"\n" +
+    "extern fn builder_repeat(ptr builder, ptr suffix, int length, int count) ptr as \"rt_cstr_builder_repeat_known\"\n" +
+    "extern fn finish(ptr builder) str as \"rt_cstr_builder_finalize\"\n" +
+    "fn strings() int {\n" +
+    "  def b = new_builder('base')\n" +
+    "  builder_add(b, '-')\n" +
+    "  known(b, 'abcdef', 3)\n" +
+    "  builder_repeat(b, 'xy', 2, 3)\n" +
+    "  print(finish(b))\n" +
+    "  print(intstr(0), intstr(-2147483647))\n" +
+    "  print(floatstr(1.234567), floatstr(0.00000125))\n" +
+    "  print(anystr(word_tag(42)), anystr(word_tag(-42)), anystr(float_box(float_bits(3.5))), anystr(nil), anystr('hello'))\n" +
+    "  print(replace('banana', 'na', 'XYZ'), replace('aaaaa', 'aa', ''), replace('abc', '', 'x'))\n" +
+    "  print(slice('aé🙂z', 1, 3), slice('aé🙂z', -3, -1), slice('abc', 3, 1))\n" +
+    "  print(1.5 + 2)\n" +
+    "  0\n" +
+    "}\n" +
+    "strings()\n"
+def expected = "base-abcxyxyxy\n0 -2147483647\n1.23457 1.25e-06\n" +
+    "42 -42 3.5 nil hello\nbaXYZXYZ a abc\né🙂 é🙂 \n3.5\n"
+assert(is_ok(file_write(input, program)), "write runtime matrix source")
+def vm = run_capture([compiler, input], [], nil, false)
+assert(int(vm.get("code", 127)) == 0 && str(vm.get("stdout", "")) == expected,
+       "VM oracle matches the selected runtime contracts")
+def qemu = run_capture(["sh", "-c", "command -v qemu-aarch64"], [], nil, false)
+for arch in ["x86_64", "aarch64"] {
+  def binary = stem + "-" + arch
+  def compiled = run_capture(["env", "CC=/nonexistent", compiler,
+      "--native-backend=" + arch, "--host-triple=" + arch + "-unknown-linux-gnu",
+      "--mode=bare", "--native-only", "--release", "-o", binary, input], [], nil, false)
+  assert(int(compiled.get("code", 127)) == 0, arch + " legalizes the complete runtime operation matrix")
+  def dynamic = run_capture(["readelf", "-d", binary], [], nil, false)
+  assert(int(dynamic.get("code", 127)) == 0 &&
+         !str(dynamic.get("stdout", "")).contains("NEEDED"), arch + " has no shared runtime dependency")
+  if arch == "x86_64" || int(qemu.get("code", 1)) == 0 {
+    def command = if arch == "aarch64" { ["qemu-aarch64", binary] } else { [binary] }
+    def ran = run_capture(command, [], nil, false)
+    assert(int(ran.get("code", 127)) == 0 && str(ran.get("stdout", "")) == expected,
+           arch + " runtime operations match VM output")
+  }
+  assert(is_ok(file_remove(binary)), "remove generated executable")
+}
+assert(is_ok(file_remove(input)), "remove generated source")
+NY
+}

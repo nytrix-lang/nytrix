@@ -3,7 +3,7 @@ shape i386_elf32_object_link_run_aggregate_argument_and_return {
   generator "native"
   features [native object elf32 i386 aggregate c-abi nyir link-run]
   template ny-test-case
-  flags "--c-frontend=nytrix --native-only --native-backend x86 --nyir-verify -no-std -emit-only -o /tmp/nytrix-native-elf32-aggregate-calls.o"
+  flags "--c-frontend=nytrix --native-only --native-backend x86 --nyr-verify -no-std -emit-only -o /tmp/nytrix-native-elf32-aggregate-calls.o"
   expect object_link_run_i64_60
   source ny <<'NY'
 #include "etc/tests/lang/interop/c/internal-byvalue-param-import.h" link "etc/tests/lang/interop/c/sum-pair.a"

@@ -1,0 +1,51 @@
+shape cli_argument_hints_are_opt_in_and_usage_aware {
+  family "probe-suite"
+  generator "regression"
+  features ["cli", "argv", "diagnostics", "hints"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os (file_remove, file_write, pid, temp_dir)
+use core.os.subprocess (run_capture)
+use core.str as str
+
+def compiler = env("NYTRIX_NY_FULL_BIN")
+def stem = temp_dir() + "/ny-cli-hints-" + to_str(pid())
+def ignored = stem + "-ignored.ny"
+def reader = stem + "-reader.ny"
+assert(is_ok(file_write(ignored, "print(1)\n")), "write ignored-args program")
+assert(is_ok(file_write(reader, "print(argv(1))\n")),
+       "write argument-reading program")
+
+def hinted = run_capture(
+    [compiler, "--warn=all", ignored, "--emit-asm=x"], [], nil, false)
+def hinted_output = str(hinted.get("stdout", ""))
+assert(int(hinted.get("code", 127)) == 0 &&
+       hinted_output.contains("note: '--emit-asm=x' comes after " + ignored),
+       "warn-all reports a compiler-looking post-script option once")
+
+def reader_run = run_capture(
+    [compiler, "--warn=all", reader, "--emit-asm=x"], [], nil, false)
+def reader_output = str(reader_run.get("stdout", ""))
+assert(int(reader_run.get("code", 127)) == 0 &&
+       !reader_output.contains("comes after " + reader),
+       "argument-reading source does not receive a misleading hint")
+
+def suppressed = run_capture(
+    ["env", "NYTRIX_NO_HINTS=1", compiler, "--warn=all", ignored,
+     "--emit-asm=x"], [], nil, false)
+assert(int(suppressed.get("code", 127)) == 0 &&
+       !str(suppressed.get("stdout", "")).contains("comes after " + ignored),
+       "NYTRIX_NO_HINTS silences the hint")
+
+def default_notty = run_capture(
+    [compiler, ignored, "--emit-asm=x"], [], nil, false)
+assert(int(default_notty.get("code", 127)) == 0 &&
+       !str(default_notty.get("stdout", "")).contains("comes after " + ignored),
+       "non-TTY execution does not print unsolicited hints")
+assert(is_ok(file_remove(ignored)) && is_ok(file_remove(reader)),
+       "remove hint fixture sources")
+print("CLI_ARGUMENT_HINTS_OK")
+NY
+}

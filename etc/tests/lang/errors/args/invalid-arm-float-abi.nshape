@@ -6,7 +6,7 @@ shape args-invalid-arm-float-abi {
   expect compile_fail
 
   flags "--arm-float-abi=bogus"
-  expect_message "invalid arm float ABI"
+  expect_message "invalid --arm-float-abi"
   source ny <<'NY'
 use core
 print("ok")

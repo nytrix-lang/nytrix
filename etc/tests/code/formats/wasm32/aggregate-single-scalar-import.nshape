@@ -30,7 +30,7 @@ def host_source =
     "integer_echoed == 6789 && load64_i(integer_returned) == 6789\n" +
     "ok ? 0 : 1"
 def compile = run_capture(
-    [compiler, "--native-backend=wasm", "--native-only", "--nyir-verify",
+    [compiler, "--native-backend=wasm", "--native-only", "--nyr-verify",
      "--emit-asm=" + host_wat, "-no-std", "-emit-only", "-e", host_source],
     [], nil, false)
 def assemble = run_capture(["wat2wasm", host_wat, "-o", host_wasm],

@@ -4,13 +4,19 @@
 ;; - core.os.ui.window.platform.opengl
 ;; - core.os.ui.window
 ;; - core.os.ui.window.consts
-module core.os.ui.window.platform.opengl.egl(create_context, destroy_context, make_current, swap_buffers, swap_interval, get_proc_address, init_display, choose_config, create_surface, destroy_surface, get_config_attrib)
+module core.os.ui.window.platform.opengl.egl(create_context, destroy_context, make_current, swap_buffers, swap_interval, get_proc_address, init_display, choose_config, create_surface, destroy_surface, get_config_attrib, wayland_window_create, wayland_window_destroy, wayland_window_resize)
 use core
 use core.mem (cstr)
 use core.os.ui.window.platform.api as backend_api
 
 #linux {
    #link "libEGL.so"
+   #link "libwayland-egl.so"
+   extern "wayland-egl" {
+      fn wl_egl_window_create(ptr surface, i32 width, i32 height) ptr
+      fn wl_egl_window_destroy(ptr window)
+      fn wl_egl_window_resize(ptr window, i32 width, i32 height, i32 dx, i32 dy)
+   }
    extern "EGL" {
       fn eglGetDisplay(ptr native_display) ptr
       fn eglInitialize(ptr display, ptr major, ptr minor) i32
@@ -27,6 +33,22 @@ use core.os.ui.window.platform.api as backend_api
       fn eglGetProcAddress(ptr name) ptr
    }
 } #endif
+
+fn wayland_window_create(any surface, int width, int height) any {
+   #linux { if surface && width > 0 && height > 0 { return wl_egl_window_create(surface, width, height) } } #endif
+   0
+}
+
+fn wayland_window_destroy(any window) any {
+   #linux { if window { wl_egl_window_destroy(window) } } #endif
+   0
+}
+
+fn wayland_window_resize(any window, int width, int height) any {
+   #linux { if window && width > 0 && height > 0 { wl_egl_window_resize(window, width, height, 0, 0) } } #endif
+   0
+}
+
 #windows {
    fn eglGetDisplay(any _native_display) any {
       "Runs the eglGetDisplay operation."

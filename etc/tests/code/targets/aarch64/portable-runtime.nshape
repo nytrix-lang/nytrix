@@ -72,7 +72,7 @@ def program =
   "(rotate_right32_8(0x0123456789abcd2e) == 0x2e89abcd ? 0 : 1)"
 def emitted = run_capture(
     [compiler, "--native-backend=aarch64", "--native-only", "-O3",
-     "--nyir-verify", "--emit-asm=" + asm_path, "-no-std", "-emit-only",
+     "--nyr-verify", "--emit-asm=" + asm_path, "-no-std", "-emit-only",
      "-e", program],
     [], nil, false)
 def linked = run_capture(
@@ -84,7 +84,7 @@ def execution = run_qemu("qemu-aarch64", exe_path)
 def checked_asm = stem + "-checked.s"
 def checked_exe = stem + "-checked"
 def checked_emit = run_capture(
-    [compiler, "--native-backend=aarch64", "--native-only", "--nyir-verify",
+    [compiler, "--native-backend=aarch64", "--native-only", "--nyr-verify",
      "--emit-asm=" + checked_asm, "-no-std", "-emit-only", "-e",
      "fn divide(int left, int right) int { left / right }\ndivide(9, 3)"],
     [], nil, false)
@@ -97,7 +97,7 @@ def checked_execution = run_qemu("qemu-aarch64", checked_exe)
 def zero_asm = stem + "-zero.s"
 def zero_exe = stem + "-zero"
 def zero_emit = run_capture(
-    [compiler, "--native-backend=aarch64", "--native-only", "--nyir-verify",
+    [compiler, "--native-backend=aarch64", "--native-only", "--nyr-verify",
      "--emit-asm=" + zero_asm, "-no-std", "-emit-only", "-e",
      "fn divide(int left, int right) int { left / right }\n" +
      "mut int divisor = 1\nwhile divisor > 0 { divisor -= 1 }\n" +
@@ -112,7 +112,7 @@ def zero_execution = run_qemu("qemu-aarch64", zero_exe)
 def bswap_asm = stem + "-bswap.s"
 def bswap_exe = stem + "-bswap"
 def bswap_emit = run_capture(
-    [compiler, "--native-backend=aarch64", "--native-only", "--nyir-verify",
+    [compiler, "--native-backend=aarch64", "--native-only", "--nyr-verify",
      "--emit-asm=" + bswap_asm, "-no-std", "-emit-only", "-e",
      "intrinsic(\"bswap.i32\", 0x12345678)"],
     [], nil, false)
@@ -125,7 +125,7 @@ def bswap_execution = run_qemu("qemu-aarch64", bswap_exe)
 def bswap64_asm = stem + "-bswap64.s"
 def bswap64_exe = stem + "-bswap64"
 def bswap64_emit = run_capture(
-    [compiler, "--native-backend=aarch64", "--native-only", "--nyir-verify",
+    [compiler, "--native-backend=aarch64", "--native-only", "--nyr-verify",
      "--emit-asm=" + bswap64_asm, "-no-std", "-emit-only", "-e",
      "intrinsic(\"bswap.i64\", 0x0100000000000000)"],
     [], nil, false)
@@ -138,7 +138,7 @@ def bswap64_execution = run_qemu("qemu-aarch64", bswap64_exe)
 def power_asm = stem + "-power.s"
 def power_emitted = run_capture(
      [compiler, "--no-effect-require-known", "--native-backend=aarch64",
-     "--native-only", "--nyir-verify",
+     "--native-only", "--nyr-verify",
      "--emit-asm=" + power_asm, "-no-std", "-emit-only", "-e",
      "fn power_check() int {\n" +
      "  def positive = 2.0 ** 3.0\n" +
@@ -162,7 +162,7 @@ def runtime_math_object = stem + "-runtime-math.o"
 def runtime_math_compiled = run_capture(
     ["aarch64-linux-gnu-gcc", "-std=c11", "-O2", "-ffunction-sections",
      "-fdata-sections", "-Isrc", "-Isrc/include", "-c",
-     "src/code/lang/runtime/math.c", "-o", runtime_math_object],
+     "src/code/backend/runtime/math.c", "-o", runtime_math_object],
     [], nil, false)
 def power_runtime_exe = stem + "-power-runtime"
 def power_runtime_link = run_capture(
@@ -175,7 +175,7 @@ def power_runtime_execution = run_qemu("qemu-aarch64", power_runtime_exe)
 def sqrt_asm = stem + "-sqrt.s"
 def sqrt_exe = stem + "-sqrt"
 def sqrt_emit = run_capture(
-    [compiler, "--native-backend=aarch64", "--native-only", "--nyir-verify",
+    [compiler, "--native-backend=aarch64", "--native-only", "--nyr-verify",
      "--emit-asm=" + sqrt_asm, "-no-std", "-emit-only", "-e",
      "(sqrt(4.0) == 2.0 ? 1 : 0) + " +
      "(sqrt(9.0) == 3.0 ? 1 : 0)"],
@@ -189,7 +189,7 @@ def sqrt_execution = run_qemu("qemu-aarch64", sqrt_exe)
 def scalar_float_asm = stem + "-scalar-float.s"
 def scalar_float_exe = stem + "-scalar-float"
 def scalar_float_emit = run_capture(
-    [compiler, "--native-backend=aarch64", "--native-only", "--nyir-verify",
+    [compiler, "--native-backend=aarch64", "--native-only", "--nyr-verify",
      "--emit-asm=" + scalar_float_asm, "-no-std", "-emit-only", "-e",
      "@noinline fn check_scalar_float(int choose) int {\n" +
      "  def left64 = choose ? 8.0 : 4.0\n" +
@@ -238,7 +238,7 @@ def scalar_float_execution = run_qemu("qemu-aarch64", scalar_float_exe)
 def panic_asm = stem + "-panic.s"
 def panic_exe = stem + "-panic"
 def panic_emit = run_capture(
-    [compiler, "--native-backend=aarch64", "--native-only", "--nyir-verify",
+    [compiler, "--native-backend=aarch64", "--native-only", "--nyr-verify",
      "--emit-asm=" + panic_asm, "-no-std", "-emit-only", "-e",
      "panic(\"portable static panic\")"],
     [], nil, false)

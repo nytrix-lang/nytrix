@@ -3,7 +3,7 @@
 ;; References:
 ;; - core.math
 module core.math.big(is_bigint, bigint, bigint_from_int, bigint_from_str, bigint_to_str,
-   bigint_add, bigint_sub, bigint_mul, bigint_div, bigint_mod, bigint_cmp,
+   bigint_add, bigint_sub, bigint_mul, bigint_mul_div, bigint_div, bigint_mod, bigint_cmp,
    bigint_eq, bigint_neq, bigint_lt, bigint_le, bigint_gt, bigint_ge,
    bigint_neg, bigint_abs, bigint_clone, bigint_pow, bigint_divmod,
    bigint_bit_length, bigint_to_int, bigint_random, bigint_random_bits,
@@ -98,10 +98,18 @@ fn _big_from_int(int n) bigint { __bigint_from_int(n) }
 
 fn bigint(any x) bigint {
    "Converts an integer, string, or existing bigint to a BigInt object."
-   if __is_bigint(x) || is_bigint(x) { return x }
+   if _big_is_rt(x) { return x }
+   if is_bigint(x) { return x }
    if is_int(x) { return __bigint_from_int(x) }
    if is_str(x) { return bigint_from_str(x) }
    _big_zero()
+}
+
+@inline
+fn _big_runtime_operand(any x) any {
+   if _big_is_rt(x) { return x }
+   if is_int(x) { return x }
+   bigint(x)
 }
 
 fn bigint_from_str(str s) bigint {
@@ -203,16 +211,16 @@ fn _big_sub_abs(any a, any b) any {
 @inline
 fn bigint_add(any a, any b) bigint {
    "Adds two BigInts together."
-   def lhs = is_int(a) ? a : bigint(a)
-   def rhs = is_int(b) ? b : bigint(b)
+   def lhs = _big_runtime_operand(a)
+   def rhs = _big_runtime_operand(b)
    __bigint_add(lhs, rhs)
 }
 
 @inline
 fn bigint_sub(any a, any b) bigint {
    "Subtracts BigInt `b` from BigInt `a`."
-   def lhs = is_int(a) ? a : bigint(a)
-   def rhs = is_int(b) ? b : bigint(b)
+   def lhs = _big_runtime_operand(a)
+   def rhs = _big_runtime_operand(b)
    __bigint_sub(lhs, rhs)
 }
 
@@ -263,6 +271,12 @@ fn bigint_mul(any a, any b) bigint {
    def lhs = is_int(a) ? a : bigint(a)
    def rhs = is_int(b) ? b : bigint(b)
    __bigint_mul(lhs, rhs)
+}
+
+@inline
+fn bigint_mul_div(bigint a, int multiplier, int divisor) bigint {
+   "Computes(a * multiplier) / divisor with BigInt truncation toward zero."
+   __bigint_mul_div_small(a, multiplier, divisor)
 }
 
 fn _big_mul_small(any a, int m) any {
@@ -523,17 +537,22 @@ fn bigint_nth_root(bigint a, int n) bigint {
 }
 
 impl bigint {
-   fn add(bigint a, bigint b) bigint { bigint_add(a, b) }
+   @inline
+   fn add(bigint a, bigint b) bigint { __bigint_add(a, b) }
    fn add_int(bigint a, int b) bigint { bigint_add(a, b) }
-   fn sub(bigint a, bigint b) bigint { bigint_sub(a, b) }
+   @inline
+   fn sub(bigint a, bigint b) bigint { __bigint_sub(a, b) }
    fn sub_int(bigint a, int b) bigint { bigint_sub(a, b) }
    fn mul(bigint a, bigint b) bigint { bigint_mul(a, b) }
    fn mul_int(bigint a, int b) bigint { bigint_mul(a, b) }
-   fn div(bigint a, bigint b) bigint { bigint_div(a, b) }
+   @inline
+   fn div(bigint a, bigint b) bigint { __bigint_div(a, b) }
    fn div_int(bigint a, int b) bigint { bigint_div(a, b) }
-   fn rem(bigint a, bigint b) bigint { bigint_mod(a, b) }
+   @inline
+   fn rem(bigint a, bigint b) bigint { __bigint_mod(a, b) }
    fn rem_int(bigint a, int b) bigint { bigint_mod(a, b) }
-   fn pow(bigint a, bigint b) bigint { bigint_pow(a, b) }
+   @inline
+   fn pow(bigint a, bigint b) bigint { __bigint_pow(a, b) }
    fn pow_int(bigint a, int b) bigint { bigint_pow(a, b) }
    fn xor(bigint a, bigint b) bigint { bigint_xor(a, b) }
    fn xor_int(bigint a, int b) bigint { bigint_xor(a, bigint(b)) }
@@ -543,7 +562,8 @@ impl bigint {
    fn and_int(bigint a, int b) bigint { bigint_and(a, bigint(b)) }
    fn or(bigint a, bigint b) bigint { bigint_or(a, b) }
    fn or_int(bigint a, int b) bigint { bigint_or(a, bigint(b)) }
-   fn cmp(bigint a, bigint b) int { bigint_cmp(a, b) }
+   @inline
+   fn cmp(bigint a, bigint b) int { __bigint_cmp(a, b) }
    fn eq(bigint a, bigint b) bool { bigint_eq(a, b) }
    fn ne(bigint a, bigint b) bool { bigint_neq(a, b) }
    fn lt(bigint a, bigint b) bool { bigint_lt(a, b) }

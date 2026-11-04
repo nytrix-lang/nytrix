@@ -5,18 +5,12 @@
 ;; - core.os.ui.assets.viewer
 module core.os.ui.render.viewer.engine.cli(argv_list, parse_options, startup_plan, option_takes_value)
 use core
+use core.os.args as process_args
 use core.str as str
 
 fn argv_list() list {
    "Returns process argv as a Nytrix list."
-   mut out = []
-   mut i = 0
-   def n = argc()
-   while i < n {
-      out = out.append(argv(i))
-      i += 1
-   }
-   out
+   process_args.args()
 }
 
 fn _value(args, i) str {

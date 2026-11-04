@@ -1,0 +1,27 @@
+shape nyir_argv_empty_boundary {
+  family "runtime-native"
+  generator "native"
+  features ["native", "nyir", "runtime", "argv"]
+  template ny-test-case
+  flags "--native --run"
+  expect compile_and_run
+  expect_exit 0
+  source ny <<'NY'
+use core.os.args as osargs
+assert(is_str(argv(-1)) && argv(-1) == "", "primitive argv negative boundary")
+assert(is_str(osargs.argv(1)) && osargs.argv(1) == "", "core.os.args argv upper boundary")
+assert(osargs.positionals_from(["ny", "alpha", "beta"]) == ["alpha", "beta"],
+   "positionals retain arguments without a separator")
+assert(osargs.positionals_from(["ny", "alpha", "--", "raw"]) == ["raw"],
+   "positionals discard pre-separator arguments")
+assert(osargs.flag_from(["ny", "--feature", "--no-feature"], "--feature") == false,
+   "last negated flag wins")
+assert(osargs.value_from(["ny", "-o=out"], "-o", "") == "out",
+   "short option equals value")
+assert(osargs.value_from(["ny", "--input", "--verbose"], "--input", "default") == "default",
+   "a value helper does not consume the next flag")
+assert(osargs.value_from(["ny", "--input", "-"], "--input", "default") == "-",
+   "a lone hyphen remains a valid option value")
+0
+NY
+}

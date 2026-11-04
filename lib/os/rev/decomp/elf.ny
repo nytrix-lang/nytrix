@@ -27,6 +27,12 @@ def SHF_ALLOC = 2
 def SHF_EXECINSTR = 4
 mut _smt_archetype_proof_cache = dict()
 
+fn _has_analysis_header(any source) bool {
+   if !is_dict(source) { return false }
+   def h = source.get("header", dict())
+   is_dict(h) && h.len > 0
+}
+
 fn _elf_safe_name(str n, str fallback) str {
    if n.len == 0 { return fallback }
    mut out = ""
@@ -114,6 +120,28 @@ fn elf_header(any source) dict {
       "shstrndx": _u16(b, 50, le)}
 }
 
+fn _section_record(str b, int off, int i, bool le, int bits) dict {
+   def name_off = _u32(b, off, le)
+   def section_type = _u32(b, off + 4, le)
+   if bits == 64 {
+      def flags = _u64(b, off + 8, le)
+      def addr = _u64(b, off + 16, le)
+      def file_off = _u64(b, off + 24, le)
+      def size = _u64(b, off + 32, le)
+      def link = _u32(b, off + 40, le)
+      def info = _u32(b, off + 44, le)
+      def align = _u64(b, off + 48, le)
+      def entsize = _u64(b, off + 56, le)
+      return {"index": i, "name_off": name_off, "type": section_type, "flags": flags,
+         "addr": addr, "offset": file_off, "size": size, "link": link, "info": info,
+         "align": align, "entsize": entsize}
+   }
+   {"index": i, "name_off": name_off, "type": section_type,
+      "flags": _u32(b, off + 8, le), "addr": _u32(b, off + 12, le), "offset": _u32(b, off + 16, le),
+      "size": _u32(b, off + 20, le), "link": _u32(b, off + 24, le), "info": _u32(b, off + 28, le),
+      "align": _u32(b, off + 32, le), "entsize": _u32(b, off + 36, le)}
+}
+
 fn _section_table(str b, dict h) list {
    if !h.get("ok", false) { return [] }
    def le = h.get("little", true)
@@ -127,17 +155,7 @@ fn _section_table(str b, dict h) list {
    while i < n {
       def off = shoff + i * entsz
       if off + entsz > b.len { break }
-      if bits == 64 {
-         raw = raw.append({"index": i, "name_off": _u32(b, off, le), "type": _u32(b, off + 4, le),
-               "flags": _u64(b, off + 8, le), "addr": _u64(b, off + 16, le), "offset": _u64(b, off + 24, le),
-               "size": _u64(b, off + 32, le), "link": _u32(b, off + 40, le), "info": _u32(b, off + 44, le),
-               "align": _u64(b, off + 48, le), "entsize": _u64(b, off + 56, le)})
-      } else {
-         raw = raw.append({"index": i, "name_off": _u32(b, off, le), "type": _u32(b, off + 4, le),
-               "flags": _u32(b, off + 8, le), "addr": _u32(b, off + 12, le), "offset": _u32(b, off + 16, le),
-               "size": _u32(b, off + 20, le), "link": _u32(b, off + 24, le), "info": _u32(b, off + 28, le),
-               "align": _u32(b, off + 32, le), "entsize": _u32(b, off + 36, le)})
-      }
+      raw = raw.append(_section_record(b, off, i, le, bits))
       i += 1
    }
    def shidx = int(h.get("shstrndx", -1))
@@ -168,9 +186,12 @@ fn sections(any source) list {
 fn section(any source, str name) dict {
    "Find one ELF section by name."
    def ss = is_dict(source) && source.contains("sections") ? source.get("sections", []) : sections(source)
+   def wanted = to_str(name)
    mut i = 0
    while i < ss.len {
-      if ss[i].get("name", "") == name { return ss[i] }
+      def row = ss[i]
+      def found_name = to_str(row.get("name", ""))
+      if found_name == wanted { return row }
       i += 1
    }
    dict()
@@ -183,10 +204,45 @@ fn section_bytes(any source, str name) str {
    _slice(b, int(s.get("offset", 0)), int(s.get("size", 0)))
 }
 
+@returns_owned
+fn _segment_record(str b, int off, int i, bool le, int bits) dict {
+   def segment_type = _u32(b, off, le)
+   if bits == 64 {
+      def flags = _u32(b, off + 4, le)
+      def file_off = _u64(b, off + 8, le)
+      def vaddr = _u64(b, off + 16, le)
+      def filesz = _u64(b, off + 32, le)
+      def memsz = _u64(b, off + 40, le)
+      def align = _u64(b, off + 48, le)
+      return {"index": i, "type": segment_type, "flags": flags, "offset": file_off,
+         "vaddr": vaddr, "filesz": filesz, "memsz": memsz, "align": align,
+         "load": segment_type == PT_LOAD}
+   }
+   def file_off = _u32(b, off + 4, le)
+   def vaddr = _u32(b, off + 8, le)
+   def filesz = _u32(b, off + 16, le)
+   def memsz = _u32(b, off + 20, le)
+   def flags = _u32(b, off + 24, le)
+   def align = _u32(b, off + 28, le)
+   {"index": i, "type": segment_type, "offset": file_off, "vaddr": vaddr,
+      "filesz": filesz, "memsz": memsz, "flags": flags, "align": align,
+      "load": segment_type == PT_LOAD}
+}
+
+@returns_owned
 fn segments(any source) list {
    "Return segment/load records. Loaded records return their cached segments;
    raw sources are parsed as ELF(or the containing format's loader)."
-   if is_dict(source) && source.contains("segments") { return source.get("segments", []) }
+   if is_dict(source) && source.contains("segments") {
+      mut copied = []
+      def existing = source.get("segments", [])
+      mut index = 0
+      while index < existing.len {
+         copied = copied.append(dict_clone(existing[index]))
+         index += 1
+      }
+      return copied
+   }
    def b = _source_data(source)
    def h = elf_header(b)
    if !h.get("ok", false) { return [] }
@@ -200,21 +256,39 @@ fn segments(any source) list {
    while i < n {
       def off = phoff + i * entsz
       if off + entsz > b.len { break }
-      if bits == 64 {
-         out = out.append({"index": i, "type": _u32(b, off, le), "flags": _u32(b, off + 4, le),
-               "offset": _u64(b, off + 8, le), "vaddr": _u64(b, off + 16, le),
-               "filesz": _u64(b, off + 32, le), "memsz": _u64(b, off + 40, le), "align": _u64(b, off + 48, le),
-               "load": _u32(b, off, le) == PT_LOAD})
-      } else {
-         out = out.append({"index": i, "type": _u32(b, off, le), "offset": _u32(b, off + 4, le),
-               "vaddr": _u32(b, off + 8, le), "filesz": _u32(b, off + 16, le), "memsz": _u32(b, off + 20, le),
-               "flags": _u32(b, off + 24, le), "align": _u32(b, off + 28, le), "load": _u32(b, off, le) == PT_LOAD})
-      }
+      out = out.append(_segment_record(b, off, i, le, bits))
       i += 1
    }
    out
 }
 
+fn _symbol_info(str b, int off, int bits) int {
+   bits == 64 ? load8(b, off + 4) : load8(b, off + 12)
+}
+
+fn _symbol_shndx(str b, int off, bool le, int bits) int {
+   bits == 64 ? _u16(b, off + 6, le) : _u16(b, off + 14, le)
+}
+
+fn _symbol_value(str b, int off, bool le, int bits) int {
+   bits == 64 ? _u64(b, off + 8, le) : _u32(b, off + 4, le)
+}
+
+fn _symbol_size(str b, int off, bool le, int bits) int {
+   bits == 64 ? _u64(b, off + 16, le) : _u32(b, off + 8, le)
+}
+
+@returns_owned
+fn _symbol_record(str b, dict h, int off, int idx, str nm, any source_name) dict {
+   def le = h.get("little", true)
+   def bits = h.get("bits", 64)
+   {"index": idx, "name": nm, "value": _symbol_value(b, off, le, bits),
+      "size": _symbol_size(b, off, le, bits), "shndx": _symbol_shndx(b, off, le, bits),
+      "bind": _sym_bind(_symbol_info(b, off, bits)),
+      "type": _sym_type(_symbol_info(b, off, bits)), "source": source_name}
+}
+
+@returns_owned
 fn _symbols_from_section(str b, dict h, list ss, dict symsec) list {
    def le = h.get("little", true)
    def bits = h.get("bits", 64)
@@ -232,25 +306,10 @@ fn _symbols_from_section(str b, dict h, list ss, dict symsec) list {
    mut idx = 0
    while off + ent <= b.len && off + ent <= end {
       def name_off = _u32(b, off, le)
-      mut info = 0
-      mut shndx = 0
-      mut value = 0
-      mut size = 0
-      if bits == 64 {
-         info = load8(b, off + 4)
-         shndx = _u16(b, off + 6, le)
-         value = _u64(b, off + 8, le)
-         size = _u64(b, off + 16, le)
-      } else {
-         value = _u32(b, off + 4, le)
-         size = _u32(b, off + 8, le)
-         info = load8(b, off + 12)
-         shndx = _u16(b, off + 14, le)
-      }
       def nm = tab_base >= 0 ? _cstring(b, tab_base + name_off) : ""
-      if nm.len > 0 || value != 0 {
-         out = out.append({"index": idx, "name": nm, "value": value, "size": size, "shndx": shndx,
-               "bind": _sym_bind(info), "type": _sym_type(info), "source": symsec.get("name", "")})
+      def symbol = _symbol_record(b, h, off, idx, nm, symsec.get("name", ""))
+      if nm.len > 0 || symbol.get("value", 0) != 0 {
+         out = out.append(symbol)
       }
       off += ent
       idx += 1
@@ -258,10 +317,20 @@ fn _symbols_from_section(str b, dict h, list ss, dict symsec) list {
    out
 }
 
+@returns_owned
 fn symbols(any source) list {
    "Return symbol records. Loaded records return their cached symbols; raw
    sources are parsed as ELF(or the containing format's loader)."
-   if is_dict(source) && source.contains("symbols") { return source.get("symbols", []) }
+   if is_dict(source) && source.contains("symbols") {
+      mut copied = []
+      def existing = source.get("symbols", [])
+      mut index = 0
+      while index < existing.len {
+         copied = copied.append(dict_clone(existing[index]))
+         index += 1
+      }
+      return copied
+   }
    def b = _source_data(source)
    def h = elf_header(b)
    def ss = _section_table(b, h)
@@ -273,7 +342,12 @@ fn symbols(any source) list {
       if t == SHT_SYMTAB || t == SHT_DYNSYM {
          def part = _symbols_from_section(b, h, ss, s)
          mut j = 0
-         while j < part.len { out = out.append(part[j]) j += 1 }
+         while j < part.len {
+            ;; Clone into the result list: records returned by the temporary
+            ;; section list do not remain valid after `part` leaves scope.
+            out = out.append(dict_clone(part[j]))
+            j += 1
+         }
       }
       i += 1
    }
@@ -291,15 +365,26 @@ fn _display_symbol(str name) str {
    base
 }
 
+@returns_owned
 fn functions(any source) list {
    "Return recovered functions for loaded binaries, or function symbols for raw sources."
-   if is_dict(source) && source.contains("functions") { return source.get("functions", []) }
+   if is_dict(source) && source.contains("functions") {
+      mut copied = []
+      def existing = source.get("functions", [])
+      mut index = 0
+      while index < existing.len {
+         copied = copied.append(dict_clone(existing[index]))
+         index += 1
+      }
+      return copied
+   }
    mut out = []
    def sy = is_dict(source) && source.contains("symbols") ? source.get("symbols", []) : symbols(source)
    mut i = 0
    while i < sy.len {
       def s = sy[i]
-      if s.get("type", "") == "function" && int(s.get("value", 0)) > 0 {
+      if str(s.get("type", "")) == "function" &&
+      int(s.get("value", 0)) > 0 {
          out = out.append(s)
       }
       i += 1
@@ -380,7 +465,7 @@ fn _extent_from_functions(dict bin, dict f, list fs, int max_bytes=4096) dict {
 
 fn function_extent(any source, any fn_or_addr, int max_bytes=4096) dict {
    "Return one inferred function extent as `{start,end,size,inferred}`."
-   def bin = is_dict(source) && source.contains("header") ? source : load(to_str(source))
+   def bin = _has_analysis_header(source) ? source : load(to_str(source))
    def fs = bin.contains("functions") ? bin.get("functions", []) : recover_functions(bin)
    if is_dict(fn_or_addr) {
       if fn_or_addr.len == 0 { return {"ok": false, "reason": "function_not_found", "start": 0, "end": 0, "size": 0} }
@@ -402,7 +487,7 @@ fn function_extent(any source, any fn_or_addr, int max_bytes=4096) dict {
 
 fn function_ranges(any source) list {
    "Return compact inferred function ranges for UI/reversing scripts."
-   def bin = is_dict(source) && source.contains("header") ? source : load(to_str(source))
+   def bin = _has_analysis_header(source) ? source : load(to_str(source))
    def fs = is_dict(source) && source.contains("functions") ? source.get("functions", []) : recover_functions(source)
    mut out = []
    mut i = 0
@@ -413,24 +498,33 @@ fn function_ranges(any source) list {
    out
 }
 
-fn _put_func(dict seen, list out, str name, int addr, int size, str source) list {
-   if addr <= 0 || seen.get(to_str(addr), false) { return [seen, out] }
-   seen = seen.set(to_str(addr), true)
+@returns_owned
+fn _put_func(dict seen, list out, str name, int addr, int size, str source) dict {
+   mut copied_seen = dict_clone(seen)
+   mut copied_out = []
+   mut i = 0
+   while i < out.len {
+      copied_out = copied_out.append(dict_clone(out[i]))
+      i += 1
+   }
+   if addr <= 0 || copied_seen.get(to_str(addr), false) {
+      return {"seen": copied_seen, "out": copied_out}
+   }
+   copied_seen = copied_seen.set(to_str(addr), true)
    def rec = {"name": _elf_safe_name(name, "sub_" + str.to_hex(addr, 0)), "value": addr, "size": size, "type": "function", "source": source}
    mut sorted = []
    mut inserted = false
-   mut i = 0
-   while i < out.len {
-      if !inserted && int(out[i].get("value", out[i].get("addr", 0))) > addr {
-         sorted = sorted.append(rec)
+   i = 0
+   while i < copied_out.len {
+      if !inserted && int(copied_out[i].get("value", copied_out[i].get("addr", 0))) > addr {
+         sorted = sorted.append(dict_clone(rec))
          inserted = true
       }
-      sorted = sorted.append(out[i])
+      sorted = sorted.append(copied_out[i])
       i += 1
    }
-   if !inserted { sorted = sorted.append(rec) }
-   out = sorted
-   [seen, out]
+   if !inserted { sorted = sorted.append(dict_clone(rec)) }
+   {"seen": copied_seen, "out": sorted}
 }
 
 fn _x86_recovery_padding_byte(int c) bool {
@@ -458,13 +552,13 @@ fn _x86_rip_entry_pattern(str data, int off, int pos, int cap) bool {
    modrm == 0x05 || modrm == 0x35 || modrm == 0x3d
 }
 
-fn _recover_x86_prologue_functions(dict bin, dict seen0, list out0, dict sec, int scan_bytes) list {
+fn _recover_x86_prologue_functions(dict bin, dict seen0, list out0, dict sec, int scan_bytes) dict {
    def fam = dasm.arch_family(arch(bin))
-   if fam != "x86" { return [seen0, out0] }
+   if fam != "x86" { return {"seen": seen0, "out": out0} }
    def data = bin.get("data", "")
    def off = int(sec.get("offset", 0))
    def size = min(int(sec.get("size", 0)), scan_bytes)
-   if off < 0 || off >= data.len || size <= 0 { return [seen0, out0] }
+   if off < 0 || off >= data.len || size <= 0 { return {"seen": seen0, "out": out0} }
    def cap = min(size, data.len - off)
    def base = int(sec.get("addr", 0))
    mut seen = seen0
@@ -497,19 +591,20 @@ fn _recover_x86_prologue_functions(dict bin, dict seen0, list out0, dict sec, in
       if pro {
          def addr = base + pstart
          def add = _put_func(seen, out, "sub_" + str.to_hex(addr, 0), addr, 0, "prologue")
-         seen = add[0]
-         out = add[1]
+         seen = add.get("seen", dict())
+         out = add.get("out", [])
       }
       i += 1
    }
-   [seen, out]
+   {"seen": seen, "out": out}
 }
 
+@returns_owned
 fn recover_functions(any source, int scan_bytes=65536) list {
    "Recover function candidates from symbols, entry, executable sections, and direct call targets.
    This is intentionally conservative: it creates useful Nytrix decompile entry
    points without inventing fake function bodies."
-   def bin = is_dict(source) && source.contains("header") ? source : load(to_str(source))
+   def bin = _has_analysis_header(source) ? source : load(to_str(source))
    mut seen = dict()
    mut out = []
    def fs = bin.get("functions", [])
@@ -517,14 +612,14 @@ fn recover_functions(any source, int scan_bytes=65536) list {
    while i < fs.len {
       def f = fs[i]
       def added = _put_func(seen, out, _display_symbol(f.get("name", "")), int(f.get("value", 0)), int(f.get("size", 0)), "symbol")
-      seen = added[0]
-      out = added[1]
+      seen = added.get("seen", dict())
+      out = added.get("out", [])
       i += 1
    }
    def e = entry(bin)
    def add_entry = _put_func(seen, out, "entry_" + str.to_hex(e, 0), e, 0, "entry")
-   seen = add_entry[0]
-   out = add_entry[1]
+   seen = add_entry.get("seen", dict())
+   out = add_entry.get("out", [])
    def xs = executable_sections(bin)
    i = 0
    while i < xs.len {
@@ -533,11 +628,11 @@ fn recover_functions(any source, int scan_bytes=65536) list {
       def sname = s.get("name", "")
       if sname != ".plt" && sname != ".plt.sec" && sname != ".got.plt" {
          def add_sec = _put_func(seen, out, sname + "_start", start, int(s.get("size", 0)), "exec_section")
-         seen = add_sec[0]
-         out = add_sec[1]
+         seen = add_sec.get("seen", dict())
+         out = add_sec.get("out", [])
          def pros = _recover_x86_prologue_functions(bin, seen, out, s, scan_bytes)
-         seen = pros[0]
-         out = pros[1]
+         seen = pros.get("seen", dict())
+         out = pros.get("out", [])
       }
       def calls = _section_call_targets(bin, s, min(scan_bytes, int(s.get("size", 0))))
       mut j = 0
@@ -546,8 +641,8 @@ fn recover_functions(any source, int scan_bytes=65536) list {
          if ck != "import_plt" && ck != "import_indirect" {
             def ca = int(calls[j].get("target", 0))
             def add_call = _put_func(seen, out, calls[j].get("name", ""), ca, 0, "call_target")
-            seen = add_call[0]
-            out = add_call[1]
+            seen = add_call.get("seen", dict())
+            out = add_call.get("out", [])
          }
          j += 1
       }
@@ -716,13 +811,14 @@ fn _reloc_type_name(int machine, int typ) str {
    }
 }
 
+@returns_owned
 fn _symbols_by_index(list syms) dict {
    mut out = dict()
    mut i = 0
    while i < syms.len {
       def sym = syms[i]
       def key = sym.get("source", "") + ":" + to_str(sym.get("index", -1))
-      out[key] = sym
+      out[key] = dict_clone(sym)
       i += 1
    }
    out
@@ -755,6 +851,25 @@ fn _symbol_by_index(any syms, int idx, str source_name) dict {
    fallback
 }
 
+fn _relocation_info(str b, int off, int bits, bool le) int {
+   bits == 64 ? _u64(b, off + 8, le) : _u32(b, off + 4, le)
+}
+
+fn _relocation_symbol_index(str b, int off, int bits, bool le) int {
+   if bits == 64 {
+      return le ? _u32(b, off + 12, le) : _u32(b, off + 8, le)
+   }
+   bshr(_u32(b, off + 4, le), 8)
+}
+
+fn _relocation_type(str b, int off, int bits, bool le) int {
+   if bits == 64 {
+      return le ? _u32(b, off + 8, le) : _u32(b, off + 12, le)
+   }
+   band(_u32(b, off + 4, le), 255)
+}
+
+@returns_owned
 fn _relocations_from_section(str b, dict h, list ss, any syms, dict relsec) list {
    def le = h.get("little", true)
    def bits = h.get("bits", 64)
@@ -768,24 +883,15 @@ fn _relocations_from_section(str b, dict h, list ss, any syms, dict relsec) list
    def end = off + int(relsec.get("size", 0))
    mut idx = 0
    while off + ent <= b.len && off + ent <= end {
-      mut r_off = 0
-      mut int r_info = 0
-      mut addend = 0
-      if bits == 64 {
-         r_off = _u64(b, off, le)
-         r_info = _u64(b, off + 8, le)
-         if rela { addend = _u64(b, off + 16, le) }
-      } else {
-         r_off = _u32(b, off, le)
-         r_info = _u32(b, off + 4, le)
-         if rela { addend = _u32(b, off + 8, le) }
-      }
-      def sym_idx = bits == 64 ? band(bshr(r_info, 32), 0xffffffff) : bshr(r_info, 8)
-      def typ = bits == 64 ? band(r_info, 0xffffffff) : band(r_info, 255)
-      def sym = _symbol_by_index(syms, sym_idx, sym_source)
+      def r_off = bits == 64 ? _u64(b, off, le) : _u32(b, off, le)
+      def packed_info = _relocation_info(b, off, bits, le)
+      def addend = rela ? (bits == 64 ? _u64(b, off + 16, le) : _u32(b, off + 8, le)) : 0
+      def relocation_symbol = _relocation_symbol_index(b, off, bits, le)
+      def relocation_type = _relocation_type(b, off, bits, le)
+      def sym = _symbol_by_index(syms, relocation_symbol, sym_source)
       out = out.append({"index": idx, "section": relsec.get("name", ""), "offset": r_off,
-            "info": r_info, "sym_index": sym_idx, "type": typ,
-            "type_name": _reloc_type_name(int(h.get("machine_id", 0)), typ),
+            "info": packed_info, "sym_index": relocation_symbol, "type": relocation_type,
+            "type_name": _reloc_type_name(int(h.get("machine_id", 0)), relocation_type),
             "symbol": sym.get("name", ""), "symbol_record": sym, "addend": addend,
             "rela": rela})
       off += ent
@@ -794,6 +900,7 @@ fn _relocations_from_section(str b, dict h, list ss, any syms, dict relsec) list
    out
 }
 
+@returns_owned
 fn relocations(any source) list {
    "Return ELF relocation records with symbol names when available."
    def b = _source_data(source)
@@ -809,7 +916,11 @@ fn relocations(any source) list {
       if t == SHT_RELA || t == SHT_REL {
          def part = _relocations_from_section(b, h, ss, sy_index, s)
          mut j = 0
-         while j < part.len { out = out.append(part[j]) j += 1 }
+         while j < part.len {
+            ;; Records come from a temporary per-section list.
+            out = out.append(dict_clone(part[j]))
+            j += 1
+         }
       }
       i += 1
    }
@@ -854,7 +965,7 @@ fn _plt_import_sites(dict bin) list {
 
 fn import_sites(any source) list {
    "Return best-effort import call sites such as x86_64 PLT stubs."
-   def bin = is_dict(source) && source.contains("header") ? source : load(to_str(source))
+   def bin = _has_analysis_header(source) ? source : load(to_str(source))
    _plt_import_sites(bin)
 }
 
@@ -880,6 +991,7 @@ fn _detect_format(str data) str {
    "unknown"
 }
 
+@returns_owned
 fn load(str p, any opts=dict()) dict {
    "Load and analyze a binary file(ELF, PE, or Mach-O). The returned record is
    intentionally compact and stable for scripts, UI panels, and later
@@ -907,36 +1019,39 @@ fn load(str p, any opts=dict()) dict {
          "tools": tool_status()}
    }
    if bin.get("ok", false) && bool(opts.get("recover_functions", true)) {
-      bin = bin.set("functions", recover_functions(bin, int(opts.get("scan_bytes", 65536))))
+      def recovered = recover_functions(bin, int(opts.get("scan_bytes", 65536)))
+      if recovered.len > 0 && is_dict(recovered[0]) {
+         bin = bin.set("functions", recovered)
+      }
    }
    bin
 }
 
 fn analyze(any source, any opts=dict()) dict {
    "Load a path or return an existing ELF analysis record unchanged."
-   if is_dict(source) && source.contains("header") { return source }
+   if _has_analysis_header(source) { return source }
    load(to_str(source), opts)
 }
 
 fn entry(any source) int {
    "Return the binary entry point."
-   def h = is_dict(source) && source.contains("header") ? source.get("header", dict()) : elf_header(source)
+   def h = _has_analysis_header(source) ? source.get("header", dict()) : elf_header(source)
    int(h.get("entry", 0))
 }
 
 fn arch(any source) str {
    "Return normalized architecture name."
-   def h = is_dict(source) && source.contains("header") ? source.get("header", dict()) : elf_header(source)
+   def h = _has_analysis_header(source) ? source.get("header", dict()) : elf_header(source)
    h.get("machine", "unknown")
 }
 
 fn arch_profile(any source) dict {
    "Return architecture metadata shared by disassembly, lifting, and emulation."
-   def h = is_dict(source) && source.contains("header") ? source.get("header", dict()) : elf_header(source)
+   def h = _has_analysis_header(source) ? source.get("header", dict()) : elf_header(source)
    def a = dasm.normalize_arch(h.get("machine", "unknown"))
    {"arch": a, "family": dasm.arch_family(a), "bits": int(h.get("bits", a == "aarch64" || a == "x86_64" ? 64 : 32)),
       "machine": h.get("machine", "unknown"), "machine_id": h.get("machine_id", 0),
-      "entry": int(h.get("entry", 0)), "disassembler": "capstone"}
+      "entry": int(h.get("entry", 0)), "disassembler": "nytrix-x86-64"}
 }
 
 fn function_at(any source, int addr) dict {
@@ -1006,7 +1121,7 @@ fn _offset_to_vaddr(dict bin, int off) int {
 }
 
 fn _target_bytes(any source, any target=0, int max_bytes=512) dict {
-   def bin = is_dict(source) && source.contains("header") ? source : load(to_str(source))
+   def bin = _has_analysis_header(source) ? source : load(to_str(source))
    if !bin.get("ok", false) { return {"ok": false, "bytes": "", "addr": 0, "name": "", "analysis": bin} }
    mut bytes = ""
    mut byte_list = []
@@ -1031,10 +1146,12 @@ fn _target_bytes(any source, any target=0, int max_bytes=512) dict {
          byte_list = _slice_list(bin.get("data", ""), off, n)
          name = target
       } else {
-         def frows = recover_functions(bin)
+         def symbol_rows = symbols({"data": bin.get("data", "")})
+         def frows = functions({"symbols": symbol_rows})
          mut i = 0
          while i < frows.len {
-            if frows[i].get("name", "") == target { return _target_bytes(bin, frows[i], max_bytes) }
+            def f = frows[i]
+            if to_str(f.get("name", "")) == to_str(target) { return _target_bytes(bin, f, max_bytes) }
             i += 1
          }
       }
@@ -1068,8 +1185,9 @@ fn _target_bytes(any source, any target=0, int max_bytes=512) dict {
    {"ok": byte_list.len > 0 || bytes.len > 0, "bytes": bytes, "byte_list": byte_list, "addr": addr, "offset": off, "size": n, "name": name, "analysis": bin}
 }
 
+@returns_owned
 fn disassemble(any source, any target=".text", int max_bytes=512) list {
-   "Disassemble a section name, address, or function record. Returns Capstone rows."
+   "Disassemble a section name, address, or function record. Returns internal-decoder rows."
    def tb = _target_bytes(source, target, max_bytes)
    if !tb.get("ok", false) { return [] }
    def a = arch(tb.get("analysis", dict()))
@@ -1081,9 +1199,10 @@ fn disassemble(any source, any target=".text", int max_bytes=512) list {
    rows
 }
 
+@returns_owned
 fn disassemble_function(any source, any fn_name_or_addr, int max_bytes=512) list {
    "Disassemble one known function by name or address."
-   def bin = is_dict(source) && source.contains("header") ? source : load(to_str(source))
+   def bin = _has_analysis_header(source) ? source : load(to_str(source))
    if is_dict(fn_name_or_addr) {
       if fn_name_or_addr.len == 0 { return [] }
       return disassemble(bin, fn_name_or_addr, max_bytes)
@@ -1091,8 +1210,9 @@ fn disassemble_function(any source, any fn_name_or_addr, int max_bytes=512) list
       def fs = bin.get("functions", [])
       mut i = 0
       while i < fs.len {
-         if fs[i].get("name", "") == fn_name_or_addr {
-            return disassemble(bin, fs[i], max_bytes)
+         def f = fs[i]
+         if to_str(f.get("name", "")) == to_str(fn_name_or_addr) {
+            return disassemble(bin, f, max_bytes)
          }
          i += 1
       }
@@ -1217,7 +1337,7 @@ fn flirt_signature(any source, any target=0, any opts=dict()) dict {
    "Build a conservative FLIRT-style signature for one function.
    The signature stores a masked first-byte pattern, CRC16 over the next stable
    byte run, and named references used to disambiguate otherwise identical code."
-   def bin = is_dict(source) && source.contains("header") ? source : load(to_str(source))
+   def bin = _has_analysis_header(source) ? source : load(to_str(source))
    def o = is_dict(opts) ? opts : dict()
    def maxb = int(o.get("max_bytes", 256))
    def pat_cap = int(o.get("pattern_bytes", 32))
@@ -1248,7 +1368,7 @@ fn flirt_signature(any source, any target=0, any opts=dict()) dict {
 
 fn flirt_signatures(any source, any opts=dict()) list {
    "Build FLIRT-style signatures for recovered functions in a binary."
-   def bin = is_dict(source) && source.contains("header") ? source : load(to_str(source))
+   def bin = _has_analysis_header(source) ? source : load(to_str(source))
    def o = is_dict(opts) ? opts : dict()
    def scan = int(o.get("scan_bytes", 65536))
    def include_rejected = o.get("include_rejected", false)
@@ -1307,7 +1427,7 @@ fn _flirt_signature_match(dict sig, dict target, bool strict_refs=false) dict {
 fn flirt_match(any source, list signatures, any opts=dict()) list {
    "Match FLIRT-style signatures against recovered functions.
    Ambiguous collisions are reported but not considered safe for automatic renaming."
-   def bin = is_dict(source) && source.contains("header") ? source : load(to_str(source))
+   def bin = _has_analysis_header(source) ? source : load(to_str(source))
    def o = is_dict(opts) ? opts : dict()
    def targets = flirt_signatures(bin, o)
    def strict_refs = o.get("strict_refs", false)

@@ -335,9 +335,9 @@ static bool nyr_native_oracle_has_runtime_calls(const nyr_func_t *rt_main,
   return false;
 }
 static nyr_scalar_class_t nyr_return_scalar_class(const nyr_func_t *f,
-                                                   const nyr_func_t *funcs,
-                                                   const char *const *names,
-                                                   size_t count) {
+                                                  const nyr_func_t *funcs,
+                                                  const char *const *names,
+                                                  size_t count) {
   if (!f || f->next_value <= 0)
     return NYIR_SCALAR_UNKNOWN;
   size_t locals = 0;
@@ -670,10 +670,10 @@ bool nyr_native_result_oracle_for_nir(
   if (needs_runtime) {
     char *exe_dir = ny_get_executable_dir();
     if (!exe_dir ||
-        snprintf(
-            runtime_obj, sizeof(runtime_obj),
-            "%s/CMakeFiles/nytrix_runtime.dir/src/code/lang/runtime/init.c.o",
-            exe_dir) < 0 ||
+        snprintf(runtime_obj, sizeof(runtime_obj),
+                 "%s/CMakeFiles/nytrix_runtime.dir/src/code/backend/runtime/"
+                 "init.c.o",
+                 exe_dir) < 0 ||
         ny_access(runtime_obj, R_OK) != 0) {
       nyr_set_error(
           err, err_len,
@@ -813,25 +813,24 @@ static bool nyr_native_fuzz_emit_binary(nyr_func_t *f, nyr_op_t op, int left,
   int dst = f->next_value++;
   bool ok =
       nyr_native_fuzz_emit_noerr(f, (nyr_inst_t){.op = op,
-                                                  .dst = dst,
-                                                  .a = left,
-                                                  .b = right,
-                                                  .c = -1,
-                                                  .d = -1,
-                                                  .e = -1,
-                                                  .f = -1,
-                                                  .imm = 0,
-                                                  .cmp = NYIR_CMP_EQ,
-                                                  .symbol = NULL,
-                                                  .flags = 0,
-                                                  .effects = NYIR_EFFECT_NONE});
+                                                 .dst = dst,
+                                                 .a = left,
+                                                 .b = right,
+                                                 .c = -1,
+                                                 .d = -1,
+                                                 .e = -1,
+                                                 .f = -1,
+                                                 .imm = 0,
+                                                 .cmp = NYIR_CMP_EQ,
+                                                 .symbol = NULL,
+                                                 .flags = 0,
+                                                 .effects = NYIR_EFFECT_NONE});
   *dst_out = dst;
   return ok;
 }
 
-static bool nyr_native_fuzz_program(nyr_native_fuzz_rng_t *rng,
-                                    nyr_func_t *out, int min_insts,
-                                    int max_insts) {
+static bool nyr_native_fuzz_program(nyr_native_fuzz_rng_t *rng, nyr_func_t *out,
+                                    int min_insts, int max_insts) {
   memset(out, 0, sizeof(*out));
   int inst_count = min_insts + (int)(nyr_native_fuzz_rng_next(rng) %
                                      (max_insts - min_insts + 1));
@@ -849,18 +848,18 @@ static bool nyr_native_fuzz_program(nyr_native_fuzz_rng_t *rng,
       int dst = out->next_value++;
       ok = nyr_native_fuzz_emit_noerr(
           out, (nyr_inst_t){.op = NYIR_CONST_I64,
-                             .dst = dst,
-                             .a = -1,
-                             .b = -1,
-                             .c = -1,
-                             .d = -1,
-                             .e = -1,
-                             .f = -1,
-                             .imm = c,
-                             .cmp = NYIR_CMP_EQ,
-                             .symbol = NULL,
-                             .flags = 0,
-                             .effects = NYIR_EFFECT_NONE});
+                            .dst = dst,
+                            .a = -1,
+                            .b = -1,
+                            .c = -1,
+                            .d = -1,
+                            .e = -1,
+                            .f = -1,
+                            .imm = c,
+                            .cmp = NYIR_CMP_EQ,
+                            .symbol = NULL,
+                            .flags = 0,
+                            .effects = NYIR_EFFECT_NONE});
       values[value_count++] = dst;
     } else {
       /*
@@ -889,18 +888,18 @@ static bool nyr_native_fuzz_program(nyr_native_fuzz_rng_t *rng,
         dst = out->next_value++;
         ok = nyr_native_fuzz_emit_noerr(
             out, (nyr_inst_t){.op = op,
-                               .dst = dst,
-                               .a = left,
-                               .b = right,
-                               .c = -1,
-                               .d = -1,
-                               .e = -1,
-                               .f = -1,
-                               .imm = 0,
-                               .cmp = cmp,
-                               .symbol = NULL,
-                               .flags = 0,
-                               .effects = NYIR_EFFECT_NONE});
+                              .dst = dst,
+                              .a = left,
+                              .b = right,
+                              .c = -1,
+                              .d = -1,
+                              .e = -1,
+                              .f = -1,
+                              .imm = 0,
+                              .cmp = cmp,
+                              .symbol = NULL,
+                              .flags = 0,
+                              .effects = NYIR_EFFECT_NONE});
       } else {
         ok = nyr_native_fuzz_emit_binary(out, op, left, right, &dst);
       }
@@ -911,18 +910,18 @@ static bool nyr_native_fuzz_program(nyr_native_fuzz_rng_t *rng,
   if (ok && value_count > 0) {
     ok = nyr_native_fuzz_emit_noerr(
         out, (nyr_inst_t){.op = NYIR_RET,
-                           .dst = -1,
-                           .a = values[value_count - 1],
-                           .b = -1,
-                           .c = -1,
-                           .d = -1,
-                           .e = -1,
-                           .f = -1,
-                           .imm = 0,
-                           .cmp = NYIR_CMP_EQ,
-                           .symbol = NULL,
-                           .flags = 0,
-                           .effects = NYIR_EFFECT_CONTROL});
+                          .dst = -1,
+                          .a = values[value_count - 1],
+                          .b = -1,
+                          .c = -1,
+                          .d = -1,
+                          .e = -1,
+                          .f = -1,
+                          .imm = 0,
+                          .cmp = NYIR_CMP_EQ,
+                          .symbol = NULL,
+                          .flags = 0,
+                          .effects = NYIR_EFFECT_CONTROL});
   }
   free(values);
   if (!ok) {

@@ -3,7 +3,7 @@ shape ownership_allowance_fixed_range_if_reassignment_negative {
   generator "error"
   features [ownership allowance fixed-range conditional-reassignment negative]
   template ny-compile-fail
-  flags "--ownership-strict --nyir-verify"
+  flags "--ownership-strict --nyr-verify"
   expect compile_fail
   expect_message "ownership allowance exceeded"
   source ny <<'NY'

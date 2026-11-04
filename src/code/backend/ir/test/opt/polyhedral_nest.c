@@ -40,15 +40,15 @@ static bool affine_address_regression(int iv_scale) {
   nyr_func_t f;
   nyr_opt_begin(&f);
   int base = nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_ALLOCA,
-                                         .dst = -1,
-                                         .a = -1,
-                                         .b = -1,
-                                         .c = -1,
-                                         .d = -1,
-                                         .e = -1,
-                                         .f = -1,
-                                         .imm = 128,
-                                         .scalar_class = NYIR_SCALAR_POINTER});
+                                          .dst = -1,
+                                          .a = -1,
+                                          .b = -1,
+                                          .c = -1,
+                                          .d = -1,
+                                          .e = -1,
+                                          .f = -1,
+                                          .imm = 128,
+                                          .scalar_class = NYIR_SCALAR_POINTER});
   int zero = nyr_opt_const(&f, 0);
   int one = nyr_opt_const(&f, 1);
   int row = nyr_opt_const(&f, 2);
@@ -73,16 +73,16 @@ static bool affine_address_regression(int iv_scale) {
   int byte_offset = nyr_opt_binop(&f, NYIR_SHL_I64, index, scale);
   int address = nyr_opt_binop(&f, NYIR_ADD_I64, base, byte_offset);
   nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_STORE_I64,
-                              .dst = -1,
-                              .a = address,
-                              .b = -1,
-                              .c = iv,
-                              .d = -1,
-                              .e = -1,
-                              .f = -1,
-                              .effects = NYIR_EFFECT_WRITE_MEMORY |
-                                         NYIR_EFFECT_MAY_TRAP,
-                              .scalar_class = NYIR_SCALAR_I64_RAW});
+                               .dst = -1,
+                               .a = address,
+                               .b = -1,
+                               .c = iv,
+                               .d = -1,
+                               .e = -1,
+                               .f = -1,
+                               .effects = NYIR_EFFECT_WRITE_MEMORY |
+                                          NYIR_EFFECT_MAY_TRAP,
+                               .scalar_class = NYIR_SCALAR_I64_RAW});
   int next = nyr_opt_binop(&f, NYIR_ADD_I64, iv, one);
   nyr_opt_br(&f, 10);
   nyr_opt_label(&f, 13);
@@ -90,16 +90,16 @@ static bool affine_address_regression(int iv_scale) {
   int result_address = nyr_opt_binop(&f, NYIR_ADD_I64, base, result_offset);
   int result =
       nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_LOAD_I64,
-                                  .dst = -1,
-                                  .a = result_address,
-                                  .b = -1,
-                                  .c = -1,
-                                  .d = -1,
-                                  .e = -1,
-                                  .f = -1,
-                                  .effects = NYIR_EFFECT_READ_MEMORY |
-                                             NYIR_EFFECT_MAY_TRAP,
-                                  .scalar_class = NYIR_SCALAR_I64_RAW});
+                                   .dst = -1,
+                                   .a = result_address,
+                                   .b = -1,
+                                   .c = -1,
+                                   .d = -1,
+                                   .e = -1,
+                                   .f = -1,
+                                   .effects = NYIR_EFFECT_READ_MEMORY |
+                                              NYIR_EFFECT_MAY_TRAP,
+                                   .scalar_class = NYIR_SCALAR_I64_RAW});
   nyr_opt_ret(&f, result);
   f.data[phi_at].phi_incoming[1].value = next;
   bool ok = nyr_opt_verify(&f, "affine-address/before");
@@ -116,8 +116,8 @@ static bool affine_address_regression(int iv_scale) {
   bool *members = shape_ok ? calloc(cfg.block_count, sizeof(*members)) : NULL;
   shape_ok = shape_ok && members &&
              nyr_cfg_natural_loop_blocks(&cfg, info.loops[0].latch_block,
-                                          info.loops[0].header_block, members,
-                                          cfg.block_count);
+                                         info.loops[0].header_block, members,
+                                         cfg.block_count);
   size_t store_at = SIZE_MAX;
   for (size_t i = 0; shape_ok && i < f.len; ++i)
     if (f.data[i].op == NYIR_STORE_I64) {

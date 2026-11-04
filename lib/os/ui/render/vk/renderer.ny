@@ -122,7 +122,7 @@ fn _store_mat4(any dst, any mat) bool {
    true
 }
 
-fn _store_mat4_cm(any dst, any mat) bool {
+fn _store_mat4_cm(ptr dst, any mat) bool {
    if dst == 0 { ui_profile.print_text("[vk] _store_mat4_cm: null ptr") return false }
    store_mat4_cm_raw(dst, mat, true)
 }
@@ -469,7 +469,7 @@ fn _srgb_to_linear_channel(any x) f64 {
    if c <= 0.0 { return 0.0 }
    if c >= 1.0 { return 1.0 }
    if c <= 0.04045 { return c / 12.92 }
-   pow((c + 0.055) / 1.055, 2.4)
+   float(__flt_pow((c + 0.055) / 1.055, 2.4))
 }
 
 fn _clear_color_channel(any x) f64 {
@@ -1137,8 +1137,9 @@ fn init(any win) bool {
    _upload_alloc, _upload_bi, _upload_bar1, _upload_bar2 = _upload_slab, _upload_slab + 32, _upload_slab + 64, _upload_slab + 136
    _upload_region, _upload_si, _upload_cb_arr = _upload_slab + 208, _upload_slab + 264, _upload_slab + 336
    _upload_cb_ptr, _flush_off, _flush_buf = _upload_slab + 344, _upload_slab + 352, _upload_slab + 360
-   mut fence_ci = _renderer_alloc(16)
+   mut fence_ci = _renderer_alloc(24)
    store32(fence_ci, VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, 0)
+   store32(fence_ci, 0, 16)
    _upload_fence_ptr = _renderer_alloc(8)
    def upload_fence_res = create_fence(_device, fence_ci, 0, _upload_fence_ptr)
    if upload_fence_res != 0 {
@@ -1478,12 +1479,12 @@ fn _draw_flat_part_buffers_loaded(
    def is_points = topo == 2
    def use_pipe = pipe ? pipe : 0
    if topo == 0 && use_pipe && flat_fast_on && _draw_static_mesh_part_fast(sbuf, soff, ibuf, ioff, idx_count, draw_count, index_type, use_pipe) {
+      return 1
    } elif ibuf && idx_count > 0 {
-      draw_static_buffer_indexed_raw(sbuf, soff, ibuf, ioff, idx_count, is_lines, 1.0, use_pipe, index_type, is_points)
+      return draw_static_buffer_indexed_raw(sbuf, soff, ibuf, ioff, idx_count, is_lines, 1.0, use_pipe, index_type, is_points) ? 1 : 0
    } else {
-      draw_static_buffer_raw(sbuf, soff, draw_count, is_lines, 1.0, use_pipe, is_points)
+      return draw_static_buffer_raw(sbuf, soff, draw_count, is_lines, 1.0, use_pipe, is_points) ? 1 : 0
    }
-   1
 }
 
 fn _draw_flat_part_buffers(?ptr base) int {
@@ -1562,6 +1563,10 @@ fn _flat_range_sync_shading_cache(?ptr base, bool sync_material_textures) any {
 
 fn draw_part0_flat_no_restore(?ptr slab_ptr) int {
    "Draws packed scene part 0 without index arithmetic for single-part hot paths."
+   if common.env_truthy("NY_SCENE_FAST_TRACE") {
+      ui_profile.print_text("[scene:fast:vk] single active=" + to_str(_flat_part_active(slab_ptr)) +
+         " slab=" + to_str(int(slab_ptr)) + " visible=" + to_str(slab_ptr ? load32_h(slab_ptr, 228) : -1))
+   }
    if !_flat_part_active(slab_ptr) { return 0 }
    def base_model = _snapshot_model_matrix(_scratch_model_saved_a)
    _sync_flat_part_model_composed(slab_ptr, base_model)
@@ -1615,7 +1620,10 @@ fn _draw_static_mesh_part_fast(any sbuf, int soff, any ibuf, int ioff, int idx_c
       _descriptor_bind_count += 1
    }
    _sync_pc()
-   if !_static_vbo_ptr || !_static_off_ptr { return false }
+   if !_static_vbo_ptr || !_static_off_ptr {
+      _flush_diag("static mesh binding scratch unavailable")
+      return false
+   }
    def can_base_vertex = (soff % _VKR_VERT_STRIDE) == 0
    def vbo_bind_off = can_base_vertex ? 0 : soff
    def first_vertex = can_base_vertex ? int(soff / _VKR_VERT_STRIDE) : 0
@@ -1638,14 +1646,12 @@ fn _draw_static_mesh_part_fast(any sbuf, int soff, any ibuf, int ioff, int idx_c
          _last_static_ibuf_off = ibo_bind_off
          _last_static_ibuf_type = index_type
       }
+      _flush_diag("static indexed count=" + to_str(idx_count) + " first=" + to_str(first_index) + " vertex=" + to_str(first_vertex))
       cmd_draw_indexed(cb, idx_count, 1, first_index, first_vertex, 0)
-      _frame_indexed_draw_calls += 1
    } else {
       cmd_draw(cb, draw_count, 1, first_vertex, 0)
    }
-   _total_draw_calls += 1
-   _frame_draw_calls += 1
-   _frame_static_draw_calls += 1
+   vk_state.record_draw_call(false, ibuf && idx_count > 0)
    true
 }
 
@@ -1658,6 +1664,11 @@ fn _draw_parts_flat_range_impl(
    bool sync_material_textures
 ) int {
    "Draws a contiguous range of flat packed scene parts with minimal interpreter overhead."
+   if common.env_truthy("NY_SCENE_FAST_TRACE") {
+      ui_profile.print_text("[scene:fast:vk] frame=" + to_str(_handle_ok(_current_frame_cb)) +
+         " layout=" + to_str(_handle_ok(_pipeline_layout)) + " model=" + to_str(_handle_ok(_current_model)) +
+         " slab=" + to_str(bool(slab_ptr)) + " start=" + to_str(start_idx) + " end=" + to_str(end_idx))
+   }
    if !_handle_ok(_current_frame_cb) || !_handle_ok(_pipeline_layout) || !_handle_ok(_current_model) { return 0 }
    if !slab_ptr || end_idx <= start_idx { return 0 }
    def saved_model = restore_model ? _snapshot_model_matrix(_scratch_model_saved_b) : 0
@@ -1710,7 +1721,15 @@ fn _draw_parts_flat_range_impl(
             " matTex=" + to_str(load32_h(mat_ptr, 20)) +
             " normal=0x" + text.to_hex(load32_h(mat_ptr, 100)))
       }
-      drawn += _draw_flat_part_buffers_loaded(base, sbuf, soff, ibuf, ioff, idx_count, draw_count, index_type, topo, pipe, flat_fast_on)
+      def part_drawn = _draw_flat_part_buffers_loaded(base, sbuf, soff, ibuf, ioff, idx_count, draw_count, index_type, topo, pipe, flat_fast_on)
+      if _trace_group && i < trace_group_end {
+         ui_profile.print_text("[group:draw-result] part=" + to_str(i) +
+            " result=" + to_str(part_drawn) +
+            " draws=" + to_str(vk_state._frame_draw_calls) +
+            " static=" + to_str(vk_state._frame_static_draw_calls) +
+            " indexed=" + to_str(vk_state._frame_indexed_draw_calls))
+      }
+      drawn += part_drawn
       i += 1
    }
    if saved_model && _current_model {
@@ -1999,10 +2018,7 @@ fn begin_frame() bool {
    _prim_raw_points = 0
    _prim_text_calls = 0
    _prim_text_glyphs = 0
-   _frame_draw_calls = 0
-   _frame_dynamic_draw_calls = 0
-   _frame_static_draw_calls = 0
-   _frame_indexed_draw_calls = 0
+   vk_state.reset_frame_draw_stats()
    _frame_begin_cpu_us = 0
    _frame_end_cpu_us = 0
    _frame_flush_cpu_us = 0
@@ -3220,9 +3236,7 @@ fn _flush() any {
    cmd_draw(cb, count, 1, first_vert, 0)
    _flush_diag("after draw")
    if _vk_markers_enabled { vk_debug_marker_end(cb) }
-   _total_draw_calls += 1
-   _frame_draw_calls += 1
-   _frame_dynamic_draw_calls += 1
+   vk_state.record_draw_call(true, false)
    _last_flush_offset = _vertex_offset
    _flush_reason = 0
    _batch_texture_id = _current_texture_id
@@ -3308,10 +3322,10 @@ fn _vk_end_frame_download_capture(bool has_surface) bool {
                   def pc = size >= 4 ? (((h / 2) * w + (w / 2)) * 4) : 0
                   def c0 = (pc >= 0 && pc + 3 < size) ? (load8(pixels, pc) | (load8(pixels, pc + 1) << 8) | (load8(pixels, pc + 2) << 16) | (load8(pixels, pc + 3) << 24)) : 0
                   ui_profile.print_text("[vk:capture] frame=" + to_str(_total_frames) +
-                     " draws=" + to_str(_frame_draw_calls) +
-                     " dyn=" + to_str(_frame_dynamic_draw_calls) +
-                     " static=" + to_str(_frame_static_draw_calls) +
-                     " indexed=" + to_str(_frame_indexed_draw_calls) +
+                     " draws=" + to_str(vk_state._frame_draw_calls) +
+                     " dyn=" + to_str(vk_state._frame_dynamic_draw_calls) +
+                     " static=" + to_str(vk_state._frame_static_draw_calls) +
+                     " indexed=" + to_str(vk_state._frame_indexed_draw_calls) +
                      " img=" + to_str(_image_index) +
                      " surface=" + to_str(has_surface) +
                      " p0=0x" + text.to_hex(p0) +
@@ -3363,10 +3377,10 @@ fn _vk_end_frame_present_image(bool backend_is_win32, bool _deep_on) bool {
    store64_h(pi, idxs, 48)
    store64_h(pi, 0, 56)
    if _vk_debug_basic == 1 {
-      ui_profile.print_text("[gfx:vulkan] pre-present stats draws=" + to_str(_frame_draw_calls) +
-         " dyn=" + to_str(_frame_dynamic_draw_calls) +
-         " static=" + to_str(_frame_static_draw_calls) +
-         " indexed=" + to_str(_frame_indexed_draw_calls) +
+      ui_profile.print_text("[gfx:vulkan] pre-present stats draws=" + to_str(vk_state._frame_draw_calls) +
+         " dyn=" + to_str(vk_state._frame_dynamic_draw_calls) +
+         " static=" + to_str(vk_state._frame_static_draw_calls) +
+         " indexed=" + to_str(vk_state._frame_indexed_draw_calls) +
          " flush=" + to_str(_flush_total) +
          " verts=" + to_str(_vertex_offset / _VKR_VERT_STRIDE))
       ui_profile.print_text("[gfx:vulkan] end_frame before present image=" + to_str(img_idx))
@@ -3426,6 +3440,7 @@ fn _end_frame_internal(bool present) bool {
    }
    def _t_end_cmd = _deep_on ? ticks() : 0
    def ecb = end_command_buffer(cb)
+   vk_state.set_frame_open(false)
    if _deep_on { _vk_deep_end_cmd_ms = ui_profile.elapsed_ms(_t_end_cmd) }
    if ecb != 0 { return false }
    if has_surface {
@@ -3478,10 +3493,7 @@ fn _end_frame_internal(bool present) bool {
    def frame_sleep_default = 0
    def frame_sleep_ms = ui_profile.env_present_cached("NY_VK_FRAME_SLEEP_MS") ? ui_profile.env_int_cached("NY_VK_FRAME_SLEEP_MS", 0, 0, 64) : frame_sleep_default
    if frame_sleep_ms > 0 { msleep(frame_sleep_ms) }
-   _last_frame_draw_calls = _frame_draw_calls
-   _last_frame_dynamic_draw_calls = _frame_dynamic_draw_calls
-   _last_frame_static_draw_calls = _frame_static_draw_calls
-   _last_frame_indexed_draw_calls = _frame_indexed_draw_calls
+   vk_state.publish_frame_draw_stats()
    _last_flush_total = _flush_total
    _last_pipeline_bind_count = _pipeline_bind_count
    _last_descriptor_bind_count = _descriptor_bind_count
@@ -3516,7 +3528,7 @@ fn _end_frame_internal(bool present) bool {
    _current_frame = (_current_frame + 1) % _frames_in_flight()
    if _deep_on && _vk_deep_should_emit(_total_frames) {
       ui_profile.print_text("[vk:end] frame=" + to_str(_total_frames) +
-         " draws=" + to_str(_frame_draw_calls) +
+         " draws=" + to_str(vk_state._frame_draw_calls) +
          " verts=" + to_str(_vertex_offset / _VKR_VERT_STRIDE) +
          " present=" + to_str(present) +
          " acq_ms=" + to_str(_vk_deep_begin_acquire_ms) +
@@ -3539,10 +3551,10 @@ fn _end_frame_internal(bool present) bool {
    }
    if ui_profile.dump_trace_enabled() && _total_frames < 8 {
       ui_profile.print_text("[vk:dump] frame=" + to_str(_total_frames) +
-         " draws=" + to_str(_frame_draw_calls) +
-         " dyn=" + to_str(_frame_dynamic_draw_calls) +
-         " static=" + to_str(_frame_static_draw_calls) +
-         " indexed=" + to_str(_frame_indexed_draw_calls) +
+         " draws=" + to_str(vk_state._frame_draw_calls) +
+         " dyn=" + to_str(vk_state._frame_dynamic_draw_calls) +
+         " static=" + to_str(vk_state._frame_static_draw_calls) +
+         " indexed=" + to_str(vk_state._frame_indexed_draw_calls) +
          " flush=" + to_str(_flush_total) +
          " valids=" + to_str(_handles_valid) +
          " open=" + to_str(vk_state.frame_open()) +
@@ -3637,19 +3649,19 @@ fn _destroy_sync_objects() any {
    if _device == 0 { return 0 }
    mut i = 0
    while i < _image_available_semaphores_count {
-      def sem = _image_available_semaphores.get(i, 0)
+      def sem = load64_h(_sem_avail_slab, i * 8)
       if sem { destroy_semaphore(_device, sem, 0) }
       i += 1
    }
    i = 0
    while i < _render_finished_semaphores_count {
-      def sem = _render_finished_semaphores.get(i, 0)
+      def sem = load64_h(_sem_finish_slab, i * 8)
       if sem { destroy_semaphore(_device, sem, 0) }
       i += 1
    }
    i = 0
    while i < _in_flight_fences_count {
-      def fence = _in_flight_fences.get(i, 0)
+      def fence = load64_h(_fences_slab, i * 8)
       if fence { destroy_fence(_device, fence, 0) }
       i += 1
    }
@@ -3700,6 +3712,89 @@ fn _reset_texture_descriptor_state() any {
    0
 }
 
+fn _destroy_pipeline_resources() any {
+   def pipelines = [
+      _pipeline,
+      _nocull_pipeline, _unlit_pipeline, _unlit_nocull_pipeline, _mesh_opaque_pipeline,
+      _mesh_opaque_nocull_pipeline, _mesh_opaque_nocull_flip_pipeline, _mesh_opaque_unlit_pipeline, _mesh_opaque_unlit_nocull_pipeline,
+      _mesh_opaque_unlit_nocull_flip_pipeline, _mesh_alpha_pipeline, _mesh_alpha_nocull_pipeline, _mesh_alpha_nocull_flip_pipeline,
+      _mesh_alpha_unlit_pipeline, _mesh_alpha_unlit_nocull_pipeline, _mesh_alpha_unlit_nocull_flip_pipeline, _mesh_alpha_flip_pipeline,
+      _mesh_alpha_unlit_flip_pipeline, _mesh_fast_opaque_pipeline, _mesh_fast_opaque_nocull_pipeline, _mesh_fast_opaque_flip_pipeline,
+      _mesh_fast_opaque_nocull_flip_pipeline, _mesh_fast_env_opaque_pipeline, _mesh_fast_env_opaque_nocull_pipeline, _mesh_fast_env_opaque_flip_pipeline,
+      _mesh_fast_env_opaque_nocull_flip_pipeline, _flip_pipeline, _flip_unlit_pipeline, _line_pipeline,
+      _sdf_line_pipeline, _point_pipeline, _wire_pipeline, _circle_pipeline,
+      _ring_pipeline, _rounded_rect_pipeline, _skybox_pipeline, _target_pipeline
+   ]
+   mut seen = dict(64)
+   mut i = 0
+   while i < pipelines.len {
+      def pipeline = pipelines.get(i, 0)
+      def key = to_str(pipeline)
+      if pipeline && !seen.get(key, false) {
+         destroy_pipeline(_device, pipeline, 0)
+         seen[key] = true
+      }
+      i += 1
+   }
+   _pipeline = 0
+   _nocull_pipeline = 0
+   _unlit_pipeline = 0
+   _unlit_nocull_pipeline = 0
+   _mesh_opaque_pipeline = 0
+   _mesh_opaque_nocull_pipeline = 0
+   _mesh_opaque_nocull_flip_pipeline = 0
+   _mesh_opaque_unlit_pipeline = 0
+   _mesh_opaque_unlit_nocull_pipeline = 0
+   _mesh_opaque_unlit_nocull_flip_pipeline = 0
+   _mesh_alpha_pipeline = 0
+   _mesh_alpha_nocull_pipeline = 0
+   _mesh_alpha_nocull_flip_pipeline = 0
+   _mesh_alpha_unlit_pipeline = 0
+   _mesh_alpha_unlit_nocull_pipeline = 0
+   _mesh_alpha_unlit_nocull_flip_pipeline = 0
+   _mesh_alpha_flip_pipeline = 0
+   _mesh_alpha_unlit_flip_pipeline = 0
+   _mesh_fast_opaque_pipeline = 0
+   _mesh_fast_opaque_nocull_pipeline = 0
+   _mesh_fast_opaque_flip_pipeline = 0
+   _mesh_fast_opaque_nocull_flip_pipeline = 0
+   _mesh_fast_env_opaque_pipeline = 0
+   _mesh_fast_env_opaque_nocull_pipeline = 0
+   _mesh_fast_env_opaque_flip_pipeline = 0
+   _mesh_fast_env_opaque_nocull_flip_pipeline = 0
+   _flip_pipeline = 0
+   _flip_unlit_pipeline = 0
+   _line_pipeline = 0
+   _sdf_line_pipeline = 0
+   _point_pipeline = 0
+   _wire_pipeline = 0
+   _circle_pipeline = 0
+   _ring_pipeline = 0
+   _rounded_rect_pipeline = 0
+   _skybox_pipeline = 0
+   _target_pipeline = 0
+   if _pipeline_layout { destroy_pipeline_layout(_device, _pipeline_layout, 0) }
+   if _descriptor_set_layout { destroy_descriptor_set_layout(_device, _descriptor_set_layout, 0) }
+   if _descriptor_set_layout_ubo { destroy_descriptor_set_layout(_device, _descriptor_set_layout_ubo, 0) }
+   if _vert_module { destroy_shader_module(_device, _vert_module, 0) }
+   if _frag_module { destroy_shader_module(_device, _frag_module, 0) }
+   if _frag_fast_module { destroy_shader_module(_device, _frag_fast_module, 0) }
+   if _frag_fast_env_module { destroy_shader_module(_device, _frag_fast_env_module, 0) }
+   if _render_pass_load { destroy_render_pass(_device, _render_pass_load, 0) }
+   if _render_pass_load_color_clear_depth { destroy_render_pass(_device, _render_pass_load_color_clear_depth, 0) }
+   if _render_pass { destroy_render_pass(_device, _render_pass, 0) }
+   if _command_pool { destroy_command_pool(_device, _command_pool, 0) }
+   if _upload_fence_ptr {
+      def fence = load64_h(_upload_fence_ptr, 0)
+      if fence { destroy_fence(_device, fence, 0) }
+      free(_upload_fence_ptr)
+   }
+   _upload_fence_ptr = 0
+   _upload_fence = 0
+   _upload_cb = 0
+   0
+}
+
 fn shutdown() any {
    "Shuts down the Vulkan renderer and releases all associated resources."
    _handles_valid = false
@@ -3726,16 +3821,26 @@ fn shutdown() any {
       return 0
    }
    device_wait_idle(_device)
+   vk_state.set_frame_open(false)
    _destroy_scene_color_capture_tex()
+   _destroy_sync_objects()
    _destroy_swapchain_objects()
    _destroy_depth_msaa_resources()
-   _destroy_sync_objects()
    if _vertex_buffer != 0 { destroy_buffer(_device, _vertex_buffer, 0) }
    if _ubo_buffer != 0 { destroy_buffer(_device, _ubo_buffer, 0) }
    if _vertex_memory != 0 { free_memory(_device, _vertex_memory, 0) }
    if _ubo_memory != 0 { free_memory(_device, _ubo_memory, 0) }
    if _staging_buffer != 0 { destroy_buffer(_device, _staging_buffer, 0) }
    if _staging_memory { free_memory(_device, _staging_memory, 0) }
+   def samplers = dict_values(_sampler_cache)
+   mut sampler_i = 0
+   while sampler_i < samplers.len {
+      def ?handle sampler = int(samplers.get(sampler_i, 0))
+      if sampler && sampler != _nearest_sampler && sampler != _linear_sampler {
+         destroy_sampler(_device, sampler, 0)
+      }
+      sampler_i += 1
+   }
    if _nearest_sampler { destroy_sampler(_device, _nearest_sampler, 0) }
    if _linear_sampler && _linear_sampler != _nearest_sampler { destroy_sampler(_device, _linear_sampler, 0) }
    if _descriptor_pool { destroy_descriptor_pool(_device, _descriptor_pool, 0) }
@@ -3778,6 +3883,7 @@ fn shutdown() any {
    if _texture_fmt_cache { free(_texture_fmt_cache) }
    _texture_fmt_cache = 0
    _reset_texture_descriptor_state()
+   _destroy_pipeline_resources()
    if _device != 0 { destroy_device(_device, 0) }
    _destroy_surface_storage()
    if _instance { destroy_instance(_instance, 0) }
@@ -4204,15 +4310,17 @@ fn _raw_surface_handle() any {
    if _surface != 0 {
       def raw = load64_h(_surface, 0)
       if raw == 0 || raw == 0x8000000000 { return raw }
-      if raw { return load64(_surface, 0) }
+      if raw { return raw }
    }
    _surface_handle
 }
 
 fn _has_valid_surface() bool {
-   if _surface_handle == 0x8000000000 { return false }
    def raw = _raw_surface_handle()
-   raw != 0 && raw != 0x8000000000
+   def handle_bits = int(raw)
+   if handle_bits == 0 { return false }
+   if handle_bits == 0x8000000000 { return false }
+   true
 }
 
 @inline
@@ -4415,6 +4523,7 @@ fn _create_logical_device() bool {
       if vk_state._debug_gfx_enabled { ui_profile.print_text(f"[gfx:vulkan] bindless create_device failed code={res}") }
       return false
    }
+   _bindless_enabled = enable_bindless_features
    _device = load64(dev_ptr, 0)
    if vk_state._debug_gfx_enabled { _dbg_handle("device", _device) }
    mut q_ptr = _renderer_alloc(8)

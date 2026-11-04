@@ -1,0 +1,911 @@
+shape otp_min {
+  family "probe-suite/otp"
+  generator "stress"
+  features [ny math crypto fixture-family]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+use core.math.bin
+
+use core.math
+
+fn otp_case_0_otp_reuse_attack(ct1, ct2){
+   def n1 = len(ct1)
+   def n2 = len(ct2)
+   mut n = (n1 < n2) ? n1 : n2
+   mut result = list(0)
+   mut i = 0
+   while(i < n){
+      def x = bxor(get(ct1, i), get(ct2, i))
+      result = append(result, x)
+      i = i + 1
+   }
+   result
+}
+fn otp_case_0_otp_decrypt_known_plaintext(ct, known_pt){
+   def ks_len = len(known_pt)
+   mut keystream = list(0)
+   mut i = 0
+   while(i < ks_len){
+      def b = bxor(get(ct, i), get(known_pt, i))
+      keystream = append(keystream, b)
+      i = i + 1
+   }
+   def ct_len = len(ct)
+   mut result = list(0)
+   i = 0
+   while(i < ct_len){
+      def ks_byte = (i < ks_len) ? get(keystream, i) : 0
+      mut p = bxor(get(ct, i), ks_byte)
+      result = append(result, p)
+      i = i + 1
+   }
+   result
+}
+if(comptime{__main()}){
+   def key = [0xAB, 0xCD, 0xEF]
+   def pt1 = [72, 101, 108]
+   def pt2 = [87, 111, 114]
+   def ct1 = [bxor(pt1[0], key[0]), bxor(pt1[1], key[1]), bxor(pt1[2], key[2])]
+   def ct2 = [bxor(pt2[0], key[0]), bxor(pt2[1], key[1]), bxor(pt2[2], key[2])]
+   def xored = otp_case_0_otp_reuse_attack(ct1, ct2)
+   assert(get(xored, 0) == bxor(get(pt1, 0), get(pt2, 0)), "otp_reuse xor[0]")
+   assert(get(xored, 1) == bxor(get(pt1, 1), get(pt2, 1)), "otp_reuse xor[1]")
+   def recovered = otp_case_0_otp_decrypt_known_plaintext(ct1, pt1)
+   assert(get(recovered, 0) == get(pt1, 0), "otp kpa[0]")
+   assert(get(recovered, 2) == get(pt1, 2), "otp kpa[2]")
+   print("ok a")
+}
+
+fn otp_case_1__otp_min(a, b){ (a < b) ? a : b }
+fn otp_case_1__otp_is_printable(b){ (b >= 32 && b <= 126) || b == 9 || b == 10 || b == 13 }
+fn otp_case_1__otp_lower(b){ (b >= 65 && b <= 90) ? (b + 32) : b }
+fn otp_case_1__otp_default_weight(b){
+   def c = otp_case_1__otp_lower(b)
+   if(c == 32){ return 130 }
+   if(c == 101){ return 127 }
+   if(c == 116){ return 91 }
+   if(c == 97){ return 82 }
+   if(c == 111){ return 75 }
+   if(c == 105){ return 70 }
+   if(c == 110){ return 67 }
+   if(c == 115){ return 63 }
+   if(c == 104){ return 61 }
+   if(c == 114){ return 60 }
+   if(c == 100){ return 43 }
+   if(c == 108){ return 40 }
+   if(c == 117){ return 28 }
+   if(c == 99){ return 28 }
+   if(c == 109){ return 24 }
+   if(c == 102){ return 22 }
+   if(c == 119){ return 20 }
+   if(c == 103){ return 20 }
+   if(c == 121){ return 20 }
+   if(c == 112){ return 19 }
+   if(c == 98){ return 15 }
+   if(c == 118){ return 10 }
+   if(c == 107){ return 8 }
+   if(c == 106){ return 2 }
+   if(c == 120){ return 2 }
+   if(c == 113){ return 1 }
+   if(c == 122){ return 1 }
+   if(c >= 48 && c <= 57){ return 12 }
+   if(c == 44 || c == 46 || c == 39 || c == 34 || c == 45 || c == 58 || c == 59){ return 16 }
+   if(c == 9 || c == 10 || c == 13){ return 8 }
+   if(c >= 33 && c <= 126){ return 1 }
+   0
+}
+fn otp_case_1__otp_freq_weight(char_frequencies, b, char_floor){
+   if(char_frequencies == nil){ return otp_case_1__otp_default_weight(b) }
+   def c = otp_case_1__otp_lower(b)
+   mut weight = dict_get(char_frequencies, c, nil)
+   if(weight == nil){ weight = dict_get(char_frequencies, bytes_to_str([c]), nil) }
+   if(weight == nil){ return char_floor }
+   if(weight <= 0){ return char_floor }
+   log10(weight)
+}
+fn otp_case_1__otp_insert_ranked(ranked, item){
+   mut out = list(0)
+   mut inserted = false
+   mut i = 0
+   while(i < len(ranked)){
+      def cur = get(ranked, i)
+      if(!inserted && get(item, 1) > get(cur, 1)){
+         out = append(out, item)
+         inserted = true
+      }
+      out = append(out, cur)
+      i = i + 1
+   }
+   if(!inserted){ out = append(out, item) }
+   out
+}
+fn otp_case_1_otp_hamming_distance(a, b){
+   def n = otp_case_1__otp_min(len(a), len(b))
+   mut distance = 0
+   mut i = 0
+   while(i < n){
+      distance = distance + bit_count(get(a, i) ^ get(b, i))
+      i = i + 1
+   }
+   distance
+}
+fn otp_case_1_otp_guess_key_sizes(ciphertexts, max_key_size=nil){
+   def nct = len(ciphertexts)
+   if(nct == 0){ return [] }
+   mut max_len = 0
+   mut ci = 0
+   while(ci < nct){
+      def clen = len(get(ciphertexts, ci))
+      if(clen > max_len){ max_len = clen }
+      ci = ci + 1
+   }
+   mut limit = (max_key_size == nil) ? max_len : max_key_size
+   if(limit > max_len){ limit = max_len }
+   if(limit < 2){ return [] }
+   mut ranked = list(0)
+   mut prev_distance = nil
+   mut key_size = 2
+   while(key_size <= limit){
+      mut blocks = list(0)
+      ci = 0
+      while(ci < nct){
+         def ct = get(ciphertexts, ci)
+         mut off = 0
+         while(off + key_size <= len(ct)){
+            mut block = list(0)
+            mut j = 0
+            while(j < key_size){
+               block = append(block, get(ct, off + j))
+               j = j + 1
+            }
+            blocks = append(blocks, block)
+            off = off + key_size
+         }
+         ci = ci + 1
+      }
+      if(len(blocks) >= 2){
+         mut total = 0
+         mut bi = 0
+         while(bi + 1 < len(blocks)){
+            total = total + otp_case_1_otp_hamming_distance(get(blocks, bi), get(blocks, bi + 1))
+            bi = bi + 1
+         }
+         def distance = (float(total) / float(len(blocks) - 1)) / float(key_size)
+         if(prev_distance != nil){
+            ranked = otp_case_1__otp_insert_ranked(ranked, [key_size, prev_distance - distance])
+         }
+         prev_distance = distance
+      }
+      key_size = key_size + 1
+   }
+   mut out = list(0)
+   mut i = 0
+   while(i < len(ranked)){
+      out = append(out, get(get(ranked, i), 0))
+      i = i + 1
+   }
+   out
+}
+fn otp_case_1_otp_score_english(bytes, char_frequencies=nil, char_floor=-5){
+   mut score = 0
+   mut i = 0
+   while(i < len(bytes)){
+      def b = get(bytes, i)
+      if(!otp_case_1__otp_is_printable(b)){ return nil }
+      score = score + otp_case_1__otp_freq_weight(char_frequencies, b, char_floor)
+      i = i + 1
+   }
+   score
+}
+fn otp_case_1__otp_transpose(ciphertexts, offset, key_size){
+   mut out = list(0)
+   mut ci = 0
+   while(ci < len(ciphertexts)){
+      def ct = get(ciphertexts, ci)
+      mut j = offset
+      while(j < len(ct)){
+         out = append(out, get(ct, j))
+         j = j + key_size
+      }
+      ci = ci + 1
+   }
+   out
+}
+fn otp_case_1__otp_frequency_key_byte(bytes, char_frequencies, char_floor){
+   mut best_key = nil
+   mut best_score = nil
+   mut k = 0
+   while(k < 256){
+      mut plain = list(0)
+      mut i = 0
+      while(i < len(bytes)){
+         plain = append(plain, get(bytes, i) ^ k)
+         i = i + 1
+      }
+      def score = otp_case_1_otp_score_english(plain, char_frequencies, char_floor)
+      if(score != nil && (best_score == nil || score > best_score)){
+         best_score = score
+         best_key = k
+      }
+      k = k + 1
+   }
+   best_key
+}
+fn otp_case_1__otp_minimal_period(key){
+   def n = len(key)
+   mut period = 1
+   while(period <= n){
+      if(n % period == 0){
+         mut ok = true
+         mut i = 0
+         while(i < n && ok){
+            if(get(key, i) != get(key, i % period)){ ok = false }
+            i = i + 1
+         }
+         if(ok){
+            mut out = list(0)
+            mut j = 0
+            while(j < period){
+               out = append(out, get(key, j))
+               j = j + 1
+            }
+            return out
+         }
+      }
+      period = period + 1
+   }
+   key
+}
+fn otp_case_1_otp_apply_key(data, key){
+   def n = len(data)
+   def kn = len(key)
+   if(kn == 0){ return _clone_list(data) }
+   mut out = list(0)
+   mut i = 0
+   while(i < n){
+      out = append(out, get(data, i) ^ get(key, i % kn))
+      i = i + 1
+   }
+   out
+}
+fn otp_case_1_otp_recover_reused_key(ciphertexts, key_size=nil, max_key_size=nil, char_frequencies=nil, char_floor=-5){
+   def sizes = (key_size == nil) ? otp_case_1_otp_guess_key_sizes(ciphertexts, max_key_size) : [key_size]
+   mut best_key = nil
+   mut best_score = nil
+   mut si = 0
+   while(si < len(sizes)){
+      def ks = get(sizes, si)
+      mut key = list(0)
+      mut ok = true
+      mut i = 0
+      while(i < ks && ok){
+         def column = otp_case_1__otp_transpose(ciphertexts, i, ks)
+         def kb = otp_case_1__otp_frequency_key_byte(column, char_frequencies, char_floor)
+         if(kb == nil){ ok = false } else { key = append(key, kb) }
+         i = i + 1
+      }
+      if(ok){
+         key = otp_case_1__otp_minimal_period(key)
+         mut total_score = 0
+         mut ci = 0
+         while(ci < len(ciphertexts) && ok){
+            def plain = otp_case_1_otp_apply_key(get(ciphertexts, ci), key)
+            def score = otp_case_1_otp_score_english(plain, char_frequencies, char_floor)
+            if(score == nil){ ok = false } else { total_score = total_score + score }
+            ci = ci + 1
+         }
+         if(ok && (best_score == nil || total_score > best_score)){
+            best_score = total_score
+            best_key = key
+         }
+      }
+      si = si + 1
+   }
+   best_key
+}
+if(comptime{__main()}){
+   print("ok b")
+}
+
+fn otp_case_2__otp_min(a, b){ (a < b) ? a : b }
+fn otp_case_2__otp_is_printable(b){ (b >= 32 && b <= 126) || b == 9 || b == 10 || b == 13 }
+fn otp_case_2__otp_lower(b){ (b >= 65 && b <= 90) ? (b + 32) : b }
+fn otp_case_2__otp_default_weight(b){
+   def c = otp_case_2__otp_lower(b)
+   if(c == 32){ return 130 }
+   if(c == 101){ return 127 }
+   if(c == 116){ return 91 }
+   if(c == 97){ return 82 }
+   if(c == 111){ return 75 }
+   if(c == 105){ return 70 }
+   if(c == 110){ return 67 }
+   if(c == 115){ return 63 }
+   if(c == 104){ return 61 }
+   if(c == 114){ return 60 }
+   if(c == 100){ return 43 }
+   if(c == 108){ return 40 }
+   if(c == 117){ return 28 }
+   if(c == 99){ return 28 }
+   if(c == 109){ return 24 }
+   if(c == 102){ return 22 }
+   if(c == 119){ return 20 }
+   if(c == 103){ return 20 }
+   if(c == 121){ return 20 }
+   if(c == 112){ return 19 }
+   if(c == 98){ return 15 }
+   if(c == 118){ return 10 }
+   if(c == 107){ return 8 }
+   if(c == 106){ return 2 }
+   if(c == 120){ return 2 }
+   if(c == 113){ return 1 }
+   if(c == 122){ return 1 }
+   if(c >= 48 && c <= 57){ return 12 }
+   if(c == 44 || c == 46 || c == 39 || c == 34 || c == 45 || c == 58 || c == 59){ return 16 }
+   if(c == 9 || c == 10 || c == 13){ return 8 }
+   if(c >= 33 && c <= 126){ return 1 }
+   0
+}
+fn otp_case_2__otp_freq_weight(char_frequencies, b, char_floor){
+   if(char_frequencies == nil){ return otp_case_2__otp_default_weight(b) }
+   def c = otp_case_2__otp_lower(b)
+   mut weight = dict_get(char_frequencies, c, nil)
+   if(weight == nil){ weight = dict_get(char_frequencies, bytes_to_str([c]), nil) }
+   if(weight == nil){ return char_floor }
+   if(weight <= 0){ return char_floor }
+   log10(weight)
+}
+fn otp_case_2__otp_insert_ranked(ranked, item){
+   mut out = list(0)
+   mut inserted = false
+   mut i = 0
+   while(i < len(ranked)){
+      def cur = get(ranked, i)
+      if(!inserted && get(item, 1) > get(cur, 1)){
+         out = append(out, item)
+         inserted = true
+      }
+      out = append(out, cur)
+      i = i + 1
+   }
+   if(!inserted){ out = append(out, item) }
+   out
+}
+fn otp_case_2_otp_hamming_distance(a, b){
+   def n = otp_case_2__otp_min(len(a), len(b))
+   mut distance = 0
+   mut i = 0
+   while(i < n){
+      distance = distance + bit_count(get(a, i) ^ get(b, i))
+      i = i + 1
+   }
+   distance
+}
+fn otp_case_2_otp_guess_key_sizes(ciphertexts, max_key_size=nil){
+   def nct = len(ciphertexts)
+   if(nct == 0){ return [] }
+   mut max_len = 0
+   mut ci = 0
+   while(ci < nct){
+      def clen = len(get(ciphertexts, ci))
+      if(clen > max_len){ max_len = clen }
+      ci = ci + 1
+   }
+   mut limit = (max_key_size == nil) ? max_len : max_key_size
+   if(limit > max_len){ limit = max_len }
+   if(limit < 2){ return [] }
+   mut ranked = list(0)
+   mut prev_distance = nil
+   mut key_size = 2
+   while(key_size <= limit){
+      mut blocks = list(0)
+      ci = 0
+      while(ci < nct){
+         def ct = get(ciphertexts, ci)
+         mut off = 0
+         while(off + key_size <= len(ct)){
+            mut block = list(0)
+            mut j = 0
+            while(j < key_size){
+               block = append(block, get(ct, off + j))
+               j = j + 1
+            }
+            blocks = append(blocks, block)
+            off = off + key_size
+         }
+         ci = ci + 1
+      }
+      if(len(blocks) >= 2){
+         mut total = 0
+         mut bi = 0
+         while(bi + 1 < len(blocks)){
+            total = total + otp_case_2_otp_hamming_distance(get(blocks, bi), get(blocks, bi + 1))
+            bi = bi + 1
+         }
+         def distance = (float(total) / float(len(blocks) - 1)) / float(key_size)
+         if(prev_distance != nil){
+            ranked = otp_case_2__otp_insert_ranked(ranked, [key_size, prev_distance - distance])
+         }
+         prev_distance = distance
+      }
+      key_size = key_size + 1
+   }
+   mut out = list(0)
+   mut i = 0
+   while(i < len(ranked)){
+      out = append(out, get(get(ranked, i), 0))
+      i = i + 1
+   }
+   out
+}
+fn otp_case_2_otp_score_english(bytes, char_frequencies=nil, char_floor=-5){
+   mut score = 0
+   mut i = 0
+   while(i < len(bytes)){
+      def b = get(bytes, i)
+      if(!otp_case_2__otp_is_printable(b)){ return nil }
+      score = score + otp_case_2__otp_freq_weight(char_frequencies, b, char_floor)
+      i = i + 1
+   }
+   score
+}
+if(comptime{__main()}){
+   print("ok b1")
+}
+
+fn otp_case_3__otp_lower(b){ (b >= 65 && b <= 90) ? (b + 32) : b }
+fn otp_case_3__otp_default_weight(b){
+   def c = otp_case_3__otp_lower(b)
+   if(c == 32){ return 130 }
+   if(c >= 33 && c <= 126){ return 1 }
+   0
+}
+fn otp_case_3__otp_freq_weight(char_frequencies, b, char_floor){
+   if(char_frequencies == nil){ return otp_case_3__otp_default_weight(b) }
+   def c = otp_case_3__otp_lower(b)
+   mut weight = dict_get(char_frequencies, c, nil)
+   if(weight == nil){ weight = dict_get(char_frequencies, bytes_to_str([c]), nil) }
+   if(weight == nil){ return char_floor }
+   if(weight <= 0){ return char_floor }
+   log10(weight)
+}
+fn otp_case_3_otp_score_english(bytes, char_frequencies=nil, char_floor=-5){
+   mut score = 0
+   mut i = 0
+   while(i < len(bytes)){
+      def b = get(bytes, i)
+      if(!((b >= 32 && b <= 126) || b == 9 || b == 10 || b == 13)){ return nil }
+      score = score + otp_case_3__otp_freq_weight(char_frequencies, b, char_floor)
+      i = i + 1
+   }
+   score
+}
+fn otp_case_3__otp_transpose(ciphertexts, offset, key_size){
+   mut out = list(0)
+   mut ci = 0
+   while(ci < len(ciphertexts)){
+      def ct = get(ciphertexts, ci)
+      mut j = offset
+      while(j < len(ct)){
+         out = append(out, get(ct, j))
+         j = j + key_size
+      }
+      ci = ci + 1
+   }
+   out
+}
+fn otp_case_3__otp_frequency_key_byte(bytes, char_frequencies, char_floor){
+   mut best_key = nil
+   mut best_score = nil
+   mut k = 0
+   while(k < 256){
+      mut plain = list(0)
+      mut i = 0
+      while(i < len(bytes)){
+         plain = append(plain, get(bytes, i) ^ k)
+         i = i + 1
+      }
+      def score = otp_case_3_otp_score_english(plain, char_frequencies, char_floor)
+      if(score != nil && (best_score == nil || score > best_score)){
+         best_score = score
+         best_key = k
+      }
+      k = k + 1
+   }
+   best_key
+}
+fn otp_case_3__otp_minimal_period(key){
+   def n = len(key)
+   mut period = 1
+   while(period <= n){
+      if(n % period == 0){
+         mut ok = true
+         mut i = 0
+         while(i < n && ok){
+            if(get(key, i) != get(key, i % period)){ ok = false }
+            i = i + 1
+         }
+         if(ok){
+            mut out = list(0)
+            mut j = 0
+            while(j < period){
+               out = append(out, get(key, j))
+               j = j + 1
+            }
+            return out
+         }
+      }
+      period = period + 1
+   }
+   key
+}
+fn otp_case_3_otp_apply_key(data, key){
+   def n = len(data)
+   def kn = len(key)
+   if(kn == 0){ return _clone_list(data) }
+   mut out = list(0)
+   mut i = 0
+   while(i < n){
+      out = append(out, get(data, i) ^ get(key, i % kn))
+      i = i + 1
+   }
+   out
+}
+fn otp_case_3_otp_recover_reused_key(ciphertexts, key_size=nil, max_key_size=nil, char_frequencies=nil, char_floor=-5){
+   def sizes = (key_size == nil) ? [3] : [key_size]
+   mut best_key = nil
+   mut best_score = nil
+   mut si = 0
+   while(si < len(sizes)){
+      def ks = get(sizes, si)
+      mut key = list(0)
+      mut ok = true
+      mut i = 0
+      while(i < ks && ok){
+         def column = otp_case_3__otp_transpose(ciphertexts, i, ks)
+         def kb = otp_case_3__otp_frequency_key_byte(column, char_frequencies, char_floor)
+         if(kb == nil){ ok = false } else { key = append(key, kb) }
+         i = i + 1
+      }
+      if(ok){
+         key = otp_case_3__otp_minimal_period(key)
+         mut total_score = 0
+         mut ci = 0
+         while(ci < len(ciphertexts) && ok){
+            def plain = otp_case_3_otp_apply_key(get(ciphertexts, ci), key)
+            def score = otp_case_3_otp_score_english(plain, char_frequencies, char_floor)
+            if(score == nil){ ok = false } else { total_score = total_score + score }
+            ci = ci + 1
+         }
+         if(ok && (best_score == nil || total_score > best_score)){
+            best_score = total_score
+            best_key = key
+         }
+      }
+      si = si + 1
+   }
+   best_key
+}
+if(comptime{__main()}){
+   print("ok b2")
+}
+
+fn otp_case_4__otp_lower(b){ (b >= 65 && b <= 90) ? (b + 32) : b }
+fn otp_case_4__otp_default_weight(b){
+   def c = otp_case_4__otp_lower(b)
+   if(c == 32){ return 130 }
+   if(c >= 33 && c <= 126){ return 1 }
+   0
+}
+fn otp_case_4__otp_freq_weight(char_frequencies, b, char_floor){
+   if(char_frequencies == nil){ return otp_case_4__otp_default_weight(b) }
+   def c = otp_case_4__otp_lower(b)
+   mut weight = dict_get(char_frequencies, c, nil)
+   if(weight == nil){ weight = dict_get(char_frequencies, bytes_to_str([c]), nil) }
+   if(weight == nil){ return char_floor }
+   if(weight <= 0){ return char_floor }
+   log10(weight)
+}
+fn otp_case_4_otp_score_english(bytes, char_frequencies=nil, char_floor=-5){
+   mut score = 0
+   mut i = 0
+   while(i < len(bytes)){
+      def b = get(bytes, i)
+      if(!((b >= 32 && b <= 126) || b == 9 || b == 10 || b == 13)){ return nil }
+      score = score + otp_case_4__otp_freq_weight(char_frequencies, b, char_floor)
+      i = i + 1
+   }
+   score
+}
+fn otp_case_4__otp_transpose(ciphertexts, offset, key_size){
+   mut out = list(0)
+   mut ci = 0
+   while(ci < len(ciphertexts)){
+      def ct = get(ciphertexts, ci)
+      mut j = offset
+      while(j < len(ct)){
+         out = append(out, get(ct, j))
+         j = j + key_size
+      }
+      ci = ci + 1
+   }
+   out
+}
+fn otp_case_4__otp_frequency_key_byte(bytes, char_frequencies, char_floor){
+   mut best_key = nil
+   mut best_score = nil
+   mut k = 0
+   while(k < 256){
+      mut plain = list(0)
+      mut i = 0
+      while(i < len(bytes)){
+         plain = append(plain, get(bytes, i) ^ k)
+         i = i + 1
+      }
+      def score = otp_case_4_otp_score_english(plain, char_frequencies, char_floor)
+      if(score != nil && (best_score == nil || score > best_score)){
+         best_score = score
+         best_key = k
+      }
+      k = k + 1
+   }
+   best_key
+}
+fn otp_case_4__otp_minimal_period(key){
+   def n = len(key)
+   mut period = 1
+   while(period <= n){
+      if(n % period == 0){
+         mut ok = true
+         mut i = 0
+         while(i < n && ok){
+            if(get(key, i) != get(key, i % period)){ ok = false }
+            i = i + 1
+         }
+         if(ok){
+            mut out = list(0)
+            mut j = 0
+            while(j < period){
+               out = append(out, get(key, j))
+               j = j + 1
+            }
+            return out
+         }
+      }
+      period = period + 1
+   }
+   key
+}
+fn otp_case_4_otp_apply_key(data, key){
+   def n = len(data)
+   def kn = len(key)
+   if(kn == 0){ return _clone_list(data) }
+   mut out = list(0)
+   mut i = 0
+   while(i < n){
+      out = append(out, get(data, i) ^ get(key, i % kn))
+      i = i + 1
+   }
+   out
+}
+if(comptime{__main()}){
+   print("ok b2a")
+}
+
+fn otp_case_5__otp_lower(b){ (b >= 65 && b <= 90) ? (b + 32) : b }
+fn otp_case_5__otp_default_weight(b){
+   def c = otp_case_5__otp_lower(b)
+   if(c == 32){ return 130 }
+   if(c >= 33 && c <= 126){ return 1 }
+   0
+}
+fn otp_case_5__otp_freq_weight(char_frequencies, b, char_floor){
+   if(char_frequencies == nil){ return otp_case_5__otp_default_weight(b) }
+   char_floor
+}
+fn otp_case_5_otp_score_english(bytes, char_frequencies=nil, char_floor=-5){
+   mut score = 0
+   mut i = 0
+   while(i < len(bytes)){
+      def b = get(bytes, i)
+      if(!((b >= 32 && b <= 126) || b == 9 || b == 10 || b == 13)){ return nil }
+      score = score + otp_case_5__otp_freq_weight(char_frequencies, b, char_floor)
+      i = i + 1
+   }
+   score
+}
+fn otp_case_5__otp_transpose(ciphertexts, offset, key_size){ [] }
+fn otp_case_5__otp_frequency_key_byte(bytes, char_frequencies, char_floor){ 0 }
+fn otp_case_5__otp_minimal_period(key){ key }
+fn otp_case_5_otp_apply_key(data, key){ data }
+fn otp_case_5_otp_recover_reused_key(ciphertexts, key_size=nil, max_key_size=nil, char_frequencies=nil, char_floor=-5){
+   def sizes = (key_size == nil) ? [3] : [key_size]
+   mut best_key = nil
+   mut best_score = nil
+   mut si = 0
+   while(si < len(sizes)){
+      def ks = get(sizes, si)
+      mut key = list(0)
+      mut ok = true
+      mut i = 0
+      while(i < ks && ok){
+         def column = otp_case_5__otp_transpose(ciphertexts, i, ks)
+         def kb = otp_case_5__otp_frequency_key_byte(column, char_frequencies, char_floor)
+         if(kb == nil){ ok = false } else { key = append(key, kb) }
+         i = i + 1
+      }
+      if(ok){
+         key = otp_case_5__otp_minimal_period(key)
+         mut total_score = 0
+         mut ci = 0
+         while(ci < len(ciphertexts) && ok){
+            def plain = otp_case_5_otp_apply_key(get(ciphertexts, ci), key)
+            def score = otp_case_5_otp_score_english(plain, char_frequencies, char_floor)
+            if(score == nil){ ok = false } else { total_score = total_score + score }
+            ci = ci + 1
+         }
+         if(ok && (best_score == nil || total_score > best_score)){
+            best_score = total_score
+            best_key = key
+         }
+      }
+      si = si + 1
+   }
+   best_key
+}
+if(comptime{__main()}){
+   print("ok b2b")
+}
+
+fn otp_case_6_f(ciphertexts, key_size=nil){
+   def sizes = (key_size == nil) ? [3] : [key_size]
+   mut best_key = nil
+   mut si = 0
+   while(si < len(sizes)){
+      def ks = get(sizes, si)
+      mut key = list(0)
+      mut ok = true
+      mut i = 0
+      while(i < ks && ok){
+         def kb = 0
+         if(kb == nil){ ok = false } else { key = append(key, kb) }
+         i = i + 1
+      }
+      if(ok){
+         best_key = key
+      }
+      si = si + 1
+   }
+   best_key
+}
+if(comptime{__main()}){
+   print("ok c1")
+}
+
+fn otp_case_7_f(ciphertexts, key_size=nil, char_frequencies=nil, char_floor=-5){
+   def sizes = (key_size == nil) ? [3] : [key_size]
+   mut best_key = nil
+   mut best_score = nil
+   mut si = 0
+   while(si < len(sizes)){
+      def ks = get(sizes, si)
+      mut key = list(0)
+      mut ok = true
+      mut i = 0
+      while(i < ks && ok){
+         def kb = 0
+         if(kb == nil){ ok = false } else { key = append(key, kb) }
+         i = i + 1
+      }
+      if(ok){
+         mut total_score = 0
+         mut ci = 0
+         while(ci < len(ciphertexts) && ok){
+            def score = 1
+            if(score == nil){ ok = false } else { total_score = total_score + score }
+            ci = ci + 1
+         }
+         if(ok && (best_score == nil || total_score > best_score)){
+            best_score = total_score
+            best_key = key
+         }
+      }
+      si = si + 1
+   }
+   best_key
+}
+if(comptime{__main()}){
+   print("ok c2")
+}
+
+fn otp_case_8_f(ciphertexts, key_size=nil){
+   def sizes = (key_size == nil) ? [3] : [key_size]
+   mut best_key = nil
+   mut best_score = nil
+   mut si = 0
+   while(si < len(sizes)){
+      def ks = get(sizes, si)
+      mut key = list(0)
+      mut ok = true
+      mut i = 0
+      while(i < ks && ok){
+         key = append(key, 0)
+         i = i + 1
+      }
+      if(ok){
+         mut total_score = 0
+         mut ci = 0
+         while(ci < len(ciphertexts) && ok){
+            total_score = total_score + 1
+            ci = ci + 1
+         }
+         if(ok && (best_score == nil || total_score > best_score)){
+            best_score = total_score
+            best_key = key
+         }
+      }
+      si = si + 1
+   }
+   best_key
+}
+if(comptime{__main()}){
+   print("ok c3")
+}
+
+fn otp_case_9_f(key_size=nil){
+   def sizes = (key_size == nil) ? [3] : [key_size]
+   mut si = 0
+   while(si < len(sizes)){
+      def ks = get(sizes, si)
+      mut ok = true
+      mut i = 0
+      while(i < ks && ok){
+         i = i + 1
+      }
+      si = si + 1
+   }
+   0
+}
+if(comptime{__main()}){
+   print("ok d1")
+}
+
+fn otp_case_10_f(key_size=nil){
+   def sizes = (key_size == nil) ? [3] : [key_size]
+   mut si = 0
+   while(si < len(sizes)){
+      def ks = get(sizes, si)
+      mut key = list(0)
+      mut i = 0
+      while(i < ks){
+         key = append(key, 0)
+         i = i + 1
+      }
+      si = si + 1
+   }
+   0
+}
+if(comptime{__main()}){
+   print("ok d2")
+}
+
+fn otp_case_11_f(key_size=nil){
+   def sizes = (key_size == nil) ? [3] : [key_size]
+   mut best_score = nil
+   mut si = 0
+   while(si < len(sizes)){
+      mut total_score = 0
+      if(best_score == nil || total_score > best_score){
+         best_score = total_score
+      }
+      si = si + 1
+   }
+   best_score
+}
+if(comptime{__main()}){
+   print("ok d3")
+}
+NY
+}

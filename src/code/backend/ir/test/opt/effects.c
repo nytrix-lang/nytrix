@@ -4,6 +4,7 @@
 #include <limits.h>
 #include <nyr/ir.h>
 #include <stdio.h>
+#include <string.h>
 
 static unsigned expected_effects(nyr_op_t op) {
   switch (op) {
@@ -71,11 +72,13 @@ static unsigned expected_effects(nyr_op_t op) {
   case NYIR_VEC8_AND_I64:
   case NYIR_VEC8_OR_I64:
   case NYIR_VEC8_XOR_I64:
+  case NYIR_VEC8_SAR_I64:
   case NYIR_VEC8_REDUCE_ADD_I64:
   case NYIR_SIN_F64:
   case NYIR_COS_F64:
   case NYIR_VEC4_REDUCE_ADD_F64:
   case NYIR_VEC4_SET1_I64:
+  case NYIR_VEC8_SET1_I64:
   case NYIR_SELECT_I64:
   case NYIR_ROR32_I64:
   case NYIR_BSWAP_I64:
@@ -103,12 +106,21 @@ static unsigned expected_effects(nyr_op_t op) {
   case NYIR_BOUNDS_CHECK:
     return NYIR_EFFECT_CONTROL | NYIR_EFFECT_MAY_TRAP;
   case NYIR_COPY_STRUCT:
+  case NYIR_VA_START:
+  case NYIR_VA_ARG:
     return NYIR_EFFECT_READ_MEMORY | NYIR_EFFECT_WRITE_MEMORY |
            NYIR_EFFECT_MAY_TRAP;
   case NYIR_ALLOCA:
     return NYIR_EFFECT_ALLOCATION;
+  case NYIR_VA_SAVE:
+    return NYIR_EFFECT_ALLOCATION | NYIR_EFFECT_WRITE_MEMORY;
   case NYIR_CALL:
     return NYIR_EFFECT_CALL | NYIR_EFFECT_UNKNOWN_SIDE_EFFECT;
+  case NYIR_INLINE_ASM:
+    return NYIR_EFFECT_CALL | NYIR_EFFECT_UNKNOWN_SIDE_EFFECT |
+           NYIR_EFFECT_VOLATILE;
+  case NYIR_READ_X86_RSP:
+    return NYIR_EFFECT_VOLATILE;
   case NYIR_RET:
   case NYIR_BR:
   case NYIR_BR_IF:
@@ -120,6 +132,33 @@ static unsigned expected_effects(nyr_op_t op) {
    * A new opcode must be classified explicitly in both tables.
    */
   return UINT_MAX;
+}
+
+static bool rsp_binary_roundtrip(void) {
+  nyr_func_t source = {0};
+  nyr_func_t loaded = {0};
+  char name[32] = {0};
+  char err[256] = {0};
+  FILE *artifact = tmpfile();
+  int value =
+      nyr_ir_emit(&source, (nyr_inst_t){.op = NYIR_READ_X86_RSP, .dst = -1});
+  bool ok = artifact && value == 0 &&
+            nyr_dump_binary(artifact, &source, "rsp_roundtrip") &&
+            fflush(artifact) == 0 && fseek(artifact, 0, SEEK_SET) == 0 &&
+            nyr_load_binary(artifact, &loaded, name, sizeof(name), err,
+                            sizeof(err)) &&
+            loaded.len == 1 && loaded.data[0].op == NYIR_READ_X86_RSP &&
+            loaded.data[0].dst == value &&
+            loaded.data[0].effects == NYIR_EFFECT_VOLATILE &&
+            strcmp(name, "rsp_roundtrip") == 0;
+  if (!ok)
+    fprintf(stderr, "[effects] RSP-read NYIR binary round-trip failed: %s\n",
+            err);
+  if (artifact)
+    fclose(artifact);
+  nyr_ir_func_free(&loaded);
+  nyr_ir_func_free(&source);
+  return ok;
 }
 
 int main(void) {
@@ -143,6 +182,8 @@ int main(void) {
             "[effects] null/invalid opcode handling is not conservative\n");
     return 1;
   }
+  if (!rsp_binary_roundtrip())
+    return 1;
   const unsigned call_effects[] = {
       NYIR_EFFECT_CALL,
       NYIR_EFFECT_CALL | NYIR_EFFECT_READ_MEMORY,

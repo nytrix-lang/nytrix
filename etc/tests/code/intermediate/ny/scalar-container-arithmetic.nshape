@@ -3,7 +3,7 @@ shape native_scalar_container_arithmetic {
   generator "native"
   features ["native", "nyir", "representation", "list", "dict"]
   template ny-test-case
-  flags "--native-only --native-backend=x86_64 -O3 --nyir-verify --no-progress --color=never"
+  flags "--native-only --native-backend=x86_64 -O3 --nyr-verify --no-progress --color=never"
   expect compile_and_run
   source ny <<'NY'
 use core

@@ -17,6 +17,12 @@ typedef struct {
   int64_t label;
 } ifc_arm_t;
 
+typedef struct {
+  int64_t slot;
+  int false_value;
+  int true_value;
+} ifc_store_pair_t;
+
 static size_t ifc_label_block(const nyr_cfg_t *cfg, int64_t label) {
   if (!cfg)
     return SIZE_MAX;
@@ -159,11 +165,23 @@ static bool ifc_boolean_condition(const nyr_func_t *f, const int *defs,
 }
 
 static bool ifc_safe_arm_op(const nyr_inst_t *in) {
-  if (!in || in->dst < 0 || nyr_inst_effects(in) != NYIR_EFFECT_NONE ||
+  bool local_load = in && in->op == NYIR_LOAD_LOCAL &&
+                    nyr_inst_effects(in) == NYIR_EFFECT_READ_LOCAL &&
+                    in->scalar_class == NYIR_SCALAR_I64_RAW;
+  bool local_store = in && in->op == NYIR_STORE_LOCAL &&
+                     nyr_inst_effects(in) == NYIR_EFFECT_WRITE_LOCAL &&
+                     in->scalar_class == NYIR_SCALAR_I64_RAW;
+  if (!in || (in->dst < 0 && !local_store) ||
+      (!local_load && !local_store &&
+       nyr_inst_effects(in) != NYIR_EFFECT_NONE) ||
       in->extra_args || in->extra_args_len || in->arg_sizes ||
       in->phi_incoming || in->phi_incoming_len || in->symbol)
     return false;
   switch (in->op) {
+  case NYIR_LOAD_LOCAL:
+    return local_load && in->imm >= 0;
+  case NYIR_STORE_LOCAL:
+    return local_store && in->imm >= 0 && in->a >= 0;
   case NYIR_CONST_I64:
   case NYIR_COPY:
   case NYIR_ADD_I64:
@@ -203,13 +221,106 @@ static bool ifc_arm_operands_available(const nyr_cfg_t *cfg, const int *defs,
                                        const ifc_arm_t *arm, size_t header,
                                        size_t header_branch,
                                        const nyr_inst_t *in) {
-  if (in->op == NYIR_CONST_I64)
+  if (in->op == NYIR_CONST_I64 || in->op == NYIR_LOAD_LOCAL)
     return true;
   if (!ifc_value_available(cfg, defs, arm, header, header_branch, in->a))
     return false;
-  if (in->op == NYIR_COPY)
+  if (in->op == NYIR_COPY || in->op == NYIR_STORE_LOCAL)
     return true;
   return ifc_value_available(cfg, defs, arm, header, header_branch, in->b);
+}
+
+static bool ifc_local_load_is_initialized(const nyr_func_t *f,
+                                          const nyr_cfg_t *cfg, size_t header,
+                                          size_t header_branch, int64_t slot) {
+  if (!f || !cfg || slot < 0)
+    return false;
+  bool initialized = (uint64_t)slot < f->param_count;
+  for (size_t i = 0; i < f->len; ++i) {
+    const nyr_inst_t *in = &f->data[i];
+    if (in->op == NYIR_ADDR_LOCAL && in->imm == slot)
+      return false;
+    if (in->op != NYIR_STORE_LOCAL || in->imm != slot)
+      continue;
+    size_t block = cfg->inst_block[i];
+    if ((block == header && i < header_branch) ||
+        (block != header && nyr_cfg_dominates(cfg, block, header)))
+      initialized = true;
+  }
+  return initialized;
+}
+
+static bool ifc_arm_store_pairs(const nyr_func_t *f, const ifc_arm_t *false_arm,
+                                const ifc_arm_t *true_arm,
+                                ifc_store_pair_t *pairs, size_t *pair_count) {
+  if (!f || !false_arm || !true_arm || !pairs || !pair_count)
+    return false;
+  *pair_count = 0;
+  bool matched[8] = {false};
+  for (size_t i = 0; i < false_arm->count; ++i) {
+    const nyr_inst_t *false_store = &f->data[false_arm->insts[i]];
+    if (false_store->op != NYIR_STORE_LOCAL)
+      continue;
+    if (*pair_count >= 8)
+      return false;
+    for (size_t at = 0; at < f->len; ++at)
+      if (f->data[at].op == NYIR_ADDR_LOCAL &&
+          f->data[at].imm == false_store->imm)
+        return false;
+    size_t match = SIZE_MAX;
+    for (size_t j = 0; j < true_arm->count; ++j) {
+      const nyr_inst_t *true_store = &f->data[true_arm->insts[j]];
+      if (true_store->op != NYIR_STORE_LOCAL ||
+          true_store->imm != false_store->imm)
+        continue;
+      if (match != SIZE_MAX)
+        return false;
+      match = j;
+    }
+    if (match == SIZE_MAX || matched[match])
+      return false;
+    const nyr_inst_t *true_store = &f->data[true_arm->insts[match]];
+    matched[match] = true;
+    pairs[(*pair_count)++] = (ifc_store_pair_t){
+        .slot = false_store->imm,
+        .false_value = false_store->a,
+        .true_value = true_store->a,
+    };
+  }
+  for (size_t j = 0; j < true_arm->count; ++j)
+    if (f->data[true_arm->insts[j]].op == NYIR_STORE_LOCAL && !matched[j])
+      return false;
+  return true;
+}
+
+static bool ifc_arms_have_stable_local_loads(const nyr_func_t *f,
+                                             const nyr_cfg_t *cfg,
+                                             size_t header,
+                                             size_t header_branch,
+                                             const ifc_arm_t *false_arm,
+                                             const ifc_arm_t *true_arm) {
+  const ifc_arm_t *arms[] = {false_arm, true_arm};
+  for (size_t a = 0; a < 2; ++a) {
+    const ifc_arm_t *arm = arms[a];
+    for (size_t i = 0; i < arm->count; ++i) {
+      const nyr_inst_t *load = &f->data[arm->insts[i]];
+      if (load->op != NYIR_LOAD_LOCAL)
+        continue;
+      if (!ifc_local_load_is_initialized(f, cfg, header, header_branch,
+                                         load->imm))
+        return false;
+      for (size_t other_arm = 0; other_arm < 2; ++other_arm) {
+        const ifc_arm_t *writes = arms[other_arm];
+        for (size_t j = 0; j < writes->count; ++j) {
+          const nyr_inst_t *write = &f->data[writes->insts[j]];
+          if (write->op == NYIR_STORE_LOCAL && write->imm == load->imm &&
+              other_arm == a && writes->insts[j] < arm->insts[i])
+            return false;
+        }
+      }
+    }
+  }
+  return true;
 }
 
 static bool ifc_parse_arm(const nyr_func_t *f, const nyr_cfg_t *cfg,
@@ -290,16 +401,25 @@ static bool ifc_arm_defines(const nyr_func_t *f, const ifc_arm_t *arm,
 static bool ifc_rewrite(nyr_func_t *f, size_t branch,
                         const ifc_arm_t *false_arm, const ifc_arm_t *true_arm,
                         size_t phi_index, int false_value, int true_value,
-                        int64_t join_label, bool normalize_condition) {
+                        const ifc_store_pair_t *store_pairs,
+                        size_t store_pair_count, int64_t join_label,
+                        bool normalize_condition) {
+  size_t moved_count = 0;
+  for (size_t i = 0; i < false_arm->count; ++i)
+    moved_count += f->data[false_arm->insts[i]].op != NYIR_STORE_LOCAL;
+  for (size_t i = 0; i < true_arm->count; ++i)
+    moved_count += f->data[true_arm->insts[i]].op != NYIR_STORE_LOCAL;
   size_t inserted =
-      false_arm->count + true_arm->count + 2 + (normalize_condition ? 2 : 0);
+      moved_count + 2 * store_pair_count + 2 + (normalize_condition ? 2 : 0);
   size_t delta = inserted - 1;
-  nyr_inst_t moved[16];
+  nyr_inst_t moved[32];
   size_t n = 0;
   for (size_t i = 0; i < false_arm->count; ++i)
-    moved[n++] = f->data[false_arm->insts[i]];
+    if (f->data[false_arm->insts[i]].op != NYIR_STORE_LOCAL)
+      moved[n++] = f->data[false_arm->insts[i]];
   for (size_t i = 0; i < true_arm->count; ++i)
-    moved[n++] = f->data[true_arm->insts[i]];
+    if (f->data[true_arm->insts[i]].op != NYIR_STORE_LOCAL)
+      moved[n++] = f->data[true_arm->insts[i]];
   nyr_inst_t old_branch = f->data[branch];
   nyr_inst_t phi = f->data[phi_index];
   int condition = old_branch.a;
@@ -308,6 +428,9 @@ static bool ifc_rewrite(nyr_func_t *f, size_t branch,
     zero = f->next_value++;
     condition = f->next_value++;
   }
+  int selected_stores[8];
+  for (size_t i = 0; i < store_pair_count; ++i)
+    selected_stores[i] = f->next_value++;
   /*
    * The SELECT replaces the PHI result, so keep facts attached to that
    * result.  The incoming-edge allocation remains owned by the old PHI and
@@ -315,6 +438,7 @@ static bool ifc_rewrite(nyr_func_t *f, size_t branch,
    */
   nyr_inst_t select = phi;
   select.op = NYIR_SELECT_I64;
+  select.scalar_class = NYIR_SCALAR_I64_RAW;
   select.a = condition;
   select.b = true_value;
   select.c = false_value;
@@ -355,6 +479,27 @@ static bool ifc_rewrite(nyr_func_t *f, size_t branch,
                                         .f = -1,
                                         .cmp = NYIR_CMP_NE};
   }
+  for (size_t i = 0; i < store_pair_count; ++i) {
+    f->data[select_at++] = (nyr_inst_t){.op = NYIR_SELECT_I64,
+                                        .dst = selected_stores[i],
+                                        .a = condition,
+                                        .b = store_pairs[i].true_value,
+                                        .c = store_pairs[i].false_value,
+                                        .d = -1,
+                                        .e = -1,
+                                        .f = -1,
+                                        .scalar_class = NYIR_SCALAR_I64_RAW};
+    f->data[select_at++] = (nyr_inst_t){.op = NYIR_STORE_LOCAL,
+                                        .dst = -1,
+                                        .a = selected_stores[i],
+                                        .b = -1,
+                                        .c = -1,
+                                        .d = -1,
+                                        .e = -1,
+                                        .f = -1,
+                                        .imm = store_pairs[i].slot,
+                                        .scalar_class = NYIR_SCALAR_I64_RAW};
+  }
   f->data[select_at++] = select;
   f->data[select_at] = (nyr_inst_t){.op = NYIR_BR,
                                     .dst = -1,
@@ -385,9 +530,12 @@ bool nyr_if_convert(nyr_func_t *f) {
   for (;;) {
     nyr_cfg_t cfg = {0};
     int *defs = nyr_build_defs(f);
-    if (!defs || !nyr_cfg_build(f, &cfg)) {
+    nyr_type_map_t types = {0};
+    if (!defs || !nyr_cfg_build(f, &cfg) ||
+        !nyr_type_map_init(&types, f, nyr_max_local(f))) {
       free(defs);
       nyr_cfg_free(&cfg);
+      nyr_type_map_free(&types);
       return false;
     }
     bool changed = false;
@@ -445,35 +593,60 @@ bool nyr_if_convert(nyr_func_t *f) {
           !ifc_two_predecessors(&cfg, join, false_block, true_block))
         continue;
       ifc_arm_t false_arm, true_arm;
+      ifc_store_pair_t store_pairs[8];
+      size_t store_pair_count = 0;
       size_t phi = SIZE_MAX;
       int false_value = -1, true_value = -1;
       if (!ifc_parse_arm(f, &cfg, defs, false_block, header, branch, join_label,
                          &false_arm) ||
           !ifc_parse_arm(f, &cfg, defs, true_block, header, branch, join_label,
                          &true_arm) ||
+          !ifc_arm_store_pairs(f, &false_arm, &true_arm, store_pairs,
+                               &store_pair_count) ||
+          !ifc_arms_have_stable_local_loads(f, &cfg, header, branch, &false_arm,
+                                            &true_arm) ||
           !ifc_join_phi(f, &cfg, join, &false_arm, &true_arm, &phi,
                         &false_value, &true_value) ||
           !ifc_arm_defines(f, &false_arm, false_value) ||
           !ifc_arm_defines(f, &true_arm, true_value))
         continue;
+      const nyr_inst_t *phi_inst = &f->data[phi];
+      /*
+       * Loop collapsing can leave an unclassified PHI whose incoming
+       * definitions still carry exact raw-i64 ABI facts. Recover only that
+       * unambiguous class; tagged values and pointers remain excluded.
+       */
+      bool raw_phi = phi_inst->scalar_class == NYIR_SCALAR_I64_RAW;
+      if (phi_inst->scalar_class == NYIR_SCALAR_UNKNOWN &&
+          defs[false_value] >= 0 && defs[true_value] >= 0)
+        raw_phi =
+            f->data[defs[false_value]].scalar_class == NYIR_SCALAR_I64_RAW &&
+            f->data[defs[true_value]].scalar_class == NYIR_SCALAR_I64_RAW;
+      if (!raw_phi || types.value_f64[false_value] ||
+          types.value_f32[false_value] || types.value_f64[true_value] ||
+          types.value_f32[true_value])
+        continue;
       size_t cost = ifc_arm_cost(f, &false_arm) + ifc_arm_cost(f, &true_arm);
       size_t budget =
           cost > 4 && ifc_diamond_is_in_loop(&cfg, header, false_block,
                                              true_block, join)
-              ? 10
+              ? 20
               : 4;
       if (cost > budget)
         continue;
       if (!ifc_rewrite(f, branch, &false_arm, &true_arm, phi, false_value,
-                       true_value, join_label, !condition_is_boolean)) {
+                       true_value, store_pairs, store_pair_count, join_label,
+                       !condition_is_boolean)) {
         free(defs);
         nyr_cfg_free(&cfg);
+        nyr_type_map_free(&types);
         return false;
       }
       changed = true;
     }
     free(defs);
     nyr_cfg_free(&cfg);
+    nyr_type_map_free(&types);
     if (!changed)
       return true;
   }

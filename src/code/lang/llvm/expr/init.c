@@ -7,9 +7,9 @@
 #include "base/util.h"
 
 #include "code/backend/llvm/bridge.h"
+#include "code/backend/runtime/shared.h"
 #include "code/lang/llvm/jit.h"
 #include "code/lang/priv.h"
-#include "code/lang/runtime/shared.h"
 #include "code/lang/types/nullnarrow.h"
 #ifndef _WIN32
 #include <alloca.h>

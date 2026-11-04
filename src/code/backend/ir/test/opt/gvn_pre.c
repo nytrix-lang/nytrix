@@ -10,49 +10,19 @@ static int64_t gvn_pre_cell = 41;
 static int64_t gvn_pre_counter = 0;
 
 static int emit_load(nyr_func_t *f, int address) {
-  return nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_LOAD_I64,
-                                    .dst = -1,
-                                    .a = address,
-                                    .b = -1,
-                                    .c = -1,
-                                    .d = -1,
-                                    .e = -1,
-                                    .f = -1});
+  return nyr_opt_emit_abc(f, NYIR_LOAD_I64, address, -1, -1);
 }
 
 static int emit_load_local(nyr_func_t *f, int slot) {
-  return nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_LOAD_LOCAL,
-                                    .dst = -1,
-                                    .a = -1,
-                                    .b = -1,
-                                    .c = -1,
-                                    .d = -1,
-                                    .e = -1,
-                                    .f = -1,
-                                    .imm = slot});
+  return nyr_opt_emit_imm(f, NYIR_LOAD_LOCAL, slot);
 }
 
 static void emit_store(nyr_func_t *f, int address, int value) {
-  nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_STORE_I64,
-                             .dst = -1,
-                             .a = address,
-                             .b = -1,
-                             .c = value,
-                             .d = -1,
-                             .e = -1,
-                             .f = -1});
+  nyr_opt_emit_abc(f, NYIR_STORE_I64, address, -1, value);
 }
 
 static int emit_symbol_address(nyr_func_t *f, const char *name) {
-  return nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_ADDR_SYMBOL,
-                                    .dst = -1,
-                                    .a = -1,
-                                    .b = -1,
-                                    .c = -1,
-                                    .d = -1,
-                                    .e = -1,
-                                    .f = -1,
-                                    .symbol = name});
+  return nyr_opt_emit_symbol(f, NYIR_ADDR_SYMBOL, name);
 }
 
 static int emit_address_offset(nyr_func_t *f, int address, int64_t offset) {
@@ -61,14 +31,7 @@ static int emit_address_offset(nyr_func_t *f, int address, int64_t offset) {
   int amount = nyr_opt_const(f, offset);
   if (amount < 0)
     return -1;
-  return nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_ADD_I64,
-                                    .dst = -1,
-                                    .a = address,
-                                    .b = amount,
-                                    .c = -1,
-                                    .d = -1,
-                                    .e = -1,
-                                    .f = -1});
+  return nyr_opt_emit_abc(f, NYIR_ADD_I64, address, amount, -1);
 }
 
 static void emit_local_store(nyr_func_t *f, int slot, int value) {
@@ -191,27 +154,11 @@ static bool run_local_store_case(void) {
 static bool run_unrelated_local_store_case(void) {
   nyr_func_t f;
   nyr_opt_begin(&f);
-  int address = nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_ADDR_SYMBOL,
-                                            .dst = -1,
-                                            .a = -1,
-                                            .b = -1,
-                                            .c = -1,
-                                            .d = -1,
-                                            .e = -1,
-                                            .f = -1,
-                                            .symbol = "gvn_pre_global_cell"});
+  int address = nyr_opt_emit_symbol(&f, NYIR_ADDR_SYMBOL, "gvn_pre_global_cell");
   address = nyr_opt_binop(&f, NYIR_ADD_I64, address, nyr_opt_const(&f, 0));
   int first = emit_load(&f, address);
   emit_local_store(&f, 0, nyr_opt_const(&f, 99));
-  nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_ADDR_LOCAL,
-                              .dst = -1,
-                              .a = -1,
-                              .b = -1,
-                              .c = -1,
-                              .d = -1,
-                              .e = -1,
-                              .f = -1,
-                              .imm = 1});
+  nyr_opt_emit_imm(&f, NYIR_ADDR_LOCAL, 1);
   int second = emit_load(&f, address);
   nyr_opt_ret(&f, second);
   bool ok = nyr_globaltab_add("gvn_pre_global_cell") &&
@@ -243,14 +190,7 @@ static bool run_unknown_offset_store_case(void) {
   int write_address = nyr_opt_binop(&f, NYIR_ADD_I64, write_base, offset);
   int first = emit_load(&f, read_address);
   int value = nyr_opt_const(&f, 99);
-  nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_STORE_I64,
-                              .dst = -1,
-                              .a = write_address,
-                              .b = -1,
-                              .c = value,
-                              .d = -1,
-                              .e = -1,
-                              .f = -1});
+  nyr_opt_emit_abc(&f, NYIR_STORE_I64, write_address, -1, value);
   int second = emit_load(&f, read_address);
   nyr_opt_ret(&f, second);
   bool ok = read_address >= 0 && write_base >= 0 && offset >= 0 &&
@@ -352,15 +292,7 @@ static bool run_address_taken_local_case(void) {
   nyr_opt_begin(&f);
   int replacement = nyr_opt_const(&f, 99);
   int replacement2 = nyr_opt_const(&f, 100);
-  int local_address = nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_ADDR_LOCAL,
-                                                  .dst = -1,
-                                                  .a = -1,
-                                                  .b = -1,
-                                                  .c = -1,
-                                                  .d = -1,
-                                                  .e = -1,
-                                                  .f = -1,
-                                                  .imm = 0});
+  int local_address = nyr_opt_emit_imm(&f, NYIR_ADDR_LOCAL, 0);
   emit_local_store(&f, 0, replacement);
   int first = emit_load(&f, local_address);
   emit_local_store(&f, 0, replacement2);
@@ -467,14 +399,7 @@ static bool run_loop_local_load_case(void) {
   nyr_opt_ret(&f, second);
   nyr_opt_label(&f, 20);
   emit_store(&f, address, replacement);
-  int next = nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_SUB_I64,
-                                         .dst = -1,
-                                         .a = counter,
-                                         .b = one,
-                                         .c = -1,
-                                         .d = -1,
-                                         .e = -1,
-                                         .f = -1});
+  int next = nyr_opt_emit_abc(&f, NYIR_SUB_I64, counter, one, -1);
   emit_store(&f, counter_address, next);
   nyr_opt_br(&f, 10);
   /*
@@ -626,38 +551,10 @@ static bool run_copy_operand_cse_case(void) {
   nyr_opt_begin(&f);
   int left = nyr_opt_const(&f, 17);
   int right = nyr_opt_const(&f, 25);
-  int copy_a = nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_COPY,
-                                           .dst = -1,
-                                           .a = left,
-                                           .b = -1,
-                                           .c = -1,
-                                           .d = -1,
-                                           .e = -1,
-                                           .f = -1});
-  int first = nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_ADD_I64,
-                                          .dst = -1,
-                                          .a = copy_a,
-                                          .b = right,
-                                          .c = -1,
-                                          .d = -1,
-                                          .e = -1,
-                                          .f = -1});
-  int copy_b = nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_COPY,
-                                           .dst = -1,
-                                           .a = left,
-                                           .b = -1,
-                                           .c = -1,
-                                           .d = -1,
-                                           .e = -1,
-                                           .f = -1});
-  int second = nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_ADD_I64,
-                                           .dst = -1,
-                                           .a = copy_b,
-                                           .b = right,
-                                           .c = -1,
-                                           .d = -1,
-                                           .e = -1,
-                                           .f = -1});
+  int copy_a = nyr_opt_emit_abc(&f, NYIR_COPY, left, -1, -1);
+  int first = nyr_opt_emit_abc(&f, NYIR_ADD_I64, copy_a, right, -1);
+  int copy_b = nyr_opt_emit_abc(&f, NYIR_COPY, left, -1, -1);
+  int second = nyr_opt_emit_abc(&f, NYIR_ADD_I64, copy_b, right, -1);
   nyr_opt_ret(&f, second);
   if (!nyr_opt_verify(&f, "gvn-pre-copy-operands")) {
     nyr_ir_func_free(&f);
@@ -833,15 +730,7 @@ static bool run_read_call_memory_barrier_case(void) {
 static bool run_read_only_call_load_reuse_case(void) {
   nyr_func_t f;
   nyr_opt_begin(&f);
-  int address = nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_ADDR_SYMBOL,
-                                            .dst = -1,
-                                            .a = -1,
-                                            .b = -1,
-                                            .c = -1,
-                                            .d = -1,
-                                            .e = -1,
-                                            .f = -1,
-                                            .symbol = "gvn_pre_global_cell"});
+  int address = nyr_opt_emit_symbol(&f, NYIR_ADDR_SYMBOL, "gvn_pre_global_cell");
   int arg = nyr_opt_const(&f, 9);
   int first = emit_load(&f, address);
   int reader = emit_known_call(&f, "reads_memory", arg,
@@ -866,15 +755,7 @@ static bool run_read_only_call_load_reuse_case(void) {
 static bool run_raw_memcmp_load_reuse_case(void) {
   nyr_func_t f;
   nyr_opt_begin(&f);
-  int address = nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_ADDR_SYMBOL,
-                                            .dst = -1,
-                                            .a = -1,
-                                            .b = -1,
-                                            .c = -1,
-                                            .d = -1,
-                                            .e = -1,
-                                            .f = -1,
-                                            .symbol = "gvn_pre_global_cell"});
+  int address = nyr_opt_emit_symbol(&f, NYIR_ADDR_SYMBOL, "gvn_pre_global_cell");
   int compare_address = nyr_opt_const(&f, 0x2000);
   int length = nyr_opt_const(&f, 8);
   int first = emit_load(&f, address);
@@ -1013,15 +894,7 @@ static bool run_load_across_nonwriting_effects_case(void) {
   nyr_func_t f;
   nyr_opt_begin(&f);
   int address =
-      nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_ADDR_SYMBOL,
-                                  .dst = -1,
-                                  .a = -1,
-                                  .b = -1,
-                                  .c = -1,
-                                  .d = -1,
-                                  .e = -1,
-                                  .f = -1,
-                                  .symbol = "gvn_pre_clock_stable_global"});
+      nyr_opt_emit_symbol(&f, NYIR_ADDR_SYMBOL, "gvn_pre_clock_stable_global");
   int value = nyr_opt_const(&f, 17);
   int first = emit_load(&f, address);
   int len = nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_CALL,
@@ -1071,15 +944,7 @@ static bool run_load_across_nonwriting_effects_case(void) {
 static bool run_load_across_allocation_unknown_alias_case(void) {
   nyr_func_t f;
   nyr_opt_begin(&f);
-  int slot = nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_ADDR_SYMBOL,
-                                         .dst = -1,
-                                         .a = -1,
-                                         .b = -1,
-                                         .c = -1,
-                                         .d = -1,
-                                         .e = -1,
-                                         .f = -1,
-                                         .symbol = "gvn_pre_pointer_holder"});
+  int slot = nyr_opt_emit_symbol(&f, NYIR_ADDR_SYMBOL, "gvn_pre_pointer_holder");
   int pointer = emit_load(&f, slot);
   int arg = nyr_opt_const(&f, 0);
   int first = emit_load(&f, pointer);

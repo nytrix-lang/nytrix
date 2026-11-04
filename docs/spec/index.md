@@ -5,6 +5,13 @@ Language contracts define syntax and behavior; backend support varies by source
 shape. Check [implementation status](../learn/status.md) for route limits and the
 linked fixtures for tested cases.
 
+## How to read these docs
+
+The specification states language rules and implementation boundaries. The
+[learn guides](../learn/index.md) teach workflows; the
+[cookbook](../learn/cookbook.md) collects copy-paste patterns with links to
+their full contracts.
+
 ## Language
 
 | Topic | Contract |
