@@ -127,14 +127,23 @@ fn _raw_ptr(any p) any {
    p
 }
 
+fn _png_env_truthy(str name) bool {
+   "Returns whether `name` is set to a common truthy textual value."
+   ;; `env_lower` keeps the read inside this module; a cross-module bool
+   ;; helper is not reliable on every route, and the route toggle must not
+   ;; depend on one.
+   def raw = __env_get(name)
+   if is_nil(raw) { return false }
+   def v = lower(raw)
+   v == "1" || v == "true" || v == "on" || v == "yes"
+}
+
 fn _png_disable_libpng() bool {
+   ;; Env naming convention for the C-route toggles: `NY_<MODULE>_DISABLE_<LIB>`
+   ;; over an int cache named `_<module>_disable_<lib>_cache`.
    if _png_disable_libpng_cache != -1 { return _png_disable_libpng_cache == 1 }
-   def raw = __env_get("NY_PNG_DISABLE_LIBPNG")
    mut on = 0
-   if !is_nil(raw) {
-      def v = lower(raw)
-      if v == "1" || v == "true" || v == "on" || v == "yes" { on = 1 }
-   }
+   if _png_env_truthy("NY_PNG_DISABLE_LIBPNG") { on = 1 }
    _png_disable_libpng_cache = on
    on == 1
 }
@@ -643,7 +652,7 @@ fn _join_chunks(any chunks) any {
       def ch = chunks.get(i)
       def clen = ch.len
       if clen > 0 {
-         __copy_mem_raw(to_int(res) + off, to_int(ch), clen)
+         _copy_bytes_safe(res, off, ch, 0, clen)
          off += clen
       }
       i += 1
@@ -670,7 +679,7 @@ fn _png_scan_decode_chunks(any data) dict {
          store8(cs, load8(data, p + 5), 1)
          store8(cs, load8(data, p + 6), 2)
          store8(cs, load8(data, p + 7), 3)
-         if length > 0 { __copy_mem_raw(to_int(cs) + 4, to_int(data) + chunk_data, length) }
+         if length > 0 { _copy_bytes_safe(cs, 4, data, chunk_data, length) }
          def want_crc = math_hash.crc32(cs, 0, 0)
          def got_crc = _u32be(data, next_p - 4)
          if want_crc != got_crc { return {"ok": false, "error": "crc mismatch at " + to_str(p)} }
@@ -689,11 +698,11 @@ fn _png_scan_decode_chunks(any data) dict {
          if bit_depth != 1 && bit_depth != 2 && bit_depth != 4 && bit_depth != 8 && bit_depth != 16 { return {"ok": false, "error": "unsupported bit depth " + to_str(bit_depth)} }
       } elif _png_chunk_is(data, p, 80, 76, 84, 69) {
          palette = init_str(malloc(length + 32), length)
-         if length > 0 { __copy_mem_raw(to_int(palette), to_int(data) + chunk_data, length) }
+         if length > 0 { _copy_bytes_safe(palette, 0, data, chunk_data, length) }
       } elif _png_chunk_is(data, p, 116, 82, 78, 83) {
          if color_type == 3 {
             palette_alpha = init_str(malloc(length + 32), length)
-            if length > 0 { __copy_mem_raw(to_int(palette_alpha), to_int(data) + chunk_data, length) }
+            if length > 0 { _copy_bytes_safe(palette_alpha, 0, data, chunk_data, length) }
          } elif color_type == 0 && length >= 2 {
             trns_gray = _u16be(data, chunk_data)
          } elif color_type == 2 && length >= 6 {
@@ -702,7 +711,7 @@ fn _png_scan_decode_chunks(any data) dict {
          }
       } elif _png_chunk_is(data, p, 73, 68, 65, 84) {
          def chunk = init_str(malloc(length + 32), length)
-         if length > 0 { __copy_mem_raw(to_int(chunk), to_int(data) + chunk_data, length) }
+         if length > 0 { _copy_bytes_safe(chunk, 0, data, chunk_data, length) }
          idat_list = idat_list.append(chunk)
       } elif _png_chunk_is(data, p, 73, 69, 78, 68) {
          break
