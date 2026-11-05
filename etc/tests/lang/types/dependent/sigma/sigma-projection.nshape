@@ -1,0 +1,27 @@
+shape sigma_projection_retains_dependency {
+  family "typing/dependent"
+  generator "embedded"
+  features [typing dependent sigma positive]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+;; Projection of the payload keeps the pair's index.  A literal-index pair
+;; exposes the substituted payload type (Fin<3>), while a parameter keeps the
+;; symbolic dependent type.
+fn takes_three(Fin<3> value) int {
+  return value
+}
+
+fn payload(exists(int n) Fin<n> pair_value) int {
+  return pair_value[1]
+}
+
+def exists(int n) Fin<n> w = pair(3, 2)
+assert_eq(takes_three(w[1]), 2, "projected payload retains its literal index")
+assert_eq(payload(pair(7, 6)), 6, "parameter projection reads the payload")
+print("✓ sigma-projection ok")
+NY
+}

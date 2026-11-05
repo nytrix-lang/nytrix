@@ -1,0 +1,18 @@
+shape sigma_construct_pair {
+  family "typing/dependent"
+  generator "embedded"
+  features [typing dependent sigma positive]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+;; A dependent pair packages an index and a payload.  `pair` has the ordinary
+;; two-element tuple representation, so projections use tuple indexes.
+def exists(int n) int p = pair(3, 7)
+assert_eq(p[0], 3, "sigma index projection")
+assert_eq(p[1], 7, "sigma payload projection")
+print("✓ sigma-construct ok")
+NY
+}

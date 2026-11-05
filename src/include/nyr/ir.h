@@ -816,6 +816,12 @@ bool nyr_cfg_simplify(nyr_func_t *f);
 bool nyr_if_convert(nyr_func_t *f);
 /* Shorten innermost-loop recurrence chains by exact i64 reassociation. */
 bool nyr_ilp_reassociate(nyr_func_t *f);
+/* Turn `inv - i` for an induction variable i into its own decrementing IV. */
+bool nyr_loop_sub_iv(nyr_func_t *f);
+/* Hoist loop-invariant exit guards from loop headers into a new preheader. */
+bool nyr_loop_guard_hoist(nyr_func_t *f);
+/* Remove heap/vector stores overwritten in the same block before any read. */
+bool nyr_mem_dse(nyr_func_t *f);
 /* Fold finite select chains whose arithmetic progression is proven safe. */
 bool nyr_select_chain_fold(nyr_func_t *f);
 /* Keep directly addressed global slots in locals across call-free loops. */

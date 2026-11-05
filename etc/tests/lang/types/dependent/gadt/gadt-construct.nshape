@@ -1,0 +1,30 @@
+shape gadt_constructor_evidence {
+  family "runtime/language"
+  generator "embedded"
+  features ["ny", "test", "gadt", "dependent"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+;; Each constructor states the type index it produces.  The constructor
+;; expression itself must carry that index, not a freely chosen one.
+enum Expr<t> {
+  IntLit(int) where t is int,
+  BoolLit(bool) where t is bool
+}
+
+def Expr<int> one = Expr.IntLit(1)
+def Expr<int> two = Expr.IntLit(2)
+def Expr<bool> truth = Expr.BoolLit(true)
+
+match one {
+  Expr.IntLit(n) -> assert_eq(n, 1, "indexed constructor payload")
+}
+match truth {
+  Expr.BoolLit(b) -> assert(b, "bool-indexed constructor payload")
+}
+print("✓ gadt-construct ok")
+NY
+}

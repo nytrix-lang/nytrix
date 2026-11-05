@@ -298,6 +298,14 @@ void collect_sigs(codegen_t *cg, stmt_t *s) {
       stmt_enum_item_t *item = &s->as.enu.items.data[i];
       enum_member_def_t member = {0};
       member.name = codegen_strdup(cg, item->name);
+      member.index_constraint_param =
+          item->index_constraint_param
+              ? codegen_strdup(cg, item->index_constraint_param)
+              : NULL;
+      member.index_constraint_type =
+          item->index_constraint_type
+              ? codegen_strdup(cg, item->index_constraint_type)
+              : NULL;
       member.has_payload = item->fields.len > 0;
       if (member.has_payload)
         enu->has_payload = true;

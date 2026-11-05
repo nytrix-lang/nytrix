@@ -1260,6 +1260,10 @@ static void hm_env_set_ctx(ny_hm_env_list *env, const char *name,
     ny_hm_env_entry_t *e = &env->data[i - 1];
     if (e->syntax_ctx == syntax_ctx && e->name && strcmp(e->name, name) == 0) {
       e->type = type;
+      /* A rebinding replaces the dependent-pair annotation as well. */
+      e->sigma_decl = NULL;
+      e->sigma_index_literal = false;
+      e->sigma_index_value = 0;
       return;
     }
   }
@@ -1351,6 +1355,38 @@ static ny_hm_type_t *hm_env_get_ctx(ny_hm_state_t *hm, ny_hm_env_list *env,
   (void)hm;
   ny_hm_env_entry_t *entry = hm_env_entry_ctx(env, name, syntax_ctx);
   return entry ? entry->type : NULL;
+}
+
+/*
+ * True when a checked expression already has the parameter's refined or
+ * value-indexed type (for example a dependent-return call result).  Such a
+ * value carries its proof; re-evaluating it as a fresh constant would fail
+ * closed even though the declaration proved it.
+ */
+static bool hm_type_is_refined_instance(ny_hm_state_t *hm, ny_hm_type_t *arg_t,
+                                        const char *param) {
+  if (!hm || !arg_t || !param)
+    return false;
+  char *actual = hm_type_string(arg_t);
+  if (!actual)
+    return false;
+  bool matches = hm_lookup_refine_stmt(hm, actual) != NULL;
+  if (!matches) {
+    char *actual_base = hm_generic_base_owned(actual);
+    char *param_base = hm_generic_base_owned(param);
+    /*
+     * Only a value-indexed refinement instance (`Vec<2>` against `Vec<2>`)
+     * carries a proof.  Ordinary generics such as `dict<str, int>` must keep
+     * their normal argument checks.
+     */
+    matches = actual_base && param_base &&
+              strcmp(actual_base, param_base) == 0 &&
+              hm_lookup_refine_stmt(hm, actual_base) != NULL;
+    free(actual_base);
+    free(param_base);
+  }
+  free(actual);
+  return matches;
 }
 
 static bool hm_expr_has_refinement_type(ny_hm_state_t *hm, ny_hm_env_list *env,
@@ -4513,6 +4549,81 @@ static const char *hm_find_top_comma(const char *s) {
   return NULL;
 }
 
+typedef struct hm_sigma_parts_t {
+  char *index_type;
+  char *binder;
+  char *value_type;
+} hm_sigma_parts_t;
+
+/*
+ * Split `exists(IndexType binder) ValueType` into its three authored pieces.
+ * Generic argument brackets are tracked so an index type such as `Fin<8>`
+ * cannot be mistaken for the closing binder parenthesis.
+ */
+static bool hm_sigma_parts_parse(const char *decl, hm_sigma_parts_t *out) {
+  if (!decl || !out)
+    return false;
+  while (*decl == ' ' || *decl == '\t')
+    decl++;
+  if (strncmp(decl, "exists(", 7) != 0)
+    return false;
+  const char *body = decl + 7;
+  const char *close = NULL;
+  int depth = 0;
+  for (const char *p = body; *p; ++p) {
+    if (*p == '<') {
+      depth++;
+    } else if (*p == '>') {
+      if (depth > 0)
+        depth--;
+    } else if (*p == ')' && depth == 0) {
+      close = p;
+      break;
+    }
+  }
+  if (!close)
+    return false;
+  const char *binder_end = close;
+  while (binder_end > body && (binder_end[-1] == ' ' || binder_end[-1] == '\t'))
+    binder_end--;
+  const char *binder_start = binder_end;
+  while (binder_start > body &&
+         (isalnum((unsigned char)binder_start[-1]) || binder_start[-1] == '_'))
+    binder_start--;
+  if (binder_start == binder_end ||
+      !(isalpha((unsigned char)*binder_start) || *binder_start == '_'))
+    return false;
+  const char *value_start = close + 1;
+  while (*value_start == ' ' || *value_start == '\t')
+    value_start++;
+  if (!*value_start)
+    return false;
+  char *index = hm_trim_owned(body, (size_t)(binder_start - body));
+  char *binder = ny_strndup(binder_start, (size_t)(binder_end - binder_start));
+  char *value = ny_strdup(value_start);
+  if (!index || !*index || !binder || !value) {
+    free(index);
+    free(binder);
+    free(value);
+    return false;
+  }
+  out->index_type = index;
+  out->binder = binder;
+  out->value_type = value;
+  return true;
+}
+
+static void hm_sigma_parts_free(hm_sigma_parts_t *parts) {
+  if (!parts)
+    return;
+  free(parts->index_type);
+  free(parts->binder);
+  free(parts->value_type);
+  parts->index_type = NULL;
+  parts->binder = NULL;
+  parts->value_type = NULL;
+}
+
 /*
  * Resolve a short enum name in its declaring module. ADT constructors carry
  * the canonical module-qualified identity, so function annotations must use
@@ -4588,8 +4699,30 @@ static ny_hm_type_t *hm_parse_type_name(ny_hm_state_t *hm, const char *raw,
     return hm_var(hm);
   while (*raw == ' ' || *raw == '\t')
     raw++;
+  /*
+   * A dependent pair is represented by its erased two-element tuple shape.
+   * The `exists` annotation itself is retained on the binding, where the
+   * construction check and projections consult it for the index and payload
+   * types.
+   */
+  {
+    hm_sigma_parts_t sigma;
+    if (hm_sigma_parts_parse(raw, &sigma)) {
+      hm_sigma_parts_free(&sigma);
+      return hm_unary(hm, NY_HM_TUPLE, hm_any(hm));
+    }
+  }
   if (strcmp(raw, "self") == 0 && self_name && *self_name)
     return hm_name(hm, self_name);
+  /*
+   * Type values erase to their canonical type-name string, so the `Type`
+   * universe has the same runtime representation as `str`.
+   */
+  {
+    const char *leaf = ny_name_leaf(raw);
+    if (leaf && strncmp(leaf, "Type", 4) == 0 && leaf[4] == '\0')
+      return hm_name(hm, "str");
+  }
   if (raw[0] == '?')
     return hm_unary(hm, NY_HM_NULLABLE,
                     hm_parse_type_name(hm, raw + 1, self_name));
@@ -5066,10 +5199,40 @@ static void hm_refine_match_pattern(ny_hm_state_t *hm, ny_hm_env_list *env,
   free(subject_name);
 }
 
-static void hm_validate_match_patterns(ny_hm_state_t *hm, stmt_t *s) {
+/*
+ * A GADT constructor can only appear in an arm whose scrutinee index it
+ * refines.  Return false when the scrutinee's known index contradicts the
+ * constructor's evidence; an unindexed or dynamic scrutinee admits every
+ * constructor.
+ */
+static bool hm_member_index_matches(ny_hm_state_t *hm, enum_def_t *owner,
+                                    enum_member_def_t *member,
+                                    const char *subject_name) {
+  if (!owner || !member || !member->index_constraint_param ||
+      !member->index_constraint_type || !subject_name)
+    return true;
+  if (!ny_generic_type_base_is(subject_name, owner->name))
+    return true;
+  for (size_t i = 0; i < owner->type_params.len; ++i) {
+    if (strcmp(owner->type_params.data[i], member->index_constraint_param) !=
+        0)
+      continue;
+    char *actual = ny_generic_type_arg_owned(subject_name, i);
+    if (!actual)
+      return true;
+    bool ok = hm_name_compatible(hm, actual, member->index_constraint_type);
+    free(actual);
+    return ok;
+  }
+  return true;
+}
+
+static void hm_validate_match_patterns(ny_hm_state_t *hm, stmt_t *s,
+                                       ny_hm_type_t *subject_t) {
   if (!hm || !s || s->kind != NY_S_MATCH || !hm->ctx || !hm->ctx->cg)
     return;
   enum_def_t *owner = NULL;
+  char *subject_name = subject_t ? hm_type_string(subject_t) : NULL;
   bool has_wild = s->as.match.default_conseq != NULL;
   bool has_other = false;
   VEC(const char *) matched;
@@ -5098,6 +5261,21 @@ static void hm_validate_match_patterns(ny_hm_state_t *hm, stmt_t *s) {
         owner = pat_owner;
       else if (owner != pat_owner)
         has_other = true;
+      if (!hm_member_index_matches(hm, pat_owner, member, subject_name)) {
+        tp_add_diag_ex(
+            hm->ctx, pat->tok, "hm", "hm-gadt-impossible-pattern",
+            "GADT match pattern", member->index_constraint_type,
+            subject_name ? subject_name : owner->name, "constructor",
+            "this constructor refines the enum to a different index than the "
+            "scrutinee",
+            "match the indexed constructor that produces the scrutinee's "
+            "index, or erase the index before matching",
+            "constructor '%s.%s' produces index '%s' and cannot match '%s'",
+            pat_owner->name, member->name, member->index_constraint_type,
+            subject_name ? subject_name : owner->name);
+        free(full_name);
+        continue;
+      }
 
       if ((pat->kind == NY_E_CALL || pat->kind == NY_E_MEMCALL) &&
           member->has_payload) {
@@ -5148,6 +5326,9 @@ static void hm_validate_match_patterns(ny_hm_state_t *hm, stmt_t *s) {
     char missing[256] = {0};
     size_t used = 0;
     for (size_t i = 0; i < owner->members.len; ++i) {
+      if (!hm_member_index_matches(hm, owner, &owner->members.data[i],
+                                   subject_name))
+        continue;
       bool found = false;
       for (size_t j = 0; j < matched.len; ++j)
         if (strcmp(matched.data[j], owner->members.data[i].name) == 0)
@@ -5175,6 +5356,7 @@ static void hm_validate_match_patterns(ny_hm_state_t *hm, stmt_t *s) {
           "non-exhaustive match for enum '%s' (missing: %s)", owner->name,
           missing);
   }
+  free(subject_name);
   vec_free(&matched);
 }
 
@@ -5568,6 +5750,166 @@ static ny_hm_type_t *hm_sig_return_type(ny_hm_state_t *hm, fun_sig *sig,
   return hm_any(hm);
 }
 
+/* Replace whole identifier occurrences of `name` with `value`. */
+static char *hm_replace_type_index_owned(const char *src, const char *name,
+                                         int64_t value) {
+  if (!src || !name || !*name)
+    return src ? ny_strdup(src) : NULL;
+  size_t name_len = strlen(name);
+  ny_tp_json_t out = {0};
+  const char *p = src;
+  while (*p) {
+    if ((*p == '_' || isalpha((unsigned char)*p)) &&
+        (p == src ||
+         !(p[-1] == '_' || isalnum((unsigned char)p[-1]) || p[-1] == '.')) &&
+        strncmp(p, name, name_len) == 0 &&
+        !(p[name_len] == '_' || isalnum((unsigned char)p[name_len]))) {
+      tp_append(&out, "%" PRId64, value);
+      p += name_len;
+      continue;
+    }
+    tp_append(&out, "%c", *p++);
+  }
+  return tp_take(&out, src);
+}
+
+/*
+ * A dependent return type mentions parameter names as value indices.  At a
+ * call with a literal argument, substitute the literal so `Vec<n>` becomes
+ * `Vec<2>`; non-literal arguments keep the symbolic type and fail closed when
+ * a caller requires a different index.
+ */
+static ny_hm_type_t *hm_subst_return_indices(
+    ny_hm_state_t *hm, stmt_t *fn, ny_hm_type_t *base, ny_call_arg_list *args,
+    size_t arg_offset, const char *self_name) {
+  if (!fn || fn->kind != NY_S_FUNC || !args || !base)
+    return base;
+  char *name = hm_type_string(base);
+  if (!name || !strchr(name, '<')) {
+    free(name);
+    return base;
+  }
+  char *text = name;
+  for (size_t i = 0; i < args->len && i + arg_offset < fn->as.fn.params.len;
+       ++i) {
+    param_t *param = &fn->as.fn.params.data[i + arg_offset];
+    expr_t *arg = args->data[i].val;
+    if (!param->name || !param->type || !arg ||
+        arg->kind != NY_E_LITERAL || arg->as.literal.kind != NY_LIT_INT)
+      continue;
+    /*
+     * Only value-indexed parameters (`Fin<N>`, `Vec<N>`) bind a value into a
+     * type.  Ordinary parameter names must not textually rewrite return
+     * types that happen to use a same-named type variable.
+     */
+    char indexed_base[512];
+    bool value_indexed =
+        strncmp(param->type, "Fin<", 4) == 0 ||
+        (hm->ctx && hm->ctx->cg &&
+         ny_indexed_declared_type_base(hm->ctx->cg, param->type, indexed_base,
+                                       sizeof(indexed_base)));
+    if (!value_indexed)
+      continue;
+    char *next =
+        hm_replace_type_index_owned(text, param->name, arg->as.literal.as.i);
+    if (!next)
+      break;
+    if (text != name)
+      free(text);
+    text = next;
+  }
+  ny_hm_type_t *result =
+      text == name ? base : hm_parse_type_name(hm, text, self_name);
+  if (text != name)
+    free(text);
+  free(name);
+  return result ? result : base;
+}
+
+/* A constructed pair literal's index component, when it is a literal. */
+static bool hm_sigma_literal_index(const expr_t *init, int64_t *out) {
+  if (!init || !out || init->kind != NY_E_TUPLE ||
+      init->as.list_like.len != 2)
+    return false;
+  const expr_t *index = init->as.list_like.data[0];
+  if (!index || index->kind != NY_E_LITERAL ||
+      index->as.literal.kind != NY_LIT_INT ||
+      index->as.literal.integer_outside_i64)
+    return false;
+  *out = index->as.literal.as.i;
+  return true;
+}
+
+/*
+ * Dependent pair construction.  The first component is checked against the
+ * index type; when it is a literal, that literal is substituted for the
+ * binder in the payload type before the second component is checked.  The
+ * substituted payload annotation also drives the existing Fin<N> and
+ * refinement initializer rules.
+ */
+static void hm_check_sigma_initializer(ny_hm_state_t *hm, ny_hm_env_list *env,
+                                       const char *decl, const expr_t *init,
+                                       const char *self_name, token_t tok) {
+  hm_sigma_parts_t parts;
+  if (!hm || !decl || !hm_sigma_parts_parse(decl, &parts))
+    return;
+  if (!init || init->kind != NY_E_TUPLE || init->as.list_like.len != 2) {
+    /*
+     * A value already carrying the pair type (a parameter or an earlier
+     * binding) satisfies the shape; only a fresh non-pair value is an error.
+     */
+    ny_hm_type_t *actual =
+        init ? hm_prune(hm_infer_expr(hm, env, init, self_name)) : NULL;
+    if (actual && (actual->kind == NY_HM_TUPLE || hm_is_any(actual))) {
+      hm_sigma_parts_free(&parts);
+      return;
+    }
+    tp_add_diag_ex(hm->ctx, tok, "hm", "hm-sigma-shape",
+                   "dependent pair initialization", "pair(index, value)",
+                   "non-pair initializer", "dependent pair",
+                   "a dependent pair value must package exactly two components",
+                   "construct the value with pair(index, value)",
+                   "dependent pair initializer must be pair(index, value)");
+    hm_sigma_parts_free(&parts);
+    return;
+  }
+  expr_t *index_e = init->as.list_like.data[0];
+  expr_t *value_e = init->as.list_like.data[1];
+  ny_hm_type_t *want_index =
+      hm_parse_type_name(hm, parts.index_type, self_name);
+  ny_hm_type_t *got_index = hm_infer_expr(hm, env, index_e, self_name);
+  hm_check_fin_initializer(hm, parts.index_type, index_e, tok);
+  hm_check_refinement_initializer(hm, parts.index_type, index_e, tok);
+  hm_unify(hm, want_index, got_index, tok, "sigma index component");
+
+  int64_t literal = 0;
+  char *value_type_raw = NULL;
+  if (hm_sigma_literal_index(init, &literal))
+    value_type_raw = hm_replace_type_index_owned(parts.value_type, parts.binder,
+                                                 literal);
+  if (!value_type_raw)
+    value_type_raw = ny_strdup(parts.value_type);
+  if (value_type_raw) {
+    ny_hm_type_t *want_value =
+        hm_parse_type_name(hm, value_type_raw, self_name);
+    ny_hm_type_t *got_value = hm_infer_expr(hm, env, value_e, self_name);
+    hm_check_fin_initializer(hm, value_type_raw, value_e, tok);
+    hm_check_indexed_initializer(hm, value_type_raw, value_e, tok);
+    hm_check_refinement_initializer(hm, value_type_raw, value_e, tok);
+    hm_unify(hm, want_value, got_value, tok, "sigma value component");
+    free(value_type_raw);
+  }
+  hm_sigma_parts_free(&parts);
+}
+
+static ny_hm_type_t *hm_sig_return_type_for_call(
+    ny_hm_state_t *hm, fun_sig *sig, stmt_t *fn, ny_call_arg_list *args,
+    size_t arg_offset, const char *self_name) {
+  return hm_subst_return_indices(hm, fn,
+                                 hm_sig_return_type(hm, sig, self_name), args,
+                                 arg_offset, self_name);
+}
+
 static ny_hm_type_t *hm_infer_lambda(ny_hm_state_t *hm, ny_hm_env_list *env,
                                      expr_t *e, const char *self_name) {
   ny_hm_type_t *ft = hm_fn_type(hm);
@@ -5800,6 +6142,22 @@ hm_adt_constructor_type(ny_hm_state_t *hm, ny_hm_env_list *env,
       if (p)
         type_name[used++] = ',';
       const char *actual = NULL;
+      /*
+       * GADT constructor evidence fixes an index directly:
+       * `IntLit(int) where t is int` constructs `Expr<int>` regardless of
+       * its payload types.
+       */
+      if (member->index_constraint_param &&
+          member->index_constraint_type && owner->type_params.data[p] &&
+          strcmp(member->index_constraint_param, owner->type_params.data[p]) ==
+              0) {
+        size_t left = sizeof(type_name) - (size_t)used;
+        int nw = snprintf(type_name + used, left, "%s",
+                          member->index_constraint_type);
+        if (nw > 0 && (size_t)nw < left)
+          used += nw;
+        continue;
+      }
       for (size_t i = 0; i < member->fields.len && i < n; ++i) {
         const char *field_type = member->fields.data[i].type_name;
         if (field_type && strcmp(field_type, owner->type_params.data[p]) == 0) {
@@ -5839,6 +6197,76 @@ hm_adt_constructor_type(ny_hm_state_t *hm, ny_hm_env_list *env,
   }
   free(arg_types);
   return hm_parse_type_name(hm, type_name, self_name);
+}
+
+/*
+ * Substitute literal earlier arguments into a dependent parameter type:
+ * `fn pick(int n, Fin<n> i, ...)` called as `pick(3, i, ...)` checks `i`
+ * against `Fin<3>`.  Only value-indexed parameters (`Fin<N>` and declared
+ * indexed types) contribute bindings, matching the return-type rule.
+ */
+/* Does `name` occur as a type index argument (after '<' or ',')? */
+static bool hm_type_text_mentions_index(const char *text, const char *name) {
+  if (!text || !name || !*name)
+    return false;
+  size_t n = strlen(name);
+  for (const char *s = text; (s = strstr(s, name)) != NULL; s += n) {
+    const char *before = s;
+    while (before > text && (before[-1] == ' ' || before[-1] == '\t'))
+      before--;
+    if (before > text && (before[-1] == '<' || before[-1] == ','))
+      return true;
+  }
+  return false;
+}
+
+static char *hm_subst_param_type_text(ny_hm_state_t *hm, stmt_t *fn,
+                                      size_t param_index,
+                                      ny_call_arg_list *args,
+                                      size_t arg_offset) {
+  if (!hm || !fn || fn->kind != NY_S_FUNC || !args)
+    return NULL;
+  ny_param_list *params = &fn->as.fn.params;
+  if (param_index >= params->len)
+    return NULL;
+  param_t *target = &params->data[param_index];
+  if (!target->type)
+    return NULL;
+  char *text = ny_strdup(target->type);
+  if (!text)
+    return NULL;
+  bool changed = false;
+  for (size_t j = 0; j < param_index && j < params->len; ++j) {
+    param_t *prev = &params->data[j];
+    if (!prev->name || !prev->type)
+      continue;
+    if (j < arg_offset || j - arg_offset >= args->len)
+      continue;
+    expr_t *arg = args->data[j - arg_offset].val;
+    if (!arg || arg->kind != NY_E_LITERAL ||
+        arg->as.literal.kind != NY_LIT_INT ||
+        arg->as.literal.integer_outside_i64)
+      continue;
+    /*
+     * Only a value used inside type-index position is substituted, so an
+     * ordinary parameter name is not rewritten where it appears as a type
+     * constructor or an unrelated identifier.
+     */
+    if (!hm_type_text_mentions_index(text, prev->name))
+      continue;
+    char *next =
+        hm_replace_type_index_owned(text, prev->name, arg->as.literal.as.i);
+    if (!next)
+      break;
+    free(text);
+    text = next;
+    changed = true;
+  }
+  if (!changed) {
+    free(text);
+    return NULL;
+  }
+  return text;
 }
 
 static ny_hm_type_t *hm_call_named(ny_hm_state_t *hm, ny_hm_env_list *env,
@@ -5997,11 +6425,15 @@ static ny_hm_type_t *hm_call_named(ny_hm_state_t *hm, ny_hm_env_list *env,
               if (param < params->len && params->data[param].type) {
                 ny_hm_type_t *param_t =
                     hm_parse_type_name(hm, params->data[param].type, self_name);
-                hm_check_indexed_initializer(
-                    hm, params->data[param].type, args->data[i].val,
-                    args->data[i].val ? args->data[i].val->tok : tok);
+                if (!hm_type_is_refined_instance(hm, arg_t,
+                                                 params->data[param].type))
+                  hm_check_indexed_initializer(
+                      hm, params->data[param].type, args->data[i].val,
+                      args->data[i].val ? args->data[i].val->tok : tok);
                 if (!hm_expr_has_refinement_type(
-                        hm, env, params->data[param].type, args->data[i].val))
+                        hm, env, params->data[param].type, args->data[i].val) &&
+                    !hm_type_is_refined_instance(hm, arg_t,
+                                                 params->data[param].type))
                   hm_check_refinement_initializer(
                       hm, params->data[param].type, args->data[i].val,
                       args->data[i].val ? args->data[i].val->tok : tok);
@@ -6020,8 +6452,9 @@ static ny_hm_type_t *hm_call_named(ny_hm_state_t *hm, ny_hm_env_list *env,
                   hm, env, args->data[i].val, self_name,
                   allow_dynamic_literal_args);
           }
-          ny_hm_type_t *out = hm_sig_return_type(
-              hm, attached, attached_self ? attached_self : self_name);
+          ny_hm_type_t *out = hm_sig_return_type_for_call(
+              hm, attached, stmt, args, 1u,
+              attached_self ? attached_self : self_name);
           free(owner);
           return out;
         }
@@ -6062,11 +6495,15 @@ static ny_hm_type_t *hm_call_named(ny_hm_state_t *hm, ny_hm_env_list *env,
           if (param < params->len && params->data[param].type) {
             ny_hm_type_t *param_t =
                 hm_parse_type_name(hm, params->data[param].type, self_name);
-            hm_check_indexed_initializer(
-                hm, params->data[param].type, args->data[i].val,
-                args->data[i].val ? args->data[i].val->tok : tok);
+            if (!hm_type_is_refined_instance(hm, arg_t,
+                                             params->data[param].type))
+              hm_check_indexed_initializer(
+                  hm, params->data[param].type, args->data[i].val,
+                  args->data[i].val ? args->data[i].val->tok : tok);
             if (!hm_expr_has_refinement_type(hm, env, params->data[param].type,
-                                             args->data[i].val))
+                                             args->data[i].val) &&
+                !hm_type_is_refined_instance(hm, arg_t,
+                                             params->data[param].type))
               hm_check_refinement_initializer(
                   hm, params->data[param].type, args->data[i].val,
                   args->data[i].val ? args->data[i].val->tok : tok);
@@ -6086,7 +6523,9 @@ static ny_hm_type_t *hm_call_named(ny_hm_state_t *hm, ny_hm_env_list *env,
                                                  self_name,
                                                  allow_dynamic_literal_args);
       }
-      return hm_sig_return_type(hm, sig, self_name);
+      return hm_sig_return_type_for_call(
+          hm, sig, sig->stmt_t, args, sig->stmt_t ?
+              (target ? 1u : 0u) : 0u, self_name);
     }
     if (target || (name && strchr(name, '.'))) {
       if (target)
@@ -6136,33 +6575,55 @@ static ny_hm_type_t *hm_call_named(ny_hm_state_t *hm, ny_hm_env_list *env,
         hm, env, args->data[i].val, self_name, allow_dynamic_literal_args);
     size_t param = i + offset;
     if (param < fn->args.len) {
+      bool param_substituted = false;
       if (scheme && scheme->stmt && scheme->stmt->kind == NY_S_FUNC) {
         ny_param_list *sparams = &scheme->stmt->as.fn.params;
         if (param < sparams->len && sparams->data[param].type) {
+          char *subst_param =
+              hm_subst_param_type_text(hm, scheme->stmt, param, args, offset);
+          const char *param_type_text =
+              subst_param ? subst_param : sparams->data[param].type;
           ny_hm_type_t *param_t =
-              hm_parse_type_name(hm, sparams->data[param].type, self_name);
-          hm_check_indexed_initializer(
-              hm, sparams->data[param].type, args->data[i].val,
+              hm_parse_type_name(hm, param_type_text, self_name);
+          hm_check_sigma_initializer(
+              hm, env, param_type_text, args->data[i].val, self_name,
               args->data[i].val ? args->data[i].val->tok : tok);
-          if (!hm_expr_has_refinement_type(hm, env, sparams->data[param].type,
-                                           args->data[i].val))
+          if (!hm_type_is_refined_instance(hm, arg_t, param_type_text))
+            hm_check_indexed_initializer(
+                hm, param_type_text, args->data[i].val,
+                args->data[i].val ? args->data[i].val->tok : tok);
+          if (!hm_expr_has_refinement_type(hm, env, param_type_text,
+                                           args->data[i].val) &&
+              !hm_type_is_refined_instance(hm, arg_t, param_type_text))
             hm_check_refinement_initializer(
-                hm, sparams->data[param].type, args->data[i].val,
+                hm, param_type_text, args->data[i].val,
                 args->data[i].val ? args->data[i].val->tok : tok);
           hm_check_refinement_return(hm, param_t, arg_t, args->data[i].val,
                                      args->data[i].val ? args->data[i].val->tok
                                                        : tok);
+          if (subst_param) {
+            hm_unify(hm, param_t, arg_t,
+                     args->data[i].val ? args->data[i].val->tok : tok,
+                     "function argument");
+            param_substituted = true;
+          }
+          free(subst_param);
         }
       }
-      hm_unify(hm, fn->args.data[param], arg_t,
-               args->data[i].val ? args->data[i].val->tok : tok,
-               "function argument");
+      if (!param_substituted)
+        hm_unify(hm, fn->args.data[param], arg_t,
+                 args->data[i].val ? args->data[i].val->tok : tok,
+                 "function argument");
     }
   }
   if (scheme && scheme->stmt && scheme->stmt->kind == NY_S_FUNC &&
       scheme->stmt->as.fn.attr_async_effects)
     return hm_name(hm, "handle");
-  return fn->a ? fn->a : hm_any(hm);
+  ny_hm_type_t *ret = fn->a ? fn->a : hm_any(hm);
+  if (scheme && scheme->stmt && scheme->stmt->kind == NY_S_FUNC)
+    ret = hm_subst_return_indices(hm, scheme->stmt, ret, args, offset,
+                                  self_name);
+  return ret;
 }
 
 static void hm_persist_named_call_target(ny_hm_state_t *hm, expr_t *call,
@@ -6353,6 +6814,97 @@ static ny_hm_type_t *hm_infer_binary(ny_hm_state_t *hm, ny_hm_env_list *env,
   return hm_any(hm);
 }
 
+/*
+ * Runtime-index constructor.  `checked_fin(value, bound)` is an ordinary
+ * library function that performs the dynamic bounds test; the checker also
+ * records the bound in the result type so a `Fin<n>` parameter can be
+ * satisfied by a value whose bound is only known while the program runs.
+ * Literal bounds are range-checked here, and the library call still emits
+ * the runtime test, so a symbolic bound never pretends the fact was proved.
+ */
+static ny_hm_type_t *hm_try_checked_fin_call(ny_hm_state_t *hm,
+                                             ny_hm_env_list *env, expr_t *e,
+                                             const char *self_name) {
+  if (!hm || !e || e->kind != NY_E_CALL || e->as.call.args.len != 2)
+    return NULL;
+  expr_t *callee = e->as.call.callee;
+  while (callee && callee->kind == NY_E_SPLICE)
+    callee = callee->as.splice.expr;
+  if (!callee || callee->kind != NY_E_IDENT || !callee->as.ident.name)
+    return NULL;
+  const char *leaf = ny_name_leaf(callee->as.ident.name);
+  if (!leaf || strcmp(leaf, "checked_fin") != 0)
+    return NULL;
+  if (hm->ctx && hm->ctx->cg) {
+    fun_sig *sig = lookup_use_module_fun(hm->ctx->cg, leaf, 2);
+    ny_hm_scheme_t *scheme = sig && sig->name ? hm_find_scheme(hm, sig->name)
+                                              : NULL;
+    if (!sig || !scheme || !scheme->stmt ||
+        !ny_is_stdlib_tok(scheme->stmt->tok))
+      return NULL;
+  } else {
+    return NULL;
+  }
+  expr_t *value_e = e->as.call.args.data[0].val;
+  expr_t *bound_e = e->as.call.args.data[1].val;
+  if (!value_e || !bound_e)
+    return NULL;
+  ny_hm_type_t *want_int = hm_parse_type_name(hm, "int", self_name);
+  ny_hm_type_t *value_t = hm_infer_expr(hm, env, value_e, self_name);
+  hm_unify(hm, want_int, value_t, value_e->tok, "checked Fin value");
+  ny_hm_type_t *bound_t = hm_infer_expr(hm, env, bound_e, self_name);
+  hm_unify(hm, want_int, bound_t, bound_e->tok, "checked Fin bound");
+
+  if (bound_e->kind == NY_E_LITERAL && bound_e->as.literal.kind == NY_LIT_INT &&
+      !bound_e->as.literal.integer_outside_i64) {
+    int64_t bound = bound_e->as.literal.as.i;
+    if (bound <= 0) {
+      tp_add_diag_ex(hm->ctx, bound_e->tok, "hm", "hm-checked-fin-bound",
+                     "runtime Fin construction", "positive Fin bound",
+                     "non-positive bound", "checked_fin",
+                     "a runtime Fin bound must be positive",
+                     "use a bound greater than zero",
+                     "checked Fin bound must be positive, got %" PRId64,
+                     bound);
+      return hm_name(hm, "int");
+    }
+    if (value_e->kind == NY_E_LITERAL &&
+        value_e->as.literal.kind == NY_LIT_INT &&
+        !value_e->as.literal.integer_outside_i64) {
+      int64_t value = value_e->as.literal.as.i;
+      if (value < 0 || value >= bound) {
+        tp_add_diag_ex(hm->ctx, e->tok, "hm", "hm-checked-fin-range",
+                       "runtime Fin construction",
+                       "value in the half-open interval [0, N)",
+                       "out-of-range literal", "checked_fin",
+                       "the runtime bound check rejects out-of-range values",
+                       "pass a value in range or adjust the bound",
+                       "checked Fin value %" PRId64 " is outside [0, %" PRId64
+                       ")",
+                       value, bound);
+        return hm_name(hm, "int");
+      }
+    }
+    char fin[64];
+    snprintf(fin, sizeof(fin), "Fin<%" PRId64 ">", bound);
+    return hm_name(hm, fin);
+  }
+  if (bound_e->kind == NY_E_IDENT && bound_e->as.ident.name &&
+      *bound_e->as.ident.name) {
+    char *fin = hm_type_format("Fin<%s>", bound_e->as.ident.name);
+    if (fin) {
+      ny_hm_type_t *out = hm_name(hm, fin);
+      free(fin);
+      return out;
+    }
+  }
+  /*
+   * Other bound expressions are checked at runtime only; no type-level index
+   * is available, so the result degrades to a plain integer.
+   */
+  return hm_name(hm, "int");
+}
+
 static ny_hm_type_t *hm_infer_expr_impl(ny_hm_state_t *hm, ny_hm_env_list *env,
                                         expr_t *e, const char *self_name) {
   if (!e)
@@ -6469,7 +7021,12 @@ static ny_hm_type_t *hm_infer_expr_impl(ny_hm_state_t *hm, ny_hm_env_list *env,
     }
     return hm_binary(hm, NY_HM_DICT, key, val);
   }
-  case NY_E_CALL:
+  case NY_E_CALL: {
+    ny_hm_type_t *checked_fin =
+        hm_try_checked_fin_call(hm, env, e, self_name);
+    if (checked_fin)
+      return checked_fin;
+  }
     if (e->as.call.callee && e->as.call.callee->kind == NY_E_MEMBER &&
         e->as.call.callee->as.member.target &&
         e->as.call.callee->as.member.name) {
@@ -6968,6 +7525,47 @@ static ny_hm_type_t *hm_infer_expr_impl(ny_hm_state_t *hm, ny_hm_env_list *env,
     return hm_any_fallback(hm, e, "hm-dynamic-member",
                            "member target is dynamic");
   case NY_E_INDEX: {
+    /*
+     * Projection from a dependent pair.  Component 0 has the index type;
+     * component 1 has the payload type with the binder replaced by the
+     * pair's literal index when one is known.
+     */
+    if (e->as.index.target &&
+        e->as.index.target->kind == NY_E_IDENT && !e->as.index.stop &&
+        !e->as.index.step && e->as.index.start &&
+        e->as.index.start->kind == NY_E_LITERAL &&
+        e->as.index.start->as.literal.kind == NY_LIT_INT &&
+        !e->as.index.start->as.literal.integer_outside_i64) {
+      const expr_t *pair_ref = e->as.index.target;
+      ny_hm_env_entry_t *entry =
+          hm_env_entry_ctx(env, pair_ref->as.ident.name,
+                           pair_ref->as.ident.syntax_ctx);
+      if (entry && entry->sigma_decl) {
+        hm_sigma_parts_t parts;
+        if (hm_sigma_parts_parse(entry->sigma_decl, &parts)) {
+          int64_t at = e->as.index.start->as.literal.as.i;
+          if (at == 0) {
+            ny_hm_type_t *t =
+                hm_parse_type_name(hm, parts.index_type, self_name);
+            hm_sigma_parts_free(&parts);
+            return t;
+          }
+          if (at == 1) {
+            char *raw = NULL;
+            if (entry->sigma_index_literal)
+              raw = hm_replace_type_index_owned(parts.value_type, parts.binder,
+                                                entry->sigma_index_value);
+            if (!raw)
+              raw = ny_strdup(parts.value_type);
+            ny_hm_type_t *t = hm_parse_type_name(hm, raw, self_name);
+            free(raw);
+            hm_sigma_parts_free(&parts);
+            return t;
+          }
+          hm_sigma_parts_free(&parts);
+        }
+      }
+    }
     ny_hm_type_t *target =
         hm_prune(hm_infer_expr(hm, env, e->as.index.target, self_name));
     /*
@@ -7887,13 +8485,27 @@ static void hm_infer_stmt_mode(ny_hm_state_t *hm, ny_hm_env_list *env,
                       : hm_var(hm));
       ny_hm_type_t *final_t =
           decl && *decl ? hm_parse_type_name(hm, decl, self_name) : it;
+      ny_hm_type_t *preserved_refined_type = NULL;
       if (!s->as.var.is_decl && init && !preserved_append_fact) {
         ny_hm_env_entry_t *entry = hm_env_entry_ctx(env, name, s->syntax_ctx);
         ny_hm_type_t *previous =
             entry && entry->guard_base_type
                 ? entry->guard_base_type
                 : hm_env_get_ctx(hm, env, name, s->syntax_ctx);
+        char *previous_name = previous ? hm_type_string(previous) : NULL;
+        bool refined = previous_name && hm_lookup_refine_stmt(hm, previous_name);
+        free(previous_name);
+        size_t before = hm->ctx ? hm->ctx->diagnostics.len : 0;
         hm_check_refinement_return(hm, previous, it, init, init->tok);
+        /*
+         * Keep the declaration's refinement after a valid reassignment.
+         * `a = 6` proves `Positive` for a `mut Positive a`; dropping the fact
+         * here would reject every later call that requires `Positive` even
+         * though the value was checked.  A failed proof leaves the binding
+         * unrefined and already reports the violation.
+         */
+        if (refined && hm->ctx && hm->ctx->diagnostics.len == before)
+          preserved_refined_type = previous;
         if (entry && entry->guard_base_type)
           entry->guard_base_type = NULL;
       }
@@ -7906,6 +8518,8 @@ static void hm_infer_stmt_mode(ny_hm_state_t *hm, ny_hm_env_list *env,
         }
       }
       if (decl && *decl) {
+        hm_check_sigma_initializer(hm, env, decl, init, self_name,
+                                   init ? init->tok : s->tok);
         hm_check_fin_initializer(hm, decl, init, init ? init->tok : s->tok);
         hm_check_indexed_initializer(hm, decl, init, init ? init->tok : s->tok);
         hm_check_refinement_initializer(hm, decl, init,
@@ -7914,6 +8528,8 @@ static void hm_infer_stmt_mode(ny_hm_state_t *hm, ny_hm_env_list *env,
                                    init ? init->tok : s->tok);
         hm_unify(hm, final_t, it, init ? init->tok : s->tok,
                  "variable declaration");
+      } else if (!s->as.var.is_decl && preserved_refined_type) {
+        final_t = preserved_refined_type;
       } else if (!s->as.var.is_decl && hm_is_any(final_t)) {
         /*
          * Reassignment without an annotation where the new value degrades to
@@ -7935,6 +8551,19 @@ static void hm_infer_stmt_mode(ny_hm_state_t *hm, ny_hm_env_list *env,
         hm_env_push_ctx(env, name, s->syntax_ctx, final_t);
       else
         hm_env_set_ctx(env, name, s->syntax_ctx, final_t);
+      if (s->as.var.is_decl && decl) {
+        hm_sigma_parts_t sigma_probe;
+        if (hm_sigma_parts_parse(decl, &sigma_probe)) {
+          hm_sigma_parts_free(&sigma_probe);
+          ny_hm_env_entry_t *sigma_entry =
+              hm_env_entry_ctx(env, name, s->syntax_ctx);
+          if (sigma_entry) {
+            sigma_entry->sigma_decl = decl;
+            sigma_entry->sigma_index_literal =
+                hm_sigma_literal_index(init, &sigma_entry->sigma_index_value);
+          }
+        }
+      }
       ny_sem_ownership_t ownership =
           !s->as.var.is_destructure && init &&
                   (init->kind == NY_E_LIST || init->kind == NY_E_DICT ||
@@ -8167,7 +8796,7 @@ static void hm_infer_stmt_mode(ny_hm_state_t *hm, ny_hm_env_list *env,
   case NY_S_MATCH: {
     ny_hm_type_t *subject_t =
         hm_infer_expr(hm, env, s->as.match.test, self_name);
-    hm_validate_match_patterns(hm, s);
+    hm_validate_match_patterns(hm, s, subject_t);
     for (size_t i = 0; i < s->as.match.arms.len; ++i) {
       match_arm_t *arm = &s->as.match.arms.data[i];
       ny_hm_env_list arm_env;
@@ -8392,6 +9021,16 @@ static void hm_infer_function_scheme(ny_hm_state_t *hm, ny_hm_scheme_t *scheme,
     param_t *p = &fn->as.fn.params.data[i];
     if (i < ft->args.len)
       hm_env_set_ctx(&env, p->name, fn->syntax_ctx, ft->args.data[i]);
+    if (p->name && p->type) {
+      hm_sigma_parts_t sigma_probe;
+      if (hm_sigma_parts_parse(p->type, &sigma_probe)) {
+        hm_sigma_parts_free(&sigma_probe);
+        ny_hm_env_entry_t *sigma_entry =
+            hm_env_entry_ctx(&env, p->name, fn->syntax_ctx);
+        if (sigma_entry)
+          sigma_entry->sigma_decl = p->type;
+      }
+    }
     hm_env_set_value_facts(hm, &env, p->name, fn->syntax_ctx, false,
                            NY_SEM_OWN_BORROWED, false);
     if (p->def && i < ft->args.len)

@@ -522,7 +522,13 @@ static bool stmt_looks_type_first_binding(parser_t *p) {
 
   if (p->cur.kind == NY_T_IDENT) {
     token_kind next = parser_peek(p).kind;
-    if (next != NY_T_IDENT && next != NY_T_LT && next != NY_T_DOT)
+    bool sigma_type = p->cur.len == 6 &&
+                      strncmp(p->cur.lexeme, "exists", 6) == 0 &&
+                      next == NY_T_LPAREN;
+    bool alias_apply = next == NY_T_LPAREN &&
+                       parser_current_token_is_type_alias(p);
+    if (!sigma_type && !alias_apply && next != NY_T_IDENT &&
+        next != NY_T_LT && next != NY_T_DOT)
       return false;
   }
 
@@ -719,6 +725,661 @@ static char *parse_qualified_name(parser_t *p) {
   return (char *)name;
 }
 
+/* ---- type-level aliases and type-level functions ----------------------- */
+
+static bool alias_ident_start(char c) {
+  return isalpha((unsigned char)c) || c == '_';
+}
+
+static bool alias_ident_char(char c) {
+  return isalnum((unsigned char)c) || c == '_';
+}
+
+static const char *alias_skip_space(const char *s) {
+  while (s && (*s == ' ' || *s == '\t' || *s == '\n' || *s == '\r'))
+    s++;
+  return s;
+}
+
+bool parser_type_ref_is_type_universe(const char *type) {
+  if (!type)
+    return false;
+  const char *t = type;
+  while (*t == '?' || *t == '*')
+    t++;
+  const char *leaf = strrchr(t, '.');
+  leaf = leaf ? leaf + 1 : t;
+  return strncmp(leaf, "Type", 4) == 0 &&
+         (leaf[4] == '\0' || leaf[4] == '<' || leaf[4] == ' ');
+}
+
+parser_type_alias *parser_find_type_alias(parser_t *p, const char *name) {
+  if (!p || !name || !*name)
+    return NULL;
+  const char *dot = strrchr(name, '.');
+  const char *leaf = dot ? dot + 1 : name;
+  size_t qualifier_len = dot ? (size_t)(dot - name) : 0;
+  for (parser_type_alias *a = p->type_aliases; a; a = a->next) {
+    if (!a->name || strcmp(a->name, leaf) != 0)
+      continue;
+    if (dot) {
+      if (!a->module || strlen(a->module) != qualifier_len ||
+          strncmp(a->module, name, qualifier_len) != 0)
+        continue;
+      return a;
+    }
+    if (!a->module || !*a->module ||
+        (p->current_module && strcmp(a->module, p->current_module) == 0))
+      return a;
+  }
+  return NULL;
+}
+
+typedef struct alias_buf_t {
+  char *data;
+  size_t len;
+  size_t cap;
+  bool oom;
+} alias_buf_t;
+
+static void alias_buf_put(alias_buf_t *b, const char *s, size_t n) {
+  if (b->oom || !s || n == 0)
+    return;
+  if (b->len + n + 1 > b->cap) {
+    size_t cap = b->cap ? b->cap : 64;
+    while (cap < b->len + n + 1)
+      cap *= 2;
+    char *next = realloc(b->data, cap);
+    if (!next) {
+      b->oom = true;
+      return;
+    }
+    b->data = next;
+    b->cap = cap;
+  }
+  memcpy(b->data + b->len, s, n);
+  b->len += n;
+  b->data[b->len] = '\0';
+}
+
+static void alias_buf_puts(alias_buf_t *b, const char *s) {
+  alias_buf_put(b, s, s ? strlen(s) : 0);
+}
+
+static char *alias_buf_take(alias_buf_t *b) {
+  if (b->oom || !b->data)
+    return NULL;
+  char *out = b->data;
+  b->data = NULL;
+  return out;
+}
+
+/* Split a type text into its head constructor and balanced arguments. */
+static bool alias_split_apply(const char *text, char **head_out,
+                              char ***args_out, size_t *argc_out) {
+  if (!text || !head_out || !args_out || !argc_out)
+    return false;
+  const char *open = NULL;
+  for (const char *s = text; *s; ++s) {
+    if (*s == '<' || *s == '(') {
+      open = s;
+      break;
+    }
+  }
+  if (!open)
+    return false;
+  char close_ch = *open == '<' ? '>' : ')';
+  int depth = 0;
+  const char *close = NULL;
+  for (const char *s = open; *s; ++s) {
+    if (*s == *open && *s == close_ch)
+      depth++;
+    else if (*s == *open)
+      depth++;
+    else if (*s == close_ch) {
+      depth--;
+      if (depth == 0) {
+        close = s;
+        break;
+      }
+    }
+  }
+  if (!close || close[1] != '\0')
+    return false;
+  const char *head_end = open;
+  while (head_end > text && (head_end[-1] == ' ' || head_end[-1] == '\t'))
+    head_end--;
+  char *head = ny_strndup(text, (size_t)(head_end - text));
+  if (!head)
+    return false;
+  size_t cap = 4;
+  size_t argc = 0;
+  char **args = malloc(cap * sizeof(char *));
+  if (!args) {
+    free(head);
+    return false;
+  }
+  const char *start = open + 1;
+  int paren = 0;
+  int angle = 0;
+  const char *p = start;
+  for (;; ++p) {
+    char c = *p;
+    bool at_end = p == close;
+    if (!at_end) {
+      if (c == '(')
+        paren++;
+      else if (c == ')')
+        paren--;
+      else if (c == '<')
+        angle++;
+      else if (c == '>')
+        angle--;
+    }
+    if (at_end || (c == ',' && paren == 0 && angle == 0)) {
+      const char *end = p;
+      while (end > start && (end[-1] == ' ' || end[-1] == '\t'))
+        end--;
+      const char *arg_start = start;
+      while (arg_start < end && (*arg_start == ' ' || *arg_start == '\t'))
+        arg_start++;
+      if (end > arg_start) {
+        if (argc == cap) {
+          cap *= 2;
+          char **next = realloc(args, cap * sizeof(char *));
+          if (!next) {
+            for (size_t i = 0; i < argc; ++i)
+              free(args[i]);
+            free(args);
+            free(head);
+            return false;
+          }
+          args = next;
+        }
+        args[argc] = ny_strndup(arg_start, (size_t)(end - arg_start));
+        if (!args[argc]) {
+          for (size_t i = 0; i < argc; ++i)
+            free(args[i]);
+          free(args);
+          free(head);
+          return false;
+        }
+        argc++;
+      }
+      if (at_end)
+        break;
+      start = p + 1;
+    }
+  }
+  *head_out = head;
+  *args_out = args;
+  *argc_out = argc;
+  return true;
+}
+
+static void alias_free_args(char **args, size_t argc) {
+  for (size_t i = 0; i < argc; ++i)
+    free(args[i]);
+  free(args);
+}
+
+static bool alias_collect_binders(parser_t *p, const char *pattern,
+                                  const char **out, size_t out_cap,
+                                  size_t *count) {
+  if (!pattern)
+    return false;
+  size_t n = 0;
+  const char *s = pattern;
+  while (*s) {
+    if (!alias_ident_start(*s)) {
+      s++;
+      continue;
+    }
+    const char *start = s;
+    while (alias_ident_char(*s))
+      s++;
+    size_t len = (size_t)(s - start);
+    /* Dotted names are constructors, not binders. */
+    if (*s == '.')
+      continue;
+    token_t tok = {.kind = NY_T_IDENT, .lexeme = start, .len = len};
+    if (parser_token_is_builtin_type(tok) || parser_type_ref_is_type_universe(
+            arena_strndup(p->arena, start, len)))
+      continue;
+    const char *next = alias_skip_space(s);
+    if (*next == '<' || *next == '(')
+      continue;
+    if (parser_find_type_alias(p, arena_strndup(p->arena, start, len)))
+      continue;
+    char *name = arena_strndup(p->arena, start, len);
+    bool duplicate = false;
+    for (size_t i = 0; i < n; ++i)
+      if (strcmp(out[i], name) == 0)
+        duplicate = true;
+    if (!duplicate && n < out_cap)
+      out[n++] = name;
+  }
+  *count = n;
+  return true;
+}
+
+static int alias_binder_index(parser_type_alias *a, const char *pattern) {
+  if (!a || !pattern)
+    return -1;
+  for (size_t i = 0; i < a->param_count; ++i)
+    if (a->params[i] && strcmp(a->params[i], pattern) == 0)
+      return (int)i;
+  return -1;
+}
+
+static bool alias_match_text(parser_type_alias *a, const char *pattern,
+                             const char *arg, const char **bindings) {
+  if (!a || !pattern || !arg)
+    return false;
+  arg = alias_skip_space(arg);
+  pattern = alias_skip_space(pattern);
+  int binder = alias_binder_index(a, pattern);
+  if (binder >= 0) {
+    if (bindings[binder]) {
+      bool same = strcmp(bindings[binder], arg) == 0;
+      return same;
+    }
+    /*
+     * The argument text belongs to a temporary split that the caller
+     * releases; keep an owned copy for substitution.
+     */
+    bindings[binder] = ny_strdup(arg);
+    return bindings[binder] != NULL;
+  }
+  char *phead = NULL;
+  char *ahead = NULL;
+  char **pargs = NULL;
+  char **aargs = NULL;
+  size_t parc = 0;
+  size_t aarc = 0;
+  if (alias_split_apply(pattern, &phead, &pargs, &parc) &&
+      alias_split_apply(arg, &ahead, &aargs, &aarc)) {
+    bool ok = strcmp(phead, ahead) == 0 && parc == aarc;
+    for (size_t i = 0; ok && i < parc; ++i)
+      ok = alias_match_text(a, pargs[i], aargs[i], bindings);
+    if (ok) {
+      /* Bindings were matched against pattern args, not the top pattern. */
+      free(phead);
+      free(ahead);
+      alias_free_args(pargs, parc);
+      alias_free_args(aargs, aarc);
+      return true;
+    }
+    free(phead);
+    free(ahead);
+    alias_free_args(pargs, parc);
+    alias_free_args(aargs, aarc);
+  } else {
+    free(phead);
+    free(ahead);
+    alias_free_args(pargs, parc);
+    alias_free_args(aargs, aarc);
+  }
+  return strcmp(pattern, arg) == 0;
+}
+
+static bool alias_match_pattern(parser_type_alias *a, size_t pattern_index,
+                                const char *arg, const char **bindings) {
+  if (!a || pattern_index >= a->arity)
+    return false;
+  return alias_match_text(a, a->patterns[pattern_index], arg, bindings);
+}
+
+/*
+ * Substitute binder bindings in a definition body.  A binding is only
+ * inserted where a whole identifier matches, so `list<T>` cannot corrupt a
+ * constructor such as `Type`.
+ */
+static char *alias_substitute_owned(parser_type_alias *a,
+                                    const char **bindings) {
+  if (!a || !a->body)
+    return NULL;
+  alias_buf_t out = {0};
+  const char *s = a->body;
+  while (*s) {
+    if (!alias_ident_start(*s)) {
+      alias_buf_put(&out, s, 1);
+      s++;
+      continue;
+    }
+    const char *start = s;
+    while (alias_ident_char(*s))
+      s++;
+    size_t len = (size_t)(s - start);
+    int found = -1;
+    for (size_t i = 0; i < a->param_count; ++i) {
+      if (a->params[i] && strlen(a->params[i]) == len &&
+          memcmp(a->params[i], start, len) == 0) {
+        found = (int)i;
+        break;
+      }
+    }
+    if (found >= 0 && bindings[found]) {
+      alias_buf_puts(&out, bindings[found]);
+    } else {
+      alias_buf_put(&out, start, len);
+    }
+  }
+  return alias_buf_take(&out);
+}
+
+static const char *alias_expand_text(parser_t *p, const char *text,
+                                     unsigned depth);
+
+static const char *alias_instantiate(parser_t *p, parser_type_alias *a,
+                                     const char *const *args, size_t argc,
+                                     token_t tok, unsigned depth) {
+  if (!p || !a)
+    return NULL;
+  if (a->arity != argc) {
+    parser_error(p, tok, "type-level definition has the wrong arity",
+                 "a type-level function must be applied to one argument per "
+                 "declared parameter");
+    return NULL;
+  }
+  const char **bindings = NULL;
+  if (a->param_count) {
+    bindings = calloc(a->param_count, sizeof(*bindings));
+    if (!bindings)
+      return NULL;
+  }
+  bool ok = true;
+  for (size_t i = 0; ok && i < a->arity; ++i)
+    ok = alias_match_pattern(a, i, args[i], bindings);
+  if (!ok) {
+    parser_error(p, tok, "type-level definition does not match this type",
+                 "check the structural type pattern in the 'type' "
+                 "declaration");
+    free(bindings);
+    return NULL;
+  }
+  char *substituted = alias_substitute_owned(a, bindings);
+  for (size_t i = 0; i < a->param_count; ++i)
+    free((char *)bindings[i]);
+  free(bindings);
+  if (!substituted)
+    return NULL;
+  const char *expanded = alias_expand_text(p, substituted, depth + 1);
+  free(substituted);
+  return expanded;
+}
+
+static const char *alias_expand_text(parser_t *p, const char *text,
+                                     unsigned depth) {
+  if (!p || !text)
+    return text;
+  if (depth > 64) {
+    parser_error(p, p->cur, "type-level normalization limit exceeded",
+                 "type-level definitions must terminate in a finite number "
+                 "of expansions");
+    return NULL;
+  }
+  for (size_t i = 0; text[i];) {
+    if (!alias_ident_start(text[i])) {
+      i++;
+      continue;
+    }
+    size_t start = i;
+    while (alias_ident_char(text[i]))
+      i++;
+    while (text[i] == '.' && alias_ident_start(text[i + 1])) {
+      i++;
+      while (alias_ident_char(text[i]))
+        i++;
+    }
+    size_t name_end = i;
+    char *name = ny_strndup(text + start, name_end - start);
+    if (!name)
+      return NULL;
+    parser_type_alias *a = parser_find_type_alias(p, name);
+    if (!a) {
+      free(name);
+      continue;
+    }
+    if (a->expanding) {
+      parser_error(p, a->tok,
+                   "type-level definition is recursive and does not "
+                   "terminate",
+                   "type-level functions must decrease or expand to a "
+                   "different shape; rewrite the definition without a "
+                   "self-reference");
+      free(name);
+      return NULL;
+    }
+    const char *open = alias_skip_space(text + name_end);
+    size_t open_at = (size_t)(open - text);
+    const char *end_ptr = open;
+    const char **args = NULL;
+    size_t argc = 0;
+    char **owned_args = NULL;
+    bool applied = false;
+    if (*open == '<' || *open == '(') {
+      char *head = NULL;
+      size_t close_at = 0;
+      char close_ch = *open == '<' ? '>' : ')';
+      int level = 0;
+      for (size_t k = open_at; text[k]; ++k) {
+        if (text[k] == *open)
+          level++;
+        else if (text[k] == close_ch) {
+          level--;
+          if (level == 0) {
+            close_at = k;
+            break;
+          }
+        }
+      }
+      if (close_at == 0) {
+        free(name);
+        return NULL;
+      }
+      char *inner = ny_strndup(text + open_at + 1,
+                               close_at - open_at - 1);
+      if (!inner) {
+        free(name);
+        return NULL;
+      }
+      /* Reuse the splitter through a fabricated application. */
+      alias_buf_t scratch = {0};
+      alias_buf_puts(&scratch, "x<");
+      alias_buf_puts(&scratch, inner);
+      alias_buf_puts(&scratch, ">");
+      free(inner);
+      char *wrapped = alias_buf_take(&scratch);
+      if (!wrapped) {
+        free(name);
+        return NULL;
+      }
+      char **pargs = NULL;
+      size_t parc = 0;
+      if (!alias_split_apply(wrapped, &head, &pargs, &parc)) {
+        free(wrapped);
+        free(name);
+        return NULL;
+      }
+      free(wrapped);
+      free(head);
+      owned_args = pargs;
+      argc = parc;
+      args = (const char **)pargs;
+      end_ptr = text + close_at + 1;
+      applied = true;
+    }
+    if (applied) {
+      /*
+       * Normalize arguments before expanding the body so a nested use of the
+       * same definition (`Wrap<Wrap<int>>`) is not mistaken for recursion.
+       */
+      const char *expanded_args[16];
+      bool args_ok = argc <= 16;
+      for (size_t k = 0; args_ok && k < argc; ++k) {
+        expanded_args[k] = alias_expand_text(p, args[k], depth + 1);
+        if (!expanded_args[k])
+          args_ok = false;
+      }
+      if (!args_ok) {
+        a->expanding = false;
+        alias_free_args(owned_args, argc);
+        free(name);
+        return NULL;
+      }
+      a->expanding = true;
+      const char *expanded = alias_instantiate(
+          p, a, argc <= 16 ? expanded_args : args, argc, a->tok, depth + 1);
+      a->expanding = false;
+      alias_free_args(owned_args, argc);
+      free(name);
+      if (!expanded)
+        return NULL;
+      alias_buf_t out = {0};
+      alias_buf_put(&out, text, start);
+      alias_buf_puts(&out, expanded);
+      alias_buf_puts(&out, end_ptr);
+      char *next = alias_buf_take(&out);
+      if (!next)
+        return NULL;
+      const char *result = alias_expand_text(p, next, depth + 1);
+      free(next);
+      return result;
+    }
+    if (a->arity != 0) {
+      parser_error(p, a->tok,
+                   "type-level definition requires type arguments",
+                   "apply the definition to one argument per declared "
+                   "parameter, e.g. 'Name<Arg>'");
+      free(name);
+      return NULL;
+    }
+    a->expanding = true;
+    const char *expanded = alias_expand_text(p, a->body, depth + 1);
+    a->expanding = false;
+    free(name);
+    if (!expanded)
+      return NULL;
+    alias_buf_t out = {0};
+    alias_buf_put(&out, text, start);
+    alias_buf_puts(&out, expanded);
+    alias_buf_puts(&out, end_ptr);
+    char *next = alias_buf_take(&out);
+    if (!next)
+      return NULL;
+    const char *result = alias_expand_text(p, next, depth + 1);
+    free(next);
+    return result;
+  }
+  return arena_strndup(p->arena, text, strlen(text));
+}
+
+bool parser_register_type_alias(parser_t *p, const char *name,
+                                const char **patterns, size_t arity,
+                                const char *body, token_t tok, bool validate) {
+  if (!p || !name || !*name || !body || !*body)
+    return false;
+  const char *module = NULL;
+  const char *short_name = name;
+  if (p->current_module) {
+    size_t mlen = strlen(p->current_module);
+    if (mlen && strncmp(name, p->current_module, mlen) == 0 &&
+        name[mlen] == '.') {
+      module = p->current_module;
+      short_name = name + mlen + 1;
+    }
+  }
+  const char *dot = strrchr(short_name, '.');
+  if (dot) {
+    module = arena_strndup(p->arena, short_name, (size_t)(dot - short_name));
+    short_name = dot + 1;
+  }
+  if (parser_type_ref_is_type_universe(short_name)) {
+    parser_error(p, tok, "cannot redefine the 'Type' universe",
+                 "choose a different type-level definition name");
+    return false;
+  }
+  token_t name_tok = {.kind = NY_T_IDENT,
+                      .lexeme = short_name,
+                      .len = strlen(short_name)};
+  if (parser_token_is_builtin_type(name_tok)) {
+    parser_error(p, tok, "cannot redefine a builtin type name",
+                 "choose a different type-level definition name");
+    return false;
+  }
+  if (parser_find_type_alias(p, short_name)) {
+    parser_error(p, tok, "duplicate type-level definition",
+                 "each type-level definition may be declared only once");
+    return false;
+  }
+  parser_type_alias *a = arena_alloc(p->arena, sizeof(*a));
+  if (!a)
+    return false;
+  memset(a, 0, sizeof(*a));
+  a->name = parser_intern(p, short_name, strlen(short_name));
+  a->module = module ? parser_intern(p, module, strlen(module)) : NULL;
+  a->body = parser_intern(p, body, strlen(body));
+  a->tok = tok;
+  a->arity = arity;
+  if (arity) {
+    /*
+     * A single structural pattern can bind more than one parameter
+     * (`type Second<Pair<A, B>> = B`), so the binder table is larger than the
+     * number of pattern slots.
+     */
+    size_t param_cap = arity * 4;
+    if (param_cap < 4)
+      param_cap = 4;
+    if (param_cap > 32)
+      param_cap = 32;
+    a->patterns = arena_alloc(p->arena, arity * sizeof(*a->patterns));
+    a->params = arena_alloc(p->arena, param_cap * sizeof(*a->params));
+    if (!a->patterns || !a->params)
+      return false;
+    memset(a->patterns, 0, arity * sizeof(*a->patterns));
+    memset(a->params, 0, param_cap * sizeof(*a->params));
+    size_t param_count = 0;
+    for (size_t i = 0; i < arity; ++i) {
+      a->patterns[i] = parser_intern(p, patterns[i], strlen(patterns[i]));
+      const char *extra[16];
+      size_t extra_count = 0;
+      alias_collect_binders(p, patterns[i], extra, 16, &extra_count);
+      for (size_t k = 0; k < extra_count && param_count < param_cap; ++k) {
+        bool seen = false;
+        for (size_t m = 0; m < param_count; ++m)
+          if (strcmp(a->params[m], extra[k]) == 0)
+            seen = true;
+        if (!seen)
+          a->params[param_count++] = extra[k];
+      }
+    }
+    a->param_count = param_count;
+  }
+  a->next = p->type_aliases;
+  p->type_aliases = a;
+  if (validate) {
+    a->expanding = true;
+    const char *expanded = alias_expand_text(p, a->body, 0);
+    a->expanding = false;
+    if (!expanded) {
+      /* Unlink the rejected definition so later uses report a parse error. */
+      if (p->type_aliases == a) {
+        p->type_aliases = a->next;
+      } else {
+        for (parser_type_alias *it = p->type_aliases; it; it = it->next) {
+          if (it->next == a) {
+            it->next = a->next;
+            break;
+          }
+        }
+      }
+      return false;
+    }
+  }
+  return true;
+}
+
 static const char *parse_type_ref(parser_t *p, const char *err_msg) {
   size_t nullable_depth = 0;
   while (parser_match(p, NY_T_QUESTION))
@@ -742,6 +1403,79 @@ static const char *parse_type_ref(parser_t *p, const char *err_msg) {
     memcpy(owner, p->current_impl_owner, owner_len + 1);
     free(base);
     base = owner;
+  }
+  /*
+   * Dependent pair (sigma) type: `exists(IndexType binder) ValueType`.  Keep
+   * the binder in the canonical spelling so the type checker can substitute
+   * the first component into the payload type at construction.
+   */
+  if (strcmp(base, "exists") == 0 && p->cur.kind == NY_T_LPAREN) {
+    parser_advance(p);
+    const char *index_type =
+        parse_type_ref(p, "expected dependent pair index type");
+    if (!index_type) {
+      free(base);
+      return NULL;
+    }
+    if (p->cur.kind != NY_T_IDENT) {
+      parser_error(p, p->cur, "expected dependent pair binder name",
+                   "write 'exists(Type n) ValueType'");
+      free(base);
+      return NULL;
+    }
+    char *binder = arena_strndup(p->arena, p->cur.lexeme, p->cur.len);
+    parser_advance(p);
+    parser_expect(p, NY_T_RPAREN, "')' after dependent pair binder", NULL);
+    const char *value_type =
+        parse_type_ref(p, "expected dependent pair value type");
+    if (!value_type) {
+      free(base);
+      return NULL;
+    }
+    size_t total =
+        strlen(index_type) + strlen(binder) + strlen(value_type) + 16;
+    char *sigma = arena_alloc(p->arena, total);
+    if (!sigma) {
+      free(base);
+      parser_error(p, p->cur, "out of memory", NULL);
+      return NULL;
+    }
+    snprintf(sigma, total, "exists(%s %s) %s", index_type, binder, value_type);
+    free(base);
+    return sigma;
+  }
+  /*
+   * Type-level application with parentheses: `Element(list<int>)`.  Only a
+   * known definition takes this form; other parenthesized type syntax is
+   * handled elsewhere (dependent pairs).
+   */
+  if (parser_find_type_alias(p, base) && p->cur.kind == NY_T_LPAREN) {
+    parser_advance(p);
+    alias_buf_t applied = {0};
+    alias_buf_puts(&applied, base);
+    alias_buf_puts(&applied, "<");
+    bool applied_first = true;
+    while (p->cur.kind != NY_T_RPAREN && p->cur.kind != NY_T_EOF) {
+      const char *arg = parse_type_ref(p, "expected type-level argument");
+      if (!arg)
+        break;
+      if (!applied_first)
+        alias_buf_puts(&applied, ", ");
+      alias_buf_puts(&applied, arg);
+      applied_first = false;
+      if (!parser_match(p, NY_T_COMMA))
+        break;
+    }
+    parser_expect(p, NY_T_RPAREN, "')' after type-level arguments", NULL);
+    alias_buf_puts(&applied, ">");
+    char *built = alias_buf_take(&applied);
+    if (!built) {
+      free(base);
+      parser_error(p, p->cur, "out of memory", NULL);
+      return NULL;
+    }
+    free(base);
+    base = built;
   }
   if (parser_match(p, NY_T_LT)) {
     if (strcmp(base, "proof") == 0) {
@@ -850,7 +1584,89 @@ static const char *parse_type_ref(parser_t *p, const char *err_msg) {
   memcpy(out + at, base, len);
   out[total] = '\0';
   free(base);
-  return out;
+  return alias_expand_text(p, out, 0);
+}
+
+/*
+ * `type Name = Body` and `type Name<Pattern...> = Body` declare a type-level
+ * alias/function.  Definitions are compile-time only: expansion happens while
+ * parsing type references, so no declaration reaches IR lowering.
+ */
+static stmt_t *parse_type_level_stmt(parser_t *p) {
+  token_t type_tok = p->cur;
+  parser_advance(p);
+  if (p->block_depth != 0) {
+    parser_error(p, type_tok, "type-level definitions must be at module scope",
+                 "move the 'type' declaration outside the function body");
+    parser_sync_stmt_boundary(p);
+    return NULL;
+  }
+  if (p->cur.kind != NY_T_IDENT) {
+    parser_error(p, p->cur, "expected name after 'type'",
+                 "write 'type Name = ConcreteType' or 'type Name<T> = T'");
+    parser_sync_stmt_boundary(p);
+    return NULL;
+  }
+  token_t name_tok = p->cur;
+  const char *name = arena_strndup(p->arena, name_tok.lexeme, name_tok.len);
+  parser_advance(p);
+
+  const char *patterns[16];
+  size_t arity = 0;
+  token_kind close_kind = NY_T_EOF;
+  if (p->cur.kind == NY_T_LT || p->cur.kind == NY_T_LPAREN) {
+    close_kind = p->cur.kind == NY_T_LT ? NY_T_GT : NY_T_RPAREN;
+    parser_advance(p);
+    while (p->cur.kind != close_kind && p->cur.kind != NY_T_RSHIFT &&
+           p->cur.kind != NY_T_EOF) {
+      const char *pattern =
+          parse_type_ref(p, "expected type-level parameter pattern");
+      if (!pattern) {
+        parser_sync_stmt_boundary(p);
+        return NULL;
+      }
+      if (arity >= sizeof(patterns) / sizeof(patterns[0])) {
+        parser_error(p, p->cur,
+                     "too many type-level parameters (maximum 16)", NULL);
+        parser_sync_stmt_boundary(p);
+        return NULL;
+      }
+      patterns[arity++] = pattern;
+      if (!parser_match(p, NY_T_COMMA))
+        break;
+    }
+    if (p->cur.kind == NY_T_RSHIFT) {
+      token_t tok = p->cur;
+      p->cur.kind = NY_T_GT;
+      p->cur.lexeme = tok.lexeme + 1;
+      p->cur.len = 1;
+      p->cur.col = tok.col + 1;
+    }
+    if (p->cur.kind == close_kind) {
+      parser_advance(p);
+    } else {
+      parser_error(p, p->cur,
+                   close_kind == NY_T_GT ? "'>' after type-level parameters"
+                                         : "')' after type-level parameters",
+                   NULL);
+      parser_sync_stmt_boundary(p);
+      return NULL;
+    }
+  }
+  if (!parser_match(p, NY_T_ASSIGN)) {
+    parser_error(p, p->cur, "expected '=' in type-level definition",
+                 "write 'type Name = ConcreteType'");
+    parser_sync_stmt_boundary(p);
+    return NULL;
+  }
+  const char *body = parse_type_ref(p, "expected type-level definition body");
+  if (!body) {
+    parser_sync_stmt_boundary(p);
+    return NULL;
+  }
+  parser_match(p, NY_T_SEMI);
+  parser_register_type_alias(p, name, patterns, arity, body, name_tok, true);
+  return NULL;
 }
 
 static stmt_t *parse_resource_block_stmt(parser_t *p) {
@@ -2916,6 +3732,38 @@ static stmt_t *parse_enum(parser_t *p) {
                      "payload enum variants cannot also have integer values",
                      item.name);
       item.value = p_parse_expr(p, 0);
+    }
+    if (tok_is_ident_text(p->cur, "where")) {
+      token_t where_tok = p->cur;
+      parser_advance(p);
+      if (p->cur.kind != NY_T_IDENT) {
+        parser_error(p, p->cur, "expected enum type parameter after 'where'",
+                     "write 'Variant(...) where t is int'");
+      } else {
+        const char *param =
+            arena_strndup(p->arena, p->cur.lexeme, p->cur.len);
+        bool declared = false;
+        for (size_t i = 0; i < s->as.enu.type_params.len; i++)
+          if (strcmp(s->as.enu.type_params.data[i], param) == 0)
+            declared = true;
+        if (!declared)
+          parser_error(p, p->cur,
+                       "enum index constraint names an undeclared type "
+                       "parameter",
+                       param);
+        item.index_constraint_param = param;
+        item.index_constraint_tok = where_tok;
+        parser_advance(p);
+        if (!tok_is_ident_text(p->cur, "is")) {
+          parser_error(p, p->cur,
+                       "expected 'is' after enum index constraint parameter",
+                       "write 'Variant(...) where t is int'");
+        } else {
+          parser_advance(p);
+          item.index_constraint_type =
+              parse_type_ref(p, "expected enum index type after 'is'");
+        }
+      }
     }
     vec_push_arena(p->arena, &s->as.enu.items, item);
     if (!parser_match(p, NY_T_COMMA))

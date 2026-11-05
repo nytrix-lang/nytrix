@@ -5,7 +5,7 @@ shape dependent_negative_type_level_fn {
   template ny-compile-fail
   flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
   expect compile_fail
-  expect_message "type-level definitions ('type Name ... = ...') are not supported"
+  expect_message "recursive and does not terminate"
   source ny <<'NY'
 use core
 ;; Unsupported dependent form: must be rejected with a clear diagnostic.

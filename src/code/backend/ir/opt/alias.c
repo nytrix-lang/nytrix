@@ -330,6 +330,19 @@ bool nyr_alias_analysis(nyr_func_t *f) {
       break;
     }
 
+    case NYIR_CALL:
+      /*
+       * A typed-buffer constructor returns a pointer to freshly allocated
+       * storage, so two such results (and pointers derived from them by the
+       * ADD/SUB rule below) never overlap. Pointers that were loaded from
+       * memory stay in the unknown class, so this only separates provably
+       * distinct allocations from each other.
+       */
+      if (in->dst >= 0 && in->dst < nvals && in->symbol &&
+          strcmp(in->symbol, "rt_tbuf_new_typed_raw") == 0)
+        seed[in->dst] = (uint32_t)(++next_unique);
+      break;
+
     case NYIR_COPY:
       if (in->a >= 0 && in->a < nvals)
         uf_union(&uf, in->dst, in->a);

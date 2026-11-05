@@ -1,0 +1,17 @@
+shape first_class_type_mismatch_negative {
+  family "typing/dependent"
+  generator "error"
+  features [error typing dependent type-level negative]
+  template ny-compile-fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_fail
+  expect_message "does not match this type"
+  source ny <<'NY'
+use core
+;; The parameter pattern requires a list argument; applying the definition to
+;; an integer cannot bind T and must be rejected.
+type Elem(list<T>) = T
+def Elem<int> value = 1
+print(value)
+NY
+}

@@ -1,0 +1,27 @@
+shape gadt_negative_impossible_pattern {
+  family "typing/dependent"
+  generator "error"
+  features [error typing dependent gadt negative]
+  template ny-compile-fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_fail
+  expect_message "cannot match 'Expr<int>'"
+  source ny <<'NY'
+use core
+
+enum Expr<t> {
+  IntLit(int) where t is int,
+  BoolLit(bool) where t is bool
+}
+
+;; BoolLit produces Expr<bool>, so this arm cannot match an Expr<int>.
+fn eval_int(Expr<int> expression) int {
+  match expression {
+    Expr.IntLit(n) -> n
+    Expr.BoolLit(b) -> 0
+  }
+}
+
+print(eval_int(Expr.IntLit(1)))
+NY
+}

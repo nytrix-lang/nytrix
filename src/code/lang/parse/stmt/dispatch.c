@@ -58,10 +58,36 @@ static stmt_t *ny_dispatch_make_aug_stmt(parser_t *p, token_t stmt_tok,
   return s;
 }
 
+/*
+ * `def T Type = int` is the one name-first type annotation: the name comes
+ * first because `Type` is a universe value, not an ordinary annotation.
+ */
+static bool stmt_looks_type_value_binding(parser_t *p) {
+  if (!p || p->cur.kind != NY_T_IDENT)
+    return false;
+  token_t second = parser_peek(p);
+  if (second.kind != NY_T_IDENT || second.len != 4 || !second.lexeme ||
+      strncmp(second.lexeme, "Type", 4) != 0)
+    return false;
+  parser_t probe = *p;
+  parser_advance(&probe);
+  parser_advance(&probe);
+  return probe.cur.kind == NY_T_ASSIGN;
+}
+
 static bool parse_var_binding_target(parser_t *p, stmt_t *s) {
   const char *var_type = NULL;
   token_t ident = {0};
-  if (stmt_looks_type_first_binding(p)) {
+  if (stmt_looks_type_value_binding(p)) {
+    ident = p->cur;
+    parser_advance(p);
+    var_type = parse_type_ref(p, "expected 'Type'");
+    if (!var_type) {
+      parser_error(p, p->cur, "expected 'Type' in type-value binding",
+                   "write 'def name Type = SomeType'");
+      return false;
+    }
+  } else if (stmt_looks_type_first_binding(p)) {
     var_type = parse_type_ref(p, "expected type name");
     if (p->cur.kind != NY_T_IDENT) {
       parser_error(p, p->cur, "expected variable name after type",
@@ -98,6 +124,22 @@ static bool parse_var_binding_target(parser_t *p, stmt_t *s) {
     }
     ident = p->cur;
     parser_advance(p);
+    /*
+     * Dependent annotations may follow the binding name, mirroring the
+     * `def name Type = ...` form: `def p exists(int n) int = pair(1, 2)`
+     * and `def i Fin<n> = checked_fin(v, n)`.  The annotation is optional, and
+     * an identifier that is not a dependent type stays an initializer.
+     */
+    bool dependent_postfix =
+        p->cur.kind == NY_T_IDENT && p->cur.lexeme &&
+        ((p->cur.len == 6 && strncmp(p->cur.lexeme, "exists", 6) == 0 &&
+          parser_peek(p).kind == NY_T_LPAREN) ||
+         ((p->cur.len == 3 && strncmp(p->cur.lexeme, "Fin", 3) == 0) &&
+          parser_peek(p).kind == NY_T_LT) ||
+         (parser_peek(p).kind == NY_T_LT &&
+          parser_current_token_is_type_alias(p)));
+    if (dependent_postfix)
+      var_type = parse_type_ref(p, "expected dependent type");
   }
   char *final_name = (char *)ident.lexeme;
   size_t nlen = ident.len;
@@ -337,7 +379,48 @@ static stmt_t *p_parse_stmt_raw(parser_t *p) {
     }
     if (parser_match(p, NY_T_ASSIGN)) {
       while (true) {
-        expr_t *initializer = p_parse_expr(p, 0);
+        size_t init_index = s->as.var.exprs.len;
+        const char *decl_type = init_index < s->as.var.types.len
+                                    ? s->as.var.types.data[init_index]
+                                    : NULL;
+        expr_t *initializer = NULL;
+        bool type_literal = decl_type &&
+                            parser_type_ref_is_type_universe(decl_type) &&
+                            (p->cur.kind == NY_T_QUESTION ||
+                             p->cur.kind == NY_T_STAR ||
+                             (p->cur.kind == NY_T_IDENT &&
+                              (parser_token_is_builtin_type(p->cur) ||
+                               parser_current_token_is_type_alias(p) ||
+                               (p->cur.len == 6 && p->cur.lexeme &&
+                                strncmp(p->cur.lexeme, "exists", 6) == 0))));
+        if (type_literal) {
+          /*
+           * `def T Type = int` binds a first-class type value.  Type values
+           * erase to their canonical name at runtime and register a
+           * compile-time alias so `def T x = ...` and `Name<T>` work.
+           */
+          token_t type_value_tok = p->cur;
+          const char *type_value =
+              parse_type_ref(p, "expected a type after 'Type'");
+          if (!type_value) {
+            parser_sync_stmt_boundary(p);
+            stmt_free_members(s);
+            return NULL;
+          }
+          if (s->as.var.is_mut) {
+            parser_error(p, s->tok,
+                         "'Type' bindings are compile-time values",
+                         "declare the type value with 'def', not 'mut'");
+          }
+          if (p->block_depth == 0 && init_index < s->as.var.names.len) {
+            parser_register_type_alias(p, s->as.var.names.data[init_index],
+                                       NULL, 0, type_value, type_value_tok,
+                                       false);
+          }
+          initializer = ct_string_expr(p, type_value_tok, type_value);
+        } else {
+          initializer = p_parse_expr(p, 0);
+        }
         if (!initializer) {
           parser_error(p, p->cur, "expected expression after '='", NULL);
           stmt_free_members(s);
@@ -455,18 +538,7 @@ static stmt_t *p_parse_stmt_raw(parser_t *p) {
       return parse_refine_stmt(p);
     }
     if (id_len == 4 && strncmp(id, "type", 4) == 0 && next.kind == NY_T_IDENT) {
-      /* `type Name<T> = ...` / `type Elem(list<T>) = T` would declare a
-       * type-level function. Reject the whole line with one diagnostic. */
-      token_t first = p->cur;
-      parser_error(p, first,
-                   "type-level definitions ('type Name ... = ...') are not "
-                   "supported",
-                   "name a refinement with 'refine Name = Base where (v) "
-                   "{ ... }' or use the concrete type");
-      int line = first.line;
-      while (p->cur.kind != NY_T_EOF && p->cur.line == line)
-        parser_advance(p);
-      return NULL;
+      return parse_type_level_stmt(p);
     }
     if (id_len == 5 && strncmp(id, "trait", 5) == 0) {
       return parse_trait(p);

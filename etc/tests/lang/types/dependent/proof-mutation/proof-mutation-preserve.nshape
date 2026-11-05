@@ -1,0 +1,21 @@
+shape proof_mutation_preserves_refinement {
+  family "runtime/language"
+  generator "embedded"
+  features ["ny", "test", "proof", "dependent"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+refine Positive = int where (v) { v > 0 }
+
+fn consume(Positive p) int { p }
+
+;; Reassigning a value that proves the predicate keeps the refinement.
+mut Positive a = 5
+a = 6
+assert_eq(consume(a), 6, "valid mutation keeps the refinement fact")
+print("✓ proof-mutation-preserve ok")
+NY
+}

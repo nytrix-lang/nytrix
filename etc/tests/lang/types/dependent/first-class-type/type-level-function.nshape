@@ -1,0 +1,29 @@
+shape first_class_type_level_function {
+  family "typing/dependent"
+  generator "embedded"
+  features [typing dependent type-level positive]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+;; Structural type-level functions bind parameters by shape.  Angle brackets
+;; and parenthesized application are both accepted.
+type Elem(list<T>) = T
+type Wrapped<A> = list<A>
+type Nested<A> = Wrapped<Wrapped<A>>
+type Second<Pair<A, B>> = B
+
+def Elem(list<int>) n = 5
+def Elem<list<str>> name = "buffy"
+def Nested<int> matrix = [[1, 2], [3, 4]]
+def Second<Pair<int, str>> second = "second"
+
+assert_eq(n, 5, "parenthesized type-level application")
+assert_eq(name, "buffy", "angle-bracket type-level application")
+assert_eq(matrix[1][0], 3, "nested type-level normalization")
+assert_eq(second, "second", "multi-binder structural pattern")
+print("✓ first-class-type function ok")
+NY
+}

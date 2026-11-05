@@ -1,0 +1,17 @@
+shape first_class_type_recursive_negative {
+  family "typing/dependent"
+  generator "error"
+  features [error typing dependent type-level negative]
+  template ny-compile-fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_fail
+  expect_message "recursive and does not terminate"
+  source ny <<'NY'
+use core
+;; A self-referential type-level definition must be rejected, not normalized
+;; until the compiler exhausts memory.
+type Bad<T> = Bad<T>
+def Bad<int> value = 1
+print(value)
+NY
+}

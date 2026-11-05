@@ -167,13 +167,16 @@ Proposition matching is structural: equivalent equality/order spellings are
 normalized, while unrelated propositions are rejected. `prove` accepts only
 a condition the compiler can establish; false and unknown conditions fail.
 
-This is refinement-proof support, not full dependent typing. Nytrix does not
-implement liquid-type or refinement-qualifier synthesis: nullable, range,
-index, and discriminant facts in the compiler's `refined.v1` artifact are
-heuristic flow facts, not user-defined inferred refinements. Some
-parameter-dependent propositions cannot yet be resolved through calls, and
-proofs do not survive mutation of their referenced values. Unsupported forms
-are rejected rather than accepted as evidence.
+This section describes the refinement-proof subsystem, not the complete set of
+dependent-type features; see [Dependent types and indexed data](dependent.md)
+for Pi/Sigma types, GADTs, and type-level forms. Nytrix does not implement
+arbitrary liquid-type or refinement-qualifier synthesis: nullable, range, index,
+and discriminant facts in the compiler's `refined.v1` artifact are heuristic
+flow facts, not synthesized user refinements. Calls transport only supported
+caller facts into parameter-dependent preconditions. A mutation preserves a
+refinement only when the analysis proves it remains valid; uncertain aliasing
+does not count as proof. Unsupported obligations remain errors or explicit
+dynamic checks, never implicit evidence.
 
 ### Proof boundary regression matrix
 

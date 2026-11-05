@@ -164,6 +164,7 @@ static void nyr_stamp_local_store_classes(nyr_func_t *f) {
    * is nothing this pass can repair.
    */
   bool has_local_value_access = false;
+  bool has_unknown_return = false;
   int64_t max_local = -1;
   for (size_t i = 0; i < f->len; ++i) {
     nyr_op_t op = f->data[i].op;
@@ -173,8 +174,11 @@ static void nyr_stamp_local_store_classes(nyr_func_t *f) {
       max_local = f->data[i].imm;
     if (op == NYIR_LOAD_LOCAL || op == NYIR_STORE_LOCAL)
       has_local_value_access = true;
+    if (op == NYIR_RET && f->data[i].scalar_class == NYIR_SCALAR_UNKNOWN &&
+        f->data[i].a >= 0)
+      has_unknown_return = true;
   }
-  if (!has_local_value_access)
+  if (!has_local_value_access && !has_unknown_return)
     return;
   size_t local_count = max_local >= 0 ? (size_t)max_local + 1u : 0;
   nyr_type_map_t types = {0};
@@ -298,6 +302,52 @@ static void nyr_stamp_local_store_classes(nyr_func_t *f) {
           prev->op == NYIR_BR_IF || prev->op == NYIR_CALL ||
           (prev->op == NYIR_ADDR_LOCAL && prev->imm == load->imm))
         break;
+    }
+  }
+
+  /*
+   * Return register classes are a function-wide ABI contract. A return can
+   * still be UNKNOWN here even after local-store classes are repaired: before
+   * optimization its operand may be a copy/phi whose class was hidden by a
+   * branch join, while this pass's whole-function type map now proves the
+   * optimized producer is f32/f64. Infer the ABI only when every return agrees;
+   * mixed float/integer or f32/f64 exits remain for the verifier to reject
+   * rather than silently changing their calling convention.
+   */
+  nyr_scalar_class_t merged_return = NYIR_SCALAR_UNKNOWN;
+  bool saw_return = false;
+  bool returns_agree = true;
+  for (size_t i = 0; i < f->len; ++i) {
+    const nyr_inst_t *ret = &f->data[i];
+    if (ret->op != NYIR_RET)
+      continue;
+    saw_return = true;
+    nyr_scalar_class_t cls = ret->scalar_class;
+    if (cls != NYIR_SCALAR_F32 && cls != NYIR_SCALAR_F64 && ret->a >= 0 &&
+        (size_t)ret->a < value_count)
+      cls = nyr_pipeline_value_class(f, &types, defs, ret->a, 0);
+    /* The verifier treats every non-float scalar class as the integer ABI. */
+    if (cls != NYIR_SCALAR_F32 && cls != NYIR_SCALAR_F64)
+      cls = NYIR_SCALAR_I64_RAW;
+    if (merged_return == NYIR_SCALAR_UNKNOWN)
+      merged_return = cls;
+    else if (merged_return != cls)
+      returns_agree = false;
+  }
+  if (saw_return && returns_agree &&
+      (merged_return == NYIR_SCALAR_F32 ||
+       merged_return == NYIR_SCALAR_F64)) {
+    for (size_t i = 0; i < f->len; ++i) {
+      nyr_inst_t *ret = &f->data[i];
+      if (ret->op != NYIR_RET || ret->scalar_class != NYIR_SCALAR_UNKNOWN)
+        continue;
+      ret->scalar_class = merged_return;
+      if (ny_trace_enabled("NY_TRACE_ABI"))
+        ny_trace_line("[abi-return]",
+                      "resolve inst=%zu value=v%d class=%s from "
+                      "whole-function return producer facts",
+                      i, ret->a,
+                      merged_return == NYIR_SCALAR_F64 ? "f64" : "f32");
     }
   }
   free(defs);
@@ -931,6 +981,9 @@ static const nyr_pass_control_t nyr_pass_controls[] = {
     {nyr_phiopt, "phiopt"},
     {nyr_if_convert, "if_convert"},
     {nyr_ilp_reassociate, "ilp_reassociate"},
+    {nyr_loop_sub_iv, "loop_sub_iv"},
+    {nyr_loop_guard_hoist, "loop_guard_hoist"},
+    {nyr_mem_dse, "mem_dse"},
     {nyr_loop_global_promote, "loop_global_promote"},
     {nyr_select_chain_fold, "select_chain_fold"},
     {nyr_float_zero_guard_fold, "float_zero_guard_fold"},
@@ -2263,6 +2316,11 @@ static bool nyr_optimize_pipeline(nyr_func_t *f, nyr_opt_stats_t *stats,
      * may lengthen loop-carried chains; this restores latency-optimal
      * association once nothing else will refactor it.
      */
+    if (ok && !nyr_pass_stopped && nyr_has_loop(f)) {
+      static bool (*const loop_tail[])(nyr_func_t *) = {
+          nyr_loop_guard_hoist, nyr_loop_sub_iv, nyr_mem_dse, nyr_dce};
+      nyr_run_seq(f, loop_tail, 4, stats, dump, &ok);
+    }
     if (ok && !nyr_pass_stopped && nyr_has_loop(f))
       nyr_run_pass(f, nyr_ilp_reassociate, stats, dump, &ok);
     /* Diagnostic: NYTRIX_DUMP_FINAL_NYIR=1 prints each function as it

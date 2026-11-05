@@ -128,8 +128,15 @@ fn _raw_ptr(any p) any {
 }
 
 fn _png_disable_libpng() bool {
-   _png_disable_libpng_cache = common.cached_env_truthy(_png_disable_libpng_cache, "NY_PNG_DISABLE_LIBPNG")
-   _png_disable_libpng_cache == 1
+   if _png_disable_libpng_cache != -1 { return _png_disable_libpng_cache == 1 }
+   def raw = __env_get("NY_PNG_DISABLE_LIBPNG")
+   mut on = 0
+   if !is_nil(raw) {
+      def v = lower(raw)
+      if v == "1" || v == "true" || v == "on" || v == "yes" { on = 1 }
+   }
+   _png_disable_libpng_cache = on
+   on == 1
 }
 
 fn _png_has_sensitive_colorspace_chunks(any data) bool {

@@ -37,35 +37,31 @@ fn env_lower(str name) str {
 
 fn env_truthy(str name) bool {
    "Returns whether environment variable `name` is set to a common truthy textual value."
-   case env_lower(name){
-      "1", "true", "on", "yes" -> true
-      _ -> false
-   }
+   def v = env_lower(name)
+   if v == "1" || v == "true" || v == "on" || v == "yes" { return true }
+   false
 }
 
 fn env_falsey(str name) bool {
    "Returns whether environment variable `name` is set to a common falsey textual value."
-   case env_lower(name){
-      "0", "false", "off", "no" -> true
-      _ -> false
-   }
+   def v = env_lower(name)
+   if v == "0" || v == "false" || v == "off" || v == "no" { return true }
+   false
 }
 
 fn env_enabled(str name) bool {
    "Returns true when `name` is present and not a common falsey textual value."
-   case env_lower(name){
-      "", "0", "false", "off", "no" -> false
-      _ -> true
-   }
+   def v = env_lower(name)
+   if v == "" || v == "0" || v == "false" || v == "off" || v == "no" { return false }
+   true
 }
 
 fn env_toggle(str name, bool default_value=false) bool {
    "Parses an environment toggle, returning `default_value` when unset or unrecognized."
-   case env_lower(name){
-      "0", "false", "off", "no" -> false
-      "1", "true", "on", "yes" -> true
-      _ -> default_value
-   }
+   def v = env_lower(name)
+   if v == "0" || v == "false" || v == "off" || v == "no" { return false }
+   if v == "1" || v == "true" || v == "on" || v == "yes" { return true }
+   default_value
 }
 
 fn env_int_clamped(str name, int fallback, int minimum=0, int maximum=1000000) int {
@@ -106,7 +102,9 @@ fn cached_env_present(int flag, str name) int {
 
 fn _cached_bool(int flag, bool value) int {
    "Returns an existing cached flag or converts `value` to the cache encoding."
-   flag != -1 ? flag : (value ? 1 : 0)
+   if flag != -1 { return flag }
+   if value { return 1 }
+   0
 }
 
 fn parse_nonneg_int(any v) int {

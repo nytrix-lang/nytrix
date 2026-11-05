@@ -776,7 +776,8 @@ static bool run_strength_reduce_preserves_result_facts(void) {
   nyr_func_t f;
   nyr_opt_begin(&f);
   int input = nyr_opt_const(&f, 23);
-  int factor = nyr_opt_const(&f, 5);
+  /* A power-of-two factor: MUL 5/9 now stays a MUL for LEA selection. */
+  int factor = nyr_opt_const(&f, 4);
   int result = nyr_opt_binop(&f, NYIR_MUL_I64, input, factor);
   nyr_opt_ret(&f, result);
   size_t result_at = f.len - 2;
@@ -785,7 +786,7 @@ static bool run_strength_reduce_preserves_result_facts(void) {
   f.data[result_at].semantic_mutable = true;
   f.data[result_at].alias_class = 91;
   f.data[result_at].range =
-      (nyr_range_t){.has_min = true, .has_max = true, .min = 115, .max = 115};
+      (nyr_range_t){.has_min = true, .has_max = true, .min = 92, .max = 92};
   f.data[result_at].debug =
       (nyr_debug_loc_t){.file = "<strength-test>", .line = 7, .column = 11};
   bool ok = nyr_strength_reduce(&f) && nyr_opt_verify(&f, "strength-metadata");
@@ -795,11 +796,11 @@ static bool run_strength_reduce_preserves_result_facts(void) {
     if (in->dst != result)
       continue;
     saw_result = true;
-    ok = ok && in->op == NYIR_ADD_I64 && in->alias_class == 0 &&
+    ok = ok && in->op == NYIR_SHL_I64 && in->alias_class == 0 &&
          in->scalar_class == NYIR_SCALAR_I64_RAW &&
          in->semantic_ownership == 1 && in->semantic_mutable &&
-         in->range.has_min && in->range.has_max && in->range.min == 115 &&
-         in->range.max == 115 && in->debug.line == 7 && in->debug.column == 11;
+         in->range.has_min && in->range.has_max && in->range.min == 92 &&
+         in->range.max == 92 && in->debug.line == 7 && in->debug.column == 11;
   }
   ok = ok && saw_result;
   if (!ok) {

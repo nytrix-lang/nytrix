@@ -5,8 +5,8 @@
 #include "code/lang/parse/ast.h"
 #include "base/json.h"
 #include "base/util.h"
-#include "code/backend/runtime/runtime.h"
 #include "code/lang/priv.h"
+#include "code/backend/runtime/runtime.h"
 #include <inttypes.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -1660,6 +1660,14 @@ static void dump_stmt_raw(stmt_t *s, json_writer_t *out) {
       json_append(out, "\"%s\"", s->as.var.names.data[i]);
       if (i < s->as.var.names.len - 1)
         json_append(out, ",");
+    }
+    for (size_t i = 0; i < s->as.var.types.len; ++i) {
+      if (i)
+        json_append(out, ",");
+      if (s->as.var.types.data[i])
+        json_string(out, s->as.var.types.data[i]);
+      else
+        json_append(out, "null");
     }
     json_append(out, "],\"del\":%s,\"exprs\":[",
                 s->as.var.is_del ? "true" : "false");

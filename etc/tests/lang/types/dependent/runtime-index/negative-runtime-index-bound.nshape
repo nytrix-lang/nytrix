@@ -1,0 +1,14 @@
+shape runtime_index_bound_negative {
+  family "typing/dependent"
+  generator "error"
+  features [error typing dependent runtime-index negative]
+  template ny-compile-fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_fail
+  expect_message "bound must be positive"
+  source ny <<'NY'
+use core
+def Fin<0> i = checked_fin(0, 0)
+print(i)
+NY
+}

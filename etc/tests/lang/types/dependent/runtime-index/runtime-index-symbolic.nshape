@@ -1,0 +1,25 @@
+shape runtime_index_symbolic {
+  family "typing/dependent"
+  generator "embedded"
+  features [typing dependent runtime-index positive]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+fn pick(int n, Fin<n> i, list<int> xs) int { xs[i] }
+
+fn at(int n, int raw, list<int> xs) int {
+  ;; The bound is a parameter, so this Fin value is checked at run time and
+  ;; only its symbolic index is known statically.
+  def i Fin<n> = checked_fin(raw, n)
+  xs[i]
+}
+
+def xs = [4, 5, 6]
+assert_eq(at(3, 2, xs), 6, "symbolic runtime Fin bound")
+assert_eq(pick(3, checked_fin(1, 3), xs), 5, "literal argument substitution")
+print("✓ runtime-index symbolic ok")
+NY
+}

@@ -76,20 +76,15 @@ static void ny_log_saved_artifact(const char *path, const char *kind) {
   if (path && strcmp(path, "-") != 0 && stat(path, &st) == 0 &&
       st.st_size >= 0) {
     uintmax_t bytes = (uintmax_t)st.st_size;
-    char display_size[64];
     if (bytes >= UINT64_C(1000000))
-      snprintf(display_size, sizeof(display_size), "%.2f MB",
-               (double)bytes / 1000000.0);
+      NY_LOG_SUCCESS("Saved %s: %s (%.2f MB)\n", kind, path,
+                     (double)bytes / 1000000.0);
     else if (bytes >= UINT64_C(1000))
-      snprintf(display_size, sizeof(display_size), "%.2f KB",
-               (double)bytes / 1000.0);
+      NY_LOG_SUCCESS("Saved %s: %s (%.2f KB)\n", kind, path,
+                     (double)bytes / 1000.0);
     else
-      snprintf(display_size, sizeof(display_size), "%" PRIuMAX " bytes", bytes);
-    if (bytes >= UINT64_C(1000))
-      NY_LOG_SUCCESS("Saved %s: %s (%s; %" PRIuMAX " bytes)\n", kind, path,
-                     display_size, bytes);
-    else
-      NY_LOG_SUCCESS("Saved %s: %s (%s)\n", kind, path, display_size);
+      NY_LOG_SUCCESS("Saved %s: %s (%" PRIuMAX " bytes)\n", kind, path,
+                     bytes);
     return;
   }
   NY_LOG_SUCCESS("Saved %s: %s\n", kind ? kind : "artifact",
@@ -620,9 +615,7 @@ char *ny_pipeline_native_cache_path(const char *source, const ny_options *opt) {
       !ny_env_enabled_default_on("NYTRIX_STENCIL_CACHE") || opt->emit_only ||
       opt->output_file || opt->strict_types || opt->ownership_strict ||
       opt->trace_exec || opt->dump_tokens || opt->dump_ast || opt->expand ||
-      opt->dump_llvm || opt->dump_funcs || opt->nyr_dump_text ||
-      opt->nyr_dump_raw || opt->nyr_dump_cfg || opt->nyr_dump_stats ||
-      opt->nyr_pass_stats || opt->nyr_dump_bin || opt->emit_ir_path ||
+      opt->dump_llvm || opt->dump_funcs || opt->emit_ir_path ||
       opt->emit_bc_path ||
       opt->emit_asm_path || opt->native_dump_ir || opt->callgraph ||
       opt->native_tier_report || opt->native_result_oracle ||
@@ -2899,11 +2892,6 @@ int ny_pipeline_run(ny_options *opt) {
         semantic_errors = 1;
       }
     }
-    if (cg.had_error) {
-      codegen_dispose(&cg);
-      exit_code = 1;
-      goto exit_success;
-    }
     if (semantic_errors == 0 && opt->dump_ast_typed)
       ny_ast_dump_tree(stdout, &prog, parse_name, opt->dump_ast_filter, true);
     codegen_dispose(&cg);
@@ -2982,6 +2970,13 @@ int ny_pipeline_run(ny_options *opt) {
       exit_code = 0;
       goto exit_success;
     }
+      if (cg.had_error) {
+        NY_LOG_ERR("Codegen failed due to ownership diagnostic\n");
+        ny_stage_maybe_emit_errors(opt, NY_STOP_AFTER_ABI, parse_name,
+                                   "codegen failed", 1);
+        exit_code = 1;
+        goto exit_success;
+      }
     /*
      * A tier/callgraph report is itself a successful cross-target compile
      * request: the report plan is built and written from NYIR lowering, so do
@@ -3341,8 +3336,9 @@ int ny_pipeline_run(ny_options *opt) {
       opt->stop_after == NY_STOP_AFTER_TRAIT ||
       opt->stop_after == NY_STOP_AFTER_FLOW ||
       opt->stop_after == NY_STOP_AFTER_ABI) {
-    ny_stage_emit_artifact(opt, opt->stop_after, &prog, &cg, parse_name,
-                           cg.module, true);
+    if (!ny_stage_emit_artifact(opt, opt->stop_after, &prog, &cg, parse_name,
+                                cg.module, true))
+      NY_LOG_ERR("Failed to write compiler artifact\n");
     goto exit_success;
   }
 
@@ -3741,6 +3737,13 @@ skip_compilation:
      * second time with all its side effects; the VM result is the answer,
      * so stop here.
      */
+      if (cg.had_error) {
+        NY_LOG_ERR("Codegen failed due to ownership diagnostic\n");
+        ny_stage_maybe_emit_errors(opt, NY_STOP_AFTER_ABI, parse_name,
+                                   "codegen failed", 1);
+        exit_code = 1;
+        goto exit_success;
+      }
     if (opt->nyr_run && !(opt->nyr_dump_text || opt->nyr_dump_bin ||
                           (opt->nyr_run_bin_path && opt->nyr_run_bin_path[0] &&
                            opt->nyr_dump_bin))) {

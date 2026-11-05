@@ -450,6 +450,20 @@ bool nyr_strength_reduce(nyr_func_t *f) {
           }
         }
       }
+      /*
+       * Native x86-64 lowers MUL by 3/5/9 to one LEA (AArch64 to one shifted
+       * ADD), so the shift-plus-add expansion only costs an instruction and
+       * hands later reassociation an extra node to scatter across a
+       * recurrence (binary's `acc * 5` became four instructions). Keep the
+       * MUL; NYTRIX_STRENGTH_EXPAND_MUL59=1 restores the expansion.
+       */
+      static int expand_mul59 = -1;
+      if (expand_mul59 < 0) {
+        const char *env = getenv("NYTRIX_STRENGTH_EXPAND_MUL59");
+        expand_mul59 = env && *env && strcmp(env, "0") != 0;
+      }
+      if (!expand_mul59)
+        scaled_mul_feeds_sub = true;
       if ((imm == 5 || imm == 9) && other >= 0 && !scaled_mul_feeds_sub) {
         int shift_amt = imm == 5 ? 2 : 3;
         int saved_dst = in->dst;

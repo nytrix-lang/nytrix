@@ -2905,6 +2905,14 @@ typedef struct ny_hm_env_entry_t {
   ny_sem_ownership_t ownership;
   uint32_t alias_class;
   bool mutable_value;
+  /*
+   * Full dependent-pair annotation (`exists(T n) U`) when the binding has
+   * one.  The declaration string is arena-owned by the AST and outlives the
+   * checking pass, so the entry stores the pointer and parses it on demand.
+   */
+  const char *sigma_decl;
+  bool sigma_index_literal;
+  int64_t sigma_index_value;
 } ny_hm_env_entry_t;
 typedef VEC(ny_hm_env_entry_t) ny_hm_env_list;
 

@@ -1,0 +1,16 @@
+shape sigma_negative_dependent_payload {
+  family "typing/dependent"
+  generator "error"
+  features [error typing dependent sigma negative]
+  template ny-compile-fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_fail
+  expect_message "Fin<3> requires 0 <= value < 3, got 5"
+  source ny <<'NY'
+use core
+;; The index literal 3 is substituted into Fin<n>, so the payload 5 is
+;; outside the resulting Fin<3> bound.
+def exists(int n) Fin<n> p = pair(3, 5)
+print(p)
+NY
+}

@@ -509,6 +509,9 @@ typedef struct enum_member_def_t {
   int64_t runtime_tag;
   bool has_payload;
   ny_enum_field_def_list fields;
+  /* GADT constructor evidence; both NULL for an ordinary variant. */
+  const char *index_constraint_param;
+  const char *index_constraint_type;
 } enum_member_def_t;
 
 typedef VEC(enum_member_def_t) ny_enum_member_list;

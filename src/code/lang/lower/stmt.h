@@ -7,6 +7,20 @@ static bool ny_native_stmt_is_stdlib(const stmt_t *s) {
   return s && ny_is_stdlib_tok(s->tok);
 }
 
+/* Optimizer options for a native compilation: AVX2 targets enable the
+ * vector passes (loop/SLP/outer widening) that key off this flag. */
+static unsigned nyr_stmt_ir_opt_options(const ny_options *opt) {
+  if (!opt || opt->native_backend != NY_NATIVE_BACKEND_X86_64)
+    return 0;
+  nyr_target_request_t request = {0};
+  ny_native_target_info_t target = {0};
+  if (!ny_options_target_request(opt, &request) ||
+      !nyr_target_info_init(&target, &request) ||
+      !(target.caps & NY_NATIVE_CAP_MACH_AVX2))
+    return 0;
+  return NYR_IR_OPT_AVX2_VECTORIZE;
+}
+
 static int nyr_normalize_return(nyr_builder_t *b, const expr_t *expr,
                                 int value);
 static bool numeric_init_call(const expr_t *e);
@@ -5416,41 +5430,7 @@ static int nyr_lower_match_pattern(nyr_builder_t *b, int test_value,
         int actual_tag =
             nyr_emit_runtime_call(b, "rt_adt_tag", test_value, -1, -1, 1, 0);
         int expected_tag = nyr_emit_const(b, adt_tag);
-        int tag_eq = nyr_emit_cmp(b, actual_tag, expected_tag, NYIR_CMP_EQ);
-        if (tag_eq < 0)
-          return -1;
-        /* Bind each constructor payload field from the ADT object. Field
-         * offsets are 0, 8, 16, ... after the returned pointer; the tag is
-         * stored just before the pointer (returned - 8). Read in declaration
-         * order and bind each non-wildcard field as a raw scalar local. */
-        for (size_t f = 0; f < adt_item->fields.len; ++f) {
-          int field_offset = nyr_emit_const(b, (int64_t)f * 8);
-          if (field_offset < 0)
-            return -1;
-          int addr = nyr_emit_binop(b, NYIR_ADD_I64, test_value, field_offset);
-          if (addr < 0)
-            return -1;
-          int field_val = nyr_ir_emit(
-              &b->nyir, (nyr_inst_t){.op = NYIR_LOAD_I64, .dst = -1, .a = addr});
-          if (field_val < 0)
-            return -1;
-          const char *field_name = adt_item->fields.data[f].name;
-          if (!field_name)
-            return -1;
-          if (strcmp(field_name, "_") == 0)
-            continue;
-          nyr_local_t *local = nyr_bind_local(b, field_name);
-          if (!local)
-            return -1;
-          local->type_name = adt_item->fields.data[f].type_name
-                                 ? adt_item->fields.data[f].type_name
-                                 : "int";
-          local->is_any = ny_native_type_name_is_any(local->type_name);
-          local->semantic_rep = NY_SEM_REP_RAW_INT;
-          if (!nyr_store_local_value(b, local->slot, field_val))
-            return -1;
-        }
-        return tag_eq;
+        return nyr_emit_cmp(b, actual_tag, expected_tag, NYIR_CMP_EQ);
       }
     }
   }
@@ -7591,9 +7571,12 @@ static bool nyr_finalize(nyr_builder_t *b, char *err, size_t err_len) {
       b->current_fn_name ? b->current_fn_name : "<anonymous>";
   if (ny_trace_enabled("NY_TRACE_O3") && b->opt_level >= 3 &&
       ny_dbg_function_selected(trace_fn))
-    optimized = nyr_optimize_debug(&b->nyir, stderr, &stats, b->opt_level);
+    optimized = nyr_optimize_debug_with_options(
+        &b->nyir, stderr, &stats, b->opt_level,
+        nyr_stmt_ir_opt_options(b->options));
   else
-    optimized = nyr_optimize_with_stats(&b->nyir, &stats, b->opt_level);
+    optimized = nyr_optimize_with_stats_options(
+        &b->nyir, &stats, b->opt_level, nyr_stmt_ir_opt_options(b->options));
   if (trace_context)
     ny_dbg_exit_context(b->current_fn_name ? b->current_fn_name
                                            : "<anonymous>");
@@ -7605,6 +7588,19 @@ static bool nyr_finalize(nyr_builder_t *b, char *err, size_t err_len) {
                "native NYIR: optimization "
                "failed");
     goto fail;
+  }
+  /* Self tail calls become loops, and the linear `f(n-1) + f(n-2)` shape
+   * becomes an accumulator loop; re-optimize when either rewrite fired. */
+  if (b->opt_level >= 2) {
+    size_t before_tail_calls = b->nyir.len;
+    if (!nyr_tail_call(&b->nyir, b->current_fn_name) ||
+        !nyr_ir_verify(&b->nyir, err, err_len))
+      goto fail;
+    if (b->nyir.len != before_tail_calls &&
+        !nyr_optimize_with_stats_options(
+            &b->nyir, NULL, b->opt_level,
+            nyr_stmt_ir_opt_options(b->options)))
+      goto fail;
   }
   if (!nyr_ir_verify(&b->nyir, err, err_len))
     goto fail;
@@ -13212,15 +13208,30 @@ bool nyr_build_ir(const program_t *prog, const ny_options *opt,
       nyr_opt_stats_t function_stats = {0};
       bool opt_ok = false;
       if (opt && opt->nyr_ir_verify) {
-        opt_ok = nyr_optimize_debug(
+        opt_ok = nyr_optimize_debug_with_options(
             &funcs_out[i],
             (fn_suppressed || !function_selected) ? NULL : stderr,
-            &function_stats, opt_level);
+            &function_stats, opt_level, nyr_stmt_ir_opt_options(opt));
       } else if (opt && opt->nyr_pass_stats) {
-        opt_ok =
-            nyr_optimize_with_stats(&funcs_out[i], &function_stats, opt_level);
+        opt_ok = nyr_optimize_with_stats_options(
+            &funcs_out[i], &function_stats, opt_level,
+            nyr_stmt_ir_opt_options(opt));
       } else {
-        opt_ok = nyr_ir_optimize(&funcs_out[i], opt_level);
+        opt_ok = nyr_ir_optimize_with_options(&funcs_out[i], opt_level,
+                                              nyr_stmt_ir_opt_options(opt));
+      }
+      if (opt_ok && opt_level >= 2) {
+        size_t before_tail_calls = funcs_out[i].len;
+        if (!nyr_tail_call(&funcs_out[i], trace_fn) ||
+            !nyr_ir_verify(&funcs_out[i], err, err_len)) {
+          nyr_set_error(
+              err, err_len,
+              "native NYIR: recursive-call rewrite failed verification");
+          opt_ok = false;
+        } else if (funcs_out[i].len != before_tail_calls) {
+          opt_ok = nyr_optimize_with_stats_options(
+              &funcs_out[i], NULL, opt_level, nyr_stmt_ir_opt_options(opt));
+        }
       }
       /* Zero-information filter: a run
        * where nothing changed prints at
@@ -13399,12 +13410,16 @@ bool nyr_build_ir(const program_t *prog, const ny_options *opt,
     nyr_opt_stats_t rt_main_stats = {0};
     bool function_selected = ny_dbg_function_selected("rt_main");
     if (opt && opt->nyr_ir_verify) {
-      ok = nyr_optimize_debug(rt_main_out, function_selected ? stderr : NULL,
-                              &rt_main_stats, opt_level);
+      ok = nyr_optimize_debug_with_options(
+          rt_main_out, function_selected ? stderr : NULL, &rt_main_stats,
+          opt_level, nyr_stmt_ir_opt_options(opt));
     } else if (opt && opt->nyr_pass_stats) {
-      ok = nyr_optimize_with_stats(rt_main_out, &rt_main_stats, opt_level);
+      ok = nyr_optimize_with_stats_options(rt_main_out, &rt_main_stats,
+                                           opt_level,
+                                           nyr_stmt_ir_opt_options(opt));
     } else {
-      ok = nyr_ir_optimize(rt_main_out, opt_level);
+      ok = nyr_ir_optimize_with_options(rt_main_out, opt_level,
+                                        nyr_stmt_ir_opt_options(opt));
     }
     if (ok && opt && opt->nyr_pass_stats && !opt->nyr_ir_verify &&
         (ny_dbg_verbosity() >= 6 ||
@@ -13471,14 +13486,16 @@ bool nyr_build_ir(const program_t *prog, const ny_options *opt,
     bool optimized = false;
     bool function_selected = ny_dbg_function_selected("rt_main");
     if (ok && opt && opt->nyr_ir_verify) {
-      optimized =
-          nyr_optimize_debug(rt_main_out, function_selected ? stderr : NULL,
-                             &post_inline_stats, opt_level);
+      optimized = nyr_optimize_debug_with_options(
+          rt_main_out, function_selected ? stderr : NULL, &post_inline_stats,
+          opt_level, nyr_stmt_ir_opt_options(opt));
     } else if (ok && opt && opt->nyr_pass_stats) {
-      optimized =
-          nyr_optimize_with_stats(rt_main_out, &post_inline_stats, opt_level);
+      optimized = nyr_optimize_with_stats_options(
+          rt_main_out, &post_inline_stats, opt_level,
+          nyr_stmt_ir_opt_options(opt));
     } else if (ok) {
-      optimized = nyr_ir_optimize(rt_main_out, opt_level);
+      optimized = nyr_ir_optimize_with_options(rt_main_out, opt_level,
+                                               nyr_stmt_ir_opt_options(opt));
     }
     if (optimized && opt && opt->nyr_pass_stats && !opt->nyr_ir_verify &&
         (ny_dbg_verbosity() >= 6 ||

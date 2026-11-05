@@ -1,0 +1,16 @@
+shape runtime_index_range_negative {
+  family "typing/dependent"
+  generator "error"
+  features [error typing dependent runtime-index negative]
+  template ny-compile-fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_fail
+  expect_message "is outside [0, 3)"
+  source ny <<'NY'
+use core
+;; A literal value that cannot satisfy the literal bound is rejected instead
+;; of producing a Fin<3> that would panic on every execution.
+def Fin<3> i = checked_fin(5, 3)
+print(i)
+NY
+}

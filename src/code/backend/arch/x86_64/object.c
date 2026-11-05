@@ -1273,11 +1273,56 @@ static void mach_allocate_loop_gprs(nyr_x64_mach_enc_t *e, const char *name,
               chain = w;
           }
         }
+        /*
+         * A SELECT producer is encoded as `mov dst, arm; cmov dst, other`.
+         * When one arm is single-definition, defined earlier in this block,
+         * not live-out, and read only by this SELECT, give it the loop-home
+         * register under the same interval proof: the SELECT then selects
+         * in place and the move disappears.
+         */
+        uint32_t select_arm = UINT32_MAX;
+        /* The SELECT is the producer itself or the chained copy's source. */
+        const nyr_mach_inst_t *sel = producer;
+        size_t sel_pc = producer_pc;
+        if (chain != UINT32_MAX) {
+          sel_pc = def_pc[chain];
+          sel = &m->insts[sel_pc];
+        }
+        if (safe && sel->opcode == NYR_MACH_SELECT &&
+            !getenv("NYTRIX_NO_SELECT_ARM_HOME")) {
+          for (int k = 0; k < 2 && select_arm == UINT32_MAX; ++k) {
+            const nyr_mach_operand_t *arm = k ? &sel->src1 : &sel->src2;
+            const nyr_mach_operand_t *peer = k ? &sel->src2 : &sel->src1;
+            if (arm->kind != NYR_MACH_OPERAND_VREG)
+              continue;
+            uint32_t w = arm->as.reg;
+            if (w >= m->vreg_len || w == dst || w == src || w == chain ||
+                defs[w] != 1 || other_def[w] ||
+                m->vreg_types[w] != NYR_MACH_TYPE_I64 ||
+                def_pc[w] < block->first_inst || def_pc[w] >= sel_pc ||
+                (peer->kind == NYR_MACH_OPERAND_VREG && peer->as.reg == w) ||
+                (sel->src0.kind == NYR_MACH_OPERAND_VREG &&
+                 sel->src0.as.reg == w) ||
+                (e->loop_gpr[w] >= 0 && e->loop_gpr[w] == color) ||
+                nyr_mach_regalloc_live_out(&e->regalloc, b, w))
+              continue;
+            size_t in_window = 0;
+            for (size_t pc = def_pc[w] + 1; pc <= copy_pc; ++pc)
+              in_window += mach_inst_input_uses_vreg(&m->insts[pc], w);
+            if (in_window == uses[w] &&
+                mach_recolor_interval_safe(e, &ranges, depth, vector_safe,
+                                           block, end, copy_pc, w, def_pc[w],
+                                           dst, color))
+              select_arm = w;
+          }
+        }
         if (!safe)
           continue;
         e->loop_gpr[src] = e->loop_gpr[dst];
         if (chain != UINT32_MAX)
           e->loop_gpr[chain] = e->loop_gpr[dst];
+        if (select_arm != UINT32_MAX)
+          e->loop_gpr[select_arm] = e->loop_gpr[dst];
         if (ny_dbg_is_enabled(NY_DBG_DEEP)) {
           ny_dbg_enter_context(name);
           ny_dbg_heuristic_event(
@@ -8455,8 +8500,26 @@ static void mach_allocate_loop_fprs(nyr_x64_mach_enc_t *e, const char *name) {
      * them through the home. Forcing spill here stored every block-local
      * temporary to its dead home once per loop iteration.
      */
-    if (c >= 0 || moved < 0)
+    if (c >= 0 || moved < 0) {
       s->reload = s->spill = true;
+    } else {
+      /*
+       * A moved segment no longer shares a color with its vreg's other
+       * segments, so any neighbour goes through the home: publish it when a
+       * later segment exists (it reloads, possibly after a gap the
+       * end-of-segment check cannot see) and reload when an earlier one
+       * does. A block-local temporary has neither and keeps no dead home.
+       */
+      for (size_t j = 0; j < seg_len; ++j) {
+        const nyr_mach_live_segment_t *o = &segs[j];
+        if (j == i || o->vreg != s->vreg)
+          continue;
+        if (o->start > s->end)
+          s->spill = true;
+        if (o->end < s->start)
+          s->reload = true;
+      }
+    }
   }
 done:
   free(regs);

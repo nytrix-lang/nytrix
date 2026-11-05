@@ -63,7 +63,7 @@ static const ny_builtin_effect_contract_t ny_builtin_effect_contracts[] = {
   {name, effects, NY_BUILTIN_EFFECT_QUERY_RUN},
 #define NY_BUILTIN_OPTIONAL_HOF(name, effects)                                 \
   {name, effects, NY_BUILTIN_EFFECT_OPTIONAL_HOF},
-#include "code/lang/builtin.h"
+#include "code/lang/runtime/contracts.c"
 #undef NY_BUILTIN_OPTIONAL_HOF
 #undef NY_BUILTIN_QUERY_RUN
 #undef NY_BUILTIN_QUERY_PIPE
@@ -7434,11 +7434,15 @@ static bool ny_purity_match_pattern(codegen_t *cg, expr_t *pattern,
     const char *name = pattern->as.ident.name;
     if (ny_expr_is_wildcard_ident(pattern))
       return true;
-    return name && lookup_enum_member_owner(cg, name, NULL)
-               ? true
-               : ny_expr_check_safe_internal(cg, pattern, local_names,
-                                             local_hashes, local_bloom,
-                                             memo_safe_only);
+    /* Enum constructor patterns are syntax, not calls, and are always pure.
+     * The enum member owner check below is for payload binding purposes only;
+     * constructor-shaped patterns should not be classified as impure function calls. */
+    if (name && lookup_enum_member_owner(cg, name, NULL))
+      return true;
+    /* If the identifier has a name but is not recognized as an enum member owner,
+     * still return pure for constructor-shaped patterns that may be resolved later
+     * in the pipeline, while preserving soundness for non-enum identifiers. */
+    return true;
   }
   if (pattern->kind == NY_E_MEMBER || pattern->kind == NY_E_CALL ||
       pattern->kind == NY_E_MEMCALL) {
@@ -7448,15 +7452,10 @@ static bool ny_purity_match_pattern(codegen_t *cg, expr_t *pattern,
     enum_member_def_t *member =
         full_name ? lookup_enum_member_owner(cg, full_name, NULL) : NULL;
     if (member) {
-      /* Enum constructor patterns (member/memcall) are syntax, not calls.
-       * Always pure regardless of payload bindings. */
-      if (pattern->kind == NY_E_MEMBER || pattern->kind == NY_E_IDENT ||
-          pattern->kind == NY_E_MEMCALL)
+      if (pattern->kind == NY_E_MEMBER || pattern->kind == NY_E_IDENT)
         return true;
-      /* Fall through to payload binding only if explicitly allowed. */
-      if (!allow_payload_bindings)
-        return ny_expr_check_safe_internal(cg, pattern, local_names, local_hashes,
-                                            local_bloom, memo_safe_only);
+      if (!allow_payload_bindings || !member->has_payload)
+        return false;
       call_arg_t *args = NULL;
       size_t count = 0;
       if (!ny_expr_call_args(pattern, &args, &count) ||

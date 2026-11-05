@@ -181,6 +181,17 @@ static inline bool parser_type_ref_is_builtin_type(const char *type_name) {
 
 typedef const char *(*parser_type_ref_fn)(parser_t *p, const char *err_msg);
 
+static inline bool parser_current_token_is_type_alias(parser_t *p) {
+  if (!p || p->cur.kind != NY_T_IDENT || !p->cur.lexeme || p->cur.len == 0)
+    return false;
+  char buf[256];
+  if (p->cur.len >= sizeof(buf))
+    return false;
+  memcpy(buf, p->cur.lexeme, p->cur.len);
+  buf[p->cur.len] = '\0';
+  return parser_find_type_alias(p, buf) != NULL;
+}
+
 static inline bool parser_token_can_start_type_ref(token_t tok) {
   return tok.kind == NY_T_IDENT || tok.kind == NY_T_NUMBER ||
          tok.kind == NY_T_QUESTION || tok.kind == NY_T_STAR ||
@@ -218,9 +229,15 @@ parser_parse_param_type_first(parser_t *p, param_t *pr,
   pr->tok = p->cur;
   pr->syntax_ctx = p->current_syntax_ctx;
   token_t next = parser_peek(p);
-  if (p->cur.kind == NY_T_IDENT && next.kind != NY_T_COLON &&
-      next.kind != NY_T_DOT && next.kind != NY_T_LT &&
-      next.kind != NY_T_IDENT) {
+  /* `exists(T n) U` is a dependent-pair type, never a parameter name. */
+  bool sigma_type = p->cur.kind == NY_T_IDENT && p->cur.len == 6 &&
+                    strncmp(p->cur.lexeme, "exists", 6) == 0 &&
+                    next.kind == NY_T_LPAREN;
+  bool alias_apply = next.kind == NY_T_LPAREN &&
+                     parser_current_token_is_type_alias(p);
+  if (!sigma_type && !alias_apply && p->cur.kind == NY_T_IDENT &&
+      next.kind != NY_T_COLON && next.kind != NY_T_DOT &&
+      next.kind != NY_T_LT && next.kind != NY_T_IDENT) {
     pr->name = arena_strndup(p->arena, p->cur.lexeme, p->cur.len);
     parser_advance(p);
     return true;

@@ -413,6 +413,11 @@ typedef struct stmt_enum_item_t {
   const char *name;
   expr_t *value;
   ny_enum_field_list fields;
+  /* GADT constructor evidence: `Variant(...) where t is int` fixes the
+   * enum's type index `t` for this constructor. */
+  const char *index_constraint_param;
+  const char *index_constraint_type;
+  token_t index_constraint_tok;
 } stmt_enum_item_t;
 
 typedef VEC(stmt_enum_item_t) ny_stmt_enum_item_list;

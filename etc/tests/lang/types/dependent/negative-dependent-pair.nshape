@@ -5,11 +5,11 @@ shape dependent_negative_dependent_pair {
   template ny-compile-fail
   flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
   expect compile_fail
-  expect_message "typed exists binders (dependent pair types) are not supported"
+  expect_message "expected dependent pair binder name"
   source ny <<'NY'
 use core
-;; Unsupported dependent form: must be rejected with a clear diagnostic.
-def p exists(Fin<8> n) list<f64, n> = [1.0]
+;; A sigma annotation must bind a name for the index; omitting it is rejected.
+def p exists(Fin<8>) list<f64> = [1.0]
 print(p)
 NY
 }

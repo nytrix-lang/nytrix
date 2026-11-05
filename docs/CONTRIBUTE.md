@@ -12,7 +12,7 @@ compiler subsystems.
 | --- | --- |
 | Compiler recovery | [Confirmed failures](todo/compiler-recovery.md) |
 | Performance acceptance | [Open performance work](todo/performance-acceptance.md) |
-| Dependent types and GADTs | [Phase checklist](todo/dependent-types.md) |
+| Dependent types and GADTs | [Feature contract](spec/dependent.md) |
 | Dependencies and build tooling | [Follow-ups](todo/dependencies-build.md) |
 | NYC Linux kernel | [Build acceptance](todo/nyc-linux-kernel.md) |
 | Source ownership | [Compiler architecture](learn/architecture.md) |

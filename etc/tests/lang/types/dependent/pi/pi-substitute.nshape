@@ -1,0 +1,27 @@
+shape pi_call_site_return_substitution {
+  family "runtime/language"
+  generator "embedded"
+  features ["ny", "test", "dependent", "pi"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+refine Vec = int where (v) { v >= 0 }
+
+fn vsum(Fin<4> n) Vec<n> {
+  return n
+}
+
+;; The result of vsum(2) is indexed by the literal argument, not the
+;; symbolic parameter name.
+fn consume_two(Vec<2> v) int {
+  return v
+}
+
+def result = consume_two(vsum(2))
+assert_eq(result, 2, "call-site substitution of the literal index")
+print("✓ pi-substitute ok")
+NY
+}

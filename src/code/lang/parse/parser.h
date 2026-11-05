@@ -44,6 +44,26 @@ typedef struct parser_gensym_scope {
   struct parser_gensym_scope *next;
 } parser_gensym_scope;
 
+/*
+ * A `type Name<P...> = Body` declaration.  Parameters are type patterns, so
+ * `type Element(list<T>) = T` matches `list<int>` and binds `T` to `int`.
+ * Definitions are expanded at parse time and never reach the runtime; the
+ * expansion is bounded and cycle-checked so non-terminating definitions are
+ * rejected instead of looping.
+ */
+typedef struct parser_type_alias {
+  const char *name;
+  const char *module;
+  const char **patterns;
+  const char **params;
+  size_t arity;
+  size_t param_count;
+  const char *body;
+  token_t tok;
+  bool expanding;
+  struct parser_type_alias *next;
+} parser_type_alias;
+
 typedef struct parser_t {
   lexer_t lex;
   token_t cur;
@@ -85,6 +105,7 @@ typedef struct parser_t {
    * an out-of-parser pass can perform the desugar; the normal compile path
    * keeps the in-parser desugar. */
   bool raw_compound_assign;
+  parser_type_alias *type_aliases;
   parser_ct_layout_meta_list ct_layouts;
   parser_ct_module_meta_list ct_modules;
   parser_ct_template_meta_list ct_templates;
@@ -108,6 +129,11 @@ typedef struct parser_module_origin_scope_t {
 const char *ny_parser_gensym(parser_t *p, const char *prefix);
 parser_ct_layout_meta *parser_find_layout_meta(parser_t *p, const char *name);
 void parser_record_ct_decl(parser_t *p, stmt_t *stmt);
+parser_type_alias *parser_find_type_alias(parser_t *p, const char *name);
+bool parser_register_type_alias(parser_t *p, const char *name,
+                                const char **params, size_t arity,
+                                const char *body, token_t tok, bool validate);
+bool parser_type_ref_is_type_universe(const char *type);
 
 void parser_init(parser_t *p, const char *src, const char *filename);
 void parser_add_module_features(parser_t *p, uint32_t features);

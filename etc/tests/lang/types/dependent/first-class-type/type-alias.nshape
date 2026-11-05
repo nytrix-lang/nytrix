@@ -1,0 +1,35 @@
+shape first_class_type_alias {
+  family "typing/dependent"
+  generator "embedded"
+  features [typing dependent type-level positive]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+;; A zero-argument type-level definition is a transparent alias.
+type Vec3 = list<int>
+
+;; `Type` is a compile-time universe value.  It erases to the canonical
+;; type-name string at runtime and can also be used as an annotation.
+fn describe(Type t) str { t }
+fn keep(Type t) Type { t }
+
+def T Type = int
+def Type Canonical = int
+def V Type = Vec3
+def Type forwarded = keep(T)
+
+def Vec3 xs = [1, 2, 3]
+def T answer = 42
+
+assert_eq(xs[2], 3, "zero-argument type alias")
+assert_eq(answer, 42, "type value used as an annotation")
+assert_eq(describe(V), "list<int>", "alias value normalizes to its body")
+assert_eq(forwarded, "int", "Type values pass through functions")
+assert_eq(Canonical, "int", "type-first Type binding")
+assert_eq(T, "int", "Type values erase to their name")
+print("✓ first-class-type alias ok")
+NY
+}

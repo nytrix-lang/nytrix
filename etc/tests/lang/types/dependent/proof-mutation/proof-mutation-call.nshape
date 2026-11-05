@@ -1,0 +1,26 @@
+shape proof_mutation_caller_precondition {
+  family "runtime/language"
+  generator "embedded"
+  features ["ny", "test", "proof", "dependent"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+refine Positive = int where (v) { v > 0 }
+
+fn need_positive(int n) int requires n > 0 { n }
+
+;; The caller's refinement discharges the callee's parameter precondition.
+def Positive proven = 9
+assert_eq(need_positive(proven), 9, "caller proof satisfies requires")
+
+;; A mutated binding keeps its refinement for callees that require the type.
+fn consume(Positive p) int { p }
+mut Positive changing = 4
+changing = 12
+assert_eq(consume(changing), 12, "mutated proof still satisfies Positive")
+print("✓ proof-mutation-call ok")
+NY
+}

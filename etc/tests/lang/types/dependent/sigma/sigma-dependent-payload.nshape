@@ -1,0 +1,19 @@
+shape sigma_dependent_payload {
+  family "typing/dependent"
+  generator "embedded"
+  features [typing dependent sigma positive]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+;; The payload type is indexed by the first component.  Constructing with the
+;; literal 3 substitutes the binder, so the second component must satisfy
+;; Fin<3>.
+def exists(int n) Fin<n> bounded = pair(3, 2)
+assert_eq(bounded[0], 3, "sigma index component")
+assert_eq(bounded[1], 2, "substituted payload component")
+print("✓ sigma-dependent-payload ok")
+NY
+}

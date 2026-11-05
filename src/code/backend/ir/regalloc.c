@@ -2206,7 +2206,7 @@ static bool block_reads_vreg_before(const nyr_mach_func_t *mach, size_t block,
  * definition, and nothing after the copy reads it. Used for the vector
  * class only, whose carry path has executable lane-by-lane regressions.
  */
-static __attribute__((unused)) bool vector_phi_reads_precede_source(const nyr_mach_func_t *mach,
+static bool vector_phi_reads_precede_source(const nyr_mach_func_t *mach,
                                             size_t block, size_t copy_pc,
                                             uint32_t phi, uint32_t src) {
   if (!mach || block >= mach->block_len)
@@ -2229,7 +2229,10 @@ static __attribute__((unused)) bool vector_phi_reads_precede_source(const nyr_ma
    * destination is formed from src0 before src1 is consumed.
    */
   const nyr_mach_inst_t *def = &mach->insts[def_pc];
-  if ((def->src1.kind == NYR_MACH_OPERAND_VREG && def->src1.as.reg == phi) ||
+  /* Multi-instruction vector lowerings may write the destination before
+   * their last operand read, so the definition must not read the PHI. */
+  if ((def->src0.kind == NYR_MACH_OPERAND_VREG && def->src0.as.reg == phi) ||
+      (def->src1.kind == NYR_MACH_OPERAND_VREG && def->src1.as.reg == phi) ||
       (def->src2.kind == NYR_MACH_OPERAND_VREG && def->src2.as.reg == phi) ||
       def->args_len)
     return false;
@@ -2447,7 +2450,10 @@ static void coalesce_loop_edges(const nyr_mach_func_t *mach,
          * vector_phi_reads_precede_source() is not yet sound (it produced
          * a wrong binary checksum once enabled); keep the strict rule.
          */
-        if (block_reads_vreg_before(mach, e, copy_pc, v)) {
+        if (block_reads_vreg_before(mach, e, copy_pc, v) &&
+            !(reg_class == NYR_MACH_REGCLASS_VECTOR && e > h &&
+              getenv("TMP_VRELAX") &&
+              vector_phi_reads_precede_source(mach, e, copy_pc, v, src))) {
           if (carry_debug)
             {
             fprintf(stderr,
@@ -2719,6 +2725,16 @@ static void coalesce_loop_edges(const nyr_mach_func_t *mach,
         }
       }
       hv->color = chosen;
+      /*
+       * The PHI and its edge sources now share `chosen`. Later loop-edge
+       * coalescing must not evict them, even when the carry chain below
+       * does not qualify: a split-off segment would leave the shared
+       * register assumption of the edge copies without a resident value.
+       */
+      expensive_vreg[v] = 1;
+      for (size_t k = 0; k < copy_len; ++k)
+        if (copies[k].src < nv)
+          expensive_vreg[copies[k].src] = 1;
       for (size_t si = 0; si < by_vreg[v].len; ++si) {
         nyr_mach_live_segment_t *s = &a->segments[by_vreg[v].data[si]];
         if (s == hv || s->block >= nb || edge_block[s->block] ||

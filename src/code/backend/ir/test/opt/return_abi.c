@@ -62,6 +62,36 @@ static bool check_pair(nyr_scalar_class_t left, nyr_scalar_class_t right,
   return ok;
 }
 
+static bool check_return_class_reconciliation(void) {
+  nyr_func_t f;
+  nyr_opt_begin(&f);
+  int condition = nyr_opt_emit_imm(&f, NYIR_LOAD_LOCAL, 0);
+  nyr_opt_br_if(&f, condition, 1);
+  int result = nyr_opt_const_f64(&f, 1.25);
+  emit_return(&f, result, NYIR_SCALAR_UNKNOWN);
+  nyr_opt_label(&f, 1);
+  result = nyr_opt_const_f64(&f, 2.5);
+  emit_return(&f, result, NYIR_SCALAR_UNKNOWN);
+
+  /* Agreeing f64 exits are discoverable from whole-function producer facts. */
+  nyr_reconcile_local_scalar_classes(&f);
+  char err[256] = {0};
+  bool saw_return = false;
+  bool ok = true;
+  for (size_t i = 0; i < f.len; ++i) {
+    if (f.data[i].op != NYIR_RET)
+      continue;
+    saw_return = true;
+    ok = ok && f.data[i].scalar_class == NYIR_SCALAR_F64;
+  }
+  ok = ok && saw_return && nyr_ir_verify(&f, err, sizeof(err));
+  if (!ok)
+    fprintf(stderr, "[return-abi] whole-function inference: %s\n",
+            err[0] ? err : "return class was not inferred");
+  nyr_ir_func_free(&f);
+  return ok;
+}
+
 int main(void) {
   const nyr_scalar_class_t words[] = {
       NYIR_SCALAR_UNKNOWN, NYIR_SCALAR_I64_RAW,      NYIR_SCALAR_I64_TAGGED,
@@ -80,8 +110,10 @@ int main(void) {
   if (!check_pair(NYIR_SCALAR_F32, NYIR_SCALAR_F32, true) ||
       !check_pair(NYIR_SCALAR_F64, NYIR_SCALAR_F64, true) ||
       !check_pair(NYIR_SCALAR_F32, NYIR_SCALAR_F64, false) ||
-      !check_pair(NYIR_SCALAR_F64, NYIR_SCALAR_F32, false))
+      !check_pair(NYIR_SCALAR_F64, NYIR_SCALAR_F32, false) ||
+      !check_return_class_reconciliation())
     return 1;
-  puts("[return-abi] compatible paths execute; mixed conventions are rejected");
+  puts("[return-abi] compatible paths execute; mixed conventions are rejected; "
+       "whole-function float returns are inferred");
   return 0;
 }

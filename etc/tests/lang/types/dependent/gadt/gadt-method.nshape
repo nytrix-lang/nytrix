@@ -1,0 +1,33 @@
+shape gadt_method_dispatch {
+  family "runtime/language"
+  generator "embedded"
+  features ["ny", "test", "gadt", "dependent"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+enum Expr<t> {
+  IntLit(int) where t is int,
+  BoolLit(bool) where t is bool,
+  Add(Expr<int>, Expr<int>) where t is int
+}
+
+impl Expr {
+  fn int_value(self e) int {
+    match e {
+      Expr.IntLit(n) -> n
+      Expr.Add(left, right) -> left.int_value() + right.int_value()
+      _ -> 0
+    }
+  }
+}
+
+def one = Expr.IntLit(40)
+def two = Expr.IntLit(2)
+def sum = Expr.Add(one, two)
+assert_eq(sum.int_value(), 42, "method dispatch on an indexed enum payload")
+print("✓ gadt-method ok")
+NY
+}

@@ -1,0 +1,41 @@
+shape gadt_match_index_refinement {
+  family "runtime/language"
+  generator "embedded"
+  features ["ny", "test", "gadt", "dependent"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+enum Expr<t> {
+  IntLit(int) where t is int,
+  BoolLit(bool) where t is bool,
+  Add(Expr<int>, Expr<int>) where t is int
+}
+
+;; Only constructors that can produce `Expr<int>` are required here; the
+;; BoolLit arm is impossible and must not be demanded by exhaustiveness.
+fn eval_int(Expr<int> expression) int {
+  match expression {
+    Expr.IntLit(n) -> n
+    Expr.Add(left, right) -> eval_int(left) + eval_int(right)
+  }
+}
+
+fn eval_bool(Expr<bool> expression) bool {
+  match expression {
+    Expr.BoolLit(b) -> b
+  }
+}
+
+def Expr<int> one = Expr.IntLit(1)
+def Expr<int> two = Expr.IntLit(2)
+def Expr<int> sum = Expr.Add(one, two)
+def Expr<bool> truth = Expr.BoolLit(true)
+
+assert_eq(eval_int(sum), 3, "recursive indexed match refines Add to Expr<int>")
+assert_eq(eval_bool(truth), true, "bool index selects the BoolLit arm")
+print("✓ gadt-match ok")
+NY
+}

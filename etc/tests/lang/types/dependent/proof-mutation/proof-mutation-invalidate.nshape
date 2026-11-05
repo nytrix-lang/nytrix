@@ -1,0 +1,21 @@
+shape proof_mutation_invalidates_refinement {
+  family "typing/dependent"
+  generator "error"
+  features [error typing dependent proof negative]
+  template ny-compile-fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_fail
+  expect_message "refinement obligation is not proved for type 'Positive'"
+  source ny <<'NY'
+use core
+
+refine Positive = int where (v) { v > 0 }
+
+fn consume(Positive p) int { p }
+
+;; -3 does not prove Positive, so the refinement must not survive.
+mut Positive a = 5
+a = -3
+print(consume(a))
+NY
+}

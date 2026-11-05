@@ -1,0 +1,21 @@
+shape runtime_index_construct {
+  family "typing/dependent"
+  generator "embedded"
+  features [typing dependent runtime-index positive]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+fn pick(int n, Fin<n> i, list<int> xs) int { xs[i] }
+
+def xs = [10, 20, 30]
+
+;; A literal bound is range-checked at compile time and also checked at run
+;; time by the library constructor.
+def Fin<3> i = checked_fin(2, 3)
+assert_eq(pick(3, i, xs), 30, "checked Fin literal bound")
+print("✓ runtime-index construct ok")
+NY
+}

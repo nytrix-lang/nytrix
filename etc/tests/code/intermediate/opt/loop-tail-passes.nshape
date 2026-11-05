@@ -1,0 +1,80 @@
+shape loop_tail_passes_preserve_semantics {
+  family "runtime/optimizer"
+  generator "regression"
+  features ["ny", "test", "optimizer", "regression"]
+  template ny-test-case
+  flags_matrix "--native --run -O3; --native-backend=llvm --jit --jit-engine=mcjit -O3; --native-only -O3"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.error
+use core.tbuf
+
+;; loop_sub_iv: `d - i` becomes its own decrementing induction variable.
+fn down_sum(int d) int {
+   mut int acc = 0
+   mut int i = 0
+   while i < d {
+      acc = acc * 3 + (d - i)
+      i += 1
+   }
+   acc
+}
+assert(down_sum(0) == 0, "zero-trip down_sum")
+assert(down_sum(1) == 1, "one-trip down_sum")
+assert(down_sum(5) == 547, "five-trip down_sum")
+assert(down_sum(-3) == 0, "negative bound skips the loop")
+
+;; loop_guard_hoist: an invariant divide-by-zero guard in the loop header.
+fn per_round(int rounds, int d) int {
+   mut int total = 0
+   mut int i = 0
+   while i < rounds / d {
+      total += i
+      i += 1
+   }
+   total
+}
+assert(per_round(100, 10) == 45, "guarded loop runs rounds / d times")
+assert(per_round(5, 10) == 0, "guarded loop with zero trips")
+@effects(all)
+fn zero_divisor_panics(int rounds) bool {
+   mut caught = false
+   try {
+      per_round(rounds, 0)
+   } catch e {
+      caught = true
+   }
+   caught
+}
+assert(zero_divisor_panics(10), "the hoisted guard still panics on a zero divisor")
+
+;; mem_dse: repeated stores to one slot keep only the last, but a read of the
+;; same buffer in between keeps the earlier store observable.
+def B = f64buf_new(8)
+def C = f64buf_new(8)
+mut int k = 0
+while k < 8 {
+   f64buf_store(B, k, float(k))
+   f64buf_store(C, k, 0.0)
+   k += 1
+}
+k = 0
+while k < 8 {
+   f64buf_store(C, k, f64buf_load(C, k) + f64buf_load(B, k))
+   f64buf_store(C, k, f64buf_load(C, k) + 2.0 * f64buf_load(B, k))
+   k += 1
+}
+assert(f64buf_load(C, 3) == 9.0, "distinct buffers: last store wins")
+k = 0
+while k < 7 {
+   f64buf_store(B, k + 1, 5.0)
+   f64buf_store(C, k, f64buf_load(B, k + 1))
+   f64buf_store(B, k + 1, 6.0)
+   k += 1
+}
+assert(f64buf_load(C, 0) == 5.0, "a read between same-buffer stores sees the first")
+assert(f64buf_load(B, 7) == 6.0, "the final same-buffer store lands")
+print("ok loop tail passes")
+NY
+}

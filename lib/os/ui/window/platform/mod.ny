@@ -123,7 +123,6 @@ use core.os.ui.render.vk.vulkan (vk_get_instance_proc_addr)
 mut _wayland_scroll_gain_cache = -1.0
 mut _xwayland_scroll_fix_cache = -1
 mut _wayland_scroll_fix_cache = -1
-mut _null_backend_requested = false
 
 fn _ensure_platform_state() dict {
    mut state = platform_state._ensure_platform_state()
@@ -141,6 +140,10 @@ fn _get_platform_val(any key, any default=0) any {
 }
 
 fn _set_platform_val(any key, any val) any { platform_state._set_platform_val(key, val) }
+
+fn _null_backend_is_requested() bool {
+   bool(_get_platform_val("null_backend_requested", false))
+}
 
 fn _native_handle(any win) u64 {
    if is_dict(win) { return int(get(win, "handle", 0)) }
@@ -349,7 +352,7 @@ fn available() bool {
    "Returns whether a native backend or explicitly selected null backend is available."
    def backend = _select_backend_name()
    if backend != "none" { return true }
-   common.env_lower("NY_UI_BACKEND") == "none" || _null_backend_requested
+   common.env_lower("NY_UI_BACKEND") == "none" || _null_backend_is_requested()
 }
 
 fn uses_native_events() bool { "Returns true because this backend owns native event polling." true }
@@ -415,23 +418,23 @@ fn init_hint(any hint, any value) any {
    "Stores an initialization hint for backend selection."
    if _native_value_eq(hint, PLATFORM) {
       if _native_value_eq(value, PLATFORM_X11) {
-         _null_backend_requested = false
+          _set_platform_val("null_backend_requested", false)
          _set_platform_val("backend_name", "x11")
       }
       elif _native_value_eq(value, PLATFORM_WAYLAND) {
-         _null_backend_requested = false
+          _set_platform_val("null_backend_requested", false)
          _set_platform_val("backend_name", "wayland")
       }
       elif _native_value_eq(value, PLATFORM_WIN32) {
-         _null_backend_requested = false
+          _set_platform_val("null_backend_requested", false)
          _set_platform_val("backend_name", "win32")
       }
       elif _native_value_eq(value, PLATFORM_COCOA) {
-         _null_backend_requested = false
+          _set_platform_val("null_backend_requested", false)
          _set_platform_val("backend_name", "cocoa")
       }
       elif _native_value_eq(value, PLATFORM_NULL) {
-         _null_backend_requested = true
+          _set_platform_val("null_backend_requested", true)
          _set_platform_val("backend_name", "none")
       }
    }
@@ -523,7 +526,7 @@ fn init() bool {
    }
    if b == "none" {
       def requested = common.env_lower("NY_UI_BACKEND")
-      if requested == "none" || _null_backend_requested {
+       if requested == "none" || _null_backend_is_requested() {
          _set_platform_val("initialized", true)
          return true
       }

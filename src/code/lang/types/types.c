@@ -527,6 +527,12 @@ static ny_builtin_type_kind_t classify_builtin_type_exact(const char *name) {
       return NY_BT_F128;
     if (name[0] == 'c' && memcmp(name, "c128", 4) == 0)
       return NY_BT_C128;
+    /*
+     * First-class type values erase to their canonical type-name string at
+     * runtime; there is no runtime reflection object behind `Type`.
+     */
+    if (memcmp(name, "Type", 4) == 0)
+      return NY_BT_STR;
     if (memcmp(name, "list", 4) == 0)
       return NY_BT_LIST;
     if (memcmp(name, "dict", 4) == 0)
@@ -739,6 +745,15 @@ static bool is_ptr_type_name(const char *name) {
   return name && (name[0] == '*' || strcmp(name, "ptr") == 0);
 }
 
+/*
+ * A dependent pair `exists(T n) U` is represented as an ordinary two-element
+ * tuple; its dependent annotation is a type-checking obligation only.
+ */
+static bool is_sigma_type_name(const char *name) {
+  name = type_skip_nullable(name);
+  return name && strncmp(name, "exists(", 7) == 0;
+}
+
 static bool is_float_type_name(const char *name) {
   ny_builtin_type_kind_t k = classify_builtin_type_tail(name);
   return k == NY_BT_F32 || k == NY_BT_F64 || k == NY_BT_F128 ||
@@ -788,6 +803,8 @@ static bool is_str_type_name(const char *name);
 ny_sem_rep_t ny_semantic_rep_for_type(const char *type_name) {
   if (!type_name || !*type_name)
     return NY_SEM_REP_UNRESOLVED;
+  if (is_sigma_type_name(type_name))
+    return NY_SEM_REP_TYPED_BUFFER;
   const char *leaf = ny_name_leaf(type_skip_nullable(type_name));
   if (!leaf || leaf[0] == '\'' || ny_type_name_is_any(type_name))
     return NY_SEM_REP_TAGGED_DYNAMIC;
@@ -3858,6 +3875,8 @@ LLVMTypeRef resolve_type_name(codegen_t *cg, const char *type_name,
     return cg->type_i64;
   if (is_any_type_name(resolved_name))
     return cg->type_i64;
+  if (is_sigma_type_name(resolved_name))
+    return cg->type_i64;
   if (ny_name_tail_is(resolved_name, "number"))
     return cg->type_i64;
   if (resolved_name[0] == '*') {
@@ -3945,6 +3964,8 @@ LLVMTypeRef resolve_abi_type_name(codegen_t *cg, const char *type_name,
   }
   const char *resolved_name = type_skip_nullable(type_name);
   if (is_any_type_name(resolved_name))
+    return cg->type_i64;
+  if (is_sigma_type_name(resolved_name))
     return cg->type_i64;
   if (ny_name_tail_is(resolved_name, "number"))
     return cg->type_i64;

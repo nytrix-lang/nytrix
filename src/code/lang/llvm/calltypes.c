@@ -203,7 +203,7 @@ const char *ny_gencall_attached_owner(const char *type_name) {
   NY_OWNER_IF_BASE("f64");
   NY_OWNER_IF_BASE("bool");
 #undef NY_OWNER_IF_BASE
-  return type_name;
+  return leaf;
 }
 
 static fun_sig *ny_gencall_lookup_attached_method_candidate(codegen_t *cg,

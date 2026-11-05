@@ -3076,6 +3076,13 @@ static stmt_t *ct_clone_stmt(parser_t *p, stmt_t *s, ct_reflect_ctx_t *ctx) {
                                   : s->as.enu.items.data[i].expansion_origin,
           .name = ct_substitute_name(p, s->as.enu.items.data[i].name, ctx),
           .value = ct_clone_expr(p, s->as.enu.items.data[i].value, ctx),
+          .index_constraint_param = ct_substitute_name(
+              p, s->as.enu.items.data[i].index_constraint_param, ctx),
+          .index_constraint_type = ct_substitute_symbol_name(
+              p, s->as.enu.items.data[i].index_constraint_type, ctx),
+          .index_constraint_tok =
+              ct_emitted_token(s->as.enu.items.data[i].index_constraint_tok,
+                               ctx),
       };
       item.fields = (ny_enum_field_list){0};
       for (size_t j = 0; j < s->as.enu.items.data[i].fields.len; j++) {

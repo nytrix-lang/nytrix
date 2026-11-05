@@ -20,7 +20,7 @@ their full contracts.
 | [Syntax](syntax.md) | Source forms and grammar |
 | [Values](values.md) | Literals, containers, equality, and value operations |
 | [Types](types.md) | Type forms, inference, refinements, and proofs |
-| [Dependent types and indexed data](dependent.md) | Current refinement support and the planned Pi, Sigma, GADT, and type-level extensions |
+| [Dependent types and indexed data](dependent.md) | Refinements, Pi and Sigma types, GADTs, first-class `Type` values, type-level functions, and runtime indices |
 | [Functions](functions.md) | Calls, parameters, closures, and function contracts |
 | [Control flow](control-flow.md) | Branches, loops, exits, cleanup, and error handling |
 | [Operators](operators.md) | Precedence, built-ins, and overloads |

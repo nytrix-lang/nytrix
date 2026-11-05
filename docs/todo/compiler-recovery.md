@@ -25,64 +25,117 @@ and optimizer correctness.
   separately. Require all routes to exit zero and produce identical expected
   state/frame streams. Preserve per-route deadlines and marker comparisons.
 
-- [ ] **ADT payload constructor/matcher ABI:**
-  `lang/types/aggregates/adt.nshape` and `lang/types/aggregates/types.nshape`
-  both report `Circle payload match: expected 16, got 0`; the arm is reached
-  but the payload binding is wrong. Constructor stores are in
-  `src/code/lang/lower/call.h` near `rt_adt_alloc`; tag matching and payload
-  binding are in `src/code/lang/lower/stmt.h` (`nyr_lower_match_pattern`,
-  `nyr_bind_result_pattern`). Compare actual object pointer/layout and field
-  offsets across constructor, allocator, matcher, heap-tag/GC handling, and
-  method receiver ABI. **Hypothesis:** producer and consumer disagree whether
-  returned pointer addresses field zero or header/tag. Confirm with NYIR/ASM
-  before changing offsets. Preserve mixed empty/payload enums and backend ABI.
-  Add one-/multi-field, qualified/unqualified, guarded-binding, and method
-  tests; verify both fixtures across declared routes.
+- [ ] **x86-64 `-O0`/`-O1` f64 buffer update miscompile:** with the native
+  backend at `-O0` or `-O1`,
 
-- [ ] **Enum method ABI and dynamic unit-enum patterns:**
-  `lang/types/traits/enum-method-abi.nshape` fails all four declared routes at
-  `payload enum method: expected 25, got 0`; prior replay also observed dynamic
-  `Color.Red` matching return `nil` instead of `"red"`. Keep unit-enum and
-  payload-zero symptoms distinct until proven to share a cause. Audit enum
-  boxing/unboxing/member lookup in `src/code/lang/lower/expr.h`, comparison and
-  binding in `src/code/lang/lower/stmt.h`, and bound/unbound method receiver
-  ABI. Unit enums use raw discriminants while `any` is tagged: preserve this
-  distinction; do not treat arbitrary odd integers as enum tags or change the
-  public ABI. Add zero/nonzero enum-through-`any` matches and payload/empty
-  method calls; verify all four routes and output parity.
+  ```ny
+  use core
+  use core.tbuf
+  def B = f64buf_new(8)
+  def C = f64buf_new(8)
+  mut int k = 0
+  while k < 8 {
+     f64buf_store(B, k, float(k))
+     f64buf_store(C, k, 0.0)
+     k += 1
+  }
+  k = 0
+  while k < 8 {
+     f64buf_store(C, k, f64buf_load(C, k) + 2.0 * f64buf_load(B, k))
+     k += 1
+  }
+  print(f64buf_load(C, 3))
+  ```
 
-- [ ] **Enum constructor patterns misclassified by proof-purity analysis:**
-  `lang/types/proofs/portable-contracts.nshape:portable_proof_contracts`
-  fails on all four strict-types routes with `enum constructor patterns are
-  syntax, not impure function calls`. Inspect match-pattern traversal/call
-  classification in `src/code/lang/types/funcpurity.c`, especially
-  `ny_purity_match_pattern` and expression purity checks. Constructor-shaped
-  patterns are syntax and payload names are bindings, not calls. Preserve
-  rejection of genuinely effectful calls and proof soundness. Add a pure
-  qualified/unqualified enum-pattern regression plus a negative effectful-call
-  control; verify all four variants.
+  prints garbage (for example `6.36e-314`) instead of `6`; `-O2`/`-O3`, LLVM,
+  and `NYTRIX_FORCE_STACK_FPR=1` are correct. The constant `2.0` is
+  materialized in `xmm2` before the bounds-check `jge`, but its segment after
+  the branch (`[48,55]`, `reload=1`) reloads `[rbp-0x178]`, which no path
+  stores. Its definition never reaches `mach_float_end_segments` or the
+  branch flush with a matching segment. Reproduces with the `object.c` from
+  before the FPR loop-home replay, so it is pre-existing. Fix where the
+  constant's definition segment and its post-branch segment disagree, then
+  add `-O0`/`-O1` routes back to
+  `code/intermediate/opt/loop-tail-passes.nshape`.
 
-- [ ] **`parse_code_typed` declaration-sequence failure:**
-  `code/ast/ast-code-queries.nshape` fails native and native-only routes at
-  `parse_code_typed returns declaration sequences`. In `lib/compiler/ast.ny`,
-  `parse_code` validates snapshot schema/version/nodes and
-  `_code_sequence_category`, then passes the list to `code_decl`. Inspect the
-  exact `parse_ast_snapshot` JSON contract in `src/code/lang/parse/ast.c` and
-  typed-code sequence serialization/parsing in `lib/compiler/ast.ny`. Likely
-  mismatch is parsed record shape/category metadata versus validator/wrapper
-  assumptions. Capture the snapshot for this input and repair the contract at
-  its source; do not weaken declaration-only validation. Retain rejection of
-  executable/malformed source; rerun both routes uncached.
+### Failures in the 2026-11-04 late full run
 
-- [ ] **Ownership allowance error not propagated by every backend:**
-  `lang/errors/ownership/allowance-trailing-defer-reassignment-upper-bound.nshape`
-  expects compile failure for two uses of `x` before deferred reassignment
-  under allowance `[0,1]`. Full-run replay: native `--run` and native-only
-  return 0 despite printing E2001; LLVM MCJIT and ORC return 1 at emit. In
-  `src/code/lang/types/ownership.c`, `stmt_ownership_diag` sets `cg->had_error`
-  in strict mode and path analysis reports observed 2 > 1. Trace why this
-  state is not propagated through native NYIR emit/run and the compile-failure
-  harness. Make all strict routes fail compilation with the diagnostic; do
-  not suppress it or convert this to a runtime assertion. Add valid allowance
-  and defer/reassignment ordering controls; verify every matrix variant and
-  required message.
+A cold `ny-test --with-stdlib` run (2,652 cases) failed 51. They reproduce in
+isolation, also with the statement-lowering performance restore reverted and
+with `NYTRIX_NO_LOOP_SUB_IV=1 NYTRIX_STRENGTH_EXPAND_MUL59=1`, so they are not
+caused by the optimizer work; most coincide with concurrent edits to parsing,
+lowering, and the bare backend. Each entry gives the first failing assertion.
+Reproduce one fixture at a time with `build/release/ny-test --bin
+build/release/ny --cold --with-stdlib etc/tests/<path>`.
+
+#### Bool carriers and scalar ABI
+
+- [ ] `code/abi/abi-conformance.nshape` — normalized true predicates retain the bool formal carrier
+- [ ] `code/abi/calls/scalar-classes.nshape` — bool global store
+- [ ] `code/intermediate/ny/logical-loop-branch.nshape` — assertion failed (no message)
+- [ ] `code/probes/numeric/comma-float-carriers.nshape` — float coordinates survive erased list reads and reassignments
+
+#### AST queries, quoting and serialization
+
+- [ ] `code/ast/ast-binding-metadata.nshape` — quoted bindings retain their scope mark separately from outer bindings
+- [ ] `code/ast/ast-code-queries.nshape` — runtime parse_code still accepts variable declarations
+- [ ] `code/ast/ast-generated-origins.nshape` — identifier splice source origin points to its template argument
+- [ ] `code/ast/ast-loop-invariant.nshape` — loop conditions and invariant syntax both substitute template arguments
+- [ ] `code/ast/ast-numeric-serialization.nshape` — PanicError: err.type: get expects a string, bytes, list, tuple, dict, range, or vector, got int
+- [ ] `code/ast/ast-string-serialization.nshape` — escaped literal and formatted-string AST records remain valid JSON
+- [ ] `code/derive/dispatch/codegen-match.nshape` — SegmentationFault: signal 11
+- [ ] `code/derive/representation/codegen-store-fields.nshape` — Ny field writer reports success only for known fields and pointers
+- [ ] `lang/comptime/comptime-counted-strings.nshape` — template cloning preserves an untouched counted literal
+- [ ] `lang/comptime/comptime.nshape` — parse_code accepts multiple complete declarations
+- [ ] `lang/comptime/reflection/semantic-effect-artifact.nshape` — compiler reports a failed semantic artifact write
+
+#### Bare AOT backend and CLI
+
+- [ ] `code/intermediate/ny/bare/asm-artifacts.nshape` — bare AOT reports the output path and exact small-file size
+- [ ] `code/intermediate/ny/bare/entry-name.nshape` — bare --entry-name controls the sectionless ELF entry and raw syscalls stay libc-free
+- [ ] `code/intermediate/ny/bare/runtime-ops.nshape` — x86_64 runtime operations match VM output
+- [ ] `code/intermediate/ny/bare/x86-typed-list-length.nshape` — bare x86-64 typed-list indexing and length work without libc or assembler; compile=0 execute=127 stdout=`` stderr=`` dynamic=
+- [ ] `code/probes/cli/cli-argv-boundaries.nshape` — AOT inline arguments retain exact boundaries
+- [ ] `code/probes/cli/cli-argv-hints.nshape` — warn-all reports a compiler-looking post-script option once
+- [ ] `code/probes/cli/cli-bare-inspection.nshape` — --emit-asm=- must be honored or rejected by bare AOT (code=0, output=	.file	"nytrix"
+- [ ] `code/probes/tools/decompiler-generated-c-elf.nshape` — retain function/data relocation symbols and types
+
+#### Desugar tool
+
+- [ ] `code/probes/tools/ny-desugar-budget.nshape` — missing diagnostic '64-container budget'; output: ny-desugar: 93942992071296
+- [ ] `code/probes/tools/ny-desugar-parity.nshape` — error: --ny-desugar=ny pass failed for ny-desugar-parity.ny (exit 2)
+
+#### UI, audio and graphics probes
+
+- [ ] `code/probes/os/audio.nshape:sound_source_abi` — mono S16 mixer preserves samples in both output channels
+- [ ] `code/probes/ui/fonts.nshape:font-text-codepoints` — ASCII and UTF-8 codepoints resolve
+- [ ] `code/probes/ui/gltf.nshape:gltf_embedded_buffer` — a node without visibility overrides is visible
+- [ ] `code/probes/ui/gltf.nshape:gltf_triangle_bounds` — scene minimum bounds match the triangle
+- [ ] `code/probes/ui/ui-render-pixels.nshape` — software circle reaches framebuffer pixels
+- [ ] `code/probes/ui/ui-smoke.nshape:ui_replay_animation` — animation native, JIT, and VM replay pass
+- [ ] `code/probes/ui/ui-smoke.nshape:ui_replay_editor` — editor native, JIT, and VM replay pass
+- [ ] `code/probes/ui/ui-smoke.nshape:ui_replay_engine` — engine native, JIT, and VM replay pass
+- [ ] `code/probes/ui/ui-smoke.nshape:ui_replay_input` — input native, JIT, and VM replay pass
+- [ ] `code/probes/ui/ui-smoke.nshape:ui_replay_monitor` — monitor native, JIT, and VM replay pass
+- [ ] `code/probes/ui/ui-smoke.nshape:ui_replay_pong` — pong native, JIT, and VM replay pass
+- [ ] `code/probes/ui/ui-smoke.nshape:ui_replay_synth` — synth native, JIT, and VM replay pass
+- [ ] `code/probes/ui/ui-smoke.nshape:ui_replay_term` — term native, JIT, and VM replay pass
+- [ ] `code/probes/ui/ui-snapshot-ownership.nshape` — later frames preserve an outstanding readback (frame 0: red=0, green=0)
+- [ ] `code/probes/ui/window-headless-init.nshape:runtime_window_explicit_null_backend_init` — explicit null backend is available
+
+#### Language semantics
+
+- [ ] `lang/control-flow/control.nshape` — defers run LIFO at scope exit
+- [ ] `lang/execution/defer.nshape` — deferred writes reach the enclosing local
+- [ ] `lang/language/sugar.nshape` — while-def entered
+- [ ] `lang/modules/attached-owner-identity.nshape` — right module keeps its attached method owner: 101
+- [ ] `lang/modules/use/guard.nshape` — runtime __main() is true in direct file
+- [ ] `lang/ownership/generated-runtime-shadow-differential.nshape` — generated inferred resource move 4 runtime shadow and strict checker disagree (code 0, accepted=true, expected=false): <inlin
+- [ ] `lang/types/inference/type.nshape` — HM generic dict<str, int> parameter
+- [ ] `lang/types/traits/enum-method-abi.nshape` — SegmentationFault: signal 11
+- [ ] `lang/values/calloc-raw.nshape` — calloc-raw.ny:9:1:  [E2001] error: effect policy violation in 'allocate_dynamic': effects are unknown
+- [ ] `lang/values/result.nshape` — typed Result error payload keeps its string type
+
+#### F64 return ABI
+
+- [ ] `code/intermediate/opt/vector-f64.nshape` — x86-64 `-O2` native-result-oracle route fails at emit/verify: `rt_main` returns an f64 loop result through an `i64-raw` return ABI

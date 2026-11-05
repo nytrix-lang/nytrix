@@ -612,6 +612,10 @@ static void dump_node(dump_context_t *ctx, dump_node_t node,
     dump_kind(ctx, "EnumVariantDecl");
     dump_location(ctx, item->tok, item->expansion_origin);
     dump_named(ctx, "name", item->name);
+    if (item->index_constraint_param)
+      dump_named(ctx, "index-parameter", item->index_constraint_param);
+    if (item->index_constraint_type)
+      dump_named(ctx, "index-type", item->index_constraint_type);
     for (size_t i = 0; i < item->fields.len; ++i)
       dump_push(&children, D_ENUM_FIELD, &item->fields.data[i], NULL);
     dump_push(&children, D_EXPR, item->value, "value");

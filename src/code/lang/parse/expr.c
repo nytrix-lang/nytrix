@@ -1736,6 +1736,25 @@ static expr_t *parse_postfix(parser_t *p) {
       expr_t *call = expr_new(p->arena, NY_E_CALL, p->cur);
       call->as.call.callee = expr;
       parse_call_arg_list(p, &call->as.call.args, NULL);
+      /*
+       * `pair(index, value)` is the dependent-pair constructor.  It has the
+       * ordinary two-element tuple representation, so lower it to a tuple
+       * literal instead of an unresolved call; the type checker verifies the
+       * index and the dependent payload against the declared `exists` type.
+       */
+      if (expr->kind == NY_E_IDENT && expr->as.ident.name &&
+          strcmp(expr->as.ident.name, "pair") == 0 &&
+          call->as.call.args.len == 2 && !call->as.call.args.data[0].name &&
+          !call->as.call.args.data[1].name) {
+        expr_t *tuple = expr_new(p->arena, NY_E_TUPLE, call->tok);
+        vec_push_arena(p->arena, &tuple->as.list_like,
+                       call->as.call.args.data[0].val);
+        vec_push_arena(p->arena, &tuple->as.list_like,
+                       call->as.call.args.data[1].val);
+        expr = tuple;
+        continue;
+      }
+
       expr = call;
     } else if (p->cur.kind == NY_T_DOT) {
       parser_advance(p);

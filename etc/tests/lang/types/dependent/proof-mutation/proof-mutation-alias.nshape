@@ -1,0 +1,22 @@
+shape proof_mutation_non_aliasing {
+  family "runtime/language"
+  generator "embedded"
+  features ["ny", "test", "proof", "dependent"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+refine Positive = int where (v) { v > 0 }
+
+fn consume(Positive p) int { p }
+
+;; Mutating an independent copy must not invalidate the source's proof.
+def Positive source = 7
+mut int copy = source
+copy = -1
+assert_eq(consume(source), 7, "non-aliasing copy mutation preserves the proof")
+print("✓ proof-mutation-alias ok")
+NY
+}
