@@ -288,6 +288,18 @@ enum {
   K_PAGE_DOWN,
   K_MOUSE_WHEEL_UP,
   K_MOUSE_WHEEL_DOWN,
+  K_F1,
+  K_F2,
+  K_F3,
+  K_F4,
+  K_F5,
+  K_F6,
+  K_F7,
+  K_F8,
+  K_F9,
+  K_F10,
+  K_F11,
+  K_F12,
   K_UNKNOWN
 };
 
@@ -465,6 +477,29 @@ static int read_escape_posix(void) {
       return K_HOME;
     if (seq2 == 'F')
       return K_END;
+    if (seq2 >= '1' && seq2 <= '2') {
+      int seq3 = get_char_timeout(1000);
+      if (seq3 >= '0' && seq3 <= '9') {
+        int seq4 = get_char_timeout(1000);
+        if (seq4 == '~') {
+          int fkey = (seq2 - '0') * 10 + (seq3 - '0');
+          if (fkey >= 11 && fkey <= 15)
+            return K_F1 + (fkey - 11);   /* 11..15 => F1..F5 */
+          if (fkey >= 17 && fkey <= 21)
+            return K_F6 + (fkey - 17);   /* 17..21 => F6..F10 */
+          if (fkey == 23)
+            return K_F11;
+          if (fkey == 24)
+            return K_F12;
+        } else {
+          csi_consume_tail(seq4, 1000);
+        }
+      } else if (seq3 == '~') {
+        /* single-digit home/end handled below */
+      } else {
+        csi_consume_tail(seq3, 1000);
+      }
+    }
     if (seq2 == '1') {
       int seq3 = get_char_timeout(1000);
       if (seq3 == '3') {
@@ -588,6 +623,14 @@ static int read_escape_posix(void) {
       return K_HOME;
     if (seq2 == 'F')
       return K_END;
+    if (seq2 == 'P')
+      return K_F1;
+    if (seq2 == 'Q')
+      return K_F2;
+    if (seq2 == 'R')
+      return K_F3;
+    if (seq2 == 'S')
+      return K_F4;
   }
   return K_UNKNOWN;
 }
@@ -956,6 +999,8 @@ static int read_key_win(char *out_chr) {
       return K_PAGE_UP;
     if (vk == VK_NEXT)
       return K_PAGE_DOWN;
+    if (vk >= VK_F1 && vk <= VK_F12)
+      return K_F1 + (vk - VK_F1);
     if (vk == VK_INSERT)
       continue;
     if (ch == '\r') {
@@ -3484,6 +3529,15 @@ char *ny_readline(const char *prompt) {
       }
       prev_lines = 0;
       draw_line(prompt, buf, len, pos, prompt_cols);
+      continue;
+    }
+    if (k >= K_F1 && k <= K_F12) {
+      /* F1..F12 open help: insert ":help " at the start so pressing
+       * Enter shows the command/symbol help reference. */
+      pos = 0;
+      if (repl_insert_bytes(&buf, &cap, &len, &pos, ":help ", 6, 64)) {
+        draw_line(prompt, buf, len, pos, prompt_cols);
+      }
       continue;
     }
     if (k == K_PASTE_START) {

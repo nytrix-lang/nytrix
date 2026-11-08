@@ -1560,7 +1560,7 @@ static const char *ny_bare_aot_unsupported_inspection(const ny_options *opt) {
   return NULL;
 }
 
-static int ny_try_bare_aot_command(const ny_options *opt, ny_tick_t t_start) {
+static int __attribute__((unused)) ny_try_bare_aot_command(const ny_options *opt, ny_tick_t t_start) {
   if (!opt || opt->runtime_mode != NY_RUNTIME_MODE_BARE ||
       opt->bare_native_fallback)
     return -1;

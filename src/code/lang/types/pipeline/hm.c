@@ -5859,7 +5859,7 @@ static void hm_check_sigma_initializer(ny_hm_state_t *hm, ny_hm_env_list *env,
      * binding) satisfies the shape; only a fresh non-pair value is an error.
      */
     ny_hm_type_t *actual =
-        init ? hm_prune(hm_infer_expr(hm, env, init, self_name)) : NULL;
+        init ? hm_prune(hm_infer_expr(hm, env, (expr_t *)init, self_name)) : NULL;
     if (actual && (actual->kind == NY_HM_TUPLE || hm_is_any(actual))) {
       hm_sigma_parts_free(&parts);
       return;
