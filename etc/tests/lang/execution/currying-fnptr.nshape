@@ -1,0 +1,17 @@
+shape currying_fnptr_call_mode {
+  family "runtime/execution"
+  generator "embedded"
+  features [ny currying fnptr representation positive]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit -O0; --native-backend=llvm --jit --jit-engine=orc -O2"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+fn add(int a, int b) int { a + b }
+def add5 = add(5)
+def fnptr raw = add5
+assert(raw(3) == 8, "a residual partial crosses the fnptr boundary")
+assert(raw(7) == 12, "the fnptr conversion stays repeatable")
+print("FNPTR-OK")
+NY
+}

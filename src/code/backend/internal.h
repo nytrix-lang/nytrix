@@ -110,13 +110,14 @@ bool nyr_x86_64_emit_ir_with_options(
     nyr_writer_t *w, const ny_native_target_info_t *target,
     const nyr_func_t *nyir, const char *func_name, bool tag_return,
     bool is_local, bool retpoline_indirect_calls, bool retpoline_inline_calls,
-    char *err, size_t err_len);
+    bool function_return_thunk_extern, char *err, size_t err_len);
 /* First executable machine-form consumer. Scalar integer/control-flow subset;
  * callers retain NYIR encode as the explicit fallback for other shapes. */
 bool nyr_x86_64_emit_mach_scalar(nyr_writer_t *w,
                                  const ny_native_target_info_t *target,
                                  const nyr_mach_func_t *mach,
                                  const char *func_name, bool tag_return,
+                                 bool function_return_thunk_extern,
                                  char *err, size_t err_len);
 
 /* C-string pool for pure-native string literals (print, etc.). */

@@ -72,23 +72,6 @@ fn _selection_bounds_ready(any bounds) bool {
    is_list(bounds) && bounds.len >= 6 && float(bounds.get(0, 0.0)) <= float(bounds.get(3, 0.0))
 }
 
-fn _selection_bounds_span(any bounds) f64 {
-   if !is_list(bounds) || bounds.len < 6 { return 0.0 }
-   def sx = abs(float(bounds.get(3, 0.0)) - float(bounds.get(0, 0.0)))
-   def sy = abs(float(bounds.get(4, 0.0)) - float(bounds.get(1, 0.0)))
-   def sz = abs(float(bounds.get(5, 0.0)) - float(bounds.get(2, 0.0)))
-   max(sx, max(sy, sz))
-}
-
-fn _selection_choose_tighter_bounds(any a, any b) list {
-   if !_selection_bounds_ready(a) { return _selection_bounds_ready(b) ? b : [] }
-   if !_selection_bounds_ready(b) { return a }
-   def aspan = _selection_bounds_span(a)
-   def bspan = _selection_bounds_span(b)
-   if bspan > 0.000001 && (aspan <= 0.000001 || bspan < aspan) { return b }
-   a
-}
-
 fn _selection_bounds_from_minmax(any bmin, any bmax) list {
    if !selection_bounds_valid(bmin) || !selection_bounds_valid(bmax) { return [] }
    [

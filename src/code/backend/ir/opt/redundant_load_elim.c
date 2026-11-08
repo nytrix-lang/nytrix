@@ -73,6 +73,89 @@ static bool rle_same_address(const nyr_func_t *f, const int *definition,
  * win while keeping generated store-heavy code linear.
  */
 
+#define NY_RLE_EDGE_CACHE 32
+
+typedef struct {
+  int address;
+  int value;
+  unsigned flags;
+  nyr_scalar_class_t scalar_class;
+} ny_rle_edge_fact_t;
+
+typedef struct {
+  size_t len;
+  ny_rle_edge_fact_t facts[NY_RLE_EDGE_CACHE];
+} ny_rle_edge_state_t;
+
+static bool ny_rle_single_pred_edges(nyr_func_t *f) {
+  nyr_cfg_t cfg = {0};
+  if (!nyr_cfg_build_topology(f, &cfg))
+    return false;
+  if (!cfg.block_count) {
+    nyr_cfg_free(&cfg);
+    return true;
+  }
+  ny_rle_edge_state_t *out = calloc(cfg.block_count, sizeof(*out));
+  if (!out) {
+    nyr_cfg_free(&cfg);
+    return false;
+  }
+  for (size_t block = 0; block < cfg.block_count; ++block) {
+    if (!cfg.reachable[block])
+      continue;
+    ny_rle_edge_state_t state = {0};
+    size_t p0 = cfg.pred_offsets[block];
+    if (block && cfg.pred_offsets[block + 1] == p0 + 1) {
+      size_t pred = cfg.pred_blocks[p0];
+      if (pred < block && cfg.reachable[pred])
+        state = out[pred];
+    }
+    for (size_t pc = cfg.block_start[block]; pc < cfg.block_end[block]; ++pc) {
+      nyr_inst_t *in = &f->data[pc];
+      if (in->op == NYIR_STORE_I64 || in->op == NYIR_STORE_LOCAL ||
+          in->op == NYIR_COPY_STRUCT || in->op == NYIR_CALL ||
+          in->op == NYIR_INLINE_ASM ||
+          (nyr_effective_effects(in) &
+           (NYIR_EFFECT_WRITE_MEMORY | NYIR_EFFECT_ALLOCATION |
+            NYIR_EFFECT_UNKNOWN_SIDE_EFFECT | NYIR_EFFECT_IO |
+            NYIR_EFFECT_FFI | NYIR_EFFECT_THREAD | NYIR_EFFECT_VOLATILE))) {
+        state.len = 0;
+        continue;
+      }
+      if (in->op != NYIR_LOAD_I64 || in->dst < 0 || in->a < 0 ||
+          (in->effects & NYIR_EFFECT_VOLATILE))
+        continue;
+      unsigned flags = in->flags & (NYIR_INST_F_MEM_BYTE |
+                                    NYIR_INST_F_MEM_U16 |
+                                    NYIR_INST_F_MEM_I32);
+      bool matched = false;
+      for (size_t i = 0; i < state.len; ++i) {
+        const ny_rle_edge_fact_t *fact = &state.facts[i];
+        if (fact->address != in->a || fact->flags != flags ||
+            fact->scalar_class != in->scalar_class)
+          continue;
+        nir_make_copy(in, fact->value);
+        in->alias_class = 0;
+        matched = true;
+        break;
+      }
+      if (!matched) {
+        if (state.len == NY_RLE_EDGE_CACHE) {
+          memmove(state.facts, state.facts + 1,
+                  (NY_RLE_EDGE_CACHE - 1) * sizeof(state.facts[0]));
+          --state.len;
+        }
+        state.facts[state.len++] =
+            (ny_rle_edge_fact_t){in->a, in->dst, flags, in->scalar_class};
+      }
+    }
+    out[block] = state;
+  }
+  free(out);
+  nyr_cfg_free(&cfg);
+  return true;
+}
+
 bool nyr_redundant_load_elim(nyr_func_t *f) {
   if (!f || f->next_value <= 0)
     return true;
@@ -304,7 +387,7 @@ bool nyr_redundant_load_elim(nyr_func_t *f) {
         (nyr_effective_effects(in) &
          (NYIR_EFFECT_WRITE_MEMORY | NYIR_EFFECT_ALLOCATION |
           NYIR_EFFECT_UNKNOWN_SIDE_EFFECT | NYIR_EFFECT_IO |
-          NYIR_EFFECT_FFI))) {
+          NYIR_EFFECT_FFI | NYIR_EFFECT_THREAD | NYIR_EFFECT_VOLATILE))) {
       vector_addr = vector_value = -1;
       vector_store_op = NYIR_NOP;
     }
@@ -352,6 +435,15 @@ bool nyr_redundant_load_elim(nyr_func_t *f) {
       }
       continue;
     }
+    if (in->op == NYIR_INLINE_ASM || in->op == NYIR_STORE_LOCAL ||
+        (nyr_effective_effects(in) &
+         (NYIR_EFFECT_WRITE_MEMORY | NYIR_EFFECT_ALLOCATION |
+          NYIR_EFFECT_UNKNOWN_SIDE_EFFECT | NYIR_EFFECT_IO |
+          NYIR_EFFECT_FFI | NYIR_EFFECT_THREAD | NYIR_EFFECT_VOLATILE))) {
+      mem_avail_count = 0;
+      vector_addr = vector_value = -1;
+      vector_store_op = NYIR_NOP;
+    }
     if (in->imm < 0 || (size_t)in->imm >= count)
       continue;
     size_t slot = (size_t)in->imm;
@@ -388,5 +480,5 @@ bool nyr_redundant_load_elim(nyr_func_t *f) {
   free(escaped);
   free(value_alias);
   free(definition);
-  return true;
+  return ny_rle_single_pred_edges(f);
 }

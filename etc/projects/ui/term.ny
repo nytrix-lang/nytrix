@@ -28,7 +28,7 @@ use core.os.ui.render.viewer.vterm as vterm
 use core.str as str
 use core.common as common
 
-mut win = 0
+mut any win = nil
 mut win_id = 0
 mut font = 0
 mut font_bold = 0
@@ -86,7 +86,7 @@ mut _mouse_update_max = 48
 mut _mouse_update_budget_ns = 3000000
 mut _scroll_update_max = 96
 mut _scroll_update_budget_ns = 6000000
-mut _pending_mouse_motion = 0
+mut any _pending_mouse_motion = nil
 mut _term_shutdown_done = false
 mut _repeat_key = 0
 mut _repeat_mod = 0
@@ -770,7 +770,7 @@ fn _reload_fonts() any {
    font_bold = fonts.get("bold", font)
    font_italic = fonts.get("italic", font)
    font_emoji = fonts.get("emoji", font)
-   if vt != 0 {
+   if is_dict(vt) {
       vt = vt.set("fonts", _font_map())
       _resize_term()
    }
@@ -906,7 +906,7 @@ fn _prepare_scroll_mouse_state() any {
    if window.mouse_down(win, 0) { return 0 }
    _left_button_was_down = false
    _last_left_down_ticks = 0
-   if vt != 0 && is_dict(vt) && vterm.selection_dragging(vt) && !vt.get("sticky_selection", false) {
+   if is_dict(vt) && vterm.selection_dragging(vt) && !vt.get("sticky_selection", false) {
       if vterm.clear_selection(vt) { _request_redraw(1) }
    }
    0
@@ -1339,7 +1339,7 @@ fn _resize_term() any {
 fn draw() any {
    def live = _live_window()
    if is_dict(live) { win = live }
-   if common.env_truthy("NYTRIX_UI_REPLAY") { _needs_draw = true }
+   if ui_dump.env_truthy_cached("NYTRIX_UI_REPLAY") { _needs_draw = true }
    def dump_enabled = _auto_dump_requested && !_auto_dump_done
    if dump_enabled {
       if _auto_dump_ready_frame < 0 && _frame_count >= _auto_dump_delay_frames {

@@ -326,7 +326,9 @@ static void nyr_stamp_local_store_classes(nyr_func_t *f) {
     if (cls != NYIR_SCALAR_F32 && cls != NYIR_SCALAR_F64 && ret->a >= 0 &&
         (size_t)ret->a < value_count)
       cls = nyr_pipeline_value_class(f, &types, defs, ret->a, 0);
-    /* The verifier treats every non-float scalar class as the integer ABI. */
+    /*
+     * The verifier treats every non-float scalar class as the integer ABI.
+     */
     if (cls != NYIR_SCALAR_F32 && cls != NYIR_SCALAR_F64)
       cls = NYIR_SCALAR_I64_RAW;
     if (merged_return == NYIR_SCALAR_UNKNOWN)
@@ -364,6 +366,7 @@ bool nyr_gvn_pre(nyr_func_t *f);
 bool nyr_loop_vectorize(nyr_func_t *f);
 bool nyr_loop_vectorize_avx2(nyr_func_t *f);
 bool nyr_slp_vectorize(nyr_func_t *f);
+bool nyr_tbuf_inline(nyr_func_t *f);
 bool nyr_memcombine(nyr_func_t *f);
 bool nyr_alias_store_sink(nyr_func_t *f);
 bool nyr_narrow(nyr_func_t *f);
@@ -989,6 +992,7 @@ static const nyr_pass_control_t nyr_pass_controls[] = {
     {nyr_float_zero_guard_fold, "float_zero_guard_fold"},
     {nyr_outer_loop_vectorize, "outer_loop_vectorize"},
     {nyr_licm, "licm"},
+    {nyr_licm_post_vectorize, "licm_post_vectorize"},
     {nyr_dce, "dce"},
     {nyr_dead_arg_elim, "dead_arg_elim"},
     {nyr_ipa_constprop, "ipa_constprop"},
@@ -1047,6 +1051,7 @@ static const nyr_pass_control_t nyr_pass_controls[] = {
     {nyr_loop_vectorize, "loop_vectorize"},
     {nyr_loop_vectorize_avx2, "loop_vectorize"},
     {nyr_slp_vectorize, "slp_vectorize"},
+{nyr_tbuf_inline, "tbuf_inline"},
     {nyr_alias_store_sink, "alias_store_sink"},
     {nyr_narrow, "narrow"},
     {nyr_phi_elim, "phi_elim"},
@@ -2124,6 +2129,8 @@ static bool nyr_optimize_pipeline(nyr_func_t *f, nyr_opt_stats_t *stats,
         !nyr_pass_stopped)
       nyr_run_pass(f, nyr_slp_vectorize, stats, dump, &ok);
     if (ok && !nyr_pass_stopped)
+      nyr_run_pass(f, nyr_tbuf_inline, stats, dump, &ok);
+    if (ok && !nyr_pass_stopped)
       nyr_run_finish_scalar(f, stats, dump, &ok);
   } else {
     /*
@@ -2237,6 +2244,13 @@ static bool nyr_optimize_pipeline(nyr_func_t *f, nyr_opt_stats_t *stats,
                             : nyr_loop_vectorize,
                      stats, dump, &ok);
       /*
+       * Vectorized loops still recompute invariant address arithmetic
+       * (row offsets); the pre-vectorization LICM keeps it in place on
+       * purpose. Hoist it now that the access shapes are final.
+       */
+      if (ok && !nyr_pass_stopped)
+        nyr_run_pass(f, nyr_licm_post_vectorize, stats, dump, &ok);
+      /*
        * Prefetch insertion after loop structure is finalized.
        */
       if (ok && !nyr_pass_stopped)
@@ -2284,6 +2298,8 @@ static bool nyr_optimize_pipeline(nyr_func_t *f, nyr_opt_stats_t *stats,
           !nyr_pass_stopped)
         nyr_run_pass(f, nyr_slp_vectorize, stats, dump, &ok);
       if (ok && !nyr_pass_stopped)
+        nyr_run_pass(f, nyr_tbuf_inline, stats, dump, &ok);
+      if (ok && !nyr_pass_stopped)
         nyr_run_pass(f, nyr_compact_if_sparse, stats, dump, &ok);
     }
     if (ok && nyr_has_control_flow(f))
@@ -2323,8 +2339,10 @@ static bool nyr_optimize_pipeline(nyr_func_t *f, nyr_opt_stats_t *stats,
     }
     if (ok && !nyr_pass_stopped && nyr_has_loop(f))
       nyr_run_pass(f, nyr_ilp_reassociate, stats, dump, &ok);
-    /* Diagnostic: NYTRIX_DUMP_FINAL_NYIR=1 prints each function as it
-     * leaves the scalar pipeline (the module-level route). */
+    /*
+     * Diagnostic: NYTRIX_DUMP_FINAL_NYIR=1 prints each function as it
+     * leaves the scalar pipeline (the module-level route).
+     */
     if (ok && getenv("NYTRIX_DUMP_FINAL_NYIR"))
       nyr_dump(stderr, f, "final");
     /*

@@ -15,7 +15,8 @@ use core.str as str
 use core.common as common
 use core.cache as cache
 
-mut _enabled, _scale, _win = true, 1.0, 0
+mut _enabled, _scale = true, 1.0
+mut any _win = nil
 mut _font, _font_title, _font_small = 0, 0, 0
 mut _fb_w, _fb_h = 0.0, 0.0
 mut _mouse_x, _mouse_y = 0.0, 0.0
@@ -36,7 +37,8 @@ mut _key_mask_4, _key_mask_5, _key_mask_6, _key_mask_7 = 0, 0, 0, 0
 mut _text_events = ""
 mut dict _windows = dict(32)
 mut dict _widget_state = dict(64)
-mut _current_window, _current_window_id_cache, _widget_id_prefix = 0, "", ""
+mut any _current_window = nil
+mut _current_window_id_cache, _widget_id_prefix = "", ""
 mut _current_body_x_cache, _current_body_y_cache = 0.0, 0.0
 mut _current_body_w_cache, _current_body_h_cache = 0.0, 0.0
 mut _current_cursor_y_cache, _focus_collect_active = 0.0, false
@@ -56,7 +58,8 @@ mut _popup_combo_active = false
 mut _popup_combo_key = ""
 mut _popup_combo_x, _popup_combo_y, _popup_combo_w, _popup_combo_h = 0.0, 0.0, 0.0, 0.0
 mut _popup_combo_row_h, _popup_combo_max_scroll, _popup_combo_scroll_y = 0.0, 0.0, 0.0
-mut _popup_combo_rows, _popup_combo_out, _popup_combo_first = 0, 0, 0
+mut _popup_combo_rows, _popup_combo_first = 0, 0
+mut any _popup_combo_out = nil
 mut _popup_combo_labels = []
 mut _move_off_x, _move_off_y = 0.0, 0.0
 mut _resize_pad_x, _resize_pad_y = 0.0, 0.0
@@ -2683,17 +2686,6 @@ fn tab_strip(any id, list labels, int selected=0, f64 w=0.0, f64 h=0.0) int {
       i += 1
    }
    out
-}
-
-fn _combo_popup_unclip_window() list {
-   mut restore_window_clip, restore_window_rect = false, []
-   def win = _current_window_state()
-   if is_dict(win) && win.get("clip_active", false) {
-      restore_window_rect = _window_body_clip(win)
-      pop_clip_rect()
-      restore_window_clip = true
-   }
-   [restore_window_clip, restore_window_rect]
 }
 
 fn _draw_combo_popup_frame(f64 x, f64 popup_y, f64 rwf, f64 popup_h) any {

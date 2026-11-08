@@ -1,0 +1,21 @@
+shape sound_headless_backend_fails_cleanly_without_a_device {
+  suite "runtime"
+  family "runtime/system"
+  generator "runtime"
+  features ["sound", "headless", "failure"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.sound.backend.io as audio
+
+def ctx = audio.create()
+assert(audio.get_backend_name(ctx) == "none", "empty audio context has no backend")
+assert(audio.get_output_device_count(ctx) == 0, "empty audio context has no devices")
+def stream = audio.outstream_create(0)
+assert(!audio.outstream_open(stream, audio.FORMAT_S16LE, 44100, 2, nil),
+       "stream without a device cannot open")
+assert(!audio.outstream_start(stream), "stream without a backend cannot start")
+print("HEADLESS_AUDIO_FAILURE_OK")
+NY
+}

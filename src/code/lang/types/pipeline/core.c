@@ -2895,6 +2895,7 @@ struct ny_hm_type_t {
   ny_hm_type_t *b;
   ny_hm_type_list args;
   ny_hm_type_t *instance;
+  const ny_param_list *parameters;
 };
 
 typedef struct ny_hm_env_entry_t {
@@ -2913,6 +2914,11 @@ typedef struct ny_hm_env_entry_t {
   const char *sigma_decl;
   bool sigma_index_literal;
   int64_t sigma_index_value;
+  /*
+   * Resolved callable provenance for `def name = callable`.
+   */
+  const char *alias_target;
+  stmt_t *alias_target_stmt;
 } ny_hm_env_entry_t;
 typedef VEC(ny_hm_env_entry_t) ny_hm_env_list;
 
@@ -2956,4 +2962,14 @@ typedef struct ny_hm_state_t {
   size_t scheme_index_cap;
   ny_hm_expr_type_fact_list expr_type_facts;
   size_t debug_std_default_constraints_suppressed;
+  /*
+   * Statement-mode partial-application bookkeeping: the statement call being
+   * inferred and the required arguments its desugared residual still needs.
+   * hm_desugar_partial_call records the miss only for this exact node so
+   * nested or value-position partials (legal) never surface it; the caller's
+   * expression-statement frame consumes and clears it.
+   */
+  expr_t *stmt_partial_call;
+  const char *stmt_partial_missing;
+  size_t stmt_partial_missing_count;
 } ny_hm_state_t;

@@ -8,10 +8,10 @@ use core as core
 use core.primitives (envc, envp)
 
 fn _env_present(str key) bool {
-   ;; __env_get returns a managed string for `NAME=...` entries and 0 when
+   ;; __env_get returns a managed string for `NAME=...` entries and nil when
    ;; absent, replacing the manual envp scan (the old scan also misread
    ;; prefix-colliding names like `NY_HOME` for `NY_H`).
-   __env_get(key) != 0
+   __env_get(key) != nil
 }
 
 mut _text_debug_flag = -1

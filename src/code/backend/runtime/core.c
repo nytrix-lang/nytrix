@@ -199,6 +199,11 @@ void rt_map_oracle_init(void) {
   atomic_flag_clear_explicit(&g_rt_oracle_init_lock, memory_order_release);
 }
 
+__thread rt_probe_cache_entry_t g_rt_probe_cache[RT_PROBE_CACHE_WAYS];
+__thread uint32_t g_rt_probe_cache_next;
+__thread rt_oracle_extra_hint_t
+    g_rt_oracle_extra_hints[RT_ORACLE_EXTRA_HINTS];
+
 void rt_map_oracle_add(uintptr_t start, size_t size) {
   if (!start || (uintptr_t)size > UINTPTR_MAX - start)
     return;
@@ -4640,9 +4645,11 @@ int64_t rt_value_index_read_raw(int64_t value, int64_t index,
 int64_t rt_value_index_read_tagged(int64_t value, int64_t key,
                                    int64_t fallback) {
   value = rt_tbuf_resolve_handle(value);
-  /* Ranges are tbuf-backed, not tagged heap objects: match them by sequence
+  /*
+   * Ranges are tbuf-backed, not tagged heap objects: match them by sequence
    * tag so a boolean key raises the integer-index error instead of falling
-   * through to the lenient getter. */
+   * through to the lenient getter.
+   */
   int64_t value_seq_tag = rt_sequence_tag(value);
   bool strict_sequence = rt_tbuf_known_handle((uintptr_t)value) ||
                          rt_native_is_str(value) || is_v_str(value) ||
@@ -4656,7 +4663,9 @@ int64_t rt_value_index_read_tagged(int64_t value, int64_t key,
   }
   if (!strict_sequence)
     return rt_value_get_tagged(value, key, fallback);
-  /* Boolean immediates share the tagged-integer low bit; reject them. */
+  /*
+   * Boolean immediates share the tagged-integer low bit; reject them.
+   */
   if (!is_int(key) || rt_is_bool_imm(key))
     return rt_index_key_error();
   return rt_tbuf_index_any_raw(value, rt_untag_v(key));
@@ -5285,6 +5294,16 @@ int64_t rt_vec_div_component_raw(int64_t left, int64_t right) {
   double z = dim >= 3 && rz != 0.0 ? ny_vec_get_coord(left, "z") / rz : 0.0;
   double w = dim >= 4 && rw != 0.0 ? ny_vec_get_coord(left, "w") / rw : 0.0;
   return ny_vec_new_from_coords(dim, x, y, z, w);
+}
+
+int64_t rt_any_sub(int64_t left, int64_t right) {
+  if (!is_int(left) && rt_value_tag(left) == TAG_FLOAT)
+    return rt_flt_box_double(rt_any_to_f64(left) - rt_any_to_f64(right));
+  if (!is_int(right) && rt_value_tag(right) == TAG_FLOAT)
+    return rt_flt_box_double(rt_any_to_f64(left) - rt_any_to_f64(right));
+  if (rt_value_tag(left) == TAG_BIGINT || rt_value_tag(right) == TAG_BIGINT)
+    return rt_bigint_sub(rt_bigint_operand(left), rt_bigint_operand(right));
+  return rt_sub(left, right);
 }
 
 int64_t rt_any_mul(int64_t left, int64_t right) {

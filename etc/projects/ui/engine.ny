@@ -56,7 +56,7 @@ use core.os.ui.render.viewer.engine.env
 use core.os.ui.render.viewer.engine.gizmo
 use core.os.ui.render.viewer.engine.state
 
-mut any win = 0
+mut any win = nil
 mut str _ui_update_stage = ""
 mut list _gui_editor_rect = [20.0, 20.0, 520.0, 700.0]
 mut list _gui_inspector_rect = [860.0, 20.0, 390.0, 430.0]
@@ -304,14 +304,6 @@ fn _gui_invalidate_model_catalog_caches() bool {
 fn _refresh_model_catalog() list {
    _model_names = viewer_catalog.refresh_names(_model_names)
    _model_names
-}
-
-fn _gui_sync_model_selection() bool {
-   _gui_model_selected_name = viewer_catalog.sync_selected(
-      _gui_model_selected_name,
-      _loaded_scene_name,
-   _refresh_model_catalog())
-   true
 }
 
 fn _gui_filtered_model_catalog(any names) list {
@@ -810,16 +802,6 @@ fn _batch_dump_terminal_log(msg) {
 mut int _anim_update_frame_guard = -1
 mut int _anim_last_tick_ns = 0
 
-fn _anim_update_guard_key() int {
-   ;; Guard animation sampling by the current update tick, not by total_frames.
-   ;; total_frames only advances after a successful present/full draw, so tying
-   ;; animation updates to it makes idle/headless/no-surface paths sample only
-   ;; when input forces a render. Visually that looks like STEP/keyframe jumps
-   ;; even when the glTF sampler is LINEAR.
-   def k = int(last_upd_t)
-   k != 0 ? k : int(ticks())
-}
-
 fn _anim_update_guard_reset() bool {
    _anim_update_frame_guard = -1
    _anim_last_tick_ns = 0
@@ -965,7 +947,7 @@ fn _scene_load_async_status() {
 }
 
 fn _scene_load_async_clear() {
-   _scene_load_async_job = 0
+   _scene_load_async_job = nil
    _scene_load_async_spec = ""
    _scene_load_async_path = ""
    _scene_load_async_display = ""
@@ -1045,7 +1027,7 @@ fn _finish_scene_load_path(gltf_path, want, auto_frame=true) {
    mut old_name = _loaded_scene_name
    if is_dict(old_scene) && old_name == want {
       scene_engine.unload_scene(old_scene, old_name)
-      active_scene = 0
+      active_scene = nil
       show_scene = false
       _scene_selected = false
       _loaded_scene_name = ""
@@ -1598,7 +1580,7 @@ fn _gui_focus_asset_search() {
 fn _gui_unload_scene() {
    if is_dict(active_scene) {
       scene_engine.unload_scene(active_scene, _loaded_scene_name)
-      active_scene = 0
+      active_scene = nil
    }
    _scene_selection_bounds_cache_clear()
    show_scene = false
@@ -1865,7 +1847,7 @@ fn _batch_dump_begin_current() {
    _stop_model_prefetch()
    if is_dict(active_scene) {
       scene_engine.unload_scene(active_scene, _loaded_scene_name)
-      active_scene = 0
+      active_scene = nil
    }
    show_scene = false
    _loaded_scene_name = ""
@@ -2806,7 +2788,7 @@ fn _sync_window_size_from_live() {
 fn _sync_anim_state_from_scene(mesh) {
    def _discard_anim_guard_sync = _anim_update_guard_reset()
    if !is_dict(mesh) {
-      _anim_gltf_data = 0
+      _anim_gltf_data = nil
       _anim_count = 0
       _anim_duration = 0.0
       _skin_count = 0
@@ -2867,7 +2849,7 @@ fn _sync_anim_state_from_scene(mesh) {
 fn _clear_anim_state() {
    def _discard_anim_guard_clear = _anim_update_guard_reset()
    _anim_enabled = false
-   _anim_gltf_data = 0
+   _anim_gltf_data = nil
    _anim_count = 0
    _anim_duration = 0.0
    _anim_time = 0.0
@@ -3210,7 +3192,7 @@ fn _exec_scene_cmd(cmd, parts) bool {
       if is_dict(active_scene) {
          scene_engine.unload_scene(active_scene, _loaded_scene_name)
       }
-      active_scene = 0
+      active_scene = nil
       show_scene = false
       _scene_selected = false
       _scene_selection_bounds_cache_clear()
@@ -3346,10 +3328,6 @@ fn _browser_apply_result(res) int {
 
 fn _icon_mode_button(str id, str icon_name, bool selected, f64 w=36.0, f64 h=30.0) bool {
    gui.icon_button(id, viewer_icons.icon_sprite(icon_name), "", w, h, selected)
-}
-
-fn _menu_svg_icon(str name) any {
-   ui_profile.env_toggle_cached("NY_UI_SVG_MENU_ICONS", false) ? viewer_icons.icon_sprite(name) : -1
 }
 
 fn _draw_asset_mode_bar(str idp, bool compact=false) int {
@@ -3527,22 +3505,6 @@ fn _editor_hierarchy_tab(bool dense) {
    ui_profile.parity_lock_stats_enabled())
 }
 
-fn _editor_legacy_scene_tab(bool dense) {
-   _editor_catalog_tab(dense)
-   if !dense && gui.collapsing_header("scene_runtime", "Runtime", false) {
-      APP_STATS = gui.checkbox("stats", "Stats Overlay", APP_STATS)
-      def next_wire = gui.checkbox("wire", "Wireframe", APP_WIRE)
-      if next_wire != APP_WIRE {
-         APP_WIRE = next_wire
-         set_wireframe(APP_WIRE)
-      }
-      _anim_enabled = gui.checkbox("anim_enabled", "Animation Enabled", _anim_enabled)
-      gui.text("Selected model: " + ((_gui_model_selected_name.len > 0) ? _gui_model_selected_name : "<none>"))
-      _scene_selected = gui.checkbox("scene_selected", "Scene Selection", _scene_selected)
-      _scene_selection_rect = gui.checkbox("scene_selection_rect", "Selection Rectangle", _scene_selection_rect)
-   }
-}
-
 fn _editor_style_tab() {
    mut dict style_state = dict(4)
    style_state["scale"] = _gui_scale
@@ -3670,7 +3632,7 @@ fn _draw_gui_editor() {
       def compact, dense = bool(editor_metrics.get("compact", false)), bool(editor_metrics.get("dense", false))
       def compact_header, summary_cols = bool(editor_metrics.get("compact_header", false)), int(editor_metrics.get("summary_cols", 1))
       def card_w = ui_app.app_card_w("editor_main", summary_cols, 10.0, compact ? 0.0 : 82.0)
-      def last_dump_path, last_probe_text = to_str(_gui_last_dump_path), to_str(_gui_last_probe_text)
+      def last_dump_path, last_probe_text = _gui_last_dump_path ? to_str(_gui_last_dump_path) : "", _gui_last_probe_text ? to_str(_gui_last_probe_text) : ""
       def layout_now, active_shot = _gui_layout_preset_env(), (_gui_shot_name.len > 0) ? _gui_shot_name : "full_editor"
       if ui_profile.gui_trace_enabled() { ui_profile.print_text("[ui:gui-editor] intro") }
       _main_loop_trace_once("[ui:gui-editor] sanitize.before")
@@ -3984,101 +3946,6 @@ fn _apply_inspector_result(st) any {
       "retile" -> { _gui_layout_dirty = true _gui_layout_warm_frames = 4 }
       _ -> {}
    }
-}
-
-fn _draw_gui_menu_panel() {
-   _main_loop_trace_once("[ui:menu] title.before")
-   gui.text_colored("Inspector", [0.86, 0.86, 0.86, 0.98])
-   def scene_label = _loaded_scene_name.len > 0 ? _loaded_scene_name : "No scene"
-   gui.text_colored(scene_label, [0.66, 0.66, 0.66, 0.92])
-   gui.separator()
-   _main_loop_trace_once("[ui:menu] actions.before")
-   if gui.icon_button("menu_fit_scene", _menu_svg_icon("asset_fit"), "Frame", 88.0, 30.0, false) { def _discard_fit = _cmd_autofit(true) }
-   gui.same_line()
-   if gui.icon_button("menu_look_scene", _menu_svg_icon("asset_camera"), "Look At", 96.0, 30.0, false) { def _discard_look = _cmd_lookat(true) }
-   gui.same_line()
-   if gui.icon_button("menu_unload_scene", _menu_svg_icon("asset_unload"), "Unload", 98.0, 30.0, false) { def _discard_unload = _queue_gui_unload_scene() }
-   _main_loop_trace_once("[ui:menu] toggles.before")
-   gui.separator()
-   APP_STATS = gui.checkbox("menu_stats", "Stats Overlay", APP_STATS)
-   def next_wire = gui.checkbox("menu_wire", "Wireframe", APP_WIRE)
-   if next_wire != APP_WIRE { APP_WIRE = next_wire set_wireframe(APP_WIRE) }
-   def old_anim = _anim_enabled
-   _anim_enabled = gui.checkbox("menu_anim", "Animation Enabled", _anim_enabled)
-   if old_anim != _anim_enabled { def _discard_anim_sync = _sync_scene_anim_playing_flag() }
-   def next_ortho = gui.checkbox("menu_ortho", "Orthographic Projection", is_ortho)
-   if next_ortho != is_ortho { _set_projection_mode(next_ortho) }
-   _scene_selected = gui.checkbox("menu_select", "Scene Selection", _scene_selected && is_dict(active_scene) && show_scene)
-   show_scene = gui.checkbox("menu_show_scene", "Draw Loaded Scene", show_scene)
-   gui.separator()
-   _main_loop_trace_once("[ui:menu] props.before")
-   def rs = _gui_frame_stats_cache
-   def part_count = _gui_scene_parts_cache
-   def mat_mask = is_dict(active_scene) ? int(active_scene.get("material_feature_mask", 0)) : 0
-   _scene_pref_cache_update(_loaded_scene_name)
-   if gui.collapsing_header("menu_scene_info", "Scene", true) {
-      gui.property_row("menu_scene_state", "State", show_scene && is_dict(active_scene) ? "visible" : "empty/hidden", [0.72, 0.72, 0.72, 1.0])
-      gui.property_row("menu_loaded", "Loaded", _loaded_scene_name.len > 0 ? _loaded_scene_name : "<none>", [0.72, 0.72, 0.72, 1.0])
-      gui.property_row("menu_selected", "Selected", _gui_model_selected_name.len > 0 ? _gui_model_selected_name : "<none>", [0.72, 0.72, 0.72, 1.0])
-      gui.property_row("menu_parts", "Draw Parts", to_str(part_count), [0.72, 0.72, 0.72, 1.0])
-      gui.property_row("menu_lights", "Lights", is_dict(active_scene) ? to_str(int(active_scene.get("scene_lights_count", 0))) : "0", [0.72, 0.72, 0.72, 1.0])
-      gui.property_row("menu_features", "Features", ui_app.app_scene_feature_names(mat_mask), [0.72, 0.72, 0.72, 1.0])
-      gui.property_row("menu_optical", "Optical", is_dict(active_scene) && bool(active_scene.get("has_optical", false)) ? "yes" : "no", [0.72, 0.72, 0.72, 1.0])
-      gui.property_row("menu_blend", "Blend", (!is_dict(active_scene) || bool(active_scene.get("has_blend", true))) ? "yes" : "no", [0.72, 0.72, 0.72, 1.0])
-   }
-   if gui.collapsing_header("menu_transform_info", "Transform", true) {
-      gui.property_row("menu_pos", "Position", is_dict(active_scene) ? (f"{float(active_scene.get('edit_tx', 0.0)):.2f}, " + f"{float(active_scene.get('edit_ty', 0.0)):.2f}, " + f"{float(active_scene.get('edit_tz', 0.0)):.2f}") : "0, 0, 0", [0.72, 0.72, 0.72, 1.0])
-      gui.property_row("menu_rot", "Rotation", is_dict(active_scene) ? (f"{float(active_scene.get('edit_rx', 0.0)):.2f}, " + f"{float(active_scene.get('edit_ry', 0.0)):.2f}, " + f"{float(active_scene.get('edit_rz', 0.0)):.2f}") : "0, 0, 0", [0.72, 0.72, 0.72, 1.0])
-      gui.property_row("menu_scale", "Scale", is_dict(active_scene) ? (f"{float(active_scene.get('edit_sx', 1.0)):.2f}, " + f"{float(active_scene.get('edit_sy', 1.0)):.2f}, " + f"{float(active_scene.get('edit_sz', 1.0)):.2f}") : "1, 1, 1", [0.72, 0.72, 0.72, 1.0])
-      if gui.button("menu_reset_transform", "Reset Transform", 138.0) && is_dict(active_scene) {
-         active_scene["edit_tx"] = 0.0 active_scene["edit_ty"] = 0.0 active_scene["edit_tz"] = 0.0
-         active_scene["edit_rx"] = 0.0 active_scene["edit_ry"] = 0.0 active_scene["edit_rz"] = 0.0
-         active_scene["edit_sx"] = 1.0 active_scene["edit_sy"] = 1.0 active_scene["edit_sz"] = 1.0 active_scene["edit_scale"] = 1.0
-         _scene_selection_bounds_cache_clear()
-         _scene_edit_redraw(3)
-      }
-   }
-   if gui.collapsing_header("menu_camera_info", "Camera", true) {
-      gui.property_row("menu_camera", "Position", f"{_cam_px:.1f}, " + f"{_cam_py:.1f}, " + f"{_cam_pz:.1f}", [0.72, 0.72, 0.72, 1.0])
-      gui.property_row("menu_view", "View", f"{_h_yaw:.2f}, " + f"{_h_pch:.2f}  fov " + f"{_cam_fov:.1f}", [0.72, 0.72, 0.72, 1.0])
-      _spd = gui.slider_float("menu_cam_speed", "Move Speed", _spd, 20.0, 5000.0)
-      _sens = gui.slider_float("menu_cam_sens", "Look Sens", _sens, 0.01, 0.60)
-      if is_ortho { _ortho_zoom = gui.slider_float("menu_ortho_zoom", "Ortho Zoom", _ortho_zoom, 5.0, 220.0) }
-      gui.property_row("menu_cursor", "Cursor Lock", _cursor_lock_enabled ? "on" : "off", [0.72, 0.72, 0.72, 1.0])
-   }
-   if gui.collapsing_header("menu_animation_info", "Animation", _anim_count > 0) {
-      gui.property_row("menu_anim_count", "Clips", to_str(_anim_count), [0.72, 0.72, 0.72, 1.0])
-      gui.property_row("menu_anim_time", "Time", f"{_anim_time:.3f} / " + f"{_anim_duration:.3f}", [0.72, 0.72, 0.72, 1.0])
-      _anim_speed = gui.slider_float("menu_anim_speed", "Speed", _anim_speed, 0.0, 4.0)
-   }
-   if gui.collapsing_header("menu_renderer_info", "Renderer", true) {
-      gui.property_row("menu_backend", "Backend", active_backend_name, [0.72, 0.78, 0.86, 1.0])
-      gui.property_row("menu_frame", "Frame", f"{_last_frame_ms:.3f} ms", [0.72, 0.72, 0.72, 1.0])
-      gui.property_row("menu_draw", "Draw", f"{_last_draw_ms:.3f} ms", [0.72, 0.72, 0.72, 1.0])
-      gui.property_row("menu_ui", "UI", f"{_last_ui_ms:.3f} ms", [0.72, 0.72, 0.72, 1.0])
-      gui.property_row("menu_draws", "Draws", to_str(int(rs.get("draws", 0))), [0.72, 0.72, 0.72, 1.0])
-      gui.property_row("menu_flushes", "Flushes", to_str(int(rs.get("flushes", 0))), [0.72, 0.72, 0.72, 1.0])
-      gui.progress_bar("menu_frame_budget", clamp(_last_frame_ms / 16.667, 0.0, 1.0), "Frame budget")
-   }
-   if gui.collapsing_header("menu_environment_info", "Environment", false) {
-      gui.property_row("menu_env_mode", "Mode", _gui_env_mode_items.get(_gui_env_mode, "custom"), [0.72, 0.72, 0.72, 1.0])
-      gui.property_row("menu_skybox", "Skybox", skybox_enabled ? "on" : "off", [0.72, 0.72, 0.72, 1.0])
-      gui.property_row("menu_skybox_tex", "Skybox Tex", to_str(skybox_tex_id), [0.72, 0.72, 0.72, 1.0])
-      gui.property_row("menu_pref", "Scene Pref", (_scene_pref_studio ? "studio " : "") + (_scene_pref_neutral ? "neutral " : "") + (_scene_pref_reflect ? "reflect " : "") + (_scene_pref_visible ? "visible " : "") + (_scene_pref_optical ? "optical" : ""), [0.72, 0.72, 0.72, 1.0])
-      if gui.button("menu_load_env", "Build Env", 104.0) { _load_skybox() }
-      gui.same_line()
-      if gui.button("menu_light_off", "Lighting Off", 112.0) { _gui_env_mode = 4 }
-   }
-   if gui.collapsing_header("menu_diag_info", "Diagnostics", false) {
-      gui.property_row("menu_window", "Window", to_str(_win_w) + "x" + to_str(_win_h), [0.72, 0.72, 0.72, 1.0])
-      gui.property_row("menu_dpi", "DPI Scale", f"{_gui_dpi_scale:.2f}", [0.72, 0.72, 0.72, 1.0])
-      gui.property_row("menu_hovered", "Hovered", to_str(gui.hovered_id()), [0.72, 0.72, 0.72, 1.0])
-      gui.property_row("menu_active", "Active", to_str(gui.active_id()), [0.72, 0.72, 0.72, 1.0])
-      if gui.button("menu_probe", "Probe", 92.0) { _gui_last_probe_text = ui_diag.probe_text() terminal.log(_gui_last_probe_text) }
-      gui.same_line()
-      if gui.button("menu_retile", "Retile", 92.0) { _gui_layout_dirty = true _gui_layout_warm_frames = 4 }
-   }
-   _main_loop_trace_once("[ui:menu] done")
 }
 
 fn _draw_gui_inspector() {

@@ -1,0 +1,42 @@
+shape test_file_roundtrip_abi {
+  family "runtime/system"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os as os
+use core.math.parse.data.json as json
+
+def path = os.temp_dir() + "/ny-file-roundtrip-abi-" + to_str(os.pid())
+assert(unwrap(os.file_write(path, "hello")) == 5, "write returns byte count")
+def text = unwrap(os.file_read(path))
+assert(__str_len(text) == 5 && text == "hello", "odd byte count survives file read")
+def binary = bytes(4)
+store8(binary, 0, 0)
+store8(binary, 0x52, 1)
+store8(binary, 0xff, 2)
+store8(binary, 0x80, 3)
+assert(unwrap(os.file_write(path, binary)) == 4, "binary write returns byte count")
+def binary_read = unwrap(os.file_read(path))
+assert(__str_len(binary_read) == 4, "binary read preserves embedded zero and high bytes")
+assert(load8(binary_read, 0) == 0 && load8(binary_read, 1) == 0x52 &&
+       load8(binary_read, 2) == 0xff && load8(binary_read, 3) == 0x80,
+       "binary file bytes round trip unchanged")
+assert(unwrap(os.file_write(path, "")) == 0, "empty write")
+assert(__str_len(unwrap(os.file_read(path))) == 0, "empty read terminates")
+def payload = {"checker_version":"logic-kernel-v1", "digest":1374371747942586}
+mut i = 0
+while i < 20 {
+   def encoded = json.json_encode(payload)
+   assert(unwrap(os.file_write(path, encoded)) == __str_len(encoded), "JSON write count")
+   def decoded = json.json_decode(unwrap(os.file_read(path)))
+   assert(decoded.get("checker_version") == "logic-kernel-v1", "repeated string allocation")
+   assert(decoded.get("digest") == 1374371747942586, "integer JSON round trip")
+   i += 1
+}
+unwrap(os.file_remove(path))
+NY
+}

@@ -36,14 +36,10 @@ fn _renderer_alloc(int size) any {
    p
 }
 
-mut _flush_diag_counter, _flush_diag_enabled = 0, -1
+mut _flush_diag_counter = 0
 
 fn _flush_diag(str msg) any {
-   if _flush_diag_enabled < 0 {
-      _flush_diag_enabled = (common.env_truthy("NY_GLTF_FORCE_GROUP_DIAG") ||
-         common.env_truthy("NY_VK_PIPE_TRACE")) ? 1 : 0
-   }
-   if _flush_diag_enabled == 0 { return 0 }
+   if !(ui_profile.env_truthy_cached("NY_GLTF_FORCE_GROUP_DIAG") || ui_profile.env_truthy_cached("NY_VK_PIPE_TRACE")) { return 0 }
    if _flush_diag_counter < 24 { ui_profile.print_text("[vk:flush:diag] " + msg) }
    _flush_diag_counter += 1
    0
@@ -91,10 +87,7 @@ fn _headless_swapchain_sentinel() int { 0x8000000001 }
 
 fn _allow_headless_surface() bool { common.env_truthy("NYTRIX_VK_ALLOW_HEADLESS") }
 
-fn _same_int_value(any a, any b) bool {
-   if !is_int(a) || !is_int(b) { return false }
-   int(a) == int(b)
-}
+fn _same_int_value(int a, int b) bool { a == b }
 
 mut _vk_headless_bench_skip_default_mvp = -1
 mut _cfg_present_policy = ""
@@ -268,14 +261,6 @@ fn _vk_deep_every() int {
 
 fn _vk_profile_enabled() bool {
    ui_profile.env_truthy_cached("NY_VK_PROFILE_TRACE")
-}
-
-fn _vk_profile_dump_enabled() bool {
-   ui_profile.env_toggle_cached("NY_VK_PROFILE_DUMP", _vk_profile_enabled())
-}
-
-fn _vk_profile_dump_file() str {
-   ui_profile.dump_path("NY_VK_PROFILE_DUMP_PATH", "nytrix_vk_profile.oasset.jsonl")
 }
 
 fn _vk_frame_scratch_ready() bool {
@@ -550,7 +535,7 @@ fn _vk_init_trace(str stage, any t0) any {
 
 fn _resize_debounce_ms() int {
    if _resize_debounce_ms_cache < 0 {
-      _resize_debounce_ms_cache = ui_profile.env_int_cached("NY_VK_RESIZE_DEBOUNCE_MS", 0, 0, 1000)
+      _resize_debounce_ms_cache = ui_profile.env_int_cached("NY_VK_RESIZE_DEBOUNCE_MS", 24, 0, 1000)
    }
    _resize_debounce_ms_cache
 }
@@ -1016,7 +1001,7 @@ fn init(any win) bool {
    def init_t0 = ticks()
    mut stage_t0 = init_t0
    _handles_valid = false
-   _window_ref = win
+   vk_state.set_window_ref(win)
    _check_debug_env()
    _backend_is_wayland_cached = (lib_uiw.backend() == "wayland") ? 1 : 0
    _backend_is_win32_cached = (lib_uiw.backend() == "win32") ? 1 : 0
@@ -1204,7 +1189,7 @@ fn init(any win) bool {
       _scene_capture_dst_bar = _scene_capture_slab + 72
       _scene_capture_copy_region = _scene_capture_slab + 144
    }
-   _update_default_mvp(_window_ref)
+   _update_default_mvp(vk_state.window_ref())
    _vk_refresh_handles_valid()
    _vk_init_trace("total", init_t0)
    true
@@ -1563,7 +1548,7 @@ fn _flat_range_sync_shading_cache(?ptr base, bool sync_material_textures) any {
 
 fn draw_part0_flat_no_restore(?ptr slab_ptr) int {
    "Draws packed scene part 0 without index arithmetic for single-part hot paths."
-   if common.env_truthy("NY_SCENE_FAST_TRACE") {
+   if ui_profile.env_truthy_cached("NY_SCENE_FAST_TRACE") {
       ui_profile.print_text("[scene:fast:vk] single active=" + to_str(_flat_part_active(slab_ptr)) +
          " slab=" + to_str(int(slab_ptr)) + " visible=" + to_str(slab_ptr ? load32_h(slab_ptr, 228) : -1))
    }
@@ -1664,7 +1649,7 @@ fn _draw_parts_flat_range_impl(
    bool sync_material_textures
 ) int {
    "Draws a contiguous range of flat packed scene parts with minimal interpreter overhead."
-   if common.env_truthy("NY_SCENE_FAST_TRACE") {
+   if ui_profile.env_truthy_cached("NY_SCENE_FAST_TRACE") {
       ui_profile.print_text("[scene:fast:vk] frame=" + to_str(_handle_ok(_current_frame_cb)) +
          " layout=" + to_str(_handle_ok(_pipeline_layout)) + " model=" + to_str(_handle_ok(_current_model)) +
          " slab=" + to_str(bool(slab_ptr)) + " start=" + to_str(start_idx) + " end=" + to_str(end_idx))
@@ -2052,7 +2037,7 @@ fn begin_frame() bool {
    if !_vk_begin_frame_record_commands(_deep_on, has_surface) { return false }
    vk_state.set_frame_open(true)
    _vk_stage("begin.mvp")
-   if !_skip_default_mvp_this_frame() { _update_default_mvp(_window_ref) }
+   if !_skip_default_mvp_this_frame() { _update_default_mvp(vk_state.window_ref()) }
    _vk_stage("begin.mvp.done")
    _vk_stage("begin.vertex.reset")
    _vertex_offset = 0
@@ -2314,8 +2299,6 @@ fn _sync_current_material_texture_slots_impl(bool honor_no_sync_env) any {
    }
    0
 }
-
-fn _sync_current_material_texture_slots() any { _sync_current_material_texture_slots_impl(true) }
 
 fn set_ui_material(int base_tex_id = -1, int alpha_u32 = 0, int vc_mode = 12) any {
    "Sets the compact material state used by 2D UI, text, and terminal draws."
@@ -3812,7 +3795,7 @@ fn shutdown() any {
       _render_pass = 0
       _render_pass_load = 0
       _render_pass_load_color_clear_depth = 0
-      _window_ref = 0
+      vk_state.set_window_ref(0)
       if _scene_light_tmp_slab { free(_scene_light_tmp_slab) }
       _scene_light_tmp_slab = 0
       if _current_mat_slab_cache { free(_current_mat_slab_cache) }
@@ -3941,7 +3924,7 @@ fn shutdown() any {
    _frag_module = 0
    _frag_fast_module = 0
    _frag_fast_env_module = 0
-   _window_ref = 0
+   vk_state.set_window_ref(0)
    0
 }
 
@@ -4816,8 +4799,16 @@ fn _create_swapchain(any win) bool {
       lib_uiw.poll_events()
       msleep(16)
    }
-   def req_extent = _window_swapchain_extent(win, 400, 300)
-   mut req_w, req_h = int(req_extent.get(0, 400)), int(req_extent.get(1, 300))
+   ;; On Wayland the surface has no extent of its own, so a recreate must never
+   ;; drop to the default: prefer the size the app reported, then the last one.
+   def fallback_w = _pending_resize_w > 0 ? _pending_resize_w : (_swapchain_extent_w > 0 ? _swapchain_extent_w : 400)
+   def fallback_h = _pending_resize_h > 0 ? _pending_resize_h : (_swapchain_extent_h > 0 ? _swapchain_extent_h : 300)
+   def req_extent = _window_swapchain_extent(win, int(fallback_w), int(fallback_h))
+   if vk_state._debug_gfx_enabled {
+      ui_profile.print_text("[gfx:vulkan] extent lookup is_dict=" + to_str(is_dict(win)) + " fb=" + to_str(lib_uiw.get_framebuffer_size(win)) +
+         " size=" + to_str(lib_uiw.size(win)) + " pending=" + to_str(_pending_resize_w) + "x" + to_str(_pending_resize_h) + " req=" + to_str(req_extent))
+   }
+   mut req_w, req_h = int(req_extent.get(0, fallback_w)), int(req_extent.get(1, fallback_h))
    mut w, h = req_w, req_h
    if cur_w != 0xFFFFFFFF && cur_h != 0xFFFFFFFF && _surface_extent_usable(cur_w, cur_h) {
       w, h = cur_w, cur_h
@@ -4969,6 +4960,7 @@ fn _create_swapchain(any win) bool {
       i += 1
    }
    free(img_count_ptr, img_count_ptr2, img_ptrs_raw)
+   lib_uiw.surface_buffer_ready(win, w, h)
    true
 }
 
@@ -5047,7 +5039,7 @@ fn _destroy_swapchain_objects() any {
 
 fn _recreate_swapchain() bool {
    _vk_stage("recreate.enter")
-   if _window_ref == 0 || _device == 0 { return false }
+   if !vk_state.window_ref() || _device == 0 { return false }
    device_wait_idle(_device)
    _destroy_sync_objects()
    def old_swapchain = _swapchain
@@ -5074,7 +5066,7 @@ fn _recreate_swapchain() bool {
    _swapchain_image_count = 0
    _destroy_depth_msaa_resources()
    _vk_stage("recreate.create_swapchain")
-   def ok = _create_swapchain_with_old(_window_ref, old_swapchain)
+   def ok = _create_swapchain_with_old(vk_state.window_ref(), old_swapchain)
    if old_swapchain != 0 && old_swapchain != _headless_swapchain_sentinel() { destroy_swapchain_khr(_device, old_swapchain, 0) }
    if !ok { return false }
    if _swapchain == 0 { ui_profile.print_text("[gfx:vulkan] _recreate_swapchain: swapchain null after create") return false }
@@ -5600,7 +5592,7 @@ fn notify_window_resize(int w, int h) bool {
    if _same_int_value(_pending_resize_w, int(w)) && _same_int_value(_pending_resize_h, int(h)) { return true }
    if _same_int_value(_swapchain_extent_w, int(w)) && _same_int_value(_swapchain_extent_h, int(h)) { return true }
    _pending_resize_w, _pending_resize_h = int(w), int(h)
-   _pending_resize_stamp_ns = ticks()
+   if _pending_resize_stamp_ns <= 0 { _pending_resize_stamp_ns = ticks() }
    _swapchain_recreate_pending = true
    _swapchain_recreate_force = false
    _suboptimal_recreate_attempted = false

@@ -150,7 +150,7 @@ static bool compare_function(const ny_native_target_info_t *target,
   bool ok =
       emitter && emitter->emit_mach_scalar &&
       nyr_mach_lower_nir(ir, &machine, target->caps, err, sizeof(err)) &&
-      emitter->emit_mach_scalar(&assembly, target, &machine, name, false, err,
+      emitter->emit_mach_scalar(&assembly, target, &machine, name, false, false, err,
                                 sizeof(err)) &&
       nyr_x64_mach_append_function(&encoded, definitions, &definition_count,
                                    relocations, &relocation_count, &machine,

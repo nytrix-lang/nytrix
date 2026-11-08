@@ -30,6 +30,7 @@
 #include "code/lang/pipeline/native.h"
 #include "code/lang/priv.h"
 #include "code/lang/types/pipeline.h"
+#include "include/nyr/nyr.h"
 #include <limits.h>
 #include <llvm-c/Analysis.h>
 #include <llvm-c/BitReader.h>
@@ -71,35 +72,7 @@
 #include <ctype.h>
 #include <stdarg.h>
 
-static void ny_log_saved_artifact(const char *path, const char *kind) {
-  struct stat st;
-  if (path && strcmp(path, "-") != 0 && stat(path, &st) == 0 &&
-      st.st_size >= 0) {
-    uintmax_t bytes = (uintmax_t)st.st_size;
-    if (bytes >= UINT64_C(1000000))
-      NY_LOG_SUCCESS("Saved %s: %s (%.2f MB)\n", kind, path,
-                     (double)bytes / 1000000.0);
-    else if (bytes >= UINT64_C(1000))
-      NY_LOG_SUCCESS("Saved %s: %s (%.2f KB)\n", kind, path,
-                     (double)bytes / 1000.0);
-    else
-      NY_LOG_SUCCESS("Saved %s: %s (%" PRIuMAX " bytes)\n", kind, path,
-                     bytes);
-    return;
-  }
-  NY_LOG_SUCCESS("Saved %s: %s\n", kind ? kind : "artifact",
-                 path ? path : "(unknown)");
-}
-
-static void ny_log_saved_native_artifact(const char *path) {
-#ifdef _WIN32
-  ny_log_saved_artifact(path, "EXE");
-#elif defined(__APPLE__)
-  ny_log_saved_artifact(path, "Mach-O");
-#else
-  ny_log_saved_artifact(path, "ELF");
-#endif
-}
+static bool ny_output_path_is_object(const char *path);
 
 static bool ny_pipeline_write_callgraph_for_program(const program_t *prog,
                                                     const ny_options *opt,
@@ -127,6 +100,36 @@ static bool ny_pipeline_write_callgraph_for_program(const program_t *prog,
   for (size_t i = 0; i < func_count; ++i)
     nyr_ir_func_free(&funcs[i]);
   return ok;
+}
+
+static void ny_log_saved_native_artifact(const char *path) {
+  if (!path)
+    return;
+#ifndef _WIN32
+  struct stat st;
+  if (stat(path, &st) == 0) {
+    NY_LOG_SUCCESS("Saved ELF: %s (%lld bytes)\n", path,
+                   (long long)st.st_size);
+    return;
+  }
+  NY_LOG_SUCCESS("Saved ELF: %s\n", path);
+#else
+  NY_LOG_SUCCESS("Saved EXE: %s\n", path);
+#endif
+}
+
+static void ny_log_saved_assembly_artifact(const char *path) {
+  if (!path)
+    return;
+#ifndef _WIN32
+  struct stat st;
+  if (stat(path, &st) == 0) {
+    NY_LOG_SUCCESS("Saved assembly: %s (%.1f KB; %lld bytes)\n", path,
+                   (double)st.st_size / 1024.0, (long long)st.st_size);
+    return;
+  }
+#endif
+  NY_LOG_SUCCESS("Saved assembly: %s\n", path);
 }
 
 typedef struct ny_member_splice_check_t {
@@ -455,10 +458,64 @@ static int ny_native_jit_safe_child(void *raw) {
   return (int)(result & 0xff);
 }
 
+static const char **ny_build_program_argv(const ny_options *opt,
+                                          char ***out_argv) {
+  if (!opt || opt->argc <= 0 || !opt->args)
+    return NULL;
+  int n = opt->argc;
+  char **argv = (char **)calloc((size_t)n + 1, sizeof(char *));
+  if (!argv)
+    return NULL;
+  for (int i = 0; i < n; ++i)
+    argv[i] = opt->args[i];
+  argv[n] = NULL;
+  *out_argv = argv;
+  return (const char **)argv;
+}
+
+static void ny_free_program_argv(char **argv) { free(argv); }
+
 static int ny_run_native_only(const program_t *prog, const ny_options *opt,
                               const char *output_path, bool execute,
                               bool remove_output) {
   if (!execute && opt && opt->emit_only && output_path && *output_path) {
+    /*
+     * Bare AOT is a dependency-free executable request, not an object
+     * request.  The native-only fast path used to copy the relocatable object
+     * straight to the requested output, leaving a non-executable ET_REL file.
+     * Link that object with the in-process ELF linker instead.
+     */
+    if (opt->runtime_mode == NY_RUNTIME_MODE_BARE &&
+        !ny_output_path_is_object(output_path)) {
+      char obj[4096];
+      char obj_name[96];
+      const char *entry =
+          opt->entry_name && *opt->entry_name ? opt->entry_name : "main";
+      char err[512] = {0};
+      snprintf(obj_name, sizeof(obj_name), "ny_bare_%ld_%llu.o",
+               (long)getpid(), (unsigned long long)ny_ticks_now());
+      ny_join_path(obj, sizeof(obj), ny_get_temp_dir(), obj_name);
+      if (!ny_pipeline_emit_program_object(prog, opt, obj, entry, false, err,
+                                           sizeof(err))) {
+        NY_LOG_ERR("Bare AOT object emission failed: %s\n",
+                   err[0] ? err : "unsupported native shape");
+        return 1;
+      }
+      const char *objects[] = {obj};
+      bool linked = nyr_link_elf64_executable_objects(
+          objects, 1, entry, output_path, err, sizeof(err));
+      unlink(obj);
+      if (!linked) {
+        NY_LOG_ERR("Bare AOT link failed: %s\n",
+                   err[0] ? err : "internal linker error");
+        return 1;
+      }
+#ifndef _WIN32
+      chmod(output_path, 0755);
+#endif
+      ny_log_saved_native_artifact(output_path);
+      return 0;
+    }
     char err[512] = {0};
     if (!ny_pipeline_emit_program_object(prog, opt, output_path, "main", false,
                                          err, sizeof(err))) {
@@ -570,9 +627,8 @@ static int ny_run_native_only(const program_t *prog, const ny_options *opt,
   bool linked = ny_builder_link(
       cc, obj, rto, NULL, NULL, 0, (const char *const *)opt->link_dirs.data,
       opt->link_dirs.len, links.items, links.len, output_path,
-      opt->strip_override == 1,
-      opt->opt_size && !opt->debug_symbols && opt->gprof != 1,
-      opt->debug_symbols, opt->gprof == 1, opt->sanitize);
+      opt->strip_override == 1, false, opt->debug_symbols, opt->gprof == 1,
+      opt->sanitize);
   unlink(obj);
   unlink(rto);
   if (!linked) {
@@ -583,12 +639,18 @@ static int ny_run_native_only(const program_t *prog, const ny_options *opt,
   if (!execute)
     return 0;
 
-  const char *argv_exec[] = {output_path, NULL};
+  char **program_argv = NULL;
+  const char **argv_exec = ny_build_program_argv(opt, &program_argv);
+  if (!argv_exec) {
+    const char *fallback[] = {output_path, NULL};
+    argv_exec = fallback;
+  }
   int rc = ny_safe_run_requested(&opt->safe_run)
-               ? ny_safe_run_spawn(&opt->safe_run, argv_exec,
-                                   opt->input_file ? opt->input_file
-                                                   : "native-only workload")
-               : ny_exec_spawn(argv_exec);
+               ? ny_safe_run_spawn_argv0(
+                     &opt->safe_run, output_path, argv_exec,
+                     opt->input_file ? opt->input_file : "native-only workload")
+               : ny_exec_spawn_argv0(output_path, argv_exec);
+  ny_free_program_argv(program_argv);
   if (remove_output)
     unlink(output_path);
   return rc;
@@ -600,6 +662,7 @@ static void ny_dump_path(char *out, size_t out_len, const ny_options *opt,
 static void ny_write_ir_stats_file(const ny_options *opt, const char *name,
                                    LLVMModuleRef module);
 static void ny_collect_ir_stats(LLVMModuleRef module, ny_ir_stats_t *out);
+static void ny_log_saved_native_artifact(const char *path);
 
 #include "cache.c"
 #include "desugar.c"
@@ -615,17 +678,16 @@ char *ny_pipeline_native_cache_path(const char *source, const ny_options *opt) {
       !ny_env_enabled_default_on("NYTRIX_STENCIL_CACHE") || opt->emit_only ||
       opt->output_file || opt->strict_types || opt->ownership_strict ||
       opt->trace_exec || opt->dump_tokens || opt->dump_ast || opt->expand ||
-      opt->dump_llvm || opt->dump_funcs || opt->emit_ir_path ||
-      opt->emit_bc_path ||
-      opt->emit_asm_path || opt->native_dump_ir || opt->callgraph ||
-      opt->native_tier_report || opt->native_result_oracle ||
-      opt->native_oracle_per_pass || opt->native_tv_seed_trials ||
-      opt->nyr_run || opt->nyr_metadata_report || opt->nyr_pass_stats ||
-      opt->nyr_ir_verify || opt->nyr_bisect || opt->nyr_fingerprint ||
-      opt->nyr_flaky_check || opt->nyr_disable_pass || opt->nyr_stop_after ||
-      opt->nyr_global_inst_cap || opt->nyr_pass_growth_factor ||
-      opt->native_profile_use_path || opt->emit_report_path ||
-      opt->verbosity >= 2)
+      opt->dump_llvm || opt->dump_funcs || opt->nyr_dump_stats ||
+      opt->emit_ir_path || opt->emit_bc_path || opt->emit_asm_path ||
+      opt->native_dump_ir || opt->callgraph || opt->native_tier_report ||
+      opt->native_result_oracle || opt->native_oracle_per_pass ||
+      opt->native_tv_seed_trials || opt->nyr_run || opt->nyr_metadata_report ||
+      opt->nyr_pass_stats || opt->nyr_ir_verify || opt->nyr_bisect ||
+      opt->nyr_fingerprint || opt->nyr_flaky_check || opt->nyr_disable_pass ||
+      opt->nyr_stop_after || opt->nyr_global_inst_cap ||
+      opt->nyr_pass_growth_factor || opt->native_profile_use_path ||
+      opt->emit_report_path || opt->verbosity >= 2)
     return NULL;
   char *path = ny_jit_stencil_cache_path(
       source, opt->opt_level, opt->native_backend_raw, opt->native_tier_raw,
@@ -826,8 +888,10 @@ static int ny_run_repl_session(ny_options *opt, bool supervised) {
     }
     if (ny_env_enabled("NYTRIX_REPL_TRACE"))
       fprintf(stderr, "[repl-batch] bytes=%zu fast_candidate=%d\n",
-              strlen(stdin_src), ny_repl_batch_can_fast_run(stdin_src) ? 1 : 0);
-    if (ny_repl_batch_can_fast_run(stdin_src)) {
+              strlen(stdin_src),
+              ny_repl_batch_can_fast_run(stdin_src, opt->repl_explicit) ? 1
+                                                                        : 0);
+    if (ny_repl_batch_can_fast_run(stdin_src, opt->repl_explicit)) {
       if (ny_env_enabled("NYTRIX_REPL_TRACE"))
         fprintf(stderr, "[repl-batch] dispatch=run\n");
       ny_options run_opt = *opt;
@@ -943,10 +1007,47 @@ static char *ny_normalize_command_source(const char *src) {
   return out;
 }
 
+static char *ny_read_stdin_source(void) {
+  size_t len = 0;
+  size_t cap = 4096;
+  char *source = (char *)malloc(cap);
+  if (!source)
+    return NULL;
+  for (;;) {
+    if (len + 1 == cap) {
+      if (cap > SIZE_MAX / 2) {
+        free(source);
+        return NULL;
+      }
+      size_t next_cap = cap * 2;
+      char *next = (char *)realloc(source, next_cap);
+      if (!next) {
+        free(source);
+        return NULL;
+      }
+      source = next;
+      cap = next_cap;
+    }
+    size_t count = fread(source + len, 1, cap - len - 1, stdin);
+    len += count;
+    if (count == 0) {
+      if (ferror(stdin)) {
+        free(source);
+        return NULL;
+      }
+      break;
+    }
+  }
+  source[len] = '\0';
+  return source;
+}
+
 static char *load_user_source(const ny_options *opt) {
   if (opt->command_string)
     return ny_normalize_command_source(opt->command_string);
   if (opt->input_file) {
+    if (strcmp(opt->input_file, "-") == 0)
+      return ny_read_stdin_source();
     if (strncmp(opt->input_file, "http://", 7) == 0 ||
         strncmp(opt->input_file, "https://", 8) == 0) {
       return ny_read_url(opt->input_file);
@@ -2267,6 +2368,36 @@ int ny_pipeline_run(ny_options *opt) {
   }
   if (opt->extract_code)
     return ny_run_code_extractor(opt);
+  int bare_aot_status = ny_try_bare_aot_command(opt, t_start);
+  if (bare_aot_status == -2) {
+    ny_options bare_native = *opt;
+    bare_native.bare_native_fallback = true;
+    bare_native.native_only = true;
+    if (!opt->native_backend_explicit ||
+        opt->native_backend == NY_NATIVE_BACKEND_LLVM) {
+      nyr_target_t host_target = {0};
+      char target_error[128] = {0};
+      const char *target = opt->host_triple;
+      if ((!target || !*target) &&
+          nyr_host_target(&host_target, target_error, sizeof(target_error)))
+        target = host_target.target;
+      if (target && (strstr(target, "aarch64") || strstr(target, "arm64")))
+        bare_native.native_backend = NY_NATIVE_BACKEND_AARCH64;
+      else if (target && (strstr(target, "x86_64") || strstr(target, "amd64")))
+        bare_native.native_backend = NY_NATIVE_BACKEND_X86_64;
+      else {
+        NY_LOG_ERR("Bare AOT has no NyR executable linker for target '%s'\n",
+                   target && *target ? target : "unknown");
+        return 1;
+      }
+    }
+    bare_native.native_backend_explicit = true;
+    bare_native.no_std = true;
+    bare_native.run_jit = false;
+    return ny_pipeline_run(&bare_native);
+  }
+  if (bare_aot_status >= 0)
+    return bare_aot_status;
   if (!ny_safe_run_requested(&opt->safe_run) &&
       ny_try_fast_command_string(opt, t_start))
     return 0;
@@ -2489,24 +2620,35 @@ int ny_pipeline_run(ny_options *opt) {
         ny_cache_artifact_manifest_valid(aot_cache_path, source) &&
         strcmp(aot_cache_path, output_path) != 0) {
       if (ny_valid_native_artifact(aot_cache_path)) {
-        if (ny_copy_file(aot_cache_path, output_path) == 0 &&
-            ny_valid_native_artifact(output_path)) {
-          NY_LOG_V2("AOT cache hit: %s\n", aot_cache_path);
-#ifdef _WIN32
-          NY_LOG_SUCCESS("Saved EXE: %s\n", output_path);
-#else
-          NY_LOG_SUCCESS("Saved ELF: %s\n", output_path);
+        if (ny_copy_file(aot_cache_path, output_path) == 0) {
+#ifndef _WIN32
+          chmod(output_path, 0755);
 #endif
-          ny_trace_file_size("emit_native_cache_hit", output_path);
-          if (opt->run_aot) {
-            const char *argv_exec[] = {output_path, NULL};
-            int rc = ny_exec_spawn(argv_exec);
-            if (rc != 0)
-              exit_code = rc;
-            if (aot_run_temp)
-              (void)unlink(output_path);
+          if (ny_valid_native_artifact(output_path)) {
+            NY_LOG_V2("AOT cache hit: %s\n", aot_cache_path);
+#ifdef _WIN32
+            NY_LOG_SUCCESS("Saved EXE: %s\n", output_path);
+#else
+            NY_LOG_SUCCESS("Saved ELF: %s\n", output_path);
+#endif
+            ny_trace_file_size("emit_native_cache_hit", output_path);
+            if (opt->run_aot) {
+              char **program_argv = NULL;
+              const char **argv_exec =
+                  ny_build_program_argv(opt, &program_argv);
+              if (!argv_exec) {
+                const char *fallback[] = {output_path, NULL};
+                argv_exec = fallback;
+              }
+              int rc = ny_exec_spawn_argv0(output_path, argv_exec);
+              ny_free_program_argv(program_argv);
+              if (rc != 0)
+                exit_code = rc;
+              if (aot_run_temp)
+                (void)unlink(output_path);
+            }
+            goto exit_success;
           }
-          goto exit_success;
         }
       } else {
         (void)unlink(aot_cache_path);
@@ -2521,7 +2663,8 @@ int ny_pipeline_run(ny_options *opt) {
   if (ny_env_enabled_default_on("NYTRIX_STENCIL_CACHE") && opt->native_only &&
       !opt->strict_types && !opt->emit_ir_path && !opt->emit_only &&
       !opt->dump_tokens && !opt->dump_ast && !opt->expand && !opt->dump_llvm &&
-      !opt->emit_bc_path && !opt->dump_on_error && !opt->dump_diagnose) {
+      !opt->emit_bc_path && !opt->dump_on_error && !opt->dump_diagnose &&
+      !opt->vm_disasm && !opt->mixed_disasm && !opt->native_dump_ir) {
     char *stencil_path = ny_pipeline_native_cache_path(source, opt);
     if (stencil_path) {
       nyr_jit_image_t cached_image = {0};
@@ -2798,8 +2941,10 @@ int ny_pipeline_run(ny_options *opt) {
    */
   ny_pipeline_run_incremental(&prog, opt);
   if (ny_stop_after_is(opt, NY_STOP_AFTER_PARSE)) {
-    ny_stage_emit_artifact(opt, NY_STOP_AFTER_PARSE, &prog, NULL, parse_name,
-                           NULL, true);
+    if (!ny_stage_emit_artifact(opt, NY_STOP_AFTER_PARSE, &prog, NULL, parse_name,
+                                NULL, true)) {
+      exit_code = 1;
+    }
     goto exit_success;
   }
   if (opt->expand) {
@@ -2946,6 +3091,7 @@ int ny_pipeline_run(ny_options *opt) {
         goto exit_success;
       }
       ny_trace_file_size("emit_asm", opt->emit_asm_path);
+      ny_log_saved_assembly_artifact(opt->emit_asm_path);
     }
     if (opt->native_dump_ir) {
       char native_dump_err[512] = {0};
@@ -2970,13 +3116,6 @@ int ny_pipeline_run(ny_options *opt) {
       exit_code = 0;
       goto exit_success;
     }
-      if (cg.had_error) {
-        NY_LOG_ERR("Codegen failed due to ownership diagnostic\n");
-        ny_stage_maybe_emit_errors(opt, NY_STOP_AFTER_ABI, parse_name,
-                                   "codegen failed", 1);
-        exit_code = 1;
-        goto exit_success;
-      }
     /*
      * A tier/callgraph report is itself a successful cross-target compile
      * request: the report plan is built and written from NYIR lowering, so do
@@ -3337,8 +3476,9 @@ int ny_pipeline_run(ny_options *opt) {
       opt->stop_after == NY_STOP_AFTER_FLOW ||
       opt->stop_after == NY_STOP_AFTER_ABI) {
     if (!ny_stage_emit_artifact(opt, opt->stop_after, &prog, &cg, parse_name,
-                                cg.module, true))
-      NY_LOG_ERR("Failed to write compiler artifact\n");
+                                cg.module, true)) {
+      exit_code = 1;
+    }
     goto exit_success;
   }
 
@@ -3631,15 +3771,20 @@ int ny_pipeline_run(ny_options *opt) {
      * emit a lightweight pass-through artifact so the caller sees success.
      */
     bool emit_full = opt->emit_artifact_path || opt->emit_shapes;
-    ny_stage_emit_artifact(opt,
-                           emit_full ? NY_STOP_AFTER_OPT : NY_STOP_AFTER_PARSE,
-                           &prog, &cg, parse_name, cg.module, true);
+    if (!ny_stage_emit_artifact(opt,
+                                emit_full ? NY_STOP_AFTER_OPT : NY_STOP_AFTER_PARSE,
+                                &prog, &cg, parse_name, cg.module, true)) {
+      exit_code = 1;
+    }
     goto exit_success;
   }
   if ((opt->emit_artifact_path || opt->emit_shapes) &&
       opt->stop_after == NY_STOP_AFTER_NONE) {
-    ny_stage_emit_artifact(opt, NY_STOP_AFTER_OPT, &prog, &cg, parse_name,
-                           cg.module, false);
+    if (!ny_stage_emit_artifact(opt, NY_STOP_AFTER_OPT, &prog, &cg, parse_name,
+                                cg.module, false)) {
+      exit_code = 1;
+      goto exit_success;
+    }
   }
   if (write_compile_caches && jit_cache_file) {
 #ifndef _WIN32
@@ -3737,13 +3882,6 @@ skip_compilation:
      * second time with all its side effects; the VM result is the answer,
      * so stop here.
      */
-      if (cg.had_error) {
-        NY_LOG_ERR("Codegen failed due to ownership diagnostic\n");
-        ny_stage_maybe_emit_errors(opt, NY_STOP_AFTER_ABI, parse_name,
-                                   "codegen failed", 1);
-        exit_code = 1;
-        goto exit_success;
-      }
     if (opt->nyr_run && !(opt->nyr_dump_text || opt->nyr_dump_bin ||
                           (opt->nyr_run_bin_path && opt->nyr_run_bin_path[0] &&
                            opt->nyr_dump_bin))) {
@@ -3849,6 +3987,7 @@ skip_compilation:
     }
     ny_pipe_trace_phase_memory("assembly-emission.complete");
     ny_trace_file_size("emit_asm", opt->emit_asm_path);
+    ny_log_saved_assembly_artifact(opt->emit_asm_path);
   }
   ny_dump_diagnose_finalize(opt, cg.module, opt->opt_level, user_src);
   if (opt->output_file) {
@@ -3976,9 +4115,8 @@ skip_compilation:
               cc, obj, rto, NULL, NULL, 0,
               (const char *const *)opt->link_dirs.data, opt->link_dirs.len,
               (const char *const *)merged_libs.data, merged_libs.len,
-              output_path, link_strip,
-              opt->opt_size && !opt->debug_symbols && opt->gprof != 1,
-              opt->debug_symbols, opt->gprof == 1, opt->sanitize)) {
+              output_path, link_strip, false, opt->debug_symbols,
+              opt->gprof == 1, opt->sanitize)) {
         ny_progress_task_end(progress_node);
         maybe_log_phase_time(opt->do_timing, "Link:", t_link);
         unlink(obj);
@@ -4005,6 +4143,9 @@ skip_compilation:
         if (ny_copy_file(output_path, aot_cache_path) == 0)
           (void)ny_cache_artifact_manifest_save(aot_cache_path, source);
       }
+#ifndef _WIN32
+      chmod(output_path, 0755);
+#endif
 #ifdef _WIN32
       NY_LOG_SUCCESS("Saved EXE: %s\n", output_path);
 #else
@@ -4018,12 +4159,18 @@ skip_compilation:
       ny_sanitize_setup_env(opt->sanitize);
       bool use_safe_run = ny_safe_run_requested(&opt->safe_run) ||
                           (opt->sanitize && *opt->sanitize);
-      const char *argv_exec[] = {output_path, NULL};
+      char **program_argv = NULL;
+      const char **argv_exec = ny_build_program_argv(opt, &program_argv);
+      if (!argv_exec) {
+        const char *fallback[] = {output_path, NULL};
+        argv_exec = fallback;
+      }
       int rc = use_safe_run
-                   ? ny_safe_run_spawn(&opt->safe_run, argv_exec,
-                                       opt->input_file ? opt->input_file
-                                                       : output_path)
-                   : ny_exec_spawn(argv_exec);
+                   ? ny_safe_run_spawn_argv0(
+                         &opt->safe_run, output_path, argv_exec,
+                         opt->input_file ? opt->input_file : output_path)
+                   : ny_exec_spawn_argv0(output_path, argv_exec);
+      ny_free_program_argv(program_argv);
       if (rc != 0)
         exit_code = rc;
       if (aot_run_temp)

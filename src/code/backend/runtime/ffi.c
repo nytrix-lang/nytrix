@@ -1003,9 +1003,8 @@ static inline int rt_ffi_require_c_fn(int64_t *f) {
   int rejected = 0;
   *f = rt_ffi_normalize_callable(*f);
   if (NY_DYNAMIC_CALLABLE_IS(*f) || rt_dynamic_callable_is_closure(*f, NULL)) {
-    *f = rt_fail(
-        rt_alloc_string("err.type"),
-        rt_alloc_string("core.os.ffi requires a C function pointer"));
+    *f = rt_fail(rt_alloc_string("err.type"),
+                 rt_alloc_string("core.os.ffi requires a C function pointer"));
     rejected = 1;
   }
   return rejected;
@@ -1153,6 +1152,127 @@ static int64_t rt_dynamic_callback_call_words(int64_t fn, const int64_t *args,
   }
 }
 
+static int64_t rt_dynamic_callback_call_f64_words(int64_t fn,
+                                                  const int64_t *args,
+                                                  size_t arity) {
+#define NY_F64_TYPES_1 int64_t
+#define NY_F64_TYPES_2 NY_F64_TYPES_1, int64_t
+#define NY_F64_TYPES_3 NY_F64_TYPES_2, int64_t
+#define NY_F64_TYPES_4 NY_F64_TYPES_3, int64_t
+#define NY_F64_TYPES_5 NY_F64_TYPES_4, int64_t
+#define NY_F64_TYPES_6 NY_F64_TYPES_5, int64_t
+#define NY_F64_TYPES_7 NY_F64_TYPES_6, int64_t
+#define NY_F64_TYPES_8 NY_F64_TYPES_7, int64_t
+#define NY_F64_TYPES_9 NY_F64_TYPES_8, int64_t
+#define NY_F64_TYPES_10 NY_F64_TYPES_9, int64_t
+#define NY_F64_TYPES_11 NY_F64_TYPES_10, int64_t
+#define NY_F64_TYPES_12 NY_F64_TYPES_11, int64_t
+#define NY_F64_TYPES_13 NY_F64_TYPES_12, int64_t
+#define NY_F64_TYPES_14 NY_F64_TYPES_13, int64_t
+#define NY_F64_TYPES_15 NY_F64_TYPES_14, int64_t
+#define NY_F64_TYPES_16 NY_F64_TYPES_15, int64_t
+#define NY_F64_ARGS_1 args[0]
+#define NY_F64_ARGS_2 NY_F64_ARGS_1, args[1]
+#define NY_F64_ARGS_3 NY_F64_ARGS_2, args[2]
+#define NY_F64_ARGS_4 NY_F64_ARGS_3, args[3]
+#define NY_F64_ARGS_5 NY_F64_ARGS_4, args[4]
+#define NY_F64_ARGS_6 NY_F64_ARGS_5, args[5]
+#define NY_F64_ARGS_7 NY_F64_ARGS_6, args[6]
+#define NY_F64_ARGS_8 NY_F64_ARGS_7, args[7]
+#define NY_F64_ARGS_9 NY_F64_ARGS_8, args[8]
+#define NY_F64_ARGS_10 NY_F64_ARGS_9, args[9]
+#define NY_F64_ARGS_11 NY_F64_ARGS_10, args[10]
+#define NY_F64_ARGS_12 NY_F64_ARGS_11, args[11]
+#define NY_F64_ARGS_13 NY_F64_ARGS_12, args[12]
+#define NY_F64_ARGS_14 NY_F64_ARGS_13, args[13]
+#define NY_F64_ARGS_15 NY_F64_ARGS_14, args[14]
+#define NY_F64_ARGS_16 NY_F64_ARGS_15, args[15]
+#define NY_F64_CASE(N)                                                         \
+  case N:                                                                      \
+    return rt_flt_box_double(                                                  \
+        ((double (*)(NY_F64_TYPES_##N))(uintptr_t)fn)(NY_F64_ARGS_##N));
+  switch (arity) {
+  case 0:
+    return rt_flt_box_double(((double (*)(void))(uintptr_t)fn)());
+    NY_F64_CASE(1)
+    NY_F64_CASE(2)
+    NY_F64_CASE(3)
+    NY_F64_CASE(4)
+    NY_F64_CASE(5)
+    NY_F64_CASE(6)
+    NY_F64_CASE(7)
+    NY_F64_CASE(8)
+    NY_F64_CASE(9)
+    NY_F64_CASE(10)
+    NY_F64_CASE(11)
+    NY_F64_CASE(12)
+    NY_F64_CASE(13)
+    NY_F64_CASE(14)
+    NY_F64_CASE(15)
+    NY_F64_CASE(16)
+  default:
+    return rt_fail(rt_alloc_string("err.type"),
+                   rt_alloc_string("floating callback ABI exceeds 16 words"));
+  }
+#undef NY_F64_CASE
+#undef NY_F64_TYPES_1
+#undef NY_F64_TYPES_2
+#undef NY_F64_TYPES_3
+#undef NY_F64_TYPES_4
+#undef NY_F64_TYPES_5
+#undef NY_F64_TYPES_6
+#undef NY_F64_TYPES_7
+#undef NY_F64_TYPES_8
+#undef NY_F64_TYPES_9
+#undef NY_F64_TYPES_10
+#undef NY_F64_TYPES_11
+#undef NY_F64_TYPES_12
+#undef NY_F64_TYPES_13
+#undef NY_F64_TYPES_14
+#undef NY_F64_TYPES_15
+#undef NY_F64_TYPES_16
+#undef NY_F64_ARGS_1
+#undef NY_F64_ARGS_2
+#undef NY_F64_ARGS_3
+#undef NY_F64_ARGS_4
+#undef NY_F64_ARGS_5
+#undef NY_F64_ARGS_6
+#undef NY_F64_ARGS_7
+#undef NY_F64_ARGS_8
+#undef NY_F64_ARGS_9
+#undef NY_F64_ARGS_10
+#undef NY_F64_ARGS_11
+#undef NY_F64_ARGS_12
+#undef NY_F64_ARGS_13
+#undef NY_F64_ARGS_14
+#undef NY_F64_ARGS_15
+#undef NY_F64_ARGS_16
+}
+
+static int64_t rt_dynamic_callback_call_f64(rt_dynamic_callable_abi_t abi,
+                                            const int64_t *args, size_t arity) {
+  int64_t fn = abi.fn;
+  int64_t words[46];
+  size_t count = 0;
+  if (rt_dynamic_callback_prepare(&fn)) {
+    int64_t code, env;
+    if (!rt_ffi_closure_split(fn, &code, &env))
+      return rt_fail(rt_alloc_string("err.type"),
+                     rt_alloc_string("invalid floating callback closure"));
+    fn = code;
+    words[count++] = env;
+  }
+  for (size_t i = 0; i < arity; ++i) {
+    words[count++] =
+        rt_dynamic_callback_normalize_arg(args[i], !abi.tagged_args);
+    if (!abi.word_args) {
+      words[count++] = rt_any_len(args[i]);
+      words[count++] = rt_any_tag(args[i]);
+    }
+  }
+  return rt_dynamic_callback_call_f64_words(fn, words, count);
+}
+
 int64_t rt_call_any_mixed(int64_t fn, int64_t argc, int64_t argv_ptr) {
   if (argc < 1 || argc > 15 || !argv_ptr)
     return rt_fail(rt_alloc_string("err.type"),
@@ -1214,6 +1334,8 @@ int64_t rt_call_any1(int64_t f, int64_t value) {
   if (!f || (uintptr_t)f < 0x1000)
     return 0;
   rt_dynamic_callable_abi_t abi = rt_dynamic_callable_abi(f);
+  if (abi.f64_result)
+    return rt_dynamic_callback_call_f64(abi, &value, 1);
   bool dynamic_callable = abi.dynamic;
   bool dynamic_bool_callable = abi.returns_bool;
   bool tagged_args_callable = abi.tagged_args;
@@ -1290,6 +1412,8 @@ int64_t rt_call_any2(int64_t f, int64_t left, int64_t right) {
   if (!f || (uintptr_t)f < 0x1000)
     return 0;
   rt_dynamic_callable_abi_t abi = rt_dynamic_callable_abi(f);
+  if (abi.f64_result)
+    return rt_dynamic_callback_call_f64(abi, (int64_t[]){left, right}, 2);
   bool dynamic_callable = abi.dynamic;
   bool dynamic_bool_callable = abi.returns_bool;
   bool tagged_args_callable = abi.tagged_args;
@@ -1371,6 +1495,8 @@ int64_t rt_call_any3(int64_t f, int64_t a0, int64_t a1, int64_t a2) {
   if (!f || (uintptr_t)f < 0x1000)
     return 0;
   rt_dynamic_callable_abi_t abi = rt_dynamic_callable_abi(f);
+  if (abi.f64_result)
+    return rt_dynamic_callback_call_f64(abi, (int64_t[]){a0, a1, a2}, 3);
   bool dynamic_callable = abi.dynamic;
   bool dynamic_bool_callable = abi.returns_bool;
   bool tagged_args_callable = abi.tagged_args;
@@ -1454,6 +1580,8 @@ int64_t rt_call_any4(int64_t f, int64_t a0, int64_t a1, int64_t a2,
   if (!f || (uintptr_t)f < 0x1000)
     return 0;
   rt_dynamic_callable_abi_t abi = rt_dynamic_callable_abi(f);
+  if (abi.f64_result)
+    return rt_dynamic_callback_call_f64(abi, (int64_t[]){a0, a1, a2, a3}, 4);
   bool dynamic_callable = abi.dynamic;
   bool dynamic_bool_callable = abi.returns_bool;
   bool tagged_args_callable = abi.tagged_args;
@@ -1686,6 +1814,9 @@ int64_t rt_call_any5(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
   if (!f || (uintptr_t)f < 0x1000)
     return 0;
   rt_dynamic_callable_abi_t abi = rt_dynamic_callable_abi(f);
+  if (abi.f64_result)
+    return rt_dynamic_callback_call_f64(abi, (int64_t[]){a0, a1, a2, a3, a4},
+                                        5);
   bool dynamic_callable = abi.dynamic;
   bool dynamic_bool_callable = abi.returns_bool;
   bool tagged_args_callable = abi.tagged_args;
@@ -1776,6 +1907,9 @@ int64_t rt_call_any6(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
   if (!f || (uintptr_t)f < 0x1000)
     return 0;
   rt_dynamic_callable_abi_t abi = rt_dynamic_callable_abi(f);
+  if (abi.f64_result)
+    return rt_dynamic_callback_call_f64(abi,
+                                        (int64_t[]){a0, a1, a2, a3, a4, a5}, 6);
   bool dynamic_callable = abi.dynamic;
   bool dynamic_bool_callable = abi.returns_bool;
   bool tagged_args_callable = abi.tagged_args;
@@ -1874,6 +2008,9 @@ int64_t rt_call_any7(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
   if (!f || (uintptr_t)f < 0x1000)
     return 0;
   rt_dynamic_callable_abi_t abi = rt_dynamic_callable_abi(f);
+  if (abi.f64_result)
+    return rt_dynamic_callback_call_f64(
+        abi, (int64_t[]){a0, a1, a2, a3, a4, a5, a6}, 7);
   bool dynamic_callable = abi.dynamic;
   bool dynamic_bool_callable = abi.returns_bool;
   bool tagged_args_callable = abi.tagged_args;
@@ -1978,6 +2115,9 @@ int64_t rt_call_any8(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
   if (!f || (uintptr_t)f < 0x1000)
     return 0;
   rt_dynamic_callable_abi_t abi = rt_dynamic_callable_abi(f);
+  if (abi.f64_result)
+    return rt_dynamic_callback_call_f64(
+        abi, (int64_t[]){a0, a1, a2, a3, a4, a5, a6, a7}, 8);
   bool dynamic_callable = abi.dynamic;
   bool dynamic_bool_callable = abi.returns_bool;
   bool tagged_args_callable = abi.tagged_args;
@@ -2090,6 +2230,9 @@ int64_t rt_call_any9(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
   if (!f || (uintptr_t)f < 0x1000)
     return 0;
   rt_dynamic_callable_abi_t abi = rt_dynamic_callable_abi(f);
+  if (abi.f64_result)
+    return rt_dynamic_callback_call_f64(
+        abi, (int64_t[]){a0, a1, a2, a3, a4, a5, a6, a7, a8}, 9);
   bool dynamic_callable = abi.dynamic;
   bool dynamic_bool_callable = abi.returns_bool;
   bool tagged_args_callable = abi.tagged_args;
@@ -2208,6 +2351,9 @@ int64_t rt_call_any10(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
   if (!f || (uintptr_t)f < 0x1000)
     return 0;
   rt_dynamic_callable_abi_t abi = rt_dynamic_callable_abi(f);
+  if (abi.f64_result)
+    return rt_dynamic_callback_call_f64(
+        abi, (int64_t[]){a0, a1, a2, a3, a4, a5, a6, a7, a8, a9}, 10);
   bool dynamic_callable = abi.dynamic;
   bool dynamic_bool_callable = abi.returns_bool;
   bool tagged_args_callable = abi.tagged_args;
@@ -2331,6 +2477,9 @@ int64_t rt_call_any11(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
   if (!f || (uintptr_t)f < 0x1000)
     return 0;
   rt_dynamic_callable_abi_t abi = rt_dynamic_callable_abi(f);
+  if (abi.f64_result)
+    return rt_dynamic_callback_call_f64(
+        abi, (int64_t[]){a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10}, 11);
   bool dynamic_callable = abi.dynamic;
   bool dynamic_bool_callable = abi.returns_bool;
   bool tagged_args_callable = abi.tagged_args;
@@ -2462,6 +2611,9 @@ int64_t rt_call_any12(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
   if (!f || (uintptr_t)f < 0x1000)
     return 0;
   rt_dynamic_callable_abi_t abi = rt_dynamic_callable_abi(f);
+  if (abi.f64_result)
+    return rt_dynamic_callback_call_f64(
+        abi, (int64_t[]){a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11}, 12);
   bool dynamic_callable = abi.dynamic;
   bool dynamic_bool_callable = abi.returns_bool;
   bool tagged_args_callable = abi.tagged_args;
@@ -2602,6 +2754,10 @@ int64_t rt_call_any13(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
   if (!f || (uintptr_t)f < 0x1000)
     return 0;
   rt_dynamic_callable_abi_t abi = rt_dynamic_callable_abi(f);
+  if (abi.f64_result)
+    return rt_dynamic_callback_call_f64(
+        abi, (int64_t[]){a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12},
+        13);
   bool dynamic_callable = abi.dynamic;
   bool dynamic_bool_callable = abi.returns_bool;
   bool tagged_args_callable = abi.tagged_args;
@@ -2751,6 +2907,11 @@ int64_t rt_call_any14(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
   if (!f || (uintptr_t)f < 0x1000)
     return 0;
   rt_dynamic_callable_abi_t abi = rt_dynamic_callable_abi(f);
+  if (abi.f64_result)
+    return rt_dynamic_callback_call_f64(
+        abi,
+        (int64_t[]){a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13},
+        14);
   bool dynamic_callable = abi.dynamic;
   bool dynamic_bool_callable = abi.returns_bool;
   bool tagged_args_callable = abi.tagged_args;
@@ -2906,6 +3067,12 @@ int64_t rt_call_any15(int64_t f, int64_t a0, int64_t a1, int64_t a2, int64_t a3,
   if (!f || (uintptr_t)f < 0x1000)
     return 0;
   rt_dynamic_callable_abi_t abi = rt_dynamic_callable_abi(f);
+  if (abi.f64_result)
+    return rt_dynamic_callback_call_f64(abi,
+                                        (int64_t[]){a0, a1, a2, a3, a4, a5, a6,
+                                                    a7, a8, a9, a10, a11, a12,
+                                                    a13, a14},
+                                        15);
   bool dynamic_callable = abi.dynamic;
   bool dynamic_bool_callable = abi.returns_bool;
   bool tagged_args_callable = abi.tagged_args;

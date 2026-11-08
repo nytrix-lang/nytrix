@@ -245,7 +245,7 @@ fn _add_round_key(list st, list w, int r) any {
 
 fn _aes_encrypt_state(list ctx, list st) list {
    def w = ctx[0]
-   def nr = ctx[1]
+   def int nr = int(ctx[1])
    _add_round_key(st, w, 0)
    mut r = 1 while r < nr {
       _sub_bytes(st)
@@ -267,7 +267,7 @@ fn aes_encrypt_block(list ctx, list block) list {
 
 fn _aes_decrypt_state(list ctx, list st) list {
    def w = ctx[0]
-   def nr = ctx[1]
+   def int nr = int(ctx[1])
    _add_round_key(st, w, nr)
    mut r = nr - 1
    while r > 0 {

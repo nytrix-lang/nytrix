@@ -11,7 +11,12 @@
 #include <unistd.h>
 
 enum { STRESS_VALUES = 5000 };
-enum { CFG_STRESS_BLOCKS = 2500, CFG_STRESS_PAIRS_PER_BLOCK = 2 };
+/*
+ * Dead arithmetic is eliminated before lowering, so each block contributes
+ * two control-flow instructions.  Keep enough blocks to exercise a 10k+
+ * instruction lowered function after optimization.
+ */
+enum { CFG_STRESS_BLOCKS = 5200, CFG_STRESS_PAIRS_PER_BLOCK = 2 };
 enum { LOWER_BUDGET_MS = 500 };
 enum { REGALLOC_BUDGET_MS = 1500 };
 enum { EMIT_BUDGET_MS = 1500 };

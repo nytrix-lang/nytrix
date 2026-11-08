@@ -1,0 +1,33 @@
+shape currying_dependent_positive {
+  family "runtime/execution"
+  generator "embedded"
+  features [ny currying dependent positive]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit -O0; --native-backend=llvm --jit --jit-engine=orc -O2"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+fn pick(int n, Fin<n> index, list<int> values) int { values[index] }
+;; The residual signature keeps the value index: `pick3` accepts Fin<3>.
+def pick3 = pick(3)
+assert(pick3(2, [10, 20, 30]) == 30, "residual keeps the bound Fin<3>")
+def pick2 = pick(2)
+assert(pick2(1, [4, 5, 6]) == 5, "a second partial has its own bound index")
+print("DEPENDENT-OK")
+NY
+}
+
+shape currying_dependent_reject {
+  family "runtime/execution"
+  generator "embedded"
+  features [ny currying dependent rejection]
+  template ny-test-case
+  expect compile_fail
+  expect_message "Fin<3> requires 0 <= value < 3, got 3"
+  source ny <<'NY'
+use core
+fn pick(int n, Fin<n> index, list<int> values) int { values[index] }
+def pick3 = pick(3)
+pick3(3, [10, 20, 30])
+NY
+}

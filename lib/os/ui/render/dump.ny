@@ -165,11 +165,6 @@ fn _bool_cache() dict {
    return _env_bool_cache
 }
 
-fn _int_cache() dict {
-   if !is_dict(_env_int_cache) { _env_int_cache = dict(32) }
-   _env_int_cache
-}
-
 fn _str_cache() dict {
    if !is_dict(_env_str_cache) { _env_str_cache = dict(32) }
    _env_str_cache
@@ -223,10 +218,6 @@ fn _argv_verbose_level(any token) int {
    if t == "-vvv" || t == "--trace-spam" || t == "--debug-spam" { return 3 }
    if t == "-v" || t == "--verbose" || t == "--debug" || t == "--trace" || t == "--trace-ui" { return 1 }
    0
-}
-
-fn _argv_verbose_token(any token) bool {
-   _argv_verbose_level(token) > 0
 }
 
 fn apply_verbose_argv(int start_index=1) bool {
@@ -298,10 +289,13 @@ fn apply_verbose_argv(int start_index=1) bool {
 fn env_truthy_cached(any name) bool {
    "Returns a truthy environment flag without requiring cache initialization."
    def k = _key(name)
-   if _ny_trace_has_value(k) { return _ny_trace_truthy(k) }
    ;; This facade participates in window/render startup cycles. A profile cache
    ;; is an optimization, never a precondition for safe startup.
-   return common.env_truthy(k)
+   def cached = is_dict(_env_bool_cache)
+   if cached && _env_bool_cache.contains(k) { return bool(_env_bool_cache.get(k, false)) }
+   def bool value = _ny_trace_has_value(k) ? _ny_trace_truthy(k) : common.env_truthy(k)
+   if cached { _env_bool_cache[k] = value }
+   value
 }
 
 fn env_present_cached(any name) bool {

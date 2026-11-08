@@ -8,6 +8,7 @@ boundaries.
 ## Contents
 
 - [Bindings and calls](#bindings-and-declarations)
+- [Partial application](#partial-application)
 - [Attributes and effect rows](#attributes)
 - [Preconditions and termination](#preconditions-and-termination-measures)
 
@@ -80,6 +81,55 @@ values and lambdas can capture bindings from their enclosing scope. Their
 parameter and return types may be inferred when the call site provides enough
 information. For explicit callable shapes, use `fnptr` where required by an
 API.
+
+## Partial application
+
+A nonempty positional prefix of a fixed-arity Nytrix callable produces a
+residual callable when required parameters remain unsupplied. For
+`fn add(int a, int b) int`, `add(5)` binds `a` and returns a callable accepting
+`b`; both `add(5)(3)` and `add(5, 3)` return `8`. The same rule applies to
+inferred lambda values and to successive residual applications.
+
+The callable and bound argument expressions are evaluated once, in source
+order, at construction. The body is deferred until the required arguments are
+available. Captures retain the ordinary closure representation and ownership
+rules; managed values are not implicitly copied. A fully applied call is not
+required to materialize intermediate closures.
+
+Defaults take precedence over automatic partial application: if the omitted
+arguments all have defaults, the existing default-argument call runs instead.
+A default may be omitted only when every later parameter is also defaulted. If a
+default precedes a required residual parameter, the default is evaluated inside
+the residual body and the required parameter remains positional. Trailing
+optional parameters stay overridable on the residual callable.
+
+Residual signatures retain dependent value indices. Partially applying
+`pick(int n, Fin<n> index, list<int> values)` to `n = 3` leaves a callable whose
+index argument is still `Fin<3>`, so an out-of-range index is rejected at the
+residual call. Bounds and defaults that reference a captured earlier parameter
+are substituted from the bound prefix.
+
+A callable value held in a name can be partially applied as well; the residual
+closure captures that binding without erasing its call signature or effect row.
+Creating a partial allocates an escaping closure when it is not immediately
+saturated, so it is not an allocation-free operation inside a hot loop.
+
+Zero-argument calls, variadic functions, and foreign declarations retain their
+existing call rules. A variadic function still requires its fixed parameters and
+is not automatically curried. A foreign declaration has a fixed ABI and an
+incomplete foreign call is rejected with an arity diagnostic. Excess arguments
+report the declared limit and the supplied count. An underscore is not a
+partial-application placeholder. Nytrix declarations continue to use type-first
+parameters and a return type after `)`, not the retired `name: Type` or `->`
+spellings.
+
+See the [currying guide](../learn/currying.md) for complete examples and the
+explicit binary `core.functional.curry` / `uncurry` adapters. The regression
+`etc/tests/lang/execution/currying.nshape` exercises escaped and repeated
+partials, grouping, evaluation order, scalar ABI boundaries, and recursion.
+Additional fixtures cover residual defaults, dependent indices, capture
+reuse, consuming-parameter rejection, variadic and foreign boundaries, `fnptr`
+conversion, higher-order callbacks, and `ny-desugar` parity.
 
 ## Return and container behavior
 

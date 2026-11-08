@@ -1,0 +1,152 @@
+shape http_fallback {
+  family "runtime/execution"
+  generator "embedded"
+  features ["ny", "test", "http"]
+  template ny-test-case
+  timeout 60
+  flags "--native-only"
+  expect compile_and_run
+  expect_message "HTTP1-FALLBACK-OK"
+  source ny <<'NY'
+use core
+use core.mem (cstr)
+use core.os.net.curl as curl
+use core.os.net.socket as sock
+use core.os.thread as thread
+
+#windows {
+   extern "" { fn _putenv(ptr s) i32 as "_putenv" }
+} #else {
+   extern "" {
+      fn setenv(ptr name, ptr value, i32 overwrite) i32
+      fn unsetenv(ptr name) i32
+   }
+} #endif
+
+mut _env_keep = ""
+
+fn force_env(str key, str value) bool {
+   _env_keep = key + "=" + value
+   #windows { return _putenv(cstr(_env_keep)) == 0 }
+   #else { return setenv(cstr(key), cstr(value), 1) == 0 }
+   #endif
+}
+
+fn clear_env(str key) bool {
+   #windows {
+      _env_keep = key + "="
+      return _putenv(cstr(_env_keep)) == 0
+   }
+   #else { return unsetenv(cstr(key)) == 0 }
+   #endif
+}
+
+fn header_value(str headers, str name) str {
+   def low = lower(headers)
+   def key = lower(name) + ":"
+   def at = find(low, key)
+   if at < 0 { return "" }
+   mut i = at + key.len
+   while i < headers.len && (load8(headers, i) == 32 || load8(headers, i) == 9) { i += 1 }
+   mut end = i
+   while end < headers.len && load8(headers, end) != 13 && load8(headers, end) != 10 { end += 1 }
+   slice(headers, i, end)
+}
+
+fn read_request(int fd) str {
+   mut buf = ""
+   while buf.len < 65536 {
+      def at = find(buf, "\r\n\r\n")
+      if at >= 0 {
+         def head_end = at + 4
+         def want = atoi(header_value(slice(buf, 0, head_end), "content-length"))
+         mut need = head_end
+         if want > 0 { need = head_end + want }
+         while buf.len < need && buf.len < 65536 {
+            def more = sock.read_socket(fd, need - buf.len)
+            if !is_str(more) || more.len == 0 { break }
+            buf = buf + more
+         }
+         return buf
+      }
+      def chunk = sock.read_socket(fd, 4096)
+      if !is_str(chunk) || chunk.len == 0 { break }
+      buf = buf + chunk
+   }
+   buf
+}
+
+fn reply(int fd, str raw) int {
+   sock.write_socket_all(fd, raw)
+   sock.close_socket(fd)
+   0
+}
+
+fn serve(any arg) int {
+   def fd = int(arg.get(0))
+   def n = int(arg.get(1))
+   mut i = 0
+   while i < n {
+      def peer = sock.socket_accept(fd)
+      if peer < 0 { return 1 }
+      def req = read_request(peer)
+      def line_end = find(req, "\r\n")
+      def line = line_end >= 0 ? slice(req, 0, line_end) : req
+      if find(line, " /chunk ") >= 0 {
+         reply(peer, "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n5\r\nhello\r\n0\r\n\r\n")
+      } elif find(line, " /echo ") >= 0 {
+         def mark = find(req, "\r\n\r\n")
+         def body = mark >= 0 ? slice(req, mark + 4, req.len) : ""
+         reply(peer, "HTTP/1.1 200 OK\r\nContent-Length: " + to_str(body.len) + "\r\nConnection: close\r\n\r\n" + body)
+      } elif find(line, " /go ") >= 0 {
+         reply(peer, "HTTP/1.1 302 Found\r\nLocation: /land\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+      } elif find(line, " /land ") >= 0 {
+         reply(peer, "HTTP/1.1 200 OK\r\nContent-Length: 10\r\nConnection: close\r\n\r\nhello-land")
+      } else {
+         reply(peer, "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+      }
+      i += 1
+   }
+   0
+}
+
+def have_curl = curl.curl_available()
+assert(force_env("NY_CURL_DISABLE_LIBCURL", "1"), "disable libcurl")
+def fd = sock.socket_bind("127.0.0.1", 0)
+assert(fd >= 0, "bind fallback server")
+def port = sock.socket_bound_port(fd)
+assert(port > 0, "ephemeral port")
+def accepts = 5 + (have_curl ? 1 : 0)
+def worker = thread.thread_spawn(serve, [fd, accepts])
+def base = "http://127.0.0.1:" + to_str(port)
+
+def chunked = curl.curl_request("GET", base + "/chunk", 0, 0, 5)
+assert(chunked.get("ok", false) && chunked.get("transport") == "http1", "chunked transport")
+assert(chunked.get("body") == "hello", "chunked body")
+
+def posted = curl.curl_request("POST", base + "/echo", "ping", 0, 5)
+assert(posted.get("ok", false) && posted.get("body") == "ping", "post body")
+assert(int(posted.get("redirects", -1)) == 0, "post redirects")
+
+def followed = curl.curl_request("GET", base + "/go", 0, 0, 5)
+assert(followed.get("ok", false) && followed.get("body") == "hello-land", "redirect body")
+assert(int(followed.get("redirects", -1)) == 1, "redirect count")
+
+def stopped = curl.curl_request("GET", base + "/go", 0, 0, 5, "nytrix/1.0", {"follow": false})
+assert(int(stopped.get("status", 0)) == 302, "follow off keeps 302")
+assert(int(stopped.get("redirects", -1)) == 0, "follow off does not count a hop")
+
+def tls = curl.curl_request("GET", "https://127.0.0.1/nope", 0, 0, 2)
+assert(!tls.get("ok", true), "https is not ok")
+assert(find(to_str(tls.get("error", "")), "libcurl") >= 0, "https names libcurl")
+
+if have_curl {
+   assert(clear_env("NY_CURL_DISABLE_LIBCURL"), "restore libcurl")
+   def via_curl = curl.curl_request("GET", base + "/chunk", 0, 0, 5)
+   assert(via_curl.get("transport") == "curl" && via_curl.get("body") == "hello", "libcurl route returns")
+}
+assert(thread.thread_join(worker) == 0, "server finished")
+sock.close_socket(fd)
+print("HTTP1-FALLBACK-OK")
+NY
+}

@@ -5,137 +5,29 @@
 #include <stdio.h>
 #include <string.h>
 
-typedef size_t nyr_cs_handle;
-typedef struct {
-  unsigned id;
-  uint64_t address;
-  uint16_t size;
-  uint8_t bytes[24];
-  char mnemonic[32];
-  char op_str[160];
-  void *detail;
-} nyr_cs_insn_t;
-_Static_assert(offsetof(nyr_cs_insn_t, mnemonic) == 42 &&
-                   offsetof(nyr_cs_insn_t, op_str) == 74,
-               "optional Capstone fallback expects the public cs_insn layout");
-typedef int (*nyr_cs_open_fn)(int, int, nyr_cs_handle *);
-typedef size_t (*nyr_cs_disasm_fn)(nyr_cs_handle, const uint8_t *, size_t,
-                                   uint64_t, size_t, nyr_cs_insn_t **);
-typedef void (*nyr_cs_free_fn)(nyr_cs_insn_t *, size_t);
-typedef int (*nyr_cs_close_fn)(nyr_cs_handle *);
-typedef struct {
-  nyr_cs_open_fn open;
-  nyr_cs_disasm_fn disasm;
-  nyr_cs_free_fn free;
-  nyr_cs_close_fn close;
-  void *library;
-} nyr_cs_api_t;
-static _Thread_local char fallback_output[131072];
-
-static nyr_cs_api_t *nyr_capstone_api(void) {
-  static nyr_cs_api_t api;
-  static int tried;
-  if (tried)
-    return api.library ? &api : NULL;
-  const char *disabled = getenv("NYTRIX_NO_CAPSTONE");
-  if (disabled && disabled[0] && strcmp(disabled, "0") != 0) {
-    tried = 1;
-    return NULL;
-  }
-  tried = 1;
-#ifdef _WIN32
-  const char *names[] = {"capstone.dll", "libcapstone.dll"};
-  for (size_t i = 0; i < sizeof(names) / sizeof(names[0]) && !api.library; ++i)
-    api.library = (void *)LoadLibraryA(names[i]);
-  if (!api.library)
-    return NULL;
-  api.open = (nyr_cs_open_fn)GetProcAddress((HMODULE)api.library, "cs_open");
-  api.disasm =
-      (nyr_cs_disasm_fn)GetProcAddress((HMODULE)api.library, "cs_disasm");
-  api.free = (nyr_cs_free_fn)GetProcAddress((HMODULE)api.library, "cs_free");
-  api.close = (nyr_cs_close_fn)GetProcAddress((HMODULE)api.library, "cs_close");
-#else
-  const char *names[] = {"libcapstone.so.6", "libcapstone.so.5",
-                         "libcapstone.so.4", "libcapstone.so",
-                         "libcapstone.dylib"};
-  for (size_t i = 0; i < sizeof(names) / sizeof(names[0]) && !api.library; ++i)
-    api.library = dlopen(names[i], RTLD_NOW | RTLD_LOCAL);
-  if (!api.library)
-    return NULL;
-  api.open = (nyr_cs_open_fn)dlsym(api.library, "cs_open");
-  api.disasm = (nyr_cs_disasm_fn)dlsym(api.library, "cs_disasm");
-  api.free = (nyr_cs_free_fn)dlsym(api.library, "cs_free");
-  api.close = (nyr_cs_close_fn)dlsym(api.library, "cs_close");
-#endif
-  if (!api.open || !api.disasm || !api.free || !api.close) {
-#ifdef _WIN32
-    FreeLibrary((HMODULE)api.library);
-#else
-    dlclose(api.library);
-#endif
-    memset(&api, 0, sizeof(api));
-    return NULL;
-  }
-  return &api;
-}
-
-int nyr_capstone_fallback_available(void) { return nyr_capstone_api() != NULL; }
-
-const char *nyr_capstone_fallback_disasm(const unsigned char *bytes,
-                                         int64_t length, int64_t address,
-                                         int arch, int mode) {
-  fallback_output[0] = 0;
-  nyr_cs_api_t *api = nyr_capstone_api();
-  if (!api || !bytes || length <= 0)
-    return fallback_output;
-  nyr_cs_handle handle = 0;
-  if (api->open(arch, mode, &handle) != 0)
-    return fallback_output;
-  nyr_cs_insn_t *insns = NULL;
-  size_t count =
-      api->disasm(handle, bytes, (size_t)length, (uint64_t)address, 0, &insns);
-  size_t used = 0;
-  uint64_t cursor = (uint64_t)address;
-  for (size_t i = 0; i < count; ++i) {
-    if (insns[i].address > cursor) {
-      int gap = snprintf(fallback_output + used, sizeof(fallback_output) - used,
-                         "%" PRIu64
-                         "\tunsupported\tundecoded byte at 0x%" PRIx64 "\t1\n",
-                         cursor, cursor);
-      if (gap < 0 || (size_t)gap >= sizeof(fallback_output) - used)
-        break;
-      used += (size_t)gap;
-    }
-    int n =
-        snprintf(fallback_output + used, sizeof(fallback_output) - used,
-                 "%" PRId64 "\t%s\t%s\t%u\n", (int64_t)insns[i].address,
-                 insns[i].mnemonic, insns[i].op_str, (unsigned)insns[i].size);
-    if (n < 0 || (size_t)n >= sizeof(fallback_output) - used)
-      break;
-    used += (size_t)n;
-    cursor = insns[i].address + insns[i].size;
-  }
-  if (cursor < (uint64_t)address + (uint64_t)length &&
-      used < sizeof(fallback_output)) {
-    int tail = snprintf(fallback_output + used, sizeof(fallback_output) - used,
-                        "%" PRIu64 "\tunsupported\tundecoded byte at 0x%" PRIx64
-                        "\t1\n",
-                        cursor, cursor);
-    if (tail > 0 && (size_t)tail < sizeof(fallback_output) - used)
-      used += (size_t)tail;
-  }
-  if (insns)
-    api->free(insns, count);
-  api->close(&handle);
-  return fallback_output;
-}
+const char *nyr_internal_aarch64_disasm(const unsigned char *b, int64_t n,
+                                        int64_t base);
 
 /*
  * Small, fail-closed decoder used by the Ny decompiler.  The accepted
  * instruction set is deliberately explicit: adding an encoding here also
  * makes it available to the language-level decoder without a host library.
  */
-static _Thread_local char output[131072];
+static _Thread_local char *output = NULL;
+static _Thread_local size_t output_cap = 0;
+
+static void output_ensure(size_t need) {
+  if (output_cap >= need)
+    return;
+  size_t cap = output_cap ? output_cap * 2 : 16384;
+  while (cap < need)
+    cap *= 2;
+  char *nb = realloc(output, cap);
+  if (!nb)
+    return;
+  output = nb;
+  output_cap = cap;
+}
 static const char *const regs64[16] = {"rax", "rcx", "rdx", "rbx", "rsp", "rbp",
                                        "rsi", "rdi", "r8",  "r9",  "r10", "r11",
                                        "r12", "r13", "r14", "r15"};
@@ -265,6 +157,9 @@ static int nyr_x64_vec_rm(const unsigned char *b, int64_t n, int64_t *ip,
 const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
                                     int64_t base) {
   size_t used = 0;
+  output_ensure(256);
+  if (!output)
+    return "";
   output[0] = 0;
   if (!b || n < 0)
     return "";
@@ -585,6 +480,28 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
       } else if (op2 >= 0xc8 && op2 <= 0xcf) {
         strcpy(m, "bswap");
         snprintf(args, sizeof(args), "%s", nyr_x64_reg((op2 & 7) + rb, w, rex));
+      } else if (op2 >= 0x40 && op2 <= 0x4f && i < n) {
+        /*
+         * CMOVcc r, r/m
+         */
+        unsigned char mr = b[i++];
+        reg = ((mr >> 3) & 7) + ((rex & 4) ? 8 : 0);
+        char rm_name[192];
+        if (!nyr_x64_rm(b, n, &i, mr, rex, w, rm_name, sizeof(rm_name)))
+          goto unsupported;
+        snprintf(m, sizeof(m), "cmov%s", cc[op2 & 15]);
+        snprintf(args, sizeof(args), "%s, %s", nyr_x64_reg(reg, w, rex),
+                 rm_name);
+      } else if (op2 >= 0x90 && op2 <= 0x9f && i < n) {
+        /*
+         * SETcc r/m8
+         */
+        unsigned char mr = b[i++];
+        char rm_name[192];
+        if (!nyr_x64_rm(b, n, &i, mr, rex, 1, rm_name, sizeof(rm_name)))
+          goto unsupported;
+        snprintf(m, sizeof(m), "set%s", cc[op2 & 15]);
+        snprintf(args, sizeof(args), "%s", rm_name);
       } else {
         goto unsupported;
       }
@@ -611,6 +528,31 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
       if (i >= n)
         goto unsupported;
       unsigned char mr = b[i++];
+      /*
+       * vmovq/vmovd (VEX.66.0F 6E/7E): xmm <-> full-width gpr move.
+       */
+      if (map == 1 && (opcode == 0x6e || opcode == 0x7e) && pp == 1) {
+        unsigned gw = (vex3 & 0x80) ? 8 : 4;
+        char vreg[16], rmb[192];
+        unsigned vreg_n = ((mr >> 3) & 7) + ((vex_rex & 4) ? 8 : 0);
+        snprintf(vreg, sizeof(vreg), "xmm%u", vreg_n);
+        if ((mr >> 6) == 3) {
+          snprintf(rmb, sizeof(rmb), "%s",
+                   nyr_x64_reg((mr & 7) + ((vex_rex & 1) ? 8 : 0), gw,
+                               (vex_rex & 1)));
+        } else {
+          if (!nyr_x64_rm(b, n, &i, mr,
+                          (unsigned)(vex_rex & 1) | ((vex3 & 0x80) ? 8 : 0), gw,
+                          rmb, sizeof(rmb)))
+            goto unsupported;
+        }
+        strcpy(m, gw == 8 ? "vmovq" : "vmovd");
+        if (opcode == 0x6e)
+          snprintf(args, sizeof(args), "%s, %s", vreg, rmb);
+        else
+          snprintf(args, sizeof(args), "%s, %s", rmb, vreg);
+        goto decoded;
+      }
       unsigned vector_reg = ((mr >> 3) & 7) + ((vex_rex & 4) ? 8 : 0);
       unsigned vector_width = (vex3 & 4) ? 256 : 128;
       unsigned vector_vvvv = (unsigned)(~vex3 >> 3) & 15;
@@ -669,6 +611,27 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
         strcpy(m, name);
         snprintf(args, sizeof(args), "%s, %s, %s", reg_name, vvvv_name,
                  rm_name);
+      } else if (map == 1 && (opcode == 0x10 || opcode == 0x11) &&
+                 (pp == 2 || pp == 3)) {
+        /*
+         * VEX.F2/F3.0F 10/11: scalar single/double move (reg or mem).
+         */
+        strcpy(m, opcode == 0x10 ? (pp == 3 ? "vmovsd" : "vmovss")
+                                 : (pp == 3 ? "vmovsd" : "vmovss"));
+        int store = opcode == 0x11;
+        if ((mr >> 6) == 3) {
+          /*
+           * reg-reg is 3-operand: dest, vvvv, src.
+           */
+          char vvvv_name[16];
+          snprintf(vvvv_name, sizeof(vvvv_name), "%s%u",
+                   vector_width == 256 ? "ymm" : "xmm", vector_vvvv);
+          snprintf(args, sizeof(args), "%s, %s, %s", reg_name, vvvv_name,
+                   rm_name);
+        } else {
+          snprintf(args, sizeof(args), "%s, %s", store ? rm_name : reg_name,
+                   store ? reg_name : rm_name);
+        }
       } else if (map == 2 && pp == 1 && !(vex3 & 0x80) && opcode == 0x19 &&
                  (vex3 & 0x78) == 0x78 && (mr >> 6) != 3) {
         strcpy(m, "vbroadcastsd");
@@ -749,6 +712,14 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
     } else if (op >= 0x50 && op <= 0x5f) {
       strcpy(m, op < 0x58 ? "push" : "pop");
       snprintf(args, sizeof(args), "%s", regs64[(op & 7) + rb]);
+    } else if (op >= 0xb0 && op <= 0xb7) {
+      imm = 1;
+      if (i + imm > n)
+        goto unsupported;
+      strcpy(m, "mov");
+      snprintf(args, sizeof(args), "%s, 0x%" PRIx64,
+               nyr_x64_reg((op & 7) + rb, 1, rex), rd(b + i, 1));
+      i += 1;
     } else if (op >= 0xb8 && op <= 0xbf) {
       imm = w;
       if (i + imm > n)
@@ -767,7 +738,48 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
     } else {
       const char *mn = NULL;
       int dir = 0;
+      int acc = 0;
       switch (op) {
+      case 0x04:
+      case 0x05:
+        mn = "add";
+        acc = 1;
+        break;
+      case 0x0c:
+      case 0x0d:
+        mn = "or";
+        acc = 1;
+        break;
+      case 0x14:
+      case 0x15:
+        mn = "adc";
+        acc = 1;
+        break;
+      case 0x1c:
+      case 0x1d:
+        mn = "sbb";
+        acc = 1;
+        break;
+      case 0x24:
+      case 0x25:
+        mn = "and";
+        acc = 1;
+        break;
+      case 0x2c:
+      case 0x2d:
+        mn = "sub";
+        acc = 1;
+        break;
+      case 0x34:
+      case 0x35:
+        mn = "xor";
+        acc = 1;
+        break;
+      case 0x3c:
+      case 0x3d:
+        mn = "cmp";
+        acc = 1;
+        break;
       case 0x89:
         mn = "mov";
         break;
@@ -839,6 +851,27 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
         break;
       default:
         break;
+      }
+      if (acc) {
+        /*
+         * ALU imm-acc: `48 05 imm32` = add rax, imm32 (sign extended).
+         */
+        unsigned width = (op & 1) ? w : 1;
+        unsigned acc_imm = width == 1 ? 1 : (op16 ? 2 : 4);
+        if (i + acc_imm > n)
+          goto unsupported;
+        int64_t iv = width == 1 ? (int8_t)b[i]
+                     : acc_imm == 2 ? (int16_t)rd(b + i, 2)
+                                    : (int32_t)rd(b + i, 4);
+        i += acc_imm;
+        strcpy(m, mn);
+        if (iv < 0)
+          snprintf(args, sizeof(args), "%s, -0x%" PRIx64,
+                   nyr_x64_reg((op & 1) ? rb : 0, width, rex), (uint64_t)-iv);
+        else
+          snprintf(args, sizeof(args), "%s, 0x%" PRIx64,
+                   nyr_x64_reg((op & 1) ? rb : 0, width, rex), (uint64_t)iv);
+        goto decoded;
       }
       if (mn) {
         if (i >= n)
@@ -1004,21 +1037,40 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
       goto unsupported;
   decoded:
     {
-      int z = snprintf(output + used, sizeof(output) - used,
-                       "%" PRId64 "\t%s\t%s\t%" PRId64 "\n", base + start, m,
-                       args, i - start);
-      if (z < 0 || (size_t)z >= sizeof(output) - used)
+      size_t sz = (size_t)(i - start);
+      char bytes_hex[64] = "";
+      for (size_t k = 0; k < sz && k < 16; ++k) {
+        char byte_hex[4];
+        snprintf(byte_hex, sizeof(byte_hex), "%02x ", b[start + k]);
+        strncat(bytes_hex, byte_hex, sizeof(bytes_hex) - strlen(bytes_hex) - 1);
+      }
+      output_ensure(used + 700);
+      int z = snprintf(output + used, output_cap - used,
+                       "%" PRId64 "\t%s\t%s\t%" PRId64 "\t%s\n", base + start, m,
+                       args, i - start, bytes_hex);
+      if (z < 0 || (size_t)z >= output_cap - used)
         break;
       used += (size_t)z;
     }
     continue;
   unsupported:
     {
+      /*
+       * Emit one explicit unsupported row for the offending byte, then
+       * resume decoding at the next byte instead of truncating the listing.
+       * This keeps long functions from being cut short by a single
+       * unhandled encoding (e.g. a VEX/EVEX form the decoder lacks).
+       */
       unsigned v = (i > start ? b[start] : op);
-      snprintf(output + used, sizeof(output) - used,
-               "%" PRId64 "\tunsupported\topcode 0x%02x at 0x%" PRIx64 "\t1\n",
-               base + start, v, (uint64_t)(base + start));
-      return output;
+      output_ensure(used + 700);
+      int z = snprintf(output + used, output_cap - used,
+               "%" PRId64 "\tunsupported\topcode 0x%02x at 0x%" PRIx64 "\t1\t%02x \n",
+               base + start, v, (uint64_t)(base + start), v);
+      if (z < 0 || (size_t)z >= output_cap - used)
+        break;
+      used += (size_t)z;
+      i = start + 1;
+      continue;
     }
   }
   return output;
@@ -1571,9 +1623,12 @@ const char *nyr_internal_aarch64_disasm(const unsigned char *b, int64_t n,
       }
     }
     {
+      char bytes_hex[16];
+      snprintf(bytes_hex, sizeof(bytes_hex), "%02x %02x %02x %02x",
+               b[off], b[off+1], b[off+2], b[off+3]);
       int z = snprintf(a64_output + used, sizeof(a64_output) - used,
-                       "%" PRId64 "\t%s\t%s\t%u\n", base + off, mnemonic,
-                       operands, size);
+                       "%" PRId64 "\t%s\t%s\t%u\t%s\n", base + off, mnemonic,
+                       operands, size, bytes_hex);
       if (z < 0 || (size_t)z >= sizeof(a64_output) - used)
         break;
       used += (size_t)z;
@@ -1582,8 +1637,9 @@ const char *nyr_internal_aarch64_disasm(const unsigned char *b, int64_t n,
   unsupported_a64:
     snprintf(a64_output + used, sizeof(a64_output) - used,
              "%" PRId64 "\tunsupported\tinstruction word 0x%08" PRIx32
-             " at 0x%" PRIx64 "\t4\n",
-             base + off, insn, (uint64_t)(base + off));
+             " at 0x%" PRIx64 "\t4\t%02x %02x %02x %02x\n",
+             base + off, insn, (uint64_t)(base + off),
+             b[off], b[off+1], b[off+2], b[off+3]);
     return a64_output;
   }
   return a64_output;

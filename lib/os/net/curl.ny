@@ -1,8 +1,6 @@
 ;; Keywords: net socket curl http-client os
 ;; libcurl-backed HTTP client transport for requests that need curl features.
-;;
-;; This lives in Ny stdlib (not the C runtime) to keep the runtime smaller while
-;; still allowing HTTPS + redirects when libcurl is present.
+;; Pure-Ny HTTP/1.1 fallback for plaintext http:// when libcurl is unavailable.
 ;; References:
 ;; - core.os.net
 ;; - core.os
@@ -11,24 +9,16 @@ use core
 use core.error
 use core.dict_mod as _d
 use core.str
-use core.os (temp_dir, file_read, file_remove)
+use core.os (temp_dir, file_read, file_remove, file_write)
 use core.os.clock (ticks)
 use core.os.path as ospath
 use core.os.net.context as netctx
 use core.os.net.http as http
 use core.os.ffi (dlsym, cstr, cptr)
+use core.os.ffi as ffi
 use core.os.ffi as calls
+use core.os.net.socket as socket
 
-#linux {
-   #link "libcurl.so"
-   #include <curl/curl.h> as "curl_"
-} #elif macos {
-   #link "libcurl.dylib"
-   #include <curl/curl.h> as "curl_"
-} #elif windows {
-   #link "libcurl"
-   #include <curl/curl.h> as "curl_"
-} #endif
 extern "" {
    fn _fopen(ptr path, ptr mode) ptr as "fopen"
    fn _fclose(ptr fp) i32 as "fclose"
@@ -92,6 +82,9 @@ def _CURLOPT_DNS_SERVERS    = 10211
 def _CURLOPT_VERBOSE        = 41
 def _CURLOPT_NOSIGNAL       = 99
 def _CURL_GLOBAL_ALL = 3
+
+;; libcurl is optional: bound through dlopen so hosts without it can still
+;; make plaintext HTTP/1.1 requests via the pure-Ny socket fallback.
 mut _curl = 0
 mut _p_global_init = 0
 mut _p_easy_init = 0
@@ -106,19 +99,43 @@ mut _tmp_seq = 0
 
 fn _load() bool {
    if _curl { return true }
-   _p_global_init = dlsym(0, "curl_global_init")
-   _p_easy_init = dlsym(0, "curl_easy_init")
-   _p_easy_setopt = dlsym(0, "curl_easy_setopt")
-   _p_easy_perform = dlsym(0, "curl_easy_perform")
-   _p_easy_cleanup = dlsym(0, "curl_easy_cleanup")
-   _p_easy_strerror = dlsym(0, "curl_easy_strerror")
-   _p_slist_append = dlsym(0, "curl_slist_append")
-   _p_slist_free_all = dlsym(0, "curl_slist_free_all")
+   mut lib = 0
+   if __os_name() == "linux" {
+      lib = ffi.dlopen_checked("libcurl.so.4", "curl_global_init", ffi.RTLD_NOW() | ffi.RTLD_GLOBAL())
+      if !lib { lib = ffi.dlopen_checked("libcurl.so", "curl_global_init", ffi.RTLD_NOW() | ffi.RTLD_GLOBAL()) }
+   } elif __os_name() == "macos" {
+      lib = ffi.dlopen_checked("libcurl.4.dylib", "curl_global_init", ffi.RTLD_NOW() | ffi.RTLD_GLOBAL())
+      if !lib { lib = ffi.dlopen_checked("libcurl.dylib", "curl_global_init", ffi.RTLD_NOW() | ffi.RTLD_GLOBAL()) }
+   } else {
+      lib = ffi.dlopen_checked("libcurl-4.dll", "curl_global_init", ffi.RTLD_NOW() | ffi.RTLD_GLOBAL())
+      if !lib { lib = ffi.dlopen_checked("libcurl.dll", "curl_global_init", ffi.RTLD_NOW() | ffi.RTLD_GLOBAL()) }
+   }
+   if !lib { return false }
+   _p_global_init = ffi.dlsym(lib, "curl_global_init")
+   _p_easy_init = ffi.dlsym(lib, "curl_easy_init")
+   _p_easy_setopt = ffi.dlsym(lib, "curl_easy_setopt")
+   _p_easy_perform = ffi.dlsym(lib, "curl_easy_perform")
+   _p_easy_cleanup = ffi.dlsym(lib, "curl_easy_cleanup")
+   _p_easy_strerror = ffi.dlsym(lib, "curl_easy_strerror")
+   _p_slist_append = ffi.dlsym(lib, "curl_slist_append")
+   _p_slist_free_all = ffi.dlsym(lib, "curl_slist_free_all")
    _curl = (_p_easy_init && _p_easy_setopt && _p_easy_perform && _p_easy_cleanup) ? 1 : 0
    _curl != 0
 }
 
 fn curl_available() bool { _load() }
+
+fn _env_on(str name) bool {
+   def v = lower(to_str(__env_get(name)))
+   v == "1" || v == "true" || v == "on" || v == "yes"
+}
+
+fn _curl_disable() bool {
+   ;; Keep this uncached: route toggles must be observable when a process
+   ;; flips them between requests. Both the short name and the canonical
+   ;; NY_<MODULE>_DISABLE_<LIB> form select the pure-Ny path.
+   _env_on("NY_CURL_DISABLE") || _env_on("NY_CURL_DISABLE_LIBCURL")
+}
 
 fn _tmp_path(str tag="curl") str {
    def t = temp_dir()
@@ -159,14 +176,16 @@ fn _method(any v) str {
 }
 
 fn _opt_bool(any options, str name, bool fallback) bool {
-   if !is_dict(options) { return fallback }
-   def v = options.get(name, fallback)
-   if is_int(v) { return v != 0 }
+   if !is_dict(options) || !options.contains(name) { return fallback }
+   def v = options.get(name)
+   ;; A stored bool is `any` here. Dynamic `!= 0` treats `false` as unequal
+   ;; to 0, so truthiness is the test that keeps `follow: false` off.
+   if !v { return false }
    if is_str(v) {
       def s = lower(strip(v))
       return !(s == "" || s == "0" || s == "false" || s == "off" || s == "no")
    }
-   v ? true : false
+   true
 }
 
 fn _opt_has(any options, str name) bool {
@@ -225,6 +244,8 @@ fn _curl_auth_mask(any v, int fallback=1) int {
       "", "basic" -> 1
       "digest" -> 2
       "negotiate", "gssapi", "spnego" -> 4
+      "ntlm" -> 8
+      "digest-ie", "digest_ie" -> 16
       "ntlm" -> 8
       "digest-ie", "digest_ie" -> 16
       "bearer" -> 64
@@ -369,7 +390,168 @@ fn _curl_result(str headers, str body, str method, any url, int curl_code) dict 
    out
 }
 
-fn curl_request(any method, any url, any data=0, any headers=0, any timeout_sec=60, any user_agent="nytrix/1.0", any options=0) dict {
+fn _http1_result(str headers, str body, str method, any url, int code) dict {
+   def raw = headers + "\r\n\r\n" + body
+   mut out = http.http_parse_response(raw)
+   out = out.set("raw", raw)
+   out = out.set("raw_all_headers", headers)
+   out = out.set("method", method)
+   out = out.set("url", is_str(url) ? url : "")
+   out = out.set("transport", "http1")
+   out = out.set("tls", is_str(url) && startswith(lower(url), "https://"))
+   out = out.set("curl_code", code)
+   out = out.set("error", code == 0 ? "" : "http1 error " + to_str(code))
+   out = out.set("redirects", 0)
+   out
+}
+
+fn _http1_fail(any method, any url, str msg) dict {
+   mut out = _http1_result("", "", _method(method), url, 1)
+   out = out.set("error", msg)
+   out = out.set("ok", false)
+   out
+}
+
+fn _http1_authority(str host, int port) str {
+   mut h = host
+   if find(h, ":") >= 0 && !startswith(h, "[") { h = "[" + h + "]" }
+   if port == 80 { h } else { h + ":" + to_str(port) }
+}
+
+fn _http1_resolve(str base, str loc) str {
+   def l = strip(loc)
+   def ll = lower(l)
+   if startswith(ll, "http://") || startswith(ll, "https://") { return l }
+   if startswith(l, "//") { return "http:" + l }
+   def parsed = http.http_parse_url_ex(base)
+   def scheme = is_str(parsed.get("scheme", "http")) ? parsed.get("scheme", "http") : "http"
+   def host = is_str(parsed.get("host", "")) ? parsed.get("host", "") : ""
+   def port = is_int(parsed.get("port", 80)) ? parsed.get("port", 80) : 80
+   def auth = _http1_authority(host, port)
+   if startswith(l, "/") { return scheme + "://" + auth + l }
+   def path = is_str(parsed.get("path", "/")) ? parsed.get("path", "/") : "/"
+   mut cut = 0
+   mut i = 0
+   while i < path.len {
+      if load8(path, i) == 47 { cut = i + 1 }
+      i += 1
+   }
+   scheme + "://" + auth + slice(path, 0, cut) + l
+}
+
+fn _http1_exchange(str method, str url, any data, any headers, int timeout_sec, str ua, any options) dict {
+   if !startswith(lower(url), "http://") { return _http1_fail(method, url, "plaintext fallback requires http://") }
+   def parsed_url = http.http_parse_url_ex(url)
+   if !parsed_url.get("ok", false) { return _http1_fail(method, url, "invalid HTTP URL") }
+   def host = to_str(parsed_url.get("host", ""))
+   def port = int(parsed_url.get("port", 80))
+   def target = to_str(parsed_url.get("target", "/"))
+   if host.len == 0 { return _http1_fail(method, url, "missing HTTP host") }
+   def sock = socket.socket_connect(host, port)
+   if sock < 0 { return _http1_fail(method, url, "HTTP connect failed") }
+   defer { socket.close_socket(sock) }
+   socket.socket_set_timeout_ms(sock, timeout_sec * 1000)
+   def authority = _http1_authority(host, port)
+   def request_line = method + " " + target + " HTTP/1.1\r\n"
+   mut headers_str = "Host: " + authority + "\r\n" + "User-Agent: " + ua + "\r\n" + "Connection: close\r\n"
+   mut extra_headers = ""
+   if is_dict(headers) {
+      def items = _d.dict_items(headers)
+      mut i = 0
+      while i < items.len {
+         def pair = items.get(i)
+         def k = strip(to_str(pair.get(0)))
+         def v = strip(to_str(pair.get(1)))
+         if k.len > 0 && v.len > 0 { extra_headers = extra_headers + k + ": " + v + "\r\n" }
+         i += 1
+      }
+   } elif is_list(headers) || is_tuple(headers) {
+      mut j = 0
+      while j < headers.len {
+         def line = strip(to_str(headers.get(j)))
+         if line.len > 0 { extra_headers = extra_headers + line + "\r\n" }
+         j += 1
+      }
+   }
+   mut body_str = ""
+   if data != nil && data != 0 {
+      body_str = is_str(data) ? data : to_str(data)
+      headers_str = headers_str + "Content-Length: " + to_str(body_str.len) + "\r\n"
+   }
+   def full_request = request_line + headers_str + extra_headers + "\r\n" + body_str
+   if socket.write_socket_all(sock, full_request) != full_request.len { return _http1_fail(method, url, "HTTP write failed") }
+   mut response = ""
+   mut total = 0
+   while total < 10485760 {
+      def chunk = socket.read_socket(sock, 8192)
+      if chunk.len == 0 { break }
+      response = response + chunk
+      total += chunk.len
+   }
+   mut header_end = find(response, "\r\n\r\n")
+   mut split_len = 4
+   if header_end < 0 {
+      header_end = find(response, "\n\n")
+      split_len = 2
+   }
+   if header_end < 0 { return _http1_fail(method, url, "invalid HTTP response") }
+   def headers_part = slice(response, 0, header_end)
+   def body = slice(response, header_end + split_len, response.len)
+   _http1_result(headers_part, body, method, url, 0)
+}
+
+fn _http1_request(any method, any url, any data=0, any headers=0, any timeout_sec=60, any user_agent="nytrix/1.0", any options=0) dict {
+   "Performs a plaintext HTTP/1.1 request via socket and returns parsed status, headers, and body."
+   def m = _method(method)
+   if !is_str(url) || url.len == 0 || _has_ctl(url) { return _http1_fail(m, url, "invalid URL") }
+   def low = lower(url)
+   if startswith(low, "https://") { return _http1_fail(m, url, "https requires libcurl(TLS)") }
+   if !startswith(low, "http://") { return _http1_fail(m, url, "unsupported URL scheme; plaintext fallback supports http://") }
+   def timeout_v = _timeout_sec(timeout_sec)
+   def ua_v = _ua(user_agent)
+   _curl_log(options, "info", "HTTP1 " + m + " " + url)
+   mut current_url = url
+   mut current_method = m
+   mut current_data = data
+   mut redirects = 0
+   mut final = _http1_fail(m, url, "request failed")
+   def follow = _opt_bool(options, "follow", true)
+   def max_redirects = _opt_int(options, "max_redirects", 10, 0, 100)
+   while true {
+      def parsed = _http1_exchange(current_method, current_url, current_data, headers, timeout_v, ua_v, options)
+      final = parsed
+      def status = int(parsed.get("status", 0))
+      if !follow { break }
+      if !(status == 301 || status == 302 || status == 303 || status == 307 || status == 308) { break }
+      def response_headers = parsed.get("headers", dict(0))
+      def location = is_dict(response_headers) ? response_headers.get("location", "") : ""
+      if !is_str(location) || strip(location).len == 0 { break }
+      if redirects >= max_redirects {
+         final = final.set("error", "too many redirects")
+         final = final.set("ok", false)
+         break
+      }
+      redirects += 1
+      current_url = _http1_resolve(current_url, location)
+      def next_low = lower(current_url)
+      if startswith(next_low, "https://") {
+         final = _http1_fail(current_method, current_url, "https requires libcurl(TLS)")
+         break
+      }
+      if !startswith(next_low, "http://") {
+         final = _http1_fail(current_method, current_url, "redirect left plaintext HTTP")
+         break
+      }
+      if status == 303 || ((status == 301 || status == 302) && current_method != "GET" && current_method != "HEAD") {
+         current_method = "GET"
+         current_data = 0
+      }
+   }
+   final = final.set("redirects", redirects)
+   final
+}
+
+fn _curl_request_impl(any method, any url, any data=0, any headers=0, any timeout_sec=60, any user_agent="nytrix/1.0", any options=0) dict {
    "Performs an HTTP/HTTPS request via libcurl and returns parsed status, headers, and body."
    def m = _method(method)
    _curl_log(options, "info", m + " " + (is_str(url) ? url : to_str(url)))
@@ -547,6 +729,14 @@ fn curl_request(any method, any url, any data=0, any headers=0, any timeout_sec=
    def okr = _curl_result(out_headers, out_body, m, url, 0)
    _curl_log(options, okr.get("ok", false) ? "info" : "error", m + " " + url + " -> " + to_str(okr.get("status", 0)) + " " + okr.get("reason", "") + " " + to_str(out_body.len) + "B")
    okr
+}
+
+fn curl_request(any method, any url, any data=0, any headers=0, any timeout_sec=60, any user_agent="nytrix/1.0", any options=0) dict {
+   "Performs an HTTP/HTTPS request, preferring libcurl and falling back to plaintext HTTP/1.1."
+   if !_curl_disable() && _load() {
+      return _curl_request_impl(method, url, data, headers, timeout_sec, user_agent, options)
+   }
+   return _http1_request(method, url, data, headers, timeout_sec, user_agent, options)
 }
 
 fn curl_request_raw(any method, any url, any data=0, any headers=0, any timeout_sec=60, any user_agent="nytrix/1.0", any options=0) str {

@@ -243,6 +243,8 @@ typedef struct {
   ny_c_frontend_t c_frontend;
   bool vm_disasm;
   const char *vm_disasm_filter;
+  bool mixed_disasm;
+  const char *mixed_disasm_filter;
   bool native_dump_ir;
   bool nyr_dump_text;
   bool nyr_dump_raw;

@@ -8,18 +8,77 @@ use core
 use core.mem
 use core.math.bin
 use core.math.crypto.hash
+use core.math.crypto.analysis.crypt as cryptny
 use core.math.crypto.analysis.worldfreq
 use core.os (file_exists, file_read)
 use core.os.path as ospath
 use core.os.sys
 use core.str as str
+use core.os.ffi as ffi
 
-if comptime { __os_name() == "linux" }{
-   #link "libcrypt.so.1"
-   #include <crypt.h>
-   extern "" {
-      fn crypt(ptr phrase, ptr setting) ptr
+;; libcrypt is optional: bound through dlopen so hosts without it can use
+;; pure-Ny fallbacks for common crypt schemes (DES, MD5, SHA-256, SHA-512).
+mut _crypt_checked = false
+mut _crypt_ok = false
+mut _crypt_handle = 0
+mut _crypt_fn = 0
+
+fn _crypt_load() bool {
+   if _crypt_checked { return _crypt_ok }
+   _crypt_checked = true
+   _crypt_ok = false
+   mut lib = 0
+   if __os_name() == "linux" {
+      lib = ffi.dlopen_checked("libcrypt.so.1", "crypt", ffi.RTLD_NOW() | ffi.RTLD_GLOBAL())
+      if !lib { lib = ffi.dlopen_checked("libcrypt.so", "crypt", ffi.RTLD_NOW() | ffi.RTLD_GLOBAL()) }
+   } elif __os_name() == "macos" {
+      lib = ffi.dlopen_checked("libcrypt.dylib", "crypt", ffi.RTLD_NOW() | ffi.RTLD_GLOBAL())
+      if !lib { lib = ffi.dlopen_checked("libcrypt.1.dylib", "crypt", ffi.RTLD_NOW() | ffi.RTLD_GLOBAL()) }
+   } else {
+      lib = ffi.dlopen_checked("crypt.dll", "crypt", ffi.RTLD_NOW() | ffi.RTLD_GLOBAL())
    }
+   if !lib { return false }
+   def crypt_fn = ffi.dlsym(lib, "crypt")
+   if !crypt_fn { return false }
+   _crypt_handle = lib
+   _crypt_fn = crypt_fn
+   _crypt_ok = true
+   true
+}
+
+fn _crypt_available() bool {
+   _crypt_load()
+   _crypt_ok
+}
+
+fn _crypt_hash_pure(str word, str salt) str {
+   cryptny.crypt_hash(word, salt)
+}
+
+fn _crypt_des(str word, str salt) str {
+   cryptny.crypt_des(word, salt)
+}
+
+fn _crypt_md5(str word, str salt) str {
+   cryptny.crypt_md5(word, salt)
+}
+
+fn _crypt_sha256(str word, str salt) str {
+   cryptny.crypt_sha256(word, salt)
+}
+
+fn _crypt_sha512(str word, str salt) str {
+   cryptny.crypt_sha512(word, salt)
+}
+
+fn unix_crypt_hash(str word, str salt_or_hash) str {
+   "Hash `word` with libc `crypt(3)` or pure-Ny fallback using `salt_or_hash` as the salt string.
+   Passing a full target hash is valid for classic Unix crypt formats."
+   if _crypt_available() {
+      def out = ffi.any2(_crypt_fn, cstr(word), cstr(salt_or_hash))
+      return out ? str.cstr_to_str(out) : ""
+   }
+   return _crypt_hash_pure(word, salt_or_hash)
 }
 
 mut _wordlist_cache = dict(8)
@@ -877,19 +936,8 @@ fn analysis_dictionary_crack_many_with_variants(list targets, fnptr verify_fn, i
 }
 
 fn unix_crypt_available() bool {
-   "Return true when libc `crypt(3)` is available through Ny FFI."
-   #linux { return true } #else { return false } #endif
-}
-
-fn unix_crypt_hash(str word, str salt_or_hash) str {
-   "Hash `word` with libc `crypt(3)` using `salt_or_hash` as the salt string.
-   Passing a full target hash is valid for classic Unix crypt formats."
-   #linux {
-      def out = crypt(cstr(word), cstr(salt_or_hash))
-      return out ? str.cstr_to_str(out) : ""
-   } #else {
-      return ""
-   } #endif
+   "Return true when Unix crypt support is available via libcrypt or pure Ny."
+   true
 }
 
 fn _unix_crypt_verify(str candidate, str target) bool { unix_crypt_hash(candidate, target) == target }

@@ -128,12 +128,6 @@ fn _gizmo_norm3(f64 x, f64 y, f64 z, any fallback) list {
    [x / len, y / len, z / len]
 }
 
-fn _gizmo_dot3(any a, any b) f64 {
-   float(a.get(0, 0.0)) * float(b.get(0, 0.0)) +
-   float(a.get(1, 0.0)) * float(b.get(1, 0.0)) +
-   float(a.get(2, 0.0)) * float(b.get(2, 0.0))
-}
-
 fn _gizmo_ray_plane_hit(any ray, list point, list normal) dict {
    def ox, oy = float(ray.get("ox", 0.0)), float(ray.get("oy", 0.0))
    def oz = float(ray.get("oz", 0.0))
@@ -202,13 +196,6 @@ fn _gizmo_axis_closest_coord(any bounds, int axis, any ray) dict {
    if abs(den) <= 0.00001 { return {"ok": false, "axis": axis, "coord": 0.0} }
    def u = (b * e - d) / den
    {"ok": true, "axis": axis, "coord": u}
-}
-
-fn _gizmo_axis_ray_coord(any bounds, int axis, any x, any y) dict {
-   if axis < 1 || axis > 3 { return {"ok": false, "axis": axis, "coord": 0.0} }
-   def ray = _gizmo_ray_from_screen(x, y)
-   if !bool(ray.get("ok", false)) { return {"ok": false, "axis": axis, "coord": 0.0} }
-   _gizmo_axis_closest_coord(bounds, axis, ray)
 }
 
 fn _gizmo_drag_point(any bounds, int axis, any x, any y, any plane_normal=0) dict {

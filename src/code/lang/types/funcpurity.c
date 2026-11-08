@@ -588,6 +588,9 @@ typedef struct {
   bool call_effect_row_known;
   bool call_effect_custom_row_unknown;
   const expr_t *callable_expr;
+  int callable_arity;
+  int callable_min_arity;
+  bool callable_arity_known;
   bool is_callable;
   bool is_query;
   uint32_t query_effects;
@@ -805,6 +808,9 @@ static void ny_effect_record_local_container(
   ctx->local_containers[ctx->local_container_len]
       .call_effect_custom_row_unknown = false;
   ctx->local_containers[ctx->local_container_len].callable_expr = NULL;
+  ctx->local_containers[ctx->local_container_len].callable_arity = 0;
+  ctx->local_containers[ctx->local_container_len].callable_min_arity = 0;
+  ctx->local_containers[ctx->local_container_len].callable_arity_known = false;
   ctx->local_containers[ctx->local_container_len].is_callable = is_callable;
   ctx->local_containers[ctx->local_container_len].is_query = is_query;
   ctx->local_containers[ctx->local_container_len].query_effects = query_effects;
@@ -828,6 +834,89 @@ static const expr_t *ny_effect_local_callable_expr(const ny_effects_ctx *ctx,
       return fact->callable_expr;
   }
   return NULL;
+}
+
+static bool ny_effect_local_callable_arity(const ny_effects_ctx *ctx,
+                                           const char *name, int *arity,
+                                           int *min_arity) {
+  if (!ctx || !name)
+    return false;
+  for (size_t i = ctx->local_container_len; i > 0; --i) {
+    const ny_effect_local_fact_t *fact = &ctx->local_containers[i - 1];
+    if (!fact->name || strcmp(fact->name, name) != 0)
+      continue;
+    if (!fact->callable_arity_known)
+      return false;
+    if (arity)
+      *arity = fact->callable_arity;
+    if (min_arity)
+      *min_arity = fact->callable_min_arity;
+    return true;
+  }
+  return false;
+}
+
+static void ny_effect_record_local_callable_arity(ny_effects_ctx *ctx,
+                                                  const char *name, int arity,
+                                                  int min_arity) {
+  if (!ctx || !name || arity <= 0 || min_arity <= 0 || min_arity > arity)
+    return;
+  for (size_t i = ctx->local_container_len; i > 0; --i) {
+    ny_effect_local_fact_t *fact = &ctx->local_containers[i - 1];
+    if (fact->name && strcmp(fact->name, name) == 0) {
+      fact->callable_arity = arity;
+      fact->callable_min_arity = min_arity;
+      fact->callable_arity_known = true;
+      return;
+    }
+  }
+}
+
+static void ny_effect_record_callable_value_arity(ny_effects_ctx *ctx,
+                                                  const char *name,
+                                                  const expr_t *value) {
+  if (!ctx || !name || !value)
+    return;
+  if (value->kind == NY_E_LAMBDA || value->kind == NY_E_FN) {
+    int arity = (int)value->as.lambda.params.len;
+    ny_effect_record_local_callable_arity(ctx, name, arity, arity);
+    return;
+  }
+  if (value->kind == NY_E_IDENT && value->as.ident.name) {
+    int arity = 0;
+    int min_arity = 0;
+    if (ny_effect_local_callable_arity(ctx, value->as.ident.name, &arity,
+                                       &min_arity)) {
+      ny_effect_record_local_callable_arity(ctx, name, arity, min_arity);
+      return;
+    }
+    if (!assigned_name_contains(ctx->local_names, ctx->local_hashes,
+                                ctx->local_bloom ? ctx->local_bloom
+                                                 : (uint64_t[4]){0},
+                                value->as.ident.name)) {
+      fun_sig *sig = lookup_fun(ctx->cg, value->as.ident.name, 0);
+      if (sig && !sig->is_extern && !sig->is_variadic && sig->arity > 0) {
+        int required = sig->min_arity > 0 ? sig->min_arity : sig->arity;
+        if (required <= sig->arity)
+          ny_effect_record_local_callable_arity(ctx, name, sig->arity,
+                                                required);
+      }
+    }
+    return;
+  }
+  if (value->kind == NY_E_CALL && value->as.call.callee &&
+      value->as.call.callee->kind == NY_E_IDENT &&
+      value->as.call.callee->as.ident.name) {
+    int arity = 0;
+    int min_arity = 0;
+    if (ny_effect_local_callable_arity(
+            ctx, value->as.call.callee->as.ident.name, &arity, &min_arity) &&
+        value->as.call.args.len < (size_t)min_arity) {
+      int bound = (int)value->as.call.args.len;
+      ny_effect_record_local_callable_arity(ctx, name, arity - bound,
+                                            min_arity - bound);
+    }
+  }
 }
 
 static void ny_effect_record_local_callable_expr(ny_effects_ctx *ctx,
@@ -1455,6 +1544,21 @@ static bool ny_effect_resolve_module_function_value(codegen_t *cg,
 
 static bool ny_effect_lambda_summary(ny_effects_ctx *ctx, const expr_t *lambda,
                                      uint32_t *effects);
+static bool ny_effect_is_partial_application(const fun_sig *sig,
+                                             const ny_call_arg_list *args) {
+  if (!sig || !args || !args->len || sig->is_extern || sig->is_variadic ||
+      !sig->stmt_t || sig->stmt_t->kind != NY_S_FUNC ||
+      args->len >= sig->stmt_t->as.fn.params.len)
+    return false;
+  for (size_t i = 0; i < args->len; ++i)
+    if (args->data[i].name)
+      return false;
+  for (size_t i = args->len; i < sig->stmt_t->as.fn.params.len; ++i)
+    if (!sig->stmt_t->as.fn.params.data[i].def)
+      return true;
+  return false;
+}
+
 static bool ny_effect_call_result_callable_summary(ny_effects_ctx *ctx,
                                                    expr_t *call,
                                                    uint32_t *effects,
@@ -3209,6 +3313,34 @@ static bool ny_effect_call_result_callable_summary(ny_effects_ctx *ctx,
                                                      ctx->local_hashes, bloom);
   ny_call_arg_list *args =
       call->kind == NY_E_CALL ? &call->as.call.args : &call->as.memcall.args;
+  if (call->kind == NY_E_CALL && ny_effect_is_partial_application(sig, args)) {
+    if (effects)
+      *effects = ny_sig_effects(sig);
+    if (row_out)
+      *row_out = ny_effect_sig_row(sig);
+    return ny_sig_effects_known(sig);
+  }
+  if (call->kind == NY_E_CALL && call->as.call.callee &&
+      call->as.call.callee->kind == NY_E_IDENT &&
+      call->as.call.callee->as.ident.name) {
+    int arity = 0;
+    int min_arity = 0;
+    const char *callee = call->as.call.callee->as.ident.name;
+    if (ny_effect_local_callable_arity(ctx, callee, &arity, &min_arity) &&
+        call->as.call.args.len > 0 &&
+        call->as.call.args.len < (size_t)min_arity) {
+      uint32_t local_effects = NY_FX_ALL;
+      bool local_known = ny_effect_local_callable(ctx, callee, &local_effects);
+      if (effects)
+        *effects = local_known ? local_effects : NY_FX_ALL;
+      if (row_out) {
+        bool row_known = false;
+        const ny_type_t *local_row = ny_effect_local_call_row(ctx, callee, &row_known);
+        *row_out = row_known ? local_row : NULL;
+      }
+      return local_known;
+    }
+  }
   if (ny_effect_diag_verbose_enabled())
     ny_effect_diag_log("callable.factory.resolve",
                        "sig=%s std_origin=%d contract_kind=%d "
@@ -3277,6 +3409,21 @@ static bool ny_effect_call_result_callable_summary(ny_effects_ctx *ctx,
     return known;
   }
   stmt_t *function = call->semantic.canonical_callee_stmt;
+  stmt_t lambda_function = {0};
+  fun_sig lambda_signature = {0};
+  if (!sig && call->kind == NY_E_CALL && call->as.call.callee &&
+      (call->as.call.callee->kind == NY_E_FN ||
+       call->as.call.callee->kind == NY_E_LAMBDA)) {
+    const expr_t *lambda = call->as.call.callee;
+    lambda_function.kind = NY_S_FUNC;
+    lambda_function.as.fn.params = lambda->as.lambda.params;
+    lambda_function.as.fn.body = lambda->as.lambda.body;
+    lambda_signature.stmt_t = &lambda_function;
+    lambda_signature.arity = (int)lambda->as.lambda.params.len;
+    lambda_signature.return_type = "fnptr";
+    sig = &lambda_signature;
+    function = &lambda_function;
+  }
   if ((!function || function->kind != NY_S_FUNC) && sig && sig->stmt_t &&
       sig->stmt_t->kind == NY_S_FUNC)
     function = sig->stmt_t;
@@ -3334,12 +3481,15 @@ static bool ny_effect_call_result_callable_summary(ny_effects_ctx *ctx,
                              .owner_effect_contract_override = true};
   for (size_t i = 0; i < function->as.fn.params.len; ++i) {
     const param_t *param = &function->as.fn.params.data[i];
-    if (!param->name || !ny_effect_param_is_callable(param->type))
+    if (!param->name)
       continue;
     expr_t *actual = ny_effect_hof_actual(sig, args, i, 0);
     uint32_t callback_effects = NY_FX_ALL;
     bool callback_known = actual && ny_effect_callback_expr_summary(
                                         ctx, actual, &callback_effects);
+    if (!ny_effect_param_is_callable(param->type) &&
+        !(function == &lambda_function && callback_known))
+      continue;
     ny_effect_record_local_container(
         &isolated, param->name, NULL, NULL, param->type,
         callback_known ? callback_effects : NY_FX_ALL, callback_known, true,
@@ -3751,6 +3901,13 @@ static bool effects_visit_expr(ny_visitor_t *v, expr_t *e) {
     fun_sig *sig = ny_purity_resolve_call_sig(
         ctx->cg, &e->as.call, ctx->local_names, ctx->local_hashes,
         ctx->local_bloom ? ctx->local_bloom : (uint64_t[4]){0});
+    if (ny_effect_is_partial_application(sig, &e->as.call.args)) {
+      e->semantic.call_effect_mask = NY_FX_ALLOC;
+      e->semantic.call_effect_known = true;
+      e->semantic.call_effect_resolved = true;
+      ctx->result |= NY_FX_ALLOC;
+      return false;
+    }
     bool is_builtin_set_idx =
         (e->semantic.canonical_callee &&
          strcmp(e->semantic.canonical_callee, "core.set_idx") == 0) ||
@@ -6632,6 +6789,9 @@ static bool effects_visit_stmt(ny_visitor_t *v, stmt_t *s) {
             value_type, call_effects, call_effects_known, is_callable, is_query,
             query_effects, query_effects_known, is_query_step,
             query_step_effects, query_step_effects_known);
+        if (is_callable)
+          ny_effect_record_callable_value_arity(ctx, s->as.var.names.data[i],
+                                                init);
         ny_effect_record_callback_value_row(ctx, s->as.var.names.data[i], init,
                                             is_callable);
         const expr_t *callable_expr =
@@ -7270,6 +7430,17 @@ static fun_sig *ny_purity_resolve_call_sig(codegen_t *cg, expr_call_t *call,
   expr_t *callee = call->callee;
   while (callee && callee->kind == NY_E_SPLICE)
     callee = callee->as.splice.expr;
+  if (callee && callee->kind == NY_E_CALL && callee->as.call.callee &&
+      callee->as.call.callee->kind == NY_E_IDENT) {
+    fun_sig *partial = ny_purity_resolve_call_sig(
+        cg, &callee->as.call, local_names, local_hashes, local_bloom);
+    size_t prefix = callee->as.call.args.len;
+    if (partial && !partial->is_extern && !partial->is_variadic &&
+        partial->arity > 0 && prefix > 0 &&
+        prefix < (size_t)partial->min_arity &&
+        prefix + call->args.len == (size_t)partial->arity)
+      return partial;
+  }
   if (!callee || callee->kind != NY_E_IDENT)
     return NULL;
   const char *name = callee->as.ident.name;
@@ -7434,14 +7605,20 @@ static bool ny_purity_match_pattern(codegen_t *cg, expr_t *pattern,
     const char *name = pattern->as.ident.name;
     if (ny_expr_is_wildcard_ident(pattern))
       return true;
-    /* Enum constructor patterns are syntax, not calls, and are always pure.
+    /*
+     * Enum constructor patterns are syntax, not calls, and are always pure.
      * The enum member owner check below is for payload binding purposes only;
-     * constructor-shaped patterns should not be classified as impure function calls. */
+     * constructor-shaped patterns should not be classified as impure function
+     * calls.
+     */
     if (name && lookup_enum_member_owner(cg, name, NULL))
       return true;
-    /* If the identifier has a name but is not recognized as an enum member owner,
-     * still return pure for constructor-shaped patterns that may be resolved later
-     * in the pipeline, while preserving soundness for non-enum identifiers. */
+    /*
+     * If the identifier has a name but is not recognized as an enum member
+     * owner, still return pure for constructor-shaped patterns that may be
+     * resolved later in the pipeline, while preserving soundness for non-enum
+     * identifiers.
+     */
     return true;
   }
   if (pattern->kind == NY_E_MEMBER || pattern->kind == NY_E_CALL ||

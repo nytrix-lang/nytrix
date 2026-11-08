@@ -237,7 +237,7 @@ mut _cpu_buf = 0
 mut _cpu_w = 0
 mut _cpu_h = 0
 mut _cpu_clear_color = 0xFF000000
-mut _gl_capture_pixels = 0
+mut any _gl_capture_pixels = nil
 mut _gl_capture_w = 0
 mut _gl_capture_h = 0
 mut _gl_capture_ready = false
@@ -1169,6 +1169,7 @@ fn _cpu_draw_triangle(f64 x0, f64 y0, f64 x1, f64 y1, f64 x2, f64 y2, int c) boo
    if max_y > _cpu_h { max_y = _cpu_h }
    def area = ((x1 - x0) * (y2 - y0)) - ((y1 - y0) * (x2 - x0))
    if abs(area) < 0.000001 { return false }
+   def eps = 1e-6
    mut y = min_y
    while y < max_y {
       mut x = min_x
@@ -1177,7 +1178,7 @@ fn _cpu_draw_triangle(f64 x0, f64 y0, f64 x1, f64 y1, f64 x2, f64 y2, int c) boo
          def w0 = ((x1 - x0) * (py - y0)) - ((y1 - y0) * (px - x0))
          def w1 = ((x2 - x1) * (py - y1)) - ((y2 - y1) * (px - x1))
          def w2 = ((x0 - x2) * (py - y2)) - ((y0 - y2) * (px - x2))
-         if (w0 >= 0.0 && w1 >= 0.0 && w2 >= 0.0) || (w0 <= 0.0 && w1 <= 0.0 && w2 <= 0.0) { _cpu_put(x, y, c) }
+         if (w0 >= -eps && w1 >= -eps && w2 >= -eps) || (w0 <= eps && w1 <= eps && w2 <= eps) { _cpu_put(x, y, c) }
          x += 1
       }
       y += 1
@@ -3626,38 +3627,20 @@ fn _init_with_window(any win, bool prefer_vulkan=true) bool {
    def live_w = int(live_sz.get(0, 0))
    def live_h = int(live_sz.get(1, 0))
    if live_w > 0 && live_h > 0 { set_win_size(live_w, live_h) }
-   if !prefer_vulkan {
-      if !lib_glr.init(win) {
-         if _is_debug() { ui_profile.print_text("[gfx] OpenGL context bind failed") }
-         _backend = 0
-         return false
-      }
-      _active_win = win
-      _backend = 1
-      lib_atlas.atlas_set_backend("gl")
-      _vk_cam_pos_valid = false
-      if _is_debug() { ui_profile.print_text("[gfx] Using Native OpenGL Backend") }
-      if _start_time == 0 {
-         _start_time = ticks()
-         _last_frame_time = _start_time
-         _start_time_sec = ostime.time()
-      }
-      return true
-   }
-   if !lib_vkr.init(win) {
-      lib_vkr.shutdown()
+   def bool ready = prefer_vulkan ? lib_vkr.init(win) : lib_glr.init(win)
+   if !ready {
+      if prefer_vulkan { lib_vkr.shutdown() }
       if _is_debug() {
-         ui_profile.print_text("[gfx] Vulkan init failed")
-         ui_profile.print_text("[gfx] requested GPU backend failed; no software fallback is active")
+         ui_profile.print_text(prefer_vulkan ? "[gfx] Vulkan init failed, no software fallback is active" : "[gfx] OpenGL context bind failed")
       }
-      _backend = 0
+      _backend = BACKEND_NONE
       return false
    }
    _active_win = win
-   _backend = 2
-   lib_atlas.atlas_set_backend("vk")
+   _backend = prefer_vulkan ? BACKEND_VK : BACKEND_GL
+   lib_atlas.atlas_set_backend(prefer_vulkan ? "vk" : "gl")
    _vk_cam_pos_valid = false
-   if _is_debug() { ui_profile.print_text("[gfx] Using Native Vulkan Backend") }
+   if _is_debug() { ui_profile.print_text(prefer_vulkan ? "[gfx] Using Native Vulkan Backend" : "[gfx] Using Native OpenGL Backend") }
    if _start_time == 0 {
       _start_time = ticks()
       _last_frame_time = _start_time
@@ -5254,6 +5237,15 @@ fn _draw_filled_fan_fallback(
       i += 1
    }
    _draw_triangles_impl(verts, segments, false)
+   ; Ensure center pixel is filled (triangle fan can miss it due to FP precision)
+   if _backend == BACKEND_MOCK {
+      def c = _cpu_pack_color(r, g, b, alpha)
+      def ix = int(cx)
+      def iy = int(cy)
+      if ix >= 0 && ix < _cpu_w && iy >= 0 && iy < _cpu_h {
+         _cpu_put(ix, iy, c)
+      }
+   }
    true
 }
 
@@ -10626,14 +10618,6 @@ fn _scene_bounds_cullable(any min, any max) bool {
    def sy = abs(float(max.get(1, 0.0)) - float(min.get(1, 0.0)))
    def sz = abs(float(max.get(2, 0.0)) - float(min.get(2, 0.0)))
    (sx + sy + sz) > 0.000001
-}
-
-fn _clip_corner_reject_bits(f64 cx, f64 cy, f64 cz, f64 cw, f64 eps) int {
-   mut bits = 0
-   if cx < (0.0 - cw - eps) { bits = bits | 1 } if cx > (cw + eps) { bits = bits | 2 }
-   if cy < (0.0 - cw - eps) { bits = bits | 4 } if cy > (cw + eps) { bits = bits | 8 }
-   if cz < (0.0 - eps) { bits = bits | 16 } if cz > (cw + eps) { bits = bits | 32 }
-   bits
 }
 
 fn _is_aabb_visible_xform(list min, list max, list mvp, any model=0) bool {

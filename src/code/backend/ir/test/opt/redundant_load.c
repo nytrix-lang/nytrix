@@ -453,6 +453,64 @@ static bool run_local_forward_uses_source_value_provenance(void) {
   return ok;
 }
 
+static bool run_single_predecessor_forwarding(bool with_store) {
+  const char *name = with_store ? "rle-single-pred-store-barrier"
+                                : "rle-single-pred-load-forward";
+  nyr_func_t f;
+  nyr_opt_begin(&f);
+  int addr = emit_address(&f, &rle_cell_a);
+  int first = emit_load(&f, addr);
+  nyr_opt_br(&f, 42);
+  nyr_opt_label(&f, 42);
+  int stored = -1;
+  if (with_store) {
+    stored = nyr_opt_const(&f, 63);
+    emit_store(&f, addr, stored);
+  }
+  size_t load_at = f.len;
+  int second = emit_load(&f, addr);
+  nyr_opt_ret(&f, second);
+  if (!prepare(&f, name)) {
+    nyr_ir_func_free(&f);
+    return false;
+  }
+  bool ok = nyr_redundant_load_elim(&f) && nyr_opt_verify(&f, name) &&
+            f.data[load_at].op == NYIR_COPY &&
+            f.data[load_at].a == (with_store ? stored : first);
+  if (!ok)
+    nyr_dump(stderr, &f, name);
+  nyr_ir_func_free(&f);
+  return ok;
+}
+
+static bool run_join_does_not_forward(void) {
+  const char *name = "rle-join-does-not-forward";
+  nyr_func_t f;
+  nyr_opt_begin(&f);
+  int addr = emit_address(&f, &rle_cell_a);
+  int cond = nyr_opt_const(&f, 1);
+  nyr_opt_br_if(&f, cond, 71);
+  nyr_opt_label(&f, 70);
+  emit_load(&f, addr);
+  nyr_opt_br(&f, 72);
+  nyr_opt_label(&f, 71);
+  nyr_opt_br(&f, 72);
+  nyr_opt_label(&f, 72);
+  size_t load_at = f.len;
+  int second = emit_load(&f, addr);
+  nyr_opt_ret(&f, second);
+  if (!prepare(&f, name)) {
+    nyr_ir_func_free(&f);
+    return false;
+  }
+  bool ok = nyr_redundant_load_elim(&f) && nyr_opt_verify(&f, name) &&
+            f.data[load_at].op == NYIR_LOAD_I64;
+  if (!ok)
+    nyr_dump(stderr, &f, name);
+  nyr_ir_func_free(&f);
+  return ok;
+}
+
 int main(void) {
   return run_positive() && run_structural_store_load_forwarding() &&
                  run_vector_store_forwarding(false) &&
@@ -466,7 +524,10 @@ int main(void) {
                  run_copy_struct_alias_barrier("copy-struct-unknown-dst", true,
                                                false) &&
                  run_loaded_pointer_has_unknown_value_provenance() &&
-                 run_local_forward_uses_source_value_provenance()
+                 run_local_forward_uses_source_value_provenance() &&
+                 run_single_predecessor_forwarding(false) &&
+                 run_single_predecessor_forwarding(true) &&
+                 run_join_does_not_forward()
              ? 0
              : 1;
 }

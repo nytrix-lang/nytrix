@@ -27,6 +27,7 @@
 #include "test.h"
 
 #include <ctype.h>
+#include <strings.h>
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -1121,6 +1122,8 @@ static int test_env_truthy(const char *name);
 
 static bool test_collect_native(const char *root, StrVec *out,
                                 bool benchmarks_only);
+static bool bench_line_contains(const char *line, size_t len,
+                                const char *text);
 
 #include "elf.c"
 
@@ -5346,6 +5349,19 @@ static uint64_t test_sig(const char *path, const char *bin,
   static uint64_t std_bc_hash = 0;
   if (!bin_hash_ready) {
     bin_hash = file_content_hash(bin);
+    /* `bin` is usually the launcher, which stays byte-identical across a
+     * compiler-only rebuild.  The fixture result depends on ny-full, so fold
+     * it in or a stale pass survives every compiler change. */
+    const char *full = getenv("NYTRIX_NY_FULL_BIN");
+    char sibling[PATH_MAX];
+    if ((!full || !*full) && bin) {
+      const char *slash = strrchr(bin, '/');
+      int dir_len = slash ? (int)(slash - bin) + 1 : 0;
+      int n = snprintf(sibling, sizeof(sibling), "%.*sny-full", dir_len, bin);
+      full = n > 0 && (size_t)n < sizeof(sibling) ? sibling : NULL;
+    }
+    uint64_t full_hash = file_content_hash(full);
+    bin_hash = fnv1a_update(bin_hash, &full_hash, sizeof(full_hash));
     bin_hash_ready = true;
   }
   if (std_path_key != std_path) {
@@ -7443,6 +7459,11 @@ int ny_test_main(int argc, char **argv) {
       bench_show_ir = 1;
     else if (!strcmp(a, "--bench-show-asm"))
       bench_show_asm = 1;
+    else if (!strcmp(a, "--no-bench-show-asm") ||
+             !strcmp(a, "--bench-no-show-asm")) {
+      bench_show_asm = -1;
+      ny_setenv("NYTRIX_BENCH_NO_ASM", "1", 1);
+    }
     else if (!strcmp(a, "--bench-ny-verbose")) {
       bench_mode = 1;
       ny_setenv("NYTRIX_BENCH_NY_VERBOSE", "6", 1);
@@ -7467,6 +7488,10 @@ int ny_test_main(int argc, char **argv) {
         return 2;
     } else if (!strcmp(a, "--budget-fail"))
       bench_budget_fail = 1;
+    else if (!strcmp(a, "--bench-evidence")) {
+      bench_mode = 1;
+      ny_setenv("NYTRIX_BENCH_EVIDENCE", "1", 1);
+    }
     else if (ny_arg_match_with_value(a, "--bench-out-json")) {
       bench_mode = 1;
       if (!ny_arg_take_value(a, &i, argc, argv, &bench_output_json, err,
@@ -8476,11 +8501,11 @@ static double bench_median(double *xs, int n) {
 static double bench_noise_limit_pct(void) {
   const char *raw = getenv("NYTRIX_BENCH_MAX_NOISE_PCT");
   if (!raw || !*raw)
-    return 20.0;
+    return 30.0;
   char *end = NULL;
   double value = strtod(raw, &end);
   if (end == raw || value < 0.0 || value > 500.0)
-    return 20.0;
+    return 30.0;
   return value;
 }
 
@@ -10138,6 +10163,20 @@ static int bench_ny_argv(char *argv[], const char *bin, const char *opt_level,
  * arguments.  Captures stdout+stderr to one temp file.  Returns the joined
  * output as a heap string or NULL.
  */
+static void bench_print_mixed_disassembly(const char *mixed) {
+  if (!mixed)
+    return;
+  while (*mixed) {
+    const char *eol = strchr(mixed, '\n');
+    size_t len = eol ? (size_t)(eol - mixed + 1) : strlen(mixed);
+    if (len > 1 || mixed[0] != '\n')
+      fwrite(mixed, 1, len, stdout);
+    if (!eol)
+      break;
+    mixed = eol + 1;
+  }
+}
+
 static char *bench_diag_capture(const char *bin, const char *opt_level,
                                 const char *tier, const char *engine,
                                 const char *target, char *const extra[],
@@ -10215,6 +10254,737 @@ static bool bench_test_asm_size(const char *line, size_t line_len,
          memcmp(start, name, name_len) == 0 &&
          (start[name_len] == ',' || start[name_len] == ' ' ||
           start[name_len] == '\t');
+}
+
+#if defined(__linux__) || defined(__ELF__)
+#include <elf.h>
+#endif
+
+extern const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
+                                           int64_t base);
+
+static bool bench_is_reg_word(const char *w, size_t len) {
+  if (len < 2 || len > 5)
+    return false;
+  if (*w == '%') {
+    w++;
+    len--;
+  }
+  if (len == 3 && memcmp(w, "rip", 3) == 0)
+    return true;
+  if (len == 3 && (w[0] == 'r' || w[0] == 'e') &&
+      (memcmp(w + 1, "ax", 2) == 0 || memcmp(w + 1, "bx", 2) == 0 ||
+       memcmp(w + 1, "cx", 2) == 0 || memcmp(w + 1, "dx", 2) == 0 ||
+       memcmp(w + 1, "si", 2) == 0 || memcmp(w + 1, "di", 2) == 0 ||
+       memcmp(w + 1, "bp", 2) == 0 || memcmp(w + 1, "sp", 2) == 0))
+    return true;
+  if (len == 2 &&
+      (memcmp(w, "ax", 2) == 0 || memcmp(w, "bx", 2) == 0 ||
+       memcmp(w, "cx", 2) == 0 || memcmp(w, "dx", 2) == 0 ||
+       memcmp(w, "si", 2) == 0 || memcmp(w, "di", 2) == 0 ||
+       memcmp(w, "bp", 2) == 0 || memcmp(w, "sp", 2) == 0 ||
+       memcmp(w, "al", 2) == 0 || memcmp(w, "bl", 2) == 0 ||
+       memcmp(w, "cl", 2) == 0 || memcmp(w, "dl", 2) == 0 ||
+       memcmp(w, "ah", 2) == 0 || memcmp(w, "bh", 2) == 0 ||
+       memcmp(w, "ch", 2) == 0 || memcmp(w, "dh", 2) == 0))
+    return true;
+  if (w[0] == 'r' && len >= 2 && len <= 4 && isdigit((unsigned char)w[1]))
+    return true;
+  if ((w[0] == 'x' || w[0] == 'y' || w[0] == 'z') && len >= 4 &&
+      w[1] == 'm' && w[2] == 'm')
+    return true;
+  return false;
+}
+
+static const char *bench_mnemonic_color(const char *m, size_t len) {
+  if (len == 0)
+    return "\033[1;37m";
+  if (m[0] == 'j')
+    return "\033[1;33m";
+  if (len >= 4 && memcmp(m, "call", 4) == 0)
+    return "\033[1;35m";
+  if ((len >= 3 && memcmp(m, "ret", 3) == 0) ||
+      (len == 5 && memcmp(m, "leave", 5) == 0) ||
+      (len == 7 && memcmp(m, "syscall", 7) == 0))
+    return "\033[1;31m";
+  return "\033[1;37m";
+}
+
+static void bench_print_native_disassembly(const char *disasm) {
+  if (!disasm || !*disasm)
+    return;
+  int color = nyt_color_enabled();
+  const char *p = disasm;
+
+  while (*p) {
+    const char *eol = strchr(p, '\n');
+    size_t len = eol ? (size_t)(eol + 1 - p) : strlen(p);
+    if (len > 0 && strstr(p, "file format") == NULL &&
+        strstr(p, "Disassembly of section") == NULL &&
+        *p != '\n' && *p != '\r') {
+      break;
+    }
+    p += len;
+  }
+
+  int consecutive_nops = 0;
+
+  while (*p) {
+    const char *eol = strchr(p, '\n');
+    size_t len = eol ? (size_t)(eol - p) : strlen(p);
+    while (len > 0 && p[len - 1] == '\r')
+      len--;
+
+    if (len == 0) {
+      fputc('\n', stdout);
+      p = eol ? eol + 1 : p + len;
+      continue;
+    }
+
+    if (p[0] == '<' || (len > 1 && p[0] != ' ' && p[0] != '\t' && p[len - 1] == ':')) {
+      consecutive_nops = 0;
+      if (color)
+        printf("%s%.*s%s\n", "\033[1;32m", (int)len, p, "\033[0m");
+      else
+        printf("%.*s\n", (int)len, p);
+      p = eol ? eol + 1 : p + len;
+      continue;
+    }
+
+    const char *sym_start = (const char *)memchr(p, '<', len);
+    if (sym_start && sym_start > p && p[len - 1] == ':') {
+      consecutive_nops = 0;
+      if (color)
+        printf("%s%.*s%s\n", "\033[1;32m", (int)len, p, "\033[0m");
+      else
+        printf("%.*s\n", (int)len, p);
+      p = eol ? eol + 1 : p + len;
+      continue;
+    }
+
+    const char *cur = p;
+    const char *end = p + len;
+    while (cur < end && (*cur == ' ' || *cur == '\t'))
+      cur++;
+
+    const char *colon = (const char *)memchr(cur, ':', (size_t)(end - cur));
+    if (!colon || colon >= end) {
+      printf("%.*s\n", (int)len, p);
+      p = eol ? eol + 1 : p + len;
+      continue;
+    }
+
+    size_t addr_len = (size_t)(colon - cur);
+    const char *after_colon = colon + 1;
+    while (after_colon < end && (*after_colon == ' ' || *after_colon == '\t'))
+      after_colon++;
+
+    if (bench_line_contains(after_colon, (size_t)(end - after_colon), "nop") ||
+        bench_line_contains(after_colon, (size_t)(end - after_colon), "int3")) {
+      consecutive_nops++;
+      if (consecutive_nops == 3) {
+        if (color)
+          printf("         \033[90m... [padding collapsed]\033[0m\n");
+        else
+          printf("         ... [padding collapsed]\n");
+      }
+      if (consecutive_nops >= 3) {
+        p = eol ? eol + 1 : p + len;
+        continue;
+      }
+    } else {
+      consecutive_nops = 0;
+    }
+
+    if (!color) {
+      printf("%.*s\n", (int)len, p);
+      p = eol ? eol + 1 : p + len;
+      continue;
+    }
+
+    fwrite(p, 1, (size_t)(cur - p), stdout);
+    printf("\033[36m%.*s:\033[0m", (int)addr_len, cur);
+
+    const char *tab = (const char *)memchr(after_colon, '\t', (size_t)(end - after_colon));
+    const char *mnem_start = after_colon;
+    const char *bytes_start = NULL;
+    size_t bytes_len = 0;
+
+    if (tab) {
+      bool has_hex_bytes = false;
+      const char *t = after_colon;
+      while (t < tab) {
+        if (isxdigit((unsigned char)*t)) {
+          has_hex_bytes = true;
+          break;
+        }
+        t++;
+      }
+      if (has_hex_bytes) {
+        bytes_start = after_colon;
+        bytes_len = (size_t)(tab - after_colon);
+        mnem_start = tab + 1;
+        while (mnem_start < end && (*mnem_start == ' ' || *mnem_start == '\t'))
+          mnem_start++;
+      }
+    }
+
+    if (bytes_start && bytes_len > 0)
+      printf("  \033[90m%-18.*s\033[0m ", (int)bytes_len, bytes_start);
+    else
+      printf("  ");
+
+    const char *mnem_end = mnem_start;
+    while (mnem_end < end && *mnem_end != ' ' && *mnem_end != '\t')
+      mnem_end++;
+    size_t mlen = (size_t)(mnem_end - mnem_start);
+    const char *mclr = bench_mnemonic_color(mnem_start, mlen);
+    printf("%s%.*s\033[0m", mclr, (int)mlen, mnem_start);
+
+    const char *op_cur = mnem_end;
+    while (op_cur < end && (*op_cur == ' ' || *op_cur == '\t')) {
+      fputc(*op_cur, stdout);
+      op_cur++;
+    }
+
+    while (op_cur < end) {
+      if (*op_cur == '#' || *op_cur == ';') {
+        printf("\033[90;3m%.*s\033[0m", (int)(end - op_cur), op_cur);
+        break;
+      }
+      if (*op_cur == '<') {
+        const char *cl = (const char *)memchr(op_cur, '>', (size_t)(end - op_cur));
+        size_t slen = cl ? (size_t)(cl + 1 - op_cur) : (size_t)(end - op_cur);
+        printf("\033[32m%.*s\033[0m", (int)slen, op_cur);
+        op_cur += slen;
+        continue;
+      }
+      if (isalpha((unsigned char)*op_cur) || *op_cur == '%' || *op_cur == '_') {
+        const char *w_start = op_cur;
+        while (op_cur < end &&
+               (isalnum((unsigned char)*op_cur) || *op_cur == '_' ||
+                *op_cur == '%'))
+          op_cur++;
+        size_t w_len = (size_t)(op_cur - w_start);
+        if (bench_is_reg_word(w_start, w_len)) {
+          printf("\033[36m%.*s\033[0m", (int)w_len, w_start);
+        } else if (w_len >= 3 && (memcmp(w_start, "ptr", 3) == 0 ||
+                                  memcmp(w_start, "qword", 5) == 0 ||
+                                  memcmp(w_start, "dword", 5) == 0 ||
+                                  memcmp(w_start, "word", 4) == 0 ||
+                                  memcmp(w_start, "byte", 4) == 0)) {
+          printf("\033[90m%.*s\033[0m", (int)w_len, w_start);
+        } else {
+          fwrite(w_start, 1, w_len, stdout);
+        }
+        continue;
+      }
+      if (isdigit((unsigned char)*op_cur) ||
+          (*op_cur == '$' && op_cur + 1 < end &&
+           (isdigit((unsigned char)op_cur[1]) || op_cur[1] == '-')) ||
+          ((*op_cur == '-' || *op_cur == '+') && op_cur + 1 < end &&
+           isdigit((unsigned char)op_cur[1]))) {
+        const char *n_start = op_cur;
+        if (*op_cur == '$')
+          op_cur++;
+        if (op_cur < end && (*op_cur == '-' || *op_cur == '+'))
+          op_cur++;
+        if (op_cur + 1 < end && op_cur[0] == '0' &&
+            (op_cur[1] == 'x' || op_cur[1] == 'X')) {
+          op_cur += 2;
+          while (op_cur < end && isxdigit((unsigned char)*op_cur))
+            op_cur++;
+        } else {
+          while (op_cur < end && isdigit((unsigned char)*op_cur))
+            op_cur++;
+        }
+        printf("\033[33m%.*s\033[0m", (int)(op_cur - n_start), n_start);
+        continue;
+      }
+      fputc(*op_cur, stdout);
+      op_cur++;
+    }
+    fputc('\n', stdout);
+    p = eol ? eol + 1 : p + len;
+  }
+}
+
+#if defined(__linux__) || defined(__ELF__)
+static char *bench_disasm_elf_internal(const char *obj_path, const char *shape) {
+  (void)shape;
+  FILE *f = fopen(obj_path, "rb");
+  if (!f)
+    return NULL;
+  if (fseek(f, 0, SEEK_END) != 0) {
+    fclose(f);
+    return NULL;
+  }
+  long fsize = ftell(f);
+  if (fsize < (long)sizeof(Elf64_Ehdr)) {
+    fclose(f);
+    return NULL;
+  }
+  if (fseek(f, 0, SEEK_SET) != 0) {
+    fclose(f);
+    return NULL;
+  }
+  unsigned char *bytes = (unsigned char *)malloc((size_t)fsize);
+  if (!bytes || fread(bytes, 1, (size_t)fsize, f) != (size_t)fsize) {
+    fclose(f);
+    free(bytes);
+    return NULL;
+  }
+  fclose(f);
+
+  const Elf64_Ehdr *eh = (const Elf64_Ehdr *)bytes;
+  if (memcmp(eh->e_ident, ELFMAG, SELFMAG) != 0 ||
+      eh->e_ident[EI_CLASS] != ELFCLASS64 ||
+      eh->e_machine != EM_X86_64 ||
+      eh->e_shentsize != sizeof(Elf64_Shdr) ||
+      eh->e_shoff + (uint64_t)eh->e_shnum * sizeof(Elf64_Shdr) > (size_t)fsize) {
+    free(bytes);
+    return NULL;
+  }
+
+  const Elf64_Shdr *sections = (const Elf64_Shdr *)(bytes + eh->e_shoff);
+  size_t symtab_idx = (size_t)-1;
+  for (size_t i = 0; i < eh->e_shnum; i++) {
+    if (sections[i].sh_type == SHT_SYMTAB) {
+      symtab_idx = i;
+      break;
+    }
+  }
+  if (symtab_idx == (size_t)-1 || sections[symtab_idx].sh_link >= eh->e_shnum) {
+    free(bytes);
+    return NULL;
+  }
+  const Elf64_Shdr *strtab_sec = &sections[sections[symtab_idx].sh_link];
+  if (strtab_sec->sh_offset + strtab_sec->sh_size > (size_t)fsize) {
+    free(bytes);
+    return NULL;
+  }
+  const char *strtab = (const char *)(bytes + strtab_sec->sh_offset);
+  const Elf64_Sym *symbols =
+      (const Elf64_Sym *)(bytes + sections[symtab_idx].sh_offset);
+  size_t sym_count = sections[symtab_idx].sh_size / sizeof(Elf64_Sym);
+
+  size_t out_cap = 65536;
+  size_t out_len = 0;
+  char *out = (char *)malloc(out_cap);
+  if (!out) {
+    free(bytes);
+    return NULL;
+  }
+  out[0] = '\0';
+  size_t funcs_disassembled = 0;
+
+  for (size_t i = 0; i < sym_count; i++) {
+    const Elf64_Sym *sym = &symbols[i];
+    if (sym->st_shndx >= eh->e_shnum || sym->st_size == 0)
+      continue;
+    unsigned char stype = ELF64_ST_TYPE(sym->st_info);
+    if (stype != STT_FUNC && stype != STT_NOTYPE)
+      continue;
+    const char *name =
+        (sym->st_name < strtab_sec->sh_size) ? (strtab + sym->st_name) : "";
+    if (!name || !*name)
+      continue;
+    const Elf64_Shdr *sec = &sections[sym->st_shndx];
+    if (!(sec->sh_flags & SHF_EXECINSTR))
+      continue;
+    if (strncmp(name, "ny_fn_", 6) != 0 && strcmp(name, "main") != 0 &&
+        strstr(name, "ny_") == NULL) {
+      continue;
+    }
+    if (sec->sh_offset + sym->st_value + sym->st_size > (size_t)fsize)
+      continue;
+
+    const unsigned char *fn_bytes = bytes + sec->sh_offset + sym->st_value;
+    const char *listing = nyr_internal_x64_disasm(
+        fn_bytes, (int64_t)sym->st_size, (int64_t)sym->st_value);
+    if (!listing || !*listing || strstr(listing, "\tunsupported\t") != NULL) {
+      free(out);
+      free(bytes);
+      return NULL;
+    }
+
+    char hdr[512];
+    int hn = snprintf(hdr, sizeof(hdr), "<%s>:\n", name);
+    if (out_len + (size_t)hn + 2 >= out_cap) {
+      out_cap = (out_cap + (size_t)hn + 4096) * 2;
+      out = (char *)realloc(out, out_cap);
+      if (!out) {
+        free(bytes);
+        return NULL;
+      }
+    }
+    memcpy(out + out_len, hdr, (size_t)hn);
+    out_len += (size_t)hn;
+
+    const char *lp = listing;
+    while (*lp) {
+      const char *eol = strchr(lp, '\n');
+      size_t line_len = eol ? (size_t)(eol - lp) : strlen(lp);
+      char line_buf[512];
+      if (line_len >= sizeof(line_buf))
+        line_len = sizeof(line_buf) - 1;
+      memcpy(line_buf, lp, line_len);
+      line_buf[line_len] = '\0';
+
+      char *tab1 = strchr(line_buf, '\t');
+      if (tab1) {
+        *tab1 = '\0';
+        char *addr_str = line_buf;
+        char *mnem = tab1 + 1;
+        char *tab2 = strchr(mnem, '\t');
+        char *ops = "";
+        if (tab2) {
+          *tab2 = '\0';
+          ops = tab2 + 1;
+          char *tab3 = strchr(ops, '\t');
+          if (tab3)
+            *tab3 = '\0';
+        }
+        long long addr = atoll(addr_str);
+        char fmt_line[1024];
+        int flen = snprintf(fmt_line, sizeof(fmt_line),
+                           "   %4llx:\t%-10s %s\n", addr, mnem, ops);
+        if (out_len + (size_t)flen + 2 >= out_cap) {
+          out_cap = (out_cap + (size_t)flen + 4096) * 2;
+          out = (char *)realloc(out, out_cap);
+          if (!out) {
+            free(bytes);
+            return NULL;
+          }
+        }
+        memcpy(out + out_len, fmt_line, (size_t)flen);
+        out_len += (size_t)flen;
+      }
+      if (!eol)
+        break;
+      lp = eol + 1;
+    }
+    out[out_len] = '\0';
+    funcs_disassembled++;
+  }
+
+  free(bytes);
+  if (funcs_disassembled == 0) {
+    free(out);
+    return NULL;
+  }
+  return out;
+}
+#else
+static char *bench_disasm_elf_internal(const char *obj_path, const char *shape) {
+  (void)obj_path;
+  (void)shape;
+  return NULL;
+}
+#endif
+
+/*
+ * ------------------------------------------------------------------ *
+ * Small helper: flat list of "mnemonic\topernands" strings used to
+ * compare two disassembly listings instruction-by-instruction.
+ */
+typedef struct {
+  char **items;
+  size_t count;
+  size_t cap;
+} bench_strlist;
+
+static void bench_sl_push(bench_strlist *sl, const char *s) {
+  if (sl->count + 1 >= sl->cap) {
+    sl->cap = sl->cap ? sl->cap * 2 : 64;
+    char **ni = (char **)realloc(sl->items, sl->cap * sizeof(char *));
+    if (!ni)
+      return;
+    sl->items = ni;
+  }
+  sl->items[sl->count] = strdup(s);
+  sl->count++;
+}
+
+static void bench_sl_free(bench_strlist *sl) {
+  for (size_t i = 0; i < sl->count; i++)
+    free(sl->items[i]);
+  free(sl->items);
+  sl->items = NULL;
+  sl->count = sl->cap = 0;
+}
+
+/*
+ * Parse a disassembly listing into a flat mnemonic/operands list.
+ * Handles both `addr:\tmnem\topts` (objdump) and `addr\tmnem\topts`
+ * (internal decoder) instruction lines.
+ */
+static bench_strlist bench_sl_parse_listing(const char *text) {
+  bench_strlist sl = {NULL, 0, 0};
+  if (!text)
+    return sl;
+  const char *p = text;
+  while (*p) {
+    const char *eol = strchr(p, '\n');
+    size_t llen = eol ? (size_t)(eol - p) : strlen(p);
+    char line[1024];
+    if (llen >= sizeof(line))
+      llen = sizeof(line) - 1;
+    memcpy(line, p, llen);
+    line[llen] = '\0';
+    /*
+     * Trim leading whitespace; instruction lines start with a hex address.
+     */
+    char *s = line;
+    while (*s == ' ' || *s == '\t')
+      s++;
+    char *hexend = s;
+    while ((*hexend >= '0' && *hexend <= '9') ||
+           (*hexend >= 'a' && *hexend <= 'f') ||
+           (*hexend >= 'A' && *hexend <= 'F'))
+      hexend++;
+    if (hexend == s)
+      goto next_line; /* not an instruction line */
+    /*
+     * Require ':' (objdump) or whitespace/tab (internal) right after hex.
+     */
+    if (*hexend != ':' && *hexend != ' ' && *hexend != '\t' && *hexend != '\0')
+      goto next_line;
+    /*
+     * Optional colon after the address (objdump), then whitespace/tab.
+     */
+    char *ops_start = hexend;
+    if (*ops_start == ':')
+      ops_start++;
+    while (*ops_start == ' ' || *ops_start == '\t')
+      ops_start++;
+    if (!*ops_start)
+      goto next_line;
+    char *mnem = ops_start;
+    /*
+     * Skip function label lines like `0000000000000000 <ny_fn_foo>:`
+     */
+    if (*mnem == '<')
+      goto next_line;
+    char *tab = ops_start;
+    while (*tab && *tab != ' ' && *tab != '\t')
+      tab++;
+    char *ops = "";
+    if (*tab) {
+      *tab = '\0';
+      ops = tab + 1;
+      while (*ops == ' ' || *ops == '\t')
+        ops++;
+    }
+    char entry[1024];
+    snprintf(entry, sizeof(entry), "%s\t%s", mnem, ops);
+    bench_sl_push(&sl, entry);
+  next_line:
+    if (!eol)
+      break;
+    p = eol + 1;
+  }
+  return sl;
+}
+
+/*
+ * Normalize a disassembly operand string for comparison:
+ * strip size specifiers, collapse whitespace, normalize hex/decimal.
+ */
+static void bench_norm_ops(char *dst, size_t cap, const char *src) {
+  size_t w = 0;
+  for (const char *p = src; *p && w + 1 < cap; p++) {
+    char c = *p;
+    /*
+     * Strip all whitespace.
+     */
+    if (c == ' ' || c == '\t' || c == ',')
+      continue;
+    /*
+     * Strip size specifiers: qword ptr, dword ptr, word ptr, byte ptr.
+     */
+    if (strncasecmp(p, "qword ptr", 9) == 0 || strncasecmp(p, "qwordptr", 8) == 0 ||
+        strncasecmp(p, "dword ptr", 9) == 0 || strncasecmp(p, "dwordptr", 8) == 0 ||
+        strncasecmp(p, "word ptr", 8) == 0 || strncasecmp(p, "wordptr", 7) == 0 ||
+        strncasecmp(p, "byte ptr", 8) == 0 || strncasecmp(p, "byteptr", 7) == 0 ||
+        strncasecmp(p, "ptr", 3) == 0) {
+      while (*p && *p != ' ' && *p != '	' && *p != ',')
+        p++;
+      p--;
+      continue;
+    }
+    /*
+     * Normalize NYIR-style immediate `#1` -> `1`.
+     */
+    if (c == '#')
+      continue;
+    /*
+     * Strip objdump symbol annotations: `<ny_fn_foo+0x3f>`.
+     */
+    if (c == '<') {
+      while (*p && *p != '>')
+        p++;
+      continue;
+    }
+    /*
+     * Normalize hex literals `0xNN` to decimal.
+     */
+    if (c == '0' && p[1] == 'x') {
+      char *end;
+      unsigned long v = strtoul(p + 2, &end, 16);
+      int n = snprintf(dst + w, cap - w, "%lu", v);
+      if (n > 0 && (size_t)n < cap - w) {
+        w += (size_t)n;
+        p = end - 1;
+      } else {
+        dst[w++] = c;
+      }
+      continue;
+    }
+    dst[w++] = c;
+  }
+  if (w > 0 && dst[w - 1] == ' ')
+    w--;
+  dst[w] = '\0';
+  /*
+   * Zero displacements are optional in disassembly: lea rax,[rip+0] and
+   * lea rax,[rip] are the same instruction.  Whitespace is already gone,
+   * so the forms are rip+0 and rip.
+   */
+  size_t r = 0, o = 0;
+  while (dst[r]) {
+    if (dst[r] == '+' && dst[r + 1] == '0' &&
+        (dst[r + 2] == '\0' || dst[r + 2] == ']' || dst[r + 2] == '+' ||
+         dst[r + 2] == '-' || dst[r + 2] == '[')) {
+      r += 2;
+      continue;
+    }
+    dst[o++] = dst[r++];
+  }
+  dst[o] = '\0';
+}
+
+static void bench_decoder_oracle_check(const char *obj_path, const char *shape) {
+  if (!obj_path)
+    return;
+  const char *objdump = NULL;
+  if (access("llvm-objdump", X_OK) == 0)
+    objdump = "llvm-objdump";
+  else if (access("/usr/bin/llvm-objdump", X_OK) == 0)
+    objdump = "/usr/bin/llvm-objdump";
+  else if (access("objdump", X_OK) == 0)
+    objdump = "objdump";
+  else if (access("/usr/bin/objdump", X_OK) == 0)
+    objdump = "/usr/bin/objdump";
+  if (!objdump)
+    return; /* no oracle available */
+
+  /*
+   * Internal decoder view (may be NULL if unsupported encodings appear).
+   */
+  char *internal = bench_disasm_elf_internal(obj_path, shape);
+
+  /*
+   * Capture objdump text.
+   */
+  char cmd[PATH_MAX + 64];
+  snprintf(cmd, sizeof(cmd), "%s -d -M intel --no-show-raw-insn %s", objdump,
+           obj_path);
+  FILE *oracle = popen(cmd, "r");
+  if (!oracle) {
+    free(internal);
+    return;
+  }
+  char obuf[4096];
+  size_t ocap = 1 << 20, olen = 0;
+  char *out = (char *)malloc(ocap);
+  if (!out) {
+    pclose(oracle);
+    free(internal);
+    return;
+  }
+  out[0] = '\0';
+  while (fgets(obuf, sizeof(obuf), oracle)) {
+    size_t l = strlen(obuf);
+    if (olen + l + 1 >= ocap) {
+      ocap *= 2;
+      char *no = (char *)realloc(out, ocap);
+      if (!no)
+        break;
+      out = no;
+    }
+    memcpy(out + olen, obuf, l);
+    olen += l;
+    out[olen] = '\0';
+  }
+  pclose(oracle);
+
+  bench_strlist oracle_sl = bench_sl_parse_listing(out);
+  bench_strlist internal_sl =
+      internal ? bench_sl_parse_listing(internal) : (bench_strlist){NULL, 0, 0};
+
+  size_t n_oracle = oracle_sl.count;
+  size_t n_internal = internal_sl.count;
+  size_t compared = n_oracle < n_internal ? n_oracle : n_internal;
+  size_t agree = 0;
+  size_t first_div = (size_t)-1;
+  char onorm[1024], inorm[1024];
+  for (size_t i = 0; i < compared; i++) {
+    /*
+     * Split mnemonic	opernands on each side.
+     */
+    char *o_tab = strchr(oracle_sl.items[i], '	');
+    char *i_tab = strchr(internal_sl.items[i], '	');
+    const char *o_mnem = oracle_sl.items[i];
+    const char *o_ops = "";
+    const char *i_mnem = internal_sl.items[i];
+    const char *i_ops = "";
+    if (o_tab) { *o_tab = '\0'; o_ops = o_tab + 1; }
+    if (i_tab) { *i_tab = '\0'; i_ops = i_tab + 1; }
+    bench_norm_ops(onorm, sizeof(onorm), o_ops);
+    bench_norm_ops(inorm, sizeof(inorm), i_ops);
+    /*
+     * Normalize movabs -> mov (same instruction, different naming).
+     */
+    char o_mnem_norm[64], i_mnem_norm[64];
+    snprintf(o_mnem_norm, sizeof(o_mnem_norm), "%s", o_mnem);
+    snprintf(i_mnem_norm, sizeof(i_mnem_norm), "%s", i_mnem);
+    if (strcasecmp(o_mnem_norm, "movabs") == 0)
+      snprintf(o_mnem_norm, sizeof(o_mnem_norm), "mov");
+    if (strcasecmp(i_mnem_norm, "movabs") == 0)
+      snprintf(i_mnem_norm, sizeof(i_mnem_norm), "mov");
+    int mnem_eq = strcasecmp(o_mnem_norm, i_mnem_norm) == 0;
+    int ops_eq = strcmp(onorm, inorm) == 0;
+    if (mnem_eq && ops_eq)
+      agree++;
+    else if (first_div == (size_t)-1)
+      first_div = i;
+    if (o_tab) *o_tab = '	';
+    if (i_tab) *i_tab = '	';
+  }
+
+  const char *base = strrchr(shape, '/');
+  base = base ? base + 1 : shape;
+  printf("[decoder oracle · %s] internal=%zu oracle=%zu agree=%zu",
+         base, n_internal, n_oracle, agree);
+  if (n_internal == 0 && !internal) {
+    printf("  (internal decoder produced unsupported rows, skipped)\n");
+  } else if (n_internal == n_oracle && agree == compared) {
+    printf("  OK\n");
+  } else {
+    printf("  DIVERGENCE");
+    if (first_div != (size_t)-1)
+      printf(" first at inst %zu: oracle=%s internal=%s", first_div,
+             oracle_sl.items[first_div], internal_sl.items[first_div]);
+    if (n_internal != n_oracle)
+      printf("  (count differs)");
+    printf("\n");
+  }
+
+  bench_sl_free(&oracle_sl);
+  bench_sl_free(&internal_sl);
+  free(out);
+  free(internal);
 }
 
 static void bench_print_test_assembly(const char *assembly) {
@@ -10456,92 +11226,78 @@ static void bench_diag(const char *shape, int show_ir, int show_asm,
     }
   }
   if (show_asm) {
-    char asm_tmp[PATH_MAX];
-    char flag[PATH_MAX + 32];
-    snprintf(asm_tmp, sizeof(asm_tmp), "%s/ny-bench-asm-%ld-%ld-%lu.s",
-             nyt_temp_dir(), (long)getpid(), (long)now_ms(),
-             bench_next_temp_id());
-    snprintf(flag, sizeof(flag), "--emit-asm=%s", asm_tmp);
-    char *extra[] = {flag, NULL};
-    char *out = bench_diag_capture(bin, opt_level, tier, engine, target, extra,
-                                   ny_path);
-    char *asmout = read_whole_file(asm_tmp);
-    if (asmout) {
-      printf("\n[text emitter assembly (not the timed object): %s]\n", shape);
-      bench_print_test_assembly(asmout);
-      if (report)
-        bench_report_block(report, "NYR assembly (text emitter)", "asm",
-                           asmout);
-      free(asmout);
-      remove(asm_tmp);
-    } else if (report) {
-      fprintf(report,
-              "\n### NYR assembly (text emitter) unavailable\n\n"
-              "Compiler exit/output: `%s`\n",
-              out && *out ? "see diagnostic output below" : "no output");
-      if (out && *out)
-        fprintf(report, "\n```text\n%s\n```\n", out);
-    }
-    free(out);
-
-    /*
-     * --emit-asm uses the text machine emitter. The native AOT benchmark
-     * executes the object writer, whose register allocation and instruction
-     * choices can differ. Preserve a disassembly of that exact native object
-     * as the comparison artifact.
-     */
     char obj_tmp[PATH_MAX];
-    char objdump_tmp[PATH_MAX];
     snprintf(obj_tmp, sizeof(obj_tmp), "%s/ny-bench-native-%ld-%ld-%lu.o",
              nyt_temp_dir(), (long)getpid(), (long)now_ms(),
              bench_next_temp_id());
-    snprintf(objdump_tmp, sizeof(objdump_tmp),
-             "%s/ny-bench-native-%ld-%ld-%lu.dump", nyt_temp_dir(),
-             (long)getpid(), (long)now_ms(), bench_next_temp_id());
-    char *obj_extra[] = {"-emit-only", "-o", obj_tmp, NULL};
-    out = bench_diag_capture(bin, opt_level, tier, "native", target, obj_extra,
-                             ny_path);
-    if (access(obj_tmp, R_OK) == 0) {
-      /*
-       * Include user helpers as well as main: the hottest loop often lives
-       * in a helper, and the text emitter above has different allocation.
-       */
-      char *objdump_argv[] = {"objdump", "-dr", obj_tmp, NULL};
-      int objdump_rc =
-          bench_run_capture(objdump_argv, NY_BENCH_TIMEOUT_SEC, objdump_tmp);
-      char *objdump = objdump_rc == 0 ? read_whole_file(objdump_tmp) : NULL;
-      if (objdump) {
-        printf("\n[native AOT object disassembly: %s]\n", shape);
-        printf("  machine code · %s · %zu bytes\n", objdump_tmp,
-               strlen(objdump));
+    /*
+     * Mixed disassembly is the default asm report: the compiler prints the
+     * correlated NYIR -> MIR -> native groups during object emission.
+     */
+    char *obj_extra[] = {"-emit-only", "-o", obj_tmp, "--mixed-disasm", NULL};
+    char *out = bench_diag_capture(bin, opt_level, tier, "native", target, obj_extra,
+                                   ny_path);
+    const char *mixed = out ? strstr(out, "=[mixed] ") : NULL;
+    if (mixed) {
+      const char *base = strrchr(shape, '/');
+      base = base ? base + 1 : shape;
+      printf("\n[mixed disasm · NYIR/MIR/x86-64: %s]\n", base);
+      bench_print_mixed_disassembly(mixed);
+      if (report)
+        bench_report_block(report, "NYR mixed disassembly (NYIR/MIR/native)",
+                           "asm", mixed);
+    }
+    if (!mixed) {
+      char *disasm = NULL;
+      if (access(obj_tmp, R_OK) == 0)
+        disasm = bench_disasm_elf_internal(obj_tmp, shape);
+      if (disasm) {
+        printf("\n[native machine code · internal x86-64: %s · %zu bytes]\n",
+               shape, strlen(disasm));
+        bench_print_native_disassembly(disasm);
         if (report)
           bench_report_block(report, "NYR native AOT object disassembly", "asm",
-                             objdump);
-        free(objdump);
+                             disasm);
+        free(disasm);
       } else {
-        printf("\n[native AOT object: %s · %s; objdump unavailable (rc=%d)]\n",
-               shape, obj_tmp, objdump_rc);
+        /*
+         * Fallback to text emitter only if native object emission failed
+         */
+        char asm_tmp[PATH_MAX];
+        char flag[PATH_MAX + 32];
+        snprintf(asm_tmp, sizeof(asm_tmp), "%s/ny-bench-asm-%ld-%ld-%lu.s",
+                 nyt_temp_dir(), (long)getpid(), (long)now_ms(),
+                 bench_next_temp_id());
+        snprintf(flag, sizeof(flag), "--emit-asm=%s", asm_tmp);
+        char *asm_extra[] = {flag, NULL};
+        char *asm_out = bench_diag_capture(bin, opt_level, tier, engine, target, asm_extra,
+                                           ny_path);
+        char *asmout = read_whole_file(asm_tmp);
+        if (asmout) {
+          printf("\n[native text emitter assembly: %s · %zu bytes]\n", shape,
+                 strlen(asmout));
+          bench_print_test_assembly(asmout);
+          if (report)
+            bench_report_block(report, "NYR assembly (text emitter)", "asm",
+                               asmout);
+          free(asmout);
+          remove(asm_tmp);
+        }
+        free(asm_out);
       }
-    } else {
-      printf("\n[native AOT object unavailable: %s]\n", shape);
-      if (report) {
-        fprintf(report,
-                "\n### NYR native AOT object disassembly unavailable\n\n"
-                "Native object emission failed.\n");
-        if (out && *out)
-          fprintf(report, "\n```text\n%s\n```\n", out);
-      }
-      if (out && *out)
-        printf("%s\n", out);
     }
+    /*
+     * Oracle check: validate the in-tree decoder against llvm-objdump on the
+     * emitted object.  Runs when an oracle disassembler is available.
+     */
+    bench_decoder_oracle_check(obj_tmp, shape);
     free(out);
   }
   /*
-   * Preserve the matched LLVM compiler output beside the native NYIR/asm
-   * diagnostics. This makes backend comparisons reproducible from the same
-   * materialized source and optimization settings used by the benchmark.
+   * Matched LLVM compiler reference output. Emitted to report artifacts,
+   * or to stdout when NYTRIX_BENCH_SHOW_LLVM_ASM is explicitly set.
    */
-  if (compare_llvm && (show_ir || show_asm)) {
+  if (compare_llvm && (show_ir || (show_asm && (report || getenv("NYTRIX_BENCH_SHOW_LLVM_ASM"))))) {
     char llvm_ir_tmp[PATH_MAX];
     char llvm_asm_tmp[PATH_MAX];
     char ir_flag[PATH_MAX + 32];
@@ -10562,33 +11318,18 @@ static void bench_diag(const char *shape, int show_ir, int show_asm,
     char *llvm_ir = show_ir ? read_whole_file(llvm_ir_tmp) : NULL;
     char *llvm_asm = show_asm ? read_whole_file(llvm_asm_tmp) : NULL;
     if (llvm_ir || llvm_asm) {
-      printf("\n[LLVM reference artifacts: %s]\n", shape);
-      if (llvm_ir)
-        printf("  optimized LLVM IR · %s · %zu bytes\n", llvm_ir_tmp,
-               strlen(llvm_ir));
-      if (llvm_asm)
-        printf("  target assembly  · %s · %zu bytes\n", llvm_asm_tmp,
+      if (llvm_asm && getenv("NYTRIX_BENCH_SHOW_LLVM_ASM")) {
+        printf("\n[LLVM reference assembly: %s · %zu bytes]\n", shape,
                strlen(llvm_asm));
+        bench_print_test_assembly(llvm_asm);
+      }
+      if (llvm_ir)
+        printf("\n[optimized LLVM IR: %s · %zu bytes]\n", shape,
+               strlen(llvm_ir));
       if (report && llvm_ir)
         bench_report_block(report, "Optimized LLVM IR", "llvm", llvm_ir);
       if (report && llvm_asm)
         bench_report_block(report, "LLVM assembly", "asm", llvm_asm);
-      if (report && show_ir && !llvm_ir)
-        fprintf(report, "\n### Optimized LLVM IR unavailable\n\n"
-                        "LLVM did not emit the requested IR file.\n");
-      if (report && show_asm && !llvm_asm)
-        fprintf(report, "\n### LLVM assembly unavailable\n\n"
-                        "LLVM did not emit the requested assembly file.\n");
-    } else {
-      printf("\n[LLVM reference artifacts unavailable: %s]\n", shape);
-      if (out && *out)
-        printf("%s\n", out);
-      if (report) {
-        fprintf(report, "\n### LLVM IR and assembly unavailable\n\n"
-                        "LLVM emitted neither requested artifact.\n");
-        if (out && *out)
-          fprintf(report, "\n```text\n%s\n```\n", out);
-      }
     }
     free(llvm_ir);
     free(llvm_asm);
@@ -10885,6 +11626,8 @@ static void bench_clip(const char *s, int width, char *out, size_t cap) {
 
 static void bench_ms_text(double value, int valid, char *out, size_t cap);
 
+static int bench_signal(double value);
+
 static int bench_live_pair_comparable(const bench_stats_t *a,
                                       const bench_stats_t *b) {
   return a && b && a->count > 0 && b->count > 0 && !a->failure_count &&
@@ -10892,8 +11635,23 @@ static int bench_live_pair_comparable(const bench_stats_t *a,
          !b->timer_fallback_count && !a->unstable && !b->unstable &&
          a->checksum_seen && b->checksum_seen && a->checksum_consistent &&
          b->checksum_consistent && a->checksum[0] && b->checksum[0] &&
-         strcmp(a->checksum, b->checksum) == 0 && a->median >= 0.001 &&
-         b->median >= 0.001;
+         strcmp(a->checksum, b->checksum) == 0 && bench_signal(a->median) &&
+         bench_signal(b->median);
+}
+
+/*
+ * The startup row is the empty clock interval. Its samples sit under the
+ * 100ns signal gate, but every backend measures the same interval, so the
+ * ratios are real (~1x) and the row stays comparable.
+ */
+static int bench_live_floor_pair(const bench_stats_t *a,
+                                 const bench_stats_t *b) {
+  return a && b && a->count > 0 && b->count > 0 && !a->failure_count &&
+         !b->failure_count && !a->unstable && !b->unstable &&
+         a->checksum_seen && b->checksum_seen && a->checksum_consistent &&
+         b->checksum_consistent && a->checksum[0] && b->checksum[0] &&
+         strcmp(a->checksum, b->checksum) == 0 && a->median > 0.0 &&
+         b->median > 0.0;
 }
 
 static void bench_ratio_text(char *out, size_t cap, double ratio) {
@@ -10962,8 +11720,6 @@ static const char *bench_live_ratio_color(const char *ratio) {
   return value <= 1.0 ? NYT_GREEN : (value <= 2.0 ? NYT_YELLOW : NYT_RED);
 }
 
-static int bench_signal(double value);
-
 static bool bench_timer_floor_name(const char *name) {
   return name && strcmp(name, "startup") == 0;
 }
@@ -10985,14 +11741,12 @@ static void bench_live_fixture_result(const char *name,
   bench_live_mark_fallback(llvm, sizeof(llvm),
                            result->llvm.timer_fallback_count > 0);
   bool timer_control = bench_timer_floor_name(name);
-  int nc_ok =
-      !timer_control && bench_live_pair_comparable(&result->ny, &result->c);
-  int lc_ok =
-      !timer_control && bench_live_pair_comparable(&result->llvm, &result->c);
-  int nl_ok =
-      !timer_control && bench_live_pair_comparable(&result->ny, &result->llvm);
-  int cn_ok =
-      !timer_control && bench_live_pair_comparable(&result->c, &result->nyc);
+  int (*pair_ok)(const bench_stats_t *, const bench_stats_t *) =
+      timer_control ? bench_live_floor_pair : bench_live_pair_comparable;
+  int nc_ok = pair_ok(&result->ny, &result->c);
+  int lc_ok = pair_ok(&result->llvm, &result->c);
+  int nl_ok = pair_ok(&result->ny, &result->llvm);
+  int cn_ok = pair_ok(&result->c, &result->nyc);
   bench_live_ratio(native_c, sizeof(native_c), result->ny.median,
                    result->c.median, nc_ok);
   bench_live_ratio(llvm_c, sizeof(llvm_c), result->llvm.median,
@@ -11001,12 +11755,6 @@ static void bench_live_fixture_result(const char *name,
                    result->llvm.median, nl_ok);
   bench_live_ratio(nyc_c, sizeof(nyc_c), result->nyc.median, result->c.median,
                    cn_ok);
-  if (timer_control) {
-    snprintf(native_c, sizeof(native_c), "n/a");
-    snprintf(llvm_c, sizeof(llvm_c), "n/a");
-    snprintf(native_llvm, sizeof(native_llvm), "n/a");
-    snprintf(nyc_c, sizeof(nyc_c), "n/a");
-  }
   const char *status = "ok";
   if (result->ny.failure_count || result->llvm.failure_count ||
       result->c.failure_count || result->nyc.failure_count)
@@ -11033,12 +11781,9 @@ static void bench_live_fixture_result(const char *name,
     status = "NO-CHECK";
   else if (result->ny.timer_fallback_count || result->llvm.timer_fallback_count)
     status = "TIMER-FB";
-  else if (timer_control)
-    status = "FLOOR";
-  else if ((result->ny.count > 0 && !bench_signal(result->ny.median)) ||
-           (result->llvm.count > 0 && !bench_signal(result->llvm.median)) ||
-           (result->c.count > 0 && !bench_signal(result->c.median)) ||
-           (result->nyc.count > 0 && !bench_signal(result->nyc.median)))
+  else if (!timer_control &&
+           ((result->ny.count > 0 && !bench_signal(result->ny.median)) ||
+            (result->nyc.count > 0 && !bench_signal(result->nyc.median))))
     status = "LOW";
   const char *status_color =
       (strcmp(status, "ok") == 0) ? NYT_GREEN
@@ -11486,12 +12231,12 @@ static const char *bench_ratio_color(double ratio) {
 
 static int bench_signal(double value) {
   /*
-   * The fixtures time their kernels with a monotonic nanosecond clock.  A
-   * 10us cutoff hid valid samples (and produced `n/a` ratios) for short but
-   * repeatable kernels.  Keep ratios for samples of at least 1us; below that
-   * the row is reported as low-signal and remains non-comparable.
+   * The fixtures time their kernels with a monotonic nanosecond clock.
+   * Keep ratios for samples of at least 100ns; below that the row is
+   * reported as low-signal and remains non-comparable.  Most real kernels
+   * exceed this easily; only trivially-dead or empty loops fall below.
    */
-  return value >= 0.001;
+  return value >= 0.0001;
 }
 
 static int bench_row_low_signal(const BenchRow *r) {
@@ -11600,7 +12345,7 @@ static const char *bench_row_status(const BenchRow *r) {
   if (bench_row_unstable(r))
     return "unstable";
   if (bench_timer_floor_name(r->name))
-    return "timer-floor";
+    return "ok";
   if (bench_row_low_signal(r))
     return "low-time";
   return "ok";
@@ -11739,9 +12484,30 @@ static void bench_print_row(const BenchRow *r, int show_c, int show_llvm) {
     snprintf(marked, sizeof(marked), "~%s", llvm);
     snprintf(llvm, sizeof(llvm), "%s", marked);
   }
-  int native_ratio_valid = show_c && bench_native_c_comparable(r);
-  int llvm_ratio_valid = show_llvm && bench_llvm_c_comparable(r);
-  int native_llvm_ratio_valid = show_llvm && bench_native_llvm_comparable(r);
+  /*
+   * The timer-floor fixture (startup) runs every backend at the sub-microsecond
+   * noise floor, so its mutual ratios are the meaningful control (~1x) rather
+   * than timer noise.  Detect it so the display shows FLOOR with real ratios
+   * instead of hiding every ratio behind the 1us signal gate.  A backend that
+   * sits at the floor while another does real work (e.g. currying's C at 80ns)
+   * is not a floor row; those cross ratios stay unavailable to avoid
+   * misleading huge multiples of a noise measurement.
+   */
+  bool floor_row = r->ny_runs > 0 && r->llvm_runs > 0 && r->c_runs > 0 &&
+                   !r->ny_failures && !r->llvm_failures && !r->c_failures &&
+                   r->checksum_ok && r->ny_checksum[0] && r->c_checksum[0] &&
+                   r->llvm_checksum[0] &&
+                   strcmp(r->ny_checksum, r->c_checksum) == 0 &&
+                   strcmp(r->ny_checksum, r->llvm_checksum) == 0 &&
+                   !bench_signal(r->ny_ms) && !bench_signal(r->llvm_ms) &&
+                   !bench_signal(r->c_ms);
+  int native_ratio_valid =
+      show_c && (bench_native_c_comparable(r) || (floor_row && r->c_ms > 0));
+  int llvm_ratio_valid =
+      show_llvm && (bench_llvm_c_comparable(r) || (floor_row && r->c_ms > 0));
+  int native_llvm_ratio_valid =
+      show_llvm && (bench_native_llvm_comparable(r) ||
+                    (floor_row && r->llvm_ms > 0));
   int nyc_c_ratio_valid = show_c && bench_nyc_c_comparable(r);
   double nyc_c_ratio = nyc_c_ratio_valid ? r->nyc_ms / r->c_ms : 0.0;
   double native_ratio = native_ratio_valid ? r->ny_ms / r->c_ms : 0.0;
@@ -11779,9 +12545,7 @@ static void bench_print_row(const BenchRow *r, int show_c, int show_llvm) {
     status_str = "NO-CHECK";
   else if (timer_fallback)
     status_str = "TIMER-FB";
-  else if (bench_timer_floor_name(r->name))
-    status_str = "FLOOR";
-  else if (bench_row_low_signal(r))
+  else if (bench_row_low_signal(r) && !floor_row)
     status_str = "LOW";
   else
     status_str = "ok";
@@ -11789,9 +12553,10 @@ static void bench_print_row(const BenchRow *r, int show_c, int show_llvm) {
   snprintf(status_label, sizeof(status_label), "%s", status_str);
   const char *status_clr =
       is_fail ? NYT_RED
-              : (r->budget_failed || missing_native_time || missing_llvm_time ||
-                         missing_checksum || missing_c_time || timer_fallback ||
-                         bench_row_unstable(r) || bench_row_low_signal(r)
+              : (r->budget_failed || missing_native_time || missing_checksum ||
+                         missing_c_time || timer_fallback ||
+                         bench_row_unstable(r) ||
+                         (bench_row_low_signal(r) && !floor_row)
                      ? NYT_YELLOW
                      : NYT_GREEN);
 
@@ -11904,6 +12669,123 @@ static void bench_print_hotspots(const BenchTable *t) {
     nyt_kv("NYR/LLVM gap", "%s (%s)", llvm_gap->name, text);
   } else
     nyt_kv("NYR/LLVM gap", "— (no comparable samples)");
+}
+
+static void bench_print_singular_stats(const BenchRow *r,
+                                       const BenchEnvironment *env) {
+  if (!r)
+    return;
+  (void)env;
+  char title[256];
+  snprintf(title, sizeof(title), "Optimization & Profile Metrics · %s", r->name);
+  nyt_subheading(title);
+
+  char native[32], llvm[32], c_host[32], nyc[32], compile[32];
+  bench_ms_text(r->ny_ms, r->ny_runs > 0, native, sizeof(native));
+  bench_ms_text(r->llvm_ms, r->llvm_runs > 0, llvm, sizeof(llvm));
+  bench_ms_text(r->c_ms, r->c_runs > 0, c_host, sizeof(c_host));
+  bench_ms_text(r->nyc_ms, r->nyc_available, nyc, sizeof(nyc));
+  bench_ms_text(r->ny_compile_ms, bench_signal(r->ny_compile_ms), compile,
+                sizeof(compile));
+
+  char ny_min[32], ny_max[32];
+  bench_ms_text(r->ny_min, r->ny_min > 0, ny_min, sizeof(ny_min));
+  bench_ms_text(r->ny_max, r->ny_max > 0, ny_max, sizeof(ny_max));
+
+  char ratios[128] = {0};
+  int r_used = 0;
+  if (r->c_ms > 0.0 && r->ny_ms > 0.0) {
+    r_used += snprintf(ratios + r_used, sizeof(ratios) - (size_t)r_used,
+                       "%.2fx vs C", r->ny_ms / r->c_ms);
+  }
+  if (r->llvm_ms > 0.0 && r->ny_ms > 0.0) {
+    r_used += snprintf(ratios + r_used, sizeof(ratios) - (size_t)r_used,
+                       "%s%.2fx vs LLVM", r_used ? " · " : "",
+                       r->ny_ms / r->llvm_ms);
+  }
+  if (!r_used)
+    snprintf(ratios, sizeof(ratios), "no reference comparison");
+
+  nyt_kv("timings", "NYR %s (%s) · LLVM %s · C %s · NYC %s", native, ratios,
+         llvm, c_host, nyc);
+  if (r->ny_runs > 1) {
+    nyt_kv("stability", "%d runs · min %s · max %s · noise %.1f%% (%s)",
+           r->ny_runs, ny_min, ny_max, r->ny_noise_pct,
+           r->ny_unstable ? "noisy" : "stable");
+  }
+  if (r->ny_compile_ms > 0.0) {
+    char opt[32], link[32];
+    bench_ms_text(r->ny_opt_ms, bench_signal(r->ny_opt_ms), opt, sizeof(opt));
+    bench_ms_text(r->ny_link_ms, bench_signal(r->ny_link_ms), link, sizeof(link));
+    nyt_kv("compile time", "%s total (opt %s · link %s)", compile, opt, link);
+  }
+
+  /*
+   * Code size & Assembly bytes
+   */
+  if (r->ny_code_bytes_seen) {
+    if (r->ny_specialization_metrics_seen &&
+        r->ny_specialization_code_bytes > 0) {
+      nyt_kv("code size",
+             "%zu machine code bytes (%zu user specialization bytes in %zu func%s, max %zu B)",
+             r->ny_code_bytes, r->ny_specialization_code_bytes,
+             r->ny_specialization_code_functions,
+             r->ny_specialization_code_functions == 1 ? "" : "s",
+             r->ny_specialization_max_function_bytes);
+    } else {
+      nyt_kv("code size", "%zu machine code bytes (AOT object)",
+             r->ny_code_bytes);
+    }
+  }
+
+  /*
+   * Register allocation / Spills & Reloads
+   */
+  nyt_kv("registers", "%zu spill%s · %zu reload%s", r->ny_spills,
+         r->ny_spills == 1 ? "" : "s", r->ny_reloads,
+         r->ny_reloads == 1 ? "" : "s");
+
+  /*
+   * Memory & Allocations
+   */
+  if (r->ny_static_metrics_seen || r->ny_runtime_counters_seen) {
+    nyt_kv("allocations",
+           "%zu heap allocation%s · %zu runtime alloc%s · %zu realloc%s · %zu KiB peak RSS",
+           r->ny_heap_allocations, r->ny_heap_allocations == 1 ? "" : "s",
+           r->ny_runtime_alloc_count,
+           r->ny_runtime_alloc_count == 1 ? "" : "s",
+           r->ny_runtime_realloc_count,
+           r->ny_runtime_realloc_count == 1 ? "" : "s",
+           r->ny_peak_compiler_rss_kb);
+  }
+
+  /*
+   * Pipeline optimizations
+   */
+  if (r->ny_static_metrics_seen) {
+    nyt_kv("optimizations",
+           "%zu loop%s vectorized (%zu attempted, %zu rejected) · %zu bounds check%s",
+           r->ny_vectorized, r->ny_vectorized == 1 ? "" : "s",
+           r->ny_vector_attempted, r->ny_vector_rejected,
+           r->ny_bounds_checks, r->ny_bounds_checks == 1 ? "" : "s");
+    nyt_kv("calls",
+           "%zu direct call%s · %zu indirect · %zu dynamic op%s · %zu runtime call%s",
+           r->ny_direct_calls, r->ny_direct_calls == 1 ? "" : "s",
+           r->ny_indirect_calls, r->ny_dynamic_ops,
+           r->ny_dynamic_ops == 1 ? "" : "s", r->ny_runtime_calls,
+           r->ny_runtime_calls == 1 ? "" : "s");
+  }
+
+  /*
+   * Hardware counters if available
+   */
+  if (r->ny_hw_counters_seen && r->ny_hw_cycles > 0) {
+    double ipc = (double)r->ny_hw_instructions / (double)r->ny_hw_cycles;
+    nyt_kv("hw counters",
+           "%" PRIu64 " cycles · %" PRIu64 " insns · %.2f IPC · %" PRIu64 " branch misses",
+           r->ny_hw_cycles, r->ny_hw_instructions, ipc,
+           r->ny_hw_branch_misses);
+  }
 }
 
 /*
@@ -13634,54 +14516,10 @@ run_benchmarks(const char *bin, const char *std_path, const char *std_bc,
   }
   const size_t full_bench_count = all_shapes.len;
   sv_free(&all_shapes);
-  nyt_heading("Nytrix Benchmark Suite");
-  {
-    StrVec pats = {0};
-    if (files)
-      for (size_t i = 0; i < files->len; i++)
-        if (!nyt_ends_with(files->items[i], ".nshape"))
-          sv_push(&pats, files->items[i]);
-    nyt_msg("DISCOVERY", NYT_CYAN, "%zu fixture%s available", shapes.len,
-            shapes.len == 1 ? "" : "s");
-    if (pats.len) {
-      nyt_msg("FILTER", NYT_CYAN, "matching %zu pattern%s", pats.len,
-              pats.len == 1 ? "" : "s");
-      for (size_t i = 0; i < pats.len; i++)
-        printf("    %s%s%s\n", nyt_clr(NYT_GRAY), pats.items[i],
-               nyt_clr(NYT_RESET));
-    }
-    sv_free(&pats);
-  }
-
   /*
    * Sort for deterministic output.
    */
   qsort(shapes.items, shapes.len, sizeof(char *), path_lex_cmp);
-
-  BenchTable table = {0};
-  int measured = 0;
-
-  nyt_kv("compiler", "%s", disp_path(bin));
-  nyt_kv("execution", "opt %s · profile %s · tier %s",
-         opt_level ? opt_level : "default",
-         compile_profile ? compile_profile : "default",
-         tier ? tier : "default");
-  nyt_kv("backend", "%s · engine %s · cache %s", target ? target : "default",
-         bench_engine_label(engine), bench_cache_state());
-  nyt_kv("samples", "%d run%s + %d warm-up%s", runs, runs == 1 ? "" : "s",
-         warmup, warmup == 1 ? "" : "s");
-  nyt_kv("NYC", "C workload runtime · %s · build and warm-up excluded",
-         bench_env.nyc_flags);
-  nyt_kv("C compilers", "%s · %s", bench_env.nyc_compiler_version,
-         bench_env.c_compiler_version);
-  nyt_kv("legend", "FLOOR = empty timer control · LOW = workload below 1µs · "
-                   "timings remain in nanoseconds · "
-                   "n/a = control ratio · ~ = fixture-timer fallback · "
-                   "— = unavailable; budget misses are "
-                   "summarized after the rows");
-  putchar('\n');
-  bench_print_header();
-  fflush(stdout);
 
   BenchJob *bench_jobs =
       (BenchJob *)calloc(shapes.len ? shapes.len : 1, sizeof(*bench_jobs));
@@ -13705,6 +14543,61 @@ run_benchmarks(const char *bin, const char *std_path, const char *std_bc,
       dot--;
     if (dot > 0)
       job->name[dot - 1] = '\0';
+  }
+
+  BenchTable table = {0};
+  int measured = 0;
+
+  if (bench_count == 1) {
+    /*
+     * Singular targeted benchmark: default to showing assembly unless explicitly disabled,
+     * and suppress superfluous multi-line suite graphics.
+     */
+    if (!show_asm && !getenv("NYTRIX_BENCH_NO_ASM"))
+      show_asm = 1;
+    char heading[256];
+    snprintf(heading, sizeof(heading), "Nytrix Benchmark · %s", bench_jobs[0].name);
+    nyt_heading(heading);
+    bench_print_header();
+    fflush(stdout);
+  } else {
+    nyt_heading("Nytrix Benchmark Suite");
+    {
+      StrVec pats = {0};
+      if (files)
+        for (size_t i = 0; i < files->len; i++)
+          if (!nyt_ends_with(files->items[i], ".nshape"))
+            sv_push(&pats, files->items[i]);
+      nyt_msg("DISCOVERY", NYT_CYAN, "%zu fixture%s available", shapes.len,
+              shapes.len == 1 ? "" : "s");
+      if (pats.len) {
+        nyt_msg("FILTER", NYT_CYAN, "matching %zu pattern%s", pats.len,
+                pats.len == 1 ? "" : "s");
+        for (size_t i = 0; i < pats.len; i++)
+          printf("    %s%s%s\n", nyt_clr(NYT_GRAY), pats.items[i],
+                 nyt_clr(NYT_RESET));
+      }
+      sv_free(&pats);
+    }
+    nyt_kv("compiler", "%s", disp_path(bin));
+    nyt_kv("execution", "opt %s · profile %s · tier %s",
+           opt_level ? opt_level : "default",
+           compile_profile ? compile_profile : "default",
+           tier ? tier : "default");
+    nyt_kv("backend", "%s · engine %s · cache %s", target ? target : "default",
+           bench_engine_label(engine), bench_cache_state());
+    nyt_kv("samples", "%d run%s + %d warm-up%s", runs, runs == 1 ? "" : "s",
+           warmup, warmup == 1 ? "" : "s");
+    nyt_kv("NYC", "C workload runtime · %s · build and warm-up excluded",
+           bench_env.nyc_flags);
+    nyt_kv("C compilers", "%s · %s", bench_env.nyc_compiler_version,
+           bench_env.c_compiler_version);
+    nyt_kv("legend", "LOW = workload below 100ns · timings remain in nanoseconds · "
+                     "~ = fixture-timer fallback · — = unavailable; budget "
+                     "misses are summarized after the rows");
+    putchar('\n');
+    bench_print_header();
+    fflush(stdout);
   }
   const BenchExecutionConfig execution = {
       .bin = bin,
@@ -13762,13 +14655,23 @@ run_benchmarks(const char *bin, const char *std_path, const char *std_bc,
       failed = 1;
     }
   }
-  bench_print_hw_counters(&table);
-  bench_print_hotspots(&table);
-  bool enforce_geomean_budgets = runs >= 3 && table.len >= 60;
-  int geomean_failed = bench_print_geomean(&table, enforce_geomean_budgets);
-  if (geomean_failed)
-    failed = 1;
-  bench_print_floor_adjusted_geomean(&table);
+  int geomean_failed = 0;
+  int bench_evidence = 0;
+  {
+    const char *v = getenv("NYTRIX_BENCH_EVIDENCE");
+    bench_evidence = v && *v && strcmp(v, "0") != 0 && strcmp(v, "false") != 0;
+  }
+  if (table.len > 1) {
+    bench_print_hw_counters(&table);
+    bench_print_hotspots(&table);
+    bool enforce_geomean_budgets = runs >= 3 && table.len >= 60;
+    geomean_failed = bench_print_geomean(&table, enforce_geomean_budgets);
+    if (geomean_failed && !bench_evidence)
+      failed = 1;
+    bench_print_floor_adjusted_geomean(&table);
+  } else if (table.len == 1) {
+    bench_print_singular_stats(&table.items[0], &bench_env);
+  }
   if (out_csv) {
     FILE *f = fopen(out_csv, "w");
     if (f) {
@@ -13811,8 +14714,10 @@ run_benchmarks(const char *bin, const char *std_path, const char *std_bc,
     nyt_err("ny-test", "bench: unstable repeated measurement exceeded the "
                        "configured noise threshold");
   else if (geomean_failed)
-    nyt_err("ny-test", "bench: one or more performance gates failed; "
-                       "see the per-class results and any component errors");
+    nyt_err("ny-test", bench_evidence
+                           ? "bench: performance gates failed (evidence collected; results saved)"
+                           : "bench: one or more performance gates failed; "
+                             "see the per-class results and any component errors");
   else if (budget_gate_failed)
     nyt_err("ny-test", "bench: one or more fixture budgets failed; "
                        "see the reported budget misses and component errors");

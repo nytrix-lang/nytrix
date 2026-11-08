@@ -1747,6 +1747,7 @@ static bool nyr_port_instruction_uses_value(const nyr_inst_t *in, int value) {
   case NYIR_VEC4_LOAD_I64:
   case NYIR_VEC4_SET1_I64:
   case NYIR_VEC8_SAR_I64:
+  case NYIR_VEC8_SHR_I64:
   case NYIR_VEC8_SET1_I64:
   case NYIR_VEC8_LOAD_I64:
   case NYIR_SIN_F64:
@@ -3266,6 +3267,7 @@ static bool nyr_port_emit_inst(nyr_port_ctx_t *c, const nyr_inst_t *in) {
   case NYIR_VEC4_LOAD_I64:
   case NYIR_VEC4_SET1_I64:
   case NYIR_VEC8_SAR_I64:
+  case NYIR_VEC8_SHR_I64:
   case NYIR_VEC8_SET1_I64:
   case NYIR_VEC4_STORE_I64:
   case NYIR_VEC4_ADD_I64:

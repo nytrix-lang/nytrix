@@ -1048,6 +1048,7 @@ void ny_jit_add_runtime_symbols(void) {
   LLVMAddSymbol("rt_vec_div_scalar_raw",
                 (void *)(uintptr_t)rt_vec_div_scalar_raw);
   LLVMAddSymbol("rt_any_mul", (void *)(uintptr_t)rt_any_mul);
+  LLVMAddSymbol("rt_any_sub", (void *)(uintptr_t)rt_any_sub);
   LLVMAddSymbol("rt_any_div", (void *)(uintptr_t)rt_any_div);
   LLVMAddSymbol("rt_any_mod", (void *)(uintptr_t)rt_any_mod);
   LLVMAddSymbol("rt_tbuf_tag", (void *)(uintptr_t)rt_tbuf_tag);
@@ -1483,6 +1484,8 @@ void ny_jit_define_runtime_trampolines(LLVMModuleRef mod) {
                                    (void *)(uintptr_t)rt_vec_div_scalar_raw);
   ny_jit_define_runtime_trampoline(mod, "rt_any_mul",
                                    (void *)(uintptr_t)rt_any_mul);
+  ny_jit_define_runtime_trampoline(mod, "rt_any_sub",
+                                   (void *)(uintptr_t)rt_any_sub);
   ny_jit_define_runtime_trampoline(mod, "rt_any_div",
                                    (void *)(uintptr_t)rt_any_div);
   ny_jit_define_runtime_trampoline(mod, "rt_any_mod",

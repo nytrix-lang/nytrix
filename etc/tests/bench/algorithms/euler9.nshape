@@ -6,7 +6,7 @@ shape euler9 {
   expect compile_and_run
   source ny <<'NY'
 ;; inspired from QBE: minic/test/euler9.c.
-fn gcd(int a, int b) int {
+@inline fn gcd(int a, int b) int {
    while b != 0 {
       def r = a % b
       a = b

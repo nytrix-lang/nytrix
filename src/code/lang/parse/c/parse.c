@@ -10274,17 +10274,41 @@ static bool parse_global_types_compatible(c_parser_t *p, size_t *at,
   c_agg_type_t *left_function_result_agg = probe.last_type_function_result_agg;
   c_function_t *left_function_decl =
       left_function.len ? find_function(p, left_function) : NULL;
+  size_t right_type_start = probe.pos;
   c_parser_t abstract_probe = probe;
   c_type_t abstract_result_type = C_BAD;
-  bool abstract_function_pointer =
+  bool parsed_abstract =
       left_type == C_FUNC_PTR && left_function_decl &&
-      parse_type(&abstract_probe, &abstract_result_type, true) &&
-      tok_is(&abstract_probe, abstract_probe.pos, "(") &&
-      tok_is(&abstract_probe, abstract_probe.pos + 1, "*") &&
-      tok_is(&abstract_probe, abstract_probe.pos + 2, ")") &&
-      tok_is(&abstract_probe, abstract_probe.pos + 3, "(");
+      parse_type(&abstract_probe, &abstract_result_type, true);
+  size_t declarator_pos = right_type_start;
+  bool abstract_function_pointer = false;
+  if (parsed_abstract && abstract_probe.last_type_is_function_declarator &&
+      abstract_result_type == C_FUNC_PTR) {
+    for (; declarator_pos + 1 < abstract_probe.pos; ++declarator_pos) {
+      if (!tok_is(&abstract_probe, declarator_pos, "(") ||
+          !tok_is(&abstract_probe, declarator_pos + 1, "*"))
+        continue;
+      size_t after_star = declarator_pos + 2;
+      while (tok_is(&abstract_probe, after_star, "const") ||
+             tok_is(&abstract_probe, after_star, "volatile") ||
+             tok_is(&abstract_probe, after_star, "restrict") ||
+             tok_is(&abstract_probe, after_star, "__restrict") ||
+             tok_is(&abstract_probe, after_star, "__restrict__"))
+        ++after_star;
+      if (tok_ident(abstract_probe.tokens[after_star]))
+        ++after_star;
+      if (tok_is(&abstract_probe, after_star, ")") &&
+          tok_is(&abstract_probe, after_star + 1, "(")) {
+        abstract_function_pointer = true;
+        break;
+      }
+    }
+  }
   if (abstract_function_pointer) {
     probe = abstract_probe;
+    probe.pos = declarator_pos;
+    abstract_result_type = abstract_probe.last_type_function_result_type;
+    probe.last_type_agg = abstract_probe.last_type_function_result_agg;
   }
   if (abstract_function_pointer) {
     c_type_t result_type = abstract_result_type;
@@ -16856,12 +16880,20 @@ static bool collect_functions(c_parser_t *p) {
                        (fn->param_count != candidate.param_count ||
                         fn->variadic != candidate.variadic));
       for (size_t i = 0;
-           !conflict && !function_type_placeholder && i < fn->param_count; ++i)
+           !conflict && !function_type_placeholder && i < fn->param_count; ++i) {
+        if ((!fn->params || !candidate.params) && (fn->param_count || candidate.param_count)) {
+          if (!fn->params && candidate.params && fn->param_count == candidate.param_count) {
+            c_param_t *params = malloc(fn->param_count * sizeof(*params));
+            if (params) { memcpy(params, candidate.params, fn->param_count * sizeof(*params)); fn->params = params; }
+          }
+          if (!fn->params || !candidate.params) { conflict = true; break; }
+        }
         conflict = fn->params[i].type != candidate.params[i].type ||
                    fn->params[i].agg != candidate.params[i].agg;
+      }
       if (conflict) {
         free(candidate.params);
-        fail(p, "conflicting function declarations");
+fail(p, "conflicting function declarations");
         return false;
       }
       if (function_type_placeholder) {
@@ -17110,28 +17142,20 @@ static bool lower_cleanup_range(c_parser_t *p, size_t first, size_t last) {
  * NYIR stores integers as machine words. Keep C int values sign-extended in
  * that representation, truncating only at C int conversion boundaries.
  */
+static int normalize_signed(c_parser_t *p, int value, unsigned bits) {
+  int shift = emit_i64_constant(p, 64 - bits);
+  if (shift < 0)
+    return -1;
+  int left = emit_i64_binary(p, NYIR_SHL_I64, value, shift);
+  return left < 0 ? -1 : emit_i64_binary(p, NYIR_SAR_I64, left, shift);
+}
+
 static int normalize_i32(c_parser_t *p, int value) {
-  int width = emit_i64_constant(p, 32);
-  int shifted = width < 0 ? -1 : emit_i64_binary(p, NYIR_SHL_I64, value, width);
-  return shifted < 0
-             ? -1
-             : emit_value(p, (nyr_inst_t){.op = NYIR_SAR_I64,
-                                          .dst = -1,
-                                          .a = shifted,
-                                          .b = width,
-                                          .scalar_class = NYIR_SCALAR_I64_RAW});
+  return normalize_signed(p, value, 32);
 }
 
 static int normalize_i16(c_parser_t *p, int value) {
-  int width = emit_i64_constant(p, 48);
-  int shifted = width < 0 ? -1 : emit_i64_binary(p, NYIR_SHL_I64, value, width);
-  return shifted < 0
-             ? -1
-             : emit_value(p, (nyr_inst_t){.op = NYIR_SAR_I64,
-                                          .dst = -1,
-                                          .a = shifted,
-                                          .b = width,
-                                          .scalar_class = NYIR_SCALAR_I64_RAW});
+  return normalize_signed(p, value, 16);
 }
 
 static int normalize_u32(c_parser_t *p, int value) {
@@ -17150,26 +17174,15 @@ static int normalize_u8(c_parser_t *p, int value) {
 }
 
 static int normalize_integer(c_parser_t *p, c_type_t type, int value) {
-  if (type == C_CHAR) {
-    int shift =
-        emit_value(p, (nyr_inst_t){.op = NYIR_CONST_I64, .dst = -1, .imm = 56});
-    int left = shift < 0 ? -1
-                         : emit_value(p, (nyr_inst_t){.op = NYIR_SHL_I64,
-                                                      .dst = -1,
-                                                      .a = value,
-                                                      .b = shift});
-    return left < 0 ? -1
-                    : emit_value(p, (nyr_inst_t){.op = NYIR_SAR_I64,
-                                                 .dst = -1,
-                                                 .a = left,
-                                                 .b = shift});
+  switch (type) {
+  case C_CHAR: return normalize_signed(p, value, 8);
+  case C_I16: return normalize_i16(p, value);
+  case C_I32: return normalize_i32(p, value);
+  case C_U8: return normalize_u8(p, value);
+  case C_U16: return normalize_u16(p, value);
+  case C_U32: return normalize_u32(p, value);
+  default: return value;
   }
-  return type == C_I32   ? normalize_i32(p, value)
-         : type == C_I16 ? normalize_i16(p, value)
-         : type == C_U32 ? normalize_u32(p, value)
-         : type == C_U16 ? normalize_u16(p, value)
-         : type == C_U8  ? normalize_u8(p, value)
-                         : value;
 }
 
 static uint8_t c_local_memory_flags(const c_parser_t *p, c_type_t type) {
@@ -17725,6 +17738,31 @@ static bool lower_copy_struct(c_parser_t *p, int dst, int src, size_t size) {
 }
 
 static bool lower_zero_fill(c_parser_t *p, int address, size_t size) {
+  if (size >= 128 && size <= INT64_MAX && !p->no_builtin) {
+    int zero = emit_i64_constant(p, 0);
+    int length = emit_i64_constant(p, (int64_t)size);
+    if (zero < 0 || length < 0)
+      return false;
+    nyr_inst_t call = {.op = NYIR_CALL,
+                       .dst = -1,
+                       .a = address,
+                       .b = zero,
+                       .c = length,
+                       .d = -1,
+                       .e = -1,
+                       .f = -1,
+                       .imm = 3,
+                       .flags = NYIR_INST_F_EXTERN,
+                       .effects = NYIR_EFFECT_CALL | NYIR_EFFECT_WRITE_MEMORY |
+                                  NYIR_EFFECT_MAY_TRAP,
+                       .symbol = "memset",
+                       .scalar_class = NYIR_SCALAR_I64_RAW};
+    for (int i = 0; i < 3; ++i)
+      nyr_call_arg_class_set(call.arg_scalar_classes, i, NYIR_SCALAR_I64_RAW);
+    if (p->abi == NYC_ABI_I386)
+      call.flags |= NYIR_INST_F_I386_C_ABI;
+    return emit(p, call, NULL);
+  }
   int zero = emit_i64_constant(p, 0);
   if (zero < 0)
     return false;
@@ -30702,6 +30740,14 @@ static bool lower_for(c_parser_t *p, size_t limit, bool *returned) {
             declaration_ok = false;
             break;
           }
+          ny_ctok_t local_section = {0};
+          ny_ctok_t local_cleanup = {0};
+          if (!parse_trailing_local_attributes(p, &local_section,
+                                               &local_cleanup) ||
+              local_section.len) {
+            declaration_ok = false;
+            break;
+          }
           int initial_value = -1;
           if (accept(p, "=")) {
             c_value_t initial = parse_expr(p, 1);
@@ -30729,6 +30775,7 @@ static bool lower_for(c_parser_t *p, size_t limit, bool *returned) {
           local->pointer_base_type = decl_pointer_base_type;
           local->pointer_depth = decl_pointer_depth;
           local->pointee_array = decl_pointee_array;
+          local->cleanup = local_cleanup;
         } while (accept(p, ","));
         if (!declaration_ok || !expect(p, ";"))
           return false;
@@ -30805,7 +30852,12 @@ static bool lower_for(c_parser_t *p, size_t limit, bool *returned) {
   size_t *saved_continue_target = p->continue_target;
   size_t *saved_break_cleanup_count = p->break_cleanup_count;
   size_t *saved_continue_cleanup_count = p->continue_cleanup_count;
-  size_t break_cleanup_count = saved_local_count;
+  /*
+   * The for-initializer lives until the loop exit label. Break and continue
+   * clean only the body; cleaning the initializer there as well runs its
+   * cleanup attribute a second time when control reaches that label.
+   */
+  size_t break_cleanup_count = body_local_count;
   size_t continue_cleanup_count = body_local_count;
   p->break_target = &exit_label;
   p->continue_target = &step_label;
@@ -31195,7 +31247,7 @@ static bool defer_unsupported_asm(c_parser_t *p, size_t open,
   if (!p->function) {
     char message[160];
     snprintf(message, sizeof(message),
-             "unsupported GNU inline-assembly operands for template: %.120s",
+             "unsupported GNU inline-assembly operands for template: %.96s",
              assembly ? (const char *)assembly : "<empty>");
     fail(p, message);
     free(assembly);
@@ -32570,15 +32622,29 @@ static bool lower_inline_asm_statement(c_parser_t *p) {
                 NULL);
   }
 
+  static const char *const repeat_stos_templates[] = {
+      "rep stosb", "rep stosw", "rep stosl", "rep stosq"};
+  static const char *const repeat_stos_symbols[] = {
+      "rep_stosb", "rep_stosw", "rep_stosl", "rep_stosq"};
   c_parser_t early_stosb_probe = *p;
   if (tok_is(&early_stosb_probe, early_stosb_probe.pos, ":"))
     ++early_stosb_probe.pos;
   size_t early_stosb_constraint_end = early_stosb_probe.pos;
   bool early_stosb_constraints = inline_asm_string_sequence_is(
       &early_stosb_probe, "=&c", &early_stosb_constraint_end);
-  if (!asm_goto && assembly_len == sizeof("rep stosb") - 1 &&
-      memcmp(assembly, "rep stosb", sizeof("rep stosb") - 1) == 0 &&
-      tok_is(p, p->pos, ":") && early_stosb_constraints) {
+  const char *early_stos_symbol = NULL;
+  if (!asm_goto && tok_is(p, p->pos, ":") && early_stosb_constraints) {
+    for (size_t i = 0; i < sizeof(repeat_stos_templates) /
+                               sizeof(repeat_stos_templates[0]);
+         ++i) {
+      if (assembly_len == strlen(repeat_stos_templates[i]) &&
+          memcmp(assembly, repeat_stos_templates[i], assembly_len) == 0) {
+        early_stos_symbol = repeat_stos_symbols[i];
+        break;
+      }
+    }
+  }
+  if (early_stos_symbol) {
     int output_addresses[2] = {-1, -1};
     static const char *const output_constraints[] = {"=&c", "=&D"};
     for (size_t i = 0; i < 2; ++i) {
@@ -32651,7 +32717,7 @@ static bool lower_inline_asm_statement(c_parser_t *p) {
                              .e = output_addresses[0],
                              .f = -1,
                              .imm = -136,
-                             .symbol = "rep_stosb",
+                             .symbol = early_stos_symbol,
                              .effects = NYIR_EFFECT_READ_MEMORY |
                                         NYIR_EFFECT_WRITE_MEMORY |
                                         NYIR_EFFECT_CONTROL |
@@ -32659,10 +32725,6 @@ static bool lower_inline_asm_statement(c_parser_t *p) {
                 NULL);
   }
 
-  static const char *const repeat_stos_templates[] = {
-      "rep stosb", "rep stosw", "rep stosl", "rep stosq"};
-  static const char *const repeat_stos_symbols[] = {
-      "rep_stosb", "rep_stosw", "rep_stosl", "rep_stosq"};
   const char *repeat_stos_symbol = NULL;
   if (!asm_goto) {
     for (size_t i = 0;
@@ -35783,8 +35845,14 @@ static bool lower_inline_asm_statement(c_parser_t *p) {
           (c_type_is_integer(output->type) || c_type_is_pointer(output->type)) &&
           c_type_size(p->abi, output->type) == width;
       if (!compatible_type || output->is_const || output->array_rank ||
-          memory_address < 0 || !expect(p, ")") || !expect(p, ":") ||
-          !expect(p, ":") || !parse_name(p, &target_name)) {
+          memory_address < 0 || !expect(p, ")") || !expect(p, ":")) {
+        return defer_unsupported_asm(p, open, assembly);
+      }
+      {
+        size_t clobber_end = p->pos;
+        if (inline_asm_clobber_list_is(p, &clobber_end)) p->pos = clobber_end;
+      }
+      if (!expect(p, ":") || !parse_name(p, &target_name)) {
         return defer_unsupported_asm(p, open, assembly);
       }
       c_label_t *target = find_label_at(p, target_name, p->pos);
@@ -35883,10 +35951,18 @@ static bool lower_inline_asm_statement(c_parser_t *p) {
                              memory_lvalue->address < 0)
               ? memory.value
           : memory_lvalue ? memory_lvalue->address
-                          : -1;
-      if (!memory_lvalue || memory_address < 0 || !matching_width ||
-          !expect(p, ")") || !expect(p, ":") || !expect(p, ":"))
+                          : (memory.type == C_AGG ? memory.value : -1);
+      if (memory_address < 0 && memory.value >= 0 && c_type_is_pointer(memory.type))
+        memory_address = memory.value;
+      bool ok_mem = memory_address >= 0 && (matching_width || memory_lvalue || memory.type == C_AGG);
+      if (!ok_mem || !expect(p, ")") || !expect(p, ":"))
         return defer_unsupported_asm(p, open, assembly);
+      {
+        size_t clobber_end = p->pos;
+        if (inline_asm_clobber_list_is(p, &clobber_end)) p->pos = clobber_end;
+        if (!expect(p, ":"))
+          return defer_unsupported_asm(p, open, assembly);
+      }
       ny_ctok_t target_name;
       if (!parse_name(p, &target_name))
         return defer_unsupported_asm(p, open, assembly);
@@ -38293,6 +38369,8 @@ static bool lower_inline_asm_statement(c_parser_t *p) {
   bool lower_atomic_memory_rmw64 = false;
   bool lower_atomic_bitwise_condition = false;
   bool lower_atomic_bts_condition = false;
+  bool lower_bt_condition = false;
+  const char *bt_condition_symbol = NULL;
   bool lower_atomic_arithmetic_condition = false;
   const char *atomic_memory_rmw_mnemonic = NULL;
   const char *atomic_arithmetic_mnemonic = NULL;
@@ -38570,6 +38648,14 @@ static bool lower_inline_asm_statement(c_parser_t *p) {
   bool atomic_bts_condition =
       assembly_len == sizeof("lock btsl %[val], %[var]") - 1 &&
       memcmp(assembly, "lock btsl %[val], %[var]", assembly_len) == 0;
+  bool bt_condition = false;
+  const char *bt_mnemonic = NULL;
+  bool test_nz_condition = false;
+  if (assembly_len == sizeof("btq %2,%1") - 1 && memcmp(assembly, "btq %2,%1", assembly_len) == 0) { bt_condition = true; bt_mnemonic = "btq"; }
+  else if (assembly_len == sizeof("btl %2,%1") - 1 && memcmp(assembly, "btl %2,%1", assembly_len) == 0) { bt_condition = true; bt_mnemonic = "btl"; }
+  else if (inline_asm_template_is(assembly, assembly_len, "btq %2,%1")) { bt_condition = true; bt_mnemonic = "btq"; }
+  else if (inline_asm_template_is(assembly, assembly_len, "btl %2,%1")) { bt_condition = true; bt_mnemonic = "btl"; }
+  else if (inline_asm_template_is(assembly, assembly_len, "testb %2,%1") || (assembly_len == sizeof("testb %2,%1")-1 && memcmp(assembly,"testb %2,%1",assembly_len)==0)) { test_nz_condition = true; }
   if (inline_asm_template_is(assembly, assembly_len,
                              "lock addl %[val], %[var]"))
     atomic_arithmetic_mnemonic = "addl";
@@ -38631,7 +38717,7 @@ static bool lower_inline_asm_statement(c_parser_t *p) {
     p->pos = condition_constraint_end;
     if (!expect(p, "(") || !parse_name(p, &condition_name) || !expect(p, ")") ||
         !expect(p, ":") || !parse_inline_asm_operand_name(p) ||
-        !inline_asm_string_sequence_is(p, "er", &p->pos) || !expect(p, "("))
+!((inline_asm_string_sequence_is(p, "er", &p->pos) || ({ size_t _e=p->pos; bool _m=inline_asm_string_sequence_is(p,"re",&_e)||inline_asm_string_sequence_is(p,"ir",&_e)||inline_asm_string_sequence_is(p,"ri",&_e)||inline_asm_string_sequence_is(p,"r",&_e)||inline_asm_string_sequence_is(p,"i",&_e)||inline_asm_string_sequence_is(p,"n",&_e); if(_m)p->pos=_e; _m; }))) || !expect(p, "("))
       return ATOMIC_ARITHMETIC_DEFER();
     c_value_t input = parse_expr(p, 1);
     c_local_t *condition_local = find_local(p, condition_name);
@@ -38680,6 +38766,75 @@ static bool lower_inline_asm_statement(c_parser_t *p) {
     }
     lower_atomic_arithmetic_condition = true;
 #undef ATOMIC_ARITHMETIC_DEFER
+  } else if (test_nz_condition && accept(p, ":")) {
+    ny_ctok_t condition_name;
+    if (!inline_asm_string_sequence_is(p, "=@ccnz", &p->pos) ||
+        !expect(p, "(") || !parse_name(p, &condition_name) || !expect(p, ")") ||
+        !expect(p, ":") || !inline_asm_string_sequence_is(p, "m", &p->pos) ||
+        !expect(p, "("))
+      return defer_unsupported_asm(p, open, assembly);
+    c_value_t mem = parse_expr(p, 1);
+    const c_lvalue_t *memory = mem.value >= 0 ? find_lvalue(p, mem.value) : NULL;
+    if (!memory || memory->address < 0 || !expect(p, ")") || !expect(p, ","))
+      return defer_unsupported_asm(p, open, assembly);
+    size_t ce = p->pos;
+    if (!inline_asm_string_sequence_is(p, "i", &ce) && !inline_asm_string_sequence_is(p, "n", &ce) &&
+        !inline_asm_string_sequence_is(p, "Ir", &ce) && !inline_asm_string_sequence_is(p, "r", &ce) &&
+        !inline_asm_string_sequence_is(p, "I", &ce))
+      return defer_unsupported_asm(p, open, assembly);
+    p->pos = ce;
+    if (!expect(p, "(")) return defer_unsupported_asm(p, open, assembly);
+    c_value_t input = parse_expr(p, 1);
+    if (input.value < 0 || !c_type_is_integer(input.type) || !expect(p, ")") || !expect(p, ":"))
+      return defer_unsupported_asm(p, open, assembly);
+    size_t clobber_end = p->pos;
+    if (!inline_asm_clobber_list_is(p, &clobber_end))
+      return defer_unsupported_asm(p, open, assembly);
+    p->pos = clobber_end;
+    asm_condition_output = find_local(p, condition_name);
+    if (!asm_condition_output || asm_condition_output->type != C_U8 ||
+        asm_condition_output->is_const || asm_condition_output->array_rank)
+      return defer_unsupported_asm(p, open, assembly);
+    asm_memory_output_value = memory->address;
+    asm_memory_register_input_value = input.value;
+    bt_condition_symbol = "testb_nz";
+    lower_bt_condition = true;
+  } else if (bt_condition && accept(p, ":")) {
+    /* bt{l,q} %2,%1 with =@ccc output, m memory input, Ir/r index */
+    ny_ctok_t condition_name;
+    if (!inline_asm_string_sequence_is(p, "=@ccc", &p->pos) ||
+        !expect(p, "(") || !parse_name(p, &condition_name) || !expect(p, ")") ||
+        !expect(p, ":") || !inline_asm_string_sequence_is(p, "m", &p->pos) ||
+        !expect(p, "("))
+      return defer_unsupported_asm(p, open, assembly);
+    c_value_t mem = parse_expr(p, 1);
+    const c_lvalue_t *memory = mem.value >= 0 ? find_lvalue(p, mem.value) : NULL;
+    if (!memory || memory->address < 0 || !expect(p, ")") ||
+        !expect(p, ","))
+      return defer_unsupported_asm(p, open, assembly);
+    size_t ce = p->pos;
+    bool ir = inline_asm_string_sequence_is(p, "Ir", &ce) || inline_asm_string_sequence_is(p, "rI", &ce) ||
+              inline_asm_string_sequence_is(p, "r", &ce) || inline_asm_string_sequence_is(p, "I", &ce) ||
+              inline_asm_string_sequence_is(p, "i", &ce) || inline_asm_string_sequence_is(p, "n", &ce);
+    if (!ir) return defer_unsupported_asm(p, open, assembly);
+    p->pos = ce;
+    if (!expect(p, "(")) return defer_unsupported_asm(p, open, assembly);
+    c_value_t input = parse_expr(p, 1);
+    if (input.value < 0 || !c_type_is_integer(input.type) || !expect(p, ")") ||
+        !expect(p, ":"))
+      return defer_unsupported_asm(p, open, assembly);
+    size_t clobber_end = p->pos;
+    if (!inline_asm_clobber_list_is(p, &clobber_end))
+      return defer_unsupported_asm(p, open, assembly);
+    p->pos = clobber_end;
+    asm_condition_output = find_local(p, condition_name);
+    if (!asm_condition_output || asm_condition_output->type != C_U8 ||
+        asm_condition_output->is_const || asm_condition_output->array_rank)
+      return defer_unsupported_asm(p, open, assembly);
+    asm_memory_output_value = memory->address;
+    asm_memory_register_input_value = input.value;
+    bt_condition_symbol = bt_mnemonic;
+    lower_bt_condition = true;
   } else if (atomic_bts_condition && accept(p, ":")) {
     size_t constraint_end = p->pos;
     if (!parse_inline_asm_operand_name(p) ||
@@ -41268,6 +41423,20 @@ finish_inline_asm_operands:
     free(assembly);
     return ok;
   }
+  if (lower_bt_condition) {
+    int result =
+        emit_value(p, (nyr_inst_t){.op = NYIR_INLINE_ASM,
+                                   .dst = -1,
+                                   .a = asm_memory_output_value,
+                                   .b = asm_memory_register_input_value,
+                                   .imm = -47,
+                                   .effects = NYIR_EFFECT_READ_MEMORY |
+                                              NYIR_EFFECT_VOLATILE,
+                                   .symbol = bt_condition_symbol ? bt_condition_symbol : "btq"});
+    bool ok = result >= 0 && lower_local_store(p, asm_condition_output, result);
+    free(assembly);
+    return ok;
+  }
   if (lower_atomic_bts_condition) {
     int result =
         emit_value(p, (nyr_inst_t){.op = NYIR_INLINE_ASM,
@@ -41969,9 +42138,17 @@ static bool lower_statement_range(c_parser_t *p, size_t start, size_t end,
       if (call_after < p->token_count &&
           (tok_is(p, call_after, "->") || tok_is(p, call_after, ".") ||
            tok_is(p, call_after, "["))) {
+        /*
+         * A call through a member of the returned object is a statement
+         * when the callee is void. That result is C_BAD with no value.
+         */
         c_value_t expression = parse_expr(p, 0);
-        if (expression.value < 0 || !expect(p, ";"))
+        if ((expression.value < 0 && expression.type != C_BAD) ||
+            (p->err && p->err_len && p->err[0]) || !expect(p, ";")) {
+          if (!p->err || !p->err_len || !p->err[0])
+            fail(p, "could not lower call through member or subscript");
           break;
+        }
         continue;
       }
       ny_ctok_t called_name = *current(p);
@@ -42707,6 +42884,11 @@ static bool lower_statement_range(c_parser_t *p, size_t start, size_t end,
                 declaration_ok = false;
                 free(string_initializer);
                 break;
+              }
+            } else if (count * width >= 128 && !p->no_builtin &&
+                       !is_volatile && !pointee_volatile) {
+              if (!lower_zero_fill(p, base, count * width)) {
+                declaration_ok = false;
               }
             } else {
               int zero =

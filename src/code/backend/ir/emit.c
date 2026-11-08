@@ -135,7 +135,7 @@ bool nyr_emit_func(nyr_writer_t *w, const ny_native_target_info_t *target,
     if (machine_lowered) {
       nyr_writer_t machine_out = {0};
       if (emitter->emit_mach_scalar(&machine_out, target, &machine, label,
-                                    tag_return, machine_err,
+                                    tag_return, false, machine_err,
                                     sizeof(machine_err))) {
         bool appended = nyr_put(w, machine_out.data ? machine_out.data : "");
         free(machine_out.data);

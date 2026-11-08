@@ -625,6 +625,48 @@ static bool nir_peephole_parallel_task(size_t i, void *opaque) {
   return true;
 }
 
+/*
+ * Rewrite inst *i into `op x, imm`.  The combined constant is inserted
+ * immediately before the binop, and *i is left on that binop so the
+ * caller's loop increment does not fold it again (known[] was not grown).
+ * The opcode is part of the rewrite: (x + c1) - c2 must become an add.
+ * Leaving NYIR_SUB_I64 in place computes x - (c1 - c2), which turned
+ * sor's `i * N + N - 1` into `i * N - 99`.
+ */
+static bool nir_peep_reassoc_const(nyr_func_t *f, size_t *i, int x, int64_t imm,
+                                   nyr_op_t op) {
+  if (!f || !i || *i >= f->len || x < 0)
+    return false;
+  nyr_inst_t saved = f->data[*i];
+  if (saved.dst < 0)
+    return false;
+  int cst = f->next_value++;
+  if (!nir_ensure_inst_space(f, 1)) {
+    --f->next_value;
+    return false;
+  }
+  memmove(&f->data[*i + 1], &f->data[*i], (f->len - *i) * sizeof(nyr_inst_t));
+  ++f->len;
+  f->data[*i] = (nyr_inst_t){.op = NYIR_CONST_I64,
+                             .dst = cst,
+                             .a = -1,
+                             .b = -1,
+                             .c = -1,
+                             .d = -1,
+                             .e = -1,
+                             .f = -1,
+                             .imm = imm,
+                             .scalar_class = NYIR_SCALAR_I64_RAW};
+  f->data[*i + 1] = saved;
+  f->data[*i + 1].op = op;
+  f->data[*i + 1].a = x;
+  f->data[*i + 1].b = cst;
+  f->data[*i + 1].effects = NYIR_EFFECT_NONE;
+  nyr_clear_derived_facts(&f->data[*i + 1]);
+  ++*i;
+  return true;
+}
+
 bool nyr_peephole(nyr_func_t *f) {
   if (!f || f->next_value <= 0)
     return true;
@@ -658,6 +700,9 @@ bool nyr_peephole(nyr_func_t *f) {
   }
   int *defs = nyr_build_defs(f);
   nir_range_query_cache_t range_cache = {0};
+  const char *skip_integer = getenv("NYTRIX_PEEPHOLE_SKIP_SERIAL_INTEGER");
+  bool skip_integer_ops =
+      skip_integer && *skip_integer && strcmp(skip_integer, "0") != 0;
   /*
    * This loop preserves branch/label topology and existing destinations.
    * Inserting rewrites change length/value count and invalidate the cache.
@@ -678,9 +723,7 @@ bool nyr_peephole(nyr_func_t *f) {
     int64_t bvf64 = bkf64 ? value[in->b] : 0;
     int64_t avf32 = akf32 ? value[in->a] : 0;
     int64_t bvf32 = bkf32 ? value[in->b] : 0;
-    const char *skip_integer = getenv("NYTRIX_PEEPHOLE_SKIP_SERIAL_INTEGER");
-    if (skip_integer && *skip_integer && strcmp(skip_integer, "0") != 0 &&
-        in->op >= NYIR_ADD_I64 && in->op <= NYIR_CMP_I64)
+    if (skip_integer_ops && in->op >= NYIR_ADD_I64 && in->op <= NYIR_CMP_I64)
       continue;
     switch (in->op) {
     case NYIR_ADD_I64:
@@ -692,6 +735,51 @@ bool nyr_peephole(nyr_func_t *f) {
                in->b < f->next_value) {
         const nyr_inst_t *da = nir_def_inst(f, defs, in->a);
         const nyr_inst_t *db = nir_def_inst(f, defs, in->b);
+        /*
+         * NEW: (x + c1) + c2 -> x + (c1 + c2)
+         */
+        if (da && da->op == NYIR_ADD_I64 && bk && kind[in->b] == 1) {
+          int c1_idx = -1, x_idx = -1;
+          if (known[da->a] && kind[da->a] == 1) {
+            c1_idx = da->a;
+            x_idx = da->b;
+          } else if (known[da->b] && kind[da->b] == 1) {
+            c1_idx = da->b;
+            x_idx = da->a;
+          }
+          if (c1_idx >= 0 && x_idx >= 0) {
+            int64_t sum =
+                (int64_t)((uint64_t)value[c1_idx] + (uint64_t)bv);
+            if (!nir_peep_reassoc_const(f, &i, x_idx, sum, NYIR_ADD_I64)) {
+              free(known);
+              free(value);
+              free(kind);
+              free(facts);
+              free(defs);
+              nir_range_query_cache_free(&range_cache);
+              return false;
+            }
+            continue;
+          }
+        }
+        /*
+         * NEW: (x - c1) + c2 -> x + (c2 - c1)
+         */
+        if (da && da->op == NYIR_SUB_I64 && known[da->b] && kind[da->b] == 1 &&
+            bk && kind[in->b] == 1) {
+          int x_idx = da->a;
+          int64_t diff = (int64_t)((uint64_t)bv - (uint64_t)value[da->b]);
+          if (!nir_peep_reassoc_const(f, &i, x_idx, diff, NYIR_ADD_I64)) {
+            free(known);
+            free(value);
+            free(kind);
+            free(facts);
+            free(defs);
+            nir_range_query_cache_free(&range_cache);
+            return false;
+          }
+          continue;
+        }
         if (da && da->op == NYIR_SUB_I64 && da->b == in->b) {
           nir_make_copy(in, da->a);
           break;
@@ -719,6 +807,33 @@ bool nyr_peephole(nyr_func_t *f) {
           if (da->b == in->b) {
             nir_make_copy(in, da->a);
             break;
+          }
+        }
+        /*
+         * NEW: (x + c1) - c2 -> x + (c1 - c2)
+         */
+        if (da && da->op == NYIR_ADD_I64 && bk && kind[in->b] == 1) {
+          int c1_idx = -1, x_idx = -1;
+          if (known[da->a] && kind[da->a] == 1) {
+            c1_idx = da->a;
+            x_idx = da->b;
+          } else if (known[da->b] && kind[da->b] == 1) {
+            c1_idx = da->b;
+            x_idx = da->a;
+          }
+          if (c1_idx >= 0 && x_idx >= 0) {
+            int64_t diff =
+                (int64_t)((uint64_t)value[c1_idx] - (uint64_t)bv);
+            if (!nir_peep_reassoc_const(f, &i, x_idx, diff, NYIR_ADD_I64)) {
+              free(known);
+              free(value);
+              free(kind);
+              free(facts);
+              free(defs);
+              nir_range_query_cache_free(&range_cache);
+              return false;
+            }
+            continue;
           }
         }
         if (db && db->op == NYIR_SUB_I64 && db->a == in->a) {
@@ -794,6 +909,42 @@ bool nyr_peephole(nyr_func_t *f) {
           }
           continue;
         }
+      } else if (defs && ((bk && kind[in->b] == 1) || (ak && kind[in->a] == 1))) {
+        /*
+         * (x * c1) * c2 -> x * (c1 * c2), wrapping like i64 mul.
+         * A power-of-two factor is already a shift, above.
+         */
+        int const_op = bk && kind[in->b] == 1 ? in->b : in->a;
+        int other = const_op == in->b ? in->a : in->b;
+        int64_t cv = const_op == in->b ? bv : av;
+        if (other >= 0 && other < f->next_value) {
+          const nyr_inst_t *dm = nir_def_inst(f, defs, other);
+          int c1_idx = -1, x_idx = -1;
+          if (dm && dm->op == NYIR_MUL_I64 && dm->a >= 0 && dm->b >= 0 &&
+              dm->a < f->next_value && dm->b < f->next_value) {
+            if (known[dm->a] && kind[dm->a] == 1) {
+              c1_idx = dm->a;
+              x_idx = dm->b;
+            } else if (known[dm->b] && kind[dm->b] == 1) {
+              c1_idx = dm->b;
+              x_idx = dm->a;
+            }
+          }
+          if (c1_idx >= 0 && x_idx >= 0) {
+            int64_t prod =
+                (int64_t)((uint64_t)value[c1_idx] * (uint64_t)cv);
+            if (!nir_peep_reassoc_const(f, &i, x_idx, prod, NYIR_MUL_I64)) {
+              free(known);
+              free(value);
+              free(kind);
+              free(facts);
+              free(defs);
+              nir_range_query_cache_free(&range_cache);
+              return false;
+            }
+            continue;
+          }
+        }
       }
       break;
     case NYIR_DIV_I64: {
@@ -821,6 +972,29 @@ bool nyr_peephole(nyr_func_t *f) {
             free(known);
             free(value);
             free(facts);
+            nir_range_query_cache_free(&range_cache);
+            return false;
+          }
+          continue;
+        }
+      } else if (defs && bk && bv > 1 && in->a >= 0 && in->a < f->next_value) {
+        /*
+         * (x / c1) / c2 -> x / (c1 * c2) for positive divisors whose product
+         * fits in i64. Toward-zero division reassociates in that range;
+         * a non-positive divisor can trap on INT64_MIN / -1.
+         */
+        const nyr_inst_t *dd = nir_def_inst(f, defs, in->a);
+        if (dd && dd->op == NYIR_DIV_I64 && dd->a >= 0 && dd->b >= 0 &&
+            dd->b < f->next_value && known[dd->b] && kind[dd->b] == 1 &&
+            value[dd->b] > 1 && value[dd->b] <= INT64_MAX / bv) {
+          int x_idx = dd->a;
+          int64_t prod = value[dd->b] * bv;
+          if (!nir_peep_reassoc_const(f, &i, x_idx, prod, NYIR_DIV_I64)) {
+            free(known);
+            free(value);
+            free(kind);
+            free(facts);
+            free(defs);
             nir_range_query_cache_free(&range_cache);
             return false;
           }

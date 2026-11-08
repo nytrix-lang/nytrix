@@ -56,7 +56,9 @@ static inline int nyt_color_enabled(void) {
   const char *term_program = getenv("TERM_PROGRAM");
   if (term_program && strcmp(term_program, "vscode") == 0)
     return 1;
-  return isatty(STDOUT_FILENO) != 0;
+  /* The bench writes headers/diagnostics to stderr and listings to stdout;
+   * enable color if either stream is a terminal. */
+  return isatty(STDOUT_FILENO) != 0 || isatty(STDERR_FILENO) != 0;
 }
 
 static inline const char *nyt_clr(const char *code) { return nyt_color_enabled() ? code : ""; }

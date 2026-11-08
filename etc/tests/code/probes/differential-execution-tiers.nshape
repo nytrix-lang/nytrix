@@ -1,0 +1,32 @@
+shape differential_execution_tiers {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 jit nyir vm differential execution tiers]
+  template ny-test-case
+  flags_matrix "--native-backend x86_64; --run=jit; --native --run"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+fn fib(int n) int {
+  if n <= 1 {
+    n
+  } else {
+    fib(n - 1) + fib(n - 2)
+  }
+}
+
+fn calc(int a, int b) int {
+  def s = a * b + 10
+  if s > 20 {
+    s - 5
+  } else {
+    s + 5
+  }
+}
+
+assert(fib(7) == 13, "fib(7)")
+assert(calc(3, 4) == 17, "calc(3, 4)")
+assert(calc(1, 2) == 17, "calc(1, 2)")
+NY
+}

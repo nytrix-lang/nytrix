@@ -35,9 +35,9 @@ fn int(any x) int {
 
 fn trunc(any x) int {
    "Truncates the fractional part of float `x`, returning the result as a tagged integer."
-   if is_int(x) { x }
-   elif !__is_float_obj(x) { 0 }
-   else { __flt_trunc(x) }
+   if is_int(x) { return x }
+   if !__is_float_obj(x) { return 0 }
+   int(x)
 }
 
 fn is_float(any x) bool {
@@ -82,6 +82,7 @@ fn feq(any a, any b) bool {
 
 fn floor(any x) int {
    "Returns the largest integer less than or equal to float `x`."
+   if is_int(x) { return x }
    def i = int(x)
    def f_i = float(i)
    fgt(f_i, x) ? i - 1 : i
@@ -89,6 +90,7 @@ fn floor(any x) int {
 
 fn ceil(any x) int {
    "Returns the smallest integer greater than or equal to float `x`."
+   if is_int(x) { return x }
    def i = int(x)
    def f_i = float(i)
    flt(f_i, x) ? i + 1 : i
@@ -100,7 +102,10 @@ def INF_VAL = __flt_inf()
 
 fn round(any x) int {
    "Rounds float `x` to the nearest integer."
-   if flt(x, float(0)) { ceil(fsub(float(x), HALF)) } else { floor(fadd(float(x), HALF)) }
+   if is_int(x) { return x }
+   ;; Use the intrinsic: adding 0.5 first rounds 0.49999999999999994 up to 1
+   ;; even though it is below the nearest-integer midpoint.
+   __flt_round(float(x))
 }
 
 fn abs(any x) any {

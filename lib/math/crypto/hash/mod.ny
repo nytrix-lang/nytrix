@@ -3,7 +3,7 @@
 ;; References:
 ;; - https://www.rfc-editor.org/rfc/rfc1321
 ;; - https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.180-4.pdf
-module core.math.crypto.hash(crc32, adler32, fnv1a, xxh32, sha1, md5, md5_bytes, sha256, sha512, ripemd160_bytes, ripemd160_hex, sha3_256, sha3_512, blake2s, sha256_hex, sha256_bytes, sha256_hmac, md5_hmac, md4_bytes, md4_hex, ntlm_hash, dcc_hash, dcc2_hash, native_available, native_backend_name, native_last_error, md5_padding, sha1_padding, sha256_padding, birthday, rainbow, length_extension, hash_dict_crack, hash_brute_crack)
+module core.math.crypto.hash(crc32, adler32, fnv1a, xxh32, sha1, md5, md5_bytes, sha256, sha512, digest_mem, ripemd160_bytes, ripemd160_hex, sha3_256, sha3_512, blake2s, sha256_hex, sha256_bytes, sha256_hmac, md5_hmac, md4_bytes, md4_hex, ntlm_hash, dcc_hash, dcc2_hash, native_available, native_backend_name, native_last_error, md5_padding, sha1_padding, sha256_padding, birthday, rainbow, length_extension, hash_dict_crack, hash_brute_crack)
 use core
 use core.mem (zalloc, zalloc_size, malloc, free, memcpy, __copy_mem)
 use core.math.bin (
@@ -91,7 +91,7 @@ fn native_last_error() str {
    _hash_native_last_error
 }
 
-fn _hash_native_enabled() bool { common.env_toggle("NY_HASH_NATIVE", false) }
+fn _hash_native_enabled() bool { common.env_toggle("NY_HASH_NATIVE", true) }
 
 fn _hash_input_bytes(any data, int start=0, int span_len=0) list {
    start = _hash_norm_start(data, start)
@@ -175,11 +175,8 @@ fn _hash_native_load() bool {
    _hash_native_backend_name = ""
    _hash_native_last_error = ""
    if !_hash_native_enabled() { return _hash_native_set_error("disabled by NY_HASH_NATIVE") }
-   if !(
-      comptime{ __os_name() == "linux" } ||
-      comptime{ __os_name() == "macos" } ||
-      comptime{ __os_name() == "windows" }
-   ){
+   def os_name = __os_name()
+   if os_name != "linux" && os_name != "macos" && os_name != "windows" {
       return _hash_native_set_error("native hash backend unsupported on this OS")
    }
    def ptr probe_ctx = _EVP_MD_CTX_new()
@@ -240,57 +237,88 @@ fn _hash_bytes_from_ptr(any p, int n) list {
 fn _hash_native_digest_hex(list names, any s, int start=0, int count=0) any {
    def out = _hash_native_digest_bytes(names, s, start, count)
    if out == nil { return nil }
-   out.hex
+   bin.bytes_to_hex(out)
 }
 
-fn _hash_native_digest_bytes(list names, any s, int start=0, int count=0) any {
+fn _hash_native_digest_mem(list names, ptr buf, int slen) any {
    def md = _hash_native_digest_obj(names)
    if !md { return nil }
-   def src = _hash_span_buf(s, start, count)
-   def buf = src[0]
-   def slen = src[1]
-   def owned = src[2]
    if !buf && slen > 0 { return nil }
    def ptr ctx = _EVP_MD_CTX_new()
    def out = malloc(128)
    def out_len_p = malloc(8)
    if !ctx || !out || !out_len_p {
-      if owned { free(buf) }
       if ctx { _EVP_MD_CTX_free(ctx) }
       free(out, out_len_p)
       return nil
    }
    store32(out_len_p, 0, 0)
    if _EVP_DigestInit_ex(ctx, md, 0) != 1 {
-      if owned { free(buf) }
       _EVP_MD_CTX_free(ctx)
       free(out, out_len_p)
       return nil
    }
    if slen > 0 && _EVP_DigestUpdate(ctx, buf, slen) != 1 {
-      if owned { free(buf) }
       _EVP_MD_CTX_free(ctx)
       free(out, out_len_p)
       return nil
    }
    if _EVP_DigestFinal_ex(ctx, out, out_len_p) != 1 {
-      if owned { free(buf) }
       _EVP_MD_CTX_free(ctx)
       free(out, out_len_p)
       return nil
    }
    def out_len = load32(out_len_p, 0)
    def res = _hash_bytes_from_ptr(out, out_len)
-   if owned { free(buf) }
    _EVP_MD_CTX_free(ctx)
    free(out, out_len_p)
    res
 }
 
+fn _hash_native_digest_bytes(list names, any s, int start=0, int count=0) any {
+   def src = _hash_span_buf(s, start, count)
+   def buf = src[0]
+   def slen = src[1]
+   def owned = src[2]
+   def res = _hash_native_digest_mem(names, buf, slen)
+   if owned { free(buf) }
+   res
+}
+
+fn _mem_to_list(ptr buf, int n) list {
+   mut out = list(n)
+   __list_set_len(out, n)
+   mut i = 0
+   while i < n {
+      __store_item_fast(out, i, load8(buf, i))
+      i += 1
+   }
+   out
+}
+
+fn digest_mem(int kind, ptr buf, int n) list {
+   "Hash `n` bytes at `buf`. `kind` is 1(MD5), 5(SHA-256), or 6(SHA-512)."
+   if kind == 1 {
+      def native = _hash_native_digest_mem(["MD5", "md5"], buf, n)
+      if native != nil { return native }
+      return md5(_mem_to_list(buf, n)).unhex
+   }
+   if kind == 5 {
+      def native = _hash_native_digest_mem(["SHA256", "sha256", "SHA-256"], buf, n)
+      if native != nil { return native }
+      def simmd_digest = _hash_simmd_digest_bytes(_mem_to_list(buf, n))
+      if simmd_digest != nil { return simmd_digest }
+      return sha256(_mem_to_list(buf, n))
+   }
+   def native = _hash_native_digest_mem(["SHA512", "sha512", "SHA-512"], buf, n)
+   if native != nil { return native }
+   sha512(_mem_to_list(buf, n)).unhex
+}
+
 fn _hash_native_hmac_hex(list names, any key, any data) any {
    def out = _hash_native_hmac_bytes(names, key, data)
    if out == nil { return nil }
-   out.hex
+   bin.bytes_to_hex(out)
 }
 
 fn _hash_native_hmac_bytes(list names, any key, any data) any {
@@ -403,149 +431,129 @@ fn _rotr64(any x, int n) any {
    _u64_word((word >> shift) | (word << (64 - shift)))
 }
 
-fn _Ch(any x, any y, any z) any {
-   def ux, uy = _u64_word(x), _u64_word(y)
-   def uz = _u64_word(z)
-   _u64_word((ux & uy) ^ ((_U64_MASK ^ ux) & uz))
+fn _sha512_rothi(int hi, int lo, int n) int {
+   if n < 32 { return ((hi >> n) | (lo << (32 - n))) & 0xffffffff }
+   n -= 32
+   ((lo >> n) | (hi << (32 - n))) & 0xffffffff
 }
 
-fn _Maj(any x, any y, any z) any {
-   def ux, uy = _u64_word(x), _u64_word(y)
-   def uz = _u64_word(z)
-   _u64_word((ux & uy) ^ (ux & uz) ^ (uy & uz))
-}
-
-fn _Sigma0_512(any x) any {
-   def word = _u64_word(x)
-   _u64_word(_rotr64(word, 28) ^ _rotr64(word, 34) ^ _rotr64(word, 39))
-}
-
-fn _Sigma1_512(any x) any {
-   def word = _u64_word(x)
-   _u64_word(_rotr64(word, 14) ^ _rotr64(word, 18) ^ _rotr64(word, 41))
-}
-
-fn _sigma0_512(any x) any {
-   def word = _u64_word(x)
-   _u64_word(_rotr64(word, 1) ^ _rotr64(word, 8) ^ (word >> 7))
-}
-
-fn _sigma1_512(any x) any {
-   def word = _u64_word(x)
-   _u64_word(_rotr64(word, 19) ^ _rotr64(word, 61) ^ (word >> 6))
-}
-
-def _K512 = [0x428a2f98d728ae22, 0x7137449123ef65cd, 0xb5c0fbcfec4d3b2f, 0xe9b5dba58189dbbc, 0x3956c25bf348b538, 0x59f111f1b605d019, 0x923f82a4af194f9b, 0xab1c5ed5da6d8118, 0xd807aa98a3030242, 0x12835b0145706fbe, 0x243185be4ee4b28c, 0x550c7dc3d5ffb4e2, 0x72be5d74f27b896f, 0x80deb1fe3b1696b1, 0x9bdc06a725c71235, 0xc19bf174cf692694, 0xe49b69c19ef14ad2, 0xefbe4786384f25e3, 0x0fc19dc68b8cd5b5, 0x240ca1cc77ac9c65, 0x2de92c6f592b0275, 0x4a7484aa6ea6e483, 0x5cb0a9dcbd41fbd4, 0x76f988da831153b5, 0x983e5152ee66dfab, 0xa831c66d2db43210, 0xb00327c898fb213f, 0xbf597fc7beef0ee4, 0xc6e00bf33da88fc2, 0xd5a79147930aa725, 0x06ca6351e003826f, 0x142929670a0e6e70, 0x27b70a8546d22ffc, 0x2e1b21385c26c926, 0x4d2c6dfc5ac42aed, 0x53380d139d95b3df, 0x650a73548baf63de, 0x766a0abb3c77b2a8, 0x81c2c92e47edaee6, 0x92722c851482353b, 0xa2bfe8a14cf10364, 0xa81a664bbc423001, 0xc24b8b70d0f89791, 0xc76c51a30654be30, 0xd192e819d6ef5218, 0xd69906245565a910, 0xf40e35855771202a, 0x106aa07032bbd1b8, 0x19a4c116b8d2d0c8, 0x1e376c085141ab53, 0x2748774cdf8eeb99, 0x34b0bcb5e19b48a8, 0x391c0cb3c5c95a63, 0x4ed8aa4ae3418acb, 0x5b9cca4f7763e373, 0x682e6ff3d6b2b8a3, 0x748f82ee5defb2fc, 0x78a5636f43172f60, 0x84c87814a1f0ab72, 0x8cc702081a6439ec, 0x90befffa23631e28, 0xa4506cebde82bde9, 0xbef9a3f7b2c67915, 0xc67178f2e372532b, 0xca273eceea26619c, 0xd186b8c721c0c207, 0xeada7dd6cde0eb1e, 0xf57d4f7fee6ed178, 0x06f067aa72176fba, 0x0a637dc5a2c898a6, 0x113f9804bef90dae, 0x1b710b35131c471b, 0x28db77f523047d84, 0x32caab7b40c72493, 0x3c9ebe0a15c9bebc, 0x431d67c49c100d4c, 0x4cc5d4becb3e42b6, 0x597f299cfc657e2a, 0x5fcb6fab3ad6faec, 0x6c44198c4a475817]
-
-fn _dl64(any s, int i) any {
-   mut out = _U64_ZERO
-   mut j = 0
-   while j < 8 {
-      out = (out * 256) + load8(s, i + j)
-      j += 1
-   }
-   _u64_word(out)
-}
-
-fn _ts64(any s, int i, any v) any {
-   mut j = 7
-   mut val = v
-   while j >= 0 {
-      store8(s, val & 255, i + j)
-      val = val >> 8
-      j -= 1
-   }
-}
-
-fn _u64_hex(any v) str {
-   def word = _u64_word(v)
-   mut out = str.Builder(16)
-   mut i = 7
-   while i >= 0 {
-      out = str.builder_append(out, str.to_hex(bigint_to_int((word >> (i * 8)) & 255), 2))
-      i -= 1
-   }
-   def text = str.builder_to_str(out)
-   str.builder_free(out)
-   text
+fn _sha512_rotlo(int hi, int lo, int n) int {
+   if n < 32 { return ((lo >> n) | (hi << (32 - n))) & 0xffffffff }
+   n -= 32
+   ((hi >> n) | (lo << (32 - n))) & 0xffffffff
 }
 
 fn sha512(any msg, int start=0, int count=0) str {
-   "Computes the SHA-512 hash of a message."
+   "Compute SHA-512 digest; returns 128 hexadecimal characters."
    if _hash_native_load() {
       def native = _hash_native_digest_hex(["SHA512", "sha512", "SHA-512"], msg, start, count)
       if native != nil { return str.cstr_to_str(native) }
    }
-   mut data = _hash_input_bytes(msg, start, count)
+   def data = _hash_input_bytes(msg, start, count)
    def n = data.len
-   mut h = [
-      0x6a09e667f3bcc908, 0xbb67ae8584caa73b, 0x3c6ef372fe94f82b, 0xa54ff53a5f1d36f1,
-      0x510e527fade682d1, 0x9b05688c2b3e6c1f, 0x1f83d9abfb41bd6b, 0x5be0cd19137e2179
-   ]
-   def padding_len = (n % 128 < 112) ? (128 - (n % 128)) : (256 - (n % 128))
-   def total_len = n + padding_len
-   mut m = malloc(total_len)
-   mut bi = 0
-   while bi < n {
-      store8(m, data.get(bi), bi)
-      bi += 1
+   def size = ((n + 16) / 128 + 1) * 128
+   def buf = zalloc(size)
+   mut i = 0
+   while i < n { store8(buf, data[i], i) i += 1 }
+   store8(buf, 128, n)
+   mut bits = n * 8
+   i = 0
+   while i < 8 {
+      store8(buf, bits & 255, size - 1 - i)
+      bits = bits >> 8
+      i += 1
    }
-   store8(m, 128, n)
-   mut i = n + 1
-   while i < total_len - 16 { store8(m, 0, i) i += 1 }
-   while i < total_len - 8 { store8(m, 0, i) i += 1 }
-   _ts64(m, total_len - 8, n * 8)
-   mut p = 0
-   while p < total_len {
-      mut w, j = _u64_list(80), 0
-      while j < 16 {
-         w[j] = _dl64(m, p + j * 8)
-         j += 1
+   def khi = [1116352408, 1899447441, 3049323471, 3921009573, 961987163, 1508970993, 2453635748, 2870763221, 3624381080, 310598401, 607225278, 1426881987, 1925078388, 2162078206, 2614888103, 3248222580, 3835390401, 4022224774, 264347078, 604807628, 770255983, 1249150122, 1555081692, 1996064986, 2554220882, 2821834349, 2952996808, 3210313671, 3336571891, 3584528711, 113926993, 338241895, 666307205, 773529912, 1294757372, 1396182291, 1695183700, 1986661051, 2177026350, 2456956037, 2730485921, 2820302411, 3259730800, 3345764771, 3516065817, 3600352804, 4094571909, 275423344, 430227734, 506948616, 659060556, 883997877, 958139571, 1322822218, 1537002063, 1747873779, 1955562222, 2024104815, 2227730452, 2361852424, 2428436474, 2756734187, 3204031479, 3329325298, 3391569614, 3515267271, 3940187606, 4118630271, 116418474, 174292421, 289380356, 460393269, 685471733, 852142971, 1017036298, 1126000580, 1288033470, 1501505948, 1607167915, 1816402316]
+   def klo = [3609767458, 602891725, 3964484399, 2173295548, 4081628472, 3053834265, 2937671579, 3664609560, 2734883394, 1164996542, 1323610764, 3590304994, 4068182383, 991336113, 633803317, 3479774868, 2666613458, 944711139, 2341262773, 2007800933, 1495990901, 1856431235, 3175218132, 2198950837, 3999719339, 766784016, 2566594879, 3203337956, 1034457026, 2466948901, 3758326383, 168717936, 1188179964, 1546045734, 1522805485, 2643833823, 2343527390, 1014477480, 1206759142, 344077627, 1290863460, 3158454273, 3505952657, 106217008, 3606008344, 1432725776, 1467031594, 851169720, 3100823752, 1363258195, 3750685593, 3785050280, 3318307427, 3812723403, 2003034995, 3602036899, 1575990012, 1125592928, 2716904306, 442776044, 593698344, 3733110249, 2999351573, 3815920427, 3928383900, 566280711, 3454069534, 4000239992, 1914138554, 2731055270, 3203993006, 320620315, 587496836, 1086792851, 365543100, 2618297676, 3409855158, 4234509866, 987167468, 1246189591]
+   mut hh = [1779033703, 3144134277, 1013904242, 2773480762, 1359893119, 2600822924, 528734635, 1541459225]
+   mut hl = [4089235720, 2227873595, 4271175723, 1595750129, 2917565137, 725511199, 4215389547, 327033209]
+   mut off = 0
+   while off < size {
+      mut wh = list(80)
+      mut wl = list(80)
+      __list_set_len(wh, 80)
+      __list_set_len(wl, 80)
+      i = 0
+      while i < 16 {
+         def j = off + i * 8
+         wh[i] = (load8(buf, j) << 24) | (load8(buf, j + 1) << 16) | (load8(buf, j + 2) << 8) | load8(buf, j + 3)
+         wl[i] = (load8(buf, j + 4) << 24) | (load8(buf, j + 5) << 16) | (load8(buf, j + 6) << 8) | load8(buf, j + 7)
+         i += 1
       }
-      while j < 80 {
-         def s0, s1 = _sigma0_512(w.get(j - 15)), _sigma1_512(w.get(j - 2))
-         w[j] = _u64_word(s1 + w.get(j - 7) + s0 + w.get(j - 16))
-         j += 1
+      while i < 80 {
+         def int xh = int(wh[i - 15])
+         def int xl = int(wl[i - 15])
+         def int yh = int(wh[i - 2])
+         def int yl = int(wl[i - 2])
+         def int s0h = _sha512_rothi(xh, xl, 1) ^ _sha512_rothi(xh, xl, 8) ^ (xh >> 7)
+         def int s0l = (_sha512_rotlo(xh, xl, 1) ^ _sha512_rotlo(xh, xl, 8) ^ ((xl >> 7) | (xh << 25))) & 0xffffffff
+         def int s1h = _sha512_rothi(yh, yl, 19) ^ _sha512_rothi(yh, yl, 61) ^ (yh >> 6)
+         def int s1l = (_sha512_rotlo(yh, yl, 19) ^ _sha512_rotlo(yh, yl, 61) ^ ((yl >> 6) | (yh << 26))) & 0xffffffff
+         def int low = wl[i - 16] + s0l + wl[i - 7] + s1l
+         wl[i] = low & 0xffffffff
+         wh[i] = (wh[i - 16] + s0h + wh[i - 7] + s1h + (low >> 32)) & 0xffffffff
+         i += 1
       }
-      mut a, b = h.get(0), h.get(1)
-      mut c, d = h.get(2), h.get(3)
-      mut e, f = h.get(4), h.get(5)
-      mut g = h.get(6)
-      mut ha = h.get(7)
-      mut k = 0
-      while k < 80 {
-         def t1 = _u64_word(ha + _Sigma1_512(e) + _Ch(e, f, g) + _K512.get(k) + w.get(k))
-         def t2 = _u64_word(_Sigma0_512(a) + _Maj(a, b, c))
-         ha = g
-         g = f
-         f = e
-         e = _u64_word(d + t1)
-         d = c
-         c = b
-         b = a
-         a = _u64_word(t1 + t2)
-         k += 1
+      mut int ah = hh[0] mut int al = hl[0]
+      mut int bh = hh[1] mut int bl = hl[1]
+      mut int ch = hh[2] mut int cl = hl[2]
+      mut int dh = hh[3] mut int dl = hl[3]
+      mut int eh = hh[4] mut int el = hl[4]
+      mut int fh = hh[5] mut int fl = hl[5]
+      mut int gh = hh[6] mut int gl = hl[6]
+      mut int zh = hh[7] mut int zl = hl[7]
+      i = 0
+      while i < 80 {
+         def int s1h = _sha512_rothi(eh, el, 14) ^ _sha512_rothi(eh, el, 18) ^ _sha512_rothi(eh, el, 41)
+         def int s1l = _sha512_rotlo(eh, el, 14) ^ _sha512_rotlo(eh, el, 18) ^ _sha512_rotlo(eh, el, 41)
+         def int chh = (eh & fh) ^ ((~eh) & gh)
+         def int chl = (el & fl) ^ ((~el) & gl)
+         def int low1 = zl + s1l + chl + klo[i] + wl[i]
+         def int t1l = low1 & 0xffffffff
+         def int t1h = (zh + s1h + chh + khi[i] + wh[i] + (low1 >> 32)) & 0xffffffff
+         def int s0h = _sha512_rothi(ah, al, 28) ^ _sha512_rothi(ah, al, 34) ^ _sha512_rothi(ah, al, 39)
+         def int s0l = _sha512_rotlo(ah, al, 28) ^ _sha512_rotlo(ah, al, 34) ^ _sha512_rotlo(ah, al, 39)
+         def int mah = (ah & bh) ^ (ah & ch) ^ (bh & ch)
+         def int mal = (al & bl) ^ (al & cl) ^ (bl & cl)
+         def int low2 = s0l + mal
+         def int t2l = low2 & 0xffffffff
+         def int t2h = (s0h + mah + (low2 >> 32)) & 0xffffffff
+         zh = gh zl = gl
+         gh = fh gl = fl
+         fh = eh fl = el
+         def int newel = dl + t1l
+         eh = (dh + t1h + (newel >> 32)) & 0xffffffff
+         el = newel & 0xffffffff
+         dh = ch dl = cl
+         ch = bh cl = bl
+         bh = ah bl = al
+         def int newal = t1l + t2l
+         ah = (t1h + t2h + (newal >> 32)) & 0xffffffff
+         al = newal & 0xffffffff
+         i += 1
       }
-      h[0] = _u64_word(h.get(0) + a)
-      h[1] = _u64_word(h.get(1) + b)
-      h[2] = _u64_word(h.get(2) + c)
-      h[3] = _u64_word(h.get(3) + d)
-      h[4] = _u64_word(h.get(4) + e)
-      h[5] = _u64_word(h.get(5) + f)
-      h[6] = _u64_word(h.get(6) + g)
-      h[7] = _u64_word(h.get(7) + ha)
-      p += 128
+      def states_hi = [ah,bh,ch,dh,eh,fh,gh,zh]
+      def states_lo = [al,bl,cl,dl,el,fl,gl,zl]
+      i = 0
+      while i < 8 {
+         def int low = hl[i] + states_lo[i]
+         hl[i] = low & 0xffffffff
+         hh[i] = (hh[i] + states_hi[i] + (low >> 32)) & 0xffffffff
+         i += 1
+      }
+      off += 128
    }
-   free(m)
-   mut res = str.Builder(136)
-   mut l = 0
-   while l < 8 {
-      res = str.builder_append(res, _u64_hex(h.get(l)))
-      l += 1
+   free(buf)
+   mut out = str.Builder(128)
+   i = 0
+   while i < 8 {
+      out = str.builder_append(out, str.to_hex(hh[i], 8))
+      out = str.builder_append(out, str.to_hex(hl[i], 8))
+      i += 1
    }
-   def hex_text = str.builder_to_str(res)
-   str.builder_free(res)
-   hex_text
+   def result = str.builder_to_str(out)
+   str.builder_free(out)
+   result
 }
 
 fn _bit(any v) int { int(v) }
@@ -787,8 +795,10 @@ fn md5(any s, int start=0, int count=0) str {
          }
          def base_idx = off + g * 4
          def M_g = _load_le32(m, base_idx)
-         def round_sum = _add32(_add32(_add32(a, f), K.get(i)), M_g)
-         def temp = _add32(b, _rotl32(round_sum, S.get(i)))
+         def round_sum = _add32(_add32(_add32(a, f), K[i]), M_g)
+         def shift = S[i]
+         def rotated = ((round_sum << shift) | (round_sum >> (32 - shift))) & 0xffffffff
+         def temp = _add32(b, rotated)
          a, d = d, c
          c, b = b, temp
          i += 1
@@ -956,7 +966,7 @@ fn sha256(any data) list {
 
 fn sha256_hex(any data) str {
    "Compute SHA-256 hash and return as hex string."
-   sha256(data).hex
+   bin.bytes_to_hex(sha256(data))
 }
 
 fn sha256_bytes(any data) list {
@@ -1097,7 +1107,7 @@ fn ripemd160_bytes(any data) list {
 
 fn ripemd160_hex(any data) str {
    "Compute RIPEMD-160 hash and return as hex string."
-   ripemd160_bytes(data).hex
+   bin.bytes_to_hex(ripemd160_bytes(data))
 }
 
 def _KECCAK_RC = [
@@ -1297,7 +1307,7 @@ fn md5_hmac(any key, any message) str {
       def native = _hash_native_hmac_hex(["MD5", "md5"], key, message)
       if native != nil { return native }
    }
-   _hash_hmac_bytes(key, message, "md5").hex
+   bin.bytes_to_hex(_hash_hmac_bytes(key, message, "md5"))
 }
 
 fn _hash_hmac_digest_bytes(str digest_name, any data) list {

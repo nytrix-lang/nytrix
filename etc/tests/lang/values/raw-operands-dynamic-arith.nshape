@@ -1,0 +1,33 @@
+shape test_raw_operands_dynamic_arith {
+  family "runtime/values"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.math (max)
+
+;; Raw integers must be boxed at the dynamic arithmetic boundary: `x / number`
+;; used to evaluate to nil when x was a raw product.
+mut sum = 12
+assert(sum * 100 / max(1, 4) == 300, "raw product over number")
+assert(sum / max(1, 4) == 3, "raw value over number")
+
+;; Same integer key, whether it arrives raw or dynamic.
+mut d = dict(8)
+mut k = 0x24001
+mut any dyn = k
+d[dyn] = 5
+assert(d[k] == 5, "raw lookup of a dynamic-stored key")
+assert(d[dyn] == 5, "dynamic lookup")
+mut any text = "name"
+d[text] = 7
+assert(d["name"] == 7, "dynamic string key")
+
+;; Absent environment values are nil, never integer zero.
+assert(__env_get("NYTRIX_DEFINITELY_UNSET_VARIABLE") == nil, "absent env is nil")
+print("ok")
+NY
+}

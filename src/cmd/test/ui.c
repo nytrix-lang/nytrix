@@ -97,6 +97,12 @@ static void replay_env(const char *app, int width, int height) {
   setenv("NY_UI_MOCK_TEXT_FAST", strcmp(app, "editor") ? "bars" : "off", 1);
   setenv("NYTRIX_FIXTURE_TIMEOUT_MS", "0", 1);
   setenv("NYTRIX_FIXTURE_FRAME_MS", "100", 1);
+  /*
+   * Replay compares route markers, not texture fidelity. The default 256-wide
+   * generated environment is filled per pixel in the VM route and dominates
+   * the engine replay.
+   */
+  setenv("NY_UI_GENERATED_ENV_W", "64", 1);
   setenv_num("NYTRIX_FIXTURE_FRAMES", 5);
   setenv_num("NYTRIX_FIXTURE_WIDTH", width);
   setenv_num("NYTRIX_FIXTURE_HEIGHT", height);

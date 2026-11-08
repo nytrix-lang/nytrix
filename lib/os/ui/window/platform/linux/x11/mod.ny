@@ -3348,8 +3348,6 @@ fn x11_error_handler(any display, ptr error_ptr) int {
    0
 }
 
-fn _suppress_x11_errors_temp(any suppress) any { _set_x11_val("suppress_errors", suppress ? 1 : 0) }
-
 fn _setup_x11_error_handler() bool {
    #linux {
       _c_xset_error_handler(x11_error_handler)

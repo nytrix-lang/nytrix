@@ -1,0 +1,21 @@
+shape test_raw_fd_abi {
+  family "runtime/system"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+def path = "lib/mod.ny"
+def fd = __open(__any_to_cstr(path), 0, 0)
+assert(fd >= 0, "open returns a usable descriptor")
+mut buf = malloc(16)
+assert(buf != 0, "read buffer allocated")
+def n = __read_off(fd, buf, 16, 0)
+assert(n == 16, "native read uses the descriptor returned by open")
+assert(__close(fd) == 0, "native close uses the descriptor returned by open")
+free(buf)
+print("✓ raw fd ABI passed")
+NY
+}

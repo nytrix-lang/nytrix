@@ -612,6 +612,7 @@ static bool verify_tied_input(const nyr_mach_inst_t *in, uint32_t value,
   case NYR_MACH_SAR:
   case NYR_MACH_ROR:
   case NYR_MACH_ROR32:
+  case NYR_MACH_VSHR:
   case NYR_MACH_BSWAP64:
   case NYR_MACH_BSWAP32:
   case NYR_MACH_FMA:
@@ -686,9 +687,61 @@ static bool verify_tied_boundary(const nyr_mach_func_t *mach,
 }
 
 /*
- * Check the final split ranges after coalescing, before encoders consume them.
+ * Latch recurrence sharing (vector class): a loop PHI `phi` and the latch
+ * value `src` that its edge copy `phi = copy src` installs may share one
+ * register although the PHI's single per-block segment spans the whole
+ * latch. The overlap is only nominal when
+ *   - `src` is defined at its segment start by an instruction that reads
+ *     `phi` at most as the src0 of a single-instruction lowering
+ *     (vector_latch_def_reads_phi_ok; multi-instruction vector lowerings may
+ *     write the destination before their last operand read),
+ *   - `src` dies exactly at the edge copy `phi = copy src`, and
+ *   - between that definition and the copy, nothing reads or redefines
+ *     `phi`.
+ * The register then holds the old PHI value until its last read, the new
+ * value from the definition on, and the copy is a no-op. Mirrors
+ * vector_phi_reads_precede_source(), which proposes the coloring.
  */
+static bool vector_latch_def_reads_phi_ok(const nyr_mach_inst_t *def,
+                                          uint32_t phi);
+
+static bool verify_vector_latch_recurrence(const nyr_mach_func_t *mach,
+                                           const regalloc_verify_color_t *active,
+                                           const regalloc_verify_span_t *span,
+                                           nyr_mach_reg_class_t reg_class) {
+  if (!mach || !active || !span || reg_class != NYR_MACH_REGCLASS_VECTOR ||
+      active->start > span->start || span->end > active->end ||
+      span->end >= mach->inst_len || span->start >= span->end)
+    return false;
+  const uint32_t phi = active->vreg, src = span->vreg;
+  if (phi == src)
+    return false;
+  const nyr_mach_inst_t *def = &mach->insts[span->start];
+  if (!dst_is_def(def) || def->dst.kind != NYR_MACH_OPERAND_VREG ||
+      def->dst.as.reg != src || !vector_latch_def_reads_phi_ok(def, phi))
+    return false;
+  const nyr_mach_inst_t *copy = &mach->insts[span->end];
+  if (copy->opcode != NYR_MACH_COPY || copy->dst.kind != NYR_MACH_OPERAND_VREG ||
+      copy->dst.as.reg != phi || copy->src0.kind != NYR_MACH_OPERAND_VREG ||
+      copy->src0.as.reg != src)
+    return false;
+  for (size_t pc = span->start + 1; pc < span->end; ++pc) {
+    const nyr_mach_inst_t *in = &mach->insts[pc];
+    if (dst_is_def(in) && in->dst.kind == NYR_MACH_OPERAND_VREG &&
+        (in->dst.as.reg == phi || in->dst.as.reg == src))
+      return false;
+    uint32_t uses[3 + NYIR_CALL_MAX_ARGS];
+    size_t use_count = inst_uses(in, uses, sizeof(uses) / sizeof(*uses));
+    for (size_t i = 0; i < use_count; ++i)
+      if (uses[i] == phi)
+        return false;
+  }
+  return true;
+}
+
 /*
+ * Check the final split ranges after coalescing, before encoders consume them.
+ *
  * Post-allocation fixed-register check: a colored segment may not stay live
  * across a non-call instruction whose target constraint clobbers that color
  * (variable shift/rotate count in RCX, division scratch, reduction
@@ -825,6 +878,14 @@ static bool regalloc_verify_mode(const nyr_mach_func_t *mach,
       continue;
     size_t color = (size_t)span->color;
     if (active[color].occupied && active[color].end >= span->start) {
+      if (verify_vector_latch_recurrence(mach, &active[color], span,
+                                         reg_class)) {
+        /*
+         * The PHI segment outlives the latch value; keep it active so later
+         * segments in this color are still checked against it.
+         */
+        continue;
+      }
       if (!verify_tied_boundary(mach, &active[color], span, reg_class,
                                 allow_rhs_tie)) {
         if (debug)
@@ -881,7 +942,7 @@ static bool regalloc_verify_mode(const nyr_mach_func_t *mach,
       }
       if (alloc->block_count == mach->block_len && alloc->live_out &&
           nyr_mach_regalloc_live_out(alloc, spans[i].block, spans[i].vreg) &&
-          (!block->inst_count || spans[end - 1].end != block_end - 1)) {
+          block->inst_count && spans[end - 1].end != block_end - 1) {
         if (debug)
           fprintf(stderr,
                   "[regalloc-verify] live-out v%u ends before block exit\n",
@@ -2050,6 +2111,60 @@ static void block_evict_color_all_excl(nyr_mach_regalloc_t *a, size_t block,
   }
 }
 
+/*
+ * Cost of the evictions block_evict_color_conflicts_excl() (target != NULL)
+ * or block_evict_color_all_excl() (target == NULL) would perform. Every
+ * evicted segment costs 1; each read or write of its value inside its span
+ * adds 8, since that access then goes through the stack home. A live-through
+ * segment with no access in its block is the cheapest victim.
+ */
+static size_t segment_access_count(const nyr_mach_func_t *mach,
+                                   const nyr_mach_live_segment_t *s) {
+  size_t n = 0;
+  for (size_t pc = s->start; pc <= s->end && pc < mach->inst_len; ++pc) {
+    const nyr_mach_inst_t *in = &mach->insts[pc];
+    if (dst_is_def(in) && in->dst.kind == NYR_MACH_OPERAND_VREG &&
+        in->dst.as.reg == s->vreg)
+      ++n;
+    uint32_t uses[3 + NYIR_CALL_MAX_ARGS];
+    size_t use_count = inst_uses(in, uses, sizeof(uses) / sizeof(*uses));
+    for (size_t i = 0; i < use_count; ++i)
+      if (uses[i] == s->vreg)
+        ++n;
+  }
+  return n;
+}
+
+static size_t block_color_eviction_count_excl(
+    const nyr_mach_func_t *mach,
+    const nyr_mach_regalloc_t *a, const nyr_mach_live_segment_t *target,
+    size_t block, int color, const size_vec_t *by_block, const uint32_t *excl,
+    size_t excl_len) {
+  if (!a || !by_block)
+    return SIZE_MAX;
+  if (target)
+    block = target->block;
+  if (block >= a->block_count)
+    return SIZE_MAX;
+  size_t n = 0;
+  for (size_t k = 0; k < by_block[block].len; ++k) {
+    const nyr_mach_live_segment_t *s = &a->segments[by_block[block].data[k]];
+    if (s == target || s->color != color)
+      continue;
+    if (target && (s->end < target->start || target->end < s->start))
+      continue;
+    bool excluded = false;
+    for (size_t x = 0; x < excl_len; ++x)
+      if (s->vreg == excl[x]) {
+        excluded = true;
+        break;
+      }
+    if (!excluded)
+      n += 1 + 8 * segment_access_count(mach, s);
+  }
+  return n;
+}
+
 static nyr_mach_live_segment_t *
 segment_in_block_vreg(nyr_mach_regalloc_t *a, uint32_t vreg, size_t block,
                       const size_vec_t *by_block, bool *unique) {
@@ -2199,6 +2314,38 @@ static bool block_reads_vreg_before(const nyr_mach_func_t *mach, size_t block,
 }
 
 /*
+ * A latch definition may read the PHI it replaces as src0 when its lowering is
+ * one instruction (or a copy of src0 into the destination followed by one
+ * instruction) whose other operand is not the PHI: reading src0 into the
+ * shared register is then a no-op. Multi-instruction lowerings (vector shifts,
+ * compares, selects) may write the destination before their last read.
+ */
+static bool vector_latch_def_reads_phi_ok(const nyr_mach_inst_t *def,
+                                          uint32_t phi) {
+  bool src0_phi =
+      def->src0.kind == NYR_MACH_OPERAND_VREG && def->src0.as.reg == phi;
+  bool other_phi =
+      (def->src1.kind == NYR_MACH_OPERAND_VREG && def->src1.as.reg == phi) ||
+      (def->src2.kind == NYR_MACH_OPERAND_VREG && def->src2.as.reg == phi) ||
+      def->args_len;
+  if (other_phi)
+    return false;
+  if (!src0_phi)
+    return true;
+  switch (def->opcode) {
+  case NYR_MACH_ADD:
+  case NYR_MACH_SUB:
+  case NYR_MACH_AND:
+  case NYR_MACH_OR:
+  case NYR_MACH_XOR:
+    return def->src1.kind == NYR_MACH_OPERAND_VREG ||
+           def->src1.kind == NYR_MACH_OPERAND_FRAME;
+  default:
+    return false;
+  }
+}
+
+/*
  * A loop recurrence computes the next value from the old one in the latch
  * itself (x' = f(x)). Sharing one register between the PHI and the copy
  * source is still interference-free when the source is defined in this edge
@@ -2229,12 +2376,7 @@ static bool vector_phi_reads_precede_source(const nyr_mach_func_t *mach,
    * destination is formed from src0 before src1 is consumed.
    */
   const nyr_mach_inst_t *def = &mach->insts[def_pc];
-  /* Multi-instruction vector lowerings may write the destination before
-   * their last operand read, so the definition must not read the PHI. */
-  if ((def->src0.kind == NYR_MACH_OPERAND_VREG && def->src0.as.reg == phi) ||
-      (def->src1.kind == NYR_MACH_OPERAND_VREG && def->src1.as.reg == phi) ||
-      (def->src2.kind == NYR_MACH_OPERAND_VREG && def->src2.as.reg == phi) ||
-      def->args_len)
+  if (!vector_latch_def_reads_phi_ok(def, phi))
     return false;
   for (size_t pc = def_pc + 1; pc < end; ++pc) {
     if (pc == copy_pc)
@@ -2403,8 +2545,16 @@ static void coalesce_loop_edges(const nyr_mach_func_t *mach,
       }
     }
 
-    for (size_t i = 0; i < a->segment_len; ++i) {
+    /*
+     * One PHI is coalesced at most once per header. Each of its region
+     * segments may serve as `hv`, and recoalescing the same PHI into another
+     * color would repeat evictions without carrying anything new.
+     */
+    uint8_t *coalesced_here = calloc(nv ? nv : 1, sizeof(*coalesced_here));
+    for (size_t i = 0; coalesced_here && i < a->segment_len; ++i) {
       nyr_mach_live_segment_t *hv = &a->segments[i];
+      if (hv->vreg < nv && coalesced_here[hv->vreg])
+        continue;
       if (hv->block >= nb ||
           (!hv->reload && !nyr_mach_regalloc_live_in(a, hv->block, hv->vreg)) ||
           edge_block[hv->block] || !reaches_h[hv->block])
@@ -2447,12 +2597,13 @@ static void coalesce_loop_edges(const nyr_mach_func_t *mach,
          * the edge block reads it first. Sharing the copy source's register
          * across that earlier read would create overlapping live ranges even
          * though the copy itself is a valid dying-input tie.
-         * vector_phi_reads_precede_source() is not yet sound (it produced
-         * a wrong binary checksum once enabled); keep the strict rule.
+         * Vector latch recurrences (x' = f(x) computed in the latch, with
+         * every read of x before the definition of x') are the exception:
+         * vector_phi_reads_precede_source() proves the overlap nominal and
+         * verify_vector_latch_recurrence() re-checks the final coloring.
          */
         if (block_reads_vreg_before(mach, e, copy_pc, v) &&
             !(reg_class == NYR_MACH_REGCLASS_VECTOR && e > h &&
-              getenv("TMP_VRELAX") &&
               vector_phi_reads_precede_source(mach, e, copy_pc, v, src))) {
           if (carry_debug)
             {
@@ -2564,6 +2715,11 @@ static void coalesce_loop_edges(const nyr_mach_func_t *mach,
        */
       int cands[64];
       size_t ncand = 0;
+      /*
+       * The PHI's own header color needs no header eviction; try it first.
+       */
+      if (hv->color >= 0 && (size_t)hv->color < a->color_count)
+        cands[ncand++] = hv->color;
       for (int pass = 0; pass < 2; ++pass) {
         for (size_t ci = 0; ci < copy_len; ++ci) {
           bool back = copies[ci].srcseg->block > h;
@@ -2593,7 +2749,14 @@ static void coalesce_loop_edges(const nyr_mach_func_t *mach,
           cands[ncand++] = (int)color;
       }
       int chosen = -1;
-      for (size_t ci = 0; ci < ncand; ++ci) {
+      /*
+       * Choose the legal color whose carry evicts least (see
+       * block_color_eviction_count_excl): an evicted loop value is reloaded
+       * from its home on every access, which can cost more than the copy
+       * the carry removes. Candidate order breaks ties.
+       */
+      size_t chosen_cost = SIZE_MAX;
+      for (size_t ci = 0; ci < ncand && chosen_cost != 0; ++ci) {
         int C = cands[ci];
         if (!segment_accepts_color(mach, hv, a->color_count, C)) {
           if (carry_debug)
@@ -2692,12 +2855,42 @@ static void coalesce_loop_edges(const nyr_mach_func_t *mach,
           }
         }
         if (all_ok) {
-          chosen = C;
-          break;
+          size_t evicted =
+              block_color_eviction_count_excl(mach, a, hv, 0, C, by_block, excl_v,
+                                              1) +
+              block_color_eviction_count_excl(mach, a, NULL, h, C, by_block, excl_v,
+                                              1);
+          for (size_t si = 0; si < by_vreg[v].len; ++si) {
+            const nyr_mach_live_segment_t *s =
+                &a->segments[by_vreg[v].data[si]];
+            if (s != hv && s->block < nb && !edge_block[s->block] &&
+                reaches_h[s->block])
+              evicted += block_color_eviction_count_excl(mach, a, s, 0, C, by_block,
+                                                         excl_v, 1);
+          }
+          for (size_t k = 0; k < copy_len; ++k) {
+            const loop_copy_t *c = &copies[k];
+            uint32_t excl[2] = {v, c->src};
+            evicted += block_color_eviction_count_excl(mach, a, c->ev, 0, C,
+                                                       by_block, excl, 2);
+            if (c->edge > h)
+              evicted += block_color_eviction_count_excl(
+                             mach, a, c->eseg, 0, C, by_block, excl, 2) +
+                         block_color_eviction_count_excl(
+                             mach, a, c->srcseg, 0, C, by_block, excl + 1, 1);
+          }
+          if (carry_debug && evicted)
+            fprintf(stderr, "carry: h=%zu v=%u C=%d eviction cost %zu\n", h,
+                    v, C, evicted);
+          if (evicted < chosen_cost) {
+            chosen_cost = evicted;
+            chosen = C;
+          }
         }
       }
       if (chosen < 0)
         continue;
+      coalesced_here[v] = 1;
       uint32_t excl_v[1] = {v};
       block_evict_color_conflicts_excl(a, hv, chosen, by_block, excl_v, 1);
       block_evict_color_all_excl(a, h, chosen, by_block, excl_v, 1);
@@ -2757,10 +2950,43 @@ static void coalesce_loop_edges(const nyr_mach_func_t *mach,
        * temporaries sharing the same GPR pool. Keep their canonical homes;
        * loop carries remain enabled for bounded functions where the edge
        * proof and allocator pressure oracle cover the full region.
+       *
+       * Nesting is a property of the natural loop body: the header plus the
+       * blocks that reach one of its backedges without passing through it.
+       * `reaches_h` also contains every block before the loop (and the rest
+       * of an enclosing loop), so a sibling nest elsewhere in the outer loop
+       * must not disable this carry.
        */
       bool nested_loop = false;
-      for (size_t b = 0; b < nb && !nested_loop; ++b)
-        nested_loop = reaches_h[b] && loop_depth[b] > loop_depth[h];
+      {
+        uint8_t *body = calloc(nb, sizeof(*body));
+        size_t *body_work = body ? malloc(nb * sizeof(*body_work)) : NULL;
+        if (!body || !body_work) {
+          nested_loop = true;
+        } else {
+          size_t body_len = 0;
+          body[h] = 1;
+          for (size_t ei = 0; ei < edge_count; ++ei)
+            if (edge_blocks[ei] > h && !body[edge_blocks[ei]]) {
+              body[edge_blocks[ei]] = 1;
+              body_work[body_len++] = edge_blocks[ei];
+            }
+          for (size_t wi = 0; wi < body_len; ++wi) {
+            size_t block = body_work[wi];
+            for (size_t pi = 0; pi < pred[block].len; ++pi) {
+              size_t pb = pred[block].data[pi];
+              if (pb < nb && !body[pb]) {
+                body[pb] = 1;
+                body_work[body_len++] = pb;
+              }
+            }
+          }
+          for (size_t b = 0; b < nb && !nested_loop; ++b)
+            nested_loop = body[b] && loop_depth[b] > loop_depth[h];
+        }
+        free(body);
+        free(body_work);
+      }
       bool carry_chain_ok =
           copy_len > 0 && carry_enabled && mach->vreg_len <= 1024 &&
           !nested_loop &&
@@ -2843,6 +3069,11 @@ static void coalesce_loop_edges(const nyr_mach_func_t *mach,
                 all_succ_carried = false;
                 break;
               }
+              /*
+               * A successor where v is dead reads no home.
+               */
+              if (!nyr_mach_regalloc_live_in(a, q, v))
+                continue;
               bool q_arrives_carried = false;
               for (size_t sj = 0; sj < by_vreg[v].len; ++sj) {
                 const nyr_mach_live_segment_t *qs =
@@ -2865,7 +3096,8 @@ static void coalesce_loop_edges(const nyr_mach_func_t *mach,
         }
       }
       if (carry_debug) {
-        fprintf(stderr, "carry: h=%zu v=%u C=%d", h, v, chosen);
+        fprintf(stderr, "carry: h=%zu v=%u C=%d chain=%d nested=%d", h, v,
+                chosen, (int)carry_chain_ok, (int)nested_loop);
         for (size_t k = 0; k < copy_len; ++k)
           fprintf(stderr, " edge=%zu src=%u evc=%d esc=%d srcsc=%d",
                   copies[k].edge, copies[k].src, copies[k].ev->color,
@@ -2878,6 +3110,7 @@ static void coalesce_loop_edges(const nyr_mach_func_t *mach,
      * Retain every spill/reload boundary. Color equality can still eliminate
      * the edge copy, while homes remain authoritative across nested CFG.
      */
+    free(coalesced_here);
     free(edge_block);
     free(reaches_h);
     free(work);
@@ -3346,6 +3579,220 @@ static void coalesce_unchanged_dag_values(
   free(work);
 }
 
+/*
+ * Loop-invariant vector values (broadcasts, constants) live through a loop
+ * without a definition inside it. Their per-block segments otherwise reload
+ * the canonical home at every block entry, i.e. once per iteration. When
+ * every segment of such a value in the natural loop body is its block's only
+ * segment of the value, spans the whole block in one common color C, and
+ * every loop entry edge leaves a preheader whose segment materializes the
+ * value in C, the register itself is valid on every loop edge: nothing in the
+ * body defines the value, and no other body segment can hold C while the
+ * value is live across the entire body. Mark the body segments carried so the
+ * encoder seeds C at block entry. Call-free bodies only.
+ */
+static void carry_loop_invariant_vectors(const nyr_mach_func_t *mach,
+                                         nyr_mach_regalloc_t *a,
+                                         const size_vec_t *pred,
+                                         const size_vec_t *by_block,
+                                         bool preserve_gpr_calls) {
+  const size_t nb = mach->block_len, nv = a->vreg_len;
+  if (nb < 2 || !nv || a->block_count != nb)
+    return;
+  uint8_t *body = calloc(nb, 1);
+  uint8_t *defined = calloc(nv, 1);
+  size_t *work = malloc(nb * sizeof(*work));
+  if (!body || !defined || !work)
+    goto done;
+  for (size_t h = 0; h < nb; ++h) {
+    bool backedge = false;
+    for (size_t pi = 0; pi < pred[h].len; ++pi)
+      backedge |= pred[h].data[pi] > h;
+    if (!backedge)
+      continue;
+    memset(body, 0, nb);
+    size_t len = 0;
+    body[h] = 1;
+    for (size_t pi = 0; pi < pred[h].len; ++pi) {
+      size_t p = pred[h].data[pi];
+      if (p > h && p < nb && !body[p]) {
+        body[p] = 1;
+        work[len++] = p;
+      }
+    }
+    for (size_t wi = 0; wi < len; ++wi)
+      for (size_t pi = 0; pi < pred[work[wi]].len; ++pi) {
+        size_t p = pred[work[wi]].data[pi];
+        if (p < nb && !body[p]) {
+          body[p] = 1;
+          work[len++] = p;
+        }
+      }
+    /*
+     * A body block reached from outside except through h is not natural.
+     */
+    bool natural = true, has_call = false;
+    memset(defined, 0, nv);
+    for (size_t b = 0; b < nb && natural; ++b) {
+      if (!body[b])
+        continue;
+      if (b != h)
+        for (size_t pi = 0; pi < pred[b].len; ++pi)
+          if (!body[pred[b].data[pi]])
+            natural = false;
+      const nyr_mach_block_t *blk = &mach->blocks[b];
+      for (size_t n = 0; n < blk->inst_count; ++n) {
+        const nyr_mach_inst_t *in = &mach->insts[blk->first_inst + n];
+        if (in->opcode == NYR_MACH_CALL)
+          has_call = true;
+        if (dst_is_def(in) && in->dst.kind == NYR_MACH_OPERAND_VREG &&
+            in->dst.as.reg < nv)
+          defined[in->dst.as.reg] = 1;
+      }
+    }
+    if (!natural || has_call)
+      continue;
+    for (uint32_t v = 0; v < nv; ++v) {
+      if (defined[v] || !nyr_mach_regalloc_live_in(a, h, v))
+        continue;
+      int color = -1;
+      bool ok = true;
+      for (size_t b = 0; b < nb && ok; ++b) {
+        if (!body[b])
+          continue;
+        bool unique = false;
+        nyr_mach_live_segment_t *seg =
+            segment_in_block_vreg(a, v, b, by_block, &unique);
+        const nyr_mach_block_t *blk = &mach->blocks[b];
+        size_t last = blk->inst_count ? blk->first_inst + blk->inst_count - 1
+                                      : blk->first_inst;
+        if (!seg || !unique || seg->color < 0 ||
+            seg->start != blk->first_inst || seg->end != last ||
+            !nyr_mach_regalloc_live_in(a, b, v) ||
+            seg->spill_reason == NYR_MACH_SPILL_FIXED_CLOBBER ||
+            (color >= 0 && seg->color != color) ||
+            !segment_color_survives_clobbers(mach, seg,
+                                             NYR_MACH_REGCLASS_VECTOR,
+                                             seg->color, preserve_gpr_calls)) {
+          ok = false;
+          break;
+        }
+        color = seg->color;
+      }
+      if (!ok || color < 0)
+        continue;
+      bool entry = false;
+      for (size_t pi = 0; pi < pred[h].len && ok; ++pi) {
+        size_t p = pred[h].data[pi];
+        if (body[p])
+          continue;
+        entry = true;
+        const nyr_mach_block_t *pb = &mach->blocks[p];
+        if (!pb->inst_count) {
+          ok = false;
+          break;
+        }
+        size_t last = pb->first_inst + pb->inst_count - 1;
+        const nyr_mach_live_segment_t *ps = NULL;
+        for (size_t k = 0; k < by_block[p].len; ++k) {
+          const nyr_mach_live_segment_t *cand =
+              &a->segments[by_block[p].data[k]];
+          if (cand->vreg == v && cand->end == last)
+            ps = cand;
+        }
+        if (!ps || ps->color != color ||
+            !coalesce_preg_reaches_edge(mach, ps, preserve_gpr_calls) ||
+            !segment_color_survives_clobbers(mach, ps,
+                                             NYR_MACH_REGCLASS_VECTOR, color,
+                                             preserve_gpr_calls))
+          ok = false;
+      }
+      if (!ok || !entry)
+        continue;
+      for (size_t b = 0; b < nb; ++b) {
+        if (!body[b])
+          continue;
+        nyr_mach_live_segment_t *seg =
+            segment_in_block_vreg(a, v, b, by_block, NULL);
+        seg->carried = true;
+        seg->reload = false;
+      }
+    }
+  }
+done:
+  free(body);
+  free(defined);
+  free(work);
+}
+
+/*
+ * Coalescing (loop carries above all) may evict a block-local temporary from
+ * the color it received during linear scan, even when another color stays
+ * free across its whole span. An evicted temporary costs a home store and a
+ * reload on its use, often on a loop recurrence. Give such segments a second
+ * chance: a segment that was register-only before coalescing (no reload, no
+ * spill, not carried) takes any color that is legal, survives the fixed
+ * clobbers it spans, and overlaps no segment of that color in its block.
+ * Its pre-coalescing flags are restored, so its home is never touched.
+ */
+typedef struct {
+  int color;
+  bool local;
+} regalloc_local_snapshot_t;
+
+static regalloc_local_snapshot_t *
+regalloc_local_snapshot(const nyr_mach_regalloc_t *a) {
+  if (!a || !a->segment_len)
+    return NULL;
+  regalloc_local_snapshot_t *snap = malloc(a->segment_len * sizeof(*snap));
+  if (!snap)
+    return NULL;
+  for (size_t i = 0; i < a->segment_len; ++i) {
+    const nyr_mach_live_segment_t *s = &a->segments[i];
+    snap[i].color = s->color;
+    snap[i].local = s->color >= 0 && !s->reload && !s->spill && !s->carried &&
+                    !s->acyclic_carried &&
+                    s->spill_reason == NYR_MACH_SPILL_NONE;
+  }
+  return snap;
+}
+
+static void recolor_evicted_locals(const nyr_mach_func_t *mach,
+                                   nyr_mach_regalloc_t *a,
+                                   const size_vec_t *by_block,
+                                   const regalloc_local_snapshot_t *snap,
+                                   nyr_mach_reg_class_t reg_class,
+                                   bool preserve_gpr_calls) {
+  for (size_t i = 0; i < a->segment_len; ++i) {
+    nyr_mach_live_segment_t *s = &a->segments[i];
+    if (!snap[i].local || s->color >= 0 ||
+        s->spill_reason != NYR_MACH_SPILL_BLOCK_CONFLICT || s->carried ||
+        s->acyclic_carried || s->block >= a->block_count)
+      continue;
+    int chosen = -1;
+    for (size_t k = 0; k <= a->color_count && chosen < 0; ++k) {
+      /*
+       * Try the linear-scan color first, then the lowest free one.
+       */
+      int c = k == 0 ? snap[i].color : (int)(k - 1);
+      if (c < 0 || (size_t)c >= a->color_count || (k > 0 && c == snap[i].color))
+        continue;
+      if (!segment_accepts_color(mach, s, a->color_count, c) ||
+          !segment_color_survives_clobbers(mach, s, reg_class, c,
+                                           preserve_gpr_calls) ||
+          block_has_color_conflict(a, s, c, by_block))
+        continue;
+      chosen = c;
+    }
+    if (chosen < 0)
+      continue;
+    s->color = chosen;
+    s->reload = false;
+    s->spill = false;
+    s->spill_reason = NYR_MACH_SPILL_NONE;
+  }
+}
+
 static bool nyr_mach_regalloc_build_class_mode(const nyr_mach_func_t *mach,
                                                nyr_mach_reg_class_t reg_class,
                                                size_t color_count,
@@ -3622,11 +4069,21 @@ static bool nyr_mach_regalloc_build_class_mode(const nyr_mach_func_t *mach,
   if (a.segment_len > 1)
     qsort(a.segments, a.segment_len, sizeof(*a.segments), cmp_seg_vreg);
   size_vec_t *by_block = build_segment_by_block(mach, &a);
+  regalloc_local_snapshot_t *local_snapshot =
+      reg_class == NYR_MACH_REGCLASS_VECTOR ? regalloc_local_snapshot(&a)
+                                            : NULL;
   coalesce_segments(mach, &a, succ, pred, by_block, preserve_gpr_calls);
   coalesce_unchanged_dag_values(mach, &a, succ, pred, by_block, reg_class,
                                 loop_depth);
   coalesce_loop_edges(mach, &a, succ, pred, by_block, loop_depth,
                       preserve_gpr_calls, reg_class);
+  if (local_snapshot && by_block)
+    recolor_evicted_locals(mach, &a, by_block, local_snapshot, reg_class,
+                           preserve_gpr_calls);
+  if (reg_class == NYR_MACH_REGCLASS_VECTOR && by_block &&
+      loop_phi_carry_enabled(reg_class))
+    carry_loop_invariant_vectors(mach, &a, pred, by_block, preserve_gpr_calls);
+  free(local_snapshot);
   free_segment_by_block(mach, by_block);
   by_block = NULL;
   free(loop_depth);

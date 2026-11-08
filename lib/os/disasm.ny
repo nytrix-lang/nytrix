@@ -17,8 +17,6 @@ use core.os.subprocess as sub
 extern "C" {
    fn _nyr_internal_x64_disasm(ptr bytes, i64 length, i64 address) ptr as "nyr_internal_x64_disasm"
    fn _nyr_internal_aarch64_disasm(ptr bytes, i64 length, i64 address) ptr as "nyr_internal_aarch64_disasm"
-   fn _nyr_capstone_fallback_available() i32 as "nyr_capstone_fallback_available"
-   fn _nyr_capstone_fallback_disasm(ptr bytes, i64 length, i64 address, i32 arch, i32 mode) ptr as "nyr_capstone_fallback_disasm"
 }
 
 fn assembler_available() bool {
@@ -33,8 +31,8 @@ fn internal_decoder_available() bool {
 }
 
 fn capstone_fallback_available() bool {
-   "Returns whether the optional dynamically loaded Capstone fallback is available."
-   _nyr_capstone_fallback_available() != 0
+   "Returns whether the optional Capstone disassembly engine fallback is available."
+   false
 }
 
 fn _tmp_base() str {
@@ -546,20 +544,6 @@ fn _copy_to_ptr(any data) ptr {
    p
 }
 
-fn _capstone_arch_mode(str arch) list {
-   def a = normalize_arch(arch)
-   if a == "x86" { return [3, 4] }
-   if a == "x86_16" || a == "i8086" { return [3, 2] }
-   if a == "aarch64" { return [1, 0] }
-   if a == "arm" { return [0, 0] }
-   if a == "riscv32" { return [15, 1] }
-   if a == "riscv32c" { return [15, 5] }
-   if a == "riscv64c" { return [15, 6] }
-   if a == "riscv" || a == "riscv64" { return [15, 2] }
-   if a == "x86_64" { return [3, 8] }
-   []
-}
-
 fn _decode_rows_text(str text) list {
    def lines = split(text, "\n")
    mut rows = []
@@ -567,19 +551,12 @@ fn _decode_rows_text(str text) list {
    while i < lines.len {
       if lines[i].len > 0 {
          def cols = split(lines[i], "\t")
-         if cols.len == 4 { rows = rows.append([_decimal(cols[0]), cols[1], cols[2], _decimal(cols[3])]) }
+         if cols.len == 5 { rows = rows.append([_decimal(cols[0]), cols[1], cols[2], _decimal(cols[3]), cols[4]]) }
+         elif cols.len == 4 { rows = rows.append([_decimal(cols[0]), cols[1], cols[2], _decimal(cols[3]), ""]) }
       }
       i += 1
    }
    rows
-}
-
-fn _fallback_rows(ptr raw, int length, int address, str arch) list {
-   def am = _capstone_arch_mode(arch)
-   if am.len != 2 || !capstone_fallback_available() { return [] }
-   def text_ptr = _nyr_capstone_fallback_disasm(raw, length, address, am[0], am[1])
-   if text_ptr == 0 { return [] }
-   _decode_rows_text(_cstr_at(text_ptr, 0, 131071))
 }
 
 fn _decimal(str text) int {
@@ -606,31 +583,51 @@ fn disasm_lines(any code, str arch="x86_64", int address=0) list {
    mut rows = []
    if normalize_arch(arch) == "x86_64" {
       def text_ptr = _nyr_internal_x64_disasm(raw, data.len, address)
-      if text_ptr != 0 { rows = _decode_rows_text(_cstr_at(text_ptr, 0, 131071)) }
+      if text_ptr != 0 { rows = _decode_rows_text(_cstr_at(text_ptr, 0, 1048576)) }
    } elif normalize_arch(arch) == "aarch64" {
       def text_ptr = _nyr_internal_aarch64_disasm(raw, data.len, address)
-      if text_ptr != 0 { rows = _decode_rows_text(_cstr_at(text_ptr, 0, 131071)) }
+      if text_ptr != 0 { rows = _decode_rows_text(_cstr_at(text_ptr, 0, 1048576)) }
    }
    mut has_unsupported = (normalize_arch(arch) != "x86_64" && normalize_arch(arch) != "aarch64") || rows.len == 0
    mut ri = 0
    while ri < rows.len { if rows[ri][1] == "unsupported" { has_unsupported = true break } ri += 1 }
-   if has_unsupported {
-      def fallback = _fallback_rows(raw, data.len, address, arch)
-      if fallback.len > 0 { return fallback }
-   }
    if rows.len > 0 { return rows }
-   [[address, "unsupported", "internal decoder does not support " + normalize_arch(arch) + (capstone_fallback_available() ? " instruction" : "; optional libcapstone fallback is unavailable"), 0]]
+   [[address, "unsupported", "internal decoder does not support " + normalize_arch(arch), 0]]
 }
 
 fn disasm(any code, str arch="x86_64", int address=0) str {
-   "Disassembles raw bytes with the in-tree decoder and returns printable text."
+   "Disassembles raw bytes with the in-tree decoder and returns objdump-style printable text."
    def rows = disasm_lines(code, arch, address)
    mut b = Builder(128)
    mut i = 0
+   def is_a64 = normalize_arch(arch) == "aarch64"
    while i < rows.len {
       def row = rows[i]
       def ops = row[2]
-      b = builder_append(b, "0x" + to_hex(row[0], 0) + ": " + row[1])
+      def bytes = row.len > 4 ? row[4] : ""
+      def addr_hex = to_hex(row[0], is_a64 ? 16 : 8)
+      b = builder_append(b, " " + addr_hex + ": ")
+      if is_str(bytes) && bytes.len > 0 {
+         def bytes_clean = strip(bytes)
+         if is_a64 {
+            b = builder_append(b, bytes_clean + "  ")
+         } else {
+            b = builder_append(b, bytes_clean)
+            mut pad = 24 - bytes_clean.len
+            while pad > 0 {
+               b = builder_append(b, " ")
+               pad -= 1
+            }
+            ;
+         }
+      } else {
+         if is_a64 {
+            b = builder_append(b, "                  ")
+         } else {
+            b = builder_append(b, "                        ")
+         }
+      }
+      b = builder_append(b, row[1])
       if is_str(ops) && ops.len > 0 { b = builder_append(b, " " + ops) }
       b = builder_append(b, "\n")
       i += 1

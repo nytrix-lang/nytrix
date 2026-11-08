@@ -9,7 +9,7 @@ module core.os.ui.window.platform(
    set_time, get_timer_value, get_timer_frequency, wait_events, wait_events_timeout, create_window,
    destroy_window, should_close, set_should_close, set_title, get_window_title, set_window_title,
    set_window_icon, get_pos, set_pos, get_window_pos, set_window_pos, get_size, get_window_size,
-   get_framebuffer_size, set_size, set_window_size, get_window_attrib, set_window_attrib, set_window_opacity,
+   get_framebuffer_size, surface_buffer_ready, set_size, set_window_size, get_window_attrib, set_window_attrib, set_window_opacity,
    post_empty_event, poll_events, poll_events_for_window, pump_window_events, uses_native_events,
    supports_state_polling, swap_buffers, swap_interval, get_key, get_mouse_button, get_cursor_pos,
    cursor_visible, get_key_name, set_cursor_pos, create_cursor, create_standard_cursor, destroy_cursor, set_cursor,
@@ -418,23 +418,23 @@ fn init_hint(any hint, any value) any {
    "Stores an initialization hint for backend selection."
    if _native_value_eq(hint, PLATFORM) {
       if _native_value_eq(value, PLATFORM_X11) {
-          _set_platform_val("null_backend_requested", false)
+         _set_platform_val("null_backend_requested", false)
          _set_platform_val("backend_name", "x11")
       }
       elif _native_value_eq(value, PLATFORM_WAYLAND) {
-          _set_platform_val("null_backend_requested", false)
+         _set_platform_val("null_backend_requested", false)
          _set_platform_val("backend_name", "wayland")
       }
       elif _native_value_eq(value, PLATFORM_WIN32) {
-          _set_platform_val("null_backend_requested", false)
+         _set_platform_val("null_backend_requested", false)
          _set_platform_val("backend_name", "win32")
       }
       elif _native_value_eq(value, PLATFORM_COCOA) {
-          _set_platform_val("null_backend_requested", false)
+         _set_platform_val("null_backend_requested", false)
          _set_platform_val("backend_name", "cocoa")
       }
       elif _native_value_eq(value, PLATFORM_NULL) {
-          _set_platform_val("null_backend_requested", true)
+         _set_platform_val("null_backend_requested", true)
          _set_platform_val("backend_name", "none")
       }
    }
@@ -526,7 +526,7 @@ fn init() bool {
    }
    if b == "none" {
       def requested = common.env_lower("NY_UI_BACKEND")
-       if requested == "none" || _null_backend_is_requested() {
+      if requested == "none" || _null_backend_is_requested() {
          _set_platform_val("initialized", true)
          return true
       }
@@ -1455,6 +1455,12 @@ fn set_size(any win, int w, int h) any {
 }
 
 fn set_window_size(any win, int w, int h) any { set_size(win, w, h) }
+
+fn surface_buffer_ready(any win, int w, int h) bool {
+   "Tells the backend a presentable buffer of w x h now exists for the window."
+   if _select_backend_name() != "wayland" { return false }
+   wayland_backend.surface_buffer_ready(_native_window(win), w, h)
+}
 
 fn focus_window(any win) any {
    "Requests keyboard focus for a native window."

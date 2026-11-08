@@ -1573,11 +1573,11 @@ static int macro_parse_primary(ny_parser_t *p, const char *s, size_t n,
       return 1;
     }
     size_t name_len = *i - name;
-    if ((name_len == 12 && strncmp(s + name, "__has_include", 12) == 0) ||
+    if ((name_len == 13 && strncmp(s + name, "__has_include", 13) == 0) ||
         (name_len == 13 && strncmp(s + name, "__has_builtin", 13) == 0) ||
-        (name_len == 12 && strncmp(s + name, "__has_feature", 12) == 0) ||
-        (name_len == 14 && strncmp(s + name, "__has_attribute", 14) == 0) ||
-        (name_len == 12 && strncmp(s + name, "__has_warning", 12) == 0)) {
+        (name_len == 13 && strncmp(s + name, "__has_feature", 13) == 0) ||
+        (name_len == 15 && strncmp(s + name, "__has_attribute", 15) == 0) ||
+        (name_len == 13 && strncmp(s + name, "__has_warning", 13) == 0)) {
       macro_skip_ws(s, n, i);
       if (*i < n && s[*i] == '(') {
         int depth = 1;
@@ -1593,7 +1593,7 @@ static int macro_parse_primary(ny_parser_t *p, const char *s, size_t n,
       *out = 0;
       return 1;
     }
-    if (name_len == 19 && strncmp(s + name, "__builtin_offsetof", 19) == 0) {
+    if (name_len == 18 && strncmp(s + name, "__builtin_offsetof", 18) == 0) {
       macro_skip_ws(s, n, i);
       if (*i < n && s[*i] == '(') {
         int depth = 1;
@@ -1609,7 +1609,7 @@ static int macro_parse_primary(ny_parser_t *p, const char *s, size_t n,
       *out = 0;
       return 1;
     }
-    if (name_len == 24 && strncmp(s + name, "__builtin_choose_expr", 24) == 0) {
+    if (name_len == 21 && strncmp(s + name, "__builtin_choose_expr", 21) == 0) {
       macro_skip_ws(s, n, i);
       if (*i < n && s[*i] == '(') {
         int depth = 1;

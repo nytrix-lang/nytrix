@@ -24,6 +24,8 @@ typedef struct ny_ct_interp_ctx_t {
   bool did_continue;
 } ny_ct_interp_ctx_t;
 
+static bool ny_ct_interp_token_is_main_file(const program_t *prog, token_t tok);
+
 static bool ny_ct_interp_step(ny_ct_interp_ctx_t *ctx) {
   if (!ctx)
     return false;
@@ -1456,7 +1458,8 @@ static bool ny_ct_interp_eval_expr(expr_t *e, ny_ct_interp_ctx_t *ctx,
     }
     if (strcmp(name, "__main") == 0 && (zero_arg || one_member_arg)) {
       out->kind = NY_CT_FAST_BOOL;
-      out->b = ny_comptime_main_enabled(ctx->cg, e->tok);
+      out->b = ctx->cg ? ny_comptime_main_enabled(ctx->cg, e->tok)
+                       : ny_ct_interp_token_is_main_file(ctx->prog, e->tok);
       return true;
     }
     if ((strcmp(name, "__os_name") == 0 || strcmp(name, "os") == 0) &&
@@ -1600,6 +1603,42 @@ static bool ny_ct_interp_eval_expr(expr_t *e, ny_ct_interp_ctx_t *ctx,
   default:
     return false;
   }
+}
+
+/*
+ * A program-only comptime evaluation carries no codegen context, so the
+ * source-file identity `__main()` depends on must come from the program
+ * itself.  Mirror the suffix comparison used by the native lowering: the
+ * root file's own top-level statements identify the main source, so a direct
+ * file evaluates `__main()` to true while an imported module stays false.
+ */
+static bool ny_ct_interp_token_is_main_file(const program_t *prog, token_t tok) {
+  const char *main_file = NULL;
+  if (prog) {
+    for (size_t i = 0; i < prog->body.len; ++i) {
+      const stmt_t *s = prog->body.data[i];
+      if (s && s->kind != NY_S_MODULE && s->tok.filename &&
+          *s->tok.filename) {
+        main_file = s->tok.filename;
+        break;
+      }
+    }
+  }
+  if (!main_file || !tok.filename || !*tok.filename)
+    return ny_env_enabled("NYTRIX_TEST_MODE");
+  if (strcmp(main_file, tok.filename) == 0)
+    return true;
+  size_t want_len = strlen(main_file);
+  size_t got_len = strlen(tok.filename);
+  if (want_len < got_len &&
+      strcmp(tok.filename + got_len - want_len, main_file) == 0 &&
+      tok.filename[got_len - want_len - 1] == '/')
+    return true;
+  if (got_len < want_len &&
+      strcmp(main_file + want_len - got_len, tok.filename) == 0 &&
+      main_file[want_len - got_len - 1] == '/')
+    return true;
+  return false;
 }
 
 static bool ny_ct_interp_eval_value(codegen_t *cg, program_t *prog,

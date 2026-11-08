@@ -1380,8 +1380,8 @@ static void safe_case_name(const char *prefix, const char *shape, int idx,
                            char *out, size_t out_sz) {
   const char *raw = shape ? shape : "";
   if (prefix && strcmp(prefix, "stress") == 0 &&
-      strncmp(raw, "stress-", 8) == 0)
-    raw += 8;
+      strncmp(raw, "stress-", 7) == 0)
+    raw += 7;
   char safe[128];
   size_t j = 0;
   for (const unsigned char *p = (const unsigned char *)raw;

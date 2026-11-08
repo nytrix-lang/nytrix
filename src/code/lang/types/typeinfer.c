@@ -796,17 +796,26 @@ bool ny_type_unify_with_subst(ny_subst_t *s, ny_type_t *a, ny_type_t *b) {
            ny_type_unify_with_subst(s, a->as.apply.arg1, b->as.apply.arg1);
   case NY_TYPE_ROW:
     return ny_type_unify_rows_internal(s, a, b);
+  case NY_TYPE_DEPENDENT_ARROW:
+    return a->as.dep_arrow.param_name && b->as.dep_arrow.param_name &&
+           strcmp(a->as.dep_arrow.param_name, b->as.dep_arrow.param_name) == 0 &&
+           ny_type_unify_with_subst(s, a->as.dep_arrow.param_type,
+                                    b->as.dep_arrow.param_type) &&
+           ny_type_unify_with_subst(s, a->as.dep_arrow.ret_type,
+                                    b->as.dep_arrow.ret_type);
+  case NY_TYPE_SIGMA:
+    return a->as.sigma.index_name && b->as.sigma.index_name &&
+           strcmp(a->as.sigma.index_name, b->as.sigma.index_name) == 0 &&
+           ny_type_unify_with_subst(s, a->as.sigma.index_type,
+                                    b->as.sigma.index_type) &&
+           ny_type_unify_with_subst(s, a->as.sigma.value_type,
+                                    b->as.sigma.value_type);
+  case NY_TYPE_TYPE:
+    return a->as.type_univ.name && b->as.type_univ.name &&
+           strcmp(a->as.type_univ.name, b->as.type_univ.name) == 0;
   case NY_TYPE_VAR:
   case NY_TYPE_EFFECT_VAR:
     return true;
-  case NY_TYPE_DEPENDENT_ARROW:
-  case NY_TYPE_SIGMA:
-  case NY_TYPE_TYPE:
-    /*
-     * Dependent/universe types are not yet structurally unifiable here;
-     * conservatively refuse rather than silently accepting mismatches.
-     */
-    return false;
   }
   return false;
 }
@@ -1193,12 +1202,6 @@ static bool ny_effect_row_type_append(ny_strbuf_t *buf, ny_type_t *type,
       return false;
     }
     return ny_effect_row_type_append(buf, type->as.arrow.ret, depth + 1);
-  case NY_TYPE_DEPENDENT_ARROW:
-    return ny_strbuf_append(buf, "dependent_arrow");
-  case NY_TYPE_SIGMA:
-    return ny_strbuf_append(buf, "sigma");
-  case NY_TYPE_TYPE:
-    return ny_strbuf_append(buf, "Type");
   case NY_TYPE_ROW: {
     if (ny_type_row_is_empty(type))
       return ny_strbuf_append(buf, "{}");
@@ -1233,6 +1236,13 @@ static bool ny_effect_row_type_append(ny_strbuf_t *buf, ny_type_t *type,
     }
     return false;
   }
+  case NY_TYPE_DEPENDENT_ARROW:
+  case NY_TYPE_SIGMA:
+  case NY_TYPE_TYPE:
+    /*
+     * Not valid effect row atoms; nothing encodable to emit.
+     */
+    return false;
   }
   return false;
 }
@@ -1268,10 +1278,6 @@ static bool ny_effect_row_field_is_closed(ny_type_t *type, unsigned depth) {
     return ny_effect_row_field_is_closed(type->as.arrow.param, depth + 1) &&
            ny_effect_row_field_is_closed(type->as.arrow.ret, depth + 1) &&
            ny_effect_row_field_is_closed(type->as.arrow.effects, depth + 1);
-  case NY_TYPE_DEPENDENT_ARROW:
-  case NY_TYPE_SIGMA:
-  case NY_TYPE_TYPE:
-    return false;
   case NY_TYPE_ROW: {
     ny_type_t *row = type;
     for (unsigned count = 0; row && count < 128; ++count) {
@@ -1285,6 +1291,13 @@ static bool ny_effect_row_field_is_closed(ny_type_t *type, unsigned depth) {
     }
     return false;
   }
+  case NY_TYPE_DEPENDENT_ARROW:
+  case NY_TYPE_SIGMA:
+  case NY_TYPE_TYPE:
+    /*
+     * Not valid effect row atoms; the encoder above cannot close them.
+     */
+    return false;
   }
   return false;
 }

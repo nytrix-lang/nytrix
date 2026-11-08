@@ -2062,6 +2062,30 @@ scalar_multiply:
     return nyr_emit_runtime_call(b, "rt_any_add", a, rhs, -1, 2,
                                  NYIR_SCALAR_I64_TAGGED);
   }
+  /* Subtraction has no statically proven numeric domain when either operand
+   * is a tagged dynamic word: decoding through rt_any_to_i64 truncates floats
+   * (`any(5.5) - 1` was 4).  Raw-classed operands keep the integer path. */
+  if (!is_cmp && e->as.binary.op && strcmp(e->as.binary.op, "-") == 0 &&
+      !left_f64 && !right_f64 && !left_f32 && !right_f32 &&
+      !nyr_expr_is_bigint(b, e->as.binary.left) &&
+      !nyr_expr_is_bigint(b, e->as.binary.right) &&
+      ((left_any && nyr_value_scalar_class(b, a) == NYIR_SCALAR_I64_TAGGED) ||
+       (right_any &&
+        nyr_value_scalar_class(b, rhs) == NYIR_SCALAR_I64_TAGGED))) {
+    if (nyr_value_scalar_class(b, a) == NYIR_SCALAR_I64_RAW)
+      a = nyr_emit_runtime_call(b, "rt_box_i64", a, -1, -1, 1,
+                                NYIR_SCALAR_I64_TAGGED);
+    if (nyr_value_scalar_class(b, rhs) == NYIR_SCALAR_I64_RAW)
+      rhs = nyr_emit_runtime_call(b, "rt_box_i64", rhs, -1, -1, 1,
+                                  NYIR_SCALAR_I64_TAGGED);
+    if (a < 0 || rhs < 0)
+      return -1;
+    b->last_arith_raw = 0;
+    b->last_arith_expr = e;
+    b->last_arith_tagged = true;
+    return nyr_emit_runtime_call(b, "rt_any_sub", a, rhs, -1, 2,
+                                 NYIR_SCALAR_I64_TAGGED);
+  }
   /* An untyped/any sequence index is returned as a tagged dynamic word by
    * the managed-sequence accessor.  When the surrounding arithmetic is a
    * scalar result, normalize those operands before the raw NYIR operation;
@@ -3166,7 +3190,10 @@ scalar_multiply:
       }
       if (dynamic_add_raw)
         return nyr_emit_runtime_call(b, "rt_raw_add", a, rhs, -1, 2, 0);
-      return nyr_emit_runtime_call(b, "rt_any_add", a, rhs, -1, 2, 0);
+      /* rt_any_add returns a tagged language value; say so, or an `int`
+       * return/consumer treats the tagged word as a raw integer. */
+      return nyr_emit_runtime_call(b, "rt_any_add", a, rhs, -1, 2,
+                                   NYIR_SCALAR_I64_TAGGED);
     }
     if (left_list && right_list && !left_cstr && !right_cstr &&
         !left_dict_read && !right_dict_read && !left_f64 && !right_f64 &&
@@ -3239,6 +3266,19 @@ scalar_multiply:
         rhs = nyr_emit_runtime_call(b, "rt_tag", rhs, -1, -1, 1,
                                     NYIR_SCALAR_I64_TAGGED);
       }
+      /* The producer class is authoritative at this tagged-ABI boundary: a
+       * raw integer word reaching rt_any_* reads as a pointer (even) or a
+       * tagged value (odd), giving nil or a halved operand. */
+      if (!left_cstr && !nyr_expr_is_bool(b, e->as.binary.left) &&
+          !nyr_expr_is_bigint(b, e->as.binary.left) && a >= 0 &&
+          nyr_value_scalar_class(b, a) == NYIR_SCALAR_I64_RAW)
+        a = nyr_emit_runtime_call(b, "rt_box_i64", a, -1, -1, 1,
+                                  NYIR_SCALAR_I64_TAGGED);
+      if (!right_cstr && !nyr_expr_is_bool(b, e->as.binary.right) &&
+          !nyr_expr_is_bigint(b, e->as.binary.right) && rhs >= 0 &&
+          nyr_value_scalar_class(b, rhs) == NYIR_SCALAR_I64_RAW)
+        rhs = nyr_emit_runtime_call(b, "rt_box_i64", rhs, -1, -1, 1,
+                                    NYIR_SCALAR_I64_TAGGED);
       if (a < 0 || rhs < 0)
         return -1;
       if (ny_dbg_is_enabled(NY_DBG_HEURISTIC))
@@ -3345,6 +3385,19 @@ scalar_multiply:
         rhs = nyr_emit_runtime_call(b, "rt_tag", rhs, -1, -1, 1,
                                     NYIR_SCALAR_I64_TAGGED);
       }
+      /* The producer class is authoritative at this tagged-ABI boundary: a
+       * raw integer word reaching rt_any_* reads as a pointer (even) or a
+       * tagged value (odd), giving nil or a halved operand. */
+      if (!left_cstr && !nyr_expr_is_bool(b, e->as.binary.left) &&
+          !nyr_expr_is_bigint(b, e->as.binary.left) && a >= 0 &&
+          nyr_value_scalar_class(b, a) == NYIR_SCALAR_I64_RAW)
+        a = nyr_emit_runtime_call(b, "rt_box_i64", a, -1, -1, 1,
+                                  NYIR_SCALAR_I64_TAGGED);
+      if (!right_cstr && !nyr_expr_is_bool(b, e->as.binary.right) &&
+          !nyr_expr_is_bigint(b, e->as.binary.right) && rhs >= 0 &&
+          nyr_value_scalar_class(b, rhs) == NYIR_SCALAR_I64_RAW)
+        rhs = nyr_emit_runtime_call(b, "rt_box_i64", rhs, -1, -1, 1,
+                                    NYIR_SCALAR_I64_TAGGED);
       if (a < 0 || rhs < 0)
         return -1;
       if (ny_dbg_is_enabled(NY_DBG_HEURISTIC))
@@ -3370,6 +3423,20 @@ scalar_multiply:
     }
     if ((left_any || right_any) && !left_f64 && !right_f64 && !left_f32 &&
         !right_f32) {
+      /* Same tagged-ABI boundary as above: `raw_int / number` reached
+       * rt_any_div with an unboxed left operand and evaluated to nil. */
+      if (!left_cstr && !nyr_expr_is_bool(b, e->as.binary.left) &&
+          !nyr_expr_is_bigint(b, e->as.binary.left) && a >= 0 &&
+          nyr_value_scalar_class(b, a) == NYIR_SCALAR_I64_RAW)
+        a = nyr_emit_runtime_call(b, "rt_box_i64", a, -1, -1, 1,
+                                  NYIR_SCALAR_I64_TAGGED);
+      if (!right_cstr && !nyr_expr_is_bool(b, e->as.binary.right) &&
+          !nyr_expr_is_bigint(b, e->as.binary.right) && rhs >= 0 &&
+          nyr_value_scalar_class(b, rhs) == NYIR_SCALAR_I64_RAW)
+        rhs = nyr_emit_runtime_call(b, "rt_box_i64", rhs, -1, -1, 1,
+                                    NYIR_SCALAR_I64_TAGGED);
+      if (a < 0 || rhs < 0)
+        return -1;
       b->last_arith_raw = 0;
       b->last_arith_expr = e;
       b->last_arith_tagged = true;

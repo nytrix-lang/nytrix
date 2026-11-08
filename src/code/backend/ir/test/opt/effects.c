@@ -73,6 +73,7 @@ static unsigned expected_effects(nyr_op_t op) {
   case NYIR_VEC8_OR_I64:
   case NYIR_VEC8_XOR_I64:
   case NYIR_VEC8_SAR_I64:
+  case NYIR_VEC8_SHR_I64:
   case NYIR_VEC8_REDUCE_ADD_I64:
   case NYIR_SIN_F64:
   case NYIR_COS_F64:

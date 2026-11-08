@@ -114,7 +114,7 @@ static bool emit_repeated_compare(bool clobber_flags, bool extra_predecessor,
                                            .abi = NY_NATIVE_ABI_SYSV,
                                            .object_format = "elf",
                                            .symbol_prefix = ""},
-                &mach, "cmp_chain", false, err, err_size);
+                &mach, "cmp_chain", false, false, err, err_size);
   nyr_mach_func_free(&mach);
   return ok;
 }
@@ -182,11 +182,12 @@ int main(void) {
   };
   nyr_writer_t assembly = {0};
   bool emitted = nyr_x86_64_emit_mach_scalar(
-      &assembly, &target, &mach, "cmp_branch", false, err, sizeof(err));
+      &assembly, &target, &mach, "cmp_branch", false, false, err, sizeof(err));
   nyr_mach_func_free(&mach);
   bool fused =
       emitted && occurrences(assembly.data, "\tcmpq\t$12, %rax\n") == 1 &&
-      occurrences(assembly.data, "\tjl\t.Lny_mach_cmp_branch_1\n") == 1 &&
+      occurrences(assembly.data, "\tjge\t.Lny_mach_cmp_branch_2\n") == 1 &&
+      occurrences(assembly.data, "\tjmp\t.Lny_mach_cmp_branch_2\n") == 0 &&
       occurrences(assembly.data, "\tsetl\t%al\n") == 0 &&
       occurrences(assembly.data, "\tcmpq\t$0,") == 0;
   if (!fused) {

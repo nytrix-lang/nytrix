@@ -3715,7 +3715,7 @@ fn vulkan_supported() bool {
    true
 }
 
-mut _win32_vk_ext_ptrs = 0
+mut any _win32_vk_ext_ptrs = nil
 mut _win32_vk_ext_surface = 0
 mut _win32_vk_ext_win32 = 0
 

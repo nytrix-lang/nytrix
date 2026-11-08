@@ -7,6 +7,7 @@
 #include "code/lang/parse/parser.h"
 #include "nytrix/nytrix.h"
 #include "priv.h"
+#include <ctype.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -268,139 +269,46 @@ static int doclist_show_source(void) {
   return !v || ny_env_truthy(v);
 }
 
-static const char *doc_token_style(token_kind kind) {
-  switch (kind) {
-  case NY_T_IDENT:
-  case NY_T_DEF:
-  case NY_T_MUT:
-  case NY_T_FN:
-  case NY_T_RETURN:
-  case NY_T_IF:
-  case NY_T_ELSE:
-  case NY_T_WHILE:
-  case NY_T_FOR:
-  case NY_T_IN:
-  case NY_T_TRUE:
-  case NY_T_FALSE:
-  case NY_T_TRY:
-  case NY_T_CATCH:
-  case NY_T_USE:
-  case NY_T_LAMBDA:
-  case NY_T_DEFER:
-  case NY_T_BREAK:
-  case NY_T_CONTINUE:
-  case NY_T_ELIF:
-  case NY_T_ASM:
-  case NY_T_AS:
-  case NY_T_COMPTIME:
-  case NY_T_STRUCT:
-  case NY_T_MATCH:
-  case NY_T_EMBED:
-  case NY_T_SIZEOF:
-  case NY_T_EXTERN:
-  case NY_T_NIL:
-  case NY_T_DEL:
-  case NY_T_MODULE:
-  case NY_T_ENUM:
-    return clr(NY_CLR_CYAN);
-  case NY_T_NUMBER:
-    return clr(NY_CLR_GREEN);
-  case NY_T_STRING:
-  case NY_T_FSTRING:
-    return clr(NY_CLR_YELLOW);
-  default:
-    return NULL;
-  }
-}
-
-static int doc_highlight_source(repl_doc_buf_t *out, const char *source,
-                                const char *const *palette) {
-  if (!out || !source)
-    return 0;
-  size_t len = strlen(source), leading = 0;
-  while (leading < len && (source[leading] == ' ' || source[leading] == '\t' ||
-                           source[leading] == '\n' || source[leading] == '\r' ||
-                           source[leading] == '\f' || source[leading] == '\v'))
-    ++leading;
-  const char *trimmed = source + leading;
-  size_t trimmed_len = len - leading, start = trimmed_len;
-  size_t brace = 0;
-  while (brace < trimmed_len && trimmed[brace] != '{')
-    ++brace;
-  if (brace < trimmed_len) {
-    size_t i = brace + 1;
-    while (i < trimmed_len &&
-           (trimmed[i] == ' ' || trimmed[i] == '\t' || trimmed[i] == '\n' ||
-            trimmed[i] == '\r' || trimmed[i] == '\f' || trimmed[i] == '\v'))
-      ++i;
-    if (i < trimmed_len && (trimmed[i] == '"' || trimmed[i] == '\'')) {
-      char quote = trimmed[i++];
+/*
+ * Source text of a doc entry without its leading docstring line, which the
+ * description already shows. Returns a malloc'd string (never NULL on OK).
+ */
+static char *doc_source_body(const char *source) {
+  while (*source && isspace((unsigned char)*source))
+    ++source;
+  const char *brace = strchr(source, '{');
+  if (brace) {
+    const char *p = brace + 1;
+    while (*p && isspace((unsigned char)*p))
+      ++p;
+    if (*p == '"' || *p == '\'') {
+      char quote = *p++;
       int escaped = 0, closed = 0;
-      while (i < trimmed_len) {
-        char c = trimmed[i++];
+      for (; *p && !closed; ++p) {
         if (escaped)
           escaped = 0;
-        else if (c == '\\')
+        else if (*p == '\\')
           escaped = 1;
-        else if (c == quote) {
+        else if (*p == quote)
           closed = 1;
-          break;
-        }
       }
       if (closed) {
-        while (i < trimmed_len && trimmed[i] != '\n')
-          ++i;
-        if (i < trimmed_len)
-          ++i;
-        start = i;
+        while (*p && *p != '\n')
+          ++p;
+        if (*p)
+          ++p;
+        size_t head = (size_t)(brace - source) + 1, tail = strlen(p);
+        char *out = malloc(head + 1 + tail + 1);
+        if (!out)
+          return NULL;
+        memcpy(out, source, head);
+        out[head] = '\n';
+        memcpy(out + head + 1, p, tail + 1);
+        return out;
       }
     }
   }
-  char *shown = malloc(trimmed_len - start + brace + 3);
-  if (!shown)
-    return 0;
-  size_t n = 0;
-  if (start < trimmed_len) {
-    memcpy(shown, trimmed, brace + 1);
-    n = brace + 1;
-    shown[n++] = '\n';
-    memcpy(shown + n, trimmed + start, trimmed_len - start + 1);
-  } else {
-    memcpy(shown, trimmed, trimmed_len + 1);
-  }
-  lexer_t lexer;
-  lexer_init(&lexer, shown, "<repl-doc>");
-  size_t cursor = 0;
-  int ok = 1;
-  for (;;) {
-    token_t token = lexer_next(&lexer);
-    if (token.kind == NY_T_EOF)
-      break;
-    const char *lexeme = token.lexeme;
-    if (!lexeme || lexeme < shown || lexeme > shown + strlen(shown))
-      continue;
-    size_t at = (size_t)(lexeme - shown);
-    if (at < cursor || token.len > strlen(shown) - at)
-      continue;
-    if (at > cursor)
-      ok = ok && repl_doc_buf_appendf(out, "%.*s", (int)(at - cursor),
-                                      shown + cursor);
-    const char *style = doc_token_style(token.kind);
-    if (style && *style)
-      ok = ok && repl_doc_buf_appendf(out, "%s", style);
-    ok = ok && repl_doc_buf_appendf(out, "%.*s", (int)token.len, shown + at);
-    if (style && *style)
-      ok =
-          ok && repl_doc_buf_appendf(out, "%s", palette[10] ? palette[10] : "");
-    cursor = at + token.len;
-    if (!ok)
-      break;
-  }
-  size_t shown_len = strlen(shown);
-  if (ok && cursor < shown_len)
-    ok = repl_doc_buf_appendf(out, "%s", shown + cursor);
-  free(shown);
-  return ok;
+  return ny_strdup(source);
 }
 
 static int doclist_name_match(const char *name, const char *query, int suffix) {
@@ -510,11 +418,10 @@ static int doclist_resolve(const doc_list_t *dl, const char *query,
   return 1;
 }
 
-static int doclist_render(const ny_doc_entry *entry, int has_source,
-                          const char *source_text, char **rendered_out) {
+static int doclist_render(const ny_doc_entry *entry, char **rendered_out) {
   if (rendered_out)
     *rendered_out = NULL;
-  if (!entry || !entry->name || !rendered_out || (has_source && !source_text))
+  if (!entry || !entry->name || !rendered_out)
     return 0;
   static const char *const labels[] = {"Symbol",   "Package", "Module",
                                        "Function", "Symbol",  "Method"};
@@ -536,21 +443,44 @@ static int doclist_render(const ny_doc_entry *entry, int has_source,
     ok = repl_doc_buf_appendf(&rendered,
                               "  %s(no documentation string available)%s\n",
                               gray ? gray : "", reset ? reset : "");
-  if (ok && !has_source)
+  if (ok)
     ok = repl_doc_buf_appendf(&rendered, "\n");
-  if (ok && has_source) {
-    const char *const source_palette[] = {NULL, NULL, NULL, NULL, NULL,  NULL,
-                                          NULL, NULL, NULL, NULL, reset, bold};
-    ok = repl_doc_buf_appendf(&rendered, "\n%sSource%s\n", bold ? bold : "",
-                              reset ? reset : "") &&
-         doc_highlight_source(&rendered, source_text, source_palette);
-  }
   *rendered_out = ok ? repl_doc_buf_take(&rendered) : NULL;
   free(rendered.data);
   return *rendered_out != NULL;
 }
 
-int doclist_print(const doc_list_t *dl, const char *name) {
+static int doclist_print_entry(const ny_doc_entry *e) {
+  int has_source =
+      e->src && (e->kind == 3 || e->kind == 5) && doclist_show_source();
+  char *rendered = NULL;
+  if (!doclist_render(e, &rendered))
+    return 0;
+  fputs(rendered, stdout);
+  free(rendered);
+  if (has_source) {
+    /*
+     * Same highlighter as the input line (fn names, types, comments).
+     */
+    const char *b = clr(NY_CLR_BOLD), *r = clr(NY_CLR_RESET);
+    printf("%sSource%s\n", b ? b : "", r ? r : "");
+    char *body = doc_source_body(e->src);
+    if (body)
+      repl_highlight_line(body);
+    free(body);
+    printf("\n");
+  }
+  printf("\n");
+  return 1;
+}
+
+/*
+ * Print docs for `name`. With best_of_many, an ambiguous name prints the
+ * entry with the shortest qualified name (core.print over core.io.print)
+ * instead of the "Multiple matches" list.
+ */
+static int doclist_print_impl(const doc_list_t *dl, const char *name,
+                              int best_of_many) {
   if (!dl || !name || !*name)
     return 0;
   int found_idx = -1;
@@ -558,39 +488,41 @@ int doclist_print(const doc_list_t *dl, const char *name) {
   char *resolution_text = NULL;
   if (!doclist_resolve(dl, name, &found_idx, &matches, &resolution_text))
     return 0;
-  if (found_idx < 0) {
-    if (!matches || !*matches) {
-      free(matches);
-      free(resolution_text);
-      return 0;
+  int printed = 0;
+  if (found_idx >= 0) {
+    printed = doclist_print_entry(&dl->data[found_idx]);
+  } else if (best_of_many && matches && *matches) {
+    size_t best = 0, best_len = (size_t)-1;
+    for (const char *p = matches; *p;) {
+      char *end = NULL;
+      size_t i = strtoul(p, &end, 10);
+      if (end == p)
+        break;
+      size_t l = i < dl->len && dl->data[i].name ? strlen(dl->data[i].name)
+                                                 : (size_t)-1;
+      if (l < best_len) {
+        best_len = l;
+        best = i;
+      }
+      p = *end == ',' ? end + 1 : end;
     }
-    if (!resolution_text || !*resolution_text) {
-      free(matches);
-      free(resolution_text);
-      return 0;
-    }
+    if (best_len != (size_t)-1)
+      printed = doclist_print_entry(&dl->data[best]);
+  } else if (matches && *matches && resolution_text && *resolution_text) {
     fputs(resolution_text, stdout);
-    free(matches);
-    free(resolution_text);
-    return 1;
+    printed = 1;
   }
   free(matches);
   free(resolution_text);
-  {
-    ny_doc_entry *e = &dl->data[found_idx];
-    int has_source =
-        e->src && (e->kind == 3 || e->kind == 5) && doclist_show_source();
-    const char *source = e->src ? e->src : "";
-    char *rendered = NULL;
-    if (!doclist_render(e, has_source, source, &rendered))
-      return 0;
-    fputs(rendered, stdout);
-    free(rendered);
-    if (has_source)
-      printf("\n");
-    printf("\n");
-    return 1;
-  }
+  return printed;
+}
+
+int doclist_print(const doc_list_t *dl, const char *name) {
+  return doclist_print_impl(dl, name, 0);
+}
+
+int doclist_print_best(const doc_list_t *dl, const char *name) {
+  return doclist_print_impl(dl, name, 1);
 }
 
 int doclist_print_missing(const doc_list_t *dl, const char *name) {

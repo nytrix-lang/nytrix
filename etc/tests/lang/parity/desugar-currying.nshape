@@ -1,0 +1,22 @@
+shape desugar_currying_parity {
+  family "runtime/compiler"
+  generator "embedded"
+  features [ny test frontend desugar parity currying]
+  flags_matrix "-no-std --native --run --ny-desugar=c; -no-std --native --run --ny-desugar=ny; -no-std --native-backend=llvm --jit --jit-engine=mcjit --ny-desugar=c; -no-std --native-backend=llvm --jit --jit-engine=mcjit --ny-desugar=ny"
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+;; Partial application is elaborated by the type checker, independent of the
+;; source-level compound-assignment desugar implementation.  Both --ny-desugar
+;; modes must therefore compile and run this program identically.
+use core
+fn add(int a, int b) int { a + b }
+def add5 = add(5)
+assert(add5(3) == 8, "escaped partial")
+assert(add(5)(3) == 8, "saturated nested partial")
+fn f(int a, int b = a * 2, int c) int { a + b + c }
+def g = f(2)
+assert(g(5) == 11, "captured default through partial application")
+print("DESUGAR-CURRY-OK")
+NY
+}

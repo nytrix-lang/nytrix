@@ -607,6 +607,7 @@ const nyr_runtime_alias_t nyr_runtime_aliases[] = {
     {"rt_any_div", "rt_any_div"},
     {"rt_any_mod", "rt_any_mod"},
     {"rt_any_mul", "rt_any_mul"},
+    {"rt_any_sub", "rt_any_sub"},
     {"rt_box_i64", "rt_box_i64"},
     {"rt_bytes_index_read_raw", "rt_bytes_index_read_raw"},
     {"rt_bytes_new", "rt_bytes_new"},
@@ -757,6 +758,11 @@ const ny_native_runtime_abi_decl_t ny_native_runtime_abi_decls[] = {
                         NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
                     NY_NATIVE_VM_CALL_NONE),
     NY_NATIVE_ENTRY("rt_any_mul",
+                    NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(0) |
+                        NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(1) |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_any_sub",
                     NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(0) |
                         NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(1) |
                         NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
@@ -2371,6 +2377,8 @@ const ny_native_runtime_arg_abi_decl_t ny_native_runtime_arg_abi_decls[] = {
     {"rt_any_mod", 0, 0, 0, 0, 0, 0,
      NYIR_ARG_CONTRACT_BORROWS | (NYIR_ARG_CONTRACT_BORROWS << 2)},
     {"rt_any_mul", 0, 0, 0, 0, 0, 0,
+     NYIR_ARG_CONTRACT_BORROWS | (NYIR_ARG_CONTRACT_BORROWS << 2)},
+    {"rt_any_sub", 0, 0, 0, 0, 0, 0,
      NYIR_ARG_CONTRACT_BORROWS | (NYIR_ARG_CONTRACT_BORROWS << 2)},
     {"rt_any_tag", 0, 0, 0, 0, 0, 0, NYIR_ARG_CONTRACT_BORROWS},
     {"rt_any_to_cstr", 0, 0, 0, 0, 0, 0, NYIR_ARG_CONTRACT_RETURNS_BORROW},
@@ -4098,6 +4106,14 @@ struct nyr_builder_impl_t {
    * consumer: raw scalar arm values must be boxed once at the join.
    */
   bool match_result_any;
+  /*
+   * A match arm boxes raw scalars for an `any` return only when the match
+   * itself is the returned value, not a value expression (see
+   * nyr_lower_match).
+   */
+  bool match_box_return;
+  bool match_value_expr;
+  unsigned match_depth;
   const char *return_type;
   const ny_extern_table_t *externs;
   const program_t *prog;
@@ -5522,6 +5538,8 @@ static const stmt_t *nyr_find_refine_in_prog(const nyr_builder_impl_t *b,
                                              const program_t *prog,
                                              const char *name);
 static int nyr_box_bool(nyr_builder_impl_t *b, int reg);
+static int nyr_contains_item(nyr_builder_impl_t *b, const expr_t *container,
+                             const expr_t *item_expr, int item);
 static const char *nyr_resolve_use_alias(const nyr_builder_impl_t *b,
                                          const char *alias);
 static const char *nyr_resolve_use_alias_global(const nyr_builder_impl_t *b,
@@ -10421,7 +10439,9 @@ static bool nyr_expr_is_cstr_impl(nyr_builder_impl_t *b, const expr_t *e) {
      * Keep the result representation attached to the resolved runtime symbol
      * so a later consumer such as print/equality does not reinterpret the
      * pointer as a raw integer.
+     * callee_name may point into this buffer, so it must outlive the branches.
      */
+    char qualified[512];
     const char *callee_name = NULL;
     const char *callee_leaf = NULL;
     if (e->kind == NY_E_CALL && e->as.call.callee &&
@@ -10430,12 +10450,10 @@ static bool nyr_expr_is_cstr_impl(nyr_builder_impl_t *b, const expr_t *e) {
       callee_leaf = ny_native_call_leaf(e);
     } else if (e->kind == NY_E_CALL && e->as.call.callee &&
                e->as.call.callee->kind == NY_E_MEMBER) {
-      char qualified[512];
       if (nyr_qualified_expr(e->as.call.callee, qualified, sizeof(qualified)))
         callee_name = qualified;
       callee_leaf = ny_native_call_leaf(e);
     } else if (e->kind == NY_E_MEMCALL) {
-      char qualified[512];
       const expr_t *target = e->as.memcall.target;
       const char *target_alias =
           target && target->kind == NY_E_IDENT ? target->as.ident.name : NULL;
@@ -10827,8 +10845,10 @@ static bool nyr_expr_is_bool(nyr_builder_impl_t *b, const expr_t *e) {
       e->semantic.canonical_callee_stmt->as.fn.return_type &&
       strcmp(e->semantic.canonical_callee_stmt->as.fn.return_type, "bool") == 0)
     return true;
-  /* `R(x)` for a refinement R is a membership test, whatever base type R
-   * refines (a refinement of a refinement used to inherit its int base). */
+  /*
+   * `R(x)` for a refinement R is a membership test, whatever base type R
+   * refines (a refinement of a refinement used to inherit its int base).
+   */
   if (e->kind == NY_E_CALL && e->as.call.args.len == 1 && b && b->prog &&
       e->as.call.callee && e->as.call.callee->kind == NY_E_IDENT &&
       e->as.call.callee->as.ident.name &&
@@ -12416,7 +12436,10 @@ static const char *nyr_dict_get_symbol(nyr_builder_impl_t *b,
         strcmp(fn->as.fn.return_type, "str") == 0)
       return "rt_dict_get_str_raw";
   }
-  if (key && key->semantic.resolved && key->semantic.rep != NY_SEM_REP_RAW_INT)
+  /* Only a proven string may use the string-key probe: "not a raw int" also
+   * covers tagged integers such as an imported `def int` constant, which
+   * rt_dict_get_str_raw would dereference. */
+  if (key && key->semantic.resolved && key->semantic.rep == NY_SEM_REP_STRING)
     return "rt_dict_get_str_raw";
   return "rt_dict_get_raw";
 }
@@ -12463,7 +12486,12 @@ static const char *nyr_dict_set_symbol(nyr_builder_impl_t *b,
         strcmp(fn->as.fn.return_type, "str") == 0)
       return "rt_native_dict_set_str_compact";
   }
-  if (key && key->semantic.resolved && key->semantic.rep != NY_SEM_REP_RAW_INT)
+  /*
+   * Only a key statically known to be a string may take the string path.  A
+   * dynamic key can be an integer at run time; the generic setter below
+   * checks the key's real kind before hashing it.
+   */
+  if (key && key->semantic.resolved && key->semantic.rep == NY_SEM_REP_STRING)
     return "rt_native_dict_set_str_compact";
   return "rt_native_dict_set_nir_i64";
 }
@@ -16769,7 +16797,10 @@ static const expr_t *nyr_find_module_member_in(const nyr_builder_impl_t *b,
   if (entries) {
     entries[slot] = (ny_native_module_member_entry_t){
         .module = mod,
-        .member = member,
+        /*
+         * Callers may pass stack buffers; cache a stable interned copy.
+         */
+        .member = ny_intern_get(ny_intern_cstr(member)),
         .result = result,
         .generation = index->module_member_generation,
         .resolved = true};
@@ -16902,7 +16933,10 @@ nyr_find_imported_module_member(const nyr_builder_impl_t *b, const stmt_t *mod,
   if (cacheable && index->imported_members)
     index->imported_members[slot] = (ny_native_imported_member_entry_t){
         .module = mod,
-        .member = member,
+        /*
+         * Callers may pass stack buffers; cache a stable interned copy.
+         */
+        .member = ny_intern_get(ny_intern_cstr(member)),
         .result = result,
         .generation = index->module_member_generation,
         .resolved = true};
@@ -17710,8 +17744,24 @@ static bool nyr_expr_is_dict(const nyr_builder_impl_t *b, const expr_t *e) {
      * A tagged `any` local may hold either a dict or a set. Its generic
      * object carrier is not proof of dictionary layout; choosing a dict
      * intrinsic here skips the runtime set branch in any.remove/delete.
+     *
+     * An unannotated binding initialized by a set constructor is a set even
+     * though its generic representation is "object" (the shortcut below).
      */
-    if (local && local->type_name && strcmp(local->type_name, "set") == 0)
+    if (nyr_expr_is_set(b, e))
+      return false;
+    if (local && local->type_name &&
+        (strcmp(local->type_name, "set") == 0 ||
+         /*
+          * Ranges are object-represented too; their declared identity keeps
+          * `contains`/`get` off the dictionary intrinsics (a range
+          * `contains` lowered to rt_dict_has_raw always answered false).
+          */
+         strcmp(local->type_name, "range") == 0 ||
+         strcmp(local->type_name, "list") == 0 ||
+         strcmp(local->type_name, "tuple") == 0 ||
+         strcmp(local->type_name, "bytes") == 0 ||
+         strcmp(local->type_name, "str") == 0))
       return false;
     if (local && (local->semantic_rep == NY_SEM_REP_OBJECT || local->is_dict))
       return true;
@@ -19678,6 +19728,29 @@ static bool nyr_store_local_value(nyr_builder_impl_t *b, int slot, int value) {
                                         NYIR_SCALAR_I64_TAGGED);
     if (value < 0)
       return nyr_fail(b, NY_NATIVE_ALLOC_FAIL);
+  }
+  /*
+   * A declared machine-float local owns an IEEE-double slot.  A raw integer
+   * reaching it (a dynamic accessor whose fallback made the producer look
+   * integral, an enum-ish numeric handle, ...) is a numeric value, not a
+   * bit-pattern: widen it here.  Storing the word unchanged let the store
+   * relabel the slot raw, so the next load reported an integer carrier while
+   * the consumer still bitcast it as f64 and printed a denormal.
+   */
+  if (local && !local->is_any && !local->is_capture &&
+      (local->is_f64 || local->is_f32 ||
+       local->semantic_rep == NY_SEM_REP_F64 ||
+       local->semantic_rep == NY_SEM_REP_F32) &&
+      nyr_value_scalar_class(b, value) == NYIR_SCALAR_I64_RAW) {
+    int as_f64 = nyr_emit_i64_to_f64(b, value);
+    if (as_f64 < 0)
+      return nyr_fail(b, NY_NATIVE_ALLOC_FAIL);
+    if (local->is_f32 || local->semantic_rep == NY_SEM_REP_F32) {
+      as_f64 = nyr_emit_f64_to_f32(b, as_f64);
+      if (as_f64 < 0)
+        return nyr_fail(b, NY_NATIVE_ALLOC_FAIL);
+    }
+    value = as_f64;
   }
   /*
    * A machine-float slot contract must receive machine-float bits. When the
@@ -23078,6 +23151,44 @@ static const stmt_t *nyr_find_attached_method(const nyr_builder_impl_t *b,
   return res;
 }
 
+/*
+ * Name the module that declares the producer expression, when the expression
+ * starts at a module qualifier (`left.make_left()`, `left.make_left`).
+ * Consumers use it to prefer the attached method declared beside the producer
+ * over a same-named owner in another module.
+ */
+static const char *nyr_expr_source_module(const nyr_builder_impl_t *b,
+                                          const expr_t *e, unsigned depth) {
+  if (!b || !e || !b->prog || depth > 8)
+    return NULL;
+  if (e->kind == NY_E_CALL)
+    return nyr_expr_source_module(b, e->as.call.callee, depth + 1);
+  if (e->kind == NY_E_MEMBER)
+    return nyr_expr_source_module(b, e->as.member.target, depth + 1);
+  if (e->kind == NY_E_MEMCALL)
+    return nyr_expr_source_module(b, e->as.memcall.target, depth + 1);
+  if (e->kind != NY_E_IDENT)
+    return NULL;
+  const char *name = e->as.ident.name;
+  if (!name || !*name)
+    return NULL;
+  char base[256];
+  const char *dot = strrchr(name, '.');
+  if (dot && dot != name && (size_t)(dot - name) < sizeof(base)) {
+    size_t n = (size_t)(dot - name);
+    memcpy(base, name, n);
+    base[n] = '\0';
+    name = base;
+  }
+  for (size_t i = 0; i < b->prog->body.len; ++i) {
+    const stmt_t *module =
+        nyr_find_module_in_root_cached(b, b->prog->body.data[i], name);
+    if (module && module->as.module.name)
+      return module->as.module.name;
+  }
+  return NULL;
+}
+
 static const stmt_t *nyr_find_attached_method_impl(const nyr_builder_impl_t *b,
                                                    const expr_t *receiver,
                                                    const char *method,
@@ -23118,6 +23229,41 @@ static const stmt_t *nyr_find_attached_method_impl(const nyr_builder_impl_t *b,
           (nyr_builder_t *)b, receiver->as.call.callee->as.ident.name);
     if (producer && producer->as.fn.return_type)
       owner = producer->as.fn.return_type;
+  }
+  /*
+   * Two modules may each declare the same nominal type with different
+   * attached methods (`left.Token.identify` vs `right.Token.identify`).  The
+   * plain owner name would match whichever declaration the program scan sees
+   * first, so recover the declaring module from the receiver's qualified
+   * producer call and prefer that module's attached owner.
+   */
+  const char *source_module =
+      owner && !strchr(owner, '.') ? nyr_expr_source_module(b, receiver, 0)
+                                   : NULL;
+  if (source_module && source_module[0] && b->prog) {
+    char qualified[512];
+    int qn =
+        snprintf(qualified, sizeof(qualified), "%s.%s", source_module, owner);
+    if (qn > 0 && (size_t)qn < sizeof(qualified)) {
+      const stmt_t *scoped = nyr_find_attached_owner(b, qualified, method);
+      if (scoped)
+        return scoped;
+      /*
+       * The declarations may keep the short nominal owner inside their own
+       * module; restrict the program scan to that module instead.
+       */
+      for (size_t i = 0; i < b->prog->body.len; ++i) {
+        const stmt_t *module =
+            nyr_find_module_in_root_cached(b, b->prog->body.data[i],
+                                           source_module);
+        if (!module)
+          continue;
+        const stmt_t *found = ny_native_find_attached_method_in_stmt(
+            module, owner, method);
+        if (found)
+          return found;
+      }
+    }
   }
   if (!owner || !b || !b->prog)
     return NULL;
@@ -23608,9 +23754,11 @@ static int nyr_lower_dict_key(nyr_builder_impl_t *b, const expr_t *e) {
   bool raw_integer = integer_literal ||
                      (e && e->semantic.rep == NY_SEM_REP_RAW_INT) ||
                      nyr_value_scalar_class(b, key) == NYIR_SCALAR_I64_RAW;
-  /* Booleans lower to raw 0/1. Dynamic keys carry the boolean immediates, so
+  /*
+   * Booleans lower to raw 0/1. Dynamic keys carry the boolean immediates, so
    * box them: a raw 1 would be read as tagged integer 0 by the tagged index
-   * bridge (and alias integer keys in dictionaries). */
+   * bridge (and alias integer keys in dictionaries).
+   */
   if (key >= 0 && e && nyr_expr_is_bool(b, e))
     return nyr_box_bool(b, key);
   if (key < 0 || !e || nyr_expr_is_cstr(b, e) ||
@@ -23704,4 +23852,32 @@ static bool nyr_expr_is_range(const nyr_builder_impl_t *b, const expr_t *e) {
            nyr_expr_is_range(b, global);
   }
   return false;
+}
+
+/*
+ * Prepare the item operand of rt_contains_raw. Floats are boxed. Native
+ * typed buffers compare raw words, so integer items stay raw, except for a
+ * range receiver: its runtime branch decodes a tagged integer, and a raw odd
+ * item would otherwise be read as the tagged value item >> 1.
+ */
+static int nyr_contains_item(nyr_builder_impl_t *b, const expr_t *container,
+                             const expr_t *item_expr, int item) {
+  if (!b || item < 0)
+    return item;
+  if ((item_expr && nyr_expr_is_f64(b, item_expr)) ||
+      nyr_value_is_f64(b, item, 0) ||
+      nyr_value_scalar_class(b, item) == NYIR_SCALAR_F64) {
+    int bits = nyr_emit_runtime_call(b, "rt_f64_bits", item, -1, -1, 1, 0);
+    return bits < 0 ? -1
+                    : nyr_emit_runtime_call(b, "rt_flt_box_val", bits, -1, -1,
+                                            1, 0);
+  }
+  if (container && nyr_expr_is_range(b, container) &&
+      ((item_expr && nyr_expr_is_raw_int(item_expr)) ||
+       nyr_value_scalar_class(b, item) == NYIR_SCALAR_I64_RAW)) {
+    int one = nyr_emit_const(b, 1);
+    int shifted = one < 0 ? -1 : nyr_emit_binop(b, NYIR_SHL_I64, item, one);
+    return shifted < 0 ? -1 : nyr_emit_binop(b, NYIR_OR_I64, shifted, one);
+  }
+  return item;
 }

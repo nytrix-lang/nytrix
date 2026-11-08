@@ -297,6 +297,9 @@ unsigned nyr_call_effect_summary(const nyr_inst_t *inst) {
   const char *name = inst->symbol;
   if (!name || !name[0])
     return NYIR_EFFECT_CALL | NYIR_EFFECT_FFI | NYIR_EFFECT_UNKNOWN_SIDE_EFFECT;
+  if ((inst->flags & NYIR_INST_F_EXTERN) &&
+      (strcmp(name, "malloc") == 0 || strcmp(name, "calloc") == 0))
+    return NYIR_EFFECT_CALL | NYIR_EFFECT_ALLOCATION;
   if (strncmp(name, "rt_", 3) != 0)
     return NYIR_EFFECT_CALL | NYIR_EFFECT_FFI | NYIR_EFFECT_UNKNOWN_SIDE_EFFECT;
   char family = name[3];

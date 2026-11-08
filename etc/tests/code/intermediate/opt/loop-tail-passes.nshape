@@ -3,7 +3,7 @@ shape loop_tail_passes_preserve_semantics {
   generator "regression"
   features ["ny", "test", "optimizer", "regression"]
   template ny-test-case
-  flags_matrix "--native --run -O3; --native-backend=llvm --jit --jit-engine=mcjit -O3; --native-only -O3"
+  flags_matrix "--native --run -O0; --native --run -O1; --native --run -O3; --native-backend=llvm --jit --jit-engine=mcjit -O3; --native-only -O3"
   expect compile_and_run
   source ny <<'NY'
 use core

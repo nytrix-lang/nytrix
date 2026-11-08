@@ -7,19 +7,19 @@ shape vector {
   source ny <<'NY'
 use core
 use core.os.time
-;; Vector Benchmark: element-wise multiply over Ny lists.
+use core.tbuf
+;; Vector Benchmark: element-wise multiply over typed i64 buffers.
 ;; Keep the workload identical in the native JIT and the C wrapper. The Ny
 ;; native-only benchmark route does not pass program arguments to argc().
 def n = 65536
 def rounds = 2
-mut a = []
-mut b = []
-mut c = []
+def a = i64buf_new(n)
+def b = i64buf_new(n)
+def c = i64buf_new(n)
 mut i = 0
 while i < n {
-   a = append(a, i + 1)
-   b = append(b, i + 3)
-   c = append(c, 0)
+   i64buf_store(a, i, i + 1)
+   i64buf_store(b, i, i + 3)
    i += 1
 }
 def int t0 = ticks()
@@ -28,10 +28,10 @@ mut r = 0
 while r < rounds {
    mut i2 = 0
    while i2 < n {
-      c[i2] = a[i2] * b[i2]
+      i64buf_store(c, i2, i64buf_load(a, i2) * i64buf_load(b, i2))
       i2 += 1
    }
-   acc += c[0] + c[n - 1]
+   acc += i64buf_load(c, 0) + i64buf_load(c, n - 1)
    r += 1
 }
 def int t1 = ticks()

@@ -427,9 +427,9 @@ fn _stable_loaded_texture_id(any raw) int {
    return tid
 }
 
-mut _scene_merge_shared_i32_field_defaults_cache = 0
-mut _scene_merge_i32_field_defaults_cache = 0
-mut _scene_skin_solid_merge_i32_field_defaults_cache = 0
+mut any _scene_merge_shared_i32_field_defaults_cache = nil
+mut any _scene_merge_i32_field_defaults_cache = nil
+mut any _scene_skin_solid_merge_i32_field_defaults_cache = nil
 
 fn _scene_merge_shared_i32_field_defaults() list {
    if is_list(_scene_merge_shared_i32_field_defaults_cache) { return _scene_merge_shared_i32_field_defaults_cache }
@@ -2293,16 +2293,6 @@ fn _scene_drag_axis_fallback_delta(f64 dx, f64 dy, int axis) f64 {
    _scene_drag_axis_delta(dx, dy)
 }
 
-fn _scene_drag_projected_delta(f64 dx, f64 dy, any st) f64 {
-   if is_dict(st) {
-      def ax = float(st.get("screen_axis_x", 0.0))
-      def ay = float(st.get("screen_axis_y", 0.0))
-      def len = sqrt(ax * ax + ay * ay)
-      if len > 0.0001 { return dx * (ax / len) + dy * (ay / len) }
-   }
-   _scene_drag_axis_delta(dx, dy)
-}
-
 fn _scene_drag_projected_delta_for_axis(f64 dx, f64 dy, any st, int axis) f64 {
    "Returns stable screen-space drag along the picked gizmo axis."
    if is_dict(st) {
@@ -2332,80 +2322,6 @@ fn _scene_drag_bounds_span(any bounds) f64 {
       return max(max(max(sx, sy), sz), 1.0)
    }
    1.0
-}
-
-fn _scene_drag_world_deadband(any bounds) f64 {
-   ;; Tiny numeric noise from ray/plane intersection must not move the object.
-   ;; Keep this small so slow precise drags still respond immediately.
-   clamp(_scene_drag_bounds_span(bounds) * 0.000020, 0.000002, 0.0025)
-}
-
-fn _scene_drag_world_smooth_limit(any bounds) f64 {
-   ;; Smooth only micro-steps.  Large intentional mouse moves should remain
-   ;; immediate, while sub-pixel ray noise is blended out.
-   clamp(_scene_drag_bounds_span(bounds) * 0.0060, 0.0010, 0.35)
-}
-
-fn _scene_drag_stabilize_scalar(any st, str key, any bounds, f64 raw) f64 {
-   if !is_dict(st) { return raw }
-   if is_nan(raw) || is_inf(raw) { return float(st.get(key, 0.0)) }
-   def eps = _scene_drag_world_deadband(bounds)
-   mut val = _scene_absf(raw) <= eps ? 0.0 : raw
-   if !bool(st.get(key + "_ok", false)) {
-      st[key] = val
-      st[key + "_ok"] = true
-      return val
-   }
-   def prev = float(st.get(key, val))
-   def diff = _scene_absf(val - prev)
-   mut out = val
-   if diff <= eps {
-      out = prev
-   } elif diff < _scene_drag_world_smooth_limit(bounds) {
-      out = prev * 0.35 + val * 0.65
-   }
-   st[key] = out
-   out
-}
-
-fn _scene_drag_stabilize_vec(any st, str key, any bounds, f64 raw_x, f64 raw_y, f64 raw_z) list {
-   if !is_dict(st) { return [raw_x, raw_y, raw_z] }
-   if is_nan(raw_x) || is_inf(raw_x) || is_nan(raw_y) || is_inf(raw_y) || is_nan(raw_z) || is_inf(raw_z) {
-      return [float(st.get(key + "_x", 0.0)), float(st.get(key + "_y", 0.0)), float(st.get(key + "_z", 0.0))]
-   }
-   def eps = _scene_drag_world_deadband(bounds)
-   def len = sqrt(raw_x * raw_x + raw_y * raw_y + raw_z * raw_z)
-   mut vx, vy = raw_x, raw_y
-   mut vz = raw_z
-   if len <= eps { vx = 0.0 vy = 0.0 vz = 0.0 }
-   if !bool(st.get(key + "_ok", false)) {
-      st[key + "_x"] = vx
-      st[key + "_y"] = vy
-      st[key + "_z"] = vz
-      st[key + "_ok"] = true
-      return [vx, vy, vz]
-   }
-   def px = float(st.get(key + "_x", vx))
-   def py = float(st.get(key + "_y", vy))
-   def pz = float(st.get(key + "_z", vz))
-   def step_x, step_y = vx - px, vy - py
-   def step_z = vz - pz
-   def step = sqrt(step_x * step_x + step_y * step_y + step_z * step_z)
-   mut ox, oy = vx, vy
-   mut oz = vz
-   if step <= eps {
-      ox = px
-      oy = py
-      oz = pz
-   } elif step < _scene_drag_world_smooth_limit(bounds) {
-      ox = px * 0.35 + vx * 0.65
-      oy = py * 0.35 + vy * 0.65
-      oz = pz * 0.35 + vz * 0.65
-   }
-   st[key + "_x"] = ox
-   st[key + "_y"] = oy
-   st[key + "_z"] = oz
-   [ox, oy, oz]
 }
 
 fn scene_drag_camera_basis(any yaw_deg, any pitch_deg) dict {
@@ -3707,13 +3623,6 @@ fn _scene_part_mat_idx(any part) int {
    if !is_dict(part) { return -1 }
    def mi = int(part.get("mat_idx", part.get("material_idx", -1)))
    mi
-}
-
-fn _scene_update_material_slab(any slab, int base_color_u32, int material_u32) bool {
-   if !slab { return false }
-   store32(slab, base_color_u32, 0)
-   store32(slab, material_u32, 4)
-   true
 }
 
 fn _scene_refresh_part_material_slab(any part) any {
@@ -5235,14 +5144,6 @@ fn _scene_sort_part_pipe(any item, bool cpu_parts) int {
 @inline
 fn _scene_sort_part_bucket(any item, bool cpu_parts) int {
    cpu_parts ? _cpu_part_pass_bucket(item) : _gpu_rec_pass_bucket(item)
-}
-
-@inline
-fn _scene_sort_part_packed_key(any item, bool cpu_parts) int {
-   def bucket = _scene_sort_part_bucket(item, cpu_parts)
-   def pipe = _scene_sort_part_pipe(item, cpu_parts)
-   def tex = _scene_sort_part_tex(item, cpu_parts)
-   bucket * 10000000000000000 + pipe * 4294967296 + (tex + 2147483648)
 }
 
 @inline

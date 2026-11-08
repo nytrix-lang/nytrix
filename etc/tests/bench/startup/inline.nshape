@@ -8,9 +8,9 @@ shape bench_inline {
 use core
 use core.os.time
 ;; Function Inlining (Benchmark)
-fn add(int a, int b) int { a + b }
-fn mul(int a, int b) int { a * b }
-fn loop(int n) int {
+@inline fn add(int a, int b) int { a + b }
+@inline fn mul(int a, int b) int { a * b }
+@inline fn loop(int n) int {
   mut int sum = 0
   mut int i = 0
   while i < n {

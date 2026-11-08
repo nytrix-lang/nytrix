@@ -2034,7 +2034,7 @@ static int run_compare_mode(const char *repo, const char *bin,
 static void usage(void) {
   nyt_heading("Nytrix Performance");
   nyt_subheading("Usage");
-  printf("%susage:%s %sny perf%s %s[options] {gate,matrix,profile,compare} "
+  printf("%susage:%s %sny perf%s %s[options] {gate,matrix,profile,compare,bench} "
          "[target] [-- args...]%s\n",
          nyt_clr(NYT_BOLD), nyt_clr(NYT_RESET), nyt_clr(NYT_CYAN),
          nyt_clr(NYT_RESET), nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
@@ -2046,8 +2046,10 @@ static void usage(void) {
   printf("  %sprofile%s  real perf profile for a Ny script or executable\n",
          nyt_clr(NYT_CYAN), nyt_clr(NYT_RESET));
   printf(
-      "  %scompare%s  Ny benchmark matrix or arbitrary executable targets\n\n",
+      "  %scompare%s  Ny benchmark matrix or arbitrary executable targets\n",
       nyt_clr(NYT_CYAN), nyt_clr(NYT_RESET));
+  printf("  %sbench%s  benchmark evidence collection with assembly\n\n",
+         nyt_clr(NYT_CYAN), nyt_clr(NYT_RESET));
   nyt_subheading("Benchmark setup");
   printf("  %s--bin BIN --write-baseline --freq HZ --out DIR%s\n",
          nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
@@ -2230,8 +2232,30 @@ int ny_perf_main(int argc, char **argv) {
       continue;
     }
     if (strcmp(a, "gate") == 0 || strcmp(a, "matrix") == 0 ||
-        strcmp(a, "profile") == 0 || strcmp(a, "compare") == 0) {
+        strcmp(a, "profile") == 0 || strcmp(a, "compare") == 0 ||
+        strcmp(a, "bench") == 0) {
       mode = a;
+      if (strcmp(a, "bench") == 0) {
+        /*
+         * Collect remaining arguments for bench to parse itself (skip mode name)
+         */
+        int remaining = argc - i - 1;
+        char **bench_argv = malloc((remaining + 3) * sizeof(char *));
+        if (!bench_argv) {
+          sv_free(&script_args);
+          return 2;
+        }
+        bench_argv[0] = argv[0];
+        bench_argv[1] = (char *)a;  /* pass mode name as first arg */
+        for (int j = 0; j < remaining; j++) {
+          bench_argv[j + 2] = argv[i + 1 + j];
+        }
+        bench_argv[remaining + 2] = NULL;
+        int rc = ny_perf_bench_main(remaining + 2, bench_argv);
+        free(bench_argv);
+        sv_free(&script_args);
+        return rc;
+      }
       continue;
     }
     if (!script && nyt_ends_with(a, ".ny")) {
@@ -2265,8 +2289,9 @@ int ny_perf_main(int argc, char **argv) {
   }
 
   int needs_ny_bin = strcmp(mode, "gate") == 0 || strcmp(mode, "matrix") == 0 ||
-                     (strcmp(mode, "profile") == 0 && !profile_exec[0]) ||
-                     (strcmp(mode, "compare") == 0 && exec_target_count == 0);
+                      (strcmp(mode, "profile") == 0 && !profile_exec[0]) ||
+                      (strcmp(mode, "compare") == 0 && exec_target_count == 0) ||
+                      strcmp(mode, "bench") == 0;
   if (needs_ny_bin && !nyt_is_file(bin)) {
     nyt_err("ny-perf", "binary not found: %s", bin);
     sv_free(&script_args);

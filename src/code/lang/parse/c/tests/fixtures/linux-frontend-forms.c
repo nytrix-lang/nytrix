@@ -111,6 +111,60 @@ static int nyc_aggregate_array_copy(struct nyc_atomic *source) {
   struct nyc_atomic values[2] = {*source};
   return values[0].counter != 31 || values[1].counter != 0;
 }
+static int nyc_guard_calls;
+static void nyc_guard_release(int *held) { nyc_guard_calls += *held; }
+static int nyc_scoped_guard(int value) {
+  int result = 0;
+  for (int held __attribute__((__cleanup__(nyc_guard_release))) = value; 1;
+       ({
+         goto nyc_guard_done;
+       }))
+    if (0) {
+    nyc_guard_done:
+      break;
+    } else
+      result = held;
+  return result != value || nyc_guard_calls != value;
+}
+typedef unsigned int nyc_u32;
+struct nyc_regs { int x; };
+static void nyc_irq_handler(struct nyc_regs *regs, nyc_u32 vector);
+static int nyc_function_pointer_compatible(struct nyc_regs *regs) {
+  nyc_u32 vector = 0;
+  (void)regs;
+  (void)vector;
+  return !__builtin_types_compatible_p(typeof(&nyc_irq_handler),
+                                       void (*)(struct nyc_regs *, nyc_u32)) ||
+         !__builtin_types_compatible_p(typeof(regs), struct nyc_regs *) ||
+         !__builtin_types_compatible_p(typeof(vector), nyc_u32);
+}
+struct nyc_ops {
+  void (*putback)(int *page);
+};
+static int nyc_member_call_page;
+static void nyc_member_putback(int *page) { nyc_member_call_page = *page; }
+static const struct nyc_ops *nyc_page_ops(int *page) {
+  (void)page;
+  static const struct nyc_ops ops = {nyc_member_putback};
+  return &ops;
+}
+static int nyc_call_through_returned_member(void) {
+  int page = 11;
+  nyc_page_ops(&page)->putback(&page);
+  return nyc_member_call_page != 11;
+}
+static int nyc_early_stosw(void) {
+  unsigned short words[2] = {0, 0};
+  int count_out = 0;
+  int pointer_out = 0;
+  unsigned short *dst = words;
+  unsigned long count = 2;
+  __asm__ volatile("rep stosw"
+                   : "=&c"(count_out), "=&D"(pointer_out)
+                   : "a"((unsigned short)0x5aa5), "1"(dst), "0"(count)
+                   : "memory");
+  return words[0] != 0x5aa5 || words[1] != 0x5aa5;
+}
 int main(void) {
   struct nyc_lock lock;
   nyc_regset_t nyc_regs;
@@ -151,6 +205,14 @@ int main(void) {
   lock.tail.counter = 31;
   if (nyc_aggregate_array_copy(&lock.tail))
     return 15;
+  if (nyc_scoped_guard(9))
+    return 29;
+  if (nyc_early_stosw())
+    return 30;
+  if (nyc_function_pointer_compatible(0))
+    return 31;
+  if (nyc_call_through_returned_member())
+    return 32;
   unsigned long *selected = _Generic((void *)0,
       void *: &(unsigned long){ 42 }, default: &nyc_fallback);
   lock.tail.counter = 0;

@@ -1661,6 +1661,7 @@ static void dump_stmt_raw(stmt_t *s, json_writer_t *out) {
       if (i < s->as.var.names.len - 1)
         json_append(out, ",");
     }
+    json_append(out, "],\"types\":[");
     for (size_t i = 0; i < s->as.var.types.len; ++i) {
       if (i)
         json_append(out, ",");

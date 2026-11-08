@@ -114,7 +114,7 @@ fn _smart_attack_p2(any Px, any Py, any Qx, any Qy, any a, any p) any {
             def pQj = ecc_scalar_mult_jacobian(p, ecc_to_jacobian(Q, p2), a2, p2)
             if pPj != nil && pQj != nil {
                def phiP, phiQ = _smart_phi_from_jac_divp(pPj, p, p2), _smart_phi_from_jac_divp(pQj, p, p2)
-               if os.env("NYTRIX_SMART_TRACE") != 0 {
+               if os.env("NYTRIX_SMART_TRACE") != nil {
                   print("[smart] ra=" + to_str(ra) + " rb=" + to_str(rb) +
                      " phiP=" + to_str(phiP) + " phiQ=" + to_str(phiQ))
                }

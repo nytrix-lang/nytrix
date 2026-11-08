@@ -777,10 +777,14 @@ fn len(any x) int {
 fn _range_contains(any container, any item) bool {
    def int n = container.len
    if n <= 0 { return false }
-   def start = __load64_idx(container, 0)
-   def step = __load64_idx(container, 16)
+   ; Range fields are raw machine integers while `item` is a language value:
+   ; untag it explicitly instead of mixing the two in dynamic arithmetic.
+   if !__is_int(item) { return false }
+   def int value = __untag(item)
+   def int start = __load64_idx(container, 0)
+   def int step = __load64_idx(container, 16)
    if step == 0 { return false }
-   def delta = item - start
+   def int delta = value - start
    if step > 0 {
       if delta < 0 { return false }
    } else {

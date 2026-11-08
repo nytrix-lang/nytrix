@@ -253,6 +253,7 @@ static bool ny_should_use_aot_cache(const ny_options *opt) {
   if (opt->trace_exec || opt->dump_funcs || opt->emit_ir_pre_path ||
       opt->emit_asm_path || opt->callgraph || opt->native_tier_report ||
       opt->native_result_oracle || opt->native_dump_ir || opt->nyr_run ||
+      opt->vm_disasm || opt->mixed_disasm ||
       opt->nyr_metadata_report || opt->emit_report_path ||
       opt->emit_refinement_interface_path || opt->emit_effect_interface_path ||
       opt->dbg_format_json || ny_env_enabled("NYTRIX_TRACE"))
@@ -287,6 +288,7 @@ static bool ny_should_use_jit_cache(const ny_options *opt) {
   if (opt->trace_exec || opt->dump_funcs || opt->emit_ir_pre_path ||
       opt->emit_asm_path || opt->callgraph || opt->native_tier_report ||
       opt->native_result_oracle || opt->native_dump_ir || opt->nyr_run ||
+      opt->vm_disasm || opt->mixed_disasm ||
       opt->nyr_metadata_report || opt->emit_report_path ||
       opt->emit_refinement_interface_path || opt->emit_effect_interface_path ||
       opt->dbg_format_json || ny_env_enabled("NYTRIX_TRACE"))

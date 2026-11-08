@@ -65,7 +65,7 @@ int main(void) {
       nyr_mach_lower_nir(&ir, &mach, target.caps, err, sizeof(err)) &&
       nyr_mach_verify(&mach, target.caps, err, sizeof(err)) &&
       nyr_x86_64_emit_mach_scalar(&assembly, &target, &mach, "float_to_i64",
-                                  false, err, sizeof(err)) &&
+                                  false, false, err, sizeof(err)) &&
       nyr_x64_mach_append_function(&code, defs, &def_count, relocs,
                                    &reloc_count, &mach, &target, "float_to_i64",
                                    false, err, sizeof(err));

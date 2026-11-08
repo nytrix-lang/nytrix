@@ -250,7 +250,8 @@ static LLVMTypeRef ny_llvm_vector_type(ny_llvm_context_t *cg, nyr_op_t op) {
       op == NYIR_VEC8_ADD_I64 || op == NYIR_VEC8_SUB_I64 ||
       op == NYIR_VEC8_AND_I64 || op == NYIR_VEC8_OR_I64 ||
       op == NYIR_VEC8_XOR_I64 || op == NYIR_VEC8_REDUCE_ADD_I64 ||
-      op == NYIR_VEC8_SET1_I64 || op == NYIR_VEC8_SAR_I64)
+      op == NYIR_VEC8_SET1_I64 || op == NYIR_VEC8_SAR_I64 ||
+      op == NYIR_VEC8_SHR_I64)
     return LLVMVectorType(cg->type_i64, 4);
   return NULL;
 }
@@ -340,6 +341,7 @@ static bool ny_llvm_infer_vector_value_types(ny_llvm_context_t *cg,
       valid = ny_llvm_vector_mark(types, parents, count, in->b, type);
       break;
     case NYIR_VEC8_SAR_I64:
+    case NYIR_VEC8_SHR_I64:
     case NYIR_VEC4_SHUFFLE_F64:
     case NYIR_VEC8_SHUFFLE_F32:
       valid = ny_llvm_vector_mark(types, parents, count, in->dst, type) &&
@@ -656,6 +658,21 @@ bool ny_llvm_emit_nyir_func(ny_llvm_context_t *cg, nyr_func_t *f,
    * read its element 1 as 0.
    */
   size_t local_count = nyr_local_count(f);
+  /*
+   * try/catch lowers to setjmp, and rt_panic longjmps back into this frame
+   * after deferred closures have updated captured locals through their
+   * addresses. LLVM's CFG does not model that second return, so a local
+   * modified between setjmp and longjmp must be accessed volatilely (the C
+   * rule for setjmp), or the catch path reuses a value forwarded from before
+   * the setjmp.
+   */
+  bool locals_volatile = false;
+  for (size_t i = 0; i < f->len && !locals_volatile; ++i) {
+    const nyr_inst_t *in = &f->data[i];
+    locals_volatile = in->op == NYIR_CALL && in->symbol &&
+                      (strcmp(in->symbol, "_setjmp") == 0 ||
+                       strcmp(in->symbol, "setjmp") == 0);
+  }
   LLVMValueRef *local_allocas = calloc(local_count + 1, sizeof(LLVMValueRef));
   LLVMValueRef slot_zero = LLVMConstInt(cg->type_i64, 0, false);
   for (size_t i = 0; i < local_count; ++i) {
@@ -1407,6 +1424,8 @@ bool ny_llvm_emit_nyir_func(ny_llvm_context_t *cg, nyr_func_t *f,
           (size_t)in->imm < local_count) {
         vals[in->dst] = LLVMBuildLoad2(cg->builder, cg->type_i64,
                                        local_allocas[in->imm], "");
+        if (locals_volatile)
+          LLVMSetVolatile(vals[in->dst], true);
       }
       break;
 
@@ -1414,7 +1433,10 @@ bool ny_llvm_emit_nyir_func(ny_llvm_context_t *cg, nyr_func_t *f,
       if (in->imm >= 0 && (size_t)in->imm < local_count) {
         LLVMValueRef va =
             (in->a >= 0 && (size_t)in->a < val_count) ? vals[in->a] : NULL;
-        LLVMBuildStore(cg->builder, ny_as_i64(cg, va), local_allocas[in->imm]);
+        LLVMValueRef store = LLVMBuildStore(cg->builder, ny_as_i64(cg, va),
+                                            local_allocas[in->imm]);
+        if (locals_volatile)
+          LLVMSetVolatile(store, true);
       }
       break;
 
@@ -1593,6 +1615,7 @@ bool ny_llvm_emit_nyir_func(ny_llvm_context_t *cg, nyr_func_t *f,
     case NYIR_VEC8_OR_I64:
     case NYIR_VEC8_XOR_I64:
     case NYIR_VEC8_SAR_I64:
+    case NYIR_VEC8_SHR_I64:
     case NYIR_VEC8_SET1_I64:
     case NYIR_VEC8_REDUCE_ADD_I64: {
       LLVMTypeRef vector_type = ny_llvm_vector_type(cg, in->op);
@@ -1634,11 +1657,13 @@ bool ny_llvm_emit_nyir_func(ny_llvm_context_t *cg, nyr_func_t *f,
         LLVMSetAlignment(store, 1);
         break;
       }
-      if (in->op == NYIR_VEC8_SAR_I64) {
+      if (in->op == NYIR_VEC8_SAR_I64 || in->op == NYIR_VEC8_SHR_I64) {
         LLVMValueRef lhs = ny_llvm_vector_slot(cg, vals, val_count, in->a, vector_type);
         LLVMValueRef count = ny_llvm_vector_splat(
             cg, LLVMConstInt(cg->type_i64, (uint64_t)in->imm, false), vector_type);
-        vals[in->dst] = LLVMBuildAShr(cg->builder, lhs, count, "");
+        vals[in->dst] = in->op == NYIR_VEC8_SHR_I64
+                            ? LLVMBuildLShr(cg->builder, lhs, count, "")
+                            : LLVMBuildAShr(cg->builder, lhs, count, "");
         break;
       }
       if (in->op == NYIR_VEC4_SET1_F64 || in->op == NYIR_VEC8_SET1_F32 ||
@@ -1868,9 +1893,9 @@ bool ny_llvm_emit_nyir_func(ny_llvm_context_t *cg, nyr_func_t *f,
         callee_name = user_callee_name;
       }
       LLVMValueRef callee = LLVMGetNamedFunction(cg->module, callee_name);
-      if (!callee && strncmp(callee_name, "ny_fn_core.", 15) == 0) {
+      if (!callee && strncmp(callee_name, "ny_fn_core.", 11) == 0) {
         char stripped[512];
-        snprintf(stripped, sizeof(stripped), "ny_fn_%s", callee_name + 15);
+        snprintf(stripped, sizeof(stripped), "ny_fn_%s", callee_name + 11);
         callee = LLVMGetNamedFunction(cg->module, stripped);
       }
       LLVMTypeRef *arg_tys =

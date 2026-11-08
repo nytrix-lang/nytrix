@@ -1,0 +1,26 @@
+shape currying_managed_capture_reuse {
+  family "runtime/execution"
+  generator "embedded"
+  features [ny currying ownership capture positive]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit -O0; --native-backend=llvm --jit --jit-engine=orc -O2"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+fn combine(list<int> values, int addend) int {
+   values[0] + values[1] + addend
+}
+def captured = combine([10, 20])
+assert(captured(3) == 33, "a managed list is captured without cloning or dropping twice")
+assert(captured(4) == 34, "the residual closure remains reusable")
+;; Supplied arguments run once when the partial is constructed, not per call.
+mut events = []
+fn mark(int n) int { events.append(n) n }
+fn observed(int a, int b) int { events.append(9) a + b }
+def partial = observed(mark(1))
+assert(events == [1], "binding evaluated the argument but not the body")
+assert(partial(mark(2)) == 3, "the final argument reaches the deferred body")
+assert(events == [1, 2, 9], "arguments run once in source order")
+print("CAPTURE-OK")
+NY
+}

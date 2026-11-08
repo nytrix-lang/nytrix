@@ -3306,19 +3306,6 @@ fn _send_input_repeat(dict vt, str seq, int count) any {
 mut _scratch_buf = 0
 mut _scratch_cap = 0
 
-fn _get_scratch(int len) any {
-   if _scratch_cap < len + 128 {
-      if _scratch_buf { free(_scratch_buf) }
-      def p = malloc(len + 128)
-      if !p {
-         _scratch_buf, _scratch_cap = 0, 0
-         return 0
-      }
-      _scratch_buf, _scratch_cap = p, len + 128
-   }
-   _scratch_buf + 64
-}
-
 fn _cp_to_str(int cp, list acache) str {
    if cp < 0 || cp > 0x10ffff { return "" }
    if cp < 128 && cp < acache.len { return acache.get(cp, "") }
@@ -3578,170 +3565,12 @@ fn _vterm_overlay_color(dict vt, str key, int fallback) int {
    int(vt.get(key, fallback))
 }
 
-fn _vterm_draw_cursor(dict vt, ptr st, int co, int ro, ptr g, ptr gptr, any cw, any ch, any px, any py, any scroll_frac_r, any gy_reg, any ascent, int glyph_tex) any {
-   if load8(st, OFF_CURSOR_VISIBLE) == 0 { return 0 }
-   if _vterm_selection_visible(vt, st) { return 0 }
-   _vterm_clamp_cursor(vt, st, co, ro)
-   mut ccx, ccy = load32(st, OFF_CX), load32(st, OFF_CY)
-   if ccx >= co { ccx = co - 1 }
-   if ccy >= ro { ccy = ro - 1 } elif ccy < 0 { ccy = 0 }
-   def cs_raw = load8(st, OFF_CURSOR_STYLE_S)
-   def cursor_style = (cs_raw > 0) ? cs_raw : vt.get("cursor_style", 2)
-   def do_blink = vt.get("cursor_blink_enabled", true)
-   def now_t = ticks()
-   def recent_key = (now_t - max(load64(st, OFF_LAST_KEY_T), load64(st, OFF_LAST_CHAR_T))) < CURSOR_RECENT_KEY_NS
-   def visible = recent_key || !do_blink || (int(now_t / CURSOR_BLINK_NS) % 2 == 0)
-   if !visible { return 0 }
-   def rx, ry = floor(float(ccx) * cw + px + 0.5), floor((float(ccy) + scroll_frac_r) * ch + py + 0.5)
-   def cur_bg, cur_fg = _vterm_cursor_color(vt, "cursor_bg", 0xffffffff), _vterm_cursor_color(vt, "cursor_fg", 0xff000000)
-   def c_off = (ccy * co + ccx) * 16
-   def c_md = load32(g, c_off + 12)
-   def cur_cw = ((c_md & ATTR_WIDE) != 0) ? (cw * 2.0) : cw
-   texture_bind_default()
-   if cursor_style == 3 {
-      def uh = max(2.0, floor(ch * 0.12 + 0.5))
-      draw_rect_fast(rx, ry + ch - uh, cur_cw, uh, cur_bg)
-   } elif cursor_style == 2 {
-      def bw = max(2.0, floor(cw * 0.12 + 0.5))
-      draw_rect_fast(rx, ry, bw, ch, cur_bg)
-   } else {
-      draw_rect_fast(rx, ry, cur_cw, ch, cur_bg)
-   }
-   def c_cp = load32(g, c_off)
-   if c_cp > 32 && cursor_style != 2 {
-      if glyph_tex >= 0 { texture_bind(glyph_tex) }
-      def by = floor(ry + gy_reg + ascent + 0.5)
-      draw_text_glyph_fast(gptr, rx, by, c_cp, cur_fg)
-   }
-}
-
 fn _vterm_draw_line_ptr(ptr g, list history, int hist_len, int co, int abs_r) ptr {
    if abs_r < hist_len { return history.get(abs_r) }
    g + ((abs_r - hist_len) * co * 16)
 }
 
-@jit
-fn _vterm_draw_background_line_ptr(ptr line_ptr, int co, f64 px, f64 ry, f64 cw, f64 ch, int db, int reverse_mask) any {
-   mut c = 0
-   while c < co {
-      def off = c * 16
-      def md = load32(line_ptr, off + 12)
-      mut rbg = (md & reverse_mask) ? (load32(line_ptr, off + 4) | 0xFF000000) : load32(line_ptr, off + 8)
-      if rbg != db && rbg != 0 && (rbg & 0xFF000000) != 0 {
-         mut run_len = 1
-         while c + run_len < co {
-            def off2 = (c + run_len) * 16
-            def md2 = load32(line_ptr, off2 + 12)
-            def rbg2 = (md2 & reverse_mask) ? (load32(line_ptr, off2 + 4) | 0xFF000000) : load32(line_ptr, off2 + 8)
-            if rbg2 == db || rbg2 != rbg { break }
-            run_len += 1
-         }
-         draw_rect_fast(px + float(c) * cw, ry, cw * float(run_len), ch, rbg)
-         c += run_len
-      } else {
-         c += 1
-      }
-   }
-   0
-}
-
-fn _vterm_draw_backgrounds(dict vt, ptr st, int co, int ro, ptr g, list history, int hist_len, int scroll_off, any scroll_frac_r, any cw, any ch, any wh, any px, any db) any {
-   mut r = -1
-   while r <= ro {
-      def abs_r = (hist_len - scroll_off) + r
-      if abs_r < 0 || abs_r >= hist_len + ro { r += 1 continue }
-      def line_ptr = _vterm_draw_line_ptr(g, history, hist_len, co, abs_r)
-      def ry = (float(r) + scroll_frac_r) * ch + _py
-      if ry + ch < _py || ry > _py + wh { r += 1 continue }
-      _vterm_draw_background_line_ptr(line_ptr, co, px, ry, cw, ch, db, ATTR_REVERSE)
-      r += 1
-   }
-}
-
-fn _vterm_draw_selection_overlay(dict vt, ptr st, int co, int ro, ptr g, list history, int hist_len, int scroll_off, any scroll_frac_r, any cw, any ch, any wh, any px, any db) any {
-   if !_vterm_selection_visible(vt, st) { return 0 }
-   def ssx = load32(st, OFF_SEL_SX) def ssy = load32(st, OFF_SEL_SY)
-   def sex = load32(st, OFF_SEL_EX) def sey = load32(st, OFF_SEL_EY)
-   mut s_row, s_col, e_row, e_col = ssy, ssx, sey, sex
-   if s_row > e_row || (s_row == e_row && s_col > e_col) { s_row = sey s_col = sex e_row = ssy e_col = ssx }
-   def sel_bg = _vterm_overlay_color(vt, "sel_bg", 0x70aa5544)
-   texture_bind_default()
-   mut r = -1
-   while r <= ro {
-      def abs_r = (hist_len - scroll_off) + r
-      if abs_r < 0 || abs_r >= hist_len + ro { r += 1 continue }
-      def line_ptr = _vterm_draw_line_ptr(g, history, hist_len, co, abs_r)
-      def ry = (float(r) + scroll_frac_r) * ch + _py
-      if ry + ch < _py || ry > _py + wh { r += 1 continue }
-      mut x1, x2 = 0, -1
-      if abs_r > s_row && abs_r < e_row { x1 = 0 x2 = co - 1 }
-      elif abs_r == s_row && abs_r == e_row { x1 = s_col x2 = e_col }
-      elif abs_r == s_row { x1 = s_col x2 = co - 1 }
-      elif abs_r == e_row { x1 = 0 x2 = e_col }
-      if x2 >= x1 {
-         if x1 < 0 { x1 = 0 } elif x1 >= co { x1 = co - 1 }
-         if x2 < 0 { x2 = 0 } elif x2 >= co { x2 = co - 1 }
-         mut c = x1
-         while c <= x2 {
-            def off = c * 16
-            def md = load32(line_ptr, off + 12)
-            def bg_val = load32(line_ptr, off + 8)
-            def fg_val = load32(line_ptr, off + 4)
-            def base = (md & ATTR_REVERSE) ? (fg_val | 0xff000000) : bg_val
-            def mixed = _blend_abgr_over(sel_bg, (base == 0) ? db : base)
-            mut run_len = 1
-            while c + run_len <= x2 {
-               def off2 = (c + run_len) * 16
-               def md2 = load32(line_ptr, off2 + 12)
-               def bg2 = load32(line_ptr, off2 + 8)
-               def fg2 = load32(line_ptr, off2 + 4)
-               def base2 = (md2 & ATTR_REVERSE) ? (fg2 | 0xff000000) : bg2
-               def mixed2 = _blend_abgr_over(sel_bg, (base2 == 0) ? db : base2)
-               if mixed2 != mixed { break }
-               run_len += 1
-            }
-            draw_rect_fast(px + float(c) * cw, ry, float(run_len) * cw, ch, mixed)
-            c += run_len
-         }
-      }
-      r += 1
-   }
-   0
-}
-
-fn _vterm_draw_foregrounds(dict vt, int co, int ro, ptr g, list history, int hist_len, int scroll_off, any scroll_frac_r, any cw, any ch, any wh, any px, any py, ptr gptr, int f_reg, any gy_reg, any ascent) any {
-   def skip_mask = ATTR_WDUMMY | ATTR_INVIS | ATTR_IMAGE
-   def acache = vt.get("ascii_cache", [])
-   mut r = -1
-   while r <= ro {
-      def abs_r = (hist_len - scroll_off) + r
-      if abs_r < 0 || abs_r >= hist_len + ro { r += 1 continue }
-      def line_ptr = _vterm_draw_line_ptr(g, history, hist_len, co, abs_r)
-      def ry = floor((float(r) + scroll_frac_r) * ch + py + 0.5)
-      if ry + ch < py || ry > py + wh { r += 1 continue }
-      def by = floor(ry + gy_reg + ascent + 0.5)
-      ;; Draw glyphs through the packed atlas path using the font's own metrics.
-      draw_terminal_line_fast_ptr(line_ptr, co, px, by, cw, gptr, skip_mask, ATTR_REVERSE)
-      ;; Fallback only for codepoints that are not in the fast atlas.  Common
-      ;; terminal UTF-8 ranges are primed by _terminal_prime_text(), so this is
-      ;; rare and does not affect btop/htop scroll speed.
-      mut fc = 0
-      while fc < co {
-         def off = fc * 16
-         def cp = load32(line_ptr, off)
-         if cp > 32 {
-            def md = load32(line_ptr, off + 12)
-            if (md & skip_mask) == 0 && !font_fast_glyph_present(gptr, cp) {
-               def fg = ((md & ATTR_REVERSE) != 0) ? (load32(line_ptr, off + 8) | 0xFF000000) : (load32(line_ptr, off + 4) | 0xFF000000)
-               def rx = floor(px + float(fc) * cw + 0.5)
-               draw_text(f_reg, _cp_to_str(cp, acache), rx, ry + gy_reg, fg)
-            }
-         }
-         fc += 1
-      }
-      r += 1
-   }
-}
+mut f64 _scroll_smooth_cache = -1.0
 
 fn draw(dict vt, any ww, any wh) any {
    "Draws draw."
@@ -3755,7 +3584,7 @@ fn draw(dict vt, any ww, any wh) any {
    }
    def co = vt.get("cols") def ro = vt.get("rows") def ptr g = vt.get("grid")
    def fonts = vt.get("fonts")
-   mut f_reg = fonts.get("regular") if !f_reg { f_reg = 0 }
+   mut int f_reg = int(fonts.get("regular", 0))
    f_reg = font_prepare(f_reg, _terminal_prime_text())
    def f_obj = _font_get(f_reg)
    def f_size = (f_obj != 0) ? float(f_obj.get("size", 16.0)) : 16.0
@@ -3777,7 +3606,8 @@ fn draw(dict vt, any ww, any wh) any {
       _scroll_set(st, int(scroll_f_val), hist_len)
    }
    def vis_prev = vt.get("scroll_vis", scroll_f_val)
-   def smooth = _env_float_between("NY_TERM_SCROLL_SMOOTH", 1.0, 0.05, 1.0)
+   if _scroll_smooth_cache < 0.0 { _scroll_smooth_cache = _env_float_between("NY_TERM_SCROLL_SMOOTH", 1.0, 0.05, 1.0) }
+   def smooth = _scroll_smooth_cache
    mut vis = scroll_f_val
    if smooth < 0.999 {
       vis = vis_prev + (scroll_f_val - vis_prev) * smooth

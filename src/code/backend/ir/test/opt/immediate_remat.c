@@ -383,7 +383,7 @@ int main(void) {
   };
   nyr_writer_t machine_asm = {0};
   bool machine_emitted = nyr_x86_64_emit_mach_scalar(
-      &machine_asm, &target, &machine, "immediate_machine_mul", false,
+      &machine_asm, &target, &machine, "immediate_machine_mul", false, false,
       machine_err, sizeof(machine_err));
   nyr_mach_func_free(&machine);
   if (!machine_emitted ||

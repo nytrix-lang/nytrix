@@ -1180,7 +1180,7 @@ int64_t rt_load8_idx(int64_t addr, int64_t idx) {
   uintptr_t p = (uintptr_t)((intptr_t)addr + (intptr_t)idx);
   if (p < 0x1000)
     return 1;
-  if (!hdr && !heap && !rt_addr_readable(p, 1))
+  if (!hdr && !heap && !rt_addr_access_ok(p, 1))
     return 1;
   int64_t val = (((int64_t)*(uint8_t *)p) << 1) | 1;
   return val;
@@ -1220,7 +1220,7 @@ int64_t rt_load16_idx(int64_t addr, int64_t idx) {
   uintptr_t p = (uintptr_t)((intptr_t)addr + (intptr_t)idx);
   if (p < 0x1000)
     return 1;
-  if (!hdr && !heap && !rt_addr_readable(p, 2))
+  if (!hdr && !heap && !rt_addr_access_ok(p, 2))
     return 1;
   uint16_t v = 0;
   if ((p & (uintptr_t)1u) == 0) {
@@ -1248,7 +1248,7 @@ int64_t rt_load32_idx(int64_t addr, int64_t idx) {
   uintptr_t p = (uintptr_t)((intptr_t)addr + (intptr_t)idx);
   if (p < 0x1000)
     return 1;
-  if (!hdr && !heap && !rt_addr_readable(p, 4))
+  if (!hdr && !heap && !rt_addr_access_ok(p, 4))
     return 1;
   uint32_t v = 0;
   if ((p & (uintptr_t)3u) == 0) {
@@ -1310,7 +1310,7 @@ int64_t rt_load64_idx(int64_t addr, int64_t idx) {
   uintptr_t p = (uintptr_t)((intptr_t)addr + (intptr_t)idx);
   if (p < 0x1000)
     return 0;
-  if (!hdr && !heap && !rt_addr_readable(p, 8))
+  if (!hdr && !heap && !rt_addr_access_ok(p, 8))
     return 0;
   if ((p & (uintptr_t)7u) == 0) {
     return *(const int64_t *)p;
@@ -1337,7 +1337,7 @@ int64_t rt_store8_idx(int64_t addr, int64_t idx, int64_t val) {
   uintptr_t p = (uintptr_t)((intptr_t)addr + (intptr_t)idx);
   if (p < 0x1000)
     return val;
-  if (!hdr && !heap && !rt_addr_readable(p, 1))
+  if (!hdr && !heap && !rt_addr_access_ok(p, 1))
     return val;
   int64_t v = (val & 1) ? (val >> 1) : val;
   *(uint8_t *)p = (uint8_t)v;
@@ -1361,7 +1361,7 @@ int64_t rt_store16_idx(int64_t addr, int64_t idx, int64_t val) {
   uintptr_t p = (uintptr_t)((intptr_t)addr + (intptr_t)idx);
   if (p < 0x1000)
     return val;
-  if (!hdr && !heap && !rt_addr_readable(p, 2))
+  if (!hdr && !heap && !rt_addr_access_ok(p, 2))
     return val;
   int64_t v = (val & 1) ? (val >> 1) : val;
   uint16_t raw = (uint16_t)v;
@@ -1390,7 +1390,7 @@ int64_t rt_store32_idx(int64_t addr, int64_t idx, int64_t val) {
   uintptr_t p = (uintptr_t)((intptr_t)addr + (intptr_t)idx);
   if (p < 0x1000)
     return val;
-  if (!hdr && !heap && !rt_addr_readable(p, 4))
+  if (!hdr && !heap && !rt_addr_access_ok(p, 4))
     return val;
   int64_t v = (val & 1) ? (val >> 1) : val;
   uint32_t raw = (uint32_t)v;
@@ -1446,7 +1446,7 @@ int64_t rt_store64_idx(int64_t addr, int64_t idx, int64_t val) {
   uintptr_t p = (uintptr_t)((intptr_t)addr + (intptr_t)idx);
   if (p < 0x1000)
     return val;
-  if (!hdr && !heap && !rt_addr_readable(p, 8))
+  if (!hdr && !heap && !rt_addr_access_ok(p, 8))
     return val;
   int64_t raw = val;
   if (idx == -8 && is_int(raw)) {
@@ -1491,7 +1491,7 @@ static _Atomic int64_t *rt_atomic_i64_slot(int64_t addr, int64_t idx) {
   uintptr_t p = (uintptr_t)((intptr_t)addr + (intptr_t)idx);
   if (p < 0x1000 || (p & (uintptr_t)7u) != 0)
     return NULL;
-  if (!heap && !rt_addr_readable(p, 8))
+  if (!heap && !rt_addr_access_ok(p, 8))
     return NULL;
   return (_Atomic int64_t *)p;
 }

@@ -1,0 +1,124 @@
+shape sound_fallback {
+  family "runtime/execution"
+  generator "embedded"
+  features ["ny", "test", "sound"]
+  template ny-test-case
+  timeout 60
+  flags "--native-only"
+  expect compile_and_run
+  expect_message "SOUND-FALLBACK-OK"
+  source ny <<'NY'
+use core
+use core.mem (cstr)
+use core.os.path as path
+use core.os.sound.res as res
+use core.os.sound.source
+
+#windows {
+   extern "" { fn _putenv(ptr s) i32 as "_putenv" }
+} #else {
+   extern "" { fn setenv(ptr name, ptr value, i32 overwrite) i32 }
+} #endif
+
+mut _env_keep = ""
+
+fn force_env(str key, str value) bool {
+   _env_keep = key + "=" + value
+   #windows { return _putenv(cstr(_env_keep)) == 0 }
+   #else { return setenv(cstr(key), cstr(value), 1) == 0 }
+   #endif
+}
+
+fn pcm(any src) any {
+   src.get(1).get("ptr")
+}
+
+fn write_pcm(str file, int bits, int fmt, int tag, int nbytes, int pattern) bool {
+   def raw = malloc(nbytes)
+   mut i = 0
+   while i < nbytes {
+      store8(raw, (pattern >> (8 * (i % 4))) & 255, i)
+      i += 1
+   }
+   def src = make_memory_source(raw, nbytes, 1, 8000, bits, fmt, tag)
+   write_wav(src, file)
+}
+
+fn expect_pcm(str file, int fmt, int nbytes, int pattern) bool {
+   def loaded = res.load(file)
+   if !is_list(loaded) { return false }
+   if sample_format(loaded) != fmt { return false }
+   def info = sound_info(loaded)
+   if !is_dict(info) || info.get("channels") != 1 || info.get("rate") != 8000 { return false }
+   def p = pcm(loaded)
+   mut i = 0
+   while i < nbytes {
+      if load8(p, i) != ((pattern >> (8 * (i % 4))) & 255) { return false }
+      i += 1
+   }
+   true
+}
+
+assert(force_env("NY_SOUND_DISABLE_LIBSNDFILE", "1"), "disable libsndfile")
+res.init()
+def stamp = to_str(__getpid())
+def dir = temp_dir()
+def s16 = path.join(dir, "ny-snd-s16-" + stamp + ".wav")
+def s24 = path.join(dir, "ny-snd-s24-" + stamp + ".wav")
+def s32 = path.join(dir, "ny-snd-s32-" + stamp + ".wav")
+def f32 = path.join(dir, "ny-snd-f32-" + stamp + ".wav")
+def au = path.join(dir, "ny-snd-au-" + stamp + ".au")
+def ogg = path.join(dir, "ny-snd-ogg-" + stamp + ".ogg")
+assert(write_pcm(s16, 16, SAMPLE_FMT_S16, 1, 2, 0x1234), "write s16 wav")
+assert(write_pcm(s24, 24, SAMPLE_FMT_S24, 1, 3, 0x112233), "write s24 wav")
+assert(write_pcm(s32, 32, SAMPLE_FMT_S32, 1, 4, 0x01020304), "write s32 wav")
+assert(write_pcm(f32, 32, SAMPLE_FMT_F32, 3, 4, 0x3f800000), "write f32 wav")
+assert(expect_pcm(s16, SAMPLE_FMT_S16, 2, 0x1234), "s16 wav fallback")
+assert(expect_pcm(s24, SAMPLE_FMT_S24, 3, 0x112233), "s24 wav fallback")
+assert(expect_pcm(s32, SAMPLE_FMT_S32, 4, 0x01020304), "s32 wav fallback")
+assert(expect_pcm(f32, SAMPLE_FMT_F32, 4, 0x3f800000), "f32 wav fallback")
+
+def au_bytes = bytes(26)
+store8(au_bytes, 46, 0)
+store8(au_bytes, 115, 1)
+store8(au_bytes, 110, 2)
+store8(au_bytes, 100, 3)
+store8(au_bytes, 0, 4)
+store8(au_bytes, 0, 5)
+store8(au_bytes, 0, 6)
+store8(au_bytes, 24, 7)
+store8(au_bytes, 0, 8)
+store8(au_bytes, 0, 9)
+store8(au_bytes, 0, 10)
+store8(au_bytes, 2, 11)
+store8(au_bytes, 0, 12)
+store8(au_bytes, 0, 13)
+store8(au_bytes, 0, 14)
+store8(au_bytes, 3, 15)
+store8(au_bytes, 0, 16)
+store8(au_bytes, 0, 17)
+store8(au_bytes, 31, 18)
+store8(au_bytes, 64, 19)
+store8(au_bytes, 0, 20)
+store8(au_bytes, 0, 21)
+store8(au_bytes, 0, 22)
+store8(au_bytes, 1, 23)
+store8(au_bytes, 0x12, 24)
+store8(au_bytes, 0x34, 25)
+assert(is_ok(file_write(au, au_bytes)), "write au")
+def au_src = res.load(au)
+assert(is_list(au_src) && sample_format(au_src) == SAMPLE_FMT_S16, "au fallback")
+assert(load8(pcm(au_src), 0) == 0x34 && load8(pcm(au_src), 1) == 0x12, "au sample")
+
+assert(is_ok(file_write(ogg, "OggS")), "write ogg")
+assert(res.load(ogg) == 0, "ogg fails closed without libsndfile")
+
+file_remove(s16)
+file_remove(s24)
+file_remove(s32)
+file_remove(f32)
+file_remove(au)
+file_remove(ogg)
+print("SOUND-FALLBACK-OK")
+NY
+}

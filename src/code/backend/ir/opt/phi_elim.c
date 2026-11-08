@@ -27,6 +27,7 @@
 typedef struct {
   size_t insert_at; /* f->data index to insert the store before */
   int slot;         /* local slot written */
+  int vec_addr;     /* 32-byte home of a four-lane i64 PHI, or -1 */
   int value;        /* value stored (defined at the insert point) */
   nyr_scalar_class_t scalar_class;
   nyr_debug_loc_t debug;
@@ -82,6 +83,100 @@ static nyr_scalar_class_t nyr_phi_value_class(const nyr_func_t *f,
   return NYIR_SCALAR_UNKNOWN;
 }
 
+/*
+ * Four-lane i64 values (VEC8_*_I64) are 32 bytes; an 8-byte local slot would
+ * keep only lane 0. Such PHIs are lowered through a 32-byte stack home
+ * instead (VEC8_STORE_I64 on each edge, VEC8_LOAD_I64 in the header).
+ */
+static bool nyr_phi_value_is_vec8_i64(const nyr_func_t *f, int value,
+                                      unsigned depth) {
+  if (!f || value < 0 || value >= f->next_value || depth > 16)
+    return false;
+  for (size_t i = f->len; i > 0; --i) {
+    const nyr_inst_t *def = &f->data[i - 1];
+    if (def->dst != value)
+      continue;
+    switch (def->op) {
+    case NYIR_VEC8_LOAD_I64:
+    case NYIR_VEC8_ADD_I64:
+    case NYIR_VEC8_SUB_I64:
+    case NYIR_VEC8_AND_I64:
+    case NYIR_VEC8_OR_I64:
+    case NYIR_VEC8_XOR_I64:
+    case NYIR_VEC8_SET1_I64:
+    case NYIR_VEC8_SAR_I64:
+    case NYIR_VEC8_SHR_I64:
+      return true;
+    case NYIR_COPY:
+      return nyr_phi_value_is_vec8_i64(f, def->a, depth + 1);
+    case NYIR_PHI:
+      for (size_t k = 0; k < def->phi_incoming_len; ++k)
+        if (def->phi_incoming[k].value != value &&
+            nyr_phi_value_is_vec8_i64(f, def->phi_incoming[k].value,
+                                      depth + 1))
+          return true;
+      return false;
+    default:
+      return false;
+    }
+  }
+  return false;
+}
+
+/*
+ * Give every four-lane i64 PHI a 32-byte ALLOCA home at function entry.
+ * `homes[dst]` receives the home address value; other entries stay -1.
+ */
+static int *nyr_phi_vec8_homes(nyr_func_t *f, bool *ok) {
+  size_t count = 0;
+  for (size_t i = 0; i < f->len; ++i)
+    if (f->data[i].op == NYIR_PHI &&
+        nyr_phi_value_is_vec8_i64(f, f->data[i].dst, 0))
+      ++count;
+  if (!count)
+    return NULL;
+  int *phi_dst = malloc(count * sizeof(*phi_dst));
+  if (!phi_dst) {
+    *ok = false;
+    return NULL;
+  }
+  size_t n = 0;
+  for (size_t i = 0; i < f->len; ++i)
+    if (f->data[i].op == NYIR_PHI &&
+        nyr_phi_value_is_vec8_i64(f, f->data[i].dst, 0))
+      phi_dst[n++] = f->data[i].dst;
+  int value_limit = f->next_value;
+  int *homes = malloc((size_t)value_limit * sizeof(*homes));
+  if (!homes) {
+    free(phi_dst);
+    *ok = false;
+    return NULL;
+  }
+  for (int v = 0; v < value_limit; ++v)
+    homes[v] = -1;
+  for (size_t k = 0; k < count; ++k) {
+    nyr_inst_t home = {.op = NYIR_ALLOCA, .dst = -1, .a = -1, .b = -1,
+                       .c = -1, .d = -1, .e = -1, .f = -1, .imm = 32};
+    size_t before = f->len;
+    int addr = nyr_ir_emit(f, home);
+    if (addr < 0 || f->len != before + 1) {
+      free(phi_dst);
+      free(homes);
+      *ok = false;
+      return NULL;
+    }
+    /*
+     * Move the home allocation to the entry: it must run exactly once.
+     */
+    nyr_inst_t moved = f->data[f->len - 1];
+    memmove(&f->data[1], &f->data[0], (f->len - 1) * sizeof(*f->data));
+    f->data[0] = moved;
+    homes[phi_dst[k]] = addr;
+  }
+  free(phi_dst);
+  return homes;
+}
+
 bool nyr_phi_elim(nyr_func_t *f) {
   if (!f || f->len == 0)
     return true;
@@ -95,6 +190,11 @@ bool nyr_phi_elim(nyr_func_t *f) {
   }
   if (!has_phi)
     return true;
+  bool homes_ok = true;
+  int *vec_homes = nyr_phi_vec8_homes(f, &homes_ok);
+  if (!homes_ok)
+    return false;
+  const int vec_home_limit = f->next_value;
 
   /*
    * Block map: next_label[i] is the index of the next NYIR_LABEL at or
@@ -106,8 +206,10 @@ bool nyr_phi_elim(nyr_func_t *f) {
   size_t *next_label = f->len <= 256
                            ? stk_next_lbl
                            : (size_t *)calloc(f->len + 1, sizeof(*next_label));
-  if (!next_label)
+  if (!next_label) {
+    free(vec_homes);
     return true;
+  }
   next_label[f->len] = f->len;
   for (size_t i = f->len; i-- > 0;)
     next_label[i] = f->data[i].op == NYIR_LABEL ? i : next_label[i + 1];
@@ -145,8 +247,12 @@ bool nyr_phi_elim(nyr_func_t *f) {
         }
       }
     }
-    if (neg_count > 1)
+    if (neg_count > 1) {
+      free(vec_homes);
+      if (next_label != stk_next_lbl)
+        free(next_label);
       return true;
+    }
     if (neg_count == 1 && neg_value >= 0) {
       bool defined_in_entry = false;
       for (size_t j = 0; j < first_label; ++j)
@@ -154,13 +260,18 @@ bool nyr_phi_elim(nyr_func_t *f) {
           defined_in_entry = true;
           break;
         }
-      if (!defined_in_entry)
+      if (!defined_in_entry) {
+        free(vec_homes);
+        if (next_label != stk_next_lbl)
+          free(next_label);
         return true;
+      }
     }
   }
 
   nyr_type_map_t value_types = {0};
   if (!nyr_type_map_init(&value_types, f, nyr_max_local(f))) {
+    free(vec_homes);
     if (next_label != stk_next_lbl)
       free(next_label);
     return true;
@@ -243,8 +354,12 @@ bool nyr_phi_elim(nyr_func_t *f) {
       }
       nyr_scalar_class_t scalar_class =
           nyr_phi_value_class(f, &value_types, value, 0);
+      int vec_addr = vec_homes && in->dst >= 0 && in->dst < vec_home_limit
+                         ? vec_homes[in->dst]
+                         : -1;
       stores[store_count++] = (nyr_phi_store_t){.insert_at = insert_at,
                                                 .slot = slot,
+                                                .vec_addr = vec_addr,
                                                 .value = value,
                                                 .scalar_class = scalar_class,
                                                 .debug = in->debug};
@@ -272,6 +387,22 @@ bool nyr_phi_elim(nyr_func_t *f) {
       }
     }
     free(in->phi_incoming);
+    int vec_addr = vec_homes && dst >= 0 && dst < vec_home_limit
+                       ? vec_homes[dst]
+                       : -1;
+    if (vec_addr >= 0) {
+      *in = (nyr_inst_t){.op = NYIR_VEC8_LOAD_I64,
+                         .dst = dst,
+                         .a = vec_addr,
+                         .b = -1,
+                         .c = -1,
+                         .d = -1,
+                         .e = -1,
+                         .f = -1,
+                         .effects = NYIR_EFFECT_READ_MEMORY,
+                         .debug = debug};
+      continue;
+    }
     *in = (nyr_inst_t){.op = NYIR_LOAD_LOCAL,
                        .dst = dst,
                        .imm = slot,
@@ -305,6 +436,20 @@ bool nyr_phi_elim(nyr_func_t *f) {
       goto done;
     }
     memmove(&f->data[at + 1], &f->data[at], (f->len - at) * sizeof(nyr_inst_t));
+    if (stores[i].vec_addr >= 0) {
+      f->data[at] = (nyr_inst_t){.op = NYIR_VEC8_STORE_I64,
+                                 .dst = -1,
+                                 .a = stores[i].vec_addr,
+                                 .b = stores[i].value,
+                                 .c = -1,
+                                 .d = -1,
+                                 .e = -1,
+                                 .f = -1,
+                                 .effects = NYIR_EFFECT_WRITE_MEMORY,
+                                 .debug = stores[i].debug};
+      ++f->len;
+      continue;
+    }
     f->data[at] = (nyr_inst_t){.op = NYIR_STORE_LOCAL,
                                .dst = -1,
                                .a = stores[i].value,
@@ -322,6 +467,7 @@ bool nyr_phi_elim(nyr_func_t *f) {
 
 done:
   nyr_type_map_free(&value_types);
+  free(vec_homes);
   free(stores);
   if (next_label != stk_next_lbl)
     free(next_label);

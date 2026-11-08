@@ -902,6 +902,166 @@ def _require_program(name: str, *, context: str) -> str:
     raise SystemExit(127)
 
 
+# Live compile log for the build that currently holds the directory lock.
+# Waiters tail this file so a second `./make` shows the compile instead of
+# sitting on a silent "waiting" line.
+_BUILD_LOG_FH = None
+_BUILD_LOCKS_HELD: set[str] = set()
+
+def _build_log_write(text: str) -> None:
+    fh = _BUILD_LOG_FH
+    if not fh or not text:
+        return
+    try:
+        fh.write(text)
+        if not text.endswith("\n"):
+            fh.write("\n")
+        fh.flush()
+    except (OSError, ValueError):
+        pass
+
+def _build_log_open(bdir: Path) -> None:
+    global _BUILD_LOG_FH
+    path = bdir / ".nytrix-cmake-build.log"
+    try:
+        _BUILD_LOG_FH = path.open("w", encoding="utf-8", errors="replace")
+    except OSError:
+        _BUILD_LOG_FH = None
+
+def _build_log_close() -> None:
+    global _BUILD_LOG_FH
+    fh = _BUILD_LOG_FH
+    _BUILD_LOG_FH = None
+    if not fh:
+        return
+    try:
+        fh.close()
+    except OSError:
+        pass
+
+def _process_cmdline(pid: int) -> str:
+    try:
+        raw = Path(f"/proc/{pid}/cmdline").read_bytes()
+    except OSError:
+        return ""
+    return raw.replace(b"\0", b" ").decode("utf-8", "replace").strip()
+
+def _child_pids(pid: int) -> list[int]:
+    try:
+        text = Path(f"/proc/{pid}/task/{pid}/children").read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return []
+    out = []
+    for tok in text.split():
+        try:
+            out.append(int(tok))
+        except ValueError:
+            continue
+    return out
+
+def _compiler_activity(pid: int) -> str:
+    """A live compiler/linker command under pid, for a build that is not logging yet."""
+    stack = _child_pids(pid)
+    seen: set[int] = set()
+    compiler = ""
+    driver = ""
+    while stack and len(seen) < 400:
+        child = stack.pop()
+        if child in seen:
+            continue
+        seen.add(child)
+        stack.extend(_child_pids(child))
+        cmd = _process_cmdline(child)
+        if not cmd:
+            continue
+        base = cmd.split(" ", 1)[0].rsplit("/", 1)[-1]
+        if base in {"cc", "c++", "gcc", "g++", "clang", "clang++", "ld", "ld.lld", "lld"}:
+            compiler = cmd
+        elif base in {"ninja", "cmake"} or base.startswith("c++") or base.startswith("clang"):
+            driver = cmd
+    return compiler or driver
+
+def _flock_holder_pids(path: Path) -> list[int]:
+    if os.name == "nt" or not path.exists():
+        return []
+    try:
+        inode = path.stat().st_ino
+        locks = Path("/proc/locks").read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return []
+    pids: list[int] = []
+    for line in locks.splitlines():
+        parts = line.split()
+        if len(parts) < 6 or parts[1] != "FLOCK" or parts[3] != "WRITE":
+            continue
+        try:
+            if int(parts[5].rsplit(":", 1)[1]) != inode:
+                continue
+            pid = int(parts[4])
+        except (ValueError, IndexError):
+            continue
+        if pid not in pids:
+            pids.append(pid)
+    return pids
+
+def _follow_build_lock(build_lock, bdir: Path) -> None:
+    """Take the build lock, streaming the other build's compile output while we wait."""
+    log_path = bdir / ".nytrix-cmake-build.log"
+    announced = False
+    offset = 0
+    last_activity = ""
+    last_activity_at = 0.0
+    while True:
+        try:
+            fcntl.flock(build_lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return
+        except BlockingIOError:
+            pass
+        holders = [pid for pid in _flock_holder_pids(bdir / ".nytrix-cmake-build.lock")
+                   if pid > 0]
+        if len(holders) == 1 and holders[0] == os.getpid():
+            raise SystemExit(
+                f"make: this process already holds the build lock ({bdir}); "
+                "refusing to wait on itself"
+            )
+        if not announced:
+            if holders:
+                pid = holders[0]
+                cmd = " ".join((_process_cmdline(pid) or "build").split())
+                if len(cmd) > 140:
+                    cmd = cmd[:137] + "..."
+                print(f"{c(UI.theme.accent, UI.mark('step'))} BUILD · waiting for pid {pid} ({cmd})",
+                      file=sys.stderr, flush=True)
+            else:
+                print(f"{c(UI.theme.accent, UI.mark('step'))} BUILD · waiting for the ongoing build in {bdir}",
+                      file=sys.stderr, flush=True)
+            print(f"{c(UI.theme.accent, UI.mark('step'))} BUILD · compile log:",
+                  file=sys.stderr, flush=True)
+            announced = True
+        chunk = ""
+        try:
+            with log_path.open("r", encoding="utf-8", errors="replace") as fh:
+                fh.seek(offset)
+                chunk = fh.read()
+                offset = fh.tell()
+        except OSError:
+            chunk = ""
+        if chunk:
+            for line in chunk.splitlines():
+                if line.strip():
+                    print(color_build_line(line), file=sys.stderr, flush=True)
+            last_activity = ""
+        else:
+            now = time.perf_counter()
+            if holders and now - last_activity_at >= 0.4:
+                last_activity_at = now
+                activity = _compiler_activity(holders[0])
+                if activity and activity != last_activity:
+                    last_activity = activity
+                    shown = activity if len(activity) <= 180 else activity[:177] + "..."
+                    print(color_build_line(shown), file=sys.stderr, flush=True)
+        time.sleep(0.1)
+
 def run(cmd: list[str] | str, *, shell: bool = False, env: dict[str, str] | None = None, quiet: bool = False) -> None:
     merged = os.environ.copy()
     if env:
@@ -919,30 +1079,6 @@ def run(cmd: list[str] | str, *, shell: bool = False, env: dict[str, str] | None
     if COLOR:
         merged.setdefault("FORCE_COLOR", "1")
         merged.setdefault("CLICOLOR_FORCE", "1")
-    if quiet:
-        try:
-            res = subprocess.run(
-                cmd,
-                cwd=str(ROOT),
-                shell=shell,
-                env=merged,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-            )
-        except FileNotFoundError as exc:
-            program = cmd[0] if isinstance(cmd, list) and cmd else str(cmd)
-            err(f"command not found: {program}")
-            raise SystemExit(127) from exc
-        if res.returncode != 0:
-            if res.stdout:
-                sys.stderr.write(res.stdout)
-            raise subprocess.CalledProcessError(res.returncode, cmd)
-        if show_cmd:
-            ok("done in " + _fmt_elapsed(time.perf_counter() - started))
-        return
     try:
         proc = subprocess.Popen(
             cmd,
@@ -961,12 +1097,19 @@ def run(cmd: list[str] | str, *, shell: bool = False, env: dict[str, str] | None
         err(f"command not found: {program}")
         raise SystemExit(127) from exc
     assert proc.stdout is not None
+    captured: list[str] = []
     for line in proc.stdout:
-        print(color_build_line(line.rstrip("\n")), file=sys.stderr, flush=True)
+        _build_log_write(line)
+        if quiet:
+            captured.append(line)
+        else:
+            print(color_build_line(line.rstrip("\n")), file=sys.stderr, flush=True)
     rc = proc.wait()
     if rc != 0:
+        if quiet and captured:
+            sys.stderr.write("".join(captured))
         raise subprocess.CalledProcessError(rc, cmd)
-    if show_cmd:
+    if show_cmd and not quiet:
         ok("done in " + _fmt_elapsed(time.perf_counter() - started))
 
 NINJA_PROGRESS_RE = re.compile(r"^(\s*)\[([^\]]*)\]\s*(.*)$")
@@ -2404,7 +2547,7 @@ def resolve_jobs(requested: int) -> tuple[int, str]:
     if env_jobs.isdigit() and int(env_jobs) > 0:
         v = int(env_jobs)
         return v, f"jobs={v} from NYTRIX_BUILD_JOBS"
-    cpu = os.cpu_count() or 1
+    cpu = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else (os.cpu_count() or 1)
     jobs = max(1, int(cpu * 0.75))
     if cpu >= 2:
         jobs = max(2, jobs)
@@ -2424,8 +2567,8 @@ def resolve_jobs(requested: int) -> tuple[int, str]:
         except Exception:
             pass
     if avail_gib > 0.0:
-        reserve = 8.0
-        per_job = 4.0
+        reserve = 6.0
+        per_job = 2.0
         cap = max(1, int((avail_gib - reserve) / per_job))
         if jobs > cap:
             jobs = cap
@@ -2471,23 +2614,6 @@ def resolve_test_jobs(cli_jobs: int) -> int:
     else:
         auto = min(auto, 2)
     return auto
-
-def resolve_bench_jobs(requested: int = 0) -> int:
-    """Use available CPUs by default, bounded by the live memory budget."""
-    bench_worker_gib = 1.5
-    desired = requested
-    if desired <= 0:
-        env_v = (os.environ.get("NYTRIX_BENCH_JOBS") or "").strip()
-        if env_v.isdigit() and int(env_v) > 0:
-            desired = int(env_v)
-        else:
-            desired = max(1, os.cpu_count() or 1)
-    desired = min(96, max(1, desired))
-    available = host_available_mem_gib()
-    if available > 0.0:
-        memory_cap = max(1, int((available - 8.0) / bench_worker_gib))
-        desired = min(desired, memory_cap)
-    return desired
 
 @dataclass
 class BenchRunAttachment:
@@ -2564,7 +2690,9 @@ def _attach_to_bench_run(handle, metadata_path: Path) -> BenchRunAttachment:
     log_file = None
     log_path = None
     output = getattr(sys.stdout, "buffer", None)
-    print(f"{c(UI.theme.accent, UI.mark('step'))} BENCH · attaching to the active suite output",
+    # Clear start header so the user immediately sees they are attaching
+    # to another bench run (not a fresh run of their own).
+    print(f"{c(UI.theme.accent, UI.mark('warn'))} BENCH · another bench run is active",
           file=sys.stderr, flush=True)
     while True:
         if _bench_lock_try_acquire(handle):
@@ -2578,15 +2706,18 @@ def _attach_to_bench_run(handle, metadata_path: Path) -> BenchRunAttachment:
 
         metadata = _read_bench_run_metadata(metadata_path)
         if metadata and metadata.get("state") == "running":
-            candidate = Path(str(metadata.get("log_path", "")))
-            if candidate.is_file() and candidate != log_path:
-                if log_file:
-                    log_file.close()
-                log_path = candidate
-                log_file = log_path.open("rb")
-                announced_pid = metadata.get("pid")
-                print(f"{c(UI.theme.accent, UI.mark('step'))} BENCH · following run {announced_pid} · {log_path}",
-                      file=sys.stderr, flush=True)
+            pid = metadata.get("pid")
+            if pid and pid != announced_pid:
+                candidate = Path(str(metadata.get("log_path", "")))
+                if candidate.is_file() and candidate != log_path:
+                    if log_file:
+                        log_file.close()
+                    log_path = candidate
+                    log_file = log_path.open("rb")
+                    announced_pid = pid
+                    print(f"{c(UI.theme.accent, UI.mark('step'))} BENCH · "
+                          f"following run {announced_pid} · {log_path}",
+                          file=sys.stderr, flush=True)
 
         if log_file:
             chunk = log_file.read(65536)
@@ -2969,6 +3100,35 @@ def cmake_build(
     bdir = cmake_build_dir(build_root, kind)
     bdir.mkdir(parents=True, exist_ok=True)
     lock_path = bdir / ".nytrix-cmake-build.lock"
+    lock_key = str(bdir.resolve())
+    if lock_key in _BUILD_LOCKS_HELD:
+        bdir = cmake_configure(build_root, kind)
+        windows_stop_locked_build_targets(bdir, targets)
+        boot_step(f"build {kind}: {', '.join(targets)}")
+        level = make_verbose_level()
+        if level >= 2:
+            show_build_introspection(build_root, kind, jobs)
+        build_cmd = ["cmake", "--build", str(bdir)]
+        if targets:
+            build_cmd.extend(["--target", *targets])
+        build_cmd.extend(["-j", str(max(1, jobs))])
+        if level >= 4:
+            build_cmd.append("-v")
+        build_env = {"NINJA_STATUS": "[%f/%t %es %r] "} if level >= 3 else None
+        _BUILD_COUNTERS.update(objects=0, links=0, generate=0)
+        started = time.perf_counter()
+        run(build_cmd, quiet=QUIET_BOOTSTRAP, env=build_env)
+        if snapshot_tools:
+            for tool, snapshot in snapshot_tools.items():
+                shutil.copy2(resolve_tool_bin(build_root, kind, tool), snapshot)
+        if snapshot_files:
+            for source, snapshot in snapshot_files.items():
+                if source.is_file():
+                    shutil.copy2(source, snapshot)
+        if level >= 3:
+            build_counters_summary(time.perf_counter() - started)
+        boot_ok(f"build {kind}: {', '.join(targets)} complete")
+        return bdir
     with lock_path.open("a+b") as build_lock:
         if os.name == "nt":
             build_lock.seek(0, os.SEEK_END)
@@ -2983,12 +3143,9 @@ def cmake_build(
                 except OSError:
                     time.sleep(0.1)
         else:
-            try:
-                fcntl.flock(build_lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError:
-                print(f"{c(UI.theme.accent, UI.mark('step'))} BUILD · waiting for the ongoing build in {bdir}",
-                      file=sys.stderr, flush=True)
-                fcntl.flock(build_lock.fileno(), fcntl.LOCK_EX)
+            _follow_build_lock(build_lock, bdir)
+        _BUILD_LOCKS_HELD.add(lock_key)
+        _build_log_open(bdir)
         try:
             bdir = cmake_configure(build_root, kind)
             windows_stop_locked_build_targets(bdir, targets)
@@ -3021,6 +3178,8 @@ def cmake_build(
             boot_ok(f"build {kind}: {', '.join(targets)} complete")
             return bdir
         finally:
+            _build_log_close()
+            _BUILD_LOCKS_HELD.discard(lock_key)
             if os.name == "nt":
                 build_lock.seek(0)
                 msvcrt.locking(build_lock.fileno(), msvcrt.LK_UNLCK, 1)
@@ -5412,6 +5571,9 @@ def _run_test_impl(build_root: Path, kind: str, jobs: int, extra: list[str]) -> 
     # configured worker count so a slow early fixture does not serialize the
     # whole suite.
     test_jobs = resolve_test_jobs(jobs)
+    # Test execution is memory-bound; compiling the test tools is not.  Keep
+    # the two budgets separate so a rebuild can use the build-job allowance.
+    build_jobs, _ = resolve_jobs(jobs)
     cold = (os.environ.get("NYTRIX_TEST_COLD") or "").strip().lower() in ("1", "true", "yes", "on")
     pattern_run = any(
         arg == "--pattern" or arg.startswith("--pattern=") for arg in extra
@@ -5489,7 +5651,7 @@ def _run_test_impl(build_root: Path, kind: str, jobs: int, extra: list[str]) -> 
         )
     step("build test tools and core library")
     targets = ["ny", "ny-full", "ny-test", "core"]
-    cmake_build(build_root, kind, targets, test_jobs)
+    cmake_build(build_root, kind, targets, build_jobs)
     ny_bin = resolve_tool_bin(build_root, kind, "ny")
     std_bundle = cmake_build_dir(build_root, kind) / "core.ny"
     std_bundle_path = str(std_bundle.resolve()) if std_bundle.is_file() else None
@@ -5552,7 +5714,7 @@ def _run_test_impl(build_root: Path, kind: str, jobs: int, extra: list[str]) -> 
         step("build backend scaling driver")
         scaling_build = subprocess.run(
             ["cmake", "--build", str(cmake_build_dir(build_root, kind)), "--target",
-             "ny-backend-scaling-test", "--parallel", str(test_jobs)],
+             "ny-backend-scaling-test", "--parallel", str(build_jobs)],
             cwd=str(ROOT),
         )
         if scaling_build.returncode != 0:
@@ -5602,7 +5764,7 @@ def _run_test_impl(build_root: Path, kind: str, jobs: int, extra: list[str]) -> 
         os.environ["NYTRIX_CORE_BC_COMPILER"] = str(suite_full_bin.resolve())
         try:
             cmake_build(
-                build_root, kind, ["core_bc"], test_jobs,
+                build_root, kind, ["core_bc"], build_jobs,
                 snapshot_files={
                     std_bundle: suite_core_ny,
                     std_bc: suite_core_bc,
@@ -5620,7 +5782,7 @@ def _run_test_impl(build_root: Path, kind: str, jobs: int, extra: list[str]) -> 
         # Fixture workers and generated-compiler tests must not execute a
         # binary while another make invocation is replacing ny-full.
         cmake_build(
-            build_root, kind, ["ny-full"], test_jobs,
+            build_root, kind, ["ny-full"], build_jobs,
             snapshot_tools={"ny-full": suite_full_bin},
         )
     # The test-only compiler/core build above can refresh the standard bundle
@@ -5628,7 +5790,7 @@ def _run_test_impl(build_root: Path, kind: str, jobs: int, extra: list[str]) -> 
     # launcher/compiler pair after that refresh so their embedded stdlib
     # identities describe the same source tree.
     cmake_build(
-        build_root, kind, ["ny-full", "ny"], test_jobs,
+        build_root, kind, ["ny-full", "ny"], build_jobs,
         snapshot_tools={"ny-full": suite_full_bin},
     )
     if build_shared_std_bc:
@@ -5698,7 +5860,7 @@ def _run_test_impl(build_root: Path, kind: str, jobs: int, extra: list[str]) -> 
             previous_core_bc_compiler = os.environ.get("NYTRIX_CORE_BC_COMPILER")
             os.environ["NYTRIX_CORE_BC_COMPILER"] = str(suite_full_bin.resolve())
             try:
-                cmake_build(build_root, kind, ["core_bc"], test_jobs)
+                cmake_build(build_root, kind, ["core_bc"], build_jobs)
             finally:
                 if previous_core_bc_compiler is None:
                     os.environ.pop("NYTRIX_CORE_BC_COMPILER", None)
@@ -6623,6 +6785,7 @@ def print_static_help() -> None:
     print("  ./make bin-static                   alias for static bin")
     print("  ./make tar                          build build/dist/nytrix-source.tar.gz")
     print("  ./make tar --with-binaries          build runnable build/dist/nytrix-static.tar.gz")
+    print("  ./make tar --bench                  package NYR/LLVM/NYC benchmark evidence")
     print("  ./make static libs [path]           bundle shared libs beside build/release or path")
     print("  ./make static check <binary>        check if ELF binary is static/dynamic")
     print("  ./make static ny <file.ny> [flags]  compile Ny program with static link flags")
@@ -7096,6 +7259,52 @@ def _copytree_replace(src: Path, dst: Path, ignore=None) -> None:
     shutil.copytree(src, dst, ignore=ignore, symlinks=True)
 
 
+def _copytree_hardlink_replace(src: Path, dst: Path, ignore=None) -> None:
+    """Stage a read-only tree with hardlinks, falling back to a copy."""
+    if not src.exists():
+        return
+    if dst.exists():
+        shutil.rmtree(dst, ignore_errors=True)
+
+    def link_file(src_name, dst_name):
+        try:
+            os.link(src_name, dst_name)
+        except OSError:
+            shutil.copy2(src_name, dst_name)
+        return dst_name
+
+    shutil.copytree(
+        src,
+        dst,
+        ignore=ignore,
+        symlinks=True,
+        copy_function=link_file,
+    )
+
+
+def _copytree_hardlink_replace(src: Path, dst: Path, ignore=None) -> None:
+    """Stage a read-only tree with hardlinks, falling back to a copy."""
+    if not src.exists():
+        return
+    if dst.exists():
+        shutil.rmtree(dst, ignore_errors=True)
+
+    def link_file(src_name, dst_name):
+        try:
+            os.link(src_name, dst_name)
+        except OSError:
+            shutil.copy2(src_name, dst_name)
+        return dst_name
+
+    shutil.copytree(
+        src,
+        dst,
+        ignore=ignore,
+        symlinks=True,
+        copy_function=link_file,
+    )
+
+
 def _copytree_replace_preserve_hardlinks(src: Path, dst: Path, ignore=None) -> None:
     """Copy a tree while preserving hardlink groups between regular files."""
     if not src.exists():
@@ -7170,10 +7379,16 @@ def _make_tar_gz_fast(archive_base: Path, root_dir: Path, base_dir: str) -> Path
     tar_path = Path(str(archive_base) + ".tar.gz")
     tar_bin = which("tar")
     if tar_bin and host_os() != "windows":
-        attempts: list[tuple[list[str], dict[str, str] | None]] = [
+        pigz = which("pigz")
+        threads = min(32, max(1, os.cpu_count() or 1))
+        attempts: list[tuple[list[str], dict[str, str] | None]] = []
+        if pigz:
+            attempts.append(([tar_bin, "-C", str(root_dir), "-I",
+                              f"{pigz} -1 -p {threads}", "-cf", str(tar_path), base_dir], None))
+        attempts.extend([
             ([tar_bin, "-C", str(root_dir), "-I", "gzip -1", "-cf", str(tar_path), base_dir], None),
             ([tar_bin, "-C", str(root_dir), "-czf", str(tar_path), base_dir], {"GZIP": "-1"}),
-        ]
+        ])
         last_exc: Exception | None = None
         for cmd, extra_env in attempts:
             try:
@@ -8181,19 +8396,27 @@ def _tar_source_ignore(dir: str, names: list[str]):
     return out
 
 def run_make_tar(build_root: Path, kind: str, jobs: int, args: list[str]) -> int:
+    with_bench = "--bench" in args
     with_binaries = "--with-binaries" in args or _env_flag("NYTRIX_TAR_WITH_BINARIES", False)
     source_only = "--source" in args or "--source-only" in args
     if source_only:
         with_binaries = False
-    args = [a for a in args if a not in ("--with-binaries", "--source", "--source-only")]
+    args = [a for a in args if a not in ("--with-binaries", "--source", "--source-only", "--bench")]
+    if args and args[0] not in ("-h", "--help", "help"):
+        raise SystemExit(f"tar: unsupported arguments: {args}")
 
     if args and args[0] in ("-h", "--help", "help"):
-        print("usage: make tar [--source|--with-binaries]")
+        print("usage: make tar [--source|--with-binaries] [--bench]")
         print()
         print("  Default: creates build/dist/nytrix-source.tar.gz")
         print("    source + docs + compact vendored LLVM/Clang/Z3 build deps")
         print("  --with-binaries: creates build/dist/nytrix-static.tar.gz")
         print("    also includes build/static/ with portable binaries/runtime libs")
+        print("  --bench: runs native/AOT benchmarks and packages NYR/LLVM/NYC asm evidence")
+        print("    Fast default: 1 run, 4 representative ASM fixtures, cached ASM, high parallelism")
+        print("    NYTRIX_TAR_BENCH_RUNS=1, NYTRIX_TAR_BENCH_TIMEOUT=120, NYTRIX_TAR_BENCH_PATTERN=...  ")
+        print("    NYTRIX_TAR_BENCH_JOBS=N, NYTRIX_TAR_ASM_JOBS=N")
+        print("    NYTRIX_TAR_BENCH_ALL_ASM=1 (all fixtures), NYTRIX_TAR_ASM_REFRESH=1")
         print("  Vendor libraries contain no symlinks and preserve hardlink deduplication.")
         print("  NYTRIX_GLIBC_FLOOR=2.38 controls the portability floor for packaged libs.")
         print("  NYTRIX_TAR_WITH_BINARIES=1 makes --with-binaries the default.")
@@ -8205,12 +8428,21 @@ def run_make_tar(build_root: Path, kind: str, jobs: int, args: list[str]) -> int
     shutil.rmtree(package_dir, ignore_errors=True)
     package_dir.mkdir(parents=True, exist_ok=True)
 
-    # Always regenerate vendor: a partially populated/stale vendor directory must
-    # never make tar silently skip dependency discovery.
-    boot_step("tar: refreshing compact vendored build dependencies")
-    rc = run_make_vendor(build_root, kind, jobs, [])
-    if rc != 0:
-        return rc
+    # Reuse complete vendor tree if already present to avoid gigabytes of redundant copies.
+    vendor_dir = build_root / "vendor"
+    vendor_complete = (
+        (vendor_dir / "bin" / "llvm-config").is_file() and
+        (vendor_dir / "include" / "llvm-c").is_dir() and
+        _vendor_lib_dir(build_root).is_dir() and
+        any(_vendor_lib_dir(build_root).glob("lib*"))
+    )
+    if not vendor_complete or _env_flag("NYTRIX_TAR_REFRESH_VENDOR", False):
+        boot_step("tar: refreshing compact vendored build dependencies")
+        rc = run_make_vendor(build_root, kind, jobs, [])
+        if rc != 0:
+            return rc
+    else:
+        boot_step("tar: reusing compact vendored build dependencies")
 
     package_vendor = package_dir / "build" / "vendor"
     _copytree_replace_preserve_hardlinks(build_root / "vendor", package_vendor)
@@ -8227,12 +8459,47 @@ def run_make_tar(build_root: Path, kind: str, jobs: int, args: list[str]) -> int
         _copytree_replace(build_root / "static", package_dir / "build" / "static")
 
     # Source tree. Do not package .git history; it is large and not needed to build.
+    # Hardlink staging avoids copying hundreds of megabytes before tar reads it.
     for name in ("src", "lib", "etc", "docs", ".github", ".githooks"):
-        _copytree_replace(ROOT / name, package_dir / name, ignore=_tar_source_ignore)
+        _copytree_hardlink_replace(ROOT / name, package_dir / name, ignore=_tar_source_ignore)
     for name in (
         "make", "CMakeLists.txt", ".clangd", "README.md", "LICENSE", ".editorconfig"
     ):
         _copy_release_file(ROOT / name, package_dir / name)
+
+    bench_rc = 0
+    if with_bench:
+        boot_step("tar: collecting NYR/LLVM/NYC benchmark evidence")
+        cmake_build(build_root, kind, ["ny", "ny-test", "nyc", "ny-perf"], jobs)
+        ny_perf = resolve_tool_bin(build_root, kind, "ny-perf")
+        ny_bin = resolve_tool_bin(build_root, kind, "ny")
+        ny_test_bin = resolve_tool_bin(build_root, kind, "ny-test")
+        nyc_bin = resolve_tool_bin(build_root, kind, "nyc")
+        command = [ny_perf, "bench",
+                   "--root", str(ROOT),
+                   "--out", str(package_dir / "build" / "bench-evidence"),
+                   "--ny", ny_bin,
+                   "--ny-test", ny_test_bin,
+                   "--nyc", nyc_bin,
+                   "--runs", os.environ.get("NYTRIX_TAR_BENCH_RUNS", "1"),
+                   "--timeout", os.environ.get("NYTRIX_TAR_BENCH_TIMEOUT", "120")]
+        if os.environ.get("NYTRIX_TAR_BENCH_PATTERN"):
+            command.extend(["--pattern", os.environ["NYTRIX_TAR_BENCH_PATTERN"]])
+        # Use available parallelism for benchmarks and ASM
+        cpu_count = os.cpu_count() or 1
+        effective_jobs = jobs if jobs > 0 else cpu_count
+        default_bench_jobs = max(4, min(effective_jobs, 32))
+        bench_jobs = int(os.environ.get("NYTRIX_TAR_BENCH_JOBS", default_bench_jobs))
+        command.extend(['--jobs', str(bench_jobs)])
+        if _env_flag("NYTRIX_TAR_BENCH_ALL_ASM", False):
+            command.append("--asm-all")
+        default_asm_jobs = max(4, min(effective_jobs, 32))
+        asm_jobs = int(os.environ.get("NYTRIX_TAR_ASM_JOBS", default_asm_jobs))
+        command.extend(["--asm-jobs", str(asm_jobs)])
+        command.extend(['--asm-cache', str(build_root / 'bench-asm-cache')])
+        if _env_flag('NYTRIX_TAR_ASM_REFRESH', False):
+            command.append('--asm-refresh')
+        bench_rc = subprocess.run(command, cwd=str(ROOT), env=_vendor_env(build_root)).returncode
 
     # Fail closed if the vendor subtree contains any symbolic links.
     vendor_links = [p for p in package_vendor.rglob("*") if p.is_symlink()]
@@ -8244,8 +8511,14 @@ def run_make_tar(build_root: Path, kind: str, jobs: int, args: list[str]) -> int
 
     archive_base = dist_dir / package_name
     tar_path = _make_tar_gz_fast(archive_base, dist_dir, package_name)
-    ok(f"tar ready: {_rel_or_abs(tar_path)}")
-    return 0
+    size_mb = (tar_path.stat().st_size / (1024 * 1024)) if tar_path.is_file() else 0.0
+    ok(f"tar ready: {_rel_or_abs(tar_path)} ({size_mb:.1f} MiB)")
+    if with_bench:
+        if bench_rc == 0:
+            ok("tar: benchmark evidence packaged successfully")
+        else:
+            err("tar: benchmark failures recorded in build/bench-evidence; archive was created")
+    return bench_rc
 
 def main() -> int:
     global COLOR, QUIET_BOOTSTRAP
@@ -8802,6 +9075,18 @@ def main() -> int:
             if isinstance(bench_run_lock, BenchRunAttachment):
                 return bench_run_lock.returncode
             bench_extra = [arg for arg in extra if arg not in ("--no-progress", "--no-build")]
+            # Auto-enable --bench-show-asm on manual targeted benchmark runs unless explicitly disabled
+            if "--list-bench" not in bench_extra:
+                has_target = any(
+                    arg == "--pattern" or arg.startswith("--pattern=") or arg.endswith(".nshape")
+                    for arg in bench_extra
+                )
+                no_asm = any(
+                    arg in ("--no-bench-show-asm", "--bench-no-show-asm", "--no-asm")
+                    for arg in bench_extra
+                )
+                if has_target and not no_asm and "--bench-show-asm" not in bench_extra:
+                    bench_extra.append("--bench-show-asm")
             # Dispatch-specific value flags go first: `--list-bench` treats the
             # following token as an optional root dir, so trailing `--jobs N`
             # used to be consumed as `--jobs/etc/tests/bench`.
@@ -8809,9 +9094,9 @@ def main() -> int:
                 bench_extra = ["--jobs", str(requested_jobs), *bench_extra]
             elif not any(arg == "--jobs" or arg.startswith("--jobs=") or arg == "-j"
                          for arg in bench_extra):
-                # Keep the host busy by default, with resolve_bench_jobs
-                # limiting concurrency to a safe fraction of available RAM.
-                bench_jobs = resolve_bench_jobs()
+                bench_env = (os.environ.get("NYTRIX_BENCH_JOBS") or "").strip()
+                cpu_count = os.cpu_count() or 1
+                bench_jobs = int(bench_env) if bench_env.isdigit() and int(bench_env) > 0 else cpu_count
                 bench_extra = ["--jobs", str(bench_jobs), *bench_extra]
             if not os.environ.get("OMP_NUM_THREADS"):
                 os.environ["OMP_NUM_THREADS"] = "1"

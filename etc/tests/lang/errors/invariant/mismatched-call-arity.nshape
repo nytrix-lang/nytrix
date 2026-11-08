@@ -4,7 +4,7 @@ shape invariant-mismatched-call-arity {
   features ["error", "invariant", "arity", "call", "negative"]
   template ny-compile-fail
   expect compile_fail
-  expect_message "expected fn(int, int)->int, got any"
+  expect_message "missing `b`"
   source ny <<'NY'
 use core
 

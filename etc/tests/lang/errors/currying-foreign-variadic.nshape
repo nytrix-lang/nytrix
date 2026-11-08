@@ -1,0 +1,56 @@
+shape currying_too_many_arguments {
+  family "compiler-errors/type"
+  generator "error"
+  features [error currying arity excess negative]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "too many arguments: expected at most 2, got 3"
+  source ny <<'NY'
+use core
+fn add_pair(int a, int b) int { a + b }
+add_pair(1, 2, 3)
+NY
+}
+
+shape currying_wrong_argument_position {
+  family "compiler-errors/type"
+  generator "error"
+  features [error currying argument-type negative]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "cannot assign string literal to int"
+  source ny <<'NY'
+use core
+fn add_pair(int a, int b) int { a + b }
+add_pair(1, "two")
+NY
+}
+
+shape currying_variadic_not_partial {
+  family "compiler-errors/type"
+  generator "error"
+  features [error currying variadic negative]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "variadic function call: expected at least 2 arguments, got 1"
+  source ny <<'NY'
+use core
+fn collect(int a, int b, ...rest) int { a + b + rest.len }
+def p = collect(1)
+p(2)
+NY
+}
+
+shape currying_extern_not_partial {
+  family "compiler-errors/type"
+  generator "error"
+  features [error currying foreign extern negative]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "expects 2 argument(s), got 1"
+  source ny <<'NY'
+use core
+extern { fn ext_add(int a, int b) int }
+ext_add(1)
+NY
+}

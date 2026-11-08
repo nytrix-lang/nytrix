@@ -3,6 +3,7 @@
  */
 #include "base/debug.h"
 #include "code/backend/object/internal.h"
+#include "code/backend/ir/machine.h"
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -1957,8 +1958,13 @@ static bool nyr_x64_c_bundle_append_data_group(
     if (!match)
       continue;
     if (!data[i].name || !data[i].name[0] || (!data[i].bytes && data[i].len) ||
-        !data[i].len || (data[i].reloc_count && !data[i].relocs)) {
-      nyr_set_error(err, err_len, "C object contains invalid global data");
+        (data[i].len == 0 && data[i].bytes == NULL) ||
+        (data[i].reloc_count && !data[i].relocs)) {
+      nyr_set_error(err, err_len,
+                    "C object invalid global data: name=%s bytes=%p len=%zu relocs=%p rc=%zu sec=%s",
+                    data[i].name ? data[i].name : "(null)", (void *)data[i].bytes,
+                    data[i].len, (void *)data[i].relocs, data[i].reloc_count,
+                    data[i].section ? data[i].section : "(null)");
       return false;
     }
     char reference_name[256];
@@ -2289,6 +2295,8 @@ static bool ny_native_x64_build_mixed_bundle_debug(
       continue;
     char reason[256] = {0};
     nyr_mach_func_t mach = {0};
+    size_t *inst_offsets = NULL;
+    size_t inst_offsets_len = 0;
     bool win_aggregate = target->abi == NY_NATIVE_ABI_WIN64 &&
                          (funcs[i].return_aggregate_size > 0);
     for (size_t pi = 0; !win_aggregate && pi < funcs[i].param_count; ++pi)
@@ -2312,8 +2320,19 @@ static bool ny_native_x64_build_mixed_bundle_debug(
       machine = nyr_x64_mach_append_function_debug(
           code, defs, def_count, relocs, reloc_count, &mach, target, symbol,
           false, bare_syscalls, funcs ? &funcs[i] : NULL, debug_lines,
-          debug_line_count, debug_line_cap, reason, sizeof(reason));
+          debug_line_count, debug_line_cap, reason, sizeof(reason),
+          &inst_offsets, &inst_offsets_len);
+    if (machine) {
+      int mdef = nyr_x64_obj_def_index(defs, *def_count, symbol);
+      if (mdef >= 0)
+        nyr_mach_dump_mixed(&funcs[i], &mach, code->data + defs[mdef].off,
+                            defs[mdef].size, inst_offsets, inst_offsets_len,
+                            name, stderr);
+    }
     nyr_mach_func_free(&mach);
+    free(inst_offsets);
+    inst_offsets = NULL;
+    inst_offsets_len = 0;
     if (machine) {
       ny_native_mach_record(true, symbol, NULL);
       continue;
@@ -2327,21 +2346,33 @@ static bool ny_native_x64_build_mixed_bundle_debug(
      * "unsupported op phi".
      */
     nyr_phi_elim((nyr_func_t *)&funcs[i]);
-    if (!nyr_x64_obj_append_function_debug(
+    if (nyr_x64_obj_append_function_debug(
             code, defs, def_count, relocs, reloc_count, &funcs[i], target,
             symbol, false, bare_syscalls, &funcs[i], debug_lines,
-            debug_line_count, debug_line_cap, fallback_err,
-            sizeof(fallback_err))) {
+            debug_line_count, debug_line_cap, fallback_err, sizeof(fallback_err),
+            &inst_offsets, &inst_offsets_len)) {
+      int fdef = nyr_x64_obj_def_index(defs, *def_count, symbol);
+      if (fdef >= 0) {
+        nyr_mach_set_mixed_note(reason);
+        nyr_mach_dump_mixed(&funcs[i], NULL, code->data + defs[fdef].off,
+                            defs[fdef].size, inst_offsets, inst_offsets_len,
+                            name, stderr);
+        free(inst_offsets);
+        inst_offsets = NULL;
+        inst_offsets_len = 0;
+      }
+    } else {
       if (getenv("NY_DUMP_MACH"))
         fprintf(stderr, "native bundle fallback failed %s: machine=%s nir=%s\n",
                 symbol, reason[0] ? reason : "unsupported",
                 fallback_err[0] ? fallback_err : "unknown");
       nyr_set_error(
           err, err_len,
-          "native function %s: machine form failed: %s; NYIR fallback failed: "
-          "%s",
+          "native function %s: machine form failed: %s; NYIR fallback "
+          "failed: %s",
           symbol, reason[0] ? reason : "unsupported machine shape",
           fallback_err[0] ? fallback_err : "object emission failed");
+      free(inst_offsets);
       return false;
     }
   }
@@ -2369,12 +2400,25 @@ static bool ny_native_x64_build_mixed_bundle_debug(
   if (win_aggregate)
     snprintf(reason, sizeof(reason),
              "Win64 aggregate uses metadata-aware encoder");
+  size_t *inst_offsets = NULL;
+  size_t inst_offsets_len = 0;
   if (machine)
     machine = nyr_x64_mach_append_function_debug(
         code, defs, def_count, relocs, reloc_count, &top_mach, target, entry,
         tag_return, bare_syscalls, rt_main, debug_lines, debug_line_count,
-        debug_line_cap, reason, sizeof(reason));
+        debug_line_cap, reason, sizeof(reason), &inst_offsets,
+        &inst_offsets_len);
+  if (machine) {
+    int mdef = nyr_x64_obj_def_index(defs, *def_count, entry);
+    if (mdef >= 0)
+      nyr_mach_dump_mixed(rt_main, &top_mach, code->data + defs[mdef].off,
+                          defs[mdef].size, inst_offsets, inst_offsets_len,
+                          entry_symbol, stderr);
+  }
   nyr_mach_func_free(&top_mach);
+  free(inst_offsets);
+  inst_offsets = NULL;
+  inst_offsets_len = 0;
   if (machine) {
     ny_native_mach_record(true, entry, NULL);
   } else {
@@ -2383,10 +2427,22 @@ static bool ny_native_x64_build_mixed_bundle_debug(
     ny_native_mach_record(false, entry, reason);
     char fallback_err[256] = {0};
     nyr_phi_elim((nyr_func_t *)rt_main);
-    if (!nyr_x64_obj_append_function_debug(
+    if (nyr_x64_obj_append_function_debug(
             code, defs, def_count, relocs, reloc_count, rt_main, target, entry,
             tag_return, bare_syscalls, rt_main, debug_lines, debug_line_count,
-            debug_line_cap, fallback_err, sizeof(fallback_err))) {
+            debug_line_cap, fallback_err, sizeof(fallback_err), &inst_offsets,
+            &inst_offsets_len)) {
+      int edef = nyr_x64_obj_def_index(defs, *def_count, entry);
+      if (edef >= 0) {
+        nyr_mach_dump_mixed(rt_main, NULL, code->data + defs[edef].off,
+                            defs[edef].size, inst_offsets, inst_offsets_len,
+                            entry_symbol, stderr);
+        free(inst_offsets);
+        inst_offsets = NULL;
+        inst_offsets_len = 0;
+      }
+    } else {
+      free(inst_offsets);
       nyr_set_error(err, err_len,
                     "native function %s: machine form failed: %s; NYIR "
                     "fallback failed: %s",

@@ -776,7 +776,9 @@ static bool run_strength_reduce_preserves_result_facts(void) {
   nyr_func_t f;
   nyr_opt_begin(&f);
   int input = nyr_opt_const(&f, 23);
-  /* A power-of-two factor: MUL 5/9 now stays a MUL for LEA selection. */
+  /*
+   * A power-of-two factor: MUL 5/9 now stays a MUL for LEA selection.
+   */
   int factor = nyr_opt_const(&f, 4);
   int result = nyr_opt_binop(&f, NYIR_MUL_I64, input, factor);
   nyr_opt_ret(&f, result);

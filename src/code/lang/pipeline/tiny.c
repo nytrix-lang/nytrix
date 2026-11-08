@@ -1560,7 +1560,7 @@ static const char *ny_bare_aot_unsupported_inspection(const ny_options *opt) {
   return NULL;
 }
 
-static int __attribute__((unused)) ny_try_bare_aot_command(const ny_options *opt, ny_tick_t t_start) {
+static int ny_try_bare_aot_command(const ny_options *opt, ny_tick_t t_start) {
   if (!opt || opt->runtime_mode != NY_RUNTIME_MODE_BARE ||
       opt->bare_native_fallback)
     return -1;
@@ -1698,10 +1698,10 @@ static char *ny_read_stdin_all(void) {
   return buf;
 }
 
-static bool ny_repl_batch_can_fast_run(const char *src) {
+static bool ny_repl_batch_can_fast_run(const char *src, bool explicit_repl) {
   if (!src)
     return false;
-  if (!ny_env_enabled("NYTRIX_REPL_FAST_PIPE"))
+  if (!explicit_repl && !ny_env_enabled("NYTRIX_REPL_FAST_PIPE"))
     return false;
   const char *p = src;
   while (*p) {

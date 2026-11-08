@@ -251,14 +251,6 @@ fn _material_roughness(any raw, any rec) f64 {
    is_dict(pbr) ? clamp(float(pbr.get("roughnessFactor", _material_word_factor(rec, 8, 1.0))), 0.0, 1.0) : _material_word_factor(rec, 8, 1.0)
 }
 
-fn _alpha_mode_code(str mode) int {
-   case mode {
-      "MASK" -> { return 1 }
-      "BLEND" -> { return 2 }
-      _ -> { return 0 }
-   }
-}
-
 fn _alpha_mode_from_code(int code) str {
    case code {
       1 -> { return "MASK" }
@@ -807,7 +799,7 @@ fn draw_body(any state) dict {
    "Draws the inspector body and returns updated state plus an optional action."
    mut st = is_dict(state) ? state : dict(0)
    st["action"] = ""
-   def scene_name = to_str(st.get("scene_name", ""))
+   def scene_name = st.get("scene_name", "") ? to_str(st.get("scene_name", "")) : ""
    def rs = st.get("renderer", dict(0))
    gui.text_colored((scene_name.len > 0 ? scene_name : "No scene") +
       "  Parts " + to_str(_intv(st.get("part_count", 0))) +

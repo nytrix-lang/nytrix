@@ -178,6 +178,8 @@ typedef enum {
   NYIR_VEC8_SET1_I64,
   /* Four arithmetic i64 shifts by the immediate count (0..63), AVX2. */
   NYIR_VEC8_SAR_I64,
+  /* Four logical i64 shifts right by the immediate count (0..63), AVX2. */
+  NYIR_VEC8_SHR_I64,
   NYIR_OP_COUNT,
 } nyr_op_t;
 
@@ -838,6 +840,7 @@ bool nyr_strength_reduce(nyr_func_t *f);
 bool nyr_dead_store_elim(nyr_func_t *f);
 bool nyr_redundant_load_elim(nyr_func_t *f);
 bool nyr_licm(nyr_func_t *f);
+bool nyr_licm_post_vectorize(nyr_func_t *f);
 bool nyr_jump_thread(nyr_func_t *f);
 /** Optimize `f` at O0--O3. `stats` may be NULL; when supplied it receives
  * before/after counts and per-pass timings. O2+ preserve SSA PHIs until

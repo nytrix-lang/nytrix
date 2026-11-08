@@ -256,6 +256,14 @@ static bool cse_is_foldable(const nyr_inst_t *in) {
     return (in->flags & NYIR_INST_F_EFFECTS_KNOWN) != 0 &&
            (nyr_effective_effects(in) & ~safe_effects) == 0;
   }
+  /*
+   * A class-refining pointer copy (`mov v [abi=ptr]` of a typed buffer) is
+   * emitted once per access. Identical refinements of the same source are
+   * the same value; merging them lets copy propagation collapse the rest and
+   * keeps one base pointer live instead of one per access.
+   */
+  if (in->op == NYIR_COPY)
+    return in->scalar_class == NYIR_SCALAR_POINTER;
   switch (in->op) {
   case NYIR_LOAD_LOCAL:
   case NYIR_ADD_I64:

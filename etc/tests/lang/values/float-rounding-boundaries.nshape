@@ -1,0 +1,34 @@
+shape float_rounding_boundaries {
+  family "runtime/values"
+  generator "program"
+  features ["runtime", "float", "rounding", "regression"]
+  template ny-test-case
+  flags_matrix "--color=never; --native-only --color=never; -O3 --color=never; --native-only -O3 --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.math as math
+use core.math.float as flt
+
+fn identity(any v) any { v }
+
+assert(flt.floor(-1.2) == -2, "floor negative")
+assert(flt.ceil(-1.2) == -1, "ceil negative")
+assert(flt.floor(1.2) == 1, "floor positive")
+assert(flt.ceil(1.2) == 2, "ceil positive")
+assert(flt.floor(9) == 9 && flt.ceil(-9) == -9, "integer fast path")
+assert(flt.round(0.49999999999999994) == 0, "round below positive half")
+assert(flt.round(-0.49999999999999994) == 0, "round above negative half")
+assert(flt.round(0.5) == 1 && flt.round(-0.5) == -1, "round ties away")
+assert(flt.round(1.5) == 2 && flt.round(-1.5) == -2, "round midpoint")
+assert(flt.round(1.4999999999999998) == 1, "round below 1.5")
+assert(flt.int(-2.9) == -2 && flt.trunc(2.9) == 2, "trunc toward zero")
+assert(math.floor(-1.2) == flt.floor(-1.2), "modules floor agree")
+assert(math.ceil(-1.2) == flt.ceil(-1.2), "modules ceil agree")
+assert(math.round(-1.5) == flt.round(-1.5), "modules round agree")
+assert(__flt_floor(identity(1.2)) == 1, "runtime floor tagged result")
+assert(__flt_ceil(identity(-1.2)) == -1, "runtime ceil tagged result")
+assert(__flt_round(identity(-0.5)) == -1, "runtime round tagged result")
+print("ok float-rounding-boundaries")
+NY
+}

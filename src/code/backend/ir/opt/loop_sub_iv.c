@@ -56,7 +56,9 @@ static bool lsi_plain_i64(const nyr_inst_t *in) {
           in->scalar_class == NYIR_SCALAR_UNKNOWN);
 }
 
-/* Insert `in` at index `at`, shifting the rest of the function down. */
+/*
+ * Insert `in` at index `at`, shifting the rest of the function down.
+ */
 static bool lsi_insert(nyr_func_t *f, size_t at, nyr_inst_t in) {
   if (!nir_ensure_inst_space(f, 1))
     return false;
@@ -81,7 +83,9 @@ static nyr_inst_t lsi_inst(nyr_op_t op, int dst, int a, int b,
                       .debug = debug};
 }
 
-/* Index just before the block's terminator (BR/BR_IF/RET), or its end. */
+/*
+ * Index just before the block's terminator (BR/BR_IF/RET), or its end.
+ */
 static size_t lsi_before_terminator(const nyr_func_t *f, const nyr_cfg_t *cfg,
                                     size_t block) {
   size_t end = cfg->block_end[block];
@@ -120,7 +124,9 @@ static int lsi_rewrite_once(nyr_func_t *f) {
       if (!nyr_cfg_natural_loop_blocks(&cfg, latch, header, member,
                                        cfg.block_count))
         continue;
-      /* Exactly one predecessor outside the loop: the preheader. */
+      /*
+       * Exactly one predecessor outside the loop: the preheader.
+       */
       size_t pre = SIZE_MAX, outside = 0;
       for (size_t k = cfg.pred_offsets[header];
            k < cfg.pred_offsets[header + 1]; ++k)
@@ -137,7 +143,9 @@ static int lsi_rewrite_once(nyr_func_t *f) {
         continue;
       int64_t pre_label = cfg.block_label[pre];
       int64_t latch_label = cfg.block_label[latch];
-      /* Candidate IVs: header PHIs with a +c step. */
+      /*
+       * Candidate IVs: header PHIs with a +c step.
+       */
       for (size_t pi = cfg.block_start[header];
            pi < cfg.block_end[header] && !result; ++pi) {
         const nyr_inst_t *phi = &f->data[pi];
@@ -168,7 +176,9 @@ static int lsi_rewrite_once(nyr_func_t *f) {
               (lsi_root(f, defs, step_in->b) == iv &&
                lsi_const(f, defs, step_in->a, &step))))
           continue;
-        /* A loop-body t = inv - iv with inv available in the preheader. */
+        /*
+         * A loop-body t = inv - iv with inv available in the preheader.
+         */
         for (size_t ti = 0; ti < f->len && !result; ++ti) {
           const nyr_inst_t *t = &f->data[ti];
           if (t->op != NYIR_SUB_I64 || !lsi_plain_i64(t) ||
@@ -221,8 +231,10 @@ static int lsi_rewrite_once(nyr_func_t *f) {
                               .debug = debug};
           nyr_inst_t c_in = lsi_inst(NYIR_CONST_I64, cst, -1, -1, cls, debug);
           c_in.imm = step;
-          /* t's uses move to q below; drop its definition so it cannot match
-           * again (index ti precedes no insertion that runs before this). */
+          /*
+           * t's uses move to q below; drop its definition so it cannot match
+           * again (index ti precedes no insertion that runs before this).
+           */
           nyr_inst_discard(&f->data[ti]);
           f->data[ti] = (nyr_inst_t){.op = NYIR_NOP,
                                      .dst = -1,
@@ -232,7 +244,9 @@ static int lsi_rewrite_once(nyr_func_t *f) {
                                      .d = -1,
                                      .e = -1,
                                      .f = -1};
-          /* Highest index first so earlier positions stay valid. */
+          /*
+           * Highest index first so earlier positions stay valid.
+           */
           if (!lsi_insert(f, latch_at,
                           lsi_inst(NYIR_SUB_I64, qn, q, cst, cls, debug)) ||
               !lsi_insert(f, latch_at, c_in) ||

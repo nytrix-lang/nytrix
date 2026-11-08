@@ -53,7 +53,10 @@ typedef struct {
   bool *member;  /* blocks of M */
   uint8_t *cls;  /* per value: OV_U / OV_V */
   int *smap;     /* scalar clone of value */
-  int *vmap;     /* vector clone of value */
+  int *vmap;     /* vector clone of value (lanes 0-3) */
+  int *vmap2;    /* second register of an interleaved value (lanes 4-7) */
+  int il;        /* interleave: 1 or 2 four-lane registers per value */
+  int half;      /* register half being emitted (0 or 1) */
   int *bcast;    /* hoisted broadcast of an outside-M value */
   int *uvmap;    /* vector shadow of a lane-uniform in-loop value */
   bool *need_uv; /* uniform in-loop values that vector code consumes */
@@ -73,6 +76,7 @@ static void ov_free(ov_ctx_t *c) {
   free(c->cls);
   free(c->smap);
   free(c->vmap);
+  free(c->vmap2);
   free(c->bcast);
   free(c->uvmap);
   free(c->need_uv);
@@ -632,7 +636,7 @@ static int ov_vec(ov_ctx_t *c, int v) {
   if (v < 0)
     return -1;
   if (v < c->value_cap && c->cls[v] == OV_V)
-    return c->vmap[v];
+    return c->half ? c->vmap2[v] : c->vmap[v];
   /*
    * Uniform: shadow, hoisted broadcast, or a broadcast at the use.
    */
@@ -671,7 +675,10 @@ typedef struct {
   size_t inst;  /* phi instruction index in f (clone) */
   int value;    /* original phi value */
   bool shadow;  /* vector shadow of a uniform phi */
+  int half;     /* register half of an interleaved vector phi */
 } ov_phi_fix_t;
+
+static int *ov_vm(ov_ctx_t *c, int h) { return h ? c->vmap2 : c->vmap; }
 
 /*
  * Uniform ops that have an exact packed form for a vector shadow.
@@ -752,17 +759,19 @@ static bool ov_transform(ov_ctx_t *c) {
   c->value_cap = orig_values;
   c->smap = malloc((size_t)orig_values * sizeof(int));
   c->vmap = malloc((size_t)orig_values * sizeof(int));
+  c->vmap2 = malloc((size_t)orig_values * sizeof(int));
   c->bcast = malloc((size_t)orig_values * sizeof(int));
   c->uvmap = malloc((size_t)orig_values * sizeof(int));
   c->need_uv = calloc((size_t)orig_values, sizeof(bool));
-  ov_phi_fix_t *fixes = calloc(2 * orig_len + 1, sizeof(*fixes));
-  if (!c->smap || !c->vmap || !c->bcast || !c->uvmap || !c->need_uv ||
-      !fixes) {
+  ov_phi_fix_t *fixes = calloc(3 * orig_len + 1, sizeof(*fixes));
+  if (!c->smap || !c->vmap || !c->vmap2 || !c->bcast || !c->uvmap ||
+      !c->need_uv || !fixes) {
     free(fixes);
     return false;
   }
   for (int v = 0; v < orig_values; ++v)
-    c->smap[v] = c->vmap[v] = c->bcast[v] = c->uvmap[v] = -1;
+    c->smap[v] = c->vmap[v] = c->vmap2[v] = c->bcast[v] = c->uvmap[v] = -1;
+  c->half = 0;
   ov_mark_shadows(c);
   size_t nfix = 0;
   int64_t base = nyr_fresh_label(f);
@@ -811,6 +820,7 @@ static bool ov_transform(ov_ctx_t *c) {
       c->bcast[v] = f->next_value++;
   int lanes = f->next_value++;
   int vzero = f->next_value++;
+  int lanes2 = -1;
   free(need_bcast);
 
   /*
@@ -838,6 +848,9 @@ static bool ov_transform(ov_ctx_t *c) {
     nyr_inst_t ld = {.op = NYIR_VEC8_LOAD_I64, .dst = lanes, .a = base_addr,
                      .b = -1, .c = -1, .d = -1, .e = -1, .f = -1};
     nyr_ir_emit(f, ld);
+    if (c->il == 2)
+      lanes2 = ov_vbin(f, NYIR_VEC8_ADD_I64, lanes,
+                       ov_set1(f, ov_const_value(f, OV_LANES)));
     nyr_inst_t z = {.op = NYIR_VEC8_SET1_I64, .dst = vzero,
                     .a = ov_const_value(f, 0), .b = -1, .c = -1, .d = -1,
                     .e = -1, .f = -1};
@@ -852,7 +865,7 @@ static bool ov_transform(ov_ctx_t *c) {
     vp_ok = ok && ov_emit_ctl(f, NYIR_BR, -1,
                               c->label_base + (int64_t)c->header);
   }
-  if (!vp_ok) {
+  if (!vp_ok || (c->il == 2 && lanes2 < 0)) {
     free(fixes);
     return false;
   }
@@ -882,8 +895,11 @@ static bool ov_transform(ov_ctx_t *c) {
         /*
          * ivv = {ivs, ivs+1, ivs+2, ivs+3}
          */
-        ivv = ov_vbin(f, NYIR_VEC8_ADD_I64, ov_set1(f, ivs), lanes);
+        int ivb = ov_set1(f, ivs);
+        ivv = ov_vbin(f, NYIR_VEC8_ADD_I64, ivb, lanes);
         c->vmap[c->iv] = ivv;
+        if (c->il == 2)
+          c->vmap2[c->iv] = ov_vbin(f, NYIR_VEC8_ADD_I64, ivb, lanes2);
         c->smap[c->iv] = ivs;
       }
       if (in.op == NYIR_PHI) {
@@ -917,14 +933,37 @@ static bool ov_transform(ov_ctx_t *c) {
         fixes[nfix].value = in.dst;
         ++nfix;
         size_t rk = 0;
+        bool red = false;
         if (in.dst == c->iv) {
           ivs = dst;
           ivs_phi_at = at;
-        } else if (ov_is_red_phi(c, in.dst, &rk)) {
-          red_phi_at[rk] = at;
+        } else if ((red = ov_is_red_phi(c, in.dst, &rk)) ||
+                   c->cls[in.dst] == OV_V) {
+          if (red)
+            red_phi_at[rk] = at;
           c->vmap[in.dst] = dst;
-        } else if (c->cls[in.dst] == OV_V) {
-          c->vmap[in.dst] = dst;
+          if (c->il == 2) {
+            nyr_phi_incoming_t *inc2 =
+                malloc(in.phi_incoming_len * sizeof(*inc2));
+            if (!inc2) {
+              ok = false;
+              break;
+            }
+            memcpy(inc2, inc, in.phi_incoming_len * sizeof(*inc2));
+            nyr_inst_t phi2 = phi;
+            phi2.phi_incoming = inc2;
+            size_t at2 = f->len;
+            int dst2 = nyr_ir_emit(f, phi2);
+            if (dst2 < 0) {
+              ok = false;
+              break;
+            }
+            c->vmap2[in.dst] = dst2;
+            fixes[nfix].inst = at2;
+            fixes[nfix].value = in.dst;
+            fixes[nfix].half = 1;
+            ++nfix;
+          }
         } else {
           c->smap[in.dst] = dst;
           if (c->need_uv[in.dst]) {
@@ -973,14 +1012,14 @@ static bool ov_transform(ov_ctx_t *c) {
         int bound = ov_s(c, c->bound);
         int c1 = ov_emit(f, NYIR_CMP_I64, ivs, bound, -1, 0, NYIR_CMP_LT);
         int rem = ov_emit(f, NYIR_SUB_I64, bound, ivs, -1, 0, NYIR_CMP_EQ);
-        int three = ov_const_value(f, OV_LANES - 1);
+        int three = ov_const_value(f, OV_LANES * c->il - 1);
         int c2 = ov_emit(f, NYIR_CMP_I64, rem, three, -1, 0, NYIR_CMP_GT);
         c->smap[in.dst] = ov_emit(f, NYIR_AND_I64, c1, c2, -1, 0,
                                   NYIR_CMP_EQ);
         continue;
       }
       if (in.dst >= 0 && root == c->iv_next && in.op == NYIR_ADD_I64) {
-        int four = ov_const_value(f, OV_LANES);
+        int four = ov_const_value(f, OV_LANES * c->il);
         c->smap[in.dst] =
             ov_emit(f, NYIR_ADD_I64, ivs, four, -1, 0, NYIR_CMP_EQ);
         continue;
@@ -990,13 +1029,17 @@ static bool ov_transform(ov_ctx_t *c) {
           in.op == NYIR_ADD_I64) {
         int red = c->red_phi[rk];
         int other = ov_root(c, in.a) == red ? in.b : in.a;
-        c->vmap[in.dst] = ov_vbin(f, NYIR_VEC8_ADD_I64, c->vmap[red],
-                                  ov_vec(c, other));
+        for (c->half = 0; c->half < c->il; ++c->half)
+          ov_vm(c, c->half)[in.dst] =
+              ov_vbin(f, NYIR_VEC8_ADD_I64, ov_vm(c, c->half)[red],
+                      ov_vec(c, other));
+        c->half = 0;
         continue;
       }
       if (in.op == NYIR_COPY) {
         if (in.a >= 0 && in.a < orig_values && c->cls[in.a] == OV_V) {
           c->vmap[in.dst] = c->vmap[in.a];
+          c->vmap2[in.dst] = c->vmap2[in.a];
           if (c->smap[in.a] >= 0)
             c->smap[in.dst] = c->smap[in.a];
         } else {
@@ -1064,8 +1107,34 @@ static bool ov_transform(ov_ctx_t *c) {
       }
       /*
        * Varying arithmetic.
+       *
+       * (x >> 63) & 1 (the sign bit of a signed division bias) is one
+       * logical shift: AVX2 has VPSRLQ but no VPSRAQ.
        */
+      int sign_src = -1;
+      if (in.op == NYIR_AND_I64) {
+        int64_t k = 0, sh = 0;
+        int sv = ov_const(c, in.b, &k) && k == 1   ? in.a
+                 : ov_const(c, in.a, &k) && k == 1 ? in.b
+                                                   : -1;
+        const nyr_inst_t *sd =
+            sv >= 0 && sv < orig_values && c->cls[sv] == OV_V ? ov_def(c, sv)
+                                                              : NULL;
+        if (sd && sd->op == NYIR_SAR_I64 && ov_const(c, sd->b, &sh) &&
+            sh == 63)
+          sign_src = sd->a;
+      }
+      for (c->half = 0; ok && c->half < c->il; ++c->half) {
       int out = -1;
+      if (sign_src >= 0) {
+        out = ov_emit(f, NYIR_VEC8_SHR_I64, ov_vec(c, sign_src), -1, -1, 63,
+                      NYIR_CMP_EQ);
+        if (out < 0)
+          ok = false;
+        else
+          ov_vm(c, c->half)[in.dst] = out;
+        continue;
+      }
       switch (in.op) {
       case NYIR_ADD_I64:
       case NYIR_SUB_I64:
@@ -1123,7 +1192,9 @@ static bool ov_transform(ov_ctx_t *c) {
       if (out < 0)
         ok = false;
       else
-        c->vmap[in.dst] = out;
+        ov_vm(c, c->half)[in.dst] = out;
+      }
+      c->half = 0;
     }
     /*
      * Make fallthrough explicit: the clone order is not the original.
@@ -1172,7 +1243,7 @@ static bool ov_transform(ov_ctx_t *c) {
             phi->phi_incoming[e].predecessor_label == c->vp_label)
           nv = vzero;
         else if (v >= 0 && v < orig_values && c->cls[v] == OV_V)
-          nv = c->vmap[v];
+          nv = ov_vm(c, fixes[k].half)[v];
         else if (v >= 0 && !ov_in_loop(c, v) && v < orig_values &&
                  c->bcast[v] >= 0)
           nv = c->bcast[v];
@@ -1201,9 +1272,13 @@ static bool ov_transform(ov_ctx_t *c) {
   if (!finals)
     return false;
   ok = ov_emit_ctl(f, NYIR_LABEL, -1, c->vx_label);
-  for (size_t k = 0; ok && k < c->red_len; ++k)
+  for (size_t k = 0; ok && k < c->red_len; ++k) {
     finals[k] = ov_emit(f, NYIR_VEC8_REDUCE_ADD_I64, c->red_init[k],
                         c->vmap[c->red_phi[k]], -1, 0, NYIR_CMP_EQ);
+    if (c->il == 2)
+      finals[k] = ov_emit(f, NYIR_VEC8_REDUCE_ADD_I64, finals[k],
+                          c->vmap2[c->red_phi[k]], -1, 0, NYIR_CMP_EQ);
+  }
   ok = ok && ov_emit_ctl(f, NYIR_BR, -1, cfg->block_label[c->header]);
   /*
    * Scalar loop now starts where the vector loop stopped.
@@ -1296,10 +1371,18 @@ static int ov_try(nyr_func_t *f) {
       }
       nyr_func_t *saved = c.f;
       c.f = &work;
+      /*
+       * NYTRIX_OUTER_VEC_INTERLEAVE=2: two independent four-lane registers
+       * per value hide the latency of loop-carried lane recurrences.
+       */
+      const char *il = getenv("NYTRIX_OUTER_VEC_INTERLEAVE");
+      c.il = il && strcmp(il, "2") == 0 ? 2 : 1;
       bool done = ov_transform(&c);
       c.f = saved;
       char err[256] = {0};
       if (done && nyr_ir_verify(&work, err, sizeof(err))) {
+        if (getenv("NYTRIX_TRACE_OUTER_VEC_DUMP"))
+          nyr_dump(stderr, &work, "outer-vectorize-accepted");
         nyr_func_replace(f, &work);
         result = 1;
       } else {
@@ -1314,10 +1397,11 @@ static int ov_try(nyr_func_t *f) {
       }
       free(c.smap);
       free(c.vmap);
+      free(c.vmap2);
       free(c.bcast);
       free(c.uvmap);
       free(c.need_uv);
-      c.smap = c.vmap = c.bcast = c.uvmap = NULL;
+      c.smap = c.vmap = c.vmap2 = c.bcast = c.uvmap = NULL;
       c.need_uv = NULL;
     }
   }
@@ -1327,14 +1411,19 @@ static int ov_try(nyr_func_t *f) {
 
 bool nyr_outer_loop_vectorize(nyr_func_t *f) {
   /*
-   * Opt-in until the vector encoder keeps loop-carried vectors resident;
-   * today the widened loop is correct but slower than scalar code.
+   * On by default. The machine-form route keeps the widened loop's
+   * recurrences and invariants in vector registers; the in-process NYIR route
+   * lowers four-lane PHIs through 32-byte homes (nyr_phi_elim).
+   * NYTRIX_OUTER_VECTORIZE=0 (or off/false) disables the transform.
    */
   const char *on = getenv("NYTRIX_OUTER_VECTORIZE");
-  if (!on || !*on || strcmp(on, "0") == 0)
+  if (on && (strcmp(on, "0") == 0 || strcmp(on, "off") == 0 ||
+             strcmp(on, "false") == 0))
     return true;
   if (!f || f->len == 0 || !nyr_has_loop(f))
     return true;
+  if (getenv("NYTRIX_TRACE_OUTER_VEC_DUMP"))
+    nyr_dump(stderr, f, "outer-vectorize-input");
   for (int n = 0; n < 4; ++n) {
     int r = ov_try(f);
     if (r < 0)

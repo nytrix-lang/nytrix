@@ -29,6 +29,8 @@ Next:
 
 - [Quick reference](quirks.md) for syntax and behavior that commonly surprise
   users.
+- [Currying and partial application](currying.md) for binding leading function
+  arguments and adapting binary callables.
 - [Numbers](numbers.md), [ownership](ownership.md), [effects](effect.md),
   [proofs](proofs.md), and [compile-time programming](comptime.md).
 - [Concurrency](concurrency.md) and [native interfaces](native.md) when your

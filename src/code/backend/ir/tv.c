@@ -203,6 +203,9 @@ static Z3_ast nyr_smt_vector_i64_binop(Z3_context z3, nyr_op_t op, Z3_ast lhs,
     case NYIR_VEC8_SAR_I64:
       value = Z3_mk_bvashr(z3, a, nyr_smt_i64_shift_count(z3, lane_sort, b));
       break;
+    case NYIR_VEC8_SHR_I64:
+      value = Z3_mk_bvlshr(z3, a, nyr_smt_i64_shift_count(z3, lane_sort, b));
+      break;
     default:
       return NULL;
     }
@@ -1501,6 +1504,7 @@ static bool nyr_smt_eval_straightline(Z3_context z3, Z3_sort bv,
       r = nyr_smt_pack_i64_lanes(z3, a, 2);
       break;
     case NYIR_VEC8_SAR_I64:
+    case NYIR_VEC8_SHR_I64:
       r = nyr_smt_vector_i64_binop(
           z3, in->op, a,
           nyr_smt_pack_i64_lanes(z3, Z3_mk_int64(z3, in->imm, bv), 4), 4);
@@ -2113,6 +2117,7 @@ static bool nyr_smt_walk_cfg(Z3_context z3, Z3_sort bv, const nyr_func_t *f,
       r = nyr_smt_pack_i64_lanes(z3, a, 2);
       break;
     case NYIR_VEC8_SAR_I64:
+    case NYIR_VEC8_SHR_I64:
       r = nyr_smt_vector_i64_binop(
           z3, in->op, a,
           nyr_smt_pack_i64_lanes(z3, Z3_mk_int64(z3, in->imm, bv), 4), 4);

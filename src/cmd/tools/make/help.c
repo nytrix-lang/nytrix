@@ -51,11 +51,18 @@ static const MakeHelp commands[] = {
     HELP("bin-static", "./make bin-static", "Alias for ./make static bin.",
          "[Example]\n./make bin-static|Build compiler/tools and bundle runtime "
          "libraries."),
-    HELP("tar", "./make tar [--source | --with-binaries]",
+    HELP("tar", "./make tar [--source | --with-binaries] [--bench]",
          "Create a source or binary release archive.",
          "[Options]\n--source, --source-only|Create a source-only "
-         "archive.\n--with-binaries|Include portable binaries.\n--out "
+         "archive.\n--with-binaries|Include portable binaries.\n--bench|Package "
+         "native benchmark and NYR/LLVM/NYC assembly evidence.\n--out "
          "PATH|Select an output path.\n"
+         "[Benchmark evidence]\nDefault|1 run, 4 representative ASM fixtures, "
+         "cached ASM, high parallelism.\nNYTRIX_TAR_BENCH_RUNS / _TIMEOUT / "
+         "_PATTERN|Control benchmark runs, timeout, and fixture filter.\n"
+         "NYTRIX_TAR_BENCH_JOBS / NYTRIX_TAR_ASM_JOBS|Control worker "
+         "counts.\nNYTRIX_TAR_BENCH_ALL_ASM=1 / NYTRIX_TAR_ASM_REFRESH=1|Assemble "
+         "all fixtures or refresh cached ASM.\n"
          "[Output]\nDefault|build/dist/"
          "nytrix-source.tar.gz.\n--with-binaries|build/dist/"
          "nytrix-static.tar.gz."),

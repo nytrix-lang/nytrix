@@ -384,6 +384,15 @@ const char *codegen_qname(codegen_t *cg, const char *name,
 }
 
 bool ny_emit_module_match(codegen_t *cg, const char *cur_mod) {
+  /*
+   * DEBUG - force output to stderr via write()
+   */
+  {
+    char buf[512];
+    int len = snprintf(buf, sizeof(buf), "[DEBUG] ny_emit_module_match: cg=%p, emit_module='%s', cur_mod='%s'\n",
+             (void*)cg, cg ? cg->emit_module_name : "NULL", cur_mod);
+    write(2, buf, len);
+  }
   if (!cg || !cg->emit_module_name)
     return true;
   if (!cg->emit_module_name[0])
@@ -396,8 +405,23 @@ bool ny_emit_module_match(codegen_t *cg, const char *cur_mod) {
       strcmp(cg->emit_module_name, "lib") != 0)
     return false;
   size_t wanted_len = strlen(cg->emit_module_name);
-  return strncmp(cg->emit_module_name, cur_mod, wanted_len) == 0 &&
-         cur_mod[wanted_len] == '.';
+  if (strncmp(cg->emit_module_name, cur_mod, wanted_len) == 0 &&
+      cur_mod[wanted_len] == '.')
+    return true;
+  /*
+   * When emitting the core library (lib), also allow core.* modules
+   * since they contain the stdlib implementation needed by lib.
+   */
+  if (strcmp(cg->emit_module_name, "lib") == 0 &&
+      strncmp(cur_mod, "core.", 5) == 0)
+    return true;
+  {
+    char buf[512];
+    int len = snprintf(buf, sizeof(buf), "[DEBUG] ny_emit_module_match: emit_module='%s', cur_mod='%s', returning false\n",
+             cg->emit_module_name, cur_mod);
+    write(2, buf, len);
+  }
+  return false;
 }
 
 #include "core/lazy.h"

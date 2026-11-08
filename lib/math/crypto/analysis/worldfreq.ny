@@ -539,15 +539,15 @@ fn _ngram_score_packed(str text, list monograms, list bigrams, list trigrams, li
    mut score = 0
    mut i = 0
    mut count = 0
-   mut p1 = 0
-   mut p2 = 0
-   mut p3 = 0
+   mut int p1 = 0
+   mut int p2 = 0
+   mut int p3 = 0
    while i < text.len {
-      def v = _ascii_alpha_value(load8(text, i))
+      def int v = int(_ascii_alpha_value(load8(text, i)))
       if v >= 0 {
          score += int(monograms[v])
          if count >= 1 {
-            def b = p1 * 26 + v
+            def int b = p1 * 26 + v
             score += int(bigrams[b]) * 2 - 1
             if count >= 2 {
                def t = p2 * 26 + v

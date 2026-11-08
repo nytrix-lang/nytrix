@@ -1007,12 +1007,15 @@ bool nyr_i386_obj_emit_code(nyr_i386_obj_ctx_t *c, const nyr_func_t *nyir,
       break;
     case NYIR_SHL_I64:
     case NYIR_SAR_I64:
+    case NYIR_ROR32_I64:
       if (!ny_i386_obj_load_value_eax(c, in->a) ||
           !ny_i386_obj_load_value_ecx(c, in->b) ||
           !ny_i386_obj_bytes(c,
                              in->op == NYIR_SHL_I64
                                  ? (const unsigned char[]){0xd3, 0xe0}
-                                 : (const unsigned char[]){0xd3, 0xf8},
+                                 : in->op == NYIR_SAR_I64
+                                       ? (const unsigned char[]){0xd3, 0xf8}
+                                       : (const unsigned char[]){0xd3, 0xc8},
                              2) ||
           !ny_i386_obj_store_value_eax(c, in->dst))
         return false;
@@ -2294,7 +2297,8 @@ static bool nyr_x64_obj_append_function_debug_options(
     bool retpoline_indirect_calls, bool retpoline_inline_calls,
     bool bare_syscalls, const nyr_func_t *source,
     nyr_native_debug_line_t **debug_lines, size_t *debug_line_count,
-    size_t *debug_line_cap, char *err, size_t err_len) {
+    size_t *debug_line_cap, char *err, size_t err_len, size_t **inst_offsets_out,
+    size_t *inst_offsets_count) {
   if (!code || !defs || !def_count || !relocs || !reloc_count || !nyir ||
       !target || !symbol_name || !symbol_name[0]) {
     nyr_set_error(err, err_len, "x86-64 object writer: missing function input");
@@ -2364,6 +2368,13 @@ static bool nyr_x64_obj_append_function_debug_options(
       }
     }
   }
+  if (inst_offsets_out)
+    *inst_offsets_out = ctx.inst_offsets;
+  else
+    free(ctx.inst_offsets);
+  ctx.inst_offsets = NULL;
+  if (inst_offsets_count)
+    *inst_offsets_count = nyir ? nyir->len : 0;
   nyr_x64_obj_ctx_free(&ctx);
   return true;
 }
@@ -2374,11 +2385,13 @@ bool nyr_x64_obj_append_function_debug(
     const ny_native_target_info_t *target, const char *symbol_name,
     bool tag_return, bool bare_syscalls, const nyr_func_t *source,
     nyr_native_debug_line_t **debug_lines, size_t *debug_line_count,
-    size_t *debug_line_cap, char *err, size_t err_len) {
+    size_t *debug_line_cap, char *err, size_t err_len,
+    size_t **inst_offsets_out, size_t *inst_offsets_count) {
   return nyr_x64_obj_append_function_debug_options(
       code, defs, def_count, relocs, reloc_count, nyir, target, symbol_name,
       tag_return, false, false, false, false, bare_syscalls, source,
-      debug_lines, debug_line_count, debug_line_cap, err, err_len);
+      debug_lines, debug_line_count, debug_line_cap, err, err_len,
+      inst_offsets_out, inst_offsets_count);
 }
 
 bool nyr_x64_obj_append_function_with_frame(
@@ -2391,7 +2404,8 @@ bool nyr_x64_obj_append_function_with_frame(
   return nyr_x64_obj_append_function_debug_options(
       code, defs, def_count, relocs, reloc_count, nyir, target, symbol_name,
       false, omit_frame_pointer, position_independent, retpoline_indirect_calls,
-      retpoline_inline_calls, false, NULL, NULL, NULL, NULL, err, err_len);
+      retpoline_inline_calls, false, NULL, NULL, NULL, NULL, err, err_len,
+      NULL, NULL);
 }
 
 bool nyr_x64_obj_append_function(nyr_obj_buf_t *code,
@@ -2403,7 +2417,7 @@ bool nyr_x64_obj_append_function(nyr_obj_buf_t *code,
                                  char *err, size_t err_len) {
   return nyr_x64_obj_append_function_debug(
       code, defs, def_count, relocs, reloc_count, nyir, target, symbol_name,
-      tag_return, false, NULL, NULL, NULL, NULL, err, err_len);
+      tag_return, false, NULL, NULL, NULL, NULL, err, err_len, NULL, NULL);
 }
 
 bool nyr_x64_obj_collect_reloc_symbols(const nyr_x64_obj_reloc_t *relocs,
@@ -2949,27 +2963,41 @@ static bool ny_x64_obj_emit_inst(nyr_x64_obj_ctx_t *c, const nyr_inst_t *in) {
     return ny_x64_obj_store_value_rax(c, in->dst);
   }
   case NYIR_SHL_I64:
-  case NYIR_SAR_I64: {
+  case NYIR_SAR_I64:
+  case NYIR_ROR32_I64: {
     int64_t shift_imm = 0;
     bool is_shl = (in->op == NYIR_SHL_I64);
+    bool is_ror32 = (in->op == NYIR_ROR32_I64);
     /*
-     * Try immediate shift count: shl $imm, %rax (0xc1 e0/ f8)
+     * Try immediate count: shl/sar $imm, %rax (0xc1 e0/f8); ror32 masks its
+     * count to five bits and zero-extends the 32-bit result into %rax.
      */
     if (ny_x64_obj_try_const_i64(c, in->b, &shift_imm) && shift_imm >= 1 &&
-        shift_imm <= 63 && ny_x64_obj_load_value_rax(c, in->a)) {
-      unsigned char base = is_shl ? 0xe0 : 0xf8;
-      if (!ny_x64_obj_bytes(c, (const unsigned char[]){0x48, 0xc1, base}, 3) ||
-          !ny_x64_obj_u8(c, (unsigned char)shift_imm))
-        return false;
+        shift_imm <= (is_ror32 ? 31 : 63) &&
+        ny_x64_obj_load_value_rax(c, in->a)) {
+      if (is_ror32) {
+        if (!ny_x64_obj_bytes(c, (const unsigned char[]){0xc1, 0xc8}, 2) ||
+            !ny_x64_obj_u8(c, (unsigned char)shift_imm))
+          return false;
+      } else {
+        unsigned char base = is_shl ? 0xe0 : 0xf8;
+        if (!ny_x64_obj_bytes(c, (const unsigned char[]){0x48, 0xc1, base}, 3) ||
+            !ny_x64_obj_u8(c, (unsigned char)shift_imm))
+          return false;
+      }
       return ny_x64_obj_store_value_rax(c, in->dst);
     }
     /*
-     * Fallback: shift by %rcx
+     * Fallback: variable count through %rcx.  The 32-bit rotate form also
+     * zero-extends %eax into %rax, matching ror32.i64 semantics.
      */
     if (!ny_x64_obj_load_value_rax(c, in->a) ||
         !ny_x64_obj_load_value_rcx(c, in->b))
       return false;
-    if (is_shl) {
+    if (is_ror32) {
+      if (!ny_x64_obj_bytes(c, (const unsigned char[]){0xd3, 0xc8}, 2))
+        return false;
+    } else if (is_shl) {
       if (!ny_x64_obj_bytes(c, (const unsigned char[]){0x48, 0xd3, 0xe0}, 3))
         return false;
     } else if (!ny_x64_obj_bytes(c, (const unsigned char[]){0x48, 0xd3, 0xf8},
@@ -4785,6 +4813,8 @@ static bool ny_x64_obj_immediate_use(const nyr_inst_t *in, int operand,
   case NYIR_SHL_I64:
   case NYIR_SAR_I64:
     return operand == 1 && imm >= 1 && imm <= 63;
+  case NYIR_ROR32_I64:
+    return operand == 1 && imm >= 1 && imm <= 31;
   case NYIR_CMP_I64:
     return operand == 1 ||
            (operand == 0 && (in->cmp == NYIR_CMP_EQ || in->cmp == NYIR_CMP_NE));

@@ -684,19 +684,21 @@ static int nyr_emit_scalar_list_append_fast(nyr_builder_t *b, int list,
 }
 
 /*
- * Native non-dynamic lists store each element in one 8-byte payload word.
- * Expand pop into ordinary NYIR memory and control-flow operations so the
- * operation is independent of a target backend's runtime-symbol table.
+ * Native lists store either one 8-byte payload word per element or 24-byte
+ * descriptor slots once a dynamic append promoted a compact buffer.  Expand
+ * pop into ordinary NYIR memory and control-flow operations so the operation
+ * is independent of a target backend's runtime-symbol table, and take the
+ * element stride from the header instead of assuming the compact layout.
  */
 static int nyr_emit_native_list_pop_raw(nyr_builder_t *b, int list) {
   if (!b || list < 0)
     return -1;
   int zero = nyr_emit_const(b, 0);
   int one = nyr_emit_const(b, 1);
-  int three = nyr_emit_const(b, 3);
+  int neg16 = nyr_emit_const(b, -16);
   int neg24 = nyr_emit_const(b, -24);
   int result_slot = nyr_temp_slot(b);
-  if (zero < 0 || one < 0 || three < 0 || neg24 < 0 || result_slot < 0)
+  if (zero < 0 || one < 0 || neg16 < 0 || neg24 < 0 || result_slot < 0)
     return -1;
 
   int empty_label = b->next_label++;
@@ -717,8 +719,32 @@ static int nyr_emit_native_list_pop_raw(nyr_builder_t *b, int list) {
     return -1;
 
   int index = nyr_push_val(b, NYIR_SUB_I64, count, one, 0, NULL);
+  int elem_addr = neg16 < 0 ? -1 : nyr_emit_add_i64(b, list, neg16);
+  int elem_size = elem_addr < 0 ? -1 : nyr_emit_load_i64(b, elem_addr);
+  /*
+   * Compact buffers use an 8-byte payload stride and promoted dynamic
+   * buffers use 24-byte descriptor slots.  Legacy managed lists share the
+   * 8-byte layout but do not carry a validated element-size word, so only a
+   * literal 24 selects the descriptor stride; every other header word keeps
+   * the historical 8-byte behavior.
+   */
+  int desc_size = nyr_emit_const(b, 24);
+  int stride_gap = nyr_emit_const(b, 16);
+  int compact_stride = nyr_emit_const(b, 8);
+  int is_desc = desc_size < 0 || elem_size < 0
+                    ? -1
+                    : nyr_emit_cmp_i64(b, NYIR_CMP_EQ, elem_size, desc_size);
+  int stride_extra =
+      is_desc < 0 || stride_gap < 0
+          ? -1
+          : nyr_push_val(b, NYIR_MUL_I64, is_desc, stride_gap, 0, NULL);
+  int stride = stride_extra < 0 || compact_stride < 0
+                   ? -1
+                   : nyr_emit_add_i64(b, compact_stride, stride_extra);
   int byte_offset =
-      index < 0 ? -1 : nyr_push_val(b, NYIR_SHL_I64, index, three, 0, NULL);
+      index < 0 || stride < 0
+          ? -1
+          : nyr_push_val(b, NYIR_MUL_I64, index, stride, 0, NULL);
   int slot_addr = byte_offset < 0 ? -1 : nyr_emit_add_i64(b, list, byte_offset);
   int value = slot_addr < 0 ? -1 : nyr_emit_load_i64(b, slot_addr);
   /* Keep the header address live only at its store. The x86 copy-home
@@ -1180,6 +1206,11 @@ static int nyr_lower_int_value(nyr_builder_t *builder,
         (local->is_any ||
          (local->type_name && ny_native_type_name_is_any(local->type_name)))) {
       int value = nyr_lower_expr(builder, value_expr);
+      /* The load already yields a raw word when the slot's producer was raw.
+       * Decoding it again halves odd values and leaves even ones intact. */
+      if (value >= 0 &&
+          nyr_value_scalar_class(builder, value) == NYIR_SCALAR_I64_RAW)
+        return value;
       return value < 0 ? -1
                        : nyr_emit_runtime_call(builder, "rt_any_to_i64", value,
                                                -1, -1, 1, 0);
@@ -1541,7 +1572,6 @@ static expr_t *nyr_proof_global_literal(nyr_builder_t *b, const char *name) {
   return NULL;
 }
 
-
 /*
  * Membership test `R(x)` for a refinement `refine R = Base where (v) { p }`.
  * A refinement of a refinement is an intersection, so R(x) is p[v := x] and
@@ -1583,9 +1613,9 @@ static int nyr_lower_refine_membership(nyr_builder_t *b,
   int base_value = -1;
   bool base_known = false, base_true = true;
   const char *base_name = refine_stmt->as.refine.base_type;
-  const stmt_t *base_stmt =
-      base_name && b->prog ? nyr_find_refine_in_prog(b, b->prog, base_name)
-                           : NULL;
+  const stmt_t *base_stmt = base_name && b->prog
+                                ? nyr_find_refine_in_prog(b, b->prog, base_name)
+                                : NULL;
   if (base_stmt) {
     base_value = nyr_lower_refine_membership(b, base_stmt, arg_expr, depth + 1);
     if (base_value < 0)
@@ -1621,11 +1651,9 @@ static int nyr_lower_refine_membership(nyr_builder_t *b,
   int rhs = nyr_refine_truthy(b, own);
   if (lhs < 0 || rhs < 0)
     return -1;
-  return nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_AND_I64,
-                                            .dst = -1,
-                                            .a = lhs,
-                                            .b = rhs,
-                                            .c = -1});
+  return nyr_ir_emit(
+      &b->nyir,
+      (nyr_inst_t){.op = NYIR_AND_I64, .dst = -1, .a = lhs, .b = rhs, .c = -1});
 }
 
 static int nyr_lower_call(nyr_builder_t *b, const expr_t *e) {
@@ -2923,8 +2951,9 @@ ordinary_call:
       name = entry->name;
       direct_zero_capture_lambda = true;
     }
-  } else if (e->as.call.callee->semantic.resolved &&
-             e->as.call.callee->semantic.rep == NY_SEM_REP_CLOSURE) {
+  } else if (e->as.call.callee->kind == NY_E_CALL ||
+             (e->as.call.callee->semantic.resolved &&
+              e->as.call.callee->semantic.rep == NY_SEM_REP_CLOSURE)) {
     /* A call expression can itself be the callee of another call
      * (`make_adder(10)(5)`).  It is a normal closure value, so let the
      * indirect-call ABI below lower the expression and invoke its result.
@@ -2988,7 +3017,14 @@ ordinary_call:
   char canonical_name[512];
   if (name) {
     const char *name_dot = strchr(name, '.');
-    if (name_dot && name_dot > name) {
+    /*
+     * `core.` is the absolute root namespace, not a module alias.  A global
+     * alias scan can otherwise bind the leaf `core` of an unrelated module
+     * (for example `...block.stream.core`) and prepend that module to an
+     * already-qualified `core.os...` spelling.
+     */
+    bool absolute_core = strncmp(name, "core.", 5) == 0;
+    if (name_dot && name_dot > name && !absolute_core) {
       size_t alias_len = (size_t)(name_dot - name);
       if (alias_len < 256) {
         char alias[256];
@@ -6153,18 +6189,32 @@ ordinary_call:
   }
   if (canon_leaf && !nyr_user_defined_fn(b, name) &&
       strcmp(canon_leaf, "contains") == 0 && e->as.call.args.len == 2 &&
-      (!strchr(name, '.') || nyr_expr_is_set(b, e->as.call.args.data[0].val)) &&
+      (!strchr(name, '.') || nyr_expr_is_set(b, e->as.call.args.data[0].val) ||
+       nyr_expr_is_dict(b, e->as.call.args.data[0].val)) &&
       !e->as.call.args.data[0].name && !e->as.call.args.data[1].name) {
-    int container = nyr_lower_expr(b, e->as.call.args.data[0].val);
-    int item = nyr_lower_expr(b, e->as.call.args.data[1].val);
-    if (item >= 0 && (nyr_expr_is_f64(b, e->as.call.args.data[1].val) ||
-                      nyr_value_is_f64(b, item, 0) ||
-                      nyr_value_scalar_class(b, item) == NYIR_SCALAR_F64)) {
-      int bits = nyr_emit_runtime_call(b, "rt_f64_bits", item, -1, -1, 1, 0);
-      item = bits < 0 ? -1
-                      : nyr_emit_runtime_call(b, "rt_flt_box_val", bits, -1, -1,
-                                              1, 0);
+    /*
+     * Dictionary membership compares against stored keys, which carry the
+     * tagged integer representation.  Route the receiver through the
+     * dictionary bridge with the same key normalization insertion uses so
+     * `d.contains(1)` cannot probe the raw word and match the key for 0.
+     */
+    if (nyr_expr_is_dict(b, e->as.call.args.data[0].val)) {
+      int dict = nyr_lower_expr(b, e->as.call.args.data[0].val);
+      int key = nyr_lower_dict_key(b, e->as.call.args.data[1].val);
+      int has = dict < 0 || key < 0
+                    ? -1
+                    : nyr_emit_runtime_call(
+                          b,
+                          nyr_expr_is_cstr(b, e->as.call.args.data[1].val)
+                              ? "rt_dict_has_str_raw"
+                              : "rt_dict_has_raw",
+                          dict, key, -1, 2, NYIR_SCALAR_I64_RAW);
+      return has < 0 ? -1 : nyr_box_bool(b, has);
     }
+    int container = nyr_lower_expr(b, e->as.call.args.data[0].val);
+    int item = nyr_contains_item(
+        b, e->as.call.args.data[0].val, e->as.call.args.data[1].val,
+        nyr_lower_expr(b, e->as.call.args.data[1].val));
     return container < 0 || item < 0
                ? -1
                : nyr_emit_runtime_call(b, "rt_contains_raw", container, item,
@@ -9759,7 +9809,7 @@ ordinary_call:
        nyr_find_user_function(b, callable_global->as.ident.name));
   bool indirect_callable =
       indirect_lambda || indirect_sequence_get || indirect_sequence_index ||
-      indirect_dictionary_get ||
+      indirect_dictionary_get || e->as.call.callee->kind == NY_E_CALL ||
       (!callee_fn && !nyr_user_defined_fn(b, name) && !known_raw_callable &&
        e->as.call.callee->semantic.rep == NY_SEM_REP_CLOSURE) ||
       (local_lambda && local_lambda->capture_count > 0) ||
@@ -11527,8 +11577,13 @@ ordinary_call:
           nyr_emit_runtime_call(b, "rt_tag", raw_index, -1, -1, 1, 0);
       if (tagged_index < 0)
         return -1;
+      /* The checked accessor returns the canonical dynamic word: a boxed
+       * float object for float slots and a tagged integer for scalar ones.
+       * Stamp that ABI on the producer so a numeric fallback, which types the
+       * source `.get(i, fallback)` spelling as f64, cannot re-enter the float
+       * boxing path and forward the object handle as a double. */
       arg = nyr_emit_runtime_call(b, "rt_tbuf_index_any", raw_base,
-                                  tagged_index, -1, 2, 0);
+                                  tagged_index, -1, 2, NYIR_SCALAR_I64_TAGGED);
       if (arg < 0)
         return -1;
     }
@@ -13929,11 +13984,12 @@ ordinary_call:
       .has_sret = has_sret,
       .aggregate_return_size =
           has_aggregate_return ? ext->ret_aggregate_size : 0,
-      .aggregate_return_classes = {
-          has_aggregate_return ? ext->ret_aggregate_classes[0]
-                               : NY_SYSV_AGG_NONE,
-          has_aggregate_return ? ext->ret_aggregate_classes[1]
-                               : NY_SYSV_AGG_NONE},
+      .aggregate_return_classes = {has_aggregate_return
+                                       ? ext->ret_aggregate_classes[0]
+                                       : NY_SYSV_AGG_NONE,
+                                   has_aggregate_return
+                                       ? ext->ret_aggregate_classes[1]
+                                       : NY_SYSV_AGG_NONE},
       .source_effects =
           e->semantic.call_effect_known ? e->semantic.call_effect_mask : 0,
       .source_effects_known = e->semantic.call_effect_known,

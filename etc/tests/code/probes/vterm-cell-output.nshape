@@ -1,0 +1,37 @@
+shape vterm-cell-output {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "sys"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.ui.render.viewer.vterm as vterm
+
+mut vt = vterm.new(4, 3, {"regular": 0, "bold": 0, "italic": 0, "emoji": 0}, 0, 0)
+assert(is_dict(vt), "vterm new returns terminal state")
+vt = vterm.put_text(vt, "AB")
+assert(is_dict(vt), "vterm write preserves terminal state")
+def ptr grid = vt.get("grid")
+assert(load32(grid, 0) == 65 && load32(grid, 16) == 66, "vterm writes adjacent printable cells")
+vt = vterm.put_text(vt, "\r\nCD")
+def ptr newline_grid = vt.get("grid")
+assert(load32(newline_grid, 4 * 16) == 67 && load32(newline_grid, 5 * 16) == 68, "vterm CRLF starts next row at column zero")
+vt = vterm.resize(vt, 8, 5)
+def ptr resized_grid = vt.get("grid")
+assert(load32(resized_grid, 0) == 65 && load32(resized_grid, 16) == 66, "vterm resize preserves first row cells")
+assert(load32(resized_grid, 8 * 16) == 67 && load32(resized_grid, 9 * 16) == 68, "vterm resize copies cells using old and new row strides")
+assert(load32(resized_grid, (8 * 4) * 16) == 32, "vterm resize leaves newly allocated rows blank")
+mut stream_vt = vterm.new(16, 3, {"regular": 0, "bold": 0, "italic": 0, "emoji": 0}, 0, 0)
+def ptr shared = stream_vt.get("shared")
+def ptr stream_buf = load64(shared, 8)
+def stream = "HELLO WORLD!\r\nCD"
+memcpy(stream_buf, cptr(stream), stream.len)
+store64(shared, stream.len, 16)
+stream_vt = vterm.update(stream_vt)
+def ptr streamed_grid = stream_vt.get("grid")
+assert(load32(streamed_grid, 0) == 72 && load32(streamed_grid, 5 * 16) == 32 && load32(streamed_grid, 6 * 16) == 87 && load32(streamed_grid, 11 * 16) == 33, "vterm streaming preserves printable cells and spaces")
+assert(load32(streamed_grid, 16 * 16) == 67 && load32(streamed_grid, 17 * 16) == 68, "vterm streaming preserves CRLF row")
+print("vterm-cell-output ok")
+NY
+}

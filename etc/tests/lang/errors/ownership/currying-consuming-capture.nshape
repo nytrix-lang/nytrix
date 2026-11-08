@@ -1,0 +1,20 @@
+shape currying_consuming_capture_rejected {
+  family "compiler-errors/ownership"
+  generator "error"
+  features [error ownership linear currying negative]
+  template ny-compile-fail
+  flags "--ownership-strict"
+  expect compile_fail
+  expect_message "cannot partially bind consuming parameter `f`"
+  source ny <<'NY'
+linear layout File { int fd }
+@consumes(f)
+fn close_file(File f, int n) int {
+   def fd = f.fd
+   forget(f)
+   fd + n
+}
+def p = close_file(File(3))
+p(1)
+NY
+}

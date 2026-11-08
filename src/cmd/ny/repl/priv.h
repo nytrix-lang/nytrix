@@ -117,9 +117,11 @@ void doclist_add_recursive(doc_list_t *dl, ny_stmt_list *body,
 void doclist_add_from_prog(doc_list_t *dl, program_t *prog);
 void add_builtin_docs(doc_list_t *docs);
 int doclist_print(const doc_list_t *dl, const char *name);
+int doclist_print_best(const doc_list_t *dl, const char *name);
 int doclist_print_missing(const doc_list_t *dl, const char *name);
 void doclist_free(doc_list_t *dl);
 void repl_load_module_docs(doc_list_t *docs, const char *name);
+void ny_repl_show_help(const char *query);
 void repl_ensure_docs_for_query(doc_list_t *docs, const char *query);
 
 char *repl_read_file(const char *path);

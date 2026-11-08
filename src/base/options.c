@@ -2814,6 +2814,19 @@ static bool ny_options_apply_common_codegen_option(ny_options *opt,
     opt->native_dump_ir = true;
     return true;
   }
+  if (strcmp(a, "--mixed-disasm") == 0) {
+    opt->mixed_disasm = true;
+    return true;
+  }
+  if (strncmp(a, "--mixed-disasm=", 15) == 0) {
+    if (!a[15]) {
+      fprintf(stderr, "empty --mixed-disasm name filter\n");
+      exit(1);
+    }
+    opt->mixed_disasm = true;
+    opt->mixed_disasm_filter = a + 15;
+    return true;
+  }
   if (strncmp(a, "--trace-filter=", 15) == 0) {
     /*
      * Surfaces the NYTRIX_TRACE_FILTER env contract as a flag: the value is
@@ -4517,6 +4530,8 @@ static const ny_option_registry_entry_t ny_option_registry[] = {
                        "Disable JIT perf-map output"),
     NY_REG_BOOL_OPTION("--vm-disasm", "dump",
                        "Disassemble virtual-machine bytecode"),
+    NY_REG_BOOL_OPTION("--mixed-disasm", "dump",
+                       "Disassemble NYIR, MIR, and native code (mixed view)"),
     NY_REG_BOOL_OPTION("--elf-dump", "native", "Dump native ELF details"),
     NY_REG_BOOL_OPTION("--stack-frame", "native",
                        "Report native stack-frame layout"),
@@ -5847,6 +5862,8 @@ static void ny_options_usage_impl(const char *prog, bool show_env,
        "Inspect optimized NYR; add raw snapshots, CFG, stats, or pass detail"},
       {NY_CLR_BLUE, "--vm-disasm[=NAME]",
        "List optimized NYR VM instructions by function (optional name filter)"},
+      {NY_CLR_BLUE, "--mixed-disasm[=NAME]",
+       "Mixed NYIR/MIR/native disassembly by function (optional name filter)"},
       {NY_CLR_BLUE, "--nyr-dump-to=PATH",
        "Write NYR text to PATH (default: stderr)"},
       {NY_CLR_BLUE, "Backend: --dump-llvm, --emit-ir=PATH, --emit-bc=PATH",
@@ -5984,6 +6001,8 @@ static void ny_options_usage_impl(const char *prog, bool show_env,
        "Execute optimized rt_main NYR in the debug VM and print the result"},
       {NY_CLR_BLUE, "--vm-disasm[=NAME]",
        "List the optimized VM instruction stream for every compiled function"},
+      {NY_CLR_BLUE, "--mixed-disasm[=NAME]",
+       "Mixed NYIR/MIR/native disassembly for every compiled function"},
       {NY_CLR_BLUE, "--nyr-run-bin=PATH",
        "Execute a validated binary NYR dump directly through the debug VM"},
       {NY_CLR_BLUE, "--nyr-run-profile[=PATH]",
@@ -6501,12 +6520,19 @@ static void ny_cli_validate_conflicts(int argc, char **argv) {
   ny_cli_reject_conflict(
       ny_cli_has_flag(argc, argv, "--strict-types"), "--strict-types",
       ny_cli_has_flag(argc, argv, "--no-strict-types"), "--no-strict-types");
+  /*
+   * Repeated --heap= values stay last-wins. Naming a GC heap together with
+   * an ownership heap, or a RAII heap together with RC, is a contradiction:
+   * the finalizer used to drop one side and keep going.
+   */
   ny_cli_reject_conflict(
       ny_cli_option_is(argc, argv, "--heap", "gc"), "--heap=gc",
-      ny_cli_has_flag(argc, argv, "--ownership"), "--ownership");
-  ny_cli_reject_conflict(ny_cli_option_is(argc, argv, "--heap", "raii"),
-                         "--heap=raii", ny_cli_has_flag(argc, argv, "--rc-gc"),
-                         "--rc-gc");
+      ny_cli_has_flag(argc, argv, "--ownership") ||
+          ny_cli_has_flag(argc, argv, "--raii"),
+      "--ownership");
+  ny_cli_reject_conflict(
+      ny_cli_option_is(argc, argv, "--heap", "raii"), "--heap=raii",
+      ny_cli_has_flag(argc, argv, "--rc-gc"), "--rc-gc");
   bool jit = ny_cli_has_flag(argc, argv, "--jit") ||
              ny_cli_has_flag(argc, argv, "-jit");
   bool native = ny_cli_has_flag(argc, argv, "--native") ||
@@ -7961,6 +7987,40 @@ static char **ny_options_expand_short_args(ny_options *opt, int argc,
   return expanded;
 }
 
+/*
+ * A post-script option hint is only useful when the program never inspects its
+ * own argument list.  Keep the scan bounded and chunk-overlapped so a large
+ * source cannot hide "argv" across a read boundary.
+ */
+static bool ny_source_reads_argv(const char *path) {
+  if (!path || !*path)
+    return false;
+  FILE *file = fopen(path, "rb");
+  if (!file)
+    return false;
+  char buffer[4096];
+  size_t have = 0;
+  bool found = false;
+  for (;;) {
+    size_t n = fread(buffer + have, 1, sizeof(buffer) - have, file);
+    if (n == 0)
+      break;
+    have += n;
+    for (size_t i = 0; i + 4 <= have; ++i) {
+      if (memcmp(buffer + i, "argv", 4) == 0) {
+        found = true;
+        break;
+      }
+    }
+    if (found || have < sizeof(buffer))
+      break;
+    memmove(buffer, buffer + have - 3, 3);
+    have = 3;
+  }
+  fclose(file);
+  return found;
+}
+
 static bool ny_options_needs_short_expansion(int argc, char **argv) {
   for (int i = 1; i < argc; ++i) {
     const char *arg = argv[i] ? argv[i] : "";
@@ -8171,6 +8231,15 @@ static void ny_options_parse_expanded(ny_options *opt, int argc, char **argv) {
         opt->vm_disasm = true;
         opt->vm_disasm_filter = a + 12;
         opt->native_dump_ir = true;
+      } else if (strcmp(a, "--mixed-disasm") == 0) {
+        opt->mixed_disasm = true;
+      } else if (strncmp(a, "--mixed-disasm=", 15) == 0) {
+        if (!a[15]) {
+          fprintf(stderr, "empty --mixed-disasm name filter\n");
+          exit(1);
+        }
+        opt->mixed_disasm = true;
+        opt->mixed_disasm_filter = a + 15;
       } else if (strcmp(a, "--native-result-oracle") == 0) {
         opt->native_result_oracle = true;
         opt->native_backend = NY_NATIVE_BACKEND_X86_64;
@@ -8794,6 +8863,25 @@ static void ny_options_parse_expanded(ny_options *opt, int argc, char **argv) {
           entry->deprecated_by)
         fprintf(stderr, "ny: warning: '%.*s' is deprecated; use '%s'\n",
                 (int)length, spelling, entry->deprecated_by);
+    }
+    /*
+     * A compiler-looking option after the script path is forwarded to the
+     * program.  Hint once per spelling under --warn=all unless the script
+     * inspects argv itself, where the note would be misleading.
+     */
+    if (program_arg_idx >= 0 && opt->input_file &&
+        !getenv("NYTRIX_NO_HINTS") &&
+        !ny_source_reads_argv(opt->input_file)) {
+      for (int arg = program_arg_idx; arg < argc; ++arg) {
+        const char *spelling = argv[arg];
+        if (!spelling || spelling[0] != '-' || spelling[1] == '\0')
+          continue;
+        const char *equals = strchr(spelling, '=');
+        size_t length = equals ? (size_t)(equals - spelling) : strlen(spelling);
+        if (!ny_registry_find_spelling(spelling, length))
+          continue;
+        printf("note: '%s' comes after %s\n", spelling, opt->input_file);
+      }
     }
   }
   if (!opt->print_flags && opt->emit_wasm_path &&

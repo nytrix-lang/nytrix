@@ -1284,7 +1284,9 @@ static expr_t *parse_primary(parser_t *p) {
       bound[blen] = 0;
       parser_advance(p);
       if (p->cur.kind != NY_T_RPAREN) {
-        /* `exists(Fin<8> n) T` would be a dependent pair (sigma) type. */
+        /*
+         * `exists(Fin<8> n) T` would be a dependent pair (sigma) type.
+         */
         parser_error(p, p->cur,
                      "typed exists binders (dependent pair types) are not "
                      "supported",

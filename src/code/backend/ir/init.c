@@ -92,7 +92,8 @@ static bool nyr_op_v256_i64(nyr_op_t op) {
   return op == NYIR_VEC8_LOAD_I64 || op == NYIR_VEC8_SET1_I64 ||
          op == NYIR_VEC8_ADD_I64 || op == NYIR_VEC8_SUB_I64 ||
          op == NYIR_VEC8_AND_I64 || op == NYIR_VEC8_OR_I64 ||
-         op == NYIR_VEC8_XOR_I64 || op == NYIR_VEC8_SAR_I64;
+         op == NYIR_VEC8_XOR_I64 || op == NYIR_VEC8_SAR_I64 ||
+         op == NYIR_VEC8_SHR_I64;
 }
 
 /*
@@ -327,7 +328,8 @@ bool nyr_type_map_init(nyr_type_map_t *map, const nyr_func_t *nyir,
     bool v256_i64_ops =
         in->op == NYIR_VEC8_ADD_I64 || in->op == NYIR_VEC8_SUB_I64 ||
         in->op == NYIR_VEC8_AND_I64 || in->op == NYIR_VEC8_OR_I64 ||
-        in->op == NYIR_VEC8_XOR_I64 || in->op == NYIR_VEC8_SAR_I64;
+        in->op == NYIR_VEC8_XOR_I64 || in->op == NYIR_VEC8_SAR_I64 ||
+        in->op == NYIR_VEC8_SHR_I64;
     bool v256_f64_ops =
         in->op == NYIR_VEC4_ADD_F64 || in->op == NYIR_VEC4_SUB_F64 ||
         in->op == NYIR_VEC4_MUL_F64 || in->op == NYIR_VEC4_DIV_F64 ||
@@ -1060,6 +1062,8 @@ const char *nyr_op_name(nyr_op_t op) {
     return "vec4.set1.i64";
   case NYIR_VEC8_SAR_I64:
     return "vec8.sar.i64";
+  case NYIR_VEC8_SHR_I64:
+    return "vec8.shr.i64";
   case NYIR_VEC8_SET1_I64:
     return "vec8.set1.i64";
   case NYIR_VEC4_STORE_I64:
@@ -1178,6 +1182,7 @@ unsigned nyr_inst_effects(const nyr_inst_t *inst) {
   case NYIR_VEC4_REDUCE_ADD_F64:
   case NYIR_VEC4_SET1_I64:
   case NYIR_VEC8_SAR_I64:
+  case NYIR_VEC8_SHR_I64:
   case NYIR_VEC8_SET1_I64:
   case NYIR_SELECT_I64:
   case NYIR_ROR32_I64:
@@ -1292,6 +1297,7 @@ static void nyr_normalize_operands(nyr_inst_t *inst) {
   case NYIR_VEC8_SET1_F32:
   case NYIR_VEC4_SET1_I64:
   case NYIR_VEC8_SAR_I64:
+  case NYIR_VEC8_SHR_I64:
   case NYIR_VEC8_SET1_I64:
   case NYIR_VEC4_SHUFFLE_F64:
   case NYIR_VEC8_SHUFFLE_F32:
@@ -1790,7 +1796,7 @@ static const char *nyr_op_short(const nyr_inst_t *in) {
 /*
  * Format one inst into buf; returns false for pure nops (callers elide).
  */
-static bool nyr_fmt_inst(const nyr_inst_t *in, char *buf, size_t n) {
+bool nyr_fmt_inst(const nyr_inst_t *in, char *buf, size_t n) {
   if (!in || !buf || n == 0)
     return false;
   if (in->op == NYIR_NOP) {

@@ -4,7 +4,7 @@
 ;; - core.os.ui.window.platform.linux
 ;; - core.os.ui.window
 ;; - core.os.ui.window.consts
-module core.os.ui.window.platform.linux.wayland(available, get_backend_name, connect_display, disconnect_display, get_registry, destroy_registry, flush, roundtrip, get_fd, dispatch_pending, dispatch, prepare_read, cancel_read, read_events, wait_events, wait_events_queue, create_event_queue, destroy_event_queue, prepare_read_queue, dispatch_queue_pending, create_proxy_wrapper, destroy_proxy_wrapper, set_proxy_queue, get_proxy_user_data, set_proxy_user_data, get_proxy_version, destroy_proxy, bootstrap_globals, destroy_globals, set_globals, vulkan_supported, vulkan_required_extensions, probe_display, presentation_supported, create_surface, create_wl_surface, create_xdg_surface, create_xdg_toplevel, xdg_toplevel_set_title, create_basic_window, destroy_basic_window, poll_window_events, show_window, hide_window, iconify_window, restore_window, maximize_window, get_window_attrib, set_window_opacity, set_window_resizable, set_title, get_size, set_size, get_cursor_pos, set_cursor_pos, set_window_icon, create_cursor, create_standard_cursor, destroy_cursor, set_cursor, get_key_state, get_mouse_button_state, get_key_name, get_window_monitor, set_window_monitor, set_clipboard, get_clipboard, get_gamma_ramp, set_gamma_ramp, get_monitors, get_primary_monitor, get_monitor_pos, get_monitor_workarea, get_monitor_physical_size, get_monitor_content_scale, get_monitor_name, get_wayland_monitor, get_video_mode, get_video_modes, set_input_mode, get_input_mode, get_key_name, get_key_scancode, text_input_enable, text_input_disable, get_window_content_scale, get_window_opacity, get_window_frame_size, request_window_attention, get_seat_capabilities, poll_joystick_events)
+module core.os.ui.window.platform.linux.wayland(surface_buffer_ready, available, get_backend_name, connect_display, disconnect_display, get_registry, destroy_registry, flush, roundtrip, get_fd, dispatch_pending, dispatch, prepare_read, cancel_read, read_events, wait_events, wait_events_queue, create_event_queue, destroy_event_queue, prepare_read_queue, dispatch_queue_pending, create_proxy_wrapper, destroy_proxy_wrapper, set_proxy_queue, get_proxy_user_data, set_proxy_user_data, get_proxy_version, destroy_proxy, bootstrap_globals, destroy_globals, set_globals, vulkan_supported, vulkan_required_extensions, probe_display, presentation_supported, create_surface, create_wl_surface, create_xdg_surface, create_xdg_toplevel, xdg_toplevel_set_title, create_basic_window, destroy_basic_window, poll_window_events, show_window, hide_window, iconify_window, restore_window, maximize_window, get_window_attrib, set_window_opacity, set_window_resizable, set_title, get_size, set_size, get_cursor_pos, set_cursor_pos, set_window_icon, create_cursor, create_standard_cursor, destroy_cursor, set_cursor, get_key_state, get_mouse_button_state, get_key_name, get_window_monitor, set_window_monitor, set_clipboard, get_clipboard, get_gamma_ramp, set_gamma_ramp, get_monitors, get_primary_monitor, get_monitor_pos, get_monitor_workarea, get_monitor_physical_size, get_monitor_content_scale, get_monitor_name, get_wayland_monitor, get_video_mode, get_video_modes, set_input_mode, get_input_mode, get_key_name, get_key_scancode, text_input_enable, text_input_disable, get_window_content_scale, get_window_opacity, get_window_frame_size, request_window_attention, get_seat_capabilities, poll_joystick_events)
 use core
 use core.mem (cstr)
 use core.str as str
@@ -37,6 +37,7 @@ use core.os.ffi as ffi
       fn wl_display_flush(ptr display) i32
       fn wl_display_roundtrip(ptr display) i32
       fn wl_display_get_fd(ptr display) i32
+      fn wl_display_get_error(ptr display) i32
       fn wl_display_dispatch_pending(ptr display) i32
       fn wl_display_dispatch(ptr display) i32
       fn wl_display_prepare_read(ptr display) i32
@@ -115,6 +116,10 @@ use core.os.ffi as ffi
    }
    fn wl_display_get_fd(..._args) any {
       "Runs the wl display get fd operation."
+      0
+   }
+   fn wl_display_get_error(..._args) any {
+      "Runs the wl display get error operation."
       0
    }
    fn wl_display_dispatch_pending(..._args) any {
@@ -306,6 +311,7 @@ def WL_SEAT_GET_KEYBOARD = 1
 def WL_DATA_DEVICE_MANAGER_GET_DATA_DEVICE = 1
 def WL_OUTPUT_MODE_CURRENT = 0x1
 def WL_SURFACE_ATTACH = 1
+def WL_SURFACE_FRAME = 3
 def WL_SURFACE_COMMIT = 6
 def XDG_WM_BASE_PONG = 3
 def XDG_WM_BASE_GET_XDG_SURFACE = 2
@@ -410,7 +416,19 @@ def _WRS_MAXIMIZED = 40
 def _WRS_FULLSCREEN = 48
 def _WRS_ACTIVATED = 56
 def _WRS_FLAGS_DIRTY = 64
-def _WRS_SIZE = 72
+;; Deferred xdg_surface.ack_configure.  Acknowledging binds the next commit to
+;; the configured size, so a resize is acknowledged only once a buffer of that
+;; size exists.  _WRS_ACK_SERIAL holds serial + 1; zero means nothing pending.
+def _WRS_ACK_SERIAL = 72
+def _WRS_ACK_SURFACE = 80
+def _WRS_BUFFER_W = 88
+def _WRS_BUFFER_H = 96
+def _WRS_DEFER_ACK = 104
+def _WRS_FLOAT_W = 112
+def _WRS_FLOAT_H = 120
+def _WRS_WAS_TILED = 128
+def _WRS_SIZE = 136
+mut _display_fatal = false
 def _WP_PENDING_SURFACE = 1
 def _WP_PENDING_MOTION = 2
 def _WP_PENDING_BUTTON = 4
@@ -1385,6 +1403,11 @@ fn _apply_shell_state(any win) any {
          } else {
             win = win.set("configured", true)
             changed = true
+            ;; Size unchanged and already presented at it: nothing will rebuild
+            ;; the swapchain, so answer the compositor now.
+            if width == load64_h(state, _WRS_BUFFER_W) && height == load64_h(state, _WRS_BUFFER_H) {
+               _flush_deferred_ack(state)
+            }
          }
       }
       store64_h(state, 0, _WRS_CONFIGURE)
@@ -1399,11 +1422,89 @@ fn _apply_shell_state(any win) any {
 
 fn _xdg_surface_handle_configure(ptr resize_state, ptr xdg_surface, u32 serial) any {
    if !xdg_surface { return 0 }
-   _dbgu("xdg_surface.configure serial=" + to_str(from_int(serial)))
-   _wl_proxy_marshal_u(xdg_surface, XDG_SURFACE_ACK_CONFIGURE, int(from_int(serial)))
-   if resize_state && load64_h(resize_state, _WRS_CONFIGURE) == 1 {
-      store64_h(resize_state, 2, _WRS_CONFIGURE)
+   def int cfg_serial = int(from_int(serial))
+   _dbgu("xdg_surface.configure serial=" + to_str(cfg_serial))
+   mut defer_ack = false
+   if resize_state {
+      def requested = load64_h(resize_state, _WRS_CONFIGURE) == 1
+      if requested { store64_h(resize_state, 2, _WRS_CONFIGURE) }
+      if load64_h(resize_state, _WRS_DEFER_ACK) {
+         def mismatch = requested &&
+            (load64_h(resize_state, _WRS_WIDTH) != load64_h(resize_state, _WRS_BUFFER_W) ||
+             load64_h(resize_state, _WRS_HEIGHT) != load64_h(resize_state, _WRS_BUFFER_H))
+         defer_ack = mismatch || load64_h(resize_state, _WRS_ACK_SERIAL) != 0
+      }
    }
+   if defer_ack {
+      store64_h(resize_state, cfg_serial + 1, _WRS_ACK_SERIAL)
+      store64_h(resize_state, xdg_surface, _WRS_ACK_SURFACE)
+      return 0
+   }
+   _wl_proxy_marshal_u(xdg_surface, XDG_SURFACE_ACK_CONFIGURE, cfg_serial)
+}
+
+fn _flush_deferred_ack(any resize_state) any {
+   if !resize_state { return 0 }
+   def pending = load64_h(resize_state, _WRS_ACK_SERIAL)
+   if !pending { return 0 }
+   store64_h(resize_state, 0, _WRS_ACK_SERIAL)
+   _wl_proxy_marshal_u(load64_h(resize_state, _WRS_ACK_SURFACE), XDG_SURFACE_ACK_CONFIGURE, int(pending) - 1)
+}
+
+fn _settle_callback_done(ptr flag, ptr callback, u32 time) any {
+   if flag { store64_h(flag, 1, 0) }
+}
+
+;; FIFO presentation can leave old-size frames queued in the compositor, and a
+;; resize acknowledged while they wait makes them be judged against the new
+;; size.  An empty commit queues behind them, so its frame callback proves they
+;; have latched.  Hidden surfaces get no callback, hence the bounded wait.
+fn _wait_queued_commits(any win) any {
+   def surface = win.get("handle", 0)
+   def globals = win.get("globals", 0)
+   def display = globals ? globals.get("display", globals.get("handle", 0)) : 0
+   if !surface || !display { return 0 }
+   def flag = zalloc(8)
+   def listener = zalloc(8)
+   if !flag || !listener {
+      if flag { free(flag) }
+      if listener { free(listener) }
+      return 0
+   }
+   store64_h(listener, _settle_callback_done, 0)
+   def callback = _wl_proxy_marshal_new_id0(surface, WL_SURFACE_FRAME, _wl_callback_interface_local)
+   if callback {
+      wl_proxy_add_listener(callback, listener, flag)
+      _wl_proxy_marshal_void(surface, WL_SURFACE_COMMIT)
+      wl_display_flush(display)
+      mut attempts = 0
+      while !load64_h(flag, 0) && attempts < 10 {
+         if wait_events(display, 10) < 0 { break }
+         attempts += 1
+      }
+      destroy_proxy(callback)
+   }
+   free(flag)
+   free(listener)
+}
+
+fn surface_buffer_ready(any win, int w, int h) bool {
+   "Records that a presentable buffer of w x h exists and acknowledges any resize waiting for it."
+   def handle = is_dict(win) ? win.get("handle", 0) : win
+   def current = handle ? _windows.get(int(handle), 0) : 0
+   if !is_dict(current) { return false }
+   def state = current.get("resize_state", 0)
+   if !state { return false }
+   store64_h(state, w, _WRS_BUFFER_W)
+   store64_h(state, h, _WRS_BUFFER_H)
+   store64_h(state, 1, _WRS_DEFER_ACK)
+   if !load64_h(state, _WRS_MAXIMIZED) && !load64_h(state, _WRS_FULLSCREEN) {
+      store64_h(state, w, _WRS_FLOAT_W)
+      store64_h(state, h, _WRS_FLOAT_H)
+   }
+   if load64_h(state, _WRS_ACK_SERIAL) { _wait_queued_commits(current) }
+   _flush_deferred_ack(state)
+   true
 }
 
 fn _xdg_toplevel_handle_configure(ptr resize_state, ptr toplevel, i32 width, i32 height, ptr states) any {
@@ -1428,7 +1529,14 @@ fn _xdg_toplevel_handle_configure(ptr resize_state, ptr toplevel, i32 width, i32
          }
       }
    }
-   def cfg_w, cfg_h = int(from_int(width)), int(from_int(height))
+   mut cfg_w, cfg_h = int(from_int(width)), int(from_int(height))
+   ;; Leaving maximized/fullscreen with 0x0 means the client picks the size:
+   ;; return to the floating size instead of keeping the tiled one.
+   def tiled = next_maximized || next_fullscreen
+   if !tiled && load64_h(resize_state, _WRS_WAS_TILED) && (cfg_w <= 0 || cfg_h <= 0) {
+      cfg_w, cfg_h = int(load64_h(resize_state, _WRS_FLOAT_W)), int(load64_h(resize_state, _WRS_FLOAT_H))
+   }
+   store64_h(resize_state, tiled ? 1 : 0, _WRS_WAS_TILED)
    if cfg_w > 0 && cfg_h > 0 {
       store64_h(resize_state, cfg_w, _WRS_WIDTH)
       store64_h(resize_state, cfg_h, _WRS_HEIGHT)
@@ -1630,8 +1738,19 @@ fn get_size(any win) list {
 }
 
 fn set_size(any win, int w, int h) bool {
-   "Sets the Wayland window size(as a hint to the compositor)."
-   if !win || !is_dict(win) { return false }
+   "Resizes a floating Wayland window; a client chooses its own size unless the compositor constrains it."
+   if !win || !is_dict(win) || w <= 0 || h <= 0 { return false }
+   def handle = win.get("handle", 0)
+   def current = handle ? _windows.get(int(handle), 0) : 0
+   if !is_dict(current) { return false }
+   def state = current.get("resize_state", 0)
+   if state && (load64_h(state, _WRS_MAXIMIZED) || load64_h(state, _WRS_FULLSCREEN)) { return false }
+   if current.get("w", 0) == w && current.get("h", 0) == h { return true }
+   def updated = current.set("w", w).set("h", h)
+   _windows = dict_set(_windows, int(handle), updated)
+   mut data = dict(4)
+   data = data.set("w", w).set("h", h)
+   _push_event(updated, EVENT_WINDOW_RESIZED, data)
    true
 }
 
@@ -2916,6 +3035,16 @@ fn poll_window_events(any win, int max_events=64) list {
       _pointer_flush_frame(state)
       _synthesize_key_repeat(win, state)
    }
+   ;; A protocol error is fatal to the connection: every later request is
+   ;; dropped, so end the app instead of spinning on failed frames.
+   if globals && !_display_fatal {
+      def fatal_display = globals.get("display", globals.get("handle", 0))
+      if fatal_display && wl_display_get_error(fatal_display) != 0 {
+         _display_fatal = true
+         print("[wayland] compositor closed the connection after a protocol error")
+         _push_event(win, EVENT_QUIT, 0)
+      }
+   }
    mut list out = []
    mut list remaining = []
    mut int i = 0
@@ -3396,7 +3525,7 @@ fn vulkan_supported() bool {
    true
 }
 
-mut _wayland_vk_ext_ptrs = 0
+mut any _wayland_vk_ext_ptrs = nil
 mut _wayland_vk_ext_surface = 0
 mut _wayland_vk_ext_wayland = 0
 

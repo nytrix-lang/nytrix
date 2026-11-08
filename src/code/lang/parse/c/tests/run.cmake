@@ -1546,7 +1546,6 @@ endif()
 foreach(flag
     -mcmodel=large
     -fcf-protection=branch
-    -mfunction-return=thunk-extern
     -mstack-protector-guard=gs
     )
   execute_process(

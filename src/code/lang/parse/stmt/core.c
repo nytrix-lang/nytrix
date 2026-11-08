@@ -725,7 +725,9 @@ static char *parse_qualified_name(parser_t *p) {
   return (char *)name;
 }
 
-/* ---- type-level aliases and type-level functions ----------------------- */
+/*
+ * type-level aliases and type-level functions
+ */
 
 static bool alias_ident_start(char c) {
   return isalpha((unsigned char)c) || c == '_';
@@ -814,7 +816,9 @@ static char *alias_buf_take(alias_buf_t *b) {
   return out;
 }
 
-/* Split a type text into its head constructor and balanced arguments. */
+/*
+ * Split a type text into its head constructor and balanced arguments.
+ */
 static bool alias_split_apply(const char *text, char **head_out,
                               char ***args_out, size_t *argc_out) {
   if (!text || !head_out || !args_out || !argc_out)
@@ -939,7 +943,9 @@ static bool alias_collect_binders(parser_t *p, const char *pattern,
     while (alias_ident_char(*s))
       s++;
     size_t len = (size_t)(s - start);
-    /* Dotted names are constructors, not binders. */
+    /*
+     * Dotted names are constructors, not binders.
+     */
     if (*s == '.')
       continue;
     token_t tok = {.kind = NY_T_IDENT, .lexeme = start, .len = len};
@@ -1003,7 +1009,9 @@ static bool alias_match_text(parser_type_alias *a, const char *pattern,
     for (size_t i = 0; ok && i < parc; ++i)
       ok = alias_match_text(a, pargs[i], aargs[i], bindings);
     if (ok) {
-      /* Bindings were matched against pattern args, not the top pattern. */
+      /*
+       * Bindings were matched against pattern args, not the top pattern.
+       */
       free(phead);
       free(ahead);
       alias_free_args(pargs, parc);
@@ -1184,7 +1192,9 @@ static const char *alias_expand_text(parser_t *p, const char *text,
         free(name);
         return NULL;
       }
-      /* Reuse the splitter through a fabricated application. */
+      /*
+       * Reuse the splitter through a fabricated application.
+       */
       alias_buf_t scratch = {0};
       alias_buf_puts(&scratch, "x<");
       alias_buf_puts(&scratch, inner);
@@ -1363,7 +1373,9 @@ bool parser_register_type_alias(parser_t *p, const char *name,
     const char *expanded = alias_expand_text(p, a->body, 0);
     a->expanding = false;
     if (!expanded) {
-      /* Unlink the rejected definition so later uses report a parse error. */
+      /*
+       * Unlink the rejected definition so later uses report a parse error.
+       */
       if (p->type_aliases == a) {
         p->type_aliases = a->next;
       } else {

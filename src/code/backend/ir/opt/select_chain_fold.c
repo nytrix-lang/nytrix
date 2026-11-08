@@ -26,6 +26,7 @@
  */
 #include "code/backend/ir/opt/loop.h"
 #include "code/backend/ir/opt/util.h"
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -33,6 +34,7 @@
 typedef struct {
   nyr_func_t *f;
   int *defs;
+  const unsigned char *def_counts;
   size_t *uses;
   nyr_value_fact_t *facts;
   nyr_scev_info_t scev;
@@ -42,7 +44,8 @@ typedef struct {
 } scf_t;
 
 static const nyr_inst_t *scf_def(const scf_t *s, int v) {
-  if (v < 0 || v >= s->f->next_value || s->defs[v] < 0)
+  if (v < 0 || v >= s->f->next_value || s->defs[v] < 0 ||
+      (s->def_counts && s->def_counts[v] != 1))
     return NULL;
   return &s->f->data[s->defs[v]];
 }
@@ -275,11 +278,15 @@ static bool scf_init(scf_t *s, nyr_func_t *f) {
     switch (in->op) {
     case NYIR_SELECT_I64:
       ops[2] = in->c;
-      /* fall through */
+      /*
+       * fall through
+       */
     case NYIR_ADD_I64:
     case NYIR_CMP_I64:
       ops[1] = in->b;
-      /* fall through */
+      /*
+       * fall through
+       */
     case NYIR_COPY:
       ops[0] = in->a;
       break;
@@ -421,7 +428,9 @@ static bool scf_merge_add_const(scf_t *s, size_t at) {
     if (inner_raw == inner && s->uses[inner] == 1) {
       nyr_inst_t *iw = &s->f->data[s->defs[inner]];
       int ia = iw->a, ib = iw->b;
-      /* base keeps its use: it moves from the inner add to this one. */
+      /*
+       * base keeps its use: it moves from the inner add to this one.
+       */
       scf_add_use(s, base);
       nir_make_const(iw, sum);
       scf_drop_use(s, ia);
@@ -536,14 +545,251 @@ static bool scf_round(nyr_func_t *f, bool *changed) {
   return true;
 }
 
+/*
+ * Fold a chain of recurrence steps whose equality branch advances with the
+ * comparison key. With a miss increment b and hit increment a, the state
+ * first hits a key exactly when x0 = k - j*(b-a), for 0 <= j < n.
+ * On a hit the remaining steps stay aligned; otherwise all n steps miss.
+ * A bounded range plus congruence test captures the exact hitting steps.
+ * Keep keys away from signed boundaries so unrelated wrapped trajectories
+ * cannot enter the bounded interval within the chain's length.
+ */
+static bool scf_step_add(const scf_t *s, const nyr_inst_t *add, int *prev,
+                         int64_t *key, int *step, int *gap) {
+  if (add->op != NYIR_ADD_I64 || add->dst < 0)
+    return false;
+  for (int side = 0; side < 2; ++side) {
+    int v = scf_strip(s, side ? add->b : add->a);
+    int selected = scf_strip(s, side ? add->a : add->b);
+    const nyr_inst_t *sel = scf_def(s, selected);
+    int cmp_value = -1;
+    int64_t t = 0, f = 0, k = 0;
+    if (!sel || sel->op != NYIR_SELECT_I64 ||
+        !scf_const(s, sel->b, &t) || t < -16 || t > 16 ||
+        !scf_const(s, sel->c, &f) || f < -24 || f > 24 ||
+        f - t == 0 || f - t < -8 || f - t > 8 ||
+        !scf_is_eq_const(s, sel->a, &cmp_value, &k) || cmp_value != v)
+      continue;
+    *prev = v;
+    *key = k;
+    *step = (int)t;
+    *gap = (int)(f - t);
+    return true;
+  }
+  return false;
+}
+
+static nyr_inst_t scf_new_inst(nyr_op_t op, int dst, int a, int b, int c,
+                               int64_t imm) {
+  return (nyr_inst_t){.op = op, .dst = dst, .a = a, .b = b, .c = c,
+                      .d = -1, .e = -1, .f = -1, .imm = imm,
+                      .scalar_class = NYIR_SCALAR_I64_RAW};
+}
+
+typedef struct {
+  unsigned length;
+  int root;
+  int64_t key;
+  int step, gap, extra;
+} scf_chain_t;
+
+static int scf_chain_extra(int gap) {
+  int d = gap < 0 ? -gap : gap;
+  return 8 + (d == 1 ? 0 : ((d & (d - 1)) == 0 ? 5 : 7));
+}
+
+static void scf_emit_chain(nyr_func_t *f, size_t pos, size_t dst_pc,
+                           const scf_chain_t *chain) {
+  int64_t steps = (int64_t)chain->length;
+  int64_t width = (steps - 1) *
+                  (int64_t)(chain->gap < 0 ? -chain->gap : chain->gap);
+  int64_t lo = chain->gap > 0 ? chain->key - width : chain->key;
+  int64_t hi = chain->gap > 0 ? chain->key : chain->key + width;
+  int ids[15];
+  for (int i = 0; i < chain->extra; ++i)
+    ids[i] = f->next_value++;
+  f->data[pos + 0] = scf_new_inst(NYIR_CONST_I64, ids[0], -1, -1, -1, lo);
+  f->data[pos + 1] = scf_new_inst(NYIR_CONST_I64, ids[1], -1, -1, -1, hi);
+  f->data[pos + 2] = scf_new_inst(NYIR_CMP_I64, ids[2], chain->root, ids[0],
+                                  -1, 0);
+  f->data[pos + 2].cmp = NYIR_CMP_GE;
+  f->data[pos + 3] = scf_new_inst(NYIR_CMP_I64, ids[3], chain->root, ids[1],
+                                  -1, 0);
+  f->data[pos + 3].cmp = NYIR_CMP_LE;
+  f->data[pos + 4] = scf_new_inst(NYIR_AND_I64, ids[4], ids[2], ids[3],
+                                  -1, 0);
+  f->data[pos + 5] = scf_new_inst(NYIR_CONST_I64, ids[5], -1, -1, -1,
+                       steps * ((int64_t)chain->step + chain->gap));
+  f->data[pos + 6] = scf_new_inst(NYIR_ADD_I64, ids[6], chain->root, ids[5],
+                                  -1, 0);
+  f->data[pos + 7] = scf_new_inst(NYIR_CONST_I64, ids[7], -1, -1, -1,
+                                  chain->key + steps * (int64_t)chain->step);
+  int cond = ids[4];
+  if (chain->extra > 8) {
+    int64_t modulus = chain->gap < 0 ? -chain->gap : chain->gap;
+    if ((modulus & (modulus - 1)) == 0) {
+      int64_t mask = modulus - 1;
+      f->data[pos + 8] = scf_new_inst(NYIR_CONST_I64, ids[8], -1, -1, -1,
+                                      mask);
+      f->data[pos + 9] = scf_new_inst(NYIR_AND_I64, ids[9], chain->root,
+                                      ids[8], -1, 0);
+      f->data[pos + 10] = scf_new_inst(NYIR_CONST_I64, ids[10], -1, -1, -1,
+                                       chain->key & mask);
+      f->data[pos + 11] = scf_new_inst(NYIR_CMP_I64, ids[11], ids[9],
+                                       ids[10], -1, 0);
+      f->data[pos + 11].cmp = NYIR_CMP_EQ;
+      f->data[pos + 12] = scf_new_inst(NYIR_AND_I64, ids[12], ids[4],
+                                       ids[11], -1, 0);
+      cond = ids[12];
+    } else {
+      f->data[pos + 8] = scf_new_inst(NYIR_CONST_I64, ids[8], -1, -1, -1,
+                                      chain->key);
+      f->data[pos + 9] = scf_new_inst(NYIR_SUB_I64, ids[9],
+                         chain->gap > 0 ? ids[8] : chain->root,
+                         chain->gap > 0 ? chain->root : ids[8], -1, 0);
+      f->data[pos + 10] = scf_new_inst(NYIR_CONST_I64, ids[10], -1, -1, -1,
+                                       modulus);
+      f->data[pos + 11] = scf_new_inst(NYIR_MOD_I64, ids[11], ids[9],
+                                       ids[10], -1, 0);
+      f->data[pos + 12] = scf_new_inst(NYIR_CONST_I64, ids[12], -1, -1, -1, 0);
+      f->data[pos + 13] = scf_new_inst(NYIR_CMP_I64, ids[13], ids[11],
+                                       ids[12], -1, 0);
+      f->data[pos + 13].cmp = NYIR_CMP_EQ;
+      f->data[pos + 14] = scf_new_inst(NYIR_AND_I64, ids[14], ids[4],
+                                       ids[13], -1, 0);
+      cond = ids[14];
+    }
+  }
+  nyr_inst_t *dst = &f->data[dst_pc];
+  nir_make_copy(dst, cond);
+  dst->op = NYIR_SELECT_I64;
+  dst->a = cond;
+  dst->b = ids[7];
+  dst->c = ids[6];
+}
+
+static bool scf_fold_step_chain(nyr_func_t *f) {
+  if (f->next_value <= 0)
+    return true;
+  scf_t s = {.f = f, .defs = nyr_build_defs(f)};
+  size_t n = (size_t)f->next_value;
+  unsigned *length = calloc(n, sizeof(*length));
+  int *roots = malloc(n * sizeof(*roots));
+  int64_t *keys = malloc(n * sizeof(*keys));
+  int *increments = malloc(n * sizeof(*increments));
+  int *gaps = malloc(n * sizeof(*gaps));
+  unsigned char *dups = calloc(n, sizeof(*dups));
+  unsigned char *extended = calloc(n, sizeof(*extended));
+  scf_chain_t *candidates = calloc(f->len, sizeof(*candidates));
+  if (!s.defs || !length || !roots || !keys || !increments || !gaps ||
+      !dups || !extended || !candidates) {
+    free(s.defs);
+    free(length);
+    free(roots);
+    free(keys);
+    free(increments);
+    free(gaps);
+    free(dups);
+    free(extended);
+    free(candidates);
+    return true;
+  }
+  for (size_t i = 0; i < f->len; ++i)
+    if (f->data[i].dst >= 0 && f->data[i].dst < f->next_value &&
+        dups[f->data[i].dst] < 2)
+      ++dups[f->data[i].dst];
+  s.def_counts = dups;
+  for (size_t i = 0; i < f->len; ++i) {
+    const nyr_inst_t *in = &f->data[i];
+    int prev = -1;
+    int64_t k = 0;
+    int step = 0, gap = 0;
+    if (in->dst < 0 || in->dst >= f->next_value ||
+        (in->scalar_class != NYIR_SCALAR_UNKNOWN &&
+         in->scalar_class != NYIR_SCALAR_I64_RAW) ||
+        dups[in->dst] != 1 ||
+        !scf_step_add(&s, in, &prev, &k, &step, &gap) || prev < 0 ||
+        prev >= f->next_value || dups[prev] > 1 ||
+        (s.defs[prev] >= 0 && (size_t)s.defs[prev] >= i))
+      continue;
+    unsigned count = 1;
+    int root = prev;
+    int64_t first = k;
+    int64_t advance = (int64_t)length[prev] * (int64_t)step;
+    if (length[prev] && length[prev] < 4096 &&
+        increments[prev] == step && gaps[prev] == gap &&
+        (advance >= 0 ? keys[prev] <= INT64_MAX - advance
+                      : keys[prev] >= INT64_MIN - advance) &&
+        k == keys[prev] + advance) {
+      count += length[prev];
+      root = roots[prev];
+      first = keys[prev];
+      extended[prev] = 1;
+    }
+    length[in->dst] = count;
+    roots[in->dst] = root;
+    keys[in->dst] = first;
+    increments[in->dst] = step;
+    gaps[in->dst] = gap;
+  }
+  size_t extra = 0;
+  for (size_t v = 0; v < n; ++v) {
+    if (length[v] < 8 || extended[v] || s.defs[v] < 0)
+      continue;
+    unsigned count = length[v];
+    int64_t first = keys[v];
+    if (first < INT64_MIN + 64 * (int64_t)count ||
+        first > INT64_MAX - 64 * (int64_t)count)
+      continue;
+    int need = scf_chain_extra(gaps[v]);
+    if ((size_t)need > (size_t)INT_MAX - (size_t)f->next_value ||
+        extra > (size_t)INT_MAX - (size_t)f->next_value - (size_t)need ||
+        (size_t)need > SIZE_MAX - f->len ||
+        extra > SIZE_MAX - f->len - (size_t)need) {
+      extra = 0;
+      break;
+    }
+    candidates[s.defs[v]] = (scf_chain_t){.length = count, .root = roots[v],
+            .key = first, .step = increments[v], .gap = gaps[v], .extra = need};
+    extra += (size_t)need;
+  }
+  free(s.defs);
+  free(length);
+  free(roots);
+  free(keys);
+  free(increments);
+  free(gaps);
+  free(dups);
+  free(extended);
+  if (!extra) {
+    free(candidates);
+    return true;
+  }
+  if (!nir_ensure_inst_space(f, extra)) {
+    free(candidates);
+    return false;
+  }
+  size_t shift = extra;
+  for (size_t pc = f->len; pc-- > 0;) {
+    size_t dst = pc + shift;
+    f->data[dst] = f->data[pc];
+    const scf_chain_t *c = &candidates[pc];
+    if (c->length) {
+      shift -= (size_t)c->extra;
+      scf_emit_chain(f, pc + shift, dst, c);
+    }
+  }
+  f->len += extra;
+  free(candidates);
+  nyr_refresh_metadata(f);
+  return true;
+}
+
 bool nyr_select_chain_fold(nyr_func_t *f) {
   if (!f || !f->len || getenv("NYTRIX_NO_SELECT_CHAIN_FOLD"))
     return true;
-  /*
-   * Each round folds every link whose inputs are already in closed form, in
-   * program order, so one round normally finishes a forward chain. Bound the
-   * rounds anyway; every rule strictly reduces select dependencies.
-   */
+  if (!scf_fold_step_chain(f))
+    return false;
   for (int round = 0; round < 4; ++round) {
     bool changed = false;
     if (!scf_round(f, &changed))

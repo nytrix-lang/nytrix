@@ -69,6 +69,15 @@ static bool licm_find_preheader(const nyr_cfg_t *cfg, const bool *in_loop,
   if (outside != 1 || preheader >= cfg->block_count)
     return false;
   /*
+   * Hoisted definitions must precede their in-loop uses in instruction
+   * order, which the NYIR verifier requires besides dominance. A transform
+   * that appends code (the outer vectorizer's vector loop and exit block)
+   * can leave a loop whose unique outside predecessor is laid out after the
+   * loop body; hoisting into it would place definitions after their uses.
+   */
+  if (cfg->block_start[preheader] >= cfg->block_start[header])
+    return false;
+  /*
    * A dedicated single-successor preheader is unnecessary for instructions
    * that licm_candidate has already proven pure and non-trapping.  Hoisting
    * into the unique outside predecessor is safe even when it also has a
@@ -330,6 +339,14 @@ static bool licm_direct_symbol_slot_address(const nyr_func_t *f,
   return false;
 }
 
+/*
+ * Set while nyr_licm_post_vectorize runs: the vectorizers have already
+ * rewritten their accesses, so the address-shape restriction below no longer
+ * protects anything and invariant address arithmetic (row offsets such as
+ * r * M) may leave the loop.
+ */
+static bool licm_allow_address_hoist = false;
+
 static bool licm_memory_op(nyr_op_t op) {
   switch (op) {
   case NYIR_LOAD_I64:
@@ -531,12 +548,13 @@ static bool licm_candidate(
       ((stored_local && stored_local[in->imm]) ||
        (addr_taken_local && addr_taken_local[in->imm])))
     return false;
-  if ((in->op == NYIR_ADD_I64 && in->dst >= 0 &&
+  if (!licm_allow_address_hoist &&
+      ((in->op == NYIR_ADD_I64 && in->dst >= 0 &&
       licm_memory_address_component(f, in->dst, 0) &&
       !(in->flags & NYIR_INST_F_AFFINE_ADDR_BASE)) ||
       (in->op == NYIR_SHL_I64 && in->dst >= 0 &&
        licm_float_memory_address_component(f, in->dst, 0) &&
-       !(in->flags & NYIR_INST_F_AFFINE_ADDR_BASE)))
+       !(in->flags & NYIR_INST_F_AFFINE_ADDR_BASE))))
     return false;
   const int inputs[] = {in->a, in->b, in->c, in->d, in->e, in->f};
   for (size_t k = 0; k < sizeof(inputs) / sizeof(inputs[0]); ++k)
@@ -1262,4 +1280,11 @@ bool nyr_licm(nyr_func_t *f) {
   }
   licm_clear_affine_address_markers(f);
   return true;
+}
+
+bool nyr_licm_post_vectorize(nyr_func_t *f) {
+  licm_allow_address_hoist = true;
+  bool ok = nyr_licm(f);
+  licm_allow_address_hoist = false;
+  return ok;
 }

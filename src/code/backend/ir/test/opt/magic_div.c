@@ -3,10 +3,12 @@
  * two COPY moves before DIV/MOD consume it.  The synthetic dynamic divisor
  * must retain the idivq fallback.
  */
+#include "code/backend/internal.h"
 #include "code/backend/object/internal.h"
 #include "support.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static nyr_mach_operand_t vreg(nyr_mach_reg_t reg) {
@@ -390,6 +392,50 @@ static bool verify_unproven_signed_pow2_division_fuses(void) {
   return ok;
 }
 
+static bool verify_text_pow2_mod(void) {
+  const int64_t divisors[] = {2, -8, INT64_C(2147483648),
+                              INT64_C(4294967296), INT64_MIN};
+  for (size_t i = 0; i < sizeof(divisors) / sizeof(divisors[0]); ++i) {
+    nyr_mach_func_t mach = {0};
+    nyr_writer_t out = {0};
+    nyr_mach_reg_t input = 0, divisor = 0, result = 0;
+    uint32_t block = 0;
+    char err[256] = {0};
+    ny_native_target_info_t target = {
+        .target = NY_NATIVE_TARGET_X86_64,
+        .abi = NY_NATIVE_ABI_SYSV,
+        .object_format = "elf",
+        .symbol_prefix = "",
+    };
+    bool ok = nyr_mach_alloc_typed_vreg(&mach, NYR_MACH_TYPE_I64, &input) &&
+              nyr_mach_alloc_typed_vreg(&mach, NYR_MACH_TYPE_I64, &divisor) &&
+              nyr_mach_alloc_typed_vreg(&mach, NYR_MACH_TYPE_I64, &result) &&
+              nyr_mach_begin_block(&mach, 0, &block) &&
+              emit(&mach, NYR_MACH_COPY, vreg(input), imm(-123),
+                   (nyr_mach_operand_t){0}, NYR_MACH_EFFECT_NONE) &&
+              emit(&mach, NYR_MACH_COPY, vreg(divisor), imm(divisors[i]),
+                   (nyr_mach_operand_t){0}, NYR_MACH_EFFECT_NONE) &&
+              emit(&mach, NYR_MACH_MOD, vreg(result), vreg(input),
+                   vreg(divisor), NYR_MACH_EFFECT_NONE) &&
+              emit(&mach, NYR_MACH_RET, (nyr_mach_operand_t){0},
+                   vreg(result), (nyr_mach_operand_t){0},
+                   NYR_MACH_EFFECT_CONTROL) &&
+              nyr_mach_verify(&mach, 0, err, sizeof(err)) &&
+              nyr_x86_64_emit_mach_scalar(&out, &target, &mach, "mod_pow2",
+                                          false, false, err, sizeof(err));
+    ok = ok && out.data && strstr(out.data, "andq") &&
+         !strstr(out.data, "idiv") && !strstr(out.data, "imul");
+    if (!ok)
+      fprintf(stderr, "[magic-div] pow2 remainder %lld: %s\n",
+              (long long)divisors[i], err[0] ? err : "unexpected assembly");
+    free(out.data);
+    nyr_mach_func_free(&mach);
+    if (!ok)
+      return false;
+  }
+  return true;
+}
+
 int main(void) {
   if (!verify_fixed_register_result_is_colorable() ||
       !verify_nonclobbered_value_stays_resident_across_div() ||
@@ -397,7 +443,8 @@ int main(void) {
       !verify_pow2_div_keeps_rcx_live_ranges_resident() ||
       !verify_call_clobbers_are_limited_to_live_through_values() ||
       !verify_nir_constant_pow2_division_lowers_immediate() ||
-      !verify_unproven_signed_pow2_division_fuses())
+      !verify_unproven_signed_pow2_division_fuses() ||
+      !verify_text_pow2_mod())
     return 1;
   nyr_mach_func_t mach = {0};
   nyr_mach_reg_t dividend, divisor, copy0, copy1, quotient, remainder;

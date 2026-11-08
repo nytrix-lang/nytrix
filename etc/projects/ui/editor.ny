@@ -197,9 +197,6 @@ mut f64 FONT_SMALL_ADV = small_advance >= 2.0 && small_advance <= float(font_sma
 mut f64 FONT_MODELINE_ADV = modeline_advance >= 2.0 && modeline_advance <= float(font_modeline_size) * 2.0 ? modeline_advance : float(font_modeline_size) * 0.6
 mut f64 FONT_MODELINE_CLIP_ADV = max(9.6, FONT_MODELINE_ADV * 1.35)
 def SECTION_H = project.TREE_HEADER_H
-def SECTION_ICON_Y = 0.0
-def SECTION_TEXT_Y = 0.0
-def ROW_TEXT_Y = 0.0
 def EDITOR_TEXT_TOP = 6.0
 def INPUT_TRACE = common.env_truthy("NY_EDITOR_INPUT_TRACE")
 def SHOW_LAST_KEY = common.env_truthy("NY_EDITOR_SHOW_LAST_KEY")
@@ -222,7 +219,6 @@ def TOP_TAB_MAX_W = 144.0
 def MOUSE_BACK = 3
 def MOUSE_FORWARD = 4
 def NAV_LIMIT = 96
-def NAV_SEP = "\t"
 def EDITOR_CACHE_PATH = "build/cache/editor_state.cfg"
 def TERM_TAB_H = 23.0
 def TERM_TAB_MIN_W = 64.0
@@ -278,12 +274,6 @@ fn _stroke_rect(f64 x, f64 y, f64 w, f64 h, any c, f64 thick=1.0) int {
 fn _text(int font, any text, f64 x, f64 y, any color) int {
    _flush_rects()
    gfx.draw_text(font, text, x, y, color)
-   0
-}
-
-fn _text_right(int font, any text, f64 x, f64 y, any color) int {
-   _flush_rects()
-   widgets.text_right(font, text, x, y, color)
    0
 }
 
@@ -373,16 +363,8 @@ def U_DIM = _pack(C_DIM)
 def U_ACCENT = _pack(C_ACCENT)
 def U_ACCENT_2 = _pack(C_ACCENT_2)
 def U_CYAN = _pack(C_CYAN)
-def U_OK = _pack(C_OK)
 def U_WARN = _pack(C_WARN)
 def U_KEYWORD = _pack(C_KEYWORD)
-def U_TYPE = _pack(C_TYPE)
-def U_STRING = _pack(C_STRING)
-def U_NUMBER = _pack(C_NUMBER)
-def U_COMMENT = _pack(C_COMMENT)
-def U_FUNC = _pack(C_FUNC)
-def U_OPERATOR = _pack(C_OPERATOR)
-def U_PROPERTY = _pack(C_PROPERTY)
 def TERM_BG = 0xff020101
 def TERM_FG = 0xfff6f5f5
 mut dict st = dict(0)
@@ -1008,12 +990,6 @@ fn _editor_context_entry() dict {
    entry["dir"] = false
    entry["kind"] = to_str(b.get("kind", "file"))
    entry
-}
-
-@returns_owned
-fn _context_file_entry(dict entry) dict {
-   if is_dict(entry) && to_str(entry.get("path", "")).len > 0 { return clone(entry) }
-   _editor_context_entry()
 }
 
 fn _open_context(f64 x, f64 y, dict entry, str scope) int {
@@ -1744,29 +1720,6 @@ fn _nav_record_current() int {
    0
 }
 
-@returns_owned
-fn _nav_trim(list xs) list {
-   if xs.len <= NAV_LIMIT { return clone(xs) }
-   mut out = []
-   mut i = xs.len - NAV_LIMIT
-   while i < xs.len {
-      out = out.append(xs.get(i))
-      i += 1
-   }
-   out
-}
-
-@returns_owned
-fn _nav_without_last(list xs) list {
-   mut out = []
-   mut int i = 0
-   while i + 1 < xs.len {
-      out = out.append(xs.get(i))
-      i += 1
-   }
-   out
-}
-
 fn _nav_push_current() int {
    nav_prev_idx = nav_live_idx
    nav_next_idx = -1
@@ -1775,36 +1728,6 @@ fn _nav_push_current() int {
 
 fn _nav_push_current_if_target_diff(str target_path) int {
    _nav_push_current()
-}
-
-fn _nav_find_buffer(list loc) int {
-   def want_path = to_str(loc.get(0, ""))
-   def want_name = to_str(loc.get(1, ""))
-   def want_idx = int(loc.get(2, -1))
-   def bs = st.get("buffers", [])
-   if want_path.len <= 0 && want_idx >= 0 && want_idx < bs.len { return want_idx }
-   mut i = 0
-   while i < bs.len {
-      def b = bs.get(i, {})
-      if want_path.len > 0 && str._str_eq(ospath.normalize(_buffer_source_path(b)), ospath.normalize(want_path)) { return i }
-      if want_path.len == 0 && str._str_eq(to_str(b.get("name", "")), want_name) { return i }
-      i += 1
-   }
-   (want_idx >= 0 && want_idx < bs.len) ? want_idx : -1
-}
-
-fn _nav_restore(list loc) bool {
-   def idx = _nav_find_buffer(loc)
-   if idx < 0 { return false }
-   st = ed.select_buffer(st, idx)
-   st["cursor_line"] = int(loc.get(3, 0))
-   st["cursor_col"] = int(loc.get(4, 0))
-   st["scroll"] = int(loc.get(5, 0))
-   _clear_selections()
-   st = ed.clamp_cursor(st)
-   _buffer_changed(true)
-   nav_live_loc = loc
-   true
 }
 
 fn _nav_go(int dir) int {
@@ -1847,12 +1770,6 @@ fn _cursor_make(int row, int col, bool primary=false) dict {
 }
 
 fn _cursor_primary(any c) bool { is_dict(c) && bool(c.get("primary", false)) }
-
-fn _cursor_before(any a, any b) bool {
-   def ar = _cursor_row(a)
-   def br = _cursor_row(b)
-   ar < br || (ar == br && _cursor_col(a) < _cursor_col(b))
-}
 
 @returns_owned
 fn _cursor_sorted_desc(list cursors) list {
@@ -2101,12 +2018,6 @@ fn _range_norm(any r) list {
 fn _range_valid(any r) bool {
    if !is_list(r) || r.len < 4 { return false }
    int(r.get(0, 0)) != int(r.get(2, 0)) || int(r.get(1, 0)) != int(r.get(3, 0))
-}
-
-fn _range_before(any a, any b) bool {
-   def ar = int(a.get(0, 0))
-   def br = int(b.get(0, 0))
-   ar < br || (ar == br && int(a.get(1, 0)) < int(b.get(1, 0)))
 }
 
 @returns_owned
@@ -3062,11 +2973,6 @@ fn _debug_breakpoint() int {
    _debug_send("break " + path + ":" + to_str(int(st.get("cursor_line", 0)) + 1))
 }
 
-fn _debug_current_file() int {
-   _debug_start_current()
-   0
-}
-
 fn _save() int {
    def path = _current_path()
    def was_dirty = bool(ed.current_buffer(st).get("dirty", false))
@@ -3452,13 +3358,6 @@ fn _completion_handle_key(any data) bool {
    false
 }
 
-fn _definition_pos_in(list lines, str word) list {
-   if word.len <= 0 { return [-1, 0] }
-   def hit = _definition_index_from_lines(lines, "").get(word, dict(0))
-   if is_dict(hit) && hit.len > 0 { return [int(hit.get("line", -1)), int(hit.get("col", 0))] }
-   [-1, 0]
-}
-
 fn _definition_decl_name(str s, int start) str {
    mut i = start
    while i < s.len {
@@ -3512,10 +3411,6 @@ fn _definition_index_from_lines(list lines, str path="", int max_lines=0) dict {
       i += 1
    }
    idx
-}
-
-fn _definition_line_for(str word) int {
-   int(_definition_pos_in(ed.current_lines(st), word).get(0, -1))
 }
 
 fn _current_definition_index() dict {
@@ -6027,18 +5922,6 @@ fn _syntax_runs_text(list runs) str {
    out
 }
 
-fn _draw_highlighted_line(str filename, str line, int li, f64 x, f64 y) int {
-   def runs = _syntax_runs(filename, line, li)
-   if runs.len == 0 { return 0 }
-   mut i = 0
-   while i < runs.len {
-      def run = runs.get(i)
-      _text(font_body, to_str(run.get(0, "")), x + float(run.get(2, 0.0)), y, _tok_color(int(run.get(1, syntax.TOK_TEXT))))
-      i += 1
-   }
-   0
-}
-
 fn _measure_prefix(str line, int col) f64 {
    if width_cache_rev != content_rev {
       width_cache_rev = content_rev
@@ -6139,29 +6022,6 @@ fn _draw_selection_for_line(str line, int li, f64 text_x, f64 y, list r) int {
    def sx = text_x + _measure_prefix(line, a)
    def ex = text_x + _measure_prefix(line, b)
    _fill_rect(sx, y - 2.0, max(4.0, ex - sx), ed.LINE_H, gfx.color_alpha(C_SELECT, 0.70))
-   0
-}
-
-fn _draw_find_for_line(str line, int li, f64 text_x, f64 y) int {
-   if !find.is_open(find_state) || find.count(find_state) <= 0 { return 0 }
-   def rs = find.results(find_state)
-   def active_idx = find.index(find_state)
-   mut i = 0
-   while i < rs.len {
-      def r = rs.get(i)
-      def row = int(r.get("line", -1))
-      if row > li { break }
-      if row == li {
-         def int a = int(min(max(int(r.get("start", 0)), 0), line.len))
-         def int b = int(min(max(int(r.get("end", a)), a), line.len))
-         if b > a {
-            def sx = text_x + _measure_prefix(line, a)
-            def ex = text_x + _measure_prefix(line, b)
-            _fill_rect(sx, y - 2.0, max(4.0, ex - sx), float(ed.LINE_H), i == active_idx ? gfx.color_alpha(C_ACCENT, 0.52) : gfx.color_alpha(C_CYAN, 0.24))
-         }
-      }
-      i += 1
-   }
    0
 }
 
@@ -6302,14 +6162,6 @@ fn _draw_top(dict lay, int fps) int {
    }
    _flush_rects()
    if runs.len > 0 { gfx.draw_text_runs_flat_colors(font_modeline, runs) }
-   0
-}
-
-fn _draw_git_badge(str code, f64 right_x, f64 y) int {
-   mut runs = []
-   runs = _queue_git_badge(runs, code, right_x, y)
-   _flush_rects()
-   if runs.len > 0 { gfx.draw_text_runs_flat_colors(font_small, runs) }
    0
 }
 

@@ -300,6 +300,16 @@ static bool nir_select_condition_is_boolean(const nyr_func_t *f, int value,
       return true;
     if (def->op == NYIR_CONST_I64)
       return def->imm == 0 || def->imm == 1;
+    /*
+     * Bool normalization (`and 1, cmp`): an AND with one 0/1 operand is
+     * 0/1, as is OR/XOR of two 0/1 values.
+     */
+    if (def->op == NYIR_AND_I64)
+      return nir_select_condition_is_boolean(f, def->a, i, depth + 1) ||
+             nir_select_condition_is_boolean(f, def->b, i, depth + 1);
+    if (def->op == NYIR_OR_I64 || def->op == NYIR_XOR_I64)
+      return nir_select_condition_is_boolean(f, def->a, i, depth + 1) &&
+             nir_select_condition_is_boolean(f, def->b, i, depth + 1);
     return def->op == NYIR_COPY &&
            nir_select_condition_is_boolean(f, def->a, i, depth + 1);
   }
@@ -788,14 +798,42 @@ static bool nir_verify_local_store_scalar_classes(const nyr_func_t *f,
   return true;
 }
 
+/*
+ * A call to a runtime panic primitive never returns: it longjmps to the
+ * nearest handler or exits.  The cold zero value the lowering emits after it
+ * (so the block still ends in a terminator) is unreachable, and its word has
+ * no relation to the function's real return ABI — a `-> f64` function's
+ * divide-by-zero block must not be forced to return an f64 zero just to
+ * satisfy the verifier.
+ */
+static bool nir_call_never_returns(const nyr_inst_t *in) {
+  if (!in || in->op != NYIR_CALL || !in->symbol)
+    return false;
+  return strcmp(in->symbol, "rt_panic") == 0 ||
+         strcmp(in->symbol, "rt_panic_fmt") == 0 ||
+         strcmp(in->symbol, "rt_exit") == 0 ||
+         strcmp(in->symbol, "rt_process_exit") == 0;
+}
+
 static bool nir_verify_return_scalar_classes(const nyr_func_t *f, char *err,
                                              size_t err_len) {
   bool has_return = false;
   size_t first_return = SIZE_MAX;
   nyr_scalar_class_t return_abi = NYIR_SCALAR_UNKNOWN;
+  bool after_noreturn = false;
   for (size_t i = 0; i < f->len; ++i) {
     const nyr_inst_t *in = &f->data[i];
+    if (in->op == NYIR_LABEL) {
+      after_noreturn = false;
+      continue;
+    }
+    if (nir_call_never_returns(in)) {
+      after_noreturn = true;
+      continue;
+    }
     if (in->op != NYIR_RET)
+      continue;
+    if (after_noreturn)
       continue;
     has_return = true;
     /*
@@ -1197,6 +1235,7 @@ static bool nir_verify_dominance(const nyr_func_t *f, char *err,
     case NYIR_VEC8_SET1_F32:
     case NYIR_VEC4_SET1_I64:
     case NYIR_VEC8_SAR_I64:
+    case NYIR_VEC8_SHR_I64:
     case NYIR_VEC8_SET1_I64:
     case NYIR_VEC4_SHUFFLE_F64:
     case NYIR_VEC8_SHUFFLE_F32:
@@ -2429,6 +2468,7 @@ bool nyr_ir_verify(const nyr_func_t *f, char *err, size_t err_len) {
     case NYIR_VEC8_SET1_F32:
     case NYIR_VEC4_SET1_I64:
     case NYIR_VEC8_SAR_I64:
+    case NYIR_VEC8_SHR_I64:
       if (in->imm < 0 || in->imm > 63) {
         free(defined);
         return nir_verify_inst_err(

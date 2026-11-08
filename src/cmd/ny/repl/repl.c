@@ -37,6 +37,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
+#ifndef _WIN32
+#include <sys/wait.h>
+#endif
 
 #ifdef _WIN32
 #include <windows.h>
@@ -103,6 +107,11 @@ static LLVMBuilderRef g_repl_builder = NULL;
 static char *g_std_src_cached_persistent = NULL;
 static char *g_repl_last_expand_source = NULL;
 static char *g_repl_last_expand_name = NULL;
+/*
+ * Last snippet the user actually ran, and the file it came from when :load/:run.
+ */
+static char *g_repl_last_run_source = NULL;
+static char *g_repl_last_run_path = NULL;
 static int g_repl_timing = 0;
 static int g_repl_phase_trace = 0;
 static int g_repl_exec_trace_enabled = 0;
@@ -870,6 +879,29 @@ static int repl_print_help_query(doc_list_t *docs, const char *query) {
       printed = doclist_print(docs, query);
   }
   return printed;
+}
+
+/*
+ * F1 hook from the line editor: print docs for `query` like :help does.
+ */
+void ny_repl_show_help(const char *query) {
+  doc_list_t *docs = (doc_list_t *)g_repl_docs;
+  if (!docs || !query || !*query)
+    return;
+  char norm[512];
+  repl_normalize_doc_query(query, norm, sizeof(norm));
+  const char *lookup = norm[0] ? norm : query;
+  repl_ensure_docs_for_query(docs, lookup);
+  int printed = repl_print_namespace_help(docs, lookup) ||
+                doclist_print_best(docs, lookup);
+  if (!printed && !strchr(lookup, '.')) {
+    for (size_t i = 0; i < ny_std_module_count(); ++i)
+      repl_load_module_docs(docs, ny_std_module_name(i));
+    printed = repl_print_namespace_help(docs, lookup) ||
+              doclist_print_best(docs, lookup);
+  }
+  if (!printed)
+    doclist_print_missing(docs, lookup);
 }
 
 static void repl_print_panic_value(int64_t msg) {
@@ -1799,6 +1831,129 @@ static void repl_restore_terminal_state(void) {
     return;
   fputs("\033[?2004l\033[0m\033[?25h\033[?7h", stdout);
   fflush(stdout);
+}
+
+static void repl_set_last_run(const char *source, const char *path) {
+  free(g_repl_last_run_source);
+  g_repl_last_run_source = (source && *source) ? ny_strdup(source) : NULL;
+  free(g_repl_last_run_path);
+  g_repl_last_run_path = (path && *path) ? ny_strdup(path) : NULL;
+}
+
+/*
+ * Always vim. $EDITOR is ignored so a stale nvim setting cannot take over.
+ * The child gets the default interrupt handler so vim, not the REPL flag,
+ * owns Ctrl-C.
+ */
+static int repl_launch_editor(const char *path) {
+  if (!path || !*path || !isatty(STDIN_FILENO) || !isatty(STDOUT_FILENO))
+    return -1;
+  fflush(NULL);
+  repl_restore_terminal_state();
+#ifndef _WIN32
+  pid_t pid = fork();
+  if (pid < 0)
+    return -1;
+  if (pid == 0) {
+    signal(SIGINT, SIG_DFL);
+    signal(SIGQUIT, SIG_DFL);
+    execlp("vim", "vim", path, (char *)NULL);
+    _exit(127);
+  }
+  int status = 0;
+  for (;;) {
+    pid_t got = waitpid(pid, &status, 0);
+    if (got < 0) {
+      if (errno == EINTR)
+        continue;
+      return -1;
+    }
+    break;
+  }
+  repl_restore_terminal_state();
+  if (WIFEXITED(status))
+    return WEXITSTATUS(status);
+  return -1;
+#else
+  char cmd[8192];
+  snprintf(cmd, sizeof(cmd), "vim \"%s\"", path);
+  int rc = system(cmd);
+  repl_restore_terminal_state();
+  return rc;
+#endif
+}
+
+/*
+ * Edit path in place, or a temporary buffer seeded with initial.
+ * On success *out_text is the file contents (always, when readable) and
+ * *changed is set when those contents differ from what the editor opened.
+ */
+static int repl_edit_buffer(const char *path, const char *initial,
+                            char **out_text, int *changed) {
+  char tmp_path[PATH_MAX];
+  int temporary = 0;
+  const char *edit_path = path;
+  if (out_text)
+    *out_text = NULL;
+  if (changed)
+    *changed = 0;
+  if (!edit_path || !*edit_path) {
+#ifdef _WIN32
+    snprintf(tmp_path, sizeof(tmp_path), "%s\\ny-repl-%d.ny",
+             getenv("TEMP") ? getenv("TEMP") : ".", (int)getpid());
+#else
+    snprintf(tmp_path, sizeof(tmp_path), "/tmp/ny-repl-edit-%d-XXXXXX",
+             (int)getpid());
+    int fd = mkstemp(tmp_path);
+    if (fd < 0)
+      return -1;
+    if (initial && *initial) {
+      size_t len = strlen(initial);
+      if (write(fd, initial, len) != (ssize_t)len) {
+        close(fd);
+        unlink(tmp_path);
+        return -1;
+      }
+    }
+    close(fd);
+    temporary = 1;
+    edit_path = tmp_path;
+#endif
+  }
+#ifdef _WIN32
+  if (!path || !*path) {
+    FILE *created = fopen(tmp_path, "w");
+    if (!created)
+      return -1;
+    if (initial && *initial)
+      fputs(initial, created);
+    fclose(created);
+    temporary = 1;
+    edit_path = tmp_path;
+  }
+#endif
+  char *before = repl_read_file(edit_path);
+  if (!before)
+    before = ny_strdup(initial ? initial : "");
+  int rc = repl_launch_editor(edit_path);
+  char *after = repl_read_file(edit_path);
+  if (temporary)
+    unlink(edit_path);
+  if (rc != 0) {
+    free(before);
+    free(after);
+    return rc;
+  }
+  if (!after)
+    after = ny_strdup("");
+  if (changed)
+    *changed = !before || strcmp(before, after) != 0;
+  free(before);
+  if (out_text)
+    *out_text = after;
+  else
+    free(after);
+  return 0;
 }
 
 static bool repl_is_known_package(const char *name) {
@@ -3553,6 +3708,41 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
         free(full_input);
         break;
       }
+      if (!strcmp(cn, "e") || !strcmp(cn, "edit") || !strcmp(cn, "editor")) {
+        /*
+         * GHCi :edit. No argument opens the last snippet that ran (or the
+         * file from :load/:run). Quitting the editor comes back here and,
+         * when the buffer changed, runs that source.
+         */
+        const char *edit_path = NULL;
+        const char *seed = "";
+        if (*p) {
+          edit_path = p;
+        } else if (g_repl_last_run_path && *g_repl_last_run_path) {
+          edit_path = g_repl_last_run_path;
+        } else if (g_repl_last_run_source && *g_repl_last_run_source) {
+          seed = g_repl_last_run_source;
+        } else if (g_repl_user_source && *g_repl_user_source) {
+          seed = g_repl_user_source;
+        }
+        char *edited = NULL;
+        int changed = 0;
+        int rc = repl_edit_buffer(edit_path, seed, &edited, &changed);
+        if (rc != 0) {
+          printf("Editor failed\n");
+          last_status = 1;
+        } else if (changed && edited && *edited) {
+          repl_set_last_run(edited, edit_path);
+          repl_set_last_expand_source(edited, edit_path ? edit_path
+                                                        : "<repl:edit>");
+          last_status = repl_eval_snippet(edited, 1, NULL, std_mode, tty_in,
+                                          &docs, 0, 0);
+          repl_restore_terminal_state();
+        }
+        free(edited);
+        free(full_input);
+        continue;
+      }
       if (!strcmp(cn, "clear") || !strcmp(cn, "cls")) {
         printf("\033[2J\033[H");
         free(full_input);
@@ -3570,6 +3760,7 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
         }
         g_repl_core_root_lazy = 0;
         repl_set_last_expand_source(NULL, NULL);
+        repl_set_last_run(NULL, NULL);
         repl_init_engine(std_mode, &docs);
         printf("Reset\n");
         last_status = 0;
@@ -3708,8 +3899,9 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
                   repl_load_snapshot_image(p, src, std_mode, &docs) == 0 ? 0
                                                                          : 1;
             } else {
-              repl_set_last_expand_source(src, p);
-              repl_append_user_source(src);
+            repl_set_last_expand_source(src, p);
+            repl_set_last_run(src, p);
+            repl_append_user_source(src);
               printf("Loaded %s (%zu bytes)\n", p, strlen(src));
               parser_t ps;
               parser_init(&ps, src, p);
@@ -3735,6 +3927,7 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
           char *src = repl_read_file(p);
           if (src) {
             repl_set_last_expand_source(src, p);
+            repl_set_last_run(src, p);
             last_status =
                 repl_eval_snippet(src, 1, NULL, std_mode, tty_in, &docs, 0, 0);
             free(src);
@@ -4060,6 +4253,8 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
           printf("  %-15s Save a REPL image, optionally AOT-export it\n",
                  ":snapshot [file]");
           printf("  %-15s Load a file\n", ":load [file]");
+          printf("  %-15s Edit the last run in vim, then run it\n",
+                 ":e/:edit [file]");
           printf("  %-15s Evaluate and run a file\n", ":run [file]");
           printf("  %-15s Save session/source to file\n", ":save [file]");
           printf("  %-15s Show standard library info\n", ":std");
@@ -4142,6 +4337,7 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
       free(name);
     }
     repl_set_last_expand_source(full_input, "<repl:last>");
+    repl_set_last_run(full_input, NULL);
     char *an = repl_assignment_target(eval_input);
     last_status = repl_eval_snippet(eval_input, is_stmt, an, std_mode, tty_in,
                                     &docs, 0, 0);

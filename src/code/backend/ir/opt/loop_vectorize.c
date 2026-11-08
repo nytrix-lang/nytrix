@@ -2907,9 +2907,17 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
     bool keep_four_lane_reduction =
         needs_broadcast && supports_vec8_i64_broadcast && vf == 4 &&
         reduction_phi_dst < 0;
+    /*
+     * With a loop-carried vector accumulator (below) a four-lane reduction
+     * no longer reduces each chunk to a scalar, so keep the full AVX2 width
+     * instead of narrowing integer reductions to two lanes.
+     */
+    bool wide_accumulator = !getenv("NYTRIX_NO_VECTOR_ACCUMULATOR") &&
+                            vf == 4 && supports_vec8_i64_broadcast &&
+                            fixed_trip >= 4 && fixed_trip % 4 == 0;
     if (!bad && reduction_phi_dst >= 0 && !reduction_f64 && !is_var_trip &&
         fixed_trip >= 2 && fixed_trip % 2 == 0 &&
-        !keep_four_lane_reduction) {
+        !keep_four_lane_reduction && !wide_accumulator) {
       vf = 2;
       vload_op = NYIR_VEC4_LOAD_I64;
       vstore_op = NYIR_VEC4_STORE_I64;
@@ -2920,10 +2928,15 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
       bad = true;
     int64_t vector_exit_label = -1;
     /*
-     * Keep loop-carried vector reductions disabled until the machine lowering
-     * preserves the accumulator lanes across every backedge without spills.
+     * Loop-carried vector accumulators for fixed-trip integer reductions.
+     * The vector allocator keeps latch recurrences resident across the
+     * backedge (vector_phi_reads_precede_source, re-checked by
+     * verify_vector_latch_recurrence), which was the reason this stayed off.
+     * NYTRIX_NO_VECTOR_ACCUMULATOR=1 restores the per-chunk reduction.
      */
-    bool vector_accumulator_safe = false;
+    bool vector_accumulator_safe = !getenv("NYTRIX_NO_VECTOR_ACCUMULATOR") &&
+                                   reduction_phi_dst >= 0 && !reduction_f64 &&
+                                   !is_var_trip;
     /*
      * The reduction update is excluded from the body scan above. This
      * transformation emits one vector add per chunk in place of one scalar

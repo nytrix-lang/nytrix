@@ -3141,12 +3141,8 @@ stmt_var_setup_local_binding(codegen_t *cg, scope *scopes, size_t depth,
       (prefer_direct_locals ||
        can_bind_decl_direct(cg, name, var_stmt->as.var.is_mut))) {
     *bind_direct = true;
-    if (depth == 0)
-      fprintf(stderr, "DBG top_level bind_direct=true for %s\n", name);
     return;
   }
-  if (depth == 0)
-    fprintf(stderr, "DBG top_level bind_direct=false for %s slot=%p\n", name, (void*)*slot);
   bool use_f64_slot = false;
   bool use_f32_slot = false;
   bool use_int_slot = false;
@@ -8111,11 +8107,6 @@ static void gen_stmt_defer(codegen_t *cg, scope *scopes, size_t depth,
                            stmt_t *s) {
   if (!s->as.de.body)
     return;
-  FILE *dbg = fopen("/tmp/ny_defer_stmt_debug.txt", "a");
-  if (dbg) {
-    fprintf(dbg, "DBG gen_stmt_defer called, depth=%zu\n", depth);
-    fclose(dbg);
-  }
   ny_param_list no_params = {0};
   LLVMValueRef cls = gen_closure(cg, scopes, depth, no_params, s->as.de.body,
                                  false, NULL, "__defer");
@@ -8181,8 +8172,6 @@ static void gen_stmt_struct(codegen_t *cg, stmt_t *s) {
 
 static void gen_stmt_module(codegen_t *cg, scope *scopes, size_t *depth,
                             stmt_t *s, size_t func_root, bool is_tail) {
-  fprintf(stderr, "DBG gen_stmt_module depth=%zu body.len=%zu\n",
-          *depth, s->as.module.body.len);
   const char *prev = cg->current_module_name;
   cg->current_module_name = s->as.module.name;
   bool direct_source_module =
@@ -8277,8 +8266,6 @@ void collect_labels(codegen_t *cg, LLVMValueRef func, stmt_t *s, size_t depth) {
  */
 static void gen_stmt_var(codegen_t *cg, scope *scopes, size_t *depth,
                          stmt_t *s) {
-  fprintf(stderr, "DBG gen_stmt_var depth=%zu names.len=%zu\n",
-          *depth, s->as.var.names.len);
   bool dest = s->as.var.is_destructure;
   NY_COMPILER_ASSERTF(s->as.var.names.len > 0,
                       "var stmt has no bindings at line %d", s->tok.line);
@@ -9513,11 +9500,6 @@ static void gen_stmt_inner(codegen_t *cg, scope *scopes, size_t *depth,
                            stmt_t *s, size_t func_root, bool is_tail) {
   if (!s || cg->had_error)
     return;
-  FILE *dbg = fopen("/tmp/ny_gen_stmt_debug.txt", "a");
-  if (dbg) {
-    fprintf(dbg, "DBG gen_stmt_inner kind=%d\n", s ? (int)s->kind : -1);
-    fclose(dbg);
-  }
 
   ny_dbg_loc(cg, s->tok);
   if (cg->trace_exec)

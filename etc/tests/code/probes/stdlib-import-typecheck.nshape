@@ -1,0 +1,26 @@
+shape stdlib_import_typecheck {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "stdlib"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core.math.crypto.gf as gf
+use core.os.net.requests as requests
+
+def solution = gf.solve_gf2([[1, 0], [0, 1]], [1, 0])
+assert(solution[0] == 1 && solution[1] == 0,
+       "GF2 elimination keeps integer row indices")
+
+def prepared = requests.prepare_request({
+  "url": "http://example.test/path",
+  "params": {"q": "ny request", "page": 2}
+})
+def prepared_url = prepared.get("url", "")
+assert(str_contains(prepared_url, "q=ny+request"),
+       "request query encodes spaces")
+assert(str_contains(prepared_url, "&page=2") ||
+       str_contains(prepared_url, "&q=ny+request"),
+       "request query separates dictionary pairs")
+NY
+}

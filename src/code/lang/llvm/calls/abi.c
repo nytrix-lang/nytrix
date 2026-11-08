@@ -1742,7 +1742,7 @@ static LLVMValueRef ny_try_emit_fast_receiver_set(codegen_t *cg, scope *scopes,
                                    ? ny_std_module_id((size_t)std_list_index)
                                    : NY_MODULE_ID_UNKNOWN;
   bool semantic_list_receiver =
-      canonical && strncmp(canonical, "core.list.", 14) == 0 &&
+      canonical && strncmp(canonical, "core.list.", 10) == 0 &&
       canonical_decl && canonical_decl->kind == NY_S_FUNC &&
       std_list_id != NY_MODULE_ID_UNKNOWN &&
       canonical_decl->tok.module_id == std_list_id &&

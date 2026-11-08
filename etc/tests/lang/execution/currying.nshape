@@ -1,0 +1,76 @@
+shape automatic_partial_application {
+  family "runtime/execution"
+  generator "embedded"
+  features [ny closures calls currying]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit -O0; --native-backend=llvm --jit --jit-engine=orc -O2"
+  expect compile_and_run
+  expect_message "CURRY-OK"
+  source ny <<'NY'
+use core
+fn add(int a, int b) int { a + b }
+def add5 = add(5)
+assert(add5(3) == 8, "escaped partial captures its supplied argument")
+assert(add5(7) == 12, "partial remains reusable")
+assert(add(5)(3) == 8, "immediate partial call")
+fn sum3(int a, int b, int c) int { a + b + c }
+assert(sum3(1)(2)(3) == 6, "three successive applications")
+assert(sum3(1)(2, 3) == 6, "grouped residual arguments")
+assert(sum3(1, 2)(3) == 6, "two bound arguments")
+def multiply = fn(int a, int b) int { a * b }
+def twice = multiply(2)
+assert(twice(21) == 42, "lambda partial")
+assert(add(20, 22) == 42, "full call unchanged")
+fn default_add(int a, int b=4) int { a + b }
+assert(default_add(3) == 7, "defaults take precedence over partial application")
+fn default_sum(int a, int b, int c=4) int { a + b + c }
+def default_partial = default_sum(1)
+assert(default_partial(2) == 7, "residual optional argument uses its default")
+assert(default_partial(2, 3) == 6, "residual default can be overridden")
+fn pick(int n, Fin<n> index, list<int> values) int { values[index] }
+def pick3 = pick(3)
+assert(pick3(2, [10, 20, 30]) == 30, "partial substitutes its bound value index")
+fn no_args() int { 42 }
+assert(no_args() == 42, "zero argument function unchanged")
+mut events = []
+fn mark(int n) int { events.append(n) n }
+fn observed_add(int a, int b) int { events.append(9) a + b }
+def observed = observed_add(mark(1))
+assert(events == [1], "binding evaluates its argument but not the body")
+assert(observed(mark(2)) == 3, "bound and final arguments reach the body")
+assert(events == [1, 2, 9], "arguments run once in source order")
+fn mixed(f64 a, int b) f64 { a + float(b) }
+def mixed_partial = mixed(1.5)
+assert(mixed_partial(2) == 3.5, "floating captures and returns preserve their ABI")
+fn mixed3(f64 a, int b, int c) f64 { a + float(b + c) }
+def mixed3_partial = mixed3(0.5)
+assert(mixed3_partial(2, 3) == 5.5, "two argument floating callback")
+fn wide(f64 base, int a, int b, int c, int d, int e, int f, int g,
+        int h, int i, int j, int k, int l, int m, int n, int o) f64 {
+   base + float(a + b + c + d + e + f + g + h + i + j + k + l + m + n + o)
+}
+def wide_partial = wide(0.5)
+assert(wide_partial(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15) == 120.5,
+       "maximum callback arity preserves floating result and captured environment")
+fn recurse(int n, int acc) int {
+   if n == 0 { acc } else { recurse(n - 1)(acc + n) }
+}
+assert(recurse(5)(0) == 15, "recursive saturated partial call")
+print("CURRY-OK")
+NY
+}
+
+shape partial_application_retains_index_bounds {
+  family "runtime/language"
+  generator "embedded"
+  features [ny currying dependent rejection]
+  template ny-test-case
+  expect compile_fail
+  expect_message "Fin<3> requires 0 <= value < 3, got 3"
+  source ny <<'NY'
+use core
+fn pick(int n, Fin<n> index, list<int> values) int { values[index] }
+def pick3 = pick(3)
+pick3(3, [10, 20, 30])
+NY
+}

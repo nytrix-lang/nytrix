@@ -1,0 +1,78 @@
+shape partial_residual_simple_default {
+  family "runtime/execution"
+  generator "embedded"
+  features [ny currying defaults residual positive]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit -O0; --native-backend=llvm --jit --jit-engine=orc -O2"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+; Partial application stops before a parameter that has a default.
+; Residual call without supplying that parameter must use its default.
+fn f(int a, int b, int c=4) int { a + b + c }
+def g = f(1)
+; g still needs `b`; `c` will use its default of 4.
+assert(g(2) == 7, "residual default c=4 is used when not supplied")
+assert(g(2, 3) == 6, "residual default c=4 can be overridden by explicit value")
+assert(g(10) == 15, "residual default is consistent across reuses")
+print("DEFAULTS-OK")
+NY
+}
+
+shape partial_residual_default_references_captured_param {
+  family "runtime/execution"
+  generator "embedded"
+  features [ny currying defaults residual captured-param positive]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit -O0; --native-backend=llvm --jit --jit-engine=orc -O2"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+; A default before a required parameter cannot be skipped positionally, so
+; `f(2)` binds `a`, evaluates `b = a * 2`, and leaves the required `c`.
+fn f(int a, int b = a * 2, int c) int { a + b + c }
+def g = f(2)
+assert(g(5) == 11, "captured default b=2*2, then c=5: 2+4+5")
+assert(g(7) == 13, "captured default is re-evaluated per residual call: 2+4+7")
+def h = f(3)
+assert(h(4) == 13, "captured default scales with the bound argument: 3+6+4")
+NY
+}
+
+shape partial_residual_default_references_preceding_residual_param {
+  family "runtime/execution"
+  generator "embedded"
+  features [ny currying defaults residual dependent-default positive]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit -O0; --native-backend=llvm --jit --jit-engine=orc -O2"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+; Default for `c` references the residual parameter `b`.
+fn f(int a, int b, int c = b * 2) int { a + b + c }
+; Bind a=1.  Residual params: b (required), c (default = b*2).
+def g = f(1)
+; Supply b=3 -> c defaults to 3*2=6 -> result = 1+3+6 = 10
+assert(g(3) == 10, "default c references residual param b: 1+3+6 = 10")
+; Override c explicitly.
+assert(g(3, 5) == 9, "residual default can be overridden: 1+3+5 = 9")
+NY
+}
+
+shape partial_residual_trailing_override {
+  family "runtime/execution"
+  generator "embedded"
+  features [ny currying defaults residual trailing-optional positive]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit -O0; --native-backend=llvm --jit --jit-engine=orc -O2"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+; `b` is evaluated before the required `c`; `d` stays an overridable
+; trailing optional parameter of the residual callable.
+fn f(int a, int b = a + 1, int c, int d = 10) int { a + b + c + d }
+def g = f(4)
+assert(g(5) == 24, "injected b=5 and trailing default d=10: 4+5+5+10")
+assert(g(5, 7) == 21, "trailing default d can be overridden: 4+5+5+7")
+NY
+}

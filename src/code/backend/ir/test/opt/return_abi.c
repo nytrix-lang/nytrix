@@ -73,7 +73,9 @@ static bool check_return_class_reconciliation(void) {
   result = nyr_opt_const_f64(&f, 2.5);
   emit_return(&f, result, NYIR_SCALAR_UNKNOWN);
 
-  /* Agreeing f64 exits are discoverable from whole-function producer facts. */
+  /*
+   * Agreeing f64 exits are discoverable from whole-function producer facts.
+   */
   nyr_reconcile_local_scalar_classes(&f);
   char err[256] = {0};
   bool saw_return = false;

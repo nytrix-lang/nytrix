@@ -15,7 +15,8 @@ typedef struct ny_backend_emitter {
   bool (*emit_mach_scalar)(nyr_writer_t *w,
                            const ny_native_target_info_t *target,
                            const nyr_mach_func_t *mach, const char *label,
-                           bool tag_return, char *err, size_t err_len);
+                           bool tag_return, bool function_return_thunk_extern,
+                           char *err, size_t err_len);
 } nyr_backend_emitter_t;
 
 const nyr_backend_emitter_t *

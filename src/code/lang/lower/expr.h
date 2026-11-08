@@ -1073,7 +1073,14 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
           known != INT64_MIN && known <= (INT64_C(1) << 62) - 1 &&
           known >= -(INT64_C(1) << 62) + 1)
         return nyr_emit_const(b, -known);
-      if (nyr_expr_is_f32(b, e->as.unary.right)) {
+      /* The lowered operand's class is the physical truth: the expression
+       * predicates do not see through conversions such as `float(x)`, and an
+       * integer subtract on f64 bits produces garbage.  Subtracting from -0.0
+       * is exact IEEE negation; subtracting from +0.0 loses the sign of zero. */
+      nyr_scalar_class_t operand_class = nyr_value_scalar_class(b, rv);
+      if (operand_class == NYIR_SCALAR_F32 ||
+          (operand_class != NYIR_SCALAR_F64 &&
+           nyr_expr_is_f32(b, e->as.unary.right))) {
         /* A literal folds to the negated constant: `0.0f - v` is IEEE
          * +0.0 for v = 0.0, so `-0.0f` would lose its sign bit (the
          * scalar-classes -0.0 contract). */
@@ -1085,14 +1092,15 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
             return -1;
           return negated;
         }
-        int zero = nyr_emit_const_f32(b, 0.0f);
+        int zero = nyr_emit_const_f32(b, -0.0f);
         if (zero < 0)
           return -1;
         return nyr_ir_emit(
             &b->nyir,
             (nyr_inst_t){.op = NYIR_SUB_F32, .dst = -1, .a = zero, .b = rv});
       }
-      if (nyr_expr_is_f64(b, e->as.unary.right)) {
+      if (operand_class == NYIR_SCALAR_F64 ||
+          nyr_expr_is_f64(b, e->as.unary.right)) {
         const expr_t *operand = e->as.unary.right;
         if (operand->kind == NY_E_LITERAL &&
             operand->as.literal.kind == NY_LIT_FLOAT) {
@@ -1101,7 +1109,7 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
             return -1;
           return negated;
         }
-        int zero = nyr_emit_const_f64(b, 0.0);
+        int zero = nyr_emit_const_f64(b, -0.0);
         if (zero < 0)
           return -1;
         return nyr_ir_emit(
@@ -1111,6 +1119,16 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
       int zero = nyr_emit_const(b, 0);
       if (zero < 0)
         return -1;
+      if (operand_class == NYIR_SCALAR_I64_TAGGED) {
+        /* A dynamic operand may be a float or BigInt; integer-subtracting the
+         * tagged word from raw zero corrupts every one of them. */
+        int tagged_zero = nyr_emit_runtime_call(b, "rt_box_i64", zero, -1, -1,
+                                                1, NYIR_SCALAR_I64_TAGGED);
+        return tagged_zero < 0
+                   ? -1
+                   : nyr_emit_runtime_call(b, "rt_any_sub", tagged_zero, rv, -1,
+                                           2, NYIR_SCALAR_I64_TAGGED);
+      }
       return nyr_ir_emit(
           &b->nyir,
           (nyr_inst_t){.op = NYIR_SUB_I64, .dst = -1, .a = zero, .b = rv});
@@ -1367,6 +1385,7 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
     match.as.match = e->as.match;
     bool saved_match_any = b->match_result_any;
     b->match_result_any = nyr_expr_is_any(b, e);
+    b->match_value_expr = true;
     if (!nyr_lower_match(b, &match))
       return -1;
     b->match_result_any = saved_match_any;
@@ -3554,16 +3573,18 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
       int out =
           list < 0
               ? -1
-              : nyr_emit_runtime_call(
-                    b, dynamic ? "rt_tbuf_pop_any" : "rt_tbuf_pop_raw", list,
-                    -1, -1, 1,
-                    dynamic ? NYIR_SCALAR_I64_TAGGED : NYIR_SCALAR_I64_RAW);
+              : dynamic
+                    ? nyr_emit_runtime_call(b, "rt_tbuf_pop_any", list, -1,
+                                            -1, 1, NYIR_SCALAR_I64_TAGGED)
+                    : nyr_emit_native_list_pop_raw(b, list);
       if (out < 0)
         return -1;
       int length = nyr_emit_known_list_pop_len(b, list);
       if (length < 0)
-        length =
-            nyr_emit_runtime_call(b, "rt_tbuf_len_raw", list, -1, -1, 1, 0);
+        length = dynamic
+                     ? nyr_emit_runtime_call(b, "rt_tbuf_len_raw", list, -1,
+                                             -1, 1, 0)
+                     : nyr_emit_native_list_length_raw(b, list);
       if (length < 0 || !nyr_record_list_len_fact(b, list, length))
         return -1;
       if (local) {
@@ -4442,7 +4463,9 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
     if (strcmp(method, "contains") == 0 && e->as.memcall.args.len == 1 &&
         !dynamic_target_is_module) {
       int container = nyr_lower_expr(b, e->as.memcall.target);
-      int item = nyr_lower_expr(b, e->as.memcall.args.data[0].val);
+      int item = nyr_contains_item(
+          b, e->as.memcall.target, e->as.memcall.args.data[0].val,
+          nyr_lower_expr(b, e->as.memcall.args.data[0].val));
       return container < 0 || item < 0
                  ? -1
                  : nyr_emit_runtime_call(b, "rt_contains_raw", container, item,
@@ -4756,7 +4779,9 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
     if (!is_dict && !is_module_namespace && strcmp(method, "contains") == 0 &&
         e->as.memcall.args.len == 1 && e->as.memcall.args.data[0].val) {
       int container = nyr_lower_expr(b, e->as.memcall.target);
-      int item = nyr_lower_expr(b, e->as.memcall.args.data[0].val);
+      int item = nyr_contains_item(
+          b, e->as.memcall.target, e->as.memcall.args.data[0].val,
+          nyr_lower_expr(b, e->as.memcall.args.data[0].val));
       return container < 0 || item < 0
                  ? -1
                  : nyr_emit_runtime_call(b, "rt_contains_raw", container, item,

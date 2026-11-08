@@ -636,7 +636,9 @@ Input-only `"i"` operands with constant expressions are substituted into
 templates for this route, including the `order_base_2` immediate expression
 used by Linux bounds generation. Earlier Linux 7.3 preparation runs generated
 and assembled `scripts/mod/devicetable-offsets.s`, passed modpost, and generated
-time constants with the cached `bc` package. A resumed clean `bzImage` and
+time constants with the cached `bc` package. A `for` initializer may carry a cleanup attribute, and early-clobber
+`rep stos{b,w,l,q}` plus named-function `__builtin_types_compatible_p` checks
+have compile-link-run coverage. A resumed clean `bzImage` and
 modules acceptance build is still in progress; those preparation milestones do
 not establish full-kernel artifact equivalence. Initialized block-scope
 `__auto_type` and C23 `auto` declarations are supported for scalar and pointer

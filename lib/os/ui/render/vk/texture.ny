@@ -1162,7 +1162,7 @@ fn blit_buffer(any pixels, int w, int h) any {
    0
 }
 
-mut _skybox_cube = 0
+mut any _skybox_cube = nil
 mut _skybox_cube_tex_id = -1
 
 fn _upload_cubemap_face_dedicated(any image, int face_size, any pixels, int layer) bool {

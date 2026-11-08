@@ -7,43 +7,38 @@ shape havlak {
   source ny <<'NY'
 use core
 use core.os.time
+use core.tbuf
 ;; Havlak-style cyclic-graph analysis: count cycles in LCG functional graphs.
 def N = 1000
 def M = 200
-mut list<int> next_ = []
-mut list<int> vis = []
-mut i = 0
-while i < N {
-   next_ = append(next_, 0)
-   vis = append(vis, 0)
-   i += 1
-}
+def next_ = i64buf_new(N)
+def vis = i64buf_new(N)
 def int t0 = ticks()
 mut checksum = 0
 mut rep = 0
 mut seed = 42
 while rep < M {
-   i = 0
+   mut i = 0
    while i < N {
       seed = (seed * 3877 + 29573) % 139968
-      next_[i] = seed % N
-      vis[i] = 0
+      i64buf_store(next_, i, seed % N)
+      i64buf_store(vis, i, 0)
       i += 1
    }
    mut pass_id = 0
    mut cycles = 0
-   i = 0
-   while i < N {
-      if vis[i] == 0 {
+   mut i2 = 0
+   while i2 < N {
+      if i64buf_load(vis, i2) == 0 {
          pass_id += 1
-         mut cur = i
-         while vis[cur] == 0 {
-            vis[cur] = pass_id
-            cur = next_[cur]
+         mut cur = i2
+         while i64buf_load(vis, cur) == 0 {
+            i64buf_store(vis, cur, pass_id)
+            cur = i64buf_load(next_, cur)
          }
-         if vis[cur] == pass_id { cycles += 1 }
+         if i64buf_load(vis, cur) == pass_id { cycles += 1 }
       }
-      i += 1
+      i2 += 1
    }
    checksum += cycles
    rep += 1

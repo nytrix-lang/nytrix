@@ -526,7 +526,7 @@ static char *proof_prop_expr_depth(expr_t *e, int depth) {
      * PASS 5: Multiplication distribution (limited)
      *   X*(Y+Z) → X*Y + X*Z  when X is int literal with |X| ≤ 16
      */
-    if (strcmp(op, "*") == 0 && right && strncmp(right, "binary:+(", 10) == 0) {
+    if (strcmp(op, "*") == 0 && right && strncmp(right, "binary:+(", 9) == 0) {
       int64_t x = 0;
       if (proof_is_int_literal(left, &x) && x >= -16 && x <= 16) {
         size_t rlen = strlen(right);

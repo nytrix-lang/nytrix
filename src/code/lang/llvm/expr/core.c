@@ -899,13 +899,6 @@ LLVMValueRef gen_closure(codegen_t *cg, scope *scopes, size_t depth,
   if (cg)
     cg->last_lambda_sig = NULL;
   bool is_defer = name_hint && strcmp(name_hint, "__defer") == 0;
-  if (is_defer) {
-    FILE *dbg = fopen("/tmp/ny_defer_debug.txt", "a");
-    if (dbg) {
-      fprintf(dbg, "DBG gen_closure __defer called, depth=%zu\n", depth);
-      fclose(dbg);
-    }
-  }
   assigned_name_list assigned_names = {0};
   assigned_hash_list assigned_hashes = {0};
   uint64_t assigned_bloom[4] = {0, 0, 0, 0};
@@ -928,22 +921,10 @@ LLVMValueRef gen_closure(codegen_t *cg, scope *scopes, size_t depth,
           !closure_stmt_contains_ident_name(body, candidate->name))
         continue;
       binding capture = *candidate;
-      bool _dbg_amc = assigned_name_contains(&assigned_names, &assigned_hashes,
-                                             assigned_bloom, candidate->name);
       capture.capture_by_ref =
-          is_defer && candidate->is_mut && candidate->is_slot && _dbg_amc;
-      if (is_defer) {
-        FILE *dbg = fopen("/tmp/ny_defer_debug.txt", "a");
-        if (dbg) {
-          fprintf(dbg,
-                  "DBG defer capture '%s': is_mut=%d is_slot=%d amc=%d "
-                  "capture_by_ref=%d\n",
-                  candidate->name ? candidate->name : "(null)",
-                  candidate->is_mut, candidate->is_slot, _dbg_amc,
-                  capture.capture_by_ref);
-          fclose(dbg);
-        }
-      }
+          is_defer && candidate->is_mut && candidate->is_slot &&
+          assigned_name_contains(&assigned_names, &assigned_hashes,
+                                 assigned_bloom, candidate->name);
       if (capture.capture_by_ref) {
         candidate->is_volatile_capture = true;
       }

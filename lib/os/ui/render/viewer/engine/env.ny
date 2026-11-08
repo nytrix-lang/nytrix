@@ -30,7 +30,7 @@ fn _reset_skybox_texture_resources() {
    }
    if skybox_im_hold && is_dict(skybox_im_hold) {
       img.free(skybox_im_hold)
-      skybox_im_hold = 0
+      skybox_im_hold = nil
    }
    if skybox_spec_tex_id >= 0 {
       texture_destroy(skybox_spec_tex_id)
@@ -49,7 +49,7 @@ fn _reset_compare_env_resources() {
    }
    if compare_env_im_hold && is_dict(compare_env_im_hold) {
       img.free(compare_env_im_hold)
-      compare_env_im_hold = 0
+      compare_env_im_hold = nil
    }
    if compare_env_spec_tex_id >= 0 {
       texture_destroy(compare_env_spec_tex_id)
@@ -61,7 +61,7 @@ fn _reset_compare_env_resources() {
    }
    if compare_reflect_env_im_hold && is_dict(compare_reflect_env_im_hold) {
       img.free(compare_reflect_env_im_hold)
-      compare_reflect_env_im_hold = 0
+      compare_reflect_env_im_hold = nil
    }
    true
 }
@@ -73,7 +73,7 @@ fn _reset_compare_visible_env_resources() {
    }
    if compare_visible_env_im_hold && is_dict(compare_visible_env_im_hold) {
       img.free(compare_visible_env_im_hold)
-      compare_visible_env_im_hold = 0
+      compare_visible_env_im_hold = nil
    }
    true
 }
@@ -88,7 +88,7 @@ fn _reset_neutral_env_resources() {
    }
    if neutral_env_im_hold && is_dict(neutral_env_im_hold) {
       img.free(neutral_env_im_hold)
-      neutral_env_im_hold = 0
+      neutral_env_im_hold = nil
    }
    if neutral_env_spec_tex_id >= 0 {
       texture_destroy(neutral_env_spec_tex_id)
@@ -151,7 +151,7 @@ fn _build_skybox_studio_env(env_w, env_h) {
          compare_env_im_hold = studio_im
       } else {
          img.free(studio_im)
-         compare_env_im_hold = 0
+         compare_env_im_hold = nil
       }
    }
    true
@@ -170,7 +170,7 @@ fn _build_compare_reflect_env(env_w, env_h) {
             compare_reflect_env_im_hold = compare_spec_im
          } else {
             img.free(compare_spec_im)
-            compare_reflect_env_im_hold = 0
+            compare_reflect_env_im_hold = nil
          }
          return true
       }
@@ -190,7 +190,7 @@ fn _build_compare_visible_env(env_w, env_h) {
          compare_visible_env_im_hold = compare_visible_im
       } else {
          img.free(compare_visible_im)
-         compare_visible_env_im_hold = 0
+         compare_visible_env_im_hold = nil
       }
       return compare_visible_tex >= 0
    }
@@ -209,7 +209,7 @@ fn _build_neutral_env(env_w, env_h) {
          neutral_env_im_hold = neutral_im
       } else {
          img.free(neutral_im)
-         neutral_env_im_hold = 0
+         neutral_env_im_hold = nil
       }
       return neutral_tex >= 0
    }
@@ -309,7 +309,7 @@ fn _load_fast_generated_skybox(visible=true) {
       skybox_im_hold = own_im ? im : 0
    } else {
       if own_im && im && is_dict(im) { img.free(im) }
-      skybox_im_hold = 0
+      skybox_im_hold = nil
    }
    true
 }

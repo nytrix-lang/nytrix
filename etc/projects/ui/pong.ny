@@ -19,6 +19,7 @@ def f64 VIEW_W, VIEW_H = 1280.0, 720.0
 def f64 BALL_SIZE, BALL_SPEED = 20.0, 400.0
 def f64 PADDLE_W, PADDLE_H, PADDLE_MARGIN = 20.0, 120.0, 80.0
 def f64 PADDLE_SPEED, OPPONENT_SPEED, OPPONENT_ERROR, SERVE_TIME = 480.0, 320.0, 18.0, 0.85
+def f64 MAX_BOUNCE_ANGLE, SPEEDUP_PER_HIT, MAX_SPEEDUP = 0.9, 0.03, 1.6
 def int NET_COUNT = 51
 
 def BG = gfx.color_hex("#201E18")
@@ -46,18 +47,30 @@ fn opponent_goal(f64 bx, f64 by, f64 vx, f64 vy, f64 ball, f64 h,
 }
 
 fn place_ball(f64 w, f64 h, f64 size, int rally) {
+   ;; Serve toward the side that just conceded; speed restarts at its base value.
+   hits = 0
    ball_x = (w - size) * 0.5
    ball_y = (h - size) * 0.5
-   def f64 direction = rally % 2 == 0 ? 1.0 : -1.0
-   ball_vx = direction * BALL_SPEED * scale
+   ball_vx = serve_dir * BALL_SPEED * scale
    ball_vy = BALL_SPEED * scale * (rally % 4 < 2 ? 0.23 : -0.23)
 }
 
-if common.env_present("NY_UI_RENDER_BACKEND") {
-   gfx.apply_backend_env()
-} else {
-   gfx.set_backend_type(gfx.BACKEND_GL)
+;; Reflect the ball off a paddle: the exit angle follows where it struck the
+;; paddle, and the speed (not just vx) is kept constant, growing slightly with
+;; every return in the rally.
+fn bounce_off_paddle(f64 dir, f64 paddle_y, f64 paddle_h, f64 ball) {
+   def f64 half = paddle_h * 0.5 + ball * 0.5
+   def f64 offset = lim(((ball_y + ball * 0.5) - (paddle_y + paddle_h * 0.5)) / half, -1.0, 1.0)
+   def f64 angle = offset * MAX_BOUNCE_ANGLE
+   hits += 1
+   def f64 speedup = float(math.min(1.0 + SPEEDUP_PER_HIT * float(hits), MAX_SPEEDUP))
+   def f64 spd = BALL_SPEED * scale * speedup
+   ball_vx = dir * spd * float(math.cos(angle))
+   ball_vy = spd * float(math.sin(angle))
+   rally += 1
 }
+
+gfx.apply_backend_env()
 gfx.apply_backend_argv()
 
 mut win = gfx.init_window(WIN_W, WIN_H, "Ping Pong - Nytrix", WINDOW_MAXIMIZE, true, false, 1)
@@ -90,6 +103,8 @@ mut f64 ball_x = 0.0
 mut f64 ball_y = 0.0
 mut f64 ball_vx = 0.0
 mut f64 ball_vy = 0.0
+mut f64 serve_dir = 1.0
+mut int hits = 0
 mut f64 player_y = 0.0
 mut f64 opponent_y = 0.0
 mut f64 serve_t = SERVE_TIME
@@ -182,6 +197,7 @@ while !gfx.window_should_close(win) && fixture.tick_ui(fx) {
    if reset_down && !previous_reset {
       player_score, opponent_score = 0, 0
       rally = 0
+      serve_dir = 1.0
       paused = false
       serve_t = SERVE_TIME
       place_ball(w, h, ball, rally)
@@ -208,37 +224,56 @@ while !gfx.window_should_close(win) && fixture.tick_ui(fx) {
          elif delta < 0.0 { opponent_y -= step }
          opponent_y = lim(opponent_y, 0.0, h - paddle_h)
 
+         def f64 prev_x = ball_x
+         def f64 prev_y = ball_y
          ball_x += ball_vx * dt
          ball_y += ball_vy * dt
 
          if ball_y < 0.0 { ball_y = 0.0 ball_vy = float(math.abs(ball_vy)) }
          if ball_y + ball > h { ball_y = h - ball ball_vy = -float(math.abs(ball_vy)) }
 
-         if ball_vx < 0.0 && ball_x <= player_x + paddle_w && ball_x + ball >= player_x &&
-            ball_y + ball >= player_y && ball_y <= player_y + paddle_h {
-            ball_x = player_x + paddle_w
-            ball_vx = float(math.abs(ball_vx))
-            def f64 offset = ((ball_y + ball * 0.5) - (player_y + paddle_h * 0.5)) / (paddle_h * 0.5)
-            ball_vy = lim(offset * BALL_SPEED * scale, -BALL_SPEED * scale, BALL_SPEED * scale)
-            rally += 1
-         }
-         if ball_vx > 0.0 && ball_x + ball >= opponent_x && ball_x <= opponent_x + paddle_w &&
-            ball_y + ball >= opponent_y && ball_y <= opponent_y + paddle_h {
-            ball_x = opponent_x - ball
-            ball_vx = -float(math.abs(ball_vx))
-            def f64 offset = ((ball_y + ball * 0.5) - (opponent_y + paddle_h * 0.5)) / (paddle_h * 0.5)
-            ball_vy = lim(offset * BALL_SPEED * scale, -BALL_SPEED * scale, BALL_SPEED * scale)
-            rally += 1
+         ;; Paddle hits: either the ball overlaps the paddle in front of its centre, or
+         ;; it crossed the paddle face between two frames (no tunnelling at low fps).
+         if ball_vx < 0.0 {
+            def f64 face = player_x + paddle_w
+            mut f64 cross_y = ball_y
+            if prev_x > ball_x && prev_x >= face && ball_x <= face {
+               cross_y = prev_y + (ball_y - prev_y) * ((prev_x - face) / (prev_x - ball_x))
+            }
+            def bool crossed = prev_x >= face && ball_x <= face
+            def bool overlap = ball_x <= face && ball_x + ball >= player_x &&
+               ball_x + ball * 0.5 >= player_x + paddle_w * 0.5
+            if (crossed || overlap) && cross_y + ball >= player_y && cross_y <= player_y + paddle_h {
+               ball_x = face
+               ball_y = lim(cross_y, 0.0, h - ball)
+               bounce_off_paddle(1.0, player_y, paddle_h, ball)
+            }
+         } elif ball_vx > 0.0 {
+            def f64 face = opponent_x - ball
+            mut f64 cross_y = ball_y
+            if prev_x < ball_x && prev_x <= face && ball_x >= face {
+               cross_y = prev_y + (ball_y - prev_y) * ((face - prev_x) / (ball_x - prev_x))
+            }
+            def bool crossed = prev_x <= face && ball_x >= face
+            def bool overlap = ball_x + ball >= opponent_x && ball_x <= opponent_x + paddle_w &&
+               ball_x + ball * 0.5 <= opponent_x + paddle_w * 0.5
+            if (crossed || overlap) && cross_y + ball >= opponent_y && cross_y <= opponent_y + paddle_h {
+               ball_x = face
+               ball_y = lim(cross_y, 0.0, h - ball)
+               bounce_off_paddle(-1.0, opponent_y, paddle_h, ball)
+            }
          }
 
          if ball_x + ball < 0.0 {
             opponent_score += 1
             rally += 1
+            serve_dir = -1.0
             place_ball(w, h, ball, rally)
             serve_t = SERVE_TIME
          } elif ball_x > w {
             player_score += 1
             rally += 1
+            serve_dir = 1.0
             place_ball(w, h, ball, rally)
             serve_t = SERVE_TIME
          }

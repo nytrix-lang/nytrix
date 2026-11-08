@@ -10,7 +10,7 @@ shape rev-decompiler-generated-c-elf {
 use core
 use core.os as os
 use core.os.subprocess as sub
-use core.os.rev.decomp as decomp
+use core.os.dis.decomp as decomp
 
 def dir = os.temp_dir() + "/ny-generated-c-decomp-" + to_str(os.pid())
 assert(int(sub.run_capture(["cmake", "-E", "make_directory", dir], [], nil, false).get("code", 127)) == 0,

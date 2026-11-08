@@ -10,11 +10,8 @@ compiler subsystems.
 
 | Need | Reference |
 | --- | --- |
-| Compiler recovery | [Confirmed failures](todo/compiler-recovery.md) |
-| Performance acceptance | [Open performance work](todo/performance-acceptance.md) |
 | Dependent types and GADTs | [Feature contract](spec/dependent.md) |
-| Dependencies and build tooling | [Follow-ups](todo/dependencies-build.md) |
-| NYC Linux kernel | [Build acceptance](todo/nyc-linux-kernel.md) |
+| NYC Linux kernel | [Build acceptance](todo/nyc.md) |
 | Source ownership | [Compiler architecture](learn/architecture.md) |
 | Commands, traces, pass isolation, and runtime failures | [Compiler debugging](learn/debugging.md) |
 | Benchmarking, profiles, sample validation, and editor compilation | [Performance](learn/performance.md) |
@@ -469,10 +466,8 @@ it is not a successful execution.
 
 ## Performance
 
-Use [Performance](learn/performance.md) for measurement methods,
-[Recorded measurements](learn/measurements.md) for dated results, and
-  [Open performance work](todo/performance-acceptance.md) for acceptance
-  criteria.
+Use [Performance](learn/performance.md) for measurement methods and
+[Recorded measurements](learn/measurements.md) for dated results.
 
 Keep source, input, checksum, target, route, optimization, cache state, warmups,
 and measured region fixed. Separate compiler time, startup/link time, runtime,

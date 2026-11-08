@@ -185,7 +185,7 @@ fn _h_add(list ctx, int root, int code, int len_bits, int sym) any {
 }
 
 fn _h_parse(any data, int off) list {
-   mut ctx = list(1)
+   mut ctx = list(0)
    ctx = ctx.append(list(512))
    _h_new(ctx)
    mut counts = list(16)
@@ -212,90 +212,84 @@ fn _h_parse(any data, int off) list {
    return [ctx.get(0), (pPtr - off)]
 }
 
-fn _h_dec(list nodes, list bs) int {
+fn _h_res(any symbol, any stream) list {
+   "Packs a Huffman decode result as [symbol, bitstream state]."
+   [symbol, stream]
+}
+
+fn _h_dec(list nodes, list bs) list {
    mut cur = 0
+   mut bs2 = bs
    while 1 {
-      mut bl = bs.get(3)
+      def bl = bs2.get(3)
       if bl == 0 {
-         def db = bs.get(0)
-         mut bp = bs.get(1)
-         if bp >= db.len { return -1 }
-         mut cV = load8(db, bp)
+         def db = bs2.get(0)
+         def bp = bs2.get(1)
+         if bp >= db.len { return _h_res(-1, bs2) }
+         def cV = load8(db, bp)
          bp += 1
          if cV == 255 {
             if bp < db.len { if load8(db, bp) == 0 { bp += 1 } }
          }
-         bs[2] = cV
-         bs[3] = 8
-         bs[1] = bp
+         bs2 = [bs2.get(0), bp, cV, 8, bs2.get(4)]
          bl = 8
       }
       bl -= 1
-      def bit = (bs.get(2) >> bl) & 1
-      bs[3] = bl
+      def bit = (bs2.get(2) >> bl) & 1
+      bs2 = [bs2.get(0), bs2.get(1), bs2.get(2), bl, bs2.get(4)]
       def n = nodes.get(cur)
       if bit { cur = n.get(3) } else { cur = n.get(2) }
-      if cur == -1 { return -1 }
+      if cur == -1 { return _h_res(-1, bs2) }
       def cn = nodes.get(cur)
-      if cn.get(1) { return cn.get(0) }
+      if cn.get(1) { return _h_res(cn.get(0), bs2) }
    }
 }
 
 fn _bs_m(any data, int start) list {
-   mut bs = list(5)
-   bs = bs.append(data)
-   bs = bs.append(start)
-   bs = bs.append(0)
-   bs = bs.append(0)
-   bs = bs.append(0)
-   return bs
+   return [data, start, 0, 0, 0]
 }
 
-fn _bs_skip_restart(any bs, int expected_rst=-1) bool {
-   if !is_list(bs) { return false }
-   bs[3] = 0
-   bs[2] = 0
+fn _bs_skip_restart(list bs, int expected_rst=-1) list {
+   if !is_list(bs) { return [false, bs] }
    def db = bs.get(0)
-   mut bp = bs.get(1)
-   if !is_str(db) || bp < 0 || bp + 1 >= db.len { return false }
+   def bp = bs.get(1)
+   if !is_str(db) || bp < 0 || bp + 1 >= db.len { return [false, bs] }
    while bp + 1 < db.len && load8(db, bp) == 255 && load8(db, bp + 1) == 255 { bp += 1 }
-   if bp + 1 >= db.len || load8(db, bp) != 255 { return false }
+   if bp + 1 >= db.len || load8(db, bp) != 255 { return [false, bs] }
    def mk = load8(db, bp + 1)
-   if mk < 208 || mk > 215 { return false }
-   if expected_rst >= 0 && mk != (208 + (expected_rst & 7)) { return false }
+   if mk < 208 || mk > 215 { return [false, bs] }
+   if expected_rst >= 0 && mk != (208 + (expected_rst & 7)) { return [false, bs] }
    bp += 2
-   bs[1] = bp
-   true
+   return [true, [db, bp, bs.get(2), 0, bs.get(4)]]
 }
 
-fn _bs_gbs(list bs, int n) int {
+fn _bs_gbs(list bs, int n) list {
    mut v = 0
    mut iCount = 0
+   mut bs2 = bs
    while iCount < n {
-      mut bl = bs.get(3)
+      def bl = bs2.get(3)
       if bl == 0 {
-         def db = bs.get(0)
-         mut bp = bs.get(1)
+         def db = bs2.get(0)
+         def bp = bs2.get(1)
          if bp < db.len {
-            mut cV = load8(db, bp)
+            def cV = load8(db, bp)
             bp += 1
             if cV == 255 {
                if bp < db.len { if load8(db, bp) == 0 { bp += 1 } }
             }
-            bs[2] = cV
-            bs[3] = 8
-            bs[1] = bp
+            bs2 = [db, bp, cV, 8, bs2.get(4)]
             bl = 8
          } else {
             break
          }
       }
       bl -= 1
-      v = (v << 1) | ((bs.get(2) >> bl) & 1)
-      bs[3] = bl
+      v = (v << 1) | ((bs2.get(2) >> bl) & 1)
+      bs2 = [bs2.get(0), bs2.get(1), bs2.get(2), bl, bs2.get(4)]
       iCount += 1
    }
-   return v
+   return [v, bs2]
 }
 
 fn _d_cf(int sz, int bits) int {
@@ -367,11 +361,13 @@ fn _jpeg_prog_set_coeff(any coeff, int block_idx, int pos, any value) any {
    0
 }
 
-fn _jpeg_prog_refine_nonzero(any coeff, int block_idx, int pos, int al, list bs) any {
+fn _jpeg_prog_refine_nonzero(any coeff, int block_idx, int pos, int al, list bs) list {
    def cur = _jpeg_prog_coeff_at(coeff, block_idx, pos)
-   if cur == 0 { return 0 }
-   def bit = _bs_gbs(bs, 1)
-   if bit == 0 { return 0 }
+   if cur == 0 { return bs }
+   def bit_res = _bs_gbs(bs, 1)
+   def bit = bit_res.get(0)
+   def bs2 = bit_res.get(1)
+   if bit == 0 { return bs2 }
    def step = 1 << al
    if cur > 0 {
       if (cur & step) == 0 { _jpeg_prog_set_coeff(coeff, block_idx, pos, cur + step) }
@@ -379,7 +375,7 @@ fn _jpeg_prog_refine_nonzero(any coeff, int block_idx, int pos, int al, list bs)
       def mag = -cur
       if (mag & step) == 0 { _jpeg_prog_set_coeff(coeff, block_idx, pos, cur - step) }
    }
-   0
+   bs2
 }
 
 fn _jpeg_prog_render_component(any plane, int plane_len, int plane_w, any coeff, any qtbl, int bw, int bh, int step_x, int step_y) any {
@@ -575,18 +571,26 @@ fn _jpeg_prog_decode_interleaved_dc(int wVal, int hVal, int mh, int mv, any comp
                      def bi = (mcy * vs + vb) * bw + (mcx * hs + hb)
                      if bi >= 0 && bi < (bw * int(info.get(4, 0))) {
                         if ah == 0 {
-                           def sz = _h_dec(dh, bs)
+                           def sz_res = _h_dec(dh, bs)
+                           def sz = sz_res.get(0)
+                           def bs2 = sz_res.get(1)
                            if sz < 0 { break }
-                           def bits = _bs_gbs(bs, sz)
+                           def bits_res = _bs_gbs(bs2, sz)
+                           def bits = bits_res.get(0)
+                           def bs3 = bits_res.get(1)
                            def d_val = _d_cf(sz, bits)
                            pdc = pdc + d_val
                            _jpeg_prog_set_coeff(coeff, bi, 0, pdc << al)
+                           bs = bs3
                         } else {
-                           def bit = _bs_gbs(bs, 1)
+                           def bit_res = _bs_gbs(bs, 1)
+                           def bit = bit_res.get(0)
+                           def bs2 = bit_res.get(1)
                            if bit != 0 {
                               def cur = _jpeg_prog_coeff_at(coeff, bi, 0)
                               _jpeg_prog_set_coeff(coeff, bi, 0, cur | (1 << al))
                            }
+                           bs = bs2
                         }
                      }
                      hb += 1
@@ -604,84 +608,139 @@ fn _jpeg_prog_decode_interleaved_dc(int wVal, int hVal, int mh, int mv, any comp
    0
 }
 
-fn _jpeg_prog_decode_ac_raster(any coeff, int bw, int bh, int ss, int se, int ah, int al, any ah_tbl, list bs) any {
+fn _jpeg_prog_ac_first_block(any coeff, int bi, int ss, int se, int al, any ah_tbl, list bs0) list {
+   "Decodes one first-pass AC band; returns [pending EOB run, bitstream] or [-1, bitstream]."
+   mut bs = bs0
+   mut k = ss
+   while k <= se {
+      def sym_res = _h_dec(ah_tbl, bs)
+      def sym = int(sym_res.get(0))
+      bs = sym_res.get(1)
+      if sym < 0 { return [-1, bs] }
+      def run = sym >> 4
+      def size = sym & 15
+      if size == 0 {
+         if run < 15 {
+            mut eob = (1 << run) - 1
+            if run > 0 {
+               def extra = _bs_gbs(bs, run)
+               eob += int(extra.get(0))
+               bs = extra.get(1)
+            }
+            return [eob, bs]
+         }
+         k += 16
+         continue
+      }
+      k += run
+      if k > se { break }
+      def bits_res = _bs_gbs(bs, size)
+      bs = bits_res.get(1)
+      _jpeg_prog_set_coeff(coeff, bi, k, _d_cf(size, int(bits_res.get(0))) * (1 << al))
+      k += 1
+   }
+   [0, bs]
+}
+
+fn _jpeg_prog_ac_refine_block(any coeff, int bi, int ss, int se, int al, any ah_tbl, list bs0, int eobrun0) list {
+   "Applies one AC refinement band; returns [pending EOB run, bitstream] or [-1, bitstream]."
+   mut bs = bs0
+   mut eobrun = eobrun0
+   mut k = ss
+   def p1 = 1 << al
+   if eobrun == 0 {
+      while k <= se {
+         def sym_res = _h_dec(ah_tbl, bs)
+         def sym = int(sym_res.get(0))
+         bs = sym_res.get(1)
+         if sym < 0 { return [-1, bs] }
+         mut run = sym >> 4
+         def size = sym & 15
+         mut value = 0
+         if size != 0 {
+            def bit_res = _bs_gbs(bs, 1)
+            bs = bit_res.get(1)
+            value = int(bit_res.get(0)) != 0 ? p1 : 0 - p1
+         } elif run != 15 {
+            eobrun = 1 << run
+            if run > 0 {
+               def extra = _bs_gbs(bs, run)
+               eobrun += int(extra.get(0))
+               bs = extra.get(1)
+            }
+            break
+         }
+         while k <= se {
+            if _jpeg_prog_coeff_at(coeff, bi, k) != 0 {
+               bs = _jpeg_prog_refine_nonzero(coeff, bi, k, al, bs)
+            } else {
+               if run == 0 { break }
+               run -= 1
+            }
+            k += 1
+         }
+         if value != 0 && k <= se { _jpeg_prog_set_coeff(coeff, bi, k, value) }
+         k += 1
+      }
+   }
+   if eobrun > 0 {
+      while k <= se {
+         if _jpeg_prog_coeff_at(coeff, bi, k) != 0 {
+            bs = _jpeg_prog_refine_nonzero(coeff, bi, k, al, bs)
+         }
+         k += 1
+      }
+      eobrun -= 1
+   }
+   [eobrun, bs]
+}
+
+fn _jpeg_prog_decode_ac_raster(any coeff, int stride, int blocks_w, int blocks_h, int ss, int se, int ah, int al, any ah_tbl, list bs0) any {
+   "Decodes a non-interleaved AC scan over the component's natural block raster."
+   mut bs = bs0
    mut eobrun = 0
    mut by = 0
-   while by < bh {
+   while by < blocks_h {
       mut bx = 0
-      while bx < bw {
-         def bi = by * bw + bx
-         if ah == 0 {
-            if eobrun > 0 { eobrun -= 1 } else {
-               mut k = ss
-               while k <= se {
-                  def sym = _h_dec(ah_tbl, bs)
-                  if sym < 0 { break }
-                  def run = sym >> 4
-                  def size = sym & 15
-                  if size == 0 {
-                     if run == 15 { k += 16 } else {
-                        eobrun = (1 << run) - 1
-                        if run > 0 { eobrun += _bs_gbs(bs, run) }
-                        break
-                     }
-                  } else {
-                     k += run
-                     if k > se { break }
-                     def bits = _bs_gbs(bs, size)
-                     def v = _d_cf(size, bits) << al
-                     _jpeg_prog_set_coeff(coeff, bi, k, v)
-                     k += 1
-                  }
-               }
-            }
+      while bx < blocks_w {
+         def bi = by * stride + bx
+         if ah == 0 && eobrun > 0 {
+            eobrun -= 1
          } else {
-            mut k = ss
-            while k <= se {
-               if eobrun > 0 {
-                  while k <= se {
-                     if _jpeg_prog_coeff_at(coeff, bi, k) != 0 { _jpeg_prog_refine_nonzero(coeff, bi, k, al, bs) }
-                     k += 1
-                  }
-                  eobrun -= 1
-                  break
-               }
-               def sym = _h_dec(ah_tbl, bs)
-               if sym < 0 { break }
-               mut run = sym >> 4
-               def size = sym & 15
-               if size == 0 {
-                  if run == 15 {
-                     mut z = 16
-                     while k <= se && z > 0 {
-                        if _jpeg_prog_coeff_at(coeff, bi, k) != 0 { _jpeg_prog_refine_nonzero(coeff, bi, k, al, bs) } else { z -= 1 }
-                        k += 1
-                     }
-                  } else {
-                     eobrun = (1 << run)
-                     if run > 0 { eobrun += _bs_gbs(bs, run) }
-                     eobrun -= 1
-                     while k <= se {
-                        if _jpeg_prog_coeff_at(coeff, bi, k) != 0 { _jpeg_prog_refine_nonzero(coeff, bi, k, al, bs) }
-                        k += 1
-                     }
-                     break
-                  }
-               } else {
-                  while k <= se {
-                     if _jpeg_prog_coeff_at(coeff, bi, k) != 0 { _jpeg_prog_refine_nonzero(coeff, bi, k, al, bs) } else {
-                        if run == 0 { break }
-                        run -= 1
-                     }
-                     k += 1
-                  }
-                  if k <= se {
-                     mut v = 1 << al
-                     if size != 1 { v = _d_cf(size, _bs_gbs(bs, size)) << al } else { if _bs_gbs(bs, 1) == 0 { v = -(1 << al) } }
-                     _jpeg_prog_set_coeff(coeff, bi, k, v)
-                     k += 1
-                  }
-               }
+            def res = ah == 0 ? _jpeg_prog_ac_first_block(coeff, bi, ss, se, al, ah_tbl, bs) : _jpeg_prog_ac_refine_block(coeff, bi, ss, se, al, ah_tbl, bs, eobrun)
+            eobrun = int(res.get(0))
+            bs = res.get(1)
+            if eobrun < 0 { return 0 }
+         }
+         bx += 1
+      }
+      by += 1
+   }
+   0
+}
+
+fn _jpeg_prog_decode_dc_raster(any coeff, int stride, int blocks_w, int blocks_h, int ah, int al, any dc_tbl, list bs0) any {
+   "Decodes a non-interleaved DC scan over the component's natural block raster."
+   mut bs = bs0
+   mut pdc = 0
+   mut by = 0
+   while by < blocks_h {
+      mut bx = 0
+      while bx < blocks_w {
+         def bi = by * stride + bx
+         if ah == 0 {
+            def sz_res = _h_dec(dc_tbl, bs)
+            def sz = int(sz_res.get(0))
+            if sz < 0 { return 0 }
+            def bits_res = _bs_gbs(sz_res.get(1), sz)
+            bs = bits_res.get(1)
+            pdc += _d_cf(sz, int(bits_res.get(0)))
+            _jpeg_prog_set_coeff(coeff, bi, 0, pdc * (1 << al))
+         } else {
+            def bit_res = _bs_gbs(bs, 1)
+            bs = bit_res.get(1)
+            if int(bit_res.get(0)) != 0 {
+               _jpeg_prog_set_coeff(coeff, bi, 0, _jpeg_prog_coeff_at(coeff, bi, 0) | (1 << al))
             }
          }
          bx += 1
@@ -742,43 +801,13 @@ fn _jpeg_decode_progressive(any data, int wVal, int hVal, int mh, int mv, list q
                if !dh { dh = hdc.get(dcid, 0) }
                if !ah_tbl { ah_tbl = hac.get(acid, 0) }
                mut pdc = 0
-               if ss > 0 && !interleaved {
-                  _jpeg_prog_decode_ac_raster(coeff, bw, bh, ss, se, ah, al, ah_tbl, bs)
+               ;; A non-interleaved scan covers the component natural size, not its MCU-padded plane.
+               def blocks_w = (((wVal * hs + mh - 1) / mh) + 7) / 8
+               def blocks_h = (((hVal * vs + mv - 1) / mv) + 7) / 8
+               if ss > 0 {
+                  _jpeg_prog_decode_ac_raster(coeff, bw, min(blocks_w, bw), min(blocks_h, bh), ss, se, ah, al, ah_tbl, bs)
                } else {
-                  mut mcy = 0
-                  while (mcy * 8 * mv) < hVal {
-                     mut mcx = 0
-                     while (mcx * 8 * mh) < wVal {
-                        mut vb = 0
-                        while vb < vs {
-                           mut hb = 0
-                           while hb < hs {
-                              def bi = (mcy * vs + vb) * bw + (mcx * hs + hb)
-                              if bi >= 0 && bi < (bw * bh) {
-                                 if ss == 0 {
-                                    if ah == 0 {
-                                       def sz = _h_dec(dh, bs)
-                                       def bits = _bs_gbs(bs, sz)
-                                       def d_val = _d_cf(sz, bits)
-                                       pdc = pdc + d_val
-                                       _jpeg_prog_set_coeff(coeff, bi, 0, pdc << al)
-                                    } else {
-                                       def bit = _bs_gbs(bs, 1)
-                                       if bit != 0 {
-                                          def cur = _jpeg_prog_coeff_at(coeff, bi, 0)
-                                          _jpeg_prog_set_coeff(coeff, bi, 0, cur | (1 << al))
-                                       }
-                                    }
-                                 }
-                              }
-                              hb += 1
-                           }
-                           vb += 1
-                        }
-                        mcx += 1
-                     }
-                     mcy += 1
-                  }
+                  _jpeg_prog_decode_dc_raster(coeff, bw, min(blocks_w, bw), min(blocks_h, bh), ah, al, dh, bs)
                }
             }
             cii += 1
@@ -999,18 +1028,21 @@ fn _idct(list cf, list qt, any out, int out_len, int off, int step_x, int step_y
    0
 }
 
-fn _d_du(list bs, any dh, any ah, any qt, int pdc, any plane, int plane_len, int off, int step_x, int step_y, int pw, list cf, list blk, list natural) any {
+fn _d_du(list bs, any dh, any ah, any qt, int pdc, any plane, int plane_len, int off, int step_x, int step_y, int pw, list cf, list blk, list natural) list {
    if _jpeg_diag_on() { _jpeg_diag_total_blocks += 1 }
-   def sz = _h_dec(dh, bs)
+   def sz_res = _h_dec(dh, bs)
+   def sz = sz_res.get(0)
+   def bs2 = sz_res.get(1)
    if sz < 0 {
       if _jpeg_diag_on() { _jpeg_diag_dc_fail += 1 }
-      bs[4] = pdc
-      return 0
+      return [bs2.get(0), bs2.get(1), bs2.get(2), bs2.get(3), pdc]
    }
-   def bits = _bs_gbs(bs, sz)
+   def bits_res = _bs_gbs(bs2, sz)
+   def bits = bits_res.get(0)
+   def bs3 = bits_res.get(1)
    def d_val = _d_cf(sz, bits)
    def ndc = pdc + d_val
-   bs[4] = ndc
+   def bs4 = [bs3.get(0), bs3.get(1), bs3.get(2), bs3.get(3), ndc]
    cf[0] = ndc
    mut iC = 1
    while iC < 64 {
@@ -1018,8 +1050,11 @@ fn _d_du(list bs, any dh, any ah, any qt, int pdc, any plane, int plane_len, int
       iC += 1
    }
    mut jI = 1
+   mut bs5 = bs4
    while jI < 64 {
-      def sym = _h_dec(ah, bs)
+      def sym_res = _h_dec(ah, bs5)
+      def sym = sym_res.get(0)
+      def bs6 = sym_res.get(1)
       if sym < 0 {
          if _jpeg_diag_on() { _jpeg_diag_ac_fail += 1 }
          break
@@ -1031,14 +1066,17 @@ fn _d_du(list bs, any dh, any ah, any qt, int pdc, any plane, int plane_len, int
       } else {
          jI += run
          if jI < 64 {
-            def bV = _bs_gbs(bs, asz)
+            def bV_res = _bs_gbs(bs6, asz)
+            def bV = bV_res.get(0)
+            def bs7 = bV_res.get(1)
             cf[jI] = _d_cf(asz, bV)
             jI += 1
+            bs5 = bs7
          }
       }
    }
    _idct(cf, qt, plane, plane_len, off, step_x, step_y, pw, blk, natural)
-   0
+   bs5
 }
 
 fn _jpeg_parse_headers(any data) any {
@@ -1225,7 +1263,10 @@ fn decode(any data) any {
       mut mcx = 0
       while (mcx * 8 * mh) < wVal {
          if restart_interval > 0 && mcu_count > 0 && (mcu_count % restart_interval) == 0 {
-            if !_bs_skip_restart(bs, restart_seq) { return 0 }
+            def skip_res = _bs_skip_restart(bs, restart_seq)
+            def skip_ok = skip_res.get(0)
+            bs = skip_res.get(1)
+            if !skip_ok { return 0 }
             restart_seq = (restart_seq + 1) & 7
             pdc1 = 0
             pdc2 = 0
@@ -1258,7 +1299,7 @@ fn decode(any data) any {
                      planeL = ccbB
                   }
                   def step_x, step_y = max(1, mh / max(1, hsV)), max(1, mv / max(1, vsV))
-                  _d_du(bs, dhV, ahV, qtV, pdcV, planeL, plane_sz, ((mcy * 8 * mv + vb * 8) * wVal + (mcx * 8 * mh + hb * 8)), step_x, step_y, wVal, decode_cf, decode_blk, decode_natural)
+                  bs = _d_du(bs, dhV, ahV, qtV, pdcV, planeL, plane_sz, ((mcy * 8 * mv + vb * 8) * wVal + (mcx * 8 * mh + hb * 8)), step_x, step_y, wVal, decode_cf, decode_blk, decode_natural)
                   def ndcV = bs.get(4)
                   if cid == Yid { pdc1 = ndcV } elif cid == Cbid {
                      pdc2 = ndcV

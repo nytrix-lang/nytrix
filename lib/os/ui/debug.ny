@@ -10,7 +10,7 @@ module core.os.ui.debug(
    event_trace_enabled, print_text, print_line, eprint_text,
    env_trim_cached, env_lower_cached, debug_deep_enabled, gfx_frame_trace_enabled,
    enabled, dump_trace_enabled, text_immediate_enabled, headless_gui_enabled,
-   now, mark, dump_path, counter_add, set_framebuffer_hash_line,
+   now, mark, dump_path, counter_add, set_framebuffer_hash_line, framebuffer_hash_line,
    trace_process_enabled, trace_process_sample, apply_verbose_argv
 )
 
@@ -76,6 +76,11 @@ fn counter_add(str name, f64 value=1.0) f64 {
    def next = float(_profile_counters.get(name, 0.0)) + value
    _profile_counters[name] = next
    next
+}
+
+fn framebuffer_hash_line() str {
+   "Returns the most recent framebuffer hash line."
+   _framebuffer_hash_line
 }
 
 fn set_framebuffer_hash_line(any line) bool {

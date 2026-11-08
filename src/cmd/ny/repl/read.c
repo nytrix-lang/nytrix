@@ -289,17 +289,6 @@ enum {
   K_MOUSE_WHEEL_UP,
   K_MOUSE_WHEEL_DOWN,
   K_F1,
-  K_F2,
-  K_F3,
-  K_F4,
-  K_F5,
-  K_F6,
-  K_F7,
-  K_F8,
-  K_F9,
-  K_F10,
-  K_F11,
-  K_F12,
   K_UNKNOWN
 };
 
@@ -477,31 +466,15 @@ static int read_escape_posix(void) {
       return K_HOME;
     if (seq2 == 'F')
       return K_END;
-    if (seq2 >= '1' && seq2 <= '2') {
-      int seq3 = get_char_timeout(1000);
-      if (seq3 >= '0' && seq3 <= '9') {
-        int seq4 = get_char_timeout(1000);
-        if (seq4 == '~') {
-          int fkey = (seq2 - '0') * 10 + (seq3 - '0');
-          if (fkey >= 11 && fkey <= 15)
-            return K_F1 + (fkey - 11);   /* 11..15 => F1..F5 */
-          if (fkey >= 17 && fkey <= 21)
-            return K_F6 + (fkey - 17);   /* 17..21 => F6..F10 */
-          if (fkey == 23)
-            return K_F11;
-          if (fkey == 24)
-            return K_F12;
-        } else {
-          csi_consume_tail(seq4, 1000);
-        }
-      } else if (seq3 == '~') {
-        /* single-digit home/end handled below */
-      } else {
-        csi_consume_tail(seq3, 1000);
-      }
-    }
     if (seq2 == '1') {
       int seq3 = get_char_timeout(1000);
+      if (seq3 == '1') {
+        int seq4 = get_char_timeout(1000);
+        if (seq4 == '~')
+          return K_F1;
+        csi_consume_tail(seq4, 1000);
+        return K_UNKNOWN;
+      }
       if (seq3 == '3') {
         int seq4 = get_char_timeout(1000);
         if (seq4 == '~')
@@ -611,6 +584,8 @@ static int read_escape_posix(void) {
     return K_CTRL_BACKSPACE;
   else if (seq1 == 'O') {
     int seq2 = get_char_timeout(1000);
+    if (seq2 == 'P')
+      return K_F1;
     if (seq2 == 'A')
       return K_UP;
     if (seq2 == 'B')
@@ -623,14 +598,6 @@ static int read_escape_posix(void) {
       return K_HOME;
     if (seq2 == 'F')
       return K_END;
-    if (seq2 == 'P')
-      return K_F1;
-    if (seq2 == 'Q')
-      return K_F2;
-    if (seq2 == 'R')
-      return K_F3;
-    if (seq2 == 'S')
-      return K_F4;
   }
   return K_UNKNOWN;
 }
@@ -999,8 +966,6 @@ static int read_key_win(char *out_chr) {
       return K_PAGE_UP;
     if (vk == VK_NEXT)
       return K_PAGE_DOWN;
-    if (vk >= VK_F1 && vk <= VK_F12)
-      return K_F1 + (vk - VK_F1);
     if (vk == VK_INSERT)
       continue;
     if (ch == '\r') {
@@ -1449,9 +1414,76 @@ static void get_term_size(int *cols, int *rows) {
     *rows = 24;
 }
 
+static int repl_utf8_span(const unsigned char *s, int avail) {
+  if (avail <= 0)
+    return 0;
+  unsigned char c = s[0];
+  int need = 1;
+  if ((c & 0x80) == 0)
+    need = 1;
+  else if ((c & 0xe0) == 0xc0)
+    need = 2;
+  else if ((c & 0xf0) == 0xe0)
+    need = 3;
+  else if ((c & 0xf8) == 0xf0)
+    need = 4;
+  else
+    return 1;
+  if (need > avail)
+    return 1;
+  for (int i = 1; i < need; ++i)
+    if ((s[i] & 0xc0) != 0x80)
+      return 1;
+  return need;
+}
+
+static uint32_t repl_utf8_cp(const unsigned char *s, int span) {
+  if (span <= 1)
+    return s[0];
+  if (span == 2)
+    return ((uint32_t)(s[0] & 0x1f) << 6) | (uint32_t)(s[1] & 0x3f);
+  if (span == 3)
+    return ((uint32_t)(s[0] & 0x0f) << 12) | ((uint32_t)(s[1] & 0x3f) << 6) |
+           (uint32_t)(s[2] & 0x3f);
+  return ((uint32_t)(s[0] & 0x07) << 18) | ((uint32_t)(s[1] & 0x3f) << 12) |
+         ((uint32_t)(s[2] & 0x3f) << 6) | (uint32_t)(s[3] & 0x3f);
+}
+
+/*
+ * Terminal columns for one code point. Fullwidth CJK and emoji take two.
+ */
+static int repl_cp_cols(uint32_t cp) {
+  if (cp < 0x20 || (cp >= 0x7f && cp < 0xa0))
+    return 0;
+  if ((cp >= 0x1100 && cp <= 0x115f) || cp == 0x2329 || cp == 0x232a ||
+      (cp >= 0x2e80 && cp <= 0xa4cf && cp != 0x303f) ||
+      (cp >= 0xac00 && cp <= 0xd7a3) || (cp >= 0xf900 && cp <= 0xfaff) ||
+      (cp >= 0xfe10 && cp <= 0xfe19) || (cp >= 0xfe30 && cp <= 0xfe6f) ||
+      (cp >= 0xff00 && cp <= 0xff60) || (cp >= 0xffe0 && cp <= 0xffe6) ||
+      (cp >= 0x1f300 && cp <= 0x1f64f) || (cp >= 0x1f900 && cp <= 0x1f9ff) ||
+      (cp >= 0x20000 && cp <= 0x3fffd))
+    return 2;
+  return 1;
+}
+
+static int repl_cols_at(const char *buf, int i, int end) {
+  if (!buf || i < 0 || i >= end)
+    return 0;
+  const unsigned char *s = (const unsigned char *)buf + i;
+  if ((s[0] & 0xc0) == 0x80)
+    return 0;
+  int span = repl_utf8_span(s, end - i);
+  int width = repl_cp_cols(repl_utf8_cp(s, span));
+  if (s[0] == '\n' || s[0] == '\t')
+    return 0;
+  if (s[0] < 0x20 || s[0] == 0x7f)
+    return 1;
+  return width > 0 ? width : 1;
+}
+
 static int visible_len(const char *s) {
   int len = 0;
-  while (*s) {
+  while (s && *s) {
     if (*s == '\x1b') {
       s++;
       if (*s == '[') {
@@ -1465,10 +1497,13 @@ static int visible_len(const char *s) {
     } else if (*s == '\001' || *s == '\002') {
       s++;
     } else {
-      if ((*s & 0xc0) != 0x80) {
-        len++;
-      }
-      s++;
+      int end = (int)strlen(s);
+      int span = repl_utf8_span((const unsigned char *)s, end);
+      if (span < 1)
+        span = 1;
+      if (((unsigned char)*s & 0xc0) != 0x80)
+        len += repl_cols_at(s, 0, span);
+      s += span;
     }
   }
   return len;
@@ -1544,11 +1579,18 @@ static void repl_paste_string_state_update(char ch, int *in_str, char *quote,
 enum { REPL_TAB_VISUAL_WIDTH = 2, REPL_CONT_PROMPT_COLS = 3 };
 
 /*
- * Advance the visual cursor over one character of the input buffer.  Newlines
- * restart at the continuation-prompt width, tabs cover their visual width
- * with the same wrap rule, and UTF-8 continuation bytes advance nothing.
+ * Advance the visual cursor over one byte of the input buffer. Newlines
+ * restart at the continuation-prompt width. Tabs cover their visual width.
+ * A UTF-8 lead byte advances by the code point's display width, so a
+ * fullwidth character such as 世 occupies two columns. Continuation bytes
+ * advance nothing. A wide character that does not fit on the current row
+ * wraps before it is placed.
  */
-static void repl_cursor_advance(char ch, int *row, int *col, int term_cols) {
+static void repl_cursor_advance(const char *buf, int i, int end, int *row,
+                                int *col, int term_cols) {
+  if (!buf || i < 0 || i >= end)
+    return;
+  unsigned char ch = (unsigned char)buf[i];
   if (ch == '\n') {
     (*row)++;
     *col = REPL_CONT_PROMPT_COLS;
@@ -1564,14 +1606,17 @@ static void repl_cursor_advance(char ch, int *row, int *col, int term_cols) {
     }
   } else if ((ch & 0xc0) == 0x80) {
     /*
-     * UTF-8 continuation byte: no visual advance.
+     * UTF-8 continuation byte: the lead byte already took the columns.
      */
   } else {
-    if (*col >= term_cols) {
+    int width = repl_cols_at(buf, i, end);
+    if (width < 1)
+      width = 1;
+    if (*col >= term_cols || *col + width > term_cols) {
       (*row)++;
       *col = 0;
     }
-    (*col)++;
+    *col += width;
   }
 }
 
@@ -1588,13 +1633,13 @@ static void calc_cursor(const char *buf, int pos, int term_cols,
                         int prompt_cols, int *r, int *c) {
   int row = 0;
   int col = prompt_cols;
+  int end = buf ? (int)strlen(buf) : 0;
   while (col >= term_cols) {
     row++;
     col -= term_cols;
   }
-  for (int i = 0; i < pos; i++) {
-    repl_cursor_advance(buf[i], &row, &col, term_cols);
-  }
+  for (int i = 0; i < pos; i++)
+    repl_cursor_advance(buf, i, end, &row, &col, term_cols);
   *r = row;
   *c = col;
 }
@@ -1627,7 +1672,7 @@ static int visual_to_pos(const char *buf, int len, int target_r, int target_c,
       break;
     if (buf[i] == '\n' && row == target_r)
       return i;
-    repl_cursor_advance(buf[i], &row, &col, term_cols);
+    repl_cursor_advance(buf, i, len, &row, &col, term_cols);
   }
   return len;
 }
@@ -1667,7 +1712,7 @@ static void buf_row_slice(const char *buf, int term_cols, int prompt_cols,
     row++;
     col -= term_cols;
   }
-  int bytes = strlen(buf);
+  int bytes = (int)strlen(buf);
   int s_idx = -1;
   if (start_r <= 0)
     s_idx = 0;
@@ -1679,7 +1724,7 @@ static void buf_row_slice(const char *buf, int term_cols, int prompt_cols,
       *out_len = i - s_idx;
       return;
     }
-    repl_cursor_advance(buf[i], &row, &col, term_cols);
+    repl_cursor_advance(buf, i, bytes, &row, &col, term_cols);
   }
   if (s_idx == -1) {
     *out_start = bytes;
@@ -3289,6 +3334,54 @@ static int repl_run_completion_menu(const char *prompt, char **pbuf, int *cap,
   return accepted ? 1 : -1;
 }
 
+/*
+ * Symbol under (or just before) the cursor, e.g. "core.os.path.join".
+ * Declaration keywords (fn, def, ...) resolve to the name that follows.
+ */
+static int repl_help_word_at(const char *buf, int len, int pos, char *out,
+                             size_t cap) {
+  static const char *const decl[] = {"fn",     "def",    "mut",   "use",
+                                     "struct", "enum",   "layout", "module",
+                                     "extern", "lambda", NULL};
+#define HW_CH(c) (isalnum((unsigned char)(c)) || (c) == '_' || (c) == '.')
+  int a = pos;
+  if (a > len)
+    a = len;
+  if (a == len || !HW_CH(buf[a]))
+    while (a > 0 && (buf[a - 1] == '(' || buf[a - 1] == ' '))
+      a--; /* cursor just after a name, e.g. "foo(" */
+  int s0 = a, e0 = a;
+  while (s0 > 0 && HW_CH(buf[s0 - 1]))
+    s0--;
+  while (e0 < len && HW_CH(buf[e0]))
+    e0++;
+  for (int pass = 0; pass < 2; pass++) {
+    if (e0 <= s0)
+      return 0;
+    size_t n = (size_t)(e0 - s0);
+    int is_decl = 0;
+    for (int i = 0; decl[i]; i++)
+      if (strlen(decl[i]) == n && !strncmp(buf + s0, decl[i], n))
+        is_decl = 1;
+    if (!is_decl || pass)
+      break;
+    s0 = e0;
+    while (s0 < len && (buf[s0] == ' ' || buf[s0] == '\t'))
+      s0++;
+    e0 = s0;
+    while (e0 < len && HW_CH(buf[e0]))
+      e0++;
+  }
+#undef HW_CH
+  while (e0 > s0 && buf[e0 - 1] == '.')
+    e0--;
+  if (e0 <= s0 || (size_t)(e0 - s0) >= cap)
+    return 0;
+  memcpy(out, buf + s0, (size_t)(e0 - s0));
+  out[e0 - s0] = '\0';
+  return 1;
+}
+
 char *ny_readline(const char *prompt) {
 #ifdef _WIN32
   HANDLE initial_hin = GetStdHandle(STD_INPUT_HANDLE);
@@ -3531,11 +3624,17 @@ char *ny_readline(const char *prompt) {
       draw_line(prompt, buf, len, pos, prompt_cols);
       continue;
     }
-    if (k >= K_F1 && k <= K_F12) {
-      /* F1..F12 open help: insert ":help " at the start so pressing
-       * Enter shows the command/symbol help reference. */
-      pos = 0;
-      if (repl_insert_bytes(&buf, &cap, &len, &pos, ":help ", 6, 64)) {
+    if (k == K_F1) {
+      /*
+       * F1: show docs for the symbol under the cursor, below the
+       * input, like :help. Nothing happens when there is no symbol.
+       */
+      char word[256];
+      if (g_vt_output_ok &&
+          repl_help_word_at(buf, len, pos, word, sizeof word)) {
+        repl_finish_submit_display(prompt, buf, len, pos, prompt_cols, 0);
+        ny_repl_show_help(word);
+        prev_lines = 0;
         draw_line(prompt, buf, len, pos, prompt_cols);
       }
       continue;
@@ -3640,6 +3739,14 @@ char *ny_readline(const char *prompt) {
           repl_finish_submit_display(prompt, buf, len, pos, prompt_cols, 1);
           break;
         } else {
+          /*
+           * Don't add newline if buffer already ends with one (e.g., from paste)
+           */
+          if (len > 0 && buf[len - 1] == '\n') {
+            if (!pasting && !repl_is_input_pending())
+              draw_line(prompt, buf, len, pos, prompt_cols);
+            continue;
+          }
           int indent = pasting ? 0 : repl_calc_indent(buf);
           if (!repl_insert_newline_indent(&buf, &cap, &len, &pos, indent, 256))
             continue;
@@ -3844,7 +3951,7 @@ char *ny_readline(const char *prompt) {
       calc_cursor(buf, pos, term_cols, prompt_cols, &cur_r, &cur_c);
       if (target_col == -1)
         target_col = cur_c;
-      if (cur_r > 0) {
+      if (cur_r > 0 && pos < len) {
         pos = visual_to_pos(buf, len, cur_r - 1, target_col, term_cols,
                             prompt_cols);
         moved_cursor = 1;

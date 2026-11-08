@@ -98,7 +98,9 @@ static int lgh_rewrite_once(nyr_func_t *f) {
       if (outside != 1 || cfg.block_label[header] < 0 ||
           cfg.succ_offsets[pre + 1] - cfg.succ_offsets[pre] != 1)
         continue;
-      /* The guard: first non-PHI/COPY instruction of the header. */
+      /*
+       * The guard: first non-PHI/COPY instruction of the header.
+       */
       size_t gi = cfg.block_start[header];
       while (gi < cfg.block_end[header]) {
         nyr_op_t op = f->data[gi].op;
@@ -115,7 +117,9 @@ static int lgh_rewrite_once(nyr_func_t *f) {
       int cond = g->a;
       if (cond < 0 || cond >= f->next_value || defs[cond] < 0)
         continue;
-      /* A COPY of an outside value inside the header is still invariant. */
+      /*
+       * A COPY of an outside value inside the header is still invariant.
+       */
       int root = cond;
       while (root >= 0 && defs[root] >= 0 &&
              f->data[defs[root]].op == NYIR_COPY &&
@@ -136,7 +140,9 @@ static int lgh_rewrite_once(nyr_func_t *f) {
       }
       if (!target_ok)
         continue;
-      /* Insertion point: end of the preheader, before a `br -> H`. */
+      /*
+       * Insertion point: end of the preheader, before a `br -> H`.
+       */
       size_t pre_end = cfg.block_end[pre];
       size_t at = pre_end;
       while (at > cfg.block_start[pre] && f->data[at - 1].op == NYIR_NOP)
@@ -152,7 +158,9 @@ static int lgh_rewrite_once(nyr_func_t *f) {
       int64_t old_pre_label = cfg.block_label[pre];
       int64_t new_label = max_label + 1;
       int64_t target_label = g->imm;
-      /* Header: drop the guard (later instructions shift by three). */
+      /*
+       * Header: drop the guard (later instructions shift by three).
+       */
       f->data[gi] = (nyr_inst_t){.op = NYIR_NOP,
                                  .dst = -1,
                                  .a = -1,
@@ -167,7 +175,9 @@ static int lgh_rewrite_once(nyr_func_t *f) {
         result = -1;
         goto done;
       }
-      /* Header PHIs now arrive from the new preheader. */
+      /*
+       * Header PHIs now arrive from the new preheader.
+       */
       for (size_t i = 0; i < f->len; ++i) {
         nyr_inst_t *in = &f->data[i];
         if (in->op != NYIR_PHI)

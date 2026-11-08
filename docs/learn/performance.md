@@ -316,7 +316,9 @@ Separate an accepted change from a rejected or provisional experiment. A new
 hypothesis should name an observable code/profile change and a discriminating
 check, not repeat an old unsuccessful budget increase.
 
-Keep only unresolved acceptance in [Performance acceptance](../todo/performance-acceptance.md). Put concise verified
+Run the bench with clang, as `./make bench` does: with `CC` unset,
+`ny-test --bench` falls back to `cc` (GCC), which reports no host-C time for
+`collatz`, `euler9`, `knight`, and `queen`. Put concise verified
 release-facing changes under the latest existing changelog version; changing
 that version is a separate user decision. Preserve large capture files outside
 source control and document their limitations when results are summarized.

@@ -8,7 +8,7 @@ shape rev-decompiler-c-control-flow {
   expect compile_and_run
   source ny <<'NY'
 use core
-use core.os.rev.decomp.cfg as cfg
+use core.os.dis.decomp.cfg as cfg
 
 ;; A diamond CFG with dynamically boxed addresses, matching the values produced
 ;; by decoded basic blocks without paying to compile or load a C executable.

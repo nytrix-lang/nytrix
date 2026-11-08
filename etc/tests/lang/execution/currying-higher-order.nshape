@@ -1,0 +1,37 @@
+shape currying_higher_order_and_imported {
+  family "runtime/execution"
+  generator "embedded"
+  features [ny currying higher-order effects imported positive]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit -O0; --native-backend=llvm --jit --jit-engine=orc -O2"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use iter
+use core.functional as functional
+
+fn add(int a, int b) int { a + b }
+def add5 = add(5)
+assert(it.map([1, 2, 3], add5) == [6, 7, 8],
+       "a partial is accepted as a higher-order callback")
+
+@pure fn multiply(int a, int b) int { a * b }
+def twice = multiply(2)
+assert(twice(21) == 42, "a partial preserves a pure callable's contract")
+
+def adapted = functional.curry(fn(a, b) { a + b })
+assert(adapted(20)(22) == 42, "an imported binary adapter remains callable")
+
+def alias = add
+def alias5 = alias(5)
+assert(alias5(2) == 7, "a module-level callable alias can be partially applied")
+
+fn local_alias() int {
+   def shadow = add
+   def p = shadow(10)
+   p(5)
+}
+assert(local_alias() == 15, "a local callable alias can be partially applied")
+print("HIGHER-ORDER-OK")
+NY
+}

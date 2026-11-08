@@ -1352,8 +1352,8 @@ static int32_t ny_overload_name_bucket_head(codegen_t *cg, uint64_t want_hash) {
         if (cg->current_module_name && current_mod_len == mod_len &&           \
             memcmp(cg->current_module_name, sig_name, mod_len) == 0)           \
           new_state = 10u;                                                     \
-        else if (mod_len >= 8 && memcmp(sig_name, "core", 8) == 0 &&           \
-                 (sig_name[8] == '.' || sig_name[8] == '\0'))                  \
+        else if (mod_len >= 4 && memcmp(sig_name, "core", 4) == 0 &&           \
+                 (mod_len == 4 || sig_name[4] == '.'))                         \
           new_state = 5u;                                                      \
         if (!e->state) {                                                       \
           e->state = new_state;                                                \

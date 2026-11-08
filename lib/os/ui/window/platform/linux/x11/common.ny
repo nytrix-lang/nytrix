@@ -8,18 +8,6 @@ module core.os.ui.window.platform.linux.x11.common(encodeUTF8, encodeUTF8String,
 use core
 use core.str as str
 
-fn _decode_utf8_offset(int count) int {
-   match count {
-      1 -> 0x00000000
-      2 -> 0x00003080
-      3 -> 0x000e2080
-      4 -> 0x03c82080
-      5 -> 0xfa082080
-      6 -> 0x82082080
-      _ -> 0
-   }
-}
-
 fn _hex_value(int c) int {
    case c {
       48..57 -> c - 48

@@ -4,6 +4,7 @@
 #include <nyr/ir.h>
 
 bool nyr_err(char *err, size_t err_len, const char *fmt, ...);
+bool nyr_fmt_inst(const nyr_inst_t *in, char *buf, size_t n);
 bool nyr_inst_err(char *err, size_t err_len, const nyr_inst_t *inst,
                   size_t index, const char *reason);
 bool nyr_label_referenced(const nyr_func_t *f, int64_t label);

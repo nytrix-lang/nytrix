@@ -12,15 +12,17 @@ Prerequisites: none; these are dated measurements, not current performance
 claims.
 
 [Performance](performance.md) owns investigation methods;
-[Contributing](../CONTRIBUTE.md) owns build and verification procedures;
-[Performance acceptance](../todo/performance-acceptance.md) owns current
-performance criteria. Release implementation records
+[Contributing](../CONTRIBUTE.md) owns build and verification procedures.
+Release implementation records
 are in the [changelog](../CHANGELOG.md).
 
 ## Reading the results
 
 - Compare the same source, input, execution route, flags, cache state, and timed
   region. Changed benchmark sources are new baselines, not compiler A/B tests.
+- If `./make bench` reports `BENCH INVALIDATED`, its saved rows are
+  measurements from the run, not a pass/fail verdict for the final source
+  tree; identify the changed input before using them as a baseline.
 - Discard contended or unstable timings. C results varied by more than 100% in
   several Binary runs; those rows cannot establish an NYR/C improvement.
   References below 1 ms were separated from the gated runtime comparisons.
@@ -36,92 +38,93 @@ are in the [changelog](../CHANGELOG.md).
 
 ## Latest full benchmark run
 
-Generated automatically by the full `ny-test --bench` run at 2026-11-05 00:58:39 CET.
-Host: AMD EPYC 7642; target `x86_64`; compiler `fnv1a64:e306e6f361a631c7`.
+Generated automatically by the full `ny-test --bench` run at 2026-11-08 17:23:09 CET.
+Host: AMD EPYC 7642; target `x86_64`; compiler `fnv1a64:6bba20c8101bdc20`.
 NYR: `-O3`, profile `peak`, tier `opt`, engine `NYR`, cache `warm`.
 C: clang version 23.1.4; flags `-O3 -march=native`. NYC flags `-O3 -S`.
-Samples: 3 plus 1 warm-up; fixture workers 14, route workers 1.
-Results: 73 fixtures; 72 passed, 0 failed or mismatched, 1 timer controls.
-Measurement qualifiers: 2 low-time, 1 noisy; 0 fixture budget misses.
+Samples: 3 plus 1 warm-up; fixture workers 25, route workers 1.
+Results: 74 fixtures; 73 passed, 0 failed or mismatched, 1 timer controls.
+Measurement qualifiers: 0 low-time, 0 noisy; 0 fixture budget misses.
 
 | Fixture | Status | NYR | LLVM | Host C | NYC | NYR/C | LLVM/C | NYR/LLVM |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| `binary-trees` | ok | 4.2µs | 3.3µs | 2.7µs | 2.04ms | 1.60x | 1.23x | 1.30x |
-| `binary` | ok | 1.55ms | 282µs | 1.07ms | 8.53ms | 1.45x | 0.26x | 5.50x |
-| `collatz` | ok | 83µs | 72µs | 33µs | 90µs | 2.52x | 2.19x | 1.15x |
-| `euler9` | ok | 46µs | 62µs | 22µs | 27µs | 2.06x | 2.77x | 0.74x |
-| `expression-tree` | ok | 67.8ms | 32.4ms | 16.7ms | 64.4ms | 4.06x | 1.94x | 2.09x |
-| `fannkuch` | ok | 293ms | 222ms | 224ms | 531ms | 1.31x | 0.99x | 1.32x |
-| `graph-bfs` | ok | 32.9ms | 22.6ms | 21.3ms | 64.0ms | 1.55x | 1.06x | 1.46x |
-| `havlak` | ok | 9.82ms | 6.01ms | 2.53ms | 6.28ms | 3.87x | 2.37x | 1.63x |
-| `knight` | ok | 67µs | 49µs | 31µs | 64µs | 2.19x | 1.59x | 1.38x |
-| `mandel` | ok | 323µs | 106µs | 77µs | 229µs | 4.20x | 1.37x | 3.06x |
-| `mandelbrot` | ok | 366µs | 260µs | 252µs | 1.47ms | 1.45x | 1.03x | 1.41x |
-| `n-body` | ok | 2.94ms | 2.03ms | 2.04ms | 5.03ms | 1.44x | 0.99x | 1.45x |
-| `nqueens` | ok | 50.0ms | 21.7ms | 21.7ms | 44.5ms | 2.30x | 1.00x | 2.31x |
-| `page-rank` | ok | 23µs | 9.9µs | 5.0µs | 62µs | 4.56x | 1.97x | 2.32x |
-| `prime` | ok | 1.42ms | 1.29ms | 1.30ms | 1.51ms | 1.09x | 0.99x | 1.10x |
-| `queen` | ok | 208µs | 106µs | 70µs | 250µs | 2.96x | 1.50x | 1.97x |
-| `sieve` | ok | 7.28ms | 5.10ms | 5.25ms | 42.2ms | 1.39x | 0.97x | 1.43x |
-| `sor` | ok | 3.22ms | 773µs | 963µs | 29.8ms | 3.35x | 0.80x | 4.17x |
-| `spectral` | ok | 93µs | 55µs | 51µs | 481µs | 1.83x | 1.07x | 1.71x |
-| `call-chain` | ok | 776µs | 549µs | 255µs | 1.50ms | 3.04x | 2.15x | 1.41x |
-| `calls` | ok | 115µs | 102µs | 105µs | 248µs | 1.09x | 0.97x | 1.12x |
-| `thread-ring` | ok | 6.93ms | 6.18ms | 3.33ms | 3.18ms | 2.08x | 1.85x | 1.12x |
-| `dict-oracle` | ok | 80µs | 78µs | 27µs | 27µs | 2.98x | 2.89x | 1.03x |
-| `dict-set` | ok | 27.5ms | 28.0ms | 36.1ms | 232ms | 0.76x | 0.78x | 0.98x |
-| `dict` | ok | 10.3ms | 9.01ms | 6.06ms | 10.6ms | 1.71x | 1.49x | 1.15x |
-| `hash` | ok | 4.80ms | 5.42ms | 4.00ms | 10.4ms | 1.20x | 1.35x | 0.89x |
-| `heapsort` | ok | 5.58ms | 2.70ms | 2.80ms | 10.6ms | 1.99x | 0.97x | 2.06x |
-| `iter` | ok | 2.81ms | 3.34ms | 558µs | 1.44ms | 5.03x | 5.98x | 0.84x |
-| `list-any-append` | ok | 9.64ms | 4.96ms | 9.89ms | 12.4ms | 0.98x | 0.50x | 1.94x |
-| `list-dynamic` | ok | 2.09ms | 2.25ms | 4.83ms | 7.87ms | 0.43x | 0.47x | 0.93x |
-| `list` | ok | 4.70ms | 4.62ms | 4.85ms | 13.2ms | 0.97x | 0.95x | 1.02x |
-| `records` | ok | 45.9ms | 39.4ms | 45.7ms | 108ms | 1.00x | 0.86x | 1.16x |
-| `splay` | ok | 8.73ms | 3.64ms | 3.75ms | 10.5ms | 2.33x | 0.97x | 2.40x |
-| `vector` | ok | 2.04ms | 1.15ms | 274µs | 1.03ms | 7.45x | 4.19x | 1.78x |
-| `bce-matrix` | ok | 11.7ms | 3.69ms | 2.28ms | 93.4ms | 5.11x | 1.61x | 3.16x |
-| `bigint-oracle` | ok | 38.8ms | 36.9ms | 3.87ms | 4.09ms | 10.03x | 9.53x | 1.05x |
-| `dgemm` | ok | 174µs | 43µs | 45µs | 1.63ms | 3.87x | 0.96x | 4.03x |
-| `fft` | unstable | 20µs | 24µs | 15µs | 131µs | — | — | 0.83x |
-| `fibonacci` | ok | 170µs | 160µs | 135µs | 708µs | 1.25x | 1.18x | 1.06x |
-| `float-cmp-oracle` | ok | 17µs | 15µs | 14µs | 50µs | 1.21x | 1.08x | 1.11x |
-| `float` | ok | 9.92ms | 9.64ms | 9.56ms | 63.8ms | 1.04x | 1.01x | 1.03x |
-| `intops` | ok | 1.05ms | 632µs | 530µs | 1.57ms | 1.97x | 1.19x | 1.66x |
-| `linpack` | ok | 780µs | 244µs | 119µs | 3.42ms | 6.53x | 2.05x | 3.19x |
-| `matrix-raw` | ok | 49µs | 26µs | 28µs | 288µs | 1.77x | 0.94x | 1.90x |
-| `matrix` | ok | 35µs | 15µs | 7.5µs | 229µs | 4.67x | 2.05x | 2.28x |
-| `pbkdf2` | ok | 1.72ms | 941µs | 1.26ms | 63.4ms | 1.37x | 0.75x | 1.83x |
-| `pidigits` | ok | 45µs | 35µs | 5.6µs | 22µs | 7.98x | 6.16x | 1.30x |
-| `sha256` | ok | 1.41ms | 1.29ms | 937µs | 32.7ms | 1.50x | 1.38x | 1.09x |
-| `cmov-sort` | ok | 1.33ms | 693µs | 387µs | 7.23ms | 3.44x | 1.79x | 1.92x |
-| `dce` | low-time | 230ns | 1.2µs | 13µs | 66µs | — | 0.09x | — |
-| `escape-loop` | ok | 4.80ms | 4.30ms | 4.30ms | 11.4ms | 1.12x | 1.00x | 1.12x |
-| `gcbench` | ok | 41.7ms | 39.3ms | 24.3ms | 25.5ms | 1.72x | 1.62x | 1.06x |
-| `inline` | ok | 90µs | 57µs | 27µs | 261µs | 3.38x | 2.13x | 1.59x |
-| `licm-math` | ok | 4.91ms | 4.70ms | 4.80ms | 5.57ms | 1.02x | 0.98x | 1.04x |
-| `licm` | ok | 172µs | 145µs | 27µs | 613µs | 6.27x | 5.27x | 1.19x |
-| `loop-unswitch` | ok | 4.56ms | 4.91ms | 4.32ms | 4.89ms | 1.05x | 1.14x | 0.93x |
-| `loop` | ok | 1.18ms | 1.17ms | 1.05ms | 1.23ms | 1.12x | 1.11x | 1.01x |
-| `mixed-static-island` | ok | 31µs | 9.7µs | 20µs | 24µs | 1.55x | 0.48x | 3.21x |
-| `native-oracle` | ok | 50µs | 49µs | 19µs | 20µs | 2.57x | 2.54x | 1.01x |
-| `recursive-fibonacci` | low-time | 281ns | 51ns | 1.21ms | 601ns | <0.01x | <0.01x | — |
-| `startup` | timer-floor | 28ns | 27ns | 28ns | 44ns | n/a | n/a | n/a |
-| `straight` | ok | 21µs | 20µs | 20µs | 41µs | 1.06x | 1.01x | 1.05x |
-| `tce-recursion` | ok | 98µs | 108µs | 84µs | 1.54ms | 1.18x | 1.29x | 0.91x |
-| `time-profile` | ok | 51µs | 45µs | 42µs | 21µs | 1.22x | 1.07x | 1.14x |
-| `append-scaling` | ok | 3.12ms | 8.19ms | 10.8ms | 30.6ms | 0.29x | 0.76x | 0.38x |
-| `fasta` | ok | 1.82ms | 1.51ms | 967µs | 2.22ms | 1.89x | 1.57x | 1.21x |
-| `json-parser` | ok | 23.2ms | 10.8ms | 12.3ms | 160ms | 1.89x | 0.88x | 2.16x |
-| `knucleotide` | ok | 219µs | 75µs | 95µs | 961µs | 2.31x | 0.79x | 2.92x |
-| `repeat` | ok | 23.9ms | 82.1ms | 22.0ms | 49.2ms | 1.08x | 3.73x | 0.29x |
-| `revcomp` | ok | 70µs | 23µs | 12µs | 330µs | 5.94x | 1.93x | 3.08x |
-| `string` | ok | 180µs | 191µs | 224µs | 675µs | 0.80x | 0.85x | 0.94x |
-| `word-frequency-scan` | ok | 4.42ms | 2.51ms | 1.97ms | 7.90ms | 2.24x | 1.27x | 1.76x |
-| `word-frequency` | ok | 4.52ms | 4.52ms | 3.78ms | 25.1ms | 1.20x | 1.20x | 1.00x |
+| `binary-trees` | ok | 4.6µs | 2.9µs | 2.6µs | 3.7µs | 1.73x | 1.10x | 1.57x |
+| `binary` | ok | 867µs | 268µs | 1.06ms | 7.79ms | 0.82x | 0.25x | 3.24x |
+| `collatz` | ok | 279µs | 84µs | 45µs | 117µs | 6.14x | 1.85x | 3.33x |
+| `euler9` | ok | 53µs | 56µs | 34µs | 29µs | 1.57x | 1.66x | 0.95x |
+| `expression-tree` | ok | 66.0ms | 31.1ms | 17.2ms | 44.8ms | 3.84x | 1.81x | 2.12x |
+| `fannkuch` | ok | 294ms | 208ms | 215ms | 488ms | 1.37x | 0.97x | 1.41x |
+| `graph-bfs` | ok | 32.6ms | 27.6ms | 20.8ms | 73.3ms | 1.57x | 1.32x | 1.18x |
+| `havlak` | ok | 2.93ms | 2.61ms | 2.43ms | 5.33ms | 1.20x | 1.07x | 1.12x |
+| `knight` | ok | 56µs | 50µs | 40µs | 58µs | 1.39x | 1.24x | 1.13x |
+| `mandel` | ok | 214µs | 92µs | 79µs | 232µs | 2.71x | 1.16x | 2.33x |
+| `mandelbrot` | ok | 368µs | 246µs | 240µs | 1.19ms | 1.53x | 1.02x | 1.50x |
+| `n-body` | ok | 2.81ms | 1.95ms | 1.95ms | 4.59ms | 1.44x | 1.00x | 1.44x |
+| `nqueens` | ok | 48.7ms | 21.0ms | 20.7ms | 42.0ms | 2.35x | 1.01x | 2.32x |
+| `page-rank` | ok | 21µs | 9.5µs | 4.8µs | 25µs | 4.45x | 1.97x | 2.26x |
+| `prime` | ok | 1.40ms | 1.27ms | 1.27ms | 1.42ms | 1.10x | 0.99x | 1.10x |
+| `queen` | ok | 200µs | 115µs | 77µs | 234µs | 2.59x | 1.49x | 1.74x |
+| `sieve` | ok | 6.52ms | 5.00ms | 3.73ms | 35.6ms | 1.75x | 1.34x | 1.30x |
+| `sor` | ok | 970µs | 872µs | 1.10ms | 17.4ms | 0.88x | 0.79x | 1.11x |
+| `spectral` | ok | 91µs | 51µs | 51µs | 261µs | 1.79x | 1.01x | 1.78x |
+| `call-chain` | ok | 730µs | 541µs | 249µs | 1.61ms | 2.94x | 2.18x | 1.35x |
+| `calls` | ok | 109µs | 98µs | 101µs | 180µs | 1.08x | 0.97x | 1.12x |
+| `thread-ring` | ok | 5.55ms | 5.51ms | 3.65ms | 2.84ms | 1.52x | 1.51x | 1.01x |
+| `dict-oracle` | ok | 87µs | 72µs | 27µs | 27µs | 3.25x | 2.69x | 1.21x |
+| `dict-set` | ok | 38.3ms | 29.8ms | 57.0ms | 210ms | 0.67x | 0.52x | 1.28x |
+| `dict` | ok | 9.93ms | 9.96ms | 5.75ms | 9.82ms | 1.73x | 1.73x | 1.00x |
+| `hash` | ok | 4.73ms | 5.25ms | 3.90ms | 6.53ms | 1.21x | 1.35x | 0.90x |
+| `heapsort` | ok | 5.30ms | 2.61ms | 2.74ms | 9.18ms | 1.93x | 0.95x | 2.03x |
+| `iter` | ok | 459µs | 342µs | 529µs | 1.30ms | 0.87x | 0.65x | 1.34x |
+| `list-any-append` | ok | 9.15ms | 9.33ms | 9.41ms | 14.9ms | 0.97x | 0.99x | 0.98x |
+| `list-dynamic` | ok | 4.56ms | 4.41ms | 4.18ms | 6.92ms | 1.09x | 1.05x | 1.04x |
+| `list` | ok | 4.14ms | 4.46ms | 4.08ms | 11.4ms | 1.02x | 1.09x | 0.93x |
+| `records` | ok | 62.3ms | 16.0ms | 42.7ms | 71.4ms | 1.46x | 0.38x | 3.89x |
+| `splay` | ok | 9.08ms | 3.58ms | 3.51ms | 10.0ms | 2.59x | 1.02x | 2.54x |
+| `vector` | ok | 289µs | 332µs | 301µs | 723µs | 0.96x | 1.10x | 0.87x |
+| `bce-matrix` | ok | 3.63ms | 6.40ms | 2.19ms | 53.4ms | 1.66x | 2.92x | 0.57x |
+| `bigint-oracle` | ok | 36.6ms | 34.3ms | 3.63ms | 3.87ms | 10.08x | 9.46x | 1.07x |
+| `dgemm` | ok | 38µs | 34µs | 35µs | 1.02ms | 1.10x | 0.97x | 1.14x |
+| `fft` | ok | 18µs | 26µs | 21µs | 60µs | 0.85x | 1.22x | 0.70x |
+| `fibonacci` | ok | 165µs | 155µs | 128µs | 528µs | 1.29x | 1.21x | 1.07x |
+| `float-cmp-oracle` | ok | 17µs | 15µs | 14µs | 41µs | 1.25x | 1.07x | 1.17x |
+| `float` | ok | 9.73ms | 9.38ms | 9.43ms | 61.3ms | 1.03x | 0.99x | 1.04x |
+| `intops` | ok | 988µs | 633µs | 531µs | 1.38ms | 1.86x | 1.19x | 1.56x |
+| `linpack` | ok | 368µs | 243µs | 111µs | 1.59ms | 3.32x | 2.19x | 1.51x |
+| `matrix-raw` | ok | 49µs | 26µs | 27µs | 287µs | 1.79x | 0.94x | 1.91x |
+| `matrix` | ok | 34µs | 15µs | 6.9µs | 122µs | 4.94x | 2.11x | 2.34x |
+| `pbkdf2` | ok | 1.60ms | 813µs | 1.18ms | 58.5ms | 1.36x | 0.69x | 1.97x |
+| `pidigits` | ok | 52µs | 29µs | 5.8µs | 22µs | 8.90x | 4.97x | 1.79x |
+| `sha256` | ok | 1.38ms | 1.21ms | 949µs | 30.4ms | 1.45x | 1.28x | 1.14x |
+| `cmov-sort` | ok | 1.32ms | 665µs | 439µs | 3.92ms | 3.01x | 1.52x | 1.99x |
+| `currying` | ok | 5.02ms | 6.36ms | 3.7µs | 23µs | 1346.44x | 1707.32x | 0.79x |
+| `dce` | ok | 21µs | 11µs | 3.32ms | 10.0ms | <0.01x | <0.01x | 1.96x |
+| `escape-loop` | ok | 4.65ms | 4.06ms | 4.12ms | 10.2ms | 1.13x | 0.99x | 1.15x |
+| `gcbench` | ok | 43.1ms | 38.6ms | 24.5ms | 27.6ms | 1.76x | 1.58x | 1.12x |
+| `inline` | ok | 104µs | 57µs | 26µs | 156µs | 3.97x | 2.16x | 1.84x |
+| `licm-math` | ok | 4.63ms | 4.59ms | 4.72ms | 5.41ms | 0.98x | 0.97x | 1.01x |
+| `licm` | ok | 166µs | 138µs | 26µs | 354µs | 6.26x | 5.21x | 1.20x |
+| `loop-unswitch` | ok | 4.58ms | 4.93ms | 4.32ms | 4.99ms | 1.06x | 1.14x | 0.93x |
+| `loop` | ok | 1.17ms | 1.15ms | 1.03ms | 1.18ms | 1.14x | 1.12x | 1.02x |
+| `mixed-static-island` | ok | 28µs | 11µs | 27µs | 31µs | 1.03x | 0.41x | 2.51x |
+| `native-oracle` | ok | 58µs | 51µs | 20µs | 30µs | 2.86x | 2.52x | 1.14x |
+| `recursive-fibonacci` | ok | 281ns | 371ns | 1.97ms | 541ns | <0.01x | <0.01x | 0.76x |
+| `startup` | ok | 28ns | 28ns | 27ns | 27ns | n/a | n/a | n/a |
+| `straight` | ok | 21µs | 20µs | 20µs | 27µs | 1.06x | 1.00x | 1.06x |
+| `tce-recursion` | ok | 93µs | 104µs | 81µs | 105µs | 1.15x | 1.28x | 0.90x |
+| `time-profile` | ok | 37µs | 39µs | 29µs | 21µs | 1.28x | 1.35x | 0.95x |
+| `append-scaling` | ok | 7.86ms | 8.21ms | 11.1ms | 29.8ms | 0.71x | 0.74x | 0.96x |
+| `fasta` | ok | 1.78ms | 1.49ms | 967µs | 2.02ms | 1.84x | 1.54x | 1.20x |
+| `json-parser` | ok | 18.8ms | 10.5ms | 12.2ms | 103ms | 1.54x | 0.86x | 1.78x |
+| `knucleotide` | ok | 245µs | 73µs | 71µs | 428µs | 3.45x | 1.03x | 3.34x |
+| `repeat` | ok | 86.9ms | 84.8ms | 96.9ms | 111ms | 0.90x | 0.88x | 1.02x |
+| `revcomp` | ok | 70µs | 25µs | 11µs | 163µs | 6.14x | 2.17x | 2.83x |
+| `string` | ok | 180µs | 196µs | 332µs | 1.08ms | 0.54x | 0.59x | 0.91x |
+| `word-frequency-scan` | ok | 5.05ms | 2.25ms | 2.07ms | 5.57ms | 2.44x | 1.08x | 2.25x |
+| `word-frequency` | ok | 4.72ms | 4.82ms | 3.73ms | 20.6ms | 1.26x | 1.29x | 0.98x |
 
 The empty timer control is shown for completeness and is excluded from workload ratios.
-Raw report: `/home/e/nytrix/build/bench-reports/bench-20261105-005709-3776451.json`.
+Raw report: `/home/e/nytrix/build/bench-reports/bench-20261108-172220-1184489.json`.
 
 <!-- AUTO_BENCHMARK_RESULTS_END -->
 
@@ -172,9 +175,8 @@ The C regression executes recursive/address-taken helpers and GNU `noinline`
 frame boundaries.
 
 This is a local NYC improvement, not a passing NYR/NYC-versus-reference matrix.
-The separate four-route binary smoke still measured NYR/LLVM above its gate;
-the remaining per-fixture acceptance stays open in
-[performance acceptance](../todo/performance-acceptance.md).
+The separate four-route binary smoke still measured NYR/LLVM above its gate
+at that time.
 
 ### Rejected NYR binary candidates
 
@@ -1407,8 +1409,137 @@ datastructures, startup, and overall gates on three fixtures:
 All 103 optimizer groups pass and all 73 bench fixtures match baseline
 checksums with these changes.
 
+## Outer vectorization residency (2026-11-05)
+
+Targeted serial run, `ny-test --bench --bench-run 7 --bench-warmup 2
+--bench-compare-llvm`, on a host that other sessions were also loading (load
+average about 14), so these numbers are advisory, not gate evidence:
+
+| Fixture | Route | NYR | LLVM | NYR/LLVM |
+| --- | --- | ---: | ---: | ---: |
+| `binary` | default | 1.45 ms | 266 µs | 5.45x |
+| `binary` | `NYTRIX_OUTER_VECTORIZE=1` | 903 µs | 266 µs | 3.40x |
+| `dgemm` | default | 154 µs | 26 µs | 5.97x |
+| `linpack` | default | 739 µs | 240 µs | 3.07x |
+
+Before this batch, the opt-in widened `binary` loop took 2.1 ms. Changes:
+
+- Vector latch recurrences (`x' = f(x)` computed in the latch) share the PHI
+  register when every read of the old value precedes the new definition. The
+  allocator proposes this pairing and the verifier checks it again
+  (`verify_vector_latch_recurrence`). The latch definition may read the PHI
+  as `src0` of a single add/sub/and/or/xor.
+- The loop-carry coalescer tries the PHI's own header color first, picks the
+  color with the cheapest evictions (a segment with no access in its block is
+  nearly free), and coalesces each PHI once per header. Nesting is judged on
+  the natural loop body, not on every block that reaches the header.
+- Coalescing can evict block-local temporaries. Those that were
+  register-only now get a second chance at any color that is still free.
+- Loop-invariant vectors stay resident across the loop when every body
+  segment shares one color with the preheader.
+- Functions with no scalar floats (SysV, AVX2) also allocate xmm4..xmm7 to
+  vectors, giving 10 vector colors instead of 6.
+- Encoder: three-operand VEX binops, register-form `vbroadcastsd`, and SET1
+  results written straight into their assigned register.
+
+Correctness fixes found along the way:
+
+- The home-path COPY of a four-lane vector used a 16-byte `movdqu`, which
+  left lanes 2–3 stale. This caused the "wrong `binary` checksum" that had
+  been blamed on the latch relaxation.
+- `mach_ymm_broadcastsd_mem` dropped VEX.R for ymm8+.
+- `mach_lower_phi_edges` counted only leading contiguous PHIs, so a PHI after
+  a DCE-made NOP lost its edge copies.
+- LICM hoisted into a preheader laid out after its loop, which broke the
+  verifier's def-before-use order once the outer vectorizer appended its
+  vector loop.
+
+The full `lang` + `code` suite (2139 fixtures) showed no regressions. The 16
+failures it reported fail on the baseline compiler too, or pass when run alone.
+
+Outer vectorization is now on by default (`NYTRIX_OUTER_VECTORIZE=0` turns it
+off). Enabling it took four more fixes on the in-process native route
+(`--native-only`, native JIT, native result oracle), whose scalar machine
+emitter hands vector functions to the NYIR emitter:
+
+- `nyr_phi_elim` lowered four-lane PHIs through 8-byte locals. They now go
+  through a 32-byte entry `alloca` with `vec8.store/load.i64`.
+- The NYIR emitter had no `vec8.sar.i64`. It is now lane-wise `sarq`, with
+  four-slot homes.
+- The home-path four-lane f64 SET1 broadcast from the source's stack home
+  even when the scalar existed only in its float register, which made `2.0 *
+  B` read 0 in `loop-tail-passes`.
+
+The full suite with the vectorizer forced on matched the baseline failure
+list exactly (2124/2139). The full serial bench that followed
+(2026-11-05 06:25, recorded above) put `binary` at 919 µs vs 266 µs LLVM
+(3.45x) and passed every per-class gate. Every checksum that ran matched.
+
+Later the same day:
+
+- `nyr_licm_post_vectorize` runs right after the late loop vectorizer. It
+  allows hoisting invariant address arithmetic, which the pre-vectorization
+  LICM keeps in place on purpose. That alone took `linpack` from 760 µs to
+  320 µs.
+- CSE now merges identical class-refining pointer copies.
+- Home-path f64 broadcasts load the lane with `movsd`, which forwards, then
+  use register-form `vbroadcastsd`. Zen 2 cannot forward a store into a
+  broadcast load.
+- A dedicated row-update vectorizer for `linpack` (runtime dependence guard,
+  scalar remainder) was correct but 2x slower and was removed. The next `k`
+  step reads the vector-written row back with scalar 8-byte loads, which
+  cannot be forwarded from the misaligned 32-byte stores.
+
+The full suite showed no new failures. The serial full bench at 13:21
+(`CC=clang`, recorded above) passed 72/72 fixtures and every per-class gate:
+`binary` 3.31x, `linpack` 1.33x (329 µs vs 248 µs), and `dgemm` 5.26x
+(137 µs vs 26 µs; ungated, host C under 1 ms).
+
+### AVX/SSE transitions, vector accumulators and exit homing (2026-11-05 evening)
+
+- Legacy SSE executed while the upper YMM halves are dirty stalls on this host
+  (C microbenchmark: 81 ns per transition against 6.4 ns with VEX scalar code).
+  The encoder mixed the two. On AVX targets the scalar and 128-bit SSE helpers
+  now emit VEX forms (`NYTRIX_NO_VEX_SSE=1` restores legacy encoding), and
+  `vzeroupper` runs before calls, before returns, and at entry to scalar-float
+  blocks where no 256-bit value is live. `sor` fell from 2.67 ms to 0.70 ms
+  and `dgemm` from 137 µs to 37 µs; this was the `dgemm` stall that had no
+  explanation without IBS.
+- Fixed-trip integer reductions keep a four-lane vector accumulator again
+  (`NYTRIX_NO_VECTOR_ACCUMULATOR=1` disables it): `bce-matrix` 11.0 ms →
+  3.4 ms.
+- Loop-carry exit homing ignored liveness. A carried vector segment was
+  published to its home before every loop branch whenever some successor had
+  no carried arrival, including successors where the value is dead.
+- Packed i64 `sar` by 1 is `(a >>> 1) | (a & SIGN)`, two cycles of latency
+  instead of three.
+
+`binary` stays at about 3.2x LLVM. Its LLVM reference is itself vectorized
+across the outer loop: `NYTRIX_OUTER_VECTORIZE=0` compares our scalar loop
+with LLVM vector code and is not a meaningful gate. The remaining gap is
+instruction count (9.6M against 3.2M at higher IPC, 2.67 against 2.04), mostly
+in the signed `x / 2` sequence and the xor/and/xor select.
+
+The full serial bench at 18:36 (`CC=clang`, 3+1, load average 4–12, recorded
+above) passed every timed fixture and every per-class gate. Overall NYR/LLVM
+was 1.29x and the maximum 3.17x on `binary`. Other results: `dgemm` 1.52x
+(39 µs vs 26 µs), `sor` 1.21x, `linpack` 1.49x, `bce-matrix` 0.53x.
+
+Built and validated after that run (224 of the 225 vector, ABI and optimizer
+fixtures pass on a private build; `f64-scalar-abi` fails on the release build
+too, from the concurrent `--run` argv change):
+
+- `vec8.shr.i64` (`NYR_MACH_VSHR`, `vpsrlq`). The outer vectorizer emits it
+  for `(x >> 63) & 1`, which replaces four instructions of the signed-division
+  bias: `binary` 880 µs → 831 µs.
+- Functions whose float allocation and loop-pinned floats stay in xmm0..xmm3
+  give xmm4..xmm7 to vectors (`NYTRIX_NO_SHARED_XMM4_7=1` disables it). The
+  fourth `dgemm` broadcast now stays in a register (about 35 µs).
+- `NYTRIX_OUTER_VEC_INTERLEAVE=2` widens to two four-lane registers per value.
+  It is correct but slower (1.40 ms) because the second register set spills.
+  Off by default.
+
 Next:
 
 - [Performance](performance.md) — measurement method and profile validation.
-- [Performance acceptance](../todo/performance-acceptance.md) — current performance work.
 - [Changelog](../CHANGELOG.md) — verified release records.

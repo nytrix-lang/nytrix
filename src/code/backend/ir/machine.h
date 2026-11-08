@@ -127,6 +127,8 @@ typedef enum {
   NYR_MACH_VA_SAVE,
   NYR_MACH_VA_START,
   NYR_MACH_VA_ARG,
+  /* Packed logical i64 shift right by an immediate (V256_I64 only). */
+  NYR_MACH_VSHR,
 } nyr_mach_opcode_t;
 
 typedef enum {
@@ -232,6 +234,20 @@ bool nyr_mach_regalloc_fixed_clobbers(const nyr_mach_func_t *func, size_t pc,
                                       bool preserve_gpr_calls, uint64_t *out);
 const char *nyr_mach_opcode_name(nyr_mach_opcode_t op);
 void nyr_mach_dump(const nyr_mach_func_t *func, FILE *out);
+/*
+ * Correlated dump: NYIR source group -> MIR inst -> native bytes.  When
+ * `mach` is set, `inst_offsets[pc]` must be the machine-encoder map from MIR
+ * instruction pc to function-relative native offset (SIZE_MAX if unmapped).
+ * When `mach` is NULL the map indexes the NYIR encoder instead.  Requires
+ * nyr_set_mixed_disasm() to be enabled; no-op otherwise.
+ */
+void nyr_mach_set_mixed_note(const char *reason);
+void nyr_mach_dump_mixed(const nyr_func_t *nyir, const nyr_mach_func_t *mach,
+                         const unsigned char *native_code, size_t native_len,
+                         const size_t *inst_offsets, size_t inst_offsets_len,
+                         const char *name, FILE *out);
+/* Enables --mixed-disasm output for the bundler; filter may be NULL/empty. */
+void nyr_set_mixed_disasm(bool enabled, const char *filter);
 bool nyr_mach_schedule_post_ra(nyr_mach_func_t *func);
 bool nyr_mach_schedule_post_ra_selftest(void);
 bool nyr_mach_sink_edge_adds_selftest(void);

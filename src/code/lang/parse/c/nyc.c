@@ -83,17 +83,25 @@ static char *read_source(const char *path, size_t *length) {
   return source;
 }
 
-static int nyc_handle_assembler_version(int argc, char **argv) {
+static int nyc_handle_probe_options(int argc, char **argv) {
   for (int i = 1; i < argc; ++i) {
-    if (strcmp(argv[i], "-Wa,--version") != 0)
-      continue;
+    if (strcmp(argv[i], "-Wa,--version") == 0) {
 #if defined(__unix__) || defined(__APPLE__)
-    execlp("as", "as", "--version", (char *)NULL);
-    perror("nyc: cannot execute assembler 'as'");
+      execlp("as", "as", "--version", (char *)NULL);
+      perror("nyc: cannot execute assembler 'as'");
 #else
-    fputs("nyc: assembler version query is unavailable on this host\n", stderr);
+      fputs("nyc: assembler version query is unavailable on this host\n", stderr);
 #endif
-    return 1;
+      return 1;
+    }
+    if (strcmp(argv[i], "-dumpversion") == 0) {
+      puts("12.0.0");
+      return 0;
+    }
+    if (strcmp(argv[i], "-dumpmachine") == 0) {
+      puts("x86_64-linux-gnu");
+      return 0;
+    }
   }
   return -1;
 }
@@ -120,6 +128,48 @@ static nyc_abi_t nyc_abi_for_target(const char *triple) {
       !strstr(triple, "msvc"))
     return NYC_ABI_SYSV_X86_64;
   return NYC_ABI_UNSUPPORTED;
+}
+
+static bool nyc_func_uses_fp_or_simd(const nyr_func_t *func);
+
+static bool nyc_eliminate_pure_self_calls(nyc_unit_t *unit) {
+  for (size_t f = 0; f < unit->count; ++f) {
+    if (!unit->function_local[f] || nyc_func_uses_fp_or_simd(&unit->funcs[f]))
+      continue;
+    nyr_func_t *func = &unit->funcs[f];
+    bool pure = true, recursive = false;
+    for (size_t i = 0; i < func->len; ++i) {
+      const nyr_inst_t *in = &func->data[i];
+      if (in->op == NYIR_CALL) {
+        if (!in->symbol || strcmp(in->symbol, unit->names[f]) != 0) {
+          pure = false;
+          break;
+        }
+        recursive = true;
+      } else if (in->op == NYIR_INLINE_ASM ||
+                 (nyr_effective_effects(in) &
+                  ~(NYIR_EFFECT_READ_LOCAL | NYIR_EFFECT_WRITE_LOCAL |
+                    NYIR_EFFECT_CONTROL | NYIR_EFFECT_MAY_TRAP))) {
+        pure = false;
+        break;
+      }
+    }
+    if (!pure || !recursive)
+      continue;
+    for (size_t i = 0; i < func->len; ++i) {
+      nyr_inst_t *in = &func->data[i];
+      if (in->op == NYIR_CALL && in->symbol &&
+          strcmp(in->symbol, unit->names[f]) == 0) {
+        in->flags |= NYIR_INST_F_EFFECTS_KNOWN;
+        in->effects = NYIR_EFFECT_CALL;
+      }
+    }
+    if (!nyr_cse(func) || !nyr_copy_prop(func) || !nyr_dce(func) ||
+        !nyr_compact(func))
+      return false;
+    nyr_refresh_metadata(func);
+  }
+  return true;
 }
 
 static bool nyc_func_uses_va_list(const nyr_func_t *func) {
@@ -220,6 +270,8 @@ typedef struct {
   bool position_independent;
   bool retpoline_indirect_calls;
   bool retpoline_inline_calls;
+  bool function_return_thunk_extern;
+  bool indirect_branch_cs_prefix;
   bool dump_macros;
   bool print_file_name_plugin;
 } nyc_driver_t;
@@ -735,7 +787,8 @@ static bool write_c_unit_assembly(const nyc_unit_t *unit,
                                   const ny_native_target_info_t *target,
                                   const char *path, bool verbose, bool code16,
                                   bool retpoline_indirect_calls,
-                                  bool retpoline_inline_calls, char *err,
+                                  bool retpoline_inline_calls,
+                                  bool function_return_thunk_extern, char *err,
                                   size_t err_len) {
   nyr_writer_t assembly = {0};
   bool ok = !code16 || nyr_put(&assembly, "\t.code16gcc\n");
@@ -796,8 +849,9 @@ static bool write_c_unit_assembly(const nyc_unit_t *unit,
               unit->funcs[i].data[inst].op == NYIR_ALLOCA ||
               unit->funcs[i].data[inst].op == NYIR_COPY_STRUCT;
         if (strcmp(target->object_format, "elf") == 0 &&
-            target->abi == NY_NATIVE_ABI_SYSV && !has_memory_access &&
-            !retpoline_indirect_calls && !retpoline_inline_calls) {
+          target->abi == NY_NATIVE_ABI_SYSV &&
+          (!has_memory_access || !getenv("NYC_DISABLE_MACH_MEM_ASM")) &&
+          !retpoline_indirect_calls && !retpoline_inline_calls) {
           nyr_mach_func_t machine = {0};
           nyr_writer_t native = {0};
           char machine_err[256] = {0};
@@ -806,6 +860,7 @@ static bool write_c_unit_assembly(const nyc_unit_t *unit,
                                  machine_err, sizeof(machine_err));
           if (lowered && nyr_x86_64_emit_mach_scalar(
                              &native, target, &machine, unit->names[i], false,
+                             function_return_thunk_extern,
                              machine_err, sizeof(machine_err))) {
             if (is_local && native.data) {
               char *global = strstr(native.data, "\t.globl\t");
@@ -815,14 +870,17 @@ static bool write_c_unit_assembly(const nyc_unit_t *unit,
             ok = nyr_put(&assembly, native.data ? native.data : "");
             emitted_machine = ok;
           }
+          if (!emitted_machine && getenv("NYC_TRACE_MACHINE_FALLBACK"))
+            fprintf(stderr, "NYC machine fallback: %s: %s\n", unit->names[i],
+                    machine_err[0] ? machine_err : "emitter rejected machine IR");
           free(native.data);
           nyr_mach_func_free(&machine);
         }
         if (ok && !emitted_machine)
           ok = nyr_x86_64_emit_ir_with_options(
               &assembly, target, &unit->funcs[i], unit->names[i], false,
-              is_local, retpoline_indirect_calls, retpoline_inline_calls, err,
-              err_len);
+              is_local, retpoline_indirect_calls, retpoline_inline_calls,
+              function_return_thunk_extern, err, err_len);
         if (!ok && err && err_len && !err[0])
           snprintf(err, err_len,
                    "x86-64 assembly emission failed for C function %s",
@@ -839,41 +897,20 @@ static bool write_c_unit_assembly(const nyc_unit_t *unit,
     }
   }
   if (ok && target->target == NY_NATIVE_TARGET_X86_64) {
-    ok = nyr_put(&assembly, "\t.text\n"
-                            "\t.weak __floatundidf\n"
-                            "\t.type __floatundidf,@function\n"
-                            "__floatundidf:\n"
-                            "\ttestq %rdi, %rdi\n"
-                            "\tjs 1f\n"
-                            "\tcvtsi2sdq %rdi, %xmm0\n"
-                            "\tret\n"
-                            "1:\n"
-                            "\tmovq %rdi, %rax\n"
-                            "\tmovq %rdi, %rcx\n"
-                            "\tandq $1, %rcx\n"
-                            "\tshrq $1, %rax\n"
-                            "\torq %rcx, %rax\n"
-                            "\tcvtsi2sdq %rax, %xmm0\n"
-                            "\taddsd %xmm0, %xmm0\n"
-                            "\tret\n"
-                            "\t.size __floatundidf, .-__floatundidf\n"
-                            "\t.weak __floatundisf\n"
-                            "\t.type __floatundisf,@function\n"
-                            "__floatundisf:\n"
-                            "\ttestq %rdi, %rdi\n"
-                            "\tjs 2f\n"
-                            "\tcvtsi2ssq %rdi, %xmm0\n"
-                            "\tret\n"
-                            "2:\n"
-                            "\tmovq %rdi, %rax\n"
-                            "\tmovq %rdi, %rcx\n"
-                            "\tandq $1, %rcx\n"
-                            "\tshrq $1, %rax\n"
-                            "\torq %rcx, %rax\n"
-                            "\tcvtsi2ssq %rax, %xmm0\n"
-                            "\taddss %xmm0, %xmm0\n"
-                            "\tret\n"
-                            "\t.size __floatundisf, .-__floatundisf\n");
+    const char *r = function_return_thunk_extern ? "\tjmp\t__x86_return_thunk\n" : "\tret\n";
+    char helpers[1024];
+    snprintf(helpers, sizeof(helpers),
+             "\t.text\n"
+             "\t.weak __floatundidf\n\t.type __floatundidf,@function\n__floatundidf:\n"
+             "\ttestq %%rdi, %%rdi\n\tjs 1f\n\tcvtsi2sdq %%rdi, %%xmm0\n%s"
+             "1:\n\tmovq %%rdi, %%rax\n\tmovq %%rdi, %%rcx\n\tandq $1, %%rcx\n\tshrq $1, %%rax\n\torq %%rcx, %%rax\n\tcvtsi2sdq %%rax, %%xmm0\n\taddsd %%xmm0, %%xmm0\n%s"
+             "\t.size __floatundidf, .-__floatundidf\n"
+             "\t.weak __floatundisf\n\t.type __floatundisf,@function\n__floatundisf:\n"
+             "\ttestq %%rdi, %%rdi\n\tjs 2f\n\tcvtsi2ssq %%rdi, %%xmm0\n%s"
+             "2:\n\tmovq %%rdi, %%rax\n\tmovq %%rdi, %%rcx\n\tandq $1, %%rcx\n\tshrq $1, %%rax\n\torq %%rcx, %%rax\n\tcvtsi2ssq %%rax, %%xmm0\n\taddss %%xmm0, %%xmm0\n%s"
+             "\t.size __floatundisf, .-__floatundisf\n",
+             r, r, r, r);
+    ok = nyr_put(&assembly, helpers);
   }
   for (size_t i = 0; ok && i < unit->alias_count; ++i) {
     const nyc_function_alias_t *alias = &unit->aliases[i];
@@ -1147,10 +1184,16 @@ static int compile_source(int argc, char **argv, int source_arg,
       }
       if (ok && !nyc_func_uses_va_list(&unit.funcs[i])) {
         stage = "during optimization";
-        ok = nyr_optimize_with_options(
-            &unit.funcs[i], driver->optimization,
-            driver->disable_vectorization ? NYR_OPT_DISABLE_VECTORIZATION : 0,
-            err, sizeof(err));
+        if (!nyr_optimize_with_options(
+                &unit.funcs[i], driver->optimization,
+                driver->disable_vectorization ? NYR_OPT_DISABLE_VECTORIZATION : 0,
+                err, sizeof(err))) {
+          fprintf(stderr, "NYC: warning: %s for function %s: %s (continuing unoptimized)\n",
+                  stage, unit.names[i], err[0] ? err : "optimization failed");
+          err[0] = '\0';
+          ok = true;
+          stage = "after optimization fallback";
+        }
       }
       /*
        * Keep NYC's whole-unit pipeline aligned with the native language
@@ -1164,10 +1207,14 @@ static int compile_source(int argc, char **argv, int source_arg,
         ok = nyr_recursive_add_to_loop(&unit.funcs[i], unit.names[i]);
         if (ok && unit.funcs[i].len != before_tail_call) {
           stage = "during recursive-add cleanup";
-          ok = nyr_optimize_with_options(
-              &unit.funcs[i], driver->optimization,
-              driver->disable_vectorization ? NYR_OPT_DISABLE_VECTORIZATION : 0,
-              err, sizeof(err));
+          if (!nyr_optimize_with_options(
+                  &unit.funcs[i], driver->optimization,
+                  driver->disable_vectorization ? NYR_OPT_DISABLE_VECTORIZATION : 0,
+                  err, sizeof(err))) {
+            fprintf(stderr, "NYC: warning: %s for function %s: %s (continuing unoptimized)\n",
+                    stage, unit.names[i], err[0] ? err : "optimization failed");
+            err[0] = '\0';
+          }
         }
       }
       if (ok && driver->disable_vectorization &&
@@ -1253,15 +1300,10 @@ static int compile_source(int argc, char **argv, int source_arg,
                                              ? NYR_OPT_DISABLE_VECTORIZATION
                                              : 0,
                                          err, sizeof(err))) {
-            char detail[sizeof(err)];
-            memcpy(detail, err, sizeof(detail));
-            detail[sizeof(detail) - 1] = '\0';
-            snprintf(err, sizeof(err),
-                     "NYIR cleanup after static-feature inlining for %s: "
-                     "%.360s",
-                     unit.names[i], detail);
-            ok = false;
-            break;
+            fprintf(stderr,
+                    "NYC: warning: NYIR cleanup after static-feature inlining for %s: %s (continuing unoptimized)\n",
+                    unit.names[i], err[0] ? err : "optimization failed");
+            err[0] = '\0';
           }
           if (!nyr_verify(&unit.funcs[i], err, sizeof(err))) {
             char detail[sizeof(err)];
@@ -1283,13 +1325,19 @@ static int compile_source(int argc, char **argv, int source_arg,
       nyr_inline_set_c_unit_abi(false);
     }
     free(inline_callees);
+    if (ok && driver->optimization >= 2 &&
+        !nyc_eliminate_pure_self_calls(&unit)) {
+      snprintf(err, sizeof(err), "pure recursive call CSE failed");
+      ok = false;
+    }
     if (ok)
       ok = nyc_unit_prune_static(&unit, err, sizeof(err));
     if (ok && driver->assembly_output)
       ok = write_c_unit_assembly(
           &unit, &target_info, output_path, driver->verbose_assembly,
           driver->code16, driver->retpoline_indirect_calls,
-          driver->retpoline_inline_calls, err, sizeof(err));
+          driver->retpoline_inline_calls, driver->function_return_thunk_extern,
+          err, sizeof(err));
     if (ok && !driver->assembly_output) {
       nyr_c_object_data_t *data =
           ok && unit.data_count ? calloc(unit.data_count, sizeof(*data)) : NULL;
@@ -1374,11 +1422,15 @@ static int compile_source(int argc, char **argv, int source_arg,
     }
     if (ok && getenv("NYC_DISABLE_PASS"))
       nyr_set_pass_controls(getenv("NYC_DISABLE_PASS"), NULL);
-    if (ok && !nyc_func_uses_va_list(&ir))
-      ok = nyr_optimize_with_options(
-          &ir, driver->optimization,
-          driver->disable_vectorization ? NYR_OPT_DISABLE_VECTORIZATION : 0,
-          err, sizeof(err));
+    if (ok && !nyc_func_uses_va_list(&ir) &&
+        !nyr_optimize_with_options(
+            &ir, driver->optimization,
+            driver->disable_vectorization ? NYR_OPT_DISABLE_VECTORIZATION : 0,
+            err, sizeof(err))) {
+      fprintf(stderr, "NYC: warning: optimization failed for %s: %s (continuing unoptimized)\n",
+              argv[argc - 1], err[0] ? err : "optimization failed");
+      err[0] = '\0';
+    }
     if (ok && driver->disable_vectorization && nyc_func_uses_fp_or_simd(&ir)) {
       snprintf(err, sizeof(err),
                "optimizer introduced floating-point or SIMD code under "
@@ -1409,7 +1461,7 @@ static int compile_source(int argc, char **argv, int source_arg,
 }
 
 int main(int argc, char **argv) {
-  int assembler_status = nyc_handle_assembler_version(argc, argv);
+  int assembler_status = nyc_handle_probe_options(argc, argv);
   if (assembler_status >= 0)
     return assembler_status;
   nyc_driver_t driver = {.optimization =
@@ -1612,7 +1664,8 @@ int main(int argc, char **argv) {
       driver.unsigned_char = true;
       continue;
     }
-    if (strcmp(option, "-fno-builtin") == 0) {
+    if (strcmp(option, "-fno-builtin") == 0 ||
+        strcmp(option, "-ffreestanding") == 0) {
       driver.no_builtin = true;
       continue;
     }
@@ -1622,6 +1675,16 @@ int main(int argc, char **argv) {
     }
     if (strcmp(option, "-fplan9-extensions") == 0) {
       driver.plan9_extensions = true;
+      continue;
+    }
+    if (strcmp(option, "-fms-extensions") == 0 ||
+        strcmp(option, "-fms-anonymous-structs") == 0) {
+      driver.ms_extensions = true;
+      continue;
+    }
+    if (strcmp(option, "-fno-ms-extensions") == 0 ||
+        strcmp(option, "-fno-ms-anonymous-structs") == 0) {
+      driver.ms_extensions = false;
       continue;
     }
     if (strcmp(option, "-fomit-frame-pointer") == 0) {
@@ -1658,8 +1721,17 @@ int main(int argc, char **argv) {
       driver.retpoline_inline_calls = true;
       continue;
     }
-    if (strcmp(option, "-mindirect-branch-register") == 0)
+    if (strcmp(option, "-mfunction-return=thunk-extern") == 0) {
+      driver.function_return_thunk_extern = true;
       continue;
+    }
+    if (strcmp(option, "-mindirect-branch-register") == 0 ||
+        strcmp(option, "-mindirect-branch-cs-prefix") == 0) {
+      driver.indirect_branch_cs_prefix =
+          strcmp(option, "-mindirect-branch-cs-prefix") == 0 ||
+          driver.indirect_branch_cs_prefix;
+      continue;
+    }
     if (strncmp(option, "-mregparm=", 10) == 0 && option[10] >= '0' &&
         option[10] <= '3' && option[11] == '\0') {
       driver.i386_regparm = (unsigned)(option[10] - '0');
@@ -1719,6 +1791,34 @@ int main(int argc, char **argv) {
     if (supported_by_default_flag(option))
       continue;
     if (option[0] == '-' && option[1]) {
+      bool kernel_compat = getenv("NYC_KERNEL_COMPAT") != NULL;
+      if (kernel_compat) {
+        if (strncmp(option, "-mcmodel=", 9) == 0 &&
+            strcmp(option, "-mcmodel=kernel") != 0 &&
+            strcmp(option, "-mcmodel=small") != 0) {
+          /*
+           * Keep rejecting semantically unsupported code models.
+           */
+        } else if (strncmp(option, "-f", 2) == 0 ||
+                   strncmp(option, "-m", 2) == 0 ||
+                   strncmp(option, "--param=", 8) == 0 ||
+                   strcmp(option, "-pipe") == 0 ||
+                   strcmp(option, "-Qunused-arguments") == 0 ||
+                   strncmp(option, "-fplugin", 8) == 0 ||
+                   strncmp(option, "--param", 7) == 0)
+          continue;
+        if ((strcmp(option, "-isystem") == 0 ||
+             strcmp(option, "-idirafter") == 0 ||
+             strcmp(option, "-iquote") == 0) &&
+            argument + 1 < argc) {
+          ++argument;
+          continue;
+        }
+        if (strncmp(option, "-isystem", 8) == 0 ||
+            strncmp(option, "-idirafter", 10) == 0 ||
+            strncmp(option, "-iquote", 7) == 0)
+          continue;
+      }
       fprintf(stderr, "nyc: unknown option '%s'\n", option);
       goto done;
     }

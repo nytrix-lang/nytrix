@@ -1,0 +1,40 @@
+shape gltf-index-modes {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "sys"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.math.parse.3d.gltf.mesh as gltf_mesh
+use core.math.parse.3d.gltf.shared as gltf_shared
+use core.math.parse.3d.gltf as gltf
+
+def src = malloc(8)
+def out = malloc(36)
+assert(src != 0 && out != 0, "index fixture allocation")
+store16(src, 2, 0)
+store16(src, 0, 2)
+store16(src, 3, 4)
+store16(src, 1, 6)
+def fan_count = gltf_mesh._gltf_pack_triangle_fan_indices(out, false, true, src, 2, 5123, 4)
+assert(fan_count == 6, "triangle fan expanded index count")
+assert(load16(out, 0) == 2 && load16(out, 2) == 0 && load16(out, 4) == 3, "triangle fan first index order")
+assert(load16(out, 6) == 2 && load16(out, 8) == 3 && load16(out, 10) == 1, "triangle fan second index order")
+def strip_count = gltf_mesh._gltf_pack_triangle_strip_indices(out, false, true, src, 2, 5123, 4)
+assert(strip_count == 6, "triangle strip expanded index count")
+assert(load16(out, 0) == 2 && load16(out, 2) == 0 && load16(out, 4) == 3, "triangle strip first index order")
+assert(load16(out, 6) == 3 && load16(out, 8) == 0 && load16(out, 10) == 1, "triangle strip second index order")
+free(src)
+free(out)
+def caps = gltf_shared.gltf_supported_extension_caps()
+assert(caps.get("KHR_texture_transform", "") == "parse+shader", "extension caps known shader status")
+assert(caps.get("KHR_draco_mesh_compression", "") == "unsupported", "extension caps unsupported status")
+def float_ptr = malloc(4)
+store32(float_ptr, 0x3fc00000, 0)
+assert(gltf._gltf_read_f32_fast(float_ptr, 0, gltf.GLTF_COMP_FLOAT) == 1.5,
+       "GLTF float component reader widens binary32")
+free(float_ptr)
+print("gltf_index_modes_probe ok")
+NY
+}

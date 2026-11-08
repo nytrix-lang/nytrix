@@ -215,6 +215,103 @@ extern const uintptr_t g_rt_oracle_gap;
 void rt_map_oracle_init(void);
 void rt_map_oracle_add(uintptr_t start, size_t size);
 
+/*
+ * Per-thread cache of recently confirmed pages, for raw load/store only.  Those
+ * hit the same few pages repeatedly; without this each one rescans the oracle's
+ * range table, and memory mapped after its snapshot (Vulkan buffers, foreign
+ * allocations) costs a syscall per access.  Entries force a fresh probe after
+ * RT_PROBE_CACHE_REVALIDATE hits.  Do not use it for heuristic probes such as
+ * is_v_str: they test arbitrary words and need an exact answer about pages
+ * that may have been unmapped since.
+ */
+#define RT_PROBE_CACHE_WAYS 8u
+#define RT_PROBE_CACHE_REVALIDATE 4096u
+
+typedef struct rt_probe_cache_entry {
+  uintptr_t start; /* inclusive */
+  uintptr_t end;   /* exclusive; 0 marks an empty entry */
+  uint32_t hits;
+} rt_probe_cache_entry_t;
+
+extern __thread rt_probe_cache_entry_t g_rt_probe_cache[RT_PROBE_CACHE_WAYS];
+extern __thread uint32_t g_rt_probe_cache_next;
+
+static inline int rt_probe_cache_hit(uintptr_t p, size_t n) {
+  uintptr_t last = p + n - 1;
+  for (uint32_t i = 0; i < RT_PROBE_CACHE_WAYS; ++i) {
+    rt_probe_cache_entry_t *entry = &g_rt_probe_cache[i];
+    if (entry->end && p >= entry->start && last < entry->end) {
+      if (++entry->hits >= RT_PROBE_CACHE_REVALIDATE) {
+        entry->end = 0;
+        return 0;
+      }
+      return 1;
+    }
+  }
+  return 0;
+}
+
+static inline void rt_probe_cache_store(uintptr_t p, size_t n) {
+  uintptr_t page = (uintptr_t)4096u;
+  uintptr_t start = p & ~(page - 1);
+  uintptr_t end = (p + n - 1 + page) & ~(page - 1);
+  if (end <= start)
+    return;
+  rt_probe_cache_entry_t *entry =
+      &g_rt_probe_cache[g_rt_probe_cache_next++ % RT_PROBE_CACHE_WAYS];
+  entry->start = start;
+  entry->end = end;
+  entry->hits = 0;
+}
+
+/*
+ * Page-keyed memo of the extra-range scan.  The table is append-only and its
+ * ranges are page aligned, so a positive stays valid and a negative is valid
+ * until the table grows: this changes the cost of the scan, never its answer.
+ */
+#define RT_ORACLE_EXTRA_HINTS 256u
+
+typedef struct rt_oracle_extra_hint {
+  uintptr_t page;
+  uint32_t slot;  /* index + 1; 0 means the page was not in the table */
+  uint32_t count; /* table size when a negative was recorded */
+} rt_oracle_extra_hint_t;
+
+extern __thread rt_oracle_extra_hint_t
+    g_rt_oracle_extra_hints[RT_ORACLE_EXTRA_HINTS];
+
+static inline int rt_oracle_extra_contains(uintptr_t p, uintptr_t e,
+                                           uint32_t extra_n) {
+  uintptr_t page = p >> 12;
+  rt_oracle_extra_hint_t *hint =
+      &g_rt_oracle_extra_hints[(page ^ (page >> 8)) &
+                               (RT_ORACLE_EXTRA_HINTS - 1u)];
+  int single_page = (e >> 12) == page;
+  if (hint->page == page) {
+    if (hint->slot) {
+      const rt_oracle_range_t *r = &g_rt_oracle_extra[hint->slot - 1u];
+      if (p >= r->start && e <= r->end)
+        return 1;
+    } else if (single_page && hint->count == extra_n) {
+      return 0;
+    }
+  }
+  for (uint32_t i = 0; i < extra_n; ++i) {
+    if (p >= g_rt_oracle_extra[i].start && e <= g_rt_oracle_extra[i].end) {
+      hint->page = page;
+      hint->slot = i + 1u;
+      hint->count = extra_n;
+      return 1;
+    }
+  }
+  if (single_page) {
+    hint->page = page;
+    hint->slot = 0;
+    hint->count = extra_n;
+  }
+  return 0;
+}
+
 /* 1 = mapped+readable (authoritative), -1 = not mapped (authoritative),
  * 0 = unknown, caller must verify with a real probe. */
 static inline int rt_map_oracle_check(uintptr_t p, size_t n) {
@@ -227,10 +324,8 @@ static inline int rt_map_oracle_check(uintptr_t p, size_t n) {
     /* Registered runtime allocations are authoritative without a snapshot. */
     uint32_t pre_n =
         atomic_load_explicit(&g_rt_oracle_extra_count, memory_order_acquire);
-    for (uint32_t i = 0; i < pre_n; ++i) {
-      if (p >= g_rt_oracle_extra[i].start && e <= g_rt_oracle_extra[i].end)
-        return 1;
-    }
+    if (rt_oracle_extra_contains(p, e, pre_n))
+      return 1;
     if (atomic_fetch_add_explicit(&g_rt_oracle_pending, 1,
                                   memory_order_relaxed) <
         RT_ORACLE_LAZY_THRESHOLD)
@@ -250,10 +345,8 @@ static inline int rt_map_oracle_check(uintptr_t p, size_t n) {
   }
   uint32_t extra_n =
       atomic_load_explicit(&g_rt_oracle_extra_count, memory_order_acquire);
-  for (uint32_t i = 0; i < extra_n; ++i) {
-    if (p >= g_rt_oracle_extra[i].start && e <= g_rt_oracle_extra[i].end)
-      return 1;
-  }
+  if (rt_oracle_extra_contains(p, e, extra_n))
+    return 1;
   uint32_t cnt = g_rt_oracle_snapshot_count;
   if (cnt == 0)
     return 0;
@@ -279,6 +372,8 @@ static inline int rt_map_oracle_check(uintptr_t p, size_t n) {
   return 0;
 }
 
+static inline int rt_addr_probe_os(uintptr_t p, size_t n);
+
 static inline int rt_addr_mapped(uintptr_t p, size_t n) {
   if (p < 0x1000 || n == 0)
     return 0;
@@ -291,6 +386,10 @@ static inline int rt_addr_mapped(uintptr_t p, size_t n) {
   if (oracle == -1)
     return 0;
 #endif
+  return rt_addr_probe_os(p, n);
+}
+
+static inline int rt_addr_probe_os(uintptr_t p, size_t n) {
 #ifdef _WIN32
   MEMORY_BASIC_INFORMATION mbi = {0};
   if (!VirtualQuery((LPCVOID)p, &mbi, sizeof(mbi)))
@@ -477,6 +576,15 @@ static inline int rt_addr_readable(uintptr_t p, size_t n) {
     return oracle > 0;
   return rt_addr_mapped(p, n);
 #endif
+}
+
+static inline int rt_addr_access_ok(uintptr_t p, size_t n) {
+  if (rt_probe_cache_hit(p, n))
+    return 1;
+  if (!rt_addr_readable(p, n))
+    return 0;
+  rt_probe_cache_store(p, n);
+  return 1;
 }
 
 static inline int rt_addr_readable_safe(uintptr_t p, size_t n) {
@@ -1421,6 +1529,8 @@ int64_t rt_vec_mul_scalar_raw(int64_t v, double s);
 int64_t rt_vec_div_scalar_raw(int64_t v, double s);
 int64_t rt_vec_mark(int64_t value, int64_t dimension);
 int64_t rt_vec_mark_raw(int64_t value, int64_t dimension);
+int64_t rt_sub(int64_t a, int64_t b);
+int64_t rt_any_sub(int64_t left, int64_t right);
 int64_t rt_any_mul(int64_t left, int64_t right);
 int64_t rt_any_div(int64_t left, int64_t right);
 int64_t rt_any_mod(int64_t left, int64_t right);

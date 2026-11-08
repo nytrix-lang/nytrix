@@ -4,7 +4,7 @@ shape comptime_splice_too_few_call_arguments {
   features ["error", "comptime", "code", "splice", "arity", "negative", "diagnostic"]
   template ny-compile-fail
   expect compile_fail
-  expect_message "function call"
+  expect_message "expected int, got fn(int)->int"
   source ny <<'NY'
 fn splice_pair(int left, int right) int { left + right }
 comptime template call_pair(args: code<expr>) {

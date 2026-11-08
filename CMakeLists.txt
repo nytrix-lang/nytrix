@@ -2065,10 +2065,15 @@ function(nytrix_add_tool tool_target tool_name)
       "${NYTRIX_ROOT}/src/base/process.c"
     )
   elseif ("${tool_name}" STREQUAL "perf")
-    list(APPEND _tool_sources "${NYTRIX_ROOT}/src/cmd/test/perf/perf.c")
+    list(APPEND _tool_sources
+      "${NYTRIX_ROOT}/src/cmd/test/perf/perf.c"
+      "${NYTRIX_ROOT}/src/cmd/test/perf/bench.c"
+      "${NYTRIX_ROOT}/src/base/sha256.c"
+    )
   elseif ("${tool_name}" STREQUAL "test")
     list(APPEND _tool_sources
       "${NYTRIX_ROOT}/src/cmd/test/init.c"
+      "${NYTRIX_ROOT}/src/code/backend/runtime/disasm.c"
       "${NYTRIX_ROOT}/src/cmd/test/perf/compare.c"
       "${NYTRIX_ROOT}/src/cmd/test/perf/compiler.c"
       "${NYTRIX_ROOT}/src/cmd/test/ui.c"
@@ -2141,8 +2146,10 @@ nytrix_add_tool(ny-fmt "fmt")
 nytrix_add_tool(ny-perf "perf")
 nytrix_add_tool(ny-test "test")
 if (UNIX)
-  # bench geomean reporting uses log()/exp().
-  target_link_libraries(ny-test PRIVATE m)
+  # bench geomean reporting uses log()/exp(); disasm fallback uses dlopen.
+  target_link_libraries(ny-test PRIVATE m ${CMAKE_DL_LIBS})
+  # bench.c rounds timings with round().
+  target_link_libraries(ny-perf PRIVATE m)
 endif()
 nytrix_add_tool(ny-doc "doc")
 nytrix_add_tool(ny-make "make")

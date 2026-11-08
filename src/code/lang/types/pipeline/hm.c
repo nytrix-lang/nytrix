@@ -1239,6 +1239,7 @@ static ny_hm_type_t *hm_type_clone_inst(ny_hm_state_t *hm, ny_hm_type_t *t,
   out->name = t->name ? hm_arena_strdup(hm, t->name) : NULL;
   out->a = hm_type_clone_inst(hm, t->a, ids, fresh, len, cap);
   out->b = hm_type_clone_inst(hm, t->b, ids, fresh, len, cap);
+  out->parameters = t->parameters;
   for (size_t i = 0; i < t->args.len; ++i)
     hm_args_push(hm, out,
                  hm_type_clone_inst(hm, t->args.data[i], ids, fresh, len, cap));
@@ -1260,7 +1261,9 @@ static void hm_env_set_ctx(ny_hm_env_list *env, const char *name,
     ny_hm_env_entry_t *e = &env->data[i - 1];
     if (e->syntax_ctx == syntax_ctx && e->name && strcmp(e->name, name) == 0) {
       e->type = type;
-      /* A rebinding replaces the dependent-pair annotation as well. */
+      /*
+       * A rebinding replaces the dependent-pair annotation as well.
+       */
       e->sigma_decl = NULL;
       e->sigma_index_literal = false;
       e->sigma_index_value = 0;
@@ -5214,8 +5217,7 @@ static bool hm_member_index_matches(ny_hm_state_t *hm, enum_def_t *owner,
   if (!ny_generic_type_base_is(subject_name, owner->name))
     return true;
   for (size_t i = 0; i < owner->type_params.len; ++i) {
-    if (strcmp(owner->type_params.data[i], member->index_constraint_param) !=
-        0)
+    if (strcmp(owner->type_params.data[i], member->index_constraint_param) != 0)
       continue;
     char *actual = ny_generic_type_arg_owned(subject_name, i);
     if (!actual)
@@ -5750,7 +5752,9 @@ static ny_hm_type_t *hm_sig_return_type(ny_hm_state_t *hm, fun_sig *sig,
   return hm_any(hm);
 }
 
-/* Replace whole identifier occurrences of `name` with `value`. */
+/*
+ * Replace whole identifier occurrences of `name` with `value`.
+ */
 static char *hm_replace_type_index_owned(const char *src, const char *name,
                                          int64_t value) {
   if (!src || !name || !*name)
@@ -5779,9 +5783,11 @@ static char *hm_replace_type_index_owned(const char *src, const char *name,
  * `Vec<2>`; non-literal arguments keep the symbolic type and fail closed when
  * a caller requires a different index.
  */
-static ny_hm_type_t *hm_subst_return_indices(
-    ny_hm_state_t *hm, stmt_t *fn, ny_hm_type_t *base, ny_call_arg_list *args,
-    size_t arg_offset, const char *self_name) {
+static ny_hm_type_t *hm_subst_return_indices(ny_hm_state_t *hm, stmt_t *fn,
+                                             ny_hm_type_t *base,
+                                             ny_call_arg_list *args,
+                                             size_t arg_offset,
+                                             const char *self_name) {
   if (!fn || fn->kind != NY_S_FUNC || !args || !base)
     return base;
   char *name = hm_type_string(base);
@@ -5794,8 +5800,8 @@ static ny_hm_type_t *hm_subst_return_indices(
        ++i) {
     param_t *param = &fn->as.fn.params.data[i + arg_offset];
     expr_t *arg = args->data[i].val;
-    if (!param->name || !param->type || !arg ||
-        arg->kind != NY_E_LITERAL || arg->as.literal.kind != NY_LIT_INT)
+    if (!param->name || !param->type || !arg || arg->kind != NY_E_LITERAL ||
+        arg->as.literal.kind != NY_LIT_INT)
       continue;
     /*
      * Only value-indexed parameters (`Fin<N>`, `Vec<N>`) bind a value into a
@@ -5826,10 +5832,11 @@ static ny_hm_type_t *hm_subst_return_indices(
   return result ? result : base;
 }
 
-/* A constructed pair literal's index component, when it is a literal. */
+/*
+ * A constructed pair literal's index component, when it is a literal.
+ */
 static bool hm_sigma_literal_index(const expr_t *init, int64_t *out) {
-  if (!init || !out || init->kind != NY_E_TUPLE ||
-      init->as.list_like.len != 2)
+  if (!init || !out || init->kind != NY_E_TUPLE || init->as.list_like.len != 2)
     return false;
   const expr_t *index = init->as.list_like.data[0];
   if (!index || index->kind != NY_E_LITERAL ||
@@ -5859,7 +5866,8 @@ static void hm_check_sigma_initializer(ny_hm_state_t *hm, ny_hm_env_list *env,
      * binding) satisfies the shape; only a fresh non-pair value is an error.
      */
     ny_hm_type_t *actual =
-        init ? hm_prune(hm_infer_expr(hm, env, (expr_t *)init, self_name)) : NULL;
+        init ? hm_prune(hm_infer_expr(hm, env, (expr_t *)init, self_name))
+             : NULL;
     if (actual && (actual->kind == NY_HM_TUPLE || hm_is_any(actual))) {
       hm_sigma_parts_free(&parts);
       return;
@@ -5885,8 +5893,8 @@ static void hm_check_sigma_initializer(ny_hm_state_t *hm, ny_hm_env_list *env,
   int64_t literal = 0;
   char *value_type_raw = NULL;
   if (hm_sigma_literal_index(init, &literal))
-    value_type_raw = hm_replace_type_index_owned(parts.value_type, parts.binder,
-                                                 literal);
+    value_type_raw =
+        hm_replace_type_index_owned(parts.value_type, parts.binder, literal);
   if (!value_type_raw)
     value_type_raw = ny_strdup(parts.value_type);
   if (value_type_raw) {
@@ -5902,12 +5910,13 @@ static void hm_check_sigma_initializer(ny_hm_state_t *hm, ny_hm_env_list *env,
   hm_sigma_parts_free(&parts);
 }
 
-static ny_hm_type_t *hm_sig_return_type_for_call(
-    ny_hm_state_t *hm, fun_sig *sig, stmt_t *fn, ny_call_arg_list *args,
-    size_t arg_offset, const char *self_name) {
-  return hm_subst_return_indices(hm, fn,
-                                 hm_sig_return_type(hm, sig, self_name), args,
-                                 arg_offset, self_name);
+static ny_hm_type_t *hm_sig_return_type_for_call(ny_hm_state_t *hm,
+                                                 fun_sig *sig, stmt_t *fn,
+                                                 ny_call_arg_list *args,
+                                                 size_t arg_offset,
+                                                 const char *self_name) {
+  return hm_subst_return_indices(hm, fn, hm_sig_return_type(hm, sig, self_name),
+                                 args, arg_offset, self_name);
 }
 
 static ny_hm_type_t *hm_infer_lambda(ny_hm_state_t *hm, ny_hm_env_list *env,
@@ -5915,6 +5924,7 @@ static ny_hm_type_t *hm_infer_lambda(ny_hm_state_t *hm, ny_hm_env_list *env,
   ny_hm_type_t *ft = hm_fn_type(hm);
   if (!e)
     return ft;
+  ft->parameters = &e->as.lambda.params;
   ny_hm_env_list local;
   hm_env_clone(&local, env);
   bool explicit_type = e->as.lambda.return_type != NULL;
@@ -5943,20 +5953,88 @@ static ny_hm_type_t *hm_infer_lambda(ny_hm_state_t *hm, ny_hm_env_list *env,
   return ft;
 }
 
-static size_t hm_scheme_min_args(const ny_hm_scheme_t *scheme, size_t offset) {
-  if (!scheme || !scheme->stmt || scheme->stmt->kind != NY_S_FUNC)
+/*
+ * Minimum positional arguments needed for a *complete* call.  A default may
+ * only be omitted when every later parameter is also defaulted; otherwise a
+ * positional call would have to skip over the default and land on a later
+ * required parameter, which is not how source arguments bind.  Thus
+ * `fn f(int a, int b = a, int c)` needs all three arguments, while
+ * `fn g(int a, int b = 1)` needs only `a`.
+ */
+static size_t hm_param_min_args(const ny_param_list *params, size_t offset) {
+  if (!params || offset >= params->len)
     return 0;
-  ny_param_list *params = &scheme->stmt->as.fn.params;
-  if (offset >= params->len)
-    return 0;
-  size_t min_args = params->len - offset;
+  size_t first_default = params->len;
   for (size_t i = offset; i < params->len; ++i) {
     if (params->data[i].def) {
-      min_args = i - offset;
+      first_default = i;
       break;
     }
   }
-  return min_args;
+  if (first_default == params->len)
+    return params->len - offset;
+  for (size_t i = first_default; i < params->len; ++i)
+    if (!params->data[i].def)
+      return params->len - offset;
+  return first_default - offset;
+}
+
+/*
+ * One past the last parameter without a default at or after `offset`.
+ */
+static size_t hm_param_required_end(const ny_param_list *params,
+                                    size_t offset) {
+  if (!params || offset >= params->len)
+    return offset;
+  size_t end = offset;
+  for (size_t i = offset; i < params->len; ++i)
+    if (!params->data[i].def)
+      end = i + 1;
+  return end;
+}
+
+static bool hm_param_range_required(const ny_param_list *params, size_t begin,
+                                    size_t end) {
+  if (!params)
+    return false;
+  if (end > params->len)
+    end = params->len;
+  for (size_t i = begin; i < end; ++i)
+    if (params->data[i].def)
+      return false;
+  return true;
+}
+
+static bool hm_param_is_consumed(const stmt_t *fn, const char *name) {
+  if (!fn || fn->kind != NY_S_FUNC || !name)
+    return false;
+  for (size_t i = 0; i < fn->as.fn.attr_consumes.len; ++i) {
+    const char *consumed = fn->as.fn.attr_consumes.data[i];
+    if (consumed && strcmp(consumed, name) == 0)
+      return true;
+  }
+  return false;
+}
+
+static size_t hm_scheme_min_args(const ny_hm_scheme_t *scheme, size_t offset) {
+  if (!scheme || !scheme->stmt || scheme->stmt->kind != NY_S_FUNC)
+    return 0;
+  return hm_param_min_args(&scheme->stmt->as.fn.params, offset);
+}
+
+/*
+ * Variadic calls still require every non-rest parameter up to the first
+ * defaulted one; the rest parameter itself is never required.
+ */
+static size_t hm_scheme_variadic_min_args(const ny_hm_scheme_t *scheme,
+                                          size_t offset) {
+  if (!scheme || !scheme->stmt || scheme->stmt->kind != NY_S_FUNC)
+    return 0;
+  const ny_param_list *params = &scheme->stmt->as.fn.params;
+  size_t end = params->len > 0 ? params->len - 1 : 0;
+  while (end > offset && params->data[end - 1].def)
+    end--;
+  return end > offset ? end - offset : 0;
 }
 
 static bool hm_scheme_is_variadic(const ny_hm_scheme_t *scheme) {
@@ -6020,13 +6098,43 @@ hm_call_function_type(ny_hm_state_t *hm, ny_hm_env_list *env,
     return hm_any(hm);
   }
   size_t given = args ? args->len : 0;
-  if (given != callee_t->args.len) {
+  size_t minimum = callee_t->args.len;
+  if (callee_t->parameters) {
+    minimum = 0;
+    for (size_t i = 0; i < callee_t->parameters->len; ++i)
+      if (!callee_t->parameters->data[i].def)
+        minimum = i + 1;
+  }
+  if (given > callee_t->args.len) {
+    tp_add_diag_ex(
+        hm ? hm->ctx : NULL, tok, "hm", "hm-too-many-arguments",
+        context ? context : "function call",
+        "at most the declared parameter count", "too many arguments", "call",
+        "the call supplies more positional arguments than the callable accepts",
+        "remove the extra arguments or pass them as a collection",
+        "too many arguments: expected at most %zu, got %zu",
+        callee_t->args.len, given);
+  } else if (given < minimum) {
     hm_unify_diag(hm, tok, "hm-arity-mismatch",
                   context ? context : "function call", callee_t, hm_any(hm));
   }
   size_t n = given < callee_t->args.len ? given : callee_t->args.len;
   for (size_t i = 0; i < n; ++i) {
     ny_hm_type_t *arg_t = hm_infer_expr(hm, env, args->data[i].val, self_name);
+    char *parameter_type = hm_type_string(callee_t->args.data[i]);
+    if (parameter_type &&
+        !hm_type_is_refined_instance(hm, arg_t, parameter_type) &&
+        !hm_expr_has_refinement_type(hm, env, parameter_type,
+                                     args->data[i].val)) {
+      token_t argument_tok = args->data[i].val ? args->data[i].val->tok : tok;
+      hm_check_fin_initializer(hm, parameter_type, args->data[i].val,
+                               argument_tok);
+      hm_check_indexed_initializer(hm, parameter_type, args->data[i].val,
+                                   argument_tok);
+      hm_check_refinement_initializer(hm, parameter_type, args->data[i].val,
+                                      argument_tok);
+    }
+    free(parameter_type);
     hm_unify(hm, callee_t->args.data[i], arg_t,
              args->data[i].val ? args->data[i].val->tok : tok,
              "function argument");
@@ -6147,8 +6255,8 @@ hm_adt_constructor_type(ny_hm_state_t *hm, ny_hm_env_list *env,
        * `IntLit(int) where t is int` constructs `Expr<int>` regardless of
        * its payload types.
        */
-      if (member->index_constraint_param &&
-          member->index_constraint_type && owner->type_params.data[p] &&
+      if (member->index_constraint_param && member->index_constraint_type &&
+          owner->type_params.data[p] &&
           strcmp(member->index_constraint_param, owner->type_params.data[p]) ==
               0) {
         size_t left = sizeof(type_name) - (size_t)used;
@@ -6204,8 +6312,8 @@ hm_adt_constructor_type(ny_hm_state_t *hm, ny_hm_env_list *env,
  * `fn pick(int n, Fin<n> i, ...)` called as `pick(3, i, ...)` checks `i`
  * against `Fin<3>`.  Only value-indexed parameters (`Fin<N>` and declared
  * indexed types) contribute bindings, matching the return-type rule.
+ * Does `name` occur as a type index argument (after '<' or ',')?
  */
-/* Does `name` occur as a type index argument (after '<' or ',')? */
 static bool hm_type_text_mentions_index(const char *text, const char *name) {
   if (!text || !name || !*name)
     return false;
@@ -6523,9 +6631,9 @@ static ny_hm_type_t *hm_call_named(ny_hm_state_t *hm, ny_hm_env_list *env,
                                                  self_name,
                                                  allow_dynamic_literal_args);
       }
-      return hm_sig_return_type_for_call(
-          hm, sig, sig->stmt_t, args, sig->stmt_t ?
-              (target ? 1u : 0u) : 0u, self_name);
+      return hm_sig_return_type_for_call(hm, sig, sig->stmt_t, args,
+                                         sig->stmt_t ? (target ? 1u : 0u) : 0u,
+                                         self_name);
     }
     if (target || (name && strchr(name, '.'))) {
       if (target)
@@ -6562,10 +6670,29 @@ static ny_hm_type_t *hm_call_named(ny_hm_state_t *hm, ny_hm_env_list *env,
   size_t offset = target ? 1u : 0u;
   size_t given = args ? args->len : 0;
   size_t available = fn->args.len > offset ? fn->args.len - offset : 0;
-  if (!hm_scheme_is_variadic(scheme) &&
-      (given < hm_scheme_min_args(scheme, offset) || given > available)) {
+  if (!hm_scheme_is_variadic(scheme) && given > available) {
+    tp_add_diag_ex(
+        hm ? hm->ctx : NULL, tok, "hm", "hm-too-many-arguments",
+        "function call", "at most the declared parameter count",
+        "too many arguments", "call",
+        "the call supplies more positional arguments than the callee accepts",
+        "remove the extra arguments or pass them as a collection",
+        "too many arguments: expected at most %zu, got %zu", available, given);
+  } else if (!hm_scheme_is_variadic(scheme) &&
+             given < hm_scheme_min_args(scheme, offset)) {
     hm_unify_diag(hm, tok, "hm-arity-mismatch", "function call", fn,
                   hm_any(hm));
+  } else if (hm_scheme_is_variadic(scheme) &&
+             given < hm_scheme_variadic_min_args(scheme, offset)) {
+    tp_add_diag_ex(
+        hm ? hm->ctx : NULL, tok, "hm", "hm-missing-arguments",
+        "variadic function call", "all required fixed parameters",
+        "too few arguments", "call",
+        "a variadic function still requires its fixed parameters; automatic "
+        "partial application does not apply to variadic calls",
+        "supply the missing fixed arguments; the variadic tail may stay empty",
+        "variadic function call: expected at least %zu arguments, got %zu",
+        hm_scheme_variadic_min_args(scheme, offset), given);
   }
   if (target && fn->args.len > 0)
     hm_unify(hm, fn->args.data[0], hm_infer_expr(hm, env, target, self_name),
@@ -6621,8 +6748,8 @@ static ny_hm_type_t *hm_call_named(ny_hm_state_t *hm, ny_hm_env_list *env,
     return hm_name(hm, "handle");
   ny_hm_type_t *ret = fn->a ? fn->a : hm_any(hm);
   if (scheme && scheme->stmt && scheme->stmt->kind == NY_S_FUNC)
-    ret = hm_subst_return_indices(hm, scheme->stmt, ret, args, offset,
-                                  self_name);
+    ret =
+        hm_subst_return_indices(hm, scheme->stmt, ret, args, offset, self_name);
   return ret;
 }
 
@@ -6647,9 +6774,11 @@ static void hm_persist_named_call_target(ny_hm_state_t *hm, expr_t *call,
     char owned_name[512];
     int n = snprintf(owned_name, sizeof(owned_name), "%s.%s", self_name, leaf);
     if (n > 0 && (size_t)n < sizeof(owned_name)) {
+      /* The module's own function outranks the global leaf lookup below,
+       * for stdlib modules too: the table can answer with any module that
+       * registered the same leaf (`save` in tga bound to render.dump.save). */
       ny_hm_scheme_t *owned = hm_find_scheme(hm, owned_name);
-      if (owned && owned->stmt && owned->stmt->kind == NY_S_FUNC &&
-          !ny_is_stdlib_tok(owned->stmt->tok)) {
+      if (owned && owned->stmt && owned->stmt->kind == NY_S_FUNC) {
         const char *canonical =
             owned->full_name ? owned->full_name : owned->stmt->as.fn.name;
         call->semantic.canonical_callee =
@@ -6676,6 +6805,12 @@ static ny_hm_type_t *hm_infer_binary(ny_hm_state_t *hm, ny_hm_env_list *env,
   ny_hm_type_t *lt = hm_infer_expr(hm, env, e->as.binary.left, self_name);
   ny_hm_type_t *rt = hm_infer_expr(hm, env, e->as.binary.right, self_name);
   const char *op = e->as.binary.op;
+  if (op && strcmp(op, "..") == 0) {
+    ny_hm_type_t *int_t = hm_name(hm, "int");
+    hm_unify(hm, lt, int_t, e->tok, "range bound");
+    hm_unify(hm, rt, int_t, e->tok, "range bound");
+    return hm_name(hm, "range");
+  }
   if (tp_is_cmp_op(op)) {
     if (hm_is_any(lt) || hm_is_any(rt)) {
       char *ls = hm_type_string(lt);
@@ -6708,6 +6843,12 @@ static ny_hm_type_t *hm_infer_binary(ny_hm_state_t *hm, ny_hm_env_list *env,
   }
   if (!tp_is_arith_op(op))
     return hm_any(hm);
+  if (op && strcmp(op, "..") == 0) {
+    ny_hm_type_t *int_t = hm_name(hm, "int");
+    hm_unify(hm, lt, int_t, e->tok, "range bound");
+    hm_unify(hm, rt, int_t, e->tok, "range bound");
+    return hm_name(hm, "range");
+  }
   if (hm_is_any(lt) || hm_is_any(rt)) {
     char *ls = hm_type_string(lt);
     char *rs = hm_type_string(rt);
@@ -6837,8 +6978,8 @@ static ny_hm_type_t *hm_try_checked_fin_call(ny_hm_state_t *hm,
     return NULL;
   if (hm->ctx && hm->ctx->cg) {
     fun_sig *sig = lookup_use_module_fun(hm->ctx->cg, leaf, 2);
-    ny_hm_scheme_t *scheme = sig && sig->name ? hm_find_scheme(hm, sig->name)
-                                              : NULL;
+    ny_hm_scheme_t *scheme =
+        sig && sig->name ? hm_find_scheme(hm, sig->name) : NULL;
     if (!sig || !scheme || !scheme->stmt ||
         !ny_is_stdlib_tok(scheme->stmt->tok))
       return NULL;
@@ -6864,8 +7005,7 @@ static ny_hm_type_t *hm_try_checked_fin_call(ny_hm_state_t *hm,
                      "non-positive bound", "checked_fin",
                      "a runtime Fin bound must be positive",
                      "use a bound greater than zero",
-                     "checked Fin bound must be positive, got %" PRId64,
-                     bound);
+                     "checked Fin bound must be positive, got %" PRId64, bound);
       return hm_name(hm, "int");
     }
     if (value_e->kind == NY_E_LITERAL &&
@@ -7022,8 +7162,7 @@ static ny_hm_type_t *hm_infer_expr_impl(ny_hm_state_t *hm, ny_hm_env_list *env,
     return hm_binary(hm, NY_HM_DICT, key, val);
   }
   case NY_E_CALL: {
-    ny_hm_type_t *checked_fin =
-        hm_try_checked_fin_call(hm, env, e, self_name);
+    ny_hm_type_t *checked_fin = hm_try_checked_fin_call(hm, env, e, self_name);
     if (checked_fin)
       return checked_fin;
   }
@@ -7132,6 +7271,24 @@ static ny_hm_type_t *hm_infer_expr_impl(ny_hm_state_t *hm, ny_hm_env_list *env,
       if (local && (callable_local || hm_is_any(pruned)))
         return hm_call_function_type(hm, env, local, &e->as.call.args, e->tok,
                                      self_name, "local call");
+      /*
+       * A module's own declaration shadows every imported function with
+       * the same leaf name.  The compiler's function table is global, so
+       * asking it first let `save` inside core...tga bind to the unrelated
+       * `save(str, ...)` of whichever module registered that leaf last.
+       */
+      if (self_name && *self_name && name && !strchr(name, '.')) {
+        char *own = hm_full_name(self_name, name);
+        if (own && hm_find_scheme(hm, own)) {
+          const char *own_key = ny_intern_get(ny_intern_cstr(own));
+          free(own);
+          ny_hm_type_t *result = hm_call_named(
+              hm, env, own_key, NULL, &e->as.call.args, e->tok, self_name);
+          hm_persist_named_call_target(hm, e, own_key, self_name);
+          return result;
+        }
+        free(own);
+      }
       if (local) {
         /*
          * Bare names imported into a module are resolved by the compiler's
@@ -7530,16 +7687,14 @@ static ny_hm_type_t *hm_infer_expr_impl(ny_hm_state_t *hm, ny_hm_env_list *env,
      * component 1 has the payload type with the binder replaced by the
      * pair's literal index when one is known.
      */
-    if (e->as.index.target &&
-        e->as.index.target->kind == NY_E_IDENT && !e->as.index.stop &&
-        !e->as.index.step && e->as.index.start &&
+    if (e->as.index.target && e->as.index.target->kind == NY_E_IDENT &&
+        !e->as.index.stop && !e->as.index.step && e->as.index.start &&
         e->as.index.start->kind == NY_E_LITERAL &&
         e->as.index.start->as.literal.kind == NY_LIT_INT &&
         !e->as.index.start->as.literal.integer_outside_i64) {
       const expr_t *pair_ref = e->as.index.target;
-      ny_hm_env_entry_t *entry =
-          hm_env_entry_ctx(env, pair_ref->as.ident.name,
-                           pair_ref->as.ident.syntax_ctx);
+      ny_hm_env_entry_t *entry = hm_env_entry_ctx(
+          env, pair_ref->as.ident.name, pair_ref->as.ident.syntax_ctx);
       if (entry && entry->sigma_decl) {
         hm_sigma_parts_t parts;
         if (hm_sigma_parts_parse(entry->sigma_decl, &parts)) {
@@ -8264,8 +8419,442 @@ static void hm_visit_semantic_completion(ny_visitor_t *visitor, stmt_t *s) {
   ny_visit_stmt(visitor, s);
 }
 
+static void hm_desugar_partial_call(ny_hm_state_t *hm, ny_hm_env_list *env,
+                                    expr_t *e, const char *self_name) {
+  if (!e || e->kind != NY_E_CALL || !e->as.call.callee || !hm->ctx ||
+      !hm->ctx->cg)
+    return;
+  expr_t *callee = e->as.call.callee;
+  if (callee->kind == NY_E_CALL && callee->as.call.callee &&
+      callee->as.call.callee->kind == NY_E_IDENT) {
+    const char *name = callee->as.call.callee->as.ident.name;
+    ny_hm_type_t *shadow = hm_env_get_ctx(
+        hm, env, name, callee->as.call.callee->as.ident.syntax_ctx);
+    if (!shadow)
+      hm_persist_named_call_target(hm, callee, name, self_name);
+    ny_hm_scheme_t *direct =
+        shadow ? NULL
+               : hm_find_scheme(hm, callee->semantic.canonical_callee
+                                        ? callee->semantic.canonical_callee
+                                        : name);
+    size_t prefix = callee->as.call.args.len;
+    size_t combined = prefix + e->as.call.args.len;
+    if (direct && direct->stmt && direct->stmt->kind == NY_S_FUNC &&
+        !hm_scheme_is_variadic(direct) && prefix > 0 &&
+        prefix < hm_scheme_min_args(direct, 0) &&
+        combined <= direct->stmt->as.fn.params.len &&
+        hm_param_range_required(&direct->stmt->as.fn.params, prefix,
+                                combined)) {
+      bool positional = true;
+      for (size_t i = 0; i < prefix; ++i)
+        positional &= callee->as.call.args.data[i].name == NULL;
+      for (size_t i = 0; i < e->as.call.args.len; ++i)
+        positional &= e->as.call.args.data[i].name == NULL;
+      if (positional) {
+        ny_call_arg_list args = {0};
+        arena_t *arena = hm->ctx->cg->arena;
+        for (size_t i = 0; i < prefix; ++i)
+          vec_push_arena(arena, &args, callee->as.call.args.data[i]);
+        for (size_t i = 0; i < e->as.call.args.len; ++i)
+          vec_push_arena(arena, &args, e->as.call.args.data[i]);
+        e->as.call.callee = callee->as.call.callee;
+        e->as.call.args = args;
+        callee = e->as.call.callee;
+      }
+    }
+  }
+  ny_hm_type_t *type = NULL;
+  ny_hm_scheme_t *scheme = NULL;
+  if (callee->kind == NY_E_IDENT) {
+    type = hm_env_get_ctx(hm, env, callee->as.ident.name,
+                          callee->as.ident.syntax_ctx);
+    if (!type) {
+      hm_persist_named_call_target(hm, e, callee->as.ident.name, self_name);
+      scheme = hm_find_scheme(hm, e->semantic.canonical_callee
+                                      ? e->semantic.canonical_callee
+                                      : callee->as.ident.name);
+      if (scheme)
+        type = hm_instantiate(hm, scheme->type);
+    }
+  } else {
+    type = hm_infer_expr(hm, env, callee, self_name);
+  }
+  type = hm_prune(type);
+  size_t given = e->as.call.args.len;
+  if (type && type->parameters) {
+    size_t minimum = 0;
+    for (size_t i = 0; i < type->parameters->len; ++i)
+      if (!type->parameters->data[i].def)
+        minimum = i + 1;
+    if (!scheme && given >= minimum && given < type->parameters->len) {
+      arena_t *arena = hm->ctx->cg->arena;
+      for (size_t i = given; i < type->parameters->len; ++i) {
+        expr_t *value = type->parameters->data[i].def;
+        if (!value)
+          return;
+        for (size_t j = 0; j < i; ++j)
+          value = ny_expr_subst(arena, value, type->parameters->data[j].name,
+                                e->as.call.args.data[j].val);
+        vec_push_arena(arena, &e->as.call.args, ((call_arg_t){.val = value}));
+      }
+      return;
+    }
+    if (given >= minimum)
+      return;
+  }
+  if (!type || type->kind != NY_HM_FN || given == 0 ||
+      given >= type->args.len ||
+      (scheme && (hm_scheme_is_variadic(scheme) ||
+                  given >= hm_scheme_min_args(scheme, 0) ||
+                  scheme->stmt->as.fn.is_extern)))
+    return;
+  for (size_t i = 0; i < given; ++i)
+    if (e->as.call.args.data[i].name)
+      return;
+
+  arena_t *arena = hm->ctx->cg->arena;
+  const ny_param_list *params = NULL;
+  if (scheme && scheme->stmt && scheme->stmt->kind == NY_S_FUNC)
+    params = &scheme->stmt->as.fn.params;
+  else if (type->parameters)
+    params = type->parameters;
+  size_t param_count = params ? params->len : type->args.len;
+  /*
+   * Defaults between the supplied prefix and the last required parameter
+   * cannot become residual parameters: a positional residual argument would
+   * bind the default slot instead of the required one.  Evaluate those
+   * defaults in the residual body and expose only the parameters that keep
+   * positional binding intact (required parameters plus trailing optionals).
+   */
+  size_t required_end =
+      params ? hm_param_required_end(params, given) : type->args.len;
+  if (required_end <= given)
+    return;
+  /*
+   * A residual closure is reusable, so it cannot safely capture a parameter
+   * the callee consumes.  Reject the partial instead of letting a second
+   * residual call consume the same linear resource again.
+   */
+  if (scheme && scheme->stmt && scheme->stmt->kind == NY_S_FUNC && params) {
+    for (size_t p = 0; p < given && p < params->len; ++p) {
+      if (!hm_param_is_consumed(scheme->stmt, params->data[p].name))
+        continue;
+      tp_add_diag_ex(
+          hm->ctx,
+          e->as.call.args.data[p].val ? e->as.call.args.data[p].val->tok
+                                      : e->tok,
+          "hm", "hm-partial-consuming-capture", "partial application",
+          "non-consuming capture", "consuming parameter",
+          "partial application",
+          "a residual closure can run more than once, so a consumed resource "
+          "cannot be captured by value",
+          "pass the resource to the residual call instead of binding it",
+          "cannot partially bind consuming parameter `%s`: the residual "
+          "callable may consume it more than once",
+          params->data[p].name ? params->data[p].name : "<argument>");
+      return;
+    }
+  }
+  expr_t **actuals =
+      arena_alloc(arena, sizeof(*actuals) * (param_count ? param_count : 1));
+  if (!actuals)
+    return;
+  /*
+   * A callable held in a local or module binding does not have a direct
+   * scheme.  Elaborate it as one residual closure that captures the binding
+   * and calls it by name.  Routing the callable through an untyped factory
+   * parameter erased the call signature, and returning the inner closure from
+   * that factory produced an invalid escaping environment.  Identifier and
+   * literal actuals are already stable values, so reading them from the
+   * closure is the same as evaluating them once at construction.
+   */
+  if (!scheme && callee && callee->kind == NY_E_IDENT) {
+    bool stable_args = true;
+    for (size_t p = 0; p < given; ++p) {
+      expr_t *arg = e->as.call.args.data[p].val;
+      if (!arg || (arg->kind != NY_E_LITERAL && arg->kind != NY_E_IDENT))
+        stable_args = false;
+    }
+    if (stable_args) {
+      expr_t *partial = expr_new(arena, NY_E_FN, e->tok);
+      if (type->a) {
+        char *ret = hm_type_string(type->a);
+        if (ret)
+          partial->as.lambda.return_type =
+              arena_strndup(arena, ret, strlen(ret));
+        free(ret);
+      }
+      expr_t *invoke = expr_new(arena, NY_E_CALL, e->tok);
+      expr_t *direct = expr_new(arena, NY_E_IDENT, callee->tok);
+      const char *direct_name = callee->as.ident.name;
+      stmt_t *direct_stmt = NULL;
+      ny_hm_env_entry_t *alias_entry = hm_env_entry_ctx(
+          env, callee->as.ident.name, callee->as.ident.syntax_ctx);
+      if (alias_entry && alias_entry->alias_target) {
+        direct_name = alias_entry->alias_target;
+        direct_stmt = alias_entry->alias_target_stmt;
+      }
+      direct->as.ident.name = direct_name;
+      direct->as.ident.syntax_ctx = callee->as.ident.syntax_ctx;
+      invoke->as.call.callee = direct;
+      invoke->semantic.canonical_callee = direct_name;
+      invoke->semantic.canonical_callee_stmt = direct_stmt;
+      for (size_t p = 0; p < given; ++p) {
+        actuals[p] = e->as.call.args.data[p].val;
+        vec_push_arena(arena, &invoke->as.call.args,
+                       e->as.call.args.data[p]);
+      }
+      for (size_t p = given; p < param_count; ++p) {
+        const char *formal =
+            params && p < params->len ? params->data[p].name : NULL;
+        expr_t *param_def = params && p < params->len ? params->data[p].def : NULL;
+        if (p < required_end && param_def) {
+          expr_t *value = param_def;
+          for (size_t j = 0; j < p; ++j) {
+            const char *prev =
+                params && j < params->len ? params->data[j].name : NULL;
+            if (prev && actuals[j])
+              value = ny_expr_subst(arena, value, prev, actuals[j]);
+          }
+          actuals[p] = value;
+          vec_push_arena(arena, &invoke->as.call.args,
+                         ((call_arg_t){.val = value}));
+          continue;
+        }
+        char name[96];
+        snprintf(name, sizeof(name), "$partial_%d_%zu", hm->next_var++, p);
+        const char *owned_name = arena_strndup(arena, name, strlen(name));
+        if (formal && *formal)
+          owned_name = formal;
+        expr_t *reference = expr_new(arena, NY_E_IDENT, e->tok);
+        reference->as.ident.name = owned_name;
+        param_t parameter = {.name = owned_name, .tok = e->tok};
+        if (p < type->args.len) {
+          char *spelling = hm_type_string(type->args.data[p]);
+          if (spelling)
+            parameter.type = arena_strndup(arena, spelling, strlen(spelling));
+          free(spelling);
+        }
+        if (param_def) {
+          expr_t *value = param_def;
+          for (size_t j = 0; j < p; ++j) {
+            const char *prev =
+                params && j < params->len ? params->data[j].name : NULL;
+            if (prev && actuals[j])
+              value = ny_expr_subst(arena, value, prev, actuals[j]);
+          }
+          parameter.def = value;
+        }
+        actuals[p] = reference;
+        vec_push_arena(arena, &partial->as.lambda.params, parameter);
+        vec_push_arena(arena, &invoke->as.call.args,
+                       ((call_arg_t){.val = reference}));
+      }
+      stmt_t *inner = stmt_new(arena, NY_S_BLOCK, e->tok);
+      stmt_t *inner_return = stmt_new(arena, NY_S_RETURN, e->tok);
+      inner_return->as.ret.value = invoke;
+      vec_push_arena(arena, &inner->as.block.body, inner_return);
+      partial->as.lambda.body = inner;
+      *e = *partial;
+      return;
+    }
+  }
+  expr_t *factory = expr_new(arena, NY_E_FN, e->tok);
+  expr_t *partial = expr_new(arena, NY_E_FN, e->tok);
+  if (!scheme && type && type->a) {
+    char *ret = hm_type_string(type->a);
+    if (ret)
+      partial->as.lambda.return_type =
+          arena_strndup(arena, ret, strlen(ret));
+    free(ret);
+  }
+  if (scheme && scheme->stmt && scheme->stmt->kind == NY_S_FUNC &&
+      scheme->stmt->as.fn.return_type) {
+    ny_hm_type_t *result = hm_subst_return_indices(
+        hm, scheme->stmt, type->a, &e->as.call.args, 0, self_name);
+    char *spelling = hm_type_string(result);
+    partial->as.lambda.return_type =
+        arena_strndup(arena, spelling, strlen(spelling));
+    free(spelling);
+  }
+  expr_t *invoke = expr_new(arena, NY_E_CALL, e->tok);
+  expr_t *replacement = expr_new(arena, NY_E_CALL, e->tok);
+  replacement->as.call.callee = factory;
+  /*
+   * A factory binds the callable and supplied arguments exactly once,
+   * before the residual closure escapes. Full applications stay untouched.
+   */
+  int partial_id = hm->next_var++;
+  for (size_t i = 0; i <= param_count; ++i) {
+    char name[96];
+    snprintf(name, sizeof(name), "$partial_%d_%zu", partial_id, i);
+    const char *owned_name = arena_strndup(arena, name, strlen(name));
+    size_t p = i - 1;
+    const char *param_name =
+        params && p < params->len ? params->data[p].name : NULL;
+    expr_t *param_def = params && p < params->len ? params->data[p].def : NULL;
+    if (i > 0 && p >= given && param_name && *param_name && scheme &&
+        scheme->stmt && scheme->stmt->kind == NY_S_FUNC)
+      owned_name = param_name;
+    expr_t *reference = expr_new(arena, NY_E_IDENT, e->tok);
+    reference->as.ident.name = owned_name;
+    param_t parameter = {.name = owned_name, .tok = e->tok};
+    if (i == 0) {
+      if (scheme) {
+        expr_t *direct = expr_new(arena, NY_E_IDENT, callee->tok);
+        direct->as.ident.name = ny_intern_get(ny_intern_cstr(
+            scheme->full_name ? scheme->full_name : scheme->name));
+        invoke->as.call.callee = direct;
+        invoke->semantic.canonical_callee = direct->as.ident.name;
+        invoke->semantic.canonical_callee_stmt = scheme->stmt;
+        continue;
+      }
+      /*
+       * A callable bound to a name needs no factory slot.  The residual
+       * closure can capture that immutable binding directly; passing it as an
+       * untyped factory parameter erased its call signature and made the
+       * deferred call dynamic.
+       */
+      if (callee && callee->kind == NY_E_IDENT) {
+        expr_t *direct = expr_new(arena, NY_E_IDENT, callee->tok);
+        direct->as.ident.name = callee->as.ident.name;
+        direct->as.ident.syntax_ctx = callee->as.ident.syntax_ctx;
+        invoke->as.call.callee = direct;
+        continue;
+      }
+      vec_push_arena(arena, &factory->as.lambda.params, parameter);
+      vec_push_arena(arena, &replacement->as.call.args,
+                     ((call_arg_t){.val = callee}));
+      invoke->as.call.callee = reference;
+    } else {
+      if (scheme && scheme->stmt && scheme->stmt->kind == NY_S_FUNC) {
+        char *substituted = hm_subst_param_type_text(hm, scheme->stmt, p,
+                                                     &e->as.call.args, 0);
+        parameter.type =
+            substituted
+                ? arena_strndup(arena, substituted, strlen(substituted))
+                : scheme->stmt->as.fn.params.data[p].type;
+        free(substituted);
+      } else if (!scheme && type && p < type->args.len) {
+        char *spelling = hm_type_string(type->args.data[p]);
+        if (spelling)
+          parameter.type = arena_strndup(arena, spelling, strlen(spelling));
+        free(spelling);
+      }
+      /*
+       * Inferred lambdas keep residual parameter types inferred.  Stamping the
+       * source spelling here changes the generated closure's representation
+       * and ABI even though the lambda had no explicit parameter types.
+       */
+      bool captured = p < given;
+      bool inject = !captured && param_def && p < required_end;
+      if (captured) {
+        expr_t *argument = reference;
+        if (scheme && e->as.call.args.data[p].val->kind == NY_E_LITERAL &&
+            e->as.call.args.data[p].val->as.literal.kind == NY_LIT_INT)
+          argument = e->as.call.args.data[p].val;
+        actuals[p] = reference;
+        vec_push_arena(arena, &invoke->as.call.args,
+                       ((call_arg_t){.val = argument}));
+        vec_push_arena(arena, &factory->as.lambda.params, parameter);
+        vec_push_arena(arena, &replacement->as.call.args,
+                       e->as.call.args.data[p]);
+      } else if (inject) {
+        expr_t *value = param_def;
+        for (size_t j = 0; j < p; ++j) {
+          const char *formal =
+              params && j < params->len ? params->data[j].name : NULL;
+          if (formal && actuals[j])
+            value = ny_expr_subst(arena, value, formal, actuals[j]);
+        }
+        actuals[p] = value;
+        vec_push_arena(arena, &invoke->as.call.args,
+                       ((call_arg_t){.val = value}));
+      } else {
+        if (param_def) {
+          expr_t *value = param_def;
+          for (size_t j = 0; j < p; ++j) {
+            const char *formal =
+                params && j < params->len ? params->data[j].name : NULL;
+            if (formal && actuals[j])
+              value = ny_expr_subst(arena, value, formal, actuals[j]);
+          }
+          parameter.def = value;
+        }
+        actuals[p] = reference;
+        vec_push_arena(arena, &partial->as.lambda.params, parameter);
+        vec_push_arena(arena, &invoke->as.call.args,
+                       ((call_arg_t){.val = reference}));
+      }
+    }
+  }
+  stmt_t *inner = stmt_new(arena, NY_S_BLOCK, e->tok);
+  stmt_t *inner_return = stmt_new(arena, NY_S_RETURN, e->tok);
+  inner_return->as.ret.value = invoke;
+  vec_push_arena(arena, &inner->as.block.body, inner_return);
+  partial->as.lambda.body = inner;
+  stmt_t *outer = stmt_new(arena, NY_S_BLOCK, e->tok);
+  stmt_t *outer_return = stmt_new(arena, NY_S_RETURN, e->tok);
+  outer_return->as.ret.value = partial;
+  vec_push_arena(arena, &outer->as.block.body, outer_return);
+  factory->as.lambda.body = outer;
+  /*
+   * Statement-position bookkeeping: when this exact call is the enclosing
+   * expression statement, its residual closure is created and immediately
+   * discarded, which almost always means the user under-supplied arguments.
+   * Record the required-but-missing parameter names so the statement frame
+   * can report them after inference completes.
+   */
+  if (e == hm->stmt_partial_call && !hm->stmt_partial_missing && hm->ctx) {
+    char names[1024];
+    size_t used = 0;
+    size_t missing_count = 0;
+    names[0] = '\0';
+    for (size_t k = given; k < type->args.len; ++k) {
+      const char *name = NULL;
+      const expr_t *def = NULL;
+      if (scheme && scheme->stmt && scheme->stmt->kind == NY_S_FUNC &&
+          k < scheme->stmt->as.fn.params.len) {
+        name = scheme->stmt->as.fn.params.data[k].name;
+        def = scheme->stmt->as.fn.params.data[k].def;
+      } else if (type->parameters && k < type->parameters->len) {
+        name = type->parameters->data[k].name;
+        def = type->parameters->data[k].def;
+      }
+      /*
+       * Options before the last required parameter are evaluated, not
+       * exposed, so they are not part of the missing residual signature.
+       */
+      if (k < required_end && def)
+        continue;
+      if (def)
+        continue; /* defaulted residual parameters need no further argument */
+      missing_count++;
+      int nw;
+      if (name && *name)
+        nw = snprintf(names + used, sizeof(names) - used, "%s`%s`",
+                      used ? ", " : "", name);
+      else
+        nw = snprintf(names + used, sizeof(names) - used, "%sargument %zu",
+                      used ? ", " : "", k + 1);
+      if (nw < 0 || (size_t)nw >= sizeof(names) - used) {
+        used = sizeof(names) - 1;
+        names[used] = '\0';
+        break;
+      }
+      used += (size_t)nw;
+    }
+    if (used && used < sizeof(names) && missing_count) {
+      hm->stmt_partial_missing = ny_intern_get(ny_intern_cstr(names));
+      hm->stmt_partial_missing_count = missing_count;
+    }
+  }
+  *e = *replacement;
+}
+
 static ny_hm_type_t *hm_infer_expr(ny_hm_state_t *hm, ny_hm_env_list *env,
                                    expr_t *e, const char *self_name) {
+  hm_desugar_partial_call(hm, env, e, self_name);
   ny_hm_type_t *result = hm_infer_expr_impl(hm, env, e, self_name);
   if (!e)
     return result;
@@ -8493,7 +9082,8 @@ static void hm_infer_stmt_mode(ny_hm_state_t *hm, ny_hm_env_list *env,
                 ? entry->guard_base_type
                 : hm_env_get_ctx(hm, env, name, s->syntax_ctx);
         char *previous_name = previous ? hm_type_string(previous) : NULL;
-        bool refined = previous_name && hm_lookup_refine_stmt(hm, previous_name);
+        bool refined =
+            previous_name && hm_lookup_refine_stmt(hm, previous_name);
         free(previous_name);
         size_t before = hm->ctx ? hm->ctx->diagnostics.len : 0;
         hm_check_refinement_return(hm, previous, it, init, init->tok);
@@ -8551,6 +9141,41 @@ static void hm_infer_stmt_mode(ny_hm_state_t *hm, ny_hm_env_list *env,
         hm_env_push_ctx(env, name, s->syntax_ctx, final_t);
       else
         hm_env_set_ctx(env, name, s->syntax_ctx, final_t);
+      /*
+       * Preserve callable provenance through simple aliases.  This lets a
+       * deferred partial call resolve the underlying function's effect row
+       * instead of degrading to an indirect call whose effects are unknown.
+       */
+      if (!s->as.var.is_destructure && name && init &&
+          init->kind == NY_E_IDENT && init->as.ident.name) {
+        const char *target = init->as.ident.name;
+        stmt_t *target_stmt = NULL;
+        ny_hm_env_entry_t *source = hm_env_entry_ctx(
+            env, target, init->as.ident.syntax_ctx);
+        if (source && source->alias_target) {
+          target = source->alias_target;
+          target_stmt = source->alias_target_stmt;
+        } else {
+          ny_hm_scheme_t *target_scheme = hm_find_scheme(hm, target);
+          if (target_scheme) {
+            target = target_scheme->full_name ? target_scheme->full_name
+                                              : target_scheme->name;
+            target_stmt = target_scheme->stmt;
+          }
+        }
+        ny_hm_env_entry_t *alias_entry =
+            hm_env_entry_ctx(env, name, s->syntax_ctx);
+        if (alias_entry && target) {
+          /*
+           * Scheme names are not guaranteed to outlive this inference step.
+           * Keep a stable arena copy so deferred desugaring and the effect
+           * pass see the real callee spelling.
+           */
+          alias_entry->alias_target =
+              ny_intern_get(ny_intern_cstr(target));
+          alias_entry->alias_target_stmt = target_stmt;
+        }
+      }
       if (s->as.var.is_decl && decl) {
         hm_sigma_parts_t sigma_probe;
         if (hm_sigma_parts_parse(decl, &sigma_probe)) {
@@ -8603,8 +9228,40 @@ static void hm_infer_stmt_mode(ny_hm_state_t *hm, ny_hm_env_list *env,
       hm_unify(hm, ret, value_t,
                s->as.expr.expr ? s->as.expr.expr->tok : s->tok,
                "implicit return value");
-    } else
+    } else {
+      /*
+       * Statement-position partial applications never run the callee; the
+       * desugared residual is created and immediately discarded. Stamp the
+       * exact call being inferred so hm_desugar_partial_call can record the
+       * required-but-missing parameter names, and report them here. Save and
+       * restore the frame around the inference: argument lambdas infer their
+       * own statement frames beneath this one.
+       */
+      expr_t *stmt_call = s->as.expr.expr && s->as.expr.expr->kind == NY_E_CALL
+                              ? s->as.expr.expr
+                              : NULL;
+      expr_t *saved_partial_call = hm->stmt_partial_call;
+      const char *saved_partial_missing = hm->stmt_partial_missing;
+      size_t saved_partial_count = hm->stmt_partial_missing_count;
+      hm->stmt_partial_call = stmt_call;
+      hm->stmt_partial_missing = NULL;
+      hm->stmt_partial_missing_count = 0;
       (void)hm_infer_expr(hm, env, s->as.expr.expr, self_name);
+      if (stmt_call && hm->stmt_partial_call == stmt_call &&
+          hm->stmt_partial_missing)
+        tp_add_diag_ex(hm->ctx, s->as.expr.expr->tok, "hm", "hm-partial-arity",
+                       "partial application", "saturated call",
+                       "residual function value discarded as a statement",
+                       "function call",
+                       "a partial application produces a residual function "
+                       "value and never runs the callee",
+                       "supply the remaining required arguments, or bind the "
+                       "partial with `def` or `mut`",
+                       "missing %s", hm->stmt_partial_missing);
+      hm->stmt_partial_call = saved_partial_call;
+      hm->stmt_partial_missing = saved_partial_missing;
+      hm->stmt_partial_missing_count = saved_partial_count;
+    }
     if (preserved_element_fact)
       preserved_element_fact->type = preserved_type;
   } break;
@@ -8831,6 +9488,7 @@ static ny_hm_type_t *hm_make_func_type(ny_hm_state_t *hm, stmt_t *fn,
   ny_hm_type_t *ft = hm_fn_type(hm);
   if (!fn || fn->kind != NY_S_FUNC)
     return ft;
+  ft->parameters = &fn->as.fn.params;
   for (size_t i = 0; i < fn->as.fn.params.len; ++i) {
     param_t *p = &fn->as.fn.params.data[i];
     char *qualified =
@@ -8916,12 +9574,13 @@ typedef struct {
 } hm_return_carriers_t;
 
 static void hm_record_return_carrier(hm_return_carriers_t *scan,
-                                      const expr_t *value) {
+                                     const expr_t *value) {
   if (value && !value->semantic.resolved)
     return;
   ny_sem_rep_t rep = value ? value->semantic.rep : NY_SEM_REP_TAGGED_DYNAMIC;
-  scan->carriers |= rep == NY_SEM_REP_F32 ? 2u
-                    : rep == NY_SEM_REP_F64 ? 4u : 1u;
+  scan->carriers |= rep == NY_SEM_REP_F32   ? 2u
+                    : rep == NY_SEM_REP_F64 ? 4u
+                                            : 1u;
 }
 
 static bool hm_return_carrier_stmt(ny_visitor_t *v, stmt_t *s) {
@@ -8941,8 +9600,8 @@ static bool hm_return_carrier_expr(ny_visitor_t *v, expr_t *e) {
 static bool hm_function_has_mixed_return_carriers(stmt_t *fn) {
   hm_return_carriers_t scan = {0};
   ny_visitor_t visitor = {.ctx = &scan,
-                         .visit_stmt_pre = hm_return_carrier_stmt,
-                         .visit_expr_pre = hm_return_carrier_expr};
+                          .visit_stmt_pre = hm_return_carrier_stmt,
+                          .visit_expr_pre = hm_return_carrier_expr};
   stmt_t *body = fn->as.fn.body;
   ny_visit_stmt(&visitor, body);
   if (body && body->kind == NY_S_BLOCK && body->as.block.body.len)

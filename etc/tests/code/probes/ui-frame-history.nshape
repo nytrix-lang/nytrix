@@ -1,0 +1,31 @@
+shape ui_frame_history_append {
+  family "probe-suite"
+  generator "regression"
+  features ["ny", "ui", "render", "typed-list"]
+  template ny-test-case
+  expect compile_and_run
+  flags_matrix "--native --run -O0; --native --run -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect_message "UI-FRAME-HISTORY-OK"
+  source ny <<'NY'
+use core
+use core.os.ui.render.viewer.app as app
+use core.os.ui.render.viewer.loop as loop
+
+mut history = [1.0]
+history = app.app_push_hist_sample(history, 2.5)
+assert(history.len == 2, "frame history append grows the caller list")
+assert(float(history[0]) == 1.0 && float(history[1]) == 2.5, "frame history append preserves ordered samples")
+mut bounded = []
+mut i = 0
+while i < 66 {
+   bounded = app.app_push_hist_sample(bounded, float(i), 1)
+   i += 1
+}
+assert(bounded.len == 1 && float(bounded[0]) == 65.0, "frame history periodically trims to the configured cap")
+def due = loop.sample_fps([], 1, 0, 1000000000)
+def fps_samples = due.get("samples", [])
+assert(bool(due.get("sampled", false)) && fps_samples.len == 1 && float(fps_samples[0]) == 1.0,
+   "FPS sampling appends its first measured interval")
+print("UI-FRAME-HISTORY-OK")
+NY
+}

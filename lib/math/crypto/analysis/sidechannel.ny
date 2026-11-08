@@ -80,16 +80,16 @@ fn aes_sbox_lsb_recover_byte(list leaks) int {
    Other byte positions must be fixed, so the minimum leakage is treated as the constant baseline."
    if leaks == nil || leaks.len != 256 { return -1 }
    def S = aes_sbox()
-   mut base = leaks[0]
-   mut i = 1
+   mut int base = int(leaks[0])
+   mut int i = 1
    while i < 256 {
       if leaks[i] < base { base = leaks[i] }
       i += 1
    }
-   mut k = 0
+   mut int k = 0
    while k < 256 {
       mut ok = true
-      mut p = 0
+      mut int p = 0
       while p < 256 {
          if (leaks[p] - base) != (S[(p ^ k) & 255] & 1) { ok = false }
          p += 1

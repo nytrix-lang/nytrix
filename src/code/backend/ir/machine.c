@@ -12,6 +12,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#if !defined(_WIN32)
+#include <unistd.h>
+#endif
 
 static bool mach_sink_edge_adds(nyr_mach_func_t *m);
 
@@ -202,17 +205,15 @@ typedef struct {
 static bool mach_merge_fallthrough_blocks(nyr_mach_func_t *m) {
   if (m->block_len < 2)
     return true;
-  bool *targeted = calloc(m->block_len, sizeof(*targeted));
-  uint8_t *target_count = calloc(m->block_len, sizeof(*target_count));
-  uint32_t *target_pred = malloc(m->block_len * sizeof(*target_pred));
-  uint32_t *map = malloc(m->block_len * sizeof(*map));
-  if (!targeted || !target_count || !target_pred || !map) {
-    free(targeted);
-    free(target_count);
-    free(target_pred);
-    free(map);
+  if (m->block_len > SIZE_MAX / (sizeof(uint32_t) * 4))
     return false;
-  }
+  uint32_t *scratch = calloc(m->block_len * 4, sizeof(*scratch));
+  if (!scratch)
+    return false;
+  uint32_t *targeted = scratch;
+  uint32_t *target_count = scratch + m->block_len;
+  uint32_t *target_pred = scratch + m->block_len * 2;
+  uint32_t *map = scratch + m->block_len * 3;
   for (size_t b = 0; b < m->block_len; ++b)
     target_pred[b] = UINT32_MAX;
   for (size_t b = 0; b < m->block_len; ++b) {
@@ -271,10 +272,7 @@ static bool mach_merge_fallthrough_blocks(nyr_mach_func_t *m) {
       in->src1.as.block_index = map[in->src1.as.block_index];
   }
   m->block_len = count;
-  free(targeted);
-  free(target_count);
-  free(target_pred);
-  free(map);
+  free(scratch);
   return true;
 }
 
@@ -305,42 +303,102 @@ static void mach_compact_nops(nyr_mach_func_t *m) {
  * and canonical homes. STORE's destination is an address input.
  */
 static bool mach_remove_unused_literals(nyr_mach_func_t *m) {
-  if (!m->vreg_len)
+  if (!m || !m->vreg_len || !m->inst_len)
     return true;
-  bool *read = calloc(m->vreg_len, sizeof(*read));
-  if (!read)
+  if (m->vreg_len > SIZE_MAX / sizeof(size_t) ||
+      m->inst_len > SIZE_MAX / sizeof(size_t))
     return false;
+  size_t *reads = calloc(m->vreg_len, sizeof(*reads));
+  size_t *owner = malloc(m->vreg_len * sizeof(*owner));
+  uint8_t *defs = calloc(m->vreg_len, sizeof(*defs));
+  size_t *work = malloc(m->inst_len * sizeof(*work));
+  if (!reads || !owner || !defs || !work) {
+    free(reads);
+    free(owner);
+    free(defs);
+    free(work);
+    return false;
+  }
+  for (size_t v = 0; v < m->vreg_len; ++v)
+    owner[v] = SIZE_MAX;
   for (size_t i = 0; i < m->inst_len; ++i) {
     const nyr_mach_inst_t *in = &m->insts[i];
     if (in->opcode == NYR_MACH_NOP)
       continue;
-    const nyr_mach_operand_t *inputs[] = {&in->src0, &in->src1, &in->src2};
-    for (size_t k = 0; k < sizeof(inputs) / sizeof(inputs[0]); ++k)
-      if (inputs[k]->kind == NYR_MACH_OPERAND_VREG &&
-          inputs[k]->as.reg < m->vreg_len)
-        read[inputs[k]->as.reg] = true;
+    if (in->opcode != NYR_MACH_STORE &&
+        in->dst.kind == NYR_MACH_OPERAND_VREG &&
+        in->dst.as.reg < m->vreg_len) {
+      uint32_t v = in->dst.as.reg;
+      if (defs[v]++ == 0)
+        owner[v] = i;
+      if (defs[v] > 2)
+        defs[v] = 2;
+    }
+    const nyr_mach_operand_t *ops[] = {
+        &in->src0, &in->src1, &in->src2,
+        in->opcode == NYR_MACH_STORE ? &in->dst : NULL};
+    for (size_t k = 0; k < 4; ++k) {
+      const nyr_mach_operand_t *op = ops[k];
+      if (op && op->kind == NYR_MACH_OPERAND_VREG &&
+          op->as.reg < m->vreg_len)
+        ++reads[op->as.reg];
+    }
     for (size_t k = 0; k < in->args_len; ++k)
       if (in->args[k].kind == NYR_MACH_OPERAND_VREG &&
           in->args[k].as.reg < m->vreg_len)
-        read[in->args[k].as.reg] = true;
-    if (in->opcode == NYR_MACH_STORE && in->dst.kind == NYR_MACH_OPERAND_VREG &&
-        in->dst.as.reg < m->vreg_len)
-      read[in->dst.as.reg] = true;
+        ++reads[in->args[k].as.reg];
   }
-  size_t removed = 0;
-  for (size_t i = 0; i < m->inst_len; ++i) {
-    nyr_mach_inst_t *in = &m->insts[i];
-    if (in->opcode == NYR_MACH_COPY && !in->effects &&
-        in->src0.kind == NYR_MACH_OPERAND_IMM &&
-        in->dst.kind == NYR_MACH_OPERAND_VREG && in->dst.as.reg < m->vreg_len &&
-        !read[in->dst.as.reg]) {
-      in->opcode = NYR_MACH_NOP;
-      ++removed;
+  size_t head = 0, tail = 0, removed = 0;
+  for (size_t v = 0; v < m->vreg_len; ++v)
+    if (defs[v] == 1 && reads[v] == 0)
+      work[tail++] = owner[v];
+  while (head < tail) {
+    nyr_mach_inst_t *in = &m->insts[work[head++]];
+    if (in->dst.kind != NYR_MACH_OPERAND_VREG ||
+        in->dst.as.reg >= m->vreg_len || reads[in->dst.as.reg] != 0 ||
+        defs[in->dst.as.reg] != 1 || in->source_pc == UINT32_MAX ||
+        in->effects != NYR_MACH_EFFECT_NONE || in->args_len || in->args ||
+        in->arg_sizes || in->call_clobbers || in->call_is_extern ||
+        in->call_has_sret || in->call_is_variadic)
+      continue;
+    switch (in->opcode) {
+    case NYR_MACH_COPY:
+    case NYR_MACH_LEA:
+    case NYR_MACH_ADD:
+    case NYR_MACH_SUB:
+    case NYR_MACH_MUL:
+    case NYR_MACH_AND:
+    case NYR_MACH_OR:
+    case NYR_MACH_XOR:
+    case NYR_MACH_BSWAP64:
+    case NYR_MACH_BSWAP32:
+      break;
+    default:
+      continue;
     }
+    if (in->opcode != NYR_MACH_COPY && in->opcode != NYR_MACH_LEA &&
+        (!m->vreg_types ||
+         m->vreg_types[in->dst.as.reg] != NYR_MACH_TYPE_I64))
+      continue;
+    const nyr_mach_operand_t *ops[] = {&in->src0, &in->src1, &in->src2};
+    for (size_t k = 0; k < 3; ++k) {
+      const nyr_mach_operand_t *op = ops[k];
+      if (op->kind != NYR_MACH_OPERAND_VREG || op->as.reg >= m->vreg_len)
+        continue;
+      uint32_t v = op->as.reg;
+      if (reads[v] && --reads[v] == 0 && defs[v] == 1)
+        work[tail++] = owner[v];
+    }
+    uint32_t source_pc = in->source_pc;
+    *in = (nyr_mach_inst_t){.opcode = NYR_MACH_NOP, .source_pc = source_pc};
+    ++removed;
   }
   if (removed && ny_dbg_is_enabled(NY_DBG_HEURISTIC))
-    ny_dbg_heuristic_event("MACHINE_LITERAL_DCE", "removed=%zu", removed);
-  free(read);
+    ny_dbg_heuristic_event("MACHINE_DCE", "removed=%zu", removed);
+  free(reads);
+  free(owner);
+  free(defs);
+  free(work);
   return true;
 }
 
@@ -377,8 +435,11 @@ static void mach_color_local_homes(nyr_mach_func_t *mach) {
   uint32_t *homes = malloc(nv * sizeof(*homes));
   mach_home_interval_t *intervals = malloc(nv * sizeof(*intervals));
   size_t *slot_end = malloc(nv * sizeof(*slot_end));
+  size_t *heap = malloc(nv * sizeof(*heap));
+  size_t *heap_pos = malloc(nv * sizeof(*heap_pos));
+  size_t *free_slots = malloc(nv * sizeof(*free_slots));
   if (!def_block || !def_inst || !last_use || !local || !multi_def || !homes ||
-      !intervals || !slot_end)
+      !intervals || !slot_end || !heap || !heap_pos || !free_slots)
     goto done;
   for (size_t v = 0; v < nv; ++v) {
     def_block[v] = no_block;
@@ -523,18 +584,44 @@ static void mach_color_local_homes(nyr_mach_func_t *mach) {
     nonlocal_count = compact_count;
     free(dense_homes);
   }
-  size_t local_home_count = 0;
-  size_t slot_count = 0;
+  size_t local_home_count = 0, slot_count = 0;
+  size_t heap_len = 0, free_len = 0;
   uint32_t block_id = no_block;
   for (size_t i = 0; i < count; ++i) {
     mach_home_interval_t *cur = &intervals[i];
     if (cur->block != block_id) {
       block_id = cur->block;
-      slot_count = 0;
+      slot_count = heap_len = free_len = 0;
+    }
+
+    while (heap_len && slot_end[heap[0]] < cur->start) {
+      size_t expired = heap[0];
+      size_t tail = heap[--heap_len];
+      if (heap_len) {
+        heap[0] = tail;
+        heap_pos[tail] = 0;
+        size_t at = 0;
+        for (;;) {
+          size_t child = at * 2 + 1;
+          if (child >= heap_len)
+            break;
+          if (child + 1 < heap_len &&
+              slot_end[heap[child + 1]] < slot_end[heap[child]])
+            ++child;
+          if (slot_end[heap[at]] <= slot_end[heap[child]])
+            break;
+          size_t tmp = heap[at];
+          heap[at] = heap[child];
+          heap[child] = tmp;
+          heap_pos[heap[at]] = at;
+          heap_pos[heap[child]] = child;
+          at = child;
+        }
+      }
+      free_slots[free_len++] = expired;
     }
 
     const nyr_mach_inst_t *def = &mach->insts[cur->def_inst];
-    bool coalesced = false;
     if (def->opcode == NYR_MACH_COPY && !def->narrow32 &&
         def->src0.kind == NYR_MACH_OPERAND_VREG && def->src0.as.reg < nv) {
       size_t src = def->src0.as.reg;
@@ -543,26 +630,47 @@ static void mach_color_local_homes(nyr_mach_func_t *mach) {
           mach->vreg_types[src] == mach->vreg_types[cur->reg] &&
           mach->vreg_classes[src] == mach->vreg_classes[cur->reg]) {
         homes[cur->reg] = homes[src];
-        size_t local_slot = homes[src] - nonlocal_count;
-        if (local_slot < slot_count && slot_end[local_slot] < cur->end)
-          slot_end[local_slot] = cur->end;
-        coalesced = true;
+        size_t slot = homes[src] - nonlocal_count;
+        if (slot < slot_count && slot_end[slot] < cur->end) {
+          slot_end[slot] = cur->end;
+          size_t at = heap_pos[slot];
+          while (at < heap_len) {
+            size_t child = at * 2 + 1;
+            if (child >= heap_len)
+              break;
+            if (child + 1 < heap_len &&
+                slot_end[heap[child + 1]] < slot_end[heap[child]])
+              ++child;
+            if (slot_end[heap[at]] <= slot_end[heap[child]])
+              break;
+            size_t tmp = heap[at];
+            heap[at] = heap[child];
+            heap[child] = tmp;
+            heap_pos[heap[at]] = at;
+            heap_pos[heap[child]] = child;
+            at = child;
+          }
+        }
+        continue;
       }
     }
-    if (coalesced)
-      continue;
 
-    size_t slot = 0;
-    while (slot < slot_count && slot_end[slot] >= cur->start)
-      ++slot;
-    if (slot == slot_count) {
-      slot_end[slot_count++] = cur->end;
-      if (slot_count > local_home_count)
-        local_home_count = slot_count;
-    } else {
-      slot_end[slot] = cur->end;
-    }
+    size_t slot = free_len ? free_slots[--free_len] : slot_count++;
+    slot_end[slot] = cur->end;
     homes[cur->reg] = (uint32_t)(nonlocal_count + slot);
+    if (slot_count > local_home_count)
+      local_home_count = slot_count;
+    size_t at = heap_len++;
+    while (at) {
+      size_t parent = (at - 1) / 2;
+      if (slot_end[heap[parent]] <= slot_end[slot])
+        break;
+      heap[at] = heap[parent];
+      heap_pos[heap[at]] = at;
+      at = parent;
+    }
+    heap[at] = slot;
+    heap_pos[slot] = at;
   }
 
   mach->home_slots = homes;
@@ -577,6 +685,9 @@ done:
   free(homes);
   free(intervals);
   free(slot_end);
+  free(heap);
+  free(heap_pos);
+  free(free_slots);
 }
 
 /*
@@ -726,6 +837,77 @@ static void mach_propagate_local_copies(nyr_mach_func_t *mach) {
      */
     for (size_t i = 0; i < aliased_len; ++i)
       alias[aliased[i]] = aliased[i];
+  }
+  if (mach->vreg_types && mach->vreg_classes) {
+    uint8_t *defs = calloc(mach->vreg_len, sizeof(*defs));
+    if (defs) {
+      for (size_t pc = 0; pc < mach->inst_len; ++pc) {
+        const nyr_mach_inst_t *in = &mach->insts[pc];
+        if (in->opcode != NYR_MACH_NOP && in->opcode != NYR_MACH_STORE &&
+            in->dst.kind == NYR_MACH_OPERAND_VREG &&
+            in->dst.as.reg < mach->vreg_len && defs[in->dst.as.reg] < 2)
+          ++defs[in->dst.as.reg];
+      }
+      for (size_t bi = 0; bi < mach->block_len; ++bi) {
+        const nyr_mach_block_t *block = &mach->blocks[bi];
+        size_t end = (size_t)block->first_inst + block->inst_count;
+        if (end > mach->inst_len)
+          continue;
+        for (size_t pc = block->first_inst; pc < end; ++pc) {
+          nyr_mach_inst_t *in = &mach->insts[pc];
+          if (in->opcode != NYR_MACH_LOAD ||
+              in->effects != NYR_MACH_EFFECT_READ_MEMORY || in->narrow32 ||
+              in->dst.kind != NYR_MACH_OPERAND_VREG ||
+              in->src0.kind != NYR_MACH_OPERAND_VREG ||
+              in->src1.kind != NYR_MACH_OPERAND_NONE ||
+              in->src2.kind != NYR_MACH_OPERAND_NONE ||
+              in->args_len || in->args || in->arg_sizes ||
+              in->dst.as.reg >= mach->vreg_len ||
+              in->src0.as.reg >= mach->vreg_len ||
+              mach->vreg_types[in->dst.as.reg] != NYR_MACH_TYPE_I64 ||
+              mach->vreg_classes[in->dst.as.reg] != NYR_MACH_REGCLASS_GPR ||
+              defs[in->dst.as.reg] != 1)
+            continue;
+          uint32_t addr = in->src0.as.reg;
+          size_t first = pc > 96 ? pc - 96 : block->first_inst;
+          if (first < block->first_inst)
+            first = block->first_inst;
+          for (size_t j = pc; j-- > first;) {
+            const nyr_mach_inst_t *prev = &mach->insts[j];
+            if (prev->effects & (NYR_MACH_EFFECT_WRITE_MEMORY |
+                                 NYR_MACH_EFFECT_CALL |
+                                 NYR_MACH_EFFECT_CONTROL))
+              break;
+            if (prev->opcode == NYR_MACH_INTRINSIC)
+              break;
+            if (prev->opcode == NYR_MACH_LOAD &&
+                prev->effects == NYR_MACH_EFFECT_READ_MEMORY &&
+                !prev->narrow32 &&
+                prev->src0.kind == NYR_MACH_OPERAND_VREG &&
+                prev->src0.as.reg == addr &&
+                prev->src1.kind == NYR_MACH_OPERAND_NONE &&
+                prev->src2.kind == NYR_MACH_OPERAND_NONE &&
+                prev->dst.kind == NYR_MACH_OPERAND_VREG &&
+                prev->dst.as.reg < mach->vreg_len &&
+                prev->dst.as.reg != in->dst.as.reg &&
+                defs[prev->dst.as.reg] == 1 &&
+                mach->vreg_types[prev->dst.as.reg] == NYR_MACH_TYPE_I64 &&
+                mach->vreg_classes[prev->dst.as.reg] == NYR_MACH_REGCLASS_GPR &&
+                !prev->args_len && !prev->args && !prev->arg_sizes) {
+              in->opcode = NYR_MACH_COPY;
+              in->src0 = prev->dst;
+              in->effects = NYR_MACH_EFFECT_NONE;
+              break;
+            }
+            if (prev->opcode != NYR_MACH_STORE &&
+                prev->dst.kind == NYR_MACH_OPERAND_VREG &&
+                prev->dst.as.reg == addr)
+              break;
+          }
+        }
+      }
+      free(defs);
+    }
   }
   free(alias);
   free(aliased);
@@ -932,6 +1114,135 @@ static void mach_propagate_single_pred_copies(nyr_mach_func_t *mach) {
   }
   if (forwarded && ny_dbg_is_enabled(NY_DBG_HEURISTIC))
     ny_dbg_heuristic_event("MACHINE_EDGE_COPY", "forwarded=%zu", forwarded);
+
+  size_t loads_forwarded = 0;
+  for (size_t succ = 0; succ < mach->block_len; ++succ) {
+    if (pred_count[succ] != 1 || only_pred[succ] == UINT32_MAX ||
+        only_pred[succ] >= mach->block_len || only_pred[succ] == succ)
+      continue;
+    const nyr_mach_block_t *pb = &mach->blocks[only_pred[succ]];
+    const nyr_mach_block_t *sb = &mach->blocks[succ];
+    size_t pe = (size_t)pb->first_inst + pb->inst_count;
+    size_t se = (size_t)sb->first_inst + sb->inst_count;
+    if (pe > mach->inst_len || se > mach->inst_len)
+      continue;
+    for (size_t ti = sb->first_inst; ti < se; ++ti) {
+      nyr_mach_inst_t *load = &mach->insts[ti];
+      if (load->opcode != NYR_MACH_LOAD || load->byte_width || load->narrow32 ||
+          load->effects != NYR_MACH_EFFECT_READ_MEMORY ||
+          load->source_pc == UINT32_MAX ||
+          load->dst.kind != NYR_MACH_OPERAND_VREG ||
+          load->src0.kind != NYR_MACH_OPERAND_VREG)
+        continue;
+      size_t ta = SIZE_MAX;
+      for (size_t i = sb->first_inst; i < ti; ++i) {
+        const nyr_mach_inst_t *in = &mach->insts[i];
+        if (in->opcode != NYR_MACH_STORE &&
+            in->dst.kind == NYR_MACH_OPERAND_VREG &&
+            in->dst.as.reg == load->src0.as.reg)
+          ta = in->opcode == NYR_MACH_LEA ? i : SIZE_MAX;
+      }
+      if (ta == SIZE_MAX)
+        continue;
+      const nyr_mach_inst_t *tlea = &mach->insts[ta];
+      if (tlea->src0.kind != NYR_MACH_OPERAND_VREG ||
+          tlea->src1.kind != NYR_MACH_OPERAND_VREG ||
+          tlea->src2.kind != NYR_MACH_OPERAND_IMM)
+        continue;
+      for (size_t pi = pe; pi-- > pb->first_inst;) {
+        const nyr_mach_inst_t *prev = &mach->insts[pi];
+        if (prev->opcode != NYR_MACH_LOAD || prev->byte_width ||
+            prev->narrow32 || prev->source_pc == UINT32_MAX ||
+            prev->effects != NYR_MACH_EFFECT_READ_MEMORY ||
+            prev->dst.kind != NYR_MACH_OPERAND_VREG ||
+            prev->src0.kind != NYR_MACH_OPERAND_VREG ||
+            prev->dst.as.reg >= mach->vreg_len ||
+            load->dst.as.reg >= mach->vreg_len ||
+            !mach->vreg_types || !mach->vreg_classes ||
+            mach->vreg_types[load->dst.as.reg] != NYR_MACH_TYPE_I64 ||
+            mach->vreg_types[prev->dst.as.reg] !=
+                mach->vreg_types[load->dst.as.reg] ||
+            mach->vreg_classes[prev->dst.as.reg] !=
+                mach->vreg_classes[load->dst.as.reg])
+          continue;
+        size_t pa = SIZE_MAX;
+        for (size_t i = pb->first_inst; i < pi; ++i) {
+          const nyr_mach_inst_t *in = &mach->insts[i];
+          if (in->opcode != NYR_MACH_STORE &&
+              in->dst.kind == NYR_MACH_OPERAND_VREG &&
+              in->dst.as.reg == prev->src0.as.reg)
+            pa = in->opcode == NYR_MACH_LEA ? i : SIZE_MAX;
+        }
+        if (pa == SIZE_MAX)
+          continue;
+        const nyr_mach_inst_t *plea = &mach->insts[pa];
+        if (plea->src0.kind != NYR_MACH_OPERAND_VREG ||
+            plea->src1.kind != NYR_MACH_OPERAND_VREG ||
+            plea->src2.kind != NYR_MACH_OPERAND_IMM ||
+            plea->immediate != tlea->immediate ||
+            plea->src0.as.reg != tlea->src0.as.reg ||
+            plea->src1.as.reg != tlea->src1.as.reg ||
+            plea->src2.as.imm != tlea->src2.as.imm ||
+            plea->narrow32 != tlea->narrow32)
+          continue;
+        uint32_t a = plea->src0.as.reg, b = plea->src1.as.reg;
+        uint32_t value = prev->dst.as.reg;
+        bool safe = true;
+        for (size_t i = pb->first_inst; safe && i <= pa; ++i) {
+          const nyr_mach_inst_t *in = &mach->insts[i];
+          if (i != pa && (in->opcode == NYR_MACH_BR ||
+                          in->opcode == NYR_MACH_BR_IF ||
+                          in->opcode == NYR_MACH_RET ||
+                          in->opcode == NYR_MACH_TRAP))
+            safe = false;
+        }
+        for (size_t i = pa + 1; safe && i < pe; ++i) {
+          const nyr_mach_inst_t *in = &mach->insts[i];
+          if ((i < pi && (in->opcode == NYR_MACH_BR ||
+                         in->opcode == NYR_MACH_BR_IF ||
+                         in->opcode == NYR_MACH_RET ||
+                         in->opcode == NYR_MACH_TRAP)) ||
+              (i > pi && (in->effects &
+              (NYR_MACH_EFFECT_WRITE_MEMORY | NYR_MACH_EFFECT_CALL))) ||
+              in->opcode == NYR_MACH_INLINE_ASM ||
+              in->opcode == NYR_MACH_INTRINSIC ||
+              (in->opcode != NYR_MACH_STORE &&
+               in->dst.kind == NYR_MACH_OPERAND_VREG &&
+               (in->dst.as.reg == a || in->dst.as.reg == b ||
+                (i > pi && in->dst.as.reg == value))))
+            safe = false;
+        }
+        for (size_t i = sb->first_inst; safe && i < ti; ++i) {
+          const nyr_mach_inst_t *in = &mach->insts[i];
+          if ((in->effects &
+               (NYR_MACH_EFFECT_WRITE_MEMORY | NYR_MACH_EFFECT_CALL |
+                NYR_MACH_EFFECT_CONTROL)) ||
+              in->opcode == NYR_MACH_INLINE_ASM ||
+              in->opcode == NYR_MACH_INTRINSIC ||
+              in->opcode == NYR_MACH_BR ||
+              in->opcode == NYR_MACH_BR_IF ||
+              in->opcode == NYR_MACH_RET ||
+              in->opcode == NYR_MACH_TRAP ||
+              (in->opcode != NYR_MACH_STORE &&
+               in->dst.kind == NYR_MACH_OPERAND_VREG &&
+               (in->dst.as.reg == a || in->dst.as.reg == b ||
+                in->dst.as.reg == value)))
+            safe = false;
+        }
+        if (!safe)
+          continue;
+        nyr_mach_operand_t dst = load->dst;
+        uint32_t source_pc = load->source_pc;
+        *load = (nyr_mach_inst_t){.opcode = NYR_MACH_COPY, .dst = dst,
+                                  .src0 = prev->dst, .source_pc = source_pc};
+        ++loads_forwarded;
+        break;
+      }
+    }
+  }
+  if (loads_forwarded && ny_dbg_is_enabled(NY_DBG_HEURISTIC))
+    ny_dbg_heuristic_event("MACHINE_EDGE_LOAD", "forwarded=%zu",
+                           loads_forwarded);
   free(pred_count);
   free(only_pred);
   free(use_block);
@@ -1345,8 +1656,14 @@ static bool mach_verify_opcode_shape(const nyr_mach_func_t *func,
   case NYR_MACH_SAR:
   case NYR_MACH_ROR:
   case NYR_MACH_ROR32:
+  case NYR_MACH_VSHR:
     if (inst->effects != NYR_MACH_EFFECT_NONE || !mach_is_none(&inst->src2))
       return false;
+    if (inst->opcode == NYR_MACH_VSHR)
+      return inst->src1.kind == NYR_MACH_OPERAND_IMM &&
+             inst->src1.as.imm >= 0 && inst->src1.as.imm <= 63 &&
+             mach_value_type(func, &inst->dst) == NYR_MACH_TYPE_V256_I64 &&
+             mach_same_value_type(func, &inst->dst, &inst->src0);
     if ((inst->opcode == NYR_MACH_SHL || inst->opcode == NYR_MACH_SAR ||
          inst->opcode == NYR_MACH_ROR || inst->opcode == NYR_MACH_ROR32) &&
         inst->src1.kind == NYR_MACH_OPERAND_IMM)
@@ -1531,6 +1848,8 @@ const char *nyr_mach_opcode_name(nyr_mach_opcode_t op) {
     return "shl";
   case NYR_MACH_SAR:
     return "sar";
+  case NYR_MACH_VSHR:
+    return "vshr";
   case NYR_MACH_ROR:
     return "ror";
   case NYR_MACH_ROR32:
@@ -1750,6 +2069,769 @@ void nyr_mach_dump(const nyr_mach_func_t *func, FILE *out) {
   }
 }
 
+static bool nyr_mach_mixed_enabled_s = false;
+static const char *nyr_mach_mixed_filter_s = NULL;
+
+void nyr_set_mixed_disasm(bool enabled, const char *filter) {
+  nyr_mach_mixed_enabled_s = enabled;
+  nyr_mach_mixed_filter_s = filter;
+}
+
+static bool nyr_mach_mixed_filter_match(const char *name) {
+  if (!nyr_mach_mixed_filter_s || !nyr_mach_mixed_filter_s[0])
+    return true;
+  if (!name)
+    return false;
+  return strstr(name, nyr_mach_mixed_filter_s) != NULL;
+}
+
+/*
+ * Prints NYIR source instructions [printed, upto] as a correlated group.
+ */
+static void mach_mixed_operand_text(const nyr_mach_operand_t *op, char *buf,
+                                    size_t n) {
+  switch (op->kind) {
+  case NYR_MACH_OPERAND_VREG:
+    snprintf(buf, n, "v%u", op->as.reg);
+    break;
+  case NYR_MACH_OPERAND_PREG:
+    snprintf(buf, n, "p%u", op->as.reg);
+    break;
+  case NYR_MACH_OPERAND_IMM:
+    snprintf(buf, n, "#%ld", (long)op->as.imm);
+    break;
+  case NYR_MACH_OPERAND_FRAME:
+    snprintf(buf, n, "[fp+%u]", op->as.frame_index);
+    break;
+  case NYR_MACH_OPERAND_BLOCK:
+    snprintf(buf, n, "BB%u", op->as.block_index);
+    break;
+  case NYR_MACH_OPERAND_SYMBOL:
+    snprintf(buf, n, "%s", op->as.symbol ? op->as.symbol : "(null)");
+    break;
+  case NYR_MACH_OPERAND_NONE:
+  default:
+    snprintf(buf, n, "_");
+    break;
+  }
+}
+
+/*
+ * Compact one-line rendering of a MIR instruction (same operand rules as
+ * nyr_mach_dump, without the [nir=] tag: the NYIR line appears above it).
+ */
+static void mach_mixed_inst_text(const nyr_mach_inst_t *in, char *buf,
+                                 size_t n) {
+  size_t off = (size_t)snprintf(buf, n, "%s%s", nyr_mach_opcode_name(in->opcode),
+                                mach_cond_name(in->condition));
+#define MIXED_APP(...)                                                         \
+  do {                                                                         \
+    if (off < n)                                                               \
+      off += (size_t)snprintf(buf + off, n - off, ##__VA_ARGS__);               \
+  } while (0)
+  char obuf[160];
+  if (mach_is_value(&in->dst))
+    MIXED_APP(" %s", (mach_mixed_operand_text(&in->dst, obuf, sizeof(obuf)),
+                       obuf));
+  if (mach_is_value(&in->src0) || in->src0.kind == NYR_MACH_OPERAND_IMM ||
+      in->src0.kind == NYR_MACH_OPERAND_FRAME ||
+      in->src0.kind == NYR_MACH_OPERAND_SYMBOL ||
+      in->src0.kind == NYR_MACH_OPERAND_BLOCK)
+    MIXED_APP(", %s", (mach_mixed_operand_text(&in->src0, obuf, sizeof(obuf)),
+                       obuf));
+  if (mach_is_value(&in->src1) || in->src1.kind == NYR_MACH_OPERAND_IMM ||
+      in->src1.kind == NYR_MACH_OPERAND_BLOCK)
+    MIXED_APP(", %s", (mach_mixed_operand_text(&in->src1, obuf, sizeof(obuf)),
+                       obuf));
+  if (in->src2.kind != NYR_MACH_OPERAND_NONE)
+    MIXED_APP(", %s", (mach_mixed_operand_text(&in->src2, obuf, sizeof(obuf)),
+                       obuf));
+  if (in->opcode == NYR_MACH_CALL && in->args_len > 1) {
+    MIXED_APP(" [");
+    for (size_t a = 1; a < in->args_len; a++) {
+      mach_mixed_operand_text(&in->args[a], obuf, sizeof(obuf));
+      MIXED_APP("%s%s", a > 1 ? ", " : "", obuf);
+    }
+    MIXED_APP("]");
+  }
+#undef MIXED_APP
+}
+
+typedef struct {
+  unsigned long long addr;
+  unsigned long long end;
+  char bytes[64];
+  char text[240];
+} nyr_mixed_nat_t;
+
+/*
+ * Mixed view: one NYIR source group per line, its MIR instruction on the
+ * same line, then the native bytes it encoded to below.  The format is
+ * intentionally terse (an optimizer diagnostic, not a reference listing):
+ *
+ *   bb10  L10
+ *     NYIR #70-72  shl + add   -> MIR #53  lea v56, v28, v51, #8
+ *       NAT 0x012e  49 8b c6   mov rax, r14
+ *
+ * `mov` source insts are elided when other ops share their group (they are
+ * copy-expansion noise); repeated ops collapse to `nm x k`.  Colors are
+ * enabled only for terminals (NO_COLOR / FORCE_COLOR / CLICOLOR_FORCE).
+ */
+#define MCLR_HDR   "\033[1;36m"
+#define MCLR_NAME  "\033[1m"
+#define MCLR_BB    "\033[94;1m"
+#define MCLR_NYIR  "\033[93m"
+#define MCLR_MIR   "\033[35m"
+#define MCLR_DIM   "\033[90m"
+#define MCLR_AMBER "\033[93m"
+#define MCLR_CALL  "\033[95m"
+#define MCLR_RET   "\033[91m"
+#define MCLR_SEL   "\033[96m"
+#define MCLR_BAD   "\033[1;91m"
+#define MCLR_RESET "\033[0m"
+
+static void mixed_c(FILE *out, bool on, const char *code) {
+  if (on && code)
+    fputs(code, out);
+}
+
+/*
+ * Pad visible output to `target` columns (color codes are invisible).
+ */
+static void mixed_pad_to(FILE *out, bool col, size_t *vc, size_t target) {
+  (void)col;
+  if (*vc < target) {
+    size_t pad = target - *vc;
+    char sp[64];
+    memset(sp, ' ', sizeof(sp));
+    while (pad > 0) {
+      size_t w = pad > 63 ? 63 : pad;
+      fwrite(sp, 1, w, out);
+      pad -= w;
+    }
+    *vc = target;
+  }
+}
+
+static bool nyr_mixed_color_for(FILE *out) {
+  if (getenv("NO_COLOR"))
+    return false;
+  const char *force = getenv("FORCE_COLOR");
+  if (!force || !force[0])
+    force = getenv("CLICOLOR_FORCE");
+  if (force && force[0] && strcmp(force, "0") != 0)
+    return true;
+#if defined(_WIN32)
+  (void)out;
+  return false;
+#else
+  return isatty(fileno(out));
+#endif
+}
+
+/*
+ * Strips a leading `vN=` assignment so `v57=ld.i64 v56` renders `ld.i64 v56`.
+ */
+static void mixed_strip_assign(const char *src, char *dst, size_t n) {
+  const char *eq = src ? strchr(src, '=') : NULL;
+  if (eq && eq != src && eq[1])
+    src = eq + 1;
+  snprintf(dst, n, "%s", src ? src : "?");
+}
+
+/*
+ * Colors the leading mnemonic of an operand text by instruction class.
+ */
+static void mixed_body(FILE *out, bool on, const char *text) {
+  size_t wl = 0;
+  while (text[wl] && text[wl] != ' ')
+    wl++;
+  const char *color = NULL;
+  if (wl == 3 && strncmp(text, "ret", 3) == 0)
+    color = MCLR_RET;
+  else if (wl == 4 && strncmp(text, "call", 4) == 0)
+    color = MCLR_CALL;
+  else if (wl > 0 && text[0] == 'j')
+    color = MCLR_AMBER;
+  else if ((wl >= 4 && strncmp(text, "cmov", 4) == 0) ||
+           (wl >= 3 && strncmp(text, "set", 3) == 0))
+    color = MCLR_SEL;
+  if (on && color) {
+    fprintf(out, "%s%.*s" MCLR_RESET "%s", color, (int)wl, text, text + wl);
+  } else {
+    fprintf(out, "%.*s", (int)wl, text);
+    fputs(text + wl, out);
+  }
+}
+
+/*
+ * Extracts the `op` keyword from a formatted NYIR inst, skipping a leading
+ * `vN=` assignment: `v57=ld.i64 v56` -> `ld.i64`.  Pure-number texts (const
+ * payloads like `v0=2000`) collapse to the typed op name `i64`/`f64`.
+ */
+static void mach_mixed_token(const nyr_func_t *nyir, size_t pc, char *tok,
+                             size_t n, bool *is_label, char *full_out,
+                             size_t full_n) {
+  char full[256];
+  tok[0] = '\0';
+  *is_label = false;
+  if (full_out && full_n)
+    full_out[0] = '\0';
+  if (pc >= nyir->len || !nyr_fmt_inst(&nyir->data[pc], full, sizeof(full)))
+    return;
+  const char *eq = strchr(full, '=');
+  const char *text = eq && eq != full ? eq + 1 : full;
+  if (full_out && full_n) {
+    size_t fl = strlen(text);
+    snprintf(full_out, full_n, "%.*s", (int)(fl > full_n - 1 ? full_n - 1 : fl),
+             text);
+  }
+  /*
+   * Trailing-colon texts are block labels: `L10`.
+   */
+  const char *sp = strchr(text, ' ');
+  if (!sp)
+    sp = text + strlen(text);
+  size_t wl = (size_t)(sp - text);
+  if (wl && text[wl - 1] == ':') {
+    *is_label = true;
+    snprintf(tok, n, "%.*s", (int)(wl - 1 > 23 ? 23 : wl - 1), text);
+    return;
+  }
+  if (wl > 0) {
+    char word[64];
+    snprintf(word, sizeof(word), "%.*s", (int)(wl > 63 ? 63 : wl), text);
+    bool numeric = true;
+    for (size_t k = 0; word[k]; ++k) {
+      if ((word[k] < '0' || word[k] > '9') && word[k] != '-' &&
+          word[k] != '.')
+        numeric = false;
+    }
+    if (numeric) {
+      bool is_float = strchr(word, '.') != NULL;
+      snprintf(tok, n, "%s", is_float ? "f64" : "i64");
+    } else {
+      snprintf(tok, n, "%s", word);
+    }
+  }
+}
+
+/*
+ * Mnemonic summary for NYIR insts [lo, hi]: consecutive identical ops
+ * collapse to `nm x k`, MOVs hide when other ops share the group, and the
+ * summary caps at four entries (`... +N`).  Returns 1 when a summary was
+ * printed, -1 when the span only holds labels (caller keeps them pending
+ * for the bb header), and 0 when no inst was found.
+ */
+static int mach_mixed_summary(const nyr_func_t *nyir, size_t lo, size_t hi,
+                              char *buf, size_t n, bool *only_labels) {
+  char names[24][24];
+  size_t qty[24];
+  size_t hn = 0;
+  size_t ops_seen = 0;
+  bool only_labels_all = true;
+  if (hi < lo || lo >= nyir->len) {
+    if (only_labels)
+      *only_labels = false;
+    return 0;
+  }
+  char single_text[64];
+  size_t single_pc = (size_t)-1;
+  for (size_t i = lo; i <= hi && i < nyir->len; ++i) {
+    if (nyir->data[i].op == NYIR_NOP)
+      continue;
+    char tok[24];
+    bool label;
+    mach_mixed_token(nyir, i, tok, sizeof(tok), &label, single_text,
+                     sizeof(single_text));
+    if (!tok[0])
+      continue;
+    if (label) {
+      continue;
+    }
+    single_pc = i;
+    only_labels_all = false;
+    const char *nm = tok[0] ? tok : "?";
+    bool is_mov = strcmp(nm, "mov") == 0;
+    if (!is_mov)
+      ops_seen++;
+    if (hn && strcmp(names[hn - 1], nm) == 0)
+      qty[hn - 1]++;
+    else if (hn < 24) {
+      snprintf(names[hn], sizeof(names[hn]), "%s", nm);
+      qty[hn] = 1;
+      hn++;
+    }
+  }
+  /*
+   * Hide MOV entries when real ops share the summary.
+   */
+  if (ops_seen > 0) {
+    size_t w = 0;
+    for (size_t k = 0; k < hn; ++k)
+      if (strcmp(names[k], "mov") != 0) {
+        if (w != k) {
+          char tmp[24];
+          snprintf(tmp, sizeof(tmp), "%s", names[k]);
+          snprintf(names[w], sizeof(names[w]), "%s", tmp);
+          qty[w] = qty[k];
+        }
+        w++;
+      }
+    hn = w;
+  }
+  if (only_labels)
+    *only_labels = only_labels_all;
+  if (hn == 0) {
+    if (only_labels_all)
+      return -1;
+    return 0;
+  }
+  /*
+   * Identity groups (exactly one NYIR inst) render its full source text:
+   * `ld.i64 v56`, `2000`, `mov v51` - denser info at no cost.
+   */
+  if (hn == 1 && qty[0] == 1 && single_pc != (size_t)-1 && single_text[0]) {
+    size_t sl = strlen(single_text);
+    snprintf(buf, n, "%s", sl > 40 ? single_text + sl - 40 : single_text);
+    return 1;
+  }
+  size_t off = 0;
+  for (size_t k = 0; k < hn; ++k) {
+    int z = snprintf(buf + off, n - off, "%s%s%s", k ? " + " : "", names[k],
+                     qty[k] > 1 ? " x " : "");
+    if (z < 0 || (size_t)z >= n - off)
+      break;
+    off += (size_t)z;
+    if (qty[k] > 1) {
+      z = snprintf(buf + off, n - off, "%zu", qty[k]);
+      if (z < 0 || (size_t)z >= n - off)
+        break;
+      off += (size_t)z;
+    }
+    if (k == 3) {
+      z = snprintf(buf + off, n - off, " ...");
+      if (z > 0 && (size_t)z < n - off)
+        off += (size_t)z;
+      break;
+    }
+  }
+  return 1;
+}
+
+/*
+ * Prints `NYIR <range> <summary> -> ` for the source group on one line.
+ * Label-only spans stay pending (the bb header renders them later).
+ * Advances *printed past the consumed span.  Returns whether anything was
+ * emitted so the caller can pad the MIR line into alignment otherwise.
+ */
+static bool mach_mixed_nyir_header(const nyr_func_t *nyir, size_t lo,
+                                   size_t hi, FILE *out, bool col,
+                                   size_t *printed, size_t *vc) {
+  if (hi < lo || lo >= nyir->len)
+    return false;
+  char summary[160];
+  bool only_labels = false;
+  int st = mach_mixed_summary(nyir, lo, hi, summary, sizeof(summary),
+                              &only_labels);
+  if (st <= 0 && only_labels)
+    return false; /* absorbed by `bbN Lx` */
+  if (st > 0) {
+    char range[24];
+    if (lo == hi)
+      snprintf(range, sizeof(range), "#%zu", lo);
+    else
+      snprintf(range, sizeof(range), "#%zu-%zu", lo, hi);
+    /*
+     * Colors replace the tag: the tier is yellow = source.
+     */
+    mixed_c(out, col, MCLR_NYIR);
+    fprintf(out, col ? "%-8s" : "NYIR %-10s", range);
+    mixed_c(out, col, MCLR_RESET);
+    *vc += col ? 8u : 12u;
+    fprintf(out, " ");
+    (*vc)++;
+    /*
+     * Truncate summary to the fixed 16-wide column.
+     */
+    fprintf(out, "%-16.16s", summary);
+    *vc += 16;
+    mixed_c(out, col, MCLR_DIM);
+    fputs(col ? "      -> " : " -> ", out);
+    *vc += col ? 7u : 4u;
+    mixed_c(out, col, MCLR_RESET);
+  } else if (st == 0) {
+    char pre[40];
+    int pl = snprintf(pre, sizeof(pre), col ? "#%zu-%zu" : "NYIR #%zu-%zu",
+                      lo, hi);
+    fputs("  ", out);
+    *vc += 2;
+    mixed_c(out, col, MCLR_DIM);
+    fputs(pre, out);
+    *vc += (size_t)pl;
+    mixed_pad_to(out, col, vc, col ? 36u : 35u);
+    mixed_c(out, col, MCLR_RESET);
+  }
+  if (printed && *printed < hi + 1)
+    *printed = hi + 1;
+  return true;
+}
+
+/* Why the next function dumped without machine form skipped that pipeline. */
+static _Thread_local char nyr_mach_mixed_note[256];
+
+void nyr_mach_set_mixed_note(const char *reason) {
+  snprintf(nyr_mach_mixed_note, sizeof(nyr_mach_mixed_note), "%s",
+           reason && reason[0] ? reason : "machine form unavailable");
+}
+
+void nyr_mach_dump_mixed(const nyr_func_t *nyir, const nyr_mach_func_t *mach,
+                         const unsigned char *native_code, size_t native_len,
+                         const size_t *inst_offsets, size_t inst_offsets_len,
+                         const char *name, FILE *out) {
+  if (!nyir || !out || !nyr_mach_mixed_enabled_s ||
+      !nyr_mach_mixed_filter_match(name))
+    return;
+  if (!native_code || native_len == 0 || (mach && !mach->insts && !mach->blocks))
+    return;
+  extern const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
+                                             int64_t base);
+  const char *listing = nyr_internal_x64_disasm(native_code, (int64_t)native_len,
+                                                (int64_t)0);
+  if (!listing || !*listing)
+    return;
+
+  nyr_mixed_nat_t *rows = calloc(native_len + 1, sizeof(*rows));
+  if (!rows)
+    return;
+  size_t row_count = 0;
+  unsigned long long stop = 0;
+  for (const char *p = listing; *p;) {
+    const char *eol = strchr(p, '\n');
+    size_t len = eol ? (size_t)(eol - p) : strlen(p);
+    char line[512];
+    size_t cl = len < sizeof(line) - 1 ? len : sizeof(line) - 1;
+    memcpy(line, p, cl);
+    line[cl] = '\0';
+    char *tab1 = strchr(line, '\t');
+    if (tab1) {
+      char *tab2 = strchr(tab1 + 1, '\t');
+      if (tab2) {
+        char *tab3 = strchr(tab2 + 1, '\t');
+        char *tab4 = tab3 ? strchr(tab3 + 1, '\t') : NULL;
+        if (tab4) {
+          char *mnem = tab1 + 1;
+          char *ops = tab2 + 1;
+          char *bytes = tab4 + 1;
+          *tab2 = '\0';
+          *tab3 = '\0';
+          *tab4 = '\0';
+          *tab1 = '\0';
+          size_t bl = strlen(bytes);
+          while (bl > 0 && bytes[bl - 1] == ' ')
+            bytes[--bl] = '\0';
+          nyr_mixed_nat_t *r = &rows[row_count++];
+          r->addr = strtoull(line, NULL, 10);
+          /*
+           * The listing's size field is authoritative for the end address
+           * (bytes-length/3 undercounts short encodings like `ret`).
+           */
+          {
+            unsigned long long size = strtoull(tab3 + 1, NULL, 10);
+            r->end = r->addr + size;
+          }
+          if (bl > 19) {
+            char bb[64];
+            memset(bb, 0, sizeof(bb));
+            memcpy(bb, bytes, 19);
+            snprintf(r->bytes, sizeof(r->bytes), "%-17s..", bb);
+          } else
+            snprintf(r->bytes, sizeof(r->bytes), "%-19s", bytes);
+          snprintf(r->text, sizeof(r->text), ops[0] ? "%s %s" : "%s", mnem, ops);
+        }
+      }
+    }
+    if (!eol)
+      break;
+    p = eol + 1;
+  }
+  if (row_count)
+    stop = rows[row_count - 1].end;
+
+  /*
+   * Group ordinal: MIR insts when machine form exists, else NYIR insts.
+   * inst_offsets maps group pc -> function-relative native start byte.
+   */
+  size_t groups = mach ? mach->inst_len : 0;
+  if (!mach && inst_offsets_len == nyir->len)
+    groups = nyir->len;
+  bool mapped = groups > 0 && inst_offsets && inst_offsets_len >= groups;
+
+  size_t *bounds = NULL;
+  if (mapped) {
+    bounds = calloc(groups + 1, sizeof(*bounds));
+    if (!bounds) {
+      free(rows);
+      return;
+    }
+    size_t pending = native_len;
+    for (size_t j = groups; j-- > 0;) {
+      bounds[j] = pending;
+      if (inst_offsets[j] != SIZE_MAX)
+        pending = inst_offsets[j];
+    }
+  }
+
+  bool col = nyr_mixed_color_for(out);
+
+  mixed_c(out, col, MCLR_HDR);
+  fputs("=[mixed] ", out);
+  mixed_c(out, col, MCLR_NAME);
+  fprintf(out, "%s", name ? name : "<anon>");
+  mixed_c(out, col, MCLR_DIM);
+  fprintf(out, "  nyir=%zu mir=%zu nat=%zuB", nyir->len,
+          mach ? mach->inst_len : 0, native_len);
+  if (!mach && nyr_mach_mixed_note[0])
+    fprintf(out, "  fallback: %s", nyr_mach_mixed_note);
+  nyr_mach_mixed_note[0] = '\0';
+  mixed_c(out, col, MCLR_RESET);
+  fputc('\n', out);
+
+  size_t nat_i = 0;
+  /*
+   * Native instructions emitted before the first mapped group belong to the
+   * entry sequence (callee-saved pushes, frame setup) in the encoder.
+   */
+  if (mapped) {
+    size_t first_off = SIZE_MAX;
+    for (size_t j = 0; j < groups; ++j)
+      if (inst_offsets[j] != SIZE_MAX) {
+        first_off = inst_offsets[j];
+        break;
+      }
+    if (first_off != SIZE_MAX && first_off != 0) {
+      size_t shown = 0, total = 0;
+      while (nat_i < row_count && rows[nat_i].addr < first_off) {
+        total++;
+        if (shown < 2) {
+          const nyr_mixed_nat_t *r = &rows[nat_i++];
+          mixed_c(out, col, MCLR_DIM);
+          fprintf(out, col ? "        0x%04llx  %-17s " : "PRE 0x%04llx  %-17s ",
+                  (unsigned long long)r->addr, r->bytes);
+          mixed_body(out, col, r->text);
+          mixed_c(out, col, MCLR_RESET);
+          fputc('\n', out);
+          shown++;
+        } else
+          nat_i++;
+      }
+      if (total > shown)
+        fprintf(out, col ? "        ... %zu prelude bytes\n" : "PRE ... %zu prelude bytes\n",
+                total - shown);
+    }
+  }
+
+  size_t printed = 0;
+  /*
+   * Fixed column where MIR text begins, so rows line up vertically.
+   */
+  const size_t MIR_COL = col ? 34u : 38u;
+
+  /*
+   * Prints one NAT row in aligned sub-columns: address, bytes, mnemonic.
+   */
+  #define MIXED_NAT_ROW(r)                                                   \
+    do {                                                                     \
+      const nyr_mixed_nat_t *_r = (r);                                       \
+      fputs(col ? "        " : "      NAT ", out);                           \
+      mixed_c(out, col, MCLR_DIM);                                           \
+      fprintf(out, "0x%04llx  %-17s ", (unsigned long long)_r->addr,         \
+              _r->bytes);                                                    \
+      mixed_c(out, col, MCLR_RESET);                                         \
+      mixed_body(out, col, _r->text);                                        \
+      fputc('\n', out);                                                      \
+    } while (0)
+
+  if (mach) {
+    for (size_t b = 0; b < mach->block_len; ++b) {
+      const nyr_mach_block_t *blk = &mach->blocks[b];
+      if (mach->block_len > 1) {
+        mixed_c(out, col, MCLR_BB);
+        fprintf(out, "bb%u", blk->label);
+        mixed_c(out, col, MCLR_DIM);
+        if (blk->source_pc != UINT32_MAX && blk->source_pc < nyir->len) {
+          char lb[64];
+          if (nyr_fmt_inst(&nyir->data[blk->source_pc], lb, sizeof(lb))) {
+            const char *colon = strchr(lb, ':');
+            if (colon && colon[1] == '\0') {
+              fprintf(out, "  %.*s", (int)(colon - lb), lb);
+              size_t label_pc = blk->source_pc + 1;
+              if (printed < label_pc)
+                printed = label_pc;
+            }
+          }
+        }
+        mixed_c(out, col, MCLR_RESET);
+        fputc('\n', out);
+      }
+      for (uint32_t ii = 0; ii < blk->inst_count;) {
+        uint32_t idx = blk->first_inst + ii;
+        if (idx >= mach->inst_len)
+          break;
+        const nyr_mach_inst_t *inst = &mach->insts[idx];
+        char mbuf[288];
+        mach_mixed_inst_text(inst, mbuf, sizeof(mbuf));
+        uint32_t pc = inst->source_pc;
+        size_t vc = 2; /* leading "  " indent */
+        fputs("  ", out);
+        if (pc != UINT32_MAX && pc < nyir->len && pc >= printed)
+          (void)mach_mixed_nyir_header(nyir, printed, pc, out, col, &printed,
+                                       &vc);
+
+        /*
+         * Determine how many following MIR-only insts (no fresh NYIR source)
+         * share this line: collapse register-shuffling into one summary.
+         */
+        uint32_t run_end = idx;
+        while (run_end + 1 < blk->inst_count &&
+               mach->insts[run_end + 1].source_pc != UINT32_MAX &&
+               (mach->insts[run_end + 1].source_pc < printed ||
+                mach->insts[run_end + 1].source_pc >= nyir->len))
+          run_end++;
+
+        if (run_end > idx) {
+          /*
+           * One collapsed line: `MIR #idx-end  copy x 2 + br`.
+           */
+          mixed_pad_to(out, col, &vc, MIR_COL);
+          mixed_c(out, col, MCLR_MIR);
+          fprintf(out, col ? "#%zu-%zu " : "MIR #%zu-%zu ",
+                  (size_t)idx, (size_t)run_end);
+          mixed_c(out, col, MCLR_RESET);
+          char run_sum[96];
+          size_t off = 0;
+          for (uint32_t k = idx; k <= run_end && off + 1 < sizeof(run_sum); ++k) {
+            char nm[40];
+            snprintf(nm, sizeof(nm), "%s%s",
+                     nyr_mach_opcode_name(mach->insts[k].opcode),
+                     mach_cond_name(mach->insts[k].condition));
+            int z = snprintf(run_sum + off, sizeof(run_sum) - off,
+                             "%s%s", off ? " + " : "", nm);
+            if (z < 0 || (size_t)z >= sizeof(run_sum) - off)
+              break;
+            off += (size_t)z;
+          }
+          mixed_body(out, col, run_sum);
+          fputc('\n', out);
+          for (uint32_t k = idx; k <= run_end; ++k)
+            if (mapped && k < inst_offsets_len &&
+                inst_offsets[k] != SIZE_MAX && nat_i < row_count) {
+              size_t hi_b = bounds[k];
+              while (nat_i < row_count && rows[nat_i].addr < hi_b)
+                MIXED_NAT_ROW(&rows[nat_i++]);
+            }
+          ii = (uint32_t)(run_end - blk->first_inst) + 1;
+          continue;
+        }
+
+        /*
+         * Single MIR instruction line.
+         */
+        mixed_pad_to(out, col, &vc, MIR_COL);
+        mixed_c(out, col, MCLR_MIR);
+        fprintf(out, col ? "#%-3zu " : "MIR #%-3zu ", (size_t)idx);
+        vc += col ? 4u : 9u;
+        mixed_c(out, col, MCLR_RESET);
+        mixed_body(out, col, mbuf);
+        fputc('\n', out);
+        if (mapped && idx < inst_offsets_len &&
+            inst_offsets[idx] != SIZE_MAX && nat_i < row_count) {
+          size_t hi = bounds[idx];
+          while (nat_i < row_count && rows[nat_i].addr < hi)
+            MIXED_NAT_ROW(&rows[nat_i++]);
+        }
+        ii += 1;
+      }
+    }
+  } else if (groups) {
+
+    for (size_t i = 0; i < nyir->len && i < inst_offsets_len; ++i) {
+      if (nyir->data[i].op != NYIR_NOP) {
+        char full[256];
+        if (nyr_fmt_inst(&nyir->data[i], full, sizeof(full))) {
+          char plain[256];
+          mixed_strip_assign(full, plain, sizeof(plain));
+          size_t vc = 2;
+          fputs("  ", out);
+          mixed_c(out, col, MCLR_NYIR);
+          fprintf(out, "NYIR %-8zu", i);
+          vc += 10;
+          fprintf(out, " ");
+          vc += 1;
+          fprintf(out, "%-16.16s", plain);
+          vc += 16;
+          mixed_c(out, col, MCLR_RESET);
+          mixed_pad_to(out, col, &vc, MIR_COL);
+          /*
+           * plain path prints full text inline (identity groups)
+           */
+          fputs(plain, out);
+          fputc('\n', out);
+        }
+      }
+      if (inst_offsets[i] != SIZE_MAX && nat_i < row_count && bounds) {
+        while (nat_i < row_count && rows[nat_i].addr < bounds[i])
+          MIXED_NAT_ROW(&rows[nat_i++]);
+      }
+    }
+    free(bounds);
+    bounds = NULL;
+  }
+
+  /*
+   * Source instructions the machine form never materialized (phis, virtual
+   * branches).
+   */
+  if (printed < nyir->len) {
+    char summary[160];
+    bool only_labels_tail = false;
+    if (mach_mixed_summary(nyir, printed, nyir->len - 1, summary,
+                           sizeof(summary), &only_labels_tail) > 0) {
+      fputs("  ", out);
+      mixed_c(out, col, MCLR_DIM);
+      if (printed == nyir->len - 1)
+        fprintf(out, "NYIR #%zu", printed);
+      else
+        fprintf(out, "NYIR #%zu-%zu", printed, nyir->len - 1);
+      mixed_c(out, col, MCLR_RESET);
+      if (summary[0]) {
+        fputs("  ", out);
+        fputs(summary, out);
+      }
+      fprintf(out, "  (virtual)");
+      mixed_c(out, col, MCLR_RESET);
+      fputc('\n', out);
+    }
+  }
+  free(bounds);
+
+  if (nat_i < row_count) {
+    mixed_c(out, col, MCLR_DIM);
+    fputs("- unassigned native -\n", out);
+    mixed_c(out, col, MCLR_RESET);
+    while (nat_i < row_count)
+      MIXED_NAT_ROW(&rows[nat_i++]);
+  }
+
+  if (stop < native_len) {
+    mixed_c(out, col, MCLR_BAD);
+    fprintf(out, "! decode stopped at 0x%04llx - %zu of %zu bytes undecoded\n",
+            stop, (size_t)(native_len - stop), native_len);
+    mixed_c(out, col, MCLR_RESET);
+  }
+  free(rows);
+}
+
 bool nyr_mach_verify(const nyr_mach_func_t *func, unsigned caps, char *err,
                      size_t err_len) {
   (void)caps;
@@ -1851,7 +2933,7 @@ bool nyr_mach_verify(const nyr_mach_func_t *func, unsigned caps, char *err,
     const char *bad_field = NULL;
     const char *bad_operand_name = NULL;
     const nyr_mach_operand_t *bad_operand = NULL;
-    if (inst->opcode > NYR_MACH_VA_ARG)
+    if (inst->opcode > NYR_MACH_VSHR)
       bad_field = "opcode";
     else if (inst->condition > NYR_MACH_COND_GE)
       bad_field = "condition";
@@ -2195,16 +3277,37 @@ static bool mach_copy_metadata(const nyr_mach_func_t *src,
   return true;
 }
 
+/*
+ * The PHI group at the head of a block. Passes may leave NOPs between PHIs
+ * (DCE removing a dead PHI in place), so the group extends over NOPs up to
+ * the first other instruction. With `out`, also records the PHI positions.
+ */
+static size_t mach_block_phis(const nyr_func_t *nyir, const nyr_cfg_t *cfg,
+                              size_t block, size_t *out) {
+  size_t at = cfg->block_start[block];
+  if (at < cfg->block_end[block] && nyir->data[at].op == NYIR_LABEL)
+    ++at;
+  size_t count = 0;
+  for (; at < cfg->block_end[block]; ++at) {
+    nyr_op_t op = nyir->data[at].op;
+    if (op == NYIR_NOP)
+      continue;
+    if (op != NYIR_PHI)
+      break;
+    if (out)
+      out[count] = at;
+    ++count;
+  }
+  return count;
+}
+
 static bool mach_lower_phi_edges(const nyr_func_t *nyir, const nyr_cfg_t *cfg,
                                  const nyr_mach_reg_t *values,
                                  nyr_mach_func_t *base, char *err,
                                  size_t err_len) {
   size_t edge_count = 0;
   for (size_t succ = 0; succ < cfg->block_count; ++succ) {
-    size_t at = cfg->block_start[succ];
-    if (at < cfg->block_end[succ] && nyir->data[at].op == NYIR_LABEL)
-      ++at;
-    if (at >= cfg->block_end[succ] || nyir->data[at].op != NYIR_PHI)
+    if (!mach_block_phis(nyir, cfg, succ, NULL))
       continue;
     edge_count += cfg->pred_offsets[succ + 1] - cfg->pred_offsets[succ];
   }
@@ -2215,14 +3318,13 @@ static bool mach_lower_phi_edges(const nyr_func_t *nyir, const nyr_cfg_t *cfg,
     return nyr_err(err, err_len, "machine lower: out of memory for PHI edges");
 
   size_t ei = 0;
+  size_t *phi_at = ny_malloc_array(nyir->len ? nyir->len : 1, sizeof(*phi_at));
+  if (!phi_at) {
+    mach_phi_edges_free(edges, edge_count);
+    return nyr_err(err, err_len, "machine lower: out of memory for PHI edges");
+  }
   for (size_t succ = 0; succ < cfg->block_count; ++succ) {
-    size_t first = cfg->block_start[succ];
-    if (first < cfg->block_end[succ] && nyir->data[first].op == NYIR_LABEL)
-      ++first;
-    size_t phi_count = 0;
-    while (first + phi_count < cfg->block_end[succ] &&
-           nyir->data[first + phi_count].op == NYIR_PHI)
-      ++phi_count;
+    size_t phi_count = mach_block_phis(nyir, cfg, succ, phi_at);
     if (!phi_count)
       continue;
     for (size_t pi = cfg->pred_offsets[succ]; pi < cfg->pred_offsets[succ + 1];
@@ -2238,13 +3340,14 @@ static bool mach_lower_phi_edges(const nyr_func_t *nyir, const nyr_cfg_t *cfg,
       edge->dst = ny_malloc_array(phi_count, sizeof(*edge->dst));
       edge->src = ny_malloc_array(phi_count, sizeof(*edge->src));
       if (!edge->dst || !edge->src) {
+        free(phi_at);
         mach_phi_edges_free(edges, edge_count);
         return nyr_err(err, err_len,
                        "machine lower: out of memory for PHI copies");
       }
       int64_t pred_label = cfg->block_label[pred];
       for (size_t k = 0; k < phi_count; ++k) {
-        const nyr_inst_t *phi = &nyir->data[first + k];
+        const nyr_inst_t *phi = &nyir->data[phi_at[k]];
         int incoming = -1;
         for (size_t n = 0; n < phi->phi_incoming_len; ++n) {
           if (phi->phi_incoming[n].predecessor_label == pred_label) {
@@ -2253,6 +3356,7 @@ static bool mach_lower_phi_edges(const nyr_func_t *nyir, const nyr_cfg_t *cfg,
           }
         }
         if (incoming < 0 || phi->dst < 0) {
+          free(phi_at);
           mach_phi_edges_free(edges, edge_count);
           return nyr_err(err, err_len,
                          "machine lower: PHI incoming edge is missing");
@@ -2263,6 +3367,7 @@ static bool mach_lower_phi_edges(const nyr_func_t *nyir, const nyr_cfg_t *cfg,
       ++ei;
     }
   }
+  free(phi_at);
   uint32_t next_edge_block = (uint32_t)base->block_len;
   for (size_t e = 0; e < edge_count; ++e)
     if (!edges[e].inline_pred)
@@ -2619,6 +3724,7 @@ bool nyr_mach_opcode_supported(nyr_op_t op) {
   case NYIR_VEC4_LOAD_I64:
   case NYIR_VEC4_SET1_I64:
   case NYIR_VEC8_SAR_I64:
+  case NYIR_VEC8_SHR_I64:
   case NYIR_VEC8_SET1_I64:
   case NYIR_VEC4_STORE_I64:
   case NYIR_VEC4_ADD_I64:
@@ -3634,12 +4740,13 @@ bool nyr_mach_lower_nir(const nyr_func_t *nyir, nyr_mach_func_t *out,
           goto done;
         }
       }
-    } else if (in->op == NYIR_VEC8_SAR_I64) {
+    } else if (in->op == NYIR_VEC8_SAR_I64 || in->op == NYIR_VEC8_SHR_I64) {
       if (!(caps & NY_NATIVE_CAP_MACH_AVX2)) {
-        nyr_err(err, err_len, "machine lower: vec8.sar.i64 requires AVX2");
+        nyr_err(err, err_len, "machine lower: vec8 shift requires AVX2");
         goto done;
       }
-      inst.opcode = NYR_MACH_SAR;
+      inst.opcode =
+          in->op == NYIR_VEC8_SHR_I64 ? NYR_MACH_VSHR : NYR_MACH_SAR;
       inst.dst = mach_vreg(&lowered, values[in->dst]);
       inst.src0 = mach_vreg(&lowered, values[in->a]);
       inst.src1 = (nyr_mach_operand_t){.kind = NYR_MACH_OPERAND_IMM, .as.imm = in->imm};
@@ -4243,6 +5350,7 @@ static bool mach_schedule_segment(nyr_mach_inst_t *insts, size_t count) {
    */
   for (size_t i = 0; i < count; ++i) {
     src0_user[i] = SIZE_MAX;
+    size_t user = SIZE_MAX, uses = 0;
     for (size_t j = i + 1; j < count; ++j) {
       bool dependency = false;
       if (mach_is_value(&insts[i].dst)) {
@@ -4255,20 +5363,16 @@ static bool mach_schedule_segment(nyr_mach_inst_t *insts, size_t count) {
         edges[i * count + j] = 1;
         ++indegree[j];
       }
+      if (uses < 2 && mach_is_value(&insts[i].dst)) {
+        size_t found = mach_schedule_operand_uses(&insts[j], &insts[i].dst);
+        if (found) {
+          uses += found;
+          user = j;
+        }
+      }
     }
     if (!mach_is_value(&insts[i].dst))
       continue;
-    size_t user = SIZE_MAX;
-    size_t uses = 0;
-    for (size_t j = i + 1; j < count; ++j) {
-      size_t user_uses = mach_schedule_operand_uses(&insts[j], &insts[i].dst);
-      if (user_uses) {
-        uses += user_uses;
-        user = j;
-        if (uses > 1)
-          break;
-      }
-    }
     if (uses == 1 && user != SIZE_MAX &&
         mach_schedule_value_equal(&insts[user].src0, &insts[i].dst))
       src0_user[i] = user;
@@ -4436,6 +5540,7 @@ static bool mach_outline_inst_ok(const nyr_mach_func_t *func,
   case NYR_MACH_SAR:
   case NYR_MACH_ROR:
   case NYR_MACH_ROR32:
+  case NYR_MACH_VSHR:
   case NYR_MACH_BSWAP64:
   case NYR_MACH_BSWAP32:
   case NYR_MACH_FMA:

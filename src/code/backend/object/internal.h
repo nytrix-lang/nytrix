@@ -285,7 +285,8 @@ bool nyr_x64_obj_append_function_debug(
     const ny_native_target_info_t *target, const char *symbol, bool tag_return,
     bool bare_syscalls, const nyr_func_t *source,
     nyr_native_debug_line_t **debug_lines, size_t *debug_line_count,
-    size_t *debug_line_cap, char *err, size_t err_len);
+    size_t *debug_line_cap, char *err, size_t err_len,
+    size_t **inst_offsets_out, size_t *inst_offsets_count);
 bool nyr_x64_obj_build_bundle(const nyr_func_t *rt_main,
                               const nyr_func_t *funcs,
                               const char *const *func_names, size_t func_count,
@@ -328,7 +329,7 @@ bool nyr_x64_mach_append_function_debug(
     const char *symbol, bool tag_return, bool bare_syscalls,
     const nyr_func_t *source, nyr_native_debug_line_t **debug_lines,
     size_t *debug_line_count, size_t *debug_line_cap, char *err,
-    size_t err_len);
+    size_t err_len, size_t **inst_offsets_out, size_t *inst_offsets_count);
 bool nyr_x64_try_stencil_bundle(const nyr_func_t *rt_main,
                                 const ny_native_target_info_t *target,
                                 nyr_obj_buf_t *code,
