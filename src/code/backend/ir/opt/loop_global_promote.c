@@ -28,6 +28,7 @@ enum { LGP_MAX_ROUNDS = 8, LGP_MAX_SLOTS = 16, LGP_MAX_EXITS = 8 };
 
 typedef struct {
   const char *symbol;
+  int64_t offset;   /* byte offset from symbol base; 0 for a plain symbol cell */
   int local;
   /*
    * Original instructions whose metadata (scalar class, memory flags, alias
@@ -62,14 +63,164 @@ typedef struct {
   nyr_inst_t inst;
 } lgp_insert_t;
 
-static const char *lgp_symbol_of(const nyr_func_t *f, const int *defs,
-                                 int value) {
+static bool lgp_is_const_i64(const nyr_func_t *f, const int *defs, int value) {
+  if (value < 0 || value >= f->next_value || defs[value] < 0)
+    return false;
+  return f->data[defs[value]].op == NYIR_CONST_I64;
+}
+
+static bool lgp_streq(const char *a, const char *b) {
+  if (!a || !b)
+    return false;
+  return strcmp(a, b) == 0;
+}
+
+/*
+ * A pointer-value location: a NYIR value that holds a pointer into a symbol
+ * cell (e.g. a buffer base loaded with `ld.i64 sym`), optionally plus a
+ * constant byte offset.  Used to resolve element accesses such as
+ * `ld.i64 base_ptr` or `add.i64 base_ptr, 24` back to (symbol, offset).
+ */
+typedef struct {
+  int value;
+  const char *symbol;
+  int64_t offset;
+} lgp_ptr_entry_t;
+
+typedef struct {
+  lgp_ptr_entry_t *entries;
+  size_t len;
+  size_t cap;
+} lgp_ptr_map_t;
+
+static int lgp_map_find(const lgp_ptr_map_t *map, int value) {
+  for (size_t i = 0; i < map->len; ++i)
+    if (map->entries[i].value == value)
+      return (int)i;
+  return -1;
+}
+
+/*
+ * Resolve the symbol cell a value points into, depth bounded to keep compile
+ * time linear.  Tracks:
+ *   ADDR_SYMBOL sym             -> (sym, 0)
+ *   ld.i64 ADDR_SYMBOL sym      -> (sym, 0)   (a buffer base pointer)
+ *   add.i64 <ptr>, C            -> (sym, off + C)
+ *
+ * Values loaded through a non-symbol pointer are treated as data, not
+ * pointers, and are not tracked.
+ */
+static bool lgp_value_loc(const nyr_func_t *f, const int *defs,
+                          lgp_ptr_map_t *map, int value, unsigned depth,
+                          const char **out_sym, int64_t *out_off) {
+  if (depth > 8 || value < 0 || value >= f->next_value || defs[value] < 0)
+    return false;
+  int found = lgp_map_find(map, value);
+  if (found >= 0) {
+    *out_sym = map->entries[found].symbol;
+    *out_off = map->entries[found].offset;
+    return true;
+  }
+  const nyr_inst_t *def = &f->data[defs[value]];
+  const char *sym = NULL;
+  int64_t off = 0;
+  bool ok = false;
+  if (def->op == NYIR_ADDR_SYMBOL) {
+    sym = def->symbol;
+    off = 0;
+    ok = sym && *sym;
+  } else if (def->op == NYIR_ADD_I64) {
+    const char *bs = NULL;
+    int64_t bo = 0;
+    if (lgp_value_loc(f, defs, map, def->a, depth + 1, &bs, &bo) &&
+        lgp_is_const_i64(f, defs, def->b)) {
+      sym = bs;
+      off = bo + f->data[defs[def->b]].imm;
+      ok = true;
+    } else if (lgp_value_loc(f, defs, map, def->b, depth + 1, &bs, &bo) &&
+               lgp_is_const_i64(f, defs, def->a)) {
+      sym = bs;
+      off = bo + f->data[defs[def->a]].imm;
+      ok = true;
+    }
+  } else if (def->op == NYIR_LOAD_I64) {
+    /*
+     * ld.i64 <pointer>: the loaded value is a pointer into the same cell the
+     * pointer addresses (e.g. a buffer base reloaded from a symbol cell).
+     */
+    const char *bs = NULL;
+    int64_t bo = 0;
+    if (lgp_value_loc(f, defs, map, def->a, depth + 1, &bs, &bo)) {
+      sym = bs;
+      off = bo;
+      ok = true;
+    }
+  }
+  if (!ok)
+    return false;
+  if (map->len == map->cap) {
+    size_t ncap = map->cap ? map->cap * 2 : 16;
+    lgp_ptr_entry_t *ne = realloc(map->entries, ncap * sizeof(*ne));
+    if (!ne)
+      return false;
+    map->entries = ne;
+    map->cap = ncap;
+  }
+  map->entries[map->len++] = (lgp_ptr_entry_t){value, sym, off};
+  *out_sym = sym;
+  *out_off = off;
+  return true;
+}
+
+/*
+ * Resolve the memory location of an address operand (symbol cell + byte
+ * offset).  Returns false when the address is not a promotable constant cell.
+ */
+static bool lgp_location_of(const nyr_func_t *f, const int *defs,
+                            lgp_ptr_map_t *map, int value,
+                            const char **out_sym, int64_t *out_off) {
+  return lgp_value_loc(f, defs, map, value, 0, out_sym, out_off);
+}
+
+/*
+ * When an address operand is base + variable_offset (e.g. buffer[index]),
+ * return the symbol base so it can be tainted; NULL otherwise.  A
+ * base + constant offset is a location, not a taint.
+ */
+static const char *lgp_taints_symbol(const nyr_func_t *f, const int *defs,
+                                     lgp_ptr_map_t *map, int value) {
   if (value < 0 || value >= f->next_value || defs[value] < 0)
     return NULL;
-  const nyr_inst_t *def = &f->data[defs[value]];
-  return def->op == NYIR_ADDR_SYMBOL && def->symbol && *def->symbol
-             ? def->symbol
-             : NULL;
+  const nyr_inst_t *ad = &f->data[defs[value]];
+  if (ad->op != NYIR_ADD_I64)
+    return NULL;
+  const char *bs = NULL;
+  int64_t bo = 0;
+  if (lgp_value_loc(f, defs, map, ad->a, 1, &bs, &bo) &&
+      !lgp_is_const_i64(f, defs, ad->b))
+    return bs;
+  if (lgp_value_loc(f, defs, map, ad->b, 1, &bs, &bo) &&
+      !lgp_is_const_i64(f, defs, ad->a))
+    return bs;
+  return NULL;
+}
+
+/*
+ * Clone an address template (ADDR_SYMBOL or ADD_I64) giving it a fresh
+ * destination value; keeps its source operands intact.
+ */
+static nyr_inst_t lgp_clone_addr(const nyr_inst_t *tmpl, nyr_op_t op,
+                                 int dst) {
+  nyr_inst_t in = *tmpl;
+  in.op = op;
+  in.dst = dst;
+  in.c = in.d = in.e = in.f = -1;
+  in.extra_args = NULL;
+  in.extra_args_len = 0;
+  in.arg_sizes = NULL;
+  in.phi_incoming = NULL;
+  in.phi_incoming_len = 0;
+  return in;
 }
 
 static bool lgp_plain_width(const nyr_inst_t *in) {
@@ -131,6 +282,18 @@ static int lgp_try_loop(nyr_func_t *f, const nyr_cfg_t *cfg, const int *defs,
   size_t nb = cfg->block_count;
   lgp_slot_t slots[LGP_MAX_SLOTS];
   size_t slot_len = 0;
+  /*
+   * Pointer->symbol-cell map, rebuilt per loop so value-based location
+   * resolution stays local and compile time linear.
+   */
+  lgp_ptr_map_t ptr_map = {0};
+  /*
+   * Symbols touched through a variable (non-constant) offset taint their
+   * base: cells of that symbol may be aliased and are not promoted.
+   */
+  const char *tainted[16];
+  size_t tainted_len = 0;
+  size_t live = 0;
   for (size_t b = 0; b < nb; ++b) {
     if (!member[b])
       continue;
@@ -139,19 +302,41 @@ static int lgp_try_loop(nyr_func_t *f, const nyr_cfg_t *cfg, const int *defs,
       if (in->op == NYIR_NOP)
         continue;
       if (in->op == NYIR_CALL || (nyr_inst_effects(in) & lgp_barrier_effects))
-        return 0;
+        goto bail;
+      int64_t offset = 0;
+      const char *sym = NULL;
+      bool is_loc = false;
       if (in->op == NYIR_LOAD_I64 || in->op == NYIR_STORE_I64) {
-        const char *sym = lgp_symbol_of(f, defs, in->a);
-        if (!sym || !lgp_plain_width(in))
-          return 0;
+        is_loc = lgp_location_of(f, defs, &ptr_map, in->a, &sym, &offset);
+        if (!is_loc) {
+          const char *tsym = lgp_taints_symbol(f, defs, &ptr_map, in->a);
+          if (tsym) {
+            bool seen = false;
+            for (size_t t = 0; t < tainted_len; ++t)
+              if (lgp_streq(tainted[t], tsym)) {
+                seen = true;
+                break;
+              }
+            if (!seen && tainted_len < sizeof(tainted) / sizeof(tainted[0]))
+              tainted[tainted_len++] = tsym;
+          } else if (nyr_inst_effects(in) &
+                     (NYIR_EFFECT_READ_MEMORY | NYIR_EFFECT_WRITE_MEMORY)) {
+            goto bail;
+          }
+          continue;
+        }
+        if (!lgp_plain_width(in))
+          goto bail;
         size_t k = 0;
-        while (k < slot_len && strcmp(slots[k].symbol, sym) != 0)
+        while (k < slot_len &&
+               (!lgp_streq(slots[k].symbol, sym) || slots[k].offset != offset))
           ++k;
         if (k == slot_len) {
           if (slot_len == LGP_MAX_SLOTS)
-            return 0;
+            goto bail;
           slots[slot_len++] = (lgp_slot_t){
-              .symbol = sym, .local = -1, .addr_tmpl = f->data[defs[in->a]]};
+              .symbol = sym, .offset = offset, .local = -1,
+              .addr_tmpl = f->data[defs[in->a]]};
         }
         if (in->op == NYIR_LOAD_I64 && !slots[k].has_load) {
           slots[k].load_tmpl = *in;
@@ -161,12 +346,30 @@ static int lgp_try_loop(nyr_func_t *f, const nyr_cfg_t *cfg, const int *defs,
           slots[k].has_store = true;
         }
         continue;
+      } else if (nyr_inst_effects(in) &
+                 (NYIR_EFFECT_READ_MEMORY | NYIR_EFFECT_WRITE_MEMORY)) {
+        goto bail;
       }
-      if (nyr_inst_effects(in) &
-          (NYIR_EFFECT_READ_MEMORY | NYIR_EFFECT_WRITE_MEMORY))
-        return 0;
     }
   }
+
+bail:
+  free(ptr_map.entries);
+  /*
+   * Drop every slot whose symbol was tainted by a variable-offset access.
+   */
+  live = 0;
+  for (size_t k = 0; k < slot_len; ++k) {
+    bool bad = false;
+    for (size_t t = 0; t < tainted_len; ++t)
+      if (lgp_streq(slots[k].symbol, tainted[t])) {
+        bad = true;
+        break;
+      }
+    if (!bad)
+      slots[live++] = slots[k];
+  }
+  slot_len = live;
   if (!slot_len)
     return 0;
   for (size_t k = 0; k < slot_len; ++k) {
@@ -247,10 +450,16 @@ static int lgp_try_loop(nyr_func_t *f, const nyr_cfg_t *cfg, const int *defs,
       nyr_inst_t *in = &f->data[i];
       if (in->op != NYIR_LOAD_I64 && in->op != NYIR_STORE_I64)
         continue;
-      const char *sym = lgp_symbol_of(f, defs, in->a);
+      int64_t offset = 0;
+      const char *sym = NULL;
+      if (!lgp_location_of(f, defs, &ptr_map, in->a, &sym, &offset) || !sym)
+        continue; /* tainted/variable cell: left in memory */
       size_t k = 0;
-      while (k < slot_len && strcmp(slots[k].symbol, sym) != 0)
+      while (k < slot_len &&
+             (!lgp_streq(slots[k].symbol, sym) || slots[k].offset != offset))
         ++k;
+      if (k == slot_len)
+        continue; /* not a collected promotable cell */
       if (in->op == NYIR_LOAD_I64) {
         in->op = NYIR_LOAD_LOCAL;
         in->a = -1;
@@ -277,9 +486,9 @@ static int lgp_try_loop(nyr_func_t *f, const nyr_cfg_t *cfg, const int *defs,
   for (size_t k = 0; k < slot_len; ++k) {
     const lgp_slot_t *sl = &slots[k];
     int addr = f->next_value++, value = f->next_value++;
-    nyr_inst_t a = lgp_clone(&sl->addr_tmpl, NYIR_ADDR_SYMBOL, addr, -1, -1,
-                             sl->addr_tmpl.imm);
-    a.symbol = sl->symbol;
+    nyr_inst_t a = lgp_clone_addr(&sl->addr_tmpl, sl->addr_tmpl.op, addr);
+    if (sl->addr_tmpl.op == NYIR_ADDR_SYMBOL)
+      a.symbol = sl->symbol;
     ins[n++] = (lgp_insert_t){seed_at, a};
     ins[n++] =
         (lgp_insert_t){seed_at, lgp_clone(&sl->load_tmpl, NYIR_LOAD_I64, value,
@@ -295,9 +504,9 @@ static int lgp_try_loop(nyr_func_t *f, const nyr_cfg_t *cfg, const int *defs,
       int addr = f->next_value++, value = f->next_value++;
       ins[n++] = (lgp_insert_t){at, lgp_clone(&sl->load_tmpl, NYIR_LOAD_LOCAL,
                                               value, -1, -1, sl->local)};
-      nyr_inst_t a = lgp_clone(&sl->addr_tmpl, NYIR_ADDR_SYMBOL, addr, -1, -1,
-                               sl->addr_tmpl.imm);
-      a.symbol = sl->symbol;
+      nyr_inst_t a = lgp_clone_addr(&sl->addr_tmpl, sl->addr_tmpl.op, addr);
+      if (sl->addr_tmpl.op == NYIR_ADDR_SYMBOL)
+        a.symbol = sl->symbol;
       ins[n++] = (lgp_insert_t){at, a};
       ins[n++] =
           (lgp_insert_t){at, lgp_clone(&sl->store_tmpl, NYIR_STORE_I64, -1,
