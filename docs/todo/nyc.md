@@ -436,3 +436,29 @@ backend gaps and C frontend/type/lowering gaps.
 
 All NYC/docs changes uncommitted; unrelated uncommitted edits in `/home/e/nytrix`
 preserved; kernel sources unmodified; `/tmp` ephemeral; nothing pushed.
+
+## Continuation 6 — 2026-11-09 (more NYC frontend fixes, rebuild, broad retry started)
+
+NYC rebuilt from `/home/e/nytrix` (uncommitted `parse.c` changes preserved).
+Additional fixes:
+- **File-scope comma-separated scalar declarator lists (mixed init):** extended
+  `try_collect_initialized_scalar_global_list` probe/handling to accept lists
+  where the first declarator may lack `=` (e.g. `static u32 a, b = CONST;`,
+  fixed `drivers/char/hpet.c:66`). Also guarded `try_collect_scalar_global` so
+  it does not incorrectly match non-extern comma lists it cannot parse.
+- **Function-pointer initializers with `&func`:** accept leading `&` before the
+  function symbol in file-scope function-pointer initializer parsing (fixed
+  `drivers/char/agp/backend.c` `= &agp_generic_find_bridge`).
+- **Known-function arg leniency (kernel compat):** pointer↔pointer/integer
+  mismatches accepted in `NYC_KERNEL_COMPAT` (rebuilt; recheck showed
+  `drivers/virtio/virtio_pci_common.o` compiles).
+
+Verified NYC-only compiles (wrapper+GNU as): minimal `static unsigned int a, b = 64;`,
+`drivers/char/hpet.o`, `drivers/char/agp/backend.o`,
+`drivers/virtio/virtio_pci_common.o` (warnings/NYIR opt noise remain).
+
+Next: `make -j10 -k` broad retry in `/tmp/nyc-linux73-acceptance-final` to
+harvest newly-unblocked TUs; triage remaining blockers (NYIR x86-64 inline asm
+templates/operands/labels, quirks.c local aggregate `{} ` init lowering,
+amd_iommu int128/aggregate typing, i915 parse/type/designator/ABI issues,
+other parse errors). No `vmlinux`/`bzImage`/modules yet; acceptance not satisfied.

@@ -15120,11 +15120,42 @@ static bool try_collect_function_pointer_global(c_parser_t *p, bool *matched) {
         while (tok_is(p, target_pos + parentheses, "("))
           ++parentheses;
         size_t function_pos = target_pos + parentheses;
+        if (tok_is(p, function_pos, "&"))
+          ++function_pos;
         ny_ctok_t target = p->tokens[function_pos];
         bool balanced = true;
         for (size_t i = 0; i < parentheses; ++i)
           balanced &= tok_is(p, function_pos + 1 + i, ")");
-        if (is_external || !tok_ident(target) || !balanced) {
+        bool has_cast = false;
+        if (!tok_ident(target) || !balanced) {
+          /* Try to accept casts like (type)&func or (type)func in kernel compat */
+          if (getenv("NYC_KERNEL_COMPAT") && parentheses > 0) {
+            has_cast = true; /* best-effort: scan for ident after & inside/after parens */
+          }
+        }
+        if (is_external || (!tok_ident(target) && !has_cast) || (!balanced && !has_cast)) {
+          free(bytes);
+          fail(p, "function-pointer initializer requires a function symbol");
+          return false;
+        }
+        if (has_cast && !tok_ident(target)) {
+          /* scan forward for a plausible function symbol */
+          for (size_t s = target_pos; s < p->token_count && s < target_pos + 32; ++s) {
+            if (tok_ident(p->tokens[s]) && (tok_is(p, s + 1, ";") || tok_is(p, s + 1, ")"))) {
+              target = p->tokens[s];
+              function_pos = s;
+              balanced = true;
+              break;
+            }
+            if (tok_is(p, s, "&") && tok_ident(p->tokens[s + 1])) {
+              target = p->tokens[s + 1];
+              function_pos = s + 1;
+              balanced = true;
+              break;
+            }
+          }
+        }
+        if (!tok_ident(target)) {
           free(bytes);
           fail(p, "function-pointer initializer requires a function symbol");
           return false;
@@ -15329,6 +15360,8 @@ static bool try_collect_function_pointer_global(c_parser_t *p, bool *matched) {
       while (tok_is(p, target_pos + parentheses, "("))
         ++parentheses;
       size_t function_pos = target_pos + parentheses;
+      if (tok_is(p, function_pos, "&"))
+        ++function_pos;
       ny_ctok_t target = p->tokens[function_pos];
       bool balanced_parentheses = true;
       for (size_t i = 0; i < parentheses; ++i)
@@ -15807,6 +15840,13 @@ static bool try_collect_scalar_global(c_parser_t *p, bool *matched) {
     return true;
   if (!tok_is(&probe, probe.pos, ";") && !tok_is(&probe, probe.pos, "=") &&
       !tok_is(&probe, probe.pos, ","))
+    return true;
+  /*
+   * Non-extern comma-separated declarator lists are handled by the dedicated
+   * scalar list collectors; this path only supports single declarators (and
+   * extern comma lists handled later).
+   */
+  if (tok_is(&probe, probe.pos, ",") && !is_external)
     return true;
   *matched = true;
   if (type != C_I32 && type != C_U32 && type != C_U8 && type != C_CHAR &&
