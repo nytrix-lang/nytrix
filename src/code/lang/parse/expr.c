@@ -1703,26 +1703,46 @@ static expr_t *parse_primary(parser_t *p) {
   }
 }
 
+/*
+ * Decide whether `?` begins a ternary or is the postfix operator. A ternary
+ * may continue on the next line only when that line starts with `:`, or when
+ * nothing followed the `?` yet. Scanning further would claim an unrelated
+ * colon from a later statement.
+ */
+static bool expr_ternary_has_colon(parser_t *p) {
+  const char *s = p->lex.src + p->lex.pos;
+  int depth = 0;
+  bool seen_token = false;
+  while (*s && *s != ';') {
+    if (*s == '(' || *s == '[' || *s == '{') {
+      depth++;
+    } else if (*s == ')' || *s == ']' || *s == '}') {
+      if (--depth < 0)
+        return false;
+    } else if (*s == ':' && depth == 0) {
+      return true;
+    } else if (*s == '\n' && depth == 0) {
+      const char *line = s + 1;
+      while (*line == ' ' || *line == '\t' || *line == '\r')
+        line++;
+      if (*line == ':')
+        return true;
+      if (seen_token)
+        return false;
+    }
+    if (*s != ' ' && *s != '\t' && *s != '\r' && *s != '\n')
+      seen_token = true;
+    s++;
+  }
+  return false;
+}
+
 static expr_t *parse_postfix(parser_t *p) {
   expr_t *expr = parse_primary(p);
   for (;;) {
     if (p->cur.kind == NY_T_QUESTION) {
       token_t tok = p->cur;
-      const char *s = p->lex.src + p->lex.pos;
-      int depth = 0;
-      bool found_colon = false;
-      while (*s && *s != '\n' && *s != ';') {
-        if (*s == '(' || *s == '[' || *s == '{')
-          depth++;
-        else if (*s == ')' || *s == ']' || *s == '}')
-          depth--;
-        else if (*s == ':' && depth == 0) {
-          found_colon = true;
-          break;
-        }
-        s++;
-      }
-      if (found_colon) {
+      if (expr_ternary_has_colon(p)) {
         break;
       } else {
         parser_advance(p);
@@ -2041,7 +2061,13 @@ static expr_t *parse_expr_impl(parser_t *p, int prec) {
 
   expr_t *left = parse_unary(p);
   while (true) {
-    if (p->stop_expr_at_newline && p->skipped_newline)
+    /* A leading minus on the next statement is unary, not a continuation of
+     * the expression we just parsed.  Only apply this at the outer statement
+     * expression level: recursive expressions preserve newlines inside
+     * grouped forms and after an operator. */
+    if (p->skipped_newline &&
+        (p->stop_expr_at_newline ||
+         (p->expr_depth == p->stmt_expr_depth && p->cur.kind == NY_T_MINUS)))
       break;
     if (p->proof_type_depth > 0 && p->cur.kind == NY_T_GT) {
       /*
@@ -2164,21 +2190,7 @@ static expr_t *parse_expr_impl(parser_t *p, int prec) {
   }
   if (prec == 0 && p->cur.kind == NY_T_QUESTION) {
     token_t tok = p->cur;
-    const char *s = p->lex.src + p->lex.pos;
-    int depth = 0;
-    bool found_colon = false;
-    while (*s && *s != '\n' && *s != ';') {
-      if (*s == '(' || *s == '[' || *s == '{')
-        depth++;
-      else if (*s == ')' || *s == ']' || *s == '}')
-        depth--;
-      else if (*s == ':' && depth == 0) {
-        found_colon = true;
-        break;
-      }
-      s++;
-    }
-    if (found_colon) {
+    if (expr_ternary_has_colon(p)) {
       parser_advance(p);
       expr_t *true_expr = p_parse_expr(p, 0);
       parser_expect(p, NY_T_COLON, ":", "ternary operator requires ':'");

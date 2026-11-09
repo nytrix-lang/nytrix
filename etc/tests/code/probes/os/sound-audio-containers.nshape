@@ -1,0 +1,213 @@
+;; Keywords: sound wav aiff au decoder writer os
+shape sound_audio_container_decoding {
+  family "runtime/system/sound"
+  generator "embedded"
+  features ["sound", "audio", "decoder", "writer"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os as os
+use core.os.sound as sound
+use core.os.sound.source
+use core.os.sound.wav as wav
+use core.os.sound.aiff as aiff
+use core.os.sound.au as au
+
+fn s(bytes p, int at, str text) bytes {
+   mut i = 0
+   while i < text.len { store8(p, load8(text, i), at + i) i += 1 }
+   p
+}
+fn be16(bytes p, int at, int v) bytes {
+   store8(p, (v >> 8) & 255, at)
+   store8(p, v & 255, at + 1)
+   p
+}
+fn be32(bytes p, int at, int v) bytes {
+   store8(p, (v >> 24) & 255, at)
+   store8(p, (v >> 16) & 255, at + 1)
+   store8(p, (v >> 8) & 255, at + 2)
+   store8(p, v & 255, at + 3)
+   p
+}
+fn le16(bytes p, int at, int v) bytes {
+   store16(p, v, at)
+   p
+}
+fn le32(bytes p, int at, int v) bytes {
+   store32(p, v, at)
+   p
+}
+fn le64(bytes p, int at, int v) bytes {
+   store64(p, v, at)
+   p
+}
+
+;; RIFX stores PCM sample words and chunk lengths in big endian.
+def rifx = bytes(48)
+s(rifx, 0, "RIFX")
+be32(rifx, 4, 40)
+s(rifx, 8, "WAVEfmt ")
+be32(rifx, 16, 16)
+be16(rifx, 20, 1)
+be16(rifx, 22, 1)
+be32(rifx, 24, 8000)
+be32(rifx, 28, 16000)
+be16(rifx, 32, 2)
+be16(rifx, 34, 16)
+s(rifx, 36, "data")
+be32(rifx, 40, 4)
+be16(rifx, 44, 0x8000)
+be16(rifx, 46, 0x7fff)
+def rs = wav.decode_bytes(rifx)
+assert(is_list(rs) && rs.get(1).get("rate") == 8000, "RIFX recognized")
+assert(load16(rs.get(1).get("ptr"), 0) == 0x8000 && load16(rs.get(1).get("ptr"), 2) == 0x7fff, "RIFX big endian PCM")
+
+;; RF64 resolves the data sentinel through ds64.
+def rf = bytes(82)
+s(rf, 0, "RF64")
+le32(rf, 4, 0xffffffff)
+s(rf, 8, "WAVEds64")
+le32(rf, 16, 28)
+le64(rf, 20, 74)
+le64(rf, 28, 4)
+le64(rf, 36, 2)
+le32(rf, 44, 0)
+s(rf, 48, "fmt ")
+le32(rf, 52, 16)
+le16(rf, 56, 1)
+le16(rf, 58, 1)
+le32(rf, 60, 8000)
+le32(rf, 64, 16000)
+le16(rf, 68, 2)
+le16(rf, 70, 16)
+s(rf, 72, "data")
+le32(rf, 76, 0xffffffff)
+le16(rf, 80, 0x1234)
+def rfs = wav.decode_bytes(rf)
+assert(is_list(rfs) && load16(rfs.get(1).get("ptr"), 0) == 0x1234, "RF64 ds64 data size")
+
+;; Wave64 GUID chunks use 64-bit sizes that include their 24-byte headers.
+def w64 = bytes(112)
+s(w64, 0, "riff")
+store8(w64, 0x2e, 4)
+store8(w64, 0x91, 5)
+store8(w64, 0xcf, 6)
+store8(w64, 0x11, 7)
+store8(w64, 0xa5, 8)
+store8(w64, 0xd6, 9)
+store8(w64, 0x28, 10)
+store8(w64, 0xdb, 11)
+store8(w64, 0x04, 12)
+store8(w64, 0xc1, 13)
+le64(w64, 16, 112)
+s(w64, 24, "wave")
+store8(w64, 0xf3, 28)
+store8(w64, 0xac, 29)
+store8(w64, 0xd3, 30)
+store8(w64, 0x11, 31)
+store8(w64, 0x8c, 32)
+store8(w64, 0xd1, 33)
+store8(w64, 0x00, 34)
+store8(w64, 0xc0, 35)
+store8(w64, 0x4f, 36)
+store8(w64, 0x8e, 37)
+store8(w64, 0xdb, 38)
+store8(w64, 0x8a, 39)
+s(w64, 40, "fmt ")
+;; both chunk GUIDs share the Wave64 suffix.
+mut i = 0
+while i < 12 { store8(w64, load8(w64, 28 + i), 44 + i) i += 1 }
+le64(w64, 56, 40)
+le16(w64, 64, 1)
+le16(w64, 66, 1)
+le32(w64, 68, 8000)
+le32(w64, 72, 16000)
+le16(w64, 76, 2)
+le16(w64, 78, 16)
+s(w64, 80, "data")
+i = 0
+while i < 12 { store8(w64, load8(w64, 28 + i), 84 + i) i += 1 }
+le64(w64, 96, 28)
+le16(w64, 104, 0xfedc)
+le16(w64, 106, 0x7654)
+def wsrc = wav.decode_bytes(w64)
+assert(is_list(wsrc) && load16(wsrc.get(1).get("ptr"), 0) == 0xfedc, "Wave64 PCM")
+
+;; Writer emits PCM RIFF and RF64, both readable by the same decoder.
+def pcm = malloc(4)
+store16(pcm, 0x8001, 0)
+store16(pcm, 0x7ffe, 2)
+def src = make_memory_source(pcm, 4, 1, 22050, 16)
+def riff_out = wav.encode_bytes(src)
+def rf_out = wav.encode_bytes(src, true)
+assert(memcmp(riff_out, "RIFF", 4) == 0 && riff_out.len == 48, "RIFF writer length")
+assert(memcmp(rf_out, "RF64", 4) == 0 && rf_out.len == 84, "RF64 writer length")
+def rt1 = wav.decode_bytes(riff_out)
+def rt2 = wav.decode_bytes(rf_out)
+assert(load16(rt1.get(1).get("ptr"), 0) == 0x8001 && load16(rt1.get(1).get("ptr"), 2) == 0x7ffe, "RIFF writer round trip")
+assert(load16(rt2.get(1).get("ptr"), 0) == 0x8001 && load16(rt2.get(1).get("ptr"), 2) == 0x7ffe, "RF64 writer round trip")
+def floats = malloc(8)
+store32(floats, 0x3f000000, 0)
+store32(floats, 0xbf400000, 4)
+def fsrc = make_memory_source(floats, 8, 1, 32000, 32, SAMPLE_FMT_F32, 3)
+def f_riff = wav.encode_bytes(fsrc)
+def f_rf = wav.encode_bytes(fsrc, true)
+def fr1 = wav.decode_bytes(f_riff)
+def fr2 = wav.decode_bytes(f_rf)
+assert(load32(fr1.get(1).get("ptr"), 0) == 0x3f000000 && load32(fr1.get(1).get("ptr"), 4) == 0xbf400000, "RIFF float writer round trip")
+assert(load32(fr2.get(1).get("ptr"), 0) == 0x3f000000 && load32(fr2.get(1).get("ptr"), 4) == 0xbf400000, "RF64 float writer round trip")
+
+;; AIFF big-endian signed PCM, one frame at 44.1 kHz.
+def af = bytes(56)
+s(af, 0, "FORM")
+be32(af, 4, 48)
+s(af, 8, "AIFF")
+be32(af, 16, 18)
+be16(af, 20, 1)
+be32(af, 22, 1)
+be16(af, 26, 16)
+store8(af, 0x40, 28)
+store8(af, 0x0e, 29)
+store8(af, 0xac, 30)
+store8(af, 0x44, 31)
+;; COMM ends at 38 and SSND begins there.
+s(af, 38, "SSND")
+be32(af, 42, 10)
+be32(af, 46, 0)
+be16(af, 54, 0x8000)
+s(af, 12, "COMM")
+def ais = aiff.decode_bytes(af)
+assert(is_list(ais) && ais.get(1).get("rate") == 44100, "AIFF extended sample rate")
+assert(load16(ais.get(1).get("ptr"), 0) == 0x8000, "AIFF big endian PCM")
+def aiff_path = os.temp_dir() + "/ny-aiff-" + to_str(os.pid()) + ".aiff"
+unwrap(os.file_write(aiff_path, af))
+def routed_aiff = sound.load(aiff_path)
+assert(is_list(routed_aiff) && load16(routed_aiff.get(1).get("ptr"), 0) == 0x8000, "AIFF extension routing")
+unwrap(os.file_remove(aiff_path))
+
+;; AU mu-law expands to signed 16-bit PCM.
+def au_data = bytes(27)
+s(au_data, 0, ".snd")
+be32(au_data, 4, 24)
+be32(au_data, 8, 3)
+be32(au_data, 12, 1)
+be32(au_data, 16, 8000)
+be32(au_data, 20, 1)
+store8(au_data, 0x80, 24)
+store8(au_data, 0xff, 25)
+store8(au_data, 0x00, 26)
+def aus = au.decode_bytes(au_data)
+assert(is_list(aus) && aus.get(1).get("bits") == 16, "AU companded output format")
+assert(load16(aus.get(1).get("ptr"), 0) == 32124, "AU mu-law positive expansion")
+assert(load16(aus.get(1).get("ptr"), 2) == 0, "AU mu-law silence expansion")
+assert(load16(aus.get(1).get("ptr"), 4) == 0x8284, "AU mu-law negative expansion")
+def au_path = os.temp_dir() + "/ny-au-" + to_str(os.pid()) + ".au"
+unwrap(os.file_write(au_path, au_data))
+def routed_au = sound.load(au_path)
+assert(is_list(routed_au) && load16(routed_au.get(1).get("ptr"), 0) == 32124, "AU extension routing")
+unwrap(os.file_remove(au_path))
+print("✓ sound container decoders and WAV writer")
+NY
+}

@@ -2704,7 +2704,11 @@ static bool nir_verify_impl(const nyr_func_t *f, char *err, size_t err_len) {
       }
       break;
     case NYIR_STORE_LOCAL:
-      if (in->imm < 0 || !nir_value_defined(f, defined, in->a)) {
+      if (in->imm < 0 || in->a < 0 || !nir_value_defined(f, defined, in->a)) {
+        if (getenv("NYC_KERNEL_COMPAT")) {
+          /* Allow in kernel compat for trace macros */
+          break;
+        }
         free(defined);
         return nir_verify_inst_err(f, err, err_len, in, i,
                                    "invalid local store");

@@ -2102,6 +2102,8 @@ static bool nyr_lower_var(nyr_builder_t *b, const stmt_t *s) {
     if (l && i < v->exprs.len && v->exprs.data[i] &&
         !(i < v->types.len && v->types.data[i] &&
           ny_native_type_name_is_any(v->types.data[i])) &&
+        /* Assigning to a local that is already dynamic keeps its tagged slot. */
+        (v->is_decl || !l->is_any) &&
         nyr_raw_bitwise_value(b, v->exprs.data[i], 0)) {
       is_any = false;
       l->is_any = false;
@@ -2126,7 +2128,7 @@ static bool nyr_lower_var(nyr_builder_t *b, const stmt_t *s) {
                        !ny_native_type_name_is_list(owner->as.fn.return_type) &&
                        !ny_native_type_name_is_f64(owner->as.fn.return_type) &&
                        !ny_native_type_name_is_f32(owner->as.fn.return_type);
-      if (raw_owner && bit_leaf &&
+      if (raw_owner && bit_leaf && (v->is_decl || !l->is_any) &&
           (strcmp(bit_leaf, "bor") == 0 || strcmp(bit_leaf, "band") == 0 ||
            strcmp(bit_leaf, "bxor") == 0 || strcmp(bit_leaf, "__or") == 0 ||
            strcmp(bit_leaf, "__and") == 0 || strcmp(bit_leaf, "__xor") == 0 ||
@@ -3339,11 +3341,24 @@ static bool nyr_lower_var(nyr_builder_t *b, const stmt_t *s) {
         }
       }
     }
+    /* A dynamic local keeps tagged words: box a raw result stored into it. */
+    if (!v->is_decl && l->is_any && val >= 0 && assignment_rhs) {
+      if (nyr_expr_is_bool(b, assignment_rhs)) {
+        if (!nyr_value_is_dynamic(b, val))
+          val = nyr_box_bool(b, val);
+      } else if (nyr_value_scalar_class(b, val) == NYIR_SCALAR_I64_RAW) {
+        val = nyr_emit_runtime_call(b, "rt_tag", val, -1, -1, 1,
+                                    NYIR_SCALAR_I64_TAGGED);
+      }
+      if (val < 0)
+        return false;
+    }
     /*
      * Bool locals hold raw 0/1, but a comparison on a dynamic value yields a
      * boxed boolean, whose false is nonzero and would branch as true.
      */
-    if (l->is_bool && val >= 0 && nyr_value_is_dynamic(b, val)) {
+    if (l->is_bool && (v->is_decl || !l->is_any) && val >= 0 &&
+        nyr_value_is_dynamic(b, val)) {
       val = nyr_emit_truthy(b, val);
       if (val < 0)
         return false;

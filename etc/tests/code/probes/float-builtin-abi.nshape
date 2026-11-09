@@ -1,0 +1,25 @@
+shape float_builtin_boxed_runtime_abi {
+  family "code/probes/runtime/float"
+  generator "embedded"
+  features [float, runtime, abi, native, jit, vm]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only; --nyr-run"
+  expect compile_and_run
+  source ny <<'NY'
+use core.math as math
+
+assert(math.fmod(5.5, 2.0) == 1.5, "fmod returns the fractional remainder")
+assert(math.fmod(-5.5, 2.0) == -1.5, "fmod preserves the dividend sign")
+assert(math.pow(2.0, 3.0) == 8.0, "pow returns a float")
+assert(float(7) == 7.0, "float conversion returns a float")
+assert(math.atan2(1.0, 0.0) > 1.57079 && math.atan2(1.0, 0.0) < 1.57080,
+       "atan2 returns the quadrant angle")
+assert(math.sin(0.5) > 0.47942 && math.sin(0.5) < 0.47943,
+       "sin returns a float")
+assert(math.sqrt(2.0) > 1.41421 && math.sqrt(2.0) < 1.41422,
+       "sqrt returns a float")
+assert(math.log(2.718281828459045) > 0.99999 &&
+       math.log(2.718281828459045) < 1.00001,
+       "log returns a float")
+NY
+}

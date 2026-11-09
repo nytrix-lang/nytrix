@@ -13,6 +13,19 @@ static bool selftest_command_uses_env_nice(const char *command) {
          strncmp(command, "NYTRIX_LOW_PRIORITY=", 19) != 0;
 }
 
+static void selftest_resolve_markdown_path(const char *markdown, char *out,
+                                           size_t out_sz) {
+  if (!markdown || !*markdown || !out || out_sz == 0)
+    return;
+  if (path_is_absolute(markdown)) {
+    snprintf(out, out_sz, "%s", markdown);
+  } else {
+    char root[4096];
+    if (find_nytrix_root(root, sizeof(root)))
+      (void)path_join(out, out_sz, root, markdown);
+  }
+}
+
 static void
 selftest_validate_fuzz_reporting(const char *json, string_list_t *errors,
                                  int *row_count, const char *expected_dir,
@@ -2072,15 +2085,8 @@ selftest_validate_fuzz_reporting(const char *json, string_list_t *errors,
     (void)string_list_push_copy(errors,
                                 "status markdown path lost expected cockpit");
   char markdown_abs[4096] = {0};
-  if (markdown && *markdown) {
-    if (path_is_absolute(markdown)) {
-      snprintf(markdown_abs, sizeof(markdown_abs), "%s", markdown);
-    } else {
-      char root[4096];
-      if (find_nytrix_root(root, sizeof(root)))
-        (void)path_join(markdown_abs, sizeof(markdown_abs), root, markdown);
-    }
-  }
+  selftest_resolve_markdown_path(markdown, markdown_abs,
+                                   sizeof(markdown_abs));
   file_buf_t md = {0};
   if (!markdown_abs[0] || !read_file(markdown_abs, &md) || !md.data) {
     (void)string_list_push_copy(errors, "status markdown was not readable");
@@ -4211,15 +4217,8 @@ static void selftest_validate_fuzz_all_repeat_status_progress(
         errors, "repeat status lost guarded missing-evidence handoff");
   char *markdown = summary_string_from_report(json, "markdown");
   char markdown_abs[4096] = {0};
-  if (markdown && *markdown) {
-    if (path_is_absolute(markdown)) {
-      snprintf(markdown_abs, sizeof(markdown_abs), "%s", markdown);
-    } else {
-      char root[4096];
-      if (find_nytrix_root(root, sizeof(root)))
-        (void)path_join(markdown_abs, sizeof(markdown_abs), root, markdown);
-    }
-  }
+  selftest_resolve_markdown_path(markdown, markdown_abs,
+                                   sizeof(markdown_abs));
   file_buf_t md = {0};
   if (!markdown_abs[0] || !read_file(markdown_abs, &md) || !md.data) {
     (void)string_list_push_copy(errors,
@@ -4719,15 +4718,8 @@ static void selftest_validate_fuzz_default_pressure(const char *json,
     (void)string_list_push_copy(errors, "default plan repeat aliases missing");
   char *markdown = summary_string_from_report(json, "markdown");
   char markdown_abs[4096] = {0};
-  if (markdown && *markdown) {
-    if (path_is_absolute(markdown)) {
-      snprintf(markdown_abs, sizeof(markdown_abs), "%s", markdown);
-    } else {
-      char root[4096];
-      if (find_nytrix_root(root, sizeof(root)))
-        (void)path_join(markdown_abs, sizeof(markdown_abs), root, markdown);
-    }
-  }
+  selftest_resolve_markdown_path(markdown, markdown_abs,
+                                   sizeof(markdown_abs));
   file_buf_t md = {0};
   if (!markdown_abs[0] || !read_file(markdown_abs, &md) || !md.data) {
     (void)string_list_push_copy(errors,
@@ -6341,15 +6333,8 @@ static void selftest_validate_fuzz_full_pressure_remediation(
 
     char *markdown = summary_string_from_report(worklist.data, "markdown");
     char markdown_abs[4096] = {0};
-    if (markdown && *markdown) {
-      if (path_is_absolute(markdown)) {
-        snprintf(markdown_abs, sizeof(markdown_abs), "%s", markdown);
-      } else {
-        char root[4096];
-        if (find_nytrix_root(root, sizeof(root)))
-          (void)path_join(markdown_abs, sizeof(markdown_abs), root, markdown);
-      }
-    }
+    selftest_resolve_markdown_path(markdown, markdown_abs,
+                                     sizeof(markdown_abs));
     file_buf_t md = {0};
     if (!markdown_abs[0] || !read_file(markdown_abs, &md) || !md.data) {
       (void)string_list_push_copy(
@@ -6690,15 +6675,8 @@ static void selftest_validate_fuzz_repro_ready_missing_wrapper(
 
   char *markdown = summary_string_from_report(json, "markdown");
   char markdown_abs[4096] = {0};
-  if (markdown && *markdown) {
-    if (path_is_absolute(markdown)) {
-      snprintf(markdown_abs, sizeof(markdown_abs), "%s", markdown);
-    } else {
-      char root[4096];
-      if (find_nytrix_root(root, sizeof(root)))
-        (void)path_join(markdown_abs, sizeof(markdown_abs), root, markdown);
-    }
-  }
+  selftest_resolve_markdown_path(markdown, markdown_abs,
+                                   sizeof(markdown_abs));
   file_buf_t md = {0};
   if (!markdown_abs[0] || !read_file(markdown_abs, &md) || !md.data) {
     (void)string_list_push_copy(
@@ -6772,15 +6750,8 @@ static void selftest_validate_fuzz_repro_ready_missing_command(
 
   char *markdown = summary_string_from_report(json, "markdown");
   char markdown_abs[4096] = {0};
-  if (markdown && *markdown) {
-    if (path_is_absolute(markdown)) {
-      snprintf(markdown_abs, sizeof(markdown_abs), "%s", markdown);
-    } else {
-      char root[4096];
-      if (find_nytrix_root(root, sizeof(root)))
-        (void)path_join(markdown_abs, sizeof(markdown_abs), root, markdown);
-    }
-  }
+  selftest_resolve_markdown_path(markdown, markdown_abs,
+                                   sizeof(markdown_abs));
   file_buf_t md = {0};
   if (!markdown_abs[0] || !read_file(markdown_abs, &md) || !md.data) {
     (void)string_list_push_copy(
@@ -10428,15 +10399,8 @@ static void selftest_validate_fuzz_all_progress(const char *json,
                                           : "fuzz_progress/progress.md"))
     (void)string_list_push_copy(errors, "progress markdown path missing");
   char markdown_abs[4096] = {0};
-  if (markdown && *markdown) {
-    if (path_is_absolute(markdown)) {
-      snprintf(markdown_abs, sizeof(markdown_abs), "%s", markdown);
-    } else {
-      char root[4096];
-      if (find_nytrix_root(root, sizeof(root)))
-        (void)path_join(markdown_abs, sizeof(markdown_abs), root, markdown);
-    }
-  }
+  selftest_resolve_markdown_path(markdown, markdown_abs,
+                                   sizeof(markdown_abs));
   file_buf_t md = {0};
   if (!markdown_abs[0] || !read_file(markdown_abs, &md) || !md.data) {
     (void)string_list_push_copy(errors, "progress markdown was not readable");
@@ -11236,15 +11200,8 @@ static void selftest_validate_fuzz_all_progress_stale_evidence(
         errors, "stale progress state refresh should follow freshness preview");
   char *markdown = summary_string_from_report(json, "markdown");
   char markdown_abs[4096] = {0};
-  if (markdown && *markdown) {
-    if (path_is_absolute(markdown)) {
-      snprintf(markdown_abs, sizeof(markdown_abs), "%s", markdown);
-    } else {
-      char root[4096];
-      if (find_nytrix_root(root, sizeof(root)))
-        (void)path_join(markdown_abs, sizeof(markdown_abs), root, markdown);
-    }
-  }
+  selftest_resolve_markdown_path(markdown, markdown_abs,
+                                   sizeof(markdown_abs));
   file_buf_t md = {0};
   if (!markdown_abs[0] || !read_file(markdown_abs, &md) || !md.data) {
     (void)string_list_push_copy(errors,

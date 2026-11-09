@@ -1,0 +1,59 @@
+shape container_bool_bytes_any {
+  family "language/containers/representation"
+  generator "embedded"
+  features ["list", "tuple", "dict", "bool", "bytes", "any"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+fn pass(any value) any { value }
+fn pass_twice(any value) any { pass(pass(value)) }
+
+def comparison_values = [1 == 1, 1 == 2]
+def literal_values = [true, false]
+def tuple_values = (true, false)
+def dictionary_values = {"a": true}
+
+print(comparison_values)
+print(literal_values)
+print(tuple_values)
+print(dictionary_values)
+assert(to_str(comparison_values) == "[true, false]",
+       "comparison list booleans format as booleans")
+assert(to_str(literal_values) == "[true, false]",
+       "literal list booleans format as booleans")
+assert(to_str(dictionary_values) == "{a: true}",
+       "dictionary booleans format as booleans")
+assert(comparison_values[0] == true, "comparison list true remains bool")
+assert(comparison_values[1] == false, "comparison list false remains bool")
+assert(literal_values[0] && !literal_values[1],
+       "literal list boolean values retain truthiness")
+assert(tuple_values[0] && !tuple_values[1],
+       "tuple boolean values retain truthiness")
+assert(dictionary_values["a"] == true, "dictionary boolean remains bool")
+
+def p = bytes(62)
+def q = pass_twice(p)
+assert(q.len == 62, "bytes length survives any helpers")
+store8(q, 173, 11)
+assert(p[11] == 173, "bytes writes through any helpers reach original")
+
+def bool_literal = [true, false]
+assert(to_str(bool_literal[0]) == "true", "indexed literal boolean formats as a boolean")
+def computed_bools = [1 == 1]
+assert(to_str(computed_bools) == "[true]", "computed booleans format inside a list")
+def appended_bools = list()
+appended_bools.append(false)
+appended_bools.append(true)
+assert(to_str(appended_bools) == "[false, true]", "appended booleans keep their type")
+assert(appended_bools[1] == true, "appended boolean compares with a boolean")
+assert(appended_bools[0] == false, "appended false compares with a boolean")
+fn put_byte(any target, int index, int value) any {
+   target[index] = value
+   target
+}
+def written = put_byte(bytes(8), 3, 9)
+assert(written.len == 8 && written[3] == 9 && load8(written, 7) == 0, "bytes write through any")
+NY
+}

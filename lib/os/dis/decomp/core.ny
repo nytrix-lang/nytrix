@@ -49,6 +49,12 @@ use core.os.dis.decomp.syscalls
 use core.os.dis.decomp.type_library
 use core.os.dis.decomp.summary
 
+fn _builder_finish(ptr b) str {
+   def out = str.builder_to_str(b)
+   str.builder_free(b)
+   out
+}
+
 fn _has_decomp_header(any source) bool {
    if !is_dict(source) { return false }
    def header = source.get("header", dict())
@@ -4105,8 +4111,7 @@ fn _signature_param_text(dict sig) str {
       b = str.builder_append(b, params[i].get("name", "arg" + to_str(i)))
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }
 
@@ -5828,8 +5833,7 @@ fn _call_render(str name, list args, str family="x86") str {
       i += 1
    }
    b = str.builder_append(b, ")")
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }
 
@@ -9914,8 +9918,7 @@ fn _clean_table_mismatch_text(dict bin, dict sig, list rows, int idx, str pad) s
    b = str.builder_append(b, pad + idx_name + " = " + idx_name + " + 1\n")
    b = str.builder_append(b, pad + "expected = expected ^ " + key_expr + "\n")
    b = str.builder_append(b, pad + acc_name + " = " + acc_name + " | (" + input_expr + " ^ expected)\n")
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }
 
@@ -12024,15 +12027,13 @@ fn _clean_return_region(dict bin, list lifted, int start, int limit, str pad, di
       }
       if op == "return" {
          b = str.builder_append(b, _render_ir_clean_row(bin, lifted, i, pad, skip, sig))
-         def out = str.builder_to_str(b)
-         str.builder_free(b)
+         def out = _builder_finish(b)
          return {"ok": true, "start": start, "end": i, "next": i + 1,
             "text": out, "row_count": rows_seen + 1}
       }
       if op == "call" && _clean_call_is_noreturn(bin, row) {
          b = str.builder_append(b, _render_ir_clean_row(bin, lifted, i, pad, skip, sig))
-         def out = str.builder_to_str(b)
-         str.builder_free(b)
+         def out = _builder_finish(b)
          return {"ok": true, "start": start, "end": i, "next": i + 1,
             "text": out, "row_count": rows_seen + 1, "terminal": "noreturn_call"}
       }
@@ -12064,22 +12065,19 @@ fn _clean_terminal_return_region(dict bin, list lifted, int start, int limit, st
             return dict()
          }
          b = str.builder_append(b, pad + "return " + rexpr + "\n")
-         def out = str.builder_to_str(b)
-         str.builder_free(b)
+         def out = _builder_finish(b)
          return {"ok": true, "start": start, "end": i, "next": i + 1,
             "text": out, "row_count": rows_seen + 1}
       }
       if op == "return" {
          b = str.builder_append(b, _render_ir_clean_row(bin, lifted, i, pad, skip, sig))
-         def out = str.builder_to_str(b)
-         str.builder_free(b)
+         def out = _builder_finish(b)
          return {"ok": true, "start": start, "end": i, "next": i + 1,
             "text": out, "row_count": rows_seen + 1}
       }
       if op == "call" && _clean_call_is_noreturn(bin, row) {
          b = str.builder_append(b, _render_ir_clean_row(bin, lifted, i, pad, skip, sig))
-         def out = str.builder_to_str(b)
-         str.builder_free(b)
+         def out = _builder_finish(b)
          return {"ok": true, "start": start, "end": i, "next": i + 1,
             "text": out, "row_count": rows_seen + 1, "terminal": "noreturn_call"}
       }
@@ -12107,8 +12105,7 @@ fn _clean_guard_fallthrough_return_shape(dict bin, list lifted, int idx, str pad
    b = str.builder_append(b, pad + "if " + _clean_negated_condition_expr(expr) + "{\n")
    b = str.builder_append(b, fall.get("text", ""))
    b = str.builder_append(b, pad + "}\n")
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    {"ok": true, "target_idx": target_idx, "next": target_idx, "target_addr": int(br.get("target", 0)), "text": out}
 }
 
@@ -12132,8 +12129,7 @@ fn _clean_branch_return_shape(dict bin, list lifted, int idx, str pad, dict skip
    b = str.builder_append(b, target.get("text", ""))
    b = str.builder_append(b, pad + "}\n")
    b = str.builder_append(b, fall.get("text", ""))
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    {"ok": true, "target_idx": target_idx, "target_end": int(target.get("end", target_idx)),
       "fallthrough_end": int(fall.get("end", idx)), "next": max(int(target.get("next", target_idx + 1)), int(fall.get("next", idx + 1))),
       "text": out}
@@ -12164,8 +12160,7 @@ fn _render_ir_simple_row(dict bin, list lifted, int i, str pad, any du0=dict(), 
    } elif op == "branch" && ir.get("kind", "") == "switch" {
       b = str.builder_append(b, _render_switch_row(bin, ir, pad))
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }
 
@@ -12558,8 +12553,7 @@ fn _render_state_machine_summary(dict sm, str pad) str {
    }
    if cases.len > 12 { b = str.builder_append(b, pad + "  ... " + to_str(cases.len - 12) + " more states\n") }
    b = str.builder_append(b, pad + "}\n")
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }
 
@@ -12636,8 +12630,7 @@ fn _render_switch_row(dict bin, dict row, str pad) str {
    }
    b = str.builder_append(b, pad + "  default: unreachable\n")
    b = str.builder_append(b, pad + "}\n")
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }
 
@@ -12811,8 +12804,7 @@ fn _clean_terminal_block_text(list lines, dict block, str indent) str {
       if raw.len > 0 { b = str.builder_append(b, indent + "  " + raw + "\n") }
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }
 
@@ -12969,8 +12961,7 @@ fn _clean_inline_terminal_labels(str text) str {
       b = str.builder_append(b, lines[i] + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }
 
@@ -13015,8 +13006,7 @@ fn _clean_noreturn_block_text(dict block, str indent) str {
       b = str.builder_append(b, indent + "  " + body[i] + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }
 
@@ -13062,8 +13052,7 @@ fn _clean_inline_noreturn_labels(str text) str {
       b = str.builder_append(b, replace.get(to_str(i), lines[i]) + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }
 
@@ -13114,8 +13103,7 @@ fn _clean_usage_guard_block_text(dict block, str indent) str {
       b = str.builder_append(b, indent + "  " + body[i] + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }
 
@@ -13165,8 +13153,7 @@ fn _clean_inline_usage_guard_labels(str text) str {
       b = str.builder_append(b, lines[i] + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -13222,8 +13209,7 @@ fn _clean_inline_return_gotos(str text) str {
       b = str.builder_append(b, lines[i] + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -13275,8 +13261,7 @@ fn _clean_collapse_local_return_joins(str text) str {
       b = str.builder_append(b, lines[i] + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -13338,8 +13323,7 @@ fn _clean_drop_unused_labels(str text) str {
       }
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }
 
@@ -13400,8 +13384,7 @@ fn _clean_collapse_empty_label_aliases(str text) str {
       b = str.builder_append(b, line + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }
 
@@ -13456,8 +13439,7 @@ fn _clean_collapse_trampoline_labels(str text) str {
       b = str.builder_append(b, line + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }
 
@@ -13486,8 +13468,7 @@ fn _clean_drop_redundant_gotos(str text) str {
       b = str.builder_append(b, lines[i] + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }
 
@@ -13555,8 +13536,7 @@ fn _clean_drop_immediate_conditional_goto_labels(str text) str {
       }
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }
 
@@ -13602,8 +13582,7 @@ fn _clean_drop_linear_unreachable_after_terminal(str text) str {
       if _clean_raw_goto_label(raw).len > 0 && !_clean_goto_from_fallthrough_label(lines, i) { blocked = true }
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }
 
@@ -13673,8 +13652,7 @@ fn _clean_drop_unlabeled_tail_after_return(str text) str {
       depth += _clean_loop_depth_delta(raw)
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -13714,8 +13692,7 @@ fn _clean_drop_unwind_tail_after_return(str text) str {
       }
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    dropped ? _clean_balance_trailing_braces(out) : out
 }
 
@@ -13770,8 +13747,7 @@ fn _clean_drop_return_dead_block_tails(str text) str {
       depth += _clean_loop_depth_delta(raw)
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -13910,8 +13886,7 @@ fn _clean_structure_goto_diamonds(str text) str {
       b = str.builder_append(b, lines[i] + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }
 
@@ -13978,8 +13953,7 @@ fn _clean_structure_fallthrough_if_else(str text) str {
       b = str.builder_append(b, lines[i] + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -14036,8 +14010,7 @@ fn _clean_structure_goto_skips(str text) str {
       b = str.builder_append(b, lines[i] + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }
 
@@ -14122,8 +14095,7 @@ fn _clean_structure_guard_label_after_terminal(str text) str {
       b = str.builder_append(b, lines[i] + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -14242,8 +14214,7 @@ fn _clean_structure_top_break_loops(str text) str {
       b = str.builder_append(b, lines[i] + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -14294,8 +14265,7 @@ fn _clean_structure_failstop_empty_loops(str text) str {
       b = str.builder_append(b, lines[i] + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -14421,8 +14391,7 @@ fn _clean_rotate_prechecked_loops(str text) str {
       b = str.builder_append(b, lines[i] + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }
 
@@ -14472,8 +14441,7 @@ fn _clean_structure_flat_prechecked_loops(str text) str {
       b = str.builder_append(b, lines[i] + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -14546,8 +14514,7 @@ fn _clean_structure_bottom_tested_loops(str text) str {
       b = str.builder_append(b, lines[i] + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -14612,8 +14579,7 @@ fn _clean_drop_unreachable_unused_labels(str text) str {
       b = str.builder_append(b, lines[i] + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }
 
@@ -14908,8 +14874,7 @@ fn _clean_drop_constant_branches(str text) str {
       b = str.builder_append(b, lines[i] + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }
 
@@ -14947,8 +14912,7 @@ fn _clean_reindent_bare_for_headers(str text) str {
       }
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }
 
@@ -14978,8 +14942,7 @@ fn _clean_parenthesize_mixed_bitwise_assigns(str text) str {
       b = str.builder_append(b, lines[i] + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -15134,8 +15097,7 @@ fn _clean_drop_stack_canary_noise(str text) str {
       b = str.builder_append(b, lines[i] + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }
 
@@ -15155,8 +15117,7 @@ fn _clean_drop_terminal_stack_canary_xor_residue(str text) str {
       b = str.builder_append(b, lines[i] + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }
 
@@ -15187,8 +15148,7 @@ fn _clean_normalize_stack_canary_lines(str text) str {
       b = str.builder_append(b, lines[i] + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }
 
@@ -15227,8 +15187,7 @@ fn _clean_simplify_constant_selects_once(str text) dict {
       b = str.builder_append(b, chr(load8(text, i)))
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    {"text": out, "changed": changed}
 }
 
@@ -15319,8 +15278,7 @@ fn _clean_drop_constant_structured_ifs(str text) str {
       b = str.builder_append(b, lines[i] + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }
 
@@ -15420,8 +15378,7 @@ fn _clean_join_bool_terms(list exprs, str op) str {
 fn _clean_copy_str(str s) str {
    mut b = str.Builder(s.len)
    b = str.builder_append(b, s)
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }
 
@@ -15693,8 +15650,7 @@ fn _clean_collapse_return_ifs(str text) str {
          i += 1
       }
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -15733,8 +15689,7 @@ fn _clean_drop_empty_blocks(str text) str {
       b = str.builder_append(b, lines[i] + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }
 
@@ -15929,8 +15884,7 @@ fn _clean_drop_rendered_call_arg_setup(str text) str {
       b = str.builder_append(b, lines[i] + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }
 
@@ -16057,8 +16011,7 @@ fn _clean_inline_errno_result_conditions(str text) str {
       b = str.builder_append(b, lines[i] + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -16081,8 +16034,7 @@ fn _clean_drop_errno_mirror_temps(str text) str {
       b = str.builder_append(b, lines[i] + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -16181,8 +16133,7 @@ fn _clean_known_struct_call_result_fields(str text) str {
       b = str.builder_append(b, line + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -16208,8 +16159,7 @@ fn _clean_drop_duplicate_return_value_assigns(str text) str {
       b = str.builder_append(b, lines[i] + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -16250,8 +16200,7 @@ fn _clean_inline_printf_call_result_args(str text) str {
       b = str.builder_append(b, lines[i] + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -16298,8 +16247,7 @@ fn _clean_repair_printf_input_args(str text) str {
       b = str.builder_append(b, line + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -16402,8 +16350,7 @@ fn _clean_collapse_sprintf_printf_buffers(str text) str {
       }
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }
 
@@ -16453,8 +16400,7 @@ fn _clean_lift_global_input_copy(str text) str {
       }
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }
 
@@ -16511,8 +16457,7 @@ fn _clean_collapse_sequential_check_chain(str text) str {
       b = str.builder_append(b, lines[i] + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -16693,8 +16638,7 @@ fn _clean_compact_check_helpers(str text) str {
       b = str.builder_append(b, lines[i] + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -16792,8 +16736,7 @@ fn _clean_normalize_libc_string_literal_args(str text) str {
       b = str.builder_append(b, line + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -16914,8 +16857,7 @@ fn _clean_simplify_string_compare_conditions(str text) str {
       b = str.builder_append(b, line + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -16938,8 +16880,7 @@ fn _clean_simplify_string_compare_returns(str text) str {
       b = str.builder_append(b, line + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -17003,8 +16944,7 @@ fn _clean_simplify_string_len_conditions(str text) str {
       b = str.builder_append(b, line + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -17053,8 +16993,7 @@ fn _clean_simplify_strlen_calls(str text) str {
       b = str.builder_append(b, line + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -17114,8 +17053,7 @@ fn _clean_collapse_ascii_sum_input_loop(str text) str {
       b = str.builder_append(b, line + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -17187,8 +17125,7 @@ fn _clean_simplify_modsum_call_conditions(str text) str {
       b = str.builder_append(b, line + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -17222,8 +17159,7 @@ fn _clean_normalize_modsum_terminal_success_fail(str text) str {
       b = str.builder_append(b, lines[i] + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -17275,8 +17211,7 @@ fn _clean_normalize_terminal_success_fail_guards(str text) str {
       b = str.builder_append(b, lines[i] + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -17311,8 +17246,7 @@ fn _clean_drop_return_after_challenge_terminal_calls(str text) str {
       if !skip.get(to_str(i), false) { b = str.builder_append(b, lines[i] + "\n") }
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }
 
@@ -17423,8 +17357,7 @@ fn _clean_discard_unused_one_byte_reads(str text) str {
       }
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -17471,8 +17404,7 @@ fn _clean_name_libc_resource_values(str text) str {
       b = str.builder_append(b, line + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -17547,8 +17479,7 @@ fn _clean_repair_fclose_resource_aliases(str text) str {
       b = str.builder_append(b, line + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -17624,8 +17555,7 @@ fn _clean_replace_token_code_uses(str text, str needle, str repl) str {
       b = str.builder_append(b, slice(text, i, i + 1, 1))
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }
 
@@ -17766,8 +17696,7 @@ fn _clean_apply_render_type_fields(str text, any trec0) str {
       b = str.builder_append(b, chr(ch))
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }
 
@@ -17801,8 +17730,7 @@ fn _clean_simplify_named_byte_field_casts(str text) str {
       b = str.builder_append(b, lines[i] + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -17920,8 +17848,7 @@ fn _clean_simplify_rendered_rotates(str text) str {
       b = str.builder_append(b, lines[i] + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }
 
@@ -18093,8 +18020,7 @@ fn _clean_normalize_stack_addr_indices(str text) str {
       b = str.builder_append(b, chr(load8(text, i)))
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }
 
@@ -18202,8 +18128,7 @@ fn _clean_fold_local_constant_reassigns(str text) str {
       b = str.builder_append(b, out_line + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }
 
@@ -18354,8 +18279,7 @@ fn _clean_propagate_local_constants(str text) str {
       b = str.builder_append(b, out_line + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }
 
@@ -18579,8 +18503,7 @@ fn _clean_drop_dead_rendered_temps_once(str text) str {
       b = str.builder_append(b, lines[i] + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -18643,8 +18566,7 @@ fn _clean_drop_unused_scratch_assigns(str text) str {
       b = str.builder_append(b, lines[i] + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -18839,8 +18761,7 @@ fn _clean_drop_terminal_opaque_even_product_scratch(str text) str {
       b = str.builder_append(b, lines[i] + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -18907,8 +18828,7 @@ fn _clean_drop_magic_wide_setup(str text) str {
       if !skip.get(to_str(i), false) { b = str.builder_append(b, lines[i] + "\n") }
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }
 
@@ -18956,8 +18876,7 @@ fn _clean_drop_condition_reg_setup(str text) str {
       b = str.builder_append(b, lines[i] + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }
 
@@ -19079,8 +18998,7 @@ fn _clean_inline_call_result_copy_conditions(str text) str {
       b = str.builder_append(b, lines[i] + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }
 
@@ -19341,8 +19259,7 @@ fn _clean_inline_condition_temp_chains(str text) str {
       }
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }
 
@@ -19372,8 +19289,7 @@ fn _clean_inline_check_condition_temp_chains(str text) str {
       b = str.builder_append(b, lines[i] + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }
 
@@ -19418,8 +19334,7 @@ fn _clean_inline_arith_condition_reg_setup(str text) str {
       b = str.builder_append(b, lines[i] + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }
 
@@ -19498,8 +19413,7 @@ fn _clean_bool_expr_apply_env(str expr0, dict env) str {
          i += 1
       }
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }
 
@@ -19740,8 +19654,7 @@ fn _clean_simplify_rendered_bool_constants(str text) str {
       b = str.builder_append(b, lines[i] + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -19798,8 +19711,7 @@ fn _clean_simplify_zero_trip_mod_returns(str text) str {
       b = str.builder_append(b, lines[i] + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -19853,8 +19765,7 @@ fn _clean_simplify_rendered_mba(str text) str {
       b = str.builder_append(b, line + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -20050,8 +19961,7 @@ fn _clean_castless_bracket_indices(str text) str {
       b = str.builder_append(b, chr(ch))
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -20215,8 +20125,7 @@ fn _clean_flatten_selected_pointer_nested_indices(str text) str {
       }
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -20311,8 +20220,7 @@ fn _clean_inline_preincrement_index_temps(str text) str {
       b = str.builder_append(b, lines[i] + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -20425,8 +20333,7 @@ fn _clean_collapse_staged_byte_sum_loops(str text) str {
       b = str.builder_append(b, lines[i] + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -20504,8 +20411,7 @@ fn _clean_name_string_sum_loop_vars(str text) str {
       b = str.builder_append(b, line + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }
 
@@ -20631,8 +20537,7 @@ fn _clean_collapse_pointer_range_sum_loops(str text) str {
       b = str.builder_append(b, lines[i] + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -20876,8 +20781,7 @@ fn _clean_name_argv_input_string_compares(str text) str {
       b = str.builder_append(b, line + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }
 
@@ -21004,8 +20908,7 @@ fn _clean_collapse_masked_password_conditions(str text) str {
       b = str.builder_append(b, line + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -21210,8 +21113,7 @@ fn _clean_collapse_linked_list_lookup_decode_loops(str text) str {
       }
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }
 
@@ -21327,8 +21229,7 @@ fn _clean_collapse_indexed_compare_return_loops(str text) str {
       b = str.builder_append(b, lines[i] + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -21717,8 +21618,7 @@ fn _clean_drop_ioli_failure_tail(str text) str {
       }
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -21792,8 +21692,7 @@ fn _clean_collapse_ioli_digit_prefix_hit_loops(str text) str {
       b = str.builder_append(b, lines[i] + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? _clean_ioli_digit_prefix_hit_signature(out) : text
 }
 
@@ -21893,8 +21792,7 @@ fn _clean_collapse_ioli_even_retry_loop(str text) str {
       b = str.builder_append(b, lines[i] + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -22114,8 +22012,7 @@ fn _clean_struct_ioli_lolo_argv_scan(str text) str {
       b = str.builder_append(b, lines[i] + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }
 
@@ -22145,8 +22042,7 @@ fn _clean_inline_expected_input_mismatch_gotos(str text) str {
       }
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -22220,8 +22116,7 @@ fn _clean_common_prefix_compare_loop_at(list lines, int i) dict {
       j += 1
    }
    b = str.builder_append(b, pad + "}\n")
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    {"ok": true, "text": out, "skip_to": close_while + 1}
 }
 
@@ -22246,8 +22141,7 @@ fn _clean_collapse_common_prefix_compare_loops(str text) str {
       b = str.builder_append(b, lines[i] + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -22373,8 +22267,7 @@ fn _clean_normalize_fgets_stdin_trim(str text) str {
       }
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }
 
@@ -22516,8 +22409,7 @@ fn _clean_collapse_cpuid_vendor_string(str text) str {
       }
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -22559,8 +22451,7 @@ fn _clean_inline_strcmp_compare_temps(str text) str {
       b = str.builder_append(b, lines[i] + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -22593,8 +22484,7 @@ fn _clean_name_expected_argv_input(str text) str {
       b = str.builder_append(b, line + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -22627,8 +22517,7 @@ fn _clean_name_argv_guard_input(str text) str {
       b = str.builder_append(b, line + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -22687,8 +22576,7 @@ fn _clean_inline_missing_failure_gotos(str text) str {
       b = str.builder_append(b, lines[i] + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -22722,8 +22610,7 @@ fn _clean_inline_missing_argc_usage_gotos(str text) str {
       b = str.builder_append(b, lines[i] + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -22777,8 +22664,7 @@ fn _clean_return_after_missing_success_gotos(str text) str {
       b = str.builder_append(b, lines[i] + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -22807,8 +22693,7 @@ fn _clean_drop_duplicate_input_aliases(str text) str {
       b = str.builder_append(b, lines[i] + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -22874,8 +22759,7 @@ fn _clean_recover_mask_check_success_main(str text) str {
       b = str.builder_append(b, lines[i] + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -23037,8 +22921,7 @@ fn _clean_collapse_shifted_string_compare_loops(str text) str {
       b = str.builder_append(b, lines[i] + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -23132,8 +23015,7 @@ fn _clean_collapse_byte_add_compare_conditions(str text) str {
       }
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }
 
@@ -23191,8 +23073,7 @@ fn _clean_simplify_rendered_byte_stores(str text) str {
       b = str.builder_append(b, lines[i] + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -23261,8 +23142,7 @@ fn _clean_simplify_rendered_byte_casts(str text) str {
       b = str.builder_append(b, chr(ch))
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -23297,8 +23177,7 @@ fn _clean_repair_if_tail_ops(str text) str {
       b = str.builder_append(b, lines[i] + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -23507,8 +23386,7 @@ fn _clean_rendered_mem_indices_text(str text) str {
       b = str.builder_append(b, chr(ch))
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -23572,8 +23450,7 @@ fn _clean_simplify_rendered_literal_casts(str text) str {
       b = str.builder_append(b, chr(ch))
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -23623,8 +23500,7 @@ fn _clean_simplify_status_literals(str text) str {
       b = str.builder_append(b, out + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -23705,8 +23581,7 @@ fn _clean_rendered_address_loads(str text) str {
       b = str.builder_append(b, replace.get(to_str(i), lines[i]) + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }
 
@@ -23778,8 +23653,7 @@ fn _clean_inline_address_temp_stores(str text) str {
       if !skip.get(to_str(i), false) { b = str.builder_append(b, lines[i] + "\n") }
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }
 
@@ -23951,8 +23825,7 @@ fn _clean_rendered_condition_index_temps(str text) str {
       b = str.builder_append(b, replace.get(to_str(i), lines[i]) + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }
 
@@ -23993,8 +23866,7 @@ fn _clean_inline_index_value_conditions(str text) str {
       b = str.builder_append(b, lines[i] + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -24072,8 +23944,7 @@ fn _clean_normalize_local_i32_indices(str text) str {
       b = str.builder_append(b, chr(ch))
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -24132,8 +24003,7 @@ fn _clean_rendered_index_temp_chains(str text) str {
       b = str.builder_append(b, replace.get(to_str(i), lines[i]) + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    _clean_rendered_condition_index_temps(out)
 }
 
@@ -24214,8 +24084,7 @@ fn _clean_inline_sub_condition_windows(str text) str {
       b = str.builder_append(b, replace.get(to_str(i), lines[i]) + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }
 
@@ -24363,8 +24232,7 @@ fn _clean_normalize_scaled_indices_for_base(str text, str base) str {
       b = str.builder_append(b, slice(text, i, i + 1, 1))
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -24476,8 +24344,7 @@ fn _clean_fold_pointer_table_temps(str text) str {
       b = str.builder_append(b, replace.get(to_str(i), lines[i]) + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }
 
@@ -24532,8 +24399,7 @@ fn _clean_normalize_inline_pointer_table_refs(str text) str {
       b = str.builder_append(b, chr(ch))
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    _clean_normalize_inline_pointer_table_refs_close(changed ? out : text)
 }
 
@@ -24679,8 +24545,7 @@ fn _clean_local_string_table_tail(list lines, int start) str {
       b = str.builder_append(b, lines[i] + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }
 
@@ -24776,8 +24641,7 @@ fn _clean_aggregate_local_string_tables(str text) str {
       b = str.builder_append(b, replace.get(to_str(i), lines[i]) + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }
 
@@ -24858,8 +24722,7 @@ fn _clean_aggregate_local_scalar_tables(str text) str {
       b = str.builder_append(b, replace.get(to_str(i), lines[i]) + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }
 
@@ -24927,8 +24790,7 @@ fn _clean_drop_dead_local_reassigns(str text) str {
       b = str.builder_append(b, lines[i] + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }
 
@@ -25017,8 +24879,7 @@ fn _clean_inline_local_call_aliases(str text) str {
       if !skip.get(to_str(i), false) { b = str.builder_append(b, lines[i] + "\n") }
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }
 
@@ -25119,8 +24980,7 @@ fn _clean_inline_local_pointer_temp_stores(str text) str {
       if !skip.get(to_str(i), false) { b = str.builder_append(b, lines[i] + "\n") }
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }
 
@@ -25165,8 +25025,7 @@ fn _clean_inline_call_result_local_aliases(str text) str {
       }
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }
 
@@ -25205,8 +25064,7 @@ fn _clean_drop_unused_local_assigns(str text) str {
       if !skip.get(to_str(i), false) { b = str.builder_append(b, lines[i] + "\n") }
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }
 
@@ -25233,8 +25091,7 @@ fn _clean_drop_dead_const_local_assigns(str text) str {
       if !skip.get(to_str(i), false) { b = str.builder_append(b, lines[i] + "\n") }
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }
 
@@ -25351,8 +25208,7 @@ fn _clean_collapse_char_shift_loops(str text) str {
       if !skip.get(to_str(i), false) { b = str.builder_append(b, replace.get(to_str(i), lines[i]) + "\n") }
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }
 
@@ -25445,8 +25301,7 @@ fn _clean_structure_counted_for_loops(str text) str {
       if !skip.get(to_str(i), false) { b = str.builder_append(b, replace.get(to_str(i), lines[i]) + "\n") }
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }
 
@@ -25526,8 +25381,7 @@ fn _clean_annotate_decoded_string_calls(str text) str {
       b = str.builder_append(b, line + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -25588,8 +25442,7 @@ fn _clean_drop_function_if_unused(str text, str name) str {
       b = str.builder_append(b, lines[i] + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    changed ? out : text
 }
 
@@ -25701,8 +25554,7 @@ fn _clean_drop_stack_scratch_allocs(str text) str {
       if !skip.get(to_str(i), false) { b = str.builder_append(b, lines[i] + "\n") }
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }
 
@@ -26244,8 +26096,7 @@ fn _pseudo_body(dict bin, list rows, int indent, any opts=dict()) str {
       loop_stack = _drop_last(loop_stack)
       b = str.builder_append(b, _loop_render_pad(pad, loop_stack.len) + "}\n")
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    if clean { return _clean_finish_render(out, opts) }
    out
 }
@@ -26425,8 +26276,7 @@ fn _decompile_fast_text(dict bin, any target, list raw, list lifted, dict labels
       i += 1
    }
    b = str.builder_append(b, "}\n")
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }
 
@@ -26730,8 +26580,7 @@ fn _decompile_join_function_text(list funcs) str {
       b = str.builder_append(b, funcs[i].get("text", "") + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }
 
@@ -27167,7 +27016,6 @@ fn report(any source, int string_limit=12) str {
       b = str.builder_append(b, "note " + ns[i].get("key", "") + " " + repr(ns[i].get("text", "")) + "\n")
       i += 1
    }
-   def out = str.builder_to_str(b)
-   str.builder_free(b)
+   def out = _builder_finish(b)
    out
 }

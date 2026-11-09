@@ -656,7 +656,260 @@ static bool x64_stack_home_safety_selftest(char *err, size_t err_len) {
   return ok;
 }
 
+/* MIR shifts operate on explicit machine bits on both language and C routes.
+ * A language function must shift in its allocated destination rather than
+ * shuttle the result through RAX. Use a frame input to prevent folding. */
+static bool x64_destination_shift_selftest(char *err, size_t err_len) {
+  ny_native_target_info_t target = {0};
+  if (!vector_target_init(&target, NY_NATIVE_BACKEND_X86_64,
+                          "x86_64-linux-gnu"))
+    return false;
+  nyr_mach_func_t mach = {0};
+  uint32_t block = 0, slot = 0;
+  nyr_mach_reg_t input = 0, shifted = 0;
+  bool ok = nyr_mach_begin_block(&mach, 0, &block) &&
+            nyr_mach_alloc_typed_frame_slot(&mach, 8, 8, NYR_MACH_TYPE_I64,
+                                           false, &slot) &&
+            nyr_mach_alloc_typed_vreg(&mach, NYR_MACH_TYPE_I64, &input) &&
+            nyr_mach_alloc_typed_vreg(&mach, NYR_MACH_TYPE_I64, &shifted) &&
+            nyr_mach_emit(&mach, (nyr_mach_inst_t){
+                .opcode = NYR_MACH_LOAD, .dst = selftest_gpr_vreg(input),
+                .src0 = selftest_frame(slot),
+                .effects = NYR_MACH_EFFECT_READ_MEMORY}) &&
+            nyr_mach_emit(&mach, (nyr_mach_inst_t){
+                .opcode = NYR_MACH_SHL, .dst = selftest_gpr_vreg(shifted),
+                .src0 = selftest_gpr_vreg(input),
+                .src1 = {.kind = NYR_MACH_OPERAND_IMM, .as.imm = 3}}) &&
+            nyr_mach_emit(&mach, (nyr_mach_inst_t){
+                .opcode = NYR_MACH_RET, .src0 = selftest_gpr_vreg(shifted),
+                .effects = NYR_MACH_EFFECT_CONTROL});
+  nyr_obj_buf_t code = {0};
+  nyr_x64_obj_symbol_def_t defs[8] = {0};
+  nyr_x64_obj_reloc_t relocs[8] = {0};
+  size_t def_count = 0, reloc_count = 0;
+  if (ok)
+    ok = nyr_mach_verify(&mach, 0, err, err_len) &&
+         nyr_x64_mach_build_bundle(
+             &mach, NULL, NULL, 0, &target, "destination_shift_selftest", false,
+             &code, defs, &def_count, relocs, &reloc_count, err, err_len);
+  bool direct_shift = false;
+  for (size_t i = 0; ok && i + 3 < code.len; ++i)
+    if ((code.data[i] & 0xfe) == 0x48 && code.data[i + 1] == 0xc1 &&
+        (code.data[i + 2] & 0xf8) == 0xe0 && code.data[i + 3] == 3 &&
+        ((code.data[i] & 1) || (code.data[i + 2] & 7)))
+      direct_shift = true;
+  if (ok && !direct_shift) {
+    nyr_set_error(err, err_len,
+                  "x86-64 destination shift selftest: shift staged through RAX");
+    ok = false;
+  }
+  nyr_obj_free(&code);
+  nyr_mach_func_free(&mach);
+  return ok;
+}
+
+/* More live inputs than GPR colors force canonical RHS homes. The running
+ * accumulator should still use ADD rdst,[home], without RAX staging. */
+static bool x64_alu_home_selftest(char *err, size_t err_len) {
+  ny_native_target_info_t target = {0};
+  if (!vector_target_init(&target, NY_NATIVE_BACKEND_X86_64,
+                          "x86_64-linux-gnu"))
+    return false;
+  nyr_mach_func_t mach = {0};
+  uint32_t block = 0;
+  nyr_mach_reg_t inputs[16], acc = 0;
+  bool ok = nyr_mach_begin_block(&mach, 0, &block);
+  for (size_t i = 0; ok && i < 16; ++i) {
+    uint32_t slot = 0;
+    ok = nyr_mach_alloc_typed_frame_slot(&mach, 8, 8, NYR_MACH_TYPE_I64,
+                                        false, &slot) &&
+         nyr_mach_alloc_typed_vreg(&mach, NYR_MACH_TYPE_I64, &inputs[i]) &&
+         nyr_mach_emit(&mach, (nyr_mach_inst_t){
+             .opcode = NYR_MACH_LOAD, .dst = selftest_gpr_vreg(inputs[i]),
+             .src0 = selftest_frame(slot),
+             .effects = NYR_MACH_EFFECT_READ_MEMORY});
+  }
+  if (ok)
+    acc = inputs[0];
+  for (size_t i = 1; ok && i < 16; ++i) {
+    nyr_mach_reg_t sum = 0;
+    ok = nyr_mach_alloc_typed_vreg(&mach, NYR_MACH_TYPE_I64, &sum) &&
+         nyr_mach_emit(&mach, (nyr_mach_inst_t){
+             .opcode = NYR_MACH_ADD, .dst = selftest_gpr_vreg(sum),
+             .src0 = selftest_gpr_vreg(acc),
+             .src1 = selftest_gpr_vreg(inputs[i])});
+    acc = sum;
+  }
+  if (ok)
+    ok = nyr_mach_emit(&mach, (nyr_mach_inst_t){
+        .opcode = NYR_MACH_RET, .src0 = selftest_gpr_vreg(acc),
+        .effects = NYR_MACH_EFFECT_CONTROL});
+  nyr_obj_buf_t code = {0};
+  nyr_x64_obj_symbol_def_t defs[8] = {0};
+  nyr_x64_obj_reloc_t relocs[8] = {0};
+  size_t def_count = 0, reloc_count = 0;
+  if (ok)
+    ok = nyr_mach_verify(&mach, 0, err, err_len) &&
+         nyr_x64_mach_build_bundle(
+             &mach, NULL, NULL, 0, &target, "alu_home_selftest", false,
+             &code, defs, &def_count, relocs, &reloc_count, err, err_len);
+  bool direct_add = false;
+  for (size_t i = 0; ok && i + 2 < code.len; ++i)
+    if ((code.data[i] & 0xfb) == 0x48 && code.data[i + 1] == 0x03 &&
+        ((code.data[i + 2] & 0xc7) == 0x45 ||
+         (code.data[i + 2] & 0xc7) == 0x85) &&
+        ((code.data[i] & 4) || (code.data[i + 2] & 0x38)))
+      direct_add = true;
+  if (ok && !direct_add) {
+    nyr_set_error(err, err_len,
+                  "x86-64 ALU home selftest: spilled RHS staged through RAX");
+    ok = false;
+  }
+  nyr_obj_free(&code);
+  nyr_mach_func_free(&mach);
+  return ok;
+}
+
+/* Keep both inputs live past a subtraction so the allocated result must
+ * differ from both. VEX must name the LHS independently of the destination. */
+static bool x64_avx_scalar_selftest(char *err, size_t err_len) {
+  ny_native_target_info_t target = {0};
+  if (!vector_target_init(&target, NY_NATIVE_BACKEND_X86_64,
+                          "x86_64-linux-gnu"))
+    return false;
+  target.caps |= NY_NATIVE_CAP_MACH_AVX;
+  for (unsigned f32 = 0; f32 < 2; ++f32) {
+    nyr_mach_type_t type = f32 ? NYR_MACH_TYPE_F32 : NYR_MACH_TYPE_F64;
+    nyr_mach_func_t mach = {0};
+    uint32_t block = 0, slots[2];
+    nyr_mach_reg_t values[5];
+    bool ok = nyr_mach_begin_block(&mach, 0, &block);
+    for (size_t i = 0; ok && i < 5; ++i)
+      ok = nyr_mach_alloc_typed_vreg(&mach, type, &values[i]);
+    for (size_t i = 0; ok && i < 2; ++i)
+      ok = nyr_mach_alloc_typed_frame_slot(&mach, 8, 8, type, false, &slots[i]) &&
+           nyr_mach_emit(&mach, (nyr_mach_inst_t){
+               .opcode = NYR_MACH_LOAD, .dst = selftest_fpr_vreg(values[i]),
+               .src0 = selftest_frame(slots[i]),
+               .effects = NYR_MACH_EFFECT_READ_MEMORY});
+    for (size_t i = 2; ok && i < 5; ++i)
+      ok = nyr_mach_emit(&mach, (nyr_mach_inst_t){
+          .opcode = i == 2 ? NYR_MACH_SUB : i == 3 ? NYR_MACH_MUL : NYR_MACH_ADD,
+          .dst = selftest_fpr_vreg(values[i]),
+          .src0 = selftest_fpr_vreg(values[i == 4 ? 2 : 0]),
+          .src1 = selftest_fpr_vreg(values[i == 4 ? 3 : 1])});
+    if (ok)
+      ok = nyr_mach_emit(&mach, (nyr_mach_inst_t){
+          .opcode = NYR_MACH_RET, .src0 = selftest_fpr_vreg(values[4]),
+          .effects = NYR_MACH_EFFECT_CONTROL});
+    nyr_obj_buf_t code = {0};
+    nyr_x64_obj_symbol_def_t defs[8] = {0};
+    nyr_x64_obj_reloc_t relocs[8] = {0};
+    size_t def_count = 0, reloc_count = 0;
+    if (ok)
+      ok = nyr_mach_verify(&mach, 0, err, err_len) &&
+           nyr_x64_mach_build_bundle(
+               &mach, NULL, NULL, 0, &target, "avx_scalar_selftest", false,
+               &code, defs, &def_count, relocs, &reloc_count, err, err_len);
+    bool independent_lhs = false;
+    for (size_t i = 0; ok && i + 3 < code.len; ++i) {
+      bool vex2 = code.data[i] == 0xc5;
+      bool vex3 = code.data[i] == 0xc4 && i + 4 < code.len;
+      if (!vex2 && !vex3)
+        continue;
+      size_t op = i + (vex2 ? 2 : 3);
+      if (code.data[op] != 0x5c || (code.data[op + 1] & 0xc0) != 0xc0)
+        continue;
+      unsigned lhs = ((~code.data[op - 1]) >> 3) & 15;
+      unsigned dst = ((code.data[op + 1] >> 3) & 7) |
+                     ((code.data[i + 1] & 0x80) ? 0 : 8);
+      independent_lhs |= lhs != dst;
+    }
+    if (ok && !independent_lhs) {
+      nyr_set_error(err, err_len,
+                    "x86-64 AVX scalar selftest: destructive f%u subtraction",
+                    f32 ? 32 : 64);
+      ok = false;
+    }
+    nyr_obj_free(&code);
+    nyr_mach_func_free(&mach);
+    if (!ok)
+      return false;
+  }
+  return true;
+}
+
+static bool x64_branch_trampoline_selftest(char *err, size_t err_len) {
+  ny_native_target_info_t target = {0};
+  if (!vector_target_init(&target, NY_NATIVE_BACKEND_X86_64,
+                          "x86_64-linux-gnu"))
+    return false;
+  for (unsigned shared = 0; shared < 2; ++shared) {
+    nyr_mach_func_t mach = {0};
+    uint32_t block = 0, slot = 0;
+    nyr_mach_reg_t cond = 0;
+    bool ok = nyr_mach_begin_block(&mach, 0, &block) &&
+              nyr_mach_alloc_typed_frame_slot(&mach, 8, 8, NYR_MACH_TYPE_I64,
+                                             false, &slot) &&
+              nyr_mach_alloc_typed_vreg(&mach, NYR_MACH_TYPE_I64, &cond) &&
+              nyr_mach_emit(&mach, (nyr_mach_inst_t){
+                  .opcode = NYR_MACH_LOAD, .dst = selftest_gpr_vreg(cond),
+                  .src0 = selftest_frame(slot),
+                  .effects = NYR_MACH_EFFECT_READ_MEMORY}) &&
+              nyr_mach_emit(&mach, (nyr_mach_inst_t){
+                  .opcode = NYR_MACH_BR_IF, .src0 = selftest_gpr_vreg(cond),
+                  .src1 = selftest_block(2),
+                  .effects = NYR_MACH_EFFECT_CONTROL}) &&
+              nyr_mach_begin_block(&mach, 1, &block) &&
+              nyr_mach_emit(&mach, (nyr_mach_inst_t){
+                  .opcode = NYR_MACH_BR, .src1 = selftest_block(3),
+                  .effects = NYR_MACH_EFFECT_CONTROL}) &&
+              nyr_mach_begin_block(&mach, 2, &block) &&
+              nyr_mach_emit(&mach, shared
+                  ? (nyr_mach_inst_t){.opcode = NYR_MACH_BR,
+                      .src1 = selftest_block(1),
+                      .effects = NYR_MACH_EFFECT_CONTROL}
+                  : (nyr_mach_inst_t){.opcode = NYR_MACH_RET,
+                      .effects = NYR_MACH_EFFECT_CONTROL}) &&
+              nyr_mach_begin_block(&mach, 3, &block) &&
+              nyr_mach_emit(&mach, (nyr_mach_inst_t){
+                  .opcode = NYR_MACH_RET,
+                  .effects = NYR_MACH_EFFECT_CONTROL});
+    nyr_obj_buf_t code = {0};
+    nyr_x64_obj_symbol_def_t defs[8] = {0};
+    nyr_x64_obj_reloc_t relocs[8] = {0};
+    size_t def_count = 0, reloc_count = 0;
+    if (ok)
+      ok = nyr_mach_verify(&mach, 0, err, err_len) &&
+           nyr_x64_mach_build_bundle(
+               &mach, NULL, NULL, 0, &target, "branch_trampoline_selftest", false,
+               &code, defs, &def_count, relocs, &reloc_count, err, err_len);
+    bool has_branch = false;
+    for (size_t i = 0; ok && i + 1 < code.len; ++i)
+      if (code.data[i] == 0x0f && code.data[i + 1] == (shared ? 0x85 : 0x84))
+        has_branch = true;
+    if (ok && !has_branch) {
+      nyr_set_error(err, err_len,
+                    "x86-64 branch trampoline selftest: shared=%u", shared);
+      ok = false;
+    }
+    nyr_obj_free(&code);
+    nyr_mach_func_free(&mach);
+    if (!ok)
+      return false;
+  }
+  return true;
+}
+
 bool nyr_vector_selftest(char *err, size_t err_len) {
+  if (!x64_avx_scalar_selftest(err, err_len))
+    return false;
+  if (!x64_alu_home_selftest(err, err_len))
+    return false;
+  if (!x64_branch_trampoline_selftest(err, err_len))
+    return false;
+  if (!x64_destination_shift_selftest(err, err_len))
+    return false;
   if (!vector_backend_selftest(NY_NATIVE_BACKEND_X86_64,
                                nyr_x64_mach_build_bundle, "x86-64", err,
                                err_len))

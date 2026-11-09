@@ -1,7 +1,7 @@
 ;; Keywords: sound res os
 ;; Unified resource loader for sound and image files.
 ;; Uses libsndfile for sound (optional, bound via dlopen).
-;; Pure-Ny WAV/AU fallback when libsndfile is unavailable.
+;; Pure-Ny WAV/AIFF/AU fallback when libsndfile is unavailable.
 ;; References:
 ;; - core.os.sound
 ;; - core.os
@@ -18,10 +18,12 @@ use core.math.parse.img as image
 use core.os.sound.diag as sound_debug
 use core.os.sound.source
 use core.os.sound.wav as wav
+use core.os.sound.au as au
+use core.os.sound.aiff as aiff
 use core.os.ffi as ffi
 
 ;; libsndfile is optional: bound through dlopen so hosts without it can still
-;; decode WAV and AU files via the pure-Ny fallback.
+;; decode WAV, AIFF, and AU files via the pure-Ny fallback.
 mut _snd_checked = false
 mut _snd_ok = false
 mut _snd_handle = 0
@@ -86,78 +88,17 @@ fn _wav_decode(str filepath) any {
    wav.decode_bytes(unwrap(res))
 }
 
-;; Reads a big-endian 16-bit value at offset `off`.
-fn load16_be(any p, int off) int {
-   (load8(p, off) << 8) | load8(p, off + 1)
-}
-
-;; Reads a big-endian 24-bit value at offset `off`.
-fn load24_be(any p, int off) int {
-   (load8(p, off) << 16) | (load8(p, off + 1) << 8) | load8(p, off + 2)
-}
-
-;; Reads a big-endian 32-bit value at offset `off`.
-fn load32_be(any p, int off) int {
-   (load8(p, off) << 24) | (load8(p, off + 1) << 16) | (load8(p, off + 2) << 8) | load8(p, off + 3)
-}
-
 ;; Pure-Ny AU decoder (SND/AU format - big endian)
 fn _au_decode(str filepath) any {
    def res = file_read(filepath)
    if is_err(res) { return 0 }
-   def data = unwrap(res)
-   if data.len < 24 { return 0 }
-   if load8(data, 0) != 46 || load8(data, 1) != 115 || load8(data, 2) != 110 || load8(data, 3) != 100 { return 0 } ;; ".snd"
-   def data_offset = load32_be(data, 4)
-   def data_size = load32_be(data, 8)
-   def encoding = load32_be(data, 12)
-   def sample_rate = load32_be(data, 16)
-   def channels = load32_be(data, 20)
-   if data_offset < 24 || data_offset + data_size > data.len { return 0 }
-   ;; AU payloads are binary. Copy them with load/store; `slice` is a text
-   ;; operation and rejects the file buffer.
-   if encoding == 3 { ;; 16-bit linear PCM
-      if data_size % 2 != 0 { return 0 }
-      def sample_count = data_size / 2
-      def out_ptr = malloc(data_size)
-      mut i = 0
-      while i < sample_count {
-         def v = load16_be(data, data_offset + i * 2)
-         store16(out_ptr, v, i * 2)
-         i += 1
-      }
-      make_memory_source(out_ptr, data_size, channels, sample_rate, 16, SAMPLE_FMT_S16, 1)
-   } elif encoding == 4 { ;; 24-bit linear PCM
-      if data_size % 3 != 0 { return 0 }
-      def sample_count = data_size / 3
-      def out_ptr = malloc(data_size)
-      mut i = 0
-      while i < sample_count {
-         def v = load24_be(data, data_offset + i * 3)
-         store8(out_ptr, v & 255, i * 3)
-         store8(out_ptr, (v >> 8) & 255, i * 3 + 1)
-         store8(out_ptr, (v >> 16) & 255, i * 3 + 2)
-         i += 1
-      }
-      make_memory_source(out_ptr, data_size, channels, sample_rate, 24, SAMPLE_FMT_S24, 1)
-   } elif encoding == 5 { ;; 32-bit linear PCM
-      if data_size % 4 != 0 { return 0 }
-      def sample_count = data_size / 4
-      def out_ptr = malloc(data_size)
-      mut i = 0
-      while i < sample_count {
-         def v = load32_be(data, data_offset + i * 4)
-         store32(out_ptr, v, i * 4)
-         i += 1
-      }
-      make_memory_source(out_ptr, data_size, channels, sample_rate, 32, SAMPLE_FMT_S32, 1)
-   } elif encoding == 6 { ;; 32-bit float
-      def out_ptr = malloc(data_size)
-      memcpy(out_ptr, ptr_add(data, data_offset), data_size)
-      make_memory_source(out_ptr, data_size, channels, sample_rate, 32, SAMPLE_FMT_F32, 3)
-   } elif encoding == 7 { ;; 64-bit float
-      return 0
-   } else { return 0 }
+   au.decode_bytes(unwrap(res))
+}
+
+fn _aiff_decode(str filepath) any {
+   def res = file_read(filepath)
+   if is_err(res) { return 0 }
+   aiff.decode_bytes(unwrap(res))
 }
 
 fn _snd_decode(str filepath) any {
@@ -267,7 +208,7 @@ fn _decode_au(str filepath) any {
 }
 
 fn _sndfile_required(str filepath) any {
-   print("sound res: " + filepath + " requires libsndfile; pure-Ny covers WAV PCM/float(8/16/24/32 and f32) and AU")
+   print("sound res: " + filepath + " requires libsndfile; pure-Ny covers WAV, AIFF/AIFC, and AU supported encodings")
    0
 }
 
@@ -283,6 +224,9 @@ fn decode(str filepath) any {
       if res != 0 { return res }
    } else if ext == ".au" || ext == ".snd" {
       def res = _decode_au(full)
+      if res != 0 { return res }
+   } else if ext == ".aiff" || ext == ".aif" || ext == ".aifc" {
+      def res = _aiff_decode(full)
       if res != 0 { return res }
    }
    if _snd_available() && !_snd_disable() {
@@ -339,7 +283,7 @@ fn load(any filepath) any {
    if !fs.is_file(full) { return 0 }
    def ext = str(str.lower(path.extname(full)))
    mut any asset = 0
-   if ext == ".wav" || ext == ".au" || ext == ".snd" || ext == ".ogg" || ext == ".flac" || ext == ".mp3" || ext == ".aiff" || ext == ".aif" || ext == ".opus" {
+   if ext == ".wav" || ext == ".au" || ext == ".snd" || ext == ".aiff" || ext == ".aif" || ext == ".aifc" || ext == ".ogg" || ext == ".flac" || ext == ".mp3" || ext == ".opus" {
       asset = decode(full)
    } else {
       def res = file_read(full)

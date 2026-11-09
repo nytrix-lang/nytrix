@@ -2435,6 +2435,10 @@ endif()
 list(APPEND objects "${many_functions_object}")
 
 set(unit_object "${BINARY_DIR}/translation-unit.o")
+set(host_runtime_flag -rtlib=compiler-rt)
+if(CC_ID STREQUAL "GNU")
+  set(host_runtime_flag)
+endif()
 execute_process(
   COMMAND "${NYC}" --all "${SOURCE_DIR}/translation-unit.c" "${unit_object}"
   RESULT_VARIABLE status
@@ -2448,7 +2452,7 @@ execute_process(
   COMMAND "${CC}" -std=c11 -O2 -Wall -Wextra -Werror
           -o "${BINARY_DIR}/translation-unit-host"
           "${SOURCE_DIR}/translation-unit-host.c" "${unit_object}"
-          -rtlib=compiler-rt
+          ${host_runtime_flag}
   RESULT_VARIABLE status
   OUTPUT_VARIABLE stdout
   ERROR_VARIABLE stderr
@@ -2519,7 +2523,7 @@ execute_process(
   COMMAND "${CC}" -std=c11 -O2 -Wall -Wextra -Werror
           -o "${BINARY_DIR}/translation-unit-omit-fp-host"
           "${SOURCE_DIR}/translation-unit-host.c" "${unit_omit_fp_object}"
-          -rtlib=compiler-rt
+          ${host_runtime_flag}
   RESULT_VARIABLE status
   OUTPUT_VARIABLE stdout
   ERROR_VARIABLE stderr

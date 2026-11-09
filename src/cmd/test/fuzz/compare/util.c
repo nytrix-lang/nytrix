@@ -20,6 +20,20 @@ static const char *NYTRIX_LOW_CPU_MISSING_EVIDENCE_THREADS = "10%";
 static const int NYTRIX_DEFAULT_RUN_NICE = 10;
 static const int NYTRIX_DEFAULT_MAX_LOAD_PCT = 75;
 static const int NYTRIX_DEFAULT_MIN_FREE_GB = 20;
+
+static double fuzz_all_calc_thread_years_per_run(double remaining_thread_years,
+                                                double runs_needed) {
+  if (remaining_thread_years <= 0.0 || runs_needed <= 0.0)
+    return 0.0;
+  return remaining_thread_years / runs_needed;
+}
+
+static double fuzz_all_calc_runs_to_days(double runs, double runs_per_day) {
+  if (runs < 0.0 || runs_per_day <= 0.0)
+    return -1.0;
+  return runs / runs_per_day;
+}
+
 #define NYTRIX_OLD_PATH_DRY_RUN_COMMAND NYTRIX_FUZZ_ALL_OLD_PATH_DRY_RUN_COMMAND
 #define NYTRIX_OLD_PATH_APPLY_COMMAND NYTRIX_FUZZ_ALL_OLD_PATH_APPLY_COMMAND
 static const char *NYTRIX_COMPILER_STD_AUDIT_JSON =
@@ -888,7 +902,6 @@ static double fuzz_all_runs_to_good(double target_percent,
                                     double target_percent_per_run,
                                     double signal_score, double stability_score,
                                     bool campaign_complete);
-static double fuzz_all_runs_to_days(double runs, double runs_per_day);
 static double fuzz_all_language_good_gap_percent(double score);
 static void append_fuzz_all_run_state_fields_prefixed(
     str_buf_t *b, const char *prefix, const fuzz_all_run_state_summary_t *st);

@@ -7697,6 +7697,16 @@ static bool nyr_is_boxed_bool_value(const nyr_builder_impl_t *b, int value) {
   return nyr_const_is(b, mul->b, 6);
 }
 
+/*
+ * True when `value` is the direct result of decoding a dynamic word. Decoding
+ * it again would halve an already raw integer.
+ */
+static bool nyr_value_is_any_decoded(const nyr_builder_impl_t *b, int value) {
+  const nyr_inst_t *def = NULL;
+  return nyr_def_of(b, value, &def) && def->op == NYIR_CALL && def->symbol &&
+         strcmp(def->symbol, "rt_any_to_i64") == 0;
+}
+
 static bool nyr_value_is_dynamic(const nyr_builder_impl_t *b, int value) {
   if (!b || value < 0)
     return false;
@@ -8249,9 +8259,14 @@ static nyr_resolved_call_contract_t nyr_runtime_call_contract(
   };
 }
 
+static bool nyr_value_is_any_decoded(const nyr_builder_impl_t *b, int value);
 static int nyr_emit_runtime_call(nyr_builder_impl_t *b, const char *symbol,
                                  int a, int b_arg, int c, int argc,
                                  nyr_scalar_class_t return_class) {
+  /* A decoded word is already raw; decoding it again halves odd integers. */
+  if (a >= 0 && strcmp(symbol, "rt_any_to_i64") == 0 &&
+      nyr_value_is_any_decoded(b, a))
+    return a;
   const char *canonical = nyr_runtime_symbol(symbol);
   if (canonical)
     symbol =
@@ -10833,6 +10848,20 @@ static const expr_t *nyr_bool_body_tail(const stmt_t *body) {
 static bool nyr_expr_is_bool(nyr_builder_impl_t *b, const expr_t *e) {
   if (!e)
     return false;
+  /* A read from a literal whose elements are all booleans is a boolean. */
+  if (e->kind == NY_E_INDEX && e->as.index.start && !e->as.index.stop &&
+      !e->as.index.step && e->as.index.target) {
+    const expr_t *literal =
+        nyr_resolve_list_literal(b, e->as.index.target, 0);
+    if (literal && (literal->kind == NY_E_LIST || literal->kind == NY_E_TUPLE) &&
+        literal->as.list_like.len > 0) {
+      bool all_bool = true;
+      for (size_t i = 0; i < literal->as.list_like.len && all_bool; ++i)
+        all_bool = nyr_expr_is_bool(b, literal->as.list_like.data[i]);
+      if (all_bool)
+        return true;
+    }
+  }
   /*
    * A resolved call's declared result is the representation authority.  In
    * particular, a qualified/module call is still a bool even when its AST

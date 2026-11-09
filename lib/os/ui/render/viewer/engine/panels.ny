@@ -175,6 +175,8 @@ fn _profiler_breakdown(p, mini_w) int {
    def last_frame, last_update, last_world, last_draw, last_ui =
    _num(p.get("last_frame", 0.0)), _num(p.get("last_update", 0.0)), _num(p.get("last_world", 0.0)),
    _num(p.get("last_draw", 0.0)), _num(p.get("last_ui", 0.0))
+   def last_events, last_gui_prep, last_sim =
+   _num(p.get("last_events", 0.0)), _num(p.get("last_gui_prep", 0.0)), _num(p.get("last_sim", 0.0))
    gui.separator()
    gui.text_colored("Frame breakdown", [0.84, 0.84, 0.84, 1.0])
    gui.stat_card("prof_update_card", "Update", f"{last_update:.2f}ms", "avg frame " + f"{avg_frame:.2f}ms", mini_w, 72.0, [0.76, 0.76, 0.76, 1.0])
@@ -184,6 +186,12 @@ fn _profiler_breakdown(p, mini_w) int {
    gui.stat_card("prof_draw_ms_card", "Draw", f"{last_draw:.2f}ms", "avg " + f"{avg_draw:.2f}ms", mini_w, 72.0, [0.82, 0.82, 0.82, 1.0])
    gui.same_line()
    gui.stat_card("prof_ui_card", "UI", f"{last_ui:.2f}ms", "avg " + f"{avg_ui:.2f}ms", mini_w, 72.0, [0.86, 0.86, 0.86, 1.0])
+   gui.same_line()
+   gui.stat_card("prof_events_card", "Events", f"{last_events:.2f}ms", "input dispatch", mini_w, 72.0, [0.80, 0.78, 0.70, 1.0])
+   gui.same_line()
+   gui.stat_card("prof_gui_prep_card", "GUI prep", f"{last_gui_prep:.2f}ms", "layout + input", mini_w, 72.0, [0.72, 0.82, 0.78, 1.0])
+   gui.same_line()
+   gui.stat_card("prof_sim_card", "Simulation", f"{last_sim:.2f}ms", "app update", mini_w, 72.0, [0.78, 0.76, 0.88, 1.0])
    gui.progress_bar("frame_budget", clamp(last_frame / 16.667, 0.0, 1.0), "16.67ms frame budget")
    gui.progress_bar("draw_budget", clamp(last_draw / 16.667, 0.0, 1.0), "Draw share")
    0

@@ -631,27 +631,40 @@ void nir_range_query_cache_free(nir_range_query_cache_t *cache) {
   *cache = (nir_range_query_cache_t){0};
 }
 
+void nir_range_query_cache_invalidate(nir_range_query_cache_t *cache) {
+  if (!cache)
+    return;
+  bool manual_invalidation = cache->manual_invalidation;
+  nir_range_query_cache_free(cache);
+  cache->manual_invalidation = manual_invalidation;
+}
+
 static bool nir_range_query_prepare(const nyr_func_t *f,
                                     nir_range_query_cache_t *cache) {
   if (cache->func == f && cache->data == f->data && cache->len == f->len &&
-      cache->next_value == f->next_value && cache->defs && cache->snapshot &&
-      memcmp(cache->snapshot, f->data, f->len * sizeof(*f->data)) == 0)
+      cache->next_value == f->next_value && cache->defs &&
+      (cache->manual_invalidation ||
+       (cache->snapshot &&
+        memcmp(cache->snapshot, f->data, f->len * sizeof(*f->data)) == 0)))
     return true;
-  nir_range_query_cache_free(cache);
-  if (f->len > SIZE_MAX / sizeof(*cache->snapshot))
+  nir_range_query_cache_invalidate(cache);
+  if (!cache->manual_invalidation &&
+      f->len > SIZE_MAX / sizeof(*cache->snapshot))
     return false;
   if (!nyr_cfg_build_topology(f, &cache->cfg) || !cache->cfg.block_count ||
       !(cache->defs = nyr_build_defs(f))) {
     nir_range_query_cache_free(cache);
     return false;
   }
-  cache->snapshot = malloc((f->len ? f->len : 1) * sizeof(*cache->snapshot));
-  if (!cache->snapshot) {
-    nir_range_query_cache_free(cache);
-    return false;
+  if (!cache->manual_invalidation) {
+    cache->snapshot = malloc((f->len ? f->len : 1) * sizeof(*cache->snapshot));
+    if (!cache->snapshot) {
+      nir_range_query_cache_free(cache);
+      return false;
+    }
+    if (f->len)
+      memcpy(cache->snapshot, f->data, f->len * sizeof(*cache->snapshot));
   }
-  if (f->len)
-    memcpy(cache->snapshot, f->data, f->len * sizeof(*f->data));
   cache->func = f;
   cache->data = f->data;
   cache->len = f->len;

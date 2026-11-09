@@ -1,0 +1,22 @@
+shape ui_w_profiler_phases {
+  family "probe-suite"
+  generator "regression"
+  features [ny render ui profiler]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect_stdout "UI-W-PROFILER-PHASES-OK"
+  source ny <<'NY'
+use core
+use core.os.ui.render.viewer.engine.tools as tools
+
+def p = tools.profiler_snapshot(60, 16.0, 2.0, 3.0, 4.0, 1.0,
+   [60], [16.0], [4.0], [1.0], false, 0.5, 0.75, 1.25)
+assert(float(p.get("last_events", 0.0)) == 0.5, "profiler exposes event cost")
+assert(float(p.get("last_gui_prep", 0.0)) == 0.75, "profiler exposes GUI preparation cost")
+assert(float(p.get("last_sim", 0.0)) == 1.25, "profiler exposes simulation cost")
+def parity = tools.profiler_snapshot(60, 16.0, 2.0, 3.0, 4.0, 1.0,
+   [60], [16.0], [4.0], [1.0], true, 0.5, 0.75, 1.25)
+assert(float(parity.get("last_events", -1.0)) == 0.0, "parity mode clears event costs")
+print("UI-W-PROFILER-PHASES-OK")
+NY
+}

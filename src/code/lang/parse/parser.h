@@ -98,6 +98,7 @@ typedef struct parser_t {
   int block_depth;
   int loop_depth;
   int expr_depth;
+  int stmt_expr_depth;
   bool quiet;
   bool exit_on_limit;
   /* Parse compound assignments into NY_S_AUG statements instead of

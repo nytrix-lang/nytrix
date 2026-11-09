@@ -2,44 +2,35 @@
 ;; Keywords: cli terminal donut
 ;; Donut - https://www.a1k0n.net/2006/09/15/obfuscated-c-donut.html
 
-                                            use core use ;{////
-                                     };core.os (exit) use core.term
-                                use core.os.fixture as fixture mut ;{///
-                             };z=own(bytes(1)) mut p=own(bytes(1)) mut ;{/
-                         };cap=0 mut A=.04 mut B=.02 fn resize(int w,int ;{//
-                      };h)int{if w<1||h<1{return 0} def n=w*h if n!=cap{cap=n
-                    z=own(bytes(n*2)) p=own(bytes(n))}0} fn draw(any c,int w,int
-                 h,float a,float b)int{ mut s=w*.75 if (h-1)*1.5<s{s=(h-1)*1.5}
-               def X=s def Y=s*.5 mut i=0 while i<w*h{bytes_set(p,i,0) ;{////////#
-             };bytes_set(z,i*2,0) bytes_set(z,i*2+1,0) i+=1} def sa=sin(a) def ;{/#
-            };ca=cos(a) def sb=sin(b) def cb=cos(b) def P=ca-cb*sa def Q=sa+cb*ca ;{
-          };mut v=0.0 while v<6.28{def ;{                };sv=sin(v) def cv=cos(v)
-        def R=cv*.75+2.8 def J=sb*cv                       def N=cv*P def G=sv*Q mut
-       u=0.0 while u<6.28{def ;{-                           };su=sin(u) def cu=cos(u)
-      def rs=R*su def rc=R*cu                               def yy=ca*rs-sa*sv def ;{
-     };zz=sa*rs+ca*sv def ;{-                              };d=1/(7-sb*rc+cb*zz) def
-    ;{/////////###**!!=;;:-                               !*###//////////////////###*
-   #//////////###**!!=;;:,                               !*###//////////////////###**
-  #///////////###**!==;~                                **###/////////////////#####**
- *////////////##**!!=;:                               };x=int(w/2+X*d*(cb*rc+sb*zz))
- def y=int(h/2-Y*d*yy)                               if x>=0&&x<w&&y>0&&y<h{def ;{**!
-};o=x+y*w def k=o*2 ;{                             };def dn=int(d*65535) if ;{###**!
-##////////////###*!=:                            *####///////////////////######***!=
-##////////////###*!=;                          ####///////////////////########***!!
-##/////////////###*!=                       #####////////////////////#######****!!
-*#//////////////###*!;                  *#####////////////////////#########***!!!;
-*##///////////////###*!             ######/////////////////////##########****!!==
-};dn>bytes_get(z,k)*256+bytes_get(z,k+1){bytes_set(z,k,dn/256) ;{######*****!!=;
-};bytes_set(z,k+1,dn%256) def l=J*cu+N*su-G mut sh=int((l+1)*5.5)+1 if ;{*!!!=
- };sh<1{sh=1} if sh>12{sh=12} bytes_set(p,o,sh)}} u+=.025} v+=.02} mut y=1 ;{
- };while y<h{mut x=0 while x<w{def k=bytes_get(p,x+y*w) def ;{##******!!!==;
-  };col=k==0?0:k<4?4:k<7?5:k<10?6:7 canvas_set(c,x,y,k>0? "█" : " " ;{!==;
-   };,col,k>0&&k%3==0?1:0) x+=1} y+=1} canvas_print(c,0,0, ;{***!!!!===;
-    };"q/esc · Donut" ,6,1) canvas_refresh(c) 0 } fixture.ready( ;{=;;
-      };"donut" ) exit(fixture.canvas_loop(fn(c,zb,w,h){resize(w,h)
-       draw(c,w,h,A,B) A+=.055 B+=.029 0},0,33,0)) ;{!!!!!!!===;;:
-         ;==!!!*********************************!!!!!!!!====;;:
-            ;==!!!!!!!******************!!!!!!!!!!======;;::
-               ;;===!!!!!!!!!!!!!!!!!!!!!!!========;;;::
-                   :;;;=====================;;;;;::
-                         :::;;;;;;;;;;;:::};
+                              use core;@
+                       use core.os(exit);@@@@@@@
+                  use core.os.fixture as fixture;@@@
+                use core.term;@@@@@@@@@@@@@@@@@@@@@@@@#
+             mut f64 A=.55 mut f64 B=.35 fn ray(f64 u,f64
+           v,f64 a,f64 b,f64 c,f64 d,f64 L,f64 M,f64 N)int{
+        def f64 g=u*u+v*v if g>=4.41{return 0}def f64 X=d*u;X#
+      X; def f64 Y=b*v+a*c*u def f64 Z=b*c*u-a*v mut f64 t=float
+     (sqrt(4.41-g))+.01 for i in 0..56{if t<=-2.2{return 0}def;X*
+    X; f64 x=X-c*t def f64 y=Y          +a*d*t def f64 z=Z+b*d*t;X
+   X; def f64 r=float(sqrt                  (x*x+y*y))def f64 q=r-
+  1.48 def f64 e=float(                       sqrt(q*q+z*z))def f64
+   f=e-.62 if f<.012{;X                        X;def f64 l=q*(x*L+y*
+ M)+z*N*r def f64 m=e*                          r return l<.2*m?1:l<
+ .65*m?2:3}t-=f}0}fn;X#                        X; draw(any c,int w,;X
+ X;int h)int{if w<1||h<1                      {return 0}def int top=w
+ >=18&&h>=9?1:0 def ok=w>=8                &&h>=6 def f64 a=float(sin
+ (A))def f64 b=float(cos(A))def f64 d=float(sin(B))def f64 e=float(;X
+ X;cos(B))def f64 z=.65*e-.45*d def f64 L=-.45*e-.65*d def f64 M=.65*
+  b+z*a def f64 N=z*b-.65*a def f64 cx=float(w-1)*.5 def f64 cy=;X::
+  X;float(h+top-1)*.5 mut f64 s=float(w-4)def f64 sy=float(h-top-4)
+   if sy*2.0<s{s=sy*2.0}s*=.9/4.2 if!ok{s=1.0}def f64 inv=1.0/s def
+     f64 dy=2.0*inv mut f64 v=cy*dy for y in 0..h{mut f64 u=-cx*;X
+     X;inv for x in 0..w{def int k=ok&&y>=top?ray(u,v,a,b,d,e,L,M
+      ,N):0 canvas_set(c,x,y,k==0?" ":k==1?"░":k==2?"▒":"▓",k==0
+        ?0:k==3?7:k+3,k==3?1:0)u+=inv}v-=dy}if!ok{canvas_set(c
+          ,int(w/2),int(h/2),"·",7,1)}if top>0{canvas_print(
+            c,0,0,"q/esc · Donut",6,1)}canvas_refresh(c)A
+               +=.035 B+=.021 0}fixture.ready("donut")
+                  exit(fixture.canvas_loop(fn(c,zb,w
+                      ,h){draw(c,w,h)},0,33,0))
+                              ;X::::::X;

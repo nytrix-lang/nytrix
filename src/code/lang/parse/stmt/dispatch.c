@@ -990,8 +990,13 @@ program_t parse_program(parser_t *p) {
 }
 
 stmt_t *p_parse_stmt(parser_t *p) {
+  if (!p)
+    return NULL;
+  int previous_stmt_expr_depth = p->stmt_expr_depth;
+  p->stmt_expr_depth = p->expr_depth + 1;
   stmt_t *s = p_parse_stmt_raw(p);
+  p->stmt_expr_depth = previous_stmt_expr_depth;
   if (s && s->syntax_ctx == 0)
-    s->syntax_ctx = p ? p->current_syntax_ctx : 0;
+    s->syntax_ctx = p->current_syntax_ctx;
   return s;
 }

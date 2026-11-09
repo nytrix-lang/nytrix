@@ -5936,6 +5936,13 @@ ordinary_call:
          nyr_expr_is_dict(b, value_expr) || nyr_expr_is_list(b, value_expr) ||
          nyr_expr_is_bytes(b, value_expr) || value_is_async ||
          (!scalar_list && (value_is_f64 || value_is_f32)));
+    /* A raw 0/1 in an untyped list is indistinguishable from an integer. */
+    bool append_value_is_bool =
+        !declared_scalar_list && nyr_expr_is_bool(b, value_expr);
+    if (append_value_is_bool) {
+      use_tagged_append = true;
+      scalar_list = false;
+    }
     bool saved_value_for_any_call = b->value_for_any_call;
     if (use_tagged_append)
       b->value_for_any_call = true;
@@ -5943,6 +5950,11 @@ ordinary_call:
     b->value_for_any_call = saved_value_for_any_call;
     if (list < 0 || value < 0)
       return -1;
+    if (append_value_is_bool && !nyr_value_is_dynamic(b, value)) {
+      value = nyr_box_bool(b, value);
+      if (value < 0)
+        return -1;
+    }
     if (value_is_string) {
       value = nyr_emit_runtime_call(b, "rt_cstr_to_str", value, -1, -1, 1, 0);
       if (value < 0)
@@ -8331,8 +8343,17 @@ ordinary_call:
       bool is_tuple_arg = !is_bool && !is_f64_arg && !is_f32_arg &&
                           !is_list_arg && !nyr_expr_is_cstr(b, arg) &&
                           nyr_expr_is_tuple(b, arg);
+      bool is_dict_arg = !is_bool && !is_f64_arg && !is_f32_arg &&
+                         !is_list_arg && !is_tuple_arg &&
+                         nyr_expr_is_dict(b, arg);
+      if (!is_dict_arg && arg && arg->kind == NY_E_IDENT &&
+          arg->as.ident.name) {
+        const nyr_local_t *arg_local = nyr_find_local(b, arg->as.ident.name);
+        is_dict_arg = arg_local && arg_local->is_dict;
+      }
       bool is_bigint_arg = !is_bool && !is_f64_arg && !is_f32_arg &&
                            !is_list_arg && !is_tuple_arg &&
+                           !is_dict_arg &&
                            (nyr_expr_is_bigint(b, arg) ||
                             (nyr_expr_type_name(b, arg) &&
                              ny_type_is(nyr_expr_type_name(b, arg), "bigint")));
@@ -8342,7 +8363,8 @@ ordinary_call:
         is_list_arg = arg_local && arg_local->is_list;
       }
       bool is_any_arg = !is_bool && !is_f64_arg && !is_f32_arg &&
-                        !is_list_arg && !is_tuple_arg && !is_bigint_arg &&
+                        !is_list_arg && !is_tuple_arg && !is_dict_arg &&
+                        !is_bigint_arg &&
                         !nyr_expr_is_cstr(b, arg) && nyr_expr_is_any(b, arg);
       if (!is_any_arg && arg && arg->kind == NY_E_INDEX &&
           arg->as.index.target && arg->as.index.target->kind == NY_E_IDENT &&
@@ -8387,6 +8409,25 @@ ordinary_call:
         if (scalar_index) {
           is_any_arg = false;
           is_raw_int_arg = true;
+        }
+      }
+      bool index_bool_arg = false;
+      if (arg && arg->kind == NY_E_INDEX) {
+        const expr_t *literal_target =
+            nyr_resolve_list_literal(b, arg->as.index.target, 0);
+        if (literal_target && (literal_target->kind == NY_E_LIST ||
+                               literal_target->kind == NY_E_TUPLE)) {
+          for (size_t li = 0; li < literal_target->as.list_like.len; ++li) {
+            if (nyr_expr_is_bool(b, literal_target->as.list_like.data[li])) {
+              /* A typed boolean slot uses raw 0/1 for scalar consumers. Print
+               * crosses an `any` boundary so the descriptor reader restores
+               * the canonical boolean immediate before formatting. */
+              is_any_arg = true;
+              is_raw_int_arg = false;
+              index_bool_arg = true;
+              break;
+            }
+          }
         }
       }
       if (!is_raw_int_arg && arg && arg->kind == NY_E_CALL &&
@@ -8501,6 +8542,10 @@ ordinary_call:
        * rt_any_to_cstr would render the payload word (<ptr>/<fn>) instead of
        * the number.  Render through the raw entry when the fact says raw.
        */
+      /* A constant index into a boolean literal folds to raw 0/1. */
+      if (index_bool_arg &&
+          nyr_value_scalar_class(b, raw) == NYIR_SCALAR_I64_RAW)
+        raw = nyr_box_bool(b, raw);
       bool arg_arith_raw = arg && arg->kind == NY_E_BINARY &&
                            b->last_arith_expr == arg && b->last_arith_raw;
       bool bare_raw_integer_print =
@@ -8528,6 +8573,12 @@ ordinary_call:
                                     0);
         if (raw < 0)
           return -1;
+      }
+      if (is_dict_arg) {
+        raw = nyr_emit_runtime_call(b, "rt_any_to_cstr", raw, -1, -1, 1, 0);
+        if (raw < 0)
+          return -1;
+        arg_rendered_cstr = true;
       }
       /* The source classifier can miss a dispatched member/operator call
        * whose selected implementation has an f64 return ABI.  The defining
@@ -8597,7 +8648,8 @@ ordinary_call:
           bare_raw_integer_print
               ? "rt_print_i64_raw"
               : (is_bool || is_bigint_arg || nyr_expr_is_cstr(b, arg) ||
-                         is_list_arg || is_tuple_arg || is_raw_int_arg ||
+                         is_list_arg || is_tuple_arg || is_dict_arg ||
+                         is_raw_int_arg ||
                          is_any_arg || arg_rendered_cstr
                      ? "rt_print_cstr"
                  : (is_f64_arg || is_f32_arg) ? "rt_print_f64_raw"

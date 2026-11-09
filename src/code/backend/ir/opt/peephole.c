@@ -699,7 +699,7 @@ bool nyr_peephole(nyr_func_t *f) {
     return false;
   }
   int *defs = nyr_build_defs(f);
-  nir_range_query_cache_t range_cache = {0};
+  nir_range_query_cache_t range_cache = {.manual_invalidation = true};
   const char *skip_integer = getenv("NYTRIX_PEEPHOLE_SKIP_SERIAL_INTEGER");
   bool skip_integer_ops =
       skip_integer && *skip_integer && strcmp(skip_integer, "0") != 0;
@@ -711,6 +711,7 @@ bool nyr_peephole(nyr_func_t *f) {
     nyr_inst_t *in = &f->data[i];
     if (in->dst < 0 || in->a < 0 || in->b < 0)
       continue;
+    nyr_inst_t before = *in;
     bool ak = known[in->a] && kind[in->a] == 1;
     bool bk = known[in->b] && kind[in->b] == 1;
     bool akf64 = known[in->a] && kind[in->a] == 2;
@@ -1342,6 +1343,14 @@ bool nyr_peephole(nyr_func_t *f) {
     default:
       break;
     }
+    /*
+     * The range cache is valid only while its definitions and branch
+     * predicates are unchanged. This ordered walk can invalidate once at a
+     * rewritten instruction instead of comparing the whole function on every
+     * query. Insertions are detected by the cache's data/length key.
+     */
+    if (memcmp(&before, in, sizeof(before)) != 0)
+      nir_range_query_cache_invalidate(&range_cache);
   }
   nir_range_query_cache_free(&range_cache);
   free(defs);

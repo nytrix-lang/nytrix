@@ -760,7 +760,7 @@ double rt_f64_round(double value) { return (double)llround(value); }
 double rt_f64_pow(double base, double exponent) { return pow(base, exponent); }
 double rt_f64_floor(double value) { return floor(value); }
 double rt_f64_ceil(double value) { return ceil(value); }
-double rt_fmod_f64(double left, double right) { return fmod(left, right); }
+__attribute__((noinline)) double rt_fmod_f64(double left, double right) { return fmod(left, right); }
 int64_t rt_flt_exp(int64_t v) {
   return rt_flt_box_double(exp(rt_flt_unbox_double(v)));
 }
@@ -783,8 +783,10 @@ int64_t rt_flt_round(int64_t v) {
   return rt_tag_v((int64_t)llround(rt_flt_unbox_double(v)));
 }
 int64_t rt_flt_fmod(int64_t a, int64_t b) {
+  /* Callers read this `f64` builtin from xmm0, and GCC inlines fmod through
+   * x87 without setting it, so go through the out-of-line helper. */
   return rt_flt_box_double(
-      fmod(rt_flt_unbox_double(a), rt_flt_unbox_double(b)));
+      rt_fmod_f64(rt_flt_unbox_double(a), rt_flt_unbox_double(b)));
 }
 int64_t rt_flt_pow(int64_t a, int64_t b) {
   return rt_flt_box_double(pow(rt_flt_unbox_double(a), rt_flt_unbox_double(b)));

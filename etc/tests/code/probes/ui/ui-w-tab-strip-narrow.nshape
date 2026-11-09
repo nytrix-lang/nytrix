@@ -1,0 +1,24 @@
+shape ui_w_tab_strip_narrow {
+  family "probe-suite"
+  generator "regression"
+  features [ny render ui gui]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect_stdout "UI-W-TAB-STRIP-NARROW-OK"
+  source ny <<'NY'
+use core
+use core.os.ui.render.viewer.gui as gui
+
+def a = gui.tab_strip_slot(10.0, 100.0, 4, 0)
+def b = gui.tab_strip_slot(10.0, 100.0, 4, 1)
+def c = gui.tab_strip_slot(10.0, 100.0, 4, 2)
+def d = gui.tab_strip_slot(10.0, 100.0, 4, 3)
+assert(float(a.get(0)) == 10.0 && float(a.get(1)) == 25.0, "first narrow tab slot")
+assert(float(b.get(0)) == 35.0 && float(b.get(1)) == 25.0, "second narrow tab slot")
+assert(float(c.get(0)) == 60.0 && float(c.get(1)) == 25.0, "third narrow tab slot")
+assert(float(d.get(0)) == 85.0 && float(d.get(1)) == 25.0, "last narrow tab slot")
+assert(float(a.get(0)) + float(a.get(1)) == float(b.get(0)), "first hit target ends at second")
+assert(float(c.get(0)) + float(c.get(1)) == float(d.get(0)), "third hit target ends at fourth")
+print("UI-W-TAB-STRIP-NARROW-OK")
+NY
+}

@@ -6375,7 +6375,7 @@ static int cmd_public_fuzz_all_plan(int argc, char **argv) {
   if (language_freshness_penalty > 0.0)
     runs_to_good_language_score = -1.0;
   double runs_to_good_language_days =
-      fuzz_all_runs_to_days(runs_to_good_language_score, runs_per_day);
+      fuzz_all_calc_runs_to_days(runs_to_good_language_score, runs_per_day);
   char language_score_note[256] = {0};
   if (!language_evidence_fresh) {
     snprintf(language_score_note, sizeof(language_score_note),
@@ -8933,10 +8933,6 @@ static double fuzz_all_not_run_lanes(double ran_lanes, double total_lanes) {
 
 static double fuzz_all_perf_watchlist_threshold(void) { return 1.25; }
 
-static double fuzz_all_perf_watchlist_artifact_fresh_hours(void) {
-  return 24.0;
-}
-
 static double fuzz_all_perf_slowdown_percent(double ratio) {
   if (ratio <= 1.0)
     return 0.0;
@@ -10353,13 +10349,6 @@ static void fuzz_all_score_from_status(const fuzz_all_status_summary_t *s,
                       out->evidence_cap, s->target_percent);
 }
 
-static double fuzz_all_thread_years_per_run(double remaining_thread_years,
-                                            double runs_needed) {
-  if (remaining_thread_years <= 0.0 || runs_needed <= 0.0)
-    return 0.0;
-  return remaining_thread_years / runs_needed;
-}
-
 static double fuzz_all_target_percent_per_run(double thread_years_per_run,
                                               double target_thread_years) {
   if (thread_years_per_run <= 0.0 || target_thread_years <= 0.0)
@@ -10389,12 +10378,6 @@ static double fuzz_all_runs_to_good(double target_percent,
   if (runs < 1)
     runs = 1;
   return (double)runs;
-}
-
-static double fuzz_all_runs_to_days(double runs, double runs_per_day) {
-  if (runs < 0.0 || runs_per_day <= 0.0)
-    return -1.0;
-  return runs / runs_per_day;
 }
 
 static double fuzz_all_campaign_calendar_percent_10y(double age_days) {
@@ -10475,7 +10458,7 @@ fuzz_all_projection_from_status(const fuzz_all_status_summary_t *s,
     out->thread_years_per_run = s->thread_years_per_day / s->runs_per_day;
     out->thread_years_per_run_source = "plan-rate";
   } else {
-    out->thread_years_per_run = fuzz_all_thread_years_per_run(
+    out->thread_years_per_run = fuzz_all_calc_thread_years_per_run(
         s->remaining_thread_years, s->runs_needed);
   }
   out->target_percent_per_run = fuzz_all_target_percent_per_run(
@@ -10497,7 +10480,7 @@ fuzz_all_projection_from_status(const fuzz_all_status_summary_t *s,
   if (score->freshness_penalty > 0.0)
     out->runs_to_good_stability = -1.0;
   out->runs_to_good_days =
-      fuzz_all_runs_to_days(out->runs_to_good_stability, s->runs_per_day);
+      fuzz_all_calc_runs_to_days(out->runs_to_good_stability, s->runs_per_day);
 }
 
 static char *make_fuzz_all_status_summary_row(
@@ -10874,7 +10857,7 @@ static char *make_fuzz_all_status_summary_row(
         : 0.0,
       s ? s->perf_watchlist_artifact_age_seconds : -1.0,
       s ? s->perf_watchlist_artifact_stale_after_hours
-        : fuzz_all_perf_watchlist_artifact_fresh_hours());
+        : fuzz_all_score_latest_fresh_hours());
   (void)sb_append(&row, ",\"perf_watchlist_artifact_max_case\":");
   (void)sb_append_json_str(&row, s ? s->perf_watchlist_artifact_max_case : "");
   (void)sb_append(&row, ",\"perf_watchlist_artifact_max_artifact\":");

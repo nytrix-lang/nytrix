@@ -2384,7 +2384,8 @@ int64_t rt_tbuf_get_any(int64_t buffer, int64_t index, int64_t fallback) {
           return out;
         }
         if (tag == NY_TBUF_TAG_BOOL)
-          return value;
+          return value == NY_IMM_TRUE || value == 1 ? NY_IMM_TRUE
+                                                     : NY_IMM_FALSE;
         if (tag == 121)
           return rt_cstr_to_str(value);
         if (tag == 1 || tag == 3)
@@ -2496,6 +2497,8 @@ int64_t rt_tbuf_index_read_raw(int64_t buffer, int64_t index) {
         if (elem_size == 24) {
           memcpy(&tag, data + (size_t)index * (size_t)elem_size + 16,
                  sizeof(tag));
+          if (tag == NY_TBUF_TAG_BOOL)
+            return value == NY_IMM_TRUE || value == 1 ? 1 : 0;
           if (tag == TAG_FLOAT && !is_v_flt(value))
             return rt_flt_box_val(value);
           if (tag == TAG_STR || tag == TAG_STR_CONST || tag == 121)
@@ -2607,7 +2610,8 @@ static int64_t rt_tbuf_index_any_impl(int64_t buffer, int64_t index) {
         if (tag == TAG_STR || tag == TAG_STR_CONST)
           return rt_cstr_to_str(value);
         if (tag == NY_TBUF_TAG_BOOL)
-          return value;
+          return value == NY_IMM_TRUE || value == 1 ? NY_IMM_TRUE
+                                                     : NY_IMM_FALSE;
         if (tag == 1 || tag == 3)
           return rt_tag_v(value);
         return value;
@@ -2846,7 +2850,16 @@ int64_t rt_tbuf_to_cstr(int64_t buffer) {
     }
     char item[64];
     int n;
-    if (is_string_slot || rt_native_is_str(value) || is_v_str(value)) {
+    if (slot_tag == NY_TBUF_TAG_BOOL) {
+      const char *word = value == NY_IMM_TRUE || value == 1 ? "true" : "false";
+      size_t len = value == NY_IMM_TRUE || value == 1 ? 4 : 5;
+      if (used + len + 1 >= cap) {
+        free(out);
+        return 0;
+      }
+      memcpy(out + used, word, len);
+      used += len;
+    } else if (is_string_slot || rt_native_is_str(value) || is_v_str(value)) {
       const char *s = (const char *)(uintptr_t)rt_any_to_cstr(value);
       size_t len = s ? strnlen(s, 4096) : 0;
       if (used + len + 3 >= cap) {
@@ -5070,8 +5083,10 @@ int64_t rt_value_set_tagged(int64_t value, int64_t key, int64_t item) {
     }
   }
   int64_t heap = rt_heap_object_ptr(value);
+  /* This entry takes tagged scalars; the bytes setter takes raw words. */
   if (heap && *(int64_t *)((char *)(uintptr_t)heap - 8) == TAG_BYTES)
-    return rt_bytes_set_raw(heap, key, item);
+    return rt_bytes_set_raw(heap, is_int(key) ? rt_untag_v(key) : key,
+                            is_int(item) ? rt_untag_v(item) : item);
   /*
    * Native dictionaries also carry the language dict tag.  Dispatch them
    * first: the managed bridge has a different payload layout and silently

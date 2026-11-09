@@ -1622,6 +1622,48 @@ scalar_multiply:
     return equal < 0 || true_imm < 0
                ? -1 : nyr_emit_cmp_i64(b, cmp, equal, true_imm);
   }
+  /* A dynamic value compared with a boolean compares boxed words. */
+  if (is_cmp && (cmp == NYIR_CMP_EQ || cmp == NYIR_CMP_NE) &&
+      e->as.binary.left && e->as.binary.right &&
+      ((nyr_value_scalar_class(b, a) == NYIR_SCALAR_I64_TAGGED &&
+        nyr_expr_is_bool(b, e->as.binary.right)) ||
+       (nyr_value_scalar_class(b, rhs) == NYIR_SCALAR_I64_TAGGED &&
+        nyr_expr_is_bool(b, e->as.binary.left)))) {
+    /* Older storage holds a boolean as tagged 0/1, so accept both forms. */
+    bool left_dynamic_word =
+        nyr_value_scalar_class(b, a) == NYIR_SCALAR_I64_TAGGED;
+    int dynamic_word = left_dynamic_word ? a : rhs;
+    int bool_word = left_dynamic_word ? rhs : a;
+    if (nyr_value_is_dynamic(b, bool_word))
+      bool_word = nyr_emit_truthy(b, bool_word);
+    int boxed = bool_word < 0 ? -1 : nyr_box_bool(b, bool_word);
+    int tagged = bool_word < 0 ? -1
+                               : nyr_emit_runtime_call(b, "rt_tag", bool_word,
+                                                       -1, -1, 1, 0);
+    int true_imm = nyr_emit_const(b, NY_IMM_TRUE);
+    int zero = nyr_emit_const(b, 0);
+    if (boxed < 0 || tagged < 0 || true_imm < 0 || zero < 0)
+      return -1;
+    int same_boxed =
+        nyr_emit_runtime_call(b, "rt_any_eq", dynamic_word, boxed, -1, 2, 0);
+    int same_tagged =
+        nyr_emit_runtime_call(b, "rt_any_eq", dynamic_word, tagged, -1, 2, 0);
+    if (same_boxed < 0 || same_tagged < 0)
+      return -1;
+    int hit_boxed = nyr_emit_cmp_i64(b, NYIR_CMP_EQ, same_boxed, true_imm);
+    int hit_tagged = nyr_emit_cmp_i64(b, NYIR_CMP_EQ, same_tagged, true_imm);
+    int hits = hit_boxed < 0 || hit_tagged < 0
+                   ? -1
+                   : nyr_emit_add_i64(b, hit_boxed, hit_tagged);
+    int compared =
+        hits < 0
+            ? -1
+            : nyr_emit_cmp_i64(
+                  b, cmp == NYIR_CMP_EQ ? NYIR_CMP_NE : NYIR_CMP_EQ, hits, zero);
+    if (compared < 0)
+      return -1;
+    return nyr_box_bool(b, compared);
+  }
   /* A nested attached-get result is a container payload even when its
    * producer's conservative scalar class later clears `dynamic_result`.
    * Resolve sequence equality at the semantic boundary, before those
@@ -2343,7 +2385,8 @@ scalar_multiply:
   if ((!is_cmp || right_int_literal) &&
       (left_scalar_get || left_scalar_get_mem) && !left_is_raw_list_get &&
       !(left_dynamic_index && !expr_f64 && !expr_f32)) {
-    a = nyr_emit_runtime_call(b, "rt_any_to_i64", a, -1, -1, 1, 0);
+    if (!nyr_value_is_any_decoded(b, a))
+      a = nyr_emit_runtime_call(b, "rt_any_to_i64", a, -1, -1, 1, 0);
     left_any = false;
     left_dynamic_result = false;
     left_raw_i64 = true;
@@ -2352,7 +2395,8 @@ scalar_multiply:
   if ((!is_cmp || left_int_literal) &&
       (right_scalar_get || right_scalar_get_mem) && !right_is_raw_list_get &&
       !(right_dynamic_index && !expr_f64 && !expr_f32)) {
-    rhs = nyr_emit_runtime_call(b, "rt_any_to_i64", rhs, -1, -1, 1, 0);
+    if (!nyr_value_is_any_decoded(b, rhs))
+      rhs = nyr_emit_runtime_call(b, "rt_any_to_i64", rhs, -1, -1, 1, 0);
     right_any = false;
     right_dynamic_result = false;
     right_raw_i64 = true;

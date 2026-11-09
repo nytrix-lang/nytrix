@@ -1925,10 +1925,6 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
               element->semantic.rep == NY_SEM_REP_AGGREGATE ||
               element->semantic.rep == NY_SEM_REP_TYPED_BUFFER)))
           all_raw_i64 = false;
-        /* Bool elements carry raw 0/1 from comparison lowering; stored raw,
-         * a boxed read classifies true as tagged integer 0. */
-        if (nyr_expr_is_bool(b, element))
-          all_raw_i64 = false;
         /* Comparison results lower as raw 0/1.  Stored raw, a boxed read
          * classifies `true` as tagged integer 0 (it printed 0 and was falsy
          * after leaving the list), so bool elements need the descriptor
@@ -2298,6 +2294,7 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
     bool string_elements = false;
     bool saw_int_word = false;
     bool saw_float_word = false;
+    bool saw_bool_word = false;
     for (size_t i = 0; i < count; ++i) {
       const expr_t *el = e->as.list_like.data[i];
       bool negate = false;
@@ -2349,9 +2346,9 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
         saw_float_word = true;
         values[i].tag = TAG_FLOAT;
       } else if (!negate && el->as.literal.kind == NY_LIT_BOOL) {
-        values[i].value = el->as.literal.as.b ? 1 : 0;
-        values[i].tag = 3;
-        saw_int_word = true;
+        values[i].value = el->as.literal.as.b ? NY_IMM_TRUE : NY_IMM_FALSE;
+        values[i].tag = NY_TBUF_TAG_BOOL;
+        saw_bool_word = true;
       } else if (!negate && el->as.literal.kind == NY_LIT_STR) {
         if (i && !string_elements) {
           nyr_fail(b, "native NYIR lower: heterogeneous constant "
@@ -2373,8 +2370,10 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
      * Mixed numeric lists need descriptors so index lowering can carry each
      * element's runtime type alongside its raw 64-bit payload.
      */
-    size_t stride =
-        string_elements || (saw_int_word && saw_float_word) ? 24 : 8;
+    size_t stride = string_elements || saw_bool_word ||
+                            (saw_int_word && saw_float_word)
+                        ? 24
+                        : 8;
     const char *arr_sym = nyr_arraytab_intern(values, count, stride, NULL, 0);
     free(values);
     if (!arr_sym)
@@ -2983,7 +2982,9 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
           target_local && target_local->list_literal
               ? target_local->list_literal
               : literal_target;
-      if (local_list_literal && local_list_literal->kind == NY_E_LIST) {
+      if (local_list_literal &&
+          (local_list_literal->kind == NY_E_LIST ||
+           local_list_literal->kind == NY_E_TUPLE)) {
         for (size_t i = 0; i < local_list_literal->as.list_like.len; ++i) {
           const expr_t *element = local_list_literal->as.list_like.data[i];
           const char *constructor =
@@ -3084,7 +3085,8 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
      * that physical boundary.  Parameterized scalar/nested lists may use the
      * proven raw representation as before. */
     if (dynamic_index_result && index_result_known &&
-        !dynamic_sequence_target && !unknown_call_receiver &&
+        !dynamic_sequence_target && !typed_descriptor_target &&
+        !unknown_call_receiver &&
         !b->index_for_any_call)
       dynamic_index_result = false;
     if (dynamic_index_result) {
@@ -4044,6 +4046,7 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
            nyr_expr_is_dict(b, append_value) ||
            nyr_expr_is_list(b, append_value) ||
            nyr_expr_is_bytes(b, append_value) || append_value_is_async ||
+           nyr_expr_is_bool(b, append_value) ||
            (append_local && append_local->is_dyn_list)) &&
                   !nyr_expr_is_raw_dynamic_read(b, append_value)
               ? "rt_tbuf_append_tagged"

@@ -276,7 +276,7 @@ fn atlas_flush(any a) int {
       __copy_mem_raw(dst, src, row_bytes)
       row += 1
    }
-   _atlas_update_texture_rect(tex_id, dx1, dy1, rw, rh, _atlas_scratch, a)
+   if !_atlas_update_texture_rect(tex_id, dx1, dy1, rw, rh, _atlas_scratch, a) { return -1 }
    if _atlas_scratch_cap > _atlas_scratch_keep_max() {
       free(_atlas_scratch)
       _atlas_scratch = 0

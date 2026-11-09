@@ -3154,6 +3154,19 @@ static bool mach_alu_preg_preg(nyr_x64_mach_enc_t *e, nyr_mach_opcode_t op,
          mach_u8(e, (unsigned char)(0xc0 | ((dst & 7) << 3) | (src & 7)));
 }
 
+static bool mach_alu_preg_home(nyr_x64_mach_enc_t *e, nyr_mach_opcode_t op,
+                               int dst, int off) {
+  unsigned opc = op == NYR_MACH_ADD   ? 0x03
+                 : op == NYR_MACH_SUB ? 0x2b
+                 : op == NYR_MACH_AND ? 0x23
+                 : op == NYR_MACH_OR  ? 0x0b
+                 : op == NYR_MACH_XOR ? 0x33
+                                     : 0xaf;
+  return mach_rex(e, true, dst >= 8, false, false) &&
+         (op != NYR_MACH_MUL || mach_u8(e, 0x0f)) && mach_u8(e, opc) &&
+         mach_rbp_disp(e, (unsigned)dst, off);
+}
+
 /*
  * Load an operand's current value into a physical register using only the
  * trusted source channels (immediate rematerialization, sticky %rax,
@@ -3201,7 +3214,7 @@ static bool mach_load_src_preg(nyr_x64_mach_enc_t *e,
 static bool mach_shift_preg_imm(nyr_x64_mach_enc_t *e,
                                nyr_mach_opcode_t op,
                                int dst, int64_t imm) {
-  unsigned ext = op == NYR_MACH_SHL ? 6
+  unsigned ext = op == NYR_MACH_SHL ? 4
                  : op == NYR_MACH_SAR ? 7
                  : op == NYR_MACH_SHR ? 5
                  : op == NYR_MACH_ROR ? 1 : 0xff;
@@ -8911,6 +8924,33 @@ static bool mach_float_binop(nyr_x64_mach_enc_t *e, const nyr_mach_inst_t *in,
   int breg = in->src1.kind == NYR_MACH_OPERAND_VREG
                  ? mach_vreg_fpreg(e, in->src1.as.reg)
                  : -1;
+  if (e->vex) {
+    /* VEX.vvvv carries the independent LHS. Loading it into the result
+     * first only adds vmovaps and can overwrite a dying RHS in that color.
+     * XMM14 is reserved, so a spilled LHS cannot clobber a colored RHS. */
+    if (!mach_load_float_operand(e, &in->src0, f32, 14, &a))
+      return false;
+    if (breg >= 0) {
+      if (!mach_seed_float_preg(e, in->src1.as.reg) ||
+          !mach_vex(e, f32 ? 2 : 3, false, d, 0, (unsigned)breg, a, opc) ||
+          !mach_u8(e, 0xc0 | ((d & 7) << 3) | ((unsigned)breg & 7)))
+        return false;
+    } else if (in->src1.kind == NYR_MACH_OPERAND_VREG ||
+               in->src1.kind == NYR_MACH_OPERAND_FRAME) {
+      if (!mach_vex(e, f32 ? 2 : 3, false, d, 0, 5, a, opc) ||
+          !mach_u8(e, 0x85 | ((d & 7) << 3)) ||
+          !mach_i32(e, mach_slot_off(e, &in->src1)))
+        return false;
+    } else {
+      return mach_err(e, "x64 machine form encode: unsupported float rhs");
+    }
+    if (assigned >= 0) {
+      if (e->fp_color_seeded)
+        e->fp_color_seeded[in->dst.as.reg] = true;
+      return true;
+    }
+    return mach_store_xmm(e, dst_off, f32, d);
+  }
   bool rhs_saved = false;
   /*
    * Scalar add/multiply are commutative: consume the dying RHS in place
@@ -9803,6 +9843,90 @@ static bool mach_block_vzeroupper(nyr_x64_mach_enc_t *e, size_t bi) {
     }
   }
   return mach_vzeroupper(e);
+}
+
+static size_t mach_without_jumps(size_t off, const size_t *cuts, size_t count) {
+  if (off == SIZE_MAX)
+    return off;
+  size_t lo = 0, hi = count;
+  while (lo < hi) {
+    size_t mid = lo + (hi - lo) / 2;
+    if (cuts[mid] + 5 <= off)
+      lo = mid + 1;
+    else
+      hi = mid;
+  }
+  if (lo < count && cuts[lo] < off)
+    off = cuts[lo];
+  return off - 5 * lo;
+}
+
+/* Fold jcc taken / jmp other / taken: into inverse-jcc other / taken:.
+ * Check the emitted bytes as well as the CFG: segment-end home stores or
+ * vector boundary code must never be skipped. A trampoline with another
+ * predecessor must retain its jump. Do this before patching block branches,
+ * and move relocations and MIR source offsets with the removed bytes. */
+static bool mach_fold_branch_trampolines(nyr_x64_mach_enc_t *e) {
+  if (e->patch_count < 2)
+    return true;
+  const nyr_mach_func_t *m = e->mach;
+  size_t *cuts = malloc(e->patch_count * sizeof(*cuts));
+  if (!cuts)
+    return mach_err(e, "x64 branch folding: OOM");
+  size_t count = 0;
+  for (size_t i = 0; i + 1 < e->patch_count; ++i) {
+    size_t at = e->patch_at[i];
+    uint32_t taken = e->patch_block[i];
+    if (at == SIZE_MAX || at < 2 || at + 9 > e->code.len || taken < 2 ||
+        taken >= m->block_len || e->code.data[at - 2] != 0x0f ||
+        (e->code.data[at - 1] & 0xf0) != 0x80 ||
+        e->code.data[at + 4] != 0xe9 || e->patch_at[i + 1] != at + 5 ||
+        e->block_off[taken - 1] != at + 4 || e->block_off[taken] != at + 9)
+      continue;
+    const nyr_mach_block_t *source = &m->blocks[taken - 2];
+    const nyr_mach_block_t *trampoline = &m->blocks[taken - 1];
+    if (!source->inst_count || trampoline->inst_count != 1 ||
+        m->insts[source->first_inst + source->inst_count - 1].opcode !=
+            NYR_MACH_BR_IF ||
+        m->insts[trampoline->first_inst].opcode != NYR_MACH_BR ||
+        !mach_block_has_only_pred(m, taken - 1, taken - 2))
+      continue;
+    e->code.data[at - 1] ^= 1;
+    e->patch_block[i] = e->patch_block[i + 1];
+    cuts[count++] = at + 4;
+    e->patch_at[++i] = SIZE_MAX;
+  }
+  if (count) {
+    size_t read = 0, write = 0;
+    for (size_t i = 0; i < count; ++i) {
+      size_t len = cuts[i] - read;
+      memmove(e->code.data + write, e->code.data + read, len);
+      write += len;
+      read = cuts[i] + 5;
+    }
+    memmove(e->code.data + write, e->code.data + read, e->code.len - read);
+    e->code.len -= 5 * count;
+    for (size_t b = 0; b < m->block_len; ++b)
+      e->block_off[b] = mach_without_jumps(e->block_off[b], cuts, count);
+    for (size_t i = 0; i < m->inst_len; ++i)
+      e->inst_offsets[i] = mach_without_jumps(e->inst_offsets[i], cuts, count);
+    for (size_t i = 0; i < e->reloc_count; ++i)
+      e->relocs[i].disp_off =
+          mach_without_jumps(e->relocs[i].disp_off, cuts, count);
+    if (e->bare_payload_entry)
+      e->bare_payload_entry =
+          mach_without_jumps(e->bare_payload_entry - 1, cuts, count) + 1;
+    size_t kept = 0;
+    for (size_t i = 0; i < e->patch_count; ++i) {
+      if (e->patch_at[i] == SIZE_MAX)
+        continue;
+      e->patch_at[kept] = mach_without_jumps(e->patch_at[i], cuts, count);
+      e->patch_block[kept++] = e->patch_block[i];
+    }
+    e->patch_count = kept;
+  }
+  free(cuts);
+  return true;
 }
 
 static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
@@ -11834,14 +11958,16 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
             fold = imm_fold[in->src1.as.reg];
             fold_ok = true;
           }
-          if (fold_ok && mach->c_abi &&
+          if (fold_ok &&
               (in->opcode == NYR_MACH_SHL || in->opcode == NYR_MACH_SAR ||
                in->opcode == NYR_MACH_SHR || in->opcode == NYR_MACH_ROR ||
                in->opcode == NYR_MACH_ROR32) &&
               in->dst.kind == NYR_MACH_OPERAND_VREG &&
               in->src0.kind == NYR_MACH_OPERAND_VREG) {
             /*
-             * Destination-preg immediate shift: stage the canonical home
+             * MIR shifts already have explicit bitwise semantics: tagged
+             * language operations have been legalized before this point.
+             * Destination-preg immediate shift: stage the current value
              * straight into the destination register and shift there,
              * skipping the %rax round trip. ROR32 is a real 32-bit rotate,
              * whose result the hardware zero-extends.
@@ -12048,6 +12174,14 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
                     emitted = true;
                   }
                 }
+              } else {
+                /* The generic ALU path reads this same canonical RHS home.
+                 * Keep a colored LHS/result out of RAX even when the RHS
+                 * spilled; no register-residency proof changes here. */
+                if (!mach_mov_preg_preg(e, dp, ap) ||
+                    !mach_alu_preg_home(e, in->opcode, dp, b))
+                  return false;
+                emitted = true;
               }
             }
             if (emitted) {
@@ -14249,6 +14383,8 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
   /*
    * Patch relative jumps
    */
+  if (!mach_fold_branch_trampolines(e))
+    return false;
   for (size_t i = 0; i < e->patch_count; ++i) {
     size_t at = e->patch_at[i];
     uint32_t blk = e->patch_block[i];

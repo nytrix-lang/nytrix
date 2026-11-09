@@ -337,7 +337,7 @@ static int cmd_public_fuzz_all_status(int argc, char **argv) {
   status.perf_watchlist_artifact_age_seconds =
       fuzz_all_score_report_age_seconds(root, status.perf_watchlist_report);
   status.perf_watchlist_artifact_stale_after_hours =
-      fuzz_all_perf_watchlist_artifact_fresh_hours();
+      fuzz_all_score_latest_fresh_hours();
   status.perf_watchlist_artifact_fresh =
       status.perf_watchlist_artifact_readable &&
       fuzz_all_score_age_fresh(status.perf_watchlist_artifact_age_seconds,
@@ -2411,12 +2411,6 @@ static double fuzz_all_progress_evidence_cap(double target_percent,
   return fuzz_all_score_evidence_cap(target_percent, campaign_complete);
 }
 
-static double fuzz_all_progress_thread_years_per_run(double remaining_thread_years,
-                                                     double runs_needed) {
-  if (remaining_thread_years <= 0.0 || runs_needed <= 0.0) return 0.0;
-  return remaining_thread_years / runs_needed;
-}
-
 static double fuzz_all_progress_percent_per_run(double thread_years_per_run,
                                                 double target_thread_years) {
   if (thread_years_per_run <= 0.0 || target_thread_years <= 0.0) return 0.0;
@@ -2427,10 +2421,6 @@ static double fuzz_all_progress_percent_per_run(double thread_years_per_run,
 
 static double fuzz_all_progress_good_threshold(void) {
   return fuzz_all_score_good_threshold();
-}
-
-static double fuzz_all_progress_latest_fresh_hours(void) {
-  return fuzz_all_score_latest_fresh_hours();
 }
 
 static double fuzz_all_progress_full_pressure_fresh_hours(void) {
@@ -2538,11 +2528,6 @@ static double fuzz_all_progress_runs_to_good(double target_percent,
   if ((double)runs + 0.000000001 < raw_runs) ++runs;
   if (runs < 1) runs = 1;
   return (double)runs;
-}
-
-static double fuzz_all_progress_runs_to_days(double runs, double runs_per_day) {
-  if (runs < 0.0 || runs_per_day <= 0.0) return -1.0;
-  return runs / runs_per_day;
 }
 
 static int fuzz_all_status_quiet(int argc, char **argv) {
@@ -2880,7 +2865,7 @@ static bool write_fuzz_all_progress_markdown(const char *markdown_path,
     (void)sb_appendf(&md, "- Source: status age %.1f min",
                      status_age_seconds / 60.0);
     if (latest_report_age_seconds >= 0.0) {
-      double stale_after = fuzz_all_progress_latest_fresh_hours();
+      double stale_after = fuzz_all_score_latest_fresh_hours();
       bool fresh = fuzz_all_progress_age_fresh(latest_report_age_seconds,
                                                stale_after);
       (void)sb_appendf(&md, "; latest %.1f h/%.0fh %s",
@@ -3916,7 +3901,7 @@ static int cmd_public_fuzz_all_progress(int argc, char **argv) {
   double perf_watchlist_artifact_max_ratio = 0.0;
   double perf_watchlist_artifact_age_seconds = -1.0;
     double perf_watchlist_artifact_stale_after_hours =
-        fuzz_all_perf_watchlist_artifact_fresh_hours();
+        fuzz_all_score_latest_fresh_hours();
     char *perf_watchlist_artifact_max_case = strdup("");
   char *perf_watchlist_artifact_max_artifact = strdup("");
   char *perf_watchlist_artifact_max_ny_source = strdup("");
@@ -4749,7 +4734,7 @@ static int cmd_public_fuzz_all_progress(int argc, char **argv) {
           fuzz_all_score_report_age_seconds(root, perf_watchlist_report);
     if (perf_watchlist_artifact_stale_after_hours <= 0.0)
       perf_watchlist_artifact_stale_after_hours =
-          fuzz_all_perf_watchlist_artifact_fresh_hours();
+          fuzz_all_score_latest_fresh_hours();
     perf_watchlist_artifact_fresh =
         perf_watchlist_artifact_readable &&
         fuzz_all_score_age_fresh(perf_watchlist_artifact_age_seconds,
@@ -4947,7 +4932,7 @@ static int cmd_public_fuzz_all_progress(int argc, char **argv) {
   double latest_full_pressure_report_age_seconds =
       fuzz_all_progress_report_age_seconds(root, latest_full_pressure_report);
   double latest_report_stale_after_hours =
-      fuzz_all_progress_latest_fresh_hours();
+      fuzz_all_score_latest_fresh_hours();
   double latest_full_pressure_report_stale_after_hours =
       fuzz_all_progress_full_pressure_fresh_hours();
   bool latest_report_fresh =
@@ -5008,7 +4993,7 @@ static int cmd_public_fuzz_all_progress(int argc, char **argv) {
     thread_years_per_run_source = "plan-rate";
   } else {
     thread_years_per_run =
-        fuzz_all_progress_thread_years_per_run(remaining_thread_years,
+        fuzz_all_calc_thread_years_per_run(remaining_thread_years,
                                                runs_needed);
   }
   double target_percent_per_run =
@@ -5030,7 +5015,7 @@ static int cmd_public_fuzz_all_progress(int argc, char **argv) {
                                      campaign_complete);
   if (freshness_penalty > 0.0) runs_to_good_stability = -1.0;
   double runs_to_good_days =
-      fuzz_all_progress_runs_to_days(runs_to_good_stability, runs_per_day);
+      fuzz_all_calc_runs_to_days(runs_to_good_stability, runs_per_day);
   double compiler_findings = compiler_live + compiler_missing;
   double known_bug_replay_findings =
       known_reproduced + known_lost + known_baseline;

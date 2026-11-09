@@ -52,6 +52,16 @@ extern double rt_fmod_f64(double left, double right);
 extern int64_t rt_flt_atan2(int64_t y, int64_t x);
 extern int64_t rt_flt_atan(int64_t v);
 extern int64_t rt_flt_tan(int64_t v);
+extern int64_t rt_flt_sin(int64_t v);
+extern int64_t rt_flt_cos(int64_t v);
+extern int64_t rt_flt_asin(int64_t v);
+extern int64_t rt_flt_acos(int64_t v);
+extern int64_t rt_flt_sqrt(int64_t v);
+extern int64_t rt_flt_exp(int64_t v);
+extern int64_t rt_flt_log(int64_t v);
+extern int64_t rt_flt_log2(int64_t v);
+extern int64_t rt_flt_log10(int64_t v);
+extern int64_t rt_flt_pow(int64_t a, int64_t b);
 extern double rt_f64_min(double left, double right);
 extern double rt_f64_max(double left, double right);
 extern double rt_tbuf_index_f64(int64_t buffer, int64_t index);
@@ -958,17 +968,36 @@ static bool ny_native_vm_call_resolve_impl(void *opaque, const char *symbol,
    * source declarations promise f64. Keep the VM result in the raw-f64 lane
    * just as the native and JIT call paths do.
    */
-  if (strcmp(symbol, "rt_flt_atan") == 0 || strcmp(symbol, "rt_flt_tan") == 0) {
-    if (!out || !args || arg_count != 1)
-      return nyr_set_error(err, err_len,
-                           "native NYIR VM: runtime ABI mismatch for %s: "
-                           "expected 1 argument, got %zu",
-                           symbol, arg_count),
-             false;
-    int64_t boxed = strcmp(symbol, "rt_flt_atan") == 0 ? rt_flt_atan(args[0])
-                                                       : rt_flt_tan(args[0]);
-    *out = nyr_f64_to_bits(rt_flt_unbox_double(boxed));
-    return true;
+  {
+    static const struct {
+      const char *symbol;
+      int64_t (*unary)(int64_t);
+      int64_t (*binary)(int64_t, int64_t);
+    } boxed_float_helpers[] = {
+        {"rt_flt_atan", rt_flt_atan, NULL},   {"rt_flt_tan", rt_flt_tan, NULL},
+        {"rt_flt_sin", rt_flt_sin, NULL},     {"rt_flt_cos", rt_flt_cos, NULL},
+        {"rt_flt_asin", rt_flt_asin, NULL},   {"rt_flt_acos", rt_flt_acos, NULL},
+        {"rt_flt_sqrt", rt_flt_sqrt, NULL},   {"rt_flt_exp", rt_flt_exp, NULL},
+        {"rt_flt_log", rt_flt_log, NULL},     {"rt_flt_log2", rt_flt_log2, NULL},
+        {"rt_flt_log10", rt_flt_log10, NULL}, {"rt_flt_pow", NULL, rt_flt_pow},
+    };
+    for (size_t i = 0;
+         i < sizeof(boxed_float_helpers) / sizeof(boxed_float_helpers[0]); ++i) {
+      if (strcmp(symbol, boxed_float_helpers[i].symbol) != 0)
+        continue;
+      size_t expected = boxed_float_helpers[i].unary ? 1 : 2;
+      if (!out || !args || arg_count != expected)
+        return nyr_set_error(err, err_len,
+                             "native NYIR VM: runtime ABI mismatch for %s: "
+                             "expected %zu arguments, got %zu",
+                             symbol, expected, arg_count),
+               false;
+      int64_t boxed = boxed_float_helpers[i].unary
+                          ? boxed_float_helpers[i].unary(args[0])
+                          : boxed_float_helpers[i].binary(args[0], args[1]);
+      *out = nyr_f64_to_bits(rt_flt_unbox_double(boxed));
+      return true;
+    }
   }
   ny_native_vm_call_status_t typed_status = ny_native_vm_call_typed_runtime(
       symbol, args, arg_count, out, err, err_len);

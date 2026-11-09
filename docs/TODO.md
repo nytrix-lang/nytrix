@@ -16,37 +16,22 @@ Working rules:
 - [ ] **Intermittent crashes under load:** `ui_replay_animation` segfaulted
   (exit 139) and `generated-mutable-flow-differential` aborted with "double
   free or corruption" in full runs. Both pass alone, and 84 concurrent cold runs
-  of the second did not reproduce it. Accept: reproduced, root-caused, fixed.
+  of the second did not reproduce it. Lead: `gc.c` drops the GC lock to run
+  finalizers during a collection. Accept: reproduced, root-caused, fixed.
 - [ ] **Same address flaw in Nytrix code:** run the suite and benchmarks against
   the fix and look for a language-level reproducer. With the fix reverted, all
-  71 NYR benchmarks still match gcc. Accept: reduced regression fixture added,
+  71 NYR benchmarks still match gcc. Lead: `object.c` seeds rematerialization by
+  vreg from entry-block LEAs without a unique reaching definition. Accept:
+  reduced regression fixture added,
   or the path shown unreachable.
+- [ ] **Boxed float builtin ABI:** builtins declared `f64` (`__flt_pow`, `__flt_sin`,
+  and others) return a boxed float in `rax` while callers read `xmm0`. It works
+  only because `xmm0` still holds the result. Changing them to return `any` broke
+  `render-camera-contract`. Accept: one contract on every route, suite green.
 - [ ] **Rendering path audit:** review the render APIs and modules for logic and
   compiler bugs with `-vvvvvv`, `--nyr-check=verify,oracle`, and
   `--native-only --inspect`. Accept: each defect recorded here with a
   reproducer, then fixed.
-
-## Language bugs
-
-Each has a confirmed reproducer. Accept: a fixture for each, on every backend.
-
-- [ ] **Ordered comparison on a dict read:** `d["a"] <= 0` is true when the value
-  is 1, because it is untagged twice. `.get` and a local copy are correct.
-- [ ] **Booleans in lists:** `print([1 == 1, 1 == 2])` prints `[8, 2]`, and an
-  element read back as `l[0]` prints `0`. The boxed value is tagged again.
-- [ ] **Raw value stored in a dynamic `mut`:** `mut x = d.get("b", 0) * 2` then
-  `x = 500` inside an `if` leaves an untagged word, and `print(x)` shows `nil`.
-- [ ] **`bytes` built through `any` helpers:** `def p = bytes(62)` passed to helpers
-  taking `any` and returned as `any` reports `.len` as 5 and loses later writes.
-  `def bytes p` is correct.
-- [ ] **Unary minus after a newline:** `def p = 1` then `-p` on the next line parses
-  as `1 - p`, and a doc string followed by `-5` fails to compile.
-- [ ] **Multi-line ternary:** a line starting with `?` or `:` does not continue the
-  expression.
-- [ ] **`fmod` in GCC builds:** a GCC-built compiler returns the divisor from
-  `__flt_fmod` (`fmod(5.5, 2.0)` gives 2) and fails `ui_replay_animation` there.
-- [ ] **New `lib/` files:** adding one needs a CMake reconfigure before edits reach
-  the embedded library, so a rebuild silently tests stale code.
 
 ## Performance: targets
 
@@ -77,12 +62,11 @@ Last table, ratio to C. Over 1.5x: 18 entries.
 - [ ] **Whole-function register allocation:** C has live-range splitting around
   call-free loops. Port it to NYR and find why loop registers conflict with
   ordinary values in `rsi`/`rdi` on C.
-- [ ] **`rax` staging:** loads now go straight to their register. Arithmetic still
-  moves through `rax`; use three-register forms.
+- [ ] **`rax` staging:** spilled right-hand operands are done. Other arithmetic
+  still moves through `rax`; use three-register forms.
 - [ ] **Stack-slot traffic:** about 12% loads and 8% stores remain.
-- [ ] **Encoder waste:** `vmovaps` before three-operand AVX and homing at block
-  boundaries. C parameter stores, leaf pushes, and `jcc` over `jmp` are done;
-  port those to NYR.
+- [ ] **Encoder waste:** homing at block boundaries, and C parameter stores and
+  leaf pushes for NYR. Scalar AVX copies and `jcc` over `jmp` are done.
 - [ ] **Backend API:** modularize and compact the x86-64 encoder and backend
   interfaces after the performance work settles. Accept: suite and benchmark
   gate unchanged.
@@ -92,10 +76,9 @@ Last table, ratio to C. Over 1.5x: 18 entries.
 - [ ] **AOT builds:** pong takes 55 s since the duplicate LLVM pass was removed
   (was 90). Target: under 30 s. Reachable-function collection (10 s) and `rt_main`
   lowering (13 s) are the largest stages.
-- [ ] **Known hot spots:** `nir_value_range_at_cached`, imported module member
+- [ ] **Known hot spots:** imported module member
   lookup, `tp_collect_call_observation`, `hm_complete_leaf_fact`,
   `nyr_cfg_build_impl`, `nyr_type_map_init`.
-- [ ] **`--run=aot` executable path:** make it fast and reliable.
 
 ## Startup
 
@@ -108,12 +91,8 @@ Reference: [dr_libs](https://github.com/mackron/dr_libs) (`dr_wav`, `dr_flac`,
 `dr_mp3`). Native decoders live in `lib/os/sound/res.ny`; each needs fixtures
 checked against reference output.
 
-- [ ] **WAV containers:** add fixtures for RIFX, RF64, and Wave64 parsing. PCM,
-  float, A-law, mu-law, `EXTENSIBLE`, and MS and IMA ADPCM are done and match
-  `ffmpeg` on RIFF test files.
-- [ ] **WAV writer:** PCM and float output in RIFF and RF64.
-- [ ] **AIFF/AIFC:** big-endian containers and their compressed variants.
-- [ ] **AU decoder:** cover every encoding, with A-law and mu-law expansion.
+- [ ] **AIFF `ima4`:** PCM, float, `sowt`, A-law, and mu-law match `ffmpeg`.
+- [ ] **AU encodings:** 1-7 and 27 are done; the rest (ADPCM variants) remain.
 - [ ] **Native FLAC decoder:** fixed and LPC subframes, stereo decorrelation,
   metadata blocks, CRC checks, seek tables, and Ogg-encapsulated FLAC.
 - [ ] **Native MP3 decoder:** MPEG-1/2/2.5 Layer I-III, ID3v1/ID3v2 skipping,
@@ -126,11 +105,10 @@ checked against reference output.
 - [ ] **Audit:** read `etc/projects/ui/engine.ny`, `editor.ny`, and `lib/os/ui`
   end to end and record defects here.
 - [ ] **Engine text garbling** on real Wayland.
-- [ ] **Left panel clipping** and the **tab strip**.
+- [ ] **Left panel clipping.**
 - [ ] **Polish:** gizmos, menus, and overall editor quality.
 - [ ] **Resize smoothness:** no flicker or stalls while dragging. Accept:
   headless resize stress plus frame-time logs.
-- [ ] **Frame profiling:** per-phase cost visible in the app.
 - [ ] **Modernize the UI system** after the audit identifies what to replace.
 - [ ] **TTY/TUI backend:** translate renderer programs to a terminal target.
 
@@ -144,5 +122,5 @@ checked against reference output.
 - [ ] **Modularize the C sources:** `src/code/lang/parse/c/parse.c` (48,000
   lines) and `src/code/backend/arch/x86_64/object.c` (15,000 lines) carry long
   near-duplicate runs. Coordinate with active NYC work (see [NYC work](todo/nyc.md)).
-- [ ] **Repeated source:** the audit reports 61,000 repeated lines. Start with
+- [ ] **Repeated source:** the audit reports 61,853 repeated lines. Start with
   `lib/os/dis/decomp/core.ny`, `lower.c`, and the fuzz drivers.

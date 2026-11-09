@@ -4,7 +4,7 @@
 ;; References:
 ;; - core.os.sound.res
 ;; - core.os.sound.source
-module core.os.sound.wav(decode_bytes)
+module core.os.sound.wav(decode_bytes, encode_bytes)
 use core
 use core.os.sound.source
 use core.tbuf
@@ -22,6 +22,70 @@ def _FMT_U8 = 2
 def _FMT_S24 = 3
 def _FMT_S32 = 4
 def _FMT_F32 = 5
+
+fn _put_text(any out, int at, str s) int {
+   mut i = 0
+   while i < s.len { store8(out, load8(s, i), at + i) i += 1 }
+   0
+}
+
+fn encode_bytes(any src, bool rf64=false) bytes {
+   "Serializes a memory sound source as RIFF or RF64 PCM/32-bit float WAV."
+   if !is_list(src) || src.get(0) != "SOUND_SOURCE" { return bytes(0) }
+   def meta = src.get(1, 0)
+   if !is_dict(meta) { return bytes(0) }
+   def ptr = meta.get("ptr", 0)
+   def data_len = int(meta.get("len", 0))
+   def channels = int(meta.get("channels", 0))
+   def rate = int(meta.get("rate", 0))
+   def bits = int(meta.get("bits", 0))
+   def tag = int(meta.get("format_tag", 1))
+   def width = (bits + 7) / 8
+   if !ptr || data_len <= 0 || channels <= 0 || channels > 65535 || rate <= 0 ||
+      (tag != 1 && !(tag == 3 && bits == 32)) ||
+      (tag == 1 && bits != 8 && bits != 16 && bits != 24 && bits != 32) ||
+      data_len % (channels * width) != 0 { return bytes(0) }
+   if !rf64 && data_len > 4294967259 { return bytes(0) }
+   def base = rf64 ? 80 : 44
+   def out = bytes(base + data_len)
+   if rf64 {
+      _put_text(out, 0, "RF64")
+      store32(out, 0xffffffff, 4)
+      _put_text(out, 8, "WAVE")
+      _put_text(out, 12, "ds64")
+      store32(out, 28, 16)
+      store64(out, base + data_len - 8, 20)
+      store64(out, data_len, 28)
+      store64(out, data_len / (channels * width), 36)
+      store32(out, 0, 44)
+      _put_text(out, 48, "fmt ")
+      store32(out, 16, 52)
+      store16(out, tag, 56)
+      store16(out, channels, 58)
+      store32(out, rate, 60)
+      store32(out, rate * channels * width, 64)
+      store16(out, channels * width, 68)
+      store16(out, bits, 70)
+      _put_text(out, 72, "data")
+      store32(out, 0xffffffff, 76)
+   } else {
+      _put_text(out, 0, "RIFF")
+      store32(out, base + data_len - 8, 4)
+      _put_text(out, 8, "WAVE")
+      _put_text(out, 12, "fmt ")
+      store32(out, 16, 16)
+      store16(out, tag, 20)
+      store16(out, channels, 22)
+      store32(out, rate, 24)
+      store32(out, rate * channels * width, 28)
+      store16(out, channels * width, 32)
+      store16(out, bits, 34)
+      _put_text(out, 36, "data")
+      store32(out, data_len, 40)
+   }
+   memcpy(out + base, ptr, data_len)
+   out
+}
 
 def _MS_ADAPT = [230, 230, 230, 230, 307, 409, 512, 614,
                  768, 614, 512, 409, 307, 230, 230, 230]

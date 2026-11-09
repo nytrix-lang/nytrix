@@ -26,3 +26,63 @@ assert(from_dict({"a": 0, "b": 5}) == 3, "local false selects the else arm")
 assert(from_dict({"a": 1, "b": 5}) == 1, "local true takes the branch")
 NY
 }
+
+shape dynamic_read_comparisons_and_assignment {
+  family "language/dynamic/integers"
+  generator "embedded"
+  features ["dynamic", "dict", "compare"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+fn le0(dict f) bool { f["a"] <= 0 }
+fn lt1(dict f) bool { f["a"] < 1 }
+fn ge1(dict f) bool { f["a"] >= 1 }
+fn gt0(dict f) bool { f["a"] > 0 }
+fn rev(dict f) bool { 0 >= f["a"] }
+
+fn check(int v, bool expected_positive) int {
+   def d = {"a": v, "s": 2}
+   assert(le0(d) != expected_positive, "<= on a dict read")
+   assert(lt1(d) != expected_positive, "< on a dict read")
+   assert(ge1(d) == expected_positive, ">= on a dict read")
+   assert(gt0(d) == expected_positive, "> on a dict read")
+   assert(rev(d) != expected_positive, "dict read on the right")
+   v
+}
+
+check(1, true)
+check(2, true)
+check(0, false)
+check(-3, false)
+
+fn reassigned(dict d) int {
+   mut x = d.get("b", 0)
+   x = 500
+   x + 1
+}
+assert(reassigned({"b": 3, "e": 2}) == 501, "raw value assigned to a dynamic local")
+
+fn printed(dict d) str {
+   mut x = d.get("b", 0)
+   x = 500
+   to_str(x)
+}
+assert(printed({"b": 3}) == "500", "reassigned dynamic local formats as an integer")
+
+fn masked(dict d) int {
+   mut x = d.get("b", 0)
+   x = band(6, 3)
+   x + 1
+}
+assert(masked({"b": 3}) == 3, "raw bitwise result stored in a dynamic local")
+
+fn compared(dict d) any {
+   mut x = d.get("b", 0)
+   x = 1 == 1
+   x
+}
+assert(to_str(compared({"b": 3})) == "true", "comparison stored in a dynamic local stays boolean")
+NY
+}

@@ -8535,7 +8535,7 @@ static const char *selftest_catalog_focused_template_command(void) {
 }
 
 static const char *selftest_catalog_focused_example_command(void) {
-  return NYTRIX_FUZZ_ALL_SELFTEST_FOCUSED_COMMAND;
+  return selftest_catalog_focused_command();
 }
 
 static const char *selftest_catalog_full_command(void) {

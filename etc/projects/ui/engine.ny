@@ -4001,7 +4001,7 @@ fn _draw_gui_profiler() {
    mut dict profiler_state = dict(4)
    profiler_state["show"] = _gui_show_profiler
    profiler_state["renderer"] = _gui_frame_stats_cache
-   profiler_state["profile"] = viewer_tools.profiler_snapshot(fps, _last_frame_ms, _last_update_ms, _last_world_ms, _last_draw_ms, _last_ui_ms, _fps_samples, _frame_ms_samples, _draw_ms_samples, _ui_ms_samples, ui_profile.parity_lock_stats_enabled())
+   profiler_state["profile"] = viewer_tools.profiler_snapshot(fps, _last_frame_ms, _last_update_ms, _last_world_ms, _last_draw_ms, _last_ui_ms, _fps_samples, _frame_ms_samples, _draw_ms_samples, _ui_ms_samples, ui_profile.parity_lock_stats_enabled(), _last_evt_ms, _last_gui_prep_ms, _last_sim_ms)
    profiler_state["renderer_hotspot"] = _gui_renderer_hotspot_cache
    def st = viewer_tools.draw_profiler(profiler_state)
    _gui_show_profiler = bool(st.get("show", _gui_show_profiler))
@@ -5939,8 +5939,10 @@ fn app_update(dt) {
    _ui_set_update_stage("start")
    _ui_set_update_stage("scene-requests")
    _process_gui_scene_requests()
-   def trace = ui_profile.trace_enabled()
-   def deep_trace = ui_profile.deep_enabled()
+   ;; The in-app profiler needs live samples without requiring diagnostic
+   ;; environment flags. Collect its phases only while the profiler is open.
+   def trace = ui_profile.trace_enabled() || _gui_show_profiler
+   def deep_trace = ui_profile.deep_enabled() || _gui_show_profiler
    def bench = ui_profile.ui_bench_enabled()
    def t_evt0 = (trace && deep_trace) ? ticks() : 0
    _ui_set_update_stage("fast-path")
@@ -6345,7 +6347,7 @@ fn _draw_frame(f64 phase, bool term_open) {
    def cam_px = _cam_px_cache
    def cam_py = _cam_py_cache
    def cam_pz = _cam_pz_cache
-   def trace = ui_profile.trace_enabled()
+   def trace = ui_profile.trace_enabled() || _gui_show_profiler
    def t0 = trace ? ticks() : 0
    if _ui_debug_enabled == 1 {
       def cur_to = term_open ? 1 : 0
@@ -7459,7 +7461,7 @@ fn _run_main_loop() {
       if ui_profile.env_truthy_cached("NYTRIX_UI_REPLAY") {
          elapsed = int(float(total_frames) * dt * 1000000000.0)
       }
-      def trace = ui_profile.trace_enabled()
+      def trace = ui_profile.trace_enabled() || _gui_show_profiler
       def timeout_close = _main_loop_timeout_close(elapsed)
       _batch_dump_check_model_timeout(now)
       _render_dt = dt

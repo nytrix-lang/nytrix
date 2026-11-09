@@ -67,6 +67,14 @@ static void rt_val_to_str_info(int64_t v, char *buf, size_t bsize,
       *out_len = (int)rt_tagged_str_len(s_obj);
       return;
     }
+    if (rt_native_is_dict(v) == NY_IMM_TRUE) {
+      int64_t s_obj = rt_native_dict_to_cstr(v);
+      if (s_obj) {
+        *out_s = (const char *)(uintptr_t)s_obj;
+        *out_len = (int)rt_tagged_str_len(s_obj);
+        return;
+      }
+    }
     if (rt_value_is_tbuf(v)) {
       /*
        * Native typed buffers reach the generic formatter when a list value

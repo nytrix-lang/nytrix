@@ -1,0 +1,37 @@
+shape ui_w_atlas_upload_failure {
+  family "probe-suite"
+  generator "regression"
+  features [ny render atlas]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect_stdout "UI-W-ATLAS-UPLOAD-FAILURE-OK"
+  source ny <<'NY'
+use core
+use core.os.ui.render.atlas as atlas
+
+atlas.atlas_set_backend("mock")
+def state = zalloc(32)
+def pixels = malloc(16)
+assert(state && pixels, "atlas test buffers allocated")
+store32(state, 1, 12)
+store32(state, 0, 16)
+store32(state, 0, 20)
+store32(state, 2, 24)
+store32(state, 2, 28)
+mut i = 0
+while i < 16 {
+   store8(pixels, 255, i)
+   i += 1
+}
+def sheet = {
+   "width": 2, "height": 2, "state_ptr": state, "cpu_buf": pixels,
+   "tex_id": 3, "backend": "mock", "filter": 0, "items": dict(4)
+}
+assert(atlas.atlas_flush(sheet) == -1, "failed texture update is reported")
+assert(load32(state, 12) == 1, "dirty atlas data remains queued after failed upload")
+atlas.atlas_set_backend("vk")
+free(pixels)
+free(state)
+print("UI-W-ATLAS-UPLOAD-FAILURE-OK")
+NY
+}

@@ -3,7 +3,7 @@
 ;; References:
 ;; - core.os.ui.render.viewer.batch
 ;; - core.os.ui.window
-module core.os.ui.render.viewer.gui(set_enabled, enabled, set_scale, scale, set_fonts, set_accent, accent, set_debug_overlay, debug_overlay, rect, inset, center_rect, clamp_rect, split_cols, split_rows, apply_window_rect, apply_window_rect_if_visible, tile_editor_shell, tile_editor_shell_preset, prepare_input, feed_event, key_pressed, begin_frame, end_frame, reset_state, wants_mouse, wants_keyboard, hit_test, suppress_mouse_clicks, hovered_id, active_id, focused_id, mouse_down, mouse_press_seq, last_item_rect, focus_window, request_focus, clear_focus, show_window, window_visible, window_closed, set_window_pos, set_window_size, window_rect, reset_window_scroll, warm_text_pipeline, begin_window, end_window, begin_scroll_area, set_scroll_area_content_hint, scroll_area_ensure_visible, end_scroll_area, scroll_area_scroll_y, scroll_area_visible_h, push_clip_rect, pop_clip_rect, same_line, spacing, spacer_px, reset_cursor, layout_gap, remaining_h, separator, text, label, text_colored, property_row, title_input_text, button, small_button, image, icon_button, selectable, selectable_file, input_text, checkbox, toggle, radio_button, tab_strip, combo_box, slider_float, slider_int, progress_bar, stat_card, plot_lines, grid_canvas, node_canvas, collapsing_header, color_edit4, color_picker4)
+module core.os.ui.render.viewer.gui(set_enabled, enabled, set_scale, scale, set_fonts, set_accent, accent, set_debug_overlay, debug_overlay, rect, inset, center_rect, clamp_rect, split_cols, split_rows, apply_window_rect, apply_window_rect_if_visible, tile_editor_shell, tile_editor_shell_preset, prepare_input, feed_event, key_pressed, begin_frame, end_frame, reset_state, wants_mouse, wants_keyboard, hit_test, suppress_mouse_clicks, hovered_id, active_id, focused_id, mouse_down, mouse_press_seq, last_item_rect, focus_window, request_focus, clear_focus, show_window, window_visible, window_closed, set_window_pos, set_window_size, window_rect, reset_window_scroll, warm_text_pipeline, begin_window, end_window, begin_scroll_area, set_scroll_area_content_hint, scroll_area_ensure_visible, end_scroll_area, scroll_area_scroll_y, scroll_area_visible_h, push_clip_rect, pop_clip_rect, same_line, spacing, spacer_px, reset_cursor, layout_gap, remaining_h, separator, text, label, text_colored, property_row, title_input_text, button, small_button, image, icon_button, selectable, selectable_file, input_text, checkbox, toggle, radio_button, tab_strip, tab_strip_slot, combo_box, slider_float, slider_int, progress_bar, stat_card, plot_lines, grid_canvas, node_canvas, collapsing_header, color_edit4, color_picker4)
 use core
 use core.math
 use core.os.ui.window.consts
@@ -2644,6 +2644,14 @@ fn toggle(any id, any label, any value) bool {
 
 fn radio_button(any id, any label, any selected) bool { _choice_control(id, label, selected, true) }
 
+fn tab_strip_slot(f64 x, f64 width, int count, int index) list {
+   "Returns the non-overlapping [x,width] hit target for one tab slot."
+   if width <= 0.0 || count <= 0 || index < 0 || index >= count { return [float(x), 0.0] }
+   def slot_w = width / float(count)
+   def slot_x = x + float(index) * slot_w
+   [slot_x, (index == count - 1) ? (x + width - slot_x) : slot_w]
+}
+
 fn tab_strip(any id, list labels, int selected=0, f64 w=0.0, f64 h=0.0) int {
    "Draws a tab strip and returns the selected tab index."
    def items = is_list(labels) ? labels : []
@@ -2659,13 +2667,12 @@ fn tab_strip(any id, list labels, int selected=0, f64 w=0.0, f64 h=0.0) int {
    def ww = float(rect.get(2, 0.0))
    def hh = float(rect.get(3, 0.0))
    def n = items.len
-   def tab_w = max(_sx(52.0), ww / float(max(n, 1)))
    _gui_rect_fast(x, y, ww, hh, _window_bg_u32)
    _gui_rect_outline_fast(x, y, ww, hh, _border_u32)
    mut i = 0
    while i < n {
-      mut tx, tw = x + float(i) * tab_w, tab_w
-      if i == n - 1 { tx, tw = x + ww - tab_w, max(_sx(52.0), x + ww - tx) }
+      def slot = tab_strip_slot(x, ww, n, i)
+      def tx, tw = float(slot.get(0, x)), float(slot.get(1, 0.0))
       def full = _widget_id_prefix + id_s + "#tab" + to_str(i)
       _register_focusable(full)
       _begin_interact_widget(full, tx, y, tw, hh, true)

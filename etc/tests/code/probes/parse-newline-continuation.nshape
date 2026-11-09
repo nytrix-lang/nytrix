@@ -1,0 +1,44 @@
+shape parse_newline_continuation {
+  family "language/parser"
+  generator "embedded"
+  features ["parser", "newline", "unary", "ternary"]
+  template ny-test-case
+  flags_matrix "--native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+mut p = 1
+mut q = 10
+-p
+assert(q == 10, "a statement-leading minus starts a new expression")
+
+fn returned_before_negative_line() int {
+   return 10
+   -p
+}
+assert(returned_before_negative_line() == 10,
+       "return expressions end before a new unary-minus statement")
+
+"documentation text"
+-5
+
+def grouped = (1
+- 2)
+assert(grouped == -1, "parentheses keep multiline subtraction together")
+def bracketed = [1
+- 2]
+assert(bracketed[0] == -1, "brackets keep multiline subtraction together")
+def continued = 1 +
+   2
+assert(continued == 3, "a line ending in an operator continues")
+
+fn choose(bool yes) int {
+   yes
+   ? 7
+   : 9
+}
+assert(choose(true) == 7, "multiline ternary takes the true arm")
+assert(choose(false) == 9, "multiline ternary takes the false arm")
+NY
+}

@@ -60,12 +60,13 @@ fn profiler_hot_label(any last_update_ms, any last_world_ms, any last_draw_ms, a
    label
 }
 
-fn profiler_snapshot(any fps_value, any last_frame_ms, any last_update_ms, any last_world_ms, any last_draw_ms, any last_ui_ms, any fps_samples, any frame_ms_samples, any draw_ms_samples, any ui_ms_samples, bool parity=false) dict {
+fn profiler_snapshot(any fps_value, any last_frame_ms, any last_update_ms, any last_world_ms, any last_draw_ms, any last_ui_ms, any fps_samples, any frame_ms_samples, any draw_ms_samples, any ui_ms_samples, bool parity=false, any last_evt_ms=0.0, any last_gui_prep_ms=0.0, any last_sim_ms=0.0) dict {
    "Builds the profiler timing snapshot consumed by the profiler panel."
    if parity {
       return {
          "fps": 0, "last_frame": 0.0, "last_update": 0.0, "last_world": 0.0,
-         "last_draw": 0.0, "last_ui": 0.0, "avg_fps": 0.0, "avg_frame": 0.0,
+         "last_draw": 0.0, "last_ui": 0.0, "last_events": 0.0, "last_gui_prep": 0.0,
+         "last_sim": 0.0, "avg_fps": 0.0, "avg_frame": 0.0,
          "avg_draw": 0.0, "avg_ui": 0.0, "peak_frame": 0.0, "hot_label": "steady"
       }
    }
@@ -73,6 +74,7 @@ fn profiler_snapshot(any fps_value, any last_frame_ms, any last_update_ms, any l
    {
       "fps": int(_num(fps_value)), "last_frame": _num(last_frame_ms), "last_update": _num(last_update_ms),
       "last_world": _num(last_world_ms), "last_draw": _num(last_draw_ms), "last_ui": _num(last_ui_ms),
+      "last_events": _num(last_evt_ms), "last_gui_prep": _num(last_gui_prep_ms), "last_sim": _num(last_sim_ms),
       "avg_fps": float(ui_app.app_hist_mean(fps_samples)), "avg_frame": float(frame_stats.get(0, 0.0)),
       "avg_draw": float(ui_app.app_hist_mean(draw_ms_samples)), "avg_ui": float(ui_app.app_hist_mean(ui_ms_samples)),
       "peak_frame": float(frame_stats.get(1, 0.0)),
