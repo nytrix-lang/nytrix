@@ -3594,8 +3594,20 @@ int ny_pipeline_run(ny_options *opt) {
    */
   char nyr_llvm_err[512] = {0};
   bool llvm_emit_ok = false;
+  /*
+   * A Nytrix-owned backend lowers the program itself when it writes the
+   * object, so the LLVM module is only needed by LLVM consumers. Building it
+   * anyway runs the whole NYIR pipeline twice.
+   */
+  bool skip_llvm_module =
+      opt->native_backend != NY_NATIVE_BACKEND_LLVM && !opt->run_jit &&
+      !opt->emit_ir_path && !opt->emit_ir_pre_path && !opt->emit_bc_path &&
+      !opt->emit_module && !opt->dump_llvm && !opt->dump_llvm_passes &&
+      !opt->dump_diagnose && !opt->emit_artifact_path && !opt->emit_shapes &&
+      !cg.emit_module_decls_only && !ny_env_enabled("NY_IR_DUMP");
   ny_pipe_trace_phase_memory("nyir-to-llvm.begin");
-  llvm_emit_ok = ny_pipeline_emit_llvm_program(&cg, &prog, opt, nyr_llvm_err,
+  llvm_emit_ok = skip_llvm_module ||
+                 ny_pipeline_emit_llvm_program(&cg, &prog, opt, nyr_llvm_err,
                                                sizeof(nyr_llvm_err));
   ny_pipe_trace_phase_memory("nyir-to-llvm.complete");
   if (!llvm_emit_ok) {
@@ -3608,7 +3620,8 @@ int ny_pipeline_run(ny_options *opt) {
   }
   if (!script_fn)
     script_fn = LLVMGetNamedFunction(cg.module, "_ny_top_entry");
-  if (!script_fn && !cg.emit_module_decls_only && !opt->emit_module) {
+  if (!skip_llvm_module && !script_fn && !cg.emit_module_decls_only &&
+      !opt->emit_module) {
     ny_progress_task_end(progress_node);
     NY_LOG_ERR("NYIR to LLVM emission failed: missing script entry\n");
     exit_code = 1;
@@ -3626,7 +3639,7 @@ int ny_pipeline_run(ny_options *opt) {
     goto exit_success;
   }
   fflush(stderr);
-  if (use_std_bc_cache) {
+  if (use_std_bc_cache && !skip_llvm_module) {
     ny_ir_externalize_std_definitions(opt, cg.module);
     bool auto_cache_path =
         auto_std_bc_cache && strcmp(std_bc_cache, auto_std_bc_cache) == 0;
@@ -3696,8 +3709,9 @@ int ny_pipeline_run(ny_options *opt) {
   }
   if (opt->do_timing && opt->verify_module)
     fprintf(stderr, "Verify:       %.4fs\n", ny_ticks_elapsed_sec(t_ver));
-  if (write_compile_caches && !use_std_bc_cache && auto_std_bc_cache &&
-      cg.module && !loaded_from_cache && !opt->emit_module &&
+  if (!skip_llvm_module && write_compile_caches && !use_std_bc_cache &&
+      auto_std_bc_cache && cg.module && !loaded_from_cache &&
+      !opt->emit_module &&
       std_mode != STD_MODE_NONE && !has_local) {
     bool need_bc = ny_access(auto_std_bc_cache, R_OK) != 0;
     bool need_links = auto_std_bc_cache_needs_links ||
@@ -3733,7 +3747,7 @@ int ny_pipeline_run(ny_options *opt) {
    * the warm-start budget and can make cache behavior depend on pass details
    * outside the cache key.
    */
-  if (!fast_compiler && !loaded_from_cache) {
+  if (!skip_llvm_module && !fast_compiler && !loaded_from_cache) {
     int eff_opt = opt->opt_level;
     if (parallel_modules && !opt->llvm_lto &&
         !ny_env_enabled("NYTRIX_PARALLEL_OPT_LINK")) {

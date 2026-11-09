@@ -609,8 +609,9 @@ macro comments; enum forward references and prototypes; repeated external
 declarations; pre-name alignment and section attributes; enum ternary
 constants; constant `offsetof` and `__alignof__`; unsigned-int complement
 width for literals and casts; builtin-based array bounds; and aggregate
-pointer arrays. This Kbuild path uses a local adapter and does not establish a
-complete NYC kernel build.
+pointer arrays. This Kbuild path uses a local adapter and does not establish
+kernel acceptance; NYC todo/acceptance notes are tracked in
+[NYC Linux kernel acceptance](../todo/nyc.md).
 Whole-unit x86-64 objects accept `-fPIC` and `-fPIE`: symbol addresses use
 GOTPCREL relocations and direct calls use PLT32 relocations. Compile-link-run
 regressions exercise both options as shared objects and executables, including

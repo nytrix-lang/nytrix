@@ -3,7 +3,7 @@
 
 An item closes only when its acceptance check has passed on the current tree.
 Figures are from 2026-11-09 and are a starting point, not a current baseline.
-NYC kernel work is tracked in [NYC Linux kernel acceptance](todo/nyc.md).
+NYC work (all NYC notes/todos) is tracked in [NYC work](todo/nyc.md).
 
 Working rules:
 
@@ -16,8 +16,6 @@ Working rules:
 - [ ] **`fmod` in GCC builds:** a compiler built with GCC returns the divisor from
   `__flt_fmod` (`fmod(5.5, 2.0)` gives 2), which also fails `ui_replay_animation`
   there. Clang builds are correct. Accept: both compilers pass the fixture.
-- [ ] **C system headers:** `signal.h`, `sys/time.h` timers, sockets, and `sys/uio.h` now work. Still failing: `netinet/tcp.h` (duplicate promoted member), `stdatomic.h` (not found), `complex.h` (`cacos` declaration).
-- [ ] **Machine encoder: by-value aggregates and inline asm operands.** `nyr_x64_c_func_needs_direct_encoder` sends these C functions to the stack encoder because machine lowering has no SysV aggregate parameter/return support and drops inline asm operands. Implement both, then remove the fallback.
 - [ ] **Intermittent crashes under load:** `ui_replay_animation` segfaulted
   (exit 139) and `generated-mutable-flow-differential` aborted with "double
   free or corruption" in full runs. Both pass alone, and 84 concurrent cold runs
@@ -26,10 +24,6 @@ Working rules:
   the fix and look for a language-level reproducer. With the fix reverted, all
   71 NYR benchmarks still match gcc. Accept: reduced regression fixture added,
   or the path shown unreachable.
-- [ ] **Assembly output accuracy:** `--emit=asm` and `nyc -S` must describe the
-  same code as the object path. `nyc -S` lacks 16/32-bit and unsigned machine
-  forms and falls back to the stack encoder. Accept: both agree on the
-  benchmark set.
 - [ ] **Rendering path audit:** review the render APIs and modules for logic and
   compiler bugs with `-vvvvvv`, `--nyr-check=verify,oracle`, and
   `--native-only --inspect`. Accept: each defect recorded here with a
@@ -59,20 +53,6 @@ Last table, ratio to C. Over 1.5x: 18 entries.
   shifts, and known-bits simplification run only for C. Enable them for raw
   values in language code. Accept: suite green, instruction counts improve.
 
-## Performance: NYC
-
-Mean 2.06x of `gcc -O3 -march=native` in instructions over 73 benchmarks, down
-from 3.32x. NYR is at 1.88x on the same measure. Timing table worst: `tce-recursion` 42x, `bce-matrix` 17x,
-`revcomp` 14x, `dgemm` 12x, `cmov-sort` 11x.
-
-- [ ] **Vectorization:** `linpack` and `bce-matrix`. `linpack` needs row dependence
-  analysis for `A[r*N+c]` against `A[k*N+c]` with `r > k`.
-- [ ] **Dead-code and loop elimination:** `dce` 33x, `tce-recursion`.
-- [ ] **Pointer induction variables** for array walks.
-- [ ] **Compiler option fallbacks:** PIC, retpolines, named sections, and
-  `-fomit-frame-pointer` still use the stack encoder. These matter for kernel
-  builds. Accept: same machine path, verified against the kernel configuration.
-
 ## Performance: backend
 
 - [ ] **Whole-function register allocation:** C has live-range splitting around
@@ -90,11 +70,9 @@ from 3.32x. NYR is at 1.88x on the same measure. Timing table worst: `tce-recurs
 
 ## Compile time
 
-- [ ] **AOT builds:** pong takes about 90 seconds (was 126) and engine about 3
-  minutes. Proposed target: under 30 seconds each.
-- [ ] **Where the AOT time goes:** a plain native object build of pong takes 43
-  seconds of that 90. CPU profiles over-count idle OpenMP workers, so measure
-  the main thread or wall time per compiler phase before optimizing further.
+- [ ] **AOT builds:** pong takes 55 s since the duplicate LLVM pass was removed
+  (was 90). Target: under 30 s. Reachable-function collection (10 s) and `rt_main`
+  lowering (13 s) are the largest stages.
 - [ ] **Known hot spots:** `nir_value_range_at_cached`, imported module member
   lookup, `tp_collect_call_observation`, `hm_complete_leaf_fact`,
   `nyr_cfg_build_impl`, `nyr_type_map_init`.
@@ -104,6 +82,25 @@ from 3.32x. NYR is at 1.88x on the same measure. Timing table worst: `tce-recurs
 
 - [ ] **First frame:** AOT pong takes about 6.3 s to its first frame. Bake fonts
   and other assets at init or build time and remove frame spikes.
+
+## Audio formats
+
+Reference: [dr_libs](https://github.com/mackron/dr_libs) (`dr_wav`, `dr_flac`,
+`dr_mp3`). Native decoders live in `lib/os/sound/res.ny`; each needs fixtures
+checked against reference output.
+
+- [ ] **WAV/RIFF decoder overhaul:** chunk scanning must not assume `fmt ` is
+  first. Add `WAVE_FORMAT_EXTENSIBLE`, A-law, mu-law, MS ADPCM, IMA/DVI ADPCM,
+  8/12/16/24/32-bit PCM and 32/64-bit float, plus RIFX, RF64, and Wave64.
+- [ ] **WAV writer:** PCM and float output in RIFF and RF64.
+- [ ] **AIFF/AIFC:** big-endian containers and their compressed variants.
+- [ ] **AU decoder:** cover every encoding, with A-law and mu-law expansion.
+- [ ] **Native FLAC decoder:** fixed and LPC subframes, stereo decorrelation,
+  metadata blocks, CRC checks, seek tables, and Ogg-encapsulated FLAC.
+- [ ] **Native MP3 decoder:** MPEG-1/2/2.5 Layer I-III, ID3v1/ID3v2 skipping,
+  Xing/VBRI/LAME headers for gapless length, and seeking.
+- [ ] **Streaming API:** decode by PCM frame range without loading the whole
+  file, with seek and exact length. Accept: frame-accurate against `dr_libs`.
 
 ## UI and engine
 
@@ -129,6 +126,6 @@ from 3.32x. NYR is at 1.88x on the same measure. Timing table worst: `tce-recurs
 
 - [ ] **Modularize the C sources:** `src/code/lang/parse/c/parse.c` (48,000
   lines) and `src/code/backend/arch/x86_64/object.c` (15,000 lines) carry long
-  near-duplicate runs. Coordinate with any session working on NYC first.
+  near-duplicate runs. Coordinate with active NYC work (see [NYC work](todo/nyc.md)).
 - [ ] **Repeated source:** the audit reports 61,000 repeated lines. Start with
   `lib/os/dis/decomp/core.ny`, `lower.c`, and the fuzz drivers.

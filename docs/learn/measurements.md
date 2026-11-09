@@ -38,93 +38,93 @@ are in the [changelog](../CHANGELOG.md).
 
 ## Latest full benchmark run
 
-Generated automatically by the full `ny-test --bench` run at 2026-11-09 16:20:28 CET.
-Host: AMD EPYC 7642; target `x86_64`; compiler `fnv1a64:885dedaa4a4d1923`.
+Generated automatically by the full `ny-test --bench` run at 2026-11-09 17:09:26 CET.
+Host: AMD EPYC 7642; target `x86_64`; compiler `fnv1a64:bbce0365367cdf82`.
 NYR: `-O3`, profile `peak`, tier `opt`, engine `NYR`, cache `warm`.
 C: clang version 23.1.4; flags `-O3 -march=native`. NYC flags `-O3 -c`.
-Samples: 3 plus 1 warm-up; fixture workers 4, route workers 1.
+Samples: 3 plus 1 warm-up; fixture workers 23, route workers 1.
 Results: 74 fixtures; 73 passed, 0 failed or mismatched, 1 timer controls.
 Measurement qualifiers: 0 low-time, 0 noisy; 0 fixture budget misses.
 
 | Fixture | Status | NYR | LLVM | Host C | NYC | NYR/C | LLVM/C | NYR/LLVM |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| `binary-trees` | ok | 2.8µs | 3.1µs | 2.8µs | 2.7µs | 1.00x | 1.11x | 0.90x |
-| `binary` | ok | 908µs | 290µs | 1.12ms | 2.37ms | 0.81x | 0.26x | 3.13x |
-| `collatz` | ok | 124µs | 90µs | 40µs | 49µs | 3.08x | 2.24x | 1.38x |
-| `euler9` | ok | 85µs | 95µs | 29µs | 34µs | 2.96x | 3.32x | 0.89x |
-| `expression-tree` | ok | 72.3ms | 33.4ms | 17.2ms | 50.3ms | 4.21x | 1.95x | 2.16x |
-| `fannkuch` | ok | 320ms | 220ms | 237ms | 268ms | 1.35x | 0.93x | 1.45x |
-| `graph-bfs` | ok | 39.4ms | 30.2ms | 15.9ms | 24.3ms | 2.48x | 1.90x | 1.30x |
-| `havlak` | ok | 3.36ms | 2.83ms | 2.63ms | 3.42ms | 1.28x | 1.08x | 1.19x |
-| `knight` | ok | 75µs | 53µs | 37µs | 35µs | 2.02x | 1.43x | 1.41x |
-| `mandel` | ok | 145µs | 137µs | 82µs | 120µs | 1.76x | 1.67x | 1.06x |
-| `mandelbrot` | ok | 365µs | 264µs | 261µs | 485µs | 1.40x | 1.01x | 1.38x |
-| `n-body` | ok | 3.04ms | 2.04ms | 2.06ms | 4.86ms | 1.48x | 0.99x | 1.49x |
-| `nqueens` | ok | 40.7ms | 21.4ms | 21.0ms | 31.9ms | 1.94x | 1.02x | 1.90x |
-| `page-rank` | ok | 20µs | 9.6µs | 4.8µs | 20µs | 4.14x | 1.98x | 2.10x |
-| `prime` | ok | 1.44ms | 1.35ms | 1.34ms | 1.45ms | 1.07x | 1.01x | 1.07x |
-| `queen` | ok | 197µs | 151µs | 72µs | 157µs | 2.73x | 2.10x | 1.30x |
-| `sieve` | ok | 7.56ms | 6.27ms | 5.95ms | 12.6ms | 1.27x | 1.05x | 1.21x |
-| `sor` | ok | 682µs | 666µs | 762µs | 993µs | 0.89x | 0.87x | 1.02x |
-| `spectral` | ok | 87µs | 51µs | 51µs | 82µs | 1.70x | 1.00x | 1.70x |
-| `call-chain` | ok | 658µs | 550µs | 251µs | 873µs | 2.62x | 2.19x | 1.20x |
-| `calls` | ok | 107µs | 99µs | 101µs | 130µs | 1.06x | 0.98x | 1.08x |
-| `thread-ring` | ok | 5.86ms | 5.36ms | 4.81ms | 4.07ms | 1.22x | 1.11x | 1.09x |
-| `dict-oracle` | ok | 194µs | 89µs | 22µs | 29µs | 8.64x | 3.97x | 2.18x |
-| `dict-set` | ok | 25.5ms | 23.8ms | 54.6ms | 76.3ms | 0.47x | 0.44x | 1.07x |
-| `dict` | ok | 16.4ms | 16.6ms | 5.74ms | 7.80ms | 2.86x | 2.89x | 0.99x |
-| `hash` | ok | 4.53ms | 5.12ms | 3.81ms | 4.59ms | 1.19x | 1.34x | 0.89x |
-| `heapsort` | ok | 5.41ms | 2.66ms | 2.71ms | 5.37ms | 2.00x | 0.98x | 2.03x |
-| `iter` | ok | 433µs | 354µs | 487µs | 766µs | 0.89x | 0.73x | 1.22x |
-| `list-any-append` | ok | 5.54ms | 12.7ms | 5.68ms | 15.3ms | 0.98x | 2.23x | 0.44x |
-| `list-dynamic` | ok | 4.13ms | 4.35ms | 4.60ms | 5.33ms | 0.90x | 0.95x | 0.95x |
-| `list` | ok | 3.42ms | 10.00ms | 11.7ms | 10.8ms | 0.29x | 0.86x | 0.34x |
-| `records` | ok | 25.5ms | 37.6ms | 42.1ms | 56.4ms | 0.61x | 0.89x | 0.68x |
-| `splay` | ok | 8.42ms | 3.57ms | 3.54ms | 9.00ms | 2.38x | 1.01x | 2.36x |
-| `vector` | ok | 237µs | 342µs | 268µs | 585µs | 0.88x | 1.27x | 0.69x |
-| `bce-matrix` | ok | 5.01ms | 6.42ms | 2.27ms | 9.66ms | 2.21x | 2.83x | 0.78x |
-| `bigint-oracle` | ok | 35.2ms | 35.6ms | 3.67ms | 4.35ms | 9.59x | 9.71x | 0.99x |
-| `dgemm` | ok | 35µs | 26µs | 31µs | 60µs | 1.16x | 0.85x | 1.36x |
-| `fft` | ok | 16µs | 24µs | 24µs | 36µs | 0.66x | 0.98x | 0.68x |
-| `fibonacci` | ok | 157µs | 155µs | 129µs | 167µs | 1.22x | 1.20x | 1.02x |
-| `float-cmp-oracle` | ok | 15µs | 15µs | 14µs | 19µs | 1.14x | 1.07x | 1.06x |
-| `float` | ok | 9.44ms | 9.20ms | 9.55ms | 9.47ms | 0.99x | 0.96x | 1.03x |
-| `intops` | ok | 769µs | 631µs | 514µs | 566µs | 1.49x | 1.23x | 1.22x |
-| `linpack` | ok | 382µs | 243µs | 108µs | 850µs | 3.53x | 2.25x | 1.57x |
-| `matrix-raw` | ok | 41µs | 26µs | 27µs | 34µs | 1.51x | 0.94x | 1.61x |
-| `matrix` | ok | 32µs | 15µs | 7.0µs | 30µs | 4.55x | 2.11x | 2.15x |
-| `pbkdf2` | ok | 1.46ms | 801µs | 1.17ms | 3.44ms | 1.25x | 0.69x | 1.82x |
-| `pidigits` | ok | 46µs | 39µs | 5.7µs | 15µs | 8.04x | 6.83x | 1.18x |
-| `sha256` | ok | 1.29ms | 1.20ms | 927µs | 2.63ms | 1.39x | 1.29x | 1.08x |
-| `cmov-sort` | ok | 963µs | 649µs | 614µs | 1.29ms | 1.57x | 1.06x | 1.48x |
-| `currying` | ok | 6.13ms | 8.24ms | 3.3µs | 11µs | 1842.57x | 2476.00x | 0.74x |
-| `dce` | ok | 18µs | 11µs | 3.28ms | 3.67ms | <0.01x | <0.01x | 1.69x |
-| `escape-loop` | ok | 4.61ms | 4.03ms | 4.11ms | 8.09ms | 1.12x | 0.98x | 1.14x |
-| `gcbench` | ok | 42.3ms | 37.0ms | 21.8ms | 24.3ms | 1.94x | 1.70x | 1.14x |
-| `inline` | ok | 82µs | 57µs | 40µs | 85µs | 2.05x | 1.43x | 1.43x |
-| `licm-math` | ok | 4.73ms | 4.61ms | 4.71ms | 5.30ms | 1.00x | 0.98x | 1.02x |
-| `licm` | ok | 156µs | 140µs | 26µs | 173µs | 5.90x | 5.30x | 1.11x |
-| `loop-unswitch` | ok | 4.48ms | 4.87ms | 4.29ms | 4.56ms | 1.04x | 1.14x | 0.92x |
-| `loop` | ok | 1.20ms | 1.15ms | 1.02ms | 1.19ms | 1.17x | 1.13x | 1.04x |
-| `mixed-static-island` | ok | 25µs | 13µs | 47µs | 25µs | 0.53x | 0.27x | 1.97x |
-| `native-oracle` | ok | 49µs | 44µs | 25µs | 20µs | 1.98x | 1.76x | 1.12x |
-| `recursive-fibonacci` | ok | 271ns | 240ns | 2.01ms | 22.0ms | <0.01x | <0.01x | 1.13x |
-| `startup` | ok | 28ns | 28ns | 51ns | 28ns | n/a | n/a | n/a |
-| `straight` | ok | 21µs | 20µs | 20µs | 21µs | 1.06x | 1.00x | 1.06x |
-| `tce-recursion` | ok | 92µs | 112µs | 81µs | 2.95ms | 1.14x | 1.38x | 0.82x |
-| `time-profile` | ok | 40µs | 35µs | 24µs | 29µs | 1.66x | 1.45x | 1.14x |
-| `append-scaling` | ok | 8.60ms | 7.53ms | 10.2ms | 28.2ms | 0.84x | 0.74x | 1.14x |
-| `fasta` | ok | 1.80ms | 1.51ms | 1.01ms | 1.21ms | 1.78x | 1.49x | 1.19x |
-| `json-parser` | ok | 22.8ms | 11.4ms | 12.2ms | 35.0ms | 1.87x | 0.93x | 2.00x |
-| `knucleotide` | ok | 152µs | 73µs | 71µs | 187µs | 2.14x | 1.03x | 2.07x |
-| `repeat` | ok | 85.4ms | 78.6ms | 91.0ms | 108ms | 0.94x | 0.86x | 1.09x |
-| `revcomp` | ok | 64µs | 23µs | 12µs | 294µs | 5.38x | 1.92x | 2.80x |
-| `string` | ok | 177µs | 185µs | 178µs | 526µs | 1.00x | 1.04x | 0.96x |
-| `word-frequency-scan` | ok | 4.38ms | 2.22ms | 1.99ms | 4.95ms | 2.20x | 1.12x | 1.97x |
-| `word-frequency` | ok | 4.48ms | 4.59ms | 3.59ms | 12.5ms | 1.25x | 1.28x | 0.98x |
+| `binary-trees` | ok | 3.1µs | 3.0µs | 2.6µs | 2.3µs | 1.17x | 1.14x | 1.02x |
+| `binary` | ok | 838µs | 268µs | 1.05ms | 1.94ms | 0.80x | 0.26x | 3.13x |
+| `collatz` | ok | 87µs | 68µs | 57µs | 60µs | 1.52x | 1.20x | 1.27x |
+| `euler9` | ok | 73µs | 48µs | 28µs | 32µs | 2.62x | 1.71x | 1.53x |
+| `expression-tree` | ok | 52.0ms | 30.9ms | 16.1ms | 40.5ms | 3.23x | 1.92x | 1.69x |
+| `fannkuch` | ok | 291ms | 209ms | 216ms | 253ms | 1.35x | 0.97x | 1.39x |
+| `graph-bfs` | ok | 29.7ms | 27.8ms | 20.7ms | 34.7ms | 1.43x | 1.35x | 1.07x |
+| `havlak` | ok | 2.89ms | 2.61ms | 2.42ms | 3.24ms | 1.19x | 1.08x | 1.10x |
+| `knight` | ok | 83µs | 44µs | 35µs | 39µs | 2.39x | 1.25x | 1.91x |
+| `mandel` | ok | 122µs | 98µs | 83µs | 102µs | 1.46x | 1.18x | 1.25x |
+| `mandelbrot` | ok | 344µs | 245µs | 239µs | 437µs | 1.44x | 1.02x | 1.40x |
+| `n-body` | ok | 2.80ms | 1.94ms | 1.97ms | 4.32ms | 1.42x | 0.99x | 1.44x |
+| `nqueens` | ok | 35.5ms | 20.9ms | 20.5ms | 31.3ms | 1.73x | 1.02x | 1.70x |
+| `page-rank` | ok | 20µs | 9.3µs | 4.8µs | 20µs | 4.12x | 1.96x | 2.10x |
+| `prime` | ok | 1.39ms | 1.26ms | 1.26ms | 1.36ms | 1.10x | 1.00x | 1.10x |
+| `queen` | ok | 232µs | 117µs | 70µs | 158µs | 3.34x | 1.68x | 1.99x |
+| `sieve` | ok | 7.39ms | 4.96ms | 5.27ms | 13.2ms | 1.40x | 0.94x | 1.49x |
+| `sor` | ok | 998µs | 795µs | 868µs | 1.44ms | 1.15x | 0.92x | 1.26x |
+| `spectral` | ok | 83µs | 54µs | 51µs | 92µs | 1.64x | 1.05x | 1.55x |
+| `call-chain` | ok | 707µs | 534µs | 440µs | 668µs | 1.61x | 1.22x | 1.32x |
+| `calls` | ok | 105µs | 98µs | 101µs | 124µs | 1.04x | 0.97x | 1.07x |
+| `thread-ring` | ok | 6.33ms | 5.08ms | 3.93ms | 2.93ms | 1.61x | 1.29x | 1.25x |
+| `dict-oracle` | ok | 116µs | 76µs | 30µs | 22µs | 3.89x | 2.54x | 1.53x |
+| `dict-set` | ok | 30.4ms | 39.2ms | 40.7ms | 84.8ms | 0.75x | 0.96x | 0.78x |
+| `dict` | ok | 9.03ms | 8.66ms | 5.75ms | 6.71ms | 1.57x | 1.50x | 1.04x |
+| `hash` | ok | 4.59ms | 5.21ms | 3.86ms | 4.51ms | 1.19x | 1.35x | 0.88x |
+| `heapsort` | ok | 5.24ms | 2.60ms | 2.71ms | 4.82ms | 1.94x | 0.96x | 2.02x |
+| `iter` | ok | 377µs | 354µs | 556µs | 837µs | 0.68x | 0.64x | 1.06x |
+| `list-any-append` | ok | 8.70ms | 10.0ms | 8.81ms | 10.2ms | 0.99x | 1.14x | 0.87x |
+| `list-dynamic` | ok | 4.69ms | 4.52ms | 4.80ms | 4.46ms | 0.98x | 0.94x | 1.04x |
+| `list` | ok | 4.54ms | 4.18ms | 3.93ms | 4.37ms | 1.16x | 1.06x | 1.09x |
+| `records` | ok | 52.2ms | 22.8ms | 45.7ms | 85.3ms | 1.14x | 0.50x | 2.29x |
+| `splay` | ok | 8.55ms | 3.58ms | 3.62ms | 9.17ms | 2.36x | 0.99x | 2.39x |
+| `vector` | ok | 290µs | 328µs | 299µs | 341µs | 0.97x | 1.09x | 0.89x |
+| `bce-matrix` | ok | 4.98ms | 6.31ms | 1.94ms | 9.49ms | 2.57x | 3.26x | 0.79x |
+| `bigint-oracle` | ok | 39.4ms | 35.4ms | 3.65ms | 3.81ms | 10.81x | 9.71x | 1.11x |
+| `dgemm` | ok | 35µs | 26µs | 21µs | 63µs | 1.67x | 1.24x | 1.35x |
+| `fft` | ok | 17µs | 24µs | 19µs | 24µs | 0.89x | 1.28x | 0.70x |
+| `fibonacci` | ok | 177µs | 168µs | 132µs | 166µs | 1.33x | 1.27x | 1.05x |
+| `float-cmp-oracle` | ok | 16µs | 14µs | 24µs | 18µs | 0.66x | 0.60x | 1.09x |
+| `float` | ok | 9.60ms | 9.39ms | 9.33ms | 9.60ms | 1.03x | 1.01x | 1.02x |
+| `intops` | ok | 1.27ms | 616µs | 514µs | 643µs | 2.47x | 1.20x | 2.06x |
+| `linpack` | ok | 373µs | 239µs | 83µs | 833µs | 4.49x | 2.88x | 1.56x |
+| `matrix-raw` | ok | 46µs | 25µs | 27µs | 32µs | 1.67x | 0.92x | 1.81x |
+| `matrix` | ok | 31µs | 15µs | 7.1µs | 22µs | 4.42x | 2.07x | 2.14x |
+| `pbkdf2` | ok | 1.48ms | 856µs | 1.90ms | 2.73ms | 0.78x | 0.45x | 1.73x |
+| `pidigits` | ok | 42µs | 39µs | 5.8µs | 15µs | 7.17x | 6.65x | 1.08x |
+| `sha256` | ok | 1.23ms | 1.18ms | 928µs | 2.49ms | 1.33x | 1.27x | 1.04x |
+| `cmov-sort` | ok | 1.31ms | 663µs | 364µs | 1.29ms | 3.60x | 1.82x | 1.98x |
+| `currying` | ok | 5.05ms | 6.67ms | 3.3µs | 13µs | 1550.65x | 2047.51x | 0.76x |
+| `dce` | ok | 19µs | 11µs | 3.29ms | 2.75ms | <0.01x | <0.01x | 1.75x |
+| `escape-loop` | ok | 4.58ms | 4.03ms | 4.11ms | 8.05ms | 1.12x | 0.98x | 1.14x |
+| `gcbench` | ok | 44.6ms | 40.2ms | 23.3ms | 25.1ms | 1.91x | 1.73x | 1.11x |
+| `inline` | ok | 82µs | 57µs | 26µs | 85µs | 3.11x | 2.16x | 1.44x |
+| `licm-math` | ok | 4.81ms | 4.67ms | 4.77ms | 5.35ms | 1.01x | 0.98x | 1.03x |
+| `licm` | ok | 158µs | 140µs | 26µs | 166µs | 5.96x | 5.30x | 1.12x |
+| `loop-unswitch` | ok | 4.48ms | 4.87ms | 4.33ms | 4.48ms | 1.04x | 1.12x | 0.92x |
+| `loop` | ok | 1.20ms | 1.15ms | 1.03ms | 1.15ms | 1.17x | 1.12x | 1.04x |
+| `mixed-static-island` | ok | 20µs | 13µs | 37µs | 29µs | 0.55x | 0.37x | 1.51x |
+| `native-oracle` | ok | 45µs | 47µs | 26µs | 30µs | 1.72x | 1.78x | 0.97x |
+| `recursive-fibonacci` | ok | 271ns | 311ns | 1.99ms | 17.0ms | <0.01x | <0.01x | 0.87x |
+| `startup` | ok | 29ns | 28ns | 27ns | 49ns | n/a | n/a | n/a |
+| `straight` | ok | 21µs | 20µs | 20µs | 21µs | 1.07x | 1.00x | 1.07x |
+| `tce-recursion` | ok | 93µs | 104µs | 90µs | 2.59ms | 1.03x | 1.16x | 0.89x |
+| `time-profile` | ok | 37µs | 45µs | 29µs | 29µs | 1.28x | 1.57x | 0.81x |
+| `append-scaling` | ok | 7.82ms | 7.86ms | 10.4ms | 27.3ms | 0.75x | 0.75x | 0.99x |
+| `fasta` | ok | 1.89ms | 1.49ms | 987µs | 1.14ms | 1.92x | 1.51x | 1.27x |
+| `json-parser` | ok | 19.1ms | 10.0ms | 12.2ms | 34.9ms | 1.57x | 0.82x | 1.90x |
+| `knucleotide` | ok | 152µs | 128µs | 71µs | 111µs | 2.14x | 1.80x | 1.18x |
+| `repeat` | ok | 82.6ms | 84.0ms | 91.4ms | 106ms | 0.90x | 0.92x | 0.98x |
+| `revcomp` | ok | 68µs | 23µs | 14µs | 70µs | 4.87x | 1.65x | 2.96x |
+| `string` | ok | 188µs | 189µs | 219µs | 536µs | 0.86x | 0.86x | 1.00x |
+| `word-frequency-scan` | ok | 4.45ms | 2.40ms | 2.09ms | 4.84ms | 2.13x | 1.15x | 1.85x |
+| `word-frequency` | ok | 5.01ms | 4.74ms | 3.90ms | 13.3ms | 1.28x | 1.21x | 1.06x |
 
 The empty timer control is shown for completeness and is excluded from workload ratios.
-Raw report: `build/bench-reports/bench-20261109-161732-1915004.json`.
+Raw report: `build/bench-reports/bench-20261109-170831-2148134.json`.
 
 <!-- AUTO_BENCHMARK_RESULTS_END -->
 
