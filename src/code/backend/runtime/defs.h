@@ -846,12 +846,13 @@ RT_DEF("__flt_unbox_val", rt_flt_unbox_val, 1, "fn __flt_unbox_val(v) int",
 RT_DEF("__flt_unbox_val32", rt_flt_unbox_val32, 1,
        "fn __flt_unbox_val32(v) int",
        "Unboxes a Nytrix float object to 32-bit float bits.")
-RT_DEF("__flt_add", rt_flt_add, 2, "fn __flt_add(a, b) f64", "Float addition.")
-RT_DEF("__flt_sub", rt_flt_sub, 2, "fn __flt_sub(a, b) f64",
+/* Boxed float helpers return Ny values; consumers unbox when they need f64. */
+RT_DEF("__flt_add", rt_flt_add, 2, "fn __flt_add(a, b) any", "Float addition.")
+RT_DEF("__flt_sub", rt_flt_sub, 2, "fn __flt_sub(a, b) any",
        "Float subtraction.")
-RT_DEF("__flt_mul", rt_flt_mul, 2, "fn __flt_mul(a, b) f64",
+RT_DEF("__flt_mul", rt_flt_mul, 2, "fn __flt_mul(a, b) any",
        "Float multiplication.")
-RT_DEF("__flt_div", rt_flt_div, 2, "fn __flt_div(a, b) f64", "Float division.")
+RT_DEF("__flt_div", rt_flt_div, 2, "fn __flt_div(a, b) any", "Float division.")
 RT_DEF("__flt_lt", rt_flt_lt, 2, "fn __flt_lt(a, b) bool", "Float less than.")
 RT_DEF("__flt_gt", rt_flt_gt, 2, "fn __flt_gt(a, b) bool",
        "Float greater than.")
@@ -865,24 +866,24 @@ RT_DEF("__flt_inf", rt_flt_inf, 0, "fn __flt_inf() any",
        "Returns positive infinity.")
 RT_DEF("__flt_hash", rt_flt_hash, 1, "fn __flt_hash(f) int",
        "Returns a stable integer hash for a float.")
-RT_DEF("__flt_sin", rt_flt_sin, 1, "fn __flt_sin(x) f64", "Float sine.")
-RT_DEF("__flt_cos", rt_flt_cos, 1, "fn __flt_cos(x) f64", "Float cosine.")
-RT_DEF("__flt_tan", rt_flt_tan, 1, "fn __flt_tan(x) f64", "Float tangent.")
-RT_DEF("__flt_asin", rt_flt_asin, 1, "fn __flt_asin(x) f64", "Float arcsine.")
-RT_DEF("__flt_acos", rt_flt_acos, 1, "fn __flt_acos(x) f64", "Float arccosine.")
-RT_DEF("__flt_atan", rt_flt_atan, 1, "fn __flt_atan(x) f64",
+RT_DEF("__flt_sin", rt_flt_sin, 1, "fn __flt_sin(x) any", "Float sine.")
+RT_DEF("__flt_cos", rt_flt_cos, 1, "fn __flt_cos(x) any", "Float cosine.")
+RT_DEF("__flt_tan", rt_flt_tan, 1, "fn __flt_tan(x) any", "Float tangent.")
+RT_DEF("__flt_asin", rt_flt_asin, 1, "fn __flt_asin(x) any", "Float arcsine.")
+RT_DEF("__flt_acos", rt_flt_acos, 1, "fn __flt_acos(x) any", "Float arccosine.")
+RT_DEF("__flt_atan", rt_flt_atan, 1, "fn __flt_atan(x) any",
        "Float arctangent.")
-RT_DEF("__flt_atan2", rt_flt_atan2, 2, "fn __flt_atan2(y, x) f64",
+RT_DEF("__flt_atan2", rt_flt_atan2, 2, "fn __flt_atan2(y, x) any",
        "Float arctangent with quadrant handling.")
-RT_DEF("__flt_sqrt", rt_flt_sqrt, 1, "fn __flt_sqrt(x) f64",
+RT_DEF("__flt_sqrt", rt_flt_sqrt, 1, "fn __flt_sqrt(x) any",
        "Float square root.")
-RT_DEF("__flt_exp", rt_flt_exp, 1, "fn __flt_exp(x) f64",
+RT_DEF("__flt_exp", rt_flt_exp, 1, "fn __flt_exp(x) any",
        "Float natural exponent.")
-RT_DEF("__flt_log", rt_flt_log, 1, "fn __flt_log(x) f64",
+RT_DEF("__flt_log", rt_flt_log, 1, "fn __flt_log(x) any",
        "Float natural logarithm.")
-RT_DEF("__flt_log2", rt_flt_log2, 1, "fn __flt_log2(x) f64",
+RT_DEF("__flt_log2", rt_flt_log2, 1, "fn __flt_log2(x) any",
        "Float base-2 logarithm.")
-RT_DEF("__flt_log10", rt_flt_log10, 1, "fn __flt_log10(x) f64",
+RT_DEF("__flt_log10", rt_flt_log10, 1, "fn __flt_log10(x) any",
        "Float base-10 logarithm.")
 RT_DEF("__flt_floor", rt_flt_floor, 1, "fn __flt_floor(x) int",
        "Float floor as integer.")
@@ -890,10 +891,10 @@ RT_DEF("__flt_ceil", rt_flt_ceil, 1, "fn __flt_ceil(x) int",
        "Float ceil as integer.")
 RT_DEF("__flt_round", rt_flt_round, 1, "fn __flt_round(x) int",
        "Float round as integer.")
-RT_DEF("__flt_fmod", rt_flt_fmod, 2, "fn __flt_fmod(a, b) f64",
+RT_DEF("__flt_fmod", rt_flt_fmod, 2, "fn __flt_fmod(a, b) any",
        "Float remainder.")
-RT_DEF("__flt_pow", rt_flt_pow, 2, "fn __flt_pow(a, b) f64", "Float power.")
-RT_DEF("__flt_from_int", rt_flt_from_int, 1, "fn __flt_from_int(i) f64",
+RT_DEF("__flt_pow", rt_flt_pow, 2, "fn __flt_pow(a, b) any", "Float power.")
+RT_DEF("__flt_from_int", rt_flt_from_int, 1, "fn __flt_from_int(i) any",
        "Convert int to float.")
 RT_DEF("__flt_to_int", rt_flt_to_int, 1, "fn __flt_to_int(f) int",
        "Convert float to int.")

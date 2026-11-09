@@ -9640,19 +9640,13 @@ static bool nyr_expr_is_f64_core(nyr_builder_impl_t *b, const expr_t *e,
     if (!leaf || !nyr_user_defined_fn(b, leaf)) {
       ny_native_leaf_kind_t kind = ny_native_leaf_kind(leaf);
       if (kind == NY_NATIVE_LEAF_FLOAT || kind == NY_NATIVE_LEAF_F64BUF_LOAD ||
-          kind == NY_NATIVE_LEAF_FLT_SQRT ||
           (leaf &&
            (strcmp(leaf, "load32_f32") == 0 ||
             strcmp(leaf, "load64_f64") == 0 || strcmp(leaf, "atof") == 0 ||
             strcmp(leaf, "strtod") == 0 || strcmp(leaf, "sin") == 0 ||
             strcmp(leaf, "cos") == 0 || strcmp(leaf, "tan") == 0 ||
             strcmp(leaf, "atan") == 0 || strcmp(leaf, "sqrt") == 0 ||
-            strcmp(leaf, "__flt_abs") == 0 || strcmp(leaf, "__flt_sin") == 0 ||
-            strcmp(leaf, "__flt_cos") == 0 || strcmp(leaf, "__flt_tan") == 0 ||
-            strcmp(leaf, "__flt_atan") == 0 || strcmp(leaf, "__flt_exp") == 0 ||
-            strcmp(leaf, "__flt_log") == 0 || strcmp(leaf, "__flt_pow") == 0 ||
-            strcmp(leaf, "__flt_atan2") == 0 ||
-            strcmp(leaf, "__flt_fmod") == 0)))
+            strcmp(leaf, "__flt_abs") == 0)))
         return true;
     }
     if (e->as.call.callee && e->as.call.callee->kind == NY_E_IDENT &&

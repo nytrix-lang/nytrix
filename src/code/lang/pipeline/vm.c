@@ -48,20 +48,6 @@ extern double rt_f64_round(double value);
 extern double rt_f64_pow(double base, double exponent);
 extern double rt_f64_floor(double value);
 extern double rt_f64_ceil(double value);
-extern double rt_fmod_f64(double left, double right);
-extern int64_t rt_flt_atan2(int64_t y, int64_t x);
-extern int64_t rt_flt_atan(int64_t v);
-extern int64_t rt_flt_tan(int64_t v);
-extern int64_t rt_flt_sin(int64_t v);
-extern int64_t rt_flt_cos(int64_t v);
-extern int64_t rt_flt_asin(int64_t v);
-extern int64_t rt_flt_acos(int64_t v);
-extern int64_t rt_flt_sqrt(int64_t v);
-extern int64_t rt_flt_exp(int64_t v);
-extern int64_t rt_flt_log(int64_t v);
-extern int64_t rt_flt_log2(int64_t v);
-extern int64_t rt_flt_log10(int64_t v);
-extern int64_t rt_flt_pow(int64_t a, int64_t b);
 extern double rt_f64_min(double left, double right);
 extern double rt_f64_max(double left, double right);
 extern double rt_tbuf_index_f64(int64_t buffer, int64_t index);
@@ -934,71 +920,6 @@ static bool ny_native_vm_call_resolve_impl(void *opaque, const char *symbol,
                "native NYIR VM: thread callbacks require executable code; "
                "run this program with MCJIT, ORC, or native execution"),
            false;
-  /*
-   * `__flt_fmod` has an f64 NYIR result, while the generic runtime helper
-   * returns a dynamically boxed float. Preserve the VM's raw-f64 call lane.
-   */
-  if (strcmp(symbol, "rt_flt_fmod") == 0) {
-    if (!out || !args || arg_count != 2)
-      return nyr_set_error(err, err_len,
-                           "native NYIR VM: runtime ABI mismatch for %s: "
-                           "expected 2 arguments, got %zu",
-                           symbol, arg_count),
-             false;
-    *out = nyr_f64_to_bits(rt_fmod_f64(rt_flt_unbox_double(args[0]),
-                                       rt_flt_unbox_double(args[1])));
-    return true;
-  }
-  /*
-   * `__flt_atan2` also declares an f64 result but its runtime wrapper returns
-   * a boxed float. Convert that result back to the VM's raw-f64 call lane.
-   */
-  if (strcmp(symbol, "rt_flt_atan2") == 0) {
-    if (!out || !args || arg_count != 2)
-      return nyr_set_error(err, err_len,
-                           "native NYIR VM: runtime ABI mismatch for %s: "
-                           "expected 2 arguments, got %zu",
-                           symbol, arg_count),
-             false;
-    *out = nyr_f64_to_bits(rt_flt_unbox_double(rt_flt_atan2(args[0], args[1])));
-    return true;
-  }
-  /*
-   * These float facade helpers return dynamically boxed floats, while their
-   * source declarations promise f64. Keep the VM result in the raw-f64 lane
-   * just as the native and JIT call paths do.
-   */
-  {
-    static const struct {
-      const char *symbol;
-      int64_t (*unary)(int64_t);
-      int64_t (*binary)(int64_t, int64_t);
-    } boxed_float_helpers[] = {
-        {"rt_flt_atan", rt_flt_atan, NULL},   {"rt_flt_tan", rt_flt_tan, NULL},
-        {"rt_flt_sin", rt_flt_sin, NULL},     {"rt_flt_cos", rt_flt_cos, NULL},
-        {"rt_flt_asin", rt_flt_asin, NULL},   {"rt_flt_acos", rt_flt_acos, NULL},
-        {"rt_flt_sqrt", rt_flt_sqrt, NULL},   {"rt_flt_exp", rt_flt_exp, NULL},
-        {"rt_flt_log", rt_flt_log, NULL},     {"rt_flt_log2", rt_flt_log2, NULL},
-        {"rt_flt_log10", rt_flt_log10, NULL}, {"rt_flt_pow", NULL, rt_flt_pow},
-    };
-    for (size_t i = 0;
-         i < sizeof(boxed_float_helpers) / sizeof(boxed_float_helpers[0]); ++i) {
-      if (strcmp(symbol, boxed_float_helpers[i].symbol) != 0)
-        continue;
-      size_t expected = boxed_float_helpers[i].unary ? 1 : 2;
-      if (!out || !args || arg_count != expected)
-        return nyr_set_error(err, err_len,
-                             "native NYIR VM: runtime ABI mismatch for %s: "
-                             "expected %zu arguments, got %zu",
-                             symbol, expected, arg_count),
-               false;
-      int64_t boxed = boxed_float_helpers[i].unary
-                          ? boxed_float_helpers[i].unary(args[0])
-                          : boxed_float_helpers[i].binary(args[0], args[1]);
-      *out = nyr_f64_to_bits(rt_flt_unbox_double(boxed));
-      return true;
-    }
-  }
   ny_native_vm_call_status_t typed_status = ny_native_vm_call_typed_runtime(
       symbol, args, arg_count, out, err, err_len);
   if (typed_status != NY_NATIVE_VM_CALL_UNHANDLED)
