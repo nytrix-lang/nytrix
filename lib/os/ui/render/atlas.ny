@@ -122,6 +122,11 @@ fn atlas_destroy(any a) int {
    if cpu_buf { free(cpu_buf) }
    def ptr state_ptr = __ffi_untag_ptr(a.get("state_ptr", 0))
    if state_ptr { free(state_ptr) }
+   ;; A glyph can outlive its atlas in a cache; leave nothing to upload through.
+   a["tex_id"] = -1
+   a["cpu_buf"] = 0
+   a["state_ptr"] = 0
+   a["destroyed"] = true
    0
 }
 

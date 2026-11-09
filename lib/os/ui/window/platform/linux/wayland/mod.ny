@@ -416,6 +416,7 @@ def _WRS_MAXIMIZED = 40
 def _WRS_FULLSCREEN = 48
 def _WRS_ACTIVATED = 56
 def _WRS_FLAGS_DIRTY = 64
+
 ;; Deferred xdg_surface.ack_configure.  Acknowledging binds the next commit to
 ;; the configured size, so a resize is acknowledged only once a buffer of that
 ;; size exists.  _WRS_ACK_SERIAL holds serial + 1; zero means nothing pending.
@@ -1430,8 +1431,8 @@ fn _xdg_surface_handle_configure(ptr resize_state, ptr xdg_surface, u32 serial) 
       if requested { store64_h(resize_state, 2, _WRS_CONFIGURE) }
       if load64_h(resize_state, _WRS_DEFER_ACK) {
          def mismatch = requested &&
-            (load64_h(resize_state, _WRS_WIDTH) != load64_h(resize_state, _WRS_BUFFER_W) ||
-             load64_h(resize_state, _WRS_HEIGHT) != load64_h(resize_state, _WRS_BUFFER_H))
+         (load64_h(resize_state, _WRS_WIDTH) != load64_h(resize_state, _WRS_BUFFER_W) ||
+            load64_h(resize_state, _WRS_HEIGHT) != load64_h(resize_state, _WRS_BUFFER_H))
          defer_ack = mismatch || load64_h(resize_state, _WRS_ACK_SERIAL) != 0
       }
    }

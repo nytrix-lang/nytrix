@@ -185,30 +185,41 @@ fn _init_default_mappings(any mappings, str platform_name) bool {
 fn init_default_linux_mappings() bool {
    "Initializes init default linux mappings."
    if _defaults_linux_loaded { return true }
-   _init_default_mappings(_DEFAULT_LINUX_MAPPINGS, "Linux")
    _defaults_linux_loaded = true
+   _init_default_mappings(_DEFAULT_LINUX_MAPPINGS, "Linux")
    true
 }
 
 fn init_default_windows_mappings() bool {
    "Initializes init default windows mappings."
    if _defaults_windows_loaded { return true }
-   _init_default_mappings(_DEFAULT_WINDOWS_MAPPINGS, "Windows")
    _defaults_windows_loaded = true
+   _init_default_mappings(_DEFAULT_WINDOWS_MAPPINGS, "Windows")
    true
 }
 
 fn init_default_macos_mappings() bool {
    "Initializes init default macos mappings."
    if _defaults_macos_loaded { return true }
-   _init_default_mappings(_DEFAULT_MACOS_MAPPINGS, "Mac OS X")
    _defaults_macos_loaded = true
+   _init_default_mappings(_DEFAULT_MACOS_MAPPINGS, "Mac OS X")
+   true
+}
+
+;; The default table is parsed on first use because most programs never see a
+;; gamepad. A caller's mapping must land after it, or the defaults would
+;; replace that mapping when they load.
+fn _ensure_host_defaults() bool {
+   #linux { init_default_linux_mappings() }
+   #windows { init_default_windows_mappings() }
+   #macos { init_default_macos_mappings() }
    true
 }
 
 fn update_mappings(any s, str platform_name="Linux") int {
    "Parses SDL-style gamepad mapping rows into the active mapping table."
    if !s || !is_str(s) { return 0 }
+   _ensure_host_defaults()
    def text = s.replace("\\n", "\n")
    def lines = str.split(text, "\n")
    if !is_list(lines) { return 0 }
@@ -442,6 +453,7 @@ fn _mapped_trigger_axis_value(any js, any e, any value) f64 {
 fn find_mapping(any guid, str platform_name="") any {
    "Returns the registered gamepad mapping for `guid`, or 0."
    if !guid || !is_str(guid) { return 0 }
+   _ensure_host_defaults()
    if platform_name && platform_name.len > 0 {
       def scoped = _mappings.get(_mapping_key(guid, platform_name), 0)
       if scoped { return scoped }

@@ -194,7 +194,6 @@ fn _invoke_callback(int jid, int event) any {
 }
 
 fn _ensure_windows_mappings() bool {
-   gamepad_map.init_default_windows_mappings()
    true
 }
 

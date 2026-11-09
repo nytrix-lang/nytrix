@@ -246,8 +246,6 @@ fn _curl_auth_mask(any v, int fallback=1) int {
       "negotiate", "gssapi", "spnego" -> 4
       "ntlm" -> 8
       "digest-ie", "digest_ie" -> 16
-      "ntlm" -> 8
-      "digest-ie", "digest_ie" -> 16
       "bearer" -> 64
       "any" -> 4294967279
       "anysafe", "safe" -> 4294967278

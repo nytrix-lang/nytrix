@@ -482,18 +482,22 @@ fn code_ident_syntax(Code<CodeIdent> code) any {
 }
 
 fn code_expr_is_sequence(Code<CodeExpr> code) bool {
+   "Returns whether the quoted expression is a sequence."
    _code_value_sequence(code_expr_json(code), "expr")
 }
 
 fn code_stmt_is_sequence(Code<CodeStmt> code) bool {
+   "Returns whether the quoted statement is a sequence."
    _code_value_sequence(code_stmt_json(code), "stmt")
 }
 
 fn code_decl_is_sequence(Code<CodeDecl> code) bool {
+   "Returns whether the quoted declaration is a sequence."
    _code_value_sequence(code_decl_json(code), "decl")
 }
 
 fn code_ident_is_sequence(Code<CodeIdent> code) bool {
+   "Returns whether the quoted identifier is a sequence."
    _code_value_sequence(code_ident_json(code), "ident")
 }
 

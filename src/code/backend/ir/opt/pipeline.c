@@ -360,6 +360,7 @@ void nyr_reconcile_local_scalar_classes(nyr_func_t *f) {
   nyr_stamp_local_store_classes(f);
 }
 
+bool nyr_invert_fallthrough_branches(nyr_func_t *f);
 bool nyr_loop_unswitch(nyr_func_t *f);
 bool nyr_iv_elim(nyr_func_t *f);
 bool nyr_gvn_pre(nyr_func_t *f);
@@ -373,16 +374,6 @@ bool nyr_narrow(nyr_func_t *f);
 bool nyr_phi_elim(nyr_func_t *f);
 
 void nyr_set_pass_controls(const char *disable_pass, const char *stop_after) {
-  /*
-   * DEBUG ORACLE (remove after the in-loop call corruption is fixed):
-   * NYTRIX_IR_DISABLE_PASSES accepts a comma-separated pass list so a
-   * multi-pass interaction can be bisected from the environment.
-   */
-  if (!(disable_pass && disable_pass[0])) {
-    const char *env_list = getenv("NYTRIX_IR_DISABLE_PASSES");
-    if (env_list && env_list[0])
-      disable_pass = env_list;
-  }
   nyr_disabled_pass = disable_pass && disable_pass[0] ? disable_pass : NULL;
   nyr_stop_after_pass = stop_after && stop_after[0] ? stop_after : NULL;
 }
@@ -412,17 +403,6 @@ void nyr_set_per_pass_oracle(bool enable, nyr_per_pass_oracle_fn fn,
 }
 
 void nyr_set_tv_seed(int trials) {
-  /*
-   * DEBUG ORACLE (remove after the in-loop call corruption is fixed):
-   * NYTRIX_IR_TV overrides every stage's TV tuning; it must stay strict so a
-   * corrupting pass is reported instead of silently accepted.
-   */
-  const char *tv_env = getenv("NYTRIX_IR_TV");
-  if (tv_env && tv_env[0]) {
-    int env_trials = atoi(tv_env);
-    nyr_tv_trials = env_trials > 0 ? env_trials : 0;
-    return;
-  }
   nyr_tv_trials = trials > 0 ? trials : 0;
 }
 
@@ -472,8 +452,7 @@ static bool nyr_pass_is_skipped(bool (*pass)(nyr_func_t *)) {
     return true;
   const char *name = nyr_debug_pass_name(pass);
   /*
-   * DEBUG ORACLE (remove after the in-loop call corruption is fixed):
-   * comma-separated disable lists (NYTRIX_IR_DISABLE_PASSES).
+   * The disable control accepts a comma-separated pass list.
    */
   const char *list = nyr_disabled_pass;
   while (list && *list) {
@@ -1020,6 +999,7 @@ static const nyr_pass_control_t nyr_pass_controls[] = {
     {nyr_tbuf_private_object, "tbuf_private_object"},
     {nyr_tbuf_promote_alloca, "tbuf_promote_alloca"},
     {nyr_sroa_scalar, "sroa_scalar"},
+    {nyr_invert_fallthrough_branches, "invert_fallthrough_branches"},
     {nyr_block_layout, "block_layout"},
     {nyr_points_to_sroa, "points_to_sroa"},
     {nyr_store_sink, "store_sink"},
@@ -2092,6 +2072,14 @@ static bool nyr_optimize_pipeline(nyr_func_t *f, nyr_opt_stats_t *stats,
      * through vectorization, then let IV elimination and SLP clean up the
      * remaining scalar regions/tails.
      */
+    if (ok && !nyr_pass_stopped && f->untagged_values && nyr_has_loop(f)) {
+      /*
+       * C counters are canonical only after redundant widening is removed.
+       */
+      static bool (*const c_canon[])(nyr_func_t *) = {nyr_cse, nyr_copy_prop,
+                                                      nyr_dce};
+      nyr_run_seq(f, c_canon, 3, stats, dump, &ok);
+    }
     if (ok && !(options & NYR_IR_OPT_DISABLE_VECTORIZATION) &&
         !nyr_pass_stopped && nyr_has_loop(f))
       nyr_run_pass(f, (options & NYR_IR_OPT_AVX2_VECTORIZE)
@@ -2237,6 +2225,11 @@ static bool nyr_optimize_pipeline(nyr_func_t *f, nyr_opt_stats_t *stats,
        * eligible when the vector reducer preserves lane order; remaining
        * legality and profitability checks stay in the vectorizer.
        */
+      if (ok && !nyr_pass_stopped && f->untagged_values) {
+        static bool (*const c_canon_late[])(nyr_func_t *) = {
+            nyr_cse, nyr_copy_prop, nyr_dce};
+        nyr_run_seq(f, c_canon_late, 3, stats, dump, &ok);
+      }
       if (ok && !(options & NYR_IR_OPT_DISABLE_VECTORIZATION) &&
           !nyr_pass_stopped)
         nyr_run_pass(f, (options & NYR_IR_OPT_AVX2_VECTORIZE)
@@ -2308,6 +2301,8 @@ static bool nyr_optimize_pipeline(nyr_func_t *f, nyr_opt_stats_t *stats,
       nyr_run_pass(f, nyr_icp_profile, stats, dump, &ok);
     if (ok)
       nyr_run_pass(f, nyr_block_layout, stats, dump, &ok);
+    if (ok && f->untagged_values && nyr_has_control_flow(f))
+      nyr_run_pass(f, nyr_invert_fallthrough_branches, stats, dump, &ok);
     if (ok) {
       static bool (*const cfg[])(nyr_func_t *) = {
           nyr_cfg_simplify, nyr_phiopt,    nyr_if_convert,
@@ -2357,6 +2352,18 @@ static bool nyr_optimize_pipeline(nyr_func_t *f, nyr_opt_stats_t *stats,
           nyr_outer_loop_vectorize, nyr_copy_prop, nyr_dce};
       nyr_run_seq(f, widen, 3, stats, dump, &ok);
     }
+  }
+
+  /*
+   * Short-circuit conditions in C reach this point as a boolean PHI tested by
+   * a branch. Earlier cleanups can expose that shape after the last threading
+   * opportunity, so give it one more pass.
+   */
+  if (ok && !nyr_pass_stopped && f->untagged_values &&
+      nyr_has_control_flow(f)) {
+    static bool (*const late_thread[])(nyr_func_t *) = {
+        nyr_jump_thread, nyr_cfg_simplify, nyr_copy_prop, nyr_dce};
+    nyr_run_seq(f, late_thread, 4, stats, dump, &ok);
   }
 
   /*

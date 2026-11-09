@@ -66,6 +66,19 @@ typedef struct {
   unsigned pending_sib_index;
   unsigned pending_sib_scale;
   bool pending_sib_valid;
+  /*
+   * Home of a destination that is also an input of this instruction.
+   */
+  int aliased_dst_home;
+  /*
+   * Code position when RAX was last known to equal last_rax_off's slot.
+   */
+  size_t last_rax_sync_end;
+  /*
+   * Values with a segment starting or ending at each instruction.
+   */
+  uint32_t *seg_start_offsets, *seg_start_vregs;
+  uint32_t *seg_end_offsets, *seg_end_vregs;
   nyr_mach_regalloc_t regalloc;
   size_t colors_len;
   size_t cur_inst;
@@ -178,6 +191,17 @@ typedef struct {
   bool *direct_param_slots;
   bool bare_syscalls;
   size_t bare_payload_entry; /* code offset + 1; zero means not emitted */
+  /*
+   * Dead spill-home elimination.  A first encoding counts the scalar home
+   * stores made per frame offset; mach_home_dse_analyze then scans the bytes
+   * it produced.  An offset is dropped only when those stores are the only
+   * references to it, so an access the encoder reaches by any other route
+   * keeps its stores.
+   */
+  int *home_offs_snapshot; /* first pass only; maps are torn down on return */
+  uint32_t *home_store_counts; /* first pass, indexed by -off */
+  const unsigned char *home_dead; /* second pass, indexed by -off */
+  size_t home_limit;
 } nyr_x64_mach_enc_t;
 
 static void mach_free_remat_maps(nyr_x64_mach_enc_t *e) {
@@ -206,6 +230,12 @@ static void mach_free_remat_maps(nyr_x64_mach_enc_t *e) {
   free(e->loop_fpr_entry);
   e->loop_fpr = NULL;
   e->loop_fpr_entry = NULL;
+  free(e->seg_start_offsets);
+  free(e->seg_start_vregs);
+  free(e->seg_end_offsets);
+  free(e->seg_end_vregs);
+  e->seg_start_offsets = e->seg_start_vregs = NULL;
+  e->seg_end_offsets = e->seg_end_vregs = NULL;
   free(e->loop_gpr);
   e->loop_gpr = NULL;
   free(e->select_test_src);
@@ -494,7 +524,7 @@ static bool mach_loop_gpr_color_available(const mach_loop_gpr_ranges_t *ranges,
 static bool mach_loop_gpr_call_safe(const nyr_mach_func_t *m,
                                     const mach_loop_gpr_ranges_t *ranges,
                                     const unsigned *depth, uint32_t vreg,
-                                    bool allow_nonloop_calls) {
+                                    bool allow_ordinary_calls) {
   if (!m || !ranges || !depth || vreg >= m->vreg_len)
     return false;
   for (size_t b = 0; b < m->block_len; ++b) {
@@ -505,7 +535,7 @@ static bool mach_loop_gpr_call_safe(const nyr_mach_func_t *m,
       nyr_mach_opcode_t op = m->insts[pc].opcode;
       if (op == NYR_MACH_CALL || op == NYR_MACH_INTRINSIC ||
           op == NYR_MACH_INLINE_ASM) {
-        if (allow_nonloop_calls && op == NYR_MACH_CALL && depth[b] == 0)
+        if (allow_ordinary_calls && op == NYR_MACH_CALL)
           continue;
         return false;
       }
@@ -578,6 +608,7 @@ static bool mach_loop_gpr_scratch_free_op(const nyr_mach_inst_t *in) {
     return true;
   case NYR_MACH_SHL:
   case NYR_MACH_SAR:
+  case NYR_MACH_SHR:
   case NYR_MACH_ROR:
   case NYR_MACH_ROR32:
   case NYR_MACH_VSHR:
@@ -712,8 +743,12 @@ static bool mach_spill_homes_are_private(const nyr_mach_func_t *mach) {
     for (size_t k = 0; k < sizeof(ops) / sizeof(ops[0]); ++k) {
       if (ops[k]->kind == NYR_MACH_OPERAND_PREG)
         return false;
+      /*
+       * A C pointer derived from a local object cannot reach the compiler's
+       * spill slots without undefined behavior.
+       */
       if (ops[k]->kind == NYR_MACH_OPERAND_FRAME &&
-          in->opcode == NYR_MACH_LEA && k > 0)
+          in->opcode == NYR_MACH_LEA && k > 0 && !mach->c_abi)
         return false;
     }
     for (size_t k = 0; k < in->args_len; ++k)
@@ -960,18 +995,18 @@ static bool mach_loop_gpr_store_safe_indexed(
 
 static bool mach_loop_gpr_call_safe_indexed(
     const nyr_mach_func_t *m, const mach_loop_gpr_ranges_t *ranges,
-    const unsigned *depth, uint32_t vreg, bool allow_nonloop_calls,
+    const unsigned *depth, uint32_t vreg, bool allow_ordinary_calls,
     const mach_loop_hazard_index_t *index) {
   if (!index->counts)
     return mach_loop_gpr_call_safe(m, ranges, depth, vreg,
-                                   allow_nonloop_calls);
+                                   allow_ordinary_calls);
   for (size_t b = 0; b < ranges->block_len; ++b) {
     size_t at = (size_t)vreg * ranges->block_len + b;
     if (ranges->starts[at] == SIZE_MAX)
       continue;
     size_t start = ranges->starts[at], end = ranges->ends[at];
     if (mach_loop_hazard_has(index, MACH_LOOP_HAZARD_OPAQUE, start, end) ||
-        ((!allow_nonloop_calls || depth[b] != 0) &&
+        (!allow_ordinary_calls &&
          mach_loop_hazard_has(index, MACH_LOOP_HAZARD_CALL, start, end)))
       return false;
   }
@@ -1276,12 +1311,24 @@ static void mach_allocate_loop_gprs(nyr_x64_mach_enc_t *e, const char *name,
              (in->src0.kind == NYR_MACH_OPERAND_VREG ||
               in->src0.kind == NYR_MACH_OPERAND_IMM)) ||
             in->opcode == NYR_MACH_LOAD || in->opcode == NYR_MACH_LEA ||
+            ((in->opcode == NYR_MACH_SAR || in->opcode == NYR_MACH_SHR ||
+              in->opcode == NYR_MACH_SHL) &&
+             (in->src1.kind == NYR_MACH_OPERAND_IMM ||
+              (in->src1.kind == NYR_MACH_OPERAND_VREG &&
+               in->src1.as.reg < m->vreg_len &&
+               folded_known[in->src1.as.reg])) &&
+             m->c_abi) ||
             in->opcode == NYR_MACH_ADD || in->opcode == NYR_MACH_SUB ||
             in->opcode == NYR_MACH_AND || in->opcode == NYR_MACH_OR ||
             in->opcode == NYR_MACH_XOR || in->opcode == NYR_MACH_MUL ||
             in->opcode == NYR_MACH_SELECT ||
             (in->opcode == NYR_MACH_DIV &&
-             in->src1.kind == NYR_MACH_OPERAND_IMM);
+             in->src1.kind == NYR_MACH_OPERAND_IMM) ||
+            (m->c_abi && in->opcode == NYR_MACH_MOD &&
+             (in->src1.kind == NYR_MACH_OPERAND_IMM ||
+              (in->src1.kind == NYR_MACH_OPERAND_VREG &&
+               in->src1.as.reg < m->vreg_len &&
+               folded_known[in->src1.as.reg])));
         other_def[in->dst.as.reg] |= !loop_home_def;
       }
       const nyr_mach_operand_t *ops[] = {&in->src0, &in->src1, &in->src2};
@@ -1320,7 +1367,11 @@ static void mach_allocate_loop_gprs(nyr_x64_mach_enc_t *e, const char *name,
      * former over the whole range; the call proof covers the rest.
      */
     bool r8_caller_saved = color >= 8;
-    bool data_caller_saved = color == 5 || color == 6;
+    /*
+     * C allocates ordinary values in rsi/rdi first, and the overlap check
+     * does not yet see every conflict with a loop register there.
+     */
+    bool data_caller_saved = !m->c_abi && (color == 5 || color == 6);
     if (!callee_saved && !r8_caller_saved && !data_caller_saved)
       continue;
     if (preg == 11)
@@ -1666,6 +1717,20 @@ static int mach_cs_count(unsigned mask) {
   return n;
 }
 
+/*
+ * Returns true when this home store should be omitted.
+ */
+static bool mach_home_store_skip(nyr_x64_mach_enc_t *e, int off) {
+  if (!e || off >= 0)
+    return false;
+  size_t index = (size_t)(-(int64_t)off);
+  if (index >= e->home_limit)
+    return false;
+  if (e->home_store_counts)
+    e->home_store_counts[index]++;
+  return e->home_dead && e->home_dead[index];
+}
+
 static int mach_vreg_home_off(const nyr_x64_mach_enc_t *e, uint32_t vreg) {
   if (!e || !e->mach || !e->vreg_home_offs || vreg >= e->mach->vreg_len)
     return 0;
@@ -1711,7 +1776,8 @@ static bool mach_home_color_boundary(const nyr_mach_inst_t *in) {
   if (in->opcode == NYR_MACH_CALL || in->opcode == NYR_MACH_DIV ||
       in->opcode == NYR_MACH_MOD || in->opcode == NYR_MACH_INTRINSIC ||
       ((in->opcode == NYR_MACH_SHL || in->opcode == NYR_MACH_SAR ||
-        in->opcode == NYR_MACH_ROR || in->opcode == NYR_MACH_ROR32) &&
+        in->opcode == NYR_MACH_SHR || in->opcode == NYR_MACH_ROR ||
+        in->opcode == NYR_MACH_ROR32) &&
        in->src1.kind != NYR_MACH_OPERAND_IMM))
     return true;
   return in->dst.kind == NYR_MACH_OPERAND_PREG ||
@@ -2194,10 +2260,60 @@ static unsigned char mach_cond_jcc(nyr_mach_cond_t cond, bool is_float) {
   return tab[idx];
 }
 
+/*
+ * Build a per-instruction list of values whose segments begin or end there,
+ * ascending by value so emission order matches a full scan.
+ */
+static bool mach_seg_index_build(nyr_x64_mach_enc_t *e, bool ends,
+                                 uint32_t **offsets_out, uint32_t **vregs_out) {
+  size_t n = e->mach->inst_len;
+  uint32_t *offsets = calloc(n + 2, sizeof(*offsets));
+  uint32_t *vregs = malloc((e->regalloc.segment_len + 1) * sizeof(*vregs));
+  if (!offsets || !vregs) {
+    free(offsets);
+    free(vregs);
+    return false;
+  }
+  for (size_t i = 0; i < e->regalloc.segment_len; ++i) {
+    const nyr_mach_live_segment_t *seg = &e->regalloc.segments[i];
+    size_t pc = ends ? seg->end : seg->start;
+    if (pc < n)
+      offsets[pc + 2]++;
+  }
+  for (size_t pc = 0; pc < n; ++pc)
+    offsets[pc + 2] += offsets[pc + 1];
+  for (size_t i = 0; i < e->regalloc.segment_len; ++i) {
+    const nyr_mach_live_segment_t *seg = &e->regalloc.segments[i];
+    size_t pc = ends ? seg->end : seg->start;
+    if (pc < n)
+      vregs[offsets[pc + 1]++] = seg->vreg;
+  }
+  for (size_t pc = 0; pc < n; ++pc)
+    for (uint32_t i = offsets[pc] + 1; i < offsets[pc + 1]; ++i) {
+      uint32_t value = vregs[i], j = i;
+      for (; j > offsets[pc] && vregs[j - 1] > value; --j)
+        vregs[j] = vregs[j - 1];
+      vregs[j] = value;
+    }
+  *offsets_out = offsets;
+  *vregs_out = vregs;
+  return true;
+}
+
 static bool mach_begin_segments(nyr_x64_mach_enc_t *e) {
   if (!e || !e->color_seeded)
     return true;
-  for (uint32_t v = 0; v < e->colors_len; ++v) {
+  if (!e->seg_start_offsets &&
+      !mach_seg_index_build(e, false, &e->seg_start_offsets,
+                            &e->seg_start_vregs))
+    return mach_err(e, "x64 machine form encode: OOM");
+  if (e->cur_inst >= e->mach->inst_len)
+    return true;
+  for (uint32_t at = e->seg_start_offsets[e->cur_inst];
+       at < e->seg_start_offsets[e->cur_inst + 1]; ++at) {
+    uint32_t v = e->seg_start_vregs[at];
+    if (v >= e->colors_len)
+      continue;
     /*
      * Loop-resident values keep a dedicated callee-saved home register for
      * the whole function (see mach_allocate_loop_gprs): every definition
@@ -2301,7 +2417,16 @@ static size_t mach_block_for_inst(const nyr_x64_mach_enc_t *e, size_t inst) {
 static bool mach_end_segments(nyr_x64_mach_enc_t *e) {
   if (!e || !e->color_seeded)
     return true;
-  for (uint32_t v = 0; v < e->colors_len; ++v) {
+  if (!e->seg_end_offsets &&
+      !mach_seg_index_build(e, true, &e->seg_end_offsets, &e->seg_end_vregs))
+    return mach_err(e, "x64 machine form encode: OOM");
+  if (e->cur_inst >= e->mach->inst_len)
+    return true;
+  for (uint32_t at = e->seg_end_offsets[e->cur_inst];
+       at < e->seg_end_offsets[e->cur_inst + 1]; ++at) {
+    uint32_t v = e->seg_end_vregs[at];
+    if (v >= e->colors_len)
+      continue;
     if (e->loop_gpr && e->loop_gpr[v] >= 0)
       continue;
     if (!e->color_seeded[v])
@@ -2518,9 +2643,14 @@ static bool mach_store_preg_home(nyr_x64_mach_enc_t *e, int preg, int off) {
   if (e->last_home_store_end != 0 && e->last_home_store_end == e->code.len &&
       e->last_home_store_off == off && e->last_home_store_preg == preg)
     return true;
-  if (!mach_rex(e, true, preg >= 8, false, false) ||
-      !mach_u8(e, 0x89) ||
-      !mach_rbp_disp(e, (unsigned)preg, off))
+  /*
+   * A dropped store still records what it would have left behind: the next
+   * load forwards from this register instead of reading the slot, and must do
+   * so identically in both encodings.
+   */
+  if (!mach_home_store_skip(e, off) &&
+      (!mach_rex(e, true, preg >= 8, false, false) ||
+       !mach_u8(e, 0x89) || !mach_rbp_disp(e, (unsigned)preg, off)))
     return false;
   e->last_home_store_end = e->code.len;
   e->last_home_store_off = off;
@@ -3051,6 +3181,11 @@ static bool mach_load_src_preg(nyr_x64_mach_enc_t *e,
     int sp = mach_vreg_preg(e, op->as.reg);
     if (sp >= 0)
       return mach_mov_preg_preg(e, (int)preg, sp);
+    /*
+     * Load the home directly; staging through RAX adds a move.
+     */
+    if (preg != 0 && off < 0)
+      return mach_load_home_preg(e, off, preg);
   }
   if (!mach_load_op_rax(e, op))
     return false;
@@ -3068,6 +3203,7 @@ static bool mach_shift_preg_imm(nyr_x64_mach_enc_t *e,
                                int dst, int64_t imm) {
   unsigned ext = op == NYR_MACH_SHL ? 6
                  : op == NYR_MACH_SAR ? 7
+                 : op == NYR_MACH_SHR ? 5
                  : op == NYR_MACH_ROR ? 1 : 0xff;
   if (ext == 0xff || imm < 0 || imm > 63)
     return false;
@@ -3167,6 +3303,7 @@ static bool mach_load_rax(nyr_x64_mach_enc_t *e, int off) {
     return false;
   e->last_rax_valid = true;
   e->last_rax_off = off;
+  e->last_rax_sync_end = e->code.len;
   return true;
 }
 
@@ -3174,16 +3311,19 @@ static bool mach_store_rax(nyr_x64_mach_enc_t *e, int off) {
   /*
    * A matching sticky-home tag means RAX still contains the value currently
    * stored at this exact stack slot.  Re-publishing it is a redundant
-   * load/store pair; retain the tag and omit the store.
+   * load/store pair; retain the tag and omit the store. An instruction whose
+   * destination is also its input has changed RAX since the tag was set.
    */
-  if (!e->no_sticky && e->last_rax_valid && e->last_rax_off == off)
+  if (!e->no_sticky && e->last_rax_valid && e->last_rax_off == off &&
+      off != e->aliased_dst_home && e->last_rax_sync_end == e->code.len)
     return true;
-  if (!mach_rex(e, true, false, false, false) ||
-      !mach_u8(e, 0x89) ||
-      !mach_rbp_disp(e, 0, off))
+  if (!mach_home_store_skip(e, off) &&
+      (!mach_rex(e, true, false, false, false) || !mach_u8(e, 0x89) ||
+       !mach_rbp_disp(e, 0, off)))
     return false;
   e->last_rax_valid = true;
   e->last_rax_off = off;
+  e->last_rax_sync_end = e->code.len;
   return true;
 }
 
@@ -4726,6 +4866,61 @@ static bool mach_sib_lea_mem(const nyr_x64_mach_enc_t *e, uint32_t vreg,
 }
 
 /*
+ * Rebuilding an address at a later use re-reads the LEA's inputs. Their live
+ * ranges may have ended at the LEA, leaving their spill homes and dedicated
+ * loop registers free for values defined in between, so reject any overlap.
+ */
+static bool mach_sib_inputs_stable(const nyr_x64_mach_enc_t *e,
+                                   const nyr_mach_inst_t *def, size_t def_index,
+                                   size_t use_index) {
+  const nyr_mach_operand_t *inputs[] = {&def->src0, &def->src1};
+  bool same_block =
+      mach_block_for_inst(e, def_index) == mach_block_for_inst(e, use_index);
+  for (size_t n = 0; n < 2; ++n) {
+    if (inputs[n]->kind != NYR_MACH_OPERAND_VREG)
+      continue;
+    uint32_t input = inputs[n]->as.reg;
+    /*
+     * The scan below is linear, so it is only exact inside one block. A
+     * multiply-defined input could change on a path it cannot see.
+     */
+    if (!same_block && e->def_count && input < e->mach->vreg_len &&
+        e->def_count[input] > 1)
+      return false;
+    /*
+     * An input produced by the instruction just before the LEA may exist only
+     * in RAX, with no home write to re-read later.
+     */
+    if (def_index > 0 && e->def_inst && input < e->mach->vreg_len &&
+        e->def_inst[input] == def_index - 1)
+      return false;
+    int home = mach_vreg_home_off(e, input);
+    for (size_t i = def_index; i < use_index; ++i) {
+      const nyr_mach_inst_t *at = &e->mach->insts[i];
+      if (at->opcode == NYR_MACH_STORE ||
+          at->dst.kind != NYR_MACH_OPERAND_VREG)
+        continue;
+      /*
+       * Redefined after the address was formed, including `add v, v, x`.
+       */
+      if (at->dst.as.reg == input)
+        return false;
+      uint32_t other = at->dst.as.reg;
+      if (mach_vreg_home_off(e, other) == home)
+        return false;
+      /*
+       * Dedicated loop registers have the same hazard as shared homes.
+       */
+      if (e->loop_gpr && input < e->mach->vreg_len &&
+          other < e->mach->vreg_len && e->loop_gpr[input] >= 0 &&
+          e->loop_gpr[input] == e->loop_gpr[other])
+        return false;
+    }
+  }
+  return true;
+}
+
+/*
  * Decompose an indexed LEA at a memory use even when the address also feeds
  * another memory operation (for example, the load and store of an array
  * element swap).  Unlike mach_sib_lea_mem(), this never licenses deleting or
@@ -4757,7 +4952,8 @@ static bool mach_sib_lea_mem_use(const nyr_x64_mach_enc_t *e, uint32_t vreg,
       def->src2.kind != NYR_MACH_OPERAND_IMM ||
       (def->src2.as.imm != 2 && def->src2.as.imm != 4 &&
        def->src2.as.imm != 8) ||
-      (!is_load && !is_store))
+      (!is_load && !is_store) ||
+      !mach_sib_inputs_stable(e, def, def_index, use_index))
     return false;
   if (base_out)
     *base_out = &def->src0;
@@ -4790,7 +4986,8 @@ static bool mach_sib_lea_all_uses_mem(const nyr_x64_mach_enc_t *e,
         in->opcode == NYR_MACH_LOAD && mach_op_is_vreg(&in->src0, vreg);
     bool is_store =
         in->opcode == NYR_MACH_STORE && mach_op_is_vreg(&in->dst, vreg);
-    if ((!is_load && !is_store) || mach_block_for_inst(e, i) != block)
+    if ((!is_load && !is_store) || mach_block_for_inst(e, i) != block ||
+        !mach_sib_inputs_stable(e, &e->mach->insts[def_index], def_index, i))
       return false;
     found = true;
   }
@@ -5041,6 +5238,18 @@ static bool mach_sib_query(nyr_x64_mach_enc_t *e,
     if (float_memory_use &&
         (e->force_stack_reads || bp < 0 || ip < 0 || (ip & 7) == 4))
       return false;
+    /*
+     * A resident index needs no scratch: only the base goes through RAX.
+     */
+    if (ip >= 0 && ip != 4 && ip != 10) {
+      if (!mach_seed_colored_preg(e, lea_index->as.reg) ||
+          !mach_load_op_rax(e, lea_base))
+        return false;
+      *base_preg = 0;
+      *idx_preg = (unsigned)ip;
+      *scale = lea_scale;
+      return true;
+    }
     if (!e->r10_index_valid || e->r10_index_vreg != lea_index->as.reg) {
       if (!mach_load_op_rax(e, lea_index) || !mach_mov_reg_rax(e, 10))
         return false;
@@ -5055,7 +5264,16 @@ static bool mach_sib_query(nyr_x64_mach_enc_t *e,
     return true;
   }
   if (d->opcode != NYR_MACH_ADD || d->dst.kind != NYR_MACH_OPERAND_VREG ||
-      d->dst.as.reg != addr->as.reg)
+      d->dst.as.reg != addr->as.reg ||
+      !mach_sib_inputs_stable(e, d, di, e->cur_inst))
+    return false;
+  /*
+   * def_inst holds a vreg's last definition, which need not be the one
+   * reaching this access once the vreg has several.
+   */
+  if (e->def_count && e->def_count[addr->as.reg] > 1 &&
+      (di >= e->cur_inst ||
+       mach_block_for_inst(e, di) != mach_block_for_inst(e, e->cur_inst)))
     return false;
 
   const nyr_mach_operand_t *side[2] = {&d->src0, &d->src1};
@@ -5092,7 +5310,10 @@ static bool mach_sib_query(nyr_x64_mach_enc_t *e,
        */
       if (iop)
         return false;
-      iop = &e->mach->insts[e->def_inst[s->as.reg]].src0;
+      if ((e->def_count && e->def_count[s->as.reg] > 1) ||
+          !mach_sib_inputs_stable(e, &e->mach->insts[si], si, e->cur_inst))
+        return false;
+      iop = &e->mach->insts[si].src0;
       sc = cand;
     } else if (!bop) {
       bop = s;
@@ -5163,6 +5384,16 @@ static bool mach_sib_query(nyr_x64_mach_enc_t *e,
         (e->addr_fold && e->addr_fold_known && e->addr_fold_known[vreg]);
     if (!mach_segment_at(e, vreg, e->cur_inst) && !rematerializable)
       return false;
+  }
+  int resident_index = mach_vreg_preg(e, add_index->as.reg);
+  if (resident_index >= 0 && resident_index != 4 && resident_index != 10) {
+    if (!mach_seed_colored_preg(e, add_index->as.reg) ||
+        !mach_load_op_rax(e, add_base))
+      return false;
+    *base_preg = 0;
+    *idx_preg = (unsigned)resident_index;
+    *scale = add_scale;
+    return true;
   }
   if (!mach_load_op_rax(e, add_index) || !mach_mov_reg_rax(e, 10) ||
       !mach_load_op_rax(e, add_base))
@@ -5388,6 +5619,12 @@ static bool mach_add_reloc(nyr_x64_mach_enc_t *e, const char *sym, int type) {
   }
   nyr_x64_obj_reloc_t *r = &e->relocs[e->reloc_count++];
   memset(r, 0, sizeof(*r));
+  /*
+   * C extern references carry an internal prefix; link against the ABI name.
+   */
+  static const char c_extern_prefix[] = "__nyc_extern_";
+  if (sym && strncmp(sym, c_extern_prefix, sizeof(c_extern_prefix) - 1) == 0)
+    sym += sizeof(c_extern_prefix) - 1;
   snprintf(r->symbol, sizeof(r->symbol), "%s", sym ? sym : "");
   r->disp_off = e->code.len;
   r->type = type;
@@ -5724,6 +5961,7 @@ static bool mach_literal_rhs_use_is_immediate(const nyr_x64_mach_enc_t *e,
     return value != 0 && value != 1 && value != -1;
   case NYR_MACH_SHL:
   case NYR_MACH_SAR:
+  case NYR_MACH_SHR:
   case NYR_MACH_ROR:
   case NYR_MACH_ROR32:
     return true;
@@ -6172,6 +6410,7 @@ static bool mach_use_requires_home(const nyr_mach_func_t *m,
     case NYR_MACH_COS:
     case NYR_MACH_SHL:
     case NYR_MACH_SAR:
+    case NYR_MACH_SHR:
     case NYR_MACH_ROR:
     case NYR_MACH_ROR32:
     case NYR_MACH_VSHR:
@@ -6335,10 +6574,11 @@ static bool mach_vreg_can_forward_to_next_rax(const nyr_x64_mach_enc_t *e,
     if (mach_inst_uses_vreg(use, vreg)) {
       bool direct_source = mach_op_is_vreg(&use->src0, vreg);
       /*
-       * The LEA encoder consumes a register index from RAX first, copies it
-       * to the reserved index register, and only then loads the base.
+       * The LEA encoder may seed a resident base first, so an index forwarded
+       * through RAX is only safe when the base needs no materialization.
        */
       bool direct_lea_index = use->opcode == NYR_MACH_LEA &&
+                              mach_vreg_assigned_preg(e, use->src0.as.reg) < 0 &&
                               mach_op_is_vreg(&use->src1, vreg) &&
                               use->src0.kind == NYR_MACH_OPERAND_VREG &&
                               use->src2.kind == NYR_MACH_OPERAND_IMM &&
@@ -6517,7 +6757,8 @@ static bool mach_vreg_can_feed_from_color(const nyr_x64_mach_enc_t *e,
     return false;
   }
   bool direct_mod_source =
-      use->opcode == NYR_MACH_MOD && mach_op_is_vreg(&use->src0, vreg);
+      use->opcode == NYR_MACH_MOD && !use->unsigned_arith &&
+      mach_op_is_vreg(&use->src0, vreg);
   if (direct_mod_source) {
     int preg = mach_color_preg[seg->color];
     /*
@@ -7051,6 +7292,8 @@ static bool mach_store_xmm(nyr_x64_mach_enc_t *e, int off, bool f32,
                            unsigned reg) {
   if (reg >= 16)
     return mach_err(e, "x64 machine form encode: unsupported XMM register");
+  if (mach_home_store_skip(e, off))
+    return true;
   if (e->vex)
     return mach_vex(e, f32 ? 2 : 3, false, reg, 0, 5, 0, 0x11) &&
            mach_u8(e, 0x85 | ((reg & 7) << 3)) && mach_i32(e, off);
@@ -9110,7 +9353,8 @@ static bool mach_float_fast_eligible(const nyr_mach_func_t *mach) {
         in->opcode != NYR_MACH_SHUFFLE && in->opcode != NYR_MACH_LOAD &&
         in->opcode != NYR_MACH_STORE && in->opcode != NYR_MACH_CMP &&
         in->opcode != NYR_MACH_BR && in->opcode != NYR_MACH_BR_IF &&
-        in->opcode != NYR_MACH_NOP && in->opcode != NYR_MACH_RET)
+        in->opcode != NYR_MACH_NOP && in->opcode != NYR_MACH_RET &&
+        in->opcode != NYR_MACH_REDUCE_ADD)
       return false;
   }
   return has_float;
@@ -9155,9 +9399,16 @@ static bool mach_store_gpr(nyr_x64_mach_enc_t *e, int off, int reg) {
 static bool mach_prepare_direct_params(nyr_x64_mach_enc_t *e) {
   const nyr_mach_func_t *mach = e->mach;
   bool trace = ny_dbg_is_enabled(NY_DBG_DEEP);
+  /*
+   * The home-slot table exists whenever parameter ABI data does.
+   */
+  bool has_aggregate_param = false;
+  for (size_t p = 0; mach && mach->param_aggregate_home_slots && mach->param_types &&
+                     p < mach->param_count;
+       ++p)
+    has_aggregate_param |= mach->param_types[p] == NYIR_PARAM_AGGREGATE;
   if (!mach || !mach->param_count || mach->param_count > mach->frame_slot_len ||
-      mach->param_aggregate_home_slots || !mach->block_len ||
-      mach->param_count > 6) {
+      has_aggregate_param || !mach->block_len || mach->param_count > 6) {
     if (trace && mach) {
       ny_dbg_enter_context(e->debug_name);
       ny_dbg_heuristic_event(
@@ -10081,7 +10332,7 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
   if (base_name && symbol_prefix_len &&
       strncmp(base_name, symbol_prefix, symbol_prefix_len) == 0)
     base_name += symbol_prefix_len;
-  if (base_name && strcmp(base_name, "main") == 0 && e->target &&
+  if (base_name && strcmp(base_name, "main") == 0 && !mach->c_abi && e->target &&
       e->target->abi == NY_NATIVE_ABI_SYSV) {
     char set_args[256];
     snprintf(set_args, sizeof(set_args), "%s_ny_aot_set_args", symbol_prefix);
@@ -10090,10 +10341,10 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
       return false;
   }
   if (base_name && strcmp(base_name, "rt_main") != 0 &&
-      strcmp(base_name, "main") != 0 && !mach_prepare_direct_params(e))
+      (mach->c_abi || strcmp(base_name, "main") != 0) && !mach_prepare_direct_params(e))
     return false;
   if (base_name && strcmp(base_name, "rt_main") != 0 &&
-      strcmp(base_name, "main") != 0 && !mach_spill_params(e))
+      (mach->c_abi || strcmp(base_name, "main") != 0) && !mach_spill_params(e))
     return false;
 
   if (mach->vreg_len) {
@@ -10209,6 +10460,12 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
       e->pending_rax_valid = false;
       e->inst_offsets[e->cur_inst] = e->code.len;
       const nyr_mach_inst_t *in = &mach->insts[e->cur_inst];
+      e->aliased_dst_home =
+          in->opcode != NYR_MACH_COPY && in->opcode != NYR_MACH_STORE &&
+                  in->dst.kind == NYR_MACH_OPERAND_VREG &&
+                  mach_inst_input_uses_vreg(in, in->dst.as.reg)
+              ? mach_vreg_home_off(e, in->dst.as.reg)
+              : 0;
       if (!mach_inst_preserves_r10_index(e, in))
         mach_r10_index_invalidate(e);
       int dst = mach_slot_off(e, &in->dst);
@@ -10741,12 +10998,37 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
           ny_x64_mem_addr_t A;
           if (!mach_resolve_mem_addr(e, &in->src0, &A))
             return false;
-          if (in->byte_width) {
-            if (!mach_rex_for_addr(e, &A, false, false) || !mach_u8(e, 0x0f) ||
-                !mach_u8(e, 0xb6) || !mach_emit_mem(e, &A, 0))
+          /*
+           * Load straight into an allocated destination; going through RAX
+           * would only add a copy.
+           */
+          int load_preg = in->dst.kind == NYR_MACH_OPERAND_VREG
+                              ? mach_vreg_def_preg(e, in->dst.as.reg)
+                              : -1;
+          unsigned load_reg = load_preg >= 0 ? (unsigned)load_preg : 0u;
+          bool load_r = load_reg >= 8;
+          if (in->mem_size == 5) {
+            /* mov r32, dword ptr: the 32-bit write clears the high half. */
+            if (!mach_rex_for_addr(e, &A, false, load_r) || !mach_u8(e, 0x8b) ||
+                !mach_emit_mem(e, &A, load_reg & 7))
               return false;
-          } else if (!mach_rex_for_addr(e, &A, true, false) ||
-                     !mach_u8(e, 0x8b) || !mach_emit_mem(e, &A, 0)) {
+          } else if (in->mem_size == 2) {
+            /* movzx r32, word ptr: the 32-bit write clears the high half. */
+            if (!mach_rex_for_addr(e, &A, false, load_r) || !mach_u8(e, 0x0f) ||
+                !mach_u8(e, 0xb7) || !mach_emit_mem(e, &A, load_reg & 7))
+              return false;
+          } else if (in->mem_size == 4) {
+            /* movsxd r64, dword ptr */
+            if (!mach_rex_for_addr(e, &A, true, load_r) || !mach_u8(e, 0x63) ||
+                !mach_emit_mem(e, &A, load_reg & 7))
+              return false;
+          } else if (in->byte_width) {
+            if (!mach_rex_for_addr(e, &A, false, load_r) || !mach_u8(e, 0x0f) ||
+                !mach_u8(e, 0xb6) || !mach_emit_mem(e, &A, load_reg & 7))
+              return false;
+          } else if (!mach_rex_for_addr(e, &A, true, load_r) ||
+                     !mach_u8(e, 0x8b) ||
+                     !mach_emit_mem(e, &A, load_reg & 7)) {
             return false;
           }
           /*
@@ -10755,8 +11037,12 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
            * retaining that sticky tag would incorrectly omit the store.
            */
           mach_rax_invalidate(e);
-          if (!mach_commit_vreg(e, &in->dst, dst))
+          if (load_preg >= 0) {
+            if (!mach_commit_preg(e, &in->dst, dst, load_reg, false))
+              return false;
+          } else if (!mach_commit_vreg(e, &in->dst, dst)) {
             return false;
+          }
         }
         break;
       }
@@ -10836,7 +11122,18 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
             ny_x64_mem_addr_t A;
             if (!mach_resolve_mem_addr(e, &in->dst, &A))
               return false;
-            if (in->byte_width) {
+            if (in->mem_size == 2) {
+              if (!mach_u8(e, 0x66) || !mach_rex_for_addr(e, &A, false, false) ||
+                  !mach_u8(e, 0xc7) || !mach_emit_mem(e, &A, 0) ||
+                  !mach_u8(e, (unsigned char)(simm & 0xff)) ||
+                  !mach_u8(e, (unsigned char)((simm >> 8) & 0xff)))
+                return false;
+            } else if (in->mem_size == 4) {
+              if (!mach_rex_for_addr(e, &A, false, false) ||
+                  !mach_u8(e, 0xc7) || !mach_emit_mem(e, &A, 0) ||
+                  !mach_i32(e, (int32_t)simm))
+                return false;
+            } else if (in->byte_width) {
               if (!mach_rex_for_addr(e, &A, false, false) ||
                   !mach_u8(e, 0xc6) || !mach_emit_mem(e, &A, 0) ||
                   !mach_u8(e, (unsigned char)simm))
@@ -10852,8 +11149,25 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
             if (!mach_resolve_mem_addr(e, &in->dst, &A) ||
                 !mach_store_value_preg(e, &A, &in->src0, &src_preg))
               return false;
-            if (in->byte_width) {
+            if (in->mem_size == 2) {
+              if (!mach_u8(e, 0x66) ||
+                  !mach_rex_for_addr(e, &A, false, src_preg >= 8) ||
+                  !mach_u8(e, 0x89) || !mach_emit_mem(e, &A, src_preg & 7))
+                return false;
+            } else if (in->mem_size == 4) {
               if (!mach_rex_for_addr(e, &A, false, src_preg >= 8) ||
+                  !mach_u8(e, 0x89) || !mach_emit_mem(e, &A, src_preg & 7))
+                return false;
+            } else if (in->byte_width) {
+              /*
+               * Without a REX prefix, byte registers 4-7 are ah/ch/dh/bh, not
+               * spl/bpl/sil/dil, so those sources need an empty one.
+               */
+              bool plain_rex = src_preg >= 4 && src_preg < 8 &&
+                               (unsigned)A.base < 8 &&
+                               !(A.index >= 0 && (unsigned)A.index >= 8);
+              if ((plain_rex && !mach_u8(e, 0x40)) ||
+                  !mach_rex_for_addr(e, &A, false, src_preg >= 8) ||
                   !mach_u8(e, 0x88) || !mach_emit_mem(e, &A, src_preg & 7))
                 return false;
             } else if (!mach_rex_for_addr(e, &A, true, src_preg >= 8) ||
@@ -10883,10 +11197,34 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
          * Scalar-float lowering may insert conversions between an address
          * LEA and its memory use. The SIB rematerializer only consumes an
          * adjacent use, so eliding this LEA would leave its home uninitialized.
+         *
+         * An adjacent float access folds this LEA whenever both inputs are
+         * resident, so the address need not be materialized for it.
          */
+        bool float_use_folds =
+            e->fp_fast_path && !e->force_stack_reads && next &&
+            next->opcode == NYR_MACH_LOAD &&
+            in->dst.kind == NYR_MACH_OPERAND_VREG &&
+            in->src0.kind == NYR_MACH_OPERAND_VREG &&
+            in->src1.kind == NYR_MACH_OPERAND_VREG &&
+            mach_sib_lea_mem(e, in->dst.as.reg, e->cur_inst + 1, NULL, NULL,
+                             NULL, NULL);
+        if (float_use_folds) {
+          /*
+           * Residency is asked where the load will read it: an input whose
+           * last use is this LEA has already left its register there.
+           */
+          size_t lea_inst = e->cur_inst++;
+          int base_at_load = mach_vreg_preg(e, in->src0.as.reg);
+          int index_at_load = mach_vreg_preg(e, in->src1.as.reg);
+          e->cur_inst = lea_inst;
+          float_use_folds = base_at_load >= 0 && index_at_load >= 0 &&
+                            (index_at_load & 7) != 4;
+        }
         if (in->dst.kind == NYR_MACH_OPERAND_VREG && !next_is_vector_load &&
-            !mach_sib_lea_has_float_memory_use(e, in->dst.as.reg,
-                                               e->cur_inst) &&
+            (float_use_folds ||
+             !mach_sib_lea_has_float_memory_use(e, in->dst.as.reg,
+                                                e->cur_inst)) &&
             ((mach_sib_lea_mem(e, in->dst.as.reg, e->cur_inst + 1, NULL, NULL,
                                NULL, NULL)) ||
              (in->src0.kind == NYR_MACH_OPERAND_VREG &&
@@ -11099,12 +11437,17 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
           unsigned src_reg = 15;
           if (!mach_load_float_operand(e, &in->src0, f32, 15, &src_reg))
             return false;
-          if (src_reg != 0 && !mach_sse_mov_reg(e, 0, src_reg, f32))
-            return false;
+          /*
+           * cvttsd2si rax, src. The source stays where it is: staging it
+           * through xmm0 would destroy any float allocated there.
+           */
           if (!mach_u8(e, f32 ? 0xf3 : 0xf2) ||
-              !mach_rex(e, true, false, false, false) || !mach_u8(e, 0x0f) ||
-              !mach_u8(e, 0x2c) || !mach_u8(e, 0xc0) ||
-              !mach_commit_vreg(e, &in->dst, dst))
+              !mach_rex(e, true, false, false, src_reg >= 8) ||
+              !mach_u8(e, 0x0f) || !mach_u8(e, 0x2c) ||
+              !mach_u8(e, (unsigned char)(0xc0 | (src_reg & 7))))
+            return false;
+          mach_rax_invalidate(e);
+          if (!mach_commit_vreg(e, &in->dst, dst))
             return false;
         } else
           return mach_err(e, "x64 machine form encode: unsupported CONVERT");
@@ -11179,6 +11522,7 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
       case NYR_MACH_ROR32:
       case NYR_MACH_SHL:
       case NYR_MACH_SAR:
+      case NYR_MACH_SHR:
       case NYR_MACH_VSHR:
         if (in->opcode == NYR_MACH_SHL &&
             in->dst.kind == NYR_MACH_OPERAND_VREG &&
@@ -11215,6 +11559,24 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
                */
               e->pending_sib_base = (unsigned)bp;
               e->pending_sib_index = (unsigned)ip;
+            } else if (ip >= 0 && ip != 4 && (unsigned)ip != 10u) {
+              /*
+               * Only the base needs a scratch: keep the resident index.
+               */
+              if (!mach_seed_colored_preg(e, index->as.reg) ||
+                  !mach_load_op_rax(e, base))
+                return false;
+              e->pending_sib_base = 0;
+              e->pending_sib_index = (unsigned)ip;
+            } else if (bp >= 0 && bp != 4) {
+              /*
+               * Only the index needs a scratch: keep the resident base.
+               */
+              if (!mach_seed_colored_preg(e, base->as.reg) ||
+                  !mach_load_op_preg(e, index, 10))
+                return false;
+              e->pending_sib_base = (unsigned)bp;
+              e->pending_sib_index = 10;
             } else {
               /*
                * Otherwise materialize the address pair in reserved scratches.
@@ -11401,7 +11763,8 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
           break;
         }
         if (in->opcode == NYR_MACH_SHL || in->opcode == NYR_MACH_SAR ||
-            in->opcode == NYR_MACH_ROR || in->opcode == NYR_MACH_ROR32) {
+            in->opcode == NYR_MACH_SHR || in->opcode == NYR_MACH_ROR ||
+            in->opcode == NYR_MACH_ROR32) {
           if (in->opcode == NYR_MACH_SAR &&
               mach_v128_type(mach, &in->dst) == NYR_MACH_TYPE_V256_I64) {
             if (!mach_vector_ymm_sar(e, in, dst))
@@ -11458,6 +11821,7 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
           bool is_ror32 = in->opcode == NYR_MACH_ROR32;
           unsigned op = in->opcode == NYR_MACH_SHL   ? 0xe0
                         : in->opcode == NYR_MACH_SAR ? 0xf8
+                        : in->opcode == NYR_MACH_SHR ? 0xe8
                                                      : 0xc8;
           int64_t fold = 0;
           bool fold_ok = false;
@@ -11470,36 +11834,37 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
             fold = imm_fold[in->src1.as.reg];
             fold_ok = true;
           }
-          if (getenv("NY_SHIFT_PREG") && fold_ok &&
+          if (fold_ok && mach->c_abi &&
               (in->opcode == NYR_MACH_SHL || in->opcode == NYR_MACH_SAR ||
-               in->opcode == NYR_MACH_ROR || in->opcode == NYR_MACH_ROR32) &&
+               in->opcode == NYR_MACH_SHR || in->opcode == NYR_MACH_ROR ||
+               in->opcode == NYR_MACH_ROR32) &&
               in->dst.kind == NYR_MACH_OPERAND_VREG &&
               in->src0.kind == NYR_MACH_OPERAND_VREG) {
             /*
-             * Experimental (NY_SHIFT_PREG=1): destination-preg immediate
-             * shifts checksum-mismatch on sha256/pbkdf2 — some load channel
-             * still disagrees with the %rax path.  Kept behind the gate
-             * until root-caused; do not enable by default.
-             *
              * Destination-preg immediate shift: stage the canonical home
              * straight into the destination register and shift there,
-             * skipping the %rax round trip and the def publish.  ROR32
-             * additionally truncates in place: the rotate runs 64-bit, so
-             * a 32-bit self-move re-zero-extends the result exactly like
-             * the %rax path's `mov %eax,%eax`.
+             * skipping the %rax round trip. ROR32 is a real 32-bit rotate,
+             * whose result the hardware zero-extends.
              */
             int dp = mach_vreg_def_preg(e, in->dst.as.reg);
             if (dp >= 0) {
-              if (!mach_load_src_preg(e, &in->src0, (unsigned)dp) ||
-                  !mach_shift_preg_imm(e, is_ror32 ? NYR_MACH_ROR : in->opcode,
-                                       dp, fold & (is_ror32 ? 31 : 63)))
+              if (!mach_load_src_preg(e, &in->src0, (unsigned)dp))
                 return false;
-              if (is_ror32 &&
-                  !(mach_rex(e, false, dp >= 8, false, dp >= 8) &&
-                    mach_u8(e, 0x89) &&
-                    mach_u8(e,
-                            (unsigned char)(0xc0 | (dp & 7) << 3 | (dp & 7)))))
+              if (in->sext32) {
+                if (!mach_rex(e, true, dp >= 8, false, dp >= 8) ||
+                    !mach_u8(e, 0x63) ||
+                    !mach_u8(e, (unsigned char)(0xc0 | (dp & 7) << 3 | (dp & 7))))
+                  return false;
+              } else if (is_ror32) {
+                unsigned count = (unsigned)(fold & 31);
+                if (!mach_rex(e, false, false, false, dp >= 8) ||
+                    !mach_u8(e, 0xc1) ||
+                    !mach_u8(e, (unsigned char)(0xc8 | (dp & 7))) ||
+                    !mach_u8(e, (unsigned char)count))
+                  return false;
+              } else if (!mach_shift_preg_imm(e, in->opcode, dp, fold & 63)) {
                 return false;
+              }
               if (e->color_seeded) {
                 for (uint32_t v = 0; v < e->colors_len; ++v) {
                   if (v == in->dst.as.reg || !e->color_seeded[v])
@@ -11534,7 +11899,11 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
              * staging sequence rebuilds (input << bits) in the scratch pair
              * and both the shift and the ADD are elided.
              */
-            if (!mach_load_op_rax(e, &in->src0) ||
+            if (in->sext32) {
+              if (!mach_load_op_rax(e, &in->src0) || !mach_u8(e, 0x48) ||
+                  !mach_u8(e, 0x63) || !mach_u8(e, 0xc0))
+                return false;
+            } else if (!mach_load_op_rax(e, &in->src0) ||
                 (!is_ror32 && !mach_rex(e, true, false, false, false)) ||
                 !mach_u8(e, 0xc1) || !mach_u8(e, op) ||
                 !mach_u8(e, (unsigned char)(fold & 0xff)) ||
@@ -11592,7 +11961,12 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
           if (dp >= 0 && !mach_seed_colored_preg(e, in->src0.as.reg))
             return false;
           int ap = mach_vreg_preg(e, in->src0.as.reg);
-          if (dp >= 0 && ap >= 0) {
+          bool and_mask32 = in->opcode == NYR_MACH_AND &&
+                            in->src1.kind == NYR_MACH_OPERAND_VREG &&
+                            imm_fold_known && in->src1.as.reg < mach->vreg_len &&
+                            imm_fold_known[in->src1.as.reg] &&
+                            imm_fold[in->src1.as.reg] == INT64_C(0xffffffff);
+          if (dp >= 0 && ap >= 0 && !and_mask32) {
             int64_t fold = 0;
             bool fold_ok = false;
             if (in->src1.kind == NYR_MACH_OPERAND_IMM) {
@@ -11711,7 +12085,22 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
               break;
             }
           }
-          if (dp >= 0 && ap < 0) {
+          /*
+           * Loading the left operand into the destination would destroy a
+           * right operand already resident there.
+           */
+          bool rhs_in_dst =
+              dp >= 0 && in->src1.kind == NYR_MACH_OPERAND_VREG &&
+              mach_vreg_assigned_preg(e, in->src1.as.reg) == dp &&
+              !(imm_fold_known && in->src1.as.reg < mach->vreg_len &&
+                imm_fold_known[in->src1.as.reg]);
+          bool commutative = in->opcode == NYR_MACH_ADD ||
+                             in->opcode == NYR_MACH_AND ||
+                             in->opcode == NYR_MACH_OR ||
+                             in->opcode == NYR_MACH_XOR ||
+                             in->opcode == NYR_MACH_MUL;
+          if (dp >= 0 && (ap < 0 || and_mask32) &&
+              (!rhs_in_dst || commutative)) {
             /*
              * Uncolored source: pull its canonical home straight into the
              * destination preg and apply the operation there.  This skips
@@ -11719,8 +12108,14 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
              * integer code (hash rounds, PRNG mixing, PRNG-like loops).
              */
             bool emitted2 = false;
-            if (!mach_load_src_preg(e, &in->src0, (unsigned)dp))
+            if (rhs_in_dst) {
+              if (!mach_seed_colored_preg(e, in->src1.as.reg) ||
+                  !mach_load_op_rax(e, &in->src0))
+                return false;
+              emitted2 = mach_alu_preg_preg(e, in->opcode, dp, 0);
+            } else if (!mach_load_src_preg(e, &in->src0, (unsigned)dp)) {
               return false;
+            }
             int64_t fold = 0;
             bool fold_ok = false;
             if (in->src1.kind == NYR_MACH_OPERAND_IMM) {
@@ -11732,7 +12127,19 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
               fold = imm_fold[in->src1.as.reg];
               fold_ok = (int64_t)(int32_t)fold == fold;
             }
-            if (fold_ok) {
+            if (rhs_in_dst) {
+              /*
+               * The operation was emitted above.
+               */
+            } else if (and_mask32) {
+              /*
+               * mov r32,r32 clears the high half without a mask register.
+               */
+              emitted2 = mach_rex(e, false, dp >= 8, false, dp >= 8) &&
+                         mach_u8(e, 0x89) &&
+                         mach_u8(e, (unsigned char)(0xc0 | (dp & 7) << 3 |
+                                                    (dp & 7)));
+            } else if (fold_ok) {
               emitted2 = mach_alu_preg_imm(e, in->opcode, dp, fold);
             } else if (in->src1.kind == NYR_MACH_OPERAND_VREG) {
               if (!mach_seed_colored_preg(e, in->src1.as.reg))
@@ -12155,6 +12562,27 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
         }
         if (!mach_is_i64(mach, &in->dst))
           return mach_err(e, "x64 machine form encode: unsupported div type");
+        if (in->unsigned_arith) {
+          /*
+           * R10 holds the divisor; xor edx,edx; div r10.
+           */
+          if (!mach_load_op_rax(e, &in->src1) || !mach_mov_reg_rax(e, 10) ||
+              !mach_load_op_rax(e, &in->src0) ||
+              !mach_flush_pregs_to_home(e, (1u << 0) | (1u << 1) | (1u << 2) |
+                                               (1u << 8) | (1u << 9) |
+                                               (1u << 10)) ||
+              !mach_u8(e, 0x31) || !mach_u8(e, 0xd2) ||
+              !mach_rex(e, true, false, false, true) || !mach_u8(e, 0xf7) ||
+              !mach_u8(e, 0xf2))
+            return false;
+          if (in->opcode == NYR_MACH_MOD &&
+              (!mach_rex(e, true, false, false, false) || !mach_u8(e, 0x89) ||
+               !mach_u8(e, 0xd0)))
+            return false;
+          if (!mach_commit_vreg(e, &in->dst, dst))
+            return false;
+          break;
+        }
         unsigned pow2_shift = 0;
         if ((in->opcode == NYR_MACH_DIV || in->opcode == NYR_MACH_MOD) &&
             mach_pow2_divisor(&in->src1, imm_fold, imm_fold_known,
@@ -13462,9 +13890,24 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
           if (!mach_u8(e, 0xe8) ||
               !mach_add_reloc(e, call_sym, NY_RELOC_PLT32) || !mach_i32(e, 0))
             return false;
-        } else if (!mach_load_op_rax(e, &in->src0) || !mach_u8(e, 0xff) ||
-                   !mach_u8(e, 0xd0)) {
-          return false;
+        } else {
+          /*
+           * Argument placement has already filled the argument registers. A
+           * target allocated to one of them must come from its home, the
+           * pre-call flush having stored it there.
+           */
+          bool in_arg_reg = false;
+          if (in->src0.kind == NYR_MACH_OPERAND_VREG) {
+            const nyr_mach_live_segment_t *target_seg =
+                nyr_mach_regalloc_segment_at(&e->regalloc, in->src0.as.reg,
+                                             e->cur_inst);
+            in_arg_reg = target_seg && target_seg->color >= MIR_CALLEE_COLOR_N;
+          }
+          if (!(in_arg_reg
+                    ? mach_load_rax(e, mach_vreg_home_off(e, in->src0.as.reg))
+                    : mach_load_op_rax(e, &in->src0)) ||
+              !mach_u8(e, 0xff) || !mach_u8(e, 0xd0))
+            return false;
         }
         if (stack_bytes) {
           if (!mach_rex(e, true, false, false, false) || !mach_u8(e, 0x81) ||
@@ -13605,8 +14048,10 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
                   e,
                   "x64 machine form encode: unsupported inline asm template");
           } else {
-            return mach_err(
-                e, "x64 machine form encode: unsupported inline asm template");
+            if (e->err && e->err_len)
+              snprintf(e->err, e->err_len,
+                       "x64 machine form encode: unsupported inline asm: %s", t);
+            return false;
           }
         }
         break;
@@ -13788,6 +14233,12 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
   if (e->vec_color_seeded && e->vec_color_seeded != vec_color_seeded_stack)
     free(e->vec_color_seeded);
   e->vec_color_seeded = NULL;
+  if (e->home_store_counts && e->vreg_home_offs && mach->vreg_len) {
+    e->home_offs_snapshot = malloc(mach->vreg_len * sizeof(int));
+    if (e->home_offs_snapshot)
+      memcpy(e->home_offs_snapshot, e->vreg_home_offs,
+             mach->vreg_len * sizeof(int));
+  }
   mach_free_remat_maps_preserving_offsets(e);
   free(e->def_inst);
   free(e->def_count);
@@ -13858,6 +14309,120 @@ static bool ny_x64_parallel_encode_task(size_t oi, void *opaque) {
   return true;
 }
 
+/*
+ * Every %rbp-relative encoding the x86-64 emitter can produce.
+ */
+static void mach_home_count_refs(const unsigned char *code, size_t len,
+                                 uint32_t *refs, size_t limit) {
+  for (size_t i = 0; i + 1 < len; ++i) {
+    unsigned char modrm = code[i];
+    int64_t disp = 0;
+    if ((modrm & 0xC7) == 0x45) {
+      disp = (int8_t)code[i + 1];
+    } else if ((modrm & 0xC7) == 0x85 && i + 4 < len) {
+      int32_t d;
+      memcpy(&d, code + i + 1, 4);
+      disp = d;
+    } else if ((modrm & 0xC7) == 0x44 && i + 2 < len &&
+               (code[i + 1] & 7) == 5) {
+      disp = (int8_t)code[i + 2];
+    } else if ((modrm & 0xC7) == 0x84 && i + 5 < len &&
+               (code[i + 1] & 7) == 5) {
+      int32_t d;
+      memcpy(&d, code + i + 2, 4);
+      disp = d;
+    } else {
+      continue;
+    }
+    if (disp < 0 && (uint64_t)(-disp) < limit)
+      refs[-disp]++;
+  }
+}
+
+/*
+ * Encode once, then find vreg homes whose only references in the machine code
+ * are the stores the encoder counted.  Returns the table for the real
+ * encoding, or NULL when nothing can be dropped.  A failure here is ignored:
+ * the real encoding reports its own errors.
+ */
+static unsigned char *mach_home_dse_analyze(const nyr_mach_func_t *mach,
+                                            const ny_native_target_info_t *target,
+                                            const char *symbol, bool tag_return,
+                                            bool bare_syscalls,
+                                            size_t *limit_out,
+                                            nyr_x64_mach_enc_t *reuse,
+                                            bool *reused) {
+  static int enabled = -1;
+  if (enabled < 0) {
+    const char *v = getenv("NYTRIX_NO_HOME_DSE");
+    enabled = !(v && v[0] && v[0] != '0');
+  }
+  if (!enabled || !mach->vreg_len)
+    return NULL;
+  size_t limit = (mach->vreg_len + mach->frame_slot_len + 64) * 40;
+  if (limit > (size_t)1 << 20)
+    limit = (size_t)1 << 20;
+  char err[32];
+  nyr_x64_mach_enc_t probe = {0};
+  probe.mach = mach;
+  probe.target = target;
+  probe.bare_syscalls = bare_syscalls;
+  probe.err = err;
+  probe.err_len = sizeof(err);
+  probe.home_limit = limit;
+  probe.home_store_counts = calloc(limit, sizeof(uint32_t));
+  uint32_t *refs = calloc(limit, sizeof(uint32_t));
+  unsigned char *dead = calloc(limit, 1);
+  bool any = false;
+  bool probe_ok = false;
+  if (probe.home_store_counts && refs && dead &&
+      mach_encode_function(&probe, symbol, tag_return) &&
+      probe.home_offs_snapshot) {
+    probe_ok = true;
+    mach_home_count_refs(probe.code.data, probe.code.len, refs, limit);
+    for (size_t i = 0; i < mach->vreg_len; ++i) {
+      if (mach_vreg_home_size(mach, i) != 8)
+        continue;
+      int off = probe.home_offs_snapshot[i];
+      if (off >= 0 || (size_t)(-(int64_t)off) >= limit)
+        continue;
+      size_t index = (size_t)(-(int64_t)off);
+      if (probe.home_store_counts[index] > 0 &&
+          probe.home_store_counts[index] == refs[index]) {
+        dead[index] = 1;
+        any = true;
+      }
+    }
+  }
+  free(probe.home_store_counts);
+  free(probe.home_offs_snapshot);
+  probe.home_store_counts = NULL;
+  probe.home_offs_snapshot = NULL;
+  free(refs);
+  /*
+   * With no dead home the real encoding would reproduce this one exactly.
+   */
+  if (probe_ok && !any && reuse && reused) {
+    probe.home_limit = 0;
+    *reuse = probe;
+    *reused = true;
+    free(dead);
+    return NULL;
+  }
+  mach_free_remat_maps(&probe);
+  free(probe.code.data);
+  free(probe.relocs);
+  free(probe.block_off);
+  free(probe.patch_at);
+  free(probe.patch_block);
+  if (!any) {
+    free(dead);
+    return NULL;
+  }
+  *limit_out = limit;
+  return dead;
+}
+
 bool nyr_x64_mach_append_function_debug(
     nyr_obj_buf_t *code, nyr_x64_obj_symbol_def_t *defs, size_t *def_count,
     nyr_x64_obj_reloc_t *relocs, size_t *reloc_count,
@@ -13877,13 +14442,25 @@ bool nyr_x64_mach_append_function_debug(
     fprintf(stderr, "x86-64 encoded machine form for %s:\n", symbol);
     nyr_mach_dump(&mach_mut, stderr);
   }
+  size_t dead_limit = 0;
   nyr_x64_mach_enc_t enc = {0};
+  bool encoded = false;
+  unsigned char *dead_homes =
+      mach_home_dse_analyze(&mach_mut, target, symbol, tag_return, bare_syscalls,
+                            &dead_limit, &enc, &encoded);
   enc.mach = &mach_mut;
   enc.target = target;
   enc.bare_syscalls = bare_syscalls;
   enc.err = err;
   enc.err_len = err_len;
-  if (!mach_encode_function(&enc, symbol, tag_return)) {
+  if (!encoded) {
+    enc.home_dead = dead_homes;
+    enc.home_limit = dead_limit;
+    encoded = mach_encode_function(&enc, symbol, tag_return);
+  }
+  free(dead_homes);
+  enc.home_dead = NULL;
+  if (!encoded) {
     mach_free_remat_maps(&enc);
     free(enc.code.data);
     free(enc.relocs);

@@ -6396,6 +6396,16 @@ ordinary_call:
         }
       }
       const expr_t *base_expr = nyr_find_top_level_value(b, base_name);
+      /*
+       * An initializer is not the value: `mut xs = []; xs.get(i)` re-evaluated
+       * `[]` and read a fresh empty list.  Only a plain literal can be used in
+       * place of the global; everything else is read from its storage.
+       */
+      expr_t base_storage = {.kind = NY_E_IDENT, .tok = e->tok};
+      base_storage.as.ident.name = base_name;
+      const expr_t *base_read =
+          base_expr && base_expr->kind != NY_E_LITERAL ? &base_storage
+                                                       : base_expr;
       const char *global_name = nyr_globaltab_name(base_name);
       if (!global_name && b->current_fn_name) {
         const char *fn_dot = strrchr(b->current_fn_name, '.');
@@ -6411,7 +6421,7 @@ ordinary_call:
       if (global_name && strcmp(dot + 1, "get") == 0 &&
           (e->as.call.args.len == 1 || e->as.call.args.len == 2)) {
         if (base_expr && nyr_expr_is_list(b, base_expr)) {
-          int list = nyr_lower_expr(b, base_expr);
+          int list = nyr_lower_expr(b, base_read);
           int index = nyr_lower_expr(b, e->as.call.args.data[0].val);
           int fallback = e->as.call.args.len == 2
                              ? nyr_lower_expr(b, e->as.call.args.data[1].val)
@@ -6464,14 +6474,14 @@ ordinary_call:
       }
       if (base_expr && nyr_expr_is_list(b, base_expr)) {
         if (strcmp(dot + 1, "len") == 0 && e->as.call.args.len == 0) {
-          int list = nyr_lower_expr(b, base_expr);
+          int list = nyr_lower_expr(b, base_read);
           return list < 0 ? -1
                           : nyr_emit_runtime_call(b, "rt_tbuf_len_raw", list,
                                                   -1, -1, 1, 0);
         }
         if (strcmp(dot + 1, "get") == 0 &&
             (e->as.call.args.len == 1 || e->as.call.args.len == 2)) {
-          int list = nyr_lower_expr(b, base_expr);
+          int list = nyr_lower_expr(b, base_read);
           int index = nyr_lower_expr(b, e->as.call.args.data[0].val);
           int fallback = e->as.call.args.len == 2
                              ? nyr_lower_expr(b, e->as.call.args.data[1].val)
@@ -6489,7 +6499,7 @@ ordinary_call:
           strcmp(dot + 1, "get") == 0 &&
           (e->as.call.args.len == 1 || e->as.call.args.len == 2)) {
         call_arg_t direct_args[3] = {
-            {.name = NULL, .val = (expr_t *)base_expr},
+            {.name = NULL, .val = (expr_t *)base_read},
             {.name = NULL, .val = e->as.call.args.data[0].val},
             {.name = NULL,
              .val =
@@ -6508,7 +6518,7 @@ ordinary_call:
         return nyr_lower_call(b, &direct);
       }
       if (base_expr) {
-        int dict = nyr_lower_expr(b, base_expr);
+        int dict = nyr_lower_expr(b, base_read);
         if (dict < 0)
           return -1;
         if (strcmp(dot + 1, "len") == 0 && e->as.call.args.len == 0)
@@ -7377,6 +7387,19 @@ ordinary_call:
         c_args[i] = nyr_lower_expr(b, e->as.call.args.data[i].val);
         if (c_args[i] < 0)
           return -1;
+        /* These take raw addresses, so a tagged-class word must be decoded.
+         * Only the value's class decides: an `any` can hold a raw byte
+         * offset into a buffer, and an odd one is not a tagged integer. */
+        bool pointer_lane =
+            i == 0 || (i == 1 && strcmp(canon_leaf, "memset") != 0 &&
+                       strcmp(canon_leaf, "memchr") != 0);
+        if (pointer_lane &&
+            nyr_value_scalar_class(b, c_args[i]) == NYIR_SCALAR_I64_TAGGED) {
+          c_args[i] = nyr_emit_runtime_call(b, "rt_ffi_untag_ptr", c_args[i],
+                                            -1, -1, 1, NYIR_SCALAR_I64_RAW);
+          if (c_args[i] < 0)
+            return -1;
+        }
       }
       /* The native runtime-call table contains the raw ABI bridge, not an
        * unresolved libc function pointer.  In particular, emitting the
@@ -12794,6 +12817,16 @@ ordinary_call:
             "reason=no-dynamic-boxing-runtime-contract",
             b->current_fn_name ? b->current_fn_name : "<entry>",
             runtime_symbol ? runtime_symbol : "native", i + 1);
+    }
+    /* A tagged address (a ternary over optional pointers, for one) must be
+     * decoded before a raw pointer lane: memcpy wrote through 2p+1. */
+    if (formal_class == NYIR_SCALAR_POINTER && arg >= 0 && runtime_symbol &&
+        strncmp(runtime_symbol, "rt_mem", 6) == 0 &&
+        nyr_value_scalar_class(b, arg) == NYIR_SCALAR_I64_TAGGED) {
+      arg = nyr_emit_runtime_call(b, "rt_ffi_untag_ptr", arg, -1, -1, 1,
+                                  NYIR_SCALAR_I64_RAW);
+      if (arg < 0)
+        return -1;
     }
     /* The NYIR call verifier models the dictionary bridge's value lane as a
      * tagged Ny word. Keep that transport contract even though the runtime

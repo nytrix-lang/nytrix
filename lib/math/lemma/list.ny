@@ -9,19 +9,23 @@ module core.math.lemma.list(
    append_len_comm, append_len_assoc, map_len, fold_sum_four)
 use core
 
+;; Appended lengths commute for lengths below 100.
 fn lemma append_len_comm(int a, int b) {
    a >= 0 && a < 100 && b >= 0 && b < 100 -> a + b == b + a
 }
 
+;; Appended lengths associate for lengths below 100.
 fn lemma append_len_assoc(int a, int b, int c) {
    a >= 0 && a < 100 && b >= 0 && b < 100 && c >= 0 && c < 100 ->
    (a + b) + c == a + (b + c)
 }
 
+;; Mapping preserves a length below 100.
 fn lemma map_len(int n) {
    n >= 0 && n < 100 -> n == n
 }
 
+;; Folding addition over 1 through 4 gives 10.
 fn lemma fold_sum_four() {
    4 * (4 + 1) / 2 == 10
 }

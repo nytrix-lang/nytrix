@@ -5463,7 +5463,28 @@ bool nyr_loop_unroll(nyr_func_t *f) {
      * This transform duplicates a linear body without remapping CFG edges.
      * PHIs outside this loop are irrelevant; PHIs in its header or body are
      * not. Keep the conservative legality boundary local to the candidate.
+     *
+     * Each clone must recompute what it reads. A body operand defined in the
+     * header (such as the guard's load of the counter) would hold the first
+     * iteration's value in every clone, so leave those loops rolled.
      */
+    bool body_reads_header = false;
+    for (size_t j = body_start; j < body_end && !body_reads_header; ++j) {
+      const nyr_inst_t *use = &f->data[j];
+      int operands[6] = {use->a, use->b, use->c, use->d, use->e, use->f};
+      for (size_t k = header_start + 1; k < bi && !body_reads_header; ++k) {
+        const nyr_inst_t *def = &f->data[k];
+        if (def->dst < 0 || def->op == NYIR_CONST_I64 ||
+            def->op == NYIR_CONST_F64 || def->op == NYIR_CONST_F32)
+          continue;
+        for (size_t o = 0; o < 6; ++o)
+          body_reads_header |= operands[o] == def->dst;
+        for (size_t o = 0; o < use->extra_args_len; ++o)
+          body_reads_header |= use->extra_args[o] == def->dst;
+      }
+    }
+    if (body_reads_header)
+      continue;
     size_t loop_phi = SIZE_MAX;
     for (size_t j = header_start + 1; j < bi; ++j)
       if (f->data[j].op == NYIR_PHI) {

@@ -381,6 +381,7 @@ fn _split_impl(str s, str sep) list {
 
 @returns_owned
 fn split(any s, any sep) list {
+   "Splits `s` on `sep`."
    return _split_impl(s, sep)
 }
 

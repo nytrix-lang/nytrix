@@ -12436,9 +12436,11 @@ static const char *nyr_dict_get_symbol(nyr_builder_impl_t *b,
         strcmp(fn->as.fn.return_type, "str") == 0)
       return "rt_dict_get_str_raw";
   }
-  /* Only a proven string may use the string-key probe: "not a raw int" also
+  /*
+   * Only a proven string may use the string-key probe: "not a raw int" also
    * covers tagged integers such as an imported `def int` constant, which
-   * rt_dict_get_str_raw would dereference. */
+   * rt_dict_get_str_raw would dereference.
+   */
   if (key && key->semantic.resolved && key->semantic.rep == NY_SEM_REP_STRING)
     return "rt_dict_get_str_raw";
   return "rt_dict_get_raw";
@@ -14268,7 +14270,8 @@ static const stmt_t *nyr_find_user_function(const nyr_builder_impl_t *b,
      */
     if (treefall && slot < NY_TREEFALL_CACHE_SIZE &&
         strlen(lookup_name) < sizeof(treefall[slot].name)) {
-      strcpy(treefall[slot].name, lookup_name);
+      snprintf(treefall[slot].name, sizeof(treefall[slot].name), "%s",
+               lookup_name);
       treefall[slot].fn = treefall_found;
       treefall[slot].resolved = true;
     }

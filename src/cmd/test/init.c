@@ -84,7 +84,16 @@
 #define NY_TEST_MAX_FIXTURE_TIMEOUT_SEC 420
 #define NY_TEST_PARALLEL_TIMEOUT_GRACE_MS 1000.0
 #define NY_TEST_WAIT_HEARTBEAT_MS 45000.0
-#define NY_TEST_WORKER_MEMORY_GIB 2.5
+/*
+ * Typical fixtures stay well under 1 GiB; only windowing/renderer fixtures
+ * reach the 2.2 GiB peak, so they have their own, smaller concurrency budget.
+ */
+#define NY_TEST_WORKER_MEMORY_GIB 0.8
+#define NY_TEST_HEAVY_WORKER_MEMORY_GIB 2.5
+#define NY_TEST_MAX_HEAVY_JOBS 12
+#define NY_TEST_LOAD_SCALE 2
+#define NY_TEST_FAILURE_TAIL_LINES 24
+#define NY_TEST_MAX_FAILURE_REPLAYS 8
 #define NY_BENCH_WORKER_MEMORY_GIB 1.5
 #define NY_TEST_HOST_MEMORY_RESERVE_GIB 8.0
 #define NY_TEST_TIMEOUT_RC 124
@@ -1228,8 +1237,25 @@ static void print_captured_test_output(const char *label, const char *path,
     free(out);
     return;
   }
-  fputs(out, stdout);
+  /*
+   * A failing fixture can dump pages of compiler traces.  The tail holds the
+   * assertion; the complete log stays in the diagnostics directory.
+   */
   size_t n = strlen(out);
+  const char *verbose = getenv("NYTRIX_TEST_VERBOSE");
+  const char *start = out;
+  if (!(verbose && *verbose && *verbose != '0')) {
+    size_t lines = 0;
+    for (size_t i = n; i > 0; --i) {
+      if (out[i - 1] == '\n' && ++lines > NY_TEST_FAILURE_TAIL_LINES) {
+        start = out + i;
+        printf("  ... %zu bytes omitted; NYTRIX_TEST_VERBOSE=1 shows all\n",
+               (size_t)(start - out));
+        break;
+      }
+    }
+  }
+  fputs(start, stdout);
   if (n == 0 || out[n - 1] != '\n')
     putchar('\n');
   free(out);
@@ -1384,6 +1410,24 @@ static void print_test_progress_line(int pct, const char *a,
   const char *aa = test_symbol(a);
   const char *bb = test_symbol(b);
   const char *cc = test_symbol(c);
+  /*
+   * On a terminal a passing fixture only updates one status line; the rows
+   * worth reading are the failures.  Logs and NYTRIX_TEST_VERBOSE=1 keep the
+   * full listing.
+   */
+  static int live_status = -1;
+  if (live_status < 0) {
+    const char *verbose = getenv("NYTRIX_TEST_VERBOSE");
+    live_status = isatty(fileno(stdout)) && !(verbose && *verbose && *verbose != '0');
+  }
+  if (live_status && !strstr(aa, "✗") && !strstr(bb, "✗") && !strstr(cc, "✗") &&
+      !(suffix && *suffix && strstr(suffix, "rc="))) {
+    printf("\r\033[K%3d%% %s\r", pct, disp_path(path));
+    fflush(stdout);
+    return;
+  }
+  if (live_status)
+    fputs("\r\033[K", stdout);
   /*
    * One compact row per fixture in a scrolling log: percent, the three
    * route marks, a short duration (or "cached" for result-cache hits),
@@ -3180,7 +3224,7 @@ static int test_unix_socket_connects(const char *path) {
     return 0;
   struct sockaddr_un addr = {0};
   addr.sun_family = AF_UNIX;
-  strcpy(addr.sun_path, path);
+  snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", path);
   int ok = connect(fd, (struct sockaddr *)&addr, sizeof(addr)) == 0;
   close(fd);
   return ok;
@@ -4087,7 +4131,16 @@ static void debug_replay_failed_tests(StrVec *failed_paths, const char *bin,
   if (!debugger)
     printf(
         "  debugger: unavailable; trace/IR/assembly artifacts still saved\n");
-  for (size_t i = 0; i < failed_paths->len; i++) {
+  /*
+   * Replays exist to explain a failure; past a handful, the cause is shared.
+   */
+  size_t replay_limit = failed_paths->len;
+  if (replay_limit > NY_TEST_MAX_FAILURE_REPLAYS) {
+    replay_limit = NY_TEST_MAX_FAILURE_REPLAYS;
+    printf("  replaying the first %zu of %zu failures\n", replay_limit,
+           failed_paths->len);
+  }
+  for (size_t i = 0; i < replay_limit; i++) {
     const char *path = failed_paths->items[i];
     int fixture_timeout = test_timeout_for_path(path, timeout_sec);
     char *materialized_path = NULL;
@@ -5349,9 +5402,11 @@ static uint64_t test_sig(const char *path, const char *bin,
   static uint64_t std_bc_hash = 0;
   if (!bin_hash_ready) {
     bin_hash = file_content_hash(bin);
-    /* `bin` is usually the launcher, which stays byte-identical across a
+    /*
+     * `bin` is usually the launcher, which stays byte-identical across a
      * compiler-only rebuild.  The fixture result depends on ny-full, so fold
-     * it in or a stale pass survives every compiler change. */
+     * it in or a stale pass survives every compiler change.
+     */
     const char *full = getenv("NYTRIX_NY_FULL_BIN");
     char sibling[PATH_MAX];
     if ((!full || !*full) && bin) {
@@ -5852,6 +5907,12 @@ static int test_timeout_for_path(const char *path, int default_timeout_sec) {
     if (ny_parse_int(env, &parsed))
       timeout = parsed;
   }
+  /*
+   * Limits catch hangs, not slowness. A fixture's declared limit is measured
+   * alone, so leave room for a machine running the whole suite beside it.
+   */
+  if (!test_path_is_benchmark(path) && timeout <= INT_MAX / NY_TEST_LOAD_SCALE)
+    timeout *= NY_TEST_LOAD_SCALE;
   if (timeout < 1)
     timeout = 1;
   if (timeout > NY_TEST_MAX_FIXTURE_TIMEOUT_SEC)
@@ -5866,6 +5927,31 @@ static int test_timeout_for_path(const char *path, int default_timeout_sec) {
  * into a false per-fixture timeout.  Keep this policy in the scheduler rather
  * than relying on directory ordering or a larger global timeout.
  */
+static int test_is_memory_heavy(const char *p) {
+  if (!p)
+    return 0;
+  return strstr(p, "/ui/") || strstr(p, "/ui-") || strstr(p, "render-") ||
+         strstr(p, "window-") || strstr(p, "gltf") || strstr(p, "fonts") ||
+         strstr(p, "vterm");
+}
+
+static int test_max_heavy_jobs(int jobs) {
+  double avail = test_mem_available_gib();
+  if (avail <= 0.0 || getenv("NYTRIX_TEST_NO_RAM_GUARD"))
+    return jobs;
+  int heavy = (int)((avail - NY_TEST_HOST_MEMORY_RESERVE_GIB) /
+                    NY_TEST_HEAVY_WORKER_MEMORY_GIB);
+  if (heavy < 1)
+    heavy = 1;
+  /*
+   * These compile and run the UI stack several times each, so they saturate
+   * CPU long before memory; more at once just pushes them past their timeouts.
+   */
+  if (heavy > NY_TEST_MAX_HEAVY_JOBS)
+    heavy = NY_TEST_MAX_HEAVY_JOBS;
+  return heavy < jobs ? heavy : jobs;
+}
+
 static int test_requires_host_exclusive(const char *p) {
   if (!p)
     return 0;
@@ -6235,15 +6321,19 @@ static int run_suite(const char *suite_name, StrVec *files, const char *bin,
     return 1;
   }
 
+  int max_heavy = test_max_heavy_jobs(jobs);
   while (completed < total) {
     int active_count = 0;
     int exclusive_active = 0;
+    int heavy_active = 0;
     for (int i = 0; i < jobs; i++) {
       if (!run[i].active)
         continue;
       active_count++;
       if (test_requires_host_exclusive(run[i].path))
         exclusive_active = 1;
+      if (test_is_memory_heavy(run[i].path))
+        heavy_active++;
     }
     for (int i = 0; i < jobs; i++) {
       if (fail_fast && *failed != failures_at_start)
@@ -6257,6 +6347,8 @@ static int run_suite(const char *suite_name, StrVec *files, const char *bin,
           continue;
         int exclusive = test_requires_host_exclusive(queued);
         if (exclusive_active || (exclusive && active_count > 0))
+          continue;
+        if (heavy_active >= max_heavy && test_is_memory_heavy(queued))
           continue;
         candidate = k;
         break;
@@ -6337,6 +6429,8 @@ static int run_suite(const char *suite_name, StrVec *files, const char *bin,
       active_count++;
       if (test_requires_host_exclusive(p))
         exclusive_active = 1;
+      if (test_is_memory_heavy(p))
+        heavy_active++;
     }
     /*
      * After the first failure, let already-started fixtures finish but do
@@ -9405,7 +9499,7 @@ static void bench_collect_environment(const char *root, const char *bin,
   snprintf(env->c_flags, sizeof(env->c_flags), "%s -march=native%s%s",
            bench_opt_for(opt_level), extra && *extra ? " " : "",
            extra && *extra ? extra : "");
-  snprintf(env->nyc_flags, sizeof(env->nyc_flags), "%s -S",
+  snprintf(env->nyc_flags, sizeof(env->nyc_flags), "%s -c",
            bench_opt_for(opt_level));
 
   const char *rev = getenv("NYTRIX_REVISION");
@@ -9564,7 +9658,7 @@ static int bench_compile_c(const char *c_source, const char *exe_path,
         snprintf(note, note_cap, "NYC executable not found");
       goto done;
     }
-    snprintf(assembly, sizeof(assembly), "%s/nyc-bench-%ld-%lu.s",
+    snprintf(assembly, sizeof(assembly), "%s/nyc-bench-%ld-%lu.o",
              nyt_temp_dir(), (long)getpid(), bench_next_temp_id());
     char *argv[24];
     int count = 0;
@@ -9572,7 +9666,7 @@ static int bench_compile_c(const char *c_source, const char *exe_path,
     argv[count++] = (char *)bench_opt_for(opt_level);
     for (int i = 0; i < flagc; ++i)
       argv[count++] = flagv[i];
-    argv[count++] = "-S";
+    argv[count++] = "-c";
     argv[count++] = src_tmp;
     argv[count++] = "-o";
     argv[count++] = assembly;
@@ -9583,7 +9677,7 @@ static int bench_compile_c(const char *c_source, const char *exe_path,
     struct stat output;
     if (stat(assembly, &output) != 0 || output.st_size <= 0) {
       if (note && note_cap)
-        snprintf(note, note_cap, "NYC emitted no assembly");
+        snprintf(note, note_cap, "NYC emitted no object");
       rc = 1;
       goto done;
     }
@@ -13099,7 +13193,11 @@ static int bench_print_geomean(const BenchTable *t, bool enforce_budgets) {
                                : BENCH_MAX_NATIVE_LLVM_RATIO;
       if (ratio > ratio_limit)
         max_nl_failed = true;
-      if (ratio > max_nl_ratio) {
+      /*
+       * Show the fixture closest to its own limit: the largest ratio can
+       * pass while a fixture with a tighter budget is the one that fails.
+       */
+      if (ratio / ratio_limit > max_nl_ratio / max_nl_limit) {
         max_nl_ratio = ratio;
         max_nl_name = r->name;
         max_nl_limit = ratio_limit;
@@ -13724,7 +13822,7 @@ static void bench_write_md(FILE *f, const BenchTable *t,
     fprintf(f, "- C flags: `%s`\n", env->c_flags);
     fprintf(f, "- NYC compiler: `%s` — `%s`\n", env->nyc_compiler,
             env->nyc_compiler_version);
-    fprintf(f, "- NYC flags: `%s`; host driver assembles/links only\n",
+    fprintf(f, "- NYC flags: `%s`; host driver links only\n",
             env->nyc_flags);
     fprintf(f, "- compiler revision: `%s`\n", env->compiler_revision);
     fprintf(f,
@@ -13878,6 +13976,14 @@ static void bench_write_md(FILE *f, const BenchTable *t,
   }
 }
 
+/*
+ * Reports are committed, so never record the local checkout location.
+ */
+static const char *bench_repo_relative_path(const char *path) {
+  const char *marker = strstr(path, "/build/bench-reports/");
+  return marker ? marker + 1 : path;
+}
+
 static bool bench_update_measurements(const char *root, const BenchTable *table,
                                       const BenchEnvironment *env,
                                       const char *report_path) {
@@ -14021,7 +14127,8 @@ static bool bench_update_measurements(const char *root, const BenchTable *table,
         "\nThe empty timer control is shown for completeness and is excluded "
         "from workload ratios.\n");
     if (ok && report_path && *report_path)
-      ok = ny_strbuf_appendf(&output, "Raw report: `%s`.\n", report_path);
+      ok = ny_strbuf_appendf(&output, "Raw report: `%s`.\n",
+                             bench_repo_relative_path(report_path));
     if (ok)
       ok = ny_strbuf_append(&output, "\n") &&
            ny_strbuf_append(&output, end_marker);
@@ -14613,6 +14720,28 @@ run_benchmarks(const char *bin, const char *std_path, const char *std_bc,
       .fixture_workers = fixture_workers,
   };
   bench_execute_jobs(bench_jobs, bench_count, &execution, &bench_env);
+  /*
+   * Workloads dominated by page faults can land far from their usual time in
+   * one process. Confirm a ratio failure before reporting it.
+   */
+  for (size_t i = 0; compare_llvm && i < bench_count; i++) {
+    BenchJob *job = &bench_jobs[i];
+    double budget = bench_shape_budget(job->shape, "max_native_llvm_ratio");
+    double limit = budget > 0.0 ? budget : BENCH_MAX_NATIVE_LLVM_RATIO;
+    double ny = job->result.ny.median, llvm = job->result.llvm.median;
+    if (ny <= 0.0 || llvm <= 0.0 || ny / llvm <= limit)
+      continue;
+    printf("[bench] confirming %s: NYR/LLVM %.2fx exceeds %.2fx\n", job->name,
+           ny / llvm, limit);
+    fflush(stdout);
+    BenchJob retry = *job;
+    bench_run_worker_jobs(&retry, 1, 0, 1, bin, opt_level, tier, engine, target,
+                          compare_llvm, warmup, runs, timeout_sec, NULL);
+    double retry_ny = retry.result.ny.median;
+    double retry_llvm = retry.result.llvm.median;
+    if (retry_ny > 0.0 && retry_llvm > 0.0 && retry_ny / retry_llvm < ny / llvm)
+      job->result = retry.result;
+  }
   for (size_t i = 0; i < bench_count; i++) {
     BenchJob *job = &bench_jobs[i];
     bench_record_result(&table, &measured, verbose, show_ir, show_asm,

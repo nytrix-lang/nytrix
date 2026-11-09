@@ -429,9 +429,102 @@ static bool cse_parallel_task(size_t index, void *opaque) {
                        ctx->defs, ctx->representatives, ctx->value_len);
 }
 
+/*
+ * Equal constants in different blocks are distinct SSA names, so the same
+ * expression written against each looks different to the scan below. Point
+ * every use at one dominating definition; the shadowed constants die in DCE.
+ * Only C functions take this path: no value there carries a runtime tag.
+ */
+typedef struct {
+  int64_t imm;
+  int value;
+  size_t block;
+  int next;
+} cse_const_t;
+
+static inline void cse_const_rewrite(int *operand, const int *replace,
+                                     size_t value_len) {
+  if (*operand >= 0 && (size_t)*operand < value_len)
+    *operand = replace[*operand];
+}
+
+static void cse_unify_constants(nyr_func_t *f) {
+  size_t value_len = (size_t)f->next_value;
+  nyr_cfg_t cfg = {0};
+  if (!nyr_cfg_build(f, &cfg)) {
+    nyr_cfg_free(&cfg);
+    return;
+  }
+  enum { BUCKETS = 256 };
+  int buckets[BUCKETS];
+  memset(buckets, -1, sizeof(buckets));
+  cse_const_t *table = malloc(f->len * sizeof(*table));
+  int *replace = malloc(value_len * sizeof(*replace));
+  if (!table || !replace) {
+    free(table);
+    free(replace);
+    nyr_cfg_free(&cfg);
+    return;
+  }
+  for (size_t i = 0; i < value_len; ++i)
+    replace[i] = (int)i;
+  int count = 0;
+  bool changed = false;
+  for (size_t i = 0; i < f->len; ++i) {
+    const nyr_inst_t *in = &f->data[i];
+    if (in->op != NYIR_CONST_I64 || in->dst < 0 ||
+        (size_t)in->dst >= value_len ||
+        (in->scalar_class != NYIR_SCALAR_UNKNOWN &&
+         in->scalar_class != NYIR_SCALAR_I64_RAW))
+      continue;
+    size_t block = cfg.inst_block[i];
+    unsigned slot = (unsigned)((uint64_t)in->imm * UINT64_C(0x9E3779B97F4A7C15) >>
+                               56);
+    bool found = false;
+    for (int e = buckets[slot]; e >= 0; e = table[e].next) {
+      if (table[e].imm == in->imm &&
+          nyr_cfg_dominates(&cfg, table[e].block, block)) {
+        replace[in->dst] = table[e].value;
+        changed = true;
+        found = true;
+        break;
+      }
+    }
+    if (!found) {
+      table[count] = (cse_const_t){in->imm, in->dst, block, buckets[slot]};
+      buckets[slot] = count++;
+    }
+  }
+  if (changed) {
+    for (size_t i = 0; i < f->len; ++i) {
+      nyr_inst_t *in = &f->data[i];
+      bool asm_goto = in->op == NYIR_INLINE_ASM &&
+                      (in->imm == -14 || in->imm == -82 || in->imm == -83);
+      cse_const_rewrite(&in->a, replace, value_len);
+      cse_const_rewrite(&in->b, replace, value_len);
+      if (!asm_goto)
+        cse_const_rewrite(&in->c, replace, value_len);
+      cse_const_rewrite(&in->d, replace, value_len);
+      cse_const_rewrite(&in->e, replace, value_len);
+      cse_const_rewrite(&in->f, replace, value_len);
+      for (size_t k = 0; k < in->extra_args_len; ++k)
+        cse_const_rewrite(&in->extra_args[k], replace, value_len);
+      for (size_t k = 0; k < in->phi_incoming_len; ++k)
+        cse_const_rewrite(&in->phi_incoming[k].value, replace, value_len);
+    }
+  }
+  free(table);
+  free(replace);
+  nyr_cfg_free(&cfg);
+}
+
 bool nyr_cse(nyr_func_t *f) {
   if (!f || f->next_value <= 0 || f->len == 0)
     return true;
+  if (f->untagged_values) {
+    nyr_bits_simplify(f);
+    cse_unify_constants(f);
+  }
   size_t value_len = (size_t)f->next_value;
   if (value_len > SIZE_MAX / (2 * sizeof(int)))
     return false;

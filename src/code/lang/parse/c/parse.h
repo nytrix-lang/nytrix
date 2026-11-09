@@ -66,6 +66,7 @@ typedef struct {
   size_t alias_count;
   nyc_variable_alias_t *variable_aliases;
   size_t variable_alias_count;
+  char *raw_file_scope_asm;
 } nyc_unit_t;
 
 bool nyc_unit_prune_static(nyc_unit_t *unit, char *err, size_t err_len);

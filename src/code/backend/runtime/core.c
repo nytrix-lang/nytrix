@@ -1438,6 +1438,15 @@ int64_t rt_raw_truthy(int64_t value) {
 }
 
 int64_t rt_any_add(int64_t left, int64_t right) {
+  /*
+   * Tagged integers are odd; every boxed object is even.  Skip the probes.
+   */
+  if (is_int(left) && is_int(right)) {
+    int64_t sum = 0;
+    if (!__builtin_add_overflow(rt_untag_v(left), rt_untag_v(right), &sum) &&
+        ny_small_int_fits_i64(sum))
+      return rt_tag_v(sum);
+  }
   if (!is_int(left) && rt_value_tag(left) == TAG_FLOAT)
     return rt_flt_box_double(rt_any_to_f64(left) + rt_any_to_f64(right));
   if (!is_int(right) && rt_value_tag(right) == TAG_FLOAT)
@@ -5297,6 +5306,13 @@ int64_t rt_vec_div_component_raw(int64_t left, int64_t right) {
 }
 
 int64_t rt_any_sub(int64_t left, int64_t right) {
+  if (is_int(left) && is_int(right)) {
+    int64_t difference = 0;
+    if (!__builtin_sub_overflow(rt_untag_v(left), rt_untag_v(right),
+                                &difference) &&
+        ny_small_int_fits_i64(difference))
+      return rt_tag_v(difference);
+  }
   if (!is_int(left) && rt_value_tag(left) == TAG_FLOAT)
     return rt_flt_box_double(rt_any_to_f64(left) - rt_any_to_f64(right));
   if (!is_int(right) && rt_value_tag(right) == TAG_FLOAT)
@@ -5307,6 +5323,12 @@ int64_t rt_any_sub(int64_t left, int64_t right) {
 }
 
 int64_t rt_any_mul(int64_t left, int64_t right) {
+  if (is_int(left) && is_int(right)) {
+    int64_t product = 0;
+    if (!__builtin_mul_overflow(rt_untag_v(left), rt_untag_v(right), &product) &&
+        ny_small_int_fits_i64(product))
+      return rt_tag_v(product);
+  }
   if (!is_int(left) && rt_value_tag(left) == TAG_FLOAT)
     return rt_flt_box_double(rt_any_to_f64(left) * rt_any_to_f64(right));
   if (!is_int(right) && rt_value_tag(right) == TAG_FLOAT)
@@ -6872,7 +6894,12 @@ int64_t rt_print_newline(void) {
 int64_t rt_alloc_string_len(const char *s, size_t len) {
   if (!s)
     return 0;
-  int64_t existing = rt_str_intern_lookup(s, len);
+  /*
+   * Interning long strings hashes every byte and keeps each intermediate
+   * result reachable from the table.
+   */
+  bool intern = len <= RT_INTERN_MAX_LEN;
+  int64_t existing = intern ? rt_str_intern_lookup(s, len) : 0;
   if (existing)
     return existing;
   if (len <= RT_SSO_MAX) {
@@ -6889,7 +6916,8 @@ int64_t rt_alloc_string_len(const char *s, size_t len) {
   *(int64_t *)((char *)(uintptr_t)p - 16) = ((int64_t)len << 1) | 1;
   memcpy((void *)(uintptr_t)p, s, len);
   ((char *)(uintptr_t)p)[len] = '\0';
-  rt_str_intern_insert(s, len, p);
+  if (intern)
+    rt_str_intern_insert(s, len, p);
   return p;
 }
 

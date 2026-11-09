@@ -240,7 +240,8 @@ static uint64_t inst_fixed_clobbers(const nyr_mach_func_t *mach,
                              : in->src1.kind == NYR_MACH_OPERAND_VREG &&
                                    mach_constant_i64(mach, in->src1.as.reg, 0,
                                                      &divisor);
-    if (known_divisor && divisor > 1 && divisor <= INT32_MAX &&
+    if (!in->unsigned_arith && known_divisor && divisor > 1 &&
+        divisor <= INT32_MAX &&
         (((uint64_t)divisor & ((uint64_t)divisor - 1)) == 0))
       return in->opcode == NYR_MACH_DIV
                  ? UINT64_C(1) << 7 /* R11 truncation-bias scratch */
@@ -248,7 +249,8 @@ static uint64_t inst_fixed_clobbers(const nyr_mach_func_t *mach,
     return UINT64_C(0xf) << 8; /* General magic division uses R8/R9/RCX/RDX. */
   }
   if ((in->opcode == NYR_MACH_SHL || in->opcode == NYR_MACH_SAR ||
-       in->opcode == NYR_MACH_ROR || in->opcode == NYR_MACH_ROR32) &&
+       in->opcode == NYR_MACH_SHR || in->opcode == NYR_MACH_ROR ||
+       in->opcode == NYR_MACH_ROR32) &&
       in->src1.kind != NYR_MACH_OPERAND_IMM)
     return UINT64_C(1) << 10; /* x64 RCX, used for variable shift counts. */
   return 0;
@@ -610,6 +612,7 @@ static bool verify_tied_input(const nyr_mach_inst_t *in, uint32_t value,
   case NYR_MACH_XOR:
   case NYR_MACH_SHL:
   case NYR_MACH_SAR:
+  case NYR_MACH_SHR:
   case NYR_MACH_ROR:
   case NYR_MACH_ROR32:
   case NYR_MACH_VSHR:
@@ -841,9 +844,12 @@ static bool regalloc_verify_mode(const nyr_mach_func_t *mach,
     if (clobber_pc != SIZE_MAX) {
       if (debug)
         fprintf(stderr,
-                "[regalloc-verify] segment %zu v%u color=%d live across "
-                "fixed clobber %s at pc=%zu\n",
-                i, seg->vreg, seg->color,
+                "[regalloc-verify] segment %zu v%u color=%d span=%zu-%zu "
+                "reload=%d spill=%d carried=%d acyclic=%d reason=%d live "
+                "across fixed clobber %s at pc=%zu\n",
+                i, seg->vreg, seg->color, seg->start, seg->end, seg->reload,
+                seg->spill, seg->carried, seg->acyclic_carried,
+                (int)seg->spill_reason,
                 nyr_mach_opcode_name(mach->insts[clobber_pc].opcode),
                 clobber_pc);
       free(spans);
@@ -1808,7 +1814,17 @@ static bool color_segments(const nyr_mach_func_t *mach, nyr_mach_regalloc_t *a,
     if (hinted_color_used && color >= 0 && (size_t)color < color_limit &&
         affinity_source < a->vreg_len && s->start < mach->inst_len) {
       const nyr_mach_inst_t *in = &mach->insts[s->start];
-      bool is_input = in->dst.kind == NYR_MACH_OPERAND_VREG &&
+      /*
+       * The dying input may donate its register only to a pure definition.
+       * A destination that is also read needs both values at once.
+       */
+      uint32_t inputs[3 + NYIR_CALL_MAX_ARGS];
+      size_t input_count =
+          inst_uses(in, inputs, sizeof(inputs) / sizeof(*inputs));
+      bool reads_own_dst = false;
+      for (size_t k = 0; k < input_count; ++k)
+        reads_own_dst |= inputs[k] == s->vreg;
+      bool is_input = !reads_own_dst && in->dst.kind == NYR_MACH_OPERAND_VREG &&
                       in->dst.as.reg == s->vreg &&
                       regalloc_affinity_input(in, affinity_source, reg_class,
                                               allow_rhs_tie);
@@ -1856,7 +1872,7 @@ static bool color_segments(const nyr_mach_func_t *mach, nyr_mach_regalloc_t *a,
     if (color < 0) {
       for (size_t rank = 0; rank < color_limit; ++rank) {
         size_t c = segment_color_at_rank(rank, color_limit, reg_class,
-                                         preserve_gpr_calls);
+                                         preserve_gpr_calls || mach->c_abi);
         if (use_color_mask ? !(used_mask & (UINT64_C(1) << c)) : !used[c]) {
           color = (int)c;
           break;
@@ -3522,6 +3538,8 @@ static void coalesce_unchanged_dag_values(
         safe = seg && seg_unique &&
                seg->spill_reason != NYR_MACH_SPILL_FIXED_CLOBBER &&
                segment_accepts_color(mach, seg, a->color_count, color) &&
+               segment_color_survives_clobbers(mach, seg, reg_class, color,
+                                               false) &&
                !block_has_color_conflict(a, seg, color, by_block);
       }
       if (safe)

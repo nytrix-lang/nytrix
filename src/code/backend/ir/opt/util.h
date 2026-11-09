@@ -27,6 +27,7 @@ bool nir_collect_consts_kind(const nyr_func_t *f, bool *known, int64_t *value,
 /* In-place rewrites release owned operand metadata and preserve semantic/debug
  * identity. Callers must not free the replaced payload themselves. */
 void nir_make_copy(nyr_inst_t *in, int src);
+void nyr_bits_simplify(nyr_func_t *f);
 void nir_make_const(nyr_inst_t *in, int64_t value);
 void nir_make_f64_const(nyr_inst_t *in, int64_t bitcast);
 void nir_make_f32_const(nyr_inst_t *in, int64_t bitcast);

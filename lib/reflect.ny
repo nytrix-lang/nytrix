@@ -56,162 +56,199 @@ fn semantic_snapshot(str source) dict {
 }
 
 fn semantic_get(any record, str key, any fallback=nil) any {
+   "Returns field `key` of a semantic record, or `fallback`."
    semantic_facts.semantic_get(record, key, fallback)
 }
 
 fn semantic_items(any sequence) tuple {
+   "Returns the items of a semantic sequence."
    semantic_facts.semantic_items(sequence)
 }
 
 fn semantic_functions(any snapshot) tuple {
+   "Returns the function records of a snapshot."
    semantic_facts.semantic_functions(snapshot)
 }
 
 fn semantic_find_function(any snapshot, str name, str owner="") any {
+   "Finds a function record by name and owner."
    semantic_facts.semantic_find_function(snapshot, name, owner)
 }
 
 fn semantic_find_function_at(any snapshot, str name, int line,
    int column=0, str file="") any {
+   "Finds a function record by name and source position."
    semantic_facts.semantic_find_function_at(snapshot, name, line, column,
       file)
 }
 
 fn semantic_layouts(any snapshot) tuple {
+   "Returns the layout records of a snapshot."
    semantic_facts.semantic_layouts(snapshot)
 }
 
 fn semantic_find_layout(any snapshot, str name, str owner="") any {
+   "Finds a layout record by name and owner."
    semantic_facts.semantic_find_layout(snapshot, name, owner)
 }
 
 fn semantic_expressions(any function_record) tuple {
+   "Returns the expression records of a function."
    semantic_facts.semantic_expressions(function_record)
 }
 
 fn semantic_find_expression(any function_record, str kind, int line,
    int column=0, str file="") any {
+   "Finds an expression record by kind and source position."
    semantic_facts.semantic_find_expression(function_record, kind, line,
       column, file)
 }
 
 fn semantic_calls(any function_record) tuple {
+   "Returns the call records of a function."
    semantic_facts.semantic_calls(function_record)
 }
 
 fn semantic_find_call(any function_record, int line, int column=0,
    str file="") any {
+   "Finds a call record by source position."
    semantic_facts.semantic_find_call(function_record, line, column, file)
 }
 
 fn semantic_call_effects(any call) any {
+   "Returns the effects of a call record."
    semantic_facts.semantic_call_effects(call)
 }
 
 fn semantic_call_effect_row(any call) any {
+   "Returns the effect row of a call record."
    semantic_facts.semantic_call_effect_row(call)
 }
 
 fn semantic_obligations(any function_record) tuple {
+   "Returns the obligations of a function."
    semantic_facts.semantic_obligations(function_record)
 }
 
 fn semantic_find_obligation(any function_record, str kind, int line,
    int column=0, str file="") any {
+   "Finds an obligation by kind and source position."
    semantic_facts.semantic_find_obligation(function_record, kind, line,
       column, file)
 }
 
 fn semantic_callable_effects(any snapshot) tuple {
+   "Returns the callable effect records of a snapshot."
    semantic_facts.semantic_callable_effects(snapshot)
 }
 
 fn semantic_find_callable_effect(any snapshot, str name, int arity=0) any {
+   "Finds a callable effect record by name and arity."
    semantic_facts.semantic_find_callable_effect(snapshot, name, arity)
 }
 
 fn semantic_callable_effect_row(any callable) any {
+   "Returns the effect row of a callable record."
    semantic_facts.semantic_callable_effect_row(callable)
 }
 
 fn semantic_proof_obligations(any snapshot) tuple {
+   "Returns the proof obligations of a snapshot."
    semantic_facts.semantic_proof_obligations(snapshot)
 }
 
 fn semantic_find_invariant(any snapshot, int line, int column=0,
    str file="") any {
+   "Finds an invariant by source position."
    semantic_facts.semantic_find_invariant(snapshot, line, column, file)
 }
 
 fn semantic_find_law(any snapshot, str trait_name, str type_name,
    int line=0) any {
+   "Finds a law by trait, type, and line."
    semantic_facts.semantic_find_law(snapshot, trait_name, type_name, line)
 }
 
 fn semantic_statement_effects(any function_record) tuple {
+   "Returns the statement effect records of a function."
    semantic_facts.semantic_statement_effects(function_record)
 }
 
 fn semantic_find_statement_effect(any function_record, str kind, int line,
    int column=0, str file="") any {
+   "Finds a statement effect by kind and source position."
    semantic_facts.semantic_find_statement_effect(function_record, kind, line,
       column, file)
 }
 
 fn semantic_diagnostics(any snapshot) tuple {
+   "Returns the diagnostics of a snapshot."
    semantic_facts.semantic_diagnostics(snapshot)
 }
 
 fn semantic_find_diagnostic(any snapshot, str code, str file="",
    int line=0, int column=0) any {
+   "Finds a diagnostic by code and source position."
    semantic_facts.semantic_find_diagnostic(snapshot, code, file, line, column)
 }
 
 fn semantic_statement_custom_effect_row(any statement) any {
+   "Returns the custom effect row of a statement."
    semantic_facts.semantic_statement_custom_effect_row(statement)
 }
 
 fn semantic_signature(any function_record) any {
+   "Returns the signature of a function record."
    semantic_facts.semantic_signature(function_record)
 }
 
 fn semantic_parameters(any function_record) tuple {
+   "Returns the parameters of a function record."
    semantic_facts.semantic_parameters(function_record)
 }
 
 fn semantic_return(any function_record) any {
+   "Returns the return type record of a function."
    semantic_facts.semantic_return(function_record)
 }
 
 fn semantic_signature_effects(any function_record) any {
+   "Returns the declared effects of a function signature."
    semantic_facts.semantic_signature_effects(function_record)
 }
 
 fn semantic_expression_type(any expression) any {
+   "Returns the type of an expression record."
    semantic_facts.semantic_expression_type(expression)
 }
 
 fn semantic_expression_representation(any expression) any {
+   "Returns the runtime representation of an expression."
    semantic_facts.semantic_expression_representation(expression)
 }
 
 fn semantic_expression_ownership(any expression) any {
+   "Returns the ownership of an expression."
    semantic_facts.semantic_expression_ownership(expression)
 }
 
 fn semantic_expression_mutable(any expression) any {
+   "Returns whether an expression is mutable."
    semantic_facts.semantic_expression_mutable(expression)
 }
 
 fn semantic_expression_alias_class(any expression) any {
+   "Returns the alias class of an expression."
    semantic_facts.semantic_expression_alias_class(expression)
 }
 
 fn semantic_expression_effects(any expression) any {
+   "Returns the effects of an expression."
    semantic_facts.semantic_expression_effects(expression)
 }
 
 fn semantic_expression_custom_effect_row(any expression) any {
+   "Returns the custom effect row of an expression."
    semantic_facts.semantic_expression_custom_effect_row(expression)
 }
 
@@ -1308,6 +1345,7 @@ fn _eq_impl(any a, any b) bool {
 
 @jit
 fn eq(any a, any b) bool {
+   "Returns whether two values are equal."
    return _eq_impl(a, b)
 }
 

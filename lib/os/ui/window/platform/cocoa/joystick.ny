@@ -506,7 +506,6 @@ fn init() bool {
    "Initializes init."
    if _initialized { return _initialized }
    if !_has_native_support() { return false }
-   gamepad_map.init_default_macos_mappings()
    def rl = CFRunLoopGetCurrent()
    def rl_mode = CFStringCreateWithCString(0, cstr("kCFRunLoopDefaultMode"), kCFStringEncodingUTF8)
    _run_loop = rl

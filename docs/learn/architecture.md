@@ -21,7 +21,7 @@ Prerequisites: a source checkout and a concrete behavior or subsystem to locate.
 | LLVM integration | `src/code/backend/llvm/` | LLVM emission and compatibility code |
 | LLVM preparation and compatibility code | `src/code/lang/llvm/` | Module/signature preparation and LLVM support helpers; legacy AST-body emitters are not a live CLI or REPL route |
 | Build pipeline | `src/code/lang/pipeline/`, `src/code/backend/wire/` | Stage orchestration, caches, and compilation artifacts |
-| Builtin semantic contracts | `src/code/lang/builtin_contracts.inc`, `src/code/lang/types/funcpurity.c` | Language-level purity and effect metadata consumed by semantic analysis |
+| Builtin semantic contracts | `src/code/lang/runtime/contracts.c`, `src/code/lang/types/funcpurity.c` | Language-level purity and effect metadata consumed by semantic analysis |
 | Runtime | `src/code/backend/runtime/` | Allocation, managed values, platform services, and runtime helpers |
 | C frontend | `src/code/lang/parse/c/` | Clang integration and the in-tree C frontend |
 | CLI tools | `src/cmd/` | Compiler, formatter, test, documentation, and platform commands |
@@ -57,7 +57,7 @@ unit. Keep those files compatible when built together, including static names
 and declarations.
 
 Language-level builtin effect contracts stay in
-`src/code/lang/builtin_contracts.inc`; they are compiler semantics, not runtime
+`src/code/lang/runtime/contracts.c`; they are compiler semantics, not runtime
 dispatch data.
 
 The compiler pipeline is orchestrated in

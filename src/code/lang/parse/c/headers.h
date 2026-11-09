@@ -35,7 +35,9 @@ static const nyc_header_t nyc_headers[] = {
         "typedef unsigned long ino_t; typedef unsigned long nlink_t;\n"
         "typedef long off_t; typedef long off64_t; typedef long ssize_t;\n"
         "typedef long blksize_t; typedef long blkcnt_t; typedef long "
-        "time_t;\n"),
+        "time_t;\n"
+        "typedef unsigned int __socklen_t; typedef long __off_t;\n"
+        "typedef long __off64_t;\n"),
     NYC_HEADER(
         "time.h", true,
         "#pragma once\n#include <sys/types.h>\n"
@@ -56,7 +58,14 @@ static const nyc_header_t nyc_headers[] = {
                "#pragma once\n#include <sys/types.h>\n"
                "struct timeval { long tv_sec; long tv_usec; };\n"
                "int gettimeofday(struct timeval *, void *);\n"
-               "int utimes(const char *, const struct timeval *);\n"),
+               "int utimes(const char *, const struct timeval *);\n"
+               "struct itimerval { struct timeval it_interval;\n"
+               "struct timeval it_value; };\n"
+               "#define ITIMER_REAL 0\n#define ITIMER_VIRTUAL 1\n"
+               "#define ITIMER_PROF 2\n"
+               "int getitimer(int, struct itimerval *);\n"
+               "int setitimer(int, const struct itimerval *, "
+               "struct itimerval *);\n"),
     NYC_HEADER(
         "sys/resource.h", true,
         "#pragma once\n#include <sys/time.h>\n"
@@ -311,7 +320,18 @@ static const nyc_header_t nyc_headers[] = {
                "double sinh(double);\ndouble sqrt(double);\n"
                "double tan(double);\ndouble tanh(double);\n"
                "double trunc(double);\n"),
-    NYC_HEADER("signal.h", false, "#pragma once\n"),
+    NYC_HEADER(
+        "signal.h", false,
+        "#pragma once\n#define SIGHUP 1\n#define SIGINT 2\n#define SIGQUIT 3\n"
+        "#define SIGILL 4\n#define SIGTRAP 5\n#define SIGABRT 6\n"
+        "#define SIGFPE 8\n#define SIGKILL 9\n#define SIGUSR1 10\n"
+        "#define SIGSEGV 11\n#define SIGUSR2 12\n#define SIGPIPE 13\n"
+        "#define SIGALRM 14\n#define SIGTERM 15\n#define SIGCHLD 17\n"
+        "typedef int sig_atomic_t;\ntypedef void (*sighandler_t)(int);\n"
+        "#define SIG_DFL ((sighandler_t)0)\n#define SIG_IGN ((sighandler_t)1)\n"
+        "#define SIG_ERR ((sighandler_t)-1)\n"
+        "sighandler_t signal(int, sighandler_t);\nint raise(int);\n"
+        "int kill(int, int);\n"),
     NYC_HEADER("stdarg.h", false, "#pragma once\n"),
     NYC_HEADER("stdbool.h", false,
                "#pragma once\n#define bool unsigned char\n#define true 1\n"

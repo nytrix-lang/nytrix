@@ -907,9 +907,6 @@ fn _create_default_texture() bool {
    true
 }
 
-mut _mvp_dirty = true
-mut _model_dirty = true
-
 fn bind_texture(any tex_id) any {
    "Binds bind texture."
    if !is_int(tex_id) || tex_id < 0 || tex_id >= _textures.len { tex_id = _default_texture }

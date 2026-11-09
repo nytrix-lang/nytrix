@@ -6859,6 +6859,12 @@ static int nyr_normalize_return(nyr_builder_t *b, const expr_t *expr,
         int fallback = nyr_emit_const(b, 0);
         if (target < 0 || index < 0 || fallback < 0)
           return -1;
+        if (nyr_value_scalar_class(b, index) == NYIR_SCALAR_I64_TAGGED) {
+          index = nyr_emit_runtime_call(b, "rt_any_to_i64", index, -1, -1, 1,
+                                        NYIR_SCALAR_I64_RAW);
+          if (index < 0)
+            return -1;
+        }
         return nyr_emit_runtime_call(b, "rt_value_get_index_raw", target, index,
                                      fallback, 3, 0);
       }
@@ -14361,46 +14367,25 @@ bool nyr_dump_program_binary(FILE *out, const program_t *prog,
                          "native NYIR bundle: "
                          "missing program output"),
            false;
-  enum { NYR_BUNDLE_VERSION = 1 };
+  enum { NYR_BUNDLE_VERSION = 2 };
   nyr_func_t rt_main = {0};
-  size_t wanted = 0;
-  for (size_t i = 0; i < prog->body.len; ++i) {
-    const stmt_t *stmt = prog->body.data[i];
-    if (stmt && stmt->kind == NY_S_FUNC)
-      wanted++;
-  }
-  if (wanted > NYR_BUNDLE_MAX_FUNCS)
-    return nyr_set_error(err, err_len,
-                         "native NYIR bundle: %zu "
-                         "functions exceed bundle "
-                         "limit %u",
-                         wanted, NYR_BUNDLE_MAX_FUNCS),
-           false;
-  nyr_func_t *funcs = wanted ? calloc(wanted, sizeof(*funcs)) : NULL;
-  const char **names = wanted ? calloc(wanted, sizeof(*names)) : NULL;
-  if (wanted && (!funcs || !names)) {
+  /*
+   * The builder lowers every reachable function, library code included, so
+   * the program's own top-level function count is not an upper bound.
+   */
+  size_t capacity = NYR_BUNDLE_MAX_FUNCS;
+  nyr_func_t *funcs = calloc(capacity, sizeof(*funcs));
+  const char **names = calloc(capacity, sizeof(*names));
+  if (!funcs || !names) {
     free(funcs);
     free(names);
     return nyr_set_error(err, err_len, NY_NATIVE_BUNDLE_OOM), false;
   }
-  size_t named = 0;
-  for (size_t i = 0; i < prog->body.len; ++i) {
-    const stmt_t *stmt = prog->body.data[i];
-    if (stmt && stmt->kind == NY_S_FUNC)
-      names[named++] = stmt->as.fn.name ? stmt->as.fn.name : "<fn>";
-  }
   size_t count = 0;
-  bool ok = nyr_build_ir(prog, opt, &rt_main, funcs, &count, names, wanted, err,
-                         err_len);
-  if (!ok || count != wanted) {
-    if (ok)
-      nyr_set_error(err, err_len,
-                    "native NYIR bundle: every user "
-                    "function must lower "
-                    "before serialization");
-    ok = false;
+  bool ok = nyr_build_ir(prog, opt, &rt_main, funcs, &count, names, capacity,
+                         err, err_len);
+  if (!ok)
     goto done;
-  }
   if (fwrite("NYIP", 1, 4, out) != 4 ||
       !nyr_write_u16le(out, NYR_BUNDLE_VERSION) || !nyr_write_u16le(out, 0) ||
       !nyr_write_u32le(out, (uint32_t)(count + 1)) ||
@@ -14413,6 +14398,7 @@ bool nyr_dump_program_binary(FILE *out, const program_t *prog,
       ok = false;
       goto done;
     }
+  ok = nyr_native_data_write(out, err, err_len);
 done:
   nyr_ir_func_free(&rt_main);
   for (size_t i = 0; i < count; ++i)

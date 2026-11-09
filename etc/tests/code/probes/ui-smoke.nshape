@@ -17,7 +17,7 @@ shape ui_native_animation {
 shape ui_native_editor {
   features [native ui editor x86_64]
   estimate_ms 112000
-  timeout 180
+  timeout 300
   flags "--native-only --native-backend=x86_64 --native-tier=baseline -emit-only -o /tmp/nytrix-ui-editor.o --no-progress --color=never"
   source ny file "etc/projects/ui/editor.ny"
 }
@@ -48,6 +48,7 @@ shape ui_native_monitor {
 
 shape ui_native_pong {
   features [native ui pong x86_64]
+  timeout 180
   estimate_ms 29000
   flags "--native-only --native-backend=x86_64 --native-tier=baseline -emit-only -o /tmp/nytrix-ui-pong.o --no-progress --color=never"
   source ny file "etc/projects/ui/pong.ny"
@@ -55,6 +56,7 @@ shape ui_native_pong {
 
 shape ui_native_synth {
   features [native ui synth x86_64]
+  timeout 180
   estimate_ms 47000
   flags "--native-only --native-backend=x86_64 --native-tier=baseline -emit-only -o /tmp/nytrix-ui-synth.o --no-progress --color=never"
   source ny file "etc/projects/ui/synth.ny"

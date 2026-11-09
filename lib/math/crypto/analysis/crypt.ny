@@ -19,6 +19,7 @@ fn _bytes(str s) list {
 def _ALPHABET = "./0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 
 fn crypt_decode6(str ch) int {
+   "Returns the 6-bit value of a crypt alphabet character."
    mut i = 0
    while i < 64 {
       if str.str_slice(_ALPHABET, i, i + 1) == ch { return i }
@@ -28,6 +29,7 @@ fn crypt_decode6(str ch) int {
 }
 
 fn crypt_encode6(int x) str {
+   "Returns the crypt alphabet character for a 6-bit value, or an empty string."
    if x < 0 || x > 63 { return "" }
    str.str_slice(_ALPHABET, x, x + 1)
 }
@@ -146,6 +148,7 @@ fn _digest_b64(list digest, list order) str {
 }
 
 fn crypt_md5(str word, str setting) str {
+   "Hashes `word` with MD5-crypt using the salt in `setting`."
    def p = _salt(setting, 1)
    if !p[3] { return "" }
    def s = p[0]
@@ -351,6 +354,7 @@ fn _des_enc(list block, list keys, list expansion) list {
 }
 
 fn crypt_des(str word, str setting) str {
+   "Hashes `word` with traditional DES crypt using the salt in `setting`."
    if setting.len < 2 { return "" }
    def salt = str.str_slice(setting, 0, 2)
    def a = crypt_decode6(str.str_slice(salt, 0, 1))
@@ -402,6 +406,7 @@ fn crypt_des(str word, str setting) str {
 }
 
 fn crypt_hash(str word, str setting) str {
+   "Hashes `word` with the scheme named by the prefix of `setting`."
    if str.startswith(setting, "$1$") { return crypt_md5(word, setting) }
    if str.startswith(setting, "$5$") { return crypt_sha256(word, setting) }
    if str.startswith(setting, "$6$") { return crypt_sha512(word, setting) }

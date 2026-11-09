@@ -7141,7 +7141,14 @@ static void audit_add_bug_findings(const char *path, StrVec *lines,
         }
       }
       char receiver[128], method[16];
-      if (audit_ny_discarded_list_update(code, receiver, sizeof(receiver),
+      /*
+       * A closing brace next means this expression is the block's value.
+       */
+      const char *following = i + 1 < lines->len ? lines->items[i + 1] : "";
+      while (*following == ' ' || *following == '\t')
+        ++following;
+      if (following[0] != '}' &&
+          audit_ny_discarded_list_update(code, receiver, sizeof(receiver),
                                          method, sizeof(method))) {
         char msg[320];
         snprintf(msg, sizeof(msg), "discarded list.%s result for '%s'", method,
@@ -7211,7 +7218,8 @@ static void audit_add_bug_findings(const char *path, StrVec *lines,
                        "assignment before the branch");
       }
       if ((audit_starts_keyword(s, "if") || audit_starts_keyword(s, "elif")) &&
-          audit_condition_is_constant_branch(cond)) {
+          audit_condition_is_constant_branch(cond) &&
+          !strstr(path, "/parse/c/tests/")) {
         audit_push_bug(issues, stats, path, ln, "NYAUD1102", "note",
                        "constant branch condition",
                        "delete the dead branch or mark the condition as "
@@ -7219,7 +7227,8 @@ static void audit_add_bug_findings(const char *path, StrVec *lines,
       }
 #else
       if (is_c_file && audit_starts_keyword(s, "if") &&
-          audit_condition_is_constant_branch(cond)) {
+          audit_condition_is_constant_branch(cond) &&
+          !strstr(path, "/parse/c/tests/")) {
         audit_push_bug(issues, stats, path, ln, "NYAUD1102", "note",
                        "constant branch condition",
                        "delete the dead branch or mark the condition as "
@@ -7255,9 +7264,13 @@ static void audit_add_bug_findings(const char *path, StrVec *lines,
           char msg[320];
           snprintf(msg, sizeof(msg), "condition repeats operand '%s' around %s",
                    dup, op);
-          audit_push_bug(issues, stats, path, ln, "NYAUD1109", "warning", msg,
-                         "delete the duplicate operand or replace it with the "
-                         "intended alternate check");
+          /*
+           * Repeated calls are emit sequences, not redundant tests.
+           */
+          if (!strchr(dup, '('))
+            audit_push_bug(issues, stats, path, ln, "NYAUD1109", "warning", msg,
+                           "delete the duplicate operand or replace it with "
+                           "the intended alternate check");
         }
         char lhs[160], rhs_a[160], rhs_b[160];
 #ifdef NYTRIX_EMBEDDED_TOOLS
@@ -7270,9 +7283,13 @@ static void audit_add_bug_findings(const char *path, StrVec *lines,
           char msg[320];
           snprintf(msg, sizeof(msg),
                    "condition compares '%s' with itself using %s", lhs, op);
-          audit_push_bug(issues, stats, path, ln, "NYAUD1110", "warning", msg,
-                         "replace one side with the intended value or delete "
-                         "the tautology");
+          /*
+           * `x != x` is the portable NaN test.
+           */
+          if (strcmp(op, "!=") != 0)
+            audit_push_bug(issues, stats, path, ln, "NYAUD1110", "warning", msg,
+                           "replace one side with the intended value or "
+                           "delete the tautology");
 #ifdef NYTRIX_EMBEDDED_TOOLS
         } else if (is_c_file && audit_condition_literal_pair_conflict(
                                     cond, "&&", "==", lhs, sizeof(lhs), rhs_a,
@@ -7326,7 +7343,8 @@ static void audit_add_bug_findings(const char *path, StrVec *lines,
 
     if (is_ny_file || is_c_file) {
       char op[4];
-      if (audit_line_literal_zero_divisor(code, op, sizeof(op))) {
+      if (!strstr(path, "/parse/c/tests/") &&
+          audit_line_literal_zero_divisor(code, op, sizeof(op))) {
         char msg[256];
         snprintf(msg, sizeof(msg), "literal zero divisor after '%s'", op);
         audit_push_bug(

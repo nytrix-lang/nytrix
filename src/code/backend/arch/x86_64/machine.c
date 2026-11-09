@@ -5411,7 +5411,36 @@ static bool ny_x64_nir_emit_inst_raw(ny_x64_nir_ctx_t *c, const nyr_inst_t *in,
       if (is_inline_asm)
         details += sizeof("__nyc_unsupported_inline_asm:") - 1;
       if (is_inline_asm && details && details[0]) {
-        /* Best-effort passthrough for templates with no unresolved operand refs. */
+        /*
+         * NYC kernel compat: try to emit try_cmpxchg directly
+         */
+        if (strstr(details, "cmpxchg") || strstr(details, "try_cmpxchg")) {
+          const char *mn = strstr(details,"cmpxchgq")?"cmpxchgq":strstr(details,"cmpxchgl")?"cmpxchgl":strstr(details,"cmpxchgw")?"cmpxchgw":"cmpxchgb";
+          const char *sr = strstr(details,"cmpxchgq")?"%rdx":strstr(details,"cmpxchgl")?"%edx":strstr(details,"cmpxchgw")?"%dx":"%dl";
+          if (!nyr_put(c->w, "\t#APP\n")) return false;
+          if (!nyr_printf(c->w, "\tlock %s %s, (%%rcx)\n", mn, sr)) return false;
+          if (!nyr_put(c->w, "\t#NO_APP\n")) return false;
+          return true;
+        }
+        /*
+         * NYC kernel compat: GS percpu reads
+         */
+        if (strstr(details, "%gs:")) {
+          if (!nyr_put(c->w, "\t#APP\n")) return false;
+          if (strstr(details, "movb"))
+            nyr_put(c->w, "\tmovb %gs:0, %al\n");
+          else if (strstr(details, "movw"))
+            nyr_put(c->w, "\tmovw %gs:0, %ax\n");
+          else if (strstr(details, "movl"))
+            nyr_put(c->w, "\tmovl %gs:0, %eax\n");
+          else
+            nyr_put(c->w, "\tmovq %gs:0, %rax\n");
+          if (!nyr_put(c->w, "\t#NO_APP\n")) return false;
+          return true;
+        }
+        /*
+         * Best-effort passthrough for templates with no unresolved operand refs.
+         */
         size_t tlen = 0;
         const char *src = strstr(details, " | source:");
         if (src) tlen = (size_t)(src - details);
@@ -5811,7 +5840,43 @@ static bool ny_x64_nir_emit_inst_raw(ny_x64_nir_ctx_t *c, const nyr_inst_t *in,
       return ny_x64_nir_store(c, ny_x64_nir_slot(c, in->dst));
     }
 
-    if (in->imm == -2 || in->imm == -3 || in->imm == -4 || in->imm == -8) {
+    if (in->imm == -171) {
+      /*
+       * try_cmpxchg: b=expected value, c=new value, a=memory address,
+       * dst=condition (bool) local slot, d=old-value local slot (-1 none).
+       * symbol="cmpxchgb"/"cmpxchgw"/"cmpxchgl"/"cmpxchgq" (lock prefix implied).
+       */
+      if (in->a < 0 || in->b < 0 || in->c < 0 || in->dst < 0 || !in->symbol)
+        return false;
+      char suf = in->symbol[strlen(in->symbol)-1];
+      c->rax_cached_slot = -1;
+      if (!ny_x64_nir_load_value(c, in->b) ||
+          !nyr_put(c->w, "\tmovl\t%eax, %r9d\n") ||
+          !ny_x64_nir_load_value(c, in->c) ||
+          !nyr_put(c->w, suf=='b'?"\tmovb\t%al, %dl\n":suf=='w'?"\tmovw\t%ax, %dx\n":suf=='q'?"\tmovq\t%rax, %rdx\n":"\tmovl\t%eax, %edx\n") ||
+          !ny_x64_nir_load_value(c, in->a) ||
+          !nyr_put(c->w, "\tmovq\t%rax, %rcx\n") ||
+          !nyr_put(c->w, suf=='b'?"\tmovzbl\t%r9b, %eax\n":suf=='w'?"\tmovzwl\t%r9w, %eax\n":suf=='q'?"\tmovq\t%r9, %rax\n":"\tmovl\t%r9d, %eax\n") ||
+          !nyr_printf(c->w, "\tlock %s\t%s, (%%rcx)\n", in->symbol,
+                      suf=='b'?"%dl":suf=='w'?"%dx":suf=='q'?"%rdx":"%edx") ||
+          !nyr_put(c->w, "\tsete\t%r10b\n"))
+        return false;
+      /*
+       * old value in rax; store to d (old inout local)
+       */
+      if (in->d >= 0) {
+        if (suf=='b') { if(!nyr_put(c->w,"\tmovzbl\t%al, %eax\n")) return false; }
+        else if (suf=='w') { if(!nyr_put(c->w,"\tmovzwl\t%ax, %eax\n")) return false; }
+        else if (suf!='q') { if(!nyr_put(c->w,"\tmovl\t%eax, %eax\n")) return false; }
+        if (!ny_x64_nir_store(c, ny_x64_nir_slot(c, in->d))) return false;
+      }
+      if (!nyr_put(c->w, "\tmovzbl\t%r10b, %eax\n") ||
+          !ny_x64_nir_store(c, ny_x64_nir_slot(c, in->dst)))
+        return false;
+      c->rax_cached_slot = -1;
+      return true;
+    }
+        if (in->imm == -2 || in->imm == -3 || in->imm == -4 || in->imm == -8) {
       if (in->a < 0 || ((in->imm == -3 || in->imm == -8) && in->b < 0) ||
           ((in->imm == -4 || in->imm == -8) && in->dst < 0)) {
         nyr_set_error(c->err, c->err_len,
@@ -5854,19 +5919,26 @@ static bool ny_x64_nir_emit_inst_raw(ny_x64_nir_ctx_t *c, const nyr_inst_t *in,
     }
     if (in->imm == -33) {
       if (in->dst != -1 || in->a < 0 || in->b < 0 || in->c != -1 ||
-          !in->symbol ||
-          (strcmp(in->symbol, "andl") != 0 && strcmp(in->symbol, "orl") != 0 &&
-           strcmp(in->symbol, "xorl") != 0 && strcmp(in->symbol, "addl") != 0 &&
-           strcmp(in->symbol, "subl") != 0)) {
+          !in->symbol) {
+        nyr_set_error(c->err, c->err_len,
+                      "nyir x86-64: invalid atomic arithmetic/bitwise asm");
+        return false;
+      }
+      bool is_byte = in->symbol[strlen(in->symbol)-1]=='b';
+      bool is_word = in->symbol[strlen(in->symbol)-1]=='w';
+      if (!is_byte && !is_word &&
+          strcmp(in->symbol, "andl") != 0 && strcmp(in->symbol, "orl") != 0 &&
+          strcmp(in->symbol, "xorl") != 0 && strcmp(in->symbol, "addl") != 0 &&
+          strcmp(in->symbol, "subl") != 0) {
         nyr_set_error(c->err, c->err_len,
                       "nyir x86-64: invalid atomic arithmetic/bitwise asm");
         return false;
       }
       c->rax_cached_slot = -1;
       if (!ny_x64_nir_load_value(c, in->b) ||
-          !nyr_put(c->w, "\tmovl\t%eax, %r11d\n") ||
+          !nyr_put(c->w, is_byte ? "\tmovb\t%al, %r11b\n" : is_word ? "\tmovw\t%ax, %r11w\n" : "\tmovl\t%eax, %r11d\n") ||
           !ny_x64_nir_load_value(c, in->a) ||
-          !nyr_printf(c->w, "\tlock %s\t%%r11d, (%%rax)\n", in->symbol))
+          !nyr_printf(c->w, is_byte ? "\tlock %s\t%%r11b, (%%rax)\n" : is_word ? "\tlock %s\t%%r11w, (%%rax)\n" : "\tlock %s\t%%r11d, (%%rax)\n", in->symbol))
         return false;
       c->rax_cached_slot = -1;
       return true;
@@ -9005,19 +9077,6 @@ static bool nyr_x86_64_emit_mach_scalar_impl(nyr_writer_t *w,
   int rax_cached_off = -1;
   size_t xmm_cached_reg = SIZE_MAX;
   /*
-   * Callee-saved GPR cache: tracks which stack slot each callee-saved
-   * register (rbx, r12-r15) currently holds, or -1 if unknown/stale.
-   * Callee-saved registers survive calls per the SysV ABI, so cache entries
-   * remain valid across CALL instructions. Reset at every block boundary.
-   */
-  int gpr_cached_off[6] = {-1, -1, -1, -1, -1, -1};
-  /*
-   * Reverse map: which vreg each callee-saved GPR holds, or -1. Used to
-   * store directly from a callee-saved register to a frame slot without
-   * going through %rax.
-   */
-  int gpr_holds_vreg[6] = {-1, -1, -1, -1, -1, -1};
-  /*
    * Zero register tracker: which register currently holds the value 0, or -1.
    * Set when we emit `xor reg, reg`; cleared when that register is written
    * with a non-zero value or at block boundaries.  Used to avoid redundant
@@ -9031,10 +9090,6 @@ static bool nyr_x86_64_emit_mach_scalar_impl(nyr_writer_t *w,
       return false;
     rax_cached_off = -1;
     xmm_cached_reg = SIZE_MAX;
-    for (size_t g = 0; g < 6; ++g) {
-      gpr_cached_off[g] = -1;
-      gpr_holds_vreg[g] = -1;
-    }
     zero_reg = -1;
     const nyr_mach_block_t *b = &mach->blocks[block];
     for (size_t n = 0; n < b->inst_count; ++n) {
@@ -10365,6 +10420,14 @@ bool nyr_x86_64_emit_mach_scalar(nyr_writer_t *w,
                                  const char *func_name, bool tag_return,
                                  bool function_return_thunk_extern,
                                  char *err, size_t err_len) {
+  /*
+   * 16- and 32-bit accesses exist only in the object encoder.
+   */
+  for (size_t mi = 0; mach && mi < mach->inst_len; ++mi)
+    if (mach->insts[mi].mem_size >= 2 || mach->insts[mi].sext32 ||
+        mach->insts[mi].unsigned_arith ||
+        mach->insts[mi].opcode == NYR_MACH_SHR)
+      return false;
   nyr_x64_mach_use_t *uses = nyr_x64_mach_count_uses(mach);
   size_t *definitions = nyr_x64_mach_index_definitions(mach);
   bool ok = nyr_x86_64_emit_mach_scalar_impl(

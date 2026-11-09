@@ -5,6 +5,13 @@
 #include <stdio.h>
 #include <string.h>
 
+/*
+ * Mnemonic and operand buffers are fixed arrays in the decoder frames.
+ */
+#define DIS_SET(buf, text) snprintf((buf), sizeof(buf), "%s", (text))
+#define DIS_APPEND(buf, text)                                                  \
+  snprintf((buf) + strlen(buf), sizeof(buf) - strlen(buf), "%s", (text))
+
 const char *nyr_internal_aarch64_disasm(const unsigned char *b, int64_t n,
                                         int64_t base);
 
@@ -89,7 +96,7 @@ static int nyr_x64_rm(const unsigned char *b, int64_t n, int64_t *ip,
       strncat(expr, regs64[base], sizeof(expr) - strlen(expr) - 1);
     }
   } else if (rip_relative) {
-    strcpy(expr, "rip");
+    DIS_SET(expr, "rip");
     disp_size = 4;
   } else {
     snprintf(expr, sizeof(expr), "%s", regs64[rm]);
@@ -186,11 +193,11 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
     unsigned imm = 0;
     unsigned w = (rex & 8) ? 8 : (op16 ? 2 : 4);
     if (op == 0x90)
-      strcpy(m, "nop");
+      DIS_SET(m, "nop");
     else if (op == 0xa4) {
-      strcpy(m, rep == 0xf3 ? "rep movsb" : "movsb");
+      DIS_SET(m, rep == 0xf3 ? "rep movsb" : "movsb");
     } else if (op == 0xd9 && i < n && (b[i] == 0xfe || b[i] == 0xff)) {
-      strcpy(m, b[i++] == 0xfe ? "fsin" : "fcos");
+      DIS_SET(m, b[i++] == 0xfe ? "fsin" : "fcos");
     } else if (op == 0xdd && i < n) {
       unsigned char mr = b[i++];
       unsigned group = (mr >> 3) & 7;
@@ -198,18 +205,18 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
       if ((mr >> 6) == 3 || (group != 0 && group != 3) ||
           !nyr_x64_rm(b, n, &i, mr, rex, 8, operand, sizeof(operand)))
         goto unsupported;
-      strcpy(m, group == 0 ? "fld" : "fstp");
+      DIS_SET(m, group == 0 ? "fld" : "fstp");
       snprintf(args, sizeof(args), "%s", operand);
     } else if (op == 0xc3)
-      strcpy(m, "ret");
+      DIS_SET(m, "ret");
     else if (op == 0xc9)
-      strcpy(m, "leave");
+      DIS_SET(m, "leave");
     else if (op == 0xcc)
-      strcpy(m, "int3");
+      DIS_SET(m, "int3");
     else if (op == 0x98)
-      strcpy(m, (rex & 8) ? "cdqe" : "cwde");
+      DIS_SET(m, (rex & 8) ? "cdqe" : "cwde");
     else if (op == 0x99)
-      strcpy(m, (rex & 8) ? "cqo" : "cdq");
+      DIS_SET(m, (rex & 8) ? "cqo" : "cdq");
     else if (op == 0x0f && i < n) {
       unsigned char op2 = b[i++];
       static const char *cc[] = {"o", "no", "b", "ae", "e", "ne", "be", "a",
@@ -227,13 +234,13 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
                             sizeof(rm_name)))
           goto unsupported;
         if (op2 == 0x10 || op2 == 0x11) {
-          strcpy(m, scalar_width ? (rep == 0xf3 ? "movss" : "movsd")
+          DIS_SET(m, scalar_width ? (rep == 0xf3 ? "movss" : "movsd")
                                  : (op16 ? "movupd" : "movups"));
           snprintf(args, sizeof(args), "%s, %s",
                    op2 == 0x10 ? reg_name : rm_name,
                    op2 == 0x10 ? rm_name : reg_name);
         } else {
-          strcpy(m, op16 ? "movapd" : "movaps");
+          DIS_SET(m, op16 ? "movapd" : "movaps");
           snprintf(args, sizeof(args), "%s, %s",
                    op2 == 0x28 ? reg_name : rm_name,
                    op2 == 0x28 ? rm_name : reg_name);
@@ -247,7 +254,7 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
         if (!nyr_x64_vec_rm(b, n, &i, mr, rex, 128, 16, rm_name,
                             sizeof(rm_name)))
           goto unsupported;
-        strcpy(m, rep == 0xf3 ? "movdqu" : "movdqa");
+        DIS_SET(m, rep == 0xf3 ? "movdqu" : "movdqa");
         snprintf(args, sizeof(args), "%s, %s", op2 == 0x6f ? reg_name : rm_name,
                  op2 == 0x6f ? rm_name : reg_name);
       } else if ((op2 == 0x6e || op2 == 0x7e) && i < n && op16 && !rep) {
@@ -259,7 +266,7 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
         if (!nyr_x64_rm(b, n, &i, mr, rex, move_width, rm_name,
                         sizeof(rm_name)))
           goto unsupported;
-        strcpy(m, move_width == 8 ? "movq" : "movd");
+        DIS_SET(m, move_width == 8 ? "movq" : "movd");
         snprintf(args, sizeof(args), "%s, %s", op2 == 0x6e ? reg_name : rm_name,
                  op2 == 0x6e ? rm_name : reg_name);
       } else if ((op2 == 0x14 || op2 == 0x15) && i < n && !rep) {
@@ -270,7 +277,7 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
         if (!nyr_x64_vec_rm(b, n, &i, mr, rex, 128, 16, rm_name,
                             sizeof(rm_name)))
           goto unsupported;
-        strcpy(m, op16 ? (op2 == 0x14 ? "unpcklpd" : "unpckhpd")
+        DIS_SET(m, op16 ? (op2 == 0x14 ? "unpcklpd" : "unpckhpd")
                        : (op2 == 0x14 ? "unpcklps" : "unpckhps"));
         snprintf(args, sizeof(args), "%s, %s", reg_name, rm_name);
       } else if ((op2 == 0x12 || op2 == 0x13 || op2 == 0x16 || op2 == 0x17) &&
@@ -284,21 +291,21 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
                             sizeof(rm_name)))
           goto unsupported;
         if (rep == 0xf2 && op2 == 0x12)
-          strcpy(m, "movddup");
+          DIS_SET(m, "movddup");
         else if (rep == 0xf3 && op2 == 0x12)
-          strcpy(m, "movsldup");
+          DIS_SET(m, "movsldup");
         else if (rep == 0xf3 && op2 == 0x16)
-          strcpy(m, "movshdup");
+          DIS_SET(m, "movshdup");
         else if (rep)
           goto unsupported;
         else if (modrm_mod == 3 && op2 == 0x12)
-          strcpy(m, "movhlps");
+          DIS_SET(m, "movhlps");
         else if (modrm_mod == 3 && op2 == 0x16)
-          strcpy(m, "movlhps");
+          DIS_SET(m, "movlhps");
         else if (op2 == 0x12 || op2 == 0x13)
-          strcpy(m, "movlps");
+          DIS_SET(m, "movlps");
         else
-          strcpy(m, "movhps");
+          DIS_SET(m, "movhps");
         int store = op2 == 0x13 || op2 == 0x17;
         snprintf(args, sizeof(args), "%s, %s", store ? rm_name : reg_name,
                  store ? reg_name : rm_name);
@@ -323,8 +330,8 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
                             scalar_width ? scalar_width : 16, rm_name,
                             sizeof(rm_name)))
           goto unsupported;
-        strcpy(m, stem);
-        strcat(m, suffix);
+        DIS_SET(m, stem);
+        DIS_APPEND(m, suffix);
         if (op2 == 0x51)
           snprintf(args, sizeof(args), "%s, %s", reg_name, rm_name);
         else
@@ -338,7 +345,7 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
                             sizeof(rm_name)) ||
             i >= n)
           goto unsupported;
-        strcpy(m, op16 ? "shufpd" : "shufps");
+        DIS_SET(m, op16 ? "shufpd" : "shufps");
         snprintf(args, sizeof(args), "%s, %s, 0x%x", reg_name, rm_name, b[i++]);
       } else if ((op2 == 0x2e || op2 == 0x2f) && i < n && !rep) {
         unsigned char mr = b[i++];
@@ -348,7 +355,7 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
         if (!nyr_x64_vec_rm(b, n, &i, mr, rex, 128, op16 ? 8 : 4, rm_name,
                             sizeof(rm_name)))
           goto unsupported;
-        strcpy(m, op2 == 0x2e ? (op16 ? "ucomisd" : "ucomiss")
+        DIS_SET(m, op2 == 0x2e ? (op16 ? "ucomisd" : "ucomiss")
                               : (op16 ? "comisd" : "comiss"));
         snprintf(args, sizeof(args), "%s, %s", reg_name, rm_name);
       } else if (op2 == 0x6c && op16 && i < n) {
@@ -359,7 +366,7 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
         if (!nyr_x64_vec_rm(b, n, &i, mr, rex, 128, 16, rm_name,
                             sizeof(rm_name)))
           goto unsupported;
-        strcpy(m, "punpcklqdq");
+        DIS_SET(m, "punpcklqdq");
         snprintf(args, sizeof(args), "%s, %s", reg_name, rm_name);
       } else if (op16 && !rep && i < n &&
                  (op2 == 0xd4 || op2 == 0xfb || op2 == 0xdb || op2 == 0xeb ||
@@ -371,7 +378,7 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
         if (!nyr_x64_vec_rm(b, n, &i, mr, rex, 128, 16, rm_name,
                             sizeof(rm_name)))
           goto unsupported;
-        strcpy(m, op2 == 0xd4   ? "paddq"
+        DIS_SET(m, op2 == 0xd4   ? "paddq"
                   : op2 == 0xfb ? "psubq"
                   : op2 == 0xdb ? "pand"
                   : op2 == 0xeb ? "por"
@@ -383,7 +390,7 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
         if ((mr >> 6) != 3 || ((mr >> 3) & 7) != 6)
           goto unsupported;
         unsigned dest = (mr & 7) | ((rex & 1) ? 8 : 0);
-        strcpy(m, "psllq");
+        DIS_SET(m, "psllq");
         snprintf(args, sizeof(args), "xmm%u, 0x%x", dest, b[i++]);
       } else if (op2 == 0x12 && rep == 0xf2 && i < n) {
         unsigned char mr = b[i++];
@@ -393,7 +400,7 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
         if (!nyr_x64_vec_rm(b, n, &i, mr, rex, 128, 8, rm_name,
                             sizeof(rm_name)))
           goto unsupported;
-        strcpy(m, "movddup");
+        DIS_SET(m, "movddup");
         snprintf(args, sizeof(args), "%s, %s", reg_name, rm_name);
       } else if ((op2 == 0x2a || op2 == 0x2c || op2 == 0x2d) &&
                  (rep == 0xf2 || rep == 0xf3) && i < n) {
@@ -422,13 +429,13 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
         if (!nyr_x64_vec_rm(b, n, &i, mr, rex, 128, rep == 0xf3 ? 4 : 8, src,
                             sizeof(src)))
           goto unsupported;
-        strcpy(m, rep == 0xf3 ? "cvtss2sd" : "cvtsd2ss");
+        DIS_SET(m, rep == 0xf3 ? "cvtss2sd" : "cvtsd2ss");
         snprintf(args, sizeof(args), "%s, %s", reg_name, src);
       } else if (op2 >= 0x80 && op2 <= 0x8f && i + 4 <= n) {
         rel = (int32_t)rd(b + i, 4);
         i += 4;
-        strcpy(m, "j");
-        strcat(m, cc[op2 & 15]);
+        DIS_SET(m, "j");
+        DIS_APPEND(m, cc[op2 & 15]);
         snprintf(args, sizeof(args), "0x%" PRIx64, (uint64_t)(base + i + rel));
       } else if (op2 >= 0x40 && op2 <= 0x4f && i < n) {
         unsigned char mr = b[i++];
@@ -436,16 +443,16 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
         char src[128];
         if (!nyr_x64_rm(b, n, &i, mr, rex, w, src, sizeof(src)))
           goto unsupported;
-        strcpy(m, "cmov");
-        strcat(m, cc[op2 & 15]);
+        DIS_SET(m, "cmov");
+        DIS_APPEND(m, cc[op2 & 15]);
         snprintf(args, sizeof(args), "%s, %s", nyr_x64_reg(reg, w, rex), src);
       } else if (op2 >= 0x90 && op2 <= 0x9f && i < n) {
         unsigned char mr = b[i++];
         char dst[128];
         if (!nyr_x64_rm(b, n, &i, mr, rex, 1, dst, sizeof(dst)))
           goto unsupported;
-        strcpy(m, "set");
-        strcat(m, cc[op2 & 15]);
+        DIS_SET(m, "set");
+        DIS_APPEND(m, cc[op2 & 15]);
         snprintf(args, sizeof(args), "%s", dst);
       } else if (op2 == 0xaf && i < n) {
         unsigned char mr = b[i++];
@@ -453,7 +460,7 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
         char src[128];
         if (!nyr_x64_rm(b, n, &i, mr, rex, w, src, sizeof(src)))
           goto unsupported;
-        strcpy(m, "imul");
+        DIS_SET(m, "imul");
         snprintf(args, sizeof(args), "%s, %s", nyr_x64_reg(reg, w, rex), src);
       } else if ((op2 == 0xb6 || op2 == 0xb7 || op2 == 0xbe || op2 == 0xbf) &&
                  i < n) {
@@ -463,45 +470,23 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
         char src[128];
         if (!nyr_x64_rm(b, n, &i, mr, rex, sw, src, sizeof(src)))
           goto unsupported;
-        strcpy(m, (op2 == 0xb6 || op2 == 0xb7) ? "movzx" : "movsx");
+        DIS_SET(m, (op2 == 0xb6 || op2 == 0xb7) ? "movzx" : "movsx");
         snprintf(args, sizeof(args), "%s, %s", nyr_x64_reg(reg, w, rex), src);
       } else if (op2 == 0x1f && i < n) {
         unsigned char mr = b[i++];
         char discard[128];
         if (!nyr_x64_rm(b, n, &i, mr, rex, 0, discard, sizeof(discard)))
           goto unsupported;
-        strcpy(m, "nop");
+        DIS_SET(m, "nop");
       } else if (op2 == 0x1e && rep == 0xf3 && i < n && b[i++] == 0xfa) {
-        strcpy(m, "endbr64");
+        DIS_SET(m, "endbr64");
       } else if (op2 == 0x05) {
-        strcpy(m, "syscall");
+        DIS_SET(m, "syscall");
       } else if (op2 == 0x0b) {
-        strcpy(m, "ud2");
+        DIS_SET(m, "ud2");
       } else if (op2 >= 0xc8 && op2 <= 0xcf) {
-        strcpy(m, "bswap");
+        DIS_SET(m, "bswap");
         snprintf(args, sizeof(args), "%s", nyr_x64_reg((op2 & 7) + rb, w, rex));
-      } else if (op2 >= 0x40 && op2 <= 0x4f && i < n) {
-        /*
-         * CMOVcc r, r/m
-         */
-        unsigned char mr = b[i++];
-        reg = ((mr >> 3) & 7) + ((rex & 4) ? 8 : 0);
-        char rm_name[192];
-        if (!nyr_x64_rm(b, n, &i, mr, rex, w, rm_name, sizeof(rm_name)))
-          goto unsupported;
-        snprintf(m, sizeof(m), "cmov%s", cc[op2 & 15]);
-        snprintf(args, sizeof(args), "%s, %s", nyr_x64_reg(reg, w, rex),
-                 rm_name);
-      } else if (op2 >= 0x90 && op2 <= 0x9f && i < n) {
-        /*
-         * SETcc r/m8
-         */
-        unsigned char mr = b[i++];
-        char rm_name[192];
-        if (!nyr_x64_rm(b, n, &i, mr, rex, 1, rm_name, sizeof(rm_name)))
-          goto unsupported;
-        snprintf(m, sizeof(m), "set%s", cc[op2 & 15]);
-        snprintf(args, sizeof(args), "%s", rm_name);
       } else {
         goto unsupported;
       }
@@ -546,7 +531,7 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
                           rmb, sizeof(rmb)))
             goto unsupported;
         }
-        strcpy(m, gw == 8 ? "vmovq" : "vmovd");
+        DIS_SET(m, gw == 8 ? "vmovq" : "vmovd");
         if (opcode == 0x6e)
           snprintf(args, sizeof(args), "%s, %s", vreg, rmb);
         else
@@ -583,7 +568,7 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
           (opcode == 0x10 || opcode == 0x11 || opcode == 0x28 ||
            opcode == 0x29) &&
           (pp == 0 || pp == 1) && !(vex3 & 0x80) && (vex3 & 0x78) == 0x78) {
-        strcpy(m, opcode == 0x28 || opcode == 0x29
+        DIS_SET(m, opcode == 0x28 || opcode == 0x29
                       ? (pp == 0 ? "vmovaps" : "vmovapd")
                       : (pp == 0 ? "vmovups" : "vmovupd"));
         int store = opcode == 0x11 || opcode == 0x29;
@@ -592,7 +577,7 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
       } else if (map == 1 && (opcode == 0x6f || opcode == 0x7f) &&
                  (pp == 1 || pp == 2) && !(vex3 & 0x80) &&
                  (vex3 & 0x78) == 0x78) {
-        strcpy(m, pp == 1 ? "vmovdqa" : "vmovdqu");
+        DIS_SET(m, pp == 1 ? "vmovdqa" : "vmovdqu");
         if (opcode == 0x6f)
           snprintf(args, sizeof(args), "%s, %s", reg_name, rm_name);
         else
@@ -608,7 +593,7 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
         char vvvv_name[16];
         snprintf(vvvv_name, sizeof(vvvv_name), "%s%u",
                  vector_width == 256 ? "ymm" : "xmm", vector_vvvv);
-        strcpy(m, name);
+        DIS_SET(m, name);
         snprintf(args, sizeof(args), "%s, %s, %s", reg_name, vvvv_name,
                  rm_name);
       } else if (map == 1 && (opcode == 0x10 || opcode == 0x11) &&
@@ -616,7 +601,7 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
         /*
          * VEX.F2/F3.0F 10/11: scalar single/double move (reg or mem).
          */
-        strcpy(m, opcode == 0x10 ? (pp == 3 ? "vmovsd" : "vmovss")
+        DIS_SET(m, opcode == 0x10 ? (pp == 3 ? "vmovsd" : "vmovss")
                                  : (pp == 3 ? "vmovsd" : "vmovss"));
         int store = opcode == 0x11;
         if ((mr >> 6) == 3) {
@@ -634,13 +619,13 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
         }
       } else if (map == 2 && pp == 1 && !(vex3 & 0x80) && opcode == 0x19 &&
                  (vex3 & 0x78) == 0x78 && (mr >> 6) != 3) {
-        strcpy(m, "vbroadcastsd");
+        DIS_SET(m, "vbroadcastsd");
         snprintf(args, sizeof(args), "%s, %s", reg_name, rm_name);
       } else if (map == 2 && pp == 1 && (vex3 & 0x80) && opcode == 0xa8) {
         char vvvv_name[16];
         snprintf(vvvv_name, sizeof(vvvv_name), "%s%u",
                  vector_width == 256 ? "ymm" : "xmm", vector_vvvv);
-        strcpy(m, "vfmadd213pd");
+        DIS_SET(m, "vfmadd213pd");
         snprintf(args, sizeof(args), "%s, %s, %s", reg_name, vvvv_name,
                  rm_name);
       } else if (map == 1 && opcode >= 0x58 && opcode <= 0x5e &&
@@ -659,8 +644,8 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
         char vvvv_name[16];
         snprintf(vvvv_name, sizeof(vvvv_name), "%s%u",
                  vector_width == 256 ? "ymm" : "xmm", vector_vvvv);
-        strcpy(m, stem);
-        strcat(m, suffix);
+        DIS_SET(m, stem);
+        DIS_APPEND(m, suffix);
         snprintf(args, sizeof(args), "%s, %s, %s", reg_name, vvvv_name,
                  rm_name);
       } else if (map == 1 && opcode == 0x51 && (pp <= 3) && !(vex3 & 0x80) &&
@@ -669,13 +654,13 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
                              : pp == 1 ? "pd"
                              : pp == 2 ? "ss"
                                        : "sd";
-        strcpy(m, "vsqrt");
-        strcat(m, suffix);
+        DIS_SET(m, "vsqrt");
+        DIS_APPEND(m, suffix);
         snprintf(args, sizeof(args), "%s, %s", reg_name, rm_name);
       } else if (map == 2 && pp == 1 && (vex3 & 0x80) && opcode == 0x59 &&
                  (vex3 & 0x78) == 0x78 && vector_width == 256 &&
                  (mr >> 6) != 3) {
-        strcpy(m, "vpbroadcastq");
+        DIS_SET(m, "vpbroadcastq");
         snprintf(args, sizeof(args), "%s, %s", reg_name, rm_name);
       } else if (map == 3 && pp == 1 && vector_width == 256 && !(vex3 & 0x80) &&
                  opcode == 0x19 && (vex3 & 0x78) == 0x78 && (mr >> 6) == 3 &&
@@ -684,7 +669,7 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
         unsigned half = b[i++];
         if (half > 1)
           goto unsupported;
-        strcpy(m, "vextractf128");
+        DIS_SET(m, "vextractf128");
         snprintf(args, sizeof(args), "xmm%u, %s, %u", xmm_dest, reg_name, half);
       } else {
         goto unsupported;
@@ -694,29 +679,29 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
         goto unsupported;
       rel = (int32_t)rd(b + i, 4);
       i += 4;
-      strcpy(m, op == 0xe8 ? "call" : "jmp");
+      DIS_SET(m, op == 0xe8 ? "call" : "jmp");
       snprintf(args, sizeof(args), "0x%" PRIx64, (uint64_t)(base + i + rel));
     } else if (op == 0xeb || (op >= 0x70 && op <= 0x7f)) {
       if (i >= n)
         goto unsupported;
       rel = (int8_t)b[i++];
       if (op == 0xeb)
-        strcpy(m, "jmp");
+        DIS_SET(m, "jmp");
       else {
         static const char *cc[] = {"jo",  "jno", "jb",  "jae", "je", "jne",
                                    "jbe", "ja",  "js",  "jns", "jp", "jnp",
                                    "jl",  "jge", "jle", "jg"};
-        strcpy(m, cc[op & 15]);
+        DIS_SET(m, cc[op & 15]);
       }
       snprintf(args, sizeof(args), "0x%" PRIx64, (uint64_t)(base + i + rel));
     } else if (op >= 0x50 && op <= 0x5f) {
-      strcpy(m, op < 0x58 ? "push" : "pop");
+      DIS_SET(m, op < 0x58 ? "push" : "pop");
       snprintf(args, sizeof(args), "%s", regs64[(op & 7) + rb]);
     } else if (op >= 0xb0 && op <= 0xb7) {
       imm = 1;
       if (i + imm > n)
         goto unsupported;
-      strcpy(m, "mov");
+      DIS_SET(m, "mov");
       snprintf(args, sizeof(args), "%s, 0x%" PRIx64,
                nyr_x64_reg((op & 7) + rb, 1, rex), rd(b + i, 1));
       i += 1;
@@ -724,7 +709,7 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
       imm = w;
       if (i + imm > n)
         goto unsupported;
-      strcpy(m, "mov");
+      DIS_SET(m, "mov");
       snprintf(args, sizeof(args), "%s, 0x%" PRIx64,
                (rex & 8 ? regs64 : regs32)[(op & 7) + rb], rd(b + i, imm));
       i += imm;
@@ -732,7 +717,7 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
       imm = op == 0x6a ? 1 : 4;
       if (i + imm > n)
         goto unsupported;
-      strcpy(m, "push");
+      DIS_SET(m, "push");
       snprintf(args, sizeof(args), "0x%" PRIx64, rd(b + i, imm));
       i += imm;
     } else {
@@ -864,7 +849,7 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
                      : acc_imm == 2 ? (int16_t)rd(b + i, 2)
                                     : (int32_t)rd(b + i, 4);
         i += acc_imm;
-        strcpy(m, mn);
+        DIS_SET(m, mn);
         if (iv < 0)
           snprintf(args, sizeof(args), "%s, -0x%" PRIx64,
                    nyr_x64_reg((op & 1) ? rb : 0, width, rex), (uint64_t)-iv);
@@ -886,7 +871,7 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
                         sizeof(lhs)))
           goto unsupported;
         snprintf(rhs, sizeof(rhs), "%s", nyr_x64_reg(reg, width, rex));
-        strcpy(m, mn);
+        DIS_SET(m, mn);
         if (dir)
           snprintf(args, sizeof(args), "%s, %s", rhs, lhs);
         else
@@ -904,7 +889,7 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
           goto unsupported;
         int64_t iv = imm == 1 ? (int8_t)b[i] : (int32_t)rd(b + i, 4);
         i += imm;
-        strcpy(m, "imul");
+        DIS_SET(m, "imul");
         snprintf(args, sizeof(args), "%s, %s, %s%" PRIx64,
                  nyr_x64_reg(reg, w, rex), src, iv < 0 ? "-0x" : "0x",
                  (uint64_t)(iv < 0 ? -iv : iv));
@@ -927,7 +912,7 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
                                       : NULL;
         if (!name)
           goto unsupported;
-        strcpy(m, name);
+        DIS_SET(m, name);
         if (op == 0xc0 || op == 0xc1) {
           if (i >= n)
             goto unsupported;
@@ -972,7 +957,7 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
                                                    : NULL;
         if (!imn)
           goto unsupported;
-        strcpy(m, imn);
+        DIS_SET(m, imn);
         if (iv < 0)
           snprintf(args, sizeof(args), "%s, -0x%" PRIx64, dst, (uint64_t)-iv);
         else
@@ -986,7 +971,7 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
         rmreg = (mr & 7) + rb;
         if (mod != 3)
           goto unsupported;
-        strcpy(m, reg == 2   ? "call"
+        DIS_SET(m, reg == 2   ? "call"
                   : reg == 4 ? "jmp"
                   : reg == 6 ? "push"
                              : "");
@@ -1010,7 +995,7 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
                        : op16     ? (int16_t)rd(b + i, 2)
                                   : (int32_t)rd(b + i, 4);
           i += imm;
-          strcpy(m, "test");
+          DIS_SET(m, "test");
           if (iv < 0)
             snprintf(args, sizeof(args), "%s, -0x%" PRIx64, operand,
                      (uint64_t)-iv);
@@ -1028,7 +1013,7 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
                                       : NULL;
         if (!name)
           goto unsupported;
-        strcpy(m, name);
+        DIS_SET(m, name);
         snprintf(args, sizeof(args), "%s", operand);
       } else
         goto unsupported;
@@ -1148,7 +1133,7 @@ const char *nyr_internal_aarch64_disasm(const unsigned char *b, int64_t n,
     char vd[8], vn[8], vm[8];
     int64_t target = 0;
     if (insn == 0xd503201f)
-      strcpy(mnemonic, "nop");
+      DIS_SET(mnemonic, "nop");
     else if ((insn & 0x3a000000) == 0x28000000 && !(insn & 0x04000000) &&
              ((insn >> 30) & 3) >= 2) {
       unsigned load = (insn >> 22) & 1;
@@ -1159,7 +1144,7 @@ const char *nyr_internal_aarch64_disasm(const unsigned char *b, int64_t n,
       const char *a = nyr_a64_reg(rd0, bytes == 8, 0);
       const char *breg = nyr_a64_reg(rt2, bytes == 8, 0);
       const char *bas = nyr_a64_reg(rn, 1, 1);
-      strcpy(mnemonic, load ? "ldp" : "stp");
+      DIS_SET(mnemonic, load ? "ldp" : "stp");
       if (mode == 1)
         snprintf(operands, sizeof(operands), "%s, %s, [%s], #%" PRId64, a, breg,
                  bas, imm);
@@ -1173,7 +1158,7 @@ const char *nyr_internal_aarch64_disasm(const unsigned char *b, int64_t n,
         goto unsupported_a64;
     } else if ((insn & 0xffe0fc00) == 0x9ac00c00 ||
                (insn & 0xffe0fc00) == 0x1ac00c00) {
-      strcpy(mnemonic, "sdiv");
+      DIS_SET(mnemonic, "sdiv");
       snprintf(operands, sizeof(operands), "%s, %s, %s",
                nyr_a64_reg(rd0, width, 0), nyr_a64_reg(rn, width, 0),
                nyr_a64_reg(rm, width, 0));
@@ -1184,20 +1169,20 @@ const char *nyr_internal_aarch64_disasm(const unsigned char *b, int64_t n,
                (insn & 0xffe0fc00) == 0x9ac02c00 ||
                (insn & 0xffe0fc00) == 0x1ac02c00) {
       unsigned shift_op = (insn >> 10) & 0x3f;
-      strcpy(mnemonic, shift_op == 10   ? "asrv"
+      DIS_SET(mnemonic, shift_op == 10   ? "asrv"
                        : shift_op == 11 ? "rorv"
                                         : "lslv");
       snprintf(operands, sizeof(operands), "%s, %s, %s",
                nyr_a64_reg(rd0, width, 0), nyr_a64_reg(rn, width, 0),
                nyr_a64_reg(rm, width, 0));
     } else if ((insn & 0xffe0fc00) == 0x9b407c00) {
-      strcpy(mnemonic, "umulh");
+      DIS_SET(mnemonic, "umulh");
       snprintf(operands, sizeof(operands), "%s, %s, %s", nyr_a64_reg(rd0, 1, 0),
                nyr_a64_reg(rn, 1, 0), nyr_a64_reg(rm, 1, 0));
     } else if ((insn & 0x7fe08000) == 0x1b008000 ||
                (insn & 0x7fe08000) == 0x1b000000) {
       unsigned acc = (insn >> 10) & 31;
-      strcpy(mnemonic, (insn & 0x8000) ? "msub" : "madd");
+      DIS_SET(mnemonic, (insn & 0x8000) ? "msub" : "madd");
       snprintf(operands, sizeof(operands), "%s, %s, %s, %s",
                nyr_a64_reg(rd0, width, 0), nyr_a64_reg(rn, width, 0),
                nyr_a64_reg(rm, width, 0), nyr_a64_reg(acc, width, 0));
@@ -1205,7 +1190,7 @@ const char *nyr_internal_aarch64_disasm(const unsigned char *b, int64_t n,
       static const char *cc[] = {"eq", "ne", "cs", "cc", "mi", "pl",
                                  "vs", "vc", "hi", "ls", "ge", "lt",
                                  "gt", "le", "al", "nv"};
-      strcpy(mnemonic, "csel");
+      DIS_SET(mnemonic, "csel");
       snprintf(operands, sizeof(operands), "%s, %s, %s, %s",
                nyr_a64_reg(rd0, width, 0), nyr_a64_reg(rn, width, 0),
                nyr_a64_reg(rm, width, 0), cc[(insn >> 12) & 15]);
@@ -1218,7 +1203,7 @@ const char *nyr_internal_aarch64_disasm(const unsigned char *b, int64_t n,
                (insn & 0xffe0fc00) == 0x1e201800 ||
                (insn & 0xffe0fc00) == 0x1e601800) {
       uint32_t op = insn & 0xffe0fc00;
-      strcpy(mnemonic, op == 0x1e202800 || op == 0x1e602800   ? "fadd"
+      DIS_SET(mnemonic, op == 0x1e202800 || op == 0x1e602800   ? "fadd"
                        : op == 0x1e203800 || op == 0x1e603800 ? "fsub"
                        : op == 0x1e200800 || op == 0x1e600800 ? "fmul"
                                                               : "fdiv");
@@ -1227,22 +1212,22 @@ const char *nyr_internal_aarch64_disasm(const unsigned char *b, int64_t n,
                fp, rm);
     } else if ((insn & 0xffe0fc00) == 0x1e202000 ||
                (insn & 0xffe0fc00) == 0x1e602000) {
-      strcpy(mnemonic, "fcmp");
+      DIS_SET(mnemonic, "fcmp");
       char fp = ((insn & 0xffe0fc00) == 0x1e602000) ? 'd' : 's';
       snprintf(operands, sizeof(operands), "%c%u, %c%u", fp, rn, fp, rm);
     } else if ((insn & 0xfffffc00) == 0x1e204000 ||
                (insn & 0xfffffc00) == 0x1e604000) {
-      strcpy(mnemonic, "fmov");
+      DIS_SET(mnemonic, "fmov");
       char fp = ((insn & 0xfffffc00) == 0x1e604000) ? 'd' : 's';
       snprintf(operands, sizeof(operands), "%c%u, %c%u", fp, rd0, fp, rn);
     } else if ((insn & 0xfffffc00) == 0x9e660000 ||
                (insn & 0xfffffc00) == 0x9e260000) {
-      strcpy(mnemonic, "fmov");
+      DIS_SET(mnemonic, "fmov");
       snprintf(operands, sizeof(operands), "%s, %c%u", nyr_a64_reg(rd0, 1, 0),
                (insn & 0x00400000) ? 'd' : 's', rn);
     } else if ((insn & 0xfffffc00) == 0x9e670000 ||
                (insn & 0xfffffc00) == 0x9e270000) {
-      strcpy(mnemonic, "fmov");
+      DIS_SET(mnemonic, "fmov");
       snprintf(operands, sizeof(operands), "%c%u, %s",
                (insn & 0x00400000) ? 'd' : 's', rd0, nyr_a64_reg(rn, 1, 0));
     } else if ((insn & 0xffe00c00) == 0xf8400000 ||
@@ -1259,7 +1244,7 @@ const char *nyr_internal_aarch64_disasm(const unsigned char *b, int64_t n,
                  op == 0x3cc00000;
       const char *base_reg = nyr_a64_reg(rn, 1, 1);
       if (op == 0x3cc00000 || op == 0x3c800000) {
-        strcpy(mnemonic, load ? "ldur" : "stur");
+        DIS_SET(mnemonic, load ? "ldur" : "stur");
         if (imm)
           snprintf(operands, sizeof(operands), "q%u, [%s, #%" PRId64 "]", rd0,
                    base_reg, imm);
@@ -1268,7 +1253,7 @@ const char *nyr_internal_aarch64_disasm(const unsigned char *b, int64_t n,
       } else if (op == 0xfc400000 || op == 0xfc000000 || op == 0xbc400000 ||
                  op == 0xbc000000) {
         char width_name = op == 0xfc400000 || op == 0xfc000000 ? 'd' : 's';
-        strcpy(mnemonic, load ? "ldur" : "stur");
+        DIS_SET(mnemonic, load ? "ldur" : "stur");
         if (imm)
           snprintf(operands, sizeof(operands), "%c%u, [%s, #%" PRId64 "]",
                    width_name, rd0, base_reg, imm);
@@ -1276,7 +1261,7 @@ const char *nyr_internal_aarch64_disasm(const unsigned char *b, int64_t n,
           snprintf(operands, sizeof(operands), "%c%u, [%s]", width_name, rd0,
                    base_reg);
       } else {
-        strcpy(mnemonic, load ? "ldur" : "stur");
+        DIS_SET(mnemonic, load ? "ldur" : "stur");
         if (imm)
           snprintf(operands, sizeof(operands), "%s, [%s, #%" PRId64 "]",
                    nyr_a64_reg(rd0, 1, 0), base_reg, imm);
@@ -1286,53 +1271,53 @@ const char *nyr_internal_aarch64_disasm(const unsigned char *b, int64_t n,
       }
     } else if ((insn & 0xfffffc00) == 0x9e620000 ||
                (insn & 0xfffffc00) == 0x9e220000) {
-      strcpy(mnemonic, "scvtf");
+      DIS_SET(mnemonic, "scvtf");
       snprintf(operands, sizeof(operands), "%c%u, %s",
                (insn & 0x00400000) ? 'd' : 's', rd0, nyr_a64_reg(rn, 1, 0));
     } else if ((insn & 0xfffffc00) == 0x9e780000 ||
                (insn & 0xfffffc00) == 0x9e380000) {
-      strcpy(mnemonic, "fcvtzs");
+      DIS_SET(mnemonic, "fcvtzs");
       snprintf(operands, sizeof(operands), "%s, %c%u", nyr_a64_reg(rd0, 1, 0),
                (insn & 0x00400000) ? 'd' : 's', rn);
     } else if ((insn & 0xfffffc00) == 0x1e22c000 ||
                (insn & 0xfffffc00) == 0x1e624000) {
-      strcpy(mnemonic, "fcvt");
+      DIS_SET(mnemonic, "fcvt");
       int to_double = (insn & 0xfffffc00) == 0x1e22c000;
       snprintf(operands, sizeof(operands), "%c%u, %c%u", to_double ? 'd' : 's',
                rd0, to_double ? 's' : 'd', rn);
     } else if ((insn & 0xfffffc1f) == 0xd65f0000) {
-      strcpy(mnemonic, "ret");
+      DIS_SET(mnemonic, "ret");
       if (rn != 30)
         snprintf(operands, sizeof(operands), "%s", nyr_a64_reg(rn, 1, 0));
     } else if ((insn & 0xfffffc1f) == 0xd61f0000 ||
                (insn & 0xfffffc1f) == 0xd63f0000) {
-      strcpy(mnemonic, (insn & 0x00200000) ? "blr" : "br");
+      DIS_SET(mnemonic, (insn & 0x00200000) ? "blr" : "br");
       snprintf(operands, sizeof(operands), "%s", nyr_a64_reg(rn, 1, 0));
     } else if ((insn & 0xffe0001f) == 0xd4000001) {
-      strcpy(mnemonic, "svc");
+      DIS_SET(mnemonic, "svc");
       snprintf(operands, sizeof(operands), "#%u", (insn >> 5) & 0xffff);
     } else if ((insn & 0xffe0001f) == 0xd4200000) {
-      strcpy(mnemonic, "brk");
+      DIS_SET(mnemonic, "brk");
       snprintf(operands, sizeof(operands), "#%u", (insn >> 5) & 0xffff);
     } else if ((insn & 0x7c000000) == 0x14000000) {
-      strcpy(mnemonic, (insn & 0x80000000) ? "bl" : "b");
+      DIS_SET(mnemonic, (insn & 0x80000000) ? "bl" : "b");
       target = base + off + nyr_sign_extend(insn & 0x03ffffff, 26) * 4;
       snprintf(operands, sizeof(operands), "0x%" PRIx64, (uint64_t)target);
     } else if ((insn & 0xff000010) == 0x54000000) {
       static const char *cc[] = {"eq", "ne", "cs", "cc", "mi", "pl",
                                  "vs", "vc", "hi", "ls", "ge", "lt",
                                  "gt", "le", "al", "nv"};
-      strcpy(mnemonic, "b.");
-      strcat(mnemonic, cc[insn & 15]);
+      DIS_SET(mnemonic, "b.");
+      DIS_APPEND(mnemonic, cc[insn & 15]);
       target = base + off + nyr_sign_extend((insn >> 5) & 0x7ffff, 19) * 4;
       snprintf(operands, sizeof(operands), "0x%" PRIx64, (uint64_t)target);
     } else if ((insn & 0x7e000000) == 0x34000000) {
-      strcpy(mnemonic, (insn & 0x01000000) ? "cbnz" : "cbz");
+      DIS_SET(mnemonic, (insn & 0x01000000) ? "cbnz" : "cbz");
       target = base + off + nyr_sign_extend((insn >> 5) & 0x7ffff, 19) * 4;
       snprintf(operands, sizeof(operands), "%s, 0x%" PRIx64,
                nyr_a64_reg(rd0, width, 0), (uint64_t)target);
     } else if ((insn & 0x7e000000) == 0x36000000) {
-      strcpy(mnemonic, (insn & 0x01000000) ? "tbnz" : "tbz");
+      DIS_SET(mnemonic, (insn & 0x01000000) ? "tbnz" : "tbz");
       target = base + off + nyr_sign_extend((insn >> 5) & 0x3fff, 14) * 4;
       unsigned bit = ((insn >> 26) & 0x20) | ((insn >> 19) & 0x1f);
       snprintf(operands, sizeof(operands), "%s, #%u, 0x%" PRIx64,
@@ -1343,9 +1328,9 @@ const char *nyr_internal_aarch64_disasm(const unsigned char *b, int64_t n,
       if (insn & (1u << 22))
         imm <<= 12;
       if (flags && rd0 == 31)
-        strcpy(mnemonic, sub ? "cmp" : "cmn");
+        DIS_SET(mnemonic, sub ? "cmp" : "cmn");
       else
-        strcpy(mnemonic,
+        DIS_SET(mnemonic,
                sub ? (flags ? "subs" : "sub") : (flags ? "adds" : "add"));
       if (flags && rd0 == 31)
         snprintf(operands, sizeof(operands), "%s, #%u",
@@ -1356,9 +1341,9 @@ const char *nyr_internal_aarch64_disasm(const unsigned char *b, int64_t n,
     } else if ((insn & 0x1f200000) == 0x0b000000) {
       unsigned sub = (insn >> 30) & 1, flags = (insn >> 29) & 1;
       if (flags && rd0 == 31)
-        strcpy(mnemonic, sub ? "cmp" : "cmn");
+        DIS_SET(mnemonic, sub ? "cmp" : "cmn");
       else
-        strcpy(mnemonic,
+        DIS_SET(mnemonic,
                sub ? (flags ? "subs" : "sub") : (flags ? "adds" : "add"));
       if (flags && rd0 == 31)
         snprintf(operands, sizeof(operands), "%s, %s",
@@ -1372,7 +1357,7 @@ const char *nyr_internal_aarch64_disasm(const unsigned char *b, int64_t n,
                (insn & 0x7f800000) == 0x12800000) {
       unsigned opc = (insn >> 29) & 3, shift = ((insn >> 21) & 3) * 16;
       uint64_t imm = (insn >> 5) & 0xffff;
-      strcpy(mnemonic, opc == 3 ? "movk" : opc == 0 ? "movn" : "movz");
+      DIS_SET(mnemonic, opc == 3 ? "movk" : opc == 0 ? "movn" : "movz");
       if (shift)
         snprintf(operands, sizeof(operands), "%s, #0x%" PRIx64 ", lsl #%u",
                  nyr_a64_reg(rd0, width, 0), imm, shift);
@@ -1381,7 +1366,7 @@ const char *nyr_internal_aarch64_disasm(const unsigned char *b, int64_t n,
                  nyr_a64_reg(rd0, width, 0), imm);
     } else if ((insn & 0xfffffc00) == 0xdac00c00 ||
                (insn & 0xfffffc00) == 0x5ac00800) {
-      strcpy(mnemonic, "rev");
+      DIS_SET(mnemonic, "rev");
       snprintf(operands, sizeof(operands), "%s, %s", nyr_a64_reg(rd0, width, 0),
                nyr_a64_reg(rn, width, 0));
     } else if ((insn & 0x9f000000) == 0x90000000) {
@@ -1390,7 +1375,7 @@ const char *nyr_internal_aarch64_disasm(const unsigned char *b, int64_t n,
       int64_t pages = nyr_sign_extend(imm, 21);
       uint64_t pc_page = (uint64_t)(base + off) & ~UINT64_C(0xfff);
       target = (int64_t)(pc_page + pages * INT64_C(4096));
-      strcpy(mnemonic, "adrp");
+      DIS_SET(mnemonic, "adrp");
       snprintf(operands, sizeof(operands), "%s, 0x%" PRIx64,
                nyr_a64_reg(rd0, 1, 0), (uint64_t)target);
     } else if ((insn & 0x7f800000) == 0x53000000 ||
@@ -1413,7 +1398,7 @@ const char *nyr_internal_aarch64_disasm(const unsigned char *b, int64_t n,
       }
       if (!shift)
         goto unsupported_a64;
-      strcpy(mnemonic, shift);
+      DIS_SET(mnemonic, shift);
       snprintf(operands, sizeof(operands), "%s, %s, #%u",
                nyr_a64_reg(rd0, width, 0), nyr_a64_reg(rn, width, 0), amount);
     } else if ((insn & 0x1f800000) == 0x12000000) {
@@ -1427,7 +1412,7 @@ const char *nyr_internal_aarch64_disasm(const unsigned char *b, int64_t n,
                                    : "ands";
       if (op == 3 && rd0 == 31)
         name = "tst";
-      strcpy(mnemonic, name);
+      DIS_SET(mnemonic, name);
       if (name[0] == 't')
         snprintf(operands, sizeof(operands), "%s, #0x%" PRIx64,
                  nyr_a64_reg(rn, width, 0), immediate);
@@ -1438,11 +1423,11 @@ const char *nyr_internal_aarch64_disasm(const unsigned char *b, int64_t n,
     } else if ((insn & 0x1f000000) == 0x0a000000) {
       unsigned opc = (insn >> 29) & 3;
       if (opc == 1 && rn == 31) {
-        strcpy(mnemonic, "mov");
+        DIS_SET(mnemonic, "mov");
         snprintf(operands, sizeof(operands), "%s, %s",
                  nyr_a64_reg(rd0, width, 0), nyr_a64_reg(rm, width, 0));
       } else {
-        strcpy(mnemonic, opc == 0   ? "and"
+        DIS_SET(mnemonic, opc == 0   ? "and"
                          : opc == 1 ? "orr"
                          : opc == 2 ? "eor"
                                     : "ands");
@@ -1462,7 +1447,7 @@ const char *nyr_internal_aarch64_disasm(const unsigned char *b, int64_t n,
                                                               : 4;
       unsigned imm = ((insn >> 10) & 0xfff) * scale;
       const char *reg_name = scale == 16 ? "q" : scale == 8 ? "d" : "s";
-      strcpy(mnemonic,
+      DIS_SET(mnemonic,
              (op == 0x3dc00000 || op == 0xfd400000 || op == 0xbd400000)
                  ? "ldr"
                  : "str");
@@ -1487,20 +1472,20 @@ const char *nyr_internal_aarch64_disasm(const unsigned char *b, int64_t n,
         goto unsupported_a64;
       table[table_used++] = '}';
       table[table_used] = 0;
-      strcpy(mnemonic, "tbl");
+      DIS_SET(mnemonic, "tbl");
       snprintf(operands, sizeof(operands), "v%u.16b, %s, v%u.16b", rd0, table,
                rm);
     } else {
       uint32_t vec_op = insn & 0xffe0fc00;
       const char *shape = NULL;
       if ((insn & 0xfffffc00) == 0x7e70d800) {
-        strcpy(mnemonic, "faddp");
+        DIS_SET(mnemonic, "faddp");
         snprintf(operands, sizeof(operands), "d%u, v%u.2d", rd0, rn);
       } else if ((insn & 0xfffffc00) == 0x4e080400 ||
                  (insn & 0xfffffc00) == 0x4e040400) {
         int is64 = (insn & 0x00080000) != 0;
         nyr_a64_vec_reg(vd, sizeof(vd), rd0, is64 ? "2d" : "4s");
-        strcpy(mnemonic, "dup");
+        DIS_SET(mnemonic, "dup");
         snprintf(operands, sizeof(operands), "%s, v%u.%s[0]", vd, rn,
                  is64 ? "d" : "s");
       } else if (vec_op == 0x4ee08400 || vec_op == 0x6ee08400)
@@ -1522,25 +1507,25 @@ const char *nyr_internal_aarch64_disasm(const unsigned char *b, int64_t n,
          */
       } else if (shape) {
         if (vec_op == 0x4ee08400)
-          strcpy(mnemonic, "add");
+          DIS_SET(mnemonic, "add");
         else if (vec_op == 0x6ee08400)
-          strcpy(mnemonic, "sub");
+          DIS_SET(mnemonic, "sub");
         else if (vec_op == 0x4e201c00)
-          strcpy(mnemonic, "and");
+          DIS_SET(mnemonic, "and");
         else if (vec_op == 0x4ea01c00)
-          strcpy(mnemonic, "orr");
+          DIS_SET(mnemonic, "orr");
         else if (vec_op == 0x6e201c00)
-          strcpy(mnemonic, "eor");
+          DIS_SET(mnemonic, "eor");
         else if (vec_op == 0x4e60d400 || vec_op == 0x4e20d400)
-          strcpy(mnemonic, "fadd");
+          DIS_SET(mnemonic, "fadd");
         else if (vec_op == 0x4ee0d400 || vec_op == 0x4ea0d400)
-          strcpy(mnemonic, "fsub");
+          DIS_SET(mnemonic, "fsub");
         else if (vec_op == 0x6e60dc00 || vec_op == 0x6e20dc00)
-          strcpy(mnemonic, "fmul");
+          DIS_SET(mnemonic, "fmul");
         else if (vec_op == 0x6e60fc00 || vec_op == 0x6e20fc00)
-          strcpy(mnemonic, "fdiv");
+          DIS_SET(mnemonic, "fdiv");
         else
-          strcpy(mnemonic, "fmla");
+          DIS_SET(mnemonic, "fmla");
         nyr_a64_vec_reg(vd, sizeof(vd), rd0, shape);
         nyr_a64_vec_reg(vn, sizeof(vn), rn, shape);
         nyr_a64_vec_reg(vm, sizeof(vm), rm, shape);
@@ -1549,27 +1534,27 @@ const char *nyr_internal_aarch64_disasm(const unsigned char *b, int64_t n,
                  (insn & 0xfffffc00) == 0x4e040c00) {
         unsigned is64 = (insn & 0x00080000) != 0;
         nyr_a64_vec_reg(vd, sizeof(vd), rd0, is64 ? "2d" : "4s");
-        strcpy(mnemonic, "dup");
+        DIS_SET(mnemonic, "dup");
         snprintf(operands, sizeof(operands), "%s, %s", vd,
                  nyr_a64_reg(rn, is64, 0));
       } else if ((insn & 0xfffffc00) == 0x9e670000) {
-        strcpy(mnemonic, "fmov");
+        DIS_SET(mnemonic, "fmov");
         snprintf(operands, sizeof(operands), "d%u, %s", rd0,
                  nyr_a64_reg(rn, 1, 0));
       } else if ((insn & 0xfffffc00) == 0x4e181c00) {
-        strcpy(mnemonic, "ins");
+        DIS_SET(mnemonic, "ins");
         snprintf(operands, sizeof(operands), "v%u.d[1], %s", rd0,
                  nyr_a64_reg(rn, 1, 0));
       } else if (vec_op == 0x6ee0b800) {
         nyr_a64_vec_reg(vd, sizeof(vd), rd0, "2d");
         nyr_a64_vec_reg(vn, sizeof(vn), rn, "2d");
-        strcpy(mnemonic, "neg");
+        DIS_SET(mnemonic, "neg");
         snprintf(operands, sizeof(operands), "%s, %s", vd, vn);
       } else if (vec_op == 0x4ee04400) {
         nyr_a64_vec_reg(vd, sizeof(vd), rd0, "2d");
         nyr_a64_vec_reg(vn, sizeof(vn), rn, "2d");
         nyr_a64_vec_reg(vm, sizeof(vm), rm, "2d");
-        strcpy(mnemonic, "sshl");
+        DIS_SET(mnemonic, "sshl");
         snprintf(operands, sizeof(operands), "%s, %s, %s", vd, vn, vm);
       } else if ((insn & 0x3b200c00) == 0x38200800) {
         unsigned opc = (insn >> 22) & 3;
@@ -1590,7 +1575,7 @@ const char *nyr_internal_aarch64_disasm(const unsigned char *b, int64_t n,
         }
         if (opc > 1)
           goto unsupported_a64;
-        strcpy(mnemonic, opc ? (bytes == 1   ? "ldrb"
+        DIS_SET(mnemonic, opc ? (bytes == 1   ? "ldrb"
                                 : bytes == 2 ? "ldrh"
                                              : "ldr")
                              : (bytes == 1   ? "strb"
@@ -1605,7 +1590,7 @@ const char *nyr_internal_aarch64_disasm(const unsigned char *b, int64_t n,
         const char *bas = nyr_a64_reg(rn, 1, 1);
         if (opc > 2 || (opc == 2 && bytes != 4))
           goto unsupported_a64;
-        strcpy(mnemonic, opc == 2   ? "ldrsw"
+        DIS_SET(mnemonic, opc == 2   ? "ldrsw"
                          : opc == 1 ? (bytes == 1   ? "ldrb"
                                        : bytes == 2 ? "ldrh"
                                                     : "ldr")

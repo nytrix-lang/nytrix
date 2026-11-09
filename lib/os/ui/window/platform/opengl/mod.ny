@@ -460,6 +460,7 @@ fn create_context(any native, any hints) any {
 }
 
 fn resize_wayland_window(any ctx, int width, int height) any {
+   "Resizes the Wayland window of an OpenGL context."
    if is_dict(ctx) { egl.wayland_window_resize(ctx.get("wayland_window", 0), width, height) }
    0
 }

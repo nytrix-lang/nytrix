@@ -45,6 +45,7 @@ fn _matches(str bitcode, str core_source, str signature_path,
 }
 
 fn run_checker() {
+   "Runs the core bytecode cache check from the process arguments."
    def ag = args()
    if ag.len != 5 { exit(2) }
    def bitcode = to_str(ag.get(1))

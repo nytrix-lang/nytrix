@@ -935,14 +935,17 @@ fn _core_vector_component(any value) any {
 }
 
 fn Vector2(any x=0, any y=nil) any {
+   "Builds a two-component vector."
    _core_vector(2, x, _core_vector_component(y))
 }
 
 fn Vector3(any x=0, any y=nil, any z=nil) any {
+   "Builds a three-component vector."
    _core_vector(3, x, _core_vector_component(y), _core_vector_component(z))
 }
 
 fn Vector4(any x=0, any y=nil, any z=nil, any w=nil) any {
+   "Builds a four-component vector."
    _core_vector(4, x, _core_vector_component(y), _core_vector_component(z),
       _core_vector_component(w))
 }
@@ -964,31 +967,37 @@ fn _core_has_tag(any x, any tag) bool {
 }
 
 @jit
+;; Returns whether `x` is a list.
 fn is_list(any x) bool {
    return _core_has_tag(x, runtime_tag_raw("list"))
 }
 
 @jit
+;; Returns whether `x` is a dictionary.
 fn is_dict(any x) bool {
    return _core_has_tag(x, runtime_tag_raw("dict"))
 }
 
 @jit
+;; Returns whether `x` is a set.
 fn is_set(any x) bool {
    return _core_has_tag(x, runtime_tag_raw("set"))
 }
 
 @jit
+;; Returns whether `x` is a tuple.
 fn is_tuple(any x) bool {
    return _core_has_tag(x, runtime_tag_raw("tuple"))
 }
 
 @jit
+;; Returns whether `x` is a range.
 fn is_range(any x) bool {
    return _core_has_tag(x, runtime_tag_raw("range"))
 }
 
 @jit
+;; Returns whether `x` is a byte string.
 fn is_bytes(any x) bool {
    return _core_has_tag(x, runtime_tag_raw("bytes"))
 }
@@ -1619,6 +1628,7 @@ impl range {
 
 @returns_owned
 fn std_core_clone_list_impl(any lst) any {
+   "Returns a copy of a list, or 0 when `lst` is not a list."
    if !is_list(lst) { return 0 }
    def n = lst.len
    mut list out = __list_new(0)

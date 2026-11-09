@@ -6,26 +6,26 @@ module core.os.prim(pid, ppid, env, environ, os, arch, is_linux, is_macos, is_wi
 use core
 use core.str as core_str
 
+;; Returns the process ID.
 fn pid() int {
-   "Returns the process ID."
    __getpid()
 }
 
+;; Returns the parent process ID.
 fn ppid() int {
-   "Returns the parent process ID."
    __getppid()
 }
 
+;; Returns the value of environment variable `key`.
 fn env(str key) any {
-   "Returns the value of environment variable `key`."
    if !is_str(key) { return nil }
    def value = __env_get(key)
    if value == 0 { return nil }
    value
 }
 
+;; Returns a list of environment entries.
 fn environ() list {
-   "Returns a list of environment entries."
    def ep = __envp()
    if !ep { return list(8) }
    else {
@@ -44,13 +44,13 @@ fn environ() list {
    }
 }
 
+;; Returns the operating system name.
 fn os() str {
-   "Returns the operating system name."
    __os_name()
 }
 
+;; Returns the architecture name.
 fn arch() str {
-   "Returns the architecture name."
    __arch_name()
 }
 
@@ -64,10 +64,13 @@ def IS_AARCH64 = (ARCH == "aarch64" || ARCH == "arm64")
 def IS_ARM = (ARCH == "arm")
 
 @inline
+;; Returns whether the target OS is Linux.
 fn is_linux() bool { IS_LINUX }
 
 @inline
+;; Returns whether the target OS is macOS.
 fn is_macos() bool { IS_MACOS }
 
 @inline
+;; Returns whether the target OS is Windows.
 fn is_windows() bool { IS_WINDOWS }

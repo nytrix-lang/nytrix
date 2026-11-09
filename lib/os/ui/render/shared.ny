@@ -141,6 +141,7 @@ fn store_vertex64(ptr base, int idx, any x, any y, any z, any u, any v, any colo
 
 @jit
 fn store_vertex64_typed(ptr base, int idx, f64 x, f64 y, f64 z, f64 u, f64 v, int color, int tex_id=0, f64 nx=0.0, f64 ny=0.0, f64 nz=1.0) any {
+   "Writes one vertex at index `idx` of a vertex buffer."
    def off = base + idx * VERTEX_STRIDE
    store32_f32(off, _safe_f32_limit_f64(x), OFF_X)
    store32_f32(off, _safe_f32_limit_f64(y), OFF_Y)

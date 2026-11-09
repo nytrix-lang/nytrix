@@ -33,6 +33,7 @@ mut _py = 0.0
 mut _terminal_ascii_cache_value = []
 
 fn memmove(ptr dst, ptr src, int n) any {
+   "Copies `n` bytes between possibly overlapping regions."
    if n <= 0 { return dst }
    def dst_addr, src_addr = to_int(dst), to_int(src)
    if dst_addr >= src_addr + n || dst_addr + n <= src_addr {

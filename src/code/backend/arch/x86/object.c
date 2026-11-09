@@ -536,11 +536,90 @@ int nyr_i386_obj_def_index(const nyr_i386_obj_symbol_def_t *defs,
   return -1;
 }
 
+static size_t nyr_obj_name_hash(const char *name) {
+  size_t h = 2166136261u;
+  for (const unsigned char *p = (const unsigned char *)name; *p; ++p)
+    h = (h ^ *p) * 16777619u;
+  return h;
+}
+
+/*
+ * Objects hold tens of thousands of symbols and every relocation looks one
+ * up, so index the table incrementally. Slots store index + 1, and an earlier
+ * definition keeps its name.
+ */
+static _Thread_local struct {
+  const nyr_x64_obj_symbol_def_t *defs;
+  size_t indexed;
+  uint32_t *slots;
+  size_t mask;
+  size_t last_hash;
+} nyr_x64_def_cache;
+
+static void nyr_x64_def_cache_insert(const nyr_x64_obj_symbol_def_t *defs,
+                                     size_t index) {
+  size_t at = nyr_obj_name_hash(defs[index].name) & nyr_x64_def_cache.mask;
+  while (nyr_x64_def_cache.slots[at]) {
+    if (strcmp(defs[nyr_x64_def_cache.slots[at] - 1].name, defs[index].name) ==
+        0)
+      return;
+    at = (at + 1) & nyr_x64_def_cache.mask;
+  }
+  nyr_x64_def_cache.slots[at] = (uint32_t)index + 1;
+}
+
+static bool nyr_x64_def_cache_sync(const nyr_x64_obj_symbol_def_t *defs,
+                                   size_t def_count) {
+  /*
+   * The table can be cleared and refilled at the same address.
+   */
+  size_t indexed = nyr_x64_def_cache.indexed;
+  bool rebuild = nyr_x64_def_cache.defs != defs || def_count < indexed ||
+                 (indexed &&
+                  nyr_obj_name_hash(defs[indexed - 1].name) !=
+                      nyr_x64_def_cache.last_hash);
+  size_t need = def_count * 2 + 16;
+  if (rebuild || !nyr_x64_def_cache.slots ||
+      need > nyr_x64_def_cache.mask + 1) {
+    size_t cap = 64;
+    while (cap < need * 2)
+      cap <<= 1;
+    uint32_t *slots = calloc(cap, sizeof(*slots));
+    if (!slots)
+      return false;
+    free(nyr_x64_def_cache.slots);
+    nyr_x64_def_cache.slots = slots;
+    nyr_x64_def_cache.mask = cap - 1;
+    nyr_x64_def_cache.defs = defs;
+    nyr_x64_def_cache.indexed = 0;
+  }
+  for (; nyr_x64_def_cache.indexed < def_count; ++nyr_x64_def_cache.indexed)
+    nyr_x64_def_cache_insert(defs, nyr_x64_def_cache.indexed);
+  if (nyr_x64_def_cache.indexed)
+    nyr_x64_def_cache.last_hash =
+        nyr_obj_name_hash(defs[nyr_x64_def_cache.indexed - 1].name);
+  return true;
+}
+
 int nyr_x64_obj_def_index(const nyr_x64_obj_symbol_def_t *defs,
                           size_t def_count, const char *name) {
-  for (size_t i = 0; defs && i < def_count; ++i) {
-    if (strcmp(defs[i].name, name) == 0)
-      return (int)i;
+  if (!defs || !def_count) {
+    nyr_x64_def_cache.indexed = 0;
+    nyr_x64_def_cache.defs = NULL;
+    return -1;
+  }
+  if (!nyr_x64_def_cache_sync(defs, def_count)) {
+    for (size_t i = 0; i < def_count; ++i)
+      if (strcmp(defs[i].name, name) == 0)
+        return (int)i;
+    return -1;
+  }
+  size_t at = nyr_obj_name_hash(name) & nyr_x64_def_cache.mask;
+  while (nyr_x64_def_cache.slots[at]) {
+    size_t index = nyr_x64_def_cache.slots[at] - 1;
+    if (strcmp(defs[index].name, name) == 0)
+      return (int)index;
+    at = (at + 1) & nyr_x64_def_cache.mask;
   }
   return -1;
 }
@@ -2268,23 +2347,42 @@ bool nyr_x64_obj_collect_external_reloc_symbols(
     const nyr_x64_obj_symbol_def_t *defs, size_t def_count, char symbols[][256],
     size_t *symbol_count, char *err, size_t err_len) {
   size_t count = 0;
+  size_t mask = 63;
+  while (mask + 1 < reloc_count * 2 + 16)
+    mask = mask * 2 + 1;
+  uint32_t *seen = calloc(mask + 1, sizeof(*seen));
+  if (!seen) {
+    nyr_set_error(err, err_len, "x86-64 object writer: out of memory");
+    return false;
+  }
   for (size_t i = 0; i < reloc_count; ++i) {
     if (!relocs[i].symbol[0]) {
       nyr_set_error(err, err_len,
                     "x86-64 object writer: empty relocation symbol");
+      free(seen);
       return false;
     }
     if (nyr_x64_obj_def_index(defs, def_count, relocs[i].symbol) >= 0)
       continue;
-    if (nyr_x64_obj_symbol_index(symbols, count, relocs[i].symbol) >= 0)
+    size_t at = nyr_obj_name_hash(relocs[i].symbol) & mask;
+    bool known = false;
+    while (seen[at] && !known) {
+      known = strcmp(symbols[seen[at] - 1], relocs[i].symbol) == 0;
+      if (!known)
+        at = (at + 1) & mask;
+    }
+    if (known)
       continue;
     if (count >= NY_X64_OBJ_MAX_RELOCS) {
       nyr_set_error(err, err_len,
                     "x86-64 object writer: too many relocation symbols");
+      free(seen);
       return false;
     }
     snprintf(symbols[count++], 256, "%s", relocs[i].symbol);
+    seen[at] = (uint32_t)count;
   }
+  free(seen);
   *symbol_count = count;
   return true;
 }
@@ -4197,6 +4295,59 @@ static bool ny_x64_obj_emit_inst(nyr_x64_obj_ctx_t *c, const nyr_inst_t *in) {
       return ny_x64_obj_load_value_rax(c, in->a) &&
              ny_x64_obj_bytes(c, (const unsigned char[]){0x8b, 0x00}, 2) &&
              ny_x64_obj_store_value_rax(c, in->dst);
+    }
+    /*
+     * NYC kernel compat: try_cmpxchg
+     */
+    if (in->imm == -171) {
+      bool is8 = in->symbol && (strcmp(in->symbol,"cmpxchgb")==0);
+      bool is16 = in->symbol && (strcmp(in->symbol,"cmpxchgw")==0);
+      bool is64 = in->symbol && (strcmp(in->symbol,"cmpxchgq")==0);
+      /*
+       * load old into rax, new into rdx, ptr in rcx
+       */
+      if (in->b < 0 || in->c < 0 || in->a < 0) return false;
+      if (!ny_x64_obj_load_value_rax(c, in->b)) return false;
+      if (!ny_x64_obj_load_value_rcx(c, in->a)) return false;
+      if (!ny_x64_obj_load_value_rax(c, in->c)) return false;
+      if (!ny_x64_obj_bytes(c,(const unsigned char[]){0x48,0x89,0xc2},3)) return false;
+      if (is8) {
+        if (!ny_x64_obj_bytes(c,(const unsigned char[]){0xf0,0x0f,0xb0,0x11},4)) return false;
+      } else if (is16) {
+        if (!ny_x64_obj_bytes(c,(const unsigned char[]){0x66,0xf0,0x0f,0xb1,0x11},5)) return false;
+      } else if (is64) {
+        if (!ny_x64_obj_bytes(c,(const unsigned char[]){0xf0,0x48,0x0f,0xb1,0x11},5)) return false;
+      } else {
+        if (!ny_x64_obj_bytes(c,(const unsigned char[]){0xf0,0x0f,0xb1,0x11},4)) return false;
+      }
+      if (in->d >= 0) {
+        if (!ny_x64_obj_store_value_rax(c, in->d)) return false;
+      }
+      if (in->dst >= 0) {
+        if (!ny_x64_obj_bytes(c,(const unsigned char[]){0x0f,0x94,0xc0},3)) return false;
+        if (!ny_x64_obj_store_value_rax(c, in->dst)) return false;
+      }
+      return true;
+    }
+    /*
+     * NYC kernel compat: GS percpu reads
+     */
+    if (in->symbol && strstr(in->symbol, "%gs:")) {
+      /*
+       * Try to handle simple GS reads
+       */
+      if (in->dst >= 0) {
+        /*
+         * movq %gs:sym, %rax
+         */
+        if (strstr(in->symbol, "movq") || strstr(in->symbol, "movl")) {
+          /*
+           * Try to emit a simple version
+           */
+          return ny_x64_obj_bytes(c, (const unsigned char[]){0x65, 0x48, 0x8b, 0x04, 0x25, 0x00, 0x00, 0x00, 0x00}, 9) &&
+                 ny_x64_obj_store_value_rax(c, in->dst);
+        }
+      }
     }
     nyr_set_error(c->err, c->err_len,
                   "x86-64 object writer: unsupported inline asm template "

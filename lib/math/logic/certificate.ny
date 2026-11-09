@@ -49,6 +49,7 @@ fn _check_dict(dict certificate, int max_variables, int max_nodes,
 
 fn check(any certificate, int max_variables=16, int max_nodes=100000,
    int max_depth=128, int max_steps=1000000, int max_memory=100000) bool {
+   "Returns whether `certificate` verifies within the given resource limits."
    if !is_dict(certificate) { return false }
    _check_dict(certificate, max_variables, max_nodes, max_depth, max_steps,
       max_memory)

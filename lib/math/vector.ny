@@ -496,6 +496,8 @@ fn divs(any v, any s) any {
    _map_s(v, s, 1)
 }
 
+fn _divs_vector(any v, any s) any { _map_s(v, s, 1) }
+
 ;; Keep boxed-float products on the typed float bridge.  The generic
 ;; integer-shaped `core.add`/`core.mul` path can reinterpret a float handle
 ;; as an i64.
@@ -560,7 +562,7 @@ impl vec2 {
    fn scale(self v, f64 s) self { _scale_vector(v, s) }
    @pure
    @jit
-   fn divs(self v, f64 s) self { divs(v, s) }
+   fn divs(self v, f64 s) self { _divs_vector(v, s) }
    @pure
    @jit
    fn div(self a, self b) self { hadamard_div(a, b) }
@@ -590,7 +592,7 @@ impl vec3 {
    fn scale(self v, f64 s) self { _scale_vector(v, s) }
    @pure
    @jit
-   fn divs(self v, f64 s) self { divs(v, s) }
+   fn divs(self v, f64 s) self { _divs_vector(v, s) }
    @pure
    @jit
    fn div(self a, self b) self { hadamard_div(a, b) }
@@ -620,7 +622,7 @@ impl vec4 {
    fn scale(self v, f64 s) self { _scale_vector(v, s) }
    @pure
    @jit
-   fn divs(self v, f64 s) self { divs(v, s) }
+   fn divs(self v, f64 s) self { _divs_vector(v, s) }
    @pure
    @jit
    fn div(self a, self b) self { hadamard_div(a, b) }

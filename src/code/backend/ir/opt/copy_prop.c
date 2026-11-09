@@ -34,7 +34,10 @@ static int nir_alias_find(const int *alias, int v) {
  * An annotated COPY can be an explicit one-word ABI class refinement.  It is
  * not a transparent alias even when the machine bits are unchanged.
  */
-static bool nir_copy_has_class_contract(const nyr_inst_t *in) {
+static bool nir_copy_has_class_contract(const nyr_func_t *f,
+                                        const nyr_inst_t *in) {
+  if (f && f->untagged_values && in && in->scalar_class == NYIR_SCALAR_I64_RAW)
+    return false;
   return in && in->op == NYIR_COPY && in->scalar_class != NYIR_SCALAR_UNKNOWN;
 }
 
@@ -318,7 +321,7 @@ static bool copy_prop_cfg(nyr_func_t *f) {
 
     if (in->op == NYIR_COPY && in->a >= 0 &&
         nir_copy_dst_calls_safe(f, defs, call_used, alias, in) &&
-        (!nir_copy_has_class_contract(in) ||
+        (!nir_copy_has_class_contract(f, in) ||
          nir_copy_class_preserved(vclass, call_used, alias, in))) {
       int s = nir_alias_find(alias, in->a);
       bool safe = false;
@@ -338,7 +341,7 @@ static bool copy_prop_cfg(nyr_func_t *f) {
       }
     } else {
       if (in->op == NYIR_COPY && in->a >= 0 &&
-          nir_copy_has_class_contract(in) &&
+          nir_copy_has_class_contract(f, in) &&
           ny_dbg_is_enabled(NY_DBG_HEURISTIC))
         ny_dbg_heuristic_event(
             "COPY_PROP",
@@ -346,6 +349,37 @@ static bool copy_prop_cfg(nyr_func_t *f) {
             in->a, in->scalar_class);
       alias[in->dst] = -1;
       alias_blk[in->dst] = SIZE_MAX;
+    }
+  }
+  /*
+   * A loop header's PHI precedes the copy in its latch, so the walk above saw
+   * no alias for the back edge. Resolve PHI edges now that all copies are known.
+   */
+  for (size_t i = 0; i < f->len; ++i) {
+    nyr_inst_t *in = &f->data[i];
+    if (in->op != NYIR_PHI || !cfg.reachable[cfg.inst_block[i]])
+      continue;
+    size_t blk = cfg.inst_block[i];
+    for (size_t k = 0; k < in->phi_incoming_len; ++k) {
+      int v = in->phi_incoming[k].value;
+      if (v < 0)
+        continue;
+      int s = nir_alias_find(alias, v);
+      if (s < 0 || s == v)
+        continue;
+      size_t pred_blk = SIZE_MAX;
+      for (size_t e = cfg.pred_offsets[blk]; e < cfg.pred_offsets[blk + 1];
+           ++e) {
+        size_t pred = cfg.pred_blocks[e];
+        if (cfg.block_label[pred] == in->phi_incoming[k].predecessor_label) {
+          pred_blk = pred;
+          break;
+        }
+      }
+      if (pred_blk != SIZE_MAX &&
+          (alias_blk[v] == SIZE_MAX || alias_blk[v] == pred_blk ||
+           nyr_cfg_dominates(&cfg, alias_blk[v], pred_blk)))
+        in->phi_incoming[k].value = s;
     }
   }
   if (nv > 256) {
@@ -413,11 +447,11 @@ bool nyr_copy_prop(nyr_func_t *f) {
     if (in->dst >= 0) {
       if (in->op == NYIR_COPY && in->a >= 0 &&
           nir_copy_dst_calls_safe(f, defs, call_used, alias, in) &&
-          (!nir_copy_has_class_contract(in) ||
+          (!nir_copy_has_class_contract(f, in) ||
            nir_copy_class_preserved(vclass, call_used, alias, in)))
         alias[in->dst] = nir_alias_find(alias, in->a);
       else {
-        if (nir_copy_has_class_contract(in) &&
+        if (nir_copy_has_class_contract(f, in) &&
             ny_dbg_is_enabled(NY_DBG_HEURISTIC))
           ny_dbg_heuristic_event(
               "COPY_PROP",

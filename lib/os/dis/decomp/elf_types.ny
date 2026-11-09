@@ -4,6 +4,7 @@ module core.os.dis.decomp.elf_types(machine, file_type, symbol_bind, symbol_type
 use core
 
 fn machine(int id) str {
+   "Returns the name of an ELF machine id."
    case id {
       3 -> "x86"
       40 -> "arm"
@@ -15,6 +16,7 @@ fn machine(int id) str {
 }
 
 fn file_type(int id) str {
+   "Returns the name of an ELF file type."
    case id {
       1 -> "relocatable"
       2 -> "executable"
@@ -25,6 +27,7 @@ fn file_type(int id) str {
 }
 
 fn symbol_bind(int info) str {
+   "Returns the binding name from an ELF symbol info byte."
    case(info >> 4) {
       0 -> "local"
       1 -> "global"
@@ -34,6 +37,7 @@ fn symbol_bind(int info) str {
 }
 
 fn symbol_type(int info) str {
+   "Returns the type name from an ELF symbol info byte."
    case(info & 15) {
       0 -> "none"
       1 -> "object"
@@ -44,6 +48,7 @@ fn symbol_type(int info) str {
    }
 }
 
+;; Returns ELF segment flags as an rwx string.
 fn segment_perms(int flags) str {
    ((flags & 4) != 0 ? "r" : "-") + ((flags & 2) != 0 ? "w" : "-") +
    ((flags & 1) != 0 ? "x" : "-")

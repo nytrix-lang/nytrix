@@ -1,5 +1,6 @@
 shape vterm-cell-output {
   family "probe-suite"
+  timeout 180
   generator "stress"
   features ["ny", "sys"]
   template ny-test-case

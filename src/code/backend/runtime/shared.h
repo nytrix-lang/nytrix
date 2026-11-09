@@ -1085,6 +1085,7 @@ int64_t rt_alloc_string_len_ptr(const char *a, size_t a_len, const char *b,
 
 /* Small-string optimization threshold and short-string interning. */
 #define RT_SSO_MAX 23
+#define RT_INTERN_MAX_LEN 64
 int64_t rt_str_intern_lookup(const char *s, size_t len);
 void rt_str_intern_insert(const char *s, size_t len, int64_t str);
 size_t rt_utf8_valid_width(const unsigned char *s, size_t remaining);

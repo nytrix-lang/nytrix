@@ -105,6 +105,8 @@ typedef enum {
   NYR_MACH_XOR,
   NYR_MACH_SHL,
   NYR_MACH_SAR,
+  /* Scalar logical i64 shift right. */
+  NYR_MACH_SHR,
   NYR_MACH_ROR,
   NYR_MACH_ROR32,
   NYR_MACH_BSWAP64,
@@ -157,7 +159,15 @@ typedef struct {
   ny_native_runtime_op_t runtime_operation;
   nyr_mach_cond_t condition;
   uint64_t call_clobbers;
+  /* Set for every sub-word access, so width-unaware folds stay away. */
   bool byte_width;
+  /* Access size when byte_width is set: 0/1 byte, 2 = u16, 4 = sign-extended
+   * i32, 5 = zero-extended u32. Only the object encoder implements 2 to 5. */
+  uint8_t mem_size;
+  /* SAR by 32 of a value whose low word is sign-extended: movsxd. */
+  bool sext32;
+  /* DIV/MOD treat both operands as unsigned 64-bit values. */
+  bool unsigned_arith;
   bool narrow32;
   unsigned effects;
   uint32_t source_pc;
@@ -203,6 +213,10 @@ typedef struct {
   size_t vreg_cap;
   uint32_t *home_slots;
   size_t home_slot_count;
+  /* C translation unit: plain `main`, no language runtime startup. */
+  bool c_abi;
+  /* Largest block label so far; labels above it need no duplicate scan. */
+  uint32_t max_block_label;
 } nyr_mach_func_t;
 
 void nyr_mach_func_free(nyr_mach_func_t *func);

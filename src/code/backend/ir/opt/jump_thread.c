@@ -244,6 +244,18 @@ bool nyr_jump_thread(nyr_func_t *f) {
             target = (size_t)block;
         } else if (through + 1 < cfg.block_count) {
           target = through + 1;
+          /*
+           * The false edge often falls into an unlabeled block holding only
+           * a branch. Follow it, since an unlabeled block cannot be targeted.
+           */
+          if (cfg.block_label[target] < 0) {
+            size_t last = nyr_block_last_non_nop(f, &cfg, target);
+            if (last == cfg.block_start[target] + 1 &&
+                f->data[last - 1].op == NYIR_BR) {
+              int block = block_for_label(&cfg, f->data[last - 1].imm);
+              target = block >= 0 ? (size_t)block : SIZE_MAX;
+            }
+          }
         }
         if (target == SIZE_MAX || target == through || target == pred)
           continue;
@@ -275,6 +287,108 @@ bool nyr_jump_thread(nyr_func_t *f) {
   }
   free(known);
   free(values);
+  free(defs);
+  return true;
+}
+
+/*
+ * A conditional branch over an unconditional one
+ *
+ *     br.if c -> L1;  br -> L2;  L1:
+ *
+ * costs an extra jump on the path to L2 and a taken branch on the path to L1.
+ * Inverting the comparison sends the first path to L2 and lets L1 fall through.
+ * Float comparisons stay as they are: inverting one changes its NaN result.
+ */
+bool nyr_invert_fallthrough_branches(nyr_func_t *f) {
+  if (!f || f->next_value <= 0 || !f->len)
+    return true;
+  size_t nv = (size_t)f->next_value;
+  unsigned *uses = calloc(nv, sizeof(*uses));
+  int *defs = nyr_build_defs(f);
+  if (!uses || !defs) {
+    free(uses);
+    free(defs);
+    return false;
+  }
+#define NOTE_USE(v)                                                            \
+  do {                                                                         \
+    if ((v) >= 0 && (size_t)(v) < nv)                                          \
+      ++uses[(v)];                                                             \
+  } while (0)
+  for (size_t i = 0; i < f->len; ++i) {
+    const nyr_inst_t *in = &f->data[i];
+    NOTE_USE(in->a);
+    NOTE_USE(in->b);
+    NOTE_USE(in->c);
+    NOTE_USE(in->d);
+    NOTE_USE(in->e);
+    NOTE_USE(in->f);
+    for (size_t k = 0; k < in->phi_incoming_len; ++k)
+      NOTE_USE(in->phi_incoming[k].value);
+    for (size_t k = 0; in->extra_args && k < in->extra_args_len; ++k)
+      NOTE_USE(in->extra_args[k]);
+  }
+#undef NOTE_USE
+  /*
+   * Loop headers keep their shape: machine lowering rotates them, which
+   * replaces the backedge and the guard with one conditional branch.
+   */
+  int64_t max_label = -1;
+  for (size_t i = 0; i < f->len; ++i)
+    if (f->data[i].op == NYIR_LABEL && f->data[i].imm > max_label)
+      max_label = f->data[i].imm;
+  size_t *last_jump =
+      max_label >= 0 ? calloc((size_t)max_label + 1, sizeof(*last_jump)) : NULL;
+  if (max_label >= 0 && !last_jump) {
+    free(uses);
+    free(defs);
+    return false;
+  }
+  for (size_t i = 0; i < f->len; ++i)
+    if ((f->data[i].op == NYIR_BR || f->data[i].op == NYIR_BR_IF) &&
+        f->data[i].imm >= 0 && f->data[i].imm <= max_label)
+      last_jump[f->data[i].imm] = i + 1;
+  int64_t block_label = -1;
+  for (size_t i = 0; i < f->len; ++i) {
+    nyr_inst_t *branch = &f->data[i];
+    if (branch->op == NYIR_LABEL)
+      block_label = branch->imm;
+    if (branch->op != NYIR_BR_IF || branch->a < 0 || (size_t)branch->a >= nv ||
+        defs[branch->a] < 0 || uses[branch->a] != 1)
+      continue;
+    if (block_label >= 0 && last_jump[block_label] > i + 1)
+      continue;
+    size_t jump_at = i + 1;
+    while (jump_at < f->len && f->data[jump_at].op == NYIR_NOP)
+      ++jump_at;
+    if (jump_at >= f->len || f->data[jump_at].op != NYIR_BR)
+      continue;
+    size_t label_at = jump_at + 1;
+    while (label_at < f->len && f->data[label_at].op == NYIR_NOP)
+      ++label_at;
+    if (label_at >= f->len || f->data[label_at].op != NYIR_LABEL ||
+        f->data[label_at].imm != branch->imm)
+      continue;
+    nyr_inst_t *cmp = &f->data[defs[branch->a]];
+    if (cmp->op != NYIR_CMP_I64)
+      continue;
+    int inverted;
+    switch (cmp->cmp) {
+    case NYIR_CMP_EQ: inverted = NYIR_CMP_NE; break;
+    case NYIR_CMP_NE: inverted = NYIR_CMP_EQ; break;
+    case NYIR_CMP_LT: inverted = NYIR_CMP_GE; break;
+    case NYIR_CMP_GE: inverted = NYIR_CMP_LT; break;
+    case NYIR_CMP_GT: inverted = NYIR_CMP_LE; break;
+    case NYIR_CMP_LE: inverted = NYIR_CMP_GT; break;
+    default: continue;
+    }
+    cmp->cmp = inverted;
+    branch->imm = f->data[jump_at].imm;
+    nyr_inst_discard(&f->data[jump_at]);
+  }
+  free(last_jump);
+  free(uses);
   free(defs);
   return true;
 }

@@ -28,11 +28,14 @@ use core.os.sound.backend.shared as backend_shared
       fn pa_strerror(i32 err) ptr as "pa_strerror"
    }
 } #else {
-   fn pa_simple_new(..._args) any { 0 }
-   fn pa_strerror(any _err) any { 0 }
+   fn pa_simple_new(..._args) any { "Stub for builds without PulseAudio, returns 0." 0 }
+   fn pa_strerror(any _err) any { "Stub for builds without PulseAudio, returns 0." 0 }
+   ;; Stub for builds without PulseAudio, returns -1.
    fn pa_simple_drain(..._args) int { -1 }
+   ;; Stub for builds without PulseAudio, returns -1.
    fn pa_simple_flush(..._args) int { -1 }
-   fn pa_simple_free(any _pa) any { 0 }
+   fn pa_simple_free(any _pa) any { "Stub for builds without PulseAudio, returns 0." 0 }
+   ;; Stub for builds without PulseAudio, returns -1.
    fn pa_simple_write(..._args) int { -1 }
 }
 

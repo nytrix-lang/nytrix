@@ -261,14 +261,16 @@ fn set_window_ref(any win) any {
    win
 }
 
-fn window_ref() any { _window_ref }
+fn window_ref() any { "Returns the window the renderer is bound to." _window_ref }
 
 fn set_frame_open(bool open) bool {
+   "Records whether a frame is open."
    _frame_open = open
    _frame_open
 }
 
 fn frame_open() bool {
+   "Returns whether a frame is open."
    _frame_open
 }
 
@@ -342,6 +344,7 @@ mut _last_frame_static_draw_calls = 0
 mut _last_frame_indexed_draw_calls = 0
 
 fn record_draw_call(bool dynamic_draw, bool indexed_draw) bool {
+   "Counts one draw call in the frame and lifetime statistics."
    _total_draw_calls += 1
    _frame_draw_calls += 1
    if dynamic_draw { _frame_dynamic_draw_calls += 1 }
@@ -351,6 +354,7 @@ fn record_draw_call(bool dynamic_draw, bool indexed_draw) bool {
 }
 
 fn reset_frame_draw_stats() bool {
+   "Clears the per-frame draw statistics."
    _frame_draw_calls = 0
    _frame_dynamic_draw_calls = 0
    _frame_static_draw_calls = 0
@@ -359,6 +363,7 @@ fn reset_frame_draw_stats() bool {
 }
 
 fn publish_frame_draw_stats() bool {
+   "Publishes the current frame's draw statistics."
    _last_frame_draw_calls = _frame_draw_calls
    _last_frame_dynamic_draw_calls = _frame_dynamic_draw_calls
    _last_frame_static_draw_calls = _frame_static_draw_calls

@@ -640,6 +640,8 @@ typedef struct {
   char **owned_symbols;
   size_t owned_symbols_len;
   size_t owned_symbols_cap;
+  /* C translation units: no value ever carries a runtime tag. */
+  bool untagged_values;
 } nyr_func_t;
 
 /* Copy a symbol into function-owned storage. The returned pointer remains

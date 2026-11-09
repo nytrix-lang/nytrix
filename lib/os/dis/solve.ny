@@ -27,6 +27,7 @@ use core.os.dis.decomp as dc
 def _BASE64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 
 fn status() dict {
+   "Returns the solver module status and Z3 availability."
    {
       "ok": true,
       "module": "core.os.dis.solve",
@@ -36,14 +37,17 @@ fn status() dict {
 }
 
 fn tool_status() dict {
+   "Returns the same report as `status`."
    status()
 }
 
 fn backend_status() dict {
+   "Returns the same report as `status`."
    status()
 }
 
 fn base64_index(int ch) int {
+   "Returns the base64 alphabet index of a character code."
    mut i = 0
    while i < _BASE64.len {
       if load8(_BASE64, i) == ch { return i }
@@ -53,6 +57,7 @@ fn base64_index(int ch) int {
 }
 
 fn base64_values(str text, int n=0) list {
+   "Returns the base64 values of the first `n` characters, or of all when `n` is 0."
    mut out = []
    def limit = n > 0 ? min(n, text.len) : text.len
    mut i = 0

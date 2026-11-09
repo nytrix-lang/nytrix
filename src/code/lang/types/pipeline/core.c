@@ -1065,30 +1065,161 @@ static void tp_env_set(ny_tp_env_t *env, const char *name, const char *type,
   vec_push(&env->vars, entry);
 }
 
+/*
+ * Function facts by full name or leaf, first declaration wins, matching the
+ * order a scan would find them. Slots store index + 1.
+ */
+static _Thread_local struct {
+  const ny_tp_ctx_t *ctx;
+  size_t indexed;
+  const char **keys;
+  uint32_t *slots;
+  size_t mask;
+} tp_func_index;
+
+static size_t tp_func_hash(const char *s) {
+  size_t h = 2166136261u;
+  for (; *s; ++s)
+    h = (h ^ (unsigned char)*s) * 16777619u;
+  return h;
+}
+
+static void tp_func_index_insert(const char *key, uint32_t value) {
+  size_t i = tp_func_hash(key) & tp_func_index.mask;
+  while (tp_func_index.keys[i]) {
+    if (strcmp(tp_func_index.keys[i], key) == 0)
+      return;
+    i = (i + 1) & tp_func_index.mask;
+  }
+  tp_func_index.keys[i] = key;
+  tp_func_index.slots[i] = value + 1;
+}
+
+static bool tp_func_index_sync(ny_tp_ctx_t *ctx) {
+  size_t need = ctx->funcs.len * 5 + 16;
+  if (tp_func_index.ctx != ctx || ctx->funcs.len < tp_func_index.indexed ||
+      need > tp_func_index.mask + 1) {
+    size_t cap = 64;
+    while (cap < need * 2)
+      cap <<= 1;
+    const char **keys = calloc(cap, sizeof(*keys));
+    uint32_t *slots = calloc(cap, sizeof(*slots));
+    if (!keys || !slots) {
+      free(keys);
+      free(slots);
+      return false;
+    }
+    free(tp_func_index.keys);
+    free(tp_func_index.slots);
+    tp_func_index.keys = keys;
+    tp_func_index.slots = slots;
+    tp_func_index.mask = cap - 1;
+    tp_func_index.ctx = ctx;
+    tp_func_index.indexed = 0;
+  }
+  for (; tp_func_index.indexed < ctx->funcs.len; ++tp_func_index.indexed) {
+    const char *full = ctx->funcs.data[tp_func_index.indexed].name;
+    if (!full)
+      continue;
+    tp_func_index_insert(full, (uint32_t)tp_func_index.indexed);
+    const char *tail = strrchr(full, '.');
+    if (tail)
+      tp_func_index_insert(tail + 1, (uint32_t)tp_func_index.indexed);
+  }
+  return true;
+}
+
 static ny_tp_func_fact_t *tp_find_func(ny_tp_ctx_t *ctx, const char *name) {
-  if (!ctx || !name)
+  if (!ctx || !name || !ctx->funcs.len)
     return NULL;
-  for (size_t i = 0; i < ctx->funcs.len; ++i) {
-    ny_tp_func_fact_t *f = &ctx->funcs.data[i];
-    if (f->name && strcmp(f->name, name) == 0)
-      return f;
-    const char *tail = f->name ? strrchr(f->name, '.') : NULL;
-    if (tail && strcmp(tail + 1, name) == 0)
-      return f;
+  if (!tp_func_index_sync(ctx)) {
+    for (size_t i = 0; i < ctx->funcs.len; ++i) {
+      ny_tp_func_fact_t *f = &ctx->funcs.data[i];
+      const char *tail = f->name ? strrchr(f->name, '.') : NULL;
+      if (f->name &&
+          (strcmp(f->name, name) == 0 || (tail && strcmp(tail + 1, name) == 0)))
+        return f;
+    }
+    return NULL;
+  }
+  size_t at = tp_func_hash(name) & tp_func_index.mask;
+  while (tp_func_index.keys[at]) {
+    if (strcmp(tp_func_index.keys[at], name) == 0)
+      return &ctx->funcs.data[tp_func_index.slots[at] - 1];
+    at = (at + 1) & tp_func_index.mask;
   }
   return NULL;
+}
+
+/*
+ * Signature lookup by full name or leaf, first declaration wins.  The linear
+ * scan with two string compares per signature was 5% of a UI compile.
+ */
+typedef struct {
+  const char *key;
+  uint32_t index;
+} tp_sig_slot_t;
+
+static _Thread_local struct {
+  const codegen_t *cg;
+  size_t indexed_len;
+  tp_sig_slot_t *slots;
+  size_t mask;
+} tp_sig_index;
+
+static size_t tp_sig_hash(const char *s) {
+  size_t h = 2166136261u;
+  for (; *s; ++s)
+    h = (h ^ (unsigned char)*s) * 16777619u;
+  return h;
+}
+
+static void tp_sig_index_insert(const char *key, uint32_t index) {
+  size_t i = tp_sig_hash(key) & tp_sig_index.mask;
+  while (tp_sig_index.slots[i].key) {
+    if (strcmp(tp_sig_index.slots[i].key, key) == 0)
+      return; /* an earlier declaration keeps the name */
+    i = (i + 1) & tp_sig_index.mask;
+  }
+  tp_sig_index.slots[i].key = key;
+  tp_sig_index.slots[i].index = index;
+}
+
+static bool tp_sig_index_build(codegen_t *cg) {
+  size_t cap = 64;
+  while (cap < cg->fun_sigs.len * 5)
+    cap <<= 1;
+  free(tp_sig_index.slots);
+  tp_sig_index.slots = calloc(cap, sizeof(*tp_sig_index.slots));
+  tp_sig_index.cg = NULL;
+  if (!tp_sig_index.slots)
+    return false;
+  tp_sig_index.mask = cap - 1;
+  for (size_t i = 0; i < cg->fun_sigs.len; ++i) {
+    const char *name = cg->fun_sigs.data[i].name;
+    if (!name)
+      continue;
+    tp_sig_index_insert(name, (uint32_t)i);
+    const char *tail = strrchr(name, '.');
+    if (tail && tail[1])
+      tp_sig_index_insert(tail + 1, (uint32_t)i);
+  }
+  tp_sig_index.cg = cg;
+  tp_sig_index.indexed_len = cg->fun_sigs.len;
+  return true;
 }
 
 static fun_sig *tp_lookup_sig(codegen_t *cg, const char *name) {
   if (!cg || !name)
     return NULL;
-  for (size_t i = 0; i < cg->fun_sigs.len; ++i) {
-    fun_sig *sig = &cg->fun_sigs.data[i];
-    if (sig->name && strcmp(sig->name, name) == 0)
-      return sig;
-    const char *tail = sig->name ? strrchr(sig->name, '.') : NULL;
-    if (tail && strcmp(tail + 1, name) == 0)
-      return sig;
+  if ((tp_sig_index.cg != cg || tp_sig_index.indexed_len != cg->fun_sigs.len) &&
+      !tp_sig_index_build(cg))
+    return NULL;
+  size_t i = tp_sig_hash(name) & tp_sig_index.mask;
+  while (tp_sig_index.slots[i].key) {
+    if (strcmp(tp_sig_index.slots[i].key, name) == 0)
+      return &cg->fun_sigs.data[tp_sig_index.slots[i].index];
+    i = (i + 1) & tp_sig_index.mask;
   }
   return NULL;
 }
@@ -2919,6 +3050,7 @@ typedef struct ny_hm_env_entry_t {
    */
   const char *alias_target;
   stmt_t *alias_target_stmt;
+  uint32_t name_hash;
 } ny_hm_env_entry_t;
 typedef VEC(ny_hm_env_entry_t) ny_hm_env_list;
 

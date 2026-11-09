@@ -63,22 +63,27 @@ fn group_by(str col) dict {
 }
 
 fn count_agg() dict {
+   "Builds a row-count aggregate step."
    {"_step": "count_agg"}
 }
 
 fn sum_agg(str col) dict {
+   "Builds a sum aggregate step over column `col`."
    {"_step": "sum_agg", "col": col}
 }
 
 fn avg_agg(str col) dict {
+   "Builds an average aggregate step over column `col`."
    {"_step": "avg_agg", "col": col}
 }
 
 fn min_agg(str col) dict {
+   "Builds a minimum aggregate step over column `col`."
    {"_step": "min_agg", "col": col}
 }
 
 fn max_agg(str col) dict {
+   "Builds a maximum aggregate step over column `col`."
    {"_step": "max_agg", "col": col}
 }
 

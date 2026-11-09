@@ -75,6 +75,13 @@ static bool ny_parallel_mode_enabled(void) {
 }
 
 int ny_parallel_threads(void) {
+  /*
+   * Every parallel-capable pass asks; the answer cannot change mid-compile.
+   */
+  static _Atomic int cached = 0;
+  int known = atomic_load_explicit(&cached, memory_order_relaxed);
+  if (known)
+    return known;
   long requested = ny_parallel_parse_long(getenv("NYTRIX_PARALLEL_THREADS"), 0);
   if (requested <= 0)
     requested = ny_parallel_parse_long(getenv("OMP_NUM_THREADS"), 0);
@@ -89,12 +96,20 @@ int ny_parallel_threads(void) {
     requested = 1;
   if (requested > 256)
     requested = 256;
+  atomic_store_explicit(&cached, (int)requested, memory_order_relaxed);
   return (int)requested;
 }
 
 size_t ny_parallel_min_work(void) {
-  long v = ny_parallel_parse_long(getenv("NYTRIX_PARALLEL_MIN_WORK"), 2048);
-  return v > 0 ? (size_t)v : 2048;
+  static _Atomic long cached = 0;
+  long v = atomic_load_explicit(&cached, memory_order_relaxed);
+  if (!v) {
+    v = ny_parallel_parse_long(getenv("NYTRIX_PARALLEL_MIN_WORK"), 2048);
+    if (v <= 0)
+      v = 2048;
+    atomic_store_explicit(&cached, v, memory_order_relaxed);
+  }
+  return (size_t)v;
 }
 
 bool ny_parallel_enabled(size_t count, size_t work_items) {

@@ -2605,12 +2605,12 @@ def resolve_test_jobs(cli_jobs: int) -> int:
     # the live-RAM budget below set the practical limit.
     auto = max(1, cpu)
     avail_gib = host_available_mem_gib()
-    # Keep 8 GiB available for the system and budget 2.5 GiB per worker. This
-    # covers the measured 2.2 GiB peak fixture RSS while leaving headroom for
-    # compiler and runtime variation. Explicit -j and
+    # Keep 8 GiB available for the system and budget 0.8 GiB per worker; the
+    # few fixtures that peak near 2.2 GiB are throttled separately by ny-test.
+    # Explicit -j and
     # NYTRIX_TEST_JOBS win.
     if avail_gib > 0.0:
-        auto = min(auto, max(1, int((avail_gib - 8.0) / 2.5)))
+        auto = min(auto, max(1, int((avail_gib - 8.0) / 0.8)))
     else:
         auto = min(auto, 2)
     return auto
@@ -2682,6 +2682,88 @@ def _read_bench_run_metadata(path: Path) -> dict | None:
     except (OSError, ValueError):
         return None
     return value if isinstance(value, dict) else None
+
+
+def bench_gcc_compare(build_root: Path, kind: str, extra: list[str]) -> int:
+    """Compare NYC or NYR with gcc on every benchmark, by instructions executed."""
+    import concurrent.futures, math, re, shutil, tempfile
+    route = "ny" if "--ny" in extra else "c"
+    wanted = [a for a in extra if not a.startswith("-")]
+    build = cmake_build_dir(build_root, kind)
+    nyc, ny = build / "nyc", build / "ny"
+    if not shutil.which("perf"):
+        print("bench-gcc needs perf", file=sys.stderr)
+        return 2
+    shapes = sorted((ROOT / "etc" / "tests" / "bench").rglob("*.nshape"))
+    source_re = lambda lang: re.compile(
+        rf"source {lang} <<'(\w+)'\n(.*?)\n\1\n", re.S)
+    env = dict(os.environ, NYTRIX_NATIVE_CACHE="0", NYTRIX_AOT_CACHE="0",
+               NYTRIX_JIT_CACHE="0")
+
+    def run(argv, timeout=60):
+        return subprocess.run(argv, capture_output=True, text=True,
+                              timeout=timeout, env=env, stdin=subprocess.DEVNULL)
+
+    def counted(exe):
+        out = run(["perf", "stat", "-x,", "-e", "instructions:u", exe], 60)
+        found = re.search(r"^(\d+),.*instructions", out.stderr, re.M)
+        return int(found.group(1)) if found else 0
+
+    def checksum(exe):
+        out = run([exe], 40).stdout
+        found = re.search(r"checksum=\s*(\S+)", out)
+        return found.group(1) if found else None
+
+    def one(shape, work):
+        text = shape.read_text(encoding="utf-8")
+        name = shape.stem
+        c = source_re("c").search(text)
+        ours = source_re("ny").search(text) if route == "ny" else c
+        if not c or not ours:
+            return None
+        base = Path(work) / name
+        c_src = base.with_suffix(".c")
+        c_src.write_text(c.group(2) + "\n", encoding="utf-8")
+        gcc_exe, our_exe = f"{base}.gcc", f"{base}.ours"
+        try:
+            if run(["cc", "-O3", "-march=native", "-w", str(c_src), "-o", gcc_exe,
+                    "-lm", "-lpthread"]).returncode:
+                return name, "no-gcc", 0, 0
+            if route == "ny":
+                ny_src = base.with_suffix(".ny")
+                ny_src.write_text(ours.group(2) + "\n", encoding="utf-8")
+                built = run([str(ny), "-O3", "--native-backend", "x86_64", "--run=none",
+                             f"--output={our_exe}", str(ny_src)], 180)
+            else:
+                obj = f"{base}.o"
+                built = run([str(nyc), "-O3", "-c", str(c_src), "-o", obj])
+                if built.returncode == 0:
+                    built = run(["cc", obj, "-o", our_exe, "-lm", "-lpthread"])
+            if built.returncode:
+                return name, "build-failed", 0, 0
+            same = checksum(our_exe) == checksum(gcc_exe)
+            return (name, "ok" if same else "MISMATCH", counted(our_exe),
+                    counted(gcc_exe))
+        except subprocess.TimeoutExpired:
+            return name, "timeout", 0, 0
+
+    picked = [s for s in shapes if not wanted or s.stem in wanted]
+    with tempfile.TemporaryDirectory(prefix="ny-bench-gcc-") as work:
+        with concurrent.futures.ThreadPoolExecutor(8) as pool:
+            results = [r for r in pool.map(lambda s: one(s, work), picked) if r]
+    rows = [r for r in results if r[1] == "ok" and r[2] and r[3]]
+    rows.sort(key=lambda r: r[3] / r[2])
+    print(f"{'benchmark':24}{'status':10}{route.upper():>12}{'gcc':>12}{'ratio':>9}")
+    for name, status, ours_n, gcc_n in rows:
+        print(f"{name:24}{status:10}{ours_n / 1e6:11.2f}M{gcc_n / 1e6:11.2f}M"
+              f"{ours_n / gcc_n:8.2f}x")
+    failed = [r for r in results if r[1] != "ok"]
+    for name, status, _, _ in failed:
+        print(f"{name:24}{status}")
+    if rows:
+        mean = math.exp(sum(math.log(o / g) for _, _, o, g in rows) / len(rows))
+        print(f"geomean {mean:.3f}x over {len(rows)} benchmarks")
+    return 1 if any(r[1] == "MISMATCH" for r in results) else 0
 
 
 def _attach_to_bench_run(handle, metadata_path: Path) -> BenchRunAttachment:
@@ -5870,7 +5952,7 @@ def _run_test_impl(build_root: Path, kind: str, jobs: int, extra: list[str]) -> 
         artifact_run = subprocess.run(
             ["ctest", "--test-dir", str(cmake_build_dir(build_root, kind)),
              "--output-on-failure", "-C", "Release", "-R",
-             "^(semantic-effect-artifact|legacy-derive-expansion)$"],
+             "^(semantic-effect-artifact|legacy-derive-expansion|nyr-c-frontend|ny-native-from-nyr)$"],
             cwd=str(ROOT),
         )
         if artifact_run.returncode != 0:
@@ -6024,8 +6106,10 @@ def _run_test_impl(build_root: Path, kind: str, jobs: int, extra: list[str]) -> 
     # not start the expensive full benchmark pass after it; this also prevents a
     # compile-timeout sweep from consuming another suite-sized budget and
     # evicting useful diagnostics under memory pressure.
+    bench_stale_note = ""
     if rc != 0:
         bench_rc = 0
+        bench_stale_note = "the fixture suite failed or timed out"
         log("TEST", "skipping benchmarks because the fixture suite failed or timed out")
     elif focused_run:
         bench_rc = 0
@@ -6085,6 +6169,12 @@ def _run_test_impl(build_root: Path, kind: str, jobs: int, extra: list[str]) -> 
         ok(f"test suite completed in {elapsed_ms}ms")
     else:
         log("TEST", f"test suite failed after {elapsed_ms}ms (suite={suite_rc}, bench={bench_rc})")
+    if bench_stale_note:
+        log(
+            "TEST",
+            f"no benchmark results from this run ({bench_stale_note}); "
+            "docs/learn/measurements.md still shows the previous full run",
+        )
     try:
         suite_full_bin.unlink()
     except OSError:
@@ -6523,8 +6613,8 @@ def run_optcheck(build_root: Path, kind: str, args: list[str]) -> int:
     return 0
 
 def parse(argv: list[str]) -> tuple[list[str], list[str], int, bool, bool, bool, bool, str | None, bool | None, str | None]:
-    known = {"all", "bin", "nyc", "bin-static", "tar", "vendor", "fmt", "std", "std_bc", "core", "core_bc", "test", "repl", "fuzz", "bench", "docs", "web", "web-demos", "web-check", "web-test", "wasm", "c2ny", "py2ny", "install", "uninstall", "clean", "debug", "tidy", "audit", "perf", "profile", "gprof", "asan", "ubsan", "coverage", "optcheck", "analyze", "check", "hooks", "fb", "ny", "run", "release", "static", "deps", "cross", "cross-run", "env", "targets", "doctor", "bench-compare", "stats", "prepare", "bare-payload"}
-    _PASSTHROUGH = {"fmt", "analyze", "tidy", "audit", "test", "perf", "profile", "docs", "web", "web-demos", "web-check", "web-test", "wasm", "ny", "repl", "gprof", "asan", "ubsan", "fuzz", "bench", "cross", "cross-run", "static", "bin-static", "tar", "vendor", "env", "targets", "doctor", "stats"}
+    known = {"bench-gcc", "all", "bin", "nyc", "bin-static", "tar", "vendor", "fmt", "std", "std_bc", "core", "core_bc", "test", "repl", "fuzz", "bench", "docs", "web", "web-demos", "web-check", "web-test", "wasm", "c2ny", "py2ny", "install", "uninstall", "clean", "debug", "tidy", "audit", "perf", "profile", "gprof", "asan", "ubsan", "coverage", "optcheck", "analyze", "check", "hooks", "fb", "ny", "run", "release", "static", "deps", "cross", "cross-run", "env", "targets", "doctor", "bench-compare", "stats", "prepare", "bare-payload"}
+    _PASSTHROUGH = {"bench-gcc", "fmt", "analyze", "tidy", "audit", "test", "perf", "profile", "docs", "web", "web-demos", "web-check", "web-test", "wasm", "ny", "repl", "gprof", "asan", "ubsan", "fuzz", "bench", "cross", "cross-run", "static", "bin-static", "tar", "vendor", "env", "targets", "doctor", "stats"}
 
     def looks_like_ny_source(arg: str) -> bool:
         if not arg or arg == "--" or arg.startswith("-"):
@@ -8893,6 +8983,8 @@ def main() -> int:
             rc = run_tool(build_root, active_kind, "ny-fmt", ["--tidy", *extra])
         elif cmd == "audit":
             rc = run_tool(build_root, active_kind, "ny-fmt", ["--audit", *extra])
+        elif cmd == "bench-gcc":
+            rc = bench_gcc_compare(build_root, active_kind, extra)
         elif cmd == "perf":
             rc = run_tool(build_root, active_kind, "ny-perf", extra)
         elif cmd == "docs":

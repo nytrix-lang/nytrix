@@ -53,6 +53,7 @@ fn _argument_index(str row) int {
 }
 
 fn select_unified_command(str arguments_hex, str output_path_hex) int {
+   "Selects the unified CLI command for hex-encoded arguments and writes it to the hex-encoded output path."
    def str arguments = _decode_hex(arguments_hex)
    def str output_path = _decode_hex(output_path_hex)
    if arguments_hex.len > 2097152 || output_path.len == 0 { exit(2) }

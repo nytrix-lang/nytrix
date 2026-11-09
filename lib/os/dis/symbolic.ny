@@ -56,6 +56,7 @@ use core.math.smt as smt
 use core.math.parse.data.zlib as zlib
 
 fn to_hex(int v, int width=0) str {
+   "Formats `v` as hexadecimal with at least `width` digits."
    str.to_hex(v, width)
 }
 
@@ -723,7 +724,7 @@ fn state_stdout(dict st) str { to_str(st.get("stdout", "")) }
 
 fn state_stderr(dict st) str { to_str(st.get("stderr", "")) }
 
-fn state_output(dict st) str { state_stdout(st) + state_stderr(st) }
+fn state_output(dict st) str { "Returns a state's captured stdout followed by its stderr." state_stdout(st) + state_stderr(st) }
 
 fn state_append_stdout(dict st, any data) dict {
    "Return state with data appended to stdout."
@@ -6151,7 +6152,7 @@ fn solver_check(dict sol) int {
    r
 }
 
-fn solver_sat(dict sol) bool { solver_check(sol) == SAT }
+fn solver_sat(dict sol) bool { "Returns whether the solver's constraints are satisfiable." solver_check(sol) == SAT }
 
 fn solver_model(dict sol, dict vars) dict {
    "Evaluate a map of name -> {ast,bits} records as hex strings."

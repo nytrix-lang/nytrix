@@ -3877,6 +3877,14 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
        * representation-aware index bridge for dynamic results; it normalizes
        * tagged integer fallbacks and preserves booleans, floats, and handles.
        */
+      /* Both bridges take a raw index; a tagged `any` key read slot 2n+1. */
+      if (index >= 0 &&
+          nyr_value_scalar_class(b, index) == NYIR_SCALAR_I64_TAGGED) {
+        index = nyr_emit_runtime_call(b, "rt_any_to_i64", index, -1, -1, 1,
+                                      NYIR_SCALAR_I64_RAW);
+        if (index < 0)
+          return -1;
+      }
       const char *get_runtime =
           dynamic_get ? "rt_value_get_index_raw" : "rt_tbuf_get";
       int value = nyr_emit_runtime_call(

@@ -215,17 +215,21 @@ static bool tbuf_alloc_bytes(const nyr_func_t *f, const int *defs, int value,
       defs[value] < 0)
     return false;
   const nyr_inst_t *def = &f->data[(size_t)defs[value]];
-  if (def->op != NYIR_CALL || !def->symbol ||
-      (strcmp(def->symbol, "rt_tbuf_new_raw") != 0 &&
-       strcmp(def->symbol, "rt_tbuf_new_typed_raw") != 0))
+  if (def->op != NYIR_CALL || !def->symbol)
+    return false;
+  bool typed_buffer = strcmp(def->symbol, "rt_tbuf_new_raw") == 0 ||
+                      strcmp(def->symbol, "rt_tbuf_new_typed_raw") == 0;
+  ny_builtin_alloc_kind_t kind = ny_builtin_alloc_kind(def->symbol);
+  bool one_size = kind == NY_BUILTIN_ALLOC_MALLOC;
+  if (!typed_buffer && !one_size && kind != NY_BUILTIN_ALLOC_CALLOC)
     return false;
   int args[2] = {-1, -1};
   int argc = 0;
-  int64_t count = 0, elem = 0;
+  int64_t count = 0, elem = 1;
   if (!nyr_call_args(def, f->next_value, args, 2, &argc, NULL, 0) ||
-      argc != 2 || !nyr_const_i64(f, defs, args[0], &count) ||
-      !nyr_const_i64(f, defs, args[1], &elem) || count <= 0 || elem <= 0 ||
-      count > INT64_MAX / elem)
+      argc != (one_size ? 1 : 2) || !nyr_const_i64(f, defs, args[0], &count) ||
+      (!one_size && !nyr_const_i64(f, defs, args[1], &elem)) || count <= 0 ||
+      elem <= 0 || count > INT64_MAX / elem)
     return false;
   *bytes = count * elem;
   return true;
@@ -285,6 +289,71 @@ static bool tbuf_swap_phi_pair(const nyr_func_t *f, const int *defs,
   return true;
 }
 
+/*
+ * Buffers chosen by a branch rather than swapped at a latch:
+ *
+ *   a = phi(L1: x, L2: y)
+ *   b = phi(L1: y, L2: x)
+ *
+ * Two PHIs of one block are disjoint when every incoming edge gives them
+ * different allocation calls. All the allocations must have one known size.
+ */
+static bool tbuf_branch_phi_pair(const nyr_func_t *f, const int *defs,
+                                 int a_value, int b_value, int64_t *bytes_out) {
+  if (a_value < 0 || b_value < 0 || a_value >= f->next_value ||
+      b_value >= f->next_value || a_value == b_value || defs[a_value] < 0 ||
+      defs[b_value] < 0)
+    return false;
+  size_t first = (size_t)(defs[a_value] < defs[b_value] ? defs[a_value]
+                                                        : defs[b_value]);
+  size_t last = (size_t)(defs[a_value] < defs[b_value] ? defs[b_value]
+                                                       : defs[a_value]);
+  for (size_t i = first; i <= last; ++i)
+    if (f->data[i].op != NYIR_PHI && f->data[i].op != NYIR_NOP)
+      return false;
+  const nyr_inst_t *a = &f->data[(size_t)defs[a_value]];
+  const nyr_inst_t *b = &f->data[(size_t)defs[b_value]];
+  if (a->op != NYIR_PHI || b->op != NYIR_PHI ||
+      a->phi_incoming_len != b->phi_incoming_len || !a->phi_incoming_len)
+    return false;
+  int64_t size = -1;
+  for (size_t i = 0; i < a->phi_incoming_len; ++i) {
+    int va = nyr_vectorize_resolve_value(f, defs, a->phi_incoming[i].value);
+    int vb = -1;
+    for (size_t k = 0; k < b->phi_incoming_len; ++k)
+      if (b->phi_incoming[k].predecessor_label ==
+          a->phi_incoming[i].predecessor_label)
+        vb = nyr_vectorize_resolve_value(f, defs, b->phi_incoming[k].value);
+    int64_t size_a = 0, size_b = 0;
+    if (vb < 0 || va == vb || !tbuf_alloc_bytes(f, defs, va, &size_a) ||
+        !tbuf_alloc_bytes(f, defs, vb, &size_b) || size_a != size_b ||
+        (size >= 0 && size != size_a))
+      return false;
+    size = size_a;
+  }
+  if (bytes_out)
+    *bytes_out = size;
+  return size > 0;
+}
+
+/*
+ * A PHI whose incoming values are all allocations of one known size.
+ */
+static bool tbuf_branch_phi_bytes(const nyr_func_t *f, const int *defs,
+                                  const nyr_inst_t *phi, int64_t *bytes) {
+  int64_t size = -1;
+  for (size_t i = 0; i < phi->phi_incoming_len; ++i) {
+    int value = nyr_vectorize_resolve_value(f, defs, phi->phi_incoming[i].value);
+    int64_t edge = 0;
+    if (!tbuf_alloc_bytes(f, defs, value, &edge) ||
+        (size >= 0 && size != edge))
+      return false;
+    size = edge;
+  }
+  *bytes = size;
+  return size > 0;
+}
+
 static bool tbuf_phi_bytes(const nyr_func_t *f, const int *defs, int value,
                            int64_t *bytes) {
   if (!f || !defs || value < 0 || value >= f->next_value || defs[value] < 0 ||
@@ -301,7 +370,7 @@ static bool tbuf_phi_bytes(const nyr_func_t *f, const int *defs, int value,
         tbuf_swap_phi_pair(f, defs, value, other, bytes))
       return true;
   }
-  return false;
+  return tbuf_branch_phi_bytes(f, defs, def, bytes);
 }
 
 static bool affine_add(affine_t a, affine_t b, bool subtract, affine_t *out) {
@@ -472,30 +541,7 @@ static bool known_alloc_bytes(const nyr_func_t *f, const int *defs, int root,
     *out = def->imm;
     return true;
   }
-  if (def->op != NYIR_CALL || !def->symbol)
-    return false;
-  if (strcmp(def->symbol, "rt_tbuf_new_raw") == 0 ||
-      strcmp(def->symbol, "rt_tbuf_new_typed_raw") == 0)
-    return tbuf_alloc_bytes(f, defs, root, out);
-  ny_builtin_alloc_kind_t kind = ny_builtin_alloc_kind(def->symbol);
-  if (kind != NY_BUILTIN_ALLOC_MALLOC && kind != NY_BUILTIN_ALLOC_CALLOC)
-    return false;
-  int args[2] = {-1, -1};
-  int argc = 0;
-  if (!nyr_call_args(def, f->next_value, args, 2, &argc, NULL, 0) ||
-      (kind == NY_BUILTIN_ALLOC_MALLOC ? argc != 1 : argc != 2))
-    return false;
-  int64_t a = 0;
-  int64_t b = 1;
-  if (!nyr_const_i64(f, defs, args[0], &a) || a <= 0)
-    return false;
-  if (kind == NY_BUILTIN_ALLOC_CALLOC &&
-      (!nyr_const_i64(f, defs, args[1], &b) || b <= 0))
-    return false;
-  if (b > INT64_MAX / a)
-    return false;
-  *out = a * b;
-  return true;
+  return tbuf_alloc_bytes(f, defs, root, out);
 }
 
 /*
@@ -539,6 +585,11 @@ static int tbuf_payload_root(const nyr_func_t *f, const int *defs, int value,
       (strcmp(in->symbol, "rt_tbuf_new_raw") == 0 ||
        strcmp(in->symbol, "rt_tbuf_new_typed_raw") == 0))
     return value;
+  if (in->op == NYIR_CALL && in->symbol) {
+    ny_builtin_alloc_kind_t kind = ny_builtin_alloc_kind(in->symbol);
+    if (kind == NY_BUILTIN_ALLOC_MALLOC || kind == NY_BUILTIN_ALLOC_CALLOC)
+      return value;
+  }
   if (in->op == NYIR_COPY)
     return tbuf_payload_root(f, defs, in->a, depth + 1);
   int64_t bytes = 0;
@@ -1115,6 +1166,69 @@ static bool guarded_induction_range(const nyr_func_t *f, const int *defs,
   return false;
 }
 
+/*
+ * A two-edge PHI of a constant start and `phi + positive constant`.
+ */
+static bool linear_phi(const nyr_func_t *f, const int *defs, int value,
+                       int64_t *start, int64_t *step, int64_t *latch_label) {
+  if (value < 0 || value >= f->next_value || defs[value] < 0)
+    return false;
+  const nyr_inst_t *phi = &f->data[(size_t)defs[value]];
+  if (phi->op != NYIR_PHI || phi->phi_incoming_len != 2)
+    return false;
+  for (size_t k = 0; k < 2; ++k) {
+    int update = nyr_vectorize_resolve_value(f, defs, phi->phi_incoming[k].value);
+    if (update < 0 || update >= f->next_value || defs[update] < 0)
+      continue;
+    const nyr_inst_t *add = &f->data[(size_t)defs[update]];
+    if (add->op != NYIR_ADD_I64)
+      continue;
+    int other = nyr_vectorize_resolve_value(f, defs, add->a) == value ? add->b
+                : nyr_vectorize_resolve_value(f, defs, add->b) == value
+                    ? add->a
+                    : -1;
+    if (other >= 0 && nyr_const_i64(f, defs, other, step) && *step > 0 &&
+        nyr_const_i64(f, defs, phi->phi_incoming[1 - k].value, start)) {
+      *latch_label = phi->phi_incoming[k].predecessor_label;
+      return true;
+    }
+  }
+  return false;
+}
+
+/*
+ * Strength reduction turns `row * n` into its own counter beside the guarded
+ * `row`. Both step once per iteration of the same back edge, so the guarded
+ * counter's iteration count bounds the derived one.
+ */
+static bool derived_induction_range(const nyr_func_t *f, const int *defs,
+                                    const nyr_cfg_t *cfg, size_t use_pc,
+                                    int value, nyr_range_t *out) {
+  int64_t start = 0, step = 0, latch = -1;
+  if (!linear_phi(f, defs, value, &start, &step, &latch))
+    return false;
+  size_t header = cfg->inst_block[(size_t)defs[value]];
+  for (size_t i = cfg->block_start[header]; i < cfg->block_end[header]; ++i) {
+    const nyr_inst_t *other = &f->data[i];
+    int64_t other_start = 0, other_step = 0, other_latch = -1;
+    nyr_range_t guarded = {0};
+    if (other->op != NYIR_PHI || other->dst < 0 || other->dst == value ||
+        !linear_phi(f, defs, other->dst, &other_start, &other_step,
+                    &other_latch) ||
+        other_latch != latch ||
+        !guarded_induction_range(f, defs, cfg, use_pc, other->dst, &guarded))
+      continue;
+    __int128 steps = ((__int128)guarded.max - guarded.min) / other_step;
+    __int128 max = (__int128)start + steps * step;
+    if (steps < 0 || max > INT64_MAX)
+      return false;
+    *out = (nyr_range_t){
+        .has_min = true, .has_max = true, .min = start, .max = (int64_t)max};
+    return true;
+  }
+  return false;
+}
+
 static bool value_range_under_guards(const nyr_func_t *f, const int *defs,
                                      const nyr_cfg_t *cfg, size_t use_pc,
                                      int value, int loop_iv, int64_t init,
@@ -1144,8 +1258,29 @@ static bool value_range_under_guards(const nyr_func_t *f, const int *defs,
     return value_range_under_guards(f, defs, cfg, use_pc, in->a, loop_iv, init,
                                     trip, depth + 1, out);
   if (in->op == NYIR_PHI) {
-    if (guarded_induction_range(f, defs, cfg, use_pc, value, out))
+    if (guarded_induction_range(f, defs, cfg, use_pc, value, out) ||
+        derived_induction_range(f, defs, cfg, use_pc, value, out))
       return true;
+  }
+  /*
+   * C's `int` normalization, (x << 32) >> 32, is an identity on any value
+   * already proven to fit in 32 bits.
+   */
+  int64_t shift = 0;
+  if (in->op == NYIR_SAR_I64 && in->a >= 0 && defs[in->a] >= 0 &&
+      nyr_const_i64(f, defs, in->b, &shift) && shift == 32 &&
+      f->data[(size_t)defs[in->a]].op == NYIR_SHL_I64 &&
+      nyr_const_i64(f, defs, f->data[(size_t)defs[in->a]].b, &shift) &&
+      shift == 32) {
+    nyr_range_t inner = {0};
+    if (value_range_under_guards(f, defs, cfg, use_pc,
+                                 f->data[(size_t)defs[in->a]].a, loop_iv, init,
+                                 trip, depth + 1, &inner) &&
+        inner.has_min && inner.has_max && inner.min >= INT32_MIN &&
+        inner.max <= INT32_MAX) {
+      *out = inner;
+      return true;
+    }
   }
   nyr_range_t a = {0}, b = {0};
   bool have_a = value_range_under_guards(f, defs, cfg, use_pc, in->a, loop_iv,
@@ -2170,7 +2305,8 @@ static bool track_root_access(const nyr_func_t *f, const int *defs,
                           defs[prior] >= 0 &&
                           f->data[(size_t)defs[prior]].op == NYIR_PHI;
       if ((root_is_phi || prior_is_phi) &&
-          !tbuf_swap_phi_pair(f, defs, root, prior, NULL))
+          !tbuf_swap_phi_pair(f, defs, root, prior, NULL) &&
+          !tbuf_branch_phi_pair(f, defs, root, prior, NULL))
         return false;
       continue;
     }

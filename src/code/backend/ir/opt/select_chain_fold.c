@@ -26,6 +26,7 @@
  */
 #include "code/backend/ir/opt/loop.h"
 #include "code/backend/ir/opt/util.h"
+#include <math.h>
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -892,7 +893,7 @@ static bool scf_f64_interval(scf_t *s, int v, size_t at, int depth,
   switch (d->op) {
   case NYIR_CONST_F64: {
     double x = scf_bits_f64(d->imm);
-    if (x != x)
+    if (isnan(x))
       return false;
     *out = (scf_fval_t){x, x};
     return true;

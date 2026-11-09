@@ -1282,13 +1282,34 @@ static void hm_env_push_ctx(ny_hm_env_list *env, const char *name,
   vec_push(env, e);
 }
 
+/*
+ * Environments hold thousands of bindings and are searched for every
+ * identifier, so compare a cached hash before the name. Zero means unhashed.
+ */
+static inline uint32_t hm_name_hash(const char *name) {
+  uint32_t h = 2166136261u;
+  for (const unsigned char *p = (const unsigned char *)name; *p; ++p)
+    h = (h ^ *p) * 16777619u;
+  return h | 1u;
+}
+
+static inline bool hm_env_entry_matches(ny_hm_env_entry_t *e, const char *name,
+                                        uint32_t hash, uint32_t syntax_ctx) {
+  if (e->syntax_ctx != syntax_ctx || !e->name)
+    return false;
+  if (!e->name_hash)
+    e->name_hash = hm_name_hash(e->name);
+  return e->name_hash == hash && strcmp(e->name, name) == 0;
+}
+
 static ny_hm_env_entry_t *
 hm_env_entry_ctx(ny_hm_env_list *env, const char *name, uint32_t syntax_ctx) {
   if (!name)
     return NULL;
+  uint32_t name_hash = hm_name_hash(name);
   for (size_t i = env ? env->len : 0; i > 0; --i) {
     ny_hm_env_entry_t *e = &env->data[i - 1];
-    if (e->syntax_ctx == syntax_ctx && e->name && strcmp(e->name, name) == 0)
+    if (hm_env_entry_matches(e, name, name_hash, syntax_ctx))
       return e;
   }
   return NULL;
@@ -1298,9 +1319,10 @@ static ssize_t hm_env_entry_index_ctx(ny_hm_env_list *env, const char *name,
                                       uint32_t syntax_ctx) {
   if (!name)
     return -1;
+  uint32_t name_hash = hm_name_hash(name);
   for (size_t i = env ? env->len : 0; i > 0; --i) {
     ny_hm_env_entry_t *e = &env->data[i - 1];
-    if (e->syntax_ctx == syntax_ctx && e->name && strcmp(e->name, name) == 0)
+    if (hm_env_entry_matches(e, name, name_hash, syntax_ctx))
       return (ssize_t)(i - 1);
   }
   return -1;
@@ -6753,6 +6775,33 @@ static ny_hm_type_t *hm_call_named(ny_hm_state_t *hm, ny_hm_env_list *env,
   return ret;
 }
 
+/*
+ * A bare call inside a type's method names the module function: resolving
+ * `divs(v, s)` to the enclosing `vec3.divs` recursed forever.
+ */
+static bool hm_scheme_is_method(const ny_hm_scheme_t *scheme) {
+  if (!scheme || !scheme->stmt || scheme->stmt->kind != NY_S_FUNC ||
+      scheme->stmt->as.fn.params.len == 0)
+    return false;
+  /*
+   * The parser rewrites `self` to the owner type, so a method is a function
+   * whose first parameter has the type its qualified name is nested under.
+   */
+  const char *first_type = scheme->stmt->as.fn.params.data[0].type;
+  const char *full =
+      scheme->full_name ? scheme->full_name : scheme->stmt->as.fn.name;
+  const char *leaf_dot = full ? strrchr(full, '.') : NULL;
+  if (!first_type || !leaf_dot || leaf_dot == full)
+    return false;
+  const char *owner_end = leaf_dot;
+  const char *owner = owner_end;
+  while (owner > full && owner[-1] != '.')
+    --owner;
+  size_t owner_len = (size_t)(owner_end - owner);
+  return owner_len > 0 && strncmp(first_type, owner, owner_len) == 0 &&
+         (first_type[owner_len] == '\0' || first_type[owner_len] == '<');
+}
+
 static void hm_persist_named_call_target(ny_hm_state_t *hm, expr_t *call,
                                          const char *name,
                                          const char *self_name) {
@@ -6774,11 +6823,14 @@ static void hm_persist_named_call_target(ny_hm_state_t *hm, expr_t *call,
     char owned_name[512];
     int n = snprintf(owned_name, sizeof(owned_name), "%s.%s", self_name, leaf);
     if (n > 0 && (size_t)n < sizeof(owned_name)) {
-      /* The module's own function outranks the global leaf lookup below,
+      /*
+       * The module's own function outranks the global leaf lookup below,
        * for stdlib modules too: the table can answer with any module that
-       * registered the same leaf (`save` in tga bound to render.dump.save). */
+       * registered the same leaf (`save` in tga bound to render.dump.save).
+       */
       ny_hm_scheme_t *owned = hm_find_scheme(hm, owned_name);
-      if (owned && owned->stmt && owned->stmt->kind == NY_S_FUNC) {
+      if (owned && owned->stmt && owned->stmt->kind == NY_S_FUNC &&
+          !hm_scheme_is_method(owned)) {
         const char *canonical =
             owned->full_name ? owned->full_name : owned->stmt->as.fn.name;
         call->semantic.canonical_callee =
@@ -7279,7 +7331,8 @@ static ny_hm_type_t *hm_infer_expr_impl(ny_hm_state_t *hm, ny_hm_env_list *env,
        */
       if (self_name && *self_name && name && !strchr(name, '.')) {
         char *own = hm_full_name(self_name, name);
-        if (own && hm_find_scheme(hm, own)) {
+        ny_hm_scheme_t *own_scheme = own ? hm_find_scheme(hm, own) : NULL;
+        if (own_scheme && !hm_scheme_is_method(own_scheme)) {
           const char *own_key = ny_intern_get(ny_intern_cstr(own));
           free(own);
           ny_hm_type_t *result = hm_call_named(
@@ -8064,6 +8117,55 @@ static char *hm_qualify_owner_type(ny_hm_state_t *hm, const char *owner,
   return result;
 }
 
+/*
+ * Owned schemes chained by method leaf.  Member resolution scanned every
+ * scheme for every call; the chain keeps the same ascending visit order.
+ */
+static _Thread_local struct {
+  const ny_hm_state_t *hm;
+  size_t indexed_len;
+  int32_t *heads;
+  int32_t *next;
+  size_t mask;
+} hm_method_index;
+
+static size_t hm_method_hash(const char *s) {
+  size_t h = 2166136261u;
+  for (; *s; ++s)
+    h = (h ^ (unsigned char)*s) * 16777619u;
+  return h;
+}
+
+static int32_t hm_method_first(ny_hm_state_t *hm, const char *method) {
+  if (hm_method_index.hm != hm || hm_method_index.indexed_len != hm->schemes.len) {
+    size_t buckets = 64;
+    while (buckets < hm->schemes.len * 2)
+      buckets <<= 1;
+    free(hm_method_index.heads);
+    free(hm_method_index.next);
+    hm_method_index.heads = malloc(buckets * sizeof(int32_t));
+    hm_method_index.next = malloc((hm->schemes.len + 1) * sizeof(int32_t));
+    hm_method_index.hm = NULL;
+    if (!hm_method_index.heads || !hm_method_index.next)
+      return -2;
+    memset(hm_method_index.heads, 0xff, buckets * sizeof(int32_t));
+    hm_method_index.mask = buckets - 1;
+    for (size_t i = hm->schemes.len; i > 0; --i) {
+      ny_hm_scheme_t *candidate = &hm->schemes.data[i - 1];
+      hm_method_index.next[i - 1] = -1;
+      if (!candidate->name || !candidate->owner)
+        continue;
+      size_t bucket =
+          hm_method_hash(ny_name_leaf(candidate->name)) & hm_method_index.mask;
+      hm_method_index.next[i - 1] = hm_method_index.heads[bucket];
+      hm_method_index.heads[bucket] = (int32_t)(i - 1);
+    }
+    hm_method_index.hm = hm;
+    hm_method_index.indexed_len = hm->schemes.len;
+  }
+  return hm_method_index.heads[hm_method_hash(method) & hm_method_index.mask];
+}
+
 static void hm_persist_member_target(ny_hm_state_t *hm, ny_hm_env_list *env,
                                      expr_t *e, const char *self_name) {
   expr_t *target = NULL;
@@ -8096,7 +8198,12 @@ static void hm_persist_member_target(ny_hm_state_t *hm, ny_hm_env_list *env,
   ny_hm_scheme_t *scheme = NULL;
   bool scheme_ambiguous = false;
   if (!sig) {
-    for (size_t i = 0; i < hm->schemes.len; ++i) {
+    int32_t first = hm_method_first(hm, method);
+    for (size_t i = first >= 0 ? (size_t)first : 0;
+         first == -2 ? i < hm->schemes.len : first >= 0;
+         first == -2 ? (void)++i
+                     : (void)((first = hm_method_index.next[i]) >= 0 &&
+                              (i = (size_t)first))) {
       ny_hm_scheme_t *candidate = &hm->schemes.data[i];
       if (candidate->name && candidate->owner &&
           strcmp(ny_name_leaf(candidate->name), method) == 0 &&
@@ -8119,7 +8226,12 @@ static void hm_persist_member_target(ny_hm_state_t *hm, ny_hm_env_list *env,
   }
   if (!sig && !scheme && !scheme_ambiguous && strcmp(lookup_type, "any") != 0) {
     bool any_scheme_ambiguous = false;
-    for (size_t i = 0; i < hm->schemes.len; ++i) {
+    int32_t first = hm_method_first(hm, method);
+    for (size_t i = first >= 0 ? (size_t)first : 0;
+         first == -2 ? i < hm->schemes.len : first >= 0;
+         first == -2 ? (void)++i
+                     : (void)((first = hm_method_index.next[i]) >= 0 &&
+                              (i = (size_t)first))) {
       ny_hm_scheme_t *candidate = &hm->schemes.data[i];
       if (candidate->name && candidate->owner &&
           strcmp(ny_name_leaf(candidate->name), method) == 0 &&

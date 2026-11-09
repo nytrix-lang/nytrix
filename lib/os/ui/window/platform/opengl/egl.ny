@@ -35,16 +35,19 @@ use core.os.ui.window.platform.api as backend_api
 } #endif
 
 fn wayland_window_create(any surface, int width, int height) any {
+   "Creates an EGL window for a Wayland surface, or returns 0."
    #linux { if surface && width > 0 && height > 0 { return wl_egl_window_create(surface, width, height) } } #endif
    0
 }
 
 fn wayland_window_destroy(any window) any {
+   "Destroys an EGL Wayland window."
    #linux { if window { wl_egl_window_destroy(window) } } #endif
    0
 }
 
 fn wayland_window_resize(any window, int width, int height) any {
+   "Resizes an EGL Wayland window."
    #linux { if window && width > 0 && height > 0 { wl_egl_window_resize(window, width, height, 0, 0) } } #endif
    0
 }

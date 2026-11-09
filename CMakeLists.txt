@@ -2836,7 +2836,8 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
     set(NYR_PUBLIC_ACCEPTANCE_SOURCE
       "${NYTRIX_ROOT}/src/code/backend/ir/test/public_acceptance.c")
     add_executable(nyr-backend-ir-acceptance
-      "${NYR_PUBLIC_ACCEPTANCE_SOURCE}")
+      "${NYR_PUBLIC_ACCEPTANCE_SOURCE}"
+      "${NYTRIX_ROOT}/src/code/backend/runtime/disasm.c")
     target_include_directories(nyr-backend-ir-acceptance PRIVATE
       "${NYTRIX_ROOT}/src")
     target_link_libraries(nyr-backend-ir-acceptance PRIVATE nyr m)
@@ -2886,6 +2887,7 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
   target_compile_options(nyc PRIVATE -Wall -Wextra -Werror)
   target_link_options(nyc PRIVATE -Wl,--gc-sections)
   target_sources(nyc PRIVATE
+    "${NYTRIX_ROOT}/src/code/backend/runtime/disasm.c"
     "${NYTRIX_ROOT}/src/code/lang/parse/c/lex.c"
     "${NYTRIX_ROOT}/src/code/lang/parse/c/aggregate.c"
     "${NYTRIX_ROOT}/src/code/lang/parse/c/parse.c"

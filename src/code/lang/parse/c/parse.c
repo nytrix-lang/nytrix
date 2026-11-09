@@ -565,6 +565,7 @@ typedef struct {
   ny_ctok_t asm_register;
   bool has_asm_register;
   ny_ctok_t alias_target;
+  bool is_volatile;
 } c_global_t;
 
 typedef struct {
@@ -668,6 +669,9 @@ typedef struct {
   c_global_t *global_initializer;
   size_t asm_global_count;
   size_t asm_section_count;
+  char *raw_file_scope_asm;
+  size_t raw_file_scope_asm_len;
+  size_t raw_file_scope_asm_capacity;
   c_pp_constant_t *pp_constants;
   size_t pp_constant_count;
   size_t pp_constant_capacity;
@@ -940,6 +944,16 @@ static bool record_lvalue(c_parser_t *p, int value, int address, c_type_t type,
       }
     }
   }
+  /*
+   * Every read of a volatile object is observable. A sub-word read may be
+   * split into several loads, so mark the whole span just emitted.
+   */
+  if (is_volatile && read_start != SIZE_MAX)
+    for (size_t i = read_start; i < p->out->len; ++i)
+      if (p->out->data[i].op == NYIR_LOAD_I64) {
+        p->out->data[i].flags |= NYIR_INST_F_MEM_VOLATILE;
+        p->out->data[i].effects |= NYIR_EFFECT_VOLATILE;
+      }
   p->lvalues[p->lvalue_count++] = (c_lvalue_t){.value = value,
                                                .address = address,
                                                .type = type,
@@ -4902,9 +4916,21 @@ static bool parse_type(c_parser_t *p, c_type_t *type, bool allow_void) {
       *type = C_U32;
       ++p->pos;
     } else {
-      while (tok_is(p, p->pos, "unsigned")) {
-        is_unsigned = true;
-        ++p->pos;
+      for (;;) {
+        if (tok_is(p, p->pos, "unsigned")) {
+          is_unsigned = true;
+          ++p->pos;
+        } else if (tok_is(p, p->pos, "const") || tok_is(p, p->pos, "__const") ||
+                   tok_is(p, p->pos, "__const__")) {
+          p->last_type_const = true;
+          ++p->pos;
+        } else if (tok_is(p, p->pos, "volatile") ||
+                   tok_is(p, p->pos, "__volatile") ||
+                   tok_is(p, p->pos, "__volatile__")) {
+          p->last_type_volatile = true;
+          ++p->pos;
+        } else
+          break;
       }
       if (accept(p, "float") || accept(p, "_Float32"))
         is_float = true;
@@ -4936,7 +4962,11 @@ static bool parse_type(c_parser_t *p, c_type_t *type, bool allow_void) {
          */
         while (tok_is(p, p->pos, "int") || tok_is(p, p->pos, "long") ||
                tok_is(p, p->pos, "short") || tok_is(p, p->pos, "unsigned") ||
-               tok_is(p, p->pos, "signed") || tok_is(p, p->pos, "__signed__")) {
+               tok_is(p, p->pos, "signed") || tok_is(p, p->pos, "__signed__") ||
+               tok_is(p, p->pos, "__signed") || tok_is(p, p->pos, "const") ||
+               tok_is(p, p->pos, "__const") || tok_is(p, p->pos, "__const__") ||
+               tok_is(p, p->pos, "volatile") || tok_is(p, p->pos, "__volatile") ||
+               tok_is(p, p->pos, "__volatile__")) {
           if (accept(p, "long")) {
             is_long = true;
             if (accept(p, "long"))
@@ -4945,8 +4975,15 @@ static bool parse_type(c_parser_t *p, c_type_t *type, bool allow_void) {
             is_short = true;
           } else if (accept(p, "unsigned")) {
             is_unsigned = true;
-          } else if (accept(p, "signed") || accept(p, "__signed__")) {
+          } else if (accept(p, "signed") || accept(p, "__signed__") ||
+                     accept(p, "__signed")) {
             is_signed = true;
+          } else if (accept(p, "const") || accept(p, "__const") ||
+                     accept(p, "__const__")) {
+            p->last_type_const = true;
+          } else if (accept(p, "volatile") || accept(p, "__volatile") ||
+                     accept(p, "__volatile__")) {
+            p->last_type_volatile = true;
           } else {
             (void)accept(p, "int");
           }
@@ -5325,7 +5362,9 @@ static bool parse_alignment_attribute(c_parser_t *p,
         continue;
       }
       if (tok_is(p, p->pos, "nonstring") ||
-          tok_is(p, p->pos, "__nonstring__")) {
+          tok_is(p, p->pos, "__nonstring__") ||
+          tok_is(p, p->pos, "may_alias") ||
+          tok_is(p, p->pos, "__may_alias__")) {
         ++p->pos;
         continue;
       }
@@ -5953,11 +5992,12 @@ static bool parse_tag_fields(c_parser_t *p, c_agg_type_t *tag, bool is_union) {
        */
       if (parsed_field_type == C_AGG && field_type == C_AGG &&
           !inherited_pointers && field_agg && field_agg->name.len &&
-          !p->ms_extensions && !p->plan9_extensions)
+          !p->ms_extensions && !p->plan9_extensions && !getenv("NYC_KERNEL_COMPAT"))
         continue;
       if (parsed_field_type != C_AGG || field_type != C_AGG ||
           inherited_pointers || !field_agg || !field_agg->complete ||
-          (field_agg->name.len && !p->ms_extensions && !p->plan9_extensions)) {
+          (field_agg->name.len && !p->ms_extensions && !p->plan9_extensions &&
+           !getenv("NYC_KERNEL_COMPAT"))) {
         fail(p, "anonymous struct/union member requires a complete aggregate");
         return false;
       }
@@ -7843,6 +7883,38 @@ static bool collect_file_scope_asm(c_parser_t *p) {
   }
   if (stack_count || !ok || p->global_count > p->global_capacity ||
       output_count > p->global_capacity - p->global_count) {
+    if ((!ok || stack_count) && getenv("NYC_KERNEL_COMPAT") && assembly &&
+        assembly_len > 1) {
+      size_t text_len = assembly_len - 1;
+      bool need_nl = text_len && ((char *)assembly)[text_len - 1] != '\n';
+      size_t add = text_len + (need_nl ? 1 : 0);
+      if (p->raw_file_scope_asm_len + add + 1 > p->raw_file_scope_asm_capacity) {
+        size_t cap = p->raw_file_scope_asm_capacity
+                         ? p->raw_file_scope_asm_capacity * 2
+                         : 256;
+        while (cap < p->raw_file_scope_asm_len + add + 1)
+          cap *= 2;
+        char *grown = realloc(p->raw_file_scope_asm, cap);
+        if (grown) {
+          p->raw_file_scope_asm = grown;
+          p->raw_file_scope_asm_capacity = cap;
+        }
+      }
+      if (p->raw_file_scope_asm &&
+          p->raw_file_scope_asm_len + add + 1 <= p->raw_file_scope_asm_capacity) {
+        memcpy(p->raw_file_scope_asm + p->raw_file_scope_asm_len, assembly,
+               text_len);
+        p->raw_file_scope_asm_len += text_len;
+        if (need_nl)
+          p->raw_file_scope_asm[p->raw_file_scope_asm_len++] = '\n';
+        p->raw_file_scope_asm[p->raw_file_scope_asm_len] = '\0';
+        for (size_t i = 0; i < section_count; ++i)
+          asm_section_dispose(&sections[i]);
+        free(sections);
+        free(assembly);
+        return true;
+      }
+    }
     char message[160];
     if (rejected_directive[0])
       snprintf(message, sizeof(message),
@@ -13809,6 +13881,9 @@ static bool try_collect_aggregate_global(c_parser_t *p, bool *matched) {
                              existing->array_rank == array_rank) ||
                             (!is_array && existing->is_array)) &&
                            existing->is_const == is_const;
+    if (getenv("NYC_KERNEL_COMPAT") && is_external && !has_initializer &&
+        existing && !matching_extern)
+      matching_extern = true;
     bool completing_extern =
         (!is_external || has_initializer) && existing &&
         (existing->is_external || existing->is_tentative) &&
@@ -13830,6 +13905,10 @@ static bool try_collect_aggregate_global(c_parser_t *p, bool *matched) {
         existing->agg == agg && existing->is_array == is_array &&
         existing->array_rank == array_rank && existing->is_const == is_const &&
         !(existing->is_external && !is_external);
+    if (getenv("NYC_KERNEL_COMPAT") && !has_initializer && existing &&
+        !matching_redeclaration && !replacing_incomplete_array &&
+        (is_external || !existing->is_external))
+      matching_redeclaration = true;
     if (matching_redeclaration && !replacing_incomplete_array) {
       if (!expect(p, ";"))
         return false;
@@ -13839,6 +13918,12 @@ static bool try_collect_aggregate_global(c_parser_t *p, bool *matched) {
         (existing && !matching_extern && !completing_extern &&
          !completing_incomplete_array && !replacing_incomplete_array) ||
         (!existing && p->global_count >= p->global_capacity)) {
+      if (getenv("NYC_KERNEL_COMPAT") && is_external && !has_initializer &&
+          existing) {
+        if (!expect(p, ";"))
+          return false;
+        return true;
+      }
       if (getenv("NYC_PP_TRACE")) {
         fprintf(stderr,
                 "AGG-FAIL name=`%.*s` agg=%p complete=%d is_external=%d "
@@ -14637,14 +14722,17 @@ static bool try_collect_aggregate_pointer_array(c_parser_t *p, bool *matched) {
             return false;
           }
           if (range_designator) {
-            if (array_rank != 1 || !expect(p, "=")) {
+            bool kernel_compat_range = getenv("NYC_KERNEL_COMPAT") != NULL;
+            if ((array_rank != 1 && !kernel_compat_range) || !expect(p, "=")) {
               free(global.bytes);
               free(global.relocs);
               fail(p, "pointer-array range designators require a flat array");
               return false;
             }
-            element_index = (size_t)designated_index;
-            range_end = (size_t)designated_last;
+            size_t range_stride = array_rank == 1 ? 1u : (size_t)inner_count;
+            element_index = (size_t)designated_index * range_stride;
+            range_end = (size_t)designated_last * range_stride +
+                        (range_stride ? range_stride - 1u : 0u);
           } else {
             element_index = (size_t)designated_index * (size_t)inner_count;
             size_t suffix = (size_t)inner_count;
@@ -14684,13 +14772,33 @@ static bool try_collect_aggregate_pointer_array(c_parser_t *p, bool *matched) {
           return false;
         }
         if (range_end != SIZE_MAX) {
-          int64_t null_value = 1;
-          if (!parse_global_const_expr(p, &p->pos, &null_value) ||
-              null_value != 0) {
+          int64_t fill_value = 0;
+          if (!parse_global_const_expr(p, &p->pos, &fill_value)) {
             free(global.bytes);
             free(global.relocs);
-            fail(p, "file-scope pointer array ranges require a null value");
+            fail(p, "file-scope pointer array ranges require a constant value");
             return false;
+          }
+          if (fill_value != 0) {
+            if (!getenv("NYC_KERNEL_COMPAT")) {
+              free(global.bytes);
+              free(global.relocs);
+              fail(p, "file-scope pointer array ranges require a null value");
+              return false;
+            }
+            size_t first_off = element_index * element_size;
+            size_t last_off = range_end * element_size;
+            if (range_end < element_index || last_off + element_size > global.len) {
+              free(global.bytes);
+              free(global.relocs);
+              fail(p, "file-scope pointer array range is out of bounds");
+              return false;
+            }
+            for (size_t off = first_off; off <= last_off; off += element_size) {
+              uint64_t u = (uint64_t)fill_value;
+              for (size_t b = 0; b < element_size && b < 8u; ++b)
+                global.bytes[off + b] = (unsigned char)((u >> (8u * b)) & 0xffu);
+            }
           }
           index = range_end;
         } else if (!initialize_data_pointer(p, &global,
@@ -15502,6 +15610,7 @@ static bool try_collect_scalar_global(c_parser_t *p, bool *matched) {
   c_type_t pointer_base_type = p->last_type_base_type;
   unsigned pointer_depth = p->last_type_pointer_count;
   bool is_long_long = p->last_type_long_long;
+  bool global_is_volatile = p->last_type_volatile;
   bool typedef_array = p->last_type_is_array;
   size_t typedef_array_size = p->last_type_array_size;
   c_array_shape_t typedef_array_shape = p->last_type_array;
@@ -15853,6 +15962,8 @@ static bool try_collect_scalar_global(c_parser_t *p, bool *matched) {
       previous->type = type;
       previous->agg = type_agg;
       previous->is_long_long = is_long_long;
+      previous->is_volatile =
+          global_is_volatile && !c_type_is_arithmetic_pointer(type);
       previous->is_array = typedef_array;
       previous->array_rank = typedef_array ? typedef_array_shape.rank : 0;
       previous->array_stride =
@@ -15885,6 +15996,7 @@ static bool try_collect_scalar_global(c_parser_t *p, bool *matched) {
       .pointer_base_type = pointer_base_type,
       .pointer_depth = pointer_depth,
       .is_long_long = is_long_long,
+      .is_volatile = global_is_volatile && !c_type_is_arithmetic_pointer(type),
       .agg = type_agg,
       .is_array = typedef_array,
       .array_rank = typedef_array ? typedef_array_shape.rank : 0,
@@ -16881,12 +16993,13 @@ static bool collect_functions(c_parser_t *p) {
                         fn->variadic != candidate.variadic));
       for (size_t i = 0;
            !conflict && !function_type_placeholder && i < fn->param_count; ++i) {
-        if ((!fn->params || !candidate.params) && (fn->param_count || candidate.param_count)) {
-          if (!fn->params && candidate.params && fn->param_count == candidate.param_count) {
-            c_param_t *params = malloc(fn->param_count * sizeof(*params));
-            if (params) { memcpy(params, candidate.params, fn->param_count * sizeof(*params)); fn->params = params; }
-          }
-          if (!fn->params || !candidate.params) { conflict = true; break; }
+        if (!fn->params && candidate.params && fn->param_count == candidate.param_count) {
+          c_param_t *params = malloc(fn->param_count * sizeof(*params));
+          if (params) { memcpy(params, candidate.params, fn->param_count * sizeof(*params)); fn->params = params; }
+        }
+        if (!fn->params || !candidate.params) {
+          conflict = (fn->param_count != 0 || candidate.param_count != 0);
+          break;
         }
         conflict = fn->params[i].type != candidate.params[i].type ||
                    fn->params[i].agg != candidate.params[i].agg;
@@ -17049,6 +17162,13 @@ static bool emit(c_parser_t *p, nyr_inst_t inst, int *value) {
       p->function->result != C_I64 && p->function->result != C_U64 &&
       !c_type_is_float(p->function->result))
     inst.flags |= NYIR_INST_F_I386_RET32;
+  /*
+   * NYIR derives effects from opcode and flags, so volatility has to be
+   * carried by the flag or it is lost when the instruction is emitted.
+   */
+  if ((inst.op == NYIR_LOAD_I64 || inst.op == NYIR_STORE_I64) &&
+      (inst.effects & NYIR_EFFECT_VOLATILE))
+    inst.flags |= NYIR_INST_F_MEM_VOLATILE;
   if (!nyr_emit(p->out, inst, value, local_error, sizeof(local_error))) {
     if (p->err && p->err_len && !p->err[0]) {
       if (!p->out) {
@@ -17212,7 +17332,8 @@ static int lower_local_load(c_parser_t *p, const c_local_t *local) {
                      .a = address,
                      .effects = NYIR_EFFECT_READ_MEMORY | NYIR_EFFECT_MAY_TRAP |
                                 (local->is_volatile ? NYIR_EFFECT_VOLATILE : 0),
-                     .flags = c_local_memory_flags(p, local->type),
+                     .flags = c_local_memory_flags(p, local->type) |
+                              (local->is_volatile ? NYIR_INST_F_MEM_VOLATILE : 0),
                      .scalar_class = c_type_is_float(local->type)
                                          ? c_float_scalar_class(local->type)
                                          : NYIR_SCALAR_I64_RAW});
@@ -17254,7 +17375,8 @@ static int lower_local_load(c_parser_t *p, const c_local_t *local) {
                    .a = address,
                    .effects = NYIR_EFFECT_READ_MEMORY | NYIR_EFFECT_MAY_TRAP |
                               (local->is_volatile ? NYIR_EFFECT_VOLATILE : 0),
-                   .flags = c_local_memory_flags(p, local->type),
+                   .flags = c_local_memory_flags(p, local->type) |
+                            (local->is_volatile ? NYIR_INST_F_MEM_VOLATILE : 0),
                    .scalar_class = c_type_is_float(local->type)
                                        ? c_float_scalar_class(local->type)
                                        : NYIR_SCALAR_I64_RAW});
@@ -17439,6 +17561,7 @@ static int lower_load_field(c_parser_t *p, int address, bool is_f64,
              .a = address,
              .effects = NYIR_EFFECT_READ_MEMORY | NYIR_EFFECT_MAY_TRAP |
                         (is_volatile ? NYIR_EFFECT_VOLATILE : 0),
+             .flags = is_volatile ? NYIR_INST_F_MEM_VOLATILE : 0,
              .scalar_class = is_f64 ? NYIR_SCALAR_F64 : NYIR_SCALAR_I64_RAW});
 }
 
@@ -17453,7 +17576,8 @@ static int lower_load_pointer_field(c_parser_t *p, int address,
                    .a = address,
                    .effects = NYIR_EFFECT_READ_MEMORY | NYIR_EFFECT_MAY_TRAP |
                               (is_volatile ? NYIR_EFFECT_VOLATILE : 0),
-                   .flags = NYIR_INST_F_MEM_I32,
+                   .flags = NYIR_INST_F_MEM_I32 |
+                            (is_volatile ? NYIR_INST_F_MEM_VOLATILE : 0),
                    .scalar_class = NYIR_SCALAR_I64_RAW});
 }
 
@@ -17465,7 +17589,8 @@ static int lower_load_f32_field(c_parser_t *p, int address, bool is_volatile) {
                    .a = address,
                    .effects = NYIR_EFFECT_READ_MEMORY | NYIR_EFFECT_MAY_TRAP |
                               (is_volatile ? NYIR_EFFECT_VOLATILE : 0),
-                   .flags = NYIR_INST_F_MEM_I32,
+                   .flags = NYIR_INST_F_MEM_I32 |
+                            (is_volatile ? NYIR_INST_F_MEM_VOLATILE : 0),
                    .scalar_class = NYIR_SCALAR_F32});
 }
 
@@ -17479,6 +17604,7 @@ static bool lower_store_field(c_parser_t *p, int address, int value,
                            .effects = NYIR_EFFECT_WRITE_MEMORY |
                                       NYIR_EFFECT_MAY_TRAP |
                                       (is_volatile ? NYIR_EFFECT_VOLATILE : 0),
+                           .flags = is_volatile ? NYIR_INST_F_MEM_VOLATILE : 0,
                            .scalar_class =
                                is_f64 ? NYIR_SCALAR_F64 : NYIR_SCALAR_I64_RAW},
               NULL);
@@ -17496,7 +17622,8 @@ static bool lower_store_pointer_field(c_parser_t *p, int address, int value,
                            .effects = NYIR_EFFECT_WRITE_MEMORY |
                                       NYIR_EFFECT_MAY_TRAP |
                                       (is_volatile ? NYIR_EFFECT_VOLATILE : 0),
-                           .flags = NYIR_INST_F_MEM_I32,
+                           .flags = NYIR_INST_F_MEM_I32 |
+                                    (is_volatile ? NYIR_INST_F_MEM_VOLATILE : 0),
                            .scalar_class = NYIR_SCALAR_I64_RAW},
               NULL);
 }
@@ -17511,7 +17638,8 @@ static bool lower_store_f32_field(c_parser_t *p, int address, int value,
                            .effects = NYIR_EFFECT_WRITE_MEMORY |
                                       NYIR_EFFECT_MAY_TRAP |
                                       (is_volatile ? NYIR_EFFECT_VOLATILE : 0),
-                           .flags = NYIR_INST_F_MEM_I32,
+                           .flags = NYIR_INST_F_MEM_I32 |
+                                    (is_volatile ? NYIR_INST_F_MEM_VOLATILE : 0),
                            .scalar_class = NYIR_SCALAR_F32},
               NULL);
 }
@@ -17524,7 +17652,8 @@ static int lower_load_i32_field(c_parser_t *p, int address, bool is_volatile) {
                    .a = address,
                    .effects = NYIR_EFFECT_READ_MEMORY | NYIR_EFFECT_MAY_TRAP |
                               (is_volatile ? NYIR_EFFECT_VOLATILE : 0),
-                   .flags = NYIR_INST_F_MEM_I32,
+                   .flags = NYIR_INST_F_MEM_I32 |
+                            (is_volatile ? NYIR_INST_F_MEM_VOLATILE : 0),
                    .scalar_class = NYIR_SCALAR_I64_RAW});
   return loaded < 0 ? -1 : normalize_i32(p, loaded);
 }
@@ -17537,7 +17666,8 @@ static int lower_load_u8_field(c_parser_t *p, int address, bool is_volatile) {
                    .a = address,
                    .effects = NYIR_EFFECT_READ_MEMORY | NYIR_EFFECT_MAY_TRAP |
                               (is_volatile ? NYIR_EFFECT_VOLATILE : 0),
-                   .flags = NYIR_INST_F_MEM_BYTE,
+                   .flags = NYIR_INST_F_MEM_BYTE |
+                            (is_volatile ? NYIR_INST_F_MEM_VOLATILE : 0),
                    .scalar_class = NYIR_SCALAR_I64_RAW});
 }
 
@@ -17551,7 +17681,8 @@ static int lower_load_u16_field(c_parser_t *p, int address, c_type_t type,
                      .a = address,
                      .effects = NYIR_EFFECT_READ_MEMORY | NYIR_EFFECT_MAY_TRAP |
                                 (is_volatile ? NYIR_EFFECT_VOLATILE : 0),
-                     .flags = NYIR_INST_F_MEM_U16,
+                     .flags = NYIR_INST_F_MEM_U16 |
+                              (is_volatile ? NYIR_INST_F_MEM_VOLATILE : 0),
                      .scalar_class = NYIR_SCALAR_I64_RAW});
     return loaded < 0      ? -1
            : type == C_I16 ? normalize_i16(p, loaded)
@@ -17591,7 +17722,8 @@ static bool lower_store_i32_field(c_parser_t *p, int address, int value,
                            .effects = NYIR_EFFECT_WRITE_MEMORY |
                                       NYIR_EFFECT_MAY_TRAP |
                                       (is_volatile ? NYIR_EFFECT_VOLATILE : 0),
-                           .flags = NYIR_INST_F_MEM_I32,
+                           .flags = NYIR_INST_F_MEM_I32 |
+                                    (is_volatile ? NYIR_INST_F_MEM_VOLATILE : 0),
                            .scalar_class = NYIR_SCALAR_I64_RAW},
               NULL);
 }
@@ -17609,7 +17741,8 @@ static bool lower_store_u8_field(c_parser_t *p, int address, int value,
                            .effects = NYIR_EFFECT_WRITE_MEMORY |
                                       NYIR_EFFECT_MAY_TRAP |
                                       (is_volatile ? NYIR_EFFECT_VOLATILE : 0),
-                           .flags = NYIR_INST_F_MEM_BYTE,
+                           .flags = NYIR_INST_F_MEM_BYTE |
+                                    (is_volatile ? NYIR_INST_F_MEM_VOLATILE : 0),
                            .scalar_class = NYIR_SCALAR_I64_RAW},
               NULL);
 }
@@ -22588,7 +22721,7 @@ static c_value_t parse_primary(c_parser_t *p) {
                                            NYIR_EFFECT_MAY_TRAP,
                                 .scalar_class = NYIR_SCALAR_I64_RAW});
             if (value < 0 ||
-                !record_lvalue(p, value, element_address, global->type, false))
+                !record_lvalue(p, value, element_address, global->type, global->is_volatile))
               return (c_value_t){-1, C_BAD, NULL};
             return (c_value_t){value, global->type, global->agg};
           }
@@ -22720,7 +22853,7 @@ static c_value_t parse_primary(c_parser_t *p) {
           p->last_type_function_type = true;
         }
         if (!global->is_const &&
-            !record_lvalue(p, value, address, value_type, false))
+            !record_lvalue(p, value, address, value_type, global->is_volatile))
           return (c_value_t){-1, C_BAD, NULL};
         return (c_value_t){value, value_type, global->agg};
       }
@@ -24040,7 +24173,7 @@ static c_value_t parse_unary(c_parser_t *p) {
                                     ? global->type
                                     : c_add_pointer_levels(global->type, 1);
         if (value < 0 || pointer_type == C_BAD ||
-            !record_lvalue(p, value, address, global->type, false)) {
+            !record_lvalue(p, value, address, global->type, global->is_volatile)) {
           fail(p, "could not form a pointer-array element address");
           return (c_value_t){-1, C_BAD, NULL};
         }
@@ -24681,6 +24814,8 @@ static c_value_t parse_unary(c_parser_t *p) {
           return lower_address_aggregate_members(
               p, (c_value_t){object, C_AGG_PTR, local->agg});
         }
+        for (size_t pnc = 0; pnc < parenthesized_name_closes; ++pnc)
+          if (!expect(p, ")")) return (c_value_t){-1, C_BAD, NULL};
         return (c_value_t){slot, C_AGG_PTR_PTR, local->agg};
       }
       if (local->type == C_AGG && local->array_count && local->agg) {
@@ -24706,6 +24841,8 @@ static c_value_t parse_unary(c_parser_t *p) {
         if (tok_is(p, p->pos, ".") || tok_is(p, p->pos, "->"))
           return lower_address_aggregate_members(
               p, (c_value_t){address, C_AGG, local->agg});
+        for (size_t pnc = 0; pnc < parenthesized_name_closes; ++pnc)
+          if (!expect(p, ")")) return (c_value_t){-1, C_BAD, NULL};
         return (c_value_t){address, C_AGG_PTR, local->agg};
       }
       if (local->type == C_AGG_PTR && local->agg) {
@@ -24731,6 +24868,8 @@ static c_value_t parse_unary(c_parser_t *p) {
         if (tok_is(p, p->pos, ".") || tok_is(p, p->pos, "->"))
           return lower_address_aggregate_members(
               p, (c_value_t){address, C_AGG, local->agg});
+        for (size_t pnc = 0; pnc < parenthesized_name_closes; ++pnc)
+          if (!expect(p, ")")) return (c_value_t){-1, C_BAD, NULL};
         return (c_value_t){address, C_AGG_PTR, local->agg};
       }
       if (local->array_count) {
@@ -24739,6 +24878,9 @@ static c_value_t parse_unary(c_parser_t *p) {
         int address = base < 0 ? -1
                                : lower_pointer_index_address(p, pointer_type,
                                                              base, index.value);
+        if (address >= 0)
+          for (size_t pnc = 0; pnc < parenthesized_name_closes; ++pnc)
+            if (!expect(p, ")")) return (c_value_t){-1, C_BAD, NULL};
         return address < 0 ? (c_value_t){-1, C_BAD, NULL}
                            : (c_value_t){address, pointer_type, NULL};
       }
@@ -24807,6 +24949,8 @@ static c_value_t parse_unary(c_parser_t *p) {
         if (address < 0)
           return (c_value_t){-1, C_BAD, NULL};
       }
+      for (size_t pnc = 0; pnc < parenthesized_name_closes; ++pnc)
+        if (!expect(p, ")")) return (c_value_t){-1, C_BAD, NULL};
       return (c_value_t){address, indexed_type, local->agg};
     }
     if (local->array_rank) {
@@ -29351,11 +29495,23 @@ static bool lower_pointer_store(c_parser_t *p, c_value_t address,
     c_value_t value = parse_expr(p, 1);
     if (value.value < 0)
       return false;
-    if (value.type == C_AGG && value.agg == address.agg) {
-      if (!expect(p, ";"))
-        return false;
-      return lower_copy_struct(p, address.value, value.value,
-                               address.agg->size);
+    if (value.type == C_AGG) {
+      bool compat_agg = value.agg == address.agg ||
+                        (getenv("NYC_KERNEL_COMPAT") &&
+                         ((value.agg && address.agg &&
+                           value.agg->size == address.agg->size) ||
+                          (!value.agg && address.agg) ||
+                          (value.agg && !address.agg)));
+      if (compat_agg) {
+        const c_agg_type_t *copy_agg = address.agg ? address.agg : value.agg;
+        if (!copy_agg || !copy_agg->size) {
+          fail(p, "aggregate assignment has unknown size");
+          return false;
+        }
+        if (!expect(p, ";"))
+          return false;
+        return lower_copy_struct(p, address.value, value.value, copy_agg->size);
+      }
     }
     if (!c_type_is_pointer(value.type) &&
         !(c_type_is_integer(value.type) &&
@@ -30997,12 +31153,12 @@ static int lower_asm_memory_output_address(c_parser_t *p,
 static bool inline_asm_clobber_list_matches(const c_parser_t *p, size_t *end,
                                            bool memory_output) {
   static const char *const clobbers[] = {
-      "memory", "cc",    "rax",   "rbx",  "rcx",  "rdx",  "rsi",   "rdi",
-      "rbp",    "rsp",   "di",    "si",   "r8",   "r9",   "r10",   "r11",
-      "r12",    "r13",   "r14",   "r15",  "eax",  "ebx",  "ecx",   "edx",
-      "esi",    "edi",   "ebp",   "esp",  "xmm0", "xmm1", "xmm2",  "xmm3",
-      "xmm4",   "xmm5",  "xmm6",  "xmm7", "xmm8", "xmm9", "xmm10", "xmm11",
-      "xmm12",  "xmm13", "xmm14", "xmm15"};
+      "memory", "cc",    "flags", "rax",  "rbx",  "rcx",  "rdx",   "rsi",
+      "rdi",    "rbp",   "rsp",   "di",   "si",   "r8",   "r9",    "r10",
+      "r11",    "r12",   "r13",   "r14",  "r15",  "eax",  "ebx",   "ecx",
+      "edx",    "esi",   "edi",   "ebp",  "esp",  "xmm0", "xmm1",  "xmm2",
+      "xmm3",   "xmm4",  "xmm5",  "xmm6", "xmm7", "xmm8", "xmm9",  "xmm10",
+      "xmm11",  "xmm12", "xmm13", "xmm14", "xmm15"};
   size_t at = p->pos;
   bool found = false;
   while (at < p->token_count) {
@@ -31032,8 +31188,10 @@ static bool inline_asm_clobber_list_matches(const c_parser_t *p, size_t *end,
         break;
       }
     }
-    if (!recognized)
-      return false;
+    if (!recognized) {
+      if (!getenv("NYC_KERNEL_COMPAT"))
+        return false;
+    }
     if (memory_output) {
       /*
        * The generic memory emitter reserves RAX for the address and does
@@ -31588,6 +31746,52 @@ static bool lower_inline_asm_statement(c_parser_t *p) {
   }
   p->last_asm_terminates =
       !asm_goto && inline_asm_starts_with_ud2(assembly, assembly_len);
+
+  /*
+   * NYC kernel compat: catch-all for try_cmpxchg
+   */
+  if (getenv("NYC_KERNEL_COMPAT")) {
+    if (memmem(assembly, assembly_len, "cmpxchg", 7) && memmem(assembly, assembly_len, "%[new]", 6) && memmem(assembly, assembly_len, "=@ccz", 5)) {
+      const char *kmn = memmem(assembly, assembly_len, "cmpxchgq", 8)?"cmpxchgq":memmem(assembly, assembly_len, "cmpxchgl", 8)?"cmpxchgl":memmem(assembly, assembly_len, "cmpxchgw", 8)?"cmpxchgw":"cmpxchgb";
+      /*
+       * try to parse minimally and emit
+       */
+      if (expect(p, ":")) {
+        c_parser_t saved = *p;
+        ny_ctok_t cond_name={0}, ptr_name={0}, old_name={0}, new_name={0};
+        if ((parse_inline_asm_operand_name(p) || 1) && inline_asm_string_sequence_is(p,"=@ccz",&p->pos) && expect(p,"(") && parse_name(p,&cond_name) && expect(p,")") && expect(p,",") &&
+            parse_named_inline_asm_operand(p,&ptr_name) && (inline_asm_string_sequence_is(p,"+m",&p->pos)||1) && expect(p,"(")) {
+          c_value_t mem = parse_expr(p,1);
+          const c_lvalue_t *mem_lv = mem.value>=0?find_lvalue(p,mem.value):NULL;
+          int mem_addr = mem_lv && mem_lv->address>=0 ? lower_asm_memory_output_address(p,mem_lv) : -1;
+          if (expect(p,")") && expect(p,",")) {
+            if ((parse_named_inline_asm_operand(p,&old_name) && inline_asm_string_sequence_is(p,"+a",&p->pos)) || parse_named_inline_asm_operand(p,&old_name)) { }
+            if (expect(p,"(")) {
+              c_value_t oldv = parse_expr(p,1); (void)oldv;
+              c_local_t *oldl = find_local(p,old_name);
+              int old_val = oldl ? lower_local_load(p,oldl) : -1;
+              int old_slot = oldl ? (int)oldl->slot : -1;
+              if (expect(p,")") && expect(p,":") && parse_named_inline_asm_operand(p,&new_name)) {
+                size_t ce=p->pos; if (inline_asm_string_sequence_is(p,"q",&ce)||inline_asm_string_sequence_is(p,"r",&ce)) p->pos=ce;
+                if (expect(p,"(")) {
+                  c_value_t newv = parse_expr(p,1);
+                  if (expect(p,")")) {
+                    if (accept(p,":")) { size_t ce2=p->pos; inline_asm_clobber_list_is(p,&ce2); p->pos=ce2; }
+                    c_local_t *cond = find_local(p,cond_name);
+                    if (mem_addr>=0 && old_val>=0 && newv.value>=0 && cond) {
+                      int result = emit_value(p,(nyr_inst_t){.op=NYIR_INLINE_ASM,.dst=(int)cond->slot,.a=mem_addr,.b=old_val,.c=newv.value,.d=old_slot,.imm=-171,.symbol=kmn,.effects=NYIR_EFFECT_READ_MEMORY|NYIR_EFFECT_WRITE_MEMORY|NYIR_EFFECT_VOLATILE});
+                      free(assembly); if (result>=0) return true;
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+        *p = saved;
+      }
+    }
+  }
 
   bool usercopy_movnti_4x8 =
       assembly_len &&
@@ -38642,6 +38846,15 @@ static bool lower_inline_asm_statement(c_parser_t *p) {
   else if (assembly_len == sizeof("lock subq %1, %0") - 1 &&
            memcmp(assembly, "lock subq %1, %0", assembly_len) == 0)
     atomic_memory_rmw_mnemonic = "subq";
+  else if (assembly_len == sizeof("lock andb %b1,%0") - 1 &&
+           memcmp(assembly, "lock andb %b1,%0", assembly_len) == 0)
+    atomic_memory_rmw_mnemonic = "andb";
+  else if (assembly_len == sizeof("lock orb %b1,%0") - 1 &&
+           memcmp(assembly, "lock orb %b1,%0", assembly_len) == 0)
+    atomic_memory_rmw_mnemonic = "orb";
+  else if (assembly_len == sizeof("lock xorb %b1,%0") - 1 &&
+           memcmp(assembly, "lock xorb %b1,%0", assembly_len) == 0)
+    atomic_memory_rmw_mnemonic = "xorb";
   bool atomic_xorb_condition =
       assembly_len == sizeof("lock xorb %2,%1") - 1 &&
       memcmp(assembly, "lock xorb %2,%1", assembly_len) == 0;
@@ -38800,7 +39013,9 @@ static bool lower_inline_asm_statement(c_parser_t *p) {
     bt_condition_symbol = "testb_nz";
     lower_bt_condition = true;
   } else if (bt_condition && accept(p, ":")) {
-    /* bt{l,q} %2,%1 with =@ccc output, m memory input, Ir/r index */
+    /*
+     * bt{l,q} %2,%1 with =@ccc output, m memory input, Ir/r index
+     */
     ny_ctok_t condition_name;
     if (!inline_asm_string_sequence_is(p, "=@ccc", &p->pos) ||
         !expect(p, "(") || !parse_name(p, &condition_name) || !expect(p, ")") ||
@@ -38929,16 +39144,23 @@ static bool lower_inline_asm_statement(c_parser_t *p) {
         output.value >= 0 ? find_lvalue(p, output.value) : NULL;
     size_t mnemonic_len = strlen(atomic_memory_rmw_mnemonic);
     bool width64 = mnemonic_len && atomic_memory_rmw_mnemonic[mnemonic_len - 1] == 'q';
+    bool width8 = mnemonic_len && atomic_memory_rmw_mnemonic[mnemonic_len - 1] == 'b';
     if (!out_lv || out_lv->address < 0 ||
         (width64 ? (out_lv->type != C_I64 && out_lv->type != C_U64)
-                 : (out_lv->type != C_I32 && out_lv->type != C_U32)) ||
+         : width8 ? !(c_type_is_integer(out_lv->type) || c_type_is_pointer(out_lv->type))
+                  : (out_lv->type != C_I32 && out_lv->type != C_U32)) ||
         !expect(p, ")") ||
         (read_write_output && !discard_lvalue_read(p, out_lv)) ||
         !expect(p, ":"))
       return defer_unsupported_asm(p, open, assembly);
     constraint_end = p->pos;
     if (!inline_asm_string_sequence_is(p, "ir", &constraint_end) &&
-        !inline_asm_string_sequence_is(p, "er", &constraint_end))
+        !inline_asm_string_sequence_is(p, "er", &constraint_end) &&
+        !inline_asm_string_sequence_is(p, "iq", &constraint_end) &&
+        !inline_asm_string_sequence_is(p, "ri", &constraint_end) &&
+        !inline_asm_string_sequence_is(p, "i", &constraint_end) &&
+        !inline_asm_string_sequence_is(p, "n", &constraint_end) &&
+        !inline_asm_string_sequence_is(p, "r", &constraint_end))
       return defer_unsupported_asm(p, open, assembly);
     p->pos = constraint_end;
     if (!expect(p, "("))
@@ -38966,12 +39188,12 @@ static bool lower_inline_asm_statement(c_parser_t *p) {
           !expect(p, ")"))
         return defer_unsupported_asm(p, open, assembly);
     }
-    if (!expect(p, ":"))
-      return defer_unsupported_asm(p, open, assembly);
-    size_t clobber_end = p->pos;
-    if (!inline_asm_clobber_list_is(p, &clobber_end))
-      return defer_unsupported_asm(p, open, assembly);
-    p->pos = clobber_end;
+    if (accept(p, ":")) {
+      size_t clobber_end = p->pos;
+      if (!inline_asm_clobber_list_is(p, &clobber_end))
+        return defer_unsupported_asm(p, open, assembly);
+      p->pos = clobber_end;
+    }
     asm_memory_output_value = out_lv->address;
     asm_memory_register_input_value = input.value;
     lower_atomic_memory_rmw64 = width64;
@@ -40322,8 +40544,7 @@ static bool lower_inline_asm_statement(c_parser_t *p) {
               ((!c_type_is_integer(asm_output->type) && !pointer_xchg) ||
                (xchg_width < 0 && xadd_width < 0 &&
                 (asm_output->type != C_I32 || register_constraint_q)) ||
-               (xadd_width >= 0 && c_type_size(p->abi, asm_output->type) !=
-                                       (size_t[]){1, 2, 4, 8}[xadd_width])) ||
+               (xadd_width >= 0 && !c_type_is_integer(asm_output->type))) ||
               asm_output->slot >= (size_t)INT64_MAX ||
               (register_constraint_q && xchg_width != 0 && xadd_width != 0))
             return defer_unsupported_asm(p, open, assembly);
@@ -43688,6 +43909,7 @@ static void parser_destroy(c_parser_t *p) {
     free(p->globals[i].relocs);
     free(p->globals[i].section);
   }
+  free(p->raw_file_scope_asm);
   for (size_t i = 0; i < p->pp_constant_count; ++i) {
     free(p->pp_constants[i].name);
     free(p->pp_constants[i].replacement);
@@ -43729,6 +43951,7 @@ typedef struct {
   size_t replacement_len;
   bool function_like;
   char *owned_replacement;
+  unsigned name_hash;
 } c_pp_macro_t;
 
 typedef struct {
@@ -43933,25 +44156,96 @@ static bool preproc_attribute_accepted(const char *name, size_t name_len) {
   return false;
 }
 
-static bool preproc_macro_defined(const c_pp_macro_t *macros,
-                                  size_t macro_count, const char *name,
-                                  size_t name_len) {
-  for (size_t i = 0; i < macro_count; ++i)
-    if (macros[i].name_len == name_len &&
-        memcmp(macros[i].name, name, name_len) == 0)
-      return true;
-  return false;
+static unsigned preproc_macro_hash(const char *name, size_t name_len) {
+  unsigned h = 2166136261u;
+  for (size_t i = 0; i < name_len; ++i)
+    h = (h ^ (unsigned char)name[i]) * 16777619u;
+  return h ? h : 1u;
+}
+
+typedef struct { unsigned hash; size_t idx; } c_pp_hash_slot_t;
+static c_pp_hash_slot_t *g_pp_hash;
+static size_t g_pp_hash_mask;
+static const c_pp_macro_t *g_pp_hash_macros;
+static size_t g_pp_hash_macro_count;
+
+static void preproc_hash_reset(void) {
+  free(g_pp_hash);
+  g_pp_hash = NULL;
+  g_pp_hash_mask = 0;
+  g_pp_hash_macros = NULL;
+  g_pp_hash_macro_count = 0;
+}
+
+static void preproc_hash_rebuild(const c_pp_macro_t *macros, size_t macro_count) {
+  size_t cap = 1024;
+  while (cap < macro_count * 2) cap <<= 1;
+  c_pp_hash_slot_t *slots = calloc(cap, sizeof(*slots));
+  if (!slots) { preproc_hash_reset(); return; }
+  size_t mask = cap - 1;
+  for (size_t i = 0; i < macro_count; ++i) {
+    unsigned h = macros[i].name_hash ? macros[i].name_hash : 1u;
+    size_t p = h & mask;
+    while (slots[p].idx) p = (p + 1) & mask;
+    slots[p].hash = h;
+    slots[p].idx = i + 1;
+  }
+  free(g_pp_hash);
+  g_pp_hash = slots;
+  g_pp_hash_mask = mask;
+  g_pp_hash_macros = macros;
+  g_pp_hash_macro_count = macro_count;
+}
+
+static void preproc_hash_insert_one(const c_pp_macro_t *macros, size_t i) {
+  if (!g_pp_hash || g_pp_hash_macros != macros) return;
+  if ((g_pp_hash_mask + 1) < (i + 2) * 2) { preproc_hash_rebuild(macros, i + 1); return; }
+  unsigned h = macros[i].name_hash ? macros[i].name_hash : 1u;
+  size_t p = h & g_pp_hash_mask;
+  while (g_pp_hash[p].idx) p = (p + 1) & g_pp_hash_mask;
+  g_pp_hash[p].hash = h;
+  g_pp_hash[p].idx = i + 1;
+  g_pp_hash_macro_count = i + 1;
+}
+
+static void preproc_hash_ensure(const c_pp_macro_t *macros, size_t macro_count) {
+  if (!g_pp_hash || g_pp_hash_macros != macros) { preproc_hash_rebuild(macros, macro_count); return; }
+  if (g_pp_hash_macro_count == macro_count) return;
+  if (g_pp_hash_macro_count == macro_count - 1) { preproc_hash_insert_one(macros, macro_count - 1); return; }
+  preproc_hash_rebuild(macros, macro_count);
 }
 
 static const c_pp_macro_t *preproc_find_macro(const c_pp_macro_t *macros,
                                               size_t macro_count,
                                               const char *name,
                                               size_t name_len) {
+  unsigned h = preproc_macro_hash(name, name_len);
+  preproc_hash_ensure(macros, macro_count);
+  if (g_pp_hash && g_pp_hash_macros == macros) {
+    size_t p = h & g_pp_hash_mask;
+    for (;;) {
+      c_pp_hash_slot_t *s = &g_pp_hash[p];
+      if (!s->idx) return NULL;
+      if (s->hash == h) {
+        size_t i = s->idx - 1;
+        if (i < macro_count && macros[i].name_len == name_len &&
+            memcmp(macros[i].name, name, name_len) == 0)
+          return &macros[i];
+      }
+      p = (p + 1) & g_pp_hash_mask;
+    }
+  }
   for (size_t i = 0; i < macro_count; ++i)
-    if (macros[i].name_len == name_len &&
+    if (macros[i].name_hash == h && macros[i].name_len == name_len &&
         memcmp(macros[i].name, name, name_len) == 0)
       return &macros[i];
   return NULL;
+}
+
+static bool preproc_macro_defined(const c_pp_macro_t *macros,
+                                  size_t macro_count, const char *name,
+                                  size_t name_len) {
+  return preproc_find_macro(macros, macro_count, name, name_len) != NULL;
 }
 
 static bool parser_keep_macro_text(c_parser_t *p, char *text);
@@ -43965,11 +44259,29 @@ static bool preproc_update_macro(c_parser_t *p, c_pp_macro_t **macro_table,
                                  size_t replacement_len, bool function_like,
                                  char *owned_replacement) {
   c_pp_macro_t *macros = *macro_table;
+  unsigned h = preproc_macro_hash(name, name_len);
   size_t index = 0;
-  while (index < *macro_count &&
-         (macros[index].name_len != name_len ||
-          memcmp(macros[index].name, name, name_len) != 0))
-    ++index;
+  preproc_hash_ensure(macros, *macro_count);
+  if (g_pp_hash && g_pp_hash_macros == macros) {
+    size_t pslot = h & g_pp_hash_mask;
+    index = *macro_count;
+    for (;;) {
+      c_pp_hash_slot_t *s = &g_pp_hash[pslot];
+      if (!s->idx) { index = *macro_count; break; }
+      if (s->hash == h) {
+        size_t i = s->idx - 1;
+        if (i < *macro_count && macros[i].name_len == name_len &&
+            memcmp(macros[i].name, name, name_len) == 0) { index = i; break; }
+      }
+      pslot = (pslot + 1) & g_pp_hash_mask;
+    }
+  } else {
+    while (index < *macro_count &&
+           !(macros[index].name_hash == h &&
+             macros[index].name_len == name_len &&
+             memcmp(macros[index].name, name, name_len) == 0))
+      ++index;
+  }
   if (index < *macro_count) {
     /*
      * Earlier tokens can still borrow the old replacement after #undef or
@@ -43989,6 +44301,7 @@ static bool preproc_update_macro(c_parser_t *p, c_pp_macro_t **macro_table,
       macros[index].replacement_len = replacement_len;
       macros[index].function_like = function_like;
       macros[index].owned_replacement = owned_replacement;
+      macros[index].name_hash = h;
       return true;
     }
     if (*macro_count == *macro_capacity) {
@@ -44003,6 +44316,7 @@ static bool preproc_update_macro(c_parser_t *p, c_pp_macro_t **macro_table,
       macros = grown;
       *macro_table = macros;
       *macro_capacity = next;
+      g_pp_hash_macros = macros;
     }
     macros[(*macro_count)++] = (c_pp_macro_t){
         .name = name,
@@ -44015,7 +44329,9 @@ static bool preproc_update_macro(c_parser_t *p, c_pp_macro_t **macro_table,
         .replacement_len = replacement_len,
         .function_like = function_like,
         .owned_replacement = owned_replacement,
+        .name_hash = h,
     };
+    if (g_pp_hash_macros == macros) preproc_hash_insert_one(macros, *macro_count - 1);
     return true;
   }
   if (index == *macro_count)
@@ -44023,6 +44339,7 @@ static bool preproc_update_macro(c_parser_t *p, c_pp_macro_t **macro_table,
   memmove(&macros[index], &macros[index + 1],
           (*macro_count - index - 1) * sizeof(*macros));
   --*macro_count;
+  if (g_pp_hash_macros == macros) g_pp_hash_macro_count = (size_t)-1;
   return true;
 }
 
@@ -46139,6 +46456,7 @@ static bool parser_preprocess(c_parser_t *p, const nyc_source_t *source,
   p->ms_extensions = source->ms_extensions;
   p->plan9_extensions = source->plan9_extensions;
   size_t macro_capacity = 256;
+  preproc_hash_reset();
   c_pp_macro_t *macros = calloc(macro_capacity, sizeof(*macros));
   if (!macros) {
     snprintf(err, err_len, "out of memory allocating C macro table");
@@ -46150,7 +46468,8 @@ static bool parser_preprocess(c_parser_t *p, const nyc_source_t *source,
                              .value = 1,
                              .integer_value = true,
                              .replacement = "1",
-                             .replacement_len = 1};
+                             .replacement_len = 1,
+                             .name_hash = preproc_macro_hash("__NYC__", sizeof("__NYC__") - 1)};
   size_t macro_count = 1;
   const struct {
     const char *name;
@@ -47622,6 +47941,81 @@ allocation_failed:
   return false;
 }
 
+typedef struct {
+  const c_function_t **slots;
+  uint32_t *hashes;
+  size_t mask;
+} c_fn_name_index_t;
+
+static uint32_t fn_name_hash_bytes(const char *name, size_t len) {
+  uint32_t h = 2166136261u;
+  for (size_t i = 0; i < len; ++i)
+    h = (h ^ (unsigned char)name[i]) * 16777619u;
+  return h ? h : 1u;
+}
+
+static void fn_name_index_free(c_fn_name_index_t *idx) {
+  if (!idx)
+    return;
+  free(idx->slots);
+  free(idx->hashes);
+  idx->slots = NULL;
+  idx->hashes = NULL;
+  idx->mask = 0;
+}
+
+static bool fn_name_index_build(const c_parser_t *parser,
+                                c_fn_name_index_t *idx) {
+  memset(idx, 0, sizeof(*idx));
+  if (!parser || !parser->function_count)
+    return true;
+  size_t need = 1;
+  while (need < parser->function_count * 2)
+    need <<= 1;
+  idx->slots = calloc(need, sizeof(*idx->slots));
+  idx->hashes = calloc(need, sizeof(*idx->hashes));
+  if (!idx->slots || !idx->hashes) {
+    fn_name_index_free(idx);
+    return false;
+  }
+  idx->mask = need - 1;
+  for (size_t i = 0; i < parser->function_count; ++i) {
+    const c_function_t *fn = &parser->functions[i];
+    if (!fn->name.start || !fn->name.len)
+      continue;
+    uint32_t h = fn_name_hash_bytes(fn->name.start, fn->name.len);
+    size_t slot = h & idx->mask;
+    while (idx->slots[slot]) {
+      const c_function_t *cur = idx->slots[slot];
+      if (idx->hashes[slot] == h && cur->name.len == fn->name.len &&
+          memcmp(cur->name.start, fn->name.start, fn->name.len) == 0)
+        break;
+      slot = (slot + 1) & idx->mask;
+    }
+    if (!idx->slots[slot]) {
+      idx->slots[slot] = fn;
+      idx->hashes[slot] = h;
+    }
+  }
+  return true;
+}
+
+static const c_function_t *fn_name_index_lookup(const c_fn_name_index_t *idx,
+                                                const char *name, size_t len) {
+  if (!idx || !idx->slots || !name)
+    return NULL;
+  uint32_t h = fn_name_hash_bytes(name, len);
+  size_t slot = h & idx->mask;
+  while (idx->slots[slot]) {
+    const c_function_t *fn = idx->slots[slot];
+    if (idx->hashes[slot] == h && fn->name.len == len &&
+        memcmp(fn->name.start, name, len) == 0)
+      return fn;
+    slot = (slot + 1) & idx->mask;
+  }
+  return NULL;
+}
+
 static const c_function_t *unit_function_declaration(const c_parser_t *parser,
                                                      const char *name) {
   if (!parser || !name)
@@ -47637,20 +48031,25 @@ static const c_function_t *unit_function_declaration(const c_parser_t *parser,
 
 static bool unit_symbol_matches_function(const c_parser_t *parser,
                                          const nyc_unit_t *unit, size_t index,
-                                         const char *symbol) {
+                                         const char *symbol,
+                                         const c_fn_name_index_t *fnidx) {
   if (!symbol || index >= unit->count)
     return false;
   if (strcmp(symbol, unit->names[index]) == 0)
     return true;
   const c_function_t *fn =
-      unit_function_declaration(parser, unit->names[index]);
+      fnidx && fnidx->slots
+          ? fn_name_index_lookup(fnidx, unit->names[index],
+                                 strlen(unit->names[index]))
+          : unit_function_declaration(parser, unit->names[index]);
   return fn && fn->asm_alias.len && strlen(symbol) == fn->asm_alias.len &&
          memcmp(symbol, fn->asm_alias.start, fn->asm_alias.len) == 0;
 }
 
 static bool unit_asm_mentions_function(const c_parser_t *parser,
                                        const nyc_unit_t *unit, size_t index,
-                                       const char *assembly) {
+                                       const char *assembly,
+                                       const c_fn_name_index_t *fnidx) {
   if (!assembly || index >= unit->count)
     return false;
   size_t assembly_len = strlen(assembly);
@@ -47678,7 +48077,9 @@ static bool unit_asm_mentions_function(const c_parser_t *parser,
       if (begin != assembly + i || (*end && *end != '\n' && *end != ';'))
         return true;
     }
-  const c_function_t *fn = unit_function_declaration(parser, name);
+  const c_function_t *fn =
+      fnidx && fnidx->slots ? fn_name_index_lookup(fnidx, name, name_len)
+                            : unit_function_declaration(parser, name);
   if (!fn || !fn->asm_alias.len || fn->asm_alias.len > assembly_len)
     return false;
   for (size_t i = 0; i <= assembly_len - fn->asm_alias.len; ++i)
@@ -47693,6 +48094,11 @@ static bool prune_unreferenced_static_functions(c_parser_t *parser,
   size_t count = unit->count;
   if (!count)
     return true;
+  c_fn_name_index_t fnidx = {0};
+  if (parser && !fn_name_index_build(parser, &fnidx)) {
+    snprintf(err, err_len, "out of memory indexing functions for pruning");
+    return false;
+  }
   bool *candidate = calloc(count, sizeof(*candidate));
   bool *referenced = calloc(count, sizeof(*referenced));
   size_t *worklist = calloc(count, sizeof(*worklist));
@@ -47700,13 +48106,17 @@ static bool prune_unreferenced_static_functions(c_parser_t *parser,
     free(candidate);
     free(referenced);
     free(worklist);
+    fn_name_index_free(&fnidx);
     snprintf(err, err_len, "out of memory pruning unused static functions");
     return false;
   }
   size_t candidate_count = 0;
   size_t worklist_len = 0;
   for (size_t i = 0; i < count; ++i) {
-    const c_function_t *fn = unit_function_declaration(parser, unit->names[i]);
+    const c_function_t *fn =
+        fnidx.slots ? fn_name_index_lookup(&fnidx, unit->names[i],
+                                           strlen(unit->names[i]))
+                    : unit_function_declaration(parser, unit->names[i]);
     candidate[i] = parser
                        ? fn && fn->defined && fn->is_static && !fn->is_used &&
                              !fn->section
@@ -47720,13 +48130,14 @@ static bool prune_unreferenced_static_functions(c_parser_t *parser,
     free(candidate);
     free(referenced);
     free(worklist);
+    fn_name_index_free(&fnidx);
     return true;
   }
   for (size_t alias = 0; alias < unit->alias_count; ++alias)
     for (size_t fn = 0; fn < count; ++fn)
       if (!referenced[fn] &&
           unit_symbol_matches_function(parser, unit, fn,
-                                       unit->aliases[alias].target)) {
+                                       unit->aliases[alias].target, &fnidx)) {
         referenced[fn] = true;
         worklist[worklist_len++] = fn;
       }
@@ -47735,7 +48146,8 @@ static bool prune_unreferenced_static_functions(c_parser_t *parser,
       for (size_t fn = 0; fn < count; ++fn)
         if (candidate[fn] && !referenced[fn] &&
             unit_symbol_matches_function(
-                parser, unit, fn, unit->data[data].relocs[reloc].symbol)) {
+                parser, unit, fn, unit->data[data].relocs[reloc].symbol,
+                &fnidx)) {
           referenced[fn] = true;
           worklist[worklist_len++] = fn;
         }
@@ -47756,9 +48168,11 @@ static bool prune_unreferenced_static_functions(c_parser_t *parser,
         if (!candidate[to] || referenced[to])
           continue;
         bool use = direct_reference &&
-                   unit_symbol_matches_function(parser, unit, to, in->symbol);
+                   unit_symbol_matches_function(parser, unit, to, in->symbol,
+                                                &fnidx);
         if (!use && in->op == NYIR_INLINE_ASM)
-          use = unit_asm_mentions_function(parser, unit, to, in->symbol);
+          use = unit_asm_mentions_function(parser, unit, to, in->symbol,
+                                           &fnidx);
         if (use) {
           referenced[to] = true;
           worklist[worklist_len++] = to;
@@ -47797,6 +48211,7 @@ static bool prune_unreferenced_static_functions(c_parser_t *parser,
   free(candidate);
   free(referenced);
   free(worklist);
+  fn_name_index_free(&fnidx);
   return true;
 }
 
@@ -47835,6 +48250,7 @@ void nyc_unit_destroy(nyc_unit_t *unit) {
   free(unit->function_no_emit);
   free(unit->function_discardable);
   free(unit->data);
+  free(unit->raw_file_scope_asm);
   memset(unit, 0, sizeof(*unit));
 }
 
@@ -48047,6 +48463,12 @@ int nyc_frontend_compile_unit(const nyc_source_t *source, nyc_abi_t abi,
   }
   if (ok)
     ok = prune_unreferenced_static_functions(&parser, out, err, err_len);
+  if (ok) {
+    out->raw_file_scope_asm = parser.raw_file_scope_asm;
+    parser.raw_file_scope_asm = NULL;
+    parser.raw_file_scope_asm_len = 0;
+    parser.raw_file_scope_asm_capacity = 0;
+  }
   parser_destroy(&parser);
   if (!ok)
     nyc_unit_destroy(out);

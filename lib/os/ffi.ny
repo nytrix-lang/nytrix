@@ -290,6 +290,7 @@ fn _ffi_bind_symbol(any h, str name) any {
 }
 
 fn bind(any h, str name) any {
+   "Resolves the symbol `name` in library handle `h`."
    _ffi_bind_symbol(h, name)
 }
 

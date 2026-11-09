@@ -158,14 +158,17 @@ fn _wav_decode(str filepath) any {
    } else { return 0 }
 }
 
+;; Reads a big-endian 16-bit value at offset `off`.
 fn load16_be(any p, int off) int {
    (load8(p, off) << 8) | load8(p, off + 1)
 }
 
+;; Reads a big-endian 24-bit value at offset `off`.
 fn load24_be(any p, int off) int {
    (load8(p, off) << 16) | (load8(p, off + 1) << 8) | load8(p, off + 2)
 }
 
+;; Reads a big-endian 32-bit value at offset `off`.
 fn load32_be(any p, int off) int {
    (load8(p, off) << 24) | (load8(p, off + 1) << 16) | (load8(p, off + 2) << 8) | load8(p, off + 3)
 }
@@ -341,6 +344,7 @@ fn _sndfile_required(str filepath) any {
 }
 
 fn decode(str filepath) any {
+   "Decodes the sound file at `filepath`."
    def debug = sound_debug.enabled()
    if debug { print("RES: decode " + filepath) }
    def full = path.normalize(filepath)
@@ -365,17 +369,20 @@ mut _cache = dict(64)
 mut _mtx = 0
 
 fn init() bool {
+   "Initializes the sound resource cache."
    if _mtx == 0 { _mtx = mutex_new() }
    true
 }
 
 fn shutdown() bool {
+   "Clears the sound cache and releases its lock."
    clear_cache()
    if _mtx != 0 { mutex_free(_mtx) _mtx = 0 }
    true
 }
 
 fn clear_cache() bool {
+   "Removes every cached sound."
    if _mtx == 0 { return true }
    mutex_lock(_mtx)
    _cache = dict(64)
@@ -384,6 +391,7 @@ fn clear_cache() bool {
 }
 
 fn is_cached(any filepath) bool {
+   "Returns whether the sound at `filepath` is cached."
    if _mtx == 0 { return false }
    def full = path.normalize(filepath)
    mutex_lock(_mtx)
@@ -393,6 +401,7 @@ fn is_cached(any filepath) bool {
 }
 
 fn load(any filepath) any {
+   "Loads a sound through the cache."
    if _mtx == 0 { init() }
    def full = path.normalize(filepath)
    mutex_lock(_mtx)
@@ -421,9 +430,11 @@ fn load(any filepath) any {
 }
 
 fn get_sound_info(any sound) any {
+   "Returns information about a loaded sound."
    source.sound_info(sound)
 }
 
 fn get_image_info(any img) any {
+   "Returns information about a loaded image."
    image.get_info(img)
 }

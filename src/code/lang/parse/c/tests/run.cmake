@@ -7061,3 +7061,170 @@ if(NOT status EQUAL 0)
   message(FATAL_ERROR
     "typedef lookup returned the wrong alias after scope exit\n${stdout}${stderr}")
 endif()
+
+execute_process(
+  COMMAND "${NYC}" -O3 -c "${SOURCE_DIR}/machine-regressions.c"
+          -o "${BINARY_DIR}/machine-regressions.o"
+  RESULT_VARIABLE status
+  OUTPUT_VARIABLE stdout
+  ERROR_VARIABLE stderr
+)
+if(NOT status EQUAL 0)
+  message(FATAL_ERROR
+    "nyc failed to compile machine regressions\n${stdout}${stderr}")
+endif()
+execute_process(
+  COMMAND "${CC}" "${BINARY_DIR}/machine-regressions.o"
+          -o "${BINARY_DIR}/machine-regressions"
+  RESULT_VARIABLE status
+  OUTPUT_VARIABLE stdout
+  ERROR_VARIABLE stderr
+)
+if(NOT status EQUAL 0)
+  message(FATAL_ERROR
+    "host compiler could not link machine regressions\n${stdout}${stderr}")
+endif()
+execute_process(
+  COMMAND "${BINARY_DIR}/machine-regressions"
+  RESULT_VARIABLE status
+  OUTPUT_VARIABLE stdout
+  ERROR_VARIABLE stderr
+)
+if(NOT status EQUAL 0)
+  message(FATAL_ERROR
+    "machine regression failed: ${status}\n${stdout}${stderr}")
+endif()
+
+foreach(machine_case_unused IN ITEMS 1)
+  execute_process(
+    COMMAND "${NYC}" -O3 -c "${SOURCE_DIR}/fixtures/machine-sha256.c"
+            -o "${BINARY_DIR}/machine-sha256.o"
+    RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+  if(NOT status EQUAL 0)
+    message(FATAL_ERROR "nyc failed on machine-sha256\n${stdout}${stderr}")
+  endif()
+  execute_process(
+    COMMAND "${CC}" "${BINARY_DIR}/machine-sha256.o" -o "${BINARY_DIR}/machine-sha256"
+    RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+  if(NOT status EQUAL 0)
+    message(FATAL_ERROR "could not link machine-sha256\n${stdout}${stderr}")
+  endif()
+  execute_process(
+    COMMAND "${BINARY_DIR}/machine-sha256" TIMEOUT 30
+    RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+  if(NOT status EQUAL 0 OR NOT stdout MATCHES "checksum=248162")
+    message(FATAL_ERROR "machine-sha256 miscompiled: ${status}\n${stdout}${stderr}")
+  endif()
+endforeach()
+
+foreach(machine_case_unused IN ITEMS 1)
+  execute_process(
+    COMMAND "${NYC}" -O3 -c "${SOURCE_DIR}/fixtures/machine-pbkdf2.c"
+            -o "${BINARY_DIR}/machine-pbkdf2.o"
+    RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+  if(NOT status EQUAL 0)
+    message(FATAL_ERROR "nyc failed on machine-pbkdf2\n${stdout}${stderr}")
+  endif()
+  execute_process(
+    COMMAND "${CC}" "${BINARY_DIR}/machine-pbkdf2.o" -o "${BINARY_DIR}/machine-pbkdf2"
+    RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+  if(NOT status EQUAL 0)
+    message(FATAL_ERROR "could not link machine-pbkdf2\n${stdout}${stderr}")
+  endif()
+  execute_process(
+    COMMAND "${BINARY_DIR}/machine-pbkdf2" TIMEOUT 30
+    RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+  if(NOT status EQUAL 0 OR NOT stdout MATCHES "checksum=2991")
+    message(FATAL_ERROR "machine-pbkdf2 miscompiled: ${status}\n${stdout}${stderr}")
+  endif()
+endforeach()
+
+foreach(machine_case_unused IN ITEMS 1)
+  execute_process(
+    COMMAND "${NYC}" -O3 -c "${SOURCE_DIR}/fixtures/machine-nqueens.c"
+            -o "${BINARY_DIR}/machine-nqueens.o"
+    RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+  if(NOT status EQUAL 0)
+    message(FATAL_ERROR "nyc failed on machine-nqueens\n${stdout}${stderr}")
+  endif()
+  execute_process(
+    COMMAND "${CC}" "${BINARY_DIR}/machine-nqueens.o" -o "${BINARY_DIR}/machine-nqueens"
+    RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+  if(NOT status EQUAL 0)
+    message(FATAL_ERROR "could not link machine-nqueens\n${stdout}${stderr}")
+  endif()
+  execute_process(
+    COMMAND "${BINARY_DIR}/machine-nqueens" TIMEOUT 30
+    RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+  if(NOT status EQUAL 0 OR NOT stdout MATCHES "checksum=73712")
+    message(FATAL_ERROR "machine-nqueens miscompiled: ${status}\n${stdout}${stderr}")
+  endif()
+endforeach()
+
+foreach(machine_case_unused IN ITEMS 1)
+  execute_process(
+    COMMAND "${NYC}" -O3 -c "${SOURCE_DIR}/fixtures/machine-knucleotide.c"
+            -o "${BINARY_DIR}/machine-knucleotide.o"
+    RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+  if(NOT status EQUAL 0)
+    message(FATAL_ERROR "nyc failed on machine-knucleotide\n${stdout}${stderr}")
+  endif()
+  execute_process(
+    COMMAND "${CC}" "${BINARY_DIR}/machine-knucleotide.o" -o "${BINARY_DIR}/machine-knucleotide"
+    RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+  if(NOT status EQUAL 0)
+    message(FATAL_ERROR "could not link machine-knucleotide\n${stdout}${stderr}")
+  endif()
+  execute_process(
+    COMMAND "${BINARY_DIR}/machine-knucleotide" TIMEOUT 30
+    RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+  if(NOT status EQUAL 0 OR NOT stdout MATCHES "checksum=849988")
+    message(FATAL_ERROR "machine-knucleotide miscompiled: ${status}\n${stdout}${stderr}")
+  endif()
+endforeach()
+
+foreach(machine_case_unused IN ITEMS 1)
+  execute_process(
+    COMMAND "${NYC}" -O3 -c "${SOURCE_DIR}/fixtures/machine-float-reduce.c"
+            -o "${BINARY_DIR}/machine-float-reduce.o"
+    RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+  if(NOT status EQUAL 0)
+    message(FATAL_ERROR "nyc failed on machine-float-reduce\n${stdout}${stderr}")
+  endif()
+  execute_process(
+    COMMAND "${CC}" "${BINARY_DIR}/machine-float-reduce.o"
+            -o "${BINARY_DIR}/machine-float-reduce"
+    RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+  if(NOT status EQUAL 0)
+    message(FATAL_ERROR "could not link machine-float-reduce\n${stdout}${stderr}")
+  endif()
+  execute_process(
+    COMMAND "${BINARY_DIR}/machine-float-reduce" TIMEOUT 30
+    RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+  if(NOT status EQUAL 0 OR NOT stdout MATCHES "checksum=15157.0 -148.0 100.0 -520.0 10000000 100.0")
+    message(FATAL_ERROR "machine-float-reduce miscompiled: ${status}\n${stdout}${stderr}")
+  endif()
+endforeach()
+
+foreach(machine_volatile_opt IN ITEMS -O0 -O3)
+  execute_process(
+    COMMAND "${NYC}" ${machine_volatile_opt} -c "${SOURCE_DIR}/fixtures/machine-volatile-wait.c"
+            -o "${BINARY_DIR}/machine-volatile-wait.o"
+    RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+  if(NOT status EQUAL 0)
+    message(FATAL_ERROR "nyc failed on machine-volatile-wait\n${stdout}${stderr}")
+  endif()
+  execute_process(
+    COMMAND "${CC}" "${BINARY_DIR}/machine-volatile-wait.o"
+            -o "${BINARY_DIR}/machine-volatile-wait"
+    RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+  if(NOT status EQUAL 0)
+    message(FATAL_ERROR "could not link machine-volatile-wait\n${stdout}${stderr}")
+  endif()
+  execute_process(
+    COMMAND "${BINARY_DIR}/machine-volatile-wait" TIMEOUT 10
+    RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+  if(NOT status EQUAL 0 OR NOT stdout MATCHES "checksum=1")
+    message(FATAL_ERROR "volatile reads were merged at ${machine_volatile_opt}: ${status}\n${stdout}${stderr}")
+  endif()
+endforeach()

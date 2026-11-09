@@ -1,3 +1,4 @@
+#include "base/debug.h"
 #include "parse.h"
 
 #include "base/version.h"
@@ -792,6 +793,8 @@ static bool write_c_unit_assembly(const nyc_unit_t *unit,
                                   size_t err_len) {
   nyr_writer_t assembly = {0};
   bool ok = !code16 || nyr_put(&assembly, "\t.code16gcc\n");
+  if (ok && unit->raw_file_scope_asm)
+    ok = nyr_put(&assembly, unit->raw_file_scope_asm);
   for (size_t i = 0; ok && i < unit->data_count; ++i) {
     if (nyc_data_is_dead_static_pointer_table(unit, &unit->data[i]))
       continue;
@@ -1172,6 +1175,14 @@ static int compile_source(int argc, char **argv, int source_arg,
     }
     if (ok && getenv("NYC_DISABLE_PASS"))
       nyr_set_pass_controls(getenv("NYC_DISABLE_PASS"), NULL);
+    /*
+     * The object writer's register-allocating path resolves PHIs into edge
+     * copies. Destroying them in the optimizer sends every merged value
+     * through memory. Text assembly and fallback encoders still get them
+     * destroyed further down.
+     */
+    nyr_set_preserve_phis(abi == NYC_ABI_SYSV_X86_64 &&
+                          !driver->assembly_output);
     for (size_t i = 0; ok && i < unit.count; i++) {
       const char *stage = "before optimization";
       ok = nyr_verify(&unit.funcs[i], err, sizeof(err));
@@ -1182,6 +1193,10 @@ static int compile_source(int argc, char **argv, int source_arg,
                  "the selected no-SSE target");
         ok = false;
       }
+      /*
+       * C values are never tagged, so raw-class copies are plain aliases.
+       */
+      unit.funcs[i].untagged_values = true;
       if (ok && !nyc_func_uses_va_list(&unit.funcs[i])) {
         stage = "during optimization";
         if (!nyr_optimize_with_options(
@@ -1207,6 +1222,7 @@ static int compile_source(int argc, char **argv, int source_arg,
         ok = nyr_recursive_add_to_loop(&unit.funcs[i], unit.names[i]);
         if (ok && unit.funcs[i].len != before_tail_call) {
           stage = "during recursive-add cleanup";
+          unit.funcs[i].untagged_values = true;
           if (!nyr_optimize_with_options(
                   &unit.funcs[i], driver->optimization,
                   driver->disable_vectorization ? NYR_OPT_DISABLE_VECTORIZATION : 0,
@@ -1295,6 +1311,7 @@ static int compile_source(int argc, char **argv, int source_arg,
             ok = false;
             break;
           }
+          unit.funcs[i].untagged_values = true;
           if (!nyr_optimize_with_options(&unit.funcs[i], driver->optimization,
                                          driver->disable_vectorization
                                              ? NYR_OPT_DISABLE_VECTORIZATION
@@ -1332,6 +1349,15 @@ static int compile_source(int argc, char **argv, int source_arg,
     }
     if (ok)
       ok = nyc_unit_prune_static(&unit, err, sizeof(err));
+    if (ok && driver->assembly_output && !nyr_get_preserve_phis()) {
+      for (size_t i = 0; ok && i < unit.count; ++i) {
+        if (!nyr_phi_elim(&unit.funcs[i])) {
+          snprintf(err, sizeof(err), "phi elimination failed for %s",
+                   unit.names[i]);
+          ok = false;
+        }
+      }
+    }
     if (ok && driver->assembly_output)
       ok = write_c_unit_assembly(
           &unit, &target_info, output_path, driver->verbose_assembly,
@@ -1484,6 +1510,18 @@ int main(int argc, char **argv) {
     }
     if (strcmp(option, "--") == 0) {
       end_options = true;
+      continue;
+    }
+    if (strncmp(option, "--verbosity=", 12) == 0) {
+      ny_dbg_init_from_verbosity(atoi(option + 12));
+      continue;
+    }
+    if (strcmp(option, "--mixed-disasm") == 0) {
+      nyr_set_mixed_disasm(true, NULL);
+      continue;
+    }
+    if (strncmp(option, "--mixed-disasm=", 15) == 0) {
+      nyr_set_mixed_disasm(true, option + 15);
       continue;
     }
     if (strcmp(option, "--help") == 0 || strcmp(option, "-h") == 0) {

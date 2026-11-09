@@ -11,6 +11,7 @@ compiler subsystems.
 | Need | Reference |
 | --- | --- |
 | Dependent types and GADTs | [Feature contract](spec/dependent.md) |
+| Open work | [Backlog](TODO.md) |
 | NYC Linux kernel | [Build acceptance](todo/nyc.md) |
 | Source ownership | [Compiler architecture](learn/architecture.md) |
 | Commands, traces, pass isolation, and runtime failures | [Compiler debugging](learn/debugging.md) |

@@ -2055,6 +2055,121 @@ static bool nyr_x64_c_bundle_append_data_group(
   return true;
 }
 
+static bool nyr_x64_c_bundle_pad_section(nyr_obj_buf_t *code,
+                                         const nyr_c_object_data_t *data,
+                                         size_t data_count, const char *section,
+                                         size_t minimum, char *err,
+                                         size_t err_len) {
+  size_t alignment = minimum;
+  for (size_t i = 0; i < data_count; ++i) {
+    bool member = section ? data[i].section && !strcmp(data[i].section, section)
+                          : !data[i].section;
+    if (member && data[i].alignment > alignment && data[i].alignment <= 4096 &&
+        !(data[i].alignment & (data[i].alignment - 1)))
+      alignment = data[i].alignment;
+  }
+  if (nyr_obj_pad_to(code, alignment))
+    return true;
+  nyr_set_error(err, err_len, "C object section alignment failed");
+  return false;
+}
+
+/*
+ * Constructs only the direct NYIR encoder implements: SysV by-value aggregate
+ * parameters and returns, and inline asm with operands or a result, which
+ * machine lowering would silently drop.
+ */
+static bool nyr_x64_c_func_needs_direct_encoder(const nyr_func_t *f) {
+  if (f->return_aggregate_size)
+    return true;
+  for (size_t i = 0; f->param_types && i < (size_t)f->param_count; ++i)
+    if (f->param_types[i] == NYIR_PARAM_AGGREGATE)
+      return true;
+  for (size_t i = 0; i < f->len; ++i)
+    if (f->data[i].op == NYIR_CALL && f->data[i].ret_aggregate_size)
+      return true;
+  for (size_t i = 0; i < f->len; ++i) {
+    const nyr_inst_t *in = &f->data[i];
+    if (in->op != NYIR_INLINE_ASM)
+      continue;
+    bool arithmetic = in->imm == -21 || in->imm == -22 || in->imm == -23;
+    bool operand_free = in->dst < 0 && in->a < 0 && in->b < 0;
+    if (!arithmetic && !operand_free && in->imm != -32)
+      return true;
+  }
+  return false;
+}
+
+/*
+ * x86-64 libgcc has no u64-to-float helpers because GCC expands that
+ * conversion inline, but the C frontend calls them. Assembly output defines
+ * them as weak symbols; objects get a private copy when a function needs one.
+ */
+static bool nyr_x64_c_bundle_append_float_helpers(
+    nyr_obj_buf_t *code, nyr_x64_obj_symbol_def_t *defs, size_t *def_count,
+    const nyr_x64_obj_reloc_t *relocs, size_t reloc_count, char *err,
+    size_t err_len) {
+  static const unsigned char to_f64[] = {
+      0x48, 0x85, 0xff,             /* test rdi, rdi */
+      0x78, 0x06,                   /* js high */
+      0xf2, 0x48, 0x0f, 0x2a, 0xc7, /* cvtsi2sd xmm0, rdi */
+      0xc3,                         /* ret */
+      0x48, 0x89, 0xf8,             /* high: mov rax, rdi */
+      0x48, 0x89, 0xf9,             /* mov rcx, rdi */
+      0x48, 0x83, 0xe1, 0x01,       /* and rcx, 1 */
+      0x48, 0xd1, 0xe8,             /* shr rax, 1 */
+      0x48, 0x09, 0xc8,             /* or rax, rcx */
+      0xf2, 0x48, 0x0f, 0x2a, 0xc0, /* cvtsi2sd xmm0, rax */
+      0xf2, 0x0f, 0x58, 0xc0,       /* addsd xmm0, xmm0 */
+      0xc3};
+  static const unsigned char to_f32[] = {
+      0x48, 0x85, 0xff,             /* test rdi, rdi */
+      0x78, 0x06,                   /* js high */
+      0xf3, 0x48, 0x0f, 0x2a, 0xc7, /* cvtsi2ss xmm0, rdi */
+      0xc3,                         /* ret */
+      0x48, 0x89, 0xf8,             /* high: mov rax, rdi */
+      0x48, 0x89, 0xf9,             /* mov rcx, rdi */
+      0x48, 0x83, 0xe1, 0x01,       /* and rcx, 1 */
+      0x48, 0xd1, 0xe8,             /* shr rax, 1 */
+      0x48, 0x09, 0xc8,             /* or rax, rcx */
+      0xf3, 0x48, 0x0f, 0x2a, 0xc0, /* cvtsi2ss xmm0, rax */
+      0xf3, 0x0f, 0x58, 0xc0,       /* addss xmm0, xmm0 */
+      0xc3};
+  static const struct {
+    const char *name;
+    const unsigned char *bytes;
+    size_t len;
+  } helpers[] = {{"__floatundidf", to_f64, sizeof(to_f64)},
+                 {"__floatundisf", to_f32, sizeof(to_f32)}};
+  for (size_t h = 0; h < sizeof(helpers) / sizeof(helpers[0]); ++h) {
+    bool needed = false;
+    for (size_t i = 0; i < reloc_count && !needed; ++i)
+      needed = strcmp(relocs[i].symbol, helpers[h].name) == 0;
+    if (!needed || nyr_x64_obj_def_index(defs, *def_count, helpers[h].name) >= 0)
+      continue;
+    if (*def_count >= NY_NATIVE_MAX_DEFS) {
+      nyr_set_error(err, err_len, "too many C object symbols");
+      return false;
+    }
+    if (!nyr_obj_pad_to(code, 16)) {
+      nyr_set_error(err, err_len, "C object helper emission failed");
+      return false;
+    }
+    nyr_x64_obj_symbol_def_t *def = &defs[(*def_count)++];
+    memset(def, 0, sizeof(*def));
+    snprintf(def->name, sizeof(def->name), "%s", helpers[h].name);
+    def->off = code->len;
+    def->size = helpers[h].len;
+    def->function_symbol = true;
+    def->is_local = true;
+    if (!nyr_obj_emit(code, helpers[h].bytes, helpers[h].len)) {
+      nyr_set_error(err, err_len, "C object helper emission failed");
+      return false;
+    }
+  }
+  return true;
+}
+
 static bool nyr_x64_obj_build_c_bundle(
     const nyr_func_t *funcs, const char *const *func_names, size_t func_count,
     const char *const *function_sections, const bool *function_local,
@@ -2116,10 +2231,69 @@ static bool nyr_x64_obj_build_c_bundle(
         nyr_set_error(err, err_len, "duplicate C object symbol %s", symbol);
         return false;
       }
-      nyr_phi_elim((nyr_func_t *)&funcs[i]);
       size_t function_def = *def_count;
       char function_err[256] = {0};
-      if (!nyr_x64_obj_append_function_with_frame(
+      /*
+       * The register-allocating machine encoder is the same one the language
+       * uses.  Options it does not model (kernel-style frames, retpolines,
+       * named sections, PIC) stay on the direct NYIR encoder, as does anything
+       * machine lowering rejects.
+       */
+      bool machine = false;
+      static int mach_objects = -1;
+      if (mach_objects < 0) {
+        const char *off = getenv("NYC_NO_MACH_OBJECT");
+        mach_objects = !(off && off[0] && off[0] != '0');
+      }
+      if (mach_objects && !omit_frame_pointer && !position_independent &&
+          !retpoline_indirect_calls && !retpoline_inline_calls && !section &&
+          !nyr_x64_c_func_needs_direct_encoder(&funcs[i])) {
+        nyr_mach_func_t mach = {0};
+        char reason[256] = {0};
+        if (nyr_mach_lower_nir(&funcs[i], &mach, target->caps, reason,
+                               sizeof(reason))) {
+          mach.c_abi = true;
+          /*
+           * C calls use the plain symbol, never the language's mangling.
+           */
+          for (size_t ii = 0; ii < mach.inst_len; ++ii)
+            if (mach.insts[ii].opcode == NYR_MACH_CALL)
+              mach.insts[ii].call_is_extern = true;
+          size_t *inst_offsets = NULL;
+          size_t inst_offsets_len = 0;
+          machine = nyr_x64_mach_append_function_debug(
+              code, defs, def_count, relocs, reloc_count, &mach, target, symbol,
+              false, false, NULL, NULL, NULL, NULL, reason, sizeof(reason),
+              &inst_offsets, &inst_offsets_len);
+          int emitted = machine ? nyr_x64_obj_def_index(defs, *def_count, symbol)
+                                : -1;
+          if (emitted >= 0)
+            nyr_mach_dump_mixed(&funcs[i], &mach, code->data + defs[emitted].off,
+                                defs[emitted].size, inst_offsets,
+                                inst_offsets_len, name, stderr);
+          free(inst_offsets);
+          if (!machine && !reason[0])
+            snprintf(reason, sizeof(reason), "encoder rejected function");
+        } else if (!reason[0]) {
+          for (size_t ii = 0; ii < funcs[i].len; ++ii) {
+            if (!nyr_mach_opcode_supported(funcs[i].data[ii].op)) {
+              snprintf(reason, sizeof(reason), "unsupported opcode %d",
+                       (int)funcs[i].data[ii].op);
+              break;
+            }
+          }
+          if (!reason[0])
+            snprintf(reason, sizeof(reason),
+                     "machine lowering rejected function");
+        }
+        nyr_mach_func_free(&mach);
+        if (!machine && getenv("NYC_TRACE_MACHINE_FALLBACK"))
+          fprintf(stderr, "NYC object fallback: %s: %s\n", name, reason);
+      }
+      if (!machine)
+        nyr_phi_elim((nyr_func_t *)&funcs[i]);
+      if (!machine &&
+          !nyr_x64_obj_append_function_with_frame(
               code, defs, def_count, relocs, reloc_count, &funcs[i], target,
               symbol, omit_frame_pointer, position_independent,
               retpoline_indirect_calls, retpoline_inline_calls, function_err,
@@ -2133,6 +2307,17 @@ static bool nyr_x64_obj_build_c_bundle(
       defs[function_def].section = section;
     }
   }
+  if (!nyr_x64_c_bundle_append_float_helpers(code, defs, def_count, relocs,
+                                             *reloc_count, err, err_len))
+    return false;
+  /*
+   * Data is padded relative to this shared buffer, but each section's offsets
+   * are later taken from its own start. Sections must begin at an offset
+   * that satisfies their strictest member, whatever length the code had.
+   */
+  if (!nyr_x64_c_bundle_pad_section(code, data, data_count, NULL, 16, err,
+                                    err_len))
+    return false;
   if (!nyr_strtab_append_defs(code, defs, def_count, err, err_len)) {
     if (err && err_len && !err[0])
       nyr_set_error(err, err_len, "C object string table emission failed");
@@ -2172,6 +2357,9 @@ static bool nyr_x64_obj_build_c_bundle(
     }
   }
   for (size_t n = 0; n < named_count; ++n) {
+    if (!nyr_x64_c_bundle_pad_section(code, data, data_count, names[n], 1, err,
+                                      err_len))
+      return false;
     if (!nyr_x64_c_bundle_append_data_group(data, data_count, names[n], code,
                                             defs, def_count, relocs,
                                             reloc_count, err, err_len))

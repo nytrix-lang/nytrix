@@ -152,6 +152,7 @@ fn int_value(str name, int fallback=0) int { int_value_from(args(), name, fallba
 fn float_value(str name, f64 fallback=0.0) f64 { float_value_from(args(), name, fallback) }
 
 fn first_positive_int(int fallback=0) int {
+   "Returns the first positive integer command-line argument, or `fallback`."
    mut i = 0
    while i < __argc() {
       def n = str.atoi(to_str(__argv(i)))

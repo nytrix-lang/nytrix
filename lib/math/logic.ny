@@ -518,6 +518,7 @@ fn certificate(dict proposition, int max_variables=16,
 }
 
 fn check_certificate(any value) bool {
+   "Returns whether a logic certificate verifies."
    def result = prop_check_certificate(value)
    if result { return true }
    return false

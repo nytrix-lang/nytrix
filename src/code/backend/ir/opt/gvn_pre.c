@@ -90,7 +90,7 @@ static bool gvn_can_number(const nyr_inst_t *in) {
     return (effects & NYIR_EFFECT_CALL) != 0 && (effects & blockers) == 0;
   }
   if (in->op == NYIR_LOAD_I64)
-    return in->a >= 0;
+    return in->a >= 0 && !(in->flags & NYIR_INST_F_MEM_VOLATILE);
   if (in->op == NYIR_LOAD_LOCAL)
     return in->imm >= 0;
   return nyr_inst_effects(in) == NYIR_EFFECT_NONE;
@@ -1096,7 +1096,7 @@ static bool gvn_pass(nyr_func_t *f, int *vn_of_val, nyr_cfg_t *cfg) {
         load_local_writes_can_alias = false;
       }
     }
-    if (in->op == NYIR_LOAD_I64 &&
+    if (in->op == NYIR_LOAD_I64 && !(in->flags & NYIR_INST_F_MEM_VOLATILE) &&
         gvn_load_pre(f, cfg, i, load_local_writes_can_alias, load_local_slot,
                      val_def)) {
       if (trace)

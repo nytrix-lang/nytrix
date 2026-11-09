@@ -63,6 +63,32 @@ static void build_loop_with_unrelated_phi(nyr_func_t *f) {
   nyr_opt_ret(f, result);
 }
 
+/*
+ * The body reads the counter loaded by the header. Every clone would see the
+ * first iteration's value, so this loop has to stay rolled.
+ */
+static void build_loop_reading_header_load(nyr_func_t *f) {
+  nyr_opt_begin(f);
+  int zero = nyr_opt_const(f, 0);
+  int one = nyr_opt_const(f, 1);
+  int trip = nyr_opt_const(f, 4);
+  store_local(f, zero, 0);
+  store_local(f, zero, 1);
+  nyr_opt_br(f, 10);
+  nyr_opt_label(f, 10);
+  int iv = load_local(f, 0);
+  int cond = nyr_opt_cmp(f, iv, trip, NYIR_CMP_LT);
+  nyr_opt_br_if(f, cond, 11);
+  nyr_opt_br(f, 30);
+  nyr_opt_label(f, 11);
+  int sum = load_local(f, 1);
+  store_local(f, nyr_opt_binop(f, NYIR_ADD_I64, sum, iv), 1);
+  store_local(f, nyr_opt_binop(f, NYIR_ADD_I64, iv, one), 0);
+  nyr_opt_br(f, 10);
+  nyr_opt_label(f, 30);
+  nyr_opt_ret(f, load_local(f, 1));
+}
+
 static void build_loop_with_header_phi(nyr_func_t *f) {
   nyr_opt_begin(f);
   int zero = nyr_opt_const(f, 0);
@@ -422,6 +448,19 @@ int main(void) {
     return 1;
   }
   puts("[loop-unroll] post-loop PHI preserved; counted loop unrolled");
+
+  build_loop_reading_header_load(&f);
+  before = nyr_opt_eval(&f, "loop-unroll-header-load-before");
+  transformed = nyr_loop_unroll(&f);
+  verified = nyr_opt_verify(&f, "loop-unroll-header-load-after");
+  after = verified ? nyr_opt_eval(&f, "loop-unroll-header-load-after") : -1;
+  nyr_ir_func_free(&f);
+  if (!transformed || !verified || before != 6 || after != before) {
+    fprintf(stderr, "[loop-unroll] header load case before=%lld after=%lld\n",
+            before, after);
+    return 1;
+  }
+  puts("[loop-unroll] body reading the header's load keeps every iteration");
 
   build_loop_with_header_phi(&f);
   if (!nyr_opt_verify(&f, "loop-unroll-header-phi-before")) {

@@ -44,28 +44,33 @@ fn i32buf_load(ptr buf, int i) int {
 @inline
 fn i64buf_load(ptr buf, int i) int { load64_i(buf, i * 8) }
 
+;; Stores an f32 at element `i` and returns the buffer.
 fn f32buf_store(ptr buf, int i, f32 v) ptr {
    store32_f32(buf, v, i * 4)
    buf
 }
 
+;; Stores an f64 at element `i` and returns the buffer.
 fn f64buf_store(ptr buf, int i, f64 v) ptr {
    store64_f64(buf, v, i * 8)
    buf
 }
 
 @inline
+;; Stores a byte at element `i` and returns the buffer.
 fn u8buf_store(ptr buf, int i, int v) ptr {
    store8(buf, v, i)
    buf
 }
 
+;; Stores an i32 at element `i` and returns the buffer.
 fn i32buf_store(ptr buf, int i, int v) ptr {
    store32(buf, v, i * 4)
    buf
 }
 
 @inline
+;; Stores an i64 at element `i` and returns the buffer.
 fn i64buf_store(ptr buf, int i, int v) ptr {
    store64_i(buf, v, i * 8)
    buf

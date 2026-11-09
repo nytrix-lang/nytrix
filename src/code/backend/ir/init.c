@@ -597,6 +597,7 @@ bool nyr_ir_func_clone(const nyr_func_t *src, nyr_func_t *dst) {
            src->param_count * sizeof(*dst->param_abi));
   }
   dst->return_aggregate_size = src->return_aggregate_size;
+  dst->untagged_values = src->untagged_values;
   dst->return_aggregate_classes[0] = src->return_aggregate_classes[0];
   dst->return_aggregate_classes[1] = src->return_aggregate_classes[1];
   dst->i386_regparm = src->i386_regparm;
@@ -1200,12 +1201,16 @@ unsigned nyr_inst_effects(const nyr_inst_t *inst) {
   case NYIR_STORE_LOCAL:
     return NYIR_EFFECT_WRITE_LOCAL;
   case NYIR_LOAD_I64:
+    return NYIR_EFFECT_READ_MEMORY | NYIR_EFFECT_MAY_TRAP |
+           (inst->flags & NYIR_INST_F_MEM_VOLATILE ? NYIR_EFFECT_VOLATILE : 0);
+  case NYIR_STORE_I64:
+    return NYIR_EFFECT_WRITE_MEMORY | NYIR_EFFECT_MAY_TRAP |
+           (inst->flags & NYIR_INST_F_MEM_VOLATILE ? NYIR_EFFECT_VOLATILE : 0);
   case NYIR_VEC4_LOAD_I64:
   case NYIR_VEC8_LOAD_I64:
   case NYIR_VEC4_LOAD_F64:
   case NYIR_VEC8_LOAD_F32:
     return NYIR_EFFECT_READ_MEMORY | NYIR_EFFECT_MAY_TRAP;
-  case NYIR_STORE_I64:
   case NYIR_VEC4_STORE_I64:
   case NYIR_VEC8_STORE_I64:
   case NYIR_VEC4_STORE_F64:

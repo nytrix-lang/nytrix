@@ -890,7 +890,6 @@ fn _poll_slot(int jid) bool {
 fn _ensure_init() bool {
    if _linux_initialized || !_linux_input_supported() { return _linux_initialized }
    _linux_initialized = true
-   gamepad_map.init_default_linux_mappings()
    def inotify_fd = osfs.watch_init(bor(IN_NONBLOCK, IN_CLOEXEC))
    _set_js_val("inotify_fd", inotify_fd)
    if inotify_fd >= 0 {

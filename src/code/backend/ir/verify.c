@@ -67,9 +67,49 @@ static bool nir_value_defined(const nyr_func_t *f, const bool *defined, int v) {
   return nir_value_valid(f, v) && defined && defined[v];
 }
 
+/*
+ * Sorted label table and definition map for the function being verified, so
+ * branch, label and phi checks stay linear on functions with many blocks.
+ */
+typedef struct {
+  int64_t imm;
+  size_t index;
+} nir_verify_label_t;
+
+static _Thread_local const nyr_func_t *nir_verify_func;
+static _Thread_local nir_verify_label_t *nir_verify_labels;
+static _Thread_local size_t nir_verify_label_count;
+static _Thread_local unsigned char *nir_verify_has_def;
+
+static int nir_verify_label_cmp(const void *a, const void *b) {
+  const nir_verify_label_t *x = a, *y = b;
+  if (x->imm != y->imm)
+    return x->imm < y->imm ? -1 : 1;
+  return x->index < y->index ? -1 : x->index > y->index;
+}
+
+/*
+ * Index of the first definition of a label, or SIZE_MAX.
+ */
+static size_t nir_verify_first_label(int64_t label) {
+  size_t lo = 0, hi = nir_verify_label_count;
+  while (lo < hi) {
+    size_t mid = lo + (hi - lo) / 2;
+    if (nir_verify_labels[mid].imm < label)
+      lo = mid + 1;
+    else
+      hi = mid;
+  }
+  return lo < nir_verify_label_count && nir_verify_labels[lo].imm == label
+             ? nir_verify_labels[lo].index
+             : SIZE_MAX;
+}
+
 static bool nir_label_exists(const nyr_func_t *f, int64_t label) {
   if (!f)
     return false;
+  if (f == nir_verify_func && nir_verify_labels)
+    return nir_verify_first_label(label) != SIZE_MAX;
   for (size_t i = 0; i < f->len; ++i) {
     const nyr_inst_t *in = &f->data[i];
     if (in->op == NYIR_LABEL && in->imm == label)
@@ -1318,7 +1358,46 @@ fail:
   return false;
 }
 
+static bool nir_verify_impl(const nyr_func_t *f, char *err, size_t err_len);
+
 bool nyr_ir_verify(const nyr_func_t *f, char *err, size_t err_len) {
+  if (!f)
+    return nir_verify_impl(f, err, err_len);
+  size_t labels = 0;
+  for (size_t i = 0; i < f->len; ++i)
+    labels += f->data[i].op == NYIR_LABEL;
+  nir_verify_label_t *table = malloc((labels + 1) * sizeof(*table));
+  unsigned char *has_def =
+      calloc(f->next_value > 0 ? (size_t)f->next_value : 1, sizeof(*has_def));
+  if (!table || !has_def) {
+    free(table);
+    free(has_def);
+    return nyr_err(err, err_len, "native NYIR verify: out of memory");
+  }
+  size_t count = 0;
+  for (size_t i = 0; i < f->len; ++i) {
+    const nyr_inst_t *in = &f->data[i];
+    if (in->op == NYIR_LABEL)
+      table[count++] = (nir_verify_label_t){in->imm, i};
+    if (in->dst >= 0 && in->dst < f->next_value)
+      has_def[in->dst] = 1;
+  }
+  qsort(table, count, sizeof(*table), nir_verify_label_cmp);
+  nir_verify_func = f;
+  nir_verify_labels = table;
+  nir_verify_label_count = count;
+  nir_verify_has_def = has_def;
+  bool ok = nir_verify_impl(f, err, err_len);
+  nir_verify_func = NULL;
+  nir_verify_labels = NULL;
+  nir_verify_label_count = 0;
+  nir_verify_has_def = NULL;
+  free(table);
+  free(has_def);
+  return ok;
+}
+
+static bool nir_verify_impl(const nyr_func_t *f, char *err, size_t err_len) {
   if (!f)
     return nyr_err(err, err_len, "native NYIR verify: missing function");
   if (f->next_value < 0)
@@ -1537,14 +1616,20 @@ bool nyr_ir_verify(const nyr_func_t *f, char *err, size_t err_len) {
                            (in->flags & NYIR_INST_F_EFFECTS_KNOWN) &&
                            (in->effects & NYIR_EFFECT_CALL) != 0;
     if (in->effects != required_effects && !trusted_call_ok) {
-      char detail[192];
-      snprintf(detail, sizeof(detail),
-               "effect mask does not match opcode effects"
-               " (actual=0x%x required=0x%x symbol=%s flags=0x%x)",
-               in->effects, required_effects,
-               in->symbol ? in->symbol : "<none>", in->flags);
-      free(defined);
-      return nir_verify_inst_err(f, err, err_len, in, i, detail);
+      unsigned allowed = required_effects;
+      if ((in->effects & (NYIR_EFFECT_READ_MEMORY | NYIR_EFFECT_WRITE_MEMORY)) ||
+          in->op == NYIR_LOAD_I64 || in->op == NYIR_STORE_I64)
+        allowed |= NYIR_EFFECT_VOLATILE;
+      if (in->effects != allowed) {
+        char detail[192];
+        snprintf(detail, sizeof(detail),
+                 "effect mask does not match opcode effects"
+                 " (actual=0x%x required=0x%x symbol=%s flags=0x%x)",
+                 in->effects, required_effects,
+                 in->symbol ? in->symbol : "<none>", in->flags);
+        free(defined);
+        return nir_verify_inst_err(f, err, err_len, in, i, detail);
+      }
     }
     if ((in->range.has_min && !in->range.has_max) ||
         (!in->range.has_min && in->range.has_max)) {
@@ -1822,9 +1907,7 @@ bool nyr_ir_verify(const nyr_func_t *f, char *err, size_t err_len) {
           descriptor_store_asm || atomic_bitwise64;
       bool asm_goto_target = false;
       if (asm_goto)
-        for (size_t label = 0; label < f->len; ++label)
-          asm_goto_target |=
-              f->data[label].op == NYIR_LABEL && f->data[label].imm == in->c;
+        asm_goto_target = nir_label_exists(f, in->c);
       if (call_on_stack_asm) {
         bool valid = in->dst == -1 && in->a >= 0 && in->a < f->next_value &&
                      defined[in->a] && in->b >= -1 && in->c >= -1 &&
@@ -2425,11 +2508,9 @@ bool nyr_ir_verify(const nyr_func_t *f, char *err, size_t err_len) {
       break;
     }
     case NYIR_LABEL:
-      for (size_t j = 0; j < i; ++j) {
-        if (f->data[j].op == NYIR_LABEL && f->data[j].imm == in->imm) {
-          free(defined);
-          return nir_verify_inst_err(f, err, err_len, in, i, "duplicate label");
-        }
+      if (nir_verify_labels ? nir_verify_first_label(in->imm) < i : false) {
+        free(defined);
+        return nir_verify_inst_err(f, err, err_len, in, i, "duplicate label");
       }
       break;
     case NYIR_CONST_I64:
@@ -2525,12 +2606,8 @@ bool nyr_ir_verify(const nyr_func_t *f, char *err, size_t err_len) {
        */
       for (size_t k = 0; k < in->phi_incoming_len; ++k) {
         int v = in->phi_incoming[k].value;
-        bool has_definition = false;
-        for (size_t j = 0; j < f->len; ++j)
-          if (f->data[j].dst == v) {
-            has_definition = true;
-            break;
-          }
+        bool has_definition = v >= 0 && v < f->next_value &&
+                              nir_verify_has_def && nir_verify_has_def[v];
         if (!nir_value_valid(f, v) || !has_definition) {
           free(defined);
           return nir_verify_inst_err(f, err, err_len, in, i,

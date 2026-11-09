@@ -53,59 +53,73 @@ fn symbolic_backend_status() dict {
 }
 
 fn z3_available() bool {
+   "Returns whether the Z3 solver can be used."
    sym.z3_available()
 }
 
 fn unicorn_available() bool {
+   "Returns whether the Unicorn emulator can be used."
    sym.unicorn_available()
 }
 
 fn load(any source) dict {
+   "Loads a binary from a path, or returns an already loaded binary."
    if is_dict(source) { return source }
    dc.load(to_str(source))
 }
 
 fn entry(any source) int {
+   "Returns the entry point address of a binary."
    dc.entry(source)
 }
 
 fn arch(any source) str {
+   "Returns the architecture name of a binary."
    dc.arch(source)
 }
 
 fn arch_profile(any source) dict {
+   "Returns the architecture profile of a binary."
    dc.arch_profile(source)
 }
 
 fn analyze(any source, any opts=dict()) dict {
+   "Runs whole-binary analysis and returns its results."
    dc.analyze(source, opts)
 }
 
 fn triage(any source, any opts=dict()) dict {
+   "Returns a quick triage summary of a binary."
    dc.triage(source, opts)
 }
 
 fn report(any source, int string_limit=12) str {
+   "Returns a text report of a binary."
    dc.report(source, string_limit)
 }
 
 fn functions(any source) list {
+   "Returns the functions known from a binary's symbols."
    dc.functions(source)
 }
 
 fn recover_functions(any source, int scan_bytes=65536) list {
+   "Recovers function starts by scanning up to `scan_bytes` of code."
    dc.recover_functions(source, scan_bytes)
 }
 
 fn imports(any source) list {
+   "Returns the imported symbols of a binary."
    dc.imports(source)
 }
 
 fn strings(any source, int min_len=4, int limit=512) list {
+   "Returns the printable strings found in a binary."
    dc.strings(source, min_len, limit)
 }
 
 fn default_target(any source, any target=0, any opts=dict()) any {
+   "Picks the address to analyze when `target` does not name one."
    def bin = load(source)
    if !bin.get("ok", false) { return target }
    _solve_target(bin, target, opts)
@@ -138,58 +152,72 @@ fn inspect(any source, any opts=dict()) dict {
 }
 
 fn lift(any source, any target=".text", int max_bytes=1024) list {
+   "Lifts code at `target` to intermediate instructions."
    dc.lift(load(source), target, max_bytes)
 }
 
 fn cfg(any source, any target=0, int max_bytes=2048) dict {
+   "Returns the control-flow graph at `target`."
    dc.cfg(source, target, max_bytes)
 }
 
 fn ssa(any source, any target=0, any opts=dict()) dict {
+   "Returns the SSA form of the code at `target`."
    dc.ssa(source, target, opts)
 }
 
 fn vsa(any source, any target=0, any opts=dict()) dict {
+   "Runs value-set analysis on the code at `target`."
    dc.vsa(source, target, opts)
 }
 
 fn facts(any source, any target=0, any opts=dict()) dict {
+   "Returns the recovered dataflow facts for `target`."
    dc.facts(source, target, opts)
 }
 
 fn function_model(any source, any target=0, int max_bytes=1024) dict {
+   "Returns the behavior model of the function at `target`."
    dc.function_model(source, target, max_bytes)
 }
 
 fn structured(any source, any target=0, int max_bytes=1024) dict {
+   "Returns structured control flow for the code at `target`."
    dc.structured(source, target, max_bytes)
 }
 
 fn semantic_summary(any source, any target=0, any opts=dict()) dict {
+   "Returns a semantic summary of the code at `target`."
    dc.semantic_summary(source, target, opts)
 }
 
 fn state_machines(any source, any target=0, int max_bytes=2048) list {
+   "Returns the state machines recovered at `target`."
    dc.state_machines(source, target, max_bytes)
 }
 
 fn type_recovery(any source, any target=0, any opts=dict()) dict {
+   "Returns the types recovered for the code at `target`."
    dc.type_recovery(source, target, opts)
 }
 
 fn pseudocode(any source, any target=0, any opts=dict()) str {
+   "Returns Nytrix pseudocode for the code at `target`."
    dc.ny_pseudocode(source, target, opts)
 }
 
 fn decompile(any source, any target=0, any opts=dict()) dict {
+   "Decompiles the function at `target`."
    dc.decompile(source, target, opts)
 }
 
 fn decompile_all(any source, any opts=dict()) dict {
+   "Decompiles every known function of a binary."
    dc.decompile_all(source, opts)
 }
 
 fn solve_decompiled_input(str text, any opts=dict()) dict {
+   "Solves for the input that satisfies decompiled checks in `text`."
    rs.solve_decompiled_input(text, opts)
 }
 
@@ -247,10 +275,12 @@ fn solve_binary_input(any source, any target=0, any opts=dict()) dict {
 }
 
 fn solve_bit_sliced_ascii_transform(str target, int input_len, int output_len, any opts=dict()) dict {
+   "Solves for the ASCII input of a bit-sliced transform that yields `target`."
    rs.solve_bit_sliced_ascii_transform(target, input_len, output_len, opts)
 }
 
 fn solve_byte_constraints(any raw_constraints, any opts=dict()) dict {
+   "Solves a set of byte constraints."
    rs.solve_byte_constraints(raw_constraints, opts)
 }
 

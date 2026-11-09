@@ -88,7 +88,6 @@ fn _headless_swapchain_sentinel() int { 0x8000000001 }
 fn _allow_headless_surface() bool { common.env_truthy("NYTRIX_VK_ALLOW_HEADLESS") }
 
 fn _same_int_value(int a, int b) bool { a == b }
-
 mut _vk_headless_bench_skip_default_mvp = -1
 mut _cfg_present_policy = ""
 
@@ -2140,6 +2139,7 @@ fn set_unlit(bool unlit) any {
 }
 
 fn set_target_pipeline(?handle target) bool {
+   "Selects the pipeline for later draws, flushing pending vertices when it changes."
    if _target_pipeline != target {
       if _vertex_offset != _last_flush_offset {
          _flush_reason = 4
@@ -3066,7 +3066,9 @@ fn set_mask(int m) any {
 fn _sync_pc() any {
    def _prof_on = _vk_profile_enabled()
    def _t0 = _prof_on ? ticks() : 0
-   def pc_ptr = _use_custom_pc ? _pc_buffer_custom : _pc_buffer
+   ;; An expression joining two optional pointers would yield a tagged word.
+   mut ptr pc_ptr = _pc_buffer
+   if _use_custom_pc { pc_ptr = _pc_buffer_custom }
    if !_use_custom_pc {
       if _current_is_unlit != _last_is_unlit { _last_is_unlit = _current_is_unlit _pc_dirty = true }
       if _current_vc_mode != _last_vc_mode { _last_vc_mode = _current_vc_mode _pc_dirty = true }
