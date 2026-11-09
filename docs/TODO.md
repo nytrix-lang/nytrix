@@ -72,9 +72,10 @@ Last table, ratio to C. Over 1.5x: 18 entries.
 
 ## Compile time
 
-- [ ] **AOT builds:** pong takes 55 s since the duplicate LLVM pass was removed
-  (was 90). Target: under 30 s. Reachable-function collection (10 s) and `rt_main`
-  lowering (13 s) are the largest stages.
+- [ ] **AOT builds:** a range-query cache reduced the measured Pong build median
+  from 66.71 s to 59.50 s; target remains under 30 s. Reachable-function
+  collection and `rt_main` lowering remain the largest stages. Six output
+  executables had identical SHA-256 checksums.
 - [ ] **Known hot spots:** imported module member
   lookup, `tp_collect_call_observation`, `hm_complete_leaf_fact`,
   `nyr_cfg_build_impl`, `nyr_type_map_init`.
@@ -115,7 +116,10 @@ checked against reference output.
 ## Tests and tooling
 
 - [ ] **Faster `./make check`:** a full run takes about 16 minutes before the
-  benchmark phase. Find the largest costs and cut them without losing coverage.
+  benchmark phase. A targeted cold run for five slow fixtures fell from 741.4 s
+  to 412.6 s (44.3%); the sixth, loopback-dependent fixture was skipped because
+  this host denies socket binds. Keep the item open until full coverage is
+  measured and the check gate confirms no coverage loss.
 
 ## Code quality
 

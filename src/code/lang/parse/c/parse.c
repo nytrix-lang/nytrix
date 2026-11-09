@@ -15662,10 +15662,15 @@ static bool try_collect_initialized_scalar_global_list(c_parser_t *p,
     return true;
   ny_ctok_t ignored_asm_label = {0};
   if (!try_parse_asm_label(&probe, &ignored_asm_label) ||
-      !parse_trailing_file_scope_attributes(&probe, &ignored_section) ||
-      !expect(&probe, "=") ||
-      !parse_global_const_expr(&probe, &probe.pos, &(int64_t){0}) ||
-      !tok_is(&probe, probe.pos, ","))
+      !parse_trailing_file_scope_attributes(&probe, &ignored_section))
+    return true;
+  bool probe_has_initializer = false;
+  if (accept(&probe, "=")) {
+    probe_has_initializer = true;
+    if (!parse_global_const_expr(&probe, &probe.pos, &(int64_t){0}))
+      return true;
+  }
+  if (!tok_is(&probe, probe.pos, ","))
     return true;
   do {
     ++probe.pos;
@@ -15675,12 +15680,14 @@ static bool try_collect_initialized_scalar_global_list(c_parser_t *p,
         !parse_trailing_file_scope_attributes(&probe, &ignored_section))
       return true;
     if (accept(&probe, "=")) {
+      probe_has_initializer = true;
       if (!parse_global_const_expr(&probe, &probe.pos, &(int64_t){0}))
         return true;
     }
   } while (tok_is(&probe, probe.pos, ","));
   if (!tok_is(&probe, probe.pos, ";"))
     return true;
+  (void)probe_has_initializer;
 
   *matched = true;
   c_type_t parsed_type;
