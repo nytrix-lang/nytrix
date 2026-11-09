@@ -10305,25 +10305,6 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
       free(addr_fold_known);
       return mach_err(e, "x64 machine form encode: OOM (constant map)");
     }
-    /*
-     * Address rematerialization is entry-block-only for the same
-     * dominance reason as the constant map above.
-     */
-    if (mach->block_len > 0 && mach->inst_len > 0) {
-      const nyr_mach_block_t *aentry = &mach->blocks[0];
-      const size_t aend = aentry->first_inst + aentry->inst_count;
-      for (size_t i = aentry->first_inst; i < aend && i < mach->inst_len; ++i) {
-        const nyr_mach_inst_t *ci = &mach->insts[i];
-        if (ci->opcode == NYR_MACH_LEA &&
-            ci->dst.kind == NYR_MACH_OPERAND_VREG &&
-            ci->dst.as.reg < mach->vreg_len &&
-            (ci->src0.kind == NYR_MACH_OPERAND_FRAME ||
-             ci->src0.kind == NYR_MACH_OPERAND_SYMBOL)) {
-          addr_fold[ci->dst.as.reg] = ci->src0;
-          addr_fold_known[ci->dst.as.reg] = true;
-        }
-      }
-    }
   }
   e->imm_fold = imm_fold;
   e->imm_fold_known = imm_fold_known;
@@ -10496,6 +10477,28 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
         e->def_inst[mi->dst.as.reg] = i;
         if (e->def_count[mi->dst.as.reg] < 2)
           e->def_count[mi->dst.as.reg]++;
+      }
+    }
+    /*
+     * Entry-block LEAs dominate all uses, but the vreg-numbered address map
+     * is only sound when that vreg has no other definition.  Machine PHIs
+     * can have edge-copy definitions that reuse the destination vreg, so
+     * checking the entry LEA alone can rematerialize the wrong address.
+     */
+    if (mach->block_len > 0 && mach->inst_len > 0) {
+      const nyr_mach_block_t *aentry = &mach->blocks[0];
+      const size_t aend = aentry->first_inst + aentry->inst_count;
+      for (size_t i = aentry->first_inst; i < aend && i < mach->inst_len; ++i) {
+        const nyr_mach_inst_t *ci = &mach->insts[i];
+        if (ci->opcode == NYR_MACH_LEA &&
+            ci->dst.kind == NYR_MACH_OPERAND_VREG &&
+            ci->dst.as.reg < mach->vreg_len &&
+            e->def_count[ci->dst.as.reg] == 1 &&
+            (ci->src0.kind == NYR_MACH_OPERAND_FRAME ||
+             ci->src0.kind == NYR_MACH_OPERAND_SYMBOL)) {
+          addr_fold[ci->dst.as.reg] = ci->src0;
+          addr_fold_known[ci->dst.as.reg] = true;
+        }
       }
     }
     if (!mach_prepare_select_bit_test(e, name))

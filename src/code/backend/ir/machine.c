@@ -632,7 +632,54 @@ static bool mach_cc_alias_legal(const nyr_mach_func_t *m, uint32_t d,
   return true;
 }
 
-static void mach_coalesce_copies(nyr_mach_func_t *m) {
+static bool *mach_cc_raw_vregs(const nyr_mach_func_t *m,
+                               const nyr_func_t *nyir) {
+  if (!m || !nyir || !m->vreg_len)
+    return NULL;
+  bool *raw = malloc(m->vreg_len * sizeof(*raw));
+  bool *defined = calloc(m->vreg_len, sizeof(*defined));
+  if (!raw || !defined) {
+    free(raw);
+    free(defined);
+    return NULL;
+  }
+  memset(raw, 1, m->vreg_len * sizeof(*raw));
+  for (size_t i = 0; i < m->inst_len; ++i) {
+    const nyr_mach_inst_t *in = &m->insts[i];
+    if (!mach_cc_is_def(in) || in->dst.as.reg >= m->vreg_len)
+      continue;
+    uint32_t v = in->dst.as.reg;
+    defined[v] = true;
+    if (in->source_pc == UINT32_MAX && in->opcode == NYR_MACH_COPY &&
+        in->src0.kind == NYR_MACH_OPERAND_VREG && in->src0.as.reg < m->vreg_len)
+      continue;
+    if (in->source_pc >= nyir->len || nyir->data[in->source_pc].dst != (int)v ||
+        nyir->data[in->source_pc].scalar_class != NYIR_SCALAR_I64_RAW)
+      raw[v] = false;
+  }
+  bool changed = true;
+  while (changed) {
+    changed = false;
+    for (size_t i = 0; i < m->inst_len; ++i) {
+      const nyr_mach_inst_t *in = &m->insts[i];
+      if (in->source_pc != UINT32_MAX || in->opcode != NYR_MACH_COPY ||
+          in->dst.kind != NYR_MACH_OPERAND_VREG ||
+          in->dst.as.reg >= m->vreg_len ||
+          in->src0.kind != NYR_MACH_OPERAND_VREG ||
+          in->src0.as.reg >= m->vreg_len)
+        continue;
+      uint32_t dst = in->dst.as.reg, src = in->src0.as.reg;
+      if (raw[dst] && (!defined[src] || !raw[src])) {
+        raw[dst] = false;
+        changed = true;
+      }
+    }
+  }
+  free(defined);
+  return raw;
+}
+
+static void mach_coalesce_copies(nyr_mach_func_t *m, const nyr_func_t *nyir) {
   const size_t nb = m->block_len, nv = m->vreg_len;
   if (!nb || !nv || nv > 20000 || nb > 5000 || m->inst_len > 100000)
     return;
@@ -645,11 +692,12 @@ static void mach_coalesce_copies(nyr_mach_func_t *m) {
   uint8_t *literal = calloc(nv, 1);
   uint32_t *first_def = malloc(nv * sizeof(*first_def));
   uint32_t *last_def = malloc(nv * sizeof(*last_def));
+  bool *raw = m->c_abi ? NULL : mach_cc_raw_vregs(m, nyir);
   mach_cc_def_block_t *def_nodes =
       malloc((m->inst_len + 1) * sizeof(*def_nodes));
   uint32_t def_node_count = 0;
   if (!in_sets || !out_sets || !gen || !kill || !def_count || !literal ||
-      !first_def || !last_def || !def_nodes)
+      !first_def || !last_def || !def_nodes || (!m->c_abi && !raw))
     goto done;
   memset(first_def, 0xff, nv * sizeof(*first_def));
   memset(last_def, 0xff, nv * sizeof(*last_def));
@@ -725,7 +773,8 @@ static void mach_coalesce_copies(nyr_mach_func_t *m) {
     }
   }
   size_t work = 0, merged = 0;
-  for (int pass = 0; pass < 2; ++pass) {
+  int pass_start = m->c_abi ? 0 : 1;
+  for (int pass = pass_start; pass < 2; ++pass) {
     for (size_t i = 0; i < m->inst_len && work < 40000000; ++i) {
       nyr_mach_inst_t *copy = &m->insts[i];
       if (copy->opcode != NYR_MACH_COPY || copy->narrow32 ||
@@ -736,6 +785,9 @@ static void mach_coalesce_copies(nyr_mach_func_t *m) {
           (pass == 0 && copy->source_pc != UINT32_MAX))
         continue;
       uint32_t d = copy->dst.as.reg, s = copy->src0.as.reg;
+      if (!m->c_abi &&
+          (copy->source_pc == UINT32_MAX || !raw[d] || !raw[s]))
+        continue;
       nyr_mach_type_t type = m->vreg_types[d];
       if (type != m->vreg_types[s] || m->vreg_classes[d] != m->vreg_classes[s] ||
           (type != NYR_MACH_TYPE_I64 && type != NYR_MACH_TYPE_F64 &&
@@ -792,6 +844,7 @@ done:
   free(first_def);
   free(last_def);
   free(def_nodes);
+  free(raw);
 }
 #undef MACH_CC_BIT
 
@@ -5684,9 +5737,10 @@ bool nyr_mach_lower_nir(const nyr_func_t *nyir, nyr_mach_func_t *out,
     goto oom;
   if (!mach_rotate_scalar_loops(&lowered))
     goto oom;
-  if (nyir->untagged_values) {
+  if (nyir->untagged_values)
     mach_fuse_int_widening(&lowered);
-    mach_coalesce_copies(&lowered);
+  mach_coalesce_copies(&lowered, nyir);
+  if (nyir->untagged_values) {
     if (!mach_split_around_loops(&lowered))
       goto oom;
   }

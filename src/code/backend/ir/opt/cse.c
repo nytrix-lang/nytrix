@@ -518,13 +518,28 @@ static void cse_unify_constants(nyr_func_t *f) {
   nyr_cfg_free(&cfg);
 }
 
+static bool cse_all_values_proven_raw(const nyr_func_t *f) {
+  if (!f || !f->len)
+    return false;
+  bool saw_value = false;
+  for (size_t i = 0; i < f->len; ++i) {
+    const nyr_inst_t *in = &f->data[i];
+    if (in->dst < 0)
+      continue;
+    saw_value = true;
+    if (in->scalar_class != NYIR_SCALAR_I64_RAW)
+      return false;
+  }
+  return saw_value;
+}
+
 bool nyr_cse(nyr_func_t *f) {
   if (!f || f->next_value <= 0 || f->len == 0)
     return true;
-  if (f->untagged_values) {
+  if (f->untagged_values || cse_all_values_proven_raw(f))
     nyr_bits_simplify(f);
+  if (f->untagged_values)
     cse_unify_constants(f);
-  }
   size_t value_len = (size_t)f->next_value;
   if (value_len > SIZE_MAX / (2 * sizeof(int)))
     return false;

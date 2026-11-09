@@ -50,15 +50,12 @@ Last table, ratio to C. Over 1.5x: 18 entries.
   `expression-tree` 3.8x, `native-oracle` 3.2x, `inline` 3.1x, `linpack` 3.0x,
   `queen` 2.8x, `matrix` 2.5x, `gcbench` 2.5x, `call-chain` 2.5x, `page-rank`
   2.4x, `pbkdf2` 2.4x, `knucleotide` 2.1x.
-- [ ] **Cases where C folds the work or uses GMP:** `currying`, `pidigits`,
-  `bigint-oracle`. Decide per benchmark whether to implement the folding and
-  bigint speedups or to compare against an equivalent workload.
-- [ ] **Share C-only wins with NYR:** copy coalescing, direct destination-register
-  shifts, and known-bits simplification run only for C. Enable them for raw
-  values in language code. Accept: suite green, instruction counts improve.
-
-## Performance: backend
-
+- [ ] **Bigint workloads:** `pidigits` runs at 3.3x, and `bigint-oracle` has no
+  reference here without GMP. `currying` is settled: its budget records that C folds
+  the call. Decide whether to speed up bigint or compare an equivalent workload.
+- [ ] **Share C-only wins with NYR:** copy coalescing and known-bits simplification
+  now run for proven-raw values. Extend them to more of language code, since only
+  `cmov-sort` gained (8.2%). Accept: suite green, instruction counts improve.
 - [ ] **Whole-function register allocation:** C has live-range splitting around
   call-free loops. Port it to NYR and find why loop registers conflict with
   ordinary values in `rsi`/`rdi` on C.
