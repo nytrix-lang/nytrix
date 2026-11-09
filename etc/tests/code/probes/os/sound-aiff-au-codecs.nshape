@@ -1,0 +1,92 @@
+shape sound_aiff_au_codec_gaps {
+  family "runtime/system/sound"
+  generator "embedded"
+  features ["sound", "aiff", "au", "ima4"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.sound.aiff as aiff
+use core.os.sound.au as au
+
+fn s(bytes p, int at, str text) bytes {
+   mut i = 0
+   while i < 4 { store8(p, load8(text, i), at + i) i += 1 }
+   p
+}
+fn be16(bytes p, int at, int v) bytes {
+   store8(p, (v >> 8) & 255, at)
+   store8(p, v & 255, at + 1)
+   p
+}
+fn be32(bytes p, int at, int v) bytes {
+   store8(p, (v >> 24) & 255, at)
+   store8(p, (v >> 16) & 255, at + 1)
+   store8(p, (v >> 8) & 255, at + 2)
+   store8(p, v & 255, at + 3)
+   p
+}
+
+;; A one-packet, mono QuickTime IMA4 AIFC fixture embedded in the test.
+def ima = bytes(94)
+ s(ima, 0, "FORM")
+be32(ima, 4, 86)
+s(ima, 8, "AIFC")
+s(ima, 12, "COMM")
+be32(ima, 16, 24)
+be16(ima, 20, 1)
+be32(ima, 22, 64)
+be16(ima, 26, 16)
+store8(ima, 0x40, 28)
+store8(ima, 0x0b, 29)
+store8(ima, 0xfa, 30)
+store8(ima, 0, 31)
+store8(ima, 0, 32)
+store8(ima, 0, 33)
+store8(ima, 0, 34)
+store8(ima, 0, 35)
+store8(ima, 0, 36)
+store8(ima, 0, 37)
+s(ima, 38, "ima4")
+s(ima, 44, "SSND")
+be32(ima, 48, 42)
+be32(ima, 52, 0)
+be32(ima, 56, 0)
+;; Predictor/index zero; varied packed nibbles exercise packet decoding.
+store8(ima, 0, 60)
+store8(ima, 0, 61)
+mut i = 0
+while i < 32 {
+   store8(ima, 0x12, 62 + i)
+   i += 1
+}
+def decoded = aiff.decode_bytes(ima)
+assert(is_list(decoded), "AIFC ima4 packet decodes")
+def pcm = decoded.get(1)
+assert(pcm.get("total_frames") == 64 && pcm.get("channels") == 1 && pcm.get("rate") == 8000,
+       "ima4 exact packet frame count and metadata")
+;; First samples are the system ffmpeg reference for this packet.
+def ffmpeg_samples = [3, 4, 7, 8, 11, 12, 15, 16, 19, 20, 23, 24, 27, 28, 31, 32,
+                      35, 36, 39, 40, 43, 44, 47, 48, 51, 52, 55, 56, 59, 60, 63, 64,
+                      67, 68, 71, 72, 75, 76, 79, 80, 83, 84, 87, 88, 91, 92, 95, 96,
+                      99, 100, 103, 104, 107, 108, 111, 112, 115, 116, 119, 120, 123, 124, 127, 128]
+i = 0
+while i < ffmpeg_samples.len {
+   assert(load16(pcm.get("ptr"), i * 2) == int(ffmpeg_samples[i]),
+          "ima4 sample matches ffmpeg packet byte output")
+   i += 1
+}
+;; G.721/G.723 ADPCM AU encoding numbers are intentionally unsupported as a
+;; clear zero result until a pure Nytrix G.726 decoder is available.
+def au_ext = bytes(26)
+s(au_ext, 0, ".snd")
+be32(au_ext, 4, 24)
+be32(au_ext, 8, 2)
+be32(au_ext, 12, 23)
+be32(au_ext, 16, 8000)
+be32(au_ext, 20, 1)
+store8(au_ext, 0x12, 24)
+store8(au_ext, 0x34, 25)
+assert(au.decode_bytes(au_ext) == 0, "unsupported G.721 AU encoding rejects clearly")
+NY
+}

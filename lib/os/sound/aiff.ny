@@ -17,7 +17,8 @@ fn _be32(any d, int at) int {
 }
 fn _rate(any d, int at) int {
    def exp = _be16(d, at) & 0x7fff
-   def mant_hi = _be32(d, at + 2)
+   mut mant_hi = _be32(d, at + 2)
+   if mant_hi < 0 { mant_hi += 4294967296 }
    if exp == 0 || exp == 0x7fff { return 0 }
    def shift = exp - 16383 - 31
    if shift < -62 || shift > 30 { return 0 }
@@ -35,6 +36,77 @@ fn _mulaw(int u) int {
    def v = (~u) & 255
    def t = (((v & 15) << 3) + 0x84) << ((v & 0x70) >> 4)
    (v & 0x80) != 0 ? 0x84 - t : t - 0x84
+}
+
+def _IMA_INDEX = [-1, -1, -1, -1, 2, 4, 6, 8,
+                  -1, -1, -1, -1, 2, 4, 6, 8]
+def _IMA_STEP = [
+   7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 19, 21, 23, 25, 28, 31, 34, 37, 41, 45,
+   50, 55, 60, 66, 73, 80, 88, 97, 107, 118, 130, 143, 157, 173, 190, 209, 230,
+   253, 279, 307, 337, 371, 408, 449, 494, 544, 598, 658, 724, 796, 876, 963,
+   1060, 1166, 1282, 1411, 1552, 1707, 1878, 2066, 2272, 2499, 2749, 3024, 3327,
+   3660, 4026, 4428, 4871, 5358, 5894, 6484, 7132, 7845, 8630, 9493, 10442,
+   11487, 12635, 13899, 15289, 16818, 18500, 20350, 22385, 24623, 27086, 29794,
+   32767
+]
+
+fn _ima4(any d, int at, int size, int frames, int channels, int rate) any {
+   ;; QuickTime IMA: a big-endian predictor/index and 32 low-nibble-first
+   ;; bytes per channel, yielding 64 interleaved PCM frames per packet.
+   ;; COMM counts packets for this codec, so take the length from the data.
+   if channels <= 0 || channels > 32 { return 0 }
+   def packets = size / (channels * 34)
+   if packets <= 0 { return 0 }
+   def total = packets * 64
+   def out = malloc(total * channels * 2)
+   ;; A header that agrees with the running state keeps its full precision.
+   def state_value = list()
+   def state_index = list()
+   mut init = 0
+   while init < channels {
+      state_value.append(0)
+      state_index.append(0)
+      init += 1
+   }
+   mut packet = 0
+   while packet < packets {
+      mut ch = 0
+      while ch < channels {
+         def base = at + (packet * channels + ch) * 34
+         def header = _be16(d, base)
+         mut index = header & 127
+         if index > 88 { free(out) return 0 }
+         mut value = header & 0xff80
+         if value >= 32768 { value -= 65536 }
+         def int running = state_value[ch]
+         def int gap = running > value ? running - value : value - running
+         def int running_index = state_index[ch]
+         if running_index == index && gap <= 127 { value = running }
+         mut k = 0
+         while k < 64 {
+            def packed = load8(d, base + 2 + k / 2)
+            def n = k % 2 == 0 ? packed & 15 : packed >> 4
+            def step = int(_IMA_STEP[index])
+            mut diff = step >> 3
+            if (n & 1) != 0 { diff += step >> 2 }
+            if (n & 2) != 0 { diff += step >> 1 }
+            if (n & 4) != 0 { diff += step }
+            value += (n & 8) != 0 ? -diff : diff
+            if value < -32768 { value = -32768 }
+            if value > 32767 { value = 32767 }
+            index += int(_IMA_INDEX[n])
+            if index < 0 { index = 0 }
+            if index > 88 { index = 88 }
+            store16(out, value, ((packet * 64 + k) * channels + ch) * 2)
+            k += 1
+         }
+         state_value[ch] = value
+         state_index[ch] = index
+         ch += 1
+      }
+      packet += 1
+   }
+   make_memory_source(out, total * channels * 2, channels, rate, 16, SAMPLE_FMT_S16, 1)
 }
 
 fn decode_bytes(any d) any {
@@ -76,6 +148,7 @@ fn decode_bytes(any d) any {
       pos = body + size + (size & 1)
    }
    if channels <= 0 || frames < 0 || rate <= 0 || sound_at < 0 { return 0 }
+   if comp == "ima4" { return _ima4(d, sound_at, sound_size, frames, channels, rate) }
    def need = frames * channels
    if comp == "sowt" || comp == "NONE" || comp == "twos" {
       if bits != 8 && bits != 16 && bits != 24 && bits != 32 { return 0 }

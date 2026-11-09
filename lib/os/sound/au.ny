@@ -25,6 +25,9 @@ fn _mulaw(int u) int {
 
 fn decode_bytes(any d) any {
    "Decodes AU bytes to a memory sound source; unsupported encodings return 0."
+   ;; Encodings 23, 24, 25, and 26 (G.721, G.722, and G.723/G.726 ADPCM)
+   ;; are not implemented here. The existing PCM, float, G.711, and A-law
+   ;; paths below are kept pure Nytrix and malformed/unsupported input returns 0.
    if d.len < 24 || load8(d, 0) != 46 || load8(d, 1) != 115 ||
       load8(d, 2) != 110 || load8(d, 3) != 100 { return 0 }
    def off = _be32(d, 4)

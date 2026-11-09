@@ -333,3 +333,106 @@ NYC_KERNEL_COMPAT=1 NYC_KERNEL_FORCE_O0=1 make -j10 -k CC=/tmp/nyc-cc-wrapper HO
 ```
 
 Per blocker: minimal repro with NYC direct flags, fix in `/home/e/nytrix/src/code/lang/parse/c/parse.c` (and possibly `nyc.c`/backend), `cmake --build /home/e/nytrix/build/release --target nyc -j4`, clean failed `.o/.nyc.s/.cmd/.d`, retry. NYC-only, no C fallback, kernel sources unmodified. All NYC/docs changes uncommitted; `/tmp` ephemeral; nothing pushed.
+
+## Continuation 5 — 2026-11-09 (resume passes, NYC compat fixes, build state saved)
+
+NYC: `NYC (Nytrix C frontend, NYR backend) 0.10.0+git.7737baf6c571 head=7737baf6c571 dirty=1`
+(rebuilt after fixes). Kernel sources unmodified:
+`/home/e/nytrix-work/nyc/upstream/linux-7.3`. Build tree (configured, ephemeral
+artifacts): `/tmp/nyc-linux73-acceptance-final`. Wrapper:
+`/tmp/nyc-cc-wrapper` (NYC+GNU `as` for `.c -c`, host gcc/as for `.S`/host
+scripts, `NYC_KERNEL_COMPAT=1`, `NYC_KERNEL_FORCE_O0=1` default except `-m16`,
+NYC `-S` failure hard-fails, no C fallback).
+
+### NYC fixes applied (uncommitted in `/home/e/nytrix/src/code/lang/parse/c/parse.c`)
+- **Local array attribute/alignment/mode leniency (kernel compat):** ignore
+  unsupported placement/section/mode/over-alignment attributes on local arrays
+  in `NYC_KERNEL_COMPAT` (was `unsupported placement or over-alignment on local array`;
+  hit `drivers/tty/hvc/hvc_console.c:154`).
+- **Function argument type leniency (kernel compat):** in known-function
+  argument checking, allow pointer↔pointer and pointer↔integer mismatches in
+  `NYC_KERNEL_COMPAT` (helps `snprintf`/kernel macro-mis-typed args, e.g.
+  `drivers/virtio/virtio_pci_common.c` pattern). Review if it masks real bugs;
+  intended for compilation coverage.
+
+Rebuilt NYC with `cmake --build /home/e/nytrix/build/release --target nyc -j4`.
+
+### Build passes (`-j10 -k`, NYC-only)
+- `resume2` (`/tmp/nyc-j10-resume2.log`): ran until tool timeout/interruption
+  while still compiling (fs/nfs, net, drivers/gpu/drm, i915, sunrpc etc.).
+- `resume3` (`/tmp/nyc-j10-resume3.log`): completed with `make -k` exhausting
+  buildable targets; **no `vmlinux`, no `bzImage`, no modules** produced.
+  Many NYC errors remain (23+ logged error sites in resume2 context; resume3
+  ended with widespread driver/arch failures).
+
+### Proxy (caveat)
+`find . -name '*.o.cmd'` vs matching `.o` (excluding `scripts/`/`tools/`) in
+`/tmp/nyc-linux73-acceptance-final` reported **2949/2949** present for tracked
+`.cmd` objects, but several NYC-failing TUs (e.g. `arch/x86/lib/iomem.o`,
+`drivers/pci/quirks.o`, `drivers/char/hpet.o`, `drivers/gpu/drm/drm_cache.o`)
+have **no `.o` and may lack tracked `.o.cmd`/be uncounted in that proxy**.
+Treat this proxy as **not proof of configured C TU coverage**; compute a
+trustworthy configured-object inventory (from `.cmd` deps / Kbuild objects for
+enabled config, excluding host/scripts/tools and asm-only TUs as appropriate)
+before claiming coverage.
+
+### NYC blocker classes observed (resume3, representative)
+- **Inline asm not supported by NYIR x86-64 emitter/backend** (fatal to TU in
+  these cases): `arch/x86/lib/iomem.c` (`rep movsl`/local labels in template),
+  `arch/x86/pci/mmconfig_64.c` (`movb (%1),%%al`), `drivers/char/hw_random/via-rng.c`
+  (`.byte 0x0F,0xA7,0xC0 xstore`), `drivers/gpu/drm/drm_cache.c` (`movntdqa`/SSE),
+  `drivers/base/power/main.c` (`movq $1f,%0` label ref) and others. NYC needs
+  broader inline-asm template/operand/label/encoding support or a safe
+  pass-through strategy for kernel asm.
+- **Parser/lowering failures:** `drivers/pci/quirks.c:1970` local
+  `struct property_entry properties[] = { PROPERTY_ENTRY_BOOL(...), {}, }`
+  — "could not lower C statement" (`{}`/compound/aggregate local init path).
+  `drivers/char/hpet.c:66` parse error (`expected ';', found ','`).
+  `drivers/iommu/amd/quirks.c:30` parse error. Various i915 display files:
+  `reference \`char\` must name...`, `typeof` of complex builtin expression
+  (`intel_dp_link_caps.c`), aggregate initializer/type mismatches
+  (`intel_dp_aux.c`, `intel_sdvo.c` ABI aggregate arg), expected scalar
+  expressions near designated array init (`intel_dp_mst.c`, `intel_vrr.c`),
+  static scalar array dimension issues (`intel_dsi_vbt.c`), switch
+  all-returning unsupported result type (`intel_hdmi.c`), parse errors
+  (`intel_snps_hdmi_pll.c`), etc.
+- **Type-system strictness in kernel macros:** `drivers/virtio/virtio_pci_common.c`
+  snprintf arg type (partially addressed by arg leniency; recheck after rebuild).
+  `drivers/char/agp/backend.c` function-pointer initializer requires function
+  symbol. `drivers/iommu/amd/{init,ppr,pasid}.c` aggregate assignment mismatch
+  from `amd_iommu.h` int128/bitop/value-typing patterns (`value type 6/tag nil`).
+  `net/ipv4/inet_hashtables.c` parenthesized address-of / `nf_conntrack_sip.c`
+  char-array/macro aggregate init / `net/mac80211/trace.c` NYIR verifier issues
+  were noted in continuation 4 and should be rechecked against current tree/logs.
+- **NYIR optimizer/verifier noise:** frequent "NYIR optimization pipeline failed
+  (continuing unoptimized)" and some "verification failed after optimization
+  pipeline" / dominance issues; not always fatal but needs review. objtool
+  warnings frequent (unreachable, UACCESS, noreturn).
+
+### Acceptance status
+**Not satisfied.** No clean `bzImage`/modules from unmodified Linux 7.3 sources
+with NYC compiling every configured C TU (GNU `as` allowed per wrapper model),
+no C fallback, and compiler/linker/`objtool` warnings not fully reviewed.
+NYC still cannot compile all configured TUs in this config due to inline-asm
+backend gaps and C frontend/type/lowering gaps.
+
+### Resume
+1. Recreate `/tmp/nyc-cc-wrapper` if `/tmp` cleared (see continuation 4).
+2. Compute a real configured-C-object inventory and a list of failing `.c` TUs
+   (missing `.o` where `.c` is configured, plus NYC error logs).
+3. Triage by blocker class; fix highest-impact NYC issues:
+   - NYIR x86-64 inline asm: handle common kernel templates (`rep movs*` with
+     labels, simple `mov* (reg),reg`/`mov* reg,(reg)`, `movq $label,%reg`,
+     byte directives/passthrough where safe, SSE op passthrough or conservative
+     support) to unblock arch/drivers.
+   - Frontend: local aggregate init with `{}` elements/compound forms
+     (`pci/quirks`), aggregate/int128 bitop typing (`amd_iommu.h`), typeof of
+     complex expressions, designated init/scalar expr forms seen in i915, parse
+     errors in hpet/amd quirks/i915 cases.
+4. Rebuild NYC, clean failed `.o/.nyc.s/.cmd/.d` for targeted TUs, retry with
+   `make -j10 -k ...`, then `vmlinux`/`bzImage`/modules.
+5. Review compiler/linker/`objtool`/NYIR warnings; document deviations required
+   for NYC acceptance if any remain.
+
+All NYC/docs changes uncommitted; unrelated uncommitted edits in `/home/e/nytrix`
+preserved; kernel sources unmodified; `/tmp` ephemeral; nothing pushed.

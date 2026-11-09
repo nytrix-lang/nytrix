@@ -1,0 +1,117 @@
+shape sound_stream_frame_ranges {
+  family "runtime/system/sound"
+  generator "embedded"
+  features ["sound", "stream", "seek", "range"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os as os
+use core.os.sound.wav as wav
+use core.os.sound.aiff as aiff
+use core.os.sound.au as au
+use core.os.sound.stream as stream
+
+fn s(bytes p, int at, str text) bytes {
+   mut i = 0
+   while i < 4 { store8(p, load8(text, i), at + i) i += 1 }
+   p
+}
+fn le16(bytes p, int at, int v) bytes { store16(p, v, at) p }
+fn le32(bytes p, int at, int v) bytes { store32(p, v, at) p }
+fn be16(bytes p, int at, int v) bytes {
+   store8(p, (v >> 8) & 255, at)
+   store8(p, v & 255, at + 1)
+   p
+}
+fn be32(bytes p, int at, int v) bytes {
+   store8(p, (v >> 24) & 255, at)
+   store8(p, (v >> 16) & 255, at + 1)
+   store8(p, (v >> 8) & 255, at + 2)
+   store8(p, v & 255, at + 3)
+   p
+}
+
+def wav_data = bytes(56)
+s(wav_data, 0, "RIFF")
+le32(wav_data, 4, 48)
+s(wav_data, 8, "WAVE")
+s(wav_data, 12, "fmt ")
+le32(wav_data, 16, 16)
+le16(wav_data, 20, 1)
+le16(wav_data, 22, 1)
+le32(wav_data, 24, 8000)
+le32(wav_data, 28, 16000)
+le16(wav_data, 32, 2)
+le16(wav_data, 34, 16)
+s(wav_data, 36, "data")
+le32(wav_data, 40, 12)
+mut i = 0
+while i < 6 { le16(wav_data, 44 + i * 2, (i + 1) * 0x111) i += 1 }
+
+def aiff_data = bytes(66)
+s(aiff_data, 0, "FORM")
+be32(aiff_data, 4, 58)
+s(aiff_data, 8, "AIFF")
+s(aiff_data, 12, "COMM")
+be32(aiff_data, 16, 18)
+be16(aiff_data, 20, 1)
+be32(aiff_data, 22, 6)
+be16(aiff_data, 26, 16)
+store8(aiff_data, 0x40, 28)
+store8(aiff_data, 0x0b, 29)
+store8(aiff_data, 0xfa, 30)
+s(aiff_data, 38, "SSND")
+be32(aiff_data, 42, 20)
+be32(aiff_data, 46, 0)
+i = 0
+while i < 6 { be16(aiff_data, 54 + i * 2, (i + 1) * 0x111) i += 1 }
+
+def au_data = bytes(36)
+s(au_data, 0, ".snd")
+be32(au_data, 4, 24)
+be32(au_data, 8, 12)
+be32(au_data, 12, 3)
+be32(au_data, 16, 8000)
+be32(au_data, 20, 1)
+i = 0
+while i < 6 { be16(au_data, 24 + i * 2, (i + 1) * 0x111) i += 1 }
+
+fn verify_file(str label, bytes data, int format_kind) bool {
+   def path = os.temp_dir() + "/ny-sound-stream-" + to_str(os.pid()) + "-" + label
+   unwrap(os.file_write(path, data))
+   def full = format_kind == 0 ? wav.decode_bytes(data) : (format_kind == 1 ? aiff.decode_bytes(data) : au.decode_bytes(data))
+   def st = stream.open(path)
+   assert(is_list(full) && st != 0, label + " opens and decodes")
+   def meta = full.get(1)
+   assert(stream.length(st) == 6 && stream.format(st) == [1, 8000, 16], label + " exact frame length and format")
+   def ranges = [[0, 2], [2, 3], [5, 1]]
+   mut r = 0
+   while r < ranges.len {
+      def start = int(ranges[r][0])
+      def count = int(ranges[r][1])
+      def part = stream.read_range(st, start, count)
+      def pm = part.get(1)
+      assert(pm.get("total_frames") == count, label + " range frame count")
+      assert(memcmp(pm.get("ptr"), meta.get("ptr") + start * 2, count * 2) == 0,
+             label + " range equals full decode slice")
+      free(pm.get("ptr"))
+      r += 1
+   }
+   def buf = malloc(8)
+   assert(stream.seek(st, 4) && stream.read(st, buf, 4) == 2, label + " seek and clipped read")
+   assert(stream.tell(st) == 6 && memcmp(buf, meta.get("ptr") + 8, 4) == 0,
+          label + " read after seek reaches exact end")
+   assert(stream.seek(st, 1) && stream.read(st, buf, 2) == 2 &&
+          memcmp(buf, meta.get("ptr") + 2, 4) == 0, label + " repeated seek read")
+   free(buf, meta.get("ptr"))
+   assert(stream.close(st), label + " closes")
+   unwrap(os.file_remove(path))
+   true
+}
+
+assert(verify_file("wav", wav_data, 0), "WAV stream range behavior")
+assert(verify_file("aiff", aiff_data, 1), "AIFF stream range behavior")
+assert(verify_file("au", au_data, 2), "AU stream range behavior")
+NY
+}
