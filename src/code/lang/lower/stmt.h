@@ -3339,6 +3339,18 @@ static bool nyr_lower_var(nyr_builder_t *b, const stmt_t *s) {
         }
       }
     }
+    /*
+     * Bool locals hold raw 0/1, but a comparison on a dynamic value yields a
+     * boxed boolean, whose false is nonzero and would branch as true.
+     */
+    if (l->is_bool && val >= 0 && nyr_value_is_dynamic(b, val)) {
+      val = nyr_emit_truthy(b, val);
+      if (val < 0)
+        return false;
+      l->is_any = false;
+      l->type_name = "bool";
+      l->semantic_rep = NY_SEM_REP_RAW_INT;
+    }
     if (!nyr_store_local_value(b, l->slot, val))
       return false;
     /* A local list keeps its current logical length in a companion slot for

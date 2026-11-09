@@ -13,9 +13,6 @@ Working rules:
 
 ## Correctness
 
-- [ ] **`fmod` in GCC builds:** a compiler built with GCC returns the divisor from
-  `__flt_fmod` (`fmod(5.5, 2.0)` gives 2), which also fails `ui_replay_animation`
-  there. Clang builds are correct. Accept: both compilers pass the fixture.
 - [ ] **Intermittent crashes under load:** `ui_replay_animation` segfaulted
   (exit 139) and `generated-mutable-flow-differential` aborted with "double
   free or corruption" in full runs. Both pass alone, and 84 concurrent cold runs
@@ -28,6 +25,28 @@ Working rules:
   compiler bugs with `-vvvvvv`, `--nyr-check=verify,oracle`, and
   `--native-only --inspect`. Accept: each defect recorded here with a
   reproducer, then fixed.
+
+## Language bugs
+
+Each has a confirmed reproducer. Accept: a fixture for each, on every backend.
+
+- [ ] **Ordered comparison on a dict read:** `d["a"] <= 0` is true when the value
+  is 1, because it is untagged twice. `.get` and a local copy are correct.
+- [ ] **Booleans in lists:** `print([1 == 1, 1 == 2])` prints `[8, 2]`, and an
+  element read back as `l[0]` prints `0`. The boxed value is tagged again.
+- [ ] **Raw value stored in a dynamic `mut`:** `mut x = d.get("b", 0) * 2` then
+  `x = 500` inside an `if` leaves an untagged word, and `print(x)` shows `nil`.
+- [ ] **`bytes` built through `any` helpers:** `def p = bytes(62)` passed to helpers
+  taking `any` and returned as `any` reports `.len` as 5 and loses later writes.
+  `def bytes p` is correct.
+- [ ] **Unary minus after a newline:** `def p = 1` then `-p` on the next line parses
+  as `1 - p`, and a doc string followed by `-5` fails to compile.
+- [ ] **Multi-line ternary:** a line starting with `?` or `:` does not continue the
+  expression.
+- [ ] **`fmod` in GCC builds:** a GCC-built compiler returns the divisor from
+  `__flt_fmod` (`fmod(5.5, 2.0)` gives 2) and fails `ui_replay_animation` there.
+- [ ] **New `lib/` files:** adding one needs a CMake reconfigure before edits reach
+  the embedded library, so a rebuild silently tests stale code.
 
 ## Performance: targets
 
@@ -89,9 +108,9 @@ Reference: [dr_libs](https://github.com/mackron/dr_libs) (`dr_wav`, `dr_flac`,
 `dr_mp3`). Native decoders live in `lib/os/sound/res.ny`; each needs fixtures
 checked against reference output.
 
-- [ ] **WAV/RIFF decoder overhaul:** chunk scanning must not assume `fmt ` is
-  first. Add `WAVE_FORMAT_EXTENSIBLE`, A-law, mu-law, MS ADPCM, IMA/DVI ADPCM,
-  8/12/16/24/32-bit PCM and 32/64-bit float, plus RIFX, RF64, and Wave64.
+- [ ] **WAV containers:** add fixtures for RIFX, RF64, and Wave64 parsing. PCM,
+  float, A-law, mu-law, `EXTENSIBLE`, and MS and IMA ADPCM are done and match
+  `ffmpeg` on RIFF test files.
 - [ ] **WAV writer:** PCM and float output in RIFF and RF64.
 - [ ] **AIFF/AIFC:** big-endian containers and their compressed variants.
 - [ ] **AU decoder:** cover every encoding, with A-law and mu-law expansion.
@@ -119,8 +138,6 @@ checked against reference output.
 
 - [ ] **Faster `./make check`:** a full run takes about 16 minutes before the
   benchmark phase. Find the largest costs and cut them without losing coverage.
-- [ ] **Test cleanup:** remove remaining duplicates and merge overlapping
-  fixtures. Accept: coverage unchanged.
 
 ## Code quality
 

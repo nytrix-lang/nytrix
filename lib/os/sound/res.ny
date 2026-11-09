@@ -17,6 +17,7 @@ use core.str as str
 use core.math.parse.img as image
 use core.os.sound.diag as sound_debug
 use core.os.sound.source
+use core.os.sound.wav as wav
 use core.os.ffi as ffi
 
 ;; libsndfile is optional: bound through dlopen so hosts without it can still
@@ -80,82 +81,9 @@ fn _snd_disable() bool {
 
 ;; Pure-Ny WAV decoder (PCM, float, 8/16/24/32-bit)
 fn _wav_decode(str filepath) any {
-   def debug = sound_debug.enabled()
    def res = file_read(filepath)
    if is_err(res) { return 0 }
-   def data = unwrap(res)
-   if data.len < 44 { return 0 }
-   if load8(data, 0) != 82 || load8(data, 1) != 73 || load8(data, 2) != 70 || load8(data, 3) != 70 { return 0 }
-   def file_size = load32(data, 4)
-   if load8(data, 8) != 87 || load8(data, 9) != 65 || load8(data, 10) != 86 || load8(data, 11) != 69 { return 0 }
-   if load8(data, 12) != 102 || load8(data, 13) != 109 || load8(data, 14) != 116 || load8(data, 15) != 32 { return 0 }
-   def fmt_chunk_size = load32(data, 16)
-   if fmt_chunk_size < 16 { return 0 }
-   def audio_fmt = load16(data, 20)
-   def channels = load16(data, 22)
-   def sample_rate = load32(data, 24)
-   def byte_rate = load32(data, 28)
-   def block_align = load16(data, 32)
-   def bits_per_sample = load16(data, 34)
-   def data_offset = 20 + fmt_chunk_size
-   mut pos = data_offset
-   while pos + 8 <= data.len {
-      def chunk_id = load32(data, pos)
-      def chunk_size = load32(data, pos + 4)
-      if chunk_id == 0x61746164 { break } ;; "data"
-      pos += 8 + chunk_size
-      if pos > data.len { return 0 }
-   }
-   if pos + 8 > data.len { return 0 }
-   def data_size = load32(data, pos + 4)
-   pos += 8
-   if pos + data_size > data.len { return 0 }
-   ;; WAV payloads are binary: copy raw bytes at `pos`. Do not route them
-   ;; through `slice`, which applies UTF-8 code-point semantics and would
-   ;; re-encode bytes >= 0x80 while changing the decoded sample count.
-   if audio_fmt == 3 { ;; IEEE float
-      if bits_per_sample != 32 { return 0 }
-      def out_ptr = malloc(data_size)
-      memcpy(out_ptr, ptr_add(data, pos), data_size)
-      return make_memory_source(out_ptr, data_size, channels, sample_rate, 32, SAMPLE_FMT_F32, 3)
-   }
-   if audio_fmt == 1 { ;; PCM
-      if bits_per_sample == 8 {
-         mut out = malloc(data_size)
-         mut i = 0
-         while i < data_size {
-            def v = load8(data, pos + i)
-            store8(out, (v + 128) & 0xff, i)
-            i += 1
-         }
-         make_memory_source(out, data_size, channels, sample_rate, 8, SAMPLE_FMT_U8, 1)
-      } elif bits_per_sample == 16 {
-         def sample_count = data_size / 2
-         def out_ptr = malloc(sample_count * 2)
-         mut i = 0
-         while i < sample_count {
-            def v = load16(data, pos + i * 2)
-            store16(out_ptr, v, i * 2)
-            i += 1
-         }
-         make_memory_source(out_ptr, sample_count * 2, channels, sample_rate, 16, SAMPLE_FMT_S16, 1)
-      } elif bits_per_sample == 24 {
-         def sample_count = data_size / 3
-         def out_ptr = malloc(data_size)
-         memcpy(out_ptr, ptr_add(data, pos), data_size)
-         make_memory_source(out_ptr, sample_count * 3, channels, sample_rate, 24, SAMPLE_FMT_S24, 1)
-      } elif bits_per_sample == 32 {
-         def sample_count = data_size / 4
-         def out_ptr = malloc(sample_count * 4)
-         mut i = 0
-         while i < sample_count {
-            def v = load32(data, pos + i * 4)
-            store32(out_ptr, v, i * 4)
-            i += 1
-         }
-         make_memory_source(out_ptr, sample_count * 4, channels, sample_rate, 32, SAMPLE_FMT_S32, 1)
-      } else { return 0 }
-   } else { return 0 }
+   wav.decode_bytes(unwrap(res))
 }
 
 ;; Reads a big-endian 16-bit value at offset `off`.

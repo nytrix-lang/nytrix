@@ -1,0 +1,28 @@
+shape dynamic_bool_def_branches {
+  family "language/dynamic/booleans"
+  generator "embedded"
+  features ["dynamic", "bool", "branch"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+fn from_dict(dict d) int {
+   def w = d["a"] == 1
+   if w { return 1 }
+   w ? 2 : 3
+}
+
+def d = {"a": 0, "b": 5}
+def v = d["a"]
+def w = v == 1
+mut reached = 0
+if w { reached = 1 }
+assert(reached == 0, "a false dynamic comparison does not take the branch")
+assert((w ? 1 : 2) == 2, "a false dynamic comparison selects the else arm")
+assert(w == false, "the value still compares equal to false")
+assert(!w, "the value still negates to true")
+assert(from_dict({"a": 0, "b": 5}) == 3, "local false selects the else arm")
+assert(from_dict({"a": 1, "b": 5}) == 1, "local true takes the branch")
+NY
+}

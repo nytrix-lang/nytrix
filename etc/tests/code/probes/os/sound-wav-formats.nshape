@@ -1,0 +1,84 @@
+shape sound_wav_format_decoding {
+  family "runtime/system/sound"
+  generator "embedded"
+  features ["sound", "wav", "decoder"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os as os
+use core.os.sound as sound
+
+fn put16(bytes p, int at, int v) bytes {
+   store8(p, v & 255, at)
+   store8(p, (v >> 8) & 255, at + 1)
+   p
+}
+
+fn put32(bytes p, int at, int v) bytes {
+   put16(p, at, v & 0xffff)
+   put16(p, at + 2, (v >> 16) & 0xffff)
+}
+
+fn name_at(bytes p, int at, str text) bytes {
+   mut i = 0
+   while i < 4 {
+      store8(p, load8(text, i), at + i)
+      i += 1
+   }
+   p
+}
+
+;; A LIST chunk ahead of `fmt ` proves the decoder scans chunks.
+fn load_wav(int format, int bits, int align) any {
+   def samples = [0x80, 0xff, 0x00, 0x40]
+   def int total = 62
+   def bytes p = bytes(total)
+   name_at(p, 0, "RIFF")
+   put32(p, 4, total - 8)
+   name_at(p, 8, "WAVE")
+   name_at(p, 12, "LIST")
+   put32(p, 16, 6)
+   name_at(p, 20, "INFO")
+   name_at(p, 26, "fmt ")
+   put32(p, 30, 16)
+   put16(p, 34, format)
+   put16(p, 36, 1)
+   put32(p, 38, 8000)
+   put32(p, 42, 8000 * align)
+   put16(p, 46, align)
+   put16(p, 48, bits)
+   name_at(p, 50, "data")
+   put32(p, 54, 4)
+   mut i = 0
+   while i < 4 {
+      store8(p, int(samples[i]), 58 + i)
+      i += 1
+   }
+   def path = os.temp_dir() + "/ny-wav-" + to_str(os.pid()) + "-" +
+              to_str(format) + ".wav"
+   unwrap(os.file_write(path, p))
+   def src = sound.load(path)
+   unwrap(os.file_remove(path))
+   src[1]
+}
+
+fn sample(any d, int i) int {
+   def int v = load16(d.get("ptr"), i * 2)
+   v >= 32768 ? v - 65536 : v
+}
+
+def pcm8 = load_wav(1, 8, 1)
+assert(load8(pcm8.get("ptr"), 1) == 0xff, "8-bit samples stay unsigned")
+assert(load8(pcm8.get("ptr"), 2) == 0x00, "8-bit samples are not inverted")
+
+def mu = load_wav(7, 8, 1)
+assert(sample(mu, 0) == 32124, "mu-law 0x80 expands")
+assert(sample(mu, 1) == 0, "mu-law 0xff is silence")
+assert(sample(mu, 2) == -32124, "mu-law 0x00 expands")
+assert(mu.get("bits") == 16 && mu.get("len") == 8, "companded output is 16-bit")
+
+def alaw = load_wav(6, 8, 1)
+assert(sample(alaw, 0) == 5504, "A-law expands")
+NY
+}
