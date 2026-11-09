@@ -12194,8 +12194,6 @@ static bool nyr_expr_is_raw_dynamic_read(nyr_builder_impl_t *b,
           e->as.index.target->as.ident.name) {
         const nyr_local_t *target_local =
             nyr_find_local(b, e->as.index.target->as.ident.name);
-        if (target_local && target_local->is_dyn_list)
-          return true;
         if (target_local && target_local->is_any)
           return false;
         if (nyr_local_is_dynamic_sequence(target_local))

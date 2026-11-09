@@ -24,8 +24,6 @@ Working rules:
   vreg from entry-block LEAs without a unique reaching definition. Accept:
   reduced regression fixture added,
   or the path shown unreachable.
-- [ ] **`int()` of a dynamic list element:** `print(int(l[0]))` shows 119 for 59 and
-  `int(l[0]) == variable` is false. Assignment and comparison with a literal work.
 - [ ] **Boxed float builtin ABI:** builtins declared `f64` (`__flt_pow`, `__flt_sin`,
   and others) return a boxed float in `rax` while callers read `xmm0`. It works
   only because `xmm0` still holds the result. Changing them to return `any` broke
@@ -97,8 +95,7 @@ checked against reference output.
   metadata blocks, CRC checks, seek tables, and Ogg-encapsulated FLAC.
 - [ ] **Native MP3 decoder:** MPEG-1/2/2.5 Layer I-III, ID3v1/ID3v2 skipping,
   Xing/VBRI/LAME headers for gapless length, and seeking.
-- [ ] **Streaming API:** frame-range reads, seek, and exact length work for WAV,
-  AIFF, and AU PCM in `stream.ny`. Compressed AIFF crashes; FLAC and MP3 are not
+- [ ] **Compressed streaming:** compressed AIFF crashes; FLAC and MP3 are not
   covered yet.
 
 ## UI and engine

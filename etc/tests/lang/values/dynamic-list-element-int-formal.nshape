@@ -13,6 +13,13 @@ fn guarded_div(int numerator, int denominator) int {
 }
 
 fn run() int {
+   def converted = list()
+   converted.append(58)
+   converted[0] = 59
+   def expected = 59
+   assert(int(converted[0]) == expected, "dynamic list int conversion")
+   assert(__any_to_i64(converted[0]) == expected, "dynamic list raw conversion")
+
    def data = [3, 0, -2, 5, 0, 7, 1, -4]
    mut acc = 0
    mut i = 0
