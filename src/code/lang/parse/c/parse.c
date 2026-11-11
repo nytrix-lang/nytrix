@@ -728,6 +728,17 @@ static uint64_t c_name_hash(ny_ctok_t name) {
   return hash;
 }
 
+static uint64_t c_source_hash(const char *path) {
+  uint64_t hash = UINT64_C(1469598103934665603);
+  if (path)
+    for (const unsigned char *byte = (const unsigned char *)path; *byte;
+         ++byte) {
+      hash ^= *byte;
+      hash *= UINT64_C(1099511628211);
+    }
+  return hash;
+}
+
 static bool typedef_index_ensure(c_parser_t *p) {
   if (!p->typedef_count) {
     if (p->typedef_index_capacity)
@@ -6361,6 +6372,10 @@ static bool collect_file_scope_asm(c_parser_t *p) {
           sections[current].local_label_offset = sections[current].length;
           sections[current].local_label_order = ++local_label_order;
           sections[current].have_local_label = true;
+        } else if (strncmp(sections[current].name, ".export_symbol", 14) == 0 &&
+                   strncmp(label, "__export_symbol_", 16) == 0) {
+          ok = asm_section_add_symbol(&sections[current], label,
+                                      sections[current].length);
         } else if (asm_section_find_symbol(&sections[current], label) &&
                    asm_section_find_symbol(&sections[current], label)->offset ==
                        sections[current].length) {
@@ -6981,13 +6996,7 @@ static bool collect_file_scope_asm(c_parser_t *p) {
       if (symbol_name) {
         name_len = (int)strlen(symbol_name);
       } else {
-        uint64_t path_hash = UINT64_C(1469598103934665603);
-        const char *path = p->base_path ? p->base_path : "";
-        for (const unsigned char *byte = (const unsigned char *)path; *byte;
-             ++byte) {
-          path_hash ^= *byte;
-          path_hash *= UINT64_C(1099511628211);
-        }
+        uint64_t path_hash = c_source_hash(p->base_path);
         name_len =
             snprintf(generated_name, sizeof(generated_name),
                      "__nyc_asm_blob_%016llx_%zu",
@@ -20567,6 +20576,7 @@ int nyc_frontend_compile_unit(const nyc_source_t *source, nyc_abi_t abi,
       out_alias->name = strndup(alias->name.start, alias->name.len);
       out_alias->target = strndup(target->name.start, target->name.len);
       out_alias->target_local = target->is_static;
+      out_alias->is_weak = alias->is_weak;
       if (!out_alias->name || !out_alias->target) {
         free(out_alias->name);
         free(out_alias->target);

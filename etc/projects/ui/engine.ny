@@ -883,6 +883,12 @@ fn _stop_model_prefetch() {
    _model_prefetch_name = ""
 }
 
+fn _model_prefetch_worker() {
+   ;; Thread entry points read module state only: a closure that captures a
+   ;; function local faults on the worker thread once the spawning frame is gone.
+   ui_assets.prefetch_gltf_asset(_model_prefetch_name)
+}
+
 fn _schedule_model_prefetch(idx) {
    def names = _refresh_model_catalog()
    if !is_list(names) || idx < 0 || idx >= names.len {
@@ -897,9 +903,7 @@ fn _schedule_model_prefetch(idx) {
    }
    _stop_model_prefetch()
    _model_prefetch_name = name
-   _model_prefetch_thread = int(thread_spawn(fn() {
-            ui_assets.prefetch_gltf_asset(name)
-   }))
+   _model_prefetch_thread = int(thread_spawn(_model_prefetch_worker))
    _model_prefetch_thread != 0
 }
 
@@ -1058,6 +1062,22 @@ fn _load_scene_runtime_sync(spec, auto_frame=true, show_loading=true) {
    _finish_scene_load_path(gltf_path, want, auto_frame)
 }
 
+fn _scene_load_async_worker() {
+   "Background half of a scene load: parse and prepare the glTF, then publish the result."
+   def ok = ui_assets.prefetch_gltf_asset(_scene_load_async_path)
+   def mu = _scene_load_async_mutex()
+   if mu {
+      mutex_lock(mu)
+   }
+   if is_dict(_scene_load_async_job) {
+      _scene_load_async_job["ok"] = ok ? true : false
+      _scene_load_async_job["done"] = true
+   }
+   if mu {
+      mutex_unlock(mu)
+   }
+}
+
 fn _load_scene_runtime_async(spec, auto_frame=true) {
    def want = str.strip(to_str(spec))
    if want.len == 0 {
@@ -1083,18 +1103,9 @@ fn _load_scene_runtime_async(spec, auto_frame=true) {
    _scene_load_async_path = gltf_path
    _scene_load_async_display = want
    _scene_load_async_auto_frame = auto_frame
-   _scene_load_async_thread = int(thread_spawn(fn() {
-            def ok = ui_assets.prefetch_gltf_asset(gltf_path)
-            def mu = _scene_load_async_mutex()
-            if mu {
-               mutex_lock(mu)
-            }
-            job["ok"] = ok ? true : false
-            job["done"] = true
-            if mu {
-               mutex_unlock(mu)
-            }
-   }))
+   ;; Create the mutex before the worker exists so both sides share one.
+   def _discard_async_mu = _scene_load_async_mutex()
+   _scene_load_async_thread = int(thread_spawn(_scene_load_async_worker))
    if !_scene_load_async_thread {
       _scene_load_async_clear()
       return _load_scene_runtime_sync(want, auto_frame, false)
@@ -1190,9 +1201,7 @@ fn _schedule_batch_prefetch_next() {
    }
    _stop_model_prefetch()
    _model_prefetch_name = spec
-   _model_prefetch_thread = int(thread_spawn(fn() {
-            ui_assets.prefetch_gltf_asset(spec)
-   }))
+   _model_prefetch_thread = int(thread_spawn(_model_prefetch_worker))
    _model_prefetch_thread != 0
 }
 
@@ -5939,8 +5948,10 @@ fn _app_update_simulation(dt, bench, prep_gui, gui_nav_blocking, trace, deep_tra
       _ui_set_update_stage("camera.sim")
       _app_simulate_camera_frame(dt, prep_gui, gui_nav_blocking)
    }
+   _ui_set_update_stage("camera.changed")
    def cam_dirty = _camera_state_changed(prev_cam)
    if cam_dirty {
+      _ui_set_update_stage("camera.sync")
       _sync_camera_state_to_arrays()
    }
    if cam_dirty || _proj_dirty {
@@ -5971,8 +5982,11 @@ fn app_update(dt) {
    _ui_set_update_stage("post-events")
    _last_evt_ms = (trace && deep_trace) ? ui_profile.elapsed_ms(t_evt0) : 0.0
    _app_prepare_gui_after_events(bench, gui_enabled_frame, trace, deep_trace)
+   _ui_set_update_stage("hotkey.f1-poll")
    def _discard_f1_poll = _app_poll_f1_hotkey()
+   _ui_set_update_stage("idle-check")
    if _app_idle_after_events(bench, _app_prep_gui) { return }
+   _ui_set_update_stage("simulation")
    _app_update_simulation(dt, bench, _app_prep_gui, _app_gui_nav_blocking, trace, deep_trace)
    _ui_set_update_stage("done")
 }

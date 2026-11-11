@@ -85,6 +85,10 @@ artifacts, where mentioned, are not a fresh test of the current checkout.
 - NYC/C frontend work expanded accepted C constructs and fixed targeted parser,
   preprocessor, declarator, initializer, typeof, array, and assembly-related
   cases. Target-dependent optimization and instruction selection remain limited.
+- NYC retains called static-inline jump-label helpers when they need out-of-line
+  emission, and its whole-unit assembly path honors `-fcf-protection=branch`
+  with ENDBR entries; unsupported control-flow modes and direct-object branch
+  protection fail explicitly.
 - Cross-target backends (AVR, ARM/AArch64, i386, RISC-V64, MIPS64, PowerPC64,
   Wasm/BPF-related paths, and object/ABI handling) received focused ABI,
   lowering, and fail-closed fixes covered by targeted tests.

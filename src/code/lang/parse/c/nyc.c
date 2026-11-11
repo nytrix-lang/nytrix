@@ -12,6 +12,7 @@
 #include "code/backend/object/internal.h"
 #include "nyc_help.h"
 
+#include <limits.h>
 #include <nyr/nyr.h>
 
 #include <stdbool.h>
@@ -294,6 +295,7 @@ typedef struct {
   bool retpoline_inline_calls;
   bool function_return_thunk_extern;
   bool indirect_branch_cs_prefix;
+  bool cf_protection_branch;
   bool dump_macros;
   bool print_file_name_plugin;
 } nyc_driver_t;
@@ -802,6 +804,8 @@ static bool write_assembly_data(nyr_writer_t *writer, const nyc_data_t *data,
     return false;
   if (data->function_symbol)
     return true;
+  if (data->section && strncmp(data->section, ".export_symbol", 14) == 0)
+    return true;
   return nyr_printf(writer,
                     "\t.local %s__nyc_data_%s\n"
                     "\t.set %s__nyc_data_%s,%s%s\n",
@@ -809,13 +813,37 @@ static bool write_assembly_data(nyr_writer_t *writer, const nyc_data_t *data,
                     data->name, target->symbol_prefix, data->name);
 }
 
-static bool write_c_unit_assembly(const nyc_unit_t *unit,
-                                  const ny_native_target_info_t *target,
-                                  const char *path, bool verbose, bool code16,
-                                  bool retpoline_indirect_calls,
-                                  bool retpoline_inline_calls,
-                                  bool function_return_thunk_extern, char *err,
-                                  size_t err_len) {
+static bool write_c_function_assembly(nyr_writer_t *assembly,
+                                      const char *function_assembly,
+                                      const char *name,
+                                      bool cf_protection_branch,
+                                      bool is_x86_64) {
+  if (!cf_protection_branch)
+    return nyr_put(assembly, function_assembly);
+  size_t name_len = strlen(name);
+  for (const char *line = function_assembly; *line;) {
+    const char *end = strchr(line, '\n');
+    if (!end)
+      break;
+    if ((size_t)(end - line) == name_len + 1 &&
+        memcmp(line, name, name_len) == 0 && line[name_len] == ':') {
+      size_t prefix_len = (size_t)(end + 1 - function_assembly);
+      const char *endbr = is_x86_64 ? "\tendbr64\n" : "\tendbr32\n";
+      if (prefix_len > INT_MAX)
+        return false;
+      return nyr_printf(assembly, "%.*s%s%s", (int)prefix_len,
+                        function_assembly, endbr, end + 1);
+    }
+    line = end + 1;
+  }
+  return false;
+}
+
+static bool write_c_unit_assembly(
+    const nyc_unit_t *unit, const ny_native_target_info_t *target,
+    const char *path, bool verbose, bool code16, bool retpoline_indirect_calls,
+    bool retpoline_inline_calls, bool function_return_thunk_extern,
+    bool cf_protection_branch, char *err, size_t err_len) {
   nyr_writer_t assembly = {0};
   bool ok = !code16 || nyr_put(&assembly, "\t.code16gcc\n");
   if (ok && unit->raw_file_scope_asm)
@@ -838,9 +866,7 @@ static bool write_c_unit_assembly(const nyc_unit_t *unit,
           has_jump_label_asm |= unit->funcs[i].data[inst].imm == -14;
           has_unspecialized_alt_wrmsr |= unit->funcs[i].data[inst].imm == -100;
         }
-      if (is_inline && has_jump_label_asm)
-        continue;
-      if (has_unspecialized_alt_wrmsr) {
+      if ((is_inline && has_jump_label_asm) || has_unspecialized_alt_wrmsr) {
         bool referenced = false;
         for (size_t caller = 0; caller < unit->count && !referenced; ++caller)
           for (size_t inst = 0; inst < unit->funcs[caller].len; ++inst) {
@@ -895,7 +921,10 @@ static bool write_c_unit_assembly(const nyc_unit_t *unit,
               if (global)
                 memcpy(global + 1, ".local", sizeof(".local") - 1);
             }
-            ok = nyr_put(&assembly, native.data ? native.data : "");
+            ok = write_c_function_assembly(
+                &assembly, native.data ? native.data : "", unit->names[i],
+                cf_protection_branch,
+                target->target == NY_NATIVE_TARGET_X86_64);
             emitted_machine = ok;
           }
           if (!emitted_machine && getenv("NYC_TRACE_MACHINE_FALLBACK"))
@@ -905,19 +934,33 @@ static bool write_c_unit_assembly(const nyc_unit_t *unit,
           free(native.data);
           nyr_mach_func_free(&machine);
         }
-        if (ok && !emitted_machine)
+        if (ok && !emitted_machine) {
+          nyr_writer_t function_assembly = {0};
           ok = nyr_x86_64_emit_ir_with_options(
-              &assembly, target, &unit->funcs[i], unit->names[i], false,
-              is_local, retpoline_indirect_calls, retpoline_inline_calls,
+              &function_assembly, target, &unit->funcs[i], unit->names[i],
+              false, is_local, retpoline_indirect_calls, retpoline_inline_calls,
               function_return_thunk_extern, err, err_len);
+          if (ok)
+            ok = write_c_function_assembly(
+                &assembly, function_assembly.data ? function_assembly.data : "",
+                unit->names[i], cf_protection_branch,
+                target->target == NY_NATIVE_TARGET_X86_64);
+          free(function_assembly.data);
+        }
         if (!ok && err && err_len && !err[0])
           snprintf(err, err_len,
                    "x86-64 assembly emission failed for C function %s",
                    unit->names[i]);
       } else {
-        ok = nyr_i386_emit_ir_with_linkage(&assembly, target, &unit->funcs[i],
-                                           unit->names[i], false, is_local, err,
-                                           err_len);
+        nyr_writer_t function_assembly = {0};
+        ok = nyr_i386_emit_ir_with_linkage(&function_assembly, target,
+                                           &unit->funcs[i], unit->names[i],
+                                           false, is_local, err, err_len);
+        if (ok)
+          ok = write_c_function_assembly(
+              &assembly, function_assembly.data ? function_assembly.data : "",
+              unit->names[i], cf_protection_branch, false);
+        free(function_assembly.data);
         if (!ok && err && err_len && !err[0])
           snprintf(err, err_len,
                    "i386 assembly emission failed for C function %s",
@@ -931,60 +974,62 @@ static bool write_c_unit_assembly(const nyc_unit_t *unit,
   if (ok && target->target == NY_NATIVE_TARGET_X86_64) {
     const char *r = function_return_thunk_extern ? "\tjmp\t__x86_return_thunk\n"
                                                  : "\tret\n";
+    const char *endbr = cf_protection_branch ? "\tendbr64\n" : "";
     char helpers[1024];
     snprintf(helpers, sizeof(helpers),
              "\t.text\n"
              "\t.weak __floatundidf\n\t.type "
-             "__floatundidf,@function\n__floatundidf:\n"
+             "__floatundidf,@function\n__floatundidf:\n%s"
              "\ttestq %%rdi, %%rdi\n\tjs 1f\n\tcvtsi2sdq %%rdi, %%xmm0\n%s"
              "1:\n\tmovq %%rdi, %%rax\n\tmovq %%rdi, %%rcx\n\tandq $1, "
              "%%rcx\n\tshrq $1, %%rax\n\torq %%rcx, %%rax\n\tcvtsi2sdq %%rax, "
              "%%xmm0\n\taddsd %%xmm0, %%xmm0\n%s"
              "\t.size __floatundidf, .-__floatundidf\n"
              "\t.weak __floatundisf\n\t.type "
-             "__floatundisf,@function\n__floatundisf:\n"
+             "__floatundisf,@function\n__floatundisf:\n%s"
              "\ttestq %%rdi, %%rdi\n\tjs 2f\n\tcvtsi2ssq %%rdi, %%xmm0\n%s"
              "2:\n\tmovq %%rdi, %%rax\n\tmovq %%rdi, %%rcx\n\tandq $1, "
              "%%rcx\n\tshrq $1, %%rax\n\torq %%rcx, %%rax\n\tcvtsi2ssq %%rax, "
              "%%xmm0\n\taddss %%xmm0, %%xmm0\n%s"
              "\t.size __floatundisf, .-__floatundisf\n",
-             r, r, r, r);
+             endbr, r, r, endbr, r, r);
     ok = nyr_put(&assembly, helpers);
   }
   for (size_t i = 0; ok && i < unit->alias_count; ++i) {
     const nyc_function_alias_t *alias = &unit->aliases[i];
+    const char *binding = alias->is_weak ? ".weak" : ".globl";
     if (alias->target_local) {
       ok = nyr_printf(&assembly,
-                      "\t.globl %s%s\n"
+                      "\t%s %s%s\n"
                       "\t.type %s%s,@function\n"
                       "\t.set %s%s,%s\n"
                       "\t.globl %s__nyc_extern_%s\n"
                       "\t.set %s__nyc_extern_%s,%s\n"
                       "\t.globl %sny_fn_%s\n"
                       "\t.set %sny_fn_%s,%s\n",
+                      binding, target->symbol_prefix, alias->name,
                       target->symbol_prefix, alias->name, target->symbol_prefix,
+                      alias->name, alias->target, target->symbol_prefix,
                       alias->name, target->symbol_prefix, alias->name,
                       alias->target, target->symbol_prefix, alias->name,
-                      target->symbol_prefix, alias->name, alias->target,
-                      target->symbol_prefix, alias->name, target->symbol_prefix,
-                      alias->name, alias->target);
+                      target->symbol_prefix, alias->name, alias->target);
       continue;
     }
     ok = nyr_printf(&assembly,
-                    "\t.globl %s%s\n"
+                    "\t%s %s%s\n"
                     "\t.type %s%s,@function\n"
-                    "\t.set %s%s,%sny_fn_%s\n"
+                    "\t.set %s%s,%s%s\n"
                     "\t.globl %s__nyc_extern_%s\n"
-                    "\t.set %s__nyc_extern_%s,%sny_fn_%s\n"
+                    "\t.set %s__nyc_extern_%s,%s%s\n"
                     "\t.globl %sny_fn_%s\n"
-                    "\t.set %sny_fn_%s,%sny_fn_%s\n",
+                    "\t.set %sny_fn_%s,%s%s\n",
+                    binding, target->symbol_prefix, alias->name,
                     target->symbol_prefix, alias->name, target->symbol_prefix,
-                    alias->name, target->symbol_prefix, alias->name,
-                    target->symbol_prefix, alias->target, target->symbol_prefix,
-                    alias->name, target->symbol_prefix, alias->name,
-                    target->symbol_prefix, alias->target, target->symbol_prefix,
-                    alias->name, target->symbol_prefix, alias->name,
-                    target->symbol_prefix, alias->target);
+                    alias->name, target->symbol_prefix, alias->target,
+                    target->symbol_prefix, alias->name, target->symbol_prefix,
+                    alias->name, target->symbol_prefix, alias->target,
+                    target->symbol_prefix, alias->name, target->symbol_prefix,
+                    alias->name, target->symbol_prefix, alias->target);
   }
   for (size_t i = 0; ok && i < unit->variable_alias_count; ++i) {
     const nyc_variable_alias_t *alias = &unit->variable_aliases[i];
@@ -1410,7 +1455,7 @@ static int compile_source(int argc, char **argv, int source_arg,
           &unit, &target_info, output_path, driver->verbose_assembly,
           driver->code16, driver->retpoline_indirect_calls,
           driver->retpoline_inline_calls, driver->function_return_thunk_extern,
-          err, sizeof(err));
+          driver->cf_protection_branch, err, sizeof(err));
     if (ok && !driver->assembly_output) {
       nyr_c_object_data_t *data =
           ok && unit.data_count ? calloc(unit.data_count, sizeof(*data)) : NULL;
@@ -1808,6 +1853,19 @@ int main(int argc, char **argv) {
       driver.retpoline_inline_calls = true;
       continue;
     }
+    if (strcmp(option, "-fcf-protection=branch") == 0) {
+      driver.cf_protection_branch = true;
+      continue;
+    }
+    if (strcmp(option, "-fcf-protection=none") == 0) {
+      driver.cf_protection_branch = false;
+      continue;
+    }
+    if (strncmp(option, "-fcf-protection=", 16) == 0) {
+      fprintf(stderr, "nyc: unsupported control-flow protection mode '%s'\n",
+              option + 16);
+      goto done;
+    }
     if (strcmp(option, "-mfunction-return=thunk-extern") == 0) {
       driver.function_return_thunk_extern = true;
       continue;
@@ -1932,6 +1990,11 @@ int main(int argc, char **argv) {
   }
   if (object_mode && driver.assembly_output) {
     fputs("nyc: -c and -S cannot be combined\n", stderr);
+    goto done;
+  }
+  if (driver.cf_protection_branch && !driver.preprocess &&
+      (!driver.compile_unit || !driver.assembly_output)) {
+    fputs("nyc: -fcf-protection=branch currently requires -S output\n", stderr);
     goto done;
   }
   if (driver.omit_frame_pointer && !driver.compile_unit && !driver.preprocess) {

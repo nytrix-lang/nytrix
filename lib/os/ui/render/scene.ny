@@ -3941,9 +3941,9 @@ fn _gltf_decode_texture_specs_parallel(any specs) dict {
       mut end = start + chunk
       if end > total { end = total }
       def batch = slice(unique_specs, start, end, 1)
-      def h = thread_spawn(fn() {
-            _gltf_decode_texture_batch(batch)
-         })
+      ;; Pass the batch as the thread argument; a closure capturing `batch`
+      ;; faults on the worker thread.
+      def h = thread_spawn(_gltf_decode_texture_batch, batch)
       if h { handles = handles.append(h) }
       wi += 1
    }

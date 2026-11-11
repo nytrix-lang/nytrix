@@ -549,7 +549,9 @@ static bool try_initialize_static_array_compound_literal(c_parser_t *p,
   unsigned char *storage = calloc(byte_count ? byte_count : 1, 1);
   char generated_name[64];
   int name_len = snprintf(generated_name, sizeof(generated_name),
-                          "__nyc_compound_array_%zu", p->global_count);
+                          "__nyc_compound_array_%016llx_%zu",
+                          (unsigned long long)c_source_hash(p->base_path),
+                          p->global_count);
   char *owned_name = name_len > 0 && (size_t)name_len < sizeof(generated_name)
                          ? strdup(generated_name)
                          : NULL;
@@ -737,7 +739,9 @@ static bool try_initialize_static_aggregate_compound_literal(c_parser_t *p,
   unsigned char *storage = calloc(aggregate->size, 1);
   char generated_name[64];
   int name_len = snprintf(generated_name, sizeof(generated_name),
-                          "__nyc_compound_aggregate_%zu", p->global_count);
+                          "__nyc_compound_aggregate_%016llx_%zu",
+                          (unsigned long long)c_source_hash(p->base_path),
+                          p->global_count);
   char *owned_name = name_len > 0 && (size_t)name_len < sizeof(generated_name)
                          ? strdup(generated_name)
                          : NULL;

@@ -1772,7 +1772,6 @@ if(NOT status EQUAL 0)
 endif()
 foreach(flag
     -mcmodel=large
-    -fcf-protection=branch
     -mstack-protector-guard=gs
     )
   execute_process(
@@ -1786,6 +1785,71 @@ foreach(flag
       "nyc did not reject unsupported semantic option ${flag}\n${stdout}${stderr}")
   endif()
 endforeach()
+execute_process(
+  COMMAND "${NYC}" -fcf-protection=full -E "${static_assert_source}"
+  RESULT_VARIABLE status
+  OUTPUT_VARIABLE stdout
+  ERROR_VARIABLE stderr
+)
+if(status EQUAL 0 OR
+   NOT stderr MATCHES "unsupported control-flow protection mode 'full'")
+  message(FATAL_ERROR
+    "nyc did not reject unsupported full control-flow protection\n${stdout}${stderr}")
+endif()
+set(cf_protection_source "${SOURCE_DIR}/fixtures/cf-protection-branch.c")
+execute_process(
+  COMMAND "${NYC}" -fcf-protection=branch -c "${cf_protection_source}"
+          -o "${BINARY_DIR}/cf-protection-branch.o"
+  RESULT_VARIABLE status
+  OUTPUT_VARIABLE stdout
+  ERROR_VARIABLE stderr
+)
+if(status EQUAL 0 OR
+   NOT stderr MATCHES "-fcf-protection=branch currently requires -S output")
+  message(FATAL_ERROR
+    "nyc silently accepted branch protection without protected object emission\n${stdout}${stderr}")
+endif()
+execute_process(
+  COMMAND "${NYC}" -O0 -fcf-protection=branch -S "${cf_protection_source}"
+          -o "${BINARY_DIR}/cf-protection-branch.s"
+  RESULT_VARIABLE status
+  OUTPUT_VARIABLE stdout
+  ERROR_VARIABLE stderr
+)
+if(NOT status EQUAL 0)
+  message(FATAL_ERROR
+    "nyc could not emit branch-protected C functions\n${stdout}${stderr}")
+endif()
+file(READ "${BINARY_DIR}/cf-protection-branch.s" cf_protection_assembly)
+foreach(symbol IN ITEMS nyc_cf_target main)
+  string(FIND "${cf_protection_assembly}"
+         "${symbol}:\n\tendbr64\n" landing_pad_offset)
+  if(landing_pad_offset EQUAL -1)
+    message(FATAL_ERROR
+      "NYC omitted endbr64 at branch-protected entry ${symbol}")
+  endif()
+endforeach()
+execute_process(
+  COMMAND "${CC}" "${BINARY_DIR}/cf-protection-branch.s"
+          -o "${BINARY_DIR}/cf-protection-branch"
+  RESULT_VARIABLE status
+  OUTPUT_VARIABLE stdout
+  ERROR_VARIABLE stderr
+)
+if(NOT status EQUAL 0)
+  message(FATAL_ERROR
+    "host assembler rejected branch-protected C output\n${stdout}${stderr}")
+endif()
+execute_process(
+  COMMAND "${BINARY_DIR}/cf-protection-branch"
+  RESULT_VARIABLE status
+  OUTPUT_VARIABLE stdout
+  ERROR_VARIABLE stderr
+)
+if(NOT status EQUAL 0)
+  message(FATAL_ERROR
+    "branch-protected indirect call changed runtime behavior\n${stdout}${stderr}")
+endif()
 set(pic-lowercase-source "${SOURCE_DIR}/fixtures/pic-lowercase.c")
 
 execute_process(
@@ -2941,6 +3005,52 @@ execute_process(
 if(NOT status EQUAL 0)
   message(FATAL_ERROR
     "strong definitions did not override NYC weak function/data symbols\n${stdout}${stderr}")
+endif()
+execute_process(
+  COMMAND "${CC}" -std=c11 -Wall -Wextra -Werror
+          -o "${BINARY_DIR}/weak-function-alias"
+          "${SOURCE_DIR}/fixtures/weak-function-alias-main.c"
+          "${BINARY_DIR}/weak-function.s"
+  RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+if(NOT status EQUAL 0)
+  message(FATAL_ERROR
+    "host compiler could not link NYC weak alias target\n${stdout}${stderr}")
+endif()
+execute_process(
+  COMMAND "${BINARY_DIR}/weak-function-alias"
+  RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+if(NOT status EQUAL 0)
+  message(FATAL_ERROR
+    "NYC weak alias did not bind to its target\n${stdout}${stderr}")
+endif()
+
+foreach(source compound-array-a compound-array-b)
+  execute_process(
+    COMMAND "${NYC}" -S "${SOURCE_DIR}/fixtures/${source}.c"
+            -o "${BINARY_DIR}/${source}.s"
+    RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+  if(NOT status EQUAL 0)
+    message(FATAL_ERROR
+      "NYC compound-literal translation-unit compilation failed\n${stdout}${stderr}")
+  endif()
+endforeach()
+execute_process(
+  COMMAND "${CC}" -std=c11 -Wall -Wextra -Werror
+          -o "${BINARY_DIR}/compound-array-link"
+          "${SOURCE_DIR}/fixtures/compound-array-main.c"
+          "${BINARY_DIR}/compound-array-a.s"
+          "${BINARY_DIR}/compound-array-b.s"
+  RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+if(NOT status EQUAL 0)
+  message(FATAL_ERROR
+    "host compiler could not link NYC compound literals from separate units\n${stdout}${stderr}")
+endif()
+execute_process(
+  COMMAND "${BINARY_DIR}/compound-array-link"
+  RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+if(NOT status EQUAL 0)
+  message(FATAL_ERROR
+    "NYC compound-literal data collided or had incorrect contents across units\n${stdout}${stderr}")
 endif()
 
 set(inline_asm_object "${BINARY_DIR}/inline-asm.o")
@@ -4114,6 +4224,38 @@ execute_process(
 if(NOT status EQUAL 0)
   message(FATAL_ERROR
     "NYC jump-label asm goto did not branch to the C label\n${stdout}${stderr}")
+endif()
+execute_process(
+  COMMAND "${NYC}" -O0 -S "${unit_asm_goto_source}"
+          -o "${BINARY_DIR}/unit-asm-goto-o0.s"
+  RESULT_VARIABLE status
+  OUTPUT_VARIABLE stdout
+  ERROR_VARIABLE stderr
+)
+if(NOT status EQUAL 0)
+  message(FATAL_ERROR
+    "nyc could not emit an out-of-line static-branch asm-goto helper\n${stdout}${stderr}")
+endif()
+execute_process(
+  COMMAND "${CC}" "${BINARY_DIR}/unit-asm-goto-o0.s"
+          -o "${BINARY_DIR}/unit-asm-goto-o0"
+  RESULT_VARIABLE status
+  OUTPUT_VARIABLE stdout
+  ERROR_VARIABLE stderr
+)
+if(NOT status EQUAL 0)
+  message(FATAL_ERROR
+    "out-of-line static-branch asm-goto helper did not link\n${stdout}${stderr}")
+endif()
+execute_process(
+  COMMAND "${BINARY_DIR}/unit-asm-goto-o0"
+  RESULT_VARIABLE status
+  OUTPUT_VARIABLE stdout
+  ERROR_VARIABLE stderr
+)
+if(NOT status EQUAL 0)
+  message(FATAL_ERROR
+    "out-of-line static-branch asm goto did not branch to the C label\n${stdout}${stderr}")
 endif()
 # Linux fixed-register exception-table assembly cases.
 set(lkgs_extable_source "${SOURCE_DIR}/fixtures/linux-lkgs-extable.c")

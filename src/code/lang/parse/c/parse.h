@@ -46,6 +46,7 @@ typedef struct {
   char *name;
   char *target;
   bool target_local;
+  bool is_weak;
 } nyc_function_alias_t;
 
 typedef struct {

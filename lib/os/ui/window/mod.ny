@@ -125,6 +125,7 @@ mut list _windows = []
 mut dict _window_registry = dict(16)
 mut int _replay_poll_frame = 1
 mut int _replay_events_applied_frame = 0
+mut int _replay_input_mode = -1
 mut str _replay_events_cache = "\x00"
 mut list _replay_events_rows = []
 mut _backend_ready = false
@@ -396,64 +397,72 @@ fn _apply_key_event_state(any win, int typ, any data) dict {
    out
 }
 
-fn _append_scancode_unique(any out, any seen, int sc) list {
-   if sc > 0 && !seen.get(sc, false) {
-      out = out.append(sc)
-      seen[sc] = true
+fn _cocoa_function_scancode(int idx) int {
+   case idx {
+      0 -> 0x7A
+      1 -> 0x78
+      2 -> 0x63
+      3 -> 0x76
+      4 -> 0x60
+      5 -> 0x61
+      6 -> 0x62
+      7 -> 0x64
+      8 -> 0x65
+      9 -> 0x6D
+      10 -> 0x67
+      11 -> 0x6F
+      _ -> 0
    }
-   [out, seen]
 }
 
-fn _cache_scancode_pair(int nk, int a, int b) list {
-   mut out = []
-   mut seen = dict(8)
-   def r0 = _append_scancode_unique(out, seen, ui_backend.get_key_scancode(a))
-   out, seen = r0.get(0, out), r0.get(1, seen)
-   def r1 = _append_scancode_unique(out, seen, ui_backend.get_key_scancode(b))
-   out = r1.get(0, out)
-   _scancode_query_cache[nk] = out
-   out
-}
-
-fn _append_function_scancode_for_index(any out, any seen, int idx, str b) list {
-   def any_backend = b == "" || b == "none"
-   mut res = [out, seen]
-   if any_backend || b == "x11" {
-      if idx >= 0 && idx <= 9 { res = _append_scancode_unique(res.get(0), res.get(1), 67 + idx) }
-      elif idx == 10 { res = _append_scancode_unique(res.get(0), res.get(1), 95) }
-      elif idx == 11 { res = _append_scancode_unique(res.get(0), res.get(1), 96) }
-   }
-   if any_backend || b == "wayland" {
-      if idx >= 0 && idx <= 9 { res = _append_scancode_unique(res.get(0), res.get(1), 59 + idx) }
-      elif idx == 10 { res = _append_scancode_unique(res.get(0), res.get(1), 87) }
-      elif idx == 11 { res = _append_scancode_unique(res.get(0), res.get(1), 88) }
-      elif idx >= 12 && idx <= 23 { res = _append_scancode_unique(res.get(0), res.get(1), 183 + (idx - 12)) }
-   }
-   if any_backend || b == "win32" {
-      if idx >= 0 && idx <= 9 { res = _append_scancode_unique(res.get(0), res.get(1), 0x3B + idx) }
-      elif idx == 10 { res = _append_scancode_unique(res.get(0), res.get(1), 0x57) }
-      elif idx == 11 { res = _append_scancode_unique(res.get(0), res.get(1), 0x58) }
-      elif idx >= 12 && idx <= 22 { res = _append_scancode_unique(res.get(0), res.get(1), 0x64 + (idx - 12)) }
-      if idx >= 0 && idx <= 23 { res = _append_scancode_unique(res.get(0), res.get(1), 0x70 + idx) }
-   }
-   if any_backend || b == "cocoa" {
-      case idx {
-         0 -> { res = _append_scancode_unique(res.get(0), res.get(1), 0x7A) }
-         1 -> { res = _append_scancode_unique(res.get(0), res.get(1), 0x78) }
-         2 -> { res = _append_scancode_unique(res.get(0), res.get(1), 0x63) }
-         3 -> { res = _append_scancode_unique(res.get(0), res.get(1), 0x76) }
-         4 -> { res = _append_scancode_unique(res.get(0), res.get(1), 0x60) }
-         5 -> { res = _append_scancode_unique(res.get(0), res.get(1), 0x61) }
-         6 -> { res = _append_scancode_unique(res.get(0), res.get(1), 0x62) }
-         7 -> { res = _append_scancode_unique(res.get(0), res.get(1), 0x64) }
-         8 -> { res = _append_scancode_unique(res.get(0), res.get(1), 0x65) }
-         9 -> { res = _append_scancode_unique(res.get(0), res.get(1), 0x6D) }
-         10 -> { res = _append_scancode_unique(res.get(0), res.get(1), 0x67) }
-         11 -> { res = _append_scancode_unique(res.get(0), res.get(1), 0x6F) }
-         _ -> {}
+fn _function_scancode_candidate(int idx, int slot) int {
+   "Returns the scancode function key `idx` (0 = F1) has in one backend table, or 0."
+   ;; Slots: 0 x11, 1 wayland/evdev, 2 win32 set-1, 3 win32 virtual-key, 4 cocoa.
+   case slot {
+      0 -> {
+         if idx >= 0 && idx <= 9 { return 67 + idx }
+         if idx == 10 { return 95 }
+         if idx == 11 { return 96 }
+         0
       }
+      1 -> {
+         if idx >= 0 && idx <= 9 { return 59 + idx }
+         if idx == 10 { return 87 }
+         if idx == 11 { return 88 }
+         if idx >= 12 && idx <= 23 { return 183 + (idx - 12) }
+         0
+      }
+      2 -> {
+         if idx >= 0 && idx <= 9 { return 0x3B + idx }
+         if idx == 10 { return 0x57 }
+         if idx == 11 { return 0x58 }
+         if idx >= 12 && idx <= 22 { return 0x64 + (idx - 12) }
+         0
+      }
+      3 -> (idx >= 0 && idx <= 23) ? (0x70 + idx) : 0
+      4 -> _cocoa_function_scancode(idx)
+      _ -> 0
    }
-   res
+}
+
+fn _function_scancode_slot_active(int slot, str b) bool {
+   if b == "" || b == "none" { return true }
+   case slot {
+      0 -> b == "x11"
+      1 -> b == "wayland"
+      2, 3 -> b == "win32"
+      4 -> b == "cocoa"
+      _ -> false
+   }
+}
+
+fn _scancode_listed(list codes, int sc) bool {
+   mut i = 0
+   while i < codes.len {
+      if int(codes.get(i, 0)) == sc { return true }
+      i += 1
+   }
+   false
 }
 
 fn _function_key_range(int code, int first, int last, int out_first) int {
@@ -498,23 +507,37 @@ fn _function_key_from_scancode(int code) int {
 }
 
 fn _scancodes_for_query(any key) list {
+   "Returns the cached scancodes that can report logical key `key` on the active backend."
+   ;; The list is built with `append` in this function and nowhere else: a list
+   ;; handed back through a helper's `[list, dict]` pair read back from the
+   ;; cache as a plain integer, and `key_down` then failed on `.get`.
    def nk = _normalize_key(key)
    def cached = _scancode_query_cache.get(nk, 0)
    if is_list(cached) { return cached }
+   mut out = []
+   mut first, second = nk, KEY_NULL
    case nk {
-      KEY_LEFT_SHIFT, KEY_RIGHT_SHIFT -> { return _cache_scancode_pair(nk, KEY_LEFT_SHIFT, KEY_RIGHT_SHIFT) }
-      KEY_LEFT_CONTROL, KEY_RIGHT_CONTROL -> { return _cache_scancode_pair(nk, KEY_LEFT_CONTROL, KEY_RIGHT_CONTROL) }
-      KEY_LEFT_ALT, KEY_RIGHT_ALT -> { return _cache_scancode_pair(nk, KEY_LEFT_ALT, KEY_RIGHT_ALT) }
-      KEY_LEFT_SUPER, KEY_RIGHT_SUPER -> { return _cache_scancode_pair(nk, KEY_LEFT_SUPER, KEY_RIGHT_SUPER) }
+      KEY_LEFT_SHIFT, KEY_RIGHT_SHIFT -> { first, second = KEY_LEFT_SHIFT, KEY_RIGHT_SHIFT }
+      KEY_LEFT_CONTROL, KEY_RIGHT_CONTROL -> { first, second = KEY_LEFT_CONTROL, KEY_RIGHT_CONTROL }
+      KEY_LEFT_ALT, KEY_RIGHT_ALT -> { first, second = KEY_LEFT_ALT, KEY_RIGHT_ALT }
+      KEY_LEFT_SUPER, KEY_RIGHT_SUPER -> { first, second = KEY_LEFT_SUPER, KEY_RIGHT_SUPER }
       _ -> {}
    }
-   mut out = []
-   mut seen = dict(8)
-   def r = _append_scancode_unique(out, seen, ui_backend.get_key_scancode(nk))
-   out, seen = r.get(0, out), r.get(1, seen)
-   if nk >= KEY_F1 && nk <= KEY_F1 + 24 {
-      def fr = _append_function_scancode_for_index(out, seen, nk - KEY_F1, ui_backend.get_backend_name())
-      out = fr.get(0, out)
+   def int sc0 = int(ui_backend.get_key_scancode(first))
+   if sc0 > 0 { out = out.append(sc0) }
+   if second != KEY_NULL {
+      def int sc1 = int(ui_backend.get_key_scancode(second))
+      if sc1 > 0 && !_scancode_listed(out, sc1) { out = out.append(sc1) }
+   } elif nk >= KEY_F1 && nk <= KEY_F1 + 24 {
+      def b = to_str(ui_backend.get_backend_name())
+      mut slot = 0
+      while slot < 5 {
+         if _function_scancode_slot_active(slot, b) {
+            def int fsc = _function_scancode_candidate(nk - KEY_F1, slot)
+            if fsc > 0 && !_scancode_listed(out, fsc) { out = out.append(fsc) }
+         }
+         slot += 1
+      }
    }
    _scancode_query_cache[nk] = out
    out
@@ -2124,14 +2147,16 @@ fn key_down(any win, int k) bool {
    def nk = _normalize_key(k)
    def ks = win.get("key_states", 0)
    if is_dict(ks) && ks.get(nk, false) { return true }
-   if win.get("_mock", false) { return false }
+   if _scripted_input(win) { return false }
    def scs = win.get("scancode_states", 0)
-   def qsc = _scancodes_for_query(nk)
-   def qsc_n = qsc.len
-   mut i = 0
-   while i < qsc_n {
-      if scs.get(qsc.get(i), false) { return true }
-      i += 1
+   if is_dict(scs) {
+      def qsc = _scancodes_for_query(nk)
+      def qsc_n = qsc.len
+      mut i = 0
+      while i < qsc_n {
+         if scs.get(qsc.get(i, 0), false) { return true }
+         i += 1
+      }
    }
    _backend_key_down(win, nk)
 }
@@ -2162,8 +2187,8 @@ fn key_pressed(any win, int k) bool {
    (is_dict(pk) && !!pk.get(nk, false))
    if cached { return true }
    ;; A CPU surface has no native key state beyond its injected events.
-   if win.get("_mock", false) { return false }
-   _backend_key_down(win, nk) && !lks.get(nk, false)
+   if _scripted_input(win) { return false }
+   _backend_key_down(win, nk) && !(is_dict(lks) && lks.get(nk, false))
 }
 
 fn mouse_pos(any win) list {
@@ -2184,11 +2209,21 @@ fn mouse_pos(any win) list {
    [mx, my]
 }
 
+fn _scripted_input(any win) bool {
+   "Returns true when injected events are the only source of button and key state for `win`."
+   ;; A CPU surface has no native input. Under UI replay the script owns the
+   ;; state on real backends too: the compositor reports every button as up,
+   ;; and trusting it would cancel a scripted press on the next poll.
+   if win.get("_mock", false) { return true }
+   if _replay_input_mode == -1 { _replay_input_mode = common.env_truthy("NYTRIX_UI_REPLAY") ? 1 : 0 }
+   _replay_input_mode == 1
+}
+
 fn mouse_down(any win, int b) bool {
    "Returns true if mouse button `b` is currently held down."
    win = _get_win(win)
    if !_is_window(win) { return false }
-   if win.get("_mock", false) {
+   if _scripted_input(win) {
       def mock_buttons = win.get("mouse_buttons", 0)
       return is_dict(mock_buttons) && !!mock_buttons.get(b, false)
    }
@@ -2219,7 +2254,7 @@ fn mouse_pressed(any win, int b) bool {
    def down_now = !!mb.get(b, false)
    def cached = (down_now && !lmb.get(b, false)) || !!pb.get(b, false)
    if cached { return true }
-   if win.get("_mock", false) { return false }
+   if _scripted_input(win) { return false }
    _backend_mouse_down(win, b) && !lmb.get(b, false)
 }
 
