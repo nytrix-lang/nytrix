@@ -1,3 +1,7 @@
+/*
+ * C parser fixture for static aggregate members referring to the containing
+ * object.
+ */
 struct local_list_head {
   struct local_list_head *next;
   struct local_list_head *prev;

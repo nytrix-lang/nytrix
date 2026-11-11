@@ -1,3 +1,6 @@
+/*
+ * Command-line driver and option dispatch for the standalone C compiler.
+ */
 #include "base/debug.h"
 #include "parse.h"
 
@@ -91,7 +94,8 @@ static int nyc_handle_probe_options(int argc, char **argv) {
       execlp("as", "as", "--version", (char *)NULL);
       perror("nyc: cannot execute assembler 'as'");
 #else
-      fputs("nyc: assembler version query is unavailable on this host\n", stderr);
+      fputs("nyc: assembler version query is unavailable on this host\n",
+            stderr);
 #endif
       return 1;
     }
@@ -182,6 +186,23 @@ static bool nyc_func_uses_va_list(const nyr_func_t *func) {
       return true;
   }
   return false;
+}
+
+/*
+ * Before SSA promotion, C scalar parameters use ABI local slots 0..N-1,
+ * just like the native frontend. Re-entering a frame is only safe when no
+ * stack object can escape to a recursive invocation.
+ */
+static bool nyc_func_can_rebind_tail_args(const nyr_func_t *func) {
+  if (func->return_aggregate_size || nyc_func_uses_va_list(func))
+    return false;
+  for (size_t i = 0; i < func->param_count; ++i)
+    if (!func->param_types || func->param_types[i] != NYIR_PARAM_I64)
+      return false;
+  for (size_t i = 0; i < func->len; ++i)
+    if (func->data[i].op == NYIR_ADDR_LOCAL || func->data[i].op == NYIR_ALLOCA)
+      return false;
+  return true;
 }
 
 static bool nyc_func_uses_fp_or_simd(const nyr_func_t *func) {
@@ -705,6 +726,10 @@ static bool write_assembly_data(nyr_writer_t *writer, const nyc_data_t *data,
     if (!nyr_printf(writer, "\t.local %s%s\n", target->symbol_prefix,
                     data->name))
       return false;
+  } else if (data->is_weak) {
+    if (!nyr_printf(writer, "\t.weak %s%s\n", target->symbol_prefix,
+                    data->name))
+      return false;
   } else if (!nyr_printf(writer, "\t.globl %s%s\n", target->symbol_prefix,
                          data->name)) {
     return false;
@@ -852,9 +877,9 @@ static bool write_c_unit_assembly(const nyc_unit_t *unit,
               unit->funcs[i].data[inst].op == NYIR_ALLOCA ||
               unit->funcs[i].data[inst].op == NYIR_COPY_STRUCT;
         if (strcmp(target->object_format, "elf") == 0 &&
-          target->abi == NY_NATIVE_ABI_SYSV &&
-          (!has_memory_access || !getenv("NYC_DISABLE_MACH_MEM_ASM")) &&
-          !retpoline_indirect_calls && !retpoline_inline_calls) {
+            target->abi == NY_NATIVE_ABI_SYSV &&
+            (!has_memory_access || !getenv("NYC_DISABLE_MACH_MEM_ASM")) &&
+            !retpoline_indirect_calls && !retpoline_inline_calls) {
           nyr_mach_func_t machine = {0};
           nyr_writer_t native = {0};
           char machine_err[256] = {0};
@@ -863,8 +888,8 @@ static bool write_c_unit_assembly(const nyc_unit_t *unit,
                                  machine_err, sizeof(machine_err));
           if (lowered && nyr_x86_64_emit_mach_scalar(
                              &native, target, &machine, unit->names[i], false,
-                             function_return_thunk_extern,
-                             machine_err, sizeof(machine_err))) {
+                             function_return_thunk_extern, machine_err,
+                             sizeof(machine_err))) {
             if (is_local && native.data) {
               char *global = strstr(native.data, "\t.globl\t");
               if (global)
@@ -875,7 +900,8 @@ static bool write_c_unit_assembly(const nyc_unit_t *unit,
           }
           if (!emitted_machine && getenv("NYC_TRACE_MACHINE_FALLBACK"))
             fprintf(stderr, "NYC machine fallback: %s: %s\n", unit->names[i],
-                    machine_err[0] ? machine_err : "emitter rejected machine IR");
+                    machine_err[0] ? machine_err
+                                   : "emitter rejected machine IR");
           free(native.data);
           nyr_mach_func_free(&machine);
         }
@@ -898,19 +924,29 @@ static bool write_c_unit_assembly(const nyc_unit_t *unit,
                    unit->names[i]);
       }
     }
+    if (ok && unit->function_weak && unit->function_weak[i])
+      ok = nyr_printf(&assembly, "\t.weak %s%s\n", target->symbol_prefix,
+                      unit->names[i]);
   }
   if (ok && target->target == NY_NATIVE_TARGET_X86_64) {
-    const char *r = function_return_thunk_extern ? "\tjmp\t__x86_return_thunk\n" : "\tret\n";
+    const char *r = function_return_thunk_extern ? "\tjmp\t__x86_return_thunk\n"
+                                                 : "\tret\n";
     char helpers[1024];
     snprintf(helpers, sizeof(helpers),
              "\t.text\n"
-             "\t.weak __floatundidf\n\t.type __floatundidf,@function\n__floatundidf:\n"
+             "\t.weak __floatundidf\n\t.type "
+             "__floatundidf,@function\n__floatundidf:\n"
              "\ttestq %%rdi, %%rdi\n\tjs 1f\n\tcvtsi2sdq %%rdi, %%xmm0\n%s"
-             "1:\n\tmovq %%rdi, %%rax\n\tmovq %%rdi, %%rcx\n\tandq $1, %%rcx\n\tshrq $1, %%rax\n\torq %%rcx, %%rax\n\tcvtsi2sdq %%rax, %%xmm0\n\taddsd %%xmm0, %%xmm0\n%s"
+             "1:\n\tmovq %%rdi, %%rax\n\tmovq %%rdi, %%rcx\n\tandq $1, "
+             "%%rcx\n\tshrq $1, %%rax\n\torq %%rcx, %%rax\n\tcvtsi2sdq %%rax, "
+             "%%xmm0\n\taddsd %%xmm0, %%xmm0\n%s"
              "\t.size __floatundidf, .-__floatundidf\n"
-             "\t.weak __floatundisf\n\t.type __floatundisf,@function\n__floatundisf:\n"
+             "\t.weak __floatundisf\n\t.type "
+             "__floatundisf,@function\n__floatundisf:\n"
              "\ttestq %%rdi, %%rdi\n\tjs 2f\n\tcvtsi2ssq %%rdi, %%xmm0\n%s"
-             "2:\n\tmovq %%rdi, %%rax\n\tmovq %%rdi, %%rcx\n\tandq $1, %%rcx\n\tshrq $1, %%rax\n\torq %%rcx, %%rax\n\tcvtsi2ssq %%rax, %%xmm0\n\taddss %%xmm0, %%xmm0\n%s"
+             "2:\n\tmovq %%rdi, %%rax\n\tmovq %%rdi, %%rcx\n\tandq $1, "
+             "%%rcx\n\tshrq $1, %%rax\n\torq %%rcx, %%rax\n\tcvtsi2ssq %%rax, "
+             "%%xmm0\n\taddss %%xmm0, %%xmm0\n%s"
              "\t.size __floatundisf, .-__floatundisf\n",
              r, r, r, r);
     ok = nyr_put(&assembly, helpers);
@@ -1197,14 +1233,22 @@ static int compile_source(int argc, char **argv, int source_arg,
        * C values are never tagged, so raw-class copies are plain aliases.
        */
       unit.funcs[i].untagged_values = true;
+      if (ok && driver->optimization >= 2 &&
+          nyc_func_can_rebind_tail_args(&unit.funcs[i])) {
+        stage = "during tail-call optimization";
+        ok = nyr_tail_call(&unit.funcs[i], unit.names[i]);
+      }
       if (ok && !nyc_func_uses_va_list(&unit.funcs[i])) {
         stage = "during optimization";
-        if (!nyr_optimize_with_options(
-                &unit.funcs[i], driver->optimization,
-                driver->disable_vectorization ? NYR_OPT_DISABLE_VECTORIZATION : 0,
-                err, sizeof(err))) {
-          fprintf(stderr, "NYC: warning: %s for function %s: %s (continuing unoptimized)\n",
-                  stage, unit.names[i], err[0] ? err : "optimization failed");
+        if (!nyr_optimize_with_options(&unit.funcs[i], driver->optimization,
+                                       driver->disable_vectorization
+                                           ? NYR_OPT_DISABLE_VECTORIZATION
+                                           : 0,
+                                       err, sizeof(err))) {
+          fprintf(
+              stderr,
+              "NYC: warning: %s for function %s: %s (continuing unoptimized)\n",
+              stage, unit.names[i], err[0] ? err : "optimization failed");
           err[0] = '\0';
           ok = true;
           stage = "after optimization fallback";
@@ -1213,8 +1257,7 @@ static int compile_source(int argc, char **argv, int source_arg,
       /*
        * Keep NYC's whole-unit pipeline aligned with the native language
        * compiler for the verified integer-add recursion pattern. The general
-       * tail-call rebinding currently assumes NYIR parameter slots that the C
-       * frontend does not use, so do not apply that rewrite to C functions.
+       * tail-call rebinding runs above, before SSA replaces parameter slots.
        */
       if (ok && driver->optimization >= 2) {
         stage = "during recursive-add optimization";
@@ -1223,11 +1266,14 @@ static int compile_source(int argc, char **argv, int source_arg,
         if (ok && unit.funcs[i].len != before_tail_call) {
           stage = "during recursive-add cleanup";
           unit.funcs[i].untagged_values = true;
-          if (!nyr_optimize_with_options(
-                  &unit.funcs[i], driver->optimization,
-                  driver->disable_vectorization ? NYR_OPT_DISABLE_VECTORIZATION : 0,
-                  err, sizeof(err))) {
-            fprintf(stderr, "NYC: warning: %s for function %s: %s (continuing unoptimized)\n",
+          if (!nyr_optimize_with_options(&unit.funcs[i], driver->optimization,
+                                         driver->disable_vectorization
+                                             ? NYR_OPT_DISABLE_VECTORIZATION
+                                             : 0,
+                                         err, sizeof(err))) {
+            fprintf(stderr,
+                    "NYC: warning: %s for function %s: %s (continuing "
+                    "unoptimized)\n",
                     stage, unit.names[i], err[0] ? err : "optimization failed");
             err[0] = '\0';
           }
@@ -1318,7 +1364,8 @@ static int compile_source(int argc, char **argv, int source_arg,
                                              : 0,
                                          err, sizeof(err))) {
             fprintf(stderr,
-                    "NYC: warning: NYIR cleanup after static-feature inlining for %s: %s (continuing unoptimized)\n",
+                    "NYC: warning: NYIR cleanup after static-feature inlining "
+                    "for %s: %s (continuing unoptimized)\n",
                     unit.names[i], err[0] ? err : "optimization failed");
             err[0] = '\0';
           }
@@ -1453,7 +1500,9 @@ static int compile_source(int argc, char **argv, int source_arg,
             &ir, driver->optimization,
             driver->disable_vectorization ? NYR_OPT_DISABLE_VECTORIZATION : 0,
             err, sizeof(err))) {
-      fprintf(stderr, "NYC: warning: optimization failed for %s: %s (continuing unoptimized)\n",
+      fprintf(stderr,
+              "NYC: warning: optimization failed for %s: %s (continuing "
+              "unoptimized)\n",
               argv[argc - 1], err[0] ? err : "optimization failed");
       err[0] = '\0';
     }

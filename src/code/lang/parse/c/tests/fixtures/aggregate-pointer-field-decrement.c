@@ -1,3 +1,6 @@
+/*
+ * Fixture: decrement a pointer-valued aggregate field.
+ */
 struct nyc_cursor_item {
   long value;
 };

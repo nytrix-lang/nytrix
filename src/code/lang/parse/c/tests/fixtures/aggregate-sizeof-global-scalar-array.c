@@ -1,3 +1,6 @@
+/*
+ * C parser fixture for sizeof and initialization of global scalar arrays.
+ */
 static const unsigned char prefix[] = {1, 2, 3};
 
 struct nyc_prefix_entry {

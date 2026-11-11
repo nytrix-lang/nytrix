@@ -1,3 +1,6 @@
+/*
+ * Fixture: dispatch between function pointers with a generic selection.
+ */
 static int add_one(int value) { return value + 1; }
 static int subtract_one(int value) { return value - 1; }
 

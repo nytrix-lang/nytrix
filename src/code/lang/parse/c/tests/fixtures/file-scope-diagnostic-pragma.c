@@ -1,3 +1,6 @@
+/*
+ * C preprocessor fixture for file-scope diagnostic pragmas.
+ */
 _Pragma("GCC diagnostic push")
 
     int main(void) {

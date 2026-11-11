@@ -1,3 +1,4 @@
+/* Portable directory-entry compatibility declarations. */
 #pragma once
 
 #ifdef _WIN32
@@ -21,7 +22,8 @@ typedef struct DIR {
   char pattern[MAX_PATH * 2];
 } DIR;
 
-static inline void ny_dirent_make_pattern(char *out, size_t cap, const char *path) {
+static inline void ny_dirent_make_pattern(char *out, size_t cap,
+                                          const char *path) {
   size_t n = 0;
   if (!path || !*path) {
     strncpy(out, ".", cap - 1);

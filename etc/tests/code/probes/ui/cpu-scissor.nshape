@@ -1,0 +1,38 @@
+shape cpu_nested_scissor {
+  family "runtime/ui"
+  generator "embedded"
+  features [ny render clip scissor pixels]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  timeout 180
+  expect compile_and_run
+  expect_message "CPU-SCISSOR-OK"
+  source ny <<'NY'
+use core
+use core.os.ui.render as gfx
+
+gfx.set_backend_type(gfx.BACKEND_MOCK)
+def win = gfx.init_window(16, 16, "scissor")
+assert(gfx.begin_frame_clear([0.0, 0.0, 0.0, 1.0]), "begin")
+gfx.scissor_push(4.0, 4.0, 4.0, 4.0)
+gfx.draw_rect(0.0, 0.0, 16.0, 16.0, [1.0, 0.0, 0.0, 1.0])
+gfx.draw_circle(2.0, 2.0, 1.0, [1.0, 1.0, 1.0, 1.0])
+gfx.scissor_push(6.0, 6.0, 4.0, 4.0)
+gfx.draw_rect(0.0, 0.0, 16.0, 16.0, [0.0, 1.0, 0.0, 1.0])
+gfx.scissor_pop()
+gfx.scissor_pop()
+gfx.draw_rect(15.0, 15.0, 1.0, 1.0, [1.0, 1.0, 1.0, 1.0])
+gfx.end_frame()
+def frame = gfx.read_framebuffer()
+def ptr pixels = __ffi_untag_ptr(frame.get("data", 0))
+assert(load32(pixels, 0) == 0xff000000, "outside scissor stays black")
+assert(load32(pixels, (2 * 16 + 2) * 4) == 0xff000000, "circle obeys scissor")
+assert(load32(pixels, (4 * 16 + 4) * 4) == 0xff0000ff, "outer clip red")
+assert(load32(pixels, (6 * 16 + 6) * 4) == 0xff00ff00, "nested clip green")
+assert(load32(pixels, (9 * 16 + 9) * 4) == 0xff000000, "nested clip intersects parent")
+assert(load32(pixels, (15 * 16 + 15) * 4) == 0xffffffff, "pop restores unclipped drawing")
+free(pixels)
+gfx.close_window()
+print("CPU-SCISSOR-OK")
+NY
+}

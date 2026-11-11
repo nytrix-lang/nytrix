@@ -192,6 +192,7 @@ if (APPLE)
   set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 endif()
 include(CheckLinkerFlag)
+include(CheckCCompilerFlag)
 include(CheckCSourceCompiles)
 
 set(NYTRIX_ROOT "${CMAKE_CURRENT_LIST_DIR}")
@@ -828,14 +829,19 @@ set_property(CACHE NYTRIX_ENABLE_BOLT PROPERTY STRINGS off on)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 find_package(ZLIB REQUIRED)
 
-option(NYTRIX_ENABLE_OPENMP "Enable OpenMP compiler parallelism" ON)
+# The internal persistent thread pool is the real parallelism backend. OpenMP
+# is an explicit opt-in oracle build for comparisons, never a default
+# dependency.
+find_package(Threads REQUIRED)
+link_libraries(Threads::Threads)
+option(NYTRIX_ENABLE_OPENMP "Use OpenMP as an oracle parallelism backend" OFF)
 if (NYTRIX_ENABLE_OPENMP)
   find_package(OpenMP QUIET COMPONENTS C)
   if (OpenMP_C_FOUND)
-    message(STATUS "OpenMP compiler parallelism enabled")
+    message(STATUS "OpenMP oracle backend enabled (internal pool disabled)")
     link_libraries(OpenMP::OpenMP_C)
   else()
-    message(STATUS "OpenMP not found; using C11 thread fallback where available")
+    message(STATUS "OpenMP requested but not found; keeping the internal pool")
   endif()
 endif()
 
@@ -2727,6 +2733,48 @@ if (NYTRIX_BUILD_SHARED AND NOT WIN32 AND NYTRIX_USE_LLVM)
     set_tests_properties(nytrix-embed-api PROPERTIES
       WORKING_DIRECTORY "${NYTRIX_ROOT}"
       TIMEOUT 60)
+    add_executable(nytrix-map-oracle-dedup
+      "${NYTRIX_ROOT}/src/code/backend/runtime/tests/map_oracle_dedup.c")
+    target_include_directories(nytrix-map-oracle-dedup PRIVATE
+      "${NYTRIX_ROOT}/src" "${NYTRIX_ROOT}/src/include")
+    target_compile_options(nytrix-map-oracle-dedup PRIVATE -Wall -Wextra -Werror)
+    target_link_libraries(nytrix-map-oracle-dedup PRIVATE nytrixrt)
+    # libnytrixrt is linked -Bsymbolic, so it updates its own copy of the
+    # runtime globals. A copy-relocated duplicate in this executable would be
+    # invisible to it; reach the library's variables through the GOT instead.
+    check_c_compiler_flag(-mno-direct-extern-access NYTRIX_HAS_NO_DIRECT_EXTERN)
+    if(NYTRIX_HAS_NO_DIRECT_EXTERN)
+      target_compile_options(nytrix-map-oracle-dedup PRIVATE -mno-direct-extern-access)
+    endif()
+    add_test(NAME nytrix-map-oracle-dedup COMMAND nytrix-map-oracle-dedup)
+    set_tests_properties(nytrix-map-oracle-dedup PROPERTIES TIMEOUT 30)
+    add_executable(nytrix-sso-probe-cache
+      "${NYTRIX_ROOT}/src/code/backend/runtime/tests/sso_probe_cache.c")
+    target_include_directories(nytrix-sso-probe-cache PRIVATE
+      "${NYTRIX_ROOT}/src" "${NYTRIX_ROOT}/src/include")
+    target_compile_options(nytrix-sso-probe-cache PRIVATE
+      -Wall -Wextra -Werror)
+    target_link_libraries(nytrix-sso-probe-cache PRIVATE nytrixrt)
+    # libnytrixrt is linked -Bsymbolic, so it updates its own copy of the
+    # runtime globals. A copy-relocated duplicate in this executable would be
+    # invisible to it; reach the library's variables through the GOT instead.
+    check_c_compiler_flag(-mno-direct-extern-access NYTRIX_HAS_NO_DIRECT_EXTERN)
+    if(NYTRIX_HAS_NO_DIRECT_EXTERN)
+      target_compile_options(nytrix-sso-probe-cache PRIVATE -mno-direct-extern-access)
+    endif()
+    add_test(NAME nytrix-sso-probe-cache COMMAND nytrix-sso-probe-cache)
+    set_tests_properties(nytrix-sso-probe-cache PROPERTIES TIMEOUT 30)
+    add_executable(nytrix-gc-finalizer
+      "${NYTRIX_ROOT}/src/code/backend/runtime/tests/gc_finalizer.c")
+    target_include_directories(nytrix-gc-finalizer PRIVATE
+      "${NYTRIX_ROOT}/src" "${NYTRIX_ROOT}/src/include")
+    target_compile_options(nytrix-gc-finalizer PRIVATE -Wall -Wextra -Werror)
+    target_link_libraries(nytrix-gc-finalizer PRIVATE nytrixrt)
+    if(UNIX)
+      target_link_libraries(nytrix-gc-finalizer PRIVATE pthread)
+    endif()
+    add_test(NAME nytrix-gc-finalizer COMMAND nytrix-gc-finalizer)
+    set_tests_properties(nytrix-gc-finalizer PROPERTIES TIMEOUT 30)
     add_executable(nytrix-embed-gc-handles
       "${NYTRIX_ROOT}/src/code/backend/runtime/tests/embed_handle.c")
     target_include_directories(nytrix-embed-gc-handles PRIVATE
@@ -2915,6 +2963,26 @@ if (CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
         -P "${NYR_C_TEST_DIR}/run.cmake"
     )
     set_tests_properties(nyr-c-frontend PROPERTIES TIMEOUT 120)
+    nytrix_add_nshape_test(
+      nyr-benchmark-knucleotide
+      etc/tests/bench/algorithms/knucleotide.nshape
+      120
+    )
+    nytrix_add_nshape_test(
+      nyr-benchmark-nqueens
+      etc/tests/bench/algorithms/nqueens.nshape
+      120
+    )
+    nytrix_add_nshape_test(
+      nyr-benchmark-pbkdf2
+      etc/tests/bench/algorithms/pbkdf2.nshape
+      120
+    )
+    nytrix_add_nshape_test(
+      nyr-benchmark-sha256
+      etc/tests/bench/algorithms/sha256.nshape
+      120
+    )
     add_executable(ny-c-lexer-test
       "${NYR_C_TEST_DIR}/lexer.c"
       "${NYTRIX_ROOT}/src/code/lang/parse/c/lex.c"

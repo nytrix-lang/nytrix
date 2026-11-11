@@ -1834,12 +1834,12 @@ static int ny_incremental_selftest(void) {
   snprintf(path_mid, sizeof(path_mid), "%s/b.ny", dir);   /* depends on c */
   snprintf(path_leaf, sizeof(path_leaf), "%s/c.ny", dir);
   const char *fails = NULL;
-#define SELFCHECK(cond)                                                        \
-  do {                                                                         \
-    if (!(cond)) {                                                             \
-      fails = #cond;                                                           \
-      goto cleanup;                                                            \
-    }                                                                          \
+#define SELFCHECK(cond) \
+  do {                  \
+    if (!(cond)) {      \
+      fails = #cond;    \
+      goto cleanup;     \
+    }                   \
   } while (0)
 
   FILE *f = fopen(path_root, "w");

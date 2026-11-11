@@ -1,3 +1,6 @@
+/*
+ * Runtime fixture for typeof applied to GNU's omitted-middle conditional.
+ */
 int main(void) {
   unsigned long value = 1;
   unsigned long fallback = 2;

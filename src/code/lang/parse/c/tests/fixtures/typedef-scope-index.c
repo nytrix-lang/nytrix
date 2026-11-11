@@ -1,3 +1,6 @@
+/*
+ * Runtime fixture for typedef scope and indexing within a nested block.
+ */
 typedef int nyc_scope_type;
 int main(void) {
   if (sizeof(nyc_scope_type) != sizeof(int))

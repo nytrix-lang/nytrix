@@ -1,3 +1,4 @@
+/* AST visitor interface for traversing language expressions and statements. */
 #pragma once
 
 #include "code/lang/parse/ast.h"

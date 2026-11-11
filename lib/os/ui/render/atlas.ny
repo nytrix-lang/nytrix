@@ -170,6 +170,10 @@ fn atlas_add(any a, any key, int w, int h, any pixels) any {
    if items.contains(key) { return items.get(key) }
    def int aw = int(a.get("width"))
    def int ah = int(a.get("height"))
+   ;; Packing reserves two pixels on each outer edge. Reject oversized
+   ;; images before wrapping or touching the buffer; subtraction avoids
+   ;; overflow from adding padding to an untrusted dimension.
+   if aw < 4 || ah < 4 || w > aw - 4 || h > ah - 4 { return 0 }
    def ptr state_ptr = __ffi_untag_ptr(a.get("state_ptr", 0))
    if !state_ptr { return 0 }
    mut cx, cy = load32(state_ptr, 0), load32(state_ptr, 4)
@@ -190,27 +194,12 @@ fn atlas_add(any a, any key, int w, int h, any pixels) any {
       while row < h {
          def src_off = row * w * 4
          def dst_off = ((cy + row) * aw + cx) * 4
-         mut col = 0
-         while col < w {
-            def src_px = src_off + col * 4
-            def dst_px = dst_off + col * 4
-            store8(cpu_buf, load8(pixels, src_px) & 255, dst_px)
-            store8(cpu_buf, load8(pixels, src_px + 1) & 255, dst_px + 1)
-            store8(cpu_buf, load8(pixels, src_px + 2) & 255, dst_px + 2)
-            store8(cpu_buf, load8(pixels, src_px + 3) & 255, dst_px + 3)
-            col += 1
-         }
+         __copy_mem_raw(ptr_add(cpu_buf, dst_off), ptr_add(pixels, src_off), w * 4)
          def left_dst = ((cy + row) * aw + (cx - 1)) * 4
-         store8(cpu_buf, load8(pixels, src_off) & 255, left_dst)
-         store8(cpu_buf, load8(pixels, src_off + 1) & 255, left_dst + 1)
-         store8(cpu_buf, load8(pixels, src_off + 2) & 255, left_dst + 2)
-         store8(cpu_buf, load8(pixels, src_off + 3) & 255, left_dst + 3)
+         store32(cpu_buf, load32(pixels, src_off), left_dst)
          def right_src = src_off + ((w - 1) * 4)
          def right_dst = ((cy + row) * aw + (cx + w)) * 4
-         store8(cpu_buf, load8(pixels, right_src) & 255, right_dst)
-         store8(cpu_buf, load8(pixels, right_src + 1) & 255, right_dst + 1)
-         store8(cpu_buf, load8(pixels, right_src + 2) & 255, right_dst + 2)
-         store8(cpu_buf, load8(pixels, right_src + 3) & 255, right_dst + 3)
+         store32(cpu_buf, load32(pixels, right_src), right_dst)
          row += 1
       }
       def ptr top_dst = ptr_add(cpu_buf, int(((cy - 1) * aw + (cx - 1)) * 4))

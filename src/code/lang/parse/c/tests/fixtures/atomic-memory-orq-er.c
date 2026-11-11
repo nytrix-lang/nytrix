@@ -1,3 +1,6 @@
+/*
+ * Inline assembly fixture for atomic OR with early-clobber constraints.
+ */
 static unsigned long nyc_atomic_word;
 
 static void nyc_atomic_or(unsigned long value) {

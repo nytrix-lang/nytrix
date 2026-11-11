@@ -1,3 +1,6 @@
+/*
+ * Fixture: parse the i386 LSL assembler alternative and register constraints.
+ */
 static unsigned long nyc_i386_lsl(void) {
   unsigned long result;
   __asm__ volatile("# ALT: oldinstr\n"

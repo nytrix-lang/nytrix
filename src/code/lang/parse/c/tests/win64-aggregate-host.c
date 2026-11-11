@@ -1,3 +1,6 @@
+/*
+ * Host-side oracle for Windows x64 aggregate calling conventions.
+ */
 #include <stdint.h>
 #include <stdio.h>
 
@@ -28,9 +31,8 @@ extern int64_t c_win_many_with_point(int64_t, int64_t, int64_t, int64_t,
 int main(void) {
   struct win_word word = c_win_word_add((struct win_word){.value = 12},
                                         (struct win_word){.value = 30});
-  struct win_point point = c_win_point_add(
-      (struct win_point){.x = 1, .y = 3},
-      (struct win_point){.x = 5, .y = 7});
+  struct win_point point = c_win_point_add((struct win_point){.x = 1, .y = 3},
+                                           (struct win_point){.x = 5, .y = 7});
   struct win_big big = c_win_big_make(40);
   if (word.value != 42 || point.x != 6 || point.y != 10 || big.a != 40 ||
       big.b != 41 || big.c != 42 || c_win_big_sum(big) != 123 ||

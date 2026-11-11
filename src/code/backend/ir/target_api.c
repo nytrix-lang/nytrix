@@ -1,3 +1,6 @@
+/*
+ * Public target capability, triple resolution, and API error helpers.
+ */
 #include "code/backend/ir/api_internal.h"
 #include <nyr/nyr.h>
 #include <stdio.h>

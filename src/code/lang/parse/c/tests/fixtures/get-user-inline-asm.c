@@ -1,3 +1,6 @@
+/*
+ * Fixture: exercise an inline-assembly get-user helper with a direct fallback.
+ */
 int __get_user_8(unsigned long *pointer) { return *pointer != 0; }
 
 int nyc_get_user_8_asm(unsigned long *pointer) {

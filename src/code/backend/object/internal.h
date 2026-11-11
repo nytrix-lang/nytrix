@@ -1,8 +1,52 @@
+/* Shared internal helpers for native object generation and serialization. */
 #ifndef NY_NATIVE_OBJECT_INTERNAL_H
 #define NY_NATIVE_OBJECT_INTERNAL_H
 
 #include "code/backend/internal.h"
 #include <stdint.h>
+#include <stdlib.h>
+
+static inline int ny_x86_obj_align(int n, int align) {
+  return (n + align - 1) & ~(align - 1);
+}
+
+static inline bool nyr_mach_profile_hot_loop_block(const nyr_mach_func_t *mach,
+                                                   uint32_t block) {
+  if (!mach || block >= mach->block_len)
+    return false;
+  uint32_t source_pc = mach->blocks[block].source_pc;
+  return source_pc != UINT32_MAX && ny_native_profile_loop_hot(source_pc) >= 16;
+}
+
+static inline size_t
+nyr_mach_regalloc_hot_peak_live(const nyr_mach_func_t *mach,
+                                const nyr_mach_regalloc_t *alloc,
+                                size_t inst_len) {
+  if (!mach || !alloc || !inst_len)
+    return 0;
+  int *delta = calloc(inst_len + 1, sizeof(*delta));
+  if (!delta)
+    return 0;
+  for (size_t i = 0; i < alloc->segment_len; ++i) {
+    const nyr_mach_live_segment_t *seg = &alloc->segments[i];
+    if (!nyr_mach_profile_hot_loop_block(mach, seg->block) ||
+        seg->start >= inst_len)
+      continue;
+    size_t end = seg->end < inst_len ? seg->end : inst_len - 1;
+    ++delta[seg->start];
+    if (end + 1 < inst_len)
+      --delta[end + 1];
+  }
+  size_t peak = 0;
+  int live = 0;
+  for (size_t pc = 0; pc < inst_len; ++pc) {
+    live += delta[pc];
+    if (live > 0 && (size_t)live > peak)
+      peak = (size_t)live;
+  }
+  free(delta);
+  return peak;
+}
 
 typedef struct {
   unsigned char *data;
@@ -68,6 +112,37 @@ typedef struct {
   size_t hot_loop_reloads;
   size_t hot_loop_peak_live;
 } nyr_native_regalloc_metrics_t;
+
+static inline void
+nyr_mach_regalloc_summarize(const nyr_mach_func_t *mach,
+                            const nyr_mach_regalloc_t *alloc, size_t inst_len,
+                            nyr_native_regalloc_metrics_t *out) {
+  if (!out)
+    return;
+  *out = (nyr_native_regalloc_metrics_t){0};
+  if (!alloc)
+    return;
+  out->segments = alloc->segment_len;
+  for (size_t i = 0; i < alloc->segment_len; ++i) {
+    const nyr_mach_live_segment_t *seg = &alloc->segments[i];
+    if (seg->color >= 0)
+      ++out->colored;
+    else
+      ++out->spilled;
+    if (seg->reload)
+      ++out->reloads;
+    if (!nyr_mach_profile_hot_loop_block(mach, seg->block))
+      continue;
+    ++out->hot_loop_segments;
+    if (seg->color < 0)
+      ++out->hot_loop_spilled;
+    if (seg->reload)
+      ++out->hot_loop_reloads;
+  }
+  out->peak_live = nyr_mach_regalloc_peak_live(alloc, inst_len);
+  out->hot_loop_peak_live =
+      nyr_mach_regalloc_hot_peak_live(mach, alloc, inst_len);
+}
 
 bool nyr_native_x64_regalloc_metrics(const nyr_mach_func_t *mach,
                                      const ny_native_target_info_t *target,
@@ -241,6 +316,12 @@ bool nyr_obj_u64(nyr_obj_buf_t *b, uint64_t v);
 void nyr_obj_patch_u16(nyr_obj_buf_t *b, size_t off, uint16_t v);
 void nyr_obj_patch_u32(nyr_obj_buf_t *b, size_t off, uint32_t v);
 void nyr_obj_patch_u64(nyr_obj_buf_t *b, size_t off, uint64_t v);
+static inline bool nyr_obj_elf64_write_sym(nyr_obj_buf_t *b, uint32_t name,
+                                           unsigned info, uint16_t shndx,
+                                           uint64_t value, uint64_t size) {
+  return nyr_obj_u32(b, name) && nyr_obj_u8(b, info) && nyr_obj_u8(b, 0) &&
+         nyr_obj_u16(b, shndx) && nyr_obj_u64(b, value) && nyr_obj_u64(b, size);
+}
 bool nyr_elf32_write_sym(nyr_obj_buf_t *b, uint32_t name, uint32_t value,
                          uint32_t size, unsigned char info, uint16_t shndx);
 bool nyr_elf32_write_sh(nyr_obj_buf_t *b, uint32_t name, uint32_t type,
@@ -251,7 +332,7 @@ bool nyr_elf32_write_sh(nyr_obj_buf_t *b, uint32_t name, uint32_t type,
 void nyr_x64_obj_ctx_free(nyr_x64_obj_ctx_t *c);
 bool nyr_x64_obj_emit_code(nyr_x64_obj_ctx_t *c, const nyr_func_t *nyir,
                            bool tag_return);
-int nyr_x64_obj_symbol_index(char symbols[][256], size_t count,
+int nyr_x86_obj_symbol_index(char symbols[][256], size_t count,
                              const char *name);
 int nyr_x64_obj_def_index(const nyr_x64_obj_symbol_def_t *defs, size_t count,
                           const char *name);
@@ -317,6 +398,16 @@ bool nyr_x64_mach_build_bundle(const nyr_mach_func_t *rt_main_mir,
                                nyr_x64_obj_symbol_def_t *defs,
                                size_t *def_count, nyr_x64_obj_reloc_t *relocs,
                                size_t *reloc_count, char *err, size_t err_len);
+bool nyr_x64_mach_build_bundle_debug(
+    const nyr_mach_func_t *rt_main_mir, const nyr_mach_func_t *func_mirs,
+    const char *const *func_names, size_t func_count,
+    const ny_native_target_info_t *target, const char *entry_symbol,
+    bool tag_return, bool bare_syscalls, const nyr_func_t *rt_main_source,
+    const nyr_func_t *func_sources, nyr_obj_buf_t *code,
+    nyr_x64_obj_symbol_def_t *defs, size_t *def_count,
+    nyr_x64_obj_reloc_t *relocs, size_t *reloc_count,
+    nyr_native_debug_line_t **debug_lines, size_t *debug_line_count,
+    size_t *debug_line_cap, char *err, size_t err_len);
 bool nyr_x64_mach_append_function(
     nyr_obj_buf_t *code, nyr_x64_obj_symbol_def_t *defs, size_t *def_count,
     nyr_x64_obj_reloc_t *relocs, size_t *reloc_count,
@@ -328,8 +419,8 @@ bool nyr_x64_mach_append_function_debug(
     const nyr_mach_func_t *mach, const ny_native_target_info_t *target,
     const char *symbol, bool tag_return, bool bare_syscalls,
     const nyr_func_t *source, nyr_native_debug_line_t **debug_lines,
-    size_t *debug_line_count, size_t *debug_line_cap, char *err,
-    size_t err_len, size_t **inst_offsets_out, size_t *inst_offsets_count);
+    size_t *debug_line_count, size_t *debug_line_cap, char *err, size_t err_len,
+    size_t **inst_offsets_out, size_t *inst_offsets_count);
 bool nyr_x64_try_stencil_bundle(const nyr_func_t *rt_main,
                                 const ny_native_target_info_t *target,
                                 nyr_obj_buf_t *code,
@@ -368,8 +459,6 @@ bool nyr_a64_obj_build_bundle(const nyr_func_t *rt_main,
 void nyr_i386_obj_ctx_free(nyr_i386_obj_ctx_t *c);
 bool nyr_i386_obj_emit_code(nyr_i386_obj_ctx_t *c, const nyr_func_t *nyir,
                             bool tag_return);
-int nyr_i386_obj_symbol_index(char symbols[][256], size_t count,
-                              const char *name);
 int nyr_i386_obj_def_index(const nyr_i386_obj_symbol_def_t *defs, size_t count,
                            const char *name);
 bool nyr_i386_obj_collect_external_reloc_symbols(

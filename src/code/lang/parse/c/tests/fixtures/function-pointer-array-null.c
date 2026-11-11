@@ -1,3 +1,6 @@
+/*
+ * Runtime fixture for NULL entries in arrays of function pointers.
+ */
 #define NULL ((void *)0)
 
 static int increment(int value) { return value + 1; }

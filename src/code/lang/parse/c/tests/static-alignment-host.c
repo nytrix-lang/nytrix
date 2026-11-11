@@ -1,3 +1,6 @@
+/*
+ * Parser fixture host: compare static and function-scope aggregate alignment.
+ */
 long file_scope_aggregate_alignment(void);
 long function_scope_aggregate_array_alignment(void);
 

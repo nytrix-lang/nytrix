@@ -1,0 +1,41 @@
+shape test_thread_outlives_entry {
+  family "runtime/concurrency"
+  generator "embedded"
+  features ["ny", "test", "native", "thread", "regression"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-only; --jit; --native-backend=llvm --jit --jit-engine=orc; --native-backend=llvm --jit --jit-engine=mcjit"
+  timeout 60
+  expect compile_and_run
+  expect_message "ok thread outlives entry"
+  source ny <<'NY'
+use core
+use core.os.thread as thread
+
+;; The program ends when its entry returns, as a linked executable does. An
+;; in-process run used to release generated code and program data under a
+;; thread that was still working, so the run died with exit 139.
+fn busy(any id) any {
+   mut out = []
+   mut k = 0
+   while true {
+      out = out.append("item" + to_str(k))
+      if out.len > 64 { out = [] }
+      def table = dict(8)
+      table["k"] = k
+      k += 1
+   }
+   0
+}
+
+def first = thread.thread_spawn(busy, 0)
+def second = thread.thread_spawn(busy, 1)
+assert(first != 0 && second != 0, "workers started")
+mut total = 0
+mut i = 0
+while i < 5000 {
+   total += ("x" + to_str(i)).len
+   i += 1
+}
+print("ok thread outlives entry")
+NY
+}

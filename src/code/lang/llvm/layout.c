@@ -1,3 +1,6 @@
+/*
+ * LLVM data-layout queries and host/target type size and alignment helpers.
+ */
 #include "base/util.h"
 #include "code/lang/code.h"
 #include "code/lang/priv.h"

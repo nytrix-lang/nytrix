@@ -1,3 +1,6 @@
+/*
+ * Host fixture: define i386 aggregate ABI callees for cross-target checks.
+ */
 #include "i386-aggregate-abi.h"
 
 int host_i386_registers(int a, int b, int c, int d) {

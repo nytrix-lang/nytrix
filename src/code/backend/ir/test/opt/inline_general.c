@@ -63,21 +63,20 @@ static bool ny_check_small_inline_distinguishes_constant_from_parameter(void) {
   int second = nyr_opt_const(&caller, 5);
   int result = caller.next_value;
   if (nyr_ir_emit(&caller, (nyr_inst_t){.op = NYIR_CALL,
-                                         .dst = result,
-                                         .a = first,
-                                         .b = second,
-                                         .c = -1,
-                                         .d = -1,
-                                         .e = -1,
-                                         .f = -1,
-                                         .symbol = "two_param_plus_one",
-                                         .imm = 2}) != result)
+                                        .dst = result,
+                                        .a = first,
+                                        .b = second,
+                                        .c = -1,
+                                        .d = -1,
+                                        .e = -1,
+                                        .f = -1,
+                                        .symbol = "two_param_plus_one",
+                                        .imm = 2}) != result)
     return false;
   caller.next_value = result + 1;
   nyr_opt_ret(&caller, result);
 
-  const nyr_inline_callee_t callees[] = {
-      {"two_param_plus_one", &callee}};
+  const nyr_inline_callee_t callees[] = {{"two_param_plus_one", &callee}};
   nyr_set_inline_callees(callees, 1);
   bool ok = nyr_opt_verify(&callee, "inline-small-constant-param/callee") &&
             nyr_opt_verify(&caller, "inline-small-constant-param/before") &&
@@ -506,8 +505,8 @@ static bool ny_check_inlining_preserves_capture_return_chain(void) {
   ny_build_leaf(&callee);
   nyr_opt_begin(&caller);
   int call_dst = caller.next_value;
-  int primary = nyr_ir_emit(&caller, (nyr_inst_t){
-                                        .op = NYIR_CALL,
+  int primary =
+      nyr_ir_emit(&caller, (nyr_inst_t){.op = NYIR_CALL,
                                         .dst = call_dst,
                                         .a = -1,
                                         .b = -1,
@@ -520,17 +519,17 @@ static bool ny_check_inlining_preserves_capture_return_chain(void) {
                                         .scalar_class = NYIR_SCALAR_AGGREGATE});
   caller.next_value = call_dst + 1;
   int second_dst = caller.next_value;
-  int second = nyr_ir_emit(&caller, (nyr_inst_t){
-                                         .op = NYIR_CAPTURE_RET,
-                                         .dst = second_dst,
-                                         .a = -1,
-                                         .b = -1,
-                                         .c = -1,
-                                         .d = -1,
-                                         .e = -1,
-                                         .f = -1,
-                                         .imm = 1,
-                                         .scalar_class = NYIR_SCALAR_I64_RAW});
+  int second =
+      nyr_ir_emit(&caller, (nyr_inst_t){.op = NYIR_CAPTURE_RET,
+                                        .dst = second_dst,
+                                        .a = -1,
+                                        .b = -1,
+                                        .c = -1,
+                                        .d = -1,
+                                        .e = -1,
+                                        .f = -1,
+                                        .imm = 1,
+                                        .scalar_class = NYIR_SCALAR_I64_RAW});
   caller.next_value = second_dst + 1;
   int result = nyr_opt_binop(&caller, NYIR_ADD_I64, primary, second);
   nyr_opt_ret(&caller, result);
@@ -586,15 +585,15 @@ static bool ny_check_void_call_inline_defines_dead_result(void) {
   nyr_opt_begin(&caller);
   int dead_result = caller.next_value;
   if (nyr_ir_emit(&caller, (nyr_inst_t){.op = NYIR_CALL,
-                                         .dst = dead_result,
-                                         .a = -1,
-                                         .b = -1,
-                                         .c = -1,
-                                         .d = -1,
-                                         .e = -1,
-                                         .f = -1,
-                                         .symbol = "void_leaf",
-                                         .imm = 0}) != dead_result)
+                                        .dst = dead_result,
+                                        .a = -1,
+                                        .b = -1,
+                                        .c = -1,
+                                        .d = -1,
+                                        .e = -1,
+                                        .f = -1,
+                                        .symbol = "void_leaf",
+                                        .imm = 0}) != dead_result)
     return false;
   caller.next_value = dead_result + 1;
   nyr_opt_ret(&caller, -1);

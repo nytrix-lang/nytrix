@@ -1397,13 +1397,13 @@ static bool nyr_smt_eval_straightline(Z3_context z3, Z3_sort bv,
   if (!bytes)
     goto unsupported;
   bool has_alloca = nyr_smt_has_alloca(f);
-#define NYIR_SMT_ADD_MEMORY_VALID(width)                                       \
-  do {                                                                         \
-    Z3_ast valid = nyr_smt_memory_valid_for_value(                             \
-        z3, bv, memory, f, has_alloca, in->a, a, (width));                     \
-    if (!valid)                                                                \
-      goto unsupported;                                                        \
-    *out_valid = Z3_mk_and(z3, 2, (Z3_ast[]){*out_valid, valid});              \
+#define NYIR_SMT_ADD_MEMORY_VALID(width)                          \
+  do {                                                            \
+    Z3_ast valid = nyr_smt_memory_valid_for_value(                \
+        z3, bv, memory, f, has_alloca, in->a, a, (width));        \
+    if (!valid)                                                   \
+      goto unsupported;                                           \
+    *out_valid = Z3_mk_and(z3, 2, (Z3_ast[]){*out_valid, valid}); \
   } while (0)
   for (size_t i = 0; i < f->len; ++i) {
     const nyr_inst_t *in = &f->data[i];
@@ -1963,13 +1963,13 @@ static bool nyr_smt_walk_cfg(Z3_context z3, Z3_sort bv, const nyr_func_t *f,
                              const bool *memory_locals, ny_smt_path_t *st,
                              ny_smt_result_t *out) {
   const size_t step_limit = f->len * 12u + 64u;
-#define NYIR_SMT_CFG_MEMORY_VALID(width)                                       \
-  do {                                                                         \
-    Z3_ast valid = nyr_smt_memory_valid_for_value(                             \
-        z3, bv, &st->memory, f, has_alloca, in->a, a, (width));                \
-    if (!valid)                                                                \
-      return false;                                                            \
-    st->path = ny_z3_and2(z3, st->path, valid);                                \
+#define NYIR_SMT_CFG_MEMORY_VALID(width)                        \
+  do {                                                          \
+    Z3_ast valid = nyr_smt_memory_valid_for_value(              \
+        z3, bv, &st->memory, f, has_alloca, in->a, a, (width)); \
+    if (!valid)                                                 \
+      return false;                                             \
+    st->path = ny_z3_and2(z3, st->path, valid);                 \
   } while (0)
   while (st->pc < f->len) {
     if (++st->steps > step_limit) {
@@ -2558,12 +2558,12 @@ static bool nyr_smt_returns_fp(const nyr_func_t *f) {
       defs[f->data[i].dst] = &f->data[i];
 
   bool returns_fp = false;
-#define NY_SMT_PUSH_VALUE(value_)                                              \
-  do {                                                                         \
-    if (top < value_count)                                                     \
-      work[top++] = (value_);                                                  \
-    else                                                                       \
-      returns_fp = true;                                                       \
+#define NY_SMT_PUSH_VALUE(value_) \
+  do {                            \
+    if (top < value_count)        \
+      work[top++] = (value_);     \
+    else                          \
+      returns_fp = true;          \
   } while (0)
   for (size_t i = 0; i < f->len && !returns_fp; ++i) {
     const nyr_inst_t *ret = &f->data[i];

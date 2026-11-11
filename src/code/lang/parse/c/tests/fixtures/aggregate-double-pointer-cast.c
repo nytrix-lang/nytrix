@@ -1,4 +1,11 @@
-struct nyc_vtab_base { const void *module; int refcount; char *error; };
+/*
+ * Fixture: cast and dereference pointers to aggregate-backed interface data.
+ */
+struct nyc_vtab_base {
+  const void *module;
+  int refcount;
+  char *error;
+};
 typedef struct nyc_vtab_base nyc_vtab_base;
 typedef struct nyc_echo_vtab nyc_echo_vtab;
 struct nyc_echo_vtab {

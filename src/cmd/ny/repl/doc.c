@@ -541,7 +541,7 @@ int doclist_print_missing(const doc_list_t *dl, const char *name) {
 }
 
 void add_builtin_docs(doc_list_t *docs) {
-#define RT_DEF(name, p, args, sig, doc)                                        \
+#define RT_DEF(name, p, args, sig, doc)       \
   doclist_set(docs, name, doc, sig, NULL, 3);
 #define RT_GV(name, p, t, doc) doclist_set(docs, name, doc, "global", NULL, 4);
 #ifdef _WIN32

@@ -181,12 +181,12 @@ const char *ny_gencall_attached_owner(const char *type_name) {
     return NULL;
   const char *leaf = strrchr(type_name, '.');
   leaf = leaf ? leaf + 1 : type_name;
-#define NY_OWNER_IF_BASE(name)                                                 \
-  do {                                                                         \
-    size_t len = sizeof(name) - 1;                                             \
-    if (strncmp(leaf, name, len) == 0 &&                                       \
-        (leaf[len] == '\0' || leaf[len] == '<' || leaf[len] == '['))           \
-      return name;                                                             \
+#define NY_OWNER_IF_BASE(name)                                       \
+  do {                                                               \
+    size_t len = sizeof(name) - 1;                                   \
+    if (strncmp(leaf, name, len) == 0 &&                             \
+        (leaf[len] == '\0' || leaf[len] == '<' || leaf[len] == '[')) \
+      return name;                                                   \
   } while (0)
   NY_OWNER_IF_BASE("any");
   NY_OWNER_IF_BASE("str");
@@ -331,8 +331,8 @@ fun_sig *ny_gencall_lookup_attached_method(codegen_t *cg, const char *type_name,
   if (match)
     return match;
   char core_builtin[512];
-  int core_n = snprintf(core_builtin, sizeof(core_builtin), "core.%s.%s",
-                        owner, method_name);
+  int core_n = snprintf(core_builtin, sizeof(core_builtin), "core.%s.%s", owner,
+                        method_name);
   if (core_n > 0 && (size_t)core_n < sizeof(core_builtin)) {
     fun_sig *sig =
         ny_gencall_lookup_attached_method_candidate(cg, core_builtin);

@@ -1,3 +1,6 @@
+/*
+ * C parser fixture for const aggregate pointers inferred through typeof.
+ */
 struct item {
   int value;
 };

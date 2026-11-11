@@ -1,3 +1,6 @@
+/*
+ * Fixture: initialize aggregate-array elements with compound values.
+ */
 struct entry {
   int key;
   int value;

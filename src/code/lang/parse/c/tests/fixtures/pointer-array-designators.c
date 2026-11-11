@@ -1,3 +1,6 @@
+/*
+ * Fixture: initialize pointer arrays with repeated and indexed designators.
+ */
 enum { LABEL_ZERO = 0, LABEL_TWO = 2, LABEL_FOUR = 4 };
 static const char *const labels[5] = {
     [LABEL_TWO] = "two",   "three",

@@ -1,3 +1,4 @@
+/* JSON parser declarations used by compiler and configuration loaders. */
 #pragma once
 
 #include "code/lang/parse/ast.h"

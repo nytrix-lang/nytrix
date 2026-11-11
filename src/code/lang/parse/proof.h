@@ -1,3 +1,4 @@
+/* Parser interfaces for proof obligations and typed logical expressions. */
 #ifndef NY_PARSE_PROOF_H
 #define NY_PARSE_PROOF_H
 

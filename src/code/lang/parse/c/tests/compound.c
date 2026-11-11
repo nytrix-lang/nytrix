@@ -1,3 +1,6 @@
+/*
+ * Parser/backend fixture for compound assignments and local values.
+ */
 #include <stdint.h>
 
 long c_compound(long value) {

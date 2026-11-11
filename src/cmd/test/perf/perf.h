@@ -1,3 +1,4 @@
+/* Top-level performance testing command interface. */
 #ifndef NYTRIX_CMD_TEST_PERF_H
 #define NYTRIX_CMD_TEST_PERF_H
 

@@ -1,3 +1,4 @@
+/* Thread-safe command-line progress and nested-task reporting interface. */
 #ifndef NY_PROGRESS_H
 #define NY_PROGRESS_H
 

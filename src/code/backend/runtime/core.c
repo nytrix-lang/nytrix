@@ -201,8 +201,24 @@ void rt_map_oracle_init(void) {
 
 __thread rt_probe_cache_entry_t g_rt_probe_cache[RT_PROBE_CACHE_WAYS];
 __thread uint32_t g_rt_probe_cache_next;
-__thread rt_oracle_extra_hint_t
-    g_rt_oracle_extra_hints[RT_ORACLE_EXTRA_HINTS];
+__thread rt_oracle_extra_hint_t g_rt_oracle_extra_hints[RT_ORACLE_EXTRA_HINTS];
+
+static void rt_map_oracle_expand_bounds(uintptr_t start, uintptr_t end) {
+  uintptr_t cur = atomic_load_explicit(&g_rt_oracle_hi, memory_order_relaxed);
+  while (end > cur) {
+    if (atomic_compare_exchange_weak_explicit(&g_rt_oracle_hi, &cur, end,
+                                              memory_order_release,
+                                              memory_order_relaxed))
+      break;
+  }
+  cur = atomic_load_explicit(&g_rt_oracle_lo, memory_order_relaxed);
+  while (start < cur) {
+    if (atomic_compare_exchange_weak_explicit(&g_rt_oracle_lo, &cur, start,
+                                              memory_order_release,
+                                              memory_order_relaxed))
+      break;
+  }
+}
 
 void rt_map_oracle_add(uintptr_t start, size_t size) {
   if (!start || (uintptr_t)size > UINTPTR_MAX - start)
@@ -212,11 +228,14 @@ void rt_map_oracle_add(uintptr_t start, size_t size) {
   if (e <= s)
     return;
   /*
-   * Once the extra-range table is full, additions are intentionally ignored.
-   * Skip the per-thread dedup cache on that steady-state allocator path too.
+   * Once the exact-range table is full, keep extending the conservative
+   * address bounds. They let distant invalid pointers avoid the syscall
+   * fallback without claiming that an unrecorded range is mapped.
    */
-  if (atomic_load_explicit(&g_rt_oracle_full, memory_order_relaxed))
+  if (atomic_load_explicit(&g_rt_oracle_full, memory_order_relaxed)) {
+    rt_map_oracle_expand_bounds(s, e);
     return;
+  }
   static __thread uintptr_t dedup_s[RT_ORACLE_DEDUP] = {0};
   static __thread uintptr_t dedup_e[RT_ORACLE_DEDUP] = {0};
   static __thread uint32_t dedup_idx = 0;
@@ -251,33 +270,37 @@ void rt_map_oracle_add(uintptr_t start, size_t size) {
   }
   if (atomic_load_explicit(&g_rt_oracle_full, memory_order_relaxed)) {
     atomic_flag_clear_explicit(&g_rt_oracle_extra_lock, memory_order_release);
+    rt_map_oracle_expand_bounds(s, e);
     return;
   }
   uint32_t cnt =
       atomic_load_explicit(&g_rt_oracle_extra_count, memory_order_relaxed);
-  if (cnt >= RT_ORACLE_EXTRA_MAX) {
+  /*
+   * The tiny thread-local dedup cache can forget a range that is still in
+   * this append-only table. Reusing such a range must not exhaust the table
+   * and disable negative oracle answers for the rest of the process.
+   */
+  bool duplicate = false;
+  for (uint32_t i = 0; i < cnt; ++i) {
+    if (s >= g_rt_oracle_extra[i].start && e <= g_rt_oracle_extra[i].end) {
+      duplicate = true;
+      break;
+    }
+  }
+  if (!duplicate && cnt >= RT_ORACLE_EXTRA_MAX) {
+    rt_map_oracle_expand_bounds(s, e);
     atomic_store_explicit(&g_rt_oracle_full, 1, memory_order_release);
     atomic_flag_clear_explicit(&g_rt_oracle_extra_lock, memory_order_release);
     return;
   }
-  g_rt_oracle_extra[cnt].start = s;
-  g_rt_oracle_extra[cnt].end = e;
-  uintptr_t cur = atomic_load_explicit(&g_rt_oracle_hi, memory_order_relaxed);
-  while (e > cur) {
-    if (atomic_compare_exchange_weak_explicit(&g_rt_oracle_hi, &cur, e,
-                                              memory_order_release,
-                                              memory_order_relaxed))
-      break;
+  if (!duplicate) {
+    g_rt_oracle_extra[cnt].start = s;
+    g_rt_oracle_extra[cnt].end = e;
   }
-  cur = atomic_load_explicit(&g_rt_oracle_lo, memory_order_relaxed);
-  while (s < cur) {
-    if (atomic_compare_exchange_weak_explicit(&g_rt_oracle_lo, &cur, s,
-                                              memory_order_release,
-                                              memory_order_relaxed))
-      break;
-  }
-  atomic_store_explicit(&g_rt_oracle_extra_count, cnt + 1,
-                        memory_order_release);
+  rt_map_oracle_expand_bounds(s, e);
+  if (!duplicate)
+    atomic_store_explicit(&g_rt_oracle_extra_count, cnt + 1,
+                          memory_order_release);
   atomic_flag_clear_explicit(&g_rt_oracle_extra_lock, memory_order_release);
 }
 
@@ -2385,7 +2408,7 @@ int64_t rt_tbuf_get_any(int64_t buffer, int64_t index, int64_t fallback) {
         }
         if (tag == NY_TBUF_TAG_BOOL)
           return value == NY_IMM_TRUE || value == 1 ? NY_IMM_TRUE
-                                                     : NY_IMM_FALSE;
+                                                    : NY_IMM_FALSE;
         if (tag == 121)
           return rt_cstr_to_str(value);
         if (tag == 1 || tag == 3)
@@ -2611,7 +2634,7 @@ static int64_t rt_tbuf_index_any_impl(int64_t buffer, int64_t index) {
           return rt_cstr_to_str(value);
         if (tag == NY_TBUF_TAG_BOOL)
           return value == NY_IMM_TRUE || value == 1 ? NY_IMM_TRUE
-                                                     : NY_IMM_FALSE;
+                                                    : NY_IMM_FALSE;
         if (tag == 1 || tag == 3)
           return rt_tag_v(value);
         return value;
@@ -5083,7 +5106,9 @@ int64_t rt_value_set_tagged(int64_t value, int64_t key, int64_t item) {
     }
   }
   int64_t heap = rt_heap_object_ptr(value);
-  /* This entry takes tagged scalars; the bytes setter takes raw words. */
+  /*
+   * This entry takes tagged scalars; the bytes setter takes raw words.
+   */
   if (heap && *(int64_t *)((char *)(uintptr_t)heap - 8) == TAG_BYTES)
     return rt_bytes_set_raw(heap, is_int(key) ? rt_untag_v(key) : key,
                             is_int(item) ? rt_untag_v(item) : item);
@@ -5147,9 +5172,13 @@ int64_t rt_native_dict_set_str_compact(int64_t value, int64_t key,
    * untouched: the dynamic ABI reserves it for nil, and a raw-int producer
    * that needs to store an unambiguous scalar 0 must box it before the call.
    */
-  if (ny_native_managed_dict_ptr(value) && item != 0 &&
-      !NY_DYNAMIC_CALLABLE_IS(item) && !is_int(item) &&
-      rt_native_is_int(item) && !rt_is_bool_imm(item))
+  /*
+   * Test the cheap properties of `item` first: the managed-dictionary probe
+   * can fall back to a mincore syscall, and most stores need no boxing.
+   */
+  if (item != 0 && !NY_DYNAMIC_CALLABLE_IS(item) && !is_int(item) &&
+      rt_native_is_int(item) && !rt_is_bool_imm(item) &&
+      ny_native_managed_dict_ptr(value))
     item = rt_tag_v(item);
   return ny_native_dict_set_impl(value, key, item, true);
 }
@@ -5340,7 +5369,8 @@ int64_t rt_any_sub(int64_t left, int64_t right) {
 int64_t rt_any_mul(int64_t left, int64_t right) {
   if (is_int(left) && is_int(right)) {
     int64_t product = 0;
-    if (!__builtin_mul_overflow(rt_untag_v(left), rt_untag_v(right), &product) &&
+    if (!__builtin_mul_overflow(rt_untag_v(left), rt_untag_v(right),
+                                &product) &&
         ny_small_int_fits_i64(product))
       return rt_tag_v(product);
   }
@@ -6447,7 +6477,12 @@ typedef struct {
 } defer_t;
 
 typedef VEC(defer_t) defer_vec;
-defer_vec g_defer_stack = {0};
+/*
+ * Per thread: defers and panic targets are scoped to one call stack. A single
+ * shared vector let workers reallocate it concurrently (glibc abort "double
+ * free or corruption") and run or longjmp into another thread's frames.
+ */
+__thread defer_vec g_defer_stack = {0};
 
 typedef struct {
   NY_JMP_BUF *env;
@@ -6455,8 +6490,8 @@ typedef struct {
 } panic_env_t;
 
 typedef VEC(panic_env_t) panic_env_vec;
-panic_env_vec g_panic_env_stack = {0};
-int64_t g_panic_value = 0;
+__thread panic_env_vec g_panic_env_stack = {0};
+__thread int64_t g_panic_value = 0;
 #ifdef _MSC_VER
 #define NY_TLS __declspec(thread)
 #else
@@ -6492,6 +6527,8 @@ typedef struct rt_sso_block {
 } rt_sso_block_t;
 
 static NY_TLS rt_sso_block_t *g_sso_strings = NULL;
+_Atomic uint64_t g_rt_sso_generation = 1;
+RT_TLS rt_sso_probe_cache_entry_t g_rt_sso_probe_cache[RT_SSO_PROBE_CACHE_SIZE];
 
 int64_t rt_alloc_small_string_len(const char *s, size_t len) {
   if (len > RT_SSO_MAX)
@@ -6511,12 +6548,14 @@ int64_t rt_alloc_small_string_len(const char *s, size_t len) {
   slot->tag = TAG_STR;
   memcpy(slot->bytes, s, len);
   slot->bytes[len] = '\0';
+  atomic_fetch_add_explicit(&g_rt_sso_generation, 1, memory_order_release);
   return (int64_t)(uintptr_t)slot->bytes;
 }
 
 void rt_cleanup_small_strings(void) {
   rt_sso_block_t *block = g_sso_strings;
   g_sso_strings = NULL;
+  atomic_fetch_add_explicit(&g_rt_sso_generation, 1, memory_order_release);
   /*
    * Clear the intern table and hash cache before freeing the SSO blocks
    * they point into, so no stale pointer can survive the free.
@@ -6527,6 +6566,7 @@ void rt_cleanup_small_strings(void) {
     free(block);
     block = next;
   }
+  atomic_fetch_add_explicit(&g_rt_sso_generation, 1, memory_order_release);
 }
 
 #define CALL_STACK_MAX 512
@@ -7833,6 +7873,13 @@ int64_t rt_fix_fn_ptr(int64_t fn) {
   return rt_fix_fn_ptr_with_hint(fn, (uintptr_t)__builtin_return_address(0));
 }
 
+void rt_thread_stacks_release(void) {
+  free(g_defer_stack.data);
+  g_defer_stack = (defer_vec){0};
+  free(g_panic_env_stack.data);
+  g_panic_env_stack = (panic_env_vec){0};
+}
+
 int64_t rt_push_defer(int64_t fn, int64_t env) {
   /*
    * Defer callbacks arrive as raw machine-code addresses.  Function symbols
@@ -9007,6 +9054,10 @@ int64_t rt_raw_word_tag(int64_t value) {
     int64_t *hdr = (int64_t *)((uintptr_t)value - RT_NATIVE_TBUF_HEADER);
     return rt_tbuf_word_is_tuple(hdr[3]) ? TAG_TUPLE : TAG_LIST;
   }
+  /* Native dictionaries are calloc-allocated registry payloads, not rt_malloc
+   * heap objects, so the header/heap probes below cannot classify them. */
+  if (ny_native_dict_ptr(value) != NULL)
+    return TAG_DICT;
   if (is_ptr(value) && is_heap_ptr(value)) {
     int64_t tag = *(int64_t *)((char *)(uintptr_t)value - 8);
     if (tag >= 100 && tag <= 255)
@@ -9855,6 +9906,19 @@ int64_t rt_load_item_fast(int64_t lst, int64_t i_v) {
   return _rt_load_item_fast(lst, i_v);
 }
 
+/*
+ * Whether a stored machine word is a dynamic language value rather than a raw
+ * scalar.  Native dictionaries are calloc-allocated registry payloads and
+ * magic-tbuf lists carry their header inline, so neither is covered by the
+ * managed-heap probes; both would otherwise be pre-tagged as integers.
+ */
+static bool rt_store_word_is_dynamic(int64_t value) {
+  return rt_is_bool_imm(value) || rt_native_is_str(value) || is_v_str(value) ||
+         is_v_flt(value) || rt_heap_object_ptr(value) != 0 ||
+         ny_native_dict_ptr(value) != NULL ||
+         rt_magic_tbuf_elem_size(value) > 0 || NY_NATIVE_IS(value);
+}
+
 int64_t rt_store_item_fast(int64_t lst, int64_t i_v, int64_t val) {
   if (!lst)
     return 0;
@@ -9873,8 +9937,7 @@ int64_t rt_store_item_fast(int64_t lst, int64_t i_v, int64_t val) {
   int64_t raw_i = is_int(i_v) ? rt_untag_v(i_v) : i_v;
   int64_t raw_val = is_int(val) ? rt_untag_v(val) : val;
   int64_t tagged_val =
-      (is_int(val) || rt_is_bool_imm(val) || is_v_flt(val) || is_v_str(val) ||
-       rt_native_is_str(val) || rt_heap_object_ptr(val) || NY_NATIVE_IS(val) ||
+      (is_int(val) || rt_store_word_is_dynamic(val) ||
        !ny_small_int_fits_i64(val))
           ? val
           : rt_tag_v(val);
@@ -9889,9 +9952,7 @@ int64_t rt_store_item_fast(int64_t lst, int64_t i_v, int64_t val) {
      * Promote before storing the first dynamic value; the descriptor setter
      * records its runtime tag and the promotion reclassifies prior scalars.
      */
-    bool dynamic_element = rt_is_bool_imm(val) || rt_native_is_str(val) ||
-                           is_v_str(val) || is_v_flt(val) ||
-                           rt_heap_object_ptr(val) != 0;
+    bool dynamic_element = rt_store_word_is_dynamic(val);
     if (rt_tbuf_header_valid(hdr) && hdr[2] == 8 && dynamic_element) {
       lst = rt_tbuf_promote_descriptor(lst);
       hdr = (int64_t *)((uintptr_t)lst - RT_NATIVE_TBUF_HEADER);
@@ -9918,10 +9979,7 @@ int64_t rt_store_item_fast_raw(int64_t lst, int64_t index, int64_t value) {
                                 RT_NATIVE_TBUF_HEADER)) {
     int64_t *hdr = (int64_t *)((uintptr_t)lst - RT_NATIVE_TBUF_HEADER);
     if (rt_tbuf_header_valid(hdr)) {
-      bool dynamic_element = rt_is_bool_imm(value) || rt_native_is_str(value) ||
-                             is_v_str(value) || is_v_flt(value) ||
-                             rt_heap_object_ptr(value) != 0 ||
-                             NY_NATIVE_IS(value);
+      bool dynamic_element = rt_store_word_is_dynamic(value);
       if (is_v_flt(value)) {
         int64_t bits = rt_f64_bits(rt_flt_unbox_double(value));
         return rt_tbuf_set_f64_bits(lst, index, bits) ? value : 0;
@@ -9931,11 +9989,8 @@ int64_t rt_store_item_fast_raw(int64_t lst, int64_t index, int64_t value) {
         hdr = (int64_t *)((uintptr_t)lst - RT_NATIVE_TBUF_HEADER);
       }
       if (hdr[2] >= 24) {
-        int64_t tagged = (rt_is_bool_imm(value) || rt_native_is_str(value) ||
-                          is_v_str(value) || rt_heap_object_ptr(value) ||
-                          NY_NATIVE_IS(value))
-                             ? value
-                             : rt_tag_v(value);
+        int64_t tagged = rt_store_word_is_dynamic(value) ? value
+                                                         : rt_tag_v(value);
         return rt_tbuf_set_tagged(lst, index, tagged) ? value : 0;
       }
       return rt_tbuf_set_i64_raw(lst, index, value) ? value : 0;

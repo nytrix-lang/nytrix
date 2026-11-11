@@ -150,11 +150,11 @@ static fun_sig *ny_gencall_lookup_helper(codegen_t *cg, fun_sig **cache_slot,
   return NULL;
 }
 
-#define NY_DEFINE_GENCALL_LOOKUP_WRAPPER(fn_name, cache_field, ...)            \
-  static fun_sig *fn_name(codegen_t *cg) {                                     \
-    static const char *const k_names[] = {__VA_ARGS__};                        \
-    return ny_gencall_lookup_helper(cg, &cg->cache_field, k_names,             \
-                                    sizeof(k_names) / sizeof(k_names[0]));     \
+#define NY_DEFINE_GENCALL_LOOKUP_WRAPPER(fn_name, cache_field, ...)        \
+  static fun_sig *fn_name(codegen_t *cg) {                                 \
+    static const char *const k_names[] = {__VA_ARGS__};                    \
+    return ny_gencall_lookup_helper(cg, &cg->cache_field, k_names,         \
+                                    sizeof(k_names) / sizeof(k_names[0])); \
   }
 
 NY_DEFINE_GENCALL_LOOKUP_WRAPPER(ny_gencall_flt_unbox, cached_fn_flt_unbox,

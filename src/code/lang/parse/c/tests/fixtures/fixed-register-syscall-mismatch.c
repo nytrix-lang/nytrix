@@ -1,3 +1,6 @@
+/*
+ * Inline assembly fixture for mismatched fixed-register syscall operands.
+ */
 long nyc_fixed_register_syscall_mismatch(void) {
   register unsigned long arg1 __asm__("rsi") = 0;
   register unsigned long arg2 __asm__("rsi") = 0;

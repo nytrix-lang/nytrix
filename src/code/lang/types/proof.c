@@ -721,16 +721,16 @@ static int ny_smt_cmp_branches(codegen_t *cg, scope *scopes, size_t depth,
    * parameters are named `coeffs` and `rhs_val` (not `coeff`/`rhs`) so they
    * cannot collide with the ny_smt_cons_t members during substitution.
    */
-#define NY_SMT_PUSH_CONS(branch, coeffs, rhs_val)                              \
-  do {                                                                         \
-    if ((branch)->ncons >= NY_SMT_MAX_CONS)                                    \
-      return 0;                                                                \
-    ny_smt_cons_t *c = &(branch)->cons[(branch)->ncons++];                     \
-    memset(c, 0, sizeof(*c));                                                  \
-    c->nvars = env->nvars;                                                     \
-    for (int i = 0; i < env->nvars; ++i)                                       \
-      c->coeff[i] = (coeffs)[i];                                               \
-    c->rhs = (rhs_val);                                                        \
+#define NY_SMT_PUSH_CONS(branch, coeffs, rhs_val)          \
+  do {                                                     \
+    if ((branch)->ncons >= NY_SMT_MAX_CONS)                \
+      return 0;                                            \
+    ny_smt_cons_t *c = &(branch)->cons[(branch)->ncons++]; \
+    memset(c, 0, sizeof(*c));                              \
+    c->nvars = env->nvars;                                 \
+    for (int i = 0; i < env->nvars; ++i)                   \
+      c->coeff[i] = (coeffs)[i];                           \
+    c->rhs = (rhs_val);                                    \
   } while (0)
 
   int nbr = 0;

@@ -1,3 +1,6 @@
+/*
+ * Parser/backend fixture for prefix and postfix increment/decrement.
+ */
 long c_prefix_increment(long value) { return ++value; }
 
 long c_prefix_decrement(long value) { return --value; }

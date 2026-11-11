@@ -1,3 +1,6 @@
+/*
+ * Embedding regression tests for GC-owned handles and appended runtime values.
+ */
 #include <nytrix/nytrix.h>
 
 #include "code/backend/runtime/gc.h"
@@ -48,8 +51,7 @@ int main(void) {
    * list API and verify its contents after a moving collection.
    */
   int64_t aggregate = rt_list_new_raw(2);
-  if (!aggregate ||
-      (aggregate = rt_append(aggregate, rt_tag_v(17))) == 0 ||
+  if (!aggregate || (aggregate = rt_append(aggregate, rt_tag_v(17))) == 0 ||
       (aggregate = rt_append(aggregate, rt_tag_v(-29))) == 0) {
     fputs("could not build aggregate embedding value\n", stderr);
     nytrix_value_handle_release(handle);
@@ -100,7 +102,8 @@ int main(void) {
   nytrix_value_handle_t *nested_handle = NULL;
   nytrix_value_handle_t *dict_handle = NULL;
   nytrix_value_handle_t *outer_handle = NULL;
-  int64_t text_value = rt_alloc_string_len(nested_text, sizeof(nested_text) - 1);
+  int64_t text_value =
+      rt_alloc_string_len(nested_text, sizeof(nested_text) - 1);
   if (!nytrix_value_handle_create(text_value, &text_handle, err, sizeof(err))) {
     fprintf(stderr, "could not root nested embedding values: %s\n", err);
     nytrix_value_handle_release(text_handle);
@@ -129,11 +132,12 @@ int main(void) {
   int64_t nested_dict = rt_dict_new_raw(1);
   int64_t child_key = rt_alloc_string_len("child", 5);
   int64_t nested_current = 0;
-  if (!nytrix_value_handle_create(nested_dict, &dict_handle, err, sizeof(err)) ||
+  if (!nytrix_value_handle_create(nested_dict, &dict_handle, err,
+                                  sizeof(err)) ||
       !nytrix_value_handle_get(nested_handle, &nested_current, err,
                                sizeof(err)) ||
-      (nested_dict = rt_dict_set_str_raw(nested_dict, child_key,
-                                         nested_current)) == 0 ||
+      (nested_dict =
+           rt_dict_set_str_raw(nested_dict, child_key, nested_current)) == 0 ||
       !nytrix_value_handle_set(dict_handle, nested_dict, err, sizeof(err))) {
     fprintf(stderr, "could not build nested embedding dictionary: %s\n", err);
     nytrix_value_handle_release(dict_handle);
@@ -144,7 +148,8 @@ int main(void) {
   }
   int64_t outer_list = rt_list_new_raw(2);
   int64_t dict_current = 0;
-  if (!nytrix_value_handle_create(outer_list, &outer_handle, err, sizeof(err)) ||
+  if (!nytrix_value_handle_create(outer_list, &outer_handle, err,
+                                  sizeof(err)) ||
       !nytrix_value_handle_get(nested_handle, &nested_current, err,
                                sizeof(err)) ||
       !nytrix_value_handle_get(outer_handle, &outer_list, err, sizeof(err)) ||
@@ -176,19 +181,19 @@ int main(void) {
   int64_t dict_child_after_gc = 0;
   if (!nytrix_value_handle_get(outer_handle, &outer_after_gc, err,
                                sizeof(err)) ||
-      !rt_bigint_to_i64_checked(rt_list_len(outer_after_gc), &aggregate_length) ||
+      !rt_bigint_to_i64_checked(rt_list_len(outer_after_gc),
+                                &aggregate_length) ||
       aggregate_length != 2 ||
       (nested_after_gc = rt_value_get_index_raw(outer_after_gc, 0,
                                                 NY_IMM_NIL)) == NY_IMM_NIL ||
-      (dict_after_gc = rt_value_get_index_raw(outer_after_gc, 1,
-                                              NY_IMM_NIL)) == NY_IMM_NIL ||
-      (nested_text_after_gc =
-           rt_value_get_index_raw(nested_after_gc, 0, NY_IMM_NIL)) ==
+      (dict_after_gc = rt_value_get_index_raw(outer_after_gc, 1, NY_IMM_NIL)) ==
           NY_IMM_NIL ||
-      (dict_child_after_gc =
-           rt_dict_get_str_raw(dict_after_gc, child_key, NY_IMM_NIL)) ==
-          NY_IMM_NIL ||
-      dict_child_after_gc != nested_after_gc || !is_v_str(nested_text_after_gc) ||
+      (nested_text_after_gc = rt_value_get_index_raw(
+           nested_after_gc, 0, NY_IMM_NIL)) == NY_IMM_NIL ||
+      (dict_child_after_gc = rt_dict_get_str_raw(dict_after_gc, child_key,
+                                                 NY_IMM_NIL)) == NY_IMM_NIL ||
+      dict_child_after_gc != nested_after_gc ||
+      !is_v_str(nested_text_after_gc) ||
       rt_tagged_str_len(nested_text_after_gc) != sizeof(nested_text) - 1) {
     fprintf(stderr, "nested aggregate graph did not survive collection: %s\n",
             err);

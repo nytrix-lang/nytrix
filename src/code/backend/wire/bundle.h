@@ -1,3 +1,4 @@
+/* Native code bundle creation and serialization interfaces. */
 #ifndef NY_BACKEND_BUNDLE_H
 #define NY_BACKEND_BUNDLE_H
 

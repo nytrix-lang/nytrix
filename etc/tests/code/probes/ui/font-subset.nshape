@@ -1,0 +1,28 @@
+shape font_subset_lazy_glyph {
+  family "runtime/ui"
+  generator "embedded"
+  features [ny font glyph cache subset]
+  template ny-test-case
+  timeout 180
+  flags_matrix "--native-only -O0; --native-only -O3; --run=aot -O2; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect compile_and_run
+  expect_message "FONT-SUBSET-OK"
+  source ny <<'NY'
+use core
+use core.os.ui.render as gfx
+
+gfx.set_backend_type(gfx.BACKEND_MOCK)
+def font = gfx.font_load_first(["etc/assets/fonts/monocraft.ttf"], 20, gfx.FONT_FILTER_DEFAULT, "A")
+assert(font > 0, "subset font loads")
+def f = gfx._font_get(font)
+assert(f.get("_kind", "") == "ttf", "bundled font is loaded as TrueType")
+def glyphs = f.get("fast_glyphs", 0)
+assert(gfx.font_fast_glyph_present(glyphs, 65), "requested A is prepared")
+assert(!gfx.font_fast_glyph_present(glyphs, 66), "unrequested B remains lazy")
+def measured = gfx.measure_text(font, "B")
+assert(measured[0] > 0.0, "lazy glyph has metrics")
+assert(gfx.font_fast_glyph_present(glyphs, 66), "measurement prepares missing B")
+assert(gfx.font_destroy(font), "subset font releases resources")
+print("FONT-SUBSET-OK")
+NY
+}

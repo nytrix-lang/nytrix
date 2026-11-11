@@ -1,9 +1,12 @@
-struct nyc_item { int value; };
+/*
+ * C parser fixture for adjusted aggregate parameters and callback use.
+ */
+struct nyc_item {
+  int value;
+};
 static int nyc_seen;
-static void nyc_record_item(struct nyc_item *item) {
-  nyc_seen = item->value;
-}
-static void nyc_invoke(void (callback)(struct nyc_item *),
+static void nyc_record_item(struct nyc_item *item) { nyc_seen = item->value; }
+static void nyc_invoke(void(callback)(struct nyc_item *),
                        struct nyc_item *item) {
   callback(item);
 }

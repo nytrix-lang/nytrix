@@ -1,3 +1,6 @@
+/*
+ * Fixture: assign and return an empty aggregate value.
+ */
 struct empty {};
 
 static struct empty make_empty(void) {

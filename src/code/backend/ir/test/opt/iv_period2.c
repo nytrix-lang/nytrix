@@ -154,6 +154,57 @@ static bool run_early_exit_case(void) {
   return ok;
 }
 
+static bool run_runtime_triangular_cases(void) {
+  const int64_t bounds[] = {-7, 0, 1, 2, 99, 100, 101, 104,
+                             INT64_MAX - 1, INT64_MAX};
+  for (size_t k = 0; k < sizeof(bounds) / sizeof(bounds[0]); ++k) {
+    nyr_func_t f;
+    nyr_opt_begin(&f);
+    int bound_constant = nyr_opt_const(&f, bounds[k]);
+    nyr_opt_emit_imm(&f, NYIR_STORE_LOCAL, 0);
+    f.data[f.len - 1].a = bound_constant;
+    int bound = nyr_opt_emit_imm(&f, NYIR_LOAD_LOCAL, 0);
+    int zero = nyr_opt_const(&f, 0);
+    int one = nyr_opt_const(&f, 1);
+    nyr_opt_br(&f, 10);
+    nyr_opt_label(&f, 10);
+    size_t iv_at = f.len;
+    int iv = f.next_value;
+    nyr_opt_phi(&f, -1, zero, 11, zero);
+    size_t sum_at = f.len;
+    int sum = f.next_value;
+    nyr_opt_phi(&f, -1, zero, 11, zero);
+    int condition = nyr_opt_cmp(&f, iv, bound, NYIR_CMP_LT);
+    nyr_opt_br_if(&f, condition, 11);
+    nyr_opt_br(&f, 12);
+    nyr_opt_label(&f, 11);
+    int next_sum = nyr_opt_binop(&f, NYIR_ADD_I64, sum, iv);
+    int next_iv = nyr_opt_binop(&f, NYIR_ADD_I64, iv, one);
+    nyr_opt_br(&f, 10);
+    f.data[iv_at].phi_incoming[1].value = next_iv;
+    f.data[sum_at].phi_incoming[1].value = next_sum;
+    nyr_opt_label(&f, 12);
+    nyr_opt_ret(&f, sum);
+    uint64_t trips = bounds[k] > 0 ? (uint64_t)bounds[k] : 0;
+    uint64_t expected = (uint64_t)((unsigned __int128)trips *
+                                   (trips ? trips - 1 : 0) / 2);
+    bool ok = nyr_opt_verify(&f, "iv-runtime-triangular/before") &&
+              nyr_iv_elim(&f) &&
+              nyr_opt_verify(&f, "iv-runtime-triangular/after") &&
+              count_op(&f, NYIR_BR_IF) == 0 &&
+              count_op(&f, NYIR_MUL_I64) == 3 &&
+              count_op(&f, NYIR_SAR_I64) == 1 &&
+              (uint64_t)nyr_opt_eval(&f, "iv-runtime-triangular") == expected;
+    if (!ok)
+      nyr_dump(stderr, &f, "iv-runtime-triangular/failed");
+    nyr_ir_func_free(&f);
+    if (!ok)
+      return false;
+  }
+  puts("[iv-runtime-triangular] zero, parity, and wrapping limits pass");
+  return true;
+}
+
 int main(void) {
   return run_case("iv-period2/even-offset-even-trip", 6, 1, 0, 894, true,
                   false) &&
@@ -163,7 +214,7 @@ int main(void) {
                           false, false) &&
                  run_case("iv-period2/even-step-rejected", 6, 2, 1, 600,
                           false, false) &&
-                 run_early_exit_case()
+                 run_early_exit_case() && run_runtime_triangular_cases()
              ? 0
              : 1;
 }

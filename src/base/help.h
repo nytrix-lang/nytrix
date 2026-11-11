@@ -1,3 +1,4 @@
+/* Shared terminal help formatting, ANSI-aware widths, and option tables. */
 #pragma once
 
 #include "base/common.h"

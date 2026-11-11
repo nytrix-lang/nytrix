@@ -1,3 +1,6 @@
+/*
+ * Fixture: parse and preserve attributes attached to pointer declarations.
+ */
 #include <stddef.h>
 
 struct value {

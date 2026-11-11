@@ -1,3 +1,6 @@
+/*
+ * Host-side ABI oracle for AArch64 aggregate argument and return tests.
+ */
 #include <stdio.h>
 
 struct a64_pair {

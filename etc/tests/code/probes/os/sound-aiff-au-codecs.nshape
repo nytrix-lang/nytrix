@@ -1,13 +1,16 @@
 shape sound_aiff_au_codec_gaps {
   family "runtime/system/sound"
   generator "embedded"
-  features ["sound", "aiff", "au", "ima4"]
+  features ["sound", "aiff", "au", "ima4", "adpcm"]
   template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
   expect compile_and_run
   source ny <<'NY'
 use core
+use core.os as os
 use core.os.sound.aiff as aiff
 use core.os.sound.au as au
+use core.os.sound.stream as stream
 
 fn s(bytes p, int at, str text) bytes {
    mut i = 0
@@ -26,10 +29,9 @@ fn be32(bytes p, int at, int v) bytes {
    store8(p, v & 255, at + 3)
    p
 }
-
 ;; A one-packet, mono QuickTime IMA4 AIFC fixture embedded in the test.
 def ima = bytes(94)
- s(ima, 0, "FORM")
+s(ima, 0, "FORM")
 be32(ima, 4, 86)
 s(ima, 8, "AIFC")
 s(ima, 12, "COMM")
@@ -76,17 +78,25 @@ while i < ffmpeg_samples.len {
           "ima4 sample matches ffmpeg packet byte output")
    i += 1
 }
-;; G.721/G.723 ADPCM AU encoding numbers are intentionally unsupported as a
-;; clear zero result until a pure Nytrix G.726 decoder is available.
-def au_ext = bytes(26)
-s(au_ext, 0, ".snd")
-be32(au_ext, 4, 24)
-be32(au_ext, 8, 2)
-be32(au_ext, 12, 23)
-be32(au_ext, 16, 8000)
-be32(au_ext, 20, 1)
-store8(au_ext, 0x12, 24)
-store8(au_ext, 0x34, 25)
-assert(au.decode_bytes(au_ext) == 0, "unsupported G.721 AU encoding rejects clearly")
+def path = os.temp_dir() + "/ny-aiff-stream-ima4-" + to_str(os.pid())
+unwrap(os.file_write(path, ima))
+def st = stream.open(path)
+assert(st != 0 && stream.length(st) == 64, "ima4 file stream opens with exact length")
+def part = stream.read_range(st, 11, 7)
+assert(is_list(part), "ima4 file stream decodes frame range")
+def part_meta = part.get(1)
+assert(part_meta.get("total_frames") == 7, "ima4 stream range frame count")
+mut sample = 0
+while sample < 7 {
+   assert(load16(part_meta.get("ptr"), sample * 2) ==
+          load16(pcm.get("ptr"), (11 + sample) * 2),
+          "ima4 streamed range sample equals full packet decode")
+   sample += 1
+}
+free(part_meta.get("ptr"), pcm.get("ptr"))
+assert(stream.close(st), "ima4 file stream closes")
+unwrap(os.file_remove(path))
+
+print("AIFF-IMA4-OK")
 NY
 }

@@ -1,3 +1,4 @@
+/* Stable runtime data-layout constants shared by NYIR and object emission. */
 #ifndef NYR_LAYOUT_H
 #define NYR_LAYOUT_H
 

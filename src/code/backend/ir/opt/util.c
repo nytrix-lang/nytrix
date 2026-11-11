@@ -525,15 +525,7 @@ nyr_cmp_t nyr_cmp_swap_operands(nyr_cmp_t cmp) {
 
 static int nir_strip_copy_value(const nyr_func_t *f, const int *defs,
                                 int value) {
-  for (unsigned depth = 0;
-       f && defs && depth < 16 && value >= 0 && value < f->next_value;
-       ++depth) {
-    int di = defs[value];
-    if (di < 0 || (size_t)di >= f->len || f->data[di].op != NYIR_COPY)
-      break;
-    value = f->data[di].a;
-  }
-  return value;
+  return nyr_strip_copy_chain(f, defs, value, 16);
 }
 
 bool nyr_value_fact_singleton(const nyr_value_fact_t *fact, int64_t *value) {
@@ -1133,10 +1125,10 @@ uint64_t nyr_debug_fingerprint(const nyr_func_t *f) {
   uint64_t hash = UINT64_C(1469598103934665603);
   if (!f)
     return hash;
-#define NIR_HASH(v)                                                            \
-  do {                                                                         \
-    hash ^= (uint64_t)(v);                                                     \
-    hash *= UINT64_C(1099511628211);                                           \
+#define NIR_HASH(v)                  \
+  do {                               \
+    hash ^= (uint64_t)(v);           \
+    hash *= UINT64_C(1099511628211); \
   } while (0)
   NIR_HASH(f->len);
   NIR_HASH(f->next_value);

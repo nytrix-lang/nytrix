@@ -1,6 +1,9 @@
-static const char *nyc_pointer_labels[] = { "zero", "one" };
+/*
+ * Fixture: initialize static pointer tables with designated indices.
+ */
+static const char *nyc_pointer_labels[] = {"zero", "one"};
 static const char **nyc_pointer_table[4] = {
-  [2] = nyc_pointer_labels,
+    [2] = nyc_pointer_labels,
 };
 
 int main(void) {

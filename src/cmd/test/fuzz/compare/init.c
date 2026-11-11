@@ -1,3 +1,6 @@
+/*
+ * Command catalog for public fuzz, bridge, benchmark, and selftest actions.
+ */
 #include "../core.h"
 #include "api.h"
 

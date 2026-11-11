@@ -1,3 +1,7 @@
+/*
+ * C parser fixture for function declarations defined through signature
+ * typedefs.
+ */
 typedef unsigned int(nyc_signature_t)(const unsigned int, unsigned int);
 nyc_signature_t nyc_signature_add;
 

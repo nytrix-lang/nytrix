@@ -1,3 +1,4 @@
+/* Declarations and lookup helpers for supported C system headers. */
 #ifndef NYC_HEADERS_H
 #define NYC_HEADERS_H
 
@@ -14,7 +15,7 @@ typedef struct {
   bool sysv_x86_64;
 } nyc_header_t;
 
-#define NYC_HEADER(NAME, SYSV, TEXT)                                           \
+#define NYC_HEADER(NAME, SYSV, TEXT)                 \
   {NAME, "<" NAME ">", TEXT, sizeof(TEXT) - 1, SYSV}
 static const nyc_header_t nyc_headers[] = {
     NYC_HEADER("assert.h", false,
@@ -26,9 +27,18 @@ static const nyc_header_t nyc_headers[] = {
                "static void __nyc_assert_int(int condition) { if(!condition) "
                "abort(); }\n"
                "#endif\n#endif\n"),
+    NYC_HEADER("endian.h", false,
+               "#pragma once\n"
+               "#define __LITTLE_ENDIAN 1234\n#define __BIG_ENDIAN 4321\n"
+               "#define __PDP_ENDIAN 3412\n"
+               "#define __BYTE_ORDER __LITTLE_ENDIAN\n"
+               "#define LITTLE_ENDIAN __LITTLE_ENDIAN\n"
+               "#define BIG_ENDIAN __BIG_ENDIAN\n"
+               "#define PDP_ENDIAN __PDP_ENDIAN\n"
+               "#define BYTE_ORDER __BYTE_ORDER\n"),
     NYC_HEADER(
         "sys/types.h", true,
-        "#pragma once\n"
+        "#pragma once\n#include <endian.h>\n"
         "typedef int pid_t; typedef unsigned int uid_t; typedef unsigned int "
         "gid_t;\n"
         "typedef unsigned int mode_t; typedef unsigned long dev_t;\n"

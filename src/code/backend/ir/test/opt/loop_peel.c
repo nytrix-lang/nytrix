@@ -1,3 +1,6 @@
+/*
+ * Regression tests for counted-loop peeling and preserved trip-count semantics.
+ */
 #include "support.h"
 
 extern bool nyr_loop_peel(nyr_func_t *f);

@@ -1,3 +1,6 @@
+/*
+ * C fixture exposing plain-char signedness and the compiler's char mode.
+ */
 int nyc_plain_char_signed(void) { return (char)-1 < 0; }
 int nyc_signed_char_signed(void) { return (signed char)-1 < 0; }
 #ifdef __CHAR_UNSIGNED__

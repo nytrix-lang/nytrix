@@ -1,3 +1,6 @@
+/*
+ * Fixture: access an aggregate-array member through the arrow operator.
+ */
 struct item {
   int value;
 };

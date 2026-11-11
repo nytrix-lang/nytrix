@@ -2127,8 +2127,8 @@ static bool stmt_ownership_stmt_contains_param_reassignment(
     return true;
   if (stmt_ownership_is_param_reassignment(s, param_name))
     return true;
-#define CHECK_STMT_REASSIGN(child)                                             \
-  stmt_ownership_stmt_contains_param_reassignment((child), param_name,         \
+#define CHECK_STMT_REASSIGN(child)                                     \
+  stmt_ownership_stmt_contains_param_reassignment((child), param_name, \
                                                   depth + 1)
   switch (s->kind) {
   case NY_S_BLOCK:
@@ -3219,7 +3219,7 @@ static bool stmt_ownership_resource_expr_captures(const expr_t *e,
     return false;
   if (depth > 128)
     return true;
-#define NY_RESOURCE_CAPTURE(child)                                             \
+#define NY_RESOURCE_CAPTURE(child)                                \
   stmt_ownership_resource_expr_captures((child), name, depth + 1)
   switch (e->kind) {
   case NY_E_UNARY:
@@ -5581,7 +5581,7 @@ static bool stmt_ownership_resource_path_mentions_expr(const expr_t *e,
     (void)place_len;
     return stmt_ownership_resource_paths_overlap(place, path);
   }
-#define NY_RESOURCE_PATH_EXPR(child)                                           \
+#define NY_RESOURCE_PATH_EXPR(child)                                   \
   stmt_ownership_resource_path_mentions_expr((child), path, depth + 1)
   switch (e->kind) {
   case NY_E_UNARY:
@@ -5719,9 +5719,9 @@ static bool stmt_ownership_resource_path_mentions_stmt(const stmt_t *s,
     return false;
   if (depth > 128)
     return true;
-#define NY_RESOURCE_PATH_STMT(child)                                           \
+#define NY_RESOURCE_PATH_STMT(child)                                   \
   stmt_ownership_resource_path_mentions_stmt((child), path, depth + 1)
-#define NY_RESOURCE_PATH_EXPR(child)                                           \
+#define NY_RESOURCE_PATH_EXPR(child)                                   \
   stmt_ownership_resource_path_mentions_expr((child), path, depth + 1)
   switch (s->kind) {
   case NY_S_BLOCK:

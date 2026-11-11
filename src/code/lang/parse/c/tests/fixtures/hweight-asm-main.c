@@ -1,3 +1,6 @@
+/*
+ * Fixture driver: compare x86 population-count helpers with software results.
+ */
 unsigned long nyc_hweight64_probe(unsigned long);
 unsigned int nyc_hweight32_probe(unsigned int);
 unsigned int __sw_hweight32(unsigned int value) {
@@ -15,6 +18,5 @@ unsigned long __sw_hweight64(unsigned long value) {
 int main(void) {
   return nyc_hweight64_probe(0) != 0 ||
          nyc_hweight64_probe(0x8000000000000001UL) != 2 ||
-         nyc_hweight32_probe(0) != 0 ||
-         nyc_hweight32_probe(0x80000001U) != 2;
+         nyc_hweight32_probe(0) != 0 || nyc_hweight32_probe(0x80000001U) != 2;
 }

@@ -51,6 +51,8 @@ static bool strlist_push(char ***list, size_t *len, size_t *cap,
                          const char *s) {
   if (*len == *cap) {
     size_t nc = *cap ? *cap * 2 : 8;
+    if (nc < *cap || nc > SIZE_MAX / sizeof(**list))
+      return false;
     char **p = realloc(*list, nc * sizeof(**list));
     if (!p)
       return false;
@@ -72,13 +74,20 @@ static void strlist_free(char **list, size_t len) {
  */
 
 bool ny_incremental_init(const ny_incremental_config_t *config) {
-  g_config = config ? *config : g_default_config;
-  if (!g_config.max_depth)
-    g_config.max_depth = 32;
-  if (config && config->project_root)
-    g_config.project_root = ny_strdup(config->project_root);
-  if (config && config->cache_dir)
-    g_config.cache_dir = ny_strdup(config->cache_dir);
+  ny_incremental_config_t next = config ? *config : g_default_config;
+  next.project_root = next.project_root ? ny_strdup(next.project_root) : NULL;
+  next.cache_dir = next.cache_dir ? ny_strdup(next.cache_dir) : NULL;
+  if (config && ((config->project_root && !next.project_root) ||
+                 (config->cache_dir && !next.cache_dir))) {
+    free((char *)next.project_root);
+    free((char *)next.cache_dir);
+    return false;
+  }
+  if (!next.max_depth)
+    next.max_depth = 32;
+  if (g_initialized)
+    ny_incremental_shutdown();
+  g_config = next;
   g_initialized = true;
   return true;
 }
@@ -261,20 +270,27 @@ bool ny_incremental_parse_dependencies(const char *file_path,
         if (dep) {
           memcpy(dep, mod, dep_len);
           dep[dep_len] = '\0';
-          /*
-           * dedupe + skip std
-           */
-          if (!(strncmp(dep, "std", 3) == 0)) {
+          {
             bool dup = false;
             for (size_t k = 0; k < *out_dep_count; ++k)
               if (strcmp((*out_deps)[k], dep) == 0) {
                 dup = true;
                 break;
               }
-            if (!dup)
-              strlist_push(out_deps, out_dep_count, &cap, dep);
+            if (!dup && !strlist_push(out_deps, out_dep_count, &cap, dep)) {
+              free(dep);
+              strlist_free(*out_deps, *out_dep_count);
+              *out_deps = NULL;
+              *out_dep_count = 0;
+              return false;
+            }
           }
           free(dep);
+        } else {
+          strlist_free(*out_deps, *out_dep_count);
+          *out_deps = NULL;
+          *out_dep_count = 0;
+          return false;
         }
         s = p;
         continue;
@@ -306,6 +322,10 @@ static ny_dep_node_t *graph_add_or_get(ny_dep_graph_t *g,
   if (!n)
     return NULL;
   n->file_path = ny_strdup(file_path);
+  if (!n->file_path) {
+    free(n);
+    return NULL;
+  }
   g->node_count++;
   n->next = g->nodes;
   g->nodes = n;
@@ -341,17 +361,27 @@ static bool graph_add_edge(ny_dep_graph_t *g, const char *from,
     if (strcmp(e->to_file, to) == 0)
       return true;
   ny_dep_edge_t *fe = calloc(1, sizeof(*fe));
-  if (!fe)
+  ny_dep_edge_t *re = calloc(1, sizeof(*re));
+  if (!fe || !re) {
+    free(fe);
+    free(re);
     return false;
+  }
   fe->to_file = ny_strdup(to);
   fe->from_file = ny_strdup(from);
+  re->from_file = ny_strdup(from);
+  re->to_file = ny_strdup(to);
+  if (!fe->to_file || !fe->from_file || !re->from_file || !re->to_file) {
+    free(fe->to_file);
+    free(fe->from_file);
+    free(re->from_file);
+    free(re->to_file);
+    free(fe);
+    free(re);
+    return false;
+  }
   fe->next = fn->deps;
   fn->deps = fe;
-  ny_dep_edge_t *re = calloc(1, sizeof(*re));
-  if (!re)
-    return true;
-  re->from_file = ny_strdup(from); /* dependent */
-  re->to_file = ny_strdup(to);     /* dependency this node satisfies */
   re->next = tn->rdeps;
   tn->rdeps = re;
   return true;
@@ -383,8 +413,6 @@ static bool source_basename_matches(const char *cand, const char *dep) {
   const char *db = strrchr(dl, '.');
   bool cdot = cb && strcmp(cb, ".ny") == 0;
   bool ddot = db && strcmp(db, ".ny") == 0;
-  if (cdot != ddot)
-    return false;
   size_t clen = cdot ? (size_t)(cb - cl) : strlen(cl);
   size_t dlen = ddot ? (size_t)(db - dl) : strlen(dl);
   return clen == dlen && strncmp(cl, dl, clen) == 0;
@@ -401,7 +429,8 @@ bool ny_incremental_build_graph(const char **source_files, size_t file_count,
    * create all nodes first
    */
   for (size_t i = 0; i < file_count; ++i)
-    graph_add_or_get(out_graph, source_files[i]);
+    if (!graph_add_or_get(out_graph, source_files[i]))
+      goto fail;
   /*
    * parse each file for deps
    */
@@ -412,13 +441,13 @@ bool ny_incremental_build_graph(const char **source_files, size_t file_count,
     if (!content)
       continue;
     ny_dep_node_t *node = graph_find_node(out_graph, fp, 0);
-    if (node && fingerprint_from_content(fp, content, len,
-                                         &node->fingerprint))
+    if (node && fingerprint_from_content(fp, content, len, &node->fingerprint))
       node->fingerprint_valid = true;
     char **deps = NULL;
     size_t dep_count = 0;
-    if (ny_incremental_parse_dependencies(fp, content, len, &deps,
-                                          &dep_count)) {
+    bool ok =
+        ny_incremental_parse_dependencies(fp, content, len, &deps, &dep_count);
+    if (ok) {
       for (size_t d = 0; d < dep_count; ++d) {
         /*
          * resolve name to a file in the set: match the absolute path, its
@@ -428,16 +457,25 @@ bool ny_incremental_build_graph(const char **source_files, size_t file_count,
           const char *cand = source_files[j];
           if (strcmp(cand, deps[d]) == 0 || ny_name_tail_is(cand, deps[d]) ||
               source_basename_matches(cand, deps[d])) {
-            graph_add_edge(out_graph, fp, cand);
-            break;
+            /* Ambiguous basenames must invalidate every possible provider,
+             * never whichever input happened to occur first. */
+            if (!graph_add_edge(out_graph, fp, cand)) {
+              ok = false;
+              break;
+            }
           }
         }
       }
     }
     strlist_free(deps, dep_count);
     free(content);
+    if (!ok)
+      goto fail;
   }
   return true;
+fail:
+  ny_incremental_free_graph(out_graph);
+  return false;
 }
 
 /*
@@ -569,7 +607,6 @@ bool ny_incremental_load_graph(const char *cache_path,
         n->fingerprint_valid = fingerprint_valid != 0;
       }
     }
-    free(path);
     if (ok) {
       uint32_t ed = 0;
       ok = graph_read_u32(f, &ed);
@@ -579,6 +616,7 @@ bool ny_incremental_load_graph(const char *cache_path,
         free(to);
       }
     }
+    free(path);
   }
   fclose(f);
   if (!ok) {
@@ -627,14 +665,14 @@ bool ny_incremental_check_changes(ny_dep_graph_t *graph, char ***out_changed,
   *out_changed_count = 0;
   size_t cap = 0;
   for (ny_dep_node_t *n = graph->nodes; n; n = n->next) {
-    if (!n->file_path || !n->fingerprint_valid)
+    if (!n->file_path)
       continue;
     ny_file_fingerprint_t cur = {0};
-    if (ny_incremental_file_fingerprint(n->file_path, &cur)) {
-      if (!fingerprint_equal(&cur, &n->fingerprint))
-        if (!strlist_push(out_changed, out_changed_count, &cap, n->file_path))
-          return false;
-    }
+    if (!n->fingerprint_valid ||
+        !ny_incremental_file_fingerprint(n->file_path, &cur) ||
+        !fingerprint_equal(&cur, &n->fingerprint))
+      if (!strlist_push(out_changed, out_changed_count, &cap, n->file_path))
+        return false;
   }
   return true;
 }
@@ -644,13 +682,19 @@ typedef struct nk_queue_t {
   size_t len, cap;
 } nk_queue_t;
 
-static void nkq_push(nk_queue_t *q, ny_dep_node_t *n) {
+static bool nkq_push(nk_queue_t *q, ny_dep_node_t *n) {
   if (q->len == q->cap) {
-    q->cap = q->cap ? q->cap * 2 : 16;
-    q->items = realloc(q->items, q->cap * sizeof(*q->items));
+    size_t cap = q->cap ? q->cap * 2 : 16;
+    if (cap < q->cap || cap > SIZE_MAX / sizeof(*q->items))
+      return false;
+    ny_dep_node_t **items = realloc(q->items, cap * sizeof(*items));
+    if (!items)
+      return false;
+    q->items = items;
+    q->cap = cap;
   }
-  if (q->items)
-    q->items[q->len++] = n;
+  q->items[q->len++] = n;
+  return true;
 }
 
 bool ny_incremental_compute_recompile_set(ny_dep_graph_t *graph,
@@ -672,14 +716,16 @@ bool ny_incremental_compute_recompile_set(ny_dep_graph_t *graph,
     ny_dep_node_t *n = graph_find_node(graph, cf, 0);
     if (n && !n->needs_recompile) {
       n->needs_recompile = true;
-      nkq_push(&q, n);
+      if (!nkq_push(&q, n))
+        goto fail;
     }
   }
   while (q.len) {
     ny_dep_node_t *n = q.items[--q.len];
     if (!n->file_path)
       continue;
-    strlist_push(out_recompile, out_recompile_count, &cap, n->file_path);
+    if (!strlist_push(out_recompile, out_recompile_count, &cap, n->file_path))
+      goto fail;
     /*
      * dependents
      */
@@ -687,7 +733,8 @@ bool ny_incremental_compute_recompile_set(ny_dep_graph_t *graph,
       ny_dep_node_t *dep = graph_find_node(graph, e->from_file, 0);
       if (dep && !dep->needs_recompile) {
         dep->needs_recompile = true;
-        nkq_push(&q, dep);
+        if (!nkq_push(&q, dep))
+          goto fail;
       }
     }
   }
@@ -698,6 +745,14 @@ bool ny_incremental_compute_recompile_set(ny_dep_graph_t *graph,
   for (ny_dep_node_t *n = graph->nodes; n; n = n->next)
     n->needs_recompile = false;
   return true;
+fail:
+  free(q.items);
+  for (ny_dep_node_t *n = graph->nodes; n; n = n->next)
+    n->needs_recompile = false;
+  strlist_free(*out_recompile, *out_recompile_count);
+  *out_recompile = NULL;
+  *out_recompile_count = 0;
+  return false;
 }
 
 /*
@@ -713,30 +768,21 @@ bool ny_incremental_invalidate_cache(const ny_dep_graph_t *graph,
   if (!cache_dir || !*cache_dir)
     return true; /* nothing to invalidate if no cache dir configured */
   bool ok = true;
+  static const char *const suffixes[] = {".bc", ".ll", ".so", ".manifest"};
   for (size_t i = 0; i < recompile_count; ++i) {
     const char *file = recompile_files[i];
     /*
      * Derived artifact pattern: <cache>/<hash>.{bc,so}
      */
     uint64_t h = ny_hash64_cstr(file);
-    char base[PATH_MAX];
-    snprintf(base, sizeof(base), "%s/%016llx", cache_dir,
-             (unsigned long long)h);
-    /*
-     * Remove bitcode and native siblings
-     */
-    char p[PATH_MAX];
-    snprintf(p, sizeof(p), "%s.bc", base);
-    if (remove(p) == 0)
-      ok = true;
-    snprintf(p, sizeof(p), "%s.ll", base);
-    if (remove(p) == 0)
-      ok = true;
-    snprintf(p, sizeof(p), "%s.so", base);
-    if (remove(p) == 0)
-      ok = true;
-    snprintf(p, sizeof(p), "%s.manifest", base);
-    remove(p);
+    for (size_t j = 0; j < sizeof(suffixes) / sizeof(*suffixes); ++j) {
+      char path[PATH_MAX];
+      int len = snprintf(path, sizeof(path), "%s/%016llx%s", cache_dir,
+                         (unsigned long long)h, suffixes[j]);
+      if (len < 0 || (size_t)len >= sizeof(path) ||
+          (remove(path) != 0 && errno != ENOENT))
+        ok = false;
+    }
   }
   return ok;
 }
@@ -750,37 +796,27 @@ ny_incremental_compile(const char **source_files, size_t file_count,
                        const ny_incremental_config_t *config) {
   ny_incremental_result_t res = {0};
   ny_tick_t t0 = ny_ticks_now();
-  if (!config)
+  if (!config || !ny_incremental_init(config))
     return res;
-  if (!g_initialized) {
-    /*
-     * accept a config passed directly to the driver
-     */
-    g_config = config ? *config : g_default_config;
-    if (config && config->project_root)
-      g_config.project_root = ny_strdup(config->project_root);
-    if (config && config->cache_dir)
-      g_config.cache_dir = ny_strdup(config->cache_dir);
-    g_initialized = true;
-  }
-  if (!config->enable_incremental || config->force_full_rebuild ||
-      file_count == 0) {
+  if (file_count == 0) {
     res.success = true;
     return res;
   }
   char graph_path[PATH_MAX];
-  if (g_config.cache_dir && *g_config.cache_dir) {
-    snprintf(graph_path, sizeof(graph_path), "%s/incgraph.bin",
-             g_config.cache_dir);
-  } else {
-    snprintf(graph_path, sizeof(graph_path), "%s/incgraph.bin",
-             ny_default_cache_root_dir());
-  }
+  const char *root = g_config.project_root ? g_config.project_root : ".";
+  const char *cache = g_config.cache_dir && *g_config.cache_dir
+                          ? g_config.cache_dir
+                          : ny_default_cache_root_dir();
+  int path_len =
+      snprintf(graph_path, sizeof(graph_path), "%s/incgraph-%016llx.bin", cache,
+               (unsigned long long)ny_hash64_cstr(root));
+  if (path_len < 0 || (size_t)path_len >= sizeof(graph_path))
+    return res;
   /*
    * load prior graph (if any)
    */
   ny_dep_graph_t old = {0};
-  ny_incremental_load_graph(graph_path, &old);
+  bool have_old = ny_incremental_load_graph(graph_path, &old);
   /*
    * build current graph
    */
@@ -789,57 +825,74 @@ ny_incremental_compile(const char **source_files, size_t file_count,
     ny_incremental_free_graph(&old);
     return res;
   }
-  /*
-   * find files shared between old and current to detect changes
-   */
+  /* Cold/forced builds must schedule every input, not return an empty set. */
   char **changed = NULL;
   size_t changed_count = 0;
   size_t cap = 0;
-  for (ny_dep_node_t *n = old.nodes; n; n = n->next) {
-    ny_dep_node_t *cur_n = graph_find_node(&cur, n->file_path, 0);
-    if (!cur_n)
-      continue; /* removed file */
-    if (!cur_n->fingerprint_valid)
-      continue;
-    if (!fingerprint_equal(&cur_n->fingerprint, &n->fingerprint))
-      if (!strlist_push(&changed, &changed_count, &cap, n->file_path))
-        break;
-  }
-  /*
-   * If a graph already existed, newly-added files also count as changed.
-   */
-  if (old.node_count > 0) {
-    for (ny_dep_node_t *n = cur.nodes; n; n = n->next) {
-      if (!graph_find_node(&old, n->file_path, 0))
-        if (!strlist_push(&changed, &changed_count, &cap, n->file_path))
-          break;
-    }
-  }
-  /*
-   * compute transitive dependents
-   */
+  char **old_affected = NULL;
+  size_t old_affected_count = 0;
   char **rset = NULL;
   size_t rset_count = 0;
-  ny_incremental_compute_recompile_set(&cur, (const char **)changed,
-                                       changed_count, &rset, &rset_count);
-  strlist_free(changed, changed_count);
+  for (ny_dep_node_t *n = cur.nodes; n; n = n->next) {
+    ny_dep_node_t *previous = graph_find_node(&old, n->file_path, 0);
+    if (!have_old || !config->enable_incremental ||
+        config->force_full_rebuild || !previous || !n->fingerprint_valid ||
+        !previous->fingerprint_valid ||
+        !fingerprint_equal(&n->fingerprint, &previous->fingerprint))
+      if (!strlist_push(&changed, &changed_count, &cap, n->file_path))
+        goto fail;
+  }
   /*
-   * publish recompile set
+   * Removed providers/edges exist only in the previous graph. Propagate there
+   * before applying the surviving names to the current dependency closure.
    */
-  res.recompile_files = rset;
-  res.recompile_count = rset_count;
+  for (ny_dep_node_t *n = old.nodes; n; n = n->next) {
+    if (!graph_find_node(&cur, n->file_path, 0) &&
+        !strlist_push(&changed, &changed_count, &cap, n->file_path))
+      goto fail;
+  }
+  if (!ny_incremental_compute_recompile_set(&old, (const char **)changed,
+                                            changed_count, &old_affected,
+                                            &old_affected_count))
+    goto fail;
+  for (size_t i = 0; i < old_affected_count; ++i)
+    if (graph_find_node(&cur, old_affected[i], 0) &&
+        !strlist_push(&changed, &changed_count, &cap, old_affected[i]))
+      goto fail;
+  if (!ny_incremental_compute_recompile_set(&cur, (const char **)changed,
+                                            changed_count, &rset, &rset_count))
+    goto fail;
+  strlist_free(changed, changed_count);
+  changed = NULL;
+  changed_count = 0;
+  strlist_free(old_affected, old_affected_count);
+  old_affected = NULL;
+  old_affected_count = 0;
   /*
    * invalidate any cached artifacts for the recompile set
    */
-  if (rset_count > 0)
-    ny_incremental_invalidate_cache(&cur, (const char **)rset, rset_count);
+  if (rset_count > 0 &&
+      !ny_incremental_invalidate_cache(&cur, (const char **)rset, rset_count))
+    goto fail;
   /*
    * save updated graph so the next run diff is against this state
    */
-  ny_incremental_save_graph(&cur, graph_path);
+  if (!ny_incremental_save_graph(&cur, graph_path))
+    goto fail;
+  res.recompile_files = rset;
+  res.recompile_count = rset_count;
   ny_incremental_free_graph(&old);
   ny_incremental_free_graph(&cur);
   res.success = true;
+  res.elapsed_ms = ny_ticks_elapsed_ms(t0);
+  return res;
+fail:
+  strlist_free(changed, changed_count);
+  strlist_free(old_affected, old_affected_count);
+  strlist_free(rset, rset_count);
+  ny_incremental_free_graph(&old);
+  ny_incremental_free_graph(&cur);
+  res.error_message = ny_strdup("incremental dependency update failed");
   res.elapsed_ms = ny_ticks_elapsed_ms(t0);
   return res;
 }

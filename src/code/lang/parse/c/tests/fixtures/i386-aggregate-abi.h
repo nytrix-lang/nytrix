@@ -1,3 +1,4 @@
+/* Fixture types: aggregate layouts used by i386 calling-convention checks. */
 struct nyc_i386_tiny {
   unsigned char a, b, c;
 };

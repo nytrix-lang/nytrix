@@ -1,3 +1,4 @@
+/* Private opcode mapping for the embedded freestanding runtime payload. */
 #ifndef NY_BARE_PAYLOAD_H
 #define NY_BARE_PAYLOAD_H
 #include "code/backend/abi.h"

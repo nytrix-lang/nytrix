@@ -1,3 +1,6 @@
+/*
+ * C parser fixture for zero-length aggregates declared at global scope.
+ */
 struct range {
   unsigned long start;
   unsigned long end;

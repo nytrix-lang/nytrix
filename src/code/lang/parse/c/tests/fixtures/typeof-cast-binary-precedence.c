@@ -1,3 +1,6 @@
+/*
+ * C parser fixture for precedence in typeof casts and binary expressions.
+ */
 struct node {
   unsigned long value;
 };

@@ -1,3 +1,4 @@
+/* Aggregate ABI classification shared by the standalone C frontends. */
 #ifndef NY_CODE_LANG_C_AGGREGATE_H
 #define NY_CODE_LANG_C_AGGREGATE_H
 
@@ -53,6 +54,7 @@ typedef struct {
   bool explicit_align; /* alignment attribute raised this field's align */
   unsigned pointer_depth;
   bool pointer_to_aggregate_array;
+  bool pointer_to_array;
   bool is_array;
   const c_agg_type_t *agg; /* C_AGG_FIELD_AGG and aggregate arrays */
   size_t elem_count;       /* C_AGG_FIELD_ARRAY (>= 1) */

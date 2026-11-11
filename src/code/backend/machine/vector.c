@@ -656,9 +656,11 @@ static bool x64_stack_home_safety_selftest(char *err, size_t err_len) {
   return ok;
 }
 
-/* MIR shifts operate on explicit machine bits on both language and C routes.
+/*
+ * MIR shifts operate on explicit machine bits on both language and C routes.
  * A language function must shift in its allocated destination rather than
- * shuttle the result through RAX. Use a frame input to prevent folding. */
+ * shuttle the result through RAX. Use a frame input to prevent folding.
+ */
 static bool x64_destination_shift_selftest(char *err, size_t err_len) {
   ny_native_target_info_t target = {0};
   if (!vector_target_init(&target, NY_NATIVE_BACKEND_X86_64,
@@ -708,8 +710,10 @@ static bool x64_destination_shift_selftest(char *err, size_t err_len) {
   return ok;
 }
 
-/* More live inputs than GPR colors force canonical RHS homes. The running
- * accumulator should still use ADD rdst,[home], without RAX staging. */
+/*
+ * More live inputs than GPR colors force canonical RHS homes. The running
+ * accumulator should still use ADD rdst,[home], without RAX staging.
+ */
 static bool x64_alu_home_selftest(char *err, size_t err_len) {
   ny_native_target_info_t target = {0};
   if (!vector_target_init(&target, NY_NATIVE_BACKEND_X86_64,
@@ -770,8 +774,10 @@ static bool x64_alu_home_selftest(char *err, size_t err_len) {
   return ok;
 }
 
-/* Keep both inputs live past a subtraction so the allocated result must
- * differ from both. VEX must name the LHS independently of the destination. */
+/*
+ * Keep both inputs live past a subtraction so the allocated result must
+ * differ from both. VEX must name the LHS independently of the destination.
+ */
 static bool x64_avx_scalar_selftest(char *err, size_t err_len) {
   ny_native_target_info_t target = {0};
   if (!vector_target_init(&target, NY_NATIVE_BACKEND_X86_64,

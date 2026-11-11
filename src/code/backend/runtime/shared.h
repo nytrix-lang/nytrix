@@ -1,3 +1,4 @@
+/* Shared runtime state, object layouts, registries, and helper declarations. */
 #ifndef RT_COMMON_H
 #define RT_COMMON_H
 
@@ -79,14 +80,14 @@ extern char **environ;
 #define NY_NATIVE_TAG UINT64_C(2)
 #define NY_NATIVE_SHIFT 2
 #define NY_NATIVE_MARK (UINT64_C(1) << 63)
-#define NY_NATIVE_IS(v)                                                        \
-  (((((uint64_t)(v) & NY_NATIVE_MARK) != 0ULL) &&                              \
+#define NY_NATIVE_IS(v)                                     \
+  (((((uint64_t)(v) & NY_NATIVE_MARK) != 0ULL) &&           \
     (((uint64_t)(v) & NY_NATIVE_TAG_MASK) == NY_NATIVE_TAG)))
 #else
 #define NY_NATIVE_TAG_MASK NY_VALUE_PTR_TAG_MASK
 #define NY_NATIVE_TAG UINT64_C(6)
 #define NY_NATIVE_SHIFT 3
-#define NY_NATIVE_IS(v)                                                        \
+#define NY_NATIVE_IS(v)                                     \
   ((((uint64_t)(v)) & NY_NATIVE_TAG_MASK) == NY_NATIVE_TAG)
 #endif
 
@@ -96,14 +97,14 @@ extern char **environ;
 #define NY_DYNAMIC_CALLABLE_TAG_MASK NY_VALUE_PTR_TAG_MASK
 #define NY_DYNAMIC_CALLABLE_TAG UINT64_C(4)
 #define NY_DYNAMIC_CALLABLE_MARK (UINT64_C(1) << 63)
-#define NY_DYNAMIC_CALLABLE_IS(v)                                              \
-  (((((uint64_t)(v)) & NY_DYNAMIC_CALLABLE_MARK) != 0ULL) &&                   \
-   (((uint64_t)(v) & NY_DYNAMIC_CALLABLE_TAG_MASK) ==                          \
+#define NY_DYNAMIC_CALLABLE_IS(v)                            \
+  (((((uint64_t)(v)) & NY_DYNAMIC_CALLABLE_MARK) != 0ULL) && \
+   (((uint64_t)(v) & NY_DYNAMIC_CALLABLE_TAG_MASK) ==        \
     NY_DYNAMIC_CALLABLE_TAG))
 int64_t rt_dynamic_callable_encode(void *fn, uint64_t flags);
 void *rt_dynamic_callable_decode(int64_t callable);
 #define NY_DYNAMIC_CALLABLE_ENCODE(p) rt_dynamic_callable_encode((void *)(p), 0)
-#define NY_DYNAMIC_CALLABLE_BOOL_ENCODE(p)                                     \
+#define NY_DYNAMIC_CALLABLE_BOOL_ENCODE(p)                               \
   rt_dynamic_callable_encode((void *)(p), NY_DYNAMIC_CALLABLE_BOOL_MARK)
 #define NY_DYNAMIC_CALLABLE_DECODE(v) rt_dynamic_callable_decode((int64_t)(v))
 
@@ -123,37 +124,37 @@ void *rt_dynamic_callable_decode(int64_t callable);
 #define NY_DYNAMIC_CALLABLE_RAW_RESULT_MARK (UINT64_C(1) << 60)
 #define NY_DYNAMIC_CALLABLE_WORD_ARGS_MARK (UINT64_C(1) << 59)
 #define NY_DYNAMIC_CALLABLE_F64_RESULT_MARK (UINT64_C(1) << 58)
-#define NY_DYNAMIC_CALLABLE_MARKS                                              \
-  (NY_DYNAMIC_CALLABLE_MARK | NY_DYNAMIC_CALLABLE_BOOL_MARK |                  \
-   NY_DYNAMIC_CALLABLE_TAGGED_ARGS_MARK |                                      \
-   NY_DYNAMIC_CALLABLE_RAW_RESULT_MARK | NY_DYNAMIC_CALLABLE_WORD_ARGS_MARK |  \
+#define NY_DYNAMIC_CALLABLE_MARKS                                             \
+  (NY_DYNAMIC_CALLABLE_MARK | NY_DYNAMIC_CALLABLE_BOOL_MARK |                 \
+   NY_DYNAMIC_CALLABLE_TAGGED_ARGS_MARK |                                     \
+   NY_DYNAMIC_CALLABLE_RAW_RESULT_MARK | NY_DYNAMIC_CALLABLE_WORD_ARGS_MARK | \
    NY_DYNAMIC_CALLABLE_F64_RESULT_MARK)
-#define NY_DYNAMIC_CALLABLE_BOOL_IS(v)                                         \
-  (NY_DYNAMIC_CALLABLE_IS(v) &&                                                \
+#define NY_DYNAMIC_CALLABLE_BOOL_IS(v)                           \
+  (NY_DYNAMIC_CALLABLE_IS(v) &&                                  \
    (((uint64_t)(v) & NY_DYNAMIC_CALLABLE_BOOL_MARK) != 0))
-#define NY_DYNAMIC_CALLABLE_TAGGED_ARGS_IS(v)                                  \
-  (NY_DYNAMIC_CALLABLE_IS(v) &&                                                \
+#define NY_DYNAMIC_CALLABLE_TAGGED_ARGS_IS(v)                    \
+  (NY_DYNAMIC_CALLABLE_IS(v) &&                                  \
    (((uint64_t)(v) & NY_DYNAMIC_CALLABLE_TAGGED_ARGS_MARK) != 0))
-#define NY_DYNAMIC_CALLABLE_RAW_RESULT_IS(v)                                   \
-  (NY_DYNAMIC_CALLABLE_IS(v) &&                                                \
+#define NY_DYNAMIC_CALLABLE_RAW_RESULT_IS(v)                     \
+  (NY_DYNAMIC_CALLABLE_IS(v) &&                                  \
    (((uint64_t)(v) & NY_DYNAMIC_CALLABLE_RAW_RESULT_MARK) != 0))
-#define NY_DYNAMIC_CALLABLE_WORD_ARGS_IS(v)                                    \
-  (NY_DYNAMIC_CALLABLE_IS(v) &&                                                \
+#define NY_DYNAMIC_CALLABLE_WORD_ARGS_IS(v)                      \
+  (NY_DYNAMIC_CALLABLE_IS(v) &&                                  \
    (((uint64_t)(v) & NY_DYNAMIC_CALLABLE_WORD_ARGS_MARK) != 0))
 
 #define is_int(v) ((((uint64_t)(v)) & NY_VALUE_INT_TAG_BIT) != 0)
-#define is_ptr(v)                                                              \
-  (!NY_DYNAMIC_CALLABLE_IS(v) &&                                               \
-   ((((uint64_t)(v)) & NY_VALUE_INT_TAG_BIT) == 0) &&                          \
+#define is_ptr(v)                                     \
+  (!NY_DYNAMIC_CALLABLE_IS(v) &&                      \
+   ((((uint64_t)(v)) & NY_VALUE_INT_TAG_BIT) == 0) && \
    (uintptr_t)(v) > NY_VALUE_PTR_MIN_ADDR)
 
-#define memset_manual(p, v, n)                                                 \
-  do {                                                                         \
-    unsigned char *_p = (unsigned char *)(p);                                  \
-    unsigned char _v = (unsigned char)(v);                                     \
-    size_t _n = (n);                                                           \
-    while (_n-- > 0)                                                           \
-      *_p++ = _v;                                                              \
+#define memset_manual(p, v, n)                \
+  do {                                        \
+    unsigned char *_p = (unsigned char *)(p); \
+    unsigned char _v = (unsigned char)(v);    \
+    size_t _n = (n);                          \
+    while (_n-- > 0)                          \
+      *_p++ = _v;                             \
   } while (0)
 
 static inline bool rt_env_is_truthy(const char *v) {
@@ -209,6 +210,7 @@ extern _Atomic uint32_t g_rt_oracle_pending;
  * fallback; the snapshot is built once a probe loop makes it worthwhile.
  */
 #define RT_ORACLE_LAZY_THRESHOLD 64u
+/* Exact dynamic ranges are full; registered address bounds remain current. */
 extern _Atomic uint32_t g_rt_oracle_full;
 extern const uintptr_t g_rt_oracle_gap;
 
@@ -332,17 +334,13 @@ static inline int rt_map_oracle_check(uintptr_t p, size_t n) {
       return 0; /* unknown: caller verifies with a real probe */
     rt_map_oracle_init();
   }
-  int reject_ok =
-      !atomic_load_explicit(&g_rt_oracle_full, memory_order_relaxed);
-  uintptr_t gap = reject_ok ? g_rt_oracle_gap : 0;
+  uintptr_t gap = g_rt_oracle_gap;
   uintptr_t lo = atomic_load_explicit(&g_rt_oracle_lo, memory_order_acquire);
   uintptr_t hi = atomic_load_explicit(&g_rt_oracle_hi, memory_order_acquire);
-  if (reject_ok) {
-    if (e < lo && lo - e > gap)
-      return -1;
-    if (p > hi && p - hi > gap)
-      return -1;
-  }
+  if (e < lo && lo - e > gap)
+    return -1;
+  if (p > hi && p - hi > gap)
+    return -1;
   uint32_t extra_n =
       atomic_load_explicit(&g_rt_oracle_extra_count, memory_order_acquire);
   if (rt_oracle_extra_contains(p, e, extra_n))
@@ -362,7 +360,7 @@ static inline int rt_map_oracle_check(uintptr_t p, size_t n) {
     const rt_oracle_range_t *r = &g_rt_oracle_snapshot[lo2 - 1];
     if (e <= r->end)
       return 1;
-    if (!reject_ok || lo2 >= cnt || p <= r->end)
+    if (lo2 >= cnt || p <= r->end)
       return 0;
     uintptr_t gap_prev = p - r->end;
     uintptr_t gap_next = g_rt_oracle_snapshot[lo2].start - e;
@@ -623,8 +621,8 @@ static inline bool is_valid_heap_ptr(int64_t v) {
 }
 
 #define is_heap_ptr(v) is_valid_heap_ptr(v)
-#define is_any_ptr(v)                                                          \
-  (((v) != 0 && ((((uint64_t)(v)) & NY_VALUE_INT_TAG_BIT) == 0) &&             \
+#define is_any_ptr(v)                                              \
+  (((v) != 0 && ((((uint64_t)(v)) & NY_VALUE_INT_TAG_BIT) == 0) && \
     (uintptr_t)(v) > NY_VALUE_PTR_MIN_ADDR))
 
 #define NY_IMM_NIL ((int64_t)0)
@@ -676,10 +674,10 @@ static inline int64_t rt_mask_ptr(int64_t v) { return (int64_t)(v & ~2ULL); }
 static inline int64_t rt_mask_ptr(int64_t v) {
   return (int64_t)((uint64_t)v & ~NY_VALUE_PTR_TAG_MASK);
 }
-#define NY_NATIVE_ENCODE(p)                                                    \
-  ((int64_t)(((uint64_t)(uintptr_t)(p) << NY_NATIVE_SHIFT) |                   \
+#define NY_NATIVE_ENCODE(p)                                  \
+  ((int64_t)(((uint64_t)(uintptr_t)(p) << NY_NATIVE_SHIFT) | \
              (uint64_t)NY_NATIVE_TAG))
-#define NY_NATIVE_DECODE(v)                                                    \
+#define NY_NATIVE_DECODE(v)                                 \
   ((void *)(uintptr_t)(((uint64_t)(v)) >> NY_NATIVE_SHIFT))
 #endif
 
@@ -832,28 +830,60 @@ static inline int is_ny_obj(int64_t v) {
 }
 
 /*
- * Small strings live in thread-local allocator blocks rather than the managed
- * heap. Keep this predicate cache-free: raw C-string probes may run
- * concurrently, while the general pointer-classification caches are shared.
+ * SSO classification probes can fall through to an OS mapping query. The
+ * runtime implementation caches exact-pointer answers and invalidates them
+ * whenever any thread allocates or releases an SSO slot.
  */
+#define RT_SSO_PROBE_CACHE_BITS 8
+#define RT_SSO_PROBE_CACHE_SIZE (1u << RT_SSO_PROBE_CACHE_BITS)
+#define RT_SSO_PROBE_CACHE_MASK (RT_SSO_PROBE_CACHE_SIZE - 1u)
+
+typedef struct {
+  uintptr_t pointer;
+  uint64_t generation;
+  int result;
+} rt_sso_probe_cache_entry_t;
+
+#if defined(_MSC_VER)
+#define RT_TLS __declspec(thread)
+#else
+#define RT_TLS _Thread_local
+#endif
+extern _Atomic uint64_t g_rt_sso_generation;
+extern RT_TLS rt_sso_probe_cache_entry_t
+    g_rt_sso_probe_cache[RT_SSO_PROBE_CACHE_SIZE];
+
 static inline int rt_is_sso_string(int64_t v) {
-  if (!is_ptr(v) || ((v) & 7) != 0)
+  if (!is_ptr(v) || (v & 7) != 0)
     return 0;
   uintptr_t p = (uintptr_t)v;
   if (p < 32)
     return 0;
+  uint64_t generation =
+      atomic_load_explicit(&g_rt_sso_generation, memory_order_acquire);
+  rt_sso_probe_cache_entry_t *entry =
+      &g_rt_sso_probe_cache[(p >> 3) & RT_SSO_PROBE_CACHE_MASK];
+  if (entry->pointer == p && entry->generation == generation)
+    return entry->result;
+
+  int result = 0;
   /*
-   * Both words belong to the same allocator-owned SSO slot. Validate the
-   * whole header span once: probing each word separately repeats the
-   * conservative mapping check (and can fall through to mincore twice).
+   * Both words belong to the same SSO slot. Validate the whole header span
+   * once; the cache prevents repeated mapping syscalls for unchanged
+   * candidates. SSO allocation/free advances the generation globally, so
+   * reused slots and slots created on other threads cannot reuse stale answers.
    */
-  if (!rt_addr_readable_safe(p - 32, 32))
-    return 0;
-  uint64_t magic = 0;
-  int64_t tag = 0;
-  memcpy(&magic, (const void *)(p - 32), sizeof(magic));
-  memcpy(&tag, (const void *)(p - 8), sizeof(tag));
-  return magic == NY_SSO_STRING_MAGIC && tag == TAG_STR;
+  if (rt_addr_readable_safe(p - 32, 32)) {
+    uint64_t magic = 0;
+    int64_t tag = 0;
+    memcpy(&magic, (const void *)(p - 32), sizeof(magic));
+    memcpy(&tag, (const void *)(p - 8), sizeof(tag));
+    result = magic == NY_SSO_STRING_MAGIC && tag == TAG_STR;
+  }
+  entry->pointer = p;
+  entry->result = result;
+  entry->generation = generation;
+  return result;
 }
 
 static inline int is_v_str(int64_t v) {
@@ -969,6 +999,8 @@ int64_t rt_getlogin(void);
 int64_t rt_gettimeofday(int64_t tv, int64_t tz);
 int64_t rt_malloc(int64_t n);
 int64_t rt_malloc_i64(int64_t n);
+void rt_thread_stacks_release(void);
+int64_t rt_thread_live_count(void);
 int64_t rt_defer_len(void);
 int rt_defer_pop_raw(int64_t *fn_out, int64_t *env_out);
 bool rt_raw_ptr_registered(int64_t ptr);
@@ -1080,6 +1112,7 @@ static inline int rt_check_oob(const char *op, int64_t addr, int64_t idx,
 
 int64_t rt_alloc_string(const char *s);
 int64_t rt_alloc_string_len(const char *s, size_t len);
+int64_t rt_alloc_small_string_len(const char *s, size_t len);
 int64_t rt_alloc_string_len_ptr(const char *a, size_t a_len, const char *b,
                                 size_t b_len);
 

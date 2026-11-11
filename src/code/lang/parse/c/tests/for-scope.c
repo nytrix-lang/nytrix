@@ -1,3 +1,6 @@
+/*
+ * Parser fixture for declaration scope within a for-loop initializer.
+ */
 long c_for_scope(void) {
   for (long index = 0, weight = 1; index < 1; index = index + 1) {
     weight += index;

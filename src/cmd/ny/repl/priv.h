@@ -1,3 +1,4 @@
+/* Private shared state and helpers for the Ny interactive REPL. */
 #ifndef REPL_INTERNAL_H
 #define REPL_INTERNAL_H
 

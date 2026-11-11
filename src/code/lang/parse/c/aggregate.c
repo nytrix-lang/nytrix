@@ -153,6 +153,8 @@ static bool c_abi_field_profile(const c_agg_field_t *field, unsigned depth,
            ? !field->agg || !field->agg->complete || field->agg->align == 0 ||
                  field->size != field->agg->size ||
                  field->offset % field->agg->align != 0
+       : field->kind == C_AGG_FIELD_ARRAY
+           ? field->offset % 8 != 0
            : field->offset % 8 != 0 || field->size % 8 != 0))
     return false;
   switch (field->kind) {
@@ -254,6 +256,21 @@ bool nyc_sysv_classify_aggregate(const c_agg_type_t *ty, unsigned depth,
     const c_agg_field_t *field = &ty->fields[i];
     if (field->size == 0)
       continue;
+    if (field->is_bitfield) {
+      if (field->bit_width == 0)
+        continue;
+      size_t end_bit = (size_t)field->bit_offset + field->bit_width;
+      size_t span = (end_bit + 7u) / 8u;
+      if (span > ty->size || field->offset > ty->size - span)
+        return false;
+      size_t first_word = field->offset / 8u;
+      size_t last_word = (field->offset + span - 1u) / 8u;
+      if (last_word > 1)
+        return false;
+      for (size_t word = first_word; word <= last_word; ++word)
+        c_abi_merge_class(&classes[word], NYIR_ARG_CLASS_INTEGER);
+      continue;
+    }
     if (field->offset + field->size > ty->size)
       return false;
     unsigned field_classes[2] = {NYIR_ARG_CLASS_NONE, NYIR_ARG_CLASS_NONE};

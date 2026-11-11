@@ -1,3 +1,6 @@
+/*
+ * Runtime fixture for cleanup attributes on values with custom typedefs.
+ */
 static int cleaned;
 
 static void record_cleanup(int *value) { cleaned += *value; }

@@ -1,3 +1,6 @@
+/*
+ * Parser/backend fixture for floating-point arithmetic and conditional results.
+ */
 double c_double(double left, double right) { return left * 2.0 + right; }
 
 double c_double_choose(double left, double right) {

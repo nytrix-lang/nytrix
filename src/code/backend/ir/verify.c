@@ -79,7 +79,15 @@ typedef struct {
 static _Thread_local const nyr_func_t *nir_verify_func;
 static _Thread_local nir_verify_label_t *nir_verify_labels;
 static _Thread_local size_t nir_verify_label_count;
-static _Thread_local unsigned char *nir_verify_has_def;
+/* Last definition, encoded as instruction index + 1; zero means undefined. */
+static _Thread_local size_t *nir_verify_definitions;
+
+static const nyr_inst_t *nir_verify_def_of(const nyr_func_t *f, int value) {
+  if (!f || value < 0 || value >= f->next_value)
+    return NULL;
+  size_t position = nir_verify_definitions[value];
+  return position ? &f->data[position - 1] : NULL;
+}
 
 static int nir_verify_label_cmp(const void *a, const void *b) {
   const nir_verify_label_t *x = a, *y = b;
@@ -177,13 +185,16 @@ static bool nir_flags_valid(const nyr_inst_t *in) {
     allowed = NYIR_INST_F_NARROW32 | NYIR_INST_F_NO_OVERFLOW |
               NYIR_INST_F_IN_BOUNDS_ADDR | NYIR_INST_F_AFFINE_ADDR_BASE;
     break;
+  case NYIR_DIV_I64:
+  case NYIR_MOD_I64:
+    allowed = NYIR_INST_F_NARROW32 | NYIR_INST_F_NO_OVERFLOW |
+              NYIR_INST_F_DIVIDEND_U31;
+    break;
   case NYIR_SUB_I64:
   case NYIR_MUL_I64:
   case NYIR_AND_I64:
   case NYIR_OR_I64:
   case NYIR_XOR_I64:
-  case NYIR_DIV_I64:
-  case NYIR_MOD_I64:
     /*
      * F_NARROW32 is set by the range-narrowing pass (opt/narrow.c) so the
      * codegen backend may emit 32-bit register forms.
@@ -205,6 +216,11 @@ static bool nir_flags_valid(const nyr_inst_t *in) {
  */
 static bool nir_verify_phi_edges(const nyr_func_t *f, char *err,
                                  size_t err_len) {
+  bool has_phi = false;
+  for (size_t i = 0; i < f->len && !has_phi; ++i)
+    has_phi = f->data[i].op == NYIR_PHI;
+  if (!has_phi)
+    return true;
   nyr_cfg_t cfg = {0};
   if (!nyr_cfg_build_topology(f, &cfg))
     return nyr_err(err, err_len, "native NYIR verify: cannot build CFG");
@@ -358,6 +374,11 @@ static bool nir_select_condition_is_boolean(const nyr_func_t *f, int value,
 
 static bool nir_verify_select_types(const nyr_func_t *f, char *err,
                                     size_t err_len) {
+  bool has_select = false;
+  for (size_t i = 0; i < f->len && !has_select; ++i)
+    has_select = f->data[i].op == NYIR_SELECT_I64;
+  if (!has_select)
+    return true;
   nyr_type_map_t types = {0};
   if (!nyr_type_map_init(&types, f, nyr_max_local(f)))
     return nyr_err(err, err_len, "native NYIR verify: cannot build type map");
@@ -394,13 +415,7 @@ nir_verify_value_scalar_class(const nyr_func_t *f, const nyr_type_map_t *types,
                               int value, unsigned depth) {
   if (!f || value < 0 || value >= f->next_value || depth > 32)
     return NYIR_SCALAR_UNKNOWN;
-  const nyr_inst_t *def = NULL;
-  for (size_t i = f->len; i > 0; --i) {
-    if (f->data[i - 1].dst == value) {
-      def = &f->data[i - 1];
-      break;
-    }
-  }
+  const nyr_inst_t *def = nir_verify_def_of(f, value);
   if (!def)
     return NYIR_SCALAR_UNKNOWN;
   /*
@@ -410,9 +425,7 @@ nir_verify_value_scalar_class(const nyr_func_t *f, const nyr_type_map_t *types,
    * ambiguous, so in those cases preserve the instruction's own class.
    */
   if (def->op == NYIR_LOAD_LOCAL) {
-    size_t def_at = 0;
-    for (; def_at < f->len && &f->data[def_at] != def; ++def_at) {
-    }
+    size_t def_at = (size_t)(def - f->data);
     for (size_t j = def_at; j > 0; --j) {
       const nyr_inst_t *prev = &f->data[j - 1];
       if (prev->op == NYIR_STORE_LOCAL && prev->imm == def->imm) {
@@ -738,16 +751,6 @@ static bool nir_verify_store_scalar_classes(const nyr_func_t *f, char *err,
  * tag. Values with UNKNOWN tags on either side are skipped (unknown is the
  * conservative join).
  */
-static const nyr_inst_t *nir_ownership_def_of(const nyr_func_t *f, int value) {
-  if (value < 0)
-    return NULL;
-  for (size_t i = f->len; i > 0; --i) {
-    if (f->data[i - 1].dst == value)
-      return &f->data[i - 1];
-  }
-  return NULL;
-}
-
 static bool nir_verify_ownership_consistency(const nyr_func_t *f, char *err,
                                              size_t err_len) {
   for (size_t i = 0; i < f->len; ++i) {
@@ -765,7 +768,7 @@ static bool nir_verify_ownership_consistency(const nyr_func_t *f, char *err,
       for (size_t k = 0; k < in->phi_incoming_len && other < 0; ++k) {
         int v = in->phi_incoming[k].value;
         const nyr_inst_t *def =
-            v >= 0 && v < f->next_value ? nir_ownership_def_of(f, v) : NULL;
+            v >= 0 && v < f->next_value ? nir_verify_def_of(f, v) : NULL;
         if (def && def->semantic_ownership != NY_SEM_OWN_UNKNOWN)
           other = v;
       }
@@ -774,7 +777,7 @@ static bool nir_verify_ownership_consistency(const nyr_func_t *f, char *err,
     }
     if (own == NY_SEM_OWN_UNKNOWN || other < 0)
       continue;
-    const nyr_inst_t *odef = nir_ownership_def_of(f, other);
+    const nyr_inst_t *odef = nir_verify_def_of(f, other);
     uint8_t oown = odef ? odef->semantic_ownership : NY_SEM_OWN_UNKNOWN;
     if (oown == NY_SEM_OWN_UNKNOWN || oown == own)
       continue;
@@ -789,6 +792,11 @@ static bool nir_verify_ownership_consistency(const nyr_func_t *f, char *err,
 
 static bool nir_verify_local_store_scalar_classes(const nyr_func_t *f,
                                                   char *err, size_t err_len) {
+  bool has_store = false;
+  for (size_t i = 0; i < f->len && !has_store; ++i)
+    has_store = f->data[i].op == NYIR_STORE_LOCAL;
+  if (!has_store)
+    return true;
   nyr_type_map_t types = {0};
   if (!nyr_type_map_init(&types, f, nyr_max_local(f)))
     return nyr_err(err, err_len,
@@ -1367,11 +1375,11 @@ bool nyr_ir_verify(const nyr_func_t *f, char *err, size_t err_len) {
   for (size_t i = 0; i < f->len; ++i)
     labels += f->data[i].op == NYIR_LABEL;
   nir_verify_label_t *table = malloc((labels + 1) * sizeof(*table));
-  unsigned char *has_def =
-      calloc(f->next_value > 0 ? (size_t)f->next_value : 1, sizeof(*has_def));
-  if (!table || !has_def) {
+  size_t *definitions = calloc(f->next_value > 0 ? (size_t)f->next_value : 1,
+                               sizeof(*definitions));
+  if (!table || !definitions) {
     free(table);
-    free(has_def);
+    free(definitions);
     return nyr_err(err, err_len, "native NYIR verify: out of memory");
   }
   size_t count = 0;
@@ -1380,20 +1388,20 @@ bool nyr_ir_verify(const nyr_func_t *f, char *err, size_t err_len) {
     if (in->op == NYIR_LABEL)
       table[count++] = (nir_verify_label_t){in->imm, i};
     if (in->dst >= 0 && in->dst < f->next_value)
-      has_def[in->dst] = 1;
+      definitions[in->dst] = i + 1;
   }
   qsort(table, count, sizeof(*table), nir_verify_label_cmp);
   nir_verify_func = f;
   nir_verify_labels = table;
   nir_verify_label_count = count;
-  nir_verify_has_def = has_def;
+  nir_verify_definitions = definitions;
   bool ok = nir_verify_impl(f, err, err_len);
   nir_verify_func = NULL;
   nir_verify_labels = NULL;
   nir_verify_label_count = 0;
-  nir_verify_has_def = NULL;
+  nir_verify_definitions = NULL;
   free(table);
-  free(has_def);
+  free(definitions);
   return ok;
 }
 
@@ -1617,7 +1625,8 @@ static bool nir_verify_impl(const nyr_func_t *f, char *err, size_t err_len) {
                            (in->effects & NYIR_EFFECT_CALL) != 0;
     if (in->effects != required_effects && !trusted_call_ok) {
       unsigned allowed = required_effects;
-      if ((in->effects & (NYIR_EFFECT_READ_MEMORY | NYIR_EFFECT_WRITE_MEMORY)) ||
+      if ((in->effects &
+           (NYIR_EFFECT_READ_MEMORY | NYIR_EFFECT_WRITE_MEMORY)) ||
           in->op == NYIR_LOAD_I64 || in->op == NYIR_STORE_I64)
         allowed |= NYIR_EFFECT_VOLATILE;
       if (in->effects != allowed) {
@@ -1768,6 +1777,9 @@ static bool nir_verify_impl(const nyr_func_t *f, char *err, size_t err_len) {
       bool random_word_asm = in->imm == -132;
       bool checked_segment_load_asm = in->imm == -134;
       bool repeat_movsb_asm = in->imm == -135;
+      bool repeat_movsl_tail_asm = in->imm == -177;
+      bool xstore_asm = in->imm == -178;
+      bool movntdqa_asm = in->imm == -179;
       bool repeat_stosb_asm = in->imm == -136;
       bool delay_loop_asm = in->imm == -167;
       bool usercopy_movnti_asm = in->imm == -168;
@@ -1775,6 +1787,8 @@ static bool nir_verify_impl(const nyr_func_t *f, char *err, size_t err_len) {
       bool repeat_movs_alternative_asm = in->imm == -138;
       bool invlpg_asm = in->imm == -139;
       bool far_jump_asm = in->imm == -146;
+      bool indirect_jump_asm = in->imm == -157;
+      bool gs_percpu_add_asm = in->imm == -181;
       bool apic_alt_io_asm = in->imm == -147;
       bool kexec_segment_load_asm = in->imm == -148;
       bool runtime_const_shift_asm = in->imm == -149;
@@ -2033,6 +2047,58 @@ static bool nir_verify_impl(const nyr_func_t *f, char *err, size_t err_len) {
         }
         break;
       }
+      if (repeat_movsl_tail_asm) {
+        const int operands[] = {in->a, in->b, in->c, in->d, in->e, in->f};
+        bool valid = in->dst == -1 && in->symbol &&
+                     strcmp(in->symbol, "rep_movsl_tail") == 0 &&
+                     in->extra_args_len == 0 && !in->phi_incoming_len;
+        for (size_t operand = 0;
+             operand < sizeof(operands) / sizeof(operands[0]); ++operand)
+          valid = valid && operands[operand] >= 0 &&
+                  operands[operand] < f->next_value &&
+                  defined[operands[operand]];
+        if (!valid) {
+          free(defined);
+          return nir_verify_inst_err(f, err, err_len, in, i,
+                                     "invalid rep-movsl-tail operands");
+        }
+        break;
+      }
+      if (xstore_asm) {
+        const int operands[] = {in->a, in->b, in->c, in->d, in->e};
+        bool valid = in->dst == -1 && in->f == -1 && in->symbol &&
+                     strcmp(in->symbol, "xstore") == 0 &&
+                     in->extra_args_len == 0 && !in->phi_incoming_len;
+        for (size_t operand = 0;
+             operand < sizeof(operands) / sizeof(operands[0]); ++operand)
+          valid = valid && operands[operand] >= 0 &&
+                  operands[operand] < f->next_value &&
+                  defined[operands[operand]];
+        if (!valid) {
+          free(defined);
+          return nir_verify_inst_err(f, err, err_len, in, i,
+                                     "invalid xstore operands");
+        }
+        break;
+      }
+      if (movntdqa_asm) {
+        bool valid_symbol =
+            in->symbol && (strcmp(in->symbol, "movntdqa_movaps_4") == 0 ||
+                           strcmp(in->symbol, "movntdqa_movaps_1") == 0 ||
+                           strcmp(in->symbol, "movntdqa_movups_1") == 0 ||
+                           strcmp(in->symbol, "movntdqa_movups_4") == 0);
+        bool valid = in->dst == -1 && in->a >= 0 && in->b >= 0 && in->c == -1 &&
+                     in->d == -1 && in->e == -1 && in->f == -1 &&
+                     valid_symbol && in->extra_args_len == 0 &&
+                     !in->phi_incoming_len && in->a < f->next_value &&
+                     in->b < f->next_value && defined[in->a] && defined[in->b];
+        if (!valid) {
+          free(defined);
+          return nir_verify_inst_err(f, err, err_len, in, i,
+                                     "invalid movntdqa operands");
+        }
+        break;
+      }
       if (((in->dst >= 0) != (builtin_result || register_output ||
                               condition_output || memory_register_output ||
                               faultable_load_goto || faultable_load_reg)) ||
@@ -2050,6 +2116,10 @@ static bool nir_verify_impl(const nyr_func_t *f, char *err, size_t err_len) {
            (in->dst != -1 || in->a < 0 || in->b < 0 || in->c < 0 || in->d < 0 ||
             in->e < 0 || in->f < 0 || !in->symbol ||
             strcmp(in->symbol, "rep_movsb") != 0)) ||
+          (repeat_movsl_tail_asm &&
+           (in->dst != -1 || in->a < 0 || in->b < 0 || in->c < 0 || in->d < 0 ||
+            in->e < 0 || in->f < 0 || !in->symbol ||
+            strcmp(in->symbol, "rep_movsl_tail") != 0)) ||
           (repeat_stosb_asm &&
            (in->dst != -1 || in->a < 0 || in->b < 0 || in->c < 0 || in->d < 0 ||
             in->e < 0 || in->f != -1 || !in->symbol ||
@@ -2241,8 +2311,9 @@ static bool nir_verify_impl(const nyr_func_t *f, char *err, size_t err_len) {
            : alternative_wrmsr_asm
                ? (in->b < 0 || in->b >= f->next_value || !defined[in->b])
            : bsr_asm ? (in->b < 0 || in->b >= f->next_value || !defined[in->b])
-           : repeat_movsb_asm ? (in->b >= f->next_value || !defined[in->b])
-           : repeat_stosb_asm ? (in->b >= f->next_value || !defined[in->b])
+           : repeat_movsb_asm      ? (in->b >= f->next_value || !defined[in->b])
+           : repeat_movsl_tail_asm ? (in->b >= f->next_value || !defined[in->b])
+           : repeat_stosb_asm      ? (in->b >= f->next_value || !defined[in->b])
            : usercopy_movnti_asm
                ? (in->b < 0 || in->b >= f->next_value || !defined[in->b])
            : repeat_movs_alternative_asm
@@ -2276,6 +2347,10 @@ static bool nir_verify_impl(const nyr_func_t *f, char *err, size_t err_len) {
            : call_on_stack_asm
                ? (in->b < -1 ||
                   (in->b >= 0 && (in->b >= f->next_value || !defined[in->b])))
+           : indirect_jump_asm
+               ? (in->b < 0 || in->b >= f->next_value || !defined[in->b])
+           : gs_percpu_add_asm
+               ? (in->b < 0 || in->b >= f->next_value || !defined[in->b])
            : unsigned_arithmetic_asm
                ? (in->b < 0 || in->b >= f->next_value || !defined[in->b])
            : in->imm == -3 || in->imm == -10 || in->imm == -11 ||
@@ -2293,9 +2368,9 @@ static bool nir_verify_impl(const nyr_func_t *f, char *err, size_t err_len) {
             divq_u64_asm || in->imm == -11 || in->imm == -12 ||
             in->imm == -155 || in->imm == -145 || in->imm == -16 ||
             syscall_asm || syscall_i386_asm || repeat_movsb_asm ||
-            repeat_stosb_asm || repeat_movs_alternative_asm ||
-            unsigned_arithmetic_asm || wrmsr_safe_asm ||
-            alternative_wrmsr_asm) &&
+            repeat_movsl_tail_asm || repeat_stosb_asm ||
+            repeat_movs_alternative_asm || unsigned_arithmetic_asm ||
+            wrmsr_safe_asm || alternative_wrmsr_asm) &&
            (in->c < -1 || in->c >= f->next_value ||
             (in->c >= 0 && !defined[in->c]))) ||
           (cmpxchg16b_asm &&
@@ -2304,6 +2379,8 @@ static bool nir_verify_impl(const nyr_func_t *f, char *err, size_t err_len) {
             in->e != -1 || in->f != -1 || !in->symbol ||
             strcmp(in->symbol, "cmpxchg16b_try") != 0)) ||
           (repeat_movsb_asm && (in->c >= f->next_value || !defined[in->c])) ||
+          (repeat_movsl_tail_asm &&
+           (in->c >= f->next_value || !defined[in->c])) ||
           (repeat_stosb_asm && (in->c >= f->next_value || !defined[in->c])) ||
           (repeat_movs_alternative_asm &&
            (in->c >= f->next_value || !defined[in->c])) ||
@@ -2354,18 +2431,18 @@ static bool nir_verify_impl(const nyr_func_t *f, char *err, size_t err_len) {
           (memory_output && in->a < 0) || (memory_load32_asm && in->a < 0) ||
           (register_memory_input_output && in->a < 0) ||
           (memory_register_input && (in->a < 0 || in->b < 0)) ||
-          (in->imm < 0 && !invlpg_asm && !far_jump_asm &&
-           !kexec_segment_load_asm && !repeat_movsb_asm && !repeat_stosb_asm &&
-           !delay_loop_asm && !usercopy_movnti_asm &&
-           !repeat_movs_alternative_asm && !alt_reloc_selftest_asm &&
-           !get_user_asm && !put_user_asm && !bsr_asm && !lkgs_asm &&
-           !typed_segment_load_asm && !cpuid_asm && !rdmsr_asm &&
-           !rdmsr_safe_asm && !rdmsr_safe_i386_asm && !rdpmc_i386_asm &&
-           !wrmsr_safe_asm && !rdpmc_asm && !debug_register_write &&
-           !checked_segment_load_asm && !asm_goto && !atomic_inc &&
-           !atomic_bitwise && !atomic_bitwise_condition && !atomic_bitwise64 &&
-           !register_output && !memory_output && !port_output_asm &&
-           !memory_load32_asm && !data_segment_reload_asm &&
+          (in->imm < 0 && !invlpg_asm && !far_jump_asm && !indirect_jump_asm &&
+           !gs_percpu_add_asm && !kexec_segment_load_asm && !repeat_movsb_asm &&
+           !repeat_movsl_tail_asm && !repeat_stosb_asm && !delay_loop_asm &&
+           !usercopy_movnti_asm && !repeat_movs_alternative_asm &&
+           !alt_reloc_selftest_asm && !get_user_asm && !put_user_asm &&
+           !bsr_asm && !lkgs_asm && !typed_segment_load_asm && !cpuid_asm &&
+           !rdmsr_asm && !rdmsr_safe_asm && !rdmsr_safe_i386_asm &&
+           !rdpmc_i386_asm && !wrmsr_safe_asm && !rdpmc_asm &&
+           !debug_register_write && !checked_segment_load_asm && !asm_goto &&
+           !atomic_inc && !atomic_bitwise && !atomic_bitwise_condition &&
+           !atomic_bitwise64 && !register_output && !memory_output &&
+           !port_output_asm && !memory_load32_asm && !data_segment_reload_asm &&
            !iret_to_self_asm && !wrfsbase_asm && !control_register_asm &&
            !fs_segment_load_asm && !typed_segment_load_asm &&
            !descriptor_table_asm && !task_register_load_asm && !verw_asm &&
@@ -2383,9 +2460,13 @@ static bool nir_verify_impl(const nyr_func_t *f, char *err, size_t err_len) {
           (call_on_stack_asm &&
            (in->d < -1 ||
             (in->d >= 0 && (in->d >= f->next_value || !defined[in->d])))) ||
-          (repeat_movsb_asm   ? (in->d >= f->next_value || !defined[in->d] ||
-                                 in->e >= f->next_value || !defined[in->e] ||
-                                 in->f >= f->next_value || !defined[in->f])
+          (repeat_movsb_asm ? (in->d >= f->next_value || !defined[in->d] ||
+                               in->e >= f->next_value || !defined[in->e] ||
+                               in->f >= f->next_value || !defined[in->f])
+           : repeat_movsl_tail_asm
+               ? (in->d >= f->next_value || !defined[in->d] ||
+                  in->e >= f->next_value || !defined[in->e] ||
+                  in->f >= f->next_value || !defined[in->f])
            : repeat_stosb_asm ? (in->d >= f->next_value || !defined[in->d] ||
                                  in->e >= f->next_value || !defined[in->e])
            : repeat_movs_alternative_asm
@@ -2423,11 +2504,13 @@ static bool nir_verify_impl(const nyr_func_t *f, char *err, size_t err_len) {
                   (in->d >= 0 && !defined[in->d]))
                : in->d != -1) ||
           (!get_user_asm && !put_user_asm && !repeat_movsb_asm &&
-           !repeat_stosb_asm && !repeat_movs_alternative_asm && !rdmsr_asm &&
-           !rdmsr_safe_asm && !rdmsr_safe_i386_asm && !rdpmc_i386_asm &&
-           !rdpmc_asm && !cpuid_asm && !syscall_i386_asm && in->e != -1) ||
+           !repeat_movsl_tail_asm && !repeat_stosb_asm &&
+           !repeat_movs_alternative_asm && !rdmsr_asm && !rdmsr_safe_asm &&
+           !rdmsr_safe_i386_asm && !rdpmc_i386_asm && !rdpmc_asm &&
+           !cpuid_asm && !syscall_i386_asm && in->e != -1) ||
           (!cpuid_asm && !syscall_i386_asm && !repeat_movsb_asm &&
-           !repeat_stosb_asm && !repeat_movs_alternative_asm && in->f != -1) ||
+           !repeat_movsl_tail_asm && !repeat_stosb_asm &&
+           !repeat_movs_alternative_asm && in->f != -1) ||
           (syscall_i386_asm &&
            (in->dst < 0 || in->a < 0 || !in->symbol ||
             strcmp(in->symbol, "syscall_i386") != 0 ||
@@ -2478,6 +2561,17 @@ static bool nir_verify_impl(const nyr_func_t *f, char *err, size_t err_len) {
            (in->dst != -1 || in->a < 0 || in->c != -1 || in->d != -1 ||
             in->e != -1 || in->f != -1 || !in->symbol ||
             strcmp(in->symbol, "ljmpl *(%rax)") != 0)) ||
+          (indirect_jump_asm &&
+           (in->dst != -1 || in->a < 0 || in->b < 0 || in->c != -1 ||
+            in->d != -1 || in->e != -1 || in->f != -1 || !in->symbol ||
+            strcmp(in->symbol, "jmp *%0") != 0)) ||
+          (gs_percpu_add_asm &&
+           (in->dst != -1 || in->a < 0 || in->b < 0 || in->c != -1 ||
+            in->d != -1 || in->e != -1 || in->f != -1 || !in->symbol ||
+            (strcmp(in->symbol, "gs_addb") != 0 &&
+             strcmp(in->symbol, "gs_addw") != 0 &&
+             strcmp(in->symbol, "gs_addl") != 0 &&
+             strcmp(in->symbol, "gs_addq") != 0))) ||
           (runtime_const_shift_asm &&
            (in->dst < 0 || in->a < 0 || in->b != -1 || in->c != -1 ||
             in->d != -1 || in->e != -1 || in->f != -1 ||
@@ -2607,7 +2701,8 @@ static bool nir_verify_impl(const nyr_func_t *f, char *err, size_t err_len) {
       for (size_t k = 0; k < in->phi_incoming_len; ++k) {
         int v = in->phi_incoming[k].value;
         bool has_definition = v >= 0 && v < f->next_value &&
-                              nir_verify_has_def && nir_verify_has_def[v];
+                              nir_verify_definitions &&
+                              nir_verify_definitions[v];
         if (!nir_value_valid(f, v) || !has_definition) {
           free(defined);
           return nir_verify_inst_err(f, err, err_len, in, i,
@@ -2706,7 +2801,9 @@ static bool nir_verify_impl(const nyr_func_t *f, char *err, size_t err_len) {
     case NYIR_STORE_LOCAL:
       if (in->imm < 0 || in->a < 0 || !nir_value_defined(f, defined, in->a)) {
         if (getenv("NYC_KERNEL_COMPAT")) {
-          /* Allow in kernel compat for trace macros */
+          /*
+           * Allow in kernel compat for trace macros
+           */
           break;
         }
         free(defined);

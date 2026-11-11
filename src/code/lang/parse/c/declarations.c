@@ -1291,11 +1291,11 @@ static void parser_forget_func_macro(ny_parser_t *p, const char *name,
 }
 
 static int c_ident_start_char(char c) {
-  return c == '_' || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
+  return ny_ascii_identifier_start((unsigned char)c);
 }
 
 static int c_ident_char(char c) {
-  return c_ident_start_char(c) || (c >= '0' && c <= '9');
+  return ny_ascii_identifier_continue((unsigned char)c);
 }
 
 static int c_parse_integer_slice(const char *s, size_t n, size_t *pos,

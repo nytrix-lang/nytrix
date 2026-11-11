@@ -1,3 +1,6 @@
+/*
+ * Fixture: query the size and layout of an anonymous aggregate member.
+ */
 struct filename_head {
   const char *name;
   int refcnt;

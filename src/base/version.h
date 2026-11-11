@@ -1,3 +1,4 @@
+/* Human-readable version and machine-readable build identity interfaces. */
 #pragma once
 
 /* Immutable semantic version/build suffix, without the stdlib identity. */

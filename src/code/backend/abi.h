@@ -1,3 +1,4 @@
+/* Native runtime-operation IDs, flags, and calling-convention contracts. */
 #ifndef NY_BACKEND_ABI_H
 #define NY_BACKEND_ABI_H
 
@@ -38,7 +39,7 @@ typedef enum {
 /* Per-argument tagged-value representation bits live above the entry flags
  * and the 4-bit result-kind field. Entries with richer raw/tagged/object
  * unions use the argument ABI table. */
-#define NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(index)                                \
+#define NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(index) \
   (1u << (10u + (unsigned)(index)))
 
 /* Typed call shapes used by the native NYIR debug VM. NYIR carries f64 values

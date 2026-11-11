@@ -1,3 +1,6 @@
+/*
+ * C parser fixture for incomplete multidimensional integer-array rows.
+ */
 static unsigned short translations[][3] = {
     [1] = {0x100, 0x101, 0x102},
     [3] = {0x200, 0x201, 0x202},

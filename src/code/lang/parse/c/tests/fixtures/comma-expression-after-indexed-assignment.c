@@ -1,3 +1,6 @@
+/*
+ * Runtime fixture for comma expressions after indexed assignment.
+ */
 int main(void) {
   int values[2] = {0, 0};
   int index = 0;

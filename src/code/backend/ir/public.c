@@ -1,3 +1,6 @@
+/*
+ * Public NYIR target-object emission and serialization implementation.
+ */
 #include <nyr/nyr.h>
 
 #include "base/util.h"

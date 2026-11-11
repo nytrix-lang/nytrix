@@ -1978,7 +1978,18 @@ fn begin_frame() bool {
    def has_surface = _has_valid_surface_fast()
    def backend_is_wayland = has_surface && _backend_is_wayland_fast()
    def backend_is_win32 = has_surface && _backend_is_win32_fast()
-   if _swapchain_image_count < 1 { ui_profile.print_text("[begin_frame] FAIL: invalid swapchain image count") return false }
+   if _swapchain_image_count < 1 {
+      ;; A failed recreation leaves no images. Retry it rather than failing
+      ;; every later frame; a surface that still cannot present fails below.
+      if has_surface {
+         _schedule_swapchain_recreate(true)
+         _vk_begin_frame_prepare_swapchain(has_surface)
+      }
+      if _swapchain_image_count < 1 {
+         ui_profile.print_text("[begin_frame] FAIL: invalid swapchain image count")
+         return false
+      }
+   }
    if _framebuffers_count < 1 { ui_profile.print_text("[begin_frame] FAIL: no framebuffers allocated") return false }
    if _command_buffers_count < 1 { ui_profile.print_text("[begin_frame] FAIL: no command buffers allocated") return false }
    if !_vk_frame_targets_ready(has_surface) { ui_profile.print_text("[begin_frame] FAIL: frame targets unavailable") return false }
@@ -4609,6 +4620,12 @@ fn _choose_present_mode() int {
       return VK_PRESENT_MODE_FIFO_KHR
    }
    if lib_uiw.backend() == "wayland" {
+      ;; FIFO blocks inside vkQueuePresentKHR until the compositor sends a
+      ;; frame callback. After a burst of client resizes a compositor can stop
+      ;; sending them, and the application froze in the driver (a headless
+      ;; Weston stress hung on every run). MAILBOX is equally tear-free and
+      ;; never blocks; the application loop paces itself.
+      if mailbox_supported { return VK_PRESENT_MODE_MAILBOX_KHR }
       return VK_PRESENT_MODE_FIFO_KHR
    }
    if lib_uiw.backend() == "win32" {

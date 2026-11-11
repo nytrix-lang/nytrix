@@ -1,6 +1,9 @@
+/*
+ * Interpreter for compile-time Ny expressions with bounded evaluation fuel.
+ */
+#include "base/util.h"
 #include "code/lang/code.h"
 #include "code/lang/priv.h"
-#include "base/util.h"
 
 #include <inttypes.h>
 #include <stdio.h>
@@ -1219,8 +1222,7 @@ static bool ny_ct_interp_eval_expr(expr_t *e, ny_ct_interp_ctx_t *ctx,
     uint64_t nested_rng_state = 0;
     if (e->as.comptime_expr.origin == NY_COMPTIME_ORIGIN_HASH_RUN ||
         e->as.comptime_expr.origin == NY_COMPTIME_ORIGIN_HASH_COMPTIME) {
-      nested_rng_state =
-          ny_ct_interp_random_key(e->as.comptime_expr.body);
+      nested_rng_state = ny_ct_interp_random_key(e->as.comptime_expr.body);
       nested.rng_state = &nested_rng_state;
     }
     bool ok = ny_ct_interp_eval_stmt(e->as.comptime_expr.body, &nested,
@@ -1286,8 +1288,7 @@ static bool ny_ct_interp_eval_expr(expr_t *e, ny_ct_interp_ctx_t *ctx,
       bool stop_is_omitted = false;
       bool ok = true;
       if (e->as.index.start) {
-        ok = ny_ct_interp_eval_expr(e->as.index.start, ctx, &start,
-                                    depth + 1);
+        ok = ny_ct_interp_eval_expr(e->as.index.start, ctx, &start, depth + 1);
         start_arg = &start;
       }
       if (ok && e->as.index.stop) {
@@ -1296,14 +1297,12 @@ static bool ny_ct_interp_eval_expr(expr_t *e, ny_ct_interp_ctx_t *ctx,
                           e->as.index.stop->as.literal.as.i == 0x3fffffff &&
                           e->as.index.stop->tok.kind != NY_T_NUMBER;
         if (!stop_is_omitted) {
-          ok = ny_ct_interp_eval_expr(e->as.index.stop, ctx, &stop,
-                                      depth + 1);
+          ok = ny_ct_interp_eval_expr(e->as.index.stop, ctx, &stop, depth + 1);
           stop_arg = &stop;
         }
       }
       if (ok && e->as.index.step) {
-        ok = ny_ct_interp_eval_expr(e->as.index.step, ctx, &step,
-                                    depth + 1);
+        ok = ny_ct_interp_eval_expr(e->as.index.step, ctx, &step, depth + 1);
         step_arg = &step;
       }
       if (ok)
@@ -1372,8 +1371,8 @@ static bool ny_ct_interp_eval_expr(expr_t *e, ny_ct_interp_ctx_t *ctx,
     if (strcmp(name, "from_int") == 0 && e->as.call.args.len == 1 &&
         !e->as.call.args.data[0].name) {
       ny_ct_fast_val_t arg = ny_ct_fast_none();
-      bool ok = ny_ct_interp_eval_expr(e->as.call.args.data[0].val, ctx,
-                                       &arg, depth + 1) &&
+      bool ok = ny_ct_interp_eval_expr(e->as.call.args.data[0].val, ctx, &arg,
+                                       depth + 1) &&
                 arg.kind == NY_CT_FAST_INT;
       if (ok)
         ny_ct_fast_val_move(out, &arg);
@@ -1501,8 +1500,8 @@ static bool ny_ct_interp_eval_expr(expr_t *e, ny_ct_interp_ctx_t *ctx,
       ny_ct_fast_val_t fallback = {.kind = NY_CT_FAST_INT, .i = 0};
       int64_t len = 0;
       bool have_index = false, have_default = false;
-      bool ok = ny_ct_interp_eval_expr(e->as.memcall.target, ctx, &target,
-                                       depth + 1);
+      bool ok =
+          ny_ct_interp_eval_expr(e->as.memcall.target, ctx, &target, depth + 1);
       if (ok && target.kind == NY_CT_FAST_STR)
         ok = ny_ct_fast_string_scalar_len(&target, &len);
       else if (ok && target.kind != NY_CT_FAST_DICT)
@@ -1612,13 +1611,13 @@ static bool ny_ct_interp_eval_expr(expr_t *e, ny_ct_interp_ctx_t *ctx,
  * root file's own top-level statements identify the main source, so a direct
  * file evaluates `__main()` to true while an imported module stays false.
  */
-static bool ny_ct_interp_token_is_main_file(const program_t *prog, token_t tok) {
+static bool ny_ct_interp_token_is_main_file(const program_t *prog,
+                                            token_t tok) {
   const char *main_file = NULL;
   if (prog) {
     for (size_t i = 0; i < prog->body.len; ++i) {
       const stmt_t *s = prog->body.data[i];
-      if (s && s->kind != NY_S_MODULE && s->tok.filename &&
-          *s->tok.filename) {
+      if (s && s->kind != NY_S_MODULE && s->tok.filename && *s->tok.filename) {
         main_file = s->tok.filename;
         break;
       }

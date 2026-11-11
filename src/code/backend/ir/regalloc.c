@@ -235,11 +235,11 @@ static uint64_t inst_fixed_clobbers(const nyr_mach_func_t *mach,
      * Other forms use the general magic/idiv sequence.
      */
     int64_t divisor = 0;
-    bool known_divisor = in->src1.kind == NYR_MACH_OPERAND_IMM
-                             ? (divisor = in->src1.as.imm, true)
-                             : in->src1.kind == NYR_MACH_OPERAND_VREG &&
-                                   mach_constant_i64(mach, in->src1.as.reg, 0,
-                                                     &divisor);
+    bool known_divisor =
+        in->src1.kind == NYR_MACH_OPERAND_IMM
+            ? (divisor = in->src1.as.imm, true)
+            : in->src1.kind == NYR_MACH_OPERAND_VREG &&
+                  mach_constant_i64(mach, in->src1.as.reg, 0, &divisor);
     if (!in->unsigned_arith && known_divisor && divisor > 1 &&
         divisor <= INT32_MAX &&
         (((uint64_t)divisor & ((uint64_t)divisor - 1)) == 0))
@@ -305,9 +305,8 @@ static size_t *build_next_clobber(const nyr_mach_func_t *mach,
       color_count >= 64 ? UINT64_MAX
                         : (color_count ? (UINT64_C(1) << color_count) - 1 : 0);
   for (size_t pc = mach->inst_len; pc-- > 0;) {
-    uint64_t clobbers =
-        inst_fixed_clobbers(mach, &mach->insts[pc], reg_class,
-                            preserve_gpr_calls);
+    uint64_t clobbers = inst_fixed_clobbers(mach, &mach->insts[pc], reg_class,
+                                            preserve_gpr_calls);
     for (size_t c = 0; c < color_count_indexed; ++c)
       if ((clobbers & (UINT64_C(1) << c)) &&
           !size_vec_push(&clobber_sites[c], pc)) {
@@ -453,10 +452,9 @@ static bool verify_use_has_segment(const regalloc_verify_span_t *spans,
   while (lo < hi) {
     size_t mid = lo + (hi - lo) / 2;
     const regalloc_verify_span_t *span = &spans[mid];
-    bool before = span->vreg < vreg ||
-                  (span->vreg == vreg && span->block < block) ||
-                  (span->vreg == vreg && span->block == block &&
-                   span->start <= pc);
+    bool before =
+        span->vreg < vreg || (span->vreg == vreg && span->block < block) ||
+        (span->vreg == vreg && span->block == block && span->start <= pc);
     if (before)
       lo = mid + 1;
     else
@@ -469,17 +467,16 @@ static bool verify_use_has_segment(const regalloc_verify_span_t *spans,
          pc <= span->end;
 }
 
-static const regalloc_verify_span_t *verify_segment_at(
-    const regalloc_verify_span_t *spans, size_t span_count, uint32_t vreg,
-    uint32_t block, size_t pc) {
+static const regalloc_verify_span_t *
+verify_segment_at(const regalloc_verify_span_t *spans, size_t span_count,
+                  uint32_t vreg, uint32_t block, size_t pc) {
   size_t lo = 0, hi = span_count;
   while (lo < hi) {
     size_t mid = lo + (hi - lo) / 2;
     const regalloc_verify_span_t *span = &spans[mid];
-    bool before = span->vreg < vreg ||
-                  (span->vreg == vreg && span->block < block) ||
-                  (span->vreg == vreg && span->block == block &&
-                   span->start <= pc);
+    bool before =
+        span->vreg < vreg || (span->vreg == vreg && span->block < block) ||
+        (span->vreg == vreg && span->block == block && span->start <= pc);
     if (before)
       lo = mid + 1;
     else
@@ -497,15 +494,14 @@ static const regalloc_verify_span_t *verify_segment_at(
 static bool verify_build_predecessors(const nyr_mach_func_t *mach,
                                       size_t **offsets_out,
                                       uint32_t **preds_out) {
-  if (!mach || !offsets_out || !preds_out ||
-      mach->block_len == SIZE_MAX ||
+  if (!mach || !offsets_out || !preds_out || mach->block_len == SIZE_MAX ||
       mach->block_len > UINT32_MAX ||
       mach->inst_len > SIZE_MAX - mach->block_len ||
       mach->inst_len + mach->block_len > SIZE_MAX / sizeof(uint32_t))
     return false;
   size_t *offsets = calloc(mach->block_len + 1, sizeof(*offsets));
-  size_t *counts = calloc(mach->block_len ? mach->block_len : 1,
-                          sizeof(*counts));
+  size_t *counts =
+      calloc(mach->block_len ? mach->block_len : 1, sizeof(*counts));
   size_t *cursor = NULL;
   uint32_t *preds = NULL;
   if (!offsets || !counts)
@@ -530,8 +526,8 @@ static bool verify_build_predecessors(const nyr_mach_func_t *mach,
     if (block->inst_count) {
       const nyr_mach_inst_t *last =
           &mach->insts[block->first_inst + block->inst_count - 1];
-      falls_through = last->opcode != NYR_MACH_BR &&
-                      last->opcode != NYR_MACH_RET;
+      falls_through =
+          last->opcode != NYR_MACH_BR && last->opcode != NYR_MACH_RET;
     }
     if (falls_through && from + 1 < mach->block_len) {
       ++counts[from + 1];
@@ -565,8 +561,8 @@ static bool verify_build_predecessors(const nyr_mach_func_t *mach,
     if (block->inst_count) {
       const nyr_mach_inst_t *last =
           &mach->insts[block->first_inst + block->inst_count - 1];
-      falls_through = last->opcode != NYR_MACH_BR &&
-                      last->opcode != NYR_MACH_RET;
+      falls_through =
+          last->opcode != NYR_MACH_BR && last->opcode != NYR_MACH_RET;
     }
     if (falls_through && from + 1 < mach->block_len)
       preds[cursor[from + 1]++] = (uint32_t)from;
@@ -636,17 +632,13 @@ static bool verify_tied_input(const nyr_mach_inst_t *in, uint32_t value,
   if (in->opcode == NYR_MACH_SELECT)
     return (in->src1.kind == NYR_MACH_OPERAND_VREG &&
             in->src1.as.reg == value) ||
-           (in->src2.kind == NYR_MACH_OPERAND_VREG &&
-            in->src2.as.reg == value);
-  return (in->src0.kind == NYR_MACH_OPERAND_VREG &&
-          in->src0.as.reg == value) ||
+           (in->src2.kind == NYR_MACH_OPERAND_VREG && in->src2.as.reg == value);
+  return (in->src0.kind == NYR_MACH_OPERAND_VREG && in->src0.as.reg == value) ||
          (allow_rhs_tie && rhs_tie_supported(reg_class, in->opcode) &&
-          in->src1.kind == NYR_MACH_OPERAND_VREG &&
-          in->src1.as.reg == value);
+          in->src1.kind == NYR_MACH_OPERAND_VREG && in->src1.as.reg == value);
 }
 
-static bool regalloc_affinity_input(const nyr_mach_inst_t *in,
-                                    uint32_t value,
+static bool regalloc_affinity_input(const nyr_mach_inst_t *in, uint32_t value,
                                     nyr_mach_reg_class_t reg_class,
                                     bool allow_rhs_tie) {
   if (!verify_tied_input(in, value, reg_class, allow_rhs_tie))
@@ -657,8 +649,7 @@ static bool regalloc_affinity_input(const nyr_mach_inst_t *in,
   if (in->opcode == NYR_MACH_SELECT)
     return (in->src1.kind == NYR_MACH_OPERAND_VREG &&
             in->src1.as.reg == value) ||
-           (in->src2.kind == NYR_MACH_OPERAND_VREG &&
-            in->src2.as.reg == value);
+           (in->src2.kind == NYR_MACH_OPERAND_VREG && in->src2.as.reg == value);
   return true;
 }
 
@@ -708,10 +699,9 @@ static bool verify_tied_boundary(const nyr_mach_func_t *mach,
 static bool vector_latch_def_reads_phi_ok(const nyr_mach_inst_t *def,
                                           uint32_t phi);
 
-static bool verify_vector_latch_recurrence(const nyr_mach_func_t *mach,
-                                           const regalloc_verify_color_t *active,
-                                           const regalloc_verify_span_t *span,
-                                           nyr_mach_reg_class_t reg_class) {
+static bool verify_vector_latch_recurrence(
+    const nyr_mach_func_t *mach, const regalloc_verify_color_t *active,
+    const regalloc_verify_span_t *span, nyr_mach_reg_class_t reg_class) {
   if (!mach || !active || !span || reg_class != NYR_MACH_REGCLASS_VECTOR ||
       active->start > span->start || span->end > active->end ||
       span->end >= mach->inst_len || span->start >= span->end)
@@ -724,9 +714,9 @@ static bool verify_vector_latch_recurrence(const nyr_mach_func_t *mach,
       def->dst.as.reg != src || !vector_latch_def_reads_phi_ok(def, phi))
     return false;
   const nyr_mach_inst_t *copy = &mach->insts[span->end];
-  if (copy->opcode != NYR_MACH_COPY || copy->dst.kind != NYR_MACH_OPERAND_VREG ||
-      copy->dst.as.reg != phi || copy->src0.kind != NYR_MACH_OPERAND_VREG ||
-      copy->src0.as.reg != src)
+  if (copy->opcode != NYR_MACH_COPY ||
+      copy->dst.kind != NYR_MACH_OPERAND_VREG || copy->dst.as.reg != phi ||
+      copy->src0.kind != NYR_MACH_OPERAND_VREG || copy->src0.as.reg != src)
     return false;
   for (size_t pc = span->start + 1; pc < span->end; ++pc) {
     const nyr_mach_inst_t *in = &mach->insts[pc];
@@ -763,8 +753,8 @@ static size_t verify_fixed_clobber_pc(const nyr_mach_func_t *mach,
       continue;
     if (!(inst_fixed_clobbers(mach, in, reg_class, false) & mask))
       continue;
-    bool live_after = pc < seg->end ||
-                      seg->spill_reason == NYR_MACH_SPILL_LIVE_OUT;
+    bool live_after =
+        pc < seg->end || seg->spill_reason == NYR_MACH_SPILL_LIVE_OUT;
     if (!live_after)
       continue;
     if (dst_is_def(in) && in->dst.as.reg == seg->vreg)
@@ -781,17 +771,14 @@ static bool regalloc_verify_mode(const nyr_mach_func_t *mach,
   const bool debug = getenv("NY_REGALLOC_VERIFY_DEBUG") != NULL;
   if (!mach || !alloc)
     return false;
-  if ((mach->block_len && !mach->blocks) ||
-      (mach->inst_len && !mach->insts) ||
+  if ((mach->block_len && !mach->blocks) || (mach->inst_len && !mach->insts) ||
       (mach->vreg_len && !mach->vreg_types))
     return false;
   if ((alloc->segment_len && !alloc->segments) ||
       alloc->segment_len > SIZE_MAX / sizeof(regalloc_verify_span_t))
     return false;
   regalloc_verify_span_t *spans =
-      alloc->segment_len
-          ? malloc(alloc->segment_len * sizeof(*spans))
-          : NULL;
+      alloc->segment_len ? malloc(alloc->segment_len * sizeof(*spans)) : NULL;
   if (alloc->segment_len && !spans)
     return false;
   for (size_t i = 0; i < alloc->segment_len; ++i) {
@@ -817,16 +804,17 @@ static bool regalloc_verify_mode(const nyr_mach_func_t *mach,
       size_t block_end = (size_t)block->first_inst + block->inst_count;
       if (seg->start < block->first_inst || seg->end >= block_end) {
         if (debug)
-          fprintf(stderr, "[regalloc-verify] segment %zu outside block %u\n",
-                  i, seg->block);
+          fprintf(stderr, "[regalloc-verify] segment %zu outside block %u\n", i,
+                  seg->block);
         free(spans);
         return false;
       }
     } else if (seg->start != block->first_inst ||
                seg->end != block->first_inst) {
       if (debug)
-        fprintf(stderr, "[regalloc-verify] segment %zu outside empty block %u\n",
-                i, seg->block);
+        fprintf(stderr,
+                "[regalloc-verify] segment %zu outside empty block %u\n", i,
+                seg->block);
       free(spans);
       return false;
     }
@@ -855,13 +843,13 @@ static bool regalloc_verify_mode(const nyr_mach_func_t *mach,
       free(spans);
       return false;
     }
-    spans[i] =(regalloc_verify_span_t){.block = seg->block,
-                                         .vreg = seg->vreg,
-                                         .start = seg->start,
-                                         .end = seg->end,
-                                         .color = seg->color,
-                                         .carried = seg->carried,
-                                         .reload = seg->reload};
+    spans[i] = (regalloc_verify_span_t){.block = seg->block,
+                                        .vreg = seg->vreg,
+                                        .start = seg->start,
+                                        .end = seg->end,
+                                        .color = seg->color,
+                                        .carried = seg->carried,
+                                        .reload = seg->reload};
   }
   if (alloc->segment_len > 1)
     qsort(spans, alloc->segment_len, sizeof(*spans), cmp_verify_span);
@@ -902,23 +890,26 @@ static bool regalloc_verify_mode(const nyr_mach_func_t *mach,
                   active[color].end, span->vreg, span->start, span->end);
         if (debug && span->start < mach->inst_len) {
           const nyr_mach_inst_t *qi = &mach->insts[span->start];
-          fprintf(stderr,
-                  "  at pc=%zu %s dst=%d s0=%d s1=%d s2=%d (rhs-tie=%d)\n",
-                  span->start, nyr_mach_opcode_name(qi->opcode),
-                  qi->dst.kind == NYR_MACH_OPERAND_VREG ? (int)qi->dst.as.reg : -1,
-                  qi->src0.kind == NYR_MACH_OPERAND_VREG ? (int)qi->src0.as.reg : -1,
-                  qi->src1.kind == NYR_MACH_OPERAND_VREG ? (int)qi->src1.as.reg : -1,
-                  qi->src2.kind == NYR_MACH_OPERAND_VREG ? (int)qi->src2.as.reg : -1,
-                  (int)allow_rhs_tie);
+          fprintf(
+              stderr, "  at pc=%zu %s dst=%d s0=%d s1=%d s2=%d (rhs-tie=%d)\n",
+              span->start, nyr_mach_opcode_name(qi->opcode),
+              qi->dst.kind == NYR_MACH_OPERAND_VREG ? (int)qi->dst.as.reg : -1,
+              qi->src0.kind == NYR_MACH_OPERAND_VREG ? (int)qi->src0.as.reg
+                                                     : -1,
+              qi->src1.kind == NYR_MACH_OPERAND_VREG ? (int)qi->src1.as.reg
+                                                     : -1,
+              qi->src2.kind == NYR_MACH_OPERAND_VREG ? (int)qi->src2.as.reg
+                                                     : -1,
+              (int)allow_rhs_tie);
         }
         valid = false;
         break;
       }
     }
     active[color] = (regalloc_verify_color_t){.vreg = span->vreg,
-                                               .start = span->start,
-                                               .end = span->end,
-                                               .occupied = true};
+                                              .start = span->start,
+                                              .end = span->end,
+                                              .occupied = true};
   }
   free(active);
   /*
@@ -931,8 +922,7 @@ static bool regalloc_verify_mode(const nyr_mach_func_t *mach,
   if (valid) {
     for (size_t i = 0; i < alloc->segment_len;) {
       size_t end = i + 1;
-      while (end < alloc->segment_len &&
-             spans[end].vreg == spans[i].vreg &&
+      while (end < alloc->segment_len && spans[end].vreg == spans[i].vreg &&
              spans[end].block == spans[i].block)
         ++end;
       const nyr_mach_block_t *block = &mach->blocks[spans[i].block];
@@ -958,21 +948,22 @@ static bool regalloc_verify_mode(const nyr_mach_func_t *mach,
       for (size_t j = i + 1; valid && j < end; ++j) {
         if (spans[j - 1].end >= spans[j].start) {
           if (debug)
-            fprintf(stderr,
-                    "[regalloc-verify] overlapping ranges for v%u in block %u\n",
-                    spans[j].vreg, spans[j].block);
+            fprintf(
+                stderr,
+                "[regalloc-verify] overlapping ranges for v%u in block %u\n",
+                spans[j].vreg, spans[j].block);
           valid = false;
         }
       }
       i = end;
     }
   }
-/*
- * A carried register is a proof obligation: at a live-in boundary, every
- * predecessor that supplies this value must end with the same color. A
- * carried edge-copy destination must be defined by a tied copy whose source
- * is allocated at that point; the copy itself may move between colors.
- */
+  /*
+   * A carried register is a proof obligation: at a live-in boundary, every
+   * predecessor that supplies this value must end with the same color. A
+   * carried edge-copy destination must be defined by a tied copy whose source
+   * is allocated at that point; the copy itself may move between colors.
+   */
   size_t *pred_offsets = NULL;
   uint32_t *preds = NULL;
   bool has_carried = false;
@@ -1012,7 +1003,8 @@ static bool regalloc_verify_mode(const nyr_mach_func_t *mach,
             valid = false;
             break;
           }
-          size_t source_pc = (size_t)source->first_inst + source->inst_count - 1;
+          size_t source_pc =
+              (size_t)source->first_inst + source->inst_count - 1;
           size_t target_pc = target->first_inst;
           const regalloc_verify_span_t *from = verify_segment_at(
               spans, alloc->segment_len, span->vreg, (uint32_t)pred, source_pc);
@@ -1021,9 +1013,10 @@ static bool regalloc_verify_mode(const nyr_mach_func_t *mach,
           if (!from || !to || from->color != span->color ||
               to->color != span->color) {
             if (debug)
-              fprintf(stderr,
-                      "[regalloc-verify] carried v%u color mismatch on B%zu->B%u\n",
-                      span->vreg, pred, span->block);
+              fprintf(
+                  stderr,
+                  "[regalloc-verify] carried v%u color mismatch on B%zu->B%u\n",
+                  span->vreg, pred, span->block);
             valid = false;
             break;
           }
@@ -1031,9 +1024,10 @@ static bool regalloc_verify_mode(const nyr_mach_func_t *mach,
         }
         if (valid && !incoming) {
           if (debug)
-            fprintf(stderr,
-                    "[regalloc-verify] carried live-in v%u has no supplying edge\n",
-                    span->vreg);
+            fprintf(
+                stderr,
+                "[regalloc-verify] carried live-in v%u has no supplying edge\n",
+                span->vreg);
           valid = false;
         }
       } else {
@@ -1060,9 +1054,10 @@ static bool regalloc_verify_mode(const nyr_mach_func_t *mach,
             spans, alloc->segment_len, source_vreg, span->block, span->start);
         if (!from) {
           if (debug)
-            fprintf(stderr,
-                    "[regalloc-verify] carried v%u copy source has no segment\n",
-                    span->vreg);
+            fprintf(
+                stderr,
+                "[regalloc-verify] carried v%u copy source has no segment\n",
+                span->vreg);
           valid = false;
         }
       }
@@ -1075,16 +1070,16 @@ static bool regalloc_verify_mode(const nyr_mach_func_t *mach,
     if ((size_t)block->first_inst > mach->inst_len ||
         block->inst_count > mach->inst_len - (size_t)block->first_inst) {
       if (debug)
-        fprintf(stderr, "[regalloc-verify] block %zu exceeds instruction list\n",
-                bi);
+        fprintf(stderr,
+                "[regalloc-verify] block %zu exceeds instruction list\n", bi);
       valid = false;
       break;
     }
     size_t end = (size_t)block->first_inst + block->inst_count;
     for (size_t pc = block->first_inst; valid && pc < end; ++pc) {
       uint32_t uses[3 + NYIR_CALL_MAX_ARGS];
-      size_t use_count = inst_uses(&mach->insts[pc], uses,
-                                   sizeof(uses) / sizeof(*uses));
+      size_t use_count =
+          inst_uses(&mach->insts[pc], uses, sizeof(uses) / sizeof(*uses));
       for (size_t ui = 0; ui < use_count; ++ui) {
         uint32_t vreg = uses[ui];
         if (vreg >= mach->vreg_len || !mach->vreg_types) {
@@ -1095,9 +1090,10 @@ static bool regalloc_verify_mode(const nyr_mach_func_t *mach,
             !verify_use_has_segment(spans, alloc->segment_len, vreg,
                                     (uint32_t)bi, pc)) {
           if (debug)
-            fprintf(stderr,
-                    "[regalloc-verify] use of v%u at pc=%zu has no %s segment\n",
-                    vreg, pc, reg_class_name(reg_class));
+            fprintf(
+                stderr,
+                "[regalloc-verify] use of v%u at pc=%zu has no %s segment\n",
+                vreg, pc, reg_class_name(reg_class));
           valid = false;
           break;
         }
@@ -1220,8 +1216,7 @@ static bool affinity_index_build(const nyr_mach_func_t *mach,
   size_t ref_count = 0;
   for (size_t pc = 0; pc < mach->inst_len; ++pc) {
     const nyr_mach_inst_t *in = &mach->insts[pc];
-    if (in->dst.kind != NYR_MACH_OPERAND_VREG ||
-        in->dst.as.reg >= a->vreg_len)
+    if (in->dst.kind != NYR_MACH_OPERAND_VREG || in->dst.as.reg >= a->vreg_len)
       continue;
     uint32_t uses[3 + NYIR_CALL_MAX_ARGS];
     size_t use_count = inst_uses(in, uses, sizeof(uses) / sizeof(*uses));
@@ -1259,8 +1254,7 @@ static bool affinity_index_build(const nyr_mach_func_t *mach,
   size_t ref_at = 0;
   for (size_t pc = 0; pc < mach->inst_len; ++pc) {
     const nyr_mach_inst_t *in = &mach->insts[pc];
-    if (in->dst.kind != NYR_MACH_OPERAND_VREG ||
-        in->dst.as.reg >= a->vreg_len)
+    if (in->dst.kind != NYR_MACH_OPERAND_VREG || in->dst.as.reg >= a->vreg_len)
       continue;
     uint32_t uses[3 + NYIR_CALL_MAX_ARGS];
     size_t use_count = inst_uses(in, uses, sizeof(uses) / sizeof(*uses));
@@ -1356,8 +1350,8 @@ static int affinity_hint_color(const nyr_mach_func_t *mach,
                                const nyr_mach_regalloc_t *a,
                                const regalloc_affinity_index_t *index,
                                nyr_mach_reg_class_t reg_class,
-                               bool allow_rhs_tie,
-                               uint32_t dst_vreg, size_t start, size_t end,
+                               bool allow_rhs_tie, uint32_t dst_vreg,
+                               size_t start, size_t end,
                                uint32_t *source_vreg) {
   if (source_vreg)
     *source_vreg = UINT32_MAX;
@@ -1396,8 +1390,8 @@ static int affinity_hint_color(const nyr_mach_func_t *mach,
     if (in->dst.kind != NYR_MACH_OPERAND_VREG || in->dst.as.reg != dst_vreg)
       continue;
     uint32_t candidates[3 + NYIR_CALL_MAX_ARGS];
-    size_t candidate_count = inst_uses(in, candidates,
-                                       sizeof(candidates) / sizeof(*candidates));
+    size_t candidate_count =
+        inst_uses(in, candidates, sizeof(candidates) / sizeof(*candidates));
     for (size_t i = 0; i < candidate_count; ++i) {
       uint32_t src_vreg = candidates[i];
       if (src_vreg == dst_vreg)
@@ -1722,8 +1716,7 @@ static bool segment_blocks_color(const nyr_mach_func_t *mach,
 static bool color_segments(const nyr_mach_func_t *mach, nyr_mach_regalloc_t *a,
                            const size_t *loop_depth,
                            nyr_mach_reg_class_t reg_class,
-                           bool preserve_gpr_calls,
-                           bool allow_rhs_tie,
+                           bool preserve_gpr_calls, bool allow_rhs_tie,
                            const size_vec_t *clobber_sites,
                            size_t clobber_color_count) {
   if (!a->segment_len || !a->color_count)
@@ -1802,9 +1795,9 @@ static bool color_segments(const nyr_mach_func_t *mach, nyr_mach_regalloc_t *a,
      * is advisory only: overlapping live ranges and spills retain priority.
      */
     uint32_t affinity_source = UINT32_MAX;
-    int color = affinity_hint_color(mach, a, &affinity_index, reg_class,
-                                    allow_rhs_tie, s->vreg, s->start, s->end,
-                                    &affinity_source);
+    int color =
+        affinity_hint_color(mach, a, &affinity_index, reg_class, allow_rhs_tie,
+                            s->vreg, s->start, s->end, &affinity_source);
     const char *choice = "lowest-free";
     bool hinted_color_used =
         color >= 0 && (size_t)color < a->color_count &&
@@ -2152,10 +2145,9 @@ static size_t segment_access_count(const nyr_mach_func_t *mach,
 }
 
 static size_t block_color_eviction_count_excl(
-    const nyr_mach_func_t *mach,
-    const nyr_mach_regalloc_t *a, const nyr_mach_live_segment_t *target,
-    size_t block, int color, const size_vec_t *by_block, const uint32_t *excl,
-    size_t excl_len) {
+    const nyr_mach_func_t *mach, const nyr_mach_regalloc_t *a,
+    const nyr_mach_live_segment_t *target, size_t block, int color,
+    const size_vec_t *by_block, const uint32_t *excl, size_t excl_len) {
   if (!a || !by_block)
     return SIZE_MAX;
   if (target)
@@ -2211,8 +2203,8 @@ segment_in_block_vreg(nyr_mach_regalloc_t *a, uint32_t vreg, size_t block,
 typedef struct {
   size_t edge; /* edge block index */
   uint32_t src;
-  size_t copy_pc;          /* phi copy instruction in the edge block */
-  bool src_dies_at_copy;   /* src segment ends at the copy: dst may reuse it */
+  size_t copy_pc;        /* phi copy instruction in the edge block */
+  bool src_dies_at_copy; /* src segment ends at the copy: dst may reuse it */
   nyr_mach_live_segment_t *ev;     /* phi dst segment in the edge block */
   nyr_mach_live_segment_t *eseg;   /* src segment in the edge block */
   nyr_mach_live_segment_t *srcseg; /* src segment in the pred block (end) */
@@ -2224,8 +2216,7 @@ static bool coalesce_preg_reaches_edge(const nyr_mach_func_t *mach,
 static bool segment_color_survives_clobbers(const nyr_mach_func_t *mach,
                                             const nyr_mach_live_segment_t *x,
                                             nyr_mach_reg_class_t reg_class,
-                                            int color,
-                                            bool preserve_gpr_calls);
+                                            int color, bool preserve_gpr_calls);
 
 static bool loop_phi_carry_enabled(nyr_mach_reg_class_t reg_class) {
   /*
@@ -2234,15 +2225,14 @@ static bool loop_phi_carry_enabled(nyr_mach_reg_class_t reg_class) {
    * opt-out for diagnosis. Scalar GPR/FPR carry remains opt-in.
    */
   const bool vector = reg_class == NYR_MACH_REGCLASS_VECTOR;
-  const char *value = getenv(vector ? "NYTRIX_VECTOR_LOOP_CARRY"
-                                    : "NYTRIX_GPR_LOOP_CARRY");
+  const char *value =
+      getenv(vector ? "NYTRIX_VECTOR_LOOP_CARRY" : "NYTRIX_GPR_LOOP_CARRY");
   if (vector && !value)
     return true;
   return (reg_class == NYR_MACH_REGCLASS_GPR ||
           reg_class == NYR_MACH_REGCLASS_FPR ||
           reg_class == NYR_MACH_REGCLASS_VECTOR) &&
-         value &&
-         strcmp(value, "0") != 0 && strcmp(value, "off") != 0 &&
+         value && strcmp(value, "0") != 0 && strcmp(value, "off") != 0 &&
          strcmp(value, "false") != 0;
 }
 
@@ -2407,15 +2397,12 @@ static bool vector_phi_reads_precede_source(const nyr_mach_func_t *mach,
   return true;
 }
 
-static void coalesce_loop_edges(const nyr_mach_func_t *mach,
-                                nyr_mach_regalloc_t *a, const size_vec_t *succ,
-                                const size_vec_t *pred,
-                                const size_vec_t *by_block,
-                                const size_t *loop_depth,
-                                bool preserve_gpr_calls,
-                                nyr_mach_reg_class_t reg_class) {
-  if (!mach || !a || !pred || !by_block || !loop_depth ||
-      mach->block_len < 2)
+static void
+coalesce_loop_edges(const nyr_mach_func_t *mach, nyr_mach_regalloc_t *a,
+                    const size_vec_t *succ, const size_vec_t *pred,
+                    const size_vec_t *by_block, const size_t *loop_depth,
+                    bool preserve_gpr_calls, nyr_mach_reg_class_t reg_class) {
+  if (!mach || !a || !pred || !by_block || !loop_depth || mach->block_len < 2)
     return;
   /*
    * Read this process-wide switch once, not once per candidate PHI.
@@ -2621,22 +2608,29 @@ static void coalesce_loop_edges(const nyr_mach_func_t *mach,
         if (block_reads_vreg_before(mach, e, copy_pc, v) &&
             !(reg_class == NYR_MACH_REGCLASS_VECTOR && e > h &&
               vector_phi_reads_precede_source(mach, e, copy_pc, v, src))) {
-          if (carry_debug)
-            {
+          if (carry_debug) {
             fprintf(stderr,
                     "carry: header=%zu v=%u edge=%zu reads old phi before "
                     "copy at %zu; keep homes (src=v%u class=%s vregs=%zu)\n",
                     h, v, e, copy_pc, src, reg_class_name(reg_class),
                     (size_t)mach->vreg_len);
-            if (getenv("NY_CARRY_DEBUG_BLOCK") && reg_class == NYR_MACH_REGCLASS_VECTOR) {
+            if (getenv("NY_CARRY_DEBUG_BLOCK") &&
+                reg_class == NYR_MACH_REGCLASS_VECTOR) {
               const nyr_mach_block_t *bb = &mach->blocks[e];
-              for (size_t q = bb->first_inst; q < (size_t)bb->first_inst + bb->inst_count; ++q) {
+              for (size_t q = bb->first_inst;
+                   q < (size_t)bb->first_inst + bb->inst_count; ++q) {
                 const nyr_mach_inst_t *qi = &mach->insts[q];
                 fprintf(stderr, "   pc=%zu %s dst=%d s0=%d s1=%d\n", q,
                         nyr_mach_opcode_name(qi->opcode),
-                        qi->dst.kind == NYR_MACH_OPERAND_VREG ? (int)qi->dst.as.reg : -1,
-                        qi->src0.kind == NYR_MACH_OPERAND_VREG ? (int)qi->src0.as.reg : -1,
-                        qi->src1.kind == NYR_MACH_OPERAND_VREG ? (int)qi->src1.as.reg : -1);
+                        qi->dst.kind == NYR_MACH_OPERAND_VREG
+                            ? (int)qi->dst.as.reg
+                            : -1,
+                        qi->src0.kind == NYR_MACH_OPERAND_VREG
+                            ? (int)qi->src0.as.reg
+                            : -1,
+                        qi->src1.kind == NYR_MACH_OPERAND_VREG
+                            ? (int)qi->src1.as.reg
+                            : -1);
               }
             }
           }
@@ -2794,16 +2788,18 @@ static void coalesce_loop_edges(const nyr_mach_func_t *mach,
         for (size_t k = 0; k < copy_len; ++k) {
           loop_copy_t *c = &copies[k];
           bool preheader_copy = c->edge < h;
+          bool recolor_source = !preheader_copy || c->src_dies_at_copy;
           if (!loop_edge_dest_accepts_color(mach, c->ev, a->color_count, C) ||
-              (!preheader_copy &&
+              (recolor_source &&
                (!segment_accepts_color(mach, c->eseg, a->color_count, C) ||
                 !segment_accepts_color(mach, c->srcseg, a->color_count, C) ||
                 !segment_color_survives_clobbers(mach, c->eseg, reg_class, C,
+                                                 preserve_gpr_calls) ||
+                !segment_color_survives_clobbers(mach, c->srcseg, reg_class, C,
                                                  preserve_gpr_calls))) ||
               !segment_color_survives_clobbers(mach, c->ev, reg_class, C,
                                                preserve_gpr_calls) ||
-              (preheader_copy && c->eseg->color == C &&
-               !c->src_dies_at_copy)) {
+              (preheader_copy && c->eseg->color == C && !c->src_dies_at_copy)) {
             if (carry_debug)
               fprintf(stderr,
                       "carry: h=%zu v=%u C=%d reject copy edge=%zu "
@@ -2820,7 +2816,7 @@ static void coalesce_loop_edges(const nyr_mach_func_t *mach,
                   a, c->ev, C, by_block, expensive_vreg,
                   (preheader_copy && !dest_shares_src) ? dest_excl : excl,
                   (preheader_copy && !dest_shares_src) ? 1 : 2) ||
-              (!preheader_copy &&
+              (recolor_source &&
                (!block_color_conflicts_evictable_excl(
                     a, c->eseg, C, by_block, expensive_vreg, excl, 2) ||
                 !block_color_conflicts_evictable_excl(
@@ -2871,33 +2867,32 @@ static void coalesce_loop_edges(const nyr_mach_func_t *mach,
           }
         }
         if (all_ok) {
-          size_t evicted =
-              block_color_eviction_count_excl(mach, a, hv, 0, C, by_block, excl_v,
-                                              1) +
-              block_color_eviction_count_excl(mach, a, NULL, h, C, by_block, excl_v,
-                                              1);
+          size_t evicted = block_color_eviction_count_excl(
+                               mach, a, hv, 0, C, by_block, excl_v, 1) +
+                           block_color_eviction_count_excl(mach, a, NULL, h, C,
+                                                           by_block, excl_v, 1);
           for (size_t si = 0; si < by_vreg[v].len; ++si) {
             const nyr_mach_live_segment_t *s =
                 &a->segments[by_vreg[v].data[si]];
             if (s != hv && s->block < nb && !edge_block[s->block] &&
                 reaches_h[s->block])
-              evicted += block_color_eviction_count_excl(mach, a, s, 0, C, by_block,
-                                                         excl_v, 1);
+              evicted += block_color_eviction_count_excl(mach, a, s, 0, C,
+                                                         by_block, excl_v, 1);
           }
           for (size_t k = 0; k < copy_len; ++k) {
             const loop_copy_t *c = &copies[k];
             uint32_t excl[2] = {v, c->src};
             evicted += block_color_eviction_count_excl(mach, a, c->ev, 0, C,
                                                        by_block, excl, 2);
-            if (c->edge > h)
-              evicted += block_color_eviction_count_excl(
-                             mach, a, c->eseg, 0, C, by_block, excl, 2) +
+            if (c->edge > h || c->src_dies_at_copy)
+              evicted += block_color_eviction_count_excl(mach, a, c->eseg, 0, C,
+                                                         by_block, excl, 2) +
                          block_color_eviction_count_excl(
                              mach, a, c->srcseg, 0, C, by_block, excl + 1, 1);
           }
           if (carry_debug && evicted)
-            fprintf(stderr, "carry: h=%zu v=%u C=%d eviction cost %zu\n", h,
-                    v, C, evicted);
+            fprintf(stderr, "carry: h=%zu v=%u C=%d eviction cost %zu\n", h, v,
+                    C, evicted);
           if (evicted < chosen_cost) {
             chosen_cost = evicted;
             chosen = C;
@@ -2921,14 +2916,15 @@ static void coalesce_loop_edges(const nyr_mach_func_t *mach,
         bool preheader_copy = c->edge < h;
         uint32_t excl[2] = {v, c->src};
         block_evict_color_conflicts_excl(a, c->ev, chosen, by_block, excl, 2);
-        if (!preheader_copy) {
+        bool recolor_source = !preheader_copy || c->src_dies_at_copy;
+        if (recolor_source) {
           block_evict_color_conflicts_excl(a, c->eseg, chosen, by_block, excl,
                                            2);
           block_evict_color_conflicts_excl(a, c->srcseg, chosen, by_block,
                                            excl + 1, 1);
         }
         c->ev->color = chosen;
-        if (!preheader_copy) {
+        if (recolor_source) {
           c->eseg->color = chosen;
           c->srcseg->color = chosen;
         }
@@ -3005,8 +3001,7 @@ static void coalesce_loop_edges(const nyr_mach_func_t *mach,
       }
       bool carry_chain_ok =
           copy_len > 0 && carry_enabled && mach->vreg_len <= 1024 &&
-          !nested_loop &&
-          !loop_phi_has_call_use(mach, v) &&
+          !nested_loop && !loop_phi_has_call_use(mach, v) &&
           !loop_phi_region_has_call(mach, succ, reaches_h, nb, h, work);
       for (size_t k = 0; carry_chain_ok && k < copy_len; ++k)
         if (copies[k].edge > h && !copies[k].src_dies_at_copy &&
@@ -3273,8 +3268,8 @@ static void coalesce_segments(const nyr_mach_func_t *mach,
               ? mach->vreg_classes[x->vreg]
               : NYR_MACH_REGCLASS_GPR;
       if (x->end < mach->inst_len &&
-           inst_fixed_clobbers(mach, &mach->insts[x->end], cls,
-                               preserve_gpr_calls) != 0)
+          inst_fixed_clobbers(mach, &mach->insts[x->end], cls,
+                              preserve_gpr_calls) != 0)
         continue;
       if (segment_accepts_color(mach, y, a->color_count, x->color) &&
           !block_has_color_conflict(a, y, x->color, by_block)) {
@@ -3455,8 +3450,7 @@ static void coalesce_unchanged_dag_values(
       }
       const nyr_mach_block_t *block = &mach->blocks[b];
       for (size_t ii = 0; ii < block->inst_count; ++ii) {
-        const nyr_mach_inst_t *in =
-            &mach->insts[block->first_inst + ii];
+        const nyr_mach_inst_t *in = &mach->insts[block->first_inst + ii];
         if (in->opcode == NYR_MACH_CALL) {
           valid = false;
           break;
@@ -3720,9 +3714,8 @@ static void carry_loop_invariant_vectors(const nyr_mach_func_t *mach,
         }
         if (!ps || ps->color != color ||
             !coalesce_preg_reaches_edge(mach, ps, preserve_gpr_calls) ||
-            !segment_color_survives_clobbers(mach, ps,
-                                             NYR_MACH_REGCLASS_VECTOR, color,
-                                             preserve_gpr_calls))
+            !segment_color_survives_clobbers(mach, ps, NYR_MACH_REGCLASS_VECTOR,
+                                             color, preserve_gpr_calls))
           ok = false;
       }
       if (!ok || !entry)
@@ -3811,12 +3804,17 @@ static void recolor_evicted_locals(const nyr_mach_func_t *mach,
   }
 }
 
-static bool nyr_mach_regalloc_build_class_mode(const nyr_mach_func_t *mach,
-                                               nyr_mach_reg_class_t reg_class,
-                                               size_t color_count,
-                                               bool preserve_gpr_calls,
-                                               bool allow_rhs_tie,
-                                               nyr_mach_regalloc_t *out) {
+/*
+ * Set while rebuilding an allocation whose coalesced (carried) form failed
+ * verification. The plain form keeps edge copies and reloads, so it is always
+ * valid; losing it would send the whole register class to stack homes.
+ */
+static _Thread_local bool regalloc_retry_without_coalescing;
+
+static bool nyr_mach_regalloc_build_class_mode_once(
+    const nyr_mach_func_t *mach, nyr_mach_reg_class_t reg_class,
+    size_t color_count, bool preserve_gpr_calls, bool allow_rhs_tie,
+    nyr_mach_regalloc_t *out) {
   if (!mach || !out)
     return false;
   /*
@@ -3827,8 +3825,7 @@ static bool nyr_mach_regalloc_build_class_mode(const nyr_mach_func_t *mach,
   {
     char verr[256] = {0};
     if (!nyr_mach_verify(mach, 0, verr, sizeof(verr))) {
-      if (getenv("NYTRIX_TRACE_REGALLOC_FAIL"))
-      {
+      if (getenv("NYTRIX_TRACE_REGALLOC_FAIL")) {
         fprintf(stderr, "regalloc: machine verify failed: %s\n", verr);
         if (getenv("NYTRIX_TRACE_REGALLOC_DUMP"))
           nyr_mach_dump(mach, stderr);
@@ -4068,8 +4065,7 @@ static bool nyr_mach_regalloc_build_class_mode(const nyr_mach_func_t *mach,
   loop_depth = compute_loop_depth(nb, succ);
   bool colored =
       color_segments(mach, &a, loop_depth, reg_class, preserve_gpr_calls,
-                     allow_rhs_tie,
-                     clobber_sites, clobber_color_count);
+                     allow_rhs_tie, clobber_sites, clobber_color_count);
   free_clobber_sites(clobber_sites, clobber_color_count);
   clobber_sites = NULL;
   clobber_color_count = 0;
@@ -4090,16 +4086,18 @@ static bool nyr_mach_regalloc_build_class_mode(const nyr_mach_func_t *mach,
   regalloc_local_snapshot_t *local_snapshot =
       reg_class == NYR_MACH_REGCLASS_VECTOR ? regalloc_local_snapshot(&a)
                                             : NULL;
-  coalesce_segments(mach, &a, succ, pred, by_block, preserve_gpr_calls);
-  coalesce_unchanged_dag_values(mach, &a, succ, pred, by_block, reg_class,
-                                loop_depth);
-  coalesce_loop_edges(mach, &a, succ, pred, by_block, loop_depth,
-                      preserve_gpr_calls, reg_class);
+  if (!regalloc_retry_without_coalescing) {
+    coalesce_segments(mach, &a, succ, pred, by_block, preserve_gpr_calls);
+    coalesce_unchanged_dag_values(mach, &a, succ, pred, by_block, reg_class,
+                                  loop_depth);
+    coalesce_loop_edges(mach, &a, succ, pred, by_block, loop_depth,
+                        preserve_gpr_calls, reg_class);
+  }
   if (local_snapshot && by_block)
     recolor_evicted_locals(mach, &a, by_block, local_snapshot, reg_class,
                            preserve_gpr_calls);
   if (reg_class == NYR_MACH_REGCLASS_VECTOR && by_block &&
-      loop_phi_carry_enabled(reg_class))
+      !regalloc_retry_without_coalescing && loop_phi_carry_enabled(reg_class))
     carry_loop_invariant_vectors(mach, &a, pred, by_block, preserve_gpr_calls);
   free(local_snapshot);
   free_segment_by_block(mach, by_block);
@@ -4293,6 +4291,25 @@ fail:
   return false;
 }
 
+static bool nyr_mach_regalloc_build_class_mode(const nyr_mach_func_t *mach,
+                                               nyr_mach_reg_class_t reg_class,
+                                               size_t color_count,
+                                               bool preserve_gpr_calls,
+                                               bool allow_rhs_tie,
+                                               nyr_mach_regalloc_t *out) {
+  if (nyr_mach_regalloc_build_class_mode_once(mach, reg_class, color_count,
+                                              preserve_gpr_calls,
+                                              allow_rhs_tie, out))
+    return true;
+  if (!mach || !out || regalloc_retry_without_coalescing)
+    return false;
+  regalloc_retry_without_coalescing = true;
+  bool ok = nyr_mach_regalloc_build_class_mode_once(
+      mach, reg_class, color_count, preserve_gpr_calls, allow_rhs_tie, out);
+  regalloc_retry_without_coalescing = false;
+  return ok;
+}
+
 bool nyr_mach_regalloc_build_class(const nyr_mach_func_t *mach,
                                    nyr_mach_reg_class_t reg_class,
                                    size_t color_count,
@@ -4305,8 +4322,51 @@ bool nyr_mach_regalloc_build_x64_class(const nyr_mach_func_t *mach,
                                        nyr_mach_reg_class_t reg_class,
                                        size_t color_count,
                                        nyr_mach_regalloc_t *out) {
-  return nyr_mach_regalloc_build_class_mode(mach, reg_class, color_count,
-                                            false, true, out);
+  return nyr_mach_regalloc_build_class_mode(mach, reg_class, color_count, false,
+                                            true, out);
+}
+
+/*
+ * An encoder that reserves colors after allocation (x86-64 loop registers)
+ * evicts the ordinary segments that held them. A block-local segment, one
+ * defined and dying inside its block with no home traffic, has no cross-block
+ * contract, so it can take any other color that is free over its interval.
+ * `candidate[i]` marks such evicted segments; `color_blocked` reports the
+ * encoder's own reservations. Returns the number of segments recolored.
+ */
+size_t nyr_mach_regalloc_recolor_locals(
+    const nyr_mach_func_t *mach, nyr_mach_regalloc_t *a,
+    nyr_mach_reg_class_t reg_class, const unsigned char *candidate,
+    bool (*color_blocked)(void *ctx, int color, size_t start, size_t end),
+    void *ctx) {
+  if (!mach || !a || !candidate || !a->segment_len)
+    return 0;
+  size_vec_t *by_block = build_segment_by_block(mach, a);
+  if (!by_block)
+    return 0;
+  size_t recolored = 0;
+  for (size_t i = 0; i < a->segment_len; ++i) {
+    nyr_mach_live_segment_t *s = &a->segments[i];
+    if (!candidate[i] || s->color >= 0 || s->block >= a->block_count ||
+        s->start > s->end || s->end >= mach->inst_len)
+      continue;
+    for (int c = 0; (size_t)c < a->color_count; ++c) {
+      if (!segment_accepts_color(mach, s, a->color_count, c) ||
+          !segment_color_survives_clobbers(mach, s, reg_class, c, false) ||
+          block_has_color_conflict(a, s, c, by_block) ||
+          (color_blocked && color_blocked(ctx, c, s->start, s->end)))
+        continue;
+      s->color = c;
+      s->reload = false;
+      s->spill = false;
+      s->carried = s->acyclic_carried = false;
+      s->spill_reason = NYR_MACH_SPILL_NONE;
+      ++recolored;
+      break;
+    }
+  }
+  free_segment_by_block(mach, by_block);
+  return recolored;
 }
 
 bool nyr_mach_regalloc_build(const nyr_mach_func_t *mach, size_t color_count,

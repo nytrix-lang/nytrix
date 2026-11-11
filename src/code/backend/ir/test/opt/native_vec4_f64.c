@@ -1,3 +1,6 @@
+/*
+ * Native x86-64 vector-of-four f64 behavior checks against scalar results.
+ */
 #if defined(__linux__) && defined(__x86_64__)
 
 #include "base/util.h"

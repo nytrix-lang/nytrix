@@ -1,3 +1,6 @@
+/*
+ * Machine-code regression tests for compare and conditional-branch lowering.
+ */
 #include "code/backend/internal.h"
 #include "code/backend/ir/machine.h"
 

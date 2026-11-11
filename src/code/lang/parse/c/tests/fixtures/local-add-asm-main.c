@@ -1,5 +1,10 @@
+/*
+ * Fixture driver: verify a local aggregate counter updated by assembly.
+ */
 struct nyc_local_counter {
-  struct { long counter; } a;
+  struct {
+    long counter;
+  } a;
 };
 void nyc_local_add_probe(long, struct nyc_local_counter *);
 void nyc_local_sub_probe(long, struct nyc_local_counter *);

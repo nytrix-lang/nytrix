@@ -1,3 +1,6 @@
+/*
+ * Parser fixture: exercise conditional definitions in preprocessed C source.
+ */
 #define NYC_FEATURE_ENABLED
 
 #ifdef NYC_FEATURE_ENABLED

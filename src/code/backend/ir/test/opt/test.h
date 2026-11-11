@@ -1,3 +1,4 @@
+/* Public test-runner interface for compiler-linked NYIR optimizer tests. */
 #ifndef NYR_IR_OPT_TEST_H
 #define NYR_IR_OPT_TEST_H
 

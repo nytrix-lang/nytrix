@@ -1,3 +1,6 @@
+/*
+ * Fixture: initialize a static pointer with the address of its own storage.
+ */
 struct nyc_self_address_node;
 
 static struct nyc_self_address_node *nyc_self_address =

@@ -3,6 +3,7 @@
  * with timeouts, resource limits, and output capture for crash detection.
  */
 #include "core.h"
+#include "shared.h"
 #include <strings.h>
 
 #ifdef _WIN32
@@ -23,6 +24,58 @@ void proc_result_free(proc_result_t *r) {
   free(r->err);
   r->out = NULL;
   r->err = NULL;
+}
+
+static bool proc_path_exists(const char *path) {
+#ifdef _WIN32
+  struct _stat st;
+  return path && *path && _stat(path, &st) == 0;
+#else
+  struct stat st;
+  return path && *path && stat(path, &st) == 0;
+#endif
+}
+
+static bool proc_looks_like_nytrix_root(const char *path) {
+  char cmake[4096], src[4096], fuzz[4096], tests[4096], readme[4096];
+  if (!path || !*path
+#ifndef _WIN32
+      || path[0] != '/'
+#endif
+  )
+    return false;
+  ny_join_path(cmake, sizeof(cmake), path, "CMakeLists.txt");
+  ny_join_path(src, sizeof(src), path, "src");
+  ny_join_path(fuzz, sizeof(fuzz), path, "src/cmd/test/fuzz");
+  ny_join_path(tests, sizeof(tests), path, "etc/tests");
+  ny_join_path(readme, sizeof(readme), path, "README.md");
+  return proc_path_exists(cmake) && proc_path_exists(src) &&
+         proc_path_exists(fuzz) && proc_path_exists(tests) &&
+         proc_path_exists(readme);
+}
+
+static bool proc_find_nytrix_root_from_path(const char *start, char *out,
+                                            size_t out_sz) {
+  if (!start || !*start || !out || !out_sz)
+    return false;
+  char cur[4096];
+  snprintf(cur, sizeof(cur), "%s", start);
+  while (1) {
+    if (proc_looks_like_nytrix_root(cur)) {
+      snprintf(out, out_sz, "%s", cur);
+      return true;
+    }
+    char *sep = strrchr(cur, '/');
+#ifdef _WIN32
+    char *backslash = strrchr(cur, '\\');
+    if (!sep || (backslash && backslash > sep))
+      sep = backslash;
+#endif
+    if (!sep || sep == cur)
+      break;
+    *sep = '\0';
+  }
+  return false;
 }
 
 #ifdef _WIN32
@@ -48,82 +101,6 @@ static void drain_fd(int fd, str_buf_t *buf, bool *open_flag) {
     *open_flag = false;
     return;
   }
-}
-
-static bool proc_path_exists(const char *path) {
-  struct _stat st;
-  return path && *path && _stat(path, &st) == 0;
-}
-
-static bool proc_looks_like_nytrix_root(const char *path) {
-  char cmake[4096], src[4096], fuzz[4096], tests[4096], readme[4096];
-  if (!path || !*path)
-    return false;
-  ny_join_path(cmake, sizeof(cmake), path, "CMakeLists.txt");
-  ny_join_path(src, sizeof(src), path, "src");
-  ny_join_path(fuzz, sizeof(fuzz), path, "src\\cmd\\fuzz");
-  ny_join_path(tests, sizeof(tests), path, "etc\\tests");
-  ny_join_path(readme, sizeof(readme), path, "README.md");
-  return proc_path_exists(cmake) && proc_path_exists(src) &&
-         proc_path_exists(fuzz) && proc_path_exists(tests) &&
-         proc_path_exists(readme);
-}
-
-static bool proc_find_nytrix_root_from_path(const char *start, char *out,
-                                            size_t out_sz) {
-  if (!start || !*start || !out || !out_sz)
-    return false;
-  char cur[4096];
-  snprintf(cur, sizeof(cur), "%s", start);
-  while (1) {
-    if (proc_looks_like_nytrix_root(cur)) {
-      snprintf(out, out_sz, "%s", cur);
-      return true;
-    }
-    char *bslash = strrchr(cur, '\\');
-    char *slash = strrchr(cur, '/');
-    char *sep = bslash > slash ? bslash : slash;
-    if (!sep || sep == cur)
-      break;
-    *sep = '\0';
-  }
-  return false;
-}
-
-static bool proc_find_nytrix_root(char *const argv[], char *out,
-                                  size_t out_sz) {
-  const char *env = getenv("NYTRIX_ROOT");
-  if (env && *env && proc_find_nytrix_root_from_path(env, out, out_sz))
-    return true;
-
-  char exe[4096];
-  DWORD n = GetModuleFileNameA(NULL, exe, (DWORD)(sizeof(exe) - 1u));
-  if (n > 0 && n < sizeof(exe)) {
-    exe[n] = '\0';
-    if (proc_find_nytrix_root_from_path(exe, out, out_sz))
-      return true;
-  }
-
-  if (argv && argv[0] && *argv[0]) {
-    if (argv[0][0] == '\\' || (argv[0][1] == ':')) {
-      if (proc_find_nytrix_root_from_path(argv[0], out, out_sz))
-        return true;
-    } else {
-      char cwd_buf[4096], abs_buf[4096];
-      if (getcwd(cwd_buf, sizeof(cwd_buf))) {
-        ny_join_path(abs_buf, sizeof(abs_buf), cwd_buf, argv[0]);
-        if (proc_find_nytrix_root_from_path(abs_buf, out, out_sz))
-          return true;
-      }
-    }
-  }
-
-  const char *pwd = getenv("PWD");
-  if (pwd && *pwd && proc_find_nytrix_root_from_path(pwd, out, out_sz))
-    return true;
-  char cwd_buf[4096];
-  return getcwd(cwd_buf, sizeof(cwd_buf)) &&
-         proc_find_nytrix_root_from_path(cwd_buf, out, out_sz);
 }
 
 #else /* POSIX */
@@ -155,43 +132,7 @@ static void drain_fd(int fd, str_buf_t *buf, bool *open_flag) {
   }
 }
 
-static bool proc_path_exists(const char *path) {
-  struct stat st;
-  return path && *path && stat(path, &st) == 0;
-}
-
-static bool proc_looks_like_nytrix_root(const char *path) {
-  char cmake[4096], src[4096], fuzz[4096], tests[4096], readme[4096];
-  if (!path || !*path || path[0] != '/')
-    return false;
-  ny_join_path(cmake, sizeof(cmake), path, "CMakeLists.txt");
-  ny_join_path(src, sizeof(src), path, "src");
-  ny_join_path(fuzz, sizeof(fuzz), path, "src/cmd/test/fuzz");
-  ny_join_path(tests, sizeof(tests), path, "etc/tests");
-  ny_join_path(readme, sizeof(readme), path, "README.md");
-  return proc_path_exists(cmake) && proc_path_exists(src) &&
-         proc_path_exists(fuzz) && proc_path_exists(tests) &&
-         proc_path_exists(readme);
-}
-
-static bool proc_find_nytrix_root_from_path(const char *start, char *out,
-                                            size_t out_sz) {
-  if (!start || !*start || !out || !out_sz)
-    return false;
-  char cur[4096];
-  snprintf(cur, sizeof(cur), "%s", start);
-  while (1) {
-    if (proc_looks_like_nytrix_root(cur)) {
-      snprintf(out, out_sz, "%s", cur);
-      return true;
-    }
-    char *slash = strrchr(cur, '/');
-    if (!slash || slash == cur)
-      break;
-    *slash = '\0';
-  }
-  return false;
-}
+#endif /* _WIN32 */
 
 static bool proc_find_nytrix_root(char *const argv[], char *out,
                                   size_t out_sz) {
@@ -200,7 +141,11 @@ static bool proc_find_nytrix_root(char *const argv[], char *out,
     return true;
 
   char exe[4096];
+#ifdef _WIN32
+  DWORD n = GetModuleFileNameA(NULL, exe, (DWORD)(sizeof(exe) - 1u));
+#else
   ssize_t n = readlink("/proc/self/exe", exe, sizeof(exe) - 1u);
+#endif
   if (n > 0 && (size_t)n < sizeof(exe)) {
     exe[n] = '\0';
     if (proc_find_nytrix_root_from_path(exe, out, out_sz))
@@ -208,7 +153,12 @@ static bool proc_find_nytrix_root(char *const argv[], char *out,
   }
 
   if (argv && argv[0] && *argv[0]) {
-    if (argv[0][0] == '/') {
+#ifdef _WIN32
+    bool absolute = argv[0][0] == '\\' || argv[0][1] == ':';
+#else
+    bool absolute = argv[0][0] == '/';
+#endif
+    if (absolute) {
       if (proc_find_nytrix_root_from_path(argv[0], out, out_sz))
         return true;
     } else {
@@ -228,8 +178,6 @@ static bool proc_find_nytrix_root(char *const argv[], char *out,
   return getcwd(cwd_buf, sizeof(cwd_buf)) &&
          proc_find_nytrix_root_from_path(cwd_buf, out, out_sz);
 }
-
-#endif /* _WIN32 */
 
 static void proc_set_path(char *out, size_t out_sz, const char *root,
                           const char *leaf) {
@@ -633,12 +581,6 @@ char *normalize_output_pair(const char *out, const char *err) {
   return sb_take(&norm);
 }
 
-static int dbl_cmp(const void *a, const void *b) {
-  double x = *(const double *)a;
-  double y = *(const double *)b;
-  return (x > y) - (x < y);
-}
-
 void run_many_result_free(run_many_result_t *r) {
   free(r->out);
   free(r->err);
@@ -698,7 +640,7 @@ run_many_result_t run_binary_many_native(const char *root, const char *path,
     proc_result_free(&pr);
   }
   if (sample_count) {
-    qsort(samples, (size_t)sample_count, sizeof(double), dbl_cmp);
+    qsort(samples, (size_t)sample_count, sizeof(double), fuzz_double_cmp);
     if (sample_count % 2)
       r.median_ms = samples[sample_count / 2];
     else

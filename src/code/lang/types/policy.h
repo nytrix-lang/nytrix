@@ -1,3 +1,5 @@
+/* Versioned proof-obligation and proof-certificate contracts for type checking.
+ */
 #ifndef NY_TYPING_POLICY_H
 #define NY_TYPING_POLICY_H
 

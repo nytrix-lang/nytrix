@@ -1,3 +1,6 @@
+/*
+ * Fixture: call a function through an externally defined global pointer.
+ */
 extern int (*nyc_external_callback)(int);
 int nyc_external_callback_call(int value) {
   return nyc_external_callback(value);

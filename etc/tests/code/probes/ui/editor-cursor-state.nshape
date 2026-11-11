@@ -1,0 +1,24 @@
+shape editor-cursor-state {
+  family "probe-suite"
+  generator "regression"
+  template ny-test-case
+  expect compile_and_run
+  timeout 180
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect_stdout "editor-cursor-state-ok"
+  source ny <<'NY'
+use core
+use core.os.ui.render.viewer.editor as ed
+def st = ed.state([ed.buffer("probe.ny", "", "first\nsecond\nthird")])
+st["cursor_line"] = __box_i64(0)
+st["cursor_col"] = __box_i64(1)
+st = ed.clamp_cursor(st)
+assert(int(st.get("cursor_col")) == 1, "right movement survives normalization")
+st["cursor_line"] = __box_i64(1)
+st["cursor_col"] = __box_i64(1)
+st = ed.clamp_cursor(st)
+assert(int(st.get("cursor_line")) == 1, "down movement survives normalization")
+assert(int(st.get("cursor_col")) == 1, "column survives normalization")
+print("editor-cursor-state-ok")
+NY
+}

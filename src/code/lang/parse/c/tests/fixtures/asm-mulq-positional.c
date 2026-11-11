@@ -1,3 +1,6 @@
+/*
+ * Fixture: compile positional operand constraints for x86-64 inline assembly.
+ */
 int main(void) {
   unsigned long random = ~0UL;
   unsigned long raw;

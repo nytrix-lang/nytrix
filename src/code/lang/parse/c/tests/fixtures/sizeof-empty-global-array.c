@@ -1,3 +1,6 @@
+/*
+ * C parser fixture for sizeof on a zero-length global array.
+ */
 static const unsigned char hash_prefix_none[] = {};
 
 struct prefix_entry {

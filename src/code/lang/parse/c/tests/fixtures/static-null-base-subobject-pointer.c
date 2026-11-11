@@ -1,9 +1,12 @@
+/*
+ * Fixture: form a member pointer relative to a null-based aggregate address.
+ */
 struct null_base_object {
   unsigned prefix;
   int values[4];
 };
 
-#define NULL_BASE_VALUE(index_)                                                \
+#define NULL_BASE_VALUE(index_)                       \
   (&((struct null_base_object *)0)->values[(index_)])
 
 static int *const selected_value = NULL_BASE_VALUE(2);

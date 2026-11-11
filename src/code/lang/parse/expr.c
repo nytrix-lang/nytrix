@@ -2061,10 +2061,12 @@ static expr_t *parse_expr_impl(parser_t *p, int prec) {
 
   expr_t *left = parse_unary(p);
   while (true) {
-    /* A leading minus on the next statement is unary, not a continuation of
+    /*
+     * A leading minus on the next statement is unary, not a continuation of
      * the expression we just parsed.  Only apply this at the outer statement
      * expression level: recursive expressions preserve newlines inside
-     * grouped forms and after an operator. */
+     * grouped forms and after an operator.
+     */
     if (p->skipped_newline &&
         (p->stop_expr_at_newline ||
          (p->expr_depth == p->stmt_expr_depth && p->cur.kind == NY_T_MINUS)))

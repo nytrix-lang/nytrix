@@ -1,0 +1,86 @@
+shape context-menu {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "sys", "render"]
+  template ny-test-case
+  expect compile_and_run
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect_stdout "CONTEXT-MENU-OK"
+  source ny <<'NY'
+use core
+use core.os.ui.render.viewer.editor.prompt as prompt
+
+fn check(bool ok, str what) {
+   assert(ok, what)
+}
+
+def scopes = ["file", "dir", "git", "timeline", "editor", "outline", "terminal"]
+def SW = 800.0
+def SH = 600.0
+def W = 156.0
+def RH = 24.0
+
+mut si = 0
+while si < scopes.len {
+   def scope = scopes[si]
+   def entry = scope == "dir" ? {"scope": "file", "dir": true} : {"scope": scope}
+   mut st = prompt.context_open(prompt.context_state(), 0.0, 0.0, entry)
+   def rows = prompt.context_actions_for(st)
+   check(rows.len > 0, scope + ": has actions")
+
+   ;; table integrity: complete rows and unique ids
+   mut seen = []
+   mut ri = 0
+   while ri < rows.len {
+      def row = rows[ri]
+      check(row.len >= 5, scope + ": row " + str(ri) + " is complete")
+      check(len(to_str(row[0])) > 0 && len(to_str(row[1])) > 0 && len(to_str(row[4])) > 0, scope + ": row " + str(ri) + " has title, id and detail")
+      check(!seen.contains(to_str(row[1])), scope + ": id " + to_str(row[1]) + " is unique")
+      seen.append(to_str(row[1]))
+      ri += 1
+   }
+
+   ;; clamping keeps the whole menu on screen from every corner
+   def corners = [[0.0, 0.0], [SW, 0.0], [0.0, SH], [SW, SH], [SW * 0.5, SH * 0.5]]
+   mut ci = 0
+   while ci < corners.len {
+      mut c = prompt.context_open(prompt.context_state(), corners[ci][0], corners[ci][1], entry)
+      c = prompt.context_clamp(c, SW, SH, W, RH)
+      def mh = float(rows.len) * RH
+      check(prompt.context_x(c) >= 8.0 && prompt.context_x(c) + W <= SW - 8.0 + 0.001, scope + ": clamped x inside the window")
+      check(prompt.context_y(c) >= 8.0 && prompt.context_y(c) + mh <= SH - 8.0 + 0.001, scope + ": clamped y inside the window")
+      ;; every row is hittable at its centre, and hover agrees with hit
+      mut hi = 0
+      while hi < rows.len {
+         def mx = prompt.context_x(c) + W * 0.5
+         def my = prompt.context_y(c) + RH * (float(hi) + 0.5)
+         check(prompt.context_hit(c, mx, my, W, RH) == to_str(rows[hi][1]), scope + ": row " + str(hi) + " hit")
+         def hov = prompt.context_hover(c, mx, my, W, RH)
+         check(int(hov.get("idx", -1)) == hi && to_str(hov.get("id", "")) == to_str(rows[hi][1]), scope + ": row " + str(hi) + " hover agrees")
+         hi += 1
+      }
+      ;; edges: first pixel row hits row 0, one pixel above/left/right/below misses
+      def x0 = prompt.context_x(c)
+      def y0 = prompt.context_y(c)
+      check(prompt.context_hit(c, x0 + 1.0, y0, W, RH) == to_str(rows[0][1]), scope + ": top edge hits first row")
+      check(prompt.context_hit(c, x0 + 1.0, y0 - 1.0, W, RH) == "", scope + ": above misses")
+      check(prompt.context_hit(c, x0 - 1.0, y0 + 2.0, W, RH) == "", scope + ": left misses")
+      check(prompt.context_hit(c, x0 + W + 1.0, y0 + 2.0, W, RH) == "", scope + ": right misses")
+      check(prompt.context_hit(c, x0 + 1.0, y0 + float(rows.len) * RH + 1.0, W, RH) == "", scope + ": below misses")
+      ci += 1
+   }
+
+   ;; closed menu answers nothing
+   def closed = prompt.context_close(st)
+   check(prompt.context_hit(closed, 10.0, 10.0, W, RH) == "", scope + ": closed menu has no hit")
+   check(prompt.context_hover(closed, 10.0, 10.0, W, RH).len == 0, scope + ": closed menu has no hover")
+
+   ;; a window shorter than the menu must not push it off the top-left
+   mut tiny = prompt.context_open(prompt.context_state(), 100.0, 100.0, entry)
+   tiny = prompt.context_clamp(tiny, 120.0, 90.0, W, RH)
+   check(prompt.context_x(tiny) >= 8.0 && prompt.context_y(tiny) >= 8.0, scope + ": tiny window keeps a positive origin")
+   si += 1
+}
+print("CONTEXT-MENU-OK")
+NY
+}

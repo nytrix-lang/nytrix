@@ -1,0 +1,32 @@
+shape editor-state-owner {
+  family "probe-suite"
+  generator "regression"
+  template ny-test-case
+  expect compile_and_run
+  timeout 180
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect_stdout "owned-editor-state-ok"
+  source ny <<'NY'
+use core
+struct EditorState { dict data }
+def EditorState editor_state = EditorState(borrow(dict(8)))
+mut dict values = borrow(editor_state.data)
+fn state_get(str name) any { values.get(name, nil) }
+values["counter"] = 0
+values["panel"] = dict(4)
+state_get("panel")["open"] = false
+values["items"] = [1, 2]
+fn advance() int {
+   values["counter"] = int(state_get("counter")) + 1
+   state_get("panel")["open"] = true
+   values["items"] = state_get("items").append(3)
+   0
+}
+advance()
+assert(int(state_get("counter")) == 1, "frame counter persistence")
+assert(state_get("panel").get("open", false), "nested state persistence")
+assert(state_get("items").len == 3, "list state persistence")
+assert(int(editor_state.data.get("counter", -1)) == 1, "owner sees updated state")
+print("owned-editor-state-ok")
+NY
+}

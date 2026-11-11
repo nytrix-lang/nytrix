@@ -70,9 +70,19 @@ static int rt_simmd_x86_has_lzcnt(void) {
 }
 
 static int rt_simmd_x86_has_sha(void) {
+  /* CPUID is serializing and more expensive than short SHA-NI digests. CPU
+   * features are process-wide, so probe once instead of on every digest or
+   * compression call. Concurrent first callers may both probe; relaxed
+   * atomics safely publish the same immutable result. */
+  static atomic_int cached = 0;
+  int result = atomic_load_explicit(&cached, memory_order_relaxed);
+  if (result)
+    return result == 2;
   unsigned eax = 0, ebx = 0, ecx = 0, edx = 0;
-  return rt_simmd_x86_cpuid(7, 0, &eax, &ebx, &ecx, &edx) &&
-         ((ebx & (UINT32_C(1) << 29)) != 0);
+  int supported = rt_simmd_x86_cpuid(7, 0, &eax, &ebx, &ecx, &edx) &&
+                  ((ebx & (UINT32_C(1) << 29)) != 0);
+  atomic_store_explicit(&cached, supported ? 2 : 1, memory_order_relaxed);
+  return supported;
 }
 
 int64_t rt_simmd_has_feature(int64_t name_v) {
@@ -613,6 +623,80 @@ static void rt_simmd_sha256_block_sw(uint32_t state[8],
   state[7] += h;
 }
 
+#if (defined(__x86_64__) || defined(__i386__)) &&                              \
+    (defined(__GNUC__) || defined(__clang__))
+/*
+ * SHA-NI accelerates both the message schedule and round function.
+ * SHA256RNDS2 consumes two rounds and alternates the ABEF/CDGH state
+ * registers; SHA256MSG1/MSG2 produce each following group of four words.
+ */
+__attribute__((target("sha,ssse3,sse4.1"))) static void
+rt_simmd_sha256_block_sha(uint32_t state[8], const uint8_t block[64]) {
+  __m128i state0 = _mm_loadu_si128((const __m128i *)&state[0]);
+  __m128i state1 = _mm_loadu_si128((const __m128i *)&state[4]);
+  __m128i tmp = _mm_shuffle_epi32(state0, 0xb1);
+  state1 = _mm_shuffle_epi32(state1, 0x1b);
+  state0 = _mm_alignr_epi8(tmp, state1, 8);
+  state1 = _mm_blend_epi16(state1, tmp, 0xf0);
+  __m128i save0 = state0;
+  __m128i save1 = state1;
+
+  const __m128i byte_swap =
+      _mm_set_epi8(12, 13, 14, 15, 8, 9, 10, 11, 4, 5, 6, 7, 0, 1, 2, 3);
+  __m128i msg0 = _mm_shuffle_epi8(
+      _mm_loadu_si128((const __m128i *)(const void *)(block + 0)), byte_swap);
+  __m128i msg1 = _mm_shuffle_epi8(
+      _mm_loadu_si128((const __m128i *)(const void *)(block + 16)), byte_swap);
+  __m128i msg2 = _mm_shuffle_epi8(
+      _mm_loadu_si128((const __m128i *)(const void *)(block + 32)), byte_swap);
+  __m128i msg3 = _mm_shuffle_epi8(
+      _mm_loadu_si128((const __m128i *)(const void *)(block + 48)), byte_swap);
+
+  for (unsigned i = 0; i < 64; i += 4) {
+    __m128i wk = _mm_add_epi32(
+        msg0,
+        _mm_loadu_si128((const __m128i *)(const void *)&rt_simmd_sha256_k[i]));
+    state1 = _mm_sha256rnds2_epu32(state1, state0, wk);
+    state0 = _mm_sha256rnds2_epu32(state0, state1, _mm_shuffle_epi32(wk, 0x0e));
+    if (i + 4 < 64) {
+      __m128i next = _mm_sha256msg1_epu32(msg0, msg1);
+      next = _mm_add_epi32(next, _mm_alignr_epi8(msg3, msg2, 4));
+      next = _mm_sha256msg2_epu32(next, msg3);
+      msg0 = msg1;
+      msg1 = msg2;
+      msg2 = msg3;
+      msg3 = next;
+    }
+  }
+
+  state0 = _mm_add_epi32(state0, save0);
+  state1 = _mm_add_epi32(state1, save1);
+  tmp = _mm_shuffle_epi32(state0, 0x1b);
+  state1 = _mm_shuffle_epi32(state1, 0xb1);
+  state0 = _mm_blend_epi16(tmp, state1, 0xf0);
+  state1 = _mm_alignr_epi8(state1, tmp, 8);
+  _mm_storeu_si128((__m128i *)&state[0], state0);
+  _mm_storeu_si128((__m128i *)&state[4], state1);
+}
+#define NY_SIMMD_SHA_NI_COMPILED 1
+#else
+#define NY_SIMMD_SHA_NI_COMPILED 0
+#endif
+
+static void rt_simmd_sha256_block_dispatch(uint32_t state[8],
+                                           const uint8_t block[64],
+                                           int have_sha) {
+#if NY_SIMMD_SHA_NI_COMPILED
+  if (have_sha) {
+    rt_simmd_sha256_block_sha(state, block);
+    return;
+  }
+#else
+  (void)have_sha;
+#endif
+  rt_simmd_sha256_block_sw(state, block);
+}
+
 /*
  * Public API: SHA-256 block with hardware acceleration when available
  */
@@ -621,16 +705,10 @@ int64_t rt_simmd_sha256_block(int64_t state_v, int64_t block_v) {
   const uint8_t *block = (const uint8_t *)(uintptr_t)block_v;
 
   if (!state || !block)
-    return 0;
-
-  /*
-   * The current SHA-NI path does not yet arrange the round state correctly,
-   * and the ARM entry point is still a stub.  Keep the public block API
-   * correct on capable hosts by using the audited software implementation
-   * until those accelerated paths have executable vector coverage.
-   */
-  rt_simmd_sha256_block_sw(state, block);
-  return 1;
+    return NY_IMM_FALSE;
+  int have_sha = rt_simmd_x86_has_sha();
+  rt_simmd_sha256_block_dispatch(state, block, have_sha);
+  return NY_IMM_TRUE;
 }
 
 /*
@@ -645,11 +723,349 @@ int64_t rt_simmd_sha256_blocks(int64_t state_v, int64_t block_v,
   if (!state || !block || count == 0)
     return 0;
 
+  int have_sha = rt_simmd_x86_has_sha();
+
   for (uint64_t i = 0; i < count; ++i) {
-    rt_simmd_sha256_block(state_v, (int64_t)(block + i * 64));
+    rt_simmd_sha256_block_dispatch(state, block + i * 64, have_sha);
   }
 
   return (int64_t)count;
+}
+
+static uint8_t *rt_simmd_ptr(int64_t v);
+
+int64_t rt_simmd_sha256_digest_mem(int64_t data_v, int64_t len_v) {
+  const uint8_t *data = rt_simmd_ptr(data_v);
+  if (len_v < 0 || (!data && len_v != 0))
+    return 0;
+#if SIZE_MAX < INT64_MAX
+  if ((uint64_t)len_v > SIZE_MAX)
+    return 0;
+#endif
+  int64_t out_v = rt_list_new_sized_uninit(32);
+  if (!out_v)
+    return 0;
+  int64_t *out = (int64_t *)(uintptr_t)out_v;
+  uint32_t state[8] = {0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+                       0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19};
+  size_t len = (size_t)len_v;
+  size_t full_blocks = len / 64;
+  int have_sha = rt_simmd_x86_has_sha();
+  for (size_t i = 0; i < full_blocks; ++i)
+    rt_simmd_sha256_block_dispatch(state, data + i * 64, have_sha);
+
+  size_t rem = len % 64;
+  uint8_t tail[128] = {0};
+  if (rem)
+    memcpy(tail, data + full_blocks * 64, rem);
+  tail[rem] = 0x80;
+  size_t tail_blocks = rem < 56 ? 1 : 2;
+  uint64_t bit_len = (uint64_t)len_v * 8;
+  size_t length_off = tail_blocks * 64 - 8;
+  for (unsigned i = 0; i < 8; ++i)
+    tail[length_off + 7 - i] = (uint8_t)(bit_len >> (i * 8));
+  for (size_t i = 0; i < tail_blocks; ++i)
+    rt_simmd_sha256_block_dispatch(state, tail + i * 64, have_sha);
+
+  for (unsigned i = 0; i < 8; ++i) {
+    uint32_t word = state[i];
+    out[i * 4] = (word >> 24) & 255;
+    out[i * 4 + 1] = (word >> 16) & 255;
+    out[i * 4 + 2] = (word >> 8) & 255;
+    out[i * 4 + 3] = word & 255;
+  }
+  return out_v;
+}
+
+int64_t rt_simmd_sha256_digest_mem_into(int64_t data_v, int64_t len_v,
+                                        int64_t out_v) {
+  const uint8_t *data = rt_simmd_ptr(data_v);
+  if (len_v < 0 || (!data && len_v != 0) || out_v <= 16 ||
+      !rt_header_readable_cached((uintptr_t)out_v - 16, 16))
+    return NY_IMM_FALSE;
+#if SIZE_MAX < INT64_MAX
+  if ((uint64_t)len_v > SIZE_MAX)
+    return NY_IMM_FALSE;
+#endif
+  int64_t tag = 0, tagged_len = 0;
+  memcpy(&tag, (const void *)((uintptr_t)out_v - 8), sizeof(tag));
+  memcpy(&tagged_len, (const void *)((uintptr_t)out_v - 16),
+         sizeof(tagged_len));
+  if (tag != TAG_BYTES || !is_int(tagged_len) ||
+      rt_untag_v(tagged_len) < 32)
+    return NY_IMM_FALSE;
+
+  uint32_t state[8] = {0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+                       0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19};
+  size_t len = (size_t)len_v;
+  size_t full_blocks = len / 64;
+  int have_sha = rt_simmd_x86_has_sha();
+  for (size_t i = 0; i < full_blocks; ++i)
+    rt_simmd_sha256_block_dispatch(state, data + i * 64, have_sha);
+
+  size_t rem = len % 64;
+  uint8_t tail[128] = {0};
+  if (rem)
+    memcpy(tail, data + full_blocks * 64, rem);
+  tail[rem] = 0x80;
+  size_t tail_blocks = rem < 56 ? 1 : 2;
+  uint64_t bit_len = (uint64_t)len_v * 8;
+  size_t length_off = tail_blocks * 64 - 8;
+  for (unsigned i = 0; i < 8; ++i)
+    tail[length_off + 7 - i] = (uint8_t)(bit_len >> (i * 8));
+  for (size_t i = 0; i < tail_blocks; ++i)
+    rt_simmd_sha256_block_dispatch(state, tail + i * 64, have_sha);
+
+  uint8_t *out = (uint8_t *)(uintptr_t)out_v;
+  for (unsigned i = 0; i < 8; ++i) {
+    uint32_t word = state[i];
+    out[i * 4] = (uint8_t)(word >> 24);
+    out[i * 4 + 1] = (uint8_t)(word >> 16);
+    out[i * 4 + 2] = (uint8_t)(word >> 8);
+    out[i * 4 + 3] = (uint8_t)word;
+  }
+  return NY_IMM_TRUE;
+}
+
+static void rt_simmd_sha256_init(uint32_t state[8]) {
+  static const uint32_t initial[8] = {0x6a09e667, 0xbb67ae85, 0x3c6ef372,
+                                      0xa54ff53a, 0x510e527f, 0x9b05688c,
+                                      0x1f83d9ab, 0x5be0cd19};
+  memcpy(state, initial, sizeof(initial));
+}
+
+static void rt_simmd_sha256_finish(uint32_t state[8], const uint8_t *data,
+                                   size_t len, uint64_t prefix_len,
+                                   int have_sha, uint8_t out[32]) {
+  size_t full_blocks = len / 64;
+  for (size_t i = 0; i < full_blocks; ++i)
+    rt_simmd_sha256_block_dispatch(state, data + i * 64, have_sha);
+
+  size_t rem = len % 64;
+  uint8_t tail[128] = {0};
+  if (rem)
+    memcpy(tail, data + full_blocks * 64, rem);
+  tail[rem] = 0x80;
+  size_t tail_blocks = rem < 56 ? 1 : 2;
+  uint64_t bit_len = (prefix_len + (uint64_t)len) * 8;
+  size_t length_off = tail_blocks * 64 - 8;
+  for (unsigned i = 0; i < 8; ++i)
+    tail[length_off + 7 - i] = (uint8_t)(bit_len >> (i * 8));
+  for (size_t i = 0; i < tail_blocks; ++i)
+    rt_simmd_sha256_block_dispatch(state, tail + i * 64, have_sha);
+
+  for (unsigned i = 0; i < 8; ++i) {
+    uint32_t word = state[i];
+    out[i * 4] = (uint8_t)(word >> 24);
+    out[i * 4 + 1] = (uint8_t)(word >> 16);
+    out[i * 4 + 2] = (uint8_t)(word >> 8);
+    out[i * 4 + 3] = (uint8_t)word;
+  }
+}
+
+/* Return a direct span for strings and byte arrays, or copy an integer
+ * sequence into owned storage. Other element types use the language fallback
+ * so their int-conversion and error behavior stays unchanged. */
+static int rt_simmd_sha256_value_bytes(int64_t value, const uint8_t **bytes,
+                                       size_t *len, uint8_t **owned) {
+  *bytes = NULL;
+  *len = 0;
+  *owned = NULL;
+  if (is_v_str(value)) {
+    *bytes = (const uint8_t *)(uintptr_t)value;
+    *len = rt_tagged_str_len(value);
+    return 1;
+  }
+  if (rt_native_is_str(value)) {
+    *bytes = (const uint8_t *)(uintptr_t)value;
+    *len = (size_t)rt_sequence_len_safe(value);
+    return 1;
+  }
+
+  int64_t heap = rt_heap_object_ptr(value);
+  if (heap && rt_header_readable_cached((uintptr_t)heap - 16, 16) &&
+      *(const int64_t *)((uintptr_t)heap - 8) == TAG_BYTES) {
+    int64_t raw_len = *(const int64_t *)((uintptr_t)heap - 16);
+    if (is_int(raw_len))
+      raw_len = rt_untag_v(raw_len);
+    if (raw_len < 0)
+      return 0;
+    *bytes = (const uint8_t *)(uintptr_t)heap;
+    *len = (size_t)raw_len;
+    return 1;
+  }
+
+  int64_t n = rt_sequence_len_safe(value);
+  if (n <= 0 || (uint64_t)n > SIZE_MAX)
+    return 0;
+  uint8_t *copy = (uint8_t *)malloc((size_t)n);
+  if (!copy)
+    return 0;
+  for (int64_t i = 0; i < n; ++i) {
+    int64_t item = rt_tbuf_get_any(value, i, 0);
+    if (!is_int(item)) {
+      free(copy);
+      return 0;
+    }
+    copy[i] = (uint8_t)rt_untag_v(item);
+  }
+  *bytes = copy;
+  *len = (size_t)n;
+  *owned = copy;
+  return 1;
+}
+
+/* Fast HMAC-SHA256 over Ny byte strings/lists. The generic OpenSSL path
+ * remains the fallback for values requiring language-level int conversion. */
+static int64_t rt_simmd_sha256_hmac_value(int64_t key_v, int64_t data_v,
+                                          int bytes_result) {
+  const uint8_t *key = NULL, *data = NULL;
+  size_t key_len = 0, data_len = 0;
+  uint8_t *owned_key = NULL, *owned_data = NULL;
+  if (!rt_simmd_sha256_value_bytes(key_v, &key, &key_len, &owned_key) ||
+      !rt_simmd_sha256_value_bytes(data_v, &data, &data_len, &owned_data)) {
+    free(owned_key);
+    free(owned_data);
+    return 0;
+  }
+
+  uint8_t key_block[64] = {0};
+  if (key_len > sizeof(key_block)) {
+    uint32_t key_state[8];
+    uint8_t key_hash[32];
+    rt_simmd_sha256_init(key_state);
+    rt_simmd_sha256_finish(key_state, key, key_len, 0, rt_simmd_x86_has_sha(),
+                           key_hash);
+    memcpy(key_block, key_hash, sizeof(key_hash));
+  } else if (key_len) {
+    memcpy(key_block, key, key_len);
+  }
+
+  uint8_t ipad[64], opad[64];
+  for (size_t i = 0; i < sizeof(key_block); ++i) {
+    ipad[i] = key_block[i] ^ 0x36;
+    opad[i] = key_block[i] ^ 0x5c;
+  }
+  int have_sha = rt_simmd_x86_has_sha();
+  uint32_t inner_state[8], outer_state[8];
+  uint8_t inner_hash[32];
+  rt_simmd_sha256_init(inner_state);
+  rt_simmd_sha256_block_dispatch(inner_state, ipad, have_sha);
+  rt_simmd_sha256_finish(inner_state, data, data_len, 64, have_sha, inner_hash);
+  rt_simmd_sha256_init(outer_state);
+  rt_simmd_sha256_block_dispatch(outer_state, opad, have_sha);
+  uint8_t digest[32];
+  rt_simmd_sha256_finish(outer_state, inner_hash, sizeof(inner_hash), 64,
+                         have_sha, digest);
+
+  free(owned_key);
+  free(owned_data);
+  if (bytes_result) {
+    int64_t result_v = rt_bytes_new_raw(32);
+    if (!result_v)
+      return 0;
+    memcpy((void *)(uintptr_t)result_v, digest, sizeof(digest));
+    return result_v;
+  }
+  int64_t result_v = rt_list_new_sized_uninit(32);
+  if (!result_v)
+    return 0;
+  int64_t *result = (int64_t *)(uintptr_t)result_v;
+  for (size_t i = 0; i < sizeof(digest); ++i)
+    result[i] = digest[i];
+  return result_v;
+}
+
+int64_t rt_simmd_sha256_hmac_values(int64_t key_v, int64_t data_v) {
+  return rt_simmd_sha256_hmac_value(key_v, data_v, 0);
+}
+
+int64_t rt_simmd_sha256_hmac_bytes(int64_t key_v, int64_t data_v) {
+  return rt_simmd_sha256_hmac_value(key_v, data_v, 1);
+}
+
+int64_t rt_simmd_pbkdf2_sha256_values(int64_t key_v, int64_t salt_v,
+                                      int64_t iterations) {
+  if (!is_int(iterations))
+    return 0;
+  iterations = rt_untag_v(iterations);
+  if (iterations < 1)
+    return 0;
+  const uint8_t *key = NULL, *salt = NULL;
+  size_t key_len = 0, salt_len = 0;
+  uint8_t *owned_key = NULL, *owned_salt = NULL;
+  if (!rt_simmd_sha256_value_bytes(key_v, &key, &key_len, &owned_key) ||
+      !rt_simmd_sha256_value_bytes(salt_v, &salt, &salt_len, &owned_salt) ||
+      salt_len > SIZE_MAX - 4) {
+    free(owned_key);
+    free(owned_salt);
+    return 0;
+  }
+
+  uint8_t key_block[64] = {0};
+  int have_sha = rt_simmd_x86_has_sha();
+  if (key_len > sizeof(key_block)) {
+    uint32_t key_state[8];
+    uint8_t key_hash[32];
+    rt_simmd_sha256_init(key_state);
+    rt_simmd_sha256_finish(key_state, key, key_len, 0, have_sha, key_hash);
+    memcpy(key_block, key_hash, sizeof(key_hash));
+  } else if (key_len) {
+    memcpy(key_block, key, key_len);
+  }
+
+  uint8_t ipad[64], opad[64];
+  for (size_t i = 0; i < sizeof(key_block); ++i) {
+    ipad[i] = key_block[i] ^ 0x36;
+    opad[i] = key_block[i] ^ 0x5c;
+  }
+  uint32_t inner_base[8], outer_base[8];
+  rt_simmd_sha256_init(inner_base);
+  rt_simmd_sha256_block_dispatch(inner_base, ipad, have_sha);
+  rt_simmd_sha256_init(outer_base);
+  rt_simmd_sha256_block_dispatch(outer_base, opad, have_sha);
+
+  size_t first_len = salt_len + 4;
+  uint8_t *first = (uint8_t *)malloc(first_len ? first_len : 1);
+  if (!first) {
+    free(owned_key);
+    free(owned_salt);
+    return 0;
+  }
+  if (salt_len)
+    memcpy(first, salt, salt_len);
+  first[salt_len] = 0;
+  first[salt_len + 1] = 0;
+  first[salt_len + 2] = 0;
+  first[salt_len + 3] = 1;
+
+  uint8_t result[32], u[32], inner_hash[32];
+  uint32_t state[8];
+  memcpy(state, inner_base, sizeof(state));
+  rt_simmd_sha256_finish(state, first, first_len, 64, have_sha, inner_hash);
+  memcpy(state, outer_base, sizeof(state));
+  rt_simmd_sha256_finish(state, inner_hash, sizeof(inner_hash), 64, have_sha,
+                         result);
+  memcpy(u, result, sizeof(u));
+
+  for (int64_t i = 1; i < iterations; ++i) {
+    memcpy(state, inner_base, sizeof(state));
+    rt_simmd_sha256_finish(state, u, sizeof(u), 64, have_sha, inner_hash);
+    memcpy(state, outer_base, sizeof(state));
+    rt_simmd_sha256_finish(state, inner_hash, sizeof(inner_hash), 64, have_sha,
+                           u);
+    for (size_t j = 0; j < sizeof(result); ++j)
+      result[j] ^= u[j];
+  }
+
+  free(first);
+  free(owned_key);
+  free(owned_salt);
+  int64_t result_v = rt_bytes_new_raw(32);
+  if (!result_v)
+    return 0;
+  memcpy((void *)(uintptr_t)result_v, result, sizeof(result));
+  return result_v;
 }
 
 static uint8_t *rt_simmd_ptr(int64_t v) {
@@ -1957,10 +2373,10 @@ int64_t rt_simd_mat4_mul(int64_t a_lst, int64_t b_lst, int64_t o_lst) {
    */
   float A[16], B[16], Out[16];
   for (int i = 0; i < 16; i++) {
-    A[i] = (float)rt_any_to_f64(
-        rt_load_item_any(a_lst, rt_tag_v(i + a_offset)));
-    B[i] = (float)rt_any_to_f64(
-        rt_load_item_any(b_lst, rt_tag_v(i + b_offset)));
+    A[i] =
+        (float)rt_any_to_f64(rt_load_item_any(a_lst, rt_tag_v(i + a_offset)));
+    B[i] =
+        (float)rt_any_to_f64(rt_load_item_any(b_lst, rt_tag_v(i + b_offset)));
   }
   _mat4_mul_simd(A, B, Out);
   for (int i = 0; i < 16; i++) {

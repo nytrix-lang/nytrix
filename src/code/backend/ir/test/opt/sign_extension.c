@@ -1,3 +1,6 @@
+/*
+ * NYIR regression tests for signed integer extension semantics.
+ */
 #include "support.h"
 
 #include <stdint.h>

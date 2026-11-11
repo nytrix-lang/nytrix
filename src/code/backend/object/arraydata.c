@@ -1,3 +1,6 @@
+/*
+ * Materializes static array-table data and registers its runtime handles.
+ */
 #include "code/backend/internal.h"
 #include <nyr/layout.h>
 

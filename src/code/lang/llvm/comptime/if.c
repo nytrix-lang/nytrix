@@ -1,3 +1,6 @@
+/*
+ * LLVM-backed evaluator for compile-time conditional expressions.
+ */
 #include "code/lang/code.h"
 #include "code/lang/priv.h"
 

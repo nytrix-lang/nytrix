@@ -1,4 +1,9 @@
-struct nyc_sizeof_owner { unsigned long long items[40]; };
+/*
+ * C parser fixture for unparenthesized sizeof of an array member.
+ */
+struct nyc_sizeof_owner {
+  unsigned long long items[40];
+};
 int main(void) {
   struct nyc_sizeof_owner *owner = 0;
   return sizeof owner->items != 320 ||

@@ -1,3 +1,6 @@
+/*
+ * C parser fixture for function attributes on an inline function definition.
+ */
 static inline int __attribute__((__warn_unused_result__))
 nyc_must_check(int value) {
   return value;
@@ -127,10 +130,10 @@ unsigned int nyc_typeof_callback_result(struct nyc_callback_ops *ops,
   typeof(callback) callback_again = callback;
   return 1U ? 1U : callback_again(context);
 }
-#define NYC_READ_ONCE(value)                                                   \
-  ({                                                                           \
-    typeof(_Generic((value), default: value)) __val = (value);                 \
-    (*(const volatile typeof(_Generic((__val), default: __val)) *)&__val);     \
+#define NYC_READ_ONCE(value)                                               \
+  ({                                                                       \
+    typeof(_Generic((value), default: value)) __val = (value);             \
+    (*(const volatile typeof(_Generic((__val), default: __val)) *)&__val); \
   })
 unsigned int
 nyc_statement_expression_callback_result(struct nyc_callback_ops *ops,

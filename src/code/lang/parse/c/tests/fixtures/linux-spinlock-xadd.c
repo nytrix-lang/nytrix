@@ -1,3 +1,6 @@
+/*
+ * Fixture: implement an atomic spinlock increment with x86 XADD.
+ */
 static unsigned long add_return(unsigned long *counter, unsigned long value) {
   __asm__ volatile("xaddq %[tmp], %[var]"
                    : [tmp] "+r"(value), [var] "+m"(*counter)

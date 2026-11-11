@@ -1,0 +1,20 @@
+shape render_camera_native_compare {
+  family "probe-suite"
+  generator "regression"
+  features [ny render camera native compare]
+  template ny-test-case
+  timeout 120
+  flags_matrix "--native-only -O0 --nyr-check=verify,oracle --inspect"
+  expect compile_and_run
+  expect_stdout "RENDER-CAMERA-NATIVE-COMPARE-OK"
+  source ny <<'NY'
+use core
+use core.os.ui.render.camera as camera
+
+def pose = camera.fit_camera_space_pose_margin(
+   1.0, 2.0, 3.0, 2.0, 4.0, 6.0, 60.0, 16.0 / 9.0, 0.0, 0.0)
+assert(is_dict(pose), "camera fitting returns a pose")
+assert(float(pose.get("z", 0.0)) > 3.0, "camera fit faces the scene")
+print("RENDER-CAMERA-NATIVE-COMPARE-OK")
+NY
+}

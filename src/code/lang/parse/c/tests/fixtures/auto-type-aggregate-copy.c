@@ -1,3 +1,6 @@
+/*
+ * C parser fixture for inferred aggregate types and structure copying.
+ */
 struct nyc_auto_pair {
   long left;
   long right;

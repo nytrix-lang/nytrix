@@ -1,3 +1,6 @@
+/*
+ * Parser/backend fixture for scalar floating-point arithmetic.
+ */
 float c_float_roundtrip(float value) {
   float result = value + 0.5f;
   return result;

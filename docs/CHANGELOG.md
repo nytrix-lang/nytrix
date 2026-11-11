@@ -25,9 +25,60 @@ artifacts, where mentioned, are not a fresh test of the current checkout.
 
 ### Compiler and backends
 
+- Native reachability now trusts the frontend's resolved builtin-operator
+  facts, avoiding repeated module/impl scans for ordinary arithmetic.
+  Explicitly selected overloads and unresolved expressions retain target
+  discovery; operator regressions include overloaded call-result operands.
+- Fixed incremental dependency inventories: cold/forced builds now schedule
+  inputs, removed providers invalidate surviving consumers, bare module names
+  match `.ny` files, and ambiguous basenames retain all candidate dependencies.
+  Graph reload no longer reads a freed pathname; cache roots follow the current
+  configuration, and allocation/publication failures are reported.
+- HM unification snapshots type-detail/deep tracing policy once per pass,
+  avoiding repeated debug-policy calls for each constraint while preserving
+  verbose constraint and substitution output.
+- Native compile-time cleanup indexes verifier definitions once per verification,
+  avoids PHI/select/local-store analyses when their instructions are absent, and
+  indexes immediate module imports without changing re-export precedence.
+  An isolated three-pair Pong object-compilation comparison reduced median wall
+  time from 40.840 s to 39.788 s (2.6%) with byte-identical objects.
 - Native x86-64 lowering improved register allocation, call-boundary handling,
   signed arithmetic, address/base forwarding, immediate multiply encoding, and
   several miscompilation/crash cases found in focused regressions.
+- Refinement lookup now indexes the main and generated program trees while
+  preserving traversal precedence, avoiding repeated full-AST scans for
+  distinct refinement names.
+- Exported-member checks scan module declarations directly instead of
+  allocating and deduplicating a temporary export-name list.
+- Module alias resolution writes bounded path copies and joins directly,
+  avoiding formatted-I/O calls in its recursive lookup path.
+- Native module-member lookup caches compare the stored key hash before
+  comparing member strings, avoiding string scans on set collisions while
+  retaining exact module/member verification.
+- Expanded the four-way module-member lookup cache from 16,384 to 65,536
+  entries after cold Pong profiling showed repeated imported-member tree scans;
+  the cache-disabled trace recorded 7.4% fewer such scans, but no total
+  compile-time speedup is established.
+- x86-64 home DSE now skips reference-buffer allocation and byte scanning when
+  a function has no scalar homes or the probe emits no home stores; the probe
+  encoder is still reused, preserving emitted bytes.
+- Native list append dispatch now gives f32/f64 classification precedence over
+  stale raw-integer ABI facts, preventing floating values from reaching the
+  raw-i64 append entry. Terminal/editor native fixtures and integer-append
+  regressions pass.
+- HM environment lookup caches positive and negative results, checking
+  appended bindings before reusing either result to preserve shadowing and
+  syntax-context behavior across cloned environments.
+- HM unification now skips constraint type-string formatting and allocation
+  when type-detail tracing is disabled; `-vvvv --stop-after=hm` still emits
+  constraint and substitution details.
+- HM function-scheme inference reuses its temporary environment buffer across
+  sequential schemes instead of allocating and freeing a buffer per function.
+- HM environment clones reserve their final capacity once and copy entries in
+  bulk instead of growing the vector one binding at a time.
+- Loop-phi register coalescing now recolors a preheader source only when it
+  dies at the copy and candidate-color constraints pass; call-crossing and
+  non-dying values retain their existing register/home behavior.
 - NYR and LLVM execution paths received targeted correctness and performance
   work, including typed-buffer/store behavior, inlining/splice budget handling,
   block layout guards, range/memory facts, and runtime fast paths where safe.
@@ -48,12 +99,37 @@ artifacts, where mentioned, are not a fresh test of the current checkout.
 - Fixed targeted semantic/lowering issues involving partial application and
   currying paths, callback/effect inference, dynamic indexing cases, and
   ABI-sensitive call lowering.
+- Fixed NYR lowering for integer conversion of dynamic-list elements, tagged
+  floating-point builtin returns, raw-integer `append` results, and list
+  copy-on-write aliases mutated inside loops; the affected regression fixtures
+  pass their configured execution variants.
+- Fixed DCE's unreachable-instruction removal to erase in reverse index order,
+  preserving original CFG-to-instruction mappings while compacting SSA.
+- Vectorized loop reductions now initialize unused NYIR operands to the
+  sentinel value, so later SSA compaction does not treat zero as a live value.
 
 ### Runtime and standard library
 
 - Fixed correctness issues in string/list/buffer operations, hashing/crypto
   helpers, subprocess/process handling, terminal and UI behavior, audio
   resource loading, HTTP handling, and platform-specific bridges.
+- Mock-renderer CPU surfaces are now freed when switching to a hardware
+  renderer, on failed hardware initialization, and on close/reinitialization.
+- Mock fast-fill skips are disabled during auto-dump, frame-hash, and UI replay
+  capture so those captures retain the clear color and rendered pixels.
+- Terminal renderer readback buffers are released through a deferred,
+  type-checked cleanup helper, including when ANSI conversion exits early.
+- The editor's headless mock exit now uses the render facade's exported
+  `close_window` API.
+- Editor line limits now derive from the current measured body-font advance
+  instead of a fixed 7.5-pixel cell width.
+- Fixed AOT UI font registration by keeping the module-level font counter
+  explicitly typed; added O2 coverage and verified the Pong font load on the
+  native Vulkan path. Cached exact-pointer SSO readability probes with
+  lifecycle invalidation, reducing repeated runtime address checks.
+- Added pure-Ny AU ADPCM (G.721/G.722/G.723), native FLAC/Ogg FLAC, and MPEG
+  Layers I–III decoding. Compressed streams support frame-range reads and
+  seeking without requiring libsndfile for those formats.
 - Preserved runtime contracts in focused fixes, including typed-buffer store
   return values and native lowering behavior for affected paths.
 - Reduced avoidable overhead in selected hot paths (for example, hashing/hex

@@ -1,3 +1,6 @@
+/*
+ * Fixture: preserve the function name in static storage through __func__.
+ */
 #include <string.h>
 
 static const char *function_name(void) {

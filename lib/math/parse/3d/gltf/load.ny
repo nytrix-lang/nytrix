@@ -275,7 +275,9 @@ fn parse_gltf_str(any json_str, str base_path="", any binary_override=0) dict {
       while bi < buffers_n {
          def buf = buffers[bi]
          def uri = buf.get("uri", "")
-         mut loaded = 0
+         ;; Dynamic local: it starts as 0 but receives a buffer dict, and an
+         ;; inferred int local would keep the dict as a raw pointer.
+         mut any loaded = 0
          if bi == 0 && binary_override { loaded = binary_override } elif is_str(uri) && uri.len > 0 { loaded = _gltf_load_buffer_uri(uri, base_path) }
          buffer_data = buffer_data.append(loaded)
          bi += 1

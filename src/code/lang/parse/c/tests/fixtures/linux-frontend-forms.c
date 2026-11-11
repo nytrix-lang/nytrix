@@ -1,22 +1,38 @@
-struct nyc_atomic { int counter; };
-struct nyc_lock { struct nyc_atomic tail; };
+/*
+ * Fixture: parse representative Linux-kernel aggregate and declaration forms.
+ */
+struct nyc_atomic {
+  int counter;
+};
+struct nyc_lock {
+  struct nyc_atomic tail;
+};
 typedef unsigned long nyc_regset_t[4];
 static char nyc_storage[4] = "abc";
-static const unsigned int __attribute__((aligned(64)))
-    nyc_aligned_values[2] = {1, 2};
+static const unsigned int
+    __attribute__((aligned(64))) nyc_aligned_values[2] = {1, 2};
 static char *nyc_current = nyc_storage;
 static unsigned long nyc_fallback;
 typedef long long nyc_long_long;
 static nyc_long_long nyc_global_long_long;
 static int nyc_set_atomic(struct nyc_atomic *value) {
-  value->counter = 17; return value->counter;
+  value->counter = 17;
+  return value->counter;
 }
 static int nyc_read_regset(nyc_regset_t *regs) {
-  (*regs)[0] = 7; return (*regs)[0] != 7;
+  (*regs)[0] = 7;
+  return (*regs)[0] != 7;
 }
 static int nyc_statement_expression_local_label(int exit_early) {
-  return ({ __label__ done; int value = 0; if (exit_early) goto done;
-            value = 41; done: value + 1; });
+  return ({
+    __label__ done;
+    int value = 0;
+    if (exit_early)
+      goto done;
+    value = 41;
+  done:
+    value + 1;
+  });
 }
 static int nyc_static_matrix(void) {
   enum { nyc_audio_type, nyc_spdif_type };
@@ -43,9 +59,7 @@ static int nyc_static_local_assignment(void) {
 }
 static int nyc_pragma_loop(void) {
   int count = 0;
-  _Pragma("GCC unroll 2")
-  for (int i = 0; i < 2; ++i)
-    ++count;
+  _Pragma("GCC unroll 2") for (int i = 0; i < 2; ++i)++ count;
   return count != 2;
 }
 static int nyc_builtin_ctz(void) {
@@ -70,10 +84,7 @@ static int nyc_cpuid_partial_outputs(void) {
   unsigned int leaf1_edx = 0;
   unsigned int leaf7_ebx = 0;
   unsigned int leaf7_ecx = 0;
-  __asm__ volatile("cpuid"
-                   : "=a"(max_leaf)
-                   : "a"(0)
-                   : "ebx", "ecx", "edx");
+  __asm__ volatile("cpuid" : "=a"(max_leaf) : "a"(0) : "ebx", "ecx", "edx");
   if (max_leaf == 0)
     return 1;
   __asm__ volatile("cpuid"
@@ -84,16 +95,18 @@ static int nyc_cpuid_partial_outputs(void) {
                    : "=a"(max_leaf), "=b"(leaf7_ebx), "=c"(leaf7_ecx)
                    : "a"(7), "c"(0)
                    : "edx");
-  return max_leaf == 0 && leaf1_ecx == 0 && leaf1_edx == 0 &&
-         leaf7_ebx == 0 && leaf7_ecx == 0;
+  return max_leaf == 0 && leaf1_ecx == 0 && leaf1_edx == 0 && leaf7_ebx == 0 &&
+         leaf7_ecx == 0;
 }
 static int nyc_dynamic_choose_expr(unsigned int value) {
   return __builtin_choose_expr(__builtin_constant_p(value), 99, value + 3) !=
          value + 3;
 }
 static int nyc_generic_unsigned_char_pointer(void) {
-  return _Generic((const unsigned char *)0, const char *: 1,
-                  const unsigned char *: 2, default: 3) != 2;
+  return _Generic((const unsigned char *)0,
+             const char *: 1,
+             const unsigned char *: 2,
+             default: 3) != 2;
 }
 static int nyc_generic_long_long(void) {
   nyc_long_long value = 0;
@@ -104,8 +117,7 @@ static int nyc_generic_long_long_parameter(nyc_long_long value) {
   return _Generic(value, long: 1, long long: 2, default: 3) != 2;
 }
 static int nyc_generic_global_long_long(void) {
-  return _Generic(nyc_global_long_long, long: 1, long long: 2, default: 3) !=
-         2;
+  return _Generic(nyc_global_long_long, long: 1, long long: 2, default: 3) != 2;
 }
 static int nyc_aggregate_array_copy(struct nyc_atomic *source) {
   struct nyc_atomic values[2] = {*source};
@@ -116,9 +128,7 @@ static void nyc_guard_release(int *held) { nyc_guard_calls += *held; }
 static int nyc_scoped_guard(int value) {
   int result = 0;
   for (int held __attribute__((__cleanup__(nyc_guard_release))) = value; 1;
-       ({
-         goto nyc_guard_done;
-       }))
+       ({ goto nyc_guard_done; }))
     if (0) {
     nyc_guard_done:
       break;
@@ -127,7 +137,9 @@ static int nyc_scoped_guard(int value) {
   return result != value || nyc_guard_calls != value;
 }
 typedef unsigned int nyc_u32;
-struct nyc_regs { int x; };
+struct nyc_regs {
+  int x;
+};
 static void nyc_irq_handler(struct nyc_regs *regs, nyc_u32 vector);
 static int nyc_function_pointer_compatible(struct nyc_regs *regs) {
   nyc_u32 vector = 0;
@@ -213,14 +225,17 @@ int main(void) {
     return 31;
   if (nyc_call_through_returned_member())
     return 32;
-  unsigned long *selected = _Generic((void *)0,
-      void *: &(unsigned long){ 42 }, default: &nyc_fallback);
+  unsigned long *selected =
+      _Generic((void *)0, void *: &(unsigned long){42}, default: &nyc_fallback);
   lock.tail.counter = 0;
   nyc_current += 1;
   nyc_current[1] = 'Z';
-  if (nyc_set_atomic(&lock.tail) != 17) return 1;
-  if (nyc_read_regset(&nyc_regs) || *selected != 42) return 2;
+  if (nyc_set_atomic(&lock.tail) != 17)
+    return 1;
+  if (nyc_read_regset(&nyc_regs) || *selected != 42)
+    return 2;
   if (nyc_statement_expression_local_label(1) != 1 ||
-      nyc_statement_expression_local_label(0) != 42) return 4;
+      nyc_statement_expression_local_label(0) != 42)
+    return 4;
   return nyc_storage[2] != 'Z' ? 3 : 0;
 }

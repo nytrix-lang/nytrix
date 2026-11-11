@@ -1,3 +1,6 @@
+/*
+ * C parser fixture for alignment of local aggregate objects.
+ */
 typedef struct {
   unsigned long long words[2];
 } key_t;

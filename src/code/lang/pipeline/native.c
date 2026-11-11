@@ -1,3 +1,6 @@
+/*
+ * Native execution pipeline bridging parsed programs to backend targets.
+ */
 #include "code/lang/pipeline/native.h"
 #include "code/backend/ast.h"
 #include "code/lang/pipeline/vm.h"
@@ -32,21 +35,21 @@ static void *ny_pipeline_resolve_runtime_symbol(void *userdata,
     if (runtime_name)
       return ny_pipeline_resolve_runtime_symbol(userdata, runtime_name);
   }
-#define RT_DEF(public_name, implementation, args, sig, doc)                    \
-  if (strcmp(name, public_name) == 0 || strcmp(name, #implementation) == 0)    \
+#define RT_DEF(public_name, implementation, args, sig, doc)                 \
+  if (strcmp(name, public_name) == 0 || strcmp(name, #implementation) == 0) \
     return (void *)(uintptr_t)(implementation);
-#define RT_DEF_F64(public_name, implementation, args, sig, doc)                \
-  if (strcmp(name, public_name) == 0 || strcmp(name, #implementation) == 0)    \
+#define RT_DEF_F64(public_name, implementation, args, sig, doc)             \
+  if (strcmp(name, public_name) == 0 || strcmp(name, #implementation) == 0) \
     return (void *)(uintptr_t)(implementation);
-#define RT_GV(public_name, implementation, type, doc)                          \
-  if (strcmp(name, public_name) == 0 || strcmp(name, #implementation) == 0)    \
+#define RT_GV(public_name, implementation, type, doc)                       \
+  if (strcmp(name, public_name) == 0 || strcmp(name, #implementation) == 0) \
     return (void *)&implementation;
 #include "code/backend/runtime/defs.h"
 #undef RT_GV
 #undef RT_DEF_F64
 #undef RT_DEF
-#define NY_RUNTIME_HELPER(public_name, implementation)                         \
-  if (strcmp(name, #implementation) == 0 || strcmp(name, public_name) == 0)    \
+#define NY_RUNTIME_HELPER(public_name, implementation)                      \
+  if (strcmp(name, #implementation) == 0 || strcmp(name, public_name) == 0) \
     return (void *)(uintptr_t)(implementation);
   NY_RUNTIME_HELPER("rt_malloc_i64", rt_malloc_i64)
   NY_RUNTIME_HELPER("rt_malloc_raw_i64", rt_malloc_raw_i64)

@@ -1,0 +1,68 @@
+shape ogg_flac_reference_and_stream_boundaries {
+  family "runtime/system/sound"
+  generator "embedded"
+  features ["sound", "flac", "ogg", "stream", "crc"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.math.bin as bin
+use core.os as os
+use core.os.sound.flac as flac
+use core.os.sound.stream as stream
+use core.os.sound.res as res
+;; FFmpeg 63.1.102: 440 Hz, 8000 Hz mono, 960 PCM frames, Ogg FLAC.
+def b64 = "T2dnUwACAAAAAAAAAABTEDbIAAAAANatzPIBM39GTEFDAQAAAWZMYUMAAAAiA8ADwAABpgABpgH0APAAAAPAUDOCCI4YYbvjvEpE0LOps09nZ1MAAAAAAAAAAAAAUxA2yAEAAAAGjyPmATCEAAAsDAAAAExhdmY2My4xLjEwMgEAAAAUAAAAZW5jb2Rlcj1MYXZmNjMuMS4xMDJPZ2dTAATAAwAAAAAAAFMQNsgCAAAAcFIpnQL/p//4dAgAA7+eTgAABWsKMg3FD7YPzQ4FCpTmLWSlxD7X+DgU34ghkL41AAFNMoEQkCIBw0iESESBQkhT2cKEhJyIETwpDAoHCRCynCTApCoVCCEoZDMIgWIEElIYFA0DELoZJCZKFuTAiBklDSIRJYFCYZLkQ0IUIUAsKaZQIhIEQDhpEIkIkChJCns4UJCTkQInhSGBQOEiFlOEmBSFQqEEJQyGYRAsQIJKQwKBoGIXQySEyULcmBEDJKGkQiSwKEwyXIhoQoQoBYU0ygRCQIgHDSIRIRIFCSFPZwoSEnIgRPCkMCgcJELKcJMCkKhUIIShkMwiBYgQSUhgUDQMQuhkkJkoW5MCIGSUNIhElgUJhkuRDQhQhQCwpplAiEgRAOGkQiQiQKEkKezhQkJORAieFIYFA4SIWU4SYFIVCoQQlDIZhECxAgkpDAoGgYhdDJITJQtyYEQMkoaRCJLAoTDJciGhChCgFhTTKBEJAiAcNIhEhEgUJIU9nChISciBE8KQwKBwkQspwkwKQqFQghKGQzCIFiBBJSGBQNAxC6GSQmShbpPR"
+def octets = bin.base64_to_bytes(b64)
+def data = bytes(octets.len)
+mut i = 0
+while i < octets.len { store8(data, int(octets[i]), i) i += 1 }
+def decoded = flac.decode_bytes(data)
+assert(is_list(decoded), "pure Nytrix Ogg FLAC decodes")
+def meta = decoded.get(1)
+assert(int(meta.get("total_frames")) == 960 && int(meta.get("channels")) == 1 &&
+   int(meta.get("rate")) == 8000, "Ogg FLAC reference metadata")
+def expected = [0,1387,2610,3525,2407,1143,-257,-1626,-1972,-3071,-3807,-4093]
+def positions = [0,1,2,3,80,81,82,83,956,957,958,959]
+i = 0
+while i < positions.len {
+   assert(load16(meta.get("ptr"), int(positions[i]) * 2) == (int(expected[i]) & 65535),
+      "Ogg FLAC PCM matches FFmpeg reference")
+   i += 1
+}
+def path = os.temp_dir() + "/ny-ogg-flac-" + to_str(os.pid()) + ".oga"
+unwrap(os.file_write(path, data))
+def resource = res.load(path)
+assert(is_list(resource) && memcmp(resource.get(1).get("ptr"), meta.get("ptr"), 1920) == 0,
+   "Ogg FLAC resource loading uses the pure decoder")
+def st = stream.open(path)
+assert(is_dict(st) && stream.length(st) == 960, "Ogg FLAC stream length")
+assert(stream.seek(st, 80), "Ogg FLAC seeks")
+def part = stream.read_range(st, 956, 10)
+assert(is_list(part) && int(part.get(1).get("total_frames")) == 4 &&
+   stream.tell(st) == 80, "range clips at EOF without moving cursor")
+i = 0
+while i < 8 {
+   assert(load8(part.get(1).get("ptr"), i) == load8(meta.get("ptr"), 1912 + i), "Ogg FLAC tail range PCM")
+   i += 1
+}
+free(part.get(1).get("ptr"))
+def out = malloc(8)
+def got = stream.read(st, out, 4)
+assert(got == 4 && stream.tell(st) == 84 &&
+   load16(out, 0) == 2407 && load16(out, 4) == (65535 - 256), "Ogg FLAC cursor PCM")
+free(out)
+def eof = stream.read_range(st, 960, 10)
+assert(is_list(eof) && int(eof.get(1).get("total_frames")) == 0, "Ogg FLAC empty EOF range")
+free(eof.get(1).get("ptr"))
+assert(stream.read_range(st, -1, 1) == 0, "negative FLAC range rejects")
+assert(stream.close(st) && !stream.close(st), "FLAC close state transition")
+assert(stream.read_range(st, 0, 1) == 0, "closed FLAC stream rejects ranges")
+store8(data, load8(data, data.len - 1) ^ 1, data.len - 1)
+assert(flac.decode_bytes(data) == 0, "Ogg page CRC corruption rejects")
+free(meta.get("ptr"), resource.get(1).get("ptr"))
+unwrap(os.file_remove(path))
+print("OGG-FLAC-REFERENCE-OK")
+NY
+}

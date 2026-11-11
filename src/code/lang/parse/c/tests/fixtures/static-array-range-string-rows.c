@@ -1,3 +1,7 @@
+/*
+ * Fixture: combine GNU range designators with string-literal row
+ * initialization.
+ */
 int main(void) {
   static const char names[5][3] = {
       [0 ... 4] = "??",

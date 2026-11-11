@@ -37,8 +37,8 @@
  * cache entries remain valid across CALL instructions.
  */
 static int x64_gpr_cached_off[6] = {-1, -1, -1, -1, -1, -1};
-static const char *const x64_gpr_names[6] = {"%rbx", "%r12", "%r13", "%r14",
-                                             "%r15", "%r10"};
+static const char *const x64_gpr_names[6] = {"%rbx", "%r12", "%r13",
+                                             "%r14", "%r15", "%r10"};
 
 enum {
   NY_X64_ASM_GET_USER = -24,
@@ -190,14 +190,12 @@ static bool ny_x64_nir_inst_uses_value(const nyr_inst_t *in, int value_id) {
 static bool ny_x64_nir_try_const_i32(ny_x64_nir_ctx_t *c, int value_id,
                                      size_t use_idx, int64_t *out);
 
-static bool ny_x64_nir_root_less(size_t lhs, size_t rhs,
-                                      const size_t *first) {
-  return first[lhs] < first[rhs] ||
-         (first[lhs] == first[rhs] && lhs < rhs);
+static bool ny_x64_nir_root_less(size_t lhs, size_t rhs, const size_t *first) {
+  return first[lhs] < first[rhs] || (first[lhs] == first[rhs] && lhs < rhs);
 }
 
 static void ny_x64_nir_root_sift(size_t *order, size_t start, size_t count,
-                                  const size_t *first) {
+                                 const size_t *first) {
   size_t root = start;
   for (;;) {
     size_t child = root * 2 + 1;
@@ -216,7 +214,7 @@ static void ny_x64_nir_root_sift(size_t *order, size_t start, size_t count,
 }
 
 static void ny_x64_nir_sort_roots(size_t *order, size_t count,
-                                   const size_t *first) {
+                                  const size_t *first) {
   for (size_t start = count / 2; start > 0;)
     ny_x64_nir_root_sift(order, --start, count, first);
   for (size_t end = count; end > 1;) {
@@ -285,7 +283,8 @@ static void ny_x64_nir_compute_frame(ny_x64_nir_ctx_t *c) {
           max_local = value_slot;
       }
     }
-    if (in->op == NYIR_INLINE_ASM && (in->imm == NY_X64_ASM_VMCALL_SLOTS || in->imm == NY_X64_ASM_VMWARE_PORT)) {
+    if (in->op == NYIR_INLINE_ASM && (in->imm == NY_X64_ASM_VMCALL_SLOTS ||
+                                      in->imm == NY_X64_ASM_VMWARE_PORT)) {
       int slots[6] = {-1, -1, -1, -1, -1, -1};
       int parsed =
           in->imm == NY_X64_ASM_VMWARE_PORT
@@ -351,15 +350,14 @@ static void ny_x64_nir_compute_frame(ny_x64_nir_ctx_t *c) {
   for (size_t i = 1; i < c->nyir->len; ++i) {
     const nyr_inst_t *shl = &c->nyir->data[i - 1];
     const nyr_inst_t *sar = &c->nyir->data[i];
-    if (shl->op != NYIR_SHL_I64 || sar->op != NYIR_SAR_I64 ||
-        shl->dst < 0 || shl->dst >= NY_X64_NIR_MAX_SLOTS ||
-        sar->a != shl->dst || c->def_count[shl->dst] != 1 ||
-        c->use_count[shl->dst] != 1)
+    if (shl->op != NYIR_SHL_I64 || sar->op != NYIR_SAR_I64 || shl->dst < 0 ||
+        shl->dst >= NY_X64_NIR_MAX_SLOTS || sar->a != shl->dst ||
+        c->def_count[shl->dst] != 1 || c->use_count[shl->dst] != 1)
       continue;
     int64_t left = 0, right = 0;
     if (!ny_x64_nir_try_const_i32(c, shl->b, i - 1, &left) ||
-        !ny_x64_nir_try_const_i32(c, sar->b, i, &right) ||
-        left != right || (left != 32 && left != 48 && left != 56))
+        !ny_x64_nir_try_const_i32(c, sar->b, i, &right) || left != right ||
+        (left != 32 && left != 48 && left != 56))
       continue;
     if (!c->phi_used[shl->dst])
       c->elided_sign_shift[shl->dst] = true;
@@ -626,11 +624,12 @@ static void ny_x64_nir_compute_frame(ny_x64_nir_ctx_t *c) {
    * the chain intentionally shares one home.
    */
   size_t scratch_len = max_val > 0 ? (size_t)max_val : 0;
-  bool home_reuse_ready = scratch_len &&
-                          scratch_len <= SIZE_MAX / (10 * sizeof(size_t) + sizeof(bool));
-  size_t *scratch = home_reuse_ready
-                        ? calloc(scratch_len, 10 * sizeof(size_t) + sizeof(bool))
-                        : NULL;
+  bool home_reuse_ready =
+      scratch_len &&
+      scratch_len <= SIZE_MAX / (10 * sizeof(size_t) + sizeof(bool));
+  size_t *scratch =
+      home_reuse_ready ? calloc(scratch_len, 10 * sizeof(size_t) + sizeof(bool))
+                       : NULL;
   home_reuse_ready = scratch != NULL;
   size_t *home_first_def = scratch;
   size_t *home_last_def = scratch ? scratch + scratch_len : NULL;
@@ -1002,8 +1001,9 @@ static void ny_x64_nir_assign_loop_regs(ny_x64_nir_ctx_t *c) {
     if (in->op == NYIR_ADDR_LOCAL && in->imm >= 0 &&
         in->imm < c->max_local_slot)
       address_taken[in->imm] = true;
-    if (in->op == NYIR_INLINE_ASM &&
-        (in->imm == NY_X64_ASM_VMCALL_SLOTS || in->imm == NY_X64_ASM_VMWARE_PORT || in->imm == NY_X64_ASM_KVM_VMMCALL)) {
+    if (in->op == NYIR_INLINE_ASM && (in->imm == NY_X64_ASM_VMCALL_SLOTS ||
+                                      in->imm == NY_X64_ASM_VMWARE_PORT ||
+                                      in->imm == NY_X64_ASM_KVM_VMMCALL)) {
       /*
        * Fixed-register hypercalls write C locals outside normal stores.
        */
@@ -1172,8 +1172,7 @@ static bool ny_x64_nir_try_remat_i64(ny_x64_nir_ctx_t *c, int value_id,
       if (ny_x64_nir_is_fixed_clobber(c, &c->nyir->data[i], i))
         c->remat_last_clobber = i;
     c->remat_scanned_until = use_idx;
-    if (c->remat_last_clobber != SIZE_MAX &&
-        c->remat_last_clobber > root)
+    if (c->remat_last_clobber != SIZE_MAX && c->remat_last_clobber > root)
       return false;
   } else {
     for (size_t i = root + 1; i < use_idx; ++i)
@@ -1210,8 +1209,7 @@ static bool ny_x64_nir_is_fixed_clobber(ny_x64_nir_ctx_t *c,
 
 static bool ny_x64_nir_find_const_val(ny_x64_nir_ctx_t *c, int value_id,
                                       int64_t *out) {
-  if (!c || !c->nyir || value_id < 0 ||
-      value_id >= NY_X64_NIR_MAX_SLOTS ||
+  if (!c || !c->nyir || value_id < 0 || value_id >= NY_X64_NIR_MAX_SLOTS ||
       value_id >= (int)c->nyir->next_value)
     return false;
   int current = value_id;
@@ -1915,7 +1913,9 @@ static bool ny_x64_nir_emit_vec4_i64v2_binop(ny_x64_nir_ctx_t *c,
   if (c->target && (c->target->caps & NY_NATIVE_CAP_MACH_AVX)) {
     int bslot = ny_x64_nir_slot(c, in->b);
     int dslot = ny_x64_nir_slot(c, in->dst);
-    int bo = bslot < 0 ? 0 : (c->is_leaf ? c->frame_bytes - (bslot + 2) * 8 : c->slot_offset[bslot]);
+    int bo = bslot < 0 ? 0
+                       : (c->is_leaf ? c->frame_bytes - (bslot + 2) * 8
+                                     : c->slot_offset[bslot]);
     if (bslot < 0 || dslot < 0 || bo <= 0)
       return false;
 
@@ -1924,11 +1924,12 @@ static bool ny_x64_nir_emit_vec4_i64v2_binop(ny_x64_nir_ctx_t *c,
       return false;
 
     /*
-     * Zero-spill register caching: keep working set in ymm/xmm without stack roundtrips
+     * Zero-spill register caching: keep working set in ymm/xmm without stack
+     * roundtrips
      */
     if (c->vec_cached_value[a_reg] == in->a && c->vec_cache_dirty[a_reg] &&
-        in->a >= 0 && in->a < NY_X64_NIR_MAX_SLOTS && c->use_count[in->a] != 1 &&
-        !ny_x64_nir_vec_flush_reg(c, a_reg))
+        in->a >= 0 && in->a < NY_X64_NIR_MAX_SLOTS &&
+        c->use_count[in->a] != 1 && !ny_x64_nir_vec_flush_reg(c, a_reg))
       return false;
 
     int b_reg = ny_x64_nir_vec_cached_reg(c, in->b);
@@ -1996,32 +1997,46 @@ typedef struct {
 } ny_x64_nir_type_edge_t;
 
 static bool ny_x64_nir_type_known(const ny_x64_nir_ctx_t *c, size_t span,
-                                   uint32_t node) {
+                                  uint32_t node) {
   size_t kind = node / span, id = node % span;
   switch (kind) {
-  case 0: return c->value_f64[id];
-  case 1: return c->value_f32[id];
-  case 2: return c->value_i64v2[id];
-  case 3: return c->local_f64[id];
-  default: return c->local_f32[id];
+  case 0:
+    return c->value_f64[id];
+  case 1:
+    return c->value_f32[id];
+  case 2:
+    return c->value_i64v2[id];
+  case 3:
+    return c->local_f64[id];
+  default:
+    return c->local_f32[id];
   }
 }
 
 static void ny_x64_nir_type_mark(ny_x64_nir_ctx_t *c, size_t span,
-                                  uint32_t node) {
+                                 uint32_t node) {
   size_t kind = node / span, id = node % span;
   switch (kind) {
-  case 0: c->value_f64[id] = true; break;
-  case 1: c->value_f32[id] = true; break;
-  case 2: c->value_i64v2[id] = true; break;
-  case 3: c->local_f64[id] = true; break;
-  default: c->local_f32[id] = true; break;
+  case 0:
+    c->value_f64[id] = true;
+    break;
+  case 1:
+    c->value_f32[id] = true;
+    break;
+  case 2:
+    c->value_i64v2[id] = true;
+    break;
+  case 3:
+    c->local_f64[id] = true;
+    break;
+  default:
+    c->local_f32[id] = true;
+    break;
   }
 }
 
-static void ny_x64_nir_type_edge(uint32_t *head,
-                                  ny_x64_nir_type_edge_t *edges,
-                                  size_t *count, uint32_t from, uint32_t to) {
+static void ny_x64_nir_type_edge(uint32_t *head, ny_x64_nir_type_edge_t *edges,
+                                 size_t *count, uint32_t from, uint32_t to) {
   size_t i = (*count)++;
   edges[i].to = to;
   edges[i].next = head[from];
@@ -3038,9 +3053,9 @@ static bool ny_x64_nir_emit_inst_raw(ny_x64_nir_ctx_t *c, const nyr_inst_t *in,
       return false;
     for (int lane = 0; lane < 4; ++lane)
       if (!ny_x64_nir_load(c, a + lane) ||
-          !nyr_printf(c->w, in->op == NYIR_VEC8_SHR_I64
-                                ? "\tshrq\t$%d, %%rax\n"
-                                : "\tsarq\t$%d, %%rax\n",
+          !nyr_printf(c->w,
+                      in->op == NYIR_VEC8_SHR_I64 ? "\tshrq\t$%d, %%rax\n"
+                                                  : "\tsarq\t$%d, %%rax\n",
                       (int)in->imm) ||
           !ny_x64_nir_store(c, dst + lane))
         return false;
@@ -3423,10 +3438,10 @@ static bool ny_x64_nir_emit_inst_raw(ny_x64_nir_ctx_t *c, const nyr_inst_t *in,
       if (shl->op == NYIR_SHL_I64 && shl->dst == in->a) {
         int64_t width = 0;
         if (ny_x64_nir_try_const_i32(c, shl->b, idx - 1, &width)) {
-          const char *ext = width == 32 ? "movslq" :
-                            width == 48 ? "movswq" : "movsbq";
-          const char *reg = width == 32 ? "%eax" :
-                            width == 48 ? "%ax" : "%al";
+          const char *ext = width == 32   ? "movslq"
+                            : width == 48 ? "movswq"
+                                          : "movsbq";
+          const char *reg = width == 32 ? "%eax" : width == 48 ? "%ax" : "%al";
           return ny_x64_nir_load_value(c, shl->a) &&
                  nyr_printf(c->w, "\t%s\t%s, %%rax\n", ext, reg) &&
                  ny_x64_nir_store(c, ny_x64_nir_slot(c, in->dst));
@@ -3546,8 +3561,8 @@ static bool ny_x64_nir_emit_inst_raw(ny_x64_nir_ctx_t *c, const nyr_inst_t *in,
      * (x & 1) ==/!= 0: emit TEST directly.  Keep the compare result form
      * (0/1 in rax) for cases where the boolean is materialized.
      */
-    if ((in->cmp == NYIR_CMP_EQ || in->cmp == NYIR_CMP_NE) &&
-        in->dst >= 0 && in->dst < NY_X64_NIR_MAX_SLOTS) {
+    if ((in->cmp == NYIR_CMP_EQ || in->cmp == NYIR_CMP_NE) && in->dst >= 0 &&
+        in->dst < NY_X64_NIR_MAX_SLOTS) {
       int masked = -1;
       int64_t zero = 1, mask = 0;
       if (ny_x64_nir_try_const_i32(c, in->b, idx, &zero) && zero == 0)
@@ -5090,6 +5105,102 @@ static bool ny_x64_nir_emit_inst_raw(ny_x64_nir_ctx_t *c, const nyr_inst_t *in,
       c->rax_cached_slot = -1;
       return true;
     }
+    if (in->imm == -179) {
+      bool four_vectors =
+          in->symbol && (strcmp(in->symbol, "movntdqa_movaps_4") == 0 ||
+                         strcmp(in->symbol, "movntdqa_movups_4") == 0);
+      bool unaligned_store =
+          in->symbol && (strcmp(in->symbol, "movntdqa_movups_1") == 0 ||
+                         strcmp(in->symbol, "movntdqa_movups_4") == 0);
+      if (in->dst != -1 || in->a < 0 || in->b < 0 || in->c != -1 ||
+          in->d != -1 || in->e != -1 || in->f != -1 || !in->symbol ||
+          (!four_vectors && !unaligned_store &&
+           strcmp(in->symbol, "movntdqa_movaps_1") != 0) ||
+          !ny_x64_nir_load_value(c, in->a) ||
+          !nyr_put(c->w, "\tmovq\t%rax, %rdi\n") ||
+          !ny_x64_nir_load_value(c, in->b) ||
+          !nyr_put(c->w, "\tmovq\t%rax, %rsi\n"))
+        return false;
+      c->rax_cached_slot = -1;
+      if (four_vectors) {
+        if (!nyr_put(c->w, "\tmovntdqa\t(%rdi), %xmm0\n"
+                           "\tmovntdqa\t16(%rdi), %xmm1\n"
+                           "\tmovntdqa\t32(%rdi), %xmm2\n"
+                           "\tmovntdqa\t48(%rdi), %xmm3\n"))
+          return false;
+        const char *store = unaligned_store ? "movups" : "movaps";
+        if (!nyr_printf(c->w,
+                        "\t%s\t%%xmm0, (%%rsi)\n"
+                        "\t%s\t%%xmm1, 16(%%rsi)\n"
+                        "\t%s\t%%xmm2, 32(%%rsi)\n"
+                        "\t%s\t%%xmm3, 48(%%rsi)\n",
+                        store, store, store, store))
+          return false;
+      } else if (!nyr_printf(c->w,
+                             "\tmovntdqa\t(%%rdi), %%xmm0\n"
+                             "\t%s\t%%xmm0, (%%rsi)\n",
+                             unaligned_store ? "movups" : "movaps")) {
+        return false;
+      }
+      return true;
+    }
+    if (in->imm == -178) {
+      if (in->dst != -1 || in->a < 0 || in->b < 0 || in->c < 0 || in->d < 0 ||
+          in->e < 0 || in->f != -1 || !in->symbol ||
+          strcmp(in->symbol, "xstore") != 0 ||
+          !ny_x64_nir_load_value(c, in->b) ||
+          !nyr_put(c->w, "\tmovq\t%rax, %rdi\n") ||
+          !ny_x64_nir_load_value(c, in->a) ||
+          !nyr_put(c->w, "\tmovl\t%eax, %edx\n"))
+        return false;
+      c->rax_cached_slot = -1;
+      if (!nyr_put(c->w, "\t.byte\t0x0f, 0xa7, 0xc0\n"
+                         "\tmovl\t%eax, %r8d\n"
+                         "\tmovl\t%edx, %r9d\n"
+                         "\tmovq\t%rdi, %r10\n"))
+        return false;
+      const int addresses[] = {in->e, in->d, in->c};
+      const char *registers[] = {"%r8d", "%r9d", "%r10"};
+      const char *stores[] = {"movl", "movl", "movq"};
+      for (size_t i = 0; i < 3; ++i) {
+        if (!ny_x64_nir_load_value(c, addresses[i]) ||
+            !nyr_printf(c->w, "\t%s\t%s, (%%rax)\n", stores[i], registers[i]))
+          return false;
+      }
+      c->rax_cached_slot = -1;
+      return true;
+    }
+    if (in->imm == -177) {
+      if (in->dst != -1 || in->a < 0 || in->b < 0 || in->c < 0 || in->d < 0 ||
+          in->e < 0 || in->f < 0 || !in->symbol ||
+          strcmp(in->symbol, "rep_movsl_tail") != 0 ||
+          !ny_x64_nir_load_value(c, in->a) ||
+          !nyr_put(c->w, "\tmovq\t%rax, %rdi\n") ||
+          !ny_x64_nir_load_value(c, in->b) ||
+          !nyr_put(c->w, "\tmovq\t%rax, %rsi\n") ||
+          !ny_x64_nir_load_value(c, in->c) ||
+          !nyr_put(c->w, "\tmovq\t%rax, %rcx\n") ||
+          !ny_x64_nir_load_value(c, in->d) ||
+          !nyr_put(c->w, "\tmovq\t%rax, %r10\n"
+                         "\trep movsl\n"
+                         "\ttestb\t$2, %r10b\n"
+                         "\tje\t1f\n"
+                         "\tmovsw\n"
+                         "1:\ttestb\t$1, %r10b\n"
+                         "\tje\t2f\n"
+                         "\tmovsb\n"
+                         "2:\n"))
+        return false;
+      const int addresses[] = {in->e, in->f};
+      const char *registers[] = {"%rdi", "%rsi"};
+      for (size_t i = 0; i < 2; ++i) {
+        if (!ny_x64_nir_load_value(c, addresses[i]) ||
+            !nyr_printf(c->w, "\tmovq\t%s, (%%rax)\n", registers[i]))
+          return false;
+      }
+      c->rax_cached_slot = -1;
+      return true;
+    }
     if (in->imm == -135) {
       if (in->dst != -1 || in->a < 0 || in->b < 0 || in->c < 0 || in->d < 0 ||
           in->e < 0 || in->f < 0 || !in->symbol ||
@@ -5406,7 +5517,8 @@ static bool ny_x64_nir_emit_inst_raw(ny_x64_nir_ctx_t *c, const nyr_inst_t *in,
                                sizeof("__nyc_unsupported_") - 1) == 0) {
       const char *details = in->symbol;
       const char *detail_prefix = "__nyc_unsupported_inline_asm:";
-      bool is_inline_asm = details && strncmp(details, detail_prefix,
+      bool is_inline_asm =
+          details && strncmp(details, detail_prefix,
                              sizeof("__nyc_unsupported_inline_asm:") - 1) == 0;
       if (is_inline_asm)
         details += sizeof("__nyc_unsupported_inline_asm:") - 1;
@@ -5415,18 +5527,28 @@ static bool ny_x64_nir_emit_inst_raw(ny_x64_nir_ctx_t *c, const nyr_inst_t *in,
          * NYC kernel compat: try to emit try_cmpxchg directly
          */
         if (strstr(details, "cmpxchg") || strstr(details, "try_cmpxchg")) {
-          const char *mn = strstr(details,"cmpxchgq")?"cmpxchgq":strstr(details,"cmpxchgl")?"cmpxchgl":strstr(details,"cmpxchgw")?"cmpxchgw":"cmpxchgb";
-          const char *sr = strstr(details,"cmpxchgq")?"%rdx":strstr(details,"cmpxchgl")?"%edx":strstr(details,"cmpxchgw")?"%dx":"%dl";
-          if (!nyr_put(c->w, "\t#APP\n")) return false;
-          if (!nyr_printf(c->w, "\tlock %s %s, (%%rcx)\n", mn, sr)) return false;
-          if (!nyr_put(c->w, "\t#NO_APP\n")) return false;
+          const char *mn = strstr(details, "cmpxchgq")   ? "cmpxchgq"
+                           : strstr(details, "cmpxchgl") ? "cmpxchgl"
+                           : strstr(details, "cmpxchgw") ? "cmpxchgw"
+                                                         : "cmpxchgb";
+          const char *sr = strstr(details, "cmpxchgq")   ? "%rdx"
+                           : strstr(details, "cmpxchgl") ? "%edx"
+                           : strstr(details, "cmpxchgw") ? "%dx"
+                                                         : "%dl";
+          if (!nyr_put(c->w, "\t#APP\n"))
+            return false;
+          if (!nyr_printf(c->w, "\tlock %s %s, (%%rcx)\n", mn, sr))
+            return false;
+          if (!nyr_put(c->w, "\t#NO_APP\n"))
+            return false;
           return true;
         }
         /*
          * NYC kernel compat: GS percpu reads
          */
         if (strstr(details, "%gs:")) {
-          if (!nyr_put(c->w, "\t#APP\n")) return false;
+          if (!nyr_put(c->w, "\t#APP\n"))
+            return false;
           if (strstr(details, "movb"))
             nyr_put(c->w, "\tmovb %gs:0, %al\n");
           else if (strstr(details, "movw"))
@@ -5435,42 +5557,56 @@ static bool ny_x64_nir_emit_inst_raw(ny_x64_nir_ctx_t *c, const nyr_inst_t *in,
             nyr_put(c->w, "\tmovl %gs:0, %eax\n");
           else
             nyr_put(c->w, "\tmovq %gs:0, %rax\n");
-          if (!nyr_put(c->w, "\t#NO_APP\n")) return false;
+          if (!nyr_put(c->w, "\t#NO_APP\n"))
+            return false;
           return true;
         }
         /*
-         * Best-effort passthrough for templates with no unresolved operand refs.
+         * Best-effort passthrough for templates with no unresolved operand
+         * refs.
          */
         size_t tlen = 0;
         const char *src = strstr(details, " | source:");
-        if (src) tlen = (size_t)(src - details);
-        else tlen = strlen(details);
+        if (src)
+          tlen = (size_t)(src - details);
+        else
+          tlen = strlen(details);
         bool has_operand_ref = false;
         for (size_t i = 0; i < tlen; ++i) {
           if (details[i] == '%' && i + 1 < tlen) {
             char n = details[i + 1];
-            if (n == '%') { ++i; continue; }
+            if (n == '%') {
+              ++i;
+              continue;
+            }
             if (n == '=' || n == '[' || n == 'c' || n == 'a' ||
                 (n >= '0' && n <= '9') || n == 'w' || n == 'b' || n == 'h' ||
                 n == 'k' || n == 'q' || n == 'l' || n == 'P') {
-              has_operand_ref = true; break;
+              has_operand_ref = true;
+              break;
             }
           }
         }
         if (!has_operand_ref && tlen > 0) {
-          if (!nyr_put(c->w, "\t#APP\n")) return false;
+          if (!nyr_put(c->w, "\t#APP\n"))
+            return false;
           size_t line_start = 0;
           for (size_t i = 0; i <= tlen; ++i) {
             if (i == tlen || details[i] == '\n' || details[i] == ';') {
               if (i > line_start) {
-                if (!nyr_put(c->w, "\t")) return false;
-                if (!nyr_printf(c->w, "%.*s", (int)(i - line_start), details + line_start)) return false;
-                if (!nyr_put(c->w, "\n")) return false;
+                if (!nyr_put(c->w, "\t"))
+                  return false;
+                if (!nyr_printf(c->w, "%.*s", (int)(i - line_start),
+                                details + line_start))
+                  return false;
+                if (!nyr_put(c->w, "\n"))
+                  return false;
               }
               line_start = i + 1;
             }
           }
-          if (!nyr_put(c->w, "\t#NO_APP\n")) return false;
+          if (!nyr_put(c->w, "\t#NO_APP\n"))
+            return false;
           return true;
         }
       }
@@ -5633,6 +5769,40 @@ static bool ny_x64_nir_emit_inst_raw(ny_x64_nir_ctx_t *c, const nyr_inst_t *in,
           !nyr_put(c->w, "\tmovq\t%rax, %rdi\n") ||
           !ny_x64_nir_load_value(c, in->a) ||
           !nyr_put(c->w, "\tljmpl\t*(%rax)\n"))
+        return false;
+      c->rax_cached_slot = -1;
+      return true;
+    }
+    if (in->imm == -157) {
+      if (in->dst != -1 || in->a < 0 || in->b < 0 ||
+          !ny_x64_nir_load_value(c, in->b) ||
+          !nyr_put(c->w, "\tmovq\t%rax, %rsi\n") ||
+          !ny_x64_nir_load_value(c, in->a) ||
+          !nyr_put(c->w, "\tleave\n\tjmp\t*%rax\n"))
+        return false;
+      c->rax_cached_slot = -1;
+      return true;
+    }
+    if (in->imm == -181) {
+      const char *source_move = NULL;
+      const char *add_instruction = NULL;
+      if (in->symbol && strcmp(in->symbol, "gs_addb") == 0) {
+        source_move = "\tmovb\t%al, %r11b\n";
+        add_instruction = "\taddb\t%r11b, %gs:(%rax)\n";
+      } else if (in->symbol && strcmp(in->symbol, "gs_addw") == 0) {
+        source_move = "\tmovw\t%ax, %r11w\n";
+        add_instruction = "\taddw\t%r11w, %gs:(%rax)\n";
+      } else if (in->symbol && strcmp(in->symbol, "gs_addl") == 0) {
+        source_move = "\tmovl\t%eax, %r11d\n";
+        add_instruction = "\taddl\t%r11d, %gs:(%rax)\n";
+      } else if (in->symbol && strcmp(in->symbol, "gs_addq") == 0) {
+        source_move = "\tmovq\t%rax, %r11\n";
+        add_instruction = "\taddq\t%r11, %gs:(%rax)\n";
+      }
+      if (in->dst != -1 || in->a < 0 || in->b < 0 || !source_move ||
+          !add_instruction || !ny_x64_nir_load_value(c, in->b) ||
+          !nyr_put(c->w, source_move) || !ny_x64_nir_load_value(c, in->a) ||
+          !nyr_put(c->w, add_instruction))
         return false;
       c->rax_cached_slot = -1;
       return true;
@@ -5844,31 +6014,49 @@ static bool ny_x64_nir_emit_inst_raw(ny_x64_nir_ctx_t *c, const nyr_inst_t *in,
       /*
        * try_cmpxchg: b=expected value, c=new value, a=memory address,
        * dst=condition (bool) local slot, d=old-value local slot (-1 none).
-       * symbol="cmpxchgb"/"cmpxchgw"/"cmpxchgl"/"cmpxchgq" (lock prefix implied).
+       * symbol="cmpxchgb"/"cmpxchgw"/"cmpxchgl"/"cmpxchgq" (lock prefix
+       * implied).
        */
       if (in->a < 0 || in->b < 0 || in->c < 0 || in->dst < 0 || !in->symbol)
         return false;
-      char suf = in->symbol[strlen(in->symbol)-1];
+      char suf = in->symbol[strlen(in->symbol) - 1];
       c->rax_cached_slot = -1;
       if (!ny_x64_nir_load_value(c, in->b) ||
           !nyr_put(c->w, "\tmovl\t%eax, %r9d\n") ||
           !ny_x64_nir_load_value(c, in->c) ||
-          !nyr_put(c->w, suf=='b'?"\tmovb\t%al, %dl\n":suf=='w'?"\tmovw\t%ax, %dx\n":suf=='q'?"\tmovq\t%rax, %rdx\n":"\tmovl\t%eax, %edx\n") ||
+          !nyr_put(c->w, suf == 'b'   ? "\tmovb\t%al, %dl\n"
+                         : suf == 'w' ? "\tmovw\t%ax, %dx\n"
+                         : suf == 'q' ? "\tmovq\t%rax, %rdx\n"
+                                      : "\tmovl\t%eax, %edx\n") ||
           !ny_x64_nir_load_value(c, in->a) ||
           !nyr_put(c->w, "\tmovq\t%rax, %rcx\n") ||
-          !nyr_put(c->w, suf=='b'?"\tmovzbl\t%r9b, %eax\n":suf=='w'?"\tmovzwl\t%r9w, %eax\n":suf=='q'?"\tmovq\t%r9, %rax\n":"\tmovl\t%r9d, %eax\n") ||
+          !nyr_put(c->w, suf == 'b'   ? "\tmovzbl\t%r9b, %eax\n"
+                         : suf == 'w' ? "\tmovzwl\t%r9w, %eax\n"
+                         : suf == 'q' ? "\tmovq\t%r9, %rax\n"
+                                      : "\tmovl\t%r9d, %eax\n") ||
           !nyr_printf(c->w, "\tlock %s\t%s, (%%rcx)\n", in->symbol,
-                      suf=='b'?"%dl":suf=='w'?"%dx":suf=='q'?"%rdx":"%edx") ||
+                      suf == 'b'   ? "%dl"
+                      : suf == 'w' ? "%dx"
+                      : suf == 'q' ? "%rdx"
+                                   : "%edx") ||
           !nyr_put(c->w, "\tsete\t%r10b\n"))
         return false;
       /*
        * old value in rax; store to d (old inout local)
        */
       if (in->d >= 0) {
-        if (suf=='b') { if(!nyr_put(c->w,"\tmovzbl\t%al, %eax\n")) return false; }
-        else if (suf=='w') { if(!nyr_put(c->w,"\tmovzwl\t%ax, %eax\n")) return false; }
-        else if (suf!='q') { if(!nyr_put(c->w,"\tmovl\t%eax, %eax\n")) return false; }
-        if (!ny_x64_nir_store(c, ny_x64_nir_slot(c, in->d))) return false;
+        if (suf == 'b') {
+          if (!nyr_put(c->w, "\tmovzbl\t%al, %eax\n"))
+            return false;
+        } else if (suf == 'w') {
+          if (!nyr_put(c->w, "\tmovzwl\t%ax, %eax\n"))
+            return false;
+        } else if (suf != 'q') {
+          if (!nyr_put(c->w, "\tmovl\t%eax, %eax\n"))
+            return false;
+        }
+        if (!ny_x64_nir_store(c, ny_x64_nir_slot(c, in->d)))
+          return false;
       }
       if (!nyr_put(c->w, "\tmovzbl\t%r10b, %eax\n") ||
           !ny_x64_nir_store(c, ny_x64_nir_slot(c, in->dst)))
@@ -5876,7 +6064,7 @@ static bool ny_x64_nir_emit_inst_raw(ny_x64_nir_ctx_t *c, const nyr_inst_t *in,
       c->rax_cached_slot = -1;
       return true;
     }
-        if (in->imm == -2 || in->imm == -3 || in->imm == -4 || in->imm == -8) {
+    if (in->imm == -2 || in->imm == -3 || in->imm == -4 || in->imm == -8) {
       if (in->a < 0 || ((in->imm == -3 || in->imm == -8) && in->b < 0) ||
           ((in->imm == -4 || in->imm == -8) && in->dst < 0)) {
         nyr_set_error(c->err, c->err_len,
@@ -5924,21 +6112,26 @@ static bool ny_x64_nir_emit_inst_raw(ny_x64_nir_ctx_t *c, const nyr_inst_t *in,
                       "nyir x86-64: invalid atomic arithmetic/bitwise asm");
         return false;
       }
-      bool is_byte = in->symbol[strlen(in->symbol)-1]=='b';
-      bool is_word = in->symbol[strlen(in->symbol)-1]=='w';
-      if (!is_byte && !is_word &&
-          strcmp(in->symbol, "andl") != 0 && strcmp(in->symbol, "orl") != 0 &&
-          strcmp(in->symbol, "xorl") != 0 && strcmp(in->symbol, "addl") != 0 &&
-          strcmp(in->symbol, "subl") != 0) {
+      bool is_byte = in->symbol[strlen(in->symbol) - 1] == 'b';
+      bool is_word = in->symbol[strlen(in->symbol) - 1] == 'w';
+      if (!is_byte && !is_word && strcmp(in->symbol, "andl") != 0 &&
+          strcmp(in->symbol, "orl") != 0 && strcmp(in->symbol, "xorl") != 0 &&
+          strcmp(in->symbol, "addl") != 0 && strcmp(in->symbol, "subl") != 0) {
         nyr_set_error(c->err, c->err_len,
                       "nyir x86-64: invalid atomic arithmetic/bitwise asm");
         return false;
       }
       c->rax_cached_slot = -1;
       if (!ny_x64_nir_load_value(c, in->b) ||
-          !nyr_put(c->w, is_byte ? "\tmovb\t%al, %r11b\n" : is_word ? "\tmovw\t%ax, %r11w\n" : "\tmovl\t%eax, %r11d\n") ||
+          !nyr_put(c->w, is_byte   ? "\tmovb\t%al, %r11b\n"
+                         : is_word ? "\tmovw\t%ax, %r11w\n"
+                                   : "\tmovl\t%eax, %r11d\n") ||
           !ny_x64_nir_load_value(c, in->a) ||
-          !nyr_printf(c->w, is_byte ? "\tlock %s\t%%r11b, (%%rax)\n" : is_word ? "\tlock %s\t%%r11w, (%%rax)\n" : "\tlock %s\t%%r11d, (%%rax)\n", in->symbol))
+          !nyr_printf(c->w,
+                      is_byte   ? "\tlock %s\t%%r11b, (%%rax)\n"
+                      : is_word ? "\tlock %s\t%%r11w, (%%rax)\n"
+                                : "\tlock %s\t%%r11d, (%%rax)\n",
+                      in->symbol))
         return false;
       c->rax_cached_slot = -1;
       return true;
@@ -5965,10 +6158,12 @@ static bool ny_x64_nir_emit_inst_raw(ny_x64_nir_ctx_t *c, const nyr_inst_t *in,
     }
     if (in->imm == -47) {
       bool bit_test_set = in->symbol && strcmp(in->symbol, "btsl") == 0;
-      bool bit_test = in->symbol && (strcmp(in->symbol, "btl") == 0 || strcmp(in->symbol, "btq") == 0);
+      bool bit_test = in->symbol && (strcmp(in->symbol, "btl") == 0 ||
+                                     strcmp(in->symbol, "btq") == 0);
       bool bit_test_nz = in->symbol && (strcmp(in->symbol, "testb_nz") == 0);
       if (in->dst < 0 || in->a < 0 || in->b < 0 || in->c != -1 || !in->symbol ||
-          (!bit_test_set && !bit_test && !bit_test_nz && strcmp(in->symbol, "xorb") != 0)) {
+          (!bit_test_set && !bit_test && !bit_test_nz &&
+           strcmp(in->symbol, "xorb") != 0)) {
         nyr_set_error(c->err, c->err_len,
                       "nyir x86-64: invalid atomic bitwise condition operands");
         return false;
@@ -5984,16 +6179,22 @@ static bool ny_x64_nir_emit_inst_raw(ny_x64_nir_ctx_t *c, const nyr_inst_t *in,
       } else if (bit_test) {
         bool q = strcmp(in->symbol, "btq") == 0;
         if (!ny_x64_nir_load_value(c, in->b) ||
-            !nyr_put(c->w, q ? "\tmovq\t%rax, %rcx\n" : "\tmovl\t%eax, %ecx\n") ||
+            !nyr_put(c->w,
+                     q ? "\tmovq\t%rax, %rcx\n" : "\tmovl\t%eax, %ecx\n") ||
             !ny_x64_nir_load_value(c, in->a) ||
-            !nyr_printf(c->w, q ? "\tbtq\t%%rcx, (%%rax)\n\tsetc\t%%al\n\tmovzbl\t%%al, %%eax\n"
-                                 : "\tbtl\t%%ecx, (%%rax)\n\tsetc\t%%al\n\tmovzbl\t%%al, %%eax\n"))
+            !nyr_printf(c->w,
+                        q ? "\tbtq\t%%rcx, "
+                            "(%%rax)\n\tsetc\t%%al\n\tmovzbl\t%%al, %%eax\n"
+                          : "\tbtl\t%%ecx, "
+                            "(%%rax)\n\tsetc\t%%al\n\tmovzbl\t%%al, %%eax\n"))
           return false;
       } else if (bit_test_nz) {
         if (!ny_x64_nir_load_value(c, in->b) ||
             !nyr_put(c->w, "\tmovl\t%eax, %ecx\n") ||
             !ny_x64_nir_load_value(c, in->a) ||
-            !nyr_put(c->w, "\ttestb\t%cl, (%rax)\n\tsetnz\t%al\n\tmovzbl\t%al, %eax\n"))
+            !nyr_put(
+                c->w,
+                "\ttestb\t%cl, (%rax)\n\tsetnz\t%al\n\tmovzbl\t%al, %eax\n"))
           return false;
       } else if (!ny_x64_nir_load_value(c, in->b) ||
                  !nyr_put(c->w, "\tmovl\t%eax, %r11d\n") ||
@@ -6938,7 +7139,8 @@ static bool ny_x64_emit_ir_with_linkage(
                           .max_local_slot = 0,
                           .retpoline_indirect_calls = retpoline_indirect_calls,
                           .retpoline_inline_calls = retpoline_inline_calls,
-                          .function_return_thunk_extern = function_return_thunk_extern,
+                          .function_return_thunk_extern =
+                              function_return_thunk_extern,
                           .label_prefix = name,
                           .err = err,
                           .err_len = err_len};
@@ -7309,7 +7511,9 @@ static bool ny_x64_emit_ir_with_linkage(
     if (ctx.frame_bytes > 0 &&
         !nyr_printf(w, "\taddq\t$%d, %%rsp\n", ctx.frame_bytes))
       return false;
-    if (!nyr_put(w, ctx.function_return_thunk_extern ? "\tjmp\t__x86_return_thunk\n" : "\tret\n"))
+    if (!nyr_put(w, ctx.function_return_thunk_extern
+                        ? "\tjmp\t__x86_return_thunk\n"
+                        : "\tret\n"))
       return false;
   } else {
     if (!nyr_put(w, "\tleave\n"))
@@ -7324,7 +7528,9 @@ static bool ny_x64_emit_ir_with_linkage(
       return false;
     if (ctx.home_reg_count > 0 && !nyr_put(w, "\tpopq\t%rbx\n"))
       return false;
-    if (!nyr_put(w, ctx.function_return_thunk_extern ? "\tjmp\t__x86_return_thunk\n" : "\tret\n"))
+    if (!nyr_put(w, ctx.function_return_thunk_extern
+                        ? "\tjmp\t__x86_return_thunk\n"
+                        : "\tret\n"))
       return false;
   }
 
@@ -7355,10 +7561,10 @@ bool nyr_x86_64_emit_ir_with_options(
     const nyr_func_t *nyir, const char *func_name, bool tag_return,
     bool is_local, bool retpoline_indirect_calls, bool retpoline_inline_calls,
     bool function_return_thunk_extern, char *err, size_t err_len) {
-  return ny_x64_emit_ir_with_linkage(w, target, nyir, func_name, tag_return,
-                                     is_local, retpoline_indirect_calls,
-                                     retpoline_inline_calls,
-                                     function_return_thunk_extern, err, err_len);
+  return ny_x64_emit_ir_with_linkage(
+      w, target, nyir, func_name, tag_return, is_local,
+      retpoline_indirect_calls, retpoline_inline_calls,
+      function_return_thunk_extern, err, err_len);
 }
 
 /*
@@ -7863,8 +8069,7 @@ static int nyr_x64_mach_emit_leaf_return(nyr_writer_t *w,
     int64_t imm = value->src0.as.imm;
     if (imm >= 0 && imm <= UINT8_MAX) {
       if (!nyr_put(w, "\txorl\t%eax, %eax\n") ||
-          (imm != 0 &&
-           !nyr_printf(w, "\tmovb\t$%d, %%al\n", (int)imm)))
+          (imm != 0 && !nyr_printf(w, "\tmovb\t$%d, %%al\n", (int)imm)))
         return -1;
     } else if (!ny_x64_scalar_emit_imm64(w, imm, "%rax")) {
       return -1;
@@ -7882,7 +8087,8 @@ static int nyr_x64_mach_emit_leaf_return(nyr_writer_t *w,
     return -1;
   }
   if ((tag_return && !nyr_put(w, "\tleaq\t1(,%rax,2), %rax\n")) ||
-      !nyr_put(w, function_return_thunk_extern ? "\tjmp\t__x86_return_thunk\n" : "\tret\n") ||
+      !nyr_put(w, function_return_thunk_extern ? "\tjmp\t__x86_return_thunk\n"
+                                               : "\tret\n") ||
       (strcmp(target->object_format, "macho") != 0 &&
        !nyr_printf(w, "\t.size\t%s%s, .-%s%s\n", sym, name, sym, name)))
     return -1;
@@ -7975,7 +8181,8 @@ static int nyr_x64_mach_emit_binary_leaf(nyr_writer_t *w,
                           ny_x64_dword_arg_reg(target, 1)))) ||
       !nyr_printf(w, "\tmovq\t%s, %%rax\n\t%s\t%s, %%rax\n%s",
                   target->gp_arg_regs[0], opcode, target->gp_arg_regs[1],
-                  function_return_thunk_extern ? "\tjmp\t__x86_return_thunk\n" : "\tret\n") ||
+                  function_return_thunk_extern ? "\tjmp\t__x86_return_thunk\n"
+                                               : "\tret\n") ||
       (strcmp(target->object_format, "macho") != 0 &&
        !nyr_printf(w, "\t.size\t%s%s, .-%s%s\n", sym, name, sym, name)))
     return -1;
@@ -8153,7 +8360,8 @@ static int nyr_x64_mach_emit_multiarg_leaf(
   int ret_reg = arg_for_vreg[ret->src0.as.reg];
   if ((ret_reg != -2 &&
        !nyr_printf(w, "\tmovq\t%s, %%rax\n", target->gp_arg_regs[ret_reg])) ||
-      !nyr_put(w, function_return_thunk_extern ? "\tjmp\t__x86_return_thunk\n" : "\tret\n") ||
+      !nyr_put(w, function_return_thunk_extern ? "\tjmp\t__x86_return_thunk\n"
+                                               : "\tret\n") ||
       (strcmp(target->object_format, "macho") != 0 &&
        !nyr_printf(w, "\t.size\t%s%s, .-%s%s\n", sym, name, sym, name)))
     return -1;
@@ -8273,7 +8481,8 @@ static void nyr_x64_mach_note_use(nyr_x64_mach_use_t *uses, size_t len,
   }
 }
 
-static nyr_x64_mach_use_t *nyr_x64_mach_count_uses(const nyr_mach_func_t *mach) {
+static nyr_x64_mach_use_t *
+nyr_x64_mach_count_uses(const nyr_mach_func_t *mach) {
   if (!mach || !mach->vreg_len)
     return NULL;
   nyr_x64_mach_use_t *uses = calloc(mach->vreg_len, sizeof(*uses));
@@ -8297,8 +8506,7 @@ static bool nyr_x64_mach_can_forward_rax_result(const nyr_mach_func_t *mach,
                                                 size_t index, size_t block_end,
                                                 const nyr_mach_inst_t *in) {
   if (!mach || !in || index + 1 >= block_end || block_end > mach->inst_len ||
-      !uses ||
-      in->dst.kind != NYR_MACH_OPERAND_VREG)
+      !uses || in->dst.kind != NYR_MACH_OPERAND_VREG)
     return false;
   const nyr_mach_inst_t *next = &mach->insts[index + 1];
   if (next->src0.kind != NYR_MACH_OPERAND_VREG ||
@@ -8349,13 +8557,12 @@ static bool nyr_x64_mach_can_forward_rax_result(const nyr_mach_func_t *mach,
     return false;
   }
 
-  return in->dst.as.reg < mach->vreg_len &&
-         uses[in->dst.as.reg].count == 1 &&
+  return in->dst.as.reg < mach->vreg_len && uses[in->dst.as.reg].count == 1 &&
          uses[in->dst.as.reg].only_user == index + 1;
 }
 
 static bool nyr_x64_mach_preserves_xmm0(const nyr_mach_func_t *mach,
-                                         const nyr_mach_inst_t *in) {
+                                        const nyr_mach_inst_t *in) {
   switch (in->opcode) {
   case NYR_MACH_NOP:
   case NYR_MACH_LEA:
@@ -8383,15 +8590,14 @@ static bool nyr_x64_mach_preserves_xmm0(const nyr_mach_func_t *mach,
   }
 }
 
-static bool nyr_x64_mach_can_forward_xmm_result(
-    const nyr_mach_func_t *mach, const nyr_x64_mach_use_t *uses,
-    size_t index, size_t block_end, const nyr_mach_inst_t *in) {
+static bool nyr_x64_mach_can_forward_xmm_result(const nyr_mach_func_t *mach,
+                                                const nyr_x64_mach_use_t *uses,
+                                                size_t index, size_t block_end,
+                                                const nyr_mach_inst_t *in) {
   if (!mach || !uses || !in || index + 1 >= block_end ||
-      block_end > mach->inst_len ||
-      in->dst.kind != NYR_MACH_OPERAND_VREG ||
+      block_end > mach->inst_len || in->dst.kind != NYR_MACH_OPERAND_VREG ||
       in->dst.as.reg >= mach->vreg_len ||
-      !nyr_x64_mach_is_float(mach, &in->dst) ||
-      uses[in->dst.as.reg].count != 1)
+      !nyr_x64_mach_is_float(mach, &in->dst) || uses[in->dst.as.reg].count != 1)
     return false;
 
   size_t consumer = uses[in->dst.as.reg].only_user;
@@ -8409,8 +8615,7 @@ static bool nyr_x64_mach_can_forward_xmm_result(
   if (next->opcode == NYR_MACH_STORE)
     return true;
   if (next->opcode == NYR_MACH_COPY)
-    return !next->narrow32 &&
-           next->dst.kind == NYR_MACH_OPERAND_VREG &&
+    return !next->narrow32 && next->dst.kind == NYR_MACH_OPERAND_VREG &&
            nyr_x64_mach_is_float(mach, &next->dst) &&
            nyr_x64_mach_is_f32(mach, &next->dst) ==
                nyr_x64_mach_is_f32(mach, &next->src0) &&
@@ -8419,10 +8624,8 @@ static bool nyr_x64_mach_can_forward_xmm_result(
   if (next->opcode == NYR_MACH_SQRT)
     return nyr_x64_mach_is_f64(mach, &next->src0) &&
            nyr_x64_mach_is_f64(mach, &next->dst);
-  return (next->opcode == NYR_MACH_ADD ||
-          next->opcode == NYR_MACH_SUB ||
-          next->opcode == NYR_MACH_MUL ||
-          next->opcode == NYR_MACH_DIV) &&
+  return (next->opcode == NYR_MACH_ADD || next->opcode == NYR_MACH_SUB ||
+          next->opcode == NYR_MACH_MUL || next->opcode == NYR_MACH_DIV) &&
          nyr_x64_mach_is_float(mach, &next->dst) &&
          nyr_x64_mach_is_f32(mach, &next->src0) ==
              nyr_x64_mach_is_f32(mach, &next->dst);
@@ -8537,9 +8740,10 @@ static void nyr_x64_mach_add_predecessor(const nyr_mach_func_t *mach,
  * the same operands. Only MOV-like operations may intervene: arithmetic,
  * calls, and other control-flow edges invalidate the flags proof.
  */
-static void nyr_x64_mach_prepare_reused_cmp_flags(const nyr_mach_func_t *mach,
-                                                  const nyr_x64_mach_use_t *uses,
-                                                  bool *reuse_flags) {
+static void
+nyr_x64_mach_prepare_reused_cmp_flags(const nyr_mach_func_t *mach,
+                                      const nyr_x64_mach_use_t *uses,
+                                      bool *reuse_flags) {
   if (!mach || !reuse_flags || !mach->block_len)
     return;
   uint32_t *pred_count = calloc(mach->block_len, sizeof(*pred_count));
@@ -8668,8 +8872,8 @@ static size_t nyr_x64_mach_vreg_uses(const nyr_mach_func_t *mach,
       if (operands[k].kind == NYR_MACH_OPERAND_VREG &&
           operands[k].as.reg == reg)
         ++uses;
-    if (in->opcode == NYR_MACH_STORE &&
-        in->dst.kind == NYR_MACH_OPERAND_VREG && in->dst.as.reg == reg)
+    if (in->opcode == NYR_MACH_STORE && in->dst.kind == NYR_MACH_OPERAND_VREG &&
+        in->dst.as.reg == reg)
       ++uses;
     for (size_t k = 0; k < in->args_len && uses <= 1; ++k)
       if (in->args[k].kind == NYR_MACH_OPERAND_VREG &&
@@ -8719,10 +8923,10 @@ static bool nyr_x64_mach_collect_cmp_and(const nyr_mach_func_t *mach,
       out->and_count >= NY_X64_MACH_CMP_AND_MAX)
     return false;
   out->ands[out->and_count++] = def;
-  return nyr_x64_mach_collect_cmp_and(mach, uses, definitions,
-                                       in->src0.as.reg, out, depth + 1) &&
-         nyr_x64_mach_collect_cmp_and(mach, uses, definitions,
-                                       in->src1.as.reg, out, depth + 1);
+  return nyr_x64_mach_collect_cmp_and(mach, uses, definitions, in->src0.as.reg,
+                                      out, depth + 1) &&
+         nyr_x64_mach_collect_cmp_and(mach, uses, definitions, in->src1.as.reg,
+                                      out, depth + 1);
 }
 
 static const char *nyr_x64_mach_inverse_jcc(nyr_mach_cond_t condition) {
@@ -8773,9 +8977,8 @@ static void nyr_x64_mach_prepare_cmp_and(const nyr_mach_func_t *mach,
       if (!has_false_br && (i + 1 != end || block + 1 >= mach->block_len))
         continue;
       nyr_x64_mach_cmp_and_t tree = {0};
-      bool collected =
-          nyr_x64_mach_collect_cmp_and(mach, uses, definitions,
-                                       br->src0.as.reg, &tree, 0);
+      bool collected = nyr_x64_mach_collect_cmp_and(mach, uses, definitions,
+                                                    br->src0.as.reg, &tree, 0);
       if (!collected || tree.compare_count < 2)
         continue;
       /*
@@ -8851,14 +9054,11 @@ static bool nyr_x64_mach_emit_rax_result(nyr_writer_t *w,
   return true;
 }
 
-static bool nyr_x86_64_emit_mach_scalar_impl(nyr_writer_t *w,
-                                 const ny_native_target_info_t *target,
-                                 const nyr_mach_func_t *mach,
-                                 const char *func_name, bool tag_return,
-                                 bool function_return_thunk_extern,
-                                 char *err, size_t err_len,
-                                 const nyr_x64_mach_use_t *uses,
-                                 const size_t *definitions) {
+static bool nyr_x86_64_emit_mach_scalar_impl(
+    nyr_writer_t *w, const ny_native_target_info_t *target,
+    const nyr_mach_func_t *mach, const char *func_name, bool tag_return,
+    bool function_return_thunk_extern, char *err, size_t err_len,
+    const nyr_x64_mach_use_t *uses, const size_t *definitions) {
   const char *name = func_name && func_name[0] ? func_name : "rt_main";
   if (!w || !target)
     return false;
@@ -8876,16 +9076,16 @@ static bool nyr_x86_64_emit_mach_scalar_impl(nyr_writer_t *w,
           nyr_x64_mach_is_float(mach, &mach->insts[i].src0))
         return false;
   }
-  int leaf_return =
-      nyr_x64_mach_emit_leaf_return(w, target, mach, name, tag_return, function_return_thunk_extern);
+  int leaf_return = nyr_x64_mach_emit_leaf_return(
+      w, target, mach, name, tag_return, function_return_thunk_extern);
   if (leaf_return != 0)
     return leaf_return > 0;
-  int multiarg_leaf =
-      nyr_x64_mach_emit_multiarg_leaf(w, target, mach, name, tag_return, function_return_thunk_extern);
+  int multiarg_leaf = nyr_x64_mach_emit_multiarg_leaf(
+      w, target, mach, name, tag_return, function_return_thunk_extern);
   if (multiarg_leaf != 0)
     return multiarg_leaf > 0;
-  int binary_leaf =
-      nyr_x64_mach_emit_binary_leaf(w, target, mach, name, tag_return, function_return_thunk_extern);
+  int binary_leaf = nyr_x64_mach_emit_binary_leaf(
+      w, target, mach, name, tag_return, function_return_thunk_extern);
   if (binary_leaf != 0)
     return binary_leaf > 0;
   size_t vreg_homes = mach->home_slots ? mach->home_slot_count : mach->vreg_len;
@@ -8930,8 +9130,8 @@ static bool nyr_x86_64_emit_mach_scalar_impl(nyr_writer_t *w,
   for (size_t i = 0; i < NY_X64_NIR_MAX_SLOTS; ++i)
     fused_false[i] = UINT32_MAX;
   if (mach->vreg_len <= NY_X64_NIR_MAX_SLOTS) {
-    nyr_x64_mach_prepare_cmp_and(mach, uses, definitions,
-                                   fused_cmp, fused_and, fused_false);
+    nyr_x64_mach_prepare_cmp_and(mach, uses, definitions, fused_cmp, fused_and,
+                                 fused_false);
     nyr_x64_mach_prepare_reused_cmp_flags(mach, uses, reuse_cmp_flags);
   }
   ny_dbg_mem_layout(
@@ -9083,8 +9283,8 @@ static bool nyr_x86_64_emit_mach_scalar_impl(nyr_writer_t *w,
    * zeroing when storing or copying zero to a vreg.
    */
   int zero_reg = -1;
-  static const char *const zero_reg_names[6] = {"%rax", "%rbx", "%r12", "%r13",
-                                                "%r14", "%r15"};
+  static const char *const zero_reg_names[6] = {"%rax", "%rbx", "%r12",
+                                                "%r13", "%r14", "%r15"};
   for (size_t block = 0; block < mach->block_len; ++block) {
     if (!nyr_printf(w, ".Lny_mach_%s_%zu:\n", name, block))
       return false;
@@ -9127,11 +9327,9 @@ static bool nyr_x86_64_emit_mach_scalar_impl(nyr_writer_t *w,
             return false;
           }
           bool forward = nyr_x64_mach_can_forward_xmm_result(
-              mach, uses, b->first_inst + n,
-              b->first_inst + b->inst_count, in);
-          if (!forward &&
-              !nyr_printf(w, "\t%s\t%%xmm0, -%d(%%rbp)\n",
-                          f32 ? "movss" : "movsd", dst))
+              mach, uses, b->first_inst + n, b->first_inst + b->inst_count, in);
+          if (!forward && !nyr_printf(w, "\t%s\t%%xmm0, -%d(%%rbp)\n",
+                                      f32 ? "movss" : "movsd", dst))
             return false;
           xmm_cached_reg = forward ? in->dst.as.reg : SIZE_MAX;
           /*
@@ -9192,8 +9390,7 @@ static bool nyr_x86_64_emit_mach_scalar_impl(nyr_writer_t *w,
         if (uses && in->dst.kind == NYR_MACH_OPERAND_VREG &&
             in->dst.as.reg < mach->vreg_len &&
             uses[in->dst.as.reg].count == 1 &&
-            uses[in->dst.as.reg].only_user == pc + 1 &&
-            n + 1 < b->inst_count) {
+            uses[in->dst.as.reg].only_user == pc + 1 && n + 1 < b->inst_count) {
           const nyr_mach_inst_t *next = &mach->insts[pc + 1];
           int value_off = nyr_x64_mach_offset(mach, &next->src0);
           if (next->opcode == NYR_MACH_STORE &&
@@ -9201,15 +9398,14 @@ static bool nyr_x86_64_emit_mach_scalar_impl(nyr_writer_t *w,
               next->dst.as.reg == in->dst.as.reg &&
               (next->src0.kind == NYR_MACH_OPERAND_VREG ||
                next->src0.kind == NYR_MACH_OPERAND_FRAME) &&
-              nyr_x64_mach_is_float(mach, &next->src0) &&
-              value_off > 0 && value_off != dst) {
-            const char *move = nyr_x64_mach_is_f32(mach, &next->src0)
-                                   ? "movss" : "movsd";
+              nyr_x64_mach_is_float(mach, &next->src0) && value_off > 0 &&
+              value_off != dst) {
+            const char *move =
+                nyr_x64_mach_is_f32(mach, &next->src0) ? "movss" : "movsd";
             bool cached = next->src0.kind == NYR_MACH_OPERAND_VREG &&
                           xmm_cached_reg == next->src0.as.reg;
             if (!cached &&
-                !nyr_printf(w, "\t%s\t-%d(%%rbp), %%xmm0\n", move,
-                            value_off))
+                !nyr_printf(w, "\t%s\t-%d(%%rbp), %%xmm0\n", move, value_off))
               return false;
             if (!nyr_printf(w, "\t%s\t%%xmm0, (%%rax)\n", move))
               return false;
@@ -9234,9 +9430,8 @@ static bool nyr_x86_64_emit_mach_scalar_impl(nyr_writer_t *w,
                                    value_off)) {
               return false;
             }
-            if (!nyr_put(w, next->byte_width
-                                ? "\tmovb\t%cl, (%rax)\n"
-                                : "\tmovq\t%rcx, (%rax)\n"))
+            if (!nyr_put(w, next->byte_width ? "\tmovb\t%cl, (%rax)\n"
+                                             : "\tmovq\t%rcx, (%rax)\n"))
               return false;
             rax_cached_off = -1;
             ++n;
@@ -9408,8 +9603,7 @@ static bool nyr_x86_64_emit_mach_scalar_impl(nyr_writer_t *w,
                        nyr_x64_mach_can_forward_xmm_result(
                            mach, uses, b->first_inst + n,
                            b->first_inst + b->inst_count, in);
-        if (!forward &&
-            !nyr_printf(w, "\tmovsd\t%%xmm0, -%d(%%rbp)\n", dst))
+        if (!forward && !nyr_printf(w, "\tmovsd\t%%xmm0, -%d(%%rbp)\n", dst))
           return false;
         xmm_cached_reg = forward ? in->dst.as.reg : SIZE_MAX;
         rax_cached_off = -1;
@@ -9420,8 +9614,7 @@ static bool nyr_x86_64_emit_mach_scalar_impl(nyr_writer_t *w,
           const char *move =
               nyr_x64_mach_is_f32(mach, &in->dst) ? "movss" : "movsd";
           bool forward = nyr_x64_mach_can_forward_xmm_result(
-              mach, uses, b->first_inst + n,
-              b->first_inst + b->inst_count, in);
+              mach, uses, b->first_inst + n, b->first_inst + b->inst_count, in);
           if (in->src0.kind == NYR_MACH_OPERAND_FRAME) {
             if (!nyr_printf(w, "\t%s\t-%d(%%rbp), %%xmm0\n", move, a))
               return false;
@@ -9465,9 +9658,10 @@ static bool nyr_x86_64_emit_mach_scalar_impl(nyr_writer_t *w,
           if (in->dst.kind == NYR_MACH_OPERAND_FRAME) {
             if (!nyr_printf(w, "\t%s\t%%xmm0, -%d(%%rbp)\n", move, dst))
               return false;
-          } else if (!nyr_printf(
-                         w, "\tmovq\t-%d(%%rbp), %%rax\n"
-                            "\t%s\t%%xmm0, (%%rax)\n", dst, move)) {
+          } else if (!nyr_printf(w,
+                                 "\tmovq\t-%d(%%rbp), %%rax\n"
+                                 "\t%s\t%%xmm0, (%%rax)\n",
+                                 dst, move)) {
             return false;
           }
           xmm_cached_reg = SIZE_MAX;
@@ -9481,8 +9675,8 @@ static bool nyr_x86_64_emit_mach_scalar_impl(nyr_writer_t *w,
            * Store zero directly from a zero register if available,
            * avoiding a redundant zeroing + store through %rax.
            */
-          if (in->src0.kind == NYR_MACH_OPERAND_IMM &&
-              in->src0.as.imm == 0 && zero_reg >= 0) {
+          if (in->src0.kind == NYR_MACH_OPERAND_IMM && in->src0.as.imm == 0 &&
+              zero_reg >= 0) {
             if (!nyr_printf(w, "\tmovq\t%s, -%d(%%rbp)\n",
                             zero_reg_names[zero_reg], dst))
               return false;
@@ -9529,8 +9723,7 @@ static bool nyr_x86_64_emit_mach_scalar_impl(nyr_writer_t *w,
           if (!nyr_printf(w, "\t%s\t-%d(%%rbp), %%xmm0\n", op, b_off))
             return false;
           bool forward = nyr_x64_mach_can_forward_xmm_result(
-              mach, uses, b->first_inst + n,
-              b->first_inst + b->inst_count, in);
+              mach, uses, b->first_inst + n, b->first_inst + b->inst_count, in);
           if (!forward &&
               !nyr_printf(w, "\t%s\t%%xmm0, -%d(%%rbp)\n", move, dst))
             return false;
@@ -9553,13 +9746,12 @@ static bool nyr_x86_64_emit_mach_scalar_impl(nyr_writer_t *w,
         {
           int64_t immediate = 0;
           const nyr_mach_operand_t *value_operand = &in->src0;
-          bool immediate_rhs =
-              nyr_x64_mach_const_i64(mach, definitions, &in->src1,
-                                     &immediate, 0);
+          bool immediate_rhs = nyr_x64_mach_const_i64(mach, definitions,
+                                                      &in->src1, &immediate, 0);
           bool commutative = in->opcode != NYR_MACH_SUB;
           if (!immediate_rhs && commutative &&
-              nyr_x64_mach_const_i64(mach, definitions, &in->src0,
-                                     &immediate, 0)) {
+              nyr_x64_mach_const_i64(mach, definitions, &in->src0, &immediate,
+                                     0)) {
             immediate_rhs = true;
             value_operand = &in->src1;
           }
@@ -9587,9 +9779,9 @@ static bool nyr_x86_64_emit_mach_scalar_impl(nyr_writer_t *w,
                                      lea_scale)
                        : !nyr_printf(w, "\t%sl\t$%" PRId64 ", %%eax\n", op,
                                      immediate)) ||
-                  !nyr_x64_mach_emit_rax_result(w, mach, uses, b->first_inst + n,
-                                                b->first_inst + b->inst_count,
-                                                in, dst, &rax_cached_off))
+                  !nyr_x64_mach_emit_rax_result(
+                      w, mach, uses, b->first_inst + n,
+                      b->first_inst + b->inst_count, in, dst, &rax_cached_off))
                 return false;
             } else {
               if (!ny_x64_scalar_emit_rax_load(w, value_operand, value_off,
@@ -9599,9 +9791,9 @@ static bool nyr_x86_64_emit_mach_scalar_impl(nyr_writer_t *w,
                                      lea_scale)
                        : !nyr_printf(w, "\t%sq\t$%" PRId64 ", %%rax\n", op,
                                      immediate)) ||
-                  !nyr_x64_mach_emit_rax_result(w, mach, uses, b->first_inst + n,
-                                                b->first_inst + b->inst_count,
-                                                in, dst, &rax_cached_off))
+                  !nyr_x64_mach_emit_rax_result(
+                      w, mach, uses, b->first_inst + n,
+                      b->first_inst + b->inst_count, in, dst, &rax_cached_off))
                 return false;
             }
             rax_cached_off = in->dst.kind == NYR_MACH_OPERAND_VREG ? dst : -1;
@@ -9695,8 +9887,7 @@ static bool nyr_x86_64_emit_mach_scalar_impl(nyr_writer_t *w,
                           f32 ? "divss" : "divsd", b_off))
             return false;
           bool forward = nyr_x64_mach_can_forward_xmm_result(
-              mach, uses, b->first_inst + n,
-              b->first_inst + b->inst_count, in);
+              mach, uses, b->first_inst + n, b->first_inst + b->inst_count, in);
           if (!forward &&
               !nyr_printf(w, "\t%s\t%%xmm0, -%d(%%rbp)\n", move, dst))
             return false;
@@ -9710,8 +9901,7 @@ static bool nyr_x86_64_emit_mach_scalar_impl(nyr_writer_t *w,
          * constant remainders in optimized loops fall back to expensive idiv.
          */
         int64_t divisor = 0;
-        if (nyr_x64_mach_const_i64(mach, definitions, &in->src1, &divisor,
-                                    0) &&
+        if (nyr_x64_mach_const_i64(mach, definitions, &in->src1, &divisor, 0) &&
             divisor != 0 && divisor != 1 && divisor != -1) {
           uint64_t ad =
               divisor >= 0 ? (uint64_t)divisor : (uint64_t)(-(divisor + 1)) + 1;
@@ -9730,7 +9920,7 @@ static bool nyr_x86_64_emit_mach_scalar_impl(nyr_writer_t *w,
             uint64_t mask = ad - 1;
             if (in->opcode == NYR_MACH_MOD) {
               if (!ny_x64_scalar_emit_rax_load(w, &in->src0, a,
-                                                rax_cached_off) ||
+                                               rax_cached_off) ||
                   !nyr_put(w, "\tmovq\t%rax, %rcx\n\tsarq\t$63, %rcx\n"))
                 return false;
               if (ad <= (UINT64_C(1) << 31)) {
@@ -9746,9 +9936,8 @@ static bool nyr_x86_64_emit_mach_scalar_impl(nyr_writer_t *w,
                 if (!nyr_printf(w, "\tandq\t$-%" PRIu64 ", %%rcx\n", ad))
                   return false;
               } else {
-                int64_t clear = ad == (UINT64_C(1) << 63)
-                                    ? INT64_MIN
-                                    : -(int64_t)ad;
+                int64_t clear =
+                    ad == (UINT64_C(1) << 63) ? INT64_MIN : -(int64_t)ad;
                 if (!ny_x64_scalar_emit_imm64(w, clear, "%r10") ||
                     !nyr_put(w, "\tandq\t%r10, %rcx\n"))
                   return false;
@@ -9842,8 +10031,8 @@ static bool nyr_x86_64_emit_mach_scalar_impl(nyr_writer_t *w,
         size_t pc = b->first_inst + n;
         size_t end = b->first_inst + b->inst_count;
         int64_t count = 0;
-        bool constant = nyr_x64_mach_const_i64(mach, definitions, &in->src1,
-                                                 &count, 0);
+        bool constant =
+            nyr_x64_mach_const_i64(mach, definitions, &in->src1, &count, 0);
 
         if (constant)
           count = (int64_t)((uint64_t)count & UINT64_C(63));
@@ -9860,31 +10049,33 @@ static bool nyr_x86_64_emit_mach_scalar_impl(nyr_writer_t *w,
                                      0) &&
               count == (int64_t)((uint64_t)right & UINT64_C(63)) &&
               (count == 32 || count == 48 || count == 56)) {
-            const char *ext = count == 32 ? "movslq" :
-                              count == 48 ? "movswq" : "movsbq";
-            const char *reg = count == 32 ? "%eax" :
-                              count == 48 ? "%ax" : "%al";
+            const char *ext = count == 32   ? "movslq"
+                              : count == 48 ? "movswq"
+                                            : "movsbq";
+            const char *reg = count == 32   ? "%eax"
+                              : count == 48 ? "%ax"
+                                            : "%al";
 
-            bool from_home = in->src0.kind == NYR_MACH_OPERAND_FRAME ||
-                (in->src0.kind == NYR_MACH_OPERAND_VREG &&
-                 rax_cached_off != a);
+            bool from_home =
+                in->src0.kind == NYR_MACH_OPERAND_FRAME ||
+                (in->src0.kind == NYR_MACH_OPERAND_VREG && rax_cached_off != a);
 
             if (from_home) {
               if (!nyr_printf(w, "\t%s\t-%d(%%rbp), %%rax\n", ext, a))
                 return false;
             } else if (!ny_x64_scalar_emit_rax_load(w, &in->src0, a,
-                                                      rax_cached_off) ||
+                                                    rax_cached_off) ||
                        !nyr_printf(w, "\t%s\t%s, %%rax\n", ext, reg)) {
               return false;
             }
 
             int next_dst = nyr_x64_mach_offset(mach, &next->dst);
             if (!nyr_x64_mach_emit_rax_result(w, mach, uses, pc + 1, end, next,
-                                               next_dst, &rax_cached_off))
+                                              next_dst, &rax_cached_off))
               return false;
 
-            rax_cached_off = next->dst.kind == NYR_MACH_OPERAND_VREG
-                                 ? next_dst : -1;
+            rax_cached_off =
+                next->dst.kind == NYR_MACH_OPERAND_VREG ? next_dst : -1;
             ++n;
             break;
           }
@@ -9895,21 +10086,23 @@ static bool nyr_x86_64_emit_mach_scalar_impl(nyr_writer_t *w,
 
         if (constant) {
           if (count && !nyr_printf(w, "\t%s\t$%" PRId64 ", %%rax\n",
-                                   in->opcode == NYR_MACH_SHL ? "shlq" :
-                                   in->opcode == NYR_MACH_SAR ? "sarq" : "rorq",
+                                   in->opcode == NYR_MACH_SHL   ? "shlq"
+                                   : in->opcode == NYR_MACH_SAR ? "sarq"
+                                                                : "rorq",
                                    count))
             return false;
         } else if (!nyr_printf(w,
                                "\tmovq\t-%d(%%rbp), %%rcx\n"
                                "\t%s\t%%cl, %%rax\n",
                                b_off,
-                               in->opcode == NYR_MACH_SHL ? "shlq" :
-                               in->opcode == NYR_MACH_SAR ? "sarq" : "rorq")) {
+                               in->opcode == NYR_MACH_SHL   ? "shlq"
+                               : in->opcode == NYR_MACH_SAR ? "sarq"
+                                                            : "rorq")) {
           return false;
         }
 
         if (!nyr_x64_mach_emit_rax_result(w, mach, uses, pc, end, in, dst,
-                                           &rax_cached_off))
+                                          &rax_cached_off))
           return false;
 
         rax_cached_off = in->dst.kind == NYR_MACH_OPERAND_VREG ? dst : -1;
@@ -9932,10 +10125,10 @@ static bool nyr_x86_64_emit_mach_scalar_impl(nyr_writer_t *w,
                                  "\tmovq\t-%d(%%rbp), %%rcx\n"
                                  "\trorl\t%%cl, %%eax\n",
                                  b_off) ||
-                     !nyr_x64_mach_emit_rax_result(w, mach, uses, b->first_inst + n,
-                                                   b->first_inst +
-                                                       b->inst_count,
-                                                   in, dst, &rax_cached_off)) {
+                     !nyr_x64_mach_emit_rax_result(
+                         w, mach, uses, b->first_inst + n,
+                         b->first_inst + b->inst_count, in, dst,
+                         &rax_cached_off)) {
             return false;
           }
         }
@@ -9975,8 +10168,7 @@ static bool nyr_x86_64_emit_mach_scalar_impl(nyr_writer_t *w,
             in->dst.as.reg < NY_X64_NIR_MAX_SLOTS &&
             reuse_cmp_flags[in->dst.as.reg] &&
             nyr_x64_mach_compare_branch(mach, uses, b->first_inst + n,
-                                        block_end, in,
-                                        &reuse_branch)) {
+                                        block_end, in, &reuse_branch)) {
           const char *jcc = nyr_x64_mach_jcc(in->condition);
           if (!jcc || !nyr_printf(w, "\t%s\t.Lny_mach_%s_%u\n", jcc, name,
                                   reuse_branch->src1.as.block_index))
@@ -9992,9 +10184,8 @@ static bool nyr_x86_64_emit_mach_scalar_impl(nyr_writer_t *w,
             fused_false[in->dst.as.reg] != UINT32_MAX) {
           const char *jcc = nyr_x64_mach_inverse_jcc(in->condition);
           int64_t immediate = 0;
-          bool rhs_constant =
-              nyr_x64_mach_const_i64(mach, definitions, &in->src1,
-                                     &immediate, 0);
+          bool rhs_constant = nyr_x64_mach_const_i64(mach, definitions,
+                                                     &in->src1, &immediate, 0);
           if (!jcc ||
               !ny_x64_scalar_emit_rax_load(w, &in->src0, a, rax_cached_off))
             return false;
@@ -10033,8 +10224,8 @@ static bool nyr_x86_64_emit_mach_scalar_impl(nyr_writer_t *w,
               (sel->src2.kind == NYR_MACH_OPERAND_IMM ||
                nyr_x64_mach_is_gpr(mach, &sel->src2))) {
             int64_t imm = 0;
-            bool const_rhs = nyr_x64_mach_const_i64(
-                mach, definitions, &in->src1, &imm, 0);
+            bool const_rhs =
+                nyr_x64_mach_const_i64(mach, definitions, &in->src1, &imm, 0);
             if (!ny_x64_scalar_emit_rax_load(w, &in->src0, a, rax_cached_off))
               return false;
             if (const_rhs && (int64_t)(int32_t)imm == imm) {
@@ -10045,8 +10236,7 @@ static bool nyr_x86_64_emit_mach_scalar_impl(nyr_writer_t *w,
                       w, const_rhs ? imm : in->src1.as.imm, "%r10") ||
                   !nyr_put(w, "\tcmpq\t%r10, %rax\n"))
                 return false;
-            } else if (!nyr_printf(w, "\tcmpq\t-%d(%%rbp), %%rax\n",
-                                   b_off)) {
+            } else if (!nyr_printf(w, "\tcmpq\t-%d(%%rbp), %%rax\n", b_off)) {
               return false;
             }
             int false_off = nyr_x64_mach_offset(mach, &sel->src2);
@@ -10057,14 +10247,14 @@ static bool nyr_x86_64_emit_mach_scalar_impl(nyr_writer_t *w,
               if (!ny_x64_scalar_emit_imm64(w, sel->src1.as.imm, "%r10") ||
                   !nyr_printf(w, "\tcmov%s\t%%r10, %%rax\n", cc + 1))
                 return false;
-            } else if (!nyr_printf(w, "\tcmov%s\t-%d(%%rbp), %%rax\n",
-                                   cc + 1, true_off)) {
+            } else if (!nyr_printf(w, "\tcmov%s\t-%d(%%rbp), %%rax\n", cc + 1,
+                                   true_off)) {
               return false;
             }
             int sel_dst = nyr_x64_mach_offset(mach, &sel->dst);
-            if (!nyr_x64_mach_emit_rax_result(
-                    w, mach, uses, b->first_inst + n + 1, block_end, sel,
-                    sel_dst, &rax_cached_off))
+            if (!nyr_x64_mach_emit_rax_result(w, mach, uses,
+                                              b->first_inst + n + 1, block_end,
+                                              sel, sel_dst, &rax_cached_off))
               return false;
             ++n;
             break;
@@ -10072,13 +10262,11 @@ static bool nyr_x86_64_emit_mach_scalar_impl(nyr_writer_t *w,
         }
         const nyr_mach_inst_t *branch = NULL;
         if (nyr_x64_mach_compare_branch(mach, uses, b->first_inst + n,
-                                        block_end, in,
-                                        &branch)) {
+                                        block_end, in, &branch)) {
           const char *jcc = nyr_x64_mach_jcc(in->condition);
           int64_t immediate = 0;
-          bool rhs_constant =
-              nyr_x64_mach_const_i64(mach, definitions, &in->src1,
-                                     &immediate, 0);
+          bool rhs_constant = nyr_x64_mach_const_i64(mach, definitions,
+                                                     &in->src1, &immediate, 0);
           if (!ny_x64_scalar_emit_rax_load(w, &in->src0, a, rax_cached_off))
             return false;
           if (rhs_constant && (int64_t)(int32_t)immediate == immediate) {
@@ -10099,14 +10287,12 @@ static bool nyr_x86_64_emit_mach_scalar_impl(nyr_writer_t *w,
                         fallthrough->src1.kind == NYR_MACH_OPERAND_BLOCK &&
                         block + 1 < mach->block_len &&
                         branch->src1.as.block_index == block + 1;
-          const char *branch_cc = invert
-                                      ? nyr_x64_mach_inverse_jcc(in->condition)
-                                      : jcc;
+          const char *branch_cc =
+              invert ? nyr_x64_mach_inverse_jcc(in->condition) : jcc;
           uint32_t target_block = invert ? fallthrough->src1.as.block_index
                                          : branch->src1.as.block_index;
-          if (!branch_cc ||
-              !nyr_printf(w, "\t%s\t.Lny_mach_%s_%u\n", branch_cc,
-                          name, target_block))
+          if (!branch_cc || !nyr_printf(w, "\t%s\t.Lny_mach_%s_%u\n", branch_cc,
+                                        name, target_block))
             return false;
           n += invert ? 2 : 1;
           rax_cached_off = -1;
@@ -10121,10 +10307,11 @@ static bool nyr_x86_64_emit_mach_scalar_impl(nyr_writer_t *w,
           int unordered_result = in->condition == NYR_MACH_COND_NE ? 1 : 0;
           char unordered[384];
           char done[384];
+          size_t compare_id = b->first_inst + n;
           snprintf(unordered, sizeof(unordered),
-                   ".Lny_mach_fcmp_unordered_%s_%u", name, in->dst.as.reg);
-          snprintf(done, sizeof(done), ".Lny_mach_fcmp_done_%s_%u", name,
-                   in->dst.as.reg);
+                   ".Lny_mach_fcmp_unordered_%s_%zu", name, compare_id);
+          snprintf(done, sizeof(done), ".Lny_mach_fcmp_done_%s_%zu", name,
+                   compare_id);
           if (!cc || !nyr_printf(w,
                                  "\t%s\t-%d(%%rbp), %%xmm0\n\t%s\t-%d(%%rbp), "
                                  "%%xmm1\n\t%s\t%%xmm1, "
@@ -10142,14 +10329,14 @@ static bool nyr_x86_64_emit_mach_scalar_impl(nyr_writer_t *w,
             !ny_x64_scalar_emit_rax_load(w, &in->src0, a, rax_cached_off))
           return false;
         int64_t rhs = 0;
-        bool rhs_constant = nyr_x64_mach_const_i64(mach, definitions,
-                                                   &in->src1, &rhs, 0);
+        bool rhs_constant =
+            nyr_x64_mach_const_i64(mach, definitions, &in->src1, &rhs, 0);
         if (rhs_constant && (int64_t)(int32_t)rhs == rhs) {
           if (!nyr_printf(w, "\tcmpq\t$%" PRId64 ", %%rax\n", rhs))
             return false;
         } else if (rhs_constant || in->src1.kind == NYR_MACH_OPERAND_IMM) {
-          if (!ny_x64_scalar_emit_imm64(
-                  w, rhs_constant ? rhs : in->src1.as.imm, "%r10") ||
+          if (!ny_x64_scalar_emit_imm64(w, rhs_constant ? rhs : in->src1.as.imm,
+                                        "%r10") ||
               !nyr_put(w, "\tcmpq\t%r10, %rax\n"))
             return false;
         } else if (!nyr_printf(w, "\tcmpq\t-%d(%%rbp), %%rax\n", b_off)) {
@@ -10192,8 +10379,9 @@ static bool nyr_x86_64_emit_mach_scalar_impl(nyr_writer_t *w,
                 NYR_MACH_OPERAND_BLOCK) {
           const nyr_mach_inst_t *fallthrough =
               &mach->insts[b->first_inst + n + 1];
-          if (!nyr_printf(w, "\tcmpq\t$0, -%d(%%rbp)\n"
-                             "\tje\t.Lny_mach_%s_%u\n",
+          if (!nyr_printf(w,
+                          "\tcmpq\t$0, -%d(%%rbp)\n"
+                          "\tje\t.Lny_mach_%s_%u\n",
                           a, name, fallthrough->src1.as.block_index))
             return false;
           ++n;
@@ -10308,15 +10496,14 @@ static bool nyr_x86_64_emit_mach_scalar_impl(nyr_writer_t *w,
               ++gp;
           }
         }
-        bool tail_self = !tag_return && target->abi == NY_NATIVE_ABI_SYSV &&
-                         !in->call_is_variadic && stack_bytes == 0 &&
-                         in->src0.kind == NYR_MACH_OPERAND_SYMBOL &&
-                         in->src0.as.symbol && in->call_is_extern &&
-                         strcmp(target->object_format, "elf") == 0 &&
-                         strcmp(in->src0.as.symbol, name) == 0 &&
-                         in->dst.kind == NYR_MACH_OPERAND_VREG &&
-                         !nyr_x64_mach_is_float(mach, &in->dst) &&
-                         n + 1 < b->inst_count;
+        bool tail_self =
+            !tag_return && target->abi == NY_NATIVE_ABI_SYSV &&
+            !in->call_is_variadic && stack_bytes == 0 &&
+            in->src0.kind == NYR_MACH_OPERAND_SYMBOL && in->src0.as.symbol &&
+            in->call_is_extern && strcmp(target->object_format, "elf") == 0 &&
+            strcmp(in->src0.as.symbol, name) == 0 &&
+            in->dst.kind == NYR_MACH_OPERAND_VREG &&
+            !nyr_x64_mach_is_float(mach, &in->dst) && n + 1 < b->inst_count;
         if (tail_self) {
           const nyr_mach_inst_t *ret = &mach->insts[b->first_inst + n + 1];
           tail_self = ret->opcode == NYR_MACH_RET &&
@@ -10337,8 +10524,8 @@ static bool nyr_x86_64_emit_mach_scalar_impl(nyr_writer_t *w,
           tail_self = tail_self && !tail_frame_unsafe;
         }
         if (tail_self) {
-          if (!nyr_printf(w, "\tleave\n\tjmp\t%s%s\n",
-                          target->symbol_prefix, name))
+          if (!nyr_printf(w, "\tleave\n\tjmp\t%s%s\n", target->symbol_prefix,
+                          name))
             return false;
           ++n;
           rax_cached_off = -1;
@@ -10404,7 +10591,9 @@ static bool nyr_x86_64_emit_mach_scalar_impl(nyr_writer_t *w,
   }
   if (!nyr_printf(w, "%s:\n", epilogue) ||
       (tag_return && !nyr_put(w, "\tleaq\t1(,%rax,2), %rax\n")) ||
-      !nyr_put(w, function_return_thunk_extern ? "\tleave\n\tjmp\t__x86_return_thunk\n" : "\tleave\n\tret\n"))
+      !nyr_put(w, function_return_thunk_extern
+                      ? "\tleave\n\tjmp\t__x86_return_thunk\n"
+                      : "\tleave\n\tret\n"))
     return false;
   if (strcmp(target->object_format, "macho") != 0 &&
       !nyr_printf(w, "\t.size\t%s%s, .-%s%s\n", sym, name, sym, name))
@@ -10418,8 +10607,8 @@ bool nyr_x86_64_emit_mach_scalar(nyr_writer_t *w,
                                  const ny_native_target_info_t *target,
                                  const nyr_mach_func_t *mach,
                                  const char *func_name, bool tag_return,
-                                 bool function_return_thunk_extern,
-                                 char *err, size_t err_len) {
+                                 bool function_return_thunk_extern, char *err,
+                                 size_t err_len) {
   /*
    * 16- and 32-bit accesses exist only in the object encoder.
    */
@@ -10431,8 +10620,8 @@ bool nyr_x86_64_emit_mach_scalar(nyr_writer_t *w,
   nyr_x64_mach_use_t *uses = nyr_x64_mach_count_uses(mach);
   size_t *definitions = nyr_x64_mach_index_definitions(mach);
   bool ok = nyr_x86_64_emit_mach_scalar_impl(
-      w, target, mach, func_name, tag_return, function_return_thunk_extern,
-      err, err_len, uses, definitions);
+      w, target, mach, func_name, tag_return, function_return_thunk_extern, err,
+      err_len, uses, definitions);
   free(definitions);
   free(uses);
   return ok;

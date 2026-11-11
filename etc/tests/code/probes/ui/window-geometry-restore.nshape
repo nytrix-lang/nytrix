@@ -1,0 +1,32 @@
+shape window-geometry-restore {
+  family "probe-suite"
+  generator "regression"
+  template ny-test-case
+  expect compile_and_run
+  timeout 180
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect_stdout "window-audit-ok"
+  source ny <<'NY'
+use core
+use core.os.ui.render as render
+use core.os.ui.window as window
+def win = render.init_mock_surface(320, 240)
+window.move(win, 21, 32)
+def initial = window.get_win(win)
+def int initial_w = int(initial.get("w"))
+def int initial_h = int(initial.get("h"))
+window.set_window_borderless(win, true)
+window.move(win, 99, 88)
+window.resize(win, 640, 480)
+assert(window.set_window_borderless(win, false), "restore borderless geometry")
+def restored = window.get_win(win)
+assert(int(restored.get("x")) == 21, "restore x")
+assert(int(restored.get("y")) == 32, "restore y")
+assert(int(restored.get("w")) == initial_w, "restore width")
+assert(int(restored.get("h")) == initial_h, "restore height")
+assert(!window.key_down(win, window.KEY_A), "initial key")
+window.on_key(win, window.KEY_A, true)
+assert(window.key_down(win, window.KEY_A), "injected key")
+print("window-audit-ok")
+NY
+}

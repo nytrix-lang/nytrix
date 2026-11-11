@@ -1,3 +1,4 @@
+/* Terminal color and TTY helpers shared by command-line tools. */
 #pragma once
 
 #include "base/common.h"
@@ -30,13 +31,15 @@
 static inline int nyt_color_mode(const char *mode, int *out) {
   if (!mode || !*mode)
     return 0;
-  if (strcmp(mode, "always") == 0 || strcmp(mode, "on") == 0 || strcmp(mode, "1") == 0 ||
-      strcasecmp(mode, "true") == 0 || strcasecmp(mode, "yes") == 0) {
+  if (strcmp(mode, "always") == 0 || strcmp(mode, "on") == 0 ||
+      strcmp(mode, "1") == 0 || strcasecmp(mode, "true") == 0 ||
+      strcasecmp(mode, "yes") == 0) {
     *out = 1;
     return 1;
   }
-  if (strcmp(mode, "never") == 0 || strcmp(mode, "off") == 0 || strcmp(mode, "0") == 0 ||
-      strcasecmp(mode, "false") == 0 || strcasecmp(mode, "no") == 0) {
+  if (strcmp(mode, "never") == 0 || strcmp(mode, "off") == 0 ||
+      strcmp(mode, "0") == 0 || strcasecmp(mode, "false") == 0 ||
+      strcasecmp(mode, "no") == 0) {
     *out = 0;
     return 1;
   }
@@ -51,7 +54,8 @@ static inline int nyt_color_enabled(void) {
     return out;
   if (getenv("NO_COLOR"))
     return 0;
-  if (ny_env_truthy(getenv("CLICOLOR_FORCE")) || ny_env_truthy(getenv("FORCE_COLOR")))
+  if (ny_env_truthy(getenv("CLICOLOR_FORCE")) ||
+      ny_env_truthy(getenv("FORCE_COLOR")))
     return 1;
   const char *term_program = getenv("TERM_PROGRAM");
   if (term_program && strcmp(term_program, "vscode") == 0)
@@ -61,4 +65,6 @@ static inline int nyt_color_enabled(void) {
   return isatty(STDOUT_FILENO) != 0 || isatty(STDERR_FILENO) != 0;
 }
 
-static inline const char *nyt_clr(const char *code) { return nyt_color_enabled() ? code : ""; }
+static inline const char *nyt_clr(const char *code) {
+  return nyt_color_enabled() ? code : "";
+}

@@ -17,7 +17,7 @@ while nv < 1000 {
          c += i64buf_load(steps, n)
          break
       }
-      if n % 2 == 1 { n = 3 * n + 1 } else { n = n / 2 }
+      if (n & 1) == 1 { n = 3 * n + 1 } else { n = n >> 1 }
       c += 1
    }
    i64buf_store(steps, nv, c)
@@ -40,7 +40,7 @@ int main(void) {
         count += steps[n];
         break;
       }
-      n = (n & 1) ? 3 * n + 1 : n / 2;
+      n = (n & 1) ? 3 * n + 1 : n >> 1;
       ++count;
     }
     steps[value] = count;

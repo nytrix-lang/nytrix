@@ -107,24 +107,6 @@ static void nyr_alias_trace(const char *action, int value, uint32_t cls) {
     ny_trace_line("ALIAS", "alias: %s v%d -> class %u", action, value, cls);
 }
 
-static bool nyr_op_has_single_memory_address(nyr_op_t op) {
-  switch (op) {
-  case NYIR_LOAD_I64:
-  case NYIR_STORE_I64:
-  case NYIR_VEC4_LOAD_F64:
-  case NYIR_VEC4_STORE_F64:
-  case NYIR_VEC8_LOAD_F32:
-  case NYIR_VEC8_STORE_F32:
-  case NYIR_VEC4_LOAD_I64:
-  case NYIR_VEC4_STORE_I64:
-  case NYIR_VEC8_LOAD_I64:
-  case NYIR_VEC8_STORE_I64:
-    return true;
-  default:
-    return false;
-  }
-}
-
 static bool nyr_op_writes_through_first_operand(nyr_op_t op) {
   switch (op) {
   case NYIR_STORE_I64:
@@ -223,6 +205,28 @@ bool nyr_alias_analysis(nyr_func_t *f) {
               escape_values[arg] = true;
           }
         }
+      }
+      if (in->op == NYIR_INLINE_ASM && in->imm == -177) {
+        if (in->e >= 0 && in->e < nvals)
+          escape_values[in->e] = true;
+        if (in->f >= 0 && in->f < nvals)
+          escape_values[in->f] = true;
+      }
+      if (in->op == NYIR_INLINE_ASM && in->imm == -178 && in->b >= 0 &&
+          in->b < nvals)
+        escape_values[in->b] = true;
+      if (in->op == NYIR_INLINE_ASM && in->imm == -178) {
+        const int outputs[] = {in->c, in->d, in->e};
+        for (size_t output = 0; output < sizeof(outputs) / sizeof(outputs[0]);
+             ++output)
+          if (outputs[output] >= 0 && outputs[output] < nvals)
+            escape_values[outputs[output]] = true;
+      }
+      if (in->op == NYIR_INLINE_ASM && in->imm == -179) {
+        if (in->a >= 0 && in->a < nvals)
+          escape_values[in->a] = true;
+        if (in->b >= 0 && in->b < nvals)
+          escape_values[in->b] = true;
       }
       if (nyr_op_writes_through_first_operand(in->op) && in->a >= 0 &&
           in->a < nvals)

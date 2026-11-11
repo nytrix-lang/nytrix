@@ -14,8 +14,8 @@ def input = stem + ".ny"
 def program =
     "extern fn intstr(int n) str as \"rt_i64_to_cstr_raw\"\n" +
     "extern fn floatstr(float n) str as \"rt_f64_to_cstr_raw\"\n" +
-    "extern fn anystr(ptr n) str as \"rt_any_to_cstr\"\n" +
-    "extern fn word_tag(int n) ptr as \"rt_tag\"\n" +
+    "extern fn anystr(any n) str as \"rt_any_to_cstr\"\n" +
+    "extern fn word_tag(int n) any as \"rt_tag\"\n" +
     "extern fn float_bits(float n) int as \"rt_f64_bits\"\n" +
     "extern fn float_box(int bits) ptr as \"rt_flt_box_val\"\n" +
     "extern fn replace(ptr s, ptr old, ptr replacement) str as \"rt_cstr_replace\"\n" +

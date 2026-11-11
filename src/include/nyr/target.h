@@ -1,3 +1,4 @@
+/* Target backend, architecture, features, and native ABI description API. */
 #ifndef NYR_TARGET_H
 #define NYR_TARGET_H
 

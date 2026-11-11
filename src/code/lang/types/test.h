@@ -1,3 +1,4 @@
+/* Test entry points for type-system and row-algebra regressions. */
 #ifndef NYR_IR_OPT_TYPING_TEST_H
 #define NYR_IR_OPT_TYPING_TEST_H
 

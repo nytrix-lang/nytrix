@@ -1,3 +1,4 @@
+/* Context and APIs for inferring proven scalar facts and variable types. */
 #ifndef NY_CODE_TYPEINFER_H
 #define NY_CODE_TYPEINFER_H
 

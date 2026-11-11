@@ -799,10 +799,10 @@ static void vn_table_init(vn_entry_t *table) {
  */
 static size_t vn_hash(const nyr_inst_t *in) {
   uint64_t h = (uint64_t)in->op + UINT64_C(0x9e3779b97f4a7c15);
-#define VN_MIX(v)                                                              \
-  do {                                                                         \
-    h ^= (uint64_t)(uint32_t)((v) + 1) + UINT64_C(0x9e3779b97f4a7c15) +        \
-         (h << 6) + (h >> 2);                                                  \
+#define VN_MIX(v)                                                       \
+  do {                                                                  \
+    h ^= (uint64_t)(uint32_t)((v) + 1) + UINT64_C(0x9e3779b97f4a7c15) + \
+         (h << 6) + (h >> 2);                                           \
   } while (0)
   VN_MIX(in->a);
   VN_MIX(in->b);
@@ -944,8 +944,8 @@ static int gvn_canonical_operand(int value, const int *copy_of,
 static void gvn_canonicalize_operands(nyr_inst_t *key, const int *copy_of,
                                       const int *constant_of,
                                       size_t value_count) {
-#define GVN_CANONICALIZE_OPERAND(field)                                        \
-  key->field =                                                                 \
+#define GVN_CANONICALIZE_OPERAND(field)                                    \
+  key->field =                                                             \
       gvn_canonical_operand(key->field, copy_of, constant_of, value_count)
   GVN_CANONICALIZE_OPERAND(a);
   GVN_CANONICALIZE_OPERAND(b);

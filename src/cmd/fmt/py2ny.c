@@ -67,7 +67,7 @@ static void pny_sb_clear(pny_sb_t *b) {
  */
 
 #define PN_IS_DIGIT(c) ((c) >= '0' && (c) <= '9')
-#define PN_IS_ALPHA(c)                                                         \
+#define PN_IS_ALPHA(c)                                                     \
   (((c) >= 'a' && (c) <= 'z') || ((c) >= 'A' && (c) <= 'Z') || (c) == '_')
 #define PN_IS_ALNUM(c) (PN_IS_ALPHA(c) || PN_IS_DIGIT(c))
 #define PN_IS_XDIGIT(c)                                                        \
@@ -1653,8 +1653,7 @@ static int pny_take_aug(pny_t *p, char *opbuf, size_t opsz) {
   const pny_tok_t *t = pny_cur(p);
   if (t->kind != PNTK_OP)
     return 0;
-  static const char *const aug[] = {
-      "+=", "-=", "*=", "**=", "/=", "%=", "&=", "|=", "^=", NULL};
+  static const char *const aug[] = {"+=", "-=", "*=", "**=", "/=", "%=", NULL};
   for (int k = 0; aug[k]; k++) {
     if (t->n == strlen(aug[k]) && memcmp(t->s, aug[k], t->n) == 0) {
       snprintf(opbuf, opsz, " %s ", aug[k]);
@@ -1669,7 +1668,13 @@ static int pny_take_aug(pny_t *p, char *opbuf, size_t opsz) {
   }
   if ((t->n == 3 &&
        (memcmp(t->s, ">>=", 3) == 0 || memcmp(t->s, "<<=", 3) == 0)) ||
-      (t->n == 2 && memcmp(t->s, "@=", 2) == 0)) {
+      (t->n == 2 && (memcmp(t->s, "&=", 2) == 0 || memcmp(t->s, "|=", 2) == 0 ||
+                     memcmp(t->s, "^=", 2) == 0))) {
+    snprintf(opbuf, opsz, "%.*s", (int)t->n - 1, t->s);
+    pny_advance(p);
+    return 2;
+  }
+  if (t->n == 2 && memcmp(t->s, "@=", 2) == 0) {
     pny_warn_at(p, t->line, "unsupported", "'%.*s' augmented assignment",
                 (int)t->n, t->s);
     pny_advance(p);
@@ -1712,12 +1717,29 @@ static void pny_parse_simple_stmt(pny_t *p) {
     free(val.data);
   } else {
     char opbuf[8];
-    if (pny_take_aug(p, opbuf, sizeof(opbuf))) {
+    int augmented = pny_take_aug(p, opbuf, sizeof(opbuf));
+    if (augmented) {
       pny_sb_t val = {0};
       pny_expr(p, &val);
-      pny_emit_sb(p, &first);
-      pny_emit(p, opbuf);
-      pny_emit_sb(p, &val);
+      if (augmented == 2) {
+        if (pny_is_bare_ident(&first)) {
+          pny_emit_sb(p, &first);
+          pny_emit(p, " = ");
+          pny_emit_sb(p, &first);
+          pny_emit(p, " ");
+          pny_emit(p, opbuf);
+          pny_emit(p, " (");
+          pny_emit_sb(p, &val);
+          pny_emit(p, ")");
+        } else {
+          pny_warn_at(p, pny_cur(p)->line, "unsupported",
+                      "bitwise compound assignment to a complex target");
+        }
+      } else {
+        pny_emit_sb(p, &first);
+        pny_emit(p, opbuf);
+        pny_emit_sb(p, &val);
+      }
       free(val.data);
     } else if (pny_at_op(p, ",")) {
       /*

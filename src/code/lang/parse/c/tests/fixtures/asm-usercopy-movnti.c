@@ -1,3 +1,6 @@
+/*
+ * Fixture: copy a fixed word block with x86 non-temporal stores.
+ */
 static void copy_32(const unsigned long *source, unsigned long *dest) {
   __asm__("movq    (%0), %%r8\n"
           "movq   8(%0), %%r9\n"

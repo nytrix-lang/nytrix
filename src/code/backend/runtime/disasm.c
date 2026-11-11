@@ -1,3 +1,6 @@
+/*
+ * Bounded instruction decoder used by the Ny decompiler and disassembly tools.
+ */
 #include "shared.h"
 #include <inttypes.h>
 #include <stddef.h>
@@ -9,7 +12,7 @@
  * Mnemonic and operand buffers are fixed arrays in the decoder frames.
  */
 #define DIS_SET(buf, text) snprintf((buf), sizeof(buf), "%s", (text))
-#define DIS_APPEND(buf, text)                                                  \
+#define DIS_APPEND(buf, text)                                            \
   snprintf((buf) + strlen(buf), sizeof(buf) - strlen(buf), "%s", (text))
 
 const char *nyr_internal_aarch64_disasm(const unsigned char *b, int64_t n,
@@ -235,7 +238,7 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
           goto unsupported;
         if (op2 == 0x10 || op2 == 0x11) {
           DIS_SET(m, scalar_width ? (rep == 0xf3 ? "movss" : "movsd")
-                                 : (op16 ? "movupd" : "movups"));
+                                  : (op16 ? "movupd" : "movups"));
           snprintf(args, sizeof(args), "%s, %s",
                    op2 == 0x10 ? reg_name : rm_name,
                    op2 == 0x10 ? rm_name : reg_name);
@@ -278,7 +281,7 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
                             sizeof(rm_name)))
           goto unsupported;
         DIS_SET(m, op16 ? (op2 == 0x14 ? "unpcklpd" : "unpckhpd")
-                       : (op2 == 0x14 ? "unpcklps" : "unpckhps"));
+                        : (op2 == 0x14 ? "unpcklps" : "unpckhps"));
         snprintf(args, sizeof(args), "%s, %s", reg_name, rm_name);
       } else if ((op2 == 0x12 || op2 == 0x13 || op2 == 0x16 || op2 == 0x17) &&
                  i < n && !op16) {
@@ -356,7 +359,7 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
                             sizeof(rm_name)))
           goto unsupported;
         DIS_SET(m, op2 == 0x2e ? (op16 ? "ucomisd" : "ucomiss")
-                              : (op16 ? "comisd" : "comiss"));
+                               : (op16 ? "comisd" : "comiss"));
         snprintf(args, sizeof(args), "%s, %s", reg_name, rm_name);
       } else if (op2 == 0x6c && op16 && i < n) {
         unsigned char mr = b[i++];
@@ -368,6 +371,18 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
           goto unsupported;
         DIS_SET(m, "punpcklqdq");
         snprintf(args, sizeof(args), "%s, %s", reg_name, rm_name);
+      } else if (op2 == 0x70 && op16 && !rep && i < n) {
+        unsigned char mr = b[i++];
+        reg = ((mr >> 3) & 7) + ((rex & 4) ? 8 : 0);
+        char reg_name[16], rm_name[192];
+        snprintf(reg_name, sizeof(reg_name), "xmm%u", reg);
+        if (!nyr_x64_vec_rm(b, n, &i, mr, rex, 128, 16, rm_name,
+                            sizeof(rm_name)) ||
+            i >= n)
+          goto unsupported;
+        DIS_SET(m, "pshufd");
+        snprintf(args, sizeof(args), "%s, %s, 0x%x", reg_name, rm_name,
+                 b[i++]);
       } else if (op16 && !rep && i < n &&
                  (op2 == 0xd4 || op2 == 0xfb || op2 == 0xdb || op2 == 0xeb ||
                   op2 == 0xef || op2 == 0xf3)) {
@@ -379,11 +394,11 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
                             sizeof(rm_name)))
           goto unsupported;
         DIS_SET(m, op2 == 0xd4   ? "paddq"
-                  : op2 == 0xfb ? "psubq"
-                  : op2 == 0xdb ? "pand"
-                  : op2 == 0xeb ? "por"
-                  : op2 == 0xef ? "pxor"
-                                : "psllq");
+                   : op2 == 0xfb ? "psubq"
+                   : op2 == 0xdb ? "pand"
+                   : op2 == 0xeb ? "por"
+                   : op2 == 0xef ? "pxor"
+                                 : "psllq");
         snprintf(args, sizeof(args), "%s, %s", reg_name, rm_name);
       } else if (op2 == 0x73 && op16 && !rep && i + 2 <= n) {
         unsigned char mr = b[i++];
@@ -510,6 +525,14 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
       }
       unsigned pp = vex3 & 3;
       unsigned vex_rex = (unsigned)(~vex2 >> 5) & 7;
+      /*
+       * VZEROUPPER/VZEROALL have no ModRM byte.
+       */
+      if (map == 1 && opcode == 0x77 && pp == 0 &&
+          (vex3 & 0x78) == 0x78 && !(vex3 & 0x80)) {
+        DIS_SET(m, (vex3 & 4) ? "vzeroall" : "vzeroupper");
+        goto decoded;
+      }
       if (i >= n)
         goto unsupported;
       unsigned char mr = b[i++];
@@ -547,12 +570,16 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
       unsigned rm_width =
           map == 1 && (opcode == 0x10 || opcode == 0x11) && (pp == 2 || pp == 3)
               ? (pp == 2 ? 4 : 8)
+          : map == 1 && (opcode == 0x2e || opcode == 0x2f) && (pp == 0 || pp == 1)
+              ? (pp == 0 ? 4 : 8)
           : map == 2 && opcode == 0x19 ? 8
           : map == 2 && opcode == 0x59 ? 8
           : map == 1 && opcode >= 0x58 && opcode <= 0x5e &&
                   (opcode == 0x58 || opcode == 0x59 || opcode == 0x5c ||
                    opcode == 0x5e) &&
                   (pp == 2 || pp == 3)
+              ? (pp == 2 ? 4 : 8)
+          : map == 1 && opcode == 0x51 && (pp == 2 || pp == 3)
               ? (pp == 2 ? 4 : 8)
               : 0;
       if ((mr >> 6) == 3) {
@@ -569,11 +596,17 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
            opcode == 0x29) &&
           (pp == 0 || pp == 1) && !(vex3 & 0x80) && (vex3 & 0x78) == 0x78) {
         DIS_SET(m, opcode == 0x28 || opcode == 0x29
-                      ? (pp == 0 ? "vmovaps" : "vmovapd")
-                      : (pp == 0 ? "vmovups" : "vmovupd"));
+                       ? (pp == 0 ? "vmovaps" : "vmovapd")
+                       : (pp == 0 ? "vmovups" : "vmovupd"));
         int store = opcode == 0x11 || opcode == 0x29;
         snprintf(args, sizeof(args), "%s, %s", store ? rm_name : reg_name,
                  store ? reg_name : rm_name);
+      } else if (map == 1 && (opcode == 0x2e || opcode == 0x2f) &&
+                 (pp == 0 || pp == 1) && vector_width == 128 &&
+                 !(vex3 & 0x80) && (vex3 & 0x78) == 0x78) {
+        DIS_SET(m, opcode == 0x2e ? (pp == 0 ? "vucomiss" : "vucomisd")
+                                 : (pp == 0 ? "vcomiss" : "vcomisd"));
+        snprintf(args, sizeof(args), "%s, %s", reg_name, rm_name);
       } else if (map == 1 && (opcode == 0x6f || opcode == 0x7f) &&
                  (pp == 1 || pp == 2) && !(vex3 & 0x80) &&
                  (vex3 & 0x78) == 0x78) {
@@ -582,6 +615,31 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
           snprintf(args, sizeof(args), "%s, %s", reg_name, rm_name);
         else
           snprintf(args, sizeof(args), "%s, %s", rm_name, reg_name);
+      } else if (map == 1 && opcode == 0x70 && pp == 1 &&
+                 !(vex3 & 0x80) && (vex3 & 0x78) == 0x78 && i < n) {
+        DIS_SET(m, "vpshufd");
+        snprintf(args, sizeof(args), "%s, %s, 0x%x", reg_name, rm_name,
+                 b[i++]);
+      } else if (map == 1 && pp == 1 && !(vex3 & 0x80) &&
+                 (opcode == 0x71 || opcode == 0x72 || opcode == 0x73) &&
+                 (mr >> 6) == 3 && i < n) {
+        /*
+         * VEX packed integer shifts by an immediate (VPSRL/VPSRA/VPSLL).
+         */
+        unsigned group = (mr >> 3) & 7;
+        const char *name = NULL;
+        if (group == 2)
+          name = "vpsrl";
+        else if (group == 4 && opcode != 0x73)
+          name = "vpsra";
+        else if (group == 6)
+          name = "vpsll";
+        if (!name)
+          goto unsupported;
+        const char *suffix = opcode == 0x71 ? "w" : opcode == 0x72 ? "d" : "q";
+        DIS_SET(m, name);
+        DIS_APPEND(m, suffix);
+        snprintf(args, sizeof(args), "%s, 0x%x", rm_name, b[i++]);
       } else if (map == 1 && pp == 1 && !(vex3 & 0x80) &&
                  (opcode == 0xd4 || opcode == 0xfb || opcode == 0xdb ||
                   opcode == 0xeb || opcode == 0xef)) {
@@ -596,13 +654,45 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
         DIS_SET(m, name);
         snprintf(args, sizeof(args), "%s, %s, %s", reg_name, vvvv_name,
                  rm_name);
+      } else if (map == 1 && (pp == 0 || pp == 1) && !(vex3 & 0x80) &&
+                 opcode >= 0x54 && opcode <= 0x57) {
+        /*
+         * VEX.0F 54-57 packed floating-point bitwise operations.
+         */
+        const char *name = opcode == 0x54   ? "vand"
+                           : opcode == 0x55 ? "vandn"
+                           : opcode == 0x56 ? "vor"
+                                            : "vxor";
+        char vvvv_name[16];
+        snprintf(vvvv_name, sizeof(vvvv_name), "%s%u",
+                 vector_width == 256 ? "ymm" : "xmm", vector_vvvv);
+        DIS_SET(m, name);
+        DIS_APPEND(m, pp == 0 ? "ps" : "pd");
+        snprintf(args, sizeof(args), "%s, %s, %s", reg_name, vvvv_name,
+                 rm_name);
+      } else if (map == 1 && pp == 1 && !(vex3 & 0x80) &&
+                 (opcode == 0x64 || opcode == 0x65 || opcode == 0x66 ||
+                  opcode == 0x74 || opcode == 0x75 || opcode == 0x76)) {
+        const char *name = opcode >= 0x74
+                               ? (opcode == 0x74   ? "vpcmpeqb"
+                                  : opcode == 0x75 ? "vpcmpeqw"
+                                                  : "vpcmpeqd")
+                               : (opcode == 0x64   ? "vpcmpgtb"
+                                  : opcode == 0x65 ? "vpcmpgtw"
+                                                  : "vpcmpgtd");
+        char vvvv_name[16];
+        snprintf(vvvv_name, sizeof(vvvv_name), "%s%u",
+                 vector_width == 256 ? "ymm" : "xmm", vector_vvvv);
+        DIS_SET(m, name);
+        snprintf(args, sizeof(args), "%s, %s, %s", reg_name, vvvv_name,
+                 rm_name);
       } else if (map == 1 && (opcode == 0x10 || opcode == 0x11) &&
                  (pp == 2 || pp == 3)) {
         /*
          * VEX.F2/F3.0F 10/11: scalar single/double move (reg or mem).
          */
         DIS_SET(m, opcode == 0x10 ? (pp == 3 ? "vmovsd" : "vmovss")
-                                 : (pp == 3 ? "vmovsd" : "vmovss"));
+                                  : (pp == 3 ? "vmovsd" : "vmovss"));
         int store = opcode == 0x11;
         if ((mr >> 6) == 3) {
           /*
@@ -618,9 +708,14 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
                    store ? reg_name : rm_name);
         }
       } else if (map == 2 && pp == 1 && !(vex3 & 0x80) && opcode == 0x19 &&
-                 (vex3 & 0x78) == 0x78 && (mr >> 6) != 3) {
+                 (vex3 & 0x78) == 0x78 && vector_width == 256) {
         DIS_SET(m, "vbroadcastsd");
-        snprintf(args, sizeof(args), "%s, %s", reg_name, rm_name);
+        if ((mr >> 6) == 3) {
+          unsigned rm = (mr & 7) + ((vex_rex & 1) ? 8 : 0);
+          snprintf(args, sizeof(args), "%s, xmm%u", reg_name, rm);
+        } else {
+          snprintf(args, sizeof(args), "%s, %s", reg_name, rm_name);
+        }
       } else if (map == 2 && pp == 1 && (vex3 & 0x80) && opcode == 0xa8) {
         char vvvv_name[16];
         snprintf(vvvv_name, sizeof(vvvv_name), "%s%u",
@@ -648,20 +743,44 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
         DIS_APPEND(m, suffix);
         snprintf(args, sizeof(args), "%s, %s, %s", reg_name, vvvv_name,
                  rm_name);
-      } else if (map == 1 && opcode == 0x51 && (pp <= 3) && !(vex3 & 0x80) &&
-                 (vex3 & 0x78) == 0x78) {
+      } else if (map == 1 && opcode == 0x51 && (pp <= 3) &&
+                 !(vex3 & 0x80) &&
+                 ((pp >= 2) || (vex3 & 0x78) == 0x78)) {
         const char *suffix = pp == 0   ? "ps"
                              : pp == 1 ? "pd"
                              : pp == 2 ? "ss"
                                        : "sd";
         DIS_SET(m, "vsqrt");
         DIS_APPEND(m, suffix);
-        snprintf(args, sizeof(args), "%s, %s", reg_name, rm_name);
+        if (pp >= 2) {
+          char vvvv_name[16];
+          snprintf(vvvv_name, sizeof(vvvv_name), "%s%u",
+                   vector_width == 256 ? "ymm" : "xmm", vector_vvvv);
+          snprintf(args, sizeof(args), "%s, %s, %s", reg_name, vvvv_name,
+                   rm_name);
+        } else {
+          snprintf(args, sizeof(args), "%s, %s", reg_name, rm_name);
+        }
       } else if (map == 2 && pp == 1 && (vex3 & 0x80) && opcode == 0x59 &&
-                 (vex3 & 0x78) == 0x78 && vector_width == 256 &&
-                 (mr >> 6) != 3) {
+                 (vex3 & 0x78) == 0x78 && vector_width == 256) {
         DIS_SET(m, "vpbroadcastq");
-        snprintf(args, sizeof(args), "%s, %s", reg_name, rm_name);
+        if ((mr >> 6) == 3) {
+          unsigned rm = (mr & 7) + ((vex_rex & 1) ? 8 : 0);
+          snprintf(args, sizeof(args), "%s, xmm%u", reg_name, rm);
+        } else {
+          snprintf(args, sizeof(args), "%s, %s", reg_name, rm_name);
+        }
+      } else if (map == 3 && pp == 1 && vector_width == 256 &&
+                 !(vex3 & 0x80) && opcode == 0x18) {
+        char src_name[192], vvvv_name[16];
+        if (!nyr_x64_vec_rm(b, n, &i, mr, vex_rex, 128, 16, src_name,
+                            sizeof(src_name)) ||
+            i >= n)
+          goto unsupported;
+        snprintf(vvvv_name, sizeof(vvvv_name), "ymm%u", vector_vvvv);
+        DIS_SET(m, "vinsertf128");
+        snprintf(args, sizeof(args), "%s, %s, %s, %u", reg_name,
+                 vvvv_name, src_name, b[i++]);
       } else if (map == 3 && pp == 1 && vector_width == 256 && !(vex3 & 0x80) &&
                  opcode == 0x19 && (vex3 & 0x78) == 0x78 && (mr >> 6) == 3 &&
                  i < n) {
@@ -845,7 +964,7 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
         unsigned acc_imm = width == 1 ? 1 : (op16 ? 2 : 4);
         if (i + acc_imm > n)
           goto unsupported;
-        int64_t iv = width == 1 ? (int8_t)b[i]
+        int64_t iv = width == 1     ? (int8_t)b[i]
                      : acc_imm == 2 ? (int16_t)rd(b + i, 2)
                                     : (int32_t)rd(b + i, 4);
         i += acc_imm;
@@ -893,6 +1012,19 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
         snprintf(args, sizeof(args), "%s, %s, %s%" PRIx64,
                  nyr_x64_reg(reg, w, rex), src, iv < 0 ? "-0x" : "0x",
                  (uint64_t)(iv < 0 ? -iv : iv));
+      } else if (op == 0x63) {
+        if (i >= n)
+          goto unsupported;
+        unsigned char mr = b[i++];
+        mod = mr >> 6;
+        reg = ((mr >> 3) & 7) + ((rex & 4) ? 8 : 0);
+        unsigned dst_width = (rex & 8) ? 8 : (op16 ? 2 : 4);
+        char src[128];
+        if (!nyr_x64_rm(b, n, &i, mr, rex, 4, src, sizeof(src)))
+          goto unsupported;
+        DIS_SET(m, "movsxd");
+        snprintf(args, sizeof(args), "%s, %s",
+                 nyr_x64_reg(reg, dst_width, rex), src);
       } else if (op == 0xc0 || op == 0xc1 || op == 0xd0 || op == 0xd1 ||
                  op == 0xd2 || op == 0xd3) {
         if (i >= n)
@@ -972,9 +1104,9 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
         if (mod != 3)
           goto unsupported;
         DIS_SET(m, reg == 2   ? "call"
-                  : reg == 4 ? "jmp"
-                  : reg == 6 ? "push"
-                             : "");
+                   : reg == 4 ? "jmp"
+                   : reg == 6 ? "push"
+                              : "");
         if (!m[0])
           goto unsupported;
         snprintf(args, sizeof(args), "%s", regs64[rmreg]);
@@ -1031,8 +1163,8 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
       }
       output_ensure(used + 700);
       int z = snprintf(output + used, output_cap - used,
-                       "%" PRId64 "\t%s\t%s\t%" PRId64 "\t%s\n", base + start, m,
-                       args, i - start, bytes_hex);
+                       "%" PRId64 "\t%s\t%s\t%" PRId64 "\t%s\n", base + start,
+                       m, args, i - start, bytes_hex);
       if (z < 0 || (size_t)z >= output_cap - used)
         break;
       used += (size_t)z;
@@ -1049,8 +1181,9 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
       unsigned v = (i > start ? b[start] : op);
       output_ensure(used + 700);
       int z = snprintf(output + used, output_cap - used,
-               "%" PRId64 "\tunsupported\topcode 0x%02x at 0x%" PRIx64 "\t1\t%02x \n",
-               base + start, v, (uint64_t)(base + start), v);
+                       "%" PRId64 "\tunsupported\topcode 0x%02x at 0x%" PRIx64
+                       "\t1\t%02x \n",
+                       base + start, v, (uint64_t)(base + start), v);
       if (z < 0 || (size_t)z >= output_cap - used)
         break;
       used += (size_t)z;
@@ -1170,8 +1303,8 @@ const char *nyr_internal_aarch64_disasm(const unsigned char *b, int64_t n,
                (insn & 0xffe0fc00) == 0x1ac02c00) {
       unsigned shift_op = (insn >> 10) & 0x3f;
       DIS_SET(mnemonic, shift_op == 10   ? "asrv"
-                       : shift_op == 11 ? "rorv"
-                                        : "lslv");
+                        : shift_op == 11 ? "rorv"
+                                         : "lslv");
       snprintf(operands, sizeof(operands), "%s, %s, %s",
                nyr_a64_reg(rd0, width, 0), nyr_a64_reg(rn, width, 0),
                nyr_a64_reg(rm, width, 0));
@@ -1204,9 +1337,9 @@ const char *nyr_internal_aarch64_disasm(const unsigned char *b, int64_t n,
                (insn & 0xffe0fc00) == 0x1e601800) {
       uint32_t op = insn & 0xffe0fc00;
       DIS_SET(mnemonic, op == 0x1e202800 || op == 0x1e602800   ? "fadd"
-                       : op == 0x1e203800 || op == 0x1e603800 ? "fsub"
-                       : op == 0x1e200800 || op == 0x1e600800 ? "fmul"
-                                                              : "fdiv");
+                        : op == 0x1e203800 || op == 0x1e603800 ? "fsub"
+                        : op == 0x1e200800 || op == 0x1e600800 ? "fmul"
+                                                               : "fdiv");
       char fp = (op & 0x00400000) ? 'd' : 's';
       snprintf(operands, sizeof(operands), "%c%u, %c%u, %c%u", fp, rd0, fp, rn,
                fp, rm);
@@ -1331,7 +1464,7 @@ const char *nyr_internal_aarch64_disasm(const unsigned char *b, int64_t n,
         DIS_SET(mnemonic, sub ? "cmp" : "cmn");
       else
         DIS_SET(mnemonic,
-               sub ? (flags ? "subs" : "sub") : (flags ? "adds" : "add"));
+                sub ? (flags ? "subs" : "sub") : (flags ? "adds" : "add"));
       if (flags && rd0 == 31)
         snprintf(operands, sizeof(operands), "%s, #%u",
                  nyr_a64_reg(rn, width, 1), imm);
@@ -1344,7 +1477,7 @@ const char *nyr_internal_aarch64_disasm(const unsigned char *b, int64_t n,
         DIS_SET(mnemonic, sub ? "cmp" : "cmn");
       else
         DIS_SET(mnemonic,
-               sub ? (flags ? "subs" : "sub") : (flags ? "adds" : "add"));
+                sub ? (flags ? "subs" : "sub") : (flags ? "adds" : "add"));
       if (flags && rd0 == 31)
         snprintf(operands, sizeof(operands), "%s, %s",
                  nyr_a64_reg(rn, width, 1), nyr_a64_reg(rm, width, 0));
@@ -1428,9 +1561,9 @@ const char *nyr_internal_aarch64_disasm(const unsigned char *b, int64_t n,
                  nyr_a64_reg(rd0, width, 0), nyr_a64_reg(rm, width, 0));
       } else {
         DIS_SET(mnemonic, opc == 0   ? "and"
-                         : opc == 1 ? "orr"
-                         : opc == 2 ? "eor"
-                                    : "ands");
+                          : opc == 1 ? "orr"
+                          : opc == 2 ? "eor"
+                                     : "ands");
         snprintf(operands, sizeof(operands), "%s, %s, %s",
                  nyr_a64_reg(rd0, width, 0), nyr_a64_reg(rn, width, 0),
                  nyr_a64_reg(rm, width, 0));
@@ -1448,9 +1581,9 @@ const char *nyr_internal_aarch64_disasm(const unsigned char *b, int64_t n,
       unsigned imm = ((insn >> 10) & 0xfff) * scale;
       const char *reg_name = scale == 16 ? "q" : scale == 8 ? "d" : "s";
       DIS_SET(mnemonic,
-             (op == 0x3dc00000 || op == 0xfd400000 || op == 0xbd400000)
-                 ? "ldr"
-                 : "str");
+              (op == 0x3dc00000 || op == 0xfd400000 || op == 0xbd400000)
+                  ? "ldr"
+                  : "str");
       if (imm)
         snprintf(operands, sizeof(operands), "%s%u, [%s, #%u]", reg_name, rd0,
                  nyr_a64_reg(rn, 1, 1), imm);
@@ -1576,11 +1709,11 @@ const char *nyr_internal_aarch64_disasm(const unsigned char *b, int64_t n,
         if (opc > 1)
           goto unsupported_a64;
         DIS_SET(mnemonic, opc ? (bytes == 1   ? "ldrb"
-                                : bytes == 2 ? "ldrh"
-                                             : "ldr")
-                             : (bytes == 1   ? "strb"
-                                : bytes == 2 ? "strh"
-                                             : "str"));
+                                 : bytes == 2 ? "ldrh"
+                                              : "ldr")
+                              : (bytes == 1   ? "strb"
+                                 : bytes == 2 ? "strh"
+                                              : "str"));
         snprintf(operands, sizeof(operands), "%s, %s",
                  nyr_a64_reg(rd0, bytes == 8, 0), address);
       } else if ((insn & 0x3f000000) == 0x39000000) {
@@ -1591,12 +1724,12 @@ const char *nyr_internal_aarch64_disasm(const unsigned char *b, int64_t n,
         if (opc > 2 || (opc == 2 && bytes != 4))
           goto unsupported_a64;
         DIS_SET(mnemonic, opc == 2   ? "ldrsw"
-                         : opc == 1 ? (bytes == 1   ? "ldrb"
-                                       : bytes == 2 ? "ldrh"
-                                                    : "ldr")
-                                    : (bytes == 1   ? "strb"
-                                       : bytes == 2 ? "strh"
-                                                    : "str"));
+                          : opc == 1 ? (bytes == 1   ? "ldrb"
+                                        : bytes == 2 ? "ldrh"
+                                                     : "ldr")
+                                     : (bytes == 1   ? "strb"
+                                        : bytes == 2 ? "strh"
+                                                     : "str"));
         if (imm)
           snprintf(operands, sizeof(operands), "%s, [%s, #%u]",
                    opc == 2 ? nyr_a64_reg(rd0, 1, 0) : reg, bas, imm);
@@ -1609,8 +1742,8 @@ const char *nyr_internal_aarch64_disasm(const unsigned char *b, int64_t n,
     }
     {
       char bytes_hex[16];
-      snprintf(bytes_hex, sizeof(bytes_hex), "%02x %02x %02x %02x",
-               b[off], b[off+1], b[off+2], b[off+3]);
+      snprintf(bytes_hex, sizeof(bytes_hex), "%02x %02x %02x %02x", b[off],
+               b[off + 1], b[off + 2], b[off + 3]);
       int z = snprintf(a64_output + used, sizeof(a64_output) - used,
                        "%" PRId64 "\t%s\t%s\t%u\t%s\n", base + off, mnemonic,
                        operands, size, bytes_hex);
@@ -1623,8 +1756,8 @@ const char *nyr_internal_aarch64_disasm(const unsigned char *b, int64_t n,
     snprintf(a64_output + used, sizeof(a64_output) - used,
              "%" PRId64 "\tunsupported\tinstruction word 0x%08" PRIx32
              " at 0x%" PRIx64 "\t4\t%02x %02x %02x %02x\n",
-             base + off, insn, (uint64_t)(base + off),
-             b[off], b[off+1], b[off+2], b[off+3]);
+             base + off, insn, (uint64_t)(base + off), b[off], b[off + 1],
+             b[off + 2], b[off + 3]);
     return a64_output;
   }
   return a64_output;

@@ -569,7 +569,7 @@ fn search(any source, any query, any opts=dict()) list {
 }
 
 fn _crackme_word_score(str value, list words) list {
-   def v = str.lower(str.strip(value))
+   def v = _normalized_token(value)
    mut score = 0
    mut reasons = []
    mut i = 0
@@ -1063,9 +1063,13 @@ fn call_targets(any source, any target=0, int max_bytes=512) list {
    out
 }
 
+fn _normalized_token(str token) str {
+   str.lower(str.strip(token))
+}
+
 fn _lift_op(str a, str m) str {
    if dasm.arch_family(a) == "x86" &&
-   str.startswith(str.lower(str.strip(m)), "lea") {
+   str.startswith(_normalized_token(m), "lea") {
       return "assign"
    }
    dasm.instruction_kind(a, m)
@@ -1084,18 +1088,18 @@ fn _paren_mem_parts(str op) dict {
 }
 
 fn _is_store_mnemonic(str mnemonic) bool {
-   def m = str.lower(str.strip(mnemonic))
+   def m = _normalized_token(mnemonic)
    m == "str" || m == "strb" || m == "strh" || m == "stur" || m == "stp" || m == "stnp" ||
    m == "sd" || m == "sw" || m == "sh" || m == "sb"
 }
 
 fn _is_pair_store_mnemonic(str mnemonic) bool {
-   def m = str.lower(str.strip(mnemonic))
+   def m = _normalized_token(mnemonic)
    m == "stp" || m == "stnp"
 }
 
 fn _is_pair_load_mnemonic(str mnemonic) bool {
-   def m = str.lower(str.strip(mnemonic))
+   def m = _normalized_token(mnemonic)
    m == "ldp" || m == "ldnp"
 }
 
@@ -1121,21 +1125,27 @@ fn _ny_operand_bin(dict bin, str op) str {
    _rename_name(bin, n)
 }
 
-fn _ny_address_operand(str op) str {
-   def n = _ny_operand(op)
-   if str.startswith(n, "mem(") { return slice(n, 4, n.len - 1, 1) }
-   if str.startswith(n, "mem_fs(") { return "&" + slice(n, 6, n.len, 1) }
-   if str.startswith(n, "mem_gs(") { return "&" + slice(n, 6, n.len, 1) }
-   _operand_kind(op) == "mem" ? dasm.address_ny_expr(op) : ("&" + n)
+fn _ny_is_memory_expr(str n) bool {
+   str.startswith(n, "mem(") || str.startswith(n, "mem_fs(") || str.startswith(n, "mem_gs(")
 }
 
-fn _ny_address_operand_bin(dict bin, str op) str {
-   def plain = _ny_operand(op)
-   def n = str.startswith(plain, "mem(") || str.startswith(plain, "mem_fs(") || str.startswith(plain, "mem_gs(") ? plain : _rename_name(bin, plain)
+fn _ny_address_expr(str n) str {
    if str.startswith(n, "mem(") { return slice(n, 4, n.len - 1, 1) }
    if str.startswith(n, "mem_fs(") { return "&" + slice(n, 6, n.len, 1) }
    if str.startswith(n, "mem_gs(") { return "&" + slice(n, 6, n.len, 1) }
    "&" + n
+}
+
+fn _ny_address_operand(str op) str {
+   def n = _ny_operand(op)
+   if _operand_kind(op) == "mem" && !_ny_is_memory_expr(n) { return dasm.address_ny_expr(op) }
+   _ny_address_expr(n)
+}
+
+fn _ny_address_operand_bin(dict bin, str op) str {
+   def plain = _ny_operand(op)
+   def n = _ny_is_memory_expr(plain) ? plain : _rename_name(bin, plain)
+   _ny_address_expr(n)
 }
 
 fn _ny_ref_value(dict ref, bool address=false) str {
@@ -1146,21 +1156,17 @@ fn _ny_ref_value(dict ref, bool address=false) str {
    ""
 }
 
-fn _ny_operand_ref(str op, dict ref) str {
+fn _ny_ref_operand(str op, dict ref, bool address) str {
    if _operand_matches_ref(op, ref) {
-      def named = _ny_ref_value(ref, false)
+      def named = _ny_ref_value(ref, address)
       if named.len > 0 { return named }
    }
-   _ny_operand(op)
+   address ? _ny_address_operand(op) : _ny_operand(op)
 }
 
-fn _ny_address_operand_ref(str op, dict ref) str {
-   if _operand_matches_ref(op, ref) {
-      def named = _ny_ref_value(ref, true)
-      if named.len > 0 { return named }
-   }
-   _ny_address_operand(op)
-}
+fn _ny_operand_ref(str op, dict ref) str { _ny_ref_operand(op, ref, false) }
+
+fn _ny_address_operand_ref(str op, dict ref) str { _ny_ref_operand(op, ref, true) }
 
 fn _operand_matches_ref(str op, dict ref) bool {
    if ref.len == 0 { return false }
@@ -1169,11 +1175,12 @@ fn _operand_matches_ref(str op, dict ref) bool {
 }
 
 @returns_owned
-fn _ny_operand_ref_bin(dict bin, str op, dict ref) str {
+fn _ny_ref_operand_bin(dict bin, str op, dict ref, bool address) str {
    if _operand_matches_ref(op, ref) {
-      def named = _ny_ref_value(ref, false)
+      def named = _ny_ref_value(ref, address)
       if named.len > 0 { return named }
    }
+   if address { return _ny_address_operand_bin(bin, op) }
    def raw_table = _ny_dynamic_data_operand_bin(bin, op)
    if raw_table.len > 0 { return raw_table }
    def plain = _ny_operand(op)
@@ -1181,6 +1188,10 @@ fn _ny_operand_ref_bin(dict bin, str op, dict ref) str {
    if table.len > 0 { return table }
    if _operand_kind(op) == "imm" { return plain }
    str.startswith(plain, "mem(") || str.startswith(plain, "mem_fs(") || str.startswith(plain, "mem_gs(") ? plain : _rename_name(bin, plain)
+}
+
+fn _ny_operand_ref_bin(dict bin, str op, dict ref) str {
+   _ny_ref_operand_bin(bin, op, ref, false)
 }
 
 fn _ny_dynamic_data_name(dict bin, int addr) str {
@@ -1209,16 +1220,20 @@ fn _ny_dynamic_index_expr(dict mem) str {
    base
 }
 
+fn _ny_dynamic_indexed_data(dict bin, int addr, str index) str {
+   if index.len == 0 { return "" }
+   def name = _ny_dynamic_data_name(bin, addr)
+   if name.len == 0 { return "" }
+   name + "[" + index + "]"
+}
+
 fn _ny_dynamic_data_operand_bin(dict bin, str op) str {
    mut mem = _fact_mem_expr(op)
    if mem.len == 0 { mem = _fact_mem_expr(_clean_operand(op)) }
    if mem.len == 0 { return "" }
    def addr = int(mem.get("offset", 0))
-   def name = _ny_dynamic_data_name(bin, addr)
-   if name.len == 0 { return "" }
    def idx = _ny_dynamic_index_expr(mem)
-   if idx.len == 0 { return "" }
-   name + "[" + idx + "]"
+   _ny_dynamic_indexed_data(bin, addr, idx)
 }
 
 fn _ny_dynamic_data_plain_bin(dict bin, str plain) str {
@@ -1241,17 +1256,11 @@ fn _ny_dynamic_data_plain_bin(dict bin, str plain) str {
       }
       i += 1
    }
-   def name = _ny_dynamic_data_name(bin, addr)
-   if name.len == 0 || idxs.len == 0 { return "" }
-   name + "[" + str.join(idxs, " + ") + "]"
+   _ny_dynamic_indexed_data(bin, addr, str.join(idxs, " + "))
 }
 
 fn _ny_address_operand_ref_bin(dict bin, str op, dict ref) str {
-   if _operand_matches_ref(op, ref) {
-      def named = _ny_ref_value(ref, true)
-      if named.len > 0 { return named }
-   }
-   _ny_address_operand_bin(bin, op)
+   _ny_ref_operand_bin(bin, op, ref, true)
 }
 
 fn _pc_relative_addr_expr(dict bin, int target, dict ref) str {
@@ -1266,26 +1275,24 @@ fn _is_byte_operand(str op) bool {
    str.find(str.lower(op), "byte ptr") >= 0
 }
 
-fn _zext_expr(str op, str value) str {
-   if _is_byte_operand(op) { return "zext8(" + value + ")" }
-   if str.find(str.lower(op), "dword ptr") >= 0 { return "zext32(" + value + ")" }
-   if str.find(str.lower(op), "word ptr") >= 0 { return "zext16(" + value + ")" }
-   "zext(" + value + ")"
+fn _extend_expr(str op, str value, str extension) str {
+   def normalized = str.lower(op)
+   if str.find(normalized, "byte ptr") >= 0 { return extension + "8(" + value + ")" }
+   if str.find(normalized, "dword ptr") >= 0 { return extension + "32(" + value + ")" }
+   if str.find(normalized, "word ptr") >= 0 { return extension + "16(" + value + ")" }
+   extension + "(" + value + ")"
 }
 
-fn _sext_expr(str op, str value) str {
-   if _is_byte_operand(op) { return "sext8(" + value + ")" }
-   if str.find(str.lower(op), "dword ptr") >= 0 { return "sext32(" + value + ")" }
-   if str.find(str.lower(op), "word ptr") >= 0 { return "sext16(" + value + ")" }
-   "sext(" + value + ")"
-}
+fn _zext_expr(str op, str value) str { _extend_expr(op, value, "zext") }
+
+fn _sext_expr(str op, str value) str { _extend_expr(op, value, "sext") }
 
 fn _branch_condition(str a, str m) str {
    dasm.branch_condition(a, m)
 }
 
 fn _setcc_condition(str m) str {
-   def s = str.lower(str.strip(m))
+   def s = _normalized_token(m)
    case s {
       "sete", "setz" -> "eq"
       "setne", "setnz" -> "ne"
@@ -1302,7 +1309,7 @@ fn _setcc_condition(str m) str {
 }
 
 fn _cmov_condition(str m) str {
-   def s = str.lower(str.strip(m))
+   def s = _normalized_token(m)
    if !str.startswith(s, "cmov") { return "" }
    _setcc_condition("set" + slice(s, 4, s.len, 1))
 }
@@ -1385,11 +1392,11 @@ fn _arith_symbol(str m) str {
 
 fn _x86_vector_zeroing_idiom(str arch0, str mnemonic, str operands) bool {
    if dasm.arch_family(arch0) != "x86" { return false }
-   def m = str.lower(str.strip(mnemonic))
+   def m = _normalized_token(mnemonic)
    if !(m == "pxor" || m == "xorps" || m == "xorpd" || m == "vpxor" || m == "vxorps" || m == "vxorpd") { return false }
    def parts = _operand_split(operands)
-   if parts.len == 2 { return str.lower(str.strip(parts[0])) == str.lower(str.strip(parts[1])) }
-   if parts.len >= 3 { return str.lower(str.strip(parts[1])) == str.lower(str.strip(parts[2])) }
+   if parts.len == 2 { return _normalized_token(parts[0]) == _normalized_token(parts[1]) }
+   if parts.len >= 3 { return _normalized_token(parts[1]) == _normalized_token(parts[2]) }
    false
 }
 
@@ -1402,7 +1409,7 @@ fn _arch_three_operand_arith(str family, str mnemonic, list parts) bool {
 }
 
 fn _arch_shifted_base_expr(dict bin, str base, str modifier, dict ref) str {
-   mut m = str.lower(str.strip(modifier))
+   mut m = _normalized_token(modifier)
    if m.len == 0 { return base }
    mut op = ""
    if str.startswith(m, "lsl") { op = "<<" }
@@ -1588,7 +1595,7 @@ fn _lift_row(dict bin, list r) dict {
       elif m == "pop" { row = row.set("effect", _ny_operand_bin(bin, row.get("dst", "")) + " = pop()") }
       elif m == "leave" { row = row.set("effect", "leave_frame()") }
    }
-   if fam == "x86" && str.startswith(str.lower(str.strip(m)), "lea") && parts.len > 1 {
+   if fam == "x86" && str.startswith(_normalized_token(m), "lea") && parts.len > 1 {
       def dst = row.get("dst", "")
       def src = row.get("src", "")
       mut effect = _ny_operand_ref_bin(bin, dst, ref) + " = " + dasm.address_ny_expr(src)
@@ -5874,7 +5881,7 @@ fn _call_trim_fixed_args(list args, str family, int fixed_argc) list {
 }
 
 fn _clean_direct_noreturn_name(str name0) bool {
-   mut name = str.lower(str.strip(name0))
+   mut name = _normalized_token(name0)
    if name.len == 0 { return false }
    name = str.str_replace(name, "@plt", "")
    name = str.str_replace(name, "__imp_", "")
@@ -6163,7 +6170,7 @@ fn _clean_stack_byte_value_at(dict bin, list rows, int idx, dict row) dict {
 }
 
 fn _clean_literal_le_bytes(str value0, int width) list {
-   def value = str.lower(str.strip(value0))
+   def value = _normalized_token(value0)
    mut out = []
    if str.startswith(value, "0x") {
       def raw = slice(value, 2, value.len, 1)
@@ -9120,11 +9127,11 @@ fn _clean_compare_feeds_later_branch(list rows, int idx) bool {
 }
 
 fn _clean_compare_context_matches(dict cmp, dict consumer) bool {
-   def lhs = str.lower(str.strip(consumer.get("cmp_lhs", "")))
+   def lhs = _normalized_token(consumer.get("cmp_lhs", ""))
    if lhs.len == 0 { return false }
-   def rhs = str.lower(str.strip(consumer.get("cmp_rhs", "")))
-   def cdst = str.lower(str.strip(cmp.get("dst", "")))
-   def csrc = str.lower(str.strip(cmp.get("src", "")))
+   def rhs = _normalized_token(consumer.get("cmp_rhs", ""))
+   def cdst = _normalized_token(cmp.get("dst", ""))
+   def csrc = _normalized_token(cmp.get("src", ""))
    lhs == cdst && rhs == csrc
 }
 
@@ -10843,7 +10850,7 @@ fn _clean_numeric_literal(str raw) bool {
 }
 
 fn _clean_linear_bool_term(str term0, list aliases) dict {
-   def term = str.lower(str.strip(term0))
+   def term = _normalized_token(term0)
    if term.len == 0 { return {"ok": false} }
    if _list_has(aliases, term) { return {"ok": true, "coeff": 1, "const": 0} }
    def star = str.find(term, "*")
@@ -11006,7 +11013,7 @@ fn _clean_byte_at_expr(str base, int idx) str {
 }
 
 fn _clean_byte_reg_lane(str op0) dict {
-   def s = str.lower(str.strip(_ny_operand(op0)))
+   def s = _normalized_token(_ny_operand(op0))
    if s == "al" { return {"ok": true, "base": "rax", "lane": 0} }
    if s == "ah" { return {"ok": true, "base": "rax", "lane": 1} }
    if s == "bl" { return {"ok": true, "base": "rbx", "lane": 0} }
@@ -11105,7 +11112,7 @@ fn _clean_shift_byte_expr(dict bin, list rows, int row_idx, str dst, str shift_o
 }
 
 fn _clean_unsigned_shift_mnemonic(str mnemonic) bool {
-   def m = str.lower(str.strip(mnemonic))
+   def m = _normalized_token(mnemonic)
    str.startswith(m, "shr") || str.startswith(m, "srl") || str.startswith(m, "lsr")
 }
 
@@ -11230,7 +11237,7 @@ fn _clean_pack_or_expr(dict bin, list rows, int row_idx, str dst, str src, int d
 }
 
 fn _clean_operand_bits(str op) int {
-   def s = str.lower(str.strip(_ny_operand(op)))
+   def s = _normalized_token(_ny_operand(op))
    if s.len == 0 { return 0 }
    if (s == "rax" || s == "rbx" || s == "rcx" || s == "rdx" || s == "rsi" || s == "rdi" ||
       s == "rbp" || s == "rsp" || s == "rip"){ return 64 }
@@ -14119,7 +14126,7 @@ fn _clean_pure_loop_guard_call_rhs(str rhs0) bool {
    def rhs = str.strip(rhs0)
    def p = str.find(rhs, "(")
    if p <= 0 || !str.endswith(rhs, ")") { return false }
-   def name = str.lower(str.strip(slice(rhs, 0, p, 1)))
+   def name = _normalized_token(slice(rhs, 0, p, 1))
    name == "strlen" || name == "len" || name == "sizeof"
 }
 
@@ -14660,7 +14667,7 @@ fn _clean_zero_mod_expr(str expr0) bool {
 }
 
 fn _clean_return_accumulator_alias(str expr0) str {
-   def expr = str.lower(str.strip(expr0))
+   def expr = _normalized_token(expr0)
    if expr == "rax" || expr == "eax" || expr == "ax" || expr == "al" { return "x86:rax" }
    if expr == "x0" || expr == "w0" { return "aarch64:x0" }
    if expr == "r0" { return "arm:r0" }
@@ -15694,7 +15701,7 @@ fn _clean_drop_empty_blocks(str text) str {
 }
 
 fn _clean_rendered_arg_reg(str lhs0) bool {
-   def lhs = str.lower(str.strip(lhs0))
+   def lhs = _normalized_token(lhs0)
    lhs == "rdi" || lhs == "edi" || lhs == "di" ||
    lhs == "rsi" || lhs == "esi" || lhs == "si" ||
    lhs == "rdx" || lhs == "edx" || lhs == "dx" ||
@@ -15707,7 +15714,7 @@ fn _clean_rendered_arg_reg(str lhs0) bool {
 }
 
 fn _clean_rendered_helper_call_name(str name0) bool {
-   def name = str.lower(str.strip(name0))
+   def name = _normalized_token(name0)
    str.startswith(name, "zext") || str.startswith(name, "sext") ||
    str.startswith(name, "bswap") || name == "rol" || name == "ror" ||
    str.startswith(name, "smul_wide") || str.startswith(name, "umul_wide") ||
@@ -15774,7 +15781,7 @@ fn _clean_rendered_any_call_args(str raw0) list {
 }
 
 fn _clean_rendered_call_setup_reg(str lhs0) bool {
-   def lhs = str.lower(str.strip(lhs0))
+   def lhs = _normalized_token(lhs0)
    _clean_rendered_arg_reg(lhs) ||
    lhs == "rax" || lhs == "eax" || lhs == "ax" || lhs == "al"
 }
@@ -15889,7 +15896,7 @@ fn _clean_drop_rendered_call_arg_setup(str text) str {
 }
 
 fn _clean_rendered_temp_reg(str lhs0) bool {
-   def lhs = str.lower(str.strip(lhs0))
+   def lhs = _normalized_token(lhs0)
    _clean_rendered_arg_reg(lhs) ||
    lhs == "rax" || lhs == "eax" || lhs == "ax" || lhs == "al" ||
    lhs == "rbx" || lhs == "ebx" || lhs == "bx" || lhs == "bl" ||
@@ -15897,7 +15904,7 @@ fn _clean_rendered_temp_reg(str lhs0) bool {
 }
 
 fn _clean_rendered_dead_temp_reg(str lhs0) bool {
-   def lhs = str.lower(str.strip(lhs0))
+   def lhs = _normalized_token(lhs0)
    lhs == "rax" || lhs == "eax" || lhs == "ax" || lhs == "al" ||
    lhs == "esi" || lhs == "si" || lhs == "sil" ||
    lhs == "rdx" || lhs == "edx" || lhs == "dx" || lhs == "dl" ||
@@ -15909,7 +15916,7 @@ fn _clean_rendered_dead_temp_reg(str lhs0) bool {
 }
 
 fn _clean_rendered_return_value_reg(str lhs0) bool {
-   def lhs = str.lower(str.strip(lhs0))
+   def lhs = _normalized_token(lhs0)
    lhs == "rax" || lhs == "eax" || lhs == "ax" || lhs == "al" ||
    lhs == "x0" || lhs == "w0" || lhs == "r0" || lhs == "a0"
 }
@@ -16537,7 +16544,7 @@ fn _clean_empty_then_failure_else_shape(list lines, int idx) dict {
 }
 
 fn _clean_check_helper_scratch_lhs(str lhs0) bool {
-   def lhs = str.lower(str.strip(lhs0))
+   def lhs = _normalized_token(lhs0)
    str.startswith(lhs, "local_") || str.startswith(lhs, "stack_") ||
    str.startswith(lhs, "xmm") || str.startswith(lhs, "ymm") || str.startswith(lhs, "zmm")
 }
@@ -18898,7 +18905,7 @@ fn _clean_rendered_call_result_copy_lhs(str lhs0) bool {
 }
 
 fn _clean_rendered_rhs_is_alias(str rhs0, str lhs0) bool {
-   def rhs = str.lower(str.strip(rhs0))
+   def rhs = _normalized_token(rhs0)
    def aliases = _slice_symbol_aliases(lhs0)
    _list_has(aliases, rhs)
 }
@@ -19339,7 +19346,7 @@ fn _clean_inline_arith_condition_reg_setup(str text) str {
 }
 
 fn _clean_rendered_bool_temp_reg(str lhs0) bool {
-   def lhs = str.lower(str.strip(lhs0))
+   def lhs = _normalized_token(lhs0)
    lhs == "al" || lhs == "bl" || lhs == "cl" || lhs == "dl" ||
    lhs == "ah" || lhs == "bh" || lhs == "ch" || lhs == "dh" ||
    lhs == "sil" || lhs == "dil" || lhs == "spl" || lhs == "bpl" ||
@@ -19349,7 +19356,7 @@ fn _clean_rendered_bool_temp_reg(str lhs0) bool {
 }
 
 fn _clean_rendered_value_temp_reg(str lhs0) bool {
-   def lhs = str.lower(str.strip(lhs0))
+   def lhs = _normalized_token(lhs0)
    if _clean_rendered_temp_reg(lhs) || _clean_rendered_dead_temp_reg(lhs) || _clean_rendered_bool_temp_reg(lhs) { return true }
    lhs == "rcx" || lhs == "ecx" || lhs == "cx" || lhs == "cl" ||
    lhs == "rsi" || lhs == "esi" || lhs == "si" || lhs == "sil" ||
@@ -19423,7 +19430,7 @@ fn _clean_bool_expr_from_truth(str expr0) str {
 }
 
 fn _clean_bool_word_value(str expr0) int {
-   def lower = str.lower(str.strip(expr0))
+   def lower = _normalized_token(expr0)
    if lower == "true" { return 1 }
    if lower == "false" { return 0 }
    -1
@@ -20550,7 +20557,7 @@ fn _clean_expr_named_call_first_arg(str expr0, str name0) str {
 }
 
 fn _clean_heap_compare_buffer_temp(str lhs0) bool {
-   def lhs = str.lower(str.strip(lhs0))
+   def lhs = _normalized_token(lhs0)
    _clean_rendered_value_temp_reg(lhs) || lhs == "rbp" || lhs == "ebp" || lhs == "bp" ||
    lhs == "x19" || lhs == "w19" || lhs == "x20" || lhs == "w20" ||
    lhs == "r4" || lhs == "r5" || lhs == "r6" || lhs == "r7"
@@ -24892,7 +24899,7 @@ fn _clean_any_assignment_parts(str line) dict {
 
 fn _clean_mem_lvalue_for_local_temp(str lhs0, str reg0, str local0) str {
    def lhs = str.strip(lhs0)
-   def reg = str.lower(str.strip(reg0))
+   def reg = _normalized_token(reg0)
    def base = str.strip(local0)
    def lower_lhs = str.lower(lhs)
    def indexed_prefix = reg + "["
@@ -25306,7 +25313,7 @@ fn _clean_structure_counted_for_loops(str text) str {
 }
 
 fn _clean_decoder_call_name(str name0) bool {
-   def name = str.lower(str.strip(name0))
+   def name = _normalized_token(name0)
    str.find(name, "shift") >= 0 || str.find(name, "decode") >= 0 ||
    str.find(name, "decrypt") >= 0 || str.find(name, "caesar") >= 0 ||
    str.find(name, "rot") >= 0
@@ -25804,6 +25811,24 @@ fn _branch_target_count(list rows, int target) int {
    count
 }
 
+fn _pseudo_branch_condition(dict bin, dict sig, list lifted, int idx, str cond, bool clean) str {
+   clean ? _clean_branch_condition_expr_sig(bin, sig, lifted, idx, cond) : _branch_condition_expr(lifted, idx, cond)
+}
+
+fn _pseudo_render_row(dict bin, list lifted, int idx, str pad, dict clean_skip, dict dataflow, dict sig, bool clean) str {
+   clean ? _render_ir_clean_row(bin, lifted, idx, pad, clean_skip, sig) : _render_ir_simple_row(bin, lifted, idx, pad, dataflow, sig)
+}
+
+fn _pseudo_append_rows(ptr builder, dict bin, list lifted, int start, int end, str pad, dict clean_skip, dict dataflow, dict sig, bool clean) ptr {
+   mut out = builder
+   mut i = start
+   while i < end {
+      out = str.builder_append(out, _pseudo_render_row(bin, lifted, i, pad, clean_skip, dataflow, sig, clean))
+      i += 1
+   }
+   out
+}
+
 fn _loop_has_following_same_backedge(list rows, int idx, int target) bool {
    mut j = idx + 1
    def end = min(rows.len, idx + 8)
@@ -26008,7 +26033,7 @@ fn _pseudo_body(dict bin, list rows, int indent, any opts=dict()) str {
             if cond == "always" {
                b = str.builder_append(b, curpad + jtext + "\n")
             } else {
-               def expr = clean ? _clean_branch_condition_expr_sig(bin, sig, lifted, i, cond) : _branch_condition_expr(lifted, i, cond)
+               def expr = _pseudo_branch_condition(bin, sig, lifted, i, cond, clean)
                b = str.builder_append(b, curpad + "if " + expr + "{ " + jtext + " }\n")
             }
          } elif loop_stack.len > 0 && loop_latches.contains(to_str(ir.get("addr", 0))) && int(loop_latches.get(to_str(ir.get("addr", 0)), 0)) == top_loop {
@@ -26016,10 +26041,10 @@ fn _pseudo_body(dict bin, list rows, int indent, any opts=dict()) str {
                loop_stack = _drop_last(loop_stack)
                b = str.builder_append(b, _loop_render_pad(pad, loop_stack.len) + "}\n")
             } elif _loop_has_following_same_backedge(lifted, i, top_loop) {
-               def expr = clean ? _clean_branch_condition_expr_sig(bin, sig, lifted, i, cond) : _branch_condition_expr(lifted, i, cond)
+               def expr = _pseudo_branch_condition(bin, sig, lifted, i, cond, clean)
                b = str.builder_append(b, curpad + "if " + expr + "{ continue }\n")
             } else {
-               def expr = clean ? _clean_branch_condition_expr_sig(bin, sig, lifted, i, cond) : _branch_condition_expr(lifted, i, cond)
+               def expr = _pseudo_branch_condition(bin, sig, lifted, i, cond, clean)
                b = str.builder_append(b, curpad + "if " + _clean_negated_condition_expr(expr) + "{ break }\n")
                loop_stack = _drop_last(loop_stack)
                b = str.builder_append(b, _loop_render_pad(pad, loop_stack.len) + "}\n")
@@ -26038,35 +26063,23 @@ fn _pseudo_body(dict bin, list rows, int indent, any opts=dict()) str {
                } else {
                   def shape = _if_else_shape(lifted, i)
                   if shape.get("ok", false) {
-                     def expr = clean ? _clean_branch_condition_expr_sig(bin, sig, lifted, i, cond) : _branch_condition_expr(lifted, i, cond)
+                     def expr = _pseudo_branch_condition(bin, sig, lifted, i, cond, clean)
                      b = str.builder_append(b, curpad + "if " + (clean ? _clean_negated_condition_expr(expr) : ("!(" + expr + ")")) + "{\n")
-                     mut bi = i + 1
-                     while bi < int(shape.get("jump_idx", 0)) {
-                        b = str.builder_append(b, clean ? _render_ir_clean_row(bin, lifted, bi, curpad + "  ", clean_skip, sig) : _render_ir_simple_row(bin, lifted, bi, curpad + "  ", dataflow, sig))
-                        bi += 1
-                     }
+                     b = _pseudo_append_rows(b, bin, lifted, i + 1, int(shape.get("jump_idx", 0)), curpad + "  ", clean_skip, dataflow, sig, clean)
                      b = str.builder_append(b, curpad + "} else {\n")
-                     bi = int(shape.get("else_idx", 0))
-                     while bi < int(shape.get("end_idx", 0)) {
-                        b = str.builder_append(b, clean ? _render_ir_clean_row(bin, lifted, bi, curpad + "  ", clean_skip, sig) : _render_ir_simple_row(bin, lifted, bi, curpad + "  ", dataflow, sig))
-                        bi += 1
-                     }
+                     b = _pseudo_append_rows(b, bin, lifted, int(shape.get("else_idx", 0)), int(shape.get("end_idx", 0)), curpad + "  ", clean_skip, dataflow, sig, clean)
                      b = str.builder_append(b, curpad + "}\n")
                      i = int(shape.get("end_idx", 0)) - 1
                   } else {
                      def target_idx = _row_index_for_addr(lifted, int(to))
                      if _can_inline_if_body(lifted, i + 1, target_idx) {
-                        def expr = clean ? _clean_branch_condition_expr_sig(bin, sig, lifted, i, cond) : _branch_condition_expr(lifted, i, cond)
+                        def expr = _pseudo_branch_condition(bin, sig, lifted, i, cond, clean)
                         b = str.builder_append(b, curpad + "if " + (clean ? _clean_negated_condition_expr(expr) : ("!(" + expr + ")")) + "{\n")
-                        mut bi = i + 1
-                        while bi < target_idx {
-                           b = str.builder_append(b, clean ? _render_ir_clean_row(bin, lifted, bi, curpad + "  ", clean_skip, sig) : _render_ir_simple_row(bin, lifted, bi, curpad + "  ", dataflow, sig))
-                           bi += 1
-                        }
+                        b = _pseudo_append_rows(b, bin, lifted, i + 1, target_idx, curpad + "  ", clean_skip, dataflow, sig, clean)
                         b = str.builder_append(b, curpad + "}\n")
                         i = target_idx - 1
                      } else {
-                        def expr = clean ? _clean_branch_condition_expr_sig(bin, sig, lifted, i, cond) : _branch_condition_expr(lifted, i, cond)
+                        def expr = _pseudo_branch_condition(bin, sig, lifted, i, cond, clean)
                         structured_targets = structured_targets.set(to_str(int(to)), false)
                         forced_labels = forced_labels.set(to_str(int(to)), true)
                         b = str.builder_append(b, curpad + "if " + expr + "{ goto " + lname + " }\n")
@@ -26084,7 +26097,7 @@ fn _pseudo_body(dict bin, list rows, int indent, any opts=dict()) str {
             b = str.builder_append(b, curpad + (rexpr.len > 0 ? ("return " + rexpr) : ("goto " + lname)) + "\n")
          }
          else {
-            def expr = clean ? _clean_branch_condition_expr_sig(bin, sig, lifted, i, cond) : _branch_condition_expr(lifted, i, cond)
+            def expr = _pseudo_branch_condition(bin, sig, lifted, i, cond, clean)
             structured_targets = structured_targets.set(to_str(int(to)), false)
             forced_labels = forced_labels.set(to_str(int(to)), true)
             b = str.builder_append(b, curpad + "if " + expr + "{ goto " + lname + " }\n")
@@ -26536,7 +26549,7 @@ fn _decompile_render_text_has_call_except(list funcs, str name, int skip_idx) bo
 }
 
 fn _decompile_unused_generated_helper_candidate(dict f) bool {
-   def name = str.lower(str.strip(f.get("name", "")))
+   def name = _normalized_token(f.get("name", ""))
    def text = f.get("text", "")
    if name == "shift" {
       return contains(text, "decoded = ") && contains(text, ".map(fn(ch){") &&

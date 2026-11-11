@@ -1,0 +1,42 @@
+shape test_global_float_loop_accumulator {
+  family "runtime/values"
+  generator "embedded"
+  features ["ny", "test", "native", "regression", "mem2reg"]
+  template ny-test-case
+  flags_matrix "-O3 --native-only; -O2 --native-only; -O3 --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.tbuf
+
+;; A top-level float accumulator updated in a loop that also reads a private
+;; buffer is promoted to a register. The promoted slot is the first float
+;; local mem2reg sees, so its loop PHI must be placed on a current CFG.
+def N = 100
+def x = f64buf_new(N)
+mut i = 0
+while i < N {
+   f64buf_store(x, i, 1.5)
+   i += 1
+}
+mut total = 0.0
+i = 0
+while i < N {
+   total += f64buf_load(x, i)
+   i += 1
+}
+assert(total == 150.0, "global float accumulator keeps its loop-carried sum")
+
+def row = malloc(64 * 8)
+mut int acc = 0
+mut int k = 0
+while k < 64 {
+   store64_i(row, k * 3, k * 8)
+   acc += load64_i(row, k * 8)
+   k += 1
+}
+assert(acc == 6048, "global int accumulator survives raw heap stores")
+free(row)
+print("ok global float loop accumulator")
+NY
+}

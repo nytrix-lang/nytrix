@@ -1,3 +1,6 @@
+/*
+ * AArch64 aggregate ABI fixture defining representative struct values.
+ */
 struct a64_pair {
   double x;
   double y;

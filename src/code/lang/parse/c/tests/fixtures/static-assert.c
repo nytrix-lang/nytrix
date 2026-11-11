@@ -1,3 +1,6 @@
+/*
+ * Fixture: parse static assertions alongside compatibility declarations.
+ */
 typedef void nyc_void_alias;
 nyc_void_alias nyc_void_alias_probe(void) {}
 

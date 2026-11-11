@@ -3150,7 +3150,7 @@ def show_build_introspection(build_root: Path, kind: str, jobs: int) -> None:
     ninja_ver = _first_line(["ninja", "--version"])
     UI.kv("generator", f"ninja {ninja_ver or '?'} {dot} cmake {cmake_ver or '?'}")
     ccache = which("ccache")
-    UI.kv("ccache", ccache or "not found", code="1;32" if ccache else "2")
+    UI.kv("ccache", (ccache + " (opt-in)") if ccache else "not found", code="1;32" if ccache else "2")
     UI.kv("jobs / dir", f"{jobs} {dot} {build_root.name}/{kind}")
     if make_verbose_level() >= 5:
         overrides = sorted((k, v) for k, v in os.environ.items()

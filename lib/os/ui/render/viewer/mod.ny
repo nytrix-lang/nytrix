@@ -4,7 +4,7 @@
 ;; - core.os.ui.render.viewer.runtime
 ;; - core.os.ui.render.viewer.loop
 module core.os.ui.render.viewer(
-   set_font, begin_text, flush_text, text_run_count, text_char_count,
+   new_text_context, set_font, begin_text, flush_text, text_run_count, text_char_count,
    FONT_CANDIDATES, TERMINAL_FONT_DEFAULT, TERMINAL_FONT_CANDIDATES,
    default_override, default_font_size, font_filter_mode, default_font_filter,
    font_from_candidates, terminal_font_map, terminal_cell_size, normalize_mod,
@@ -46,12 +46,37 @@ use core.os.ui.render.viewer.loop
 use core.os.ui.render.viewer.runtime
 use core.str as str
 
+fn new_text_context(any font=0) dict {
+   "Creates independent font, measurement, and text-batch state for one viewer."
+   {"font": font, "widths": dict(64), "line_h": -1.0,
+      "runs": [], "run_count": 0, "char_count": 0}
+}
+
+;; Compatibility state for callers that do not supply their own context.
 mut font = 0
 mut _text_width_cache = dict(64)
 mut _line_h_cache = -1.0
 mut _text_runs = []
 mut _text_run_count = 0
 mut _text_char_count = 0
+
+fn _text_context(any context) dict {
+   if is_dict(context) { return context }
+   {"font": font, "widths": _text_width_cache, "line_h": _line_h_cache,
+      "runs": _text_runs, "run_count": _text_run_count, "char_count": _text_char_count}
+}
+
+fn _save_text_context(any context, dict state) int {
+   if !is_dict(context) {
+      font = state.get("font", 0)
+      _text_width_cache = state.get("widths", dict(64))
+      _line_h_cache = float(state.get("line_h", -1.0))
+      _text_runs = state.get("runs", [])
+      _text_run_count = int(state.get("run_count", 0))
+      _text_char_count = int(state.get("char_count", 0))
+   }
+   0
+}
 def C_BG = render.color_rgb(0.0, 0.0, 0.0)
 def C_PANEL = render.color_rgb(0.031, 0.031, 0.031)
 def C_PANEL_ALT = render.color_rgb(0.075, 0.075, 0.094)
@@ -108,66 +133,75 @@ fn _disc(any cx, any cy, any radius, any color) bool {
 }
 
 ;; Returns the result of the `text_w` operation.
-fn text_w(any label) f64 {
-   def cached = _text_width_cache.get(label, -1.0)
+fn text_w(any label, any context=nil) f64 {
+   def state = _text_context(context)
+   def widths = state.get("widths")
+   def cached = widths.get(label, -1.0)
    if cached >= 0.0 { return cached }
-   def tw = float(measure_text_fast(font, label).get(0, 0.0))
-   _text_width_cache[label] = tw
+   def tw = float(measure_text_fast(state.get("font", 0), label).get(0, 0.0))
+   widths[label] = tw
+   state["widths"] = widths
+   _save_text_context(context, state)
    tw
 }
 
 ;; Returns the result of the `queue_text` operation.
-fn queue_text(any label, any x, any y, any color) int {
+fn queue_text(any label, any x, any y, any color, any context=nil) int {
+   def state = _text_context(context)
    def s = to_str(label)
    if s.len <= 0 { return 0 }
-   _text_run_count += 1
-   _text_char_count += s.len
-   mut runs = is_list(_text_runs) ? _text_runs : []
+   state["run_count"] = int(state.get("run_count", 0)) + 1
+   state["char_count"] = int(state.get("char_count", 0)) + s.len
+   mut runs = state.get("runs", [])
    runs = runs.append(s)
    runs = runs.append(float(x))
    runs = runs.append(float(y))
    runs = runs.append(_packed_color(color))
-   _text_runs = runs
+   state["runs"] = runs
+   _save_text_context(context, state)
    0
 }
 
 ;; Returns the result of the `flush_text` operation.
-fn flush_text() int {
-   if is_list(_text_runs) && _text_runs.len > 0 {
-      draw_text_runs_flat_colors(font, _text_runs)
-      _text_runs = []
+fn flush_text(any context=nil) int {
+   def state = _text_context(context)
+   def runs = state.get("runs", [])
+   if is_list(runs) && runs.len > 0 {
+      draw_text_runs_flat_colors(state.get("font", 0), runs)
+      state["runs"] = []
+      _save_text_context(context, state)
    }
    0
 }
 
 ;; Returns the result of the `fit_text` operation.
-fn fit_text(any label, any max_w) str {
+fn fit_text(any label, any max_w, any context=nil) str {
    if max_w <= 0.0 { return "" }
    def s = to_str(label)
-   if text_w(s) <= max_w { return s }
+   if text_w(s, context) <= max_w { return s }
    def ell = "..."
-   def ell_w = text_w(ell)
+   def ell_w = text_w(ell, context)
    if max_w <= ell_w { return "" }
    mut hi = s.len
    while hi > 0 {
       def cand = str.str_slice(s, 0, hi) + ell
-      if text_w(cand) <= max_w { return cand }
+      if text_w(cand, context) <= max_w { return cand }
       hi -= 1
    }
    ell
 }
 
 ;; Draws the text fit in the current render state.
-fn draw_text_fit(any label, any x, any y, any max_w, any color) int {
-   def s = fit_text(label, max_w)
-   if s.len > 0 { queue_text(s, x, y, color) }
+fn draw_text_fit(any label, any x, any y, any max_w, any color, any context=nil) int {
+   def s = fit_text(label, max_w, context)
+   if s.len > 0 { queue_text(s, x, y, color, context) }
    0
 }
 
 ;; Draws the text right fit in the current render state.
-fn draw_text_right_fit(any label, any right_x, any y, any max_w, any color) int {
-   def s = fit_text(label, max_w)
-   if s.len > 0 { queue_text(s, right_x - text_w(s), y, color) }
+fn draw_text_right_fit(any label, any right_x, any y, any max_w, any color, any context=nil) int {
+   def s = fit_text(label, max_w, context)
+   if s.len > 0 { queue_text(s, right_x - text_w(s, context), y, color, context) }
    0
 }
 
@@ -384,12 +418,14 @@ fn draw_controller(any st, f64 x, f64 y, f64 w, f64 h) int {
 }
 
 ;; Returns the result of the `line_h` operation.
-fn line_h() f64 {
-   if _line_h_cache > 0.0 { return _line_h_cache }
-   def sz = measure_text_fast(font, "Mg")
+fn line_h(any context=nil) f64 {
+   def state = _text_context(context)
+   if float(state.get("line_h", -1.0)) > 0.0 { return float(state.get("line_h")) }
+   def sz = measure_text_fast(state.get("font", 0), "Mg")
    def h = float(sz.get(1, 18.0))
-   _line_h_cache = h > 0.0 ? h : 18.0
-   _line_h_cache
+   state["line_h"] = h > 0.0 ? h : 18.0
+   _save_text_context(context, state)
+   float(state.get("line_h"))
 }
 
 ;; Returns the result of the `controller_fit_scale` operation.
@@ -528,30 +564,34 @@ fn terminal_cell_size(any font_id, any font_size) list {
    [max(1.0, float(int(cw + 0.5))), max(1.0, float(int(ch + 0.5)))]
 }
 
-fn set_font(any f) int {
+fn set_font(any f, any context=nil) int {
    "Sets the font used by viewer text batching."
-   font = f
-   _text_width_cache = dict(64)
-   _line_h_cache = -1.0
+   def state = _text_context(context)
+   state["font"] = f
+   state["widths"] = dict(64)
+   state["line_h"] = -1.0
+   _save_text_context(context, state)
    0
 }
 
-fn begin_text() int {
+fn begin_text(any context=nil) int {
    "Clears queued text and frame counters."
-   _text_runs = []
-   _text_run_count = 0
-   _text_char_count = 0
+   def state = _text_context(context)
+   state["runs"] = []
+   state["run_count"] = 0
+   state["char_count"] = 0
+   _save_text_context(context, state)
    0
 }
 
-fn text_run_count() int {
+fn text_run_count(any context=nil) int {
    "Returns queued text run count for the current frame."
-   _text_run_count
+   int(_text_context(context).get("run_count", 0))
 }
 
-fn text_char_count() int {
+fn text_char_count(any context=nil) int {
    "Returns queued text character count for the current frame."
-   _text_char_count
+   int(_text_context(context).get("char_count", 0))
 }
 
 #main {

@@ -1,0 +1,49 @@
+shape source_converter_shift_assignments {
+  generator "embedded"
+  family "probe/tools/fmt"
+  features ["formatter", "c2ny", "py2ny", "execution"]
+  template ny-test-case
+  flags "--native-only"
+  timeout 180
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.subprocess (run_capture)
+def ny = env("NYTRIX_NY_FULL_BIN")
+def fmt = env("NYTRIX_TEST_FMT_BIN")
+def cmake = env("NYTRIX_CMAKE_COMMAND")
+assert(is_str(ny) && is_str(fmt) && is_str(cmake), "converter test tools are available")
+def dir = temp_dir() + "/ny-converter-shifts-" + to_str(pid())
+assert(run_capture([cmake, "-E", "make_directory", dir], [], nil, false).get("code", 127) == 0,
+   "create converter execution directory")
+fn execute(str name, str mode, str extension, str input) {
+   def from = dir + "/" + name + extension
+   def output = dir + "/" + name + ".ny"
+   unwrap(file_write(from, input))
+   def converted = run_capture([fmt, mode, from, "-o", output], [], nil, false)
+   assert(converted.get("code", 127) == 0,
+      name + " conversion failed: " + converted.get("stderr", ""))
+   def checks = "\nassert(shift(5) == 9, \"shift result for 5\")\n" +
+      "assert(shift(63) == 125, \"shift result for 63\")\n" +
+      "assert(shift(64) == 11, \"shift and mask boundary\")\n" +
+      "assert(grouped(3) == 12, \"compound RHS preserves precedence\")\n"
+   unwrap(file_write(output, unwrap(file_read(output)) + checks))
+   def executed = run_capture([ny, "--native-only", output], [], nil, false)
+   assert(executed.get("code", 127) == 0,
+      name + " generated program failed: " + executed.get("stderr", "") + executed.get("stdout", ""))
+}
+execute("c", "--c2ny", ".c", "int shift(int value) { value <<= 3; value >>= 2; value &= 127; value |= 8; value ^= 3; return value; }\nint grouped(int value) { value <<= 1 + 2; value >>= 1; return value; }\n")
+execute("python", "--py2ny", ".py", "def shift(value):\n    value <<= 3\n    value >>= 2\n    value &= 127\n    value |= 8\n    value ^= 3\n    return value\ndef grouped(value):\n    value <<= 1 + 2\n    value >>= 1\n    return value\n")
+def c_bad = dir + "/complex.c"
+unwrap(file_write(c_bad, "int index(void) { return 0; }\nint complex(void) { int values[2] = {1, 2}; values[index()] <<= 1; return values[0]; }\n"))
+assert(run_capture([fmt, "--c2ny", c_bad, "-o", dir + "/complex-c.ny"], [], nil, false).get("code", 0) != 0,
+   "C converter refuses compound targets that would be evaluated twice")
+def py_bad = dir + "/complex.py"
+unwrap(file_write(py_bad, "def index():\n    return 0\ndef complex():\n    values = [1, 2]\n    values[index()] <<= 1\n    return values[0]\n"))
+assert(run_capture([fmt, "--py2ny", py_bad, "-o", dir + "/complex-py.ny"], [], nil, false).get("code", 0) != 0,
+   "Python converter refuses compound targets that would be evaluated twice")
+assert(run_capture([cmake, "-E", "remove_directory", dir], [], nil, false).get("code", 127) == 0,
+   "remove converter execution directory")
+print("CONVERTER-SHIFTS-OK")
+NY
+}

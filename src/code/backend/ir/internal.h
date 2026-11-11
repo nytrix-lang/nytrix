@@ -1,3 +1,4 @@
+/* Shared internal NYIR verification, formatting, and optimization helpers. */
 #ifndef NY_NATIVE_IR_INTERNAL_H
 #define NY_NATIVE_IR_INTERNAL_H
 

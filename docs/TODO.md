@@ -2,7 +2,8 @@
 # Open work
 
 An item closes only when its acceptance check has passed on the current tree.
-Figures are from 2026-11-09 and are a starting point, not a current baseline.
+Figures below are dated investigation snapshots, not a substitute for rerunning
+the relevant gate on the current tree.
 NYC work (all NYC notes/todos) is tracked in [NYC work](todo/nyc.md).
 
 Working rules:
@@ -11,117 +12,99 @@ Working rules:
 - A change counts only if checksums still match and the suite stays green.
 - Reproduce one benchmark or fixture at a time before changing anything.
 
-## Correctness
-
-- [ ] **Intermittent crashes under load:** `ui_replay_animation` segfaulted
-  (exit 139) and `generated-mutable-flow-differential` aborted with "double
-  free or corruption" in full runs. Both pass alone, and 84 concurrent cold runs
-  of the second did not reproduce it. Lead: `gc.c` drops the GC lock to run
-  finalizers during a collection. Accept: reproduced, root-caused, fixed.
-- [ ] **Same address flaw in Nytrix code:** run the suite and benchmarks against
-  the fix and look for a language-level reproducer. With the fix reverted, all
-  71 NYR benchmarks still match gcc. Lead: `object.c` seeds rematerialization by
-  vreg from entry-block LEAs without a unique reaching definition. Accept:
-  reduced regression fixture added,
-  or the path shown unreachable.
-- [ ] **Boxed float builtin ABI:** builtins declared `f64` (`__flt_pow`, `__flt_sin`,
-  and others) return a boxed float in `rax` while callers read `xmm0`. It works
-  only because `xmm0` still holds the result. Changing them to return `any` broke
-  `render-camera-contract`. Accept: one contract on every route, suite green.
-- [ ] **Rendering path audit:** review the render APIs and modules for logic and
-  compiler bugs with `-vvvvvv`, `--nyr-check=verify,oracle`, and
-  `--native-only --inspect`. Accept: each defect recorded here with a
-  reproducer, then fixed.
-
-## Performance: targets
-
-- [ ] **At most 1.5x of C on every backend:** no benchmark above 1.5x on NYR,
-  NYC, or LLVM. Accept: the `./make bench` table, with the assembly of each
-  outlier reviewed.
-- [ ] **Beat C where the machine allows it:** after the 1.5x target, reach parity
-  or better on each benchmark class. Accept: per-class geomeans at or below 1.0x.
-
 ## Performance: NYR
 
-Last table, ratio to C. Over 1.5x: 18 entries.
+- [ ] **At most 1.2x of C on every backend:** no valid, comparable benchmark
+  above 1.2x on NYR, NYC, or LLVM. Accept: a fresh complete `./make bench`
+  report with valid checksums and stable measurements, plus mixed-assembly
+  review for every row above 1.2x. Keep optimization work focused on those
+  severe outliers; rows at or below 1.2x are outside this performance pass.
 
-- [ ] **Outliers to read in mixed assembly:** `licm` 10.6x, `knight` 6.9x,
-  `cmov-sort` 6.5x, `collatz` 5.6x, `revcomp` 5.6x, `intops` 4.0x,
-  `expression-tree` 3.8x, `native-oracle` 3.2x, `inline` 3.1x, `linpack` 3.0x,
-  `queen` 2.8x, `matrix` 2.5x, `gcbench` 2.5x, `call-chain` 2.5x, `page-rank`
-  2.4x, `pbkdf2` 2.4x, `knucleotide` 2.1x.
-- [ ] **Bigint workloads:** `pidigits` runs at 3.3x, and `bigint-oracle` has no
-  reference here without GMP. `currying` is settled: its budget records that C folds
-  the call. Decide whether to speed up bigint or compare an equivalent workload.
-- [ ] **Share C-only wins with NYR:** copy coalescing and known-bits simplification
-  now run for proven-raw values. Extend them to more of language code, since only
-  `cmov-sort` gained (8.2%). Accept: suite green, instruction counts improve.
-- [ ] **Whole-function register allocation:** C has live-range splitting around
-  call-free loops. Port it to NYR and find why loop registers conflict with
-  ordinary values in `rsi`/`rdi` on C.
-- [ ] **`rax` staging:** spilled right-hand operands are done. Other arithmetic
-  still moves through `rax`; use three-register forms.
-- [ ] **Stack-slot traffic:** about 12% loads and 8% stores remain.
-- [ ] **Encoder waste:** homing at block boundaries, and C parameter stores and
-  leaf pushes for NYR. Scalar AVX copies and `jcc` over `jmp` are done.
-- [ ] **Backend API:** modularize and compact the x86-64 encoder and backend
-  interfaces after the performance work settles. Accept: suite and benchmark
-  gate unchanged.
+### Gate status (2026-11-11)
 
-## Compile time
+Baseline: full `./make bench` report
+`build/bench-reports/bench-20261111-012737-2689407.json` (77 fixtures, 3 runs,
+1 warm-up). Figures below marked local were measured against
+`clang -O3 -march=native`, not by `./make bench`; every fix closes for good
+only when the next full report confirms it.
 
-- [ ] **AOT builds:** a range-query cache reduced the measured Pong build median
-  from 66.71 s to 59.50 s; target remains under 30 s. Reachable-function
-  collection and `rt_main` lowering remain the largest stages. Six output
-  executables had identical SHA-256 checksums.
-- [ ] **Known hot spots:** imported module member
-  lookup, `tp_collect_call_observation`, `hm_complete_leaf_fact`,
-  `nyr_cfg_build_impl`, `nyr_type_map_init`.
+Rows still above 2.0x:
 
-## Startup
+| Fixture | NYR/C | LLVM/C | NYC/C | Evidence and cause |
+| --- | ---: | ---: | ---: | --- |
+| `page-rank` | 3.83x | 1.58x | 3.85x | `bench-20261111-032403-2923171`. Six-instruction inner loop with `newrank[0]` stored and reloaded every iteration (4-5 cycle store-forward plus add chain); C keeps it in a register. `rank`/`newrank` are swapped top-level globals, so disjointness is unproven. Needs scalar promotion of the read-modify-write guarded by a runtime no-overlap check (loop versioning). Type-based disambiguation via scalar classes was rejected: the C frontend shares NYIR and can take global addresses. |
+| `matrix` | 3.4x | 2.08x | 2.9x | Vectorizer rejects the `mul.i64` reduction. There is no `NYIR_VEC8_MUL_I64`: adding one touches about 17 files (IR op, verifier, interpreter `eval.c`, SMT semantics `tv.c`, `portable.c`, LLVM emitter, both machine lowerings, the x86-64 encoder). AVX2 has no `vpmullq`; the lowering is `vpmuludq` on the low halves plus two shifted cross products. |
+| `revcomp` | 3.4x | 1.4-2.0x | 6.0x | Not diagnosed. Replacing packed reductions with eight scalar lane extracts regressed NYR 19 to 31 µs (reverted). |
+| `dict-oracle` | 3.05x | 3.90x | 1.05x | The fixture has no kernel timer, so its ratio is whole-process time (mostly startup). A timed steady-state loop (one `set` plus three `get` on a persistent dict, 200,000 iterations) measures 560 ns per iteration in Ny against 22 ns for an 8-slot C table: about 140 ns per operation. The profile is flat: `rt_map_oracle_check` 13%, `is_v_str` 9%, `ny_native_dict_get_impl` 9%, `rt_cstr_to_str` 8% (each literal key is converted to a Ny string on every call), `ny_native_dict_find` 7%, `rt_is_sso_string` 7%, heap-registry lookups 5%. Fixed already: a `mincore` syscall per store (157 ms to 23 ms for 20,000 create-and-use iterations). Hoisting the literal conversion needs proof that the interned string stays rooted across the loop. The fixture still needs a timed loop and an unfoldable C reference. |
+| `bigint-oracle` | 9.9x | 9.7x | 1.2x | Compares Ny's library bignum against GMP; profile per function before assuming a codegen cause. |
+| `bce-matrix` | 1.35x | 2.5x | 3.4x | LLVM and NYC keep a serial reduction dependency. A uniform-state term and four independent accumulators regressed NYC to 4.00x and 4.32x; a pointer loop stopped vectorizing; all reverted. |
+| `fft` | 1.08x | 2.04x | 1.09x | Only the LLVM route is above the gate; not diagnosed. |
 
-- [ ] **First frame:** AOT pong takes about 6.3 s to its first frame. Bake fonts
-  and other assets at init or build time and remove frame spikes.
+NYC rows still above 2.0x (local `nyc -c -O3`, best of 11, checksums match):
 
-## Audio formats
+| Fixture | NYC/C | Cause |
+| --- | ---: | --- |
+| `pbkdf2` | 2.09x | Scalar SHA-256 rounds; see `sha256`. |
+| `json-parser` | 2.03x | Not diagnosed. |
+| `string` | 1.47x | Small-copy lowering and callee-saved residency are implemented. Seven-run focused report `bench-20261111-083623-3891112.json` reports matching checksums and `ok`, down from 3.04x in the last full run. The current 1.2x target remains open; confirm in the next full run. |
+| `append-scaling` | 2.34x | Not diagnosed. |
+| `sha256` | 2.56x | 8 rotating state words spill in the round loop; clang keeps them in registers. |
+| `pidigits` | 2.64x | Not diagnosed (14.8 µs against 5.6 µs). |
+| `bce-matrix`, `matrix`, `linpack`, `licm`, `revcomp`, `page-rank` | 3.0x, 3.0x, 2.6x, 2.8x, 4.2x, 3.8x | The NYC vectorizer does not widen these; same causes as the NYR rows above. |
 
-Reference: [dr_libs](https://github.com/mackron/dr_libs) (`dr_wav`, `dr_flac`,
-`dr_mp3`). Native decoders live in `lib/os/sound/res.ny`; each needs fixtures
-checked against reference output.
+`currying` is excluded: its C timer measures 3.3 µs against 5.27 ms for NYR.
 
-- [ ] **AU encodings:** G.726 and G.722 remain; other unsupported encodings fail
-  cleanly.
-- [ ] **Native FLAC decoder:** fixed and LPC subframes, stereo decorrelation,
-  metadata blocks, CRC checks, seek tables, and Ogg-encapsulated FLAC.
-- [ ] **Native MP3 decoder:** MPEG-1/2/2.5 Layer I-III, ID3v1/ID3v2 skipping,
-  Xing/VBRI/LAME headers for gapless length, and seeking.
-- [ ] **Compressed streaming:** compressed AIFF crashes; FLAC and MP3 are not
-  covered yet.
+Open follow-ups from the 2026-11-11 performance work:
 
-## UI and engine
+- The full report `build/bench-reports/bench-20261111-082901-3859446.json`
+  confirms `splay`, `spectral`, and `licm` below 2.0x on every route.
+  `linpack` clears NYR (1.20x) and LLVM (0.84x), but NYC remains 2.28x.
+  The NYC vectorizer still rejects the row
+  update (needs row-dependence analysis for `A[r*N+c]` against `A[k*N+c]`,
+  `r > k`).
+- The carry/coalescing defect behind the allocator verifier rejection
+  ("carried v29 / v4 color mismatch") is worked around by a retry that drops
+  carried registers, not fixed.
+- Flags reuse (`mach_cmp_reuse_alloc_view`) is off behind `NY_X64_CMP_REUSE`:
+  its stripped view fails the machine verifier, and enabling it without
+  verification miscompiled `splay`. Needs a correct view and a fixture.
 
-- [ ] **Audit:** read `etc/projects/ui/engine.ny`, `editor.ny`, and `lib/os/ui`
-  end to end and record defects here.
-- [ ] **Engine text garbling** on real Wayland.
-- [ ] **Left panel clipping.**
-- [ ] **Polish:** gizmos, menus, and overall editor quality.
-- [ ] **Resize smoothness:** no flicker or stalls while dragging. Accept:
-  headless resize stress plus frame-time logs.
-- [ ] **Modernize the UI system** after the audit identifies what to replace.
-- [ ] **TTY/TUI backend:** translate renderer programs to a terminal target.
+### Open performance work
 
-## Tests and tooling
+- [ ] **Diagnose `revcomp`, `dict-oracle`, and the undiagnosed NYC rows (`json-parser`, `append-scaling`, `pidigits`):** record timed-kernel
+  instruction counts, vector lanes, spills, and the vectorizer rejection reason
+  (`NY_TRACE_VECTORIZE=1`), then choose a change.
+- [ ] **Pointer induction variables for NYC array walks:** verify generated
+  code and affected workloads against the 2.0x gate.
+- [ ] **Allocator and encoder traffic:** re-measure the older 12% load / 8%
+  store stack-slot traffic and `rax` staging moves on the current tree before
+  choosing three-register forms, boundary home publishing, or shrink-wrapped
+  callee saves. The opt-in MIR address-reassociation probe (`NYTRIX_ADDR_REASSOC=1`)
+  rewrites `cmov-sort`'s `add index, 1; lea base, index, 8` to reuse the existing
+  `base + 8`, but currently makes x86-64 register allocation fail and falls back
+  to a slower path (about 3.76 ms vs 0.50 ms without the probe). Keeping the ADD
+  intact still fails, so deletion of that instruction is not the cause. Keep
+  this transformation disabled by default until the cross-block live-range /
+  carried-register issue is fixed and the focused benchmark clears its gate.
 
-- [ ] **Faster `./make check`:** a full run takes about 16 minutes before the
-  benchmark phase. A targeted cold run for five slow fixtures fell from 741.4 s
-  to 412.6 s (44.3%); the sixth, loopback-dependent fixture was skipped because
-  this host denies socket binds. Keep the item open until full coverage is
-  measured and the check gate confirms no coverage loss.
+---
 
-## Code quality
+### Measurement Discipline for Every Fix
 
-- [ ] **Modularize the C sources:** `src/code/lang/parse/c/parse.c` (48,000
-  lines) and `src/code/backend/arch/x86_64/object.c` (15,000 lines) carry long
-  near-duplicate runs. Coordinate with active NYC work (see [NYC work](todo/nyc.md)).
-- [ ] **Repeated source:** the audit reports 61,853 repeated lines. Start with
-  `lib/os/dis/decomp/core.ny`, `lower.c`, and the fuzz drivers.
+1. Run `./make bench` (77 fixtures, 3 runs + 1 warm-up) — all checksums must match
+2. For each changed fixture: capture mixed assembly (`--bench-show-asm --bench-compare-llvm`)
+3. Compare dynamic instruction counts, vector lanes, spills/reloads, branches in timed kernel
+4. Recheck all >2.0x rows after shared optimizer/encoder changes (ranking moves)
+5. Only review assembly for rows above 2.0x; exclude documented timer-floor rows using benchmark rules
+
+---
+
+### UI and engine
+
+- [ ] **Visual confirmation of the editor and engine on a real compositor.**
+refiine all hud edt engiine style features and how works and all more thiinked wiht a lot more detaels and polsiehd
+  Gizmo picking, the context menu, text editing, undo/redo, panel layout, resize
+  and the TTY backend are covered by headless probes (`gizmo-pick`,
+  `context-menu`, `editor-history`, `editor-edit`, panel and resize sweeps).
+  Pixel-level polish of gizmo drawing, menu rendering and engine text needs a
+  person to look at a live window; it cannot be judged from headless logs.

@@ -83,14 +83,15 @@ fn set_lines(dict st, list lines) dict {
 ;; Returns the result of the `clamp_cursor` operation.
 fn clamp_cursor(dict st) dict {
    def lines = current_lines(st)
-   mut row = int(st.get("cursor_line", 0))
-   mut col = int(st.get("cursor_col", 0))
+   mut int row = int(st.get("cursor_line", 0))
+   mut int col = int(st.get("cursor_col", 0))
    if row < 0 { row = 0 }
    if row >= lines.len { row = max(0, lines.len - 1) }
    def line = to_str(lines.get(row, ""))
    if col < 0 { col = 0 }
    if col > line.len { col = line.len }
-   st["cursor_line"] = row
-   st["cursor_col"] = col
+   ;; Preserve the dynamic dictionary ABI after scalar control-flow joins.
+   st["cursor_line"] = __box_i64(row)
+   st["cursor_col"] = __box_i64(col)
    st
 }

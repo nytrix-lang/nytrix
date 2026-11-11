@@ -1,3 +1,4 @@
+/* Public entry point for the Nytrix formatter command. */
 #ifndef NYTRIX_CMD_NY_TOOLS_FMT_H
 #define NYTRIX_CMD_NY_TOOLS_FMT_H
 

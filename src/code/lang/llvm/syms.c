@@ -1032,21 +1032,21 @@ static inline uint64_t ny_overload_cache_hash(codegen_t *cg, const char *name,
          ((uint64_t)argc * 11400714819323198485ULL);
 }
 
-#define NY_CACHE_ENTRY_MATCH(e, cg, stamp, hash, len, name)                    \
-  ((e)->state && (e)->cg == (cg) && (e)->stamp == (stamp) &&                   \
-   (e)->hash == (hash) && (e)->len == (uint16_t)(len) &&                       \
+#define NY_CACHE_ENTRY_MATCH(e, cg, stamp, hash, len, name)  \
+  ((e)->state && (e)->cg == (cg) && (e)->stamp == (stamp) && \
+   (e)->hash == (hash) && (e)->len == (uint16_t)(len) &&     \
    memcmp((e)->key, (name), (len)) == 0)
 
-#define NY_CACHE_ENTRY_FILL(e, cg, name, len, hash, value_expr)                \
-  do {                                                                         \
-    (e)->cg = (cg);                                                            \
-    (e)->stamp = ny_lookup_stamp(cg);                                          \
-    (e)->hash = (hash);                                                        \
-    (e)->len = (uint16_t)(len);                                                \
-    memcpy((e)->key, (name), (len));                                           \
-    (e)->key[(len)] = '\0';                                                    \
-    (e)->value = (value_expr);                                                 \
-    (e)->state = (value_expr) ? 2u : 1u;                                       \
+#define NY_CACHE_ENTRY_FILL(e, cg, name, len, hash, value_expr) \
+  do {                                                          \
+    (e)->cg = (cg);                                             \
+    (e)->stamp = ny_lookup_stamp(cg);                           \
+    (e)->hash = (hash);                                         \
+    (e)->len = (uint16_t)(len);                                 \
+    memcpy((e)->key, (name), (len));                            \
+    (e)->key[(len)] = '\0';                                     \
+    (e)->value = (value_expr);                                  \
+    (e)->state = (value_expr) ? 2u : 1u;                        \
   } while (0)
 
 static int ny_fun_cache_get(codegen_t *cg, const char *name, uint64_t hash,
@@ -1592,70 +1592,70 @@ void add_builtins(codegen_t *cg) {
               i);
   }
 
-#define RT_DEF(rt_name, implementation, args, sig, doc)                        \
-  do {                                                                         \
-    if (cg->comptime && !builtin_allowed_comptime(rt_name))                    \
-      break;                                                                   \
-    LLVMTypeRef ty = NULL;                                                     \
-    if (strcmp(rt_name, "__copy_mem") == 0) {                                  \
-      ty = LLVMFunctionType(                                                   \
-          cg->type_i64,                                                        \
-          (LLVMTypeRef[]){cg->type_i64, cg->type_i64, cg->type_i64}, 3, 0);    \
-    } else {                                                                   \
-      ty = fn_types[args];                                                     \
-    }                                                                          \
-    const char *impl_name = #implementation;                                   \
-    LLVMValueRef f = ny_get_named_fn(cg, impl_name);                           \
-    if (!f)                                                                    \
-      f = LLVMAddFunction(cg->module, impl_name, ty);                          \
-    fun_sig *sig_obj = arena_alloc(cg->arena, sizeof(fun_sig));                \
-    ny_fun_sig_init(sig_obj, rt_name, ty, f, NULL, (int)args, false, false);   \
-    sig_obj->is_stable = true;                                                 \
-    sig_obj->owned = false;                                                    \
-    vec_push(&cg->fun_sigs, *sig_obj);                                         \
-    ny_apply_rt_fn_attrs(cg, f);                                               \
-    if (!strcmp(rt_name, "__panic")) {                                         \
-      unsigned nr_kind = LLVMGetEnumAttributeKindForName("noreturn", 8);       \
-      if (nr_kind != 0) {                                                      \
-        LLVMAttributeRef nr_attr =                                             \
-            LLVMCreateEnumAttribute(cg->ctx, nr_kind, 0);                      \
-        LLVMAddAttributeAtIndex(f, LLVMAttributeFunctionIndex, nr_attr);       \
-      }                                                                        \
-    }                                                                          \
+#define RT_DEF(rt_name, implementation, args, sig, doc)                      \
+  do {                                                                       \
+    if (cg->comptime && !builtin_allowed_comptime(rt_name))                  \
+      break;                                                                 \
+    LLVMTypeRef ty = NULL;                                                   \
+    if (strcmp(rt_name, "__copy_mem") == 0) {                                \
+      ty = LLVMFunctionType(                                                 \
+          cg->type_i64,                                                      \
+          (LLVMTypeRef[]){cg->type_i64, cg->type_i64, cg->type_i64}, 3, 0);  \
+    } else {                                                                 \
+      ty = fn_types[args];                                                   \
+    }                                                                        \
+    const char *impl_name = #implementation;                                 \
+    LLVMValueRef f = ny_get_named_fn(cg, impl_name);                         \
+    if (!f)                                                                  \
+      f = LLVMAddFunction(cg->module, impl_name, ty);                        \
+    fun_sig *sig_obj = arena_alloc(cg->arena, sizeof(fun_sig));              \
+    ny_fun_sig_init(sig_obj, rt_name, ty, f, NULL, (int)args, false, false); \
+    sig_obj->is_stable = true;                                               \
+    sig_obj->owned = false;                                                  \
+    vec_push(&cg->fun_sigs, *sig_obj);                                       \
+    ny_apply_rt_fn_attrs(cg, f);                                             \
+    if (!strcmp(rt_name, "__panic")) {                                       \
+      unsigned nr_kind = LLVMGetEnumAttributeKindForName("noreturn", 8);     \
+      if (nr_kind != 0) {                                                    \
+        LLVMAttributeRef nr_attr =                                           \
+            LLVMCreateEnumAttribute(cg->ctx, nr_kind, 0);                    \
+        LLVMAddAttributeAtIndex(f, LLVMAttributeFunctionIndex, nr_attr);     \
+      }                                                                      \
+    }                                                                        \
   } while (0);
 
-#define RT_DEF_F64(rt_name, implementation, args, sig, doc)                    \
-  do {                                                                         \
-    if (cg->comptime && !builtin_allowed_comptime(rt_name))                    \
-      break;                                                                   \
-    LLVMTypeRef ty =                                                           \
-        LLVMFunctionType(cg->type_i64, (LLVMTypeRef[]){cg->type_f64}, 1, 0);   \
-    const char *impl_name = #implementation;                                   \
-    LLVMValueRef f = ny_get_named_fn(cg, impl_name);                           \
-    if (!f)                                                                    \
-      f = LLVMAddFunction(cg->module, impl_name, ty);                          \
-    fun_sig *sig_obj = arena_alloc(cg->arena, sizeof(fun_sig));                \
-    ny_fun_sig_init(sig_obj, rt_name, ty, f, NULL, (int)args, false, false);   \
-    sig_obj->is_stable = true;                                                 \
-    sig_obj->owned = false;                                                    \
-    vec_push(&cg->fun_sigs, *sig_obj);                                         \
-    ny_apply_rt_fn_attrs(cg, f);                                               \
+#define RT_DEF_F64(rt_name, implementation, args, sig, doc)                  \
+  do {                                                                       \
+    if (cg->comptime && !builtin_allowed_comptime(rt_name))                  \
+      break;                                                                 \
+    LLVMTypeRef ty =                                                         \
+        LLVMFunctionType(cg->type_i64, (LLVMTypeRef[]){cg->type_f64}, 1, 0); \
+    const char *impl_name = #implementation;                                 \
+    LLVMValueRef f = ny_get_named_fn(cg, impl_name);                         \
+    if (!f)                                                                  \
+      f = LLVMAddFunction(cg->module, impl_name, ty);                        \
+    fun_sig *sig_obj = arena_alloc(cg->arena, sizeof(fun_sig));              \
+    ny_fun_sig_init(sig_obj, rt_name, ty, f, NULL, (int)args, false, false); \
+    sig_obj->is_stable = true;                                               \
+    sig_obj->owned = false;                                                  \
+    vec_push(&cg->fun_sigs, *sig_obj);                                       \
+    ny_apply_rt_fn_attrs(cg, f);                                             \
   } while (0);
 
-#define RT_GV(rt_name, p, t, doc)                                              \
-  do {                                                                         \
-    LLVMValueRef g = ny_get_global(cg, rt_name);                               \
-    if (!g) {                                                                  \
-      g = LLVMAddGlobal(cg->module, cg->type_i64, rt_name);                    \
-      LLVMSetLinkage(g, LLVMExternalLinkage);                                  \
-    }                                                                          \
-    binding b = {0};                                                           \
-    b.name = ny_strdup(rt_name);                                               \
-    b.value = g;                                                               \
-    b.is_slot = true;                                                          \
-    b.is_stable = true;                                                        \
-    b.owned = true;                                                            \
-    vec_push(&cg->global_vars, b);                                             \
+#define RT_GV(rt_name, p, t, doc)                           \
+  do {                                                      \
+    LLVMValueRef g = ny_get_global(cg, rt_name);            \
+    if (!g) {                                               \
+      g = LLVMAddGlobal(cg->module, cg->type_i64, rt_name); \
+      LLVMSetLinkage(g, LLVMExternalLinkage);               \
+    }                                                       \
+    binding b = {0};                                        \
+    b.name = ny_strdup(rt_name);                            \
+    b.value = g;                                            \
+    b.is_slot = true;                                       \
+    b.is_stable = true;                                     \
+    b.owned = true;                                         \
+    vec_push(&cg->global_vars, b);                          \
   } while (0);
 
 #ifdef _WIN32

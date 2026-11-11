@@ -1,8 +1,13 @@
+/*
+ * Fixture: pass a global memory operand through x86-64 inline assembly.
+ */
 unsigned long observed;
 void copy_memory_operand(const unsigned long *value) {
   __asm__ __volatile__("movq %0, %%rax\n\t"
                        "movq %%rax, observed(%%rip)"
-                       : : "m"(*value) : "memory");
+                       :
+                       : "m"(*value)
+                       : "memory");
 }
 int main(void) {
   unsigned long value = 0x123456789abcdef0UL;

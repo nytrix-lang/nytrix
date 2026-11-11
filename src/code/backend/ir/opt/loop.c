@@ -20,10 +20,7 @@
  */
 
 static int idiom_root_copy(const nyr_func_t *f, const int *defs, int value) {
-  while (value >= 0 && value < f->next_value && defs[value] >= 0 &&
-         f->data[defs[value]].op == NYIR_COPY)
-    value = f->data[defs[value]].a;
-  return value;
+  return nyr_strip_copy_chain(f, defs, value, 0);
 }
 
 static bool const_i64_val(const nyr_func_t *f, const int *defs, int value,
@@ -206,11 +203,7 @@ bool nyr_loop_idiom(nyr_func_t *f) {
 
 static int interchange_root_copy(const nyr_func_t *f, const int *defs,
                                  int value) {
-  for (int depth = 0; value >= 0 && value < f->next_value && defs[value] >= 0 &&
-                      f->data[defs[value]].op == NYIR_COPY && depth < 32;
-       ++depth)
-    value = f->data[defs[value]].a;
-  return value;
+  return nyr_strip_copy_chain(f, defs, value, 32);
 }
 
 static bool is_iv_control_use(const nyr_inst_t *in, int iv, int next) {
@@ -2198,12 +2191,12 @@ static bool last_overwrite_try_loop(nyr_func_t *f, const nyr_cfg_t *cfg,
                                     const int *defs,
                                     const nyr_scev_loop_t *loop,
                                     bool *in_loop) {
-#define LAST_OVERWRITE_REJECT(reason)                                          \
-  do {                                                                         \
-    ny_dbg_heuristic_event("LOOP_LAST_OVERWRITE",                              \
-                           "decision=reject header=L%lld reason=%s",           \
-                           (long long)loop->header_label, reason);             \
-    return false;                                                              \
+#define LAST_OVERWRITE_REJECT(reason)                                \
+  do {                                                               \
+    ny_dbg_heuristic_event("LOOP_LAST_OVERWRITE",                    \
+                           "decision=reject header=L%lld reason=%s", \
+                           (long long)loop->header_label, reason);   \
+    return false;                                                    \
   } while (0)
   ny_dbg_heuristic_event(
       "LOOP_LAST_OVERWRITE",
@@ -2838,8 +2831,8 @@ static bool unswitch_try_one(nyr_func_t *f, const nyr_cfg_t *cfg,
   bool *fallthrough_exits =
       calloc(cfg->block_count, sizeof(*fallthrough_exits));
   bool *exit_blocks = calloc(cfg->block_count, sizeof(*exit_blocks));
-  bool *escape_phis_inserted = calloc(cfg->block_count,
-                                      sizeof(*escape_phis_inserted));
+  bool *escape_phis_inserted =
+      calloc(cfg->block_count, sizeof(*escape_phis_inserted));
   size_t *fallthrough_target =
       calloc(cfg->block_count, sizeof(*fallthrough_target));
   int *defs = nyr_build_defs(f);
@@ -3208,8 +3201,7 @@ static bool unswitch_try_one(nyr_func_t *f, const nyr_cfg_t *cfg,
           goto done;
         }
         size_t def_block = cfg->inst_block[def];
-        size_t pred_count =
-            cfg->pred_offsets[b + 1] - cfg->pred_offsets[b];
+        size_t pred_count = cfg->pred_offsets[b + 1] - cfg->pred_offsets[b];
         if (pred_count == 0) {
           stage = "escaping-no-predecessor";
           goto done;
@@ -3627,14 +3619,12 @@ static bool unswitch_try_one(nyr_func_t *f, const nyr_cfg_t *cfg,
       size_t b = escape_block_by_value[v];
       if (b == SIZE_MAX)
         continue;
-      size_t pred_count =
-          cfg->pred_offsets[b + 1] - cfg->pred_offsets[b];
+      size_t pred_count = cfg->pred_offsets[b + 1] - cfg->pred_offsets[b];
       if (pred_count == 0 || pred_count > SIZE_MAX / 2 ||
           pred_count * 2 > SIZE_MAX / sizeof(nyr_phi_incoming_t) ||
           escape_phi_by_value[v] < 0 || value_map[v] < 0)
         goto done;
-      nyr_phi_incoming_t *incoming =
-          malloc(pred_count * 2 * sizeof(*incoming));
+      nyr_phi_incoming_t *incoming = malloc(pred_count * 2 * sizeof(*incoming));
       if (!incoming)
         goto done;
       size_t out = 0;
@@ -3663,15 +3653,14 @@ static bool unswitch_try_one(nyr_func_t *f, const nyr_cfg_t *cfg,
         incoming[out++] = (nyr_phi_incoming_t){
             .value = (int)v,
             .predecessor_label = escape_pred_label_by_block[trampoline]};
-        incoming[out++] = (nyr_phi_incoming_t){
-            .value = value_map[v], .predecessor_label = clone_pred};
+        incoming[out++] = (nyr_phi_incoming_t){.value = value_map[v],
+                                               .predecessor_label = clone_pred};
       } else {
         for (size_t e = cfg->pred_offsets[b]; e < cfg->pred_offsets[b + 1];
              ++e) {
           size_t pred = cfg->pred_blocks[e];
-          int64_t clone_pred = fallthrough_exits[pred]
-                                   ? exit_label_map[pred]
-                                   : label_map[pred];
+          int64_t clone_pred =
+              fallthrough_exits[pred] ? exit_label_map[pred] : label_map[pred];
           if (!members[pred] || cfg->block_label[pred] < 0 || clone_pred < 0) {
             free(incoming);
             goto done;
@@ -3799,8 +3788,8 @@ static bool unswitch_try_one(nyr_func_t *f, const nyr_cfg_t *cfg,
       for (size_t v = 0; v < value_count; ++v) {
         if (escape_block_by_value[v] != b)
           continue;
-        int *ops[] = {&moved.a, &moved.b, &moved.c, &moved.d, &moved.e,
-                      &moved.f};
+        int *ops[] = {&moved.a, &moved.b, &moved.c,
+                      &moved.d, &moved.e, &moved.f};
         for (size_t k = 0; k < sizeof(ops) / sizeof(ops[0]); ++k)
           if (*ops[k] == (int)v)
             *ops[k] = escape_phi_by_value[v];
@@ -5244,18 +5233,6 @@ bool nyr_loop_unroll_ssa(nyr_func_t *f) {
   return true;
 }
 /*
- * Canonical single-version form for loop-invariant integer predicates.
- */
-
-static int versioning_root_copy(const nyr_func_t *f, const int *defs,
-                                int value) {
-  while (value >= 0 && value < f->next_value && defs[value] >= 0 &&
-         f->data[defs[value]].op == NYIR_COPY)
-    value = f->data[defs[value]].a;
-  return value;
-}
-
-/*
  * Put a loop-invariant relational guard in constant-left canonical form.  It
  * is a concrete, verifier-safe specialization of the existing loop version;
  * guards involving the induction variable are deliberately left unchanged.
@@ -5292,8 +5269,8 @@ bool nyr_loop_versioning(nyr_func_t *f) {
           if (in->op != NYIR_CMP_I64 || in->cmp == NYIR_CMP_EQ ||
               in->cmp == NYIR_CMP_NE)
             continue;
-          int left = versioning_root_copy(f, defs, in->a);
-          int right = versioning_root_copy(f, defs, in->b);
+          int left = idiom_root_copy(f, defs, in->a);
+          int right = idiom_root_copy(f, defs, in->b);
           if (left < 0 || right < 0 || defs[left] < 0 || defs[right] < 0 ||
               in_loop[cfg.inst_block[(size_t)defs[left]]] ||
               in_loop[cfg.inst_block[(size_t)defs[right]]] ||

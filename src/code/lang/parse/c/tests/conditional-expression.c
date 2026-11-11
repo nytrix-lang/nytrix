@@ -1,3 +1,6 @@
+/*
+ * Preprocessor fixture for evaluating conditional expressions in directives.
+ */
 #define NYR_FEATURE 1
 #if NYR_FEATURE ? (2 * 3) : (1 / 0)
 long nyr_feature_enabled(void) { return 1; }

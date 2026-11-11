@@ -1,3 +1,6 @@
+/*
+ * Parser fixture host: validate declarations produced by preprocessor inputs.
+ */
 #include <string.h>
 
 extern long c_pp_defined(void);

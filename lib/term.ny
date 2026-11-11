@@ -237,8 +237,8 @@ fn tui_canvas_loop(fnptr draw, int delay=16, int budget=0) int {
 }
 
 fn is_quit_key(int key) bool {
-   "Returns true for quit keys in TUI mode(Esc or Ctrl+C)."
-   key == 27 || key == 3
+   "Returns true for quit keys in TUI mode(Esc, Ctrl+C, or 'q')."
+   key == 27 || key == 3 || key == 113
 }
 
 fn _stty_bin() str {

@@ -1,3 +1,6 @@
+/*
+ * Fixture helpers: implement 32-bit and 64-bit population-count operations.
+ */
 unsigned int __sw_hweight32(unsigned int);
 unsigned long __sw_hweight64(unsigned long);
 unsigned long nyc_hweight64_probe(unsigned long value) {

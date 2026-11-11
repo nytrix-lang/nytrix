@@ -1,11 +1,14 @@
+/*
+ * Fixture: compile robust-futex lock operations with constrained x86 assembly.
+ */
 typedef unsigned int u32;
 typedef unsigned long u64;
 static u32 try_unlock(u32 *lock, u32 tid, u64 *pop) {
   asm volatile("lock cmpxchgl %k[zero], %a[lock]\n"
-      "jnz 1f\nmovq %[zero], %a[pop]\n1:\n"
-      : [tid] "+&a"(tid)
-      : [lock] "D"(lock), [pop] "d"(pop), [zero] "r"(0UL)
-      : "memory");
+               "jnz 1f\nmovq %[zero], %a[pop]\n1:\n"
+               : [tid] "+&a"(tid)
+               : [lock] "D"(lock), [pop] "d"(pop), [zero] "r"(0UL)
+               : "memory");
   return tid;
 }
 int main(void) {

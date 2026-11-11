@@ -47,21 +47,21 @@ typedef struct {
 
 static const ny_builtin_effect_contract_t ny_builtin_effect_contracts[] = {
 #define NY_BUILTIN_PURE(name) {name, NY_FX_NONE, NY_BUILTIN_EFFECT_DIRECT},
-#define NY_BUILTIN_EFFECT(name, effects)                                       \
+#define NY_BUILTIN_EFFECT(name, effects)     \
   {name, effects, NY_BUILTIN_EFFECT_DIRECT},
-#define NY_BUILTIN_CALLABLE_FACTORY(name, effects)                             \
+#define NY_BUILTIN_CALLABLE_FACTORY(name, effects)     \
   {name, effects, NY_BUILTIN_EFFECT_CALLABLE_FACTORY},
-#define NY_BUILTIN_QUERY_FROM(name, effects)                                   \
+#define NY_BUILTIN_QUERY_FROM(name, effects)     \
   {name, effects, NY_BUILTIN_EFFECT_QUERY_FROM},
-#define NY_BUILTIN_QUERY_STEP(name, effects)                                   \
+#define NY_BUILTIN_QUERY_STEP(name, effects)     \
   {name, effects, NY_BUILTIN_EFFECT_QUERY_STEP},
-#define NY_BUILTIN_QUERY_PREDICATE_STEP(name, effects)                         \
+#define NY_BUILTIN_QUERY_PREDICATE_STEP(name, effects)     \
   {name, effects, NY_BUILTIN_EFFECT_QUERY_PREDICATE_STEP},
-#define NY_BUILTIN_QUERY_PIPE(name, effects)                                   \
+#define NY_BUILTIN_QUERY_PIPE(name, effects)     \
   {name, effects, NY_BUILTIN_EFFECT_QUERY_PIPE},
-#define NY_BUILTIN_QUERY_RUN(name, effects)                                    \
+#define NY_BUILTIN_QUERY_RUN(name, effects)     \
   {name, effects, NY_BUILTIN_EFFECT_QUERY_RUN},
-#define NY_BUILTIN_OPTIONAL_HOF(name, effects)                                 \
+#define NY_BUILTIN_OPTIONAL_HOF(name, effects)     \
   {name, effects, NY_BUILTIN_EFFECT_OPTIONAL_HOF},
 #include "code/lang/runtime/contracts.c"
 #undef NY_BUILTIN_OPTIONAL_HOF
@@ -2962,11 +2962,11 @@ static bool ny_effect_nested_builtin_mask(const char *name, size_t len,
                                           uint32_t *mask) {
   if (!name || !len || !mask)
     return false;
-#define NY_EFFECT_NESTED_NAME(spelling, bit)                                   \
-  if (len == sizeof(spelling) - 1 &&                                           \
-      memcmp(name, spelling, sizeof(spelling) - 1) == 0) {                     \
-    *mask = bit;                                                               \
-    return true;                                                               \
+#define NY_EFFECT_NESTED_NAME(spelling, bit)               \
+  if (len == sizeof(spelling) - 1 &&                       \
+      memcmp(name, spelling, sizeof(spelling) - 1) == 0) { \
+    *mask = bit;                                           \
+    return true;                                           \
   }
   NY_EFFECT_NESTED_NAME("io", NY_FX_IO)
   NY_EFFECT_NESTED_NAME("alloc", NY_FX_ALLOC)
@@ -7565,18 +7565,18 @@ static fun_sig *ny_purity_resolve_memcall_sig(codegen_t *cg, expr_memcall_t *mc,
   return lookup_fun(cg, resolved_fun, 0);
 }
 
-#define CHECK_PURE_EXPR(e)                                                     \
-  do {                                                                         \
-    if (!ny_expr_check_safe_internal(cg, (e), local_names, local_hashes,       \
-                                     local_bloom, memo_safe_only))             \
-      return false;                                                            \
+#define CHECK_PURE_EXPR(e)                                               \
+  do {                                                                   \
+    if (!ny_expr_check_safe_internal(cg, (e), local_names, local_hashes, \
+                                     local_bloom, memo_safe_only))       \
+      return false;                                                      \
   } while (0)
 
-#define CHECK_PURE_STMT(s)                                                     \
-  do {                                                                         \
-    if (!ny_stmt_check_safe_internal(cg, (s), local_names, local_hashes,       \
-                                     local_bloom, memo_safe_only))             \
-      return false;                                                            \
+#define CHECK_PURE_STMT(s)                                               \
+  do {                                                                   \
+    if (!ny_stmt_check_safe_internal(cg, (s), local_names, local_hashes, \
+                                     local_bloom, memo_safe_only))       \
+      return false;                                                      \
   } while (0)
 
 static bool ny_expr_check_safe_internal(codegen_t *cg, expr_t *e,
@@ -9515,30 +9515,30 @@ static bool ny_effect_diag_verbose_enabled(void) {
   return verbose_enabled >= 4 || ny_env_enabled("NYTRIX_EFFECT_DIAG_VERBOSE");
 }
 
-#define NY_FOREACH_FUNC_SIG(cg, sig_var)                                       \
-  for (size_t _ny_i = 0; _ny_i < (cg)->fun_sigs.len; _ny_i++)                  \
-    for (fun_sig *sig_var = &(cg)->fun_sigs.data[_ny_i]; sig_var != NULL;      \
-         sig_var = NULL)                                                       \
-      if (!sig_var->stmt_t || sig_var->stmt_t->kind != NY_S_FUNC) {            \
+#define NY_FOREACH_FUNC_SIG(cg, sig_var)                                  \
+  for (size_t _ny_i = 0; _ny_i < (cg)->fun_sigs.len; _ny_i++)             \
+    for (fun_sig *sig_var = &(cg)->fun_sigs.data[_ny_i]; sig_var != NULL; \
+         sig_var = NULL)                                                  \
+      if (!sig_var->stmt_t || sig_var->stmt_t->kind != NY_S_FUNC) {       \
       } else
 
-#define NY_FOREACH_NON_STD_FUNC_SIG(cg, sig_var)                               \
-  for (size_t _ny_i = 0; _ny_i < (cg)->fun_sigs.len; _ny_i++)                  \
-    for (fun_sig *sig_var = &(cg)->fun_sigs.data[_ny_i]; sig_var != NULL;      \
-         sig_var = NULL)                                                       \
-      if (!sig_var->stmt_t || sig_var->stmt_t->kind != NY_S_FUNC ||            \
-          ny_is_stdlib_tok(sig_var->stmt_t->tok)) {                            \
+#define NY_FOREACH_NON_STD_FUNC_SIG(cg, sig_var)                          \
+  for (size_t _ny_i = 0; _ny_i < (cg)->fun_sigs.len; _ny_i++)             \
+    for (fun_sig *sig_var = &(cg)->fun_sigs.data[_ny_i]; sig_var != NULL; \
+         sig_var = NULL)                                                  \
+      if (!sig_var->stmt_t || sig_var->stmt_t->kind != NY_S_FUNC ||       \
+          ny_is_stdlib_tok(sig_var->stmt_t->tok)) {                       \
       } else
 
-#define NY_FOREACH_POLICY_SIG(cg, include_std_flag, sig_var)                   \
-  for (size_t _ny_i = 0; _ny_i < (cg)->fun_sigs.len; _ny_i++)                  \
-    for (fun_sig *sig_var = &(cg)->fun_sigs.data[_ny_i]; sig_var != NULL;      \
-         sig_var = NULL)                                                       \
-      if (!sig_var->stmt_t || sig_var->stmt_t->kind != NY_S_FUNC ||            \
-          (!(include_std_flag) &&                                              \
-           (ny_sig_is_std_for_effects(sig_var) ||                              \
-            (sig_var->stmt_t->tok.filename &&                                  \
-             strcmp(sig_var->stmt_t->tok.filename, "<stdlib>") == 0)))) {      \
+#define NY_FOREACH_POLICY_SIG(cg, include_std_flag, sig_var)              \
+  for (size_t _ny_i = 0; _ny_i < (cg)->fun_sigs.len; _ny_i++)             \
+    for (fun_sig *sig_var = &(cg)->fun_sigs.data[_ny_i]; sig_var != NULL; \
+         sig_var = NULL)                                                  \
+      if (!sig_var->stmt_t || sig_var->stmt_t->kind != NY_S_FUNC ||       \
+          (!(include_std_flag) &&                                         \
+           (ny_sig_is_std_for_effects(sig_var) ||                         \
+            (sig_var->stmt_t->tok.filename &&                             \
+             strcmp(sig_var->stmt_t->tok.filename, "<stdlib>") == 0)))) { \
       } else
 
 static bool ny_apply_infer_pass_to_sig(codegen_t *cg, size_t sig_idx,

@@ -1,3 +1,6 @@
+/*
+ * Fixture: parse the Linux clear-user helper and its assembler fallback.
+ */
 extern unsigned long rep_stos_alternative(void *address, unsigned long length);
 
 unsigned long nyc_clear_user(void *address, unsigned long size) {

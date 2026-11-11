@@ -5,7 +5,7 @@ CC ?= cc
 CFLAGS ?= -O1 -g -Wall -Wextra -I$(ROOT)/src
 NY_FULL ?= $(BUILD)/release/ny-full
 LDLIBS := -L/usr/lib/llvm21/lib -lLLVM -lclang -lm -lpthread -lz3 \
-          -lcurl -fopenmp -lomp -L$(BUILD)/release -lnytrixrt \
+          -lcurl -pthread -L$(BUILD)/release -lnytrixrt \
           -Wl,-rpath,$(BUILD)/release
 OBJDIR := $(BUILD)/release/CMakeFiles/nytrix_compiler.dir
 OBJECTS = $(shell for o in $$(find $(OBJDIR) -name '*.o' 2>/dev/null); do \

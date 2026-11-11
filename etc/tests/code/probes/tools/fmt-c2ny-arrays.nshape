@@ -1,0 +1,47 @@
+shape c2ny_reference_table_initializers {
+  generator "embedded"
+  family "probe/tools/fmt"
+  features ["formatter", "c2ny", "arrays", "execution"]
+  template ny-test-case
+  flags "--native-only"
+  timeout 180
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.subprocess (run_capture)
+def ny = env("NYTRIX_NY_FULL_BIN")
+def fmt = env("NYTRIX_TEST_FMT_BIN")
+def cmake = env("NYTRIX_CMAKE_COMMAND")
+assert(is_str(ny) && is_str(fmt) && is_str(cmake), "converter test tools are available")
+def dir = temp_dir() + "/ny-c2ny-arrays-" + to_str(pid())
+assert(run_capture([cmake, "-E", "make_directory", dir], [], nil, false).get("code", 127) == 0,
+   "create table conversion directory")
+def source = dir + "/tables.c"
+def output = dir + "/tables.ny"
+unwrap(file_write(source, "static const int global[][3] = {{1, 2}, {3}};\n" +
+   "static const float gain[] = {0.5f, 1.25f, 2.0f};\n" +
+   "int zeros[2][2];\n" +
+   "int local_values(void) {\n" +
+   "  int inferred[] = {2, 4, 6,};\n" +
+   "  int padded[4] = {7};\n" +
+   "  int nested[2][3] = {{8}, {9, 10}};\n" +
+   "  padded[3] = 11;\n" +
+   "  return inferred[2] + padded[0] + padded[1] + padded[3] + nested[0][1] + nested[1][1] + nested[1][2];\n" +
+   "}\n"))
+def converted = run_capture([fmt, "--c2ny", source, "-o", output], [], nil, false)
+assert(converted.get("code", 127) == 0,
+   "reference table conversion failed: " + converted.get("stderr", ""))
+unwrap(file_write(output, unwrap(file_read(output)) +
+   "\nassert(global[0][0] == 1 && global[0][1] == 2 && global[0][2] == 0, \"global row zero fill\")\n" +
+   "assert(global[1][0] == 3 && global[1][1] == 0 && global[1][2] == 0, \"inferred outer extent\")\n" +
+   "assert(gain[0] == 0.5 && gain[1] == 1.25 && gain[2] == 2.0, \"floating reference table\")\n" +
+   "zeros[0][0] = 99\nassert(zeros[1][0] == 0 && zeros[0][1] == 0, \"zero initialized rows do not alias\")\n" +
+   "assert(local_values() == 34, \"local inferred and padded nested tables\")\n"))
+def executed = run_capture([ny, "--native-only", output], [], nil, false)
+assert(executed.get("code", 127) == 0,
+   "generated reference tables failed: " + executed.get("stderr", "") + executed.get("stdout", ""))
+assert(run_capture([cmake, "-E", "remove_directory", dir], [], nil, false).get("code", 127) == 0,
+   "remove table conversion directory")
+print("C2NY-ARRAYS-OK")
+NY
+}

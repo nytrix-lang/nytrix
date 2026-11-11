@@ -1,3 +1,6 @@
+/*
+ * Loop optimizer tests for last-overwrite elimination and reduction cases.
+ */
 #include "code/backend/ir/opt/util.h"
 #include "support.h"
 

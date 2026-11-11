@@ -1,3 +1,6 @@
+/*
+ * Parser/backend fixture for indexed array loads and element access.
+ */
 long c_index_load(const long *items, long index) { return items[index]; }
 
 long c_i64_array(const long items[], long index) { return items[index]; }

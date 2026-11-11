@@ -1,3 +1,4 @@
+/* Public and internal declarations for the Nytrix garbage collector. */
 #ifndef NYTRIX_RT_GC_H
 #define NYTRIX_RT_GC_H
 
@@ -14,8 +15,8 @@
 #define NYGC_NURSERY_SIZE (256 * 1024 * 1024)  /* 256 MB nursery */
 #define NYGC_TENURED_SIZE (1024 * 1024 * 1024) /* 1 GB tenured */
 #define NYGC_PROMOTION_AGE 3                   /* Promote after 3 collections */
-#define NYGC_DEFAULT_LOS_THRESHOLD                                             \
-  (1024 * 1024) /* 1 MB large-object cutoff */
+#define NYGC_DEFAULT_LOS_THRESHOLD (1024 * 1024) /* 1 MB large-object cutoff \
+                                                  */
 
 /* Object header flags */
 #define NYGC_MARKED (1 << 0)
@@ -132,6 +133,7 @@ int64_t nyGcAlloc(size_t size);
 int64_t nyGcAllocSlow(size_t size);
 
 /* Trigger collections */
+void nyGcSetFinalizer(int64_t obj, void (*finalizer)(int64_t));
 void nyGcCollect(void);
 void nyGcTriggerMinor(void);
 void nyGcTriggerMajor(void);
@@ -144,8 +146,8 @@ int64_t nyGcReadRoot(const int64_t *slot);
  * may collect. */
 void nyGcPushTempRoot(int64_t *slot);
 void nyGcPopTempRoot(void);
-#define NY_GC_PROTECT(slot)                                                    \
-  for (int ny_gc_protect_once = (nyGcPushTempRoot(&(slot)), 1);                \
+#define NY_GC_PROTECT(slot)                                           \
+  for (int ny_gc_protect_once = (nyGcPushTempRoot(&(slot)), 1);       \
        ny_gc_protect_once; nyGcPopTempRoot(), ny_gc_protect_once = 0)
 void nyGcWriteBarrier(int64_t *slot, int64_t value);
 

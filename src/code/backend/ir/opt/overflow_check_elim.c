@@ -200,6 +200,36 @@ static bool eliminate_const_overflow(nyr_func_t *f, const int *defs,
 }
 
 /*
+ * Decompose `v` as base + offset through one constant ADD/SUB (and copies).
+ * Used to recognise `x - 1` however constant folding spelled it.
+ */
+static void oce_base_offset(const nyr_func_t *f, const int *defs, int v,
+                            int *base, int64_t *offset) {
+  *base = v;
+  *offset = 0;
+  for (int depth = 0; depth < 4; ++depth) {
+    if (*base < 0 || *base >= f->next_value || defs[*base] < 0)
+      return;
+    const nyr_inst_t *d = &f->data[(size_t)defs[*base]];
+    int64_t c = 0;
+    if (d->op == NYIR_COPY) {
+      *base = d->a;
+    } else if (d->op == NYIR_ADD_I64 && nyr_const_i64(f, defs, d->b, &c)) {
+      *offset += c;
+      *base = d->a;
+    } else if (d->op == NYIR_ADD_I64 && nyr_const_i64(f, defs, d->a, &c)) {
+      *offset += c;
+      *base = d->b;
+    } else if (d->op == NYIR_SUB_I64 && nyr_const_i64(f, defs, d->b, &c)) {
+      *offset -= c;
+      *base = d->a;
+    } else {
+      return;
+    }
+  }
+}
+
+/*
  * Main overflow check elimination pass.
  * Uses range facts from SCCP and SCEV loop-invariant bounds.
  */
@@ -255,6 +285,8 @@ bool nyr_overflow_check_elim(nyr_func_t *f) {
         in->a < f->next_value && in->b >= 0 && in->b < f->next_value) {
       const nyr_range_t *ra = &facts[in->a].range;
       const nyr_range_t *rb = &facts[in->b].range;
+      if (ra->has_min && ra->has_max && ra->min >= 0 && ra->max <= INT32_MAX)
+        in->flags |= NYIR_INST_F_DIVIDEND_U31;
       if (ra->has_min && ra->has_max && rb->has_min && rb->has_max) {
         /*
          * Division traps on zero divisors AND on INT64_MIN / -1.
@@ -272,6 +304,101 @@ bool nyr_overflow_check_elim(nyr_func_t *f) {
           continue;
         }
       }
+    }
+  }
+
+  /*
+   * Triangular-number halving. The induction-variable closed form computes
+   * T*(T-1)/2 as (T>>1) * (T-1 + (T&1)) so the product never overflows. When
+   * range facts bound T to [0, 2^31], T*(T-1) < 2^62 cannot wrap, and the
+   * shorter (T*(T-1)) >> 1 is exact:
+   *
+   *   half = sar T, 1 ; bit = and T, 1 ; pf = add Tm1, bit ; r = mul half, pf
+   *     ==>  half = mul T, Tm1 ; ... ; r = sar half, 1
+   *
+   * `half` keeps its position (and is used only by `r`), so Tm1 is already
+   * defined there; `bit` and `pf` become dead.
+   */
+  {
+    int *uses = calloc((size_t)f->next_value, sizeof(*uses));
+    if (uses) {
+      for (size_t i = 0; i < f->len; ++i) {
+        const nyr_inst_t *u = &f->data[i];
+        int ops[6] = {u->a, u->b, u->c, u->d, u->e, u->f};
+        for (int k = 0; k < 6; ++k)
+          if (ops[k] >= 0 && ops[k] < f->next_value)
+            ++uses[ops[k]];
+        for (size_t k = 0; k < u->phi_incoming_len; ++k) {
+          int v = u->phi_incoming[k].value;
+          if (v >= 0 && v < f->next_value)
+            ++uses[v];
+        }
+        for (size_t k = 0; k < u->extra_args_len; ++k) {
+          int v = u->extra_args[k];
+          if (v >= 0 && v < f->next_value)
+            ++uses[v];
+        }
+      }
+      for (size_t i = 0; i < f->len; ++i) {
+        nyr_inst_t *r = &f->data[i];
+        if (r->op != NYIR_MUL_I64 || r->a < 0 || r->b < 0 ||
+            r->a >= f->next_value || r->b >= f->next_value ||
+            defs[r->a] < 0 || defs[r->b] < 0)
+          continue;
+        nyr_inst_t *half = &f->data[(size_t)defs[r->a]];
+        nyr_inst_t *pf = &f->data[(size_t)defs[r->b]];
+        if (half->op != NYIR_SAR_I64 || pf->op != NYIR_ADD_I64 ||
+            uses[r->a] != 1 || (size_t)defs[r->a] >= i ||
+            (size_t)defs[r->b] >= i)
+          continue;
+        int t = half->a;
+        int one = half->b;
+        int64_t shift = 0;
+        if (t < 0 || t >= f->next_value || one < 0 || one >= f->next_value ||
+            !nyr_const_i64(f, defs, one, &shift) || shift != 1)
+          continue;
+        const nyr_range_t *rt = &facts[t].range;
+        if (!rt->has_min || !rt->has_max || rt->min < 0 ||
+            rt->max > ((int64_t)1 << 31))
+          continue;
+        /* pf = tm1 + (t & 1), tm1 == t - 1 (any spelling) */
+        int tm1 = -1, bitv = -1;
+        int t_base = 0;
+        int64_t t_off = 0;
+        oce_base_offset(f, defs, t, &t_base, &t_off);
+        for (int side = 0; side < 2 && tm1 < 0; ++side) {
+          int x = side ? pf->b : pf->a;
+          int y = side ? pf->a : pf->b;
+          if (x < 0 || y < 0 || x >= f->next_value || y >= f->next_value ||
+              defs[x] < 0 || defs[y] < 0)
+            continue;
+          const nyr_inst_t *dy = &f->data[(size_t)defs[y]];
+          int64_t c1 = 0;
+          int x_base = 0;
+          int64_t x_off = 0;
+          oce_base_offset(f, defs, x, &x_base, &x_off);
+          if (x_base == t_base && x_off == t_off - 1 &&
+              dy->op == NYIR_AND_I64 &&
+              ((dy->a == t && nyr_const_i64(f, defs, dy->b, &c1) && c1 == 1) ||
+               (dy->b == t && nyr_const_i64(f, defs, dy->a, &c1) && c1 == 1))) {
+            tm1 = x;
+            bitv = y;
+          }
+        }
+        if (tm1 < 0 || bitv < 0 || (size_t)defs[tm1] >= (size_t)defs[r->a])
+          continue;
+        nyr_oce_trace(f, i, "halve triangular product",
+                      "T in [0,2^31]: (T*(T-1))>>1 is exact");
+        half->op = NYIR_MUL_I64;
+        half->b = tm1;
+        half->flags |= NYIR_INST_F_NO_OVERFLOW;
+        nyr_clear_derived_facts(half);
+        r->op = NYIR_SAR_I64;
+        r->b = one;
+        r->flags &= ~(NYIR_INST_F_NARROW32 | NYIR_INST_F_NO_OVERFLOW);
+        nyr_clear_derived_facts(r);
+      }
+      free(uses);
     }
   }
 

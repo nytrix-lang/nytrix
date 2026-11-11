@@ -61,7 +61,7 @@ typedef struct {
   size_t len;
   size_t cap;
 } _rpdv;
-extern _rpdv g_defer_stack;
+extern __thread _rpdv g_defer_stack;
 #endif
 typedef struct {
   jmp_buf *env;
@@ -72,7 +72,7 @@ typedef struct {
   size_t len;
   size_t cap;
 } _rpev;
-extern _rpev g_panic_env_stack;
+extern __thread _rpev g_panic_env_stack;
 
 #ifndef PATH_MAX
 #define PATH_MAX 4096
@@ -108,7 +108,8 @@ static char *g_std_src_cached_persistent = NULL;
 static char *g_repl_last_expand_source = NULL;
 static char *g_repl_last_expand_name = NULL;
 /*
- * Last snippet the user actually ran, and the file it came from when :load/:run.
+ * Last snippet the user actually ran, and the file it came from when
+ * :load/:run.
  */
 static char *g_repl_last_run_source = NULL;
 static char *g_repl_last_run_path = NULL;
@@ -3733,10 +3734,10 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
           last_status = 1;
         } else if (changed && edited && *edited) {
           repl_set_last_run(edited, edit_path);
-          repl_set_last_expand_source(edited, edit_path ? edit_path
-                                                        : "<repl:edit>");
-          last_status = repl_eval_snippet(edited, 1, NULL, std_mode, tty_in,
-                                          &docs, 0, 0);
+          repl_set_last_expand_source(edited,
+                                      edit_path ? edit_path : "<repl:edit>");
+          last_status =
+              repl_eval_snippet(edited, 1, NULL, std_mode, tty_in, &docs, 0, 0);
           repl_restore_terminal_state();
         }
         free(edited);
@@ -3899,9 +3900,9 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
                   repl_load_snapshot_image(p, src, std_mode, &docs) == 0 ? 0
                                                                          : 1;
             } else {
-            repl_set_last_expand_source(src, p);
-            repl_set_last_run(src, p);
-            repl_append_user_source(src);
+              repl_set_last_expand_source(src, p);
+              repl_set_last_run(src, p);
+              repl_append_user_source(src);
               printf("Loaded %s (%zu bytes)\n", p, strlen(src));
               parser_t ps;
               parser_init(&ps, src, p);

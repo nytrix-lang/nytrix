@@ -155,6 +155,47 @@ bool nyr_type_map_init(nyr_type_map_t *map, const nyr_func_t *nyir,
     nyr_type_map_free(map);
     return false;
   }
+
+  size_t param_count =
+      nyir->param_count < local_count ? nyir->param_count : local_count;
+  bool has_typed_values = false;
+  for (size_t i = 0; i < param_count; ++i)
+    has_typed_values |= nyir->param_types[i] == NYIR_PARAM_F64 ||
+                        nyir->param_types[i] == NYIR_PARAM_F32;
+  for (size_t i = 0; i < nyir->len && !has_typed_values; ++i) {
+    const nyr_inst_t *in = &nyir->data[i];
+    has_typed_values =
+        in->scalar_class == NYIR_SCALAR_F64 ||
+        in->scalar_class == NYIR_SCALAR_F32 || nyr_op_is_f64(in->op) ||
+        nyr_op_is_f32(in->op) || nyr_op_v128_i64(in->op) ||
+        nyr_op_v256_i64(in->op) || nyr_op_v256_f64(in->op) ||
+        nyr_op_v128_f32(in->op) ||
+        (in->op == NYIR_CAPTURE_RET && in->imm >= 10 && in->imm <= 13);
+  }
+  if (!has_typed_values) {
+    if (!flag_count)
+      return true;
+    map->storage = calloc(flag_count, sizeof(bool));
+    if (!map->storage) {
+      nyr_type_map_free(map);
+      return false;
+    }
+    /*
+     * Untyped maps contain no set bits. Keep every indexed view valid while
+     * sharing one zeroed value/local region instead of allocating and clearing
+     * fourteen independent flag arrays for every ordinary scalar function.
+     */
+    bool *value_flags = map->storage;
+    bool *local_flags = map->storage + map->value_count;
+    map->value_f64 = map->value_f32 = map->value_v128_i64 =
+        map->value_v256_i64 = map->value_v128_f64 = map->value_v128_f32 =
+            map->value_v256_f64 = value_flags;
+    map->local_f64 = map->local_f32 = map->local_v128_i64 =
+        map->local_v256_i64 = map->local_v128_f64 = map->local_v128_f32 =
+            map->local_v256_f64 = local_flags;
+    return true;
+  }
+
   if (flag_count) {
     map->storage = calloc(flag_count * 14, sizeof(bool));
     if (!map->storage) {
@@ -185,25 +226,6 @@ bool nyr_type_map_init(nyr_type_map_t *map, const nyr_func_t *nyir,
     nyr_type_map_free(map);
     return false;
   }
-
-  size_t param_count =
-      nyir->param_count < local_count ? nyir->param_count : local_count;
-  bool has_typed_values = false;
-  for (size_t i = 0; i < param_count; ++i)
-    has_typed_values |= nyir->param_types[i] == NYIR_PARAM_F64 ||
-                        nyir->param_types[i] == NYIR_PARAM_F32;
-  for (size_t i = 0; i < nyir->len && !has_typed_values; ++i) {
-    const nyr_inst_t *in = &nyir->data[i];
-    has_typed_values =
-        in->scalar_class == NYIR_SCALAR_F64 ||
-        in->scalar_class == NYIR_SCALAR_F32 || nyr_op_is_f64(in->op) ||
-        nyr_op_is_f32(in->op) || nyr_op_v128_i64(in->op) ||
-        nyr_op_v256_i64(in->op) || nyr_op_v256_f64(in->op) ||
-        nyr_op_v128_f32(in->op) ||
-        (in->op == NYIR_CAPTURE_RET && in->imm >= 10 && in->imm <= 13);
-  }
-  if (!has_typed_values)
-    return true;
 
   size_t node_count = flag_count;
   if (node_count > SIZE_MAX / (sizeof(size_t) + sizeof(unsigned char))) {
@@ -1483,28 +1505,29 @@ static void nyr_normalize_operands(nyr_inst_t *inst) {
     inst->f = -1;
     break;
   case NYIR_INLINE_ASM:
-    if (inst->imm == -140 || inst->imm == -141 || inst->imm == -142)
+    if (inst->imm == -140 || inst->imm == -141 || inst->imm == -142 ||
+        inst->imm == -177 || inst->imm == -178 || inst->imm == -179)
       break;
     if (inst->imm != -3 && inst->imm != -5 && inst->imm != -6 &&
-        inst->imm != -154 && inst->imm != -7 && inst->imm != -8 &&
-        inst->imm != -10 && inst->imm != -11 && inst->imm != -12 &&
-        inst->imm != -155 && inst->imm != -146 && inst->imm != -147 &&
-        inst->imm != -14 && inst->imm != -145 && inst->imm != -16 &&
-        inst->imm != -20 && inst->imm != -21 && inst->imm != -22 &&
-        inst->imm != -23 && inst->imm != -25 && inst->imm != -106 &&
-        inst->imm != -111 && inst->imm != -153 && inst->imm != -116 &&
-        inst->imm != -118 && inst->imm != -119 && inst->imm != -125 &&
-        inst->imm != -126 && inst->imm != -127 && inst->imm != -130 &&
-        inst->imm != -131 && inst->imm != -135 && inst->imm != -136 &&
-        inst->imm != -138 && inst->imm != -27 && inst->imm != -28 &&
-        inst->imm != -29 && inst->imm != -100 && inst->imm != -30 &&
-        inst->imm != -31 && inst->imm != -33 && inst->imm != -34 &&
-        inst->imm != -47 && inst->imm != -50 && inst->imm != -77 &&
-        inst->imm != -156 && inst->imm != -160 && inst->imm != -162 &&
-        inst->imm != -164 && inst->imm != -165 && inst->imm != -166 &&
-        inst->imm != -168 && inst->imm != -81 && inst->imm != -82 &&
-        inst->imm != -84 && inst->imm != -176 &&
-        (inst->imm < -46 || inst->imm > -40))
+        inst->imm != -157 && inst->imm != -181 && inst->imm != -154 &&
+        inst->imm != -7 && inst->imm != -8 && inst->imm != -10 &&
+        inst->imm != -11 && inst->imm != -12 && inst->imm != -155 &&
+        inst->imm != -146 && inst->imm != -147 && inst->imm != -14 &&
+        inst->imm != -145 && inst->imm != -16 && inst->imm != -20 &&
+        inst->imm != -21 && inst->imm != -22 && inst->imm != -23 &&
+        inst->imm != -25 && inst->imm != -106 && inst->imm != -111 &&
+        inst->imm != -153 && inst->imm != -116 && inst->imm != -118 &&
+        inst->imm != -119 && inst->imm != -125 && inst->imm != -126 &&
+        inst->imm != -127 && inst->imm != -130 && inst->imm != -131 &&
+        inst->imm != -135 && inst->imm != -136 && inst->imm != -138 &&
+        inst->imm != -27 && inst->imm != -28 && inst->imm != -29 &&
+        inst->imm != -100 && inst->imm != -30 && inst->imm != -31 &&
+        inst->imm != -33 && inst->imm != -34 && inst->imm != -47 &&
+        inst->imm != -50 && inst->imm != -77 && inst->imm != -156 &&
+        inst->imm != -160 && inst->imm != -162 && inst->imm != -164 &&
+        inst->imm != -165 && inst->imm != -166 && inst->imm != -168 &&
+        inst->imm != -81 && inst->imm != -82 && inst->imm != -84 &&
+        inst->imm != -176 && (inst->imm < -46 || inst->imm > -40))
       inst->b = -1;
     if (inst->imm != -5 && inst->imm != -11 && inst->imm != -12 &&
         inst->imm != -145 && inst->imm != -155 && inst->imm != -160 &&

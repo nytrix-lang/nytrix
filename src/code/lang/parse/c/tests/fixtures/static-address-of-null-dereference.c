@@ -1,3 +1,6 @@
+/*
+ * C parser fixture for static addresses involving a null-base member access.
+ */
 struct sysrq_operation;
 
 #define NULL_OBJECT (*(const struct sysrq_operation *)((void *)0))

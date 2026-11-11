@@ -1,3 +1,6 @@
+/*
+ * C parser fixture for sizeof applied to structure array members.
+ */
 struct console_line {
   char devname[64];
   char name[32];

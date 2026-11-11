@@ -1,17 +1,25 @@
+/*
+ * Runtime harness for compare-and-exchange inline assembly fixtures.
+ */
 int cmpxchg_asm(int *, int, int);
 unsigned long cmpxchg_u32_asm(unsigned int *, unsigned int, unsigned int);
 void *cmpxchg_pointer_asm(void **, void *, void *);
 unsigned long long cmpxchg_qword_classic_asm(unsigned long long *,
                                              unsigned long long,
                                              unsigned long long);
-struct cmpxchg_object { unsigned long value; };
-struct cmpxchg_object *cmpxchg_pointer_null_expected_asm(
-    struct cmpxchg_object **, struct cmpxchg_object *);
+struct cmpxchg_object {
+  unsigned long value;
+};
+struct cmpxchg_object *
+cmpxchg_pointer_null_expected_asm(struct cmpxchg_object **,
+                                  struct cmpxchg_object *);
 int main(void) {
   static int first, second, third;
   int value = 5;
-  if (cmpxchg_asm(&value, 5, 9) != 5 || value != 9) return 1;
-  if (cmpxchg_asm(&value, 7, 11) != 1009 || value != 9) return 2;
+  if (cmpxchg_asm(&value, 5, 9) != 5 || value != 9)
+    return 1;
+  if (cmpxchg_asm(&value, 7, 11) != 1009 || value != 9)
+    return 2;
   unsigned int wide = 0xf0000000U;
   if (cmpxchg_u32_asm(&wide, 0xf0000000U, 0xf0000001U) != 0xf0000000UL ||
       wide != 0xf0000001U)

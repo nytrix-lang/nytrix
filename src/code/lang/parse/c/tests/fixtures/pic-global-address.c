@@ -1,3 +1,7 @@
+/*
+ * Fixture: reference local and external globals under position-independent
+ * code.
+ */
 extern int nyc_pic_external;
 extern int nyc_pic_external_fn(void);
 static int nyc_pic_local = 17;

@@ -27,11 +27,14 @@ fn _clone_buffer(any b) dict {
 }
 
 fn _clone_buffers(list buffers) list {
-   mut out = list(buffers.len)
-   __list_set_len(out, buffers.len)
+   ;; `_clone_buffer` returns a typed `dict` (a raw payload pointer). Storing it
+   ;; with `__store_item_fast` skips the boxing a list slot needs, so every
+   ;; snapshot held unreadable buffers and undo/redo restored an empty file.
+   ;; `append` boxes the value.
+   mut out = []
    mut i = 0
    while i < buffers.len {
-      __store_item_fast(out, i, _clone_buffer(buffers.get(i, {})))
+      out = out.append(_clone_buffer(buffers.get(i, {})))
       i += 1
    }
    out
@@ -41,12 +44,14 @@ fn _clone_buffers(list buffers) list {
 fn snapshot(dict st) dict {
    {
       "buffers": _clone_buffers(st.get("buffers", [])),
-      "active": int(st.get("active", 0)),
-      "cursor_line": int(st.get("cursor_line", 0)),
-      "cursor_col": int(st.get("cursor_col", 0)),
+      ;; Raw ints stored in a dict literal read back as nil/0; box them the way
+      ;; core.clamp_cursor does for the cursor fields.
+      "active": __box_i64(int(st.get("active", 0))),
+      "cursor_line": __box_i64(int(st.get("cursor_line", 0))),
+      "cursor_col": __box_i64(int(st.get("cursor_col", 0))),
       "extra_cursors": clone(st.get("extra_cursors", [])),
       "multi_selects": clone(st.get("multi_selects", [])),
-      "scroll": int(st.get("scroll", 0)),
+      "scroll": __box_i64(int(st.get("scroll", 0))),
       "rail_w": float(st.get("rail_w", 250.0)),
    }
 }
@@ -62,20 +67,22 @@ fn _same(dict a, dict b) bool {
 
 fn _restore(dict st, dict snap) dict {
    st["buffers"] = _clone_buffers(snap.get("buffers", st.get("buffers", [])))
-   st["active"] = int(snap.get("active", 0))
-   st["cursor_line"] = int(snap.get("cursor_line", 0))
-   st["cursor_col"] = int(snap.get("cursor_col", 0))
+   st["active"] = __box_i64(int(snap.get("active", 0)))
+   st["cursor_line"] = __box_i64(int(snap.get("cursor_line", 0)))
+   st["cursor_col"] = __box_i64(int(snap.get("cursor_col", 0)))
    st["extra_cursors"] = clone(snap.get("extra_cursors", []))
    st["multi_selects"] = clone(snap.get("multi_selects", []))
-   st["scroll"] = int(snap.get("scroll", 0))
+   st["scroll"] = __box_i64(int(snap.get("scroll", 0)))
    st["rail_w"] = float(snap.get("rail_w", 250.0))
    st["sel_active"] = false
    st
 }
 
 ;; Returns the result of the `push` operation.
-fn push(dict hist, dict st) dict {
-   def snap = snapshot(st)
+fn push(dict hist, dict st) dict { _push_snapshot(hist, snapshot(st)) }
+
+;; Records an already-taken snapshot (the state before an edit).
+fn _push_snapshot(dict hist, dict snap) dict {
    mut undo = hist.get("undo", [])
    if undo.len > 0 && _same(undo.get(undo.len - 1), snap) { return hist }
    undo = undo.append(snap)
@@ -138,18 +145,22 @@ fn newline(dict hist, dict st) dict {
 
 ;; Returns the result of the `backspace` operation.
 fn backspace(dict hist, dict st) dict {
-   hist = push(hist, st)
+   def before = snapshot(st)
    if ed.selection_valid(st) { st = ed.delete_selection(st) }
    else { st = ed.backspace(st) }
-   _pack(hist, st)
+   ;; An edit that changed nothing (Backspace at the start of the buffer) must
+   ;; not add a phantom undo step or discard the redo stack.
+   if _same(before, snapshot(st)) { return _pack(hist, st) }
+   _pack(_push_snapshot(hist, before), st)
 }
 
 ;; Releases the char.
 fn delete_char(dict hist, dict st) dict {
-   hist = push(hist, st)
+   def before = snapshot(st)
    if ed.selection_valid(st) { st = ed.delete_selection(st) }
    else { st = ed.delete_char(st) }
-   _pack(hist, st)
+   if _same(before, snapshot(st)) { return _pack(hist, st) }
+   _pack(_push_snapshot(hist, before), st)
 }
 
 ;; Returns the result of the `cut_selection` operation.

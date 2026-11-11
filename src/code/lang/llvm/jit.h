@@ -1,3 +1,4 @@
+/* LLVM JIT symbol registration and execution interfaces for Ny code. */
 #ifndef NY_JIT_SYMBOLS_H
 #define NY_JIT_SYMBOLS_H
 

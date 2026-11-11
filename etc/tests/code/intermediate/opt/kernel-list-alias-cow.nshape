@@ -44,9 +44,10 @@ fn run() int {
          j += 1
       }
       def expected = 201999 * n + 4 * n * n
-      if sum != expected {
-         assert(false, "copy-on-write length at growth boundary")
-      }
+      assert(sum == expected,
+         "copy-on-write length at growth boundary: n=" + to_str(n) +
+         " sum=" + to_str(sum) + " expected=" + to_str(expected) +
+         " xs_len=" + to_str(xs.len()) + " alias_len=" + to_str(alias.len()))
       checksum += sum
       n += 1
    }

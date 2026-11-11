@@ -969,20 +969,21 @@ static bool hm_unify(ny_hm_state_t *hm, ny_hm_type_t *want, ny_hm_type_t *got,
    * value at trace tiers: count them and keep the trace for constraints
    * that actually say something (different shapes, any ~ T).
    */
+  bool trace_type_detail = hm->trace_type_detail;
   bool routine_std_default =
-      ny_dbg_is_enabled(NY_DBG_DEEP) &&
+      trace_type_detail && hm->trace_deep &&
       (tok.module_features & NY_MODULE_FEATURE_STDLIB) != 0 && context &&
       strcmp(context, "default parameter") == 0;
   if (routine_std_default)
     hm->debug_std_default_constraints_suppressed++;
-  char *lhs_s = hm_type_string(want);
-  char *rhs_s = hm_type_string(got);
-  bool trivial = lhs_s && rhs_s && strcmp(lhs_s, rhs_s) == 0 &&
+  char *lhs_s = trace_type_detail ? hm_type_string(want) : NULL;
+  char *rhs_s = trace_type_detail ? hm_type_string(got) : NULL;
+  bool trivial = trace_type_detail && lhs_s && rhs_s &&
+                 strcmp(lhs_s, rhs_s) == 0 &&
                  strcmp(context ? context : "", "default parameter") == 0;
   if (trivial)
     hm->debug_std_default_constraints_suppressed++;
-  if (ny_dbg_is_enabled(NY_DBG_TYPE_DETAIL) && !routine_std_default &&
-      !trivial) {
+  if (trace_type_detail && !routine_std_default && !trivial) {
     char detail[768];
     snprintf(detail, sizeof(detail), "%s~%s@%u:%u %s", lhs_s ? lhs_s : "?",
              rhs_s ? rhs_s : "?", tok.line, tok.col,
@@ -1000,7 +1001,7 @@ static bool hm_unify(ny_hm_state_t *hm, ny_hm_type_t *want, ny_hm_type_t *got,
       hm_unify_diag(hm, tok, "hm-occurs-check", context, want, got);
       return false;
     }
-    if (ny_dbg_is_enabled(NY_DBG_TYPE_DETAIL) && !routine_std_default) {
+    if (trace_type_detail && !routine_std_default) {
       char *rhs = hm_type_string(got);
       char detail[512];
       snprintf(detail, sizeof(detail), "bind 'a%d := %s (%s)", want->id,
@@ -1253,25 +1254,35 @@ static ny_hm_type_t *hm_instantiate(ny_hm_state_t *hm, ny_hm_type_t *scheme) {
   return hm_type_clone_inst(hm, scheme, ids, fresh, &len, 128);
 }
 
+static ny_hm_env_entry_t *
+hm_env_entry_ctx(ny_hm_env_list *env, const char *name, uint32_t syntax_ctx);
+
+static void hm_env_init(ny_hm_state_t *hm, ny_hm_env_list *env) {
+  *env = (ny_hm_env_list){0};
+  env->generation = ++hm->next_env_generation;
+  if (!env->generation)
+    env->generation = ++hm->next_env_generation;
+  env->lookup_cache = hm->env_lookup_cache;
+}
+
 static void hm_env_set_ctx(ny_hm_env_list *env, const char *name,
                            uint32_t syntax_ctx, ny_hm_type_t *type) {
   if (!env || !name || !*name)
     return;
-  for (size_t i = env->len; i > 0; --i) {
-    ny_hm_env_entry_t *e = &env->data[i - 1];
-    if (e->syntax_ctx == syntax_ctx && e->name && strcmp(e->name, name) == 0) {
-      e->type = type;
-      /*
-       * A rebinding replaces the dependent-pair annotation as well.
-       */
-      e->sigma_decl = NULL;
-      e->sigma_index_literal = false;
-      e->sigma_index_value = 0;
-      return;
-    }
+  ny_hm_env_entry_t *e = hm_env_entry_ctx(env, name, syntax_ctx);
+  if (e) {
+    e->type = type;
+    /*
+     * A rebinding replaces the dependent-pair annotation as well.
+     */
+    e->sigma_decl = NULL;
+    e->sigma_index_literal = false;
+    e->sigma_index_value = 0;
+    return;
   }
-  ny_hm_env_entry_t e = {.name = name, .syntax_ctx = syntax_ctx, .type = type};
-  vec_push(env, e);
+  ny_hm_env_entry_t new_entry = {
+      .name = name, .syntax_ctx = syntax_ctx, .type = type};
+  vec_push(env, new_entry);
 }
 
 static void hm_env_push_ctx(ny_hm_env_list *env, const char *name,
@@ -1304,28 +1315,83 @@ static inline bool hm_env_entry_matches(ny_hm_env_entry_t *e, const char *name,
 
 static ny_hm_env_entry_t *
 hm_env_entry_ctx(ny_hm_env_list *env, const char *name, uint32_t syntax_ctx) {
-  if (!name)
+  if (!env || !name)
     return NULL;
   uint32_t name_hash = hm_name_hash(name);
-  for (size_t i = env ? env->len : 0; i > 0; --i) {
-    ny_hm_env_entry_t *e = &env->data[i - 1];
-    if (hm_env_entry_matches(e, name, name_hash, syntax_ctx))
-      return e;
+  uint64_t cache_key = ((uintptr_t)env >> 4) ^ env->generation ^
+                       ((uint64_t)name_hash << 32) ^ syntax_ctx;
+  cache_key ^= cache_key >> 30;
+  cache_key *= 0xbf58476d1ce4e5b9ull;
+  cache_key ^= cache_key >> 27;
+  size_t cache_slot = (cache_key ^ (cache_key >> 31)) & 127u;
+  ny_hm_env_lookup_cache_entry_t *cached =
+      env->lookup_cache ? &env->lookup_cache[cache_slot] : NULL;
+  if (cached && cached->env == env && cached->generation == env->generation &&
+      cached->name_hash == name_hash && cached->syntax_ctx == syntax_ctx &&
+      cached->len <= env->len && cached->index <= cached->len) {
+    if (cached->index == cached->len) {
+      for (size_t i = env->len; i > cached->len; --i) {
+        ny_hm_env_entry_t *appended = &env->data[i - 1u];
+        if (hm_env_entry_matches(appended, name, cached->name_hash,
+                                 syntax_ctx)) {
+          cached->len = env->len;
+          cached->index = i - 1u;
+          return appended;
+        }
+      }
+      cached->len = env->len;
+      cached->index = env->len;
+      return NULL;
+    }
+    ny_hm_env_entry_t *entry = &env->data[cached->index];
+    if (hm_env_entry_matches(entry, name, name_hash, syntax_ctx)) {
+      for (size_t i = env->len; i > cached->len; --i) {
+        ny_hm_env_entry_t *appended = &env->data[i - 1u];
+        if (hm_env_entry_matches(appended, name, name_hash, syntax_ctx)) {
+          cached->len = env->len;
+          cached->index = i - 1u;
+          return appended;
+        }
+      }
+      cached->len = env->len;
+      return entry;
+    }
+  }
+  for (size_t i = env->len; i > 0; --i) {
+    ny_hm_env_entry_t *e = &env->data[i - 1u];
+    if (hm_env_entry_matches(e, name, name_hash, syntax_ctx)) {
+      if (cached) {
+        *cached = (ny_hm_env_lookup_cache_entry_t){
+            .env = env,
+            .generation = env->generation,
+            .name_hash = name_hash,
+            .syntax_ctx = syntax_ctx,
+            .len = env->len,
+            .index = i - 1u,
+        };
+        return e;
+      }
+    }
+  }
+  if (cached) {
+    *cached = (ny_hm_env_lookup_cache_entry_t){
+        .env = env,
+        .generation = env->generation,
+        .name_hash = name_hash,
+        .syntax_ctx = syntax_ctx,
+        .len = env->len,
+        .index = env->len,
+    };
   }
   return NULL;
 }
 
 static ssize_t hm_env_entry_index_ctx(ny_hm_env_list *env, const char *name,
                                       uint32_t syntax_ctx) {
-  if (!name)
+  if (!env || !name)
     return -1;
-  uint32_t name_hash = hm_name_hash(name);
-  for (size_t i = env ? env->len : 0; i > 0; --i) {
-    ny_hm_env_entry_t *e = &env->data[i - 1];
-    if (hm_env_entry_matches(e, name, name_hash, syntax_ctx))
-      return (ssize_t)(i - 1);
-  }
-  return -1;
+  ny_hm_env_entry_t *entry = hm_env_entry_ctx(env, name, syntax_ctx);
+  return entry ? (ssize_t)(entry - env->data) : -1;
 }
 
 static bool hm_is_mutable_binding(ny_hm_state_t *hm, ny_hm_env_list *env,
@@ -1375,9 +1441,8 @@ static ny_hm_type_t *hm_parse_type_name(ny_hm_state_t *hm, const char *raw,
                                         const char *self_name);
 static char *hm_type_string(ny_hm_type_t *t);
 
-static ny_hm_type_t *hm_env_get_ctx(ny_hm_state_t *hm, ny_hm_env_list *env,
-                                    const char *name, uint32_t syntax_ctx) {
-  (void)hm;
+static ny_hm_type_t *hm_env_get_ctx(ny_hm_env_list *env, const char *name,
+                                    uint32_t syntax_ctx) {
   ny_hm_env_entry_t *entry = hm_env_entry_ctx(env, name, syntax_ctx);
   return entry ? entry->type : NULL;
 }
@@ -1420,7 +1485,7 @@ static bool hm_expr_has_refinement_type(ny_hm_state_t *hm, ny_hm_env_list *env,
       !hm_lookup_refine_stmt(hm, expected))
     return false;
   ny_hm_type_t *actual =
-      hm_env_get_ctx(hm, env, expr->as.ident.name, expr->as.ident.syntax_ctx);
+      hm_env_get_ctx(env, expr->as.ident.name, expr->as.ident.syntax_ctx);
   char *actual_name = hm_type_string(actual);
   bool matches = actual_name && strcmp(actual_name, expected) == 0;
   free(actual_name);
@@ -3381,8 +3446,8 @@ static bool hm_refinement_list_concat_assignment(ny_hm_state_t *hm,
   const expr_t *suffix = concat->as.binary.right;
   bool suffix_is_list = suffix && suffix->kind == NY_E_LIST;
   if (suffix && suffix->kind == NY_E_IDENT && suffix->as.ident.name) {
-    ny_hm_type_t *suffix_type = hm_env_get_ctx(hm, env, suffix->as.ident.name,
-                                               suffix->as.ident.syntax_ctx);
+    ny_hm_type_t *suffix_type =
+        hm_env_get_ctx(env, suffix->as.ident.name, suffix->as.ident.syntax_ctx);
     suffix_type = hm_prune(suffix_type);
     suffix_is_list = suffix_type && suffix_type->kind == NY_HM_LIST;
   }
@@ -4425,7 +4490,7 @@ static bool hm_resolve_module_expr_path(ny_hm_state_t *hm, ny_hm_env_list *env,
    * from unrelated modules in the flattened program.
    */
   ny_hm_type_t *root_type =
-      hm_env_get_ctx(hm, env, root, root_ident->as.ident.syntax_ctx);
+      hm_env_get_ctx(env, root, root_ident->as.ident.syntax_ctx);
   if (root_type &&
       (!hm_is_any(root_type) || !hm_declares_inline_module(hm, root))) {
     /*
@@ -4471,7 +4536,7 @@ static bool hm_member_root_is_unresolved_ident(ny_hm_state_t *hm,
     return false;
   const char *root = root_ident->as.ident.name;
   ny_hm_type_t *root_type =
-      hm_env_get_ctx(hm, env, root, root_ident->as.ident.syntax_ctx);
+      hm_env_get_ctx(env, root, root_ident->as.ident.syntax_ctx);
   /*
    * A lexical `any` binding is still a value.  Treating it as an unresolved
    * module name skips dynamic-member diagnostics in strict mode.
@@ -4989,7 +5054,8 @@ static void hm_infer_stmt(ny_hm_state_t *hm, ny_hm_env_list *env, stmt_t *s,
 static void hm_infer_stmt_mode(ny_hm_state_t *hm, ny_hm_env_list *env,
                                stmt_t *s, const char *self_name,
                                ny_hm_type_t *ret, bool allow_tail_expr);
-static void hm_env_clone(ny_hm_env_list *dst, const ny_hm_env_list *src);
+static void hm_env_clone(ny_hm_state_t *hm, ny_hm_env_list *dst,
+                         const ny_hm_env_list *src);
 
 static ny_hm_type_t *hm_infer_comptime_expr(ny_hm_state_t *hm,
                                             ny_hm_env_list *env, expr_t *e,
@@ -5011,7 +5077,7 @@ static ny_hm_type_t *hm_infer_comptime_expr(ny_hm_state_t *hm,
       return hm_parse_type_name(hm, "int", self_name);
   }
   ny_hm_env_list local;
-  hm_env_clone(&local, env);
+  hm_env_clone(hm, &local, env);
   ny_hm_type_t *ret = hm_var(hm);
   int saved_depth = hm->comptime_depth;
   size_t saved_outer_len = hm->comptime_outer_env_len;
@@ -5041,10 +5107,30 @@ static ny_hm_type_t *hm_infer_comptime_expr(ny_hm_state_t *hm,
   return out;
 }
 
-static void hm_env_clone(ny_hm_env_list *dst, const ny_hm_env_list *src) {
-  vec_init(dst);
-  for (size_t i = 0; src && i < src->len; ++i)
-    vec_push(dst, src->data[i]);
+static void hm_env_clone(ny_hm_state_t *hm, ny_hm_env_list *dst,
+                         const ny_hm_env_list *src) {
+  hm_env_init(hm, dst);
+  if (src && src->len) {
+    vec_reserve(dst, src->len);
+    memcpy(dst->data, src->data, src->len * sizeof(*src->data));
+    dst->len = src->len;
+  }
+}
+
+static void hm_env_clone_reuse(ny_hm_state_t *hm, ny_hm_env_list *dst,
+                               const ny_hm_env_list *src) {
+  if (!hm || !dst)
+    return;
+  dst->len = 0;
+  dst->generation = ++hm->next_env_generation;
+  if (!dst->generation)
+    dst->generation = ++hm->next_env_generation;
+  dst->lookup_cache = hm->env_lookup_cache;
+  if (src && src->len) {
+    vec_reserve(dst, src->len);
+    memcpy(dst->data, src->data, src->len * sizeof(*src->data));
+    dst->len = src->len;
+  }
 }
 
 static bool hm_type_name_allows_dynamic_literal(const char *type_name) {
@@ -5948,7 +6034,7 @@ static ny_hm_type_t *hm_infer_lambda(ny_hm_state_t *hm, ny_hm_env_list *env,
     return ft;
   ft->parameters = &e->as.lambda.params;
   ny_hm_env_list local;
-  hm_env_clone(&local, env);
+  hm_env_clone(hm, &local, env);
   bool explicit_type = e->as.lambda.return_type != NULL;
   for (size_t i = 0; i < e->as.lambda.params.len; ++i) {
     param_t *p = &e->as.lambda.params.data[i];
@@ -6134,8 +6220,8 @@ hm_call_function_type(ny_hm_state_t *hm, ny_hm_env_list *env,
         "at most the declared parameter count", "too many arguments", "call",
         "the call supplies more positional arguments than the callable accepts",
         "remove the extra arguments or pass them as a collection",
-        "too many arguments: expected at most %zu, got %zu",
-        callee_t->args.len, given);
+        "too many arguments: expected at most %zu, got %zu", callee_t->args.len,
+        given);
   } else if (given < minimum) {
     hm_unify_diag(hm, tok, "hm-arity-mismatch",
                   context ? context : "function call", callee_t, hm_any(hm));
@@ -7120,7 +7206,7 @@ static ny_hm_type_t *hm_infer_expr_impl(ny_hm_state_t *hm, ny_hm_env_list *env,
                      e->as.ident.name);
     }
     ny_hm_type_t *t =
-        hm_env_get_ctx(hm, env, e->as.ident.name, e->as.ident.syntax_ctx);
+        hm_env_get_ctx(env, e->as.ident.name, e->as.ident.syntax_ctx);
     if (t)
       return t;
     const char *global_type = tp_lookup_global_type(
@@ -7301,7 +7387,7 @@ static ny_hm_type_t *hm_infer_expr_impl(ny_hm_state_t *hm, ny_hm_env_list *env,
         }
       }
       ny_hm_type_t *local =
-          hm_env_get_ctx(hm, env, name, named_callee->as.ident.syntax_ctx);
+          hm_env_get_ctx(env, name, named_callee->as.ident.syntax_ctx);
       /*
        * Module-level VALUES from every compiled module share this
        * environment, so a bare call whose name collides with a module-level
@@ -7438,7 +7524,7 @@ static ny_hm_type_t *hm_infer_expr_impl(ny_hm_state_t *hm, ny_hm_env_list *env,
         e->as.memcall.target->as.ident.name && e->as.memcall.name) {
       const char *target_name = e->as.memcall.target->as.ident.name;
       ny_hm_type_t *root_type = hm_env_get_ctx(
-          hm, env, target_name, e->as.memcall.target->as.ident.syntax_ctx);
+          env, target_name, e->as.memcall.target->as.ident.syntax_ctx);
       if (!root_type && hm && hm->ctx && hm->ctx->cg) {
         const char *global_type =
             tp_lookup_global_type(hm->ctx->cg, target_name);
@@ -7525,7 +7611,7 @@ static ny_hm_type_t *hm_infer_expr_impl(ny_hm_state_t *hm, ny_hm_env_list *env,
     if (e->as.member.target && e->as.member.name) {
       if (e->as.member.target->kind == NY_E_IDENT &&
           e->as.member.target->as.ident.name &&
-          !hm_env_get_ctx(hm, env, e->as.member.target->as.ident.name,
+          !hm_env_get_ctx(env, e->as.member.target->as.ident.name,
                           e->as.member.target->as.ident.syntax_ctx)) {
         const char *module_member = tp_lookup_module_alias_member_type(
             hm && hm->ctx ? hm->ctx->cg : NULL,
@@ -7573,7 +7659,7 @@ static ny_hm_type_t *hm_infer_expr_impl(ny_hm_state_t *hm, ny_hm_env_list *env,
         return hm_any(hm);
       if (e->as.member.target->kind == NY_E_IDENT &&
           e->as.member.target->as.ident.name &&
-          !hm_env_get_ctx(hm, env, e->as.member.target->as.ident.name,
+          !hm_env_get_ctx(env, e->as.member.target->as.ident.name,
                           e->as.member.target->as.ident.syntax_ctx) &&
           (tp_module_alias_member_exists(hm && hm->ctx ? hm->ctx->cg : NULL,
                                          e->as.member.target->as.ident.name,
@@ -7915,7 +8001,7 @@ static ny_hm_type_t *hm_infer_expr_impl(ny_hm_state_t *hm, ny_hm_env_list *env,
                : hm_name(hm, "any");
   case NY_E_EXISTS: {
     ny_hm_env_list local;
-    hm_env_clone(&local, env);
+    hm_env_clone(hm, &local, env);
     if (e->as.exists.var)
       hm_env_set_ctx(&local, e->as.exists.var, e->as.exists.syntax_ctx,
                      hm_name(hm, "int"));
@@ -8137,7 +8223,8 @@ static size_t hm_method_hash(const char *s) {
 }
 
 static int32_t hm_method_first(ny_hm_state_t *hm, const char *method) {
-  if (hm_method_index.hm != hm || hm_method_index.indexed_len != hm->schemes.len) {
+  if (hm_method_index.hm != hm ||
+      hm_method_index.indexed_len != hm->schemes.len) {
     size_t buckets = 64;
     while (buckets < hm->schemes.len * 2)
       buckets <<= 1;
@@ -8540,8 +8627,8 @@ static void hm_desugar_partial_call(ny_hm_state_t *hm, ny_hm_env_list *env,
   if (callee->kind == NY_E_CALL && callee->as.call.callee &&
       callee->as.call.callee->kind == NY_E_IDENT) {
     const char *name = callee->as.call.callee->as.ident.name;
-    ny_hm_type_t *shadow = hm_env_get_ctx(
-        hm, env, name, callee->as.call.callee->as.ident.syntax_ctx);
+    ny_hm_type_t *shadow =
+        hm_env_get_ctx(env, name, callee->as.call.callee->as.ident.syntax_ctx);
     if (!shadow)
       hm_persist_named_call_target(hm, callee, name, self_name);
     ny_hm_scheme_t *direct =
@@ -8578,8 +8665,8 @@ static void hm_desugar_partial_call(ny_hm_state_t *hm, ny_hm_env_list *env,
   ny_hm_type_t *type = NULL;
   ny_hm_scheme_t *scheme = NULL;
   if (callee->kind == NY_E_IDENT) {
-    type = hm_env_get_ctx(hm, env, callee->as.ident.name,
-                          callee->as.ident.syntax_ctx);
+    type =
+        hm_env_get_ctx(env, callee->as.ident.name, callee->as.ident.syntax_ctx);
     if (!type) {
       hm_persist_named_call_target(hm, e, callee->as.ident.name, self_name);
       scheme = hm_find_scheme(hm, e->semantic.canonical_callee
@@ -8656,8 +8743,7 @@ static void hm_desugar_partial_call(ny_hm_state_t *hm, ny_hm_env_list *env,
           e->as.call.args.data[p].val ? e->as.call.args.data[p].val->tok
                                       : e->tok,
           "hm", "hm-partial-consuming-capture", "partial application",
-          "non-consuming capture", "consuming parameter",
-          "partial application",
+          "non-consuming capture", "consuming parameter", "partial application",
           "a residual closure can run more than once, so a consumed resource "
           "cannot be captured by value",
           "pass the resource to the residual call instead of binding it",
@@ -8713,13 +8799,13 @@ static void hm_desugar_partial_call(ny_hm_state_t *hm, ny_hm_env_list *env,
       invoke->semantic.canonical_callee_stmt = direct_stmt;
       for (size_t p = 0; p < given; ++p) {
         actuals[p] = e->as.call.args.data[p].val;
-        vec_push_arena(arena, &invoke->as.call.args,
-                       e->as.call.args.data[p]);
+        vec_push_arena(arena, &invoke->as.call.args, e->as.call.args.data[p]);
       }
       for (size_t p = given; p < param_count; ++p) {
         const char *formal =
             params && p < params->len ? params->data[p].name : NULL;
-        expr_t *param_def = params && p < params->len ? params->data[p].def : NULL;
+        expr_t *param_def =
+            params && p < params->len ? params->data[p].def : NULL;
         if (p < required_end && param_def) {
           expr_t *value = param_def;
           for (size_t j = 0; j < p; ++j) {
@@ -8776,8 +8862,7 @@ static void hm_desugar_partial_call(ny_hm_state_t *hm, ny_hm_env_list *env,
   if (!scheme && type && type->a) {
     char *ret = hm_type_string(type->a);
     if (ret)
-      partial->as.lambda.return_type =
-          arena_strndup(arena, ret, strlen(ret));
+      partial->as.lambda.return_type = arena_strndup(arena, ret, strlen(ret));
     free(ret);
   }
   if (scheme && scheme->stmt && scheme->stmt->kind == NY_S_FUNC &&
@@ -8840,12 +8925,11 @@ static void hm_desugar_partial_call(ny_hm_state_t *hm, ny_hm_env_list *env,
       invoke->as.call.callee = reference;
     } else {
       if (scheme && scheme->stmt && scheme->stmt->kind == NY_S_FUNC) {
-        char *substituted = hm_subst_param_type_text(hm, scheme->stmt, p,
-                                                     &e->as.call.args, 0);
+        char *substituted =
+            hm_subst_param_type_text(hm, scheme->stmt, p, &e->as.call.args, 0);
         parameter.type =
-            substituted
-                ? arena_strndup(arena, substituted, strlen(substituted))
-                : scheme->stmt->as.fn.params.data[p].type;
+            substituted ? arena_strndup(arena, substituted, strlen(substituted))
+                        : scheme->stmt->as.fn.params.data[p].type;
         free(substituted);
       } else if (!scheme && type && p < type->args.len) {
         char *spelling = hm_type_string(type->args.data[p]);
@@ -9025,8 +9109,7 @@ static ny_hm_type_t *hm_infer_expr(ny_hm_state_t *hm, ny_hm_env_list *env,
          * calls, and must receive the normal `any` attached-method contract.
          */
         if (base[0] != '_' &&
-            !hm_env_get_ctx(hm, env, base,
-                            e->as.call.callee->as.ident.syntax_ctx))
+            !hm_env_get_ctx(env, base, e->as.call.callee->as.ident.syntax_ctx))
           return result;
         expr_t target = {.kind = NY_E_IDENT, .tok = e->tok};
         target.as.ident.name = base;
@@ -9189,10 +9272,9 @@ static void hm_infer_stmt_mode(ny_hm_state_t *hm, ny_hm_env_list *env,
       ny_hm_type_t *preserved_refined_type = NULL;
       if (!s->as.var.is_decl && init && !preserved_append_fact) {
         ny_hm_env_entry_t *entry = hm_env_entry_ctx(env, name, s->syntax_ctx);
-        ny_hm_type_t *previous =
-            entry && entry->guard_base_type
-                ? entry->guard_base_type
-                : hm_env_get_ctx(hm, env, name, s->syntax_ctx);
+        ny_hm_type_t *previous = entry && entry->guard_base_type
+                                     ? entry->guard_base_type
+                                     : hm_env_get_ctx(env, name, s->syntax_ctx);
         char *previous_name = previous ? hm_type_string(previous) : NULL;
         bool refined =
             previous_name && hm_lookup_refine_stmt(hm, previous_name);
@@ -9242,7 +9324,7 @@ static void hm_infer_stmt_mode(ny_hm_state_t *hm, ny_hm_env_list *env,
          * fall back to dynamic dispatch.  Only collections are preserved;
          * scalar/nil bindings keep normal inference.
          */
-        ny_hm_type_t *prev = hm_env_get_ctx(hm, env, name, s->syntax_ctx);
+        ny_hm_type_t *prev = hm_env_get_ctx(env, name, s->syntax_ctx);
         if (prev && hm_type_known_collection(prev) && prev != final_t)
           final_t = prev;
       }
@@ -9262,8 +9344,8 @@ static void hm_infer_stmt_mode(ny_hm_state_t *hm, ny_hm_env_list *env,
           init->kind == NY_E_IDENT && init->as.ident.name) {
         const char *target = init->as.ident.name;
         stmt_t *target_stmt = NULL;
-        ny_hm_env_entry_t *source = hm_env_entry_ctx(
-            env, target, init->as.ident.syntax_ctx);
+        ny_hm_env_entry_t *source =
+            hm_env_entry_ctx(env, target, init->as.ident.syntax_ctx);
         if (source && source->alias_target) {
           target = source->alias_target;
           target_stmt = source->alias_target_stmt;
@@ -9283,8 +9365,7 @@ static void hm_infer_stmt_mode(ny_hm_state_t *hm, ny_hm_env_list *env,
            * Keep a stable arena copy so deferred desugaring and the effect
            * pass see the real callee spelling.
            */
-          alias_entry->alias_target =
-              ny_intern_get(ny_intern_cstr(target));
+          alias_entry->alias_target = ny_intern_get(ny_intern_cstr(target));
           alias_entry->alias_target_stmt = target_stmt;
         }
       }
@@ -9539,7 +9620,7 @@ static void hm_infer_stmt_mode(ny_hm_state_t *hm, ny_hm_env_list *env,
        * branch's control-flow result.
        */
       ny_hm_env_list handler_env;
-      hm_env_clone(&handler_env, env);
+      hm_env_clone(hm, &handler_env, env);
       hm_env_set_ctx(&handler_env, s->as.tr.err, s->syntax_ctx, hm_any(hm));
       hm_infer_stmt_mode(hm, &handler_env, s->as.tr.handler, self_name, ret,
                          allow_tail_expr);
@@ -9569,7 +9650,7 @@ static void hm_infer_stmt_mode(ny_hm_state_t *hm, ny_hm_env_list *env,
     for (size_t i = 0; i < s->as.match.arms.len; ++i) {
       match_arm_t *arm = &s->as.match.arms.data[i];
       ny_hm_env_list arm_env;
-      hm_env_clone(&arm_env, env);
+      hm_env_clone(hm, &arm_env, env);
       if (arm->patterns.len == 1)
         hm_refine_match_pattern(hm, &arm_env, subject_t, arm->patterns.data[0],
                                 self_name);
@@ -9724,7 +9805,8 @@ static bool hm_function_has_mixed_return_carriers(stmt_t *fn) {
 }
 
 static void hm_infer_function_scheme(ny_hm_state_t *hm, ny_hm_scheme_t *scheme,
-                                     ny_hm_env_list *globals) {
+                                     ny_hm_env_list *globals,
+                                     ny_hm_env_list *env_scratch) {
   if (!hm || !scheme || !scheme->stmt || scheme->stmt->kind != NY_S_FUNC)
     return;
   stmt_t *fn = scheme->stmt;
@@ -9786,8 +9868,11 @@ static void hm_infer_function_scheme(ny_hm_state_t *hm, ny_hm_scheme_t *scheme,
     }
     free(param_reps);
   }
-  ny_hm_env_list env;
-  hm_env_clone(&env, globals);
+  ny_hm_env_list env = env_scratch ? *env_scratch : (ny_hm_env_list){0};
+  if (env_scratch)
+    hm_env_clone_reuse(hm, &env, globals);
+  else
+    hm_env_clone(hm, &env, globals);
   for (size_t i = 0; i < fn->as.fn.params.len; ++i) {
     param_t *p = &fn->as.fn.params.data[i];
     if (i < ft->args.len)
@@ -9892,29 +9977,53 @@ static void hm_infer_function_scheme(ny_hm_state_t *hm, ny_hm_scheme_t *scheme,
   ny_visitor_t completion_visitor = {.ctx = &completion,
                                      .visit_expr_post = hm_complete_leaf_fact};
   ny_visit_stmt(&completion_visitor, fn->as.fn.body);
-  vec_free(&env);
+  if (env_scratch)
+    *env_scratch = env;
+  else
+    vec_free(&env);
 }
 
 static void hm_run(ny_hm_state_t *hm, ny_tp_ctx_t *ctx) {
+  bool trace_timing = ny_env_enabled("NYTRIX_TRACE_TYPE_PIPELINE_TIMING");
+  ny_tick_t stage_start = trace_timing ? ny_ticks_now() : 0;
+#define NY_HM_STAGE_TIMED(label)                                               \
+  do {                                                                         \
+    if (trace_timing) {                                                        \
+      ny_tick_t stage_end = ny_ticks_now();                                    \
+      fprintf(stderr, "[type-hm-timing] stage=%s elapsed=%.3f s\n", label,     \
+              ny_ticks_elapsed_sec(stage_start));                              \
+      stage_start = stage_end;                                                 \
+    }                                                                          \
+  } while (0)
   memset(hm, 0, sizeof(*hm));
   hm->ctx = ctx;
+  hm->trace_type_detail = ny_dbg_is_enabled(NY_DBG_TYPE_DETAIL);
+  hm->trace_deep = ny_dbg_is_enabled(NY_DBG_DEEP);
   vec_init(&hm->schemes);
   hm_collect_function_schemes(hm);
+  NY_HM_STAGE_TIMED("scheme-collection");
   ny_hm_env_list env;
-  vec_init(&env);
+  hm_env_init(hm, &env);
+  ny_hm_env_list function_env_scratch = {0};
+  size_t first_pass_function_inferences = 0;
   for (size_t i = 0; ctx && ctx->prog && i < ctx->prog->body.len; ++i) {
     stmt_t *s = ctx->prog->body.data[i];
     if (s && s->kind == NY_S_FUNC) {
       ny_hm_scheme_t *scheme = hm_find_scheme(hm, s->as.fn.name);
-      if (scheme)
-        hm_infer_function_scheme(hm, scheme, &env);
+      if (scheme) {
+        hm_infer_function_scheme(hm, scheme, &env, &function_env_scratch);
+        first_pass_function_inferences++;
+      }
     } else if (s && s->kind != NY_S_IMPL && s->kind != NY_S_STRUCT &&
                s->kind != NY_S_LAYOUT) {
       hm_infer_stmt(hm, &env, s, NULL, NULL);
     }
   }
+  NY_HM_STAGE_TIMED("top-level-sweep");
   for (size_t i = 0; i < hm->schemes.len; ++i)
-    hm_infer_function_scheme(hm, &hm->schemes.data[i], &env);
+    hm_infer_function_scheme(hm, &hm->schemes.data[i], &env,
+                             &function_env_scratch);
+  NY_HM_STAGE_TIMED("all-scheme-inference");
 
   /*
    * The native reachability pass may later select a function that was not in
@@ -9938,9 +10047,16 @@ static void hm_run(ny_hm_state_t *hm, ny_tp_ctx_t *ctx) {
     hm_visit_semantic_completion(&completion_visitor, ctx->prog->body.data[i]);
     hm_completion_scope_pop(&completion);
   }
+  NY_HM_STAGE_TIMED("semantic-completion");
   hm_completion_scope_reset(&completion);
   if (ctx && ctx->collect_semantic_artifact_facts)
     hm_finalize_expr_type_facts(hm);
+  NY_HM_STAGE_TIMED("expression-fact-finalization");
+  if (trace_timing)
+    fprintf(stderr,
+            "[type-hm-timing] functions=%zu first-pass-inferences=%zu\n",
+            hm->schemes.len, first_pass_function_inferences);
+  vec_free(&function_env_scratch);
   vec_free(&env);
   if (hm->debug_std_default_constraints_suppressed > 0) {
     char summary[192];
@@ -9949,12 +10065,15 @@ static void hm_run(ny_hm_state_t *hm, ny_tp_ctx_t *ctx) {
              hm->debug_std_default_constraints_suppressed);
     ny_dbg_type_detail("HM_SUMMARY", summary);
   }
+#undef NY_HM_STAGE_TIMED
 }
 
 static void hm_run_reachable(ny_hm_state_t *hm, ny_tp_ctx_t *ctx,
                              stmt_t *const *targets, size_t target_count) {
   memset(hm, 0, sizeof(*hm));
   hm->ctx = ctx;
+  hm->trace_type_detail = ny_dbg_is_enabled(NY_DBG_TYPE_DETAIL);
+  hm->trace_deep = ny_dbg_is_enabled(NY_DBG_DEEP);
   if (ny_env_enabled("NY_TRACE_NATIVE_REACHABLE")) {
     size_t resolved = 0, typed_signatures = 0;
     for (size_t i = 0; i < target_count; ++i)
@@ -10023,7 +10142,8 @@ static void hm_run_reachable(ny_hm_state_t *hm, ny_tp_ctx_t *ctx,
   }
 
   ny_hm_env_list env;
-  vec_init(&env);
+  hm_env_init(hm, &env);
+  ny_hm_env_list function_env_scratch = {0};
   for (size_t i = 0; ctx && ctx->prog && i < ctx->prog->body.len; ++i) {
     stmt_t *s = ctx->prog->body.data[i];
     if (s && s->kind == NY_S_VAR && !ny_is_stdlib_tok(s->tok))
@@ -10073,13 +10193,14 @@ static void hm_run_reachable(ny_hm_state_t *hm, ny_tp_ctx_t *ctx,
       hm_scheme_index_put(hm, scheme->name, hm->schemes.len - 1);
       hm_scheme_index_put(hm, scheme->full_name, hm->schemes.len - 1);
     }
-    hm_infer_function_scheme(hm, scheme, &env);
+    hm_infer_function_scheme(hm, scheme, &env, &function_env_scratch);
   }
   if (ny_env_enabled("NY_TRACE_NATIVE_REACHABLE")) {
     fprintf(stderr, "native reachable HM inference complete\n");
     fflush(stderr);
   }
   free(target_scheme_indices);
+  vec_free(&function_env_scratch);
   if (ctx && ctx->collect_semantic_artifact_facts)
     hm_finalize_expr_type_facts(hm);
   vec_free(&env);

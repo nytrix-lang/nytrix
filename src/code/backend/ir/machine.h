@@ -1,3 +1,4 @@
+/* Target-specific machine IR consumed by register allocation and encoders. */
 #ifndef NYR_NATIVE_MACHINE_H
 #define NYR_NATIVE_MACHINE_H
 
@@ -6,8 +7,8 @@
 #include <stdint.h>
 #include <stdio.h>
 
-#include <nyr/ir.h>
 #include "code/backend/abi.h"
+#include <nyr/ir.h>
 
 /*
  * Target-specific machine IR between NYIR and object emission. It owns virtual
@@ -169,6 +170,8 @@ typedef struct {
   /* DIV/MOD treat both operands as unsigned 64-bit values. */
   bool unsigned_arith;
   bool narrow32;
+  /* DIV/MOD dividend is proven in [0, 2^31). */
+  bool dividend_u31;
   unsigned effects;
   uint32_t source_pc;
 } nyr_mach_inst_t;
@@ -332,6 +335,11 @@ bool nyr_mach_regalloc_build_x64_class(const nyr_mach_func_t *mach,
                                        nyr_mach_reg_class_t reg_class,
                                        size_t color_count,
                                        nyr_mach_regalloc_t *out);
+size_t nyr_mach_regalloc_recolor_locals(
+    const nyr_mach_func_t *mach, nyr_mach_regalloc_t *alloc,
+    nyr_mach_reg_class_t reg_class, const unsigned char *candidate,
+    bool (*color_blocked)(void *ctx, int color, size_t start, size_t end),
+    void *ctx);
 bool nyr_mach_regalloc_verify(const nyr_mach_func_t *mach,
                               const nyr_mach_regalloc_t *alloc,
                               nyr_mach_reg_class_t reg_class);

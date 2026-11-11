@@ -1,3 +1,6 @@
+/*
+ * C preprocessor fixture for conditional directives closing macro arguments.
+ */
 #define ID(value) (value)
 
 int main(void) {

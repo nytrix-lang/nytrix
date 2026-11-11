@@ -1,3 +1,6 @@
+/*
+ * Stress test for float provenance registration beyond the former fixed limit.
+ */
 #include "code/backend/runtime/shared.h"
 
 #include <stdio.h>

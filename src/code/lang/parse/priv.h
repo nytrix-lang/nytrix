@@ -1,3 +1,4 @@
+/* Private lexer and parser state shared across language parsing modules. */
 #ifndef NY_PARSER_INTERNAL_H
 #define NY_PARSER_INTERNAL_H
 
@@ -129,7 +130,7 @@ static inline bool parser_token_is_builtin_type(token_t tok) {
     return false;
   const char *s = tok.lexeme;
   size_t n = tok.len;
-#define NY_PARSER_TYPE_EQ(lit)                                                 \
+#define NY_PARSER_TYPE_EQ(lit)                                   \
   (n == sizeof(lit) - 1 && memcmp(s, lit, sizeof(lit) - 1) == 0)
   return NY_PARSER_TYPE_EQ("any") || NY_PARSER_TYPE_EQ("int") ||
          NY_PARSER_TYPE_EQ("i8") || NY_PARSER_TYPE_EQ("i16") ||
@@ -233,8 +234,8 @@ parser_parse_param_type_first(parser_t *p, param_t *pr,
   bool sigma_type = p->cur.kind == NY_T_IDENT && p->cur.len == 6 &&
                     strncmp(p->cur.lexeme, "exists", 6) == 0 &&
                     next.kind == NY_T_LPAREN;
-  bool alias_apply = next.kind == NY_T_LPAREN &&
-                     parser_current_token_is_type_alias(p);
+  bool alias_apply =
+      next.kind == NY_T_LPAREN && parser_current_token_is_type_alias(p);
   if (!sigma_type && !alias_apply && p->cur.kind == NY_T_IDENT &&
       next.kind != NY_T_COLON && next.kind != NY_T_DOT &&
       next.kind != NY_T_LT && next.kind != NY_T_IDENT) {

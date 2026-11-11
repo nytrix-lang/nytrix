@@ -1,3 +1,4 @@
+/* Runtime macro aliases and platform-specific symbol definitions. */
 #ifdef _WIN32
 #ifdef rt_argc
 #undef rt_argc
@@ -1337,6 +1338,21 @@ RT_DEF("__simmd_sha256_blocks", rt_simmd_sha256_blocks, 3,
        "fn __simmd_sha256_blocks(state, blocks, count)",
        "Processes multiple SHA-256 blocks using the best available "
        "implementation.")
+RT_DEF("__simmd_sha256_digest_mem", rt_simmd_sha256_digest_mem, 2,
+       "fn __simmd_sha256_digest_mem(data, len)",
+       "Computes SHA-256 over contiguous bytes and returns a 32-byte list.")
+RT_DEF("__simmd_sha256_digest_mem_into", rt_simmd_sha256_digest_mem_into, 3,
+       "fn __simmd_sha256_digest_mem_into(data, len, out)",
+       "Writes SHA-256 over contiguous bytes into a mutable 32-byte buffer.")
+RT_DEF("__simmd_sha256_hmac_values", rt_simmd_sha256_hmac_values, 2,
+       "fn __simmd_sha256_hmac_values(key, data)",
+       "Computes HMAC-SHA256 over byte strings or integer-byte sequences.")
+RT_DEF("__simmd_sha256_hmac_bytes", rt_simmd_sha256_hmac_bytes, 2,
+       "fn __simmd_sha256_hmac_bytes(key, data)",
+       "Computes HMAC-SHA256 and returns a mutable byte buffer.")
+RT_DEF("__simmd_pbkdf2_sha256_values", rt_simmd_pbkdf2_sha256_values, 3,
+       "fn __simmd_pbkdf2_sha256_values(any key, any salt, any iterations)",
+       "Computes one 32-byte PBKDF2-HMAC-SHA256 key.")
 RT_DEF("__simmd_popcnt64", rt_simmd_popcnt64, 1, "fn __simmd_popcnt64(x)",
        "Counts set bits in a 64-bit integer.")
 RT_DEF("__simmd_ctz64", rt_simmd_ctz64, 1, "fn __simmd_ctz64(x)",

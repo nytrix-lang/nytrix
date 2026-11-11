@@ -1,3 +1,6 @@
+/*
+ * C parser fixture for builtin offsetof on an aligned structure member.
+ */
 struct nyc_offset_probe {
   char first;
   long second;
@@ -105,23 +108,23 @@ _Static_assert(__builtin_bswap32(0x12345678U) == 0x78563412U,
 _Static_assert(__builtin_bswap64(0x0123456789abcdefULL) ==
                    0xefcdab8967452301ULL,
                "64-bit byte swap constant expression");
-#define NYC_CONSTEXPR(x)                                                       \
+#define NYC_CONSTEXPR(x)                                                \
   (sizeof(int) == sizeof(*(8 ? ((void *)((long)(x) * 0l)) : (int *)8)))
 #define NYC_CONST_TRUE(x) __builtin_choose_expr(NYC_CONSTEXPR(x), x, 0)
-#define NYC_BUILD_BUG_ON_ZERO(e)                                               \
+#define NYC_BUILD_BUG_ON_ZERO(e)                                    \
   ((int)sizeof(struct { _Static_assert(!(e), "constant check"); }))
 _Static_assert(NYC_CONSTEXPR((0) > 11), "kernel integer constant probe");
 _Static_assert(NYC_BUILD_BUG_ON_ZERO(NYC_CONST_TRUE((0) > 11)) == 0,
                "kernel BUILD_BUG_ON_ZERO constant expression");
 #define NYC_IS_SIGNED_TYPE(type) (((typeof(type))-1) < (typeof(type))1)
-#define NYC_TYPE_HALF_MAX(type)                                                \
+#define NYC_TYPE_HALF_MAX(type)                                  \
   ((type)1 << (8 * sizeof(type) - 1 - NYC_IS_SIGNED_TYPE(type)))
-#define NYC_TYPE_MAX(type)                                                     \
+#define NYC_TYPE_MAX(type)                                          \
   ((type)((NYC_TYPE_HALF_MAX(type) - 1) + NYC_TYPE_HALF_MAX(type)))
-#define NYC_GENMASK_ULL(h, l)                                                  \
-  ((unsigned long long)(NYC_BUILD_BUG_ON_ZERO(NYC_CONST_TRUE((l) > (h))) +     \
-                        (NYC_TYPE_MAX(unsigned long long) << (l) &             \
-                         NYC_TYPE_MAX(unsigned long long) >>                   \
+#define NYC_GENMASK_ULL(h, l)                                              \
+  ((unsigned long long)(NYC_BUILD_BUG_ON_ZERO(NYC_CONST_TRUE((l) > (h))) + \
+                        (NYC_TYPE_MAX(unsigned long long) << (l) &         \
+                         NYC_TYPE_MAX(unsigned long long) >>               \
                              (sizeof(unsigned long long) * 8 - 1 - (h)))))
 _Static_assert(NYC_TYPE_MAX(unsigned long long) == 0xFFFFFFFFFFFFFFFFULL,
                "unsigned 64-bit constant wrap");
@@ -145,12 +148,12 @@ _Static_assert(sizeof(struct nyc_constant_probe) == 1,
 struct nyc_page_probe {
   char bytes[64];
 };
-#define nyc_ilog2(n)                                                           \
-  (__builtin_constant_p(n)                                                     \
-       ? ((n) < 2 ? 0 : 63 - __builtin_clzll(n))                               \
+#define nyc_ilog2(n)                                         \
+  (__builtin_constant_p(n)                                   \
+       ? ((n) < 2 ? 0 : 63 - __builtin_clzll(n))             \
        : (sizeof(n) <= 4 ? __ilog2_u32(n) : __ilog2_u64(n)))
-#define nyc_vmemmap_tail_count                                                 \
-  (nyc_ilog2(0x400000000ULL) - 12 -                                            \
+#define nyc_vmemmap_tail_count                                       \
+  (nyc_ilog2(0x400000000ULL) - 12 -                                  \
    nyc_ilog2(2 * ((1UL) << 12) / sizeof(struct nyc_page_probe)) + 1)
 struct nyc_vmemmap_probe {
   void *tails[nyc_vmemmap_tail_count > 0 ? nyc_vmemmap_tail_count : 0];

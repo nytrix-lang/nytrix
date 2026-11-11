@@ -1011,23 +1011,45 @@ bool ny_module_declares_exported_member(codegen_t *cg, const char *module_name,
   stmt_t *mod = ny_module_lookup_stmt_by_name(cg, module_name);
   if (!mod)
     return false;
-  str_list names = {0};
-  if (mod->as.module.export_all)
-    collect_module_defs(mod, &names);
-  else
-    collect_module_exports(mod, &names, NULL);
-  bool found = false;
-  for (size_t i = 0; i < names.len; ++i) {
-    const char *name = names.data[i];
-    const char *leaf = name ? strrchr(name, '.') : NULL;
-    leaf = leaf ? leaf + 1 : name;
-    if (leaf && strcmp(leaf, member) == 0) {
-      found = true;
-      break;
+  if (mod->as.module.export_all) {
+    for (size_t i = 0; i < mod->as.module.body.len; ++i) {
+      stmt_t *child = mod->as.module.body.data[i];
+      if (child->kind == NY_S_FUNC) {
+        const char *name = child->as.fn.name;
+        if (name && !ny_module_name_is_internal(mod, name)) {
+          const char *leaf = strrchr(name, '.');
+          if (strcmp(leaf ? leaf + 1 : name, member) == 0)
+            return true;
+        }
+      } else if (child->kind == NY_S_VAR) {
+        for (size_t j = 0; j < child->as.var.names.len; ++j) {
+          const char *name = child->as.var.names.data[j];
+          if (name && !ny_module_name_is_internal(mod, name)) {
+            const char *leaf = strrchr(name, '.');
+            if (strcmp(leaf ? leaf + 1 : name, member) == 0)
+              return true;
+          }
+        }
+      }
+    }
+    return false;
+  }
+
+  for (size_t i = 0; i < mod->as.module.body.len; ++i) {
+    stmt_t *child = mod->as.module.body.data[i];
+    if (child->kind != NY_S_EXPORT || child->as.exprt.is_internal ||
+        !ny_export_profile_visible(child->as.exprt.profile, NULL))
+      continue;
+    for (size_t j = 0; j < child->as.exprt.names.len; ++j) {
+      const char *name = child->as.exprt.names.data[j];
+      if (!name)
+        continue;
+      const char *leaf = strrchr(name, '.');
+      if (strcmp(leaf ? leaf + 1 : name, member) == 0)
+        return true;
     }
   }
-  ny_str_list_free_owned(&names);
-  return found;
+  return false;
 }
 
 void add_imports_from_prefix(codegen_t *cg, bool user_use, const char *mod) {
@@ -2227,6 +2249,27 @@ bool ny_is_module_active(codegen_t *cg, const char *name) {
   return cg->parent ? ny_is_module_active(cg->parent, name) : false;
 }
 
+static bool ny_module_path_write(char *out, size_t out_cap, const char *first,
+                                 const char *second) {
+  if (!out || !out_cap || !first)
+    return false;
+  size_t first_len = strlen(first);
+  size_t second_len = second ? strlen(second) : 0;
+  if (second &&
+      (second_len > SIZE_MAX - 2 || first_len > SIZE_MAX - second_len - 2))
+    return false;
+  size_t len = first_len + second_len + (second ? 1u : 0u);
+  if (!len || len >= out_cap)
+    return false;
+  memcpy(out, first, first_len);
+  if (second) {
+    out[first_len] = '.';
+    memcpy(out + first_len + 1u, second, second_len);
+  }
+  out[len] = '\0';
+  return true;
+}
+
 static bool ny_module_local_import_target_inner(codegen_t *cg, stmt_t *s,
                                                 const char *target, char *out,
                                                 size_t out_cap, int depth) {
@@ -2240,9 +2283,9 @@ static bool ny_module_local_import_target_inner(codegen_t *cg, stmt_t *s,
     bool alias_only =
         !s->as.use.import_all && s->as.use.imports.len == 0 && s->as.use.alias;
     if (alias_only && s->as.use.alias && strcmp(s->as.use.alias, target) == 0) {
-      int nw = snprintf(out, out_cap, "%s", mod);
+      bool copied = ny_module_path_write(out, out_cap, mod, NULL);
       free(mod);
-      return nw > 0 && (size_t)nw < out_cap;
+      return copied;
     }
     if (s->as.use.imports.len > 0) {
       for (size_t i = 0; i < s->as.use.imports.len; ++i) {
@@ -2252,9 +2295,9 @@ static bool ny_module_local_import_target_inner(codegen_t *cg, stmt_t *s,
         const char *local = item->alias ? item->alias : item->name;
         if (!local || strcmp(local, target) != 0)
           continue;
-        int nw = snprintf(out, out_cap, "%s.%s", mod, item->name);
+        bool copied = ny_module_path_write(out, out_cap, mod, item->name);
         free(mod);
-        return nw > 0 && (size_t)nw < out_cap;
+        return copied;
       }
       free(mod);
       return false;
@@ -2266,9 +2309,9 @@ static bool ny_module_local_import_target_inner(codegen_t *cg, stmt_t *s,
       const char *leaf = ny_name_leaf(mod);
       if (bare_use && leaf && strcmp(leaf, target) == 0 &&
           ny_module_lookup_stmt_by_name(cg, mod)) {
-        int nw = snprintf(out, out_cap, "%s", mod);
+        bool copied = ny_module_path_write(out, out_cap, mod, NULL);
         free(mod);
-        return nw > 0 && (size_t)nw < out_cap;
+        return copied;
       }
       stmt_t *used = ny_module_lookup_stmt_by_name(cg, mod);
       if (used && ny_module_public_target(cg, used, target, out, out_cap,
@@ -2277,9 +2320,9 @@ static bool ny_module_local_import_target_inner(codegen_t *cg, stmt_t *s,
         return true;
       }
       if (!used) {
-        int nw = snprintf(out, out_cap, "%s.%s", mod, target);
+        bool copied = ny_module_path_write(out, out_cap, mod, target);
         free(mod);
-        return nw > 0 && (size_t)nw < out_cap;
+        return copied;
       }
     }
     free(mod);
@@ -2333,19 +2376,19 @@ static bool ny_module_exported_child_target(codegen_t *cg, stmt_t *mod,
       if (!name || !*name)
         continue;
       char child_path[1024];
-      int cw = strchr(name, '.')
-                   ? snprintf(child_path, sizeof(child_path), "%s", name)
-                   : snprintf(child_path, sizeof(child_path), "%s.%s", mod_name,
-                              name);
-      if (cw <= 0 || (size_t)cw >= sizeof(child_path))
+      bool copied =
+          strchr(name, '.')
+              ? ny_module_path_write(child_path, sizeof(child_path), name, NULL)
+              : ny_module_path_write(child_path, sizeof(child_path), mod_name,
+                                     name);
+      if (!copied)
         continue;
       stmt_t *child_mod = ny_module_lookup_stmt_by_name(cg, child_path);
       if (!child_mod)
         continue;
       const char *child_leaf = ny_name_leaf(child_path);
       if (child_leaf && strcmp(child_leaf, target) == 0) {
-        int nw = snprintf(out, out_cap, "%s", child_path);
-        return nw > 0 && (size_t)nw < out_cap;
+        return ny_module_path_write(out, out_cap, child_path, NULL);
       }
       if (ny_module_public_target(cg, child_mod, target, out, out_cap, NULL,
                                   true, depth + 1))
@@ -2533,23 +2576,22 @@ ny_module_public_target_uncached(codegen_t *cg, stmt_t *mod, const char *target,
         if (!name || !*name)
           continue;
         char full[1024];
-        int nw = strchr(name, '.')
-                     ? snprintf(full, sizeof(full), "%s", name)
-                     : snprintf(full, sizeof(full), "%s.%s", mod_name, name);
-        if (nw <= 0 || (size_t)nw >= sizeof(full))
+        bool copied =
+            strchr(name, '.')
+                ? ny_module_path_write(full, sizeof(full), name, NULL)
+                : ny_module_path_write(full, sizeof(full), mod_name, name);
+        if (!copied)
           continue;
         const char *leaf = ny_name_leaf(full);
         if (leaf && strcmp(leaf, target) == 0) {
           if (lookup_fun_exact(cg, full) || lookup_global_exact(cg, full) ||
               ny_module_lookup_stmt_by_name(cg, full)) {
-            int cw = snprintf(out, out_cap, "%s", full);
-            return cw > 0 && (size_t)cw < out_cap;
+            return ny_module_path_write(out, out_cap, full, NULL);
           }
           char import_target[1024];
           if (ny_module_local_import_target(cg, mod, target, import_target,
                                             sizeof(import_target), depth + 1)) {
-            int cw = snprintf(out, out_cap, "%s", import_target);
-            return cw > 0 && (size_t)cw < out_cap;
+            return ny_module_path_write(out, out_cap, import_target, NULL);
           }
         }
         if (!include_child_uses)
@@ -2572,8 +2614,7 @@ ny_module_public_target_uncached(codegen_t *cg, stmt_t *mod, const char *target,
           strcmp(child->as.fn.name, target) == 0 &&
           !ny_module_name_is_internal(mod, child->as.fn.name)) {
         const char *q = codegen_qname(cg, child->as.fn.name, mod_name);
-        int nw = snprintf(out, out_cap, "%s", q);
-        return nw > 0 && (size_t)nw < out_cap;
+        return ny_module_path_write(out, out_cap, q, NULL);
       }
       if (child->kind == NY_S_VAR) {
         for (size_t j = 0; j < child->as.var.names.len; ++j) {
@@ -2581,8 +2622,7 @@ ny_module_public_target_uncached(codegen_t *cg, stmt_t *mod, const char *target,
           if (name && strcmp(name, target) == 0 &&
               !ny_module_name_is_internal(mod, name)) {
             const char *q = codegen_qname(cg, name, mod_name);
-            int nw = snprintf(out, out_cap, "%s", q);
-            return nw > 0 && (size_t)nw < out_cap;
+            return ny_module_path_write(out, out_cap, q, NULL);
           }
         }
       }

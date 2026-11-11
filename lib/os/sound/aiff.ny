@@ -11,10 +11,12 @@ fn _tag(any d, int at, str s) bool {
 }
 
 fn _be16(any d, int at) int { (load8(d, at) << 8) | load8(d, at + 1) }
+
 fn _be32(any d, int at) int {
    (load8(d, at) << 24) | (load8(d, at + 1) << 16) |
    (load8(d, at + 2) << 8) | load8(d, at + 3)
 }
+
 fn _rate(any d, int at) int {
    def exp = _be16(d, at) & 0x7fff
    mut mant_hi = _be32(d, at + 2)
@@ -32,6 +34,7 @@ fn _alaw(int a) int {
    if seg == 0 { t += 8 } else { t = (t + 0x108) << (seg - 1) }
    (v & 0x80) != 0 ? t : -t
 }
+
 fn _mulaw(int u) int {
    def v = (~u) & 255
    def t = (((v & 15) << 3) + 0x84) << ((v & 0x70) >> 4)
@@ -39,7 +42,7 @@ fn _mulaw(int u) int {
 }
 
 def _IMA_INDEX = [-1, -1, -1, -1, 2, 4, 6, 8,
-                  -1, -1, -1, -1, 2, 4, 6, 8]
+   -1, -1, -1, -1, 2, 4, 6, 8]
 def _IMA_STEP = [
    7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 19, 21, 23, 25, 28, 31, 34, 37, 41, 45,
    50, 55, 60, 66, 73, 80, 88, 97, 107, 118, 130, 143, 157, 173, 190, 209, 230,

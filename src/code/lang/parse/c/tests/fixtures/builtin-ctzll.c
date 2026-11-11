@@ -1,3 +1,6 @@
+/*
+ * Runtime fixture for the 64-bit count-trailing-zeros builtin.
+ */
 static int count_trailing_zeros(unsigned long long value) {
   return __builtin_ctzll(value);
 }

@@ -1,3 +1,4 @@
+/* Shared LLVM bitcode cache identity, lookup, and persistence interfaces. */
 #ifndef NY_BACKEND_CACHE_H
 #define NY_BACKEND_CACHE_H
 
@@ -34,26 +35,33 @@ uint64_t ny_cache_compiler_source_fingerprint(void);
  * length. A failed validation removes both files so no later path can consume
  * a partial, stale, or manually-corrupted executable artifact.
  */
-bool ny_cache_artifact_manifest_valid(const char *cache_path, const char *source);
-bool ny_cache_artifact_manifest_save(const char *cache_path, const char *source);
-char *ny_jit_cache_path(const char *source, const char *stdlib_path, unsigned long std_src_hash,
-                        int opt_level, int opt_dce, int opt_internalize, bool debug_symbols,
+bool ny_cache_artifact_manifest_valid(const char *cache_path,
+                                      const char *source);
+bool ny_cache_artifact_manifest_save(const char *cache_path,
+                                     const char *source);
+char *ny_jit_cache_path(const char *source, const char *stdlib_path,
+                        unsigned long std_src_hash, int opt_level, int opt_dce,
+                        int opt_internalize, bool debug_symbols,
                         unsigned long std_latest_mtime,
                         uint64_t semantic_config_fingerprint);
-char *ny_std_bc_cache_path(const char *stdlib_path, const char *const *uses, size_t use_count,
-                           int std_mode, bool debug_symbols, unsigned long std_latest_mtime,
-                           const char *argv0);
-bool ny_jit_cache_load(const char *cache_path, LLVMContextRef ctx, LLVMModuleRef *out_module);
+char *ny_std_bc_cache_path(const char *stdlib_path, const char *const *uses,
+                           size_t use_count, int std_mode, bool debug_symbols,
+                           unsigned long std_latest_mtime, const char *argv0);
+bool ny_jit_cache_load(const char *cache_path, LLVMContextRef ctx,
+                       LLVMModuleRef *out_module);
 bool ny_jit_cache_save(const char *cache_path, LLVMModuleRef module);
-bool ny_jit_cache_load_ir(const char *cache_path, LLVMContextRef ctx, LLVMModuleRef *out_module);
+bool ny_jit_cache_load_ir(const char *cache_path, LLVMContextRef ctx,
+                          LLVMModuleRef *out_module);
 bool ny_jit_cache_save_ir(const char *cache_path, LLVMModuleRef module);
 
 #ifndef _WIN32
 bool ny_jit_native_cache_enabled(void);
 char *ny_jit_native_cache_path(const char *bc_path);
-bool ny_jit_native_cache_load(const char *so_path, void **out_handle, void (**out_entry)(void));
-bool ny_jit_native_cache_save(const char *so_path, LLVMModuleRef module, int opt_level,
-                              const char *const *link_libs, size_t link_count);
+bool ny_jit_native_cache_load(const char *so_path, void **out_handle,
+                              void (**out_entry)(void));
+bool ny_jit_native_cache_save(const char *so_path, LLVMModuleRef module,
+                              int opt_level, const char *const *link_libs,
+                              size_t link_count);
 
 /* Stencil-native cache: persist in-memory JIT code as a minimal ELF .so.
  * The key includes source, optimization level, backend, and native tier so
@@ -62,9 +70,9 @@ char *ny_jit_stencil_cache_path(const char *source, int opt_level,
                                 const char *backend, const char *tier,
                                 uint64_t config_fingerprint);
 bool ny_jit_stencil_cache_load(const char *so_path, void **out_handle,
-                                void (**out_entry)(void));
+                               void (**out_entry)(void));
 bool ny_jit_stencil_cache_save(const char *so_path, const unsigned char *code,
-                                size_t code_len, const char *entry_symbol);
+                               size_t code_len, const char *entry_symbol);
 #endif
 
 #endif

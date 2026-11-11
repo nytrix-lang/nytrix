@@ -456,7 +456,7 @@ bool nyr_tail_call(nyr_func_t *f, const char *func_name) {
      * unnecessary call effects for later whole-function analyses.
      */
     nyr_inst_discard(&f->data[i + add]);
-    nyr_inst_discard(&f->data[i + add + 1]);
+    nyr_inst_discard(&f->data[ret_at + add]);
 
     /*
      * Skip past the rewritten region; indices shifted by `add`.

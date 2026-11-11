@@ -1,3 +1,4 @@
+/* Clang-backed C parsing and frontend integration interfaces. */
 #ifndef NYTRIX_LANG_C_CLANG_H
 #define NYTRIX_LANG_C_CLANG_H
 

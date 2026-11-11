@@ -1,3 +1,6 @@
+/*
+ * Host-side C reference runner for parser and backend execution fixtures.
+ */
 #include <stdio.h>
 #include <string.h>
 
@@ -1068,8 +1071,8 @@ int main(void) {
     long expected = (value & 1) ? 13 : 10;
     long got = c_bitwise_select(value);
     if (got != expected) {
-      fprintf(stderr, "C bitwise-select mismatch for %ld: %ld != %ld\n",
-              value, got, expected);
+      fprintf(stderr, "C bitwise-select mismatch for %ld: %ld != %ld\n", value,
+              got, expected);
       return 1;
     }
   }

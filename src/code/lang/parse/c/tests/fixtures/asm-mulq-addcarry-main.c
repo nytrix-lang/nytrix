@@ -1,11 +1,13 @@
+/*
+ * Fixture driver: check multiply-add carry results from an assembly helper.
+ */
 #include <stdint.h>
 
 unsigned long long nyc_mulq_addcarry(unsigned long long low,
                                      unsigned long long multiplier,
                                      unsigned long long addend,
                                      unsigned long long *high_out);
-unsigned long long nyc_divq(unsigned long long low,
-                            unsigned long long high,
+unsigned long long nyc_divq(unsigned long long low, unsigned long long high,
                             unsigned long long divisor,
                             unsigned long long *remainder_out);
 

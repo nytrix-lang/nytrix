@@ -1,3 +1,6 @@
+/*
+ * Fixture: constrain inline assembly writes to a guarded memory output.
+ */
 struct guarded {
   unsigned long before;
   unsigned long counter;

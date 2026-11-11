@@ -1,3 +1,6 @@
+/*
+ * Public embedding pipeline for compiling and evaluating Nytrix source.
+ */
 #include <nytrix/nytrix.h>
 
 #include "base/options.h"

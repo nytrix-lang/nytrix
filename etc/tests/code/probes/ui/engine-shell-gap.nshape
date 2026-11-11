@@ -1,0 +1,21 @@
+shape engine_shell_gap {
+  family "runtime/ui"
+  generator "embedded"
+  features [ny engine layout gap]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  timeout 180
+  expect compile_and_run
+  expect_message "ENGINE-SHELL-GAP-OK"
+  source ny <<'NY'
+use core
+use core.os.ui.render.viewer.engine.shell as shell
+
+def plan = shell.tiled_layout_plan("default", 1800.0, 1000.0, 12.0, 0, true, false, false, false, true, true, true, false)
+def editor = plan.get("editor_main").get("rect")
+def middle = plan.get("workspace_grid").get("rect")
+def gap = float(middle[0]) - float(editor[0]) - float(editor[2])
+assert(gap > 11.99 && gap < 12.01, "requested 12-pixel panel gap is retained")
+print("ENGINE-SHELL-GAP-OK")
+NY
+}

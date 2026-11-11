@@ -1,3 +1,4 @@
+/* Native compilation pipeline interfaces for Ny programs. */
 #ifndef NY_LANG_PIPELINE_NATIVE_H
 #define NY_LANG_PIPELINE_NATIVE_H
 

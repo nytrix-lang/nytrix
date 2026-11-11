@@ -1,3 +1,6 @@
+/*
+ * Regression tests for x86 XMM value forwarding across machine instructions.
+ */
 #include "code/backend/internal.h"
 #include "code/backend/ir/machine.h"
 #include "code/backend/native.h"
@@ -20,12 +23,17 @@ static nyr_mach_operand_t frame(uint32_t index) {
 static bool emit(nyr_mach_func_t *m, nyr_mach_opcode_t op,
                  nyr_mach_operand_t dst, nyr_mach_operand_t src,
                  nyr_mach_operand_t rhs) {
-  return nyr_mach_emit(m, (nyr_mach_inst_t){
-      .opcode = op, .dst = dst, .src0 = src, .src1 = rhs,
-      .effects = op == NYR_MACH_STORE ? NYR_MACH_EFFECT_WRITE_MEMORY
-                 : op == NYR_MACH_LOAD ? NYR_MACH_EFFECT_READ_MEMORY
-                 : op == NYR_MACH_RET || op == NYR_MACH_BR
-                     ? NYR_MACH_EFFECT_CONTROL : NYR_MACH_EFFECT_NONE});
+  return nyr_mach_emit(
+      m, (nyr_mach_inst_t){
+             .opcode = op,
+             .dst = dst,
+             .src0 = src,
+             .src1 = rhs,
+             .effects = op == NYR_MACH_STORE  ? NYR_MACH_EFFECT_WRITE_MEMORY
+                        : op == NYR_MACH_LOAD ? NYR_MACH_EFFECT_READ_MEMORY
+                        : op == NYR_MACH_RET || op == NYR_MACH_BR
+                            ? NYR_MACH_EFFECT_CONTROL
+                            : NYR_MACH_EFFECT_NONE});
 }
 
 static size_t occurrences(const char *text, const char *pattern) {
@@ -89,22 +97,26 @@ static bool check(nyr_mach_type_t type, unsigned mode) {
   ok = ok && emit(&m, NYR_MACH_COPY, vr, zero, none) &&
        emit(&m, NYR_MACH_RET, none, vr, none);
   nyr_writer_t w = {0};
-  const ny_native_target_info_t target = {
-      .target = NY_NATIVE_TARGET_X86_64, .abi = NY_NATIVE_ABI_SYSV,
-      .object_format = "elf", .symbol_prefix = ""};
+  const ny_native_target_info_t target = {.target = NY_NATIVE_TARGET_X86_64,
+                                          .abi = NY_NATIVE_ABI_SYSV,
+                                          .object_format = "elf",
+                                          .symbol_prefix = ""};
   ok = ok && nyr_mach_verify(&m, 0, err, sizeof(err)) &&
        nyr_x86_64_emit_mach_scalar(&w, &target, &m, "xmm_forward", false, false,
-                                    err, sizeof(err));
+                                   err, sizeof(err));
   if (ok) {
-    const char *op = mode == 7 || mode == 8 ? "\tsqrtsd\t" :
-                     fp32 ? "\taddss\t" : "\taddsd\t";
+    const char *op = mode == 7 || mode == 8 ? "\tsqrtsd\t"
+                     : fp32                 ? "\taddss\t"
+                                            : "\taddsd\t";
     const char *spill = fp32 ? "\tmovss\t%xmm0, -" : "\tmovsd\t%xmm0, -";
     const char *add = strstr(w.data, op);
     const char *after = add ? strstr(add, spill) : NULL;
     const char *store = add ? strstr(add, fp32 ? "\tmovss\t%xmm0, (%rax)"
-                                                 : "\tmovsd\t%xmm0, (%rax)") : NULL;
-    ok = add && store && ((after == NULL || after > store) ==
-                          (mode != 2 && mode != 4 && mode != 6 && mode != 9));
+                                               : "\tmovsd\t%xmm0, (%rax)")
+                            : NULL;
+    ok = add && store &&
+         ((after == NULL || after > store) ==
+          (mode != 2 && mode != 4 && mode != 6 && mode != 9));
     if (mode == 2 || mode == 4 || mode == 6)
       ok = ok && occurrences(w.data, spill) >= 2;
     if (mode == 9)
@@ -116,8 +128,8 @@ static bool check(nyr_mach_type_t type, unsigned mode) {
     }
   }
   if (!ok)
-    fprintf(stderr, "[machine-xmm-forward] type=%u mode=%u %s\n%s",
-            type, mode, err, w.data ? w.data : "<no asm>\n");
+    fprintf(stderr, "[machine-xmm-forward] type=%u mode=%u %s\n%s", type, mode,
+            err, w.data ? w.data : "<no asm>\n");
   free(w.data);
   nyr_mach_func_free(&m);
   return ok;
@@ -132,6 +144,7 @@ int main(void) {
       ok = check(type ? NYR_MACH_TYPE_F32 : NYR_MACH_TYPE_F64, mode) && ok;
     }
   if (ok)
-    puts("[machine-xmm-forward] eighteen f32/f64 forwarding and barrier cases passed");
+    puts("[machine-xmm-forward] eighteen f32/f64 forwarding and barrier cases "
+         "passed");
   return ok ? 0 : 1;
 }

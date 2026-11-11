@@ -1,3 +1,6 @@
+/*
+ * Fixture: perform a byte-sized compare-exchange through inline assembly.
+ */
 static unsigned char cmpxchg_byte(unsigned char *memory, unsigned char expected,
                                   unsigned char replacement) {
   unsigned char old;

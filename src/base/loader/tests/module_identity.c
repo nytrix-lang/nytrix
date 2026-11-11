@@ -1,3 +1,6 @@
+/*
+ * Regression test for stable standard-module identity lookup.
+ */
 #include "base/loader.h"
 #include "code/lang/parse/parser.h"
 

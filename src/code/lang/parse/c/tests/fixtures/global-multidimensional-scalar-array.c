@@ -1,3 +1,6 @@
+/*
+ * C parser fixture for global multidimensional scalar-array initialization.
+ */
 struct nyc_matrix_fixture {
   signed char counters[2][3];
   unsigned int ids[2][2];

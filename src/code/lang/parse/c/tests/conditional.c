@@ -1,3 +1,6 @@
+/*
+ * Parser/backend fixture for a store followed by a conditional return.
+ */
 long c_cond_mutate(long *slot) {
   *slot = 1;
   return 7;

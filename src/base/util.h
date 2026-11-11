@@ -1,3 +1,4 @@
+/* Shared compiler utilities for file I/O, strings, paths, and diagnostics. */
 #ifndef NY_COMPILER_UTIL_H
 #define NY_COMPILER_UTIL_H
 
@@ -163,28 +164,28 @@ static inline uint64_t ny_hash64_u64(uint64_t seed, uint64_t v) {
   return ny_fnv1a64(&v, sizeof(v), seed ? seed : NY_FNV1A64_OFFSET_BASIS);
 }
 
-#define NY_COMPILER_ASSERT(cond, msg)                                          \
-  do {                                                                         \
-    if (ny_compiler_asserts_enabled() && !(cond))                              \
-      ny_compiler_assert_fail(__FILE__, __LINE__, __func__, #cond, "%s",       \
-                              (msg));                                          \
+#define NY_COMPILER_ASSERT(cond, msg)                                    \
+  do {                                                                   \
+    if (ny_compiler_asserts_enabled() && !(cond))                        \
+      ny_compiler_assert_fail(__FILE__, __LINE__, __func__, #cond, "%s", \
+                              (msg));                                    \
   } while (0)
 
-#define NY_COMPILER_ASSERTF(cond, fmt, ...)                                    \
-  do {                                                                         \
-    if (ny_compiler_asserts_enabled() && !(cond))                              \
-      ny_compiler_assert_fail(__FILE__, __LINE__, __func__, #cond,             \
-                              (fmt), ##__VA_ARGS__);                           \
+#define NY_COMPILER_ASSERTF(cond, fmt, ...)                        \
+  do {                                                             \
+    if (ny_compiler_asserts_enabled() && !(cond))                  \
+      ny_compiler_assert_fail(__FILE__, __LINE__, __func__, #cond, \
+                              (fmt), ##__VA_ARGS__);               \
   } while (0)
 
-#define NY_INVARIANT_ASSERT(cond, inv_name, src_file, src_line, src_col,       \
-                            mod_fn, state, fmt, ...)                           \
-  do {                                                                         \
-    if (ny_compiler_asserts_enabled() && !(cond)) {                            \
-      ny_compiler_invariant_fail(__FILE__, __LINE__, __func__, (inv_name),     \
-                                 (src_file), (int)(src_line), (int)(src_col),  \
-                                 (mod_fn), (state), (fmt), ##__VA_ARGS__);     \
-    }                                                                          \
+#define NY_INVARIANT_ASSERT(cond, inv_name, src_file, src_line, src_col,      \
+                            mod_fn, state, fmt, ...)                          \
+  do {                                                                        \
+    if (ny_compiler_asserts_enabled() && !(cond)) {                           \
+      ny_compiler_invariant_fail(__FILE__, __LINE__, __func__, (inv_name),    \
+                                 (src_file), (int)(src_line), (int)(src_col), \
+                                 (mod_fn), (state), (fmt), ##__VA_ARGS__);    \
+    }                                                                         \
   } while (0)
 
 static inline bool ny_add_range_ok(int64_t a, int64_t b, int64_t *out) {
@@ -366,7 +367,7 @@ bool ny_log_should_emit(const char *fmt);
 void ny_complexity_note(const char *file, int line, const char *func,
                         const char *category, const char *detail);
 
-#define NY_COMPLEXITY_NOTE(cat, detail)                                        \
+#define NY_COMPLEXITY_NOTE(cat, detail)                             \
   ny_complexity_note(__FILE__, __LINE__, __func__, (cat), (detail))
 
 const char *ny_src_root(void);

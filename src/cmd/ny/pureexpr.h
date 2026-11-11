@@ -1,3 +1,4 @@
+/* Pure-expression API used by the Ny command-line evaluator. */
 #ifndef NY_CMD_NY_PUREEXPR_H
 #define NY_CMD_NY_PUREEXPR_H
 

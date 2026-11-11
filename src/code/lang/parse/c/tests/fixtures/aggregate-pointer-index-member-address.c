@@ -1,3 +1,6 @@
+/*
+ * C parser fixture for taking an indexed member address through a pointer.
+ */
 struct list_head {
   struct list_head *next;
   struct list_head *prev;

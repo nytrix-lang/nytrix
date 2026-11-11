@@ -1,3 +1,6 @@
+/*
+ * Linux-style inline assembly fixture for atomic add and sign detection.
+ */
 static void atomic_add(unsigned int *counter, int addend,
                        unsigned char *negative_out) {
   unsigned char negative = 0;

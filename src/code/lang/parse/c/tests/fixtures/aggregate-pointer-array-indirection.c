@@ -1,3 +1,6 @@
+/*
+ * Fixture: follow pointer links stored in an aggregate array.
+ */
 struct rcu_head {
   struct rcu_head *next;
   int value;
@@ -8,9 +11,9 @@ struct callback_list {
   struct rcu_head **tails[4];
 };
 
-#define WRITE_ONCE(object, value)                                              \
-  do {                                                                         \
-    *(volatile __typeof__(object) *)&(object) = (value);                       \
+#define WRITE_ONCE(object, value)                        \
+  do {                                                   \
+    *(volatile __typeof__(object) *)&(object) = (value); \
   } while (0)
 
 int main(void) {

@@ -1,3 +1,6 @@
+/*
+ * Fixture: inline-assembly checksum reduction for IPv4 headers.
+ */
 static unsigned short nyc_ip_fast_csum(const void *iph, unsigned int ihl) {
   unsigned int sum;
   asm("  movl (%1), %0\n"

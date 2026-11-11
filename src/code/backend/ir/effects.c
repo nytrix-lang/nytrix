@@ -1,3 +1,6 @@
+/*
+ * Conservative effect summaries for known runtime calls and helpers.
+ */
 #include "code/backend/ir/internal.h"
 #include <nyr/ir.h>
 #include <string.h>

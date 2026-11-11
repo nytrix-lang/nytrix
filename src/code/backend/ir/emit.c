@@ -68,7 +68,7 @@ static const nyr_backend_emitter_t g_backend_emitters[] = {
     {"avr", NY_NATIVE_TARGET_AVR, nyr_avr_emit_ir, NULL},
     {"wasm", NY_NATIVE_TARGET_WASM, nyr_wasm_emit_ir, NULL},
 };
-#define NUM_BACKEND_EMITTERS                                                   \
+#define NUM_BACKEND_EMITTERS                                   \
   (sizeof(g_backend_emitters) / sizeof(g_backend_emitters[0]))
 
 const nyr_backend_emitter_t *

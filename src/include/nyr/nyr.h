@@ -1,6 +1,3 @@
-#ifndef NYR_PUBLIC_H
-#define NYR_PUBLIC_H
-
 /*
  * Public Nyr API, version 1.
  *
@@ -10,6 +7,9 @@
  * implementation. Check nyr_version() and rebuild when the API
  * major version changes.
  */
+#ifndef NYR_PUBLIC_H
+#define NYR_PUBLIC_H
+
 #include <nyr/ir.h>
 
 #include <stdbool.h>

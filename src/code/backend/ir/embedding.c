@@ -1,3 +1,6 @@
+/*
+ * In-process NYIR virtual-machine API for embedding hosts.
+ */
 #include <nytrix/nytrix.h>
 
 #include <stdio.h>
@@ -222,9 +225,9 @@ static bool nytrix_eval_registered(nytrix_vm_t *vm, const char *name,
   nyr_eval_result_t *eval_result =
       result ? result : (owns_result ? &nested_result : NULL);
   ++vm->call_depth;
-  bool ok =
-      nyr_ir_eval_with_calls(func, locals, local_count, vm->max_steps,
-                           eval_result, nytrix_resolve_call, vm, err, err_len);
+  bool ok = nyr_ir_eval_with_calls(func, locals, local_count, vm->max_steps,
+                                   eval_result, nytrix_resolve_call, vm, err,
+                                   err_len);
   --vm->call_depth;
   free(locals);
   if (!ok) {

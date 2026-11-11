@@ -1,3 +1,6 @@
+/*
+ * Fixture: use _Generic to select a call for an aggregate pointer type.
+ */
 struct dentry {
   int value;
 };

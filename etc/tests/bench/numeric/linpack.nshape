@@ -12,6 +12,7 @@ use core.tbuf
 def N = 100
 def A = f64buf_new(N * N)
 def b = f64buf_new(N)
+def pivot_row = f64buf_new(N)
 mut i = 0
 while i < N {
    mut j = 0
@@ -36,14 +37,21 @@ def int t0 = ticks()
 ;; LU factorize in place (Doolittle)
 mut k = 0
 while k < N {
+   ;; Snapshot the active pivot row into a disjoint buffer. Rows below k are
+   ;; updated in place, while this row remains unchanged throughout the pass.
+   mut copy_c = k
+   while copy_c < N {
+      f64buf_store(pivot_row, copy_c, f64buf_load(A, k * N + copy_c))
+      copy_c += 1
+   }
    mut r = k + 1
    while r < N {
-      def piv = f64buf_load(A, k * N + k)
+      def piv = f64buf_load(pivot_row, k)
       def m = f64buf_load(A, r * N + k) / piv
       f64buf_store(A, r * N + k, m)
       mut c = k + 1
       while c < N {
-         f64buf_store(A, r * N + c, f64buf_load(A, r * N + c) - m * f64buf_load(A, k * N + c))
+         f64buf_store(A, r * N + c, f64buf_load(A, r * N + c) - m * f64buf_load(pivot_row, c))
          c += 1
       }
       r += 1
@@ -103,6 +111,7 @@ int main(void) {
     int N = 100;
     double *A = (double *)malloc((size_t)N * N * sizeof(double));
     double *b = (double *)malloc((size_t)N * sizeof(double));
+    double *pivot_row = (double *)malloc((size_t)N * sizeof(double));
     for (int i = 0; i < N; i++)
         for (int j = 0; j < N; j++)
             A[i * N + j] = (i == j) ? 100.0 : 1.0;
@@ -113,21 +122,37 @@ int main(void) {
     }
     int64_t t0 = now_ns();
     for (int k = 0; k < N; k++) {
+        for (int c = k; c < N; c++) pivot_row[c] = A[k * N + c];
         for (int r = k + 1; r < N; r++) {
-            double piv = A[k * N + k];
+            double piv = pivot_row[k];
             double m = A[r * N + k] / piv;
             A[r * N + k] = m;
-            for (int c = k + 1; c < N; c++)
-                A[r * N + c] -= m * A[k * N + c];
+            double *restrict dst = A + r * N + k + 1;
+            const double *restrict src = pivot_row + k + 1;
+            double *end = A + (r + 1) * N;
+            for (; dst + 3 < end; dst += 4, src += 4) {
+                dst[0] -= m * src[0];
+                dst[1] -= m * src[1];
+                dst[2] -= m * src[2];
+                dst[3] -= m * src[3];
+            }
+            for (; dst < end; ++dst, ++src) *dst -= m * *src;
         }
     }
-    for (int row = 0; row < N; row++)
-        for (int c = 0; c < row; c++)
-            b[row] -= A[row * N + c] * b[c];
+    for (int row = 0; row < N; row++) {
+        double sum = b[row];
+        const double *a = A + row * N;
+        const double *y = b;
+        for (int c = 0; c < row; c++, ++a, ++y) sum -= *a * *y;
+        b[row] = sum;
+    }
     double *x = (double *)malloc((size_t)N * sizeof(double));
     for (int rr = N - 1; rr >= 0; rr--) {
         double s = b[rr];
-        for (int c = rr + 1; c < N; c++) s -= A[rr * N + c] * x[c];
+        const double *a = A + rr * N + rr + 1;
+        const double *x_col = x + rr + 1;
+        const double *end = A + (rr + 1) * N;
+        for (; a < end; ++a, ++x_col) s -= *a * *x_col;
         x[rr] = s / A[rr * N + rr];
     }
     int64_t t1 = now_ns();

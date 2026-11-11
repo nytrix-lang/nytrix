@@ -839,8 +839,15 @@ bool ny_pipeline_emit_program_object(const program_t *prog,
                   target.target_name ? target.target_name : "unknown");
     return false;
   }
+  bool profile_object = getenv("NYTRIX_AOT_OBJECT_PROFILE") != NULL;
+  clock_t phase_started = profile_object ? clock() : 0;
   if (!ny_pipeline_dump_ir_for_program(prog, opt, err, err_len))
     return false;
+  if (profile_object) {
+    clock_t phase_ended = clock();
+    fprintf(stderr, "[aot-object] phase=dump-ir elapsed=%.6fs\n",
+            (double)(phase_ended - phase_started) / CLOCKS_PER_SEC);
+  }
   if (ny_native_target_has(&target, NY_NATIVE_CAP_ELF_OBJECT) ||
       ny_native_target_has(&target, NY_NATIVE_CAP_COFF_OBJECT) ||
       ny_native_target_has(&target, NY_NATIVE_CAP_MACHO_OBJECT)) {
@@ -857,9 +864,16 @@ bool ny_pipeline_emit_program_object(const program_t *prog,
                     "native object function pool allocation failed");
       return false;
     }
+    phase_started = profile_object ? clock() : 0;
     bool nir_built =
         nyr_build_ir(prog, opt, &rt_main_nir, func_nirs, &func_count,
                      func_names, func_cap, nir_err, sizeof(nir_err));
+    if (profile_object) {
+      clock_t phase_ended = clock();
+      fprintf(
+          stderr, "[aot-object] phase=build-ir elapsed=%.6fs functions=%zu\n",
+          (double)(phase_ended - phase_started) / CLOCKS_PER_SEC, func_count);
+    }
     if (nir_built && target.abi == NY_NATIVE_ABI_WIN64) {
       for (size_t i = 0; nir_built && i < func_count; ++i)
         nir_built = ny_native_x64_win64_aggregate_supported(
@@ -880,6 +894,7 @@ bool ny_pipeline_emit_program_object(const program_t *prog,
           entry_name && entry_name[0] ? entry_name : "rt_main";
       char obj_err[512] = {0};
       bool obj_ok = false;
+      phase_started = profile_object ? clock() : 0;
       if (ny_native_target_has(&target, NY_NATIVE_CAP_ELF_OBJECT)) {
         if (target.target == NY_NATIVE_TARGET_X86) {
           obj_ok = nyr_native_emit_elf32_i386_object_from_nirs(
@@ -904,6 +919,11 @@ bool ny_pipeline_emit_program_object(const program_t *prog,
         obj_ok = nyr_native_emit_macho_x64_object_from_nirs(
             &rt_main_nir, func_nirs, func_names, func_count, &target, path,
             obj_symbol, tag_return, obj_err, sizeof(obj_err));
+      }
+      if (profile_object) {
+        clock_t phase_ended = clock();
+        fprintf(stderr, "[aot-object] phase=machine-object elapsed=%.6fs\n",
+                (double)(phase_ended - phase_started) / CLOCKS_PER_SEC);
       }
       if (!obj_ok && getenv("NY_DUMP_MACH"))
         fprintf(stderr, "native object writer failed: %s\n",

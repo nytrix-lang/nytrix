@@ -1,3 +1,6 @@
+/*
+ * Runtime fixture for computed goto dispatch through a label table.
+ */
 static int dispatch(unsigned index) {
   static void *const targets[] = {&&first, &&second};
   goto *targets[index];

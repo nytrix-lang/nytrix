@@ -3859,13 +3859,13 @@ static bool ct_value_from_parse_code(parser_t *p, expr_t *call,
    * A struct assignment would share the backing arrays, and vec_push_arena
    * writes into spare capacity before it allocates a new one.
    */
-#define CT_COPY_REGISTRY(dst, src)                                             \
-  do {                                                                         \
-    if ((src).len) {                                                           \
-      vec_reserve_arena(p->arena, &(dst), (src).len);                          \
-      memcpy((dst).data, (src).data, (src).len * sizeof(*(src).data));         \
-      (dst).len = (src).len;                                                   \
-    }                                                                          \
+#define CT_COPY_REGISTRY(dst, src)                                     \
+  do {                                                                 \
+    if ((src).len) {                                                   \
+      vec_reserve_arena(p->arena, &(dst), (src).len);                  \
+      memcpy((dst).data, (src).data, (src).len * sizeof(*(src).data)); \
+      (dst).len = (src).len;                                           \
+    }                                                                  \
   } while (0)
   CT_COPY_REGISTRY(sub.ct_layouts, p->ct_layouts);
   CT_COPY_REGISTRY(sub.ct_modules, p->ct_modules);

@@ -1,3 +1,6 @@
+/*
+ * Fixture: retain unreachable inline assembly in a guarded control-flow path.
+ */
 __attribute__((noinline)) static int guarded(int condition) {
   if (condition)
     do {

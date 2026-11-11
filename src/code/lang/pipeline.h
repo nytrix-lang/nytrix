@@ -1,3 +1,4 @@
+/* Shared language-pipeline configuration and stage interfaces. */
 #ifndef NY_BACKEND_WIRE_PIPE_H
 #define NY_BACKEND_WIRE_PIPE_H
 

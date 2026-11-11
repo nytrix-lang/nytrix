@@ -688,12 +688,12 @@ static bool nyr_native_machine_code_size(const ny_native_target_info_t *target,
 
 static void nyr_native_print_caps(FILE *out, unsigned caps) {
   bool first = true;
-#define NY_CAP(name, bit)                                                      \
-  do {                                                                         \
-    if ((caps & (unsigned)(bit)) != 0) {                                       \
-      fprintf(out, "%s%s", first ? "" : ",", name);                            \
-      first = false;                                                           \
-    }                                                                          \
+#define NY_CAP(name, bit)                           \
+  do {                                              \
+    if ((caps & (unsigned)(bit)) != 0) {            \
+      fprintf(out, "%s%s", first ? "" : ",", name); \
+      first = false;                                \
+    }                                               \
   } while (0)
   NY_CAP("nyir-asm", NY_NATIVE_CAP_NIR_ASM);
   NY_CAP("ast-fallback", NY_NATIVE_CAP_AST_FALLBACK);

@@ -1,3 +1,6 @@
+/*
+ * Host fixture: define and invoke the external global callback pointer.
+ */
 static int nyc_callback_target(int value) { return value * 3 + 1; }
 int (*nyc_external_callback)(int) = nyc_callback_target;
 int nyc_external_callback_call(int);

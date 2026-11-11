@@ -80,6 +80,16 @@ NY_UI_RENDER_BACKEND=vk build/release/ny-full --no-progress etc/projects/ui/inpu
 
 These commands open interactive windows and require a usable display plus the
 selected backend. Run them only when desktop interaction is intended.
+
+`NY_UI_RENDER_BACKEND=tty` (also `terminal`, `ansi`, or `tui`, or the same names
+in `NY_UI_BACKEND`) draws on the CPU renderer and presents every frame to the
+controlling terminal as true-color cells sized to the terminal. The automatic
+backend makes the same choice when neither `WAYLAND_DISPLAY` nor `DISPLAY` is
+set and both stdin and stdout are terminals; `NY_UI_TTY=0` turns that off and
+`NY_UI_TTY=1` forces it. The terminal runs on the alternate screen in raw mode
+and is restored on `close_window`. Typed keys arrive as window key events:
+arrows, Home, End, Enter, Tab, Backspace, Escape, and printable keys, pressed
+for one frame. Ctrl+C closes the window. There is no mouse input.
 For automated Linux checks, use an isolated X11 display, not the user's desktop.
 Xvfb with `GALLIUM_DRIVER=softpipe` can exercise OpenGL software rendering; it
 is not a GPU frame-rate measurement. Xvfb may lack the DRI3 presentation surface

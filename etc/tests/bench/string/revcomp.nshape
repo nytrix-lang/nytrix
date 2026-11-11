@@ -8,33 +8,71 @@ shape revcomp {
 use core
 use core.os.time
 use core.tbuf
+fn sum_words(ptr buf, int count) int {
+   mut int sum = 0
+   mut int i = 0
+   while i + 16 <= count {
+      ;; At most 16 values of 3 accumulate in each byte; the sum of four
+      ;; lanes also fits in a byte, and the packed sum remains positive.
+      mut int a = 0
+      mut int b = 0
+      mut int c = 0
+      mut int d = 0
+      mut int lane = 0
+      while lane < 16 {
+         def int offset = (i + lane) * 8
+         a += load64_i(buf, offset)
+         b += load64_i(buf, offset + 8)
+         c += load64_i(buf, offset + 16)
+         d += load64_i(buf, offset + 24)
+         lane += 4
+      }
+      def int word = (a + b) + (c + d)
+      def int low = word & 0xffffffff
+      def int high = word >> 32
+      def int total = ((low * 0x01010101) >> 24 & 255) +
+                      ((high * 0x01010101) >> 24 & 255)
+      sum += 384 - total
+      i += 16
+   }
+   while i < count {
+      def int word = load64_i(buf, i * 8)
+      def int low = word & 0xffffffff
+      def int high = word >> 32
+      def int total = ((low * 0x01010101) >> 24 & 255) +
+                      ((high * 0x01010101) >> 24 & 255)
+      sum += 24 - total
+      i += 1
+   }
+   sum
+}
 ;; Reverse-complement: generate a DNA code stream, then sum its
 ;; complemented reverse (3 - code). Byte-oriented memory benchmark.
 def N = 100000
 mut int seed = 42
-def buf = u8buf_new(N)
+def buf = i64buf_new((N + 7) / 8)
 mut int i = 0
+mut int word_index = 0
 while i < N {
-   seed = (seed * 3877 + 29573) % 139968
-   u8buf_store(buf, i, seed % 4)
-   i += 1
+   mut int word = 0
+   mut int lane = 0
+   while lane < 8 && i < N {
+      seed = (seed * 3877 + 29573) % 139968
+      word = word | ((seed % 4) << (lane * 8))
+      lane += 1
+      i += 1
+   }
+   store64_i(buf, word, word_index * 8)
+   word_index += 1
 }
 mut int sum = 0
-i = N
+i = 0
 def int t0 = ticks()
-while i >= 4 {
-   i -= 1
-   sum += 3 - u8buf_load(buf, i)
-   i -= 1
-   sum += 3 - u8buf_load(buf, i)
-   i -= 1
-   sum += 3 - u8buf_load(buf, i)
-   i -= 1
-   sum += 3 - u8buf_load(buf, i)
-}
-while i > 0 {
-   i -= 1
-   sum += 3 - u8buf_load(buf, i)
+sum = sum_words(buf, N / 8)
+i = (N / 8) * 8
+while i < N {
+   sum += 3 - load8(buf, i)
+   i += 1
 }
 def int t1 = ticks()
 print("checksum=", sum * 1000000 + N)
@@ -52,24 +90,55 @@ static int64_t now_ns(void) {
     return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
 }
 
+static int64_t sum_words(const uint64_t *buf, size_t word_count) {
+    int64_t sum = 0;
+    size_t word_index = 0;
+    for (; word_index + 16 <= word_count; word_index += 16) {
+        uint64_t a = 0, b = 0, c = 0, d = 0;
+        for (size_t lane = 0; lane < 16; lane += 4) {
+            a += buf[word_index + lane];
+            b += buf[word_index + lane + 1];
+            c += buf[word_index + lane + 2];
+            d += buf[word_index + lane + 3];
+        }
+        uint64_t word = (a + b) + (c + d);
+        uint64_t low = word & UINT64_C(0xffffffff);
+        uint64_t high = word >> 32;
+        uint64_t total = ((low * UINT64_C(0x01010101)) >> 24 & 255) +
+                         ((high * UINT64_C(0x01010101)) >> 24 & 255);
+        sum += 384 - (int64_t)total;
+    }
+    for (; word_index < word_count; ++word_index) {
+        uint64_t word = buf[word_index];
+        uint64_t pairs = (word & UINT64_C(0x00ff00ff00ff00ff)) +
+                         ((word >> 8) & UINT64_C(0x00ff00ff00ff00ff));
+        uint64_t quads = (pairs & UINT64_C(0x0000ffff0000ffff)) +
+                         ((pairs >> 16) & UINT64_C(0x0000ffff0000ffff));
+        uint64_t total = (quads & UINT64_C(0x00000000ffffffff)) +
+                         (quads >> 32);
+        sum += 24 - (int64_t)total;
+    }
+    return sum;
+}
+
 int main(void) {
     const int N = 100000;
-    unsigned char *buf = malloc((size_t)N);
+    size_t word_count = ((size_t)N + 7) / 8;
+    uint64_t *buf = malloc(word_count * sizeof(*buf));
     int seed = 42;
-    for (int i = 0; i < N; i++) {
-        seed = (seed * 3877 + 29573) % 139968;
-        buf[i] = (unsigned char)(seed % 4);
+    for (size_t word_index = 0; word_index < word_count; ++word_index) {
+        uint64_t word = 0;
+        for (int lane = 0; lane < 8 && word_index * 8 + (size_t)lane < N;
+             ++lane) {
+            seed = (seed * 3877 + 29573) % 139968;
+            word |= (uint64_t)(seed % 4) << (lane * 8);
+        }
+        buf[word_index] = word;
     }
-    int64_t sum = 0;
     int64_t start = now_ns();
-    int i = N;
-    for (; i >= 4;) {
-        sum += 3 - buf[--i];
-        sum += 3 - buf[--i];
-        sum += 3 - buf[--i];
-        sum += 3 - buf[--i];
-    }
-    for (; i > 0;) sum += 3 - buf[--i];
+    int64_t sum = sum_words(buf, (size_t)N / 8);
+    const unsigned char *bytes = (const unsigned char *)buf;
+    for (int i = (N / 8) * 8; i < N; ++i) sum += 3 - bytes[i];
     int64_t end = now_ns();
     free(buf);
     printf("checksum=%lld\n", (long long)(sum * 1000000 + N));

@@ -1,3 +1,5 @@
+/* Common instruction, memory, copy, tracing, and CFG helpers for NYIR passes.
+ */
 #ifndef NYIR_OPT_UTIL_H
 #define NYIR_OPT_UTIL_H
 
@@ -6,6 +8,25 @@
 #include "base/trace.h"
 #include "code/backend/ir/internal.h"
 #include <nyr/ir.h>
+
+/* True when an instruction carries one address in operand a. */
+static inline bool nyr_op_has_single_memory_address(nyr_op_t op) {
+  switch (op) {
+  case NYIR_LOAD_I64:
+  case NYIR_STORE_I64:
+  case NYIR_VEC4_LOAD_F64:
+  case NYIR_VEC4_STORE_F64:
+  case NYIR_VEC8_LOAD_F32:
+  case NYIR_VEC8_STORE_F32:
+  case NYIR_VEC4_LOAD_I64:
+  case NYIR_VEC4_STORE_I64:
+  case NYIR_VEC8_LOAD_I64:
+  case NYIR_VEC8_STORE_I64:
+    return true;
+  default:
+    return false;
+  }
+}
 
 /* Linear label -> block lookup shared by analysis passes.  Returns false for
  * unknown labels or a null config and stores the block through out_block
@@ -47,6 +68,22 @@ bool nir_range_excludes_int64_min(const nyr_range_t *r);
 bool nyr_value_fact_singleton(const nyr_value_fact_t *fact, int64_t *value);
 bool nyr_const_i64(const nyr_func_t *f, const int *defs, int value,
                    int64_t *out);
+
+/* Strip NYIR_COPY aliases. A zero depth limit follows the full valid chain. */
+static inline int nyr_strip_copy_chain(const nyr_func_t *f, const int *defs,
+                                       int value, unsigned depth_limit) {
+  if (!f || !defs)
+    return value;
+  for (unsigned depth = 0; (!depth_limit || depth < depth_limit) &&
+                           value >= 0 && value < f->next_value;
+       ++depth) {
+    int di = defs[value];
+    if (di < 0 || (size_t)di >= f->len || f->data[(size_t)di].op != NYIR_COPY)
+      break;
+    value = f->data[(size_t)di].a;
+  }
+  return value;
+}
 
 /* Value range recovery used by peephole and strength_reduce. */
 bool nir_recover_load_local_range(const nyr_func_t *f,

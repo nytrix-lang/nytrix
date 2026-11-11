@@ -1,3 +1,5 @@
+/* Loop and scalar-evolution analysis records shared by NYIR optimization
+ * passes. */
 #ifndef NYIR_LOOP_H
 #define NYIR_LOOP_H
 
@@ -43,20 +45,19 @@ typedef struct {
 bool nyr_scev_analyze(const nyr_func_t *f, nyr_scev_info_t *out);
 void nyr_scev_free(nyr_scev_info_t *info);
 bool nyr_scev_affine_at(const nyr_func_t *f, const nyr_scev_info_t *info,
-                         const int *defs, int value, size_t at,
-                         nyr_scev_affine_t *out);
+                        const int *defs, int value, size_t at,
+                        nyr_scev_affine_t *out);
 bool nyr_scev_affine_at_cfg(const nyr_func_t *f, const nyr_scev_info_t *info,
-                             const int *defs, const nyr_cfg_t *cfg, int value,
-                             size_t at, nyr_scev_affine_t *out);
+                            const int *defs, const nyr_cfg_t *cfg, int value,
+                            size_t at, nyr_scev_affine_t *out);
 bool nyr_scev_tbuf_bounds_check_safe(const nyr_func_t *f,
-                                      const nyr_scev_info_t *info,
-                                      const int *defs, size_t at,
-                                      const nyr_inst_t *check);
+                                     const nyr_scev_info_t *info,
+                                     const int *defs, size_t at,
+                                     const nyr_inst_t *check);
 bool nyr_scev_tbuf_bounds_check_safe_cfg(const nyr_func_t *f,
-                                          const nyr_scev_info_t *info,
-                                          const int *defs,
-                                          const nyr_cfg_t *cfg, size_t at,
-                                          const nyr_inst_t *check);
+                                         const nyr_scev_info_t *info,
+                                         const int *defs, const nyr_cfg_t *cfg,
+                                         size_t at, const nyr_inst_t *check);
 bool nyr_scev_lite(nyr_func_t *f);
 bool nyr_irce(nyr_func_t *f);
 bool nyr_loop_idiom(nyr_func_t *f);

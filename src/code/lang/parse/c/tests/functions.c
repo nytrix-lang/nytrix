@@ -1,3 +1,6 @@
+/*
+ * Parser/backend fixture for function calls, arities, and floating arguments.
+ */
 long c_helper(long, long);
 double c_double_helper(double, double);
 long c_seven_params(long, long, long, long, long, long, long);

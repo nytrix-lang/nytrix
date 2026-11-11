@@ -95,6 +95,35 @@ static bool nyr_vectorize_is_typed_buffer(const nyr_func_t *f, const int *defs,
 }
 
 /*
+ * Calls emitted for the language's raw malloc/free builtins can use the
+ * runtime's width-specific entry points instead of the source builtin name.
+ * They still return fresh private allocations and carry a byte count in their
+ * single argument. Keep this list exact: allocation provenance is used to
+ * prove both non-aliasing and access bounds before vectorizing memory ops.
+ */
+static bool tbuf_is_single_size_allocator(const char *symbol) {
+  if (!symbol)
+    return false;
+  if (strcmp(symbol, "rt_malloc") == 0 ||
+      strcmp(symbol, "rt_malloc_i64") == 0 ||
+      strcmp(symbol, "rt_malloc_raw") == 0 ||
+      strcmp(symbol, "rt_malloc_raw_i64") == 0 ||
+      strcmp(symbol, "rt_malloc_uninit") == 0 ||
+      strcmp(symbol, "rt_calloc_raw") == 0 ||
+      strcmp(symbol, "rt_calloc_raw_i64") == 0 ||
+      strcmp(symbol, "rt_zalloc_raw") == 0)
+    return true;
+  ny_builtin_alloc_kind_t kind = ny_builtin_alloc_kind(symbol);
+  return kind == NY_BUILTIN_ALLOC_MALLOC || kind == NY_BUILTIN_ALLOC_ZALLOC;
+}
+
+static bool tbuf_is_private_allocator(const char *symbol) {
+  if (tbuf_is_single_size_allocator(symbol))
+    return true;
+  return ny_builtin_alloc_kind(symbol) == NY_BUILTIN_ALLOC_CALLOC;
+}
+
+/*
  * V128/V256 i64 loop vectorization.
  *
  * VEC4_I64 opcodes represent 128-bit vectors (2×i64 lanes).
@@ -220,16 +249,18 @@ static bool tbuf_alloc_bytes(const nyr_func_t *f, const int *defs, int value,
   bool typed_buffer = strcmp(def->symbol, "rt_tbuf_new_raw") == 0 ||
                       strcmp(def->symbol, "rt_tbuf_new_typed_raw") == 0;
   ny_builtin_alloc_kind_t kind = ny_builtin_alloc_kind(def->symbol);
-  bool one_size = kind == NY_BUILTIN_ALLOC_MALLOC;
-  if (!typed_buffer && !one_size && kind != NY_BUILTIN_ALLOC_CALLOC)
+  bool one_size = !typed_buffer && tbuf_is_single_size_allocator(def->symbol);
+  bool two_size = !typed_buffer && !one_size && kind == NY_BUILTIN_ALLOC_CALLOC;
+  if (!typed_buffer && !one_size && !two_size)
     return false;
   int args[2] = {-1, -1};
   int argc = 0;
   int64_t count = 0, elem = 1;
   if (!nyr_call_args(def, f->next_value, args, 2, &argc, NULL, 0) ||
-      argc != (one_size ? 1 : 2) || !nyr_const_i64(f, defs, args[0], &count) ||
-      (!one_size && !nyr_const_i64(f, defs, args[1], &elem)) || count <= 0 ||
-      elem <= 0 || count > INT64_MAX / elem)
+      argc != ((typed_buffer || two_size) ? 2 : 1) ||
+      !nyr_const_i64(f, defs, args[0], &count) ||
+      ((typed_buffer || two_size) && !nyr_const_i64(f, defs, args[1], &elem)) ||
+      count <= 0 || elem <= 0 || count > INT64_MAX / elem)
     return false;
   *bytes = count * elem;
   return true;
@@ -304,10 +335,10 @@ static bool tbuf_branch_phi_pair(const nyr_func_t *f, const int *defs,
       b_value >= f->next_value || a_value == b_value || defs[a_value] < 0 ||
       defs[b_value] < 0)
     return false;
-  size_t first = (size_t)(defs[a_value] < defs[b_value] ? defs[a_value]
-                                                        : defs[b_value]);
-  size_t last = (size_t)(defs[a_value] < defs[b_value] ? defs[b_value]
-                                                       : defs[a_value]);
+  size_t first =
+      (size_t)(defs[a_value] < defs[b_value] ? defs[a_value] : defs[b_value]);
+  size_t last =
+      (size_t)(defs[a_value] < defs[b_value] ? defs[b_value] : defs[a_value]);
   for (size_t i = first; i <= last; ++i)
     if (f->data[i].op != NYIR_PHI && f->data[i].op != NYIR_NOP)
       return false;
@@ -343,10 +374,10 @@ static bool tbuf_branch_phi_bytes(const nyr_func_t *f, const int *defs,
                                   const nyr_inst_t *phi, int64_t *bytes) {
   int64_t size = -1;
   for (size_t i = 0; i < phi->phi_incoming_len; ++i) {
-    int value = nyr_vectorize_resolve_value(f, defs, phi->phi_incoming[i].value);
+    int value =
+        nyr_vectorize_resolve_value(f, defs, phi->phi_incoming[i].value);
     int64_t edge = 0;
-    if (!tbuf_alloc_bytes(f, defs, value, &edge) ||
-        (size >= 0 && size != edge))
+    if (!tbuf_alloc_bytes(f, defs, value, &edge) || (size >= 0 && size != edge))
       return false;
     size = edge;
   }
@@ -526,8 +557,7 @@ static bool root_is_private_memory(const nyr_func_t *f, const int *defs,
   if (strcmp(def->symbol, "rt_tbuf_new_raw") == 0 ||
       strcmp(def->symbol, "rt_tbuf_new_typed_raw") == 0)
     return true;
-  ny_builtin_alloc_kind_t kind = ny_builtin_alloc_kind(def->symbol);
-  return kind == NY_BUILTIN_ALLOC_MALLOC || kind == NY_BUILTIN_ALLOC_CALLOC;
+  return tbuf_is_private_allocator(def->symbol);
 }
 
 static bool known_alloc_bytes(const nyr_func_t *f, const int *defs, int root,
@@ -585,11 +615,8 @@ static int tbuf_payload_root(const nyr_func_t *f, const int *defs, int value,
       (strcmp(in->symbol, "rt_tbuf_new_raw") == 0 ||
        strcmp(in->symbol, "rt_tbuf_new_typed_raw") == 0))
     return value;
-  if (in->op == NYIR_CALL && in->symbol) {
-    ny_builtin_alloc_kind_t kind = ny_builtin_alloc_kind(in->symbol);
-    if (kind == NY_BUILTIN_ALLOC_MALLOC || kind == NY_BUILTIN_ALLOC_CALLOC)
-      return value;
-  }
+  if (in->op == NYIR_CALL && tbuf_is_private_allocator(in->symbol))
+    return value;
   if (in->op == NYIR_COPY)
     return tbuf_payload_root(f, defs, in->a, depth + 1);
   int64_t bytes = 0;
@@ -887,6 +914,7 @@ static bool vector_memory_affine(const nyr_func_t *f, const int *defs,
                                  const nyr_cfg_t *cfg, const bool *in_loop,
                                  int address, int iv, int64_t init,
                                  bool variable_trip, int64_t trip,
+                                 int64_t window_init, int64_t window_trip,
                                  size_t use_pc, affine_t *out,
                                  bool *dynamic_offset) {
   affine_t access = affine_value(f, defs, cfg, in_loop, address, iv, 0);
@@ -898,9 +926,18 @@ static bool vector_memory_affine(const nyr_func_t *f, const int *defs,
     *out = access;
     return true;
   }
-  return !variable_trip &&
-         tbuf_affine_memory_safe(f, defs, cfg, in_loop, address, iv, init, trip,
-                                 use_pc, out, dynamic_offset);
+  if (!variable_trip)
+    return tbuf_affine_memory_safe(f, defs, cfg, in_loop, address, iv, init,
+                                   trip, use_pc, out, dynamic_offset);
+  /*
+   * Variable-trip loop: every vector lane is a scalar iteration, so bounding
+   * the whole iteration window [window_init, window_init + window_trip) with
+   * range facts on the start and limit covers all lanes and the tail.
+   */
+  return window_trip > 0 &&
+         tbuf_affine_memory_safe(f, defs, cfg, in_loop, address, iv,
+                                 window_init, window_trip, use_pc, out,
+                                 dynamic_offset);
 }
 
 /*
@@ -1124,8 +1161,26 @@ static bool guarded_induction_range(const nyr_func_t *f, const int *defs,
       if (!preds_match || defs[pre] < 0)
         continue;
       int64_t init = 0;
-      if (!nyr_const_i64(f, defs, pre, &init))
-        continue;
+      /*
+       * A runtime start (for example `c = k + 1` under an outer guarded `k`)
+       * contributes its own lower bound; the body-edge guard still caps the
+       * value below the limit.
+       */
+      bool init_is_bound = false;
+      if (!nyr_const_i64(f, defs, pre, &init)) {
+        static _Thread_local unsigned start_depth;
+        nyr_range_t start_range = {0};
+        if (start_depth >= 6)
+          continue;
+        ++start_depth;
+        bool have = value_range_under_guards(f, defs, cfg, use_pc, pre, -1, 0,
+                                             0, 0, &start_range);
+        --start_depth;
+        if (!have || !start_range.has_min)
+          continue;
+        init = start_range.min;
+        init_is_bound = true;
+      }
       size_t branch = SIZE_MAX;
       for (size_t i = cfg->block_end[h]; i > cfg->block_start[h]; --i)
         if (f->data[i - 1].op == NYIR_BR_IF) {
@@ -1156,6 +1211,10 @@ static bool guarded_induction_range(const nyr_func_t *f, const int *defs,
         continue;
       __int128 n = distance / step;
       __int128 max = (__int128)init + n * step;
+      if (init_is_bound) {
+        /* Unknown exact start: only the guard bounds the value. */
+        max = (__int128)limit - (inclusive ? 0 : 1);
+      }
       if (max < INT64_MIN || max > INT64_MAX || max + step > INT64_MAX)
         continue;
       *out = (nyr_range_t){
@@ -1177,16 +1236,16 @@ static bool linear_phi(const nyr_func_t *f, const int *defs, int value,
   if (phi->op != NYIR_PHI || phi->phi_incoming_len != 2)
     return false;
   for (size_t k = 0; k < 2; ++k) {
-    int update = nyr_vectorize_resolve_value(f, defs, phi->phi_incoming[k].value);
+    int update =
+        nyr_vectorize_resolve_value(f, defs, phi->phi_incoming[k].value);
     if (update < 0 || update >= f->next_value || defs[update] < 0)
       continue;
     const nyr_inst_t *add = &f->data[(size_t)defs[update]];
     if (add->op != NYIR_ADD_I64)
       continue;
-    int other = nyr_vectorize_resolve_value(f, defs, add->a) == value ? add->b
-                : nyr_vectorize_resolve_value(f, defs, add->b) == value
-                    ? add->a
-                    : -1;
+    int other = nyr_vectorize_resolve_value(f, defs, add->a) == value   ? add->b
+                : nyr_vectorize_resolve_value(f, defs, add->b) == value ? add->a
+                                                                        : -1;
     if (other >= 0 && nyr_const_i64(f, defs, other, step) && *step > 0 &&
         nyr_const_i64(f, defs, phi->phi_incoming[1 - k].value, start)) {
       *latch_label = phi->phi_incoming[k].predecessor_label;
@@ -1435,11 +1494,10 @@ static void replace_uses_outside_loop(nyr_func_t *f, const nyr_cfg_t *cfg,
 
 static bool
 emit_i64_vector_accumulator(nyr_func_t *f, int vf, const bool *in_loop,
-                            int scalar_phi,
-                            int scalar_init, int vector_phi, int vector_update,
-                            int scalar_result, int64_t preheader_label,
-                            int64_t header_label, int64_t latch_label,
-                            int64_t exit_label) {
+                            int scalar_phi, int scalar_init, int vector_phi,
+                            int vector_update, int scalar_result,
+                            int64_t preheader_label, int64_t header_label,
+                            int64_t latch_label, int64_t exit_label) {
   nyr_cfg_t cfg = {0};
   if (!nyr_cfg_build(f, &cfg))
     return false;
@@ -1463,8 +1521,7 @@ emit_i64_vector_accumulator(nyr_func_t *f, int vf, const bool *in_loop,
   memmove(&f->data[at + 2], &f->data[at], (f->len - at) * sizeof(*f->data));
   f->data[at] = (nyr_inst_t){.op = NYIR_CONST_I64, .dst = zero, .imm = 0};
   f->data[at + 1] =
-      (nyr_inst_t){.op = vf == 4 ? NYIR_VEC8_SET1_I64
-                                 : NYIR_VEC4_SET1_I64,
+      (nyr_inst_t){.op = vf == 4 ? NYIR_VEC8_SET1_I64 : NYIR_VEC4_SET1_I64,
                    .dst = vector_zero,
                    .a = zero};
   f->data[at].effects = nyr_inst_effects(&f->data[at]);
@@ -1530,10 +1587,14 @@ emit_i64_vector_accumulator(nyr_func_t *f, int vf, const bool *in_loop,
   memmove(&f->data[result_at + 1], &f->data[result_at],
           (f->len - result_at) * sizeof(*f->data));
   f->data[result_at] = (nyr_inst_t){.op = vf == 4 ? NYIR_VEC8_REDUCE_ADD_I64
-                                                 : NYIR_VEC4_REDUCE_ADD_I64,
+                                                  : NYIR_VEC4_REDUCE_ADD_I64,
                                     .dst = scalar_result,
                                     .a = scalar_init,
-                                    .b = vector_phi};
+                                    .b = vector_phi,
+                                    .c = -1,
+                                    .d = -1,
+                                    .e = -1,
+                                    .f = -1};
   f->data[result_at].effects = nyr_inst_effects(&f->data[result_at]);
   ++f->len;
   nyr_cfg_free(&cfg);
@@ -2290,6 +2351,47 @@ typedef struct {
   bool written;
 } root_access_t;
 
+/*
+ * Two SSA values denote the same runtime value when they are the same value,
+ * equal constants, copies of equal values, or the same pure integer operation
+ * over equal operands (add/mul commute). Lowering often rebuilds the same row
+ * offset (`r * N * 8`) from separate constants for each access; comparing the
+ * expressions keeps those accesses in one dependence stream.
+ */
+static bool values_structurally_equal(const nyr_func_t *f, const int *defs,
+                                      int a, int b, unsigned depth) {
+  if (a == b)
+    return a >= 0;
+  if (!f || !defs || depth > 8 || a < 0 || b < 0 || a >= f->next_value ||
+      b >= f->next_value || defs[a] < 0 || defs[b] < 0)
+    return false;
+  const nyr_inst_t *x = &f->data[(size_t)defs[a]];
+  const nyr_inst_t *y = &f->data[(size_t)defs[b]];
+  if (x->op == NYIR_COPY)
+    return values_structurally_equal(f, defs, x->a, b, depth + 1);
+  if (y->op == NYIR_COPY)
+    return values_structurally_equal(f, defs, a, y->a, depth + 1);
+  if (x->op == NYIR_CONST_I64 && y->op == NYIR_CONST_I64)
+    return x->imm == y->imm;
+  if (x->op != y->op)
+    return false;
+  switch (x->op) {
+  case NYIR_ADD_I64:
+  case NYIR_MUL_I64:
+    return (values_structurally_equal(f, defs, x->a, y->a, depth + 1) &&
+            values_structurally_equal(f, defs, x->b, y->b, depth + 1)) ||
+           (values_structurally_equal(f, defs, x->a, y->b, depth + 1) &&
+            values_structurally_equal(f, defs, x->b, y->a, depth + 1));
+  case NYIR_SUB_I64:
+  case NYIR_SHL_I64:
+  case NYIR_SAR_I64:
+    return values_structurally_equal(f, defs, x->a, y->a, depth + 1) &&
+           values_structurally_equal(f, defs, x->b, y->b, depth + 1);
+  default:
+    return false;
+  }
+}
+
 static bool track_root_access(const nyr_func_t *f, const int *defs,
                               root_access_t *seen, size_t *seen_count,
                               size_t seen_cap, int root, int64_t offset,
@@ -2316,7 +2418,9 @@ static bool track_root_access(const nyr_func_t *f, const int *defs,
     if (seen[r].dynamic_offset || dynamic_offset)
       same_stream = same_stream && seen[r].dynamic_offset && dynamic_offset &&
                     seen[r].has_dynamic_key && has_dynamic_key &&
-                    seen[r].dynamic_key == dynamic_key && stride == 8;
+                    values_structurally_equal(f, defs, seen[r].dynamic_key,
+                                              dynamic_key, 0) &&
+                    stride == 8;
     if (!same_stream)
       return false;
   }
@@ -2486,10 +2590,25 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
     bool iv_update_has_iv_on_left = update_a == iv;
     int step_v = update_a == iv ? update->b : update_b == iv ? update->a : -1;
     int64_t step = 0, init = 0;
-    if (step_v < 0 || !nyr_const_i64(f, defs, step_v, &step) || step != 1 ||
-        !nyr_const_i64(f, defs, init_v, &init)) {
+    if (step_v < 0 || !nyr_const_i64(f, defs, step_v, &step) || step != 1) {
       free(in_loop);
       continue;
+    }
+    /*
+     * A loop whose first index is a runtime value (for example `c = k + 1`)
+     * is handled as a variable-trip loop. The numeric `init` is then only a
+     * placeholder: INT64_MIN makes every proof that needs a known
+     * non-negative start (bounds-check elision) fail closed, and only
+     * inflates the profitability estimate. Emission uses the SSA start
+     * value, and the runtime peel computes the trip count from it.
+     */
+    bool init_unknown = !nyr_const_i64(f, defs, init_v, &init);
+    if (init_unknown) {
+      if (init_v < 0 || init_v >= f->next_value) {
+        free(in_loop);
+        continue;
+      }
+      init = INT64_MIN;
     }
 
     /*
@@ -2540,8 +2659,7 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
           zero == 0 && defs[inner] >= 0) {
         size_t inner_idx = (size_t)defs[inner];
         const nyr_inst_t *inner_cmp = &f->data[inner_idx];
-        if (inner_cmp->op == NYIR_CMP_I64 &&
-            inner_cmp->cmp == NYIR_CMP_LT) {
+        if (inner_cmp->op == NYIR_CMP_I64 && inner_cmp->cmp == NYIR_CMP_LT) {
           cmp_idx = inner_idx;
           cmp = inner_cmp;
         }
@@ -2563,7 +2681,7 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
       continue;
     }
     limit_v = cmp->b;
-    if (nyr_const_i64(f, defs, cmp->b, &limit)) {
+    if (nyr_const_i64(f, defs, cmp->b, &limit) && !init_unknown) {
       if (limit <= init) {
         free(in_loop);
         continue;
@@ -2581,6 +2699,43 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
       continue;
     }
     f->vectorize_attempted_loops++;
+    /*
+     * Largest iteration window a variable-trip loop can cover: from the
+     * smallest possible start to the largest possible limit, from range
+     * facts. Zero means unknown, and then no windowed proof is attempted.
+     */
+    int64_t window_init = 0, window_trip = 0;
+    if (is_var_trip) {
+      bool have_lo = false, have_hi = false;
+      int64_t w_lo = 0, w_hi = 0;
+      if (!init_unknown) {
+        w_lo = init;
+        have_lo = true;
+      } else if (init_v >= 0 && init_v < f->next_value && defs[init_v] >= 0) {
+        const nyr_range_t *r = &f->data[(size_t)defs[init_v]].range;
+        if (r->has_min) {
+          w_lo = r->min;
+          have_lo = true;
+        }
+      }
+      int64_t const_limit = 0;
+      if (nyr_const_i64(f, defs, limit_v, &const_limit)) {
+        w_hi = const_limit;
+        have_hi = true;
+      } else if (limit_v >= 0 && limit_v < f->next_value &&
+                 defs[limit_v] >= 0) {
+        const nyr_range_t *r = &f->data[(size_t)defs[limit_v]].range;
+        if (r->has_max) {
+          w_hi = r->max;
+          have_hi = true;
+        }
+      }
+      if (have_lo && have_hi && w_hi > w_lo &&
+          (__int128)w_hi - (__int128)w_lo <= (__int128)INT64_MAX) {
+        window_init = w_lo;
+        window_trip = w_hi - w_lo;
+      }
+    }
     int vf = 0;
     int64_t fixed_trip = 0;
     uint64_t estimated_trip = 0;
@@ -2667,9 +2822,8 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
        * accumulator live across the loop backedge alongside vector values.
        * Defer that shape until the vector accumulator can span this CFG.
        */
-      if (!is_var_trip &&
-          vectorize_reassociate_reduction(f, defs, &cfg, phi->dst,
-                                          (size_t)defs[back_in])) {
+      if (!is_var_trip && vectorize_reassociate_reduction(
+                              f, defs, &cfg, phi->dst, (size_t)defs[back_in])) {
         free(in_loop);
         free(defs);
         nyr_cfg_free(&cfg);
@@ -2834,8 +2988,9 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
         affine_t a = {0};
         bool dynamic_offset = false;
         bool access_ok = vector_memory_affine(f, defs, &cfg, in_loop, in->a, iv,
-                                              init, is_var_trip, fixed_trip, i,
-                                              &a, &dynamic_offset);
+                                              init, is_var_trip, fixed_trip,
+                                              window_init, window_trip, i, &a,
+                                              &dynamic_offset);
         if (!access_ok && read_only_loop)
           access_ok =
               vector_checked_read_affine(f, defs, &cfg, in_loop, in->a, iv, &a);
@@ -2939,8 +3094,8 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
         affine_t a = {0};
         bool dynamic_offset = false;
         if (!vector_memory_affine(f, defs, &cfg, in_loop, in->a, iv, init,
-                                  is_var_trip, fixed_trip, i, &a,
-                                  &dynamic_offset) ||
+                                  is_var_trip, fixed_trip, window_init,
+                                  window_trip, i, &a, &dynamic_offset) ||
             !track_root_access(f, defs, seen_roots, &seen_count, 64, a.root,
                                a.offset, a.stride, dynamic_offset,
                                a.has_dynamic_key, a.dynamic_key, true)) {
@@ -3040,9 +3195,9 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
      * Accumulate fixed-trip integer reductions in vector lanes. Reducing each
      * vector chunk to a scalar keeps a serial dependency in the hot loop.
      */
-    bool keep_four_lane_reduction =
-        needs_broadcast && supports_vec8_i64_broadcast && vf == 4 &&
-        reduction_phi_dst < 0;
+    bool keep_four_lane_reduction = needs_broadcast &&
+                                    supports_vec8_i64_broadcast && vf == 4 &&
+                                    reduction_phi_dst < 0;
     /*
      * With a loop-carried vector accumulator (below) a four-lane reduction
      * no longer reduces each chunk to a scalar, so keep the full AVX2 width
@@ -3052,8 +3207,8 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
                             vf == 4 && supports_vec8_i64_broadcast &&
                             fixed_trip >= 4 && fixed_trip % 4 == 0;
     if (!bad && reduction_phi_dst >= 0 && !reduction_f64 && !is_var_trip &&
-        fixed_trip >= 2 && fixed_trip % 2 == 0 &&
-        !keep_four_lane_reduction && !wide_accumulator) {
+        fixed_trip >= 2 && fixed_trip % 2 == 0 && !keep_four_lane_reduction &&
+        !wide_accumulator) {
       vf = 2;
       vload_op = NYIR_VEC4_LOAD_I64;
       vstore_op = NYIR_VEC4_STORE_I64;
@@ -3308,8 +3463,8 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
     int vector_unroll_factor = 1;
     bool vector_accumulator = false;
     bool unroll_reduction = !vector_accumulator_safe && !is_var_trip &&
-                            reduction_phi_dst >= 0 &&
-                            !reduction_f64 && fixed_trip >= (int64_t)(4 * vf);
+                            reduction_phi_dst >= 0 && !reduction_f64 &&
+                            fixed_trip >= (int64_t)(4 * vf);
     bool unroll_fixed_body = !is_var_trip && fixed_trip >= (int64_t)(2 * vf) &&
                              reduction_phi_dst < 0 && extra_phi_dst < 0;
     if ((unroll_fixed_body || unroll_reduction) && body_target == latch &&
@@ -3541,17 +3696,16 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
       for (size_t v = 0; v < scalar_value_count; ++v) {
         if (broadcast_map[v] < 0)
           continue;
-        f->data[at + w] =
-            (nyr_inst_t){.op = is_f64 ? NYIR_VEC4_SET1_F64
-                                      : (vf == 4 ? NYIR_VEC8_SET1_I64
-                                                 : NYIR_VEC4_SET1_I64),
-                         .dst = broadcast_map[v],
-                         .a = (int)v,
-                         .b = -1,
-                         .c = -1,
-                         .d = -1,
-                         .e = -1,
-                         .f = -1};
+        f->data[at + w] = (nyr_inst_t){
+            .op = is_f64 ? NYIR_VEC4_SET1_F64
+                         : (vf == 4 ? NYIR_VEC8_SET1_I64 : NYIR_VEC4_SET1_I64),
+            .dst = broadcast_map[v],
+            .a = (int)v,
+            .b = -1,
+            .c = -1,
+            .d = -1,
+            .e = -1,
+            .f = -1};
         f->data[at + w].effects = nyr_inst_effects(&f->data[at + w]);
         ++w;
       }
@@ -3779,9 +3933,9 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
       nyr_clear_derived_facts(&f->data[cmp_idx]);
     if (vector_accumulator &&
         !emit_i64_vector_accumulator(
-            f, vf, in_loop, reduction_phi_dst, reduction_phi_init, vector_acc_phi,
-            vector_acc_update, vector_acc_result, reduction_preheader_label,
-            cfg.block_label[header], latch_label,
+            f, vf, in_loop, reduction_phi_dst, reduction_phi_init,
+            vector_acc_phi, vector_acc_update, vector_acc_result,
+            reduction_preheader_label, cfg.block_label[header], latch_label,
             needs_scalar_tail ? dispatch_label : vector_exit_label)) {
       free(saved_body);
       free(vec);
@@ -3812,7 +3966,7 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
 }
 
 static bool nyr_loop_vectorize_impl(nyr_func_t *f,
-                                   bool supports_vec8_i64_broadcast) {
+                                    bool supports_vec8_i64_broadcast) {
   if (!f || f->len < 8 || f->next_value <= 0)
     return true;
   /*

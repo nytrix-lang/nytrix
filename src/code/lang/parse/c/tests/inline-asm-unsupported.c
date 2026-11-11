@@ -1,3 +1,6 @@
+/*
+ * Negative fixture for unsupported inline-assembly operand constraints.
+ */
 int nyc_inline_asm_unsupported(void) {
   int value;
   __asm__ volatile("leaq %c1(%%rip), %0" : "=r"(value) : "i"(value));

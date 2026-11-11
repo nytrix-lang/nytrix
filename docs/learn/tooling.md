@@ -155,7 +155,11 @@ ny fmt --fix file.ny
 
 `--check` is read-only; `--fix` writes formatting changes. Use the narrowest
 fixture pattern that covers the behavior, then run broader tests as required by
-the change. See [Testing](testing.md).
+the change. For C and header files, `--check` reports missing file-purpose
+comments and continued-macro backslashes that are not column-aligned;
+`--fix` aligns those backslashes. `ny fmt --align-macros src` applies only the
+macro alignment pass to C and header files under `src`. See
+[Testing](testing.md).
 
 ## Find API documentation
 

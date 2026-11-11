@@ -1,3 +1,6 @@
+/*
+ * C parser fixture for typeof casts involving aggregate array members.
+ */
 typedef unsigned long long u64;
 
 struct frame {

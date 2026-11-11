@@ -1,3 +1,4 @@
+/* Nullability narrowing analysis interfaces for typed expressions. */
 #ifndef NY_CODE_NULLNARROW_H
 #define NY_CODE_NULLNARROW_H
 

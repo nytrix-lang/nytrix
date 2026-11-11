@@ -1,3 +1,4 @@
+/* Native target architecture, feature, and ABI selection interfaces. */
 #ifndef NY_BACKEND_TARGET_H
 #define NY_BACKEND_TARGET_H
 

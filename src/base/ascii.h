@@ -1,5 +1,14 @@
+/* ASCII byte predicates used by the Nytrix lexer and identifier handling. */
 #ifndef NY_BASE_ASCII_H
 #define NY_BASE_ASCII_H
+
+static inline int ny_ascii_identifier_start(unsigned char c) {
+  return c == '_' || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
+}
+
+static inline int ny_ascii_identifier_continue(unsigned char c) {
+  return ny_ascii_identifier_start(c) || (c >= '0' && c <= '9');
+}
 
 /* Return an ASCII hexadecimal digit's value, or -1 when c is not a digit. */
 static inline int ny_ascii_hex_digit_value(unsigned char c) {

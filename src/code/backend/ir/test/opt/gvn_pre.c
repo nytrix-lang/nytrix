@@ -1,3 +1,7 @@
+/*
+ * Regression tests for global value numbering and partial redundancy
+ * elimination.
+ */
 #include "code/lang/parse/ast.h"
 #include "support.h"
 
@@ -36,27 +40,27 @@ static int emit_address_offset(nyr_func_t *f, int address, int64_t offset) {
 
 static void emit_local_store(nyr_func_t *f, int slot, int value) {
   nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_STORE_LOCAL,
-                             .dst = -1,
-                             .a = value,
-                             .b = -1,
-                             .c = -1,
-                             .d = -1,
-                             .e = -1,
-                             .f = -1,
-                             .imm = slot});
+                              .dst = -1,
+                              .a = value,
+                              .b = -1,
+                              .c = -1,
+                              .d = -1,
+                              .e = -1,
+                              .f = -1,
+                              .imm = slot});
 }
 
 static void emit_unknown_call(nyr_func_t *f) {
   nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_CALL,
-                             .dst = -1,
-                             .a = -1,
-                             .b = -1,
-                             .c = -1,
-                             .d = -1,
-                             .e = -1,
-                             .f = -1,
-                             .imm = 0,
-                             .symbol = "unknown_memory_effect"});
+                              .dst = -1,
+                              .a = -1,
+                              .b = -1,
+                              .c = -1,
+                              .d = -1,
+                              .e = -1,
+                              .f = -1,
+                              .imm = 0,
+                              .symbol = "unknown_memory_effect"});
 }
 
 static void build_diamond(nyr_func_t *f, bool store, bool unknown_call) {
@@ -154,7 +158,8 @@ static bool run_local_store_case(void) {
 static bool run_unrelated_local_store_case(void) {
   nyr_func_t f;
   nyr_opt_begin(&f);
-  int address = nyr_opt_emit_symbol(&f, NYIR_ADDR_SYMBOL, "gvn_pre_global_cell");
+  int address =
+      nyr_opt_emit_symbol(&f, NYIR_ADDR_SYMBOL, "gvn_pre_global_cell");
   address = nyr_opt_binop(&f, NYIR_ADD_I64, address, nyr_opt_const(&f, 0));
   int first = emit_load(&f, address);
   emit_local_store(&f, 0, nyr_opt_const(&f, 99));
@@ -385,14 +390,14 @@ static bool run_loop_local_load_case(void) {
   int first = emit_load(&f, address);
   int counter = emit_load(&f, counter_address);
   int more = nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_CMP_I64,
-                                         .dst = -1,
-                                         .a = counter,
-                                         .b = zero,
-                                         .c = -1,
-                                         .d = -1,
-                                         .e = -1,
-                                         .f = -1,
-                                         .cmp = NYIR_CMP_GT});
+                                          .dst = -1,
+                                          .a = counter,
+                                          .b = zero,
+                                          .c = -1,
+                                          .d = -1,
+                                          .e = -1,
+                                          .f = -1,
+                                          .cmp = NYIR_CMP_GT});
   nyr_opt_br_if(&f, more, 20);
   nyr_opt_label(&f, 30);
   int second = emit_load(&f, address);
@@ -659,16 +664,16 @@ static bool run_local_load_cse_case(bool same_slot_store, bool other_slot_store,
 static int emit_known_call(nyr_func_t *f, const char *symbol, int arg,
                            unsigned effects, nyr_scalar_class_t result_class) {
   int dst = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_CALL,
-                                       .dst = -1,
-                                       .a = arg,
-                                       .b = -1,
-                                       .c = -1,
-                                       .d = -1,
-                                       .e = -1,
-                                       .f = -1,
-                                       .imm = 1,
-                                       .symbol = symbol,
-                                       .scalar_class = result_class});
+                                        .dst = -1,
+                                        .a = arg,
+                                        .b = -1,
+                                        .c = -1,
+                                        .d = -1,
+                                        .e = -1,
+                                        .f = -1,
+                                        .imm = 1,
+                                        .symbol = symbol,
+                                        .scalar_class = result_class});
   if (dst >= 0) {
     f->data[f->len - 1].flags |= NYIR_INST_F_EFFECTS_KNOWN;
     f->data[f->len - 1].effects = effects;
@@ -687,8 +692,8 @@ static bool run_pure_call_cse_case(void) {
       emit_known_call(&f, "pure_scalar", arg, pure, NYIR_SCALAR_I64_RAW);
   nyr_opt_ret(&f, second);
   bool ok = first >= 0 && second >= 0 &&
-            nyr_opt_verify(&f, "gvn-pre-pure-call/before") &&
-            nyr_gvn_pre(&f) && nyr_opt_verify(&f, "gvn-pre-pure-call/after") &&
+            nyr_opt_verify(&f, "gvn-pre-pure-call/before") && nyr_gvn_pre(&f) &&
+            nyr_opt_verify(&f, "gvn-pre-pure-call/after") &&
             f.data[1].op == NYIR_CALL && f.data[2].op == NYIR_COPY &&
             f.data[2].a == first;
   if (!ok)
@@ -730,7 +735,8 @@ static bool run_read_call_memory_barrier_case(void) {
 static bool run_read_only_call_load_reuse_case(void) {
   nyr_func_t f;
   nyr_opt_begin(&f);
-  int address = nyr_opt_emit_symbol(&f, NYIR_ADDR_SYMBOL, "gvn_pre_global_cell");
+  int address =
+      nyr_opt_emit_symbol(&f, NYIR_ADDR_SYMBOL, "gvn_pre_global_cell");
   int arg = nyr_opt_const(&f, 9);
   int first = emit_load(&f, address);
   int reader = emit_known_call(&f, "reads_memory", arg,
@@ -755,20 +761,21 @@ static bool run_read_only_call_load_reuse_case(void) {
 static bool run_raw_memcmp_load_reuse_case(void) {
   nyr_func_t f;
   nyr_opt_begin(&f);
-  int address = nyr_opt_emit_symbol(&f, NYIR_ADDR_SYMBOL, "gvn_pre_global_cell");
+  int address =
+      nyr_opt_emit_symbol(&f, NYIR_ADDR_SYMBOL, "gvn_pre_global_cell");
   int compare_address = nyr_opt_const(&f, 0x2000);
   int length = nyr_opt_const(&f, 8);
   int first = emit_load(&f, address);
   int compare = nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_CALL,
-                                            .dst = -1,
-                                            .a = address,
-                                            .b = compare_address,
-                                            .c = length,
-                                            .d = -1,
-                                            .e = -1,
-                                            .f = -1,
-                                            .imm = 3,
-                                            .symbol = "rt_memcmp_raw"});
+                                             .dst = -1,
+                                             .a = address,
+                                             .b = compare_address,
+                                             .c = length,
+                                             .d = -1,
+                                             .e = -1,
+                                             .f = -1,
+                                             .imm = 3,
+                                             .symbol = "rt_memcmp_raw"});
   int second = emit_load(&f, address);
   nyr_opt_ret(&f, second);
   bool ok =
@@ -805,15 +812,15 @@ static bool run_raw_memory_write_barrier_case(bool alias_destination,
   int first = emit_load(&f, read_address);
   int fill = nyr_ir_emit(
       &f, (nyr_inst_t){.op = NYIR_CALL,
-                        .dst = -1,
-                        .a = write_address,
-                        .b = copy ? read_address : value,
-                        .c = complete_call ? length : -1,
-                        .d = -1,
-                        .e = -1,
-                        .f = -1,
-                        .imm = complete_call ? 3 : 2,
-                        .symbol = copy ? "rt_memcpy_raw" : "rt_memset_raw"});
+                       .dst = -1,
+                       .a = write_address,
+                       .b = copy ? read_address : value,
+                       .c = complete_call ? length : -1,
+                       .d = -1,
+                       .e = -1,
+                       .f = -1,
+                       .imm = complete_call ? 3 : 2,
+                       .symbol = copy ? "rt_memcpy_raw" : "rt_memset_raw"});
   int second = emit_load(&f, read_address);
   nyr_opt_ret(&f, second);
   int loads = 0, phis = 0;
@@ -856,15 +863,15 @@ static bool run_raw_memory_write_range_case(int64_t read_offset,
   int first = emit_load(&f, read_address);
   int call = nyr_ir_emit(
       &f, (nyr_inst_t){.op = NYIR_CALL,
-                        .dst = -1,
-                        .a = write_address,
-                        .b = source_or_value,
-                        .c = call_length,
-                        .d = -1,
-                        .e = -1,
-                        .f = -1,
-                        .imm = 3,
-                        .symbol = copy ? "rt_memcpy_raw" : "rt_memset_raw"});
+                       .dst = -1,
+                       .a = write_address,
+                       .b = source_or_value,
+                       .c = call_length,
+                       .d = -1,
+                       .e = -1,
+                       .f = -1,
+                       .imm = 3,
+                       .symbol = copy ? "rt_memcpy_raw" : "rt_memset_raw"});
   int second = emit_load(&f, read_address);
   nyr_opt_ret(&f, second);
   int loads = 0, phis = 0;
@@ -898,25 +905,25 @@ static bool run_load_across_nonwriting_effects_case(void) {
   int value = nyr_opt_const(&f, 17);
   int first = emit_load(&f, address);
   int len = nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_CALL,
-                                        .dst = -1,
-                                        .a = value,
-                                        .b = -1,
-                                        .c = -1,
-                                        .d = -1,
-                                        .e = -1,
-                                        .f = -1,
-                                        .imm = 1,
-                                        .symbol = "rt_len_strict"});
+                                         .dst = -1,
+                                         .a = value,
+                                         .b = -1,
+                                         .c = -1,
+                                         .d = -1,
+                                         .e = -1,
+                                         .f = -1,
+                                         .imm = 1,
+                                         .symbol = "rt_len_strict"});
   int clock = nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_CALL,
-                                          .dst = -1,
-                                          .a = -1,
-                                          .b = -1,
-                                          .c = -1,
-                                          .d = -1,
-                                          .e = -1,
-                                          .f = -1,
-                                          .imm = 0,
-                                          .symbol = "rt_monotonic_ns_raw"});
+                                           .dst = -1,
+                                           .a = -1,
+                                           .b = -1,
+                                           .c = -1,
+                                           .d = -1,
+                                           .e = -1,
+                                           .f = -1,
+                                           .imm = 0,
+                                           .symbol = "rt_monotonic_ns_raw"});
   int second = emit_load(&f, address);
   nyr_opt_ret(&f, second);
   bool ok =
@@ -944,20 +951,21 @@ static bool run_load_across_nonwriting_effects_case(void) {
 static bool run_load_across_allocation_unknown_alias_case(void) {
   nyr_func_t f;
   nyr_opt_begin(&f);
-  int slot = nyr_opt_emit_symbol(&f, NYIR_ADDR_SYMBOL, "gvn_pre_pointer_holder");
+  int slot =
+      nyr_opt_emit_symbol(&f, NYIR_ADDR_SYMBOL, "gvn_pre_pointer_holder");
   int pointer = emit_load(&f, slot);
   int arg = nyr_opt_const(&f, 0);
   int first = emit_load(&f, pointer);
   int alloc = nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_CALL,
-                                          .dst = -1,
-                                          .a = arg,
-                                          .b = -1,
-                                          .c = -1,
-                                          .d = -1,
-                                          .e = -1,
-                                          .f = -1,
-                                          .imm = 1,
-                                          .symbol = "rt_len_strict"});
+                                           .dst = -1,
+                                           .a = arg,
+                                           .b = -1,
+                                           .c = -1,
+                                           .d = -1,
+                                           .e = -1,
+                                           .f = -1,
+                                           .imm = 1,
+                                           .symbol = "rt_len_strict"});
   int second = emit_load(&f, pointer);
   nyr_opt_ret(&f, second);
   bool ok =
@@ -979,29 +987,28 @@ static bool run_load_across_allocation_unknown_alias_case(void) {
 
 static int emit_raw_load8(nyr_func_t *f, int address, int offset) {
   return nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_CALL,
-                                    .dst = -1,
-                                    .a = address,
-                                    .b = offset,
-                                    .c = -1,
-                                    .d = -1,
-                                    .e = -1,
-                                    .f = -1,
-                                    .imm = 2,
-                                    .symbol = "rt_load8_idx"});
+                                     .dst = -1,
+                                     .a = address,
+                                     .b = offset,
+                                     .c = -1,
+                                     .d = -1,
+                                     .e = -1,
+                                     .f = -1,
+                                     .imm = 2,
+                                     .symbol = "rt_load8_idx"});
 }
 
-static void emit_raw_store8(nyr_func_t *f, int address, int offset,
-                            int value) {
+static void emit_raw_store8(nyr_func_t *f, int address, int offset, int value) {
   nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_CALL,
-                             .dst = -1,
-                             .a = address,
-                             .b = offset,
-                             .c = value,
-                             .d = -1,
-                             .e = -1,
-                             .f = -1,
-                             .imm = 3,
-                             .symbol = "rt_store8_idx"});
+                              .dst = -1,
+                              .a = address,
+                              .b = offset,
+                              .c = value,
+                              .d = -1,
+                              .e = -1,
+                              .f = -1,
+                              .imm = 3,
+                              .symbol = "rt_store8_idx"});
 }
 
 static bool run_raw_load8_effect_contract_case(void) {
@@ -1096,8 +1103,7 @@ static bool run_call_ownership_key_case(void) {
   nyr_opt_ret(&f, consumes);
   ok = ok && borrows >= 0 && consumes >= 0 &&
        nyr_opt_verify(&f, "gvn-pre-formal-contract/before") &&
-       nyr_gvn_pre(&f) &&
-       nyr_opt_verify(&f, "gvn-pre-formal-contract/after") &&
+       nyr_gvn_pre(&f) && nyr_opt_verify(&f, "gvn-pre-formal-contract/after") &&
        f.data[1].op == NYIR_CALL && f.data[2].op == NYIR_CALL;
   if (!ok)
     fprintf(stderr, "[gvn-pre-call-ownership] distinct formal ownership "
@@ -1112,17 +1118,17 @@ static bool run_scalar_class_key_case(void) {
   nyr_func_t f;
   nyr_opt_begin(&f);
   int raw = nyr_ir_emit(&f, (nyr_inst_t){
-                              .op = NYIR_CONST_I64,
-                              .dst = -1,
-                              .imm = 100,
-                              .scalar_class = NYIR_SCALAR_I64_RAW,
-                          });
+                                .op = NYIR_CONST_I64,
+                                .dst = -1,
+                                .imm = 100,
+                                .scalar_class = NYIR_SCALAR_I64_RAW,
+                            });
   int tagged = nyr_ir_emit(&f, (nyr_inst_t){
-                                 .op = NYIR_CONST_I64,
-                                 .dst = -1,
-                                 .imm = 100,
-                                 .scalar_class = NYIR_SCALAR_I64_TAGGED,
-                             });
+                                   .op = NYIR_CONST_I64,
+                                   .dst = -1,
+                                   .imm = 100,
+                                   .scalar_class = NYIR_SCALAR_I64_TAGGED,
+                               });
   nyr_opt_ret(&f, tagged);
   bool ok = raw >= 0 && tagged >= 0 &&
             nyr_opt_verify(&f, "gvn-pre-scalar-class/before") &&

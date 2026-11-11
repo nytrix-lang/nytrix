@@ -1,3 +1,6 @@
+/*
+ * Fixture: parse register variables and x86 get-user inline assembly.
+ */
 register unsigned long current_stack_pointer __asm__("rsp");
 unsigned long get_user_asm_probe(unsigned long *address) {
   long result;

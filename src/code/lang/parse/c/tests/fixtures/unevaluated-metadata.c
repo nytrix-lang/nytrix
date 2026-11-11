@@ -1,3 +1,6 @@
+/*
+ * Fixture: exercise type and declaration metadata in unevaluated expressions.
+ */
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>

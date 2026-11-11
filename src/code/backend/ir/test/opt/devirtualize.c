@@ -1,3 +1,6 @@
+/*
+ * Optimizer regression tests for devirtualizing known NYIR runtime calls.
+ */
 #include "code/lang/parse/ast.h"
 #include "support.h"
 

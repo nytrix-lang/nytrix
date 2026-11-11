@@ -3,7 +3,7 @@
 ;; References:
 ;; - https://www.rfc-editor.org/rfc/rfc1321
 ;; - https://nvlpubs.nist.gov/nistpubs/FIPS/NIST.FIPS.180-4.pdf
-module core.math.crypto.hash(crc32, adler32, fnv1a, xxh32, sha1, md5, md5_bytes, sha256, sha512, digest_mem, ripemd160_bytes, ripemd160_hex, sha3_256, sha3_512, blake2s, sha256_hex, sha256_bytes, sha256_hmac, md5_hmac, md4_bytes, md4_hex, ntlm_hash, dcc_hash, dcc2_hash, native_available, native_backend_name, native_last_error, md5_padding, sha1_padding, sha256_padding, birthday, rainbow, length_extension, hash_dict_crack, hash_brute_crack)
+module core.math.crypto.hash(crc32, adler32, fnv1a, xxh32, sha1, md5, md5_bytes, sha256, sha256_into, sha512, digest_mem, ripemd160_bytes, ripemd160_hex, sha3_256, sha3_512, blake2s, sha256_hex, sha256_bytes, sha256_hmac, sha256_hmac_bytes, pbkdf2_sha256, md5_hmac, md4_bytes, md4_hex, ntlm_hash, dcc_hash, dcc2_hash, native_available, native_backend_name, native_last_error, md5_padding, sha1_padding, sha256_padding, birthday, rainbow, length_extension, hash_dict_crack, hash_brute_crack)
 use core
 use core.mem (zalloc, zalloc_size, malloc, free, memcpy, __copy_mem)
 use core.math.bin (
@@ -363,13 +363,12 @@ fn _hash_simmd_digest_bytes(any data) any {
    def total_len = padded_len + 8
    def msg = zalloc(total_len)
    if !msg { return nil }
-   mut copy_i = 0
    if is_str(data) || is_bytes(data) {
-      while copy_i < msg_len {
-         store8(msg, load8(data, copy_i), copy_i)
-         copy_i += 1
-      }
+      ;; Both inputs expose contiguous byte storage. Copy the span in one
+      ;; runtime call instead of crossing the Ny/runtime boundary per byte.
+      memcpy(msg, data, msg_len)
    } else if is_list(data) {
+      mut copy_i = 0
       while copy_i < msg_len {
          store8(msg, int(data[copy_i]) & 255, copy_i)
          copy_i += 1
@@ -843,15 +842,19 @@ fn _sha256_maj(int x, int y, int z) int { (x & y) ^ (x & z) ^ (y & z) }
 
 fn sha256(any data) list {
    "Compute SHA-256 hash of message(string or bytes). Returns bytes list."
+   if is_str(data) || is_bytes(data) {
+      def digest = __simmd_sha256_digest_mem(data, data.len)
+      if digest != nil { return digest }
+   }
+   ;; The runtime path performs a complete digest in one native call. For short
+   ;; messages, avoiding EVP setup and teardown through repeated FFI calls is
+   ;; substantially cheaper; retain OpenSSL as a fallback if SIMD is unavailable.
+   def simmd_digest = _hash_simmd_digest_bytes(data)
+   if simmd_digest != nil { return simmd_digest }
    if _hash_native_load() {
       def native = _hash_native_digest_bytes(["SHA256", "sha256", "SHA-256"], data, 0, 0)
       if native != nil { return native }
    }
-   ;; The runtime helper selects SHA-NI/ARM SHA when available and otherwise
-   ;; uses its software block implementation.  Calling it on every host keeps
-   ;; the public digest independent of the separate Nytrix fallback path.
-   def simmd_digest = _hash_simmd_digest_bytes(data)
-   if simmd_digest != nil { return simmd_digest }
    mut msg_len = 0
    if is_str(data) || is_bytes(data) || is_list(data) { msg_len = data.len }
    mut padded_len = msg_len + 1
@@ -962,6 +965,12 @@ fn sha256(any data) list {
       k += 1
    }
    result
+}
+
+fn sha256_into(bytes data, bytes out) bool {
+   "Write SHA-256 of a byte buffer into a reusable 32-byte buffer."
+   if out.len < 32 { return false }
+   __simmd_sha256_digest_mem_into(data, data.len, out)
 }
 
 fn sha256_hex(any data) str {
@@ -1346,11 +1355,35 @@ fn _hash_hmac_bytes(any key, any data, str digest_name) list {
 
 fn sha256_hmac(any key, any data) list {
    "HMAC-SHA256."
+   def simmd = __simmd_sha256_hmac_values(key, data)
+   if simmd != 0 { return simmd }
    if _hash_native_load() {
       def native = _hash_native_hmac_bytes(["SHA256", "sha256", "SHA-256"], key, data)
       if native != nil { return native }
    }
    _hash_hmac_bytes(key, data, "sha256")
+}
+
+fn sha256_hmac_bytes(any key, any data) bytes {
+   "HMAC-SHA256, returning a mutable byte buffer."
+   def simmd = __simmd_sha256_hmac_bytes(key, data)
+   if simmd != 0 { return simmd }
+   def value = sha256_hmac(key, data)
+   mut out = bytes(value.len)
+   mut i = 0
+   while i < value.len {
+      store8(out, int(value.get(i)) & 255, i)
+      i += 1
+   }
+   out
+}
+
+fn pbkdf2_sha256(any key, any salt, int iterations) bytes {
+   "PBKDF2-HMAC-SHA256 with one 32-byte output block; key and salt are byte sequences."
+   if iterations < 1 { __panic("pbkdf2_sha256 requires at least one iteration") }
+   def out = __simmd_pbkdf2_sha256_values(key, salt, iterations)
+   if out == 0 { __panic("pbkdf2_sha256 could not allocate or process its inputs") }
+   out
 }
 
 fn md5_padding(int msg_len) list {

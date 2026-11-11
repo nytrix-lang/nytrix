@@ -159,10 +159,7 @@ static bool iv_period_two_select(const nyr_func_t *f, const int *defs,
  * keeps every pattern below robust regardless of copy-propagation timing.
  */
 static int iv_root_copy(const nyr_func_t *f, const int *defs, int value) {
-  while (value >= 0 && value < f->next_value && defs[value] >= 0 &&
-         f->data[(size_t)defs[value]].op == NYIR_COPY)
-    value = f->data[(size_t)defs[value]].a;
-  return value;
+  return nyr_strip_copy_chain(f, defs, value, 0);
 }
 
 static int64_t wrap_mul64(int64_t a, int64_t b) {
@@ -556,13 +553,13 @@ static bool find_loops(const nyr_func_t *f, const nyr_cfg_t *cfg,
  */
 static bool closed_form_constant_sum(nyr_func_t *f, const nyr_cfg_t *cfg,
                                      const iv_loop_t *lp, const int *defs) {
-#define IV_CF_REJECT(reason)                                                   \
-  do {                                                                         \
-    free(loop_member);                                                         \
-    if (iv_trace_enabled())                                                    \
-      fprintf(stderr, "[iv-elim] rejected header=L%lld reason=%s\n",           \
-              (long long)lp->header_label, reason);                            \
-    return false;                                                              \
+#define IV_CF_REJECT(reason)                                         \
+  do {                                                               \
+    free(loop_member);                                               \
+    if (iv_trace_enabled())                                          \
+      fprintf(stderr, "[iv-elim] rejected header=L%lld reason=%s\n", \
+              (long long)lp->header_label, reason);                  \
+    return false;                                                    \
   } while (0)
   if (!f || !cfg || !lp || !defs || lp->header_idx >= lp->back_idx)
     return false;
@@ -644,8 +641,7 @@ static bool closed_form_constant_sum(nyr_func_t *f, const nyr_cfg_t *cfg,
     if (exit_idx == SIZE_MAX || exit_idx <= lp->header_idx)
       continue;
     bool comparison_inverted = false;
-    cmp = iv_unwrap_boolean_compare(f, defs, candidate,
-                                    &comparison_inverted);
+    cmp = iv_unwrap_boolean_compare(f, defs, candidate, &comparison_inverted);
     exit_taken_edge = taken_is_exit ^ comparison_inverted;
     exit_cond_block = cond_block;
     exit_edge_block = outside_block;
@@ -1123,7 +1119,6 @@ static bool closed_form_constant_sum(nyr_func_t *f, const nyr_cfg_t *cfg,
   } else {
     int zero = f->next_value++;
     int one = f->next_value++;
-    int two = f->next_value++;
     int trip_step_value = f->next_value++;
     int step_value = f->next_value++;
     int init_value_for_trips = f->next_value++;
@@ -1139,12 +1134,8 @@ static bool closed_form_constant_sum(nyr_func_t *f, const nyr_cfg_t *cfg,
     int trips = f->next_value++;
     int trips_minus_one = f->next_value++;
     int half = f->next_value++;
-    int even_prod = f->next_value++;
-    int odd_half = f->next_value++;
-    int odd_prod = f->next_value++;
     int bit = f->next_value++;
-    int delta = f->next_value++;
-    int weighted = f->next_value++;
+    int paired_factor = f->next_value++;
     int sum_j = f->next_value++;
     int step_term = f->next_value++;
     int init_term = f->next_value++;
@@ -1169,15 +1160,6 @@ static bool closed_form_constant_sum(nyr_func_t *f, const nyr_cfg_t *cfg,
                                             .e = -1,
                                             .f = -1,
                                             .imm = 1};
-    formula[formula_count++] = (nyr_inst_t){.op = NYIR_CONST_I64,
-                                            .dst = two,
-                                            .a = -1,
-                                            .b = -1,
-                                            .c = -1,
-                                            .d = -1,
-                                            .e = -1,
-                                            .f = -1,
-                                            .imm = 2};
     formula[formula_count++] = (nyr_inst_t){.op = NYIR_CONST_I64,
                                             .dst = trip_step_value,
                                             .a = -1,
@@ -1351,36 +1333,14 @@ static bool closed_form_constant_sum(nyr_func_t *f, const nyr_cfg_t *cfg,
                                               .e = -1,
                                               .f = -1};
     } else {
-      formula[formula_count++] = (nyr_inst_t){.op = NYIR_DIV_I64,
+      /* Choose the even factor before multiplying: for even T use
+       * (T/2)*(T-1), and for odd T use ((T-1)/2)*T. Arithmetic shift
+       * computes the selected half exactly, including T=0. Each product
+       * retains the original wrapping-i64 semantics. */
+      formula[formula_count++] = (nyr_inst_t){.op = NYIR_SAR_I64,
                                               .dst = half,
                                               .a = trips,
-                                              .b = two,
-                                              .c = -1,
-                                              .d = -1,
-                                              .e = -1,
-                                              .f = -1,
-                                              .effects = NYIR_EFFECT_MAY_TRAP};
-      formula[formula_count++] = (nyr_inst_t){.op = NYIR_MUL_I64,
-                                              .dst = even_prod,
-                                              .a = half,
-                                              .b = trips_minus_one,
-                                              .c = -1,
-                                              .d = -1,
-                                              .e = -1,
-                                              .f = -1};
-      formula[formula_count++] = (nyr_inst_t){.op = NYIR_DIV_I64,
-                                              .dst = odd_half,
-                                              .a = trips_minus_one,
-                                              .b = two,
-                                              .c = -1,
-                                              .d = -1,
-                                              .e = -1,
-                                              .f = -1,
-                                              .effects = NYIR_EFFECT_MAY_TRAP};
-      formula[formula_count++] = (nyr_inst_t){.op = NYIR_MUL_I64,
-                                              .dst = odd_prod,
-                                              .a = trips,
-                                              .b = odd_half,
+                                              .b = one,
                                               .c = -1,
                                               .d = -1,
                                               .e = -1,
@@ -1393,26 +1353,18 @@ static bool closed_form_constant_sum(nyr_func_t *f, const nyr_cfg_t *cfg,
                                               .d = -1,
                                               .e = -1,
                                               .f = -1};
-      formula[formula_count++] = (nyr_inst_t){.op = NYIR_SUB_I64,
-                                              .dst = delta,
-                                              .a = odd_prod,
-                                              .b = even_prod,
+      formula[formula_count++] = (nyr_inst_t){.op = NYIR_ADD_I64,
+                                              .dst = paired_factor,
+                                              .a = trips_minus_one,
+                                              .b = bit,
                                               .c = -1,
                                               .d = -1,
                                               .e = -1,
                                               .f = -1};
       formula[formula_count++] = (nyr_inst_t){.op = NYIR_MUL_I64,
-                                              .dst = weighted,
-                                              .a = bit,
-                                              .b = delta,
-                                              .c = -1,
-                                              .d = -1,
-                                              .e = -1,
-                                              .f = -1};
-      formula[formula_count++] = (nyr_inst_t){.op = NYIR_ADD_I64,
                                               .dst = sum_j,
-                                              .a = even_prod,
-                                              .b = weighted,
+                                              .a = half,
+                                              .b = paired_factor,
                                               .c = -1,
                                               .d = -1,
                                               .e = -1,

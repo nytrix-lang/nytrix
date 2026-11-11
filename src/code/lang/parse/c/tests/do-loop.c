@@ -1,3 +1,6 @@
+/*
+ * Parser/backend fixture for do-while loop control flow and accumulation.
+ */
 long c_do_sum(long count) {
   long index = 0;
   long sum = 0;

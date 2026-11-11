@@ -75,21 +75,25 @@ fn split_below(dict node, any new_buffer=0) dict {
 
 ;; Returns the result of the `pane_layout` operation.
 fn pane_layout(dict node, f64 x, f64 y, f64 w, f64 h) dict {
+   def pw = max(0.0, w)
+   def ph = max(0.0, h)
    node["x"] = x
    node["y"] = y
-   node["w"] = w
-   node["h"] = h
+   node["w"] = pw
+   node["h"] = ph
    def split = to_str(node.get("split", SPLIT_NONE))
    if split == SPLIT_NONE { return node }
    def ratio = min(max(float(node.get("ratio", 0.5)), 0.15), 0.85)
    if split == SPLIT_VERTICAL {
-      def lw = max(MIN_PANE, w * ratio)
-      node["left"] = pane_layout(_child(node, "left"), x, y, lw, h)
-      node["right"] = pane_layout(_child(node, "right"), x + lw, y, max(MIN_PANE, w - lw), h)
+      def floor_w = min(MIN_PANE, pw * 0.5)
+      def lw = min(max(floor_w, pw * ratio), pw - floor_w)
+      node["left"] = pane_layout(_child(node, "left"), x, y, lw, ph)
+      node["right"] = pane_layout(_child(node, "right"), x + lw, y, pw - lw, ph)
    } else {
-      def th = max(MIN_PANE, h * ratio)
-      node["left"] = pane_layout(_child(node, "left"), x, y, w, th)
-      node["right"] = pane_layout(_child(node, "right"), x, y + th, w, max(MIN_PANE, h - th))
+      def floor_h = min(MIN_PANE, ph * 0.5)
+      def th = min(max(floor_h, ph * ratio), ph - floor_h)
+      node["left"] = pane_layout(_child(node, "left"), x, y, pw, th)
+      node["right"] = pane_layout(_child(node, "right"), x, y + th, pw, ph - th)
    }
    node
 }
@@ -117,14 +121,17 @@ fn selected(dict node) dict {
    rows.len > 0 ? rows.get(0) : leaf()
 }
 
-fn _select_buffer(dict node, any buffer) dict {
+fn _select_index(dict node, int index) list {
    if to_str(node.get("split", SPLIT_NONE)) == SPLIT_NONE {
-      node["active"] = node.get("buffer", 0) == buffer
-      return node
+      node["active"] = index == 0
+      return [node, index - 1]
    }
-   node["left"] = _select_buffer(_child(node, "left"), buffer)
-   node["right"] = _select_buffer(_child(node, "right"), buffer)
-   node
+   node["active"] = false
+   def left = _select_index(_child(node, "left"), index)
+   def right = _select_index(_child(node, "right"), int(left.get(1)))
+   node["left"] = left.get(0)
+   node["right"] = right.get(0)
+   [node, right.get(1)]
 }
 
 ;; Updates the next and returns the resulting state.
@@ -138,9 +145,8 @@ fn select_next(dict node, int dir=1) dict {
       if is_dict(row) && bool(row.get("active", false)) { active = i }
       i += 1
    }
-   def next = (active + dir + rows.len) % rows.len
-   def next_row = rows.get(next, dict(0))
-   _select_buffer(_clear_active(node), is_dict(next_row) ? next_row.get("buffer", next) : next)
+   def next = ((active + dir) % rows.len + rows.len) % rows.len
+   _select_index(node, next).get(0)
 }
 
 ;; Updates the at and returns the resulting state.
@@ -150,13 +156,12 @@ fn select_at(dict node, f64 x, f64 y) dict {
    mut i = 0
    while i < rows.len {
       def r = rows.get(i)
-      if x >= float(r.get("x", 0.0)) && x <= float(r.get("x", 0.0)) + float(r.get("w", 0.0)) &&
-      y >= float(r.get("y", 0.0)) && y <= float(r.get("y", 0.0)) + float(r.get("h", 0.0)){ picked = i }
+      if x >= float(r.get("x", 0.0)) && x < float(r.get("x", 0.0)) + float(r.get("w", 0.0)) &&
+      y >= float(r.get("y", 0.0)) && y < float(r.get("y", 0.0)) + float(r.get("h", 0.0)){ picked = i }
       i += 1
    }
    if picked < 0 { return node }
-   def picked_row = rows.get(picked, dict(0))
-   _select_buffer(_clear_active(node), is_dict(picked_row) ? picked_row.get("buffer", picked) : picked)
+   _select_index(node, picked).get(0)
 }
 
 ;; Releases the selected.
@@ -165,12 +170,10 @@ fn delete_selected(dict node) dict {
    def left = _child(node, "left")
    def right = _child(node, "right")
    if to_str(left.get("split", SPLIT_NONE)) == SPLIT_NONE && bool(left.get("active", false)) {
-      right["active"] = true
-      return right
+      return _select_index(right, 0).get(0)
    }
    if to_str(right.get("split", SPLIT_NONE)) == SPLIT_NONE && bool(right.get("active", false)) {
-      left["active"] = true
-      return left
+      return _select_index(left, 0).get(0)
    }
    node["left"] = delete_selected(left)
    node["right"] = delete_selected(right)

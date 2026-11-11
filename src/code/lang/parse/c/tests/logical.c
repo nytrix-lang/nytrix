@@ -1,3 +1,6 @@
+/*
+ * Parser fixture: test logical mutation through a pointer argument.
+ */
 long c_logic_mutate(long *slot) {
   *slot = 1;
   return 7;

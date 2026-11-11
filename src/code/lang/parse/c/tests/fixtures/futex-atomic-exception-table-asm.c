@@ -1,3 +1,7 @@
+/*
+ * Fixture: preserve exception-table metadata around an atomic futex
+ * instruction.
+ */
 #include <stdint.h>
 
 static volatile uint32_t memory_word;

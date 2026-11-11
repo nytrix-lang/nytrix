@@ -8,6 +8,7 @@ use core
 use core.common as common
 use core.str as str
 use core.math
+use core.math.scalar as scalar_math
 use core.math.float (is_nan, is_inf)
 use core.math.vector
 use core.math.matrix
@@ -381,7 +382,7 @@ fn simulate_frame_state(dict state) dict {
          ;; pacing varies.  Treat the configured alpha as the 60Hz response.
          if smooth_alpha > 0.0 && smooth_alpha < 0.999 {
             def frame_scale = clamp(dt * 60.0, 0.25, 4.0)
-            smooth_alpha = 1.0 - float(__flt_pow(1.0 - smooth_alpha, frame_scale))
+            smooth_alpha = 1.0 - scalar_math.pow(1.0 - smooth_alpha, frame_scale)
          }
          if smooth_alpha >= 0.999 {
             rmb_dx_smooth, rmb_dy_smooth = look_dx, look_dy

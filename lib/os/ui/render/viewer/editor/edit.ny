@@ -17,28 +17,27 @@ fn _line_at(list lines, int i) str {
    to_str(lines.get(i, ""))
 }
 
-fn _copy_lines(list src, int a, int b, list dst, int at) int {
+;; Line lists are built with `append`, which boxes each element and the result.
+;; The earlier preallocated-list construction produced a list whose handle was
+;; stored into the buffer dictionary unboxed, so Enter, joining lines, and
+;; multi-line paste left the buffer empty.
+fn _append_lines(list out, list src, int a, int b) list {
    mut i = a
-   mut j = at
    while i < b {
-      __store_item_fast(dst, j, src.get(i, ""))
+      out = out.append(to_str(src.get(i, "")))
       i += 1
-      j += 1
    }
-   j
-}
-
-fn _new_lines(int n) list {
-   mut out = list(max(1, n))
-   __list_set_len(out, max(1, n))
    out
 }
 
 ;; Returns the result of the `line_insert` operation.
 fn line_insert(str line, int col, str text) str {
    if text.len <= 0 { return line }
-   col = min(max(col, 0), line.len)
-   str.str_slice(line, 0, col) + text + str.str_slice(line, col, line.len)
+   ;; Clamp into a fresh local: reassigning the `int` parameter from a
+   ;; `number`-typed `min`/`max` result halves it (see docs/TODO.md), which
+   ;; inserted text at the wrong column.
+   def at = int(min(max(col, 0), line.len))
+   str.str_slice(line, 0, at) + text + str.str_slice(line, at, line.len)
 }
 
 ;; Returns the result of the `line_delete_before` operation.
@@ -57,28 +56,23 @@ fn insert_text(dict st, str text) dict {
    def parts = split_lines(text)
    if parts.len <= 1 {
       lines[row] = line_insert(line, col, text)
-      st["cursor_col"] = col + text.len
+      st["cursor_col"] = __box_i64(col + text.len)
       return set_lines(st, lines)
    }
    def before = str.str_slice(line, 0, col)
    def after = str.str_slice(line, col, line.len)
-   def out_len = lines.len + parts.len - 1
-   mut out = _new_lines(out_len)
-   mut j = _copy_lines(lines, 0, row, out, 0)
-   __store_item_fast(out, j, before + to_str(parts.get(0, "")))
-   j += 1
+   mut out = _append_lines([], lines, 0, row)
+   out = out.append(before + to_str(parts.get(0, "")))
    mut i = 1
    while i < parts.len - 1 {
-      __store_item_fast(out, j, parts.get(i, ""))
+      out = out.append(to_str(parts.get(i, "")))
       i += 1
-      j += 1
    }
    def tail = to_str(parts.get(parts.len - 1, ""))
-   __store_item_fast(out, j, tail + after)
-   j += 1
-   _copy_lines(lines, row + 1, lines.len, out, j)
-   st["cursor_line"] = row + parts.len - 1
-   st["cursor_col"] = tail.len
+   out = out.append(tail + after)
+   out = _append_lines(out, lines, row + 1, lines.len)
+   st["cursor_line"] = __box_i64(row + parts.len - 1)
+   st["cursor_col"] = __box_i64(tail.len)
    set_lines(st, out)
 }
 
@@ -89,12 +83,11 @@ fn newline(dict st) dict {
    def row = int(st.get("cursor_line", 0))
    def col = int(st.get("cursor_col", 0))
    def line = _line_at(lines, row)
-   mut out = _new_lines(lines.len + 1)
-   mut j = _copy_lines(lines, 0, row, out, 0)
-   __store_item_fast(out, j, str.str_slice(line, 0, col))
-   __store_item_fast(out, j + 1, str.str_slice(line, col, line.len))
-   _copy_lines(lines, row + 1, lines.len, out, j + 2)
-   st["cursor_line"] = row + 1
+   mut out = _append_lines([], lines, 0, row)
+   out = out.append(str.str_slice(line, 0, col))
+   out = out.append(str.str_slice(line, col, line.len))
+   out = _append_lines(out, lines, row + 1, lines.len)
+   st["cursor_line"] = __box_i64(row + 1)
    st["cursor_col"] = 0
    set_lines(st, out)
 }
@@ -107,18 +100,17 @@ fn backspace(dict st) dict {
    def col = int(st.get("cursor_col", 0))
    if col > 0 {
       lines[row] = line_delete_before(to_str(lines.get(row, "")), col)
-      st["cursor_col"] = col - 1
+      st["cursor_col"] = __box_i64(col - 1)
       return set_lines(st, lines)
    }
    if row <= 0 { return st }
    def prev = _line_at(lines, row - 1)
    def cur = _line_at(lines, row)
-   mut out = _new_lines(lines.len - 1)
-   mut j = _copy_lines(lines, 0, row - 1, out, 0)
-   __store_item_fast(out, j, prev + cur)
-   _copy_lines(lines, row + 1, lines.len, out, j + 1)
-   st["cursor_line"] = row - 1
-   st["cursor_col"] = prev.len
+   mut out = _append_lines([], lines, 0, row - 1)
+   out = out.append(prev + cur)
+   out = _append_lines(out, lines, row + 1, lines.len)
+   st["cursor_line"] = __box_i64(row - 1)
+   st["cursor_col"] = __box_i64(prev.len)
    set_lines(st, out)
 }
 
@@ -134,10 +126,9 @@ fn delete_char(dict st) dict {
       return set_lines(st, lines)
    }
    if row + 1 >= lines.len { return st }
-   mut out = _new_lines(lines.len - 1)
-   mut j = _copy_lines(lines, 0, row, out, 0)
-   __store_item_fast(out, j, line + _line_at(lines, row + 1))
-   _copy_lines(lines, row + 2, lines.len, out, j + 1)
+   mut out = _append_lines([], lines, 0, row)
+   out = out.append(line + _line_at(lines, row + 1))
+   out = _append_lines(out, lines, row + 2, lines.len)
    set_lines(st, out)
 }
 

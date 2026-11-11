@@ -1,3 +1,6 @@
+/*
+ * C parser fixture for a 16-bit wchar_t target data model.
+ */
 typedef __WCHAR_TYPE__ wchar_t;
 _Static_assert(sizeof(wchar_t) == 2, "short wchar_t size");
 _Static_assert(__SIZEOF_WCHAR_T__ == 2, "short wchar_t macro size");

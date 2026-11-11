@@ -7,6 +7,8 @@
  * path, process, JSON, and report helpers
  * campaign guards and shell command generation
  */
+#include "../json.h"
+#include "../shared.h"
 #include <limits.h>
 #ifndef _WIN32
 #include <sys/resource.h>
@@ -22,7 +24,7 @@ static const int NYTRIX_DEFAULT_MAX_LOAD_PCT = 75;
 static const int NYTRIX_DEFAULT_MIN_FREE_GB = 20;
 
 static double fuzz_all_calc_thread_years_per_run(double remaining_thread_years,
-                                                double runs_needed) {
+                                                 double runs_needed) {
   if (remaining_thread_years <= 0.0 || runs_needed <= 0.0)
     return 0.0;
   return remaining_thread_years / runs_needed;
@@ -32,6 +34,24 @@ static double fuzz_all_calc_runs_to_days(double runs, double runs_per_day) {
   if (runs < 0.0 || runs_per_day <= 0.0)
     return -1.0;
   return runs / runs_per_day;
+}
+
+static void append_json_field_key(str_buf_t *row, const char *key) {
+  (void)sb_append(row, ",\"");
+  (void)sb_append(row, key);
+  (void)sb_append(row, "\":");
+}
+
+static void append_json_bool_field(str_buf_t *row, const char *key,
+                                   bool value) {
+  append_json_field_key(row, key);
+  (void)sb_append(row, value ? "true" : "false");
+}
+
+static void append_json_string_field(str_buf_t *row, const char *key,
+                                     const char *value) {
+  append_json_field_key(row, key);
+  (void)sb_append_json_str(row, value);
 }
 
 #define NYTRIX_OLD_PATH_DRY_RUN_COMMAND NYTRIX_FUZZ_ALL_OLD_PATH_DRY_RUN_COMMAND
@@ -1032,7 +1052,6 @@ static int emit_native_report(char *report_json, const char *json_path,
 static char *native_row_status(const char *name, const char *kind, bool ok,
                                const char *detail_key,
                                const char *detail_value);
-static bool contains_ci(const char *haystack, const char *needle);
 static char *json_string_or_empty_range_local(const char *start,
                                               const char *end, const char *key);
 static bool compile_or_run_ny_source(const char *root, const char *ny_bin,
@@ -1075,12 +1094,6 @@ static char *trim_trailing_copy(const char *s) {
   return strndup_local(s, n);
 }
 
-static const char *skip_ws_const(const char *p) {
-  while (p && *p && isspace((unsigned char)*p))
-    ++p;
-  return p;
-}
-
 static const char *find_n(const char *start, const char *end,
                           const char *needle) {
   size_t n = strlen(needle);
@@ -1105,7 +1118,7 @@ static const char *json_value_after_key_range(const char *start,
     while (after < end && isspace((unsigned char)*after))
       ++after;
     if (after < end && *after == ':')
-      return skip_ws_const(after + 1);
+      return fuzz_json_skip_ws(after + 1);
     p += pat_len;
   }
   return NULL;
@@ -1117,7 +1130,7 @@ static const char *json_value_after_key(const char *json, const char *key) {
 
 static const char *json_top_level_value_after_key(const char *json,
                                                   const char *key) {
-  const char *p = skip_ws_const(json);
+  const char *p = fuzz_json_skip_ws(json);
   if (!p || *p != '{' || !key)
     return json_value_after_key(json ? json : "", key ? key : "");
   const size_t key_len = strlen(key);
@@ -1153,11 +1166,11 @@ static const char *json_top_level_value_after_key(const char *json,
         }
         if (!*q)
           return NULL;
-        const char *after = skip_ws_const(q + 1);
+        const char *after = fuzz_json_skip_ws(q + 1);
         if (!key_escape && after && *after == ':' &&
             (size_t)(q - start) == key_len &&
             memcmp(start, key, key_len) == 0) {
-          return skip_ws_const(after + 1);
+          return fuzz_json_skip_ws(after + 1);
         }
         p = q;
         continue;
@@ -1200,71 +1213,12 @@ static const char *matching_json_end(const char *open, char lhs, char rhs) {
   return NULL;
 }
 
-static char *parse_json_string_dup(const char **cursor, const char *end) {
-  const char *p = *cursor;
-  if (!p || p >= end || *p != '"')
-    return NULL;
-  ++p;
-  str_buf_t b = {0};
-  while (p < end && *p) {
-    unsigned char c = (unsigned char)*p++;
-    if (c == '"') {
-      *cursor = p;
-      return sb_take(&b);
-    }
-    if (c == '\\' && p < end) {
-      unsigned char e = (unsigned char)*p++;
-      switch (e) {
-      case '"':
-        c = '"';
-        break;
-      case '\\':
-        c = '\\';
-        break;
-      case '/':
-        c = '/';
-        break;
-      case 'b':
-        c = '\b';
-        break;
-      case 'f':
-        c = '\f';
-        break;
-      case 'n':
-        c = '\n';
-        break;
-      case 'r':
-        c = '\r';
-        break;
-      case 't':
-        c = '\t';
-        break;
-      case 'u':
-
-        if (p + 4 <= end)
-          p += 4;
-        c = '?';
-        break;
-      default:
-        c = e;
-        break;
-      }
-    }
-    if (!sb_append_c(&b, (char)c)) {
-      free(b.data);
-      return NULL;
-    }
-  }
-  free(b.data);
-  return NULL;
-}
-
 static char *json_extract_string_range(const char *start, const char *end,
                                        const char *key) {
   const char *p = json_value_after_key_range(start, end, key);
   if (!p || p >= end || *p != '"')
     return NULL;
-  return parse_json_string_dup(&p, end);
+  return fuzz_json_string_dup(&p, end);
 }
 
 static char *json_extract_array_range(const char *start, const char *end,
@@ -1287,7 +1241,7 @@ static char *features_csv_from_json_array(const char *array_text) {
   const char *p = array_text + 1;
   str_buf_t out = {0};
   while (p < end) {
-    p = skip_ws_const(p);
+    p = fuzz_json_skip_ws(p);
     if (p >= end || *p == ']')
       break;
     if (*p == ',') {
@@ -1296,7 +1250,7 @@ static char *features_csv_from_json_array(const char *array_text) {
     }
     if (*p != '"')
       break;
-    char *item = parse_json_string_dup(&p, end);
+    char *item = fuzz_json_string_dup(&p, end);
     if (!item)
       break;
     if (out.len)
@@ -1434,7 +1388,7 @@ static int append_failures_from_row(str_buf_t *failures_json, const char *row) {
   const char *q = matching_json_end(p, '[', ']');
   if (!q)
     return 0;
-  const char *content = skip_ws_const(p + 1);
+  const char *content = fuzz_json_skip_ws(p + 1);
   const char *tail = q;
   while (tail > content && isspace((unsigned char)tail[-1]))
     --tail;
@@ -1485,13 +1439,13 @@ static bool text_mentions_crash(const char *a, const char *b) {
     const char *s = texts[i];
     if (!s)
       continue;
-    if (contains_ci(s, "segmentation fault") ||
-        contains_ci(s, "segmentationfault") || contains_ci(s, "signal 11") ||
-        contains_ci(s, "sigsegv") ||
-        contains_ci(s, "internal compiler error") ||
-        contains_ci(s, "addresssanitizer") ||
-        contains_ci(s, "undefinedbehavior") || contains_ci(s, "assertion") ||
-        contains_ci(s, "panic"))
+    if (fuzz_contains_ci(s, "segmentation fault") ||
+        fuzz_contains_ci(s, "segmentationfault") ||
+        fuzz_contains_ci(s, "signal 11") || fuzz_contains_ci(s, "sigsegv") ||
+        fuzz_contains_ci(s, "internal compiler error") ||
+        fuzz_contains_ci(s, "addresssanitizer") ||
+        fuzz_contains_ci(s, "undefinedbehavior") ||
+        fuzz_contains_ci(s, "assertion") || fuzz_contains_ci(s, "panic"))
       return true;
   }
   return false;
@@ -1501,14 +1455,14 @@ static const char *worker_failure_kind(const char *phase, int rc,
                                        const char *out, const char *err) {
   if (rc == 124)
     return "timeout";
-  if (phase && contains_ci(phase, "diff"))
+  if (phase && fuzz_contains_ci(phase, "diff"))
     return "output_diff";
-  if (phase && contains_ci(phase, "prepare"))
+  if (phase && fuzz_contains_ci(phase, "prepare"))
     return "prepare_error";
   bool crash = rc >= 128 || text_mentions_crash(err, out);
-  if (phase && contains_ci(phase, "compile"))
+  if (phase && fuzz_contains_ci(phase, "compile"))
     return crash ? "compiler_crash" : "compile_error";
-  if (phase && contains_ci(phase, "run"))
+  if (phase && fuzz_contains_ci(phase, "run"))
     return "runtime_error";
   return crash ? "compiler_crash" : "prepare_error";
 }
@@ -1543,11 +1497,18 @@ static char *make_worker_failure_row(const char *case_name, const char *phase,
   return sb_take(&b);
 }
 
-static char *row_with_id_field(const char *row, const char *id) {
-  size_t n = strlen(row ? row : "");
+static size_t row_object_end(const char *row) {
+  if (!row)
+    return 0;
+  size_t n = strlen(row);
   while (n > 0 && isspace((unsigned char)row[n - 1]))
     --n;
-  if (n == 0 || row[n - 1] != '}')
+  return n > 0 && row[n - 1] == '}' ? n : 0;
+}
+
+static char *row_with_id_field(const char *row, const char *id) {
+  size_t n = row_object_end(row);
+  if (n == 0)
     return strdup(row ? row : "");
   str_buf_t b = {0};
   (void)sb_append_n(&b, row, n - 1);
@@ -1559,10 +1520,8 @@ static char *row_with_id_field(const char *row, const char *id) {
 
 static char *row_with_lane_fields(const char *row, const char *lane,
                                   const char *source_kind) {
-  size_t n = strlen(row ? row : "");
-  while (n > 0 && isspace((unsigned char)row[n - 1]))
-    --n;
-  if (n == 0 || row[n - 1] != '}')
+  size_t n = row_object_end(row);
+  if (n == 0)
     return strdup(row ? row : "");
   str_buf_t b = {0};
   (void)sb_append_n(&b, row, n - 1);
@@ -1624,7 +1583,7 @@ static int report_add_rows_from_report_json(report_rows_t *report,
   const char *p = rows + 1;
   int added = 0;
   while (p < end) {
-    p = skip_ws_const(p);
+    p = fuzz_json_skip_ws(p);
     if (p >= end || *p == ']')
       break;
     if (*p == ',') {
@@ -1943,9 +1902,8 @@ static int extract_json_int_in_object(const char *json, const char *object_key,
   const char *v = json_value_after_key_range(obj, end + 1, key);
   if (!v)
     return 0;
-  char *num_end = NULL;
-  long n = strtol(v, &num_end, 10);
-  if (num_end == v)
+  long n;
+  if (!fuzz_parse_long(&v, &n))
     return 0;
   return (int)n;
 }
@@ -2109,7 +2067,7 @@ static bool parse_generated_cases(const char *json,
     return false;
   const char *p = cases + 1;
   while (p < end) {
-    p = skip_ws_const(p);
+    p = fuzz_json_skip_ws(p);
     if (p >= end || *p == ']')
       break;
     if (*p == ',') {
@@ -2159,7 +2117,7 @@ static bool parse_manifest_entries_raw(const char *json,
     return false;
   const char *p = items + 1;
   while (p < end) {
-    p = skip_ws_const(p);
+    p = fuzz_json_skip_ws(p);
     if (p >= end || *p == ']')
       break;
     if (*p == ',') {
@@ -2198,7 +2156,7 @@ static bool collect_rows_from_report_json(const char *json,
     return false;
   const char *p = items + 1;
   while (p < end) {
-    p = skip_ws_const(p);
+    p = fuzz_json_skip_ws(p);
     if (p >= end || *p == ']')
       break;
     if (*p == ',') {
@@ -2224,7 +2182,7 @@ static int count_json_array_items(const char *array_text) {
   const char *end = matching_json_end(array_text, '[', ']');
   if (!end)
     return -1;
-  const char *p = skip_ws_const(array_text + 1);
+  const char *p = fuzz_json_skip_ws(array_text + 1);
   if (p >= end)
     return 0;
   int count = 0;
@@ -2280,7 +2238,7 @@ static char *first_row_or_object_from_json(const char *json) {
     return out;
   }
   string_list_free(&rows);
-  const char *p = skip_ws_const(json);
+  const char *p = fuzz_json_skip_ws(json);
   if (!p || *p != '{')
     return NULL;
   const char *end = matching_json_end(p, '{', '}');
@@ -2307,18 +2265,6 @@ static bool copy_file_bytes(const char *src, const char *dst) {
     ok = false;
   free(f.data);
   return ok;
-}
-
-static void file_hash_hex(const char *path, char *out, size_t out_sz) {
-  if (out_sz)
-    out[0] = '\0';
-  if (!path || !*path || !out_sz)
-    return;
-  file_buf_t f = {0};
-  if (!read_file(path, &f))
-    return;
-  snprintf(out, out_sz, "%016" PRIx64, fnv1a64(f.data, f.len));
-  free(f.data);
 }
 
 static char *json_string_or_empty(const char *row, const char *key) {
@@ -2351,19 +2297,6 @@ static char *json_method_or_generator(const char *row) {
     return method;
   free(method);
   return strdup("native");
-}
-
-static const char *canonical_native_method(const char *generator) {
-  if (!generator || !*generator || strcmp(generator, "mixed") == 0 ||
-      strcmp(generator, "auto") == 0)
-    return "mixed";
-  if (strcmp(generator, "generate") == 0 || strcmp(generator, "typed") == 0)
-    return "typed";
-  if (strcmp(generator, "ir") == 0)
-    return "ir";
-  if (strcmp(generator, "stress") == 0)
-    return "stress";
-  return generator;
 }
 
 static const char *canonical_synth_schedule(const char *schedule) {
@@ -2459,16 +2392,10 @@ static bool extract_prefixed_field(const char *text, const char *prefix,
   return false;
 }
 
-static int cmp_double_value(const void *a, const void *b) {
-  double x = *(const double *)a;
-  double y = *(const double *)b;
-  return (x > y) - (x < y);
-}
-
 static double median_double(double *values, int count) {
   if (!values || count <= 0)
     return 0.0;
-  qsort(values, (size_t)count, sizeof(double), cmp_double_value);
+  qsort(values, (size_t)count, sizeof(double), fuzz_double_cmp);
   if (count & 1)
     return values[count / 2];
   return (values[count / 2 - 1] + values[count / 2]) / 2.0;
@@ -2946,14 +2873,14 @@ static char *build_promotion_result_json(const char *row,
     (void)sb_append_json_str(&fail, case_name);
     (void)sb_append(&fail, ",\"missing\":[");
     bool first = true;
-#define ADD_MISSING_SOURCE(path_value)                                         \
-  do {                                                                         \
-    if (!path_exists_file(path_value)) {                                       \
-      if (!first)                                                              \
-        (void)sb_append_c(&fail, ',');                                         \
-      first = false;                                                           \
-      (void)sb_append_json_str(&fail, path_value ? path_value : "");           \
-    }                                                                          \
+#define ADD_MISSING_SOURCE(path_value)                               \
+  do {                                                               \
+    if (!path_exists_file(path_value)) {                             \
+      if (!first)                                                    \
+        (void)sb_append_c(&fail, ',');                               \
+      first = false;                                                 \
+      (void)sb_append_json_str(&fail, path_value ? path_value : ""); \
+    }                                                                \
   } while (0)
     ADD_MISSING_SOURCE(c_source);
     ADD_MISSING_SOURCE(ny_source);
@@ -3068,13 +2995,13 @@ static char *build_promotion_result_json(const char *row,
   if (!c_hash || !*c_hash) {
     free(c_hash);
     char buf[32];
-    file_hash_hex(c_source, buf, sizeof(buf));
+    fuzz_file_hash_hex(c_source, buf, sizeof(buf));
     c_hash = strdup(buf);
   }
   if (!ny_hash || !*ny_hash) {
     free(ny_hash);
     char buf[32];
-    file_hash_hex(ny_source, buf, sizeof(buf));
+    fuzz_file_hash_hex(ny_source, buf, sizeof(buf));
     ny_hash = strdup(buf);
   }
   char *features = json_array_or_empty(row, "features");
@@ -3401,7 +3328,7 @@ static char *build_creal_promotion_result_json(const char *row,
   if (!structural || !*structural) {
     free(structural);
     char buf[32];
-    file_hash_hex(c_source, buf, sizeof(buf));
+    fuzz_file_hash_hex(c_source, buf, sizeof(buf));
     structural = strdup(buf);
   }
   if ((!behavior || !*behavior) && sample_hash && *sample_hash) {
@@ -3997,9 +3924,9 @@ static int count_json_true_fields(const char *json, const char *key) {
   const char *end = json + strlen(json);
   const char *p = json;
   while ((p = find_n(p, end, pat)) != NULL) {
-    const char *after = skip_ws_const(p + n);
+    const char *after = fuzz_json_skip_ws(p + n);
     if (after && after < end && *after == ':') {
-      const char *value = skip_ws_const(after + 1);
+      const char *value = fuzz_json_skip_ws(after + 1);
       if (value && value + 4 <= end && strncmp(value, "true", 4) == 0 &&
           (value + 4 == end ||
            (!isalnum((unsigned char)value[4]) && value[4] != '_'))) {
@@ -4332,6 +4259,7 @@ static int cmd_public_selftest_child_tmp_env(int argc, char **argv) {
     char *child_argv[8];
     int a = 0;
     child_argv[a++] = g_self_path;
+    child_argv[a++] = "fuzz";
     child_argv[a++] = "selftest";
     child_argv[a++] = "child-tmp-env";
     child_argv[a++] = "--check";
@@ -5327,7 +5255,7 @@ static bool collect_matrix_rows_from_report(const char *path, const char *key,
   const char *p = rows && end ? rows + 1 : NULL;
   matrix_row_list_t report_rows = {0};
   while (p && p < end) {
-    p = skip_ws_const(p);
+    p = fuzz_json_skip_ws(p);
     if (p >= end || *p == ']')
       break;
     if (*p == ',') {
@@ -5567,7 +5495,7 @@ static char *build_synth_generate_report_json(
   (void)sb_append_json_str(&b, generator);
   (void)sb_append(&b, ",\"schedule\":");
   (void)sb_append_json_str(&b, schedule ? schedule : "smart");
-  const char *method = canonical_native_method(generator);
+  const char *method = fuzz_canonical_generator_method(generator);
   (void)sb_append(&b, ",\"generator_kind\":");
   (void)sb_append_json_str(&b, method);
   (void)sb_append(&b, ",\"method\":");
@@ -5822,7 +5750,7 @@ static int cmd_public_corpus_audit(int argc, char **argv,
                                 : NULL;
   const char *p = entries_json && entries_end ? entries_json + 1 : NULL;
   while (p && p < entries_end) {
-    p = skip_ws_const(p);
+    p = fuzz_json_skip_ws(p);
     if (p >= entries_end || *p == ']')
       break;
     if (*p == ',') {
@@ -5913,14 +5841,14 @@ static int cmd_public_corpus_audit(int argc, char **argv,
     (void)sb_appendf(&row, ",\"duplicate\":%s,\"missing_paths\":[",
                      duplicate ? "true" : "false");
     bool first_missing = true;
-#define APPEND_MISSING(path_value, missing_flag)                               \
-  do {                                                                         \
-    if ((missing_flag)) {                                                      \
-      if (!first_missing)                                                      \
-        (void)sb_append_c(&row, ',');                                          \
-      first_missing = false;                                                   \
-      (void)sb_append_json_str(&row, (path_value) ? (path_value) : "");        \
-    }                                                                          \
+#define APPEND_MISSING(path_value, missing_flag)                        \
+  do {                                                                  \
+    if ((missing_flag)) {                                               \
+      if (!first_missing)                                               \
+        (void)sb_append_c(&row, ',');                                   \
+      first_missing = false;                                            \
+      (void)sb_append_json_str(&row, (path_value) ? (path_value) : ""); \
+    }                                                                   \
   } while (0)
     APPEND_MISSING(c_path, c_missing);
     APPEND_MISSING(ny_path, ny_missing);
@@ -6160,7 +6088,7 @@ static char *build_corpus_build_report_json(const string_list_t *promotions,
   (void)sb_append_json_str(&b, corpus_dir);
   (void)sb_append(&b, ",\"jobs\":1,\"generator\":");
   (void)sb_append_json_str(&b, generator);
-  const char *method = canonical_native_method(generator);
+  const char *method = fuzz_canonical_generator_method(generator);
   (void)sb_append(&b, ",\"generator_kind\":");
   (void)sb_append_json_str(&b, method);
   (void)sb_append(&b, ",\"method\":");
@@ -8284,7 +8212,7 @@ static char *copy_afl_binary_to_cache(const char *bin_dir,
   if (!ny_mkdir_p(bin_dir))
     return NULL;
   char hash[32] = {0};
-  file_hash_hex(source_bin, hash, sizeof(hash));
+  fuzz_file_hash_hex(source_bin, hash, sizeof(hash));
   if (!hash[0])
     snprintf(hash, sizeof(hash), "unknown");
   char *path = NULL;
@@ -9115,6 +9043,16 @@ static void append_repo_or_sibling_rel_json_str(str_buf_t *b, const char *root,
   free(norm_root);
 }
 
+static void append_repo_or_sibling_rel_json_field(str_buf_t *row,
+                                                  const char *key,
+                                                  const char *root,
+                                                  const char *path) {
+  if (!row)
+    return;
+  append_json_field_key(row, key);
+  append_repo_or_sibling_rel_json_str(row, root, path);
+}
+
 static char *repo_or_sibling_rel_path_dup(const char *root, const char *path) {
   str_buf_t quoted = {0};
   append_repo_or_sibling_rel_json_str(&quoted, root ? root : "",
@@ -9122,7 +9060,7 @@ static char *repo_or_sibling_rel_path_dup(const char *root, const char *path) {
   char *out = NULL;
   if (quoted.data) {
     const char *p = quoted.data;
-    out = parse_json_string_dup(&p, quoted.data + strlen(quoted.data));
+    out = fuzz_json_string_dup(&p, quoted.data + strlen(quoted.data));
   }
   free(quoted.data);
   return out ? out : strdup(path ? path : "");
@@ -10397,9 +10335,9 @@ static void append_gc_proc_row(string_list_t *rows, const char *root,
     (void)sb_append(&row, ",\"artifact\":");
     append_rel_json_str(&row, root, artifact_path);
   }
-  if (stats_json && *skip_ws_const(stats_json) == '{') {
+  if (stats_json && *fuzz_json_skip_ws(stats_json) == '{') {
     (void)sb_append(&row, ",\"stats\":");
-    (void)sb_append(&row, skip_ws_const(stats_json));
+    (void)sb_append(&row, fuzz_json_skip_ws(stats_json));
   }
   if (pr && (!ok || pr->out || pr->err))
     append_proc_tail_fields(&row, pr);
@@ -11273,12 +11211,12 @@ static int cmd_public_fuzz_gc_campaign_run(int argc, char **argv,
     }                                                                          \
   } while (0)
 
-#define RUN_GC_LANE_COUNT(counter_name, lane_name, timeout_value, ...)         \
-  do {                                                                         \
-    int before_count = lane_metric_count;                                      \
-    RUN_GC_LANE((lane_name), (timeout_value), __VA_ARGS__);                    \
-    if (lane_metric_count > before_count)                                      \
-      ++(counter_name);                                                        \
+#define RUN_GC_LANE_COUNT(counter_name, lane_name, timeout_value, ...) \
+  do {                                                                 \
+    int before_count = lane_metric_count;                              \
+    RUN_GC_LANE((lane_name), (timeout_value), __VA_ARGS__);            \
+    if (lane_metric_count > before_count)                              \
+      ++(counter_name);                                                \
   } while (0)
 
   if (soak) {
@@ -12707,7 +12645,7 @@ static bool summarize_perf_triage_report(const char *json, int *hotspots,
   bool found = false;
   const char *p = rows_json + 1;
   while (p < rows_end) {
-    p = skip_ws_const(p);
+    p = fuzz_json_skip_ws(p);
     if (p >= rows_end || *p == ']')
       break;
     if (*p == ',') {

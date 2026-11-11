@@ -137,7 +137,8 @@ fn _draw_parts(idp, parts, win_w, list_h, max_rows, parity_lock, model_icon) int
    def last_row = int(range[1])
    if first_row > 0 { gui.spacer_px(float(first_row) * row_step) }
    mut pi = first_row
-   def row_w = max(120.0, float(win_w) - 44.0)
+   ;; Zero selects the scroll body width, including its scrollbar inset.
+   def row_w = 0.0
    def icon = (parity_lock || !ui_profile.env_toggle_cached("NY_UI_SVG_HIERARCHY_ICONS", false)) ? -1 : (_icon_missing(model_icon) ? icons.icon_sprite("asset_model") : model_icon)
    while pi < last_row {
       def part = parts[pi]
@@ -190,7 +191,8 @@ fn _tree_h(win_h, compact, part_count, node_count=0) f64 {
 }
 
 fn _draw_tree(idp, nodes, roots, win_w, tree_h, parity_lock, camera_icon, model_icon, node_icon) int {
-   def row_w = max(120.0, float(win_w) - 44.0)
+   ;; Zero selects the scroll body width, including its scrollbar inset.
+   def row_w = 0.0
    gui.begin_scroll_area(idp + "_hierarchy_tree", 0.0, tree_h)
    mut drawn = 0
    mut ri = 0

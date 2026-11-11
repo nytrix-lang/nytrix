@@ -1,3 +1,6 @@
+/*
+ * Compiler process capture and source snapshot utilities for performance tests.
+ */
 #ifndef _POSIX_C_SOURCE
 #define _POSIX_C_SOURCE 200809L
 #endif
@@ -10,8 +13,8 @@
 #ifdef _WIN32
 #include <windows.h>
 #else
-#include <unistd.h>
 #include <sys/wait.h>
+#include <unistd.h>
 #endif
 
 bool nyt_compiler_snapshot(const char *source, char *path, size_t capacity,
@@ -28,7 +31,8 @@ bool nyt_compiler_snapshot(const char *source, char *path, size_t capacity,
   if (n > 0 && (size_t)n < capacity && CopyFileA(source, path, TRUE))
     return true;
   if (error && error_capacity)
-    snprintf(error, error_capacity, "cannot snapshot compiler (Windows error %lu)",
+    snprintf(error, error_capacity,
+             "cannot snapshot compiler (Windows error %lu)",
              (unsigned long)GetLastError());
 #else
   FILE *input = fopen(source, "rb");
@@ -84,7 +88,8 @@ bool nyt_compiler_snapshot(const char *source, char *path, size_t capacity,
   errno = EIO;
 failed:
   if (error && error_capacity)
-    snprintf(error, error_capacity, "cannot snapshot compiler: %s", strerror(errno));
+    snprintf(error, error_capacity, "cannot snapshot compiler: %s",
+             strerror(errno));
 #endif
   path[0] = 0;
   return false;
@@ -111,7 +116,8 @@ int nyt_compiler_snapshot_selftest(void) {
     ok = fclose(out) == 0 && ok && chmod(source, 0700) == 0;
   }
   snapshot[0] = second[0] = 0;
-  ok = ok && nyt_compiler_snapshot(source, snapshot, sizeof(snapshot), error, sizeof(error));
+  ok = ok && nyt_compiler_snapshot(source, snapshot, sizeof(snapshot), error,
+                                   sizeof(error));
   out = fopen(replacement, "wb");
   if (out) {
     ok = fputs("#!/bin/sh\nexit 7\n", out) >= 0 && ok;
@@ -132,7 +138,8 @@ int nyt_compiler_snapshot_selftest(void) {
     ok = false;
   ok = ok && memcmp(actual, original, sizeof(original) - 1) == 0 &&
        access(snapshot, X_OK) == 0 &&
-       !nyt_compiler_snapshot(source, second, sizeof(second), error, sizeof(error)) &&
+       !nyt_compiler_snapshot(source, second, sizeof(second), error,
+                              sizeof(error)) &&
        !second[0] && error[0];
   if (ok) {
     pid_t child = fork();

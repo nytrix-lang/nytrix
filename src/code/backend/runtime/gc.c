@@ -101,18 +101,6 @@ static void nyGcFinalizerSet(int64_t obj, void (*fn)(int64_t)) {
   g_finalizer_table[idx].fn = fn;
 }
 
-static void (*nyGcFinalizerGet(int64_t obj))(int64_t) {
-  if (!g_finalizer_table || !g_finalizer_cap)
-    return NULL;
-  size_t idx = (size_t)obj % g_finalizer_cap;
-  while (g_finalizer_table[idx].obj) {
-    if (g_finalizer_table[idx].obj == obj)
-      return g_finalizer_table[idx].fn;
-    idx = (idx + 1) % g_finalizer_cap;
-  }
-  return NULL;
-}
-
 static void nyGcFinalizerRemove(int64_t obj) {
   if (!g_finalizer_table || !g_finalizer_cap)
     return;
@@ -248,6 +236,10 @@ static void nyGcForwardSort(nyGcForwardMap_t *map) {
 }
 
 static atomic_flag gNyGcLock = ATOMIC_FLAG_INIT;
+/*
+ * Protected by gNyGcLock; callbacks may allocate but cannot compact the heap.
+ */
+static bool gNyGcFinalizing;
 
 static void nyGcMinorCollectUnlocked(void);
 static void nyGcMajorCollectUnlocked(void);
@@ -551,6 +543,25 @@ static void nyGcUpdateObjectRefs(nyGcHeader_t *header,
 }
 
 static void nyGcApplyForwards(const nyGcForwardMap_t *map) {
+  /*
+   * Object movement changes hash keys; updating entries in place would
+   * invalidate their probe chains. Reinsert every surviving registration.
+   */
+  if (g_finalizer_count) {
+    nyGcFinalizerEntry_t *old = g_finalizer_table;
+    size_t cap = g_finalizer_cap;
+    g_finalizer_table = calloc(cap, sizeof(*g_finalizer_table));
+    if (!g_finalizer_table)
+      nyGcFatal("finalizer relocation table allocation failed");
+    g_finalizer_count = 0;
+    for (size_t i = 0; i < cap; ++i) {
+      if (!old[i].obj)
+        continue;
+      nyGcForwardSlot(map, &old[i].obj);
+      nyGcFinalizerSet(old[i].obj, old[i].fn);
+    }
+    free(old);
+  }
   for (size_t i = 0; i < gNyGc.root_count; i++)
     nyGcForwardSlot(map, gNyGc.roots[i]);
   for (size_t i = 0; i < gNyGc.remembered_count; i++)
@@ -950,6 +961,8 @@ void nyGcDispose(void) {
     nyGcUnlock();
     return;
   }
+  if (gNyGcFinalizing)
+    nyGcFatal("cannot dispose the heap while a finalizer is running");
 
   free(gNyGc.nursery_start);
   free(gNyGc.tenured_start);
@@ -963,6 +976,9 @@ void nyGcDispose(void) {
   free(gNyGc.remembered_set);
   free(gNyGc.remembered_index);
   free(gNyGc.roots);
+  free(g_finalizer_table);
+  g_finalizer_table = NULL;
+  g_finalizer_count = g_finalizer_cap = 0;
   free(g_large_index);
   g_large_index = NULL;
   g_large_index_count = 0;
@@ -1106,8 +1122,7 @@ int64_t nyGcAllocFast(size_t size) {
   size_t total = nyGcAllocSize(size);
   if (total == 0)
     return 0;
-  if (total < gNyGc.large_threshold &&
-      nyGcFits(gNyGc.nursery_ptr, gNyGc.nursery_limit, total)) {
+  if (total < gNyGc.large_threshold) {
     nyGcLock();
     if (nyGcFits(gNyGc.nursery_ptr, gNyGc.nursery_limit, total)) {
       int64_t obj = nyGcAllocFastUnlocked(size);
@@ -1133,8 +1148,7 @@ int64_t nyGcAlloc(size_t size) {
   size_t total = nyGcAllocSize(size);
   if (total == 0)
     return 0;
-  if (total < gNyGc.large_threshold &&
-      nyGcFits(gNyGc.nursery_ptr, gNyGc.nursery_limit, total)) {
+  if (total < gNyGc.large_threshold) {
     nyGcLock();
     if (nyGcFits(gNyGc.nursery_ptr, gNyGc.nursery_limit, total)) {
       int64_t obj = nyGcAllocFastUnlocked(size);
@@ -1259,12 +1273,86 @@ void nyGcCollect(void) {
   nyGcUnlock();
 }
 
+/*
+ * No sweep cursor or forwarding map may survive a user callback. Discover
+ * unreachable finalizers before compaction, then restart marking because the
+ * callback can change roots and allocate. Nested collection requests are
+ * deferred until a subsequent collection; allocations still use normal homes.
+ */
+static void nyGcClearMarksUnlocked(void) {
+  uint8_t *starts[] = {gNyGc.nursery_start, gNyGc.tenured_start};
+  uint8_t *ends[] = {gNyGc.nursery_ptr, gNyGc.tenured_free};
+  for (size_t r = 0; r < 2; ++r)
+    for (uint8_t *p = starts[r]; p < ends[r];) {
+      nyGcHeader_t *h = (nyGcHeader_t *)p;
+      h->flags &= ~(NYGC_MARKED | NYGC_SCANNED);
+      p += nyGcAllocSize(h->size);
+    }
+  nyGcClearLargeMarksUnlocked();
+}
+
+static void nyGcRunFinalizersUnlocked(void) {
+  size_t count = 0;
+  nyGcFinalizerEntry_t *pending =
+      ny_malloc_array(g_finalizer_count, sizeof(*pending));
+  if (!pending)
+    nyGcFatal("pending finalizer allocation failed");
+  nyGcClearMarksUnlocked();
+  nyGcMark_from_roots();
+  for (size_t i = 0; i < g_finalizer_cap; ++i) {
+    nyGcHeader_t *header = NULL;
+    if (g_finalizer_table[i].obj &&
+        nyGcHeaderForObject(g_finalizer_table[i].obj, &header) &&
+        !(header->flags & NYGC_MARKED))
+      pending[count++] = g_finalizer_table[i];
+  }
+  gNyGcFinalizing = true;
+  for (size_t i = 0; i < count; ++i) {
+    /*
+     * A preceding callback may resurrect this object or replace its finalizer.
+     * Registrations created by callbacks belong to the next collection.
+     */
+    nyGcClearMarksUnlocked();
+    nyGcMark_from_roots();
+    nyGcHeader_t *header = NULL;
+    if (!nyGcHeaderForObject(pending[i].obj, &header) ||
+        (header->flags & NYGC_MARKED))
+      continue;
+    size_t slot = (size_t)pending[i].obj % g_finalizer_cap;
+    while (g_finalizer_table[slot].obj &&
+           g_finalizer_table[slot].obj != pending[i].obj)
+      slot = (slot + 1) % g_finalizer_cap;
+    if (!g_finalizer_table[slot].obj ||
+        g_finalizer_table[slot].fn != pending[i].fn)
+      continue;
+    nyGcFinalizerRemove(pending[i].obj);
+    header->flags &= ~NYGC_FINALIZER;
+    nyGcUnlock();
+    if (pending[i].fn)
+      pending[i].fn(pending[i].obj);
+    nyGcLock();
+  }
+  gNyGcFinalizing = false;
+  free(pending);
+}
+
 static void nyGcMinorCollectUnlocked(void) {
+  if (gNyGcFinalizing)
+    return;
+  if (g_finalizer_count)
+    nyGcRunFinalizersUnlocked();
   nyGcPauseBegin();
   nyGcValidateUnlocked("minor-before");
   gNyGc.stats.nursery_collections++;
-  nyGcClearLargeMarksUnlocked();
+  nyGcClearMarksUnlocked();
   nyGcMark_from_roots();
+  /*
+   * Keep newly registered or resurrected finalizable objects until the next
+   * callback pass, including their referenced children.
+   */
+  for (size_t i = 0; i < g_finalizer_cap; ++i)
+    if (g_finalizer_table[i].obj)
+      nyGcMarkUnlocked(g_finalizer_table[i].obj);
   nyGcPromoteSurvivors();
   nyGcRebuildRememberedUnlocked();
   nyGcValidateUnlocked("minor-after");
@@ -1272,6 +1360,8 @@ static void nyGcMinorCollectUnlocked(void) {
 }
 
 static void nyGcMajorCollectUnlocked(void) {
+  if (gNyGcFinalizing)
+    return;
   nyGcPauseBegin();
   nyGcValidateUnlocked("major-before");
   gNyGc.stats.tenured_collections++;
@@ -1424,7 +1514,7 @@ static void nyGcPromoteSurvivors(void) {
         nyGcHeader_t *dst = (nyGcHeader_t *)gNyGc.tenured_free;
         memcpy(dst, header, total);
         dst->flags =
-            (dst->flags | NYGC_TENURED) & ~(NYGC_MARKED | NYGC_SCANNED);
+            (dst->flags | NYGC_TENURED | NYGC_MARKED) & ~NYGC_SCANNED;
         dst->age = NYGC_PROMOTION_AGE;
         gNyGc.tenured_free += total;
         gNyGc.stats.tenured_allocated += total;
@@ -1441,15 +1531,6 @@ static void nyGcPromoteSurvivors(void) {
         abort();
       }
     } else {
-      if (header->flags & NYGC_FINALIZER) {
-        void (*fn)(int64_t) = nyGcFinalizerGet(from_obj);
-        if (fn) {
-          nyGcFinalizerRemove(from_obj);
-          nyGcUnlock();
-          fn(from_obj);
-          nyGcLock();
-        }
-      }
       gNyGc.stats.objects_swept++;
       gNyGc.stats.bytes_freed += header->size;
     }
@@ -1483,16 +1564,6 @@ static void nyGcSweepTenured(void) {
       }
       new_free += total;
     } else {
-      if (header->flags & NYGC_FINALIZER) {
-        int64_t from = (int64_t)(uintptr_t)nyGcObjPtr(header);
-        void (*fn)(int64_t) = nyGcFinalizerGet(from);
-        if (fn) {
-          nyGcFinalizerRemove(from);
-          nyGcUnlock();
-          fn(from);
-          nyGcLock();
-        }
-      }
       gNyGc.stats.objects_swept++;
       gNyGc.stats.bytes_freed += header->size;
     }
@@ -1532,16 +1603,6 @@ static void nyGcSweepLargeUnlocked(void) {
     if (!large->header || !(large->header->flags & NYGC_MARKED)) {
       *link = large->next;
       if (large->header) {
-        if (large->header->flags & NYGC_FINALIZER) {
-          int64_t from = (int64_t)(uintptr_t)nyGcObjPtr(large->header);
-          void (*fn)(int64_t) = nyGcFinalizerGet(from);
-          if (fn) {
-            nyGcFinalizerRemove(from);
-            nyGcUnlock();
-            fn(from);
-            nyGcLock();
-          }
-        }
         gNyGc.stats.objects_swept++;
         gNyGc.stats.bytes_freed += large->header->size;
         gNyGc.stats.large_freed += large->total_size;

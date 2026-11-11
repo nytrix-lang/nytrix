@@ -1,3 +1,6 @@
+/*
+ * C parser fixture for function-pointer arrays, declarations, and sections.
+ */
 typedef void (*nyc_initcall_entry_t)(void);
 extern nyc_initcall_entry_t nyc_initcall_start[], nyc_initcall_end[];
 extern long (*nyc_panic_blink)(int state);

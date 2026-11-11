@@ -1,3 +1,6 @@
+/*
+ * Fixture: access an aggregate member through a local pointer array.
+ */
 struct file {
   int value;
 };

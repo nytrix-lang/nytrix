@@ -1,3 +1,6 @@
+/*
+ * Runtime harness for CPUID inline assembly output-register tests.
+ */
 typedef unsigned int u32;
 void nyc_cpuid_probe(u32 *, u32 *, u32 *, u32 *);
 static void host_cpuid(u32 *eax, u32 *ebx, u32 *ecx, u32 *edx) {

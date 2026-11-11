@@ -1,3 +1,4 @@
+/* Lightweight C-source function scanner used by formatter tooling. */
 #ifndef NY_FMT_CSCAN_H
 #define NY_FMT_CSCAN_H
 

@@ -4,6 +4,7 @@
  */
 #include "code/lang/pipeline/build.h"
 #include "base/common.h"
+#include "base/parallel.h"
 #include "base/process.h"
 #include "base/util.h"
 #include <ctype.h>
@@ -156,6 +157,15 @@ static bool ny_tool_in_path(const char *tool) {
  * deterministic and avoids turning a runtime test into a tool-cache error.
  */
 static bool ny_builder_ccache_usable(void) {
+  /*
+   * The internal runtime object cache is the default path. ccache is an
+   * explicit oracle/comparison opt-in so builds never silently depend on an
+   * external cache.
+   */
+  const char *opt_in = getenv("NYTRIX_USE_CCACHE");
+  if (!opt_in || !*opt_in || strcmp(opt_in, "0") == 0 ||
+      strcmp(opt_in, "off") == 0 || strcmp(opt_in, "false") == 0)
+    return false;
   if (!ny_tool_in_path("ccache"))
     return false;
 #ifdef _WIN32
@@ -789,6 +799,85 @@ const char *ny_builder_choose_cc(void) {
 }
 
 #if !defined(_WIN32)
+typedef struct {
+  const char *cc;
+  const char *include_arg;
+  const char *public_include_arg;
+  const char *llvm_include_arg;
+  const char *dwarf_flag;
+  const char *sanitize_kind;
+  const char *host_cflags;
+  bool has_ccache;
+  const char (*src)[PATH_MAX];
+  const char (*obj)[PATH_MAX];
+  int *status;
+  bool debug;
+  bool profile;
+  int speed_level;
+  bool native_tune;
+  bool target_windows;
+} ny_runtime_unit_compile_ctx_t;
+
+static bool ny_runtime_compile_unit(size_t u, void *opaque) {
+  ny_runtime_unit_compile_ctx_t *ctx = opaque;
+  const char *args[64];
+  size_t n = 0;
+  if (ctx->has_ccache)
+    args[n++] = "ccache";
+  args[n++] = ctx->cc;
+  args[n++] = "-std=gnu11";
+  args[n++] = ctx->debug ? "-g3" : (ctx->speed_level >= 2 ? "-O3" : "-Os");
+  args[n++] = ctx->dwarf_flag;
+  if (!ctx->debug && ctx->speed_level < 0) {
+    args[n++] = "-fno-unwind-tables";
+    args[n++] = "-fno-asynchronous-unwind-tables";
+    args[n++] = "-fno-ident";
+  }
+  args[n++] = ctx->debug ? "-fno-omit-frame-pointer" : "-fomit-frame-pointer";
+  args[n++] =
+      ctx->debug ? "-fno-optimize-sibling-calls" : "-foptimize-sibling-calls";
+  if (!ctx->debug && ctx->native_tune && !ctx->target_windows)
+    args[n++] = "-march=native";
+#if defined(__arm__) && !defined(__aarch64__)
+  args[n++] = ny_builder_arm_float_abi_flag();
+#endif
+#if defined(__APPLE__)
+  if (!ctx->target_windows)
+    args[n++] = "-fPIC";
+#else
+  if (!ctx->target_windows)
+    args[n++] = ny_env_enabled("NYTRIX_NO_PIE") ? "-fno-pie" : "-fPIE";
+#endif
+  args[n++] = "-fvisibility=hidden";
+  args[n++] = "-ffunction-sections";
+  args[n++] = "-fdata-sections";
+  args[n++] = "-DNYTRIX_RUNTIME_ONLY";
+  if (!ctx->debug)
+    args[n++] = "-DNDEBUG";
+  args[n++] = ctx->include_arg;
+  args[n++] = ctx->public_include_arg;
+  args[n++] = ctx->llvm_include_arg;
+  char sanitize_flag[64];
+  if (ctx->sanitize_kind && *ctx->sanitize_kind) {
+    snprintf(sanitize_flag, sizeof(sanitize_flag), "-fsanitize=%s",
+             ctx->sanitize_kind);
+    args[n++] = sanitize_flag;
+  }
+  if (ctx->profile)
+    args[n++] = "-pg";
+  args[n++] = "-c";
+  args[n++] = ctx->src[u];
+  args[n++] = "-o";
+  args[n++] = ctx->obj[u];
+  args[n] = NULL;
+  char *pool[16];
+  size_t pool_len = 0;
+  int rc = spawn_with_host_flags(args, ctx->host_cflags, pool, &pool_len);
+  ny_free_host_pool(pool, pool_len);
+  ctx->status[u] = rc;
+  return rc == 0;
+}
+
 static bool ny_builder_compile_runtime_archive(
     const char *cc, const char *root, const char *out_runtime,
     const char *include_arg, const char *public_include_arg,
@@ -810,6 +899,7 @@ static bool ny_builder_compile_runtime_archive(
   ny_ensure_dir(dir);
   char src[sizeof(units) / sizeof(units[0])][PATH_MAX];
   char obj[sizeof(units) / sizeof(units[0])][PATH_MAX];
+  size_t unit_count = sizeof(units) / sizeof(units[0]);
   bool ok = true;
   for (size_t u = 0; u < sizeof(units) / sizeof(units[0]); ++u) {
     const char *unit_path = units[u];
@@ -842,67 +932,48 @@ static bool ny_builder_compile_runtime_archive(
       snprintf(src[u], sizeof(src[u]), "%s/src/code/backend/runtime/%s.c", root,
                unit_path);
     snprintf(obj[u], sizeof(obj[u]), "%s/%s.o", dir, units[u]);
-    const char *args[64];
-    size_t n = 0;
-    if (has_ccache)
-      args[n++] = "ccache";
-    args[n++] = cc;
-    args[n++] = "-std=gnu11";
-    args[n++] = debug ? "-g3" : (speed_level >= 2 ? "-O3" : "-Os");
-    args[n++] = dwarf_flag;
-    if (!debug && speed_level < 0) {
-      args[n++] = "-fno-unwind-tables";
-      args[n++] = "-fno-asynchronous-unwind-tables";
-      args[n++] = "-fno-ident";
-    }
-    args[n++] = debug ? "-fno-omit-frame-pointer" : "-fomit-frame-pointer";
-    args[n++] =
-        debug ? "-fno-optimize-sibling-calls" : "-foptimize-sibling-calls";
-    if (!debug && native_tune && !target_windows)
-      args[n++] = "-march=native";
-#if defined(__arm__) && !defined(__aarch64__)
-    args[n++] = ny_builder_arm_float_abi_flag();
-#endif
-#if defined(__APPLE__)
-    if (!target_windows)
-      args[n++] = "-fPIC";
-#else
-    if (!target_windows)
-      args[n++] = ny_env_enabled("NYTRIX_NO_PIE") ? "-fno-pie" : "-fPIE";
-#endif
-    args[n++] = "-fvisibility=hidden";
-    args[n++] = "-ffunction-sections";
-    args[n++] = "-fdata-sections";
-    args[n++] = "-DNYTRIX_RUNTIME_ONLY";
-    if (!debug)
-      args[n++] = "-DNDEBUG";
-    args[n++] = include_arg;
-    args[n++] = public_include_arg;
-    args[n++] = llvm_include_arg;
-    char sanitize_flag[64];
-    if (sanitize_kind && *sanitize_kind) {
-      snprintf(sanitize_flag, sizeof(sanitize_flag), "-fsanitize=%s",
-               sanitize_kind);
-      args[n++] = sanitize_flag;
-    }
-    if (profile)
-      args[n++] = "-pg";
-    args[n++] = "-c";
-    args[n++] = src[u];
-    args[n++] = "-o";
-    args[n++] = obj[u];
-    args[n] = NULL;
-    char *pool[16];
-    size_t pool_len = 0;
-    int rc = spawn_with_host_flags(args, getenv("NYTRIX_HOST_CFLAGS"), pool,
-                                   &pool_len);
-    ny_free_host_pool(pool, pool_len);
-    if (rc != 0) {
+  }
+  int *statuses = calloc(unit_count, sizeof(*statuses));
+  if (!statuses)
+    ok = false;
+  size_t work = 0;
+  for (size_t u = 0; ok && u < unit_count; ++u) {
+    struct stat st;
+    if (stat(src[u], &st) == 0 && st.st_size > 0 &&
+        work <= SIZE_MAX - (size_t)st.st_size)
+      work += (size_t)st.st_size;
+  }
+  ny_runtime_unit_compile_ctx_t compile_ctx = {
+      .cc = cc,
+      .include_arg = include_arg,
+      .public_include_arg = public_include_arg,
+      .llvm_include_arg = llvm_include_arg,
+      .dwarf_flag = dwarf_flag,
+      .sanitize_kind = sanitize_kind,
+      .host_cflags = getenv("NYTRIX_HOST_CFLAGS"),
+      .has_ccache = has_ccache,
+      .src = src,
+      .obj = obj,
+      .status = statuses,
+      .debug = debug,
+      .profile = profile,
+      .speed_level = speed_level,
+      .native_tune = native_tune,
+      .target_windows = target_windows,
+  };
+  if (ok)
+    ok = ny_parallel_for(unit_count, work, ny_runtime_compile_unit,
+                         &compile_ctx);
+  if (statuses) {
+    for (size_t u = 0; u < unit_count; ++u) {
+      if (statuses[u] == 0)
+        continue;
       NY_LOG_ERR("Runtime unit compilation failed for %s (exit=%d)\n", units[u],
-                 rc);
+                 statuses[u]);
       ok = false;
       break;
     }
+    free(statuses);
   }
   if (ok) {
     const char *ar_args[32];

@@ -1,3 +1,6 @@
+/*
+ * Host-side oracle for aggregate values passed through variadic calls.
+ */
 #include <stdarg.h>
 
 struct nyc_uid {

@@ -1,3 +1,4 @@
+/* Interned-string storage and stable symbol-ID lookup APIs. */
 #ifndef NY_INTERN_H
 #define NY_INTERN_H
 

@@ -3,6 +3,8 @@
  * templates, covering parser, type checker, and codegen edge cases.
  */
 #include "core.h"
+#include "shape.h"
+#include "shared.h"
 
 typedef struct {
   char name[96];
@@ -54,93 +56,6 @@ static int rng_range(uint64_t *state, int lo, int hi) {
   return lo + (int)(rng_next(state) % span);
 }
 
-static bool extract_quoted_after(const char *data, const char *key, char *out,
-                                 size_t out_sz) {
-  const char *p = strstr(data, key);
-  if (!p)
-    return false;
-  p = strchr(p, '"');
-  if (!p)
-    return false;
-  ++p;
-  const char *q = strchr(p, '"');
-  if (!q)
-    return false;
-  size_t n = (size_t)(q - p);
-  if (n >= out_sz)
-    n = out_sz - 1;
-  memcpy(out, p, n);
-  out[n] = '\0';
-  return true;
-}
-
-static bool extract_word_after_shape(const char *data, char *out,
-                                     size_t out_sz) {
-  const char *p = strstr(data, "shape ");
-  if (!p)
-    return false;
-  p += 6;
-  while (*p == ' ' || *p == '\t')
-    ++p;
-  const char *q = p;
-  while (*q && *q != ' ' && *q != '\t' && *q != '{' && *q != '\n')
-    ++q;
-  size_t n = (size_t)(q - p);
-  if (!n)
-    return false;
-  if (n >= out_sz)
-    n = out_sz - 1;
-  memcpy(out, p, n);
-  out[n] = '\0';
-  return true;
-}
-
-static bool extract_features(const char *data, char *out, size_t out_sz) {
-  const char *p = strstr(data, "features ");
-  if (!p)
-    return false;
-  p = strchr(p, '[');
-  if (!p)
-    return false;
-  const char *q = strchr(p, ']');
-  if (!q)
-    return false;
-  size_t n = (size_t)(q - p + 1);
-  if (n >= out_sz)
-    n = out_sz - 1;
-  memcpy(out, p, n);
-  out[n] = '\0';
-  return true;
-}
-
-static int extract_int_after(const char *data, const char *key, int fallback) {
-  const char *p = strstr(data, key);
-  if (!p)
-    return fallback;
-  p += strlen(key);
-  while (*p == ' ' || *p == '\t' || *p == ':')
-    ++p;
-  return atoi(p);
-}
-
-static int extract_weight(const char *data, const char *profile) {
-  const char *p = strstr(data, profile);
-  if (!p)
-    return 1;
-  p += strlen(profile);
-  while (*p == ' ' || *p == '\t' || *p == ':')
-    ++p;
-  int v = atoi(p);
-  return v > 0 ? v : 0;
-}
-
-static void source_from_path(const char *path, char *out, size_t out_sz) {
-  const char *p = strstr(path, "shapes/");
-  if (!p)
-    p = path;
-  snprintf(out, out_sz, "%.*s", (int)out_sz - 1, p);
-}
-
 static void parse_shape_for_gen(const char *path, gen_shapes_t *shapes) {
   if (shapes->count >= (int)(sizeof(shapes->items) / sizeof(shapes->items[0])))
     return;
@@ -149,53 +64,34 @@ static void parse_shape_for_gen(const char *path, gen_shapes_t *shapes) {
     return;
   gen_shape_t s;
   memset(&s, 0, sizeof(s));
-  if (!extract_word_after_shape(f.data, s.name, sizeof(s.name))) {
+  if (!fuzz_extract_shape_name(f.data, s.name, sizeof(s.name))) {
     free(f.data);
     return;
   }
-  (void)extract_quoted_after(
+  (void)fuzz_extract_quoted_after(
       strstr(f.data, "family ") ? strstr(f.data, "family ") : f.data, "family ",
       s.family, sizeof(s.family));
-  (void)extract_quoted_after(
+  (void)fuzz_extract_quoted_after(
       strstr(f.data, "generator ") ? strstr(f.data, "generator ") : f.data,
       "generator ", s.generator, sizeof(s.generator));
   if (!s.family[0])
-    extract_quoted_after(f.data, "family ", s.family, sizeof(s.family));
+    fuzz_extract_quoted_after(f.data, "family ", s.family, sizeof(s.family));
   if (!s.generator[0])
-    extract_quoted_after(f.data, "generator ", s.generator,
-                         sizeof(s.generator));
-  if (!extract_features(f.data, s.features, sizeof(s.features)))
+    fuzz_extract_quoted_after(f.data, "generator ", s.generator,
+                              sizeof(s.generator));
+  if (!fuzz_extract_features(f.data, s.features, sizeof(s.features)))
     snprintf(s.features, sizeof(s.features), "[]");
-  source_from_path(path, s.source, sizeof(s.source));
+  fuzz_source_from_path(path, s.source, sizeof(s.source));
   snprintf(s.hash, sizeof(s.hash), "%016" PRIx64, fnv1a64(f.data, f.len));
-  s.fast_rank = extract_int_after(f.data, "fast_rank", 100);
+  s.fast_rank = fuzz_extract_int_after(f.data, "fast_rank", 100);
   for (int i = 0; i < 5; ++i)
-    s.weights[i] = extract_weight(f.data, profile_names[i]);
+    s.weights[i] = fuzz_extract_weight(f.data, profile_names[i]);
   shapes->items[shapes->count++] = s;
   free(f.data);
 }
 
-static void walk_gen_shapes(const char *dir, gen_shapes_t *shapes) {
-  DIR *d = opendir(dir);
-  if (!d)
-    return;
-  struct dirent *ent;
-  while ((ent = readdir(d)) != NULL) {
-    if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0)
-      continue;
-    char path[4096];
-    int n = snprintf(path, sizeof(path), "%s/%s", dir, ent->d_name);
-    if (n <= 0 || (size_t)n >= sizeof(path))
-      continue;
-    struct stat st;
-    if (stat(path, &st) != 0)
-      continue;
-    if (S_ISDIR(st.st_mode))
-      walk_gen_shapes(path, shapes);
-    else if (S_ISREG(st.st_mode) && ny_has_suffix(path, ".nshape"))
-      parse_shape_for_gen(path, shapes);
-  }
-  closedir(d);
+static void visit_gen_shape(const char *path, void *context) {
+  parse_shape_for_gen(path, context);
 }
 
 static int shape_cmp(const void *a, const void *b) {
@@ -241,19 +137,6 @@ static const char *normalize_schedule(const char *schedule) {
       strcmp(schedule, "weighted") == 0 || strcmp(schedule, "smart") == 0)
     return schedule;
   return "smart";
-}
-
-static const char *canonical_generator_method(const char *generator) {
-  if (!generator || !*generator || strcmp(generator, "mixed") == 0 ||
-      strcmp(generator, "auto") == 0)
-    return "mixed";
-  if (strcmp(generator, "generate") == 0 || strcmp(generator, "typed") == 0)
-    return "typed";
-  if (strcmp(generator, "ir") == 0)
-    return "ir";
-  if (strcmp(generator, "stress") == 0)
-    return "stress";
-  return generator;
 }
 
 static const char *source_kind_for_method(const char *method,
@@ -452,6 +335,14 @@ static void print_int_array(FILE *f, const int *values, int n,
   }
 }
 
+static void emit_zero_values(FILE *f, int n) {
+  for (int i = 0; i < n; ++i) {
+    if (i)
+      fputs(", ", f);
+    fputc('0', f);
+  }
+}
+
 static void emit_c_prelude(FILE *f, bool need_get) {
   fputs("#include <stdbool.h>\n#include <stdint.h>\n#include <stdio.h>\n\n", f);
   if (need_get) {
@@ -620,11 +511,7 @@ static void emit_c_case(FILE *f, const gen_case_t *c) {
     fprintf(f, "int main(void) {\n    const int src[%d] = {", n);
     print_int_array(f, c->values, n, ", ");
     fprintf(f, "};\n    int dst[%d] = {", n);
-    for (int i = 0; i < n; ++i) {
-      if (i)
-        fputs(", ", f);
-      fputs("0", f);
-    }
+    emit_zero_values(f, n);
     fprintf(f,
             "};\n    int acc = 0;\n    for (int i = 0; i < %d; i += 1) {\n"
             "        int v = (src[i] + %d);\n"
@@ -642,11 +529,7 @@ static void emit_c_case(FILE *f, const gen_case_t *c) {
     fprintf(f, "int main(void) {\n    const int src[%d] = {", n);
     print_int_array(f, c->values, n, ", ");
     fprintf(f, "};\n    int dst[%d] = {", n);
-    for (int i = 0; i < n; ++i) {
-      if (i)
-        fputs(", ", f);
-      fputs("0", f);
-    }
+    emit_zero_values(f, n);
     fprintf(f,
             "};\n    int acc = 0;\n    for (int i = 0; i < %d; i += 1) {\n"
             "        int v = (((src[i] * %d) + (i + %d)) %% 251);\n"
@@ -897,17 +780,9 @@ static void emit_c_case(FILE *f, const gen_case_t *c) {
     fprintf(f, "int main(void) {\n    const int src[%d] = {", n);
     print_int_array(f, c->values, n, ", ");
     fprintf(f, "};\n    int tmp[%d] = {", n);
-    for (int i = 0; i < n; ++i) {
-      if (i)
-        fputs(", ", f);
-      fputs("0", f);
-    }
+    emit_zero_values(f, n);
     fprintf(f, "};\n    int out[%d] = {", n);
-    for (int i = 0; i < n; ++i) {
-      if (i)
-        fputs(", ", f);
-      fputs("0", f);
-    }
+    emit_zero_values(f, n);
     fprintf(f,
             "};\n    int acc = 0;\n"
             "    for (int i = 0; i < %d; i += 1) {\n"
@@ -934,11 +809,7 @@ static void emit_ny_array(FILE *f, const int *values, int n) {
 
 static void emit_ny_zero_array(FILE *f, int n) {
   fputc('[', f);
-  for (int i = 0; i < n; ++i) {
-    if (i)
-      fputs(", ", f);
-    fputc('0', f);
-  }
+  emit_zero_values(f, n);
   fputc(']', f);
 }
 
@@ -1406,7 +1277,7 @@ static void init_gen_case(gen_case_t *c, const gen_shape_t *shape, int idx,
   c->seed = seed + idx;
   c->index = idx;
   snprintf(c->profile, sizeof(c->profile), "%s", profile);
-  const char *method = canonical_generator_method(requested_generator);
+  const char *method = fuzz_canonical_generator_method(requested_generator);
   if (strcmp(method, "mixed") == 0)
     method = shape->generator;
   snprintf(c->generator, sizeof(c->generator), "%s", method);
@@ -1521,7 +1392,7 @@ int cmd_generate_batch(int argc, char **argv) {
   const char *shape_name = arg_value(argc, argv, "--shape", "");
   const char *schedule =
       normalize_schedule(arg_value(argc, argv, "--schedule", "smart"));
-  const char *method = canonical_generator_method(generator);
+  const char *method = fuzz_canonical_generator_method(generator);
   int seed = atoi(arg_value(argc, argv, "--seed", "1337"));
   int cases = atoi(arg_value(argc, argv, "--cases", "8"));
   bool fast = arg_flag(argc, argv, "--fast");
@@ -1532,7 +1403,7 @@ int cmd_generate_batch(int argc, char **argv) {
     cases = 1;
   gen_shapes_t all;
   memset(&all, 0, sizeof(all));
-  walk_gen_shapes(shape_dir, &all);
+  fuzz_walk_shape_files(shape_dir, visit_gen_shape, &all);
   gen_shape_t pool[128];
   int pool_n = select_shapes(&all, pool, 128, generator, shape_name);
   if (list_shapes) {

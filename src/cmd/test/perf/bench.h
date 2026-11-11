@@ -1,3 +1,4 @@
+/* Benchmark command interface for measuring compiled Nytrix programs. */
 #ifndef NYTRIX_CMD_TEST_PERF_BENCH_H
 #define NYTRIX_CMD_TEST_PERF_BENCH_H
 

@@ -18,8 +18,8 @@
 #include "ui.h"
 #include <errno.h>
 #include <limits.h>
-#include <stdatomic.h>
 #include <stdarg.h>
+#include <stdatomic.h>
 #include <sys/stat.h>
 #ifdef _WIN32
 #include "base/dirent.h"
@@ -185,10 +185,19 @@ static void usage(void) {
          nyt_clr(NYT_CYAN), nyt_clr(NYT_RESET), nyt_clr(NYT_GREEN),
          nyt_clr(NYT_RESET));
   nyt_subheading("Formatting");
-  printf("  %s--check --fix --trim --syntax --types --dead%s\n",
+  printf("  %s--check --fix --trim --syntax --types --dead --align-macros%s\n",
          nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
   printf(
       "  Formatting is read-only by default; pass --fix to rewrite files.\n");
+  printf("  --check reports missing C/H purpose comments and misaligned macro "
+         "continuations.\n");
+  nyt_subheading("Source Conversion");
+  printf("  %s--c2ny input.c -o output.ny%s  C to Nytrix\n", nyt_clr(NYT_GREEN),
+         nyt_clr(NYT_RESET));
+  printf("  %s--py2ny input.py -o output.ny%s Python to Nytrix\n",
+         nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
+  printf("  Unsupported constructs leave diagnostic markers and return a "
+         "nonzero status; compile and verify the generated program.\n");
   nyt_subheading("Audits");
   printf("  %s--analyze --audit --smart --overhaul --bugs --checks --bloat%s\n",
          nyt_clr(NYT_GREEN), nyt_clr(NYT_RESET));
@@ -1966,24 +1975,13 @@ static int fmt_audit_issue_codes(const char *code, ...) {
 }
 
 static int fmt_audit_issue_is_battery(const char *code) {
-  return fmt_audit_issue_codes(code,
-                     "NYAUD2001",
-                     "NYAUD2002",
-                     "NYAUD2003",
-                     "NYAUD2004",
-                     "NYAUD2005",
-                     "NYAUD2006",
-                     NULL);
+  return fmt_audit_issue_codes(code, "NYAUD2001", "NYAUD2002", "NYAUD2003",
+                               "NYAUD2004", "NYAUD2005", "NYAUD2006", NULL);
 }
 
 static int fmt_audit_issue_is_specialize(const char *code) {
-  return fmt_audit_issue_codes(code,
-                     "NYAUD3101",
-                     "NYAUD3102",
-                     "NYAUD3103",
-                     "NYAUD3104",
-                     "NYAUD3105",
-                     NULL);
+  return fmt_audit_issue_codes(code, "NYAUD3101", "NYAUD3102", "NYAUD3103",
+                               "NYAUD3104", "NYAUD3105", NULL);
 }
 
 static int fmt_audit_issue_is_contract(const char *code) {
@@ -2019,17 +2017,11 @@ static int fmt_audit_issue_is_hot_function(const char *code) {
 }
 
 static int fmt_audit_issue_is_append_builder(const char *code) {
-  return fmt_audit_issue_codes(code,
-                     "NYAUD3004",
-                     "NYAUD3009",
-                     NULL);
+  return fmt_audit_issue_codes(code, "NYAUD3004", "NYAUD3009", NULL);
 }
 
 static int fmt_audit_issue_is_loop_guard(const char *code) {
-  return fmt_audit_issue_codes(code,
-                     "NYAUD3007",
-                     "NYAUD3008",
-                     NULL);
+  return fmt_audit_issue_codes(code, "NYAUD3007", "NYAUD3008", NULL);
 }
 
 static int fmt_audit_issue_is_dead_helper(const char *code) {
@@ -2049,33 +2041,15 @@ static int fmt_audit_issue_is_layout(const char *code) {
 }
 
 static int fmt_audit_issue_is_metaprog_trim(const char *code) {
-  return fmt_audit_issue_codes(code,
-                     "NYAUD4101",
-                     "NYAUD4102",
-                     "NYAUD4103",
-                     "NYAUD4104",
-                     "NYAUD4105",
-                     "NYAUD4201",
-                     "NYAUD4202",
-                     "NYAUD4203",
-                     "NYAUD4301",
-                     "NYAUD4302",
-                     "NYAUD4401",
-                     "NYAUD4501",
-                     "NYAUD4502",
-                     "NYAUD4503",
-                     "NYAUD4601",
-                     "NYAUD4801",
-                     "NYAUD4901",
-                     "NYAUD4701",
-                     NULL);
+  return fmt_audit_issue_codes(
+      code, "NYAUD4101", "NYAUD4102", "NYAUD4103", "NYAUD4104", "NYAUD4105",
+      "NYAUD4201", "NYAUD4202", "NYAUD4203", "NYAUD4301", "NYAUD4302",
+      "NYAUD4401", "NYAUD4501", "NYAUD4502", "NYAUD4503", "NYAUD4601",
+      "NYAUD4801", "NYAUD4901", "NYAUD4701", NULL);
 }
 
 static int fmt_audit_issue_is_constant(const char *code) {
-  return fmt_audit_issue_codes(code,
-                     "NYAUD7301",
-                     "NYAUD7302",
-                     NULL);
+  return fmt_audit_issue_codes(code, "NYAUD7301", "NYAUD7302", NULL);
 }
 
 static int fmt_audit_issue_is_method_syntax(const char *code) {
@@ -3399,8 +3373,51 @@ static int run_check_mode(const FmtOpts *opts) {
     if (issue)
       failed++;
   }
+  StrVec c_files = {0};
+  const char *c_roots[] = {"src"};
+  const char *const *c_check_roots =
+      opts->paths.len ? (const char *const *)opts->paths.items : c_roots;
+  size_t c_check_root_count = opts->paths.len ? opts->paths.len : 1;
+  if (!fmt_collect_via_library(c_check_roots, c_check_root_count, "c",
+                               &c_files)) {
+    nyt_err("ny-fmt", "C/H source collection failed; check aborted");
+    sv_free(&files);
+    sv_free(&c_files);
+    return 1;
+  }
+  nyt_msg("CHECK", NYT_CYAN,
+          "scanning %zu C/H files for headers and macro alignment",
+          c_files.len);
+  for (size_t i = 0; i < c_files.len; i++) {
+    char *src = ny_read_file_raw(c_files.items[i], NULL);
+    if (!src) {
+      nyt_err("ny-fmt", "could not read C/H source: %s", c_files.items[i]);
+      failed++;
+      continue;
+    }
+    if (!c_has_file_header_comment(src)) {
+      nyt_err("ny-fmt", "%s:1:1: missing file-purpose comment",
+              c_files.items[i]);
+      failed++;
+    }
+    char *aligned = c_align_macro_continuations(src);
+    if (!aligned) {
+      nyt_err("ny-fmt", "could not check macro alignment in %s",
+              c_files.items[i]);
+      failed++;
+    } else if (strcmp(src, aligned) != 0) {
+      nyt_err("ny-fmt", "%s:%zu: unaligned macro continuation backslashes",
+              c_files.items[i], c_first_difference_line(src, aligned));
+      failed++;
+    }
+    free(aligned);
+    free(src);
+  }
+  size_t c_file_count = c_files.len;
+  sv_free(&c_files);
   if (failed == 0)
-    nyt_msg("OK", NYT_GREEN, "check complete: all %zu files OK", check_count);
+    nyt_msg("OK", NYT_GREEN, "check complete: all %zu Ny and %zu C/H files OK",
+            check_count, c_file_count);
   else
     nyt_msg("CHECK", NYT_RED, "%d file(s) with issues", failed);
   sv_free(&files);
@@ -3412,88 +3429,44 @@ static int run_align_macros_mode(const FmtOpts *opts) {
   if (opts->paths.len == 0) {
     const char *roots[] = {"src"};
     if (!fmt_collect_via_library(roots, 1, "c", &files)) {
-      nyt_err("ny-fmt", "Ny source collection failed; macro alignment aborted");
+      nyt_err("ny-fmt",
+              "C/H source collection failed; macro alignment aborted");
       sv_free(&files);
       return 1;
     }
   } else {
     if (!fmt_collect_via_library((const char *const *)opts->paths.items,
                                  opts->paths.len, "c", &files)) {
-      nyt_err("ny-fmt", "Ny source collection failed; macro alignment aborted");
+      nyt_err("ny-fmt",
+              "C/H source collection failed; macro alignment aborted");
       sv_free(&files);
       return 1;
     }
   }
   int changed = 0;
+  int failed = 0;
   for (size_t i = 0; i < files.len; i++) {
-    size_t n = 0;
-    char *src = ny_read_file_raw(files.items[i], &n);
-    if (!src)
+    char *src = ny_read_file_raw(files.items[i], NULL);
+    if (!src) {
+      nyt_err("ny-fmt", "could not read C/H source: %s", files.items[i]);
+      failed++;
       continue;
-    char *dst = malloc(n * 2 + 1);
+    }
+    char *dst = c_align_macro_continuations(src);
     if (!dst) {
+      nyt_err("ny-fmt", "could not align macro continuations in %s",
+              files.items[i]);
+      failed++;
       free(src);
       continue;
     }
-    size_t di = 0, si = 0;
-    int block_changed = 0;
-    while (si < n) {
-      const char *line_start = src + si;
-      const char *nl = memchr(line_start, '\n', n - si);
-      size_t line_len = nl ? (size_t)(nl - line_start) : n - si;
-      const char *trimmed = line_start;
-      while (trimmed < line_start + line_len &&
-             (*trimmed == ' ' || *trimmed == '\t'))
-        trimmed++;
-      if (strncmp(trimmed, "#define ", 8) == 0 && nl && si + line_len + 1 < n) {
-
-        const char *next = src + si + line_len + 1;
-        const char *next_trim = next;
-        while (next_trim < src + n && (*next_trim == ' ' || *next_trim == '\t'))
-          next_trim++;
-        const char *next_nl = memchr(next, '\n', n - (next - src));
-
-        const char *bs =
-            memchr(next, '\\',
-                   next_nl ? (size_t)(next_nl - next) : (n - (next - src)));
-        if (bs && strncmp(next_trim, "do {", 4) == 0) {
-
-          memmove(dst + di, line_start, line_len);
-          di += line_len;
-          si += line_len + 1;
-          if (dst[di - 1] != '\n')
-            dst[di++] = '\n';
-
-          while (si < n) {
-            const char *bl = src + si;
-            const char *bnl = memchr(bl, '\n', n - si);
-            size_t bl_len = bnl ? (size_t)(bnl - bl) : n - si;
-            memmove(dst + di, bl, bl_len);
-            di += bl_len;
-            si += bl_len + 1;
-            if (!bnl)
-              break;
-
-            if (strstr(bl, "while (0)") || strstr(bl, "while(0)")) {
-              if (dst[di - 1] != '\n')
-                dst[di++] = '\n';
-              break;
-            }
-          }
-          continue;
-        }
-      }
-
-      memmove(dst + di, line_start, line_len);
-      di += line_len;
-      si += line_len + 1;
-      if (si < n && dst[di - 1] != '\n')
-        dst[di++] = '\n';
-    }
-    dst[di] = '\0';
-    if (block_changed) {
-      if (ny_write_file(files.items[i], dst, di) == 0)
+    if (strcmp(src, dst) != 0) {
+      if (ny_write_file(files.items[i], dst, strlen(dst)) == 0) {
         changed++;
+      } else {
+        nyt_err("ny-fmt", "could not write aligned file: %s", files.items[i]);
+        failed++;
+      }
     }
     free(dst);
     free(src);
@@ -3501,7 +3474,7 @@ static int run_align_macros_mode(const FmtOpts *opts) {
   nyt_msg("ALIGN", changed ? NYT_GREEN : NYT_GRAY,
           "aligned macros in %d file(s)", changed);
   sv_free(&files);
-  return 0;
+  return failed != 0;
 }
 
 int ny_fmt_main(int argc, char **argv) {

@@ -1,3 +1,6 @@
+/*
+ * C parser fixture for function pointers returning aggregate values.
+ */
 struct test_inode {
   int value;
 };

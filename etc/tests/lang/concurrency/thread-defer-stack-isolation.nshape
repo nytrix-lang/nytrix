@@ -1,0 +1,60 @@
+shape test_thread_defer_stack_isolation {
+  family "runtime/concurrency"
+  generator "embedded"
+  features ["ny", "test", "native", "thread", "defer", "try", "regression"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-only; --native-backend=llvm --jit --jit-engine=orc"
+  timeout 120
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.thread as thread
+
+;; Defer and panic stacks belong to one call stack. Workers that shared a single
+;; vector reallocated it concurrently (glibc "double free or corruption") and
+;; could run a defer, or unwind to a handler, owned by another thread.
+fn nested(int depth, int token) int {
+   mut seen = 0
+   defer { seen = token }
+   if depth == 0 { return token }
+   nested(depth - 1, token) + 1
+}
+
+fn recovers(int token) int {
+   mut out = 0
+   try {
+      defer { out = out + 1 }
+      panic("worker-" + to_str(token))
+   } catch err {
+      out = out + (str.find(to_str(err), "worker-" + to_str(token)) >= 0 ? 2 : 100)
+   }
+   out
+}
+
+fn worker(any id) any {
+   mut bad = 0
+   mut k = 0
+   while k < 4000 {
+      if nested(24, int(id) + k) != int(id) + k + 24 { bad = bad + 1 }
+      if k % 16 == 0 && recovers(int(id)) != 3 { bad = bad + 1 }
+      k += 1
+   }
+   bad
+}
+
+mut handles = []
+mut i = 0
+while i < 8 {
+   handles = handles.append(thread.thread_spawn(worker, i * 1000))
+   i += 1
+}
+mut failures = 0
+i = 0
+while i < 8 {
+   failures = failures + int(thread.thread_join(handles.get(i, 0)))
+   i += 1
+}
+assert(failures == 0, "each thread owns its defers and panic handlers")
+print("ok thread defer stack isolation")
+NY
+}

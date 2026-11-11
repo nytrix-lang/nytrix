@@ -1,3 +1,6 @@
+/*
+ * Fixture: preserve explicit alignment for a global aggregate type.
+ */
 struct nyc_aligned_key {
   unsigned long key[2];
 };

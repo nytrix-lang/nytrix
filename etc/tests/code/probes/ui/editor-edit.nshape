@@ -1,0 +1,89 @@
+shape editor-edit {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "sys", "render"]
+  template ny-test-case
+  expect compile_and_run
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect_stdout "EDITOR-EDIT-OK"
+  source ny <<'NY'
+use core
+use core.os.ui.render.viewer.editor as ed
+
+fn check(bool ok, str what) { assert(ok, what) }
+fn text(dict st) str { ed.join_lines(ed.current_lines(st)) }
+fn setc(dict st, int line, int col) {
+   st["cursor_line"] = __box_i64(line)
+   st["cursor_col"] = __box_i64(col)
+}
+
+;; Backspace at column 0 joins with the previous line
+mut st = ed.state([ed.buffer("a", "", "ab\ncd")])
+setc(st, 1, 0)
+st = ed.backspace(st)
+check(text(st) == "abcd", "backspace joins lines")
+check(int(st.get("cursor_line", -1)) == 0 && int(st.get("cursor_col", -1)) == 2, "cursor lands at the join")
+
+;; Backspace at the very start is a no-op
+st = ed.state([ed.buffer("a", "", "ab")])
+setc(st, 0, 0)
+st = ed.backspace(st)
+check(text(st) == "ab", "backspace at start is a no-op")
+
+;; Delete at end of line pulls the next line up
+st = ed.state([ed.buffer("a", "", "ab\ncd")])
+setc(st, 0, 2)
+st = ed.delete_char(st)
+check(text(st) == "abcd", "delete joins the next line")
+
+;; Delete at the end of the buffer is a no-op
+st = ed.state([ed.buffer("a", "", "ab")])
+setc(st, 0, 2)
+st = ed.delete_char(st)
+check(text(st) == "ab", "delete at end is a no-op")
+
+;; Newline in the middle, at the start and at the end
+st = ed.state([ed.buffer("a", "", "abc")])
+setc(st, 0, 1)
+st = ed.newline(st)
+check(text(st) == "a\nbc" && int(st.get("cursor_line", -1)) == 1 && int(st.get("cursor_col", -1)) == 0, "newline mid-line")
+st = ed.state([ed.buffer("a", "", "abc")])
+setc(st, 0, 0)
+st = ed.newline(st)
+check(text(st) == "\nabc", "newline at start")
+st = ed.state([ed.buffer("a", "", "abc")])
+setc(st, 0, 3)
+st = ed.newline(st)
+check(text(st) == "abc\n", "newline at end")
+
+;; Multi-line paste in the middle of a line, with a following line preserved
+st = ed.state([ed.buffer("a", "", "ab\nzz")])
+setc(st, 0, 1)
+st = ed.insert_text(st, "X\nY\nZ")
+check(text(st) == "aX\nY\nZb\nzz", "multi-line paste")
+check(int(st.get("cursor_line", -1)) == 2 && int(st.get("cursor_col", -1)) == 1, "cursor after paste")
+
+;; Selection across lines
+st = ed.state([ed.buffer("a", "", "hello\nworld\nagain")])
+setc(st, 0, 3)
+st = ed.set_selection_anchor(st)
+setc(st, 2, 2)
+st = ed.update_selection(st)
+check(ed.selection_valid(st), "selection is valid")
+check(ed.selection_text(st) == "lo\nworld\nag", "selection text spans lines")
+st = ed.delete_selection(st)
+check(text(st) == "helain", "delete selection joins the ends")
+check(int(st.get("cursor_line", -1)) == 0 && int(st.get("cursor_col", -1)) == 3, "cursor at selection start")
+
+;; Selection within one line, made backwards
+st = ed.state([ed.buffer("a", "", "abcdef")])
+setc(st, 0, 4)
+st = ed.set_selection_anchor(st)
+setc(st, 0, 1)
+st = ed.update_selection(st)
+check(ed.selection_text(st) == "bcd", "backward selection text")
+st = ed.delete_selection(st)
+check(text(st) == "aef", "backward selection delete")
+print("EDITOR-EDIT-OK")
+NY
+}

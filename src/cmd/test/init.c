@@ -10958,6 +10958,26 @@ static void bench_norm_ops(char *dst, size_t cap, const char *src) {
   dst[o] = '\0';
 }
 
+/*
+ * Alignment padding is emitted as multi-byte NOPs, which disassemblers may
+ * render with or without operands and may split differently.  Padding is not
+ * part of the generated code's semantics, so compare only real instructions;
+ * a missing or extra non-NOP row still fails the oracle.
+ */
+static int bench_listing_line_is_nop(const char *line) {
+  while (*line == ' ' || *line == '\t')
+    ++line;
+  if (strncasecmp(line, "nop", 3) == 0)
+    return line[3] == '\0' || line[3] == '\t' || line[3] == ' ';
+  /*
+   * int3 is the linker/compiler padding between functions; it is not part of
+   * either function body.
+   */
+  if (strncasecmp(line, "int3", 4) == 0)
+    return line[4] == '\0' || line[4] == '\t' || line[4] == ' ';
+  return 0;
+}
+
 static void bench_decoder_oracle_check(const char *obj_path, const char *shape) {
   if (!obj_path)
     return;
@@ -11019,22 +11039,41 @@ static void bench_decoder_oracle_check(const char *obj_path, const char *shape) 
 
   size_t n_oracle = oracle_sl.count;
   size_t n_internal = internal_sl.count;
-  size_t compared = n_oracle < n_internal ? n_oracle : n_internal;
-  size_t agree = 0;
+  size_t nonnop_oracle = 0, nonnop_internal = 0;
+  for (size_t i = 0; i < n_oracle; ++i)
+    if (!bench_listing_line_is_nop(oracle_sl.items[i]))
+      ++nonnop_oracle;
+  for (size_t i = 0; i < n_internal; ++i)
+    if (!bench_listing_line_is_nop(internal_sl.items[i]))
+      ++nonnop_internal;
+  size_t agree = 0, compared = 0;
   size_t first_div = (size_t)-1;
+  char first_oracle[1024] = "", first_internal[1024] = "";
   char onorm[1024], inorm[1024];
-  for (size_t i = 0; i < compared; i++) {
+  size_t oi = 0, ii = 0;
+  while (oi < n_oracle && ii < n_internal) {
+    while (oi < n_oracle && bench_listing_line_is_nop(oracle_sl.items[oi]))
+      ++oi;
+    while (ii < n_internal && bench_listing_line_is_nop(internal_sl.items[ii]))
+      ++ii;
+    if (oi >= n_oracle || ii >= n_internal)
+      break;
     /*
-     * Split mnemonic	opernands on each side.
+     * Split mnemonic\topernands on each side.
      */
-    char *o_tab = strchr(oracle_sl.items[i], '	');
-    char *i_tab = strchr(internal_sl.items[i], '	');
-    const char *o_mnem = oracle_sl.items[i];
+    char *o_line = oracle_sl.items[oi];
+    char *i_line = internal_sl.items[ii];
+    char *o_tab = strchr(o_line, '\t');
+    char *i_tab = strchr(i_line, '\t');
+    const char *o_mnem = o_line;
     const char *o_ops = "";
-    const char *i_mnem = internal_sl.items[i];
+    const char *i_mnem = i_line;
     const char *i_ops = "";
     if (o_tab) { *o_tab = '\0'; o_ops = o_tab + 1; }
     if (i_tab) { *i_tab = '\0'; i_ops = i_tab + 1; }
+    char *objdump_comment = strchr((char *)o_ops, '#');
+    if (objdump_comment)
+      *objdump_comment = '\0';
     bench_norm_ops(onorm, sizeof(onorm), o_ops);
     bench_norm_ops(inorm, sizeof(inorm), i_ops);
     /*
@@ -11050,28 +11089,44 @@ static void bench_decoder_oracle_check(const char *obj_path, const char *shape) 
     int mnem_eq = strcasecmp(o_mnem_norm, i_mnem_norm) == 0;
     int ops_eq = strcmp(onorm, inorm) == 0;
     if (mnem_eq && ops_eq)
-      agree++;
+      ++agree;
     else if (first_div == (size_t)-1)
-      first_div = i;
-    if (o_tab) *o_tab = '	';
-    if (i_tab) *i_tab = '	';
+      first_div = compared;
+    if (o_tab) *o_tab = '\t';
+    if (i_tab) *i_tab = '\t';
+    if (first_div == compared) {
+      snprintf(first_oracle, sizeof(first_oracle), "%s", o_line);
+      snprintf(first_internal, sizeof(first_internal), "%s", i_line);
+    }
+    ++compared;
+    ++oi;
+    ++ii;
   }
+  size_t leftover_oracle = 0, leftover_internal = 0;
+  for (; oi < n_oracle; ++oi)
+    if (!bench_listing_line_is_nop(oracle_sl.items[oi]))
+      ++leftover_oracle;
+  for (; ii < n_internal; ++ii)
+    if (!bench_listing_line_is_nop(internal_sl.items[ii]))
+      ++leftover_internal;
+
 
   const char *base = strrchr(shape, '/');
   base = base ? base + 1 : shape;
-  printf("[decoder oracle · %s] internal=%zu oracle=%zu agree=%zu",
-         base, n_internal, n_oracle, agree);
+  printf("[decoder oracle · %s] internal=%zu oracle=%zu agree=%zu", base,
+         nonnop_internal, nonnop_oracle, agree);
   if (n_internal == 0 && !internal) {
     printf("  (internal decoder produced unsupported rows, skipped)\n");
-  } else if (n_internal == n_oracle && agree == compared) {
-    printf("  OK\n");
+  } else if (nonnop_internal == nonnop_oracle && agree == nonnop_oracle &&
+             leftover_oracle == 0 && leftover_internal == 0) {
+    printf("  OK (NOP padding ignored)\n");
   } else {
     printf("  DIVERGENCE");
     if (first_div != (size_t)-1)
       printf(" first at inst %zu: oracle=%s internal=%s", first_div,
-             oracle_sl.items[first_div], internal_sl.items[first_div]);
-    if (n_internal != n_oracle)
-      printf("  (count differs)");
+             first_oracle, first_internal);
+    if (nonnop_internal != nonnop_oracle)
+      printf("  (instruction count differs)");
     printf("\n");
   }
 

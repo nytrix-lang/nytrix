@@ -1,6 +1,10 @@
 /*
- * Parallel-work dispatcher: OpenMP and C11-thread backends for
- * module-level and pipeline-stage parallelism with a shared job queue.
+ * Parallel-work dispatcher.
+ *
+ * The default backend is an internal persistent thread pool (POSIX threads,
+ * with a C11-thread fallback where pthreads is unavailable). OpenMP is an
+ * explicit opt-in oracle build (NYTRIX_ENABLE_OPENMP=ON); the shipped
+ * compiler neither requires nor links libomp.
  */
 #include "base/parallel.h"
 #include "base/common.h"
@@ -20,7 +24,15 @@
 #define NY_PAR_HAVE_OPENMP 0
 #endif
 
-#if !NY_PAR_HAVE_OPENMP && !defined(_WIN32) && !defined(__STDC_NO_THREADS__)
+#if !NY_PAR_HAVE_OPENMP && !defined(_WIN32)
+#include <pthread.h>
+#define NY_PAR_HAVE_PTHREAD 1
+#else
+#define NY_PAR_HAVE_PTHREAD 0
+#endif
+
+#if !NY_PAR_HAVE_OPENMP && !NY_PAR_HAVE_PTHREAD && !defined(_WIN32) && \
+    !defined(__STDC_NO_THREADS__)
 #include <threads.h>
 #define NY_PAR_HAVE_C11 1
 #else
@@ -32,6 +44,7 @@ static _Atomic uint64_t g_tasks;
 static _Atomic uint64_t g_serial_regions;
 static _Atomic uint64_t g_openmp_regions;
 static _Atomic uint64_t g_c11_regions;
+static _Atomic uint64_t g_pool_regions;
 static _Atomic bool g_report_registered;
 
 static void ny_parallel_report(void) {
@@ -42,9 +55,10 @@ static void ny_parallel_report(void) {
   ny_parallel_stats(&st);
   fprintf(stderr,
           "[parallel] threads=%d regions=%" PRIu64 " tasks=%" PRIu64
-          " serial=%" PRIu64 " openmp=%" PRIu64 " c11=%" PRIu64 "\n",
+          " serial=%" PRIu64 " openmp=%" PRIu64 " c11=%" PRIu64
+          " pool=%" PRIu64 "\n",
           ny_parallel_threads(), st.regions, st.tasks, st.serial_regions,
-          st.openmp_regions, st.c11_regions);
+          st.openmp_regions, st.c11_regions, st.pool_regions);
 }
 
 static void ny_parallel_register_report(void) {
@@ -121,6 +135,125 @@ bool ny_parallel_enabled(size_t count, size_t work_items) {
          work_items / worker_count >= ny_parallel_min_work();
 }
 
+#if NY_PAR_HAVE_PTHREAD
+/*
+ * Persistent pool. One job runs at a time; the main thread participates and
+ * waits until every worker reports the job finished, so the job struct needs
+ * no per-region allocation and no thread is created per region.
+ */
+typedef struct {
+  _Atomic size_t next;
+  _Atomic int failed;
+  size_t count;
+  size_t active_workers;
+  ny_parallel_task_fn fn;
+  void *ctx;
+} ny_parallel_job_t;
+
+static pthread_mutex_t g_pool_mu = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t g_pool_work = PTHREAD_COND_INITIALIZER;
+static pthread_cond_t g_pool_done = PTHREAD_COND_INITIALIZER;
+static ny_parallel_job_t g_pool_job;
+static pthread_t *g_pool_threads;
+static size_t g_pool_workers;
+static unsigned long g_pool_epoch;
+static size_t g_pool_done_count;
+static bool g_pool_stop;
+static bool g_pool_atexit;
+static _Atomic bool g_region_active;
+
+/*
+ * One shared work queue: whichever participant is free takes the next index,
+ * which keeps uneven encode/lowering jobs balanced without per-region thread
+ * creation. Callbacks are independent, so completion order does not affect
+ * the emitted object.
+ */
+static void ny_parallel_job_run(ny_parallel_job_t *job) {
+  for (;;) {
+    if (atomic_load_explicit(&job->failed, memory_order_relaxed))
+      return;
+    size_t i =
+        atomic_fetch_add_explicit(&job->next, 1, memory_order_relaxed);
+    if (i >= job->count)
+      return;
+    if (!job->fn(i, job->ctx)) {
+      atomic_store_explicit(&job->failed, 1, memory_order_relaxed);
+      return;
+    }
+  }
+}
+
+static void *ny_parallel_pool_worker(void *opaque) {
+  size_t worker_id = (size_t)(uintptr_t)opaque;
+  unsigned long seen = 0;
+  pthread_mutex_lock(&g_pool_mu);
+  for (;;) {
+    while (!g_pool_stop && seen == g_pool_epoch)
+      pthread_cond_wait(&g_pool_work, &g_pool_mu);
+    if (g_pool_stop) {
+      pthread_mutex_unlock(&g_pool_mu);
+      return NULL;
+    }
+    seen = g_pool_epoch;
+    bool active = worker_id < g_pool_job.active_workers;
+    pthread_mutex_unlock(&g_pool_mu);
+    if (!active) {
+      pthread_mutex_lock(&g_pool_mu);
+      continue;
+    }
+    ny_parallel_job_run(&g_pool_job);
+    pthread_mutex_lock(&g_pool_mu);
+    ++g_pool_done_count;
+    if (g_pool_done_count >= g_pool_job.active_workers)
+      pthread_cond_signal(&g_pool_done);
+  }
+}
+
+static void ny_parallel_pool_shutdown(void) {
+  pthread_mutex_lock(&g_pool_mu);
+  g_pool_stop = true;
+  pthread_cond_broadcast(&g_pool_work);
+  pthread_mutex_unlock(&g_pool_mu);
+  for (size_t i = 0; i < g_pool_workers; ++i)
+    pthread_join(g_pool_threads[i], NULL);
+  free(g_pool_threads);
+  g_pool_threads = NULL;
+  g_pool_workers = 0;
+}
+
+static bool ny_parallel_pool_start_locked(int threads) {
+  if (threads < 2)
+    return false;
+  size_t want = (size_t)threads - 1;
+  if (g_pool_workers >= want)
+    return true;
+  pthread_t *threads_buf =
+      realloc(g_pool_threads, want * sizeof(*g_pool_threads));
+  if (!threads_buf)
+    return g_pool_workers > 0;
+  g_pool_threads = threads_buf;
+  while (g_pool_workers < want) {
+    size_t id = g_pool_workers;
+    if (pthread_create(&g_pool_threads[id], NULL, ny_parallel_pool_worker,
+                       (void *)(uintptr_t)id) != 0)
+      break;
+    ++g_pool_workers;
+  }
+  if (!g_pool_atexit) {
+    if (g_pool_workers) {
+      atexit(ny_parallel_pool_shutdown);
+      g_pool_atexit = true;
+    }
+  }
+  if (!g_pool_workers) {
+    free(g_pool_threads);
+    g_pool_threads = NULL;
+    return false;
+  }
+  return true;
+}
+#endif
+
 #if NY_PAR_HAVE_C11
 typedef struct {
   _Atomic size_t next;
@@ -156,8 +289,8 @@ bool ny_parallel_for(size_t count, size_t work_items, ny_parallel_task_fn fn,
   int threads = ny_parallel_threads();
   /*
    * The minimum is a per-worker grain size. Checking only total work can
-   * start a large OpenMP team for tiny per-item callbacks, where team startup
-   * and synchronization cost more than the work being parallelized.
+   * start a large team for tiny per-item callbacks, where startup and
+   * synchronization cost more than the work being parallelized.
    */
   if (!ny_parallel_enabled(count, work_items)) {
     atomic_fetch_add_explicit(&g_serial_regions, 1, memory_order_relaxed);
@@ -172,9 +305,8 @@ bool ny_parallel_for(size_t count, size_t work_items, ny_parallel_task_fn fn,
     _Atomic int failed = 0;
     /*
      * OpenMP creates the requested team even when the loop has fewer tasks.
-     * Module and pass work often has only a handful of independent items;
-     * cap the team to useful workers instead of waking the machine-wide
-     * default (which can be dozens of idle threads for a two-item region).
+     * Cap the team to useful workers instead of waking the machine-wide
+     * default (dozens of idle threads for a two-item region).
      */
     if ((size_t)threads > count)
       threads = (int)count;
@@ -186,6 +318,52 @@ bool ny_parallel_for(size_t count, size_t work_items, ny_parallel_task_fn fn,
     }
     atomic_fetch_add_explicit(&g_openmp_regions, 1, memory_order_relaxed);
     return atomic_load_explicit(&failed, memory_order_relaxed) == 0;
+  }
+#endif
+
+#if NY_PAR_HAVE_PTHREAD
+  /*
+   * Nested or concurrent callers run serially: the pool owns one job at a
+   * time, and serial execution preserves the caller's stack for callbacks
+   * that touch builder state.
+   */
+  bool expected = false;
+  if (atomic_compare_exchange_strong_explicit(
+          &g_region_active, &expected, true, memory_order_acq_rel,
+          memory_order_relaxed)) {
+    if ((size_t)threads > count)
+      threads = (int)count;
+    pthread_mutex_lock(&g_pool_mu);
+    if (ny_parallel_pool_start_locked(threads)) {
+      size_t active_workers = (size_t)threads - 1;
+      if (active_workers > g_pool_workers)
+        active_workers = g_pool_workers;
+      g_pool_job = (ny_parallel_job_t){.next = 0,
+                                       .failed = 0,
+                                       .count = count,
+                                       .active_workers = active_workers,
+                                       .fn = fn,
+                                       .ctx = ctx};
+      g_pool_done_count = 0;
+      ++g_pool_epoch;
+      pthread_cond_broadcast(&g_pool_work);
+      pthread_mutex_unlock(&g_pool_mu);
+      ny_parallel_job_run(&g_pool_job);
+      pthread_mutex_lock(&g_pool_mu);
+      while (g_pool_done_count < active_workers)
+        pthread_cond_wait(&g_pool_done, &g_pool_mu);
+      bool failed = atomic_load_explicit(&g_pool_job.failed,
+                                         memory_order_relaxed) != 0;
+      pthread_mutex_unlock(&g_pool_mu);
+      atomic_store_explicit(&g_region_active, false, memory_order_release);
+      if (!failed) {
+        atomic_fetch_add_explicit(&g_pool_regions, 1, memory_order_relaxed);
+        return true;
+      }
+      return false;
+    }
+    pthread_mutex_unlock(&g_pool_mu);
+    atomic_store_explicit(&g_region_active, false, memory_order_release);
   }
 #endif
 
@@ -231,6 +409,7 @@ void ny_parallel_stats(ny_parallel_stats_t *out) {
   out->openmp_regions =
       atomic_load_explicit(&g_openmp_regions, memory_order_relaxed);
   out->c11_regions = atomic_load_explicit(&g_c11_regions, memory_order_relaxed);
+  out->pool_regions = atomic_load_explicit(&g_pool_regions, memory_order_relaxed);
 }
 
 void ny_parallel_stats_reset(void) {
@@ -239,4 +418,5 @@ void ny_parallel_stats_reset(void) {
   atomic_store_explicit(&g_serial_regions, 0, memory_order_relaxed);
   atomic_store_explicit(&g_openmp_regions, 0, memory_order_relaxed);
   atomic_store_explicit(&g_c11_regions, 0, memory_order_relaxed);
+  atomic_store_explicit(&g_pool_regions, 0, memory_order_relaxed);
 }

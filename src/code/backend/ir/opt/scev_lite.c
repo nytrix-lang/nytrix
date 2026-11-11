@@ -19,11 +19,7 @@
 #include <string.h>
 
 static int root_copy(const nyr_func_t *f, const int *defs, int value) {
-  for (int depth = 0; value >= 0 && value < f->next_value && defs[value] >= 0 &&
-                      f->data[defs[value]].op == NYIR_COPY && depth < 32;
-       ++depth)
-    value = f->data[defs[value]].a;
-  return value;
+  return nyr_strip_copy_chain(f, defs, value, 32);
 }
 
 static int def_index(const nyr_func_t *f, const int *defs, int value) {
@@ -139,11 +135,11 @@ bool nyr_scev_analyze(const nyr_func_t *f, nyr_scev_info_t *out) {
       }
       size_t header_end = nyr_block_last_non_nop(f, &cfg, header);
       const nyr_inst_t *control = header_end > cfg.block_start[header]
-                                       ? &f->data[header_end - 1u]
-                                       : NULL;
+                                      ? &f->data[header_end - 1u]
+                                      : NULL;
       size_t taken_block = SIZE_MAX;
       if (!nyr_cfg_natural_loop_blocks(&cfg, latch, header, in_loop,
-                                        cfg.block_count) ||
+                                       cfg.block_count) ||
           !control || control->op != NYIR_BR_IF ||
           !block_for_label(&cfg, control->imm, &taken_block) ||
           !in_loop[taken_block]) {
@@ -203,19 +199,19 @@ bool nyr_scev_analyze(const nyr_func_t *f, nyr_scev_info_t *out) {
                   root_copy(f, defs, control->a) != cmp->dst)
                 continue;
               nyr_scev_loop_t loop = {.header_block = header,
-                                       .latch_block = latch,
-                                       .preheader_block = preheader,
-                                       .header_index = cfg.block_start[header],
-                                       .latch_index = cfg.block_end[latch] - 1u,
-                                       .header_label = cfg.block_label[header],
-                                       .iv = phi->dst,
-                                       .init_value = init,
-                                       .next_value = next,
-                                       .limit_value = cmp->b,
-                                       .init = start,
-                                       .init_is_const = start_is_const,
-                                       .step = step,
-                                       .predicate = cmp->cmp};
+                                      .latch_block = latch,
+                                      .preheader_block = preheader,
+                                      .header_index = cfg.block_start[header],
+                                      .latch_index = cfg.block_end[latch] - 1u,
+                                      .header_label = cfg.block_label[header],
+                                      .iv = phi->dst,
+                                      .init_value = init,
+                                      .next_value = next,
+                                      .limit_value = cmp->b,
+                                      .init = start,
+                                      .init_is_const = start_is_const,
+                                      .step = step,
+                                      .predicate = cmp->cmp};
               loop.limit_is_const = const_value(f, defs, cmp->b, &loop.limit);
               compute_trip(&loop);
               if (loop.trip_count_known) {
@@ -227,19 +223,19 @@ bool nyr_scev_analyze(const nyr_func_t *f, nyr_scev_info_t *out) {
           } else {
             bool is_primary = false;
             nyr_scev_loop_t loop = {.header_block = header,
-                                     .latch_block = latch,
-                                     .preheader_block = preheader,
-                                     .header_index = cfg.block_start[header],
-                                     .latch_index = cfg.block_end[latch] - 1u,
-                                     .header_label = cfg.block_label[header],
-                                     .iv = phi->dst,
-                                     .init_value = init,
-                                     .next_value = next,
-                                     .limit_value = -1,
-                                     .init = start,
-                                     .init_is_const = start_is_const,
-                                     .step = step,
-                                     .predicate = 0};
+                                    .latch_block = latch,
+                                    .preheader_block = preheader,
+                                    .header_index = cfg.block_start[header],
+                                    .latch_index = cfg.block_end[latch] - 1u,
+                                    .header_label = cfg.block_label[header],
+                                    .iv = phi->dst,
+                                    .init_value = init,
+                                    .next_value = next,
+                                    .limit_value = -1,
+                                    .init = start,
+                                    .init_is_const = start_is_const,
+                                    .step = step,
+                                    .predicate = 0};
             for (size_t j = cfg.block_start[header]; j < cfg.block_end[header];
                  ++j) {
               const nyr_inst_t *cmp = &f->data[j];
@@ -284,13 +280,12 @@ void nyr_scev_free(nyr_scev_info_t *info) {
   memset(info, 0, sizeof(*info));
 }
 
-static bool scev_affine_build(const nyr_func_t *f,
-                              const nyr_scev_info_t *info, const int *defs,
-                              const nyr_cfg_t *cfg, int value, size_t at,
-                              unsigned depth, nyr_scev_affine_t *out);
-static bool scev_affine_bound(const nyr_func_t *f,
-                              const nyr_scev_info_t *info, const int *defs,
-                              const nyr_cfg_t *cfg, size_t at,
+static bool scev_affine_build(const nyr_func_t *f, const nyr_scev_info_t *info,
+                              const int *defs, const nyr_cfg_t *cfg, int value,
+                              size_t at, unsigned depth,
+                              nyr_scev_affine_t *out);
+static bool scev_affine_bound(const nyr_func_t *f, const nyr_scev_info_t *info,
+                              const int *defs, const nyr_cfg_t *cfg, size_t at,
                               nyr_scev_affine_t *out);
 
 /*
@@ -298,10 +293,11 @@ static bool scev_affine_bound(const nyr_func_t *f,
  * outer IV. The query must be dominated by the header's taken edge; the
  * resulting interval applies only inside the loop body, never after exit.
  */
-static bool scev_dynamic_loop_iv_bounds_at(
-    const nyr_func_t *f, const nyr_scev_info_t *info, const int *defs,
-    const nyr_cfg_t *cfg, const nyr_scev_loop_t *loop, size_t at,
-    int64_t *min_out, int64_t *max_out) {
+static bool
+scev_dynamic_loop_iv_bounds_at(const nyr_func_t *f, const nyr_scev_info_t *info,
+                               const int *defs, const nyr_cfg_t *cfg,
+                               const nyr_scev_loop_t *loop, size_t at,
+                               int64_t *min_out, int64_t *max_out) {
   if (!f || !info || !defs || !cfg || !loop || loop->init_is_const ||
       !loop->limit_is_const || loop->init_value < 0 ||
       (size_t)loop->init_value >= (size_t)f->next_value ||
@@ -411,23 +407,20 @@ static bool scev_tbuf_length_upper_bound(const nyr_func_t *f, const int *defs,
   for (size_t i = (size_t)di; i > cfg->block_start[block];) {
     const nyr_inst_t *in = &f->data[--i];
     if (in->op == NYIR_CALL) {
-      return in->symbol &&
-             strcmp(in->symbol, "rt_list_set_len_raw") == 0 &&
+      return in->symbol && strcmp(in->symbol, "rt_list_set_len_raw") == 0 &&
              root_copy(f, defs, in->a) == base &&
              const_value(f, defs, in->b, upper) && *upper >= 0;
     }
-    if (nyr_effective_effects(in) &
-        ~(NYIR_EFFECT_READ_LOCAL))
+    if (nyr_effective_effects(in) & ~(NYIR_EFFECT_READ_LOCAL))
       return false;
   }
   return false;
 }
 
 static bool scev_loop_iv_bounds_at(const nyr_func_t *f,
-                                   const nyr_scev_info_t *info,
-                                   const int *defs, const nyr_cfg_t *cfg,
-                                   int value, size_t at, int64_t *min_out,
-                                   int64_t *max_out) {
+                                   const nyr_scev_info_t *info, const int *defs,
+                                   const nyr_cfg_t *cfg, int value, size_t at,
+                                   int64_t *min_out, int64_t *max_out) {
   if (!f || !info || !defs || !cfg || !min_out || !max_out || at >= f->len)
     return false;
   size_t at_block = cfg->inst_block[at];
@@ -461,8 +454,8 @@ static bool scev_loop_iv_bounds_at(const nyr_func_t *f,
       if (!in_loop)
         return false;
       bool in_body = nyr_cfg_natural_loop_blocks(cfg, loop->latch_block,
-                                                  loop->header_block, in_loop,
-                                                  cfg->block_count) &&
+                                                 loop->header_block, in_loop,
+                                                 cfg->block_count) &&
                      at_block < cfg->block_count && in_loop[at_block];
       free(in_loop);
       if (!in_body)
@@ -479,7 +472,7 @@ static bool scev_loop_iv_bounds_at(const nyr_func_t *f,
             body != loop->header_block &&
             nyr_cfg_dominates(cfg, body, at_block) &&
             scev_tbuf_length_upper_bound(f, defs, cfg, loop->limit_value,
-                                          &upper) &&
+                                         &upper) &&
             upper > loop->init)
           *max_out = upper - 1;
       } else {
@@ -501,7 +494,7 @@ static bool scev_loop_iv_bounds_at(const nyr_func_t *f,
       return false;
     bool in_body =
         nyr_cfg_natural_loop_blocks(cfg, loop->latch_block, loop->header_block,
-                                     in_loop, cfg->block_count) &&
+                                    in_loop, cfg->block_count) &&
         at_block < cfg->block_count && in_loop[at_block];
     if (in_body) {
       *min_out = loop->step > 0 ? loop->init : (int64_t)last;
@@ -614,10 +607,10 @@ static bool scev_affine_scale(nyr_scev_affine_t *out,
   return true;
 }
 
-static bool scev_affine_build(const nyr_func_t *f,
-                              const nyr_scev_info_t *info, const int *defs,
-                              const nyr_cfg_t *cfg, int value, size_t at,
-                              unsigned depth, nyr_scev_affine_t *out) {
+static bool scev_affine_build(const nyr_func_t *f, const nyr_scev_info_t *info,
+                              const int *defs, const nyr_cfg_t *cfg, int value,
+                              size_t at, unsigned depth,
+                              nyr_scev_affine_t *out) {
   if (!f || !info || !defs || !cfg || !out || depth > 32)
     return false;
   value = root_copy(f, defs, value);
@@ -667,9 +660,8 @@ static bool scev_affine_build(const nyr_func_t *f,
          scev_affine_scale(out, &a, scale);
 }
 
-static bool scev_affine_bound(const nyr_func_t *f,
-                              const nyr_scev_info_t *info, const int *defs,
-                              const nyr_cfg_t *cfg, size_t at,
+static bool scev_affine_bound(const nyr_func_t *f, const nyr_scev_info_t *info,
+                              const int *defs, const nyr_cfg_t *cfg, size_t at,
                               nyr_scev_affine_t *out) {
   if (!f || !info || !defs || !cfg || !out)
     return false;
@@ -699,8 +691,8 @@ static bool scev_affine_bound(const nyr_func_t *f,
 }
 
 bool nyr_scev_affine_at_cfg(const nyr_func_t *f, const nyr_scev_info_t *info,
-                             const int *defs, const nyr_cfg_t *cfg, int value,
-                             size_t at, nyr_scev_affine_t *out) {
+                            const int *defs, const nyr_cfg_t *cfg, int value,
+                            size_t at, nyr_scev_affine_t *out) {
   if (!f || !info || !defs || !cfg || !out || at >= f->len)
     return false;
   return scev_affine_build(f, info, defs, cfg, value, at, 0, out) &&
@@ -708,8 +700,8 @@ bool nyr_scev_affine_at_cfg(const nyr_func_t *f, const nyr_scev_info_t *info,
 }
 
 bool nyr_scev_affine_at(const nyr_func_t *f, const nyr_scev_info_t *info,
-                         const int *defs, int value, size_t at,
-                         nyr_scev_affine_t *out) {
+                        const int *defs, int value, size_t at,
+                        nyr_scev_affine_t *out) {
   if (!f || !info || !defs || !out || at >= f->len)
     return false;
   nyr_cfg_t cfg = {0};
@@ -778,10 +770,9 @@ static bool scev_tbuf_payload(const nyr_func_t *f, const int *defs, int value,
 }
 
 bool nyr_scev_tbuf_bounds_check_safe_cfg(const nyr_func_t *f,
-                                          const nyr_scev_info_t *info,
-                                          const int *defs,
-                                          const nyr_cfg_t *cfg, size_t at,
-                                          const nyr_inst_t *check) {
+                                         const nyr_scev_info_t *info,
+                                         const int *defs, const nyr_cfg_t *cfg,
+                                         size_t at, const nyr_inst_t *check) {
   if (!f || !info || !defs || !cfg || !check ||
       check->op != NYIR_BOUNDS_CHECK || check->a < 0 || check->b < 0)
     return false;
@@ -808,9 +799,9 @@ bool nyr_scev_tbuf_bounds_check_safe_cfg(const nyr_func_t *f,
 }
 
 bool nyr_scev_tbuf_bounds_check_safe(const nyr_func_t *f,
-                                      const nyr_scev_info_t *info,
-                                      const int *defs, size_t at,
-                                      const nyr_inst_t *check) {
+                                     const nyr_scev_info_t *info,
+                                     const int *defs, size_t at,
+                                     const nyr_inst_t *check) {
   if (!f || !info || !defs || at >= f->len)
     return false;
   nyr_cfg_t cfg = {0};

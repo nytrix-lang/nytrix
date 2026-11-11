@@ -12,6 +12,17 @@ use core.tbuf
 def N = 100
 def ITERS = 50
 def damping = 0.85
+fn checksum_rank(ptr values) int {
+   mut int checksum = 0
+   mut int k = 0
+   while k < N {
+      def v = f64buf_load(values, k)
+      def int scaled = int(v * 10000.0 + 0.5)
+      checksum += (k + 1) * scaled
+      k += 1
+   }
+   checksum
+}
 mut rank = f64buf_new(N)
 mut newrank = f64buf_new(N)
 mut i = 0
@@ -39,18 +50,8 @@ while it < ITERS {
    it += 1
 }
 def int t1 = ticks()
-mut argmax = 0
-mut best = f64buf_load(rank, 0)
-i = 1
-while i < N {
-   def v = f64buf_load(rank, i)
-   if v > best {
-      best = v
-      argmax = i
-   }
-   i += 1
-}
-print("checksum=", argmax)
+def checksum = checksum_rank(rank)
+print("checksum=", checksum)
 print("elapsed_ns=", t1 - t0)
 NY
   source c <<'C'
@@ -63,6 +64,13 @@ static int64_t now_ns(void) {
     struct timespec ts;
     if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0;
     return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+}
+
+static int64_t checksum_rank(const double *rank, int n) {
+    int64_t checksum = 0;
+    for (int i = 0; i < n; i++)
+        checksum += (int64_t)(i + 1) * (int64_t)(rank[i] * 10000.0 + 0.5);
+    return checksum;
 }
 
 int main(void) {
@@ -81,11 +89,7 @@ int main(void) {
         double *tmp = rank; rank = newrank; newrank = tmp;
     }
     int64_t end = now_ns();
-    int argmax = 0;
-    double best = rank[0];
-    for (int i = 1; i < N; i++)
-        if (rank[i] > best) { best = rank[i]; argmax = i; }
-    printf("checksum=%d\n", argmax);
+    printf("checksum=%lld\n", (long long)checksum_rank(rank, N));
     if (end <= start) end = start + 1;
     printf("elapsed_ns=%lld\n", (long long)(end - start));
     return 0;

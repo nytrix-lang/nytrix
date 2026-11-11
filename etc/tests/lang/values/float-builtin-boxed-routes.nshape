@@ -1,0 +1,26 @@
+shape test_float_builtin_boxed_routes {
+  family "runtime/values"
+  generator "embedded"
+  features ["ny", "test", "native", "vm", "regression"]
+  template ny-test-case
+  flags_matrix "--nyr-run; --native-only; --native --run; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.math
+
+;; Boxed float builtins stay boxed on every route. The VM read tan/atan results
+;; as raw doubles, which pushed the engine's fitted camera to z=47380.
+fn tangent(f64 x) f64 { __flt_tan(x) }
+fn arc(f64 x) f64 { __flt_atan(x) }
+fn near(any a, f64 b) bool { abs(float(a) - b) < 0.000001 }
+
+assert(near(__flt_tan(0.5), 0.546302), "boxed tan")
+assert(near(__flt_atan(0.5), 0.463648), "boxed atan")
+assert(near(tangent(0.5), 0.546302), "tan crosses the f64 boundary")
+assert(near(arc(0.5), 0.463648), "atan crosses the f64 boundary")
+assert(near(tan(0.5), 0.546302), "library tan")
+assert(near(2.0 * atan(tan(0.5) * 1.1), 1.082210), "nested camera solve")
+print("ok float builtin boxed routes")
+NY
+}

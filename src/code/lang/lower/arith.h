@@ -3819,6 +3819,33 @@ scalar_multiply:
         return -1;
     }
   }
+  /*
+   * Integer-only operators have no float form. A cast result or an integer
+   * expression can still be f64-classified after context propagation (for
+   * example `sum + int(f64buf_load(a, j) * 1000.0)` promotes the add to
+   * add.f64), and `% 100003` then emits mod.i64 on an f64 register: the raw
+   * IEEE bits are used as the dividend at -O0 and the machine-form gate
+   * rejects the function at -O3. Convert those operands back before the
+   * integer-domain guards and emission.
+   */
+  if (!is_cmp && (op == NYIR_MOD_I64 || op == NYIR_AND_I64 ||
+                  op == NYIR_OR_I64 || op == NYIR_XOR_I64 ||
+                  op == NYIR_ROR_I64)) {
+    if (a >= 0 && nyr_value_is_f64(b, a, 0)) {
+      a = nyr_emit_runtime_call(b, "rt_f64_to_i64", a, -1, -1, 1, 0);
+      if (a < 0)
+        return -1;
+      left_f64 = false;
+      left_f32 = false;
+    }
+    if (rhs >= 0 && nyr_value_is_f64(b, rhs, 0)) {
+      rhs = nyr_emit_runtime_call(b, "rt_f64_to_i64", rhs, -1, -1, 1, 0);
+      if (rhs < 0)
+        return -1;
+      right_f64 = false;
+      right_f32 = false;
+    }
+  }
   if (op == NYIR_DIV_F64 || op == NYIR_DIV_F32 || op == NYIR_DIV_I64 ||
       op == NYIR_MOD_I64) {
     /*

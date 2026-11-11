@@ -1548,43 +1548,41 @@ static void cny_expr_node(cny_t *p, cny_sb_t *n, int *level, int minprec,
         cny_expr_node(p, n, &rlevel, CNP_ASSIGN, 0);
         *level = CNP_ASSIGN;
         continue;
-      } else if (t->kind == CNTK_PUNCT && t->n == 2 &&
+      } else if (t->kind == CNTK_PUNCT && (t->n == 2 || t->n == 3) &&
                  (cny_word_eq(t->s, t->n, "<<=") ||
                   cny_word_eq(t->s, t->n, ">>=") ||
                   cny_word_eq(t->s, t->n, "&=") ||
                   cny_word_eq(t->s, t->n, "|=") ||
                   cny_word_eq(t->s, t->n, "^="))) {
-        char op = *t->s;
-        int is_shift_left = cny_word_eq(t->s, t->n, "<<=");
-        int is_shift_right = cny_word_eq(t->s, t->n, ">>=");
-        const char *op2 = NULL;
-        if (is_shift_left)
-          op2 = "<<";
-        else if (is_shift_right)
-          op2 = ">>";
-        else if (op == '&')
-          op2 = "&";
-        else if (op == '|')
-          op2 = "|";
-        else if (op == '^')
-          op2 = "^";
+        int simple = n->len > 0 &&
+                     (isalpha((unsigned char)n->data[0]) || n->data[0] == '_');
+        for (size_t i = 1; simple && i < n->len; ++i)
+          simple = isalnum((unsigned char)n->data[i]) || n->data[i] == '_';
         cny_advance(p);
         int rlevel = 0;
-        cny_expr_node(p, n, &rlevel, CNP_ASSIGN, 0);
         cny_sb_t rhs = {0};
-        /*
-         * re-emit as x = x op2 rhs: rebuild node text
-         */
-        (void)op2;
-        (void)rhs;
-        cny_sb_add(n, " = ");
-        /*
-         * we need the lvalue again; simplest: leave the compound as-is plus
-         * marker
-         */
-        p->errors++;
-        cny_warn_at(p, t->line, "unsupported", "compound assignment '%.*s'",
-                    (int)t->n, t->s);
+        cny_expr_node(p, &rhs, &rlevel, CNP_ASSIGN, 0);
+        if (simple) {
+          cny_sb_t lowered = {0};
+          cny_sb_addn(&lowered, n->data, n->len);
+          cny_sb_add(&lowered, " = ");
+          cny_sb_addn(&lowered, n->data, n->len);
+          cny_sb_add(&lowered, " ");
+          cny_sb_addn(&lowered, t->s, t->n - 1);
+          cny_sb_add(&lowered, " (");
+          cny_sb_addn(&lowered, rhs.data ? rhs.data : "", rhs.len);
+          cny_sb_add(&lowered, ")");
+          free(n->data);
+          *n = lowered;
+        } else {
+          /*
+           * Duplicating a subscript/member target can repeat side effects.
+           */
+          cny_warn_at(p, t->line, "unsupported",
+                      "compound assignment '%.*s' to a complex target",
+                      (int)t->n, t->s);
+        }
+        free(rhs.data);
         *level = CNP_ASSIGN;
         continue;
       }
@@ -2384,20 +2382,83 @@ static void cny_parse_statement(cny_t *p) {
   cny_parse_expr_statement(p);
 }
 
-static void cny_emit_list_fill(cny_t *p, const char *name, size_t n) {
-  /*
-   * emit `mut name = [0,0,...]` for constant n
-   */
-  cny_emit(p, "mut ");
-  cny_emit(p, name);
-  cny_emit(p, " = [");
-  for (size_t i = 0; i < n; i++) {
-    if (i)
-      cny_emit(p, ", ");
-    cny_emit(p, "0");
+/*
+ * C reference libraries use both inferred-size and multidimensional tables.
+ * Preserve their shape and C's zero-filled omitted elements.
+ */
+static int cny_array_dims(cny_t *p, int dims[8]) {
+  int count = 0;
+  while (cny_at(p, "[")) {
+    int line = cny_cur(p)->line;
+    cny_advance(p);
+    size_t first = p->ti;
+    while (!cny_at(p, "]") && cny_cur(p)->kind != CNTK_EOF)
+      cny_advance(p);
+    int ok = 0;
+    long long size = -1;
+    if (p->ti > first)
+      size = cny_const_eval_range(p, first, p->ti, &ok);
+    if (count >= 8 || (p->ti > first && (!ok || size <= 0 || size > 1000000)))
+      cny_warn_at(p, line, "unsupported", "array dimension");
+    if (count < 8)
+      dims[count++] = ok && size > 0 && size <= 1000000 ? (int)size : -1;
+    if (cny_at(p, "]"))
+      cny_advance(p);
   }
-  cny_emit(p, "]");
-  cny_flush(p);
+  return count;
+}
+
+static void cny_array_zero(cny_sb_t *out, const int dims[8], int ndims,
+                           int depth) {
+  if (depth >= ndims) {
+    cny_sb_add(out, "0");
+    return;
+  }
+  cny_sb_add(out, "[");
+  for (int i = 0; i < dims[depth]; ++i) {
+    if (i)
+      cny_sb_add(out, ", ");
+    cny_array_zero(out, dims, ndims, depth + 1);
+  }
+  cny_sb_add(out, "]");
+}
+
+static void cny_array_init(cny_t *p, cny_sb_t *out, const int dims[8],
+                           int ndims, int depth) {
+  int line = cny_cur(p)->line;
+  cny_advance(p); /* '{' */
+  cny_sb_add(out, "[");
+  int count = 0;
+  while (!cny_at(p, "}") && cny_cur(p)->kind != CNTK_EOF) {
+    if (count)
+      cny_sb_add(out, ", ");
+    if (cny_at(p, "{")) {
+      cny_array_init(p, out, dims, ndims, depth + 1);
+    } else {
+      if (depth + 1 < ndims)
+        cny_warn_at(p, cny_cur(p)->line, "unsupported",
+                    "multidimensional initializer without row braces");
+      int level = 0;
+      cny_expr_node(p, out, &level, CNP_ASSIGN, 0);
+    }
+    ++count;
+    if (!cny_at(p, ","))
+      break;
+    cny_advance(p);
+  }
+  if (cny_at(p, "}"))
+    cny_advance(p);
+  else
+    cny_warn_at(p, line, "unsupported", "unterminated array initializer");
+  int declared = depth < ndims ? dims[depth] : -1;
+  if (declared >= 0 && count > declared)
+    cny_warn_at(p, line, "unsupported", "excess array initializer elements");
+  while (count < declared) {
+    if (count++)
+      cny_sb_add(out, ", ");
+    cny_array_zero(out, dims, ndims, depth + 1);
+  }
+  cny_sb_add(out, "]");
 }
 
 static void cny_parse_local_decl(cny_t *p) {
@@ -2440,22 +2501,8 @@ static void cny_parse_local_decl(cny_t *p) {
   /*
    * array suffix?
    */
-  int array_n = -1;
-  if (cny_at(p, "[")) {
-    cny_advance(p);
-    size_t start = p->ti;
-    while (!cny_at(p, "]") && cny_cur(p)->kind != CNTK_EOF)
-      cny_advance(p);
-    size_t end = p->ti;
-    int ok = 0;
-    long long v = 0;
-    if (end > start)
-      v = cny_const_eval_range(p, start, end, &ok);
-    if (ok && v > 0 && v < 1000000)
-      array_n = (int)v;
-    if (cny_at(p, "]"))
-      cny_advance(p);
-  }
+  int dims[8] = {0};
+  int ndims = cny_array_dims(p, dims);
 
   /*
    * optional initializer
@@ -2467,33 +2514,8 @@ static void cny_parse_local_decl(cny_t *p) {
     cny_advance(p);
     has_init = 1;
     if (cny_at(p, "{")) {
-      /*
-       * aggregate initializer { ... }
-       */
       init_is_list = 1;
-      cny_advance(p);
-      for (;;) {
-        if (cny_at(p, "}")) {
-          cny_advance(p);
-          break;
-        }
-        if (init.len)
-          cny_sb_add(&init, ", ");
-        int level = 0;
-        cny_sb_t one = {0};
-        cny_expr_node(p, &one, &level, CNP_ASSIGN, 1);
-        cny_sb_add(&init, one.data ? one.data : "");
-        free(one.data);
-        if (cny_at(p, ",")) {
-          cny_advance(p);
-          continue;
-        }
-        if (cny_at(p, "}")) {
-          cny_advance(p);
-          break;
-        }
-        break;
-      }
+      cny_array_init(p, &init, dims, ndims, 0);
     } else {
       int level = 0;
       cny_sb_t one = {0};
@@ -2513,34 +2535,16 @@ static void cny_parse_local_decl(cny_t *p) {
       cny_emit(p, has_init && init.len ? init.data : "0");
       cny_flush(p);
     }
-  } else if (array_n >= 0) {
-    if (has_init && init_is_list) {
-      cny_emit(p, "mut ");
-      cny_emit(p, name.data);
-      cny_emit(p, " = [");
-      cny_emit(p, init.data);
-      cny_emit(p, "]");
-      cny_flush(p);
-      if (array_n > 0) {
-        /*
-         * pad with zeros to array_n
-         */
-        size_t cnt = 1;
-        for (size_t k = 0; init.data && init.data[k]; k++)
-          if (init.data[k] == ',')
-            cnt++;
-        for (size_t k = cnt; k < (size_t)array_n; k++) {
-          cny_emit(p, " ");
-          cny_emit(p, name.data);
-          cny_emit(p, " = ");
-          cny_emit(p, name.data);
-          cny_emit(p, ".extend([0])");
-          cny_flush(p);
-        }
-      }
-    } else {
-      cny_emit_list_fill(p, name.data, (size_t)array_n);
-    }
+  } else if (ndims > 0) {
+    if (!has_init)
+      cny_array_zero(&init, dims, ndims, 0);
+    else if (!init_is_list)
+      cny_warn_at(p, line, "unsupported", "non-aggregate array initializer");
+    cny_emit(p, "mut ");
+    cny_emit(p, name.data);
+    cny_emit(p, " = ");
+    cny_emit(p, init.data ? init.data : "[]");
+    cny_flush(p);
   } else {
     cny_emit(p, "mut ");
     cny_emit(p, name.data);
@@ -3403,47 +3407,12 @@ static void cny_parse_top(cny_t *p) {
           cny_sb_t ginit = {0};
           int gis_ptr = 0;
           cny_parse_name(p, &gname, &gis_ptr);
-          int extern_ = 0;
-          /*
-           * check extern in spec was consumed already; re-scan
-           */
-          (void)extern_;
+          int dims[8] = {0};
+          int ndims = cny_array_dims(p, dims);
           if (cny_at(p, "=")) {
             cny_advance(p);
             if (cny_at(p, "{")) {
-              cny_sb_t init = {0};
-              cny_advance(p);
-              for (;;) {
-                if (cny_at(p, "}")) {
-                  cny_advance(p);
-                  break;
-                }
-                if (init.len)
-                  cny_sb_add(&init, ", ");
-                int lvl = 0;
-                cny_sb_t one = {0};
-                cny_expr_node(p, &one, &lvl, CNP_ASSIGN, 1);
-                cny_sb_add(&init, one.data ? one.data : "");
-                free(one.data);
-                if (cny_at(p, ",")) {
-                  cny_advance(p);
-                  continue;
-                }
-                if (cny_at(p, "}")) {
-                  cny_advance(p);
-                  break;
-                }
-                break;
-              }
-              if (gname.len) {
-                cny_emit(p, "mut ");
-                cny_emit(p, gname.data);
-                cny_emit(p, " = [");
-                cny_emit(p, init.data);
-                cny_emit(p, "]");
-                cny_flush(p);
-              }
-              free(init.data);
+              cny_array_init(p, &ginit, dims, ndims, 0);
             } else {
               int lvl = 0;
               cny_sb_t one = {0};
@@ -3451,11 +3420,8 @@ static void cny_parse_top(cny_t *p) {
               cny_sb_add(&ginit, one.data ? one.data : "");
               free(one.data);
             }
-          }
-          if (gname.len && ginit.len == 0 && !(cny_at(p, "="))) {
-            /*
-             * no initializer -> mut name = 0
-             */
+          } else if (ndims > 0) {
+            cny_array_zero(&ginit, dims, ndims, 0);
           }
           if (gname.len) {
             cny_emit(p, "mut ");

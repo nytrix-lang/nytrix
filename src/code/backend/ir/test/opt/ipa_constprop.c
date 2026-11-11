@@ -1,3 +1,6 @@
+/*
+ * Regression tests for interprocedural constant propagation and memory effects.
+ */
 #include "support.h"
 
 static int64_t ipa_pointer_write_cell;
@@ -6,17 +9,17 @@ static int64_t ipa_pointer_other_cell;
 static int call_known(nyr_func_t *f, const char *name, int arg) {
   int dst = f->next_value;
   nyr_inst_t in = {.op = NYIR_CALL,
-                    .dst = dst,
-                    .a = arg,
-                    .b = -1,
-                    .c = -1,
-                    .d = -1,
-                    .e = -1,
-                    .f = -1,
-                    .imm = 1,
-                    .symbol = name,
-                    .flags = NYIR_INST_F_EFFECTS_KNOWN,
-                    .effects = NYIR_EFFECT_CALL};
+                   .dst = dst,
+                   .a = arg,
+                   .b = -1,
+                   .c = -1,
+                   .d = -1,
+                   .e = -1,
+                   .f = -1,
+                   .imm = 1,
+                   .symbol = name,
+                   .flags = NYIR_INST_F_EFFECTS_KNOWN,
+                   .effects = NYIR_EFFECT_CALL};
   if (nyr_ir_emit(f, in) != dst)
     return -1;
   f->data[f->len - 1].flags |= NYIR_INST_F_EFFECTS_KNOWN;
@@ -29,17 +32,17 @@ static int call_known_two(nyr_func_t *f, const char *name, int first,
                           int second) {
   int dst = f->next_value;
   if (nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_CALL,
-                                 .dst = dst,
-                                 .a = first,
-                                 .b = second,
-                                 .c = -1,
-                                 .d = -1,
-                                 .e = -1,
-                                 .f = -1,
-                                 .imm = 2,
-                                 .symbol = name,
-                                 .flags = NYIR_INST_F_EFFECTS_KNOWN,
-                                 .effects = NYIR_EFFECT_CALL}) != dst)
+                                  .dst = dst,
+                                  .a = first,
+                                  .b = second,
+                                  .c = -1,
+                                  .d = -1,
+                                  .e = -1,
+                                  .f = -1,
+                                  .imm = 2,
+                                  .symbol = name,
+                                  .flags = NYIR_INST_F_EFFECTS_KNOWN,
+                                  .effects = NYIR_EFFECT_CALL}) != dst)
     return -1;
   f->data[f->len - 1].flags |= NYIR_INST_F_EFFECTS_KNOWN;
   f->data[f->len - 1].effects = NYIR_EFFECT_CALL;
@@ -110,7 +113,8 @@ static void build_select_callee(nyr_func_t *f) {
   int negative = nyr_opt_const(f, 10);
   int nonnegative = nyr_opt_const(f, 20);
   int is_negative = nyr_opt_cmp(f, input, zero, NYIR_CMP_LT);
-  int selected = nyr_opt_emit_abc(f, NYIR_SELECT_I64, is_negative, negative, nonnegative);
+  int selected =
+      nyr_opt_emit_abc(f, NYIR_SELECT_I64, is_negative, negative, nonnegative);
   nyr_opt_ret(f, selected);
 }
 
@@ -155,17 +159,17 @@ static void build_effectful_callee(nyr_func_t *f) {
   int x = nyr_opt_emit_imm(f, NYIR_LOAD_LOCAL, 0);
   nyr_ir_emit(
       f, (nyr_inst_t){.op = NYIR_CALL,
-                       .dst = -1,
-                       .a = x,
-                       .b = -1,
-                       .c = -1,
-                       .d = -1,
-                       .e = -1,
-                       .f = -1,
-                       .imm = 1,
-                       .symbol = "unknown_mutator",
-                       .flags = NYIR_INST_F_EFFECTS_KNOWN,
-                       .effects = NYIR_EFFECT_CALL | NYIR_EFFECT_WRITE_MEMORY});
+                      .dst = -1,
+                      .a = x,
+                      .b = -1,
+                      .c = -1,
+                      .d = -1,
+                      .e = -1,
+                      .f = -1,
+                      .imm = 1,
+                      .symbol = "unknown_mutator",
+                      .flags = NYIR_INST_F_EFFECTS_KNOWN,
+                      .effects = NYIR_EFFECT_CALL | NYIR_EFFECT_WRITE_MEMORY});
   nyr_opt_ret(f, x);
 }
 
@@ -179,15 +183,15 @@ static void build_pointer_write_callee(nyr_func_t *f) {
   int address = nyr_opt_emit_imm(f, NYIR_LOAD_LOCAL, 0);
   int value = nyr_opt_const(f, 99);
   nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_STORE_I64,
-                             .dst = -1,
-                             .a = address,
-                             .b = -1,
-                             .c = value,
-                             .d = -1,
-                             .e = -1,
-                             .f = -1,
-                             .effects = NYIR_EFFECT_WRITE_MEMORY |
-                                        NYIR_EFFECT_MAY_TRAP});
+                              .dst = -1,
+                              .a = address,
+                              .b = -1,
+                              .c = value,
+                              .d = -1,
+                              .e = -1,
+                              .f = -1,
+                              .effects = NYIR_EFFECT_WRITE_MEMORY |
+                                         NYIR_EFFECT_MAY_TRAP});
   nyr_opt_ret(f, nyr_opt_const(f, 7));
 }
 
@@ -202,15 +206,15 @@ static void build_pointer_write_second_callee(nyr_func_t *f) {
   int address = nyr_opt_emit_imm(f, NYIR_LOAD_LOCAL, 1);
   int value = nyr_opt_const(f, 99);
   nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_STORE_I64,
-                             .dst = -1,
-                             .a = address,
-                             .b = -1,
-                             .c = value,
-                             .d = -1,
-                             .e = -1,
-                             .f = -1,
-                             .effects = NYIR_EFFECT_WRITE_MEMORY |
-                                        NYIR_EFFECT_MAY_TRAP});
+                              .dst = -1,
+                              .a = address,
+                              .b = -1,
+                              .c = value,
+                              .d = -1,
+                              .e = -1,
+                              .f = -1,
+                              .effects = NYIR_EFFECT_WRITE_MEMORY |
+                                         NYIR_EFFECT_MAY_TRAP});
   nyr_opt_ret(f, nyr_opt_const(f, 7));
 }
 
@@ -239,7 +243,8 @@ static bool check_pointer_write_call_barrier(nyr_func_t *callee) {
   caller.data[call_at].effects =
       NYIR_EFFECT_CALL | NYIR_EFFECT_WRITE_MEMORY | NYIR_EFFECT_MAY_TRAP;
   int after = nyr_opt_emit_abc(&caller, NYIR_LOAD_I64, address, -1, -1);
-  int other_after = nyr_opt_emit_abc(&caller, NYIR_LOAD_I64, other_address, -1, -1);
+  int other_after =
+      nyr_opt_emit_abc(&caller, NYIR_LOAD_I64, other_address, -1, -1);
   int sum = nyr_opt_binop(&caller, NYIR_ADD_I64, before, after);
   sum = nyr_opt_binop(&caller, NYIR_ADD_I64, sum, other_after);
   int result = nyr_opt_binop(&caller, NYIR_ADD_I64, sum, call_result);
@@ -352,20 +357,21 @@ static bool check_pointer_write_forwarding_stops_at_mutator(void) {
   int call_result = call_known(&caller, "write_through_arg", address);
   caller.data[caller.len - 1].effects =
       NYIR_EFFECT_CALL | NYIR_EFFECT_WRITE_MEMORY | NYIR_EFFECT_MAY_TRAP;
-  nyr_ir_emit(&caller, (nyr_inst_t){.op = NYIR_CALL,
-                                   .dst = -1,
-                                   .a = -1,
-                                   .b = -1,
-                                   .c = -1,
-                                   .d = -1,
-                                   .e = -1,
-                                   .f = -1,
-                                   .imm = 0,
-                                   .symbol = "unknown_memory_mutator",
-                                   .flags = NYIR_INST_F_EFFECTS_KNOWN,
-                                   .effects = NYIR_EFFECT_CALL |
-                                              NYIR_EFFECT_WRITE_MEMORY |
-                                              NYIR_EFFECT_UNKNOWN_SIDE_EFFECT});
+  nyr_ir_emit(&caller,
+              (nyr_inst_t){.op = NYIR_CALL,
+                           .dst = -1,
+                           .a = -1,
+                           .b = -1,
+                           .c = -1,
+                           .d = -1,
+                           .e = -1,
+                           .f = -1,
+                           .imm = 0,
+                           .symbol = "unknown_memory_mutator",
+                           .flags = NYIR_INST_F_EFFECTS_KNOWN,
+                           .effects = NYIR_EFFECT_CALL |
+                                      NYIR_EFFECT_WRITE_MEMORY |
+                                      NYIR_EFFECT_UNKNOWN_SIDE_EFFECT});
   int loaded = nyr_opt_emit_abc(&caller, NYIR_LOAD_I64, address, -1, -1);
   int result = nyr_opt_binop(&caller, NYIR_ADD_I64, loaded, call_result);
   nyr_opt_ret(&caller, result);
@@ -463,14 +469,14 @@ static void build_malformed_callee(nyr_func_t *f) {
   f->param_count = 1;
   int condition = nyr_opt_emit_imm(f, NYIR_LOAD_LOCAL, 0);
   nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_BR_IF,
-                             .dst = -1,
-                             .a = condition,
-                             .b = -1,
-                             .c = -1,
-                             .d = -1,
-                             .e = -1,
-                             .f = -1,
-                             .imm = 999});
+                              .dst = -1,
+                              .a = condition,
+                              .b = -1,
+                              .c = -1,
+                              .d = -1,
+                              .e = -1,
+                              .f = -1,
+                              .imm = 999});
   nyr_opt_ret(f, nyr_opt_const(f, 9));
 }
 
@@ -539,7 +545,8 @@ int main(void) {
   int select_true = nyr_opt_const(&select_arg_caller, 41);
   int select_false = nyr_opt_const(&select_arg_caller, 1);
   int selected_arg =
-      nyr_opt_emit_abc(&select_arg_caller, NYIR_SELECT_I64, select_condition, select_true, select_false);
+      nyr_opt_emit_abc(&select_arg_caller, NYIR_SELECT_I64, select_condition,
+                       select_true, select_false);
   int select_arg_result =
       call_known(&select_arg_caller, "pure_add_one", selected_arg);
   nyr_opt_ret(&select_arg_caller, select_arg_result);

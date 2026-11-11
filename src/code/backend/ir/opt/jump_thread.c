@@ -311,10 +311,10 @@ bool nyr_invert_fallthrough_branches(nyr_func_t *f) {
     free(defs);
     return false;
   }
-#define NOTE_USE(v)                                                            \
-  do {                                                                         \
-    if ((v) >= 0 && (size_t)(v) < nv)                                          \
-      ++uses[(v)];                                                             \
+#define NOTE_USE(v)                   \
+  do {                                \
+    if ((v) >= 0 && (size_t)(v) < nv) \
+      ++uses[(v)];                    \
   } while (0)
   for (size_t i = 0; i < f->len; ++i) {
     const nyr_inst_t *in = &f->data[i];

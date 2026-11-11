@@ -1,3 +1,6 @@
+/*
+ * Fixture: exercise the x86 multiply instruction's EDX:EAX outputs.
+ */
 int main(void) {
   unsigned long high = 0x80000000UL;
   int low;

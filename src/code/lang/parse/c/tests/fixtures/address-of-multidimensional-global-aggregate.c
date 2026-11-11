@@ -1,3 +1,6 @@
+/*
+ * Fixture: take the address of a multidimensional global aggregate.
+ */
 struct nyc_hook_key {
   unsigned long value;
 };

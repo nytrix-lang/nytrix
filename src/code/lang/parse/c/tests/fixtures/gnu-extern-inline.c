@@ -1,3 +1,6 @@
+/*
+ * C fixture for GNU extern-inline linkage and call semantics.
+ */
 extern inline __attribute__((gnu_inline)) int plus_one(int value) {
   return value + 1;
 }

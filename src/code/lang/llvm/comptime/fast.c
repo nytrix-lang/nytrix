@@ -1,3 +1,6 @@
+/*
+ * Fast scalar operations and helpers for compile-time expression evaluation.
+ */
 #include "code/lang/code.h"
 #include "code/lang/priv.h"
 
@@ -981,11 +984,11 @@ bool ny_ct_platform_ident(const char *name, ny_ct_fast_val_t *out) {
     return true;
   }
 
-#define NY_CT_PLATFORM_BOOL(symbol, value)                                     \
-  if (strcmp(name, symbol) == 0) {                                             \
-    out->kind = NY_CT_FAST_BOOL;                                               \
-    out->b = (value);                                                          \
-    return true;                                                               \
+#define NY_CT_PLATFORM_BOOL(symbol, value) \
+  if (strcmp(name, symbol) == 0) {         \
+    out->kind = NY_CT_FAST_BOOL;           \
+    out->b = (value);                      \
+    return true;                           \
   }
 
   NY_CT_PLATFORM_BOOL("linux", is_linux)

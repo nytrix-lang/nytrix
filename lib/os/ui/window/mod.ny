@@ -3,7 +3,7 @@
 ;; References:
 ;; - core.os.ui
 ;; - core.os.ui.window.consts
-module core.os.ui.window(surface_buffer_ready, BACKEND_NY, backend, available, EVENT_NONE, EVENT_KEY_PRESSED, EVENT_KEY_RELEASED, EVENT_KEY_CHAR, EVENT_MOUSE_BUTTON_PRESSED, EVENT_MOUSE_BUTTON_RELEASED, EVENT_MOUSE_SCROLL, EVENT_MOUSE_POS_CHANGED, EVENT_WINDOW_MOVED, EVENT_WINDOW_RESIZED, EVENT_FOCUS_IN, EVENT_FOCUS_OUT, EVENT_MOUSE_ENTER, EVENT_MOUSE_LEAVE, EVENT_WINDOW_REFRESH, EVENT_QUIT, EVENT_DATA_DROP, EVENT_DATA_DRAG, EVENT_WINDOW_MAXIMIZED, EVENT_WINDOW_MINIMIZED, EVENT_WINDOW_RESTORED, EVENT_SCALE_UPDATED, EVENT_MONITOR_CONNECTED, EVENT_MONITOR_DISCONNECTED, WINDOW_NORMAL, WINDOW_NO_BORDER, WINDOW_NO_RESIZE, WINDOW_ALLOW_DND, WINDOW_HIDE_MOUSE, WINDOW_FULLSCREEN, WINDOW_TRANSPARENT, WINDOW_CENTER, WINDOW_RAW_MOUSE, WINDOW_SCALE_TO_MONITOR, WINDOW_HIDE, WINDOW_MAXIMIZE, WINDOW_CENTER_CURSOR, WINDOW_FLOATING, WINDOW_FOCUS_ON_SHOW, WINDOW_MINIMIZE, WINDOW_FOCUS, WINDOW_CAPTURE_MOUSE, WINDOW_CPU, WINDOW_VULKAN, CLIENT_API, NO_API, CURSOR_NORMAL, CURSOR_HIDDEN, CURSOR_DISABLED, ARROW_CURSOR, IBEAM_CURSOR, CROSSHAIR_CURSOR, POINTING_HAND_CURSOR, RESIZE_EW_CURSOR, RESIZE_NS_CURSOR, RESIZE_NWSE_CURSOR, RESIZE_NESW_CURSOR, RESIZE_ALL_CURSOR, NOT_ALLOWED_CURSOR, KEY_NULL, KEY_ESCAPE, KEY_ESC, KEY_ENTER, KEY_TAB, KEY_BACKSPACE, KEY_SPACE, KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT, KEY_PAGE_UP, KEY_PAGE_DOWN, KEY_HOME, KEY_END, KEY_INSERT, KEY_DELETE, KEY_CAPS_LOCK, KEY_SCROLL_LOCK, KEY_NUM_LOCK, KEY_PRINT_SCREEN, KEY_PAUSE, KEY_MENU, KEY_F1, KEY_F2, KEY_F3, KEY_F4, KEY_F5, KEY_F6, KEY_F7, KEY_F8, KEY_F9, KEY_F10, KEY_F11, KEY_F12, KEY_F13, KEY_F14, KEY_F15, KEY_F16, KEY_F17, KEY_F18, KEY_F19, KEY_F20, KEY_F21, KEY_F22, KEY_F23, KEY_F24, KEY_F25, KEY_KP_0, KEY_KP_1, KEY_KP_2, KEY_KP_3, KEY_KP_4, KEY_KP_5, KEY_KP_6, KEY_KP_7, KEY_KP_8, KEY_KP_9, KEY_KP_ADD, KEY_KP_SUBTRACT, KEY_KP_MULTIPLY, KEY_KP_DIVIDE, KEY_KP_DECIMAL, KEY_KP_ENTER, KEY_KP_EQUAL, KEY_LEFT_SHIFT, KEY_RIGHT_SHIFT, KEY_LEFT_CONTROL, KEY_RIGHT_CONTROL, KEY_LEFT_ALT, KEY_RIGHT_ALT, KEY_LEFT_SUPER, KEY_RIGHT_SUPER, KEY_SHIFT, KEY_CTRL, KEY_ALT, KEY_SUPER, KEY_GRAVE, KEY_MINUS, KEY_EQUAL, KEY_APOSTROPHE, KEY_COMMA, KEY_PERIOD, KEY_SLASH, KEY_SEMICOLON, KEY_LEFT_BRACKET, KEY_BACKSLASH, KEY_RIGHT_BRACKET, KEY_0, KEY_1, KEY_2, KEY_3, KEY_4, KEY_5, KEY_6, KEY_7, KEY_8, KEY_9, KEY_A, KEY_B, KEY_C, KEY_D, KEY_E, KEY_F, KEY_G, KEY_H, KEY_I, KEY_J, KEY_K, KEY_L, KEY_M, KEY_N, KEY_O, KEY_P, KEY_Q, KEY_R, KEY_S, KEY_T, KEY_U, KEY_V, KEY_W, KEY_X, KEY_Y, KEY_Z, KEY_WORLD_1, KEY_WORLD_2, MOD_SHIFT, MOD_CONTROL, MOD_ALT, MOD_SUPER, MOD_META, get_monitors, get_primary_monitor, get_monitor_pos, get_monitor_workarea, get_monitor_physical_size, get_monitor_content_scale, get_monitor_name, get_video_mode, get_video_modes, get_monitor_resolution, get_monitor_rect, get_monitor_desktop_bounds, get_monitor_index_at, get_current_monitor_index, get_current_monitor, move_to_monitor, set_gamma, get_gamma_ramp, set_gamma_ramp, get_window_monitor, set_window_monitor, set_window_fullscreen, toggle_window_fullscreen, set_window_borderless, toggle_window_borderless, primary_mode, default_window_size, fit_to_workarea, open_window, create, show, hide, iconify, restore, maximize, id, title, set_title, pos, size, get_framebuffer_size, get_window_content_scale, get_window_scale_dpi, window_flags, has_window_flag, set_window_flag, toggle_window_flag, window_attrib, window_state, is_window_visible, is_window_focused, is_window_minimized, is_window_maximized, is_window_resizable, is_window_decorated, is_window_floating, is_window_fullscreen, is_window_borderless, window_vsync, set_window_vsync, toggle_window_vsync, toggle_window_resizable, toggle_window_decorated, toggle_window_floating, set_icon, move, resize, should_close, set_should_close, close, quit, exit_key, set_exit_key, key_state, key_name, key_down, key_pressed, get_modifiers, mod_down, mouse_pos, mouse_down, mouse_pressed, joystick_present, get_joystick_name, get_joystick_guid, get_joystick_axes, get_joystick_buttons, get_joystick_hats, joystick_is_gamepad, get_gamepad_state, get_gamepad_name, get_gamepad_guid, gamepad_count, gamepads, gamepad_connected, gamepad_mapped, gamepad_name, gamepad_guid, gamepad_axis, gamepad_button, gamepad_axis_count, gamepad_button_count, set_joystick_callback, update_gamepad_mappings, add_gamepad_mapping, JOYSTICK_1, JOYSTICK_2, JOYSTICK_3, JOYSTICK_4, JOYSTICK_5, JOYSTICK_6, JOYSTICK_7, JOYSTICK_8, JOYSTICK_9, JOYSTICK_10, JOYSTICK_11, JOYSTICK_12, JOYSTICK_13, JOYSTICK_14, JOYSTICK_15, JOYSTICK_16, JOYSTICK_LAST, JOYSTICK_HAT_BUTTONS, GAMEPAD_BUTTON_A, GAMEPAD_BUTTON_B, GAMEPAD_BUTTON_X, GAMEPAD_BUTTON_Y, GAMEPAD_BUTTON_LEFT_BUMPER, GAMEPAD_BUTTON_RIGHT_BUMPER, GAMEPAD_BUTTON_BACK, GAMEPAD_BUTTON_START, GAMEPAD_BUTTON_GUIDE, GAMEPAD_BUTTON_LEFT_THUMB, GAMEPAD_BUTTON_RIGHT_THUMB, GAMEPAD_BUTTON_DPAD_UP, GAMEPAD_BUTTON_DPAD_RIGHT, GAMEPAD_BUTTON_DPAD_DOWN, GAMEPAD_BUTTON_DPAD_LEFT, GAMEPAD_BUTTON_LAST, GAMEPAD_BUTTON_CROSS, GAMEPAD_BUTTON_SQUARE, GAMEPAD_BUTTON_TRIANGLE, GAMEPAD_AXIS_LEFT_X, GAMEPAD_AXIS_LEFT_Y, GAMEPAD_AXIS_RIGHT_X, GAMEPAD_AXIS_RIGHT_Y, GAMEPAD_AXIS_LEFT_TRIGGER, GAMEPAD_AXIS_RIGHT_TRIGGER, GAMEPAD_AXIS_LAST, set_cursor_mode, create_cursor, create_standard_cursor, destroy_cursor, set_cursor, cursor_pos, scroll_pos, touch_count, touch_pos, touch_active, test_report_touch, test_report_gamepad, mouse_state, set_cursor_pos, center_cursor, show_centered_cursor, sync_cursor, focus, transparent_framebuffer, set_window_opacity, set_window_resizable, set_window_decorated, set_window_floating, set_input_exclusive, match_chord, bind, push_event, check_event, event_type, event_window, event_window_id, event_data, event_key_is, on_key, poll_events, count_open, last, get_win, swap_buffers, make_current, blit_buffer, blit_software, update_input, set_blit_handler, set_clipboard, get_clipboard, get_error, get_proc_address, window_hint, window_hint_string, get_x11_display, get_x11_window, set_x11_selection_string, get_x11_selection_string, replay_advance_frame, replay_window_frame)
+module core.os.ui.window(surface_buffer_ready, BACKEND_NY, backend, available, EVENT_NONE, EVENT_KEY_PRESSED, EVENT_KEY_RELEASED, EVENT_KEY_CHAR, EVENT_MOUSE_BUTTON_PRESSED, EVENT_MOUSE_BUTTON_RELEASED, EVENT_MOUSE_SCROLL, EVENT_MOUSE_POS_CHANGED, EVENT_WINDOW_MOVED, EVENT_WINDOW_RESIZED, EVENT_FOCUS_IN, EVENT_FOCUS_OUT, EVENT_MOUSE_ENTER, EVENT_MOUSE_LEAVE, EVENT_WINDOW_REFRESH, EVENT_QUIT, EVENT_DATA_DROP, EVENT_DATA_DRAG, EVENT_WINDOW_MAXIMIZED, EVENT_WINDOW_MINIMIZED, EVENT_WINDOW_RESTORED, EVENT_SCALE_UPDATED, EVENT_MONITOR_CONNECTED, EVENT_MONITOR_DISCONNECTED, WINDOW_NORMAL, WINDOW_NO_BORDER, WINDOW_NO_RESIZE, WINDOW_ALLOW_DND, WINDOW_HIDE_MOUSE, WINDOW_FULLSCREEN, WINDOW_TRANSPARENT, WINDOW_CENTER, WINDOW_RAW_MOUSE, WINDOW_SCALE_TO_MONITOR, WINDOW_HIDE, WINDOW_MAXIMIZE, WINDOW_CENTER_CURSOR, WINDOW_FLOATING, WINDOW_FOCUS_ON_SHOW, WINDOW_MINIMIZE, WINDOW_FOCUS, WINDOW_CAPTURE_MOUSE, WINDOW_CPU, WINDOW_VULKAN, CLIENT_API, NO_API, CURSOR_NORMAL, CURSOR_HIDDEN, CURSOR_DISABLED, ARROW_CURSOR, IBEAM_CURSOR, CROSSHAIR_CURSOR, POINTING_HAND_CURSOR, RESIZE_EW_CURSOR, RESIZE_NS_CURSOR, RESIZE_NWSE_CURSOR, RESIZE_NESW_CURSOR, RESIZE_ALL_CURSOR, NOT_ALLOWED_CURSOR, KEY_NULL, KEY_ESCAPE, KEY_ESC, KEY_ENTER, KEY_TAB, KEY_BACKSPACE, KEY_SPACE, KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT, KEY_PAGE_UP, KEY_PAGE_DOWN, KEY_HOME, KEY_END, KEY_INSERT, KEY_DELETE, KEY_CAPS_LOCK, KEY_SCROLL_LOCK, KEY_NUM_LOCK, KEY_PRINT_SCREEN, KEY_PAUSE, KEY_MENU, KEY_F1, KEY_F2, KEY_F3, KEY_F4, KEY_F5, KEY_F6, KEY_F7, KEY_F8, KEY_F9, KEY_F10, KEY_F11, KEY_F12, KEY_F13, KEY_F14, KEY_F15, KEY_F16, KEY_F17, KEY_F18, KEY_F19, KEY_F20, KEY_F21, KEY_F22, KEY_F23, KEY_F24, KEY_F25, KEY_KP_0, KEY_KP_1, KEY_KP_2, KEY_KP_3, KEY_KP_4, KEY_KP_5, KEY_KP_6, KEY_KP_7, KEY_KP_8, KEY_KP_9, KEY_KP_ADD, KEY_KP_SUBTRACT, KEY_KP_MULTIPLY, KEY_KP_DIVIDE, KEY_KP_DECIMAL, KEY_KP_ENTER, KEY_KP_EQUAL, KEY_LEFT_SHIFT, KEY_RIGHT_SHIFT, KEY_LEFT_CONTROL, KEY_RIGHT_CONTROL, KEY_LEFT_ALT, KEY_RIGHT_ALT, KEY_LEFT_SUPER, KEY_RIGHT_SUPER, KEY_SHIFT, KEY_CTRL, KEY_ALT, KEY_SUPER, KEY_GRAVE, KEY_MINUS, KEY_EQUAL, KEY_APOSTROPHE, KEY_COMMA, KEY_PERIOD, KEY_SLASH, KEY_SEMICOLON, KEY_LEFT_BRACKET, KEY_BACKSLASH, KEY_RIGHT_BRACKET, KEY_0, KEY_1, KEY_2, KEY_3, KEY_4, KEY_5, KEY_6, KEY_7, KEY_8, KEY_9, KEY_A, KEY_B, KEY_C, KEY_D, KEY_E, KEY_F, KEY_G, KEY_H, KEY_I, KEY_J, KEY_K, KEY_L, KEY_M, KEY_N, KEY_O, KEY_P, KEY_Q, KEY_R, KEY_S, KEY_T, KEY_U, KEY_V, KEY_W, KEY_X, KEY_Y, KEY_Z, KEY_WORLD_1, KEY_WORLD_2, MOD_SHIFT, MOD_CONTROL, MOD_ALT, MOD_SUPER, MOD_META, get_monitors, get_primary_monitor, get_monitor_pos, get_monitor_workarea, get_monitor_physical_size, get_monitor_content_scale, get_monitor_name, get_video_mode, get_video_modes, get_monitor_resolution, get_monitor_rect, get_monitor_desktop_bounds, get_monitor_index_at, get_current_monitor_index, get_current_monitor, move_to_monitor, set_gamma, get_gamma_ramp, set_gamma_ramp, get_window_monitor, set_window_monitor, set_window_fullscreen, toggle_window_fullscreen, set_window_borderless, toggle_window_borderless, primary_mode, default_window_size, fit_to_workarea, open_window, create, show, hide, iconify, restore, maximize, id, title, set_title, pos, size, get_framebuffer_size, get_window_content_scale, get_window_scale_dpi, window_flags, has_window_flag, set_window_flag, toggle_window_flag, window_attrib, window_state, is_window_visible, is_window_focused, is_window_minimized, is_window_maximized, is_window_resizable, is_window_decorated, is_window_floating, is_window_fullscreen, is_window_borderless, window_vsync, set_window_vsync, toggle_window_vsync, toggle_window_resizable, toggle_window_decorated, toggle_window_floating, set_icon, move, resize, should_close, set_should_close, close, quit, exit_key, set_exit_key, key_state, key_name, key_down, key_pressed, get_modifiers, mod_down, mouse_pos, mouse_down, mouse_pressed, joystick_present, get_joystick_name, get_joystick_guid, get_joystick_axes, get_joystick_buttons, get_joystick_hats, joystick_is_gamepad, get_gamepad_state, get_gamepad_name, get_gamepad_guid, gamepad_count, gamepads, gamepad_connected, gamepad_mapped, gamepad_name, gamepad_guid, gamepad_axis, gamepad_button, gamepad_axis_count, gamepad_button_count, set_joystick_callback, update_gamepad_mappings, add_gamepad_mapping, JOYSTICK_1, JOYSTICK_2, JOYSTICK_3, JOYSTICK_4, JOYSTICK_5, JOYSTICK_6, JOYSTICK_7, JOYSTICK_8, JOYSTICK_9, JOYSTICK_10, JOYSTICK_11, JOYSTICK_12, JOYSTICK_13, JOYSTICK_14, JOYSTICK_15, JOYSTICK_16, JOYSTICK_LAST, JOYSTICK_HAT_BUTTONS, GAMEPAD_BUTTON_A, GAMEPAD_BUTTON_B, GAMEPAD_BUTTON_X, GAMEPAD_BUTTON_Y, GAMEPAD_BUTTON_LEFT_BUMPER, GAMEPAD_BUTTON_RIGHT_BUMPER, GAMEPAD_BUTTON_BACK, GAMEPAD_BUTTON_START, GAMEPAD_BUTTON_GUIDE, GAMEPAD_BUTTON_LEFT_THUMB, GAMEPAD_BUTTON_RIGHT_THUMB, GAMEPAD_BUTTON_DPAD_UP, GAMEPAD_BUTTON_DPAD_RIGHT, GAMEPAD_BUTTON_DPAD_DOWN, GAMEPAD_BUTTON_DPAD_LEFT, GAMEPAD_BUTTON_LAST, GAMEPAD_BUTTON_CROSS, GAMEPAD_BUTTON_SQUARE, GAMEPAD_BUTTON_TRIANGLE, GAMEPAD_AXIS_LEFT_X, GAMEPAD_AXIS_LEFT_Y, GAMEPAD_AXIS_RIGHT_X, GAMEPAD_AXIS_RIGHT_Y, GAMEPAD_AXIS_LEFT_TRIGGER, GAMEPAD_AXIS_RIGHT_TRIGGER, GAMEPAD_AXIS_LAST, set_cursor_mode, create_cursor, create_standard_cursor, destroy_cursor, set_cursor, cursor_pos, scroll_pos, touch_count, touch_pos, touch_active, test_report_touch, test_report_gamepad, mouse_state, set_cursor_pos, center_cursor, show_centered_cursor, sync_cursor, focus, transparent_framebuffer, set_window_opacity, set_window_resizable, set_window_decorated, set_window_floating, set_input_exclusive, match_chord, bind, push_event, check_event, event_type, event_window, event_window_id, event_data, event_key_is, key_query_stats, on_key, poll_events, count_open, last, get_win, swap_buffers, make_current, blit_buffer, blit_software, update_input, set_blit_handler, set_clipboard, get_clipboard, get_error, get_proc_address, window_hint, window_hint_string, get_x11_display, get_x11_window, set_x11_selection_string, get_x11_selection_string, replay_advance_frame, replay_window_frame)
 use core
 use core.dict_mod
 use core.os.ui.window.consts (
@@ -130,7 +130,6 @@ mut list _replay_events_rows = []
 mut _backend_ready = false
 mut _raw_key_query_cache = dict(32)
 mut _scancode_query_cache = dict(32)
-mut _wayland_scroll_gain_cache = -1.0
 mut _xwayland_scroll_fix_cache = -1
 mut _wayland_scroll_fix_cache = -1
 mut _window_vsync_enabled = false
@@ -300,16 +299,41 @@ fn _raw_keys_for_query(any key) list {
    out
 }
 
+mut _backend_key_snapshots = dict(8)
+def _KEY_QUERY_STATS = common.env_truthy("NY_UI_KEY_QUERY_STATS")
+mut int _backend_key_queries = 0
+mut int _backend_key_cache_hits = 0
+
+fn key_query_stats(bool reset=false) list {
+   "Returns [native queries, cache hits]; enable NY_UI_KEY_QUERY_STATS to count."
+   def result = [_backend_key_queries, _backend_key_cache_hits]
+   if reset { _backend_key_queries = 0 _backend_key_cache_hits = 0 }
+   result
+}
+
 fn _backend_key_down(any win, any key) bool {
    win = _get_win(win)
    if !_is_window(win) { return false }
    def handle = win.get("handle", 0)
    if !handle { return false }
+   mut snapshot = _backend_key_snapshots.get(handle, nil)
+   if snapshot == nil {
+      snapshot = dict(32)
+      _backend_key_snapshots[handle] = snapshot
+   }
    def raw_keys = _raw_keys_for_query(key)
    def raw_keys_n = raw_keys.len
    mut i = 0
    while i < raw_keys_n {
-      if ui_backend.get_key(handle, raw_keys.get(i)) == 1 { return true }
+      def raw = raw_keys.get(i)
+      if !snapshot.contains(raw) {
+         if _KEY_QUERY_STATS { _backend_key_queries += 1 }
+         snapshot[raw] = ui_backend.get_key(handle, raw) == 1
+         _backend_key_snapshots[handle] = snapshot
+      } else {
+         if _KEY_QUERY_STATS { _backend_key_cache_hits += 1 }
+      }
+      if snapshot.get(raw, false) { return true }
       i += 1
    }
    false
@@ -341,6 +365,7 @@ fn _normalize_key_event_data(any data) dict {
 
 fn _apply_key_event_state(any win, int typ, any data) dict {
    win = _get_win(win)
+   _backend_key_snapshots = _backend_key_snapshots.delete(_get_handle(win))
    def out = _normalize_key_event_data(data)
    if !_is_window(win) { return out }
    def k = int(out.get("key", KEY_NULL))
@@ -587,7 +612,8 @@ fn _normalize_scroll_component(f64 v) f64 {
 }
 
 fn _wayland_scroll_gain() f64 {
-   if _wayland_scroll_gain_cache >= 0.0 { return _wayland_scroll_gain_cache }
+   ;; Read per scroll event, not once per process: this is an operator tuning
+   ;; knob and memoizing it made runtime changes silently ignored.
    mut env_gain = common.env_trim("NY_UI_WAYLAND_SCROLL_GAIN")
    if env_gain.len == 0 { env_gain = common.env_trim("NY_TERM_WAYLAND_SCROLL_GAIN") }
    mut gain = 8.0
@@ -595,7 +621,6 @@ fn _wayland_scroll_gain() f64 {
       def gv = str.atof(env_gain)
       if gv >= 1.0 && gv <= 64.0 { gain = gv }
    }
-   _wayland_scroll_gain_cache = gain
    gain
 }
 
@@ -1126,6 +1151,7 @@ fn close(any win) bool {
    win = _get_win(win)
    if !_is_window(win) { return false }
    def h = win.get("handle", 0)
+   _backend_key_snapshots = _backend_key_snapshots.delete(h)
    win["should_close"] = true
    if h {
       _save_win(win)
@@ -1376,16 +1402,27 @@ fn set_window_monitor(any win, any monitor, int xpos, int ypos, int width, int h
    true
 }
 
-fn _remember_window_geometry(any win, str prefix) any {
+struct WindowGeometry { int x, int y, int w, int h }
+
+fn _geometry(int x, int y, int w, int h) any {
+   ;; The dictionary boundary transports a dynamic record handle.
+   WindowGeometry(x, y, w > 0 ? w : 1, h > 0 ? h : 1)
+}
+
+fn _restore_geometry(any win, str slot) any {
+   win.get(slot, _geometry(int(win.get("x", 100)), int(win.get("y", 100)),
+      int(win.get("w", 800)), int(win.get("h", 450))))
+}
+
+fn _remember_window_geometry(any win, str slot) any {
    win = _get_win(win)
    if !_is_window(win) { return false }
    def p = pos(win)
    def s = size(win)
    win = _get_win(win)
-   win[prefix + "_x"] = int(p.get(0, win.get("x", 100)))
-   win[prefix + "_y"] = int(p.get(1, win.get("y", 100)))
-   win[prefix + "_w"] = max(1, int(s.get(0, win.get("w", 800))))
-   win[prefix + "_h"] = max(1, int(s.get(1, win.get("h", 450))))
+   win[slot] = _geometry(int(p.get(0, win.get("x", 100))),
+      int(p.get(1, win.get("y", 100))), int(s.get(0, win.get("w", 800))),
+      int(s.get(1, win.get("h", 450))))
    _save_win(win)
    win
 }
@@ -1395,11 +1432,8 @@ fn set_window_fullscreen(any win, bool enabled, any monitor=0) bool {
    win = _get_win(win)
    if !_is_window(win) { return false }
    if !enabled {
-      def rx = int(win.get("fullscreen_restore_x", win.get("x", 100)))
-      def ry = int(win.get("fullscreen_restore_y", win.get("y", 100)))
-      def rw = max(1, int(win.get("fullscreen_restore_w", win.get("w", 800))))
-      def rh = max(1, int(win.get("fullscreen_restore_h", win.get("h", 450))))
-      return set_window_monitor(win, false, rx, ry, rw, rh, 0)
+      def WindowGeometry saved = _restore_geometry(win, "fullscreen_restore")
+      return set_window_monitor(win, false, saved.x, saved.y, saved.w, saved.h, 0)
    }
    if !is_window_fullscreen(win) { _remember_window_geometry(win, "fullscreen_restore") }
    if !monitor { monitor = get_current_monitor(win) }
@@ -1427,10 +1461,12 @@ fn set_window_borderless(any win, bool enabled, any monitor=0) bool {
    if !_is_window(win) { return false }
    if !enabled {
       def decorated = !!win.get("borderless_restore_decorated", true)
-      def rx = int(win.get("borderless_restore_x", win.get("x", 100)))
-      def ry = int(win.get("borderless_restore_y", win.get("y", 100)))
-      def rw = max(1, int(win.get("borderless_restore_w", win.get("w", 800))))
-      def rh = max(1, int(win.get("borderless_restore_h", win.get("h", 450))))
+      def WindowGeometry saved = _restore_geometry(win, "borderless_restore")
+      ;; Read the complete snapshot before calls can change window state.
+      def int rx = saved.x
+      def int ry = saved.y
+      def int rw = saved.w
+      def int rh = saved.h
       win["borderless"] = false
       _save_win(win)
       set_window_decorated(win, decorated)
@@ -1461,7 +1497,9 @@ fn toggle_window_borderless(any win, any monitor=0) bool {
 
 fn push_event(any win, int kind, any data=0) bool {
    "Runs the push event operation."
-   mut real_win = _is_window(win) ? win : _get_win(win)
+   ;; Event injection must mutate the canonical window, including CPU/mock
+   ;; windows whose zero native handle has no registry write-back path.
+   mut real_win = borrow(_get_win(win))
    def h = _get_handle(real_win)
    if !_is_window(real_win) { return false }
    mut event_data = data
@@ -1934,6 +1972,7 @@ mut _event_poll_ns_by_handle = dict(8)
 @jit
 fn check_event(any win) any {
    "Polls for new events and returns the next one from the queue, or 0 if empty."
+   win = borrow(_get_win(win))
    if !_is_window(win) { return 0 }
    if win.get("_mock", false) {
       mut q0 = win.get("events", [])
@@ -1954,6 +1993,7 @@ fn check_event(any win) any {
       return e0
    }
    def handle = _get_handle(win)
+   _backend_key_snapshots = _backend_key_snapshots.delete(handle)
    def native_events = ui_backend.uses_native_events()
    mut cw = _get_win(win)
    mut q = cw.get("events", [])
@@ -2115,11 +2155,14 @@ fn mod_down(any win, any m) bool {
 fn key_pressed(any win, int k) bool {
    "Runs the key pressed operation."
    win = _get_win(win) if !_is_window(win) { return false }
-   if win.get("_mock", false) { return false }
    def nk = _normalize_key(k) def ks = win.get("key_states", 0)
    def lks = win.get("last_key_states", 0) def pk = win.get("pressed_keys", 0)
-   def cached = (!!ks.get(nk, false) && !lks.get(nk, false)) || !!pk.get(nk, false)
+   def cached = (is_dict(ks) && !!ks.get(nk, false) &&
+      !(is_dict(lks) && lks.get(nk, false))) ||
+   (is_dict(pk) && !!pk.get(nk, false))
    if cached { return true }
+   ;; A CPU surface has no native key state beyond its injected events.
+   if win.get("_mock", false) { return false }
    _backend_key_down(win, nk) && !lks.get(nk, false)
 }
 
@@ -2183,6 +2226,7 @@ fn mouse_pressed(any win, int b) bool {
 fn on_key(any win, any k, bool p=true, bool r=false, any m=0) bool {
    "Runs the on key operation."
    win = _get_win(win) if !_is_window(win) { return false }
+   _backend_key_snapshots = _backend_key_snapshots.delete(_get_handle(win))
    def nk = _normalize_key(k) mut ks = win.get("key_states", 0)
    if !is_dict(ks) { ks = dict(256) }
    ks[nk] = !!p
@@ -2237,6 +2281,7 @@ mut _input_update_ns_by_handle = dict(8)
 fn update_input(any win) any {
    "Runs the update input operation."
    win = _get_win(win) if !_is_window(win) { return 0 }
+   _backend_key_snapshots = _backend_key_snapshots.delete(_get_handle(win))
    if !win.get("_input_dirty", false) { return 0 }
    def handle = _get_handle(win)
    def now = ticks()
@@ -2326,6 +2371,7 @@ fn blit_software(any win, any buf, int w, int h) any {
 
 fn poll_events() bool {
    "Triggers the system to process window and input events."
+   _backend_key_snapshots = dict(8)
    def windows = _ensure_windows()
    if windows.len == 0 { return true }
    if !_ensure_backend_ready() { return false }

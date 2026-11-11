@@ -1,0 +1,129 @@
+shape optcheck_row_update_variable_start {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 optcheck vectorize variable-trip row-major]
+  template ny-test-case
+  flags_matrix "-O0 --color=never; -O3 --color=never; --native-only -O3 --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.tbuf
+
+;; Row-major elimination whose inner loop starts at a runtime column (k + 1)
+;; with a runtime trip count over constant-size buffers (the linpack shape).
+;; Sizes 5, 13 and 100 give trip counts below, at and above the vector width.
+;; The same source must give the same checksum at -O0 and -O3 (vectorized).
+def a5 = f64buf_new(5 * 5)
+def piv5 = f64buf_new(5)
+mut int i5 = 0
+while i5 < 5 * 5 {
+   def int ti5 = (i5 * 7) % 13
+   f64buf_store(a5, i5, float(ti5) * 0.5 + 1.0)
+   i5 += 1
+}
+mut int k5 = 0
+while k5 < 5 {
+   mut int cc5 = k5
+   while cc5 < 5 {
+      f64buf_store(piv5, cc5, f64buf_load(a5, k5 * 5 + cc5))
+      cc5 += 1
+   }
+   mut int r5 = k5 + 1
+   while r5 < 5 {
+      def int qm5 = (r5 + k5) % 5
+      def m5 = float(qm5) * 0.01
+      mut int c5 = k5 + 1
+      while c5 < 5 {
+         f64buf_store(a5, r5 * 5 + c5, f64buf_load(a5, r5 * 5 + c5) - m5 * f64buf_load(piv5, c5))
+         c5 += 1
+      }
+      r5 += 1
+   }
+   k5 += 1
+}
+mut int sum5 = 0
+mut int j5 = 0
+while j5 < 5 * 5 {
+   def v5 = int(f64buf_load(a5, j5) * 1000.0)
+   sum5 = (sum5 * 31 + v5) % 1000003
+   j5 += 1
+}
+
+def a13 = f64buf_new(13 * 13)
+def piv13 = f64buf_new(13)
+mut int i13 = 0
+while i13 < 13 * 13 {
+   def int ti13 = (i13 * 7) % 13
+   f64buf_store(a13, i13, float(ti13) * 0.5 + 1.0)
+   i13 += 1
+}
+mut int k13 = 0
+while k13 < 13 {
+   mut int cc13 = k13
+   while cc13 < 13 {
+      f64buf_store(piv13, cc13, f64buf_load(a13, k13 * 13 + cc13))
+      cc13 += 1
+   }
+   mut int r13 = k13 + 1
+   while r13 < 13 {
+      def int qm13 = (r13 + k13) % 5
+      def m13 = float(qm13) * 0.01
+      mut int c13 = k13 + 1
+      while c13 < 13 {
+         f64buf_store(a13, r13 * 13 + c13, f64buf_load(a13, r13 * 13 + c13) - m13 * f64buf_load(piv13, c13))
+         c13 += 1
+      }
+      r13 += 1
+   }
+   k13 += 1
+}
+mut int sum13 = 0
+mut int j13 = 0
+while j13 < 13 * 13 {
+   def v13 = int(f64buf_load(a13, j13) * 1000.0)
+   sum13 = (sum13 * 31 + v13) % 1000003
+   j13 += 1
+}
+
+def a100 = f64buf_new(100 * 100)
+def piv100 = f64buf_new(100)
+mut int i100 = 0
+while i100 < 100 * 100 {
+   def int ti100 = (i100 * 7) % 13
+   f64buf_store(a100, i100, float(ti100) * 0.5 + 1.0)
+   i100 += 1
+}
+mut int k100 = 0
+while k100 < 100 {
+   mut int cc100 = k100
+   while cc100 < 100 {
+      f64buf_store(piv100, cc100, f64buf_load(a100, k100 * 100 + cc100))
+      cc100 += 1
+   }
+   mut int r100 = k100 + 1
+   while r100 < 100 {
+      def int qm100 = (r100 + k100) % 5
+      def m100 = float(qm100) * 0.01
+      mut int c100 = k100 + 1
+      while c100 < 100 {
+         f64buf_store(a100, r100 * 100 + c100, f64buf_load(a100, r100 * 100 + c100) - m100 * f64buf_load(piv100, c100))
+         c100 += 1
+      }
+      r100 += 1
+   }
+   k100 += 1
+}
+mut int sum100 = 0
+mut int j100 = 0
+while j100 < 100 * 100 {
+   def v100 = int(f64buf_load(a100, j100) * 1000.0)
+   sum100 = (sum100 * 31 + v100) % 1000003
+   j100 += 1
+}
+
+mut int total = sum5
+total = (total * 31 + sum13) % 1000000007
+total = (total * 31 + sum100) % 1000000007
+assert(total == 121708497, "row-major variable-start update checksum")
+NY
+}

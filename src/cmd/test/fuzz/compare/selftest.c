@@ -26,6 +26,32 @@ static void selftest_resolve_markdown_path(const char *markdown, char *out,
   }
 }
 
+static void selftest_report_path(char *out, size_t out_sz, const char *dir,
+                                 const char *name) {
+  (void)snprintf(out, out_sz, "%s/%s", dir, name);
+}
+
+static void selftest_report_sibling_path(char *out, size_t out_sz,
+                                         const char *path, const char *name) {
+  if (!out || out_sz == 0 || !path || !name)
+    return;
+  const char *slash = strrchr(path, '/');
+  if (!slash) {
+    (void)snprintf(out, out_sz, "build/fuzz/all/%s", name);
+    return;
+  }
+  size_t name_len = strlen(name) + 1;
+  if (name_len > out_sz) {
+    (void)snprintf(out, out_sz, "%s", name);
+    return;
+  }
+  size_t prefix_len = (size_t)(slash - path) + 1;
+  if (prefix_len > out_sz - name_len)
+    prefix_len = out_sz - name_len;
+  memcpy(out, path, prefix_len);
+  memcpy(out + prefix_len, name, name_len);
+}
+
 static void
 selftest_validate_fuzz_reporting(const char *json, string_list_t *errors,
                                  int *row_count, const char *expected_dir,
@@ -45,33 +71,34 @@ selftest_validate_fuzz_reporting(const char *json, string_list_t *errors,
   char expected_run_next[512];
   char expected_stop_file[512];
   char expected_state_file[512];
-  snprintf(expected_status_json, sizeof(expected_status_json), "%s/status.json",
-           cockpit_dir);
-  snprintf(expected_status_md, sizeof(expected_status_md), "%s/status.md",
-           cockpit_dir);
-  snprintf(expected_coverage_json, sizeof(expected_coverage_json),
-           "%s/coverage.json", cockpit_dir);
-  snprintf(expected_coverage_md, sizeof(expected_coverage_md), "%s/coverage.md",
-           cockpit_dir);
-  snprintf(expected_old_paths_json, sizeof(expected_old_paths_json),
-           "%s/old-paths.json", cockpit_dir);
-  snprintf(expected_old_paths_md, sizeof(expected_old_paths_md),
-           "%s/old-paths.md", cockpit_dir);
-  snprintf(expected_progress_json, sizeof(expected_progress_json),
-           "%s/progress.json", cockpit_dir);
-  snprintf(expected_progress_md, sizeof(expected_progress_md), "%s/progress.md",
-           cockpit_dir);
-  snprintf(expected_worklist_history_json,
-           sizeof(expected_worklist_history_json), "%s/worklist-history.json",
-           cockpit_dir);
-  snprintf(expected_worklist_history_md, sizeof(expected_worklist_history_md),
-           "%s/worklist-history.md", cockpit_dir);
-  snprintf(expected_run_next, sizeof(expected_run_next), "%s/run-next.sh",
-           cockpit_dir);
-  snprintf(expected_stop_file, sizeof(expected_stop_file), "%s/stop",
-           cockpit_dir);
-  snprintf(expected_state_file, sizeof(expected_state_file),
-           "%s/run-next-state.json", cockpit_dir);
+  selftest_report_path(expected_status_json, sizeof(expected_status_json),
+                       cockpit_dir, "status.json");
+  selftest_report_path(expected_status_md, sizeof(expected_status_md),
+                       cockpit_dir, "status.md");
+  selftest_report_path(expected_coverage_json, sizeof(expected_coverage_json),
+                       cockpit_dir, "coverage.json");
+  selftest_report_path(expected_coverage_md, sizeof(expected_coverage_md),
+                       cockpit_dir, "coverage.md");
+  selftest_report_path(expected_old_paths_json, sizeof(expected_old_paths_json),
+                       cockpit_dir, "old-paths.json");
+  selftest_report_path(expected_old_paths_md, sizeof(expected_old_paths_md),
+                       cockpit_dir, "old-paths.md");
+  selftest_report_path(expected_progress_json, sizeof(expected_progress_json),
+                       cockpit_dir, "progress.json");
+  selftest_report_path(expected_progress_md, sizeof(expected_progress_md),
+                       cockpit_dir, "progress.md");
+  selftest_report_path(expected_worklist_history_json,
+                       sizeof(expected_worklist_history_json), cockpit_dir,
+                       "worklist-history.json");
+  selftest_report_path(expected_worklist_history_md,
+                       sizeof(expected_worklist_history_md), cockpit_dir,
+                       "worklist-history.md");
+  selftest_report_path(expected_run_next, sizeof(expected_run_next),
+                       cockpit_dir, "run-next.sh");
+  selftest_report_path(expected_stop_file, sizeof(expected_stop_file),
+                       cockpit_dir, "stop");
+  selftest_report_path(expected_state_file, sizeof(expected_state_file),
+                       cockpit_dir, "run-next-state.json");
   const char *expected_progress_status_json =
       canonical_pair ? expected_status_json : "fuzz_all_reporting.json";
   double expected_score_min = stale_evidence ? 64.99 : 84.99;
@@ -2085,8 +2112,7 @@ selftest_validate_fuzz_reporting(const char *json, string_list_t *errors,
     (void)string_list_push_copy(errors,
                                 "status markdown path lost expected cockpit");
   char markdown_abs[4096] = {0};
-  selftest_resolve_markdown_path(markdown, markdown_abs,
-                                   sizeof(markdown_abs));
+  selftest_resolve_markdown_path(markdown, markdown_abs, sizeof(markdown_abs));
   file_buf_t md = {0};
   if (!markdown_abs[0] || !read_file(markdown_abs, &md) || !md.data) {
     (void)string_list_push_copy(errors, "status markdown was not readable");
@@ -4217,8 +4243,7 @@ static void selftest_validate_fuzz_all_repeat_status_progress(
         errors, "repeat status lost guarded missing-evidence handoff");
   char *markdown = summary_string_from_report(json, "markdown");
   char markdown_abs[4096] = {0};
-  selftest_resolve_markdown_path(markdown, markdown_abs,
-                                   sizeof(markdown_abs));
+  selftest_resolve_markdown_path(markdown, markdown_abs, sizeof(markdown_abs));
   file_buf_t md = {0};
   if (!markdown_abs[0] || !read_file(markdown_abs, &md) || !md.data) {
     (void)string_list_push_copy(errors,
@@ -4718,8 +4743,7 @@ static void selftest_validate_fuzz_default_pressure(const char *json,
     (void)string_list_push_copy(errors, "default plan repeat aliases missing");
   char *markdown = summary_string_from_report(json, "markdown");
   char markdown_abs[4096] = {0};
-  selftest_resolve_markdown_path(markdown, markdown_abs,
-                                   sizeof(markdown_abs));
+  selftest_resolve_markdown_path(markdown, markdown_abs, sizeof(markdown_abs));
   file_buf_t md = {0};
   if (!markdown_abs[0] || !read_file(markdown_abs, &md) || !md.data) {
     (void)string_list_push_copy(errors,
@@ -6334,7 +6358,7 @@ static void selftest_validate_fuzz_full_pressure_remediation(
     char *markdown = summary_string_from_report(worklist.data, "markdown");
     char markdown_abs[4096] = {0};
     selftest_resolve_markdown_path(markdown, markdown_abs,
-                                     sizeof(markdown_abs));
+                                   sizeof(markdown_abs));
     file_buf_t md = {0};
     if (!markdown_abs[0] || !read_file(markdown_abs, &md) || !md.data) {
       (void)string_list_push_copy(
@@ -6675,8 +6699,7 @@ static void selftest_validate_fuzz_repro_ready_missing_wrapper(
 
   char *markdown = summary_string_from_report(json, "markdown");
   char markdown_abs[4096] = {0};
-  selftest_resolve_markdown_path(markdown, markdown_abs,
-                                   sizeof(markdown_abs));
+  selftest_resolve_markdown_path(markdown, markdown_abs, sizeof(markdown_abs));
   file_buf_t md = {0};
   if (!markdown_abs[0] || !read_file(markdown_abs, &md) || !md.data) {
     (void)string_list_push_copy(
@@ -6750,8 +6773,7 @@ static void selftest_validate_fuzz_repro_ready_missing_command(
 
   char *markdown = summary_string_from_report(json, "markdown");
   char markdown_abs[4096] = {0};
-  selftest_resolve_markdown_path(markdown, markdown_abs,
-                                   sizeof(markdown_abs));
+  selftest_resolve_markdown_path(markdown, markdown_abs, sizeof(markdown_abs));
   file_buf_t md = {0};
   if (!markdown_abs[0] || !read_file(markdown_abs, &md) || !md.data) {
     (void)string_list_push_copy(
@@ -8575,36 +8597,16 @@ static void selftest_validate_fuzz_all_progress(const char *json,
   char expected_state_file[512];
   char expected_old_path_report[512];
   char expected_old_path_markdown[512];
-  const char *slash = strrchr(expected_progress_md, '/');
-  if (slash) {
-    size_t prefix_len = (size_t)(slash - expected_progress_md) + 1;
-    if (prefix_len > sizeof(expected_stop_file) - 5)
-      prefix_len = sizeof(expected_stop_file) - 5;
-    memcpy(expected_stop_file, expected_progress_md, prefix_len);
-    memcpy(expected_stop_file + prefix_len, "stop", 5);
-    if (prefix_len > sizeof(expected_state_file) - 20)
-      prefix_len = sizeof(expected_state_file) - 20;
-    memcpy(expected_state_file, expected_progress_md, prefix_len);
-    memcpy(expected_state_file + prefix_len, "run-next-state.json", 20);
-    size_t old_prefix_len = (size_t)(slash - expected_progress_md) + 1;
-    if (old_prefix_len > sizeof(expected_old_path_report) - 15)
-      old_prefix_len = sizeof(expected_old_path_report) - 15;
-    memcpy(expected_old_path_report, expected_progress_md, old_prefix_len);
-    memcpy(expected_old_path_report + old_prefix_len, "old-paths.json", 15);
-    if (old_prefix_len > sizeof(expected_old_path_markdown) - 13)
-      old_prefix_len = sizeof(expected_old_path_markdown) - 13;
-    memcpy(expected_old_path_markdown, expected_progress_md, old_prefix_len);
-    memcpy(expected_old_path_markdown + old_prefix_len, "old-paths.md", 13);
-  } else {
-    snprintf(expected_stop_file, sizeof(expected_stop_file),
-             "build/fuzz/all/stop");
-    snprintf(expected_state_file, sizeof(expected_state_file),
-             "build/fuzz/all/run-next-state.json");
-    snprintf(expected_old_path_report, sizeof(expected_old_path_report),
-             "build/fuzz/all/old-paths.json");
-    snprintf(expected_old_path_markdown, sizeof(expected_old_path_markdown),
-             "build/fuzz/all/old-paths.md");
-  }
+  selftest_report_sibling_path(expected_stop_file, sizeof(expected_stop_file),
+                               expected_progress_md, "stop");
+  selftest_report_sibling_path(expected_state_file, sizeof(expected_state_file),
+                               expected_progress_md, "run-next-state.json");
+  selftest_report_sibling_path(expected_old_path_report,
+                               sizeof(expected_old_path_report),
+                               expected_progress_md, "old-paths.json");
+  selftest_report_sibling_path(expected_old_path_markdown,
+                               sizeof(expected_old_path_markdown),
+                               expected_progress_md, "old-paths.md");
   double target_percent = 0.0;
   double blocker_count = 0.0;
   double active_items = 0.0;
@@ -10399,8 +10401,7 @@ static void selftest_validate_fuzz_all_progress(const char *json,
                                           : "fuzz_progress/progress.md"))
     (void)string_list_push_copy(errors, "progress markdown path missing");
   char markdown_abs[4096] = {0};
-  selftest_resolve_markdown_path(markdown, markdown_abs,
-                                   sizeof(markdown_abs));
+  selftest_resolve_markdown_path(markdown, markdown_abs, sizeof(markdown_abs));
   file_buf_t md = {0};
   if (!markdown_abs[0] || !read_file(markdown_abs, &md) || !md.data) {
     (void)string_list_push_copy(errors, "progress markdown was not readable");
@@ -11200,8 +11201,7 @@ static void selftest_validate_fuzz_all_progress_stale_evidence(
         errors, "stale progress state refresh should follow freshness preview");
   char *markdown = summary_string_from_report(json, "markdown");
   char markdown_abs[4096] = {0};
-  selftest_resolve_markdown_path(markdown, markdown_abs,
-                                   sizeof(markdown_abs));
+  selftest_resolve_markdown_path(markdown, markdown_abs, sizeof(markdown_abs));
   file_buf_t md = {0};
   if (!markdown_abs[0] || !read_file(markdown_abs, &md) || !md.data) {
     (void)string_list_push_copy(errors,
@@ -13121,7 +13121,7 @@ static int json_failures_nonempty(const char *json) {
   const char *q = matching_json_end(p, '[', ']');
   if (!q)
     return 0;
-  const char *content = skip_ws_const(p + 1);
+  const char *content = fuzz_json_skip_ws(p + 1);
   while (q > content && isspace((unsigned char)q[-1]))
     --q;
   return content < q;
@@ -13756,9 +13756,8 @@ static int json_int_or_zero_range(const char *start, const char *end,
   const char *p = json_value_after_key_range(start, end, key);
   if (!p || p >= end)
     return 0;
-  char *num_end = NULL;
-  long value = strtol(p, &num_end, 10);
-  if (num_end == p)
+  long value;
+  if (!fuzz_parse_long(&p, &value))
     return 0;
   return (int)value;
 }
@@ -13798,7 +13797,7 @@ static bool row_find_ny_compiler_crash(const char *row,
     return false;
   const char *p = failures + 1;
   while (p < end) {
-    p = skip_ws_const(p);
+    p = fuzz_json_skip_ws(p);
     if (p >= end || *p == ']')
       break;
     if (*p == ',') {
@@ -13850,19 +13849,19 @@ static char *synth_capture_expect_substring(const captured_failure_t *f) {
     const char *s = texts[i];
     if (!s)
       continue;
-    if (contains_ci(s, "segmentationfault"))
+    if (fuzz_contains_ci(s, "segmentationfault"))
       return strdup("SegmentationFault");
-    if (contains_ci(s, "segmentation fault"))
+    if (fuzz_contains_ci(s, "segmentation fault"))
       return strdup("segmentation fault");
-    if (contains_ci(s, "signal 11"))
+    if (fuzz_contains_ci(s, "signal 11"))
       return strdup("signal 11");
-    if (contains_ci(s, "sigsegv"))
+    if (fuzz_contains_ci(s, "sigsegv"))
       return strdup("SIGSEGV");
-    if (contains_ci(s, "internal compiler error"))
+    if (fuzz_contains_ci(s, "internal compiler error"))
       return strdup("internal compiler error");
-    if (contains_ci(s, "panic"))
+    if (fuzz_contains_ci(s, "panic"))
       return strdup("panic");
-    if (contains_ci(s, "assertion"))
+    if (fuzz_contains_ci(s, "assertion"))
       return strdup("assertion");
   }
   return strdup("");
@@ -14073,10 +14072,8 @@ static char *row_with_capture_fields(const char *row, const char *root,
                                      const char *artifact_path,
                                      const char *reduced_source,
                                      int reduction_checks) {
-  size_t n = strlen(row ? row : "");
-  while (n > 0 && isspace((unsigned char)row[n - 1]))
-    --n;
-  if (n == 0 || row[n - 1] != '}')
+  size_t n = row_object_end(row);
+  if (n == 0)
     return strdup(row ? row : "");
   str_buf_t b = {0};
   (void)sb_append_n(&b, row, n - 1);
@@ -14113,10 +14110,8 @@ static bool synth_row_matches_known_bug_ny008(const char *root,
 
 static char *row_with_known_bug_fields(const char *row, const char *bug_id,
                                        const char *reason) {
-  size_t n = strlen(row ? row : "");
-  while (n > 0 && isspace((unsigned char)row[n - 1]))
-    --n;
-  if (n == 0 || row[n - 1] != '}')
+  size_t n = row_object_end(row);
+  if (n == 0)
     return strdup(row ? row : "");
   str_buf_t b = {0};
   (void)sb_append_n(&b, row, n - 1);
@@ -14163,7 +14158,7 @@ static int cmd_public_synth_generate(int argc, char **argv) {
   const char *schedule = canonical_synth_schedule(
       value_after(argc, argv, 3, "--schedule", "smart"));
   const char *shape = value_after(argc, argv, 3, "--shape", "");
-  const char *method = canonical_native_method(generator);
+  const char *method = fuzz_canonical_generator_method(generator);
   const char *json_path = value_after(argc, argv, 3, "--json", "");
   int max_reduce_checks = atoi(
       value_after(argc, argv, 3, "--max-reduce-checks", fast ? "80" : "250"));

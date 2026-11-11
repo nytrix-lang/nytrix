@@ -1,6 +1,17 @@
+/*
+ * Parser/backend fixture for global assembly data and symbol relocations.
+ */
 __asm__(".section \"nyc_asm_probe\", \"a\"\n"
+        ".globl nyc_asm_probe_data\n"
+        "nyc_asm_probe_data:\n"
         ".balign 4\n"
         ".long nyc_asm_target - .\n"
+        ".previous\n");
+
+__asm__(".section .rodata\n"
+        ".globl nyc_asm_implicit_rodata\n"
+        "nyc_asm_implicit_rodata:\n"
+        ".byte 1\n"
         ".previous\n");
 
 int nyc_asm_target;
@@ -83,3 +94,11 @@ __asm__(".text\n"
         ".balign 4, 0x90\n"
         ".skip 2, 0x90\n"
         ".size nyc_asm_text_trampoline, . - nyc_asm_text_trampoline\n");
+
+__asm__(".text\n"
+        ".globl nyc_asm_movl_imm32\n"
+        "nyc_asm_movl_imm32:\n"
+        "movl $7, (%r12)\n"
+        "ret\n"
+        ".type nyc_asm_movl_imm32, @function\n"
+        ".size nyc_asm_movl_imm32, . - nyc_asm_movl_imm32\n");

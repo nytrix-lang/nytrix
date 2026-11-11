@@ -1,13 +1,16 @@
 /*
  * x86-family object format writers for ELF, COFF, and Mach-O.
  */
+#include "base/compat.h"
 #include "base/debug.h"
-#include "code/backend/object/internal.h"
+#include "base/parallel.h"
 #include "code/backend/ir/machine.h"
+#include "code/backend/object/internal.h"
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 static bool ny_i386_obj_reserve_relocs(nyr_i386_obj_reloc_t **data, size_t *cap,
                                        size_t want, char *err, size_t err_len) {
@@ -243,12 +246,6 @@ void nyr_native_mach_vector_stats(unsigned long long *segments,
         __atomic_load_n(&ny_native_stat_vector_peak_live, __ATOMIC_RELAXED);
 }
 
-static bool ny_elf64_write_sym(nyr_obj_buf_t *b, uint32_t name, unsigned info,
-                               uint16_t shndx, uint64_t value, uint64_t size) {
-  return nyr_obj_u32(b, name) && nyr_obj_u8(b, info) && nyr_obj_u8(b, 0) &&
-         nyr_obj_u16(b, shndx) && nyr_obj_u64(b, value) && nyr_obj_u64(b, size);
-}
-
 static bool ny_elf64_write_sh(nyr_obj_buf_t *b, uint32_t name, uint32_t type,
                               uint64_t flags, uint64_t offset, uint64_t size,
                               uint32_t link, uint32_t info, uint64_t align,
@@ -368,7 +365,7 @@ static bool ny_native_emit_coff_x64_object_code(
   if (!nyr_obj_emit(&file, code, code_len))
     goto done;
   for (size_t i = 0; i < reloc_count; ++i) {
-    int sym_i = nyr_x64_obj_symbol_index(reloc_symbols, reloc_symbol_count,
+    int sym_i = nyr_x86_obj_symbol_index(reloc_symbols, reloc_symbol_count,
                                          relocs[i].symbol);
     if (sym_i < 0)
       goto done;
@@ -489,7 +486,7 @@ static bool ny_native_emit_macho_x64_object_code(
   if (!nyr_obj_emit(&file, code, code_len))
     goto done;
   for (size_t i = 0; i < reloc_count; ++i) {
-    int sym_i = nyr_x64_obj_symbol_index(reloc_symbols, reloc_symbol_count,
+    int sym_i = nyr_x86_obj_symbol_index(reloc_symbols, reloc_symbol_count,
                                          relocs[i].symbol);
     if (sym_i < 0)
       goto done;
@@ -827,7 +824,7 @@ static bool ny_elf64_obj_rela_text_entry(nyr_obj_buf_t *file,
   if (def_i >= 0)
     sym_index = (uint32_t)(1 + def_i);
   else {
-    int ext_i = nyr_x64_obj_symbol_index(reloc_symbols, reloc_symbol_count,
+    int ext_i = nyr_x86_obj_symbol_index(reloc_symbols, reloc_symbol_count,
                                          reloc->symbol);
     if (ext_i < 0) {
       nyr_set_error(err, err_len,
@@ -863,7 +860,7 @@ static bool ny_elf64_obj_rela_data_entry(
   if (def_i >= 0)
     sym_index = (uint32_t)(1 + def_i);
   else {
-    int ext_i = nyr_x64_obj_symbol_index(reloc_symbols, reloc_symbol_count,
+    int ext_i = nyr_x86_obj_symbol_index(reloc_symbols, reloc_symbol_count,
                                          reloc->symbol);
     if (ext_i < 0) {
       nyr_set_error(err, err_len,
@@ -894,6 +891,22 @@ static bool ny_native_emit_elf64_x64_object_bundle_code(
   nyr_obj_buf_t strtab = {0};
   bool ok = false;
   const char *stage = "input setup";
+  bool profile = getenv("NYTRIX_AOT_OBJECT_PROFILE") != NULL;
+  clock_t stage_started = profile ? clock() : 0;
+#define NY_X64_ELF_PROFILE_STAGE(next_stage)                                 \
+  do {                                                                       \
+    if (profile) {                                                           \
+      clock_t stage_ended = clock();                                         \
+      fprintf(stderr,                                                        \
+              "[aot-object] phase=elf64-writer stage=%s elapsed=%.6fs "      \
+              "defs=%zu relocs=%zu\n",                                       \
+              stage, (double)(stage_ended - stage_started) / CLOCKS_PER_SEC, \
+              def_count, reloc_count);                                       \
+    }                                                                        \
+    stage = (next_stage);                                                    \
+    if (profile)                                                             \
+      stage_started = clock();                                               \
+  } while (0)
   char (*reloc_symbols)[256] =
       calloc(NY_X64_OBJ_MAX_RELOCS, sizeof(*reloc_symbols));
   size_t reloc_symbol_count = 0;
@@ -912,7 +925,7 @@ static bool ny_native_emit_elf64_x64_object_bundle_code(
           relocs, reloc_count, defs, def_count, reloc_symbols,
           &reloc_symbol_count, err, err_len))
     goto done;
-  stage = "string table construction";
+  NY_X64_ELF_PROFILE_STAGE("string table construction");
 
   const char shstr[] =
       "\0.text\0.rela.text\0.data\0.rela.data\0.debug_line\0.rela.debug_line"
@@ -998,6 +1011,18 @@ static bool ny_native_emit_elf64_x64_object_bundle_code(
   size_t text_len = have_data ? data_start : code_len;
   if (named_code_count)
     text_len = named_code[0].start;
+  if (!named_code_count) {
+    for (size_t i = 0; i < def_count; ++i) {
+      if (defs[i].is_data)
+        continue;
+      if (defs[i].off > text_len || defs[i].size > text_len - defs[i].off) {
+        nyr_set_error(err, err_len,
+                      "x86-64 ELF object writer: function %s exceeds .text",
+                      defs[i].name);
+        goto done;
+      }
+    }
+  }
   bool have_rela_data = false;
   for (size_t i = 0; i < reloc_count; ++i)
     have_rela_data |= relocs[i].is_data;
@@ -1086,14 +1111,14 @@ static bool ny_native_emit_elf64_x64_object_bundle_code(
   size_t debug_info_reloc = 0;
   size_t debug_info_base_def = 0;
   bool have_debug = debug_line_count > 0;
-  stage = "debug line construction";
+  NY_X64_ELF_PROFILE_STAGE("debug line construction");
   if (have_debug && !nyr_native_build_debug_line(
                         debug_lines, debug_line_count, text_len, &debug_line,
                         &debug_base_reloc, &debug_base_def, err, err_len))
     goto done;
   if (have_debug && debug_base_def >= def_count)
     goto done;
-  stage = "debug compile-unit construction";
+  NY_X64_ELF_PROFILE_STAGE("debug compile-unit construction");
   if (have_debug &&
       !nyr_native_build_debug_info(
           debug_lines, debug_line_count, text_len, &debug_info, &debug_abbrev,
@@ -1154,7 +1179,7 @@ static bool ny_native_emit_elf64_x64_object_bundle_code(
   uint32_t symtab_idx = next_idx++;
   uint32_t strtab_idx = next_idx++;
   uint32_t shstrtab_idx = next_idx++;
-  stage = "string table construction";
+  NY_X64_ELF_PROFILE_STAGE("string table construction");
   if (!nyr_obj_u8(&strtab, 0))
     goto done;
   for (size_t i = 0; i < def_count; ++i) {
@@ -1168,7 +1193,7 @@ static bool ny_native_emit_elf64_x64_object_bundle_code(
       goto done;
   }
 
-  stage = "object section data construction";
+  NY_X64_ELF_PROFILE_STAGE("object section data construction");
   if (!nyr_obj_zero(&file, 64) || !nyr_obj_pad_to(&file, 16))
     goto done;
   size_t text_off = file.len;
@@ -1211,7 +1236,7 @@ static bool ny_native_emit_elf64_x64_object_bundle_code(
       (!nyr_obj_emit(&file, debug_abbrev.data, debug_abbrev.len) ||
        !nyr_obj_pad_to(&file, 8)))
     goto done;
-  stage = "text relocation construction";
+  NY_X64_ELF_PROFILE_STAGE("text relocation construction");
   size_t rela_off = file.len;
   for (size_t i = 0; i < reloc_count; ++i) {
     if (relocs[i].is_data || relocs[i].disp_off >= text_len)
@@ -1239,7 +1264,7 @@ static bool ny_native_emit_elf64_x64_object_bundle_code(
     }
     named_code[n].rela_size = file.len - named_code[n].rela_off;
   }
-  stage = "data relocation construction";
+  NY_X64_ELF_PROFILE_STAGE("data relocation construction");
   for (size_t i = 0; i < reloc_count; ++i) {
     if (!relocs[i].is_data)
       continue;
@@ -1269,7 +1294,7 @@ static bool ny_native_emit_elf64_x64_object_bundle_code(
       goto done;
   }
   size_t rela_data_size = file.len - rela_data_off;
-  stage = "named data relocation construction";
+  NY_X64_ELF_PROFILE_STAGE("named data relocation construction");
   for (size_t n = 0; n < named_count; ++n) {
     if (!named[n].has_rela)
       continue;
@@ -1301,12 +1326,12 @@ static bool ny_native_emit_elf64_x64_object_bundle_code(
       goto done;
   }
   size_t rela_debug_info_size = file.len - rela_debug_info_off;
-  stage = "symbol table construction";
+  NY_X64_ELF_PROFILE_STAGE("symbol table construction");
   size_t local_def_count = 0;
   for (size_t i = 0; i < def_count; ++i)
     local_def_count += defs[i].is_local;
   size_t symtab_off = file.len;
-  if (!ny_elf64_write_sym(&file, 0, 0, 0, 0, 0))
+  if (!nyr_obj_elf64_write_sym(&file, 0, 0, 0, 0, 0))
     goto done;
   for (size_t i = 0; i < def_count; ++i) {
     size_t def_group = named_count;
@@ -1347,12 +1372,12 @@ static bool ny_native_emit_elf64_x64_object_bundle_code(
                      : def_group < named_count ? named[def_group].data_idx
                      : in_data                 ? sec_data
                                                : 1;
-    if (!ny_elf64_write_sym(&file, def_name_offs[i], info, shndx, value,
-                            defs[i].size))
+    if (!nyr_obj_elf64_write_sym(&file, def_name_offs[i], info, shndx, value,
+                                 defs[i].size))
       goto done;
   }
   for (size_t i = 0; i < reloc_symbol_count; ++i) {
-    if (!ny_elf64_write_sym(&file, reloc_name_offs[i], 0x12, 0, 0, 0))
+    if (!nyr_obj_elf64_write_sym(&file, reloc_name_offs[i], 0x12, 0, 0, 0))
       goto done;
   }
   size_t symtab_size = file.len - symtab_off;
@@ -1483,10 +1508,10 @@ static bool ny_native_emit_elf64_x64_object_bundle_code(
    * dense layout -- symtab linked to itself and section names were read
    * from the symbol string table (<corrupt> symbols at link time).
    */
-  stage = "section header construction";
+  NY_X64_ELF_PROFILE_STAGE("section header construction");
   size_t shoff = file.len;
   if (!ny_elf64_write_sh(&file, 0, 0, 0, 0, 0, 0, 0, 0, 0) ||
-      !ny_elf64_write_sh(&file, sh_text, 1, 0x6, text_off, text_len, 0, 0, 16,
+      !ny_elf64_write_sh(&file, sh_text, 1, 0x6, text_off, text_len, 0, 0, 32,
                          0) ||
       !ny_elf64_write_sh(&file, sh_rela_text, 4, 0, rela_off, rela_size,
                          symtab_idx, 1, 8, 24))
@@ -1559,10 +1584,18 @@ static bool ny_native_emit_elf64_x64_object_bundle_code(
   nyr_obj_patch_u16(&file, 60, (uint16_t)(shstrtab_idx + 1));
   nyr_obj_patch_u16(&file, 62, (uint16_t)shstrtab_idx);
 
-  stage = "writing object file";
+  NY_X64_ELF_PROFILE_STAGE("writing object file");
   ok = ny_elf64_write_file(path, file.data, file.len, err, err_len);
 
 done:
+  if (profile) {
+    clock_t stage_ended = clock();
+    fprintf(stderr,
+            "[aot-object] phase=elf64-writer stage=%s elapsed=%.6fs "
+            "defs=%zu relocs=%zu\n",
+            stage, (double)(stage_ended - stage_started) / CLOCKS_PER_SEC,
+            def_count, reloc_count);
+  }
   free(reloc_symbols);
   free(def_name_offs);
   free(reloc_name_offs);
@@ -1574,6 +1607,7 @@ done:
   if (!ok && err && err_len > 0 && err[0] == '\0')
     nyr_set_error(err, err_len, "x86-64 ELF object writer failed during %s",
                   stage);
+#undef NY_X64_ELF_PROFILE_STAGE
   return ok;
 }
 
@@ -1676,7 +1710,7 @@ static bool ny_native_emit_coff_x64_object_bundle_code(
     if (def_i >= 0) {
       sym_index = (uint32_t)(1 + def_i);
     } else {
-      int ext_i = nyr_x64_obj_symbol_index(reloc_symbols, reloc_symbol_count,
+      int ext_i = nyr_x86_obj_symbol_index(reloc_symbols, reloc_symbol_count,
                                            relocs[i].symbol);
       if (ext_i < 0)
         goto done;
@@ -1842,7 +1876,7 @@ static bool ny_native_emit_macho_x64_object_bundle_code(
     if (def_i >= 0) {
       sym_index = (uint32_t)def_i;
     } else {
-      int ext_i = nyr_x64_obj_symbol_index(reloc_symbols, reloc_symbol_count,
+      int ext_i = nyr_x86_obj_symbol_index(reloc_symbols, reloc_symbol_count,
                                            relocs[i].symbol);
       if (ext_i < 0)
         goto done;
@@ -1961,9 +1995,11 @@ static bool nyr_x64_c_bundle_append_data_group(
         (data[i].len == 0 && data[i].bytes == NULL) ||
         (data[i].reloc_count && !data[i].relocs)) {
       nyr_set_error(err, err_len,
-                    "C object invalid global data: name=%s bytes=%p len=%zu relocs=%p rc=%zu sec=%s",
-                    data[i].name ? data[i].name : "(null)", (void *)data[i].bytes,
-                    data[i].len, (void *)data[i].relocs, data[i].reloc_count,
+                    "C object invalid global data: name=%s bytes=%p len=%zu "
+                    "relocs=%p rc=%zu sec=%s",
+                    data[i].name ? data[i].name : "(null)",
+                    (void *)data[i].bytes, data[i].len, (void *)data[i].relocs,
+                    data[i].reloc_count,
                     data[i].section ? data[i].section : "(null)");
       return false;
     }
@@ -2040,10 +2076,8 @@ static bool nyr_x64_c_bundle_append_data_group(
       reloc->disp_off = def->off + source->offset;
       reloc->type = source->type ? source->type : NY_RELOC_X86_64_64;
       if ((reloc->type == NY_RELOC_PC32 && width != sizeof(uint32_t)) ||
-          ((reloc->type == NY_RELOC_X86_64_64) &&
-           width != sizeof(uint64_t)) ||
-          (reloc->type == NY_RELOC_X86_64_32S &&
-           width != sizeof(uint32_t))) {
+          ((reloc->type == NY_RELOC_X86_64_64) && width != sizeof(uint64_t)) ||
+          (reloc->type == NY_RELOC_X86_64_32S && width != sizeof(uint32_t))) {
         nyr_set_error(err, err_len,
                       "C object data relocation width does not match type");
         return false;
@@ -2145,7 +2179,8 @@ static bool nyr_x64_c_bundle_append_float_helpers(
     bool needed = false;
     for (size_t i = 0; i < reloc_count && !needed; ++i)
       needed = strcmp(relocs[i].symbol, helpers[h].name) == 0;
-    if (!needed || nyr_x64_obj_def_index(defs, *def_count, helpers[h].name) >= 0)
+    if (!needed ||
+        nyr_x64_obj_def_index(defs, *def_count, helpers[h].name) >= 0)
       continue;
     if (*def_count >= NY_NATIVE_MAX_DEFS) {
       nyr_set_error(err, err_len, "too many C object symbols");
@@ -2265,10 +2300,11 @@ static bool nyr_x64_obj_build_c_bundle(
               code, defs, def_count, relocs, reloc_count, &mach, target, symbol,
               false, false, NULL, NULL, NULL, NULL, reason, sizeof(reason),
               &inst_offsets, &inst_offsets_len);
-          int emitted = machine ? nyr_x64_obj_def_index(defs, *def_count, symbol)
-                                : -1;
+          int emitted =
+              machine ? nyr_x64_obj_def_index(defs, *def_count, symbol) : -1;
           if (emitted >= 0)
-            nyr_mach_dump_mixed(&funcs[i], &mach, code->data + defs[emitted].off,
+            nyr_mach_dump_mixed(&funcs[i], &mach,
+                                code->data + defs[emitted].off,
                                 defs[emitted].size, inst_offsets,
                                 inst_offsets_len, name, stderr);
           free(inst_offsets);
@@ -2459,6 +2495,219 @@ static bool ny_native_x64_build_mixed_bundle_debug(
     nyr_x64_obj_symbol_def_t *defs, size_t *def_count,
     nyr_x64_obj_reloc_t *relocs, size_t *reloc_count,
     nyr_native_debug_line_t **debug_lines, size_t *debug_line_count,
+    size_t *debug_line_cap, char *err, size_t err_len);
+
+static bool ny_native_x64_nir_requires_aggregate_fallback(
+    const nyr_func_t *func, const ny_native_target_info_t *target) {
+  if (!func || !target)
+    return true;
+  bool aggregate =
+      target->abi == NY_NATIVE_ABI_WIN64 && func->return_aggregate_size > 0;
+  for (size_t pi = 0; !aggregate && pi < func->param_count; ++pi)
+    aggregate =
+        func->param_types && func->param_types[pi] == NYIR_PARAM_AGGREGATE;
+  for (size_t ii = 0; !aggregate && ii < func->len; ++ii) {
+    const nyr_inst_t *in = &func->data[ii];
+    if (in->op != NYIR_CALL || !in->arg_sizes)
+      continue;
+    int argc = (int)in->imm;
+    for (int ai = 0; argc >= 0 && ai < argc && ai < NYIR_CALL_MAX_ARGS; ++ai)
+      aggregate |= in->arg_sizes[ai] > 0;
+  }
+  return aggregate;
+}
+
+typedef struct {
+  const nyr_func_t *funcs;
+  const nyr_func_t *rt_main;
+  size_t func_count;
+  nyr_mach_func_t *mir;
+  char (*errors)[256];
+  unsigned caps;
+} ny_native_x64_mach_lower_ctx_t;
+
+static bool ny_native_x64_mach_lower_task(size_t i, void *opaque) {
+  ny_native_x64_mach_lower_ctx_t *ctx =
+      (ny_native_x64_mach_lower_ctx_t *)opaque;
+  const nyr_func_t *func = i == ctx->func_count ? ctx->rt_main : &ctx->funcs[i];
+  return nyr_mach_lower_nir(func, &ctx->mir[i], ctx->caps, ctx->errors[i],
+                            sizeof(ctx->errors[i]));
+}
+
+static bool ny_native_x64_append_bundle_nir_fallback(
+    const nyr_func_t *func, const char *symbol, const char *name,
+    const ny_native_target_info_t *target, bool bare_syscalls,
+    nyr_obj_buf_t *code, nyr_x64_obj_symbol_def_t *defs, size_t *def_count,
+    nyr_x64_obj_reloc_t *relocs, size_t *reloc_count,
+    nyr_native_debug_line_t **debug_lines, size_t *debug_line_count,
+    size_t *debug_line_cap, char *err, size_t err_len) {
+  const char *reason = "parallel machine encoder rejected function";
+  char fallback_err[256] = {0};
+  size_t *inst_offsets = NULL;
+  size_t inst_offsets_len = 0;
+  ny_native_mach_record(false, symbol, reason);
+  nyr_phi_elim((nyr_func_t *)func);
+  if (!nyr_x64_obj_append_function_debug(
+          code, defs, def_count, relocs, reloc_count, func, target, symbol,
+          false, bare_syscalls, func, debug_lines, debug_line_count,
+          debug_line_cap, fallback_err, sizeof(fallback_err), &inst_offsets,
+          &inst_offsets_len)) {
+    nyr_set_error(err, err_len,
+                  "native function %s: machine form failed: %s; NYIR "
+                  "fallback failed: %s",
+                  symbol, reason,
+                  fallback_err[0] ? fallback_err : "object emission failed");
+    free(inst_offsets);
+    return false;
+  }
+  int def = nyr_x64_obj_def_index(defs, *def_count, symbol);
+  if (def >= 0) {
+    nyr_mach_set_mixed_note(reason);
+    nyr_mach_dump_mixed(func, NULL, code->data + defs[def].off, defs[def].size,
+                        inst_offsets, inst_offsets_len, name, stderr);
+  }
+  free(inst_offsets);
+  return true;
+}
+
+static bool ny_native_x64_try_parallel_bundle_debug(
+    const nyr_func_t *rt_main, const nyr_func_t *funcs,
+    const char *const *func_names, size_t func_count,
+    const ny_native_target_info_t *target, const char *entry_symbol,
+    bool tag_return, bool bare_syscalls, nyr_obj_buf_t *code,
+    nyr_x64_obj_symbol_def_t *defs, size_t *def_count,
+    nyr_x64_obj_reloc_t *relocs, size_t *reloc_count,
+    nyr_native_debug_line_t **debug_lines, size_t *debug_line_count,
+    size_t *debug_line_cap, char *err, size_t err_len) {
+  if (!rt_main || !funcs || !target ||
+      target->target != NY_NATIVE_TARGET_X86_64 || func_count < 2 ||
+      getenv("NY_DUMP_MACH") ||
+      ny_native_x64_nir_requires_aggregate_fallback(rt_main, target))
+    return false;
+  size_t work = rt_main->len;
+  for (size_t i = 0; i < func_count; ++i) {
+    if (ny_native_x64_nir_requires_aggregate_fallback(&funcs[i], target) ||
+        funcs[i].len > SIZE_MAX - work)
+      return false;
+    work += funcs[i].len;
+  }
+  if (!ny_parallel_enabled(func_count + 1, work))
+    return false;
+
+  nyr_mach_func_t *mir = calloc(func_count + 1, sizeof(*mir));
+  char (*lower_errors)[256] = calloc(func_count + 1, sizeof(*lower_errors));
+  if (!mir || !lower_errors) {
+    free(mir);
+    free(lower_errors);
+    return false;
+  }
+  ny_native_x64_mach_lower_ctx_t ctx = {.funcs = funcs,
+                                        .rt_main = rt_main,
+                                        .func_count = func_count,
+                                        .mir = mir,
+                                        .errors = lower_errors,
+                                        .caps = target->caps};
+  bool profile_object = getenv("NYTRIX_AOT_OBJECT_PROFILE") != NULL;
+  ny_tick_t lower_start = profile_object ? ny_ticks_now() : 0;
+  bool lowered = ny_parallel_for(func_count + 1, work,
+                                 ny_native_x64_mach_lower_task, &ctx);
+  if (profile_object)
+    fprintf(stderr,
+            "[aot-object] phase=machine-lower path=parallel functions=%zu "
+            "nyir-insts=%zu elapsed=%.6fs\n",
+            func_count + 1, work, ny_ticks_elapsed_sec(lower_start));
+  if (!lowered)
+    for (size_t i = 0; i <= func_count; ++i)
+      if (lower_errors[i][0]) {
+        if (err && err_len)
+          snprintf(err, err_len, "%s", lower_errors[i]);
+        break;
+      }
+  free(lower_errors);
+  char entry[256];
+  snprintf(entry, sizeof(entry), "%s%s",
+           target->symbol_prefix ? target->symbol_prefix : "",
+           entry_symbol && entry_symbol[0] ? entry_symbol : "rt_main");
+  if (!lowered) {
+    for (size_t i = 0; i <= func_count; ++i)
+      nyr_mach_func_free(&mir[i]);
+    free(mir);
+    return false;
+  }
+
+  bool ok = nyr_x64_mach_build_bundle_debug(
+      &mir[func_count], mir, func_names, func_count, target,
+      entry_symbol && entry_symbol[0] ? entry_symbol : "rt_main", tag_return,
+      bare_syscalls, rt_main, funcs, code, defs, def_count, relocs, reloc_count,
+      debug_lines, debug_line_count, debug_line_cap, err, err_len);
+  if (ok) {
+    for (size_t i = 0; i < func_count; ++i) {
+      const char *name =
+          func_names && func_names[i] ? func_names[i] : "unknown_fn";
+      char symbol[256];
+      snprintf(symbol, sizeof(symbol), NY_FMT_FN,
+               target->symbol_prefix ? target->symbol_prefix : "", name);
+      if (nyr_x64_obj_def_index(defs, *def_count, symbol) < 0) {
+        if (!ny_native_x64_append_bundle_nir_fallback(
+                &funcs[i], symbol, name, target, bare_syscalls, code, defs,
+                def_count, relocs, reloc_count, debug_lines, debug_line_count,
+                debug_line_cap, err, err_len)) {
+          ok = false;
+          break;
+        }
+      } else {
+        ny_native_mach_record(true, symbol, NULL);
+      }
+    }
+    if (ok)
+      ny_native_mach_record(true, entry, NULL);
+  }
+  if (ok) {
+    ny_tick_t tables_start = profile_object ? ny_ticks_now() : 0;
+    ok = nyr_strtab_append_defs(code, defs, def_count, err, err_len) &&
+         nyr_consttab_append_defs(code, defs, def_count, err, err_len) &&
+         nyr_globaltab_append_defs(code, defs, def_count, err, err_len) &&
+         nyr_arraytab_append_defs(code, defs, def_count, err, err_len);
+    if (profile_object)
+      fprintf(stderr, "[aot-object] phase=bundle-tables elapsed=%.6fs\n",
+              ny_ticks_elapsed_sec(tables_start));
+  }
+  for (size_t i = 0; i <= func_count; ++i)
+    nyr_mach_func_free(&mir[i]);
+  free(mir);
+  if (!ok) {
+    if (profile_object)
+      fprintf(stderr,
+              "[aot-object] phase=machine-bundle path=serial-fallback "
+              "functions=%zu reason=%s\n",
+              func_count, err && err[0] ? err : "unspecified failure");
+    code->len = 0;
+    *def_count = 0;
+    *reloc_count = 0;
+    if (debug_lines) {
+      free(*debug_lines);
+      *debug_lines = NULL;
+    }
+    if (debug_line_count)
+      *debug_line_count = 0;
+    if (debug_line_cap)
+      *debug_line_cap = 0;
+    if (err && err_len)
+      err[0] = '\0';
+    return false;
+  }
+
+  return true;
+}
+
+static bool ny_native_x64_build_mixed_bundle_debug(
+    const nyr_func_t *rt_main, const nyr_func_t *funcs,
+    const char *const *func_names, size_t func_count,
+    const ny_native_target_info_t *target, const char *entry_symbol,
+    bool tag_return, bool bare_syscalls, nyr_obj_buf_t *code,
+    nyr_x64_obj_symbol_def_t *defs, size_t *def_count,
+    nyr_x64_obj_reloc_t *relocs, size_t *reloc_count,
+    nyr_native_debug_line_t **debug_lines, size_t *debug_line_count,
     size_t *debug_line_cap, char *err, size_t err_len) {
   if (!rt_main || !target || !entry_symbol || !entry_symbol[0] || !code ||
       !defs || !def_count || !relocs || !reloc_count || (func_count && !funcs))
@@ -2472,6 +2721,11 @@ static bool ny_native_x64_build_mixed_bundle_debug(
     *debug_line_count = 0;
   if (debug_line_cap)
     *debug_line_cap = 0;
+  if (ny_native_x64_try_parallel_bundle_debug(
+          rt_main, funcs, func_names, func_count, target, entry_symbol,
+          tag_return, bare_syscalls, code, defs, def_count, relocs, reloc_count,
+          debug_lines, debug_line_count, debug_line_cap, err, err_len))
+    return true;
   for (size_t i = 0; i < func_count; ++i) {
     const char *name =
         func_names && func_names[i] ? func_names[i] : "unknown_fn";
@@ -2537,8 +2791,8 @@ static bool ny_native_x64_build_mixed_bundle_debug(
     if (nyr_x64_obj_append_function_debug(
             code, defs, def_count, relocs, reloc_count, &funcs[i], target,
             symbol, false, bare_syscalls, &funcs[i], debug_lines,
-            debug_line_count, debug_line_cap, fallback_err, sizeof(fallback_err),
-            &inst_offsets, &inst_offsets_len)) {
+            debug_line_count, debug_line_cap, fallback_err,
+            sizeof(fallback_err), &inst_offsets, &inst_offsets_len)) {
       int fdef = nyr_x64_obj_def_index(defs, *def_count, symbol);
       if (fdef >= 0) {
         nyr_mach_set_mixed_note(reason);
@@ -2994,7 +3248,7 @@ bool nyr_native_emit_elf64_object_from_nir(
     goto done;
   size_t rela_off = file.len;
   for (size_t i = 0; i < ctx.reloc_count; ++i) {
-    int sym_i = nyr_x64_obj_symbol_index(reloc_symbols, reloc_symbol_count,
+    int sym_i = nyr_x86_obj_symbol_index(reloc_symbols, reloc_symbol_count,
                                          ctx.relocs[i].symbol);
     if (sym_i < 0)
       goto done;
@@ -3009,11 +3263,11 @@ bool nyr_native_emit_elf64_object_from_nir(
   }
   size_t rela_size = file.len - rela_off;
   size_t symtab_off = file.len;
-  if (!ny_elf64_write_sym(&file, 0, 0, 0, 0, 0) ||
-      !ny_elf64_write_sym(&file, sym_name_off, 0x12, 1, 0, ctx.code.len))
+  if (!nyr_obj_elf64_write_sym(&file, 0, 0, 0, 0, 0) ||
+      !nyr_obj_elf64_write_sym(&file, sym_name_off, 0x12, 1, 0, ctx.code.len))
     goto done;
   for (size_t i = 0; i < reloc_symbol_count; ++i) {
-    if (!ny_elf64_write_sym(&file, reloc_name_offs[i], 0x12, 0, 0, 0))
+    if (!nyr_obj_elf64_write_sym(&file, reloc_name_offs[i], 0x12, 0, 0, 0))
       goto done;
   }
   size_t symtab_size = file.len - symtab_off;
@@ -3250,8 +3504,8 @@ bool nyr_native_emit_elf32_i386_object_from_nirs(
     if (def_i >= 0) {
       sym_index = (uint32_t)(1 + def_i);
     } else {
-      int ext_i = nyr_i386_obj_symbol_index(reloc_symbols, reloc_symbol_count,
-                                            relocs[i].symbol);
+      int ext_i = nyr_x86_obj_symbol_index(reloc_symbols, reloc_symbol_count,
+                                           relocs[i].symbol);
       if (ext_i < 0)
         goto done;
       sym_index = (uint32_t)(1 + def_count + (size_t)ext_i);

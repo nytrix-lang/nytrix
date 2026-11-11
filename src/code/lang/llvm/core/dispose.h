@@ -1,3 +1,4 @@
+/* Code-generator cleanup helpers for owned names and bindings. */
 static void codegen_free_owned_binding_name(binding *b) {
   if (!b || !b->owned || !b->name)
     return;

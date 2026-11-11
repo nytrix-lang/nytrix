@@ -1,3 +1,4 @@
+/* Ny source lexer state, tokenization, and source-location interfaces. */
 #ifndef NY_LEXER_H
 #define NY_LEXER_H
 

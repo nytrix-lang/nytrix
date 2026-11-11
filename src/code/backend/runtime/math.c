@@ -299,13 +299,13 @@ static inline bool math_stats_enabled(void) {
   return g_math_stats_enabled != 0;
 }
 
-#define MATH_STAT_INC(field)                                                   \
-  do {                                                                         \
-    if (__builtin_expect(g_math_stats_enabled == 1, 0))                        \
-      g_math_stats.field++;                                                    \
-    else if (__builtin_expect(g_math_stats_enabled < 0, 0) &&                  \
-             math_stats_enabled())                                             \
-      g_math_stats.field++;                                                    \
+#define MATH_STAT_INC(field)                                  \
+  do {                                                        \
+    if (__builtin_expect(g_math_stats_enabled == 1, 0))       \
+      g_math_stats.field++;                                   \
+    else if (__builtin_expect(g_math_stats_enabled < 0, 0) && \
+             math_stats_enabled())                            \
+      g_math_stats.field++;                                   \
   } while (0)
 
 __attribute__((destructor)) static void rt_math_stats_dump(void) {
@@ -664,12 +664,12 @@ int64_t rt_complex_eq(int64_t a, int64_t b) {
              : NY_IMM_FALSE;
 }
 
-#define FLT_OP(name, op)                                                       \
-  int64_t rt_flt_##name(int64_t a, int64_t b) {                                \
-    double da = rt_flt_unbox_double(a);                                        \
-    double db = rt_flt_unbox_double(b);                                        \
-    double r = da op db;                                                       \
-    return rt_flt_box_double(r);                                               \
+#define FLT_OP(name, op)                        \
+  int64_t rt_flt_##name(int64_t a, int64_t b) { \
+    double da = rt_flt_unbox_double(a);         \
+    double db = rt_flt_unbox_double(b);         \
+    double r = da op db;                        \
+    return rt_flt_box_double(r);                \
   }
 
 FLT_OP(add, +)
@@ -684,11 +684,11 @@ int64_t rt_flt_div(int64_t a, int64_t b) {
   return rt_flt_box_double(da / db);
 }
 
-#define FLT_CMP(name, op)                                                      \
-  int64_t rt_flt_##name(int64_t a, int64_t b) {                                \
-    double da = rt_flt_unbox_double(a);                                        \
-    double db = rt_flt_unbox_double(b);                                        \
-    return (da op db) ? NY_IMM_TRUE : NY_IMM_FALSE;                            \
+#define FLT_CMP(name, op)                           \
+  int64_t rt_flt_##name(int64_t a, int64_t b) {     \
+    double da = rt_flt_unbox_double(a);             \
+    double db = rt_flt_unbox_double(b);             \
+    return (da op db) ? NY_IMM_TRUE : NY_IMM_FALSE; \
   }
 
 FLT_CMP(lt, <)
@@ -783,8 +783,10 @@ int64_t rt_flt_round(int64_t v) {
   return rt_tag_v((int64_t)llround(rt_flt_unbox_double(v)));
 }
 int64_t rt_flt_fmod(int64_t a, int64_t b) {
-  /* Callers read this `f64` builtin from xmm0, and GCC inlines fmod through
-   * x87 without setting it, so go through the out-of-line helper. */
+  /*
+   * Callers read this `f64` builtin from xmm0, and GCC inlines fmod through
+   * x87 without setting it, so go through the out-of-line helper.
+   */
   return rt_flt_box_double(
       rt_fmod_f64(rt_flt_unbox_double(a), rt_flt_unbox_double(b)));
 }

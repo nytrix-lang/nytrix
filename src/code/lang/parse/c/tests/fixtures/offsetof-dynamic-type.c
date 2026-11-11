@@ -1,3 +1,6 @@
+/*
+ * C parser fixture for offsetof applied to a dynamically sized member type.
+ */
 struct dirent {
   unsigned long ino;
   char d_name[256];

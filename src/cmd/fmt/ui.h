@@ -1,3 +1,4 @@
+/* Shared formatter and CLI output, help, color, and string-vector helpers. */
 #pragma once
 
 #include "base/help.h"

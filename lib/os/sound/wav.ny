@@ -16,7 +16,6 @@ def _TAG_ALAW = 6
 def _TAG_MULAW = 7
 def _TAG_IMA = 0x11
 def _TAG_EXTENSIBLE = 0xfffe
-
 def _FMT_S16 = 1
 def _FMT_U8 = 2
 def _FMT_S24 = 3
@@ -42,9 +41,9 @@ fn encode_bytes(any src, bool rf64=false) bytes {
    def tag = int(meta.get("format_tag", 1))
    def width = (bits + 7) / 8
    if !ptr || data_len <= 0 || channels <= 0 || channels > 65535 || rate <= 0 ||
-      (tag != 1 && !(tag == 3 && bits == 32)) ||
-      (tag == 1 && bits != 8 && bits != 16 && bits != 24 && bits != 32) ||
-      data_len % (channels * width) != 0 { return bytes(0) }
+   (tag != 1 && !(tag == 3 && bits == 32)) ||
+   (tag == 1 && bits != 8 && bits != 16 && bits != 24 && bits != 32) ||
+   data_len % (channels * width) != 0 { return bytes(0) }
    if !rf64 && data_len > 4294967259 { return bytes(0) }
    def base = rf64 ? 80 : 44
    def out = bytes(base + data_len)
@@ -88,12 +87,11 @@ fn encode_bytes(any src, bool rf64=false) bytes {
 }
 
 def _MS_ADAPT = [230, 230, 230, 230, 307, 409, 512, 614,
-                 768, 614, 512, 409, 307, 230, 230, 230]
+   768, 614, 512, 409, 307, 230, 230, 230]
 def _MS_COEF1 = [256, 512, 0, 192, 240, 460, 392]
 def _MS_COEF2 = [0, -256, 0, 64, 0, -208, -232]
-
 def _IMA_INDEX = [-1, -1, -1, -1, 2, 4, 6, 8,
-                  -1, -1, -1, -1, 2, 4, 6, 8]
+   -1, -1, -1, -1, 2, 4, 6, 8]
 def _IMA_STEP = [
    7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 19, 21, 23, 25, 28, 31, 34, 37, 41, 45,
    50, 55, 60, 66, 73, 80, 88, 97, 107, 118, 130, 143, 157, 173, 190, 209, 230,
@@ -147,22 +145,22 @@ fn _tag_at(any d, int at, str text) bool {
 fn _container(any d) dict {
    if d.len < 12 { return dict() }
    if _tag_at(d, 0, "riff") && d.len >= 40 && load8(d, 4) == 0x2e &&
-      load8(d, 5) == 0x91 {
+   load8(d, 5) == 0x91 {
       return {"kind": "w64", "big": 0, "start": 40, "head": 24,
-              "wide": 1, "align": 8}
+         "wide": 1, "align": 8}
    }
    if !_tag_at(d, 8, "WAVE") { return dict() }
    if _tag_at(d, 0, "RIFF") {
       return {"kind": "riff", "big": 0, "start": 12, "head": 8,
-              "wide": 0, "align": 2}
+         "wide": 0, "align": 2}
    }
    if _tag_at(d, 0, "RIFX") {
       return {"kind": "rifx", "big": 1, "start": 12, "head": 8,
-              "wide": 0, "align": 2}
+         "wide": 0, "align": 2}
    }
    if _tag_at(d, 0, "RF64") {
       return {"kind": "rf64", "big": 0, "start": 12, "head": 8,
-              "wide": 0, "align": 2}
+         "wide": 0, "align": 2}
    }
    dict()
 }
@@ -194,7 +192,7 @@ fn _parse_fmt(any d, int at, int size, bool big) dict {
 
 fn _source(any out, int len, dict fmt, int bits, int sample_fmt, int tag) any {
    make_memory_source(out, len, fmt.get("channels", 0), fmt.get("rate", 0), bits, sample_fmt,
-                      tag)
+      tag)
 }
 
 fn _decode_pcm(any d, int at, int size, dict fmt, bool big) any {

@@ -1,3 +1,6 @@
+/*
+ * Inline assembly fixture for 32-bit addition with carry propagation.
+ */
 #include <stdint.h>
 
 static uint32_t add_carry32(uint32_t sum) {

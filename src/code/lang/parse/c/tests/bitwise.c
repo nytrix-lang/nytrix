@@ -1,3 +1,6 @@
+/*
+ * Parser/backend fixture for integer bitwise operators.
+ */
 long c_bitwise(long left, long right) {
   return (~left & right) | (left ^ right);
 }

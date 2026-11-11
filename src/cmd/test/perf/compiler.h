@@ -1,3 +1,4 @@
+/* Compiler snapshot and process-control helpers for benchmark runs. */
 #ifndef NYT_PERF_COMPILER_H
 #define NYT_PERF_COMPILER_H
 

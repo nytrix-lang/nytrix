@@ -1,3 +1,6 @@
+/*
+ * Selftest runner for sinking safe additions across machine CFG edges.
+ */
 #include "code/backend/ir/machine.h"
 #include <stdio.h>
 
@@ -6,6 +9,7 @@ int main(void) {
     fputs("[machine-edge-add-sink] dependency/barrier checks failed\n", stderr);
     return 1;
   }
-  puts("[machine-edge-add-sink] edge addition sinks; input writes, extra uses, effects and ordinary copies retained");
+  puts("[machine-edge-add-sink] edge addition sinks; input writes, extra uses, "
+       "effects and ordinary copies retained");
   return 0;
 }

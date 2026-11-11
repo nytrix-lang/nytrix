@@ -1,3 +1,6 @@
+/*
+ * Fixture: test repeat-store inline assembly across supported operand widths.
+ */
 static void fill_bytes(unsigned char *dst, unsigned long count,
                        unsigned char value) {
   __asm__ volatile("rep stosb"

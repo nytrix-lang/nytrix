@@ -1,3 +1,6 @@
+/*
+ * C fixture defining aggregate values for Windows x64 ABI tests.
+ */
 struct win_point {
   long x;
   long y;
@@ -21,8 +24,7 @@ struct win_point c_win_point_add(struct win_point left,
   return result;
 }
 
-struct win_word c_win_word_add(struct win_word left,
-                               struct win_word right) {
+struct win_word c_win_word_add(struct win_word left, struct win_word right) {
   struct win_word result;
   result.value = left.value + right.value;
   return result;
@@ -36,9 +38,7 @@ struct win_big c_win_big_make(long seed) {
   return result;
 }
 
-long c_win_big_sum(struct win_big value) {
-  return value.a + value.b + value.c;
-}
+long c_win_big_sum(struct win_big value) { return value.a + value.b + value.c; }
 
 long c_win_big_sum_after4(long a, long b, long c, long d,
                           struct win_big value) {

@@ -1,7 +1,7 @@
 ;; Keywords: sound res os
 ;; Unified resource loader for sound and image files.
-;; Uses libsndfile for sound (optional, bound via dlopen).
-;; Pure-Ny WAV/AIFF/AU fallback when libsndfile is unavailable.
+;; Pure-Ny WAV, AIFF/AIFC, AU, FLAC/Ogg FLAC, and MPEG Layers I-III.
+;; Other sound formats may use optional libsndfile, bound via dlopen.
 ;; References:
 ;; - core.os.sound
 ;; - core.os
@@ -20,10 +20,12 @@ use core.os.sound.source
 use core.os.sound.wav as wav
 use core.os.sound.au as au
 use core.os.sound.aiff as aiff
+use core.os.sound.flac as flac
+use core.os.sound.mpeg as mpeg
 use core.os.ffi as ffi
 
 ;; libsndfile is optional: bound through dlopen so hosts without it can still
-;; decode WAV, AIFF, and AU files via the pure-Ny fallback.
+;; decode WAV, AIFF, AU, FLAC, and MPEG files via the pure-Ny decoders.
 mut _snd_checked = false
 mut _snd_ok = false
 mut _snd_handle = 0
@@ -192,7 +194,7 @@ fn _decode_sf(str filepath) any {
          free(out_ptr)
          return 0
       }
-      make_memory_source(out_ptr, got * 2, channels, rate, 16, SAMPLE_FMT_S16, 1)
+      return make_memory_source(out_ptr, got * 2, channels, rate, 16, SAMPLE_FMT_S16, 1)
    }
    return 0
 }
@@ -208,7 +210,7 @@ fn _decode_au(str filepath) any {
 }
 
 fn _sndfile_required(str filepath) any {
-   print("sound res: " + filepath + " requires libsndfile; pure-Ny covers WAV, AIFF/AIFC, and AU supported encodings")
+   print("sound res: " + filepath + " requires libsndfile; pure-Ny covers WAV, AIFF/AIFC, AU, FLAC/Ogg FLAC, and MPEG")
    0
 }
 
@@ -228,6 +230,17 @@ fn decode(str filepath) any {
    } else if ext == ".aiff" || ext == ".aif" || ext == ".aifc" {
       def res = _aiff_decode(full)
       if res != 0 { return res }
+   } else if ext == ".mp1" || ext == ".mp2" || ext == ".mp3" {
+      def raw = file_read(full)
+      if is_err(raw) { return 0 }
+      return mpeg.decode_bytes(unwrap(raw))
+   } else if ext == ".flac" || ext == ".oga" || ext == ".ogg" {
+      def raw = file_read(full)
+      if !is_err(raw) {
+         def res = flac.decode_bytes(unwrap(raw))
+         if res != 0 { return res }
+      }
+      if ext == ".flac" || ext == ".oga" { return 0 }
    }
    if _snd_available() && !_snd_disable() {
       def res = _decode_sf(full)
@@ -283,7 +296,7 @@ fn load(any filepath) any {
    if !fs.is_file(full) { return 0 }
    def ext = str(str.lower(path.extname(full)))
    mut any asset = 0
-   if ext == ".wav" || ext == ".au" || ext == ".snd" || ext == ".aiff" || ext == ".aif" || ext == ".aifc" || ext == ".ogg" || ext == ".flac" || ext == ".mp3" || ext == ".opus" {
+   if ext == ".wav" || ext == ".au" || ext == ".snd" || ext == ".aiff" || ext == ".aif" || ext == ".aifc" || ext == ".ogg" || ext == ".oga" || ext == ".flac" || ext == ".mp1" || ext == ".mp2" || ext == ".mp3" || ext == ".opus" {
       asset = decode(full)
    } else {
       def res = file_read(full)

@@ -1,3 +1,6 @@
+/*
+ * Fixture: capture the previous bit state from an atomic BTS instruction.
+ */
 static unsigned int bits;
 
 static unsigned char set_bit_one(void) {

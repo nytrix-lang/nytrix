@@ -1,3 +1,4 @@
+/* Standard-module source generation, identity lookup, and loader metadata. */
 #pragma once
 
 #include "base/common.h"
@@ -12,10 +13,11 @@ enum {
 };
 #define NY_MODULE_ID_UNKNOWN ((ny_module_id_t)0)
 
-char *ny_build_std_source(const char **modules, size_t module_count, std_mode_t mode, int verbose,
-                          const char *entry_path);
-char *ny_build_std_source_ex(const char **modules, size_t module_count, std_mode_t mode,
-                             int verbose, const char *entry_path, bool append_module_uses);
+char *ny_build_std_source(const char **modules, size_t module_count,
+                          std_mode_t mode, int verbose, const char *entry_path);
+char *ny_build_std_source_ex(const char **modules, size_t module_count,
+                             std_mode_t mode, int verbose,
+                             const char *entry_path, bool append_module_uses);
 char *ny_std_generate_c_symbols_header(std_mode_t mode);
 
 size_t ny_std_module_count(void);

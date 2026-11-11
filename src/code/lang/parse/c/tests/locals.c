@@ -1,3 +1,6 @@
+/*
+ * Parser fixture: evaluate arithmetic across local variables and assignments.
+ */
 long c_locals(long left, long right) {
   long sum = left + right;
   long doubled = sum * 2;

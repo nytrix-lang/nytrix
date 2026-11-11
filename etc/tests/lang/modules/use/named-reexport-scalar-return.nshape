@@ -15,6 +15,27 @@ assert(re_floor(1.8) == 1, "named floor reexport keeps raw integer result")
 assert(re_floor(-1.2) == -2, "named floor reexport preserves negative result")
 assert(re_ceil(2.1) == 3, "named ceil reexport keeps raw integer result")
 assert(to_str("010203".unhex.long) == "66051", "hex digit ternary keeps raw integers")
+
+module ConstantProvider(ANSWER, NEGATIVE) {
+  def int ANSWER = 17
+  def int NEGATIVE = -23
+}
+module ConstantBridge(RENAMED, NEGATIVE) {
+  fn before_import() int { 1000 }
+  use ConstantProvider (ANSWER as RENAMED, NEGATIVE)
+  fn after_import() int { 2000 }
+}
+module ConstantConsumer(FINAL, NEGATIVE) {
+  use ConstantBridge (RENAMED as FINAL, NEGATIVE)
+}
+module OtherProvider(ANSWER) {
+  def int ANSWER = 91
+}
+use ConstantConsumer (FINAL, NEGATIVE)
+use OtherProvider (ANSWER as OTHER)
+assert(int(FINAL) == 17, "chained constant aliases retain their provider")
+assert(int(NEGATIVE) == -23, "negative constant survives the re-export chain")
+assert(int(OTHER) == 91, "same constant spelling remains module scoped")
 0
 NY
 }

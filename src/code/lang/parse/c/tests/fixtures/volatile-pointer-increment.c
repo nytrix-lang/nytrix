@@ -1,3 +1,6 @@
+/*
+ * Fixture: increment a pointer to a volatile aggregate member.
+ */
 struct nyc_volatile_counter {
   unsigned int value;
 };

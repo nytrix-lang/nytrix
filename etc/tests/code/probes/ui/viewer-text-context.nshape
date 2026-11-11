@@ -1,0 +1,35 @@
+shape viewer-text-context {
+  family "probe-suite"
+  generator "regression"
+  template ny-test-case
+  expect compile_and_run
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  timeout 180
+  expect_stdout "VIEWER-TEXT-CONTEXT-OK"
+  source ny <<'NY'
+use core
+use core.os.ui.render.viewer as viewer
+use core.os.ui.render as render
+use core.os.ui.render.text as text
+use core.os.ui.render.mesh as mesh
+assert(text.FONT_FILTER_DEFAULT == render.FONT_FILTER_DEFAULT, "text API compatibility")
+def destroy_mesh = mesh.mesh_destroy
+assert(destroy_mesh != nil, "mesh API export")
+def first = viewer.new_text_context()
+def second = viewer.new_text_context()
+viewer.queue_text("alpha", 1.0, 2.0, 0xffffffff, first)
+viewer.queue_text("beta", 3.0, 4.0, 0xffffffff, second)
+assert(viewer.text_char_count(first) == 5, "first characters")
+assert(viewer.text_char_count(second) == 4, "second characters")
+viewer.begin_text(first)
+assert(viewer.text_run_count(first) == 0, "first reset")
+assert(viewer.text_run_count(second) == 1, "second retained")
+viewer.set_font(12, first)
+viewer.set_font(23, second)
+assert(int(first.get("font")) == 12 && int(second.get("font")) == 23, "font isolation")
+viewer.queue_text("legacy", 0.0, 0.0, 0xffffffff)
+assert(viewer.text_run_count() == 1, "legacy context")
+assert(viewer.text_run_count(second) == 1, "legacy isolation")
+print("VIEWER-TEXT-CONTEXT-OK")
+NY
+}

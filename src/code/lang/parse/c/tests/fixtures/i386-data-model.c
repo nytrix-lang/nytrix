@@ -1,3 +1,6 @@
+/*
+ * Fixture: assert the i386 widths of pointers, integers, and size_t.
+ */
 _Static_assert(sizeof(long) == 4, "i386 long is 32 bits");
 _Static_assert(sizeof(long long) == 8, "i386 long long is 64 bits");
 _Static_assert(sizeof(void *) == 4, "i386 pointers are 32 bits");

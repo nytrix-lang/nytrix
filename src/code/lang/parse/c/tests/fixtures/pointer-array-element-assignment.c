@@ -1,3 +1,6 @@
+/*
+ * Fixture: copy pointer values into selected elements of a pointer array.
+ */
 static int first;
 static int second;
 

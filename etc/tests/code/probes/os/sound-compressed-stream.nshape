@@ -1,0 +1,116 @@
+shape compressed_sound_stream_range_reference {
+  family "runtime/system/sound"
+  generator "embedded"
+  features ["sound", "mp3", "flac", "stream", "range", "reference"]
+  template ny-test-case
+  flags_matrix "-O0; -O3; --native-only -O0; --native-only -O3"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.math.bin as bin
+use core.os as os
+use core.os.sound.res as res
+use core.os.sound.flac as flac
+use core.os.sound.source as sound_source
+use core.os.sound.stream as stream
+
+def encoded_b64 = "SUQzBAAAAAAAIlRTU0UAAAAOAAADTGF2ZjYzLjEuMTAyAAAAAAAAAAAAAAD/4zjAAAAAAAAAAAAASW5mbwAAAA8AAAAEAAAEOABmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmaZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZmZzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzMzP////////////////////////////////8AAAAATGF2YzYzLjEuAAAAAAAAAAAAAAAAJAMAAAAAAAAABDjsv6EDAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD/4zjEACnp2nQBQ8ABAwMDAwMDA3dEAAAAABCI7hwMDFu7oiBABEQt3d3c/iIiFXw5vPPuFJGI3T514bYel+CQmlZ6sdIGgCVkgp6evTxiWWMMMMKSkp6e3nnnnXp6SkwwwwwwsU9vPPPPPPOwAAAAAB4eHh4YAAAAAB4eHh4YAAAAAB4eHh4YAAAAAB4eHh4YAAAAAB4eHh4YAAAAAB4eHh4YAAAAIDw8PD0gAAAHpw8P/+ACDZgsKABQL46vg2qBg4N5gbKr/AzoLEQMDA29WvwFwBAYBwH/4zjEIzSzMlgBkrAAAGA8CwBgCwMCAEwMDQJ1spTo/gYAQMAYIwUAYOQnAYGAhgYYBWgZDg1gbZBdgYmgzrRMhXAMAIDwMNCVgNSATwDgBcgAN1wMIzcgMpwXwBgRAYRAigYAQNAYHwNAYGQMALAFAwEAJAwDAJBvMDZQNlDh/4sP/DoQshCyETcGKgxUMaIKiCo5QoIWV///+Q0XKMyTQ5xBiiQEnTIixsdLv////nlF5OippilMkUSZMkoNiUSCsEpIWCwWzMyvX3WNLjpmZmTBwzMwagD/4zjEGzOTwsJZjJgCo5A2mZlWYCQoEI5MRB/ELiC4yYasDVgsBkXiBGJFRyfhIxE3TTcuDkA04HzEESSJoxJ0Y4hpBW/5ECLk+blwuIJpuMqZF4mkUTFJJL/8XILkIgOeOeT45hBCoRci5XMS6RUyLxNGJdJkyLxe//yKEUNCLkXNyKE4aF8vm5cLiKJdSSLyKJikkZIo///mhfL5uXC4aF8vm5cLiBfL6ZcLhMmReJoxLpMmReLxiXS6ZF4vGJdqtVChZySJFGSJE1sUKGUUKFnFkRNFZEj/4zjEFyp5/hQByWABkWqkIpaVQilDiwqFTKwqFQqaVCoIrmSSIIknqYEgDIhCA8bHJNiJQJCSYu4ueSgiBFUOINRFPYDoSidEdGRkuuycmPsrVrvNLl3WXLrTVat+q12s2ae4KCugrYKbCGQgroK2CmwjoQ3oL0FdCOhDfBegrsjshvgvgv5HZHeC+C/kdkd4L4L+R2R3gvgv5HcO8F+LTEFNRTQuMFVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVU="
+def octets = bin.base64_to_bytes(encoded_b64)
+def encoded = bytes(octets.len)
+mut i = 0
+while i < octets.len {
+   store8(encoded, int(octets[i]), i)
+   i += 1
+}
+
+def path = os.temp_dir() + "/ny-mp3-stream-" + to_str(os.pid()) + ".mp3"
+unwrap(os.file_write(path, encoded))
+def source = res.load(path)
+assert(is_list(source), "MP3 resource decoding does not require libsndfile")
+   def meta = source.get(1)
+   assert(sound_source.source_channels(source) == 1 &&
+          sound_source.source_rate(source) == 8000 &&
+          sound_source.source_length(source) == 960,
+          "MP3 metadata and Xing frame count match the reference")
+   assert(load16(meta.get("ptr"), 160) == 64800,
+          "decoded sample 80 matches the ffmpeg PCM reference")
+
+   def st = stream.open(path)
+   assert(is_dict(st) && stream.length(st) == 960,
+          "MP3 stream exposes the reference frame count")
+   def part = stream.read_range(st, 64, 16)
+   assert(is_list(part), "MP3 stream reads a nonzero frame range")
+   def part_meta = part.get(1)
+   assert(part_meta.get("total_frames") == 16 &&
+          memcmp(part_meta.get("ptr"), meta.get("ptr") + 128, 32) == 0,
+          "MP3 range samples equal the decoded reference slice")
+   free(part_meta.get("ptr"))
+   def tail = stream.read_range(st, 956, 10)
+   assert(is_list(tail) && tail.get(1).get("total_frames") == 4 &&
+          memcmp(tail.get(1).get("ptr"), meta.get("ptr") + 1912, 8) == 0,
+          "MP3 range clips at the final frame")
+   free(tail.get(1).get("ptr"))
+   def out = malloc(8)
+   def seek_ok = stream.seek(st, 80)
+   def mid = stream.read_range(st, 80, 4)
+   assert(is_list(mid) && memcmp(mid.get(1).get("ptr"),
+          meta.get("ptr") + 160, 8) == 0,
+          "MP3 seek position identifies the reference range")
+   free(mid.get(1).get("ptr"))
+   def read_count = stream.read(st, out, 4)
+   assert(seek_ok && read_count == 4 && stream.tell(st) == 84 &&
+          memcmp(out, meta.get("ptr") + 160, 8) == 0,
+          "MP3 seek and cursor reads match reference samples")
+   free(out)
+   assert(stream.close(st), "MP3 stream closes")
+   free(meta.get("ptr"))
+unwrap(os.file_remove(path))
+
+def flac_b64 = "ZkxhQwAAACIQABAAAAJaAAJaAfQA8AAAA8CPlARHhytnEvBTImeuFDsBhAAAKCAAAAByZWZlcmVuY2UgbGliRkxBQyAxLjUuMCAyMDI1MDIxMQAAAAD/+HQIAAO/nkgAAAtID/8LZAAntKBmSvlZS/MQBkORbW7ziOlb7opioLTdMMV/t/CHIhr7xhSJalNGKVD0p5hSISTvKM6Ek7RTFU1aeY5kpftMKVPv+HEIx604gxl+9OKIZPtTDiGQl/wwgifamGGKj2phRTIStcOc6PamFFMpK1wohnJJ2FEO5a0wgxkW9sKKVyWp0hjuStsKc7Na2WOUjSUxxjM9a7Y4itW+VEMR62ypzkJWu0OIy2vjnFZbW3xikW9NoYQhfrSogjrWvUEORrV3hTslb5wgjpeucIIRbU7hBHWtfoYUi0vvHGdK2/xCmS9KeYQrUt3HFdC37TiFQ9PwQQiVr+iCFX7/xhnQtv0U5U+9OOIVC1ppxSoS36c5kNWvFEMn3/TCmR7V4xzqaldMKZHtXDiFZ5PwoxGJauCGK5bV0xzq9q6Y52LX+uIVntbSiHYlqbY5SPL2UFOz1thTnZ71ygh2e9NqYVy0r1RTM9bZQ4rPW21EMR62yhzketescR2rfGFM6SUzjis1L7QQ5XvTeFEdrU/xDkW1foIcrVrSggjtS38MUqXr1DCFWtfoYUi1pThTFWtv8whErJ3lFKtL9pzlQT68IIVKW/RDlQ1aaIIRDUpgpypWluOIVHk7TCkY9K6IY6UvTynESlqaUUqPJ2XOdC1ppRBE+1NIMVXk7CCHQlbcU4iNemFFMpLUyg5VJWuyFO5LVwgpme9cqKZWvXCHEZ62wpxFe1OqKUj3ptjnd621zjI1bbQU6re2MKIzVt1jCs1b5QQ5Gv9KCmdbXyr4/Q=="
+def flac_octets = bin.base64_to_bytes(flac_b64)
+def flac_bytes = bytes(flac_octets.len)
+i = 0
+while i < flac_octets.len {
+   store8(flac_bytes, int(flac_octets[i]), i)
+   i += 1
+}
+def flac_path = os.temp_dir() + "/ny-flac-stream-" + to_str(os.pid()) + ".flac"
+unwrap(os.file_write(flac_path, flac_bytes))
+def flac_source = res.load(flac_path)
+assert(is_list(flac_source), "FLAC resource decoding does not require libsndfile")
+   def flac_meta = flac_source.get(1)
+   assert(sound_source.source_channels(flac_source) == 1 &&
+          sound_source.source_rate(flac_source) == 8000 &&
+          sound_source.source_length(flac_source) == 960,
+          "FLAC metadata matches the reference")
+   assert(load16(flac_meta.get("ptr"), 160) == 64768,
+          "FLAC sample 80 matches the reference PCM")
+
+   def flac_st = stream.open(flac_path)
+   assert(is_dict(flac_st) && stream.length(flac_st) == 960,
+          "FLAC stream exposes the reference frame count")
+   def flac_part = stream.read_range(flac_st, 64, 16)
+   assert(is_list(flac_part), "FLAC stream reads a nonzero frame range")
+   def flac_part_meta = flac_part.get(1)
+   assert(flac_part_meta.get("total_frames") == 16 &&
+          memcmp(flac_part_meta.get("ptr"), flac_meta.get("ptr") + 128, 32) == 0,
+          "FLAC range samples equal the decoded reference slice")
+   free(flac_part_meta.get("ptr"))
+   def flac_tail = stream.read_range(flac_st, 956, 10)
+   assert(is_list(flac_tail) && flac_tail.get(1).get("total_frames") == 4 &&
+          memcmp(flac_tail.get(1).get("ptr"), flac_meta.get("ptr") + 1912, 8) == 0,
+          "FLAC range clips at the final frame")
+   free(flac_tail.get(1).get("ptr"))
+   def flac_out = malloc(8)
+   assert(stream.seek(flac_st, 80) && stream.read(flac_st, flac_out, 4) == 4 &&
+          stream.tell(flac_st) == 84 &&
+          memcmp(flac_out, flac_meta.get("ptr") + 160, 8) == 0,
+          "FLAC seek and cursor reads match reference samples")
+   free(flac_out)
+   assert(stream.close(flac_st), "FLAC stream closes")
+   free(flac_meta.get("ptr"))
+store8(flac_bytes, load8(flac_bytes, flac_bytes.len - 1) ^ 1, flac_bytes.len - 1)
+assert(flac.decode_bytes(flac_bytes) == 0, "native FLAC frame CRC corruption rejects")
+unwrap(os.file_remove(flac_path))
+NY
+}

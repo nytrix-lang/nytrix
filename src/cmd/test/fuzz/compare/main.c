@@ -1,4 +1,8 @@
+/*
+ * Fuzz comparison translation unit that assembles shared command modules.
+ */
 #include "../core.h"
+#include "../shared.h"
 #include "api.h"
 
 /*

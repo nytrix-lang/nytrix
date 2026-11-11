@@ -1,3 +1,6 @@
+/*
+ * C parser fixture for taking an address from an array of function pointers.
+ */
 struct node {
   int value;
 };

@@ -1,3 +1,6 @@
+/*
+ * C parser fixture for array typedef decay in aggregate and pointer contexts.
+ */
 struct object {
   int value;
 };

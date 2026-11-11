@@ -1,3 +1,6 @@
+/*
+ * Fixture helper: load a character through a memory-constrained operand.
+ */
 static unsigned char bits;
 
 int nyc_inline_asm_memory_input(const char *value) {

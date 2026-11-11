@@ -1,3 +1,4 @@
+/* Internal NYIR API errors, target capabilities, and triple resolution. */
 #ifndef NY_NATIVE_IR_API_INTERNAL_H
 #define NY_NATIVE_IR_API_INTERNAL_H
 

@@ -1,3 +1,6 @@
+/*
+ * Host fixture: declare fixed-register globals and their cross-file helper.
+ */
 extern unsigned long nyc_fixed_register_a;
 extern unsigned long nyc_fixed_register_c;
 extern unsigned long nyc_fixed_register_d;

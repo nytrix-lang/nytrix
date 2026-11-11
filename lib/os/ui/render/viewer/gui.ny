@@ -740,6 +740,7 @@ fn _text_fit(int font_id, any txt, f64 max_w=0.0) str {
    if use_cache && _text_fit_cache.contains(cache_key) { return to_str(_text_fit_cache.get(cache_key, s)) }
    if _text_fit_width(fid, s) <= float(max_w) { return _text_fit_cache_put(cache_key, s) }
    def ell = "..."
+   if _text_fit_width(fid, ell) > float(max_w) { return "" }
    def total_n = n
    mut lo = 0
    mut hi = total_n
@@ -916,23 +917,24 @@ fn _draw_text_ui_ex_clipped(int font_id,
       def clip_y = float(clip_rect.get(1, 0.0))
       def clip_w = max(0.0, float(clip_rect.get(2, 0.0)))
       def clip_h = max(0.0, float(clip_rect.get(3, 0.0)))
-      def fit_w = (limit_w > 0.0 && clip_w > 0.0) ? min(limit_w, clip_w) : max(limit_w, clip_w)
+      def right = clip_x + clip_w
+      def bottom = clip_y + clip_h
+      def available_w = max(0.0, right - float(x))
+      if clip_w <= 0.0 || clip_h <= 0.0 || available_w <= 0.0 { return 0 }
+      def fit_w = limit_w > 0.0 ? min(limit_w, available_w) : available_w
       def fid = (font_id > 0) ? font_id : _font_body()
       def font_h = _font_h_for(fid)
-      def y_inside = float(y) >= clip_y - 0.5 && (float(y) + font_h) <= (clip_y + clip_h + 0.5)
-      if fit_w > 0.0 && float(x) >= clip_x - 0.5 && y_inside {
+      if float(y) >= bottom || float(y) + font_h <= clip_y { return 0 }
+      def y_inside = float(y) >= clip_y && float(y) + font_h <= bottom
+      if float(x) >= clip_x && y_inside && float(shadow_alpha) <= 0.001 {
          _draw_text_ui_ex(fid, s, x, y, color, shadow_alpha, fit_w)
          return 0
       }
-      def likely_fits = float(x) >= clip_x - 0.5 && _text_likely_fits_ascii(fid, s, fit_w + _sx(2.0))
-      def needs_hard_clip = fit_w <= 0.0 || (!likely_fits && (float(x) < clip_x - 0.5 || _text_fit_width(fid, s) > fit_w + _sx(2.0)))
-      if needs_hard_clip {
-         push_clip_rect(clip_rect)
-         _draw_text_ui_now(fid, s, x, y, color, shadow_alpha, fit_w)
-         pop_clip_rect()
-      } else {
-         _draw_text_ui_ex(fid, s, x, y, color, shadow_alpha, fit_w)
-      }
+      ;; Partial rows and left-overhanging glyphs need a real scissor even
+      ;; when their text is short enough to fit horizontally.
+      push_clip_rect(clip_rect)
+      _draw_text_ui_now(fid, s, x, y, color, shadow_alpha, fit_w)
+      pop_clip_rect()
       return 0
    }
    _draw_text_ui_ex(font_id, txt, x, y, color, shadow_alpha, max_w)
@@ -4077,7 +4079,10 @@ fn begin_window(any id, any title, f64 x, f64 y, f64 w, f64 h, any opts=0) bool 
    st["body_h"] = body_h
    st["cursor_y"] = float(origin.get(1, sy + title_h + _pad()))
    if _focus_collect_active { st["focusables"] = [] st["focusable_map"] = dict(64) }
-   def needs_clip = !collapsed && (!scrollable || max_scroll > 0.5 || scroll_y > 0.0)
+   ;; A window body is always clipped. Clipping only when the content
+   ;; overflowed let an oversized widget (a wide button or a long row) paint
+   ;; outside its panel whenever the panel happened to fit its content.
+   def needs_clip = !collapsed
    st["clip_active"] = needs_clip
    _same_line_next = false
    _same_line_gap = _gap()

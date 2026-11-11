@@ -1,3 +1,6 @@
+/*
+ * Inline assembly fixture for 64-bit checksum addition with carry.
+ */
 #include <stdint.h>
 
 static uint64_t checksum_add(uint64_t sum, const uint64_t *source,

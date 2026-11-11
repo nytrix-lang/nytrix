@@ -1,3 +1,6 @@
+/*
+ * C parser fixture for trailing aggregate attributes and section placement.
+ */
 struct attributed_state {
   unsigned int generation;
   unsigned int flags;

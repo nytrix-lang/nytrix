@@ -1,3 +1,4 @@
+/* Remote standard-module cache-path resolution interface. */
 #pragma once
 
 /* Returns an owned cache path, or NULL when the download fails. */

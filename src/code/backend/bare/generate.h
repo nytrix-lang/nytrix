@@ -1,3 +1,4 @@
+/* Freestanding runtime payload and image generation command interface. */
 #ifndef NY_CODE_BACKEND_BARE_GENERATE_H
 #define NY_CODE_BACKEND_BARE_GENERATE_H
 

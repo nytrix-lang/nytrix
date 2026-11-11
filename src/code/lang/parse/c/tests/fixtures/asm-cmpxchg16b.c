@@ -1,3 +1,6 @@
+/*
+ * Inline assembly fixture for aligned 128-bit compare-and-exchange.
+ */
 struct __attribute__((aligned(16))) nyc_cmpxchg16b_pair {
   unsigned long low;
   unsigned long high;

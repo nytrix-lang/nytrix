@@ -1,3 +1,4 @@
+/* Debugger-facing declarations for code generation state. */
 #ifndef NY_DBG_H
 #define NY_DBG_H
 

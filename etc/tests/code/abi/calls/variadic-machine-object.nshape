@@ -1,0 +1,63 @@
+shape variadic_machine_object_encoding {
+  family "codegen/abi/calls"
+  generator "embedded"
+  features ["x86-64", "variadic", "machine-object", "abi"]
+  template ny-test-case
+  flags "--native-only --native-backend=x86_64"
+  timeout 60
+  expect compile_and_run
+  source ny <<'NY'
+use core.os (env, file_remove, file_write, pid, run_capture, temp_dir)
+
+mut nyc = env("NYTRIX_NYC")
+if !is_str(nyc) || nyc.len == 0 { nyc = "build/release/nyc" }
+def dir = temp_dir() + "/ny-va-machine-" + to_str(pid())
+def source = dir + ".c"
+def object = dir + ".o"
+def driver = dir + "-driver.c"
+def executable = dir + "-run"
+def c_source = "#include <stdarg.h>\n" +
+   "long sum_int(int count, ...) {\n" +
+   "  va_list ap; va_start(ap, count); long sum = 0;\n" +
+   "  for (int i = 0; i < count; ++i) sum += va_arg(ap, int);\n" +
+   "  va_end(ap); return sum;\n" +
+   "}\n" +
+   "double sum_double(int count, ...) {\n" +
+   "  va_list ap; va_start(ap, count); double sum = 0;\n" +
+   "  for (int i = 0; i < count; ++i) sum += va_arg(ap, double);\n" +
+   "  va_end(ap); return sum;\n" +
+   "}\n"
+def driver_source = "#include <stdio.h>\n" +
+   "long sum_int(int, ...); double sum_double(int, ...);\n" +
+   "int main(void) {\n" +
+   "  long i = sum_int(8, 1,2,3,4,5,6,7,8);\n" +
+   "  double d = sum_double(3, 1.25,2.5,3.75);\n" +
+   "  double f = sum_double(10, 1.,2.,3.,4.,5.,6.,7.,8.,9.,10.);\n" +
+   "  printf(\"%ld %.2f %.2f\\n\", i, d, f);\n" +
+   "  return i == 36 && d == 7.5 && f == 55. ? 0 : 1;\n" +
+   "}\n"
+assert(is_ok(file_write(source, c_source)), "write variadic C functions")
+assert(is_ok(file_write(driver, driver_source)), "write C caller")
+def compiled = run_capture(
+   ["env", "NYC_TRACE_MACHINE_FALLBACK=1", nyc, "-O3", "-c", source, "-o", object],
+   [], nil, false)
+assert(compiled.get("code", 127) == 0,
+   "NYC failed to compile variadic functions: " + compiled.get("stderr", ""))
+assert(!compiled.get("stderr", "").contains("object fallback"),
+   "SysV variadic functions fell back from the machine-object encoder: " +
+   compiled.get("stderr", ""))
+def linked = run_capture(["clang", driver, object, "-o", executable], [], nil, false)
+assert(linked.get("code", 127) == 0,
+   "link variadic object: " + linked.get("stderr", ""))
+def ran = run_capture([executable], [], nil, false)
+file_remove(source)
+file_remove(object)
+file_remove(driver)
+file_remove(executable)
+assert(ran.get("code", 127) == 0,
+   "GP and FP register/stack variadic paths returned wrong values: " +
+   ran.get("stdout", "") + ran.get("stderr", ""))
+assert(ran.get("stdout", "").contains("36 7.50 55.00"),
+   "variadic integer and floating-point results match their C caller")
+NY
+}

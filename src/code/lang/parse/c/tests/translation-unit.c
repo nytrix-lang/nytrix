@@ -1,3 +1,6 @@
+/*
+ * Translation-unit fixture: exercise standard headers and C library calls.
+ */
 #include <ctype.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -57,8 +60,8 @@ char *nyr_unit_array_decay_assign(struct nyr_unit_array_decay_holder *holder,
   return holder->entries->name;
 }
 static void nyr_unit_void_macro_sink(int *value, int delta) { *value += delta; }
-#define NYC_VOID_CALL_IF(condition, call)                                      \
-  if (condition)                                                               \
+#define NYC_VOID_CALL_IF(condition, call) \
+  if (condition)                          \
   (call)
 int nyr_unit_parenthesized_void_macro(void) {
   int value = 0;
@@ -357,16 +360,35 @@ static int nyr_unit_array_callback_identify(int value) { return value + 19; }
 int nyr_unit_global_aggregate_pointer_array_call(int value) {
   nyr_unit_array_callback_value.identify = nyr_unit_array_callback_identify;
   nyr_unit_array_callbacks[0] = &nyr_unit_array_callback_value;
-  if (nyr_unit_array_callbacks[0] &&
-      nyr_unit_array_callbacks[0]->identify)
+  if (nyr_unit_array_callbacks[0] && nyr_unit_array_callbacks[0]->identify)
     return nyr_unit_array_callbacks[0]->identify(value);
   return 0;
 }
 
 int nyr_unit_typeof_statement_lvalue_growth(int *value) {
-  typeof(({ *value; *value; *value; *value; *value; *value; *value; *value;
-            *value; *value; *value; *value; *value; *value; *value; *value;
-            *value; *value; *value; *value; 7; })) result = 7;
+  typeof(({
+    *value;
+    *value;
+    *value;
+    *value;
+    *value;
+    *value;
+    *value;
+    *value;
+    *value;
+    *value;
+    *value;
+    *value;
+    *value;
+    *value;
+    *value;
+    *value;
+    *value;
+    *value;
+    *value;
+    *value;
+    7;
+  })) result = 7;
   return result;
 }
 
@@ -784,7 +806,10 @@ struct nyr_unit_float_entry nyr_unit_float_entries[] = {
 
 const char nyr_unit_global_text[] = "abc";
 int nyr_unit_global_text_at_one(void) { return nyr_unit_global_text[1]; }
-struct nyr_unit_token { const char *text; unsigned int length; };
+struct nyr_unit_token {
+  const char *text;
+  unsigned int length;
+};
 int nyr_unit_aggregate_parameter(int seed, struct nyr_unit_token token) {
   return seed + (int)token.length + token.text[0];
 }
@@ -816,11 +841,11 @@ static const unsigned char nyr_unit_global_bytes[] = {0, 10, 255};
 int nyr_unit_global_bytes_at_two(void) { return nyr_unit_global_bytes[2]; }
 extern const char *const nyr_unit_extern_string_pointer_array[];
 struct nyr_unit_extern_pointer_bounds_item;
-extern const struct nyr_unit_extern_pointer_bounds_item *const
-    nyr_unit_extern_pointer_bounds_start[],
-    *const nyr_unit_extern_pointer_bounds_end[];
-static const struct nyr_unit_extern_pointer_bounds_item *
-    nyr_unit_empty_aggregate_pointer_array[2] = {};
+extern const struct nyr_unit_extern_pointer_bounds_item
+    *const nyr_unit_extern_pointer_bounds_start[],
+        *const nyr_unit_extern_pointer_bounds_end[];
+static const struct nyr_unit_extern_pointer_bounds_item
+    *nyr_unit_empty_aggregate_pointer_array[2] = {};
 static char nyr_unit_address_extent[16];
 unsigned long nyr_unit_address_extent_end =
     (unsigned long)&nyr_unit_address_extent + sizeof(nyr_unit_address_extent);

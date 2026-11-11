@@ -1,3 +1,6 @@
+/*
+ * Parser/backend fixture for a counted for-loop with accumulation.
+ */
 long c_for_sum(long count) {
   long sum = 0;
   for (long index = 0; index < count; index = index + 1)

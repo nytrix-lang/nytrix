@@ -1,3 +1,4 @@
+/* Hashing declarations for byte strings and compiler-side lookup tables. */
 #ifndef NY_HASH_H
 #define NY_HASH_H
 

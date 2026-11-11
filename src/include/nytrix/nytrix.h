@@ -1,6 +1,3 @@
-#ifndef NYTRIX_EMBED_H
-#define NYTRIX_EMBED_H
-
 /*
  * Embedding API for hosts
  *
@@ -15,6 +12,9 @@
  * compile_source stops after the type pipeline and returns the semantic
  * artifact. See their contracts below.
  */
+#ifndef NYTRIX_EMBED_H
+#define NYTRIX_EMBED_H
+
 #include <nyr/nyr.h>
 
 #include <stdbool.h>

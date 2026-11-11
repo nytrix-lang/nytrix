@@ -1,0 +1,48 @@
+shape render_tty_backend {
+  family "runtime/ui"
+  generator "embedded"
+  features [ny render tty ansi input backend]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  timeout 180
+  expect compile_and_run
+  expect_message "RENDER-TTY-OK"
+  source ny <<'NY'
+use core
+use core.os.ui.render as gfx
+use core.os.ui.render.tty as tty
+use core.os.ui.window as uiw
+
+;; Terminal key decoding: arrows and Home/End from CSI, Enter, Tab, Backspace,
+;; letters as window key codes, a lone Escape, and Ctrl+C as quit.
+def keys = tty.decode_keys([27, 91, 67, 27, 91, 65, 13, 9, 127, 113, 65, 32, 27, 3, 27, 91, 72])
+assert(keys.len == 11, "every byte group decodes to one key")
+assert(keys.get(0) == uiw.KEY_RIGHT && keys.get(1) == uiw.KEY_UP, "arrow keys")
+assert(keys.get(2) == uiw.KEY_ENTER && keys.get(3) == uiw.KEY_TAB &&
+       keys.get(4) == uiw.KEY_BACKSPACE, "control keys")
+assert(keys.get(5) == uiw.KEY_Q && keys.get(6) == uiw.KEY_A && keys.get(7) == uiw.KEY_SPACE,
+       "printable keys")
+assert(keys.get(8) == uiw.KEY_ESCAPE && keys.get(9) == tty.KEY_QUIT &&
+       keys.get(10) == uiw.KEY_HOME, "escape, Ctrl+C, and Home")
+assert(tty.requested_by_name("TTY") && tty.requested_by_name("terminal") &&
+       !tty.requested_by_name("vk"), "backend names")
+
+;; The terminal backend draws on the CPU surface; a mock window reports key
+;; presses that its events delivered.
+gfx.apply_backend_name("tty")
+def win = gfx.init_window(4, 2, "tty")
+assert(!!win, "terminal backend opens a CPU surface")
+assert(!uiw.key_pressed(win, uiw.KEY_RIGHT), "no key before input")
+uiw.push_event(win, uiw.EVENT_KEY_PRESSED, {"key": uiw.KEY_RIGHT, "mod": 0})
+assert(uiw.key_pressed(win, uiw.KEY_RIGHT), "CPU-surface window reports injected key press")
+assert(gfx.begin_frame_clear([0.0, 0.0, 1.0, 1.0]), "frame begins")
+assert(gfx.end_frame(), "frame ends")
+def frame = gfx.read_framebuffer()
+assert(is_dict(frame) && int(frame.get("width", 0)) == 4, "framebuffer readable")
+def ansi = tty.frame_to_ansi(frame, 4, 2)
+assert(ansi.len > 0 && str.find(ansi, "\x1b[48;2;0;0;255m") >= 0, "blue frame becomes blue cells")
+free(__ffi_untag_ptr(frame.get("data", 0)))
+gfx.close_window()
+print("RENDER-TTY-OK")
+NY
+}

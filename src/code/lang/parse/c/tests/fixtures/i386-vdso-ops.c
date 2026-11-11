@@ -1,3 +1,6 @@
+/*
+ * Fixture: compile i386 vDSO arithmetic helpers with explicit integer widths.
+ */
 typedef unsigned int u32;
 typedef unsigned long long u64;
 
@@ -15,6 +18,5 @@ static long nyc_i386_syscall(u32 number, u32 argument) {
 }
 
 int main(void) {
-  return (int)(nyc_i386_division(17, 5) +
-               (u64)nyc_i386_syscall(1, 2));
+  return (int)(nyc_i386_division(17, 5) + (u64)nyc_i386_syscall(1, 2));
 }

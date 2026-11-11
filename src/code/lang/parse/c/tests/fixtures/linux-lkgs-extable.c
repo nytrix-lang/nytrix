@@ -1,3 +1,6 @@
+/*
+ * Fixture: emit an LKGS instruction and Linux exception-table metadata.
+ */
 void nyc_lkgs(unsigned int selector) {
   unsigned short sel = selector;
   __asm__ volatile("1: .byte 0xf2,0x0f,0x00,0xf7 ;\n"

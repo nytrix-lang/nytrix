@@ -1,3 +1,4 @@
+/* Native backend tier planning, compilation, and runtime handoff interfaces. */
 #ifndef NY_BACKEND_NATIVE_H
 #define NY_BACKEND_NATIVE_H
 
@@ -55,15 +56,15 @@ bool nyr_write_tier_report_for_module(nyr_backend_module_t *module,
  * If only functions (not rt_main) lowered, *rt_main_out is left empty.
  */
 bool nyr_jit_compile(nyr_backend_module_t *module, const ny_options *opt,
-                     const char *stencil_cache_path,
-                     nyr_jit_image_t *image, char *err, size_t err_len);
+                     const char *stencil_cache_path, nyr_jit_image_t *image,
+                     char *err, size_t err_len);
 void nyr_jit_image_free(nyr_jit_image_t *image);
 /* Load an unrelocated native image, resolving symbols in this process. */
 bool nyr_jit_cache_load(const char *path,
-                         const nyr_runtime_services_t *runtime_services,
-                         nyr_jit_image_t *image, char *err, size_t err_len);
+                        const nyr_runtime_services_t *runtime_services,
+                        nyr_jit_image_t *image, char *err, size_t err_len);
 bool nyr_oracle_fuzz(const ny_options *opt, int count,
-                     const nyr_runtime_services_t *runtime_services,
-                     char *err, size_t err_len);
+                     const nyr_runtime_services_t *runtime_services, char *err,
+                     size_t err_len);
 
 #endif

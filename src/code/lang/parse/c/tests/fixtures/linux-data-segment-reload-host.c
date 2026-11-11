@@ -1,3 +1,6 @@
+/*
+ * Fixture driver: exercise the x86 data-segment reload helper.
+ */
 extern void nyc_linux_reload_data_segments(unsigned short selector);
 
 int main(void) {

@@ -1,3 +1,6 @@
+/*
+ * Parser fixture: verify alignment of file-scope and local aggregate objects.
+ */
 static char alignment_prefix;
 
 struct static_alignment_item {

@@ -1,6 +1,8 @@
+/* Growable owned byte/string buffer with formatting and JSON helpers. */
 #ifndef NY_STRBUF_H
 #define NY_STRBUF_H
 
+#include "base/json.h"
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -8,7 +10,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "base/json.h"
 
 typedef struct {
   char *data;
@@ -94,8 +95,7 @@ static inline bool ny_strbuf_vappendf(ny_strbuf_t *b, const char *fmt,
   va_copy(copy, ap);
   int n = vsnprintf(NULL, 0, fmt, copy);
   va_end(copy);
-  if (n < 0 || (size_t)n == SIZE_MAX ||
-      !ny_strbuf_reserve(b, (size_t)n + 1))
+  if (n < 0 || (size_t)n == SIZE_MAX || !ny_strbuf_reserve(b, (size_t)n + 1))
     return false;
   vsnprintf(b->data + b->len, (size_t)n + 1, fmt, ap);
   b->len += (size_t)n;

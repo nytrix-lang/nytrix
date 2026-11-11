@@ -1,0 +1,40 @@
+shape window-key-snapshot-native {
+  family "probe-suite"
+  generator "regression"
+  ci skip
+  template ny-test-case
+  expect compile_and_run
+  timeout 180
+  expect_stdout "native-key-snapshot-ok"
+  source ny <<'NY'
+;; Requires a dedicated Wayland compositor, NY_UI_BACKEND=wayland,
+;; NY_UI_KEY_QUERY_STATS=1, and NY_UI_HEADLESS=0.
+use core
+use core.os.ui.window as window
+use core.os.ui.window.platform as platform
+assert(platform.get_backend_name() == "wayland", "native Wayland backend")
+def win = window.create(320, 240, "key snapshot audit", window.WINDOW_CPU)
+assert(!!win, "native window opens")
+window.poll_events()
+window.key_query_stats(true)
+mut int i = 0
+while i < 30 {
+   assert(!window.key_down(win, window.KEY_A), "unpressed native key")
+   i += 1
+}
+def first = window.key_query_stats()
+print("queries=", first)
+assert(int(first.get(0)) == 1, "one native query per poll interval")
+assert(int(first.get(1)) == 29, "repeated queries hit snapshot")
+window.poll_events()
+assert(!window.key_down(win, window.KEY_A), "native key after poll")
+assert(int(window.key_query_stats().get(0)) == 2, "poll invalidates snapshot")
+window.on_key(win, window.KEY_A, true)
+assert(window.key_down(win, window.KEY_A), "press transition")
+window.on_key(win, window.KEY_A, false)
+assert(!window.key_down(win, window.KEY_A), "release transition")
+assert(int(window.key_query_stats().get(0)) == 3, "release invalidates snapshot")
+window.close(win)
+print("native-key-snapshot-ok")
+NY
+}

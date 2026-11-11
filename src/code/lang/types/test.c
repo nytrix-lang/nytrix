@@ -1,3 +1,6 @@
+/*
+ * Type-system regression suite for inference, checking, and type relations.
+ */
 #include "code/lang/types/test.h"
 #include "code/lang/parse/proof.h"
 #include "code/lang/types/types.h"

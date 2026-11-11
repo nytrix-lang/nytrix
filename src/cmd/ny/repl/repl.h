@@ -1,3 +1,4 @@
+/* Public command interface for starting the Ny interactive REPL. */
 #ifndef NY_REPL_H
 #define NY_REPL_H
 

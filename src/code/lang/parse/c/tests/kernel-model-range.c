@@ -1,3 +1,6 @@
+/*
+ * Parser/backend fixture for kernel address-range constants and globals.
+ */
 void _start(void) {}
 
 long nyc_kernel_range_data = 7;

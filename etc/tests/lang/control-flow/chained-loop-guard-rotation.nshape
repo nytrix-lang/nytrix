@@ -1,0 +1,60 @@
+shape test_chained_loop_guard_rotation {
+  family "control-flow/loops"
+  generator "embedded"
+  features ["ny", "test", "native", "loop", "regression"]
+  template ny-test-case
+  flags_matrix "-O3 --native-only; -O2 --native-only; -O0 --native-only; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.tbuf (i64buf_new, i64buf_load, i64buf_store)
+
+;; A loop with two exits ahead of its body (`j >= 0 && a[j] > key`) has its
+;; first guard copied onto the latch. Each exit, zero trips, and the full trip
+;; count must behave as before.
+fn insertion(int n, int seed) int {
+   mut a = i64buf_new(n)
+   mut s = seed
+   mut i = 0
+   while i < n {
+      s = (s * 3877 + 29573) % 139968
+      i64buf_store(a, i, s)
+      i += 1
+   }
+   i = 1
+   while i < n {
+      def key = i64buf_load(a, i)
+      mut j = i - 1
+      while j >= 0 && i64buf_load(a, j) > key {
+         i64buf_store(a, j + 1, i64buf_load(a, j))
+         j -= 1
+      }
+      i64buf_store(a, j + 1, key)
+      i += 1
+   }
+   mut acc = 0
+   i = 0
+   while i < n {
+      if i > 0 && i64buf_load(a, i - 1) > i64buf_load(a, i) { return -1 }
+      acc += i64buf_load(a, i) * (i + 1)
+      i += 1
+   }
+   acc
+}
+
+fn first_over(int limit, int bound) int {
+   mut k = 0
+   while k < bound && k * k <= limit { k += 1 }
+   k
+}
+
+assert(insertion(0, 1) == 0, "empty input")
+assert(insertion(1, 7) > 0, "single element")
+assert(insertion(300, 42) == insertion(300, 42) && insertion(300, 42) > 0,
+       "sorted output")
+assert(first_over(50, 100) == 8, "second guard exits")
+assert(first_over(50, 3) == 3, "first guard exits")
+assert(first_over(50, 0) == 0, "zero trips")
+print("ok chained loop guard rotation")
+NY
+}

@@ -208,17 +208,17 @@ typedef struct {
   size_t cap;
 } DupGroupVec;
 
-#define VEC_GROW_OR(v, initial_cap, on_fail)                                   \
-  do {                                                                         \
-    if ((v)->len == (v)->cap) {                                                \
-      size_t nc = (v)->cap ? (v)->cap * 2 : (initial_cap);                     \
-      void *p = realloc((v)->items, nc * sizeof(*(v)->items));                 \
-      if (!p) {                                                                \
-        on_fail;                                                               \
-      }                                                                        \
-      (v)->items = p;                                                          \
-      (v)->cap = nc;                                                           \
-    }                                                                          \
+#define VEC_GROW_OR(v, initial_cap, on_fail)                   \
+  do {                                                         \
+    if ((v)->len == (v)->cap) {                                \
+      size_t nc = (v)->cap ? (v)->cap * 2 : (initial_cap);     \
+      void *p = realloc((v)->items, nc * sizeof(*(v)->items)); \
+      if (!p) {                                                \
+        on_fail;                                               \
+      }                                                        \
+      (v)->items = p;                                          \
+      (v)->cap = nc;                                           \
+    }                                                          \
   } while (0)
 
 typedef struct {
@@ -326,6 +326,8 @@ typedef struct {
 
 static char *format_c_text(const char *in);
 static char *tidy_c_text(const char *in);
+static char *c_align_macro_continuations(const char *in);
+static int c_has_file_header_comment(const char *src);
 static int c_tidy_separator_only(const char *s);
 static int c_tidy_heading(const char *line, char **title_out);
 static int audit_patterns_selftest(void);
@@ -411,6 +413,31 @@ static int cscan_selftest(void) {
   }
   free(tidy_once);
   free(tidy_twice);
+  const char *macro_in = "#define M(x) \\\n"
+                         "  call(x); \\\n"
+                         "    finish(x)\n";
+  const char *macro_expect = "#define M(x)  \\\n"
+                             "  call(x);    \\\n"
+                             "    finish(x)\n";
+  char *macro_once = c_align_macro_continuations(macro_in);
+  char *macro_twice =
+      macro_once ? c_align_macro_continuations(macro_once) : NULL;
+  if (!macro_once || strcmp(macro_once, macro_expect) != 0 || !macro_twice ||
+      strcmp(macro_twice, macro_once) != 0) {
+    fprintf(stderr, "ny-fmt C macro selftest: continuation alignment failed\n");
+    free(macro_once);
+    free(macro_twice);
+    return 1;
+  }
+  free(macro_once);
+  free(macro_twice);
+  if (!c_has_file_header_comment(" \n/* File purpose. */\n#include <x>\n") ||
+      !c_has_file_header_comment("// File purpose.\n#include <x>\n") ||
+      c_has_file_header_comment("\n#include <x>\n") ||
+      c_has_file_header_comment("#pragma once\n")) {
+    fprintf(stderr, "ny-fmt C header selftest: detection failed\n");
+    return 1;
+  }
   const char *hdr_in =
       "/* \xe2\x94\x80\xe2\x94\x80 Loads & Stores "
       "\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80"
@@ -2499,6 +2526,148 @@ static int c_comment_group(const char *src, size_t n, size_t start,
   return 1;
 }
 
+static int c_define_directive(const char *line, size_t len) {
+  size_t pos = 0;
+  while (pos < len && (line[pos] == ' ' || line[pos] == '\t'))
+    pos++;
+  if (pos == len || line[pos++] != '#')
+    return 0;
+  while (pos < len && (line[pos] == ' ' || line[pos] == '\t'))
+    pos++;
+  static const char define[] = "define";
+  if (len - pos < sizeof(define) - 1 ||
+      memcmp(line + pos, define, sizeof(define) - 1) != 0)
+    return 0;
+  pos += sizeof(define) - 1;
+  return pos == len || !(isalnum((unsigned char)line[pos]) || line[pos] == '_');
+}
+
+static size_t c_macro_prefix_len(const char *line, size_t len,
+                                 int continuation) {
+  size_t prefix = continuation ? len - 1 : len;
+  while (prefix && (line[prefix - 1] == ' ' || line[prefix - 1] == '\t'))
+    prefix--;
+  return prefix;
+}
+
+static void c_append_spaces(char **out, size_t *out_len, size_t *out_cap,
+                            size_t count) {
+  for (size_t i = 0; i < count; i++)
+    buf_append_char(out, out_len, out_cap, ' ');
+}
+
+/*
+ * Align the backslashes in physical lines of #define replacement lists.
+ * Only trailing backslashes followed immediately by a newline are changed;
+ * all other preprocessing directives and source bytes are preserved.
+ */
+static char *c_align_macro_continuations(const char *in) {
+  size_t n = strlen(in), out_len = 0, out_cap = 0, pos = 0;
+  char *out = NULL;
+  while (pos < n) {
+    size_t line_end = pos;
+    while (line_end < n && in[line_end] != '\n')
+      line_end++;
+    size_t content_end = line_end;
+    if (content_end > pos && in[content_end - 1] == '\r')
+      content_end--;
+    if (!c_define_directive(in + pos, content_end - pos) ||
+        content_end == pos || in[content_end - 1] != '\\' || line_end == n) {
+      size_t copy_end = line_end < n ? line_end + 1 : line_end;
+      for (size_t i = pos; i < copy_end; i++)
+        buf_append_char(&out, &out_len, &out_cap, in[i]);
+      pos = copy_end;
+      continue;
+    }
+
+    size_t block_end = pos;
+    size_t max_prefix = 0;
+    int valid_block = 1;
+    for (;;) {
+      line_end = block_end;
+      while (line_end < n && in[line_end] != '\n')
+        line_end++;
+      content_end = line_end;
+      int has_cr = content_end > block_end && in[content_end - 1] == '\r';
+      if (has_cr)
+        content_end--;
+      int continuation = content_end > block_end && in[content_end - 1] == '\\';
+      if (continuation && line_end == n) {
+        valid_block = 0;
+        break;
+      }
+      size_t prefix = c_macro_prefix_len(in + block_end,
+                                         content_end - block_end, continuation);
+      if (prefix > max_prefix)
+        max_prefix = prefix;
+      block_end = line_end < n ? line_end + 1 : line_end;
+      if (!continuation)
+        break;
+    }
+    if (!valid_block) {
+      size_t copy_end = line_end < n ? line_end + 1 : line_end;
+      for (size_t i = pos; i < copy_end; i++)
+        buf_append_char(&out, &out_len, &out_cap, in[i]);
+      pos = copy_end;
+      continue;
+    }
+
+    size_t macro_pos = pos;
+    while (macro_pos < block_end) {
+      line_end = macro_pos;
+      while (line_end < block_end && in[line_end] != '\n')
+        line_end++;
+      content_end = line_end;
+      if (content_end > macro_pos && in[content_end - 1] == '\r')
+        content_end--;
+      int continuation = content_end > macro_pos && in[content_end - 1] == '\\';
+      if (continuation) {
+        size_t prefix =
+            c_macro_prefix_len(in + macro_pos, content_end - macro_pos, 1);
+        for (size_t i = macro_pos; i < macro_pos + prefix; i++)
+          buf_append_char(&out, &out_len, &out_cap, in[i]);
+        c_append_spaces(&out, &out_len, &out_cap, max_prefix - prefix + 1);
+        buf_append_char(&out, &out_len, &out_cap, '\\');
+        if (content_end < line_end)
+          buf_append_char(&out, &out_len, &out_cap, '\r');
+      } else {
+        for (size_t i = macro_pos; i < line_end; i++)
+          buf_append_char(&out, &out_len, &out_cap, in[i]);
+      }
+      if (line_end < block_end)
+        buf_append_char(&out, &out_len, &out_cap, '\n');
+      macro_pos = line_end < block_end ? line_end + 1 : line_end;
+    }
+    pos = block_end;
+  }
+  if (!out)
+    return strdup("");
+  out[out_len] = '\0';
+  return out;
+}
+
+static int c_has_file_header_comment(const char *src) {
+  if (!src)
+    return 0;
+  const unsigned char *p = (const unsigned char *)src;
+  if (strncmp(src, "\xef\xbb\xbf", 3) == 0)
+    p += 3;
+  while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n')
+    p++;
+  return p[0] == '/' && (p[1] == '*' || p[1] == '/');
+}
+
+static size_t c_first_difference_line(const char *a, const char *b) {
+  size_t line = 1;
+  while (*a && *b && *a == *b) {
+    if (*a == '\n')
+      line++;
+    a++;
+    b++;
+  }
+  return line;
+}
+
 static char *format_c_text(const char *in) {
   size_t n = strlen(in), out_len = 0, out_cap = 0;
   char *out = NULL;
@@ -2563,9 +2732,13 @@ static char *format_c_text(const char *in) {
     buf_append_char(&out, &out_len, &out_cap, '\n');
   }
   if (!out)
-    return strdup("");
+    out = strdup("");
+  if (!out)
+    return NULL;
   out[out_len] = '\0';
-  return out;
+  char *aligned = c_align_macro_continuations(out);
+  free(out);
+  return aligned;
 }
 
 static size_t fmt_diff_line_count(const char *text) {
@@ -2733,8 +2906,12 @@ static char *tidy_c_text(const char *in) {
   free(out);
   if (!collapsed)
     collapsed = strdup("");
+  if (!collapsed)
+    return NULL;
   collapsed[c_len] = '\0';
-  return collapsed;
+  char *aligned = c_align_macro_continuations(collapsed);
+  free(collapsed);
+  return aligned;
 }
 
 /*
@@ -3118,10 +3295,10 @@ typedef struct {
   size_t cap;
 } FnVec;
 
-#define DEFINE_VEC_PUSH(name, VecType, ItemType, initial_cap)                  \
-  static void name(VecType *v, const ItemType *item) {                         \
-    VEC_GROW_OR(v, initial_cap, return);                                       \
-    v->items[v->len++] = *item;                                                \
+#define DEFINE_VEC_PUSH(name, VecType, ItemType, initial_cap) \
+  static void name(VecType *v, const ItemType *item) {        \
+    VEC_GROW_OR(v, initial_cap, return);                      \
+    v->items[v->len++] = *item;                               \
   }
 
 DEFINE_VEC_PUSH(fv_push, FnVec, Fn, 128)

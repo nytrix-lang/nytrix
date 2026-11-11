@@ -251,7 +251,23 @@ fn mat4_look_at_into_xyz(f64 ex, f64 ey, f64 ez, f64 cx, f64 cy, f64 cz, f64 ux,
    if fl < 0.0001 { return mat4_identity_into(m) }
    def ifl=1.0/fl def fnx=fx*ifl def fny=fy*ifl def fnz=fz*ifl
    mut sx, sy, sz = fny*uz-fnz*uy, fnz*ux-fnx*uz, fnx*uy-fny*ux
-   def sl = sqrt(sx*sx + sy*sy + sz*sz)
+   mut sl = sqrt(sx*sx + sy*sy + sz*sz)
+   if sl <= 0.0001 {
+      ;; The view direction is parallel to `up` (a top-down or bottom-up view),
+      ;; which leaves the side vector zero and collapses the whole matrix.
+      ;; Substitute a perpendicular up: world -Z when looking along +Y-up's
+      ;; negative direction, +Z when looking the other way, or +Y when `up` was
+      ;; not the Y axis.
+      mut nux, nuy, nuz = 0.0, 1.0, 0.0
+      if abs(uy) > 0.9 {
+         nuy = 0.0
+         nuz = (fnx*ux + fny*uy + fnz*uz) < 0.0 ? -1.0 : 1.0
+      }
+      sx = fny*nuz-fnz*nuy
+      sy = fnz*nux-fnx*nuz
+      sz = fnx*nuy-fny*nux
+      sl = sqrt(sx*sx + sy*sy + sz*sz)
+   }
    if sl > 0.0001 { def isl=1.0/sl sx *= isl sy *= isl sz *= isl }
    def ux2=sy*fnz-sz*fny def uy2=sz*fnx-sx*fnz def uz2=sx*fny-sy*fnx
    m[2] = sx    m[6] = sy    m[10] = sz    m[14] = -(sx*ex + sy*ey + sz*ez)

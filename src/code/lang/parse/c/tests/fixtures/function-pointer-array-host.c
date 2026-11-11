@@ -1,3 +1,6 @@
+/*
+ * Host-side oracle for function-pointer arrays and linker section symbols.
+ */
 typedef void (*nyc_initcall_entry_t)(void);
 nyc_initcall_entry_t nyc_initcall_start[1], nyc_initcall_end[1];
 int nyc_initcall0_start[1];

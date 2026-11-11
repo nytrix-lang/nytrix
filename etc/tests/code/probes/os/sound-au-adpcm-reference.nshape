@@ -1,0 +1,58 @@
+shape au_adpcm_ffmpeg_reference {
+  family "runtime/system/sound"
+  generator "embedded"
+  features ["sound", "au", "adpcm", "reference"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.math.bin as bin
+use core.os.sound.au as au
+
+;; FFmpeg 63.1.102 s16le output for the deterministic 120-byte payload below.
+def references = [
+"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"
+]
+fn be32(bytes d, int at, int v) {
+   mut i = 0
+   while i < 4 { store8(d, (v >> ((3 - i) * 8)) & 255, at + i) i += 1 }
+}
+mut encoding = 23
+while encoding <= 26 {
+   def rate = encoding == 24 ? 16000 : 8000
+   def data = bytes(144)
+   store8(data, 46, 0)
+   store8(data, 115, 1)
+   store8(data, 110, 2)
+   store8(data, 100, 3)
+   be32(data, 4, 24)
+   be32(data, 8, 120)
+   be32(data, 12, encoding)
+   be32(data, 16, rate)
+   be32(data, 20, 1)
+   mut i = 0
+   while i < 120 { store8(data, ((i * 73) ^ (i >> 1) ^ 127) & 255, 24 + i) i += 1 }
+   def expected = bin.base64_to_bytes(str(references[encoding - 23]))
+   def src = au.decode_bytes(data)
+   assert(is_list(src), "AU ADPCM source decodes")
+   def meta = src.get(1)
+   assert(int(meta.get("len")) == expected.len && int(meta.get("total_frames")) == expected.len / 2,
+      "AU ADPCM exact PCM frame count")
+   assert(int(meta.get("rate")) == rate && int(meta.get("channels")) == 1, "AU ADPCM metadata")
+   i = 0
+   while i < expected.len {
+      assert(load8(meta.get("ptr"), i) == int(expected[i]), "AU ADPCM PCM matches FFmpeg")
+      i += 1
+   }
+   free(meta.get("ptr"))
+   be32(data, 8, 121)
+   assert(au.decode_bytes(data) == 0, "AU ADPCM rejects truncated declared payload")
+   encoding += 1
+}
+print("AU-ADPCM-REFERENCE-OK")
+NY
+}

@@ -1,3 +1,4 @@
+/* Cross-platform time compatibility and nanosecond file-mtime access. */
 #ifndef NY_BASE_TIME_H
 #define NY_BASE_TIME_H
 

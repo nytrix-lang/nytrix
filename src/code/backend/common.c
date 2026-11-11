@@ -1,3 +1,6 @@
+/*
+ * Shared native-backend diagnostics and growable output-writer operations.
+ */
 #include "code/backend/internal.h"
 
 #include <stdarg.h>

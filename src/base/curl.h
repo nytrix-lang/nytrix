@@ -1,3 +1,4 @@
+/* Small libcurl helpers for HTTP requests and response buffers. */
 #ifndef NY_CURL_UTILS_H
 #define NY_CURL_UTILS_H
 

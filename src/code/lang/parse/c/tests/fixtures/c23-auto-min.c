@@ -1,8 +1,11 @@
-#define min(left, right)                                                       \
-  ({                                                                           \
-    auto inferred_left = (left);                                               \
-    auto inferred_right = (right);                                             \
-    inferred_left < inferred_right ? inferred_left : inferred_right;           \
+/*
+ * C23 fixture for type inference in a statement-expression min macro.
+ */
+#define min(left, right)                                             \
+  ({                                                                 \
+    auto inferred_left = (left);                                     \
+    auto inferred_right = (right);                                   \
+    inferred_left < inferred_right ? inferred_left : inferred_right; \
   })
 
 int main(void) {

@@ -155,6 +155,80 @@ static bool build_variable_sum(nyr_func_t *f) {
   return nyr_opt_verify(f, "loop-vector-variable-sum-before");
 }
 
+static bool build_malloc_i64_sum(nyr_func_t *f) {
+  nyr_opt_begin(f);
+  int bytes = nyr_opt_const(f, 64);
+  int heap = nyr_ir_emit(f, (nyr_inst_t){.op = NYIR_CALL,
+                                         .dst = -1,
+                                         .a = bytes,
+                                         .b = -1,
+                                         .c = -1,
+                                         .d = -1,
+                                         .e = -1,
+                                         .f = -1,
+                                         .imm = 1,
+                                         .symbol = "rt_malloc_i64",
+                                         .scalar_class = NYIR_SCALAR_POINTER});
+  int limit = nyr_opt_const(f, 8);
+  int zero = nyr_opt_const(f, 0);
+  int seed = nyr_opt_const(f, 0);
+  int one = nyr_opt_const(f, 1);
+  int eight = nyr_opt_const(f, 8);
+  if (bytes < 0 || heap < 0 || limit < 0 || zero < 0 || seed < 0 || one < 0 ||
+      eight < 0)
+    return false;
+
+  nyr_opt_label(f, 9);
+  nyr_opt_br(f, 10);
+  nyr_opt_label(f, 10);
+  size_t iv_phi = f->len;
+  int iv = f->next_value;
+  nyr_opt_phi(f, 9, zero, 11, zero);
+  size_t sum_phi = f->len;
+  int sum = f->next_value;
+  nyr_opt_phi(f, 9, seed, 11, seed);
+  int cond = nyr_opt_cmp(f, iv, limit, NYIR_CMP_LT);
+  nyr_opt_br_if(f, cond, 11);
+  nyr_opt_br(f, 12);
+  nyr_opt_label(f, 11);
+  int offset = nyr_opt_binop(f, NYIR_MUL_I64, iv, eight);
+  int address = offset < 0 ? -1 : nyr_opt_binop(f, NYIR_ADD_I64, heap, offset);
+  int loaded =
+      address < 0 ? -1 : nyr_opt_emit_abc(f, NYIR_LOAD_I64, address, -1, -1);
+  int next_sum = loaded < 0 ? -1 : nyr_opt_binop(f, NYIR_ADD_I64, sum, loaded);
+  int next_iv = nyr_opt_binop(f, NYIR_ADD_I64, iv, one);
+  if (next_sum < 0 || next_iv < 0)
+    return false;
+  nyr_opt_br(f, 10);
+  f->data[iv_phi].phi_incoming[1].value = next_iv;
+  f->data[sum_phi].phi_incoming[1].value = next_sum;
+  nyr_opt_label(f, 12);
+  nyr_opt_ret(f, sum);
+  return nyr_opt_verify(f, "loop-vector-malloc-i64-before");
+}
+
+static bool check_malloc_i64_affine_vectorization(void) {
+  nyr_func_t f;
+  if (!build_malloc_i64_sum(&f)) {
+    nyr_ir_func_free(&f);
+    return false;
+  }
+  bool ok = nyr_loop_vectorize(&f) &&
+            nyr_opt_verify(&f, "loop-vector-malloc-i64-after") &&
+            f.vectorized_loops > 0;
+  bool saw_vector_load = false;
+  for (size_t i = 0; ok && i < f.len; ++i)
+    saw_vector_load |= f.data[i].op == NYIR_VEC4_LOAD_I64 ||
+                       f.data[i].op == NYIR_VEC8_LOAD_I64;
+  ok = ok && saw_vector_load;
+  if (!ok)
+    nyr_dump(stderr, &f, "loop-vector-malloc-i64-after");
+  nyr_ir_func_free(&f);
+  if (ok)
+    puts("[loop-vector-malloc-i64] known-size runtime allocation is affine");
+  return ok;
+}
+
 static bool check_variable_reduction_tails(void) {
   nyr_func_t f;
   if (!build_variable_sum(&f)) {
@@ -1243,5 +1317,7 @@ int main(void) {
   if (ok)
     puts("[loop-vector-inclusive-overflow] inclusive guard wrapping stays "
          "scalar");
-  return ok ? 0 : 1;
+  if (!ok || !check_malloc_i64_affine_vectorization())
+    return 1;
+  return 0;
 }

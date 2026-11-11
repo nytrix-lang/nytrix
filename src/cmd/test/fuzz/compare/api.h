@@ -1,3 +1,4 @@
+/* Internal API declarations for public fuzz-comparison commands. */
 #ifndef NY_CMD_TEST_FUZZ_COMPARE_API_H
 #define NY_CMD_TEST_FUZZ_COMPARE_API_H
 
@@ -8,7 +9,6 @@ typedef struct {
 } string_list_t;
 
 static bool find_nytrix_root(char *out, size_t out_sz);
-static const char *skip_ws_const(const char *p);
 static const char *value_after_equals(int argc, char **argv, int start,
                                       const char *flag, const char *fallback);
 static bool has_flag_after(int argc, char **argv, int start, const char *flag);
@@ -26,6 +26,13 @@ static bool json_bool_range(const char *start, const char *end, const char *key,
                             bool fallback);
 static bool json_number_range(const char *start, const char *end,
                               const char *key, double *out);
+static void append_json_bool_field(str_buf_t *row, const char *key, bool value);
+static void append_json_string_field(str_buf_t *row, const char *key,
+                                     const char *value);
+static void append_repo_or_sibling_rel_json_field(str_buf_t *row,
+                                                  const char *key,
+                                                  const char *root,
+                                                  const char *path);
 static const char *json_top_level_value_after_key(const char *json,
                                                   const char *key);
 static const char *matching_json_end(const char *open, char lhs, char rhs);

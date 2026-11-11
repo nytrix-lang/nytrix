@@ -1,3 +1,7 @@
+/*
+ * Shared work-queue API. The default backend is the internal persistent
+ * thread pool; OpenMP is an explicit opt-in oracle build.
+ */
 #ifndef NYTRIX_BASE_PARALLEL_H
 #define NYTRIX_BASE_PARALLEL_H
 
@@ -13,6 +17,7 @@ typedef struct {
   uint64_t serial_regions;
   uint64_t openmp_regions;
   uint64_t c11_regions;
+  uint64_t pool_regions;
 } ny_parallel_stats_t;
 
 int ny_parallel_threads(void);

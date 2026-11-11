@@ -1,3 +1,6 @@
+/*
+ * Environment-controlled compiler diagnostics, tracing, and NYIR dumps.
+ */
 #include "base/debug.h"
 #include "base/common.h"
 #include "base/json.h"

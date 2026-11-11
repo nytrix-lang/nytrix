@@ -1,3 +1,4 @@
+/* Central API for feature-specific and master compiler trace controls. */
 #ifndef NY_BASE_TRACE_H
 #define NY_BASE_TRACE_H
 

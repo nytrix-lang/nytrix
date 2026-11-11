@@ -1,3 +1,5 @@
+/* Portable conversions between object, function, string, and integer pointers.
+ */
 #ifndef NYTRIX_BASE_PTRCAST_H
 #define NYTRIX_BASE_PTRCAST_H
 #include <stdint.h>

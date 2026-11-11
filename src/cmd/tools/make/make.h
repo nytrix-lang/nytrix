@@ -1,3 +1,4 @@
+/* Public dispatch and help interfaces for the repository make command. */
 #ifndef NYTRIX_CMD_TOOLS_MAKE_H
 #define NYTRIX_CMD_TOOLS_MAKE_H
 

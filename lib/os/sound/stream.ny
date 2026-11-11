@@ -1,12 +1,21 @@
 ;; Keywords: sound streaming frame range seek wav aiff au
 ;; File-backed decoding. Header scanning skips payloads, and each read loads
 ;; only the PCM span or independent ADPCM packets covering the requested range.
+;; FLAC and MPEG retain compressed bytes and decode bounded PCM blocks.
+;; FLAC uses seek points; MPEG restores reservoir/overlap state on backward seeks.
+;; Vorbis may use optional libsndfile.
 module core.os.sound.stream(open, close, read, read_range, seek, tell, length, format)
 use core
 use core.os.sound.wav as wav
 use core.os.sound.aiff as aiff
 use core.os.sound.au as au
+use core.os.sound.flac as flac
+use core.os.sound.mpeg as mpeg
+use core.os (file_read)
 use core.os.sound.source as source
+use core.os.ffi as ffi
+use core.os.path as fs_path
+use core.str as str
 
 extern "" {
    fn fopen(str path, str mode) ptr
@@ -16,28 +25,98 @@ extern "" {
    fn fread(ptr data, u64 width, u64 count, ptr file) u64
 }
 
+mut _sf_checked = false
+mut _sf_handle = 0
+mut _sf_open_fn = 0
+mut _sf_close_fn = 0
+mut _sf_seek_fn = 0
+mut _sf_read_frames_fn = 0
+
+fn _sf_init() bool {
+   if _sf_checked { return _sf_handle != 0 }
+   _sf_checked = true
+   _sf_handle = ffi.dlopen_any("sndfile", ffi.RTLD_NOW() | ffi.RTLD_LOCAL())
+   if !_sf_handle { return false }
+   _sf_open_fn = ffi.dlsym(_sf_handle, "sf_open")
+   _sf_close_fn = ffi.dlsym(_sf_handle, "sf_close")
+   _sf_seek_fn = ffi.dlsym(_sf_handle, "sf_seek")
+   _sf_read_frames_fn = ffi.dlsym(_sf_handle, "sf_readf_short")
+   if !_sf_open_fn || !_sf_close_fn || !_sf_seek_fn || !_sf_read_frames_fn {
+      ffi.dlclose(_sf_handle)
+      _sf_handle = 0
+      return false
+   }
+   true
+}
+
+fn _sf_open(str filename) any {
+   if !_sf_init() { return 0 }
+   def info = malloc(64)
+   memset(info, 0, 64)
+   def snd = ffi.any3(_sf_open_fn, ffi.cstr(filename), 0x10, info)
+   if !snd { free(info) return 0 }
+   def frames = load64_h(info, 0)
+   def rate = load32(info, 8)
+   def channels = load32(info, 12)
+   free(info)
+   if frames <= 0 || rate <= 0 || channels <= 0 || channels > 32 {
+      ffi.any1(_sf_close_fn, snd)
+      return 0
+   }
+   {"file": snd, "kind": "sndfile", "frames": frames, "cursor": 0,
+      "channels": channels, "rate": rate, "bits": 16,
+      "format": [channels, rate, 16], "frame_size": channels * 2}
+}
+
+fn _sf_range(any st, int start, int count) any {
+   def frames = int(st.get("frames"))
+   if start < 0 || count < 0 { return 0 }
+   if start > frames { start = frames }
+   if count > frames - start { count = frames - start }
+   def channels = int(st.get("channels"))
+   if count == 0 {
+      return source.make_memory_source(malloc(1), 0, channels,
+         st.get("rate"), 16, source.SAMPLE_FMT_S16, 1)
+   }
+   if int(ffi.any3(_sf_seek_fn, st.get("file"), start, 0)) != start { return 0 }
+   def out = malloc(count * channels * 2 + 1)
+   def got = int(ffi.any3(_sf_read_frames_fn, st.get("file"), out, count))
+   if got <= 0 {
+      free(out)
+      return 0
+   }
+   if got < count { count = got }
+   source.make_memory_source(out, count * channels * 2, channels,
+      st.get("rate"), 16, source.SAMPLE_FMT_S16, 1)
+}
+
 fn _at(ptr file, int at, int count) bytes {
    if at < 0 || count < 0 || fseek(file, at, 0) != 0 { return bytes(0) }
    def out = bytes(count)
    if count > 0 && fread(out, 1, count, file) != count { return bytes(0) }
    out
 }
+
 fn _tag(any d, int at, str tag) bool {
    mut i = 0
    while i < 4 { if load8(d, at + i) != load8(tag, i) { return false } i += 1 }
    true
 }
+
 fn _u16(any d, int at, bool big) int {
    big ? (load8(d, at) << 8) | load8(d, at + 1) : load8(d, at) | (load8(d, at + 1) << 8)
 }
+
 fn _u32(any d, int at, bool big) int {
    big ? (_u16(d, at, true) << 16) | _u16(d, at + 2, true) : _u16(d, at, false) | (_u16(d, at + 2, false) << 16)
 }
+
 fn _put32(any d, int at, int value, bool big) int {
    mut i = 0
    while i < 4 { store8(d, (value >> ((big ? 3 - i : i) * 8)) & 255, at + i) i += 1 }
    0
 }
+
 fn _text(any d, int at, str text) int {
    mut i = 0
    while i < text.len { store8(d, load8(text, i), at + i) i += 1 }
@@ -142,12 +221,41 @@ fn _scan(ptr file, int size) any {
       frames = data_size / block
    }
    {"file": file, "kind": kind, "big": big, "header": fmt, "data_at": data_at,
-    "data_size": data_size, "block": block, "block_frames": block_frames,
-    "frames": frames, "cursor": 0, "channels": channels}
+      "data_size": data_size, "block": block, "block_frames": block_frames,
+      "frames": frames, "cursor": 0, "channels": channels}
 }
 
 fn open(str path) any {
    ;; Returns a stream dictionary or 0. The caller owns close().
+   def ext = str.lower(fs_path.extname(path))
+   if ext == ".mp1" || ext == ".mp2" || ext == ".mp3" {
+      def raw = file_read(path)
+      if is_err(raw) { return 0 }
+      def ctx = mpeg.open_bytes(unwrap(raw))
+      if !ctx { return 0 }
+      def channels = int(ctx.get("channels"))
+      return {"file": ctx, "kind": "mpeg", "frames": ctx.get("frames"),
+         "cursor": 0, "channels": channels,
+         "format": [channels, ctx.get("rate"), 16], "frame_size": channels*2}
+   }
+   if ext == ".flac" || ext == ".oga" || ext == ".ogg" {
+      def raw = file_read(path)
+      if !is_err(raw) {
+         def ctx = flac.open_bytes(unwrap(raw))
+         if ctx {
+            def bits = int(ctx.get("bits")) <= 16 ? 16 : 32
+            def channels = int(ctx.get("channels"))
+            return {"file": ctx, "kind": "flac", "frames": ctx.get("frames"),
+               "cursor": 0, "channels": channels,
+               "format": [channels, ctx.get("rate"), bits], "frame_size": channels * bits / 8}
+         }
+      }
+      if ext == ".flac" || ext == ".oga" { return 0 }
+   }
+   if ext == ".ogg" {
+      def snd = _sf_open(path)
+      if snd { return snd }
+   }
    def file = fopen(path, "rb")
    if !file { return 0 }
    if fseek(file, 0, 2) != 0 { fclose(file) return 0 }
@@ -166,6 +274,9 @@ fn open(str path) any {
 fn read_range(any st, int start, int count) any {
    ;; Returns an independently owned memory sound source without moving cursor.
    if !is_dict(st) || !st.get("file", 0) || start < 0 || count < 0 { return 0 }
+   if st.get("kind") == "flac" { return flac.read_range(st.get("file"), start, count) }
+   if st.get("kind") == "mpeg" { return mpeg.read_range(st.get("file"), start, count) }
+   if st.get("kind") == "sndfile" { return _sf_range(st, start, count) }
    def total = int(st.get("frames"))
    if start > total { start = total }
    if count > total - start { count = total - start }
@@ -223,23 +334,50 @@ fn read_range(any st, int start, int count) any {
    def frame_size = int(meta.get("frame_size"))
    if skip + count > meta.get("total_frames") { free(meta.get("ptr")) return 0 }
    def out = malloc(count * frame_size + 1)
-   memcpy(out, meta.get("ptr") + skip * frame_size, count * frame_size)
+   if per > 1 {
+      ;; Packet decoders return independent buffers. Copy by indexed loads here:
+      ;; native pointer addition on this dynamic metadata pointer is not a safe
+      ;; source for memcpy when the range starts inside a decoded packet.
+      mut byte = 0
+      while byte < count * frame_size {
+         store8(out, load8(meta.get("ptr"), skip * frame_size + byte), byte)
+         byte += 1
+      }
+   } else {
+      memcpy(out, meta.get("ptr") + skip * frame_size, count * frame_size)
+   }
    free(meta.get("ptr"))
    source.make_memory_source(out, count * frame_size, meta.get("channels"), meta.get("rate"),
       meta.get("bits"), meta.get("sample_fmt"), meta.get("format_tag"))
 }
 
 fn read(any st, any out, int count) int {
-   if !is_dict(st) || count <= 0 { return 0 }
+   if !is_dict(st) || !st.get("file", 0) || count <= 0 { return 0 }
+   if st.get("kind") == "sndfile" {
+      def cursor = tell(st)
+      def total = length(st)
+      if cursor >= total { return 0 }
+      if count > total - cursor { count = total - cursor }
+      if int(ffi.any3(_sf_seek_fn, st.get("file"), cursor, 0)) != cursor { return 0 }
+      def got = int(ffi.any3(_sf_read_frames_fn, st.get("file"), out, count))
+      if got <= 0 { return 0 }
+      st.set("cursor", cursor + got)
+      return got
+   }
    def src = read_range(st, tell(st), count)
    if !src { return 0 }
    def meta = src.get(1)
    def got = int(meta.get("total_frames"))
-   memcpy(out, meta.get("ptr"), meta.get("len"))
+   mut byte = 0
+   while byte < int(meta.get("len")) {
+      store8(out, load8(meta.get("ptr"), byte), byte)
+      byte += 1
+   }
    free(meta.get("ptr"))
    st.set("cursor", tell(st) + got)
    got
 }
+
 fn seek(any st, int frame) bool {
    if !is_dict(st) || !st.get("file", 0) { return false }
    if frame < 0 { frame = 0 }
@@ -247,11 +385,24 @@ fn seek(any st, int frame) bool {
    st.set("cursor", frame)
    true
 }
+
 fn tell(any st) int { is_dict(st) ? int(st.get("cursor", 0)) : 0 }
+
 fn length(any st) int { is_dict(st) ? int(st.get("frames", 0)) : 0 }
+
 fn format(any st) any { is_dict(st) ? st.get("format", [0, 0, 0]) : [0, 0, 0] }
+
 fn close(any st) bool {
    if !is_dict(st) || !st.get("file", 0) { return false }
+   if st.get("kind") == "flac" || st.get("kind") == "mpeg" {
+      st.set("file", 0)
+      return true
+   }
+   if st.get("kind") == "sndfile" {
+      def rc = ffi.any1(_sf_close_fn, st.get("file"))
+      st.set("file", 0)
+      return int(rc) == 0
+   }
    def rc = fclose(st.get("file"))
    st.set("file", 0)
    rc == 0

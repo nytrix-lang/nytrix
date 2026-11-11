@@ -1,3 +1,6 @@
+/*
+ * LLVM execution profiling hooks for compiled Nytrix functions.
+ */
 #include "code/lang/code.h"
 #include "code/lang/priv.h"
 

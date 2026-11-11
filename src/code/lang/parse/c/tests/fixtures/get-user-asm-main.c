@@ -1,3 +1,6 @@
+/*
+ * Fixture driver: invoke x86 get-user helpers with representative addresses.
+ */
 unsigned long get_user_asm_probe(unsigned long *);
 unsigned long get_user_asm_probe32(unsigned long *);
 int main(void) {

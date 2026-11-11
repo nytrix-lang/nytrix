@@ -1,3 +1,6 @@
+/*
+ * Parser/backend fixture for conditional mutation and return values.
+ */
 long c_if_increment(long value, long flag) {
   if (flag)
     value = value + 1;

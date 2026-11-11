@@ -967,36 +967,42 @@ fn _core_has_tag(any x, any tag) bool {
 }
 
 @jit
+
 ;; Returns whether `x` is a list.
 fn is_list(any x) bool {
    return _core_has_tag(x, runtime_tag_raw("list"))
 }
 
 @jit
+
 ;; Returns whether `x` is a dictionary.
 fn is_dict(any x) bool {
    return _core_has_tag(x, runtime_tag_raw("dict"))
 }
 
 @jit
+
 ;; Returns whether `x` is a set.
 fn is_set(any x) bool {
    return _core_has_tag(x, runtime_tag_raw("set"))
 }
 
 @jit
+
 ;; Returns whether `x` is a tuple.
 fn is_tuple(any x) bool {
    return _core_has_tag(x, runtime_tag_raw("tuple"))
 }
 
 @jit
+
 ;; Returns whether `x` is a range.
 fn is_range(any x) bool {
    return _core_has_tag(x, runtime_tag_raw("range"))
 }
 
 @jit
+
 ;; Returns whether `x` is a byte string.
 fn is_bytes(any x) bool {
    return _core_has_tag(x, runtime_tag_raw("bytes"))

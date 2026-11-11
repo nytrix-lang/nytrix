@@ -1,3 +1,6 @@
+/*
+ * Inline assembly fixture for a runtime shift with an emitted metadata section.
+ */
 static unsigned int runtime_shift(unsigned int value) {
   unsigned int result = value;
   __asm__ volatile("shrl $12,%k0\n1:\n"

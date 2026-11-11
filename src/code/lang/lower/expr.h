@@ -1,3 +1,4 @@
+/* Native lowering helpers for expressions, target checks, and constants. */
 static bool ny_native_target_platform_ident(const ny_options *opt,
                                             const char *name, bool *out);
 
@@ -1076,7 +1077,8 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
       /* The lowered operand's class is the physical truth: the expression
        * predicates do not see through conversions such as `float(x)`, and an
        * integer subtract on f64 bits produces garbage.  Subtracting from -0.0
-       * is exact IEEE negation; subtracting from +0.0 loses the sign of zero. */
+       * is exact IEEE negation; subtracting from +0.0 loses the sign of zero.
+       */
       nyr_scalar_class_t operand_class = nyr_value_scalar_class(b, rv);
       if (operand_class == NYIR_SCALAR_F32 ||
           (operand_class != NYIR_SCALAR_F64 &&
@@ -1396,36 +1398,44 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
     return b->last_value;
   }
   case NY_E_CALL:
-    /* The stdlib int(any) compatibility wrapper decodes tagged values into
-     * raw i64.  An integer produced by a raw bitwise global is already
-     * normalized at that boundary, so lower the value using its physical
-     * representation instead of inlining the wrapper and decoding twice. */
+    /* Preserve physical integer provenance for raw bitwise values and raw
+     * memory reads. Dynamic list index reads instead return tagged words even
+     * when inference has narrowed the element type to int. */
     if (e->as.call.args.len == 1 && e->as.call.args.data[0].val &&
-        (nyr_raw_bitwise_value(b, e->as.call.args.data[0].val, 0) ||
-         nyr_expr_is_raw_dynamic_read(b, e->as.call.args.data[0].val)) &&
-        ny_native_call_leaf(e) && strcmp(ny_native_call_leaf(e), "int") == 0 &&
-        e->as.call.args.len == 1 && e->as.call.args.data[0].val) {
+        ny_native_call_leaf(e) && strcmp(ny_native_call_leaf(e), "int") == 0) {
       const expr_t *arg_expr = e->as.call.args.data[0].val;
       bool raw_dynamic_read = nyr_expr_is_raw_dynamic_read(b, arg_expr);
-      int value = nyr_lower_expr(b, arg_expr);
-      if (value < 0)
-        return -1;
-      nyr_scalar_class_t cls = nyr_value_scalar_class(b, value);
-      if (cls == NYIR_SCALAR_F64)
-        return nyr_emit_f64_to_i64(b, value);
-      if (cls == NYIR_SCALAR_F32)
-        return nyr_emit_f32_to_i64(b, value);
-      if (cls == NYIR_SCALAR_I64_RAW)
+      bool known_raw_int = nyr_raw_bitwise_value(b, arg_expr, 0);
+      const nyr_local_t *list_target = NULL;
+      if (arg_expr->kind == NY_E_INDEX && arg_expr->as.index.target &&
+          arg_expr->as.index.target->kind == NY_E_IDENT &&
+          arg_expr->as.index.target->as.ident.name)
+        list_target =
+            nyr_find_local_nearest(b, arg_expr->as.index.target->as.ident.name);
+      bool dynamic_list_index = list_target && list_target->type_name &&
+                                strcmp(list_target->type_name, "list") == 0;
+      if (known_raw_int || raw_dynamic_read || dynamic_list_index) {
+        int value = nyr_lower_expr(b, arg_expr);
+        if (value < 0)
+          return -1;
+        nyr_scalar_class_t cls = nyr_value_scalar_class(b, value);
+        if (cls == NYIR_SCALAR_F64)
+          return nyr_emit_f64_to_i64(b, value);
+        if (cls == NYIR_SCALAR_F32)
+          return nyr_emit_f32_to_i64(b, value);
+        if (cls == NYIR_SCALAR_I64_RAW && !dynamic_list_index)
+          return value;
+        /* Indexed scalar-list slots and raw memory reads already contain the
+         * payload word. rt_any_to_i64 guesses from the low bit and would halve
+         * odd raw integers as if they were tagged. */
+        if (raw_dynamic_read && !dynamic_list_index)
+          return value;
+        if (cls == NYIR_SCALAR_I64_TAGGED || nyr_expr_is_any(b, arg_expr) ||
+            dynamic_list_index)
+          return nyr_emit_runtime_call(b, "rt_any_to_i64", value, -1, -1, 1,
+                                       NYIR_SCALAR_I64_RAW);
         return value;
-      /* Indexed scalar-list slots and raw memory reads already contain the
-       * payload word. rt_any_to_i64 guesses from the low bit and would halve
-       * odd raw integers as if they were tagged. */
-      if (raw_dynamic_read)
-        return value;
-      if (cls == NYIR_SCALAR_I64_TAGGED || nyr_expr_is_any(b, arg_expr))
-        return nyr_emit_runtime_call(b, "rt_any_to_i64", value, -1, -1, 1,
-                                     NYIR_SCALAR_I64_RAW);
-      return value;
+      }
     }
     return nyr_lower_call(b, e);
   case NY_E_SIZEOF: {
@@ -2370,10 +2380,10 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
      * Mixed numeric lists need descriptors so index lowering can carry each
      * element's runtime type alongside its raw 64-bit payload.
      */
-    size_t stride = string_elements || saw_bool_word ||
-                            (saw_int_word && saw_float_word)
-                        ? 24
-                        : 8;
+    size_t stride =
+        string_elements || saw_bool_word || (saw_int_word && saw_float_word)
+            ? 24
+            : 8;
     const char *arr_sym = nyr_arraytab_intern(values, count, stride, NULL, 0);
     free(values);
     if (!arr_sym)
@@ -2982,9 +2992,8 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
           target_local && target_local->list_literal
               ? target_local->list_literal
               : literal_target;
-      if (local_list_literal &&
-          (local_list_literal->kind == NY_E_LIST ||
-           local_list_literal->kind == NY_E_TUPLE)) {
+      if (local_list_literal && (local_list_literal->kind == NY_E_LIST ||
+                                 local_list_literal->kind == NY_E_TUPLE)) {
         for (size_t i = 0; i < local_list_literal->as.list_like.len; ++i) {
           const expr_t *element = local_list_literal->as.list_like.data[i];
           const char *constructor =
@@ -3086,8 +3095,7 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
      * proven raw representation as before. */
     if (dynamic_index_result && index_result_known &&
         !dynamic_sequence_target && !typed_descriptor_target &&
-        !unknown_call_receiver &&
-        !b->index_for_any_call)
+        !unknown_call_receiver && !b->index_for_any_call)
       dynamic_index_result = false;
     if (dynamic_index_result) {
       if (e->as.index.target && e->as.index.target->kind == NY_E_IDENT &&
@@ -3319,7 +3327,8 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
        * dynamic word, even when type inference knows the element is scalar.
        * Keep that physical ABI visible so consumers decode exactly once.
        */
-      if (unknown_call_receiver && !nyr_expr_is_f64(b, e)) {
+      if ((unknown_call_receiver || dynamic_sequence_target) &&
+          !nyr_expr_is_f64(b, e)) {
         ((expr_t *)e)->semantic.resolved = true;
         ((expr_t *)e)->semantic.rep = NY_SEM_REP_TAGGED_DYNAMIC;
       }
@@ -3572,21 +3581,18 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
                                : NULL;
       bool dynamic = nyr_expr_is_dyn_list(b, target);
       int list = nyr_lower_expr(b, target);
-      int out =
-          list < 0
-              ? -1
-              : dynamic
-                    ? nyr_emit_runtime_call(b, "rt_tbuf_pop_any", list, -1,
-                                            -1, 1, NYIR_SCALAR_I64_TAGGED)
+      int out = list < 0 ? -1
+                : dynamic
+                    ? nyr_emit_runtime_call(b, "rt_tbuf_pop_any", list, -1, -1,
+                                            1, NYIR_SCALAR_I64_TAGGED)
                     : nyr_emit_native_list_pop_raw(b, list);
       if (out < 0)
         return -1;
       int length = nyr_emit_known_list_pop_len(b, list);
       if (length < 0)
-        length = dynamic
-                     ? nyr_emit_runtime_call(b, "rt_tbuf_len_raw", list, -1,
-                                             -1, 1, 0)
-                     : nyr_emit_native_list_length_raw(b, list);
+        length = dynamic ? nyr_emit_runtime_call(b, "rt_tbuf_len_raw", list, -1,
+                                                 -1, 1, 0)
+                         : nyr_emit_native_list_length_raw(b, list);
       if (length < 0 || !nyr_record_list_len_fact(b, list, length))
         return -1;
       if (local) {
@@ -4007,6 +4013,11 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
                                   nyr_expr_is_list(b, append_value) ||
                                   nyr_expr_is_bytes(b, append_value) ||
                                   append_value_is_async;
+      /* Call lowering can lose source-level return ABI facts when it emits
+       * the result into the current block. Capture the expression contract
+       * before lowering it. */
+      bool append_expr_has_raw_int_abi =
+          nyr_expr_has_raw_int_abi(b, append_value, 0);
       bool saved_value_for_any_call = b->value_for_any_call;
       if (append_value_for_any)
         b->value_for_any_call = true;
@@ -4055,17 +4066,25 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
        * integers cannot need the string-provenance check, and this call also
        * avoids passing append_raw's unused third ABI argument. */
       bool append_value_is_raw_integer =
-          append_value &&
-          ((append_value->kind == NY_E_LITERAL &&
-            append_value->as.literal.kind == NY_LIT_INT &&
-            append_value->tok.kind != NY_T_NIL) ||
-           (append_value->semantic.resolved &&
-            append_value->semantic.rep == NY_SEM_REP_RAW_INT) ||
-           (append_value_local &&
-            append_value_local->semantic_rep == NY_SEM_REP_RAW_INT));
+          (value >= 0 &&
+           nyr_value_scalar_class(b, value) == NYIR_SCALAR_I64_RAW) ||
+          (append_value &&
+           ((append_value->kind == NY_E_LITERAL &&
+             append_value->as.literal.kind == NY_LIT_INT &&
+             append_value->tok.kind != NY_T_NIL) ||
+            (append_value->semantic.resolved &&
+             append_value->semantic.rep == NY_SEM_REP_RAW_INT) ||
+            (append_value_local &&
+             append_value_local->semantic_rep == NY_SEM_REP_RAW_INT) ||
+            append_expr_has_raw_int_abi));
+      /* A dynamic list still stores raw integer call results as raw values;
+       * its getter boxes them at the language boundary. Using the dedicated
+       * entry avoids interpreting an unboxed odd integer as a tagged word.
+       * Concrete float classification takes precedence over stale raw-int
+       * metadata on a mutable local. */
       if (!append_is_string && !nyr_expr_is_raw_dynamic_read(b, append_value) &&
-          strcmp(append_symbol, "rt_tbuf_append_raw") == 0 &&
-          append_value_is_raw_integer)
+          !nyr_expr_is_f64(b, append_value) &&
+          !nyr_expr_is_f32(b, append_value) && append_value_is_raw_integer)
         append_symbol = "rt_tbuf_append_i64_raw";
       if (strcmp(append_symbol, "rt_tbuf_append_tagged") == 0) {
         bool is_bool_val = nyr_expr_is_bool(b, append_value);
@@ -4074,16 +4093,7 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
         if (is_bool_val) {
           value = nyr_box_bool(b, value);
         } else {
-          bool raw_integer =
-              append_value &&
-              ((append_value->kind == NY_E_LITERAL &&
-                append_value->as.literal.kind == NY_LIT_INT &&
-                append_value->tok.kind != NY_T_NIL) ||
-               (append_value->semantic.resolved &&
-                append_value->semantic.rep == NY_SEM_REP_RAW_INT) ||
-               (append_value_local &&
-                append_value_local->semantic_rep == NY_SEM_REP_RAW_INT));
-          if (raw_integer) {
+          if (append_value_is_raw_integer) {
             value = nyr_emit_runtime_call(b, "rt_tag", value, -1, -1, 1, 0);
           } else if (nyr_expr_is_f64(b, append_value) ||
                      nyr_expr_is_f32(b, append_value)) {

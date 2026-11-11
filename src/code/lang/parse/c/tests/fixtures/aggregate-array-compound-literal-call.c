@@ -1,3 +1,6 @@
+/*
+ * Fixture: pass an aggregate compound-literal element to a function.
+ */
 struct aggregate_array_item {
   unsigned vendor;
   unsigned device;

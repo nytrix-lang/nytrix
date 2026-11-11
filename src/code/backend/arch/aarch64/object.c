@@ -80,9 +80,6 @@ typedef struct {
   size_t err_len;
 } ny_a64_obj_ctx_t;
 
-static bool ny_a64_debug_line_push(nyr_native_debug_line_t **lines,
-                                   size_t *count, size_t *cap,
-                                   nyr_native_debug_line_t line);
 static bool ny_a64_mach_build_bundle_debug(
     const nyr_mach_func_t *rt_main_mir, const nyr_mach_func_t *func_mirs,
     const char *const *func_names, size_t func_count,
@@ -135,12 +132,23 @@ static int ny_a64_align(int value, int align) {
   return (value + align - 1) & ~(align - 1);
 }
 
-static bool ny_a64_mov_imm(ny_a64_obj_ctx_t *c, unsigned reg, int64_t value);
-
 static bool ny_a64_u32(ny_a64_obj_ctx_t *c, uint32_t word) {
   if (!nyr_obj_u32(&c->code, word)) {
     nyr_set_error(c->err, c->err_len, "AArch64 object writer: out of memory");
     return false;
+  }
+  return true;
+}
+
+static bool ny_a64_mov_imm(ny_a64_obj_ctx_t *c, unsigned reg, int64_t value) {
+  uint64_t bits = (uint64_t)value;
+  if (!ny_a64_u32(c, 0xd2800000u | ((uint32_t)(bits & 0xffffu) << 5) | reg))
+    return false;
+  for (unsigned shift = 16; shift < 64; shift += 16) {
+    unsigned part = (unsigned)((bits >> shift) & 0xffffu);
+    if (part && !ny_a64_u32(c, 0xf2800000u | ((shift / 16u) << 21) |
+                                   ((uint32_t)part << 5) | reg))
+      return false;
   }
   return true;
 }
@@ -491,19 +499,6 @@ static bool ny_a64_fp_binop(ny_a64_obj_ctx_t *c, const nyr_inst_t *in,
          ny_a64_store_fp_value(c, in->dst, 0, f32);
 }
 
-static bool ny_a64_mov_imm(ny_a64_obj_ctx_t *c, unsigned reg, int64_t value) {
-  uint64_t bits = (uint64_t)value;
-  if (!ny_a64_u32(c, 0xd2800000u | ((uint32_t)(bits & 0xffffu) << 5) | reg))
-    return false;
-  for (unsigned shift = 16; shift < 64; shift += 16) {
-    unsigned part = (unsigned)((bits >> shift) & 0xffffu);
-    if (part && !ny_a64_u32(c, 0xf2800000u | ((shift / 16u) << 21) |
-                                   ((uint32_t)part << 5) | reg))
-      return false;
-  }
-  return true;
-}
-
 static bool ny_a64_binop(ny_a64_obj_ctx_t *c, const nyr_inst_t *in,
                          uint32_t op) {
   return ny_a64_load_value(c, 0, in->a) && ny_a64_load_value(c, 1, in->b) &&
@@ -574,6 +569,17 @@ static bool ny_a64_control_flow_init(ny_a64_obj_ctx_t *c) {
   c->patch_cap = cap;
   c->return_cap = cap;
   return true;
+}
+
+static void ny_a64_obj_ctx_dispose(ny_a64_obj_ctx_t *c) {
+  free(c->value_offs);
+  free(c->local_offs);
+  free(c->alloca_offs);
+  free(c->agg_home_offs);
+  free(c->relocs);
+  ny_a64_control_flow_free(c);
+  nyr_obj_free(&c->code);
+  nyr_type_map_free(&c->types);
 }
 
 static bool ny_a64_patch_branch(ny_a64_obj_ctx_t *c, size_t off, size_t target,
@@ -2262,8 +2268,7 @@ static bool ny_a64_emit_inst(ny_a64_obj_ctx_t *c, const nyr_inst_t *in) {
     /*
      * dup v0.2d, x0; copy both 128-bit halves into the 256-bit home.
      */
-    return ny_a64_load_value(c, 0, in->a) &&
-           ny_a64_u32(c, 0x4e080c00u) &&
+    return ny_a64_load_value(c, 0, in->a) && ny_a64_u32(c, 0x4e080c00u) &&
            ny_a64_store_vec4_half(c, in->dst, 0, 0) &&
            ny_a64_store_vec4_half(c, in->dst, 1, 0);
   case NYIR_VEC4_SET1_F64:
@@ -3255,7 +3260,12 @@ static bool ny_a64_emit_code(ny_a64_obj_ctx_t *c, bool user_function,
 }
 
 static int ny_a64_def_index(const ny_a64_def_t *defs, size_t count,
-                            const char *name);
+                            const char *name) {
+  for (size_t i = 0; i < count; ++i)
+    if (strcmp(defs[i].name, name) == 0)
+      return (int)i;
+  return -1;
+}
 
 static bool ny_a64_append_str_defs(nyr_obj_buf_t *code, ny_a64_def_t *defs,
                                    size_t *def_count,
@@ -3336,14 +3346,6 @@ static bool ny_a64_append_array_defs(nyr_obj_buf_t *code, ny_a64_def_t *defs,
   return ok;
 }
 
-static int ny_a64_def_index(const ny_a64_def_t *defs, size_t count,
-                            const char *name) {
-  for (size_t i = 0; i < count; ++i)
-    if (strcmp(defs[i].name, name) == 0)
-      return (int)i;
-  return -1;
-}
-
 static int ny_a64_name_index(char names[][256], size_t count,
                              const char *name) {
   for (size_t i = 0; i < count; ++i)
@@ -3370,27 +3372,13 @@ static bool ny_a64_append(nyr_obj_buf_t *code, ny_a64_def_t *defs,
   if (!ny_a64_control_flow_init(&c))
     return false;
   if (!ny_a64_emit_code(&c, user_function, tag_return)) {
-    free(c.value_offs);
-    free(c.local_offs);
-    free(c.alloca_offs);
-    free(c.agg_home_offs);
-    free(c.relocs);
-    ny_a64_control_flow_free(&c);
-    nyr_type_map_free(&c.types);
-    nyr_obj_free(&c.code);
+    ny_a64_obj_ctx_dispose(&c);
     return false;
   }
   if (!ny_a64_reserve_relocs(relocs, reloc_cap, *reloc_count + c.reloc_count,
                              err, err_len) ||
       !nyr_obj_emit(code, c.code.data, c.code.len)) {
-    free(c.value_offs);
-    free(c.local_offs);
-    free(c.alloca_offs);
-    free(c.agg_home_offs);
-    free(c.relocs);
-    ny_a64_control_flow_free(&c);
-    nyr_type_map_free(&c.types);
-    nyr_obj_free(&c.code);
+    ny_a64_obj_ctx_dispose(&c);
     return false;
   }
   ny_a64_def_t *def = &defs[(*def_count)++];
@@ -3402,14 +3390,7 @@ static bool ny_a64_append(nyr_obj_buf_t *code, ny_a64_def_t *defs,
     (*relocs)[*reloc_count].off += start;
     (*reloc_count)++;
   }
-  free(c.value_offs);
-  free(c.local_offs);
-  free(c.alloca_offs);
-  free(c.agg_home_offs);
-  free(c.relocs);
-  ny_a64_control_flow_free(&c);
-  nyr_obj_free(&c.code);
-  nyr_type_map_free(&c.types);
+  ny_a64_obj_ctx_dispose(&c);
   return true;
 }
 
@@ -3427,6 +3408,15 @@ typedef struct {
   const ny_native_target_info_t *target;
   ny_a64_parallel_result_t *results;
 } ny_a64_parallel_ctx_t;
+
+static void ny_a64_parallel_results_free(ny_a64_parallel_result_t *results,
+                                         size_t count) {
+  for (size_t i = 0; i < count; ++i) {
+    nyr_obj_free(&results[i].code);
+    free(results[i].relocs);
+  }
+  free(results);
+}
 
 static bool ny_a64_parallel_task(size_t i, void *opaque) {
   ny_a64_parallel_ctx_t *ctx = (ny_a64_parallel_ctx_t *)opaque;
@@ -3465,11 +3455,7 @@ static bool ny_a64_append_functions_parallel(
           snprintf(err, err_len, "%s", results[i].error);
           break;
         }
-    for (size_t i = 0; i < func_count; ++i) {
-      nyr_obj_free(&results[i].code);
-      free(results[i].relocs);
-    }
-    free(results);
+    ny_a64_parallel_results_free(results, func_count);
     return false;
   }
   bool ok = true;
@@ -3498,18 +3484,8 @@ static bool ny_a64_append_functions_parallel(
       (*reloc_count)++;
     }
   }
-  for (size_t i = 0; i < func_count; ++i) {
-    nyr_obj_free(&results[i].code);
-    free(results[i].relocs);
-  }
-  free(results);
+  ny_a64_parallel_results_free(results, func_count);
   return ok;
-}
-
-static bool ny_a64_elf_sym(nyr_obj_buf_t *b, uint32_t name, unsigned info,
-                           uint16_t shndx, uint64_t value, uint64_t size) {
-  return nyr_obj_u32(b, name) && nyr_obj_u8(b, info) && nyr_obj_u8(b, 0) &&
-         nyr_obj_u16(b, shndx) && nyr_obj_u64(b, value) && nyr_obj_u64(b, size);
 }
 
 static bool ny_a64_elf_sh(nyr_obj_buf_t *b, uint32_t name, uint32_t type,
@@ -3860,7 +3836,7 @@ bool nyr_native_emit_elf64_aarch64_object_from_nirs(
       const nyr_debug_loc_t *loc = &funcs[i].data[j].debug;
       if (!loc->line)
         continue;
-      if (!ny_a64_debug_line_push(
+      if (!nyr_native_debug_line_append(
               &debug_lines, &debug_line_count, &debug_line_cap,
               (nyr_native_debug_line_t){(size_t)def_i, defs[def_i].off,
                                         loc->file, loc->line, loc->column}))
@@ -3877,7 +3853,7 @@ bool nyr_native_emit_elf64_aarch64_object_from_nirs(
       const nyr_debug_loc_t *loc = &rt_main->data[j].debug;
       if (!loc->line)
         continue;
-      if (!ny_a64_debug_line_push(
+      if (!nyr_native_debug_line_append(
               &debug_lines, &debug_line_count, &debug_line_cap,
               (nyr_native_debug_line_t){(size_t)entry_i, defs[entry_i].off,
                                         loc->file, loc->line, loc->column}))
@@ -3986,14 +3962,14 @@ bool nyr_native_emit_elf64_aarch64_object_from_nirs(
   }
   size_t rela_debug_size = file.len - rela_debug_off;
   size_t symtab_off = file.len;
-  if (!ny_a64_elf_sym(&file, 0, 0, 0, 0, 0))
+  if (!nyr_obj_elf64_write_sym(&file, 0, 0, 0, 0, 0))
     goto done;
   for (size_t i = 0; i < def_count; ++i)
-    if (!ny_a64_elf_sym(&file, def_names[i], 0x12, 1, defs[i].off,
-                        defs[i].size))
+    if (!nyr_obj_elf64_write_sym(&file, def_names[i], 0x12, 1, defs[i].off,
+                                 defs[i].size))
       goto done;
   for (size_t i = 0; i < extern_count; ++i)
-    if (!ny_a64_elf_sym(&file, ext_names[i], 0x12, 0, 0, 0))
+    if (!nyr_obj_elf64_write_sym(&file, ext_names[i], 0x12, 0, 0, 0))
       goto done;
   size_t symtab_size = file.len - symtab_off;
   size_t strtab_off = file.len;
@@ -4645,19 +4621,13 @@ static int a64_mach_fpr_reg(const a64_mach_fpr_state_t *state, uint32_t vreg,
   return seg->color;
 }
 
-static const nyr_mach_live_segment_t *
-a64_mach_fpr_segment(const a64_mach_fpr_state_t *state, uint32_t vreg,
-                     size_t inst) {
-  return state ? nyr_mach_regalloc_segment_at(&state->alloc, vreg, inst) : NULL;
-}
-
 static bool a64_mach_fpr_carries(const a64_mach_fpr_state_t *state,
                                  uint32_t vreg,
                                  const nyr_mach_live_segment_t *seg) {
   if (!state || !seg || seg->start == 0 || seg->reload || seg->color < 0)
     return false;
   const nyr_mach_live_segment_t *prev =
-      a64_mach_fpr_segment(state, vreg, seg->start - 1);
+      nyr_mach_regalloc_segment_at(&state->alloc, vreg, seg->start - 1);
   return prev && prev->end + 1 == seg->start && !prev->spill &&
          prev->color == seg->color;
 }
@@ -4666,7 +4636,8 @@ static bool a64_mach_fpr_begin(a64_mach_fpr_state_t *state, size_t inst) {
   if (!state || !state->seeded)
     return true;
   for (uint32_t v = 0; v < state->colors_len; ++v) {
-    const nyr_mach_live_segment_t *seg = a64_mach_fpr_segment(state, v, inst);
+    const nyr_mach_live_segment_t *seg =
+        nyr_mach_regalloc_segment_at(&state->alloc, v, inst);
     if (seg && seg->start == inst)
       state->seeded[v] = a64_mach_fpr_carries(state, v, seg);
   }
@@ -4679,11 +4650,12 @@ static bool a64_mach_fpr_end(const nyr_mach_func_t *mach,
   if (!mach || !state || !state->seeded)
     return true;
   for (uint32_t v = 0; v < state->colors_len; ++v) {
-    const nyr_mach_live_segment_t *seg = a64_mach_fpr_segment(state, v, inst);
+    const nyr_mach_live_segment_t *seg =
+        nyr_mach_regalloc_segment_at(&state->alloc, v, inst);
     if (!seg || seg->end != inst)
       continue;
     const nyr_mach_live_segment_t *next =
-        a64_mach_fpr_segment(state, v, inst + 1);
+        nyr_mach_regalloc_segment_at(&state->alloc, v, inst + 1);
     bool needs_home =
         seg->spill || (next && !a64_mach_fpr_carries(state, v, next));
     if (needs_home && seg->color >= 0 && state->seeded[v]) {
@@ -5027,79 +4999,6 @@ static bool a64_mach_fpr_encode(const nyr_mach_func_t *mach,
  */
 #define A64_MACH_VECTOR_COLOR_N 8
 
-/*
- * Target-tier reporting uses the same physical-color budgets as the AArch64
- * encoder.  Unlike the fast-path eligibility checks below, telemetry still
- * summarizes uncolored segments: a spill is exactly the information the
- * report is meant to expose rather than a reason to suppress the row.
- */
-static bool a64_mach_profile_hot_loop_block(const nyr_mach_func_t *mach,
-                                            uint32_t block) {
-  if (!mach || block >= mach->block_len)
-    return false;
-  uint32_t source_pc = mach->blocks[block].source_pc;
-  return source_pc != UINT32_MAX && ny_native_profile_loop_hot(source_pc) >= 16;
-}
-
-static size_t a64_mach_regalloc_hot_peak_live(const nyr_mach_func_t *mach,
-                                              const nyr_mach_regalloc_t *a,
-                                              size_t inst_len) {
-  if (!mach || !a || !inst_len)
-    return 0;
-  int *delta = calloc(inst_len + 1, sizeof(*delta));
-  if (!delta)
-    return 0;
-  for (size_t i = 0; i < a->segment_len; ++i) {
-    const nyr_mach_live_segment_t *seg = &a->segments[i];
-    if (!a64_mach_profile_hot_loop_block(mach, seg->block) ||
-        seg->start >= inst_len)
-      continue;
-    size_t end = seg->end < inst_len ? seg->end : inst_len - 1;
-    ++delta[seg->start];
-    if (end + 1 < inst_len)
-      --delta[end + 1];
-  }
-  size_t peak = 0;
-  int live = 0;
-  for (size_t pc = 0; pc < inst_len; ++pc) {
-    live += delta[pc];
-    if (live > 0 && (size_t)live > peak)
-      peak = (size_t)live;
-  }
-  free(delta);
-  return peak;
-}
-
-static void a64_mach_regalloc_summarize(const nyr_mach_func_t *mach,
-                                        const nyr_mach_regalloc_t *a,
-                                        size_t inst_len,
-                                        nyr_native_regalloc_metrics_t *out) {
-  if (!out)
-    return;
-  *out = (nyr_native_regalloc_metrics_t){0};
-  if (!a)
-    return;
-  out->segments = a->segment_len;
-  for (size_t i = 0; i < a->segment_len; ++i) {
-    const nyr_mach_live_segment_t *seg = &a->segments[i];
-    if (seg->color >= 0)
-      ++out->colored;
-    else
-      ++out->spilled;
-    if (seg->reload)
-      ++out->reloads;
-    if (!a64_mach_profile_hot_loop_block(mach, seg->block))
-      continue;
-    ++out->hot_loop_segments;
-    if (seg->color < 0)
-      ++out->hot_loop_spilled;
-    if (seg->reload)
-      ++out->hot_loop_reloads;
-  }
-  out->peak_live = nyr_mach_regalloc_peak_live(a, inst_len);
-  out->hot_loop_peak_live = a64_mach_regalloc_hot_peak_live(mach, a, inst_len);
-}
-
 bool nyr_native_a64_regalloc_metrics(const nyr_mach_func_t *mach,
                                      nyr_native_regalloc_metrics_t *gpr,
                                      nyr_native_regalloc_metrics_t *fpr,
@@ -5117,21 +5016,21 @@ bool nyr_native_a64_regalloc_metrics(const nyr_mach_func_t *mach,
   if (mach->vreg_len &&
       !nyr_mach_regalloc_build(mach, A64_MACH_COLOR_N, &alloc))
     return false;
-  a64_mach_regalloc_summarize(mach, &alloc, mach->inst_len, gpr);
+  nyr_mach_regalloc_summarize(mach, &alloc, mach->inst_len, gpr);
   nyr_mach_regalloc_free(&alloc);
 
   if (mach->vreg_len &&
       !nyr_mach_regalloc_build_class(mach, NYR_MACH_REGCLASS_FPR,
                                      A64_MACH_FPR_COLOR_N, &alloc))
     return false;
-  a64_mach_regalloc_summarize(mach, &alloc, mach->inst_len, fpr);
+  nyr_mach_regalloc_summarize(mach, &alloc, mach->inst_len, fpr);
   nyr_mach_regalloc_free(&alloc);
 
   if (mach->vreg_len &&
       !nyr_mach_regalloc_build_class(mach, NYR_MACH_REGCLASS_VECTOR,
                                      A64_MACH_VECTOR_COLOR_N, &alloc))
     return false;
-  a64_mach_regalloc_summarize(mach, &alloc, mach->inst_len, vector);
+  nyr_mach_regalloc_summarize(mach, &alloc, mach->inst_len, vector);
   nyr_mach_regalloc_free(&alloc);
   return true;
 }
@@ -5153,12 +5052,6 @@ static int a64_mach_vector_reg(const a64_mach_vector_state_t *state,
   return seg->color;
 }
 
-static const nyr_mach_live_segment_t *
-a64_mach_vector_segment(const a64_mach_vector_state_t *state, uint32_t vreg,
-                        size_t inst) {
-  return state ? nyr_mach_regalloc_segment_at(&state->alloc, vreg, inst) : NULL;
-}
-
 static bool a64_mach_is_v128(const nyr_mach_func_t *m,
                              const nyr_mach_operand_t *op) {
   if (!op || op->kind != NYR_MACH_OPERAND_VREG || op->as.reg >= m->vreg_len ||
@@ -5175,7 +5068,7 @@ static bool a64_mach_vector_carries(const a64_mach_vector_state_t *state,
   if (!state || !seg || seg->start == 0 || seg->reload || seg->color < 0)
     return false;
   const nyr_mach_live_segment_t *prev =
-      a64_mach_vector_segment(state, vreg, seg->start - 1);
+      nyr_mach_regalloc_segment_at(&state->alloc, vreg, seg->start - 1);
   /*
    * Every CFG edge communicates through the vreg home. Reusing a color on
    * both sides of an edge must not be mistaken for register residency.
@@ -5189,7 +5082,7 @@ static bool a64_mach_vector_begin(a64_mach_vector_state_t *state, size_t inst) {
     return true;
   for (uint32_t v = 0; v < state->colors_len; ++v) {
     const nyr_mach_live_segment_t *seg =
-        a64_mach_vector_segment(state, v, inst);
+        nyr_mach_regalloc_segment_at(&state->alloc, v, inst);
     if (seg && seg->start == inst)
       state->seeded[v] = a64_mach_vector_carries(state, v, seg);
   }
@@ -5456,11 +5349,11 @@ static bool a64_mach_vector_end(a64_mach_vector_state_t *state,
     return true;
   for (uint32_t v = 0; v < state->colors_len; ++v) {
     const nyr_mach_live_segment_t *seg =
-        a64_mach_vector_segment(state, v, inst);
+        nyr_mach_regalloc_segment_at(&state->alloc, v, inst);
     if (!seg || seg->end != inst)
       continue;
     const nyr_mach_live_segment_t *next =
-        a64_mach_vector_segment(state, v, inst + 1);
+        nyr_mach_regalloc_segment_at(&state->alloc, v, inst + 1);
     bool needs_home =
         seg->spill || (next && !a64_mach_vector_carries(state, v, next));
     if (needs_home && seg->color >= 0 && state->seeded[v]) {
@@ -5483,7 +5376,7 @@ static bool a64_mach_vector_flush(a64_mach_vector_state_t *state,
     if (!state->seeded[v])
       continue;
     const nyr_mach_live_segment_t *seg =
-        a64_mach_vector_segment(state, v, inst);
+        nyr_mach_regalloc_segment_at(&state->alloc, v, inst);
     if (!seg || seg->color < 0)
       continue;
     nyr_mach_operand_t home = {.kind = NYR_MACH_OPERAND_VREG, .as.reg = v};
@@ -7486,29 +7379,6 @@ fail:
   return false;
 }
 
-static bool ny_a64_debug_line_push(nyr_native_debug_line_t **lines,
-                                   size_t *count, size_t *cap,
-                                   nyr_native_debug_line_t line) {
-  if (!lines || !count || !cap)
-    return false;
-  if (*count == *cap) {
-    if (*count == SIZE_MAX)
-      return false;
-    size_t next = *cap > SIZE_MAX / 2 ? *count + 1 : (*cap ? *cap * 2 : 32);
-    if (next < *count + 1)
-      next = *count + 1;
-    if (next > SIZE_MAX / sizeof(**lines))
-      return false;
-    nyr_native_debug_line_t *grown = realloc(*lines, next * sizeof(**lines));
-    if (!grown)
-      return false;
-    *lines = grown;
-    *cap = next;
-  }
-  (*lines)[(*count)++] = line;
-  return true;
-}
-
 static bool ny_a64_debug_machine_function(const nyr_mach_func_t *mach,
                                           const nyr_func_t *source,
                                           size_t def_index,
@@ -7523,7 +7393,7 @@ static bool ny_a64_debug_machine_function(const nyr_mach_func_t *mach,
         !source->data[source_pc].debug.line)
       continue;
     const nyr_debug_loc_t *loc = &source->data[source_pc].debug;
-    if (!ny_a64_debug_line_push(
+    if (!nyr_native_debug_line_append(
             lines, count, cap,
             (nyr_native_debug_line_t){def_index, inst_offsets[i], loc->file,
                                       loc->line, loc->column}))

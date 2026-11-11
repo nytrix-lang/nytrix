@@ -1,3 +1,4 @@
+/* Ny expression, statement, declaration, and type AST definitions. */
 #ifndef NY_AST_H
 #define NY_AST_H
 
@@ -265,7 +266,8 @@ typedef struct expr_call_t {
   expr_t *callee;
   ny_call_arg_list args;
   /* True only for the parser-generated call implementing `target[index] = v`;
-   * a source call named `set_idx` does not have indexed-assignment semantics. */
+   * a source call named `set_idx` does not have indexed-assignment semantics.
+   */
   bool synthetic_index_assignment;
   /* Internal parser marker for a reflection loop deferred in a template. */
   bool deferred_comptime_reflection;

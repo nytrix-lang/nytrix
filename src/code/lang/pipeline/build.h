@@ -1,3 +1,4 @@
+/* Build orchestration interfaces for compiling and linking Ny programs. */
 #ifndef NY_BACKEND_BUILDER_H
 #define NY_BACKEND_BUILDER_H
 

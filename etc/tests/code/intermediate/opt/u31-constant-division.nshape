@@ -1,0 +1,151 @@
+shape optcheck_u31_constant_division {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 optcheck division range-analysis]
+  template ny-test-case
+  flags_matrix "-O0 --color=never; -O3 --color=never; --native-only -O3 --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+;; The dividend is provably in [0, 2^31), so the encoder may use the unsigned
+;; multiply-shift reciprocal. q*d + r == x with 0 <= r < d fixes q and r
+;; uniquely, so the identity detects any wrong magic number or shift.
+fn check(int xin) int {
+   def x = xin & 2147483647
+   {
+      def q = x / 3
+      def r = x % 3
+      assert(r >= 0 && r < 3, "u31 remainder range 3")
+      assert(q * 3 + r == x, "u31 division identity 3")
+   }
+   {
+      def q = x / 5
+      def r = x % 5
+      assert(r >= 0 && r < 5, "u31 remainder range 5")
+      assert(q * 5 + r == x, "u31 division identity 5")
+   }
+   {
+      def q = x / 6
+      def r = x % 6
+      assert(r >= 0 && r < 6, "u31 remainder range 6")
+      assert(q * 6 + r == x, "u31 division identity 6")
+   }
+   {
+      def q = x / 7
+      def r = x % 7
+      assert(r >= 0 && r < 7, "u31 remainder range 7")
+      assert(q * 7 + r == x, "u31 division identity 7")
+   }
+   {
+      def q = x / 9
+      def r = x % 9
+      assert(r >= 0 && r < 9, "u31 remainder range 9")
+      assert(q * 9 + r == x, "u31 division identity 9")
+   }
+   {
+      def q = x / 10
+      def r = x % 10
+      assert(r >= 0 && r < 10, "u31 remainder range 10")
+      assert(q * 10 + r == x, "u31 division identity 10")
+   }
+   {
+      def q = x / 11
+      def r = x % 11
+      assert(r >= 0 && r < 11, "u31 remainder range 11")
+      assert(q * 11 + r == x, "u31 division identity 11")
+   }
+   {
+      def q = x / 12
+      def r = x % 12
+      assert(r >= 0 && r < 12, "u31 remainder range 12")
+      assert(q * 12 + r == x, "u31 division identity 12")
+   }
+   {
+      def q = x / 13
+      def r = x % 13
+      assert(r >= 0 && r < 13, "u31 remainder range 13")
+      assert(q * 13 + r == x, "u31 division identity 13")
+   }
+   {
+      def q = x / 25
+      def r = x % 25
+      assert(r >= 0 && r < 25, "u31 remainder range 25")
+      assert(q * 25 + r == x, "u31 division identity 25")
+   }
+   {
+      def q = x / 60
+      def r = x % 60
+      assert(r >= 0 && r < 60, "u31 remainder range 60")
+      assert(q * 60 + r == x, "u31 division identity 60")
+   }
+   {
+      def q = x / 100
+      def r = x % 100
+      assert(r >= 0 && r < 100, "u31 remainder range 100")
+      assert(q * 100 + r == x, "u31 division identity 100")
+   }
+   {
+      def q = x / 127
+      def r = x % 127
+      assert(r >= 0 && r < 127, "u31 remainder range 127")
+      assert(q * 127 + r == x, "u31 division identity 127")
+   }
+   {
+      def q = x / 255
+      def r = x % 255
+      assert(r >= 0 && r < 255, "u31 remainder range 255")
+      assert(q * 255 + r == x, "u31 division identity 255")
+   }
+   {
+      def q = x / 641
+      def r = x % 641
+      assert(r >= 0 && r < 641, "u31 remainder range 641")
+      assert(q * 641 + r == x, "u31 division identity 641")
+   }
+   {
+      def q = x / 1000
+      def r = x % 1000
+      assert(r >= 0 && r < 1000, "u31 remainder range 1000")
+      assert(q * 1000 + r == x, "u31 division identity 1000")
+   }
+   {
+      def q = x / 4097
+      def r = x % 4097
+      assert(r >= 0 && r < 4097, "u31 remainder range 4097")
+      assert(q * 4097 + r == x, "u31 division identity 4097")
+   }
+   {
+      def q = x / 65537
+      def r = x % 65537
+      assert(r >= 0 && r < 65537, "u31 remainder range 65537")
+      assert(q * 65537 + r == x, "u31 division identity 65537")
+   }
+   {
+      def q = x / 1000003
+      def r = x % 1000003
+      assert(r >= 0 && r < 1000003, "u31 remainder range 1000003")
+      assert(q * 1000003 + r == x, "u31 division identity 1000003")
+   }
+   {
+      def q = x / 2147483629
+      def r = x % 2147483629
+      assert(r >= 0 && r < 2147483629, "u31 remainder range 2147483629")
+      assert(q * 2147483629 + r == x, "u31 division identity 2147483629")
+   }
+   0
+}
+
+mut i = 0
+mut dummy = 0
+while i < 100000 {
+   dummy += check(i * 21474 + i % 7)
+   i += 1
+}
+dummy += check(2147483647)
+dummy += check(2147483646)
+dummy += check(0)
+dummy += check(1)
+assert(dummy == 0, "u31 division fixture ran")
+NY
+}

@@ -1,0 +1,73 @@
+shape gizmo-pick {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "sys", "render"]
+  template ny-test-case
+  expect compile_and_run
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect_stdout "GIZMO-PICK-OK"
+  source ny <<'NY'
+use core
+use core.math
+use core.os.ui.render.matrix as rmat
+use core.os.ui.render.viewer.gizmo as g
+
+fn row_len(list m, int r) f64 {
+   def a = rmat.mat4_get(m, r, 0)
+   def b = rmat.mat4_get(m, r, 1)
+   def c = rmat.mat4_get(m, r, 2)
+   sqrt(a * a + b * b + c * c)
+}
+
+fn check(bool ok, str what) {
+   assert(ok, what)
+}
+
+;; 1. look_at must stay orthonormal when the view direction is parallel to up.
+def top = rmat.mat4_look_at_xyz(0.0, 5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0)
+def bot = rmat.mat4_look_at_xyz(0.0, -5.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0)
+check(abs(row_len(top, 0) - 1.0) < 0.001 && abs(row_len(top, 1) - 1.0) < 0.001, "look_at straight down keeps unit side/up rows")
+check(abs(row_len(bot, 0) - 1.0) < 0.001 && abs(row_len(bot, 1) - 1.0) < 0.001, "look_at straight up keeps unit side/up rows")
+
+;; 2. gizmo picks through a real camera
+def W = 1280
+def H = 720
+def proj = rmat.mat4_perspective(1.0, float(W) / float(H), 0.1, 100.0)
+def view = rmat.mat4_look_at_xyz(4.0, 3.0, 5.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0)
+def vp = rmat.mat4_mul(proj, view)
+def bounds = [-1.0, -1.0, -1.0, 1.0, 1.0, 1.0]
+mut mode = 0
+while mode < 3 {
+   def m = g.metrics_screen(bounds, mode, vp, W, H)
+   def px = float(m.get(0))
+   def py = float(m.get(1))
+   def pz = float(m.get(2))
+   def len = float(m.get(4))
+   def c = g.project_point(vp, W, H, px, py, pz)
+   def ax = g.project_point(vp, W, H, px + len * 0.9, py, pz)
+   def ay = g.project_point(vp, W, H, px, py + len * 0.9, pz)
+   def az = g.project_point(vp, W, H, px, py, pz + len * 0.9)
+   if mode != 1 {
+      def hx = g.hit_test_screen(vp, W, H, bounds, mode, ax.get(0), ax.get(1))
+      def hy = g.hit_test_screen(vp, W, H, bounds, mode, ay.get(0), ay.get(1))
+      def hz = g.hit_test_screen(vp, W, H, bounds, mode, az.get(0), az.get(1))
+      check(hx.get("hit", false) && int(hx.get("axis", -1)) == 1, "mode " + str(mode) + " picks X")
+      check(hy.get("hit", false) && int(hy.get("axis", -1)) == 2, "mode " + str(mode) + " picks Y")
+      check(hz.get("hit", false) && int(hz.get("axis", -1)) == 3, "mode " + str(mode) + " picks Z")
+   }
+   def hc = g.hit_test_screen(vp, W, H, bounds, mode, c.get(0), c.get(1))
+   check(hc.get("hit", false), "mode " + str(mode) + " center is a hit")
+   def miss = g.hit_test_screen(vp, W, H, bounds, mode, 5.0, 5.0)
+   check(!miss.get("hit", true), "mode " + str(mode) + " far corner misses")
+   mode += 1
+}
+
+;; 3. degenerate bounds and a tiny window must not crash or hit spuriously
+def pt = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+def r0 = g.hit_test_screen(vp, W, H, pt, 0, 640.0, 360.0)
+check(is_dict(r0), "zero-size bounds return a dict")
+def r1 = g.hit_test_screen(vp, 8, 8, bounds, 0, 4.0, 4.0)
+check(is_dict(r1), "tiny window returns a dict")
+print("GIZMO-PICK-OK")
+NY
+}

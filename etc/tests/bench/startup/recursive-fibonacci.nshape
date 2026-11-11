@@ -11,13 +11,16 @@ shape recursive_fibonacci {
   source ny <<'NY'
 use core
 use core.os.time
+use core.os.prim (env)
+use core.common (parse_nonneg_int)
 
 fn fib(int n) int {
    if n < 2 { return n }
    fib(n - 1) + fib(n - 2)
 }
 
-def int n = 28 + (argc() & 1)
+def int requested_n = parse_nonneg_int(env("NYTRIX_BENCH_FIB_N"))
+def int n = requested_n >= 2 ? requested_n : 29
 mut total = 0
 def int start = ticks()
 mut i = 0
@@ -32,6 +35,7 @@ NY
   source c <<'C'
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <time.h>
 
 static int64_t now_ns(void) {
@@ -40,17 +44,23 @@ static int64_t now_ns(void) {
     return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
 }
 
-static int64_t fib(int64_t n) {
-    if (n < 2) return n;
-    return fib(n - 1) + fib(n - 2);
-}
-
 int main(int argc, char **argv) {
+    (void)argc;
     (void)argv;
-    int64_t n = 28 + (argc & 1);
+    const char *requested_n = getenv("NYTRIX_BENCH_FIB_N");
+    int64_t n = requested_n ? strtoll(requested_n, NULL, 10) : 0;
+    if (n < 2) n = 29;
     int64_t start = now_ns();
     int64_t total = 0;
-    for (int i = 0; i < 5; ++i) total += fib(n);
+    for (int i = 0; i < 5; ++i) {
+        int64_t a = 0, b = 1;
+        for (int64_t j = 0; j < n; ++j) {
+            int64_t next = a + b;
+            a = b;
+            b = next;
+        }
+        total += a;
+    }
     int64_t finish = now_ns();
     printf("checksum=%lld\n", (long long)total);
     if (finish <= start) finish = start + 1;

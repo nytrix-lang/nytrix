@@ -118,12 +118,12 @@ static const char *type_attached_owner(const char *name) {
     return NULL;
   const char *leaf = strrchr(name, '.');
   leaf = leaf ? leaf + 1 : name;
-#define NY_OWNER_IF_BASE(bname)                                                \
-  do {                                                                         \
-    size_t len = sizeof(bname) - 1;                                            \
-    if (strncmp(leaf, bname, len) == 0 &&                                      \
-        (leaf[len] == '\0' || leaf[len] == '<' || leaf[len] == '['))           \
-      return bname;                                                            \
+#define NY_OWNER_IF_BASE(bname)                                      \
+  do {                                                               \
+    size_t len = sizeof(bname) - 1;                                  \
+    if (strncmp(leaf, bname, len) == 0 &&                            \
+        (leaf[len] == '\0' || leaf[len] == '<' || leaf[len] == '[')) \
+      return bname;                                                  \
   } while (0)
   NY_OWNER_IF_BASE("any");
   NY_OWNER_IF_BASE("str");
@@ -148,12 +148,12 @@ static const char *type_builtin_generic_owner(const char *owner) {
     return NULL;
   const char *leaf = strrchr(owner, '.');
   leaf = leaf ? leaf + 1 : owner;
-#define NY_GENERIC_OWNER_IF_BASE(name)                                         \
-  do {                                                                         \
-    size_t len = sizeof(name) - 1;                                             \
-    if (strncmp(leaf, name, len) == 0 &&                                       \
-        (leaf[len] == '<' || leaf[len] == '['))                                \
-      return name;                                                             \
+#define NY_GENERIC_OWNER_IF_BASE(name)          \
+  do {                                          \
+    size_t len = sizeof(name) - 1;              \
+    if (strncmp(leaf, name, len) == 0 &&        \
+        (leaf[len] == '<' || leaf[len] == '[')) \
+      return name;                              \
   } while (0)
   NY_GENERIC_OWNER_IF_BASE("list");
   NY_GENERIC_OWNER_IF_BASE("dict");
@@ -2813,7 +2813,10 @@ static void ny_refine_memo_grow(codegen_t *cg) {
 }
 
 static bool ny_refine_memo_stale(codegen_t *cg) {
-  return cg->refine_memo && cg->refine_memo_epoch != cg->extra_progs.len;
+  return cg->refine_memo &&
+         (cg->refine_memo_extra_progs_len != cg->extra_progs.len ||
+          cg->refine_memo_refines_len != cg->refines.len ||
+          cg->refine_memo_registry_refines_len != cg->registry.refines.len);
 }
 
 static bool ny_refine_memo_get(codegen_t *cg, const char *name,
@@ -2836,7 +2839,9 @@ static void ny_refine_memo_put(codegen_t *cg, const char *name,
     cg->refine_memo_len = 0;
   }
   if (!cg->refine_memo) {
-    cg->refine_memo_epoch = cg->extra_progs.len;
+    cg->refine_memo_extra_progs_len = cg->extra_progs.len;
+    cg->refine_memo_refines_len = cg->refines.len;
+    cg->refine_memo_registry_refines_len = cg->registry.refines.len;
     ny_refine_memo_grow(cg);
     if (!cg->refine_memo)
       return;
@@ -2864,6 +2869,129 @@ static void ny_refine_memo_put(codegen_t *cg, const char *name,
   slot->def = def;
 }
 
+static bool ny_refine_stmt_count(ny_stmt_list *stmts, size_t *count) {
+  if (!stmts)
+    return true;
+  for (size_t i = 0; i < stmts->len; ++i) {
+    stmt_t *s = stmts->data[i];
+    if (!s)
+      continue;
+    if (s->kind == NY_S_REFINE && s->as.refine.name && *s->as.refine.name) {
+      if (*count == SIZE_MAX)
+        return false;
+      (*count)++;
+    } else if (s->kind == NY_S_MODULE &&
+               !ny_refine_stmt_count(&s->as.module.body, count)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+static void ny_refine_stmt_index_insert(ny_refine_stmt_slot_t *slots,
+                                        size_t cap, stmt_t *stmt) {
+  if (!stmt || stmt->kind != NY_S_REFINE || !stmt->as.refine.name ||
+      !*stmt->as.refine.name)
+    return;
+  const char *name = stmt->as.refine.name;
+  size_t pos = (size_t)ny_hash64_cstr(name) & (cap - 1u);
+  while (slots[pos].name && strcmp(slots[pos].name, name) != 0)
+    pos = (pos + 1u) & (cap - 1u);
+  if (!slots[pos].name) {
+    slots[pos].name = name;
+    slots[pos].stmt = stmt;
+  }
+}
+
+static void ny_refine_stmt_index_collect(ny_refine_stmt_slot_t *slots,
+                                         size_t cap, ny_stmt_list *stmts) {
+  if (!stmts)
+    return;
+  for (size_t i = 0; i < stmts->len; ++i) {
+    stmt_t *s = stmts->data[i];
+    if (!s)
+      continue;
+    if (s->kind == NY_S_REFINE) {
+      ny_refine_stmt_index_insert(slots, cap, s);
+    } else if (s->kind == NY_S_MODULE) {
+      ny_refine_stmt_index_collect(slots, cap, &s->as.module.body);
+    }
+  }
+}
+
+static bool ny_refine_stmt_index_get(codegen_t *cg, const char *name,
+                                     stmt_t **out) {
+  if (!cg || !cg->arena || !name || !out)
+    return false;
+  if (!cg->refine_stmt_index || cg->refine_stmt_index_prog != cg->prog ||
+      cg->refine_stmt_index_extra_progs_len != cg->extra_progs.len) {
+    size_t count = 0;
+    if ((cg->prog && !ny_refine_stmt_count(&cg->prog->body, &count)))
+      return false;
+    for (size_t p = 0; p < cg->extra_progs.len; ++p) {
+      program_t *prog = cg->extra_progs.data[p];
+      if (prog && !ny_refine_stmt_count(&prog->body, &count))
+        return false;
+    }
+    if (count > SIZE_MAX / 2u)
+      return false;
+    size_t cap = 16;
+    size_t needed = count * 2u;
+    while (cap < needed) {
+      if (cap > SIZE_MAX / 2u)
+        return false;
+      cap *= 2u;
+    }
+    if (cap > SIZE_MAX / sizeof(ny_refine_stmt_slot_t))
+      return false;
+    ny_refine_stmt_slot_t *slots = arena_alloc(cg->arena, cap * sizeof(*slots));
+    if (!slots)
+      return false;
+    memset(slots, 0, cap * sizeof(*slots));
+    if (cg->prog)
+      ny_refine_stmt_index_collect(slots, cap, &cg->prog->body);
+    for (size_t p = 0; p < cg->extra_progs.len; ++p) {
+      program_t *prog = cg->extra_progs.data[p];
+      if (prog)
+        ny_refine_stmt_index_collect(slots, cap, &prog->body);
+    }
+    cg->refine_stmt_index = slots;
+    cg->refine_stmt_index_cap = cap;
+    cg->refine_stmt_index_prog = cg->prog;
+    cg->refine_stmt_index_extra_progs_len = cg->extra_progs.len;
+  }
+  size_t mask = cg->refine_stmt_index_cap - 1u;
+  size_t pos = (size_t)ny_hash64_cstr(name) & mask;
+  for (;;) {
+    ny_refine_stmt_slot_t *slot = &cg->refine_stmt_index[pos];
+    if (!slot->name) {
+      *out = NULL;
+      return true;
+    }
+    if (strcmp(slot->name, name) == 0) {
+      *out = slot->stmt;
+      return true;
+    }
+    pos = (pos + 1u) & mask;
+  }
+}
+
+static refine_def_t *refine_def_from_stmt(codegen_t *cg, stmt_t *s) {
+  if (!cg || !cg->arena || !s || s->kind != NY_S_REFINE)
+    return NULL;
+  refine_def_t *def = arena_alloc(cg->arena, sizeof(*def));
+  if (!def)
+    return NULL;
+  memset(def, 0, sizeof(*def));
+  def->name = types_arena_strdup(cg->arena, s->as.refine.name);
+  def->base_type = types_arena_strdup(cg->arena, s->as.refine.base_type);
+  def->param = types_arena_strdup(cg->arena, s->as.refine.param);
+  def->predicate = s->as.refine.predicate;
+  def->stmt = s;
+  vec_push(&cg->refines, def);
+  return def;
+}
+
 static refine_def_t *find_refine_in_stmts(codegen_t *cg, ny_stmt_list *stmts,
                                           const char *name) {
   if (!cg || !stmts || !name)
@@ -2873,22 +3001,8 @@ static refine_def_t *find_refine_in_stmts(codegen_t *cg, ny_stmt_list *stmts,
     if (!s)
       continue;
     if (s->kind == NY_S_REFINE && s->as.refine.name &&
-        strcmp(s->as.refine.name, name) == 0) {
-      if (cg->arena) {
-        refine_def_t *def = arena_alloc(cg->arena, sizeof(*def));
-        if (def) {
-          memset(def, 0, sizeof(*def));
-          def->name = types_arena_strdup(cg->arena, s->as.refine.name);
-          def->base_type =
-              types_arena_strdup(cg->arena, s->as.refine.base_type);
-          def->param = types_arena_strdup(cg->arena, s->as.refine.param);
-          def->predicate = s->as.refine.predicate;
-          def->stmt = s;
-          vec_push(&cg->refines, def);
-          return def;
-        }
-      }
-    }
+        strcmp(s->as.refine.name, name) == 0)
+      return refine_def_from_stmt(cg, s);
     if (s->kind == NY_S_MODULE) {
       refine_def_t *r = find_refine_in_stmts(cg, &s->as.module.body, name);
       if (r)
@@ -2901,6 +3015,11 @@ static refine_def_t *find_refine_in_stmts(codegen_t *cg, ny_stmt_list *stmts,
 refine_def_t *ny_lookup_refine(codegen_t *cg, const char *name) {
   if (!cg || !name || !*name)
     return NULL;
+  if (cg->arena) {
+    refine_def_t *memo = NULL;
+    if (ny_refine_memo_get(cg, name, &memo))
+      return memo;
+  }
   for (size_t i = 0; i < cg->refines.len; i++) {
     refine_def_t *r = cg->refines.data[i];
     if (r && r->name && strcmp(r->name, name) == 0)
@@ -2911,18 +3030,18 @@ refine_def_t *ny_lookup_refine(codegen_t *cg, const char *name) {
     if (r && r->name && strcmp(r->name, name) == 0)
       return r;
   }
-  if (cg->arena) {
-    refine_def_t *memo = NULL;
-    if (ny_refine_memo_get(cg, name, &memo))
-      return memo;
-  }
   refine_def_t *result = NULL;
-  if (cg->prog) {
-    result = find_refine_in_stmts(cg, &cg->prog->body, name);
-  }
-  for (size_t p = 0; !result && p < cg->extra_progs.len; p++) {
-    if (cg->extra_progs.data[p]) {
-      result = find_refine_in_stmts(cg, &cg->extra_progs.data[p]->body, name);
+  stmt_t *stmt = NULL;
+  if (ny_refine_stmt_index_get(cg, name, &stmt)) {
+    if (stmt)
+      result = refine_def_from_stmt(cg, stmt);
+  } else {
+    if (cg->prog)
+      result = find_refine_in_stmts(cg, &cg->prog->body, name);
+    for (size_t p = 0; !result && p < cg->extra_progs.len; p++) {
+      if (cg->extra_progs.data[p]) {
+        result = find_refine_in_stmts(cg, &cg->extra_progs.data[p]->body, name);
+      }
     }
   }
   if (cg->arena)

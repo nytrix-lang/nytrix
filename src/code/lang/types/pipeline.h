@@ -1,3 +1,4 @@
+/* Type/effect pipeline stages and semantic-fact analysis interfaces. */
 #ifndef NY_CODE_TYPEPIPELINE_H
 #define NY_CODE_TYPEPIPELINE_H
 
@@ -68,6 +69,6 @@ void ny_type_pipeline_persist_native_reachable_facts(
     program_t *prog, const stmt_t *const *functions, size_t function_count,
     const char *source_name);
 ny_comptime_effect_status_t ny_stmt_comptime_effect_status(codegen_t *cg,
-                                                            stmt_t *stmt);
+                                                           stmt_t *stmt);
 
 #endif

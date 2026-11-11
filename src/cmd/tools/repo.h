@@ -1,3 +1,5 @@
+/* Shared filesystem, path, and repository-discovery helpers for tool commands.
+ */
 #pragma once
 
 #include "base/compat.h"
@@ -42,7 +44,8 @@ static inline void nyt_path_copy(char *out, size_t out_sz, const char *s) {
   out[n] = '\0';
 }
 
-static inline void nyt_path_join(char *out, size_t out_sz, const char *a, const char *b) {
+static inline void nyt_path_join(char *out, size_t out_sz, const char *a,
+                                 const char *b) {
   if (!out || out_sz == 0)
     return;
   if (!a || !*a) {
@@ -77,7 +80,8 @@ static inline const char *nyt_default_cache_root_dir(void) {
   return out;
 }
 
-static inline int nyt_ensure_repo_root_by_marker(char *out, size_t out_sz, const char *marker_file) {
+static inline int nyt_ensure_repo_root_by_marker(char *out, size_t out_sz,
+                                                 const char *marker_file) {
   const char *env = getenv("NYTRIX_ROOT");
   if (env && *env) {
     snprintf(out, out_sz, "%s", env);

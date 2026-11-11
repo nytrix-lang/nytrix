@@ -1917,10 +1917,10 @@ ny_build_memoized_direct_call(codegen_t *cg, token_t tok, LLVMTypeRef ft,
                               unsigned argc, bool memo_enabled, bool int_only) {
   if (!cg || !cg->builder)
     return 0;
-#define NY_MEMO_FALLBACK_CALL()                                                \
-  do {                                                                         \
-    ny_dbg_loc(cg, tok);                                                       \
-    return LLVMBuildCall2(cg->builder, ft, callee, args, argc, "");            \
+#define NY_MEMO_FALLBACK_CALL()                                     \
+  do {                                                              \
+    ny_dbg_loc(cg, tok);                                            \
+    return LLVMBuildCall2(cg->builder, ft, callee, args, argc, ""); \
   } while (0)
   if (!memo_enabled)
     NY_MEMO_FALLBACK_CALL();

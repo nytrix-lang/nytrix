@@ -1,3 +1,7 @@
+/*
+ * Fixture: initialize an array subobject with a pointer-valued compound
+ * literal.
+ */
 struct device_attribute {
   unsigned mode;
   int (*show)(void);
@@ -10,13 +14,13 @@ struct string_attribute {
 
 static int show_value(void) { return 17; }
 
-#define STRING_ATTRIBUTE(text_)                                                \
-  (&((struct string_attribute[]){                                              \
-      {.attr = {.mode = 0444, .show = show_value}, .text = (text_)}})[0]       \
+#define STRING_ATTRIBUTE(text_)                                          \
+  (&((struct string_attribute[]){                                        \
+      {.attr = {.mode = 0444, .show = show_value}, .text = (text_)}})[0] \
         .attr)
-#define STRING_ATTRIBUTE_TEXT(text_)                                           \
-  (&((struct string_attribute[]){                                              \
-      {.attr = {.mode = 0444, .show = show_value}, .text = (text_)}})[0]       \
+#define STRING_ATTRIBUTE_TEXT(text_)                                     \
+  (&((struct string_attribute[]){                                        \
+      {.attr = {.mode = 0444, .show = show_value}, .text = (text_)}})[0] \
         .text)
 
 static struct device_attribute *const attributes[] = {

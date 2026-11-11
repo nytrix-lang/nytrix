@@ -1,3 +1,4 @@
+/* Shared C lexer and parser interfaces for FFI and standalone frontends. */
 #ifndef NY_CODE_C_H
 #define NY_CODE_C_H
 

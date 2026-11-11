@@ -222,7 +222,13 @@ static void tp_persist_native_program(program_t *prog, codegen_t *cg,
 
 void ny_type_pipeline_persist_native_facts(program_t *prog, codegen_t *cg,
                                            const char *source_name) {
-  tp_persist_native_program(prog, cg, source_name);
+  (void)prog;
+  /*
+   * The main program has already completed HM validation (or proof
+   * validation when reusing a semantic artifact) before reaching native
+   * codegen. Re-running HM here only repeats its full-program inference.
+   * Extra programs are prepared separately and still need their facts.
+   */
   for (size_t i = 0; cg && i < cg->extra_progs.len; ++i)
     tp_persist_native_program(cg->extra_progs.data[i], cg, source_name);
 }
@@ -4424,15 +4430,28 @@ int ny_type_pipeline_validate_semantics(
     program_t *prog, codegen_t *cg, const char *source_name, bool include_std,
     ny_type_pipeline_stage_t max_stage, ny_type_pipeline_stage_t *failed_stage,
     bool emit_diagnostics, char **errors_json_out) {
+  bool trace_timing = ny_env_enabled("NYTRIX_TRACE_TYPE_PIPELINE_TIMING");
+  ny_tick_t stage_start = trace_timing ? ny_ticks_now() : 0;
+#define NY_TP_STAGE_TIMED(label)                                               \
+  do {                                                                         \
+    if (trace_timing) {                                                        \
+      ny_tick_t stage_end = ny_ticks_now();                                    \
+      fprintf(stderr, "[type-pipeline-timing] stage=%s elapsed=%.3f s\n",      \
+              label, ny_ticks_elapsed_sec(stage_start));                       \
+      stage_start = stage_end;                                                 \
+    }                                                                          \
+  } while (0)
   if (failed_stage)
     *failed_stage = NY_TYPE_PIPELINE_STAGE_OK;
   if (errors_json_out)
     *errors_json_out = NULL;
   ny_tp_ctx_t ctx;
   tp_ctx_build(&ctx, prog, cg, source_name, include_std);
+  NY_TP_STAGE_TIMED("context-build");
 
   ny_hm_state_t hm;
   hm_run(&hm, &ctx);
+  NY_TP_STAGE_TIMED("hm");
   if (ctx.diagnostics.len > 0) {
     if (failed_stage)
       *failed_stage = NY_TYPE_PIPELINE_STAGE_HM;
@@ -4459,6 +4478,7 @@ int ny_type_pipeline_validate_semantics(
   }
 
   tp_validate_contract_call_proofs(prog, &ctx);
+  NY_TP_STAGE_TIMED("contract-call-proofs");
   if (!ny_verify_totality(cg)) {
     if (failed_stage)
       *failed_stage = NY_TYPE_PIPELINE_STAGE_TRAIT;
@@ -4466,14 +4486,17 @@ int ny_type_pipeline_validate_semantics(
     tp_ctx_dispose(&ctx);
     return 1;
   }
+  NY_TP_STAGE_TIMED("totality");
   tp_validate_operator_decls(&ctx);
   tp_validate_impl_coherence(&ctx);
+  NY_TP_STAGE_TIMED("operator-and-impl-validation");
   bool first = true;
   ny_tp_env_t env = {0};
   for (size_t i = 0; prog && i < prog->body.len; ++i)
     tp_emit_operator_obligations_stmt(NULL, &ctx, &env, prog->body.data[i],
                                       &first);
   tp_env_dispose(&env);
+  NY_TP_STAGE_TIMED("operator-obligations");
   if (ctx.diagnostics.len > 0) {
     if (failed_stage)
       *failed_stage = NY_TYPE_PIPELINE_STAGE_TRAIT;
@@ -4500,6 +4523,7 @@ int ny_type_pipeline_validate_semantics(
   }
 
   tp_validate_abi_program(&ctx);
+  NY_TP_STAGE_TIMED("abi");
   if (ctx.diagnostics.len > 0) {
     if (failed_stage)
       *failed_stage = NY_TYPE_PIPELINE_STAGE_ABI;
@@ -4522,6 +4546,8 @@ int ny_type_pipeline_validate_semantics(
     (void)tp_emit_fallback_warnings(&ctx);
   hm_dispose(&hm);
   tp_ctx_dispose(&ctx);
+  NY_TP_STAGE_TIMED("cleanup");
+#undef NY_TP_STAGE_TIMED
   return 0;
 }
 

@@ -1,3 +1,6 @@
+/*
+ * Fixture: distinguish const and mutable container pointers in _Generic.
+ */
 struct sock {
   int value;
 };
@@ -11,22 +14,22 @@ struct udp_sock {
   _Bool peeking_with_offset;
 };
 
-#define same_type(left, right)                                                 \
+#define same_type(left, right)                              \
   __builtin_types_compatible_p(typeof(left), typeof(right))
 #define typeof_member(type, member) typeof(((type *)0)->member)
-#define container_of(ptr, type, member)                                        \
-  ({                                                                           \
-    _Static_assert(same_type(*(ptr), typeof_member(type, member)) ||           \
-                       same_type(*(ptr), void),                                \
-                   "pointer type mismatch");                                   \
-    (type *)((void *)(ptr) - __builtin_offsetof(type, member));                \
+#define container_of(ptr, type, member)                              \
+  ({                                                                 \
+    _Static_assert(same_type(*(ptr), typeof_member(type, member)) || \
+                       same_type(*(ptr), void),                      \
+                   "pointer type mismatch");                         \
+    (type *)((void *)(ptr) - __builtin_offsetof(type, member));      \
   })
 #define container_of_const(ptr, type, member)                                  \
   _Generic((ptr),                                                              \
       const typeof(*(ptr)) *: ((const type *)container_of(ptr, type, member)), \
       default: ((type *)container_of(ptr, type, member)))
 #define udp_sk(ptr) container_of_const(ptr, struct udp_sock, inet.sk)
-#define WRITE_ONCE(location, value)                                            \
+#define WRITE_ONCE(location, value)                     \
   (*(volatile typeof(location) *)&(location) = (value))
 
 static void sk_set_peek_off(struct sock *sk, int val) {

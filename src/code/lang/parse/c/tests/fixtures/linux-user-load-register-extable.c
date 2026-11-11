@@ -1,3 +1,6 @@
+/*
+ * Fixture: load user memory through a register operand and exception table.
+ */
 struct nyc_large_user {
   unsigned long value;
   unsigned long padding[99];

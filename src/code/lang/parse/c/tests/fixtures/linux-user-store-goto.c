@@ -1,3 +1,6 @@
+/*
+ * Fixture: store a user value and recover through a fault-handling branch.
+ */
 int main(void) {
   unsigned long stored = 0;
   unsigned long value = 0x123456789abcdef0UL;

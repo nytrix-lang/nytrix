@@ -1,3 +1,6 @@
+/*
+ * Fixture: store through a two-dimensional array of pointers.
+ */
 struct pointer_table {
   char **entries[2];
 };

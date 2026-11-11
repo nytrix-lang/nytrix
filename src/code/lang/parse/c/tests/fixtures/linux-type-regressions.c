@@ -1,3 +1,6 @@
+/*
+ * Fixture helpers: define flexible-array and aggregate type regression cases.
+ */
 struct nyc_flex {
   unsigned long count;
   unsigned long values[];
@@ -11,7 +14,7 @@ struct nyc_owner {
 struct nyc_regs {
   unsigned long value;
 };
-#define BITS_TO_LONGS(bits)                                                    \
+#define BITS_TO_LONGS(bits)                                \
   (((bits) + (sizeof(long) * 8) - 1) / (sizeof(long) * 8))
 #define DECLARE_BITMAP(name, bits) unsigned long name[BITS_TO_LONGS(bits)]
 typedef DECLARE_BITMAP(mce_banks_t, 64);

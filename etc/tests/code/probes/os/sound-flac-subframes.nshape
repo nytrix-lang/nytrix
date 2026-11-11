@@ -1,0 +1,188 @@
+shape pure_flac_subframe_boundaries {
+  family "runtime/system/sound"
+  generator "embedded"
+  features ["sound", "flac", "lpc", "crc", "stereo"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.sound.flac as flac
+
+fn put(any w, int value, int bits) {
+   def d = w.get("data")
+   mut int pos = w.get("pos")
+   mut i = bits - 1
+   while i >= 0 {
+      def at = pos / 8
+      store8(d, load8(d, at) | (((value >> i) & 1) << (7 - (pos & 7))), at)
+      pos += 1
+      i -= 1
+   }
+   w.set("pos", pos)
+}
+fn checksum(any d, int at, int end, int width, int polynomial) int {
+   mut value = 0
+   while at < end {
+      value = value ^ (load8(d, at) << (width - 8))
+      mut i = 0
+      while i < 8 {
+         def top = (value >> (width - 1)) & 1
+         value = (value << 1) & ((1 << width) - 1)
+         if top != 0 { value = value ^ polynomial }
+         i += 1
+      }
+      at += 1
+   }
+   value
+}
+fn verbatim(any w, int channel, int assignment, int width) {
+   put(w, 2, 8)
+   mut i = 0
+   while i < 16 {
+      def left = width >= 32 ? 2147483647 - i * 73 : i * 73 - 500
+      def right = width >= 32 ? -2147483648 + i * 17 : 250 - i * 17
+      mut value = channel == 0 ? left : right
+      if assignment == 8 && channel == 1 { value = left - right }
+      elif assignment == 9 && channel == 0 { value = left - right }
+      elif assignment == 10 { value = channel == 0 ? (left + right) >> 1 : left - right }
+      put(w, value, width)
+      i += 1
+   }
+}
+fn frame(int kind, int assignment) bytes {
+   def d = bytes(512)
+   store8(d, 102, 0)
+   store8(d, 76, 1)
+   store8(d, 97, 2)
+   store8(d, 67, 3)
+   store8(d, 128, 4)
+   store8(d, 34, 7)
+   store8(d, 16, 9)
+   store8(d, 16, 11)
+   def width = kind == 34 ? 32 : (kind == 33 ? 24 : 16)
+   def channels = assignment == 0 ? 1 : 2
+   def w = {"data": d, "pos": 18 * 8}
+   put(w, 8000, 20)
+   put(w, channels - 1, 3)
+   put(w, width - 1, 5)
+   put(w, 16, 36)
+   w.set("pos", 42 * 8)
+   put(w, 0xfff8, 16)
+   put(w, 6, 4)
+   put(w, 0, 4)
+   put(w, assignment, 4)
+   put(w, 0, 4)
+   put(w, 0, 8)
+   put(w, 15, 8)
+   put(w, checksum(d, 42, 48, 8, 7), 8)
+   if assignment != 0 {
+      verbatim(w, 0, assignment, width + (assignment == 9 ? 1 : 0))
+      verbatim(w, 1, assignment, width + (assignment != 9 ? 1 : 0))
+   } else {
+      put(w, kind << 1, 8)
+      if kind == 0 { put(w, -123, width) }
+      elif kind == 1 {
+         mut i = 0
+         while i < 16 { put(w, i * i - 100, width) i += 1 }
+      } else {
+         def order = kind >= 32 ? kind - 31 : kind - 8
+         mut i = 0
+         while i < order {
+            mut value = 7
+            if kind == 10 { value = i }
+            elif kind == 11 { value = i * i }
+            elif kind == 12 { value = i * i * i }
+            elif kind == 33 { value = 1 << i }
+            put(w, value, width)
+            i += 1
+         }
+         if kind >= 32 {
+            put(w, 2, 4)
+            put(w, kind == 33 ? 31 : 1, 5)
+            put(w, kind == 33 ? 1 : 2, 3)
+            if kind == 33 { put(w, 0, 3) }
+         }
+         put(w, 0, 2)
+         put(w, 0, 4)
+         put(w, 0, 4)
+         i = order
+         while i < 16 { put(w, 1, 1) i += 1 }
+      }
+   }
+   while (int(w.get("pos")) & 7) != 0 { put(w, 0, 1) }
+   def end = int(w.get("pos")) / 8
+   put(w, checksum(d, 42, end, 16, 0x8005), 16)
+   def result = bytes(end + 2)
+   memcpy(result, d, end + 2)
+   result
+}
+
+def kinds = [0,1,8,9,10,11,12,32,33]
+mut k = 0
+while k < kinds.len {
+   def kind = int(kinds[k])
+   def encoded = frame(kind, 0)
+   def decoded = flac.decode_bytes(encoded)
+   assert(is_list(decoded), "FLAC subframe decodes")
+   def meta = decoded.get(1)
+   assert(int(meta.get("total_frames")) == 16, "FLAC subframe frame count")
+   mut i = 0
+   while i < 16 {
+      mut expected = 0
+      if kind == 0 { expected = -123 }
+      elif kind == 1 { expected = i * i - 100 }
+      elif kind == 9 || kind == 32 { expected = 7 }
+      elif kind == 10 { expected = i }
+      elif kind == 11 { expected = i * i }
+      elif kind == 12 { expected = i * i * i }
+      elif kind == 33 { expected = (1 << i) << 8 }
+      if kind == 33 { assert(load32(meta.get("ptr"), i * 4) == expected, "negative LPC shift reconstructs 24-bit samples") }
+      else { assert(load16(meta.get("ptr"), i * 2) == (expected & 65535), "FLAC subframe PCM") }
+      i += 1
+   }
+   free(meta.get("ptr"))
+   store8(encoded, load8(encoded, encoded.len - 1) ^ 1, encoded.len - 1)
+   assert(flac.decode_bytes(encoded) == 0, "FLAC frame CRC corruption rejects")
+   k += 1
+}
+mut assignment = 8
+while assignment <= 10 {
+   def decoded = flac.decode_bytes(frame(1, assignment))
+   assert(is_list(decoded), "FLAC stereo subframe decodes")
+   def meta = decoded.get(1)
+   mut i = 0
+   while i < 16 {
+      assert(load16(meta.get("ptr"), i * 4) == ((i * 73 - 500) & 65535) &&
+         load16(meta.get("ptr"), i * 4 + 2) == ((250 - i * 17) & 65535), "FLAC stereo decorrelation PCM")
+      i += 1
+   }
+   free(meta.get("ptr"))
+   assignment += 1
+}
+assignment = 8
+while assignment <= 10 {
+   def decoded = flac.decode_bytes(frame(34, assignment))
+   assert(is_list(decoded), "32-bit FLAC stereo decodes with 33-bit side channel")
+   def meta = decoded.get(1)
+   mut i = 0
+   while i < 16 {
+      assert(load32(meta.get("ptr"), i * 8) == ((2147483647 - i * 73) & 0xffffffff) &&
+         load32(meta.get("ptr"), i * 8 + 4) == ((-2147483648 + i * 17) & 0xffffffff),
+         "FLAC decorrelation preserves full-range signed 32-bit samples")
+      i += 1
+   }
+   free(meta.get("ptr"))
+   assignment += 1
+}
+def unknown = frame(0, 0)
+store8(unknown, 0, 25)
+def ctx = flac.open_bytes(unknown)
+assert(is_dict(ctx) && int(ctx.get("frames")) == 16, "FLAC omitted length counts verified PCM frames")
+def last = flac.read_range(ctx, 15, 10)
+assert(is_list(last) && int(last.get(1).get("total_frames")) == 1 &&
+   load16(last.get(1).get("ptr"), 0) == (-123 & 65535), "unknown-length FLAC final range")
+free(last.get(1).get("ptr"))
+print("FLAC-SUBFRAMES-OK")
+NY
+}

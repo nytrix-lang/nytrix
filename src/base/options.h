@@ -1,3 +1,4 @@
+/* Command-line modes, options, targets, and parsed invocation state. */
 #ifndef NY_OPTIONS_H
 #define NY_OPTIONS_H
 

@@ -346,8 +346,8 @@ static int pol_parse_node(pol_parser_t *ps, const char *s, size_t len,
     }
     size_t oplen = (size_t)(open - (s + 7));
     int op = -1;
-#define POL_OP_LIT(lit, val)                                                   \
-  if (oplen == strlen(lit) && strncmp(s + 7, lit, oplen) == 0)                 \
+#define POL_OP_LIT(lit, val)                                   \
+  if (oplen == strlen(lit) && strncmp(s + 7, lit, oplen) == 0) \
     op = val;
     POL_OP_LIT("&&", POL_OP_AND)
     POL_OP_LIT("||", POL_OP_OR)
@@ -1738,23 +1738,23 @@ static bool pol_dnf_atom(pol_parser_t *ps, pol_dnf_t *d, int idx, bool negate,
     else
       op = POL_OP_EQ;
   }
-#define POL_DNF_PUSH(b, lin, k)                                                \
-  do {                                                                         \
-    if ((b)->count >= d->ob->max_cons || (b)->count >= POL_MAX_CONS) {         \
-      d->undecided = true;                                                     \
-      return false;                                                            \
-    }                                                                          \
-    pol_cons_t *slot = &(b)->cons[(b)->count++];                               \
-    memset(slot, 0, sizeof(*slot));                                            \
-    for (int i = 0; i < POL_MAX_VARS; ++i)                                     \
-      slot->coeff[i] = (lin).coeff[i];                                         \
-    slot->interval_safe = interval_constraint_safe;                            \
-    slot->interval_left = n->left;                                             \
-    slot->interval_right = n->right;                                           \
-    if (__builtin_add_overflow((lin).cst, (__int128)(k), &slot->cst)) {        \
-      pol_fail(st, "overflow building a constraint");                          \
-      return false;                                                            \
-    }                                                                          \
+#define POL_DNF_PUSH(b, lin, k)                                         \
+  do {                                                                  \
+    if ((b)->count >= d->ob->max_cons || (b)->count >= POL_MAX_CONS) {  \
+      d->undecided = true;                                              \
+      return false;                                                     \
+    }                                                                   \
+    pol_cons_t *slot = &(b)->cons[(b)->count++];                        \
+    memset(slot, 0, sizeof(*slot));                                     \
+    for (int i = 0; i < POL_MAX_VARS; ++i)                              \
+      slot->coeff[i] = (lin).coeff[i];                                  \
+    slot->interval_safe = interval_constraint_safe;                     \
+    slot->interval_left = n->left;                                      \
+    slot->interval_right = n->right;                                    \
+    if (__builtin_add_overflow((lin).cst, (__int128)(k), &slot->cst)) { \
+      pol_fail(st, "overflow building a constraint");                   \
+      return false;                                                     \
+    }                                                                   \
   } while (0)
 
   if (op == POL_OP_LT || op == POL_OP_LE) {

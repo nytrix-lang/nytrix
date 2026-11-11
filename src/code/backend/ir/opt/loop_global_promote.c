@@ -260,6 +260,48 @@ static nyr_inst_t lgp_clone_addr(const nyr_inst_t *tmpl, nyr_op_t op, int dst) {
   return in;
 }
 
+/*
+ * True when the address is derived from a fresh allocator result of this
+ * function (malloc/calloc/zalloc or a raw tbuf payload) through copies and
+ * additions. Such memory is a distinct object from every symbol cell, so an
+ * access through it can neither read nor clobber a promoted slot.
+ */
+static bool lgp_private_heap_addr(const nyr_func_t *f, const int *defs,
+                                  int value, unsigned depth) {
+  if (depth > 8 || value < 0 || value >= f->next_value || defs[value] < 0)
+    return false;
+  const nyr_inst_t *def = &f->data[defs[value]];
+  if (def->op == NYIR_COPY)
+    return lgp_private_heap_addr(f, defs, def->a, depth + 1);
+  if (def->op == NYIR_ADD_I64) {
+    /*
+     * Only +0 preserves the exact allocator result. Any nonzero displacement
+     * can wrap or cross into unrelated storage in untyped i64 address math.
+     */
+    if (lgp_is_const_i64(f, defs, def->b) &&
+        f->data[defs[def->b]].imm == 0)
+      return lgp_private_heap_addr(f, defs, def->a, depth + 1);
+    if (lgp_is_const_i64(f, defs, def->a) &&
+        f->data[defs[def->a]].imm == 0)
+      return lgp_private_heap_addr(f, defs, def->b, depth + 1);
+    return false;
+  }
+  if (def->op != NYIR_CALL || !def->symbol)
+    return false;
+  if (strcmp(def->symbol, "rt_tbuf_new_raw") == 0 ||
+      strcmp(def->symbol, "rt_tbuf_new_typed_raw") == 0)
+    return true;
+  static const char *const fresh[] = {
+      "rt_malloc",     "rt_malloc_i64",     "rt_malloc_raw", "rt_malloc_raw_i64",
+      "rt_calloc_raw", "rt_calloc_raw_i64", "rt_zalloc_raw", "rt_malloc_uninit"};
+  for (size_t i = 0; i < sizeof(fresh) / sizeof(fresh[0]); ++i)
+    if (strcmp(def->symbol, fresh[i]) == 0)
+      return true;
+  ny_builtin_alloc_kind_t kind = ny_builtin_alloc_kind(def->symbol);
+  return kind == NY_BUILTIN_ALLOC_MALLOC || kind == NY_BUILTIN_ALLOC_CALLOC ||
+         kind == NY_BUILTIN_ALLOC_ZALLOC;
+}
+
 static bool lgp_plain_width(const nyr_inst_t *in) {
   return !(in->flags & (NYIR_INST_F_MEM_BYTE | NYIR_INST_F_MEM_I32 |
                         NYIR_INST_F_MEM_U16 | NYIR_INST_F_MEM_VOLATILE));
@@ -353,6 +395,8 @@ static int lgp_try_loop_inner(nyr_func_t *f, const nyr_cfg_t *cfg,
       if (in->op == NYIR_LOAD_I64 || in->op == NYIR_STORE_I64) {
         is_loc = lgp_location_of(f, defs, pm, in->a, &sym, &offset);
         if (!is_loc) {
+          if (lgp_private_heap_addr(f, defs, in->a, 0))
+            continue;
           const char *tsym = lgp_taints_symbol(f, defs, pm, in->a);
           if (tsym) {
             bool seen = false;

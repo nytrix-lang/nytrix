@@ -1,3 +1,4 @@
+/* Platform and compiler compatibility macros for Nytrix C sources. */
 #pragma once
 
 #ifndef _POSIX_C_SOURCE
@@ -20,8 +21,8 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 #include <sys/time.h>
+#include <time.h>
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
@@ -45,8 +46,8 @@
 #include <sys/stat.h>
 #include <windows.h>
 #else
-#include <unistd.h>
 #include <dlfcn.h>
+#include <unistd.h>
 #ifdef __APPLE__
 #include <mach/mach_time.h>
 #endif
@@ -57,8 +58,8 @@ extern char *realpath(const char *path, char *resolved_path);
 extern int setenv(const char *name, const char *value, int overwrite);
 extern int unsetenv(const char *name);
 #ifdef __APPLE__
-extern int sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void *newp,
-                        size_t newlen);
+extern int sysctlbyname(const char *name, void *oldp, size_t *oldlenp,
+                        void *newp, size_t newlen);
 #endif
 #endif
 
@@ -153,7 +154,8 @@ static inline void *ny_realloc_array(void *ptr, size_t count, size_t size) {
 
 typedef uint64_t ny_tick_t;
 
-static inline int ny_setenv(const char *name, const char *value, int overwrite) {
+static inline int ny_setenv(const char *name, const char *value,
+                            int overwrite) {
   if (!name || !*name)
     return -1;
 #ifdef _WIN32
@@ -198,8 +200,8 @@ static inline char *ny_realpath(const char *path, char *resolved) {
 #endif
 }
 
-static inline const void *ny_memmem(const void *haystack, size_t haystack_len, const void *needle,
-                                    size_t needle_len) {
+static inline const void *ny_memmem(const void *haystack, size_t haystack_len,
+                                    const void *needle, size_t needle_len) {
   if (!haystack || !needle)
     return NULL;
   if (needle_len == 0)
@@ -269,7 +271,12 @@ static inline ny_tick_t ny_ticks_now(void) {
 #elif defined(CLOCK_REALTIME)
   clock_gettime(CLOCK_REALTIME, &ts);
 #else
-  { struct timeval tv; gettimeofday(&tv, NULL); ts.tv_sec = tv.tv_sec; ts.tv_nsec = tv.tv_usec * 1000; }
+  {
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    ts.tv_sec = tv.tv_sec;
+    ts.tv_nsec = tv.tv_usec * 1000;
+  }
 #endif
   return (ny_tick_t)ts.tv_sec * 1000000000ull + (ny_tick_t)ts.tv_nsec;
 #endif

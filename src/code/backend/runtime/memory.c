@@ -107,6 +107,7 @@ _Thread_local mem_pool_node_t *g_mem_pools[NUM_POOLS] = {0};
 #define RT_MANAGED_PTR_TABLE_SIZE (1u << RT_MANAGED_PTR_TABLE_BITS)
 #define RT_MANAGED_PTR_TABLE_MASK (RT_MANAGED_PTR_TABLE_SIZE - 1u)
 #define RT_MANAGED_PTR_TOMBSTONE UINTPTR_MAX
+#define RT_MANAGED_PTR_REUSE_WINDOW 16u
 static _Atomic(uintptr_t) rt_managed_ptr_table[RT_MANAGED_PTR_TABLE_SIZE];
 static _Atomic(uint64_t) rt_managed_ptr_epoch;
 #define RT_MANAGED_PTR_CACHE_SIZE 8u
@@ -125,8 +126,13 @@ static size_t rt_managed_ptr_slot(uintptr_t value) {
    * Exact keys and open-addressing probes still resolve collisions.
    */
   uint64_t x = (uint64_t)value >> 4;
-  x ^= x >> RT_MANAGED_PTR_TABLE_BITS;
-  x ^= x >> (2u * RT_MANAGED_PTR_TABLE_BITS);
+  /*
+   * Thread arenas sit 64 MiB apart, exactly one table size in this key, so
+   * XOR-folding the region left them on the same slots and linear probes grew
+   * with every thread. An odd multiplier moves each region far away while
+   * adjacent payloads stay adjacent.
+   */
+  x += (x >> RT_MANAGED_PTR_TABLE_BITS) * UINT64_C(0x9E3779B97F4A7C15);
   return (size_t)x & RT_MANAGED_PTR_TABLE_MASK;
 }
 
@@ -143,6 +149,22 @@ static void rt_managed_ptr_register(uintptr_t value) {
       return;
     if (seen == RT_MANAGED_PTR_TOMBSTONE && tombstone == SIZE_MAX)
       tombstone = slot;
+    /*
+     * The allocator hands out addresses that are not registered, so the
+     * duplicate check only needs a short window. Scanning on to an empty slot
+     * walked every tombstone left by earlier frees (97% of the time in a
+     * defer-heavy loop).
+     */
+    if (tombstone != SIZE_MAX && probe >= RT_MANAGED_PTR_REUSE_WINDOW) {
+      uintptr_t reusable = RT_MANAGED_PTR_TOMBSTONE;
+      if (atomic_compare_exchange_strong_explicit(
+              &rt_managed_ptr_table[tombstone], &reusable, value,
+              memory_order_release, memory_order_relaxed))
+        return;
+      probe = (size_t)-1;
+      tombstone = SIZE_MAX;
+      continue;
+    }
     if (!seen) {
       size_t target = tombstone == SIZE_MAX ? slot : tombstone;
       uintptr_t expected = tombstone == SIZE_MAX ? 0 : RT_MANAGED_PTR_TOMBSTONE;

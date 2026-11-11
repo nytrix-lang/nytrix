@@ -1,3 +1,4 @@
+/* Shared declarations and helpers for native backend implementations. */
 #ifndef NY_NATIVE_INTERNAL_H
 #define NY_NATIVE_INTERNAL_H
 
@@ -117,8 +118,8 @@ bool nyr_x86_64_emit_mach_scalar(nyr_writer_t *w,
                                  const ny_native_target_info_t *target,
                                  const nyr_mach_func_t *mach,
                                  const char *func_name, bool tag_return,
-                                 bool function_return_thunk_extern,
-                                 char *err, size_t err_len);
+                                 bool function_return_thunk_extern, char *err,
+                                 size_t err_len);
 
 /* C-string pool for pure-native string literals (print, etc.). */
 void nyr_strtab_clear(void);
@@ -221,10 +222,11 @@ bool nyr_arm_emit_ir(nyr_writer_t *w, const ny_native_target_info_t *target,
 bool nyr_i386_emit_ir(nyr_writer_t *w, const ny_native_target_info_t *target,
                       const nyr_func_t *nyir, const char *func_name,
                       bool tag_return, char *err, size_t err_len);
-bool nyr_i386_emit_ir_with_linkage(
-    nyr_writer_t *w, const ny_native_target_info_t *target,
-    const nyr_func_t *nyir, const char *func_name, bool tag_return,
-    bool is_local, char *err, size_t err_len);
+bool nyr_i386_emit_ir_with_linkage(nyr_writer_t *w,
+                                   const ny_native_target_info_t *target,
+                                   const nyr_func_t *nyir,
+                                   const char *func_name, bool tag_return,
+                                   bool is_local, char *err, size_t err_len);
 
 bool nyr_native_emit_elf64_object_from_nirs(
     const nyr_func_t *rt_main, const nyr_func_t *funcs,

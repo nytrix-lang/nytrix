@@ -1,3 +1,6 @@
+/*
+ * Parser/backend fixture for pause and register-to-memory inline assembly.
+ */
 void nyc_inline_asm_pause(void) { __asm__ __volatile__("pause"); }
 
 void nyc_inline_asm_register_to_memory(int *address, int value) {

@@ -1,3 +1,6 @@
+/*
+ * Negative parser fixture for unsupported C control-flow statements.
+ */
 long c_unsupported(long value) {
   continue;
   return value;

@@ -30,7 +30,7 @@ static size_t cfg_label_hash(int64_t label, size_t cap) {
   x ^= x >> 33;
   x *= UINT64_C(0xc4ceb9fe1a85ec53);
   x ^= x >> 33;
-  return (size_t)(x % cap);
+  return (size_t)x & (cap - 1);
 }
 
 static void cfg_label_map_free(nyr_label_map_t *map) {
@@ -83,7 +83,7 @@ static bool cfg_label_map_insert(nyr_label_map_t *map, int64_t label,
     }
     if (map->keys[slot] == label)
       return false;
-    slot = (slot + 1) % map->cap;
+    slot = (slot + 1) & (map->cap - 1);
   }
   return false;
 }
@@ -97,7 +97,7 @@ static int cfg_label_map_find(const nyr_label_map_t *map, int64_t label) {
       return -1;
     if (map->keys[slot] == label)
       return map->values[slot] <= INT_MAX ? (int)map->values[slot] : -1;
-    slot = (slot + 1) % map->cap;
+    slot = (slot + 1) & (map->cap - 1);
   }
   return -1;
 }
@@ -1123,6 +1123,16 @@ bool nyr_mem2reg(nyr_func_t *f) {
     }
   }
   /*
+   * The typed zero constants above were inserted into the entry block after
+   * the CFG was built, shifting every later instruction. Rebuild it so PHI
+   * placement for the first promoted local sees the real block ranges.
+   */
+  if (has_f64_promote || has_f32_promote) {
+    nyr_cfg_free(&cfg);
+    if (!nyr_cfg_build(f, &cfg))
+      goto oom;
+  }
+  /*
    * Pruned Cytron SSA: only place a PHI at a dominance frontier where this
    * local is live-in. This avoids join values that cannot be observed.
    */
@@ -1286,8 +1296,8 @@ bool nyr_mem2reg(nyr_func_t *f) {
       if (in->imm < 0 || (size_t)in->imm >= locals || !promote[in->imm])
         continue;
       if (in->op == NYIR_LOAD_LOCAL) {
-        int zero = zero_for_local(&types, (size_t)in->imm, zero_v,
-                                  zero_f64_v, zero_f32_v);
+        int zero = zero_for_local(&types, (size_t)in->imm, zero_v, zero_f64_v,
+                                  zero_f32_v);
         nir_make_copy(in, zero);
       } else if (in->op == NYIR_STORE_LOCAL) {
         nyr_inst_discard(in);
@@ -1463,11 +1473,8 @@ bool nyr_memory_ssa_forward(nyr_func_t *f) {
     if (cfg.block_label[b] >= 0)
       continue;
     int64_t label_id = next_label(f);
-    nyr_inst_t label = {.op = NYIR_LABEL,
-                        .dst = -1,
-                        .a = -1,
-                        .b = -1,
-                        .imm = label_id};
+    nyr_inst_t label = {
+        .op = NYIR_LABEL, .dst = -1, .a = -1, .b = -1, .imm = label_id};
     size_t at = cfg.block_start[b];
     if (!insert_inst(f, at, label)) {
       nyr_cfg_free(&cfg);
@@ -1646,8 +1653,8 @@ bool nyr_memory_ssa_forward(nyr_func_t *f) {
       bool have = false;
       for (size_t i = at; i < cfg.block_end[bi] && f->data[i].op == NYIR_PHI;
            ++i)
-        if (ny_mssa_phi_for_local(local_phis, local_phi_count,
-                                  f->data[i].dst, l)) {
+        if (ny_mssa_phi_for_local(local_phis, local_phi_count, f->data[i].dst,
+                                  l)) {
           have = true;
           break;
         }
@@ -1763,8 +1770,7 @@ bool nyr_memory_ssa_forward(nyr_func_t *f) {
     }
     for (size_t i = cfg.block_start[b]; i < cfg.block_end[b]; ++i) {
       nyr_inst_t *in = &f->data[i];
-      if (in->op == NYIR_PHI && in->dst >= 0 &&
-          (size_t)in->dst < value_count &&
+      if (in->op == NYIR_PHI && in->dst >= 0 && (size_t)in->dst < value_count &&
           local_phi_for_value[in->dst] >= 0 &&
           (size_t)local_phi_for_value[in->dst] < local_n) {
         cur[local_phi_for_value[in->dst]] = in->dst;

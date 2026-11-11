@@ -1,3 +1,6 @@
+/*
+ * Fixture: aggregate layout and access for a large fixed-size array.
+ */
 struct large_buffer {
   unsigned char bytes[131072];
 };

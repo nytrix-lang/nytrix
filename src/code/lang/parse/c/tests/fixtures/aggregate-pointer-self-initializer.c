@@ -1,3 +1,7 @@
+/*
+ * C parser fixture for aggregate members initialized from the containing
+ * object.
+ */
 struct nyc_pointer_initializer_value {
   int value;
 };

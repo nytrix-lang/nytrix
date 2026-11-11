@@ -15,6 +15,7 @@ use core.os.ui.window.consts as key
 use core.os.ui.render as gfx
 use core.os.ui.render.shared (color_u32 as _pack, color_component as _color_at)
 use core.os.ui.render.diag as ui_diag
+use core.os.ui.render.viewer.trace as ui_trace
 use core.os.ui.render.dump as ui_dump
 use core.os.ui.render.reuse as ui_reuse
 use core.os.ui.render.viewer.batch as ui_batch
@@ -151,11 +152,16 @@ else {
 }
 
 def int RENDER_BACKEND_MOCK = int(gfx.BACKEND_MOCK)
-mut win = gfx.init_window(START_W, START_H, "Nytrix Editor", START_FLAGS, EDITOR_PRESENT_MODE, false, 4)
+struct EditorState { dict data }
+def EditorState editor_state = EditorState(borrow(dict(128)))
+;; Mutable borrowed view: keeps writes visible to the record owner across calls.
+mut dict _editor_values = borrow(editor_state.data)
+fn _editor_get(str name) any { borrow(_editor_values.get(name, nil)) }
+_editor_values["win"] = gfx.init_window(START_W, START_H, "Nytrix Editor", START_FLAGS, EDITOR_PRESENT_MODE, false, 4)
 
-if !win { panic("window init failed") }
-window.set_exit_key(win, key.KEY_NULL)
-if is_dict(win) && !!win.get("_mock", false) && !common.env_truthy("NYTRIX_UI_REPLAY") {
+if !_editor_get("win") { panic("window init failed") }
+window.set_exit_key(_editor_get("win"), key.KEY_NULL)
+if is_dict(_editor_get("win")) && !!_editor_get("win").get("_mock", false) && !common.env_truthy("NYTRIX_UI_REPLAY") {
    if gfx.begin_frame_clear([0.015, 0.015, 0.018, 1.0]) { gfx.end_frame() }
    gfx.close_window()
    exit(0)
@@ -178,24 +184,24 @@ fn _load_editor_font(list candidates, int size) any {
    f
 }
 
-mut int font_title_size = FONT_TITLE_SIZE
-mut int font_body_size = FONT_BODY_SIZE
-mut int font_small_size = FONT_SMALL_SIZE
-mut int font_modeline_size = FONT_MODELINE_SIZE
-mut font_title = _load_editor_font(TITLE_FONT_CANDIDATES, font_title_size)
-mut font_body = _load_editor_font(UI_FONT_CANDIDATES, font_body_size)
-mut font_small = _load_editor_font(UI_FONT_CANDIDATES, font_small_size)
-mut font_modeline = _load_editor_font(MODELINE_FONT_CANDIDATES, font_modeline_size)
+_editor_values["font_title_size"] = FONT_TITLE_SIZE
+_editor_values["font_body_size"] = FONT_BODY_SIZE
+_editor_values["font_small_size"] = FONT_SMALL_SIZE
+_editor_values["font_modeline_size"] = FONT_MODELINE_SIZE
+_editor_values["font_title"] = _load_editor_font(TITLE_FONT_CANDIDATES, int(_editor_get("font_title_size")))
+_editor_values["font_body"] = _load_editor_font(UI_FONT_CANDIDATES, int(_editor_get("font_body_size")))
+_editor_values["font_small"] = _load_editor_font(UI_FONT_CANDIDATES, int(_editor_get("font_small_size")))
+_editor_values["font_modeline"] = _load_editor_font(MODELINE_FONT_CANDIDATES, int(_editor_get("font_modeline_size")))
 def cursor_text = window.create_standard_cursor(window.IBEAM_CURSOR)
 def cursor_resize = window.create_standard_cursor(window.RESIZE_EW_CURSOR)
 def cursor_resize_ns = window.create_standard_cursor(window.RESIZE_NS_CURSOR)
-def body_advance = _measure_ui(font_body, "0", 0.0)
-def small_advance = _measure_ui(font_small, "0", 0.0)
-def modeline_advance = _measure_ui(font_modeline, "0", 0.0)
-mut f64 FONT_BODY_ADV = body_advance >= 2.0 && body_advance <= float(font_body_size) * 2.0 ? body_advance : float(font_body_size) * 0.6
-mut f64 FONT_SMALL_ADV = small_advance >= 2.0 && small_advance <= float(font_small_size) * 2.0 ? small_advance : float(font_small_size) * 0.6
-mut f64 FONT_MODELINE_ADV = modeline_advance >= 2.0 && modeline_advance <= float(font_modeline_size) * 2.0 ? modeline_advance : float(font_modeline_size) * 0.6
-mut f64 FONT_MODELINE_CLIP_ADV = max(9.6, FONT_MODELINE_ADV * 1.35)
+def body_advance = _measure_ui(int(_editor_get("font_body")), "0", 0.0)
+def small_advance = _measure_ui(int(_editor_get("font_small")), "0", 0.0)
+def modeline_advance = _measure_ui(int(_editor_get("font_modeline")), "0", 0.0)
+_editor_values["FONT_BODY_ADV"] = body_advance >= 2.0 && body_advance <= float(int(_editor_get("font_body_size"))) * 2.0 ? body_advance : float(int(_editor_get("font_body_size"))) * 0.6
+_editor_values["FONT_SMALL_ADV"] = small_advance >= 2.0 && small_advance <= float(int(_editor_get("font_small_size"))) * 2.0 ? small_advance : float(int(_editor_get("font_small_size"))) * 0.6
+_editor_values["FONT_MODELINE_ADV"] = modeline_advance >= 2.0 && modeline_advance <= float(int(_editor_get("font_modeline_size"))) * 2.0 ? modeline_advance : float(int(_editor_get("font_modeline_size"))) * 0.6
+_editor_values["FONT_MODELINE_CLIP_ADV"] = max(9.6, float(_editor_get("FONT_MODELINE_ADV")) * 1.35)
 def SECTION_H = project.TREE_HEADER_H
 def EDITOR_TEXT_TOP = 6.0
 def INPUT_TRACE = common.env_truthy("NY_EDITOR_INPUT_TRACE")
@@ -341,7 +347,7 @@ fn _row_text_y_from_baseline(int font, f64 baseline_y, f64 row_h) f64 {
 }
 
 fn _editor_row_baseline_y(f64 row_y) f64 {
-   _row_baseline_y(font_body, row_y, ed.LINE_H)
+   _row_baseline_y(int(_editor_get("font_body")), row_y, ed.LINE_H)
 }
 
 fn _editor_row_y(f64 panel_y, int row) f64 {
@@ -367,104 +373,104 @@ def U_WARN = _pack(C_WARN)
 def U_KEYWORD = _pack(C_KEYWORD)
 def TERM_BG = 0xff020101
 def TERM_FG = 0xfff6f5f5
-mut dict st = dict(0)
-mut hist = borrow(history.new())
-mut find_state = borrow(find.state())
-mut find_content_rev = -1
-mut palette_state = borrow(pal.state())
-mut chord_state = borrow(chord.empty_state())
-mut command_cfg = borrow(cmd.config())
-mut lsp_state = borrow(lsp.new())
-mut ui_state = borrow(interact.new())
-mut term_state = borrow(termpane.new(font_body, TERM_BG, TERM_FG))
-mut dict completion_state = dict(6)
-completion_state["open"] = false
-completion_state["items"] = []
-completion_state["index"] = 0
-completion_state["prefix"] = ""
-completion_state["x"] = 0.0
-completion_state["y"] = 0.0
-mut dict peek_state = dict(6)
-peek_state["open"] = false
-peek_state["title"] = ""
-peek_state["body"] = ""
-peek_state["path"] = ""
-peek_state["line"] = 0
-peek_state["col"] = 0
-mut color_state = borrow(colorpicker.state())
-mut dict project_drag = dict(5)
-project_drag["active"] = false
-project_drag["armed"] = false
-project_drag["entry"] = dict(8)
-project_drag["x"] = 0.0
-project_drag["y"] = 0.0
-mut project_selection = borrow([])
-mut project_selection_anchor = ""
-mut dict section_drag = dict(4)
-section_drag["active"] = false
-section_drag["section"] = ""
-section_drag["x"] = 0.0
-section_drag["y"] = 0.0
+_editor_values["st"] = dict(0)
+_editor_values["hist"] = borrow(history.new())
+_editor_values["find_state"] = borrow(find.state())
+_editor_values["find_content_rev"] = -1
+_editor_values["palette_state"] = borrow(pal.state())
+_editor_values["chord_state"] = borrow(chord.empty_state())
+_editor_values["command_cfg"] = borrow(cmd.config())
+_editor_values["lsp_state"] = borrow(lsp.new())
+_editor_values["ui_state"] = borrow(interact.new())
+_editor_values["term_state"] = borrow(termpane.new(int(_editor_get("font_body")), TERM_BG, TERM_FG))
+_editor_values["completion_state"] = dict(6)
+_editor_get("completion_state")["open"] = false
+_editor_get("completion_state")["items"] = []
+_editor_get("completion_state")["index"] = 0
+_editor_get("completion_state")["prefix"] = ""
+_editor_get("completion_state")["x"] = 0.0
+_editor_get("completion_state")["y"] = 0.0
+_editor_values["peek_state"] = dict(6)
+_editor_get("peek_state")["open"] = false
+_editor_get("peek_state")["title"] = ""
+_editor_get("peek_state")["body"] = ""
+_editor_get("peek_state")["path"] = ""
+_editor_get("peek_state")["line"] = 0
+_editor_get("peek_state")["col"] = 0
+_editor_values["color_state"] = borrow(colorpicker.state())
+_editor_values["project_drag"] = dict(5)
+_editor_get("project_drag")["active"] = false
+_editor_get("project_drag")["armed"] = false
+_editor_get("project_drag")["entry"] = dict(8)
+_editor_get("project_drag")["x"] = 0.0
+_editor_get("project_drag")["y"] = 0.0
+_editor_values["project_selection"] = borrow([])
+_editor_values["project_selection_anchor"] = ""
+_editor_values["section_drag"] = dict(4)
+_editor_get("section_drag")["active"] = false
+_editor_get("section_drag")["section"] = ""
+_editor_get("section_drag")["x"] = 0.0
+_editor_get("section_drag")["y"] = 0.0
 ;; Process-lifetime frame caches: these globals are reused across frames and
 ;; reset as editor state changes. They are not function-scoped owned slots.
-mut image_preview_cache = borrow(dict(32))
-mut nav_back = borrow([])
-mut nav_forward = borrow([])
-mut nav_live_loc = borrow([])
-mut nav_live_idx = 0
-mut nav_prev_idx = -1
-mut nav_next_idx = -1
-mut nav_probe_phase = 0
-mut content_rev = 0
-mut syntax_cache_rev = -1
-mut syntax_run_cache = borrow(dict(256))
-mut syntax_flat_cache = borrow(dict(256))
-mut syntax_lang_cache = borrow(dict(32))
-mut visible_runs_cache_key = ""
-mut visible_line_runs_cache = borrow([])
-mut visible_text_runs_cache = borrow([])
-mut width_cache_rev = -1
-mut width_cache = borrow(dict(512))
-mut ui_measure_cache = borrow(dict(512))
-mut modeline_cache_key = ""
-mut modeline_cache = borrow(dict(8))
-mut outline_cache_rev = -1
-mut outline_cache_name = ""
-mut outline_cache = borrow([])
-mut definition_cache_rev = -1
-mut definition_cache_name = ""
-mut definition_cache = borrow(dict(64))
-mut project_definition_cache_key = ""
-mut project_definition_cache = borrow(dict(512))
-mut project_definition_scanned = borrow(dict(256))
-mut project_definition_cache_complete = false
-mut context_state = borrow(prompt.context_state())
-mut rename_state = borrow(prompt.rename_state())
-mut fps_state = borrow(ui_runtime.fps_begin())
-mut reuse_state = borrow(ui_reuse.make())
-mut int frame_count = 0
-mut int reuse_present_count = 0
-mut int begin_fail_count = 0
-mut bool frame_events_seen = false
-mut next_cache_save_time = 0.0
-mut int force_full_redraw = 0
-mut int last_escape_ns = 0
-mut bool auto_dump_done = false
-mut str cursor_kind = ""
-mut int perf_advisor_reports = 0
-mut bool frame_hash_done = false
-mut edit_scroll_accum = 0.0
-mut palette_scroll_accum = 0.0
-mut which_key_scroll_accum = 0.0
-mut which_key_scroll = 0
-mut which_key_prefix = ""
-mut which_key_rows_cache = borrow([])
-mut suppress_char_cp = 0
-mut tree_scroll_accum = 0.0
-mut outline_scroll_accum = 0.0
-mut git_scroll_accum = 0.0
-mut timeline_scroll_accum = 0.0
-mut project_state = project.new(common.env_trim("NY_EDITOR_PROJECT_ROOT"))
+_editor_values["image_preview_cache"] = borrow(dict(32))
+_editor_values["nav_back"] = borrow([])
+_editor_values["nav_forward"] = borrow([])
+_editor_values["nav_live_loc"] = borrow([])
+_editor_values["nav_live_idx"] = 0
+_editor_values["nav_prev_idx"] = -1
+_editor_values["nav_next_idx"] = -1
+_editor_values["nav_probe_phase"] = 0
+_editor_values["content_rev"] = 0
+_editor_values["syntax_cache_rev"] = -1
+_editor_values["syntax_run_cache"] = borrow(dict(256))
+_editor_values["syntax_flat_cache"] = borrow(dict(256))
+_editor_values["syntax_lang_cache"] = borrow(dict(32))
+_editor_values["visible_runs_cache_key"] = ""
+_editor_values["visible_line_runs_cache"] = borrow([])
+_editor_values["visible_text_runs_cache"] = borrow([])
+_editor_values["width_cache_rev"] = -1
+_editor_values["width_cache"] = borrow(dict(512))
+_editor_values["ui_measure_cache"] = borrow(dict(512))
+_editor_values["modeline_cache_key"] = ""
+_editor_values["modeline_cache"] = borrow(dict(8))
+_editor_values["outline_cache_rev"] = -1
+_editor_values["outline_cache_name"] = ""
+_editor_values["outline_cache"] = borrow([])
+_editor_values["definition_cache_rev"] = -1
+_editor_values["definition_cache_name"] = ""
+_editor_values["definition_cache"] = borrow(dict(64))
+_editor_values["project_definition_cache_key"] = ""
+_editor_values["project_definition_cache"] = borrow(dict(512))
+_editor_values["project_definition_scanned"] = borrow(dict(256))
+_editor_values["project_definition_cache_complete"] = false
+_editor_values["context_state"] = borrow(prompt.context_state())
+_editor_values["rename_state"] = borrow(prompt.rename_state())
+_editor_values["fps_state"] = borrow(ui_runtime.fps_begin())
+_editor_values["reuse_state"] = borrow(ui_reuse.make())
+_editor_values["frame_count"] = 0
+_editor_values["reuse_present_count"] = 0
+_editor_values["begin_fail_count"] = 0
+_editor_values["frame_events_seen"] = false
+_editor_values["next_cache_save_time"] = 0.0
+_editor_values["force_full_redraw"] = 0
+_editor_values["last_escape_ns"] = 0
+_editor_values["auto_dump_done"] = false
+_editor_values["cursor_kind"] = ""
+_editor_values["perf_advisor_reports"] = 0
+_editor_values["frame_hash_done"] = false
+_editor_values["edit_scroll_accum"] = 0.0
+_editor_values["palette_scroll_accum"] = 0.0
+_editor_values["which_key_scroll_accum"] = 0.0
+_editor_values["which_key_scroll"] = 0
+_editor_values["which_key_prefix"] = ""
+_editor_values["which_key_rows_cache"] = borrow([])
+_editor_values["suppress_char_cp"] = 0
+_editor_values["tree_scroll_accum"] = 0.0
+_editor_values["outline_scroll_accum"] = 0.0
+_editor_values["git_scroll_accum"] = 0.0
+_editor_values["timeline_scroll_accum"] = 0.0
+_editor_values["project_state"] = project.new(common.env_trim("NY_EDITOR_PROJECT_ROOT"))
 def auto_dump_delay = ui_dump.auto_dump_delay_frames(8)
 def timeout_limit = ui_runtime.timeout_ns(0)
 
@@ -474,30 +480,32 @@ fn _editor_probe(str name) bool {
    common.env_truthy("NY_EDITOR_" + name + "_SELFTEST")
 }
 
-def bool INPUT_PROBE = _editor_probe("INPUT")
-def bool CONTEXT_PROBE = _editor_probe("CONTEXT")
-def bool TERMINAL_PROBE = _editor_probe("TERMINAL")
-def bool TERMINAL_DUMP_PROBE = _editor_probe("TERMINAL_DUMP")
-def bool SYNTAX_PROBE = _editor_probe("SYNTAX")
-def bool NAV_PROBE = _editor_probe("NAV")
-def bool UNDO_PROBE = _editor_probe("UNDO")
-def bool ESCAPE_PROBE = _editor_probe("ESCAPE")
-def bool MODELINE_PROBE = _editor_probe("MODELINE")
-def bool CHORD_PROBE = _editor_probe("CHORD")
-def bool FIND_PROBE = _editor_probe("FIND")
-def bool PALETTE_PROBE = _editor_probe("PALETTE")
-def bool WHICH_KEY_PROBE = _editor_probe("WHICH_KEY")
-def bool MULTICURSOR_PROBE = _editor_probe("MULTICURSOR")
-def bool ZOOM_PROBE = _editor_probe("ZOOM")
-def bool SCROLLBAR_PROBE = _editor_probe("SCROLLBAR")
-def bool GOTO_PROBE = _editor_probe("GOTO")
-def bool GIT_PROBE = _editor_probe("GIT")
-def bool TAB_PROBE = _editor_probe("TAB")
-def bool SELECT_PROBE = _editor_probe("SELECT")
-def bool TEXTGRID_PROBE = _editor_probe("TEXTGRID")
-def bool IMAGE_PROBE = _editor_probe("IMAGE")
-def bool BENCH_PROBE = _editor_probe("BENCH")
-def bool MOCK_BENCH_FAST = BENCH_PROBE && common.env_truthy("NY_UI_HEADLESS") && !common.env_truthy("NYTRIX_AUTO_DUMP")
+def probe_flags = {
+   "INPUT": _editor_probe("INPUT"),
+   "CONTEXT": _editor_probe("CONTEXT"),
+   "TERMINAL": _editor_probe("TERMINAL"),
+   "TERMINAL_DUMP": _editor_probe("TERMINAL_DUMP"),
+   "SYNTAX": _editor_probe("SYNTAX"),
+   "NAV": _editor_probe("NAV"),
+   "UNDO": _editor_probe("UNDO"),
+   "ESCAPE": _editor_probe("ESCAPE"),
+   "MODELINE": _editor_probe("MODELINE"),
+   "CHORD": _editor_probe("CHORD"),
+   "FIND": _editor_probe("FIND"),
+   "PALETTE": _editor_probe("PALETTE"),
+   "WHICH_KEY": _editor_probe("WHICH_KEY"),
+   "MULTICURSOR": _editor_probe("MULTICURSOR"),
+   "ZOOM": _editor_probe("ZOOM"),
+   "SCROLLBAR": _editor_probe("SCROLLBAR"),
+   "GOTO": _editor_probe("GOTO"),
+   "GIT": _editor_probe("GIT"),
+   "TAB": _editor_probe("TAB"),
+   "SELECT": _editor_probe("SELECT"),
+   "TEXTGRID": _editor_probe("TEXTGRID"),
+   "IMAGE": _editor_probe("IMAGE"),
+   "BENCH": _editor_probe("BENCH")
+}
+def bool MOCK_BENCH_FAST = probe_flags.get("BENCH", false) && common.env_truthy("NY_UI_HEADLESS") && !common.env_truthy("NYTRIX_AUTO_DUMP")
 def int BENCH_FRAME_LIMIT = int(common.env_int_clamped("NY_EDITOR_BENCH_FRAMES", 240, 1, 100000))
 def int BENCH_WARMUP_FRAMES = int(common.env_int_clamped("NY_EDITOR_BENCH_WARMUP_FRAMES", 1, 0, 10000))
 def bool FRAME_TRACE = common.env_truthy("NY_EDITOR_FRAME_TRACE")
@@ -520,7 +528,7 @@ def int COMPLETION_SCAN_MAX_LINES = int(common.env_int_clamped("NY_EDITOR_COMPLE
 def int IDLE_REUSE_WARMUP = int(common.env_int_clamped("NY_EDITOR_IDLE_REUSE_WARMUP", 1, 0, 128))
 def int IDLE_REUSE_INTERVAL = int(common.env_int_clamped("NY_EDITOR_IDLE_REUSE_INTERVAL", 1200, 1, 100000))
 def int ESC_QUIT_WINDOW_NS = 900000000
-palette_state["cfg"] = command_cfg
+_editor_get("palette_state")["cfg"] = _editor_get("command_cfg")
 
 fn _trace_ms(int a, int b) str {
    def int delta = b - a
@@ -531,20 +539,20 @@ fn _trace_ms(int a, int b) str {
 fn _measure_ui(int font, str text, f64 fallback=0.0) f64 {
    "Returns cached UI text width for stable chrome labels.  Editor line-prefix widths keep their own content-revision cache."
    if text.len <= 0 { return 0.0 }
-   if !is_dict(ui_measure_cache) { ui_measure_cache = borrow(dict(512)) }
+   if !is_dict(_editor_get("ui_measure_cache")) { _editor_values["ui_measure_cache"] = borrow(dict(512)) }
    def key = to_str(font) + "\t" + text
-   if ui_measure_cache.contains(key) { return float(ui_measure_cache.get(key, 0)) }
+   if _editor_get("ui_measure_cache").contains(key) { return float(_editor_get("ui_measure_cache").get(key, 0)) }
    def measured = gfx.measure_text_fast(font, text)
    def w = is_list(measured) && measured.len > 0 ? float(measured.get(0, fallback)) : fallback
-   if text.len <= 96 && ui_measure_cache.len < 2048 { ui_measure_cache[key] = w }
+   if text.len <= 96 && _editor_get("ui_measure_cache").len < 2048 { _editor_get("ui_measure_cache")[key] = w }
    w
 }
 
 fn _perf_advisor_frame(int frame, int t0, int t_update, int t_events, int t_begin, int t_draw, int t_flush, int t_end) int {
-   if !PERF_ADVISOR || perf_advisor_reports >= PERF_ADVISOR_LIMIT { return 0 }
+   if !PERF_ADVISOR || int(_editor_get("perf_advisor_reports")) >= PERF_ADVISOR_LIMIT { return 0 }
    def total_ms = (t_end - t0) / 1000000
    if total_ms < PERF_ADVISOR_MIN_MS { return 0 }
-   perf_advisor_reports += 1
+   _editor_values["perf_advisor_reports"] = int(_editor_get("perf_advisor_reports")) + (1)
    def draw_ms = (t_draw - t_begin) / 1000000
    def event_ms = (t_events - t_update) / 1000000
    def flush_ms = (t_end - t_flush) / 1000000
@@ -553,7 +561,7 @@ fn _perf_advisor_frame(int frame, int t0, int t_update, int t_events, int t_begi
    elif flush_ms >= 4 { hint = "present/driver: try -vk/-gl switch, disable vsync, or inspect renderer stats" }
    elif draw_ms >= 4 { hint = "draw path: enable idle reuse, shrink visible rows, or inspect text/rect batches" }
    else { hint = "mixed frame: run NY_EDITOR_FRAME_TRACE=1 NY_EDITOR_PERF_ADVISOR=1" }
-   print("[editor:perf] frame=" + to_str(frame) + " total=" + to_str(total_ms) + "ms update=" + _trace_ms(t0, t_update) + " events=" + _trace_ms(t_update, t_events) + " draw=" + _trace_ms(t_begin, t_draw) + " flush=" + _trace_ms(t_flush, t_end) + " hint=" + hint)
+   ui_trace.emit("editor.perf", frame, "[editor:perf] frame=" + to_str(frame) + " total=" + to_str(total_ms) + "ms update=" + _trace_ms(t0, t_update) + " events=" + _trace_ms(t_update, t_events) + " draw=" + _trace_ms(t_begin, t_draw) + " flush=" + _trace_ms(t_flush, t_end) + " hint=" + hint)
    0
 }
 
@@ -569,7 +577,7 @@ fn _trace_frame(
 ) int {
    if !FRAME_TRACE || frame >= FRAME_TRACE_LIMIT { return 0 }
    def rs = gfx.renderer_frame_stats()
-   print("[editor:frame] #" + to_str(frame) +
+   ui_trace.emit("editor.frame", frame, "[editor:frame] #" + to_str(frame) +
       " update=" + _trace_ms(t0, t_update) +
       " events=" + _trace_ms(t_update, t_events) +
       " begin=" + _trace_ms(t_events, t_begin) +
@@ -595,7 +603,7 @@ fn _trace_draw(
    int t_popups
 ) int {
    if !FRAME_TRACE || frame >= FRAME_TRACE_LIMIT { return 0 }
-   print("[editor:draw] #" + to_str(frame) +
+   ui_trace.emit("editor.draw", frame, "[editor:draw] #" + to_str(frame) +
       " top=" + _trace_ms(t0, t_top) +
       " rail=" + _trace_ms(t_top, t_rail) +
       " editor=" + _trace_ms(t_rail, t_editor) +
@@ -606,81 +614,92 @@ fn _trace_draw(
 }
 
 fn _editor_popup_summary() str {
-   "palette=" + common.yn(pal.is_open(palette_state)) +
-   " find=" + common.yn(find.is_open(find_state)) +
-   " context=" + common.yn(prompt.context_is_open(context_state)) +
-   " rename=" + common.yn(prompt.rename_is_open(rename_state)) +
-   " color=" + common.yn(colorpicker.is_open(color_state)) +
-   " completion=" + common.yn(bool(completion_state.get("open", false))) +
-   " chord=" + common.yn(chord.pending(chord_state)) +
-   " quit=" + common.yn(bool(st.get("quit_prompt", false)))
+   "palette=" + common.yn(pal.is_open(_editor_get("palette_state"))) +
+   " find=" + common.yn(find.is_open(_editor_get("find_state"))) +
+   " context=" + common.yn(prompt.context_is_open(_editor_get("context_state"))) +
+   " rename=" + common.yn(prompt.rename_is_open(_editor_get("rename_state"))) +
+   " color=" + common.yn(colorpicker.is_open(_editor_get("color_state"))) +
+   " completion=" + common.yn(bool(_editor_get("completion_state").get("open", false))) +
+   " chord=" + common.yn(chord.pending(_editor_get("chord_state"))) +
+   " quit=" + common.yn(bool(_editor_get("st").get("quit_prompt", false)))
 }
 
 fn _editor_omni_dump(dict lay, f64 sw, f64 sh) int {
    if !OMNI_TRACE { return 0 }
-   if frame_count >= OMNI_TRACE_FRAMES { return 0 }
-   if frame_count % OMNI_TRACE_EVERY != 0 { return 0 }
-   def b = ed.current_buffer(st)
-   def lines = ed.current_lines(st)
+   if int(_editor_get("frame_count")) >= OMNI_TRACE_FRAMES { return 0 }
+   if int(_editor_get("frame_count")) % OMNI_TRACE_EVERY != 0 { return 0 }
+   def b = ed.current_buffer(_editor_get("st"))
+   def lines = ed.current_lines(_editor_get("st"))
    def rs = gfx.renderer_frame_stats()
-   print("[editor:omni] frame=" + to_str(frame_count) +
-      " fps=" + to_str(int(st.get("fps", 0))) +
-      " frame_ms=" + to_str(float(st.get("frame_ms", 0.0))) +
-      " focus=" + to_str(st.get("focus", "")) +
-      " active=" + to_str(int(st.get("active", 0))) +
-      " buffers=" + to_str(st.get("buffers", []).len) +
-      " cursor=" + to_str(int(st.get("cursor_line", 0))) + ":" + to_str(int(st.get("cursor_col", 0))) +
-      " scroll=" + to_str(int(st.get("scroll", 0))) +
+   print("[editor:omni] frame=" + to_str(int(_editor_get("frame_count"))) +
+      " fps=" + to_str(int(_editor_get("st").get("fps", 0))) +
+      " frame_ms=" + to_str(float(_editor_get("st").get("frame_ms", 0.0))) +
+      " focus=" + to_str(_editor_get("st").get("focus", "")) +
+      " active=" + to_str(int(_editor_get("st").get("active", 0))) +
+      " buffers=" + to_str(_editor_get("st").get("buffers", []).len) +
+      " cursor=" + to_str(int(_editor_get("st").get("cursor_line", 0))) + ":" + to_str(int(_editor_get("st").get("cursor_col", 0))) +
+      " scroll=" + to_str(int(_editor_get("st").get("scroll", 0))) +
       " file=" + to_str(b.get("name", "")) +
       " kind=" + to_str(b.get("kind", "text")) +
       " path=" + to_str(b.get("path", "")) +
       " lines=" + to_str(lines.len) +
       " layout=" + to_str(int(sw)) + "x" + to_str(int(sh)) +
       " edit=" + to_str(int(float(lay.get("edit_x", 0.0)))) + "," + to_str(int(float(lay.get("edit_y", 0.0)))) + "," + to_str(int(float(lay.get("edit_w", 0.0)))) + "," + to_str(int(float(lay.get("edit_h", 0.0)))) +
-      " rail=" + common.yn(bool(st.get("show_hierarchy", true))) + ":" + _rail_tab() +
-      " project_loaded=" + common.yn(bool(st.get("project_loaded", false))) +
-      " git_loaded=" + common.yn(bool(st.get("git_loaded", false))) +
-      " terminal=" + common.yn(termpane.is_open(term_state)) +
-      " term_tabs=" + to_str(termpane.tab_count(term_state)) +
-      " term_hot=" + common.yn(bool(term_state.get("hot", false))) +
-      " term_bytes=" + to_str(int(term_state.get("last_update_bytes", 0))) +
+      " rail=" + common.yn(bool(_editor_get("st").get("show_hierarchy", true))) + ":" + _rail_tab() +
+      " project_loaded=" + common.yn(bool(_editor_get("st").get("project_loaded", false))) +
+      " git_loaded=" + common.yn(bool(_editor_get("st").get("git_loaded", false))) +
+      " terminal=" + common.yn(termpane.is_open(_editor_get("term_state"))) +
+      " term_tabs=" + to_str(termpane.tab_count(_editor_get("term_state"))) +
+      " term_hot=" + common.yn(bool(_editor_get("term_state").get("hot", false))) +
+      " term_bytes=" + to_str(int(_editor_get("term_state").get("last_update_bytes", 0))) +
       " popups={" + _editor_popup_summary() + "}" +
       " draws=" + to_str(int(rs.get("draws", 0))) +
       " text=" + to_str(int(rs.get("prim_text_calls", 0))) + "/" + to_str(int(rs.get("prim_text_glyphs", 0))) +
-      " " + ui_diag.snapshot_text(win))
+      " " + ui_diag.snapshot_text(_editor_get("win")))
    0
 }
 
 fn _request_full_redraw(int frames=2) int {
-   if frames > force_full_redraw { force_full_redraw = frames }
+   if frames > int(_editor_get("force_full_redraw")) { _editor_values["force_full_redraw"] = frames }
    0
 }
 
 fn _clear_pending_destructive_prompts() int {
-   st["quit_prompt"] = false
-   st["kill_confirm"] = false
-   st["kill_confirm_buf"] = -1
-   st["reload_confirm"] = false
-   st["reload_confirm_buf"] = -1
-   last_escape_ns = 0
+   _editor_get("st")["quit_prompt"] = false
+   _editor_get("st")["kill_confirm"] = false
+   _editor_get("st")["kill_confirm_buf"] = -1
+   _editor_get("st")["reload_confirm"] = false
+   _editor_get("st")["reload_confirm_buf"] = -1
+   _editor_values["last_escape_ns"] = 0
    0
 }
 
+fn _editor_terminal_active() bool {
+   termpane.is_open(_editor_get("term_state")) &&
+   (bool(_editor_get("term_state").get("hot", false)) || int(_editor_get("term_state").get("last_update_bytes", 0)) > 0)
+}
+
+fn _editor_overlay_active() bool {
+   if _editor_get("st").get("quit_prompt", false) { return true }
+   if chord.pending(_editor_get("chord_state")) { return true }
+   if pal.is_open(_editor_get("palette_state")) { return true }
+   if find.is_open(_editor_get("find_state")) { return true }
+   if prompt.rename_is_open(_editor_get("rename_state")) { return true }
+   if prompt.context_is_open(_editor_get("context_state")) { return true }
+   if colorpicker.is_open(_editor_get("color_state")) { return true }
+   if bool(_editor_get("completion_state").get("open", false)) { return true }
+   false
+}
+
+fn _editor_drag_active() bool {
+   _editor_get("st").get("drag_terminal", false) || _editor_get("st").get("drag_divider", false) || _editor_get("st").get("drag_select", false) ||
+   _editor_get("st").get("drag_scrollbar", false) || _editor_get("project_drag").get("active", false) || _editor_get("project_drag").get("armed", false) ||
+   _editor_get("section_drag").get("active", false)
+}
+
 fn _editor_dynamic_ui_active() bool {
-   if force_full_redraw > 0 { return true }
-   if termpane.is_open(term_state) && bool(term_state.get("hot", false)) { return true }
-   if termpane.is_open(term_state) && int(term_state.get("last_update_bytes", 0)) > 0 { return true }
-   if st.get("quit_prompt", false) { return true }
-   if chord.pending(chord_state) { return true }
-   if pal.is_open(palette_state) { return true }
-   if find.is_open(find_state) { return true }
-   if prompt.rename_is_open(rename_state) { return true }
-   if prompt.context_is_open(context_state) { return true }
-   if colorpicker.is_open(color_state) { return true }
-   if bool(completion_state.get("open", false)) { return true }
-   st.get("drag_terminal", false) || st.get("drag_divider", false) || st.get("drag_select", false) ||
-   st.get("drag_scrollbar", false) || project_drag.get("active", false) || project_drag.get("armed", false) ||
-   section_drag.get("active", false)
+   int(_editor_get("force_full_redraw")) > 0 || _editor_terminal_active() ||
+   _editor_overlay_active() || _editor_drag_active()
 }
 
 @returns_owned
@@ -691,46 +710,46 @@ fn _editor_reuse_opts(f64 sw, f64 sh) dict {
    opts["gui_frame"] = true
    opts["win_w"] = int(sw)
    opts["win_h"] = int(sh)
-   opts["terminal_open"] = termpane.is_open(term_state)
-   opts["first_frame_done"] = frame_count > 1
+   opts["terminal_open"] = termpane.is_open(_editor_get("term_state"))
+   opts["first_frame_done"] = int(_editor_get("frame_count")) > 1
    opts["scene_active"] = true
-   opts["input_active"] = frame_events_seen
+   opts["input_active"] = bool(_editor_get("frame_events_seen"))
    ;; Dynamic state probing is unnecessary when present-only reuse is disabled.
    if reuse_enabled {
       opts["dynamic_active"] = _editor_dynamic_ui_active()
    } else {
       opts["dynamic_active"] = false
    }
-   opts["capture_active"] = TERMINAL_DUMP_PROBE || common.env_truthy("NYTRIX_AUTO_DUMP")
+   opts["capture_active"] = probe_flags.get("TERMINAL_DUMP", false) || common.env_truthy("NYTRIX_AUTO_DUMP")
    opts["warmup"] = max(IDLE_REUSE_WARMUP, gfx.get_swapchain_image_count() + 2)
    opts["redraw_interval"] = IDLE_REUSE_INTERVAL
    opts
 }
 
 fn _bench_finish() int {
-   if !BENCH_PROBE { return 0 }
-   def int start_ns = int(fps_state.get("start", ticks()))
+   if !probe_flags.get("BENCH", false) { return 0 }
+   def int start_ns = int(_editor_get("fps_state").get("start", ticks()))
    def int elapsed_ns = ticks() - start_ns
    def f64 elapsed = elapsed_ns > 0 ? float(elapsed_ns) / 1000000000.0 : 0.000001
-   def int total = int(fps_state.get("total", 0))
+   def int total = int(_editor_get("fps_state").get("total", 0))
    def int avg = int(float(total) / elapsed)
    print("[editor:bench] avg_fps=" + to_str(avg) +
       " frames=" + to_str(total) +
-      " reused=" + to_str(reuse_present_count) +
-      " reused_streak=" + to_str(ui_reuse.reused_frames(reuse_state)) +
-   " full_ready=" + to_str(ui_reuse.ready_frames(reuse_state)))
+      " reused=" + to_str(int(_editor_get("reuse_present_count"))) +
+      " reused_streak=" + to_str(ui_reuse.reused_frames(_editor_get("reuse_state"))) +
+   " full_ready=" + to_str(ui_reuse.ready_frames(_editor_get("reuse_state"))))
    0
 }
 
 fn _set_cursor_kind(str kind) int {
-   if cursor_kind == kind { return 0 }
-   cursor_kind = kind
-   window.set_cursor(win, kind == "resize-ew" ? cursor_resize : (kind == "resize-ns" ? cursor_resize_ns : cursor_text))
+   if to_str(_editor_get("cursor_kind")) == kind { return 0 }
+   _editor_values["cursor_kind"] = kind
+   window.set_cursor(_editor_get("win"), kind == "resize-ew" ? cursor_resize : (kind == "resize-ns" ? cursor_resize_ns : cursor_text))
    0
 }
 
 fn _next_event() any {
-   window.check_event(window.get_win(win))
+   window.check_event(window.get_win(_editor_get("win")))
 }
 
 fn _draw_icon(str name, f64 x, f64 y, f64 size, any tint=C_TEXT) int {
@@ -804,23 +823,23 @@ fn _palette_rect(f64 sw, f64 sh, int matches_len) list {
 }
 
 fn _palette_contains(dict lay, f64 mx, f64 my) bool {
-   if !pal.is_open(palette_state) { return false }
+   if !pal.is_open(_editor_get("palette_state")) { return false }
    def r = _palette_rect(_layout_sw(lay), _layout_sh(lay), _palette_matches().len)
    widgets.hit(mx, my, float(r.get(0, 0.0)), float(r.get(1, 0.0)), float(r.get(2, 0.0)), float(r.get(3, 0.0)))
 }
 
 fn _palette_row_hit(dict lay, f64 mx, f64 my) int {
-   if !pal.is_open(palette_state) { return -1 }
+   if !pal.is_open(_editor_get("palette_state")) { return -1 }
    def matches = _palette_matches()
    def r = _palette_rect(_layout_sw(lay), _layout_sh(lay), matches.len)
    def x = float(r.get(0, 0.0))
    def y = float(r.get(1, 0.0))
    def w = float(r.get(2, 0.0))
    def rows = int(r.get(4, 0))
-   palette_state = pal.set_visible(palette_state, rows)
+   _editor_values["palette_state"] = pal.set_visible(_editor_get("palette_state"), rows)
    if !widgets.hit(mx, my, x, y, w, float(r.get(3, 0.0))) { return -2 }
    def row = int((my - (y + PALETTE_HEADER_H)) / PALETTE_ROW_H)
-   def idx = pal.scroll(palette_state) + row
+   def idx = pal.scroll(_editor_get("palette_state")) + row
    (row >= 0 && row < rows && idx < matches.len) ? idx : -1
 }
 
@@ -849,17 +868,17 @@ fn _which_key_rect(f64 sw, f64 sh, int total) list {
 }
 
 fn _which_key_rows(str prefix) list {
-   if prefix == which_key_prefix && is_list(which_key_rows_cache) { return which_key_rows_cache }
-   which_key_prefix = prefix
-   which_key_scroll = 0
-   which_key_scroll_accum = 0.0
-   which_key_rows_cache = pal.which_key(prefix)
-   which_key_rows_cache
+   if prefix == to_str(_editor_get("which_key_prefix")) && is_list(_editor_get("which_key_rows_cache")) { return _editor_get("which_key_rows_cache") }
+   _editor_values["which_key_prefix"] = prefix
+   _editor_values["which_key_scroll"] = 0
+   _editor_values["which_key_scroll_accum"] = 0.0
+   _editor_values["which_key_rows_cache"] = pal.which_key(prefix)
+   _editor_get("which_key_rows_cache")
 }
 
 fn _which_key_contains(f64 sw, f64 sh, f64 mx, f64 my) bool {
-   if !chord.pending(chord_state) { return false }
-   def rows = _which_key_rows(chord.describe(chord_state))
+   if !chord.pending(_editor_get("chord_state")) { return false }
+   def rows = _which_key_rows(chord.describe(_editor_get("chord_state")))
    if rows.len <= 0 { return false }
    def r = _which_key_rect(sw, sh, rows.len)
    widgets.hit(mx, my, float(r.get(0, 0.0)), float(r.get(1, 0.0)), float(r.get(2, 0.0)), float(r.get(3, 0.0)))
@@ -868,40 +887,40 @@ fn _which_key_contains(f64 sw, f64 sh, f64 mx, f64 my) bool {
 fn _clamp_which_key_scroll(int total, int visible) int {
    def int visible_rows = visible > 0 ? visible : 1
    def int max_scroll = total > visible_rows ? total - visible_rows : 0
-   _clamp_int(which_key_scroll, 0, max_scroll)
+   _clamp_int(int(_editor_get("which_key_scroll")), 0, max_scroll)
 }
 
 fn _touch_content() int {
    _request_full_redraw(2)
-   content_rev += 1
-   syntax_cache_rev = -1
-   width_cache_rev = -1
-   outline_cache_rev = -1
-   definition_cache_rev = -1
-   syntax_run_cache = borrow(dict(256))
-   syntax_flat_cache = borrow(dict(256))
-   width_cache = borrow(dict(512))
-   find_content_rev = -1
-   color_state = colorpicker.close(color_state)
+   _editor_values["content_rev"] = int(_editor_get("content_rev")) + (1)
+   _editor_values["syntax_cache_rev"] = -1
+   _editor_values["width_cache_rev"] = -1
+   _editor_values["outline_cache_rev"] = -1
+   _editor_values["definition_cache_rev"] = -1
+   _editor_values["syntax_run_cache"] = borrow(dict(256))
+   _editor_values["syntax_flat_cache"] = borrow(dict(256))
+   _editor_values["width_cache"] = borrow(dict(512))
+   _editor_values["find_content_rev"] = -1
+   _editor_values["color_state"] = colorpicker.close(_editor_get("color_state"))
    0
 }
 
 fn _invalidate_project_definitions() int {
-   project_definition_cache_key = ""
-   project_definition_cache = borrow(dict(512))
-   project_definition_scanned = borrow(dict(256))
-   project_definition_cache_complete = false
+   _editor_values["project_definition_cache_key"] = ""
+   _editor_values["project_definition_cache"] = borrow(dict(512))
+   _editor_values["project_definition_scanned"] = borrow(dict(256))
+   _editor_values["project_definition_cache_complete"] = false
    0
 }
 
 fn _invalidate_text_metrics() int {
-   syntax_cache_rev = -1
-   width_cache_rev = -1
-   modeline_cache_key = ""
-   visible_runs_cache_key = ""
-   syntax_run_cache = borrow(dict(256))
-   syntax_flat_cache = borrow(dict(256))
-   width_cache = borrow(dict(512))
+   _editor_values["syntax_cache_rev"] = -1
+   _editor_values["width_cache_rev"] = -1
+   _editor_values["modeline_cache_key"] = ""
+   _editor_values["visible_runs_cache_key"] = ""
+   _editor_values["syntax_run_cache"] = borrow(dict(256))
+   _editor_values["syntax_flat_cache"] = borrow(dict(256))
+   _editor_values["width_cache"] = borrow(dict(512))
    0
 }
 
@@ -909,41 +928,41 @@ def int FONT_ZOOM_MIN = 8
 def int FONT_ZOOM_MAX = 42
 
 fn _apply_editor_fonts() int {
-   font_title = _load_editor_font(TITLE_FONT_CANDIDATES, font_title_size)
-   font_body = _load_editor_font(UI_FONT_CANDIDATES, font_body_size)
-   font_small = _load_editor_font(UI_FONT_CANDIDATES, font_small_size)
-   font_modeline = _load_editor_font(MODELINE_FONT_CANDIDATES, font_modeline_size)
-   def body_advance = _measure_ui(font_body, "0", 0.0)
-   def small_advance = _measure_ui(font_small, "0", 0.0)
-   def modeline_advance = _measure_ui(font_modeline, "0", 0.0)
-   FONT_BODY_ADV = body_advance >= 2.0 && body_advance <= float(font_body_size) * 2.0 ? body_advance : float(font_body_size) * 0.6
-   FONT_SMALL_ADV = small_advance >= 2.0 && small_advance <= float(font_small_size) * 2.0 ? small_advance : float(font_small_size) * 0.6
-   FONT_MODELINE_ADV = modeline_advance >= 2.0 && modeline_advance <= float(font_modeline_size) * 2.0 ? modeline_advance : float(font_modeline_size) * 0.6
-   FONT_MODELINE_CLIP_ADV = _clamp_f64(FONT_MODELINE_ADV * 1.35, 11.0, 10000.0)
-   term_state = termpane.set_font(term_state, font_body)
+   _editor_values["font_title"] = _load_editor_font(TITLE_FONT_CANDIDATES, int(_editor_get("font_title_size")))
+   _editor_values["font_body"] = _load_editor_font(UI_FONT_CANDIDATES, int(_editor_get("font_body_size")))
+   _editor_values["font_small"] = _load_editor_font(UI_FONT_CANDIDATES, int(_editor_get("font_small_size")))
+   _editor_values["font_modeline"] = _load_editor_font(MODELINE_FONT_CANDIDATES, int(_editor_get("font_modeline_size")))
+   def body_advance = _measure_ui(int(_editor_get("font_body")), "0", 0.0)
+   def small_advance = _measure_ui(int(_editor_get("font_small")), "0", 0.0)
+   def modeline_advance = _measure_ui(int(_editor_get("font_modeline")), "0", 0.0)
+   _editor_values["FONT_BODY_ADV"] = body_advance >= 2.0 && body_advance <= float(int(_editor_get("font_body_size"))) * 2.0 ? body_advance : float(int(_editor_get("font_body_size"))) * 0.6
+   _editor_values["FONT_SMALL_ADV"] = small_advance >= 2.0 && small_advance <= float(int(_editor_get("font_small_size"))) * 2.0 ? small_advance : float(int(_editor_get("font_small_size"))) * 0.6
+   _editor_values["FONT_MODELINE_ADV"] = modeline_advance >= 2.0 && modeline_advance <= float(int(_editor_get("font_modeline_size"))) * 2.0 ? modeline_advance : float(int(_editor_get("font_modeline_size"))) * 0.6
+   _editor_values["FONT_MODELINE_CLIP_ADV"] = _clamp_f64(float(_editor_get("FONT_MODELINE_ADV")) * 1.35, 11.0, 10000.0)
+   _editor_values["term_state"] = termpane.set_font(_editor_get("term_state"), int(_editor_get("font_body")))
    _invalidate_text_metrics()
    0
 }
 
 fn _set_editor_font_size(int body_size, bool persist=true) int {
    def int next = _clamp_int(body_size, FONT_ZOOM_MIN, FONT_ZOOM_MAX)
-   if next == font_body_size {
-      if persist { _status("font " + to_str(font_body_size) + "px") }
+   if next == int(_editor_get("font_body_size")) {
+      if persist { _status("font " + to_str(int(_editor_get("font_body_size"))) + "px") }
       return 0
    }
    def int delta = next - FONT_BODY_SIZE
-   font_body_size = next
-   font_title_size = _clamp_int(FONT_TITLE_SIZE + delta, 8, 96)
-   font_small_size = _clamp_int(FONT_SMALL_SIZE + delta, 8, 96)
-   font_modeline_size = _clamp_int(FONT_MODELINE_SIZE + delta, 8, 96)
+   _editor_values["font_body_size"] = next
+   _editor_values["font_title_size"] = _clamp_int(FONT_TITLE_SIZE + delta, 8, 96)
+   _editor_values["font_small_size"] = _clamp_int(FONT_SMALL_SIZE + delta, 8, 96)
+   _editor_values["font_modeline_size"] = _clamp_int(FONT_MODELINE_SIZE + delta, 8, 96)
    _apply_editor_fonts()
    if persist { _save_ui_cache() }
-   if persist { _status("font " + to_str(font_body_size) + "px") }
+   if persist { _status("font " + to_str(int(_editor_get("font_body_size"))) + "px") }
    0
 }
 
 fn _zoom_editor_font(int delta) int {
-   _set_editor_font_size(font_body_size + delta, true)
+   _set_editor_font_size(int(_editor_get("font_body_size")) + delta, true)
 }
 
 fn _reset_editor_font() int {
@@ -951,7 +970,9 @@ fn _reset_editor_font() int {
 }
 
 fn _line_limit(dict lay) int {
-   def f64 limit = float(lay.get("edit_w", 0.0)) / 7.5 + float(LINE_DRAW_EXTRA_COLS)
+   mut f64 body_advance = float(float(_editor_get("FONT_BODY_ADV")))
+   if body_advance < 1.0 { body_advance = 1.0 }
+   def f64 limit = float(lay.get("edit_w", 0.0)) / body_advance + float(LINE_DRAW_EXTRA_COLS)
    int(_clamp_f64(limit, 120.0, 1000000.0))
 }
 
@@ -969,7 +990,7 @@ fn _buffer_is_big(list lines) bool {
 }
 
 fn _follow_cursor() int {
-   st["scroll_follow"] = true
+   _editor_get("st")["scroll_follow"] = true
    0
 }
 
@@ -980,7 +1001,7 @@ fn _buffer_source_path(dict b) str {
 
 @returns_owned
 fn _editor_context_entry() dict {
-   def b = ed.current_buffer(st)
+   def b = ed.current_buffer(_editor_get("st"))
    def path = _buffer_source_path(b)
    mut dict entry = dict(6)
    entry["scope"] = "editor"
@@ -995,8 +1016,8 @@ fn _editor_context_entry() dict {
 fn _open_context(f64 x, f64 y, dict entry, str scope) int {
    mut e = is_dict(entry) ? clone(entry) : dict(8)
    e["scope"] = scope
-   context_state = prompt.context_open(context_state, x, y, e)
-   palette_state = pal.close(palette_state)
+   _editor_values["context_state"] = prompt.context_open(_editor_get("context_state"), x, y, e)
+   _editor_values["palette_state"] = pal.close(_editor_get("palette_state"))
    0
 }
 
@@ -1068,12 +1089,12 @@ fn _svg_meta_lines(str path, any im=0) list {
 
 fn _svg_preview_tex(str path) int {
    if path.len <= 0 { return -1 }
-   if image_preview_cache.contains(path) {
-      def cached = int(image_preview_cache.get(path, -1))
+   if _editor_get("image_preview_cache").contains(path) {
+      def cached = int(_editor_get("image_preview_cache").get(path, -1))
       if cached > 0 {
          def sz = gfx.texture_size(cached)
          if is_list(sz) && int(sz.get(0, 0)) > 0 && int(sz.get(1, 0)) > 0 { return cached }
-         image_preview_cache = image_preview_cache.delete(path)
+         _editor_values["image_preview_cache"] = _editor_get("image_preview_cache").delete(path)
       }
       if cached == -2 { return -1 }
    }
@@ -1082,36 +1103,36 @@ fn _svg_preview_tex(str path) int {
       return -1
    }
    def tex = icons.stable_texture_id(gfx.texture_upload_image_ex(im, path, 37, false, false, 1, 33071, 33071, "editor_svg:" + path, true))
-   image_preview_cache[path] = tex
+   _editor_get("image_preview_cache")[path] = tex
    tex
 }
 
 fn _image_preview_tex(str path) int {
    if path.len <= 0 { return -1 }
-   if image_preview_cache.contains(path) {
-      def cached = int(image_preview_cache.get(path, -1))
+   if _editor_get("image_preview_cache").contains(path) {
+      def cached = int(_editor_get("image_preview_cache").get(path, -1))
       if cached > 0 {
          def sz = gfx.texture_size(cached)
          if is_list(sz) && int(sz.get(0, 0)) > 0 && int(sz.get(1, 0)) > 0 { return cached }
-         image_preview_cache = image_preview_cache.delete(path)
+         _editor_values["image_preview_cache"] = _editor_get("image_preview_cache").delete(path)
       }
       if cached == -2 { return -1 }
    }
    if _is_svg_path(path) { return _svg_preview_tex(path) }
    def tex = gfx.texture_load_ex(path, 37, false, true, 1, 33071, 33071, true)
-   image_preview_cache[path] = tex
+   _editor_get("image_preview_cache")[path] = tex
    tex
 }
 
 fn _release_image_preview_cache() int {
-   def keys = dict_keys(image_preview_cache)
+   def keys = dict_keys(_editor_get("image_preview_cache"))
    mut i = 0
    while i < keys.len {
-      def tex = int(image_preview_cache.get(keys.get(i), -1))
+      def tex = int(_editor_get("image_preview_cache").get(keys.get(i), -1))
       if tex > 0 { gfx.texture_destroy(tex) }
       i += 1
    }
-   image_preview_cache = borrow(dict(32))
+   _editor_values["image_preview_cache"] = borrow(dict(32))
    0
 }
 
@@ -1134,7 +1155,7 @@ fn _draw_svg_metadata(dict lay, dict b, int tex, f64 iw, f64 ih) bool {
       _draw_tex_rect(tex, x + pad + 12.0, y + pad + 14.0, iw * scale, ih * scale, gfx.WHITE)
    } else {
       _draw_icon("asset_image", x + pad + 24.0, y + pad + 24.0, 44.0, C_WARN)
-      _text(font_body, "SVG preview unavailable", x + pad + 82.0, y + pad + 24.0, C_WARN)
+      _text(int(_editor_get("font_body")), "SVG preview unavailable", x + pad + 82.0, y + pad + 24.0, C_WARN)
    }
    mut lines = _svg_meta_lines(path, 0)
    if tex > 0 { lines = lines.append("texture: " + to_str(int(iw)) + "x" + to_str(int(ih))) }
@@ -1142,7 +1163,7 @@ fn _draw_svg_metadata(dict lay, dict b, int tex, f64 iw, f64 ih) bool {
    mut i = 0
    while i < lines.len && y + pad + 50.0 + float(i) * 20.0 < y + h - pad {
       def int text_cols = int(_clamp_f64((x + w - pad - mx) / 7.2, 12.0, 1000000.0))
-      _text(i == 0 ? font_body : font_small, widgets.preview(to_str(lines.get(i, "")), text_cols), mx, y + pad + 24.0 + float(i) * 20.0, i == 0 ? C_ACCENT_2 : C_MUTED)
+      _text(i == 0 ? int(_editor_get("font_body")) : int(_editor_get("font_small")), widgets.preview(to_str(lines.get(i, "")), text_cols), mx, y + pad + 24.0 + float(i) * 20.0, i == 0 ? C_ACCENT_2 : C_MUTED)
       i += 1
    }
    true
@@ -1175,8 +1196,8 @@ fn _draw_svg_preview(dict lay, dict b, int tex, f64 iw, f64 ih) bool {
    def lines = _svg_meta_lines(path, 0)
    def declared = lines.len > 4 ? to_str(lines.get(4, "")) : "SVG vector"
    def info = "rendered " + to_str(int(iw)) + "x" + to_str(int(ih)) + "  " + declared + "  " + path
-   _text(font_body, widgets.preview(name, int(_clamp_f64((w - pad * 2.0) / 9.0, 8.0, 1000000.0))), x + pad + 12.0, y + h - pad - 42.0, C_ACCENT_2)
-   _text(font_small, widgets.preview(info, int(_clamp_f64((w - pad * 2.0) / 7.0, 8.0, 1000000.0))), x + pad + 12.0, y + h - pad - 20.0, C_DIM)
+   _text(int(_editor_get("font_body")), widgets.preview(name, int(_clamp_f64((w - pad * 2.0) / 9.0, 8.0, 1000000.0))), x + pad + 12.0, y + h - pad - 42.0, C_ACCENT_2)
+   _text(int(_editor_get("font_small")), widgets.preview(info, int(_clamp_f64((w - pad * 2.0) / 7.0, 8.0, 1000000.0))), x + pad + 12.0, y + h - pad - 20.0, C_DIM)
    true
 }
 
@@ -1224,8 +1245,8 @@ fn _draw_image_preview(dict lay, dict b) bool {
    _draw_tex_rect(tex, ix, iy, draw_w, draw_h, gfx.WHITE)
    def name = to_str(b.get("name", ospath.basename(path)))
    def info = to_str(int(iw)) + "x" + to_str(int(ih)) + "  " + path
-   _text(font_body, widgets.preview(name, int(_clamp_f64((w - pad * 2.0) / 9.0, 8.0, 1000000.0))), x + pad + 12.0, y + h - pad - 38.0, C_ACCENT_2)
-   _text(font_small, widgets.preview(info, int(_clamp_f64((w - pad * 2.0) / 7.0, 8.0, 1000000.0))), x + pad + 12.0, y + h - pad - 18.0, C_DIM)
+   _text(int(_editor_get("font_body")), widgets.preview(name, int(_clamp_f64((w - pad * 2.0) / 9.0, 8.0, 1000000.0))), x + pad + 12.0, y + h - pad - 38.0, C_ACCENT_2)
+   _text(int(_editor_get("font_small")), widgets.preview(info, int(_clamp_f64((w - pad * 2.0) / 7.0, 8.0, 1000000.0))), x + pad + 12.0, y + h - pad - 18.0, C_DIM)
    true
 }
 
@@ -1239,8 +1260,8 @@ fn _git_color(str code) any {
 }
 
 fn _status(str msg) int {
-   st = session.set_status(st, msg)
-   ui_state = interact.message(ui_state, msg)
+   _editor_values["st"] = session.set_status(_editor_get("st"), msg)
+   _editor_values["ui_state"] = interact.message(_editor_get("ui_state"), msg)
    0
 }
 
@@ -1332,7 +1353,7 @@ fn _restore_project_ops(any raw) int {
       if is_dict(op2) && op2.len > 0 { redo = redo.append(op2) }
       i += 1
    }
-   if undo.len > 0 || redo.len > 0 { project_state = project.set_file_history(project_state, undo, redo) }
+   if undo.len > 0 || redo.len > 0 { _editor_values["project_state"] = project.set_file_history(_editor_get("project_state"), undo, redo) }
    0
 }
 
@@ -1357,7 +1378,7 @@ fn _cache_append_project_ops(list rows, str prefix, list ops) list {
 
 fn _restore_session_allowed() bool {
    if common.env_truthy("NYTRIX_UI_REPLAY") { return false }
-   cli.args().len <= 1 && !INPUT_PROBE && !CONTEXT_PROBE && !TERMINAL_PROBE && !TERMINAL_DUMP_PROBE && !SYNTAX_PROBE && !NAV_PROBE && !UNDO_PROBE && !ESCAPE_PROBE && !MODELINE_PROBE && !CHORD_PROBE && !FIND_PROBE && !PALETTE_PROBE && !WHICH_KEY_PROBE && !MULTICURSOR_PROBE && !ZOOM_PROBE && !SCROLLBAR_PROBE && !GOTO_PROBE && !GIT_PROBE && !TAB_PROBE && !SELECT_PROBE && !TEXTGRID_PROBE && !IMAGE_PROBE && !BENCH_PROBE
+   cli.args().len <= 1 && !probe_flags.get("INPUT", false) && !probe_flags.get("CONTEXT", false) && !probe_flags.get("TERMINAL", false) && !probe_flags.get("TERMINAL_DUMP", false) && !probe_flags.get("SYNTAX", false) && !probe_flags.get("NAV", false) && !probe_flags.get("UNDO", false) && !probe_flags.get("ESCAPE", false) && !probe_flags.get("MODELINE", false) && !probe_flags.get("CHORD", false) && !probe_flags.get("FIND", false) && !probe_flags.get("PALETTE", false) && !probe_flags.get("WHICH_KEY", false) && !probe_flags.get("MULTICURSOR", false) && !probe_flags.get("ZOOM", false) && !probe_flags.get("SCROLLBAR", false) && !probe_flags.get("GOTO", false) && !probe_flags.get("GIT", false) && !probe_flags.get("TAB", false) && !probe_flags.get("SELECT", false) && !probe_flags.get("TEXTGRID", false) && !probe_flags.get("IMAGE", false) && !probe_flags.get("BENCH", false)
 }
 
 @returns_owned
@@ -1374,7 +1395,7 @@ fn _restore_cached_buffers(any raw) list {
 }
 
 fn _select_cached_active(any raw) int {
-   def bs = st.get("buffers", [])
+   def bs = _editor_get("st").get("buffers", [])
    if bs.len <= 0 { return 0 }
    def active_path = _cache_decode(raw, "active_path")
    if active_path.len > 0 {
@@ -1385,7 +1406,7 @@ fn _select_cached_active(any raw) int {
          i += 1
       }
    }
-   _cache_int(raw, "active", int(st.get("active", 0)), 0, bs.len - 1)
+   _cache_int(raw, "active", int(_editor_get("st").get("active", 0)), 0, bs.len - 1)
 }
 
 fn _valid_focus(str pane) bool {
@@ -1395,7 +1416,7 @@ fn _valid_focus(str pane) bool {
 @returns_owned
 fn _session_paths() list {
    mut out = []
-   def bs = st.get("buffers", [])
+   def bs = _editor_get("st").get("buffers", [])
    mut i = 0
    while i < bs.len && out.len < 64 {
       def path = _buffer_source_path(bs.get(i, {}))
@@ -1415,9 +1436,9 @@ fn _restore_project_open(any raw) int {
       i += 1
    }
    if count > 0 {
-      project_state["open"] = open
-      project_state = project.refresh(project_state)
-      st["project_loaded"] = true
+      _editor_get("project_state")["open"] = open
+      _editor_values["project_state"] = project.refresh(_editor_get("project_state"))
+      _editor_get("st")["project_loaded"] = true
    }
    0
 }
@@ -1425,8 +1446,8 @@ fn _restore_project_open(any raw) int {
 fn _restore_terminal(any raw) int {
    if !_cache_bool(raw, "term_open", false) { return 0 }
    def m = _cache_value(raw, "term_mode", "terminal")
-   if m == "repl" { term_state = termpane.open_repl(term_state) }
-   else { term_state = termpane.open_shell(term_state) }
+   if m == "repl" { _editor_values["term_state"] = termpane.open_repl(_editor_get("term_state")) }
+   else { _editor_values["term_state"] = termpane.open_shell(_editor_get("term_state")) }
    0
 }
 
@@ -1439,34 +1460,34 @@ fn _load_ui_cache() int {
          _restore_project_open(cache)
          _restore_project_ops(cache)
          def restored = _restore_cached_buffers(cache)
-         if restored.len > 0 { st = ed.state(restored) }
-         st["show_project"] = _cache_bool(cache, "show_project", bool(st.get("show_project", true)))
-         st["show_outline"] = _cache_bool(cache, "show_outline", bool(st.get("show_outline", true)))
-         st["show_hierarchy"] = _cache_bool(cache, "show_hierarchy", bool(st.get("show_hierarchy", true)))
-         st["show_status"] = _cache_bool(cache, "show_status", bool(st.get("show_status", true)))
-         st["show_titlebar"] = _cache_bool(cache, "show_titlebar", bool(st.get("show_titlebar", true)))
-         st["show_line_numbers"] = _cache_bool(cache, "show_line_numbers", bool(st.get("show_line_numbers", true)))
-         st["show_indent_guides"] = _cache_bool(cache, "show_indent_guides", bool(st.get("show_indent_guides", false)))
-         st["rail_w"] = _cache_float(cache, "rail_w", float(st.get("rail_w", 250.0)), RAIL_MIN_W, PANE_MAX)
-         st["rail_split"] = _cache_float(cache, "rail_split", float(st.get("rail_split", 0.0)), 0.0, 0.95)
-         st["term_h"] = _cache_float(cache, "term_h", float(st.get("term_h", 220.0)), DOCK_MIN_H, PANE_MAX)
-         _set_editor_font_size(_cache_int(cache, "font_body_size", font_body_size, FONT_ZOOM_MIN, FONT_ZOOM_MAX), false)
-         def tab = _cache_value(cache, "rail_tab", to_str(st.get("rail_tab", "files")))
-         if tab == "files" || tab == "git" || tab == "timeline" { st["rail_tab"] = tab }
-         st = ed.select_buffer(st, _select_cached_active(cache))
-         st["cursor_line"] = _cache_int(cache, "cursor_line", int(st.get("cursor_line", 0)), 0, 100000000)
-         st["cursor_col"] = _cache_int(cache, "cursor_col", int(st.get("cursor_col", 0)), 0, 100000000)
-         st["scroll"] = _cache_int(cache, "scroll", int(st.get("scroll", 0)), 0, 100000000)
-         st["tree_scroll"] = _cache_int(cache, "tree_scroll", int(st.get("tree_scroll", 0)), 0, 1000000)
-         st["outline_scroll"] = _cache_int(cache, "outline_scroll", int(st.get("outline_scroll", 0)), 0, 1000000)
-         st["git_scroll"] = _cache_int(cache, "git_scroll", int(st.get("git_scroll", 0)), 0, 1000000)
-         st["timeline_scroll"] = _cache_int(cache, "timeline_scroll", int(st.get("timeline_scroll", 0)), 0, 1000000)
-         def focus = _cache_value(cache, "focus", to_str(st.get("focus", "editor")))
-         if _valid_focus(focus) { st["focus"] = focus }
+         if restored.len > 0 { _editor_values["st"] = ed.state(restored) }
+         _editor_get("st")["show_project"] = _cache_bool(cache, "show_project", bool(_editor_get("st").get("show_project", true)))
+         _editor_get("st")["show_outline"] = _cache_bool(cache, "show_outline", bool(_editor_get("st").get("show_outline", true)))
+         _editor_get("st")["show_hierarchy"] = _cache_bool(cache, "show_hierarchy", bool(_editor_get("st").get("show_hierarchy", true)))
+         _editor_get("st")["show_status"] = _cache_bool(cache, "show_status", bool(_editor_get("st").get("show_status", true)))
+         _editor_get("st")["show_titlebar"] = _cache_bool(cache, "show_titlebar", bool(_editor_get("st").get("show_titlebar", true)))
+         _editor_get("st")["show_line_numbers"] = _cache_bool(cache, "show_line_numbers", bool(_editor_get("st").get("show_line_numbers", true)))
+         _editor_get("st")["show_indent_guides"] = _cache_bool(cache, "show_indent_guides", bool(_editor_get("st").get("show_indent_guides", false)))
+         _editor_get("st")["rail_w"] = _cache_float(cache, "rail_w", float(_editor_get("st").get("rail_w", 250.0)), RAIL_MIN_W, PANE_MAX)
+         _editor_get("st")["rail_split"] = _cache_float(cache, "rail_split", float(_editor_get("st").get("rail_split", 0.0)), 0.0, 0.95)
+         _editor_get("st")["term_h"] = _cache_float(cache, "term_h", float(_editor_get("st").get("term_h", 220.0)), DOCK_MIN_H, PANE_MAX)
+         _set_editor_font_size(_cache_int(cache, "font_body_size", int(_editor_get("font_body_size")), FONT_ZOOM_MIN, FONT_ZOOM_MAX), false)
+         def tab = _cache_value(cache, "rail_tab", to_str(_editor_get("st").get("rail_tab", "files")))
+         if tab == "files" || tab == "git" || tab == "timeline" { _editor_get("st")["rail_tab"] = tab }
+         _editor_values["st"] = ed.select_buffer(_editor_get("st"), _select_cached_active(cache))
+         _editor_get("st")["cursor_line"] = _cache_int(cache, "cursor_line", int(_editor_get("st").get("cursor_line", 0)), 0, 100000000)
+         _editor_get("st")["cursor_col"] = _cache_int(cache, "cursor_col", int(_editor_get("st").get("cursor_col", 0)), 0, 100000000)
+         _editor_get("st")["scroll"] = _cache_int(cache, "scroll", int(_editor_get("st").get("scroll", 0)), 0, 100000000)
+         _editor_get("st")["tree_scroll"] = _cache_int(cache, "tree_scroll", int(_editor_get("st").get("tree_scroll", 0)), 0, 1000000)
+         _editor_get("st")["outline_scroll"] = _cache_int(cache, "outline_scroll", int(_editor_get("st").get("outline_scroll", 0)), 0, 1000000)
+         _editor_get("st")["git_scroll"] = _cache_int(cache, "git_scroll", int(_editor_get("st").get("git_scroll", 0)), 0, 1000000)
+         _editor_get("st")["timeline_scroll"] = _cache_int(cache, "timeline_scroll", int(_editor_get("st").get("timeline_scroll", 0)), 0, 1000000)
+         def focus = _cache_value(cache, "focus", to_str(_editor_get("st").get("focus", "editor")))
+         if _valid_focus(focus) { _editor_get("st")["focus"] = focus }
          _restore_terminal(cache)
-         if to_str(st.get("focus", "editor")) != "terminal" { term_state["focus"] = false }
-         st = ed.clamp_cursor(st)
-         st["scroll_follow"] = false
+         if to_str(_editor_get("st").get("focus", "editor")) != "terminal" { _editor_get("term_state")["focus"] = false }
+         _editor_values["st"] = ed.clamp_cursor(_editor_get("st"))
+         _editor_get("st")["scroll_follow"] = false
       }
       err(_) -> { }
    }
@@ -1476,30 +1497,30 @@ fn _load_ui_cache() int {
 fn _save_ui_cache() int {
    if !_restore_session_allowed() { return 0 }
    mut rows = [
-      "show_project=" + (bool(st.get("show_project", true)) ? "1" : "0"),
-      "show_outline=" + (bool(st.get("show_outline", true)) ? "1" : "0"),
-      "show_hierarchy=" + (bool(st.get("show_hierarchy", true)) ? "1" : "0"),
-      "show_status=" + (bool(st.get("show_status", true)) ? "1" : "0"),
-      "show_titlebar=" + (bool(st.get("show_titlebar", true)) ? "1" : "0"),
-      "show_line_numbers=" + (bool(st.get("show_line_numbers", true)) ? "1" : "0"),
-      "show_indent_guides=" + (bool(st.get("show_indent_guides", false)) ? "1" : "0"),
-      "rail_w=" + to_str(float(st.get("rail_w", 250.0))),
-      "rail_split=" + to_str(float(st.get("rail_split", 0.0))),
-      "term_h=" + to_str(float(st.get("term_h", 220.0))),
-      "font_body_size=" + to_str(font_body_size),
-      "rail_tab=" + to_str(st.get("rail_tab", "files")),
-      "active=" + to_str(int(st.get("active", 0))),
+      "show_project=" + (bool(_editor_get("st").get("show_project", true)) ? "1" : "0"),
+      "show_outline=" + (bool(_editor_get("st").get("show_outline", true)) ? "1" : "0"),
+      "show_hierarchy=" + (bool(_editor_get("st").get("show_hierarchy", true)) ? "1" : "0"),
+      "show_status=" + (bool(_editor_get("st").get("show_status", true)) ? "1" : "0"),
+      "show_titlebar=" + (bool(_editor_get("st").get("show_titlebar", true)) ? "1" : "0"),
+      "show_line_numbers=" + (bool(_editor_get("st").get("show_line_numbers", true)) ? "1" : "0"),
+      "show_indent_guides=" + (bool(_editor_get("st").get("show_indent_guides", false)) ? "1" : "0"),
+      "rail_w=" + to_str(float(_editor_get("st").get("rail_w", 250.0))),
+      "rail_split=" + to_str(float(_editor_get("st").get("rail_split", 0.0))),
+      "term_h=" + to_str(float(_editor_get("st").get("term_h", 220.0))),
+      "font_body_size=" + to_str(int(_editor_get("font_body_size"))),
+      "rail_tab=" + to_str(_editor_get("st").get("rail_tab", "files")),
+      "active=" + to_str(int(_editor_get("st").get("active", 0))),
       "active_path=" + _cache_encode(_current_path()),
-      "cursor_line=" + to_str(int(st.get("cursor_line", 0))),
-      "cursor_col=" + to_str(int(st.get("cursor_col", 0))),
-      "scroll=" + to_str(int(st.get("scroll", 0))),
-      "tree_scroll=" + to_str(int(st.get("tree_scroll", 0))),
-      "outline_scroll=" + to_str(int(st.get("outline_scroll", 0))),
-      "git_scroll=" + to_str(int(st.get("git_scroll", 0))),
-      "timeline_scroll=" + to_str(int(st.get("timeline_scroll", 0))),
-      "focus=" + to_str(st.get("focus", "editor")),
-      "term_open=" + (termpane.is_open(term_state) ? "1" : "0"),
-      "term_mode=" + termpane.mode(term_state)
+      "cursor_line=" + to_str(int(_editor_get("st").get("cursor_line", 0))),
+      "cursor_col=" + to_str(int(_editor_get("st").get("cursor_col", 0))),
+      "scroll=" + to_str(int(_editor_get("st").get("scroll", 0))),
+      "tree_scroll=" + to_str(int(_editor_get("st").get("tree_scroll", 0))),
+      "outline_scroll=" + to_str(int(_editor_get("st").get("outline_scroll", 0))),
+      "git_scroll=" + to_str(int(_editor_get("st").get("git_scroll", 0))),
+      "timeline_scroll=" + to_str(int(_editor_get("st").get("timeline_scroll", 0))),
+      "focus=" + to_str(_editor_get("st").get("focus", "editor")),
+      "term_open=" + (termpane.is_open(_editor_get("term_state")) ? "1" : "0"),
+      "term_mode=" + termpane.mode(_editor_get("term_state"))
    ]
    def paths = _session_paths()
    rows = rows.append("buffer_count=" + to_str(paths.len))
@@ -1508,7 +1529,7 @@ fn _save_ui_cache() int {
       rows = rows.append("buffer_" + to_str(i) + "=" + _cache_encode(to_str(paths.get(i, ""))))
       i += 1
    }
-   def open_map_raw = project_state.get("open", dict(8))
+   def open_map_raw = _editor_get("project_state").get("open", dict(8))
    def open_map = is_dict(open_map_raw) ? open_map_raw : dict(8)
    def open_keys = dict_keys(open_map)
    def int open_count = int(min(open_keys.len, PROJECT_OPEN_CACHE_LIMIT))
@@ -1520,16 +1541,16 @@ fn _save_ui_cache() int {
       rows = rows.append("project_open_val_" + to_str(i) + "=" + (bool(open_map.get(rel, true)) ? "1" : "0"))
       i += 1
    }
-   rows = _cache_append_project_ops(rows, "project_op_undo", project.file_undo_stack(project_state))
-   rows = _cache_append_project_ops(rows, "project_op_redo", project.file_redo_stack(project_state))
+   rows = _cache_append_project_ops(rows, "project_op_undo", project.file_undo_stack(_editor_get("project_state")))
+   rows = _cache_append_project_ops(rows, "project_op_redo", project.file_redo_stack(_editor_get("project_state")))
    def body = str.join(rows, "\n") + "\n"
    match file_write(EDITOR_CACHE_PATH, body) { ok(_) -> { } err(_) -> { } }
    0
 }
 
-fn _current_path() str { _buffer_source_path(ed.current_buffer(st)) }
+fn _current_path() str { _buffer_source_path(ed.current_buffer(_editor_get("st"))) }
 
-fn _current_text() str { ed.join_lines(ed.current_lines(st)) }
+fn _current_text() str { ed.join_lines(ed.current_lines(_editor_get("st"))) }
 
 fn _find_seed() str {
    def selected = _selected_text_all()
@@ -1538,28 +1559,28 @@ fn _find_seed() str {
 }
 
 fn _find_refresh_now() int {
-   find_state = find.refresh(find_state, ed.current_lines(st), int(st.get("cursor_line", 0)), int(st.get("cursor_col", 0)))
-   find_content_rev = content_rev
+   _editor_values["find_state"] = find.refresh(_editor_get("find_state"), ed.current_lines(_editor_get("st")), int(_editor_get("st").get("cursor_line", 0)), int(_editor_get("st").get("cursor_col", 0)))
+   _editor_values["find_content_rev"] = int(_editor_get("content_rev"))
    0
 }
 
 fn _find_refresh_if_needed() int {
-   if find.is_open(find_state) && find_content_rev != content_rev { _find_refresh_now() }
+   if find.is_open(_editor_get("find_state")) && int(_editor_get("find_content_rev")) != int(_editor_get("content_rev")) { _find_refresh_now() }
    0
 }
 
 fn _find_message() str {
-   def err = find.error(find_state)
-   err.len > 0 ? "find: bad regex" : "find " + find.summary(find_state)
+   def err = find.error(_editor_get("find_state"))
+   err.len > 0 ? "find: bad regex" : "find " + find.summary(_editor_get("find_state"))
 }
 
 fn _find_open() int {
-   def old = find.query(find_state)
+   def old = find.query(_editor_get("find_state"))
    def seed = old.len > 0 ? old : _find_seed()
-   if seed.len > 0 { find_state = find.set_query(find_state, seed) }
-   find_state = find.open(find_state)
-   context_state = prompt.context_close(context_state)
-   palette_state = pal.close(palette_state)
+   if seed.len > 0 { _editor_values["find_state"] = find.set_query(_editor_get("find_state"), seed) }
+   _editor_values["find_state"] = find.open(_editor_get("find_state"))
+   _editor_values["context_state"] = prompt.context_close(_editor_get("context_state"))
+   _editor_values["palette_state"] = pal.close(_editor_get("palette_state"))
    _completion_close()
    _find_refresh_now()
    _status(seed.len > 0 ? _find_message() : "find")
@@ -1568,53 +1589,53 @@ fn _find_open() int {
 
 fn _find_replace_open() int {
    _find_open()
-   find_state = find.show_replace(find_state)
+   _editor_values["find_state"] = find.show_replace(_editor_get("find_state"))
    _status("replace")
    0
 }
 
 fn _find_close() int {
-   find_state = find.close(find_state)
+   _editor_values["find_state"] = find.close(_editor_get("find_state"))
    _status("find closed")
    0
 }
 
 fn _find_jump_current(bool announce=true) int {
    _find_refresh_if_needed()
-   if find.count(find_state) <= 0 {
+   if find.count(_editor_get("find_state")) <= 0 {
       if announce { _status(_find_message()) }
       return 0
    }
-   def cur = find.current(find_state)
-   st["cursor_line"] = int(cur.get("line", 0))
-   st["cursor_col"] = int(cur.get("start", 0))
+   def cur = find.current(_editor_get("find_state"))
+   _editor_get("st")["cursor_line"] = int(cur.get("line", 0))
+   _editor_get("st")["cursor_col"] = int(cur.get("start", 0))
    _clear_selections()
-   st = ed.clamp_cursor(st)
+   _editor_values["st"] = ed.clamp_cursor(_editor_get("st"))
    _follow_cursor()
    if announce { _status(_find_message()) }
    0
 }
 
 fn _find_step(int dir) int {
-   if !find.is_open(find_state) { _find_open() }
-   if find.query(find_state).len <= 0 { _status("find") return 0 }
+   if !find.is_open(_editor_get("find_state")) { _find_open() }
+   if find.query(_editor_get("find_state")).len <= 0 { _status("find") return 0 }
    _find_refresh_if_needed()
-   find_state = dir < 0 ? find.prev(find_state) : find.next(find_state)
+   _editor_values["find_state"] = dir < 0 ? find.prev(_editor_get("find_state")) : find.next(_editor_get("find_state"))
    _find_jump_current(true)
 }
 
 fn _find_toggle(str what) int {
-   if what == "regex" { find_state = find.toggle_regex(find_state) }
-   elif what == "case" { find_state = find.toggle_case(find_state) }
-   elif what == "word" { find_state = find.toggle_word(find_state) }
-   elif what == "replace" { find_state = find.toggle_replace(find_state) }
+   if what == "regex" { _editor_values["find_state"] = find.toggle_regex(_editor_get("find_state")) }
+   elif what == "case" { _editor_values["find_state"] = find.toggle_case(_editor_get("find_state")) }
+   elif what == "word" { _editor_values["find_state"] = find.toggle_word(_editor_get("find_state")) }
+   elif what == "replace" { _editor_values["find_state"] = find.toggle_replace(_editor_get("find_state")) }
    _find_refresh_now()
    _status(_find_message())
    0
 }
 
 fn _find_apply_replace(dict res, bool all=false) int {
-   find_state = res.get("st", find_state)
+   _editor_values["find_state"] = res.get("st", _editor_get("find_state"))
    def err = to_str(res.get("error", ""))
    if err.len > 0 || !bool(res.get("ok", false)) {
       _status("replace: " + (err.len > 0 ? err : "failed"))
@@ -1622,12 +1643,12 @@ fn _find_apply_replace(dict res, bool all=false) int {
    }
    def n = int(res.get("count", 0))
    if n <= 0 { _status("replace: no matches") return 0 }
-   hist = history.push(hist, st)
-   st = ed.set_lines(st, res.get("lines", ed.current_lines(st)))
-   st["cursor_line"] = int(res.get("line", int(st.get("cursor_line", 0))))
-   st["cursor_col"] = int(res.get("col", int(st.get("cursor_col", 0))))
+   _editor_values["hist"] = history.push(_editor_get("hist"), _editor_get("st"))
+   _editor_values["st"] = ed.set_lines(_editor_get("st"), res.get("lines", ed.current_lines(_editor_get("st"))))
+   _editor_get("st")["cursor_line"] = int(res.get("line", int(_editor_get("st").get("cursor_line", 0))))
+   _editor_get("st")["cursor_col"] = int(res.get("col", int(_editor_get("st").get("cursor_col", 0))))
    _clear_selections()
-   st = ed.clamp_cursor(st)
+   _editor_values["st"] = ed.clamp_cursor(_editor_get("st"))
    _touch_content()
    _find_refresh_now()
    _follow_cursor()
@@ -1636,20 +1657,20 @@ fn _find_apply_replace(dict res, bool all=false) int {
 }
 
 fn _find_replace_current() int {
-   if !find.is_open(find_state) { _find_replace_open() }
+   if !find.is_open(_editor_get("find_state")) { _find_replace_open() }
    _find_refresh_now()
-   _find_apply_replace(find.replace_current(find_state, ed.current_lines(st)), false)
+   _find_apply_replace(find.replace_current(_editor_get("find_state"), ed.current_lines(_editor_get("st"))), false)
 }
 
 fn _find_replace_all() int {
-   if !find.is_open(find_state) { _find_replace_open() }
+   if !find.is_open(_editor_get("find_state")) { _find_replace_open() }
    _find_refresh_now()
-   _find_apply_replace(find.replace_all(find_state, ed.current_lines(st)), true)
+   _find_apply_replace(find.replace_all(_editor_get("find_state"), ed.current_lines(_editor_get("st"))), true)
 }
 
 fn _project_relative_path(str path) str {
    if path.len <= 0 { return "" }
-   def root = str.str_replace(ospath.normalize(project.root(project_state)), "\\", "/")
+   def root = str.str_replace(ospath.normalize(project.root(_editor_get("project_state"))), "\\", "/")
    def p = str.str_replace(ospath.normalize(path), "\\", "/")
    def prefix = root + "/"
    str.startswith(p, prefix) ? str.str_slice(p, prefix.len, p.len) : p
@@ -1658,23 +1679,23 @@ fn _project_relative_path(str path) str {
 fn _copy_relative_path(str path) int {
    def rel = _project_relative_path(path)
    if rel.len <= 0 { _status("no path") return 0 }
-   window.set_clipboard(win, rel)
+   window.set_clipboard(_editor_get("win"), rel)
    _status("copied relative path")
    0
 }
 
 fn _lsp_sync_current(bool force=false) int {
    if !lsp.enabled_by_default() { return 0 }
-   def b = ed.current_buffer(st)
+   def b = ed.current_buffer(_editor_get("st"))
    if b.get("readonly", false) {
-      if lsp_state.get("active", false) { lsp_state = lsp.stop(lsp_state) }
+      if _editor_get("lsp_state").get("active", false) { _editor_values["lsp_state"] = lsp.stop(_editor_get("lsp_state")) }
       return 0
    }
    def path = _current_path()
    if path.len <= 0 { return 0 }
-   def cur_path = to_str(lsp_state.get("path", ""))
-   if !force && lsp_state.get("active", false) && cur_path == path { return 0 }
-   lsp_state = lsp.start(lsp_state, path, _current_text())
+   def cur_path = to_str(_editor_get("lsp_state").get("path", ""))
+   if !force && _editor_get("lsp_state").get("active", false) && cur_path == path { return 0 }
+   _editor_values["lsp_state"] = lsp.start(_editor_get("lsp_state"), path, _current_text())
    0
 }
 
@@ -1687,18 +1708,18 @@ fn _buffer_changed(bool force_lsp=true) int {
 }
 
 fn _ensure_project_tree() int {
-   if !bool(st.get("project_loaded", false)) {
-      project_state = project.refresh(project_state)
-      st["project_loaded"] = true
+   if !bool(_editor_get("st").get("project_loaded", false)) {
+      _editor_values["project_state"] = project.refresh(_editor_get("project_state"))
+      _editor_get("st")["project_loaded"] = true
       _invalidate_project_definitions()
    }
    0
 }
 
 fn _ensure_project_git() int {
-   if !bool(st.get("git_loaded", false)) {
-      project_state = project.refresh_status(project_state)
-      st["git_loaded"] = true
+   if !bool(_editor_get("st").get("git_loaded", false)) {
+      _editor_values["project_state"] = project.refresh_status(_editor_get("project_state"))
+      _editor_get("st")["git_loaded"] = true
    }
    0
 }
@@ -1707,22 +1728,22 @@ fn _nav_location() list {
    [
       "",
       "",
-      int(st.get("active", 0)),
-      int(st.get("cursor_line", 0)),
-      int(st.get("cursor_col", 0)),
-      int(st.get("scroll", 0))
+      int(_editor_get("st").get("active", 0)),
+      int(_editor_get("st").get("cursor_line", 0)),
+      int(_editor_get("st").get("cursor_col", 0)),
+      int(_editor_get("st").get("scroll", 0))
    ]
 }
 
 fn _nav_record_current() int {
-   nav_live_loc = _nav_location()
-   nav_live_idx = int(st.get("active", 0))
+   _editor_values["nav_live_loc"] = _nav_location()
+   _editor_values["nav_live_idx"] = int(_editor_get("st").get("active", 0))
    0
 }
 
 fn _nav_push_current() int {
-   nav_prev_idx = nav_live_idx
-   nav_next_idx = -1
+   _editor_values["nav_prev_idx"] = int(_editor_get("nav_live_idx"))
+   _editor_values["nav_next_idx"] = -1
    0
 }
 
@@ -1732,28 +1753,28 @@ fn _nav_push_current_if_target_diff(str target_path) int {
 
 fn _nav_go(int dir) int {
    if dir < 0 {
-      if nav_prev_idx < 0 { _status("no previous location") return 0 }
-      def target = nav_prev_idx
-      nav_next_idx = nav_live_idx
-      nav_prev_idx = -1
-      st = ed.select_buffer(st, target)
+      if int(_editor_get("nav_prev_idx")) < 0 { _status("no previous location") return 0 }
+      def target = int(_editor_get("nav_prev_idx"))
+      _editor_values["nav_next_idx"] = int(_editor_get("nav_live_idx"))
+      _editor_values["nav_prev_idx"] = -1
+      _editor_values["st"] = ed.select_buffer(_editor_get("st"), target)
       _buffer_changed(true)
-      nav_live_idx = target
+      _editor_values["nav_live_idx"] = target
       _status("back")
       return 0
    }
-   if nav_next_idx < 0 { _status("no next location") return 0 }
-   def target2 = nav_next_idx
-   nav_prev_idx = nav_live_idx
-   nav_next_idx = -1
-   st = ed.select_buffer(st, target2)
+   if int(_editor_get("nav_next_idx")) < 0 { _status("no next location") return 0 }
+   def target2 = int(_editor_get("nav_next_idx"))
+   _editor_values["nav_prev_idx"] = int(_editor_get("nav_live_idx"))
+   _editor_values["nav_next_idx"] = -1
+   _editor_values["st"] = ed.select_buffer(_editor_get("st"), target2)
    _buffer_changed(true)
-   nav_live_idx = target2
+   _editor_values["nav_live_idx"] = target2
    _status("forward")
    0
 }
 
-fn _extra_cursors() list { st.get("extra_cursors", []) }
+fn _extra_cursors() list { _editor_get("st").get("extra_cursors", []) }
 
 fn _extra_cursor_count() int { _extra_cursors().len }
 
@@ -1793,7 +1814,7 @@ fn _cursor_sorted_desc(list cursors) list {
 
 @returns_owned
 fn _all_cursors_desc() list {
-   def lines = ed.current_lines(st)
+   def lines = ed.current_lines(_editor_get("st"))
    def max_row = max(0, lines.len - 1)
    mut out = []
    def extras = _extra_cursors()
@@ -1804,8 +1825,8 @@ fn _all_cursors_desc() list {
       out = out.append(_cursor_make(row, col, false))
       i += 1
    }
-   def prow = min(max(int(st.get("cursor_line", 0)), 0), max_row)
-   def pcol = min(max(int(st.get("cursor_col", 0)), 0), to_str(lines.get(prow, "")).len)
+   def prow = min(max(int(_editor_get("st").get("cursor_line", 0)), 0), max_row)
+   def pcol = min(max(int(_editor_get("st").get("cursor_col", 0)), 0), to_str(lines.get(prow, "")).len)
    _cursor_sorted_desc(out.append(_cursor_make(prow, pcol, true)))
 }
 
@@ -1818,8 +1839,8 @@ fn _set_processed_cursors(list cursors) int {
       def row = max(0, _cursor_row(c))
       def col = max(0, _cursor_col(c))
       if _cursor_primary(c) && !saw_primary {
-         st["cursor_line"] = row
-         st["cursor_col"] = col
+         _editor_get("st")["cursor_line"] = row
+         _editor_get("st")["cursor_col"] = col
          saw_primary = true
       } else {
          extras = extras.append([row, col])
@@ -1828,10 +1849,10 @@ fn _set_processed_cursors(list cursors) int {
    }
    if !saw_primary && cursors.len > 0 {
       def first = cursors.get(0)
-      st["cursor_line"] = max(0, _cursor_row(first))
-      st["cursor_col"] = max(0, _cursor_col(first))
+      _editor_get("st")["cursor_line"] = max(0, _cursor_row(first))
+      _editor_get("st")["cursor_col"] = max(0, _cursor_col(first))
    }
-   st["extra_cursors"] = extras
+   _editor_get("st")["extra_cursors"] = extras
    0
 }
 
@@ -1844,7 +1865,7 @@ fn _clamp_extra_cursor(any c, list lines) list {
 
 fn _move_extra_cursors_by(int drow, int dcol) int {
    if _extra_cursor_count() <= 0 || (drow == 0 && dcol == 0) { return 0 }
-   def lines = ed.current_lines(st)
+   def lines = ed.current_lines(_editor_get("st"))
    mut out = []
    def extras = _extra_cursors()
    mut i = 0
@@ -1852,12 +1873,12 @@ fn _move_extra_cursors_by(int drow, int dcol) int {
       def old = extras.get(i)
       mut c = [_cursor_row(old) + drow, _cursor_col(old) + dcol]
       c = _clamp_extra_cursor(c, lines)
-      if _cursor_row(c) != int(st.get("cursor_line", 0)) && !_cursor_at_row(out, _cursor_row(c)) {
+      if _cursor_row(c) != int(_editor_get("st").get("cursor_line", 0)) && !_cursor_at_row(out, _cursor_row(c)) {
          out = out.append(c)
       }
       i += 1
    }
-   st["extra_cursors"] = out
+   _editor_get("st")["extra_cursors"] = out
    0
 }
 
@@ -1947,7 +1968,7 @@ fn _cursor_at_row(list cursors, int row) bool {
 }
 
 fn _cursor_stack_edge(int dir) int {
-   mut row = int(st.get("cursor_line", 0))
+   mut row = int(_editor_get("st").get("cursor_line", 0))
    def extras = _extra_cursors()
    mut i = 0
    while i < extras.len {
@@ -1960,17 +1981,17 @@ fn _cursor_stack_edge(int dir) int {
 
 fn _clear_extra_cursors(bool announce=true) int {
    if _extra_cursor_count() <= 0 { return 0 }
-   st["extra_cursors"] = []
-   st["multi_selects"] = []
+   _editor_get("st")["extra_cursors"] = []
+   _editor_get("st")["multi_selects"] = []
    if announce { _status("single cursor") }
    0
 }
 
 fn _add_extra_cursor(int dir) int {
-   def lines = ed.current_lines(st)
+   def lines = ed.current_lines(_editor_get("st"))
    if lines.len <= 0 { return 0 }
    def step = dir < 0 ? -1 : 1
-   def primary_row = int(st.get("cursor_line", 0))
+   def primary_row = int(_editor_get("st").get("cursor_line", 0))
    mut row = _cursor_stack_edge(step) + step
    def cursors = _extra_cursors()
    while row >= 0 && row < lines.len && (row == primary_row || _cursor_at_row(cursors, row)) {
@@ -1980,22 +2001,22 @@ fn _add_extra_cursor(int dir) int {
       _status("no more lines")
       return 0
    }
-   def col = min(max(int(st.get("cursor_col", 0)), 0), to_str(lines.get(row, "")).len)
+   def col = min(max(int(_editor_get("st").get("cursor_col", 0)), 0), to_str(lines.get(row, "")).len)
    _add_extra_cursor_at(row, col)
 }
 
 fn _add_extra_cursor_at(int row, int col) int {
-   def lines = ed.current_lines(st)
+   def lines = ed.current_lines(_editor_get("st"))
    if lines.len <= 0 { return 0 }
    def int target_row = int(min(max(row, 0), lines.len - 1))
    def int target_col = int(min(max(col, 0), to_str(lines.get(target_row, "")).len))
    mut cursors = _extra_cursors()
-   if target_row == int(st.get("cursor_line", 0)) || _cursor_at_row(cursors, target_row) {
+   if target_row == int(_editor_get("st").get("cursor_line", 0)) || _cursor_at_row(cursors, target_row) {
       _status("cursor already on line")
       return 0
    }
    cursors = cursors.append([target_row, target_col])
-   st["extra_cursors"] = cursors
+   _editor_get("st")["extra_cursors"] = cursors
    _status(to_str(cursors.len + 1) + " cursors")
    0
 }
@@ -2041,7 +2062,7 @@ fn _ranges_sorted_desc(list ranges) list {
 }
 
 fn _multi_selection_valid() bool {
-   def ranges = st.get("multi_selects", [])
+   def ranges = _editor_get("st").get("multi_selects", [])
    mut i = 0
    while i < ranges.len {
       if _range_valid(ranges.get(i, [])) { return true }
@@ -2051,14 +2072,14 @@ fn _multi_selection_valid() bool {
 }
 
 fn _selection_any_valid() bool {
-   _multi_selection_valid() || ed.selection_valid(st)
+   _multi_selection_valid() || ed.selection_valid(_editor_get("st"))
 }
 
 @returns_owned
 fn _selection_ranges_active() list {
    if _multi_selection_valid() {
       mut out = []
-      def ranges = st.get("multi_selects", [])
+      def ranges = _editor_get("st").get("multi_selects", [])
       mut i = 0
       while i < ranges.len {
          def r = ranges.get(i, [])
@@ -2067,10 +2088,10 @@ fn _selection_ranges_active() list {
       }
       return out
    }
-   if ed.selection_valid(st) {
+   if ed.selection_valid(_editor_get("st")) {
       return [_range_norm(_range_make(
-               int(st.get("sel_a_line", 0)), int(st.get("sel_a_col", 0)),
-               int(st.get("sel_b_line", 0)), int(st.get("sel_b_col", 0)),
+               int(_editor_get("st").get("sel_a_line", 0)), int(_editor_get("st").get("sel_a_col", 0)),
+               int(_editor_get("st").get("sel_b_line", 0)), int(_editor_get("st").get("sel_b_col", 0)),
                true
       ))]
    }
@@ -2078,10 +2099,10 @@ fn _selection_ranges_active() list {
 }
 
 fn _multi_selection_anchor_if_needed() int {
-   if st.get("multi_selects", []).len > 0 { return 0 }
+   if _editor_get("st").get("multi_selects", []).len > 0 { return 0 }
    mut ranges = [_range_make(
-         int(st.get("cursor_line", 0)), int(st.get("cursor_col", 0)),
-         int(st.get("cursor_line", 0)), int(st.get("cursor_col", 0)),
+         int(_editor_get("st").get("cursor_line", 0)), int(_editor_get("st").get("cursor_col", 0)),
+         int(_editor_get("st").get("cursor_line", 0)), int(_editor_get("st").get("cursor_col", 0)),
          true
    )]
    def extras = _extra_cursors()
@@ -2091,18 +2112,18 @@ fn _multi_selection_anchor_if_needed() int {
       ranges = ranges.append(_range_make(_cursor_row(c), _cursor_col(c), _cursor_row(c), _cursor_col(c), false))
       i += 1
    }
-   st["multi_selects"] = ranges
-   st["sel_a_line"] = int(st.get("cursor_line", 0))
-   st["sel_a_col"] = int(st.get("cursor_col", 0))
-   st["sel_b_line"] = int(st.get("cursor_line", 0))
-   st["sel_b_col"] = int(st.get("cursor_col", 0))
-   st["sel_active"] = false
-   st["drag_select"] = false
+   _editor_get("st")["multi_selects"] = ranges
+   _editor_get("st")["sel_a_line"] = int(_editor_get("st").get("cursor_line", 0))
+   _editor_get("st")["sel_a_col"] = int(_editor_get("st").get("cursor_col", 0))
+   _editor_get("st")["sel_b_line"] = int(_editor_get("st").get("cursor_line", 0))
+   _editor_get("st")["sel_b_col"] = int(_editor_get("st").get("cursor_col", 0))
+   _editor_get("st")["sel_active"] = false
+   _editor_get("st")["drag_select"] = false
    0
 }
 
 fn _multi_selection_update() int {
-   def ranges = st.get("multi_selects", [])
+   def ranges = _editor_get("st").get("multi_selects", [])
    if ranges.len <= 0 { return 0 }
    mut out = []
    mut idx = 0
@@ -2110,7 +2131,7 @@ fn _multi_selection_update() int {
       def r = ranges.get(0, [])
       out = out.append(_range_make(
             int(r.get(0, 0)), int(r.get(1, 0)),
-            int(st.get("cursor_line", 0)), int(st.get("cursor_col", 0)),
+            int(_editor_get("st").get("cursor_line", 0)), int(_editor_get("st").get("cursor_col", 0)),
             true
       ))
       idx = 1
@@ -2124,22 +2145,22 @@ fn _multi_selection_update() int {
       ei += 1
       idx += 1
    }
-   st["multi_selects"] = out
+   _editor_get("st")["multi_selects"] = out
    if out.len > 0 {
       def p = out.get(0, [])
-      st["sel_a_line"] = int(p.get(0, 0))
-      st["sel_a_col"] = int(p.get(1, 0))
-      st["sel_b_line"] = int(p.get(2, 0))
-      st["sel_b_col"] = int(p.get(3, 0))
-      st["sel_active"] = _range_valid(p)
+      _editor_get("st")["sel_a_line"] = int(p.get(0, 0))
+      _editor_get("st")["sel_a_col"] = int(p.get(1, 0))
+      _editor_get("st")["sel_b_line"] = int(p.get(2, 0))
+      _editor_get("st")["sel_b_col"] = int(p.get(3, 0))
+      _editor_get("st")["sel_active"] = _range_valid(p)
    }
    0
 }
 
 fn _clear_selections() int {
-   st["sel_active"] = false
-   st["drag_select"] = false
-   st["multi_selects"] = []
+   _editor_get("st")["sel_active"] = false
+   _editor_get("st")["drag_select"] = false
+   _editor_get("st")["multi_selects"] = []
    0
 }
 
@@ -2164,7 +2185,7 @@ fn _range_text(list lines, any raw) str {
 fn _selected_text_all() str {
    def ranges = _selection_ranges_active()
    if ranges.len <= 0 { return "" }
-   def lines = ed.current_lines(st)
+   def lines = ed.current_lines(_editor_get("st"))
    mut out = []
    mut int i = 0
    while i < ranges.len {
@@ -2231,8 +2252,8 @@ fn _insert_text_in_lines(list lines, int row, int col, str text) dict {
 fn _replace_multi_selections(str text) int {
    def ranges = _ranges_sorted_desc(_selection_ranges_active())
    if ranges.len <= 0 { return 0 }
-   hist = history.push(hist, st)
-   mut lines = ed.current_lines(st)
+   _editor_values["hist"] = history.push(_editor_get("hist"), _editor_get("st"))
+   mut lines = ed.current_lines(_editor_get("st"))
    mut cursors = []
    mut i = 0
    while i < ranges.len {
@@ -2250,14 +2271,14 @@ fn _replace_multi_selections(str text) int {
       cursors = cursors.append(_cursor_make(row, col, _range_primary(r)))
       i += 1
    }
-   st = ed.set_lines(st, lines)
+   _editor_values["st"] = ed.set_lines(_editor_get("st"), lines)
    _set_processed_cursors(cursors)
    _clear_selections()
-   st = ed.clamp_cursor(st)
+   _editor_values["st"] = ed.clamp_cursor(_editor_get("st"))
    _follow_cursor()
    _touch_content()
-   if lsp_state.get("active", false) && _current_path().len > 0 {
-      lsp_state["last_request"] = lsp.did_change(lsp_state, _current_path(), _current_text())
+   if _editor_get("lsp_state").get("active", false) && _current_path().len > 0 {
+      _editor_get("lsp_state")["last_request"] = lsp.did_change(_editor_get("lsp_state"), _current_path(), _current_text())
    }
    0
 }
@@ -2266,10 +2287,10 @@ fn _edit_insert_extra(str text) int {
    if text.len <= 0 { return 0 }
    if _selection_any_valid() { return _replace_multi_selections(text) }
    if _extra_cursor_count() <= 0 {
-      return _apply_hist(history.insert_text(hist, st, text))
+      return _apply_hist(history.insert_text(_editor_get("hist"), _editor_get("st"), text))
    }
-   hist = history.push(hist, st)
-   mut lines = ed.current_lines(st)
+   _editor_values["hist"] = history.push(_editor_get("hist"), _editor_get("st"))
+   mut lines = ed.current_lines(_editor_get("st"))
    def cursors = _all_cursors_desc()
    mut updated = []
    mut int i = 0
@@ -2302,9 +2323,9 @@ fn _edit_insert_extra(str text) int {
       }
       i += 1
    }
-   st = ed.set_lines(st, lines)
+   _editor_values["st"] = ed.set_lines(_editor_get("st"), lines)
    _set_processed_cursors(updated)
-   st = ed.clamp_cursor(st)
+   _editor_values["st"] = ed.clamp_cursor(_editor_get("st"))
    _follow_cursor()
    _touch_content()
    0
@@ -2312,9 +2333,9 @@ fn _edit_insert_extra(str text) int {
 
 fn _edit_backspace_extra() int {
    if _selection_any_valid() { return _replace_multi_selections("") }
-   if _extra_cursor_count() <= 0 { return _apply_hist(history.backspace(hist, st)) }
-   hist = history.push(hist, st)
-   mut lines = ed.current_lines(st)
+   if _extra_cursor_count() <= 0 { return _apply_hist(history.backspace(_editor_get("hist"), _editor_get("st"))) }
+   _editor_values["hist"] = history.push(_editor_get("hist"), _editor_get("st"))
+   mut lines = ed.current_lines(_editor_get("st"))
    def cursors = _all_cursors_desc()
    mut updated = []
    mut int i = 0
@@ -2342,9 +2363,9 @@ fn _edit_backspace_extra() int {
       }
       i += 1
    }
-   st = ed.set_lines(st, lines)
+   _editor_values["st"] = ed.set_lines(_editor_get("st"), lines)
    _set_processed_cursors(updated)
-   st = ed.clamp_cursor(st)
+   _editor_values["st"] = ed.clamp_cursor(_editor_get("st"))
    _follow_cursor()
    _touch_content()
    0
@@ -2352,9 +2373,9 @@ fn _edit_backspace_extra() int {
 
 fn _edit_delete_extra() int {
    if _selection_any_valid() { return _replace_multi_selections("") }
-   if _extra_cursor_count() <= 0 { return _apply_hist(history.delete_char(hist, st)) }
-   hist = history.push(hist, st)
-   mut lines = ed.current_lines(st)
+   if _extra_cursor_count() <= 0 { return _apply_hist(history.delete_char(_editor_get("hist"), _editor_get("st"))) }
+   _editor_values["hist"] = history.push(_editor_get("hist"), _editor_get("st"))
+   mut lines = ed.current_lines(_editor_get("st"))
    def cursors = _all_cursors_desc()
    mut updated = []
    mut int i = 0
@@ -2378,36 +2399,36 @@ fn _edit_delete_extra() int {
       updated = updated.append(_cursor_make(row, col, _cursor_primary(cursors.get(i))))
       i += 1
    }
-   st = ed.set_lines(st, lines)
+   _editor_values["st"] = ed.set_lines(_editor_get("st"), lines)
    _set_processed_cursors(updated)
-   st = ed.clamp_cursor(st)
+   _editor_values["st"] = ed.clamp_cursor(_editor_get("st"))
    _follow_cursor()
    _touch_content()
    0
 }
 
 fn _apply_hist(dict res) int {
-   hist = res.get("hist", hist)
-   st = res.get("st", st)
+   _editor_values["hist"] = res.get("hist", _editor_get("hist"))
+   _editor_values["st"] = res.get("st", _editor_get("st"))
    _follow_cursor()
    _touch_content()
-   if lsp_state.get("active", false) && _current_path().len > 0 {
-      lsp_state["last_request"] = lsp.did_change(lsp_state, _current_path(), _current_text())
+   if _editor_get("lsp_state").get("active", false) && _current_path().len > 0 {
+      _editor_get("lsp_state")["last_request"] = lsp.did_change(_editor_get("lsp_state"), _current_path(), _current_text())
    }
    def msg = to_str(res.get("status", ""))
    if msg.len > 0 { _status(msg) }
    0
 }
 
-fn _undo() int { _apply_hist(history.undo(hist, st)) }
+fn _undo() int { _apply_hist(history.undo(_editor_get("hist"), _editor_get("st"))) }
 
-fn _redo() int { _apply_hist(history.redo(hist, st)) }
+fn _redo() int { _apply_hist(history.redo(_editor_get("hist"), _editor_get("st"))) }
 
 fn _edit_insert(str text) int { _edit_insert_extra(text) }
 
 fn _edit_newline() int {
    if _selection_any_valid() { return _replace_multi_selections("\n") }
-   if _extra_cursor_count() <= 0 { return _apply_hist(history.newline(hist, st)) }
+   if _extra_cursor_count() <= 0 { return _apply_hist(history.newline(_editor_get("hist"), _editor_get("st"))) }
    _edit_insert_extra("\n")
 }
 
@@ -2417,15 +2438,15 @@ fn _edit_delete() int { _edit_delete_extra() }
 
 fn _open_file(str path) int {
    _nav_push_current_if_target_diff(path)
-   st = session.open_file(st, path)
+   _editor_values["st"] = session.open_file(_editor_get("st"), path)
    _buffer_changed(true)
    _nav_record_current()
    0
 }
 
 fn _project_entry_at(dict lay, f64 mx, f64 my) dict {
-   if !bool(st.get("show_hierarchy", true)) { return dict(0) }
-   if _rail_tab() != "files" || !bool(st.get("show_project", true)) { return dict(0) }
+   if !bool(_editor_get("st").get("show_hierarchy", true)) { return dict(0) }
+   if _rail_tab() != "files" || !bool(_editor_get("st").get("show_project", true)) { return dict(0) }
    _ensure_project_tree()
    def rail_x = float(lay.get("rail_x", 0.0))
    def rail_y = float(lay.get("rail_y", 0.0))
@@ -2434,11 +2455,11 @@ fn _project_entry_at(dict lay, f64 mx, f64 my) dict {
    if rail_w <= 1.0 { return dict(0) }
    def body_y = rail_y + RAIL_TABS_H
    def body_h = rail_h - RAIL_TABS_H
-   def rows = project.tree(project_state)
-   def show_outline = bool(st.get("show_outline", true))
+   def rows = project.tree(_editor_get("project_state"))
+   def show_outline = bool(_editor_get("st").get("show_outline", true))
    def syms = show_outline ? _outline_symbols() : []
    def tree_h = show_outline ? _rail_tree_height(body_h, rows.len, syms.len) : body_h
-   project.hit_entry(project_state, rail_x, body_y, rail_w, tree_h, int(st.get("tree_scroll", 0)), mx, my)
+   project.hit_entry(_editor_get("project_state"), rail_x, body_y, rail_w, tree_h, int(_editor_get("st").get("tree_scroll", 0)), mx, my)
 }
 
 fn _project_rel(dict entry) str { to_str(entry.get("rel", "")) }
@@ -2446,8 +2467,8 @@ fn _project_rel(dict entry) str { to_str(entry.get("rel", "")) }
 fn _project_selection_contains_rel(str rel) bool {
    if rel.len <= 0 { return false }
    mut i = 0
-   while i < project_selection.len {
-      if to_str(project_selection.get(i, "")) == rel { return true }
+   while i < _editor_get("project_selection").len {
+      if to_str(_editor_get("project_selection").get(i, "")) == rel { return true }
       i += 1
    }
    false
@@ -2458,14 +2479,14 @@ fn _project_selection_contains(dict entry) bool {
 }
 
 fn _project_selection_status() int {
-   def n = project_selection.len
+   def n = _editor_get("project_selection").len
    _status(n <= 0 ? "selection cleared" : (to_str(n) + " selected"))
 }
 
 @consumes(xs)
 @forgets(xs)
 fn _project_selection_replace(list xs) int {
-   project_selection = borrow(xs)
+   _editor_values["project_selection"] = borrow(xs)
    forget(xs)
    0
 }
@@ -2474,7 +2495,7 @@ fn _project_selection_set(dict entry) int {
    def rel = _project_rel(entry)
    if rel.len <= 0 { return 0 }
    _project_selection_replace([rel])
-   project_selection_anchor = rel
+   _editor_values["project_selection_anchor"] = rel
    0
 }
 
@@ -2484,19 +2505,19 @@ fn _project_selection_toggle(dict entry) int {
    mut out = []
    mut found = false
    mut i = 0
-   while i < project_selection.len {
-      def cur = to_str(project_selection.get(i, ""))
+   while i < _editor_get("project_selection").len {
+      def cur = to_str(_editor_get("project_selection").get(i, ""))
       if cur == rel { found = true }
       else { out = out.append(cur) }
       i += 1
    }
-   if !found { out = out.append(rel) project_selection_anchor = rel }
+   if !found { out = out.append(rel) _editor_values["project_selection_anchor"] = rel }
    _project_selection_replace(out)
    _project_selection_status()
 }
 
 fn _project_tree_index(str rel) int {
-   def rows = project.tree(project_state)
+   def rows = project.tree(_editor_get("project_state"))
    mut i = 0
    while i < rows.len {
       if _project_rel(rows.get(i, {})) == rel { return i }
@@ -2508,8 +2529,8 @@ fn _project_tree_index(str rel) int {
 fn _project_selection_range(dict entry) int {
    def rel = _project_rel(entry)
    if rel.len <= 0 { return 0 }
-   if project_selection_anchor.len <= 0 { project_selection_anchor = rel }
-   def a = _project_tree_index(project_selection_anchor)
+   if to_str(_editor_get("project_selection_anchor")).len <= 0 { _editor_values["project_selection_anchor"] = rel }
+   def a = _project_tree_index(to_str(_editor_get("project_selection_anchor")))
    def b = _project_tree_index(rel)
    if a < 0 || b < 0 {
       _project_selection_set(entry)
@@ -2518,7 +2539,7 @@ fn _project_selection_range(dict entry) int {
    }
    def int lo = int(min(a, b))
    def int hi = int(max(a, b))
-   def rows = project.tree(project_state)
+   def rows = project.tree(_editor_get("project_state"))
    mut out = []
    mut int i = lo
    while i <= hi && i < rows.len {
@@ -2532,7 +2553,7 @@ fn _project_selection_range(dict entry) int {
 
 @returns_owned
 fn _project_selected_entries() list {
-   def rows = project.tree(project_state)
+   def rows = project.tree(_editor_get("project_state"))
    mut out = []
    mut i = 0
    while i < rows.len {
@@ -2548,7 +2569,7 @@ fn _project_action_entries(dict entry) list {
    def e = _project_entry_or_current(entry)
    if !is_dict(e) || e.len <= 0 { return [] }
    def scope = to_str(e.get("scope", "file"))
-   if project_selection.len > 0 && (scope == "file" || scope.len <= 0 || _project_selection_contains(e)) {
+   if _editor_get("project_selection").len > 0 && (scope == "file" || scope.len <= 0 || _project_selection_contains(e)) {
       def rows = _project_selected_entries()
       if rows.len > 0 { return rows }
    }
@@ -2608,73 +2629,73 @@ fn _project_copy_entries(list entries, bool relative) int {
       i += 1
    }
    if vals.len <= 0 { return 0 }
-   window.set_clipboard(win, str.join(vals, "\n"))
+   window.set_clipboard(_editor_get("win"), str.join(vals, "\n"))
    _status(vals.len == 1 ? (relative ? "copied relative path" : "copied path") : ("copied " + to_str(vals.len) + " paths"))
 }
 
 fn _open_or_toggle_project_row(dict entry) int {
-   def res = session.open_or_toggle_project_row(st, project_state, entry)
-   st = res.get("st", st)
-   project_state = res.get("project", project_state)
+   def res = session.open_or_toggle_project_row(_editor_get("st"), _editor_get("project_state"), entry)
+   _editor_values["st"] = res.get("st", _editor_get("st"))
+   _editor_values["project_state"] = res.get("project", _editor_get("project_state"))
    _buffer_changed(!entry.get("dir", false))
    if !entry.get("dir", false) { _nav_record_current() }
    0
 }
 
 fn _new_file_path(dict entry, str name) str {
-   def base = to_str(entry.get("path", project.root(project_state)))
+   def base = to_str(entry.get("path", project.root(_editor_get("project_state"))))
    def parent = entry.get("dir", false) ? base : ospath.dirname(base)
    ospath.join(parent, str.strip(name))
 }
 
 fn _start_new_file(dict entry) int {
    if !is_dict(entry) || entry.len <= 0 {
-      entry = session.project_entry_for_path(project_state, _current_path())
+      entry = session.project_entry_for_path(_editor_get("project_state"), _current_path())
    }
    if !is_dict(entry) || entry.len <= 0 {
       mut dict root_entry = dict(4)
-      root_entry["name"] = ospath.basename(project.root(project_state))
-      root_entry["path"] = project.root(project_state)
+      root_entry["name"] = ospath.basename(project.root(_editor_get("project_state")))
+      root_entry["path"] = project.root(_editor_get("project_state"))
       root_entry["rel"] = "."
       root_entry["dir"] = true
       entry = root_entry
    }
    entry["action"] = "new-file"
    entry["name"] = "untitled.ny"
-   rename_state = prompt.rename_start(rename_state, entry)
-   palette_state = pal.close(palette_state)
-   context_state = prompt.context_close(context_state)
+   _editor_values["rename_state"] = prompt.rename_start(_editor_get("rename_state"), entry)
+   _editor_values["palette_state"] = pal.close(_editor_get("palette_state"))
+   _editor_values["context_state"] = prompt.context_close(_editor_get("context_state"))
    _status("new file")
    0
 }
 
 fn _start_rename(dict entry) int {
-   if !is_dict(entry) || entry.len <= 0 { entry = session.project_entry_for_path(project_state, to_str(ed.current_buffer(st).get("path", ""))) }
+   if !is_dict(entry) || entry.len <= 0 { entry = session.project_entry_for_path(_editor_get("project_state"), to_str(ed.current_buffer(_editor_get("st")).get("path", ""))) }
    if !is_dict(entry) || to_str(entry.get("rel", "")).len <= 0 || to_str(entry.get("rel", "")) == "." {
       _status("select a file first")
       return 0
    }
-   rename_state = prompt.rename_start(rename_state, entry)
-   palette_state = pal.close(palette_state)
-   context_state = prompt.context_close(context_state)
+   _editor_values["rename_state"] = prompt.rename_start(_editor_get("rename_state"), entry)
+   _editor_values["palette_state"] = pal.close(_editor_get("palette_state"))
+   _editor_values["context_state"] = prompt.context_close(_editor_get("context_state"))
    _status("rename")
    0
 }
 
 fn _finish_rename() int {
-   if !prompt.rename_is_open(rename_state) { return 0 }
-   def entry = prompt.rename_entry(rename_state)
+   if !prompt.rename_is_open(_editor_get("rename_state")) { return 0 }
+   def entry = prompt.rename_entry(_editor_get("rename_state"))
    def action = to_str(entry.get("action", "rename"))
-   def text = prompt.rename_text(rename_state)
+   def text = prompt.rename_text(_editor_get("rename_state"))
    def created_path = action == "new-file" ? _new_file_path(entry, text) : ""
    if action == "new-file" {
-      project_state = project.create_file(project_state, prompt.rename_rel(rename_state), text)
+      _editor_values["project_state"] = project.create_file(_editor_get("project_state"), prompt.rename_rel(_editor_get("rename_state")), text)
    } else {
-      project_state = project.rename_entry(project_state, prompt.rename_rel(rename_state), text)
+      _editor_values["project_state"] = project.rename_entry(_editor_get("project_state"), prompt.rename_rel(_editor_get("rename_state")), text)
    }
    _invalidate_project_definitions()
-   def err = to_str(project_state.get("last_error", ""))
-   rename_state = prompt.rename_close(rename_state)
+   def err = to_str(_editor_get("project_state").get("last_error", ""))
+   _editor_values["rename_state"] = prompt.rename_close(_editor_get("rename_state"))
    if err.len > 0 { _status(err) }
    else {
       if action == "new-file" && created_path.len > 0 { _open_file(created_path) }
@@ -2684,17 +2705,17 @@ fn _finish_rename() int {
 }
 
 fn _context_action(str id) int {
-   def entry = prompt.context_entry(context_state)
-   context_state = prompt.context_close(context_state)
+   def entry = prompt.context_entry(_editor_get("context_state"))
+   _editor_values["context_state"] = prompt.context_close(_editor_get("context_state"))
    def scope = to_str(entry.get("scope", "file"))
    def path = to_str(entry.get("path", ""))
    if id == "open" {
       if scope == "editor" {
          if path.len > 0 { _open_file(path) }
       } elif scope == "outline" {
-         st["cursor_line"] = int(entry.get("line", 0))
-         st["cursor_col"] = 0
-         st = ed.clamp_cursor(st)
+         _editor_get("st")["cursor_line"] = int(entry.get("line", 0))
+         _editor_get("st")["cursor_col"] = 0
+         _editor_values["st"] = ed.clamp_cursor(_editor_get("st"))
          _follow_cursor()
          _status("symbol " + to_str(entry.get("name", "")))
       } elif scope == "timeline" {
@@ -2710,7 +2731,7 @@ fn _context_action(str id) int {
    elif id == "redo-file-op" { _redo_file_op() }
    elif id == "git-diff" {
       if scope == "editor" {
-         def hit = session.project_entry_for_path(project_state, _current_path())
+         def hit = session.project_entry_for_path(_editor_get("project_state"), _current_path())
          if is_dict(hit) && hit.len > 0 { _open_git_diff(hit) } else { _status("no git entry") }
       } else { _open_git_diff(entry) }
    }
@@ -2757,7 +2778,7 @@ fn _context_action(str id) int {
       _diff_clipboard()
    }
    elif id == "rename" { _start_rename(entry) }
-   elif id == "refresh" { project_state = project.refresh_git(project_state) st["project_loaded"] = true st["git_loaded"] = true _invalidate_project_definitions() _status("project refreshed") }
+   elif id == "refresh" { _editor_values["project_state"] = project.refresh_git(_editor_get("project_state")) _editor_get("st")["project_loaded"] = true _editor_get("st")["git_loaded"] = true _invalidate_project_definitions() _status("project refreshed") }
    elif id == "copy-path" {
       if scope != "editor" && path.len > 0 { _project_copy_entries(_project_action_entries(entry), false) }
       else { _copy_file_path() }
@@ -2772,11 +2793,11 @@ fn _context_action(str id) int {
    elif id == "go-definition" { _goto_definition() }
    elif id == "lsp-hover" { _lsp_request("hover") }
    elif id == "lsp-diagnostics" { _lsp_diagnostics() }
-   elif id == "terminal-shell" { term_state = termpane.show_shell(term_state) _set_focus("terminal") }
-   elif id == "terminal-repl" { term_state = termpane.show_repl(term_state) _set_focus("terminal") }
-   elif id == "terminal-next" { term_state = termpane.next_tab(term_state) _set_focus("terminal") }
-   elif id == "terminal-prev" { term_state = termpane.prev_tab(term_state) _set_focus("terminal") }
-   elif id == "terminal-close" { term_state = termpane.close_tab(term_state) _set_focus(termpane.is_open(term_state) ? "terminal" : "editor") }
+   elif id == "terminal-shell" { _editor_values["term_state"] = termpane.show_shell(_editor_get("term_state")) _set_focus("terminal") }
+   elif id == "terminal-repl" { _editor_values["term_state"] = termpane.show_repl(_editor_get("term_state")) _set_focus("terminal") }
+   elif id == "terminal-next" { _editor_values["term_state"] = termpane.next_tab(_editor_get("term_state")) _set_focus("terminal") }
+   elif id == "terminal-prev" { _editor_values["term_state"] = termpane.prev_tab(_editor_get("term_state")) _set_focus("terminal") }
+   elif id == "terminal-close" { _editor_values["term_state"] = termpane.close_tab(_editor_get("term_state")) _set_focus(termpane.is_open(_editor_get("term_state")) ? "terminal" : "editor") }
    elif id == "pane-editor" { _set_focus("editor") }
    0
 }
@@ -2785,13 +2806,13 @@ fn _run_current_file() int {
    def path = _current_path()
    def selected = _selected_text_all()
    if selected.len > 0 {
-      st = session.run_text(st, path, selected, "selection")
+      _editor_values["st"] = session.run_text(_editor_get("st"), path, selected, "selection")
    } else {
-      def sec = runner.section_at(ed.current_lines(st), int(st.get("cursor_line", 0)))
+      def sec = runner.section_at(ed.current_lines(_editor_get("st")), int(_editor_get("st").get("cursor_line", 0)))
       if sec.get("found", false) && str.strip(to_str(sec.get("text", ""))).len > 0 {
-         st = session.run_text(st, path, to_str(sec.get("text", "")), "section")
+         _editor_values["st"] = session.run_text(_editor_get("st"), path, to_str(sec.get("text", "")), "section")
       } else {
-         st = session.run_current_file(st)
+         _editor_values["st"] = session.run_current_file(_editor_get("st"))
       }
    }
    _follow_cursor()
@@ -2800,13 +2821,13 @@ fn _run_current_file() int {
 }
 
 fn _diff_clipboard() int {
-   def clip = window.get_clipboard(win)
+   def clip = window.get_clipboard(_editor_get("win"))
    if clip.len <= 0 { _status("clipboard empty") return 0 }
-   def b = ed.current_buffer(st)
+   def b = ed.current_buffer(_editor_get("st"))
    def name = to_str(b.get("name", "buffer"))
-   def text = ed.join_lines(ed.current_lines(st))
+   def text = ed.join_lines(ed.current_lines(_editor_get("st")))
    def out = eddiff.side_by_side(text, clip, name, "clipboard", 68)
-   st = session.set_output_buffer(st, "*diff: " + name + " clipboard*", out)
+   _editor_values["st"] = session.set_output_buffer(_editor_get("st"), "*diff: " + name + " clipboard*", out)
    _mark_current_output("diff", _buffer_source_path(b))
    _follow_cursor()
    _touch_content()
@@ -2815,21 +2836,21 @@ fn _diff_clipboard() int {
 }
 
 fn _mark_current_output(str kind, str source_path="") int {
-   mut bs = st.get("buffers", [])
-   mut b = ed.current_buffer(st)
+   mut bs = _editor_get("st").get("buffers", [])
+   mut b = ed.current_buffer(_editor_get("st"))
    b["readonly"] = true
    b["kind"] = kind
    if source_path.len > 0 { b["source_path"] = source_path }
-   bs[int(st.get("active", 0))] = b
-   st["buffers"] = bs
+   bs[int(_editor_get("st").get("active", 0))] = b
+   _editor_get("st")["buffers"] = bs
    0
 }
 
 fn _open_git_diff(dict entry) int {
    if !is_dict(entry) || entry.len <= 0 { _status("select changed file") return 0 }
    def rel = to_str(entry.get("rel", entry.get("name", "")))
-   def body = project.diff_text(project_state, entry)
-   st = session.set_output_buffer(st, "*git diff: " + rel + "*", body)
+   def body = project.diff_text(_editor_get("project_state"), entry)
+   _editor_values["st"] = session.set_output_buffer(_editor_get("st"), "*git diff: " + rel + "*", body)
    _mark_current_output("diff", to_str(entry.get("path", "")))
    _follow_cursor()
    _touch_content()
@@ -2838,14 +2859,14 @@ fn _open_git_diff(dict entry) int {
 }
 
 fn _check_current_file() int {
-   st = session.check_current_file(st)
+   _editor_values["st"] = session.check_current_file(_editor_get("st"))
    _follow_cursor()
    _touch_content()
    0
 }
 
 fn _format_current_file() int {
-   st = session.format_current_file(st)
+   _editor_values["st"] = session.format_current_file(_editor_get("st"))
    _follow_cursor()
    _touch_content()
    0
@@ -2869,19 +2890,19 @@ fn _debug_command_text(list argv) str {
 fn _debug_start_current() int {
    def path = _current_path()
    if path.len <= 0 || !file_exists(path) { _status("save file before debug") return 0 }
-   if !ed.current_buffer(st).get("readonly", false) && ed.current_buffer(st).get("dirty", false) { st = session.save(st) }
+   if !ed.current_buffer(_editor_get("st")).get("readonly", false) && ed.current_buffer(_editor_get("st")).get("dirty", false) { _editor_values["st"] = session.save(_editor_get("st")) }
    def argv = tools.debug_command_for(path)
    if argv.len <= 0 { _status("debug command missing") return 0 }
-   term_state = termpane.open_command(term_state, "debug", to_str(argv.get(0, "")), _argv_tail(argv), "$ " + _debug_command_text(argv) + "\n")
+   _editor_values["term_state"] = termpane.open_command(_editor_get("term_state"), "debug", to_str(argv.get(0, "")), _argv_tail(argv), "$ " + _debug_command_text(argv) + "\n")
    _set_focus("terminal", false)
    _status("debug " + ospath.basename(path))
    0
 }
 
 fn _debug_send(str command) int {
-   if !termpane.is_open(term_state) || termpane.mode(term_state) != "debug" { _debug_start_current() }
-   if termpane.is_open(term_state) {
-      term_state = termpane.send_text(term_state, command + "\n")
+   if !termpane.is_open(_editor_get("term_state")) || termpane.mode(_editor_get("term_state")) != "debug" { _debug_start_current() }
+   if termpane.is_open(_editor_get("term_state")) {
+      _editor_values["term_state"] = termpane.send_text(_editor_get("term_state"), command + "\n")
       _set_focus("terminal", false)
       _status("debug " + command)
    }
@@ -2891,7 +2912,7 @@ fn _debug_send(str command) int {
 fn _debug_line_target() str {
    def path = _current_path()
    if path.len <= 0 { return "" }
-   path + ":" + to_str(int(st.get("cursor_line", 0)) + 1)
+   path + ":" + to_str(int(_editor_get("st").get("cursor_line", 0)) + 1)
 }
 
 fn _debug_until_current_line() int {
@@ -2944,15 +2965,15 @@ fn _debug_line_symbols(str line, int limit=10) list {
 }
 
 fn _debug_inspect_line() int {
-   def lines = ed.current_lines(st)
+   def lines = ed.current_lines(_editor_get("st"))
    if lines.len <= 0 { _status("empty line") return 0 }
-   def int row = int(min(max(0, int(st.get("cursor_line", 0))), lines.len - 1))
+   def int row = int(min(max(0, int(_editor_get("st").get("cursor_line", 0))), lines.len - 1))
    def syms = _debug_line_symbols(to_str(lines.get(row, "")))
    if syms.len <= 0 { _status("no symbols on line") return 0 }
    _debug_start_current()
    mut int i = 0
    while i < syms.len {
-      term_state = termpane.send_text(term_state, "print " + to_str(syms.get(i, "")) + "\n")
+      _editor_values["term_state"] = termpane.send_text(_editor_get("term_state"), "print " + to_str(syms.get(i, "")) + "\n")
       i += 1
    }
    _set_focus("terminal", false)
@@ -2961,7 +2982,7 @@ fn _debug_inspect_line() int {
 }
 
 fn _debug_load_coredump() int {
-   term_state = termpane.open_command(term_state, "debug", "coredumpctl", ["-1", "gdb"], "$ coredumpctl -1 gdb\n")
+   _editor_values["term_state"] = termpane.open_command(_editor_get("term_state"), "debug", "coredumpctl", ["-1", "gdb"], "$ coredumpctl -1 gdb\n")
    _set_focus("terminal", false)
    _status("latest coredump")
    0
@@ -2970,30 +2991,30 @@ fn _debug_load_coredump() int {
 fn _debug_breakpoint() int {
    def path = _current_path()
    if path.len <= 0 { _status("save file before breakpoint") return 0 }
-   _debug_send("break " + path + ":" + to_str(int(st.get("cursor_line", 0)) + 1))
+   _debug_send("break " + path + ":" + to_str(int(_editor_get("st").get("cursor_line", 0)) + 1))
 }
 
 fn _save() int {
    def path = _current_path()
-   def was_dirty = bool(ed.current_buffer(st).get("dirty", false))
-   st = session.save(st)
-   def now_dirty = bool(ed.current_buffer(st).get("dirty", false))
-   def save_status = to_str(st.get("status", ""))
+   def was_dirty = bool(ed.current_buffer(_editor_get("st")).get("dirty", false))
+   _editor_values["st"] = session.save(_editor_get("st"))
+   def now_dirty = bool(ed.current_buffer(_editor_get("st")).get("dirty", false))
+   def save_status = to_str(_editor_get("st").get("status", ""))
    def save_ok = path.len > 0 && !str.startswith(save_status, "save failed") && save_status != "read-only preview" && save_status != "memory buffer"
-   if lsp_state.get("active", false) && save_ok && (!now_dirty || !was_dirty) {
-      lsp_state["last_request"] = lsp.did_save(lsp_state, path)
+   if _editor_get("lsp_state").get("active", false) && save_ok && (!now_dirty || !was_dirty) {
+      _editor_get("lsp_state")["last_request"] = lsp.did_save(_editor_get("lsp_state"), path)
    }
    0
 }
 
 fn _copy_buffer() int {
-   window.set_clipboard(win, ed.join_lines(ed.current_lines(st)))
+   window.set_clipboard(_editor_get("win"), ed.join_lines(ed.current_lines(_editor_get("st"))))
    _status("copied buffer")
    0
 }
 
 fn _paste_clipboard() int {
-   def text = window.get_clipboard(win)
+   def text = window.get_clipboard(_editor_get("win"))
    if text.len <= 0 { _status("clipboard empty") return 0 }
    _edit_insert(text)
    _status("pasted")
@@ -3003,7 +3024,7 @@ fn _paste_clipboard() int {
 fn _copy_selection_or_buffer() int {
    def selected = _selected_text_all()
    if selected.len > 0 {
-      window.set_clipboard(win, selected)
+      window.set_clipboard(_editor_get("win"), selected)
       _status("copied selection")
    } else {
       _copy_buffer()
@@ -3013,62 +3034,62 @@ fn _copy_selection_or_buffer() int {
 
 fn _cut_selection() int {
    if !_selection_any_valid() { _status("no selection") return 0 }
-   window.set_clipboard(win, _selected_text_all())
+   window.set_clipboard(_editor_get("win"), _selected_text_all())
    _replace_multi_selections("")
    _status("cut")
 }
 
 fn _mark_whole_buffer() int {
-   def lines = ed.current_lines(st)
-   st["sel_a_line"] = 0
-   st["sel_a_col"] = 0
-   st["sel_b_line"] = max(0, lines.len - 1)
-   st["sel_b_col"] = to_str(lines.get(max(0, lines.len - 1), "")).len
-   st["cursor_line"] = int(st.get("sel_b_line", 0))
-   st["cursor_col"] = int(st.get("sel_b_col", 0))
-   st["sel_active"] = true
-   st["multi_selects"] = []
+   def lines = ed.current_lines(_editor_get("st"))
+   _editor_get("st")["sel_a_line"] = 0
+   _editor_get("st")["sel_a_col"] = 0
+   _editor_get("st")["sel_b_line"] = max(0, lines.len - 1)
+   _editor_get("st")["sel_b_col"] = to_str(lines.get(max(0, lines.len - 1), "")).len
+   _editor_get("st")["cursor_line"] = int(_editor_get("st").get("sel_b_line", 0))
+   _editor_get("st")["cursor_col"] = int(_editor_get("st").get("sel_b_col", 0))
+   _editor_get("st")["sel_active"] = true
+   _editor_get("st")["multi_selects"] = []
    _status("marked buffer")
    0
 }
 
 fn _kill_line() int {
-   def lines = ed.current_lines(st)
-   def row = min(max(int(st.get("cursor_line", 0)), 0), max(0, lines.len - 1))
+   def lines = ed.current_lines(_editor_get("st"))
+   def row = min(max(int(_editor_get("st").get("cursor_line", 0)), 0), max(0, lines.len - 1))
    def line = to_str(lines.get(row, ""))
-   def col = min(max(int(st.get("cursor_col", 0)), 0), line.len)
-   st["sel_a_line"] = row
-   st["sel_a_col"] = col
-   st["sel_b_line"] = row
-   st["sel_b_col"] = line.len
-   st["sel_active"] = true
-   st["multi_selects"] = []
+   def col = min(max(int(_editor_get("st").get("cursor_col", 0)), 0), line.len)
+   _editor_get("st")["sel_a_line"] = row
+   _editor_get("st")["sel_a_col"] = col
+   _editor_get("st")["sel_b_line"] = row
+   _editor_get("st")["sel_b_col"] = line.len
+   _editor_get("st")["sel_active"] = true
+   _editor_get("st")["multi_selects"] = []
    _cut_selection()
 }
 
 fn _kill_buffer() int {
-   mut bs = st.get("buffers", [])
+   mut bs = _editor_get("st").get("buffers", [])
    if bs.len <= 1 {
-      st = ed.state([ed.buffer("untitled.ny", "", "")])
+      _editor_values["st"] = ed.state([ed.buffer("untitled.ny", "", "")])
       _buffer_changed(true)
       _nav_record_current()
       _status("new empty buffer")
       return 0
    }
-   def active = int(st.get("active", 0))
+   def active = int(_editor_get("st").get("active", 0))
    ;; Guard against accidentally discarding unsaved edits: require a second
    ;; kill-buffer invocation within a short window when the active buffer is
    ;; dirty. The first call only emits a status hint.
    def cur = bs.get(active, {})
    if bool(cur.get("dirty", false)) && !bool(cur.get("readonly", false)) {
-      if !bool(st.get("kill_confirm", false)) || int(st.get("kill_confirm_buf", -1)) != active {
-         st["kill_confirm"] = true
-         st["kill_confirm_buf"] = active
+      if !bool(_editor_get("st").get("kill_confirm", false)) || int(_editor_get("st").get("kill_confirm_buf", -1)) != active {
+         _editor_get("st")["kill_confirm"] = true
+         _editor_get("st")["kill_confirm_buf"] = active
          _status("unsaved changes — run kill-buffer again to discard")
          return 0
       }
-      st["kill_confirm"] = false
-      st["kill_confirm_buf"] = -1
+      _editor_get("st")["kill_confirm"] = false
+      _editor_get("st")["kill_confirm_buf"] = -1
    }
    mut out = []
    mut i = 0
@@ -3076,11 +3097,11 @@ fn _kill_buffer() int {
       if i != active { out = out.append(bs.get(i)) }
       i += 1
    }
-   st["buffers"] = out
-   st["active"] = min(max(0, active), out.len - 1)
-   st["cursor_line"] = 0
-   st["cursor_col"] = 0
-   st["scroll"] = 0
+   _editor_get("st")["buffers"] = out
+   _editor_get("st")["active"] = min(max(0, active), out.len - 1)
+   _editor_get("st")["cursor_line"] = 0
+   _editor_get("st")["cursor_col"] = 0
+   _editor_get("st")["scroll"] = 0
    _clear_selections()
    _buffer_changed(true)
    _nav_record_current()
@@ -3089,17 +3110,17 @@ fn _kill_buffer() int {
 }
 
 fn _new_scratch() int {
-   mut bs = st.get("buffers", [])
+   mut bs = _editor_get("st").get("buffers", [])
    def idx = bs.len + 1
    mut b = ed.buffer("*scratch " + to_str(idx) + "*", "", "")
    b["kind"] = "scratch"
    b["dirty"] = false
    bs = bs.append(b)
-   st["buffers"] = bs
-   st["active"] = bs.len - 1
-   st["cursor_line"] = 0
-   st["cursor_col"] = 0
-   st["scroll"] = 0
+   _editor_get("st")["buffers"] = bs
+   _editor_get("st")["active"] = bs.len - 1
+   _editor_get("st")["cursor_line"] = 0
+   _editor_get("st")["cursor_col"] = 0
+   _editor_get("st")["scroll"] = 0
    _clear_selections()
    _buffer_changed(true)
    _nav_record_current()
@@ -3108,9 +3129,9 @@ fn _new_scratch() int {
 }
 
 fn _mutate_lines(list lines, str msg) int {
-   hist = history.push(hist, st)
-   st = ed.set_lines(st, lines)
-   st = ed.clamp_cursor(st)
+   _editor_values["hist"] = history.push(_editor_get("hist"), _editor_get("st"))
+   _editor_values["st"] = ed.set_lines(_editor_get("st"), lines)
+   _editor_values["st"] = ed.clamp_cursor(_editor_get("st"))
    _follow_cursor()
    _touch_content()
    if msg.len > 0 { _status(msg) }
@@ -3118,7 +3139,7 @@ fn _mutate_lines(list lines, str msg) int {
 }
 
 fn _save_all() int {
-   mut bs = st.get("buffers", [])
+   mut bs = _editor_get("st").get("buffers", [])
    mut saved = 0
    mut failed = 0
    mut i = 0
@@ -3139,7 +3160,7 @@ fn _save_all() int {
       }
       i += 1
    }
-   st["buffers"] = bs
+   _editor_get("st")["buffers"] = bs
    if failed > 0 {
       _status("saved " + to_str(saved) + ", " + to_str(failed) + " failed")
    } else {
@@ -3149,28 +3170,28 @@ fn _save_all() int {
 }
 
 fn _reload_from_disk() int {
-   def path = to_str(ed.current_buffer(st).get("path", ""))
+   def path = to_str(ed.current_buffer(_editor_get("st")).get("path", ""))
    if path.len <= 0 || !file_exists(path) { _status("no file to reload") return 0 }
    ;; Guard against clobbering unsaved in-memory edits: same double-tap pattern
    ;; as _kill_buffer. The first invocation only warns; the second one within
    ;; the same editor session actually reloads.
-   if bool(ed.current_buffer(st).get("dirty", false)) {
-      def active = int(st.get("active", 0))
-      if !bool(st.get("reload_confirm", false)) || int(st.get("reload_confirm_buf", -1)) != active {
-         st["reload_confirm"] = true
-         st["reload_confirm_buf"] = active
+   if bool(ed.current_buffer(_editor_get("st")).get("dirty", false)) {
+      def active = int(_editor_get("st").get("active", 0))
+      if !bool(_editor_get("st").get("reload_confirm", false)) || int(_editor_get("st").get("reload_confirm_buf", -1)) != active {
+         _editor_get("st")["reload_confirm"] = true
+         _editor_get("st")["reload_confirm_buf"] = active
          _status("buffer dirty — run reload again to discard edits")
          return 0
       }
-      st["reload_confirm"] = false
-      st["reload_confirm_buf"] = -1
+      _editor_get("st")["reload_confirm"] = false
+      _editor_get("st")["reload_confirm_buf"] = -1
    }
-   mut bs = st.get("buffers", [])
-   bs[int(st.get("active", 0))] = session.read_buffer(path)
-   st["buffers"] = bs
-   st["cursor_line"] = 0
-   st["cursor_col"] = 0
-   st["scroll"] = 0
+   mut bs = _editor_get("st").get("buffers", [])
+   bs[int(_editor_get("st").get("active", 0))] = session.read_buffer(path)
+   _editor_get("st")["buffers"] = bs
+   _editor_get("st")["cursor_line"] = 0
+   _editor_get("st")["cursor_col"] = 0
+   _editor_get("st")["scroll"] = 0
    _clear_selections()
    _follow_cursor()
    _touch_content()
@@ -3182,17 +3203,17 @@ fn _reload_from_disk() int {
 fn _copy_file_path() int {
    def path = _current_path()
    if path.len <= 0 { _status("memory buffer") return 0 }
-   window.set_clipboard(win, path)
+   window.set_clipboard(_editor_get("win"), path)
    _status("copied path")
    0
 }
 
 fn _copy_line_info() int {
-   def b = ed.current_buffer(st)
+   def b = ed.current_buffer(_editor_get("st"))
    def path = _buffer_source_path(b)
    def info = (path.len > 0 ? path : to_str(b.get("name", "buffer"))) + ":" +
-   to_str(int(st.get("cursor_line", 0)) + 1) + ":" + to_str(int(st.get("cursor_col", 0)) + 1)
-   window.set_clipboard(win, info)
+   to_str(int(_editor_get("st").get("cursor_line", 0)) + 1) + ":" + to_str(int(_editor_get("st").get("cursor_col", 0)) + 1)
+   window.set_clipboard(_editor_get("win"), info)
    _status("copied line info")
    0
 }
@@ -3202,11 +3223,11 @@ fn _word_byte(int c) bool {
 }
 
 fn _word_at_cursor() str {
-   def lines = ed.current_lines(st)
-   def int row = int(min(max(int(st.get("cursor_line", 0)), 0), max(0, lines.len - 1)))
+   def lines = ed.current_lines(_editor_get("st"))
+   def int row = int(min(max(int(_editor_get("st").get("cursor_line", 0)), 0), max(0, lines.len - 1)))
    def line = to_str(lines.get(row, ""))
    if line.len <= 0 { return "" }
-   mut int col = int(min(max(int(st.get("cursor_col", 0)), 0), line.len - 1))
+   mut int col = int(min(max(int(_editor_get("st").get("cursor_col", 0)), 0), line.len - 1))
    if !_word_byte(load8(line, col)) && col > 0 { col -= 1 }
    if !_word_byte(load8(line, col)) { return "" }
    mut int a = col
@@ -3217,19 +3238,19 @@ fn _word_at_cursor() str {
 }
 
 fn _word_prefix_before_cursor() str {
-   def lines = ed.current_lines(st)
-   def int row = int(min(max(int(st.get("cursor_line", 0)), 0), max(0, lines.len - 1)))
+   def lines = ed.current_lines(_editor_get("st"))
+   def int row = int(min(max(int(_editor_get("st").get("cursor_line", 0)), 0), max(0, lines.len - 1)))
    def line = to_str(lines.get(row, ""))
-   mut int col = int(min(max(int(st.get("cursor_col", 0)), 0), line.len))
+   mut int col = int(min(max(int(_editor_get("st").get("cursor_col", 0)), 0), line.len))
    mut int a = col
    while a > 0 && _word_byte(load8(line, a - 1)) { a -= 1 }
    str.str_slice(line, a, col)
 }
 
 fn _completion_close() int {
-   completion_state["open"] = false
-   completion_state["items"] = []
-   completion_state["index"] = 0
+   _editor_get("completion_state")["open"] = false
+   _editor_get("completion_state")["items"] = []
+   _editor_get("completion_state")["index"] = 0
    0
 }
 
@@ -3279,8 +3300,8 @@ fn _completion_scan_line(list out, str prefix, list lines, int li) list {
 
 fn _completion_items(str prefix, bool lsp_hint=false) list {
    mut out = _completion_seed_items(prefix)
-   def lines = ed.current_lines(st)
-   def int cursor = int(min(max(int(st.get("cursor_line", 0)), 0), max(0, lines.len - 1)))
+   def lines = ed.current_lines(_editor_get("st"))
+   def int cursor = int(min(max(int(_editor_get("st").get("cursor_line", 0)), 0), max(0, lines.len - 1)))
    def int radius = int(min(COMPLETION_SCAN_RADIUS, max(lines.len, 1)))
    def int lo = int(max(0, cursor - radius))
    def int hi = int(min(lines.len, cursor + radius + 1))
@@ -3297,7 +3318,7 @@ fn _completion_items(str prefix, bool lsp_hint=false) list {
       }
    }
    if lsp_hint {
-      out = _completion_push(out, "LSP completion requested", to_str(lsp_state.get("last", "waiting for language server")), "lsp", prefix)
+      out = _completion_push(out, "LSP completion requested", to_str(_editor_get("lsp_state").get("last", "waiting for language server")), "lsp", prefix)
    }
    out
 }
@@ -3305,35 +3326,35 @@ fn _completion_items(str prefix, bool lsp_hint=false) list {
 fn _completion_open(bool lsp_hint=false) int {
    def prefix = _word_prefix_before_cursor()
    def items = _completion_items(prefix, lsp_hint)
-   completion_state["open"] = items.len > 0
-   completion_state["items"] = items
-   completion_state["index"] = 0
-   completion_state["prefix"] = prefix
+   _editor_get("completion_state")["open"] = items.len > 0
+   _editor_get("completion_state")["items"] = items
+   _editor_get("completion_state")["index"] = 0
+   _editor_get("completion_state")["prefix"] = prefix
    if items.len <= 0 { _status("no completions") }
    0
 }
 
 fn _completion_help(str title, str detail) int {
-   completion_state["open"] = true
+   _editor_get("completion_state")["open"] = true
    mut dict item = dict(4)
    item["label"] = title
    item["detail"] = detail
    item["kind"] = "lsp"
    item["insert"] = ""
-   completion_state["items"] = [item]
-   completion_state["index"] = 0
-   completion_state["prefix"] = ""
+   _editor_get("completion_state")["items"] = [item]
+   _editor_get("completion_state")["index"] = 0
+   _editor_get("completion_state")["prefix"] = ""
    0
 }
 
 fn _completion_apply() int {
-   if !bool(completion_state.get("open", false)) { return 0 }
-   def items = completion_state.get("items", [])
+   if !bool(_editor_get("completion_state").get("open", false)) { return 0 }
+   def items = _editor_get("completion_state").get("items", [])
    if items.len <= 0 { return _completion_close() }
-   def idx = min(max(0, int(completion_state.get("index", 0))), items.len - 1)
+   def idx = min(max(0, int(_editor_get("completion_state").get("index", 0))), items.len - 1)
    def item = items.get(idx, {})
    def insert = to_str(item.get("insert", ""))
-   def prefix = to_str(completion_state.get("prefix", ""))
+   def prefix = to_str(_editor_get("completion_state").get("prefix", ""))
    if insert.len > prefix.len && str.startswith(insert, prefix) {
       _edit_insert(str.str_slice(insert, prefix.len, insert.len))
    } else {
@@ -3343,15 +3364,15 @@ fn _completion_apply() int {
 }
 
 fn _completion_handle_key(any data) bool {
-   if !bool(completion_state.get("open", false)) { return false }
-   def items = completion_state.get("items", [])
+   if !bool(_editor_get("completion_state").get("open", false)) { return false }
+   def items = _editor_get("completion_state").get("items", [])
    if window.event_key_is(data, key.KEY_ESCAPE) { _completion_close() return true }
    if window.event_key_is(data, key.KEY_DOWN) {
-      completion_state["index"] = items.len <= 0 ? 0 : (int(completion_state.get("index", 0)) + 1) % items.len
+      _editor_get("completion_state")["index"] = items.len <= 0 ? 0 : (int(_editor_get("completion_state").get("index", 0)) + 1) % items.len
       return true
    }
    if window.event_key_is(data, key.KEY_UP) {
-      completion_state["index"] = items.len <= 0 ? 0 : (int(completion_state.get("index", 0)) + items.len - 1) % items.len
+      _editor_get("completion_state")["index"] = items.len <= 0 ? 0 : (int(_editor_get("completion_state").get("index", 0)) + items.len - 1) % items.len
       return true
    }
    if window.event_key_is(data, key.KEY_ENTER) || window.event_key_is(data, key.KEY_TAB) { _completion_apply() return true }
@@ -3414,13 +3435,13 @@ fn _definition_index_from_lines(list lines, str path="", int max_lines=0) dict {
 }
 
 fn _current_definition_index() dict {
-   def b = ed.current_buffer(st)
-   def name = to_str(int(st.get("active", 0))) + ":" + to_str(b.get("name", ""))
-   if definition_cache_rev == content_rev && definition_cache_name == name { return definition_cache }
-   definition_cache = _definition_index_from_lines(ed.current_lines(st), _current_path())
-   definition_cache_rev = content_rev
-   definition_cache_name = name
-   definition_cache
+   def b = ed.current_buffer(_editor_get("st"))
+   def name = to_str(int(_editor_get("st").get("active", 0))) + ":" + to_str(b.get("name", ""))
+   if int(_editor_get("definition_cache_rev")) == int(_editor_get("content_rev")) && to_str(_editor_get("definition_cache_name")) == name { return _editor_get("definition_cache") }
+   _editor_values["definition_cache"] = _definition_index_from_lines(ed.current_lines(_editor_get("st")), _current_path())
+   _editor_values["definition_cache_rev"] = int(_editor_get("content_rev"))
+   _editor_values["definition_cache_name"] = name
+   _editor_get("definition_cache")
 }
 
 fn _current_definition(str word) dict {
@@ -3438,22 +3459,22 @@ fn _goto_max_files() int { common.env_int_clamped("NY_EDITOR_GOTO_MAX_FILES", 16
 fn _goto_max_bytes() int { common.env_int_clamped("NY_EDITOR_GOTO_MAX_BYTES", 524288, 4096, 8388608) }
 
 fn _project_definition_key(str active_path, int max_files, int max_bytes) str {
-   project.root(project_state) + "\t" + to_str(project.tree(project_state).len) + "\t" + ospath.normalize(active_path) + "\t" + to_str(max_files) + "\t" + to_str(max_bytes)
+   project.root(_editor_get("project_state")) + "\t" + to_str(project.tree(_editor_get("project_state")).len) + "\t" + ospath.normalize(active_path) + "\t" + to_str(max_files) + "\t" + to_str(max_bytes)
 }
 
 fn _prepare_project_definition_cache(str active_path, int max_files, int max_bytes) int {
    def key = _project_definition_key(active_path, max_files, max_bytes)
-   if project_definition_cache_key == key { return 0 }
-   project_definition_cache_key = key
-   project_definition_cache = borrow(dict(512))
-   project_definition_scanned = borrow(dict(256))
-   project_definition_cache_complete = false
+   if to_str(_editor_get("project_definition_cache_key")) == key { return 0 }
+   _editor_values["project_definition_cache_key"] = key
+   _editor_values["project_definition_cache"] = borrow(dict(512))
+   _editor_values["project_definition_scanned"] = borrow(dict(256))
+   _editor_values["project_definition_cache_complete"] = false
    0
 }
 
 fn _project_cache_file_defs(str path, str active_path, int max_bytes) int {
-   if path.len <= 0 || project_definition_scanned.contains(path) { return 0 }
-   project_definition_scanned[path] = true
+   if path.len <= 0 || _editor_get("project_definition_scanned").contains(path) { return 0 }
+   _editor_get("project_definition_scanned")[path] = true
    if ospath.normalize(path) == ospath.normalize(active_path) { return 0 }
    def text = session.read_text(path)
    if text.len <= 0 || text.len > max_bytes { return 0 }
@@ -3462,8 +3483,8 @@ fn _project_cache_file_defs(str path, str active_path, int max_bytes) int {
    mut i = 0
    while i < keys.len {
       def k = to_str(keys.get(i, ""))
-      if k.len > 0 && !project_definition_cache.contains(k) {
-         project_definition_cache[k] = defs.get(k, dict(0))
+      if k.len > 0 && !_editor_get("project_definition_cache").contains(k) {
+         _editor_get("project_definition_cache")[k] = defs.get(k, dict(0))
       }
       i += 1
    }
@@ -3474,27 +3495,27 @@ fn _find_project_definition(str word) dict {
    if word.len <= 0 { return dict(0) }
    _ensure_project_tree()
    def active_path = ospath.normalize(_current_path())
-   def rows = project.tree(project_state)
+   def rows = project.tree(_editor_get("project_state"))
    def max_files = _goto_max_files()
    def max_bytes = _goto_max_bytes()
    _prepare_project_definition_cache(active_path, max_files, max_bytes)
-   if project_definition_cache.contains(word) { return project_definition_cache.get(word, dict(0)) }
-   if project_definition_cache_complete { return dict(0) }
-   mut checked = project_definition_scanned.len
+   if _editor_get("project_definition_cache").contains(word) { return _editor_get("project_definition_cache").get(word, dict(0)) }
+   if bool(_editor_get("project_definition_cache_complete")) { return dict(0) }
+   mut checked = _editor_get("project_definition_scanned").len
    mut i = 0
    while i < rows.len && checked < max_files {
       def entry = rows.get(i, {})
       def path = to_str(entry.get("path", ""))
       if !entry.get("dir", false) && path.len > 0 && _source_like_path(path) {
-         if !project_definition_scanned.contains(path) {
+         if !_editor_get("project_definition_scanned").contains(path) {
             checked += 1
             _project_cache_file_defs(path, active_path, max_bytes)
-            if project_definition_cache.contains(word) { return project_definition_cache.get(word, dict(0)) }
+            if _editor_get("project_definition_cache").contains(word) { return _editor_get("project_definition_cache").get(word, dict(0)) }
          }
       }
       i += 1
    }
-   if i >= rows.len { project_definition_cache_complete = true }
+   if i >= rows.len { _editor_values["project_definition_cache_complete"] = true }
    dict(0)
 }
 
@@ -3504,9 +3525,9 @@ fn _goto_definition() int {
    def here = _current_definition(word)
    if is_dict(here) && here.len > 0 {
       _nav_push_current()
-      st["cursor_line"] = int(here.get("line", 0))
-      st["cursor_col"] = int(here.get("col", 0))
-      st = ed.clamp_cursor(st)
+      _editor_get("st")["cursor_line"] = int(here.get("line", 0))
+      _editor_get("st")["cursor_col"] = int(here.get("col", 0))
+      _editor_values["st"] = ed.clamp_cursor(_editor_get("st"))
       _follow_cursor()
       _status("definition " + word)
       return 0
@@ -3514,10 +3535,10 @@ fn _goto_definition() int {
    def found = _find_project_definition(word)
    if is_dict(found) && found.len > 0 {
       _nav_push_current()
-      st = session.open_file(st, to_str(found.get("path", "")))
-      st["cursor_line"] = int(found.get("line", 0))
-      st["cursor_col"] = int(found.get("col", 0))
-      st = ed.clamp_cursor(st)
+      _editor_values["st"] = session.open_file(_editor_get("st"), to_str(found.get("path", "")))
+      _editor_get("st")["cursor_line"] = int(found.get("line", 0))
+      _editor_get("st")["cursor_col"] = int(found.get("col", 0))
+      _editor_values["st"] = ed.clamp_cursor(_editor_get("st"))
       _buffer_changed(true)
       _follow_cursor()
       _status("definition " + word)
@@ -3528,10 +3549,10 @@ fn _goto_definition() int {
 }
 
 fn _select_line() int {
-   def lines = ed.current_lines(st)
+   def lines = ed.current_lines(_editor_get("st"))
    if _extra_cursor_count() > 0 {
       mut ranges = []
-      def prow = min(max(int(st.get("cursor_line", 0)), 0), max(0, lines.len - 1))
+      def prow = min(max(int(_editor_get("st").get("cursor_line", 0)), 0), max(0, lines.len - 1))
       ranges = ranges.append(_range_make(prow, 0, prow, to_str(lines.get(prow, "")).len, true))
       def extras = _extra_cursors()
       mut i = 0
@@ -3540,32 +3561,32 @@ fn _select_line() int {
          ranges = ranges.append(_range_make(row2, 0, row2, to_str(lines.get(row2, "")).len, false))
          i += 1
       }
-      st["multi_selects"] = ranges
+      _editor_get("st")["multi_selects"] = ranges
       def p = ranges.get(0, [])
-      st["sel_a_line"] = int(p.get(0, 0))
-      st["sel_a_col"] = int(p.get(1, 0))
-      st["sel_b_line"] = int(p.get(2, 0))
-      st["sel_b_col"] = int(p.get(3, 0))
-      st["sel_active"] = true
+      _editor_get("st")["sel_a_line"] = int(p.get(0, 0))
+      _editor_get("st")["sel_a_col"] = int(p.get(1, 0))
+      _editor_get("st")["sel_b_line"] = int(p.get(2, 0))
+      _editor_get("st")["sel_b_col"] = int(p.get(3, 0))
+      _editor_get("st")["sel_active"] = true
       _status("selected " + to_str(ranges.len) + " lines")
       return 0
    }
-   def int row = int(min(max(int(st.get("cursor_line", 0)), 0), max(0, lines.len - 1)))
-   st["cursor_line"] = row
-   st["cursor_col"] = to_str(lines.get(row, "")).len
-   st["sel_a_line"] = row
-   st["sel_a_col"] = 0
-   st["sel_b_line"] = row
-   st["sel_b_col"] = int(st.get("cursor_col", 0))
-   st["sel_active"] = true
-   st["multi_selects"] = []
+   def int row = int(min(max(int(_editor_get("st").get("cursor_line", 0)), 0), max(0, lines.len - 1)))
+   _editor_get("st")["cursor_line"] = row
+   _editor_get("st")["cursor_col"] = to_str(lines.get(row, "")).len
+   _editor_get("st")["sel_a_line"] = row
+   _editor_get("st")["sel_a_col"] = 0
+   _editor_get("st")["sel_b_line"] = row
+   _editor_get("st")["sel_b_col"] = int(_editor_get("st").get("cursor_col", 0))
+   _editor_get("st")["sel_active"] = true
+   _editor_get("st")["multi_selects"] = []
    _status("selected line")
    0
 }
 
 fn _duplicate_line() int {
-   def lines = ed.current_lines(st)
-   def int row = int(min(max(int(st.get("cursor_line", 0)), 0), max(0, lines.len - 1)))
+   def lines = ed.current_lines(_editor_get("st"))
+   def int row = int(min(max(int(_editor_get("st").get("cursor_line", 0)), 0), max(0, lines.len - 1)))
    mut out = []
    mut int i = 0
    while i < lines.len {
@@ -3573,46 +3594,46 @@ fn _duplicate_line() int {
       if i == row { out = out.append(lines.get(i, "")) }
       i += 1
    }
-   st["cursor_line"] = row + 1
+   _editor_get("st")["cursor_line"] = row + 1
    _mutate_lines(out, "duplicated line")
 }
 
 fn _delete_line() int {
-   def lines = ed.current_lines(st)
+   def lines = ed.current_lines(_editor_get("st"))
    if lines.len <= 1 {
-      st["cursor_line"] = 0
-      st["cursor_col"] = 0
+      _editor_get("st")["cursor_line"] = 0
+      _editor_get("st")["cursor_col"] = 0
       return _mutate_lines([""], "deleted line")
    }
-   def int row = int(min(max(int(st.get("cursor_line", 0)), 0), lines.len - 1))
+   def int row = int(min(max(int(_editor_get("st").get("cursor_line", 0)), 0), lines.len - 1))
    mut out = []
    mut int i = 0
    while i < lines.len {
       if i != row { out = out.append(lines.get(i, "")) }
       i += 1
    }
-   st["cursor_line"] = min(row, out.len - 1)
-   st["cursor_col"] = min(int(st.get("cursor_col", 0)), to_str(out.get(int(st.get("cursor_line", 0)), "")).len)
+   _editor_get("st")["cursor_line"] = min(row, out.len - 1)
+   _editor_get("st")["cursor_col"] = min(int(_editor_get("st").get("cursor_col", 0)), to_str(out.get(int(_editor_get("st").get("cursor_line", 0)), "")).len)
    _mutate_lines(out, "deleted line")
 }
 
 fn _move_line(int dir) int {
-   def lines = ed.current_lines(st)
+   def lines = ed.current_lines(_editor_get("st"))
    if lines.len <= 1 { return 0 }
-   def int row = int(min(max(int(st.get("cursor_line", 0)), 0), lines.len - 1))
+   def int row = int(min(max(int(_editor_get("st").get("cursor_line", 0)), 0), lines.len - 1))
    def int other = row + dir
    if other < 0 || other >= lines.len { return 0 }
    mut out = lines
    def a = out.get(row, "")
    out[row] = out.get(other, "")
    out[other] = a
-   st["cursor_line"] = other
+   _editor_get("st")["cursor_line"] = other
    _mutate_lines(out, dir < 0 ? "moved line up" : "moved line down")
 }
 
 fn _join_line(bool tight=false) int {
-   def lines = ed.current_lines(st)
-   def int row = int(min(max(int(st.get("cursor_line", 0)), 0), max(0, lines.len - 1)))
+   def lines = ed.current_lines(_editor_get("st"))
+   def int row = int(min(max(int(_editor_get("st").get("cursor_line", 0)), 0), max(0, lines.len - 1)))
    if row + 1 >= lines.len { return 0 }
    def a = to_str(lines.get(row, ""))
    def b = to_str(lines.get(row + 1, ""))
@@ -3624,13 +3645,13 @@ fn _join_line(bool tight=false) int {
       elif i != row + 1 { out = out.append(lines.get(i, "")) }
       i += 1
    }
-   st["cursor_col"] = a.len
+   _editor_get("st")["cursor_col"] = a.len
    _mutate_lines(out, "joined lines")
 }
 
 fn _selection_line_span() list {
    def ranges = _selection_ranges_active()
-   if ranges.len <= 0 { return [int(st.get("cursor_line", 0)), int(st.get("cursor_line", 0))] }
+   if ranges.len <= 0 { return [int(_editor_get("st").get("cursor_line", 0)), int(_editor_get("st").get("cursor_line", 0))] }
    mut int lo = 1000000000
    mut int hi = 0
    mut int i = 0
@@ -3644,7 +3665,7 @@ fn _selection_line_span() list {
 }
 
 fn _sort_lines() int {
-   def lines = ed.current_lines(st)
+   def lines = ed.current_lines(_editor_get("st"))
    if lines.len <= 1 { return 0 }
    def span = _selection_line_span()
    def int start = int(min(max(int(span.get(0, 0)), 0), lines.len - 1))
@@ -3670,7 +3691,7 @@ fn _rstrip_ws(str s) str {
 }
 
 fn _strip_trailing_ws() int {
-   def lines = ed.current_lines(st)
+   def lines = ed.current_lines(_editor_get("st"))
    mut out = []
    mut changed = false
    mut i = 0
@@ -3686,14 +3707,14 @@ fn _strip_trailing_ws() int {
 }
 
 fn _comment_prefix() str {
-   def str ext = str.lower(ospath.extname(to_str(ed.current_buffer(st).get("name", ""))))
+   def str ext = str.lower(ospath.extname(to_str(ed.current_buffer(_editor_get("st")).get("name", ""))))
    if ext == ".py" || ext == ".sh" || ext == ".rb" || ext == ".pl" || ext == ".yaml" || ext == ".yml" { return "# " }
    if ext == ".lua" { return "-- " }
    "// "
 }
 
 fn _toggle_comment() int {
-   def lines = ed.current_lines(st)
+   def lines = ed.current_lines(_editor_get("st"))
    if lines.len <= 0 { return 0 }
    def span = _selection_line_span()
    def int start = int(min(max(int(span.get(0, 0)), 0), lines.len - 1))
@@ -3721,27 +3742,27 @@ fn _toggle_comment() int {
 }
 
 fn _insert_pair(str open, str close) int {
-   _apply_hist(history.insert_pair(hist, st, open, close))
+   _apply_hist(history.insert_pair(_editor_get("hist"), _editor_get("st"), open, close))
 }
 
 fn _mods_live(any data) int {
-   int(data.get("mods", data.get("mod", window.get_modifiers(win))))
+   int(data.get("mods", data.get("mod", window.get_modifiers(_editor_get("win")))))
 }
 
 fn _ctrl(any data) bool {
-   (_mods_live(data) & key.MOD_CONTROL) != 0 || window.key_down(win, key.KEY_LEFT_CONTROL) || window.key_down(win, key.KEY_RIGHT_CONTROL) || window.key_down(win, key.KEY_CTRL)
+   (_mods_live(data) & key.MOD_CONTROL) != 0 || window.key_down(_editor_get("win"), key.KEY_LEFT_CONTROL) || window.key_down(_editor_get("win"), key.KEY_RIGHT_CONTROL) || window.key_down(_editor_get("win"), key.KEY_CTRL)
 }
 
 fn _cmd_mod(any data) bool {
-   (_mods_live(data) & (key.MOD_CONTROL | key.MOD_SUPER | key.MOD_META)) != 0 || _ctrl(data) || window.key_down(win, key.KEY_LEFT_SUPER) || window.key_down(win, key.KEY_RIGHT_SUPER) || window.key_down(win, key.KEY_SUPER)
+   (_mods_live(data) & (key.MOD_CONTROL | key.MOD_SUPER | key.MOD_META)) != 0 || _ctrl(data) || window.key_down(_editor_get("win"), key.KEY_LEFT_SUPER) || window.key_down(_editor_get("win"), key.KEY_RIGHT_SUPER) || window.key_down(_editor_get("win"), key.KEY_SUPER)
 }
 
 fn _shift(any data) bool {
-   (_mods_live(data) & key.MOD_SHIFT) != 0 || window.key_down(win, key.KEY_LEFT_SHIFT) || window.key_down(win, key.KEY_RIGHT_SHIFT) || window.key_down(win, key.KEY_SHIFT)
+   (_mods_live(data) & key.MOD_SHIFT) != 0 || window.key_down(_editor_get("win"), key.KEY_LEFT_SHIFT) || window.key_down(_editor_get("win"), key.KEY_RIGHT_SHIFT) || window.key_down(_editor_get("win"), key.KEY_SHIFT)
 }
 
 fn _alt(any data) bool {
-   (_mods_live(data) & key.MOD_ALT) != 0 || window.key_down(win, key.KEY_LEFT_ALT) || window.key_down(win, key.KEY_RIGHT_ALT) || window.key_down(win, key.KEY_ALT)
+   (_mods_live(data) & key.MOD_ALT) != 0 || window.key_down(_editor_get("win"), key.KEY_LEFT_ALT) || window.key_down(_editor_get("win"), key.KEY_RIGHT_ALT) || window.key_down(_editor_get("win"), key.KEY_ALT)
 }
 
 fn _key_event_char_cp(any data) int {
@@ -3776,7 +3797,7 @@ fn _same_char_fold(int a, int b) bool {
 fn _suppress_char_from_key(any data) int {
    def cp = _key_event_char_cp(data)
    if cp > 0 {
-      suppress_char_cp = cp
+      _editor_values["suppress_char_cp"] = cp
       if INPUT_TRACE { print("[editor:key] suppress-char cp=" + to_str(cp)) }
    }
    0
@@ -3784,9 +3805,9 @@ fn _suppress_char_from_key(any data) int {
 
 fn _consume_suppressed_char(any data) bool {
    def cp = int(data.get("char", 0))
-   if suppress_char_cp <= 0 || cp <= 0 { return false }
-   def expected = suppress_char_cp
-   suppress_char_cp = 0
+   if int(_editor_get("suppress_char_cp")) <= 0 || cp <= 0 { return false }
+   def expected = int(_editor_get("suppress_char_cp"))
+   _editor_values["suppress_char_cp"] = 0
    if _same_char_fold(cp, expected) {
       if INPUT_TRACE { print("[editor:char] suppressed cp=" + to_str(cp)) }
       return true
@@ -3795,15 +3816,15 @@ fn _consume_suppressed_char(any data) bool {
 }
 
 fn _line_text_x(dict lay) f64 {
-   float(lay.get("edit_x", 0.0)) + (bool(st.get("show_line_numbers", true)) ? 58.0 : 16.0)
+   float(lay.get("edit_x", 0.0)) + (bool(_editor_get("st").get("show_line_numbers", true)) ? 58.0 : 16.0)
 }
 
 fn _layout_with_terminal(dict lay, f64 sh) dict {
-   lay = ed.with_bottom_dock(lay, sh, termpane.is_open(term_state), float(st.get("term_h", 0.0)))
-   if termpane.is_open(term_state) {
-      st["term_h"] = float(lay.get("dock_h", st.get("term_h", 0.0)))
-      term_state = termpane.resize(
-         term_state,
+   lay = ed.with_bottom_dock(lay, sh, termpane.is_open(_editor_get("term_state")), float(_editor_get("st").get("term_h", 0.0)))
+   if termpane.is_open(_editor_get("term_state")) {
+      _editor_get("st")["term_h"] = float(lay.get("dock_h", _editor_get("st").get("term_h", 0.0)))
+      _editor_values["term_state"] = termpane.resize(
+         _editor_get("term_state"),
          float(lay.get("dock_x", 0.0)) + 8.0,
          float(lay.get("dock_y", 0.0)) + TERM_TAB_H,
          max(1.0, float(lay.get("dock_w", 1.0)) - 16.0),
@@ -3834,12 +3855,12 @@ fn _term_tab_w(f64 w, int count) f64 {
 }
 
 fn _term_tab_hit(dict lay, f64 mx, f64 my) dict {
-   if !termpane.is_open(term_state) { return _tab_hit_result("", -1, false) }
+   if !termpane.is_open(_editor_get("term_state")) { return _tab_hit_result("", -1, false) }
    def x = float(lay.get("dock_x", 0.0))
    def y = float(lay.get("dock_y", 0.0))
    def w = float(lay.get("dock_w", 0.0))
    if my < y + 2.0 || my > y + TERM_TAB_H - 2.0 || mx < x + 6.0 || mx > x + w - 6.0 { return _tab_hit_result("", -1, false) }
-   def n = termpane.tab_count(term_state)
+   def n = termpane.tab_count(_editor_get("term_state"))
    def tw = _term_tab_w(w, n)
    def start_x = x + 6.0
    mut i = 0
@@ -3876,7 +3897,7 @@ fn _scrollbar_track_hit(f64 mx, f64 my, f64 x, f64 y, f64 w, f64 h) bool {
 }
 
 fn _editor_scrollbar_target(dict lay, f64 mx, f64 my) dict {
-   def lines = ed.current_lines(st)
+   def lines = ed.current_lines(_editor_get("st"))
    def visible = ed.visible_rows(float(lay.get("edit_h", 0.0)))
    if lines.len <= visible { return dict(0) }
    def x = float(lay.get("edit_x", 0.0)) + float(lay.get("edit_w", 0.0)) - 18.0
@@ -3903,7 +3924,7 @@ fn _scrollbar_target(str kind, f64 y, f64 h, int total, int visible) dict {
 }
 
 fn _rail_scrollbar_target(dict lay, f64 mx, f64 my) dict {
-   if !bool(st.get("show_hierarchy", true)) { return dict(0) }
+   if !bool(_editor_get("st").get("show_hierarchy", true)) { return dict(0) }
    def rail_x = float(lay.get("rail_x", 0.0))
    def rail_y = float(lay.get("rail_y", 0.0))
    def rail_w = float(lay.get("rail_w", 0.0))
@@ -3913,7 +3934,7 @@ fn _rail_scrollbar_target(dict lay, f64 mx, f64 my) dict {
    def body_h = rail_h - RAIL_TABS_H
    def tab = _rail_tab()
    if tab == "git" {
-      def rows_git = project.changes(project_state)
+      def rows_git = project.changes(_editor_get("project_state"))
       def visible_git = project.visible_count(body_h)
       def ty = body_y + project.TREE_HEADER_H
       def th = max(1.0, body_h - project.TREE_HEADER_H)
@@ -3932,10 +3953,10 @@ fn _rail_scrollbar_target(dict lay, f64 mx, f64 my) dict {
       }
       return dict(0)
    }
-   def show_project = bool(st.get("show_project", true))
-   def show_outline = bool(st.get("show_outline", true))
+   def show_project = bool(_editor_get("st").get("show_project", true))
+   def show_outline = bool(_editor_get("st").get("show_outline", true))
    if show_project { _ensure_project_tree() }
-   def rows = project.tree(project_state)
+   def rows = project.tree(_editor_get("project_state"))
    def syms = show_outline ? _outline_symbols() : []
    def tree_h = (!show_project) ? 0.0 : (show_outline ? _rail_tree_height(body_h, rows.len, syms.len) : body_h)
    if show_project {
@@ -3975,11 +3996,11 @@ fn _apply_scrollbar_target(dict target, f64 my) int {
       my
    )
    case to_str(target.get("kind", "")){
-      "editor" -> { st["scroll"] = value st["scroll_follow"] = false }
-      "tree" -> { st["tree_scroll"] = value }
-      "outline" -> { st["outline_scroll"] = value }
-      "git" -> { st["git_scroll"] = value }
-      "timeline" -> { st["timeline_scroll"] = value }
+      "editor" -> { _editor_get("st")["scroll"] = value _editor_get("st")["scroll_follow"] = false }
+      "tree" -> { _editor_get("st")["tree_scroll"] = value }
+      "outline" -> { _editor_get("st")["outline_scroll"] = value }
+      "git" -> { _editor_get("st")["git_scroll"] = value }
+      "timeline" -> { _editor_get("st")["timeline_scroll"] = value }
       _ -> {}
    }
    0
@@ -3994,38 +4015,38 @@ fn _rail_width_from_mouse(dict lay, f64 mx) f64 {
 }
 
 fn _place_cursor(dict lay, f64 x, f64 y) int {
-   def lines = ed.current_lines(st)
+   def lines = ed.current_lines(_editor_get("st"))
    if lines.len <= 0 { return 0 }
    def top = float(lay.get("edit_y", 0.0)) + 14.0
    def bottom = float(lay.get("edit_y", 0.0)) + float(lay.get("edit_h", 0.0)) - 8.0
-   def row = min(max(ed.row_at(lay, min(max(y, top), bottom), int(st.get("scroll", 0))), 0), lines.len - 1)
+   def row = min(max(ed.row_at(lay, min(max(y, top), bottom), int(_editor_get("st").get("scroll", 0))), 0), lines.len - 1)
    def line = to_str(lines.get(row, ""))
-   st["cursor_line"] = row
-   st["cursor_col"] = ed.col_at(font_body, line, x, _line_text_x(lay))
-   st = ed.clamp_cursor(st)
+   _editor_get("st")["cursor_line"] = row
+   _editor_get("st")["cursor_col"] = ed.col_at(int(_editor_get("font_body")), line, x, _line_text_x(lay))
+   _editor_values["st"] = ed.clamp_cursor(_editor_get("st"))
    _follow_cursor()
-   st["quit_prompt"] = false
-   last_escape_ns = 0
+   _editor_get("st")["quit_prompt"] = false
+   _editor_values["last_escape_ns"] = 0
    0
 }
 
 fn _click_editor(dict lay, f64 x, f64 y) int {
-   def row = ed.row_at(lay, y, int(st.get("scroll", 0)))
-   def lines = ed.current_lines(st)
+   def row = ed.row_at(lay, y, int(_editor_get("st").get("scroll", 0)))
+   def lines = ed.current_lines(_editor_get("st"))
    if row < 0 || row >= lines.len { return 0 }
    _place_cursor(lay, x, y)
 }
 
 fn _palette_matches() list {
-   pal.state_matches(palette_state)
+   pal.state_matches(_editor_get("palette_state"))
 }
 
 fn _palette_open() int {
-   palette_state["cfg"] = command_cfg
-   palette_state = pal.open(palette_state)
-   context_state = prompt.context_close(context_state)
-   find_state = find.close(find_state)
-   rename_state = prompt.rename_close(rename_state)
+   _editor_get("palette_state")["cfg"] = _editor_get("command_cfg")
+   _editor_values["palette_state"] = pal.open(_editor_get("palette_state"))
+   _editor_values["context_state"] = prompt.context_close(_editor_get("context_state"))
+   _editor_values["find_state"] = find.close(_editor_get("find_state"))
+   _editor_values["rename_state"] = prompt.rename_close(_editor_get("rename_state"))
    _request_full_redraw(3)
    _status("command palette")
    0
@@ -4033,35 +4054,35 @@ fn _palette_open() int {
 
 fn _set_ui_toggle(str key_name) bool {
    def k = "show_" + key_name
-   def on = !bool(st.get(k, true))
-   st[k] = on
+   def on = !bool(_editor_get("st").get(k, true))
+   _editor_get("st")[k] = on
    _request_full_redraw(2)
    _save_ui_cache()
    on
 }
 
 fn _set_focus(str pane, bool announce=true) int {
-   st["focus"] = pane
-   term_state["focus"] = pane == "terminal" && termpane.is_open(term_state)
+   _editor_get("st")["focus"] = pane
+   _editor_get("term_state")["focus"] = pane == "terminal" && termpane.is_open(_editor_get("term_state"))
    _request_full_redraw(2)
    if announce { _status("focus " + pane) }
    0
 }
 
 fn _focus_next() int {
-   _set_focus(ed.focus_next(to_str(st.get("focus", "editor")), bool(st.get("show_hierarchy", true)), termpane.is_open(term_state)))
+   _set_focus(ed.focus_next(to_str(_editor_get("st").get("focus", "editor")), bool(_editor_get("st").get("show_hierarchy", true)), termpane.is_open(_editor_get("term_state"))))
 }
 
 fn _pane_resize(str dir) int {
    if dir == "left" {
-      st["rail_w"] = max(RAIL_MIN_W, float(st.get("rail_w", 250.0)) - 24.0)
+      _editor_get("st")["rail_w"] = max(RAIL_MIN_W, float(_editor_get("st").get("rail_w", 250.0)) - 24.0)
    } elif dir == "right" {
-      st["show_hierarchy"] = true
-      st["rail_w"] = min(PANE_MAX, float(st.get("rail_w", 250.0)) + 24.0)
+      _editor_get("st")["show_hierarchy"] = true
+      _editor_get("st")["rail_w"] = min(PANE_MAX, float(_editor_get("st").get("rail_w", 250.0)) + 24.0)
    } elif dir == "up" {
-      st["term_h"] = min(PANE_MAX, float(st.get("term_h", 0.0)) + 24.0)
+      _editor_get("st")["term_h"] = min(PANE_MAX, float(_editor_get("st").get("term_h", 0.0)) + 24.0)
    } elif dir == "down" {
-      st["term_h"] = max(DOCK_MIN_H, float(st.get("term_h", 0.0)) - 24.0)
+      _editor_get("st")["term_h"] = max(DOCK_MIN_H, float(_editor_get("st").get("term_h", 0.0)) - 24.0)
    }
    _request_full_redraw(2)
    _save_ui_cache()
@@ -4070,12 +4091,12 @@ fn _pane_resize(str dir) int {
 }
 
 fn _close_focused_pane() int {
-   def focus = to_str(st.get("focus", "editor"))
+   def focus = to_str(_editor_get("st").get("focus", "editor"))
    if focus == "terminal" {
-      term_state = termpane.close(term_state)
+      _editor_values["term_state"] = termpane.close(_editor_get("term_state"))
       _set_focus("editor")
    } elif focus == "project" {
-      st["show_hierarchy"] = false
+      _editor_get("st")["show_hierarchy"] = false
       _save_ui_cache()
       _set_focus("editor")
    } else {
@@ -4086,37 +4107,37 @@ fn _close_focused_pane() int {
 
 fn _lsp_output(str title, str body) int {
    def path = _current_path()
-   st = session.set_output_buffer(st, lsp.output_name(path), title + "\n\n" + body)
+   _editor_values["st"] = session.set_output_buffer(_editor_get("st"), lsp.output_name(path), title + "\n\n" + body)
    0
 }
 
 fn _lsp_start() int {
-   if ed.current_buffer(st).get("readonly", false) { _status("lsp skipped for preview") return 0 }
+   if ed.current_buffer(_editor_get("st")).get("readonly", false) { _status("lsp skipped for preview") return 0 }
    if _current_path().len <= 0 { _status("save before lsp") return 0 }
-   lsp_state = lsp.start(lsp_state, _current_path(), _current_text())
-   _lsp_output("LSP status", lsp.status(lsp_state))
-   _status(lsp.status(lsp_state))
+   _editor_values["lsp_state"] = lsp.start(_editor_get("lsp_state"), _current_path(), _current_text())
+   _lsp_output("LSP status", lsp.status(_editor_get("lsp_state")))
+   _status(lsp.status(_editor_get("lsp_state")))
    0
 }
 
 fn _lsp_request(str kind) int {
-   if ed.current_buffer(st).get("readonly", false) { _status("lsp skipped for preview") return 0 }
+   if ed.current_buffer(_editor_get("st")).get("readonly", false) { _status("lsp skipped for preview") return 0 }
    def path = _current_path()
    if path.len <= 0 { _status("save before lsp") return 0 }
-   def line = int(st.get("cursor_line", 0))
-   def col = int(st.get("cursor_col", 0))
-   if !lsp_state.get("active", false) { lsp_state = lsp.start(lsp_state, path, _current_text()) }
+   def line = int(_editor_get("st").get("cursor_line", 0))
+   def col = int(_editor_get("st").get("cursor_col", 0))
+   if !_editor_get("lsp_state").get("active", false) { _editor_values["lsp_state"] = lsp.start(_editor_get("lsp_state"), path, _current_text()) }
    if kind == "completion" {
-      lsp_state = lsp.completion(lsp_state, path, line, col)
+      _editor_values["lsp_state"] = lsp.completion(_editor_get("lsp_state"), path, line, col)
       _completion_open(true)
    } elif kind == "hover" {
-      lsp_state = lsp.hover(lsp_state, path, line, col)
-      _completion_help("LSP hover", to_str(lsp_state.get("last", lsp.status(lsp_state))))
+      _editor_values["lsp_state"] = lsp.hover(_editor_get("lsp_state"), path, line, col)
+      _completion_help("LSP hover", to_str(_editor_get("lsp_state").get("last", lsp.status(_editor_get("lsp_state")))))
    } elif kind == "definition" {
-      lsp_state = lsp.definition(lsp_state, path, line, col)
-      _lsp_output("LSP " + kind, to_str(lsp_state.get("last_request", lsp.status(lsp_state))))
+      _editor_values["lsp_state"] = lsp.definition(_editor_get("lsp_state"), path, line, col)
+      _lsp_output("LSP " + kind, to_str(_editor_get("lsp_state").get("last_request", lsp.status(_editor_get("lsp_state")))))
    }
-   _status(to_str(lsp_state.get("last", "lsp")))
+   _status(to_str(_editor_get("lsp_state").get("last", "lsp")))
    0
 }
 
@@ -4124,18 +4145,18 @@ fn _lsp_diagnostics() int {
    def path = _current_path()
    if path.len <= 0 { _status("save before diagnostics") return 0 }
    def res = tools.check_file(path)
-   lsp_state["diagnostics"] = lsp.diagnostics_from_check(res)
-   _lsp_output("LSP diagnostics", lsp.diagnostics_text(lsp_state))
+   _editor_get("lsp_state")["diagnostics"] = lsp.diagnostics_from_check(res)
+   _lsp_output("LSP diagnostics", lsp.diagnostics_text(_editor_get("lsp_state")))
    _status("diagnostics")
    0
 }
 
 fn _run_command(str id) int {
-   ui_state = interact.history_add(ui_state, id)
+   _editor_values["ui_state"] = interact.history_add(_editor_get("ui_state"), id)
    _request_full_redraw(2)
    if id != "quit" {
-      st["quit_prompt"] = false
-      last_escape_ns = 0
+      _editor_get("st")["quit_prompt"] = false
+      _editor_values["last_escape_ns"] = 0
    }
    if id == "save" { _save() }
    elif id == "save-all" { _save_all() }
@@ -4144,8 +4165,8 @@ fn _run_command(str id) int {
    elif id == "copy-relative-path" { _copy_relative_path(_current_path()) }
    elif id == "copy-line-info" { _copy_line_info() }
    elif id == "open-file" { _status("use project tree or drag-drop to open") }
-   elif id == "new-file" { _start_new_file(session.project_entry_for_path(project_state, _current_path())) }
-   elif id == "delete-file" { _delete_project_entry(session.project_entry_for_path(project_state, _current_path())) }
+   elif id == "new-file" { _start_new_file(session.project_entry_for_path(_editor_get("project_state"), _current_path())) }
+   elif id == "delete-file" { _delete_project_entry(session.project_entry_for_path(_editor_get("project_state"), _current_path())) }
    elif id == "undo-file-op" { _undo_file_op() }
    elif id == "redo-file-op" { _redo_file_op() }
    elif id == "new-scratch" { _new_scratch() }
@@ -4168,8 +4189,8 @@ fn _run_command(str id) int {
    elif id == "debug-reverse-next" { _debug_send("reverse-next") }
    elif id == "debug-reverse-step" { _debug_send("reverse-step") }
    elif id == "debug-coredump" { _debug_load_coredump() }
-   elif id == "refresh" { project_state = project.refresh_git(project_state) st["project_loaded"] = true st["git_loaded"] = true _invalidate_project_definitions() _status("project refreshed") }
-   elif id == "rename" { _start_rename(prompt.context_entry(context_state)) }
+   elif id == "refresh" { _editor_values["project_state"] = project.refresh_git(_editor_get("project_state")) _editor_get("st")["project_loaded"] = true _editor_get("st")["git_loaded"] = true _invalidate_project_definitions() _status("project refreshed") }
+   elif id == "rename" { _start_rename(prompt.context_entry(_editor_get("context_state"))) }
    elif id == "find" { _find_open() }
    elif id == "replace" { _find_replace_open() }
    elif id == "find-next" { _find_step(1) }
@@ -4181,8 +4202,8 @@ fn _run_command(str id) int {
    elif id == "find-toggle-word" { _find_toggle("word") }
    elif id == "palette" { _palette_open() }
    elif id == "quit" {
-      if st.get("quit_prompt", false) { window.set_should_close(win, true) }
-      else { st["quit_prompt"] = true _status("quit? run quit again") }
+      if _editor_get("st").get("quit_prompt", false) { window.set_should_close(_editor_get("win"), true) }
+      else { _editor_get("st")["quit_prompt"] = true _status("quit? run quit again") }
    }
    elif id == "undo" { _undo() }
    elif id == "redo" { _redo() }
@@ -4202,16 +4223,16 @@ fn _run_command(str id) int {
    elif id == "toggle-comment" { _toggle_comment() }
    elif id == "strip-trailing-whitespace" { _strip_trailing_ws() }
    elif id == "color-picker" { _color_picker_open() }
-   elif id == "next" { _nav_push_current() st = ed.switch_buffer(st, 1) _buffer_changed(true) _nav_record_current() _status("next buffer") }
-   elif id == "prev" { _nav_push_current() st = ed.switch_buffer(st, -1) _buffer_changed(true) _nav_record_current() _status("previous buffer") }
+   elif id == "next" { _nav_push_current() _editor_values["st"] = ed.switch_buffer(_editor_get("st"), 1) _buffer_changed(true) _nav_record_current() _status("next buffer") }
+   elif id == "prev" { _nav_push_current() _editor_values["st"] = ed.switch_buffer(_editor_get("st"), -1) _buffer_changed(true) _nav_record_current() _status("previous buffer") }
    elif id == "go-back" { _nav_go(-1) }
    elif id == "go-forward" { _nav_go(1) }
    elif id == "go-definition" { _goto_definition() }
    elif id == "toggle-sidebar" {
-      def on = !bool(st.get("show_hierarchy", true))
-      st["show_hierarchy"] = on
-      if on && !bool(st.get("show_project", true)) && !bool(st.get("show_outline", true)) { st["show_project"] = true }
-      if !on && to_str(st.get("focus", "editor")) == "project" { _set_focus("editor", false) }
+      def on = !bool(_editor_get("st").get("show_hierarchy", true))
+      _editor_get("st")["show_hierarchy"] = on
+      if on && !bool(_editor_get("st").get("show_project", true)) && !bool(_editor_get("st").get("show_outline", true)) { _editor_get("st")["show_project"] = true }
+      if !on && to_str(_editor_get("st").get("focus", "editor")) == "project" { _set_focus("editor", false) }
       _save_ui_cache()
       _status(on ? "hierarchy on" : "hierarchy off")
    }
@@ -4220,15 +4241,15 @@ fn _run_command(str id) int {
    elif id == "zoom-out" { _zoom_editor_font(-1) }
    elif id == "zoom-reset" { _reset_editor_font() }
    elif id == "pane-next" { _focus_next() }
-   elif id == "pane-project" { st["show_hierarchy"] = true _save_ui_cache() _set_focus("project") }
+   elif id == "pane-project" { _editor_get("st")["show_hierarchy"] = true _save_ui_cache() _set_focus("project") }
    elif id == "pane-editor" { _set_focus("editor") }
-   elif id == "pane-terminal" { if termpane.is_open(term_state) { _set_focus("terminal") } else { _status("terminal closed") } }
+   elif id == "pane-terminal" { if termpane.is_open(_editor_get("term_state")) { _set_focus("terminal") } else { _status("terminal closed") } }
    elif id == "pane-close" { _close_focused_pane() }
-   elif id == "pane-only" { st["show_hierarchy"] = false term_state = termpane.close(term_state) _save_ui_cache() _set_focus("editor") }
-   elif id == "pane-split-below" { term_state = termpane.open_shell(term_state) _set_focus("terminal") }
-   elif id == "pane-split-right" { st["show_hierarchy"] = true st["show_project"] = true st["show_outline"] = true _save_ui_cache() _set_focus("project") }
-   elif id == "pane-balance" { st["rail_w"] = 240.0 st["rail_split"] = 0.0 st["term_h"] = 200.0 _save_ui_cache() _status("panes balanced") }
-   elif id == "toggle-fullscreen" { window.toggle_window_fullscreen(win) _status("fullscreen") }
+   elif id == "pane-only" { _editor_get("st")["show_hierarchy"] = false _editor_values["term_state"] = termpane.close(_editor_get("term_state")) _save_ui_cache() _set_focus("editor") }
+   elif id == "pane-split-below" { _editor_values["term_state"] = termpane.open_shell(_editor_get("term_state")) _set_focus("terminal") }
+   elif id == "pane-split-right" { _editor_get("st")["show_hierarchy"] = true _editor_get("st")["show_project"] = true _editor_get("st")["show_outline"] = true _save_ui_cache() _set_focus("project") }
+   elif id == "pane-balance" { _editor_get("st")["rail_w"] = 240.0 _editor_get("st")["rail_split"] = 0.0 _editor_get("st")["term_h"] = 200.0 _save_ui_cache() _status("panes balanced") }
+   elif id == "toggle-fullscreen" { window.toggle_window_fullscreen(_editor_get("win")) _status("fullscreen") }
    elif id == "pane-resize-left" { _pane_resize("left") }
    elif id == "pane-resize-right" { _pane_resize("right") }
    elif id == "pane-resize-up" { _pane_resize("up") }
@@ -4261,42 +4282,42 @@ fn _run_command(str id) int {
    elif id == "toggle-status" { _status(_set_ui_toggle("status") ? "status on" : "status off") }
    elif id == "toggle-line-numbers" { _status(_set_ui_toggle("line_numbers") ? "line numbers on" : "line numbers off") }
    elif id == "toggle-indent-guides" { _status(_set_ui_toggle("indent_guides") ? "indent guides on" : "indent guides off") }
-   elif id == "toggle-terminal" { term_state = termpane.toggle_shell(term_state) _set_focus(termpane.is_open(term_state) ? "terminal" : "editor") }
-   elif id == "toggle-repl" { term_state = termpane.toggle_repl(term_state) _set_focus(termpane.is_open(term_state) ? "terminal" : "editor") }
-   elif id == "terminal-shell" { term_state = termpane.show_shell(term_state) _set_focus("terminal") }
-   elif id == "terminal-repl" { term_state = termpane.show_repl(term_state) _set_focus("terminal") }
-   elif id == "terminal-next" { term_state = termpane.next_tab(term_state) _set_focus("terminal") }
-   elif id == "terminal-prev" { term_state = termpane.prev_tab(term_state) _set_focus("terminal") }
-   elif id == "terminal-close" { term_state = termpane.close_tab(term_state) _set_focus(termpane.is_open(term_state) ? "terminal" : "editor") }
-   elif id == "toggle-lsp-popups" { lsp_state = lsp.toggle_popups(lsp_state) _status(to_str(lsp_state.get("last", "lsp"))) }
-   elif id == "lsp-status" { _lsp_output("LSP status", lsp.status(lsp_state) + "\n\n" + lsp.diagnostics_text(lsp_state)) _status("lsp status") }
+   elif id == "toggle-terminal" { _editor_values["term_state"] = termpane.toggle_shell(_editor_get("term_state")) _set_focus(termpane.is_open(_editor_get("term_state")) ? "terminal" : "editor") }
+   elif id == "toggle-repl" { _editor_values["term_state"] = termpane.toggle_repl(_editor_get("term_state")) _set_focus(termpane.is_open(_editor_get("term_state")) ? "terminal" : "editor") }
+   elif id == "terminal-shell" { _editor_values["term_state"] = termpane.show_shell(_editor_get("term_state")) _set_focus("terminal") }
+   elif id == "terminal-repl" { _editor_values["term_state"] = termpane.show_repl(_editor_get("term_state")) _set_focus("terminal") }
+   elif id == "terminal-next" { _editor_values["term_state"] = termpane.next_tab(_editor_get("term_state")) _set_focus("terminal") }
+   elif id == "terminal-prev" { _editor_values["term_state"] = termpane.prev_tab(_editor_get("term_state")) _set_focus("terminal") }
+   elif id == "terminal-close" { _editor_values["term_state"] = termpane.close_tab(_editor_get("term_state")) _set_focus(termpane.is_open(_editor_get("term_state")) ? "terminal" : "editor") }
+   elif id == "toggle-lsp-popups" { _editor_values["lsp_state"] = lsp.toggle_popups(_editor_get("lsp_state")) _status(to_str(_editor_get("lsp_state").get("last", "lsp"))) }
+   elif id == "lsp-status" { _lsp_output("LSP status", lsp.status(_editor_get("lsp_state")) + "\n\n" + lsp.diagnostics_text(_editor_get("lsp_state"))) _status("lsp status") }
    elif id == "lsp-start" { _lsp_start() }
-   elif id == "lsp-restart" { lsp_state = lsp.restart(lsp_state, _current_path(), _current_text()) _lsp_output("LSP status", lsp.status(lsp_state)) _status(lsp.status(lsp_state)) }
-   elif id == "lsp-stop" { lsp_state = lsp.stop(lsp_state) _status(lsp.status(lsp_state)) }
+   elif id == "lsp-restart" { _editor_values["lsp_state"] = lsp.restart(_editor_get("lsp_state"), _current_path(), _current_text()) _lsp_output("LSP status", lsp.status(_editor_get("lsp_state"))) _status(lsp.status(_editor_get("lsp_state"))) }
+   elif id == "lsp-stop" { _editor_values["lsp_state"] = lsp.stop(_editor_get("lsp_state")) _status(lsp.status(_editor_get("lsp_state"))) }
    elif id == "lsp-diagnostics" { _lsp_diagnostics() }
    elif id == "lsp-complete" { _lsp_request("completion") }
    elif id == "lsp-hover" { _lsp_request("hover") }
    elif id == "lsp-definition" { _lsp_request("definition") }
    else { _status("unknown command " + id) }
-   if id != "palette" { palette_state = pal.close(palette_state) }
+   if id != "palette" { _editor_values["palette_state"] = pal.close(_editor_get("palette_state")) }
    0
 }
 
 fn _palette_choose() int {
-   def row = pal.selected(palette_state)
+   def row = pal.selected(_editor_get("palette_state"))
    if row.len <= 0 { _status("no command") return 0 }
    _run_command(to_str(row.get(1, "")))
 }
 
 fn _handle_palette_key(any data) int {
-   def res = pal.handle_key(palette_state, data)
-   palette_state = res.get("st", palette_state)
+   def res = pal.handle_key(_editor_get("palette_state"), data)
+   _editor_values["palette_state"] = res.get("st", _editor_get("palette_state"))
    if res.get("choose", false) { _palette_choose() }
    0
 }
 
 fn _handle_palette_char(any data) int {
-   palette_state = pal.handle_char(palette_state, data)
+   _editor_values["palette_state"] = pal.handle_char(_editor_get("palette_state"), data)
    0
 }
 
@@ -4309,8 +4330,8 @@ fn _handle_find_key(any data) int {
    if window.event_key_is(data, key.KEY_UP) { _find_step(-1) return 0 }
    if window.event_key_is(data, key.KEY_DOWN) { _find_step(1) return 0 }
    if window.event_key_is(data, key.KEY_F3) { _find_step(_shift(data) ? -1 : 1) return 0 }
-   def res = find.handle_key(find_state, data)
-   find_state = res.get("st", find_state)
+   def res = find.handle_key(_editor_get("find_state"), data)
+   _editor_values["find_state"] = res.get("st", _editor_get("find_state"))
    def action = to_str(res.get("action", ""))
    if action == "refresh" {
       _find_refresh_now()
@@ -4328,27 +4349,27 @@ fn _handle_find_key(any data) int {
 }
 
 fn _handle_find_char(any data) int {
-   def before = find.query(find_state)
-   def repl_before = find.replacement(find_state)
-   find_state = find.handle_char(find_state, data)
-   if find.query(find_state) != before {
+   def before = find.query(_editor_get("find_state"))
+   def repl_before = find.replacement(_editor_get("find_state"))
+   _editor_values["find_state"] = find.handle_char(_editor_get("find_state"), data)
+   if find.query(_editor_get("find_state")) != before {
       _find_refresh_now()
       _status(_find_message())
-   } elif find.replacement(find_state) != repl_before {
+   } elif find.replacement(_editor_get("find_state")) != repl_before {
       _status("replace")
    }
    0
 }
 
 fn _handle_rename_key(any data) int {
-   def res = prompt.rename_handle_key(rename_state, data)
-   rename_state = res.get("st", rename_state)
+   def res = prompt.rename_handle_key(_editor_get("rename_state"), data)
+   _editor_values["rename_state"] = res.get("st", _editor_get("rename_state"))
    if res.get("submit", false) { _finish_rename() }
    0
 }
 
 fn _handle_rename_char(any data) int {
-   rename_state = prompt.rename_handle_char(rename_state, data)
+   _editor_values["rename_state"] = prompt.rename_handle_char(_editor_get("rename_state"), data)
    0
 }
 
@@ -4357,10 +4378,10 @@ fn _selection_anchor_if_needed() int {
       _multi_selection_anchor_if_needed()
       return 0
    }
-   if !ed.selection_valid(st) && !bool(st.get("sel_active", false)) {
-      st = ed.set_selection_anchor(st)
-      st["multi_selects"] = []
-      st["drag_select"] = false
+   if !ed.selection_valid(_editor_get("st")) && !bool(_editor_get("st").get("sel_active", false)) {
+      _editor_values["st"] = ed.set_selection_anchor(_editor_get("st"))
+      _editor_get("st")["multi_selects"] = []
+      _editor_get("st")["drag_select"] = false
    }
    0
 }
@@ -4368,11 +4389,11 @@ fn _selection_anchor_if_needed() int {
 fn _move_cursor_ext(str dir, bool jump, bool extend=false) int {
    _follow_cursor()
    if extend { _selection_anchor_if_needed() }
-   def old_row = int(st.get("cursor_line", 0))
-   def old_col = int(st.get("cursor_col", 0))
-   def lines = ed.current_lines(st)
-   mut row = int(st.get("cursor_line", 0))
-   mut col = int(st.get("cursor_col", 0))
+   def old_row = int(_editor_get("st").get("cursor_line", 0))
+   def old_col = int(_editor_get("st").get("cursor_col", 0))
+   def lines = ed.current_lines(_editor_get("st"))
+   mut row = int(_editor_get("st").get("cursor_line", 0))
+   mut col = int(_editor_get("st").get("cursor_col", 0))
    if dir == "left" {
       mut steps = jump ? 4 : 1
       while steps > 0 {
@@ -4383,8 +4404,8 @@ fn _move_cursor_ext(str dir, bool jump, bool extend=false) int {
          }
          steps -= 1
       }
-      st["cursor_line"] = row
-      st["cursor_col"] = col
+      _editor_get("st")["cursor_line"] = row
+      _editor_get("st")["cursor_col"] = col
    } elif dir == "right" {
       mut steps2 = jump ? 4 : 1
       while steps2 > 0 {
@@ -4396,15 +4417,15 @@ fn _move_cursor_ext(str dir, bool jump, bool extend=false) int {
          }
          steps2 -= 1
       }
-      st["cursor_line"] = row
-      st["cursor_col"] = col
+      _editor_get("st")["cursor_line"] = row
+      _editor_get("st")["cursor_col"] = col
    } elif dir == "up" {
-      st["cursor_line"] = row - (jump ? 8 : 1)
+      _editor_get("st")["cursor_line"] = row - (jump ? 8 : 1)
    } elif dir == "down" {
-      st["cursor_line"] = row + (jump ? 8 : 1)
+      _editor_get("st")["cursor_line"] = row + (jump ? 8 : 1)
    }
-   st = ed.clamp_cursor(st)
-   _move_extra_cursors_by(int(st.get("cursor_line", 0)) - old_row, int(st.get("cursor_col", 0)) - old_col)
+   _editor_values["st"] = ed.clamp_cursor(_editor_get("st"))
+   _move_extra_cursors_by(int(_editor_get("st").get("cursor_line", 0)) - old_row, int(_editor_get("st").get("cursor_col", 0)) - old_col)
    if extend {
       _finish_selection_move(true)
    } else {
@@ -4419,9 +4440,9 @@ fn _move_cursor(str dir, bool jump) int {
 
 fn _finish_selection_move(bool extend) int {
    if extend {
-      if st.get("multi_selects", []).len > 0 { _multi_selection_update() }
-      else { st = ed.update_selection(st) }
-      st["drag_select"] = false
+      if _editor_get("st").get("multi_selects", []).len > 0 { _multi_selection_update() }
+      else { _editor_values["st"] = ed.update_selection(_editor_get("st")) }
+      _editor_get("st")["drag_select"] = false
    } else {
       _clear_selections()
    }
@@ -4431,54 +4452,54 @@ fn _finish_selection_move(bool extend) int {
 fn _page_cursor(int dir, bool extend=false) int {
    _follow_cursor()
    if extend { _selection_anchor_if_needed() }
-   def old_row = int(st.get("cursor_line", 0))
-   def old_col = int(st.get("cursor_col", 0))
-   st["cursor_line"] = int(st.get("cursor_line", 0)) + dir * 12
-   st = ed.clamp_cursor(st)
-   _move_extra_cursors_by(int(st.get("cursor_line", 0)) - old_row, int(st.get("cursor_col", 0)) - old_col)
+   def old_row = int(_editor_get("st").get("cursor_line", 0))
+   def old_col = int(_editor_get("st").get("cursor_col", 0))
+   _editor_get("st")["cursor_line"] = int(_editor_get("st").get("cursor_line", 0)) + dir * 12
+   _editor_values["st"] = ed.clamp_cursor(_editor_get("st"))
+   _move_extra_cursors_by(int(_editor_get("st").get("cursor_line", 0)) - old_row, int(_editor_get("st").get("cursor_col", 0)) - old_col)
    _finish_selection_move(extend)
 }
 
 fn _line_edge(str edge, bool extend=false) int {
    _follow_cursor()
    if extend { _selection_anchor_if_needed() }
-   def old_row = int(st.get("cursor_line", 0))
-   def old_col = int(st.get("cursor_col", 0))
+   def old_row = int(_editor_get("st").get("cursor_line", 0))
+   def old_col = int(_editor_get("st").get("cursor_col", 0))
    if edge == "start" {
-      st["cursor_col"] = 0
+      _editor_get("st")["cursor_col"] = 0
    } else {
-      st["cursor_col"] = to_str(ed.current_lines(st).get(int(st.get("cursor_line", 0)), "")).len
+      _editor_get("st")["cursor_col"] = to_str(ed.current_lines(_editor_get("st")).get(int(_editor_get("st").get("cursor_line", 0)), "")).len
    }
-   st = ed.clamp_cursor(st)
-   _move_extra_cursors_by(int(st.get("cursor_line", 0)) - old_row, int(st.get("cursor_col", 0)) - old_col)
+   _editor_values["st"] = ed.clamp_cursor(_editor_get("st"))
+   _move_extra_cursors_by(int(_editor_get("st").get("cursor_line", 0)) - old_row, int(_editor_get("st").get("cursor_col", 0)) - old_col)
    _finish_selection_move(extend)
 }
 
 fn _buffer_edge(str edge, bool extend=false) int {
    _follow_cursor()
    if extend { _selection_anchor_if_needed() }
-   def old_row = int(st.get("cursor_line", 0))
-   def old_col = int(st.get("cursor_col", 0))
-   def lines = ed.current_lines(st)
+   def old_row = int(_editor_get("st").get("cursor_line", 0))
+   def old_col = int(_editor_get("st").get("cursor_col", 0))
+   def lines = ed.current_lines(_editor_get("st"))
    if edge == "start" {
-      st["cursor_line"] = 0
-      st["cursor_col"] = 0
+      _editor_get("st")["cursor_line"] = 0
+      _editor_get("st")["cursor_col"] = 0
    } else {
       def last = max(0, lines.len - 1)
-      st["cursor_line"] = last
-      st["cursor_col"] = to_str(lines.get(last, "")).len
+      _editor_get("st")["cursor_line"] = last
+      _editor_get("st")["cursor_col"] = to_str(lines.get(last, "")).len
    }
-   st = ed.clamp_cursor(st)
-   _move_extra_cursors_by(int(st.get("cursor_line", 0)) - old_row, int(st.get("cursor_col", 0)) - old_col)
+   _editor_values["st"] = ed.clamp_cursor(_editor_get("st"))
+   _move_extra_cursors_by(int(_editor_get("st").get("cursor_line", 0)) - old_row, int(_editor_get("st").get("cursor_col", 0)) - old_col)
    _finish_selection_move(extend)
 }
 
 fn _handle_command(str ch) bool {
    if ch.len <= 0 {
-      _status(chord.describe(chord_state) + "-")
+      _status(chord.describe(_editor_get("chord_state")) + "-")
       return true
    }
-   if ch == "cancel" { chord_state = chord.clear(chord_state) _run_command("cancel") return true }
+   if ch == "cancel" { _editor_values["chord_state"] = chord.clear(_editor_get("chord_state")) _run_command("cancel") return true }
    def id = cmd.id_for_chord(ch)
    if id.len <= 0 { return false }
    _run_command(id)
@@ -4486,13 +4507,13 @@ fn _handle_command(str ch) bool {
 }
 
 fn _open_chord_prefix(str prefix) int {
-   chord_state["prefix"] = prefix
-   chord_state["timer"] = chord.PREFIX_TIMEOUT
-   which_key_prefix = ""
-   which_key_rows_cache = borrow([])
-   which_key_scroll = 0
-   which_key_scroll_accum = 0.0
-   ui_state = interact.key_seen(ui_state, prefix)
+   _editor_get("chord_state")["prefix"] = prefix
+   _editor_get("chord_state")["timer"] = chord.PREFIX_TIMEOUT
+   _editor_values["which_key_prefix"] = ""
+   _editor_values["which_key_rows_cache"] = borrow([])
+   _editor_values["which_key_scroll"] = 0
+   _editor_values["which_key_scroll_accum"] = 0.0
+   _editor_values["ui_state"] = interact.key_seen(_editor_get("ui_state"), prefix)
    _request_full_redraw(2)
    _status(prefix + "-")
    0
@@ -4511,8 +4532,8 @@ fn _is_ctrl_space_event(any data) bool {
 
 fn _handle_ctrl_space(any data) bool {
    if !_is_ctrl_space_event(data) { return false }
-   if chord.pending(chord_state) && chord.describe(chord_state) == "C-SPC" {
-      chord_state = chord.clear(chord_state)
+   if chord.pending(_editor_get("chord_state")) && chord.describe(_editor_get("chord_state")) == "C-SPC" {
+      _editor_values["chord_state"] = chord.clear(_editor_get("chord_state"))
       _run_command("palette")
    } else {
       _open_chord_prefix("C-SPC")
@@ -4570,14 +4591,14 @@ fn _direct_key_fallback(any data) bool {
 }
 
 fn _handle_key(any data) int {
-   if suppress_char_cp > 0 { suppress_char_cp = 0 }
+   if int(_editor_get("suppress_char_cp")) > 0 { _editor_values["suppress_char_cp"] = 0 }
    if INPUT_TRACE {
-      print("[editor:key] enter rename=" + to_str(prompt.rename_is_open(rename_state)) + " palette=" + to_str(pal.is_open(palette_state)))
+      print("[editor:key] enter rename=" + to_str(prompt.rename_is_open(_editor_get("rename_state"))) + " palette=" + to_str(pal.is_open(_editor_get("palette_state"))))
    }
    if _handle_escape_key(data) { return 0 }
-   if prompt.rename_is_open(rename_state) { _handle_rename_key(data) return 0 }
-   if pal.is_open(palette_state) { _handle_palette_key(data) return 0 }
-   if find.is_open(find_state) { _handle_find_key(data) return 0 }
+   if prompt.rename_is_open(_editor_get("rename_state")) { _handle_rename_key(data) return 0 }
+   if pal.is_open(_editor_get("palette_state")) { _handle_palette_key(data) return 0 }
+   if find.is_open(_editor_get("find_state")) { _handle_find_key(data) return 0 }
    if _ctrl(data) && _shift(data) && window.event_key_is(data, key.KEY_P) {
       _run_command("palette")
       _suppress_char_from_key(data)
@@ -4589,13 +4610,13 @@ fn _handle_key(any data) int {
    if INPUT_TRACE {
       print("[editor:key] chord=" + key_chord + " key=" + to_str(int(data.get("key", -1))) + " mods=" + to_str(int(data.get("mods", data.get("mod", 0)))))
    }
-   def had_prefix = chord.pending(chord_state)
-   if SHOW_LAST_KEY || had_prefix { ui_state = interact.key_seen(ui_state, key_chord) }
+   def had_prefix = chord.pending(_editor_get("chord_state"))
+   if SHOW_LAST_KEY || had_prefix { _editor_values["ui_state"] = interact.key_seen(_editor_get("ui_state"), key_chord) }
    if key_chord == "C-c" && !had_prefix { _copy_selection_or_buffer() }
-   def res = chord.command_chord(chord_state, data)
-   chord_state = res.get(0)
+   def res = chord.command_chord(_editor_get("chord_state"), data)
+   _editor_values["chord_state"] = res.get(0)
    def resolved = to_str(res.get(1, ""))
-   if INPUT_TRACE { print("[editor:key] resolved=" + resolved + " prefix=" + chord.describe(chord_state)) }
+   if INPUT_TRACE { print("[editor:key] resolved=" + resolved + " prefix=" + chord.describe(_editor_get("chord_state"))) }
    if _handle_command(resolved) {
       _suppress_char_from_key(data)
       return 0
@@ -4606,20 +4627,20 @@ fn _handle_key(any data) int {
    }
    if INPUT_TRACE { print("[editor:key] fallback") }
    def fallback_handled = _direct_key_fallback(data)
-   if fallback_handled && st.get("quit_prompt", false) { _clear_pending_destructive_prompts() }
+   if fallback_handled && _editor_get("st").get("quit_prompt", false) { _clear_pending_destructive_prompts() }
    0
 }
 
 fn _handle_char(any data) int {
    if _consume_suppressed_char(data) { return 0 }
-   if prompt.rename_is_open(rename_state) { _handle_rename_char(data) return 0 }
-   if pal.is_open(palette_state) { _handle_palette_char(data) return 0 }
-   if find.is_open(find_state) { _handle_find_char(data) return 0 }
+   if prompt.rename_is_open(_editor_get("rename_state")) { _handle_rename_char(data) return 0 }
+   if pal.is_open(_editor_get("palette_state")) { _handle_palette_char(data) return 0 }
+   if find.is_open(_editor_get("find_state")) { _handle_find_char(data) return 0 }
    if _ctrl(data) { return 0 }
    def cp = int(data.get("char", 0))
    if cp >= 32 && cp != 127 {
-      st["quit_prompt"] = false
-      last_escape_ns = 0
+      _editor_get("st")["quit_prompt"] = false
+      _editor_values["last_escape_ns"] = 0
    }
    if cp == 40 { _insert_pair("(", ")") return 0 }
    if cp == 91 { _insert_pair("[", "]") return 0 }
@@ -4628,14 +4649,14 @@ fn _handle_char(any data) int {
    if cp == 39 { _insert_pair("'", "'") return 0 }
    if cp >= 32 && cp != 127 {
       _edit_insert(chr(cp))
-      if bool(lsp_state.get("popups", true)) && _word_byte(cp) && _word_prefix_before_cursor().len >= 2 { _completion_open(false) }
+      if bool(_editor_get("lsp_state").get("popups", true)) && _word_byte(cp) && _word_prefix_before_cursor().len >= 2 { _completion_open(false) }
       else { _completion_close() }
    }
    0
 }
 
 fn _context_hit_action(f64 mx, f64 my) str {
-   prompt.context_hit(context_state, mx, my, CONTEXT_W, CONTEXT_ROW_H)
+   prompt.context_hit(_editor_get("context_state"), mx, my, CONTEXT_W, CONTEXT_ROW_H)
 }
 
 fn _handle_mouse_nav_button(any data) bool {
@@ -4653,20 +4674,20 @@ fn _is_escape_key(any data) bool {
 fn _handle_escape_key(any data) bool {
    if !_is_escape_key(data) { return false }
    mut cleared = false
-   if prompt.rename_is_open(rename_state) { rename_state = prompt.rename_close(rename_state) cleared = true }
-   if pal.is_open(palette_state) { palette_state = pal.close(palette_state) cleared = true }
-   if find.is_open(find_state) { find_state = find.close(find_state) cleared = true }
-   if colorpicker.is_open(color_state) { color_state = colorpicker.close(color_state) cleared = true }
-   if prompt.context_is_open(context_state) { context_state = prompt.context_close(context_state) cleared = true }
-   if bool(completion_state.get("open", false)) { _completion_close() cleared = true }
-   if bool(peek_state.get("open", false)) { peek_state["open"] = false cleared = true }
-   if chord.pending(chord_state) { chord_state = chord.empty_state() cleared = true }
+   if prompt.rename_is_open(_editor_get("rename_state")) { _editor_values["rename_state"] = prompt.rename_close(_editor_get("rename_state")) cleared = true }
+   if pal.is_open(_editor_get("palette_state")) { _editor_values["palette_state"] = pal.close(_editor_get("palette_state")) cleared = true }
+   if find.is_open(_editor_get("find_state")) { _editor_values["find_state"] = find.close(_editor_get("find_state")) cleared = true }
+   if colorpicker.is_open(_editor_get("color_state")) { _editor_values["color_state"] = colorpicker.close(_editor_get("color_state")) cleared = true }
+   if prompt.context_is_open(_editor_get("context_state")) { _editor_values["context_state"] = prompt.context_close(_editor_get("context_state")) cleared = true }
+   if bool(_editor_get("completion_state").get("open", false)) { _completion_close() cleared = true }
+   if bool(_editor_get("peek_state").get("open", false)) { _editor_get("peek_state")["open"] = false cleared = true }
+   if chord.pending(_editor_get("chord_state")) { _editor_values["chord_state"] = chord.empty_state() cleared = true }
    if _extra_cursor_count() > 0 { _clear_extra_cursors(false) cleared = true }
-   if _selection_any_valid() || bool(st.get("sel_active", false)) { _clear_selections() cleared = true }
-   if project_selection.len > 0 { _project_selection_replace([]) project_selection_anchor = "" cleared = true }
-   st["drag_select"] = false
-   st["drag_divider"] = false
-   st["drag_terminal"] = false
+   if _selection_any_valid() || bool(_editor_get("st").get("sel_active", false)) { _clear_selections() cleared = true }
+   if _editor_get("project_selection").len > 0 { _project_selection_replace([]) _editor_values["project_selection_anchor"] = "" cleared = true }
+   _editor_get("st")["drag_select"] = false
+   _editor_get("st")["drag_divider"] = false
+   _editor_get("st")["drag_terminal"] = false
    if cleared {
       _clear_pending_destructive_prompts()
       _request_full_redraw(2)
@@ -4674,31 +4695,31 @@ fn _handle_escape_key(any data) bool {
       return true
    }
    def now = ticks()
-   if st.get("quit_prompt", false) || (last_escape_ns > 0 && now - last_escape_ns <= ESC_QUIT_WINDOW_NS) {
-      window.set_should_close(win, true)
+   if _editor_get("st").get("quit_prompt", false) || (int(_editor_get("last_escape_ns")) > 0 && now - int(_editor_get("last_escape_ns")) <= ESC_QUIT_WINDOW_NS) {
+      window.set_should_close(_editor_get("win"), true)
       return true
    }
-   last_escape_ns = now
-   st["quit_prompt"] = true
+   _editor_values["last_escape_ns"] = now
+   _editor_get("st")["quit_prompt"] = true
    _request_full_redraw(2)
    _status("Esc again quits")
    true
 }
 
 fn _handle_mouse_press(dict lay, any data) int {
-   def p = window.mouse_pos(win)
+   def p = window.mouse_pos(_editor_get("win"))
    def mx = float(data.get("x", p.get(0, 0.0)))
    def my = float(data.get("y", p.get(1, 0.0)))
    def button = int(data.get("button", 0))
-   if pal.is_open(palette_state) {
+   if pal.is_open(_editor_get("palette_state")) {
       def pi = _palette_row_hit(lay, mx, my)
       if pi >= 0 {
-         palette_state = pal.set_index(palette_state, pi)
+         _editor_values["palette_state"] = pal.set_index(_editor_get("palette_state"), pi)
          _palette_choose()
          return 0
       }
       if pi == -2 {
-         palette_state = pal.close(palette_state)
+         _editor_values["palette_state"] = pal.close(_editor_get("palette_state"))
          return 0
       }
       ;; pi == -1: click landed inside the palette rect but not on a row
@@ -4717,25 +4738,25 @@ fn _handle_mouse_press(dict lay, any data) int {
    def term_hit = _term_tab_hit(lay, mx, my)
    def term_action = to_str(term_hit.get("action", ""))
    if term_action.len > 0 {
-      if term_action == "new" { term_state = termpane.open_shell(term_state) }
-      elif term_action == "close" { term_state = termpane.close_tab(term_state, int(term_hit.get("idx", -1))) }
-      elif term_action == "select" { term_state = termpane.select_tab(term_state, int(term_hit.get("idx", 0))) }
+      if term_action == "new" { _editor_values["term_state"] = termpane.open_shell(_editor_get("term_state")) }
+      elif term_action == "close" { _editor_values["term_state"] = termpane.close_tab(_editor_get("term_state"), int(term_hit.get("idx", -1))) }
+      elif term_action == "select" { _editor_values["term_state"] = termpane.select_tab(_editor_get("term_state"), int(term_hit.get("idx", 0))) }
       _request_full_redraw(3)
-      _set_focus(termpane.is_open(term_state) ? "terminal" : "editor", false)
+      _set_focus(termpane.is_open(_editor_get("term_state")) ? "terminal" : "editor", false)
       return 0
    }
    def pane = ed.pane_at(lay, mx, my)
    if pane == "editor" || pane == "project" || pane == "terminal" { _set_focus(pane, false) }
-   st["quit_prompt"] = false
-   last_escape_ns = 0
+   _editor_get("st")["quit_prompt"] = false
+   _editor_values["last_escape_ns"] = 0
    def rail_x = float(lay.get("rail_x", 0.0))
    def rail_y = float(lay.get("rail_y", 0.0))
    def rail_w = float(lay.get("rail_w", 0.0))
    def rail_h = float(lay.get("rail_h", 0.0))
-   def tab_hit = (bool(st.get("show_hierarchy", true)) && rail_w > 1.0) ? _rail_tab_at(rail_x, rail_y, rail_w, mx, my) : ""
+   def tab_hit = (bool(_editor_get("st").get("show_hierarchy", true)) && rail_w > 1.0) ? _rail_tab_at(rail_x, rail_y, rail_w, mx, my) : ""
    if tab_hit.len > 0 {
       def old_tab = _rail_tab()
-      st["rail_tab"] = tab_hit
+      _editor_get("st")["rail_tab"] = tab_hit
       if tab_hit != old_tab {
          _request_full_redraw(3)
          if tab_hit == "git" { _ensure_project_git() }
@@ -4745,73 +4766,73 @@ fn _handle_mouse_press(dict lay, any data) int {
    }
    def action = _context_hit_action(mx, my)
    if action.len > 0 { _context_action(action) return 0 }
-   context_state = prompt.context_close(context_state)
+   _editor_values["context_state"] = prompt.context_close(_editor_get("context_state"))
    if (button == 0 || button == 1) && _dock_resize_hit(lay, mx, my) {
-      st["drag_terminal"] = true
+      _editor_get("st")["drag_terminal"] = true
       return 0
    }
    if button == 0 {
       def scroll_target = _scrollbar_target_at(lay, mx, my)
       if scroll_target.len > 0 {
-         st["drag_scrollbar"] = true
-         st["scrollbar_target"] = scroll_target
+         _editor_get("st")["drag_scrollbar"] = true
+         _editor_get("st")["scrollbar_target"] = scroll_target
          _apply_scrollbar_target(scroll_target, my)
          return 0
       }
    }
    def section_hit = _rail_section_at(lay, mx, my)
    if section_hit.len > 0 && button == 0 {
-      section_drag["active"] = true
-      section_drag["section"] = section_hit
-      section_drag["x"] = mx
-      section_drag["y"] = my
+      _editor_get("section_drag")["active"] = true
+      _editor_get("section_drag")["section"] = section_hit
+      _editor_get("section_drag")["x"] = mx
+      _editor_get("section_drag")["y"] = my
       _set_focus("project", false)
       return 0
    }
    if ed.divider_hit(lay, mx, my) {
-      st["drag_divider"] = true
+      _editor_get("st")["drag_divider"] = true
       return 0
    }
    if pane == "editor" {
       if button == 0 && _alt(data) && _shift(data) {
-         def lines_alt = ed.current_lines(st)
+         def lines_alt = ed.current_lines(_editor_get("st"))
          if lines_alt.len > 0 {
-            def row_alt = min(max(ed.row_at(lay, my, int(st.get("scroll", 0))), 0), lines_alt.len - 1)
+            def row_alt = min(max(ed.row_at(lay, my, int(_editor_get("st").get("scroll", 0))), 0), lines_alt.len - 1)
             def line_alt = to_str(lines_alt.get(row_alt, ""))
-            _add_extra_cursor_at(row_alt, ed.col_at(font_body, line_alt, mx, _line_text_x(lay)))
+            _add_extra_cursor_at(row_alt, ed.col_at(int(_editor_get("font_body")), line_alt, mx, _line_text_x(lay)))
          }
-         st["drag_select"] = false
+         _editor_get("st")["drag_select"] = false
          return 0
       }
       _click_editor(lay, mx, my)
-      if button == 0 && bool(st.get("show_line_numbers", true)) && mx < _line_text_x(lay) - 8.0 {
+      if button == 0 && bool(_editor_get("st").get("show_line_numbers", true)) && mx < _line_text_x(lay) - 8.0 {
          _debug_breakpoint()
-         st["drag_select"] = false
+         _editor_get("st")["drag_select"] = false
          return 0
       }
       if button == 1 {
          _open_context(mx, my, _editor_context_entry(), "editor")
-         st["drag_select"] = false
+         _editor_get("st")["drag_select"] = false
          return 0
       }
-      st["drag_select"] = button == 0
+      _editor_get("st")["drag_select"] = button == 0
       if _shift(data) {
-         st = ed.update_selection(st)
+         _editor_values["st"] = ed.update_selection(_editor_get("st"))
       } else {
-         st = ed.set_selection_anchor(st)
+         _editor_values["st"] = ed.set_selection_anchor(_editor_get("st"))
       }
       return 0
    }
-   if pane != "project" || rail_w <= 1.0 || !bool(st.get("show_hierarchy", true)) { return 0 }
+   if pane != "project" || rail_w <= 1.0 || !bool(_editor_get("st").get("show_hierarchy", true)) { return 0 }
    def tab = _rail_tab()
    def body_y = rail_y + RAIL_TABS_H
    def body_h = rail_h - RAIL_TABS_H
    if pane == "project" && tab == "git" {
-      def rows_git = project.changes(project_state)
+      def rows_git = project.changes(_editor_get("project_state"))
       def visible_git = project.visible_count(body_h)
-      def idx_git = project.row_at(rail_x, body_y, rail_w, body_h, mx, my, min(visible_git, rows_git.len - int(st.get("git_scroll", 0))))
+      def idx_git = project.row_at(rail_x, body_y, rail_w, body_h, mx, my, min(visible_git, rows_git.len - int(_editor_get("st").get("git_scroll", 0))))
       if idx_git >= 0 {
-         def entry = rows_git.get(int(st.get("git_scroll", 0)) + idx_git, {})
+         def entry = rows_git.get(int(_editor_get("st").get("git_scroll", 0)) + idx_git, {})
          if button == 1 { _open_context(mx, my, entry, "git") }
          else { _open_git_diff(entry) }
          return 0
@@ -4820,9 +4841,9 @@ fn _handle_mouse_press(dict lay, any data) int {
    if pane == "project" && tab == "timeline" {
       def rows_time = _timeline_rows()
       def visible_time = project.visible_count(body_h)
-      def idx_time = project.row_at(rail_x, body_y, rail_w, body_h, mx, my, min(visible_time, rows_time.len - int(st.get("timeline_scroll", 0))))
+      def idx_time = project.row_at(rail_x, body_y, rail_w, body_h, mx, my, min(visible_time, rows_time.len - int(_editor_get("st").get("timeline_scroll", 0))))
       if idx_time >= 0 {
-         def row = rows_time.get(int(st.get("timeline_scroll", 0)) + idx_time, [])
+         def row = rows_time.get(int(_editor_get("st").get("timeline_scroll", 0)) + idx_time, [])
          if button == 1 {
             _open_context(mx, my, _timeline_context_entry(row), "timeline")
          } elif to_str(row.get(0, "")) == "command" { _run_command(to_str(row.get(2, ""))) }
@@ -4833,18 +4854,18 @@ fn _handle_mouse_press(dict lay, any data) int {
          return 0
       }
    }
-   def show_project = bool(st.get("show_project", true))
-   def show_outline = bool(st.get("show_outline", true))
+   def show_project = bool(_editor_get("st").get("show_project", true))
+   def show_outline = bool(_editor_get("st").get("show_outline", true))
    if tab == "files" && show_project { _ensure_project_tree() }
-   def rows = project.tree(project_state)
+   def rows = project.tree(_editor_get("project_state"))
    def syms = _outline_symbols()
    def tree_h = (!show_project) ? 0.0 : (show_outline ? _rail_tree_height(body_h, rows.len, syms.len) : body_h)
    if tab == "files" && show_project {
-      def entry = project.hit_entry(project_state, rail_x, body_y, rail_w, tree_h, int(st.get("tree_scroll", 0)), mx, my)
+      def entry = project.hit_entry(_editor_get("project_state"), rail_x, body_y, rail_w, tree_h, int(_editor_get("st").get("tree_scroll", 0)), mx, my)
       if is_dict(entry) && entry.len > 0 {
          if button == 1 {
             if !_project_selection_contains(entry) { _project_selection_set(entry) }
-            entry["selection_count"] = project_selection.len
+            entry["selection_count"] = _editor_get("project_selection").len
             _open_context(mx, my, entry, "file")
          } else {
             if _shift(data) {
@@ -4856,11 +4877,11 @@ fn _handle_mouse_press(dict lay, any data) int {
                return 0
             }
             _project_selection_set(entry)
-            project_drag["active"] = false
-            project_drag["armed"] = true
-            project_drag["entry"] = borrow(clone(entry))
-            project_drag["x"] = mx
-            project_drag["y"] = my
+            _editor_get("project_drag")["active"] = false
+            _editor_get("project_drag")["armed"] = true
+            _editor_get("project_drag")["entry"] = borrow(clone(entry))
+            _editor_get("project_drag")["x"] = mx
+            _editor_get("project_drag")["y"] = my
             _open_or_toggle_project_row(entry)
          }
          return 0
@@ -4870,8 +4891,8 @@ fn _handle_mouse_press(dict lay, any data) int {
    def outline_y = body_y + outline_off
    def outline_h = body_h - outline_off
    def outline_visible = _outline_visible(outline_h)
-   def outline_scroll = _outline_clamp(int(st.get("outline_scroll", 0)), syms.len, outline_visible)
-   st["outline_scroll"] = outline_scroll
+   def outline_scroll = _outline_clamp(int(_editor_get("st").get("outline_scroll", 0)), syms.len, outline_visible)
+   _editor_get("st")["outline_scroll"] = outline_scroll
    def oi = (tab == "files" && show_outline) ? outline.row_at(rail_x, outline_y, rail_w, outline_h, mx, my, min(outline_visible, syms.len - outline_scroll)) : -1
    if tab == "files" && show_outline && oi >= 0 {
       def sym = syms.get(outline_scroll + oi, {})
@@ -4883,9 +4904,9 @@ fn _handle_mouse_press(dict lay, any data) int {
          _open_context(mx, my, entry, "outline")
          return 0
       }
-      st["cursor_line"] = int(sym.get("line", 0))
-      st["cursor_col"] = 0
-      st = ed.clamp_cursor(st)
+      _editor_get("st")["cursor_line"] = int(sym.get("line", 0))
+      _editor_get("st")["cursor_col"] = 0
+      _editor_values["st"] = ed.clamp_cursor(_editor_get("st"))
       _follow_cursor()
       _status("symbol " + to_str(sym.get("name", "")))
       return 0
@@ -4894,35 +4915,35 @@ fn _handle_mouse_press(dict lay, any data) int {
 }
 
 fn _handle_mouse_move(dict lay, any data) int {
-   def p = window.mouse_pos(win)
+   def p = window.mouse_pos(_editor_get("win"))
    def mx = float(data.get("x", p.get(0, 0.0)))
    def my = float(data.get("y", p.get(1, 0.0)))
-   if project_drag.get("armed", false) {
-      def dx = mx - float(project_drag.get("x", mx))
-      def dy = my - float(project_drag.get("y", my))
+   if _editor_get("project_drag").get("armed", false) {
+      def dx = mx - float(_editor_get("project_drag").get("x", mx))
+      def dy = my - float(_editor_get("project_drag").get("y", my))
       if (dx * dx + dy * dy) > 36.0 {
-         project_drag["active"] = true
+         _editor_get("project_drag")["active"] = true
          if INPUT_TRACE {
-            def drag_entry = project_drag.get("entry", dict(0))
+            def drag_entry = _editor_get("project_drag").get("entry", dict(0))
             print("[editor:drag] project " + (is_dict(drag_entry) ? to_str(drag_entry.get("rel", "")) : ""))
          }
       }
    }
-   if st.get("drag_select", false) {
+   if _editor_get("st").get("drag_select", false) {
       _place_cursor(lay, mx, my)
-      st = ed.update_selection(st)
+      _editor_values["st"] = ed.update_selection(_editor_get("st"))
       return 0
    }
-   if st.get("drag_terminal", false) {
-      st["term_h"] = _dock_height_from_mouse(lay, my)
+   if _editor_get("st").get("drag_terminal", false) {
+      _editor_get("st")["term_h"] = _dock_height_from_mouse(lay, my)
       return 0
    }
-   if st.get("drag_scrollbar", false) {
-      _apply_scrollbar_target(st.get("scrollbar_target", dict(0)), my)
+   if _editor_get("st").get("drag_scrollbar", false) {
+      _apply_scrollbar_target(_editor_get("st").get("scrollbar_target", dict(0)), my)
       return 0
    }
-   if !st.get("drag_divider", false) { return 0 }
-   st["rail_w"] = _rail_width_from_mouse(lay, mx)
+   if !_editor_get("st").get("drag_divider", false) { return 0 }
+   _editor_get("st")["rail_w"] = _rail_width_from_mouse(lay, mx)
    0
 }
 
@@ -4936,7 +4957,7 @@ fn _move_dst_path(dict src, dict dst) str {
 fn _retarget_open_buffers(str old_path, str new_path) int {
    if old_path.len <= 0 || new_path.len <= 0 { return 0 }
    def old_norm = ospath.normalize(old_path)
-   mut bs = st.get("buffers", [])
+   mut bs = _editor_get("st").get("buffers", [])
    mut i = 0
    while i < bs.len {
       mut b = bs.get(i, {})
@@ -4947,15 +4968,15 @@ fn _retarget_open_buffers(str old_path, str new_path) int {
       }
       i += 1
    }
-   st["buffers"] = bs
+   _editor_get("st")["buffers"] = bs
    0
 }
 
 fn _drop_open_buffer_path(str path) int {
    if path.len <= 0 { return 0 }
    def want = ospath.normalize(path)
-   def active = int(st.get("active", 0))
-   def bs = st.get("buffers", [])
+   def active = int(_editor_get("st").get("active", 0))
+   def bs = _editor_get("st").get("buffers", [])
    mut out = []
    mut removed_before = 0
    mut removed = false
@@ -4973,11 +4994,11 @@ fn _drop_open_buffer_path(str path) int {
    }
    if !removed { return 0 }
    if out.len <= 0 { out = [ed.buffer("untitled.ny", "", "")] }
-   st["buffers"] = out
-   st["active"] = min(max(0, active - removed_before), out.len - 1)
-   st["cursor_line"] = 0
-   st["cursor_col"] = 0
-   st["scroll"] = 0
+   _editor_get("st")["buffers"] = out
+   _editor_get("st")["active"] = min(max(0, active - removed_before), out.len - 1)
+   _editor_get("st")["cursor_line"] = 0
+   _editor_get("st")["cursor_col"] = 0
+   _editor_get("st")["scroll"] = 0
    _clear_selections()
    _buffer_changed(true)
    _nav_record_current()
@@ -4988,12 +5009,12 @@ fn _project_entry_or_current(dict entry) dict {
    if is_dict(entry) && entry.len > 0 && to_str(entry.get("rel", "")).len > 0 { return entry }
    def cur = _current_path()
    if cur.len > 0 {
-      def hit = session.project_entry_for_path(project_state, cur)
+      def hit = session.project_entry_for_path(_editor_get("project_state"), cur)
       if is_dict(hit) && hit.len > 0 { return hit }
       mut dict current_entry = dict(4)
       current_entry["name"] = ospath.basename(cur)
       current_entry["path"] = cur
-      current_entry["rel"] = str.str_replace(ospath.normalize(cur), ospath.normalize(project.root(project_state)) + ospath.sep(), "")
+      current_entry["rel"] = str.str_replace(ospath.normalize(cur), ospath.normalize(project.root(_editor_get("project_state"))) + ospath.sep(), "")
       current_entry["dir"] = false
       return current_entry
    }
@@ -5011,17 +5032,17 @@ fn _delete_project_entry(dict entry) int {
       def rel = to_str(e.get("rel", ""))
       def path = to_str(e.get("path", ""))
       if first_name.len <= 0 { first_name = to_str(e.get("name", ospath.basename(path))) }
-      project_state = project.trash_entry(project_state, rel)
-      def err = to_str(project_state.get("last_error", ""))
+      _editor_values["project_state"] = project.trash_entry(_editor_get("project_state"), rel)
+      def err = to_str(_editor_get("project_state").get("last_error", ""))
       if err.len > 0 { _status(err) return 0 }
       if path.len > 0 { _drop_open_buffer_path(path) }
       deleted += 1
       i += 1
    }
    _project_selection_replace([])
-   project_selection_anchor = ""
-   st["project_loaded"] = true
-   st["git_loaded"] = true
+   _editor_values["project_selection_anchor"] = ""
+   _editor_get("st")["project_loaded"] = true
+   _editor_get("st")["git_loaded"] = true
    _invalidate_project_definitions()
    _save_ui_cache()
    _status(deleted == 1 ? ("moved to trash " + first_name) : ("moved " + to_str(deleted) + " items to trash"))
@@ -5029,11 +5050,11 @@ fn _delete_project_entry(dict entry) int {
 }
 
 fn _undo_file_op() int {
-   project_state = project.undo_file_op(project_state)
-   def err = to_str(project_state.get("last_error", ""))
+   _editor_values["project_state"] = project.undo_file_op(_editor_get("project_state"))
+   def err = to_str(_editor_get("project_state").get("last_error", ""))
    if err.len > 0 { _status(err) return 0 }
-   st["project_loaded"] = true
-   st["git_loaded"] = true
+   _editor_get("st")["project_loaded"] = true
+   _editor_get("st")["git_loaded"] = true
    _invalidate_project_definitions()
    _save_ui_cache()
    _status("file op undone")
@@ -5041,11 +5062,11 @@ fn _undo_file_op() int {
 }
 
 fn _redo_file_op() int {
-   project_state = project.redo_file_op(project_state)
-   def err = to_str(project_state.get("last_error", ""))
+   _editor_values["project_state"] = project.redo_file_op(_editor_get("project_state"))
+   def err = to_str(_editor_get("project_state").get("last_error", ""))
    if err.len > 0 { _status(err) return 0 }
-   st["project_loaded"] = true
-   st["git_loaded"] = true
+   _editor_get("st")["project_loaded"] = true
+   _editor_get("st")["git_loaded"] = true
    _invalidate_project_definitions()
    _save_ui_cache()
    _status("file op redone")
@@ -5053,14 +5074,14 @@ fn _redo_file_op() int {
 }
 
 fn _finish_project_drag(dict lay, f64 mx, f64 my) int {
-   if !project_drag.get("armed", false) { return 0 }
-   def src = project_drag.get("entry", dict(8))
-   def active = bool(project_drag.get("active", false))
-   project_drag["active"] = false
-   project_drag["armed"] = false
-   project_drag["entry"] = borrow(dict(8))
-   project_drag["x"] = 0.0
-   project_drag["y"] = 0.0
+   if !_editor_get("project_drag").get("armed", false) { return 0 }
+   def src = _editor_get("project_drag").get("entry", dict(8))
+   def active = bool(_editor_get("project_drag").get("active", false))
+   _editor_get("project_drag")["active"] = false
+   _editor_get("project_drag")["armed"] = false
+   _editor_get("project_drag")["entry"] = borrow(dict(8))
+   _editor_get("project_drag")["x"] = 0.0
+   _editor_get("project_drag")["y"] = 0.0
    if !active || !is_dict(src) || src.len <= 0 { return 0 }
    def dst = _project_entry_at(lay, mx, my)
    if !is_dict(dst) || dst.len <= 0 { _status("move cancelled") return 0 }
@@ -5075,17 +5096,17 @@ fn _finish_project_drag(dict lay, f64 mx, f64 my) int {
       def e = entries.get(i, {})
       if first_name.len <= 0 { first_name = to_str(e.get("name", "")) }
       def new_path = _move_dst_path(e, dst)
-      project_state = project.move_entry(project_state, to_str(e.get("rel", "")), dst_rel)
-      def err = to_str(project_state.get("last_error", ""))
+      _editor_values["project_state"] = project.move_entry(_editor_get("project_state"), to_str(e.get("rel", "")), dst_rel)
+      def err = to_str(_editor_get("project_state").get("last_error", ""))
       if err.len > 0 { _status(err) return 0 }
       _retarget_open_buffers(to_str(e.get("path", "")), new_path)
       moved += 1
       i += 1
    }
    _project_selection_replace([])
-   project_selection_anchor = ""
-   st["project_loaded"] = true
-   st["git_loaded"] = true
+   _editor_values["project_selection_anchor"] = ""
+   _editor_get("st")["project_loaded"] = true
+   _editor_get("st")["git_loaded"] = true
    _invalidate_project_definitions()
    _buffer_changed(false)
    _status(moved == 1 ? ("moved " + first_name) : ("moved " + to_str(moved) + " items"))
@@ -5093,14 +5114,14 @@ fn _finish_project_drag(dict lay, f64 mx, f64 my) int {
 }
 
 fn _finish_section_drag(f64 mx, f64 my) int {
-   if !section_drag.get("active", false) { return 0 }
-   def section = to_str(section_drag.get("section", ""))
-   def dx = mx - float(section_drag.get("x", mx))
-   def dy = my - float(section_drag.get("y", my))
-   section_drag["active"] = false
-   section_drag["section"] = ""
-   section_drag["x"] = 0.0
-   section_drag["y"] = 0.0
+   if !_editor_get("section_drag").get("active", false) { return 0 }
+   def section = to_str(_editor_get("section_drag").get("section", ""))
+   def dx = mx - float(_editor_get("section_drag").get("x", mx))
+   def dy = my - float(_editor_get("section_drag").get("y", my))
+   _editor_get("section_drag")["active"] = false
+   _editor_get("section_drag")["section"] = ""
+   _editor_get("section_drag")["x"] = 0.0
+   _editor_get("section_drag")["y"] = 0.0
    if section.len <= 0 { return 0 }
    if (dx * dx + dy * dy) > 49.0 { _hide_rail_section(section) }
    else { _toggle_rail_section(section) }
@@ -5108,21 +5129,21 @@ fn _finish_section_drag(f64 mx, f64 my) int {
 }
 
 fn _handle_mouse_release(dict lay, any data) int {
-   def p = window.mouse_pos(win)
+   def p = window.mouse_pos(_editor_get("win"))
    def mx = is_dict(data) ? float(data.get("x", p.get(0, 0.0))) : float(p.get(0, 0.0))
    def my = is_dict(data) ? float(data.get("y", p.get(1, 0.0))) : float(p.get(1, 0.0))
    _finish_section_drag(mx, my)
    _finish_project_drag(lay, mx, my)
-   st["drag_divider"] = false
-   st["drag_terminal"] = false
-   st["drag_select"] = false
-   st["drag_scrollbar"] = false
-   st["scrollbar_target"] = dict(0)
+   _editor_get("st")["drag_divider"] = false
+   _editor_get("st")["drag_terminal"] = false
+   _editor_get("st")["drag_select"] = false
+   _editor_get("st")["drag_scrollbar"] = false
+   _editor_get("st")["scrollbar_target"] = dict(0)
    0
 }
 
 fn _handle_scroll(dict lay, any data) int {
-   def p = window.mouse_pos(win)
+   def p = window.mouse_pos(_editor_get("win"))
    mut f64 mx = float(p.get(0, 0.0))
    mut f64 my = float(p.get(1, 0.0))
    if is_dict(data) {
@@ -5136,27 +5157,27 @@ fn _handle_scroll(dict lay, any data) int {
    elif is_list(data) { dy = float(data.get(1, 0.0)) }
    if dy == 0.0 { return 0 }
    if INPUT_TRACE { print("[editor:scroll] mx=" + to_str(mx) + " my=" + to_str(my) + " dy=" + to_str(dy)) }
-   if pal.is_open(palette_state) {
+   if pal.is_open(_editor_get("palette_state")) {
       if _palette_contains(lay, mx, my) {
-         palette_scroll_accum += -dy * 3.0
-         def step_pal = int(palette_scroll_accum)
+         _editor_values["palette_scroll_accum"] = float(_editor_get("palette_scroll_accum")) + (-dy * 3.0)
+         def step_pal = int(float(_editor_get("palette_scroll_accum")))
          if step_pal != 0 {
-            palette_scroll_accum -= float(step_pal)
-            palette_state = pal.scroll_by(palette_state, step_pal)
+            _editor_values["palette_scroll_accum"] = float(_editor_get("palette_scroll_accum")) - (float(step_pal))
+            _editor_values["palette_state"] = pal.scroll_by(_editor_get("palette_state"), step_pal)
          }
       }
       return 0
    }
    if _which_key_contains(_layout_sw(lay), _layout_sh(lay), mx, my) {
-      def rows_key = pal.which_key(chord.describe(chord_state))
+      def rows_key = pal.which_key(chord.describe(_editor_get("chord_state")))
       def rect_key = _which_key_rect(_layout_sw(lay), _layout_sh(lay), rows_key.len)
       def visible_key = int(rect_key.get(5, 1))
-      which_key_scroll_accum += -dy * 3.0
-      def step_key = int(which_key_scroll_accum)
+      _editor_values["which_key_scroll_accum"] = float(_editor_get("which_key_scroll_accum")) + (-dy * 3.0)
+      def step_key = int(float(_editor_get("which_key_scroll_accum")))
       if step_key != 0 {
-         which_key_scroll_accum -= float(step_key)
-         which_key_scroll += step_key
-         which_key_scroll = _clamp_which_key_scroll(rows_key.len, visible_key)
+         _editor_values["which_key_scroll_accum"] = float(_editor_get("which_key_scroll_accum")) - (float(step_key))
+         _editor_values["which_key_scroll"] = int(_editor_get("which_key_scroll")) + (step_key)
+         _editor_values["which_key_scroll"] = _clamp_which_key_scroll(rows_key.len, visible_key)
       }
       return 0
    }
@@ -5165,54 +5186,54 @@ fn _handle_scroll(dict lay, any data) int {
       def body_h = rail_h - RAIL_TABS_H
       def tab = _rail_tab()
       if tab == "git" {
-         def rows_git = project.changes(project_state)
+         def rows_git = project.changes(_editor_get("project_state"))
          def visible_git = project.visible_count(body_h)
-         git_scroll_accum += -dy * 3.0
-         def step_git = int(git_scroll_accum)
+         _editor_values["git_scroll_accum"] = float(_editor_get("git_scroll_accum")) + (-dy * 3.0)
+         def step_git = int(float(_editor_get("git_scroll_accum")))
          if step_git != 0 {
-            git_scroll_accum -= float(step_git)
-            st["git_scroll"] = project.clamp_scroll(int(st.get("git_scroll", 0)) + step_git, rows_git.len, visible_git)
+            _editor_values["git_scroll_accum"] = float(_editor_get("git_scroll_accum")) - (float(step_git))
+            _editor_get("st")["git_scroll"] = project.clamp_scroll(int(_editor_get("st").get("git_scroll", 0)) + step_git, rows_git.len, visible_git)
          }
          return 0
       }
       if tab == "timeline" {
          def rows_time = _timeline_rows()
          def visible_time = project.visible_count(body_h)
-         timeline_scroll_accum += -dy * 3.0
-         def step_time = int(timeline_scroll_accum)
+         _editor_values["timeline_scroll_accum"] = float(_editor_get("timeline_scroll_accum")) + (-dy * 3.0)
+         def step_time = int(float(_editor_get("timeline_scroll_accum")))
          if step_time != 0 {
-            timeline_scroll_accum -= float(step_time)
-            st["timeline_scroll"] = project.clamp_scroll(int(st.get("timeline_scroll", 0)) + step_time, rows_time.len, visible_time)
+            _editor_values["timeline_scroll_accum"] = float(_editor_get("timeline_scroll_accum")) - (float(step_time))
+            _editor_get("st")["timeline_scroll"] = project.clamp_scroll(int(_editor_get("st").get("timeline_scroll", 0)) + step_time, rows_time.len, visible_time)
          }
          return 0
       }
-      def show_project = bool(st.get("show_project", true))
-      def show_outline = bool(st.get("show_outline", true))
+      def show_project = bool(_editor_get("st").get("show_project", true))
+      def show_outline = bool(_editor_get("st").get("show_outline", true))
       if show_project { _ensure_project_tree() }
-      def rows = project.tree(project_state)
+      def rows = project.tree(_editor_get("project_state"))
       def syms = _outline_symbols()
       def tree_h = (!show_project) ? 0.0 : (show_outline ? _rail_tree_height(body_h, rows.len, syms.len) : body_h)
       def outline_y = float(lay.get("rail_y", 0.0)) + RAIL_TABS_H + (show_project ? tree_h + 1.0 : 0.0)
       if show_outline && my >= outline_y {
          def visible = _outline_visible(body_h - (outline_y - float(lay.get("rail_y", 0.0)) - RAIL_TABS_H))
-         outline_scroll_accum += -dy * 3.0
-         def step = int(outline_scroll_accum)
+         _editor_values["outline_scroll_accum"] = float(_editor_get("outline_scroll_accum")) + (-dy * 3.0)
+         def step = int(float(_editor_get("outline_scroll_accum")))
          if step != 0 {
-            outline_scroll_accum -= float(step)
-            st["outline_scroll"] = _outline_clamp(int(st.get("outline_scroll", 0)) + step, syms.len, visible)
+            _editor_values["outline_scroll_accum"] = float(_editor_get("outline_scroll_accum")) - (float(step))
+            _editor_get("st")["outline_scroll"] = _outline_clamp(int(_editor_get("st").get("outline_scroll", 0)) + step, syms.len, visible)
          }
-         if INPUT_TRACE { print("[editor:scroll] outline step=" + to_str(step) + " scroll=" + to_str(int(st.get("outline_scroll", 0)))) }
+         if INPUT_TRACE { print("[editor:scroll] outline step=" + to_str(step) + " scroll=" + to_str(int(_editor_get("st").get("outline_scroll", 0)))) }
          return 0
       }
       if show_project {
          def visible = project.visible_count(tree_h)
-         tree_scroll_accum += -dy * 3.0
-         def step = int(tree_scroll_accum)
+         _editor_values["tree_scroll_accum"] = float(_editor_get("tree_scroll_accum")) + (-dy * 3.0)
+         def step = int(float(_editor_get("tree_scroll_accum")))
          if step != 0 {
-            tree_scroll_accum -= float(step)
-            st["tree_scroll"] = project.clamp_scroll(int(st.get("tree_scroll", 0)) + step, rows.len, visible)
+            _editor_values["tree_scroll_accum"] = float(_editor_get("tree_scroll_accum")) - (float(step))
+            _editor_get("st")["tree_scroll"] = project.clamp_scroll(int(_editor_get("st").get("tree_scroll", 0)) + step, rows.len, visible)
          }
-         if INPUT_TRACE { print("[editor:scroll] tree step=" + to_str(step) + " scroll=" + to_str(int(st.get("tree_scroll", 0)))) }
+         if INPUT_TRACE { print("[editor:scroll] tree step=" + to_str(step) + " scroll=" + to_str(int(_editor_get("st").get("tree_scroll", 0)))) }
          return 0
       }
       return 0
@@ -5221,28 +5242,28 @@ fn _handle_scroll(dict lay, any data) int {
       if INPUT_TRACE { print("[editor:scroll] miss") }
       return 0
    }
-   def lines = ed.current_lines(st)
+   def lines = ed.current_lines(_editor_get("st"))
    def visible_rows = ed.visible_rows(float(lay.get("edit_h", 0.0)))
    def max_scroll = max(0, lines.len - visible_rows)
-   edit_scroll_accum += -dy * 5.0
-   def step = int(edit_scroll_accum)
+   _editor_values["edit_scroll_accum"] = float(_editor_get("edit_scroll_accum")) + (-dy * 5.0)
+   def step = int(float(_editor_get("edit_scroll_accum")))
    if step != 0 {
-      edit_scroll_accum -= float(step)
-      st["scroll"] = min(max_scroll, max(0, int(st.get("scroll", 0)) + step))
-      st["scroll_follow"] = false
+      _editor_values["edit_scroll_accum"] = float(_editor_get("edit_scroll_accum")) - (float(step))
+      _editor_get("st")["scroll"] = min(max_scroll, max(0, int(_editor_get("st").get("scroll", 0)) + step))
+      _editor_get("st")["scroll_follow"] = false
    }
-   if INPUT_TRACE { print("[editor:scroll] edit step=" + to_str(step) + " max=" + to_str(max_scroll) + " scroll=" + to_str(int(st.get("scroll", 0)))) }
+   if INPUT_TRACE { print("[editor:scroll] edit step=" + to_str(step) + " max=" + to_str(max_scroll) + " scroll=" + to_str(int(_editor_get("st").get("scroll", 0)))) }
    0
 }
 
 fn _outline_symbols() list {
-   def name = to_str(ed.current_buffer(st).get("name", ""))
-   def cache_name = to_str(int(st.get("active", 0))) + ":" + name
-   if outline_cache_rev == content_rev && outline_cache_name == cache_name { return outline_cache }
-   outline_cache = outline.symbols(ed.current_lines(st), name, OUTLINE_MAX_LINES)
-   outline_cache_rev = content_rev
-   outline_cache_name = cache_name
-   outline_cache
+   def name = to_str(ed.current_buffer(_editor_get("st")).get("name", ""))
+   def cache_name = to_str(int(_editor_get("st").get("active", 0))) + ":" + name
+   if int(_editor_get("outline_cache_rev")) == int(_editor_get("content_rev")) && to_str(_editor_get("outline_cache_name")) == cache_name { return _editor_get("outline_cache") }
+   _editor_values["outline_cache"] = outline.symbols(ed.current_lines(_editor_get("st")), name, OUTLINE_MAX_LINES)
+   _editor_values["outline_cache_rev"] = int(_editor_get("content_rev"))
+   _editor_values["outline_cache_name"] = cache_name
+   _editor_get("outline_cache")
 }
 
 fn _drop_paths(any data) list {
@@ -5266,9 +5287,9 @@ fn _drop_move_into(dict target, str src_path) str {
    if file_exists(dst) { _status("drop target exists") return "" }
    match osfs.rename(src_path, dst) {
       ok(_) -> {
-         project_state = project.refresh_git(project_state)
-         st["project_loaded"] = true
-         st["git_loaded"] = true
+         _editor_values["project_state"] = project.refresh_git(_editor_get("project_state"))
+         _editor_get("st")["project_loaded"] = true
+         _editor_get("st")["git_loaded"] = true
          _invalidate_project_definitions()
          dst
       }
@@ -5282,7 +5303,7 @@ fn _drop_move_into(dict target, str src_path) str {
 fn _handle_drop(dict lay, any data) int {
    def files = _drop_paths(data)
    if files.len <= 0 { _status("drop failed") return 0 }
-   def p = window.mouse_pos(win)
+   def p = window.mouse_pos(_editor_get("win"))
    def mx = is_dict(data) ? float(data.get("x", p.get(0, 0.0))) : float(p.get(0, 0.0))
    def my = is_dict(data) ? float(data.get("y", p.get(1, 0.0))) : float(p.get(1, 0.0))
    def target = _project_entry_at(lay, mx, my)
@@ -5312,13 +5333,13 @@ fn _handle_drop(dict lay, any data) int {
       }
       return 0
    }
-   st = session.append_file(st, to_str(files.get(0, "")))
+   _editor_values["st"] = session.append_file(_editor_get("st"), to_str(files.get(0, "")))
    _buffer_changed(true)
    0
 }
 
 fn _process_events(dict lay) int {
-   term_state["focus"] = to_str(st.get("focus", "editor")) == "terminal" && termpane.is_open(term_state)
+   _editor_get("term_state")["focus"] = to_str(_editor_get("st").get("focus", "editor")) == "terminal" && termpane.is_open(_editor_get("term_state"))
    mut e = _next_event()
    mut ev_count = 0
    mut motion_count = 0
@@ -5340,7 +5361,7 @@ fn _process_events(dict lay) int {
       ;; prompt so the user does not return to a half-armed editor that
       ;; silently runs C-x k on the next keystroke.
       if typ == window.EVENT_FOCUS_OUT || typ == window.EVENT_MOUSE_LEAVE {
-         if chord.pending(chord_state) { chord_state = chord.empty_state() }
+         if chord.pending(_editor_get("chord_state")) { _editor_values["chord_state"] = chord.empty_state() }
          _clear_pending_destructive_prompts()
       }
       mut scroll_ev = 0
@@ -5348,7 +5369,7 @@ fn _process_events(dict lay) int {
          if is_dict(data) {
             scroll_ev = data
          } else {
-            def p = window.mouse_pos(win)
+            def p = window.mouse_pos(_editor_get("win"))
             if is_list(data) {
                scroll_ev = {"dx": float(data.get(0, 0.0)), "dy": float(data.get(1, 0.0)), "x": float(p.get(0, 0.0)), "y": float(p.get(1, 0.0))}
             } else {
@@ -5364,11 +5385,11 @@ fn _process_events(dict lay) int {
                continue
             }
             mut handled_terminal = false
-            if termpane.is_open(term_state) && to_str(st.get("focus", "editor")) == "terminal" {
+            if termpane.is_open(_editor_get("term_state")) && to_str(_editor_get("st").get("focus", "editor")) == "terminal" {
                def ch = chord.event_chord(data)
                if ch != "F6" && ch != "F7" && ch != "C-g" {
-                  def tres = termpane.handle_event(term_state, typ, data)
-                  term_state = tres.get(0, term_state)
+                  def tres = termpane.handle_event(_editor_get("term_state"), typ, data)
+                  _editor_values["term_state"] = tres.get(0, _editor_get("term_state"))
                   handled_terminal = bool(tres.get(1, false))
                }
             }
@@ -5396,26 +5417,26 @@ fn _process_events(dict lay) int {
       if is_scroll {
          scroll_count += 1
          if is_dict(data) {
-            if pal.is_open(palette_state) || _which_key_contains(_layout_sw(lay), _layout_sh(lay), float(data.get("x", -1.0)), float(data.get("y", -1.0))) {
+            if pal.is_open(_editor_get("palette_state")) || _which_key_contains(_layout_sw(lay), _layout_sh(lay), float(data.get("x", -1.0)), float(data.get("y", -1.0))) {
                if INPUT_TRACE { print("[editor:event] scroll-overlay") }
                _handle_scroll(lay, data)
-            } elif termpane.point_contains(term_state, float(data.get("x", -1.0)), float(data.get("y", -1.0))) {
+            } elif termpane.point_contains(_editor_get("term_state"), float(data.get("x", -1.0)), float(data.get("y", -1.0))) {
                if INPUT_TRACE { print("[editor:event] scroll-terminal") }
-               def tres = termpane.handle_event(term_state, window.EVENT_MOUSE_SCROLL, data)
-               term_state = tres.get(0, term_state)
+               def tres = termpane.handle_event(_editor_get("term_state"), window.EVENT_MOUSE_SCROLL, data)
+               _editor_values["term_state"] = tres.get(0, _editor_get("term_state"))
             } else {
                if INPUT_TRACE { print("[editor:event] scroll-editor") }
                _handle_scroll(lay, data)
             }
          } else {
             if !is_dict(scroll_ev) { scroll_ev = {"dx": 0.0, "dy": 0.0, "x": 0.0, "y": 0.0} }
-            if pal.is_open(palette_state) || _which_key_contains(_layout_sw(lay), _layout_sh(lay), float(scroll_ev.get("x", -1.0)), float(scroll_ev.get("y", -1.0))) {
+            if pal.is_open(_editor_get("palette_state")) || _which_key_contains(_layout_sw(lay), _layout_sh(lay), float(scroll_ev.get("x", -1.0)), float(scroll_ev.get("y", -1.0))) {
                if INPUT_TRACE { print("[editor:event] scroll-overlay") }
                _handle_scroll(lay, scroll_ev)
-            } elif termpane.point_contains(term_state, float(scroll_ev.get("x", -1.0)), float(scroll_ev.get("y", -1.0))) {
+            } elif termpane.point_contains(_editor_get("term_state"), float(scroll_ev.get("x", -1.0)), float(scroll_ev.get("y", -1.0))) {
                if INPUT_TRACE { print("[editor:event] scroll-terminal") }
-               def tres = termpane.handle_event(term_state, window.EVENT_MOUSE_SCROLL, scroll_ev)
-               term_state = tres.get(0, term_state)
+               def tres = termpane.handle_event(_editor_get("term_state"), window.EVENT_MOUSE_SCROLL, scroll_ev)
+               _editor_values["term_state"] = tres.get(0, _editor_get("term_state"))
             } else {
                if INPUT_TRACE { print("[editor:event] scroll-editor") }
                _handle_scroll(lay, scroll_ev)
@@ -5435,21 +5456,21 @@ fn _process_events(dict lay) int {
             continue
          }
       }
-      if is_mouse_press && is_dict(data) && int(data.get("button", 0)) == 1 && termpane.is_open(term_state) && termpane.point_contains(term_state, float(data.get("x", -1.0)), float(data.get("y", -1.0))) {
+      if is_mouse_press && is_dict(data) && int(data.get("button", 0)) == 1 && termpane.is_open(_editor_get("term_state")) && termpane.point_contains(_editor_get("term_state"), float(data.get("x", -1.0)), float(data.get("y", -1.0))) {
          mut dict target = dict(3)
-         target["name"] = termpane.tab_title(term_state, termpane.active_tab(term_state))
+         target["name"] = termpane.tab_title(_editor_get("term_state"), termpane.active_tab(_editor_get("term_state")))
          target["path"] = ""
          target["dir"] = false
          _open_context(float(data.get("x", 0.0)), float(data.get("y", 0.0)), target, "terminal")
          e = _next_event()
          continue
       }
-      if termpane.is_open(term_state) {
+      if termpane.is_open(_editor_get("term_state")) {
          def mouse_ev = is_mouse_press || is_mouse_release || is_mouse_move
-         def term_mouse = mouse_ev && is_dict(data) && termpane.point_contains(term_state, float(data.get("x", -1.0)), float(data.get("y", -1.0)))
-         if term_mouse || (!mouse_ev && to_str(st.get("focus", "editor")) == "terminal") {
-            def tres = termpane.handle_event(term_state, typ, data)
-            term_state = tres.get(0, term_state)
+         def term_mouse = mouse_ev && is_dict(data) && termpane.point_contains(_editor_get("term_state"), float(data.get("x", -1.0)), float(data.get("y", -1.0)))
+         if term_mouse || (!mouse_ev && to_str(_editor_get("st").get("focus", "editor")) == "terminal") {
+            def tres = termpane.handle_event(_editor_get("term_state"), typ, data)
+            _editor_values["term_state"] = tres.get(0, _editor_get("term_state"))
             if tres.get(1, false) {
                if is_mouse_press && term_mouse { _set_focus("terminal", false) }
                e = _next_event()
@@ -5469,20 +5490,20 @@ fn _process_events(dict lay) int {
       e = _next_event()
    }
    if e {
-      frame_events_seen = true
-      force_full_redraw = max(force_full_redraw, 1)
+      _editor_values["frame_events_seen"] = true
+      _editor_values["force_full_redraw"] = max(int(_editor_get("force_full_redraw")), 1)
       _status("input queue throttled; continuing next frame")
    }
    if have_motion {
-      if pal.is_open(palette_state) {
+      if pal.is_open(_editor_get("palette_state")) {
          def pi = _palette_row_hit(lay, float(motion_data.get("x", -1.0)), float(motion_data.get("y", -1.0)))
-         if pi >= 0 { palette_state = pal.set_index(palette_state, pi) }
+         if pi >= 0 { _editor_values["palette_state"] = pal.set_index(_editor_get("palette_state"), pi) }
       }
       mut consumed = false
-      def editor_dragging = st.get("drag_terminal", false) || st.get("drag_divider", false) || st.get("drag_select", false) || st.get("drag_scrollbar", false) || project_drag.get("armed", false)
-      if termpane.is_open(term_state) && !editor_dragging {
-         def tres = termpane.handle_event(term_state, window.EVENT_MOUSE_POS_CHANGED, motion_data)
-         term_state = tres.get(0, term_state)
+      def editor_dragging = _editor_get("st").get("drag_terminal", false) || _editor_get("st").get("drag_divider", false) || _editor_get("st").get("drag_select", false) || _editor_get("st").get("drag_scrollbar", false) || _editor_get("project_drag").get("armed", false)
+      if termpane.is_open(_editor_get("term_state")) && !editor_dragging {
+         def tres = termpane.handle_event(_editor_get("term_state"), window.EVENT_MOUSE_POS_CHANGED, motion_data)
+         _editor_values["term_state"] = tres.get(0, _editor_get("term_state"))
          consumed = bool(tres.get(1, false))
       }
       if !consumed { _handle_mouse_move(lay, motion_data) }
@@ -5490,19 +5511,19 @@ fn _process_events(dict lay) int {
    if INPUT_TRACE && ev_count > 0 {
       print("[editor:input] events=" + to_str(ev_count) + " motion=" + to_str(motion_count) + " scroll=" + to_str(scroll_count))
    }
-   if !window.mouse_down(win, 0) && !window.mouse_down(win, 1) {
-      st["drag_divider"] = false
-      st["drag_terminal"] = false
-      st["drag_select"] = false
-      st["drag_scrollbar"] = false
-      st["scrollbar_target"] = dict(0)
-      project_drag["active"] = false
-      project_drag["armed"] = false
-      section_drag["active"] = false
-      section_drag["section"] = ""
+   if !window.mouse_down(_editor_get("win"), 0) && !window.mouse_down(_editor_get("win"), 1) {
+      _editor_get("st")["drag_divider"] = false
+      _editor_get("st")["drag_terminal"] = false
+      _editor_get("st")["drag_select"] = false
+      _editor_get("st")["drag_scrollbar"] = false
+      _editor_get("st")["scrollbar_target"] = dict(0)
+      _editor_get("project_drag")["active"] = false
+      _editor_get("project_drag")["armed"] = false
+      _editor_get("section_drag")["active"] = false
+      _editor_get("section_drag")["section"] = ""
    }
-   st = ed.clamp_cursor(st)
-   frame_events_seen = ev_count > 0 || have_motion || scroll_count > 0
+   _editor_values["st"] = ed.clamp_cursor(_editor_get("st"))
+   _editor_values["frame_events_seen"] = ev_count > 0 || have_motion || scroll_count > 0
    0
 }
 
@@ -5524,9 +5545,9 @@ fn _tok_color(int kind) any {
 }
 
 fn _syntax_lang(str filename) str {
-   if syntax_lang_cache.contains(filename) { return to_str(syntax_lang_cache.get(filename, "text")) }
+   if _editor_get("syntax_lang_cache").contains(filename) { return to_str(_editor_get("syntax_lang_cache").get(filename, "text")) }
    def lang = syntax.detect_language(filename)
-   syntax_lang_cache[filename] = lang
+   _editor_get("syntax_lang_cache")[filename] = lang
    lang
 }
 
@@ -5583,7 +5604,7 @@ fn _markdown_fence_lang(str line) str {
 
 fn _markdown_fenced_lang_at(int target_li) str {
    if target_li < 0 { return "" }
-   def lines = ed.current_lines(st)
+   def lines = ed.current_lines(_editor_get("st"))
    mut open = false
    mut marker = 0
    mut lang = ""
@@ -5646,7 +5667,7 @@ fn _syntax_key(str filename, int li, str line) str {
 
 fn _prefix_x(str line, int col) int {
    def int safe_col = col < 0 ? 0 : col > line.len ? line.len : col
-   mut int advance = int(FONT_BODY_ADV)
+   mut int advance = int(float(_editor_get("FONT_BODY_ADV")))
    if advance < 1 { advance = 1 }
    def int tab_width = advance * 4
    mut int x = 0
@@ -5666,13 +5687,13 @@ fn _prefix_x(str line, int col) int {
 }
 
 fn _syntax_runs(str filename, str line, int li) list {
-   if syntax_cache_rev != content_rev {
-      syntax_cache_rev = content_rev
-      syntax_run_cache = borrow(dict(256))
-      syntax_flat_cache = borrow(dict(256))
+   if int(_editor_get("syntax_cache_rev")) != int(_editor_get("content_rev")) {
+      _editor_values["syntax_cache_rev"] = int(_editor_get("content_rev"))
+      _editor_values["syntax_run_cache"] = borrow(dict(256))
+      _editor_values["syntax_flat_cache"] = borrow(dict(256))
    }
    def key = _syntax_key(filename, li, line)
-   if syntax_run_cache.contains(key) { return syntax_run_cache.get(key, []) }
+   if _editor_get("syntax_run_cache").contains(key) { return _editor_get("syntax_run_cache").get(key, []) }
    def toks = _tokenize_line(filename, line, li)
    mut runs = []
    if toks.len == 0 {
@@ -5702,9 +5723,9 @@ fn _syntax_runs(str filename, str line, int li) list {
          runs = runs.append([str.str_slice(line, cursor, line.len), syntax.TOK_TEXT, xoff])
       }
    }
-   syntax_run_cache[key] = borrow(runs)
+   _editor_get("syntax_run_cache")[key] = borrow(runs)
    forget(runs)
-   syntax_run_cache.get(key, [])
+   _editor_get("syntax_run_cache").get(key, [])
 }
 
 fn _append_syntax_flat_run(list flat, str text, f64 x, int kind) list {
@@ -5716,13 +5737,13 @@ fn _append_syntax_flat_run(list flat, str text, f64 x, int kind) list {
 }
 
 fn _syntax_rel_runs(str filename, str line, int li) list {
-   if syntax_cache_rev != content_rev {
-      syntax_cache_rev = content_rev
-      syntax_run_cache = borrow(dict(256))
-      syntax_flat_cache = borrow(dict(256))
+   if int(_editor_get("syntax_cache_rev")) != int(_editor_get("content_rev")) {
+      _editor_values["syntax_cache_rev"] = int(_editor_get("content_rev"))
+      _editor_values["syntax_run_cache"] = borrow(dict(256))
+      _editor_values["syntax_flat_cache"] = borrow(dict(256))
    }
    def key = _syntax_key(filename, li, line)
-   if syntax_flat_cache.contains(key) { return syntax_flat_cache.get(key, []) }
+   if _editor_get("syntax_flat_cache").contains(key) { return _editor_get("syntax_flat_cache").get(key, []) }
    def runs = _syntax_runs(filename, line, li)
    mut flat = []
    mut str pending_text = ""
@@ -5736,7 +5757,7 @@ fn _syntax_rel_runs(str filename, str line, int li) list {
       if text.len > 0 {
          def xoff = float(run.get(2, 0.0))
          def int kind = int(run.get(1, syntax.TOK_TEXT))
-         def width = _measure_ui(font_body, text, float(text.len) * FONT_BODY_ADV)
+         def width = _measure_ui(int(_editor_get("font_body")), text, float(text.len) * float(_editor_get("FONT_BODY_ADV")))
          def f64 gap = abs(xoff - pending_end)
          if pending_text.len > 0 && pending_kind == kind && gap <= 0.75 {
             pending_text = pending_text + text
@@ -5752,9 +5773,9 @@ fn _syntax_rel_runs(str filename, str line, int li) list {
       i += 1
    }
    flat = _append_syntax_flat_run(flat, pending_text, pending_x, pending_kind)
-   syntax_flat_cache[key] = borrow(flat)
+   _editor_get("syntax_flat_cache")[key] = borrow(flat)
    forget(flat)
-   syntax_flat_cache.get(key, [])
+   _editor_get("syntax_flat_cache").get(key, [])
 }
 
 fn _append_plain_run(list out, str line, f64 x, f64 y) list {
@@ -5864,7 +5885,7 @@ fn _visible_runs_key(
    bool show_numbers,
    bool big_file
 ) str {
-   to_str(content_rev) + "\t" + filename + "\t" + to_str(scroll) + "\t" + to_str(rows) +
+   to_str(int(_editor_get("content_rev"))) + "\t" + filename + "\t" + to_str(scroll) + "\t" + to_str(rows) +
    "\t" + to_str(int(text_x * 10.0)) + "\t" + to_str(int(y * 10.0)) +
    "\t" + to_str(int(num_x * 10.0)) + "\t" + to_str(draw_limit) +
    "\t" + (show_numbers ? "1" : "0") + "\t" + (big_file ? "1" : "0")
@@ -5883,7 +5904,7 @@ fn _prepare_visible_runs(
    bool big_file
 ) int {
    def key = _visible_runs_key(filename, scroll, rows, text_x, y, num_x, draw_limit, show_numbers, big_file)
-   if key == visible_runs_cache_key { return 0 }
+   if key == to_str(_editor_get("visible_runs_cache_key")) { return 0 }
    mut line_runs = []
    mut text_runs = []
    mut i = 0
@@ -5891,8 +5912,8 @@ fn _prepare_visible_runs(
       def li = scroll + i
       def yy = _editor_row_y(y, i)
       def baseline_y = _editor_row_baseline_y(yy)
-      def text_y = _row_text_y_from_baseline(font_body, baseline_y, ed.LINE_H)
-      def num_y = _row_text_y_from_baseline(font_small, baseline_y, ed.LINE_H)
+      def text_y = _row_text_y_from_baseline(int(_editor_get("font_body")), baseline_y, ed.LINE_H)
+      def num_y = _row_text_y_from_baseline(int(_editor_get("font_small")), baseline_y, ed.LINE_H)
       def line = to_str(lines.get(li, ""))
       def draw_line = _draw_line_text(line, draw_limit)
       if show_numbers {
@@ -5903,9 +5924,9 @@ fn _prepare_visible_runs(
       text_runs = _append_highlight_runs(text_runs, filename, draw_line, li, text_x, text_y, _highlight_on(draw_line))
       i += 1
    }
-   visible_runs_cache_key = key
-   visible_line_runs_cache = borrow(line_runs)
-   visible_text_runs_cache = borrow(text_runs)
+   _editor_values["visible_runs_cache_key"] = key
+   _editor_values["visible_line_runs_cache"] = borrow(line_runs)
+   _editor_values["visible_text_runs_cache"] = borrow(text_runs)
    forget(line_runs)
    forget(text_runs)
    0
@@ -5923,16 +5944,16 @@ fn _syntax_runs_text(list runs) str {
 }
 
 fn _measure_prefix(str line, int col) f64 {
-   if width_cache_rev != content_rev {
-      width_cache_rev = content_rev
-      width_cache = borrow(dict(512))
+   if int(_editor_get("width_cache_rev")) != int(_editor_get("content_rev")) {
+      _editor_values["width_cache_rev"] = int(_editor_get("content_rev"))
+      _editor_values["width_cache"] = borrow(dict(512))
    }
    def int n = int(min(max(col, 0), line.len))
    if n <= 0 { return 0.0 }
    def key = to_str(n) + ":" + line
-   if width_cache.contains(key) { return float(width_cache.get(key, 0.0)) }
+   if _editor_get("width_cache").contains(key) { return float(_editor_get("width_cache").get(key, 0.0)) }
    def w = float(_prefix_x(line, n))
-   width_cache[key] = w
+   _editor_get("width_cache")[key] = w
    w
 }
 
@@ -5941,13 +5962,13 @@ fn _hex_color(str hex) any {
 }
 
 fn _color_picker_open() int {
-   def hit = colorpicker.at_cursor(ed.current_lines(st), int(st.get("cursor_line", 0)), int(st.get("cursor_col", 0)))
+   def hit = colorpicker.at_cursor(ed.current_lines(_editor_get("st")), int(_editor_get("st").get("cursor_line", 0)), int(_editor_get("st").get("cursor_col", 0)))
    if !is_dict(hit) || hit.len <= 0 {
-      color_state = colorpicker.close(color_state)
+      _editor_values["color_state"] = colorpicker.close(_editor_get("color_state"))
       _status("no hex color")
       return 0
    }
-   color_state = colorpicker.open(color_state, hit)
+   _editor_values["color_state"] = colorpicker.open(_editor_get("color_state"), hit)
    _status(to_str(hit.get("hex", "")) + " " + colorpicker.rgb_label(to_str(hit.get("hex", ""))))
    0
 }
@@ -5979,11 +6000,11 @@ fn _draw_color_swatches_visible(list lines, int scroll, int rows, f64 text_x, f6
 }
 
 fn _draw_color_picker(dict lay, f64 sw, f64 sh) int {
-   if !colorpicker.is_open(color_state) { return 0 }
-   def hex = colorpicker.hex(color_state)
+   if !colorpicker.is_open(_editor_get("color_state")) { return 0 }
+   def hex = colorpicker.hex(_editor_get("color_state"))
    if hex.len < 7 { return 0 }
-   def row = colorpicker.line(color_state)
-   def scroll = int(st.get("scroll", 0))
+   def row = colorpicker.line(_editor_get("color_state"))
+   def scroll = int(_editor_get("st").get("scroll", 0))
    def x0 = float(lay.get("edit_x", 0.0))
    def y0 = float(lay.get("edit_y", 0.0))
    def rows = ed.visible_rows(float(lay.get("edit_h", 0.0)))
@@ -5993,9 +6014,9 @@ fn _draw_color_picker(dict lay, f64 sw, f64 sh) int {
    mut x = float(fit0.get(0, 8.0))
    mut y = float(fit0.get(1, 8.0))
    if row >= scroll && row < scroll + rows {
-      def line = to_str(ed.current_lines(st).get(row, ""))
+      def line = to_str(ed.current_lines(_editor_get("st")).get(row, ""))
       def f64 row_y = float(_editor_row_y(y0, row - scroll))
-      fit0 = _fit_rect(_line_text_x(lay) + _measure_prefix(line, colorpicker.start(color_state)) + 18.0, row_y + float(ed.LINE_H) + 2.0, w, h, sw, sh, 8.0)
+      fit0 = _fit_rect(_line_text_x(lay) + _measure_prefix(line, colorpicker.start(_editor_get("color_state"))) + 18.0, row_y + float(ed.LINE_H) + 2.0, w, h, sw, sh, 8.0)
       x = float(fit0.get(0, x))
       y = float(fit0.get(1, y))
    }
@@ -6004,8 +6025,8 @@ fn _draw_color_picker(dict lay, f64 sw, f64 sh) int {
    _stroke_rect(x, y, w, h, C_ACCENT, 1.0)
    _fill_rect(x + 14.0, y + 16.0, 46.0, 46.0, col)
    _stroke_rect(x + 14.0, y + 16.0, 46.0, 46.0, C_LINE_2, 1.0)
-   _text(font_body, hex, x + 76.0, y + 18.0, C_TEXT)
-   _text(font_small, colorpicker.rgb_label(hex), x + 76.0, y + 43.0, C_MUTED)
+   _text(int(_editor_get("font_body")), hex, x + 76.0, y + 18.0, C_TEXT)
+   _text(int(_editor_get("font_small")), colorpicker.rgb_label(hex), x + 76.0, y + 43.0, C_MUTED)
    0
 }
 
@@ -6026,9 +6047,9 @@ fn _draw_selection_for_line(str line, int li, f64 text_x, f64 y, list r) int {
 }
 
 fn _draw_find_visible(list lines, int scroll, int rows, f64 text_x, f64 y) int {
-   if !find.is_open(find_state) || find.count(find_state) <= 0 { return 0 }
-   def rs = find.results(find_state)
-   def active_idx = find.index(find_state)
+   if !find.is_open(_editor_get("find_state")) || find.count(_editor_get("find_state")) <= 0 { return 0 }
+   def rs = find.results(_editor_get("find_state"))
+   def active_idx = find.index(_editor_get("find_state"))
    def last = scroll + rows
    mut i = 0
    while i < rs.len && int(rs.get(i, {}).get("line", -1)) < scroll { i += 1 }
@@ -6093,8 +6114,8 @@ fn _top_tab_w(f64 sw, int count) f64 {
 
 fn _top_tab_hit(dict lay, f64 mx, f64 my) dict {
    def top_h = float(lay.get("top", 0.0))
-   if !bool(st.get("show_titlebar", true)) || top_h <= 1.0 || my < 0.0 || my > top_h { return _tab_hit_result("", -1, true) }
-   def bs = st.get("buffers", [])
+   if !bool(_editor_get("st").get("show_titlebar", true)) || top_h <= 1.0 || my < 0.0 || my > top_h { return _tab_hit_result("", -1, true) }
+   def bs = _editor_get("st").get("buffers", [])
    def sw = _layout_sw(lay)
    def tab_w = _top_tab_w(sw, bs.len)
    def start_x = 6.0
@@ -6110,11 +6131,11 @@ fn _top_tab_hit(dict lay, f64 mx, f64 my) dict {
 }
 
 fn _select_top_tab(int idx) int {
-   def bs = st.get("buffers", [])
+   def bs = _editor_get("st").get("buffers", [])
    if idx < 0 || idx >= bs.len { return 0 }
    _clear_pending_destructive_prompts()
-   if idx != int(st.get("active", 0)) { _nav_push_current() }
-   st = ed.select_buffer(st, idx)
+   if idx != int(_editor_get("st").get("active", 0)) { _nav_push_current() }
+   _editor_values["st"] = ed.select_buffer(_editor_get("st"), idx)
    _buffer_changed(true)
    _nav_record_current()
    _set_focus("editor", false)
@@ -6122,9 +6143,9 @@ fn _select_top_tab(int idx) int {
 }
 
 fn _close_top_tab(int idx) int {
-   def bs = st.get("buffers", [])
+   def bs = _editor_get("st").get("buffers", [])
    if idx < 0 || idx >= bs.len { return 0 }
-   st["active"] = idx
+   _editor_get("st")["active"] = idx
    _kill_buffer()
    _set_focus("editor", false)
    0
@@ -6136,10 +6157,10 @@ fn _draw_top(dict lay, int fps) int {
    if top_h <= 1.0 { return 0 }
    _fill_rect(0.0, 0.0, sw, top_h, C_RAIL)
    _fill_rect(0.0, top_h - 1.0, sw, 1.0, C_LINE)
-   def bs = st.get("buffers", [])
-   def active = int(st.get("active", 0))
+   def bs = _editor_get("st").get("buffers", [])
+   def active = int(_editor_get("st").get("active", 0))
    def tab_w = _top_tab_w(sw, bs.len)
-   def tab_text_y = _text_center_y_for(font_modeline, 3.0, top_h - 5.0)
+   def tab_text_y = _text_center_y_for(int(_editor_get("font_modeline")), 3.0, top_h - 5.0)
    mut runs = []
    mut i = 0
    while i < bs.len {
@@ -6161,7 +6182,7 @@ fn _draw_top(dict lay, int fps) int {
       i += 1
    }
    _flush_rects()
-   if runs.len > 0 { gfx.draw_text_runs_flat_colors(font_modeline, runs) }
+   if runs.len > 0 { gfx.draw_text_runs_flat_colors(int(_editor_get("font_modeline")), runs) }
    0
 }
 
@@ -6171,23 +6192,23 @@ fn _queue_git_badge(list runs, str code, f64 right_x, f64 y) list {
    def col = _git_color(code)
    _fill_rect(right_x - 18.0, y + 3.0, 14.0, 14.0, gfx.color_alpha(col, 0.18))
    _stroke_rect(right_x - 18.0, y + 3.0, 14.0, 14.0, col, 1.0)
-   _append_center_run(runs, font_small, label, right_x - 11.0, y + 4.0, _pack(col))
+   _append_center_run(runs, int(_editor_get("font_small")), label, right_x - 11.0, y + 4.0, _pack(col))
 }
 
 fn _draw_section_title(str icon, str title, f64 x, f64 y, f64 w, str right="") int {
    _fill_rect(x, y, w, SECTION_H, C_PANE_2)
    def icon_y = _center_y(y, SECTION_H, 15.0)
-   def text_y = _row_text_y(font_small, y, SECTION_H)
+   def text_y = _row_text_y(int(_editor_get("font_small")), y, SECTION_H)
    _draw_icon(icon, x + 8.0, icon_y, 15.0, C_MUTED)
    mut runs = []
    runs = _append_text_run(runs, title, x + 30.0, text_y, U_MUTED)
-   if right.len > 0 { runs = _append_right_run(runs, font_small, right, x + w - 8.0, text_y, U_MUTED) }
+   if right.len > 0 { runs = _append_right_run(runs, int(_editor_get("font_small")), right, x + w - 8.0, text_y, U_MUTED) }
    _flush_rects()
-   if runs.len > 0 { gfx.draw_text_runs_flat_colors(font_small, runs) }
+   if runs.len > 0 { gfx.draw_text_runs_flat_colors(int(_editor_get("font_small")), runs) }
    0
 }
 
-fn _rail_tab() str { to_str(st.get("rail_tab", "files")) }
+fn _rail_tab() str { to_str(_editor_get("st").get("rail_tab", "files")) }
 
 fn _rail_tab_at(f64 x, f64 y, f64 w, f64 mx, f64 my) str {
    if !widgets.hit(mx, my, x, y, w, RAIL_TABS_H) { return "" }
@@ -6197,7 +6218,7 @@ fn _rail_tab_at(f64 x, f64 y, f64 w, f64 mx, f64 my) str {
 }
 
 fn _rail_section_at(dict lay, f64 mx, f64 my) str {
-   if !bool(st.get("show_hierarchy", true)) || _rail_tab() != "files" { return "" }
+   if !bool(_editor_get("st").get("show_hierarchy", true)) || _rail_tab() != "files" { return "" }
    def x = float(lay.get("rail_x", 0.0))
    def y = float(lay.get("rail_y", 0.0))
    def w = float(lay.get("rail_w", 0.0))
@@ -6205,10 +6226,10 @@ fn _rail_section_at(dict lay, f64 mx, f64 my) str {
    if !widgets.hit(mx, my, x, y + RAIL_TABS_H, w, h - RAIL_TABS_H) { return "" }
    def body_y = y + RAIL_TABS_H
    def body_h = h - RAIL_TABS_H
-   def show_project = bool(st.get("show_project", true))
-   def show_outline = bool(st.get("show_outline", true))
+   def show_project = bool(_editor_get("st").get("show_project", true))
+   def show_outline = bool(_editor_get("st").get("show_outline", true))
    if show_project { _ensure_project_tree() }
-   def rows = project.tree(project_state)
+   def rows = project.tree(_editor_get("project_state"))
    def syms = show_outline ? _outline_symbols() : []
    def tree_h = (!show_project) ? 0.0 : (show_outline ? _rail_tree_height(body_h, rows.len, syms.len) : body_h)
    if show_project && my >= body_y && my < body_y + float(project.TREE_HEADER_H) { return "project" }
@@ -6218,10 +6239,10 @@ fn _rail_section_at(dict lay, f64 mx, f64 my) str {
 }
 
 fn _hide_rail_section(str section) int {
-   if section == "project" { st["show_project"] = false }
-   elif section == "outline" { st["show_outline"] = false }
-   if !bool(st.get("show_project", true)) && !bool(st.get("show_outline", true)) {
-      st["show_hierarchy"] = false
+   if section == "project" { _editor_get("st")["show_project"] = false }
+   elif section == "outline" { _editor_get("st")["show_outline"] = false }
+   if !bool(_editor_get("st").get("show_project", true)) && !bool(_editor_get("st").get("show_outline", true)) {
+      _editor_get("st")["show_hierarchy"] = false
       _set_focus("editor", false)
    }
    _save_ui_cache()
@@ -6230,11 +6251,11 @@ fn _hide_rail_section(str section) int {
 }
 
 fn _toggle_rail_section(str section) int {
-   if section == "project" { st["show_project"] = !bool(st.get("show_project", true)) }
-   elif section == "outline" { st["show_outline"] = !bool(st.get("show_outline", true)) }
-   if bool(st.get("show_project", true)) || bool(st.get("show_outline", true)) { st["show_hierarchy"] = true }
+   if section == "project" { _editor_get("st")["show_project"] = !bool(_editor_get("st").get("show_project", true)) }
+   elif section == "outline" { _editor_get("st")["show_outline"] = !bool(_editor_get("st").get("show_outline", true)) }
+   if bool(_editor_get("st").get("show_project", true)) || bool(_editor_get("st").get("show_outline", true)) { _editor_get("st")["show_hierarchy"] = true }
    _save_ui_cache()
-   _status(section + (section == "project" ? (bool(st.get("show_project", true)) ? " on" : " off") : (bool(st.get("show_outline", true)) ? " on" : " off")))
+   _status(section + (section == "project" ? (bool(_editor_get("st").get("show_project", true)) ? " on" : " off") : (bool(_editor_get("st").get("show_outline", true)) ? " on" : " off")))
    0
 }
 
@@ -6249,7 +6270,7 @@ fn _draw_rail_tabs(f64 x, f64 y, f64 w) int {
       def id = to_str(t.get(0, ""))
       def tx = _snap_px(x + float(i) * tab_w)
       def on = id == active
-      def text_y = _row_text_y(font_small, y, RAIL_TABS_H)
+      def text_y = _row_text_y(int(_editor_get("font_small")), y, RAIL_TABS_H)
       def bg_color = on ? _pack(gfx.color_alpha(C_ACCENT, 0.13)) : _pack(C_PANE_2)
       _fill_rect(tx, y, tab_w, RAIL_TABS_H, bg_color)
       _stroke_rect(tx, y, tab_w, RAIL_TABS_H, on ? C_ACCENT : C_LINE, 1.0)
@@ -6258,19 +6279,19 @@ fn _draw_rail_tabs(f64 x, f64 y, f64 w) int {
       i += 1
    }
    _flush_rects()
-   if runs.len > 0 { gfx.draw_text_runs_flat_colors(font_small, runs) }
+   if runs.len > 0 { gfx.draw_text_runs_flat_colors(int(_editor_get("font_small")), runs) }
    0
 }
 
 fn _draw_git_panel(f64 x, f64 y, f64 w, f64 h) int {
    _ensure_project_git()
-   def rows = project.changes(project_state)
-   def counts = project.counts(project_state)
+   def rows = project.changes(_editor_get("project_state"))
+   def counts = project.counts(_editor_get("project_state"))
    def dirty = int(counts.get("modified", 0)) + int(counts.get("added", 0)) + int(counts.get("deleted", 0)) + int(counts.get("untracked", 0))
-   _draw_section_title("vcsbranches", "CHANGES", x, y, w, project.branch(project_state) + (dirty > 0 ? " +" + to_str(dirty) : ""))
+   _draw_section_title("vcsbranches", "CHANGES", x, y, w, project.branch(_editor_get("project_state")) + (dirty > 0 ? " +" + to_str(dirty) : ""))
    def visible = project.visible_count(h)
-   def scroll = project.clamp_scroll(int(st.get("git_scroll", 0)), rows.len, visible)
-   st["git_scroll"] = scroll
+   def scroll = project.clamp_scroll(int(_editor_get("st").get("git_scroll", 0)), rows.len, visible)
+   _editor_get("st")["git_scroll"] = scroll
    mut runs = []
    mut i = 0
    while i < visible && scroll + i < rows.len {
@@ -6278,8 +6299,8 @@ fn _draw_git_panel(f64 x, f64 y, f64 w, f64 h) int {
       def e = rows.get(scroll + i, {})
       def code = to_str(e.get("git", ""))
       def col = _git_color(code)
-      def baseline_y = _row_baseline_y(font_small, yy, project.TREE_ROW_H)
-      def text_y = _row_text_y_from_baseline(font_small, baseline_y, project.TREE_ROW_H)
+      def baseline_y = _row_baseline_y(int(_editor_get("font_small")), yy, project.TREE_ROW_H)
+      def text_y = _row_text_y_from_baseline(int(_editor_get("font_small")), baseline_y, project.TREE_ROW_H)
       _draw_icon(project.file_icon(e), x + 10.0, _center_y(yy, project.TREE_ROW_H, 16.0), 16.0, col)
       runs = _append_text_run(runs, widgets.preview(to_str(e.get("rel", "")), int(max(8.0, (w - 74.0) / 7.2))), x + 34.0, text_y, U_MUTED)
       runs = _queue_git_badge(runs, code, x + w - 8.0, yy)
@@ -6287,21 +6308,21 @@ fn _draw_git_panel(f64 x, f64 y, f64 w, f64 h) int {
    }
    if rows.len == 0 { runs = _append_text_run(runs, "working tree clean", x + 12.0, y + 36.0, U_MUTED) }
    _flush_rects()
-   if runs.len > 0 { gfx.draw_text_runs_flat_colors(font_small, runs) }
+   if runs.len > 0 { gfx.draw_text_runs_flat_colors(int(_editor_get("font_small")), runs) }
    i
 }
 
 @returns_owned
 fn _timeline_rows() list {
    mut out = []
-   def bs = st.get("buffers", [])
+   def bs = _editor_get("st").get("buffers", [])
    mut bi = bs.len - 1
    while bi >= 0 && out.len < 12 {
       def b = bs.get(bi, {})
       out = out.append(["buffer", to_str(b.get("name", "buffer")), to_str(b.get("path", b.get("source_path", "")))])
       bi -= 1
    }
-   def hist_rows = interact.history(ui_state)
+   def hist_rows = interact.history(_editor_get("ui_state"))
    mut hi = hist_rows.len - 1
    while hi >= 0 && out.len < 64 {
       def id = to_str(hist_rows.get(hi, ""))
@@ -6316,8 +6337,8 @@ fn _draw_timeline_panel(f64 x, f64 y, f64 w, f64 h) int {
    def rows = _timeline_rows()
    _draw_section_title("history", "TIMELINE", x, y, w, to_str(rows.len))
    def visible = project.visible_count(h)
-   def scroll = project.clamp_scroll(int(st.get("timeline_scroll", 0)), rows.len, visible)
-   st["timeline_scroll"] = scroll
+   def scroll = project.clamp_scroll(int(_editor_get("st").get("timeline_scroll", 0)), rows.len, visible)
+   _editor_get("st")["timeline_scroll"] = scroll
    mut runs = []
    mut i = 0
    while i < visible && scroll + i < rows.len {
@@ -6326,16 +6347,16 @@ fn _draw_timeline_panel(f64 x, f64 y, f64 w, f64 h) int {
       def kind = to_str(row.get(0, ""))
       def label = to_str(row.get(1, ""))
       def detail = to_str(row.get(2, ""))
-      def baseline_y = _row_baseline_y(font_small, yy, project.TREE_ROW_H)
-      def text_y = _row_text_y_from_baseline(font_small, baseline_y, project.TREE_ROW_H)
+      def baseline_y = _row_baseline_y(int(_editor_get("font_small")), yy, project.TREE_ROW_H)
+      def text_y = _row_text_y_from_baseline(int(_editor_get("font_small")), baseline_y, project.TREE_ROW_H)
       _draw_icon(kind == "buffer" ? "textfile" : "statusindicator", x + 10.0, _center_y(yy, project.TREE_ROW_H, 16.0), 16.0, kind == "buffer" ? C_ACCENT_2 : C_MUTED)
       runs = _append_text_run(runs, widgets.preview(label, int(max(8.0, (w - 50.0) / 7.2))), x + 34.0, text_y, kind == "buffer" ? U_TEXT : U_MUTED)
-      if detail.len > 0 { runs = _append_right_run(runs, font_small, widgets.preview(detail, 12), x + w - 8.0, text_y, U_DIM) }
+      if detail.len > 0 { runs = _append_right_run(runs, int(_editor_get("font_small")), widgets.preview(detail, 12), x + w - 8.0, text_y, U_DIM) }
       i += 1
    }
    if rows.len == 0 { runs = _append_text_run(runs, "no timeline yet", x + 12.0, y + 36.0, U_MUTED) }
    _flush_rects()
-   if runs.len > 0 { gfx.draw_text_runs_flat_colors(font_small, runs) }
+   if runs.len > 0 { gfx.draw_text_runs_flat_colors(int(_editor_get("font_small")), runs) }
    i
 }
 
@@ -6358,16 +6379,16 @@ fn _draw_tree_disclosure(bool open, f64 x, f64 y, any tint) int {
 
 fn _draw_project_tree(f64 x, f64 y, f64 w, f64 h) int {
    _ensure_project_tree()
-   def counts = project.counts(project_state)
+   def counts = project.counts(_editor_get("project_state"))
    def dirty = int(counts.get("modified", 0)) + int(counts.get("added", 0)) + int(counts.get("deleted", 0)) + int(counts.get("untracked", 0))
-   def branch = project.branch(project_state)
+   def branch = project.branch(_editor_get("project_state"))
    def right = (branch.len > 0 ? branch : "cwd") + (dirty > 0 ? " +" + to_str(dirty) : "")
-   _draw_section_title("filetree", ospath.basename(project.root(project_state)), x, y, w, right)
-   def rows = project.tree(project_state)
+   _draw_section_title("filetree", ospath.basename(project.root(_editor_get("project_state"))), x, y, w, right)
+   def rows = project.tree(_editor_get("project_state"))
    def visible = project.visible_count(h)
-   def scroll = project.clamp_scroll(int(st.get("tree_scroll", 0)), rows.len, visible)
-   st["tree_scroll"] = scroll
-   def active_path = _buffer_source_path(ed.current_buffer(st))
+   def scroll = project.clamp_scroll(int(_editor_get("st").get("tree_scroll", 0)), rows.len, visible)
+   _editor_get("st")["tree_scroll"] = scroll
+   def active_path = _buffer_source_path(ed.current_buffer(_editor_get("st")))
    def active_norm = active_path.len > 0 ? ospath.normalize(active_path) : ""
    mut runs = []
    mut i = 0
@@ -6390,8 +6411,8 @@ fn _draw_project_tree(f64 x, f64 y, f64 w, f64 h) int {
       ix += arrow_slot
       def file_x = ix
       def text_x = file_x + 24.0
-      def baseline_y = _row_baseline_y(font_small, yy, row_h)
-      def text_y = _row_text_y_from_baseline(font_small, baseline_y, row_h)
+      def baseline_y = _row_baseline_y(int(_editor_get("font_small")), yy, row_h)
+      def text_y = _row_text_y_from_baseline(int(_editor_get("font_small")), baseline_y, row_h)
       _draw_icon(project.file_icon(e), file_x, _center_y(yy, row_h, 16.0), 16.0, (active || selected) ? C_ACCENT : C_MUTED)
       runs = _append_text_run(runs, widgets.preview(to_str(e.get("name", "")), int(max(8.0, (w - (text_x - x) - 26.0) / 7.2))), text_x, text_y, (active || selected) ? U_TEXT : U_MUTED)
       runs = _queue_git_badge(runs, to_str(e.get("git", "")), x + w - 8.0, yy)
@@ -6406,7 +6427,7 @@ fn _draw_project_tree(f64 x, f64 y, f64 w, f64 h) int {
       _fill_rect(x + w - 5.0, thumb_y, 4.0, thumb_h, gfx.color_alpha(C_ACCENT, 0.55))
    }
    _flush_rects()
-   if runs.len > 0 { gfx.draw_text_runs_flat_colors(font_small, runs) }
+   if runs.len > 0 { gfx.draw_text_runs_flat_colors(int(_editor_get("font_small")), runs) }
    i
 }
 
@@ -6414,8 +6435,8 @@ fn _draw_outline(f64 x, f64 y, f64 w, f64 h) int {
    def syms = _outline_symbols()
    _draw_section_title("graphedit", "OUTLINE", x, y, w, to_str(syms.len))
    def visible = _outline_visible(h)
-   def scroll = _outline_clamp(int(st.get("outline_scroll", 0)), syms.len, visible)
-   st["outline_scroll"] = scroll
+   def scroll = _outline_clamp(int(_editor_get("st").get("outline_scroll", 0)), syms.len, visible)
+   _editor_get("st")["outline_scroll"] = scroll
    mut runs = []
    mut i = 0
    while i < visible && scroll + i < syms.len {
@@ -6424,12 +6445,12 @@ fn _draw_outline(f64 x, f64 y, f64 w, f64 h) int {
       if yy + row_h > y + h { break }
       def s = syms.get(scroll + i, {})
       def line = int(s.get("line", 0))
-      def active = line == int(st.get("cursor_line", 0))
+      def active = line == int(_editor_get("st").get("cursor_line", 0))
       if active { _fill_rect(x + 4.0, yy, w - 8.0, row_h, gfx.color_alpha(C_ACCENT, 0.16)) }
-      def text_y = _row_text_y(font_small, yy, row_h)
+      def text_y = _row_text_y(int(_editor_get("font_small")), yy, row_h)
       _draw_icon(to_str(s.get("icon", "graphnode")), x + 10.0, _center_y(yy, row_h, 15.0), 15.0, active ? C_ACCENT : C_MUTED)
       runs = _append_text_run(runs, widgets.preview(to_str(s.get("name", "")), int(max(8.0, (w - 72.0) / 7.2))), x + 32.0, text_y, active ? U_TEXT : U_MUTED)
-      runs = _append_right_run(runs, font_small, to_str(line + 1), x + w - 8.0, text_y, U_MUTED)
+      runs = _append_right_run(runs, int(_editor_get("font_small")), to_str(line + 1), x + w - 8.0, text_y, U_MUTED)
       i += 1
    }
    if syms.len > visible && visible > 0 {
@@ -6442,7 +6463,7 @@ fn _draw_outline(f64 x, f64 y, f64 w, f64 h) int {
    }
    if syms.len == 0 { runs = _append_text_run(runs, "no symbols", x + 12.0, y + 34.0, U_MUTED) }
    _flush_rects()
-   if runs.len > 0 { gfx.draw_text_runs_flat_colors(font_small, runs) }
+   if runs.len > 0 { gfx.draw_text_runs_flat_colors(int(_editor_get("font_small")), runs) }
    0
 }
 
@@ -6451,25 +6472,25 @@ fn _draw_rail(dict lay) int {
    def y = float(lay.get("rail_y", 0.0))
    def w = float(lay.get("rail_w", 0.0))
    def h = float(lay.get("rail_h", 0.0))
-   if w <= 1.0 || !bool(st.get("show_hierarchy", true)) { return 0 }
-   if MOCK_BENCH_FAST && frame_count >= BENCH_WARMUP_FRAMES { return 0 }
+   if w <= 1.0 || !bool(_editor_get("st").get("show_hierarchy", true)) { return 0 }
+   if MOCK_BENCH_FAST && int(_editor_get("frame_count")) >= BENCH_WARMUP_FRAMES { return 0 }
    _fill_rect(x, y, w, h, C_RAIL)
-   _stroke_rect(x, y, w, h, to_str(st.get("focus", "editor")) == "project" ? C_ACCENT : C_LINE, to_str(st.get("focus", "editor")) == "project" ? 2.0 : 1.0)
+   _stroke_rect(x, y, w, h, to_str(_editor_get("st").get("focus", "editor")) == "project" ? C_ACCENT : C_LINE, to_str(_editor_get("st").get("focus", "editor")) == "project" ? 2.0 : 1.0)
    _draw_rail_tabs(x, y, w)
    def body_y = y + RAIL_TABS_H
    def body_h = h - RAIL_TABS_H
    def tab = _rail_tab()
    if tab == "git" { _draw_git_panel(x, body_y, w, body_h) return 0 }
    if tab == "timeline" { _draw_timeline_panel(x, body_y, w, body_h) return 0 }
-   def show_project = bool(st.get("show_project", true))
-   def show_outline = bool(st.get("show_outline", true))
+   def show_project = bool(_editor_get("st").get("show_project", true))
+   def show_outline = bool(_editor_get("st").get("show_outline", true))
    if !show_project && !show_outline {
       _draw_section_title("boxcontainer", "PANES", x, body_y, w, "hidden")
-      _text(font_small, "C-SPC t p project  C-SPC t o outline", x + 12.0, body_y + 36.0, C_MUTED)
+      _text(int(_editor_get("font_small")), "C-SPC t p project  C-SPC t o outline", x + 12.0, body_y + 36.0, C_MUTED)
       return 0
    }
    if show_project { _ensure_project_tree() }
-   def rows = project.tree(project_state)
+   def rows = project.tree(_editor_get("project_state"))
    if show_project && show_outline {
       def syms = _outline_symbols()
       def tree_h = _rail_tree_height(body_h, rows.len, syms.len)
@@ -6485,14 +6506,14 @@ fn _draw_rail(dict lay) int {
 }
 
 fn _sync_scroll(int rows, int total) int {
-   def cursor = int(st.get("cursor_line", 0))
-   mut scroll = int(st.get("scroll", 0))
+   def cursor = int(_editor_get("st").get("cursor_line", 0))
+   mut scroll = int(_editor_get("st").get("scroll", 0))
    def max_scroll = max(0, total - rows)
-   if bool(st.get("scroll_follow", true)) {
+   if bool(_editor_get("st").get("scroll_follow", true)) {
       if cursor < scroll { scroll = cursor }
       if cursor >= scroll + rows { scroll = cursor - rows + 1 }
    }
-   st["scroll"] = min(max_scroll, max(0, scroll))
+   _editor_get("st")["scroll"] = min(max_scroll, max(0, scroll))
    0
 }
 
@@ -6502,26 +6523,26 @@ fn _draw_editor(dict lay, bool caret) int {
    def w = float(lay.get("edit_w", 0.0))
    def h = float(lay.get("edit_h", 0.0))
    def rows = ed.visible_rows(h)
-   def cur_buf = ed.current_buffer(st)
-   def lines = ed.current_lines(st)
+   def cur_buf = ed.current_buffer(_editor_get("st"))
+   def lines = ed.current_lines(_editor_get("st"))
    _sync_scroll(rows, lines.len)
    _find_refresh_if_needed()
    _fill_rect(x, y, w, h, C_PANE)
    _stroke_rect(x, y, w, h, C_LINE, 1.0)
    def div_x = float(lay.get("divider_x", x - 9.0))
-   _fill_rect(div_x - 1.0, y, 2.0, h, st.get("drag_divider", false) ? C_ACCENT : C_LINE)
+   _fill_rect(div_x - 1.0, y, 2.0, h, _editor_get("st").get("drag_divider", false) ? C_ACCENT : C_LINE)
    if _draw_image_preview(lay, cur_buf) { return 0 }
    def text_x = _line_text_x(lay)
    def filename = to_str(cur_buf.get("name", ""))
-   def scroll = int(st.get("scroll", 0))
+   def scroll = int(_editor_get("st").get("scroll", 0))
    mut line_runs = []
    mut text_runs = []
-   def show_numbers = bool(st.get("show_line_numbers", true))
-   def show_guides = bool(st.get("show_indent_guides", false))
+   def show_numbers = bool(_editor_get("st").get("show_line_numbers", true))
+   def show_guides = bool(_editor_get("st").get("show_indent_guides", false))
    def draw_limit = _line_limit(lay)
    def big_file = _buffer_is_big(lines)
    def selection_ranges = _selection_ranges_active()
-   def cursor_row = int(st.get("cursor_line", 0))
+   def cursor_row = int(_editor_get("st").get("cursor_line", 0))
    if cursor_row >= scroll && cursor_row < scroll + rows {
       def cy0 = _editor_row_y(y, cursor_row - scroll)
       _fill_rect(x + 1.0, cy0, w - 2.0, ed.LINE_H, gfx.color_alpha(C_ACCENT, 0.10))
@@ -6532,14 +6553,14 @@ fn _draw_editor(dict lay, bool caret) int {
          def li = scroll + i
          def yy = _editor_row_y(y, i)
          def baseline_y = _editor_row_baseline_y(yy)
-         def text_y = _row_text_y_from_baseline(font_body, baseline_y, ed.LINE_H)
-         def num_y = _row_text_y_from_baseline(font_small, baseline_y, ed.LINE_H)
+         def text_y = _row_text_y_from_baseline(int(_editor_get("font_body")), baseline_y, ed.LINE_H)
+         def num_y = _row_text_y_from_baseline(int(_editor_get("font_small")), baseline_y, ed.LINE_H)
          def line = to_str(lines.get(li, ""))
          def draw_line = _draw_line_text(line, draw_limit)
          if show_guides {
             mut g = 0
             while g < draw_line.len && load8(draw_line, g) == 32 {
-               if g > 0 && g % 3 == 0 { _fill_rect(text_x + float(g) * FONT_BODY_ADV, yy + 1.0, 1.0, float(ed.LINE_H) - 2.0, gfx.color_alpha(C_LINE_2, 0.58)) }
+               if g > 0 && g % 3 == 0 { _fill_rect(text_x + float(g) * float(_editor_get("FONT_BODY_ADV")), yy + 1.0, 1.0, float(ed.LINE_H) - 2.0, gfx.color_alpha(C_LINE_2, 0.58)) }
                g += 1
             }
          }
@@ -6558,19 +6579,19 @@ fn _draw_editor(dict lay, bool caret) int {
       }
    } else {
       _prepare_visible_runs(lines, filename, scroll, rows, text_x, y, x + 16.0, draw_limit, show_numbers, big_file)
-      line_runs = visible_line_runs_cache
-      text_runs = visible_text_runs_cache
+      line_runs = _editor_get("visible_line_runs_cache")
+      text_runs = _editor_get("visible_text_runs_cache")
    }
    _draw_find_visible(lines, scroll, rows, text_x, y)
    if !big_file { _draw_color_swatches_visible(lines, scroll, rows, text_x, y, draw_limit) }
    _flush_rects()
-   if line_runs.len > 0 { gfx.draw_text_runs_flat(font_small, line_runs, C_MUTED) }
-   if text_runs.len > 0 { _draw_editor_body_runs(font_body, text_runs) }
+   if line_runs.len > 0 { gfx.draw_text_runs_flat(int(_editor_get("font_small")), line_runs, C_MUTED) }
+   if text_runs.len > 0 { _draw_editor_body_runs(int(_editor_get("font_body")), text_runs) }
    _draw_minimap(lay, rows, scroll, lines.len)
-   if caret && int(st.get("cursor_line", 0)) >= scroll && int(st.get("cursor_line", 0)) < scroll + rows {
-      def line = to_str(lines.get(int(st.get("cursor_line", 0)), ""))
-      def cx = text_x + _measure_prefix(line, int(st.get("cursor_col", 0)))
-      def cy = _editor_row_y(y, int(st.get("cursor_line", 0)) - scroll)
+   if caret && int(_editor_get("st").get("cursor_line", 0)) >= scroll && int(_editor_get("st").get("cursor_line", 0)) < scroll + rows {
+      def line = to_str(lines.get(int(_editor_get("st").get("cursor_line", 0)), ""))
+      def cx = text_x + _measure_prefix(line, int(_editor_get("st").get("cursor_col", 0)))
+      def cy = _editor_row_y(y, int(_editor_get("st").get("cursor_line", 0)) - scroll)
       _fill_rect(cx, cy + 1.0, 2.0, float(ed.LINE_H) - 2.0, C_ACCENT)
    }
    if caret && _extra_cursor_count() > 0 {
@@ -6592,18 +6613,18 @@ fn _draw_editor(dict lay, bool caret) int {
 }
 
 fn _draw_terminal(dict lay) int {
-   if !termpane.is_open(term_state) { return 0 }
+   if !termpane.is_open(_editor_get("term_state")) { return 0 }
    def x = float(lay.get("dock_x", 0.0))
    def y = float(lay.get("dock_y", 0.0))
    def w = float(lay.get("dock_w", 0.0))
    def h = float(lay.get("dock_h", 0.0))
    _fill_rect(x, y, w, h, C_RAIL)
    _flush_rects()
-   term_state = termpane.draw(term_state)
+   _editor_values["term_state"] = termpane.draw(_editor_get("term_state"))
    _fill_rect(x, y, w, TERM_TAB_H, C_PANE_2)
    mut runs = []
-   def int n = int(termpane.tab_count(term_state))
-   def int active = int(termpane.active_tab(term_state))
+   def int n = int(termpane.tab_count(_editor_get("term_state")))
+   def int active = int(termpane.active_tab(_editor_get("term_state")))
    def f64 tw = float(_term_tab_w(w, n))
    mut i = 0
    while i < n {
@@ -6611,11 +6632,11 @@ fn _draw_terminal(dict lay) int {
       def f64 tab_w = float(min(tw - 2.0, x + w - tx - 40.0))
       if tab_w <= 16.0 { break }
       def on = i == active
-      def text_y = _row_text_y(font_small, y + 3.0, TERM_TAB_H - 5.0)
+      def text_y = _row_text_y(int(_editor_get("font_small")), y + 3.0, TERM_TAB_H - 5.0)
       _fill_rect(tx, y + 3.0, tab_w, TERM_TAB_H - 5.0, on ? C_PANE : C_CHIP)
       _stroke_rect(tx, y + 3.0, tab_w, TERM_TAB_H - 5.0, on ? C_ACCENT : C_LINE, 1.0)
       if on { _fill_rect(tx, y + TERM_TAB_H - 2.0, tab_w, 2.0, C_ACCENT) }
-      runs = _append_text_run(runs, widgets.preview(termpane.tab_title(term_state, i), int(max(4.0, (tab_w - 30.0) / FONT_SMALL_ADV))), tx + 9.0, text_y, on ? U_TEXT : U_MUTED)
+      runs = _append_text_run(runs, widgets.preview(termpane.tab_title(_editor_get("term_state"), i), int(max(4.0, (tab_w - 30.0) / float(_editor_get("FONT_SMALL_ADV"))))), tx + 9.0, text_y, on ? U_TEXT : U_MUTED)
       runs = _append_text_run(runs, "x", tx + tab_w - 15.0, text_y, on ? U_MUTED : U_DIM)
       i += 1
    }
@@ -6623,12 +6644,12 @@ fn _draw_terminal(dict lay) int {
    if plus_x + 24.0 < x + w - 8.0 {
       _fill_rect(plus_x, y + 3.0, 24.0, TERM_TAB_H - 5.0, C_CHIP)
       _stroke_rect(plus_x, y + 3.0, 24.0, TERM_TAB_H - 5.0, C_LINE, 1.0)
-      runs = _append_center_run(runs, font_small, "+", plus_x + 12.0, _row_text_y(font_small, y + 3.0, TERM_TAB_H - 5.0), U_ACCENT)
+      runs = _append_center_run(runs, int(_editor_get("font_small")), "+", plus_x + 12.0, _row_text_y(int(_editor_get("font_small")), y + 3.0, TERM_TAB_H - 5.0), U_ACCENT)
    }
-   runs = _append_right_run(runs, font_small, "F6 shell  F7 repl", x + w - 10.0, _row_text_y(font_small, y + 3.0, TERM_TAB_H - 5.0), U_DIM)
+   runs = _append_right_run(runs, int(_editor_get("font_small")), "F6 shell  F7 repl", x + w - 10.0, _row_text_y(int(_editor_get("font_small")), y + 3.0, TERM_TAB_H - 5.0), U_DIM)
    _flush_rects()
-   if runs.len > 0 { gfx.draw_text_runs_flat_colors(font_small, runs) }
-   _stroke_rect(x, y, w, h, to_str(st.get("focus", "editor")) == "terminal" ? C_ACCENT : C_LINE, to_str(st.get("focus", "editor")) == "terminal" ? 2.0 : 1.0)
+   if runs.len > 0 { gfx.draw_text_runs_flat_colors(int(_editor_get("font_small")), runs) }
+   _stroke_rect(x, y, w, h, to_str(_editor_get("st").get("focus", "editor")) == "terminal" ? C_ACCENT : C_LINE, to_str(_editor_get("st").get("focus", "editor")) == "terminal" ? 2.0 : 1.0)
    0
 }
 
@@ -6665,16 +6686,16 @@ fn _command_color(str tag) any {
 
 fn _queue_key_badge(list runs, str label, f64 x, f64 y, any col=C_MUTED) list {
    if label.len <= 0 { return runs }
-   def f64 bw = float(max(24.0, _measure_ui(font_small, label, 0.0) + 10.0))
+   def f64 bw = float(max(24.0, _measure_ui(int(_editor_get("font_small")), label, 0.0) + 10.0))
    _fill_rect(x, y, bw, 17.0, gfx.color_alpha(C_CHIP, 0.50))
    _stroke_rect(x, y, bw, 17.0, gfx.color_alpha(col, 0.34), 1.0)
-   _append_center_run(runs, font_small, label, x + bw * 0.5, y + 3.0, _pack(col))
+   _append_center_run(runs, int(_editor_get("font_small")), label, x + bw * 0.5, y + 3.0, _pack(col))
 }
 
 fn _draw_find_bar(f64 sw, f64 sh) int {
-   if !find.is_open(find_state) { return 0 }
+   if !find.is_open(_editor_get("find_state")) { return 0 }
    _find_refresh_if_needed()
-   def replace_on = find.replace_on(find_state)
+   def replace_on = find.replace_on(_editor_get("find_state"))
    def f64 bar_h = replace_on ? 86.0 : float(FIND_BAR_H)
    def f64 w0 = float(min(760.0, max(280.0, sw - 34.0)))
    def fit = _fit_rect(sw * 0.5 - w0 * 0.5, sh - bar_h - float(ed.STATUS_H) - 10.0, w0, bar_h, sw, sh, 8.0)
@@ -6683,19 +6704,19 @@ fn _draw_find_bar(f64 sw, f64 sh) int {
    def w = float(fit.get(2, w0))
    def h = float(fit.get(3, bar_h))
    _fill_rect(x, y, w, h, gfx.color_alpha(C_RAIL, 0.98))
-   _stroke_rect(x, y, w, h, find.error(find_state).len > 0 ? C_WARN : C_ACCENT, 1.0)
-   _draw_icon("search", x + 13.0, y + 13.0, 18.0, find.error(find_state).len > 0 ? C_WARN : C_ACCENT)
+   _stroke_rect(x, y, w, h, find.error(_editor_get("find_state")).len > 0 ? C_WARN : C_ACCENT, 1.0)
+   _draw_icon("search", x + 13.0, y + 13.0, 18.0, find.error(_editor_get("find_state")).len > 0 ? C_WARN : C_ACCENT)
    mut body_runs = []
    mut small_runs = []
-   def q = find.query(find_state)
-   def repl = find.replacement(find_state)
-   def field = find.active_field(find_state)
+   def q = find.query(_editor_get("find_state"))
+   def repl = find.replacement(_editor_get("find_state"))
+   def field = find.active_field(_editor_get("find_state"))
    body_runs = _append_text_run(body_runs, _preview_body(q.len > 0 ? q : "find in buffer", w - 300.0), x + 40.0, y + 10.0, field == "find" ? U_ACCENT : (q.len > 0 ? U_TEXT : U_DIM))
    if replace_on {
       _draw_icon("edit", x + 14.0, y + 35.0, 16.0, field == "replace" ? C_ACCENT : C_MUTED)
       body_runs = _append_text_run(body_runs, _preview_body(repl.len > 0 ? repl : "replace with", w - 300.0), x + 40.0, y + 34.0, field == "replace" ? U_ACCENT : (repl.len > 0 ? U_TEXT : U_DIM))
    }
-   small_runs = _append_right_run(small_runs, font_small, find.summary(find_state), x + w - 14.0, y + 16.0, find.error(find_state).len > 0 ? U_WARN : U_ACCENT)
+   small_runs = _append_right_run(small_runs, int(_editor_get("font_small")), find.summary(_editor_get("find_state")), x + w - 14.0, y + 16.0, find.error(_editor_get("find_state")).len > 0 ? U_WARN : U_ACCENT)
    _fill_rect(x + 13.0, y + (replace_on ? 58.0 : 28.0), w - 26.0, 1.0, C_LINE)
    def chips = [
       ["Enter", "next"],
@@ -6703,9 +6724,9 @@ fn _draw_find_bar(f64 sw, f64 sh) int {
       ["C-h", replace_on ? "replace on" : "replace"],
       ["Tab", field],
       ["C-Enter", "all"],
-      ["C-r", find.regex_on(find_state) ? "regex on" : "regex"],
-      ["C-c", find.case_on(find_state) ? "case on" : "case"],
-      ["C-w", find.word_on(find_state) ? "word on" : "word"]
+      ["C-r", find.regex_on(_editor_get("find_state")) ? "regex on" : "regex"],
+      ["C-c", find.case_on(_editor_get("find_state")) ? "case on" : "case"],
+      ["C-w", find.word_on(_editor_get("find_state")) ? "word on" : "word"]
    ]
    mut f64 cx = x + 14.0
    mut i = 0
@@ -6715,20 +6736,20 @@ fn _draw_find_bar(f64 sw, f64 sh) int {
       def text = to_str(chip.get(1, ""))
       def hot = str.str_contains(text, "on") || (key_label == "Tab" && replace_on)
       small_runs = _queue_key_badge(small_runs, key_label, cx, y + (replace_on ? 62.0 : 30.0), hot ? C_ACCENT : C_MUTED)
-      cx += float(max(30.0, _measure_ui(font_small, key_label, 0.0) + 16.0)) + 5.0
+      cx += float(max(30.0, _measure_ui(int(_editor_get("font_small")), key_label, 0.0) + 16.0)) + 5.0
       small_runs = _append_text_run(small_runs, text, cx, y + (replace_on ? 65.0 : 33.0), hot ? U_ACCENT : U_DIM)
-      cx += float(_measure_ui(font_small, text, 0.0)) + 14.0
+      cx += float(_measure_ui(int(_editor_get("font_small")), text, 0.0)) + 14.0
       i += 1
    }
-   small_runs = _append_right_run(small_runs, font_small, "Esc close", x + w - 14.0, y + (replace_on ? 65.0 : 33.0), U_MUTED)
+   small_runs = _append_right_run(small_runs, int(_editor_get("font_small")), "Esc close", x + w - 14.0, y + (replace_on ? 65.0 : 33.0), U_MUTED)
    _flush_rects()
-   if body_runs.len > 0 { gfx.draw_text_runs_flat_colors(font_body, body_runs) }
-   if small_runs.len > 0 { gfx.draw_text_runs_flat_colors(font_small, small_runs) }
+   if body_runs.len > 0 { gfx.draw_text_runs_flat_colors(int(_editor_get("font_body")), body_runs) }
+   if small_runs.len > 0 { gfx.draw_text_runs_flat_colors(int(_editor_get("font_small")), small_runs) }
    0
 }
 
 fn _draw_palette(f64 sw, f64 sh) int {
-   if !pal.is_open(palette_state) { return 0 }
+   if !pal.is_open(_editor_get("palette_state")) { return 0 }
    def matches = _palette_matches()
    def rect = _palette_rect(sw, sh, matches.len)
    def x = float(rect.get(0, 0.0))
@@ -6736,8 +6757,8 @@ fn _draw_palette(f64 sw, f64 sh) int {
    def w = float(rect.get(2, 0.0))
    def h = float(rect.get(3, 0.0))
    def rows = int(rect.get(4, 0))
-   palette_state = pal.set_visible(palette_state, rows)
-   def start = pal.scroll(palette_state)
+   _editor_values["palette_state"] = pal.set_visible(_editor_get("palette_state"), rows)
+   def start = pal.scroll(_editor_get("palette_state"))
    def f64 header_h = float(PALETTE_HEADER_H)
    def f64 row_h = float(PALETTE_ROW_H)
    def f64 detail_h = float(PALETTE_DETAIL_H)
@@ -6746,12 +6767,12 @@ fn _draw_palette(f64 sw, f64 sh) int {
    _fill_rect(x + 10.0, y + header_h - 1.0, w - 20.0, 1.0, C_LINE)
    mut body_runs = []
    mut small_runs = []
-   def q = pal.query(palette_state)
-   def header_y = _row_text_y(font_body, y, header_h)
-   def header_small_y = _row_text_y(font_small, y, header_h)
+   def q = pal.query(_editor_get("palette_state"))
+   def header_y = _row_text_y(int(_editor_get("font_body")), y, header_h)
+   def header_small_y = _row_text_y(int(_editor_get("font_small")), y, header_h)
    body_runs = _append_text_run(body_runs, _preview_body(q.len > 0 ? q : "command", w - 230.0), x + 14.0, header_y, q.len > 0 ? U_TEXT : U_DIM)
-   def pos_label = matches.len > 0 ? to_str(min(matches.len, pal.index(palette_state) + 1)) + "/" + to_str(matches.len) : "0/0"
-   small_runs = _append_right_run(small_runs, font_small, pos_label + "  Enter run  Tab next", x + w - 14.0, header_small_y, U_MUTED)
+   def pos_label = matches.len > 0 ? to_str(min(matches.len, pal.index(_editor_get("palette_state")) + 1)) + "/" + to_str(matches.len) : "0/0"
+   small_runs = _append_right_run(small_runs, int(_editor_get("font_small")), pos_label + "  Enter run  Tab next", x + w - 14.0, header_small_y, U_MUTED)
    def f64 name_x = x + 14.0
    def f64 key_right = x + w - 16.0
    def f64 key_w = float(min(112.0, max(62.0, w * 0.16)))
@@ -6764,16 +6785,16 @@ fn _draw_palette(f64 sw, f64 sh) int {
       def actual = start + i
       def f64 yy = y + header_h + float(i) * row_h
       def tag = cmd.row_tag(row)
-      def active = actual == pal.index(palette_state)
+      def active = actual == pal.index(_editor_get("palette_state"))
       def col = _command_color(tag)
-      def body_y = _row_text_y(font_body, yy, row_h)
-      def small_y = _row_text_y(font_small, yy, row_h)
+      def body_y = _row_text_y(int(_editor_get("font_body")), yy, row_h)
+      def small_y = _row_text_y(int(_editor_get("font_small")), yy, row_h)
       if active { _fill_rect(x + 7.0, yy + 2.0, w - 14.0, row_h - 4.0, gfx.color_alpha(C_ACCENT, 0.17)) }
       elif i > 0 { _fill_rect(x + 12.0, yy, w - 24.0, 1.0, gfx.color_alpha(C_LINE, 0.36)) }
       _fill_rect(x + 8.0, yy + 7.0, 3.0, 8.0, active ? C_ACCENT : col)
       body_runs = _append_text_run(body_runs, _preview_body(to_str(row.get(0, "")), name_w), name_x, body_y, active ? U_TEXT : U_MUTED)
       small_runs = _append_text_run(small_runs, _preview_small(to_str(row.get(3, "")), detail_w), detail_x, small_y, active ? U_ACCENT_2 : U_DIM)
-      small_runs = _append_right_run(small_runs, font_small, _preview_small(to_str(row.get(2, "")), key_w), key_right, small_y, active ? U_ACCENT : U_DIM)
+      small_runs = _append_right_run(small_runs, int(_editor_get("font_small")), _preview_small(to_str(row.get(2, "")), key_w), key_right, small_y, active ? U_ACCENT : U_DIM)
       i += 1
    }
    if matches.len == 0 { body_runs = _append_text_run(body_runs, "No commands", x + 14.0, y + PALETTE_HEADER_H + 5.0, U_WARN) }
@@ -6786,17 +6807,17 @@ fn _draw_palette(f64 sw, f64 sh) int {
       _fill_rect(track_x, track_y, 2.0, track_h, gfx.color_alpha(C_LINE_2, 0.62))
       _fill_rect(track_x, thumb_y, 2.0, thumb_h, gfx.color_alpha(C_ACCENT, 0.76))
    }
-   def sel = matches.len > 0 ? matches.get(min(max(pal.index(palette_state), 0), matches.len - 1), []) : []
+   def sel = matches.len > 0 ? matches.get(min(max(pal.index(_editor_get("palette_state")), 0), matches.len - 1), []) : []
    if sel.len > 0 {
       def f64 detail_y = y + h - detail_h - 3.0
       _fill_rect(x + 12.0, detail_y, w - 24.0, 1.0, C_LINE)
-      def detail_text_y = _row_text_y(font_small, detail_y + 2.0, detail_h - 5.0)
+      def detail_text_y = _row_text_y(int(_editor_get("font_small")), detail_y + 2.0, detail_h - 5.0)
       small_runs = _append_text_run(small_runs, _preview_small(to_str(sel.get(1, "")) + "  " + to_str(sel.get(4, "")), w * 0.32), x + 14.0, detail_text_y, U_ACCENT)
       small_runs = _append_text_run(small_runs, _preview_small(to_str(sel.get(3, "")), w * 0.58), x + w * 0.36, detail_text_y, U_MUTED)
    }
    _flush_rects()
-   if body_runs.len > 0 { gfx.draw_text_runs_flat_colors(font_body, body_runs) }
-   if small_runs.len > 0 { gfx.draw_text_runs_flat_colors(font_small, small_runs) }
+   if body_runs.len > 0 { gfx.draw_text_runs_flat_colors(int(_editor_get("font_body")), body_runs) }
+   if small_runs.len > 0 { gfx.draw_text_runs_flat_colors(int(_editor_get("font_small")), small_runs) }
    0
 }
 
@@ -6807,15 +6828,15 @@ fn _completion_color(str kind) vec4 {
 }
 
 fn _draw_completion(dict lay, f64 sw, f64 sh) int {
-   if !bool(completion_state.get("open", false)) { return 0 }
-   def items = completion_state.get("items", [])
+   if !bool(_editor_get("completion_state").get("open", false)) { return 0 }
+   def items = _editor_get("completion_state").get("items", [])
    if items.len <= 0 { return 0 }
-   def lines = ed.current_lines(st)
-   def row = int(st.get("cursor_line", 0))
-   def scroll = int(st.get("scroll", 0))
+   def lines = ed.current_lines(_editor_get("st"))
+   def row = int(_editor_get("st").get("cursor_line", 0))
+   def scroll = int(_editor_get("st").get("scroll", 0))
    def line = to_str(lines.get(min(max(row, 0), max(0, lines.len - 1)), ""))
    def visible_row = row - scroll
-   def base_x = _line_text_x(lay) + _measure_prefix(line, int(st.get("cursor_col", 0)))
+   def base_x = _line_text_x(lay) + _measure_prefix(line, int(_editor_get("st").get("cursor_col", 0)))
    def f64 base_y = float(_editor_row_y(float(lay.get("edit_y", 0.0)), max(0, visible_row))) + float(ed.LINE_H) + 4.0
    def int rows = int(min(items.len, 9))
    def f64 w0 = float(min(420.0, max(260.0, sw * 0.42)))
@@ -6825,35 +6846,35 @@ fn _draw_completion(dict lay, f64 sw, f64 sh) int {
    def y = float(fit.get(1, 8.0))
    def w = float(fit.get(2, w0))
    def h = float(fit.get(3, h0))
-   def prefix = to_str(completion_state.get("prefix", ""))
+   def prefix = to_str(_editor_get("completion_state").get("prefix", ""))
    _fill_rect(x, y, w, h, gfx.color_alpha(C_RAIL, 0.98))
    _stroke_rect(x, y, w, h, C_ACCENT, 1.0)
    _draw_icon("search", x + 12.0, _center_y(y, 30.0, 16.0), 16.0, C_ACCENT)
    mut body_runs = []
    mut small_runs = []
-   def header_body_y = _row_text_y(font_body, y, 30.0)
-   def header_small_y = _row_text_y(font_small, y, 30.0)
+   def header_body_y = _row_text_y(int(_editor_get("font_body")), y, 30.0)
+   def header_small_y = _row_text_y(int(_editor_get("font_small")), y, 30.0)
    body_runs = _append_text_run(body_runs, prefix.len > 0 ? prefix : "completion", x + 36.0, header_body_y, U_TEXT)
-   small_runs = _append_right_run(small_runs, font_small, "Enter accept  Esc close", x + w - 12.0, header_small_y, U_MUTED)
+   small_runs = _append_right_run(small_runs, int(_editor_get("font_small")), "Enter accept  Esc close", x + w - 12.0, header_small_y, U_MUTED)
    _fill_rect(x + 12.0, y + 30.0, w - 24.0, 1.0, C_LINE)
    mut i = 0
    while i < rows {
       def item = items.get(i, {})
-      def active = i == int(completion_state.get("index", 0))
+      def active = i == int(_editor_get("completion_state").get("index", 0))
       def yy = y + 40.0 + float(i) * 26.0
       def kind = to_str(item.get("kind", "symbol"))
       def col = _completion_color(kind)
-      def body_y = _row_text_y(font_body, yy - 4.0, 24.0)
-      def small_y = _row_text_y(font_small, yy - 4.0, 24.0)
+      def body_y = _row_text_y(int(_editor_get("font_body")), yy - 4.0, 24.0)
+      def small_y = _row_text_y(int(_editor_get("font_small")), yy - 4.0, 24.0)
       if active { _fill_rect(x + 8.0, yy - 4.0, w - 16.0, 24.0, gfx.color_alpha(C_ACCENT, 0.18)) }
       _draw_icon(kind == "lsp" ? "net" : (kind == "keyword" ? "codeedit" : "doc"), x + 14.0, _center_y(yy - 4.0, 24.0, 15.0), 15.0, active ? C_ACCENT : col)
       body_runs = _append_text_run(body_runs, widgets.preview(to_str(item.get("label", "")), int(max(10.0, (w - 178.0) / 8.2))), x + 38.0, body_y, active ? U_TEXT : U_MUTED)
-      small_runs = _append_right_run(small_runs, font_small, widgets.preview(to_str(item.get("detail", "")), 24), x + w - 14.0, small_y, active ? U_ACCENT_2 : U_DIM)
+      small_runs = _append_right_run(small_runs, int(_editor_get("font_small")), widgets.preview(to_str(item.get("detail", "")), 24), x + w - 14.0, small_y, active ? U_ACCENT_2 : U_DIM)
       i += 1
    }
    _flush_rects()
-   if body_runs.len > 0 { gfx.draw_text_runs_flat_colors(font_body, body_runs) }
-   if small_runs.len > 0 { gfx.draw_text_runs_flat_colors(font_small, small_runs) }
+   if body_runs.len > 0 { gfx.draw_text_runs_flat_colors(int(_editor_get("font_body")), body_runs) }
+   if small_runs.len > 0 { gfx.draw_text_runs_flat_colors(int(_editor_get("font_small")), small_runs) }
    0
 }
 
@@ -6875,24 +6896,24 @@ fn _which_key_detail(str prefix, str head) str {
 }
 
 fn _draw_which_key(f64 sw, f64 sh) int {
-   if pal.is_open(palette_state) || prompt.rename_is_open(rename_state) { return 0 }
-   if !chord.pending(chord_state) {
+   if pal.is_open(_editor_get("palette_state")) || prompt.rename_is_open(_editor_get("rename_state")) { return 0 }
+   if !chord.pending(_editor_get("chord_state")) {
       if !SHOW_LAST_KEY { return 0 }
-      def seen = interact.show_key(ui_state)
+      def seen = interact.show_key(_editor_get("ui_state"))
       if seen.len <= 0 { return 0 }
-      def f64 w0 = float(min(320.0, max(130.0, float(seen.len) * FONT_SMALL_ADV + 64.0)))
+      def f64 w0 = float(min(320.0, max(130.0, float(seen.len) * float(_editor_get("FONT_SMALL_ADV")) + 64.0)))
       def f64 x0 = sw - w0 - 10.0
       def f64 y0 = sh - 42.0
       _fill_rect(x0, y0, w0, 28.0, gfx.color_alpha(C_RAIL, 0.88))
       _stroke_rect(x0, y0, w0, 28.0, C_LINE_2, 1.0)
       mut kruns = []
-      kruns = _append_text_run(kruns, _preview_small(seen, w0 - 66.0), x0 + 10.0, _row_text_y(font_small, y0, 28.0), U_TEXT)
-      kruns = _append_right_run(kruns, font_small, "key", x0 + w0 - 10.0, _row_text_y(font_small, y0, 28.0), U_DIM)
+      kruns = _append_text_run(kruns, _preview_small(seen, w0 - 66.0), x0 + 10.0, _row_text_y(int(_editor_get("font_small")), y0, 28.0), U_TEXT)
+      kruns = _append_right_run(kruns, int(_editor_get("font_small")), "key", x0 + w0 - 10.0, _row_text_y(int(_editor_get("font_small")), y0, 28.0), U_DIM)
       _flush_rects()
-      if kruns.len > 0 { gfx.draw_text_runs_flat_colors(font_small, kruns) }
+      if kruns.len > 0 { gfx.draw_text_runs_flat_colors(int(_editor_get("font_small")), kruns) }
       return 0
    }
-   def prefix = chord.describe(chord_state)
+   def prefix = chord.describe(_editor_get("chord_state"))
    def rows = _which_key_rows(prefix)
    if rows.len <= 0 { return 0 }
    def rect = _which_key_rect(sw, sh, rows.len)
@@ -6902,8 +6923,8 @@ fn _draw_which_key(f64 sw, f64 sh) int {
    def h = float(rect.get(3, 0.0))
    def cols = int(rect.get(4, 3))
    def visible = int(rect.get(5, 1))
-   which_key_scroll = _clamp_which_key_scroll(rows.len, visible)
-   def start = which_key_scroll
+   _editor_values["which_key_scroll"] = _clamp_which_key_scroll(rows.len, visible)
+   def start = int(_editor_get("which_key_scroll"))
    _fill_rect(x, y, w, h, gfx.color_alpha(C_RAIL, 0.94))
    _stroke_rect(x, y, w, h, C_ACCENT, 1.0)
    _fill_rect(x + 10.0, y + 34.0, w - 20.0, 1.0, C_LINE)
@@ -6911,7 +6932,7 @@ fn _draw_which_key(f64 sw, f64 sh) int {
    mut small_runs = []
    body_runs = _append_text_run(body_runs, prefix, x + 12.0, y + 8.0, U_TEXT)
    def key_pos = rows.len > 0 ? to_str(start + 1) + "-" + to_str(min(rows.len, start + visible)) + "/" + to_str(rows.len) : "0/0"
-   small_runs = _append_right_run(small_runs, font_small, key_pos + "  Esc", x + w - 12.0, y + 10.0, U_MUTED)
+   small_runs = _append_right_run(small_runs, int(_editor_get("font_small")), key_pos + "  Esc", x + w - 12.0, y + 10.0, U_MUTED)
    def col_w = (w - 20.0) / float(cols)
    def f64 key_row_h = float(WHICH_KEY_ROW_H)
    mut i = 0
@@ -6936,24 +6957,24 @@ fn _draw_which_key(f64 sw, f64 sh) int {
       _fill_rect(track_x, thumb_y, 2.0, thumb_h, gfx.color_alpha(C_ACCENT, 0.74))
    }
    _flush_rects()
-   if body_runs.len > 0 { gfx.draw_text_runs_flat_colors(font_body, body_runs) }
-   if small_runs.len > 0 { gfx.draw_text_runs_flat_colors(font_small, small_runs) }
+   if body_runs.len > 0 { gfx.draw_text_runs_flat_colors(int(_editor_get("font_body")), body_runs) }
+   if small_runs.len > 0 { gfx.draw_text_runs_flat_colors(int(_editor_get("font_small")), small_runs) }
    0
 }
 
 fn _draw_context_menu(f64 sw, f64 sh) int {
-   if !prompt.context_is_open(context_state) { return 0 }
+   if !prompt.context_is_open(_editor_get("context_state")) { return 0 }
    def f64 w = float(min(CONTEXT_W, max(1.0, sw - 16.0)))
    def f64 row_h = float(CONTEXT_ROW_H)
-   def actions = prompt.context_actions_for(context_state)
+   def actions = prompt.context_actions_for(_editor_get("context_state"))
    def f64 h = float(min(float(actions.len) * row_h, max(1.0, sh - 16.0)))
-   context_state = prompt.context_clamp(context_state, sw, sh, w, row_h)
-   def fit = _fit_rect(prompt.context_x(context_state), prompt.context_y(context_state), w, h, sw, sh, 8.0)
+   _editor_values["context_state"] = prompt.context_clamp(_editor_get("context_state"), sw, sh, w, row_h)
+   def fit = _fit_rect(prompt.context_x(_editor_get("context_state")), prompt.context_y(_editor_get("context_state")), w, h, sw, sh, 8.0)
    def x = float(fit.get(0, 8.0))
    def y = float(fit.get(1, 8.0))
-   context_state["x"] = x
-   context_state["y"] = y
-   def mp = window.mouse_pos(win)
+   _editor_get("context_state")["x"] = x
+   _editor_get("context_state")["y"] = y
+   def mp = window.mouse_pos(_editor_get("win"))
    def int visible_actions = int(min(actions.len, max(1, int(h / row_h))))
    def mx = float(mp.get(0, -1.0))
    def my = float(mp.get(1, -1.0))
@@ -6970,22 +6991,22 @@ fn _draw_context_menu(f64 sw, f64 sh) int {
       def tag = to_str(row.get(3, ""))
       def detail = to_str(row.get(4, ""))
       def col = _command_color(tag)
-      def text_y = _row_text_y(font_small, yy, row_h)
+      def text_y = _row_text_y(int(_editor_get("font_small")), yy, row_h)
       if i == hover_idx { _fill_rect(x + 4.0, yy + 2.0, w - 8.0, row_h - 4.0, gfx.color_alpha(C_ACCENT, 0.18)) }
       elif i > 0 { _fill_rect(x + 4.0, yy, w - 8.0, 1.0, gfx.color_alpha(C_LINE, 0.50)) }
       _draw_icon(_command_icon(tag, id), x + 10.0, _center_y(yy, row_h, 15.0), 15.0, i == hover_idx ? C_ACCENT : col)
       runs = _append_text_run(runs, widgets.preview(to_str(row.get(0, "")), 26), x + 34.0, text_y, i == hover_idx ? U_TEXT : U_MUTED)
-      if key_label.len > 0 { runs = _append_right_run(runs, font_small, key_label, x + w - 10.0, text_y, i == hover_idx ? U_ACCENT : U_DIM) }
+      if key_label.len > 0 { runs = _append_right_run(runs, int(_editor_get("font_small")), key_label, x + w - 10.0, text_y, i == hover_idx ? U_ACCENT : U_DIM) }
       if detail.len > 0 { runs = _append_text_run(runs, widgets.preview(detail, 42), x + 34.0, yy + 22.0, U_DIM) }
       i += 1
    }
    _flush_rects()
-   if runs.len > 0 { gfx.draw_text_runs_flat_colors(font_small, runs) }
+   if runs.len > 0 { gfx.draw_text_runs_flat_colors(int(_editor_get("font_small")), runs) }
    0
 }
 
 fn _draw_rename_prompt(f64 sw, f64 sh) int {
-   if !prompt.rename_is_open(rename_state) { return 0 }
+   if !prompt.rename_is_open(_editor_get("rename_state")) { return 0 }
    def f64 w0 = float(min(520.0, max(1.0, sw - 44.0)))
    def f64 h0 = 86.0
    def fit = _fit_rect(sw * 0.5 - w0 * 0.5, max(24.0, sh * 0.18), w0, h0, sw, sh, 8.0)
@@ -6995,18 +7016,18 @@ fn _draw_rename_prompt(f64 sw, f64 sh) int {
    def h = float(fit.get(3, h0))
    _fill_rect(x, y, w, h, gfx.color_alpha(C_RAIL, 0.98))
    _stroke_rect(x, y, w, h, C_ACCENT, 2.0)
-   _text(font_small, "rename " + prompt.rename_rel(rename_state), x + 16.0, y + 14.0, C_MUTED)
+   _text(int(_editor_get("font_small")), "rename " + prompt.rename_rel(_editor_get("rename_state")), x + 16.0, y + 14.0, C_MUTED)
    _fill_rect(x + 14.0, y + 42.0, w - 28.0, 30.0, C_PANE)
    _stroke_rect(x + 14.0, y + 42.0, w - 28.0, 30.0, C_LINE, 1.0)
-   def text = prompt.rename_text(rename_state)
-   _text(font_body, text, x + 24.0, y + 49.0, C_TEXT)
-   _fill_rect(x + 25.0 + _measure_ui(font_body, text, 0.0), y + 48.0, 2.0, 18.0, C_ACCENT)
+   def text = prompt.rename_text(_editor_get("rename_state"))
+   _text(int(_editor_get("font_body")), text, x + 24.0, y + 49.0, C_TEXT)
+   _fill_rect(x + 25.0 + _measure_ui(int(_editor_get("font_body")), text, 0.0), y + 48.0, 2.0, 18.0, C_ACCENT)
    0
 }
 
 fn _modeline_path(str path, str fallback) str {
    if path.len <= 0 { return fallback }
-   def root = ospath.normalize(project.root(project_state))
+   def root = ospath.normalize(project.root(_editor_get("project_state")))
    def p = ospath.normalize(path)
    def prefix = root + ospath.sep()
    if str.startswith(p, prefix) { return str.str_slice(p, prefix.len, p.len) }
@@ -7069,10 +7090,10 @@ fn _modeline_meta(dict b) dict {
    def kind = to_str(b.get("kind", ""))
    def path = _buffer_source_path(b)
    def key = name + "\t" + kind + "\t" + path + "\t" + to_str(bool(b.get("readonly", false)))
-   if modeline_cache_key == key { return modeline_cache }
+   if to_str(_editor_get("modeline_cache_key")) == key { return _editor_get("modeline_cache") }
    def run_cmd = b.get("readonly", false) ? [] : runner.command_for(path)
-   modeline_cache_key = key
-   modeline_cache = borrow({
+   _editor_values["modeline_cache_key"] = key
+   _editor_values["modeline_cache"] = borrow({
       "name": name,
       "kind": kind,
       "path": path,
@@ -7080,7 +7101,7 @@ fn _modeline_meta(dict b) dict {
       "run_hint": run_cmd.len > 0 ? to_str(run_cmd.get(0, "")) : "no-runner",
       "language": kind.len > 0 && kind != "code" && kind != "doc" && kind != "file" ? kind : syntax.detect_language(name)
    })
-   modeline_cache
+   _editor_get("modeline_cache")
 }
 
 fn _modeline_selection() str {
@@ -7097,9 +7118,9 @@ fn _preview_px(str text, f64 px, f64 adv) str {
    widgets.preview(text, int(max(4.0, px / safe_adv)))
 }
 
-fn _preview_small(str text, f64 px) str { _preview_px(text, px, FONT_SMALL_ADV) }
+fn _preview_small(str text, f64 px) str { _preview_px(text, px, float(_editor_get("FONT_SMALL_ADV"))) }
 
-fn _preview_body(str text, f64 px) str { _preview_px(text, px, FONT_BODY_ADV) }
+fn _preview_body(str text, f64 px) str { _preview_px(text, px, float(_editor_get("FONT_BODY_ADV"))) }
 
 fn _preview_utf8(str text, int limit) str {
    if limit <= 0 { return "" }
@@ -7114,7 +7135,7 @@ fn _preview_utf8(str text, int limit) str {
 }
 
 fn _preview_modeline(str text, f64 px) str {
-   _preview_utf8(text, int(max(4.0, px / float(max(1.0, FONT_MODELINE_CLIP_ADV)))))
+   _preview_utf8(text, int(max(4.0, px / float(max(1.0, float(_editor_get("FONT_MODELINE_CLIP_ADV")))))))
 }
 
 fn _draw_status(dict lay) int {
@@ -7124,39 +7145,39 @@ fn _draw_status(dict lay) int {
    def sw = float(lay.get("edit_x", 0.0)) + float(lay.get("edit_w", 0.0))
    _fill_rect(0.0, y, sw, h, C_PANE_2)
    _stroke_rect(0.0, y, sw, h, C_LINE, 1.0)
-   def b = ed.current_buffer(st)
+   def b = ed.current_buffer(_editor_get("st"))
    def meta = _modeline_meta(b)
    def display_path = _modeline_text(to_str(meta.get("display_path", "buffer")))
-   def counts = project.counts(project_state)
+   def counts = project.counts(_editor_get("project_state"))
    def mod_n = int(counts.get("modified", 0))
    def add_n = int(counts.get("added", 0))
    def del_n = int(counts.get("deleted", 0))
    def untracked_n = int(counts.get("untracked", 0))
    def dirty = mod_n + add_n + del_n + untracked_n
-   def branch = _modeline_text(project.branch(project_state))
+   def branch = _modeline_text(project.branch(_editor_get("project_state")))
    def run_hint = _modeline_text(to_str(meta.get("run_hint", "no-runner")))
    def language = _modeline_text(to_str(meta.get("language", "text")))
    def mode = b.get("readonly", false) ? "RO" : (b.get("dirty", false) ? "MOD" : "OK")
-   def line = int(st.get("cursor_line", 0)) + 1
-   def col = int(st.get("cursor_col", 0)) + 1
-   def int total = int(max(1, ed.current_lines(st).len))
+   def line = int(_editor_get("st").get("cursor_line", 0)) + 1
+   def col = int(_editor_get("st").get("cursor_col", 0)) + 1
+   def int total = int(max(1, ed.current_lines(_editor_get("st")).len))
    def loc = "Ln " + to_str(line) + ":" + to_str(col) + "  " + to_str((line * 100) / total) + "%"
-   def page = "buf " + to_str(int(st.get("active", 0)) + 1) + "/" + to_str(st.get("buffers", []).len)
+   def page = "buf " + to_str(int(_editor_get("st").get("active", 0)) + 1) + "/" + to_str(_editor_get("st").get("buffers", []).len)
    def git = branch.len > 0 ? branch + (dirty > 0 ? " +" + to_str(dirty) : "") : "no git"
    def diff = "+" + to_str(add_n) + " ~" + to_str(mod_n) + " -" + to_str(del_n) + (untracked_n > 0 ? " ?" + to_str(untracked_n) : "")
    def sel = _modeline_selection()
    def cursors = _extra_cursor_count() > 0 ? "cur " + to_str(_extra_cursor_count() + 1) : ""
-   def term = termpane.is_open(term_state) ? "term:" + termpane.mode(term_state) : "term:off"
-   def lsp_label = lsp_state.get("active", false) ? "lsp:on" : "lsp:off"
-   def int ms10 = int(max(0, int(float(st.get("frame_ms", 0.0)) * 10.0)))
-   def fps = "FPS " + to_str(int(st.get("fps", 0))) + " " + to_str(ms10 / 10) + "." + to_str(ms10 % 10) + "ms"
-   def seen = _modeline_text(interact.show_key(ui_state))
-   def key_hint = chord.pending(chord_state) ? ("prefix " + chord.describe(chord_state)) : (seen.len > 0 ? ("key " + seen) : "C-SPC leader")
+   def term = termpane.is_open(_editor_get("term_state")) ? "term:" + termpane.mode(_editor_get("term_state")) : "term:off"
+   def lsp_label = _editor_get("lsp_state").get("active", false) ? "lsp:on" : "lsp:off"
+   def int ms10 = int(max(0, int(float(_editor_get("st").get("frame_ms", 0.0)) * 10.0)))
+   def fps = "FPS " + to_str(int(_editor_get("st").get("fps", 0))) + " " + to_str(ms10 / 10) + "." + to_str(ms10 % 10) + "ms"
+   def seen = _modeline_text(interact.show_key(_editor_get("ui_state")))
+   def key_hint = chord.pending(_editor_get("chord_state")) ? ("prefix " + chord.describe(_editor_get("chord_state"))) : (seen.len > 0 ? ("key " + seen) : "C-SPC leader")
    def state_icon = mode == "MOD" ? "MOD" : (mode == "RO" ? "RO" : "OK")
-   def left = state_icon + "  " + page + "  " + to_str(st.get("focus", "editor")) + "  " + _preview_modeline(display_path, sw * 0.18)
+   def left = state_icon + "  " + page + "  " + to_str(_editor_get("st").get("focus", "editor")) + "  " + _preview_modeline(display_path, sw * 0.18)
    def mid = key_hint + "  " + git + "  " + diff + "  " + language + "  " + run_hint
    def right_state = fps + "  " + loc + (sel.len > 0 ? "  " + sel : "") + (cursors.len > 0 ? "  " + cursors : "") + "  " + lsp_label + "  " + term
-   def live_status = _modeline_text(interact.status(ui_state))
+   def live_status = _modeline_text(interact.status(_editor_get("ui_state")))
    def right = live_status != "ready" ? fps + "  " + live_status + "  " + loc + (sel.len > 0 ? "  " + sel : "") + (cursors.len > 0 ? "  " + cursors : "") + "  " + lsp_label + "  " + term : right_state
    def f64 content_w = float(max(1.0, sw - pad * 2.0 - 16.0))
    def f64 right_w = float(min(max(228.0, content_w * 0.34), max(128.0, content_w - 260.0)))
@@ -7169,17 +7190,17 @@ fn _draw_status(dict lay) int {
    def f64 mid_icon_x = left_x + left_w + 10.0
    def f64 mid_x = mid_icon_x + 20.0
    def f64 mid_w = float(max(24.0, right_start - mid_x - 12.0))
-   def text_y = _text_center_y_for(font_modeline, y, h)
+   def text_y = _text_center_y_for(int(_editor_get("font_modeline")), y, h)
    _fill_rect(0.0, y, 4.0, h, mode == "MOD" ? C_WARN : (mode == "RO" ? C_CYAN : C_ACCENT))
    mut runs = []
    runs = _append_text_run(runs, _preview_modeline(left, max(24.0, left_w - 20.0)), left_text_x, text_y, mode == "MOD" ? U_WARN : (mode == "RO" ? U_CYAN : U_ACCENT))
-   runs = _append_text_run(runs, _preview_modeline(mid, mid_w), mid_x, text_y, chord.pending(chord_state) ? U_ACCENT : (dirty > 0 ? U_ACCENT_2 : U_DIM))
-   runs = _append_right_run(runs, font_modeline, _preview_modeline(right, right_w), right_x, text_y, live_status != "ready" ? U_ACCENT : U_MUTED)
+   runs = _append_text_run(runs, _preview_modeline(mid, mid_w), mid_x, text_y, chord.pending(_editor_get("chord_state")) ? U_ACCENT : (dirty > 0 ? U_ACCENT_2 : U_DIM))
+   runs = _append_right_run(runs, int(_editor_get("font_modeline")), _preview_modeline(right, right_w), right_x, text_y, live_status != "ready" ? U_ACCENT : U_MUTED)
    _flush_rects()
    def icon_y = _center_y(y, h, 14.0)
    _draw_icon(left_icon, left_x, icon_y, 14.0, mode == "MOD" ? C_WARN : (mode == "RO" ? C_CYAN : C_ACCENT))
    _draw_icon("vcsbranches", mid_icon_x, icon_y, 14.0, dirty > 0 ? C_ACCENT_2 : C_DIM)
-   if runs.len > 0 { gfx.draw_text_runs_flat_colors(font_modeline, runs) }
+   if runs.len > 0 { gfx.draw_text_runs_flat_colors(int(_editor_get("font_modeline")), runs) }
    0
 }
 
@@ -7194,194 +7215,202 @@ fn _bench_text() str {
 }
 
 fn _initial_buffers() list {
-   if TERMINAL_DUMP_PROBE { return [ed.buffer("terminal-visual.ny", "", "use core\nprint(\"terminal visual probe\")\n")] }
-   if TEXTGRID_PROBE { return [ed.buffer("textgrid.ny", "", "fn main() int {\n\tprint(\"grid\")\n   return 0\n}\n")] }
-   if BENCH_PROBE || SCROLLBAR_PROBE { return [ed.buffer(BENCH_PROBE ? "bench.ny" : "scrollbar.ny", "", _bench_text())] }
-   if ZOOM_PROBE { return [ed.buffer("zoom-test.ny", "", "use core\n")] }
-   if GOTO_PROBE { return [ed.buffer("goto-test.ny", "", "use core\nfn local_target() int { return 1 }\nfn main() int {\n   local_target()\n   project_target()\n}\n")] }
-   if MULTICURSOR_PROBE { return [ed.buffer("multi-cursor.ny", "", "aaa\nbbb\nccc")] }
-   if FIND_PROBE || PALETTE_PROBE || WHICH_KEY_PROBE { return [ed.buffer("ui-probe.ny", "", PROBE_TEXT)] }
-   if ESCAPE_PROBE { return [ed.buffer("escape-test.ny", "", "use core\n")] }
-   if NAV_PROBE || TAB_PROBE { return [ed.buffer("nav-a.ny", "", "alpha"), ed.buffer("nav-b.ny", "", "beta")] }
-   if SELECT_PROBE { return [ed.buffer("select-all.ny", "", "one\ntwo\nthree")] }
-   if IMAGE_PROBE { return [session.read_buffer(_write_image_probe_fixture())] }
-   if GIT_PROBE { return [ed.buffer("git-panel.ny", "", "use core\n")] }
-   if CHORD_PROBE { return [ed.buffer("chord-test.ny", "", "")] }
-   if UNDO_PROBE { return [ed.buffer("undo-test.ny", "", "a")] }
-   if INPUT_PROBE { return [ed.buffer("input-test.ny", "", PROBE_TEXT)] }
+   if probe_flags.get("TERMINAL_DUMP", false) { return [ed.buffer("terminal-visual.ny", "", "use core\nprint(\"terminal visual probe\")\n")] }
+   if probe_flags.get("TEXTGRID", false) { return [ed.buffer("textgrid.ny", "", "fn main() int {\n\tprint(\"grid\")\n   return 0\n}\n")] }
+   if probe_flags.get("BENCH", false) || probe_flags.get("SCROLLBAR", false) { return [ed.buffer(probe_flags.get("BENCH", false) ? "bench.ny" : "scrollbar.ny", "", _bench_text())] }
+   if probe_flags.get("ZOOM", false) { return [ed.buffer("zoom-test.ny", "", "use core\n")] }
+   if probe_flags.get("GOTO", false) { return [ed.buffer("goto-test.ny", "", "use core\nfn local_target() int { return 1 }\nfn main() int {\n   local_target()\n   project_target()\n}\n")] }
+   if probe_flags.get("MULTICURSOR", false) { return [ed.buffer("multi-cursor.ny", "", "aaa\nbbb\nccc")] }
+   if probe_flags.get("FIND", false) || probe_flags.get("PALETTE", false) || probe_flags.get("WHICH_KEY", false) { return [ed.buffer("ui-probe.ny", "", PROBE_TEXT)] }
+   if probe_flags.get("ESCAPE", false) { return [ed.buffer("escape-test.ny", "", "use core\n")] }
+   if probe_flags.get("NAV", false) || probe_flags.get("TAB", false) { return [ed.buffer("nav-a.ny", "", "alpha"), ed.buffer("nav-b.ny", "", "beta")] }
+   if probe_flags.get("SELECT", false) { return [ed.buffer("select-all.ny", "", "one\ntwo\nthree")] }
+   if probe_flags.get("IMAGE", false) { return [session.read_buffer(_write_image_probe_fixture())] }
+   if probe_flags.get("GIT", false) { return [ed.buffer("git-panel.ny", "", "use core\n")] }
+   if probe_flags.get("CHORD", false) { return [ed.buffer("chord-test.ny", "", "")] }
+   if probe_flags.get("UNDO", false) { return [ed.buffer("undo-test.ny", "", "a")] }
+   if probe_flags.get("INPUT", false) { return [ed.buffer("input-test.ny", "", PROBE_TEXT)] }
    def project_root = common.env_trim("NY_EDITOR_PROJECT_ROOT")
    def fallback = project_root.len > 0 ? ospath.join(project_root, "README.md") : "README.md"
    session.seed_buffers(cli.args(), fallback)
 }
 
 def initial_buffers = _initial_buffers()
-st = ed.state(initial_buffers)
-st["focus"] = "editor"
-st["show_hierarchy"] = true
-st["show_titlebar"] = true
-st["show_project"] = true
-st["show_outline"] = true
-st["show_status"] = true
-st["show_line_numbers"] = true
-st["show_indent_guides"] = false
-st["scroll_follow"] = true
-st["outline_scroll"] = 0
-st["rail_tab"] = "files"
-st["project_loaded"] = false
-st["git_loaded"] = false
-st["drag_terminal"] = false
-st["drag_scrollbar"] = false
-st["scrollbar_target"] = dict(0)
-st["git_scroll"] = 0
-st["timeline_scroll"] = 0
-st["rail_split"] = 0.0
-st["term_h"] = 220.0
+_editor_values["st"] = ed.state(initial_buffers)
+_editor_get("st")["focus"] = "editor"
+_editor_get("st")["show_hierarchy"] = true
+_editor_get("st")["show_titlebar"] = true
+_editor_get("st")["show_project"] = true
+_editor_get("st")["show_outline"] = true
+_editor_get("st")["show_status"] = true
+_editor_get("st")["show_line_numbers"] = true
+_editor_get("st")["show_indent_guides"] = false
+_editor_get("st")["scroll_follow"] = true
+_editor_get("st")["outline_scroll"] = 0
+_editor_get("st")["rail_tab"] = "files"
+_editor_get("st")["project_loaded"] = false
+_editor_get("st")["git_loaded"] = false
+_editor_get("st")["drag_terminal"] = false
+_editor_get("st")["drag_scrollbar"] = false
+_editor_get("st")["scrollbar_target"] = dict(0)
+_editor_get("st")["git_scroll"] = 0
+_editor_get("st")["timeline_scroll"] = 0
+_editor_get("st")["rail_split"] = 0.0
+_editor_get("st")["term_h"] = 220.0
 _load_ui_cache()
-if bool(st.get("show_project", true)) && bool(st.get("show_hierarchy", true)) { _ensure_project_tree() }
-if BENCH_PROBE && common.env_truthy("NY_UI_HEADLESS") {
-   st["show_hierarchy"] = false
-   st["show_project"] = false
-   st["show_outline"] = false
-   st["rail_w"] = 0.0
+if bool(_editor_get("st").get("show_project", true)) && bool(_editor_get("st").get("show_hierarchy", true)) { _ensure_project_tree() }
+if probe_flags.get("BENCH", false) && common.env_truthy("NY_UI_HEADLESS") {
+   _editor_get("st")["show_hierarchy"] = false
+   _editor_get("st")["show_project"] = false
+   _editor_get("st")["show_outline"] = false
+   _editor_get("st")["rail_w"] = 0.0
 }
-next_cache_save_time = gfx.get_time() + float(CACHE_SAVE_SECONDS)
+_editor_values["next_cache_save_time"] = gfx.get_time() + float(CACHE_SAVE_SECONDS)
 _nav_record_current()
-fps_state = ui_runtime.fps_begin()
+_editor_values["fps_state"] = ui_runtime.fps_begin()
 
-if NAV_PROBE {
+if probe_flags.get("NAV", false) {
    _nav_push_current()
-   st = ed.select_buffer(st, 1)
+   _editor_values["st"] = ed.select_buffer(_editor_get("st"), 1)
    _buffer_changed(false)
    _nav_record_current()
 }
 
 _lsp_sync_current(true)
 
-if GOTO_PROBE {
+if probe_flags.get("GOTO", false) {
    def root = common.env_trim("NY_EDITOR_PROBE_GOTO_ROOT")
    mut target_path = common.env_trim("NY_EDITOR_PROBE_GOTO_TARGET")
    if target_path.len <= 0 && root.len > 0 { target_path = ospath.join(root, "defs.ny") }
-   project_state = project.new(root)
-   project_state = project.refresh(project_state, 1, 32)
-   st["project_loaded"] = true
+   _editor_values["project_state"] = project.new(root)
+   _editor_values["project_state"] = project.refresh(_editor_get("project_state"), 1, 32)
+   _editor_get("st")["project_loaded"] = true
    _invalidate_project_definitions()
-   st["cursor_line"] = 3
-   st["cursor_col"] = 6
+   _editor_get("st")["cursor_line"] = 3
+   _editor_get("st")["cursor_col"] = 6
    _goto_definition()
-   assert(int(st.get("cursor_line", -1)) == 1 && int(st.get("cursor_col", -1)) == 3, "goto local definition")
-   st["cursor_line"] = 4
-   st["cursor_col"] = 7
+   assert(int(_editor_get("st").get("cursor_line", -1)) == 1 && int(_editor_get("st").get("cursor_col", -1)) == 3, "goto local definition")
+   _editor_get("st")["cursor_line"] = 4
+   _editor_get("st")["cursor_col"] = 7
    assert(root.len > 0 && file_exists(target_path), "goto project fixture")
    _goto_definition()
    assert(ospath.normalize(_current_path()) == ospath.normalize(target_path), "goto project definition path")
-   assert(int(st.get("cursor_line", -1)) == 0, "goto project definition line")
-   st = ed.state([ed.buffer("goto-empty.ny", "", "   \n")])
-   st["cursor_line"] = 0
-   st["cursor_col"] = 0
+   assert(int(_editor_get("st").get("cursor_line", -1)) == 0, "goto project definition line")
+   _editor_values["st"] = ed.state([ed.buffer("goto-empty.ny", "", "   \n")])
+   _editor_get("st")["cursor_line"] = 0
+   _editor_get("st")["cursor_col"] = 0
    _goto_definition()
-   assert(int(st.get("cursor_line", -1)) == 0, "goto no symbol stays put")
-   window.set_should_close(win, true)
+   assert(int(_editor_get("st").get("cursor_line", -1)) == 0, "goto no symbol stays put")
+   window.set_should_close(_editor_get("win"), true)
 }
 
-if ZOOM_PROBE {
-   def start_size = font_body_size
+if probe_flags.get("ZOOM", false) {
+   _set_editor_font_size(FONT_ZOOM_MIN + 1, false)
+   def start_size = int(_editor_get("font_body_size"))
+   mut line_limit_lay = dict(1)
+   line_limit_lay["edit_w"] = 4000.0
+   def int start_line_limit = _line_limit(line_limit_lay)
+   def start_body_advance = float(_editor_get("FONT_BODY_ADV"))
    _run_command("zoom-in")
    def int zoomed_size = int(min(start_size + 1, FONT_ZOOM_MAX))
-   def int terminal_font = int(font_body)
-   assert(font_body_size == zoomed_size, "editor zoom in")
-   assert(int(term_state.get("font", 0)) == terminal_font, "terminal font follows editor zoom")
+   def int terminal_font = int(int(_editor_get("font_body")))
+   assert(int(_editor_get("font_body_size")) == zoomed_size, "editor zoom in")
+   def int zoomed_line_limit = _line_limit(line_limit_lay)
+   assert(zoomed_line_limit < start_line_limit, "editor line limit tracks zoomed body-font advance (" + to_str(start_body_advance) + " -> " + to_str(float(_editor_get("FONT_BODY_ADV"))) + ", " + to_str(start_line_limit) + " -> " + to_str(zoomed_line_limit) + ")")
+   assert(int(_editor_get("term_state").get("font", 0)) == terminal_font, "terminal font follows editor zoom")
    _run_command("zoom-out")
-   assert(font_body_size == start_size, "editor zoom out")
+   assert(int(_editor_get("font_body_size")) == start_size, "editor zoom out")
+   assert(_line_limit(line_limit_lay) == start_line_limit, "editor line limit restores with body-font advance")
    _run_command("zoom-reset")
-   assert(font_body_size == FONT_BODY_SIZE, "editor zoom reset")
-   window.set_should_close(win, true)
+   assert(int(_editor_get("font_body_size")) == FONT_BODY_SIZE, "editor zoom reset")
+   window.set_should_close(_editor_get("win"), true)
 }
 
-if FIND_PROBE {
+if probe_flags.get("FIND", false) {
    _run_command("find")
-   find_state = find.set_query(find_state, "tw")
+   _editor_values["find_state"] = find.set_query(_editor_get("find_state"), "tw")
    _find_refresh_now()
-   assert(find.is_open(find_state) && find.count(find_state) >= 2, "ctrl-f find opens and matches")
+   assert(find.is_open(_editor_get("find_state")) && find.count(_editor_get("find_state")) >= 2, "ctrl-f find opens and matches")
    _find_step(1)
-   assert(int(st.get("cursor_line", -1)) >= 10, "find next jumps")
-   st = ed.state([ed.buffer("find-replace.ny", "", "one two\ntwo two")])
-   hist = history.new()
-   find_state = find.state()
+   assert(int(_editor_get("st").get("cursor_line", -1)) >= 10, "find next jumps")
+   _editor_values["st"] = ed.state([ed.buffer("find-replace.ny", "", "one two\ntwo two")])
+   _editor_values["hist"] = history.new()
+   _editor_values["find_state"] = find.state()
    _find_replace_open()
-   find_state = find.set_query(find_state, "(tw)(o)")
-   find_state = find.toggle_regex(find_state)
-   find_state = find.set_replacement(find_state, "\\2\\1")
+   _editor_values["find_state"] = find.set_query(_editor_get("find_state"), "(tw)(o)")
+   _editor_values["find_state"] = find.toggle_regex(_editor_get("find_state"))
+   _editor_values["find_state"] = find.set_replacement(_editor_get("find_state"), "\\2\\1")
    _find_refresh_now()
    _find_replace_all()
    assert(_current_text() == "one otw\notw otw", "regex replace all")
    _undo()
    assert(_current_text() == "one two\ntwo two", "replace undo")
-   window.set_should_close(win, true)
+   window.set_should_close(_editor_get("win"), true)
 }
 
-if CONTEXT_PROBE {
+if probe_flags.get("CONTEXT", false) {
    _open_context(9999.0, 9999.0, _editor_context_entry(), "editor")
-   assert(prompt.context_is_open(context_state), "editor context opens")
-   assert(to_str(prompt.context_entry(context_state).get("scope", "")) == "editor", "editor context scope")
-   def fit_ctx = _fit_rect(prompt.context_x(context_state), prompt.context_y(context_state), CONTEXT_W, CONTEXT_ROW_H * 4.0, START_W, START_H, 8.0)
+   assert(prompt.context_is_open(_editor_get("context_state")), "editor context opens")
+   assert(to_str(prompt.context_entry(_editor_get("context_state")).get("scope", "")) == "editor", "editor context scope")
+   def fit_ctx = _fit_rect(prompt.context_x(_editor_get("context_state")), prompt.context_y(_editor_get("context_state")), CONTEXT_W, CONTEXT_ROW_H * 4.0, START_W, START_H, 8.0)
    assert(float(fit_ctx.get(0, 0.0)) + CONTEXT_W <= START_W - 8.0 && float(fit_ctx.get(1, 0.0)) + CONTEXT_ROW_H * 4.0 <= START_H - 8.0, "context menu fits viewport")
-   window.set_should_close(win, true)
+   window.set_should_close(_editor_get("win"), true)
 }
 
-if PALETTE_PROBE {
+if probe_flags.get("PALETTE", false) {
    _handle_key({"key": key.KEY_P, "mods": key.MOD_CONTROL | key.MOD_SHIFT})
-   assert(pal.is_open(palette_state), "ctrl-shift-p opens palette")
-   palette_state = pal.handle_char(palette_state, {"char": 102, "mods": 0})
-   palette_state = pal.handle_char(palette_state, {"char": 105, "mods": 0})
-   assert(pal.is_open(palette_state) && pal.state_matches(palette_state).len > 0, "palette filters commands")
-   window.set_should_close(win, true)
+   assert(pal.is_open(_editor_get("palette_state")), "ctrl-shift-p opens palette")
+   _editor_values["palette_state"] = pal.handle_char(_editor_get("palette_state"), {"char": 102, "mods": 0})
+   _editor_values["palette_state"] = pal.handle_char(_editor_get("palette_state"), {"char": 105, "mods": 0})
+   assert(pal.is_open(_editor_get("palette_state")) && pal.state_matches(_editor_get("palette_state")).len > 0, "palette filters commands")
+   window.set_should_close(_editor_get("win"), true)
 }
 
-if WHICH_KEY_PROBE {
+if probe_flags.get("WHICH_KEY", false) {
    def top_keys = pal.which_key("C-SPC")
    assert(top_keys.len > 0 && cmd.id_for_chord("C-f") == "find", "which-key and ctrl-f command registry")
    assert(cmd.id_for_chord("C-a") == "mark-whole", "ctrl-a command registry")
    assert(_which_key_tag("C-SPC", "SPC") == "ui", "which-key complete command metadata")
    assert(str.str_contains(_which_key_detail("C-SPC", "f"), "continue"), "which-key prefix detail")
-   window.set_should_close(win, true)
+   window.set_should_close(_editor_get("win"), true)
 }
 
-if SELECT_PROBE {
-   st["cursor_line"] = 1
-   st["cursor_col"] = 1
+if probe_flags.get("SELECT", false) {
+   _editor_get("st")["cursor_line"] = 1
+   _editor_get("st")["cursor_col"] = 1
    _direct_key_fallback({"key": key.KEY_A, "mods": key.MOD_CONTROL})
    assert(_selection_any_valid() && _selected_text_all() == "one\ntwo\nthree", "ctrl-a selects whole buffer")
    _handle_escape_key({"key": key.KEY_ESCAPE, "mods": 0})
-   assert(!_selection_any_valid() && !bool(st.get("quit_prompt", false)), "escape clears select all")
-   st["quit_prompt"] = true
-   last_escape_ns = 1
+   assert(!_selection_any_valid() && !bool(_editor_get("st").get("quit_prompt", false)), "escape clears select all")
+   _editor_get("st")["quit_prompt"] = true
+   _editor_values["last_escape_ns"] = 1
    _handle_key({"key": key.KEY_DOWN, "mods": 0})
-   assert(!bool(st.get("quit_prompt", false)) && last_escape_ns == 0, "movement clears quit prompt")
+   assert(!bool(_editor_get("st").get("quit_prompt", false)) && int(_editor_get("last_escape_ns")) == 0, "movement clears quit prompt")
    mut dirty_a = ed.buffer("dirty-a.ny", "", "a")
    mut dirty_b = ed.buffer("dirty-b.ny", "", "b")
    dirty_a["dirty"] = true
    dirty_b["dirty"] = true
-   st = ed.state([dirty_a, dirty_b])
+   _editor_values["st"] = ed.state([dirty_a, dirty_b])
    _kill_buffer()
-   assert(bool(st.get("kill_confirm", false)) && int(st.get("kill_confirm_buf", -1)) == 0, "dirty kill arms active buffer")
-   st = ed.select_buffer(st, 1)
+   assert(bool(_editor_get("st").get("kill_confirm", false)) && int(_editor_get("st").get("kill_confirm_buf", -1)) == 0, "dirty kill arms active buffer")
+   _editor_values["st"] = ed.select_buffer(_editor_get("st"), 1)
    _kill_buffer()
-   assert(st.get("buffers", []).len == 2 && bool(st.get("kill_confirm", false)) && int(st.get("kill_confirm_buf", -1)) == 1, "dirty kill confirm does not transfer")
-   window.set_should_close(win, true)
+   assert(_editor_get("st").get("buffers", []).len == 2 && bool(_editor_get("st").get("kill_confirm", false)) && int(_editor_get("st").get("kill_confirm_buf", -1)) == 1, "dirty kill confirm does not transfer")
+   window.set_should_close(_editor_get("win"), true)
 }
 
-if MULTICURSOR_PROBE {
-   st["cursor_line"] = 0
-   st["cursor_col"] = 2
+if probe_flags.get("MULTICURSOR", false) {
+   _editor_get("st")["cursor_line"] = 0
+   _editor_get("st")["cursor_col"] = 2
    _direct_key_fallback({"key": key.KEY_DOWN, "mods": key.MOD_ALT | key.MOD_SHIFT})
    _direct_key_fallback({"key": key.KEY_DOWN, "mods": key.MOD_ALT | key.MOD_SHIFT})
    assert(_extra_cursor_count() == 2, "alt-shift-down grows cursor stack")
    _handle_escape_key({"key": key.KEY_ESCAPE, "mods": 0})
-   assert(_extra_cursor_count() == 0 && !bool(st.get("quit_prompt", false)), "escape clears extra cursors")
+   assert(_extra_cursor_count() == 0 && !bool(_editor_get("st").get("quit_prompt", false)), "escape clears extra cursors")
    _direct_key_fallback({"key": key.KEY_DOWN, "mods": key.MOD_ALT | key.MOD_SHIFT})
    assert(_extra_cursor_count() == 1, "alt-shift-down adds cursor")
    _move_cursor_ext("right", false, false)
-   assert(int(st.get("cursor_col", 0)) == 3 && _cursor_col(_extra_cursors().get(0, [])) == 3, "real cursor moves extra cursors")
+   assert(int(_editor_get("st").get("cursor_col", 0)) == 3 && _cursor_col(_extra_cursors().get(0, [])) == 3, "real cursor moves extra cursors")
    _move_cursor_ext("left", false, false)
    _edit_insert("!")
    assert(_current_text() == "aa!a\nbb!b\nccc", "multi cursor insert")
@@ -7391,10 +7420,10 @@ if MULTICURSOR_PROBE {
    assert(_current_text() == "aa!a\nbb!b\nccc", "multi cursor backspace merge")
    _undo()
    assert(_current_text() == "aa!\na\nbb!\nb\nccc" && _extra_cursor_count() == 1, "multi cursor undo restores state")
-   st = ed.state([ed.buffer("multi-line-cursor.ny", "", "abc\ndef\nghi\njkl")])
-   hist = history.new()
-   st["cursor_line"] = 0
-   st["cursor_col"] = 1
+   _editor_values["st"] = ed.state([ed.buffer("multi-line-cursor.ny", "", "abc\ndef\nghi\njkl")])
+   _editor_values["hist"] = history.new()
+   _editor_get("st")["cursor_line"] = 0
+   _editor_get("st")["cursor_col"] = 1
    _add_extra_cursor(1)
    _add_extra_cursor(1)
    assert(_extra_cursor_count() == 2, "repeated add-cursor below walks past existing cursors")
@@ -7402,66 +7431,66 @@ if MULTICURSOR_PROBE {
    assert(_current_text() == "aX\nYbc\ndX\nYef\ngX\nYhi\njkl", "multi cursor multiline insert")
    _handle_escape_key({"key": key.KEY_ESCAPE, "mods": 0})
    assert(_extra_cursor_count() == 0, "escape returns to one cursor after multiline edit")
-   st = ed.state([ed.buffer("multi-select.ny", "", "abc\ndef\nghi")])
-   hist = history.new()
-   st["cursor_line"] = 0
-   st["cursor_col"] = 1
+   _editor_values["st"] = ed.state([ed.buffer("multi-select.ny", "", "abc\ndef\nghi")])
+   _editor_values["hist"] = history.new()
+   _editor_get("st")["cursor_line"] = 0
+   _editor_get("st")["cursor_col"] = 1
    _add_extra_cursor(1)
    _move_cursor_ext("right", false, true)
    assert(_selection_ranges_active().len == 2 && _selected_text_all() == "b\ne", "shift-selection extends from all cursors")
    _edit_insert("Z")
    assert(_current_text() == "aZc\ndZf\nghi" && _extra_cursor_count() == 1, "typing replaces all cursor selections")
-   st = ed.state([ed.buffer("multi-select-line.ny", "", "abc\ndef\nghi")])
-   hist = history.new()
-   st["cursor_line"] = 0
-   st["cursor_col"] = 0
+   _editor_values["st"] = ed.state([ed.buffer("multi-select-line.ny", "", "abc\ndef\nghi")])
+   _editor_values["hist"] = history.new()
+   _editor_get("st")["cursor_line"] = 0
+   _editor_get("st")["cursor_col"] = 0
    _add_extra_cursor(1)
    _select_line()
    assert(_selection_ranges_active().len == 2 && _selected_text_all() == "abc\ndef", "select-line selects all cursor lines")
-   window.set_should_close(win, true)
+   window.set_should_close(_editor_get("win"), true)
 }
 
-if TERMINAL_DUMP_PROBE {
-   term_state["open"] = true
-   term_state["focus"] = true
-   term_state["mode"] = "terminal"
-   term_state["tabs"] = [{"mode": "terminal", "vt": term_state.get("vt")}]
-   term_state["active"] = 0
-   term_state = termpane.write_text(term_state, "terminal visual probe\n")
-   term_state = termpane.write_text(term_state, "fg should be light, bg should be dark\n")
-   term_state = termpane.write_text(term_state, "0123456789 abcdefghijklmnopqrstuvwxyz\n")
-   assert(termpane.visible_cell_count(term_state) > 0, "terminal visual text written")
+if probe_flags.get("TERMINAL_DUMP", false) {
+   _editor_get("term_state")["open"] = true
+   _editor_get("term_state")["focus"] = true
+   _editor_get("term_state")["mode"] = "terminal"
+   _editor_get("term_state")["tabs"] = [{"mode": "terminal", "vt": _editor_get("term_state").get("vt")}]
+   _editor_get("term_state")["active"] = 0
+   _editor_values["term_state"] = termpane.write_text(_editor_get("term_state"), "terminal visual probe\n")
+   _editor_values["term_state"] = termpane.write_text(_editor_get("term_state"), "fg should be light, bg should be dark\n")
+   _editor_values["term_state"] = termpane.write_text(_editor_get("term_state"), "0123456789 abcdefghijklmnopqrstuvwxyz\n")
+   assert(termpane.visible_cell_count(_editor_get("term_state")) > 0, "terminal visual text written")
    _set_focus("terminal")
-} elif TERMINAL_PROBE {
+} elif probe_flags.get("TERMINAL", false) {
    if common.env_truthy("NY_UI_HEADLESS") {
-      term_state["open"] = true
-      term_state["focus"] = true
-      term_state["mode"] = "terminal"
-      term_state["tabs"] = [{"mode": "terminal", "vt": term_state.get("vt")}]
-      term_state["active"] = 0
-      term_state = termpane.write_text(term_state, "EDITOR TERMINAL OK\n")
+      _editor_get("term_state")["open"] = true
+      _editor_get("term_state")["focus"] = true
+      _editor_get("term_state")["mode"] = "terminal"
+      _editor_get("term_state")["tabs"] = [{"mode": "terminal", "vt": _editor_get("term_state").get("vt")}]
+      _editor_get("term_state")["active"] = 0
+      _editor_values["term_state"] = termpane.write_text(_editor_get("term_state"), "EDITOR TERMINAL OK\n")
    } else {
-      term_state = termpane.open_shell(term_state)
-      term_state = termpane.write_text(term_state, "EDITOR TERMINAL OK\n")
-      term_state = termpane.send_text(term_state, "printf 'cwd: '; pwd\n")
+      _editor_values["term_state"] = termpane.open_shell(_editor_get("term_state"))
+      _editor_values["term_state"] = termpane.write_text(_editor_get("term_state"), "EDITOR TERMINAL OK\n")
+      _editor_values["term_state"] = termpane.send_text(_editor_get("term_state"), "printf 'cwd: '; pwd\n")
    }
    _set_focus("terminal")
 }
 
-if SYNTAX_PROBE {
+if probe_flags.get("SYNTAX", false) {
    def probe = "fn main() int { return 1 + value_name }"
    def runs = _syntax_runs("probe.ny", probe, 0)
    assert(_syntax_runs_text(runs) == probe, "syntax highlight preserves full line")
    assert(float(runs.get(0, []).get(2, -1.0)) == 0.0, "first syntax run starts at column zero")
-   def old_buffers = st.get("buffers", [])
-   def old_active = int(st.get("active", 0))
-   st["buffers"] = [ed.buffer("readme.md", "", "```ny\nfn main() int { return 1 }\n```")]
-   st["active"] = 0
+   def old_buffers = _editor_get("st").get("buffers", [])
+   def old_active = int(_editor_get("st").get("active", 0))
+   _editor_get("st")["buffers"] = [ed.buffer("readme.md", "", "```ny\nfn main() int { return 1 }\n```")]
+   _editor_get("st")["active"] = 0
    def md_runs = _syntax_runs("readme.md", "fn main() int { return 1 }", 1)
    assert(_syntax_runs_text(md_runs) == "fn main() int { return 1 }", "markdown ny fence preserves line")
    assert(md_runs.len > 0 && int(md_runs.get(0, []).get(1, syntax.TOK_TEXT)) == int(syntax.TOK_KEYWORD), "markdown ny fence uses nytrix syntax")
-   st["buffers"] = old_buffers
-   st["active"] = old_active
+   _editor_get("st")["buffers"] = old_buffers
+   _editor_get("st")["active"] = old_active
    mut big = []
    mut bi = 0
    while bi < BIG_FILE_LINES + 12 {
@@ -7469,266 +7498,266 @@ if SYNTAX_PROBE {
       bi += 1
    }
    _prepare_visible_runs(big, "huge.ny", BIG_FILE_LINES + 4, 4, 10.0, 10.0, 0.0, 180, false, true)
-   assert(visible_text_runs_cache.len > 3 && int(visible_text_runs_cache.get(3, U_TEXT)) == U_KEYWORD, "big file visible syntax stays highlighted")
+   assert(_editor_get("visible_text_runs_cache").len > 3 && int(_editor_get("visible_text_runs_cache").get(3, U_TEXT)) == U_KEYWORD, "big file visible syntax stays highlighted")
    assert(to_str(colorpicker.scan_hex_literal("bg: #b6a0ff;", 6).get("hex", "")) == "#b6a0ff", "hex color literal scanner")
    assert(to_str(colorpicker.scan_hex_literal("fg: #acf;", 6).get("hex", "")) == "#aaccff", "short hex color literal scanner")
-   window.set_should_close(win, true)
+   window.set_should_close(_editor_get("win"), true)
 }
 
-if MODELINE_PROBE {
+if probe_flags.get("MODELINE", false) {
    def safe = _modeline_safe("ok \tbox " + chr(0x03BB) + chr(0x2192) + chr(0x2713))
    assert(_modeline_utf8_clean(safe) && str.utf8_valid(safe), "modeline preserves valid utf8 and strips controls")
    assert(str.utf8_valid(_preview_modeline(safe, 36.0)), "modeline clips on utf8 boundaries")
-   window.set_should_close(win, true)
+   window.set_should_close(_editor_get("win"), true)
 }
 
-if TEXTGRID_PROBE {
+if probe_flags.get("TEXTGRID", false) {
    def row0 = _editor_row_y(32.0, 0)
    def row1 = _editor_row_y(32.0, 1)
    def baseline = _editor_row_baseline_y(row0)
-   def body_y = _row_text_y_from_baseline(font_body, baseline, ed.LINE_H)
-   def num_y = _row_text_y_from_baseline(font_small, baseline, ed.LINE_H)
+   def body_y = _row_text_y_from_baseline(int(_editor_get("font_body")), baseline, ed.LINE_H)
+   def num_y = _row_text_y_from_baseline(int(_editor_get("font_small")), baseline, ed.LINE_H)
    assert(row1 - row0 == float(ed.LINE_H), "textgrid row origin stable")
    assert(_snap_px(row0) == row0 && _snap_px(body_y) == body_y && _snap_px(num_y) == num_y, "textgrid rows snap to pixels")
-   assert(_snap_px(body_y + _font_ascent_px(font_body, ed.LINE_H)) == baseline, "textgrid code baseline")
-   assert(_snap_px(num_y + _font_ascent_px(font_small, ed.LINE_H)) == baseline, "textgrid line-number baseline")
-   assert(FONT_BODY_ADV >= 2.0 && FONT_BODY_ADV <= float(font_body_size) * 2.0, "textgrid body mono cell")
-   def int cell = int(FONT_BODY_ADV)
+   assert(_snap_px(body_y + _font_ascent_px(int(_editor_get("font_body")), ed.LINE_H)) == baseline, "textgrid code baseline")
+   assert(_snap_px(num_y + _font_ascent_px(int(_editor_get("font_small")), ed.LINE_H)) == baseline, "textgrid line-number baseline")
+   assert(float(_editor_get("FONT_BODY_ADV")) >= 2.0 && float(_editor_get("FONT_BODY_ADV")) <= float(int(_editor_get("font_body_size"))) * 2.0, "textgrid body mono cell")
+   def int cell = int(float(_editor_get("FONT_BODY_ADV")))
    assert(_prefix_x("1234", 4) == cell * 4, "textgrid mono cell width")
    assert(_prefix_x("x\t", 2) == cell * 4, "textgrid tab stop cell width")
-   window.set_should_close(win, true)
+   window.set_should_close(_editor_get("win"), true)
 }
 
-if IMAGE_PROBE {
-   def ib = ed.current_buffer(st)
+if probe_flags.get("IMAGE", false) {
+   def ib = ed.current_buffer(_editor_get("st"))
    assert(to_str(ib.get("kind", "")) == "image", "image probe opens a preview buffer")
    assert(_is_svg_path(_buffer_source_path(ib)), "image probe uses svg source path")
 }
 
-if TERMINAL_PROBE && common.env_truthy("NY_UI_HEADLESS") {
-   assert(termpane.is_open(term_state), "terminal pane open")
-   window.set_should_close(win, true)
+if probe_flags.get("TERMINAL", false) && common.env_truthy("NY_UI_HEADLESS") {
+   assert(termpane.is_open(_editor_get("term_state")), "terminal pane open")
+   window.set_should_close(_editor_get("win"), true)
 }
 
-while !gfx.window_should_close(win) {
+while !gfx.window_should_close(_editor_get("win")) {
    def t_frame0 = FRAME_TRACE ? ticks() : 0
    def dt = gfx.get_delta_time()
-   chord_state = chord.tick(chord_state, dt)
-   ui_state = interact.tick(ui_state, dt)
-   if termpane.is_open(term_state) { term_state = termpane.update(term_state) }
-   fps_state = ui_runtime.fps_tick(fps_state, dt)
-   def fps = ui_runtime.fps_current(fps_state, dt)
-   if int(st.get("fps", -1)) != fps { st["fps"] = fps }
-   st["frame_ms"] = dt * 1000.0
-   if float(st.get("status_timer", 0.0)) > 0.0 { st["status_timer"] = max(0.0, float(st.get("status_timer", 0.0)) - dt) }
+   _editor_values["chord_state"] = chord.tick(_editor_get("chord_state"), dt)
+   _editor_values["ui_state"] = interact.tick(_editor_get("ui_state"), dt)
+   if termpane.is_open(_editor_get("term_state")) { _editor_values["term_state"] = termpane.update(_editor_get("term_state")) }
+   _editor_values["fps_state"] = ui_runtime.fps_tick(_editor_get("fps_state"), dt)
+   def fps = ui_runtime.fps_current(_editor_get("fps_state"), dt)
+   if int(_editor_get("st").get("fps", -1)) != fps { _editor_get("st")["fps"] = fps }
+   _editor_get("st")["frame_ms"] = dt * 1000.0
+   if float(_editor_get("st").get("status_timer", 0.0)) > 0.0 { _editor_get("st")["status_timer"] = max(0.0, float(_editor_get("st").get("status_timer", 0.0)) - dt) }
    def fb = gfx.framebuffer_size_f64(START_W, START_H)
    def f64 sw = float(max(1.0, float(fb.get(0, START_W))))
    def f64 sh = float(max(1.0, float(fb.get(1, START_H))))
-   def rail_w = bool(st.get("show_hierarchy", true)) ? float(st.get("rail_w", 250.0)) : 0.0
-   def top_h = bool(st.get("show_titlebar", true)) ? TOP_H : 0.0
+   def rail_w = bool(_editor_get("st").get("show_hierarchy", true)) ? float(_editor_get("st").get("rail_w", 250.0)) : 0.0
+   def top_h = bool(_editor_get("st").get("show_titlebar", true)) ? TOP_H : 0.0
    mut lay = ed.editor_layout(sw, sh, rail_w, top_h)
    lay = _layout_with_terminal(lay, sh)
    if common.env_truthy("NYTRIX_UI_REPLAY") {
-      def replay_lines = ed.current_lines(st)
-      def replay_project_rows = project.tree(project_state)
-      print("NYTRIX_UI_APP_STATE demo=editor frame=" + to_str(frame_count + 1) +
-         " fps=" + to_str(fps) + " frame_ms=" + to_str(float(st.get("frame_ms", 0.0))) +
-         " focus=" + to_str(st.get("focus", "")) +
-         " active=" + to_str(int(st.get("active", 0))) +
-         " buffers=" + to_str(st.get("buffers", []).len) +
+      def replay_lines = ed.current_lines(_editor_get("st"))
+      def replay_project_rows = project.tree(_editor_get("project_state"))
+      print("NYTRIX_UI_APP_STATE demo=editor frame=" + to_str(int(_editor_get("frame_count")) + 1) +
+         " fps=" + to_str(fps) + " frame_ms=" + to_str(float(_editor_get("st").get("frame_ms", 0.0))) +
+         " focus=" + to_str(_editor_get("st").get("focus", "")) +
+         " active=" + to_str(int(_editor_get("st").get("active", 0))) +
+         " buffers=" + to_str(_editor_get("st").get("buffers", []).len) +
          " lines=" + to_str(replay_lines.len) +
-         " cursor=" + to_str(int(st.get("cursor_line", 0))) + ":" +
-            to_str(int(st.get("cursor_col", 0))) +
-         " scroll=" + to_str(int(st.get("scroll", 0))) +
+         " cursor=" + to_str(int(_editor_get("st").get("cursor_line", 0))) + ":" +
+            to_str(int(_editor_get("st").get("cursor_col", 0))) +
+         " scroll=" + to_str(int(_editor_get("st").get("scroll", 0))) +
          " project_rows=" + to_str(replay_project_rows.len) +
-         " hierarchy=" + to_str(bool(st.get("show_hierarchy", true))) +
-         " project=" + to_str(bool(st.get("show_project", true))) +
-         " outline=" + to_str(bool(st.get("show_outline", true))) +
-         " terminal=" + to_str(termpane.is_open(term_state)))
+         " hierarchy=" + to_str(bool(_editor_get("st").get("show_hierarchy", true))) +
+         " project=" + to_str(bool(_editor_get("st").get("show_project", true))) +
+         " outline=" + to_str(bool(_editor_get("st").get("show_outline", true))) +
+         " terminal=" + to_str(termpane.is_open(_editor_get("term_state"))))
    }
    def t_update = FRAME_TRACE ? ticks() : 0
-   if TERMINAL_DUMP_PROBE && frame_count == 0 {
-      assert(termpane.visible_cell_count(term_state) > 0, "terminal visual text survived layout")
-      print("[terminal:dump]\n" + termpane.debug_text(term_state, 3, 100))
+   if probe_flags.get("TERMINAL_DUMP", false) && int(_editor_get("frame_count")) == 0 {
+      assert(termpane.visible_cell_count(_editor_get("term_state")) > 0, "terminal visual text survived layout")
+      print("[terminal:dump]\n" + termpane.debug_text(_editor_get("term_state"), 3, 100))
    }
-   if INPUT_PROBE && !TERMINAL_PROBE && frame_count == 0 {
-      window.push_event(win, window.EVENT_KEY_PRESSED, {"key": key.KEY_RIGHT, "mods": 0})
-      window.push_event(win, window.EVENT_KEY_PRESSED, {"key": key.KEY_DOWN, "mods": 0})
-      window.push_event(win, window.EVENT_MOUSE_SCROLL, {"dy": -2.0, "x": float(lay.get("edit_x", 0.0)) + 40.0, "y": float(lay.get("edit_y", 0.0)) + 40.0})
+   if probe_flags.get("INPUT", false) && !probe_flags.get("TERMINAL", false) && int(_editor_get("frame_count")) == 0 {
+      window.push_event(_editor_get("win"), window.EVENT_KEY_PRESSED, {"key": key.KEY_RIGHT, "mods": 0})
+      window.push_event(_editor_get("win"), window.EVENT_KEY_PRESSED, {"key": key.KEY_DOWN, "mods": 0})
+      window.push_event(_editor_get("win"), window.EVENT_MOUSE_SCROLL, {"dy": -2.0, "x": float(lay.get("edit_x", 0.0)) + 40.0, "y": float(lay.get("edit_y", 0.0)) + 40.0})
    }
-   if CONTEXT_PROBE && frame_count == 0 {
+   if probe_flags.get("CONTEXT", false) && int(_editor_get("frame_count")) == 0 {
       def f64 click_x = float(lay.get("edit_x", 0.0)) + float(max(8.0, float(lay.get("edit_w", 0.0)) * 0.5))
       def f64 click_y = float(lay.get("edit_y", 0.0)) + float(max(8.0, min(42.0, float(lay.get("edit_h", 0.0)) * 0.5)))
-      window.push_event(win, window.EVENT_MOUSE_BUTTON_PRESSED, {"button": 1, "x": click_x, "y": click_y})
+      window.push_event(_editor_get("win"), window.EVENT_MOUSE_BUTTON_PRESSED, {"button": 1, "x": click_x, "y": click_y})
    }
-   if NAV_PROBE && frame_count == 0 && nav_probe_phase == 0 {
-      window.push_event(win, window.EVENT_MOUSE_BUTTON_PRESSED, {"button": MOUSE_BACK, "x": float(lay.get("edit_x", 0.0)) + 30.0, "y": float(lay.get("edit_y", 0.0)) + 30.0})
+   if probe_flags.get("NAV", false) && int(_editor_get("frame_count")) == 0 && int(_editor_get("nav_probe_phase")) == 0 {
+      window.push_event(_editor_get("win"), window.EVENT_MOUSE_BUTTON_PRESSED, {"button": MOUSE_BACK, "x": float(lay.get("edit_x", 0.0)) + 30.0, "y": float(lay.get("edit_y", 0.0)) + 30.0})
    }
-   if TAB_PROBE && frame_count == 0 {
-      def tab_w_probe = _top_tab_w(sw, st.get("buffers", []).len)
-      window.push_event(win, window.EVENT_MOUSE_BUTTON_PRESSED, {"button": 0, "x": 6.0 + tab_w_probe + 18.0, "y": 10.0})
+   if probe_flags.get("TAB", false) && int(_editor_get("frame_count")) == 0 {
+      def tab_w_probe = _top_tab_w(sw, _editor_get("st").get("buffers", []).len)
+      window.push_event(_editor_get("win"), window.EVENT_MOUSE_BUTTON_PRESSED, {"button": 0, "x": 6.0 + tab_w_probe + 18.0, "y": 10.0})
    }
-   if TAB_PROBE && frame_count == 1 {
-      window.push_event(win, window.EVENT_MOUSE_BUTTON_PRESSED, {"button": 0, "x": 18.0, "y": 10.0})
+   if probe_flags.get("TAB", false) && int(_editor_get("frame_count")) == 1 {
+      window.push_event(_editor_get("win"), window.EVENT_MOUSE_BUTTON_PRESSED, {"button": 0, "x": 18.0, "y": 10.0})
    }
-   if GIT_PROBE && frame_count == 0 {
+   if probe_flags.get("GIT", false) && int(_editor_get("frame_count")) == 0 {
       def tab_w_git = rail_w / 3.0
       def rail_x_probe = float(lay.get("rail_x", 0.0))
       def rail_y_probe = float(lay.get("rail_y", 0.0))
-      window.push_event(win, window.EVENT_MOUSE_BUTTON_PRESSED, {"button": 0, "x": rail_x_probe + tab_w_git * 2.0 + 12.0, "y": rail_y_probe + 10.0})
+      window.push_event(_editor_get("win"), window.EVENT_MOUSE_BUTTON_PRESSED, {"button": 0, "x": rail_x_probe + tab_w_git * 2.0 + 12.0, "y": rail_y_probe + 10.0})
    }
-   if UNDO_PROBE && frame_count == 0 {
-      window.push_event(win, window.EVENT_KEY_CHAR, {"char": 98, "mods": 0})
-      window.push_event(win, window.EVENT_KEY_PRESSED, {"key": key.KEY_Z, "mods": key.MOD_CONTROL})
+   if probe_flags.get("UNDO", false) && int(_editor_get("frame_count")) == 0 {
+      window.push_event(_editor_get("win"), window.EVENT_KEY_CHAR, {"char": 98, "mods": 0})
+      window.push_event(_editor_get("win"), window.EVENT_KEY_PRESSED, {"key": key.KEY_Z, "mods": key.MOD_CONTROL})
    }
-   if ESCAPE_PROBE && frame_count == 0 {
-      window.push_event(win, window.EVENT_KEY_PRESSED, {"key": key.KEY_ESCAPE, "mods": 0})
-      window.push_event(win, window.EVENT_KEY_CHAR, {"char": 27, "mods": 0})
+   if probe_flags.get("ESCAPE", false) && int(_editor_get("frame_count")) == 0 {
+      window.push_event(_editor_get("win"), window.EVENT_KEY_PRESSED, {"key": key.KEY_ESCAPE, "mods": 0})
+      window.push_event(_editor_get("win"), window.EVENT_KEY_CHAR, {"char": 27, "mods": 0})
    }
-   if ESCAPE_PROBE && frame_count == 1 {
-      window.push_event(win, window.EVENT_KEY_PRESSED, {"key": key.KEY_ESCAPE, "mods": 0})
-      window.push_event(win, window.EVENT_KEY_CHAR, {"char": 27, "mods": 0})
+   if probe_flags.get("ESCAPE", false) && int(_editor_get("frame_count")) == 1 {
+      window.push_event(_editor_get("win"), window.EVENT_KEY_PRESSED, {"key": key.KEY_ESCAPE, "mods": 0})
+      window.push_event(_editor_get("win"), window.EVENT_KEY_CHAR, {"char": 27, "mods": 0})
    }
-   if CHORD_PROBE && frame_count == 0 {
-      window.push_event(win, window.EVENT_KEY_PRESSED, {"key": key.KEY_SPACE, "mods": key.MOD_CONTROL})
-      window.push_event(win, window.EVENT_KEY_CHAR, {"char": 32, "mods": key.MOD_CONTROL})
-      window.push_event(win, window.EVENT_KEY_PRESSED, {"key": key.KEY_R, "mods": 0})
-      window.push_event(win, window.EVENT_KEY_CHAR, {"char": 114, "mods": 0})
-      window.push_event(win, window.EVENT_KEY_PRESSED, {"key": key.KEY_R, "mods": 0})
-      window.push_event(win, window.EVENT_KEY_CHAR, {"char": 114, "mods": 0})
-      window.push_event(win, window.EVENT_KEY_PRESSED, {"key": key.KEY_C, "mods": key.MOD_CONTROL})
-      window.push_event(win, window.EVENT_KEY_PRESSED, {"key": key.KEY_R, "mods": 0})
-      window.push_event(win, window.EVENT_KEY_CHAR, {"char": 114, "mods": 0})
-      window.push_event(win, window.EVENT_KEY_PRESSED, {"key": key.KEY_R, "mods": 0})
-      window.push_event(win, window.EVENT_KEY_CHAR, {"char": 114, "mods": 0})
+   if probe_flags.get("CHORD", false) && int(_editor_get("frame_count")) == 0 {
+      window.push_event(_editor_get("win"), window.EVENT_KEY_PRESSED, {"key": key.KEY_SPACE, "mods": key.MOD_CONTROL})
+      window.push_event(_editor_get("win"), window.EVENT_KEY_CHAR, {"char": 32, "mods": key.MOD_CONTROL})
+      window.push_event(_editor_get("win"), window.EVENT_KEY_PRESSED, {"key": key.KEY_R, "mods": 0})
+      window.push_event(_editor_get("win"), window.EVENT_KEY_CHAR, {"char": 114, "mods": 0})
+      window.push_event(_editor_get("win"), window.EVENT_KEY_PRESSED, {"key": key.KEY_R, "mods": 0})
+      window.push_event(_editor_get("win"), window.EVENT_KEY_CHAR, {"char": 114, "mods": 0})
+      window.push_event(_editor_get("win"), window.EVENT_KEY_PRESSED, {"key": key.KEY_C, "mods": key.MOD_CONTROL})
+      window.push_event(_editor_get("win"), window.EVENT_KEY_PRESSED, {"key": key.KEY_R, "mods": 0})
+      window.push_event(_editor_get("win"), window.EVENT_KEY_CHAR, {"char": 114, "mods": 0})
+      window.push_event(_editor_get("win"), window.EVENT_KEY_PRESSED, {"key": key.KEY_R, "mods": 0})
+      window.push_event(_editor_get("win"), window.EVENT_KEY_CHAR, {"char": 114, "mods": 0})
    }
-   if SCROLLBAR_PROBE && frame_count == 0 {
+   if probe_flags.get("SCROLLBAR", false) && int(_editor_get("frame_count")) == 0 {
       def sx = float(lay.get("edit_x", 0.0)) + float(lay.get("edit_w", 0.0)) - 8.0
       def sy1 = float(lay.get("edit_y", 0.0)) + float(lay.get("edit_h", 0.0)) - 18.0
-      window.push_event(win, window.EVENT_MOUSE_BUTTON_PRESSED, {"button": 0, "x": sx, "y": sy1})
-      window.push_event(win, window.EVENT_MOUSE_POS_CHANGED, {"x": sx, "y": sy1})
-      window.push_event(win, window.EVENT_MOUSE_BUTTON_RELEASED, {"button": 0, "x": sx, "y": sy1})
+      window.push_event(_editor_get("win"), window.EVENT_MOUSE_BUTTON_PRESSED, {"button": 0, "x": sx, "y": sy1})
+      window.push_event(_editor_get("win"), window.EVENT_MOUSE_POS_CHANGED, {"x": sx, "y": sy1})
+      window.push_event(_editor_get("win"), window.EVENT_MOUSE_BUTTON_RELEASED, {"button": 0, "x": sx, "y": sy1})
    }
    _process_events(lay)
    def t_events = FRAME_TRACE ? ticks() : 0
    _editor_omni_dump(lay, sw, sh)
-   if INPUT_PROBE && !TERMINAL_PROBE && frame_count == 0 {
+   if probe_flags.get("INPUT", false) && !probe_flags.get("TERMINAL", false) && int(_editor_get("frame_count")) == 0 {
       if INPUT_TRACE {
-         print("[editor:probe] line=" + to_str(int(st.get("cursor_line", -1))) + " col=" + to_str(int(st.get("cursor_col", -1))) + " scroll=" + to_str(int(st.get("scroll", -1))) + " follow=" + to_str(bool(st.get("scroll_follow", true))))
+         print("[editor:probe] line=" + to_str(int(_editor_get("st").get("cursor_line", -1))) + " col=" + to_str(int(_editor_get("st").get("cursor_col", -1))) + " scroll=" + to_str(int(_editor_get("st").get("scroll", -1))) + " follow=" + to_str(bool(_editor_get("st").get("scroll_follow", true))))
       }
-      assert(int(st.get("cursor_line", -1)) == 1 && int(st.get("cursor_col", -1)) == 1 && int(st.get("scroll", 0)) > 0 && !bool(st.get("scroll_follow", true)), "editor input movement")
-      window.set_should_close(win, true)
+      assert(int(_editor_get("st").get("cursor_line", -1)) == 1 && int(_editor_get("st").get("cursor_col", -1)) == 1 && int(_editor_get("st").get("scroll", 0)) > 0 && !bool(_editor_get("st").get("scroll_follow", true)), "editor input movement")
+      window.set_should_close(_editor_get("win"), true)
    }
-   if CONTEXT_PROBE && frame_count == 0 {
-      assert(prompt.context_is_open(context_state), "editor right-click context")
-      assert(to_str(prompt.context_entry(context_state).get("scope", "")) == "editor", "editor context scope")
-      window.set_should_close(win, true)
+   if probe_flags.get("CONTEXT", false) && int(_editor_get("frame_count")) == 0 {
+      assert(prompt.context_is_open(_editor_get("context_state")), "editor right-click context")
+      assert(to_str(prompt.context_entry(_editor_get("context_state")).get("scope", "")) == "editor", "editor context scope")
+      window.set_should_close(_editor_get("win"), true)
    }
-   if NAV_PROBE {
-      if nav_probe_phase == 0 {
-         assert(int(st.get("active", -1)) == 0, "mouse back navigation")
-         nav_probe_phase = 1
-         window.push_event(win, window.EVENT_MOUSE_BUTTON_PRESSED, {"button": MOUSE_FORWARD, "x": float(lay.get("edit_x", 0.0)) + 30.0, "y": float(lay.get("edit_y", 0.0)) + 30.0})
-      } elif nav_probe_phase == 1 {
-         assert(int(st.get("active", -1)) == 1, "mouse forward navigation")
-         window.set_should_close(win, true)
+   if probe_flags.get("NAV", false) {
+      if int(_editor_get("nav_probe_phase")) == 0 {
+         assert(int(_editor_get("st").get("active", -1)) == 0, "mouse back navigation")
+         _editor_values["nav_probe_phase"] = 1
+         window.push_event(_editor_get("win"), window.EVENT_MOUSE_BUTTON_PRESSED, {"button": MOUSE_FORWARD, "x": float(lay.get("edit_x", 0.0)) + 30.0, "y": float(lay.get("edit_y", 0.0)) + 30.0})
+      } elif int(_editor_get("nav_probe_phase")) == 1 {
+         assert(int(_editor_get("st").get("active", -1)) == 1, "mouse forward navigation")
+         window.set_should_close(_editor_get("win"), true)
       }
    }
-   if TAB_PROBE && frame_count == 0 {
-      assert(int(st.get("active", -1)) == 1, "top tab selects second buffer")
-      assert(force_full_redraw > 0, "top tab switch requests redraw")
+   if probe_flags.get("TAB", false) && int(_editor_get("frame_count")) == 0 {
+      assert(int(_editor_get("st").get("active", -1)) == 1, "top tab selects second buffer")
+      assert(int(_editor_get("force_full_redraw")) > 0, "top tab switch requests redraw")
    }
-   if TAB_PROBE && frame_count == 1 {
-      assert(int(st.get("active", -1)) == 0, "top tab selects first buffer")
-      window.set_should_close(win, true)
+   if probe_flags.get("TAB", false) && int(_editor_get("frame_count")) == 1 {
+      assert(int(_editor_get("st").get("active", -1)) == 0, "top tab selects first buffer")
+      window.set_should_close(_editor_get("win"), true)
    }
-   if GIT_PROBE && frame_count == 0 {
+   if probe_flags.get("GIT", false) && int(_editor_get("frame_count")) == 0 {
       assert(_rail_tab() == "git", "git rail tab selected")
-      assert(bool(st.get("git_loaded", false)), "git tab status loaded")
-      assert(force_full_redraw > 0, "git tab requests redraw")
-      window.set_should_close(win, true)
+      assert(bool(_editor_get("st").get("git_loaded", false)), "git tab status loaded")
+      assert(int(_editor_get("force_full_redraw")) > 0, "git tab requests redraw")
+      window.set_should_close(_editor_get("win"), true)
    }
-   if UNDO_PROBE && frame_count == 0 {
+   if probe_flags.get("UNDO", false) && int(_editor_get("frame_count")) == 0 {
       assert(_current_text() == "a", "ctrl-z undo")
-      window.set_should_close(win, true)
+      window.set_should_close(_editor_get("win"), true)
    }
-   if ESCAPE_PROBE && frame_count == 0 {
-      assert(bool(st.get("quit_prompt", false)) && !window.should_close(win), "first esc prompts")
+   if probe_flags.get("ESCAPE", false) && int(_editor_get("frame_count")) == 0 {
+      assert(bool(_editor_get("st").get("quit_prompt", false)) && !window.should_close(_editor_get("win")), "first esc prompts")
    }
-   if ESCAPE_PROBE && frame_count == 1 {
-      assert(window.should_close(win), "esc esc closes editor")
+   if probe_flags.get("ESCAPE", false) && int(_editor_get("frame_count")) == 1 {
+      assert(window.should_close(_editor_get("win")), "esc esc closes editor")
    }
-   if CHORD_PROBE && frame_count == 0 {
+   if probe_flags.get("CHORD", false) && int(_editor_get("frame_count")) == 0 {
       assert(_current_text() == "", "command chord chars do not insert")
-      window.set_should_close(win, true)
+      window.set_should_close(_editor_get("win"), true)
    }
-   if SCROLLBAR_PROBE && frame_count == 0 {
-      assert(int(st.get("scroll", 0)) > 0 && !bool(st.get("scroll_follow", true)), "editor scrollbar drag scrolls")
-      window.set_should_close(win, true)
+   if probe_flags.get("SCROLLBAR", false) && int(_editor_get("frame_count")) == 0 {
+      assert(int(_editor_get("st").get("scroll", 0)) > 0 && !bool(_editor_get("st").get("scroll_follow", true)), "editor scrollbar drag scrolls")
+      window.set_should_close(_editor_get("win"), true)
    }
-   if TERMINAL_PROBE && frame_count >= 18 { window.set_should_close(win, true) }
-   if TERMINAL_DUMP_PROBE && frame_count >= int(max(12, auto_dump_delay + 3)) { window.set_should_close(win, true) }
-   def mp = window.mouse_pos(win)
+   if probe_flags.get("TERMINAL", false) && int(_editor_get("frame_count")) >= 18 { window.set_should_close(_editor_get("win"), true) }
+   if probe_flags.get("TERMINAL_DUMP", false) && int(_editor_get("frame_count")) >= int(max(12, auto_dump_delay + 3)) { window.set_should_close(_editor_get("win"), true) }
+   def mp = window.mouse_pos(_editor_get("win"))
    def mpx = float(mp.get(0, 0.0))
    def mpy = float(mp.get(1, 0.0))
-   if _dock_resize_hit(lay, mpx, mpy) || st.get("drag_terminal", false) {
+   if _dock_resize_hit(lay, mpx, mpy) || _editor_get("st").get("drag_terminal", false) {
       _set_cursor_kind("resize-ns")
-   } elif ed.divider_hit(lay, mpx, mpy) || st.get("drag_divider", false) {
+   } elif ed.divider_hit(lay, mpx, mpy) || _editor_get("st").get("drag_divider", false) {
       _set_cursor_kind("resize-ew")
    } else {
       _set_cursor_kind("text")
    }
-   frame_events_seen = frame_events_seen || st.get("drag_terminal", false) || st.get("drag_divider", false) || st.get("drag_select", false) || st.get("drag_scrollbar", false)
-   reuse_state = ui_reuse.note_events_seen(reuse_state, frame_events_seen)
+   _editor_values["frame_events_seen"] = bool(_editor_get("frame_events_seen")) || _editor_get("st").get("drag_terminal", false) || _editor_get("st").get("drag_divider", false) || _editor_get("st").get("drag_select", false) || _editor_get("st").get("drag_scrollbar", false)
+   _editor_values["reuse_state"] = ui_reuse.note_events_seen(_editor_get("reuse_state"), bool(_editor_get("frame_events_seen")))
    def reuse_opts = _editor_reuse_opts(sw, sh)
-   if ui_reuse.try_present(reuse_state, reuse_opts) {
-      reuse_present_count += 1
-      if BENCH_PROBE {
-         frame_count += 1
-         if frame_count >= BENCH_FRAME_LIMIT { window.set_should_close(win, true) }
+   if ui_reuse.try_present(_editor_get("reuse_state"), reuse_opts) {
+      _editor_values["reuse_present_count"] = int(_editor_get("reuse_present_count")) + (1)
+      if probe_flags.get("BENCH", false) {
+         _editor_values["frame_count"] = int(_editor_get("frame_count")) + (1)
+         if int(_editor_get("frame_count")) >= BENCH_FRAME_LIMIT { window.set_should_close(_editor_get("win"), true) }
       } else {
-         frame_count += 1
+         _editor_values["frame_count"] = int(_editor_get("frame_count")) + (1)
       }
-      ui_runtime.close_on_timeout(win, int(fps_state.get("start", 0)), timeout_limit)
+      ui_runtime.close_on_timeout(_editor_get("win"), int(_editor_get("fps_state").get("start", 0)), timeout_limit)
       continue
    }
    if !gfx.begin_frame_clear(C_BG) {
-      begin_fail_count += 1
-      if BENCH_PROBE {
-         frame_count += 1
-         if frame_count >= BENCH_FRAME_LIMIT { window.set_should_close(win, true) }
+      _editor_values["begin_fail_count"] = int(_editor_get("begin_fail_count")) + (1)
+      if probe_flags.get("BENCH", false) {
+         _editor_values["frame_count"] = int(_editor_get("frame_count")) + (1)
+         if int(_editor_get("frame_count")) >= BENCH_FRAME_LIMIT { window.set_should_close(_editor_get("win"), true) }
       } else {
          _status("renderer begin failed on " + gfx.get_active_backend_name() + "; retrying")
-         if begin_fail_count >= BEGIN_FAIL_LIMIT {
+         if int(_editor_get("begin_fail_count")) >= BEGIN_FAIL_LIMIT {
             _status("renderer begin failed repeatedly; closing safely")
-            window.set_should_close(win, true)
+            window.set_should_close(_editor_get("win"), true)
          }
       }
-      ui_runtime.close_on_timeout(win, int(fps_state.get("start", 0)), timeout_limit)
+      ui_runtime.close_on_timeout(_editor_get("win"), int(_editor_get("fps_state").get("start", 0)), timeout_limit)
       continue
    }
    def t_begin = FRAME_TRACE ? ticks() : 0
-   begin_fail_count = 0
+   _editor_values["begin_fail_count"] = 0
    gfx.set_ortho_2d(0.0, sw, 0.0, sh)
    def caret = int(gfx.get_time() / CARET_BLINK_SEC) % 2 == 0
-   if bool(st.get("show_titlebar", true)) { _draw_top(lay, fps) }
+   if bool(_editor_get("st").get("show_titlebar", true)) { _draw_top(lay, fps) }
    def t_top = FRAME_TRACE ? ticks() : 0
-   if bool(st.get("show_hierarchy", true)) { _draw_rail(lay) }
+   if bool(_editor_get("st").get("show_hierarchy", true)) { _draw_rail(lay) }
    def t_rail = FRAME_TRACE ? ticks() : 0
    _draw_editor(lay, caret)
    def t_editor = FRAME_TRACE ? ticks() : 0
    _draw_terminal(lay)
    def t_terminal = FRAME_TRACE ? ticks() : 0
-   if bool(st.get("show_status", true)) { _draw_status(lay) }
+   if bool(_editor_get("st").get("show_status", true)) { _draw_status(lay) }
    def t_status = FRAME_TRACE ? ticks() : 0
-   if st.get("quit_prompt", false) {
+   if _editor_get("st").get("quit_prompt", false) {
       def f64 pw = 240.0
       def f64 ph = 72.0
       def f64 px = float(sw) * 0.5 - float(pw) * 0.5
       def f64 py = float(sh) * 0.5 - float(ph) * 0.5
       _fill_rect(px, py, pw, ph, gfx.color_alpha(C_RAIL, 0.96))
       _stroke_rect(px, py, pw, ph, C_ACCENT, 2.0)
-      _text_center(font_body, "Quit? Esc again", px + pw * 0.5, py + 26.0, C_TEXT)
+      _text_center(int(_editor_get("font_body")), "Quit? Esc again", px + pw * 0.5, py + 26.0, C_TEXT)
    }
    _draw_context_menu(sw, sh)
    _draw_rename_prompt(sw, sh)
@@ -7738,53 +7767,53 @@ while !gfx.window_should_close(win) {
    _draw_palette(sw, sh)
    _draw_which_key(sw, sh)
    def t_draw = FRAME_TRACE ? ticks() : 0
-   _trace_draw(frame_count, t_begin, t_top, t_rail, t_editor, t_terminal, t_status, t_draw)
+   _trace_draw(int(_editor_get("frame_count")), t_begin, t_top, t_rail, t_editor, t_terminal, t_status, t_draw)
    _flush_rects()
    def t_flush = FRAME_TRACE ? ticks() : 0
-   ui_dump.auto_dump_pre_frame(auto_dump_done, frame_count, auto_dump_delay)
-   if FRAME_HASH && frame_count + 1 >= FRAME_HASH_FRAME { gfx.request_frame_capture() }
+   ui_dump.auto_dump_pre_frame(bool(_editor_get("auto_dump_done")), int(_editor_get("frame_count")), auto_dump_delay)
+   if FRAME_HASH && int(_editor_get("frame_count")) + 1 >= FRAME_HASH_FRAME { gfx.request_frame_capture() }
    gfx.end_frame()
    def t_end = FRAME_TRACE ? ticks() : 0
-   if FRAME_HASH && !frame_hash_done && frame_count >= FRAME_HASH_FRAME {
+   if FRAME_HASH && !bool(_editor_get("frame_hash_done")) && int(_editor_get("frame_count")) >= FRAME_HASH_FRAME {
       def hash_line = ui_dump.framebuffer_hash_line()
       if hash_line.len > 0 {
-         frame_hash_done = true
-         print("[editor:framehash] frame=" + to_str(frame_count) + " " + hash_line)
+         _editor_values["frame_hash_done"] = true
+         print("[editor:framehash] frame=" + to_str(int(_editor_get("frame_count"))) + " " + hash_line)
          if FRAME_HASH_EXPECT.len > 0 && !str.str_contains(hash_line, FRAME_HASH_EXPECT) {
             print("[editor:framehash:mismatch] expected=" + FRAME_HASH_EXPECT + " got=" + hash_line)
-            window.set_should_close(win, true)
+            window.set_should_close(_editor_get("win"), true)
          }
-         if !common.env_truthy("NY_EDITOR_FRAME_HASH_EVERY") { window.set_should_close(win, true) }
-      } elif frame_count >= FRAME_HASH_FRAME + 4 {
-         frame_hash_done = true
-         print("[editor:framehash] frame=" + to_str(frame_count) + " unavailable backend=" + gfx.get_active_backend_name())
-         window.set_should_close(win, true)
+         if !common.env_truthy("NY_EDITOR_FRAME_HASH_EVERY") { window.set_should_close(_editor_get("win"), true) }
+      } elif int(_editor_get("frame_count")) >= FRAME_HASH_FRAME + 4 {
+         _editor_values["frame_hash_done"] = true
+         print("[editor:framehash] frame=" + to_str(int(_editor_get("frame_count"))) + " unavailable backend=" + gfx.get_active_backend_name())
+         window.set_should_close(_editor_get("win"), true)
       }
    }
-   reuse_state = ui_reuse.note_full_draw(reuse_state, reuse_opts)
-   if force_full_redraw > 0 { force_full_redraw -= 1 }
-   _trace_frame(frame_count, t_frame0, t_update, t_events, t_begin, t_draw, t_flush, t_end)
-   frame_count += 1
-   if BENCH_PROBE && BENCH_WARMUP_FRAMES > 0 && frame_count == BENCH_WARMUP_FRAMES {
-      fps_state = ui_runtime.fps_begin()
+   _editor_values["reuse_state"] = ui_reuse.note_full_draw(_editor_get("reuse_state"), reuse_opts)
+   if int(_editor_get("force_full_redraw")) > 0 { _editor_values["force_full_redraw"] = int(_editor_get("force_full_redraw")) - (1) }
+   _trace_frame(int(_editor_get("frame_count")), t_frame0, t_update, t_events, t_begin, t_draw, t_flush, t_end)
+   _editor_values["frame_count"] = int(_editor_get("frame_count")) + (1)
+   if probe_flags.get("BENCH", false) && BENCH_WARMUP_FRAMES > 0 && int(_editor_get("frame_count")) == BENCH_WARMUP_FRAMES {
+      _editor_values["fps_state"] = ui_runtime.fps_begin()
    }
-   if IMAGE_PROBE && frame_count >= 2 { window.set_should_close(win, true) }
-   if BENCH_PROBE && frame_count >= BENCH_FRAME_LIMIT { window.set_should_close(win, true) }
-   if common.env_truthy("NYTRIX_UI_REPLAY") && frame_count >= common.env_int_clamped("NYTRIX_FIXTURE_FRAMES", 3, 1, 100000) {
-      window.set_should_close(win, true)
+   if probe_flags.get("IMAGE", false) && int(_editor_get("frame_count")) >= 2 { window.set_should_close(_editor_get("win"), true) }
+   if probe_flags.get("BENCH", false) && int(_editor_get("frame_count")) >= BENCH_FRAME_LIMIT { window.set_should_close(_editor_get("win"), true) }
+   if common.env_truthy("NYTRIX_UI_REPLAY") && int(_editor_get("frame_count")) >= common.env_int_clamped("NYTRIX_FIXTURE_FRAMES", 3, 1, 100000) {
+      window.set_should_close(_editor_get("win"), true)
    }
-   if !BENCH_PROBE && gfx.get_time() >= next_cache_save_time {
+   if !probe_flags.get("BENCH", false) && gfx.get_time() >= float(_editor_get("next_cache_save_time")) {
       _save_ui_cache()
-      next_cache_save_time = gfx.get_time() + float(CACHE_SAVE_SECONDS)
+      _editor_values["next_cache_save_time"] = gfx.get_time() + float(CACHE_SAVE_SECONDS)
    }
-   auto_dump_done = ui_dump.auto_dump_post_frame(win, auto_dump_done, frame_count, auto_dump_delay, "build/cache/fb/ui/editor.png")
-   ui_runtime.close_on_timeout(win, int(fps_state.get("start", 0)), timeout_limit)
+   _editor_values["auto_dump_done"] = ui_dump.auto_dump_post_frame(_editor_get("win"), bool(_editor_get("auto_dump_done")), int(_editor_get("frame_count")), auto_dump_delay, "build/cache/fb/ui/editor.png")
+   ui_runtime.close_on_timeout(_editor_get("win"), int(_editor_get("fps_state").get("start", 0)), timeout_limit)
 }
 
 _bench_finish()
-ui_runtime.fps_finish("editor", fps_state)
+ui_runtime.fps_finish("editor", _editor_get("fps_state"))
 _save_ui_cache()
-term_state = termpane.close(term_state)
+_editor_values["term_state"] = termpane.close(_editor_get("term_state"))
 _release_image_preview_cache()
 gfx.close_window()
 exit(0)

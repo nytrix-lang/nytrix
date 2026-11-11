@@ -14,44 +14,44 @@
 
 #if UINTPTR_MAX == 0xffffffff
 #define NY_NATIVE_RET0(fn) (int64_t)((intptr_t (*)(void))(fn))()
-#define NY_NATIVE_RET1(fn, a0)                                                 \
+#define NY_NATIVE_RET1(fn, a0)                            \
   (int64_t)((intptr_t (*)(intptr_t))(fn))((intptr_t)(a0))
-#define NY_NATIVE_RET2(fn, a0, a1)                                             \
-  (int64_t)((intptr_t (*)(intptr_t, intptr_t))(fn))((intptr_t)(a0),            \
+#define NY_NATIVE_RET2(fn, a0, a1)                                  \
+  (int64_t)((intptr_t (*)(intptr_t, intptr_t))(fn))((intptr_t)(a0), \
                                                     (intptr_t)(a1))
-#define NY_NATIVE_RET3(fn, a0, a1, a2)                                         \
-  (int64_t)((intptr_t (*)(intptr_t, intptr_t, intptr_t))(fn))(                 \
+#define NY_NATIVE_RET3(fn, a0, a1, a2)                         \
+  (int64_t)((intptr_t (*)(intptr_t, intptr_t, intptr_t))(fn))( \
       (intptr_t)(a0), (intptr_t)(a1), (intptr_t)(a2))
-#define NY_NATIVE_RET4(fn, a0, a1, a2, a3)                                     \
-  (int64_t)((intptr_t (*)(intptr_t, intptr_t, intptr_t, intptr_t))(fn))(       \
+#define NY_NATIVE_RET4(fn, a0, a1, a2, a3)                               \
+  (int64_t)((intptr_t (*)(intptr_t, intptr_t, intptr_t, intptr_t))(fn))( \
       (intptr_t)(a0), (intptr_t)(a1), (intptr_t)(a2), (intptr_t)(a3))
-#define NY_NATIVE_RET5(fn, a0, a1, a2, a3, a4)                                 \
-  (int64_t)((intptr_t (*)(intptr_t, intptr_t, intptr_t, intptr_t, intptr_t))(  \
-      fn))((intptr_t)(a0), (intptr_t)(a1), (intptr_t)(a2), (intptr_t)(a3),     \
+#define NY_NATIVE_RET5(fn, a0, a1, a2, a3, a4)                                \
+  (int64_t)((intptr_t (*)(intptr_t, intptr_t, intptr_t, intptr_t, intptr_t))( \
+      fn))((intptr_t)(a0), (intptr_t)(a1), (intptr_t)(a2), (intptr_t)(a3),    \
            (intptr_t)(a4))
-#define NY_NATIVE_RET6(fn, a0, a1, a2, a3, a4, a5)                             \
-  (int64_t)((intptr_t (*)(intptr_t, intptr_t, intptr_t, intptr_t, intptr_t,    \
-                          intptr_t))(fn))((intptr_t)(a0), (intptr_t)(a1),      \
-                                          (intptr_t)(a2), (intptr_t)(a3),      \
+#define NY_NATIVE_RET6(fn, a0, a1, a2, a3, a4, a5)                          \
+  (int64_t)((intptr_t (*)(intptr_t, intptr_t, intptr_t, intptr_t, intptr_t, \
+                          intptr_t))(fn))((intptr_t)(a0), (intptr_t)(a1),   \
+                                          (intptr_t)(a2), (intptr_t)(a3),   \
                                           (intptr_t)(a4), (intptr_t)(a5))
 #else
 #define NY_NATIVE_RET0(fn) ((int64_t (*)(void))(fn))()
 #define NY_NATIVE_RET1(fn, a0) ((int64_t (*)(int64_t))(fn))((int64_t)(a0))
-#define NY_NATIVE_RET2(fn, a0, a1)                                             \
+#define NY_NATIVE_RET2(fn, a0, a1)                                    \
   ((int64_t (*)(int64_t, int64_t))(fn))((int64_t)(a0), (int64_t)(a1))
 #define NY_NATIVE_RET3(fn, a0, a1, a2)                                         \
   ((int64_t (*)(int64_t, int64_t, int64_t))(fn))((int64_t)(a0), (int64_t)(a1), \
                                                  (int64_t)(a2))
-#define NY_NATIVE_RET4(fn, a0, a1, a2, a3)                                     \
-  ((int64_t (*)(int64_t, int64_t, int64_t, int64_t))(fn))(                     \
+#define NY_NATIVE_RET4(fn, a0, a1, a2, a3)                        \
+  ((int64_t (*)(int64_t, int64_t, int64_t, int64_t))(fn))(        \
       (int64_t)(a0), (int64_t)(a1), (int64_t)(a2), (int64_t)(a3))
-#define NY_NATIVE_RET5(fn, a0, a1, a2, a3, a4)                                 \
-  ((int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t))(fn))(            \
-      (int64_t)(a0), (int64_t)(a1), (int64_t)(a2), (int64_t)(a3),              \
+#define NY_NATIVE_RET5(fn, a0, a1, a2, a3, a4)                      \
+  ((int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t))(fn))( \
+      (int64_t)(a0), (int64_t)(a1), (int64_t)(a2), (int64_t)(a3),   \
       (int64_t)(a4))
-#define NY_NATIVE_RET6(fn, a0, a1, a2, a3, a4, a5)                             \
-  ((int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t))(fn))(   \
-      (int64_t)(a0), (int64_t)(a1), (int64_t)(a2), (int64_t)(a3),              \
+#define NY_NATIVE_RET6(fn, a0, a1, a2, a3, a4, a5)                           \
+  ((int64_t (*)(int64_t, int64_t, int64_t, int64_t, int64_t, int64_t))(fn))( \
+      (int64_t)(a0), (int64_t)(a1), (int64_t)(a2), (int64_t)(a3),            \
       (int64_t)(a4), (int64_t)(a5))
 #endif
 
@@ -1187,9 +1187,9 @@ static int64_t rt_dynamic_callback_call_f64_words(int64_t fn,
 #define NY_F64_ARGS_14 NY_F64_ARGS_13, args[13]
 #define NY_F64_ARGS_15 NY_F64_ARGS_14, args[14]
 #define NY_F64_ARGS_16 NY_F64_ARGS_15, args[15]
-#define NY_F64_CASE(N)                                                         \
-  case N:                                                                      \
-    return rt_flt_box_double(                                                  \
+#define NY_F64_CASE(N)                                                   \
+  case N:                                                                \
+    return rt_flt_box_double(                                            \
         ((double (*)(NY_F64_TYPES_##N))(uintptr_t)fn)(NY_F64_ARGS_##N));
   switch (arity) {
   case 0:

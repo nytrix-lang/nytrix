@@ -1,8 +1,17 @@
+/*
+ * Host-side oracle for anonymous struct and union member layout.
+ */
 struct nyc_anonymous_box {
   long guard;
   union {
-    struct { long correct; long incorrect; };
-    struct { long miss; long hit; };
+    struct {
+      long correct;
+      long incorrect;
+    };
+    struct {
+      long miss;
+      long hit;
+    };
     long miss_hit[2];
   };
 };

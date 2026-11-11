@@ -1,3 +1,4 @@
+/* File hashing interface that returns a prefixed lowercase SHA-256 digest. */
 #pragma once
 
 #include <stdbool.h>

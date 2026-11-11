@@ -1,3 +1,6 @@
+/*
+ * C parser fixture for string concatenation in a braced narrow-char array.
+ */
 static char core_modes[] = {"file\npipe"
                             "\nsocket"};
 

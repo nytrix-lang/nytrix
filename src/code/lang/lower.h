@@ -1,3 +1,4 @@
+/* Interfaces for lowering parsed Ny syntax into backend representations. */
 #ifndef NY_CODE_LANG_LOWER_H
 #define NY_CODE_LANG_LOWER_H
 

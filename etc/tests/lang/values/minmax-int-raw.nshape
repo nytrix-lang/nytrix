@@ -1,0 +1,36 @@
+shape minmax_int_raw {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 optcheck min max raw-int]
+  template ny-test-case
+  flags_matrix "-O0 --color=never; -O3 --color=never; --native-only -O0 --color=never; --native-only -O3 --color=never; --native-backend=llvm --jit --jit-engine=mcjit --color=never"
+  expect compile_and_run
+  expect_stdout "MIN-MAX-INT-OK"
+  source ny <<'NY'
+use core
+use core.math (max, min)
+use core.os.time
+
+;; min/max of two ints must stay a raw int when it feeds list sizes, assigned
+;; int variables and nested calls; decoding a raw word as tagged halved it.
+fn clamp_into(int col, int n) int { col = min(max(col, 0), n) col }
+fn raise(int col) int { col = max(col, 0) col }
+fn fresh(int col, int n) int { def r = min(max(col, 0), n) r }
+fn sized(int n) list {
+   mut out = list(max(1, n))
+   __list_set_len(out, max(1, n))
+   out
+}
+
+def int k = (ticks() & 3) + 2
+def int n = k + 4
+assert(clamp_into(k, n) == k, "assigned parameter: clamp keeps the value")
+assert(clamp_into(-7, n) == 0, "assigned parameter: clamp raises to zero")
+assert(clamp_into(100, n) == n, "assigned parameter: clamp lowers to the limit")
+assert(raise(k) == k && raise(-3) == 0, "assigned parameter: max")
+assert(fresh(k, n) == k, "fresh local: nested min/max")
+assert(sized(3).len == 3 && sized(0).len == 1, "list length from max(1, n)")
+assert(clamp_into(1, 1) == 1 && raise(1) == 1 && sized(1).len == 1, "constant arguments")
+print("MIN-MAX-INT-OK")
+NY
+}

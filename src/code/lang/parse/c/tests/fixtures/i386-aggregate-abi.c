@@ -1,3 +1,6 @@
+/*
+ * Fixture: exercise aggregate argument and return rules for the i386 ABI.
+ */
 #include "i386-aggregate-abi.h"
 
 int nyc_i386_registers(int a, int b, int c, int d) {

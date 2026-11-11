@@ -27,6 +27,10 @@ def Meter right = Meter({"value": 23})
 def total = left + right
 assert(int(total.get("value", 0)) == 42,
        "all backends lower the uniquely resolved impl operator")
+fn make_meter(int value) Meter { Meter({"value": value}) }
+def Meter from_calls = make_meter(19) + make_meter(23)
+assert(int(from_calls.get("value", 0)) == 42,
+       "resolved operators on call results retain their reachable target")
 def Meter powered = left ** 2
 assert(int(powered.get("value", 0)) == 361, "Ny-defined power operator overload")
 def Meter alias_powered = left ^^ 2

@@ -1,3 +1,6 @@
+/*
+ * Fixture: initialize character-matrix rows from string literals.
+ */
 struct aggregate_char_matrix {
   unsigned count;
   char rows[2][8];

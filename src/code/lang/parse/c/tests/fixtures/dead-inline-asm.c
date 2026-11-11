@@ -1,3 +1,6 @@
+/*
+ * Fixture: keep unsupported inline assembly inside a dead branch.
+ */
 int main(void) {
   int value = 7;
   if (sizeof(value) == 8)

@@ -4,54 +4,54 @@
  */
 #include "core.h"
 
-#define NYTRIX_FUZZ_ALL_RUN_ONE_SHOT                                           \
-  "env NYTRIX_LOW_PRIORITY=1 NYTRIX_RUN_NICE=10 nice -n 10 ./build/ny-test "   \
-  "fuzz all run --profile insane --hours H --threads 25% "                     \
+#define NYTRIX_FUZZ_ALL_RUN_ONE_SHOT                                         \
+  "env NYTRIX_LOW_PRIORITY=1 NYTRIX_RUN_NICE=10 nice -n 10 ./build/ny-test " \
+  "fuzz all run --profile insane --hours H --threads 25% "                   \
   "--target-thread-years N --dir build/fuzz/all --fail-fast"
 #define NYTRIX_FUZZ_ALL_RUN_NEXT_PREVIEW                                       \
   "env NYTRIX_LOW_PRIORITY=1 NYTRIX_RUN_NICE=10 NYTRIX_RUN_DRY_RUN=1 nice -n " \
   "10 ./build/fuzz/all/run-next.sh"
-#define NYTRIX_FUZZ_ALL_RUN_NEXT_LOW_CPU                                       \
-  "env NYTRIX_LOW_PRIORITY=1 NYTRIX_RUN_NICE=10 nice -n 10 "                   \
+#define NYTRIX_FUZZ_ALL_RUN_NEXT_LOW_CPU                     \
+  "env NYTRIX_LOW_PRIORITY=1 NYTRIX_RUN_NICE=10 nice -n 10 " \
   "./build/fuzz/all/run-next.sh"
-#define NYTRIX_FUZZ_ALL_RUN_NEXT_GENTLE                                        \
-  "env NYTRIX_LOW_PRIORITY=1 NYTRIX_RUN_NICE=10 NYTRIX_RUN_HOURS=1 "           \
+#define NYTRIX_FUZZ_ALL_RUN_NEXT_GENTLE                              \
+  "env NYTRIX_LOW_PRIORITY=1 NYTRIX_RUN_NICE=10 NYTRIX_RUN_HOURS=1 " \
   "NYTRIX_RUN_THREADS=10% nice -n 10 ./build/fuzz/all/run-next.sh"
-#define NYTRIX_FUZZ_ALL_RUN_NEXT_GENTLE_PREVIEW                                \
-  "env NYTRIX_LOW_PRIORITY=1 NYTRIX_RUN_NICE=10 NYTRIX_RUN_DRY_RUN=1 "         \
-  "NYTRIX_RUN_HOURS=1 NYTRIX_RUN_THREADS=10% nice -n 10 "                      \
+#define NYTRIX_FUZZ_ALL_RUN_NEXT_GENTLE_PREVIEW                        \
+  "env NYTRIX_LOW_PRIORITY=1 NYTRIX_RUN_NICE=10 NYTRIX_RUN_DRY_RUN=1 " \
+  "NYTRIX_RUN_HOURS=1 NYTRIX_RUN_THREADS=10% nice -n 10 "              \
   "./build/fuzz/all/run-next.sh"
-#define NYTRIX_FUZZ_ALL_STATUS_REFRESH                                         \
-  "env NYTRIX_LOW_PRIORITY=1 NYTRIX_RUN_NICE=10 nice -n 10 ./build/ny-test "   \
-  "fuzz all status --refresh --strict --allow-full-pressure-remediation "      \
-  "--dir build/fuzz/all --history build/fuzz/all/history.json --worklist "     \
-  "build/fuzz/all/worklist.json --coverage build/fuzz/all/coverage.json "      \
-  "--plan build/fuzz/all/plan.json --target-thread-years N --hours H "         \
-  "--threads 25% --profile insane --json build/fuzz/all/status.json "          \
+#define NYTRIX_FUZZ_ALL_STATUS_REFRESH                                       \
+  "env NYTRIX_LOW_PRIORITY=1 NYTRIX_RUN_NICE=10 nice -n 10 ./build/ny-test " \
+  "fuzz all status --refresh --strict --allow-full-pressure-remediation "    \
+  "--dir build/fuzz/all --history build/fuzz/all/history.json --worklist "   \
+  "build/fuzz/all/worklist.json --coverage build/fuzz/all/coverage.json "    \
+  "--plan build/fuzz/all/plan.json --target-thread-years N --hours H "       \
+  "--threads 25% --profile insane --json build/fuzz/all/status.json "        \
   "--markdown build/fuzz/all/status.md"
-#define NYTRIX_FUZZ_ALL_PROGRESS_REFRESH                                       \
-  "env NYTRIX_LOW_PRIORITY=1 NYTRIX_RUN_NICE=10 nice -n 10 ./build/ny-test "   \
-  "fuzz all progress --refresh --strict --allow-full-pressure-remediation "    \
-  "--dir build/fuzz/all --status build/fuzz/all/status.json --history "        \
-  "build/fuzz/all/history.json --worklist build/fuzz/all/worklist.json "       \
-  "--coverage build/fuzz/all/coverage.json --plan build/fuzz/all/plan.json "   \
-  "--target-thread-years N --hours H --threads 25% --profile insane --json "   \
+#define NYTRIX_FUZZ_ALL_PROGRESS_REFRESH                                     \
+  "env NYTRIX_LOW_PRIORITY=1 NYTRIX_RUN_NICE=10 nice -n 10 ./build/ny-test " \
+  "fuzz all progress --refresh --strict --allow-full-pressure-remediation "  \
+  "--dir build/fuzz/all --status build/fuzz/all/status.json --history "      \
+  "build/fuzz/all/history.json --worklist build/fuzz/all/worklist.json "     \
+  "--coverage build/fuzz/all/coverage.json --plan build/fuzz/all/plan.json " \
+  "--target-thread-years N --hours H --threads 25% --profile insane --json " \
   "build/fuzz/all/progress.json --markdown build/fuzz/all/progress.md"
-#define NYTRIX_FUZZ_ALL_STATUS_REFRESH_EXAMPLE                                 \
-  "env NYTRIX_LOW_PRIORITY=1 NYTRIX_RUN_NICE=10 nice -n 10 ./build/ny-test "   \
-  "fuzz all status --refresh --strict --allow-full-pressure-remediation "      \
-  "--dir build/fuzz/all --history build/fuzz/all/history.json --worklist "     \
-  "build/fuzz/all/worklist.json --coverage build/fuzz/all/coverage.json "      \
-  "--plan build/fuzz/all/plan.json --target-thread-years 10 --hours 8 "        \
-  "--threads 25% --profile insane --json build/fuzz/all/status.json "          \
+#define NYTRIX_FUZZ_ALL_STATUS_REFRESH_EXAMPLE                               \
+  "env NYTRIX_LOW_PRIORITY=1 NYTRIX_RUN_NICE=10 nice -n 10 ./build/ny-test " \
+  "fuzz all status --refresh --strict --allow-full-pressure-remediation "    \
+  "--dir build/fuzz/all --history build/fuzz/all/history.json --worklist "   \
+  "build/fuzz/all/worklist.json --coverage build/fuzz/all/coverage.json "    \
+  "--plan build/fuzz/all/plan.json --target-thread-years 10 --hours 8 "      \
+  "--threads 25% --profile insane --json build/fuzz/all/status.json "        \
   "--markdown build/fuzz/all/status.md"
-#define NYTRIX_FUZZ_ALL_PROGRESS_REFRESH_EXAMPLE                               \
-  "env NYTRIX_LOW_PRIORITY=1 NYTRIX_RUN_NICE=10 nice -n 10 ./build/ny-test "   \
-  "fuzz all progress --refresh --strict --allow-full-pressure-remediation "    \
-  "--dir build/fuzz/all --status build/fuzz/all/status.json --history "        \
-  "build/fuzz/all/history.json --worklist build/fuzz/all/worklist.json "       \
-  "--coverage build/fuzz/all/coverage.json --plan build/fuzz/all/plan.json "   \
-  "--target-thread-years 10 --hours 8 --threads 25% --profile insane --json "  \
+#define NYTRIX_FUZZ_ALL_PROGRESS_REFRESH_EXAMPLE                              \
+  "env NYTRIX_LOW_PRIORITY=1 NYTRIX_RUN_NICE=10 nice -n 10 ./build/ny-test "  \
+  "fuzz all progress --refresh --strict --allow-full-pressure-remediation "   \
+  "--dir build/fuzz/all --status build/fuzz/all/status.json --history "       \
+  "build/fuzz/all/history.json --worklist build/fuzz/all/worklist.json "      \
+  "--coverage build/fuzz/all/coverage.json --plan build/fuzz/all/plan.json "  \
+  "--target-thread-years 10 --hours 8 --threads 25% --profile insane --json " \
   "build/fuzz/all/progress.json --markdown build/fuzz/all/progress.md"
 void nytrix_print_worker_usage(FILE *out) {
   fputs(

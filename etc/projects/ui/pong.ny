@@ -14,6 +14,9 @@ use core.os.ui.render.dump as ui_dump
 use core.os.ui.window as window
 use core.os.ui.window.consts (KEY_W, KEY_S, KEY_ESCAPE, KEY_SPACE, KEY_R, WINDOW_MAXIMIZE)
 
+def int startup_started = ticks()
+def bool frame_times = common.env_truthy("NYTRIX_PONG_FRAME_TIMES")
+
 def WIN_W, WIN_H = 1280, 720
 def f64 VIEW_W, VIEW_H = 1280.0, 720.0
 def f64 BALL_SIZE, BALL_SPEED = 20.0, 400.0
@@ -91,10 +94,10 @@ def fx = fixture.start_ui(legacy_frames, legacy_timeout, headless && !common.env
 def bool replay = common.env_truthy("NYTRIX_UI_REPLAY")
 def bool trace = common.env_truthy("NYTRIX_PONG_TRACE")
 def int trace_every = common.env_int_clamped("NYTRIX_PONG_TRACE_EVERY", 30, 1, 600)
-mut int font = gfx.font_load_first(["etc/assets/fonts/monocraft.ttf"], 48) ?? 0
-mut int font_small = gfx.font_load_first(["etc/assets/fonts/monocraft.ttf"], 20) ?? 0
-mut int score_font_size = 48
-mut int label_font_size = 20
+mut int font = 0
+mut int font_small = 0
+mut int score_font_size = 0
+mut int label_font_size = 0
 
 mut int player_score = 0
 mut int opponent_score = 0
@@ -117,6 +120,13 @@ mut bool initialized = false
 mut int rally = 0
 mut int replay_frame = 0
 mut bool dump_done = false
+;; The court net is static between resizes: build its packed vertices once.
+def int NET_RECTS = (NET_COUNT + 1) / 2
+def ptr net_rects = malloc(NET_RECTS * 20)
+if !net_rects { panic("could not allocate Pong net geometry") }
+def int net_color = gfx.color_pack(128.0 / 255.0, 125.0 / 255.0, 117.0 / 255.0, 1.0)
+mut f64 net_w = -1.0
+mut f64 net_h = -1.0
 mut f64 previous_w = 0.0
 mut f64 previous_h = 0.0
 
@@ -124,8 +134,6 @@ while !gfx.window_should_close(win) && fixture.tick_ui(fx) {
    def int frame_started = ticks()
    window.poll_events()
    if fixture.quit_key(fixture.next_ui_key(fx)) { break }
-   if !gfx.begin_frame_clear(BG) { continue }
-
    ;; Read the live native framebuffer, not the GL renderer's cached extent;
    ;; Wayland configure events can resize the window between frames.
    def fb = window.get_framebuffer_size(win)
@@ -154,21 +162,24 @@ while !gfx.window_should_close(win) && fixture.tick_ui(fx) {
    def int next_score_size = int(math.max(16.0, math.floor(48.0 * scale + 0.5)))
    def int next_label_size = int(math.max(10.0, math.floor(20.0 * scale + 0.5)))
    if next_score_size != score_font_size {
-      def next_font = gfx.font_load_first(["etc/assets/fonts/monocraft.ttf"], next_score_size)
+      def next_font = gfx.font_load_first(["etc/assets/fonts/monocraft.ttf"], next_score_size, gfx.FONT_FILTER_DEFAULT, "0123456789PAUSED")
       if next_font > 0 {
          if font > 0 { gfx.font_destroy(font) }
          font = next_font
+         gfx.font_prepare(font, "0123456789PAUSED")
          score_font_size = next_score_size
       }
    }
    if next_label_size != label_font_size {
-      def next_font = gfx.font_load_first(["etc/assets/fonts/monocraft.ttf"], next_label_size)
+      def next_font = gfx.font_load_first(["etc/assets/fonts/monocraft.ttf"], next_label_size, gfx.FONT_FILTER_DEFAULT, "YOU CPU W/S MOVE - SPACE PAUSE - R RESET")
       if next_font > 0 {
          if font_small > 0 { gfx.font_destroy(font_small) }
          font_small = next_font
+         gfx.font_prepare(font_small, "YOU CPU W/S MOVE - SPACE PAUSE - R RESET")
          label_font_size = next_label_size
       }
    }
+   if !gfx.begin_frame_clear(BG) { continue }
    def f64 ball = BALL_SIZE * scale
    def f64 paddle_w = PADDLE_W * scale
    def f64 paddle_h = PADDLE_H * scale
@@ -281,13 +292,20 @@ while !gfx.window_should_close(win) && fixture.tick_ui(fx) {
    }
 
    def f64 dash_h = h / float(NET_COUNT)
-   mut int dash = 0
-   while dash < NET_COUNT {
-      if dash % 2 == 0 {
-         gfx.draw_rect(w * 0.5 - 1.5 * scale, float(dash) * dash_h, 3.0 * scale, dash_h * 0.56, MUTED)
+   if w != net_w || h != net_h {
+      mut int dash = 0
+      while dash < NET_RECTS {
+         def int off = dash * 20
+         store32_f32(net_rects, w * 0.5 - 1.5 * scale, off)
+         store32_f32(net_rects, float(dash * 2) * dash_h, off + 4)
+         store32_f32(net_rects, 3.0 * scale, off + 8)
+         store32_f32(net_rects, dash_h * 0.56, off + 12)
+         store32(net_rects, net_color, off + 16)
+         dash += 1
       }
-      dash += 1
+      net_w, net_h = w, h
    }
+   gfx.draw_rects_fast_ptr(net_rects, NET_RECTS)
 
    gfx.draw_rect(player_x, player_y, paddle_w, paddle_h, FG)
    gfx.draw_rect(opponent_x, opponent_y, paddle_w, paddle_h, FG)
@@ -327,6 +345,10 @@ while !gfx.window_should_close(win) && fixture.tick_ui(fx) {
       if !window.show(win) { panic("Pong window could not be shown") }
       first_frame = false
    }
+   if frame_times {
+      print("PONG_FRAME_TIME frame=" + to_str(replay_frame) +
+         " elapsed_ns=" + to_str(ticks() - startup_started))
+   }
    ;; Vsync is advisory on some window routes. Bound CPU use when presentation
    ;; returns immediately, using real elapsed time rather than advancing the
    ;; simulation by an artificial minimum delta.
@@ -336,6 +358,7 @@ while !gfx.window_should_close(win) && fixture.tick_ui(fx) {
    }
 }
 
+free(net_rects)
 if font > 0 { gfx.font_destroy(font) }
 if font_small > 0 { gfx.font_destroy(font_small) }
 gfx.close_window()

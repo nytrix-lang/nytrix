@@ -2171,13 +2171,13 @@ static int test_internal_elf32_link_run(const char *obj_path,
   }
   const uint32_t base = 0x08048000u + 0x1000u;
   size_t linked_text_len = text_len;
-#define ELF32_AR_FAIL                                                          \
-  do {                                                                         \
-    free(text);                                                                \
-    free(obj);                                                                 \
-    free(archive_data);                                                        \
-    test_ar_free_symtab(&ar_st);                                               \
-    return 2;                                                                  \
+#define ELF32_AR_FAIL            \
+  do {                           \
+    free(text);                  \
+    free(obj);                   \
+    free(archive_data);          \
+    test_ar_free_symtab(&ar_st); \
+    return 2;                    \
   } while (0)
   if (rel_i >= 0) {
     if (!ny_test_elf_range_u64(sh[rel_i].sh_offset, sh[rel_i].sh_size,
@@ -3163,14 +3163,14 @@ static int test_internal_elf64_link_run(const char *obj_path,
                          : 0;
   const char *strtab = (const char *)(obj + sh[str_i].sh_offset);
   size_t strtab_len = (size_t)sh[str_i].sh_size;
-#define TEST_AR_FAIL                                                           \
-  do {                                                                         \
-    free(text);                                                                \
-    free(data);                                                                \
-    free(obj);                                                                 \
-    free(archive_data);                                                        \
-    test_ar_free_symtab(&ar_st);                                               \
-    return 2;                                                                  \
+#define TEST_AR_FAIL             \
+  do {                           \
+    free(text);                  \
+    free(data);                  \
+    free(obj);                   \
+    free(archive_data);          \
+    test_ar_free_symtab(&ar_st); \
+    return 2;                    \
   } while (0)
   ny_test_link_sym_t defs[256];
   size_t def_count = 0;

@@ -1,3 +1,4 @@
+/* NYIR module lowering inputs and optional runtime-service callbacks. */
 #ifndef NY_BACKEND_IR_MODULE_H
 #define NY_BACKEND_IR_MODULE_H
 
@@ -12,16 +13,15 @@ typedef struct {
   void *userdata;
   void *(*resolve_symbol)(void *userdata, const char *name);
   void (*register_mapping)(void *userdata, uintptr_t address, size_t size);
-  bool (*evaluate_ir)(void *userdata, const void *options,
-                      nyr_func_t *entry, nyr_func_t *functions,
-                      const char *const *function_names, size_t function_count,
-                      nyr_eval_result_t *result, char *err, size_t err_len);
+  bool (*evaluate_ir)(void *userdata, const void *options, nyr_func_t *entry,
+                      nyr_func_t *functions, const char *const *function_names,
+                      size_t function_count, nyr_eval_result_t *result,
+                      char *err, size_t err_len);
   bool (*collect_vm_profile)(void *userdata, const void *options,
                              nyr_func_t *entry, nyr_func_t *functions,
                              const char *const *function_names,
-                             size_t function_count,
-                             nyr_eval_result_t *profile, char *err,
-                             size_t err_len);
+                             size_t function_count, nyr_eval_result_t *profile,
+                             char *err, size_t err_len);
 } nyr_runtime_services_t;
 
 /* Language-neutral NYIR module view. Functions and names are owned by the

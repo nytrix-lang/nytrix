@@ -1,3 +1,6 @@
+/*
+ * C parser fixture for a translation unit with many function declarations.
+ */
 long c_forward_0();
 long c_forward_1();
 long c_forward_2();

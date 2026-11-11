@@ -1,3 +1,4 @@
+/* Language code-generation state, symbol tables, and compilation helpers. */
 #pragma once
 
 #include "base/intern.h"
@@ -79,10 +80,10 @@ typedef struct module_stmt_slot {
   bool occupied;
 } module_stmt_slot;
 
-#define NY_REPORT_ERROR(cg, tok, ...)                                          \
-  do {                                                                         \
-    ny_diag_error(tok, __VA_ARGS__);                                           \
-    (cg)->had_error = 1;                                                       \
+#define NY_REPORT_ERROR(cg, tok, ...) \
+  do {                                \
+    ny_diag_error(tok, __VA_ARGS__);  \
+    (cg)->had_error = 1;              \
   } while (0)
 
 static inline int ny_param_required_arity(const ny_param_list *params,
@@ -539,6 +540,11 @@ typedef struct ny_refine_memo_slot {
   refine_def_t *def;
 } ny_refine_memo_slot_t;
 
+typedef struct ny_refine_stmt_slot {
+  const char *name;
+  stmt_t *stmt;
+} ny_refine_stmt_slot_t;
+
 typedef struct codegen_registry_t {
   ny_operator_def_list operators;
   VEC(enum_def_t *) enums;
@@ -830,13 +836,20 @@ struct codegen_t {
       size_t mono_masked_range_uses;
       int64_t current_enum_val;
       /* Refine-lookup memo: name -> refine_def_t* with proven misses kept
-       * as name/non-NULL-name NULL-def entries.  Allocated from the
-       * compilation arena and cleared whenever the program set changes, so
-       * comptime-generated programs are re-scanned. */
+       * as name/non-NULL-name NULL-def entries. Allocated from the
+       * compilation arena and invalidated when its search inputs grow. */
       ny_refine_memo_slot_t *refine_memo;
       size_t refine_memo_cap;
       size_t refine_memo_len;
-      size_t refine_memo_epoch;
+      size_t refine_memo_extra_progs_len;
+      size_t refine_memo_refines_len;
+      size_t refine_memo_registry_refines_len;
+      /* Ordered-source index for refinement declarations in prog/extra_progs.
+       */
+      ny_refine_stmt_slot_t *refine_stmt_index;
+      size_t refine_stmt_index_cap;
+      program_t *refine_stmt_index_prog;
+      size_t refine_stmt_index_extra_progs_len;
     };
   };
 };

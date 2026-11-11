@@ -1,4 +1,11 @@
-struct nyc_plan9_head { const char *name; int refcnt; void *aname; };
+/*
+ * Fixture: access promoted fields from a Plan 9 anonymous struct member.
+ */
+struct nyc_plan9_head {
+  const char *name;
+  int refcnt;
+  void *aname;
+};
 struct nyc_plan9_file {
   struct nyc_plan9_head;
   const char iname[192 - sizeof(struct nyc_plan9_head)];

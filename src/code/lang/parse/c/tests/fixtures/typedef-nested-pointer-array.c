@@ -1,3 +1,6 @@
+/*
+ * C parser fixture for array typedefs containing nested pointer levels.
+ */
 typedef int *row[3];
 extern row table[2];
 row table[2] = {};

@@ -1,3 +1,6 @@
+/*
+ * Fixture: expand GNU variadic macros with omitted and token-pasted arguments.
+ */
 #define NYC_VA(first, ...) first, ##__VA_ARGS__
 #define NYC_STRINGIFY_1(x...) #x
 #define NYC_STRINGIFY(x...) NYC_STRINGIFY_1(x)
@@ -21,10 +24,10 @@ const char *stringified = NYC_STRINGIFY(1, 2);
 #if NYC_TRACE_PATH_INCLUDED
 int trace_path_found;
 #endif
-#define NYC_CONTINUED(value)                                                   \
-  value /* Preserve a comment                                                  \
-         * across continued physical lines                                     \
-         */                                                                    \
+#define NYC_CONTINUED(value)               \
+  value /* Preserve a comment              \
+         * across continued physical lines \
+         */                                \
       + 1
 int comment_macro = NYC_CONTINUED(40);
 

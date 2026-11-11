@@ -1,3 +1,6 @@
+/*
+ * Fixture: verify -pthread exposes the platform reentrant header contract.
+ */
 #include <pthread.h>
 
 #ifndef _REENTRANT

@@ -1,3 +1,6 @@
+/*
+ * C parser fixture for pointer arguments passed through a transparent union.
+ */
 typedef union {
   int *integer;
   void *generic;

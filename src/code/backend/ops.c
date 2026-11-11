@@ -1,3 +1,6 @@
+/*
+ * Runtime-operation identity shared by Ny and standalone NYIR backends.
+ */
 #include "code/backend/abi.h"
 
 #include <string.h>

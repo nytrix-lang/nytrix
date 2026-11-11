@@ -110,9 +110,9 @@ static void print_blockers(FILE *out, int hot_runtime_calls, int user_reflective
                            int list_mutation_helper_calls, int tagged_int_op_count,
                            int top_entry_string_init_count) {
   bool first = true;
-#define ADD_BLOCKER_FMT(cond, fmt, value) \
+#define ADD_BLOCKER_FMT(cond, fmt, value)                                                                                                \
   do { if (cond) { if (!first) fputc(',', out); first = false; fputc('"', out); fprintf(out, fmt, value); fputc('"', out); } } while (0)
-#define ADD_BLOCKER_STR(cond, value) \
+#define ADD_BLOCKER_STR(cond, value)                                                               \
   do { if (cond) { if (!first) fputc(',', out); first = false; json_str(out, value); } } while (0)
   ADD_BLOCKER_FMT(hot_runtime_calls, "hot-runtime-calls:%d", hot_runtime_calls);
   ADD_BLOCKER_FMT(user_reflective_calls, "reflective-calls:%d", user_reflective_calls);

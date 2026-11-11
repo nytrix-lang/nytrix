@@ -1,3 +1,6 @@
+/*
+ * C parser fixture for object-size analysis of an array member.
+ */
 typedef unsigned long size_t;
 
 struct object_with_array {

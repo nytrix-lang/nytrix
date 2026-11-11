@@ -99,15 +99,15 @@ int main(void) {
   const char *listing =
       nyr_internal_aarch64_disasm(encoded, (int64_t)sizeof(encoded), 0x1000);
   static const char *const expected[] = {
-      "4096\tmovz\tx0, #0x2a\t4\n",
-      "4100\tadd\tx0, x0, #1\t4\n",
-      "4104\tcmp\tx0, #0\t4\n",
-      "4108\tb.eq\t0x1014\t4\n",
-      "4112\tstr\tx0, [sp, #8]\t4\n",
-      "4116\tldr\tx0, [sp, #8]\t4\n",
-      "4120\tmovz\tx8, #0x5d\t4\n",
-      "4124\tsvc\t#0\t4\n",
-      "4128\tret\t\t4\n",
+      "4096\tmovz\tx0, #0x2a\t4\t",
+      "4100\tadd\tx0, x0, #1\t4\t",
+      "4104\tcmp\tx0, #0\t4\t",
+      "4108\tb.eq\t0x1014\t4\t",
+      "4112\tstr\tx0, [sp, #8]\t4\t",
+      "4116\tldr\tx0, [sp, #8]\t4\t",
+      "4120\tmovz\tx8, #0x5d\t4\t",
+      "4124\tsvc\t#0\t4\t",
+      "4128\tret\t\t4\t",
   };
   for (size_t i = 0; i < sizeof(expected) / sizeof(expected[0]); ++i) {
     if (!strstr(listing, expected[i])) {
@@ -127,7 +127,7 @@ int main(void) {
   listing = nyr_internal_aarch64_disasm(unknown, sizeof(unknown), 0x2000);
   if (!strstr(
           listing,
-          "8192\tunsupported\tinstruction word 0xffffffff at 0x2000\t4\n")) {
+          "8192\tunsupported\tinstruction word 0xffffffff at 0x2000\t4\t")) {
     fprintf(stderr,
             "[aarch64-disasm-scalar] unsupported word was not explicit:\n%s",
             listing);
@@ -156,18 +156,18 @@ int main(void) {
   };
   listing = nyr_internal_aarch64_disasm(vectors, sizeof(vectors), 0x3000);
   static const char *const vector_expected[] = {
-      "12288\tldr\tq0, [x0]\t4\n",
-      "12292\tstr\tq1, [x0, #16]\t4\n",
-      "12296\tdup\tv0.2d, x0\t4\n",
-      "12300\tfadd\tv0.2d, v1.2d, v2.2d\t4\n",
-      "12304\tfmla\tv0.4s, v1.4s, v2.4s\t4\n",
-      "12308\tfmov\td3, x0\t4\n",
-      "12312\tins\tv3.d[1], x1\t4\n",
-      "12316\tdup\tv1.4s, w2\t4\n",
-      "12320\tadd\tv0.2d, v1.2d, v2.2d\t4\n",
-      "12324\tand\tv1.16b, v2.16b, v3.16b\t4\n",
-      "12328\tfdiv\tv0.4s, v1.4s, v2.4s\t4\n",
-      "12332\tfmla\tv0.2d, v1.2d, v2.2d\t4\n",
+      "12288\tldr\tq0, [x0]\t4\t",
+      "12292\tstr\tq1, [x0, #16]\t4\t",
+      "12296\tdup\tv0.2d, x0\t4\t",
+      "12300\tfadd\tv0.2d, v1.2d, v2.2d\t4\t",
+      "12304\tfmla\tv0.4s, v1.4s, v2.4s\t4\t",
+      "12308\tfmov\td3, x0\t4\t",
+      "12312\tins\tv3.d[1], x1\t4\t",
+      "12316\tdup\tv1.4s, w2\t4\t",
+      "12320\tadd\tv0.2d, v1.2d, v2.2d\t4\t",
+      "12324\tand\tv1.16b, v2.16b, v3.16b\t4\t",
+      "12328\tfdiv\tv0.4s, v1.4s, v2.4s\t4\t",
+      "12332\tfmla\tv0.2d, v1.2d, v2.2d\t4\t",
   };
   for (size_t i = 0; i < sizeof(vector_expected) / sizeof(vector_expected[0]);
        ++i) {
@@ -208,27 +208,27 @@ int main(void) {
   listing =
       nyr_internal_aarch64_disasm(emitted_forms, sizeof(emitted_forms), 0x4000);
   static const char *const emitted_expected[] = {
-      "16384\tstp\tx29, x30, [sp, #-16]!\t4\n",
-      "16388\tldp\tx29, x30, [sp], #16\t4\n",
-      "16392\tfadd\td0, d1, d2\t4\n",
-      "16396\tfmul\ts0, s1, s2\t4\n",
-      "16400\tfmov\tx0, d0\t4\n",
-      "16404\tfmov\td0, x0\t4\n",
-      "16408\tldur\tx0, [x29, #-8]\t4\n",
-      "16412\tstur\tx0, [x29, #8]\t4\n",
-      "16416\tsdiv\tx0, x1, x2\t4\n",
-      "16420\tlslv\tx0, x1, x2\t4\n",
-      "16424\tasrv\tx0, x1, x2\t4\n",
-      "16428\tmsub\tx0, x1, x2, x3\t4\n",
-      "16432\tcsel\tx0, x1, x2, ne\t4\n",
-      "16436\tscvtf\td0, x0\t4\n",
-      "16440\tfcvtzs\tx0, d0\t4\n",
-      "16444\tfcvt\ts0, d0\t4\n",
-      "16448\trorv\tx0, x1, x2\t4\n",
-      "16452\trev\tx0, x0\t4\n",
-      "16456\trev\tw0, w0\t4\n",
-      "16460\tldrsw\tx0, [x1, #4]\t4\n",
-      "16464\tadrp\tx0, 0x4000\t4\n",
+      "16384\tstp\tx29, x30, [sp, #-16]!\t4\t",
+      "16388\tldp\tx29, x30, [sp], #16\t4\t",
+      "16392\tfadd\td0, d1, d2\t4\t",
+      "16396\tfmul\ts0, s1, s2\t4\t",
+      "16400\tfmov\tx0, d0\t4\t",
+      "16404\tfmov\td0, x0\t4\t",
+      "16408\tldur\tx0, [x29, #-8]\t4\t",
+      "16412\tstur\tx0, [x29, #8]\t4\t",
+      "16416\tsdiv\tx0, x1, x2\t4\t",
+      "16420\tlslv\tx0, x1, x2\t4\t",
+      "16424\tasrv\tx0, x1, x2\t4\t",
+      "16428\tmsub\tx0, x1, x2, x3\t4\t",
+      "16432\tcsel\tx0, x1, x2, ne\t4\t",
+      "16436\tscvtf\td0, x0\t4\t",
+      "16440\tfcvtzs\tx0, d0\t4\t",
+      "16444\tfcvt\ts0, d0\t4\t",
+      "16448\trorv\tx0, x1, x2\t4\t",
+      "16452\trev\tx0, x0\t4\t",
+      "16456\trev\tw0, w0\t4\t",
+      "16460\tldrsw\tx0, [x1, #4]\t4\t",
+      "16464\tadrp\tx0, 0x4000\t4\t",
   };
   for (size_t i = 0; i < sizeof(emitted_expected) / sizeof(emitted_expected[0]);
        ++i) {
@@ -257,12 +257,12 @@ int main(void) {
   listing = nyr_internal_aarch64_disasm(vector_lane_forms,
                                         sizeof(vector_lane_forms), 0x6000);
   static const char *const vector_lane_expected[] = {
-      "24576\tdup\tv0.2d, v0.d[0]\t4\n",
-      "24580\ttbl\tv0.16b, {v1.16b, v2.16b}, v3.16b\t4\n",
-      "24584\ttbl\tv5.16b, {v1.16b, v2.16b}, v4.16b\t4\n",
-      "24588\tfaddp\td2, v0.2d\t4\n",
-      "24592\tfaddp\td3, v1.2d\t4\n",
-      "24596\tfadd\td2, d2, d3\t4\n",
+      "24576\tdup\tv0.2d, v0.d[0]\t4\t",
+      "24580\ttbl\tv0.16b, {v1.16b, v2.16b}, v3.16b\t4\t",
+      "24584\ttbl\tv5.16b, {v1.16b, v2.16b}, v4.16b\t4\t",
+      "24588\tfaddp\td2, v0.2d\t4\t",
+      "24592\tfaddp\td3, v1.2d\t4\t",
+      "24596\tfadd\td2, d2, d3\t4\t",
   };
   for (size_t i = 0;
        i < sizeof(vector_lane_expected) / sizeof(vector_lane_expected[0]);
@@ -298,19 +298,19 @@ int main(void) {
   listing = nyr_internal_aarch64_disasm(bare_runtime_forms,
                                         sizeof(bare_runtime_forms), 0x7000);
   static const char *const bare_runtime_expected[] = {
-      "28672\tldrb\tw9, [x19, x21]\t4\n",
-      "28676\tstrb\tw9, [x10, x26]\t4\n",
-      "28680\tumulh\tx15, x12, x10\t4\n",
-      "28684\tlsr\tx12, x9, #18\t4\n",
-      "28688\tlsr\tw12, w9, #12\t4\n",
-      "28692\tand\tw12, w9, #0x3f\t4\n",
-      "28696\tbrk\t#0\t4\n",
-      "28700\tneg\tv2.2d, v2.2d\t4\n",
-      "28704\tsshl\tv0.2d, v1.2d, v2.2d\t4\n",
-      "28708\torr\tw12, w9, #0x3f\t4\n",
-      "28712\teor\tw12, w9, #0x3f\t4\n",
-      "28716\tands\tw12, w9, #0x3f\t4\n",
-      "28720\ttst\tw9, #0x3f\t4\n",
+      "28672\tldrb\tw9, [x19, x21]\t4\t",
+      "28676\tstrb\tw9, [x10, x26]\t4\t",
+      "28680\tumulh\tx15, x12, x10\t4\t",
+      "28684\tlsr\tx12, x9, #18\t4\t",
+      "28688\tlsr\tw12, w9, #12\t4\t",
+      "28692\tand\tw12, w9, #0x3f\t4\t",
+      "28696\tbrk\t#0\t4\t",
+      "28700\tneg\tv2.2d, v2.2d\t4\t",
+      "28704\tsshl\tv0.2d, v1.2d, v2.2d\t4\t",
+      "28708\torr\tw12, w9, #0x3f\t4\t",
+      "28712\teor\tw12, w9, #0x3f\t4\t",
+      "28716\tands\tw12, w9, #0x3f\t4\t",
+      "28720\ttst\tw9, #0x3f\t4\t",
   };
   for (size_t i = 0;
        i < sizeof(bare_runtime_expected) / sizeof(bare_runtime_expected[0]);
@@ -335,10 +335,10 @@ int main(void) {
   listing = nyr_internal_aarch64_disasm(scaled_fp_memory_forms,
                                         sizeof(scaled_fp_memory_forms), 0x7100);
   static const char *const scaled_fp_expected[] = {
-      "28928\tldr\ts0, [sp, #4]\t4\n",
-      "28932\tstr\ts1, [sp, #8]\t4\n",
-      "28936\tldr\td2, [sp, #16]\t4\n",
-      "28940\tstr\td3, [sp, #24]\t4\n",
+      "28928\tldr\ts0, [sp, #4]\t4\t",
+      "28932\tstr\ts1, [sp, #8]\t4\t",
+      "28936\tldr\td2, [sp, #16]\t4\t",
+      "28940\tstr\td3, [sp, #24]\t4\t",
   };
   for (size_t i = 0;
        i < sizeof(scaled_fp_expected) / sizeof(scaled_fp_expected[0]); ++i) {

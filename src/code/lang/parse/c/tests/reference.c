@@ -1,3 +1,6 @@
+/*
+ * Reference fixture: provide scalar control-flow and arithmetic results.
+ */
 long c_reference(long left, long right) { return left * 3 + right; }
 
 long c_choose_reference(long left, long right) {

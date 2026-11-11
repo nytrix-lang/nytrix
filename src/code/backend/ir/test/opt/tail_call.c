@@ -73,6 +73,47 @@ static bool test_unlabeled_entry(void) {
   return ok;
 }
 
+static bool test_parallel_args_and_nop(void) {
+  nyr_func_t f;
+  nyr_opt_begin(&f);
+  f.param_count = 2;
+  f.param_types = calloc(2, sizeof(*f.param_types));
+  if (!f.param_types)
+    return false;
+  f.param_types[0] = f.param_types[1] = NYIR_PARAM_I64;
+  int args[2];
+  for (int i = 0; i < 2; ++i)
+    args[i] = nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_LOAD_LOCAL,
+                                            .dst = -1, .a = -1, .b = -1,
+                                            .imm = i});
+  int call = nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_CALL, .dst = -1,
+                                          .a = args[1], .b = args[0],
+                                          .c = -1, .d = -1, .e = -1,
+                                          .f = -1, .imm = 2,
+                                          .symbol = "swap"});
+  nyr_ir_emit(&f, (nyr_inst_t){.op = NYIR_NOP, .dst = -1});
+  nyr_opt_ret(&f, call);
+  bool ok = nyr_opt_verify(&f, "tco/swap-before") &&
+            nyr_tail_call(&f, "swap") &&
+            nyr_opt_verify(&f, "tco/swap-after");
+  size_t stores = 0;
+  for (size_t i = 0; ok && i < f.len; ++i) {
+    const nyr_inst_t *in = &f.data[i];
+    if (in->op == NYIR_CALL || in->op == NYIR_RET)
+      ok = false;
+    if (in->op == NYIR_STORE_LOCAL) {
+      ok = stores < 2 && in->imm == (int64_t)stores &&
+           in->a == args[1 - stores];
+      ++stores;
+    }
+  }
+  ok = ok && stores == 2;
+  if (!ok)
+    nyr_dump(stderr, &f, "tco/swap-failure");
+  nyr_ir_func_free(&f);
+  return ok;
+}
+
 int main(void) {
   static const char source[] = "tail-call-origin.ny";
   nyr_func_t f;
@@ -119,5 +160,5 @@ int main(void) {
     nyr_dump(stderr, &f, "tco/debug-failure");
   }
   nyr_ir_func_free(&f);
-  return ok && test_unlabeled_entry() ? 0 : 1;
+  return ok && test_unlabeled_entry() && test_parallel_args_and_nop() ? 0 : 1;
 }

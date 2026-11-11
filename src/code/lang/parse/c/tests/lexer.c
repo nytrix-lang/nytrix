@@ -1,3 +1,6 @@
+/*
+ * Standalone regression test runner for the C lexer.
+ */
 #include "code/lang/parse/c/c.h"
 
 #include <stdio.h>

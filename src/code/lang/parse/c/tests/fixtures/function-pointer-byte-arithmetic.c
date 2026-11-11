@@ -1,3 +1,6 @@
+/*
+ * Runtime fixture ensuring byte arithmetic does not change function pointers.
+ */
 static int target(void) { return 1; }
 
 int main(void) {

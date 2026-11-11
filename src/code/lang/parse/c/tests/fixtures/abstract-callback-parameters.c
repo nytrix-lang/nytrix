@@ -1,3 +1,7 @@
+/*
+ * Fixture: abstract callback parameter types preserve function-pointer
+ * signatures.
+ */
 #include <stddef.h>
 
 static long node = 41;

@@ -1,3 +1,6 @@
+/*
+ * Central registry for compiler trace flags and their diagnostic summaries.
+ */
 #include "base/trace.h"
 #include "base/common.h"
 #include "base/debug.h"

@@ -1,3 +1,6 @@
+/*
+ * Fixture: call a void-returning function through a global aggregate member.
+ */
 struct handler {
   void (*invoke)(int);
 };

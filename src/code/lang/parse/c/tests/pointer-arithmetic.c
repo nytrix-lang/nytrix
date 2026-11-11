@@ -1,3 +1,6 @@
+/*
+ * Parser fixture: exercise commuted pointer addition and indexed loads.
+ */
 long c_pointer_add(const long *items, long index) { return *(items + index); }
 
 long c_pointer_add_reversed(const long *items, long index) {

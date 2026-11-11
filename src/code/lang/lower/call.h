@@ -1,3 +1,4 @@
+/* Native lowering helpers for resolving and emitting function calls. */
 static const char *ny_native_fn_module(ny_native_fn_index_t *index,
                                        const program_t *prog, const stmt_t *fn);
 static const char *ny_native_emitted_fn_name(ny_native_fn_index_t *index,
@@ -445,6 +446,11 @@ static bool nyr_expr_has_raw_int_abi(const nyr_builder_t *b, const expr_t *e,
     if (!callee && e->kind == NY_E_CALL && e->as.call.callee &&
         e->as.call.callee->kind == NY_E_IDENT &&
         e->as.call.callee->as.ident.name)
+      callee = nyr_find_user_function_for_arity(
+          b, e->as.call.callee->as.ident.name, e->as.call.args.len);
+    if (!callee && e->kind == NY_E_CALL && e->as.call.callee &&
+        e->as.call.callee->kind == NY_E_IDENT &&
+        e->as.call.callee->as.ident.name)
       callee = nyr_find_user_function((nyr_builder_t *)b,
                                       e->as.call.callee->as.ident.name);
     if (callee && callee->kind == NY_S_FUNC) {
@@ -615,6 +621,31 @@ static bool nyr_mapped_proof_holds(const char *proof_type, const char *param,
   return decision == 1;
 }
 
+static int nyr_emit_list_append_branches(nyr_builder_t *b, int list, int value,
+                                         int count, int count_addr, int one,
+                                         int result_slot, int slow_label,
+                                         int end_label) {
+  /* Strength-reduced byte offset: count*8 == count<<3. */
+  int shl_three = nyr_emit_const(b, 3);
+  int byte_off = shl_three < 0
+                     ? -1
+                     : nyr_push_val(b, NYIR_SHL_I64, count, shl_three, 0, NULL);
+  int dst = byte_off < 0 ? -1 : nyr_emit_add_i64(b, list, byte_off);
+  int next_count = nyr_emit_add_i64(b, count, one);
+  if (dst < 0 || next_count < 0 || !nyr_emit_store_i64(b, dst, value) ||
+      !nyr_emit_store_i64(b, count_addr, next_count) ||
+      !nyr_store_local_value(b, result_slot, list) ||
+      !nyr_emit_br(b, end_label) || !nyr_emit_label(b, slow_label))
+    return -1;
+
+  int slow =
+      nyr_emit_runtime_call(b, "rt_tbuf_append_i64_raw", list, value, -1, 2, 0);
+  if (slow < 0 || !nyr_store_local_value(b, result_slot, slow) ||
+      !nyr_emit_br(b, end_label) || !nyr_emit_label(b, end_label))
+    return -1;
+  return nyr_load_local_value(b, result_slot);
+}
+
 /* Inline the overwhelmingly common append-to-capacity path for scalar lists.
  * A native scalar list is a typed-buffer data pointer with the canonical
  * 32-byte header immediately before the data: count @ -24, elem_size @ -16,
@@ -652,35 +683,14 @@ static int nyr_emit_scalar_list_append_fast(nyr_builder_t *b, int list,
   int result_slot = nyr_temp_slot(b);
   if (can_fast < 0 || result_slot < 0)
     return -1;
-
   int fast_label = b->next_label++;
   int slow_label = b->next_label++;
   int end_label = b->next_label++;
   if (!nyr_emit_br_if(b, can_fast, fast_label) || !nyr_emit_br(b, slow_label) ||
       !nyr_emit_label(b, fast_label))
     return -1;
-
-  /* Strength-reduced byte offset: count*8 == count<<3. Emitting SHL
-   * directly lets both LLVM and native encoders use shift/LEA instead of
-   * a full imul on every append. */
-  int shl_three = nyr_emit_const(b, 3);
-  int byte_off = shl_three < 0
-                     ? -1
-                     : nyr_push_val(b, NYIR_SHL_I64, count, shl_three, 0, NULL);
-  int dst = byte_off < 0 ? -1 : nyr_emit_add_i64(b, list, byte_off);
-  int next_count = nyr_emit_add_i64(b, count, one);
-  if (dst < 0 || next_count < 0 || !nyr_emit_store_i64(b, dst, value) ||
-      !nyr_emit_store_i64(b, count_addr, next_count) ||
-      !nyr_store_local_value(b, result_slot, list) ||
-      !nyr_emit_br(b, end_label) || !nyr_emit_label(b, slow_label))
-    return -1;
-
-  int slow =
-      nyr_emit_runtime_call(b, "rt_tbuf_append_i64_raw", list, value, -1, 2, 0);
-  if (slow < 0 || !nyr_store_local_value(b, result_slot, slow) ||
-      !nyr_emit_br(b, end_label) || !nyr_emit_label(b, end_label))
-    return -1;
-  return nyr_load_local_value(b, result_slot);
+  return nyr_emit_list_append_branches(b, list, value, count, count_addr, one,
+                                       result_slot, slow_label, end_label);
 }
 
 /*
@@ -741,10 +751,9 @@ static int nyr_emit_native_list_pop_raw(nyr_builder_t *b, int list) {
   int stride = stride_extra < 0 || compact_stride < 0
                    ? -1
                    : nyr_emit_add_i64(b, compact_stride, stride_extra);
-  int byte_offset =
-      index < 0 || stride < 0
-          ? -1
-          : nyr_push_val(b, NYIR_MUL_I64, index, stride, 0, NULL);
+  int byte_offset = index < 0 || stride < 0
+                        ? -1
+                        : nyr_push_val(b, NYIR_MUL_I64, index, stride, 0, NULL);
   int slot_addr = byte_offset < 0 ? -1 : nyr_emit_add_i64(b, list, byte_offset);
   int value = slot_addr < 0 ? -1 : nyr_emit_load_i64(b, slot_addr);
   /* Keep the header address live only at its store. The x86 copy-home
@@ -865,25 +874,8 @@ static int nyr_emit_dynamic_i64_append_fast(nyr_builder_t *b, int list,
   if (has_capacity < 0 || !nyr_emit_br_if(b, has_capacity, fast_label) ||
       !nyr_emit_br(b, slow_label) || !nyr_emit_label(b, fast_label))
     return -1;
-
-  int shl_three_dyn = nyr_emit_const(b, 3);
-  int byte_off = shl_three_dyn < 0 ? -1
-                                   : nyr_push_val(b, NYIR_SHL_I64, count,
-                                                  shl_three_dyn, 0, NULL);
-  int dst = byte_off < 0 ? -1 : nyr_emit_add_i64(b, list, byte_off);
-  int next_count = nyr_emit_add_i64(b, count, one);
-  if (dst < 0 || next_count < 0 || !nyr_emit_store_i64(b, dst, value) ||
-      !nyr_emit_store_i64(b, count_addr, next_count) ||
-      !nyr_store_local_value(b, result_slot, list) ||
-      !nyr_emit_br(b, end_label) || !nyr_emit_label(b, slow_label))
-    return -1;
-
-  int slow =
-      nyr_emit_runtime_call(b, "rt_tbuf_append_i64_raw", list, value, -1, 2, 0);
-  if (slow < 0 || !nyr_store_local_value(b, result_slot, slow) ||
-      !nyr_emit_br(b, end_label) || !nyr_emit_label(b, end_label))
-    return -1;
-  return nyr_load_local_value(b, result_slot);
+  return nyr_emit_list_append_branches(b, list, value, count, count_addr, one,
+                                       result_slot, slow_label, end_label);
 }
 
 /*
@@ -4357,6 +4349,15 @@ ordinary_call:
         nyr_expr_is_any(b, arg_expr))
       return nyr_emit_runtime_call(b, "rt_any_to_f64", value, -1, -1, 1,
                                    NYIR_SCALAR_F64);
+    /*
+     * A boxed runtime result stays a boxed Ny word whatever the expression
+     * looks like statically. Inside a module the call's name is qualified and
+     * misses the builtin's declared result type, and i64.to.f64 would then
+     * convert the heap pointer itself (sRGB conversion produced about 1e14).
+     */
+    if (nyr_value_scalar_class(b, value) == NYIR_SCALAR_I64_TAGGED)
+      return nyr_emit_runtime_call(b, "rt_any_to_f64", value, -1, -1, 1,
+                                   NYIR_SCALAR_F64);
     if (nyr_expr_is_f32(b, arg_expr))
       return nyr_emit_f32_to_f64(b, value);
     if (nyr_expr_is_f64(b, arg_expr))
@@ -4898,7 +4899,13 @@ ordinary_call:
     const expr_t *value_expr = e->as.call.args.data[2].val;
     int target = nyr_lower_expr(b, target_expr);
     int key = nyr_lower_expr(b, key_expr);
+    /* Match append's dynamic storage boundary: typed container-returning
+     * calls must materialize their language value before entering a slot. */
+    bool saved_store_any = b->value_for_any_call;
+    if (!nyr_expr_is_raw_scalar(b, value_expr, 0))
+      b->value_for_any_call = true;
     int value = nyr_lower_expr(b, value_expr);
+    b->value_for_any_call = saved_store_any;
     if (target < 0 || key < 0 || value < 0)
       return -1;
     if (nyr_expr_is_f64(b, value_expr) || nyr_expr_is_f32(b, value_expr)) {
@@ -5925,7 +5932,8 @@ ordinary_call:
          (value_expr->semantic.resolved &&
           value_expr->semantic.rep == NY_SEM_REP_RAW_INT) ||
          (append_value_local &&
-          append_value_local->semantic_rep == NY_SEM_REP_RAW_INT));
+          append_value_local->semantic_rep == NY_SEM_REP_RAW_INT) ||
+         nyr_expr_has_raw_int_abi(b, value_expr, 0));
     if (!append_value_is_raw_integer && value_expr &&
         nyr_expr_is_raw_integer_conversion(b, value_expr))
       append_value_is_raw_integer = true;
@@ -5969,9 +5977,8 @@ ordinary_call:
       if (value < 0)
         return -1;
     }
-    if (use_tagged_append && value_expr->kind == NY_E_LITERAL &&
-        value_expr->as.literal.kind == NY_LIT_INT &&
-        value_expr->tok.kind != NY_T_NIL) {
+    if (use_tagged_append && append_value_is_raw_integer &&
+        !append_value_is_bool) {
       value = nyr_emit_runtime_call(b, "rt_tag", value, -1, -1, 1, 0);
       if (value < 0)
         return -1;
@@ -6127,7 +6134,8 @@ ordinary_call:
       !e->as.call.args.data[1].name) {
     const expr_t *list_expr = e->as.call.args.data[0].val;
     int list = nyr_lower_expr(b, e->as.call.args.data[0].val);
-    int length = nyr_lower_expr(b, e->as.call.args.data[1].val);
+    /* The count may arrive as a tagged `number` (`max(1, n)`); decode it. */
+    int length = nyr_lower_int_value(b, e->as.call.args.data[1].val);
     if (list < 0 || length < 0)
       return -1;
     int result =
@@ -6415,9 +6423,9 @@ ordinary_call:
        */
       expr_t base_storage = {.kind = NY_E_IDENT, .tok = e->tok};
       base_storage.as.ident.name = base_name;
-      const expr_t *base_read =
-          base_expr && base_expr->kind != NY_E_LITERAL ? &base_storage
-                                                       : base_expr;
+      const expr_t *base_read = base_expr && base_expr->kind != NY_E_LITERAL
+                                    ? &base_storage
+                                    : base_expr;
       const char *global_name = nyr_globaltab_name(base_name);
       if (!global_name && b->current_fn_name) {
         const char *fn_dot = strrchr(b->current_fn_name, '.');
@@ -7253,8 +7261,16 @@ ordinary_call:
      * `rt_` spelling: dynamic sides through the any bridges, statically
      * known sides as before.
      */
-    bool left_any = nyr_expr_is_any(b, left_expr);
-    bool right_any = nyr_expr_is_any(b, right_expr);
+    /* Decode according to the lowered value, not the expression's static
+     * type: a raw word must never be decoded again (that turned a raw 3 into
+     * 1), and a tagged one must always be. Only an unclassified value falls
+     * back to the contextual `any` fact. */
+    bool left_any = left_class == NYIR_SCALAR_I64_TAGGED ||
+                    (left_class != NYIR_SCALAR_I64_RAW &&
+                     nyr_expr_is_any(b, left_expr));
+    bool right_any = right_class == NYIR_SCALAR_I64_TAGGED ||
+                     (right_class != NYIR_SCALAR_I64_RAW &&
+                      nyr_expr_is_any(b, right_expr));
     if (use_f64) {
       if (left_class == NYIR_SCALAR_F64) {
         /* Already in the helper's machine-f64 ABI. */
@@ -8352,8 +8368,7 @@ ordinary_call:
         is_dict_arg = arg_local && arg_local->is_dict;
       }
       bool is_bigint_arg = !is_bool && !is_f64_arg && !is_f32_arg &&
-                           !is_list_arg && !is_tuple_arg &&
-                           !is_dict_arg &&
+                           !is_list_arg && !is_tuple_arg && !is_dict_arg &&
                            (nyr_expr_is_bigint(b, arg) ||
                             (nyr_expr_type_name(b, arg) &&
                              ny_type_is(nyr_expr_type_name(b, arg), "bigint")));
@@ -8364,8 +8379,8 @@ ordinary_call:
       }
       bool is_any_arg = !is_bool && !is_f64_arg && !is_f32_arg &&
                         !is_list_arg && !is_tuple_arg && !is_dict_arg &&
-                        !is_bigint_arg &&
-                        !nyr_expr_is_cstr(b, arg) && nyr_expr_is_any(b, arg);
+                        !is_bigint_arg && !nyr_expr_is_cstr(b, arg) &&
+                        nyr_expr_is_any(b, arg);
       if (!is_any_arg && arg && arg->kind == NY_E_INDEX &&
           arg->as.index.target && arg->as.index.target->kind == NY_E_IDENT &&
           arg->as.index.target->as.ident.name) {
@@ -8649,8 +8664,7 @@ ordinary_call:
               ? "rt_print_i64_raw"
               : (is_bool || is_bigint_arg || nyr_expr_is_cstr(b, arg) ||
                          is_list_arg || is_tuple_arg || is_dict_arg ||
-                         is_raw_int_arg ||
-                         is_any_arg || arg_rendered_cstr
+                         is_raw_int_arg || is_any_arg || arg_rendered_cstr
                      ? "rt_print_cstr"
                  : (is_f64_arg || is_f32_arg) ? "rt_print_f64_raw"
                                               : "rt_print_i64_raw");
@@ -13961,9 +13975,10 @@ ordinary_call:
      */
     if (ny_native_runtime_abi_result_is_raw_int(call_result_abi))
       result_class = NYIR_SCALAR_I64_RAW;
+    else if (ny_native_runtime_abi_result_is_tagged_value(call_result_abi))
+      result_class = NYIR_SCALAR_I64_TAGGED;
     else if (result_class == NYIR_SCALAR_UNKNOWN &&
              (ny_native_runtime_abi_result_is_tagged_int(call_result_abi) ||
-              ny_native_runtime_abi_result_is_tagged_value(call_result_abi) ||
               ny_native_runtime_abi_result_is_bigint(call_result_abi)))
       result_class = NYIR_SCALAR_I64_TAGGED;
     else if (result_class == NYIR_SCALAR_UNKNOWN &&

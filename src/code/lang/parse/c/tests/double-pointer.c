@@ -1,3 +1,6 @@
+/*
+ * Parser/backend fixture for double loads, stores, and pointer dereferences.
+ */
 double c_f64_load(const double *pointer) { return *pointer; }
 
 double c_f64_store(double *slot, double value) {

@@ -1,3 +1,6 @@
+/*
+ * Fixture: verify inline assembly preserves address-expression side effects.
+ */
 static volatile int address_calls;
 
 static __attribute__((noinline)) const char *next_address(void) {

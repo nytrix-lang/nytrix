@@ -3,6 +3,7 @@
  * amalgamating hm.c, core.c, and emit.c into one compilation unit.
  */
 #include "base/common.h"
+#include "base/compat.h"
 #include "base/util.h"
 #include "code/lang/parse/ast.h"
 #include "code/lang/parse/frontend/visitor.h"

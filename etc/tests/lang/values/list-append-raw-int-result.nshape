@@ -1,0 +1,35 @@
+shape test_list_append_raw_int_result {
+  family "runtime/values"
+  generator "embedded"
+  features ["ny", "test", "native", "list", "regression"]
+  template ny-test-case
+  flags_matrix "-O0 --native-only; -O3 --native-only; --nyr-run; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+;; A user function's `int` result is a raw word. Appending it to a dynamic list
+;; must box it: odd values used to read back halved (113 -> 81 -> 40).
+fn upper(int b) int {
+   if b >= 97 && b <= 122 { return b - 32 }
+   b
+}
+fn lt(int a, int b) bool { a < b }
+
+mut xs = []
+xs = xs.append(upper(113))
+xs = xs.append(upper(65))
+xs = xs.append(upper(7))
+def list src = [97, 120, 33]
+mut i = 0
+while i < src.len {
+   xs = xs.append(upper(int(src.get(i, 0))))
+   i += 1
+}
+xs = xs.append(lt(1, 2))
+assert(xs.get(0, 0) == 81 && xs.get(1, 0) == 65 && xs.get(2, 0) == 7, "direct raw results")
+assert(xs.get(3, 0) == 65 && xs.get(4, 0) == 88 && xs.get(5, 0) == 33, "loop raw results")
+assert(is_bool(xs.get(6, 0)) && xs.get(6, false), "boolean results stay booleans")
+print("ok list append raw int result")
+NY
+}

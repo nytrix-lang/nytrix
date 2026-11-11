@@ -6,6 +6,10 @@
 /*
  * report loading, finding classification, and audit emission
  */
+static const char *fuzz_all_output_dir(const char *dir_rel) {
+  return dir_rel && *dir_rel ? dir_rel : "build/fuzz/all";
+}
+
 static int cmd_public_fuzz_all_audit(int argc, char **argv) {
   char root[4096];
   if (!find_nytrix_root(root, sizeof(root))) {
@@ -66,7 +70,7 @@ static int cmd_public_fuzz_all_audit(int argc, char **argv) {
     } else {
       const char *p = rows_json + 1;
       while (p < rows_end) {
-        p = skip_ws_const(p);
+        p = fuzz_json_skip_ws(p);
         if (p >= rows_end || *p == ']')
           break;
         if (*p == ',') {
@@ -393,7 +397,7 @@ static void findings_collect_known_bug_rows(const char *root,
     return;
   const char *p = rows_json + 1;
   while (p < rows_end) {
-    p = skip_ws_const(p);
+    p = fuzz_json_skip_ws(p);
     if (p >= rows_end || *p == ']')
       break;
     if (*p == ',') {
@@ -457,7 +461,7 @@ static void findings_collect_compiler_finding_rows(const char *root,
     return;
   const char *p = rows_json + 1;
   while (p < rows_end) {
-    p = skip_ws_const(p);
+    p = fuzz_json_skip_ws(p);
     if (p >= rows_end || *p == ']')
       break;
     if (*p == ',') {
@@ -529,7 +533,7 @@ static void findings_collect_perf_rows(const char *root, const char *sub_json,
     return;
   const char *p = rows_json + 1;
   while (p < rows_end) {
-    p = skip_ws_const(p);
+    p = fuzz_json_skip_ws(p);
     if (p >= rows_end || *p == ']')
       break;
     if (*p == ',') {
@@ -891,6 +895,121 @@ findings_markdown_append_quarantine_rows(str_buf_t *md,
   (void)sb_append(md, "\n");
 }
 
+typedef struct {
+  double failure_count;
+  double lanes;
+  double ok;
+  double finding_count;
+  double finding_live;
+  double finding_cleared;
+  double finding_missing;
+  double known_count;
+  double known_reproduced;
+  double known_fixed;
+  double known_lost;
+  double known_baseline;
+  double quarantined;
+  double quarantine_lanes;
+  double perf_hotspots;
+  double perf_max_ratio;
+} fuzz_findings_source_metrics_t;
+
+static fuzz_findings_source_metrics_t
+fuzz_findings_source_metrics(const char *json) {
+  fuzz_findings_source_metrics_t metrics = {0};
+  if (!json)
+    return metrics;
+  (void)summary_number_from_report(json, "failure_count",
+                                   &metrics.failure_count);
+  (void)summary_number_from_report(json, "cases", &metrics.lanes);
+  (void)summary_number_from_report(json, "ok", &metrics.ok);
+  (void)summary_number_from_report(json, "finding_count",
+                                   &metrics.finding_count);
+  (void)summary_number_from_report(json, "finding_live", &metrics.finding_live);
+  (void)summary_number_from_report(json, "finding_cleared",
+                                   &metrics.finding_cleared);
+  (void)summary_number_from_report(json, "finding_missing",
+                                   &metrics.finding_missing);
+  (void)summary_number_from_report(json, "known_bug_count",
+                                   &metrics.known_count);
+  (void)summary_number_from_report(json, "known_bug_reproduced",
+                                   &metrics.known_reproduced);
+  (void)summary_number_from_report(json, "known_bug_fixed_candidates",
+                                   &metrics.known_fixed);
+  (void)summary_number_from_report(json, "known_bug_lost_signal",
+                                   &metrics.known_lost);
+  (void)summary_number_from_report(json, "known_bug_baseline_failures",
+                                   &metrics.known_baseline);
+  (void)summary_number_from_report(json, "quarantined_known_bugs",
+                                   &metrics.quarantined);
+  (void)summary_number_from_report(json, "lanes_with_quarantine",
+                                   &metrics.quarantine_lanes);
+  (void)summary_number_from_report(json, "perf_hotspots",
+                                   &metrics.perf_hotspots);
+  (void)summary_number_from_report(json, "perf_max_ratio",
+                                   &metrics.perf_max_ratio);
+  return metrics;
+}
+
+typedef struct {
+  int known_count;
+  int known_reproduced;
+  int known_fixed;
+  int known_lost;
+  int known_baseline;
+  int quarantine_lanes;
+  int perf_hotspots;
+  double quarantined;
+  double perf_max_ratio;
+  char perf_case[128];
+} fuzz_findings_derived_metrics_t;
+
+static fuzz_findings_derived_metrics_t
+fuzz_findings_derived_metrics(const string_list_t *findings,
+                              bool count_all_perf_rows) {
+  fuzz_findings_derived_metrics_t metrics = {0};
+  if (!findings)
+    return metrics;
+  for (int i = 0; i < findings->count; ++i) {
+    const char *row = findings->items[i];
+    char *kind = json_string_or_empty(row, "kind");
+    if (kind && strcmp(kind, "known-bug") == 0) {
+      ++metrics.known_count;
+      char *status = json_string_or_empty(row, "status");
+      if (status && strcmp(status, "known_bug_reproduced") == 0)
+        ++metrics.known_reproduced;
+      else if (status && strcmp(status, "fixed_candidate") == 0)
+        ++metrics.known_fixed;
+      else if (status && strcmp(status, "baseline_failed") == 0)
+        ++metrics.known_baseline;
+      else if (status && *status)
+        ++metrics.known_lost;
+      free(status);
+    } else if (kind && strcmp(kind, "known-bug-quarantine") == 0) {
+      double count = 0.0;
+      (void)extract_json_number(row, "quarantined_known_bugs", &count);
+      metrics.quarantined += count;
+      ++metrics.quarantine_lanes;
+    } else if (kind && strcmp(kind, "perf-hotspot") == 0) {
+      bool hot = count_all_perf_rows ||
+                 json_bool_range(row, row + strlen(row), "hot", false);
+      if (hot)
+        ++metrics.perf_hotspots;
+      double ratio = 0.0;
+      if (extract_json_number(row, "ratio", &ratio) &&
+          ratio > metrics.perf_max_ratio) {
+        metrics.perf_max_ratio = ratio;
+        char *case_name = json_string_or_empty(row, "case");
+        snprintf(metrics.perf_case, sizeof(metrics.perf_case), "%s",
+                 case_name ? case_name : "");
+        free(case_name);
+      }
+    }
+    free(kind);
+  }
+  return metrics;
+}
+
 static bool write_fuzz_all_findings_markdown(const char *root,
                                              const char *markdown_path,
                                              const char *source_report,
@@ -898,44 +1017,21 @@ static bool write_fuzz_all_findings_markdown(const char *root,
                                              const string_list_t *findings) {
   if (!markdown_path || !*markdown_path)
     return true;
-  double failure_count = 0.0, lanes = 0.0, ok = 0.0;
-  double finding_count = 0.0, finding_live = 0.0, finding_cleared = 0.0;
-  double finding_missing = 0.0, known_count = 0.0, known_reproduced = 0.0;
-  double known_fixed = 0.0, known_lost = 0.0, known_baseline = 0.0;
-  double quarantined = 0.0, quarantine_lanes = 0.0;
-  double perf_hotspots = 0.0, perf_max_ratio = 0.0;
-  if (source_json) {
-    (void)summary_number_from_report(source_json, "failure_count",
-                                     &failure_count);
-    (void)summary_number_from_report(source_json, "cases", &lanes);
-    (void)summary_number_from_report(source_json, "ok", &ok);
-    (void)summary_number_from_report(source_json, "finding_count",
-                                     &finding_count);
-    (void)summary_number_from_report(source_json, "finding_live",
-                                     &finding_live);
-    (void)summary_number_from_report(source_json, "finding_cleared",
-                                     &finding_cleared);
-    (void)summary_number_from_report(source_json, "finding_missing",
-                                     &finding_missing);
-    (void)summary_number_from_report(source_json, "known_bug_count",
-                                     &known_count);
-    (void)summary_number_from_report(source_json, "known_bug_reproduced",
-                                     &known_reproduced);
-    (void)summary_number_from_report(source_json, "known_bug_fixed_candidates",
-                                     &known_fixed);
-    (void)summary_number_from_report(source_json, "known_bug_lost_signal",
-                                     &known_lost);
-    (void)summary_number_from_report(source_json, "known_bug_baseline_failures",
-                                     &known_baseline);
-    (void)summary_number_from_report(source_json, "quarantined_known_bugs",
-                                     &quarantined);
-    (void)summary_number_from_report(source_json, "lanes_with_quarantine",
-                                     &quarantine_lanes);
-    (void)summary_number_from_report(source_json, "perf_hotspots",
-                                     &perf_hotspots);
-    (void)summary_number_from_report(source_json, "perf_max_ratio",
-                                     &perf_max_ratio);
-  }
+  fuzz_findings_source_metrics_t metrics =
+      fuzz_findings_source_metrics(source_json);
+  double failure_count = metrics.failure_count, lanes = metrics.lanes;
+  double ok = metrics.ok, finding_count = metrics.finding_count;
+  double finding_live = metrics.finding_live;
+  double finding_cleared = metrics.finding_cleared;
+  double finding_missing = metrics.finding_missing;
+  double known_count = metrics.known_count;
+  double known_reproduced = metrics.known_reproduced;
+  double known_fixed = metrics.known_fixed, known_lost = metrics.known_lost;
+  double known_baseline = metrics.known_baseline;
+  double quarantined = metrics.quarantined;
+  double quarantine_lanes = metrics.quarantine_lanes;
+  double perf_hotspots = metrics.perf_hotspots;
+  double perf_max_ratio = metrics.perf_max_ratio;
   char *perf_case = source_json
                         ? json_string_or_empty(source_json, "perf_max_case")
                         : strdup("");
@@ -1032,84 +1128,34 @@ static bool write_fuzz_all_findings_markdown(const char *root,
 static void print_fuzz_all_findings_human(const char *report_path,
                                           const char *report_json,
                                           const string_list_t *findings) {
-  double failure_count = 0.0, lanes = 0.0, ok = 0.0;
-  double finding_count = 0.0, finding_live = 0.0, finding_cleared = 0.0;
-  double finding_missing = 0.0;
-  double known_count = 0.0, known_reproduced = 0.0, known_fixed = 0.0;
-  double known_lost = 0.0, known_baseline = 0.0;
-  double quarantined = 0.0, quarantine_lanes = 0.0;
-  double perf_hotspots = 0.0, perf_max_ratio = 0.0;
-  (void)summary_number_from_report(report_json, "failure_count",
-                                   &failure_count);
-  (void)summary_number_from_report(report_json, "cases", &lanes);
-  (void)summary_number_from_report(report_json, "ok", &ok);
-  (void)summary_number_from_report(report_json, "finding_count",
-                                   &finding_count);
-  (void)summary_number_from_report(report_json, "finding_live", &finding_live);
-  (void)summary_number_from_report(report_json, "finding_cleared",
-                                   &finding_cleared);
-  (void)summary_number_from_report(report_json, "finding_missing",
-                                   &finding_missing);
-  (void)summary_number_from_report(report_json, "known_bug_count",
-                                   &known_count);
-  (void)summary_number_from_report(report_json, "known_bug_reproduced",
-                                   &known_reproduced);
-  (void)summary_number_from_report(report_json, "known_bug_fixed_candidates",
-                                   &known_fixed);
-  (void)summary_number_from_report(report_json, "known_bug_lost_signal",
-                                   &known_lost);
-  (void)summary_number_from_report(report_json, "known_bug_baseline_failures",
-                                   &known_baseline);
-  (void)summary_number_from_report(report_json, "quarantined_known_bugs",
-                                   &quarantined);
-  (void)summary_number_from_report(report_json, "lanes_with_quarantine",
-                                   &quarantine_lanes);
-  (void)summary_number_from_report(report_json, "perf_hotspots",
-                                   &perf_hotspots);
-  (void)summary_number_from_report(report_json, "perf_max_ratio",
-                                   &perf_max_ratio);
+  fuzz_findings_source_metrics_t metrics =
+      fuzz_findings_source_metrics(report_json);
+  double failure_count = metrics.failure_count, lanes = metrics.lanes;
+  double ok = metrics.ok, finding_count = metrics.finding_count;
+  double finding_live = metrics.finding_live;
+  double finding_cleared = metrics.finding_cleared;
+  double finding_missing = metrics.finding_missing;
+  double known_count = metrics.known_count;
+  double known_reproduced = metrics.known_reproduced;
+  double known_fixed = metrics.known_fixed, known_lost = metrics.known_lost;
+  double known_baseline = metrics.known_baseline;
+  double quarantined = metrics.quarantined;
+  double quarantine_lanes = metrics.quarantine_lanes;
+  double perf_hotspots = metrics.perf_hotspots;
+  double perf_max_ratio = metrics.perf_max_ratio;
   char *perf_case = json_string_or_empty(report_json, "perf_max_case");
 
-  int derived_known_count = 0, derived_known_reproduced = 0,
-      derived_known_fixed = 0;
-  int derived_known_lost = 0, derived_known_baseline = 0;
-  int derived_quarantine_lanes = 0, derived_perf_hotspots = 0;
-  double derived_quarantined = 0.0, derived_perf_max_ratio = 0.0;
-  char derived_perf_case[128] = {0};
-  for (int i = 0; i < findings->count; ++i) {
-    char *kind = json_string_or_empty(findings->items[i], "kind");
-    if (kind && strcmp(kind, "known-bug") == 0) {
-      ++derived_known_count;
-      char *status = json_string_or_empty(findings->items[i], "status");
-      if (status && strcmp(status, "known_bug_reproduced") == 0)
-        ++derived_known_reproduced;
-      else if (status && strcmp(status, "fixed_candidate") == 0)
-        ++derived_known_fixed;
-      else if (status && strcmp(status, "baseline_failed") == 0)
-        ++derived_known_baseline;
-      else if (status && *status)
-        ++derived_known_lost;
-      free(status);
-    } else if (kind && strcmp(kind, "known-bug-quarantine") == 0) {
-      double count = 0.0;
-      (void)extract_json_number(findings->items[i], "quarantined_known_bugs",
-                                &count);
-      derived_quarantined += count;
-      ++derived_quarantine_lanes;
-    } else if (kind && strcmp(kind, "perf-hotspot") == 0) {
-      ++derived_perf_hotspots;
-      double ratio = 0.0;
-      if (extract_json_number(findings->items[i], "ratio", &ratio) &&
-          ratio > derived_perf_max_ratio) {
-        derived_perf_max_ratio = ratio;
-        char *case_name = json_string_or_empty(findings->items[i], "case");
-        snprintf(derived_perf_case, sizeof(derived_perf_case), "%s",
-                 case_name ? case_name : "");
-        free(case_name);
-      }
-    }
-    free(kind);
-  }
+  fuzz_findings_derived_metrics_t derived =
+      fuzz_findings_derived_metrics(findings, true);
+  int derived_known_count = derived.known_count;
+  int derived_known_reproduced = derived.known_reproduced;
+  int derived_known_fixed = derived.known_fixed;
+  int derived_known_lost = derived.known_lost;
+  int derived_known_baseline = derived.known_baseline;
+  int derived_quarantine_lanes = derived.quarantine_lanes;
+  int derived_perf_hotspots = derived.perf_hotspots;
+  double derived_quarantined = derived.quarantined;
+  double derived_perf_max_ratio = derived.perf_max_ratio;
   if (known_count <= 0.0 && derived_known_count > 0)
     known_count = derived_known_count;
   if (known_reproduced <= 0.0 && derived_known_reproduced > 0)
@@ -1129,7 +1175,7 @@ static void print_fuzz_all_findings_human(const char *report_path,
   if (perf_max_ratio <= 0.0 && derived_perf_max_ratio > 0.0) {
     perf_max_ratio = derived_perf_max_ratio;
     free(perf_case);
-    perf_case = strdup(derived_perf_case);
+    perf_case = strdup(derived.perf_case);
   }
 
   printf("all-fuzz findings: %s\n", report_path ? report_path : "");
@@ -1326,7 +1372,7 @@ static int cmd_public_fuzz_all_findings(int argc, char **argv) {
     } else {
       const char *p = rows_json + 1;
       while (p < rows_end) {
-        p = skip_ws_const(p);
+        p = fuzz_json_skip_ws(p);
         if (p >= rows_end || *p == ']')
           break;
         if (*p == ',') {
@@ -1375,91 +1421,35 @@ static int cmd_public_fuzz_all_findings(int argc, char **argv) {
     }
   }
 
-  double failure_count = 0.0, lanes = 0.0, ok = 0.0;
-  double finding_count = 0.0, finding_live = 0.0, finding_cleared = 0.0;
-  double finding_missing = 0.0;
-  double known_count = 0.0, known_reproduced = 0.0, known_fixed = 0.0;
-  double known_lost = 0.0, known_baseline = 0.0, quarantined = 0.0;
-  double quarantine_lanes = 0.0, perf_hotspots = 0.0, perf_max_ratio = 0.0;
-  if (report_file.data) {
-    (void)summary_number_from_report(report_file.data, "failure_count",
-                                     &failure_count);
-    (void)summary_number_from_report(report_file.data, "cases", &lanes);
-    (void)summary_number_from_report(report_file.data, "ok", &ok);
-    (void)summary_number_from_report(report_file.data, "finding_count",
-                                     &finding_count);
-    (void)summary_number_from_report(report_file.data, "finding_live",
-                                     &finding_live);
-    (void)summary_number_from_report(report_file.data, "finding_cleared",
-                                     &finding_cleared);
-    (void)summary_number_from_report(report_file.data, "finding_missing",
-                                     &finding_missing);
-    (void)summary_number_from_report(report_file.data, "known_bug_count",
-                                     &known_count);
-    (void)summary_number_from_report(report_file.data, "known_bug_reproduced",
-                                     &known_reproduced);
-    (void)summary_number_from_report(
-        report_file.data, "known_bug_fixed_candidates", &known_fixed);
-    (void)summary_number_from_report(report_file.data, "known_bug_lost_signal",
-                                     &known_lost);
-    (void)summary_number_from_report(
-        report_file.data, "known_bug_baseline_failures", &known_baseline);
-    (void)summary_number_from_report(report_file.data, "quarantined_known_bugs",
-                                     &quarantined);
-    (void)summary_number_from_report(report_file.data, "lanes_with_quarantine",
-                                     &quarantine_lanes);
-    (void)summary_number_from_report(report_file.data, "perf_hotspots",
-                                     &perf_hotspots);
-    (void)summary_number_from_report(report_file.data, "perf_max_ratio",
-                                     &perf_max_ratio);
-  }
+  fuzz_findings_source_metrics_t metrics =
+      fuzz_findings_source_metrics(report_file.data);
+  double failure_count = metrics.failure_count, lanes = metrics.lanes;
+  double ok = metrics.ok, finding_count = metrics.finding_count;
+  double finding_live = metrics.finding_live;
+  double finding_cleared = metrics.finding_cleared;
+  double finding_missing = metrics.finding_missing;
+  double known_count = metrics.known_count;
+  double known_reproduced = metrics.known_reproduced;
+  double known_fixed = metrics.known_fixed, known_lost = metrics.known_lost;
+  double known_baseline = metrics.known_baseline;
+  double quarantined = metrics.quarantined;
+  double quarantine_lanes = metrics.quarantine_lanes;
+  double perf_hotspots = metrics.perf_hotspots;
+  double perf_max_ratio = metrics.perf_max_ratio;
   char *perf_case =
       report_file.data ? json_string_or_empty(report_file.data, "perf_max_case")
                        : strdup("");
-  int derived_known_count = 0, derived_known_reproduced = 0,
-      derived_known_fixed = 0;
-  int derived_known_lost = 0, derived_known_baseline = 0;
-  int derived_quarantine_lanes = 0, derived_perf_hotspots = 0;
-  double derived_quarantined = 0.0, derived_perf_max_ratio = 0.0;
-  char derived_perf_case[128] = {0};
-  for (int i = 0; i < findings.count; ++i) {
-    char *kind = json_string_or_empty(findings.items[i], "kind");
-    if (kind && strcmp(kind, "known-bug") == 0) {
-      ++derived_known_count;
-      char *status = json_string_or_empty(findings.items[i], "status");
-      if (status && strcmp(status, "known_bug_reproduced") == 0)
-        ++derived_known_reproduced;
-      else if (status && strcmp(status, "fixed_candidate") == 0)
-        ++derived_known_fixed;
-      else if (status && strcmp(status, "baseline_failed") == 0)
-        ++derived_known_baseline;
-      else if (status && *status)
-        ++derived_known_lost;
-      free(status);
-    } else if (kind && strcmp(kind, "known-bug-quarantine") == 0) {
-      double count = 0.0;
-      (void)extract_json_number(findings.items[i], "quarantined_known_bugs",
-                                &count);
-      derived_quarantined += count;
-      ++derived_quarantine_lanes;
-    } else if (kind && strcmp(kind, "perf-hotspot") == 0) {
-      bool hot = json_bool_range(findings.items[i],
-                                 findings.items[i] + strlen(findings.items[i]),
-                                 "hot", false);
-      if (hot)
-        ++derived_perf_hotspots;
-      double ratio = 0.0;
-      if (extract_json_number(findings.items[i], "ratio", &ratio) &&
-          ratio > derived_perf_max_ratio) {
-        derived_perf_max_ratio = ratio;
-        char *case_name = json_string_or_empty(findings.items[i], "case");
-        snprintf(derived_perf_case, sizeof(derived_perf_case), "%s",
-                 case_name ? case_name : "");
-        free(case_name);
-      }
-    }
-    free(kind);
-  }
+  fuzz_findings_derived_metrics_t derived =
+      fuzz_findings_derived_metrics(&findings, false);
+  int derived_known_count = derived.known_count;
+  int derived_known_reproduced = derived.known_reproduced;
+  int derived_known_fixed = derived.known_fixed;
+  int derived_known_lost = derived.known_lost;
+  int derived_known_baseline = derived.known_baseline;
+  int derived_quarantine_lanes = derived.quarantine_lanes;
+  int derived_perf_hotspots = derived.perf_hotspots;
+  double derived_quarantined = derived.quarantined;
+  double derived_perf_max_ratio = derived.perf_max_ratio;
   if (known_count <= 0.0 && derived_known_count > 0)
     known_count = derived_known_count;
   if (known_reproduced <= 0.0 && derived_known_reproduced > 0)
@@ -1479,7 +1469,7 @@ static int cmd_public_fuzz_all_findings(int argc, char **argv) {
   if (perf_max_ratio <= 0.0 && derived_perf_max_ratio > 0.0) {
     perf_max_ratio = derived_perf_max_ratio;
     free(perf_case);
-    perf_case = strdup(derived_perf_case);
+    perf_case = strdup(derived.perf_case);
   }
   double suppressed_fixed_known_bug_rows = 0.0;
   if (!include_fixed_known_bugs && known_fixed > (double)derived_known_fixed)
@@ -7658,7 +7648,7 @@ static void status_capture_provenance(fuzz_all_status_summary_t *s,
                       sizeof(s->nytrix_git_head), s->nytrix_git_status_hash,
                       sizeof(s->nytrix_git_status_hash), &s->nytrix_git_ok,
                       &s->nytrix_git_dirty);
-  file_hash_hex(g_self_path, s->nytrix_bin_hash, sizeof(s->nytrix_bin_hash));
+  fuzz_file_hash_hex(g_self_path, s->nytrix_bin_hash, sizeof(s->nytrix_bin_hash));
 
   char ny_root[4096] = {0};
   if (find_repo_root_or_sibling(ny_root, sizeof(ny_root)) && ny_root[0])
@@ -7666,7 +7656,7 @@ static void status_capture_provenance(fuzz_all_status_summary_t *s,
   if (find_ny_bin(s->nytrix_root, s->ny_bin, sizeof(s->ny_bin)))
     s->ny_bin_exists = true;
   if (s->ny_bin_exists)
-    file_hash_hex(s->ny_bin, s->ny_bin_hash, sizeof(s->ny_bin_hash));
+    fuzz_file_hash_hex(s->ny_bin, s->ny_bin_hash, sizeof(s->ny_bin_hash));
   if (s->nytrix_root[0])
     status_git_snapshot(root, s->nytrix_root, s->nytrix_git_head,
                         sizeof(s->nytrix_git_head), s->nytrix_git_status_hash,
@@ -9210,7 +9200,7 @@ static bool fuzz_all_perf_watchlist_target_paths(
   double best_ratio = 0.0;
   const char *p = rows_json + 1;
   while (p < rows_end) {
-    p = skip_ws_const(p);
+    p = fuzz_json_skip_ws(p);
     if (p >= rows_end || *p == ']')
       break;
     if (*p == ',') {
@@ -10609,78 +10599,61 @@ static char *make_fuzz_all_status_summary_row(
         s->next_handoff_command[0] ? s->next_handoff_command : s->next_command);
   str_buf_t row = {0};
   (void)sb_append(&row, "{\"kind\":\"fuzz-all-status\"");
-  (void)sb_append(&row, ",\"history_report\":");
-  (void)sb_append_json_str(&row, s ? s->history_report : "");
-  (void)sb_append(&row, ",\"worklist_report\":");
-  (void)sb_append_json_str(&row, s ? s->worklist_report : "");
-  (void)sb_append(&row, ",\"historical_worklist_report\":");
-  (void)sb_append_json_str(&row, s ? s->historical_worklist_report : "");
-  (void)sb_append(&row, ",\"historical_worklist_markdown\":");
-  (void)sb_append_json_str(&row, s ? s->historical_worklist_markdown : "");
-  (void)sb_append(&row, ",\"coverage_report\":");
-  (void)sb_append_json_str(&row, s ? s->coverage_report : "");
-  (void)sb_append(&row, ",\"plan_report\":");
-  (void)sb_append_json_str(&row, s ? s->plan_report : "");
+  append_json_string_field(&row, "history_report", s ? s->history_report : "");
+  append_json_string_field(&row, "worklist_report",
+                           s ? s->worklist_report : "");
+  append_json_string_field(&row, "historical_worklist_report",
+                           s ? s->historical_worklist_report : "");
+  append_json_string_field(&row, "historical_worklist_markdown",
+                           s ? s->historical_worklist_markdown : "");
+  append_json_string_field(&row, "coverage_report",
+                           s ? s->coverage_report : "");
+  append_json_string_field(&row, "plan_report", s ? s->plan_report : "");
   append_fuzz_all_compiler_std_audit_fields(&row, s);
-  (void)sb_append(&row, ",\"latest_report\":");
-  (void)sb_append_json_str(&row, s ? s->latest_report : "");
-  (void)sb_append(&row, ",\"latest_full_pressure_report\":");
-  (void)sb_append_json_str(&row, s ? s->latest_full_pressure_report : "");
-  (void)sb_append(&row, ",\"next_script\":");
-  (void)sb_append_json_str(&row, s ? s->next_script : "");
-  (void)sb_append(&row, ",\"next_handoff_command\":");
-  (void)sb_append_json_str(&row, s ? s->next_handoff_command : "");
-  (void)sb_append(&row, ",\"next_command\":");
-  (void)sb_append_json_str(&row, s ? s->next_command : "");
-  (void)sb_append(&row, ",\"preview_command\":");
-  (void)sb_append_json_str(&row, selected_preview_command);
-  (void)sb_append(&row, ",\"run_next_command\":");
-  (void)sb_append_json_str(&row, s ? s->next_command : "");
-  (void)sb_append(&row, ",\"run_next_preview_command\":");
-  (void)sb_append_json_str(&row, selected_preview_command);
-  (void)sb_append(&row, ",\"run_next_low_cpu_command\":");
-  (void)sb_append_json_str(&row, s ? s->next_command : "");
-  (void)sb_append(&row, ",\"run_next_gentle_command\":");
-  (void)sb_append_json_str(&row, run_next_gentle_command);
-  (void)sb_append(&row, ",\"run_next_gentle_preview_command\":");
-  (void)sb_append_json_str(&row, run_next_gentle_preview_command);
-  (void)sb_append(&row, ",\"stop_file\":");
-  (void)sb_append_json_str(&row, s ? s->stop_file : "");
-  (void)sb_append(&row, ",\"stop_command\":");
-  (void)sb_append_json_str(&row, s ? s->stop_command : "");
-  (void)sb_append(&row, ",\"resume_command\":");
-  (void)sb_append_json_str(&row, s ? s->resume_command : "");
-  (void)sb_append(&row, ",\"state_file\":");
-  (void)sb_append_json_str(&row, s ? s->state_file : "");
-  (void)sb_append(&row, ",\"state_command\":");
-  (void)sb_append_json_str(&row, s ? s->state_command : "");
-  (void)sb_append(&row, ",\"state_refresh_command\":");
-  (void)sb_append_json_str(&row, selected_state_refresh_command);
-  (void)sb_append(&row, ",\"state\":");
-  (void)sb_append_json_str(
-      &row, s ? fuzz_all_state_label_values(s->state_readable, s->state_phase)
-              : "missing");
-  (void)sb_append(&row, ",\"state_readable\":");
-  (void)sb_append(&row, s && s->state_readable ? "true" : "false");
-  (void)sb_append(&row, ",\"state_fresh\":");
-  (void)sb_append(&row, s && s->state_fresh ? "true" : "false");
-  (void)sb_append(&row, ",\"state_live\":");
-  (void)sb_append(
-      &row, s && fuzz_all_state_phase_live(s->state_phase) ? "true" : "false");
-  (void)sb_append(&row, ",\"state_child_alive\":");
-  (void)sb_append(&row, s && s->state_child_alive ? "true" : "false");
-  (void)sb_append(&row, ",\"state_child_status\":");
-  (void)sb_append_json_str(
-      &row,
+  append_json_string_field(&row, "latest_report", s ? s->latest_report : "");
+  append_json_string_field(&row, "latest_full_pressure_report",
+                           s ? s->latest_full_pressure_report : "");
+  append_json_string_field(&row, "next_script", s ? s->next_script : "");
+  append_json_string_field(&row, "next_handoff_command",
+                           s ? s->next_handoff_command : "");
+  append_json_string_field(&row, "next_command", s ? s->next_command : "");
+  append_json_string_field(&row, "preview_command", selected_preview_command);
+  append_json_string_field(&row, "run_next_command", s ? s->next_command : "");
+  append_json_string_field(&row, "run_next_preview_command",
+                           selected_preview_command);
+  append_json_string_field(&row, "run_next_low_cpu_command",
+                           s ? s->next_command : "");
+  append_json_string_field(&row, "run_next_gentle_command",
+                           run_next_gentle_command);
+  append_json_string_field(&row, "run_next_gentle_preview_command",
+                           run_next_gentle_preview_command);
+  append_json_string_field(&row, "stop_file", s ? s->stop_file : "");
+  append_json_string_field(&row, "stop_command", s ? s->stop_command : "");
+  append_json_string_field(&row, "resume_command", s ? s->resume_command : "");
+  append_json_string_field(&row, "state_file", s ? s->state_file : "");
+  append_json_string_field(&row, "state_command", s ? s->state_command : "");
+  append_json_string_field(&row, "state_refresh_command",
+                           selected_state_refresh_command);
+  append_json_string_field(
+      &row, "state",
+      s ? fuzz_all_state_label_values(s->state_readable, s->state_phase)
+        : "missing");
+  append_json_bool_field(&row, "state_readable", s && s->state_readable);
+  append_json_bool_field(&row, "state_fresh", s && s->state_fresh);
+  append_json_bool_field(&row, "state_live",
+                         s && fuzz_all_state_phase_live(s->state_phase));
+  append_json_bool_field(&row, "state_child_alive", s && s->state_child_alive);
+  append_json_string_field(
+      &row, "state_child_status",
       s ? fuzz_all_state_child_status(s->state_child_pid, s->state_child_alive)
         : "none");
-  (void)sb_append(&row, ",\"state_stale_reason\":");
-  (void)sb_append_json_str(
-      &row, s ? fuzz_all_state_stale_reason_values(
-                    s->state_readable, s->state_fresh, s->state_phase,
-                    s->state_age_seconds, s->state_heartbeat_s,
-                    s->state_child_pid, s->state_child_alive)
-              : "missing");
+  append_json_string_field(&row, "state_stale_reason",
+                           s ? fuzz_all_state_stale_reason_values(
+                                   s->state_readable, s->state_fresh,
+                                   s->state_phase, s->state_age_seconds,
+                                   s->state_heartbeat_s, s->state_child_pid,
+                                   s->state_child_alive)
+                             : "missing");
   (void)sb_appendf(
       &row,
       ",\"state_age_seconds\":%.0f,"
@@ -10695,62 +10668,59 @@ static char *make_fuzz_all_status_summary_row(
       s ? s->state_cycle : 0.0, s ? s->state_cycles : 0.0,
       s ? s->state_heartbeat_s : 0.0, s ? s->state_heartbeat_count : 0.0,
       s ? s->state_child_pid : 0.0);
-  (void)sb_append(&row, ",\"state_phase\":");
-  (void)sb_append_json_str(&row, s ? s->state_phase : "");
-  (void)sb_append(&row, ",\"state_event\":");
-  (void)sb_append_json_str(&row, s ? s->state_event : "");
-  (void)sb_append(&row, ",\"state_timestamp_utc\":");
-  (void)sb_append_json_str(&row, s ? s->state_timestamp_utc : "");
-  (void)sb_append(&row, ",\"state_last_report\":");
-  (void)sb_append_json_str(&row, s ? s->state_last_report : "");
-  (void)sb_append(&row, ",\"progress_command\":");
-  (void)sb_append_json_str(&row, s ? s->progress_command : "");
+  append_json_string_field(&row, "state_phase", s ? s->state_phase : "");
+  append_json_string_field(&row, "state_event", s ? s->state_event : "");
+  append_json_string_field(&row, "state_timestamp_utc",
+                           s ? s->state_timestamp_utc : "");
+  append_json_string_field(&row, "state_last_report",
+                           s ? s->state_last_report : "");
+  append_json_string_field(&row, "progress_command",
+                           s ? s->progress_command : "");
   char status_freshness_action_command[4096] = {0};
   if (s && score.freshness_penalty > 0.0)
     fuzz_all_freshness_action_command(
         status_freshness_action_command,
         sizeof(status_freshness_action_command),
         s->next_handoff_command[0] ? s->next_handoff_command : s->next_command);
-  (void)sb_append(&row, ",\"freshness_action_command\":");
-  (void)sb_append_json_str(&row, status_freshness_action_command);
-  (void)sb_append(&row, ",\"latest_report_freshness_command\":");
-  (void)sb_append_json_str(&row, s && !score.latest_report_fresh
-                                     ? status_freshness_action_command
-                                     : "");
-  (void)sb_append(&row, ",\"latest_full_pressure_report_freshness_command\":");
-  (void)sb_append_json_str(&row, s && !score.latest_full_pressure_report_fresh
-                                     ? status_freshness_action_command
-                                     : "");
-  (void)sb_append(&row, ",\"full_pressure_freshen_command\":");
-  (void)sb_append_json_str(&row, s && !score.latest_full_pressure_report_fresh
-                                     ? status_freshness_action_command
-                                     : "");
-  (void)sb_append(&row, ",\"full_pressure_remediation_command\":");
-  (void)sb_append_json_str(&row, s && !score.latest_full_pressure_report_fresh
-                                     ? status_freshness_action_command
-                                     : "");
-  (void)sb_append(&row, ",\"full_pressure_action_command\":");
-  (void)sb_append_json_str(&row, s && !score.latest_full_pressure_report_fresh
-                                     ? status_freshness_action_command
-                                     : "");
-  (void)sb_append(&row, ",\"status_command\":");
-  (void)sb_append_json_str(&row, s ? s->status_command : "");
-  (void)sb_append(&row, ",\"old_path_probe_command\":");
-  (void)sb_append_json_str(&row, NYTRIX_FUZZ_ALL_OLD_PATH_PROBE_COMMAND);
-  (void)sb_append(&row, ",\"old_path_command\":");
-  (void)sb_append_json_str(&row, s ? s->old_path_command : "");
-  (void)sb_append(&row, ",\"old_path_dry_run_command\":");
-  (void)sb_append_json_str(&row, s ? s->old_path_dry_run_command : "");
-  (void)sb_append(&row, ",\"old_path_apply_command\":");
-  (void)sb_append_json_str(&row, s ? s->old_path_apply_command : "");
-  (void)sb_append(&row, ",\"old_path_next_action\":");
-  (void)sb_append_json_str(&row, s ? s->old_path_next_action : "none");
-  (void)sb_append(&row, ",\"old_path_next_reason\":");
-  (void)sb_append_json_str(&row, s ? s->old_path_next_reason : "");
-  (void)sb_append(&row, ",\"old_path_report\":");
-  (void)sb_append_json_str(&row, s ? s->old_path_report : "");
-  (void)sb_append(&row, ",\"old_path_markdown\":");
-  (void)sb_append_json_str(&row, s ? s->old_path_markdown : "");
+  append_json_string_field(&row, "freshness_action_command",
+                           status_freshness_action_command);
+  append_json_string_field(
+      &row, "latest_report_freshness_command",
+      s && !score.latest_report_fresh ? status_freshness_action_command : "");
+  append_json_string_field(&row,
+                           "latest_full_pressure_report_freshness_command",
+                           s && !score.latest_full_pressure_report_fresh
+                               ? status_freshness_action_command
+                               : "");
+  append_json_string_field(&row, "full_pressure_freshen_command",
+                           s && !score.latest_full_pressure_report_fresh
+                               ? status_freshness_action_command
+                               : "");
+  append_json_string_field(&row, "full_pressure_remediation_command",
+                           s && !score.latest_full_pressure_report_fresh
+                               ? status_freshness_action_command
+                               : "");
+  append_json_string_field(&row, "full_pressure_action_command",
+                           s && !score.latest_full_pressure_report_fresh
+                               ? status_freshness_action_command
+                               : "");
+  append_json_string_field(&row, "status_command", s ? s->status_command : "");
+  append_json_string_field(&row, "old_path_probe_command",
+                           NYTRIX_FUZZ_ALL_OLD_PATH_PROBE_COMMAND);
+  append_json_string_field(&row, "old_path_command",
+                           s ? s->old_path_command : "");
+  append_json_string_field(&row, "old_path_dry_run_command",
+                           s ? s->old_path_dry_run_command : "");
+  append_json_string_field(&row, "old_path_apply_command",
+                           s ? s->old_path_apply_command : "");
+  append_json_string_field(&row, "old_path_next_action",
+                           s ? s->old_path_next_action : "none");
+  append_json_string_field(&row, "old_path_next_reason",
+                           s ? s->old_path_next_reason : "");
+  append_json_string_field(&row, "old_path_report",
+                           s ? s->old_path_report : "");
+  append_json_string_field(&row, "old_path_markdown",
+                           s ? s->old_path_markdown : "");
   (void)sb_appendf(&row,
                    ",\"old_path_cache_policy_ok\":%s,"
                    "\"old_path_present_count\":%.0f,"
@@ -10802,48 +10772,42 @@ static char *make_fuzz_all_status_summary_row(
       advisory_present && s ? s->advisory_recheck_raw_repro_passed : 0.0,
       advisory_present && s ? s->advisory_recheck_raw_repro_timeouts : 0.0,
       advisory_present && s ? s->advisory_recheck_raw_repro_unexpected : 0.0);
-  (void)sb_append(&row, ",\"perf_watchlist_command\":");
-  (void)sb_append_json_str(&row, s ? s->perf_watchlist_command : "");
-  (void)sb_append(&row, ",\"perf_watchlist_state\":");
-  (void)sb_append_json_str(&row, perf_watchlist_state);
-  (void)sb_append(&row, ",\"perf_watchlist_action\":");
-  (void)sb_append_json_str(&row, perf_watchlist_action);
-  (void)sb_append(&row, ",\"perf_watchlist_action_command\":");
-  (void)sb_append_json_str(
-      &row, perf_watchlist_action_command ? perf_watchlist_action_command : "");
-  (void)sb_append(&row, ",\"optimization_action\":");
-  (void)sb_append_json_str(&row, perf_watchlist_action);
-  (void)sb_append(&row, ",\"optimization_reason\":");
-  (void)sb_append_json_str(&row, optimization_reason);
-  (void)sb_append(&row, ",\"optimization_command\":");
-  (void)sb_append_json_str(
-      &row, perf_watchlist_action_command ? perf_watchlist_action_command : "");
-  (void)sb_append(&row, ",\"optimization_target_command\":");
-  (void)sb_append_json_str(
-      &row, optimization_target_command ? optimization_target_command : "");
-  (void)sb_append(&row, ",\"optimization_case\":");
-  (void)sb_append_json_str(&row, optimization_case);
-  (void)sb_append(&row, ",\"optimization_artifact\":");
-  (void)sb_append_json_str(&row, optimization_artifact);
-  (void)sb_append(&row, ",\"optimization_ny_source\":");
-  (void)sb_append_json_str(&row, optimization_ny_source);
-  (void)sb_append(&row, ",\"optimization_c_source\":");
-  (void)sb_append_json_str(&row, optimization_c_source);
+  append_json_string_field(&row, "perf_watchlist_command",
+                           s ? s->perf_watchlist_command : "");
+  append_json_string_field(&row, "perf_watchlist_state", perf_watchlist_state);
+  append_json_string_field(&row, "perf_watchlist_action",
+                           perf_watchlist_action);
+  append_json_string_field(
+      &row, "perf_watchlist_action_command",
+      perf_watchlist_action_command ? perf_watchlist_action_command : "");
+  append_json_string_field(&row, "optimization_action", perf_watchlist_action);
+  append_json_string_field(&row, "optimization_reason", optimization_reason);
+  append_json_string_field(
+      &row, "optimization_command",
+      perf_watchlist_action_command ? perf_watchlist_action_command : "");
+  append_json_string_field(
+      &row, "optimization_target_command",
+      optimization_target_command ? optimization_target_command : "");
+  append_json_string_field(&row, "optimization_case", optimization_case);
+  append_json_string_field(&row, "optimization_artifact",
+                           optimization_artifact);
+  append_json_string_field(&row, "optimization_ny_source",
+                           optimization_ny_source);
+  append_json_string_field(&row, "optimization_c_source",
+                           optimization_c_source);
   (void)sb_appendf(&row,
                    ",\"optimization_ratio\":%.4f,"
                    "\"optimization_slowdown_percent\":%.2f",
                    optimization_ratio,
                    fuzz_all_perf_slowdown_percent(optimization_ratio));
-  (void)sb_append(&row, ",\"perf_watchlist_report\":");
-  (void)sb_append_json_str(&row, s ? s->perf_watchlist_report : "");
-  (void)sb_append(&row, ",\"perf_watchlist_markdown\":");
-  (void)sb_append_json_str(&row, s ? s->perf_watchlist_markdown : "");
-  (void)sb_append(&row, ",\"perf_watchlist_artifact_readable\":");
-  (void)sb_append(&row,
-                  s && s->perf_watchlist_artifact_readable ? "true" : "false");
-  (void)sb_append(&row, ",\"perf_watchlist_artifact_fresh\":");
-  (void)sb_append(&row,
-                  s && s->perf_watchlist_artifact_fresh ? "true" : "false");
+  append_json_string_field(&row, "perf_watchlist_report",
+                           s ? s->perf_watchlist_report : "");
+  append_json_string_field(&row, "perf_watchlist_markdown",
+                           s ? s->perf_watchlist_markdown : "");
+  append_json_bool_field(&row, "perf_watchlist_artifact_readable",
+                         s && s->perf_watchlist_artifact_readable);
+  append_json_bool_field(&row, "perf_watchlist_artifact_fresh",
+                         s && s->perf_watchlist_artifact_fresh);
   (void)sb_appendf(
       &row,
       ",\"perf_watchlist_artifact_hotspots\":%.0f,"
@@ -10858,29 +10822,23 @@ static char *make_fuzz_all_status_summary_row(
       s ? s->perf_watchlist_artifact_age_seconds : -1.0,
       s ? s->perf_watchlist_artifact_stale_after_hours
         : fuzz_all_score_latest_fresh_hours());
-  (void)sb_append(&row, ",\"perf_watchlist_artifact_max_case\":");
-  (void)sb_append_json_str(&row, s ? s->perf_watchlist_artifact_max_case : "");
-  (void)sb_append(&row, ",\"perf_watchlist_artifact_max_artifact\":");
-  (void)sb_append_json_str(&row,
+  append_json_string_field(&row, "perf_watchlist_artifact_max_case",
+                           s ? s->perf_watchlist_artifact_max_case : "");
+  append_json_string_field(&row, "perf_watchlist_artifact_max_artifact",
                            s ? s->perf_watchlist_artifact_max_artifact : "");
-  (void)sb_append(&row, ",\"perf_watchlist_artifact_max_ny_source\":");
-  (void)sb_append_json_str(&row,
+  append_json_string_field(&row, "perf_watchlist_artifact_max_ny_source",
                            s ? s->perf_watchlist_artifact_max_ny_source : "");
-  (void)sb_append(&row, ",\"perf_watchlist_artifact_max_c_source\":");
-  (void)sb_append_json_str(&row,
+  append_json_string_field(&row, "perf_watchlist_artifact_max_c_source",
                            s ? s->perf_watchlist_artifact_max_c_source : "");
-  (void)sb_append(&row, ",\"recommended_action\":");
-  (void)sb_append_json_str(&row, recommendation.action);
-  (void)sb_append(&row, ",\"recommended_reason\":");
-  (void)sb_append_json_str(&row, recommendation.reason);
-  (void)sb_append(&row, ",\"recommended_command\":");
-  (void)sb_append_json_str(&row, recommendation.command);
-  (void)sb_append(&row, ",\"recommended_low_cpu_command\":");
-  (void)sb_append_json_str(&row, recommendation.low_cpu_command);
-  (void)sb_append(&row, ",\"recommended_preview_command\":");
-  (void)sb_append_json_str(&row, recommendation.preview_command);
-  (void)sb_append(&row, ",\"recommended_repeat_mode\":");
-  (void)sb_append_json_str(&row, recommendation.repeat_mode);
+  append_json_string_field(&row, "recommended_action", recommendation.action);
+  append_json_string_field(&row, "recommended_reason", recommendation.reason);
+  append_json_string_field(&row, "recommended_command", recommendation.command);
+  append_json_string_field(&row, "recommended_low_cpu_command",
+                           recommendation.low_cpu_command);
+  append_json_string_field(&row, "recommended_preview_command",
+                           recommendation.preview_command);
+  append_json_string_field(&row, "recommended_repeat_mode",
+                           recommendation.repeat_mode);
   (void)sb_appendf(&row, ",\"recommended_repeat_count\":%.0f",
                    recommendation.repeat_count);
   append_fuzz_all_coverage_next_fields(&row, s);
@@ -10897,64 +10855,48 @@ static char *make_fuzz_all_status_summary_row(
       s && s->coverage_next_state_refresh_required,
       s ? s->coverage_next_state_refresh_reason : "");
   append_fuzz_all_handoff_guard_fields(&row);
-  (void)sb_append(&row, ",\"active_primary_command\":");
-  (void)sb_append_json_str(&row, s ? s->active_primary_command : "");
-  (void)sb_append(&row, ",\"active_raw_repro_command\":");
-  (void)sb_append_json_str(&row, s ? s->active_raw_repro_command : "");
-  (void)sb_append(&row, ",\"nytrix_root\":");
-  append_repo_or_sibling_rel_json_str(&row, s ? s->nytrix_root : "",
-                                      s ? s->nytrix_root : "");
-  (void)sb_append(&row, ",\"nytrix_root\":");
-  append_repo_or_sibling_rel_json_str(&row, s ? s->nytrix_root : "",
-                                      s ? s->nytrix_root : "");
-  (void)sb_append(&row, ",\"ny_bin\":");
-  append_repo_or_sibling_rel_json_str(&row, s ? s->nytrix_root : "",
-                                      s ? s->ny_bin : "");
-  (void)sb_append(&row, ",\"tmp_dir\":");
-  append_repo_or_sibling_rel_json_str(&row, s ? s->nytrix_root : "",
-                                      s ? s->tmp_dir : "");
-  (void)sb_append(&row, ",\"scratch_root\":");
-  append_repo_or_sibling_rel_json_str(&row, s ? s->nytrix_root : "",
-                                      s ? s->scratch_root : "");
-  (void)sb_append(&row, ",\"xdg_cache_home\":");
-  append_repo_or_sibling_rel_json_str(&row, s ? s->nytrix_root : "",
-                                      s ? s->xdg_cache_home : "");
-  (void)sb_append(&row, ",\"nytrix_cache_dir\":");
-  append_repo_or_sibling_rel_json_str(&row, s ? s->nytrix_root : "",
-                                      s ? s->nytrix_cache_dir : "");
-  (void)sb_append(&row, ",\"old_nytrix_test_scratch\":");
-  (void)sb_append_json_str(&row, "old-sibling-test-scratch");
-  (void)sb_append(&row, ",\"old_nytrix_fuzz_dir\":");
-  (void)sb_append_json_str(&row, "old-sibling-fuzz-dir");
-  (void)sb_append(&row, ",\"old_nytrix_build_cache_dir\":");
-  (void)sb_append_json_str(&row, "old-sibling-build-cache");
-  (void)sb_append(&row, ",\"old_nytrix_build_cache_absent\":");
-  (void)sb_append(&row,
-                  s && s->old_nytrix_build_cache_absent ? "true" : "false");
-  (void)sb_append(&row, ",\"active_old_nytrix_cache_writer_present\":");
-  (void)sb_append(
-      &row, s && s->active_old_nytrix_cache_writer_present ? "true" : "false");
+  append_json_string_field(&row, "active_primary_command",
+                           s ? s->active_primary_command : "");
+  append_json_string_field(&row, "active_raw_repro_command",
+                           s ? s->active_raw_repro_command : "");
+  append_repo_or_sibling_rel_json_field(
+      &row, "nytrix_root", s ? s->nytrix_root : "", s ? s->nytrix_root : "");
+  append_repo_or_sibling_rel_json_field(&row, "ny_bin", s ? s->nytrix_root : "",
+                                        s ? s->ny_bin : "");
+  append_repo_or_sibling_rel_json_field(
+      &row, "tmp_dir", s ? s->nytrix_root : "", s ? s->tmp_dir : "");
+  append_repo_or_sibling_rel_json_field(
+      &row, "scratch_root", s ? s->nytrix_root : "", s ? s->scratch_root : "");
+  append_repo_or_sibling_rel_json_field(&row, "xdg_cache_home",
+                                        s ? s->nytrix_root : "",
+                                        s ? s->xdg_cache_home : "");
+  append_repo_or_sibling_rel_json_field(&row, "nytrix_cache_dir",
+                                        s ? s->nytrix_root : "",
+                                        s ? s->nytrix_cache_dir : "");
+  append_json_string_field(&row, "old_nytrix_test_scratch",
+                           "old-sibling-test-scratch");
+  append_json_string_field(&row, "old_nytrix_fuzz_dir", "old-sibling-fuzz-dir");
+  append_json_string_field(&row, "old_nytrix_build_cache_dir",
+                           "old-sibling-build-cache");
+  append_json_bool_field(&row, "old_nytrix_build_cache_absent",
+                         s && s->old_nytrix_build_cache_absent);
+  append_json_bool_field(&row, "active_old_nytrix_cache_writer_present",
+                         s && s->active_old_nytrix_cache_writer_present);
   (void)sb_append(&row, ",\"active_old_nytrix_cache_writer\":");
   (void)sb_append_json_str(&row, s ? s->active_old_nytrix_cache_writer : "");
-  (void)sb_append(&row, ",\"active_old_nytrix_output_writer_present\":");
-  (void)sb_append(
-      &row, s && s->active_old_nytrix_output_writer_present ? "true" : "false");
+  append_json_bool_field(&row, "active_old_nytrix_output_writer_present",
+                         s && s->active_old_nytrix_output_writer_present);
   (void)sb_append(&row, ",\"active_old_nytrix_output_writer\":");
   (void)sb_append_json_str(&row, s ? s->active_old_nytrix_output_writer : "");
   (void)sb_append(&row, ",\"old_path_wait_remaining_seconds\":");
   (void)sb_appendf(&row, "%.0f", s ? s->old_path_wait_remaining_seconds : -1.0);
-  (void)sb_append(&row, ",\"nytrix_git_head\":");
-  (void)sb_append_json_str(&row, s ? s->nytrix_git_head : "");
-  (void)sb_append(&row, ",\"nytrix_git_head\":");
-  (void)sb_append_json_str(&row, s ? s->nytrix_git_head : "");
-  (void)sb_append(&row, ",\"nytrix_git_status_hash\":");
-  (void)sb_append_json_str(&row, s ? s->nytrix_git_status_hash : "");
-  (void)sb_append(&row, ",\"nytrix_git_status_hash\":");
-  (void)sb_append_json_str(&row, s ? s->nytrix_git_status_hash : "");
-  (void)sb_append(&row, ",\"nytrix_bin_hash\":");
-  (void)sb_append_json_str(&row, s ? s->nytrix_bin_hash : "");
-  (void)sb_append(&row, ",\"ny_bin_hash\":");
-  (void)sb_append_json_str(&row, s ? s->ny_bin_hash : "");
+  append_json_string_field(&row, "nytrix_git_head",
+                           s ? s->nytrix_git_head : "");
+  append_json_string_field(&row, "nytrix_git_status_hash",
+                           s ? s->nytrix_git_status_hash : "");
+  append_json_string_field(&row, "nytrix_bin_hash",
+                           s ? s->nytrix_bin_hash : "");
+  append_json_string_field(&row, "ny_bin_hash", s ? s->ny_bin_hash : "");
   (void)sb_appendf(
       &row,
       ",\"history_readable\":%s,\"worklist_readable\":%s,"
@@ -11196,8 +11138,8 @@ static char *make_fuzz_all_status_summary_row(
       projection.target_percent_per_run, s ? s->runs_per_day : 0.0,
       s ? s->thread_years_per_day : 0.0, s ? s->campaign_plan_wall_hours : 0.0,
       s ? s->campaign_plan_threads : "", s ? s->completion_eta_local : "");
-  (void)sb_append(&row, ",\"campaign_first_report\":");
-  (void)sb_append_json_str(&row, s ? s->campaign_first_report : "");
+  append_json_string_field(&row, "campaign_first_report",
+                           s ? s->campaign_first_report : "");
   (void)sb_appendf(&row,
                    ",\"coverage_queue_count\":%d,"
                    "\"coverage_queue_non_advisory_count\":%d,"
@@ -11205,45 +11147,41 @@ static char *make_fuzz_all_status_summary_row(
                    s ? s->coverage_queue_count : 0,
                    s ? s->coverage_queue_non_advisory_count : 0,
                    s ? s->coverage_queue_advisory_count : 0);
-  (void)sb_append(&row, ",\"coverage_queue_lanes\":");
-  (void)sb_append_json_str(&row, s ? s->coverage_queue_lanes : "");
+  append_json_string_field(&row, "coverage_queue_lanes",
+                           s ? s->coverage_queue_lanes : "");
   append_fuzz_all_coverage_queue_json(&row, coverage_queue_json);
-  (void)sb_append(&row, ",\"coverage_state\":");
-  (void)sb_append_json_str(
-      &row, s ? fuzz_all_coverage_state(
-                    s->coverage_lanes, s->coverage_ran_lanes,
-                    s->coverage_blocker_gaps, s->coverage_failed_lanes)
-              : "missing");
-  (void)sb_append(&row, ",\"campaign_state\":");
-  (void)sb_append_json_str(
-      &row, fuzz_all_campaign_state(campaign_ready, s && s->target_reached,
-                                    s && s->campaign_complete));
-  (void)sb_append(&row, ",\"campaign_incomplete_reason\":");
-  (void)sb_append_json_str(&row, fuzz_all_campaign_incomplete_reason(
-                                     campaign_ready, s ? s->blocker_count : 0.0,
-                                     s ? s->active_items : 0.0,
-                                     s && s->target_reached,
-                                     s && s->campaign_complete));
-  (void)sb_append(&row, ",\"completion_state\":");
-  (void)sb_append_json_str(
-      &row, fuzz_all_campaign_state(campaign_ready, s && s->target_reached,
-                                    s && s->campaign_complete));
-  (void)sb_append(&row, ",\"completion_reason\":");
-  (void)sb_append_json_str(&row, fuzz_all_campaign_incomplete_reason(
-                                     campaign_ready, s ? s->blocker_count : 0.0,
-                                     s ? s->active_items : 0.0,
-                                     s && s->target_reached,
-                                     s && s->campaign_complete));
-  (void)sb_append(&row, ",\"perf_max_case\":");
-  (void)sb_append_json_str(&row, s ? s->perf_max_case : "");
-  (void)sb_append(&row, ",\"historical_perf_max_case\":");
-  (void)sb_append_json_str(&row, s ? s->historical_perf_max_case : "");
-  (void)sb_append(&row, ",\"active_perf_max_case\":");
-  (void)sb_append_json_str(&row, s ? s->perf_max_case : "");
-  (void)sb_append(&row, ",\"latest_perf_max_case\":");
-  (void)sb_append_json_str(&row, s ? s->latest_perf_max_case : "");
-  (void)sb_append(&row, ",\"latest_full_pressure_perf_max_case\":");
-  (void)sb_append_json_str(&row,
+  append_json_string_field(&row, "coverage_state",
+                           s ? fuzz_all_coverage_state(s->coverage_lanes,
+                                                       s->coverage_ran_lanes,
+                                                       s->coverage_blocker_gaps,
+                                                       s->coverage_failed_lanes)
+                             : "missing");
+  append_json_string_field(&row, "campaign_state",
+                           fuzz_all_campaign_state(campaign_ready,
+                                                   s && s->target_reached,
+                                                   s && s->campaign_complete));
+  append_json_string_field(
+      &row, "campaign_incomplete_reason",
+      fuzz_all_campaign_incomplete_reason(
+          campaign_ready, s ? s->blocker_count : 0.0, s ? s->active_items : 0.0,
+          s && s->target_reached, s && s->campaign_complete));
+  append_json_string_field(&row, "completion_state",
+                           fuzz_all_campaign_state(campaign_ready,
+                                                   s && s->target_reached,
+                                                   s && s->campaign_complete));
+  append_json_string_field(
+      &row, "completion_reason",
+      fuzz_all_campaign_incomplete_reason(
+          campaign_ready, s ? s->blocker_count : 0.0, s ? s->active_items : 0.0,
+          s && s->target_reached, s && s->campaign_complete));
+  append_json_string_field(&row, "perf_max_case", s ? s->perf_max_case : "");
+  append_json_string_field(&row, "historical_perf_max_case",
+                           s ? s->historical_perf_max_case : "");
+  append_json_string_field(&row, "active_perf_max_case",
+                           s ? s->perf_max_case : "");
+  append_json_string_field(&row, "latest_perf_max_case",
+                           s ? s->latest_perf_max_case : "");
+  append_json_string_field(&row, "latest_full_pressure_perf_max_case",
                            s ? s->latest_full_pressure_perf_max_case : "");
   (void)sb_appendf(&row,
                    ",\"latest_full_pressure_perf_max_slowdown_percent\":%.2f",
@@ -11251,10 +11189,9 @@ static char *make_fuzz_all_status_summary_row(
                        s ? s->latest_full_pressure_perf_max_ratio : 0.0));
   (void)sb_appendf(&row, ",\"perf_worst_slowdown_percent\":%.2f",
                    fuzz_all_perf_slowdown_percent(perf_worst_ratio));
-  (void)sb_append(&row, ",\"perf_worst_case\":");
-  (void)sb_append_json_str(&row, perf_worst_case ? perf_worst_case : "");
-  (void)sb_append(&row, ",\"perf_watchlist_case\":");
-  (void)sb_append_json_str(&row,
+  append_json_string_field(&row, "perf_worst_case",
+                           perf_worst_case ? perf_worst_case : "");
+  append_json_string_field(&row, "perf_watchlist_case",
                            perf_watchlist_case ? perf_watchlist_case : "");
   (void)sb_appendf(
       &row,
@@ -11270,9 +11207,8 @@ static char *make_fuzz_all_status_summary_row(
       s ? s->non_reproducing_afl_timeouts : 0.0,
       s ? s->historical_non_reproducing_afl_timeouts : 0.0,
       s && s->latest_only_non_reproducing_afl_timeout > 0.0 ? "true" : "false");
-  (void)sb_append(&row, ",\"advisory_state\":");
-  (void)sb_append_json_str(
-      &row,
+  append_json_string_field(
+      &row, "advisory_state",
       s ? fuzz_all_advisory_state(s->non_reproducing_afl_timeouts,
                                   s->historical_non_reproducing_afl_timeouts)
         : "clear");
@@ -11289,11 +11225,11 @@ static char *make_fuzz_all_status_summary_row(
                    ",\"effective_advisory_timeouts\":%.0f,"
                    "\"advisory_effective_timeouts\":%.0f",
                    effective_advisory_timeouts, effective_advisory_timeouts);
-  (void)sb_append(&row, ",\"advisory_penalty_state\":");
-  (void)sb_append_json_str(
-      &row, fuzz_all_advisory_penalty_state(effective_advisory_timeouts));
-  (void)sb_append(&row, ",\"latest_full_pressure_clean_reason\":");
-  (void)sb_append_json_str(&row, s ? s->latest_full_pressure_clean_reason : "");
+  append_json_string_field(
+      &row, "advisory_penalty_state",
+      fuzz_all_advisory_penalty_state(effective_advisory_timeouts));
+  append_json_string_field(&row, "latest_full_pressure_clean_reason",
+                           s ? s->latest_full_pressure_clean_reason : "");
   (void)sb_appendf(
       &row,
       ",\"stability_score_percent\":%.2f,"
@@ -11397,22 +11333,19 @@ static char *make_fuzz_all_status_summary_row(
       score.latest_report_stale_after_hours,
       score.latest_full_pressure_report_age_seconds,
       score.latest_full_pressure_report_stale_after_hours);
-  (void)sb_append(&row, ",\"stability_label\":");
-  (void)sb_append_json_str(&row, score.label ? score.label : "");
-  (void)sb_append(&row, ",\"thread_years_per_run_source\":");
-  (void)sb_append_json_str(&row, projection.thread_years_per_run_source
-                                     ? projection.thread_years_per_run_source
-                                     : "");
-  (void)sb_append(&row, ",\"language_score_label\":");
-  (void)sb_append_json_str(&row, score.label ? score.label : "");
-  (void)sb_append(&row, ",\"stability_note\":");
-  (void)sb_append_json_str(&row, score.note);
-  (void)sb_append(&row, ",\"language_score_note\":");
-  (void)sb_append_json_str(&row, score.note);
-  (void)sb_append(&row, ",\"completion_eta_local\":");
-  (void)sb_append_json_str(&row, s ? s->completion_eta_local : "");
-  (void)sb_append(&row, ",\"run_command\":");
-  (void)sb_append_json_str(&row, s ? s->run_command : "");
+  append_json_string_field(&row, "stability_label",
+                           score.label ? score.label : "");
+  append_json_string_field(&row, "thread_years_per_run_source",
+                           projection.thread_years_per_run_source
+                               ? projection.thread_years_per_run_source
+                               : "");
+  append_json_string_field(&row, "language_score_label",
+                           score.label ? score.label : "");
+  append_json_string_field(&row, "stability_note", score.note);
+  append_json_string_field(&row, "language_score_note", score.note);
+  append_json_string_field(&row, "completion_eta_local",
+                           s ? s->completion_eta_local : "");
+  append_json_string_field(&row, "run_command", s ? s->run_command : "");
   (void)sb_append(&row, ",\"engine\":\"nytrix_core\"}");
   char *out = sb_take(&row);
   free(perf_watchlist_action_command);
@@ -12451,8 +12384,7 @@ static void append_fuzz_all_repeat_progress_refresh_script(
   (void)sb_append(
       sh, "  nytrix_low_priority ./build/nytrix fuzz all progress --strict "
           "--allow-full-pressure-remediation --dir ");
-  (void)sb_append_json_str(sh,
-                           dir_rel && *dir_rel ? dir_rel : "build/fuzz/all");
+  (void)sb_append_json_str(sh, fuzz_all_output_dir(dir_rel));
   (void)sb_append(sh,
                   " --status \"$repeat_status\" --history \"$history\" "
                   "--worklist \"$worklist\" --coverage \"$latest_coverage\" "
@@ -12478,8 +12410,7 @@ static void append_fuzz_all_status_progress_refresh_script(
   (void)sb_append(
       sh, "nytrix_low_priority ./build/nytrix fuzz all progress --strict "
           "--allow-full-pressure-remediation --dir ");
-  (void)sb_append_json_str(sh,
-                           dir_rel && *dir_rel ? dir_rel : "build/fuzz/all");
+  (void)sb_append_json_str(sh, fuzz_all_output_dir(dir_rel));
   (void)sb_append(sh,
                   " --status \"$status\" --history \"$history\" "
                   "--worklist \"$worklist\" --coverage \"$latest_coverage\" "
@@ -12603,7 +12534,7 @@ static bool write_fuzz_all_missing_evidence_script(
       plan_rel && *plan_rel ? plan_rel : "build/fuzz/all/plan.json", "", ".md");
   char *missing_default_json = NULL;
   (void)asprintf(&missing_default_json, "%s/with-afl.json",
-                 dir_rel && *dir_rel ? dir_rel : "build/fuzz/all");
+                 fuzz_all_output_dir(dir_rel));
   char *script_dir = NULL;
   if (script_path) {
     script_dir = strdup(script_path);
@@ -12625,8 +12556,7 @@ static bool write_fuzz_all_missing_evidence_script(
   append_space_guard_shell_helper(&sh);
   append_campaign_lock_shell_helper(&sh);
   (void)sb_append(&sh, "mkdir -p ");
-  (void)sb_append_json_str(&sh,
-                           dir_rel && *dir_rel ? dir_rel : "build/fuzz/all");
+  (void)sb_append_json_str(&sh, fuzz_all_output_dir(dir_rel));
   (void)sb_append(&sh, "\n");
   (void)sb_append(&sh, "history=");
   (void)sb_append_json_str(&sh, history_rel && *history_rel
@@ -12673,27 +12603,26 @@ static bool write_fuzz_all_missing_evidence_script(
                                     : "build/fuzz/all/status.md");
   (void)sb_append(&sh, "\n");
   (void)sb_appendf(&sh, "progress=\"%s/progress.json\"\n",
-                   dir_rel && *dir_rel ? dir_rel : "build/fuzz/all");
+                   fuzz_all_output_dir(dir_rel));
   (void)sb_appendf(&sh, "progress_md=\"%s/progress.md\"\n",
-                   dir_rel && *dir_rel ? dir_rel : "build/fuzz/all");
+                   fuzz_all_output_dir(dir_rel));
   (void)sb_appendf(&sh, "old_paths=\"%s/old-paths.json\"\n",
-                   dir_rel && *dir_rel ? dir_rel : "build/fuzz/all");
+                   fuzz_all_output_dir(dir_rel));
   (void)sb_appendf(&sh, "old_paths_md=\"%s/old-paths.md\"\n",
-                   dir_rel && *dir_rel ? dir_rel : "build/fuzz/all");
+                   fuzz_all_output_dir(dir_rel));
   (void)sb_appendf(
       &sh,
       "NYTRIX_MISSING_EVIDENCE_STATE_FILE=\"${NYTRIX_MISSING_EVIDENCE_STATE_"
       "FILE:-%s/run-missing-evidence-state.json}\"\n",
-      dir_rel && *dir_rel ? dir_rel : "build/fuzz/all");
+      fuzz_all_output_dir(dir_rel));
   (void)sb_appendf(&sh,
                    "NYTRIX_MISSING_EVIDENCE_STOP_FILE=\"${NYTRIX_MISSING_"
                    "EVIDENCE_STOP_FILE:-%s/missing-evidence-stop}\"\n",
-                   dir_rel && *dir_rel ? dir_rel : "build/fuzz/all");
+                   fuzz_all_output_dir(dir_rel));
   (void)sb_append(&sh, "NYTRIX_MISSING_EVIDENCE_HEARTBEAT_S=\"${NYTRIX_MISSING_"
                        "EVIDENCE_HEARTBEAT_S:-300}\"\n"
                        "nytrix_missing_dir=");
-  (void)sb_append_json_str(&sh,
-                           dir_rel && *dir_rel ? dir_rel : "build/fuzz/all");
+  (void)sb_append_json_str(&sh, fuzz_all_output_dir(dir_rel));
   (void)sb_append(&sh, "\n");
   (void)sb_append(&sh, "nytrix_missing_default_json=");
   (void)sb_append_json_str(&sh, missing_default_json && *missing_default_json
@@ -12965,8 +12894,7 @@ static bool write_fuzz_all_missing_evidence_script(
   (void)sb_append(&sh, "nytrix_require_free_space\n");
   (void)sb_append(&sh, "nytrix_wait_for_load\n");
   (void)sb_append(&sh, "nytrix_acquire_campaign_lock ");
-  (void)sb_append_json_str(&sh,
-                           dir_rel && *dir_rel ? dir_rel : "build/fuzz/all");
+  (void)sb_append_json_str(&sh, fuzz_all_output_dir(dir_rel));
   (void)sb_append(&sh, "\n");
   (void)sb_append(&sh, "nytrix_missing_install_traps\n");
   (void)sb_append(&sh, "nytrix_missing_write_state locked acquired-lock\n");
@@ -12978,8 +12906,7 @@ static bool write_fuzz_all_missing_evidence_script(
   (void)sb_append(&sh, "nytrix_missing_write_state refreshing run-complete\n");
   (void)sb_append(&sh,
                   "nytrix_low_priority ./build/nytrix fuzz all history --dir ");
-  (void)sb_append_json_str(&sh,
-                           dir_rel && *dir_rel ? dir_rel : "build/fuzz/all");
+  (void)sb_append_json_str(&sh, fuzz_all_output_dir(dir_rel));
   (void)sb_append(&sh, " --json \"$history\" --markdown \"$history_md\"\n");
   append_fuzz_all_strict_history_coverage_refresh_script(
       &sh, "", target_arg, hours_arg, threads_arg, profile_arg);
@@ -12988,8 +12915,7 @@ static bool write_fuzz_all_missing_evidence_script(
            "\"$history\" --json \"$worklist\" --markdown \"$worklist_md\"\n");
   (void)sb_append(&sh,
                   "nytrix_low_priority ./build/nytrix fuzz all plan --dir ");
-  (void)sb_append_json_str(&sh,
-                           dir_rel && *dir_rel ? dir_rel : "build/fuzz/all");
+  (void)sb_append_json_str(&sh, fuzz_all_output_dir(dir_rel));
   (void)sb_append(&sh,
                   " --history \"$history\" --worklist \"$worklist\" --coverage "
                   "\"$latest_coverage\" --target-thread-years ");
@@ -13009,8 +12935,7 @@ static bool write_fuzz_all_missing_evidence_script(
            "--json \"$old_paths\" --markdown \"$old_paths_md\"\n");
   (void)sb_append(&sh, "nytrix_low_priority ./build/nytrix fuzz all status "
                        "--strict --allow-full-pressure-remediation --dir ");
-  (void)sb_append_json_str(&sh,
-                           dir_rel && *dir_rel ? dir_rel : "build/fuzz/all");
+  (void)sb_append_json_str(&sh, fuzz_all_output_dir(dir_rel));
   (void)sb_append(
       &sh, " --history \"$history\" --worklist \"$worklist\" --coverage "
            "\"$latest_coverage\" --plan \"$plan\" --target-thread-years ");
@@ -13751,8 +13676,7 @@ static bool write_fuzz_all_next_run_script(
   append_space_guard_shell_helper(&sh);
   append_campaign_lock_shell_helper(&sh);
   (void)sb_append(&sh, "mkdir -p ");
-  (void)sb_append_json_str(&sh,
-                           dir_rel && *dir_rel ? dir_rel : "build/fuzz/all");
+  (void)sb_append_json_str(&sh, fuzz_all_output_dir(dir_rel));
   (void)sb_append(&sh, "\n");
   (void)sb_append(&sh, "history=");
   (void)sb_append_json_str(&sh, history_rel && *history_rel
@@ -13801,19 +13725,19 @@ static bool write_fuzz_all_next_run_script(
                                     : "build/fuzz/all/status.md");
   (void)sb_append(&sh, "\n");
   (void)sb_appendf(&sh, "progress=\"%s/progress.json\"\n",
-                   dir_rel && *dir_rel ? dir_rel : "build/fuzz/all");
+                   fuzz_all_output_dir(dir_rel));
   (void)sb_appendf(&sh, "progress_md=\"%s/progress.md\"\n",
-                   dir_rel && *dir_rel ? dir_rel : "build/fuzz/all");
+                   fuzz_all_output_dir(dir_rel));
   (void)sb_appendf(&sh, "repeat_status=\"%s/repeat-status.json\"\n",
-                   dir_rel && *dir_rel ? dir_rel : "build/fuzz/all");
+                   fuzz_all_output_dir(dir_rel));
   (void)sb_appendf(&sh, "repeat_status_md=\"%s/repeat-status.md\"\n",
-                   dir_rel && *dir_rel ? dir_rel : "build/fuzz/all");
+                   fuzz_all_output_dir(dir_rel));
   (void)sb_appendf(&sh, "repeat_progress=\"%s/repeat-progress.json\"\n",
-                   dir_rel && *dir_rel ? dir_rel : "build/fuzz/all");
+                   fuzz_all_output_dir(dir_rel));
   (void)sb_appendf(&sh, "repeat_progress_md=\"%s/repeat-progress.md\"\n",
-                   dir_rel && *dir_rel ? dir_rel : "build/fuzz/all");
+                   fuzz_all_output_dir(dir_rel));
   (void)sb_appendf(&sh, "missing_evidence=\"%s/run-missing-evidence.sh\"\n",
-                   dir_rel && *dir_rel ? dir_rel : "build/fuzz/all");
+                   fuzz_all_output_dir(dir_rel));
   (void)sb_append(&sh, "NYTRIX_RUN_DRY_RUN=\"${NYTRIX_RUN_DRY_RUN:-0}\"\n");
   (void)sb_append(&sh, "nytrix_default_hours=");
   (void)sb_append_json_str(&sh, hours_arg && *hours_arg ? hours_arg : "8");
@@ -13832,8 +13756,7 @@ static bool write_fuzz_all_next_run_script(
                        "repeat resolution\"\n");
   (void)sb_append(
       &sh, "  nytrix_low_priority ./build/nytrix fuzz all history --dir ");
-  (void)sb_append_json_str(&sh,
-                           dir_rel && *dir_rel ? dir_rel : "build/fuzz/all");
+  (void)sb_append_json_str(&sh, fuzz_all_output_dir(dir_rel));
   (void)sb_append(&sh, " --json \"$history\" --markdown \"$history_md\"\n");
   append_fuzz_all_strict_history_coverage_refresh_script(
       &sh, "  ", target_arg, run_hours_ref, run_threads_ref, profile_arg);
@@ -13842,8 +13765,7 @@ static bool write_fuzz_all_next_run_script(
            "\"$history\" --json \"$worklist\" --markdown \"$worklist_md\"\n");
   (void)sb_append(&sh,
                   "  nytrix_low_priority ./build/nytrix fuzz all plan --dir ");
-  (void)sb_append_json_str(&sh,
-                           dir_rel && *dir_rel ? dir_rel : "build/fuzz/all");
+  (void)sb_append_json_str(&sh, fuzz_all_output_dir(dir_rel));
   (void)sb_append(&sh,
                   " --history \"$history\" --worklist \"$worklist\" --coverage "
                   "\"$latest_coverage\" --target-thread-years ");
@@ -13858,8 +13780,7 @@ static bool write_fuzz_all_next_run_script(
   (void)sb_append(
       &sh, "  nytrix_low_priority ./build/nytrix fuzz all status --strict "
            "--allow-full-pressure-remediation --no-script --dir ");
-  (void)sb_append_json_str(&sh,
-                           dir_rel && *dir_rel ? dir_rel : "build/fuzz/all");
+  (void)sb_append_json_str(&sh, fuzz_all_output_dir(dir_rel));
   (void)sb_append(
       &sh, " --history \"$history\" --worklist \"$worklist\" --coverage "
            "\"$latest_coverage\" --plan \"$plan\" --target-thread-years ");
@@ -13889,8 +13810,7 @@ static bool write_fuzz_all_next_run_script(
   (void)sb_append(
       &sh, "    nytrix_low_priority ./build/nytrix fuzz all status --strict "
            "--allow-full-pressure-remediation --no-script --dir ");
-  (void)sb_append_json_str(&sh,
-                           dir_rel && *dir_rel ? dir_rel : "build/fuzz/all");
+  (void)sb_append_json_str(&sh, fuzz_all_output_dir(dir_rel));
   (void)sb_append(
       &sh, " --history \"$history\" --worklist \"$worklist\" --coverage "
            "\"$latest_coverage\" --plan \"$plan\" --target-thread-years ");
@@ -13924,20 +13844,17 @@ static bool write_fuzz_all_next_run_script(
   (void)sb_append(
       &sh, "NYTRIX_RUN_HEARTBEAT_S=\"${NYTRIX_RUN_HEARTBEAT_S:-300}\"\n");
   (void)sb_append(&sh, "nytrix_default_stop_file=");
-  (void)sb_append_json_str(&sh,
-                           dir_rel && *dir_rel ? dir_rel : "build/fuzz/all");
+  (void)sb_append_json_str(&sh, fuzz_all_output_dir(dir_rel));
   (void)sb_append(&sh, "/stop\n");
   (void)sb_append(&sh, "NYTRIX_RUN_STOP_FILE=\"${NYTRIX_RUN_STOP_FILE:-$nytrix_"
                        "default_stop_file}\"\n");
   (void)sb_append(&sh, "nytrix_default_state_file=");
-  (void)sb_append_json_str(&sh,
-                           dir_rel && *dir_rel ? dir_rel : "build/fuzz/all");
+  (void)sb_append_json_str(&sh, fuzz_all_output_dir(dir_rel));
   (void)sb_append(&sh, "/run-next-state.json\n");
   (void)sb_append(&sh, "NYTRIX_RUN_STATE_FILE=\"${NYTRIX_RUN_STATE_FILE:-$"
                        "nytrix_default_state_file}\"\n");
   (void)sb_append(&sh, "nytrix_campaign_dir=");
-  (void)sb_append_json_str(&sh,
-                           dir_rel && *dir_rel ? dir_rel : "build/fuzz/all");
+  (void)sb_append_json_str(&sh, fuzz_all_output_dir(dir_rel));
   (void)sb_append(&sh, "\n");
   (void)sb_append(&sh, "nytrix_json_escape() { printf '%s' \"$1\" | sed "
                        "'s/\\\\/\\\\\\\\/g; s/\"/\\\\\"/g'; }\n");
@@ -14345,8 +14262,7 @@ static bool write_fuzz_all_next_run_script(
   (void)sb_append(
       &sh, "    nytrix_low_priority ./build/nytrix fuzz all status --strict "
            "--allow-full-pressure-remediation --no-script --dir ");
-  (void)sb_append_json_str(&sh,
-                           dir_rel && *dir_rel ? dir_rel : "build/fuzz/all");
+  (void)sb_append_json_str(&sh, fuzz_all_output_dir(dir_rel));
   (void)sb_append(
       &sh, " --history \"$history\" --worklist \"$worklist\" --coverage "
            "\"$latest_coverage\" --plan \"$plan\" --target-thread-years ");
@@ -14369,8 +14285,7 @@ static bool write_fuzz_all_next_run_script(
   (void)sb_append(
       &sh, "    nytrix_low_priority ./build/nytrix fuzz all status --strict "
            "--allow-full-pressure-remediation --no-script --dir ");
-  (void)sb_append_json_str(&sh,
-                           dir_rel && *dir_rel ? dir_rel : "build/fuzz/all");
+  (void)sb_append_json_str(&sh, fuzz_all_output_dir(dir_rel));
   (void)sb_append(
       &sh, " --history \"$history\" --worklist \"$worklist\" --coverage "
            "\"$latest_coverage\" --plan \"$plan\" --target-thread-years ");
@@ -14389,8 +14304,7 @@ static bool write_fuzz_all_next_run_script(
   (void)sb_append(&sh,
                   "    nytrix_low_priority ./build/nytrix fuzz all progress "
                   "--strict --allow-full-pressure-remediation --dir ");
-  (void)sb_append_json_str(&sh,
-                           dir_rel && *dir_rel ? dir_rel : "build/fuzz/all");
+  (void)sb_append_json_str(&sh, fuzz_all_output_dir(dir_rel));
   (void)sb_append(
       &sh, " --status \"$nytrix_canonical_status\" --history \"$history\" "
            "--worklist \"$worklist\" --coverage \"$latest_coverage\" --plan "
@@ -14430,7 +14344,7 @@ static bool write_fuzz_all_next_run_script(
       " hours=$nytrix_run_hours threads=$nytrix_run_threads target_years=");
   (void)sb_append(&sh, target_arg && *target_arg ? target_arg : "10");
   (void)sb_append(&sh, " dir=");
-  (void)sb_append(&sh, dir_rel && *dir_rel ? dir_rel : "build/fuzz/all");
+  (void)sb_append(&sh, fuzz_all_output_dir(dir_rel));
   (void)sb_append(&sh, "\"\n");
   (void)sb_append(&sh, "  exit 0\n");
   (void)sb_append(&sh, "fi\n");
@@ -14450,8 +14364,7 @@ static bool write_fuzz_all_next_run_script(
   (void)sb_append(&sh, "  exit 0\n");
   (void)sb_append(&sh, "fi\n");
   (void)sb_append(&sh, "nytrix_acquire_campaign_lock ");
-  (void)sb_append_json_str(&sh,
-                           dir_rel && *dir_rel ? dir_rel : "build/fuzz/all");
+  (void)sb_append_json_str(&sh, fuzz_all_output_dir(dir_rel));
   (void)sb_append(&sh, "\n");
   (void)sb_append(&sh, "nytrix_install_state_traps\n");
   (void)sb_append(&sh, "nytrix_write_state locked acquired-lock\n");
@@ -14471,17 +14384,17 @@ static bool write_fuzz_all_next_run_script(
   (void)sb_append(&sh, "nytrix_write_state running cycle-start\n");
   (void)sb_append(&sh, "ts=$(date +%Y%m%d-%H%M%S)\n");
   (void)sb_appendf(&sh, "report=\"%s/insane-${ts}.json\"\n",
-                   dir_rel && *dir_rel ? dir_rel : "build/fuzz/all");
+                   fuzz_all_output_dir(dir_rel));
   (void)sb_appendf(&sh, "audit=\"%s/insane-${ts}-audit.json\"\n",
-                   dir_rel && *dir_rel ? dir_rel : "build/fuzz/all");
+                   fuzz_all_output_dir(dir_rel));
   (void)sb_appendf(&sh, "findings=\"%s/insane-${ts}-findings.json\"\n",
-                   dir_rel && *dir_rel ? dir_rel : "build/fuzz/all");
+                   fuzz_all_output_dir(dir_rel));
   (void)sb_appendf(&sh, "findings_md=\"%s/insane-${ts}-findings.md\"\n",
-                   dir_rel && *dir_rel ? dir_rel : "build/fuzz/all");
+                   fuzz_all_output_dir(dir_rel));
   (void)sb_appendf(&sh, "coverage=\"%s/insane-${ts}-coverage.json\"\n",
-                   dir_rel && *dir_rel ? dir_rel : "build/fuzz/all");
+                   fuzz_all_output_dir(dir_rel));
   (void)sb_appendf(&sh, "coverage_md=\"%s/insane-${ts}-coverage.md\"\n",
-                   dir_rel && *dir_rel ? dir_rel : "build/fuzz/all");
+                   fuzz_all_output_dir(dir_rel));
   (void)sb_append(&sh, "latest_coverage=");
   (void)sb_append_json_str(&sh, coverage_rel && *coverage_rel
                                     ? coverage_rel
@@ -14555,13 +14468,13 @@ static bool write_fuzz_all_next_run_script(
                                     : "build/fuzz/all/status.md");
   (void)sb_append(&sh, "\n");
   (void)sb_appendf(&sh, "progress=\"%s/progress.json\"\n",
-                   dir_rel && *dir_rel ? dir_rel : "build/fuzz/all");
+                   fuzz_all_output_dir(dir_rel));
   (void)sb_appendf(&sh, "progress_md=\"%s/progress.md\"\n",
-                   dir_rel && *dir_rel ? dir_rel : "build/fuzz/all");
+                   fuzz_all_output_dir(dir_rel));
   (void)sb_appendf(&sh, "old_paths=\"%s/old-paths.json\"\n",
-                   dir_rel && *dir_rel ? dir_rel : "build/fuzz/all");
+                   fuzz_all_output_dir(dir_rel));
   (void)sb_appendf(&sh, "old_paths_md=\"%s/old-paths.md\"\n",
-                   dir_rel && *dir_rel ? dir_rel : "build/fuzz/all");
+                   fuzz_all_output_dir(dir_rel));
   (void)sb_append(
       &sh, "nytrix_low_priority ./build/nytrix fuzz all old-paths --dry-run "
            "--nytrix-root ../nytrix --archive-dir build/cache/old-nytrix "
@@ -14569,8 +14482,7 @@ static bool write_fuzz_all_next_run_script(
   (void)sb_append(&sh, "if [ -f \"$history\" ]; then\n");
   (void)sb_append(
       &sh, "  nytrix_low_priority ./build/nytrix fuzz all history --dir ");
-  (void)sb_append_json_str(&sh,
-                           dir_rel && *dir_rel ? dir_rel : "build/fuzz/all");
+  (void)sb_append_json_str(&sh, fuzz_all_output_dir(dir_rel));
   (void)sb_append(&sh, " --json \"$history\" --markdown \"$history_md\"\n");
   append_fuzz_all_strict_history_coverage_refresh_script(
       &sh, "  ", target_arg, run_hours_ref, run_threads_ref, profile_arg);
@@ -14583,8 +14495,7 @@ static bool write_fuzz_all_next_run_script(
            "--markdown \"$worklist_history_md\"\n");
   (void)sb_append(&sh,
                   "  nytrix_low_priority ./build/nytrix fuzz all plan --dir ");
-  (void)sb_append_json_str(&sh,
-                           dir_rel && *dir_rel ? dir_rel : "build/fuzz/all");
+  (void)sb_append_json_str(&sh, fuzz_all_output_dir(dir_rel));
   (void)sb_append(&sh,
                   " --history \"$history\" --worklist \"$worklist\" --coverage "
                   "\"$latest_coverage\" --target-thread-years ");
@@ -14599,8 +14510,7 @@ static bool write_fuzz_all_next_run_script(
   (void)sb_append(
       &sh, "  nytrix_low_priority ./build/nytrix fuzz all status --strict "
            "--allow-full-pressure-remediation --no-script --dir ");
-  (void)sb_append_json_str(&sh,
-                           dir_rel && *dir_rel ? dir_rel : "build/fuzz/all");
+  (void)sb_append_json_str(&sh, fuzz_all_output_dir(dir_rel));
   (void)sb_append(
       &sh, " --history \"$history\" --worklist \"$worklist\" --coverage "
            "\"$latest_coverage\" --plan \"$plan\" --target-thread-years ");
@@ -14638,8 +14548,7 @@ static bool write_fuzz_all_next_run_script(
   (void)sb_append(&sh, " --threads ");
   (void)sb_append(&sh, run_threads_ref);
   (void)sb_append(&sh, " --dir ");
-  (void)sb_append_json_str(&sh,
-                           dir_rel && *dir_rel ? dir_rel : "build/fuzz/all");
+  (void)sb_append_json_str(&sh, fuzz_all_output_dir(dir_rel));
   (void)sb_append(&sh, " --target-thread-years ");
   (void)sb_append(&sh, target_arg && *target_arg ? target_arg : "10");
   (void)sb_append(
@@ -14655,8 +14564,7 @@ static bool write_fuzz_all_next_run_script(
            "\"$report\" --json \"$coverage\" --markdown \"$coverage_md\"\n");
   (void)sb_append(&sh,
                   "nytrix_low_priority ./build/nytrix fuzz all history --dir ");
-  (void)sb_append_json_str(&sh,
-                           dir_rel && *dir_rel ? dir_rel : "build/fuzz/all");
+  (void)sb_append_json_str(&sh, fuzz_all_output_dir(dir_rel));
   (void)sb_append(&sh, " --json \"$history\" --markdown \"$history_md\"\n");
   append_fuzz_all_strict_history_coverage_refresh_script(
       &sh, "", target_arg, run_hours_ref, run_threads_ref, profile_arg);
@@ -14670,8 +14578,7 @@ static bool write_fuzz_all_next_run_script(
            "--markdown \"$worklist_history_md\"\n");
   (void)sb_append(&sh,
                   "nytrix_low_priority ./build/nytrix fuzz all plan --dir ");
-  (void)sb_append_json_str(&sh,
-                           dir_rel && *dir_rel ? dir_rel : "build/fuzz/all");
+  (void)sb_append_json_str(&sh, fuzz_all_output_dir(dir_rel));
   (void)sb_append(&sh, " --history \"$history\" --worklist \"$worklist\"");
   (void)sb_append(&sh,
                   " --coverage \"$latest_coverage\" --target-thread-years ");
@@ -14690,8 +14597,7 @@ static bool write_fuzz_all_next_run_script(
            "--json \"$old_paths\" --markdown \"$old_paths_md\"\n");
   (void)sb_append(&sh, "nytrix_low_priority ./build/nytrix fuzz all status "
                        "--strict --allow-full-pressure-remediation --dir ");
-  (void)sb_append_json_str(&sh,
-                           dir_rel && *dir_rel ? dir_rel : "build/fuzz/all");
+  (void)sb_append_json_str(&sh, fuzz_all_output_dir(dir_rel));
   (void)sb_append(&sh, " --history \"$history\" --worklist \"$worklist\" "
                        "--coverage \"$latest_coverage\" --plan \"$plan\"");
   (void)sb_append(&sh, " --target-thread-years ");
@@ -14754,8 +14660,7 @@ static bool write_fuzz_all_next_run_script(
            "--json \"$old_paths\" --markdown \"$old_paths_md\"\n");
   (void)sb_append(&sh, "nytrix_low_priority ./build/nytrix fuzz all status "
                        "--strict --allow-full-pressure-remediation --dir ");
-  (void)sb_append_json_str(&sh,
-                           dir_rel && *dir_rel ? dir_rel : "build/fuzz/all");
+  (void)sb_append_json_str(&sh, fuzz_all_output_dir(dir_rel));
   (void)sb_append(&sh, " --history \"$history\" --worklist \"$worklist\" "
                        "--coverage \"$latest_coverage\" --plan \"$plan\"");
   (void)sb_append(&sh, " --target-thread-years ");

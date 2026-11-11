@@ -1,3 +1,6 @@
+/*
+ * Parser fixture: define integer and floating-point typedef chains.
+ */
 typedef long ny_count_t;
 typedef ny_count_t ny_index_t;
 typedef const ny_count_t ny_readonly_count_t;

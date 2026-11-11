@@ -1,3 +1,4 @@
+/* Compatibility aliases for runtime symbols shared with generated code. */
 #ifndef NY_BACKEND_RUNTIME_ALIASES_H
 #define NY_BACKEND_RUNTIME_ALIASES_H
 

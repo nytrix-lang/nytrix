@@ -1,3 +1,6 @@
+/*
+ * C parser fixture for passing aggregates through variadic calls.
+ */
 struct nyc_uid {
   unsigned int value;
 };

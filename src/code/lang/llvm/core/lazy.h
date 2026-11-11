@@ -1,3 +1,4 @@
+/* Lazy symbol-set lookup helpers for LLVM code generation. */
 static size_t ny_lazy_name_set_slot(uint64_t hash, size_t cap) {
   uint64_t mixed = hash ^ (hash >> 33);
   mixed *= UINT64_C(0xff51afd7ed558ccd);
@@ -130,10 +131,9 @@ static void ny_lazy_emit_mark_collected_function(codegen_t *cg,
                                                  const char *name) {
   if (!cg || !name || !*name)
     return;
-  ny_lazy_emit_add_stable_name(cg, &cg->lazy_emit_collected_names,
-                               &cg->lazy_emit_collected_hashes,
-                               cg->lazy_emit_collected_bloom,
-                               &cg->lazy_emit_collected_set, name);
+  ny_lazy_emit_add_stable_name(
+      cg, &cg->lazy_emit_collected_names, &cg->lazy_emit_collected_hashes,
+      cg->lazy_emit_collected_bloom, &cg->lazy_emit_collected_set, name);
 }
 
 static void ny_lazy_emit_add_resolved_name(codegen_t *cg, const char *name,
@@ -150,10 +150,9 @@ static bool ny_lazy_emit_has_name(codegen_t *cg, const char *name) {
   if (!cg || !name || !*name)
     return false;
   uint64_t hash = ny_hash64_cstr(name);
-  return ny_lazy_emit_name_list_contains(&cg->lazy_emit_names,
-                                         &cg->lazy_emit_hashes,
-                                         cg->lazy_emit_bloom,
-                                         &cg->lazy_emit_name_set, name, hash);
+  return ny_lazy_emit_name_list_contains(
+      &cg->lazy_emit_names, &cg->lazy_emit_hashes, cg->lazy_emit_bloom,
+      &cg->lazy_emit_name_set, name, hash);
 }
 
 static bool ny_lazy_emit_has_name_or_qname(codegen_t *cg, const char *name,
@@ -447,7 +446,7 @@ static bool ny_lazy_emit_collect_reached_var_deps(codegen_t *cg) {
   bool changed = false;
   for (size_t i = 0; i < cg->prog->body.len; ++i) {
     if (ny_lazy_emit_collect_reached_var_deps_stmt(cg, cg->prog->body.data[i],
-                                                  NULL))
+                                                   NULL))
       changed = true;
   }
   for (size_t p = 0; p < cg->extra_progs.len; ++p) {
@@ -456,7 +455,7 @@ static bool ny_lazy_emit_collect_reached_var_deps(codegen_t *cg) {
       continue;
     for (size_t i = 0; i < prog->body.len; ++i) {
       if (ny_lazy_emit_collect_reached_var_deps_stmt(cg, prog->body.data[i],
-                                                    NULL))
+                                                     NULL))
         changed = true;
     }
   }
@@ -527,8 +526,8 @@ bool ny_codegen_stmt_is_source_file(codegen_t *cg, stmt_t *s) {
 }
 
 bool ny_codegen_module_is_source_file(codegen_t *cg, const char *module_name) {
-  if (!cg || !cg->source_main_file || !*cg->source_main_file ||
-      !module_name || !*module_name)
+  if (!cg || !cg->source_main_file || !*cg->source_main_file || !module_name ||
+      !*module_name)
     return false;
   stmt_t *module = ny_module_lookup_stmt_by_name(cg, module_name);
   return module && module->kind == NY_S_MODULE &&
@@ -618,7 +617,8 @@ static bool ny_expr_tree_has_zero_arg_call_named(const expr_t *e,
            ny_expr_tree_has_zero_arg_call_named(e->as.logical.right, name);
   case NY_E_TERNARY:
     return ny_expr_tree_has_zero_arg_call_named(e->as.ternary.cond, name) ||
-           ny_expr_tree_has_zero_arg_call_named(e->as.ternary.true_expr, name) ||
+           ny_expr_tree_has_zero_arg_call_named(e->as.ternary.true_expr,
+                                                name) ||
            ny_expr_tree_has_zero_arg_call_named(e->as.ternary.false_expr, name);
   case NY_E_CALL:
     if (ny_expr_tree_has_zero_arg_call_named(e->as.call.callee, name))
@@ -663,8 +663,7 @@ static bool ny_expr_tree_has_zero_arg_call_named(const expr_t *e,
     }
     return false;
   case NY_E_COMPTIME:
-    return ny_stmt_tree_has_zero_arg_call_named(e->as.comptime_expr.body,
-                                                name);
+    return ny_stmt_tree_has_zero_arg_call_named(e->as.comptime_expr.body, name);
   case NY_E_FSTRING:
     for (size_t i = 0; i < e->as.fstring.parts.len; i++) {
       fstring_part_t part = e->as.fstring.parts.data[i];
@@ -796,8 +795,7 @@ static bool ny_lazy_emit_treat_as_root(codegen_t *cg, stmt_t *s,
    * selected module so consumers of the artifact never receive a declaration
    * whose body was omitted merely because dispatch is determined later from
    * the receiver type. */
-  if (cg && cg->emit_module_name &&
-      ny_emit_module_match(cg, cur_mod))
+  if (cg && cg->emit_module_name && ny_emit_module_match(cg, cur_mod))
     return true;
   return s &&
          (!ny_is_stdlib_tok(s->tok) || ny_codegen_stmt_is_source_file(cg, s) ||
@@ -812,9 +810,8 @@ static void ny_lazy_emit_seed_stmt(codegen_t *cg, stmt_t *s,
   case NY_S_FUNC: {
     fun_sig *sig = ny_lazy_emit_attached_sig_for_stmt(cg, s);
     const char *fn_mod = ny_lazy_emit_stmt_module(cg, s, cur_mod);
-    const char *final_name = sig && sig->name
-                                 ? sig->name
-                                 : codegen_qname(cg, s->as.fn.name, fn_mod);
+    const char *final_name =
+        sig && sig->name ? sig->name : codegen_qname(cg, s->as.fn.name, fn_mod);
     bool module_root = sig && sig->is_attached_method
                            ? ny_emit_module_match(cg, fn_mod)
                            : ny_lazy_emit_treat_as_root(cg, s, fn_mod);
@@ -968,16 +965,15 @@ static bool ny_lazy_emit_should_emit_func(codegen_t *cg, stmt_t *s,
 }
 
 static void emit_top_functions(codegen_t *cg, stmt_t *s, scope *gsc, size_t gd,
-                        const char *cur_mod) {
+                               const char *cur_mod) {
   if (s->kind == NY_S_FUNC) {
     fun_sig *sig = ny_lazy_emit_attached_sig_for_stmt(cg, s);
     const char *fn_mod = ny_lazy_emit_stmt_module(cg, s, cur_mod);
     if (!ny_emit_module_match(cg, fn_mod))
       return;
     cg->current_module_name = fn_mod;
-    const char *final_name = sig && sig->name
-                                 ? sig->name
-                                 : codegen_qname(cg, s->as.fn.name, fn_mod);
+    const char *final_name =
+        sig && sig->name ? sig->name : codegen_qname(cg, s->as.fn.name, fn_mod);
     if (!ny_lazy_emit_should_emit_func(cg, s, final_name))
       return;
     if (cg->lazy_emit_stdlib_enabled &&
@@ -1041,8 +1037,7 @@ static bool ny_emit_referenced_function_declarations(codegen_t *cg, scope *gsc,
       LLVMUseRef use = LLVMGetFirstUse(sig->value);
       LLVMValueRef user = use ? LLVMGetUser(use) : NULL;
       char *printed = user ? LLVMPrintValueToString(user) : NULL;
-      fprintf(stderr,
-              "[lazy-stdlib-codegen] demand_use %s llvm=%s user=%s\n",
+      fprintf(stderr, "[lazy-stdlib-codegen] demand_use %s llvm=%s user=%s\n",
               sig->name ? sig->name : "(nil)",
               sig->value ? LLVMGetValueName(sig->value) : "(nil)",
               printed ? printed : "(nil)");
@@ -1060,8 +1055,7 @@ static bool ny_emit_referenced_function_declarations(codegen_t *cg, scope *gsc,
       ny_lazy_emit_add_function_name(cg, sig->name);
       ny_lazy_emit_collect_reached_var_deps(cg);
       if (ny_env_enabled("NYTRIX_TRACE_LAZY_STDLIB_CODEGEN")) {
-        fprintf(stderr, "[lazy-stdlib-codegen] demand_collect %s\n",
-                sig->name);
+        fprintf(stderr, "[lazy-stdlib-codegen] demand_collect %s\n", sig->name);
       }
     }
     cg->current_module_name = sig_mod;

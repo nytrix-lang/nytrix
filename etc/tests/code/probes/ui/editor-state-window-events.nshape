@@ -1,0 +1,31 @@
+shape editor-state-window-events {
+  family "probe-suite"
+  generator "regression"
+  template ny-test-case
+  expect compile_and_run
+  timeout 180
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect_stdout "editor-window-state-ok"
+  source ny <<'NY'
+use core
+use core.os.ui.render as render
+use core.os.ui.window as window
+struct EditorState { dict data }
+def EditorState editor_state = EditorState(borrow(dict(8)))
+mut dict values = borrow(editor_state.data)
+fn state_get(str name) any { borrow(values.get(name, nil)) }
+values["win"] = render.init_mock_surface(320, 240)
+assert(window.push_event(state_get("win"), window.EVENT_KEY_PRESSED, {"key": window.KEY_RIGHT, "mods": 0}), "push event")
+assert(window.push_event(state_get("win"), window.EVENT_KEY_PRESSED, {"key": window.KEY_DOWN, "mods": 0}), "push second event")
+assert(window.push_event(state_get("win"), window.EVENT_MOUSE_SCROLL, {"dy": -2.0}), "push scroll event")
+def event = window.check_event(window.get_win(state_get("win")))
+assert(window.event_type(event) == window.EVENT_KEY_PRESSED, "record-owned window event")
+assert(window.event_key_is(window.event_data(event), window.KEY_RIGHT), "first key")
+def second = window.check_event(window.get_win(state_get("win")))
+assert(window.event_key_is(window.event_data(second), window.KEY_DOWN), "second key")
+def third = window.check_event(window.get_win(state_get("win")))
+assert(window.event_type(third) == window.EVENT_MOUSE_SCROLL, "third event")
+assert(!window.check_event(window.get_win(state_get("win"))), "queue drained")
+print("editor-window-state-ok")
+NY
+}

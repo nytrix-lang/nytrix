@@ -384,11 +384,11 @@ void nyr_bits_simplify(nyr_func_t *f) {
    * PHIs, so a loop counter holds as long as every incoming value does.
    */
   memset(in32, 0, nv);
-#define BITS_IS_SEXT(in)                                                       \
-  ((in)->op == NYIR_SAR_I64 && BITS_CONST((in)->b, 32) && (in)->a >= 0 &&      \
-   defs[(in)->a] >= 0 && f->data[defs[(in)->a]].op == NYIR_SHL_I64 &&          \
+#define BITS_IS_SEXT(in)                                                  \
+  ((in)->op == NYIR_SAR_I64 && BITS_CONST((in)->b, 32) && (in)->a >= 0 && \
+   defs[(in)->a] >= 0 && f->data[defs[(in)->a]].op == NYIR_SHL_I64 &&     \
    BITS_CONST(f->data[defs[(in)->a]].b, 32))
-#define BITS_CONST(x, c) ((x) >= 0 && (size_t)(x) < nv && is_constant[x] &&     \
+#define BITS_CONST(x, c) ((x) >= 0 && (size_t)(x) < nv && is_constant[x] && \
                           constants[x] == (c))
   for (size_t i = 0; i < f->len; ++i)
     if (f->data[i].dst >= 0 && (size_t)f->data[i].dst < nv)
@@ -426,9 +426,9 @@ void nyr_bits_simplify(nyr_func_t *f) {
   if (in32_changed)
     memset(in32, 0, nv);
 #undef BITS_CONST
-#define BITS_DEF(x)                                                            \
+#define BITS_DEF(x)                                                         \
   ((x) >= 0 && (size_t)(x) < nv && defs[x] >= 0 ? &f->data[defs[x]] : NULL)
-#define BITS_CONST(x, c) ((x) >= 0 && (size_t)(x) < nv && is_constant[x] &&     \
+#define BITS_CONST(x, c) ((x) >= 0 && (size_t)(x) < nv && is_constant[x] && \
                           constants[x] == (c))
   for (size_t i = 0; i < f->len; ++i) {
     nyr_inst_t *in = &f->data[i];

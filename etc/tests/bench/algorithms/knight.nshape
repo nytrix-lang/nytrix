@@ -8,16 +8,16 @@ shape knight {
 ;; inspired from QBE: minic/test/knight.c.
 fn moves(int depth, int x, int y) int {
    if depth == 0 { return 1 }
-   mut total = 0
-   mut i = 0
+   mut int total = 0
+   mut int i = 0
    while i < 8 {
-      def pair = i >> 1
-      def dx = pair < 2 ? pair - 2 : pair - 1
-      def sign = (i & 1) == 0 ? -1 : 1
-      def magnitude = pair == 0 || pair == 3 ? 1 : 2
-      def dy = sign * magnitude
-      def nx = x + dx
-      def ny = y + dy
+      def int pair = i >> 1
+      def int dx = pair < 2 ? pair - 2 : pair - 1
+      def int sign = (i & 1) == 0 ? -1 : 1
+      def int magnitude = pair == 0 || pair == 3 ? 1 : 2
+      def int dy = sign * magnitude
+      def int nx = x + dx
+      def int ny = y + dy
       if nx >= 0 && nx < 8 && ny >= 0 && ny < 8 { total += moves(depth - 1, nx, ny) }
       i += 1
    }

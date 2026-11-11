@@ -1,3 +1,6 @@
+/*
+ * Inline assembly fixture for syscall arguments bound to fixed registers.
+ */
 long nyc_fixed_register_syscall(void) {
   register unsigned long arg1 __asm__("rdi") = 0;
   register unsigned long arg2 __asm__("rsi") = 0;

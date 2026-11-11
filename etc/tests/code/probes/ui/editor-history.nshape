@@ -1,0 +1,156 @@
+shape editor-history {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "sys", "render"]
+  template ny-test-case
+  expect compile_and_run
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect_stdout "EDITOR-HISTORY-OK"
+  source ny <<'NY'
+use core
+use core.os.ui.render.viewer.editor as ed
+use core.os.ui.render.viewer.editor.history as h
+
+fn check(bool ok, str what) { assert(ok, what) }
+fn text(dict st) str { ed.join_lines(ed.current_lines(st)) }
+
+;; --- a no-op Backspace (start of buffer) must not touch history
+mut hist = h.new()
+mut st = ed.state([ed.buffer("a", "", "one")])
+mut r = h.insert_text(hist, st, "x")
+hist = r.get("hist", hist)
+st = r.get("st", st)
+check(text(st) == "xone", "insert")
+r = h.undo(hist, st)
+hist = r.get("hist", hist)
+st = r.get("st", st)
+check(text(st) == "one", "undo restores")
+st["cursor_line"] = 0
+st["cursor_col"] = 0
+r = h.backspace(hist, st)
+hist = r.get("hist", hist)
+st = r.get("st", st)
+check(text(st) == "one", "backspace at start is a no-op")
+r = h.redo(hist, st)
+check(to_str(r.get("status", "")) == "redo" && text(r.get("st", st)) == "xone", "no-op backspace keeps the redo stack")
+
+;; --- a no-op Delete (end of buffer) must not add an undo step
+hist = h.new()
+st = ed.state([ed.buffer("a", "", "ab")])
+r = h.insert_text(hist, st, "c")
+hist = r.get("hist", hist)
+st = r.get("st", st)
+check(text(st) == "cab", "insert c")
+st["cursor_line"] = 0
+st["cursor_col"] = 3
+r = h.delete_char(hist, st)
+hist = r.get("hist", hist)
+st = r.get("st", st)
+check(text(st) == "cab", "delete at end is a no-op")
+r = h.undo(hist, st)
+check(text(r.get("st", st)) == "ab", "one undo reverts the real edit, not a phantom one")
+
+;; --- real edits still undo and redo
+hist = h.new()
+st = ed.state([ed.buffer("a", "", "ab")])
+st["cursor_line"] = 0
+st["cursor_col"] = 2
+r = h.backspace(hist, st)
+hist = r.get("hist", hist)
+st = r.get("st", st)
+check(text(st) == "a", "backspace deletes")
+r = h.undo(hist, st)
+hist = r.get("hist", hist)
+st = r.get("st", st)
+check(text(st) == "ab", "undo of backspace")
+r = h.redo(hist, st)
+check(text(r.get("st", st)) == "a", "redo of backspace")
+
+;; --- multi-step chain, redo cleared by a new edit
+hist = h.new()
+st = ed.state([ed.buffer("a", "", "")])
+mut step = 0
+while step < 5 {
+   r = h.insert_text(hist, st, str(step))
+   hist = r.get("hist", hist)
+   st = r.get("st", st)
+   step += 1
+}
+check(text(st) == "01234", "five inserts")
+mut back = 0
+while back < 3 {
+   r = h.undo(hist, st)
+   hist = r.get("hist", hist)
+   st = r.get("st", st)
+   back += 1
+}
+check(text(st) == "01", "three undos")
+r = h.redo(hist, st)
+hist = r.get("hist", hist)
+st = r.get("st", st)
+check(text(st) == "012", "redo one")
+r = h.insert_text(hist, st, "Z")
+hist = r.get("hist", hist)
+st = r.get("st", st)
+r = h.redo(hist, st)
+check(to_str(r.get("status", "")) == "nothing to redo", "a new edit clears redo")
+
+;; --- newline and pair insertion undo cleanly
+hist = h.new()
+st = ed.state([ed.buffer("a", "", "ab")])
+st["cursor_line"] = 0
+st["cursor_col"] = 1
+r = h.newline(hist, st)
+hist = r.get("hist", hist)
+st = r.get("st", st)
+check(text(st) == "a\nb", "newline splits the line")
+r = h.undo(hist, st)
+hist = r.get("hist", hist)
+st = r.get("st", st)
+check(text(st) == "ab", "undo of newline rejoins")
+r = h.insert_pair(hist, st, "(", ")")
+hist = r.get("hist", hist)
+st = r.get("st", st)
+check(text(st) == "a()b", "pair inserted")
+check(int(st.get("cursor_col", -1)) == 2, "cursor sits between the pair")
+r = h.undo(hist, st)
+st = r.get("st", st)
+check(text(st) == "ab", "undo of pair")
+
+;; --- history is bounded
+hist = h.new()
+st = ed.state([ed.buffer("a", "", "")])
+mut n = 0
+while n < 200 {
+   r = h.insert_text(hist, st, "x")
+   hist = r.get("hist", hist)
+   st = r.get("st", st)
+   n += 1
+}
+check(hist.get("undo", []).len <= 128, "undo stack is capped at 128")
+mut undone = 0
+while undone < 200 {
+   r = h.undo(hist, st)
+   hist = r.get("hist", hist)
+   st = r.get("st", st)
+   undone += 1
+}
+check(text(st).len == 72, "128 undos remove exactly 128 of 200 characters")
+
+;; --- undo restores the right buffer when several are open
+hist = h.new()
+st = ed.state([ed.buffer("a", "", "one"), ed.buffer("b", "", "two")])
+st["active"] = 1
+st["cursor_line"] = 0
+st["cursor_col"] = 3
+r = h.insert_text(hist, st, "!")
+hist = r.get("hist", hist)
+st = r.get("st", st)
+check(text(st) == "two!", "edit second buffer")
+r = h.undo(hist, st)
+st = r.get("st", st)
+check(text(st) == "two" && int(st.get("active", -1)) == 1, "undo keeps the active buffer")
+check(ed.join_lines(st.get("buffers", [])[0].get("lines", [])) == "one", "other buffer untouched")
+print("EDITOR-HISTORY-OK")
+NY
+}

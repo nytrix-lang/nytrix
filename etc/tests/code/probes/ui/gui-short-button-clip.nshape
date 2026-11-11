@@ -1,0 +1,57 @@
+shape gui_short_button_clip {
+  family "runtime/ui"
+  generator "embedded"
+  features [ny gui text clip pixels]
+  template ny-test-case
+  flags "--native-only -O0"
+  timeout 180
+  expect compile_and_run
+  expect_message "GUI-SHORT-BUTTON-CLIP-OK"
+  source ny <<'NY'
+use core
+use core.os.ui.render as gfx
+use core.os.ui.render.viewer.gui as gui
+
+gfx.set_backend_type(gfx.BACKEND_MOCK)
+gui.set_enabled(true)
+def win = gfx.init_window(256, 128, "clip regression")
+mut copies = []
+mut rectangles = []
+for label in ["", "", "M"] {
+  assert(gfx.begin_frame_clear([0.0, 0.0, 0.0, 1.0]), "begin")
+  gui.begin_frame(win, 0, 256.0, 128.0)
+  assert(gui.begin_window("panel", "", 0.0, 0.0, 240.0, 120.0,
+    {"titlebar": false, "scrollable": false, "movable": false, "resizable": false}), "panel")
+  gui.button("short", label, 80.0, 2.0)
+  def rect = gui.last_item_rect()
+  gui.end_window()
+  gui.end_frame()
+  gfx.end_frame()
+  def fb = gfx.read_framebuffer()
+  def ptr copy = malloc(256 * 128 * 4)
+  def ptr data = __ffi_untag_ptr(fb.get("data", 0))
+  __copy_mem_raw(copy, data, 256 * 128 * 4)
+  free(data)
+  copies = copies.append(copy)
+  rectangles = rectangles.append(rect)
+}
+def ptr a = copies[1]
+def ptr b = copies[2]
+def rect = rectangles[2]
+def int bottom = int(float(rect[1]) + float(rect[3]))
+mut y = bottom
+while y < 128 {
+  mut x = 0
+  while x < 256 {
+    def off = (y * 256 + x) * 4
+    if load32(a, off) != load32(b, off) { print("clip diff x=" + to_str(x) + " y=" + to_str(y) + " bottom=" + to_str(bottom)) }
+    assert(load32(a, off) == load32(b, off), "short button text stays inside its vertical clip")
+    x += 1
+  }
+  y += 1
+}
+for buffer in copies { free(buffer) }
+gfx.close_window()
+print("GUI-SHORT-BUTTON-CLIP-OK")
+NY
+}

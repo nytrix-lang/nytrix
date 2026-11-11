@@ -1477,26 +1477,20 @@ fn framebuffer_hash_line() str {
       if data { free(data) }
       return ""
    }
-   def fb_bytes = bytes(fb_len)
-   if !fb_bytes {
-      if data { free(data) }
-      return ""
-   }
-   memcpy(fb_bytes, data, fb_len)
-   ;; The mock framebuffer is displayed as an opaque surface. Its alpha bytes
-   ;; are not initialized by every drawing primitive, while snapshot() forces
-   ;; them to 255 before writing an image. Normalize only that copied hash
-   ;; input so hashes describe its visible pixels without touching live memory.
-   if fb_bpp == 4 && bool(fb.get("mock_opaque", false)) {
-      mut alpha_off = 3
-      while alpha_off < fb_len {
-         store8(fb_bytes, 255, alpha_off)
-         alpha_off += 4
+   ;; Same visible-RGB FNV-1a as the mock surface hash, read in place. Copying
+   ;; into a bytes value and hashing through dynamic indexing cost one pointer
+   ;; probe per byte, about 95% of every replayed GPU frame.
+   def ptr pixels = __ffi_untag_ptr(data)
+   mut hash32 = 2166136261
+   mut off = 0
+   while off < fb_len {
+      if fb_bpp != 4 || (off & 3) != 3 {
+         hash32 = ((hash32 ^ (load8(pixels, off) & 255)) * 16777619) & 4294967295
       }
+      off += 1
    }
-   def line = "FB_HASH: " + str.to_hex(hash.xxh32(fb_bytes, 0, 0, fb_len))
-   if data { free(data) }
-   line
+   free(pixels)
+   "FB_HASH: " + str.to_hex(hash32)
 }
 
 fn set_framebuffer_hash_line(any line) bool {

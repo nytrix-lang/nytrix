@@ -1,3 +1,6 @@
+/*
+ * Fixture: assign pointer truth values into a _Bool aggregate member.
+ */
 struct presence {
   _Bool set;
 };
@@ -7,9 +10,9 @@ int main(void) {
   int *pointer = 0;
   _Bool present = 1;
   struct presence state = {pointer};
-  if (_Generic(state.set, _Bool : 1, default : 0) != 1)
+  if (_Generic(state.set, _Bool: 1, default: 0) != 1)
     return 5;
-  if (_Generic((unsigned char)0, _Bool : 1, default : 0) != 0)
+  if (_Generic((unsigned char)0, _Bool: 1, default: 0) != 0)
     return 6;
   present = pointer;
   if (present)

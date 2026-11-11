@@ -1,3 +1,6 @@
+/*
+ * C parser fixture for typeof on an address through a local aggregate pointer.
+ */
 struct nyc_typeof_pointer_member {
   void *private;
 };

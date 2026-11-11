@@ -1,3 +1,4 @@
+/* Virtual-machine execution pipeline interfaces for Ny programs. */
 #ifndef NY_LANG_PIPELINE_VM_H
 #define NY_LANG_PIPELINE_VM_H
 

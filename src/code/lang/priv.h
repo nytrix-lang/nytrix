@@ -70,13 +70,13 @@ static inline LLVMValueRef ny_cast_to_i64(codegen_t *cg, LLVMValueRef v,
   return ny_llvm_cast_to_i64(cg, v, name);
 }
 
-#define NY_SEMA_ASSERT(stmt, kind)                                             \
-  do {                                                                         \
-    const stmt_t *ny_sema_stmt__ = (stmt);                                     \
-    NY_COMPILER_ASSERTF(                                                       \
-        !ny_sema_stmt__ || ny_sema_stmt__->sema_kind == (kind),                \
-        "sema kind mismatch: got %d expected %d",                              \
-        ny_sema_stmt__ ? (int)ny_sema_stmt__->sema_kind : -1, (int)(kind));    \
+#define NY_SEMA_ASSERT(stmt, kind)                                          \
+  do {                                                                      \
+    const stmt_t *ny_sema_stmt__ = (stmt);                                  \
+    NY_COMPILER_ASSERTF(                                                    \
+        !ny_sema_stmt__ || ny_sema_stmt__->sema_kind == (kind),             \
+        "sema kind mismatch: got %d expected %d",                           \
+        ny_sema_stmt__ ? (int)ny_sema_stmt__->sema_kind : -1, (int)(kind)); \
   } while (0)
 
 static inline const char *ny_host_os_name(void) {

@@ -64,13 +64,16 @@ def IS_AARCH64 = (ARCH == "aarch64" || ARCH == "arm64")
 def IS_ARM = (ARCH == "arm")
 
 @inline
+
 ;; Returns whether the target OS is Linux.
 fn is_linux() bool { IS_LINUX }
 
 @inline
+
 ;; Returns whether the target OS is macOS.
 fn is_macos() bool { IS_MACOS }
 
 @inline
+
 ;; Returns whether the target OS is Windows.
 fn is_windows() bool { IS_WINDOWS }

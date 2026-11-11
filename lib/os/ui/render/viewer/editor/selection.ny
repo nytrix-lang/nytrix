@@ -12,20 +12,13 @@ use core.str as str
 use core.math (max, min)
 use core.os.ui.render.viewer.editor.core
 
-fn _copy_lines(list src, int a, int b, list dst, int at) int {
+;; See edit.ny: lists are built with the boxing `append` path.
+fn _append_lines(list out, list src, int a, int b) list {
    mut i = a
-   mut j = at
    while i < b {
-      __store_item_fast(dst, j, src.get(i, ""))
+      out = out.append(to_str(src.get(i, "")))
       i += 1
-      j += 1
    }
-   j
-}
-
-fn _new_lines(int n) list {
-   mut out = list(max(1, n))
-   __list_set_len(out, max(1, n))
    out
 }
 
@@ -33,18 +26,18 @@ fn set_selection_anchor(dict st) dict {
    "Starts a selection at the current cursor."
    st["sel_active"] = false
    st["drag_select"] = true
-   st["sel_a_line"] = int(st.get("cursor_line", 0))
-   st["sel_a_col"] = int(st.get("cursor_col", 0))
-   st["sel_b_line"] = int(st.get("cursor_line", 0))
-   st["sel_b_col"] = int(st.get("cursor_col", 0))
+   st["sel_a_line"] = __box_i64(int(st.get("cursor_line", 0)))
+   st["sel_a_col"] = __box_i64(int(st.get("cursor_col", 0)))
+   st["sel_b_line"] = __box_i64(int(st.get("cursor_line", 0)))
+   st["sel_b_col"] = __box_i64(int(st.get("cursor_col", 0)))
    st
 }
 
 fn update_selection(dict st) dict {
    "Extends the active selection to the current cursor."
    st["sel_active"] = true
-   st["sel_b_line"] = int(st.get("cursor_line", 0))
-   st["sel_b_col"] = int(st.get("cursor_col", 0))
+   st["sel_b_line"] = __box_i64(int(st.get("cursor_line", 0)))
+   st["sel_b_col"] = __box_i64(int(st.get("cursor_col", 0)))
    st
 }
 
@@ -75,17 +68,14 @@ fn selection_text(dict st) str {
    def el = int(ord.get(2, 0))
    def ec = int(ord.get(3, 0))
    def lines = current_lines(st)
-   def n = max(0, min(el, lines.len - 1) - sl + 1)
-   mut out = _new_lines(n)
+   mut out = []
    mut i = sl
-   mut j = 0
    while i <= el && i < lines.len {
       def line = to_str(lines.get(i, ""))
       def a = i == sl ? min(sc, line.len) : 0
       def b = i == el ? min(ec, line.len) : line.len
-      __store_item_fast(out, j, str.str_slice(line, a, max(a, b)))
+      out = out.append(str.str_slice(line, a, max(a, b)))
       i += 1
-      j += 1
    }
    join_lines(out)
 }
@@ -101,12 +91,11 @@ fn delete_selection(dict st) dict {
    def lines = current_lines(st)
    def first = to_str(lines.get(sl, ""))
    def last = to_str(lines.get(el, ""))
-   mut out = _new_lines(lines.len - (el - sl))
-   mut j = _copy_lines(lines, 0, sl, out, 0)
-   __store_item_fast(out, j, str.str_slice(first, 0, min(sc, first.len)) + str.str_slice(last, min(ec, last.len), last.len))
-   _copy_lines(lines, el + 1, lines.len, out, j + 1)
-   st["cursor_line"] = sl
-   st["cursor_col"] = sc
+   mut out = _append_lines([], lines, 0, sl)
+   out = out.append(str.str_slice(first, 0, min(sc, first.len)) + str.str_slice(last, min(ec, last.len), last.len))
+   out = _append_lines(out, lines, el + 1, lines.len)
+   st["cursor_line"] = __box_i64(sl)
+   st["cursor_col"] = __box_i64(sc)
    st["sel_active"] = false
    set_lines(st, out)
 }

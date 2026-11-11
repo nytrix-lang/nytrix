@@ -1,3 +1,4 @@
+/* Shared data structures for persistent Ny REPL bindings and values. */
 #ifndef REPL_TYPES_H
 #define REPL_TYPES_H
 

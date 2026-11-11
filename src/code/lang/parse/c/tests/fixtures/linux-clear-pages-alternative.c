@@ -1,3 +1,6 @@
+/*
+ * Fixture: parse the Linux clear-pages assembler alternative.
+ */
 extern void *memset(void *destination, int value, unsigned long size);
 
 static void clear_pages(void *address, unsigned long length) {

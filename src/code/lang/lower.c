@@ -93,6 +93,22 @@ static bool nyr_binop(const char *op, nyr_op_t *out) {
   return true;
 }
 
+static bool nyr_const_pow_i64(int64_t base, int64_t exponent, int64_t *out) {
+  if (!out || exponent < 0)
+    return false;
+  uint64_t power = (uint64_t)exponent;
+  int64_t result = 1;
+  while (power) {
+    if ((power & 1u) && __builtin_mul_overflow(result, base, &result))
+      return false;
+    power >>= 1u;
+    if (power && __builtin_mul_overflow(base, base, &base))
+      return false;
+  }
+  *out = result;
+  return true;
+}
+
 /*
  * Native NYIR has no general power instruction. Keep the supported constant
  * subset in the language IR: exponentiation by a non-negative integer literal
@@ -123,18 +139,8 @@ static bool nyr_const_i64_expr(const expr_t *e, int64_t *out, unsigned depth) {
     int64_t base = 0, exponent = 0;
     if (!nyr_const_i64_expr(e->as.binary.left, &base, depth + 1) ||
         !nyr_const_i64_expr(e->as.binary.right, &exponent, depth + 1) ||
-        exponent < 0)
+        !nyr_const_pow_i64(base, exponent, out))
       return false;
-    uint64_t power = (uint64_t)exponent;
-    int64_t result = 1;
-    while (power) {
-      if ((power & 1u) && __builtin_mul_overflow(result, base, &result))
-        return false;
-      power >>= 1u;
-      if (power && __builtin_mul_overflow(base, base, &base))
-        return false;
-    }
-    *out = result;
     return true;
   }
   return false;
@@ -144,19 +150,9 @@ static bool nyr_fold_const_pow(const expr_t *left, const expr_t *right,
                                int64_t *out) {
   int64_t base = 0, exponent_value = 0;
   if (!left || !right || !out || !nyr_const_i64_expr(left, &base, 0) ||
-      !nyr_const_i64_expr(right, &exponent_value, 0) || exponent_value < 0)
+      !nyr_const_i64_expr(right, &exponent_value, 0))
     return false;
-  int64_t result = 1;
-  uint64_t exponent = (uint64_t)exponent_value;
-  while (exponent) {
-    if ((exponent & 1u) && __builtin_mul_overflow(result, base, &result))
-      return false;
-    exponent >>= 1u;
-    if (exponent && __builtin_mul_overflow(base, base, &base))
-      return false;
-  }
-  *out = result;
-  return true;
+  return nyr_const_pow_i64(base, exponent_value, out);
 }
 
 static bool nyr_cmp(const char *op, nyr_cmp_t *out) {
@@ -1397,7 +1393,70 @@ const ny_native_runtime_abi_decl_t ny_native_runtime_abi_decls[] = {
                     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
                         NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
                     NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_flt_acos",
+                    NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(0) |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_flt_asin",
+                    NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(0) |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_flt_atan",
+                    NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(0) |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_flt_atan2",
+                    NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(0) |
+                        NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(1) |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
+                    NY_NATIVE_VM_CALL_NONE),
     NY_NATIVE_ENTRY("rt_flt_box_val", NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_flt_cos",
+                    NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(0) |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_flt_div",
+                    NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(0) |
+                        NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(1) |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_flt_exp",
+                    NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(0) |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_flt_inf", NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_flt_log",
+                    NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(0) |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_flt_log10",
+                    NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(0) |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_flt_log2",
+                    NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(0) |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_flt_nan", NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_flt_pow",
+                    NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(0) |
+                        NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(1) |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_flt_sin",
+                    NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(0) |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_flt_sqrt",
+                    NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(0) |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_flt_tan",
+                    NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(0) |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
                     NY_NATIVE_VM_CALL_NONE),
     NY_NATIVE_ENTRY_FN("rt_flt_unbox_double", NY_NATIVE_RUNTIME_ABI_RESULT_F64,
                        NY_NATIVE_VM_I64_UNARY_TO_F64, i64_unary_f64,
@@ -3055,7 +3114,6 @@ static bool ny_native_type_name_is_int(const char *name);
 static bool ny_native_type_name_is_list(const char *name);
 typedef struct nyr_builder_impl_t nyr_builder_impl_t;
 typedef nyr_builder_impl_t nyr_builder_t;
-typedef nyr_builder_t nyr_builder_t;
 static const stmt_t *ny_native_fn_cache_lookup_exact_with_builder(
     const struct nyr_builder_impl_t *builder, const char *name);
 static bool ny_native_type_name_is_str(const char *name);
@@ -4805,127 +4863,7 @@ static int64_t ny_native_resolve_fin_bound(const nyr_builder_impl_t *b,
   return strcmp(leaf, "Fin") == 0 ? bound : -1;
 }
 
-/*
- * Check whether an intrinsic call's index operand has a Fin type whose
- * bound allows bounds-check elision.  buffer_byte_len must be > 0 (pass
- * the known allocation / tbuf capacity in bytes; 0 = unknown).
- * Checks both function parameter types and local variable type annotations.
- */
-static nyr_local_t *nyr_find_local(nyr_builder_impl_t *b, const char *name);
-
-static int64_t nyr_fin_bound_for_name(const nyr_builder_impl_t *b,
-                                      const char *name, unsigned depth) {
-  if (!b || !name || !name[0] || depth > 16)
-    return 0;
-  nyr_local_t *local = nyr_find_local((nyr_builder_t *)b, name);
-  if (local && local->fin_bound > 0)
-    return local->fin_bound;
-  if (!b->prog)
-    return 0;
-  for (size_t i = 0; i < b->prog->body.len; ++i) {
-    const stmt_t *s = b->prog->body.data[i];
-    if (!s)
-      continue;
-    if (strcmp(b->current_fn_name ? b->current_fn_name : "", "rt_main") == 0 &&
-        s->kind == NY_S_VAR) {
-      for (size_t vi = 0; vi < s->as.var.names.len; ++vi) {
-        if (!s->as.var.names.data[vi] ||
-            strcmp(s->as.var.names.data[vi], name) != 0)
-          continue;
-        if (vi < s->as.var.types.len) {
-          int64_t bound =
-              ny_native_resolve_fin_bound(b, s->as.var.types.data[vi]);
-          if (bound > 0)
-            return bound;
-        }
-        if (vi < s->as.var.exprs.len && s->as.var.exprs.data[vi] &&
-            s->as.var.exprs.data[vi]->kind == NY_E_IDENT)
-          return nyr_fin_bound_for_name(
-              b, s->as.var.exprs.data[vi]->as.ident.name, depth + 1);
-      }
-    }
-    if (s->kind != NY_S_FUNC || !s->as.fn.name ||
-        strcmp(s->as.fn.name, b->current_fn_name ? b->current_fn_name : "") !=
-            0)
-      continue;
-    for (size_t pi = 0; pi < s->as.fn.params.len; ++pi) {
-      if (s->as.fn.params.data[pi].name &&
-          strcmp(s->as.fn.params.data[pi].name, name) == 0)
-        return ny_native_resolve_fin_bound(b, s->as.fn.params.data[pi].type);
-    }
-    if (!s->as.fn.body || s->as.fn.body->kind != NY_S_BLOCK)
-      continue;
-    for (size_t si = 0; si < s->as.fn.body->as.block.body.len; ++si) {
-      const stmt_t *vs = s->as.fn.body->as.block.body.data[si];
-      if (!vs || vs->kind != NY_S_VAR)
-        continue;
-      for (size_t vi = 0; vi < vs->as.var.names.len; ++vi) {
-        if (!vs->as.var.names.data[vi] ||
-            strcmp(vs->as.var.names.data[vi], name) != 0)
-          continue;
-        if (vi < vs->as.var.types.len) {
-          int64_t bound =
-              ny_native_resolve_fin_bound(b, vs->as.var.types.data[vi]);
-          if (bound > 0)
-            return bound;
-        }
-        if (vi < vs->as.var.exprs.len && vs->as.var.exprs.data[vi] &&
-            vs->as.var.exprs.data[vi]->kind == NY_E_IDENT)
-          return nyr_fin_bound_for_name(
-              b, vs->as.var.exprs.data[vi]->as.ident.name, depth + 1);
-      }
-    }
-  }
-  return 0;
-}
-
-static bool nyr_index_fin_bound_elision(const nyr_builder_impl_t *b,
-                                        const expr_t *e, size_t index_arg_pos,
-                                        int64_t buffer_byte_len) {
-  if (!b || !b->current_fn_name || !e || buffer_byte_len <= 0 ||
-      index_arg_pos >= e->as.call.args.len)
-    return false;
-  const expr_t *idx_expr = e->as.call.args.data[index_arg_pos].val;
-  if (!idx_expr)
-    return false;
-  int64_t scale = 1;
-  const char *idx_name = NULL;
-  if (idx_expr->kind == NY_E_IDENT) {
-    idx_name = idx_expr->as.ident.name;
-  } else if (idx_expr->kind == NY_E_BINARY && idx_expr->as.binary.op &&
-             strcmp(idx_expr->as.binary.op, "*") == 0) {
-    const expr_t *l = idx_expr->as.binary.left;
-    const expr_t *r = idx_expr->as.binary.right;
-    if (l && l->kind == NY_E_IDENT && r && r->kind == NY_E_LITERAL &&
-        r->as.literal.kind == NY_LIT_INT && r->as.literal.as.i > 0) {
-      idx_name = l->as.ident.name;
-      scale = r->as.literal.as.i;
-    } else if (r && r->kind == NY_E_IDENT && l && l->kind == NY_E_LITERAL &&
-               l->as.literal.kind == NY_LIT_INT && l->as.literal.as.i > 0) {
-      idx_name = r->as.ident.name;
-      scale = l->as.literal.as.i;
-    }
-  }
-  int64_t fin_bound = nyr_fin_bound_for_name(b, idx_name, 0);
-  return fin_bound > 0 && fin_bound <= INT64_MAX / scale &&
-         fin_bound * scale <= buffer_byte_len;
-}
-
-/*
- * Resolve the comptime buffer byte length from the first argument of a
- * tbuf intrinsic call (__load64_idx, f64buf_load, etc.).  Returns 0 if
- * the pointer argument isn't a named local with known buffer_byte_len.
- */
-static int64_t nyr_resolve_buf_byte_len(const nyr_builder_impl_t *b,
-                                        const expr_t *e) {
-  if (!b || !e || e->as.call.args.len == 0)
-    return 0;
-  const expr_t *ptr_arg = e->as.call.args.data[0].val;
-  if (!ptr_arg || ptr_arg->kind != NY_E_IDENT)
-    return 0;
-  nyr_local_t *bl = nyr_find_local((nyr_builder_t *)b, ptr_arg->as.ident.name);
-  return (bl && bl->buffer_byte_len > 0) ? bl->buffer_byte_len : 0;
-}
+#include "lower/fin.h"
 
 static bool nyr_fail(nyr_builder_impl_t *b, const char *fmt, ...)
     __attribute__((format(printf, 2, 3)));
@@ -5359,7 +5297,6 @@ static nyr_local_t *nyr_find_expr_local(nyr_builder_impl_t *b,
  * Forward declarations needed by nyr_expr_is_dyn_list which is
  * defined here but calls helpers defined later in the file.
  */
-static bool ny_native_type_name_is_list(const char *name);
 static const char *nyr_expr_type_name(const nyr_builder_impl_t *b,
                                       const expr_t *e);
 static bool nyr_expr_is_list(const nyr_builder_impl_t *b, const expr_t *e);
@@ -5566,8 +5503,9 @@ static bool nyr_expr_is_canonical_dynamic_value(nyr_builder_impl_t *b,
 static bool nyr_expr_is_dict_read(nyr_builder_impl_t *b, const expr_t *e);
 static bool nyr_stmt_uses_ident(const stmt_t *s, const char *name);
 static bool nyr_expr_is_range(const nyr_builder_impl_t *b, const expr_t *e);
-static const expr_t *nyr_find_unshadowed_top_level_value(
-    const nyr_builder_impl_t *b, const char *name);
+static const expr_t *
+nyr_find_unshadowed_top_level_value(const nyr_builder_impl_t *b,
+                                    const char *name);
 static const expr_t *nyr_find_top_level_value(const nyr_builder_impl_t *b,
                                               const char *name);
 static const expr_t *
@@ -5588,7 +5526,6 @@ static const stmt_t *nyr_find_layout_stmt(const nyr_builder_impl_t *b,
                                           const stmt_t *s, const char *name);
 static const stmt_t *nyr_find_refine_stmt(const nyr_builder_impl_t *b,
                                           const stmt_t *s, const char *name);
-static const char *ny_native_call_leaf(const expr_t *e);
 static bool nyr_record_dyn_fact(nyr_builder_impl_t *b, int value,
                                 nyr_fact_kind_t kind, int reg);
 
@@ -5642,7 +5579,6 @@ nyr_function_param_is_dyn_list(const nyr_builder_impl_t *cache_owner,
  * elem-8 paths instead of the boxed dynamic boundary on every access.
  */
 
-static bool nyr_stmt_uses_ident(const stmt_t *s, const char *name);
 static bool nyr_expr_uses_ident(const nyr_builder_impl_t *b, const expr_t *e,
                                 const char *name);
 
@@ -5836,8 +5772,6 @@ static bool ny_top_mut_reads_only(const nyr_builder_impl_t *b, const expr_t *e,
  * int shape.  Strings, floats, bools, bigints, containers, calls, and
  * anything dynamically annotated reject the promotion.
  */
-static bool ny_top_mut_int_value(const nyr_builder_impl_t *b, const expr_t *e,
-                                 const char *name, unsigned depth);
 static bool nyr_top_mut_is_append_int_list(const nyr_builder_impl_t *b,
                                            const char *name);
 static bool ny_top_mut_int_value(const nyr_builder_impl_t *b, const expr_t *e,
@@ -6572,9 +6506,6 @@ static bool nyr_index_of_promoted_top_mut(nyr_builder_impl_t *b,
          nyr_top_mut_is_append_int_list(b, e->as.index.target->as.ident.name);
 }
 
-static const char *nyr_expr_type_name(const nyr_builder_impl_t *b,
-                                      const expr_t *e);
-
 static bool nyr_expr_is_dyn_list_core(nyr_builder_impl_t *b, const expr_t *e);
 
 static bool nyr_expr_is_dyn_list(nyr_builder_impl_t *b, const expr_t *e) {
@@ -6930,291 +6861,7 @@ static bool nyr_local_is_dynamic_sequence(const nyr_local_t *local) {
     return true;
   return ny_native_type_name_is_dyn_list(local->type_name);
 }
-static bool nyr_stmt_iterates_param(const stmt_t *s, const char *name,
-                                    unsigned depth) {
-  if (!s || !name || depth > 64)
-    return false;
-  if (s->kind == NY_S_FOR) {
-    if (s->as.fr.iterable && s->as.fr.iterable->kind == NY_E_IDENT &&
-        s->as.fr.iterable->as.ident.name &&
-        strcmp(s->as.fr.iterable->as.ident.name, name) == 0)
-      return true;
-    return nyr_stmt_iterates_param(s->as.fr.body, name, depth + 1);
-  }
-  if (s->kind == NY_S_BLOCK || s->kind == NY_S_MODULE) {
-    const ny_stmt_list *body =
-        s->kind == NY_S_BLOCK ? &s->as.block.body : &s->as.module.body;
-    for (size_t i = 0; i < body->len; ++i)
-      if (nyr_stmt_iterates_param(body->data[i], name, depth + 1))
-        return true;
-  }
-  return false;
-}
-
-/*
- * Infer a list ABI from operations that are specific to sequence mutation or
- * traversal.  Generic `get`, `set`, and `contains` are deliberately
- * excluded: dictionaries expose the same surface, and guessing a tbuf ABI
- * for an arbitrary `any` value silently turns `node.set("field", value)` into
- * a raw list write.
- */
-static bool nyr_expr_uses_list_surface(const expr_t *e, const char *name,
-                                       unsigned depth) {
-  if (!e || !name || depth > 64)
-    return false;
-  switch (e->kind) {
-  case NY_E_MEMCALL: {
-    const char *method = e->as.memcall.name;
-    if (e->as.memcall.target && e->as.memcall.target->kind == NY_E_IDENT &&
-        e->as.memcall.target->as.ident.name &&
-        strcmp(e->as.memcall.target->as.ident.name, name) == 0 && method &&
-        (strcmp(method, "append") == 0 || strcmp(method, "extend") == 0 ||
-         strcmp(method, "push") == 0 || strcmp(method, "pop") == 0 ||
-         strcmp(method, "slice") == 0 || strcmp(method, "clear") == 0 ||
-         strcmp(method, "sort") == 0 || strcmp(method, "sorted") == 0 ||
-         strcmp(method, "clone") == 0 || strcmp(method, "insert") == 0))
-      return true;
-    if (nyr_expr_uses_list_surface(e->as.memcall.target, name, depth + 1))
-      return true;
-    for (size_t i = 0; i < e->as.memcall.args.len; ++i)
-      if (nyr_expr_uses_list_surface(e->as.memcall.args.data[i].val, name,
-                                     depth + 1))
-        return true;
-    return false;
-  }
-  case NY_E_CALL:
-    if (e->as.call.callee && e->as.call.callee->kind == NY_E_MEMBER &&
-        e->as.call.callee->as.member.target &&
-        e->as.call.callee->as.member.target->kind == NY_E_IDENT &&
-        e->as.call.callee->as.member.target->as.ident.name &&
-        strcmp(e->as.call.callee->as.member.target->as.ident.name, name) == 0 &&
-        e->as.call.callee->as.member.name &&
-        (strcmp(e->as.call.callee->as.member.name, "append") == 0 ||
-         strcmp(e->as.call.callee->as.member.name, "push") == 0 ||
-         strcmp(e->as.call.callee->as.member.name, "pop") == 0 ||
-         strcmp(e->as.call.callee->as.member.name, "slice") == 0))
-      return true;
-    if (nyr_expr_uses_list_surface(e->as.call.callee, name, depth + 1))
-      return true;
-    for (size_t i = 0; i < e->as.call.args.len; ++i)
-      if (nyr_expr_uses_list_surface(e->as.call.args.data[i].val, name,
-                                     depth + 1))
-        return true;
-    return false;
-  case NY_E_BINARY:
-    return nyr_expr_uses_list_surface(e->as.binary.left, name, depth + 1) ||
-           nyr_expr_uses_list_surface(e->as.binary.right, name, depth + 1);
-  case NY_E_UNARY:
-    return nyr_expr_uses_list_surface(e->as.unary.right, name, depth + 1);
-  case NY_E_INDEX:
-    if (e->as.index.target && e->as.index.target->kind == NY_E_IDENT &&
-        e->as.index.target->as.ident.name &&
-        strcmp(e->as.index.target->as.ident.name, name) == 0)
-      return true;
-    return nyr_expr_uses_list_surface(e->as.index.target, name, depth + 1) ||
-           nyr_expr_uses_list_surface(e->as.index.start, name, depth + 1) ||
-           nyr_expr_uses_list_surface(e->as.index.stop, name, depth + 1) ||
-           nyr_expr_uses_list_surface(e->as.index.step, name, depth + 1);
-  case NY_E_MEMBER:
-    return nyr_expr_uses_list_surface(e->as.member.target, name, depth + 1);
-  case NY_E_LIST:
-  case NY_E_TUPLE:
-  case NY_E_SET:
-    for (size_t i = 0; i < e->as.list_like.len; ++i)
-      if (nyr_expr_uses_list_surface(e->as.list_like.data[i], name, depth + 1))
-        return true;
-    return false;
-  default:
-    return false;
-  }
-}
-
-static bool nyr_stmt_uses_list_surface(const stmt_t *s, const char *name,
-                                       unsigned depth) {
-  if (!s || !name || depth > 64)
-    return false;
-  switch (s->kind) {
-  case NY_S_EXPR:
-    return nyr_expr_uses_list_surface(s->as.expr.expr, name, depth + 1);
-  case NY_S_RETURN:
-    return nyr_expr_uses_list_surface(s->as.ret.value, name, depth + 1);
-  case NY_S_VAR:
-    for (size_t i = 0; i < s->as.var.exprs.len; ++i)
-      if (nyr_expr_uses_list_surface(s->as.var.exprs.data[i], name, depth + 1))
-        return true;
-    return false;
-  case NY_S_BLOCK:
-    for (size_t i = 0; i < s->as.block.body.len; ++i)
-      if (nyr_stmt_uses_list_surface(s->as.block.body.data[i], name, depth + 1))
-        return true;
-    return false;
-  case NY_S_WHILE:
-    return nyr_expr_uses_list_surface(s->as.whl.test, name, depth + 1) ||
-           nyr_stmt_uses_list_surface(s->as.whl.body, name, depth + 1) ||
-           nyr_stmt_uses_list_surface(s->as.whl.update, name, depth + 1) ||
-           nyr_stmt_uses_list_surface(s->as.whl.init, name, depth + 1);
-  case NY_S_IF:
-    return nyr_expr_uses_list_surface(s->as.iff.test, name, depth + 1) ||
-           nyr_stmt_uses_list_surface(s->as.iff.conseq, name, depth + 1) ||
-           nyr_stmt_uses_list_surface(s->as.iff.alt, name, depth + 1) ||
-           nyr_stmt_uses_list_surface(s->as.iff.init, name, depth + 1);
-  case NY_S_FOR:
-    return nyr_expr_uses_list_surface(s->as.fr.iterable, name, depth + 1) ||
-           nyr_expr_uses_list_surface(s->as.fr.cond, name, depth + 1) ||
-           nyr_stmt_uses_list_surface(s->as.fr.init, name, depth + 1) ||
-           nyr_stmt_uses_list_surface(s->as.fr.update, name, depth + 1) ||
-           nyr_stmt_uses_list_surface(s->as.fr.body, name, depth + 1);
-  case NY_S_GUARD:
-    return nyr_expr_uses_list_surface(s->as.guard.value, name, depth + 1) ||
-           nyr_stmt_uses_list_surface(s->as.guard.fallback, name, depth + 1);
-  case NY_S_TRY:
-    return nyr_stmt_uses_list_surface(s->as.tr.body, name, depth + 1) ||
-           nyr_stmt_uses_list_surface(s->as.tr.handler, name, depth + 1);
-  case NY_S_MODULE:
-    for (size_t i = 0; i < s->as.module.body.len; ++i)
-      if (nyr_stmt_uses_list_surface(s->as.module.body.data[i], name,
-                                     depth + 1))
-        return true;
-    return false;
-  default:
-    return false;
-  }
-}
-
-static bool nyr_param_is_inferred_list(const stmt_t *fn, size_t index) {
-  if (!fn || fn->kind != NY_S_FUNC || index >= fn->as.fn.params.len)
-    return false;
-  const char *type = fn->as.fn.params.data[index].type;
-  const char *name = fn->as.fn.params.data[index].name;
-  /*
-   * Bare `list`/`seq` annotations are still polymorphic: they specify the
-   * container kind but not its element representation.  Treat them like an
-   * inferred sequence so list<int>, list<f64>, strings, and bytes can cross
-   * the same generic function boundary without selecting an ABI from the
-   * first call site.
-   */
-  bool unparameterized =
-      !type || strcmp(type, "list") == 0 || strcmp(type, "seq") == 0;
-  return name && unparameterized &&
-         (nyr_stmt_iterates_param(fn->as.fn.body, name, 0) ||
-          nyr_stmt_uses_list_surface(fn->as.fn.body, name, 0));
-}
-
-/*
- * An unannotated parameter used through sequence syntax is polymorphic at
- * the source level.  Its ABI must therefore carry the ordinary dynamic
- * value/length/tag triple: a later call is allowed to pass a list, string, or
- * bytes value.  Keeping the old two-word list ABI here made the first call
- * site decide the machine representation for every later call.
- */
-static bool nyr_param_uses_dynamic_sequence_abi(const stmt_t *fn,
-                                                size_t index) {
-  return fn && fn->kind == NY_S_FUNC && index < fn->as.fn.params.len &&
-         !(fn->as.fn.is_variadic && index + 1 == fn->as.fn.params.len) &&
-         (!fn->as.fn.params.data[index].type ||
-          strcmp(fn->as.fn.params.data[index].type, "list") == 0 ||
-          strcmp(fn->as.fn.params.data[index].type, "seq") == 0) &&
-         nyr_param_is_inferred_list(fn, index);
-}
-
-/*
- * A fallible operation protected by try/catch is intentionally a dynamic
- * type test: code such as `try { mapcat(f, x) } catch { [x] }` must accept
- * both sequences and scalar leaves.  HM may still infer a concrete sequence
- * from the protected call, but using that fact as the native ABI would make
- * the catch path unreachable (or reinterpret scalar callback words as list
- * handles).  Keep unannotated parameters dynamic when they are observed in a
- * try body; explicit source types remain authoritative.
- */
-static bool nyr_stmt_try_uses_ident(const stmt_t *s, const char *name,
-                                    unsigned depth) {
-  if (!s || !name || depth > 64)
-    return false;
-  switch (s->kind) {
-  case NY_S_TRY:
-    if (s->as.tr.body && nyr_stmt_uses_ident(s->as.tr.body, name))
-      return true;
-    return nyr_stmt_try_uses_ident(s->as.tr.handler, name, depth + 1);
-  case NY_S_BLOCK:
-    for (size_t i = 0; i < s->as.block.body.len; ++i)
-      if (nyr_stmt_try_uses_ident(s->as.block.body.data[i], name, depth + 1))
-        return true;
-    return false;
-  case NY_S_IF:
-    return nyr_stmt_try_uses_ident(s->as.iff.init, name, depth + 1) ||
-           nyr_stmt_try_uses_ident(s->as.iff.conseq, name, depth + 1) ||
-           nyr_stmt_try_uses_ident(s->as.iff.alt, name, depth + 1);
-  case NY_S_WHILE:
-    return nyr_stmt_try_uses_ident(s->as.whl.init, name, depth + 1) ||
-           nyr_stmt_try_uses_ident(s->as.whl.body, name, depth + 1) ||
-           nyr_stmt_try_uses_ident(s->as.whl.update, name, depth + 1);
-  case NY_S_FOR:
-    return nyr_stmt_try_uses_ident(s->as.fr.init, name, depth + 1) ||
-           nyr_stmt_try_uses_ident(s->as.fr.body, name, depth + 1) ||
-           nyr_stmt_try_uses_ident(s->as.fr.update, name, depth + 1);
-  case NY_S_GUARD:
-    return nyr_stmt_try_uses_ident(s->as.guard.fallback, name, depth + 1);
-  case NY_S_MODULE:
-    for (size_t i = 0; i < s->as.module.body.len; ++i)
-      if (nyr_stmt_try_uses_ident(s->as.module.body.data[i], name, depth + 1))
-        return true;
-    return false;
-  default:
-    return false;
-  }
-}
-
-#define NY_TRY_DYNAMIC_CACHE_MAX 4096u
-
-static bool nyr_param_is_try_dynamic(const nyr_builder_impl_t *b,
-                                     const stmt_t *fn, size_t index) {
-  if (!fn || fn->kind != NY_S_FUNC || index >= fn->as.fn.params.len ||
-      fn->as.fn.params.data[index].type)
-    return false;
-
-  /*
-   * This fact is queried from function ABI setup and from every call edge.
-   * Scanning the callee AST at each call site turns import-heavy modules into
-   * quadratic work, so memoize by the immutable function node + parameter.
-   * Store the result on the shared builder owner so it cannot outlive the
-   * AST/program snapshot that established it.
-   */
-  uintptr_t key = ((uintptr_t)fn >> 4) ^ (index * UINT64_C(0x9e3779b97f4a7c15));
-  size_t slot = (size_t)(key % NY_TRY_DYNAMIC_CACHE_MAX);
-  nyr_builder_impl_t *owner =
-      b && b->cache_owner ? b->cache_owner : (nyr_builder_t *)b;
-  if (!owner)
-    goto uncached;
-  owner->cache_owner = owner;
-  if (!owner->try_dynamic_cache) {
-    owner->try_dynamic_cache =
-        calloc(NY_TRY_DYNAMIC_CACHE_MAX, sizeof(*owner->try_dynamic_cache));
-    if (owner->try_dynamic_cache)
-      owner->try_dynamic_cache_cap = NY_TRY_DYNAMIC_CACHE_MAX;
-  }
-  if (!owner->try_dynamic_cache)
-    goto uncached;
-  for (size_t probe = 0; probe < NY_TRY_DYNAMIC_CACHE_MAX; ++probe) {
-    ny_try_dynamic_cache_ent_t *ent =
-        &owner->try_dynamic_cache[(slot + probe) % NY_TRY_DYNAMIC_CACHE_MAX];
-    if (ent->fn == fn && ent->index == index)
-      return ent->value;
-    if (!ent->fn) {
-      const char *name = fn->as.fn.params.data[index].name;
-      ent->fn = fn;
-      ent->index = index;
-      ent->value = name && nyr_stmt_try_uses_ident(fn->as.fn.body, name, 0);
-      return ent->value;
-    }
-  }
-
-  /*
-   * Cache saturation is harmless: retain correctness and only lose speed.
-   */
-uncached:;
-  const char *name = fn->as.fn.params.data[index].name;
-  return name && nyr_stmt_try_uses_ident(fn->as.fn.body, name, 0);
-}
+#include "lower/sequence.h"
 
 /*
  * The native float predicates consult the shared semantic layer before the
@@ -7257,214 +6904,7 @@ static bool ny_native_type_name_is_ptr(const char *name) {
   return ny_type_name_is_ptr(name);
 }
 
-/*
- * Call-result f64 classification shared by every callee-contract site: the
- * declared return annotation stays authoritative, and a resolved semantic
- * fact may only refine it while it remains coherent with that annotation.
- */
-static bool nyr_fn_return_is_f64(const stmt_t *fn) {
-  const char *rtype = fn->as.fn.return_type;
-  const ny_expr_semantic_t *rsem = &fn->as.fn.return_semantic;
-  return ny_native_type_name_is_f64(rtype) ||
-         (rsem->resolved && rsem->rep == NY_SEM_REP_F64 &&
-          ny_sem_rep_coherent_with_type(rtype, rsem->rep));
-}
-
-/*
- * Thread and async trampolines return through a dynamic-value boundary.
- * Result kinds: raw scalar integer, canonical dynamic value, and raw bool.
- */
-static int nyr_fn_result_kind(nyr_builder_impl_t *b, const stmt_t *fn) {
-  if (!fn || fn->kind != NY_S_FUNC)
-    return 0;
-  if (ny_type_name_is_bool(fn->as.fn.return_type))
-    return 2;
-  /*
-   * Unannotated lambda bodies can still have a statically known boolean
-   * result. Preserve that raw 0/1 callback ABI when the closure escapes into
-   * an `any` container; otherwise the dynamic trampoline treats raw true (1)
-   * as the tagged integer zero.
-   */
-  if (b && !fn->as.fn.return_type && fn->as.fn.body) {
-    const stmt_t *body = fn->as.fn.body;
-    const expr_t *tail = NULL;
-    if (body->kind == NY_S_EXPR)
-      tail = body->as.expr.expr;
-    else if (body->kind == NY_S_BLOCK && body->as.block.body.len > 0) {
-      const stmt_t *last =
-          body->as.block.body.data[body->as.block.body.len - 1];
-      if (last && last->kind == NY_S_EXPR)
-        tail = last->as.expr.expr;
-      else if (last && last->kind == NY_S_RETURN)
-        tail = last->as.ret.value;
-    }
-    if (tail && nyr_expr_is_bool(b, tail))
-      return 2;
-    /*
-     * Parser/query callbacks frequently return dictionaries, sequences, or
-     * values fetched from an `any` container without an explicit return
-     * annotation. Their trampoline must preserve the tagged object ABI.
-     */
-    if (tail && (nyr_expr_is_dict(b, tail) || nyr_expr_is_list(b, tail) ||
-                 nyr_expr_is_any(b, (expr_t *)tail)))
-      return 1;
-  }
-  if (fn->as.fn.return_semantic.resolved) {
-    ny_sem_rep_t rep = fn->as.fn.return_semantic.rep;
-    if (rep == NY_SEM_REP_TAGGED_DYNAMIC || rep == NY_SEM_REP_STRING ||
-        rep == NY_SEM_REP_TYPED_BUFFER || rep == NY_SEM_REP_OBJECT ||
-        rep == NY_SEM_REP_POINTER || rep == NY_SEM_REP_CLOSURE ||
-        rep == NY_SEM_REP_AGGREGATE)
-      return 1;
-    return 0;
-  }
-  const char *type = fn->as.fn.return_type;
-  if (ny_native_type_name_is_any(type) || ny_native_type_name_is_str(type) ||
-      ny_native_type_name_is_list(type) || ny_native_type_name_is_bytes(type) ||
-      ny_native_type_name_is_ptr(type) ||
-      (type && (strcmp(type, "dict") == 0 || strcmp(type, "set") == 0 ||
-                strcmp(type, "tuple") == 0)))
-    return 1;
-  return 0;
-}
-
-typedef struct nyr_param_abi_t {
-  ny_sem_rep_t rep;
-  nyr_param_type_t value_type;
-  size_t extra_slots;
-  bool try_dynamic;
-  bool inferred_list;
-  bool dynamic_sequence;
-  bool is_list;
-  bool is_str;
-  bool is_any;
-} nyr_param_abi_t;
-
-static bool nyr_param_abi(const nyr_builder_impl_t *b, const stmt_t *fn,
-                          size_t index, nyr_param_abi_t *out) {
-  if (!fn || fn->kind != NY_S_FUNC || index >= fn->as.fn.params.len || !out)
-    return false;
-  const param_t *param = &fn->as.fn.params.data[index];
-  const char *type = param->type;
-  bool try_dynamic = nyr_param_is_try_dynamic(b, fn, index);
-  bool inferred_list = !try_dynamic && nyr_param_is_inferred_list(fn, index);
-  bool dynamic_sequence =
-      !try_dynamic && nyr_param_uses_dynamic_sequence_abi(fn, index);
-  ny_sem_rep_t rep = try_dynamic
-                         ? NY_SEM_REP_TAGGED_DYNAMIC
-                         : (param->semantic.resolved ? param->semantic.rep
-                                                     : NY_SEM_REP_UNRESOLVED);
-  if (!try_dynamic && type && *type)
-    rep = nyr_rep_for_type(b, type);
-  bool is_list = !try_dynamic && !dynamic_sequence &&
-                 (ny_native_type_name_is_list(type) || inferred_list ||
-                  (!type && rep == NY_SEM_REP_TYPED_BUFFER));
-  bool is_str = !try_dynamic && (ny_native_type_name_is_str(type) ||
-                                 (!type && rep == NY_SEM_REP_STRING));
-  bool is_any = try_dynamic || dynamic_sequence ||
-                ny_native_type_name_is_any(type) ||
-                (!type && !is_list && !is_str && rep != NY_SEM_REP_RAW_INT &&
-                 rep != NY_SEM_REP_F64 && rep != NY_SEM_REP_F32);
-  nyr_param_type_t value_type =
-      (ny_native_type_name_is_f64(type) || (!type && rep == NY_SEM_REP_F64))
-          ? NYIR_PARAM_F64
-      : (ny_native_type_name_is_f32(type) || (!type && rep == NY_SEM_REP_F32))
-          ? NYIR_PARAM_F32
-      : (type && (ny_type_is(type, "u8") || ny_type_is(type, "bool")) &&
-         b->options && b->options->native_backend == NY_NATIVE_BACKEND_X86_64)
-          ? NYIR_PARAM_U8
-      : (type && ny_type_is(type, "i8") && b->options &&
-         b->options->native_backend == NY_NATIVE_BACKEND_X86_64)
-          ? NYIR_PARAM_I8
-          : NYIR_PARAM_I64;
-  *out = (nyr_param_abi_t){
-      .rep = rep,
-      .value_type = value_type,
-      .extra_slots = is_list ? 1 : ((is_str || is_any) ? 2 : 0),
-      .try_dynamic = try_dynamic,
-      .inferred_list = inferred_list,
-      .dynamic_sequence = dynamic_sequence,
-      .is_list = is_list,
-      .is_str = is_str,
-      .is_any = is_any,
-  };
-  return true;
-}
-
-static bool nyr_set_param_types(nyr_builder_impl_t *b, const stmt_t *fn) {
-  if (!b || !fn || fn->kind != NY_S_FUNC)
-    return false;
-  if (fn->as.fn.return_semantic.resolved &&
-      !ny_sem_rep_coherent_with_type(fn->as.fn.return_type,
-                                     fn->as.fn.return_semantic.rep))
-    return nyr_fail(b,
-                    "native NYIR lower: function return type and semantic ABI "
-                    "representation disagree");
-  for (size_t i = 0; i < fn->as.fn.params.len; ++i) {
-    const param_t *param = &fn->as.fn.params.data[i];
-    if (param->semantic.resolved &&
-        !ny_sem_rep_coherent_with_type(param->type, param->semantic.rep))
-      return nyr_fail(b, "native NYIR lower: parameter type and semantic ABI "
-                         "representation disagree");
-  }
-  size_t source_count = fn->as.fn.params.len;
-  const ny_native_lambda_entry_t *lambda =
-      ny_native_lambda_find_name(ny_native_lambda_cache_for(b), fn->as.fn.name);
-  bool hidden_env = lambda && lambda->capture_count > 0;
-  size_t count = source_count + (hidden_env ? 1 : 0);
-  nyr_param_abi_t *param_abis =
-      source_count ? calloc(source_count, sizeof(*param_abis)) : NULL;
-  if (source_count && !param_abis)
-    return nyr_fail(b, NY_NATIVE_ALLOC_FAIL);
-  for (size_t i = 0; i < source_count; ++i) {
-    if (!nyr_param_abi(b, fn, i, &param_abis[i])) {
-      free(param_abis);
-      return nyr_fail(b, "native NYIR lower: cannot resolve parameter ABI");
-    }
-    if (param_abis[i].extra_slots > SIZE_MAX - count) {
-      free(param_abis);
-      return nyr_fail(b, "native NYIR lower: parameter ABI is too large");
-    }
-    count += param_abis[i].extra_slots;
-  }
-  if (!count) {
-    free(param_abis);
-    return true;
-  }
-  b->nyir.param_types = calloc(count, sizeof(*b->nyir.param_types));
-  if (!b->nyir.param_types) {
-    free(param_abis);
-    return nyr_fail(b, NY_NATIVE_ALLOC_FAIL);
-  }
-  b->nyir.param_count = count;
-  if (source_count) {
-    b->nyir.source_param_widths = calloc(source_count, sizeof(uint8_t));
-    if (!b->nyir.source_param_widths) {
-      free(param_abis);
-      return nyr_fail(b, NY_NATIVE_ALLOC_FAIL);
-    }
-    b->nyir.source_param_count = source_count;
-  }
-  size_t abi_index = 0;
-  if (hidden_env)
-    b->nyir.param_types[abi_index++] = NYIR_PARAM_I64;
-  for (size_t i = 0; i < source_count; ++i) {
-    const nyr_param_abi_t *param_abi = &param_abis[i];
-    b->nyir.source_param_widths[i] = (uint8_t)(1 + param_abi->extra_slots);
-    b->nyir.param_types[abi_index++] = param_abi->value_type;
-    if (param_abi->is_list)
-      b->nyir.param_types[abi_index++] = NYIR_PARAM_I64;
-    else if (param_abi->is_str || param_abi->is_any) {
-      b->nyir.param_types[abi_index++] = NYIR_PARAM_I64;
-      b->nyir.param_types[abi_index++] = NYIR_PARAM_I64;
-    }
-  }
-  NY_COMPILER_ASSERT(
-      abi_index == count,
-      "native parameter count disagrees with parameter ABI slots");
-  free(param_abis);
-  return true;
-}
+#include "lower/abi.h"
 
 static int64_t ny_native_f64_bits(double v) { return nyr_f64_to_bits(v); }
 
@@ -7801,10 +7241,6 @@ static bool nyr_emit_cmp_br_if(nyr_builder_impl_t *b, int predicate,
   return predicate >= 0 && nyr_push_ctrl(b, NYIR_BR_IF, predicate, label);
 }
 
-static int nyr_emit_runtime_call(nyr_builder_impl_t *b, const char *symbol,
-                                 int a, int b_arg, int c, int argc,
-                                 nyr_scalar_class_t return_class);
-
 /*
  * Five-value variant used by the indirect-closure dispatch (rt_call_any3 /
  * rt_call_any4 forward env + four values to the closure body).
@@ -7822,7 +7258,6 @@ static nyr_scalar_class_t nyr_value_scalar_class(const nyr_builder_impl_t *b,
 static int nyr_emit_i64_to_f64(nyr_builder_impl_t *b, int v);
 static int nyr_emit_f32_to_f64(nyr_builder_impl_t *b, int value);
 static int nyr_emit_f64_to_f32(nyr_builder_impl_t *b, int value);
-static int nyr_emit_f64_to_f32(nyr_builder_impl_t *b, int v);
 static bool nyr_emit_ret(nyr_builder_impl_t *b, int value) {
   if (!b)
     return false;
@@ -7930,9 +7365,6 @@ static bool nyr_record_list_len_fact(nyr_builder_impl_t *b, int value,
                                      int length_value);
 static int nyr_emit_add_i64(nyr_builder_impl_t *b, int a, int rhs);
 static bool nyr_emit_store_i64(nyr_builder_impl_t *b, int addr, int value);
-static int nyr_emit_runtime_call(nyr_builder_impl_t *b, const char *symbol,
-                                 int a, int b_arg, int c, int argc,
-                                 nyr_scalar_class_t return_class);
 static int nyr_emit_const(nyr_builder_impl_t *b, int64_t value) {
   return nyr_push_val(b, NYIR_CONST_I64, -1, -1, value, NULL);
 }
@@ -8263,7 +7695,9 @@ static bool nyr_value_is_any_decoded(const nyr_builder_impl_t *b, int value);
 static int nyr_emit_runtime_call(nyr_builder_impl_t *b, const char *symbol,
                                  int a, int b_arg, int c, int argc,
                                  nyr_scalar_class_t return_class) {
-  /* A decoded word is already raw; decoding it again halves odd integers. */
+  /*
+   * A decoded word is already raw; decoding it again halves odd integers.
+   */
   if (a >= 0 && strcmp(symbol, "rt_any_to_i64") == 0 &&
       nyr_value_is_any_decoded(b, a))
     return a;
@@ -8956,6 +8390,23 @@ static const stmt_t *nyr_source_attached_result(const nyr_builder_impl_t *b,
       receiver && method ? nyr_find_attached_method(b, receiver, method) : NULL;
   return fn && !ny_is_stdlib_tok(fn->tok) && fn->as.fn.return_type ? fn : NULL;
 }
+
+static bool nyr_expr_get_returns_cstr(nyr_builder_impl_t *b, const expr_t *e) {
+  if (e->kind == NY_E_MEMCALL && e->as.memcall.name &&
+      strcmp(e->as.memcall.name, "get") == 0)
+    return nyr_current_returns_cstr(b) ||
+           (e->as.memcall.args.len >= 2 && e->as.memcall.args.data[1].val &&
+            nyr_expr_is_cstr(b, e->as.memcall.args.data[1].val));
+  if (e->kind == NY_E_CALL) {
+    const char *leaf = ny_native_call_leaf(e);
+    return leaf && strcmp(leaf, "get") == 0 &&
+           (nyr_current_returns_cstr(b) ||
+            (e->as.call.args.len >= 3 && e->as.call.args.data[2].val &&
+             nyr_expr_is_cstr(b, e->as.call.args.data[2].val)));
+  }
+  return false;
+}
+
 static bool nyr_expr_is_f64_core(nyr_builder_impl_t *b, const expr_t *e,
                                  unsigned depth) {
   if (!e || depth > 8)
@@ -9038,21 +8489,7 @@ static bool nyr_expr_is_f64_core(nyr_builder_impl_t *b, const expr_t *e,
    * comparison or return.  Check this before semantic/contextual metadata,
    * which may describe the generic helper as `any` or f64.
    */
-  if (e->kind == NY_E_MEMCALL && e->as.memcall.name &&
-      strcmp(e->as.memcall.name, "get") == 0 && nyr_current_returns_cstr(b))
-    return false;
-  if (e->kind == NY_E_MEMCALL && e->as.memcall.name &&
-      strcmp(e->as.memcall.name, "get") == 0 && e->as.memcall.args.len >= 2 &&
-      e->as.memcall.args.data[1].val &&
-      nyr_expr_is_cstr(b, e->as.memcall.args.data[1].val))
-    return false;
-  if (e->kind == NY_E_CALL && ny_native_call_leaf(e) &&
-      strcmp(ny_native_call_leaf(e), "get") == 0 && nyr_current_returns_cstr(b))
-    return false;
-  if (e->kind == NY_E_CALL && ny_native_call_leaf(e) &&
-      strcmp(ny_native_call_leaf(e), "get") == 0 && e->as.call.args.len >= 3 &&
-      e->as.call.args.data[2].val &&
-      nyr_expr_is_cstr(b, e->as.call.args.data[2].val))
+  if (nyr_expr_get_returns_cstr(b, e))
     return false;
   /*
    * Integer/bool literals are raw NYIR scalars even when contextual typing
@@ -9966,14 +9403,6 @@ static bool nyr_expr_is_f32_core(nyr_builder_impl_t *b, const expr_t *e,
     if (l)
       return !l->is_any && (l->semantic_rep == NY_SEM_REP_F32 || l->is_f32);
   }
-  if (e->kind == NY_E_BINARY) {
-    bool f32 = nyr_expr_is_f32_depth(b, e->as.binary.left, depth + 1) ||
-               nyr_expr_is_f32_depth(b, e->as.binary.right, depth + 1);
-    bool f64 = nyr_expr_is_f64_depth(b, e->as.binary.left, depth + 1) ||
-               nyr_expr_is_f64_depth(b, e->as.binary.right, depth + 1);
-    if (f32 && !f64)
-      return true;
-  }
   if (e->kind == NY_E_INDEX) {
     const expr_t *literal_target =
         nyr_resolve_list_literal(b, e->as.index.target, 0);
@@ -10842,12 +10271,14 @@ static const expr_t *nyr_bool_body_tail(const stmt_t *body) {
 static bool nyr_expr_is_bool(nyr_builder_impl_t *b, const expr_t *e) {
   if (!e)
     return false;
-  /* A read from a literal whose elements are all booleans is a boolean. */
+  /*
+   * A read from a literal whose elements are all booleans is a boolean.
+   */
   if (e->kind == NY_E_INDEX && e->as.index.start && !e->as.index.stop &&
       !e->as.index.step && e->as.index.target) {
-    const expr_t *literal =
-        nyr_resolve_list_literal(b, e->as.index.target, 0);
-    if (literal && (literal->kind == NY_E_LIST || literal->kind == NY_E_TUPLE) &&
+    const expr_t *literal = nyr_resolve_list_literal(b, e->as.index.target, 0);
+    if (literal &&
+        (literal->kind == NY_E_LIST || literal->kind == NY_E_TUPLE) &&
         literal->as.list_like.len > 0) {
       bool all_bool = true;
       for (size_t i = 0; i < literal->as.list_like.len && all_bool; ++i)
@@ -11025,7 +10456,8 @@ static bool nyr_expr_is_bool(nyr_builder_impl_t *b, const expr_t *e) {
       if (l->is_bool || (l->type_name && strcmp(l->type_name, "bool") == 0) ||
           (type && strcmp(type, "bool") == 0))
         return true;
-      const expr_t *init = nyr_find_unshadowed_top_level_value(b, e->as.ident.name);
+      const expr_t *init =
+          nyr_find_unshadowed_top_level_value(b, e->as.ident.name);
       if (init && init != e && nyr_expr_is_bool(b, init))
         return true;
       return false;
@@ -11086,6 +10518,35 @@ static const expr_t *nyr_comptime_sequence_get_target(const expr_t *value) {
   return NULL;
 }
 
+static const expr_t *nyr_comptime_body_value(const stmt_t *body) {
+  if (!body)
+    return NULL;
+  if (body->kind == NY_S_BLOCK) {
+    for (size_t i = body->as.block.body.len; i-- > 0;) {
+      const stmt_t *item = body->as.block.body.data[i];
+      if (!item)
+        continue;
+      if (item->kind == NY_S_RETURN && item->as.ret.value)
+        return item->as.ret.value;
+      if (item->kind == NY_S_EXPR && item->as.expr.expr)
+        return item->as.expr.expr;
+    }
+    return NULL;
+  }
+  if (body->kind == NY_S_RETURN)
+    return body->as.ret.value;
+  if (body->kind == NY_S_EXPR)
+    return body->as.expr.expr;
+  return NULL;
+}
+
+static bool nyr_comptime_sequence_get_is_static_list(nyr_builder_impl_t *b,
+                                                     const expr_t *value) {
+  const expr_t *target = nyr_comptime_sequence_get_target(value);
+  return target && nyr_expr_is_list(b, target) &&
+         !nyr_expr_is_dyn_list(b, target);
+}
+
 static bool nyr_expr_is_any_core(nyr_builder_impl_t *b, const expr_t *e) {
   if (!e)
     return false;
@@ -11110,49 +10571,16 @@ static bool nyr_expr_is_any_core(nyr_builder_impl_t *b, const expr_t *e) {
    * expression. In particular, an aggregate materialized through runtime
    * calls is an object handle, never a raw integer word.
    */
-  if (e->kind == NY_E_COMPTIME && e->as.comptime_expr.body) {
-    const stmt_t *body = e->as.comptime_expr.body;
-    if (body->kind == NY_S_BLOCK) {
-      for (size_t i = body->as.block.body.len; i-- > 0;) {
-        const stmt_t *item = body->as.block.body.data[i];
-        if (!item)
-          continue;
-        if (item->kind == NY_S_RETURN && item->as.ret.value) {
-          /*
-           * The comptime interpreter materializes `get` results as dynamic
-           * values. Keep the declared any result boxed even when ordinary
-           * native list.get lowering can use a raw element word.
-           */
-          const expr_t *value = item->as.ret.value;
-          const expr_t *target = nyr_comptime_sequence_get_target(value);
-          if (target && nyr_expr_is_list(b, target) &&
-              !nyr_expr_is_dyn_list(b, target))
-            return true;
-          return nyr_expr_is_any(b, item->as.ret.value);
-        }
-        if (item->kind == NY_S_EXPR && item->as.expr.expr) {
-          const expr_t *value = item->as.expr.expr;
-          const expr_t *target = nyr_comptime_sequence_get_target(value);
-          if (target && nyr_expr_is_list(b, target) &&
-              !nyr_expr_is_dyn_list(b, target))
-            return true;
-          return nyr_expr_is_any(b, value);
-        }
-      }
-    } else if (body->kind == NY_S_RETURN && body->as.ret.value) {
-      const expr_t *value = body->as.ret.value;
-      const expr_t *target = nyr_comptime_sequence_get_target(value);
-      if (target && nyr_expr_is_list(b, target) &&
-          !nyr_expr_is_dyn_list(b, target))
-        return true;
-      return nyr_expr_is_any(b, body->as.ret.value);
-    } else if (body->kind == NY_S_EXPR && body->as.expr.expr) {
-      const expr_t *value = body->as.expr.expr;
-      const expr_t *target = nyr_comptime_sequence_get_target(value);
-      if (target && nyr_expr_is_list(b, target) &&
-          !nyr_expr_is_dyn_list(b, target))
-        return true;
-      return nyr_expr_is_any(b, body->as.expr.expr);
+  if (e->kind == NY_E_COMPTIME) {
+    const expr_t *value = nyr_comptime_body_value(e->as.comptime_expr.body);
+    if (value) {
+      /*
+       * The comptime interpreter materializes `get` results as dynamic
+       * values. Keep the declared any result boxed even when ordinary native
+       * list.get lowering can use a raw element word.
+       */
+      return nyr_comptime_sequence_get_is_static_list(b, value) ||
+             nyr_expr_is_any(b, value);
     }
   }
   /*
@@ -12194,6 +11622,8 @@ static bool nyr_expr_is_raw_dynamic_read(nyr_builder_impl_t *b,
           e->as.index.target->as.ident.name) {
         const nyr_local_t *target_local =
             nyr_find_local(b, e->as.index.target->as.ident.name);
+        if (target_local && target_local->is_dyn_list)
+          return true;
         if (target_local && target_local->is_any)
           return false;
         if (nyr_local_is_dynamic_sequence(target_local))
@@ -12621,7 +12051,7 @@ static bool ny_native_name_matches(const char *fn_name, const char *lookup) {
 
 #define NY_FN_BUCKET_SIZE 8192
 #define NY_MODULE_BUCKET_SIZE 1024
-#define NY_MODULE_MEMBER_CACHE_SIZE 16384
+#define NY_MODULE_MEMBER_CACHE_SIZE 65536
 #define NY_MODULE_MEMBER_CACHE_WAYS 4u
 #define NY_MODULE_MEMBER_CACHE_SETS                                            \
   (NY_MODULE_MEMBER_CACHE_SIZE / NY_MODULE_MEMBER_CACHE_WAYS)
@@ -12749,6 +12179,7 @@ typedef struct {
   const stmt_t *module;
   const char *member;
   const expr_t *result;
+  uint32_t hash;
   uint32_t generation;
   bool resolved;
 } ny_native_module_member_entry_t;
@@ -12757,6 +12188,7 @@ typedef struct {
   const stmt_t *module;
   const char *member;
   const expr_t *result;
+  uint32_t hash;
   uint32_t generation;
   bool resolved;
 } ny_native_imported_member_entry_t;
@@ -12930,6 +12362,13 @@ ny_native_module_name_from_source_cache(const ny_native_module_cache_t *cache,
   return module && module->kind == NY_S_MODULE ? module->as.module.name : NULL;
 }
 
+typedef struct {
+  const stmt_t *module;
+  ny_stmt_list uses;
+} ny_native_module_uses_t;
+
+enum { NY_MODULE_USES_CACHE_SIZE = 2048 };
+
 struct ny_native_fn_index_t {
   ny_native_treefall_entry_t *treefall;
   ny_native_exact_fn_entry_t *exact_fns;
@@ -12969,6 +12408,7 @@ struct ny_native_fn_index_t {
   ny_native_module_cache_t modules;
   ny_native_module_member_entry_t *module_members;
   ny_native_imported_member_entry_t *imported_members;
+  ny_native_module_uses_t *module_uses;
   /*
    * This list mirrors the narrow module/block walk used by package surfaces.
    */
@@ -13030,6 +12470,11 @@ static void ny_native_fn_index_free(ny_native_fn_index_t *index) {
   free(index->modules.source_keys);
   free(index->module_members);
   free(index->imported_members);
+  if (index->module_uses) {
+    for (size_t i = 0; i < NY_MODULE_USES_CACHE_SIZE; ++i)
+      free(index->module_uses[i].uses.data);
+    free(index->module_uses);
+  }
   free(index->package_surface_modules);
   free(index->fn_exact_next);
   free(index->fn_leaf_next);
@@ -13583,6 +13028,12 @@ static void ny_native_fn_cache_build(ny_native_fn_index_t *index,
       memset(index->imported_members, 0,
              NY_MODULE_MEMBER_CACHE_SIZE * sizeof(*index->imported_members));
     index->module_member_generation = 1;
+  }
+  if (index->module_uses) {
+    for (size_t i = 0; i < NY_MODULE_USES_CACHE_SIZE; ++i)
+      free(index->module_uses[i].uses.data);
+    memset(index->module_uses, 0,
+           NY_MODULE_USES_CACHE_SIZE * sizeof(*index->module_uses));
   }
   free(index->exact_fns);
   index->exact_fns = NULL;
@@ -15385,8 +14836,9 @@ nyr_find_top_level_value_uncached(const nyr_builder_impl_t *b,
  * counter `i` like another module's global. Script top-level code keeps the
  * global view, where top-level variables are both slots and module values.
  */
-static const expr_t *nyr_find_unshadowed_top_level_value(
-    const nyr_builder_impl_t *b, const char *name) {
+static const expr_t *
+nyr_find_unshadowed_top_level_value(const nyr_builder_impl_t *b,
+                                    const char *name) {
   if (b && name && b->current_fn_name &&
       strcmp(b->current_fn_name, "rt_main") != 0 &&
       strcmp(b->current_fn_name, "_ny_top_entry") != 0 &&
@@ -15396,7 +14848,7 @@ static const expr_t *nyr_find_unshadowed_top_level_value(
 }
 
 static const expr_t *nyr_find_top_level_value(const nyr_builder_impl_t *b,
-                                                   const char *name) {
+                                              const char *name) {
   if (!b || !b->prog || !name)
     return NULL;
   nyr_builder_impl_t *mutable_b =
@@ -16762,6 +16214,8 @@ static const expr_t *nyr_find_module_member_in_uncached(const stmt_t *mod,
   return NULL;
 }
 
+
+
 /*
  * Module trees are immutable during one whole-program lowering operation.
  * Imported-value and member resolution often ask for the same leaf many
@@ -16779,6 +16233,7 @@ static const expr_t *nyr_find_module_member_in(const nyr_builder_impl_t *b,
       depth == 0 && index && b->prog && index->functions.prog == b->prog;
   ny_native_module_member_entry_t *entries = NULL;
   size_t slot = 0;
+  uint32_t key_hash = 0;
   if (cacheable) {
     if (!index->trace_lookup_stats_initialized) {
       index->trace_lookup_stats = getenv("NYTRIX_TRACE_LOOKUPS") != NULL;
@@ -16791,16 +16246,16 @@ static const expr_t *nyr_find_module_member_in(const nyr_builder_impl_t *b,
           calloc(NY_MODULE_MEMBER_CACHE_SIZE, sizeof(*index->module_members));
     entries = index->module_members;
     if (entries) {
-      uint32_t h = ny_module_member_cache_hash(mod, member);
-      size_t base = ny_module_member_cache_set(h);
-      slot = base + ((h >> 12) & (NY_MODULE_MEMBER_CACHE_WAYS - 1u));
+      key_hash = ny_module_member_cache_hash(mod, member);
+      size_t base = ny_module_member_cache_set(key_hash);
+      slot = base + ((key_hash >> 12) & (NY_MODULE_MEMBER_CACHE_WAYS - 1u));
       size_t stale_slot = SIZE_MAX;
       for (size_t way = 0; way < NY_MODULE_MEMBER_CACHE_WAYS; ++way) {
         size_t candidate = base + way;
         ny_native_module_member_entry_t *entry = &entries[candidate];
         if (entry->resolved &&
             entry->generation == index->module_member_generation &&
-            entry->module == mod && entry->member &&
+            entry->module == mod && entry->hash == key_hash && entry->member &&
             (entry->member == member || strcmp(entry->member, member) == 0)) {
           if (index->trace_lookup_stats)
             index->module_member_cache_hits++;
@@ -16826,10 +16281,59 @@ static const expr_t *nyr_find_module_member_in(const nyr_builder_impl_t *b,
          */
         .member = ny_intern_get(ny_intern_cstr(member)),
         .result = result,
+        .hash = key_hash,
         .generation = index->module_member_generation,
         .resolved = true};
   }
   return result;
+}
+
+/*
+ * Re-export lookup needs only immediate use declarations, not every function
+ * and variable in a module. Preserve their source order and all resolution
+ * rules while filtering each immutable snapshot body once. Entries and their
+ * lists stay stable across recursive lookups; allocation failure or a full
+ * table falls back to the original body walk.
+ */
+static const ny_stmt_list *
+nyr_module_use_declarations(const nyr_builder_impl_t *b, const stmt_t *mod,
+                            const ny_stmt_list *body) {
+  ny_native_fn_index_t *index = ny_native_fn_index_for(b);
+  if (!index || index->functions.prog != b->prog)
+    return body;
+  if (!index->module_uses)
+    index->module_uses =
+        calloc(NY_MODULE_USES_CACHE_SIZE, sizeof(*index->module_uses));
+  if (!index->module_uses)
+    return body;
+  size_t slot = ((uintptr_t)mod >> 4) & (NY_MODULE_USES_CACHE_SIZE - 1);
+  for (size_t probe = 0; probe < NY_MODULE_USES_CACHE_SIZE; ++probe) {
+    ny_native_module_uses_t *entry = &index->module_uses[slot];
+    if (entry->module == mod)
+      return &entry->uses;
+    if (!entry->module) {
+      size_t count = 0;
+      for (size_t i = 0; i < body->len; ++i)
+        count += body->data[i] && body->data[i]->kind == NY_S_USE &&
+                 body->data[i]->as.use.module;
+      ny_stmt_list uses = {0};
+      if (count) {
+        uses.data = ny_malloc_array(count, sizeof(*uses.data));
+        if (!uses.data)
+          return body;
+        for (size_t i = 0; i < body->len; ++i) {
+          stmt_t *use = body->data[i];
+          if (use && use->kind == NY_S_USE && use->as.use.module)
+            uses.data[uses.len++] = use;
+        }
+      }
+      entry->module = mod;
+      entry->uses = uses;
+      return &entry->uses;
+    }
+    slot = (slot + 1) & (NY_MODULE_USES_CACHE_SIZE - 1);
+  }
+  return body;
 }
 
 /*
@@ -16856,6 +16360,7 @@ nyr_find_imported_module_member_rec(const nyr_builder_impl_t *b,
     body = &mod->as.block.body;
   if (!body)
     return NULL;
+  body = nyr_module_use_declarations(b, mod, body);
   for (size_t i = 0; i < body->len; ++i) {
     const stmt_t *use = body->data[i];
     if (!use || use->kind != NY_S_USE || !use->as.use.module)
@@ -16923,14 +16428,15 @@ nyr_find_imported_module_member(const nyr_builder_impl_t *b, const stmt_t *mod,
   bool cacheable =
       depth == 0 && index && b->prog && index->functions.prog == b->prog;
   size_t slot = 0;
+  uint32_t key_hash = 0;
   if (cacheable) {
     if (!index->imported_members)
       index->imported_members =
           calloc(NY_MODULE_MEMBER_CACHE_SIZE, sizeof(*index->imported_members));
     if (index->imported_members) {
-      uint32_t h = ny_module_member_cache_hash(mod, member);
-      size_t base = ny_module_member_cache_set(h);
-      slot = base + ((h >> 12) & (NY_MODULE_MEMBER_CACHE_WAYS - 1u));
+      key_hash = ny_module_member_cache_hash(mod, member);
+      size_t base = ny_module_member_cache_set(key_hash);
+      slot = base + ((key_hash >> 12) & (NY_MODULE_MEMBER_CACHE_WAYS - 1u));
       size_t stale_slot = SIZE_MAX;
       for (size_t way = 0; way < NY_MODULE_MEMBER_CACHE_WAYS; ++way) {
         size_t candidate = base + way;
@@ -16938,7 +16444,7 @@ nyr_find_imported_module_member(const nyr_builder_impl_t *b, const stmt_t *mod,
             &index->imported_members[candidate];
         if (entry->resolved &&
             entry->generation == index->module_member_generation &&
-            entry->module == mod && entry->member &&
+            entry->module == mod && entry->hash == key_hash && entry->member &&
             (entry->member == member || strcmp(entry->member, member) == 0))
           return entry->result;
         if (stale_slot == SIZE_MAX &&
@@ -16962,6 +16468,7 @@ nyr_find_imported_module_member(const nyr_builder_impl_t *b, const stmt_t *mod,
          */
         .member = ny_intern_get(ny_intern_cstr(member)),
         .result = result,
+        .hash = key_hash,
         .generation = index->module_member_generation,
         .resolved = true};
   return result;
@@ -17381,9 +16888,10 @@ static bool nyr_expr_is_list(const nyr_builder_impl_t *b, const expr_t *e) {
         return true;
       if (!local) {
         const expr_t *global =
-            e->tok.filename ? nyr_find_top_level_value_in_source(
-                                  b, e->as.ident.name, e->tok.filename)
-                            : nyr_find_unshadowed_top_level_value(b, e->as.ident.name);
+            e->tok.filename
+                ? nyr_find_top_level_value_in_source(b, e->as.ident.name,
+                                                     e->tok.filename)
+                : nyr_find_unshadowed_top_level_value(b, e->as.ident.name);
         if (!global)
           global = nyr_find_unshadowed_top_level_value(b, e->as.ident.name);
         for (unsigned depth = 0;
@@ -17569,10 +17077,11 @@ static bool nyr_expr_is_list(const nyr_builder_impl_t *b, const expr_t *e) {
     if (local) {
       return local->is_list;
     }
-    const expr_t *global = e->tok.filename
-                               ? nyr_find_top_level_value_in_source(
-                                     b, e->as.ident.name, e->tok.filename)
-                               : nyr_find_unshadowed_top_level_value(b, e->as.ident.name);
+    const expr_t *global =
+        e->tok.filename
+            ? nyr_find_top_level_value_in_source(b, e->as.ident.name,
+                                                 e->tok.filename)
+            : nyr_find_unshadowed_top_level_value(b, e->as.ident.name);
     if (!global)
       global = nyr_find_unshadowed_top_level_value(b, e->as.ident.name);
     /*
@@ -17871,10 +17380,11 @@ static bool nyr_expr_is_set(const nyr_builder_impl_t *b, const expr_t *e) {
      */
     if (local && local->type_name)
       return false;
-    const expr_t *global = e->tok.filename
-                               ? nyr_find_top_level_value_in_source(
-                                     b, e->as.ident.name, e->tok.filename)
-                               : nyr_find_unshadowed_top_level_value(b, e->as.ident.name);
+    const expr_t *global =
+        e->tok.filename
+            ? nyr_find_top_level_value_in_source(b, e->as.ident.name,
+                                                 e->tok.filename)
+            : nyr_find_unshadowed_top_level_value(b, e->as.ident.name);
     if (!global)
       global = nyr_find_unshadowed_top_level_value(b, e->as.ident.name);
     /*
@@ -19495,19 +19005,10 @@ static int nyr_emit_known_list_append_len(nyr_builder_impl_t *b, int list,
     length = one < 0 ? -1 : nyr_emit_add_i64(b, base_len, one);
   }
   if (length < 0 && out >= 0) {
-    /*
-     * An append's return value is always the current buffer handle (never a
-     * growth-forwarded one), so the post-append count is the header word at
-     * out-24 read directly. rt_tbuf_len_raw re-validates handle provenance
-     * and magic on every call, which made each hot-loop append iteration pay
-     * a full runtime call just to re-read a count both append arms had just
-     * stored into that header.
-     */
-    int neg24 = nyr_emit_const(b, -24);
-    int count_addr = neg24 < 0 ? -1 : nyr_emit_add_i64(b, out, neg24);
-    length = count_addr < 0 ? -1 : nyr_emit_load_i64(b, count_addr);
-    if (length < 0)
-      length = nyr_emit_runtime_call(b, "rt_tbuf_len_raw", out, -1, -1, 1, 0);
+    /* Append may growth-forward the buffer. Only read the header through the
+     * returned handle's checked runtime accessor when no SSA length fact
+     * survives the append. */
+    length = nyr_emit_runtime_call(b, "rt_tbuf_len_raw", out, -1, -1, 1, 0);
   }
   return length;
 }
@@ -23261,9 +22762,9 @@ static const stmt_t *nyr_find_attached_method_impl(const nyr_builder_impl_t *b,
    * first, so recover the declaring module from the receiver's qualified
    * producer call and prefer that module's attached owner.
    */
-  const char *source_module =
-      owner && !strchr(owner, '.') ? nyr_expr_source_module(b, receiver, 0)
-                                   : NULL;
+  const char *source_module = owner && !strchr(owner, '.')
+                                  ? nyr_expr_source_module(b, receiver, 0)
+                                  : NULL;
   if (source_module && source_module[0] && b->prog) {
     char qualified[512];
     int qn =
@@ -23277,13 +22778,12 @@ static const stmt_t *nyr_find_attached_method_impl(const nyr_builder_impl_t *b,
        * module; restrict the program scan to that module instead.
        */
       for (size_t i = 0; i < b->prog->body.len; ++i) {
-        const stmt_t *module =
-            nyr_find_module_in_root_cached(b, b->prog->body.data[i],
-                                           source_module);
+        const stmt_t *module = nyr_find_module_in_root_cached(
+            b, b->prog->body.data[i], source_module);
         if (!module)
           continue;
-        const stmt_t *found = ny_native_find_attached_method_in_stmt(
-            module, owner, method);
+        const stmt_t *found =
+            ny_native_find_attached_method_in_stmt(module, owner, method);
         if (found)
           return found;
       }
@@ -23871,7 +23371,8 @@ static bool nyr_expr_is_range(const nyr_builder_impl_t *b, const expr_t *e) {
         }
       }
     }
-    const expr_t *global = nyr_find_unshadowed_top_level_value(b, e->as.ident.name);
+    const expr_t *global =
+        nyr_find_unshadowed_top_level_value(b, e->as.ident.name);
     return global && global != e && global->kind != NY_E_IDENT &&
            nyr_expr_is_range(b, global);
   }
@@ -23892,9 +23393,9 @@ static int nyr_contains_item(nyr_builder_impl_t *b, const expr_t *container,
       nyr_value_is_f64(b, item, 0) ||
       nyr_value_scalar_class(b, item) == NYIR_SCALAR_F64) {
     int bits = nyr_emit_runtime_call(b, "rt_f64_bits", item, -1, -1, 1, 0);
-    return bits < 0 ? -1
-                    : nyr_emit_runtime_call(b, "rt_flt_box_val", bits, -1, -1,
-                                            1, 0);
+    return bits < 0
+               ? -1
+               : nyr_emit_runtime_call(b, "rt_flt_box_val", bits, -1, -1, 1, 0);
   }
   if (container && nyr_expr_is_range(b, container) &&
       ((item_expr && nyr_expr_is_raw_int(item_expr)) ||

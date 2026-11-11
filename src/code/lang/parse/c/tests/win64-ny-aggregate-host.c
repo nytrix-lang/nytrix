@@ -1,3 +1,6 @@
+/*
+ * Host-side oracle for Nytrix aggregate calls using the Windows x64 ABI.
+ */
 #include "src/code/lang/parse/c/tests/win64-ny-aggregate-host.h"
 #include "etc/tests/lang/interop/c/internal-byvalue-param-import.h"
 

@@ -1,0 +1,48 @@
+shape ui_mock_fast_fill_capture {
+  family "runtime/ui"
+  generator "embedded"
+  features [ui mock framebuffer capture]
+  template ny-test-case
+  flags "--native-only"
+  timeout 120
+  expect compile_and_run
+  expect_message "UI-MOCK-FAST-FILL-CAPTURE-OK"
+  source ny <<'NY'
+use core
+use core.mem (cstr)
+use core.os.ui.render as gfx
+
+#if windows {
+   extern "" { fn _putenv(ptr s) i32 as "_putenv" }
+} #else {
+   extern "" { fn setenv(ptr name, ptr value, i32 overwrite) i32 }
+} #endif
+
+mut _env_keep = ""
+fn set_test_env(str key, str value) bool {
+   #windows {
+      _env_keep = key + "=" + value
+      return _putenv(cstr(_env_keep)) == 0
+   }
+   #else { return setenv(cstr(key), cstr(value), 1) == 0 }
+   #endif
+}
+
+assert(set_test_env("NY_UI_MOCK_FILL_FAST", "1"), "enable mock fast fill")
+assert(set_test_env("NY_UI_FRAME_HASH_LOCK", "1"), "enable deterministic capture")
+assert(gfx.set_backend_type(gfx.BACKEND_MOCK), "select mock renderer")
+assert(gfx.init_window(4, 4, "mock capture"), "open mock surface")
+assert(gfx.begin_frame_clear([0.0, 0.0, 0.0, 1.0]), "clear mock frame")
+assert(gfx.draw_rect(1.0, 1.0, 2.0, 2.0, [1.0, 0.0, 0.0, 1.0]), "draw captured pixel")
+assert(gfx.end_frame(), "end mock frame")
+def frame = gfx.read_framebuffer()
+def ptr pixels = __ffi_untag_ptr(frame.get("data", 0))
+def int background = load32(pixels, 0)
+def int pixel = load32(pixels, (1 * 4 + 1) * 4)
+free(pixels)
+gfx.close_window()
+assert(background == 0xff000000, "capture preserves the opaque clear color")
+assert(pixel == 0xff0000ff, "capture preserves drawn pixels when frame hash lock is active")
+print("UI-MOCK-FAST-FILL-CAPTURE-OK")
+NY
+}

@@ -10,7 +10,8 @@ file(MAKE_DIRECTORY "${BINARY_DIR}")
 # Source fixtures live in fixtures/; this script owns build outputs and header copies.
 
 # Frontend semantics, declarations, and aggregate layout.
-foreach(probe IN ITEMS unevaluated-metadata abstract-callback-parameters
+foreach(probe IN ITEMS small-copy-loop-residency declared-copy-definition
+                       unevaluated-metadata abstract-callback-parameters
                        static-inline-boundaries driver-pthread
                        void-pointer-increment cleanup-type-attribute
                        atomic-memory-cmpxchg-small dead-inline-asm
@@ -27,6 +28,12 @@ foreach(probe IN ITEMS unevaluated-metadata abstract-callback-parameters
                        aggregate-pointer-self-initializer
                        volatile-pointer-increment
                        aggregate-sizeof-global-scalar-array
+                       aggregate-block-tag-scope
+                       gnu-omitted-middle-array-extent
+                       object-alias-followed-by-external
+                       address-of-choose-expr-member
+                       typeof-pointer-qualifier-dereference
+                       automatic-array-designator-extent
                        sizeof-empty-global-array
                        function-pointer-byte-arithmetic
                        generic-function-pointer-call
@@ -42,12 +49,22 @@ foreach(probe IN ITEMS unevaluated-metadata abstract-callback-parameters
                        macro-argument-conditional-close
                        aggregate-array-arrow-member
                        function-pointer-array-null
+                       linux-local-static-function-pointer-array
+                       function-pointer-array-row-designators
+                       integer-cast-array-extent
+                       bitfield-log2-constant
+                       multidimensional-scalar-array-parameter
+                       address-of-multidimensional-array-element
+                       typeof-builtin-clz
                        typeof-const-aggregate-pointer
                        static-function-name
                        typeof-cast-binary-precedence
                        void-global-array-member-call
                        aggregate-array-rank4
                        static-pointer-array-range-designator
+                       local-aggregate-array-range
+                       aggregate-scalar-pointer-to-array
+                       atomic-type-specifier
                        static-local-label-address-range
                        inline-asm-unlocked-add-condition
                        runtime-constant-shift-inline-asm
@@ -87,7 +104,22 @@ foreach(probe IN ITEMS unevaluated-metadata abstract-callback-parameters
                        static-null-base-subobject-pointer
                        comma-expression-after-indexed-assignment
                        aggregate-array-compound-literal-call
+                       aggregate-array-local-compound-literal
+                       array-compound-literal-null-pointer
+                       array-compound-literal-fixed-bound
+                       pointer-to-incomplete-aggregate-array-field
+                       aggregate-member-bitwise-condition
+                       inline-asm-endbr-constant
+                       static-local-data-dead-function
+                       int128-arithmetic
+                       int128-member-assignment
+                       global-incomplete-aggregate-matrix
+                       system-netinet-tcp
+                       int128-pointer-parameter
+                       int128-signedness-call
+                       generic-typedef-long-long
                        aggregate-char-matrix-string-rows
+                       switch-aggregate-return
                        conditional-in-function-macro-arguments
                        local-aggregate-pointer-array pointer-attributes
                        aligned-local-aggregate enum-wide-alias
@@ -97,6 +129,8 @@ foreach(probe IN ITEMS unevaluated-metadata abstract-callback-parameters
                        pointer-to-bool-assignment
                        aggregate-trailing-attribute
                        function-pointer-aggregate-return
+                       indirect-aggregate-return
+                       packed-bitfield-aggregate-argument
                        typedef-function-signature
                        driver-no-builtin)
   set(probe_flags)
@@ -126,6 +160,15 @@ foreach(probe IN ITEMS unevaluated-metadata abstract-callback-parameters
     message(FATAL_ERROR "${probe} returned an incorrect result\n${stdout}${stderr}")
   endif()
 endforeach()
+execute_process(
+  COMMAND "${NYC}" -E
+          "${SOURCE_DIR}/fixtures/system-stdatomic-header.c"
+          -o "${BINARY_DIR}/system-stdatomic-header.i"
+  RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+if(NOT status EQUAL 0)
+  message(FATAL_ERROR
+    "nyc could not preprocess the Clang stdatomic system header\n${stdout}${stderr}")
+endif()
 execute_process(
   COMMAND "${NYC}" -fno-builtin -S
           "${SOURCE_DIR}/fixtures/driver-no-builtin.c"
@@ -253,6 +296,122 @@ execute_process(COMMAND "${BINARY_DIR}/linux-user-load-goto"
 if(NOT status EQUAL 0)
   message(FATAL_ERROR "user-load asm-goto returned incorrect results: ${status}")
 endif()
+set(xstore_inline_asm_source
+    "${SOURCE_DIR}/fixtures/linux-xstore-inline-asm.c")
+execute_process(
+  COMMAND "${NYC}" -S "${xstore_inline_asm_source}"
+          -o "${BINARY_DIR}/linux-xstore-inline-asm.s"
+  RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+if(NOT status EQUAL 0)
+  message(FATAL_ERROR "nyc xstore inline-asm compilation failed\n${stdout}${stderr}")
+endif()
+execute_process(
+  COMMAND "${CC}" -c "${BINARY_DIR}/linux-xstore-inline-asm.s"
+          -o "${BINARY_DIR}/linux-xstore-inline-asm.o"
+  RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+if(NOT status EQUAL 0)
+  message(FATAL_ERROR "xstore inline-asm assembly failed\n${stdout}${stderr}")
+endif()
+set(function_pointer_xchg_source
+    "${SOURCE_DIR}/fixtures/linux-function-pointer-xchg.c")
+execute_process(
+  COMMAND "${NYC}" -S "${function_pointer_xchg_source}"
+          -o "${BINARY_DIR}/linux-function-pointer-xchg.s"
+  RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+if(NOT status EQUAL 0)
+  message(FATAL_ERROR "nyc function-pointer xchg compilation failed\n${stdout}${stderr}")
+endif()
+execute_process(
+  COMMAND "${CC}" "${BINARY_DIR}/linux-function-pointer-xchg.s"
+          -o "${BINARY_DIR}/linux-function-pointer-xchg"
+  RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+if(NOT status EQUAL 0)
+  message(FATAL_ERROR "function-pointer xchg link failed\n${stdout}${stderr}")
+endif()
+execute_process(COMMAND "${BINARY_DIR}/linux-function-pointer-xchg"
+                RESULT_VARIABLE status)
+if(NOT status EQUAL 0)
+  message(FATAL_ERROR "function-pointer xchg returned incorrect results: ${status}")
+endif()
+set(pm_trace_metadata_source
+    "${SOURCE_DIR}/fixtures/linux-pm-trace-metadata.c")
+execute_process(
+  COMMAND "${NYC}" -S "${pm_trace_metadata_source}"
+          -o "${BINARY_DIR}/linux-pm-trace-metadata.s"
+  RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+if(NOT status EQUAL 0)
+  message(FATAL_ERROR "nyc PM trace metadata compilation failed\n${stdout}${stderr}")
+endif()
+execute_process(
+  COMMAND "${CC}" "${BINARY_DIR}/linux-pm-trace-metadata.s"
+          -o "${BINARY_DIR}/linux-pm-trace-metadata"
+  RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+if(NOT status EQUAL 0)
+  message(FATAL_ERROR "PM trace metadata link failed\n${stdout}${stderr}")
+endif()
+execute_process(COMMAND "${BINARY_DIR}/linux-pm-trace-metadata"
+                RESULT_VARIABLE status)
+if(NOT status EQUAL 0)
+  message(FATAL_ERROR "PM trace metadata returned incorrect results: ${status}")
+endif()
+set(int128_shift_compound_source
+    "${SOURCE_DIR}/fixtures/linux-int128-shift-compound.c")
+execute_process(
+  COMMAND "${NYC}" -S "${int128_shift_compound_source}"
+          -o "${BINARY_DIR}/linux-int128-shift-compound.s"
+  RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+if(NOT status EQUAL 0)
+  message(FATAL_ERROR "nyc int128 compound shift compilation failed\n${stdout}${stderr}")
+endif()
+execute_process(
+  COMMAND "${CC}" "${BINARY_DIR}/linux-int128-shift-compound.s"
+          -o "${BINARY_DIR}/linux-int128-shift-compound"
+  RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+if(NOT status EQUAL 0)
+  message(FATAL_ERROR "int128 compound shift link failed\n${stdout}${stderr}")
+endif()
+execute_process(COMMAND "${BINARY_DIR}/linux-int128-shift-compound"
+                RESULT_VARIABLE status)
+if(NOT status EQUAL 0)
+  message(FATAL_ERROR "int128 compound shift returned incorrect results: ${status}")
+endif()
+set(movntdqa_asm_source
+    "${SOURCE_DIR}/fixtures/linux-movntdqa-asm.c")
+execute_process(
+  COMMAND "${NYC}" -S "${movntdqa_asm_source}"
+          -o "${BINARY_DIR}/linux-movntdqa-asm.s"
+  RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+if(NOT status EQUAL 0)
+  message(FATAL_ERROR "nyc movntdqa inline-asm compilation failed\n${stdout}${stderr}")
+endif()
+execute_process(
+  COMMAND "${CC}" -c "${BINARY_DIR}/linux-movntdqa-asm.s"
+          -o "${BINARY_DIR}/linux-movntdqa-asm.o"
+  RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+if(NOT status EQUAL 0)
+  message(FATAL_ERROR "movntdqa inline-asm assembly failed\n${stdout}${stderr}")
+endif()
+set(rep_movsl_tail_source
+    "${SOURCE_DIR}/fixtures/linux-rep-movsl-tail.c")
+execute_process(
+  COMMAND "${NYC}" -S "${rep_movsl_tail_source}"
+          -o "${BINARY_DIR}/linux-rep-movsl-tail.s"
+  RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+if(NOT status EQUAL 0)
+  message(FATAL_ERROR "nyc rep-movsl-tail compilation failed\n${stdout}${stderr}")
+endif()
+execute_process(
+  COMMAND "${CC}" "${BINARY_DIR}/linux-rep-movsl-tail.s"
+          -o "${BINARY_DIR}/linux-rep-movsl-tail"
+  RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+if(NOT status EQUAL 0)
+  message(FATAL_ERROR "rep-movsl-tail link failed\n${stdout}${stderr}")
+endif()
+execute_process(COMMAND "${BINARY_DIR}/linux-rep-movsl-tail"
+                RESULT_VARIABLE status)
+if(NOT status EQUAL 0)
+  message(FATAL_ERROR "rep-movsl-tail returned incorrect results: ${status}")
+endif()
 set(user_load_register_extable_source
     "${SOURCE_DIR}/fixtures/linux-user-load-register-extable.c")
 
@@ -352,6 +511,72 @@ execute_process(COMMAND "${BINARY_DIR}/aggregate-variadic-va-arg"
                 RESULT_VARIABLE status)
 if(NOT status EQUAL 0)
   message(FATAL_ERROR "aggregate va_arg returned incorrect result: ${status}")
+endif()
+set(va_start_aggregate_source
+    "${SOURCE_DIR}/fixtures/va-start-fixed-aggregate.c")
+execute_process(
+  COMMAND "${NYC}" -S "${va_start_aggregate_source}"
+          -o "${BINARY_DIR}/va-start-fixed-aggregate.s"
+  RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+if(NOT status EQUAL 0)
+  message(FATAL_ERROR "nyc fixed-aggregate va_start compilation failed\n${stdout}${stderr}")
+endif()
+execute_process(
+  COMMAND "${CC}" "${BINARY_DIR}/va-start-fixed-aggregate.s"
+          "${SOURCE_DIR}/fixtures/va-start-fixed-aggregate-host.c"
+          -o "${BINARY_DIR}/va-start-fixed-aggregate"
+  RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+if(NOT status EQUAL 0)
+  message(FATAL_ERROR "fixed-aggregate va_start host link failed\n${stdout}${stderr}")
+endif()
+execute_process(COMMAND "${BINARY_DIR}/va-start-fixed-aggregate"
+                RESULT_VARIABLE status)
+if(NOT status EQUAL 0)
+  message(FATAL_ERROR "fixed-aggregate va_start returned incorrect result: ${status}")
+endif()
+set(static_wide_array_source
+    "${SOURCE_DIR}/fixtures/static-wide-array-extent.c")
+execute_process(
+  COMMAND "${NYC}" -S "${static_wide_array_source}"
+          -o "${BINARY_DIR}/static-wide-array-extent.s"
+  RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+if(NOT status EQUAL 0)
+  message(FATAL_ERROR "nyc static wide-array compilation failed\n${stdout}${stderr}")
+endif()
+execute_process(
+  COMMAND "${CC}" "${BINARY_DIR}/static-wide-array-extent.s"
+          "${SOURCE_DIR}/fixtures/static-wide-array-extent-host.c"
+          -o "${BINARY_DIR}/static-wide-array-extent"
+  RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+if(NOT status EQUAL 0)
+  message(FATAL_ERROR "static wide-array host link failed\n${stdout}${stderr}")
+endif()
+execute_process(COMMAND "${BINARY_DIR}/static-wide-array-extent"
+                RESULT_VARIABLE status)
+if(NOT status EQUAL 0)
+  message(FATAL_ERROR "static wide-array returned incorrect result: ${status}")
+endif()
+set(indirect_jump_source
+    "${SOURCE_DIR}/fixtures/indirect-asm-jump.c")
+execute_process(
+  COMMAND "${NYC}" -S "${indirect_jump_source}"
+          -o "${BINARY_DIR}/indirect-asm-jump.s"
+  RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+if(NOT status EQUAL 0)
+  message(FATAL_ERROR "nyc indirect jump compilation failed\n${stdout}${stderr}")
+endif()
+execute_process(
+  COMMAND "${CC}" "${BINARY_DIR}/indirect-asm-jump.s"
+          "${SOURCE_DIR}/fixtures/indirect-asm-jump-host.c"
+          -o "${BINARY_DIR}/indirect-asm-jump"
+  RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+if(NOT status EQUAL 0)
+  message(FATAL_ERROR "indirect jump host link failed\n${stdout}${stderr}")
+endif()
+execute_process(COMMAND "${BINARY_DIR}/indirect-asm-jump"
+                RESULT_VARIABLE status)
+if(NOT status EQUAL 0)
+  message(FATAL_ERROR "indirect jump returned incorrect result: ${status}")
 endif()
 set(percpu_source "${SOURCE_DIR}/fixtures/percpu-raw-pointer.c")
 execute_process(
@@ -1208,7 +1433,9 @@ if(READELF)
     OUTPUT_VARIABLE stdout
     ERROR_VARIABLE stderr
   )
-  if(NOT status EQUAL 0 OR NOT stdout MATCHES "\\.text.*[ \t]16")
+  # The x86-64 object writer aligns .text to 32 bytes so that loop headers
+  # padded to 32 keep their position; 16-byte function alignment still holds.
+  if(NOT status EQUAL 0 OR NOT stdout MATCHES "\\.text.*[ \t](16|32)")
     message(FATAL_ERROR
       "NYC did not honor 16-byte function alignment\n${stdout}${stderr}")
   endif()
@@ -2226,6 +2453,35 @@ if(NOT status EQUAL 0)
     "attributed static local array did not preserve static storage\n${stdout}${stderr}")
 endif()
 
+set(array_member_designator_source
+    "${SOURCE_DIR}/fixtures/array-member-designator.c")
+execute_process(
+  COMMAND "${NYC}" -O3 -S "${array_member_designator_source}"
+          -o "${BINARY_DIR}/array-member-designator.s"
+  RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr
+)
+if(NOT status EQUAL 0)
+  message(FATAL_ERROR
+    "nyc failed to compile chained array/member designators\n${stdout}${stderr}")
+endif()
+execute_process(
+  COMMAND "${CC}" "${BINARY_DIR}/array-member-designator.s"
+          -o "${BINARY_DIR}/array-member-designator"
+  RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr
+)
+if(NOT status EQUAL 0)
+  message(FATAL_ERROR
+    "host linker rejected chained array/member designators\n${stdout}${stderr}")
+endif()
+execute_process(
+  COMMAND "${BINARY_DIR}/array-member-designator"
+  RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr
+)
+if(NOT status EQUAL 0)
+  message(FATAL_ERROR
+    "chained array/member initializer data was incorrect\n${stdout}${stderr}")
+endif()
+
 # Per-function C lowering and object compilation.
 set(cases
   "structs.c|c_point_after_three|point-after-three.o"
@@ -2241,6 +2497,8 @@ set(cases
   "structs.c|c_point_pointer_set|point-pointer-set.o"
   "structs.c|c_point_pointer_slot|point-pointer-slot.o"
   "structs.c|c_byte_pointer_element|byte-pointer-element.o"
+  "fixtures/sysv-byte-array-union-argument.c|intel_slicemask_from_xehp_dssmask|sysv-byte-array-union-callee.o"
+  "fixtures/sysv-byte-array-union-argument.c|c_sseu_mask_argument|sysv-byte-array-union-argument.o"
   "program.c|c_kernel|program.o"
   "target-link.c|c_target_link|target-link.o"
   "void.c|c_void_store|void-store.o"
@@ -2649,6 +2907,40 @@ execute_process(
 if(NOT status EQUAL 0)
   message(FATAL_ERROR
     "NYC file-scope asm PC-relative data relocation was incorrect\n${stdout}${stderr}")
+endif()
+
+set(weak_function_source "${SOURCE_DIR}/fixtures/weak-function.c")
+set(strong_function_source "${SOURCE_DIR}/fixtures/strong-function.c")
+execute_process(
+  COMMAND "${NYC}" -S "${weak_function_source}"
+          -o "${BINARY_DIR}/weak-function.s"
+  RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+if(NOT status EQUAL 0)
+  message(FATAL_ERROR "NYC weak function compilation failed\n${stdout}${stderr}")
+endif()
+execute_process(
+  COMMAND "${NYC}" -S "${strong_function_source}"
+          -o "${BINARY_DIR}/strong-function.s"
+  RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+if(NOT status EQUAL 0)
+  message(FATAL_ERROR "NYC strong function compilation failed\n${stdout}${stderr}")
+endif()
+execute_process(
+  COMMAND "${CC}" -std=c11 -Wall -Wextra -Werror
+          -o "${BINARY_DIR}/weak-function-override"
+          "${SOURCE_DIR}/fixtures/weak-function-main.c"
+          "${BINARY_DIR}/weak-function.s" "${BINARY_DIR}/strong-function.s"
+  RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+if(NOT status EQUAL 0)
+  message(FATAL_ERROR
+    "host compiler could not link strong-over-weak NYC symbols\n${stdout}${stderr}")
+endif()
+execute_process(
+  COMMAND "${BINARY_DIR}/weak-function-override"
+  RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+if(NOT status EQUAL 0)
+  message(FATAL_ERROR
+    "strong definitions did not override NYC weak function/data symbols\n${stdout}${stderr}")
 endif()
 
 set(inline_asm_object "${BINARY_DIR}/inline-asm.o")
@@ -3469,8 +3761,8 @@ endif()
 
 # Negative diagnostics and argument-limit checks.
 set(unsupported_cases
-  "unsupported.c|c_unsupported|continue statement is not inside a loop|2:11"
-  "unsupported.c|c_break_outside|break statement is not inside a loop|7:8"
+  "unsupported.c|c_unsupported|continue statement is not inside a loop"
+  "unsupported.c|c_break_outside|break statement is not inside a loop"
   "void.c|c_void_return_value|void function return must not include a value"
 
   "const-update.c|c_const_update|cannot assign to a const C object"
@@ -5322,6 +5614,43 @@ if(NM_TOOL)
     message(FATAL_ERROR
       "nyc rejected the x86-64 per-CPU increment asm\n${stdout}${stderr}")
   endif()
+  set(asm_gs_percpu_add_source
+    "${SOURCE_DIR}/fixtures/inline-asm-gs-percpu-add.c")
+  execute_process(
+    COMMAND "${NYC}" -S "${asm_gs_percpu_add_source}"
+            -o "${BINARY_DIR}/inline-asm-gs-percpu-add.s"
+    RESULT_VARIABLE status
+    OUTPUT_VARIABLE stdout
+    ERROR_VARIABLE stderr
+  )
+  if(NOT status EQUAL 0)
+    message(FATAL_ERROR
+      "nyc rejected the GS-address-space per-CPU add asm\n${stdout}${stderr}")
+  endif()
+  file(READ "${BINARY_DIR}/inline-asm-gs-percpu-add.s"
+       asm_gs_percpu_add_output)
+  if(NOT asm_gs_percpu_add_output MATCHES
+     "addb[ \t]+%r11b, %gs:\\(%rax\\)" OR
+     NOT asm_gs_percpu_add_output MATCHES
+     "addw[ \t]+%r11w, %gs:\\(%rax\\)" OR
+     NOT asm_gs_percpu_add_output MATCHES
+     "addl[ \t]+%r11d, %gs:\\(%rax\\)" OR
+     NOT asm_gs_percpu_add_output MATCHES
+     "addq[ \t]+%r11, %gs:\\(%rax\\)")
+    message(FATAL_ERROR
+      "NYC omitted the GS-relative per-CPU add\n${asm_gs_percpu_add_output}")
+  endif()
+  execute_process(
+    COMMAND "${CC}" -c "${BINARY_DIR}/inline-asm-gs-percpu-add.s"
+            -o "${BINARY_DIR}/inline-asm-gs-percpu-add.o"
+    RESULT_VARIABLE status
+    OUTPUT_VARIABLE stdout
+    ERROR_VARIABLE stderr
+  )
+  if(NOT status EQUAL 0)
+    message(FATAL_ERROR
+      "assembler rejected NYC's GS-relative per-CPU add\n${stdout}${stderr}")
+  endif()
   set(asm_memory_input_host "${SOURCE_DIR}/fixtures/inline-asm-memory-input-host.c")
 
   execute_process(
@@ -7098,94 +7427,6 @@ if(NOT status EQUAL 0)
   message(FATAL_ERROR
     "machine regression failed: ${status}\n${stdout}${stderr}")
 endif()
-
-foreach(machine_case_unused IN ITEMS 1)
-  execute_process(
-    COMMAND "${NYC}" -O3 -c "${SOURCE_DIR}/fixtures/machine-sha256.c"
-            -o "${BINARY_DIR}/machine-sha256.o"
-    RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
-  if(NOT status EQUAL 0)
-    message(FATAL_ERROR "nyc failed on machine-sha256\n${stdout}${stderr}")
-  endif()
-  execute_process(
-    COMMAND "${CC}" "${BINARY_DIR}/machine-sha256.o" -o "${BINARY_DIR}/machine-sha256"
-    RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
-  if(NOT status EQUAL 0)
-    message(FATAL_ERROR "could not link machine-sha256\n${stdout}${stderr}")
-  endif()
-  execute_process(
-    COMMAND "${BINARY_DIR}/machine-sha256" TIMEOUT 30
-    RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
-  if(NOT status EQUAL 0 OR NOT stdout MATCHES "checksum=248162")
-    message(FATAL_ERROR "machine-sha256 miscompiled: ${status}\n${stdout}${stderr}")
-  endif()
-endforeach()
-
-foreach(machine_case_unused IN ITEMS 1)
-  execute_process(
-    COMMAND "${NYC}" -O3 -c "${SOURCE_DIR}/fixtures/machine-pbkdf2.c"
-            -o "${BINARY_DIR}/machine-pbkdf2.o"
-    RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
-  if(NOT status EQUAL 0)
-    message(FATAL_ERROR "nyc failed on machine-pbkdf2\n${stdout}${stderr}")
-  endif()
-  execute_process(
-    COMMAND "${CC}" "${BINARY_DIR}/machine-pbkdf2.o" -o "${BINARY_DIR}/machine-pbkdf2"
-    RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
-  if(NOT status EQUAL 0)
-    message(FATAL_ERROR "could not link machine-pbkdf2\n${stdout}${stderr}")
-  endif()
-  execute_process(
-    COMMAND "${BINARY_DIR}/machine-pbkdf2" TIMEOUT 30
-    RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
-  if(NOT status EQUAL 0 OR NOT stdout MATCHES "checksum=2991")
-    message(FATAL_ERROR "machine-pbkdf2 miscompiled: ${status}\n${stdout}${stderr}")
-  endif()
-endforeach()
-
-foreach(machine_case_unused IN ITEMS 1)
-  execute_process(
-    COMMAND "${NYC}" -O3 -c "${SOURCE_DIR}/fixtures/machine-nqueens.c"
-            -o "${BINARY_DIR}/machine-nqueens.o"
-    RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
-  if(NOT status EQUAL 0)
-    message(FATAL_ERROR "nyc failed on machine-nqueens\n${stdout}${stderr}")
-  endif()
-  execute_process(
-    COMMAND "${CC}" "${BINARY_DIR}/machine-nqueens.o" -o "${BINARY_DIR}/machine-nqueens"
-    RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
-  if(NOT status EQUAL 0)
-    message(FATAL_ERROR "could not link machine-nqueens\n${stdout}${stderr}")
-  endif()
-  execute_process(
-    COMMAND "${BINARY_DIR}/machine-nqueens" TIMEOUT 30
-    RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
-  if(NOT status EQUAL 0 OR NOT stdout MATCHES "checksum=73712")
-    message(FATAL_ERROR "machine-nqueens miscompiled: ${status}\n${stdout}${stderr}")
-  endif()
-endforeach()
-
-foreach(machine_case_unused IN ITEMS 1)
-  execute_process(
-    COMMAND "${NYC}" -O3 -c "${SOURCE_DIR}/fixtures/machine-knucleotide.c"
-            -o "${BINARY_DIR}/machine-knucleotide.o"
-    RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
-  if(NOT status EQUAL 0)
-    message(FATAL_ERROR "nyc failed on machine-knucleotide\n${stdout}${stderr}")
-  endif()
-  execute_process(
-    COMMAND "${CC}" "${BINARY_DIR}/machine-knucleotide.o" -o "${BINARY_DIR}/machine-knucleotide"
-    RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
-  if(NOT status EQUAL 0)
-    message(FATAL_ERROR "could not link machine-knucleotide\n${stdout}${stderr}")
-  endif()
-  execute_process(
-    COMMAND "${BINARY_DIR}/machine-knucleotide" TIMEOUT 30
-    RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
-  if(NOT status EQUAL 0 OR NOT stdout MATCHES "checksum=849988")
-    message(FATAL_ERROR "machine-knucleotide miscompiled: ${status}\n${stdout}${stderr}")
-  endif()
-endforeach()
 
 foreach(machine_case_unused IN ITEMS 1)
   execute_process(

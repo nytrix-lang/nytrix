@@ -1,0 +1,21 @@
+shape viewer-trace-sink {
+  family "ui"
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.ui.render.viewer.trace as trace
+mut captured = dict(4)
+fn capture(any record) int {
+   captured = record
+   0
+}
+trace.set_sink(capture)
+trace.emit("editor.frame", 7, "frame-message")
+assert(captured.get("kind") == "editor.frame", "trace kind")
+assert(captured.get("frame") == 7, "trace frame")
+assert(captured.get("message") == "frame-message", "trace message")
+trace.set_sink()
+print("trace-sink-ok")
+NY
+}

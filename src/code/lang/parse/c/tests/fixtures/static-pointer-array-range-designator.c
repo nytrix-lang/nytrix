@@ -1,3 +1,7 @@
+/*
+ * Fixture: initialize each static pointer-array element with a GNU range
+ * designator.
+ */
 int main(void) {
   static int target;
   static int *const pointers[4] = {[0 ... 3] = &target};

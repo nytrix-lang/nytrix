@@ -1,3 +1,6 @@
+/*
+ * Parser/backend fixture for while-loop accumulation and termination.
+ */
 long c_while_sum(long count) {
   long index = 0;
   long sum = 0;

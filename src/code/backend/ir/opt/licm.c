@@ -347,24 +347,6 @@ static bool licm_direct_symbol_slot_address(const nyr_func_t *f,
  */
 static bool licm_allow_address_hoist = false;
 
-static bool licm_memory_op(nyr_op_t op) {
-  switch (op) {
-  case NYIR_LOAD_I64:
-  case NYIR_STORE_I64:
-  case NYIR_VEC4_LOAD_F64:
-  case NYIR_VEC4_STORE_F64:
-  case NYIR_VEC8_LOAD_F32:
-  case NYIR_VEC8_STORE_F32:
-  case NYIR_VEC4_LOAD_I64:
-  case NYIR_VEC4_STORE_I64:
-  case NYIR_VEC8_LOAD_I64:
-  case NYIR_VEC8_STORE_I64:
-    return true;
-  default:
-    return false;
-  }
-}
-
 /*
  * Keep memory address expressions in the loop that owns their access. A
  * later vectorization pass can rewrite scalar accesses while depending on
@@ -381,7 +363,7 @@ static bool licm_memory_address_component(const nyr_func_t *f, int value,
         (user->a != value && user->b != value && user->c != value &&
          user->d != value && user->e != value && user->f != value))
       continue;
-    if (licm_memory_op(user->op) && user->a == value)
+    if (nyr_op_has_single_memory_address(user->op) && user->a == value)
       return true;
     if (user->dst >= 0 &&
         (user->op == NYIR_ADD_I64 || user->op == NYIR_SUB_I64 ||
@@ -405,10 +387,9 @@ static bool licm_float_memory_address_component(const nyr_func_t *f, int value,
       continue;
     if (((user->op == NYIR_LOAD_I64 || user->op == NYIR_STORE_I64) &&
          user->scalar_class == NYIR_SCALAR_F64 && user->a == value) ||
-        ((user->op == NYIR_VEC4_LOAD_F64 ||
-         user->op == NYIR_VEC4_STORE_F64 ||
-         user->op == NYIR_VEC8_LOAD_F32 ||
-         user->op == NYIR_VEC8_STORE_F32) && user->a == value))
+        ((user->op == NYIR_VEC4_LOAD_F64 || user->op == NYIR_VEC4_STORE_F64 ||
+          user->op == NYIR_VEC8_LOAD_F32 || user->op == NYIR_VEC8_STORE_F32) &&
+         user->a == value))
       return true;
     if (user->dst >= 0 &&
         (user->op == NYIR_ADD_I64 || user->op == NYIR_SUB_I64 ||
@@ -550,11 +531,11 @@ static bool licm_candidate(
     return false;
   if (!licm_allow_address_hoist &&
       ((in->op == NYIR_ADD_I64 && in->dst >= 0 &&
-      licm_memory_address_component(f, in->dst, 0) &&
-      !(in->flags & NYIR_INST_F_AFFINE_ADDR_BASE)) ||
-      (in->op == NYIR_SHL_I64 && in->dst >= 0 &&
-       licm_float_memory_address_component(f, in->dst, 0) &&
-       !(in->flags & NYIR_INST_F_AFFINE_ADDR_BASE))))
+        licm_memory_address_component(f, in->dst, 0) &&
+        !(in->flags & NYIR_INST_F_AFFINE_ADDR_BASE)) ||
+       (in->op == NYIR_SHL_I64 && in->dst >= 0 &&
+        licm_float_memory_address_component(f, in->dst, 0) &&
+        !(in->flags & NYIR_INST_F_AFFINE_ADDR_BASE))))
     return false;
   const int inputs[] = {in->a, in->b, in->c, in->d, in->e, in->f};
   for (size_t k = 0; k < sizeof(inputs) / sizeof(inputs[0]); ++k)

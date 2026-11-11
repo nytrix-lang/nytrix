@@ -115,6 +115,7 @@ use core.os.ui.render.camera as camera
 ;; (camera contract merged into this module)
 use core.os.ui.render.contract as render_contract
 use core.os.ui.render.atlas as lib_atlas
+use core.os.ui.render.tty as render_tty
 use core.os.ui.render.env as render_env
 use core.os.ui.font.truetype as lib_ttf
 use core.str as lib_str
@@ -243,7 +244,7 @@ mut _gl_capture_h = 0
 mut _gl_capture_ready = false
 mut _gl_capture_pending = false
 mut _fonts = dict(32)
-mut _next_font_id = 1
+mut int _next_font_id = 1
 mut _default_font_id = 0
 mut _default_font_fail_sizes = dict(8)
 mut _retired_meshes = []
@@ -357,12 +358,23 @@ fn _font_prime_extended_default() bool {
    ui_profile.env_truthy_cached("NY_VK_FONT_EAGER_EXTENDED")
 }
 
+fn _font_atlas_size(int requested, int fallback) int {
+   ;; Texture atlases are uploaded as power-of-two pages; an arbitrary env value
+   ;; selects the smallest page that still holds the request.
+   mut size = int(requested) > 0 ? int(requested) : int(fallback)
+   if size < 512 { size = 512 }
+   if size > 4096 { size = 4096 }
+   mut page = 512
+   while page < size { page *= 2 }
+   page
+}
+
 fn _font_primary_atlas_size() int {
-   ui_profile.env_int_cached("NY_FONT_ATLAS_SIZE", 1024, 512, 4096)
+   _font_atlas_size(ui_profile.env_int_cached("NY_FONT_ATLAS_SIZE", 1024, 512, 4096), 1024)
 }
 
 fn _font_fallback_atlas_size() int {
-   ui_profile.env_int_cached("NY_FONT_FALLBACK_ATLAS_SIZE", 2048, 512, 4096)
+   _font_atlas_size(ui_profile.env_int_cached("NY_FONT_FALLBACK_ATLAS_SIZE", 2048, 512, 4096), 2048)
 }
 
 fn _font_keep_bitmap_data() bool {
@@ -1021,6 +1033,10 @@ mut _model_debug_seen = dict(256)
 mut _last_win_w = 1280.0
 mut _last_win_h = 720.0
 mut _scissor_stack = []
+mut int _cpu_clip_x0 = 0
+mut int _cpu_clip_y0 = 0
+mut int _cpu_clip_x1 = 2147483647
+mut int _cpu_clip_y1 = 2147483647
 mut _last_ortho2d_l = 0.0
 mut _last_ortho2d_r = 0.0
 mut _last_ortho2d_b = 0.0
@@ -1030,6 +1046,12 @@ mut _ortho2d_active = false
 mut _backend_pref = 2
 mut _backend_requested = 5
 mut _backend_auto_requested = true
+
+;; The CPU surface is presented to the controlling terminal (see render.tty).
+mut bool _tty_mode = false
+
+;; Keys the terminal pressed last frame; a terminal sends no key-up.
+mut list _tty_held_keys = []
 
 fn _is_debug() int {
    ui_profile.debug_enabled() ? 1 : 0
@@ -1051,25 +1073,56 @@ fn _cpu_pack_color(f64 r, f64 g, f64 b, f64 a) int {
    return (a8 << 24) | (bb << 16) | (gg << 8) | rr
 }
 
+;; Capacity of the CPU surface allocation, which is kept across resizes.
+mut int _cpu_cap = 0
+
 fn _cpu_ensure_surface() bool {
    if !_active_win { return false }
    def w, h = int(_active_win.get("w", 0)), int(_active_win.get("h", 0))
    if w <= 0 || h <= 0 { return false }
    if _cpu_buf != 0 && _cpu_w == w && _cpu_h == h { return true }
-   if _cpu_buf != 0 { free(_cpu_buf) }
-   _cpu_w, _cpu_h = w, h
-   def bytes = _cpu_w * _cpu_h * 4
-   _cpu_buf = malloc(bytes)
-   if !_cpu_buf {
-      _cpu_w, _cpu_h = 0, 0
-      return false
+   def bytes = w * h * 4
+   ;; Dragging a window edge changes the size every frame. Freeing and
+   ;; reallocating the whole surface on each step churned the allocator and
+   ;; handed back pages the next frame immediately touched again; grow the one
+   ;; allocation instead and reuse it when the surface shrinks.
+   if _cpu_buf == 0 || _cpu_cap < bytes {
+      if _cpu_buf != 0 { free(_cpu_buf) }
+      _cpu_buf = malloc(bytes)
+      if !_cpu_buf {
+         _cpu_w, _cpu_h, _cpu_cap = 0, 0, 0
+         return false
+      }
+      _cpu_cap = bytes
    }
+   _cpu_w, _cpu_h = w, h
    memset(_cpu_buf, 0, bytes)
    true
 }
 
+fn _cpu_release_surface() bool {
+   if _cpu_buf != 0 { free(_cpu_buf) }
+   _cpu_buf = 0
+   _cpu_w, _cpu_h, _cpu_cap = 0, 0, 0
+   true
+}
+
+fn _cpu_sync_scissor() any {
+   if _backend != BACKEND_MOCK { return }
+   _cpu_clip_x0, _cpu_clip_y0 = 0, 0
+   _cpu_clip_x1, _cpu_clip_y1 = 2147483647, 2147483647
+   if _scissor_stack.len > 0 {
+      def clip = _scissor_stack.get(_scissor_stack.len - 1)
+      _cpu_clip_x0 = int(clip.get(0, 0.0))
+      _cpu_clip_y0 = int(clip.get(1, 0.0))
+      _cpu_clip_x1 = _cpu_clip_x0 + max(0, int(clip.get(2, 0.0)))
+      _cpu_clip_y1 = _cpu_clip_y0 + max(0, int(clip.get(3, 0.0)))
+   }
+}
+
 fn _cpu_put(int x, int y, int c) bool {
    if x < 0 || y < 0 || x >= _cpu_w || y >= _cpu_h { return false }
+   if x < _cpu_clip_x0 || y < _cpu_clip_y0 || x >= _cpu_clip_x1 || y >= _cpu_clip_y1 { return false }
    def off = ((y * _cpu_w) + x) * 4
    store32(_cpu_buf, c, off)
    true
@@ -1077,6 +1130,7 @@ fn _cpu_put(int x, int y, int c) bool {
 
 fn _cpu_blend(int x, int y, f64 r, f64 g, f64 b, f64 a) bool {
    if x < 0 || y < 0 || x >= _cpu_w || y >= _cpu_h || a <= 0.0 { return false }
+   if x < _cpu_clip_x0 || y < _cpu_clip_y0 || x >= _cpu_clip_x1 || y >= _cpu_clip_y1 { return false }
    def off = ((y * _cpu_w) + x) * 4
    def dst = load32(_cpu_buf, off)
    def da = float((dst >> 24) & 255) / 255.0
@@ -1103,6 +1157,10 @@ fn _mock_fast_editor_bench_enabled() bool {
 fn _mock_fast_fill_enabled() bool {
    _backend == BACKEND_MOCK &&
    !ui_profile.env_truthy_cached("NYTRIX_AUTO_DUMP") &&
+   !ui_profile.env_truthy_cached("NY_EDITOR_FRAME_HASH") &&
+   !ui_profile.env_truthy_cached("NY_UI_FRAME_HASH_LOCK") &&
+   !ui_profile.frame_hash_lock_enabled() &&
+   !ui_profile.env_truthy_cached("NYTRIX_UI_REPLAY") &&
    (ui_profile.env_truthy_cached("NY_UI_MOCK_FILL_FAST") || _mock_fast_editor_bench_enabled())
 }
 
@@ -1152,6 +1210,10 @@ fn _cpu_draw_rect_packed(f64 x, f64 y, f64 w, f64 h, int vk_packed) bool {
    if y0 < 0 { y0 = 0 }
    if x1 > _cpu_w { x1 = _cpu_w }
    if y1 > _cpu_h { y1 = _cpu_h }
+   if x0 < _cpu_clip_x0 { x0 = _cpu_clip_x0 }
+   if y0 < _cpu_clip_y0 { y0 = _cpu_clip_y0 }
+   if x1 > _cpu_clip_x1 { x1 = _cpu_clip_x1 }
+   if y1 > _cpu_clip_y1 { y1 = _cpu_clip_y1 }
    if x1 <= x0 || y1 <= y0 { return true }
    def c = _cpu_color_from_vk_packed(vk_packed)
    _cpu_fill_rect_raw(x0, y0, x1, y1, c)
@@ -1787,7 +1849,7 @@ fn _font_build_fallback_chain(int font_id) bool {
    true
 }
 
-fn _font_load_impl(str path, int size, int filter=FONT_FILTER_DEFAULT) int {
+fn _font_load_impl(str path, int size, int filter=FONT_FILTER_DEFAULT, any glyphs=nil) int {
    if !is_str(path) || path.len == 0 { return 0 }
    if size < 4 { size = 4 }
    if !is_dict(_font_cache_by_key) { _font_cache_by_key = dict(32) }
@@ -1840,7 +1902,7 @@ fn _font_load_impl(str path, int size, int filter=FONT_FILTER_DEFAULT) int {
       font_obj["fallback_chain"] = []
       _font_set(id, font_obj)
    }
-   _font_prime_fast_data(id)
+   _font_prime_fast_data(id, glyphs)
    if !is_dict(_font_cache_by_key) { _font_cache_by_key = dict(32) }
    _font_cache_by_key[cache_key] = id
    id
@@ -1857,7 +1919,7 @@ fn _font_prime_range(int font_id, int cp_start, int cp_end) bool {
    true
 }
 
-fn _font_prime_fast_data(int font_id) any {
+fn _font_prime_fast_data(int font_id, any glyphs=nil) any {
    "Allocates fast_glyphs table and eagerly primes ASCII + common terminal codepoints.
    All glyph pixels accumulate in atlas CPU buffers during resolve, then ONE
    atlas_flush() per atlas uploads everything in a single GPU call."
@@ -1877,7 +1939,16 @@ fn _font_prime_fast_data(int font_id) any {
       _font_priming = false
       return ptr
    }
+   if is_str(glyphs) {
+      _font_prime_string(font_id, glyphs)
+      _font_priming = false
+      _font_flush_atlases(font_id)
+      return ptr
+   }
    _font_prime_range(font_id, 32, 126)
+   mut primed = _font_get(font_id)
+   primed["ascii_preprimed"] = true
+   _font_set(font_id, primed)
    if prime_full || _font_prime_extended_default() {
       _font_prime_range(font_id, 128, 255)
    }
@@ -3314,6 +3385,7 @@ fn _requested_backend_name() str {
    if _backend_requested == BACKEND_GL { return "opengl" }
    if _backend_requested == BACKEND_VK { return "vulkan" }
    if _backend_requested == BACKEND_MOCK { return "mock" }
+   if _backend_requested == BACKEND_TTY { return "tty" }
    return "none"
 }
 
@@ -3630,12 +3702,14 @@ fn _init_with_window(any win, bool prefer_vulkan=true) bool {
    def bool ready = prefer_vulkan ? lib_vkr.init(win) : lib_glr.init(win)
    if !ready {
       if prefer_vulkan { lib_vkr.shutdown() }
+      _cpu_release_surface()
       if _is_debug() {
          ui_profile.print_text(prefer_vulkan ? "[gfx] Vulkan init failed, no software fallback is active" : "[gfx] OpenGL context bind failed")
       }
       _backend = BACKEND_NONE
       return false
    }
+   _cpu_release_surface()
    _active_win = win
    _backend = prefer_vulkan ? BACKEND_VK : BACKEND_GL
    lib_atlas.atlas_set_backend(prefer_vulkan ? "vk" : "gl")
@@ -3658,7 +3732,7 @@ fn init_mock_surface(int width=1280, int height=720) any {
    if _backend == BACKEND_VK { lib_vkr.shutdown() }
    if _backend == BACKEND_GL { lib_glr.shutdown() }
    _vk_cam_pos_valid = false
-   if _cpu_buf != 0 { free(_cpu_buf) _cpu_buf = 0 _cpu_w = 0 _cpu_h = 0 }
+   _cpu_release_surface()
    _auto_show_pending = false
    _backend = 3
    lib_atlas.atlas_set_backend("mock")
@@ -3740,6 +3814,22 @@ fn _show_pending_after_first_frame() any {
 fn init_window(int width, int height, str title, int flags=0, any vsync=false, bool filter=false, int msaa=4) any {
    "Initializes a window with renderer config and graphics context. Returns window dict or false."
    _ensure_matrix_scratch()
+   ;; Without a display server, an automatic choice draws into the terminal.
+   ;; BACKEND_NONE means the backend was never configured: fresh processes read
+   ;; the mutable defaults as zero in generated code, so an unconfigured
+   ;; backend must still count as automatic here.
+   ;; Prefer the requested-backend value: a fresh process can read the
+   ;; auto-requested default as false in generated code even though AUTO is
+   ;; the active choice.
+   def auto_choice = _backend_requested == BACKEND_AUTO || _backend_auto_requested
+   if !_tty_mode && auto_choice && render_tty.auto_selected() {
+      set_backend_type(BACKEND_TTY)
+   }
+   if _tty_mode {
+      def tty_win = init_mock_surface(width, height)
+      if tty_win { render_tty.begin() }
+      return tty_win
+   }
    if _backend_pref == BACKEND_MOCK { return init_mock_surface(width, height) }
    if _backend_auto_requested || _backend_pref == BACKEND_VK { renderer_config(vsync, filter, "", "", msaa) }
    mut f = flags
@@ -3881,8 +3971,10 @@ fn close_window() bool {
    _last_ortho2d_valid = false
    _vk_cam_pos_valid = false
    if _active_win && !_active_win.get("_mock", false) { lib_uiw.close(_active_win) }
+   if _tty_mode { render_tty.end() }
+   _tty_held_keys = []
    _active_win = nil
-   if _cpu_buf != 0 { free(_cpu_buf) _cpu_buf = 0 _cpu_w = 0 _cpu_h = 0 }
+   _cpu_release_surface()
    _render_release_scratch_buffers()
    true
 }
@@ -3892,6 +3984,7 @@ fn window_should_close(any win=0) bool {
    if _backend == BACKEND_MOCK {
       def target = win ? win : _active_win
       if !target || !is_dict(target) { return true }
+      if _tty_mode && render_tty.active() { _tty_pump_input(target) }
       return bool(target.get("should_close", false))
    }
    lib_uiw.poll_events()
@@ -3948,6 +4041,7 @@ fn begin_drawing() bool {
    _shape_scratch_used = 0
    _ensure_scissor_stack()
    if _scissor_stack.len > 0 { _scissor_stack = [] }
+   _cpu_sync_scissor()
    if _backend == BACKEND_GL { lib_glr.reset_scissor_rect() }
    elif _backend == BACKEND_VK { lib_vkr.reset_scissor_rect() }
    if _backend != BACKEND_MOCK && ui_profile.env_present_cached("NY_GFX_ESC_CLOSE") { if lib_uiw.key_down(_active_win, ui_consts.KEY_ESCAPE) || lib_uiw.key_down(_active_win, 0xFF1B) { lib_uiw.set_should_close(_active_win, true) } }
@@ -4053,9 +4147,72 @@ fn begin_frame_clear(any color=BLACK) bool {
    false
 }
 
+fn _tty_pump_input(dict win) bool {
+   "Releases last frame's terminal keys and presses the newly typed ones."
+   mut i = 0
+   while i < _tty_held_keys.len {
+      lib_uiw.push_event(win, lib_uiw.EVENT_KEY_RELEASED, {"key": int(_tty_held_keys.get(i, 0)), "mod": 0})
+      i += 1
+   }
+   win["pressed_keys"] = dict(32)
+   win["last_key_states"] = is_dict(win.get("key_states", 0)) ? clone(win.get("key_states", 0)) : dict(32)
+   _tty_held_keys = []
+   def keys = render_tty.read_keys()
+   i = 0
+   while i < keys.len {
+      def k = int(keys.get(i, 0))
+      if k == render_tty.KEY_QUIT {
+         lib_uiw.push_event(win, lib_uiw.EVENT_QUIT, 0)
+      } else {
+         lib_uiw.push_event(win, lib_uiw.EVENT_KEY_PRESSED, {"key": k, "mod": 0})
+         _tty_held_keys = _tty_held_keys.append(k)
+      }
+      i += 1
+   }
+   true
+}
+
+fn _tty_present_frame() bool {
+   def frame = read_framebuffer()
+   if !is_dict(frame) { return false }
+   def ok = render_tty.present_rgba(frame)
+   def ptr data = __ffi_untag_ptr(frame.get("data", 0))
+   if data { free(data) }
+   ok
+}
+
+mut int _frame_log_last_ns = 0
+mut int _frame_log_count = 0
+
+;; NY_UI_FRAME_LOG=1 prints one line per presented frame with the time since
+;; the previous one and the window size, for resize and stall measurements.
+fn _frame_log() bool {
+   if !ui_profile.env_truthy_cached("NY_UI_FRAME_LOG") { return false }
+   def now = ticks()
+   _frame_log_count += 1
+   def ms = _frame_log_last_ns > 0 ? float(now - _frame_log_last_ns) / 1000000.0 : 0.0
+   _frame_log_last_ns = now
+   mut w, h = 0, 0
+   if _active_win && is_dict(_active_win) {
+      if _active_win.get("_mock", false) {
+         w = int(_active_win.get("w", 0))
+         h = int(_active_win.get("h", 0))
+      } else {
+         def sz = lib_uiw.size(lib_uiw.get_win(_active_win))
+         w = int(sz.get(0, 0))
+         h = int(sz.get(1, 0))
+      }
+   }
+   print("NYTRIX_UI_FRAMETIME frame=" + to_str(_frame_log_count) + " ms=" + to_str(ms) +
+      " size=" + to_str(w) + "x" + to_str(h) + " backend=" + to_str(_backend))
+   true
+}
+
 fn end_frame() bool {
    "Finalizes and presents the current frame."
    def ok = end_drawing()
+   if ok { _frame_log() }
+   if ok && _tty_mode && render_tty.active() { _tty_present_frame() }
    if ok && ui_profile.env_truthy_cached("NYTRIX_UI_REPLAY") {
       _replay_rendered_frames += 1
       def replay_win = lib_uiw.get_win(_active_win)
@@ -4064,7 +4221,10 @@ fn end_frame() bool {
       print("NYTRIX_UI_STATE frame=" + to_str(_replay_rendered_frames) +
          " size=" + to_str(replay_size.get(0, 0)) + "x" + to_str(replay_size.get(1, 0)) +
          " mouse=" + to_str(replay_mouse.get(0, 0)) + "," + to_str(replay_mouse.get(1, 0)))
-      def hash_line = ui_profile.framebuffer_hash_line()
+      ;; NYTRIX_UI_REPLAY_HASH=0 keeps replayed GPU frames free of the
+      ;; framebuffer readback when only frame timing is being measured.
+      def hash_line = ui_profile.env_lower_cached("NYTRIX_UI_REPLAY_HASH") == "0" ? ""
+      : ui_profile.framebuffer_hash_line()
       if hash_line.len > 0 {
          print("NYTRIX_UI_FRAMEHASH frame=" + to_str(_replay_rendered_frames) + " " + hash_line)
       }
@@ -6360,7 +6520,13 @@ fn request_frame_capture() bool {
 fn set_backend_type(int type) bool {
    "Configures the preferred graphics backend(must be called before init)."
    def t = int(type)
-   if t == BACKEND_MOCK {
+   _tty_mode = t == BACKEND_TTY
+   if t == BACKEND_TTY {
+      _backend_pref = BACKEND_MOCK
+      _backend_requested = BACKEND_TTY
+      _backend_auto_requested = false
+      lib_atlas.atlas_set_backend("mock")
+   } elif t == BACKEND_MOCK {
       _backend_pref = t
       _backend_requested = t
       _backend_auto_requested = false
@@ -6413,6 +6579,9 @@ fn apply_backend_name(any requested_backend) bool {
    }
    if backend == "mock" || backend == "cpu" || backend == "software" {
       return set_backend_type(BACKEND_MOCK)
+   }
+   if render_tty.requested_by_name(backend) {
+      return set_backend_type(BACKEND_TTY)
    }
    true
 }
@@ -6502,6 +6671,7 @@ fn scissor_push(f64 x, f64 y, f64 w, f64 h) bool {
    }
    def rect = [rx, ry, rw, rh]
    _scissor_stack = _scissor_stack.append(rect)
+   _cpu_sync_scissor()
    if _backend == BACKEND_VK { lib_vkr.set_scissor_rect(int(rx), int(ry), int(rw), int(rh)) }
    elif _backend == BACKEND_GL {
       lib_glr.set_scissor_rect(int(rx), int(ry), int(rw), int(rh))
@@ -6513,6 +6683,7 @@ fn scissor_pop() bool {
    "Disables scissor testing."
    _ensure_scissor_stack()
    if _scissor_stack.len > 0 { _scissor_stack = slice(_scissor_stack, 0, _scissor_stack.len - 1) }
+   _cpu_sync_scissor()
    if _backend == BACKEND_VK {
       if _scissor_stack.len > 0 {
          def rect = _scissor_stack.get(_scissor_stack.len - 1, [0.0, 0.0, _last_win_w, _last_win_h])
@@ -7544,15 +7715,15 @@ fn draw_texture(int tex, f64 x, f64 y, f64 scale=1.0, any color=WHITE) bool {
    true
 }
 
-fn font_load(str path, int size, any filter=FONT_FILTER_DEFAULT) int {
-   "Loads a TrueType font at the specified pixel size and optional texture filter."
-   def id = _font_load_impl(path, size, int(filter))
+fn font_load(str path, int size, any filter=FONT_FILTER_DEFAULT, any glyphs=nil) int {
+   "Loads a TrueType font. Optional glyphs limits eager preparation; other glyphs load on demand."
+   def id = _font_load_impl(path, size, int(filter), glyphs)
    if id { _default_font_fail_sizes = _default_font_fail_sizes.delete(max(4, size)) }
    if !id && _is_debug() { ui_profile.print_text("[GFX] Font load failed: " + to_str(path)) }
    id
 }
 
-fn font_load_first(list paths, int size, any filter=FONT_FILTER_DEFAULT) int {
+fn font_load_first(list paths, int size, any filter=FONT_FILTER_DEFAULT, any glyphs=nil) int {
    "Loads the first available font from `paths`, resolving repo-relative paths when needed."
    if !is_list(paths) || paths.len == 0 { return 0 }
    mut i = 0
@@ -7563,7 +7734,7 @@ fn font_load_first(list paths, int size, any filter=FONT_FILTER_DEFAULT) int {
          mut resolved = lib_path.resolve_repo_asset(raw)
          if !is_str(resolved) { resolved = raw }
          if resolved.len == 0 { resolved = raw }
-         def fid = font_load(resolved, size, filter)
+         def fid = font_load(resolved, size, filter, glyphs)
          if fid { return fid }
       }
       i += 1
@@ -8480,7 +8651,8 @@ fn _font_ascii_preprimed(str text) bool {
 @jit
 fn _font_maybe_prime_string(int font_id, any text) bool {
    if !is_str(text) { return false }
-   if _font_ascii_preprimed(text) { return true }
+   def f = _font_get(font_id)
+   if f && f.get("ascii_preprimed", false) && _font_ascii_preprimed(text) { return true }
    _font_prime_string(font_id, text)
 }
 

@@ -1,0 +1,36 @@
+shape render_terminal_rgba {
+  family "runtime/ui"
+  generator "embedded"
+  features [ny render tty ansi framebuffer]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  timeout 180
+  expect compile_and_run
+  expect_message "RENDER-TERMINAL-OK"
+  source ny <<'NY'
+use core
+use core.str as str
+use core.os.ui.render.terminal as terminal
+use core.os.ui.render as gfx
+
+def ptr pixels = malloc(8)
+store32(pixels, 0xff0000ff, 0)
+store32(pixels, 0xff00ff00, 4)
+def frame = {"width": 2, "height": 1, "data": pixels, "channels": 4}
+def output = terminal.frame_to_ansi(frame, 2, 1)
+assert(str.find(output, "\x1b[48;2;255;0;0m ") >= 0, "red pixel becomes red terminal background")
+assert(str.find(output, "\x1b[48;2;0;255;0m ") >= 0, "green pixel becomes green terminal background")
+assert(str.endswith(output, "\x1b[0m\x1b[1;1H"), "attributes and cursor reset after frame")
+assert(terminal.frame_to_ansi(frame, 0, 1) == "", "empty target rejected")
+assert(terminal.frame_to_ansi({"width": 0, "height": 1, "data": pixels}) == "", "empty source rejected")
+free(pixels)
+def win = terminal.init(2, 1)
+assert(!!win, "terminal target creates a CPU surface")
+assert(gfx.begin_frame_clear([1.0, 0.0, 0.0, 1.0]), "terminal renderer begins")
+assert(gfx.draw_rect(1.0, 0.0, 1.0, 1.0, [0.0, 1.0, 0.0, 1.0]), "renderer submits terminal pixels")
+assert(gfx.end_frame(), "terminal renderer ends")
+assert(terminal.present(2, 1), "renderer framebuffer reaches terminal output")
+gfx.close_window()
+print("RENDER-TERMINAL-OK")
+NY
+}

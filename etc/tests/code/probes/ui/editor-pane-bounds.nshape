@@ -1,0 +1,56 @@
+shape editor_pane_bounds_selection {
+  family "runtime/ui"
+  generator "embedded"
+  features [ny editor layout resize selection]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  timeout 180
+  expect compile_and_run
+  expect_message "EDITOR-PANE-BOUNDS-OK"
+  source ny <<'NY'
+use core
+use core.os.ui.render.viewer.editor.window as panes
+
+mut tree = panes.split_right(panes.root(7), 7)
+tree = panes.split_below(tree, 8)
+tree = panes.pane_layout(tree, 10.0, 20.0, 160.0, 100.0)
+def rows = panes.leaves(tree)
+mut i = 0
+while i < rows.len {
+  def r = rows[i]
+  assert(float(r.get("x")) >= 10.0 && float(r.get("y")) >= 20.0, "pane origin inside parent")
+  assert(float(r.get("w")) >= 0.0 && float(r.get("h")) >= 0.0, "nonnegative pane extent")
+  assert(float(r.get("x")) + float(r.get("w")) <= 170.0, "pane right inside parent")
+  assert(float(r.get("y")) + float(r.get("h")) <= 120.0, "pane bottom inside parent")
+  i += 1
+}
+for width in [0.0, 1.0, 32.0, 95.0, 96.0, 160.0, 192.0, 400.0, 1920.0] {
+  tree = panes.pane_layout(tree, 0.0, 0.0, width, width * 0.75)
+  for r in panes.leaves(tree) {
+    assert(float(r.get("x")) + float(r.get("w")) <= width, "resize keeps horizontal bounds")
+    assert(float(r.get("y")) + float(r.get("h")) <= width * 0.75, "resize keeps vertical bounds")
+  }
+}
+tree = panes.pane_layout(tree, 10.0, 20.0, 160.0, 100.0)
+tree = panes.select_at(tree, 11.0, 21.0)
+mut count = 0
+for r in panes.leaves(tree) {
+  if r.get("active", false) { count += 1 }
+}
+assert(count == 1, "duplicate buffers do not activate multiple panes")
+tree = panes.select_next(tree, -1000)
+count = 0
+for r in panes.leaves(tree) {
+  if r.get("active", false) { count += 1 }
+}
+assert(count == 1, "large negative navigation keeps one active pane")
+tree = panes.select_at(tree, 11.0, 21.0)
+tree = panes.delete_selected(tree)
+count = 0
+for r in panes.leaves(tree) {
+  if r.get("active", false) { count += 1 }
+}
+assert(count == 1, "collapsing a split selects a surviving leaf")
+print("EDITOR-PANE-BOUNDS-OK")
+NY
+}

@@ -1,8 +1,11 @@
+/*
+ * Fixture: compile Linux-style raw per-CPU pointer conversion macros.
+ */
 #define TYPEOF_UNQUAL(value) __typeof_unqual__(value)
-#define raw_cpu_ptr(pointer)                                                   \
-  ({                                                                           \
-    unsigned long address = (unsigned long)(pointer);                          \
-    (TYPEOF_UNQUAL(*(pointer)) *)address;                                      \
+#define raw_cpu_ptr(pointer)                          \
+  ({                                                  \
+    unsigned long address = (unsigned long)(pointer); \
+    (TYPEOF_UNQUAL(*(pointer)) *)address;             \
   })
 
 static unsigned long first_version[3];

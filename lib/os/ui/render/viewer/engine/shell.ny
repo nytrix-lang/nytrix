@@ -271,7 +271,7 @@ fn tiled_layout_plan(
 ) dict {
    "Builds tile rectangles for the current editor shell layout."
    def p, w = to_str(preset), float(ww)
-   def h, g = float(wh), 0.0
+   def h, g = float(wh), max(0.0, float(gap))
    def editor = bool(show_editor)
    def gallery = bool(show_gallery)
    def probe = bool(show_probe)

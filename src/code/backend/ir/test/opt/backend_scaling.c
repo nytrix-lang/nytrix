@@ -62,7 +62,8 @@ int main(void) {
   clock_gettime(CLOCK_MONOTONIC, &lower_start);
   bool lowered = nyr_mach_lower_nir(&ir, &mach, target.caps, err, sizeof(err));
   clock_gettime(CLOCK_MONOTONIC, &lower_end);
-  if (!lowered || mach.inst_len < 10000 || mach.block_len < 2000) {
+  /* Machine lowering folds the constant-false conditional in each block. */
+  if (!lowered || mach.inst_len < 5000 || mach.block_len < 2000) {
     fprintf(stderr,
             "[backend-scaling] lowering failed/too small: ok=%d insts=%zu "
             "blocks=%zu err=%s\n",

@@ -1,30 +1,37 @@
+/* Special native lowering paths for inline assembly and target intrinsics. */
 static char *ny_native_asm_trim(char *s) {
   while (*s && isspace((unsigned char)*s))
-  s++;
+    s++;
   char *end = s + strlen(s);
   while (end > s && isspace((unsigned char)end[-1]))
-  *--end = '\0';
+    *--end = '\0';
   return s;
 }
 
 static size_t ny_native_asm_split(char *s, char delimiter, char **parts,
-                                size_t cap) {
+                                  size_t cap) {
   size_t count = 0;
   int square = 0, round = 0, curly = 0;
   if (cap)
-  parts[count++] = s;
+    parts[count++] = s;
   for (char *p = s; *p; ++p) {
-  if (*p == '[') square++;
-  else if (*p == ']') square--;
-  else if (*p == '(') round++;
-  else if (*p == ')') round--;
-  else if (*p == '{') curly++;
-  else if (*p == '}') curly--;
-  else if (*p == delimiter && square == 0 && round == 0 && curly == 0) {
-    *p = '\0';
-    if (count < cap)
-      parts[count++] = p + 1;
-  }
+    if (*p == '[')
+      square++;
+    else if (*p == ']')
+      square--;
+    else if (*p == '(')
+      round++;
+    else if (*p == ')')
+      round--;
+    else if (*p == '{')
+      curly++;
+    else if (*p == '}')
+      curly--;
+    else if (*p == delimiter && square == 0 && round == 0 && curly == 0) {
+      *p = '\0';
+      if (count < cap)
+        parts[count++] = p + 1;
+    }
   }
   return count;
 }
@@ -66,26 +73,28 @@ static bool ny_native_asm_constraint_class(const char *s, bool *memory,
     *memory = true;
   else if (*s == 'i' || *s == 'n' || (*s >= 'I' && *s <= 'P') || *s == 'S')
     *immediate = true;
-  else if (*s != 'r' && *s != 'g' && *s != 'f' && *s != 'x' &&
-           *s != 'v' && *s != 'w' && *s != 'q' && *s != 'a' &&
-           *s != 'b' && *s != 'c' && *s != 'd' && *s != 'D')
+  else if (*s != 'r' && *s != 'g' && *s != 'f' && *s != 'x' && *s != 'v' &&
+           *s != 'w' && *s != 'q' && *s != 'a' && *s != 'b' && *s != 'c' &&
+           *s != 'd' && *s != 'D')
     return false;
   if (*s == 'w')
     *bits = 32;
   return true;
 }
 
-static bool ny_native_asm_parse_constraints(nyr_builder_t *b,
-                                             const expr_t *e,
-                                             ny_native_asm_state_t *state) {
+static bool ny_native_asm_parse_constraints(nyr_builder_t *b, const expr_t *e,
+                                            ny_native_asm_state_t *state) {
   char buf[2048];
-  const char *constraints = e->as.as_asm.constraints ? e->as.as_asm.constraints : "";
+  const char *constraints =
+      e->as.as_asm.constraints ? e->as.as_asm.constraints : "";
   size_t len = strlen(constraints);
   if (len >= sizeof(buf))
     return nyr_fail(b, "native NYIR asm: constraints are too long");
   memcpy(buf, constraints, len + 1);
   char *tokens[NY_NATIVE_ASM_MAX_OPERANDS];
-  size_t count = len ? ny_native_asm_split(buf, ',', tokens, NY_NATIVE_ASM_MAX_OPERANDS) : 0;
+  size_t count =
+      len ? ny_native_asm_split(buf, ',', tokens, NY_NATIVE_ASM_MAX_OPERANDS)
+          : 0;
   if (count >= NY_NATIVE_ASM_MAX_OPERANDS && strchr(tokens[count - 1], ','))
     return nyr_fail(b, "native NYIR asm: too many operands");
   memset(state, 0, sizeof(*state));
@@ -129,32 +138,34 @@ static bool ny_native_asm_parse_constraints(nyr_builder_t *b,
       op->initialized = true;
       if (op->match >= 0) {
         if ((size_t)op->match >= count || !state->operands[op->match].output)
-          return nyr_fail(b, "native NYIR asm: invalid matching constraint %d", op->match);
+          return nyr_fail(b, "native NYIR asm: invalid matching constraint %d",
+                          op->match);
         state->operands[op->match].value = value;
         state->operands[op->match].initialized = true;
       }
     }
   }
   if (arg != e->as.as_asm.args.len)
-    return nyr_fail(b, "native NYIR asm: %zu arguments are not described by constraints",
-                              e->as.as_asm.args.len - arg);
+    return nyr_fail(
+        b, "native NYIR asm: %zu arguments are not described by constraints",
+        e->as.as_asm.args.len - arg);
   return true;
 }
 
-static int ny_native_asm_emit_binop(nyr_builder_t *b, nyr_op_t op,
-                                    int a, int c) {
-  int value = nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = op, .dst = -1, .a = a,
-                                                    .b = c, .c = -1});
+static int ny_native_asm_emit_binop(nyr_builder_t *b, nyr_op_t op, int a,
+                                    int c) {
+  int value = nyr_ir_emit(
+      &b->nyir, (nyr_inst_t){.op = op, .dst = -1, .a = a, .b = c, .c = -1});
   if (value < 0)
     nyr_fail(b, NY_NATIVE_ALLOC_FAIL);
   return value;
 }
 
-static int ny_native_asm_emit_cmp(nyr_builder_t *b, nyr_cmp_t cmp,
-                                  int a, int c) {
-  int value = nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_CMP_I64,
-                                                    .dst = -1, .a = a, .b = c,
-                                                    .cmp = cmp});
+static int ny_native_asm_emit_cmp(nyr_builder_t *b, nyr_cmp_t cmp, int a,
+                                  int c) {
+  int value = nyr_ir_emit(
+      &b->nyir,
+      (nyr_inst_t){.op = NYIR_CMP_I64, .dst = -1, .a = a, .b = c, .cmp = cmp});
   if (value < 0)
     nyr_fail(b, NY_NATIVE_ALLOC_FAIL);
   return value;
@@ -184,10 +195,8 @@ static int ny_native_asm_lsr(nyr_builder_t *b, int value, int shift) {
   int bias = ny_native_asm_emit_binop(b, NYIR_SHL_I64, sign, inverse);
   int result = ny_native_asm_emit_binop(b, NYIR_ADD_I64, sar, bias);
   if (result < 0 || !nyr_store_local_value(b, slot, result) ||
-      !nyr_emit_br(b, end_label) ||
-      !nyr_emit_label(b, zero_label) ||
-      !nyr_store_local_value(b, slot, value) ||
-      !nyr_emit_label(b, end_label))
+      !nyr_emit_br(b, end_label) || !nyr_emit_label(b, zero_label) ||
+      !nyr_store_local_value(b, slot, value) || !nyr_emit_label(b, end_label))
     return -1;
   return nyr_load_local_value(b, slot);
 }
@@ -201,7 +210,8 @@ static int ny_native_asm_sdiv(nyr_builder_t *b, int a, int c) {
   int div_zero = ny_native_asm_emit_cmp(b, NYIR_CMP_EQ, c, zero);
   int lhs_min = ny_native_asm_emit_cmp(b, NYIR_CMP_EQ, a, min);
   int rhs_neg_one = ny_native_asm_emit_cmp(b, NYIR_CMP_EQ, c, neg_one);
-  int overflow = ny_native_asm_emit_binop(b, NYIR_AND_I64, lhs_min, rhs_neg_one);
+  int overflow =
+      ny_native_asm_emit_binop(b, NYIR_AND_I64, lhs_min, rhs_neg_one);
   int slot = nyr_temp_slot(b);
   int zero_label = b->next_label++;
   int overflow_label = b->next_label++;
@@ -212,13 +222,10 @@ static int ny_native_asm_sdiv(nyr_builder_t *b, int a, int c) {
     return -1;
   int result = ny_native_asm_emit_binop(b, NYIR_DIV_I64, a, c);
   if (result < 0 || !nyr_store_local_value(b, slot, result) ||
-      !nyr_emit_br(b, end_label) ||
-      !nyr_emit_label(b, zero_label) ||
-      !nyr_store_local_value(b, slot, zero) ||
-      !nyr_emit_br(b, end_label) ||
+      !nyr_emit_br(b, end_label) || !nyr_emit_label(b, zero_label) ||
+      !nyr_store_local_value(b, slot, zero) || !nyr_emit_br(b, end_label) ||
       !nyr_emit_label(b, overflow_label) ||
-      !nyr_store_local_value(b, slot, min) ||
-      !nyr_emit_label(b, end_label))
+      !nyr_store_local_value(b, slot, min) || !nyr_emit_label(b, end_label))
     return -1;
   return nyr_load_local_value(b, slot);
 }
@@ -252,32 +259,31 @@ static int ny_native_asm_udiv(nyr_builder_t *b, int a, int c) {
     return -1;
   int result = ny_native_asm_emit_binop(b, NYIR_DIV_I64, a, c);
   if (result < 0 || !nyr_store_local_value(b, slot, result) ||
-      !nyr_emit_br(b, end_label) ||
-      !nyr_emit_label(b, divisor_high_label))
+      !nyr_emit_br(b, end_label) || !nyr_emit_label(b, divisor_high_label))
     return -1;
   result = ny_native_asm_uge(b, a, c);
   if (result < 0 || !nyr_store_local_value(b, slot, result) ||
-      !nyr_emit_br(b, end_label) ||
-      !nyr_emit_label(b, dividend_high_label))
+      !nyr_emit_br(b, end_label) || !nyr_emit_label(b, dividend_high_label))
     return -1;
   int half = ny_native_asm_lsr(b, a, one);
-  int half_q = half < 0 ? -1 : ny_native_asm_emit_binop(b, NYIR_DIV_I64, half, c);
-  int q = half_q < 0 ? -1 : ny_native_asm_emit_binop(b, NYIR_SHL_I64, half_q, one);
+  int half_q =
+      half < 0 ? -1 : ny_native_asm_emit_binop(b, NYIR_DIV_I64, half, c);
+  int q =
+      half_q < 0 ? -1 : ny_native_asm_emit_binop(b, NYIR_SHL_I64, half_q, one);
   int product = q < 0 ? -1 : ny_native_asm_emit_binop(b, NYIR_MUL_I64, q, c);
-  int remainder = product < 0 ? -1 : ny_native_asm_emit_binop(b, NYIR_SUB_I64, a, product);
+  int remainder =
+      product < 0 ? -1 : ny_native_asm_emit_binop(b, NYIR_SUB_I64, a, product);
   int carry = remainder < 0 ? -1 : ny_native_asm_uge(b, remainder, c);
   result = carry < 0 ? -1 : ny_native_asm_emit_binop(b, NYIR_ADD_I64, q, carry);
   if (result < 0 || !nyr_store_local_value(b, slot, result) ||
-      !nyr_emit_br(b, end_label) ||
-      !nyr_emit_label(b, zero_label) ||
-      !nyr_store_local_value(b, slot, zero) ||
-      !nyr_emit_label(b, end_label))
+      !nyr_emit_br(b, end_label) || !nyr_emit_label(b, zero_label) ||
+      !nyr_store_local_value(b, slot, zero) || !nyr_emit_label(b, end_label))
     return -1;
   return nyr_load_local_value(b, slot);
 }
 
-static bool ny_native_asm_ref(const ny_native_asm_state_t *state, const char *text,
-                              int *index, unsigned *bits) {
+static bool ny_native_asm_ref(const ny_native_asm_state_t *state,
+                              const char *text, int *index, unsigned *bits) {
   char buf[NY_NATIVE_ASM_MAX_TOKEN];
   size_t len = strlen(text);
   if (len >= sizeof(buf))
@@ -291,7 +297,8 @@ static bool ny_native_asm_ref(const ny_native_asm_state_t *state, const char *te
     for (char *p = reg; *p; ++p)
       *p = (char)tolower((unsigned char)*p);
     for (size_t i = 0; i < state->count; ++i)
-      if (state->operands[i].fixed[0] && strcmp(state->operands[i].fixed, reg) == 0) {
+      if (state->operands[i].fixed[0] &&
+          strcmp(state->operands[i].fixed, reg) == 0) {
         *index = (int)i;
         *bits = reg[0] == 'w' ? 32 : 64;
         return true;
@@ -343,7 +350,8 @@ static int ny_native_asm_source(nyr_builder_t *b,
   if (ny_native_asm_ref(state, s, &index, bits)) {
     const ny_native_asm_operand_t *op = &state->operands[index];
     if (!op->initialized) {
-      nyr_fail(b, "native NYIR asm: operand %d is read before it is written", index);
+      nyr_fail(b, "native NYIR asm: operand %d is read before it is written",
+               index);
       return -1;
     }
     int value = op->value;
@@ -364,13 +372,13 @@ static int ny_native_asm_source(nyr_builder_t *b,
   return -1;
 }
 
-static bool ny_native_asm_assign(nyr_builder_t *b,
-                                 ny_native_asm_state_t *state, const char *text,
-                                 int value) {
+static bool ny_native_asm_assign(nyr_builder_t *b, ny_native_asm_state_t *state,
+                                 const char *text, int value) {
   int index = -1;
   unsigned bits = 64;
   if (!ny_native_asm_ref(state, text, &index, &bits))
-    return nyr_fail(b, "native NYIR asm: destination '%s' is not constrained", text);
+    return nyr_fail(b, "native NYIR asm: destination '%s' is not constrained",
+                    text);
   if (bits == 32 || state->operands[index].bits == 32) {
     value = ny_native_asm_mask32(b, value);
     if (value < 0)
@@ -396,7 +404,8 @@ static int ny_native_asm_address(nyr_builder_t *b,
     return ny_native_asm_source(b, state, s, width);
   char *end = strrchr(s, ']');
   if (!end)
-    return nyr_fail(b, "native NYIR asm: malformed memory operand '%s'", text), -1;
+    return nyr_fail(b, "native NYIR asm: malformed memory operand '%s'", text),
+           -1;
   *end = '\0';
   char *parts[3];
   size_t count = ny_native_asm_split(s + 1, ',', parts, 3);
@@ -414,8 +423,8 @@ static int ny_native_asm_address(nyr_builder_t *b,
   return base;
 }
 
-static bool ny_native_asm_exec(nyr_builder_t *b,
-                               ny_native_asm_state_t *state, const char *code) {
+static bool ny_native_asm_exec(nyr_builder_t *b, ny_native_asm_state_t *state,
+                               const char *code) {
   char buf[NY_NATIVE_ASM_MAX_TEMPLATE];
   size_t len = strlen(code);
   if (len >= sizeof(buf))
@@ -425,7 +434,8 @@ static bool ny_native_asm_exec(nyr_builder_t *b,
     if (*p == ';')
       *p = '\n';
   char *save = NULL;
-  for (char *line = strtok_r(buf, "\n", &save); line; line = strtok_r(NULL, "\n", &save)) {
+  for (char *line = strtok_r(buf, "\n", &save); line;
+       line = strtok_r(NULL, "\n", &save)) {
     char *comment = strstr(line, "//");
     if (comment)
       *comment = '\0';
@@ -445,7 +455,8 @@ static bool ny_native_asm_exec(nyr_builder_t *b,
       *p = (char)tolower((unsigned char)*p);
     char *operand_text = ny_native_asm_trim(space);
     char *args[4] = {0};
-    size_t argc = *operand_text ? ny_native_asm_split(operand_text, ',', args, 4) : 0;
+    size_t argc =
+        *operand_text ? ny_native_asm_split(operand_text, ',', args, 4) : 0;
     for (size_t i = 0; i < argc; ++i)
       args[i] = ny_native_asm_trim(args[i]);
     if (strcmp(mnemonic, "nop") == 0 || strcmp(mnemonic, "yield") == 0 ||
@@ -464,7 +475,9 @@ static bool ny_native_asm_exec(nyr_builder_t *b,
       unsigned bits = 64;
       int value = ny_native_asm_source(b, state, args[1], &bits);
       int all = nyr_emit_const(b, -1);
-      value = value < 0 || all < 0 ? -1 : ny_native_asm_emit_binop(b, NYIR_XOR_I64, value, all);
+      value = value < 0 || all < 0
+                  ? -1
+                  : ny_native_asm_emit_binop(b, NYIR_XOR_I64, value, all);
       if (value < 0 || !ny_native_asm_assign(b, state, args[0], value))
         return false;
       continue;
@@ -482,7 +495,8 @@ static bool ny_native_asm_exec(nyr_builder_t *b,
     if (strcmp(mnemonic, "str") == 0 && argc == 2) {
       unsigned bits = 64, width = 64;
       int value = ny_native_asm_source(b, state, args[0], &bits);
-      int address = value < 0 ? -1 : ny_native_asm_address(b, state, args[1], &width);
+      int address =
+          value < 0 ? -1 : ny_native_asm_address(b, state, args[1], &width);
       if (value < 0 || address < 0 || bits != 64 || width != 64)
         return nyr_fail(b, "native NYIR asm: only 64-bit str is supported");
       if (!nyr_emit_store_i64(b, address, value))
@@ -491,55 +505,75 @@ static bool ny_native_asm_exec(nyr_builder_t *b,
     }
     bool shift = strcmp(mnemonic, "lsl") == 0 || strcmp(mnemonic, "lsr") == 0 ||
                  strcmp(mnemonic, "asr") == 0;
-    bool binary = strcmp(mnemonic, "add") == 0 || strcmp(mnemonic, "sub") == 0 ||
-                  strcmp(mnemonic, "and") == 0 || strcmp(mnemonic, "eor") == 0 ||
-                  strcmp(mnemonic, "orr") == 0 || strcmp(mnemonic, "mul") == 0 ||
-                  strcmp(mnemonic, "sdiv") == 0 || strcmp(mnemonic, "udiv") == 0 ||
-                  strcmp(mnemonic, "bic") == 0 || shift;
+    bool binary =
+        strcmp(mnemonic, "add") == 0 || strcmp(mnemonic, "sub") == 0 ||
+        strcmp(mnemonic, "and") == 0 || strcmp(mnemonic, "eor") == 0 ||
+        strcmp(mnemonic, "orr") == 0 || strcmp(mnemonic, "mul") == 0 ||
+        strcmp(mnemonic, "sdiv") == 0 || strcmp(mnemonic, "udiv") == 0 ||
+        strcmp(mnemonic, "bic") == 0 || shift;
     if (binary && (argc == 2 || argc == 3)) {
       const char *lhs_text = argc == 3 ? args[1] : args[0];
       const char *rhs_text = argc == 3 ? args[2] : args[1];
       unsigned lhs_bits = 64, rhs_bits = 64;
       int lhs = ny_native_asm_source(b, state, lhs_text, &lhs_bits);
-      int rhs = lhs < 0 ? -1 : ny_native_asm_source(b, state, rhs_text, &rhs_bits);
+      int rhs =
+          lhs < 0 ? -1 : ny_native_asm_source(b, state, rhs_text, &rhs_bits);
       int value = -1;
       if (lhs < 0 || rhs < 0)
         return false;
-      if (strcmp(mnemonic, "add") == 0) value = ny_native_asm_emit_binop(b, NYIR_ADD_I64, lhs, rhs);
-      else if (strcmp(mnemonic, "sub") == 0) value = ny_native_asm_emit_binop(b, NYIR_SUB_I64, lhs, rhs);
-      else if (strcmp(mnemonic, "and") == 0) value = ny_native_asm_emit_binop(b, NYIR_AND_I64, lhs, rhs);
-      else if (strcmp(mnemonic, "eor") == 0) value = ny_native_asm_emit_binop(b, NYIR_XOR_I64, lhs, rhs);
-      else if (strcmp(mnemonic, "orr") == 0) value = ny_native_asm_emit_binop(b, NYIR_OR_I64, lhs, rhs);
-      else if (strcmp(mnemonic, "mul") == 0) value = ny_native_asm_emit_binop(b, NYIR_MUL_I64, lhs, rhs);
-      else if (strcmp(mnemonic, "sdiv") == 0) value = ny_native_asm_sdiv(b, lhs, rhs);
-      else if (strcmp(mnemonic, "udiv") == 0) value = ny_native_asm_udiv(b, lhs, rhs);
-      else if (strcmp(mnemonic, "lsl") == 0) value = ny_native_asm_emit_binop(b, NYIR_SHL_I64, lhs, rhs);
-      else if (strcmp(mnemonic, "asr") == 0) value = ny_native_asm_emit_binop(b, NYIR_SAR_I64, lhs, rhs);
-      else if (strcmp(mnemonic, "lsr") == 0) value = ny_native_asm_lsr(b, lhs, rhs);
+      if (strcmp(mnemonic, "add") == 0)
+        value = ny_native_asm_emit_binop(b, NYIR_ADD_I64, lhs, rhs);
+      else if (strcmp(mnemonic, "sub") == 0)
+        value = ny_native_asm_emit_binop(b, NYIR_SUB_I64, lhs, rhs);
+      else if (strcmp(mnemonic, "and") == 0)
+        value = ny_native_asm_emit_binop(b, NYIR_AND_I64, lhs, rhs);
+      else if (strcmp(mnemonic, "eor") == 0)
+        value = ny_native_asm_emit_binop(b, NYIR_XOR_I64, lhs, rhs);
+      else if (strcmp(mnemonic, "orr") == 0)
+        value = ny_native_asm_emit_binop(b, NYIR_OR_I64, lhs, rhs);
+      else if (strcmp(mnemonic, "mul") == 0)
+        value = ny_native_asm_emit_binop(b, NYIR_MUL_I64, lhs, rhs);
+      else if (strcmp(mnemonic, "sdiv") == 0)
+        value = ny_native_asm_sdiv(b, lhs, rhs);
+      else if (strcmp(mnemonic, "udiv") == 0)
+        value = ny_native_asm_udiv(b, lhs, rhs);
+      else if (strcmp(mnemonic, "lsl") == 0)
+        value = ny_native_asm_emit_binop(b, NYIR_SHL_I64, lhs, rhs);
+      else if (strcmp(mnemonic, "asr") == 0)
+        value = ny_native_asm_emit_binop(b, NYIR_SAR_I64, lhs, rhs);
+      else if (strcmp(mnemonic, "lsr") == 0)
+        value = ny_native_asm_lsr(b, lhs, rhs);
       else {
         int all = nyr_emit_const(b, -1);
-        int inverted = all < 0 ? -1 : ny_native_asm_emit_binop(b, NYIR_XOR_I64, rhs, all);
-        value = inverted < 0 ? -1 : ny_native_asm_emit_binop(b, NYIR_AND_I64, lhs, inverted);
+        int inverted =
+            all < 0 ? -1 : ny_native_asm_emit_binop(b, NYIR_XOR_I64, rhs, all);
+        value = inverted < 0
+                    ? -1
+                    : ny_native_asm_emit_binop(b, NYIR_AND_I64, lhs, inverted);
       }
       if (value < 0 || !ny_native_asm_assign(b, state, args[0], value))
         return false;
       continue;
     }
-    return nyr_fail(b, "native NYIR asm: unsupported AArch64 template instruction '%s'", mnemonic);
+    return nyr_fail(
+        b, "native NYIR asm: unsupported AArch64 template instruction '%s'",
+        mnemonic);
   }
   return true;
 }
 
-static int nyr_lower_aarch64_asm(nyr_builder_t *b,
-                                            const expr_t *e) {
+static int nyr_lower_aarch64_asm(nyr_builder_t *b, const expr_t *e) {
   ny_native_asm_state_t state;
   if (!ny_native_asm_parse_constraints(b, e, &state) ||
-      !ny_native_asm_exec(b, &state, e->as.as_asm.code ? e->as.as_asm.code : ""))
+      !ny_native_asm_exec(b, &state,
+                          e->as.as_asm.code ? e->as.as_asm.code : ""))
     return -1;
   if (state.result < 0)
     return nyr_emit_const(b, 0);
   ny_native_asm_operand_t *result = &state.operands[state.result];
   if (!result->initialized)
-    return nyr_fail(b, "native NYIR asm: output operand %d was not written", state.result), -1;
+    return nyr_fail(b, "native NYIR asm: output operand %d was not written",
+                    state.result),
+           -1;
   return result->value;
 }

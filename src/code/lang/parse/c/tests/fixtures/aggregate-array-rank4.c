@@ -1,3 +1,6 @@
+/*
+ * Fixture: index a four-dimensional aggregate array.
+ */
 struct grid_owner {
   unsigned char cells[2][2][2][2];
 };

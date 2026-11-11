@@ -1,3 +1,6 @@
+/*
+ * C parser fixture for aggregates accessed through triple pointers.
+ */
 struct nyc_target {
   long value;
 };
@@ -101,8 +104,7 @@ int main(void) {
   nyc_nested_address_dereference();
   return nyc_goto_after_case(1) != 3 ||
          nyc_typeof_function_pointer(nyc_function_target, 40) != 41 ||
-         target.value != 41 ||
-         nyc_get_targets() != holder.targets ||
+         target.value != 41 || nyc_get_targets() != holder.targets ||
          sizeof(holder.targets) != sizeof(void *) ||
          nyc_triple_identity(holder.targets) != holder.targets ||
          nyc_hop(&target_paths[1]) != &target_pointer ||

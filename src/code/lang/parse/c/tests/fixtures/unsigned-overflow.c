@@ -1,3 +1,6 @@
+/*
+ * Fixture: check unsigned constant casts, overflow, and arithmetic results.
+ */
 _Static_assert((unsigned short)~0U == 65535U,
                "constant integer casts truncate to their destination width");
 int nyc_u64_add(unsigned long long a, unsigned long long b,
@@ -36,17 +39,14 @@ int main(void) {
     return 3;
   if (nyc_u64_sub(42, 2, &result) != 0 || result != 40)
     return 4;
-  if (nyc_u64_mul(~0ULL, 2, &result) != 1 ||
-      result != 0xFFFFFFFFFFFFFFFEULL)
+  if (nyc_u64_mul(~0ULL, 2, &result) != 1 || result != 0xFFFFFFFFFFFFFFFEULL)
     return 5;
   if (nyc_u64_mul(0xFFFFFFFFULL, 0xFFFFFFFFULL, &result) != 0 ||
       result != 0xFFFFFFFE00000001ULL)
     return 6;
-  if (nyc_u64_mul(0x100000000ULL, 0x100000000ULL, &result) != 1 ||
-      result != 0)
+  if (nyc_u64_mul(0x100000000ULL, 0x100000000ULL, &result) != 1 || result != 0)
     return 7;
-  if (nyc_i32_mul(1000, 1000U, &narrow_result) != 0 ||
-      narrow_result != 1000000)
+  if (nyc_i32_mul(1000, 1000U, &narrow_result) != 0 || narrow_result != 1000000)
     return 8;
   if (nyc_i32_mul(50000, 50000U, &narrow_result) != 1 ||
       narrow_result != -1794967296)

@@ -1,3 +1,4 @@
+/* Ny language parser entry points and AST construction interfaces. */
 #ifndef NY_PARSER_H
 #define NY_PARSER_H
 

@@ -360,17 +360,17 @@ static bool sp_try_one(nyr_func_t *work, const nyr_scev_loop_t *loop) {
   out = malloc(out_cap * sizeof(*out));
   if (!out)
     goto out;
-#define SP_PUSH(inst_)                                                         \
-  do {                                                                         \
-    if (olen == out_cap) {                                                     \
-      size_t nc = out_cap * 2;                                                 \
-      nyr_inst_t *no = realloc(out, nc * sizeof(*no));                         \
-      if (!no)                                                                 \
-        goto out;                                                              \
-      out = no;                                                                \
-      out_cap = nc;                                                            \
-    }                                                                          \
-    out[olen++] = (inst_);                                                     \
+#define SP_PUSH(inst_)                                 \
+  do {                                                 \
+    if (olen == out_cap) {                             \
+      size_t nc = out_cap * 2;                         \
+      nyr_inst_t *no = realloc(out, nc * sizeof(*no)); \
+      if (!no)                                         \
+        goto out;                                      \
+      out = no;                                        \
+      out_cap = nc;                                    \
+    }                                                  \
+    out[olen++] = (inst_);                             \
   } while (0)
 
   for (size_t b = 0; b < cfg.block_count; ++b) {

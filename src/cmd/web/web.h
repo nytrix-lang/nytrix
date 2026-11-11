@@ -1,3 +1,4 @@
+/* Public entry point for documentation and web-tool commands. */
 #ifndef NYTRIX_CMD_NY_TOOLS_WEB_H
 #define NYTRIX_CMD_NY_TOOLS_WEB_H
 

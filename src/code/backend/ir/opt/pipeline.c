@@ -337,8 +337,7 @@ static void nyr_stamp_local_store_classes(nyr_func_t *f) {
       returns_agree = false;
   }
   if (saw_return && returns_agree &&
-      (merged_return == NYIR_SCALAR_F32 ||
-       merged_return == NYIR_SCALAR_F64)) {
+      (merged_return == NYIR_SCALAR_F32 || merged_return == NYIR_SCALAR_F64)) {
     for (size_t i = 0; i < f->len; ++i) {
       nyr_inst_t *ret = &f->data[i];
       if (ret->op != NYIR_RET || ret->scalar_class != NYIR_SCALAR_UNKNOWN)
@@ -402,9 +401,7 @@ void nyr_set_per_pass_oracle(bool enable, nyr_per_pass_oracle_fn fn,
   nyr_oracle_userdata = enable ? userdata : NULL;
 }
 
-void nyr_set_tv_seed(int trials) {
-  nyr_tv_trials = trials > 0 ? trials : 0;
-}
+void nyr_set_tv_seed(int trials) { nyr_tv_trials = trials > 0 ? trials : 0; }
 
 static bool nyr_oracle_checkpoint(const nyr_func_t *f, const char *pass_name) {
   if (!nyr_per_pass_oracle || !nyr_oracle_fn)
@@ -1031,7 +1028,7 @@ static const nyr_pass_control_t nyr_pass_controls[] = {
     {nyr_loop_vectorize, "loop_vectorize"},
     {nyr_loop_vectorize_avx2, "loop_vectorize"},
     {nyr_slp_vectorize, "slp_vectorize"},
-{nyr_tbuf_inline, "tbuf_inline"},
+    {nyr_tbuf_inline, "tbuf_inline"},
     {nyr_alias_store_sink, "alias_store_sink"},
     {nyr_narrow, "narrow"},
     {nyr_phi_elim, "phi_elim"},
@@ -2082,9 +2079,10 @@ static bool nyr_optimize_pipeline(nyr_func_t *f, nyr_opt_stats_t *stats,
     }
     if (ok && !(options & NYR_IR_OPT_DISABLE_VECTORIZATION) &&
         !nyr_pass_stopped && nyr_has_loop(f))
-      nyr_run_pass(f, (options & NYR_IR_OPT_AVX2_VECTORIZE)
-                          ? nyr_loop_vectorize_avx2
-                          : nyr_loop_vectorize,
+      nyr_run_pass(f,
+                   (options & NYR_IR_OPT_AVX2_VECTORIZE)
+                       ? nyr_loop_vectorize_avx2
+                       : nyr_loop_vectorize,
                    stats, dump, &ok);
     if (ok && !nyr_pass_stopped && nyr_has_loop(f))
       nyr_run_pass(f, nyr_iv_elim, stats, dump, &ok);
@@ -2232,9 +2230,10 @@ static bool nyr_optimize_pipeline(nyr_func_t *f, nyr_opt_stats_t *stats,
       }
       if (ok && !(options & NYR_IR_OPT_DISABLE_VECTORIZATION) &&
           !nyr_pass_stopped)
-        nyr_run_pass(f, (options & NYR_IR_OPT_AVX2_VECTORIZE)
-                            ? nyr_loop_vectorize_avx2
-                            : nyr_loop_vectorize,
+        nyr_run_pass(f,
+                     (options & NYR_IR_OPT_AVX2_VECTORIZE)
+                         ? nyr_loop_vectorize_avx2
+                         : nyr_loop_vectorize,
                      stats, dump, &ok);
       /*
        * Vectorized loops still recompute invariant address arithmetic
@@ -2250,6 +2249,12 @@ static bool nyr_optimize_pipeline(nyr_func_t *f, nyr_opt_stats_t *stats,
         nyr_run_pass(f, nyr_prefetch_insert, stats, dump, &ok);
       if (ok && !nyr_pass_stopped)
         nyr_run_pass(f, nyr_iv_elim, stats, dump, &ok);
+      /*
+       * Closed forms emitted by iv_elim carry fresh range questions
+       * (overflow-free triangular products, non-negative dividends).
+       */
+      if (ok && !nyr_pass_stopped)
+        nyr_run_pass(f, nyr_overflow_check_elim, stats, dump, &ok);
       if (ok && !nyr_pass_stopped)
         nyr_run_pass(f, nyr_cse, stats, dump, &ok);
       if (ok && !nyr_pass_stopped)
@@ -2348,8 +2353,8 @@ static bool nyr_optimize_pipeline(nyr_func_t *f, nyr_opt_stats_t *stats,
     if (ok && !nyr_pass_stopped && nyr_has_loop(f) &&
         (options & NYR_IR_OPT_AVX2_VECTORIZE) &&
         !(options & NYR_IR_OPT_DISABLE_VECTORIZATION)) {
-      static bool (*const widen[])(nyr_func_t *) = {
-          nyr_outer_loop_vectorize, nyr_copy_prop, nyr_dce};
+      static bool (*const widen[])(nyr_func_t *) = {nyr_outer_loop_vectorize,
+                                                    nyr_copy_prop, nyr_dce};
       nyr_run_seq(f, widen, 3, stats, dump, &ok);
     }
   }

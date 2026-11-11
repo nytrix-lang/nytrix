@@ -86,12 +86,7 @@ nyr_strength_apply_result_metadata(nyr_inst_t *in,
 
 static int nyr_strength_root_copy(const nyr_func_t *f, const int *defs,
                                   int value) {
-  for (int depth = 0; f && defs && value >= 0 && value < f->next_value &&
-                      defs[value] >= 0 && (size_t)defs[value] < f->len &&
-                      f->data[defs[value]].op == NYIR_COPY && depth < 32;
-       ++depth)
-    value = f->data[defs[value]].a;
-  return value;
+  return nyr_strip_copy_chain(f, defs, value, 32);
 }
 
 static bool nyr_strength_const_value(const nyr_func_t *f, const int *defs,

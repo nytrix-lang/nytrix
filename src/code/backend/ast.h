@@ -1,3 +1,4 @@
+/* Private AST fallback backend and NYR code-emission interfaces. */
 #ifndef NY_CODE_BACKEND_AST_H
 #define NY_CODE_BACKEND_AST_H
 

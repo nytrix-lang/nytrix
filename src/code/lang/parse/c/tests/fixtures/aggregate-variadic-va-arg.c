@@ -1,3 +1,6 @@
+/*
+ * C parser fixture for retrieving aggregate values with va_arg.
+ */
 typedef __builtin_va_list va_list;
 
 struct nyc_uid {

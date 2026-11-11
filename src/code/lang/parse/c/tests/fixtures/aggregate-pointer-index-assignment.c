@@ -1,3 +1,6 @@
+/*
+ * Fixture: assign an aggregate field through indexed pointer access.
+ */
 struct record {
   long value;
 };

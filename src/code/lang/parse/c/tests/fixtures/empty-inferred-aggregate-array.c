@@ -1,3 +1,6 @@
+/*
+ * Fixture: infer aggregate-array initialization when elements are empty.
+ */
 struct entry {
   int value;
 };

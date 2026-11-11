@@ -29,12 +29,12 @@
 #include <stdio.h>
 #include <string.h>
 
-#define OV_REJECT(why)                                                         \
-  do {                                                                         \
-    if (getenv("NYTRIX_TRACE_OUTER_VEC"))                                      \
+#define OV_REJECT(why)                                                          \
+  do {                                                                          \
+    if (getenv("NYTRIX_TRACE_OUTER_VEC"))                                       \
       fprintf(stderr, "outer-vectorize: reject %s (line %d) len=%zu hdr=%zu\n", \
-              why, __LINE__, c->f->len, c->header);                          \
-    return false;                                                              \
+              why, __LINE__, c->f->len, c->header);                             \
+    return false;                                                               \
   } while (0)
 
 enum {

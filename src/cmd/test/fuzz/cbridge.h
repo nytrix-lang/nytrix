@@ -1,3 +1,4 @@
+/* C bridge utilities for generating and evaluating cross-language fixtures. */
 #ifndef NY_CMD_TEST_FUZZ_CBRIDGE_H
 #define NY_CMD_TEST_FUZZ_CBRIDGE_H
 
@@ -10,6 +11,7 @@
 #endif
 #endif
 
+#include "base/strbuf.h"
 #include <ctype.h>
 #include <errno.h>
 #include <inttypes.h>
@@ -21,7 +23,6 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <time.h>
-#include "base/strbuf.h"
 #ifdef _WIN32
 #include <direct.h>
 #include <io.h>
@@ -36,7 +37,7 @@
 #endif
 
 #if defined(__GNUC__) || defined(__clang__)
-#define NYTRIX_PRINTF_FMT(fmt_index, first_arg)                                \
+#define NYTRIX_PRINTF_FMT(fmt_index, first_arg)         \
   __attribute__((format(printf, fmt_index, first_arg)))
 #else
 #define NYTRIX_PRINTF_FMT(fmt_index, first_arg)
@@ -89,7 +90,7 @@
   "old_path_moved_count,old_current:.old_path_remaining_count,old_wait_s:."    \
   "old_path_wait_remaining_seconds,old_leaks:.old_path_artifact_leak_count,"   \
   "artifact_remaining:.old_path_artifact_remaining_count}}"
-#define NYTRIX_FUZZ_ALL_QUICK_JQ_STATUS                                        \
+#define NYTRIX_FUZZ_ALL_QUICK_JQ_STATUS                             \
   "jq " NYTRIX_FUZZ_ALL_QUICK_JQ_EXPR " build/fuzz/all/status.json"
 #define NYTRIX_FUZZ_ALL_STATE_JQ_EXPR                                          \
   "{state,event,live,child_status,stale_after_seconds,repeat_mode,repeat_"     \
@@ -102,91 +103,91 @@
   "dry_run_campaign_gain_percent,dry_run_target_percent_per_run,dry_run_"      \
   "thread_years_per_run,canonical_status_report,canonical_progress_report,"    \
   "last_report}"
-#define NYTRIX_FUZZ_ALL_STATE_JQ_DEFAULT                                       \
+#define NYTRIX_FUZZ_ALL_STATE_JQ_DEFAULT                                    \
   "jq " NYTRIX_FUZZ_ALL_STATE_JQ_EXPR " build/fuzz/all/run-next-state.json"
 #define NYTRIX_FUZZ_ALL_OLD_PATH_PROBE_COMMAND                                 \
   "env NYTRIX_LOW_PRIORITY=1 NYTRIX_RUN_NICE=10 nice -n 10 ./build/ny-test "   \
   "fuzz all old-paths --dry-run --probe --nytrix-root ../nytrix "              \
   "--archive-dir build/cache/old-nytrix --json build/fuzz/all/old-paths.json " \
   "--markdown build/fuzz/all/old-paths.md"
-#define NYTRIX_FUZZ_ALL_OLD_PATH_DRY_RUN_COMMAND                               \
-  "env NYTRIX_LOW_PRIORITY=1 NYTRIX_RUN_NICE=10 nice -n 10 ./build/ny-test "   \
-  "fuzz all old-paths --dry-run --nytrix-root ../nytrix --archive-dir "        \
-  "build/cache/old-nytrix --json build/fuzz/all/old-paths.json --markdown "    \
+#define NYTRIX_FUZZ_ALL_OLD_PATH_DRY_RUN_COMMAND                             \
+  "env NYTRIX_LOW_PRIORITY=1 NYTRIX_RUN_NICE=10 nice -n 10 ./build/ny-test " \
+  "fuzz all old-paths --dry-run --nytrix-root ../nytrix --archive-dir "      \
+  "build/cache/old-nytrix --json build/fuzz/all/old-paths.json --markdown "  \
   "build/fuzz/all/old-paths.md"
 #define NYTRIX_FUZZ_ALL_OLD_PATH_APPLY_COMMAND                                 \
   "env NYTRIX_LOW_PRIORITY=1 NYTRIX_RUN_NICE=10 nice -n 10 ./build/ny-test "   \
   "fuzz all old-paths --apply --wait-writers-s 300 --nytrix-root ../nytrix "   \
   "--archive-dir build/cache/old-nytrix --json build/fuzz/all/old-paths.json " \
   "--markdown build/fuzz/all/old-paths.md"
-#define NYTRIX_FUZZ_ALL_KNOWN_BUGS_REPORT                                      \
+#define NYTRIX_FUZZ_ALL_KNOWN_BUGS_REPORT     \
   "build/fuzz/ultra/compiler-known-bugs.json"
-#define NYTRIX_FUZZ_ALL_KNOWN_BUGS_COMMAND                                     \
-  "env NYTRIX_LOW_PRIORITY=1 NYTRIX_RUN_NICE=10 nice -n 10 ./build/nytrix "    \
-  "compiler known-bugs --timeout-s 15 "                                        \
+#define NYTRIX_FUZZ_ALL_KNOWN_BUGS_COMMAND                                  \
+  "env NYTRIX_LOW_PRIORITY=1 NYTRIX_RUN_NICE=10 nice -n 10 ./build/nytrix " \
+  "compiler known-bugs --timeout-s 15 "                                     \
   "--json " NYTRIX_FUZZ_ALL_KNOWN_BUGS_REPORT
-#define NYTRIX_FUZZ_ALL_KNOWN_BUGS_PROBE                                       \
-  "jq "                                                                        \
-  "{ok,cases,ok_count,failure_count,known_bug_count,known_bug_reproduced,"     \
-  "known_bug_fixed_candidates,known_bug_lost_signal,known_bug_baseline_"       \
+#define NYTRIX_FUZZ_ALL_KNOWN_BUGS_PROBE                                   \
+  "jq "                                                                    \
+  "{ok,cases,ok_count,failure_count,known_bug_count,known_bug_reproduced," \
+  "known_bug_fixed_candidates,known_bug_lost_signal,known_bug_baseline_"   \
   "failures} " NYTRIX_FUZZ_ALL_KNOWN_BUGS_REPORT
-#define NYTRIX_FUZZ_ALL_PERF_TRIAGE_REPORT                                     \
+#define NYTRIX_FUZZ_ALL_PERF_TRIAGE_REPORT    \
   "build/fuzz/ultra/perf-triage-current.json"
-#define NYTRIX_FUZZ_ALL_PERF_TRIAGE_MARKDOWN                                   \
+#define NYTRIX_FUZZ_ALL_PERF_TRIAGE_MARKDOWN \
   "build/fuzz/ultra/perf-triage-current.md"
-#define NYTRIX_FUZZ_ALL_PERF_TRIAGE_COMMAND                                    \
-  "env NYTRIX_LOW_PRIORITY=1 NYTRIX_RUN_NICE=10 nice -n 10 ./build/nytrix "    \
-  "perf triage --fast --limit 5 --threshold 1.50 "                             \
-  "--json " NYTRIX_FUZZ_ALL_PERF_TRIAGE_REPORT                                 \
+#define NYTRIX_FUZZ_ALL_PERF_TRIAGE_COMMAND                                 \
+  "env NYTRIX_LOW_PRIORITY=1 NYTRIX_RUN_NICE=10 nice -n 10 ./build/nytrix " \
+  "perf triage --fast --limit 5 --threshold 1.50 "                          \
+  "--json " NYTRIX_FUZZ_ALL_PERF_TRIAGE_REPORT                              \
   " --markdown " NYTRIX_FUZZ_ALL_PERF_TRIAGE_MARKDOWN
-#define NYTRIX_FUZZ_ALL_PERF_TRIAGE_PROBE                                      \
-  "jq "                                                                        \
-  "{ok,cases,ok_count,failure_count,perf_hotspots,perf_worst_ratio,perf_"      \
-  "worst_case,perf_worst_slowdown_percent}"                                    \
+#define NYTRIX_FUZZ_ALL_PERF_TRIAGE_PROBE                                 \
+  "jq "                                                                   \
+  "{ok,cases,ok_count,failure_count,perf_hotspots,perf_worst_ratio,perf_" \
+  "worst_case,perf_worst_slowdown_percent}"                               \
   " " NYTRIX_FUZZ_ALL_PERF_TRIAGE_REPORT
-#define NYTRIX_FUZZ_ALL_SELFTEST_FOCUSED_COMMAND                               \
-  "env NYTRIX_LOW_PRIORITY=1 NYTRIX_RUN_NICE=10 nice -n 10 ./build/nytrix "    \
-  "selftest run --only fuzz_all_help --json "                                  \
-  "build/fuzz/all/selftest-fuzz_all_help.json --markdown "                     \
+#define NYTRIX_FUZZ_ALL_SELFTEST_FOCUSED_COMMAND                            \
+  "env NYTRIX_LOW_PRIORITY=1 NYTRIX_RUN_NICE=10 nice -n 10 ./build/nytrix " \
+  "selftest run --only fuzz_all_help --json "                               \
+  "build/fuzz/all/selftest-fuzz_all_help.json --markdown "                  \
   "build/fuzz/all/selftest-fuzz_all_help.md"
-#define NYTRIX_FUZZ_ALL_SELFTEST_TEMPLATE_COMMAND                              \
-  "env NYTRIX_LOW_PRIORITY=1 NYTRIX_RUN_NICE=10 nice -n 10 ./build/nytrix "    \
-  "selftest run --only NAME --json build/fuzz/all/selftest-NAME.json "         \
+#define NYTRIX_FUZZ_ALL_SELFTEST_TEMPLATE_COMMAND                           \
+  "env NYTRIX_LOW_PRIORITY=1 NYTRIX_RUN_NICE=10 nice -n 10 ./build/nytrix " \
+  "selftest run --only NAME --json build/fuzz/all/selftest-NAME.json "      \
   "--markdown build/fuzz/all/selftest-NAME.md"
-#define NYTRIX_FUZZ_ALL_SELFTEST_FULL_COMMAND                                  \
-  "env NYTRIX_LOW_PRIORITY=1 NYTRIX_RUN_NICE=10 nice -n 10 ./build/nytrix "    \
-  "selftest run --full --json build/fuzz/all/selftest-full.json --markdown "   \
+#define NYTRIX_FUZZ_ALL_SELFTEST_FULL_COMMAND                                \
+  "env NYTRIX_LOW_PRIORITY=1 NYTRIX_RUN_NICE=10 nice -n 10 ./build/nytrix "  \
+  "selftest run --full --json build/fuzz/all/selftest-full.json --markdown " \
   "build/fuzz/all/selftest-full.md"
-#define NYTRIX_FUZZ_ALL_SELFTEST_CATALOG                                       \
-  "env NYTRIX_LOW_PRIORITY=1 NYTRIX_RUN_NICE=10 nice -n 10 ./build/nytrix "    \
-  "selftest run --list --json build/fuzz/all/selftest-catalog.json "           \
+#define NYTRIX_FUZZ_ALL_SELFTEST_CATALOG                                    \
+  "env NYTRIX_LOW_PRIORITY=1 NYTRIX_RUN_NICE=10 nice -n 10 ./build/nytrix " \
+  "selftest run --list --json build/fuzz/all/selftest-catalog.json "        \
   "--markdown build/fuzz/all/selftest-catalog.md"
-#define NYTRIX_FUZZ_ALL_SELFTEST_PROBE                                         \
-  "env NYTRIX_LOW_PRIORITY=1 NYTRIX_RUN_NICE=10 nice -n 10 ./build/nytrix "    \
-  "selftest run --list --probe --json build/fuzz/all/selftest-catalog.json "   \
+#define NYTRIX_FUZZ_ALL_SELFTEST_PROBE                                       \
+  "env NYTRIX_LOW_PRIORITY=1 NYTRIX_RUN_NICE=10 nice -n 10 ./build/nytrix "  \
+  "selftest run --list --probe --json build/fuzz/all/selftest-catalog.json " \
   "--markdown build/fuzz/all/selftest-catalog.md"
-#define NYTRIX_FUZZ_ALL_SELFTEST_RUN                                           \
-  "env NYTRIX_LOW_PRIORITY=1 NYTRIX_RUN_NICE=10 nice -n 10 ./build/nytrix "    \
-  "selftest run --only fuzz_all_help --only fuzz_all_audit --only "            \
-  "fuzz_all_default_pressure --only fuzz_all_coverage_commands --only "        \
-  "fuzz_all_coverage_focus_companions --only fuzz_all_history_commands "       \
-  "--only fuzz_all_preflight_isolation --only fuzz_all_status_canonical "      \
-  "--only fuzz_all_status_stale_evidence --only "                              \
-  "fuzz_all_repeat_status_progress --only fuzz_all_reporting --only "          \
-  "fuzz_all_fresh_handoff --only fuzz_all_progress_canonical --only "          \
-  "fuzz_all_progress --only fuzz_all_progress_stale_evidence --only "          \
-  "fuzz_all_progress_refresh_fail --only fuzz_all_full_pressure_remediation "  \
-  "--only fuzz_repro_ready_missing_wrapper --only "                            \
-  "fuzz_repro_ready_missing_command --only fuzz_all_plan_coverage_next "       \
-  "--only fuzz_all_old_paths --only fuzz_all_old_paths_dry_run --only "        \
-  "fuzz_all_old_paths_empty_dry_run --only fuzz_all_old_writer_classifier "    \
-  "--only compiler_findings --only compiler_known_bugs --only "                \
-  "compiler_std_audit --only perf_triage_args --json "                         \
-  "build/fuzz/all/selftest-cockpit.json --markdown "                           \
+#define NYTRIX_FUZZ_ALL_SELFTEST_RUN                                          \
+  "env NYTRIX_LOW_PRIORITY=1 NYTRIX_RUN_NICE=10 nice -n 10 ./build/nytrix "   \
+  "selftest run --only fuzz_all_help --only fuzz_all_audit --only "           \
+  "fuzz_all_default_pressure --only fuzz_all_coverage_commands --only "       \
+  "fuzz_all_coverage_focus_companions --only fuzz_all_history_commands "      \
+  "--only fuzz_all_preflight_isolation --only fuzz_all_status_canonical "     \
+  "--only fuzz_all_status_stale_evidence --only "                             \
+  "fuzz_all_repeat_status_progress --only fuzz_all_reporting --only "         \
+  "fuzz_all_fresh_handoff --only fuzz_all_progress_canonical --only "         \
+  "fuzz_all_progress --only fuzz_all_progress_stale_evidence --only "         \
+  "fuzz_all_progress_refresh_fail --only fuzz_all_full_pressure_remediation " \
+  "--only fuzz_repro_ready_missing_wrapper --only "                           \
+  "fuzz_repro_ready_missing_command --only fuzz_all_plan_coverage_next "      \
+  "--only fuzz_all_old_paths --only fuzz_all_old_paths_dry_run --only "       \
+  "fuzz_all_old_paths_empty_dry_run --only fuzz_all_old_writer_classifier "   \
+  "--only compiler_findings --only compiler_known_bugs --only "               \
+  "compiler_std_audit --only perf_triage_args --json "                        \
+  "build/fuzz/all/selftest-cockpit.json --markdown "                          \
   "build/fuzz/all/selftest-cockpit.md"
-#define NYTRIX_FUZZ_ALL_SELFTEST_COCKPIT_PROBE                                 \
-  "jq "                                                                        \
-  "{ok,cases,ok_count,failure_count,requested_cases,executed_cases,skipped_"   \
+#define NYTRIX_FUZZ_ALL_SELFTEST_COCKPIT_PROBE                               \
+  "jq "                                                                      \
+  "{ok,cases,ok_count,failure_count,requested_cases,executed_cases,skipped_" \
   "slow_count,all_requested_executed} build/fuzz/all/selftest-cockpit.json"
 
 typedef struct {

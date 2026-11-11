@@ -1,3 +1,6 @@
+/*
+ * Fixture: initialize static pointer arrays from aggregate compound literals.
+ */
 typedef unsigned int __u32;
 typedef __u32 u32;
 
@@ -32,8 +35,8 @@ struct hwmon_channel_info {
   const u32 *config;
 };
 
-#define CHANNEL_INFO(type_, ...)                                               \
-  (&(const struct hwmon_channel_info){                                         \
+#define CHANNEL_INFO(type_, ...)                                       \
+  (&(const struct hwmon_channel_info){                                 \
       .type = hwmon_##type_, .config = (const u32[]){__VA_ARGS__, 0}})
 
 static const struct hwmon_channel_info *const channels[] = {

@@ -1,3 +1,6 @@
+/*
+ * Parser/backend fixture for void-returning functions and side effects.
+ */
 void c_void_store(long *out, long value) { *out = value; }
 
 void c_void_store_return(long *out, long value) {

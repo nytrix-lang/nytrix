@@ -1,3 +1,6 @@
+/*
+ * Linux-style assembly fixture for WRMSR alternatives and register operands.
+ */
 typedef unsigned int u32;
 typedef unsigned long long u64;
 
@@ -28,8 +31,8 @@ nyc_alternative_msr_write(unsigned int msr, u64 value, unsigned int feature) {
       "775:\n"
       ".popsection\n"
       :
-      : "c"(msr), "a"((u32)value), "d"((u32)(value >> 32)),
-        [feature] "i"(feature)
+      : "c"(msr), "a"((u32)value),
+        "d"((u32)(value >> 32)), [feature] "i"(feature)
       : "memory");
 }
 

@@ -1,3 +1,6 @@
+/*
+ * Fixture: read x86 CPUID outputs with explicit register constraints.
+ */
 typedef unsigned int u32;
 void nyc_cpuid_probe(u32 *eax, u32 *ebx, u32 *ecx, u32 *edx) {
   __asm__ volatile("cpuid"

@@ -1,3 +1,6 @@
+/*
+ * Build version and source-revision identification helpers.
+ */
 #include "base/version.h"
 
 #include <stdio.h>

@@ -133,9 +133,10 @@ bool nyr_dce(nyr_func_t *f) {
       }
       phi->phi_incoming_len = out;
     }
-    for (size_t i = 0; i < f->len; ++i) {
-      if (cfg.inst_block && !cfg.reachable[cfg.inst_block[i]])
-        (void)nyr_erase_instruction(f, i);
+    for (size_t i = f->len; i > 0; --i) {
+      size_t inst = i - 1;
+      if (cfg.inst_block && !cfg.reachable[cfg.inst_block[inst]])
+        (void)nyr_erase_instruction(f, inst);
     }
     nyr_cfg_free(&cfg);
     if (!nyr_compact(f)) {

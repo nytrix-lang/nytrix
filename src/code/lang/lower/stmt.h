@@ -46,8 +46,8 @@ static bool nyr_global_declared_any(nyr_builder_t *b, const char *name) {
     cleaf = cleaf ? cleaf + 1 : candidate;
     if (strcmp(cleaf, leaf) != 0)
       continue;
-    const char *type = i < decl->as.var.types.len ? decl->as.var.types.data[i]
-                                                  : NULL;
+    const char *type =
+        i < decl->as.var.types.len ? decl->as.var.types.data[i] : NULL;
     if (!type && decl->as.var.types.len == 1)
       type = decl->as.var.types.data[0];
     return type && strcmp(type, "any") == 0;
@@ -903,7 +903,7 @@ static bool nyr_lower_var(nyr_builder_t *b, const stmt_t *s) {
           !global_init->as.call.args.data[0].name) {
         /* `mut list<int> xs = list(n)` as a global: emit rt_list_new_sized
          * so indexed stores at 0..n-1 succeed immediately. */
-        int arg = nyr_lower_expr(b, global_init->as.call.args.data[0].val);
+        int arg = nyr_lower_int_value(b, global_init->as.call.args.data[0].val);
         value = arg < 0 ? -1
                         : nyr_emit_runtime_call(b, "rt_list_new_sized", arg, -1,
                                                 -1, 1, 0);
@@ -2081,8 +2081,8 @@ static bool nyr_lower_var(nyr_builder_t *b, const stmt_t *s) {
      * Record the physical slot ABI explicitly so later compound arithmetic
      * can stay raw and normalize only the dynamic operand. */
     if (l && (!declared_type || ny_native_type_name_is_int(declared_type)) &&
-        (v->is_decl || !prior_dynamic_slot) &&
-        !l->is_bigint && i < v->exprs.len && v->exprs.data[i] &&
+        (v->is_decl || !prior_dynamic_slot) && !l->is_bigint &&
+        i < v->exprs.len && v->exprs.data[i] &&
         v->exprs.data[i]->kind == NY_E_LITERAL &&
         v->exprs.data[i]->as.literal.kind == NY_LIT_INT &&
         v->exprs.data[i]->tok.kind != NY_T_NIL) {
@@ -2102,7 +2102,8 @@ static bool nyr_lower_var(nyr_builder_t *b, const stmt_t *s) {
     if (l && i < v->exprs.len && v->exprs.data[i] &&
         !(i < v->types.len && v->types.data[i] &&
           ny_native_type_name_is_any(v->types.data[i])) &&
-        /* Assigning to a local that is already dynamic keeps its tagged slot. */
+        /* Assigning to a local that is already dynamic keeps its tagged slot.
+         */
         (v->is_decl || !l->is_any) &&
         nyr_raw_bitwise_value(b, v->exprs.data[i], 0)) {
       is_any = false;
@@ -2476,10 +2477,10 @@ static bool nyr_lower_var(nyr_builder_t *b, const stmt_t *s) {
       /* Preserve `list(n)`'s contract: n reserves capacity but does not add
        * logical elements. Indexed stores can materialize values through the
        * runtime setter when the destination is preallocated. */
-      int arg = nyr_lower_expr(b, init->as.call.args.data[0].val);
+      int arg = nyr_lower_int_value(b, init->as.call.args.data[0].val);
       if (arg < 0)
         return false;
-      val = nyr_emit_runtime_call(b, "rt_list_new", arg, -1, -1, 1, 0);
+      val = nyr_emit_runtime_call(b, "rt_list_new_raw", arg, -1, -1, 1, 0);
     } else if (is_f64 && init && init->kind == NY_E_TERNARY) {
       /* Normalize conditional arms before joining them into the declared
        * machine-f64 slot.  Lowering the ordinary ternary first would merge
@@ -2825,6 +2826,23 @@ static bool nyr_lower_var(nyr_builder_t *b, const stmt_t *s) {
     b->current_list_elem_size = saved_list_elem_size;
     if (val < 0)
       return false;
+    /*
+     * A local list alias starts shared, but the compiler can prove uniqueness
+     * when it is the only second local reference. Split the values once at
+     * the binding instead of emitting a clone on every write in a loop: after
+     * the split, each local owns its buffer and subsequent appends/indexed
+     * stores need no repeated copy.
+     */
+    if (v->is_decl && is_list && l && source_list_local &&
+        source_list_local != l && source_list_local->alias_count == 2 &&
+        l->alias_count == 2) {
+      val = nyr_emit_runtime_call(b, "rt_tbuf_clone_raw", val, -1, -1, 1,
+                                  NYIR_SCALAR_TYPED_BUFFER);
+      if (val < 0)
+        return false;
+      source_list_local->alias_count = 1;
+      l->alias_count = 1;
+    }
     /*
      * Inferred mutable scalar slots retain their raw-i64 ABI after declaration.
      * A later read can still arrive as a tagged integer when source facts are
@@ -5570,8 +5588,8 @@ static const char *nyr_result_generic_arg(nyr_builder_t *b,
     if (at_end || at_sep) {
       if (seen == index) {
         size_t len = (size_t)(p - arg_start);
-        while (len > 0 && (arg_start[len - 1] == ' ' ||
-                           arg_start[len - 1] == '\t'))
+        while (len > 0 &&
+               (arg_start[len - 1] == ' ' || arg_start[len - 1] == '\t'))
           --len;
         while (len > 0 && (*arg_start == ' ' || *arg_start == '\t')) {
           ++arg_start;
@@ -6305,7 +6323,8 @@ static bool nyr_lower_match_impl(nyr_builder_t *b, const stmt_t *s) {
           return false;
         b->last_value = boxed;
       } else if (decode_dynamic_arms &&
-                 nyr_arm_value_is_dynamic(b, s->as.match.default_conseq, b->last_value)) {
+                 nyr_arm_value_is_dynamic(b, s->as.match.default_conseq,
+                                          b->last_value)) {
         int raw = nyr_emit_runtime_call(b, "rt_any_to_i64", b->last_value, -1,
                                         -1, 1, NYIR_SCALAR_I64_RAW);
         if (raw < 0)
@@ -7662,13 +7681,12 @@ static bool nyr_lower_stmt_impl(nyr_builder_t *b, const stmt_t *s) {
      * (and the native caller) see two different return ABIs in one function,
      * for example a guard clause and an f64 tail expression.
      */
-    int v = s->as.ret.value
-                ? nyr_lower_expr(b, s->as.ret.value)
-                : (b->return_class == NYIR_SCALAR_F64
-                       ? nyr_emit_const_f64(b, 0.0)
-                       : b->return_class == NYIR_SCALAR_F32
-                             ? nyr_emit_const_f32(b, 0.0f)
-                             : nyr_emit_const(b, 0));
+    int v = s->as.ret.value ? nyr_lower_expr(b, s->as.ret.value)
+                            : (b->return_class == NYIR_SCALAR_F64
+                                   ? nyr_emit_const_f64(b, 0.0)
+                               : b->return_class == NYIR_SCALAR_F32
+                                   ? nyr_emit_const_f32(b, 0.0f)
+                                   : nyr_emit_const(b, 0));
     v = nyr_normalize_return(b, s->as.ret.value, v);
     if (v < 0)
       return false;
@@ -7749,7 +7767,8 @@ static bool nyr_register_defer(nyr_builder_t *b, const stmt_t *body) {
      */
     bool _assigns = nyr_stmt_assigns_ident(body, local->name);
     if (getenv("NY_DEFER_DBG"))
-      fprintf(stderr, "[defer-dbg] %s mut=%d assigns=%d slot=%d any=%d list=%d\n",
+      fprintf(stderr,
+              "[defer-dbg] %s mut=%d assigns=%d slot=%d any=%d list=%d\n",
               local->name, local->is_mut_binding, _assigns, local->slot,
               local->is_any, local->is_list);
     if (_assigns || local->semantic_mutable)
@@ -7901,9 +7920,9 @@ static bool nyr_finalize(nyr_builder_t *b, char *err, size_t err_len) {
       b->current_fn_name ? b->current_fn_name : "<anonymous>";
   if (ny_trace_enabled("NY_TRACE_O3") && b->opt_level >= 3 &&
       ny_dbg_function_selected(trace_fn))
-    optimized = nyr_optimize_debug_with_options(
-        &b->nyir, stderr, &stats, b->opt_level,
-        nyr_stmt_ir_opt_options(b->options));
+    optimized =
+        nyr_optimize_debug_with_options(&b->nyir, stderr, &stats, b->opt_level,
+                                        nyr_stmt_ir_opt_options(b->options));
   else
     optimized = nyr_optimize_with_stats_options(
         &b->nyir, &stats, b->opt_level, nyr_stmt_ir_opt_options(b->options));
@@ -7927,9 +7946,8 @@ static bool nyr_finalize(nyr_builder_t *b, char *err, size_t err_len) {
         !nyr_ir_verify(&b->nyir, err, err_len))
       goto fail;
     if (b->nyir.len != before_tail_calls &&
-        !nyr_optimize_with_stats_options(
-            &b->nyir, NULL, b->opt_level,
-            nyr_stmt_ir_opt_options(b->options)))
+        !nyr_optimize_with_stats_options(&b->nyir, NULL, b->opt_level,
+                                         nyr_stmt_ir_opt_options(b->options)))
       goto fail;
   }
   if (!nyr_ir_verify(&b->nyir, err, err_len))
@@ -8754,9 +8772,8 @@ static bool nyr_build_function(const program_t *prog, const stmt_t *fn,
                            !nyr_if_stmt_yields_value(tail) &&
                            nyr_stmt_has_bare_return(fn->as.fn.body, 0);
     }
-    int ret = b.last_value >= 0 && !tail_without_value
-                  ? b.last_value
-                  : nyr_emit_const(&b, 0);
+    int ret = b.last_value >= 0 && !tail_without_value ? b.last_value
+                                                       : nyr_emit_const(&b, 0);
     /* Preserve the implicit expression's
      * producer kind.  Passing NULL here
      * made captured dynamic lambdas
@@ -8821,6 +8838,9 @@ static bool nyr_build_function(const program_t *prog, const stmt_t *fn,
       }
     }
     nyr_scalar_class_t implicit_value_class = nyr_value_scalar_class(&b, ret);
+    bool implicit_value_is_f64 =
+        implicit_value_class == NYIR_SCALAR_F64 ||
+        (b.last_value_f64 && implicit_value_class != NYIR_SCALAR_I64_TAGGED);
     /* Scope restoration removed the tail
      * local, so normalize_return cannot see
      * its raw slot ABI.  Preserve the fact
@@ -8828,8 +8848,7 @@ static bool nyr_build_function(const program_t *prog, const stmt_t *fn,
      * expression and box once for an
      * untyped/dynamic result. */
     if (has_implicit_tail && b.return_any &&
-        (b.last_value_f64 || implicit_value_class == NYIR_SCALAR_F64 ||
-         implicit_value_class == NYIR_SCALAR_F32)) {
+        (implicit_value_is_f64 || implicit_value_class == NYIR_SCALAR_F32)) {
       int as_f64 = implicit_value_class == NYIR_SCALAR_F32
                        ? nyr_emit_f32_to_f64(&b, ret)
                        : ret;
@@ -8853,7 +8872,7 @@ static bool nyr_build_function(const program_t *prog, const stmt_t *fn,
           nyr_value_scalar_class(&b, ret) != NYIR_SCALAR_I64_TAGGED &&
           !nyr_value_is_tagged_dynamic_call(&b, ret))
         ret = nyr_emit_runtime_call(&b, "rt_tag", ret, -1, -1, 1, 0);
-    } else if (!(has_implicit_tail && b.last_value_f64 && b.return_type &&
+    } else if (!(has_implicit_tail && implicit_value_is_f64 && b.return_type &&
                  ny_native_type_name_is_f64(b.return_type)) &&
                !(has_implicit_tail && b.last_value_raw_scalar &&
                  b.return_type && ny_native_type_name_is_int(b.return_type) &&
@@ -10489,6 +10508,14 @@ static const stmt_t *ny_native_collector_operator(ny_native_fn_collector_t *col,
       return fn;
     }
   }
+  /*
+   * Match nyr_find_operator: a resolved builtin has no overload dependency.
+   * Re-walking all impls for every arithmetic expression is redundant and
+   * can also retain bodies that lowering will never call. Keep the fallback
+   * below when an explicitly selected operator still needs target resolution.
+   */
+  if (expr->semantic.resolved && (!selected || selected->kind != NY_S_OPERATOR))
+    return NULL;
   const char *owner = ny_native_collector_expr_type(col, expr->as.binary.left);
   const char *right = ny_native_collector_expr_type(col, expr->as.binary.right);
   if (!owner) {
@@ -10766,11 +10793,9 @@ static bool ny_native_scan_qualified_call(ny_native_fn_collector_t *col,
     /* The first lookup also finds stdlib declarations. Reuse that result
      * when the spelling is not an import alias instead of walking the same
      * function index and source scopes a second time. */
-    const stmt_t *fn =
-        declared ? declared : nyr_find_user_function(&probe, qualified);
-    if (!fn)
+    if (!declared)
       return false;
-    ny_native_collector_add_fn(col, fn);
+    ny_native_collector_add_fn(col, declared);
     return true;
   }
   char canonical[512];
@@ -11698,9 +11723,11 @@ static void ny_native_scan_expr_for_calls(const expr_t *e,
         ny_native_add_reachable_fn(col, e->semantic.canonical_callee +
                                             sizeof("core.") - 1);
     }
+    const bool qualified_call =
+        e->as.memcall.target && e->as.memcall.name &&
+        ny_native_scan_qualified_call(col, e->as.memcall.target,
+                                      e->as.memcall.name);
     if (e->as.memcall.name) {
-      bool qualified = ny_native_scan_qualified_call(col, e->as.memcall.target,
-                                                     e->as.memcall.name);
       bool runtime_method = strcmp(e->as.memcall.name, "append") == 0 ||
                             strcmp(e->as.memcall.name, "get") == 0 ||
                             strcmp(e->as.memcall.name, "set") == 0 ||
@@ -11710,7 +11737,7 @@ static void ny_native_scan_expr_for_calls(const expr_t *e,
                             strcmp(e->as.memcall.name, "exists") == 0 ||
                             strcmp(e->as.memcall.name, "delete") == 0 ||
                             strcmp(e->as.memcall.name, "remove") == 0;
-      if (!e->semantic.canonical_callee && !qualified && !runtime_method)
+      if (!e->semantic.canonical_callee && !qualified_call && !runtime_method)
         ny_native_add_reachable_fn(col, e->as.memcall.name);
     }
     /*
@@ -11725,9 +11752,7 @@ static void ny_native_scan_expr_for_calls(const expr_t *e,
      * target the emitter can choose so the
      * body exists under the emitted symbol.
      */
-    if (e->as.memcall.target && e->as.memcall.name &&
-        !ny_native_scan_qualified_call(col, e->as.memcall.target,
-                                       e->as.memcall.name)) {
+    if (e->as.memcall.target && e->as.memcall.name && !qualified_call) {
       const stmt_t *attached = ny_native_collector_attached_method(
           col, e->as.memcall.target, e->as.memcall.name);
       if (attached)
@@ -12454,7 +12479,20 @@ ny_native_collect_reachable_fns(const program_t *prog, const ny_options *opt,
       .max_funcs = max_funcs,
       .shared_cache = shared_owner,
   };
+  bool trace_stage_timing = ny_env_enabled("NYTRIX_TRACE_NYIR_EMIT_TIMING");
+  ny_tick_t stage_start = trace_stage_timing ? ny_ticks_now() : 0;
+#define NY_NATIVE_REACH_TIMED(label)                                           \
+  do {                                                                         \
+    if (trace_stage_timing) {                                                  \
+      ny_tick_t stage_end = ny_ticks_now();                                    \
+      fprintf(stderr,                                                          \
+              "[nyir-reach-timing] stage=%s elapsed=%.3f s count=%zu\n",       \
+              label, ny_ticks_elapsed_sec(stage_start), col.count);            \
+      stage_start = stage_end;                                                 \
+    }                                                                          \
+  } while (0)
   ny_native_seed_emitted_module(prog, opt, &col);
+  NY_NATIVE_REACH_TIMED("emitted-module-roots");
   /* Library precompiles root exports above, then follow their function and
    * initializer dependencies without repeated attached/operator/type walks.
    * Those whole-program queries dominated std.bc time and RSS. */
@@ -12552,17 +12590,14 @@ ny_native_collect_reachable_fns(const program_t *prog, const ny_options *opt,
       ny_native_scan_stmt_for_calls(s, &col);
     }
   }
+  NY_NATIVE_REACH_TIMED("top-level-roots");
 
   /*
-   * 1b. Seed the entry point function so
-   * that programs consisting entirely of
-   * function definitions (no top-level
-   * statements) still have their call graph
-   * traversed.  Without this, `fn main() {
-   * ... }` programs produce zero reachable
-   * functions, leaving the inline callee
-   * table empty and forcing every call
-   * through the slow ABI path.
+   * 1b. Seed the entry point function so programs consisting entirely of
+   * function definitions (no top-level statements) still have their call
+   * graph traversed. Without this, `fn main() { ... }` programs produce zero
+   * reachable functions, leaving the inline callee table empty and forcing
+   * every call through the slow ABI path.
    */
   for (size_t i = 0; i < prog->body.len; ++i) {
     const stmt_t *s = prog->body.data[i];
@@ -12571,6 +12606,7 @@ ny_native_collect_reachable_fns(const program_t *prog, const ny_options *opt,
       ny_native_add_reachable_fn(&col, s->as.fn.name);
     }
   }
+  NY_NATIVE_REACH_TIMED("function-roots");
 
   /*
    * 3. Transitive worklist loop over
@@ -12582,11 +12618,13 @@ ny_native_collect_reachable_fns(const program_t *prog, const ny_options *opt,
     col.scope_fn = fn;
     ny_native_scan_stmt_for_calls(fn->as.fn.body, &col);
   }
+  NY_NATIVE_REACH_TIMED("transitive-worklist");
 
   size_t reachable_count = col.count;
   free(col.seen_fn_slots);
   free(col.seen_name_slots);
   return col.overflow ? SIZE_MAX : reachable_count;
+#undef NY_NATIVE_REACH_TIMED
 }
 
 /*
@@ -12680,9 +12718,8 @@ ny_native_call_effect_index_build(ny_native_call_effect_index_t *index,
   if (index->slots) {
     index->slot_mask = capacity - 1;
     for (size_t e = 0; e < index->len; ++e) {
-      size_t i =
-          (size_t)ny_native_call_effect_hash(index->entries[e].name) &
-          index->slot_mask;
+      size_t i = (size_t)ny_native_call_effect_hash(index->entries[e].name) &
+                 index->slot_mask;
       bool duplicate = false;
       while (index->slots[i]) {
         if (strcmp(index->entries[index->slots[i] - 1].name,
@@ -13501,6 +13538,7 @@ bool nyr_build_ir(const program_t *prog, const ny_options *opt,
       (void)nyr_compact(&funcs_out[i]);
       nyr_refresh_metadata(&funcs_out[i]);
     }
+    NY_NATIVE_STAGE_TIMED("function-inline-cleanup");
     for (int pass = 0; pass < 3; ++pass) {
       if (ny_trace_enabled("NY_TRACE_LOWER") && ny_dbg_function_selected(NULL))
         if (ny_dbg_verbosity() >= 6)
@@ -13518,6 +13556,7 @@ bool nyr_build_ir(const program_t *prog, const ny_options *opt,
         }
       }
     }
+    NY_NATIVE_STAGE_TIMED("function-small-inline");
     /*
      * Inline larger pure wrappers after
      * leaf calls are folded.  This second
@@ -13559,6 +13598,7 @@ bool nyr_build_ir(const program_t *prog, const ny_options *opt,
       nyr_builder_dispose(&compilation_cache);
       return false;
     }
+    NY_NATIVE_STAGE_TIMED("function-general-inline");
     /*
      * Function bodies were initially
      * finalized before the callee registry
@@ -13626,9 +13666,9 @@ bool nyr_build_ir(const program_t *prog, const ny_options *opt,
             (fn_suppressed || !function_selected) ? NULL : stderr,
             &function_stats, opt_level, nyr_stmt_ir_opt_options(opt));
       } else if (opt && opt->nyr_pass_stats) {
-        opt_ok = nyr_optimize_with_stats_options(
-            &funcs_out[i], &function_stats, opt_level,
-            nyr_stmt_ir_opt_options(opt));
+        opt_ok = nyr_optimize_with_stats_options(&funcs_out[i], &function_stats,
+                                                 opt_level,
+                                                 nyr_stmt_ir_opt_options(opt));
       } else {
         opt_ok = nyr_ir_optimize_with_options(&funcs_out[i], opt_level,
                                               nyr_stmt_ir_opt_options(opt));
@@ -13690,6 +13730,7 @@ bool nyr_build_ir(const program_t *prog, const ny_options *opt,
       nyr_builder_dispose(&compilation_cache);
       return false;
     }
+    NY_NATIVE_STAGE_TIMED("function-post-inline-opt");
   }
 
   /*
@@ -13750,6 +13791,7 @@ bool nyr_build_ir(const program_t *prog, const ny_options *opt,
     }
   }
 
+  NY_NATIVE_STAGE_TIMED("call-effect-inference");
   /*
    * Build rt_main with extern table.  When
    * requested, run the VM/native result
@@ -13796,6 +13838,7 @@ bool nyr_build_ir(const program_t *prog, const ny_options *opt,
                   "locals");
     ok = false;
   }
+  NY_NATIVE_STAGE_TIMED("rt-main-initial-prepare");
   /* `NY_DUMP_FN=rt_main` also covers the
    * synthesized entry function.  It is the
    * most important body for source-only
@@ -13827,9 +13870,8 @@ bool nyr_build_ir(const program_t *prog, const ny_options *opt,
           rt_main_out, function_selected ? stderr : NULL, &rt_main_stats,
           opt_level, nyr_stmt_ir_opt_options(opt));
     } else if (opt && opt->nyr_pass_stats) {
-      ok = nyr_optimize_with_stats_options(rt_main_out, &rt_main_stats,
-                                           opt_level,
-                                           nyr_stmt_ir_opt_options(opt));
+      ok = nyr_optimize_with_stats_options(
+          rt_main_out, &rt_main_stats, opt_level, nyr_stmt_ir_opt_options(opt));
     } else {
       ok = nyr_ir_optimize_with_options(rt_main_out, opt_level,
                                         nyr_stmt_ir_opt_options(opt));
@@ -13846,6 +13888,7 @@ bool nyr_build_ir(const program_t *prog, const ny_options *opt,
     if (trace_context)
       ny_dbg_exit_context("rt_main registry optimize");
   }
+  NY_NATIVE_STAGE_TIMED("rt-main-first-opt");
   /*
    * The general inliner deliberately
    * rejects callees that still carry local
@@ -13859,29 +13902,15 @@ bool nyr_build_ir(const program_t *prog, const ny_options *opt,
    * visible ABI.
    */
   if (ok && inline_count > 0) {
-    for (int pass = 0; pass < 3; ++pass) {
-      if (!nyr_inline_small(rt_main_out))
-        break;
-      (void)nyr_copy_prop(rt_main_out);
-      (void)nyr_dce(rt_main_out);
-      nyr_refresh_metadata(rt_main_out);
-      if (dump_rt_main)
-        nyr_dump(stderr, rt_main_out,
-                 "rt_main after "
-                 "leaf-wrapper inline");
-    }
-    /*
-     * Keep the general inliner off synthetic rt_main. Cloning CFG-bearing
-     * callees here can miscompile loop-carried PHIs in the entry function.
-     * Retain the small-wrapper sweep, which does not clone CFGs.
-     */
-    for (int pass = 0; pass < 3; ++pass) {
-      if (!nyr_inline_small(rt_main_out))
-        break;
-      (void)nyr_copy_prop(rt_main_out);
-      (void)nyr_dce(rt_main_out);
-      nyr_refresh_metadata(rt_main_out);
-    }
+    (void)nyr_inline_small(rt_main_out);
+    (void)nyr_copy_prop(rt_main_out);
+    (void)nyr_dce(rt_main_out);
+    nyr_refresh_metadata(rt_main_out);
+    if (dump_rt_main)
+      nyr_dump(stderr, rt_main_out,
+               "rt_main after "
+               "leaf-wrapper inline");
+    NY_NATIVE_STAGE_TIMED("rt-main-small-inline");
     if (dump_rt_main)
       nyr_dump(stderr, rt_main_out,
                "rt_main before "
@@ -13903,9 +13932,9 @@ bool nyr_build_ir(const program_t *prog, const ny_options *opt,
           rt_main_out, function_selected ? stderr : NULL, &post_inline_stats,
           opt_level, nyr_stmt_ir_opt_options(opt));
     } else if (ok && opt && opt->nyr_pass_stats) {
-      optimized = nyr_optimize_with_stats_options(
-          rt_main_out, &post_inline_stats, opt_level,
-          nyr_stmt_ir_opt_options(opt));
+      optimized = nyr_optimize_with_stats_options(rt_main_out,
+                                                  &post_inline_stats, opt_level,
+                                                  nyr_stmt_ir_opt_options(opt));
     } else if (ok) {
       optimized = nyr_ir_optimize_with_options(rt_main_out, opt_level,
                                                nyr_stmt_ir_opt_options(opt));
@@ -13947,6 +13976,7 @@ bool nyr_build_ir(const program_t *prog, const ny_options *opt,
                  "post-inline optimize");
     }
   }
+  NY_NATIVE_STAGE_TIMED("rt-main-post-inline-opt");
   /* Keep the pass oracle installed through
    * rt_main's registry and post-inline
    * optimization pipelines. Disabling it

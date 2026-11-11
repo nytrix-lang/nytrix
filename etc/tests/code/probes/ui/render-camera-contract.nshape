@@ -9,6 +9,7 @@ shape render-camera-contract {
   source ny <<'NY'
 use core
 use core.os.ui.render as camera
+use core.os.ui.render.camera as fitcam
 use core.os.ui.render.matrix as matrix
 
 assert(camera._mat4_data_off([0.0] * 9) == -1, "short matrices are rejected")
@@ -38,6 +39,10 @@ def smoothed = camera.simulate_frame_state({
 })
 assert(abs(float(smoothed.get("yaw", 0.0)) - 0.32) < 0.000001,
    "camera smoothing uses fractional float power")
+def fitted = fitcam.fit_camera_space_pose_margin(
+   1.0, 2.0, 3.0, 2.0, 4.0, 6.0, 60.0, 16.0 / 9.0, 0.0, 0.0)
+assert(is_dict(fitted) && float(fitted.get("z", 0.0)) > 3.0,
+   "camera fitting emits a finite forward-facing pose")
 print("RENDER_CAMERA_CONTRACT_OK target=" + to_str(cam.get(1)))
 NY
 }

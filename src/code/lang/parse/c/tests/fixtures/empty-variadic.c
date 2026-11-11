@@ -1,3 +1,6 @@
+/*
+ * Fixture: call a variadic function with no variadic arguments.
+ */
 void empty_variadic(int fixed, ...) { (void)fixed; }
 int main(void) {
   empty_variadic(7, 11, 13);

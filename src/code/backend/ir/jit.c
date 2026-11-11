@@ -34,6 +34,12 @@
 #endif
 #endif
 
+#if defined(__APPLE__)
+#include <mach/mach.h>
+#include <mach/mach_vm.h>
+#include <mach/vm_region.h>
+#endif
+
 static size_t nyr_native_jit_align(size_t value, size_t align) {
   return align > 1 ? (value + align - 1) & ~(align - 1) : value;
 }
@@ -169,6 +175,62 @@ static void nyr_native_jit_release(void *memory, size_t size) {
 #endif
 }
 
+/*
+ * A PC32 relocation materializes a symbol address with `leaq sym(%rip), reg`.
+ * When the target is farther than 2 GiB away, a function can be reached
+ * through a nearby movabs/jmp thunk, but a data symbol must keep its real
+ * address: redirecting it to a thunk would silently hand out the stub address
+ * instead of the datum.  Classify the resolved target by the permissions of
+ * the mapping that contains it.
+ */
+static bool nyr_native_jit_target_is_code(const void *target) {
+  uintptr_t p = (uintptr_t)target;
+  if (p < 0x1000)
+    return false;
+#ifdef _WIN32
+  MEMORY_BASIC_INFORMATION mbi = {0};
+  if (!VirtualQuery(target, &mbi, sizeof(mbi)) || mbi.State != MEM_COMMIT)
+    return false;
+  DWORD protect = mbi.Protect & 0xff;
+  return protect == PAGE_EXECUTE || protect == PAGE_EXECUTE_READ ||
+         protect == PAGE_EXECUTE_READWRITE ||
+         protect == PAGE_EXECUTE_WRITECOPY;
+#elif defined(__APPLE__)
+  mach_vm_address_t region = (mach_vm_address_t)p;
+  mach_vm_size_t region_size = 0;
+  vm_region_basic_info_data_64_t info;
+  mach_msg_type_number_t count = VM_REGION_BASIC_INFO_COUNT_64;
+  mach_port_t object_name = MACH_PORT_NULL;
+  kern_return_t kr = mach_vm_region(
+      mach_task_self(), &region, &region_size, VM_REGION_BASIC_INFO_64,
+      (vm_region_info_t)&info, &count, &object_name);
+  if (object_name != MACH_PORT_NULL)
+    mach_port_deallocate(mach_task_self(), object_name);
+  if (kr != KERN_SUCCESS || region_size == 0 || p < region ||
+      p - region >= region_size)
+    return false;
+  return (info.protection & VM_PROT_EXECUTE) != 0;
+#else
+  FILE *maps = fopen("/proc/self/maps", "r");
+  if (!maps)
+    return false;
+  char line[512];
+  bool code = false;
+  while (fgets(line, sizeof(line), maps)) {
+    unsigned long start = 0, end = 0;
+    char perms[8] = {0};
+    if (sscanf(line, "%lx-%lx %7s", &start, &end, perms) != 3)
+      continue;
+    if (p >= (uintptr_t)start && p < (uintptr_t)end) {
+      code = perms[2] == 'x';
+      break;
+    }
+  }
+  fclose(maps);
+  return code;
+#endif
+}
+
 static bool nyr_native_jit_def_is_data(const char *name) {
   return name &&
          (strncmp(name, ".Lnyarr.", 8) == 0 || nyr_globaltab_has(name) ||
@@ -201,7 +263,11 @@ static bool nyr_native_jit_seal(void *memory, size_t size) {
 void nyr_jit_image_free(nyr_jit_image_t *image) {
   if (!image)
     return;
-  if (image->data_memory && image->data_size) {
+  uintptr_t base = (uintptr_t)image->memory;
+  uintptr_t data = (uintptr_t)image->data_memory;
+  bool shared_mapping = image->memory && data >= base &&
+                        data - base < image->size;
+  if (image->data_memory && image->data_size && !shared_mapping) {
     nyr_native_jit_release(image->data_memory, image->data_size);
   }
   if (!image->memory)
@@ -570,7 +636,14 @@ static bool nyr_native_jit_materialize_x64(
   size_t data_len =
       have_data ? nyr_native_jit_align(data_end - data_start, 16) : 0;
 
-  unsigned char *memory = (unsigned char *)nyr_native_jit_alloc(alloc_size);
+  /* PC32 data references require the pool to stay within 2 GiB of text.
+   * Reserve both regions together, then seal only the code pages RX. */
+  if (alloc_size > INT32_MAX || data_len > (size_t)INT32_MAX - alloc_size) {
+    nyr_set_error(err, err_len, "native JIT: code and data exceed PC32 range");
+    goto fail_nir;
+  }
+  size_t mapping_size = alloc_size + data_len;
+  unsigned char *memory = (unsigned char *)nyr_native_jit_alloc(mapping_size);
   if (!memory) {
     nyr_set_error(err, err_len, "native JIT: executable allocation failed");
     nyr_obj_free(&code);
@@ -591,13 +664,7 @@ static bool nyr_native_jit_materialize_x64(
 
   unsigned char *data_memory = NULL;
   if (have_data && data_len > 0) {
-    data_memory = (unsigned char *)nyr_native_jit_alloc_data(data_len);
-    if (!data_memory) {
-      nyr_set_error(err, err_len, "native JIT: data pool allocation failed");
-      nyr_obj_free(&code);
-      nyr_native_jit_release(memory, alloc_size);
-      goto fail_nir;
-    }
+    data_memory = memory + alloc_size;
     memset(data_memory, 0, data_len);
     memcpy(data_memory, code.data + data_start, data_end - data_start);
     if (runtime_services && runtime_services->register_mapping)
@@ -621,7 +688,7 @@ static bool nyr_native_jit_materialize_x64(
       nyr_set_error(err, err_len, "native JIT: unresolved symbol '%s'",
                     relocs[i].symbol);
       image->memory = memory;
-      image->size = alloc_size;
+      image->size = mapping_size;
       nyr_jit_image_free(image);
       goto fail_nir;
     }
@@ -636,18 +703,18 @@ static bool nyr_native_jit_materialize_x64(
         /*
          * A runtime function can also be materialized as a first-class value
          * (`let f = zalloc`).  Its LEA uses PC32, but the process image may be
-         * more than 2 GiB from this JIT mapping.  Give that function a nearby
-         * callable thunk, just as PLT32 calls do, then materialize the thunk
-         * address.  Data symbols must remain directly addressable and still
-         * report an out-of-range relocation.
+         * more than 2 GiB from this JIT mapping.  Give any external function a
+         * nearby callable thunk, just as PLT32 calls do, then materialize the
+         * thunk address.  Data symbols must remain directly addressable and
+         * still report an out-of-range relocation.
          */
-        if (ny_native_runtime_abi_decl(relocs[i].symbol) == NULL ||
-            used > alloc_size || stub_size > alloc_size - used) {
+        if (!nyr_native_jit_target_is_code(target_ptr) || used > alloc_size ||
+            stub_size > alloc_size - used) {
           nyr_set_error(err, err_len,
                         "native JIT: PC32 relocation for '%s' is out of range",
                         relocs[i].symbol);
           image->memory = memory;
-          image->size = alloc_size;
+          image->size = mapping_size;
           nyr_jit_image_free(image);
           goto fail_nir;
         }
@@ -665,7 +732,7 @@ static bool nyr_native_jit_materialize_x64(
                         "native JIT: PC32 relocation for '%s' is out of range",
                         relocs[i].symbol);
           image->memory = memory;
-          image->size = alloc_size;
+          image->size = mapping_size;
           nyr_jit_image_free(image);
           goto fail_nir;
         }
@@ -694,7 +761,7 @@ static bool nyr_native_jit_materialize_x64(
                       "native JIT: relocation for '%s' is out of range",
                       relocs[i].symbol);
         image->memory = memory;
-        image->size = alloc_size;
+        image->size = mapping_size;
         nyr_jit_image_free(image);
         goto fail_nir;
       }
@@ -707,12 +774,12 @@ static bool nyr_native_jit_materialize_x64(
   if (entry_index < 0 || !nyr_native_jit_seal(memory, alloc_size)) {
     nyr_set_error(err, err_len, "native JIT: executable finalization failed");
     image->memory = memory;
-    image->size = alloc_size;
+    image->size = mapping_size;
     nyr_jit_image_free(image);
     goto fail_nir;
   }
   image->memory = memory;
-  image->size = alloc_size;
+  image->size = mapping_size;
   image->entry = memory + defs[entry_index].off;
   nyr_native_jit_write_perf_map(defs, def_count, memory);
   nyr_native_jit_dump_code_image(defs, def_count, memory, alloc_size);

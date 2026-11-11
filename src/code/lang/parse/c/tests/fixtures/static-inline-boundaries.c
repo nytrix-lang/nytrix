@@ -1,3 +1,6 @@
+/*
+ * Fixture: check inline-function boundaries and unused static declarations.
+ */
 static int step(int value) { return value * 2 + 3; }
 
 __attribute__((unused)) static int unused_before_compaction(int value) {

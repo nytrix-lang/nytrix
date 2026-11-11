@@ -1,3 +1,6 @@
+/*
+ * Fixture: read an x86 model-specific register with inline assembly.
+ */
 unsigned long long nyc_rdmsr_probe(unsigned int msr) {
   unsigned int low, high;
   __asm__ volatile("1: rdmsr\n"

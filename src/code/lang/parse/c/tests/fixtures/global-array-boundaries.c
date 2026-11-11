@@ -1,3 +1,6 @@
+/*
+ * Fixture: represent begin/end boundaries for a global aggregate array.
+ */
 struct entry {
   unsigned value;
 };

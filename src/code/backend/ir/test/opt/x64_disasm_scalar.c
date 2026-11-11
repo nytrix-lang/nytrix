@@ -24,17 +24,17 @@ int main(void) {
   const char *listing =
       nyr_internal_x64_disasm(encoded, (int64_t)sizeof(encoded), 0x401000);
   static const char *const expected[] = {
-      "4198400\tpush\trbp\t1\n",
-      "4198401\tmov\trbp, rsp\t3\n",
-      "4198404\tmov\tdword ptr [rbp-4], edi\t3\n",
-      "4198407\tcmp\tdword ptr [rbp-4], 0x0\t4\n",
-      "4198411\tjns\t0x401014\t2\n",
-      "4198413\tmov\teax, 0x3\t5\n",
-      "4198418\tjmp\t0x40101a\t2\n",
-      "4198420\tmov\teax, dword ptr [rbp-4]\t3\n",
-      "4198423\tadd\teax, 0x1\t3\n",
-      "4198426\tpop\trbp\t1\n",
-      "4198427\tret\t\t1\n",
+      "4198400\tpush\trbp\t1\t",
+      "4198401\tmov\trbp, rsp\t3\t",
+      "4198404\tmov\tdword ptr [rbp-4], edi\t3\t",
+      "4198407\tcmp\tdword ptr [rbp-4], 0x0\t4\t",
+      "4198411\tjns\t0x401014\t2\t",
+      "4198413\tmov\teax, 0x3\t5\t",
+      "4198418\tjmp\t0x40101a\t2\t",
+      "4198420\tmov\teax, dword ptr [rbp-4]\t3\t",
+      "4198423\tadd\teax, 0x1\t3\t",
+      "4198426\tpop\trbp\t1\t",
+      "4198427\tret\t\t1\t",
   };
   for (size_t i = 0; i < sizeof(expected) / sizeof(expected[0]); ++i) {
     if (!strstr(listing, expected[i])) {
@@ -53,8 +53,8 @@ int main(void) {
   };
   listing = nyr_internal_x64_disasm(immediate_forms,
                                     (int64_t)sizeof(immediate_forms), 0x5000);
-  if (!strstr(listing, "20480\tadd\tax, 0x1234\t5\n") ||
-      !strstr(listing, "20485\tmov\trax, -0x1\t7\n") ||
+  if (!strstr(listing, "20480\tadd\tax, 0x1234\t5\t") ||
+      !strstr(listing, "20485\tmov\trax, -0x1\t7\t") ||
       strstr(listing, "\tunsupported\t")) {
     fprintf(stderr, "[x64-disasm-scalar] immediate width/sign mismatch:\n%s",
             listing);
@@ -70,15 +70,28 @@ int main(void) {
   };
   listing =
       nyr_internal_x64_disasm(byte_forms, (int64_t)sizeof(byte_forms), 0x6000);
-  if (!strstr(listing, "24576\tmov\tbyte ptr [rdi], 0x0\t3\n") ||
-      !strstr(listing, "24579\tmov\tal, byte ptr [rsi]\t2\n") ||
-      !strstr(listing, "24581\tmov\tbyte ptr [rdi], al\t2\n") ||
-      !strstr(listing, "24583\tcmp\tbyte ptr [rdx*1+rsi], 0x0\t5\n") ||
-      !strstr(listing, "24588\tmov\tbyte ptr [r8], 0xff\t4\n") ||
-      !strstr(listing, "24592\tcmp\tbyte ptr [rax], 0x80\t4\n") ||
+  if (!strstr(listing, "24576\tmov\tbyte ptr [rdi], 0x0\t3\t") ||
+      !strstr(listing, "24579\tmov\tal, byte ptr [rsi]\t2\t") ||
+      !strstr(listing, "24581\tmov\tbyte ptr [rdi], al\t2\t") ||
+      !strstr(listing, "24583\tcmp\tbyte ptr [rdx*1+rsi], 0x0\t5\t") ||
+      !strstr(listing, "24588\tmov\tbyte ptr [r8], 0xff\t4\t") ||
+      !strstr(listing, "24592\tcmp\tbyte ptr [rax], 0x80\t4\t") ||
       strstr(listing, "\tunsupported\t")) {
     fprintf(stderr, "[x64-disasm-scalar] emitted byte forms mismatch:\n%s",
             listing);
+    return 1;
+  }
+  static const unsigned char sign_extend_forms[] = {
+      0x48, 0x63, 0xc2,                         /* movsxd rax, edx */
+      0x4d, 0x63, 0xac, 0xad, 0xa0, 0xfd, 0xff, 0xff,
+  };
+  listing = nyr_internal_x64_disasm(sign_extend_forms,
+                                    (int64_t)sizeof(sign_extend_forms), 0x6800);
+  if (!strstr(listing, "26624\tmovsxd\trax, edx\t3\t") ||
+      !strstr(listing,
+              "26627\tmovsxd\tr13, dword ptr [rbp*4+r13-608]\t8\t") ||
+      strstr(listing, "\tunsupported\t")) {
+    fprintf(stderr, "[x64-disasm-scalar] MOVSXD form mismatch:\n%s", listing);
     return 1;
   }
   static const unsigned char syscall_stub[] = {
@@ -89,10 +102,10 @@ int main(void) {
   };
   listing = nyr_internal_x64_disasm(syscall_stub, (int64_t)sizeof(syscall_stub),
                                     0x7000);
-  if (!strstr(listing, "28672\tmov\teax, 0x3c\t5\n") ||
-      !strstr(listing, "28677\tmov\tedi, 0x2a\t5\n") ||
-      !strstr(listing, "28682\tsyscall\t\t2\n") ||
-      !strstr(listing, "28684\tud2\t\t2\n") ||
+  if (!strstr(listing, "28672\tmov\teax, 0x3c\t5\t") ||
+      !strstr(listing, "28677\tmov\tedi, 0x2a\t5\t") ||
+      !strstr(listing, "28682\tsyscall\t\t2\t") ||
+      !strstr(listing, "28684\tud2\t\t2\t") ||
       strstr(listing, "\tunsupported\t")) {
     fprintf(stderr, "[x64-disasm-scalar] syscall stub mismatch:\n%s", listing);
     return 1;
@@ -111,17 +124,17 @@ int main(void) {
       0x66, 0x0f, 0x7f, 0x4d, 0xf0  /* movdqa [rbp-16], xmm1 */
   };
   listing = nyr_internal_x64_disasm(sse_forms, sizeof(sse_forms), 0x8000);
-  if (!strstr(listing, "32768\tmovss\txmm0, dword ptr [rbp-4]\t5\n") ||
-      !strstr(listing, "32773\taddss\txmm0, xmm1\t4\n") ||
-      !strstr(listing, "32777\taddpd\txmm0, xmm1\t4\n") ||
-      !strstr(listing, "32781\tcvtsi2sd\txmm0, ecx\t4\n") ||
-      !strstr(listing, "32785\tcvttsd2si\teax, xmm1\t4\n") ||
-      !strstr(listing, "32789\tcvtsd2ss\txmm0, xmm1\t4\n") ||
-      !strstr(listing, "32793\tpunpcklqdq\txmm0, xmm1\t4\n") ||
-      !strstr(listing, "32797\tshufps\txmm0, xmm1, 0x1b\t4\n") ||
-      !strstr(listing, "32801\tucomisd\txmm0, xmm1\t4\n") ||
-      !strstr(listing, "32805\tmovdqu\txmm0, xmmword ptr [rbp-4]\t5\n") ||
-      !strstr(listing, "32810\tmovdqa\txmmword ptr [rbp-16], xmm1\t5\n") ||
+  if (!strstr(listing, "32768\tmovss\txmm0, dword ptr [rbp-4]\t5\t") ||
+      !strstr(listing, "32773\taddss\txmm0, xmm1\t4\t") ||
+      !strstr(listing, "32777\taddpd\txmm0, xmm1\t4\t") ||
+      !strstr(listing, "32781\tcvtsi2sd\txmm0, ecx\t4\t") ||
+      !strstr(listing, "32785\tcvttsd2si\teax, xmm1\t4\t") ||
+      !strstr(listing, "32789\tcvtsd2ss\txmm0, xmm1\t4\t") ||
+      !strstr(listing, "32793\tpunpcklqdq\txmm0, xmm1\t4\t") ||
+      !strstr(listing, "32797\tshufps\txmm0, xmm1, 0x1b\t4\t") ||
+      !strstr(listing, "32801\tucomisd\txmm0, xmm1\t4\t") ||
+      !strstr(listing, "32805\tmovdqu\txmm0, xmmword ptr [rbp-4]\t5\t") ||
+      !strstr(listing, "32810\tmovdqa\txmmword ptr [rbp-16], xmm1\t5\t") ||
       strstr(listing, "\tunsupported\t")) {
     fprintf(stderr,
             "[x64-disasm-scalar] emitted SSE forms decode incorrectly:\n%s",
@@ -134,9 +147,9 @@ int main(void) {
       0x48, 0xd3, 0xf8,       /* sar rax, cl */
   };
   listing = nyr_internal_x64_disasm(shift_forms, sizeof(shift_forms), 0x9000);
-  if (!strstr(listing, "36864\tsar\trdx, 0x3f\t4\n") ||
-      !strstr(listing, "36868\tshl\trax, 1\t3\n") ||
-      !strstr(listing, "36871\tsar\trax, cl\t3\n") ||
+  if (!strstr(listing, "36864\tsar\trdx, 0x3f\t4\t") ||
+      !strstr(listing, "36868\tshl\trax, 1\t3\t") ||
+      !strstr(listing, "36871\tsar\trax, cl\t3\t") ||
       strstr(listing, "\tunsupported\t")) {
     fprintf(stderr, "[x64-disasm-scalar] emitted shift form mismatch:\n%s",
             listing);
@@ -149,9 +162,9 @@ int main(void) {
   };
   listing = nyr_internal_x64_disasm(test_immediate_forms,
                                     sizeof(test_immediate_forms), 0x9800);
-  if (!strstr(listing, "38912\ttest\trax, 0x1\t7\n") ||
-      !strstr(listing, "38919\ttest\tbyte ptr [rdi], 0x80\t3\n") ||
-      !strstr(listing, "38922\ttest\tcx, -0x1\t5\n") ||
+  if (!strstr(listing, "38912\ttest\trax, 0x1\t7\t") ||
+      !strstr(listing, "38919\ttest\tbyte ptr [rdi], 0x80\t3\t") ||
+      !strstr(listing, "38922\ttest\tcx, -0x1\t5\t") ||
       strstr(listing, "\tunsupported\t")) {
     fprintf(stderr, "[x64-disasm-scalar] immediate TEST form mismatch:\n%s",
             listing);
@@ -163,9 +176,9 @@ int main(void) {
       0x48, 0xf7, 0xd8, /* neg rax */
   };
   listing = nyr_internal_x64_disasm(divide_forms, sizeof(divide_forms), 0xa000);
-  if (!strstr(listing, "40960\tcqo\t\t2\n") ||
-      !strstr(listing, "40962\tidiv\tr10\t3\n") ||
-      !strstr(listing, "40965\tneg\trax\t3\n") ||
+  if (!strstr(listing, "40960\tcqo\t\t2\t") ||
+      !strstr(listing, "40962\tidiv\tr10\t3\t") ||
+      !strstr(listing, "40965\tneg\trax\t3\t") ||
       strstr(listing, "\tunsupported\t")) {
     fprintf(stderr, "[x64-disasm-scalar] emitted division form mismatch:\n%s",
             listing);
@@ -181,12 +194,12 @@ int main(void) {
   };
   listing = nyr_internal_x64_disasm(rotate_bswap_forms,
                                     sizeof(rotate_bswap_forms), 0xb000);
-  if (!strstr(listing, "45056\tbswap\trax\t3\n") ||
-      !strstr(listing, "45059\tbswap\teax\t2\n") ||
-      !strstr(listing, "45061\tror\trax, 0x8\t4\n") ||
-      !strstr(listing, "45065\tror\trax, cl\t3\n") ||
-      !strstr(listing, "45068\tror\teax, 0x7\t3\n") ||
-      !strstr(listing, "45071\tror\teax, cl\t2\n") ||
+  if (!strstr(listing, "45056\tbswap\trax\t3\t") ||
+      !strstr(listing, "45059\tbswap\teax\t2\t") ||
+      !strstr(listing, "45061\tror\trax, 0x8\t4\t") ||
+      !strstr(listing, "45065\tror\trax, cl\t3\t") ||
+      !strstr(listing, "45068\tror\teax, 0x7\t3\t") ||
+      !strstr(listing, "45071\tror\teax, cl\t2\t") ||
       strstr(listing, "\tunsupported\t")) {
     fprintf(stderr, "[x64-disasm-scalar] rotate/byte-swap mismatch:\n%s",
             listing);
@@ -201,11 +214,11 @@ int main(void) {
   };
   listing = nyr_internal_x64_disasm(x87_and_string_forms,
                                     sizeof(x87_and_string_forms), 0xc000);
-  if (!strstr(listing, "49152\tfld\tqword ptr [rbp-8]\t3\n") ||
-      !strstr(listing, "49155\tfsin\t\t2\n") ||
-      !strstr(listing, "49157\tfcos\t\t2\n") ||
-      !strstr(listing, "49159\tfstp\tqword ptr [rbp-8]\t3\n") ||
-      !strstr(listing, "49162\trep movsb\t\t2\n") ||
+  if (!strstr(listing, "49152\tfld\tqword ptr [rbp-8]\t3\t") ||
+      !strstr(listing, "49155\tfsin\t\t2\t") ||
+      !strstr(listing, "49157\tfcos\t\t2\t") ||
+      !strstr(listing, "49159\tfstp\tqword ptr [rbp-8]\t3\t") ||
+      !strstr(listing, "49162\trep movsb\t\t2\t") ||
       strstr(listing, "\tunsupported\t")) {
     fprintf(stderr, "[x64-disasm-scalar] x87/string forms mismatch:\n%s",
             listing);
@@ -219,16 +232,18 @@ int main(void) {
       0x66, 0x0f, 0xef, 0xc1,       /* pxor xmm0, xmm1 */
       0x66, 0x0f, 0xf3, 0xc1,       /* psllq xmm0, xmm1 */
       0x66, 0x0f, 0x73, 0xf0, 0x04, /* psllq xmm0, 4 */
+      0x66, 0x0f, 0x70, 0xc8, 0x01, /* pshufd xmm1, xmm0, 1 */
   };
   listing = nyr_internal_x64_disasm(packed_integer_forms,
                                     sizeof(packed_integer_forms), 0xd000);
-  if (!strstr(listing, "53248\tpaddq\txmm0, xmm1\t4\n") ||
-      !strstr(listing, "53252\tpsubq\txmm0, xmm1\t4\n") ||
-      !strstr(listing, "53256\tpand\txmm0, xmm1\t4\n") ||
-      !strstr(listing, "53260\tpor\txmm0, xmm1\t4\n") ||
-      !strstr(listing, "53264\tpxor\txmm0, xmm1\t4\n") ||
-      !strstr(listing, "53268\tpsllq\txmm0, xmm1\t4\n") ||
-      !strstr(listing, "53272\tpsllq\txmm0, 0x4\t5\n") ||
+  if (!strstr(listing, "53248\tpaddq\txmm0, xmm1\t4\t") ||
+      !strstr(listing, "53252\tpsubq\txmm0, xmm1\t4\t") ||
+      !strstr(listing, "53256\tpand\txmm0, xmm1\t4\t") ||
+      !strstr(listing, "53260\tpor\txmm0, xmm1\t4\t") ||
+      !strstr(listing, "53264\tpxor\txmm0, xmm1\t4\t") ||
+      !strstr(listing, "53268\tpsllq\txmm0, xmm1\t4\t") ||
+      !strstr(listing, "53272\tpsllq\txmm0, 0x4\t5\t") ||
+      !strstr(listing, "53277\tpshufd\txmm1, xmm0, 0x1\t5\t") ||
       strstr(listing, "\tunsupported\t")) {
     fprintf(stderr, "[x64-disasm-scalar] packed integer forms mismatch:\n%s",
             listing);

@@ -1,3 +1,6 @@
+/*
+ * Host-side oracle for supported inline assembly operations and outputs.
+ */
 #include <string.h>
 
 int nyc_inline_asm_pause(void);
@@ -7,8 +10,7 @@ unsigned char nyc_inline_asm_readb(volatile unsigned char *);
 unsigned short nyc_inline_asm_readw(volatile unsigned short *);
 void nyc_inline_asm_writeb(volatile unsigned char *, unsigned char);
 void nyc_inline_asm_writew(volatile unsigned short *, unsigned short);
-void nyc_inline_asm_writeq(volatile unsigned long long *,
-                           unsigned long long);
+void nyc_inline_asm_writeq(volatile unsigned long long *, unsigned long long);
 int nyc_builtin_isdigit(int);
 void *nyc_inline_asm_rip_rel_ptr(void *);
 int nyc_inline_asm_memory_barrier(int *);
@@ -39,8 +41,7 @@ int main(void) {
   int counter = 5;
   nyc_inline_asm_pause();
   nyc_inline_asm_register_to_memory(&asm_stored, 71);
-  return nyc_inline_asm_rip_rel_ptr(&value) != &value ||
-         asm_stored != 71 ||
+  return nyc_inline_asm_rip_rel_ptr(&value) != &value || asm_stored != 71 ||
          nyc_inline_asm_readl(&asm_loaded) != asm_loaded ||
          nyc_inline_asm_readb(&asm_byte) != asm_byte ||
          nyc_inline_asm_readw(&asm_word) != asm_word ||

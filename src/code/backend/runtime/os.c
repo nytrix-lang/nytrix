@@ -5,6 +5,7 @@
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
 #endif
+#include <stdatomic.h>
 #include "code/backend/runtime/shared.h"
 #include <errno.h>
 #include <fcntl.h>
@@ -1844,10 +1845,10 @@ static void rt_canvas_refresh_changed(ny_native_canvas_t *c, size_t width,
   }
   char *out = c->frame_buf;
   size_t p = 0;
-#define NY_CANVAS_DIFF_BYTE(v)                                                 \
-  do {                                                                         \
-    if (p < cap)                                                               \
-      out[p++] = (char)(v);                                                    \
+#define NY_CANVAS_DIFF_BYTE(v) \
+  do {                         \
+    if (p < cap)               \
+      out[p++] = (char)(v);    \
   } while (0)
   int last_color = -1, last_bold = -1;
   for (size_t y = 0; y < height; ++y) {
@@ -2015,10 +2016,10 @@ int64_t rt_canvas_refresh(int64_t canvas) {
   if (!out)
     return 0;
   size_t p = 0;
-#define NY_CANVAS_BYTE(v)                                                      \
-  do {                                                                         \
-    if (p < cap)                                                               \
-      out[p++] = (char)(v);                                                    \
+#define NY_CANVAS_BYTE(v)   \
+  do {                      \
+    if (p < cap)            \
+      out[p++] = (char)(v); \
   } while (0)
   if (interactive) {
     NY_CANVAS_BYTE(27);
@@ -4260,6 +4261,17 @@ int64_t rt_async_state_of(int64_t handle) {
   return rt_tag_v((int64_t)t->state);
 }
 
+/*
+ * Threads the program started that have not finished. An in-process run must
+ * not tear down after its entry returns while one of these is still executing
+ * generated code; see ny_exit_if_threads_outlive_program.
+ */
+static _Atomic int64_t g_rt_live_threads;
+
+int64_t rt_thread_live_count(void) {
+  return atomic_load_explicit(&g_rt_live_threads, memory_order_acquire);
+}
+
 #ifdef _WIN32
 typedef struct rt_thread_state {
   HANDLE h;
@@ -4307,8 +4319,18 @@ static DWORD WINAPI rt_thread_trampoline(LPVOID p) {
     st->ret = ret;
   if (ta->argv)
     free(ta->argv);
+  rt_thread_stacks_release();
+  atomic_fetch_sub_explicit(&g_rt_live_threads, 1, memory_order_release);
   free(ta);
   return 0;
+}
+
+static HANDLE rt_thread_start(rt_thread_arg *ta) {
+  atomic_fetch_add_explicit(&g_rt_live_threads, 1, memory_order_acq_rel);
+  HANDLE h = CreateThread(NULL, 0, rt_thread_trampoline, ta, 0, NULL);
+  if (!h)
+    atomic_fetch_sub_explicit(&g_rt_live_threads, 1, memory_order_release);
+  return h;
 }
 
 int64_t rt_thread_spawn(int64_t fn, int64_t arg) {
@@ -4328,7 +4350,7 @@ int64_t rt_thread_spawn(int64_t fn, int64_t arg) {
   ta->st = st;
   ta->raw_fn = false;
   ta->result_kind = RT_CALLBACK_RESULT_RAW_I64;
-  HANDLE h = CreateThread(NULL, 0, rt_thread_trampoline, ta, 0, NULL);
+  HANDLE h = rt_thread_start(ta);
   if (!h) {
     free(ta);
     free(st);
@@ -4356,7 +4378,7 @@ int64_t rt_thread_spawn_raw(int64_t fn, int64_t arg) {
   ta->st = st;
   ta->raw_fn = false;
   ta->result_kind = RT_CALLBACK_RESULT_RAW_I64;
-  HANDLE h = CreateThread(NULL, 0, rt_thread_trampoline, ta, 0, NULL);
+  HANDLE h = rt_thread_start(ta);
   if (!h) {
     free(ta);
     free(st);
@@ -4397,7 +4419,7 @@ int64_t rt_thread_spawn_call_abi(int64_t fn, int64_t argc, int64_t argv_ptr,
   ta->st = st;
   ta->raw_fn = raw_fn;
   ta->result_kind = result_kind;
-  HANDLE h = CreateThread(NULL, 0, rt_thread_trampoline, ta, 0, NULL);
+  HANDLE h = rt_thread_start(ta);
   if (!h) {
     free(ta);
     free(st);
@@ -4432,7 +4454,7 @@ int64_t rt_thread_launch_call_abi(int64_t fn, int64_t argc, int64_t argv_ptr,
   ta->st = NULL;
   ta->raw_fn = raw_fn;
   ta->result_kind = result_kind;
-  HANDLE h = CreateThread(NULL, 0, rt_thread_trampoline, ta, 0, NULL);
+  HANDLE h = rt_thread_start(ta);
   if (!h) {
     free(ta);
     if (argv_copy)
@@ -4569,8 +4591,18 @@ static void *rt_thread_trampoline(void *p) {
   }
   if (ta->argv)
     free(ta->argv);
+  rt_thread_stacks_release();
+  atomic_fetch_sub_explicit(&g_rt_live_threads, 1, memory_order_release);
   free(ta);
   return (void *)(uintptr_t)res;
+}
+
+static int rt_thread_start(pthread_t *tid, rt_thread_arg *ta) {
+  atomic_fetch_add_explicit(&g_rt_live_threads, 1, memory_order_acq_rel);
+  int r = pthread_create(tid, NULL, rt_thread_trampoline, ta);
+  if (r)
+    atomic_fetch_sub_explicit(&g_rt_live_threads, 1, memory_order_release);
+  return r;
 }
 
 int64_t rt_thread_spawn(int64_t fn, int64_t arg) {
@@ -4584,7 +4616,7 @@ int64_t rt_thread_spawn(int64_t fn, int64_t arg) {
   ta->argv = NULL;
   ta->raw_fn = false;
   ta->result_kind = RT_CALLBACK_RESULT_RAW_I64;
-  int r = pthread_create(&tid, NULL, rt_thread_trampoline, ta);
+  int r = rt_thread_start(&tid, ta);
   if (r != 0) {
     free(ta);
     return -r;
@@ -4604,7 +4636,7 @@ int64_t rt_thread_spawn_raw(int64_t fn, int64_t arg) {
   ta->argv = NULL;
   ta->raw_fn = false;
   ta->result_kind = RT_CALLBACK_RESULT_RAW_I64;
-  int r = pthread_create(&tid, NULL, rt_thread_trampoline, ta);
+  int r = rt_thread_start(&tid, ta);
   if (r != 0) {
     free(ta);
     return -r;
@@ -4637,7 +4669,7 @@ int64_t rt_thread_spawn_call_abi(int64_t fn, int64_t argc, int64_t argv_ptr,
   ta->argv = argv_copy;
   ta->raw_fn = raw_fn;
   ta->result_kind = result_kind;
-  int r = pthread_create(&tid, NULL, rt_thread_trampoline, ta);
+  int r = rt_thread_start(&tid, ta);
   if (r != 0) {
     if (argv_copy)
       free(argv_copy);
@@ -4670,7 +4702,7 @@ int64_t rt_thread_launch_call_abi(int64_t fn, int64_t argc, int64_t argv_ptr,
   ta->argv = argv_copy;
   ta->raw_fn = raw_fn;
   ta->result_kind = result_kind;
-  int r = pthread_create(&tid, NULL, rt_thread_trampoline, ta);
+  int r = rt_thread_start(&tid, ta);
   if (r != 0) {
     if (argv_copy)
       free(argv_copy);

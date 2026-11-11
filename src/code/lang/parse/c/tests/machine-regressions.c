@@ -6,12 +6,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#define CHECK(id, cond)                                                        \
-  do {                                                                         \
-    if (!(cond)) {                                                             \
-      printf("check %d failed\n", id);                                         \
-      return id;                                                               \
-    }                                                                          \
+#define CHECK(id, cond)                \
+  do {                                 \
+    if (!(cond)) {                     \
+      printf("check %d failed\n", id); \
+      return id;                       \
+    }                                  \
   } while (0)
 
 static uint64_t opaque(uint64_t v) {

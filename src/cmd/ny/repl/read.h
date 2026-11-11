@@ -1,3 +1,4 @@
+/* Line-input API used by the Ny interactive REPL. */
 #ifndef NYTRIX_REPL_READ_H
 #define NYTRIX_REPL_READ_H
 

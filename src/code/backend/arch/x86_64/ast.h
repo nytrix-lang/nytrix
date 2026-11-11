@@ -1,3 +1,4 @@
+/* x86-64 AST fallback emitter interfaces for generated runtime entry points. */
 #ifndef NY_CODE_BACKEND_ARCH_X86_64_AST_H
 #define NY_CODE_BACKEND_ARCH_X86_64_AST_H
 

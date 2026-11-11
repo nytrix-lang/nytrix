@@ -34,97 +34,779 @@ are in the [changelog](../CHANGELOG.md).
   aggregate counters are separate evidence. Build-ID or mapping mismatches also
   invalidate attribution.
 
+## Resolved builtin operator reachability
+
+A fresh cache-disabled native Pong compilation was sampled at 99 Hz with
+`cpu-clock:u` and 8 KiB DWARF call stacks. The capture contained 5,338 samples
+and zero losses. `ny_native_find_impl_operator_in_stmt` accounted for 1.55%
+of self samples, reached through `ny_native_scan_expr_for_calls` and
+`ny_native_collector_operator`.
+
+Lowering already treats a resolved binary expression without a selected
+operator declaration as a builtin. Reachability previously ignored that fact,
+recomputed operand types, and traversed module/impl declarations again.
+`ny_native_collector_operator` now uses the same authoritative fact before
+those probes. For resolved builtins, work proportional to the module graph
+at each expression becomes one fact check. Explicitly selected operator
+declarations still take target resolution and its fallback, and unresolved
+expressions retain the conservative search.
+
+Seven focused fixtures passed: raw integer operators in the presence of BigInt
+overloads, nominal impl operators (including call-result operands), chained
+operator re-exports, scalar multiplication, portable impl laws, and the
+ambiguous/unresolved operator error contracts. The runtime fixtures exercised
+their declared native/LLVM variant matrices. Both `--bin` and
+`NYTRIX_TEST_NY_FULL_BIN` pinned the candidate, with execution, stencil, and
+stdlib source caches disabled.
+
+Both compilers also built native x86-64 Pong executables from the frozen
+library inputs. Each executable completed two frames and exited successfully
+under a private Vulkan-rendered headless Weston compositor. Their first-frame
+application traces agreed on ball position/velocity, paddles, score, font
+sizes, and the 1280x688 framebuffer. A separate candidate `-vvvvvv` smoke
+confirmed `[gfx] Using Native Vulkan Backend` and a shown Wayland surface.
+These checks establish exercised runtime behavior, not pixel equivalence or
+a startup/steady-state speedup.
+
+The isolated control and candidate compile the same copied lowering source,
+with only the collector header changed. Every other linked compiler object
+is frozen and shared between the pair. A separate 541-file library/Pong/core
+input snapshot prevents concurrent workspace edits from changing the measured
+source graph; its manifest is checked before and after each timed run.
+Artifacts are retained in `build/complexity-overhaul/`.
+
+Three alternating control/candidate pairs used `--native-only -O2 --threads=4
+--run=none`, identical absolute input/core paths, and disabled native, AOT,
+JIT, stencil, stdlib source/bitcode, and incremental-inventory caches.
+These are object-compilation measurements, not link, startup, or first-frame
+times; other coding sessions were active on the host.
+
+| Metric | Control | Candidate | Change |
+| --- | ---: | ---: | ---: |
+| Median wall time | 44.676 s | 42.471 s | 4.94% less |
+| Median user CPU | 54.027 s | 51.814 s | 4.10% less |
+| Median system CPU | 2.646 s | 2.287 s | 13.58% less |
+| Emitted object bytes | 14,040,848 | 13,526,960 | 513,888 fewer |
+| Defined text symbols, including entry | 2,728 | 2,694 | 34 fewer |
+
+Object hashes were stable across all three runs of each compiler, but differ
+between compilers. The harness's initial cross-compiler byte-equality check
+therefore failed. Symbol inspection found 34 removed definitions, no added
+definitions, and size changes in retained functions; this is not a
+byte-preserving optimization. Removed definitions include BigInt comparisons,
+finite-field equality/shift helpers, and polynomial equality helpers that
+the previous collector rooted through the redundant overload search.
+
+A separate candidate capture contained 4,983 samples and zero losses.
+`ny_native_find_impl_operator_in_stmt` fell from 1.55% of self samples to
+0.02% (one sample). The largest named remaining self bucket was
+`nyr_mach_regalloc_segment_at` at 9.35%; CFG construction was 2.73%,
+imported-module member recursion 2.13%, type-map initialization 1.85%, and
+loop-edge coalescing 1.79%. The two large stripped OpenMP address buckets
+remain unattributed; nearest exported symbols are not sufficient evidence
+to name those private routines.
+
+## Incremental inventory and HM tracing
+
+`NYTRIX_INCREMENTAL=1` runs a dependency inventory after parsing. It does not
+restore inferred schemes, substitute an HM cache for validation, or certify
+that compilation of the reported files succeeded. The dependency snapshot
+must not be mistaken for checked semantic state.
+
+The inventory now schedules all inputs on cold and forced builds, detects
+missing sources, propagates changes through both the previous and current
+graphs, and conservatively retains ambiguous basename dependencies. Bare
+module names match `.ny` filenames. Project roots select separate snapshots;
+reconfiguration honors the current cache directory. Graph reconstruction
+previously freed a pathname before using it for outgoing edges; moving the
+free after edge reconstruction fixes that use-after-free. Allocation failures,
+failed invalidation, and failed snapshot publication no longer become success.
+
+`incremental_graph.c` covers cold/unchanged/forced transitions, provider edits,
+provider deletion, unrelated additions, cache reconfiguration, ambiguous
+providers, and sources disappearing after graph construction. The standalone
+driver passed. Valgrind Memcheck reported zero errors and zero definitely,
+indirectly, or possibly lost bytes; shared-library process-global allocations
+remained reachable at exit.
+
+HM now captures type-detail and deep tracing bits at the start of each normal
+or reachable-fact pass. `hm_unify` reads those fields instead of calling
+`ny_dbg_is_enabled` for each constraint. Quiet and `-vvvvvv` smoke checks
+passed; verbose output retained `HM_CONSTRAINT` and `HM_SUBST`. A deliberately
+invalid, unused function still failed HM validation. No wall-time speedup is
+claimed for this small tracing-policy change.
+
+After rebuilding `build/release/ny-full`, its integrated
+`--ir-opt-test=incremental_graph` group passed. The cold module-use selection,
+with explicit compiler and `core.ny` paths, passed 45/45, including positive
+and fail-closed portable refinement cases.
+
+The architecture audit distinguishes existing work from open designs:
+
+| Area | Current implementation |
+| --- | --- |
+| Persistent per-module HM reuse | Not implemented; explicit successful ABI/opt artifacts are reusable only under their identity checks, and their proof path still runs HM. |
+| Reachability | Native reachable-fact completion exists; full validation is not replaced by a graph that ignores unused-function errors. The main program is not redundantly re-inferred by `persist_native_facts`. |
+| Parallel inference | Serial within one per-pass HM state. Schemes, type-variable instances, arena allocations, diagnostics, and AST writes are shared within that pass, not a process-global unification table. |
+| HM name lookup | Existing cache keys include environment identity/generation, exact name, and exact syntax context. Replacing hygiene context with a guessed lexical-scope ID is unsound. |
+| Import lookup | Existing exact module/member result caches and snapshot-owned import-declaration index preserve source order and re-export traversal; not every transitive query is one lookup. |
+| Refinement lookup | Already indexed in the codegen compilation context; no second root cache was added. |
+
+Preserving full-program diagnostics was explicitly selected for this pass.
+Persistent per-module schemes/facts with dependency invalidation and independent
+HM partitions with deterministic merging remain necessary before claiming the
+first and third architectural blockers solved. The dirty-file inventory alone
+does not satisfy either requirement.
+
+## Compile-time cleanup under revised acceptance
+
+The compile-time TODO pass now uses measured improvement and preserved behavior,
+not the former 3–5 s compile/link/window cutoff. The user explicitly retired
+that cutoff. Earlier target-miss statements below are historical; removing the
+TODO section does not mean compilation costs disappeared or that incremental
+or parallel HM was implemented.
+
+The retained changes are confined to two compiler translation units:
+
+- `src/code/backend/ir/verify.c` builds a last-definition index during its
+  existing verification setup. Scalar-class and ownership checks use constant
+  time definition lookup instead of repeatedly scanning the whole function.
+  Same-block reaching-store checks, recursion bounds, and all ABI/ownership
+  checks remain. PHI, select, and local-store helpers avoid building analyses
+  when there are no corresponding instructions.
+- `src/code/lang/lower.c` indexes immediate valid `use` declarations per module
+  or block for each compilation snapshot. Recursive re-export lookup visits
+  those declarations in the same source order, without rescanning unrelated
+  function and variable declarations. Alias, wildcard, cycle, and depth rules
+  are unchanged. The index resets with the function/module snapshot and is
+  freed with its owner; allocation failure or table saturation falls back to
+  the original body walk.
+
+An isolated control was relinked with only those two pre-change translation
+units, using the candidate's remaining compiler objects and dependencies.
+Frozen executables prevented concurrent workspace rebuilds from changing the
+comparison. Both compiled the same `etc/projects/ui/pong.ny` through native
+x86-64 at `-O2 --threads=4 --run=none`; standard-source, automatic bitcode,
+native, AOT, and JIT caches were disabled, with `CCACHE_DISABLE=1`. This is
+source-cache-disabled compilation, not an OS-page-cache drop.
+
+Three runs per arm alternated control/candidate order:
+
+| Measurement | Control | Candidate |
+| --- | ---: | ---: |
+| Median object-compilation wall time | 40.840 s | 39.788 s |
+| Wall-time range | 40.214–41.025 s | 39.075–40.601 s |
+| Median user CPU | 51.094 s | 49.102 s |
+
+The local wall median decreased 2.6%, and user CPU decreased 3.9%. Each paired
+candidate finished sooner, but the wall-time ranges overlap; this is a modest
+local improvement, not a universal speedup or an end-to-end startup result.
+Other coding sessions were active on the host. All six objects were identical:
+SHA-256 `8af9128875b2432eb2a168c5ca95f1fc19111e1cdfe8ce7ef6689fbf775240d5`.
+
+Compiler SHA-256 identities:
+
+```text
+control:   0414b30f69e975401a51d5aa7cf9db155e017510ca2157275faf8bfa74b7e913
+candidate: 0c2dcd34a25b70a26870580c14b68219bbb8155024466b9dc5c11305a6fea866
+```
+
+The initial 199 Hz `cpu-clock:u` DWARF profile contained 10,609 samples and
+zero lost samples. It identified imported-member recursion, register-segment
+lookup, CFG construction, type-map construction, and scalar verification.
+A candidate capture overlapped the AOT smoke and lost 253 samples in ten
+chunks; it is not used to establish per-symbol improvements. Raw captures,
+frozen binaries, timing logs, objects, and `comparison.json` are retained
+under `build/compile-overhaul/`, outside source control.
+
+Verification used explicit frozen compiler binaries and
+`--std=/home/e/nytrix/build/release/core.ny`: the full module-use selection
+passed 45/45 on both control and candidate. The existing named-reexport fixture
+now also checks chained constant aliases, negative constants, unrelated
+declarations surrounding imports, and identical member spellings in separate
+providers across its four backend variants. The first default-path runner
+invocation reported 32/45, including an installed-stdlib path error and
+timeouts; it is not the explicit-binary comparison or a passing run.
+
+The cache-disabled candidate also completed native AOT compilation, link,
+launch, and two Pong frames under a private Weston Vulkan `kiosk-shell`
+compositor. Both the Wayland surface and Vulkan framebuffer were 1280×720;
+the client printed `[gfx] Using Native Vulkan Backend`. That smoke exited zero
+in 45.750 s and logged frame 1 at 5.026 s after startup. It overlapped the
+candidate profile and enabled `NY_DEBUG`, so it verifies the full path only:
+neither its total nor first-frame time is a startup-performance comparison.
+
+## HM function-environment buffer reuse
+
+`hm_infer_function_scheme` now reuses one scratch environment vector across the
+sequential scheme-inference passes in `hm_run` and `hm_run_reachable`. Each use
+gets a fresh environment generation and copies the global entries before
+binding function parameters, so cached lookups cannot reuse facts from the
+previous function. Refinement, inference, and module-use selections passed
+112/112. A cache-disabled Pong `--native-only -O2 --run=none` compile produced
+the same object SHA-256 as the previous compiler. The single control took
+36.589 s; two candidate runs took 36.219 s and 35.910 s (median 36.065 s).
+Those runs do not establish a repeatable speedup and exclude linking, launch,
+and first frame; the 5 s end-to-end target remains unmet.
+
+## Pong imported-module lookup profile
+
+A cache-disabled native-only Pong AOT run was sampled on 2026-11-11 with
+`perf record -F 499 -e cpu-clock:u --call-graph dwarf,16384`. It captured
+38,076 samples with no losses (about 76.3 billion cpu-clock events). Named
+costs included `mach_encode_function` at 11.77% cumulative,
+`mach_home_dse_analyze` at 6.33%, `nyr_find_imported_value` at 6.83%
+(`nyr_find_imported_module_member_rec` at 6.45%), and HM inference at 3.7%.
+`nyr_mach_regalloc_segment_at` accounted for 2.01%. The executable was
+emitted, but launching Pong terminated with signal 11; the compositor reported
+`message length 27503 exceeds 4096`, so this run did not verify a first window.
+
+The module-member cache was increased from 16,384 to 65,536 four-way entries.
+Matched `NYTRIX_TRACE_LOOKUPS=1` runs with `CCACHE_DISABLE=1` and AOT, native,
+and standard caches disabled recorded 12,534,021 module-member queries and
+991,142 tree scans at 16,384 entries, versus 11,769,712 queries and 917,513
+scans at 65,536 entries (7.4% fewer scans). Both saved Pong executables had
+SHA-256
+`53c42af524e6e078cdea2de362733adfb880336b2893f7d369100914e9daa70e`.
+The single traced wall times were 37.42 s and 37.84 s respectively; another
+untraced candidate run took 37.63 s. The counter reduction confirms less
+recursive lookup work, but these timings do not establish a total compile-time
+speedup. Both AOT launches ended with the same Wayland protocol error. The
+larger lazily allocated tables trade additional compiler memory for fewer
+measured lookup scans; the 5 s compile/link/first-window target remains unmet.
+
+## x86-64 home-DSE probe fast path
+
+`mach_home_dse_analyze` can remove only 8-byte virtual-register homes. The
+probe now avoids allocating its reference/dead maps and scanning encoded bytes
+when a function has no 8-byte vreg homes or the probe emits no vreg-home
+stores. Otherwise the existing reference scan and elimination test are
+unchanged. A no-dead-home probe is still reused as the final encoding.
+
+The cache-disabled native fixture selection passed 68/68 after this change.
+Two cold-cache 64-thread Pong AOT runs on headless Weston with a Vulkan
+renderer took 37.263 s and 38.365 s wall (median 37.814 s); first submitted
+frames arrived 1.283 s and 1.134 s after app startup. Compiler, native, AOT,
+standard-library, and standard-bytecode caches were disabled. Both emitted
+the same ELF SHA-256 as the pre-change Pong build:
+`53c42af524e6e078cdea2de362733adfb880336b2893f7d369100914e9daa70e`.
+A debug-enabled run of that identical ELF printed
+`[gfx] Using Native Vulkan Backend`. Weston output was 1280×720, but its
+desktop shell configured the app surface at 1280×688.
+
+A cache-disabled 199 Hz DWARF profile of the same 64-thread, `--run=none`
+route captured 12,000 samples with no losses. `perf buildid-list` matched the
+sampled `ny-full` Build ID `a79e6dbcd64bd354755bea5a1e59ccc500331255`.
+`mach_home_dse_analyze` was below the 1% report cutoff. Remaining named costs
+included imported-module recursion at 2.31%, CFG construction at 2.14%,
+register-segment lookup at 1.99%, NYIR scalar verification at 1.73%,
+loop-edge coalescing at 1.72%, type-map initialization at 1.72%, and
+implementation-operator scanning at 1.45%. Two unresolved `libomp.so`
+instruction-address buckets accounted for 13.13% and 9.79%; the profile does
+not identify their symbols, so this is not yet evidence of a specific OpenMP
+wait or scheduling defect.
+
+The same output was rebuilt cache-disabled through Weston `kiosk-shell` with
+an exact 1280×720 app surface. Each run requested one frame; timings are one
+observation per thread setting, not repeatable medians.
+
+| Compiler / std-library threads | AOT-to-frame wall | Frame 1 |
+| ---: | ---: | ---: |
+| 8 / 8 | 41.386 s | 1.438 s |
+| 16 / 16 | 39.819 s | 1.338 s |
+| 32 / 32 | 37.189 s | 1.185 s |
+| 64 / 64 | 37.223 s | 1.269 s |
+
+Every run emitted the same ELF SHA-256 as the earlier Pong build:
+`53c42af524e6e078cdea2de362733adfb880336b2893f7d369100914e9daa70e`. A debug
+launch of that identical ELF reported a 1280×720 Wayland surface and
+`[gfx] Using Native Vulkan Backend`. The single 32/32 and 64/64 observations
+are indistinguishable as a tuning result; neither approaches the 5 s target.
+
+A preceding 64/64 cold run before the no-store gate took 43.107 s and produced
+the same first-frame behavior; it is only one control against two candidates,
+so the difference does not establish a repeatable total-time speedup. The
+measured end-to-end time remains far above 5 s, and compile-hotspot work stays
+open.
+
+## Native Pong compiler call graph
+
+A cache-disabled native-only Pong compile was sampled on 2026-11-10 with
+`perf record -F 199 -e cpu-clock:u --call-graph dwarf,16384`. The baseline
+record contained 3,698 samples, no lost samples, and about 18.58 billion
+cpu-clock events. `find_refine_in_stmts` accounted for 5.76% of samples:
+each unseen refinement name recursively scanned the program and nested module
+statements. The old name memo helped repeated names but did not avoid a full
+scan for each distinct refinement.
+
+`ny_lookup_refine` now builds an arena-backed open-addressed index of refinement
+statements in `prog` and `extra_progs`, preserving the original first-match
+order (main program, nested modules in traversal order, then generated
+programs). It rebuilds if the main program pointer or generated-program count
+changes; definition objects are still materialized lazily. The candidate record
+contained 3,378 samples, no lost samples, and about 16.97 billion cpu-clock
+events. The scan fell below the report's 0.8% cutoff. These are single-run
+profiles, not a controlled timing comparison.
+
+The candidate call graph still puts `hm_run` at 55.89% cumulative children;
+`hm_infer_function_scheme` accounts for 49.73%, with recursive statement
+inference dominant. Flat samples include HM environment lookup (6.01%),
+module statement lookup (5.39%), expression inference (5.54%), and
+`collect_module_exports` with linear unique-name checks (3.29% cumulative).
+Imported-module alias resolution and string/hash work remain visible below
+those paths. These overlapping call-tree percentages are not additive.
+
+An attempted four-way per-HM-state environment lookup cache validated cached
+entries against the mutable environment vector and scanned newer entries to
+preserve shadowing. It was rejected: with other compiler caches disabled, its
+199 Hz profile attributed 23.84% of samples to `hm_env_lookup_index_ctx`.
+The final cache-free profile had 5.79% flat samples in `hm_env_entry_ctx`,
+consistent with the prior 6.01% HM environment-lookup attribution; the
+temporary cache and helper were removed. A single uninstrumented cached-trial
+compile took 16.614 s, but one run is not a controlled improvement against the
+18.072 s cache-free result.
+
+`ny_module_declares_exported_member` previously materialized an owned export
+list, performed linear duplicate checks, scanned for one member, and freed the
+list on each query. It now walks the export declarations or module definitions
+directly and returns on the first matching leaf name. The 199 Hz candidate
+profile no longer reports `ny_str_list_has` or `collect_module_exports` at its
+0.8% cutoff; module lookup remains at 5.62% and HM environment lookup at 6.16%.
+The cache-disabled module-use suite passed 45/45. A single cache-disabled
+native Pong compile took 16.329 s (15.30 s user, 0.90 s system); the earlier
+18.072 s measurement is a different single run, so this is not a controlled
+speedup claim. It still excludes linking, launch, and first frame.
+
+The same recursive module-alias resolver also formatted bounded path copies
+and joins through `snprintf`. `ny_module_path_write` now checks lengths and
+capacity, then copies the path components directly. The subsequent 199 Hz
+profile captured 2,610 samples with no losses and about 13.12 billion
+cpu-clock events; `snprintf` was not reported above the 0.8% cutoff, while
+module statement lookup remained at 6.25%. Two cache-disabled native-only
+Pong compiles took 13.866 s and 13.890 s (median 13.878 s). These are repeat
+candidate runs, not a controlled A/B against the 18.072 s historical baseline;
+they do not include link, launch, or first frame.
+
+The earlier uninstrumented cache-disabled baseline
+`build/release/ny-full --native-only -O2 --run=none etc/projects/ui/pong.ny`
+run completed in 18.072 s (17.05 s user, 0.89 s system). It is compile-only:
+no link, app launch, or first frame. This does not meet the 3 s cold
+compile/link/first-window requirement. The profile runs used 64
+standard-loader and compiler workers with minimum parallel work 512; configured
+worker counts do not establish that the hot inference path parallelizes.
+Correctness check: `NYTRIX_TEST_EXEC_CACHE=0 build/release/ny-test --bin
+build/release/ny-full --cold --jobs 8 --pattern refinement` passed all 90
+selected runtime and error fixtures.
+
+## Append-aware HM environment lookup cache
+
+HM environment lookup uses a direct-mapped cache keyed by the environment
+address, unique generation, name hash, and syntax context. Each entry records
+the environment length and either the most recent matching binding index or a
+negative result (`index == len`). When later bindings are appended, a cache hit
+scans only that suffix before reusing either result; cloned environments
+receive distinct generations. Existing-binding updates change the entry's
+type but not lookup order.
+
+A 199 Hz call-graph profile captured 14,445 samples with no losses; the
+`hm_env_entry_ctx` helper accounted for 3.67%. That is below the 6.16% seen in
+an earlier, non-matched profile, not a controlled A/B. The profiled compile
+took 43.165 s wall time; an uninstrumented run took 40.328 s, and a run with
+standard source/bytecode caches disabled took 41.573 s. Those current timings
+are much higher than the earlier 13.866/13.890 s runs; the cause is not
+established, so no total compile-time speedup is claimed. All are
+`--run=none` compile-only measurements and exclude link, launch, and first
+frame.
+
+Two cache-disabled control compiles with the existing positive cache took
+12.947 s at one thread and 12.940 s at four threads; thread count did not
+materially change this compile-only workload. A pointer-keyed cache-hit
+experiment guarded by binding-name pointer identity (falling back to content
+lookup otherwise) took 13.732 s at one thread and 13.528 s at four threads.
+Its 199 Hz profile captured 2,468 samples with no losses; `hm_env_entry_ctx`
+was 21.27% and `ny_module_lookup_stmt_by_name` 7.46%. These percentages are
+from a smaller capture than the earlier 14,445-sample profile and are not
+directly comparable. The pointer-cache experiment was reverted; it showed no
+improvement. Growing the direct-mapped cache from 128 to 1,024 entries also
+failed to improve the same compile: 13.236 s at one thread and 12.950 s at four
+threads, with a 2,443-sample profile still showing `hm_env_entry_ctx` at
+21.74% and module lookup at 7.74%. This capacity experiment was reverted.
+A fresh profile of the restored 128-entry cache captured 2,425 samples with no
+losses; `hm_env_entry_ctx` was 23.13% and module statement lookup was 6.85%.
+With append-suffix validation, the refinement, `modules/use`, and
+`shadowing` selections passed 90/90, 45/45, and 6/6. Cache-disabled Pong
+compile-only runs took 12.842 s at one thread and 12.632 s at four threads;
+the 2,384-sample profile had no losses and sampled HM lookup at 22.19% and
+module statement lookup at 7.51%. This one-run-per-setting comparison is too
+small to establish a speedup; it is consistent with a small improvement over
+the 12.947/12.940 s control runs. The compile/link/first-window 3 s target
+remains unmet. Module lookup and HM inference remain open hotspots.
+
+A follow-up caches negative lookups with the environment length as the
+not-found sentinel. Appended bindings are still checked before reusing a
+negative result, so a name introduced later in the same environment resolves
+normally. Refinement, `modules/use`, and `shadowing` passed 90/90, 45/45, and
+6/6. Four cache-disabled compile-only repeats took 10.923–11.202 s at one
+thread (median 11.078 s) and 10.682–10.952 s at four threads (median
+10.700 s), versus the preceding single-run 12.842/12.632 s controls. A fresh
+2,019-sample profile had no losses and sampled `hm_env_entry_ctx` at 8.37%,
+down from 22.19% in the earlier smaller capture; module lookup was 8.07%.
+These are not matched A/B profiles, but repeated timings at both thread counts
+support keeping the negative cache. The compile/link/first-window 3 s target
+remains unmet.
+
+### HM cache-slot mixer experiment (reverted)
+
+Replacing the cache slot's 64-bit mixing sequence with a cheaper 32-bit
+fold-and-shift mixer preserved the full environment, generation, name-hash,
+syntax-context, and length checks. Refinement, `modules/use`, and `shadowing`
+passed 90/90, 45/45, and 6/6. Four cache-disabled compile-only Pong runs took
+11.034/11.054 s at one thread and 10.962/11.156 s at four threads. Against
+the immediately preceding mixer controls (10.875/10.902 s and
+10.927/10.858 s), both candidate medians were slower by about 1.4–1.5%.
+The 2,017-sample candidate profile had no lost samples. Reverted the mixer;
+the 64-bit slot calculation remains. These compile-only measurements exclude
+linking, launch, and first frame.
+
+## HM constraint-trace fast path
+
+`hm_unify` only needs formatted constraint type strings for `NY_DBG_TYPE_DETAIL`
+output and its suppression summary. It now checks that flag once and does not
+allocate or format either string on the normal trace-disabled path. When detail
+tracing is enabled, the existing formatter and suppression rules are retained.
+The compiler reads a debug bitmask here; it does not parse environment
+variables per constraint.
+
+After the change, `NYTRIX_TEST_EXEC_CACHE=0 build/release/ny-test --cold
+--pattern native` passed 68/68. `build/release/ny-full -vvvv
+--stop-after=hm etc/projects/ui/pong.ny` exited 0 and emitted both
+`HM_CONSTRAINT` and `HM_SUBST` records. A cache-disabled four-thread Pong
+`--run=none` compile took 40.153 s and emitted the same ELF hash as the
+1280×720 AOT artifact; this single timing is not a controlled speedup.
+
+A 99 Hz DWARF profile of the trace-disabled 64-thread compile captured about
+6,000 samples with no losses. The `ny-full` Build ID matched the profiled
+binary. HM symbols and `mach_home_dse_analyze` were below the 1% report cutoff.
+The top two `libomp.so` instruction-address buckets were 12.90% and 10.27%;
+their symbols remain unresolved, so they do not identify a specific runtime
+wait or scheduling cause. Named compiler costs still included CFG building
+(2.15%), imported-member recursion (2.08%), register-segment lookup (2.02%),
+type-map initialization (1.90%), NYIR scalar verification (1.69%), and loop
+edge coalescing (1.64%). This profile identifies remaining work but does not
+establish a total compile-time speedup; the 5 s end-to-end target remains open.
+
+## Imported-member visited-set trial (reverted)
+
+The recursive re-export search temporarily replaced its query-wide linear
+visited-module scan with a 512-slot open-addressed pointer set, retaining the
+same 256-module bound and traversal order. The cache-disabled `modules/use`
+selection passed 45/45 and the emitted Pong ELF hash was unchanged. The
+baseline 99 Hz profile (Build ID
+`3970bd342bd1a58745445db06b44cc9e262795bc`) sampled
+`nyr_find_imported_module_member_rec` at 2.08%; the candidate profile (Build ID
+`3a354ff38709ecec8be62d06971c7a826705cc07`) sampled it at 2.14%. Both
+captured about 6,000 samples with no losses. These separate captures do not
+show a reduction; initializing the 4 KiB pointer table per uncached query
+also adds work for shallow walks. The change was reverted rather than retained
+without a measured win.
+
+## Module statement cache probe experiment (reverted)
+
+The module-statement lookup cache inserts into the first empty slot in its
+eight-slot probe sequence and never deletes individual entries; graph changes
+free the whole cache. A trial made lookup stop at the first empty slot instead
+of checking the remaining probes. The focused `modules/use` selection passed
+45/45. Cache-disabled Pong compile-only runs took 12.898 s at one thread and
+12.554 s at four threads, versus 12.842 s and 12.632 s in the preceding
+append-aware-cache run. The new 2,387-sample profile had no losses, but module
+lookup rose from 7.51% to 7.96%; the timings and profile do not establish a
+gain. Reverted rather than keep an unmeasured optimization.
+
+Retesting the same early-exit change after the HM negative cache passed
+`modules/use` 45/45 but took 11.107 s at one thread and 11.568 s at four
+threads, versus the negative-cache medians 11.078 s and 10.700 s. The
+2,051-sample profile had no losses and put module lookup at 8.97%, up from
+8.07% in the negative-cache profile. This did not produce a repeatable gain;
+the change was reverted again.
+
+A direct-mapped variant was also tested, replacing the eight-probe lookup and
+insertion with a single hashed slot; collisions still fell through to the
+canonical module-statement index. `modules/use` passed 45/45. Against two
+baseline repeats at each thread count (10.859/10.997 s at one thread and
+10.800/11.055 s at four), direct-map repeats took 10.829/10.867 s and
+10.890/10.858 s. These small, overlapping differences do not establish a
+speedup. Its 2,029-sample profile had no losses but sampled module lookup at
+9.76%, compared with 9.25% in the preceding profile. Reverted the one-slot
+cache; the probe count remains eight.
+
+## Module statement last-result cache trial (reverted)
+
+A one-entry fast path reused the most recently hit or inserted module-statement
+cache entry by comparing its cache-owned key before hashing and probing the
+table. `modules/use` passed 45/45 and shadowing passed 6/6. Cache-disabled
+four-thread Pong compile-only wall times were 14.54/12.07 s, against
+11.44/11.27 s immediately before the trial. The candidate was slower and was
+reverted; no module-lookup speedup is established.
+
+## Cached import-alias lookup fast-path experiment (reverted)
+
+`ny_resolve_used_module_export_alias` was changed to return an existing
+non-self user import alias before rescanning used modules; the indexed lookup
+still marks the alias as used. The refinement, `modules/use`, and shadowing
+selections passed 90/90, 45/45, and 6/6. Cache-disabled Pong compile-only runs
+took 10.984/11.043 s at one thread and 11.083/10.965 s at four threads.
+Compared with the preceding negative-cache medians (11.078 s and 10.700 s),
+these results show no repeatable gain; the four-thread median was about 3%
+slower. The 2,153-sample candidate profile had no lost samples. Reverted the
+fast path rather than keep an unproven alias-precedence shortcut.
+
+## HM binding-name pointer shortcut experiment (reverted)
+
+`hm_env_entry_matches` briefly accepted pointer-identical binding names before
+computing or comparing content hashes. Refinement, `modules/use`, and
+shadowing passed 90/90, 45/45, and 6/6. Cache-disabled compile-only Pong runs
+took 11.188/10.970 s at one thread and 11.109/11.082 s at four threads.
+Against the restored-source controls (11.524/10.995 s and 11.040/10.943 s),
+the differences were inconsistent across thread counts. The candidate's
+2,087-sample profile had no losses and sampled HM lookup at 8.82%, versus
+8.30% in the 2,011-sample control profile. Reverted the shortcut; the captures
+do not demonstrate reduced lookup cost or compile time.
+
+## HM cache pointer-key experiment (reverted)
+
+A trial used the parser-interned query-name pointer to select and validate the
+HM cache slot, deferring name hashing until a cache miss. This avoided repeated
+hashing and cached-name comparisons on same-AST hits while retaining the cached
+hash for appended-binding checks. Refinement, `modules/use`, and shadowing
+passed 90/45/6. Cache-disabled four-thread Pong compile-only wall times were
+11.44/11.27 s before and 11.59/11.37 s with the trial. The candidate was
+slower, so the pointer-key path was reverted; no compile-time gain is claimed.
+
+## HM environment clone bulk copy
+
+`hm_env_clone` now reserves exactly the source length once and copies the
+entries with one `memcpy`, replacing per-entry `vec_push` growth and copying.
+The cold refinement selection passed 90/90; `modules/use` passed 45/45 and
+shadowing passed 6/6. Cache-disabled four-thread Pong compile-only wall times
+were 11.44/11.27 s before and 11.51/11.27 s after. This removes repeated
+vector growth/copy work but the timings do not establish a total compile-time
+speedup. A separate 2,427-sample cycle profile had no losses and still showed
+HM lookup as the largest flat hotspot at 9.55%; profiles are not matched A/B.
+
+## HM fast-hash replacement trial (reverted)
+
+To target the HM lookup hotspot, `hm_name_hash` was temporarily changed from
+32-bit FNV-1a to the existing `ny_hash64_fast_cstr`, truncated to 32 bits.
+Refinement, `modules/use`, and shadowing passed 90/45/6. Two cache-disabled
+four-thread Pong compile-only controls took 10.933/10.955 s; the trial took
+10.906/11.039 s. The ranges overlap and show no repeatable improvement, so
+the replacement was reverted.
+
+## Reachability qualified-call duplicate lookup
+
+In `ny_native_scan_qualified_call`, a failed initial
+`nyr_find_user_function` lookup was repeated when the qualified name was not an
+import alias. The branch now returns directly when the first lookup found
+nothing, and adds the first result otherwise. The normal `NY_E_MEMCALL` scan
+also resolved the same qualified target twice; it now reuses the first
+resolution result. The change builds; focused `modules/use` passed 45/45, and
+the `native` selection passed 68/68. Two cache-disabled four-thread Pong
+`--run=none` compiles took 12.12 s and 11.19 s wall time. These timings are not
+a matched A/B and do not establish a speedup. The change removes redundant
+lookups but does not close the compile-hotspot or 3 s compile/link/first-window
+acceptance criteria.
+
+### Follow-up cache-disabled Pong profile
+
+A fresh 199 Hz DWARF call-graph capture after the reachability changes recorded
+2,545 samples with no losses. Flat samples were led by HM environment lookup
+(10.20%), `ny_hash64_fast` (5.71%), module statement lookup (4.67%),
+`ny_module_public_target` (4.44%), and attached-method lookup (3.03%).
+`ny_native_scan_qualified_call` was not a top-level symbol at the report's
+1% cutoff, so this capture does not demonstrate a measurable gain from the
+duplicate-lookup fix. The imported-module and HM hot spots remain; the
+compile-time acceptance criteria are still open.
+
+## Name-hash hotspot review
+
+The 2,019-sample negative-cache profile attributed 5.10% cumulative to
+`ny_hash_name` and 4.26% self to `ny_hash64_fast`; these overlapping call-tree
+figures are not additive. Samples came through several consumers, including
+import-alias resolution and attached-method lookup, rather than one isolated
+name-hash workload. `ny_hash64_fast` is the shared implementation behind
+`ny_hash64` and has callers outside name lookup. No hash algorithm or global
+hash contract change was justified by this profile, so no code change was
+kept. Name hashing remains a measured cost to revisit if a consumer-specific
+hotspot becomes clear.
+
+## Attached-method fallback scan experiment (reverted)
+
+The attached-method fallback scans `cg->fun_sigs` and derives an owner string
+for signatures before checking whether each signature is an attached method.
+A trial moved the cheap attached-method, owner/name, and current-signature
+checks ahead of owner derivation. The attached-method selections passed 7/7
+and `modules/use` passed 45/45. Two cache-disabled compile-only runs took
+11.267/10.844 s at one thread and 11.446/10.695 s at four threads; these
+overlap the preceding negative-cache medians of 11.078/10.700 s and do not
+show a stable gain. The 2,075-sample candidate profile had no losses and
+sampled attached-method lookup at 4.05% self, but it is not a matched profile.
+Reverted the filter reordering rather than claim an unsupported speedup.
+
+## CFG builder allocation experiment (reverted)
+
+A `nyr_cfg_build_impl` trial replaced zeroed allocations with uninitialized
+storage for arrays believed to be fully written. It required zeroing all
+predecessor-offset entries before accumulating incoming edges; doing that
+inside the accumulation loop erased earlier counts and stalled dominator
+intersection. After fixing the ordering, `cfg_simplify`, `dce_phi_label`,
+`loop_unroll`, `loop_interchange`, `gvn_pre`, and `range_query` passed.
+
+The corrected trial's 199 Hz profile captured 14,908 samples with no losses;
+`nyr_cfg_build_impl` accounted for 2.12%. The profiled compile took 43.771 s;
+the uninstrumented cache-disabled `--run=none` compile took 41.338 s
+(1m18.022s user, 5.006s system), versus a separate 41.573 s baseline. The
+difference is not enough to establish a speedup, so the allocation changes
+were reverted. `regalloc_loop_phi_carry` fails with both the trial and restored
+baseline; the mismatch is not attributed to the CFG allocation experiment.
+
+The whole `--ir-opt-test` run also stops at the AArch64 disassembly fixture's
+expected-line mismatch: the actual listing appends encoded bytes before the
+newline. Focused CFG-related groups pass independently. Pong measurements
+remain compile-only and do not meet the 3 s compile/link/first-window target.
+
+## Register-segment lookup observation
+
+The Pong profile sampled `nyr_mach_regalloc_segment_at` at 1.69%. Its search is
+already restricted to each vreg's sorted segment range and runs in
+$O(\log k)$, where $k$ is that vreg's segment count. A last-start upper-bound
+shortcut was not adopted: machine blocks are appended at `inst_len`, so empty
+blocks can share instruction positions and generate same-start live segments;
+the shortcut could select a different segment at those boundaries. The LSP
+found 65 references, mostly encoder lookups.
+
+Focused `regalloc_cfg_edge_carry` and `regalloc_dead_input_coalesce` tests pass.
+At the time of this lookup investigation, `regalloc_loop_phi_carry` failed with
+the same reported colors when the CFG allocation trial was reverted
+(`header/preheader/latch = color 2`, source = color 0); the failure was not
+attributed to the lookup investigation. No segment-search change was made.
+
+## Loop-phi preheader source color fix
+
+The failing GPR fixture exposed a missed safe-coalescing case: loop-edge
+coalescing intentionally left preheader source segments untouched to preserve
+values across calls, even when the source died at the phi copy. That left the
+preheader incoming value in a different physical register from the backedge
+carry. The coalescer now recolors a preheader source only when it dies at the
+copy, after checking both source segments for register constraints, clobbers,
+and conflicts. Non-dying sources retain their original register; call-clobber
+checks remain active.
+
+The focused `regalloc_loop_phi_carry`, `regalloc_cfg_edge_carry`,
+`regalloc_dead_input_coalesce`, and `regalloc_fpr_loop_phi_carry` tests pass.
+The loop-carry fixture also verifies that a deliberately mismatched latch color
+is rejected by the allocator verifier. The CFG allocation experiment remains
+reverted; this correctness fix does not establish a compile-time speedup.
+
 <!-- AUTO_BENCHMARK_RESULTS_BEGIN -->
 
 ## Latest full benchmark run
 
-Generated automatically by the full `ny-test --bench` run at 2026-11-09 17:09:26 CET.
-Host: AMD EPYC 7642; target `x86_64`; compiler `fnv1a64:bbce0365367cdf82`.
+Generated automatically by the full `ny-test --bench` run at 2026-11-11 08:57:04 CET.
+Host: AMD EPYC 7642; target `x86_64`; compiler `fnv1a64:c2e30831b14c1e99`.
 NYR: `-O3`, profile `peak`, tier `opt`, engine `NYR`, cache `warm`.
 C: clang version 23.1.4; flags `-O3 -march=native`. NYC flags `-O3 -c`.
-Samples: 3 plus 1 warm-up; fixture workers 23, route workers 1.
-Results: 74 fixtures; 73 passed, 0 failed or mismatched, 1 timer controls.
+Samples: 3 plus 1 warm-up; fixture workers 15, route workers 1.
+Results: 77 fixtures; 75 passed, 1 failed or mismatched, 1 timer controls.
 Measurement qualifiers: 0 low-time, 0 noisy; 0 fixture budget misses.
 
 | Fixture | Status | NYR | LLVM | Host C | NYC | NYR/C | LLVM/C | NYR/LLVM |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| `binary-trees` | ok | 3.1µs | 3.0µs | 2.6µs | 2.3µs | 1.17x | 1.14x | 1.02x |
-| `binary` | ok | 838µs | 268µs | 1.05ms | 1.94ms | 0.80x | 0.26x | 3.13x |
-| `collatz` | ok | 87µs | 68µs | 57µs | 60µs | 1.52x | 1.20x | 1.27x |
-| `euler9` | ok | 73µs | 48µs | 28µs | 32µs | 2.62x | 1.71x | 1.53x |
-| `expression-tree` | ok | 52.0ms | 30.9ms | 16.1ms | 40.5ms | 3.23x | 1.92x | 1.69x |
-| `fannkuch` | ok | 291ms | 209ms | 216ms | 253ms | 1.35x | 0.97x | 1.39x |
-| `graph-bfs` | ok | 29.7ms | 27.8ms | 20.7ms | 34.7ms | 1.43x | 1.35x | 1.07x |
-| `havlak` | ok | 2.89ms | 2.61ms | 2.42ms | 3.24ms | 1.19x | 1.08x | 1.10x |
-| `knight` | ok | 83µs | 44µs | 35µs | 39µs | 2.39x | 1.25x | 1.91x |
-| `mandel` | ok | 122µs | 98µs | 83µs | 102µs | 1.46x | 1.18x | 1.25x |
-| `mandelbrot` | ok | 344µs | 245µs | 239µs | 437µs | 1.44x | 1.02x | 1.40x |
-| `n-body` | ok | 2.80ms | 1.94ms | 1.97ms | 4.32ms | 1.42x | 0.99x | 1.44x |
-| `nqueens` | ok | 35.5ms | 20.9ms | 20.5ms | 31.3ms | 1.73x | 1.02x | 1.70x |
-| `page-rank` | ok | 20µs | 9.3µs | 4.8µs | 20µs | 4.12x | 1.96x | 2.10x |
-| `prime` | ok | 1.39ms | 1.26ms | 1.26ms | 1.36ms | 1.10x | 1.00x | 1.10x |
-| `queen` | ok | 232µs | 117µs | 70µs | 158µs | 3.34x | 1.68x | 1.99x |
-| `sieve` | ok | 7.39ms | 4.96ms | 5.27ms | 13.2ms | 1.40x | 0.94x | 1.49x |
-| `sor` | ok | 998µs | 795µs | 868µs | 1.44ms | 1.15x | 0.92x | 1.26x |
-| `spectral` | ok | 83µs | 54µs | 51µs | 92µs | 1.64x | 1.05x | 1.55x |
-| `call-chain` | ok | 707µs | 534µs | 440µs | 668µs | 1.61x | 1.22x | 1.32x |
-| `calls` | ok | 105µs | 98µs | 101µs | 124µs | 1.04x | 0.97x | 1.07x |
-| `thread-ring` | ok | 6.33ms | 5.08ms | 3.93ms | 2.93ms | 1.61x | 1.29x | 1.25x |
-| `dict-oracle` | ok | 116µs | 76µs | 30µs | 22µs | 3.89x | 2.54x | 1.53x |
-| `dict-set` | ok | 30.4ms | 39.2ms | 40.7ms | 84.8ms | 0.75x | 0.96x | 0.78x |
-| `dict` | ok | 9.03ms | 8.66ms | 5.75ms | 6.71ms | 1.57x | 1.50x | 1.04x |
-| `hash` | ok | 4.59ms | 5.21ms | 3.86ms | 4.51ms | 1.19x | 1.35x | 0.88x |
-| `heapsort` | ok | 5.24ms | 2.60ms | 2.71ms | 4.82ms | 1.94x | 0.96x | 2.02x |
-| `iter` | ok | 377µs | 354µs | 556µs | 837µs | 0.68x | 0.64x | 1.06x |
-| `list-any-append` | ok | 8.70ms | 10.0ms | 8.81ms | 10.2ms | 0.99x | 1.14x | 0.87x |
-| `list-dynamic` | ok | 4.69ms | 4.52ms | 4.80ms | 4.46ms | 0.98x | 0.94x | 1.04x |
-| `list` | ok | 4.54ms | 4.18ms | 3.93ms | 4.37ms | 1.16x | 1.06x | 1.09x |
-| `records` | ok | 52.2ms | 22.8ms | 45.7ms | 85.3ms | 1.14x | 0.50x | 2.29x |
-| `splay` | ok | 8.55ms | 3.58ms | 3.62ms | 9.17ms | 2.36x | 0.99x | 2.39x |
-| `vector` | ok | 290µs | 328µs | 299µs | 341µs | 0.97x | 1.09x | 0.89x |
-| `bce-matrix` | ok | 4.98ms | 6.31ms | 1.94ms | 9.49ms | 2.57x | 3.26x | 0.79x |
-| `bigint-oracle` | ok | 39.4ms | 35.4ms | 3.65ms | 3.81ms | 10.81x | 9.71x | 1.11x |
-| `dgemm` | ok | 35µs | 26µs | 21µs | 63µs | 1.67x | 1.24x | 1.35x |
-| `fft` | ok | 17µs | 24µs | 19µs | 24µs | 0.89x | 1.28x | 0.70x |
-| `fibonacci` | ok | 177µs | 168µs | 132µs | 166µs | 1.33x | 1.27x | 1.05x |
-| `float-cmp-oracle` | ok | 16µs | 14µs | 24µs | 18µs | 0.66x | 0.60x | 1.09x |
-| `float` | ok | 9.60ms | 9.39ms | 9.33ms | 9.60ms | 1.03x | 1.01x | 1.02x |
-| `intops` | ok | 1.27ms | 616µs | 514µs | 643µs | 2.47x | 1.20x | 2.06x |
-| `linpack` | ok | 373µs | 239µs | 83µs | 833µs | 4.49x | 2.88x | 1.56x |
-| `matrix-raw` | ok | 46µs | 25µs | 27µs | 32µs | 1.67x | 0.92x | 1.81x |
-| `matrix` | ok | 31µs | 15µs | 7.1µs | 22µs | 4.42x | 2.07x | 2.14x |
-| `pbkdf2` | ok | 1.48ms | 856µs | 1.90ms | 2.73ms | 0.78x | 0.45x | 1.73x |
-| `pidigits` | ok | 42µs | 39µs | 5.8µs | 15µs | 7.17x | 6.65x | 1.08x |
-| `sha256` | ok | 1.23ms | 1.18ms | 928µs | 2.49ms | 1.33x | 1.27x | 1.04x |
-| `cmov-sort` | ok | 1.31ms | 663µs | 364µs | 1.29ms | 3.60x | 1.82x | 1.98x |
-| `currying` | ok | 5.05ms | 6.67ms | 3.3µs | 13µs | 1550.65x | 2047.51x | 0.76x |
-| `dce` | ok | 19µs | 11µs | 3.29ms | 2.75ms | <0.01x | <0.01x | 1.75x |
-| `escape-loop` | ok | 4.58ms | 4.03ms | 4.11ms | 8.05ms | 1.12x | 0.98x | 1.14x |
-| `gcbench` | ok | 44.6ms | 40.2ms | 23.3ms | 25.1ms | 1.91x | 1.73x | 1.11x |
-| `inline` | ok | 82µs | 57µs | 26µs | 85µs | 3.11x | 2.16x | 1.44x |
-| `licm-math` | ok | 4.81ms | 4.67ms | 4.77ms | 5.35ms | 1.01x | 0.98x | 1.03x |
-| `licm` | ok | 158µs | 140µs | 26µs | 166µs | 5.96x | 5.30x | 1.12x |
-| `loop-unswitch` | ok | 4.48ms | 4.87ms | 4.33ms | 4.48ms | 1.04x | 1.12x | 0.92x |
-| `loop` | ok | 1.20ms | 1.15ms | 1.03ms | 1.15ms | 1.17x | 1.12x | 1.04x |
-| `mixed-static-island` | ok | 20µs | 13µs | 37µs | 29µs | 0.55x | 0.37x | 1.51x |
-| `native-oracle` | ok | 45µs | 47µs | 26µs | 30µs | 1.72x | 1.78x | 0.97x |
-| `recursive-fibonacci` | ok | 271ns | 311ns | 1.99ms | 17.0ms | <0.01x | <0.01x | 0.87x |
-| `startup` | ok | 29ns | 28ns | 27ns | 49ns | n/a | n/a | n/a |
-| `straight` | ok | 21µs | 20µs | 20µs | 21µs | 1.07x | 1.00x | 1.07x |
-| `tce-recursion` | ok | 93µs | 104µs | 90µs | 2.59ms | 1.03x | 1.16x | 0.89x |
-| `time-profile` | ok | 37µs | 45µs | 29µs | 29µs | 1.28x | 1.57x | 0.81x |
-| `append-scaling` | ok | 7.82ms | 7.86ms | 10.4ms | 27.3ms | 0.75x | 0.75x | 0.99x |
-| `fasta` | ok | 1.89ms | 1.49ms | 987µs | 1.14ms | 1.92x | 1.51x | 1.27x |
-| `json-parser` | ok | 19.1ms | 10.0ms | 12.2ms | 34.9ms | 1.57x | 0.82x | 1.90x |
-| `knucleotide` | ok | 152µs | 128µs | 71µs | 111µs | 2.14x | 1.80x | 1.18x |
-| `repeat` | ok | 82.6ms | 84.0ms | 91.4ms | 106ms | 0.90x | 0.92x | 0.98x |
-| `revcomp` | ok | 68µs | 23µs | 14µs | 70µs | 4.87x | 1.65x | 2.96x |
-| `string` | ok | 188µs | 189µs | 219µs | 536µs | 0.86x | 0.86x | 1.00x |
-| `word-frequency-scan` | ok | 4.45ms | 2.40ms | 2.09ms | 4.84ms | 2.13x | 1.15x | 1.85x |
-| `word-frequency` | ok | 5.01ms | 4.74ms | 3.90ms | 13.3ms | 1.28x | 1.21x | 1.06x |
+| `binary-trees` | ok | 2.3µs | 2.9µs | 2.6µs | 2.4µs | 0.86x | 1.10x | 0.79x |
+| `binary` | ok | 840µs | 282µs | 2.39ms | 1.77ms | 0.35x | 0.12x | 2.98x |
+| `collatz` | ok | 82µs | 53µs | 39µs | 47µs | 2.10x | 1.36x | 1.54x |
+| `euler9` | ok | 65µs | 56µs | 22µs | 29µs | 2.99x | 2.56x | 1.17x |
+| `expression-tree` | ok | 7.18ms | 6.99ms | 7.87ms | 10.3ms | 0.91x | 0.89x | 1.03x |
+| `fannkuch` | ok | 233ms | 210ms | 218ms | 245ms | 1.06x | 0.96x | 1.11x |
+| `graph-bfs` | ok | 35.6ms | 29.4ms | 28.1ms | 40.3ms | 1.26x | 1.04x | 1.21x |
+| `havlak` | ok | 2.72ms | 2.67ms | 2.45ms | 3.17ms | 1.11x | 1.09x | 1.02x |
+| `knight` | ok | 57µs | 155µs | 33µs | 42µs | 1.74x | 4.71x | 0.37x |
+| `knucleotide` | ok | 442µs | 530µs | 373µs | 478µs | 1.19x | 1.42x | 0.83x |
+| `mandel` | ok | 129µs | 99µs | 78µs | 101µs | 1.65x | 1.27x | 1.30x |
+| `mandelbrot` | ok | 322µs | 253µs | 252µs | 430µs | 1.28x | 1.00x | 1.27x |
+| `n-body` | ok | 2.76ms | 1.99ms | 1.98ms | 2.36ms | 1.39x | 1.00x | 1.39x |
+| `nqueens` | ok | 32.1ms | 21.2ms | 20.8ms | 33.1ms | 1.54x | 1.02x | 1.51x |
+| `page-rank` | ok | 19µs | 7.6µs | 4.8µs | 19µs | 3.96x | 1.58x | 2.50x |
+| `pbkdf2` | ok | 138µs | 134µs | 1.19ms | 2.46ms | 0.12x | 0.11x | 1.03x |
+| `prime` | ok | 1.38ms | 1.28ms | 1.26ms | 1.38ms | 1.09x | 1.01x | 1.07x |
+| `queen` | ok | 74µs | 67µs | 51µs | 52µs | 1.45x | 1.30x | 1.11x |
+| `sha256` | ok | 1.43ms | 1.42ms | 939µs | 2.54ms | 1.53x | 1.51x | 1.01x |
+| `sieve` | ok | 5.49ms | 6.26ms | 4.85ms | 5.57ms | 1.13x | 1.29x | 0.88x |
+| `sor` | ok | 987µs | 938µs | 1.04ms | 1.42ms | 0.95x | 0.90x | 1.05x |
+| `spectral` | ok | 84µs | 58µs | 51µs | 93µs | 1.65x | 1.14x | 1.45x |
+| `call-chain` | ok | 530µs | 541µs | 249µs | 510µs | 2.13x | 2.17x | 0.98x |
+| `calls` | ok | 115µs | 111µs | 102µs | 124µs | 1.13x | 1.09x | 1.03x |
+| `thread-ring` | ok | 5.48ms | 5.33ms | 5.04ms | 2.88ms | 1.09x | 1.06x | 1.03x |
+| `dict-oracle` | ok | 83µs | 73µs | 28µs | 27µs | 2.99x | 2.62x | 1.14x |
+| `dict-set` | fail | 48.1ms | 104ms | 65.1ms | — | 0.74x | 1.60x | 0.46x |
+| `dict` | ok | 9.96ms | 11.9ms | 5.67ms | 6.76ms | 1.76x | 2.10x | 0.84x |
+| `hash` | ok | 4.62ms | 5.36ms | 3.95ms | 4.60ms | 1.17x | 1.35x | 0.86x |
+| `heapsort` | ok | 4.73ms | 2.77ms | 2.63ms | 5.19ms | 1.80x | 1.05x | 1.71x |
+| `iter` | ok | 368µs | 409µs | 641µs | 874µs | 0.57x | 0.64x | 0.90x |
+| `list-any-append` | ok | 9.52ms | 11.4ms | 11.4ms | 10.2ms | 0.83x | 1.00x | 0.83x |
+| `list-dynamic` | ok | 4.28ms | 4.70ms | 4.60ms | 5.49ms | 0.93x | 1.02x | 0.91x |
+| `list` | ok | 4.35ms | 4.46ms | 4.25ms | 4.45ms | 1.02x | 1.05x | 0.98x |
+| `records` | ok | 45.5ms | 51.8ms | 18.5ms | 61.9ms | 2.47x | 2.81x | 0.88x |
+| `splay` | ok | 4.24ms | 3.65ms | 3.83ms | 6.31ms | 1.11x | 0.95x | 1.16x |
+| `vector` | ok | 379µs | 381µs | 265µs | 387µs | 1.43x | 1.44x | 0.99x |
+| `bce-matrix` | ok | 2.86ms | 6.38ms | 2.29ms | 6.45ms | 1.25x | 2.79x | 0.45x |
+| `bigint-oracle` | ok | 39.5ms | 34.1ms | 3.74ms | 3.95ms | 10.57x | 9.13x | 1.16x |
+| `dgemm` | ok | 62µs | 42µs | 44µs | 63µs | 1.41x | 0.94x | 1.50x |
+| `fft` | ok | 17µs | 28µs | 14µs | 23µs | 1.15x | 1.94x | 0.59x |
+| `fibonacci` | ok | 113µs | 170µs | 131µs | 165µs | 0.86x | 1.29x | 0.67x |
+| `float-cmp-oracle` | ok | 15µs | 15µs | 14µs | 18µs | 1.10x | 1.07x | 1.03x |
+| `float` | ok | 9.71ms | 9.49ms | 9.55ms | 9.71ms | 1.02x | 0.99x | 1.02x |
+| `intops` | ok | 653µs | 636µs | 526µs | 592µs | 1.24x | 1.21x | 1.03x |
+| `linpack` | ok | 161µs | 108µs | 146µs | 286µs | 1.11x | 0.74x | 1.49x |
+| `matrix-raw` | ok | 45µs | 26µs | 28µs | 34µs | 1.60x | 0.94x | 1.70x |
+| `matrix` | ok | 22µs | 15µs | 7.4µs | 24µs | 3.04x | 2.04x | 1.49x |
+| `pbkdf2` | ok | 1.02ms | 371µs | 1.18ms | 2.44ms | 0.87x | 0.31x | 2.76x |
+| `pidigits` | ok | 9.5µs | 7.1µs | 5.9µs | 15µs | 1.61x | 1.20x | 1.34x |
+| `sha256` | ok | 784µs | 732µs | 941µs | 2.40ms | 0.83x | 0.78x | 1.07x |
+| `cmov-sort` | ok | 476µs | 693µs | 368µs | 815µs | 1.30x | 1.88x | 0.69x |
+| `currying` | ok | 4.77ms | 6.81ms | 6.0µs | 5.9µs | 791.81x | 1130.78x | 0.70x |
+| `dce` | ok | 18µs | 11µs | 3.27ms | 2.79ms | <0.01x | <0.01x | 1.66x |
+| `escape-loop` | ok | 4.76ms | 4.13ms | 4.21ms | 8.25ms | 1.13x | 0.98x | 1.15x |
+| `gcbench` | ok | 46.3ms | 47.8ms | 25.6ms | 27.9ms | 1.81x | 1.87x | 0.97x |
+| `inline` | ok | 58µs | 57µs | 26µs | 75µs | 2.20x | 2.16x | 1.02x |
+| `licm-math` | ok | 4.68ms | 4.71ms | 4.78ms | 5.41ms | 0.98x | 0.99x | 0.99x |
+| `licm` | ok | 77µs | 85µs | 39µs | 102µs | 1.95x | 2.15x | 0.91x |
+| `loop-unswitch` | ok | 4.52ms | 4.90ms | 4.28ms | 4.55ms | 1.06x | 1.14x | 0.92x |
+| `loop` | ok | 1.16ms | 1.16ms | 1.04ms | 1.16ms | 1.12x | 1.11x | 1.00x |
+| `mixed-static-island` | ok | 18µs | 14µs | 28µs | 28µs | 0.63x | 0.51x | 1.24x |
+| `native-oracle` | ok | 61µs | 53µs | 27µs | 25µs | 2.28x | 2.00x | 1.14x |
+| `recursive-fibonacci` | ok | 291ns | 221ns | 220ns | 240ns | 1.32x | 1.00x | 1.32x |
+| `startup` | ok | 29ns | 28ns | 28ns | 28ns | n/a | n/a | n/a |
+| `straight` | ok | 20µs | 20µs | 20µs | 20µs | 1.01x | 1.01x | 1.00x |
+| `tce-recursion` | ok | 93µs | 106µs | 83µs | 93µs | 1.12x | 1.28x | 0.87x |
+| `time-profile` | ok | 47µs | 44µs | 33µs | 35µs | 1.43x | 1.34x | 1.07x |
+| `append-scaling` | ok | 9.91ms | 7.75ms | 6.48ms | 18.5ms | 1.53x | 1.20x | 1.28x |
+| `fasta` | ok | 1.34ms | 1.53ms | 977µs | 1.17ms | 1.37x | 1.56x | 0.88x |
+| `json-parser` | ok | 15.5ms | 10.7ms | 12.3ms | 24.9ms | 1.25x | 0.87x | 1.45x |
+| `knucleotide` | ok | 107µs | 74µs | 71µs | 104µs | 1.50x | 1.03x | 1.45x |
+| `repeat` | ok | 85.8ms | 83.9ms | 85.3ms | 119ms | 1.01x | 0.98x | 1.02x |
+| `revcomp` | ok | 6.0µs | 5.2µs | 2.7µs | 8.1µs | 2.24x | 1.95x | 1.15x |
+| `string` | ok | 181µs | 206µs | 189µs | 272µs | 0.96x | 1.09x | 0.88x |
+| `word-frequency-scan` | ok | 3.04ms | 2.34ms | 2.24ms | 3.25ms | 1.36x | 1.04x | 1.30x |
+| `word-frequency` | ok | 4.73ms | 4.76ms | 3.74ms | 5.93ms | 1.26x | 1.27x | 0.99x |
+
+Checksum and execution failures:
+
+| Fixture | Status | NYR checksum | LLVM checksum | C checksum | NYC checksum | Return codes (NYR/LLVM/C/NYC) | NYC diagnostic |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `dict-set` | fail | `749999` | `749999` | `749999` | `—` | 0/0/0/139 | NYC execution failed (exit 139, failures 9) |
 
 The empty timer control is shown for completeness and is excluded from workload ratios.
-Raw report: `build/bench-reports/bench-20261109-170831-2148134.json`.
+Raw report: `build/bench-reports/bench-20261111-085551-3992942.json`.
 
 <!-- AUTO_BENCHMARK_RESULTS_END -->
 
@@ -496,6 +1178,390 @@ and all 62 benchmark checksums passed; the one-sample benchmark was correctness
 evidence, not a performance campaign. Generated-program runtime was outside
 this compile-time target.
 
+### Pong AOT compilation and startup
+
+Pong's font setup accepts an optional glyph subset; omitted glyphs are prepared
+on demand, while the default still primes ASCII. `font-subset.nshape` checks
+prepared and missing glyph metrics on native O0/O3, AOT O2, and LLVM MCJIT.
+The app prepares its score/label characters before drawing. Its 26 net
+rectangles are cached as packed records and rebuilt only on framebuffer resize.
+The AOT executable completed three 20-frame headless-Weston runs.
+`NYTRIX_PONG_FRAME_TIMES=1` measures submission/show completion, not physical
+display scanout.
+
+The original mapping oracle's eight-entry thread-local dedup cache could forget
+an address still in the append-only exact-range table, exhausting the 256
+entries with duplicates. Registration now scans that table under its writer
+lock before appending. `nytrix-map-oracle-dedup` cycles 32 allocated ranges 32
+times; the old runtime fills the table at 256, and the regression passes with
+the fix. Distinct ranges still saturate capacity. A 4096-entry trial delayed
+saturation to about frame nine, then frame intervals returned to roughly
+210 ms; the same 60-frame run stopped in `libvulkan_radeon.so` with SIGSEGV,
+whose cause was not established. The capacity increase was reverted.
+Append-only positive range knowledge needs lifetime-safe invalidation before
+capacity can grow without weakening pointer safety.
+
+Historical three-run medians at 1280×720 on private headless Weston were:
+
+| Variant | Median to first submitted/shown frame |
+| --- | ---: |
+| Original app and runtime | 1714.20 ms |
+| Font subsets | 1612.48 ms |
+| Subsets plus cached net geometry | 1505.97 ms |
+| Fresh runtime with range deduplication | 1417.93 ms |
+
+These successive runs overlapped other host work and runtime builds, so they do
+not establish a controlled speedup. Subsequent frames remained around
+210–220 ms. The mapping-oracle bound-overflow experiment and its current check
+are recorded with the runtime changes; startup still needs a stable headless
+comparison.
+
+The 2026-11-10 cache-disabled Pong `-O2` AOT compile measured 62.185 s on the
+synchronized toolchain: type validation 10.243 s, codegen 11.783 s, object
+emission 42.560 s, runtime object 0.006 s, link 0.319 s. A sampled run recorded
+6,246 CPU-cycle samples with no lost samples. The largest named self costs were
+CFG building 2.60%, imported-member lookup 2.44%, loop-edge coalescing 2.37%,
+refinement lookup 2.20%, type-map initialization 1.78%, and register-allocation
+segment lookup 1.59%; no one hot path accounts for the 30-second gap. The
+profile-time run before rebuilding the launcher and compiler as a matched pair
+is not comparable and is excluded.
+
+A later synchronized compile after the mapping-oracle change completed in
+70.350 s, including 14.092 s rebuilding the runtime object. Its type validation
+took 10.227 s, codegen 11.723 s, object emission 34.969 s, and linking 0.237 s.
+The different cache/build state prevents treating this as a direct regression
+against the 62.185 s run; both remain above the 30 s target. No compiler
+hot-spot optimization was established by these measurements.
+
+New cache-disabled `-O2` runs on the updated tree took 58.139 s with default
+thread settings, 56.042 s with `--threads 4` (10.349 s type validation,
+11.938 s codegen, 36.259 s object emission), and 63.450 s with `--threads 8`;
+the eight-thread run parallelized only five of 4,956 regions. Disabling x86
+home DSE took 52.267 s (10.303 s type validation, 11.828 s codegen,
+32.488 s object emission), but generated code differs and its Pong runtime was
+not validated. None meets the 30 s target; these experiments establish no
+retained compile-time speedup.
+
+The current cold-cache, eight-thread `--run=aot` profile ran under headless
+Weston at 1280×720 with cache-disabled compiler/runtime settings and
+`NYTRIX_PONG_MAX_FRAMES=1`. Total time was 75.334 s: type validation 10.019 s,
+codegen 11.547 s, object emission 31.732 s, and `nyr_build_ir` 30.046 s;
+the first submitted frame arrived 1.200 s after app startup. Reachability
+timers split its 6.978 s into 0.066 s for top-level roots, effectively zero for
+function roots, and 6.912 s for transitive call-graph scanning across 2,725
+functions. Function lowering took 6.864 s and `rt_main` lowering 12.248 s.
+Machine lowering took 0.520 s, bundle encoding 4.430 s, and ELF writing under
+0.2 s. The `_range_contains` function still uses the legacy fallback after a
+register-allocation failure. A root-seeding filter experiment did not change
+the 2,725-function reachable set and was reverted. Earlier default-cache
+verification explicitly printed `[gfx] Using Native Vulkan Backend`; its
+one-frame run took 52.498 s total. These runs confirm the three-second
+compile/link/first-frame target is not currently close to passing; profiling
+did not establish a retained compiler speedup.
+
+A follow-up instrumented NYIR build used an already-cached runtime object and
+completed the same one-frame Weston/Vulkan AOT path in 53.401 s. Its 29.815 s
+NYIR build split into 6.893 s reachable-function collection, 6.857 s function
+lowering, 6.019 s post-inline optimization, 4.221 s call-effect inference, and
+0.295 s `rt_main` lowering. The post-inline stage runs the full optimizer over
+up to 512 functions after cleanup, small inlining, and general inlining. The
+call-effect stage includes fixed-point propagation and patching calls in the
+function bodies. Machine lowering was 0.519 s, bundle encoding 4.414 s, and
+ELF writing under 0.2 s; object emission was 31.482 s. A temporary attempt to
+skip that full optimization when general inlining made no changes reported
+355 reoptimized and 157 unchanged functions, but an unpaired noisy run was
+slower (37.146 s `nyr_build_ir`, 39.577 s object emission). It was reverted:
+the earlier small-inline/cleanup mutations were not tracked, and no output
+equivalence or speed improvement was established. The new opt-in stage timers
+are retained to isolate these costs on future matched runs.
+
+A separate cache-disabled `--run=none` type-pipeline profile, with the finer
+HM-phase timers enabled, measured 18.862 s total: context construction 1.229 s,
+HM 8.078 s, type validation 10.070 s, and codegen 11.584 s. Within HM,
+scheme collection took 0.081 s, the top-level sweep 0.405 s, inference across
+8,430 schemes 7.299 s, and semantic completion 0.293 s; only four functions
+were inferred during the first-pass top-level sweep. These counts identify
+whole-scheme inference—not the initial sweep—as the measured HM cost. Pipeline
+timers are nested/overlapping and must not be summed to reconstruct wall time.
+A separate 99 Hz software-clock profile captured 1,824 samples with no loss.
+It sampled repeated refinement lookup at 5.37%, HM environment matching at
+5.59%, and module lookup/cache paths at about 8.6% combined. HM expression
+inference was distributed across several symbols. The sample identifies
+investigation targets, not independently attributable savings; no optimization
+to these paths was justified by that profile alone. A follow-up changed
+`ny_lookup_refine` to consult the existing name-to-definition/miss memo before
+scanning registered definitions, while invalidating the memo when the extra
+program, parsed-refinement, or registry-refinement counts change. The build and
+generated-refinement fixture pass. One cache-disabled `--run=none` Pong profile
+after this change measured 18.948 s total (type validation 10.113 s, codegen
+11.586 s); its instrumented repeat measured 18.728 s total, with 8.042 s HM
+time on the validation pass and 6.7 s on the post-codegen HM pass. These are
+single unpaired observations against an earlier 18.862 s profile; they do not
+establish a compile-time speedup. The full language type suite completed with
+343 passed, 0 failed across 273 runtime and 70 error fixtures, including the
+generated-refinement and mutable-flow differentials.
+
+A separate NYIR cleanup removed five redundant `rt_main` small-inliner scans:
+the helper walks every current instruction, only clones straight-line bodies
+without calls, and does not expose new calls for a later sweep. It also removed
+a duplicate three-pass sweep. The cache-disabled one-frame AOT run completed
+under the existing headless Weston/Vulkan compositor in 75.232 s: type
+validation 10.236 s, codegen 11.713 s, object emission 31.501 s, runtime object
+generation 22.926 s, and link 0.272 s. Frame 1 was reported at 1.267 s after
+app startup. The client output did not include `[gfx] Using Native Vulkan
+Backend`; backend selection is therefore unconfirmed for this run. This
+single-sample result does not establish a compile-time improvement, and the
+3-second acceptance remains unmet.
+
+The `./make bench call-chain` smoke completed with exit 0. It reported NYR
+699µs, LLVM 541µs, and C 245µs, but also reported an internal-versus-decoder
+instruction-count divergence (180,701 versus 186,499) at an equivalent `lea`
+whose operand ordering differed textually. Do not treat that output as proof
+of instruction-count parity or as a speedup measurement for the inliner edit.
+
+For output verification, a cache-disabled native `-O2` Pong AOT run with
+`NY_DEBUG=1` completed two frames and exited 0 after 52.8 s process uptime.
+It selected `[gfx] Using Native Vulkan Backend` on the AMD Radeon RX 9060 XT;
+the frame-2 capture logged nine draw calls and saved
+`/tmp/nytrix-pong-verify.png`. The image showed the court, center net, paddles,
+score labels, and controls. Auto-dump/debug overhead means this is an output
+check, not a clean timing sample; it still confirms the current compile-plus-
+launch is far above 3 s.
+
+Matched cold-cache AOT screening runs used `--native-only -O2 --run=aot`,
+`CCACHE_DISABLE=1`, `NYTRIX_AOT_CACHE=0`, `NYTRIX_NATIVE_CACHE=0`,
+`NYTRIX_STD_CACHE=0`, `NYTRIX_STD_BC_CACHE_AUTO=0`, runtime `-O3`, and one
+Pong frame. All four selected native Vulkan and completed:
+
+| Compiler threads | `NYTRIX_STD_THREADS` | Wall | User CPU |
+| ---: | ---: | ---: | ---: |
+| 8 | default (8) | 53.214 s | 63.539 s |
+| 64 | default (8) | 49.881 s | 76.867 s |
+| 96 | default (8) | 52.240 s | 87.735 s |
+| 64 | 64 | 48.996 s | 76.959 s |
+
+These are single-run screening results, not a repeated speedup estimate.
+64 compiler threads with 64 standard-loader threads were fastest by 7.9%
+versus 8/8, while consuming 21% more user CPU; 96/8 threads were slower than
+8/8 despite consuming 38% more user CPU. Raising only standard-loader
+parallelism from its 8-thread default saved 0.885 s at 64 compiler threads.
+The object profile's `clock()` values are process CPU time, while its
+`ny_ticks` subphases are elapsed time: build-IR CPU time was 30.347 s at 8
+threads and 26.298/27.179 s at 64/96; parallel machine-lowering elapsed time
+was 0.518/0.277/0.328 s, and bundle-encoding elapsed time was
+4.505/1.054/1.071 s. The 3 s acceptance remains unmet.
+A final cold `64/64` run with `NYTRIX_PONG_FRAME_TIMES=1` took 50.927 s
+wall / 79.027 s user and reported frame 1 at 1.131 s after app startup. It
+again selected native Vulkan; this confirms the first-frame timing path but
+does not pass the 3 s compile/link/first-frame limit.
+
+The latest cache-disabled, four-thread `--native-only -O2 --run=aot` run
+completed in 53.684 s wall (78.506 s user, 7.964 s system) on 2026-11-10.
+It selected native Vulkan and reported frame 1 at 1.460 s after startup.
+NYIR construction took 37.616 s for 2,725 reachable functions; its measured
+sub-stages were 7.590 s reachability, 7.304 s function lowering, 6.430 s
+post-inline optimization, and 4.584 s call-effect inference. Machine-object
+emission took 10.418 s, including 5.685 s bundle encoding; ELF writing itself
+was under 0.13 s across the reported writer stages. These phase measurements
+overlap with pipeline timings and are not additive. This one run establishes
+no speedup, and cold compile/link/first-frame remains far above 5 s.
+
+A cache-disabled `-vvvvvv --callgraph=3 --run=none` trace completed in
+66.277 s and peaked at 1,060 MiB RSS. It loaded 146 modules (4,389,365
+standard-library source bytes); import scanning took 0.00018 s, core loading
+0.066 s, and parsing 0.348 s. Type validation took 9.403 s (HM inference
+7.831 s); reachable-function collection took 7.566 s for 2,725 functions;
+function lowering took 8.493 s, post-inline optimization 23.840 s, and
+call-effect inference 4.345 s. The deep pass tracing materially increased
+optimization time, so these are diagnostic figures, not performance
+baselines. The bounded graph reported 305 displayed nodes and 4,873 edges at
+depth 3, with remaining edges omitted from text output. Before the trace, the
+default callgraph path used a 256-entry function buffer and failed on Pong;
+it now allocates the native 16,384-function capacity, and this run completed.
+
+The profile also exposed malformed x86-64 object layout: parallel register-
+allocation fallbacks were appended after the data tables, placing function
+symbols outside `.text` and allowing code/data overlap. The parallel builder
+now appends the tables after all fallback bodies, and the ELF writer rejects
+unsectioned function symbols outside `.text`. On the corrected output,
+`_vk_check_descriptor_pool` and `rt_load32_idx` both lie within `.text`, and
+the saved AOT executable selected Vulkan and completed a one-frame run.
+One earlier first-launch attempt still exited with signal 11 during surface
+startup; a GDB run, direct relaunch, and the later cold AOT run succeeded.
+That intermittent runtime crash is not root-caused by these measurements.
+
+The runtime archive builder's 25 C translation units now have independent
+parallel compile tasks with distinct source/object paths; the archive is
+assembled in the original fixed unit order after they finish. A first apparent
+2.295 s runtime-object result was only a runtime-cache restore, not a parallel
+compile. A controlled uncached comparison then used `NYTRIX_RUNTIME_OPT=3`,
+`NYTRIX_RUNTIME_NATIVE=0`, `CCACHE_DISABLE=1`, and the same harmless host
+warning flags (order reversed to create distinct runtime-cache keys):
+
+| Runtime archive compile | Threads | Runtime object | Total AOT | Object emission |
+| --- | ---: | ---: | ---: | ---: |
+| Parallel | 8 | 7.473 s | 60.135 s | 32.207 s |
+| Serial | 1 | 24.465 s | 81.501 s | 35.535 s |
+
+Both launches reported one frame. The runtime-object stage improved 3.28× in
+this paired profile; total AOT time is not a clean scaling comparison because
+the compiler and object stages also used different thread counts and varied.
+The parallel run reported 8 OpenMP regions across 2.86 million tasks; the
+single-thread control reported no OpenMP regions. This verifies the runtime
+archive scaling path, not the 3-second target. A separate cache-enabled
+`NY_DEBUG=1` AOT launch printed `[gfx] Using Native Vulkan Backend` and
+reported frame 1 at 1.459 s after app startup. This confirms the intended
+renderer path but is not a cold-cache timing result.
+
+The final cache-disabled `-O2` build after the AOT font-registration fix took
+55.971 s: type validation 10.599 s, codegen 12.111 s, object emission
+35.917 s, runtime object 0.0046 s, and link 0.242 s. A fresh current-source
+run took 56.241 s: type validation 10.516 s, codegen 12.122 s, object emission
+36.379 s, runtime object 0.0067 s, and link 0.249 s. The font change was a
+source representation correction, not a compiler-speed optimization; the
+small run-to-run difference does not establish a regression. Object emission
+remains the largest stage and the 30 s target remains unmet.
+
+Fresh `NYTRIX_AOT_CACHE=0` scheduler trials measured 56.622 s with four
+threads and `NYTRIX_PARALLEL_MIN_WORK=512`, 55.653 s with eight threads and
+the same threshold, and 57.144 s with eight threads and a 128-item threshold.
+The parallel report counted 65 OpenMP regions for the four-thread case and
+only five for the eight-thread cases, out of 4,967 regions overall. These are
+single-run screening results, not a matched speedup; thread/grain tuning does
+not close the 30 s gap.
+
+A fresh cache-disabled `-O2 --threads=4 --native-only --run=none` object-emission
+profile took 55.128 s: type validation 10.359 s, codegen 11.864 s, and object
+emission 35.477 s. `perf record -e cpu-clock:u` captured 6,155 samples with no
+losses; the recorded `ny-full` BuildID matches the executable. The largest
+named self costs were CFG construction 2.73%, imported-module re-export lookup
+2.26%, register-segment lookup 1.97%, refinement lookup 1.92%, module lookup
+1.66%, loop-edge coalescing 1.54%, HM inference 1.51%, and type-map
+initialization 1.41%. Two unresolved `libomp` addresses account for 10.20%;
+without a known-code control, their attribution remains unverified. Object
+emission is still the dominant measured stage, and no identified compiler
+function accounts for the 30-second gap. A member-cache key experiment using
+intern IDs measured 55.946 s without sampling and was reverted: the runs are
+not a matched comparison and establish no speedup.
+
+A CFG label-map audit found that `cfg_label_map_init` always chooses a
+power-of-two capacity. Hash reduction and linear-probe wraparound now use
+`cap - 1` masks instead of remainder. The seven `cfg`-matched fixtures passed.
+Two cache-disabled AOT screenings took 50.718 s and 41.795 s wall versus the
+earlier 53.684 s run; the spread is too large to establish a repeatable gain.
+The latest run selected native Vulkan and showed the window through the X11
+fallback because the isolated Weston socket was no longer running; it did not
+record a first-frame time. A recursive exact-function subtree-cache trial
+passed `modules/use` 45/45 but one AOT screening took 57.284 s, so that
+unproven memoization was discarded.
+
+The x86-64 mixed-bundle parallel-encoding candidate passed focused ELF64
+debug-line, multifunc, and call-object fixtures. Three cache-disabled Pong
+`-O2 --threads=4 --native-only --run=none` measurements with that candidate
+took 57.054 s, 57.460 s (`NYTRIX_PARALLEL_MIN_WORK=1`), and 56.530 s
+(`NYTRIX_PARALLEL_MIN_WORK=1`, parallel report enabled); the last reported
+4,958 parallel regions and 2,856,770 tasks across the full compile, not
+specifically the object emitter. These runs do not establish a compile-time
+improvement; object emission remained about 37.5 s and the 30 s target remains
+unmet.
+
+Parallelizing NYIR-to-machine lowering in the same x86-64 bundle path also
+passed the focused ELF64 fixtures. A cache-disabled run at four threads took
+56.316 s (10.207 s type validation, 11.723 s codegen, 37.185 s object emission);
+the parallel report counted 67 OpenMP regions. At 32 threads it took 57.611 s
+with 38.624 s object emission and only two OpenMP regions. Neither run met the
+target or showed a speedup over the current 55.128 s reference.
+
+Changing bundle encoding to retain successful functions and use the legacy
+machine/NIR fallback only for failed functions passed the focused ELF64
+debug-line, multifunc, and call-object fixtures (5/5). A fresh cache-disabled
+Pong `-O2 --threads=4 --native-only --run=none` compile took 51.948 s: type
+validation 10.140 s, codegen 11.655 s, and object emission 32.809 s. A second
+cache-disabled run at eight threads took 51.165 s: 10.193 s type validation,
+11.707 s codegen, and 31.882 s object emission. Instrumented bundle encoding
+handled 2,725 functions in 5.193 s at four threads and 4.117 s at eight; only
+`ny_fn_core.reflect._range_contains` required the fallback. The eight-thread
+output passed `readelf --lint` and `ld -r`. These are single-run measurements,
+not matched evidence of a speedup; both remain above the historical 30 s
+compile-only target and the user's 3 s compile/link/first-window target.
+
+Repeating the eight-thread compile with the default parallel grain (rather than
+forcing `NYTRIX_PARALLEL_MIN_WORK=1`) took 50.530 s: type validation 10.162 s,
+codegen 11.621 s, and object emission 31.529 s. Bundle encoding took 4.148 s.
+The output again passed `readelf --lint` and `ld -r`. This single run is only
+0.635 s faster than the preceding forced-grain run; neither run measures
+launch or first frame.
+
+Further instrumentation on a fresh cache-disabled eight-thread run measured
+51.599 s total: type validation 10.413 s, codegen 11.947 s, and object
+emission 32.079 s. `nyr_build_ir` consumed 30.656 s, split into 7.091 s
+reachable-function collection, 6.942 s function lowering, and 12.376 s
+`rt_main` lowering. The 2,725-function machine bundle then encoded in 4.417 s;
+ELF section serialization, including 154,901 relocations, took under 0.2 s.
+This rules out ELF serialization as the object-time bottleneck. The run emitted
+an object only; a compile/link/launch/first-frame measurement is still needed
+against the new 3 s target.
+
+A cache-disabled `--run=aot` run under the dedicated headless Weston Vulkan
+compositor compiled and launched Pong, then completed 60 frames in 66.377 s
+total. Its first frame was reported at 1.360 s after app startup; runtime object
+generation took 13.480 s and link took 0.294 s. Weston loaded its Vulkan
+renderer, but the client did not print `[gfx] Using Native Vulkan Backend`, so
+the selected client renderer is unconfirmed. This run misses the 3 s
+compile/link/first-window target by a wide margin and is not yet valid backend
+acceptance.
+
+A subsequent `--run=aot` invocation with default caches and `NY_DEBUG=1`
+completed one headless-Weston frame in 52.498 s total. It reported a cached
+runtime object (0.004 s), but object emission still took 31.674 s; frame 1
+arrived 1.412 s after app startup. The client printed
+`[gfx] Using Native Vulkan Backend`. Default caches therefore did not bring
+this source compile near the 3 s end-to-end target.
+
+One subsequent 20-frame headless run showed 1.629 s to the first submitted/
+shown frame and roughly 200–210 ms between later frames. It had no paired
+baseline, so it establishes neither a startup improvement nor a regression.
+A separate `strace` run counted 928,250 `mincore` calls (8.796 s reported in
+that syscall) but slowed the app enough to invalidate its frame timings. A
+non-traced CPU profile sampled `_font_builtin_create` under
+`_resolve_text_font`; this identifies a path for further investigation, not a
+proven cause of the syscall count. The bound-overflow change preserved
+conservative distant-address rejection but did not establish lower startup
+cost.
+
+#### Same-session Vulkan comparison after runtime fixes
+
+Using the same 1280×720 headless Weston Vulkan renderer and explicit native
+Vulkan backend, the pre-cache AOT executable took 1.189 s to its first shown
+frame and 14.249 s for 60 frames, with later intervals around 204–210 ms. The
+intermediate build with only the exact-pointer SSO-probe cache took 1.155 s
+and 7.745 s; it still had a 0.51 s interval spike at frame 49 and failed to
+load the Pong font. After fixing the AOT UI module's inferred global type, the
+corrected build took 1.194 s to its first shown frame and 2.141 s for 60 frames;
+later intervals were roughly 16–18 ms, without a spike or font-load warning.
+The app reported `[gfx] Using Native Vulkan Backend`. A 60-frame `perf stat`
+run also completed (2.190 s wall time, 1.074 s task-clock), without the
+previously observed `ZeroDivisionError`.
+
+Five-frame `strace -c -e mincore` runs counted 837,099 calls before runtime
+fixes, 389,911 after the SSO-probe cache alone, and 77,524 after both the cache
+and font fix. Traced timings are invalid; these counts show reduced calls in
+this setup, not elimination of `mincore` or proof that distinct-range
+exhaustion is impossible. The conservative range-capacity limit was not
+increased.
+
+The Pixman-rendered Weston variant rejected the Vulkan surface query and the
+application fell back to its mock renderer; it was discarded. Weston with
+`--renderer=vulkan` and the application log `[gfx] Using Native Vulkan
+Backend` were required for valid runs. The font failure was in
+`lib/os/ui/render/mod.ny`: the module-level `_next_font_id` was inferred as a
+dynamic value, and AOT lowering mishandled its increment/return path. Declaring
+it `mut int` preserves the integer representation. The AOT `-O2` variant of
+`font-subset.nshape` now passes alongside native O0/O3 and LLVM MCJIT; the
+corrected Pong app completed 60 frames with no font-load warning. The earlier
+`ZeroDivisionError` did not recur after the fix; its connection to the font
+bug is unproven.
+
 ### Larger editor workload
 
 A later workload on revision `2f25b3ac` plus local changes took 128.71 s cold
@@ -692,6 +1758,29 @@ even trip count, step-one induction, and a pure two-block body; larger budgets
 did not satisfy those structural requirements.
 
 ## Splay and native register allocation
+
+### Entry-address rematerialization reachability
+
+The reported C failure needs an entry-block LEA and another definition to
+coalesce to the same machine vreg. Domination alone does not make a vreg-numbered
+address fact immutable, so the x86-64 object encoder retains its
+unique-definition guard.
+
+That PHI-coalescing route is unreachable for current Nytrix functions:
+`mach_coalesce_copies` starts at pass 1 for non-C functions and skips synthetic
+PHI edge copies (`source_pc == UINT32_MAX`). Ordinary Nytrix coalescing also
+requires both operands to pass `mach_cc_raw_vregs`; C does not have these
+restrictions. This does not rule out other encoder bugs; revisit if synthetic
+edge-copy coalescing becomes available.
+
+`etc/tests/code/targets/x86_64/addr-local-loop-phi-x86-64.nshape` covers a
+pointer changed across a loop, including zero and one iterations; its O3 native
+oracle is 42 and `@noinline` preserves the function boundary. It passes with
+and without only the unique-definition guard in an isolated compiler build,
+so it is coverage, not a reproducer of the C failure. Five cold fixtures
+passed: this case, `addr-local-x86-64`, `addr-local-multi-x86-64`,
+`addr-borrow-local-x86-64`, and ELF64 `addr-deref`. No compiler behavior
+changed.
 
 The supplied early Splay row was 16.9 ms native/4.01 ms LLVM/4.53 ms C;
 a 5+2 confirmation was 16.733/3.978/4.414 ms. Later safe-source checkpoints
@@ -1538,6 +2627,34 @@ too, from the concurrent `--run` argv change):
 - `NYTRIX_OUTER_VEC_INTERLEAVE=2` widens to two four-lane registers per value.
   It is correct but slower (1.40 ms) because the second register set spills.
   Off by default.
+
+## NYC copy intrinsic register residency (2026-11-11)
+
+The x86-64 loop allocator now treats known copy intrinsics as clobbers that
+callee-saved registers can survive. Copies remain indirect-store hazards when
+stack-home privacy is unproven. Both indexed and fallback proofs agree.
+
+A frozen before/after compiler comparison on the string benchmark's C source,
+with `memcpy` replaced by `__builtin_memcpy` to exercise this path, retained
+checksum `300003294` in all 11 runs. Best kernel times fell from 643127 ns to
+273198 ns; medians fell from 714369 ns to 324634 ns. Object assembly shows
+fewer loop-counter reloads. This is an intrinsic-path measurement, not closure
+of the existing string benchmark: its declared `memcpy` remains a call and
+measured essentially unchanged. The `small-copy-loop-residency.c` regression
+passes NYC O3 and Clang O3, including writes through an escaped local address.
+
+### Declared memcpy follow-up
+
+Small constant copies now also lower through compatible external `memcpy`
+declarations, including the standard header prototype. Visible definitions,
+assembler aliases, incompatible signatures, and `-fno-builtin` retain calls.
+The seven-run focused string report
+`build/bench-reports/bench-20261111-083623-3891112.json` reports `ok`, matching
+checksums, and 184 us NYR, 202 us LLVM, 190 us C, and 280 us NYC (1.47x NYC/C).
+The prior full report measured 3.04x NYC/C. Object inspection confirms no
+`memcpy` relocation in the optimized fixture and a retained relocation with
+`-fno-builtin`. The copy-residency and visible-definition regressions pass;
+both are registered with the C frontend fixture runner.
 
 Next:
 

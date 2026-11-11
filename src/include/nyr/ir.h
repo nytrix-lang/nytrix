@@ -1,3 +1,4 @@
+/* Public NYIR instruction, function, verifier, and optimization API. */
 #ifndef NYR_IR_H
 #define NYR_IR_H
 
@@ -264,6 +265,13 @@ typedef enum {
  * the operation cannot overflow. Allows codegen to emit non-checking variants.
  */
 #define NYIR_INST_F_NO_OVERFLOW 256u
+/*
+ * Set on NYIR_DIV_I64 / NYIR_MOD_I64 when range analysis proves the dividend
+ * lies in [0, 2^31). A constant positive divisor can then use the unsigned
+ * multiply-shift reciprocal, which needs no sign correction and no fixed
+ * registers.
+ */
+#define NYIR_INST_F_DIVIDEND_U31 (1u << 18)
 /* Address value produced by a compiler-lowered typed-buffer index after the
  * index has been checked/proved in bounds.  The proof survives later BCE so
  * escape/SROA passes can distinguish payload addressing from arbitrary raw

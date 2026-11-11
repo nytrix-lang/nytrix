@@ -1,0 +1,22 @@
+shape test_float_builtin_f64_abi {
+  family "runtime/values"
+  generator "embedded"
+  features ["ny", "test", "native", "llvm", "regression"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+fn power() f64 { __flt_pow(2.0, 3.0) }
+fn sine() f64 { __flt_sin(0.5) }
+
+assert(power() == 8.0, "boxed pow result crosses the f64 boundary")
+assert(float(__flt_pow(3.0, 2.0)) == 9.0, "boxed pow remains usable as any")
+assert(sine() > 0.4794 && sine() < 0.4795,
+       "boxed sine result crosses the f64 boundary")
+assert(float(__flt_sin(0.5)) > 0.4794 && float(__flt_sin(0.5)) < 0.4795,
+       "boxed sine remains usable as any")
+print("ok float builtin f64 ABI")
+NY
+}

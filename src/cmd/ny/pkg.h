@@ -1,3 +1,4 @@
+/* Command interface for installing, removing, and inspecting Ny packages. */
 #ifndef NYTRIX_CMD_NY_PKG_H
 #define NYTRIX_CMD_NY_PKG_H
 

@@ -1,3 +1,6 @@
+/*
+ * Fixture: load an x86 segment register with a Linux exception-table entry.
+ */
 void nyc_loadsegment_ds(unsigned short value) {
   __asm__ volatile("1: movl %k0,%%ds\n"
                    " .pushsection __ex_table, \"aM\", @progbits, 12\n"

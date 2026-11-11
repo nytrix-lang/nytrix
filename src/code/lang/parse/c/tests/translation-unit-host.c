@@ -1,3 +1,6 @@
+/*
+ * Translation-unit test host: provide standard types and runtime helpers.
+ */
 #include <stdarg.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -9,7 +12,10 @@
 #include <unistd.h>
 #endif
 
-struct nyr_unit_token { const char *text; unsigned int length; };
+struct nyr_unit_token {
+  const char *text;
+  unsigned int length;
+};
 extern int nyr_unit_aggregate_parameter(int, struct nyr_unit_token);
 extern int nyr_unit_tag_decl_only_size(void);
 extern int nyr_unit_aggregate_array_designators(void);
@@ -18,12 +24,12 @@ extern int nyr_unit_global_aggregate_pointer_path(void);
 extern int nyr_unit_global_aggregate_pointer_array_call(int value);
 extern int nyr_unit_typeof_statement_lvalue_growth(int *value);
 extern unsigned long nyr_unit_int128_mul_add_shift(unsigned long value,
-                                                    unsigned int multiplier,
-                                                    unsigned long addend,
-                                                    unsigned int shift);
+                                                   unsigned int multiplier,
+                                                   unsigned long addend,
+                                                   unsigned int shift);
 extern unsigned long nyr_unit_int128_mul_u64_shift(unsigned long value,
-                                                    unsigned long multiplier,
-                                                    unsigned int shift);
+                                                   unsigned long multiplier,
+                                                   unsigned int shift);
 
 struct nyr_unit_volatile_link {
   struct nyr_unit_volatile_link *next;
@@ -894,17 +900,16 @@ int main(void) {
                  page.index == 2 &&
                  nyr_unit_call_result_member_assignment(53) == 53 &&
                  nyr_unit_integer_to_double(-1234567L) == -1234567.0 &&
-                 nyr_unit_aggregate_parameter(3, (struct nyr_unit_token){"A", 6}) ==
-                     74 &&
+                 nyr_unit_aggregate_parameter(
+                     3, (struct nyr_unit_token){"A", 6}) == 74 &&
                  nyr_unit_tag_decl_only_size() == sizeof(int) &&
                  nyr_unit_aggregate_array_designators() == 27 &&
                  nyr_unit_extern_array_definition() == 59 &&
                  nyr_unit_address_extent_matches() &&
                  nyr_unit_global_aggregate_pointer_path() == 73 &&
                  nyr_unit_int128_mul_add_shift(123, 3, 42, 4) == 25 &&
-                 nyr_unit_int128_mul_u64_shift(0x100000002UL,
-                                                0x200000003UL, 32) ==
-                     8589934599UL &&
+                 nyr_unit_int128_mul_u64_shift(0x100000002UL, 0x200000003UL,
+                                               32) == 8589934599UL &&
                  nyr_unit_global_pointer_holders[1].dev[2] ==
                      &nyr_unit_global_pointer_value &&
                  nyr_unit_signed_bytes(-128) && nyr_unit_signed_bytes(-1) &&

@@ -3052,7 +3052,20 @@ typedef struct ny_hm_env_entry_t {
   stmt_t *alias_target_stmt;
   uint32_t name_hash;
 } ny_hm_env_entry_t;
-typedef VEC(ny_hm_env_entry_t) ny_hm_env_list;
+typedef struct ny_hm_env_lookup_cache_entry_t {
+  const void *env;
+  uint64_t generation;
+  uint32_t name_hash;
+  uint32_t syntax_ctx;
+  size_t len;
+  size_t index;
+} ny_hm_env_lookup_cache_entry_t;
+typedef struct ny_hm_env_list {
+  ny_hm_env_entry_t *data;
+  size_t len, cap;
+  uint64_t generation;
+  ny_hm_env_lookup_cache_entry_t *lookup_cache;
+} ny_hm_env_list;
 
 typedef struct ny_hm_scheme_t {
   const char *name;
@@ -3071,7 +3084,6 @@ typedef struct ny_hm_expr_type_fact_t {
   ny_hm_type_t *type;
 } ny_hm_expr_type_fact_t;
 typedef VEC(ny_hm_expr_type_fact_t) ny_hm_expr_type_fact_list;
-
 typedef struct ny_hm_state_t {
   ny_tp_ctx_t *ctx;
   stmt_t *active_fn;
@@ -3092,7 +3104,11 @@ typedef struct ny_hm_state_t {
   ny_hm_scheme_list schemes;
   ny_hm_scheme_index_entry_t *scheme_index;
   size_t scheme_index_cap;
+  uint64_t next_env_generation;
+  ny_hm_env_lookup_cache_entry_t env_lookup_cache[128];
   ny_hm_expr_type_fact_list expr_type_facts;
+  bool trace_type_detail;
+  bool trace_deep;
   size_t debug_std_default_constraints_suppressed;
   /*
    * Statement-mode partial-application bookkeeping: the statement call being

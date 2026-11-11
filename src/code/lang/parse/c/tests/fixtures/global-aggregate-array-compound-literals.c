@@ -1,3 +1,6 @@
+/*
+ * Fixture: initialize global aggregate arrays with compound literals.
+ */
 struct hook_entry {
   int key;
   int active;

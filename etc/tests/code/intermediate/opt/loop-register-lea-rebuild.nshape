@@ -1,0 +1,94 @@
+shape optcheck_loop_register_lea_rebuild {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 optcheck loop-register address-fold regalloc]
+  template ny-test-case
+  flags_matrix "-O0 --color=never; -O3 --color=never; --native-only -O3 --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.tbuf
+;; Regression: the lea feeding the final store is rebuilt at the store from
+;; `right` (a dedicated loop register). Another segment took that register in
+;; between, and the encoder re-read an unwritten home (SIGSEGV in AOT, and a
+;; whole-function fallback to the stack encoder before that).
+;; Top-down splay tree (array-based; node 0 = header, -1 = null).
+def N = 1000
+def M = 100000
+def key = i64buf_new(N + 1)
+def left = i64buf_new(N + 1)
+def right = i64buf_new(N + 1)
+mut i = 0
+fn splay_join(ptr left, ptr right, int lmax, int rmin, int t) int {
+   i64buf_store(right, lmax, i64buf_load(left, t))
+   i64buf_store(left, rmin, i64buf_load(right, t))
+   i64buf_store(left, t, i64buf_load(right, 0))
+   i64buf_store(right, t, i64buf_load(left, 0))
+   t
+}
+fn splay(ptr key, ptr left, ptr right, int root, int k) int {
+   i64buf_store(left, 0, -1)
+   i64buf_store(right, 0, -1)
+   mut lmax = 0
+   mut rmin = 0
+   mut t = root
+   while true {
+      def kt = i64buf_load(key, t)
+      if k < kt {
+         def tl = i64buf_load(left, t)
+         if tl == -1 { break } else {
+            def ktl = i64buf_load(key, tl)
+            if k < ktl {
+               def x = i64buf_load(left, t)
+               i64buf_store(left, t, i64buf_load(right, x))
+               i64buf_store(right, x, t)
+               t = x
+               if i64buf_load(left, t) == -1 { break }
+            }
+            i64buf_store(left, rmin, t)
+            rmin = t
+            t = i64buf_load(left, t)
+         }
+      } else if k > kt {
+         def tr = i64buf_load(right, t)
+         if tr == -1 { break } else {
+            def ktr = i64buf_load(key, tr)
+            if k > ktr {
+               def y = i64buf_load(right, t)
+               i64buf_store(right, t, i64buf_load(left, y))
+               i64buf_store(left, y, t)
+               t = y
+               if i64buf_load(right, t) == -1 { break }
+            }
+            i64buf_store(right, lmax, t)
+            lmax = t
+            t = i64buf_load(right, t)
+         }
+      } else { break }
+   }
+   splay_join(left, right, lmax, rmin, t)
+}
+mut root = -1
+i = 0
+while i < N {
+   def id = i + 1
+   i64buf_store(key, id, id)
+   i64buf_store(left, id, -1)
+   i64buf_store(right, id, -1)
+   ;; Inserting ascending keys produces a right-skewed BST. Build that same
+   ;; shape directly; the setup is outside the timed region and avoids an
+   ;; indirect control-flow path that currently miscompiles in NYR AOT.
+   if i == 0 { root = id } else { i64buf_store(right, i, id) }
+   i += 1
+}
+mut checksum = 0
+i = 0
+while i < M {
+   def lk = (i * 7) % N + 1
+   root = splay(key, left, right, root, lk)
+   checksum += i64buf_load(key, root)
+   i += 1
+}
+assert(checksum == 50050000, "splay checksum")
+NY
+}

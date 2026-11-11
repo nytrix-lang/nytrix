@@ -1,3 +1,6 @@
+/*
+ * Empty runtime ABI registry for standalone Nyr lowering.
+ */
 #include "code/backend/abi.h"
 
 #include <string.h>

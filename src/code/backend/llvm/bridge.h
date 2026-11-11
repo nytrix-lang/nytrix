@@ -1,3 +1,5 @@
+/* LLVM context and callback bridge used by the language-neutral NYIR emitter.
+ */
 #ifndef NY_BACKEND_LLVM_BRIDGE_H
 #define NY_BACKEND_LLVM_BRIDGE_H
 

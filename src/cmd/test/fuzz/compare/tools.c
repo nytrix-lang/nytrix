@@ -339,7 +339,7 @@ static int json_array_unique_string_field_count(const char *json,
   string_list_t keys = {0};
   const char *p = items + 1;
   while (p < end) {
-    p = skip_ws_const(p);
+    p = fuzz_json_skip_ws(p);
     if (p >= end || *p == ']')
       break;
     if (*p == ',') {
@@ -1983,7 +1983,7 @@ static bool audit_parse_runtime_def_info(const char *defs_text,
   q = strchr(q + 1, ',');
   if (!q)
     return true;
-  q = skip_ws_const(q + 1);
+  q = fuzz_json_skip_ws(q + 1);
   const char *sym_start = q;
   while (*q && *q != ',')
     ++q;
@@ -1992,15 +1992,14 @@ static bool audit_parse_runtime_def_info(const char *defs_text,
   if (*q != ',')
     return true;
 
-  q = skip_ws_const(q + 1);
-  char *endptr = NULL;
-  long arity = strtol(q, &endptr, 10);
-  if (endptr && endptr != q && arity >= 0 && arity <= INT_MAX)
+  q = fuzz_json_skip_ws(q + 1);
+  long arity;
+  if (fuzz_parse_long(&q, &arity) && arity >= 0 && arity <= INT_MAX)
     info->arity = (int)arity;
   q = strchr(q, ',');
   if (!q)
     return true;
-  q = skip_ws_const(q + 1);
+  q = fuzz_json_skip_ws(q + 1);
   if (*q != '"')
     return true;
   const char *sig_start = q + 1;
@@ -3106,7 +3105,7 @@ static bool creal_parse_string_array(const char *array_text,
     return false;
   const char *p = array_text + 1;
   while (p < end) {
-    p = skip_ws_const(p);
+    p = fuzz_json_skip_ws(p);
     if (p >= end || *p == ']')
       break;
     if (*p == ',') {
@@ -3115,7 +3114,7 @@ static bool creal_parse_string_array(const char *array_text,
     }
     if (*p != '"')
       return false;
-    char *item = parse_json_string_dup(&p, end);
+    char *item = fuzz_json_string_dup(&p, end);
     if (!item)
       return false;
     if (!string_list_push_take(out, item)) {
@@ -3128,11 +3127,11 @@ static bool creal_parse_string_array(const char *array_text,
 
 static char *creal_parse_json_scalar_text(const char **cursor,
                                           const char *end) {
-  const char *p = skip_ws_const(*cursor);
+  const char *p = fuzz_json_skip_ws(*cursor);
   if (p >= end)
     return NULL;
   if (*p == '"') {
-    char *s = parse_json_string_dup(&p, end);
+    char *s = fuzz_json_string_dup(&p, end);
     *cursor = p;
     return s;
   }
@@ -3155,7 +3154,7 @@ static bool creal_parse_io_list(const char *io_list,
     return false;
   const char *p = io_list + 1;
   while (p < end && (max_samples <= 0 || out->count < max_samples)) {
-    p = skip_ws_const(p);
+    p = fuzz_json_skip_ws(p);
     if (p >= end || *p == ']')
       break;
     if (*p == ',') {
@@ -3167,7 +3166,7 @@ static bool creal_parse_io_list(const char *io_list,
     const char *sample_end = matching_json_end(p, '[', ']');
     if (!sample_end || sample_end > end)
       return false;
-    const char *q = skip_ws_const(p + 1);
+    const char *q = fuzz_json_skip_ws(p + 1);
     if (q >= sample_end || *q != '[')
       return false;
     const char *inputs_end = matching_json_end(q, '[', ']');
@@ -3179,7 +3178,7 @@ static bool creal_parse_io_list(const char *io_list,
     bool ok =
         inputs_text && creal_parse_string_array(inputs_text, &sample.inputs);
     free(inputs_text);
-    q = skip_ws_const(inputs_end + 1);
+    q = fuzz_json_skip_ws(inputs_end + 1);
     if (ok && q < sample_end && *q == ',') {
       ++q;
       sample.expected = creal_parse_json_scalar_text(&q, sample_end);
@@ -3371,7 +3370,7 @@ static bool creal_parse_record(const char *start, const char *end,
 }
 
 static const char *creal_database_array(const char *json) {
-  const char *p = skip_ws_const(json);
+  const char *p = fuzz_json_skip_ws(json);
   if (!p)
     return NULL;
   if (*p == '[')
@@ -3474,11 +3473,11 @@ static void append_creal_failure_json(str_buf_t *b,
                                       const char *reject_reason,
                                       const char *expected) {
   bool first = true;
-#define CREAL_SEP()                                                            \
-  do {                                                                         \
-    if (!first)                                                                \
-      (void)sb_append_c(b, ',');                                               \
-    first = false;                                                             \
+#define CREAL_SEP()              \
+  do {                           \
+    if (!first)                  \
+      (void)sb_append_c(b, ','); \
+    first = false;               \
   } while (0)
   if (reject_reason && *reject_reason) {
     CREAL_SEP();
@@ -3923,7 +3922,7 @@ static int cmd_public_corpus_creal_build(int argc, char **argv) {
   if (scan_cap < limit)
     scan_cap = limit;
   while (p < arr_end && (promoted + duplicates) < limit && scanned < scan_cap) {
-    p = skip_ws_const(p);
+    p = fuzz_json_skip_ws(p);
     if (p >= arr_end || *p == ']')
       break;
     if (*p == ',') {
@@ -6240,7 +6239,7 @@ static int cmd_public_corpus_real_db(int argc, char **argv, const char *kind) {
     snprintf(sample_hash, sizeof(sample_hash), "%016" PRIx64,
              fnv1a64(normalized ? normalized : "",
                      strlen(normalized ? normalized : "")));
-    file_hash_hex(files.items[i], source_hash, sizeof(source_hash));
+    fuzz_file_hash_hex(files.items[i], source_hash, sizeof(source_hash));
     if (compile_ok)
       ++validated;
     else
@@ -6598,8 +6597,9 @@ static bool reducer_output_has_expect(const proc_result_t *pr,
 }
 
 static bool reducer_mode_wants_runtime(const char *mode) {
-  return contains_ci(mode, "runtime") || contains_ci(mode, "differential") ||
-         contains_ci(mode, "metamorphic") || contains_ci(mode, "run");
+  return fuzz_contains_ci(mode, "runtime") ||
+         fuzz_contains_ci(mode, "differential") ||
+         fuzz_contains_ci(mode, "metamorphic") || fuzz_contains_ci(mode, "run");
 }
 
 static bool reducer_candidate_preserves(reducer_context_t *ctx,
@@ -6616,9 +6616,9 @@ static bool reducer_candidate_preserves(reducer_context_t *ctx,
   (void)compile_or_run_ny_source_flavor(ctx->root, ctx->ny_bin, ctx->tmp_source,
                                         run, ctx->flavor, ctx->timeout_s, &pr);
   bool preserved = false;
-  if (contains_ci(ctx->mode, "timeout"))
+  if (fuzz_contains_ci(ctx->mode, "timeout"))
     preserved = pr.timed_out;
-  else if (contains_ci(ctx->mode, "crash"))
+  else if (fuzz_contains_ci(ctx->mode, "crash"))
     preserved = proc_result_crashed(&pr);
   else
     preserved = pr.rc != 0;

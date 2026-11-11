@@ -1,3 +1,6 @@
+/*
+ * Inline assembly fixture for an unlocked addition returning a condition code.
+ */
 static unsigned long counter;
 
 static unsigned char add_and_test_sign(long value) {

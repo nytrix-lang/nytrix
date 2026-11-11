@@ -1,3 +1,6 @@
+/*
+ * JSON serialization of parsed language and C declaration trees.
+ */
 #include "code/lang/parse/json.h"
 #include <inttypes.h>
 #include <string.h>

@@ -13,6 +13,7 @@
 #include "base/util.h"
 #include "base/version.h"
 #include "cmd/ny/repl/repl.h"
+#include "code/backend/internal.h"
 #include "code/backend/ir/module.h"
 #include "code/backend/llvm/bridge.h"
 #include "code/backend/native.h"
@@ -80,12 +81,21 @@ static bool ny_pipeline_write_callgraph_for_program(const program_t *prog,
   if (!prog || !opt || !opt->callgraph)
     return true;
   nyr_func_t rt_main = {0};
-  nyr_func_t funcs[256] = {0};
-  const char *func_names[256] = {0};
+  const size_t func_cap = NYR_BUNDLE_MAX_FUNCS;
+  nyr_func_t *funcs = calloc(func_cap, sizeof(*funcs));
+  const char **func_names = calloc(func_cap, sizeof(*func_names));
+  if (!funcs || !func_names) {
+    free(funcs);
+    free(func_names);
+    nyr_set_error(err, err_len, "callgraph: function pool allocation failed");
+    return false;
+  }
   size_t func_count = 0;
   char local_err[512] = {0};
-  if (!nyr_build_ir(prog, opt, &rt_main, funcs, &func_count, func_names, 256,
-                    local_err, sizeof(local_err))) {
+  if (!nyr_build_ir(prog, opt, &rt_main, funcs, &func_count, func_names,
+                    func_cap, local_err, sizeof(local_err))) {
+    free(funcs);
+    free(func_names);
     if (err && err_len)
       snprintf(err, err_len, "callgraph: %s",
                local_err[0] ? local_err : "failed to build NYIR");
@@ -99,6 +109,8 @@ static bool ny_pipeline_write_callgraph_for_program(const program_t *prog,
   nyr_ir_func_free(&rt_main);
   for (size_t i = 0; i < func_count; ++i)
     nyr_ir_func_free(&funcs[i]);
+  free(funcs);
+  free(func_names);
   return ok;
 }
 
@@ -108,8 +120,7 @@ static void ny_log_saved_native_artifact(const char *path) {
 #ifndef _WIN32
   struct stat st;
   if (stat(path, &st) == 0) {
-    NY_LOG_SUCCESS("Saved ELF: %s (%lld bytes)\n", path,
-                   (long long)st.st_size);
+    NY_LOG_SUCCESS("Saved ELF: %s (%lld bytes)\n", path, (long long)st.st_size);
     return;
   }
   NY_LOG_SUCCESS("Saved ELF: %s\n", path);
@@ -204,6 +215,7 @@ static void ny_pipe_trace_phase_memory(const char *phase) {
 
 extern int64_t rt_free(int64_t ptr);
 extern void rt_print_flush(void);
+extern int64_t rt_thread_live_count(void);
 
 typedef struct {
   bool function_profile;
@@ -384,6 +396,20 @@ static bool ny_jit_prepare_call(uint64_t script_addr, uint64_t main_addr) {
          (!main_addr || ny_jit_prepare_execution(main_addr));
 }
 
+/*
+ * A linked program ends when main returns, even if detached threads are still
+ * running. In-process runs must match that: returning here would release the
+ * generated code, AST, and strings those threads are using (UI replays died
+ * with exit 139 whenever the font-scan thread outlived the app). Compiler
+ * cleanup at exit is intentionally empty, so exit() is safe.
+ */
+static void ny_exit_if_threads_outlive_program(int code) {
+  if (rt_thread_live_count() > 0) {
+    rt_print_flush();
+    exit(code);
+  }
+}
+
 static int ny_jit_safe_child(void *raw) {
   ny_jit_safe_call_t *call = (ny_jit_safe_call_t *)raw;
   if (!call || !ny_jit_prepare_call(call->script_addr, call->main_addr))
@@ -392,6 +418,7 @@ static int ny_jit_safe_child(void *raw) {
   if (call->main_addr)
     (void)((int64_t (*)(void))call->main_addr)();
   rt_print_flush();
+  ny_exit_if_threads_outlive_program(0);
   return 0;
 }
 
@@ -400,6 +427,7 @@ static int ny_native_cache_safe_child(void *raw) {
   void (*entry)(void) = (void (*)(void))raw;
   entry();
   rt_print_flush();
+  ny_exit_if_threads_outlive_program(0);
   return 0;
 }
 #endif
@@ -455,6 +483,7 @@ static int ny_native_jit_safe_child(void *raw) {
     return 1;
   int64_t result = call->entry();
   rt_print_flush();
+  ny_exit_if_threads_outlive_program((int)(result & 0xff));
   return (int)(result & 0xff);
 }
 
@@ -492,8 +521,8 @@ static int ny_run_native_only(const program_t *prog, const ny_options *opt,
       const char *entry =
           opt->entry_name && *opt->entry_name ? opt->entry_name : "main";
       char err[512] = {0};
-      snprintf(obj_name, sizeof(obj_name), "ny_bare_%ld_%llu.o",
-               (long)getpid(), (unsigned long long)ny_ticks_now());
+      snprintf(obj_name, sizeof(obj_name), "ny_bare_%ld_%llu.o", (long)getpid(),
+               (unsigned long long)ny_ticks_now());
       ny_join_path(obj, sizeof(obj), ny_get_temp_dir(), obj_name);
       if (!ny_pipeline_emit_program_object(prog, opt, obj, entry, false, err,
                                            sizeof(err))) {
@@ -2941,8 +2970,8 @@ int ny_pipeline_run(ny_options *opt) {
    */
   ny_pipeline_run_incremental(&prog, opt);
   if (ny_stop_after_is(opt, NY_STOP_AFTER_PARSE)) {
-    if (!ny_stage_emit_artifact(opt, NY_STOP_AFTER_PARSE, &prog, NULL, parse_name,
-                                NULL, true)) {
+    if (!ny_stage_emit_artifact(opt, NY_STOP_AFTER_PARSE, &prog, NULL,
+                                parse_name, NULL, true)) {
       exit_code = 1;
     }
     goto exit_success;
@@ -3711,8 +3740,7 @@ int ny_pipeline_run(ny_options *opt) {
     fprintf(stderr, "Verify:       %.4fs\n", ny_ticks_elapsed_sec(t_ver));
   if (!skip_llvm_module && write_compile_caches && !use_std_bc_cache &&
       auto_std_bc_cache && cg.module && !loaded_from_cache &&
-      !opt->emit_module &&
-      std_mode != STD_MODE_NONE && !has_local) {
+      !opt->emit_module && std_mode != STD_MODE_NONE && !has_local) {
     bool need_bc = ny_access(auto_std_bc_cache, R_OK) != 0;
     bool need_links = auto_std_bc_cache_needs_links ||
                       !ny_std_bc_cache_has_links(auto_std_bc_cache);
@@ -3785,9 +3813,9 @@ int ny_pipeline_run(ny_options *opt) {
      * emit a lightweight pass-through artifact so the caller sees success.
      */
     bool emit_full = opt->emit_artifact_path || opt->emit_shapes;
-    if (!ny_stage_emit_artifact(opt,
-                                emit_full ? NY_STOP_AFTER_OPT : NY_STOP_AFTER_PARSE,
-                                &prog, &cg, parse_name, cg.module, true)) {
+    if (!ny_stage_emit_artifact(
+            opt, emit_full ? NY_STOP_AFTER_OPT : NY_STOP_AFTER_PARSE, &prog,
+            &cg, parse_name, cg.module, true)) {
       exit_code = 1;
     }
     goto exit_success;
@@ -4224,6 +4252,7 @@ skip_compilation:
       } else {
         native_cache_entry();
         rt_print_flush();
+        ny_exit_if_threads_outlive_program(0);
       }
       maybe_log_phase_time(opt->do_timing, "JIT Run:", t_run);
     } else
@@ -4306,6 +4335,7 @@ skip_compilation:
             if (call_implicit_main && main_addr)
               (void)((int64_t (*)(void))main_addr)();
             rt_print_flush();
+            ny_exit_if_threads_outlive_program(0);
           }
         }
         maybe_log_phase_time(opt->do_timing, "JIT Run:", t_run);
@@ -4401,6 +4431,7 @@ skip_compilation:
           if (main_addr)
             (void)((int64_t (*)(void))main_addr)();
           rt_print_flush();
+          ny_exit_if_threads_outlive_program(0);
         }
         if (verbose_enabled >= 3)
           NY_LOG_V3("JIT: script finished\n");

@@ -1,3 +1,4 @@
+/* C parser entry points, parse state, and declaration-processing APIs. */
 #ifndef NYC_PARSE_H
 #define NYC_PARSE_H
 
@@ -34,6 +35,9 @@ typedef struct {
   size_t section_entsize;
   bool function_symbol;
   bool is_local;
+  bool is_weak;
+  /* Function owning a function-local static object, or NULL at file scope. */
+  char *owner_function;
   nyc_data_reloc_t *relocs;
   size_t reloc_count;
 } nyc_data_t;
@@ -57,6 +61,7 @@ typedef struct {
   bool *function_inline;
   bool *function_always_inline;
   bool *function_noinline;
+  bool *function_weak;
   bool *function_no_emit;
   bool *function_discardable;
   size_t count;

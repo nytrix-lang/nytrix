@@ -1,3 +1,6 @@
+/*
+ * Regression tests for folding scaled index arithmetic into x86 LEA.
+ */
 #include "code/backend/ir/machine.h"
 #include "code/backend/native.h"
 #include "support.h"

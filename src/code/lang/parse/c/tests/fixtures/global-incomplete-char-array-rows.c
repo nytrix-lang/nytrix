@@ -1,3 +1,6 @@
+/*
+ * C parser fixture for incomplete multidimensional character-array rows.
+ */
 static const char names[][4]
     __attribute__((nonstring, section(".init.rodata"))) = {
         "ab",

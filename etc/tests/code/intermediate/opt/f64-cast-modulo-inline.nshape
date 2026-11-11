@@ -1,0 +1,49 @@
+shape optcheck_f64_cast_modulo_inline {
+  family "runtime-native"
+  generator "native"
+  features [native x86_64 optcheck f64 cast modulo inline]
+  template ny-test-case
+  flags_matrix "-O0 --color=never; -O3 --color=never; --native-only -O3 --color=never"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.tbuf
+
+;; `int(f64)` feeding `%` used to keep an f64 register class once the
+;; surrounding `sum + ...` promoted to add.f64: the modulo then read IEEE
+;; bits at -O0 (53174 for three 1.0 elements) and the machine-form gate
+;; rejected it at -O3. The inline and typed spellings must agree.
+fn sum_inline() int {
+  def a = f64buf_new(3)
+  f64buf_store(a, 0, 1.0)
+  f64buf_store(a, 1, 1.0)
+  f64buf_store(a, 2, 1.0)
+  mut int sum = 0
+  mut int j = 0
+  while j < 3 {
+    sum = (sum + int(f64buf_load(a, j) * 1000.0) % 100003) % 100003
+    j += 1
+  }
+  sum
+}
+
+fn sum_typed() int {
+  def a = f64buf_new(3)
+  f64buf_store(a, 0, 1.0)
+  f64buf_store(a, 1, 1.0)
+  f64buf_store(a, 2, 1.0)
+  mut int sum = 0
+  mut int j = 0
+  while j < 3 {
+    def int v = int(f64buf_load(a, j) * 1000.0)
+    sum = (sum + v) % 100003
+    j += 1
+  }
+  sum
+}
+
+assert(sum_inline() == 3000, "inline f64 cast modulo")
+assert(sum_typed() == 3000, "typed f64 cast modulo")
+print("f64-cast-modulo-inline=ok")
+NY
+}

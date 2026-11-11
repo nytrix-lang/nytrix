@@ -1,3 +1,4 @@
+/* Core semantic types, typed AST metadata, and type-system interfaces. */
 #ifndef NY_CODE_TYPES_H
 #define NY_CODE_TYPES_H
 
@@ -225,9 +226,9 @@ typedef enum ny_type_kind_t {
   NY_TYPE_CAPABILITY,
   NY_TYPE_EFFECT_VAR,
   NY_TYPE_ROW,
-  NY_TYPE_DEPENDENT_ARROW,   /* fn(n Fin<N>) Vec<T, n> — return type mentions n */
-  NY_TYPE_SIGMA,             /* exists(n Fin<8>). Vec<f64, n> — dependent pair */
-  NY_TYPE_TYPE,              /* Type — the universe of types (first-class types) */
+  NY_TYPE_DEPENDENT_ARROW, /* fn(n Fin<N>) Vec<T, n> — return type mentions n */
+  NY_TYPE_SIGMA,           /* exists(n Fin<8>). Vec<f64, n> — dependent pair */
+  NY_TYPE_TYPE, /* Type — the universe of types (first-class types) */
 } ny_type_kind_t;
 
 typedef struct ny_type_t ny_type_t;

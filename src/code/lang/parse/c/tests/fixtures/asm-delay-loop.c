@@ -1,3 +1,6 @@
+/*
+ * Inline assembly fixture for delay-loop branches and local labels.
+ */
 static void delay_loop(unsigned long loops) {
   __asm__ volatile("\ttest %0,%0\t\n"
                    "\tjz 3f\t\t\n"

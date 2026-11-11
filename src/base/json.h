@@ -1,3 +1,4 @@
+/* Inline JSON string escaping and minimal JSON serialization helpers. */
 #ifndef NY_BASE_JSON_H
 #define NY_BASE_JSON_H
 

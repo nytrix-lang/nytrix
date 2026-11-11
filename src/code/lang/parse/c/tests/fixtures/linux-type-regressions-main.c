@@ -1,3 +1,6 @@
+/*
+ * Fixture driver: exercise Linux-style aggregate and flexible-array types.
+ */
 struct nyc_pair {
   unsigned long left, right;
 };

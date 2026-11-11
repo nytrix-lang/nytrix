@@ -1,3 +1,6 @@
+/*
+ * End-to-end acceptance checks for the public NYIR API and linked objects.
+ */
 #include <nyr/nyr.h>
 
 #include "code/backend/internal.h"

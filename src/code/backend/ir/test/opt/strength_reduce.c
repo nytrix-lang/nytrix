@@ -1,3 +1,6 @@
+/*
+ * NYIR regression tests for integer strength-reduction transformations.
+ */
 #include "support.h"
 
 #include <stdint.h>
