@@ -136,6 +136,51 @@ static bool sm_i386_has_live_label_incoming(const sm_i386_spill_line_t *lines,
   return false;
 }
 
+/* Recompute the per-line register liveness after a pass edits the stream. */
+static void sm_i386_spill_reg_live(sm_i386_spill_line_t *lines, size_t count) {
+  bool changed;
+  do {
+    changed = false;
+    for (size_t at = count; at-- > 0;) {
+      sm_i386_spill_line_t *in = &lines[at];
+      unsigned out = (!in->terminal || in->removed) && at + 1 < count
+                         ? lines[at + 1].reg_live : 0;
+      if (!in->removed && in->target < count) out |= lines[in->target].reg_live;
+      unsigned before = in->removed ? out :
+          (out & ~(unsigned)in->reg_write) | in->reg_read;
+      if (before != in->reg_live) {
+        in->reg_live = (unsigned char)before; changed = true;
+      }
+    }
+  } while (changed);
+}
+
+/* Instructions that read the current flags without setting them first. */
+static bool sm_i386_flag_consumer(const char *op) {
+  if (op[0] == 'j' && strcmp(op, "jmp") && strcmp(op, "jmpq") &&
+      strcmp(op, "jcxz") && strcmp(op, "jecxz"))
+    return true;
+  return !strncmp(op, "set", 3) || !strncmp(op, "cmov", 4) ||
+         !strcmp(op, "adcl") || !strcmp(op, "sbbl") ||
+         !strcmp(op, "adcw") || !strcmp(op, "sbbw") ||
+         !strcmp(op, "adcb") || !strcmp(op, "sbbb") || !strcmp(op, "cmc");
+}
+
+/* Instructions that overwrite every flag a discarded SARL could set. */
+static bool sm_i386_flag_writer(const char *op) {
+  static const char *const names[] = {
+      "addl", "subl", "andl", "orl", "xorl", "cmpl", "testl", "incl",
+      "decl", "negl", "imull", "shll", "shrl", "sarl", "addw", "subw",
+      "andw", "orw", "xorw", "cmpw", "testw", "incw", "decw", "negw",
+      "imulw", "shlw", "shrw", "sarw", "addb", "subb", "andb", "orb",
+      "xorb", "cmpb", "testb", "incb", "decb", "negb", "imulb", "shlb",
+      "shrb", "sarb"};
+  for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); ++i)
+    if (!strcmp(op, names[i])) return true;
+  return !strncmp(op, "call", 4) || !strncmp(op, "ret", 3) ||
+         !strcmp(op, "ud2");
+}
+
 static bool sm_i386_direct_call_reads(const nyr_func_t *func,
                                       const char *assembly_target,
                                       size_t *cursor, unsigned *reads) {
@@ -852,6 +897,150 @@ static bool sm_i386_cleanup_spills(nyr_writer_t *assembly, int value_bytes,
       }
     } while (changed);
   }
+  /* Fold a zero test of a freshly loaded home into the compare form. TESTL
+   * and CMPL $0 leave every observable flag identical (ZF/SF/PF from the
+   * same value, CF/OF clear), so the loaded register can die at the test. */
+  bool folded_zero_test = false;
+  for (size_t i = 1; i < count && !getenv("NYC_DISABLE_I386_HOME_TEST_FOLD");
+       ++i) {
+    sm_i386_spill_line_t *test = &lines[i], *load = &lines[i - 1];
+    if (test->removed || strcmp(test->op, "testl") || !test->args ||
+        load->removed || strcmp(load->op, "movl") || load->label) continue;
+    char lhs[192], rhs[192], source[192], destination[192];
+    if (!sm_i386_spill_split(test, lhs, rhs) ||
+        !sm_i386_spill_split(load, source, destination)) continue;
+    int slot = sm_i386_spill_slot(source, bytes);
+    int reg = sm_i386_spill_register(destination);
+    if (slot < 0 || reg < 0 || strcmp(destination, sm_i386_gpr[reg]) ||
+        strcmp(lhs, rhs) || strcmp(lhs, sm_i386_gpr[reg]) || banned[slot])
+      continue;
+    if ((i + 1 < count ? lines[i + 1].reg_live : 0) & (1u << reg)) continue;
+    nyr_writer_t replacement = {0};
+    if (!nyr_printf(&replacement, "\tcmpl\t$0, %s", source)) {
+      free(replacement.data); ok = false; goto done;
+    }
+    free(test->replacement);
+    test->replacement = replacement.data;
+    test->args = test->replacement + strlen("\tcmpl\t");
+    strcpy(test->op, "cmpl");
+    test->reg_read = (unsigned char)sm_i386_spill_register_mask(source);
+    test->reads = 1;
+    test->read[0] = slot;
+    load->removed = true;
+    folded_zero_test = true;
+  }
+  if (folded_zero_test) sm_i386_spill_reg_live(lines, count);
+  /* Forward a register through a dead copy: a definition of B followed by
+   * a copy of B into C with B dead afterwards redefines C directly. Backward
+   * sweeps fold whole copy chains; liveness is recomputed between rounds. */
+  for (bool round_changed = true; round_changed &&
+       !getenv("NYC_DISABLE_I386_MOVE_FORWARD");) {
+    round_changed = false;
+    for (size_t i = count; i-- > 1;) {
+      sm_i386_spill_line_t *move_line = &lines[i],
+                           *def_line = &lines[i - 1];
+      if (move_line->removed || move_line->label || def_line->removed ||
+          def_line->label || strcmp(move_line->op, "movl") ||
+          !move_line->args || !def_line->op[0])
+        continue;
+      bool pop_def = !strcmp(def_line->op, "popl");
+      bool cmov_def = !strncmp(def_line->op, "cmov", 4);
+      if (!pop_def && !cmov_def && strcmp(def_line->op, "movl") &&
+          strcmp(def_line->op, "leal") && strcmp(def_line->op, "movzbl") &&
+          strcmp(def_line->op, "movzwl") && strcmp(def_line->op, "movsbl") &&
+          strcmp(def_line->op, "movswl"))
+        continue;
+      char src[192], dst[192], copy_src[192], copy_dst[192];
+      if (pop_def)
+        strcpy(src, def_line->args ? def_line->args : "");
+      else if (!sm_i386_spill_split(def_line, src, dst))
+        continue;
+      if (!pop_def && !strcmp(def_line->op, "movl") && src[0] != '$' &&
+          sm_i386_spill_register(src) < 0)
+        continue;
+      int def_reg = sm_i386_spill_register(pop_def ? src : dst);
+      if (def_reg < 0 || def_reg >= 6 ||
+          strcmp(pop_def ? src : dst, sm_i386_gpr[def_reg]))
+        continue;
+      if (!sm_i386_spill_split(move_line, copy_src, copy_dst) ||
+          strcmp(copy_src, sm_i386_gpr[def_reg])) continue;
+      int copy_reg = sm_i386_spill_register(copy_dst);
+      if (copy_reg < 0 || copy_reg >= 6 || copy_reg == def_reg ||
+          strcmp(copy_dst, sm_i386_gpr[copy_reg]))
+        continue;
+      unsigned def_bit = 1u << def_reg;
+      unsigned copy_out = (i + 1 < count ? lines[i + 1].reg_live : 0) |
+                          (move_line->target < count
+                               ? lines[move_line->target].reg_live : 0);
+      if (copy_out & def_bit) continue;
+      nyr_writer_t replacement = {0};
+      bool formatted = pop_def
+          ? nyr_printf(&replacement, "\tpopl\t%s", sm_i386_gpr[copy_reg])
+          : nyr_printf(&replacement, "\t%s\t%s, %s", def_line->op, src,
+                       sm_i386_gpr[copy_reg]);
+      if (!formatted) { free(replacement.data); ok = false; goto done; }
+      free(def_line->replacement);
+      def_line->replacement = replacement.data;
+      def_line->args =
+          def_line->replacement + strlen("\t") + strlen(def_line->op) + 1;
+      def_line->reg_write = (unsigned char)(1u << copy_reg);
+      def_line->reg_read =
+          pop_def ? 128u : (unsigned char)sm_i386_spill_register_mask(src);
+      move_line->removed = true;
+      round_changed = true;
+    }
+    if (round_changed) sm_i386_spill_reg_live(lines, count);
+  }
+  /* A push/sarl/popl bracket whose shift result was never stored only
+   * clobbers and restores its register; drop it when no later instruction
+   * can consume the shift's flags. */
+  for (size_t i = 0; i + 2 < count &&
+       !getenv("NYC_DISABLE_I386_SARL_BRACKET"); ++i) {
+    sm_i386_spill_line_t *push = &lines[i], *sar = &lines[i + 1],
+                        *pop = &lines[i + 2];
+    if (push->removed || sar->removed || pop->removed ||
+        strcmp(push->op, "pushl") || strcmp(sar->op, "sarl") ||
+        strcmp(pop->op, "popl") || !push->args || !sar->args || !pop->args)
+      continue;
+    if (strcmp(push->args, sar->args) || strcmp(push->args, pop->args))
+      continue;
+    int reg = sm_i386_spill_register(push->args);
+    if (reg < 0 || reg >= 6) continue;
+    bool blocked = false;
+    size_t hops = 0;
+    for (size_t k = i + 3; k < count;) {
+      const sm_i386_spill_line_t *scan = &lines[k];
+      if (scan->removed || !scan->op[0]) { ++k; continue; }
+      if (scan->label) {
+        if (sm_i386_has_live_label_incoming(lines, count, k)) {
+          blocked = true;
+          break;
+        }
+        ++k;
+        continue;
+      }
+      if (sm_i386_flag_consumer(scan->op)) { blocked = true; break; }
+      if (sm_i386_flag_writer(scan->op)) break;
+      if (!strcmp(scan->op, "jmp") && scan->target < count) {
+        if (++hops > 16) { blocked = true; break; }
+        k = scan->target;
+        continue;
+      }
+      if (!strncmp(scan->op, "mov", 3) || !strcmp(scan->op, "leal") ||
+          !strncmp(scan->op, "push", 4) || !strncmp(scan->op, "pop", 3) ||
+          !strcmp(scan->op, "cltd") || !strcmp(scan->op, "nop")) {
+        ++k;
+        continue;
+      }
+      blocked = true;
+      break;
+    }
+    if (blocked) continue;
+    push->removed = true;
+    sar->removed = true;
+    pop->removed = true;
+  }
+  sm_i386_spill_reg_live(lines, count);
   for (size_t i = 0; i + 1 < count; ++i)
     if (lines[i].reg_removable && !(lines[i].reg_write & lines[i + 1].reg_live))
       lines[i].removed = true;

@@ -1,0 +1,109 @@
+shape lbm-relax {
+  family "perf-real"
+  generator "stress"
+  features ["perf", "integer", "grid", "stencil", "c-vs-ny", "native", "checksum", "time"]
+  meta "integer D2Q9-style lattice relaxation, two buffers"
+  timeout 180
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.tbuf
+use core.os.time
+;; Fixed-point lattice relaxation on a 2D stencil with clamped update.
+def W = 96
+def H = 96
+mut ptr a = i64buf_new(W * H)
+mut ptr b = i64buf_new(W * H)
+mut z = 0
+while z < W * H {
+   i64buf_store(a, z, 0)
+   i64buf_store(b, z, 0)
+   z += 1
+}
+mut y = 40
+while y < 56 {
+   mut x = 40
+   while x < 56 {
+      i64buf_store(a, y * W + x, 1000)
+      x += 1
+   }
+   y += 1
+}
+def int t0 = ticks()
+mut step = 0
+while step < 200 {
+   y = 1
+   while y < H - 1 {
+      mut x = 1
+      while x < W - 1 {
+         def idx = y * W + x
+         mut v = (i64buf_load(a, idx - W) + i64buf_load(a, idx + W)
+                + i64buf_load(a, idx - 1) + i64buf_load(a, idx + 1)
+                + 4 * i64buf_load(a, idx)) / 8
+         if v < 0 { v = 0 }
+         if v > 4096 { v = 4096 }
+         i64buf_store(b, idx, v)
+         x += 1
+      }
+      y += 1
+   }
+   def ptr tmp = a
+   a = b
+   b = tmp
+   step += 1
+}
+def int t1 = ticks()
+mut acc = 0
+mut k = 0
+while k < W * H {
+   acc = (acc + i64buf_load(a, k)) % 1000000007
+   k += 1
+}
+print("checksum=", acc)
+print("elapsed_ns=", t1 - t0)
+NY
+  source c <<'C'
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+
+static int64_t now_ns(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0;
+    return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+}
+
+int main(void) {
+    const int W = 96, H = 96;
+    int64_t *a = calloc((size_t)W * H, sizeof(int64_t));
+    int64_t *b = calloc((size_t)W * H, sizeof(int64_t));
+    for (int y = 40; y < 56; y++)
+        for (int x = 40; x < 56; x++) a[y * W + x] = 1000;
+    int64_t t0 = now_ns();
+    for (int step = 0; step < 200; step++) {
+        for (int y = 1; y < H - 1; y++) {
+            for (int x = 1; x < W - 1; x++) {
+                int idx = y * W + x;
+                int64_t v = (a[idx - W] + a[idx + W] + a[idx - 1] + a[idx + 1]
+                          + 4 * a[idx]) / 8;
+                if (v < 0) v = 0;
+                if (v > 4096) v = 4096;
+                b[idx] = v;
+            }
+        }
+        int64_t *tmp = a;
+        a = b;
+        b = tmp;
+    }
+    int64_t t1 = now_ns();
+    int64_t acc = 0;
+    for (int k = 0; k < W * H; k++) acc = (acc + a[k]) % 1000000007;
+    printf("checksum=%lld\n", (long long)acc);
+    if (t1 <= t0) t1 = t0 + 1;
+    printf("elapsed_ns=%lld\n", (long long)(t1 - t0));
+    return 0;
+}
+C
+}

@@ -41,14 +41,28 @@ work is tracked in [Performance work](perf.md).
 
 ### P1 — Complete real-compositor behavior
 
-- [ ] **Exercise window and text-input environments.** Cover fractional and
-  HiDPI scaling, resize, IME composition/commit/cancel, clipboard, and the
-  TTY backend in a real terminal. For GL on Wayland, first make window
-  creation failure observable; do not count "no window appeared" as a pass.
-  Pointer and keyboard events delivered by a compositor seat are still
-  untested (headless Weston has none). Acceptance: captures/probes at each
-  supported scale and size, no lost input or text, and an explicit support
-  result for each backend.
+- [ ] **Exercise window and text-input environments.** Results so far
+  (2026-11-15, headless Weston, Vulkan and GL):
+  - Window creation failure is observable: `gfx.window_error()` names the
+    requested backend and the display variables when `init_window` returns
+    false or falls back to the off-screen mock surface, and is empty when
+    the window opened (`code/probes/ui/window-error-report`).
+  - Integer output scale 2: both backends draw the same frame, but into a
+    1x buffer that the compositor upscales, so text is soft. The Wayland
+    layer records `wp_fractional_scale_v1` in `content_scale` and never
+    applies it. Not HiDPI-aware yet: needs the buffer sized by the scale
+    (`set_buffer_scale` or `wp_viewport`), the swapchain/EGL surface resized
+    to match, the toolkit scale multiplied in, and pointer coordinates kept
+    logical.
+  - TTY backend in a pseudo-terminal (100x30, truecolour): draws, and now
+    restores the terminal on `exit()` as well as on `close_window()` (the
+    runtime exit skipped its terminal restore, leaving raw mode, the
+    alternate screen, and a hidden cursor).
+  Still untested: fractional scales, resize, IME composition/commit/cancel,
+  clipboard, and pointer/keyboard events from a compositor seat (headless
+  Weston has none). Acceptance: captures/probes at each supported scale and
+  size, no lost input or text, and an explicit support result for each
+  backend.
 
 ### P2 — Toolkit and engine
 
@@ -134,22 +148,6 @@ work is tracked in [Performance work](perf.md).
   - **Acceptance:** behavior and controls match the upstream README/source for
     supported Linux `/proc` workflows, no compile warnings, stable on native/JIT
     routes used for UI tools, and no regressions in existing UI/tool checks.
-
-### Compiler defects found during this work (open)
-
-- A module global whose name matches a variable anywhere else in the loaded
-  libraries can be lowered as that other value. With `mut alpha = 0` in one
-  module, an importing module's `alpha * 1000 + vc` calls the list-repeat
-  runtime and returns 12 after `alpha = 2`, because the bare-name lookup
-  finds `def alpha = [0, 1]` inside a function of `lib/math/gf.ny`. Renaming
-  the global to a unique name gives 2012. The resolved cell symbol, not the
-  bare name, should drive the operand type.
-- A module global initialised with a negative literal (`mut word = -1`) and
-  assigned from an importing module reads back `nil` through `owner.word`
-  from the root program.
-- With two inline modules that both own a global `x`, the root program's
-  `second.x` reads the first module's cell. Importing modules now resolve
-  the bare name correctly (`lang/modules/module-global-same-leaf-two-owners`).
 
 ## Execution brief
 

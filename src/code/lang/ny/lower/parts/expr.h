@@ -5674,6 +5674,7 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
       const nyr_builder_impl_t *owner = b->cache_owner ? b->cache_owner : b;
       const char *qualified[1] = {NULL};
       char member_name[1024];
+      member_name[0] = '\0';
       char canonical_name[1024];
       canonical_name[0] = '\0';
       const char *module_owner =
@@ -5722,6 +5723,36 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
           qualified[0] ? nyr_globaltab_name(qualified[0])
                        : nyr_globaltab_name(canonical_name[0] ? canonical_name
                                                               : member_name);
+      /*
+       * The spelled owner wins when it names a registered cell. The member
+       * resolver above can return the initializer of a same-named global in
+       * another module (two modules each owning `x`), and `second.x` then
+       * read the first module's cell.
+       */
+      if (member_name[0] && e->as.member.target &&
+          e->as.member.target->kind == NY_E_IDENT) {
+        const char *dot = strchr(member_name, '.');
+        char spelled[1024];
+        const char *root_alias = NULL;
+        if (dot && (size_t)(dot - member_name) < 512) {
+          char root_name[512];
+          memcpy(root_name, member_name, (size_t)(dot - member_name));
+          root_name[dot - member_name] = '\0';
+          root_alias = nyr_resolve_use_alias(b, root_name);
+        }
+        int sn = dot ? snprintf(spelled, sizeof(spelled), "%s%s",
+                                root_alias ? root_alias : "", root_alias ? dot : member_name)
+                     : -1;
+        const char *spelled_symbol =
+            sn > 0 && (size_t)sn < sizeof(spelled) ? nyr_globaltab_name(spelled)
+                                                   : NULL;
+        /* Inline root modules register their cells under the name as
+         * written, while the alias resolver may prefix it. */
+        if (!spelled_symbol && dot)
+          spelled_symbol = nyr_globaltab_name(member_name);
+        if (spelled_symbol)
+          symbol = spelled_symbol;
+      }
       if (symbol) {
         int addr = nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_ADDR_SYMBOL,
                                                       .dst = -1,

@@ -1,0 +1,98 @@
+shape lz-match {
+  family "perf-real"
+  generator "stress"
+  features ["perf", "integer", "compression", "match-finder", "c-vs-ny", "native", "checksum", "time"]
+  meta "LZ match search over a fixed window"
+  timeout 180
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.tbuf
+use core.os.time
+;; Greedy LZ77 tokenizer: fixed power-of-two offsets, capped match length.
+def N = 65536
+def MAXM = 64
+def ptr data = i64buf_new(N)
+mut i = 0
+while i < N {
+   i64buf_store(data, i, (i * 31 + 7) % 251)
+   i += 1
+}
+mut tokens = 0
+mut literals = 0
+def int t0 = ticks()
+i = 0
+while i < N {
+   mut best = 0
+   mut off = 1
+   while off <= 1024 {
+      if i >= off {
+         mut len = 0
+         mut go = 1
+         while go == 1 {
+            if len >= MAXM { go = 0 } else {
+               if i + len >= N { go = 0 } else {
+                  if i64buf_load(data, i + len) == i64buf_load(data, i - off + len) {
+                     len += 1
+                  } else { go = 0 }
+               }
+            }
+         }
+         if len > best { best = len }
+      }
+      off *= 2
+   }
+   if best >= 4 {
+      tokens += 1
+      i += best
+   } else {
+      literals += 1
+      i += 1
+   }
+}
+def int t1 = ticks()
+mut acc = (tokens * 1000003 + literals) % 1000000007
+print("checksum=", acc)
+print("elapsed_ns=", t1 - t0)
+NY
+  source c <<'C'
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+
+static int64_t now_ns(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0;
+    return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+}
+
+int main(void) {
+    const int N = 65536, MAXM = 64;
+    int64_t *data = calloc((size_t)N, sizeof(int64_t));
+    for (int i = 0; i < N; i++) data[i] = (i * 31 + 7) % 251;
+    int64_t tokens = 0, literals = 0;
+    int64_t t0 = now_ns();
+    for (int i = 0; i < N;) {
+        int best = 0;
+        for (int off = 1; off <= 1024; off *= 2) {
+            if (i < off) continue;
+            int len = 0;
+            while (len < MAXM && i + len < N &&
+                   data[i + len] == data[i - off + len])
+                len++;
+            if (len > best) best = len;
+        }
+        if (best >= 4) { tokens++; i += best; }
+        else { literals++; i += 1; }
+    }
+    int64_t t1 = now_ns();
+    int64_t acc = (tokens * 1000003 + literals) % 1000000007;
+    printf("checksum=%lld\n", (long long)acc);
+    if (t1 <= t0) t1 = t0 + 1;
+    printf("elapsed_ns=%lld\n", (long long)(t1 - t0));
+    return 0;
+}
+C
+}

@@ -48,6 +48,9 @@ assert(user_b.sum_b() == 712, "the other owner is untouched")
 assert(!user_a.set_a(2, 12), "an unchanged value compares equal")
 user_b.set_b(3)
 assert(user_b.sum_b() == 312 && user_a.sum_a() == 212, "the second owner updates independently")
+;; Qualified reads from the root program pick the spelled owner's cell.
+assert(state_a.zq_blend == 2 && state_a.zq_mode == 12, "state_a's cells")
+assert(state_b.zq_blend == 3 && state_b.zq_mode == 12, "state_b's cells")
 print("MODULE-GLOBAL-SAME-LEAF-OK")
 NY
 }

@@ -1,0 +1,128 @@
+shape scheduler {
+  family "perf-real"
+  generator "stress"
+  features ["perf", "integer", "scheduler", "queues", "c-vs-ny", "native", "checksum", "time"]
+  meta "round-robin scheduler with task queues"
+  timeout 180
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.tbuf
+use core.os.time
+;; Three priority queues with ready/running/waiting task transitions.
+def Q = 3
+def T = 8
+def CAP = 32
+def ptr state = i64buf_new(Q * T)
+def ptr queue = i64buf_new(Q * CAP)
+def ptr head = i64buf_new(Q)
+def ptr qlen = i64buf_new(Q)
+mut q = 0
+while q < Q {
+   mut k = 0
+   while k < T {
+      i64buf_store(state, q * T + k, 0)
+      i64buf_store(queue, q * CAP + k, q * T + k)
+      k += 1
+   }
+   i64buf_store(head, q, 0)
+   i64buf_store(qlen, q, T)
+   q += 1
+}
+mut acc = 0
+def int t0 = ticks()
+mut step = 0
+while step < 200000 {
+   def qi = step % Q
+   def n = i64buf_load(qlen, qi)
+   if n > 0 {
+      def h = i64buf_load(head, qi)
+      def pos = h % CAP
+      def t = i64buf_load(queue, qi * CAP + pos)
+      i64buf_store(head, qi, h + 1)
+      def s = i64buf_load(state, t)
+      def tail = (h + n) % CAP
+      if s == 0 {
+         i64buf_store(state, t, 1)
+         i64buf_store(queue, qi * CAP + tail, t)
+         i64buf_store(qlen, qi, n)
+      } else {
+         if s == 1 {
+            i64buf_store(state, t, 2)
+            acc = (acc + t * 7 + 1) % 1000000007
+         } else {
+            i64buf_store(state, t, 0)
+         }
+         i64buf_store(queue, qi * CAP + tail, t)
+         i64buf_store(qlen, qi, n)
+      }
+   }
+   step += 1
+}
+def int t1 = ticks()
+print("checksum=", acc)
+print("elapsed_ns=", t1 - t0)
+NY
+  source c <<'C'
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+
+static int64_t now_ns(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0;
+    return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+}
+
+int main(void) {
+    const int Q = 3, T = 8, CAP = 32;
+    int64_t *state = calloc((size_t)Q * T, sizeof(int64_t));
+    int64_t *queue = calloc((size_t)Q * CAP, sizeof(int64_t));
+    int64_t *head = calloc((size_t)Q, sizeof(int64_t));
+    int64_t *qlen = calloc((size_t)Q, sizeof(int64_t));
+    for (int q = 0; q < Q; q++) {
+        for (int k = 0; k < T; k++) {
+            state[q * T + k] = 0;
+            queue[q * CAP + k] = q * T + k;
+        }
+        head[q] = 0;
+        qlen[q] = T;
+    }
+    int64_t acc = 0;
+    int64_t t0 = now_ns();
+    for (int step = 0; step < 200000; step++) {
+        int qi = step % Q;
+        int64_t n = qlen[qi];
+        if (n > 0) {
+            int64_t h = head[qi];
+            int64_t pos = h % CAP;
+            int64_t t = queue[qi * CAP + pos];
+            head[qi] = h + 1;
+            int64_t s = state[t];
+            int64_t tail = (h + n) % CAP;
+            if (s == 0) {
+                state[t] = 1;
+                queue[qi * CAP + tail] = t;
+                qlen[qi] = n;
+            } else {
+                if (s == 1) {
+                    state[t] = 2;
+                    acc = (acc + t * 7 + 1) % 1000000007;
+                } else {
+                    state[t] = 0;
+                }
+                queue[qi * CAP + tail] = t;
+                qlen[qi] = n;
+            }
+        }
+    }
+    int64_t t1 = now_ns();
+    printf("checksum=%lld\n", (long long)acc);
+    if (t1 <= t0) t1 = t0 + 1;
+    printf("elapsed_ns=%lld\n", (long long)(t1 - t0));
+    return 0;
+}
+C
+}

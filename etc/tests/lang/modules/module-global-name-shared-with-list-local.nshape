@@ -1,0 +1,41 @@
+shape module_global_name_shared_with_list_local {
+  family "runtime/modules"
+  generator "embedded"
+  features ["ny", "modules", "globals", "imports"]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect compile_and_run
+  expect_message "MODULE-GLOBAL-NAME-SHARED-WITH-LIST-LOCAL-OK"
+  source ny <<'NY'
+use core
+
+;; An integer module global shares its name with a list bound in the
+;; `#main` self-test block of an unrelated module (core.math.gf has
+;; `def alpha = [0, 1]` there). The bare-name lookup found that list, and
+;; `zq_mix * 1000` on the imported integer became a list repeat.
+module other(make){
+   fn make() list { [0, 1] }
+   #main {
+      def zq_mix = [0, 1]
+      assert(zq_mix.len == 2, "self test")
+   }
+}
+module st(zq_mix, zq_vc){
+   mut zq_mix = 0
+   mut zq_vc = 0
+}
+module rr(setm, peek){
+   use st
+   fn setm(int a, int v) any {
+      zq_mix = a
+      zq_vc = v
+      0
+   }
+   fn peek() int { zq_mix * 1000 + zq_vc }
+}
+rr.setm(2, 12)
+assert(rr.peek() == 2012, "the imported integer multiplies as an integer")
+assert(other.make().len == 2, "the unrelated list is unchanged")
+print("MODULE-GLOBAL-NAME-SHARED-WITH-LIST-LOCAL-OK")
+NY
+}

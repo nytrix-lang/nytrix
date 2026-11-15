@@ -53,11 +53,32 @@ fixture or a bench row that passes.
   phi elimination also publishes the `MAY_TRAP` effect bits the verifier now
   requires (`phi_elim_deep_vec8`).
 
+### Benchmark corpus coverage (2026-11-15)
+
+Nineteen fixtures from public benchmark families were added to
+`etc/tests/bench`; the mapping and checksums are in the
+[corpus table](../learn/measurements.md#benchmark-corpus-expansion-2026-11-15):
+`algorithms/{mcf,sssp,permute,deltablue,statemate}`, `concurrency/richards`,
+`numeric/{lbm,matmult-int,mont64}`, `string/xz`, `graphics/{imagick,povray}`,
+`memory/{stream,transpose}`, `crypto/{crc32,qrsyndrome}`, and
+`simulation/{omnetpp,leela,cd}`.
+
+- [x] Every new fixture carries a C counterpart in the same `.nshape` and
+  matches its checksum on the measured input (19/19).
+- [x] Re-ran `--bench-show-asm` over the nineteen new fixtures; the
+  [assembly audit](../learn/measurements.md#native-assembly-and-code-size-audit-2026-11-15)
+  now covers all 96. Six of them emit
+  text assembly in that diagnostic mode and therefore carry no machine-code
+  size (recorded in the audit note).
+- [ ] Add the new fixtures to the saved `./make bench` baseline so the route
+  ratios and the 1.2x gate cover them.
+
 ### Assembly and code-size audit (2026-11-15)
 
-- All 77 bench sources now have a `--bench-show-asm` record in the
-  [assembly audit](../learn/asm-audit.md): 91,714,429 bytes of emitted x86-64
-  code, median 26,381 bytes per fixture. The largest programs are generated
+- The 77 bench sources present at audit time have a `--bench-show-asm` record in
+  the [assembly audit](../learn/measurements.md#native-assembly-and-code-size-audit-2026-11-15):
+  92,005,384 bytes of emitted
+  x86-64 code, median 26,381 bytes per fixture. The largest programs are generated
   fixtures (`pbkdf2` 5.6 MB, `sha256` 5.6 MB, `inline` 5.4 MB).
 - The cost is MACH-to-x64 expansion, not a missed opcode idiom. `ny_fn_moves`
   in `knight` is 188 MACH instructions and 498 x64 instructions; 199 of those
@@ -513,12 +534,27 @@ Use `NYTRIX_AUDIT=1` and compare `ra_segments`/`ra_spilled`/`ra_spill_live`/
 
 ## SCEV: remaining symbolic work
 
+Closed 2026-11-15 (evidence in `docs/learn/measurements.md`, the two dated SCEV
+sections):
+
+- `!=` counted loops get an exact trip count when the recurrence lands on the
+  limit (`scev_ne_trip_count`).
+- Symbolic start/limit loops get constant IV intervals and a trip ceiling from
+  operand range facts, with invariance and wrap checks (`scev_range_bounds`).
+- Loop guards now prove bounds checks with no constant length at all: the exit
+  test plus matching positive scaling is enough (`scev_guard_bounds`).
+- Chained guards work too: a dominating `n <= cap` plus `i < n` proves a check
+  against `cap`, closed transitively (`scev_guard_chain`).
+
+Still open:
+
 - Exact symbolic exit counts (`n - a` as a value rather than an interval) need a
   symbolic range type; `nyr_range_t` is a constant interval by design and is
-  part of the serialized IR format. Range-derived intervals now cover the
-  bounds case (see `docs/learn/measurements.md`, 2026-11-15).
+  part of the serialized IR format.
 - Known multiples (`{0,+,3}` is always a multiple of three) has no consumer yet.
   Add it together with the first div/mod strength-reduction query that wants it,
   rather than carrying dead metadata.
-- Loop guards proven from range facts are used only as in-body intervals; the
-  after-loop exhaustion singleton still requires an exact trip count.
+- Guard predicates are consumed where the check is, not hoisted: proving a
+  property outside the loop, or through a call result, a select, or an assume,
+  still needs an expression-level SCEV rather than the affine-lite form.
+- The after-loop exhaustion singleton still requires an exact trip count.

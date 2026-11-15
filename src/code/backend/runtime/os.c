@@ -1254,9 +1254,15 @@ int64_t rt_wait4(int64_t pid, int64_t status_ptr, int64_t options) {
 
 extern int64_t rt_print_flush(void);
 
+static void rt_tty_atexit_restore(void);
+
 int64_t rt_exit(int64_t code) {
   RT_UNTAG_INT(code);
   rt_print_flush();
+  /* _exit skips atexit handlers, so a program that calls exit() while its
+   * terminal is raw would leave it raw, on the alternate screen, with no
+   * cursor. */
+  rt_tty_atexit_restore();
 #ifdef _WIN32
   ExitProcess((unsigned int)code);
 #else
@@ -1316,6 +1322,17 @@ static void rt_tty_atexit_restore(void) {
     SetConsoleMode(hIn, rt_tty_mode_prev);
 #else
   tcsetattr(STDIN_FILENO, TCSANOW, &rt_tty_mode_prev);
+  /*
+   * Still raw at exit means the program left without its own teardown
+   * (exit() from a frame loop, a panic). A full-screen program is then
+   * usually on the alternate screen with the cursor hidden; put the
+   * terminal back: default attributes, visible cursor, primary screen.
+   */
+  if (isatty(STDOUT_FILENO)) {
+    static const char reset[] = "\x1b[0m\x1b[?25h\x1b[?1049l";
+    ssize_t ignored = write(STDOUT_FILENO, reset, sizeof(reset) - 1);
+    (void)ignored;
+  }
 #endif
   rt_tty_mode_saved = 0;
 }

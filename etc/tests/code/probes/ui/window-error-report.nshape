@@ -1,0 +1,27 @@
+shape window_error_report {
+  family "runtime-ui"
+  generator "embedded"
+  features [window backend diagnostics]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect compile_and_run
+  expect_message "WINDOW-ERROR-REPORT-OK"
+  source ny <<'NY'
+use core
+use core.os.ui.render as gfx
+;; window_error() is how a program learns that the window it asked for did
+;; not appear. A surface that was requested and delivered leaves it empty.
+;; The failing side needs a session without a display and is checked on the
+;; compositor harness: with WAYLAND_DISPLAY pointing nowhere and DISPLAY
+;; unset, init_window returns false for both GL and Vulkan and the message
+;; names the requested backend and the display variables.
+assert(gfx.window_error() == "", "no error before any window was requested")
+gfx.set_backend_type(gfx.BACKEND_MOCK)
+def win = gfx.init_window(320, 200, "probe")
+assert(win, "the mock surface opens")
+assert(gfx.get_backend_type() == gfx.BACKEND_MOCK, "the mock backend is active")
+assert(gfx.window_error() == "", "a delivered surface reports no error")
+gfx.close_window()
+print("WINDOW-ERROR-REPORT-OK")
+NY
+}

@@ -1,0 +1,108 @@
+shape heap-permute {
+  family "perf-real"
+  generator "stress"
+  features ["perf", "integer", "permutation", "iteration", "c-vs-ny", "native", "checksum", "time"]
+  meta "Heap's algorithm permutation generation"
+  timeout 180
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.tbuf
+use core.os.time
+;; Heap's algorithm over ten elements; checksum accumulates a position signature.
+def N = 10
+def ptr p = i64buf_new(N)
+def ptr c = i64buf_new(N)
+mut i = 0
+while i < N {
+   i64buf_store(p, i, i)
+   i64buf_store(c, i, 0)
+   i += 1
+}
+mut sig = 0
+i = 0
+while i < N {
+   sig = (sig + i * i64buf_load(p, i)) % 1000000007
+   i += 1
+}
+mut acc = sig
+def int t0 = ticks()
+i = 0
+while i < N {
+   if i64buf_load(c, i) < i {
+      if i % 2 == 0 {
+         def tmp = i64buf_load(p, 0)
+         i64buf_store(p, 0, i64buf_load(p, i))
+         i64buf_store(p, i, tmp)
+      } else {
+         def j = i64buf_load(c, i)
+         def tmp = i64buf_load(p, j)
+         i64buf_store(p, j, i64buf_load(p, i))
+         i64buf_store(p, i, tmp)
+      }
+      sig = 0
+      mut k = 0
+      while k < N {
+         sig = (sig + k * i64buf_load(p, k)) % 1000000007
+         k += 1
+      }
+      acc = (acc + sig) % 1000000007
+      i64buf_store(c, i, i64buf_load(c, i) + 1)
+      i = 0
+   } else {
+      i64buf_store(c, i, 0)
+      i += 1
+   }
+}
+def int t1 = ticks()
+print("checksum=", acc)
+print("elapsed_ns=", t1 - t0)
+NY
+  source c <<'C'
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+
+static int64_t now_ns(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0;
+    return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+}
+
+int main(void) {
+    const int N = 10;
+    int64_t *p = calloc((size_t)N, sizeof(int64_t));
+    int64_t *c = calloc((size_t)N, sizeof(int64_t));
+    for (int i = 0; i < N; i++) { p[i] = i; c[i] = 0; }
+    int64_t sig = 0;
+    for (int i = 0; i < N; i++) sig = (sig + i * p[i]) % 1000000007;
+    int64_t acc = sig;
+    int64_t t0 = now_ns();
+    for (int i = 0; i < N;) {
+        if (c[i] < i) {
+            if (i % 2 == 0) {
+                int64_t tmp = p[0]; p[0] = p[i]; p[i] = tmp;
+            } else {
+                int64_t j = c[i];
+                int64_t tmp = p[j]; p[j] = p[i]; p[i] = tmp;
+            }
+            sig = 0;
+            for (int k = 0; k < N; k++) sig = (sig + k * p[k]) % 1000000007;
+            acc = (acc + sig) % 1000000007;
+            c[i] += 1;
+            i = 0;
+        } else {
+            c[i] = 0;
+            i += 1;
+        }
+    }
+    int64_t t1 = now_ns();
+    printf("checksum=%lld\n", (long long)acc);
+    if (t1 <= t0) t1 = t0 + 1;
+    printf("elapsed_ns=%lld\n", (long long)(t1 - t0));
+    return 0;
+}
+C
+}

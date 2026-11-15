@@ -15195,16 +15195,23 @@ static int nyr_load_global_scalar(nyr_builder_impl_t *b, int address,
    * dynamic consumer decode the raw word, so odd values halved and even
    * ones read as false (GL bound texture 3 for a scene's texture 7).
    */
-  if (value >= 0 && reference && reference->kind == NY_E_IDENT &&
-      reference->as.ident.name &&
-      !nyr_global_declared_any(b, reference->as.ident.name) &&
+  /* A qualified read (`owner.cell`) names the same cell through a member
+   * expression; its leaf stands in for the identifier. */
+  const char *ref_leaf =
+      !reference ? NULL
+      : reference->kind == NY_E_IDENT ? reference->as.ident.name
+      : (reference->kind == NY_E_MEMBER && name && strchr(name, '.'))
+          ? strrchr(name, '.') + 1
+          : NULL;
+  if (value >= 0 && ref_leaf && *ref_leaf &&
+      !nyr_global_declared_any(b, ref_leaf) &&
       !(name && nyr_global_declared_any(b, name))) {
     /*
      * The resolved symbol names the cell. Looking the bare identifier up
      * first found an unrelated top-level value of the same name in another
      * module (`alpha`), which hid the literal initializer of the real cell.
      */
-    const char *bare = reference->as.ident.name;
+    const char *bare = ref_leaf;
     const char *owner_dot = name ? strrchr(name, '.') : NULL;
     const char *here = b->module_name ? b->module_name : "";
     bool imported_cell = owner_dot && (strlen(here) != (size_t)(owner_dot - name) ||

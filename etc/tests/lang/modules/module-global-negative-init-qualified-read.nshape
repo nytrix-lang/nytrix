@@ -1,0 +1,34 @@
+shape module_global_negative_init_qualified_read {
+  family "runtime/modules"
+  generator "embedded"
+  features ["ny", "modules", "globals", "abi"]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect compile_and_run
+  expect_message "MODULE-GLOBAL-NEGATIVE-INIT-QUALIFIED-READ-OK"
+  source ny <<'NY'
+use core
+;; `mut word = -1` owns a raw integer cell. A qualified read `st.word` from
+;; the root program was stamped tagged and decoded again, so 7 read as 3.
+module st(word, pos){
+   mut word = -1
+   mut pos = 5
+}
+module rr(setw, getw){
+   use st
+   fn setw(int a) any {
+      word = a
+      pos = a
+      0
+   }
+   fn getw() int { word }
+}
+assert(st.word == -1 && st.pos == 5, "initial values")
+rr.setw(7)
+assert(rr.getw() == 7, "the importing module reads its store")
+assert(st.word == 7 && st.pos == 7, "qualified reads from the root see the raw cell")
+rr.setw(-3)
+assert(st.word == -3, "a negative odd value survives the qualified read")
+print("MODULE-GLOBAL-NEGATIVE-INIT-QUALIFIED-READ-OK")
+NY
+}

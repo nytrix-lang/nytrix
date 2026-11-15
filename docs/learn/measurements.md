@@ -21,6 +21,8 @@ claims.
 - [Latest full benchmark graph](#latest-full-benchmark-run)
 - [Measurement and profiling method](performance.md)
 - [Compilation and startup results](#compilation-and-startup)
+- [Native assembly and code-size audit (2026-11-15)](#native-assembly-and-code-size-audit-2026-11-15)
+- [Benchmark corpus expansion (2026-11-15)](#benchmark-corpus-expansion-2026-11-15)
 - [Compiler build-time fixes (2026-11-12)](#compiler-build-time-fixes-2026-11-12)
 - [Runtime and code-generation investigations](#vectorization-floating-point-and-addressing)
 - [Contribution and verification procedures](../CONTRIBUTE.md)
@@ -720,6 +722,170 @@ The focused `regalloc_loop_phi_carry`, `regalloc_cfg_edge_carry`,
 The loop-carry fixture also verifies that a deliberately mismatched latch color
 is rejected by the allocator verifier. The CFG allocation experiment remains
 reverted; this correctness fix does not establish a compile-time speedup.
+
+### Native assembly and code-size audit (2026-11-15)
+
+Collected 2026-11-15 on the release build, one `--bench-show-asm` run per
+fixture. These numbers rank emitted code size; they are not timing evidence:
+
+```
+ny-test --bin build/release/ny-full --bench <fixture> --bench-show-asm \
+  --bench-run 1 --bench-warmup 0
+```
+
+for all 96 `etc/tests/bench/**/*.nshape` sources. `code bytes` is the internal
+x86-64 machine code size the runner reports, so it measures emitted code rather
+than the assembly printer. Six fixtures fall back to the text emitter in this
+diagnostic mode: their rows say `text`, they carry assembly bytes in the note
+below the table, and they are excluded from the byte total and median.
+
+Timings below come from a single sample per fixture. The C column is the
+runner's C route for that fixture and can use a different repetition count
+from the fixture's own timing loop (`knight` reports 16.5x here while the
+harness row for it is 1.61x). Use these numbers only to rank code size;
+the benchmark run below is the timing evidence.
+
+- fixtures audited: 96 (95 ok, 1 fail)
+- emitted machine code: 92,005,384 bytes across 90 fixtures; median 24,876 bytes
+- records without an internal machine-code size: 6 (text-emitter fallback)
+
+### Largest fixtures
+
+| fixture | path | code bytes |
+|---|---|---|
+| pbkdf2 | `etc/tests/bench/algorithms/pbkdf2.nshape` | 5,627,626 |
+| sha256 | `etc/tests/bench/algorithms/sha256.nshape` | 5,592,189 |
+| inline | `etc/tests/bench/startup/inline.nshape` | 5,392,368 |
+| call-chain | `etc/tests/bench/concurrency/call-chain.nshape` | 5,391,983 |
+| expression-tree | `etc/tests/bench/algorithms/expression-tree.nshape` | 5,307,968 |
+| page-rank | `etc/tests/bench/algorithms/page-rank.nshape` | 4,522,018 |
+| bigint-oracle | `etc/tests/bench/numeric/bigint-oracle.nshape` | 4,295,923 |
+| json-parser | `etc/tests/bench/string/json-parser.nshape` | 3,950,079 |
+
+### All audited fixtures
+
+| fixture | path | status | NYR | C | code bytes |
+|---|---|---|---|---|---|
+| append-scaling | `etc/tests/bench/string/append-scaling.nshape` | ok | 8.47ms | 13.1ms | 19814 |
+| bce-matrix | `etc/tests/bench/numeric/bce-matrix.nshape` | ok | 4.92ms | 2.20ms | 26381 |
+| bigint-oracle | `etc/tests/bench/numeric/bigint-oracle.nshape` | ok | 36.0ms | 3.72ms | 4295923 |
+| binary | `etc/tests/bench/algorithms/binary.nshape` | ok | 823µs | 559µs | 25630 |
+| binary-trees | `etc/tests/bench/algorithms/binary-trees.nshape` | ok | 3.1µs | 16µs | 23797 |
+| call-chain | `etc/tests/bench/concurrency/call-chain.nshape` | ok | 587µs | 586µs | 5391983 |
+| calls | `etc/tests/bench/concurrency/calls.nshape` | ok | 104µs | 103µs | 20341 |
+| cd | `etc/tests/bench/simulation/cd.nshape` | ok | 17.2ms | 2.11ms | 24097 |
+| cmov-sort | `etc/tests/bench/startup/cmov-sort.nshape` | ok | 882µs | 572µs | 20796 |
+| collatz | `etc/tests/bench/algorithms/collatz.nshape` | ok | 78µs | 55µs | 6497 |
+| crc32 | `etc/tests/bench/crypto/crc32.nshape` | ok | 11.1ms | 10.1ms | 20945 |
+| currying | `etc/tests/bench/startup/currying.nshape` | FAIL | 2.21ms | 4.9µs | 27034 |
+| dce | `etc/tests/bench/startup/dce.nshape` | ok | 15µs | 247µs | 3149464 |
+| deltablue | `etc/tests/bench/algorithms/deltablue.nshape` | ok | 22.8ms | 16.1ms | text |
+| dgemm | `etc/tests/bench/numeric/dgemm.nshape` | ok | 40µs | 40µs | 65454 |
+| dict | `etc/tests/bench/datastructures/dict.nshape` | ok | 12.4ms | 5.73ms | 405931 |
+| dict-oracle | `etc/tests/bench/datastructures/dict-oracle.nshape` | ok | 68µs | 30µs | 406426 |
+| dict-set | `etc/tests/bench/datastructures/dict-set.nshape` | ok | 56.3ms | 86.4ms | 3544919 |
+| escape-loop | `etc/tests/bench/startup/escape-loop.nshape` | ok | 4.58ms | 4.97ms | 17792 |
+| euler9 | `etc/tests/bench/algorithms/euler9.nshape` | ok | 55µs | 30µs | 11465 |
+| expression-tree | `etc/tests/bench/algorithms/expression-tree.nshape` | ok | 8.37ms | 6.89ms | 5307968 |
+| fannkuch | `etc/tests/bench/algorithms/fannkuch.nshape` | ok | 237ms | 214ms | 26087 |
+| fasta | `etc/tests/bench/string/fasta.nshape` | ok | 1.75ms | 1.37ms | 23883 |
+| fft | `etc/tests/bench/numeric/fft.nshape` | ok | 17µs | 39µs | 3615888 |
+| fibonacci | `etc/tests/bench/numeric/fibonacci.nshape` | ok | 118µs | 112µs | 21064 |
+| float | `etc/tests/bench/numeric/float.nshape` | ok | 9.45ms | 9.19ms | 21547 |
+| float-cmp-oracle | `etc/tests/bench/numeric/float-cmp-oracle.nshape` | ok | 19µs | 10µs | 3600354 |
+| gcbench | `etc/tests/bench/startup/gcbench.nshape` | ok | 39.7ms | 23.0ms | 24817 |
+| graph-bfs | `etc/tests/bench/algorithms/graph-bfs.nshape` | ok | 23.2ms | 19.7ms | 41627 |
+| hash | `etc/tests/bench/datastructures/hash.nshape` | ok | 4.46ms | 3.69ms | 18257 |
+| havlak | `etc/tests/bench/algorithms/havlak.nshape` | ok | 3.52ms | 2.32ms | 22167 |
+| heapsort | `etc/tests/bench/datastructures/heapsort.nshape` | ok | 4.78ms | 4.82ms | 25916 |
+| imagick | `etc/tests/bench/graphics/imagick.nshape` | ok | 70µs | 94µs | 22959 |
+| inline | `etc/tests/bench/startup/inline.nshape` | ok | 60µs | 2.09ms | 5392368 |
+| intops | `etc/tests/bench/numeric/intops.nshape` | ok | 636µs | 346µs | 19665 |
+| iter | `etc/tests/bench/datastructures/iter.nshape` | ok | 385µs | 337µs | 25688 |
+| json-parser | `etc/tests/bench/string/json-parser.nshape` | ok | 13.1ms | 12.4ms | 3950079 |
+| knight | `etc/tests/bench/algorithms/knight.nshape` | ok | 2.35ms | 142µs | 34558 |
+| knucleotide | `etc/tests/bench/algorithms/knucleotide.nshape` | ok | 435µs | 364µs | 18855 |
+| knucleotide | `etc/tests/bench/string/knucleotide.nshape` | ok | 122µs | 120µs | 23514 |
+| lbm | `etc/tests/bench/numeric/lbm.nshape` | ok | 3.45ms | 812µs | 23485 |
+| leela | `etc/tests/bench/simulation/leela.nshape` | ok | 4.77ms | 5.96ms | text |
+| licm | `etc/tests/bench/startup/licm.nshape` | ok | 74µs | 610µs | 3707492 |
+| licm-math | `etc/tests/bench/startup/licm-math.nshape` | ok | 4.58ms | 4.64ms | 18778 |
+| linpack | `etc/tests/bench/numeric/linpack.nshape` | ok | 268µs | 96µs | 3453711 |
+| list | `etc/tests/bench/datastructures/list.nshape` | ok | 3.98ms | 4.15ms | 3418251 |
+| list-any-append | `etc/tests/bench/datastructures/list-any-append.nshape` | ok | 9.13ms | 8.54ms | 3414172 |
+| list-dynamic | `etc/tests/bench/datastructures/list-dynamic.nshape` | ok | 5.92ms | 4.40ms | 3418251 |
+| loop | `etc/tests/bench/startup/loop.nshape` | ok | 1.15ms | 1.17ms | 18275 |
+| loop-unswitch | `etc/tests/bench/startup/loop-unswitch.nshape` | ok | 4.49ms | 4.48ms | 24176 |
+| mandel | `etc/tests/bench/algorithms/mandel.nshape` | ok | 137µs | 80µs | 7905 |
+| mandelbrot | `etc/tests/bench/algorithms/mandelbrot.nshape` | ok | 325µs | 408µs | 3597871 |
+| matmult-int | `etc/tests/bench/numeric/matmult-int.nshape` | ok | 920µs | 591µs | 22276 |
+| matrix | `etc/tests/bench/numeric/matrix.nshape` | ok | 22µs | 7.6µs | 20954 |
+| matrix-raw | `etc/tests/bench/numeric/matrix-raw.nshape` | ok | 43µs | 30µs | 3600142 |
+| mcf | `etc/tests/bench/algorithms/mcf.nshape` | ok | 7.17ms | 6.06ms | 22360 |
+| mixed-static-is~ | `etc/tests/bench/startup/mixed-static-island.nshape` | ok | 33µs | 30µs | 21829 |
+| mont64 | `etc/tests/bench/numeric/mont64.nshape` | ok | 6.88ms | 2.04ms | text |
+| n-body | `etc/tests/bench/algorithms/n-body.nshape` | ok | 2.72ms | 1.82ms | 26466 |
+| native-oracle | `etc/tests/bench/startup/native-oracle.nshape` | ok | 88µs | 33µs | 17361 |
+| nqueens | `etc/tests/bench/algorithms/nqueens.nshape` | ok | 27.8ms | 27.4ms | 21116 |
+| omnetpp | `etc/tests/bench/simulation/omnetpp.nshape` | ok | 10.9ms | 11.1ms | 29139 |
+| page-rank | `etc/tests/bench/algorithms/page-rank.nshape` | ok | 18µs | 4.9µs | 4522018 |
+| pbkdf2 | `etc/tests/bench/algorithms/pbkdf2.nshape` | ok | 160µs | 1.75ms | 5627626 |
+| pbkdf2 | `etc/tests/bench/numeric/pbkdf2.nshape` | ok | 960µs | 1.10ms | 103673 |
+| permute | `etc/tests/bench/algorithms/permute.nshape` | ok | 117ms | 89.5ms | 21116 |
+| pidigits | `etc/tests/bench/numeric/pidigits.nshape` | ok | 9.4µs | 7.1µs | 75209 |
+| povray | `etc/tests/bench/graphics/povray.nshape` | ok | 5.08ms | 1.24ms | 22653 |
+| prime | `etc/tests/bench/algorithms/prime.nshape` | ok | 1.35ms | 1.23ms | 8906 |
+| qrsyndrome | `etc/tests/bench/crypto/qrsyndrome.nshape` | ok | 4.67ms | 3.11ms | text |
+| queen | `etc/tests/bench/algorithms/queen.nshape` | ok | 2.35ms | 1.78ms | 20434 |
+| records | `etc/tests/bench/datastructures/records.nshape` | ok | 46.7ms | 44.1ms | 35014 |
+| recursive-fibon~ | `etc/tests/bench/startup/recursive-fibonacci.nshape` | ok | 310ns | 191ns | 3710910 |
+| repeat | `etc/tests/bench/string/repeat.nshape` | ok | 83.8ms | 97.9ms | 14927 |
+| revcomp | `etc/tests/bench/string/revcomp.nshape` | ok | 5.0µs | 7.8µs | 30235 |
+| richards | `etc/tests/bench/concurrency/richards.nshape` | ok | 1.30ms | 878µs | text |
+| sha256 | `etc/tests/bench/algorithms/sha256.nshape` | ok | 1.36ms | 896µs | 5592189 |
+| sha256 | `etc/tests/bench/numeric/sha256.nshape` | ok | 756µs | 907µs | 37510 |
+| sieve | `etc/tests/bench/algorithms/sieve.nshape` | ok | 6.04ms | 4.94ms | 24934 |
+| sor | `etc/tests/bench/algorithms/sor.nshape` | ok | 1.74ms | 851µs | 28110 |
+| spectral | `etc/tests/bench/algorithms/spectral.nshape` | ok | 80µs | 27µs | 3611523 |
+| splay | `etc/tests/bench/datastructures/splay.nshape` | ok | 4.01ms | 4.07ms | 3611602 |
+| sssp | `etc/tests/bench/algorithms/sssp.nshape` | ok | 6.42ms | 2.38ms | text |
+| startup | `etc/tests/bench/startup/startup.nshape` | ok | 27ns | 27ns | 17072 |
+| statemate | `etc/tests/bench/algorithms/statemate.nshape` | ok | 2.03ms | 1.64ms | 22219 |
+| straight | `etc/tests/bench/startup/straight.nshape` | ok | 20µs | 20µs | 17997 |
+| stream | `etc/tests/bench/memory/stream.nshape` | ok | 11.1ms | 4.00ms | 19579 |
+| string | `etc/tests/bench/string/string.nshape` | ok | 198µs | 284µs | 28818 |
+| tce-recursion | `etc/tests/bench/startup/tce-recursion.nshape` | ok | 91µs | 91µs | 19481 |
+| thread-ring | `etc/tests/bench/concurrency/thread-ring.nshape` | ok | 6.32ms | 4.54ms | 27509 |
+| time-profile | `etc/tests/bench/startup/time-profile.nshape` | ok | 99µs | 21µs | 16444 |
+| transpose | `etc/tests/bench/memory/transpose.nshape` | ok | 491µs | 597µs | 20052 |
+| vector | `etc/tests/bench/datastructures/vector.nshape` | ok | 336µs | 267µs | 20227 |
+| word-frequency | `etc/tests/bench/string/word-frequency.nshape` | ok | 4.63ms | 3.34ms | 23981 |
+| word-frequency-~ | `etc/tests/bench/string/word-frequency-scan.nshape` | ok | 3.03ms | 2.49ms | 27381 |
+| xz | `etc/tests/bench/string/xz.nshape` | ok | 2.17ms | 1.61ms | 20075 |
+
+The six `text` rows emitted through the text assembly emitter in this
+diagnostic mode, so no comparable machine-code size exists for them: `sssp`
+2,486,370, `deltablue` 2,485,605, `richards` 2,598,852, `mont64` 3,775,697,
+`qrsyndrome` 2,636,227, and `leela` 3,228,001 assembly-text bytes. They pass
+their checksums on the native route; the fallback is a property of this
+assembly diagnostic, not of execution.
+
+### Findings
+
+- The size cost is MACH-to-x64 expansion, not one missed opcode idiom.
+  `ny_fn_moves` (`knight`) is 188 MACH instructions and 498 x64
+  instructions, 199 of them `(%rbp)` home traffic: each MACH operand is
+  materialised through a stack home unless a value stays resident across
+  the block.
+- Zero tests already use `test %reg,%reg`, and immediates already take the
+  zero / 32-bit / sign-extended forms, so `cmp $0` and `mov $0` peepholes
+  have no remaining targets (0 occurrences of `cmp $0` in `knight`).
+- 37 adjacent `mov A,B; mov B,A` reversed pairs remain in `knight`. They
+  come out of the inline ALU/copy paths, so removing them needs a
+  MACH-level copy-forwarding pass (see `measurements.md`, 2026-11-15).
+- The 32-bit path already emits compact forms: no `pushl`/`popl` pairs, no
+  `cmpl $0`, no self moves in `knight`'s i386 assembly; its 119 `pushl`
+  are call arguments under the stack ABI.
 
 <!-- AUTO_BENCHMARK_RESULTS_BEGIN -->
 
@@ -3601,3 +3767,173 @@ coverage comes from the loop drivers that exist.
 
 Still missing: exact symbolic exit counts (an expression such as `n - a`, not an
 interval), known-multiple tracking, and SCEV expansion.
+
+## SCEV: loop-guard bounds-check elimination (2026-11-15)
+
+The article's "loop guard" idea: an exit test can prove a check without any
+range fact about the bound. `for (i = start; i < n; ++i) check(buf, i * S, n * S)`
+only reaches the check while `i < n`, so `S*i + d < S*n` for `d <= 0` (and for
+`d <= -1` under `<=`, where the body may run at `i == n`). Nytrix's check-safety
+query required a constant interval for the offset and a constant minimum length,
+so a buffer whose length is the loop's own runtime limit produced no proof even
+though the guard makes the check redundant.
+
+`scev_guard_proves_offset` adds the symbolic proof. It needs the offset to be
+`S*iv + d` with `S > 0` and `d <= 0`, the length to be the loop's own comparison
+value scaled by the same `S`, the check to be dominated by the body entry, an
+ascending loop, and `S*start + d >= 0` so the removed check could not have
+trapped on a negative offset. Scaling is recognized in both `x * c` and
+`x << s` form, so byte-scaled checks against a byte-scaled length work. To see
+unbounded induction variables as affine terms, `scev_affine_build` now emits a
+term for a known loop IV even when its constant interval is unavailable; those
+term-only forms still fail in `scev_affine_bound`, so every existing range
+consumer keeps its previous result.
+
+A test expectation was wrong on the first run, and the failure is the feature
+working: `i <= n` with `i - 1` at `i = 0` can be `-1`, so eliminating the check
+would hide a trap. The suite now keeps that case as a must-not-eliminate
+expectation (with `start = 4` as the eliminable counterpart), which is exactly
+the non-negativity condition the proof needs.
+
+`passes/loops/scev_guard_bounds` drives the real consumer (`nyr_bounds_check_elim`)
+and asserts 4 eliminations (`<` element, `i-1` offset, `<=` with `i-1`,
+byte-scaled) and 6 kept checks (`<=` at `i`, `i+1`, a different length value,
+negative lowest value at zero start, negative start, descending loop).
+`passes/loops/bounds_check_elim`, `loop_memset`, `loop_interchange`,
+`loop_unroll`, `iv_period2`, `licm_guarded_division` and the other SCEV drivers
+stay green. Measured: fixture `.text` unchanged at 4,320 / 6,424 / 2,384 / 2,888 /
+3,656 / 3,032, `knight` checksum `340233`, five verification suites green,
+`--pattern x86` 223/223 in 24.7 s.
+
+What this does not do: it does not convert the guard into a reusable predicate
+outside the loop, and the relations come from dominating branches rather than
+assumptions, SMT, or a symbolic expression layer. Chained guards are covered in
+the next section.
+
+## SCBE review and chained guard proofs (2026-11-15)
+
+Reviewed `https://github.com/maxnut/scbe` before porting anything. SCBE is
+32,218 lines of C++ with an x86-64 back end (ELF, COFF, text assembly) and
+AArch64 assembly emission; its README calls it a learning project that is
+unfinished and not production quality. Each subsystem was compared with the
+Nytrix equivalent:
+
+| SCBE | Nytrix |
+| --- | --- |
+| `codegen/spiller.cpp`: replaces one operand per instruction with a reserved register | `lower/regalloc.c` spills live segments with homes, rematerializes constants, and recolors local evictions afterwards |
+| `graph_color_regalloc.cpp`: Chaitin simplify/select/spill over a color graph, no coalescing | profile heat, loop depth, next-use and use-count eviction, tied-input affinity, dead-input coalescing, callee-save preference |
+| `IR/fix_phis.cpp`: drop phi operands for non-predecessors | `nyr_prune_phis` in `core/ssa.c`, run by DCE |
+| `IR/split_critical_edge.cpp`: splits edges only when the target has phis | phi lowering goes through edge copies and memory (`phi_elim.c`, `machine.c`), so no split pass is needed |
+| `ISel/pattern.hpp`: pattern table with cost, covered operands, minimum opt level | `isle.c` and `machine.c` already fuse addressing modes and immediates; porting the table is a rewrite with no measured target |
+| mem2reg, dominator tree, DCE, constant folder, inlining, loop/call heuristics | all present |
+
+Verdict: no subsystem worth porting. Feature parity or Nytrix ahead on every
+row, and SCBE's own TODOs name work Nytrix already does. The one idea worth
+taking was the predicated guard reasoning the LLVM SCEV article also describes,
+which filled a gap Nytrix had.
+
+### Chained guards
+
+The loop-guard proof previously required the check's length to be the loop's own
+comparison value. It now accepts a chain: when a dominating branch proves
+`limit <= length` on every path to the check, `i < limit <= length` makes the
+check redundant. `scev_collect_le_facts` collects `lo <= hi` from each branch
+that dominates the query point, using the branch direction only when exactly one
+successor dominates the query (a merge leaves both edges possible and the branch
+is skipped), maps `LT`/`LE`/`GT`/`GE` and their negations to an ordering
+regardless of operand order, and closes the facts transitively. Scaling is
+matched as before, so a byte-scaled check against a byte-scaled length works.
+
+`passes/loops/scev_guard_chain` asserts 3 eliminations (`n <= cap`, strict
+`n < cap`, and a two-step `n <= m`, `m <= cap` chain) and 3 kept checks
+(reversed `cap <= n`, no guard, and a guard in a sibling arm that does not
+dominate the loop). The first run failed four cases because the test builder's
+phi referenced a preheader label the CFG did not contain, so verification
+rejected the function before the pass ran; rebuilding the CFG with a real
+preheader made the proof fire. That is a test construction defect, not a pass
+defect, and it is why the suite verifies before running the pass.
+
+Measured: `.text` unchanged at 4,320 / 6,424 / 2,384 / 2,888 / 3,656 / 3,032,
+`knight` checksum `340233`, twelve loop drivers green, five verification suites
+green, `--pattern x86` 223/223 in 24.0 s.
+
+Limits, stated so they are not mistaken for coverage: relations come only from
+dominating `BR_IF` integer compares; there is no assume-like fact, no equality
+propagation through arithmetic beyond copy roots, and no symbolic expression
+layer. A check guarded by a call result, a select, or a comparison that is
+reloaded per iteration still needs a runtime check.
+
+## Benchmark corpus expansion (2026-11-15)
+
+Added nineteen fixtures to `etc/tests/bench` for workload families the
+corpus did not cover. Each fixture is an original Ny program paired with an
+equivalent C program in the same `.nshape`, written to exercise one kernel
+shape; no third-party benchmark source, binary, or input set is copied or
+redistributed here. Families that already had a counterpart in this corpus
+(`mandelbrot`, `fannkuch`, `n-body`, `spectral`, `knucleotide`, `revcomp`,
+`fasta`, `pidigits`, `binary-trees`, `sieve`, `splay`, `havlak`, `json`,
+`list`) were deliberately not duplicated.
+
+The fixtures are filed by general workload category, not by the suite that
+suggested them:
+
+| Fixture | Category | Kernel and question | Checksum (Ny = C) |
+| --- | --- | --- | --- |
+| `algorithms/mcf` | algorithms | Sparse network-flow style transshipment over a fixed arc list | 294232244 |
+| `algorithms/sssp` | algorithms | Bellman-Ford single-source shortest path on a 1024-vertex graph | 41194 |
+| `algorithms/permute` | algorithms | Permutation generation | 734832000 |
+| `algorithms/deltablue` | algorithms | Constraint propagation to a fixpoint | 2718751 |
+| `algorithms/statemate` | algorithms | Six-state car-window chart, if-chain dispatch | 235582476 |
+| `concurrency/richards` | concurrency | Scheduler/task-queue benchmark | 5433768 |
+| `numeric/lbm` | numeric | Integer D2Q9-style stencil relaxation, two output buffers | 152700 |
+| `numeric/matmult-int` | numeric | Integer 32x32 matmul, 40 accumulated passes | 756776586 |
+| `numeric/mont64` | numeric | 64-bit Montgomery multiply, 16-bit limbs | 114319663 |
+| `string/xz` | string | LZ77-style match search with a bounded hash chain | 65536 |
+| `graphics/imagick` | graphics | Two-pass 5-point sharpen with saturation | 2069072 |
+| `graphics/povray` | graphics | Q10 fixed-point sphere ray march, 256x192 | 393846 |
+| `memory/stream` | memory | Integer triad-like streaming over four buffers | 471845615 |
+| `memory/transpose` | memory | Blocked 256x256 transpose, 16x16 tiles, eight repeats | 32734680 |
+| `crypto/crc32` | crypto | Table-driven reflected CRC-32 over 4 MiB | 1584041980 |
+| `crypto/qrsyndrome` | crypto | GF(256) Reed-Solomon syndrome evaluation | 1161080 |
+| `simulation/omnetpp` | simulation | Event-queue simulation with timestamp ordering | 703468200 |
+| `simulation/leela` | simulation | Monte Carlo rollouts of a take-away game | 533733992 |
+| `simulation/cd` | simulation | Collision detection over a fixed particle set | 387 |
+
+All nineteen are integer-only. Floating point was avoided on purpose: the
+checksum is the parity evidence, and integer kernels let Ny and C prove exact
+agreement instead of agreement to a printed precision. Existing fixtures pick
+up the benchmarks-game families this table omits.
+
+### Parity check
+
+Each fixture was checked by extracting its `source ny` and `source c` blocks,
+running the Ny side with `ny-full --native-only -O3 -run`, building the C side
+with `cc -O2`, and comparing the `checksum=` line. Result: 19 of 19 match. The
+same files are discovered by the normal harness, for example:
+
+```bash
+build/release/ny-test --bin build/release/ny-full --bench --pattern 'graphics/povray' \
+  --bench-run 1 --bench-warmup 0 --jobs 1 --bench-no-compare-llvm
+```
+
+The corpus is 96 fixtures after the addition. This section records agreement on
+one input per fixture, not general correctness, and no timing claim: the host
+was shared and loaded, and the C programs are built at `-O2` while the Ny route
+runs `-O3`.
+
+### Ny behaviours the parity work exposed
+
+The fixtures were written against the current language, so four mismatches were
+bugs in the new Ny sources rather than in the compiler. They are useful to
+record because each fails silently:
+
+- `i64buf_new` does not zero its memory. C `calloc` does. Every new buffer is
+  now explicitly initialized, or its unused border cells leak into the checksum.
+- An expression continues across a newline only inside unclosed parentheses. A
+  two-line sharpen expression without outer parentheses parsed as two
+  statements, and the trailing subtractions were discarded; the checksum
+difference (`3579272` versus `2069072`) was the only signal.
+- Stencil codes that ping-pong two buffers must initialize both, because the
+  second pass reads the border cells the first pass never writes.
+- Ny pointers are not indexable; buffer elements go through `i64buf_load` and
+  `i64buf_store`.

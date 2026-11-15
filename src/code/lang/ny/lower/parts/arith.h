@@ -230,6 +230,8 @@ static bool nyr_ident_local_is_raw_int(nyr_builder_t *b, const expr_t *e) {
 /* Top-level integer cells keep the raw i64 ABI selected by their literal
  * initializer, including mutable globals whose value is subsequently stored.
  * This proof is intentionally limited to literal-initialized globals. */
+static const char *nyr_global_symbol(const nyr_builder_t *b, const char *name);
+
 static bool nyr_ident_global_is_raw_int(nyr_builder_t *b, const expr_t *e) {
   if (!e || e->kind != NY_E_IDENT || !e->as.ident.name ||
       nyr_find_local_nearest(b, e->as.ident.name))
@@ -709,9 +711,17 @@ static int nyr_lower_binary(nyr_builder_t *b, const expr_t *e) {
         concrete_list =
             local &&
             (local->is_list || local->semantic_rep == NY_SEM_REP_TYPED_BUFFER);
-        if (!concrete_list) {
+        if (!concrete_list && !local) {
+          /* Ask the cell the identifier resolves to. The bare name can also
+           * match a list bound in an unrelated module (`def alpha = [0, 1]`
+           * in core.math.gf), which turned `alpha * 1000` on an integer
+           * global of another module into a list repeat. */
+          const char *cell = nyr_global_symbol(b, list_expr->as.ident.name);
           const expr_t *global =
-              nyr_find_top_level_value(b, list_expr->as.ident.name);
+              cell && strchr(cell, '.') ? nyr_find_top_level_value(b, cell)
+                                        : NULL;
+          if (!global)
+            global = nyr_find_top_level_value(b, list_expr->as.ident.name);
           concrete_list =
               global && global != list_expr && global->kind == NY_E_LIST;
         }

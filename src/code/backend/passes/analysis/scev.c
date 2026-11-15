@@ -790,6 +790,18 @@ static bool scev_affine_build(const nyr_func_t *f, const nyr_scev_info_t *info,
     scev_affine_init(out);
     return scev_affine_add_term(out, value, 1);
   }
+  /*
+   * Bounds may be unavailable while the structural shape is still usable: a
+   * symbolic guard comparison must see the IV as a term even when no constant
+   * interval exists. Term-only forms fail in scev_affine_bound, so range
+   * consumers are unaffected.
+   */
+  for (size_t k = 0; k < info->count; ++k) {
+    if (info->loops[k].iv != value)
+      continue;
+    scev_affine_init(out);
+    return scev_affine_add_term(out, value, 1);
+  }
   int di = defs[value];
   if (di < 0 || (size_t)di >= f->len)
     return false;
@@ -881,6 +893,45 @@ bool nyr_scev_affine_at(const nyr_func_t *f, const nyr_scev_info_t *info,
   return ok;
 }
 
+/*
+ * Split `value` into `base * scale` for a positive constant scale, recognizing
+ * both `x * c` and `x << s`. Returns false when the value is not a scaled
+ * form, leaving the caller to treat it as scale 1.
+ */
+static bool scev_scale_of_value(const nyr_func_t *f, const int *defs, int value,
+                                int *base, int64_t *scale) {
+  if (!f || !defs || !base || !scale)
+    return false;
+  value = root_copy(f, defs, value);
+  int di = def_index(f, defs, value);
+  if (di < 0 || (size_t)di >= f->len)
+    return false;
+  const nyr_inst_t *in = &f->data[di];
+  if (in->op == NYIR_MUL_I64) {
+    int64_t c = 0;
+    if (const_value(f, defs, in->b, &c) && c > 0) {
+      *base = in->a;
+      *scale = c;
+      return true;
+    }
+    if (const_value(f, defs, in->a, &c) && c > 0) {
+      *base = in->b;
+      *scale = c;
+      return true;
+    }
+    return false;
+  }
+  if (in->op == NYIR_SHL_I64) {
+    int64_t s = 0;
+    if (!const_value(f, defs, in->b, &s) || s <= 0 || s >= 63)
+      return false;
+    *base = in->a;
+    *scale = (int64_t)(UINT64_C(1) << (unsigned)s);
+    return true;
+  }
+  return false;
+}
+
 static bool scev_tbuf_payload(const nyr_func_t *f, const int *defs, int value,
                               bool *active, unsigned depth) {
   if (!f || !defs || !active || depth > 32)
@@ -938,6 +989,226 @@ static bool scev_tbuf_payload(const nyr_func_t *f, const int *defs, int value,
   return ok;
 }
 
+/* `lo <= hi` established on every path to a query point. */
+typedef struct {
+  int lo;
+  int hi;
+} scev_le_fact_t;
+
+static nyr_cmp_t scev_cmp_invert(nyr_cmp_t cmp) {
+  switch (cmp) {
+  case NYIR_CMP_LT:
+    return NYIR_CMP_GE;
+  case NYIR_CMP_LE:
+    return NYIR_CMP_GT;
+  case NYIR_CMP_GT:
+    return NYIR_CMP_LE;
+  case NYIR_CMP_GE:
+    return NYIR_CMP_LT;
+  case NYIR_CMP_EQ:
+    return NYIR_CMP_NE;
+  case NYIR_CMP_NE:
+    return NYIR_CMP_EQ;
+  }
+  return NYIR_CMP_NE;
+}
+
+/*
+ * Collect `lo <= hi` relations that hold on every path to `at`, from branches
+ * that dominate the query point. A branch is usable only when exactly one of
+ * its successors dominates the query: then every path reaching the query took
+ * that edge, so the edge's comparison (or its negation) is a fact there. A
+ * merge point leaves both successors reachable, and the branch is skipped.
+ */
+static bool scev_collect_le_facts(const nyr_func_t *f, const int *defs,
+                                  const nyr_cfg_t *cfg, size_t at,
+                                  scev_le_fact_t *facts, size_t *count,
+                                  size_t cap) {
+  if (!f || !defs || !cfg || !facts || !count || at >= f->len)
+    return false;
+  size_t at_block = cfg->inst_block[at];
+  if (at_block >= cfg->block_count)
+    return false;
+  for (size_t b = 0; b < cfg->block_count; ++b) {
+    /* The guard must be on the way to the query, not the query's own block. */
+    if (b == at_block || !nyr_cfg_dominates(cfg, b, at_block))
+      continue;
+    size_t end = nyr_block_last_non_nop(f, cfg, b);
+    if (end <= cfg->block_start[b])
+      continue;
+    const nyr_inst_t *term = &f->data[end - 1];
+    if (term->op != NYIR_BR_IF)
+      continue;
+    int def = def_index(f, defs, term->a);
+    if (def < 0)
+      continue;
+    const nyr_inst_t *cmp = &f->data[def];
+    if (cmp->op != NYIR_CMP_I64 || cmp->a < 0 || cmp->b < 0)
+      continue;
+    size_t taken = SIZE_MAX;
+    if (!block_for_label(cfg, term->imm, &taken) ||
+        taken >= cfg->block_count)
+      continue;
+    size_t other = SIZE_MAX;
+    for (size_t e = cfg->succ_offsets[b]; e < cfg->succ_offsets[b + 1]; ++e) {
+      size_t succ = cfg->succ_blocks[e];
+      if (succ != taken)
+        other = succ;
+    }
+    if (other == SIZE_MAX)
+      continue;
+    bool took_taken = nyr_cfg_dominates(cfg, taken, at_block);
+    bool took_other = nyr_cfg_dominates(cfg, other, at_block);
+    if (took_taken == took_other)
+      continue;
+    nyr_cmp_t pred = took_taken ? cmp->cmp : scev_cmp_invert(cmp->cmp);
+    int x = root_copy(f, defs, cmp->a);
+    int y = root_copy(f, defs, cmp->b);
+    bool le_xy = false, le_yx = false;
+    switch (pred) {
+    case NYIR_CMP_LT: /* x < y */
+    case NYIR_CMP_LE:
+      le_xy = true;
+      break;
+    case NYIR_CMP_GT: /* x > y */
+    case NYIR_CMP_GE:
+      le_yx = true;
+      break;
+    case NYIR_CMP_EQ:
+      le_xy = le_yx = true;
+      break;
+    case NYIR_CMP_NE:
+      break;
+    }
+    if ((le_xy && *count == cap) || (le_yx && *count + 1 >= cap))
+      return *count > 0;
+    if (le_xy)
+      facts[(*count)++] = (scev_le_fact_t){.lo = x, .hi = y};
+    if (le_yx)
+      facts[(*count)++] = (scev_le_fact_t){.lo = y, .hi = x};
+  }
+  return *count > 0;
+}
+
+/* Transitive closure of the collected `<=` facts, bounded by the fact count. */
+static bool scev_le_reaches(int from, int to, const scev_le_fact_t *facts,
+                            size_t count) {
+  if (from == to)
+    return true;
+  if (!facts || !count)
+    return false;
+  int reached[64];
+  size_t reached_n = 0;
+  reached[reached_n++] = from;
+  for (size_t iter = 0; iter <= count; ++iter) {
+    bool added = false;
+    for (size_t i = 0; i < count; ++i) {
+      bool have_lo = false, have_hi = false;
+      for (size_t k = 0; k < reached_n; ++k) {
+        have_lo |= reached[k] == facts[i].lo;
+        have_hi |= reached[k] == facts[i].hi;
+      }
+      if (!have_lo || have_hi)
+        continue;
+      if (reached_n == 64)
+        return false;
+      reached[reached_n++] = facts[i].hi;
+      added = true;
+      if (facts[i].hi == to)
+        return true;
+    }
+    if (!added)
+      break;
+  }
+  return false;
+}
+
+/*
+ * Loop-guard proof for a dynamic length.
+ *
+ * In `for (i = start; i < n; ++i) { check(buf, i * S, n * S); }` the exit test
+ * already implies the check: the body runs only while `i < n`, and both sides
+ * are scaled by the same positive factor, so `S*i + d < S*n` for `d <= 0`
+ * (`d <= -1` for `<=`, where the body may run at `i == n`). No constant bound
+ * on `n` is needed, so this covers dynamic-length buffers that range facts
+ * cannot bound.
+ *
+ * The length may also come through a chain of dominating guards: when the loop
+ * limit is `n` and an earlier branch proved `n <= cap` on this path, a check
+ * against `cap` is equally redundant (`i < n <= cap`). Those relations are
+ * collected per query point and closed transitively, which is the predicated
+ * form of the loop guard.
+ */
+static bool scev_guard_proves_offset(const nyr_func_t *f,
+                                     const nyr_scev_info_t *info,
+                                     const int *defs, const nyr_cfg_t *cfg,
+                                     size_t at, const nyr_inst_t *check) {
+  if (!f || !info || !defs || !cfg || !check || at >= f->len)
+    return false;
+  nyr_scev_affine_t offset = {0};
+  if (!scev_affine_build(f, info, defs, cfg, check->b, at, 0, &offset))
+    return false;
+  if (offset.iv[1] >= 0 || offset.iv[0] < 0 || offset.coefficient[0] <= 0)
+    return false;
+  int iv = offset.iv[0];
+  int64_t scale = offset.coefficient[0];
+  const nyr_scev_loop_t *loop = NULL;
+  for (size_t i = 0; i < info->count; ++i) {
+    if (info->loops[i].iv != iv)
+      continue;
+    loop = &info->loops[i];
+    break;
+  }
+  if (!loop || loop->step <= 0 || !loop->init_is_const)
+    return false;
+  if (loop->predicate != NYIR_CMP_LT && loop->predicate != NYIR_CMP_LE)
+    return false;
+  if (loop->predicate == NYIR_CMP_LT ? offset.constant > 0
+                                     : offset.constant >= 0)
+    return false;
+  __int128 lowest = (__int128)scale * loop->init + offset.constant;
+  if (lowest < 0)
+    return false;
+  int base = check->c;
+  int64_t length_scale = 1;
+  int scaled_base = -1;
+  if (scev_scale_of_value(f, defs, check->c, &scaled_base, &length_scale))
+    base = scaled_base;
+  if (length_scale != scale)
+    return false;
+  int length_root = root_copy(f, defs, base);
+  int limit_root = root_copy(f, defs, loop->limit_value);
+  bool ordered = length_root == limit_root;
+  if (!ordered) {
+    /* Predicated guard: the limit is at most the check's length here. */
+    scev_le_fact_t facts[64];
+    size_t fact_count = 0;
+    ordered = scev_collect_le_facts(f, defs, cfg, at, facts, &fact_count, 64) &&
+              scev_le_reaches(limit_root, length_root, facts, fact_count);
+  }
+  if (!ordered)
+    return false;
+  bool *members = calloc(cfg->block_count, sizeof(*members));
+  if (!members)
+    return false;
+  size_t header_end = nyr_block_last_non_nop(f, cfg, loop->header_block);
+  size_t body_entry = SIZE_MAX;
+  bool in_loop = nyr_cfg_natural_loop_blocks(cfg, loop->latch_block,
+                                             loop->header_block, members,
+                                             cfg->block_count);
+  bool guarded =
+      in_loop && header_end > cfg->block_start[loop->header_block] &&
+      f->data[header_end - 1].op == NYIR_BR_IF &&
+      block_for_label(cfg, f->data[header_end - 1].imm, &body_entry);
+  size_t at_block = cfg->inst_block[at];
+  bool on_body_path =
+      guarded && body_entry < cfg->block_count && members[body_entry] &&
+      at_block < cfg->block_count && members[at_block] &&
+      nyr_cfg_dominates(cfg, body_entry, at_block);
+  free(members);
+  return on_body_path;
+}
+
 bool nyr_scev_tbuf_bounds_check_safe_cfg(const nyr_func_t *f,
                                          const nyr_scev_info_t *info,
                                          const int *defs, const nyr_cfg_t *cfg,
@@ -952,19 +1223,26 @@ bool nyr_scev_tbuf_bounds_check_safe_cfg(const nyr_func_t *f,
   free(active);
   if (!payload)
     return false;
+  /* Constant proof: the offset's proven interval stays inside the length. */
   nyr_scev_affine_t offset = {0};
-  if (!nyr_scev_affine_at_cfg(f, info, defs, cfg, check->b, at, &offset) ||
-      !offset.range.has_min || !offset.range.has_max || offset.range.min < 0)
-    return false;
-  int64_t length_min = check->imm;
-  if (check->c >= 0) {
-    nyr_scev_affine_t length = {0};
-    if (!nyr_scev_affine_at_cfg(f, info, defs, cfg, check->c, at, &length) ||
-        !length.range.has_min)
-      return false;
-    length_min = length.range.min;
+  if (nyr_scev_affine_at_cfg(f, info, defs, cfg, check->b, at, &offset) &&
+      offset.range.has_min && offset.range.has_max && offset.range.min >= 0) {
+    int64_t length_min = check->imm;
+    bool have_length = true;
+    if (check->c >= 0) {
+      nyr_scev_affine_t length = {0};
+      if (nyr_scev_affine_at_cfg(f, info, defs, cfg, check->c, at, &length) &&
+          length.range.has_min)
+        length_min = length.range.min;
+      else
+        have_length = false;
+    }
+    if (have_length && length_min > 0 && offset.range.max < length_min)
+      return true;
   }
-  return length_min > 0 && offset.range.max < length_min;
+  /* Symbolic proof from the loop's own exit test. */
+  return check->c >= 0 &&
+         scev_guard_proves_offset(f, info, defs, cfg, at, check);
 }
 
 bool nyr_scev_tbuf_bounds_check_safe(const nyr_func_t *f,

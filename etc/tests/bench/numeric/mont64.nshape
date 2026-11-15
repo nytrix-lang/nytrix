@@ -1,0 +1,251 @@
+shape mont64 {
+  family "perf-real"
+  generator "stress"
+  features ["perf", "integer", "bignum", "montgomery", "c-vs-ny", "native", "checksum", "time"]
+  meta "64-bit Montgomery multiplication in 16-bit limbs"
+  timeout 180
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.tbuf
+use core.os.time
+;; aha-mont64's shape: 64-bit modulus held in four 16-bit limbs, CIOS
+;; reduction with R = 2^64, then a chain of multiplications.
+def N0 = 65511
+mut inv = 0
+mut t = 1
+while t < 65536 {
+   if (N0 * t) % 65536 == 1 { inv = t }
+   t += 2
+}
+def n0inv = (65536 - inv) % 65536
+def n = i64buf_new(4)
+def a = i64buf_new(4)
+def b = i64buf_new(4)
+def tbuf = i64buf_new(6)
+;; N = 2^63 - 25
+i64buf_store(n, 0, N0)
+i64buf_store(n, 1, 65535)
+i64buf_store(n, 2, 65535)
+i64buf_store(n, 3, 32767)
+;; A = 1234567890123456789, B = 987654321098765
+def AV = 1234567890123456789
+def BV = 987654321098765
+i64buf_store(a, 0, AV & 0xFFFF)
+i64buf_store(a, 1, (AV >> 16) & 0xFFFF)
+i64buf_store(a, 2, (AV >> 32) & 0xFFFF)
+i64buf_store(a, 3, (AV >> 48) & 0xFFFF)
+i64buf_store(b, 0, BV & 0xFFFF)
+i64buf_store(b, 1, (BV >> 16) & 0xFFFF)
+i64buf_store(b, 2, (BV >> 32) & 0xFFFF)
+i64buf_store(b, 3, (BV >> 48) & 0xFFFF)
+def int t0 = ticks()
+mut iter = 0
+while iter < 100000 {
+   mut z = 0
+   while z < 6 {
+      i64buf_store(tbuf, z, 0)
+      z += 1
+   }
+   mut i = 0
+   while i < 4 {
+      def bi = i64buf_load(b, i)
+      mut c = 0
+      mut j = 0
+      while j < 4 {
+         def s = i64buf_load(tbuf, j) + i64buf_load(a, j) * bi + c
+         i64buf_store(tbuf, j, s & 0xFFFF)
+         c = s >> 16
+         j += 1
+      }
+      def s4 = i64buf_load(tbuf, 4) + c
+      i64buf_store(tbuf, 4, s4 & 0xFFFF)
+      i64buf_store(tbuf, 5, s4 >> 16)
+      def m = (i64buf_load(tbuf, 0) * n0inv) & 0xFFFF
+      c = 0
+      j = 0
+      while j < 4 {
+         def s = i64buf_load(tbuf, j) + m * i64buf_load(n, j) + c
+         i64buf_store(tbuf, j, s & 0xFFFF)
+         c = s >> 16
+         j += 1
+      }
+      def s5 = i64buf_load(tbuf, 4) + c
+      i64buf_store(tbuf, 4, s5 & 0xFFFF)
+      i64buf_store(tbuf, 5, i64buf_load(tbuf, 5) + (s5 >> 16))
+      i64buf_store(tbuf, 0, i64buf_load(tbuf, 1))
+      i64buf_store(tbuf, 1, i64buf_load(tbuf, 2))
+      i64buf_store(tbuf, 2, i64buf_load(tbuf, 3))
+      i64buf_store(tbuf, 3, i64buf_load(tbuf, 4))
+      i64buf_store(tbuf, 4, i64buf_load(tbuf, 5))
+      i64buf_store(tbuf, 5, 0)
+      i += 1
+   }
+   mut gt = 0
+   mut eq = 1
+   mut limb = 3
+   while limb >= 0 {
+      def tv = i64buf_load(tbuf, limb)
+      def nv = i64buf_load(n, limb)
+      if tv > nv {
+         gt = 1
+         limb = -1
+      } else {
+         if tv < nv {
+            eq = 0
+            limb = -1
+         }
+      }
+      limb -= 1
+   }
+   if gt == 1 {
+      mut borrow = 0
+      mut q = 0
+      while q < 4 {
+         mut d = i64buf_load(tbuf, q) - i64buf_load(n, q) - borrow
+         if d < 0 {
+            d = d + 65536
+            borrow = 1
+         } else {
+            borrow = 0
+         }
+         i64buf_store(a, q, d)
+         q += 1
+      }
+   } else {
+      if eq == 1 {
+         mut borrow2 = 0
+         mut q2 = 0
+         while q2 < 4 {
+            mut d2 = i64buf_load(tbuf, q2) - i64buf_load(n, q2) - borrow2
+            if d2 < 0 {
+               d2 = d2 + 65536
+               borrow2 = 1
+            } else {
+               borrow2 = 0
+            }
+            i64buf_store(a, q2, d2)
+            q2 += 1
+         }
+      } else {
+         mut q3 = 0
+         while q3 < 4 {
+            i64buf_store(a, q3, i64buf_load(tbuf, q3))
+            q3 += 1
+         }
+      }
+   }
+   iter += 1
+}
+def int t1 = ticks()
+def low = (i64buf_load(a, 0) + i64buf_load(a, 1) * 65536 + i64buf_load(a, 2) * 4294967296) % 1000000007
+def high = i64buf_load(a, 3) % 1000000007
+print("checksum=", (low + high * 7919) % 1000000007)
+print("elapsed_ns=", t1 - t0)
+NY
+  source c <<'C'
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+
+static int64_t now_ns(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0;
+    return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+}
+
+int main(void) {
+    const int64_t N0 = 65511;
+    int64_t inv = 0;
+    for (int64_t t = 1; t < 65536; t += 2)
+        if ((N0 * t) % 65536 == 1) inv = t;
+    int64_t n0inv = (65536 - inv) % 65536;
+
+    int64_t n[4], a[4], b[4], tbuf[6];
+    n[0] = N0;
+    n[1] = 65535;
+    n[2] = 65535;
+    n[3] = 32767;
+
+    int64_t AV = 1234567890123456789LL;
+    int64_t BV = 987654321098765LL;
+    a[0] = AV & 0xFFFF;
+    a[1] = (AV >> 16) & 0xFFFF;
+    a[2] = (AV >> 32) & 0xFFFF;
+    a[3] = (AV >> 48) & 0xFFFF;
+    b[0] = BV & 0xFFFF;
+    b[1] = (BV >> 16) & 0xFFFF;
+    b[2] = (BV >> 32) & 0xFFFF;
+    b[3] = (BV >> 48) & 0xFFFF;
+
+    int64_t t0 = now_ns();
+    for (int64_t iter = 0; iter < 100000; iter++) {
+        for (int z = 0; z < 6; z++) tbuf[z] = 0;
+        for (int i = 0; i < 4; i++) {
+            int64_t bi = b[i];
+            int64_t c = 0;
+            for (int j = 0; j < 4; j++) {
+                int64_t s = tbuf[j] + a[j] * bi + c;
+                tbuf[j] = s & 0xFFFF;
+                c = s >> 16;
+            }
+            int64_t s4 = tbuf[4] + c;
+            tbuf[4] = s4 & 0xFFFF;
+            tbuf[5] = s4 >> 16;
+            int64_t m = (tbuf[0] * n0inv) & 0xFFFF;
+            c = 0;
+            for (int j = 0; j < 4; j++) {
+                int64_t s = tbuf[j] + m * n[j] + c;
+                tbuf[j] = s & 0xFFFF;
+                c = s >> 16;
+            }
+            int64_t s5 = tbuf[4] + c;
+            tbuf[4] = s5 & 0xFFFF;
+            tbuf[5] = tbuf[5] + (s5 >> 16);
+            tbuf[0] = tbuf[1];
+            tbuf[1] = tbuf[2];
+            tbuf[2] = tbuf[3];
+            tbuf[3] = tbuf[4];
+            tbuf[4] = tbuf[5];
+            tbuf[5] = 0;
+        }
+        int64_t gt = 0, eq = 1;
+        for (int limb = 3; limb >= 0; limb--) {
+            int64_t tv = tbuf[limb], nv = n[limb];
+            if (tv > nv) {
+                gt = 1;
+                break;
+            }
+            if (tv < nv) {
+                eq = 0;
+                break;
+            }
+        }
+        if (gt == 1 || eq == 1) {
+            int64_t borrow = 0;
+            for (int q = 0; q < 4; q++) {
+                int64_t d = tbuf[q] - n[q] - borrow;
+                if (d < 0) {
+                    d += 65536;
+                    borrow = 1;
+                } else {
+                    borrow = 0;
+                }
+                a[q] = d;
+            }
+        } else {
+            for (int q = 0; q < 4; q++) a[q] = tbuf[q];
+        }
+    }
+    int64_t t1 = now_ns();
+    int64_t low = (a[0] + a[1] * 65536 + a[2] * 4294967296LL) % 1000000007LL;
+    int64_t high = a[3] % 1000000007LL;
+    printf("checksum=%lld\n", (long long)((low + high * 7919) % 1000000007LL));
+    if (t1 <= t0) t1 = t0 + 1;
+    printf("elapsed_ns=%lld\n", (long long)(t1 - t0));
+    return 0;
+}
+C
+}

@@ -1,0 +1,118 @@
+shape povray {
+  family "perf-real"
+  generator "stress"
+  features ["perf", "integer", "fixed-point", "raytrace", "c-vs-ny", "native", "checksum", "time"]
+  meta "fixed-point sphere ray march, 256x192"
+  timeout 180
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.tbuf
+use core.os.time
+;; Deterministic ray march against one sphere in Q10 fixed point. Integer-only so
+;; the Ny and C checksums are exactly comparable.
+def W = 256
+def H = 192
+def Q = 1024
+def SZ = 6 * Q
+def R = Q + Q / 4
+def R2 = R * R
+def img = i64buf_new(W * H)
+mut i = 0
+while i < W * H {
+   i64buf_store(img, i, 0)
+   i += 1
+}
+def int t0 = ticks()
+mut y = 0
+while y < H {
+   mut x = 0
+   while x < W {
+      def dx = (x * 2 * Q) / W - Q
+      def dy = (y * 2 * Q) / H - Q
+      mut px = 0
+      mut py = 0
+      mut pz = 0
+      mut hit = 0
+      mut step = 0
+      while step < 64 {
+         px += dx
+         py += dy
+         pz += Q
+         def ax = px
+         def ay = py
+         def az = pz - SZ
+         if (ax * ax + ay * ay + az * az) < R2 {
+            hit = 1
+            step = 64
+         }
+         step += 1
+      }
+      def shade = (hit * 255 + ((x * 3 + y * 5) % 16)) % 256
+      i64buf_store(img, y * W + x, shade)
+      x += 1
+   }
+   y += 1
+}
+def int t1 = ticks()
+mut acc = 0
+mut k = 0
+while k < W * H {
+   acc = (acc + i64buf_load(img, k)) % 1000000007
+   k += 1
+}
+print("checksum=", acc)
+print("elapsed_ns=", t1 - t0)
+NY
+  source c <<'C'
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+
+static int64_t now_ns(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0;
+    return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+}
+
+int main(void) {
+    enum { W = 256, H = 192, Q = 1024 };
+    const int64_t SZ = 6 * (int64_t)Q;
+    const int64_t R = Q + Q / 4;
+    const int64_t R2 = R * R;
+    int64_t *img = (int64_t *)calloc((size_t)W * H, sizeof(int64_t));
+    int64_t t0 = now_ns();
+    for (int y = 0; y < H; y++) {
+        for (int x = 0; x < W; x++) {
+            int64_t dx = (x * 2 * Q) / W - Q;
+            int64_t dy = (y * 2 * Q) / H - Q;
+            int64_t px = 0, py = 0, pz = 0;
+            int64_t hit = 0;
+            for (int step = 0; step < 64; step++) {
+                px += dx;
+                py += dy;
+                pz += Q;
+                int64_t ax = px, ay = py, az = pz - SZ;
+                if (ax * ax + ay * ay + az * az < R2) {
+                    hit = 1;
+                    break;
+                }
+            }
+            int64_t shade = (hit * 255 + ((x * 3 + y * 5) % 16)) % 256;
+            img[y * W + x] = shade;
+        }
+    }
+    int64_t t1 = now_ns();
+    int64_t acc = 0;
+    for (int k = 0; k < W * H; k++)
+        acc = (acc + img[k]) % 1000000007LL;
+    printf("checksum=%lld\n", (long long)acc);
+    if (t1 <= t0) t1 = t0 + 1;
+    printf("elapsed_ns=%lld\n", (long long)(t1 - t0));
+    free(img);
+    return 0;
+}
+C
+}

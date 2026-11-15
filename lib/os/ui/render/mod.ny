@@ -5,6 +5,7 @@
 ;; - core.os.ui.render.matrix
 module core.os.ui.render(
    BACKEND_NONE, BACKEND_GL, BACKEND_VK, BACKEND_MOCK, BACKEND_TTY, BACKEND_AUTO,
+   window_error,
    WHITE, BLACK, RED, GREEN, BLUE, YELLOW, CYAN, MAGENTA, ORANGE, PURPLE, GRAY, CLEAR,
    color_rgba, color_rgb, color_gray, color_hex, color_255, color_lerp, color_alpha,
    rect, rect_x, rect_y, rect_w, rect_h,
@@ -3844,9 +3845,24 @@ fn _show_pending_after_first_frame() any {
    0
 }
 
+mut str _window_error = ""
+
+fn window_error() str {
+   "Returns why the last init_window did not give the requested window, or \"\" when it did. It is set both when init_window returns false and when it fell back to the off-screen mock surface, so a program that asked for a visible window can tell that none appeared."
+   _window_error
+}
+
+fn _window_fail(str what) bool {
+   _window_error = what + " (requested " + _requested_backend_name() + " backend, WAYLAND_DISPLAY=" +
+      (ui_profile.env_present_cached("WAYLAND_DISPLAY") ? "set" : "unset") + ", DISPLAY=" +
+      (ui_profile.env_present_cached("DISPLAY") ? "set" : "unset") + ")"
+   false
+}
+
 fn init_window(int width, int height, str title, int flags=0, any vsync=false, bool filter=false, int msaa=4) any {
-   "Initializes a window with renderer config and graphics context. Returns window dict or false."
+   "Initializes a window with renderer config and graphics context. Returns window dict or false; window_error() says why when no window of the requested backend appeared."
    _ensure_matrix_scratch()
+   _window_error = ""
    ;; Without a display server, an automatic choice draws into the terminal.
    ;; BACKEND_NONE means the backend was never configured: fresh processes read
    ;; the mutable defaults as zero in generated code, so an unconfigured
@@ -3890,7 +3906,7 @@ fn init_window(int width, int height, str title, int flags=0, any vsync=false, b
    def auto_hide_boot = !headless && !explicit_hide && !use_gl && !_visible_vulkan_boot_required()
    if auto_hide_boot { f = f | 0x0200 }
    mut any win = lib_uiw.open_window(title, x, y, width, height, f, window_hints)
-   if !win { return false }
+   if !win { return _window_fail("the platform layer could not open a window") }
    _prepare_visible_vulkan_boot(win, explicit_hide, headless)
    if !_init_with_window(win, !use_gl) {
       lib_uiw.close(win)
@@ -3910,12 +3926,13 @@ fn init_window(int width, int height, str title, int flags=0, any vsync=false, b
             if gl_win { lib_uiw.close(gl_win) }
             if _backend_fallback_enabled() {
                if _is_debug() { ui_profile.print_text("[gfx] Auto backend GPU fallback failed; using mock renderer") }
+               _window_fail("neither Vulkan nor OpenGL could initialise; drawing to the off-screen mock surface")
                return init_mock_surface(width, height)
             }
-            return false
+            return _window_fail("neither Vulkan nor OpenGL could initialise on the window")
          }
       } else {
-         if !_backend_fallback_enabled() { return false }
+         if !_backend_fallback_enabled() { return _window_fail("the renderer could not initialise on the window") }
          def try_gl = _backend_pref != BACKEND_GL
          if _is_debug() {
             ui_profile.print_text("[gfx] requested " + _requested_backend_name() + " backend failed; retrying " + (try_gl ? "OpenGL" : "Vulkan"))
@@ -3935,6 +3952,7 @@ fn init_window(int width, int height, str title, int flags=0, any vsync=false, b
          } else {
             if alt_win { lib_uiw.close(alt_win) }
             if _is_debug() { ui_profile.print_text("[gfx] GPU fallback failed; using mock renderer") }
+            _window_fail("no GPU backend could initialise; drawing to the off-screen mock surface")
             return init_mock_surface(width, height)
          }
       }
