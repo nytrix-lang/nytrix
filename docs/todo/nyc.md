@@ -811,6 +811,46 @@ while a separate 54-job sanitizer run was active, so that run is not counted as
 a pass. A caller-saved spill-home coloring experiment grew `.text` to 39,181
 bytes and was reverted.
 
+i386 setup zero-fill gate (2026-11-15): the C frontend zero-filled every
+uninitialized aggregate local at all optimization levels, so every
+address-taken setup local emitted an inline fill. The `lower_zero_fill`
+pass in `src/code/lang/c/lower/parts/initializer.h` now runs only when the
+translation unit was compiled without optimization
+(`nyc_source_t.optimization == 0`), which the driver records in
+`src/code/lang/c/pipeline/driver.c`, `parse.h` and `parse.c`. A byte/word
+member written later still zero-fills because the partial-store lowering
+depends on it; only full-length fills are gated. A reproducer fell from 145
+to 49 assembly lines at `-Os`. The focused setup link falls from 38,307 to
+33,387 bytes of `.text` (`.text32` ends at `0x85da`), leaving 5,890 bytes to
+the `0x7000` threshold. The i386 portable-runtime fixture passes and a
+differential run of the 523-test C corpus through the old and new compilers
+shows no behavioral differences (the single differing case,
+`i386-lsl-alternative`, reads RDPID hardware state and varies run to run
+under either binary). The `nyr-c-frontend` CTest remains blocked by the
+uncommitted `object64.c` regression in the active freebuff session
+(`builtin-ffs` segfaults under both the old and new binaries), so the
+differential harness stands in for it.
+
+i386 displacement-folded addressing (2026-11-15): the i386 register-run
+emitter now resolves a chain of constant address arithmetic into one
+displacement at its final user. When an `ADD`/`SUB` of a constant inside a
+run has a single-user chain that ends at a byte, word or long load or store
+in the same run, every link is skipped and the user emits
+`mov X, disp(%base)` instead of materializing the address; chain totals are
+gated to 16-bit range, every link must have one definition, and the base
+counts as live up to the user so eviction still homes it. This removes the
+address-accumulator pattern (`mov base; addl $imm; mov X, (%reg)`).
+`src/code/backend/mach/arch/i386/registers.h` gained `sm_i386_sole_user`,
+`sm_i386_resolve_fold` and folded load, store and sign-extend branches. The
+differential corpus run and both cold i386 runtime fixtures pass, and a new
+reusable real-mode QEMU probe (`/tmp/nyc-setup-qemu-probe.sh` with
+`/tmp/nyc-fold-probe.c`) boots a probe-built setup image under
+`qemu-system-i386 -kernel` and prints identical `FOLD` hashes for the old
+and new binaries. The focused setup link falls another 769 bytes:
+`.text` is now 32,618 bytes and `.text32` ends at `0x82d9`, leaving 4,825
+bytes to the `0x7000` threshold. Address-accumulator `addl $imm, %reg`
+sites in the setup assembly fell from 287 to 109.
+
 ## Correctness verification programme
 
 Merged from `docs/todo/kcc.md` (2026-11-15). The artifact requirements in
