@@ -1,0 +1,44 @@
+shape env_image_generate {
+  family "runtime-ui"
+  generator "embedded"
+  features [texture environment float]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect compile_and_run
+  expect_message "ENV-IMAGE-GENERATE-OK"
+  source ny <<'NY'
+use core
+use core.os (ticks)
+use core.os.ui.render.texture as tex
+;; The four procedural environments are fixed images: a checksum per kind
+;; pins the pixels, and the time bound keeps the pixel loop unboxed (it took
+;; about 120 ms per 256x128 image when every step was a dynamic operation,
+;; which stalled the first frame of a freshly loaded scene).
+fn sum_px(any im) int {
+   def p = im.get("data", 0)
+   def n = int(im.get("width", 0)) * int(im.get("height", 0)) * 4
+   mut int acc = 0
+   mut int i = 0
+   while i < n {
+      acc = (acc * 31 + load8(p, i)) % 1000000007
+      i += 1
+   }
+   acc
+}
+def want = [442499055, 554819488, 461764009, 32660081]
+mut k = 0
+mut slowest = 0
+while k < 4 {
+   def t0 = ticks()
+   def im = tex.generate_env_image(k, 256, 128)
+   def ms = (ticks() - t0) / 1000000
+   if ms > slowest { slowest = ms }
+   assert(is_dict(im) && int(im.get("width", 0)) == 256 && int(im.get("height", 0)) == 128, "image size")
+   assert(sum_px(im) == int(want[k]), "environment " + to_str(k) + " pixels are unchanged")
+   k += 1
+}
+assert(slowest < 60, "a 256x128 environment is generated in well under a frame budget multiple")
+assert(tex.linear_to_srgb_u8(0.2) == 124 && tex.linear_to_srgb_u8(-1.0) == 0 && tex.linear_to_srgb_u8(7.0) == 255, "sRGB encode clamps")
+print("ENV-IMAGE-GENERATE-OK")
+NY
+}

@@ -1651,6 +1651,7 @@ static int compile_source(int argc, char **argv, int source_arg,
       .ms_extensions = driver->ms_extensions,
       .plan9_extensions = driver->plan9_extensions,
       .system_includes = !driver->no_std_includes && !driver->target};
+  input.optimization = (unsigned)driver->optimization;
   const char *output_path = driver->output       ? driver->output
                             : driver->preprocess ? NULL
                                                  : argv[source_arg + 1];

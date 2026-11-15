@@ -34,6 +34,11 @@ typedef struct {
   const char *debug_name;
   size_t *block_off;
   size_t *patch_at;
+  /*
+   * Parallel to patch_at: 1 when the branch was emitted in rel8 form, so the
+   * patch site holds one displacement byte instead of four.
+   */
+  unsigned char *patch_short;
   uint32_t *patch_block;
   size_t patch_count;
   size_t patch_cap;
@@ -77,6 +82,12 @@ typedef struct {
   uint32_t *seg_start_offsets, *seg_start_vregs;
   uint32_t *seg_end_offsets, *seg_end_vregs;
   nyr_mach_regalloc_t regalloc;
+  /*
+   * Set for throwaway probe encodes (home dead-store analysis).  A probe must
+   * not print an audit line and must not add its segments to the global
+   * regalloc counters, or every function is counted twice.
+   */
+  bool suppress_stats;
   size_t colors_len;
   size_t cur_inst;
   size_t cur_block;
@@ -103,6 +114,27 @@ typedef struct {
    * NYTRIX_NO_SAME_COLOR_COPY restores the staging path for A/B runs.
    */
   bool same_color_copy_fold;
+  /*
+   * Materialize a symbol address directly in the LEA destination's assigned
+   * color instead of staging it through %rax. Measured on `knight`: 4584 ->
+   * 4320 bytes of text. NYTRIX_NO_LEA_COLOR restores the RAX staging path
+   * for A/B runs.
+   */
+  bool lea_assign_color;
+  /*
+   * Operand reference counts per vreg.  A symbol LEA whose result has exactly
+   * one use (the COPY that immediately follows) can be materialized straight
+   * into that copy's register instead of through %rax.
+   */
+  uint32_t *vreg_use_count;
+  /*
+   * Encoder decision counters for the audit: how symbol addresses were
+   * materialized.  These are what an address-encoding change moves, so they
+   * are the evidence a size delta is attributed to, rather than an inference
+   * from reading assembly.
+   */
+  unsigned stat_lea_color;
+  unsigned stat_lea_staged;
   /*
    * Vector loop carries have a separate allocator proof and XMM/YMM seeding
    * path, so they can be enabled without opting GPR/FPR carries in.
@@ -317,6 +349,8 @@ static void mach_free_remat_maps(nyr_x64_mach_enc_t *e) {
   free(e->vreg_has_ret_use);
   free(e->vreg_last_call_arg_inst);
   free(e->vreg_literal_rhs_only);
+  free(e->vreg_use_count);
+  e->vreg_use_count = NULL;
   free(e->vreg_carried_copy_cache);
   free(e->loop_fpr);
   free(e->loop_fpr_entry);
@@ -367,6 +401,8 @@ static void mach_enc_free_scratch(nyr_x64_mach_enc_t *e) {
   free(e->block_align);
   e->block_align = NULL;
   free(e->patch_at);
+  free(e->patch_short);
+  e->patch_short = NULL;
   free(e->patch_block);
   e->block_off = NULL;
   e->patch_at = NULL;
@@ -5665,24 +5701,74 @@ static bool mach_mem_modrm(nyr_x64_mach_enc_t *e, unsigned base, unsigned reg,
   return mach_u8(e, (unsigned char)((reg << 3) | (base & 7)));
 }
 
-static bool mach_add_patch(nyr_x64_mach_enc_t *e, uint32_t block) {
+static bool mach_add_patch_kind(nyr_x64_mach_enc_t *e, uint32_t block,
+                                bool rel8) {
   if (e->patch_count == e->patch_cap) {
     size_t nc = e->patch_cap ? e->patch_cap * 2 : 32;
     size_t *na = realloc(e->patch_at, nc * sizeof(*na));
     uint32_t *nb = realloc(e->patch_block, nc * sizeof(*nb));
-    if (!na || !nb) {
-      free(na);
-      free(nb);
+    unsigned char *ns = realloc(e->patch_short, nc * sizeof(*ns));
+    if (na)
+      e->patch_at = na;
+    if (nb)
+      e->patch_block = nb;
+    if (ns)
+      e->patch_short = ns;
+    if (!na || !nb || !ns)
       return mach_err(e, "x64 machine form encode: patch OOM");
-    }
-    e->patch_at = na;
-    e->patch_block = nb;
     e->patch_cap = nc;
   }
   e->patch_at[e->patch_count] = e->code.len;
   e->patch_block[e->patch_count] = block;
+  e->patch_short[e->patch_count] = rel8 ? 1 : 0;
   e->patch_count++;
   return true;
+}
+
+static bool mach_add_patch(nyr_x64_mach_enc_t *e, uint32_t block) {
+  return mach_add_patch_kind(e, block, false);
+}
+
+static bool mach_add_patch_short(nyr_x64_mach_enc_t *e, uint32_t block) {
+  return mach_add_patch_kind(e, block, true);
+}
+
+/*
+ * Emit a branch to `block`. A backward edge already knows its target offset,
+ * so when the displacement fits a signed byte emit the short form: two bytes
+ * instead of five (jmp) or six (jcc). Forward edges keep the rel32 placeholder.
+ *
+ * Short branches still record a patch, flagged in patch_short, so the
+ * trampoline fold can move them with the rest of the code before patching.
+ * That fold only ever drops bytes, which can only shrink the magnitude of a
+ * backward displacement, so a rel8 edge stays in range.
+ *
+ * jcc is 0 for an unconditional jump, otherwise the 0F 8x opcode byte.
+ */
+static bool mach_emit_branch_to(nyr_x64_mach_enc_t *e, uint32_t block,
+                                unsigned char jcc) {
+  if (!e || !e->mach || !e->block_off)
+    return false;
+  /* Opt-out so both layouts can be measured from one binary. */
+  const char *no_short = getenv("NYTRIX_NO_SHORT_BRANCHES");
+  bool short_ok =
+      !(no_short && strcmp(no_short, "0") != 0 && strcmp(no_short, "off") != 0);
+  if (short_ok && e->cur_block_valid && block < e->cur_block &&
+      block < e->mach->block_len) {
+    int64_t rel = (int64_t)e->block_off[block] - (int64_t)(e->code.len + 2);
+    if (rel >= -128 && rel <= 127) {
+      unsigned char op = jcc ? (unsigned char)(0x70 | (jcc & 0x0f)) : 0xeb;
+      return mach_u8(e, op) && mach_add_patch_short(e, block) &&
+             mach_u8(e, 0x00);
+    }
+  }
+  if (jcc) {
+    if (!mach_u8(e, 0x0f) || !mach_u8(e, jcc))
+      return false;
+  } else if (!mach_u8(e, 0xe9)) {
+    return false;
+  }
+  return mach_add_patch(e, block) && mach_i32(e, 0);
 }
 
 static bool mach_add_reloc(nyr_x64_mach_enc_t *e, const char *sym, int type) {
@@ -10318,6 +10404,7 @@ static bool mach_fold_branch_trampolines(nyr_x64_mach_enc_t *e) {
       if (e->patch_at[i] == SIZE_MAX)
         continue;
       e->patch_at[kept] = mach_without_jumps(e->patch_at[i], cuts, count);
+      e->patch_short[kept] = e->patch_short[i];
       e->patch_block[kept++] = e->patch_block[i];
     }
     e->patch_count = kept;
@@ -10330,10 +10417,151 @@ static bool mach_fold_branch_trampolines(nyr_x64_mach_enc_t *e) {
 #include "code/backend/mach/arch/x86/object/loop_align.h"
 #include "code/backend/mach/arch/x86/object/regalloc.h"
 
+/*
+ * Per-vreg operand reference counts, built once per function.  The encoder
+ * uses them to prove that an address materialization has a single consumer
+ * before folding it into that consumer's destination register.
+ */
+static bool mach_build_vreg_use_counts(nyr_x64_mach_enc_t *e) {
+  if (!e || !e->mach)
+    return false;
+  const nyr_mach_func_t *m = e->mach;
+  free(e->vreg_use_count);
+  e->vreg_use_count = NULL;
+  if (!m->vreg_len)
+    return true;
+  uint32_t *counts = calloc(m->vreg_len, sizeof(*counts));
+  if (!counts)
+    return false;
+  for (size_t i = 0; i < m->inst_len; ++i) {
+    const nyr_mach_inst_t *in = &m->insts[i];
+    const nyr_mach_operand_t *ops[] = {&in->src0, &in->src1, &in->src2};
+    for (size_t k = 0; k < sizeof(ops) / sizeof(ops[0]); ++k) {
+      if (ops[k]->kind != NYR_MACH_OPERAND_VREG ||
+          ops[k]->as.reg >= m->vreg_len)
+        continue;
+      if (counts[ops[k]->as.reg] < 3)
+        counts[ops[k]->as.reg]++;
+    }
+  }
+  e->vreg_use_count = counts;
+  return true;
+}
+
+/*
+ * Missed-optimization audit for one function's machine form.
+ *
+ * Counts the patterns this backend can still improve, in exactly the terms the
+ * encoder controls: address materializations that admit a fold, copies whose
+ * source and destination already share a color, adjacent store/load pairs
+ * through one home, unconditional edges to the next block, and homes beyond
+ * disp8 reach with their reference count.  NYTRIX_AUDIT=1 prints one stable
+ * line per function, so a change can be judged by the same counters that
+ * motivate it rather than by looking at assembly.
+ */
+static void mach_audit_function(const nyr_x64_mach_enc_t *e,
+                                const char *name) {
+  const char *env = getenv("NYTRIX_AUDIT");
+  if (!env || !*env || *env == '0')
+    return;
+  const nyr_mach_func_t *m = e->mach;
+  if (!m)
+    return;
+  unsigned lea_copy = 0, self_move = 0, spill_pair = 0, fallthrough = 0;
+  size_t bi = 0;
+  for (size_t i = 0; i < m->inst_len; ++i) {
+    while (bi < m->block_len &&
+           i >= m->blocks[bi].first_inst + m->blocks[bi].inst_count)
+      ++bi;
+    const nyr_mach_inst_t *in = &m->insts[i];
+    if (in->opcode == NYR_MACH_LEA &&
+        in->dst.kind == NYR_MACH_OPERAND_VREG &&
+        in->src0.kind == NYR_MACH_OPERAND_SYMBOL && in->src0.as.symbol &&
+        e->vreg_use_count && in->dst.as.reg < m->vreg_len &&
+        e->vreg_use_count[in->dst.as.reg] == 1 && i + 1 < m->inst_len &&
+        m->insts[i + 1].opcode == NYR_MACH_COPY &&
+        m->insts[i + 1].src0.kind == NYR_MACH_OPERAND_VREG &&
+        m->insts[i + 1].src0.as.reg == in->dst.as.reg)
+      ++lea_copy;
+    if (in->opcode == NYR_MACH_COPY &&
+        in->src0.kind == NYR_MACH_OPERAND_VREG &&
+        in->dst.kind == NYR_MACH_OPERAND_VREG &&
+        in->src0.as.reg != in->dst.as.reg &&
+        in->src0.as.reg < m->vreg_len && in->dst.as.reg < m->vreg_len) {
+      int sp = mach_vreg_def_preg(e, in->src0.as.reg);
+      int dp = mach_vreg_def_preg(e, in->dst.as.reg);
+      if (sp >= 0 && sp == dp)
+        ++self_move;
+    }
+    if (in->opcode == NYR_MACH_STORE && i + 1 < m->inst_len &&
+        m->insts[i + 1].opcode == NYR_MACH_LOAD &&
+        in->dst.kind == NYR_MACH_OPERAND_FRAME &&
+        m->insts[i + 1].src0.kind == NYR_MACH_OPERAND_FRAME &&
+        mach_slot_off(e, &in->dst) == mach_slot_off(e, &m->insts[i + 1].src0))
+      ++spill_pair;
+    /*
+     * Unconditional edge to the immediately following block: the encoder
+     * elides the jmp and falls through, so this counts a live optimization
+     * rather than a miss.  A nonzero count that ever appears in the emitted
+     * bytes would mean the elision stopped applying.
+     */
+    if (in->opcode == NYR_MACH_BR &&
+        in->src1.kind == NYR_MACH_OPERAND_BLOCK && bi + 1 < m->block_len &&
+        in->src1.as.block_index == bi + 1)
+      ++fallthrough;
+  }
+  /*
+   * Register-allocation shape for this function, taken from the allocator's
+   * own result rather than recomputed: how many live segments it produced, how
+   * many it had to spill, and how many physical colors it actually used.  A
+   * size or copy-count change can then be attributed to allocation instead of
+   * to the encoder.
+   */
+  unsigned ra_segments = 0, ra_spilled = 0, ra_reload = 0, ra_colors = 0;
+  unsigned ra_spill_live = 0, ra_spill_dying = 0;
+  if (e->regalloc.segments) {
+    uint64_t seen = 0;
+    ra_segments = (unsigned)e->regalloc.segment_len;
+    for (size_t i = 0; i < e->regalloc.segment_len; ++i) {
+      const nyr_mach_live_segment_t *seg = &e->regalloc.segments[i];
+      if (seg->spill) {
+        ++ra_spilled;
+        /*
+         * Only a spill that is reloaded later costs a store and a load; a
+         * spilled value that dies in the segment needs no load at all.  Splitting
+         * the count says whether `ra_spilled` is real pressure or bookkeeping.
+         * Home reachability cannot be read here: `vreg_home_offs` is only
+         * populated for the home-DSE path, so a home-based count would report
+         * every spill as home-less.
+         */
+        if (seg->reload)
+          ++ra_spill_live;
+        else
+          ++ra_spill_dying;
+      }
+      if (seg->reload)
+        ++ra_reload;
+      if (seg->color >= 0 && seg->color < 64)
+        seen |= UINT64_C(1) << seg->color;
+    }
+    ra_colors = (unsigned)__builtin_popcountll((unsigned long long)seen);
+  }
+  fprintf(stderr,
+          "[audit] fn=%s lea_copy=%u self_move=%u spill_pair=%u "
+          "fallthrough_elided=%u lea_color=%u lea_staged=%u "
+          "ra_segments=%u ra_spilled=%u ra_reload=%u ra_colors=%u "
+          "ra_spill_live=%u ra_spill_dying=%u\n",
+          name && *name ? name : "fn", lea_copy, self_move, spill_pair,
+          fallthrough, e->stat_lea_color, e->stat_lea_staged, ra_segments,
+          ra_spilled, ra_reload, ra_colors, ra_spill_live, ra_spill_dying);
+}
+
 static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
                                  bool tag_return) {
   (void)tag_return;
   e->debug_name = name;
+  e->stat_lea_color = 0;
+  e->stat_lea_staged = 0;
   const nyr_mach_func_t *mach = e->mach;
   if (!mach_validate_target_features(e))
     return false;
@@ -10593,6 +10821,10 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
   e->same_color_copy_fold =
       !(no_same_color && strcmp(no_same_color, "0") != 0 &&
         strcmp(no_same_color, "off") != 0);
+  const char *no_lea_color = getenv("NYTRIX_NO_LEA_COLOR");
+  e->lea_assign_color =
+      !(no_lea_color && strcmp(no_lea_color, "0") != 0 &&
+        strcmp(no_lea_color, "off") != 0);
   /*
    * The vector allocator enables only chains that pass the all-edge proof;
    * its opt-out simply leaves every vector segment home-backed.
@@ -10830,6 +11062,8 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
     return false;
   if (!mach_build_literal_use_map(e))
     return mach_err(e, "x64 machine form encode: OOM (literal use map)");
+  if (!mach_build_vreg_use_counts(e))
+    return mach_err(e, "x64 machine form encode: OOM (vreg use counts)");
   if (!mach_build_block_align(e))
     return mach_err(e, "x64 machine form encode: OOM (block alignment)");
   e->block_off = calloc(mach->block_len ? mach->block_len : 1, sizeof(size_t));
@@ -11862,13 +12096,35 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
         } else if (in->src0.kind == NYR_MACH_OPERAND_SYMBOL &&
                    in->src0.as.symbol) {
           /*
-           * leaq sym(%rip), %rax — 48 8d 05 rel32
+           * leaq sym(%rip), reg — 48 8d 05 rel32 with reg in ModRM.
+           * Materializing the address in RAX and moving it to the assigned
+           * color cost ten bytes per address-of-global use; the move is the
+           * largest single redundancy left in the encoder's output on
+           * fixtures that pass globals by address.
            */
-          if (!mach_rex(e, true, false, false, false) || !mach_u8(e, 0x8d) ||
-              !mach_u8(e, 0x05) ||
-              !mach_add_reloc(e, in->src0.as.symbol, NY_RELOC_PC32) ||
-              !mach_i32(e, 0) || !mach_commit_vreg(e, &in->dst, dst))
-            return false;
+          int dst_preg = in->dst.kind == NYR_MACH_OPERAND_VREG
+                             ? mach_vreg_def_preg(e, in->dst.as.reg)
+                             : -1;
+          if (e->lea_assign_color && dst_preg >= 0 && dst_preg != 4 &&
+              dst_preg != 5) {
+            /*
+             * The same commit as the indexed LEA paths above: the assigned
+             * register now holds the address, and a later consumer that
+             * re-seeds from the canonical home must still find it current.
+             */
+            ++e->stat_lea_color;
+            if (!mach_remat_addr_preg(e, dst_preg, &in->src0) ||
+                !mach_commit_preg(e, &in->dst, dst, (unsigned)dst_preg,
+                                  false))
+              return false;
+          } else {
+            ++e->stat_lea_staged;
+            if (!mach_rex(e, true, false, false, false) ||
+                !mach_u8(e, 0x8d) || !mach_u8(e, 0x05) ||
+                !mach_add_reloc(e, in->src0.as.symbol, NY_RELOC_PC32) ||
+                !mach_i32(e, 0) || !mach_commit_vreg(e, &in->dst, dst))
+              return false;
+          }
         } else
           return mach_err(e, "x64 machine form encode: bad LEA");
         break;
@@ -13948,7 +14204,7 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
             !mach_flush_vector_to_home(e, true))
           return false;
         /*
-         * jmp rel32
+         * jmp to the target block (rel8 when it is a short backward edge)
          */
         mach_rax_invalidate(e);
         /*
@@ -13959,8 +14215,7 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
          */
         if (e->cur_block_valid && in->src1.as.block_index == e->cur_block + 1)
           break;
-        if (!mach_u8(e, 0xe9) || !mach_add_patch(e, in->src1.as.block_index) ||
-            !mach_i32(e, 0))
+        if (!mach_emit_branch_to(e, in->src1.as.block_index, 0))
           return false;
         break;
       case NYR_MACH_BR_IF:
@@ -13981,8 +14236,7 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
            */
           unsigned char jcc = e->fused_jcc;
           e->fused_jcc = 0;
-          if (!mach_u8(e, 0x0f) || !mach_u8(e, jcc) ||
-              !mach_add_patch(e, in->src1.as.block_index) || !mach_i32(e, 0))
+          if (!mach_emit_branch_to(e, in->src1.as.block_index, jcc))
             return false;
           break;
         }
@@ -14006,18 +14260,16 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
           if (!mach_rex(e, true, reg >= 8, false, reg >= 8) ||
               !mach_u8(e, 0x85) ||
               !mach_u8(e, 0xc0 | ((reg & 7) << 3) | (reg & 7)) ||
-              !mach_u8(e, 0x0f) || !mach_u8(e, 0x85) ||
-              !mach_add_patch(e, in->src1.as.block_index) || !mach_i32(e, 0))
+              !mach_emit_branch_to(e, in->src1.as.block_index, 0x85))
             return false;
           break;
         }
         /*
-         * cmpq $0, mem; jne rel32
+         * cmpq $0, mem; jne target
          */
         if (!mach_rex(e, true, false, false, false) || !mach_u8(e, 0x83) ||
             !mach_rbp_disp(e, 7, a) || !mach_u8(e, 0x00) ||
-            !mach_u8(e, 0x0f) || !mach_u8(e, 0x85) ||
-            !mach_add_patch(e, in->src1.as.block_index) || !mach_i32(e, 0))
+            !mach_emit_branch_to(e, in->src1.as.block_index, 0x85))
           return false;
         break;
       case NYR_MACH_CALL: {
@@ -15166,9 +15418,10 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
   }
   size_t gpr_peak_live =
       nyr_mach_regalloc_peak_live(&e->regalloc, e->mach->inst_len);
-  nyr_native_mach_regalloc_record(e->regalloc.segment_len, colored_segments,
-                                  spilled_segments, reload_segments,
-                                  gpr_peak_live);
+  if (!e->suppress_stats)
+    nyr_native_mach_regalloc_record(e->regalloc.segment_len, colored_segments,
+                                    spilled_segments, reload_segments,
+                                    gpr_peak_live);
   size_t fp_colored_segments = 0;
   size_t fp_spilled_segments = 0;
   size_t fp_reload_segments = 0;
@@ -15182,9 +15435,10 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
   }
   size_t fp_peak_live =
       nyr_mach_regalloc_peak_live(&e->fp_regalloc, e->mach->inst_len);
-  nyr_native_mach_fpr_record(e->fp_regalloc.segment_len, fp_colored_segments,
-                             fp_spilled_segments, fp_reload_segments,
-                             fp_peak_live);
+  if (!e->suppress_stats)
+    nyr_native_mach_fpr_record(e->fp_regalloc.segment_len, fp_colored_segments,
+                               fp_spilled_segments, fp_reload_segments,
+                               fp_peak_live);
   size_t vec_colored_segments = 0;
   size_t vec_spilled_segments = 0;
   size_t vec_reload_segments = 0;
@@ -15198,9 +15452,18 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
   }
   size_t vec_peak_live =
       nyr_mach_regalloc_peak_live(&e->vec_regalloc, e->mach->inst_len);
-  nyr_native_mach_vector_record(e->vec_regalloc.segment_len,
-                                vec_colored_segments, vec_spilled_segments,
-                                vec_reload_segments, vec_peak_live);
+  if (!e->suppress_stats)
+    nyr_native_mach_vector_record(e->vec_regalloc.segment_len,
+                                  vec_colored_segments, vec_spilled_segments,
+                                  vec_reload_segments, vec_peak_live);
+  /*
+   * Audit here, while the per-class allocator results are still live and the
+   * encoder's decision counters are final.  The outer callers run after this
+   * function frees its allocators, which reported every regalloc field as
+   * zero.
+   */
+  if (!e->suppress_stats)
+    mach_audit_function(e, name);
   nyr_mach_regalloc_free(&e->vec_regalloc);
   nyr_mach_regalloc_free(&e->regalloc);
   nyr_mach_regalloc_free(&e->fp_regalloc);
@@ -15241,6 +15504,15 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
     uint32_t blk = e->patch_block[i];
     if (blk >= mach->block_len)
       return mach_err(e, "x64 machine form encode: bad branch target");
+    if (e->patch_short && e->patch_short[i]) {
+      int64_t short_rel =
+          (int64_t)e->block_off[blk] - (int64_t)(at + 1);
+      if (short_rel < -128 || short_rel > 127)
+        return mach_err(e,
+                        "x64 machine form encode: short branch out of range");
+      e->code.data[at] = (unsigned char)(short_rel & 0xff);
+      continue;
+    }
     int32_t rel = (int32_t)((int64_t)e->block_off[blk] - (int64_t)(at + 4));
     e->code.data[at] = (unsigned char)(rel & 0xff);
     e->code.data[at + 1] = (unsigned char)((rel >> 8) & 0xff);

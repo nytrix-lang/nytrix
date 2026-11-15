@@ -31,8 +31,9 @@
 ;;                save / restore stack
 ;;   scissor      scissor, intersect_scissor, reset_scissor (the bounding box
 ;;                of the transformed rectangle)
-;;   text         font_face, text_align, text, text_bounds (position follows
-;;                the transform; rotation and scale do not apply to glyphs)
+;;   text         font_face, text_align, text, text_bounds (glyphs follow the
+;;                whole transform on Vulkan and GL; the software renderer
+;;                keeps them upright at the transformed position)
 ;;   compositing  global_alpha, and source-over blending only: the renderer
 ;;                has one alpha blend pipeline, so the other Porter-Duff
 ;;                operators are rejected by global_composite_operation.
@@ -56,6 +57,7 @@ use core.math (sqrt, sin, cos, tan, atan2, acos, abs, PI)
 use core.str as str
 use core.os.ui.render as gfx
 use core.os.ui.render.shared as shared
+use core.os.ui.render.matrix as mat
 
 def BUTT = 0
 def ROUND = 1
@@ -77,6 +79,8 @@ def SOURCE_OVER = 0
 
 ;; Current state. save() copies these into a list; restore() reads them back.
 mut _xa, _xb, _xc, _xd, _xe, _xf = 1.0, 0.0, 0.0, 1.0, 0.0, 0.0
+;; Model matrix reused for transformed text.
+mut any _text_mat = nil
 mut any _fill = nil
 mut any _stroke = nil
 mut _stroke_w, _miter = 1.0, 10.0
@@ -1284,21 +1288,84 @@ fn _text_origin(f64 x, f64 y, any s) list {
    [ox, oy, tw, line]
 }
 
+fn _text_transformed() bool {
+   "True when glyphs must be rotated, scaled, or skewed and the backend can do it: the GPU backends take the transform as a model matrix, the software renderer keeps upright glyphs at the transformed position."
+   if _xa == 1.0 && _xb == 0.0 && _xc == 0.0 && _xd == 1.0 { return false }
+   def int backend = gfx.get_backend_type()
+   backend == gfx.BACKEND_VK || backend == gfx.BACKEND_GL
+}
+
+fn _text_local_origin(f64 x, f64 y, any s) list {
+   ;; Alignment in the untransformed frame: [x, y, width, line height].
+   def m = gfx.measure_text_fast(_font, s)
+   def f64 tw = float(m.get(0, 0.0))
+   def f64 line = float(gfx.font_line_height(_font))
+   def f64 asc = float(gfx.font_ascent(_font))
+   mut f64 ox = x
+   mut f64 oy = y
+   if (_align & ALIGN_CENTER) != 0 { ox = ox - tw * 0.5 }
+   elif (_align & ALIGN_RIGHT) != 0 { ox = ox - tw }
+   if (_align & ALIGN_MIDDLE) != 0 { oy = oy - line * 0.5 }
+   elif (_align & ALIGN_BOTTOM) != 0 { oy = oy - line }
+   elif (_align & ALIGN_BASELINE) != 0 { oy = oy - (asc > 0.0 ? asc : line * 0.8) }
+   [ox, oy, tw, line]
+}
+
 fn text(f64 x, f64 y, any s) f64 {
-   "Draws a line of text at (x, y) in the fill color and returns the x where it ends. The position follows the transform; glyphs keep their own size and orientation."
+   "Draws a line of text at (x, y) in the fill color and returns the x where it ends. Glyphs follow the whole transform (rotation, scale, skew) on the Vulkan and GL backends; the software renderer keeps them upright at the transformed position."
    _init()
    if _font <= 0 { return x }
+   def int col = gfx.color_pack(float(_fill.get(11, 1.0)), float(_fill.get(12, 1.0)), float(_fill.get(13, 1.0)), float(_fill.get(14, 1.0)) * _alpha)
+   if _text_transformed() {
+      def lo = _text_local_origin(x, y, s)
+      if !is_list(_text_mat) { _text_mat = mat.mat4_identity() }
+      mat.mat4_identity_into(_text_mat)
+      mat.mat4_set(_text_mat, 0, 0, _xa)
+      mat.mat4_set(_text_mat, 1, 0, _xb)
+      mat.mat4_set(_text_mat, 0, 1, _xc)
+      mat.mat4_set(_text_mat, 1, 1, _xd)
+      mat.mat4_set(_text_mat, 0, 3, _xe)
+      mat.mat4_set(_text_mat, 1, 3, _xf)
+      if _sc_on { gfx.scissor_push(_sc_x, _sc_y, _sc_w, _sc_h) }
+      gfx.set_model_matrix(_text_mat)
+      gfx.draw_text(_font, s, float(lo.get(0, 0.0)), float(lo.get(1, 0.0)), col)
+      mat.mat4_identity_into(_text_mat)
+      gfx.set_model_matrix(_text_mat)
+      if _sc_on { gfx.scissor_pop() }
+      return x + float(lo.get(2, 0.0))
+   }
    def o = _text_origin(x, y, s)
    if _sc_on { gfx.scissor_push(_sc_x, _sc_y, _sc_w, _sc_h) }
-   gfx.draw_text(_font, s, float(o.get(0, 0.0)), float(o.get(1, 0.0)),
-      gfx.color_pack(float(_fill.get(11, 1.0)), float(_fill.get(12, 1.0)), float(_fill.get(13, 1.0)), float(_fill.get(14, 1.0)) * _alpha))
+   gfx.draw_text(_font, s, float(o.get(0, 0.0)), float(o.get(1, 0.0)), col)
    if _sc_on { gfx.scissor_pop() }
    x + float(o.get(2, 0.0))
 }
 
 fn text_bounds(f64 x, f64 y, any s) list {
-   "Returns the screen rectangle [x, y, w, h] the text would cover."
+   "Returns the screen rectangle [x, y, w, h] the text would cover: the bounding box of the transformed text block when glyphs follow the transform."
    _init()
    if _font <= 0 { return [x, y, 0.0, 0.0] }
-   _text_origin(x, y, s)
+   if !_text_transformed() { return _text_origin(x, y, s) }
+   def lo = _text_local_origin(x, y, s)
+   def f64 lx = float(lo.get(0, 0.0))
+   def f64 ly = float(lo.get(1, 0.0))
+   def f64 lw = float(lo.get(2, 0.0))
+   def f64 lh = float(lo.get(3, 0.0))
+   mut f64 min_x = 0.0
+   mut f64 min_y = 0.0
+   mut f64 max_x = 0.0
+   mut f64 max_y = 0.0
+   mut int k = 0
+   while k < 4 {
+      def f64 cx = (k == 1 || k == 2) ? (lx + lw) : lx
+      def f64 cy = (k >= 2) ? (ly + lh) : ly
+      def f64 sx = cx * _xa + cy * _xc + _xe
+      def f64 sy = cx * _xb + cy * _xd + _xf
+      if k == 0 || sx < min_x { min_x = sx }
+      if k == 0 || sx > max_x { max_x = sx }
+      if k == 0 || sy < min_y { min_y = sy }
+      if k == 0 || sy > max_y { max_y = sy }
+      k += 1
+   }
+   [min_x, min_y, max_x - min_x, max_y - min_y]
 }

@@ -285,6 +285,8 @@ static const nyr_runtime_effect_entry_t nyr_runtime_effects[] = {
      * conservative without collapsing unrelated memory into UNKNOWN.
      */
     {"rt_sin_f64", NYIR_EFFECT_CALL | NYIR_EFFECT_FENV},
+    {"rt_exp_f64", NYIR_EFFECT_CALL | NYIR_EFFECT_FENV},
+    {"rt_log_f64", NYIR_EFFECT_CALL | NYIR_EFFECT_FENV},
     {"rt_cos_f64", NYIR_EFFECT_CALL | NYIR_EFFECT_FENV},
     {"rt_fmod_f64", NYIR_EFFECT_CALL | NYIR_EFFECT_FENV},
     {"rt_assert_cstr", NYIR_EFFECT_CALL | NYIR_EFFECT_READ_MEMORY |

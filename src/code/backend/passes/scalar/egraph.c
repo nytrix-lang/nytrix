@@ -58,7 +58,36 @@ typedef struct {
   ny_eg_node_t *nodes;
   int n, cap;
   int *uf;
+  /*
+   * Union-by-rank.  Every rebuild canonicalizes all child pointers, so long
+   * parent chains would be walked repeatedly; rank keeps them shallow.
+   */
+  unsigned char *rank;
+  /*
+   * Open-addressing table of canonical node indices (-1 empty).  Interning
+   * used to scan every node, which made saturation quadratic in the block
+   * size before any rule fired; the table makes it constant time and is
+   * rebuilt whenever unions move canonical children.
+   */
+  int *hash;
+  int hash_cap;
 } ny_egraph_t;
+
+static void eg_free_graph(ny_egraph_t *g) {
+  if (!g)
+    return;
+  free(g->nodes);
+  free(g->uf);
+  free(g->rank);
+  free(g->hash);
+  g->nodes = NULL;
+  g->uf = NULL;
+  g->rank = NULL;
+  g->hash = NULL;
+  g->hash_cap = 0;
+  g->n = 0;
+  g->cap = 0;
+}
 
 static int eg_find(ny_egraph_t *g, int n) {
   int root = n;
@@ -75,8 +104,17 @@ static int eg_find(ny_egraph_t *g, int n) {
 static void eg_union(ny_egraph_t *g, int a, int b) {
   a = eg_find(g, a);
   b = eg_find(g, b);
-  if (a != b)
+  if (a == b)
+    return;
+  if (g->rank[a] < g->rank[b]) {
     g->uf[a] = b;
+  } else if (g->rank[a] > g->rank[b]) {
+    g->uf[b] = a;
+  } else {
+    g->uf[b] = a;
+    if (g->rank[a] < 255)
+      ++g->rank[a];
+  }
 }
 
 static int eg_new(ny_egraph_t *g, int op, int64_t imm, int nchild, int c0,
@@ -93,8 +131,13 @@ static int eg_new(ny_egraph_t *g, int op, int64_t imm, int nchild, int c0,
     if (!nu)
       return -1;
     g->uf = nu;
+    unsigned char *nr = ny_realloc_array(g->rank, (size_t)nc, sizeof(*nr));
+    if (!nr)
+      return -1;
+    g->rank = nr;
+    memset(g->rank + g->cap, 0, (size_t)(nc - g->cap));
     /*
-     * Only commit the new capacity once BOTH arrays grew; growing
+     * Only commit the new capacity once every array grew; growing
      * `nodes` alone left cap stale and made the failing insert look
      * like fuel exhaustion on the next call.
      */
@@ -110,18 +153,103 @@ static int eg_new(ny_egraph_t *g, int op, int64_t imm, int nchild, int c0,
   return i;
 }
 
-static int eg_find_node(ny_egraph_t *g, int op, int64_t imm, int nchild, int c0,
-                        int c1) {
-  for (int i = 0; i < g->n; ++i) {
-    const ny_eg_node_t *n = &g->nodes[i];
-    if (n->op != op || n->imm != imm || n->nchild != nchild)
-      continue;
-    int e0 = n->nchild > 0 ? n->child0 : -1;
-    int e1 = n->nchild > 1 ? n->child1 : -1;
-    if (e0 == c0 && e1 == c1)
-      return i;
+static uint64_t eg_hash_mix(uint64_t x) {
+  x ^= x >> 30;
+  x *= 0xbf58476d1ce4e5b9ULL;
+  x ^= x >> 27;
+  x *= 0x94d049bb133111ebULL;
+  x ^= x >> 31;
+  return x;
+}
+
+static uint64_t eg_node_hash(int op, int64_t imm, int nchild, int c0, int c1) {
+  uint64_t h = eg_hash_mix((uint64_t)(uint32_t)op ^ (uint64_t)imm);
+  h = eg_hash_mix(h ^ ((uint64_t)(uint32_t)(c0 + 1) * 3u));
+  h = eg_hash_mix(h ^ ((uint64_t)(uint32_t)(c1 + 1) * 17u));
+  return h ^ ((uint64_t)nchild << 59);
+}
+
+static bool eg_hash_reset(ny_egraph_t *g, int want) {
+  int cap = 16;
+  while (cap < want && cap < (1 << 24))
+    cap <<= 1;
+  if (g->hash_cap != cap) {
+    int *h = ny_realloc_array(g->hash, (size_t)cap, sizeof(*h));
+    if (!h)
+      return false;
+    g->hash = h;
+    g->hash_cap = cap;
+  }
+  for (int i = 0; i < g->hash_cap; ++i)
+    g->hash[i] = -1;
+  return true;
+}
+
+/*
+ * Find the canonical node with this key.  Returns its index, or -1 with *slot
+ * set to the probe position where a node with this key belongs.
+ */
+static int eg_hash_probe(const ny_egraph_t *g, int op, int64_t imm, int nchild,
+                         int c0, int c1, int *slot) {
+  if (!g->hash_cap)
+    return -1;
+  int mask = g->hash_cap - 1;
+  int i = (int)(eg_node_hash(op, imm, nchild, c0, c1) & (uint64_t)mask);
+  for (int probes = 0; probes < g->hash_cap; ++probes) {
+    int at = g->hash[i];
+    if (at < 0) {
+      if (slot)
+        *slot = i;
+      return -1;
+    }
+    const ny_eg_node_t *n = &g->nodes[at];
+    int n0 = n->nchild > 0 ? n->child0 : -1;
+    int n1 = n->nchild > 1 ? n->child1 : -1;
+    if (n->op == op && n->imm == imm && n->nchild == nchild && n0 == c0 &&
+        n1 == c1) {
+      if (slot)
+        *slot = i;
+      return at;
+    }
+    i = (i + 1) & mask;
   }
   return -1;
+}
+
+/*
+ * Insert a canonical node unless an equal one is already present.  Returns the
+ * equal node's index or -1 when this node was stored.
+ */
+static int eg_hash_store(ny_egraph_t *g, int node) {
+  const ny_eg_node_t *n = &g->nodes[node];
+  int slot = -1;
+  int found = eg_hash_probe(g, n->op, n->imm, n->nchild, n->child0, n->child1,
+                            &slot);
+  if (found >= 0)
+    return found;
+  if (slot >= 0)
+    g->hash[slot] = node;
+  return -1;
+}
+
+/*
+ * Rebuild the table from the current canonical nodes, re-canonicalizing every
+ * child pointer on the way.  Any table mapping the stale index is discarded.
+ */
+static bool eg_hash_rehash(ny_egraph_t *g, int want) {
+  if (!eg_hash_reset(g, want))
+    return false;
+  for (int i = 0; i < g->n; ++i) {
+    if (eg_find(g, i) != i)
+      continue;
+    ny_eg_node_t *n = &g->nodes[i];
+    if (n->nchild > 0)
+      n->child0 = eg_find(g, n->child0);
+    if (n->nchild > 1)
+      n->child1 = eg_find(g, n->child1);
+    eg_hash_store(g, i);
+  }
+  return true;
 }
 
 static int eg_intern(ny_egraph_t *g, int op, int64_t imm, int nchild, int c0,
@@ -130,10 +258,61 @@ static int eg_intern(ny_egraph_t *g, int op, int64_t imm, int nchild, int c0,
     c0 = eg_find(g, c0);
   if (nchild > 1)
     c1 = eg_find(g, c1);
-  int found = eg_find_node(g, op, imm, nchild, c0, c1);
+  int slot = -1;
+  int found = eg_hash_probe(g, op, imm, nchild, c0, c1, &slot);
   if (found >= 0)
     return found;
-  return eg_new(g, op, imm, nchild, c0, c1);
+  int node = eg_new(g, op, imm, nchild, c0, c1);
+  if (node < 0)
+    return -1;
+  if (slot < 0) {
+    /* Table saturated (or never built): rebuild it, then re-probe. */
+    if (!eg_hash_rehash(g, g->n * 4 + 32))
+      return -1;
+    if (eg_hash_probe(g, op, imm, nchild, c0, c1, &slot) >= 0 || slot < 0)
+      return node;
+  }
+  g->hash[slot] = node;
+  return node;
+}
+
+/*
+ * Batched congruence closure (egg-style rebuild): canonicalize every root's
+ * children, then merge roots that have become structurally identical.  The
+ * old saturation loop compared all pairs of nodes on every iteration, which is
+ * quadratic in the block size; this is linear per round and additionally
+ * catches equalities that only become visible after an earlier merge.
+ *
+ * Returns the number of merges, or -1 when the table cannot be allocated.
+ * A merge made late in a round can leave other table entries stale; those are
+ * re-derived on the next round (or next iteration), so a stale entry can only
+ * delay a merge, never invent one.
+ */
+static int eg_rebuild(ny_egraph_t *g) {
+  int merges = 0;
+  for (int round = 0; round < 8; ++round) {
+    if (!eg_hash_rehash(g, g->n * 4 + 32))
+      return -1;
+    int local = 0;
+    for (int i = 0; i < g->n; ++i) {
+      if (eg_find(g, i) != i)
+        continue;
+      ny_eg_node_t *n = &g->nodes[i];
+      int c0 = n->nchild > 0 ? eg_find(g, n->child0) : -1;
+      int c1 = n->nchild > 1 ? eg_find(g, n->child1) : -1;
+      n->child0 = c0;
+      n->child1 = c1;
+      int other = eg_hash_store(g, i);
+      if (other >= 0 && eg_find(g, other) != eg_find(g, i)) {
+        eg_union(g, i, other);
+        ++local;
+      }
+    }
+    merges += local;
+    if (!local)
+      break;
+  }
+  return merges;
 }
 
 static int eg_class_for_leaf(ny_egraph_t *g, int value_id) {
@@ -162,6 +341,136 @@ static int64_t eg_class_first_const(const ny_egraph_t *g, int c) {
       return g->nodes[i].imm;
   }
   return 0;
+}
+
+/*
+ * Known non-negativity of e-classes.  A class is non-negative when one of its
+ * members provably is: the e-graph only equates values that really are equal,
+ * so a proven member transfers its fact to every form in the class.  `and`
+ * with a non-negative constant is the case that matters for type-punning
+ * code; COPY forwards the fact, constants carry it directly.
+ *
+ * `nn` is indexed by node and only ever set on canonical roots; the result is
+ * a fixpoint because a class can gain a proven member after another class
+ * becomes non-negative.
+ */
+static void eg_nonneg_roots(ny_egraph_t *g, bool *nn) {
+  for (int i = 0; i < g->n; ++i)
+    nn[i] = false;
+  for (int round = 0; round <= g->n; ++round) {
+    bool changed = false;
+    for (int i = 0; i < g->n; ++i) {
+      if (nn[i] || eg_find(g, i) != i)
+        continue;
+      const ny_eg_node_t *n = &g->nodes[i];
+      bool value = false;
+      if (n->op == NYIR_CONST_I64)
+        value = n->imm >= 0;
+      else if (n->op == NYIR_AND_I64 && n->nchild == 2)
+        value = nn[eg_find(g, n->child0)] || nn[eg_find(g, n->child1)];
+      else if (n->op == NYIR_COPY && n->nchild == 1)
+        value = nn[eg_find(g, n->child0)];
+      if (value) {
+        nn[i] = true;
+        changed = true;
+      }
+    }
+    if (!changed)
+      break;
+  }
+}
+
+static bool eg_class_nonneg(ny_egraph_t *g, const bool *nn, int c) {
+  int canon = eg_find(g, c);
+  for (int i = 0; i < g->n; ++i)
+    if (nn[i] && eg_find(g, i) == canon)
+      return true;
+  return false;
+}
+
+static bool eg_class_const_value(const ny_egraph_t *g, int c, int64_t *out) {
+  int canon = eg_find((ny_egraph_t *)g, c);
+  for (int i = 0; i < g->n; ++i) {
+    if (eg_find((ny_egraph_t *)g, i) != canon)
+      continue;
+    if (g->nodes[i].op == NYIR_CONST_I64) {
+      *out = g->nodes[i].imm;
+      return true;
+    }
+  }
+  return false;
+}
+
+/*
+ * Divisor of the form 2^k with k in [1, 62].
+ */
+static bool eg_pow2_shift(int64_t divisor, int *shift) {
+  if (divisor <= 0 || (divisor & (divisor - 1)) != 0)
+    return false;
+  int k = 0;
+  for (int64_t v = divisor; v > 1; v >>= 1)
+    ++k;
+  if (k < 1 || k > 62)
+    return false;
+  *shift = k;
+  return true;
+}
+
+static bool eg_facts_enabled(void) {
+  const char *env = getenv("NY_EGRAPH_FACTS");
+  if (!env || !*env)
+    return true;
+  if (*env == '0' || strcmp(env, "false") == 0 || strcmp(env, "off") == 0)
+    return false;
+  return true;
+}
+
+/*
+ * Analysis-guarded refinement rules.  These are NOT equalities in general:
+ * NYIR division truncates toward zero while SAR rounds toward negative
+ * infinity, so `x / 2^k` equals `x >> k` only for x >= 0, and `x % 2^k`
+ * equals `x & (2^k - 1)` only for x >= 0.  The analysis fact is the guard, so
+ * these rules run only after the non-negativity fixpoint and never when the
+ * operand's sign is unknown.
+ *
+ * The divisor is a nonzero constant, so neither side traps where the other
+ * does: the rewrite removes no fault and adds none.
+ *
+ * Returns the number of unions applied, or -1 when the graph is out of fuel.
+ */
+static int eg_apply_fact_rules(ny_egraph_t *g, const bool *nn) {
+  int unions = 0;
+  for (int i = 0; i < g->n; ++i) {
+    if (eg_find(g, i) != i)
+      continue;
+    const ny_eg_node_t *n = &g->nodes[i];
+    if ((n->op != NYIR_DIV_I64 && n->op != NYIR_MOD_I64) || n->nchild != 2)
+      continue;
+    int64_t divisor = 0;
+    if (!eg_class_const_value(g, n->child1, &divisor) || divisor <= 0 ||
+        (divisor & (divisor - 1)) != 0)
+      continue;
+    int shift = 0;
+    for (int64_t v = divisor; v > 1; v >>= 1)
+      ++shift;
+    if (shift < 1 || shift > 62)
+      continue;
+    int xc = eg_find(g, n->child0);
+    if (!eg_class_nonneg(g, nn, xc))
+      continue;
+    int rhs = n->op == NYIR_DIV_I64
+                  ? eg_intern(g, NYIR_SAR_I64, 0, 2, xc,
+                              eg_class_for_const(g, shift))
+                  : eg_intern(g, NYIR_AND_I64, 0, 2, xc,
+                              eg_class_for_const(g, divisor - 1));
+    if (rhs < 0)
+      return -1;
+    if (eg_find(g, rhs) != i) {
+      eg_union(g, i, rhs);
+      ++unions;
+    }
+  }
+  return unions;
 }
 
 /*
@@ -213,6 +522,12 @@ static const ny_eg_rule_t ny_eg_rules[] = {
     {NYIR_MUL_I64, 1, 8, 0, 0, 0, EG_RH_OP, NYIR_SHL_I64, 1, 3},
     {NYIR_MUL_I64, 0, 0, 1, 16, 0, EG_RH_OP, NYIR_SHL_I64, 0, 4},
     {NYIR_MUL_I64, 1, 16, 0, 0, 0, EG_RH_OP, NYIR_SHL_I64, 1, 4},
+    /*
+     * Idempotence: x&x -> x ; x|x -> x.  Both have two variable children that
+     * must be the same class, so the rule pattern's `same` flag is the check.
+     */
+    {NYIR_AND_I64, 0, 0, 0, 0, 1, EG_RH_COPY, NYIR_OP_COUNT, 0, 0},
+    {NYIR_OR_I64, 0, 0, 0, 0, 1, EG_RH_COPY, NYIR_OP_COUNT, 0, 0},
     /*
      * and: &0 -> 0 ; &-1 -> x
      */
@@ -639,8 +954,7 @@ bool nyr_egraph_rewrite(nyr_func_t *f) {
 
     ny_egraph_t g = {0};
     if (eg_new(&g, NY_EG_LEAF, 0, 0, -1, -1) < 0) {
-      free(g.nodes);
-      free(g.uf);
+      eg_free_graph(&g);
       free(vm);
       goto eg_oom;
     }
@@ -664,8 +978,7 @@ bool nyr_egraph_rewrite(nyr_func_t *f) {
       int cb = nch == 2 ? vm[bb].class_id : -1;
       int node = eg_intern(&g, in->op, 0, nch, ca, cb);
       if (node < 0) {
-        free(g.nodes);
-        free(g.uf);
+        eg_free_graph(&g);
         free(vm);
         goto eg_oom;
       }
@@ -691,8 +1004,7 @@ bool nyr_egraph_rewrite(nyr_func_t *f) {
           start, end, NY_EG_NODE_FUEL);
       for (size_t i = start; i < end; ++i)
         EG_PUSH(f->data[i]);
-      free(g.nodes);
-      free(g.uf);
+      eg_free_graph(&g);
       free(vm);
       continue;
     }
@@ -700,29 +1012,24 @@ bool nyr_egraph_rewrite(nyr_func_t *f) {
     /*
      * Saturate.
      */
+    /*
+     * Equality saturation with batched congruence closure.  Rules are applied
+     * once per iteration and the e-graph is then canonicalized by one rebuild:
+     * every root's children are re-canonicalized, and roots that became
+     * identical merge through the hash-consed table.  The previous loop
+     * compared every pair of nodes on every iteration, which is quadratic in
+     * the block size and was the slowest compile path for large pure blocks.
+     */
     bool fuel_exhausted = false;
+    bool facts_enabled = eg_facts_enabled();
+    bool *nn = facts_enabled ? ny_calloc_array(NY_EG_NODE_FUEL, 1) : NULL;
+    if (facts_enabled && !nn) {
+      eg_free_graph(&g);
+      free(vm);
+      goto eg_oom;
+    }
     for (int iter = 0; iter < NY_EG_MAX_ITERS; ++iter) {
       int unions = 0;
-      for (int a = 0; a < g.n; ++a) {
-        if (eg_find(&g, a) != a)
-          continue;
-        const ny_eg_node_t *na = &g.nodes[a];
-        for (int q = a + 1; q < g.n; ++q) {
-          if (eg_find(&g, q) != q)
-            continue;
-          if (na->op != g.nodes[q].op || na->imm != g.nodes[q].imm ||
-              na->nchild != g.nodes[q].nchild)
-            continue;
-          int a0 = na->nchild > 0 ? eg_find(&g, na->child0) : -1;
-          int a1 = na->nchild > 1 ? eg_find(&g, na->child1) : -1;
-          int q0 = g.nodes[q].nchild > 0 ? eg_find(&g, g.nodes[q].child0) : -1;
-          int q1 = g.nodes[q].nchild > 1 ? eg_find(&g, g.nodes[q].child1) : -1;
-          if (a0 == q0 && a1 == q1) {
-            eg_union(&g, a, q);
-            ++unions;
-          }
-        }
-      }
       for (int i = 0; i < g.n; ++i) {
         if (fuel_exhausted)
           break;
@@ -772,7 +1079,28 @@ bool nyr_egraph_rewrite(nyr_func_t *f) {
           unions += made;
         }
       }
-      if (fuel_exhausted || unions == 0)
+      int merged = eg_rebuild(&g);
+      if (merged < 0) {
+        fuel_exhausted = true;
+        break;
+      }
+      unions += merged;
+      if (facts_enabled) {
+        eg_nonneg_roots(&g, nn);
+        int fact_unions = eg_apply_fact_rules(&g, nn);
+        if (fact_unions < 0) {
+          fuel_exhausted = true;
+          break;
+        }
+        if (fact_unions) {
+          unions += fact_unions;
+          if (eg_rebuild(&g) < 0) {
+            fuel_exhausted = true;
+            break;
+          }
+        }
+      }
+      if (unions == 0)
         break;
     }
     if (fuel_exhausted)
@@ -785,8 +1113,7 @@ bool nyr_egraph_rewrite(nyr_func_t *f) {
     int *def_at =
         ny_malloc_array(next_value > 0 ? next_value : 1, sizeof(*def_at));
     if (!def_at) {
-      free(g.nodes);
-      free(g.uf);
+      eg_free_graph(&g);
       free(vm);
       goto eg_oom;
     }
@@ -798,6 +1125,39 @@ bool nyr_egraph_rewrite(nyr_func_t *f) {
 
     for (size_t i = start; i < end; ++i) {
       const nyr_inst_t *in = &f->data[i];
+      /*
+       * Analysis-guarded strength reduction for trap-free division.  DIV and
+       * MOD are not e-nodes (they may fault), so they cannot pick up a
+       * refined shift/mask form through extraction; they are planned here
+       * against the same non-negativity fact.  The divisor is a nonzero
+       * constant, so no observable trap is added or removed: x / 2^k is
+       * x >> k and x % 2^k is x & (2^k - 1) exactly when x >= 0, which is
+       * what the fact proves.
+       */
+      if (facts_enabled && in->a >= 0 && in->b >= 0 &&
+          (in->op == NYIR_DIV_I64 || in->op == NYIR_MOD_I64) &&
+          (size_t)in->b < next_value && is_const[in->b] &&
+          (size_t)in->a < next_value && vm[in->a].class_id >= 0) {
+        int shift = 0;
+        int64_t divisor = const_imm[in->b];
+        if (eg_pow2_shift(divisor, &shift) &&
+            eg_class_nonneg(&g, nn, vm[in->a].class_id)) {
+          int v = in->dst;
+          if (v >= 0 && (size_t)v < next_value) {
+            vm[v].rewrite = 1;
+            vm[v].materialized = 1;
+            vm[v].cost = 1;
+            vm[v].fresh = 1;
+            vm[v].out_op =
+                in->op == NYIR_DIV_I64 ? NYIR_SAR_I64 : NYIR_AND_I64;
+            vm[v].out_a = in->a;
+            vm[v].out_b = -1;
+            vm[v].out_cimm = in->op == NYIR_DIV_I64 ? (int64_t)shift
+                                                    : (divisor - 1);
+            continue;
+          }
+        }
+      }
       if (!eg_inst_pure_scalar(in))
         continue;
       int v = in->dst;
@@ -906,7 +1266,12 @@ bool nyr_egraph_rewrite(nyr_func_t *f) {
      */
     for (size_t i = start; i < end; ++i) {
       const nyr_inst_t *in = &f->data[i];
-      if (!eg_inst_pure_scalar(in) || !vm[in->dst].rewrite) {
+      /*
+       * The plan is keyed by destination value, so it also covers the DIV/MOD
+       * strength reductions above, which are not pure-scalar e-nodes.
+       */
+      if (in->dst < 0 || (size_t)in->dst >= next_value ||
+          !vm[in->dst].rewrite) {
         EG_PUSH(*in);
         continue;
       }
@@ -948,8 +1313,9 @@ bool nyr_egraph_rewrite(nyr_func_t *f) {
     }
 
     free(def_at);
-    free(g.nodes);
-    free(g.uf);
+    free(nn);
+    nn = NULL;
+    eg_free_graph(&g);
     free(vm);
   }
 

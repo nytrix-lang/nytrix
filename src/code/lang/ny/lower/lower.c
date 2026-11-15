@@ -1343,6 +1343,9 @@ const ny_native_runtime_abi_decl_t ny_native_runtime_abi_decls[] = {
                     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
                         NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(0),
                     NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY_FN("rt_exp_f64", NY_NATIVE_RUNTIME_ABI_RESULT_F64,
+                       NY_NATIVE_VM_F64_UNARY_TO_F64, f64_unary_f64,
+                       rt_exp_f64),
     NY_NATIVE_ENTRY_FN("rt_f64_bits",
                        NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
                            NY_NATIVE_RUNTIME_ABI_RESULT_RAW_WORD,
@@ -1540,6 +1543,9 @@ const ny_native_runtime_abi_decl_t ny_native_runtime_abi_decls[] = {
                        rt_load32_f64),
     {"rt_load_item", 0, NY_NATIVE_VM_CALL_NONE, {0}},
     {"rt_load_item_any", 0, NY_NATIVE_VM_CALL_NONE, {0}},
+    NY_NATIVE_ENTRY_FN("rt_log_f64", NY_NATIVE_RUNTIME_ABI_RESULT_F64,
+                       NY_NATIVE_VM_F64_UNARY_TO_F64, f64_unary_f64,
+                       rt_log_f64),
     NY_NATIVE_ENTRY_FN("rt_long", NY_NATIVE_RUNTIME_ABI_VALUE_CONVERSION,
                        NY_NATIVE_VM_I64_UNARY_TO_I64, i64_unary_i64, rt_long),
     NY_NATIVE_ENTRY("rt_long_list_raw", NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,

@@ -283,6 +283,76 @@ static int sm_i386_reg_result(sm_i386_regs_t *r, int dst, int source,
   return reg;
 }
 
+/* Sole-use lookup through the use-def map: exactly one instruction reads
+ * the value. */
+static bool sm_i386_sole_user(const sm_i386_regs_t *r, int value, size_t *user) {
+  if (!sm_i386_reg_input(r, value))
+    return false;
+  if (r->c->i386_uses->offsets[value + 1] - r->c->i386_uses->offsets[value] != 1)
+    return false;
+  *user = r->c->i386_uses->users[r->c->i386_uses->offsets[value]];
+  return true;
+}
+
+/* Collapse a chain of constant address arithmetic into one displacement.
+ * The chain begins with the add or subtract of a constant at index `at`;
+ * every link has one definition and a single user, and the chain ends at a
+ * byte, word or long load or store inside the current run whose address
+ * operand is the chain result. On success the base value and accumulated
+ * displacement are recorded for every folded link, the base counts as live
+ * up to the user, and the user index is returned; otherwise nothing is
+ * recorded and 0 is returned. */
+static size_t sm_i386_resolve_fold(sm_i386_regs_t *r, size_t at, size_t end,
+                                   int *fold_base, int *fold_disp) {
+  ny_sm_ctx_t *c = r->c;
+  const nyr_inst_t *in = &c->nyir->data[at];
+  int64_t immediate = 0;
+  if (!sm_i386_reg_input(r, in->dst) ||
+      !sm_i386_const_value(c, in->b, &immediate) ||
+      r->values[in->dst].definitions != 1)
+    return 0;
+  int64_t total = in->op == NYIR_SUB_I64 ? -immediate : immediate;
+  int base = in->a;
+  if (!sm_i386_reg_input(r, base) || r->values[base].definitions != 1 ||
+      total < -32767 || total > 32767)
+    return 0;
+  int links[8];
+  size_t count = 0, link = at;
+  for (;;) {
+    if (count == sizeof(links) / sizeof(*links))
+      return 0;
+    int dst = c->nyir->data[link].dst;
+    size_t user = 0;
+    if (!sm_i386_sole_user(r, dst, &user) || user <= link || user >= end)
+      return 0;
+    const nyr_inst_t *use = &c->nyir->data[user];
+    if (use->op == NYIR_LOAD_I64 || use->op == NYIR_STORE_I64) {
+      if (use->a != dst ||
+          !(use->flags & (NYIR_INST_F_MEM_BYTE | NYIR_INST_F_MEM_U16 |
+                          NYIR_INST_F_MEM_I32)))
+        return 0;
+      links[count++] = dst;
+      for (size_t n = 0; n < count; ++n) {
+        fold_base[links[n]] = base;
+        fold_disp[links[n]] = (int)total;
+      }
+      if (user > r->values[base].last)
+        r->values[base].last = user;
+      return user;
+    }
+    if ((use->op != NYIR_ADD_I64 && use->op != NYIR_SUB_I64) ||
+        use->a != dst || !sm_i386_reg_input(r, use->dst) ||
+        r->values[use->dst].definitions != 1 ||
+        !sm_i386_const_value(c, use->b, &immediate))
+      return 0;
+    total += use->op == NYIR_SUB_I64 ? -immediate : immediate;
+    if (total < -32767 || total > 32767)
+      return 0;
+    links[count++] = dst;
+    link = user;
+  }
+}
+
 /* 0: leave this instruction to the general emitter; -1: allocation/output
  * failure; 1: emitted a complete run and advanced *next. */
 static int sm_i386_emit_register_run(ny_sm_ctx_t *c, size_t start, size_t *next,
@@ -290,10 +360,18 @@ static int sm_i386_emit_register_run(ny_sm_ctx_t *c, size_t start, size_t *next,
   size_t count = (size_t)c->nyir->next_value;
   sm_i386_regs_t r = {.c = c};
   r.values = calloc(count, sizeof(*r.values));
-  if (!r.values)
+  int *fold_base = calloc(count, sizeof(*fold_base));
+  int *fold_disp = calloc(count, sizeof(*fold_disp));
+  if (!r.values || !fold_base || !fold_disp) {
+    free(fold_base);
+    free(fold_disp);
+    free(r.values);
     return -1;
-  for (size_t v = 0; v < count; ++v)
+  }
+  for (size_t v = 0; v < count; ++v) {
     r.values[v].reg = -1;
+    fold_base[v] = -1;
+  }
   for (int reg = 0; reg < 6; ++reg)
     r.registers[reg] = -1;
   for (size_t i = 0; i < c->nyir->len; ++i)
@@ -308,6 +386,8 @@ static int sm_i386_emit_register_run(ny_sm_ctx_t *c, size_t start, size_t *next,
   /* Even single instructions can benefit when the result has no stack home
    * users beyond this run. */
   if (end - start < 1) {
+    free(fold_base);
+    free(fold_disp);
     free(r.values);
     return 0;
   }
@@ -382,13 +462,21 @@ static int sm_i386_emit_register_run(ny_sm_ctx_t *c, size_t start, size_t *next,
       const nyr_inst_t *load = in;
       const nyr_inst_t *extend = &c->nyir->data[i + 2];
       sm_i386_match_sign_extend(c, i + 1, &bits);
-      a = sm_i386_reg_load(&r, load->a, false);
+      bool fold_load = load->a >= 0 && fold_base[load->a] >= 0;
+      a = sm_i386_reg_load(&r, fold_load ? fold_base[load->a] : load->a, false);
       result = a < 0 ? -1 : sm_i386_reg_result(&r, extend->dst,
-                                               load->a, false, false);
-      ok = result >= 0 &&
-           nyr_printf(c->w, "\tmovs%sl\t(%s), %s\n",
-                      bits == 8 ? "b" : "w", sm_i386_gpr[a],
-                      sm_i386_gpr[result]);
+                                               fold_load ? fold_base[load->a]
+                                                         : load->a,
+                                               false, false);
+      ok = result >= 0;
+      if (ok && fold_load)
+        ok = nyr_printf(c->w, "\tmovs%sl\t%d(%s), %s\n",
+                        bits == 8 ? "b" : "w", fold_disp[load->a],
+                        sm_i386_gpr[a], sm_i386_gpr[result]);
+      else if (ok)
+        ok = nyr_printf(c->w, "\tmovs%sl\t(%s), %s\n",
+                        bits == 8 ? "b" : "w", sm_i386_gpr[a],
+                        sm_i386_gpr[result]);
     } else if (length == 2) {
       sm_i386_match_sign_extend(c, i, &bits);
       dst = c->nyir->data[i + 1].dst;
@@ -472,17 +560,23 @@ static int sm_i386_emit_register_run(ny_sm_ctx_t *c, size_t start, size_t *next,
       ok = result >= 0 && nyr_printf(c->w, "\ttestl\t%s, %s\n\tcmovnel\t%s, %s\n",
           sm_i386_gpr[a], sm_i386_gpr[a], sm_i386_gpr[b], sm_i386_gpr[result]);
     } else if (in->op == NYIR_STORE_I64) {
-      a = sm_i386_reg_load(&r, in->a, false);
+      bool fold_store = in->a >= 0 && fold_base[in->a] >= 0;
+      a = sm_i386_reg_load(&r, fold_store ? fold_base[in->a] : in->a, false);
       b = a < 0 ? -1 : sm_i386_reg_load(&r, in->c,
-                                       (in->flags & NYIR_INST_F_MEM_BYTE) != 0);
+                                        (in->flags & NYIR_INST_F_MEM_BYTE) != 0);
       ok = a >= 0 && b >= 0;
-      if (ok)
-        ok = nyr_printf(c->w, "\tmov%s\t%s, (%s)\n",
-            in->flags & NYIR_INST_F_MEM_BYTE ? "b" :
-            in->flags & NYIR_INST_F_MEM_U16 ? "w" : "l",
-            in->flags & NYIR_INST_F_MEM_BYTE ? sm_i386_gpr8[b] :
-            in->flags & NYIR_INST_F_MEM_U16 ? sm_i386_gpr16[b] : sm_i386_gpr[b],
-            sm_i386_gpr[a]);
+      if (ok) {
+        const char *move = in->flags & NYIR_INST_F_MEM_BYTE ? "b" :
+                           in->flags & NYIR_INST_F_MEM_U16 ? "w" : "l";
+        const char *data = in->flags & NYIR_INST_F_MEM_BYTE ? sm_i386_gpr8[b] :
+                           in->flags & NYIR_INST_F_MEM_U16 ? sm_i386_gpr16[b] :
+                           sm_i386_gpr[b];
+        ok = fold_store
+            ? nyr_printf(c->w, "\tmov%s\t%s, %d(%s)\n", move, data,
+                         fold_disp[in->a], sm_i386_gpr[a])
+            : nyr_printf(c->w, "\tmov%s\t%s, (%s)\n", move, data,
+                         sm_i386_gpr[a]);
+      }
     } else if (in->op == NYIR_STORE_LOCAL) {
       a = sm_i386_reg_load(&r, in->a, false);
       ok = a >= 0 && sm_stl(c, (int)in->imm, sm_i386_gpr[a]);
@@ -493,7 +587,20 @@ static int sm_i386_emit_register_run(ny_sm_ctx_t *c, size_t start, size_t *next,
       int64_t immediate = 0;
       bool has_immediate = in->op != NYIR_COPY && in->op != NYIR_LOAD_I64 &&
                            sm_i386_const_value(c, in->b, &immediate);
-      a = sm_i386_reg_load(&r, in->a, false);
+      bool fold_load = in->op == NYIR_LOAD_I64 && in->a >= 0 &&
+                       fold_base[in->a] >= 0;
+      if (!fold_load &&
+          (in->op == NYIR_ADD_I64 || in->op == NYIR_SUB_I64) && in->dst >= 0) {
+        bool folded = fold_base[in->dst] >= 0;
+        if (!folded && has_immediate)
+          folded = sm_i386_resolve_fold(&r, i, end, fold_base, fold_disp) != 0;
+        if (folded) {
+          /* The result travels inside a later load or store. */
+          i += length;
+          continue;
+        }
+      }
+      a = sm_i386_reg_load(&r, fold_load ? fold_base[in->a] : in->a, false);
       if (a >= 0 && !has_immediate && in->op != NYIR_COPY && in->op != NYIR_LOAD_I64)
         b = sm_i386_reg_load(&r, in->b, false);
       bool compare = in->op == NYIR_CMP_I64;
@@ -505,14 +612,22 @@ static int sm_i386_emit_register_run(ny_sm_ctx_t *c, size_t start, size_t *next,
         i += length;
         continue;
       }
-      result = a < 0 ? -1 : sm_i386_reg_result(&r, dst, in->a, compare,
+      result = a < 0 ? -1 : sm_i386_reg_result(&r, dst,
+                                               fold_load ? fold_base[in->a]
+                                                         : in->a,
+                                               compare,
                                                !compare && in->op != NYIR_LOAD_I64);
       ok = result >= 0;
       if (ok && in->op == NYIR_LOAD_I64)
-        ok = nyr_printf(c->w, "\t%s\t(%s), %s\n",
-            in->flags & NYIR_INST_F_MEM_BYTE ? "movzbl" :
-            in->flags & NYIR_INST_F_MEM_U16 ? "movzwl" : "movl",
-            sm_i386_gpr[a], sm_i386_gpr[result]);
+        ok = fold_load
+            ? nyr_printf(c->w, "\t%s\t%d(%s), %s\n",
+                in->flags & NYIR_INST_F_MEM_BYTE ? "movzbl" :
+                in->flags & NYIR_INST_F_MEM_U16 ? "movzwl" : "movl",
+                fold_disp[in->a], sm_i386_gpr[a], sm_i386_gpr[result])
+            : nyr_printf(c->w, "\t%s\t(%s), %s\n",
+                in->flags & NYIR_INST_F_MEM_BYTE ? "movzbl" :
+                in->flags & NYIR_INST_F_MEM_U16 ? "movzwl" : "movl",
+                sm_i386_gpr[a], sm_i386_gpr[result]);
       else if (ok && compare) {
         bool is_unsigned = false;
         ok = sm_i386_cmp32_mode(c, in, &is_unsigned);
@@ -582,6 +697,8 @@ static int sm_i386_emit_register_run(ny_sm_ctx_t *c, size_t start, size_t *next,
     if (!c->i386_global_registers && (r.used & (1u << reg)))
       ok = nyr_printf(output, "\tpopl\t%s\n", sm_i386_gpr[reg]);
   free(body.data);
+  free(fold_base);
+  free(fold_disp);
   free(r.values);
   *next = end;
   return ok ? 1 : -1;

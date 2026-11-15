@@ -7447,6 +7447,42 @@ ordinary_call:
     }
     return result;
   }
+  /* exp/log take and return a raw double. The generic builtin path boxed
+   * the argument and the result (two float boxes per call), which dominated
+   * float loops such as the procedural environment generator. */
+  if (leaf && !nyr_user_defined_fn(b, name) &&
+      (strcmp(canon_leaf, "__flt_exp") == 0 ||
+       strcmp(canon_leaf, "__flt_log") == 0) &&
+      e->as.call.args.len == 1 && !e->as.call.args.data[0].name) {
+    int value = nyr_lower_f64_arg(b, e->as.call.args.data[0].val);
+    if (value < 0)
+      return -1;
+    int result = nyr_emit_runtime_call(
+        b, strcmp(canon_leaf, "__flt_exp") == 0 ? "rt_exp_f64" : "rt_log_f64",
+        value, -1, -1, 1, NYIR_SCALAR_F64);
+    if (result >= 0) {
+      ((expr_t *)e)->semantic.rep = NY_SEM_REP_F64;
+      ((expr_t *)e)->semantic.resolved = true;
+    }
+    return result;
+  }
+  if (leaf && !nyr_user_defined_fn(b, name) &&
+      strcmp(canon_leaf, "__flt_pow") == 0 && e->as.call.args.len == 2 &&
+      !e->as.call.args.data[0].name && !e->as.call.args.data[1].name) {
+    int base_v = nyr_lower_f64_arg(b, e->as.call.args.data[0].val);
+    int exp_v = base_v < 0
+                    ? -1
+                    : nyr_lower_f64_arg(b, e->as.call.args.data[1].val);
+    if (base_v < 0 || exp_v < 0)
+      return -1;
+    int result = nyr_emit_runtime_call(b, "rt_f64_pow", base_v, exp_v, -1, 2,
+                                       NYIR_SCALAR_F64);
+    if (result >= 0) {
+      ((expr_t *)e)->semantic.rep = NY_SEM_REP_F64;
+      ((expr_t *)e)->semantic.resolved = true;
+    }
+    return result;
+  }
   if (leaf && !nyr_user_defined_fn(b, name) &&
       (strcmp(canon_leaf, "__flt_sin") == 0 ||
        strcmp(canon_leaf, "__flt_cos") == 0)) {

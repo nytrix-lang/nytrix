@@ -72,6 +72,7 @@ mach_home_dse_analyze(const nyr_mach_func_t *mach,
   probe.target = target;
   probe.bare_syscalls = bare_syscalls;
   probe.suppress_div_stats = true;
+  probe.suppress_stats = true;
   probe.err = err;
   probe.err_len = sizeof(err);
   probe.home_limit = limit;
@@ -121,6 +122,7 @@ mach_home_dse_analyze(const nyr_mach_func_t *mach,
     for (unsigned long long i = 0; i < probe.suppressed_div_idiv; ++i)
       nyr_native_mach_div_record(false);
     probe.suppress_div_stats = false;
+    probe.suppress_stats = false;
     probe.home_limit = 0;
     *reuse = probe;
     *reused = true;

@@ -810,3 +810,204 @@ fixture passes. `nyr-c-frontend` timed out at its configured 120-second limit
 while a separate 54-job sanitizer run was active, so that run is not counted as
 a pass. A caller-saved spill-home coloring experiment grew `.text` to 39,181
 bytes and was reverted.
+
+## Correctness verification programme
+
+Merged from `docs/todo/kcc.md` (2026-11-15). The artifact requirements in
+[Required acceptance](#required-acceptance) above remain canonical; this section
+adds the correctness, verification and reproducibility work needed to back those
+claims with evidence.
+
+Reference: <https://github.com/LiterateDrivenDevelopment/kcc>. Extract only
+useful testing, reproducibility and semantic-verification ideas. Do not copy
+KCC's architecture, literate programming, backend, bootstrap or test harness.
+Nytrix already has its own compiler architecture, a native NYR backend, an LLVM
+backend, a C frontend, native object generation and the Linux kernel build work
+recorded above.
+
+Mission: turn NYC into a compiler whose correctness claims are backed by
+reproducible, adversarial, independent tests. Audit before editing. Prefer
+removing duplication and fixing real weaknesses over adding new systems, flags,
+frameworks or abstractions.
+
+### P0 — Make the test harness trustworthy
+
+Audit `./make check`, the C frontend tests, backend tests, benchmarks and the
+existing differential test infrastructure. Find:
+
+- False positives and silently ignored failures.
+- Tests that compare only truncated exit codes.
+- Compilation failures misclassified as success.
+- Tests accepting matching linker/runtime failures.
+- Stale outputs accidentally passing.
+- Unsupported cases excluded without accounting.
+- Fragile expected-failure rules.
+- Duplicate or obsolete test implementations.
+
+Build a strict common result model: `PASS`, `MISCOMPILE`, `COMPILE_FAIL`,
+`LINK_FAIL`, `RUNTIME_FAIL`, `TIMEOUT`, `UNSUPPORTED`, `INVALID_TEST`. Every real
+regression must produce a nonzero test status.
+
+Introduce deliberate fault-injection tests proving the harness detects wrong
+output, bad assembly, crashes, link failures, timeouts and stale binaries. A
+harness that fails to catch injected bugs is defective.
+
+### P1 — Differential compiler validation
+
+Compare NYC → NYR, NYC → LLVM, Clang and GCC on well-defined C programs with
+deterministic inputs. Compare actual behavior: full output, exit status and
+signal, binary files and observable memory results, exact integer values,
+appropriate floating-point semantics, ABI-visible results and external effects.
+
+Never assume GCC/Clang agreement proves correctness; use standard-defined
+semantics to adjudicate disputes, and filter undefined and unspecified behavior
+appropriately. Run each case across supported optimization levels. Separate
+compiler acceptance coverage from execution correctness, and report both
+denominators honestly.
+
+### P2 — Automated bug discovery
+
+Integrate existing fuzzing infrastructure or lightweight adapters to
+established generators where useful: Csmith, YARPGen, compiler torture tests and
+AST fuzzing. Target NYC's real failure-prone areas:
+
+- Integer promotions and arithmetic conversions.
+- Pointer provenance, aliasing and casts.
+- Struct/union layout, bitfields and alignment.
+- Variadic calls, ABI lowering and return values.
+- GNU C attributes and inline assembly.
+- Atomics, volatile and memory barriers.
+- SSA dominance, phi nodes and CFG rewrites.
+- Constant folding, CSE and loop optimizations.
+- Register allocation, spills and stack layout.
+- ELF relocations, symbols and linker compatibility.
+
+For every mismatch: reproduce it with a stable seed; determine whether the
+source is well-defined; identify the earliest divergent compiler stage; minimize
+with C-Reduce or IR reduction; fix the underlying compiler defect; preserve a
+permanent regression test. Group repeated failures by root cause, not by
+superficial error-message similarity.
+
+### P3 — Compiler invariant checking
+
+Audit existing checks before introducing new ones. Strengthen invariant
+validation at major boundaries: AST → typed IR → SSA → optimized IR → MACH →
+ELF. Check:
+
+- Type and operand consistency.
+- Def-use validity and dominance.
+- CFG edges and phi predecessor mappings.
+- Register allocation and liveness consistency.
+- Spill/reload and stack-frame correctness.
+- ABI operand constraints.
+- Symbol, section and relocation integrity.
+
+Make invalid states fail close to their origin with actionable diagnostics
+rather than becoming machine-code miscompilations later. Keep expensive
+verification optional for normal builds, but enabled in tests and debug
+configurations.
+
+### P4 — Semantic conformance
+
+Build on NYC's existing C17/GNU C feature coverage. Create focused positive and
+negative test pairs for the important C constructs NYC actually supports:
+positive tests must compile and behave correctly, negative tests must be
+rejected for the right reason. Prioritize features required by the Linux kernel,
+SQLite, system headers and other existing workloads. Use fast
+syntax/semantic-only checks if already present; add them only if missing and
+independently useful. Do not inflate conformance numbers with untested features.
+
+### P5 — Kernel acceptance as hard evidence
+
+Preserve the existing Linux 7.3 x86-64 goal and do not restart or duplicate
+kernel work already completed. Treat these as separate milestones, not one
+boolean:
+
+- Unmodified Linux sources.
+- Reproducible configuration and toolchain manifest.
+- Every configured C translation unit compiled by NYC.
+- GNU `as` permitted for assembly.
+- Zero hidden C fallback to Clang/GCC.
+- Valid `vmlinux`, `bzImage` and configured modules.
+- Verified build-object provenance.
+- Reviewed `objtool`/linker/assembler diagnostics.
+- Successful QEMU boot and initramfs smoke tests.
+
+Count actual configured C translation units and successful NYC compilations, not
+estimated Kbuild progress. Track failures, unsupported features and workarounds.
+Preserve the kernel build as a permanent regression suite when acceptance is
+achieved. The artifact rules in [Required acceptance](#required-acceptance)
+still govern what may count as acceptance.
+
+### P6 — Reproducibility and bootstrap
+
+Improve reproducible build records: compiler revision, flags, dependencies,
+target, checksums, seeds, object provenance and exact reproduction commands.
+Consider self-hosting only where NYC's current build architecture makes it
+practical. Do not add a bootstrap project purely to imitate KCC, and do not
+mistake identical binaries for semantic proof.
+
+### P7 — Performance without testing bloat
+
+Keep the verification infrastructure small and maintainable, using the existing
+build/test conventions (`./make check`, `./make bench`). Add a consolidated
+verification entry point only if it genuinely simplifies existing workflows.
+
+Separate three tiers: `FAST` (deterministic checks after every code change),
+`DEEP` (differential fuzzing, sanitizers, stress tests) and `SYSTEM` (full
+kernel build, modules and QEMU boot). Cache reproducible inputs and compiler
+outputs safely, parallelize independent tests, retain failing artifacts and
+discard unnecessary success logs. Do not slow down ordinary production
+compilation.
+
+### Implementation rules
+
+- Inspect the current repository first.
+- Respect the existing Nytrix architecture.
+- Reuse existing test fixtures and helpers.
+- Prefer compact C implementations.
+- Do not add Python or shell wrappers unnecessarily.
+- No massive documentation framework.
+- No new backend or register allocator.
+- No unrelated refactoring.
+- No speculative rewrites.
+- No cosmetic changes presented as improvements.
+- No suppressed compiler warnings to fake success.
+- No hardcoded passing metrics.
+- No invented benchmark results.
+- No tests marked PASS without execution.
+
+For every change, explain EXISTING DEFECT → FIX → REGRESSION → EVIDENCE. Use
+small reversible patches with a stable baseline.
+
+### Execution priorities
+
+1. Find and eliminate false-positive tests.
+2. Build a strict NYR/LLVM/GCC/Clang differential oracle.
+3. Find and minimize genuine NYC miscompilations.
+4. Strengthen IR and machine-code invariants.
+5. Close conformance gaps revealed by real programs.
+6. Complete and independently validate kernel acceptance.
+7. Simplify the resulting code and remove redundant tools.
+
+Do not stop after writing a plan: implement, execute tests, fix defects, rerun
+and measure.
+
+### Final delivery
+
+Provide the actual patches/source changes, before/after correctness results, new
+bugs discovered and minimized, tests proving each fix, fuzzing coverage and
+limitations, current kernel build/boot status, compilation time and memory
+regression measurements, and remaining unsupported features and known failures.
+
+### Success criteria
+
+A genuinely stronger compiler, not a larger repository. NYC must reject invalid
+input reliably, correctly compile more well-defined C programs, detect
+intentionally injected miscompilations, produce reproducible native machine
+code, pass strict independent differential tests, maintain or improve compiler
+performance, and demonstrate kernel acceptance with actual artifacts.
+
+The objective is not to imitate KCC. It is to take the useful engineering
+lessons, improve them, and produce verifiable evidence that Nytrix's existing
+compiler is more correct, capable and reliable.

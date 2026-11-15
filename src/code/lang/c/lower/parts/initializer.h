@@ -1886,7 +1886,11 @@ static bool lower_aggregate_declaration(c_parser_t *p, bool semicolon) {
       ok = false;
       break;
     }
-    if (type == C_AGG && !lower_zero_fill(p, base, bytes)) {
+    /* Uninitialized aggregate locals are zero-filled only at -O0 so reads
+     * stay deterministic there. At -O1 and above C leaves them undefined,
+     * and filling them costs every address-taken struct its size in stores
+     * that kernel-style code rewrites with memset anyway. */
+    if (type == C_AGG && p->optimization == 0 && !lower_zero_fill(p, base, bytes)) {
       ok = false;
       break;
     }

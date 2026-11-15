@@ -1,0 +1,38 @@
+shape float_exp_log_pow_raw {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "float", "math", "abi"]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit; --nyr-run --nyr-run-max-steps=50000000 -O0"
+  expect compile_and_run
+  expect_message "FLOAT-EXP-LOG-POW-RAW-OK"
+  source ny <<'NY'
+use core
+use core.math (exp, log, pow)
+;; exp, log and __flt_pow lower to raw-double runtime calls. Typed, dynamic
+;; and integer arguments must all give the same values as before, when each
+;; call boxed its argument and its result.
+fn near(f64 a, f64 b) bool { a - b < 0.000000001 && b - a < 0.000000001 }
+fn typed(f64 x) f64 { exp(x) + log(x + 1.0) }
+fn dynamic(any x) f64 { exp(x) + log(x) }
+fn gauss(f64 dx, f64 dy) f64 { exp(-(dx * dx + dy * dy)) }
+fn curve(f64 c) f64 { 1.055 * float(__flt_pow(c, 1.0 / 2.4)) - 0.055 }
+assert(near(exp(0.0), 1.0) && near(exp(1.0), 2.718281828459045), "exp of typed literals")
+assert(near(log(1.0), 0.0) && near(log(2.718281828459045), 1.0), "log of typed literals")
+assert(near(typed(1.0), 2.718281828459045 + 0.6931471805599453), "typed parameters")
+assert(near(dynamic(1), 2.718281828459045), "an integer argument is converted")
+assert(near(dynamic(2.0), 7.38905609893065 + 0.6931471805599453), "a boxed float argument is unboxed")
+assert(near(gauss(1.0, 2.0), 0.006737946999085467), "exp of a negated sum")
+assert(near(curve(0.5), 0.7353569830524495), "pow through the float intrinsic")
+assert(near(float(__flt_pow(2, 10)), 1024.0), "pow of integers")
+def list vals = [0.5, 1.5, 2.5]
+mut f64 acc = 0.0
+mut i = 0
+while i < vals.len {
+   acc = acc + exp(float(vals[i])) + log(vals.get(i, 1.0))
+   i += 1
+}
+assert(near(acc, 1.6487212707001282 + 4.4816890703380645 + 12.182493960703473 - 0.6931471805599453 + 0.4054651081081644 + 0.9162907318741551), "elements read from a list")
+print("FLOAT-EXP-LOG-POW-RAW-OK")
+NY
+}

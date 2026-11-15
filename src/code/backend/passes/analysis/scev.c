@@ -36,6 +36,33 @@ static bool compute_trip(nyr_scev_loop_t *l) {
   if (!l->init_is_const || !l->limit_is_const || l->step == 0)
     return false;
   __int128 start = l->init, limit = l->limit, step = l->step, n = 0;
+  /*
+   * `i != limit` counted loops. The exit count is exact only when the
+   * recurrence lands on the limit: the distance must be a whole multiple of
+   * the step, in the direction of travel. A loop that misses the limit keeps
+   * going until the i64 recurrence wraps, so no count may be claimed for it.
+   * This mirrors LLVM's exit-count treatment of the canonical `icmp ne`
+   * counted loop rather than guessing from the comparison alone.
+   */
+  if (l->predicate == NYIR_CMP_NE) {
+    __int128 delta = limit - start;
+    if (step > 0) {
+      if (delta <= 0 || delta % step != 0)
+        return false;
+      n = delta / step;
+    } else {
+      if (delta >= 0 || (-delta) % (-step) != 0)
+        return false;
+      n = (-delta) / (-step);
+    }
+    __int128 ne_exit = start + n * step;
+    if (n <= 0 || n > UINT64_MAX || ne_exit != limit || ne_exit < INT64_MIN ||
+        ne_exit > INT64_MAX)
+      return false;
+    l->trip_count = (uint64_t)n;
+    l->trip_count_known = true;
+    return true;
+  }
   if (step > 0) {
     if (l->predicate == NYIR_CMP_LT) {
       if (start >= limit)
@@ -80,6 +107,97 @@ static bool compute_trip(nyr_scev_loop_t *l) {
   return true;
 }
 
+/*
+ * Constant bounds for a counted loop whose start or limit is not a literal.
+ *
+ * The limit must be loop invariant: defined outside the loop in a block that
+ * dominates the header. Its proven range, together with the initial value's
+ * range, then bounds every value the induction variable can take even though
+ * no exact trip count is known. Two facts come out:
+ *
+ *   body_min/body_max  values that reach the body, from the exit test;
+ *   iv_min/iv_max      every observation of the phi, including the final
+ *                      failing test in the exit block.
+ *
+ * The step must not carry the recurrence past the representable limit while
+ * the test still holds; otherwise wrapping can revisit earlier values and no
+ * single interval is valid. All arithmetic is 128-bit and checked.
+ */
+static void compute_range_bounds(const nyr_func_t *f,
+                                 const nyr_value_fact_t *facts,
+                                 const nyr_cfg_t *cfg, const bool *in_loop,
+                                 const int *defs, size_t at,
+                                 nyr_scev_loop_t *l) {
+  if (!f || !facts || !cfg || !in_loop || !defs || !l || l->step == 0 ||
+      at >= f->len)
+    return;
+  bool up = l->step > 0;
+  if (up ? (l->predicate != NYIR_CMP_LT && l->predicate != NYIR_CMP_LE)
+         : (l->predicate != NYIR_CMP_GT && l->predicate != NYIR_CMP_GE))
+    return;
+  int lim_def = def_index(f, defs, l->limit_value);
+  int init_def = def_index(f, defs, l->init_value);
+  if (lim_def < 0 || init_def < 0 || (size_t)lim_def >= f->len ||
+      (size_t)init_def >= f->len)
+    return;
+  size_t lim_block = cfg->inst_block[(size_t)lim_def];
+  size_t init_block = cfg->inst_block[(size_t)init_def];
+  if (lim_block >= cfg->block_count || init_block >= cfg->block_count ||
+      in_loop[lim_block] || in_loop[init_block] ||
+      !nyr_cfg_dominates(cfg, lim_block, l->header_block) ||
+      !nyr_cfg_dominates(cfg, init_block, l->header_block))
+    return;
+  nyr_range_t ir = {0}, lr = {0};
+  if (!nir_value_range_at(f, facts, l->init_value, at, &ir) ||
+      !nir_value_range_at(f, facts, l->limit_value, at, &lr) || !ir.has_min ||
+      !ir.has_max || !lr.has_min || !lr.has_max)
+    return;
+  __int128 body_lo, body_hi, exit_edge, iv_lo, iv_hi, span;
+  if (up) {
+    /* `lr.max - 1` must stay representable before it is used. */
+    if (lr.max <= INT64_MIN)
+      return;
+    body_lo = ir.min;
+    body_hi = (__int128)lr.max - (l->predicate == NYIR_CMP_LT ? 1 : 0);
+    exit_edge = body_hi + l->step;
+    if (exit_edge > INT64_MAX)
+      return;
+    iv_lo = ir.min;
+    iv_hi = ir.max > exit_edge ? ir.max : exit_edge;
+    span = (__int128)lr.max - ir.min;
+  } else {
+    if (lr.min >= INT64_MAX)
+      return;
+    body_lo = (__int128)lr.min + (l->predicate == NYIR_CMP_GT ? 1 : 0);
+    body_hi = ir.max;
+    exit_edge = body_lo + l->step;
+    if (exit_edge < INT64_MIN)
+      return;
+    iv_lo = ir.min < exit_edge ? ir.min : exit_edge;
+    iv_hi = ir.max;
+    span = (__int128)ir.max - lr.min;
+  }
+  if (body_lo >= INT64_MIN && body_hi <= INT64_MAX && body_hi >= body_lo) {
+    l->body_bounds_known = true;
+    l->body_min = (int64_t)body_lo;
+    l->body_max = (int64_t)body_hi;
+  }
+  if (iv_lo >= INT64_MIN && iv_hi <= INT64_MAX) {
+    l->iv_bounds_known = true;
+    l->iv_min = (int64_t)iv_lo;
+    l->iv_max = (int64_t)iv_hi;
+  }
+  /* The same interval bounds the iteration count from above. */
+  __int128 mag = up ? (__int128)l->step : -(__int128)l->step;
+  if (span > 0) {
+    __int128 bound = (span + mag - 1) / mag;
+    if (bound > 0 && bound <= UINT64_MAX) {
+      l->trip_bound_known = true;
+      l->trip_bound = (uint64_t)bound;
+    }
+  }
+}
+
 static bool block_for_label(const nyr_cfg_t *cfg, int64_t label,
                             size_t *out_block) {
   return nyr_cfg_block_for_label(cfg, label, out_block);
@@ -109,6 +227,24 @@ bool nyr_scev_analyze(const nyr_func_t *f, nyr_scev_info_t *out) {
     free(defs);
     return false;
   }
+  /*
+   * Range facts for operands that are not literals. They let a counted loop
+   * with a symbolic start or limit export a constant IV interval. The facts
+   * are optional: when they are unavailable, analysis continues and only the
+   * constant paths below apply.
+   */
+  nyr_value_fact_t *facts = NULL;
+  if (!getenv("NYTRIX_NO_SCEV_RANGE_BOUNDS")) {
+    nyr_value_fact_t *table = calloc((size_t)f->next_value, sizeof(*table));
+    if (table) {
+      if (nyr_analyze_values(f, table, (size_t)f->next_value, NULL, 0))
+        facts = table;
+      /*
+       * On failure the analyzer may already have released its argument (its
+       * contradiction path does), so the table is not freed here.
+       */
+    }
+  }
   for (size_t latch = 0; latch < cfg.block_count; ++latch) {
     for (size_t e = cfg.succ_offsets[latch]; e < cfg.succ_offsets[latch + 1];
          ++e) {
@@ -130,6 +266,7 @@ bool nyr_scev_analyze(const nyr_func_t *f, nyr_scev_info_t *out) {
       if (!in_loop) {
         nyr_scev_free(out);
         nyr_cfg_free(&cfg);
+        free(facts);
         free(defs);
         return false;
       }
@@ -222,6 +359,7 @@ bool nyr_scev_analyze(const nyr_func_t *f, nyr_scev_info_t *out) {
             }
           } else {
             bool is_primary = false;
+            size_t cmp_at = SIZE_MAX;
             nyr_scev_loop_t loop = {.header_block = header,
                                     .latch_block = latch,
                                     .preheader_block = preheader,
@@ -246,11 +384,20 @@ bool nyr_scev_analyze(const nyr_func_t *f, nyr_scev_info_t *out) {
               loop.limit_value = cmp->b;
               loop.predicate = cmp->cmp;
               loop.limit_is_const = const_value(f, defs, cmp->b, &loop.limit);
+              cmp_at = j;
               is_primary = true;
               break;
             }
             if (is_primary) {
               compute_trip(&loop);
+              /*
+               * Range facts can bound a loop whose start or limit is not a
+               * literal even when no exact trip count exists. Only the
+               * primary IV carries the exit test, so only it gets bounds.
+               */
+              if (facts && cmp_at < f->len)
+                compute_range_bounds(f, facts, &cfg, in_loop, defs, cmp_at,
+                                     &loop);
             } else if (trip_known && loop.init_is_const) {
               loop.trip_count_known = true;
               loop.trip_count = trip_count;
@@ -259,6 +406,7 @@ bool nyr_scev_analyze(const nyr_func_t *f, nyr_scev_info_t *out) {
               free(in_loop);
               nyr_scev_free(out);
               nyr_cfg_free(&cfg);
+              free(facts);
               free(defs);
               return false;
             }
@@ -269,6 +417,7 @@ bool nyr_scev_analyze(const nyr_func_t *f, nyr_scev_info_t *out) {
     }
   }
   nyr_cfg_free(&cfg);
+  free(facts);
   free(defs);
   return true;
 }
@@ -428,6 +577,26 @@ static bool scev_loop_iv_bounds_at(const nyr_func_t *f,
     const nyr_scev_loop_t *loop = &info->loops[i];
     if (loop->iv != value)
       continue;
+    /*
+     * Range-fact bounds describe values that passed the exit test, so they
+     * apply on body paths only. The whole-value interval stays in the loop
+     * record for the phi's range fact.
+     */
+    if (loop->body_bounds_known) {
+      bool *members = calloc(cfg->block_count, sizeof(*members));
+      if (!members)
+        return false;
+      bool in_body = nyr_cfg_natural_loop_blocks(
+                         cfg, loop->latch_block, loop->header_block, members,
+                         cfg->block_count) &&
+                     at_block < cfg->block_count && members[at_block];
+      free(members);
+      if (in_body) {
+        *min_out = loop->body_min;
+        *max_out = loop->body_max;
+        return true;
+      }
+    }
     if (!loop->init_is_const) {
       if (scev_dynamic_loop_iv_bounds_at(f, info, defs, cfg, loop, at, min_out,
                                          max_out))
@@ -830,8 +999,25 @@ bool nyr_scev_lite(nyr_func_t *f) {
     return false;
   for (size_t i = 0; i < info.count; ++i) {
     nyr_scev_loop_t *l = &info.loops[i];
-    if (!l->trip_count_known || l->trip_count == 0)
+    if (!l->trip_count_known || l->trip_count == 0) {
+      /*
+       * No exact count, but range facts may still bound the induction
+       * variable over the whole loop, final test included. Export that
+       * interval; it is strictly weaker than an exhaustion singleton.
+       */
+      if (!l->iv_bounds_known)
+        continue;
+      for (size_t j = l->header_index; j < f->len; ++j) {
+        if (f->data[j].dst != l->iv)
+          continue;
+        f->data[j].range.has_min = true;
+        f->data[j].range.has_max = true;
+        f->data[j].range.min = l->iv_min;
+        f->data[j].range.max = l->iv_max;
+        break;
+      }
       continue;
+    }
     /*
      * The IV is tested once more after the final body iteration.  A range
      * ending at `last` incorrectly folds the exit comparison to true for

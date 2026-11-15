@@ -478,10 +478,159 @@ static bool run_random_cases(void) {
   return true;
 }
 
+/*
+ * Guarded refinement: `div(x, 8)` may become `sar(x, 3)` only when x is
+ * provably non-negative, because NYIR division truncates toward zero while
+ * SAR rounds toward negative infinity.  The masked build proves the guard
+ * fires (`and(x, 255)` is non-negative); the unmasked build proves it does
+ * not (`x` loaded straight from memory has unknown sign).
+ */
+static bool build_guarded_div_fn(nyr_func_t *f, bool mask) {
+  nyr_opt_begin(f);
+  f->param_types = malloc(sizeof(*f->param_types));
+  if (!f->param_types)
+    return false;
+  f->param_types[0] = NYIR_PARAM_I64;
+  f->param_count = 1;
+  int x = nyr_opt_emit_imm(f, NYIR_LOAD_LOCAL, 0);
+  if (x < 0)
+    return false;
+  int num = x;
+  if (mask) {
+    num = nyr_opt_binop(f, NYIR_AND_I64, x, nyr_opt_const(f, 255));
+    if (num < 0)
+      return false;
+  }
+  int div = nyr_opt_binop(f, NYIR_DIV_I64, num, nyr_opt_const(f, 8));
+  if (div < 0)
+    return false;
+  int add = nyr_opt_binop(f, NYIR_ADD_I64, div, nyr_opt_const(f, 0));
+  if (add < 0)
+    return false;
+  nyr_opt_ret(f, add);
+  return true;
+}
+
+static bool run_guarded_div_case(void) {
+  static const int64_t inputs[] = {1000, -8, 0, 7, 255, -255};
+  const size_t input_count = sizeof(inputs) / sizeof(inputs[0]);
+  for (int masked = 0; masked <= 1; ++masked) {
+    for (size_t i = 0; i < input_count; ++i) {
+      nyr_func_t f;
+      if (!build_guarded_div_fn(&f, masked != 0)) {
+        fprintf(stderr, "[egraph] guarded div build failed\n");
+        nyr_ir_func_free(&f);
+        return false;
+      }
+      bool ok = nyr_opt_verify(&f, "egraph-div-before");
+      int64_t before = 0;
+      if (ok)
+        ok = eval_random_fn(&f, inputs[i], &before);
+      if (ok)
+        ok = nyr_egraph_rewrite(&f) && nyr_opt_verify(&f, "egraph-div-after");
+      int64_t after = 0;
+      if (ok)
+        ok = eval_random_fn(&f, inputs[i], &after);
+      size_t div_after = 0, sar_after = 0;
+      count_op(&f, NYIR_DIV_I64, &div_after);
+      count_op(&f, NYIR_SAR_I64, &sar_after);
+      if (!ok || before != after) {
+        fprintf(stderr,
+                "[egraph] guarded div changed eval masked=%d input=%lld "
+                "before=%lld after=%lld\n",
+                masked, (long long)inputs[i], (long long)before,
+                (long long)after);
+        nyr_ir_func_free(&f);
+        return false;
+      }
+      if (masked && (div_after != 0 || sar_after == 0)) {
+        fprintf(stderr,
+                "[egraph] non-negative div was not refined to a shift "
+                "(div=%zu sar=%zu)\n",
+                div_after, sar_after);
+        nyr_ir_func_free(&f);
+        return false;
+      }
+      if (!masked && div_after == 0) {
+        fprintf(stderr,
+                "[egraph] div refined without a sign fact; the analysis "
+                "guard is unsound\n");
+        nyr_ir_func_free(&f);
+        return false;
+      }
+      nyr_ir_func_free(&f);
+    }
+  }
+  puts("[egraph] analysis-guarded div refinement ok");
+  return true;
+}
+
+static bool build_idempotence_fn(nyr_func_t *f) {
+  nyr_opt_begin(f);
+  f->param_types = malloc(sizeof(*f->param_types));
+  if (!f->param_types)
+    return false;
+  f->param_types[0] = NYIR_PARAM_I64;
+  f->param_count = 1;
+  int x = nyr_opt_emit_imm(f, NYIR_LOAD_LOCAL, 0);
+  if (x < 0)
+    return false;
+  int aand = nyr_opt_binop(f, NYIR_AND_I64, x, x);
+  int oor = nyr_opt_binop(f, NYIR_OR_I64, x, x);
+  if (aand < 0 || oor < 0)
+    return false;
+  int sum = nyr_opt_binop(f, NYIR_ADD_I64, aand, oor);
+  if (sum < 0)
+    return false;
+  nyr_opt_ret(f, sum);
+  return true;
+}
+
+static bool run_idempotence_case(void) {
+  static const int64_t inputs[] = {0, 1, -1, 12345, -98765};
+  const size_t input_count = sizeof(inputs) / sizeof(inputs[0]);
+  for (size_t i = 0; i < input_count; ++i) {
+    nyr_func_t f;
+    if (!build_idempotence_fn(&f)) {
+      nyr_ir_func_free(&f);
+      return false;
+    }
+    bool ok = nyr_opt_verify(&f, "egraph-idem-before");
+    int64_t before = 0;
+    if (ok)
+      ok = eval_random_fn(&f, inputs[i], &before);
+    if (ok)
+      ok = nyr_egraph_rewrite(&f) && nyr_opt_verify(&f, "egraph-idem-after");
+    int64_t after = 0;
+    if (ok)
+      ok = eval_random_fn(&f, inputs[i], &after);
+    size_t and_after = 0, or_after = 0;
+    count_op(&f, NYIR_AND_I64, &and_after);
+    count_op(&f, NYIR_OR_I64, &or_after);
+    if (!ok || before != after) {
+      fprintf(stderr, "[egraph] idempotence changed eval input=%lld\n",
+              (long long)inputs[i]);
+      nyr_ir_func_free(&f);
+      return false;
+    }
+    if (and_after != 0 || or_after != 0) {
+      fprintf(stderr,
+              "[egraph] x&x / x|x not folded to the operand (and=%zu or=%zu)\n",
+              and_after, or_after);
+      nyr_ir_func_free(&f);
+      return false;
+    }
+    nyr_ir_func_free(&f);
+  }
+  puts("[egraph] bitwise idempotence ok");
+  return true;
+}
+
 int main(void) {
   return run_case(3) && run_case(1000) && run_case(-7) &&
                  run_dominated_case() && run_alias_invalidation_case() &&
-                 run_shrinker_case() && run_random_cases()
+                 run_shrinker_case() && run_guarded_div_case() &&
+                 run_idempotence_case() && run_random_cases()
              ? 0
              : 1;
 }

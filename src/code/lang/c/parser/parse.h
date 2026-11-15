@@ -114,6 +114,11 @@ typedef struct {
   bool plan9_extensions;
   bool system_includes;
   unsigned i386_regparm;
+  /* Nyr optimization level the driver will apply. At -O0 the frontend keeps
+   * zero-filling uninitialized aggregate locals so every read is
+   * deterministic; at -O1 and above it follows C semantics and leaves them
+   * undefined, matching GCC's object size. */
+  unsigned optimization;
 } nyc_source_t;
 
 typedef int (*nyc_dependency_visitor_t)(const char *path, void *context);

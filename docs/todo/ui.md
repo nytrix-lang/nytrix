@@ -2,7 +2,7 @@
 # UI, Engine, and Editor Roadmap (Fable 5.2)
 
 Only open work is listed; finished items are removed once their acceptance
-check has passed. State on 2026-11-14 (evening, private build of the
+check has passed. State on 2026-11-15 (private build of the
 current tree): the UI probe directory passes on native -O0, native -O3, and
 LLVM JIT (85 shapes, no exceptions; `editor-keymap-profiles` now passes on
 MCJIT). Loaded glTF scenes draw textured on Vulkan and GL over the default
@@ -28,8 +28,9 @@ work is tracked in [Performance work](perf.md).
   builds per widget stays allocated. Done so far: float reads no longer box
   (`rt_value_get_f64`, `rt_tbuf_index_any_f64`), the float intern table
   probes, the text run queue and batch are reused, text measures are keyed
-  per font, `set_model_matrix` no longer clones per element, and the print
-  history is a ring. What remains is spread over hundreds of sites of about
+  per font, `set_model_matrix` no longer clones per element, the print
+  history is a ring, and float boxes are tracked per pool chunk instead of
+  in a per-box hash set (its doubling rehash was a 50-140 ms frame). What remains is spread over hundreds of sites of about
   0.3 MB per 400 frames each (`_layout_rect`, `_clip_rect_inset`,
   `_window_body_clip`, `scissor_push`, `begin_scroll_area`, `_wid`,
   `_main_loop_count_frame`, `_idle_opts`, `_inspector_state`), so site-by-site
@@ -51,16 +52,16 @@ work is tracked in [Performance work](perf.md).
 
 ### P2 — Toolkit and engine
 
-- [ ] **Remove the last post-load frame spike.** The first frame with the
-  default EXR sky used to stall about 13 s on Vulkan (three procedural
-  environments built eagerly, ~3 s each, plus a 2 s EXR conversion). On
-  2026-11-14 the environments are built only when a scene prefers one, the
-  conversion takes ~0.6 s, and a startup worker decodes the sky
-  (`NY_UI_SKY_PREFETCH_OFF=1` disables it). Clicking BarramundiFish 2 s
-  after startup: 144 ms to scene, load frame 126 ms, no sky stall (835 ms
-  without the worker). One ~55 ms frame about 100 frames after the load
-  remains and also appears with the worker off. Acceptance: first-load
-  click-to-scene under 300 ms with no frame over 50 ms after it.
+- [ ] **Cut the runtime's value-classification cost in UI frames.** With a
+  scene loaded on Vulkan the render thread spends about 84% of its samples
+  in runtime C helpers that decide what a word is (2026-11-15):
+  `ny_native_dict_ptr` 13%, `rt_tbuf_registered_handle` 9%,
+  `rt_addr_readable` 9% (two variants), `rt_tbuf_check` 6%,
+  `rt_heap_ptr_registry_has` 4%. `rt_addr_readable` was 22% plus 9% kernel
+  time in `mincore`; a page bitmap of runtime-owned ranges and a two-entry
+  cache in front of the mapping snapshot's binary search brought it down.
+  Acceptance: no single classifier above 3% of samples in an idle engine
+  frame, with the `lang/memory` fixtures passing.
 
 ### P3 — Editor and panels
 
@@ -77,13 +78,16 @@ work is tracked in [Performance work](perf.md).
   supplied earlier; it is not in the repository. Acceptance: each effect
   renders on Vulkan and GL on the compositor with a capture, toggles at run
   time, and has a probe.
-- [ ] **Vector graphics: composite modes and transformed text.**
-  `core.os.ui.render.vg` covers paths, fills with holes, strokes, joins and
-  caps, antialiasing, gradients, image patterns, transforms, scissor, and
-  text, with `vg-golden` passing on mock, Vulkan, and GL (11 ms and 18 ms
-  for the thirty-shape card against a 20 ms budget). Remaining: blend
-  operators other than source-over (the renderer has one alpha blend
-  pipeline), and glyphs that follow rotation and scale.
+- [ ] **Vector graphics: composite modes.** `core.os.ui.render.vg` covers
+  paths, fills with holes, strokes, joins and caps, antialiasing, gradients,
+  image patterns, transforms, scissor, and text that follows rotation, scale
+  and skew on Vulkan and GL (`vg-golden` passes on mock, Vulkan, and GL).
+  Remaining: blend operators other than source-over. They need
+  premultiplied output from `vg` (vertex colours, baked gradients, image
+  patterns), a blend-factor setter in the renderer with one Vulkan pipeline
+  per factor set, `glBlendFuncSeparate` on GL, and the same formulas in the
+  software renderer. Acceptance: the eleven Porter-Duff operators match a
+  reference card on all three backends, with a probe.
 - [ ] **Port/fix `smem` process memory scanner UI (`etc/projects/ui/smem.ny`).**
   Single-file Nytrix port of `x3ric/smem` (https://github.com/x3ric/smem);
   original reference cloned at `/tmp/kilo/smem` (`README.md`, `src/main.rs`,

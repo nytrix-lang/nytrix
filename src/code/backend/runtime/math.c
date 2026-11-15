@@ -421,15 +421,22 @@ static __thread void *g_flt_cache = NULL;
 
 /*
  * Boxed floats are interior pointers into pooled allocations, so the normal
- * heap-pointer test cannot identify them.  Keep authoritative live-value
- * provenance shared by every runtime translation unit; the small TLS cache
- * remains only as a fast path for values not present in this table.
+ * heap-pointer test cannot identify them.  Provenance is kept per pool chunk
+ * rather than per box: a box is a 16-byte slot of a registered chunk whose
+ * header word is TAG_FLOAT (a slot on a free list holds its link there
+ * instead).  The earlier per-box hash set took an insertion for every boxed
+ * float and rehashed all of them whenever it doubled, which showed up as
+ * single 50-140 ms frames in a running UI.  The small TLS cache remains only
+ * as a fast path in front of this table.
  */
-#define RT_FLOAT_REGISTRY_TOMBSTONE UINTPTR_MAX
-static uintptr_t *rt_float_registry;
-static size_t rt_float_registry_capacity;
-static size_t rt_float_registry_used;
-static size_t rt_float_registry_live;
+#define RT_FLT_CHUNK_BYTES 4096u
+typedef struct {
+  uintptr_t page; /* address >> 12 of one page the chunk touches, 0 = empty */
+  uintptr_t base; /* first byte of the chunk */
+} rt_float_chunk_entry_t;
+static rt_float_chunk_entry_t *rt_float_chunks;
+static size_t rt_float_chunk_capacity;
+static size_t rt_float_chunk_used;
 static atomic_flag rt_float_registry_lock = ATOMIC_FLAG_INIT;
 
 static void rt_float_registry_acquire(void) {
@@ -442,112 +449,81 @@ static void rt_float_registry_release(void) {
   atomic_flag_clear_explicit(&rt_float_registry_lock, memory_order_release);
 }
 
-static inline size_t rt_float_registry_slot(uintptr_t value, size_t mask) {
-  uint64_t x = (uint64_t)value;
+static inline size_t rt_float_chunk_slot(uintptr_t page, size_t mask) {
+  uint64_t x = (uint64_t)page;
   x ^= x >> 33;
   x *= UINT64_C(0xff51afd7ed558ccd);
   x ^= x >> 33;
   return (size_t)x & mask;
 }
 
-/*
- * Called with the registry locked. Rehashing also removes tombstones, so
- * repeated free/reuse cycles cannot turn absent lookups into full scans.
- */
-static void rt_float_registry_rehash(size_t capacity) {
-  uintptr_t *entries = calloc(capacity, sizeof(*entries));
-  if (!entries)
-    abort();
-  size_t mask = capacity - 1;
-  for (size_t i = 0; i < rt_float_registry_capacity; ++i) {
-    uintptr_t value = rt_float_registry[i];
-    if (!value || value == RT_FLOAT_REGISTRY_TOMBSTONE)
-      continue;
-    size_t slot = rt_float_registry_slot(value, mask);
-    while (entries[slot])
-      slot = (slot + 1) & mask;
-    entries[slot] = value;
-  }
-  free(rt_float_registry);
-  rt_float_registry = entries;
-  rt_float_registry_capacity = capacity;
-  rt_float_registry_used = rt_float_registry_live;
-}
-
-static void rt_float_registry_add(uintptr_t value) {
-  if (!value)
-    return;
-  rt_float_registry_acquire();
-  if (!rt_float_registry_capacity) {
-    rt_float_registry_rehash(1024);
-  } else if (rt_float_registry_used >= rt_float_registry_capacity / 2) {
-    size_t capacity = rt_float_registry_capacity;
-    if (rt_float_registry_live >= capacity / 4) {
-      if (capacity > SIZE_MAX / (2 * sizeof(uintptr_t)))
-        abort();
-      capacity *= 2;
-    }
-    rt_float_registry_rehash(capacity);
-  }
-  size_t mask = rt_float_registry_capacity - 1;
-  size_t slot = rt_float_registry_slot(value, mask);
-  size_t tombstone = SIZE_MAX;
-  while (rt_float_registry[slot]) {
-    if (rt_float_registry[slot] == value) {
-      rt_float_registry_release();
-      return;
-    }
-    if (rt_float_registry[slot] == RT_FLOAT_REGISTRY_TOMBSTONE &&
-        tombstone == SIZE_MAX)
-      tombstone = slot;
+/* Called with the registry locked. */
+static void rt_float_chunk_insert(rt_float_chunk_entry_t *entries, size_t mask,
+                                  uintptr_t page, uintptr_t base) {
+  size_t slot = rt_float_chunk_slot(page, mask);
+  while (entries[slot].page)
     slot = (slot + 1) & mask;
+  entries[slot].page = page;
+  entries[slot].base = base;
+}
+
+/* A chunk is not page aligned, so it is entered under each page it covers. */
+static void rt_float_chunk_register(uintptr_t base) {
+  uintptr_t first = base >> 12;
+  uintptr_t last = (base + RT_FLT_CHUNK_BYTES - 1) >> 12;
+  rt_float_registry_acquire();
+  if (rt_float_chunk_used + 2 >= rt_float_chunk_capacity / 2) {
+    size_t capacity = rt_float_chunk_capacity ? rt_float_chunk_capacity * 2 : 256;
+    rt_float_chunk_entry_t *entries = calloc(capacity, sizeof(*entries));
+    if (!entries)
+      abort();
+    for (size_t i = 0; i < rt_float_chunk_capacity; ++i)
+      if (rt_float_chunks[i].page)
+        rt_float_chunk_insert(entries, capacity - 1, rt_float_chunks[i].page,
+                              rt_float_chunks[i].base);
+    free(rt_float_chunks);
+    rt_float_chunks = entries;
+    rt_float_chunk_capacity = capacity;
   }
-  if (tombstone != SIZE_MAX)
-    slot = tombstone;
-  else
-    ++rt_float_registry_used;
-  rt_float_registry[slot] = value;
-  ++rt_float_registry_live;
+  for (uintptr_t page = first; page <= last; ++page) {
+    rt_float_chunk_insert(rt_float_chunks, rt_float_chunk_capacity - 1, page,
+                          base);
+    ++rt_float_chunk_used;
+  }
   rt_float_registry_release();
 }
 
-static void rt_float_registry_remove(uintptr_t value) {
-  if (!value)
-    return;
-  rt_float_registry_acquire();
-  if (rt_float_registry_capacity) {
-    size_t mask = rt_float_registry_capacity - 1;
-    size_t slot = rt_float_registry_slot(value, mask);
-    while (rt_float_registry[slot]) {
-      if (rt_float_registry[slot] == value) {
-        rt_float_registry[slot] = RT_FLOAT_REGISTRY_TOMBSTONE;
-        --rt_float_registry_live;
-        break;
-      }
-      slot = (slot + 1) & mask;
-    }
-  }
-  rt_float_registry_release();
-}
+static bool rt_flt_interned(uintptr_t v);
+static bool rt_flt_interned_live(uintptr_t v);
 
 bool rt_float_registry_has(uintptr_t value) {
-  if (!value)
+  if (!value || (value & 15) != 8)
     return false;
-  bool found = false;
+  if (rt_flt_interned(value))
+    return rt_flt_interned_live(value);
+  uintptr_t header = value - 8;
+  uintptr_t page = header >> 12;
+  bool in_chunk = false;
   rt_float_registry_acquire();
-  if (rt_float_registry_capacity) {
-    size_t mask = rt_float_registry_capacity - 1;
-    size_t slot = rt_float_registry_slot(value, mask);
-    while (rt_float_registry[slot]) {
-      if (rt_float_registry[slot] == value) {
-        found = true;
+  if (rt_float_chunk_capacity) {
+    size_t mask = rt_float_chunk_capacity - 1;
+    size_t slot = rt_float_chunk_slot(page, mask);
+    while (rt_float_chunks[slot].page) {
+      uintptr_t base = rt_float_chunks[slot].base;
+      if (rt_float_chunks[slot].page == page && header >= base &&
+          header - base < RT_FLT_CHUNK_BYTES && ((header - base) & 15) == 0) {
+        in_chunk = true;
         break;
       }
       slot = (slot + 1) & mask;
     }
   }
   rt_float_registry_release();
-  return found;
+  if (!in_chunk)
+    return false;
+  int64_t tag = 0;
+  memcpy(&tag, (const void *)header, sizeof(tag));
+  return tag == TAG_FLOAT;
 }
 
 static void *rt_flt_alloc_slot(void) {
@@ -556,7 +532,7 @@ static void *rt_flt_alloc_slot(void) {
     g_flt_cache = *(void **)p;
     return p;
   }
-  size_t chunk_size = 4096;
+  size_t chunk_size = RT_FLT_CHUNK_BYTES;
   char *chunk = (char *)rt_malloc((int64_t)((chunk_size << 1) | 1));
   if (!chunk)
     return NULL;
@@ -567,6 +543,9 @@ static void *rt_flt_alloc_slot(void) {
     *(void **)curr = next;
   }
   *(void **)(chunk + ((slot_count - 1) * 16)) = NULL;
+  /* Registered only once every slot holds a free-list link, so no stale
+   * word in the fresh chunk can pass for a float header. */
+  rt_float_chunk_register((uintptr_t)chunk);
   g_flt_cache = (void *)chunk;
   void *p = g_flt_cache;
   g_flt_cache = *(void **)p;
@@ -590,6 +569,15 @@ static _Atomic(uintptr_t) g_flt_intern_box[RT_FLT_INTERN_SLOTS];
 static bool rt_flt_interned(uintptr_t v) {
   uintptr_t lo = (uintptr_t)g_flt_intern_store;
   return v >= lo && v < lo + sizeof(g_flt_intern_store);
+}
+
+/* An interned slot is live once its box address has been published. */
+static bool rt_flt_interned_live(uintptr_t v) {
+  uintptr_t off = v - (uintptr_t)g_flt_intern_store;
+  if ((off & 15) != 8)
+    return false;
+  return atomic_load_explicit(&g_flt_intern_box[off >> 4],
+                              memory_order_acquire) == v;
 }
 
 static size_t rt_flt_intern_slot(int64_t bits) {
@@ -627,7 +615,6 @@ static int64_t rt_flt_intern(int64_t bits) {
     *(int64_t *)slot = TAG_FLOAT;
     memcpy(slot + 8, &bits, 8);
     uintptr_t out = (uintptr_t)(slot + 8);
-    rt_float_registry_add(out);
     atomic_store_explicit(&g_flt_intern_box[i], out, memory_order_release);
     return (int64_t)out;
   }
@@ -637,7 +624,10 @@ static int64_t rt_flt_intern(int64_t bits) {
 void rt_flt_free(int64_t v) {
   if (!v || rt_flt_interned((uintptr_t)v))
     return;
-  rt_float_registry_remove((uintptr_t)v);
+  /* Only a live box returns to the pool; freeing one twice would link the
+   * slot into the free list twice. */
+  if (!rt_float_registry_has((uintptr_t)v))
+    return;
   rt_float_cache_forget((uintptr_t)v);
   void *slot = (void *)((char *)(uintptr_t)v - 8);
   *(void **)slot = g_flt_cache;
@@ -654,7 +644,6 @@ int64_t rt_flt_box_val(int64_t bits) {
   *(int64_t *)slot = TAG_FLOAT;
   memcpy((char *)slot + 8, &bits, 8);
   int64_t out = (int64_t)(uintptr_t)((char *)slot + 8);
-  rt_float_registry_add((uintptr_t)out);
   rt_float_cache_store((uintptr_t)out);
   return out;
 }
@@ -845,6 +834,10 @@ int64_t rt_flt_sqrt(int64_t v) {
 double rt_sqrt_f64(double value) { return sqrt(value); }
 double rt_sin_f64(double value) { return sin(value); }
 double rt_cos_f64(double value) { return cos(value); }
+/* Raw-double forms: the boxed rt_flt_exp/rt_flt_log allocate a float box
+ * for the argument and another for the result on every call. */
+double rt_exp_f64(double value) { return exp(value); }
+double rt_log_f64(double value) { return log(value); }
 double rt_f64_round(double value) { return (double)llround(value); }
 double rt_f64_pow(double base, double exponent) { return pow(base, exponent); }
 double rt_f64_floor(double value) { return floor(value); }

@@ -238,6 +238,51 @@ __thread uint32_t g_rt_probe_cache_next;
 __thread rt_probe_cache_entry_t g_rt_probe_cache[RT_PROBE_CACHE_WAYS];
 __thread uint32_t g_rt_probe_cache_next;
 
+_Atomic(_Atomic(uint64_t) *) g_rt_oracle_pages[1u << RT_ORACLE_PAGE_ROOT_BITS];
+
+/* Set the bit of every page in [s, e); both are page aligned. */
+static void rt_map_oracle_mark_pages(uintptr_t s, uintptr_t e) {
+  static __thread uintptr_t last_s = 0, last_e = 0;
+  if (s >= last_s && e <= last_e)
+    return;
+  uintptr_t page = s >> 12, end = e >> 12;
+  while (page < end) {
+    uintptr_t root = page >> RT_ORACLE_PAGE_LEAF_BITS;
+    if (root >> RT_ORACLE_PAGE_ROOT_BITS)
+      return;
+    _Atomic(uint64_t) *leaf =
+        atomic_load_explicit(&g_rt_oracle_pages[root], memory_order_acquire);
+    if (!leaf) {
+      _Atomic(uint64_t) *fresh =
+          calloc(RT_ORACLE_PAGE_LEAF_WORDS, sizeof(*fresh));
+      if (!fresh)
+        return;
+      _Atomic(uint64_t) *expected = NULL;
+      if (atomic_compare_exchange_strong_explicit(
+              &g_rt_oracle_pages[root], &expected, fresh, memory_order_release,
+              memory_order_acquire)) {
+        leaf = fresh;
+      } else {
+        free(fresh);
+        leaf = expected;
+      }
+    }
+    uintptr_t leaf_end = (root + 1u) << RT_ORACLE_PAGE_LEAF_BITS;
+    uintptr_t stop = end < leaf_end ? end : leaf_end;
+    while (page < stop) {
+      uintptr_t bit = page & ((1u << RT_ORACLE_PAGE_LEAF_BITS) - 1u);
+      uintptr_t room = 64u - (bit & 63u);
+      uintptr_t take = stop - page < room ? stop - page : room;
+      uint64_t mask = take == 64u ? ~UINT64_C(0)
+                                  : ((UINT64_C(1) << take) - 1u) << (bit & 63u);
+      atomic_fetch_or_explicit(&leaf[bit >> 6], mask, memory_order_relaxed);
+      page += take;
+    }
+  }
+  last_s = s;
+  last_e = e;
+}
+
 void rt_map_oracle_add(uintptr_t start, size_t size) {
   if (!start || (uintptr_t)size > UINTPTR_MAX - start)
     return;
@@ -245,6 +290,7 @@ void rt_map_oracle_add(uintptr_t start, size_t size) {
   uintptr_t e = (start + (uintptr_t)size + 4095u) & ~(uintptr_t)4095u;
   if (e <= s)
     return;
+  rt_map_oracle_mark_pages(s, e);
   /*
    * Once the exact-range table is full, keep extending the conservative
    * address bounds. They let distant invalid pointers avoid the syscall

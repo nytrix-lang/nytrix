@@ -408,6 +408,7 @@ typedef struct {
   int agg_base;
   size_t agg_area_next;
   nyc_abi_t abi;
+  unsigned optimization;
   char *err;
   size_t err_len;
 } c_parser_t;
@@ -19253,6 +19254,7 @@ static bool parser_preprocess(c_parser_t *p, const nyc_source_t *source,
   p->unsigned_char = source->unsigned_char;
   p->no_builtin = source->no_builtin;
   p->i386_regparm = source->i386_regparm;
+  p->optimization = source->optimization;
   p->ms_extensions = source->ms_extensions;
   p->plan9_extensions = source->plan9_extensions;
   size_t macro_capacity = 256;

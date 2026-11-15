@@ -3195,3 +3195,409 @@ The remaining ceiling is the low 128 bytes themselves: they also hold the
 callee-save slots and the source frame slots, so only a handful of 8-byte homes
 land in disp8 reach. Ordering frame slots by access frequency is the next lever,
 not more encoder work.
+
+## Short backward branches (kept 2026-11-15)
+
+Every branch was emitted as rel32 (`e9` or `0f 8x` plus four displacement
+bytes) and patched after the trampoline fold, even for loop latches whose target
+was already laid out. A backward edge knows its displacement when it is emitted
+because `block_off[target]` is recorded at that block's start, so
+`mach_emit_branch_to` now emits `eb`/`7x` with a single displacement byte when
+the distance fits a signed byte.
+
+Short branches still record a patch, flagged in `patch_short`, so the trampoline
+fold's byte compaction moves their patch site with the rest of the code. That
+fold only ever drops bytes, and dropping bytes between a backward target and its
+latch can only shrink the displacement, so a rel8 edge cannot fall out of range
+afterwards. Forward edges keep the rel32 placeholder.
+`NYTRIX_NO_SHORT_BRANCHES=1` restores rel32 everywhere for A/B runs.
+
+| fixture | rel32 only | short backward |
+| --- | --- | --- |
+| `knight` | 4,592 | 4,584 (-8) |
+| `compose-local` | 6,712 | 6,680 (-32) |
+| `combs-test`, `eq-test`, `unicode-identifiers`, `unicode-debug7` | - | unchanged |
+
+Only one of `knight`'s 67 branches fits: its loop bodies are larger than the
+128-byte rel8 reach. `compose-local` converts ten. Reaching the rest needs a real
+fixpoint relaxation that also re-derives block alignment, which is a separate
+change rather than another local widening.
+
+`knight`'s checksum is unchanged (`340233`). `--pattern x86` 223/223, `regalloc`
+11/11, `copy` 8/8. The full `--bench-correctness` sweep reports 2,290/2,370, and
+the failing fixtures are exactly those that fail with `NYTRIX_NO_HOT_HOMES=1` in
+the same binary (80, all heavy UI/font/audio fixtures timing out under the load
+other agents put on the machine). The two fixtures' baselines moved by 8-16 bytes
+between builds because of concurrent edits outside this work, so every number
+above is an A/B inside one binary.
+
+## Symbol addresses materialized in the destination color (kept 2026-11-15)
+
+Auditing `knight`'s 4,584-byte `.text` by instruction class showed the largest
+single redundancy was not arithmetic: 169 of its 175 LEAs were
+`leaq sym(%rip),%rax`, roughly one per address-of-global use, and 87 of those
+were immediately followed by `mov %rax,%rdi`/`%rsi`/`%r12`. The pair costs ten
+bytes where `leaq sym(%rip),%rdi` costs seven.
+
+The move is not a machine COPY. `mach_vreg_def_preg` already gave the LEA a
+destination color, and `mach_commit_vreg` stages the RAX result into that color
+with exactly that three-byte move. The indexed-LEA paths in the same case write
+their result straight into the assigned register, so the symbol path now does the
+same: emit `lea` with the color in ModRM and commit through `mach_commit_preg`
+like its neighbours, falling back to the RAX form when the destination has no
+usable color (unassigned, `%rsp`, `%rbp`).
+
+| fixture | RAX staging | in-color | delta |
+| --- | --- | --- | --- |
+| `knight` | 4,584 | 4,320 | -264 (-5.8%) |
+| `compose-local` | 6,680 | 6,424 | -256 (-3.8%) |
+| `unicode-identifiers` | 2,640 | 2,384 | -256 (-9.7%) |
+| `combs-test` | 3,160 | 2,888 | -272 (-8.6%) |
+| `eq-test` | 3,928 | 3,656 | -272 (-6.9%) |
+| `unicode-debug7` | 3,296 | 3,032 | -264 (-8.0%) |
+
+`NYTRIX_NO_LEA_COLOR=1` restores RAX staging and reproduces the old sizes
+exactly, so each row is an A/B inside one binary. The saving is not simply three
+bytes per folded site: surviving copies include two-byte 32-bit moves, and
+removing the staging move also shifts later block layout. In the disassembly the
+`lea ...; mov %r..` pairs fall from 87 to 22 in `knight` and from 93 to 35 in
+`compose-local`.
+
+Four other levers were measured and rejected before this one, so they are not
+worth re-trying blindly:
+
+- Loop-alignment padding: every NOP run is 7 bytes or shorter (`knight` 24 bytes
+  total, `compose-local` 126), so a GCC-style max-skip policy saves nothing.
+- Branch relaxation: only 1 of `knight`'s 67 branches fits rel8 even with both
+  directions known, so a layout fixpoint would buy about 5 bytes.
+- Address CSE: all 169 symbol targets are distinct, one per use; there is no
+  duplicate materialization to remove.
+- Frame-slot ordering: `knight` has no frame slots and `compose-local` none in
+  reach, all offsets are vreg homes, and hot ordering already fills the disp8
+  window with the busiest of them.
+
+`knight`'s checksum is unchanged (`340233`). `--pattern x86` 223/223, `regalloc`
+11/11, `copy` 8/8, `codegen` 14/15 (`codegen-match`, pre-existing and identical
+with every encoder hatch disabled). The full `--bench-correctness` sweep reports
+2,290/2,370 with exactly the baseline binary's 80 failing fixtures, none new and
+none fixed, under the same host load other agents were generating.
+
+What remains is the 22 (`knight`) and 35 (`compose-local`) surviving LEA+move
+pairs: there the LEA's own color is RAX and the move is a genuine MACH COPY of a
+single-use address. Folding those requires proving the single use and skipping a
+copy instruction — a separate change with its own residency proof, not another
+widening of this one.
+
+## E-graph saturator: hash-consing, batched rebuild, guarded arithmetic (kept 2026-11-15)
+
+`passes/scalar/egraph.c` already saturated pure i64 straight-line blocks, but
+the implementation was the slow shape: interning a node scanned every node,
+and congruence closure compared every pair of nodes on every iteration. Both
+are quadratic in the block, so a large pure block was the most expensive thing
+the mid-pipeline could do, and the rule set could only express unconditionally
+sound equalities.
+
+Three changes, all inside that pass:
+
+- **Hash-consed interning.** Nodes live in an open-addressing table keyed by
+  `(op, imm, child classes)`, rebuilt whenever unions move canonical children.
+  `eg_intern` is now a probe instead of a scan.
+- **Batched congruence closure.** `eg_rebuild` re-canonicalizes every root's
+  child pointers and merges roots that became identical, once per saturation
+  iteration, replacing the pairwise compare. Union-find now merges by rank, so
+  the repeated canonicalization does not walk long parent chains. A merge late
+  in a round can leave a table entry stale; that can only *delay* a merge to
+  the next round, never invent one, because entries are only ever compared for
+  full structural equality.
+- **Analysis-guarded rewriting.** `eg_nonneg_roots` computes class
+  non-negativity as a fixpoint: a class is non-negative when one of its members
+  provably is (the e-graph only equates values that really are equal), with
+  `and` inheriting non-negativity from either operand and COPY forwarding it.
+  That fact justifies rewrites that are *not* equalities in general: NYIR
+  division truncates toward zero while SAR rounds toward -infinity, so
+  `x / 2^k == x >> k` and `x % 2^k == x & (2^k-1)` hold exactly when `x >= 0`.
+  Because the divisor is a nonzero constant, neither form traps where the other
+  did. Bitwise idempotence (`x&x`, `x|x`) was added as unconditional rules.
+
+DIV/MOD are not e-nodes at all — they may fault, so `eg_inst_pure_scalar`
+rejects them — and the first version of the guarded rule therefore never fired.
+The regression driver caught it (`non-negative div was not refined to a
+shift`); the rewrite is now planned per instruction against the dividend's
+e-class fact, and emission is keyed by destination value so a planned DIV/MOD
+replacement reaches the rewritten instruction stream.
+
+| check | result |
+| --- | --- |
+| `ny --backend-test=passes/scalar/egraph` | pass (incl. new guarded-div and idempotence cases) |
+| randomized expression equivalence | 256 seeds, depth 24, unchanged |
+| `knight`, `compose-local`, `unicode-identifiers`, `combs-test`, `eq-test` `.text` | byte-identical with the pass on, guarded rules off, and pass off |
+| compile time, 120-op straight-line function | 543/549/550 ms vs 548/544/554 ms with the guarded rules off |
+
+The zero byte delta is a scheduling fact, not an analysis failure: the pipeline
+runs this saturator only for functions without loops, and on those the earlier
+`const_fold`/`cse`/`peephole`/`strength_reduce` passes already canonicalize
+the arithmetic — a straight-line `band(x,255) / 8` fixture reaches the backend
+with no `idiv` at all. So this change buys compile time on pure blocks and
+correctness of the new rules, not code size on the current fixtures.
+
+Limitations, stated plainly: there is no directional `<=` relation with
+per-argument variance, so a refinement that is legal without an explicit fact
+still cannot be used; non-negativity is the only class fact (no known-bits,
+ranges, alignment, or provenance); extraction still uses a static per-op cost
+plus loop-depth/trip-hint scaling rather than measured register pressure; and
+the new rules are argumented by hand rather than discharged by an SMT bitvector
+proof. Each of those is a separate, independently testable step.
+
+## Explainable x64 missed-optimization audit (kept 2026-11-15)
+
+The x64 encoder now reports what it did and what it left on the table, in the
+terms it actually controls. `NYTRIX_AUDIT=1` prints one stable line per encoded
+function:
+
+```
+[audit] fn=main lea_copy=0 self_move=0 spill_pair=0 fallthrough_elided=9 \
+        lea_color=87 lea_staged=0
+```
+
+- `lea_color` / `lea_staged` — symbol addresses materialized directly in the
+destination's assigned color versus staged through `%rax` and then moved. This
+is an encoder *decision* counter, incremented on the path taken, so a size delta
+is attributed to the transformation instead of inferred from assembly.
+- `lea_copy` — symbol LEAs whose result has exactly one use, the adjacent COPY,
+which could be folded into that copy's register (`mach_build_vreg_use_counts`
+builds the per-vreg reference counts this needs).
+- `self_move` — COPY whose source and destination already share a physical color.
+- `spill_pair` — adjacent store/load through the same frame slot.
+- `fallthrough_elided` — unconditional edges to the following block that emit no
+`jmp`. Nonzero here is the optimization working, not a miss: it is counted so a
+regression to an emitted branch would show up as a different number.
+
+**End-to-end demonstration.** `NYTRIX_NO_LEA_COLOR=1` restores the old RAX
+staging path, which makes the detector's own counters reproduce the defect it was
+written to find:
+
+| fixture | encoding | `lea_color` | `lea_staged` | `.text` |
+| --- | --- | --- | --- | --- |
+| `knight` | in-color (kept) | 87 | 0 | 4,320 |
+| `knight` | `NYTRIX_NO_LEA_COLOR=1` | 0 | 87 | 4,584 |
+| `compose-local` | in-color (kept) | 93 | 3 | 6,424 |
+| `compose-local` | `NYTRIX_NO_LEA_COLOR=1` | 0 | 96 | 6,680 |
+
+The 87 staged materializations in `knight` cost 264 bytes (3.03 bytes each:
+the three-byte `mov` that disappears, plus layout movement); `compose-local`
+spends 256 bytes on 93 convertible sites and keeps 3 in the RAX form because the
+destination has no usable color (unassigned, `%rsp`, `%rbp`). `knight`'s
+checksum is `340233` in both encodings, so the correction is verified by
+behaviour, not by the counters agreeing with themselves.
+
+`self_move=0` and `spill_pair=0` on both fixtures are the expected end state of
+the same-color copy fold and the frame-slot work recorded above. `lea_copy=0`
+means the single-use-address-plus-COPY pattern does not occur: the remaining
+LEA+move pairs are commit staging, not machine copies.
+
+**A rejected experiment, recorded.** A fold that would have emitted such a
+single-use symbol LEA directly into the following COPY's register was implemented
+with a `NYTRIX_NO_LEA_COPY_FOLD` hatch and measured at `lea_copy=0` on both
+fixtures: zero candidates, zero bytes. By the keep-only-measured-wins rule it was
+reverted; the audit counter that would justify it is retained, so the evidence
+for re-adding it later is one `NYTRIX_AUDIT=1` run away.
+
+**A wiring bug the work exposed.** The audit was first called inside
+`if (!encoded)`, but the home-DSE analysis encodes most functions itself, so the
+call never ran and every counter read zero. It is now called after either encode
+path. That is worth remembering for any future instrumentation in this encoder:
+there are two encode entry points, not one.
+
+Cost: the audit is off unless `NYTRIX_AUDIT` is set, the environment is read once
+per function, and the walk is a single pass over the machine form the encoder has
+already visited. No persistent cache, no extra IR, no second code path.
+
+Limitations: there is no Linux `perf`/hardware-counter correlation, no automatic
+ranking or auto-apply loop, and no MIR-to-source-line attribution in the report
+(the encoder already carries `inst_offsets` and debug lines, so that is the
+natural next step). Counters go to stderr as a stable machine-readable line
+rather than into the JSON report. Performance attribution in this session is
+code size plus reference checksums under controlled A/B hatches; the host was
+loaded throughout, so no timing claim is made.
+
+## Register-allocation shape audit (2026-11-15)
+
+`NYTRIX_AUDIT=1` now runs inside `mach_encode_function`, after the GPR, FPR and
+vector allocators have been summarized and before they are freed, and appends
+the allocator's own totals to each `[audit]` line: `ra_segments`, `ra_spilled`,
+`ra_reload`, and `ra_colors` (distinct physical colors actually used). Earlier
+attempts hooked the outer encode callers, where the allocators have already
+been freed; those rows printed zero for every field. A zero row now means an
+empty allocator, not a stale hook.
+
+| fixture | `.text` | segments | spilled | reload | colors |
+| --- | --- | --- | --- | --- | --- |
+| `knight` | 4,320 | 2,202 | 1,608 | 1,600 | 42 |
+| `compose-local` | 6,424 | 2,656 | 1,686 | 1,690 | 96 |
+| `unicode-identifiers` | 2,384 | 366 | 2 | 2 | 16 |
+
+Per function in `knight`: `ny_fn_moves` has 870 segments, 769 spilled and 12
+colors; `main` has 231 segments, 35 spilled and 9 colors. The large spilled
+share in the dispatcher is the same mechanism the spill-slot coloring and
+frame-disp8 narrowing exploit, so a high `ra_spilled` value is not by itself a
+defect — it is the pressure the encoder then folds.
+
+`knight` checksum `340233` and all three `.text` sizes are byte-identical to the
+pre-audit build, so this section records measurement plumbing only, not a code
+generation change. Each function prints twice per build (two deterministic
+encode passes); the duplicate lines carry identical counters, so sum per
+function name rather than per line.
+
+Checks for this change: build clean, `--pattern x86` 223/223, `regalloc` 11/11,
+`copy` 8/8.
+
+### Probe encodes no longer count twice
+
+The duplicated audit line per function was not a second compilation pass. Home
+dead-store analysis (`mach_home_dse_analyze`) runs a throwaway *probe* encode
+inside `mach_encode_function`, then the real encode applies the dead-home
+table. The probe printed its own audit line and, worse, added its segments to
+the process-wide `mach regalloc segments/colored/spilled/reloads` counters, so
+every report about allocation counted each function twice. The encoder now has
+`suppress_stats`, set for probe encodes and cleared when a probe is reused
+(`NYTRIX_NO_HOME_DSE` already disabled the probe). After the fix, `knight`
+prints two audit lines for its two functions and `compose-local` five for five.
+
+The probe encode itself remains deliberate: without it there are no dead-home
+findings. `knight` with `NYTRIX_NO_HOME_DSE=1` grows from 4,320 to 5,600 bytes,
+so the probe still pays for itself.
+
+### Spill composition: stored-and-reloaded versus dying
+
+`[audit]` also splits `ra_spilled` into `ra_spill_live` (the segment is stored
+and later reloaded) and `ra_spill_dying` (the value dies in the segment, so no
+load is needed). A home-based count was rejected: `vreg_home_offs` is only
+populated on the home-DSE path, so counting "spills without a home" reported
+every spill as home-less.
+
+| fixture | `.text` | functions | segments | spilled | reload | colors | live | dying |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `knight` | 4,320 | 2 | 1,101 | 804 | 800 | 21 | 748 | 56 |
+| `compose-local` | 6,424 | 5 | 1,328 | 843 | 845 | 48 | 804 | 39 |
+| `unicode-identifiers` | 2,384 | 1 | 183 | 1 | 1 | 8 | 1 | 0 |
+| `combs-test` | 2,888 | 2 | 236 | 7 | 6 | 13 | 5 | 2 |
+| `eq-test` | 3,656 | 4 | 324 | 2 | 2 | 34 | 2 | 0 |
+| `unicode-debug7` | 3,032 | 1 | 251 | 0 | 0 | 9 | 0 | 0 |
+
+So roughly 93% of spilled segments in the large fixtures are real
+store-and-reload work, not live-through bookkeeping: `knight` is 748 live to 56
+dying. The high spill share is genuine pressure in the dispatchers, which is why
+the encoder-side folds (spill-slot coloring, frame disp8 narrowing, same-color
+copy folding) produced the size wins rather than allocation itself.
+
+### Rejected: call-crossing-weighted spill cost
+
+Spill cost was extended with the number of call and fixed-clobber sites inside
+candidate segments (`uses x (1 + crossings)`, saturating), with
+`NYTRIX_NO_RA_CALL_COST=1` as the A/B hatch. Measured on `knight`,
+`compose-local`, `unicode-identifiers`, `combs-test`, `eq-test` and
+`unicode-debug7`: byte-identical `.text` in every fixture, both settings. The
+existing `use_count` term is already the number of reloads a spill would cause,
+so the crossing weight never displaced a victim. Reverted: `regalloc.c` is back
+to byte-identical with its previous state (`git diff --stat` empty), and the
+crossing weight's binary search came off the eviction hot path.
+
+Final checks after the revert: build clean, `--pattern x86` 223/223,
+`regalloc` 11/11, `copy` 8/8, `--pattern codegen` 14/15 (the pre-existing
+`code/derive/dispatch/codegen-match` failure, unchanged), `knight` checksum
+`340233`, all six `.text` sizes unchanged.
+
+## SCEV: exact trip counts for `!=` loops (2026-11-15)
+
+Nikita Popov's "LLVM: Scalar evolution" describes the addrec + exit-count
+model: an induction variable is `{start,+,step}` over a loop, the backedge-taken
+count is what an exit condition bounds, and the trip count is that count plus
+one. Nytrix's `nyr_scev_analyze` already derived counts for `<`, `<=`, `>` and
+`>=` with constant start, limit and step, but rejected `!=` outright. C loops
+written `for (i = 0; i != n; ++i)` or `while (i != n)` therefore got no trip
+count, `nyr_scev_lite` exported no range fact for their induction variable, and
+bounds-check elimination had to keep runtime guards it could otherwise drop.
+
+`compute_trip` now counts a `NYIR_CMP_NE` loop only when the recurrence lands
+exactly on the limit: `limit - start` must be a whole multiple of `|step|`, the
+step must travel toward the limit, and the resulting exit value
+(`start + n*step`) must equal the limit and stay representable in i64. A loop
+that misses the limit continues until the i64 recurrence wraps, so it must stay
+unknown; the divisibility test, the direction test, and the landing check are
+each necessary. Downward loops use the same rule with a negative step, which
+keeps the article's point that count-down loops should not be second-class.
+
+`passes/loops/scev_ne_trip_count` covers three exact cases (unit step,
+divisible `+2`, downward `-2`) and four that must remain unknown
+(non-divisible in both directions, a step travelling away from the limit, and an
+entry value that already satisfies the exit test). For each exact case it checks
+the derived count, the exit value returned by the reference interpreter, and the
+exported induction-variable range `[min(start, limit), max(start, limit)]`; for
+each unknown case it checks that `scev_lite` exports **no** range fact, so a
+dropped guard cannot follow from a guessed count.
+
+Measured effect on the existing fixtures: `.text` is unchanged at 4,320
+(`knight`), 6,424 (`compose-local`), 2,384 (`unicode-identifiers`) and 2,888
+(`combs-test`), with `knight` checksum `340233`, so this is a capability
+extension on loop shapes those fixtures do not contain rather than a size win.
+The existing `passes/loops/scev_tbuf_length_range` case still passes, and
+`--pattern x86` remains 223/223.
+
+Article items that remain unimplemented, and why: symbolic exit counts (the
+article's `symbolic max exit count`) cannot be represented because
+`nyr_range_t` holds constants only, so `i != n` for a parameter `n` still yields
+no count; there is no known-multiple tracking, no nowrap/poison distinction
+(NYIR has no poison values), and no SCEV expander, so "SCEV at scope" is only
+used as the exhaustion-value singleton that already existed for single-exit
+loops. The constant-range half of the symbolic limit case is addressed in the
+next section.
+
+## SCEV: range-derived bounds for symbolic loops (2026-11-15)
+
+Popov's article treats an induction variable as `{start,+,step}` and its exit
+count as a first-class expression. Nytrix has no symbolic bound type:
+`nyr_range_t` is a constant interval that the binary IR format serializes, so
+`i < n` with a parameter `n` produced no count and no range fact. This change
+gets the useful half without inventing a type. When the limit is loop invariant
+(defined outside the loop, dominating the header) and the start and limit both
+have proven ranges, a constant interval for the induction variable and an upper
+bound on iterations follow from those ranges.
+
+`compute_range_bounds` exports three facts on `nyr_scev_loop_t`: `body_min` /
+`body_max` for values that pass the exit test, `iv_min` / `iv_max` for every
+observation including the final failing test (the exit block observes that
+value, so the phi's range fact must cover it), and `trip_bound` for consumers
+that only need a ceiling. `compute_trip` remains the exact-count path, so no
+consumer that requires an exact count receives an inexact one.
+
+Soundness conditions, each enforced: the start and limit definitions must lie
+outside the natural loop and dominate the header (a per-iteration limit has no
+static bound); the predicate must match the step direction (`<` / `<=`
+ascending, `>` / `>=` descending), because the opposite combination never exits
+on the tested edge; and `body_max + step` (or `body_min + step`) must stay
+representable in i64, because wrapping would let the loop revisit values outside
+any claimed interval. All arithmetic is 128-bit and checked.
+`NYTRIX_NO_SCEV_RANGE_BOUNDS=1` disables the derivation.
+
+A bug was found in the first attempt: bounds were computed on the pass-0 analysis
+record, which SCEV discards, because only pass 1 appends the loop record. The
+call moved to pass 1, which is why the first run reported no bounds at all. The
+negative assertions in the suite are what made that visible; a test that only
+checked accepted loops would have passed while computing into a dead record.
+
+`passes/loops/scev_range_bounds` asserts the body and whole-value intervals, the
+trip ceiling, the in-body `nyr_scev_affine_at` query (the path bounds-check
+elimination uses) and the phi range fact for three loops (ascending `<`,
+ascending `<=` with step 2, descending `>`), and asserts that an unbounded limit
+and an `INT64_MAX`-reaching `<=` limit export nothing at all.
+
+Measured: `.text` unchanged at 4,320 (`knight`), 6,424 (`compose-local`), 2,384
+(`unicode-identifiers`), 2,888 (`combs-test`), 3,656 (`eq-test`) and 3,032
+(`unicode-debug7`); `knight` checksum `340233`; five verification suites green
+(`invariants`, `rules`, `differential`, `passes`, `mach_invariants`);
+`--pattern x86` 223/223. `passes/loops/irce` has no driver on disk, so the
+runner's status 2 for that name means "unknown test", not a failure; IRCE
+coverage comes from the loop drivers that exist.
+
+Still missing: exact symbolic exit counts (an expression such as `n - a`, not an
+interval), known-multiple tracking, and SCEV expansion.

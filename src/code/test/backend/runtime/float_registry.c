@@ -31,12 +31,26 @@ int main(void) {
   }
   if (rt_float_registry_has(8))
     return 1;
+  /*
+   * A freed pooled box loses its provenance. An interned box is permanent:
+   * freeing it is a no-op and it keeps its value. Freeing twice is harmless.
+   */
+  size_t released = 0;
   for (size_t i = 0; i < count; ++i) {
     rt_flt_free(values[i]);
-    if (rt_float_registry_has((uintptr_t)values[i])) {
-      fputs("freed float still registered\n", stderr);
+    rt_flt_free(values[i]);
+    if (!rt_float_registry_has((uintptr_t)values[i])) {
+      ++released;
+      continue;
+    }
+    if (rt_flt_unbox_double(values[i]) != (double)i + 0.25) {
+      fputs("float still registered after free lost its value\n", stderr);
       return 1;
     }
+  }
+  if (released < 4096) {
+    fputs("pooled floats were not released\n", stderr);
+    return 1;
   }
   /*
    * Reuse pooled slots after removal and tombstone cleanup.

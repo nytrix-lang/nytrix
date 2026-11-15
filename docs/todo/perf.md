@@ -173,9 +173,108 @@ homes are untouched, and the frame size does not change.
 operand reference instead of only home-using vregs cost `unicode-identifiers` 8
 bytes, because resident values have many operands and no home traffic.
 
-The remaining ceiling is the low 128 bytes themselves: they also hold the
-callee-save slots and the source frame slots, so only a handful of 8-byte homes
-fit in disp8 reach. Ordering frame slots by access frequency is the next lever.
+The remaining ceiling is the low 128 bytes themselves. Measured layout on the
+two hot fixtures: `knight` has no frame slots at all and `compose-local` none
+reachable, so every offset from 48 (resp. 24) down is a vreg home; the window
+opens at `8 * cs_slots` because the callee-save slots sit directly under `%rbp`.
+That leaves 80 (resp. 104) bytes, i.e. 10 (resp. 13) homes, and both are now
+filled with the hottest values: `knight` has 178 of 209 frame accesses in disp8
+reach (was 132), `compose-local` 173 of 197 (was 166). Ordering frame slots would
+buy nothing here; the next lever has to come from non-frame encoding.
+
+### Kept 2026-11-15: x64 missed-optimization audit (`NYTRIX_AUDIT=1`)
+
+The encoder now emits one stable line per function naming what it did and what it
+left on the table: `lea_copy`, `self_move`, `spill_pair`,
+`fallthrough_elided`, and the decision counters `lea_color` / `lea_staged`
+(symbol addresses materialized in the destination color versus staged through
+`%rax`). The decision counters are the point: they attribute a size delta to a
+transformation instead of leaving it to be inferred from assembly.
+
+| fixture | in-color | `lea_staged` | `NYTRIX_NO_LEA_COLOR=1` | `.text` |
+| --- | --- | --- | --- | --- |
+| `knight` | 87 | 0 | 87 | 4,320 vs 4,584 (-264) |
+| `compose-local` | 93 | 3 | 96 | 6,424 vs 6,680 (-256) |
+
+`knight`'s checksum `340233` is identical in both encodings, so the correction is
+verified by behaviour. `self_move=0` and `spill_pair=0` are the expected end
+state of the same-color copy fold and the frame-slot work; `lea_copy=0` shows the
+single-use-address-plus-COPY pattern does not occur, so the fold written for it
+was measured at zero candidates and reverted (its counter stays as the evidence
+for re-adding it).
+
+The audit is opt-in and reads its environment once per function; with it unset
+the pass does not run at all. Wiring note for future instrumentation: this
+encoder has two encode entry points (`mach_encode_function` and the home-DSE
+analysis), and an audit placed only in the fallback branch silently reports
+nothing.
+
+Open: correlate with Linux `perf`/hardware counters rather than code size alone,
+fold the counters into the JSON report, add MIR-to-source-line attribution using
+the existing `inst_offsets` and debug lines, and rank the findings so the largest
+recoverable byte count is named first.
+
+### Kept 2026-11-15: e-graph saturator gets hash-consing, batched rebuild, guarded arithmetic
+
+The mid-pipeline saturator (`passes/scalar/egraph.c`) interned nodes with a
+linear scan and closed congruence by comparing every pair of nodes each
+iteration — quadratic in the block. Interning now probes an open-addressing
+table keyed by `(op, imm, canonical children)`, closure is one egg-style
+`eg_rebuild` per iteration, and union-find merges by rank.
+
+On top of that, class non-negativity is a fixpoint (`and` inherits it from
+either operand, COPY forwards it, constants carry it), which justifies rewrites
+that are not equalities: `x / 2^k -> x >> k` and `x % 2^k -> x & (2^k-1)` for
+`x >= 0`, with a nonzero constant divisor so no trap moves. DIV/MOD are not
+e-nodes (they may fault), so that rewrite is planned per instruction against
+the dividend's class rather than through extraction — the regression driver
+caught the first attempt silently never firing. `x&x` and `x|x` became
+unconditional rules.
+
+`ny --backend-test=passes/scalar/egraph` passes, including the new cases that
+assert the guard fires for `band(x,255)/8` and does *not* fire for an unknown
+sign; the 256-seed randomized equivalence check still passes. `.text` is
+byte-identical with the pass on, guarded rules off, and pass off across
+`knight`, `compose-local`, `unicode-identifiers`, `combs-test` and `eq-test`,
+and 120-op straight-line compile time is 543-550 ms either way. The pass runs
+only on loop-free functions, and earlier passes already remove the division
+there, so this round buys compile time and rule correctness rather than size.
+
+Open: a real directional `<=` relation with per-argument variance and
+refinement-aware extraction, richer class facts (known bits, ranges,
+alignment, provenance), register-pressure-aware conversion cost, and SMT
+discharge of the guarded rules instead of hand arguments.
+
+### Kept 2026-11-15: symbol addresses go straight to the destination color
+
+169 of `knight`'s 175 LEAs were `leaq sym(%rip),%rax`, one per address-of-global
+use, and 87 of them were immediately followed by a three-byte move of that RAX
+result into the register the value actually needed. That move was
+`mach_commit_vreg` staging, not a machine COPY. The symbol path now emits into
+the assigned color directly, as the indexed-LEA paths in the same case already
+did:
+
+| fixture | RAX staging | in-color |
+| --- | --- | --- |
+| `knight` | 4,584 | 4,320 (-5.8%) |
+| `compose-local` | 6,680 | 6,424 (-3.8%) |
+| `unicode-identifiers` | 2,640 | 2,384 (-9.7%) |
+| `combs-test` | 3,160 | 2,888 (-8.6%) |
+| `eq-test` | 3,928 | 3,656 (-6.9%) |
+| `unicode-debug7` | 3,296 | 3,032 (-8.0%) |
+
+`NYTRIX_NO_LEA_COLOR=1` restores RAX staging and reproduces the old sizes exactly,
+so every row is A/B-able from one binary. Checksum `340233` unchanged; `--pattern
+x86` 223/223, `regalloc` 11/11, `copy` 8/8, `codegen` 14/15; full sweep
+2,290/2,370 with the same 80 load-induced failures as the baseline binary.
+
+Audited and rejected on the way, so they are not worth re-trying blindly: loop
+alignment padding is at most 7 bytes per run (a max-skip policy saves zero); only
+1 of `knight`'s 67 branches fits rel8; all 169 symbol targets are distinct, so
+there is no duplicate address to CSE; and the hot fixtures have no frame slots to
+reorder. The next lever is the 22/35 surviving LEA+move pairs, where the LEA's
+own color is RAX and the following move is a genuine COPY of a single-use
+address.
 
 ### Current evidence - still open
 
@@ -375,3 +474,51 @@ benchmark and inspect timed-kernel assembly only after correctness is restored.
 
 Dated measurements and fixes are recorded in
 [Recorded measurements](../learn/measurements.md#compiler-build-time-fixes-2026-11-12).
+
+## Register allocation: measured gaps (2026-11-15)
+
+Audited `src/code/backend/lower/regalloc.c` against the SSA-allocator spec that
+used to live in `docs/todo/ssa.md` (now removed). Already implemented and kept:
+loop-depth plus profile-heat, next-use distance and use-count eviction scoring;
+tied-input affinity and dead-input coalescing; callee-save preference under calls;
+fixed-clobber handling; deterministic end/vreg tie-breaks; per-class allocation
+for GPR, FPR and vector with separate homes.
+
+Closed on 2026-11-15 (numbers and A/B details in
+`docs/learn/measurements.md`, "Register-allocation shape audit"):
+
+1. Spill composition is measured, not assumed. `ra_spill_live`/`ra_spill_dying`
+   split the spilled count; `knight` is 748 live to 56 dying, so the pressure is
+   real store-and-reload work. A "spill without a home" count was dropped as
+   unmeasurable: `vreg_home_offs` is only populated for home-DSE.
+2. No treescan allocator, as a decision rather than an omission. The existing
+   scan already uses loop depth, profile heat, next-use distance and use count,
+   verifies its own interference (`regalloc_verify_mode`), and the encoder
+   repairs local evictions afterwards (`nyr_mach_regalloc_recolor_locals`).
+   Replacing that verified core with a new sweep on a host contended by other
+   agents would ship unmeasurable risk, which the repository's keep-only-if-
+   measured rule forbids. Revisit only with an idle host and a runtime A/B.
+3. Call-crossing-weighted spill cost was implemented, measured as byte-
+   identical on six fixtures (the use-count term is already the reload count),
+   and reverted; `regalloc.c` is byte-identical with its previous state.
+4. The duplicate audit line was home-DSE's probe encode, and it also double-
+   counted the process-wide regalloc stats, so released `mach regalloc` reports
+   overstated every function's segments and spills. Probe encodes now set
+   `suppress_stats`; a reused probe clears it. Allocation time can therefore be
+   compared against `NYTRIX_NO_HOME_DSE=1` (one encode) or the default two-
+   encode path, but the two must not be mixed.
+
+Use `NYTRIX_AUDIT=1` and compare `ra_segments`/`ra_spilled`/`ra_spill_live`/
+`ra_colors` per function name when changing allocation.
+
+## SCEV: remaining symbolic work
+
+- Exact symbolic exit counts (`n - a` as a value rather than an interval) need a
+  symbolic range type; `nyr_range_t` is a constant interval by design and is
+  part of the serialized IR format. Range-derived intervals now cover the
+  bounds case (see `docs/learn/measurements.md`, 2026-11-15).
+- Known multiples (`{0,+,3}` is always a multiple of three) has no consumer yet.
+  Add it together with the first div/mod strength-reduction query that wants it,
+  rather than carrying dead metadata.
+- Loop guards proven from range facts are used only as in-body intervals; the
+  after-loop exhaustion singleton still requires an exact trip count.

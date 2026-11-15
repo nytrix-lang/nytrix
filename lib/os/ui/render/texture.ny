@@ -411,7 +411,8 @@ fn srgb_to_linear_chan(any x) f64 {
 
 @jit
 fn _linear_to_srgb_chan_f64(f64 c) f64 {
-   if is_nan(c) { c = 0.0 }
+   ;; `c != c` is the NaN test on a typed float; is_nan() boxes its argument.
+   if c != c { c = 0.0 }
    if c < 0.0 { c = 0.0 } elif c > 1.0 { c = 1.0 }
    if c <= 0.0031308 { return c * 12.92 }
    1.055 * float(__flt_pow(c, 1.0 / 2.4)) - 0.055
@@ -425,8 +426,8 @@ fn linear_to_srgb_chan(any x) f64 {
 
 @jit
 fn _linear_to_srgb_u8_f64(f64 x) int {
-   def y = _linear_to_srgb_chan_f64(x)
-   if is_nan(y) { return 0 }
+   def f64 y = _linear_to_srgb_chan_f64(x)
+   if y != y { return 0 }
    clamp(int(y * 255.0 + 0.5), 0, 255)
 }
 
@@ -727,106 +728,122 @@ fn _rgba_image_result(any pixels, int w, int h) dict {
 
 fn generate_env_image(int kind=0, int w=1024, int h=512) any {
    "Generates a procedural RGBA environment image."
-   def iw, ih = max(1, int(w)), max(1, int(h))
+   ;; Every local in the pixel loop is typed: untyped multi-assignments made
+   ;; each step a boxed dynamic operation (about 120 ms for a 256x128 image,
+   ;; paid on the first frame of a scene that wants a generated environment).
+   def int iw = max(1, int(w))
+   def int ih = max(1, int(h))
    def pixels = malloc(iw * ih * 4)
    if !pixels { return 0 }
-   def fw, fh = float(iw), float(ih)
-   mut y = 0
+   def f64 fw = float(iw)
+   def f64 fh = float(ih)
+   mut int y = 0
    while y < ih {
-      def v = (float(y) + 0.5) / fh
-      def elev = (0.5 - v) * 3.141592653589793
-      def dy = sin(elev)
-      def sky_t = clamp(dy * 0.5 + 0.5, 0.0, 1.0)
-      def top_t = clamp(dy, 0.0, 1.0)
-      def floor_t = clamp(-dy, 0.0, 1.0)
-      def row = y * iw * 4
-      mut x = 0
+      def f64 v = (float(y) + 0.5) / fh
+      def f64 elev = (0.5 - v) * 3.141592653589793
+      def f64 dy = sin(elev)
+      def f64 sky_t = clamp(dy * 0.5 + 0.5, 0.0, 1.0)
+      def f64 top_t = clamp(dy, 0.0, 1.0)
+      def f64 floor_t = clamp(-dy, 0.0, 1.0)
+      def int row = y * iw * 4
+      mut int x = 0
       while x < iw {
-         def u = (float(x) + 0.5) / fw
-         mut c0, c1 = 0.0, 0.0
-         mut c2 = 0.0
+         def f64 u = (float(x) + 0.5) / fw
+         mut f64 c0 = 0.0
+         mut f64 c1 = 0.0
+         mut f64 c2 = 0.0
          if kind == 0 {
-            c0, c1 = (0.58 * (1.0 - sky_t)) + ((0.78 + 0.035 * top_t) * sky_t), (0.60 * (1.0 - sky_t)) + ((0.80 + 0.036 * top_t) * sky_t)
+            c0 = (0.58 * (1.0 - sky_t)) + ((0.78 + 0.035 * top_t) * sky_t)
+            c1 = (0.60 * (1.0 - sky_t)) + ((0.80 + 0.036 * top_t) * sky_t)
             c2 = (0.66 * (1.0 - sky_t)) + ((0.86 + 0.040 * top_t) * sky_t)
-            def key1_dx, key1_dy = (u - 0.74) / 0.055, (v - 0.27) / 0.085
-            def key1 = exp(-(key1_dx * key1_dx + key1_dy * key1_dy))
-            def key2_dx = (u - 0.28) / 0.070
-            def key2_dy = (v - 0.30) / 0.095
-            def key2 = exp(-(key2_dx * key2_dx + key2_dy * key2_dy))
-            def top_dy = (v - 0.17) / 0.040
-            def top_dx = (u - 0.50) / 0.32
-            def top_dx2 = top_dx * top_dx
-            def top_strip = exp(-(top_dy * top_dy)) * exp(-(top_dx2 * top_dx2 * top_dx2))
-            def horizon_dy = (v - 0.50) / 0.11
-            def horizon = exp(-(horizon_dy * horizon_dy)) * 0.012
+            def f64 key1_dx = (u - 0.74) / 0.055
+            def f64 key1_dy = (v - 0.27) / 0.085
+            def f64 key1 = exp(-(key1_dx * key1_dx + key1_dy * key1_dy))
+            def f64 key2_dx = (u - 0.28) / 0.070
+            def f64 key2_dy = (v - 0.30) / 0.095
+            def f64 key2 = exp(-(key2_dx * key2_dx + key2_dy * key2_dy))
+            def f64 top_dy = (v - 0.17) / 0.040
+            def f64 top_dx = (u - 0.50) / 0.32
+            def f64 top_dx2 = top_dx * top_dx
+            def f64 top_strip = exp(-(top_dy * top_dy)) * exp(-(top_dx2 * top_dx2 * top_dx2))
+            def f64 horizon_dy = (v - 0.50) / 0.11
+            def f64 horizon = exp(-(horizon_dy * horizon_dy)) * 0.012
             c0 += key1 * 0.10 + key2 * 0.08 + top_strip * 0.034 + horizon
             c1 += key1 * 0.10 + key2 * 0.08 + top_strip * 0.034 + horizon
             c2 += key1 * 0.11 + key2 * 0.09 + top_strip * 0.038 + horizon
          } elif kind == 1 {
-            c0, c1 = 0.70 + 0.15 * top_t - 0.08 * floor_t, 0.66 + 0.14 * top_t - 0.07 * floor_t
+            c0 = 0.70 + 0.15 * top_t - 0.08 * floor_t
+            c1 = 0.66 + 0.14 * top_t - 0.07 * floor_t
             c2 = 0.74 + 0.16 * top_t - 0.04 * floor_t
-            def broad1_dx, broad1_dy = (u - 0.72) / 0.18, (v - 0.24) / 0.16
-            def broad1 = exp(-(broad1_dx * broad1_dx + broad1_dy * broad1_dy))
-            def broad2_dx = (u - 0.28) / 0.18
-            def broad2_dy = (v - 0.30) / 0.18
-            def broad2 = exp(-(broad2_dx * broad2_dx + broad2_dy * broad2_dy))
-            def top_dy = (v - 0.16) / 0.040
-            def top_dx = (u - 0.50) / 0.34
-            def top_dx2 = top_dx * top_dx
-            def top_strip = exp(-(top_dy * top_dy)) * exp(-(top_dx2 * top_dx2 * top_dx2))
-            def horizon_dy = (v - 0.56) / 0.14
-            def horizon = exp(-(horizon_dy * horizon_dy))
-            def floor_dy = (v - 0.82) / 0.16
-            def warm_floor = exp(-(floor_dy * floor_dy))
+            def f64 broad1_dx = (u - 0.72) / 0.18
+            def f64 broad1_dy = (v - 0.24) / 0.16
+            def f64 broad1 = exp(-(broad1_dx * broad1_dx + broad1_dy * broad1_dy))
+            def f64 broad2_dx = (u - 0.28) / 0.18
+            def f64 broad2_dy = (v - 0.30) / 0.18
+            def f64 broad2 = exp(-(broad2_dx * broad2_dx + broad2_dy * broad2_dy))
+            def f64 top_dy = (v - 0.16) / 0.040
+            def f64 top_dx = (u - 0.50) / 0.34
+            def f64 top_dx2 = top_dx * top_dx
+            def f64 top_strip = exp(-(top_dy * top_dy)) * exp(-(top_dx2 * top_dx2 * top_dx2))
+            def f64 horizon_dy = (v - 0.56) / 0.14
+            def f64 horizon = exp(-(horizon_dy * horizon_dy))
+            def f64 floor_dy = (v - 0.82) / 0.16
+            def f64 warm_floor = exp(-(floor_dy * floor_dy))
             c0 += broad1 * 0.16 + broad2 * 0.12 + top_strip * 0.08 + horizon * 0.06 + warm_floor * 0.05
             c1 += broad1 * 0.12 + broad2 * 0.10 + top_strip * 0.06 + horizon * 0.04 + warm_floor * 0.03
             c2 += broad1 * 0.18 + broad2 * 0.16 + top_strip * 0.10 + horizon * 0.08 + warm_floor * 0.05
          } elif kind == 2 {
-            mut l = 0.30 + 0.42 * top_t + 0.02 * floor_t
-            def key_left_dx, key_left_dy = (u - 0.22) / 0.090, (v - 0.23) / 0.085
-            def key_left = exp(-(key_left_dx * key_left_dx + key_left_dy * key_left_dy))
-            def key_right_dx = (u - 0.78) / 0.095
-            def key_right_dy = (v - 0.24) / 0.090
-            def key_right = exp(-(key_right_dx * key_right_dx + key_right_dy * key_right_dy))
-            def top_dy, top_dx = (v - 0.15) / 0.070, (u - 0.50) / 0.42
-            def top_dx2 = top_dx * top_dx
-            def top_strip = exp(-(top_dy * top_dy)) * exp(-(top_dx2 * top_dx2))
-            def mid_dy, mid_dx = (v - 0.44) / 0.16, (u - 0.50) / 0.36
-            def mid_dx2 = mid_dx * mid_dx
-            def mid_soft = exp(-(mid_dy * mid_dy)) * exp(-(mid_dx2 * mid_dx2))
-            def floor_dy = (v - 0.82) / 0.18
-            def floor_soft = exp(-(floor_dy * floor_dy))
-            def center_shadow_x = max(abs((u - 0.50) / 0.25), abs((v - 0.63) / 0.30))
-            def center_shadow_x2 = center_shadow_x * center_shadow_x
-            def center_shadow = exp(-(center_shadow_x2 * center_shadow_x2))
+            mut f64 l = 0.30 + 0.42 * top_t + 0.02 * floor_t
+            def f64 key_left_dx = (u - 0.22) / 0.090
+            def f64 key_left_dy = (v - 0.23) / 0.085
+            def f64 key_left = exp(-(key_left_dx * key_left_dx + key_left_dy * key_left_dy))
+            def f64 key_right_dx = (u - 0.78) / 0.095
+            def f64 key_right_dy = (v - 0.24) / 0.090
+            def f64 key_right = exp(-(key_right_dx * key_right_dx + key_right_dy * key_right_dy))
+            def f64 top_dy = (v - 0.15) / 0.070
+            def f64 top_dx = (u - 0.50) / 0.42
+            def f64 top_dx2 = top_dx * top_dx
+            def f64 top_strip = exp(-(top_dy * top_dy)) * exp(-(top_dx2 * top_dx2))
+            def f64 mid_dy = (v - 0.44) / 0.16
+            def f64 mid_dx = (u - 0.50) / 0.36
+            def f64 mid_dx2 = mid_dx * mid_dx
+            def f64 mid_soft = exp(-(mid_dy * mid_dy)) * exp(-(mid_dx2 * mid_dx2))
+            def f64 floor_dy = (v - 0.82) / 0.18
+            def f64 floor_soft = exp(-(floor_dy * floor_dy))
+            def f64 center_shadow_x = max(abs((u - 0.50) / 0.25), abs((v - 0.63) / 0.30))
+            def f64 center_shadow_x2 = center_shadow_x * center_shadow_x
+            def f64 center_shadow = exp(-(center_shadow_x2 * center_shadow_x2))
             l += key_left * 1.05 + key_right * 1.00 + top_strip * 0.24 + mid_soft * 0.10 + floor_soft * 0.035
             l -= center_shadow * 0.035
             l = max(l, 0.075)
-            def warm = key_left * 0.035 + floor_t * 0.018
-            def cool = key_right * 0.025 + top_t * 0.020
-            c0, c1 = l * 1.01 + warm, l * 1.00
+            def f64 warm = key_left * 0.035 + floor_t * 0.018
+            def f64 cool = key_right * 0.025 + top_t * 0.020
+            c0 = l * 1.01 + warm
+            c1 = l * 1.00
             c2 = l * 1.02 + cool
          } else {
-            c0, c1 = 0.18 + 0.08 * sky_t - 0.02 * floor_t, 0.18 + 0.08 * sky_t - 0.02 * floor_t
+            c0 = 0.18 + 0.08 * sky_t - 0.02 * floor_t
+            c1 = 0.18 + 0.08 * sky_t - 0.02 * floor_t
             c2 = 0.20 + 0.09 * sky_t - 0.02 * floor_t
-            def soft1_dx, soft1_dy = (u - 0.24) / 0.060, (v - 0.23) / 0.055
-            def soft1 = exp(-(soft1_dx * soft1_dx + soft1_dy * soft1_dy))
-            def soft2_dx = (u - 0.76) / 0.060
-            def soft2_dy = (v - 0.23) / 0.055
-            def soft2 = exp(-(soft2_dx * soft2_dx + soft2_dy * soft2_dy))
-            def fill_dx = (u - 0.50) / 0.20
-            def fill_dy = (v - 0.19) / 0.08
-            def fill = exp(-(fill_dx * fill_dx + fill_dy * fill_dy))
-            def warm_dx = (u - 0.50) / 0.30
-            def warm_dy = (v - 0.74) / 0.16
-            def warm = exp(-(warm_dx * warm_dx + warm_dy * warm_dy))
-            def horizon_dy = (v - 0.50) / 0.090
-            def horizon = exp(-(horizon_dy * horizon_dy))
+            def f64 soft1_dx = (u - 0.24) / 0.060
+            def f64 soft1_dy = (v - 0.23) / 0.055
+            def f64 soft1 = exp(-(soft1_dx * soft1_dx + soft1_dy * soft1_dy))
+            def f64 soft2_dx = (u - 0.76) / 0.060
+            def f64 soft2_dy = (v - 0.23) / 0.055
+            def f64 soft2 = exp(-(soft2_dx * soft2_dx + soft2_dy * soft2_dy))
+            def f64 fill_dx = (u - 0.50) / 0.20
+            def f64 fill_dy = (v - 0.19) / 0.08
+            def f64 fill = exp(-(fill_dx * fill_dx + fill_dy * fill_dy))
+            def f64 warm_dx = (u - 0.50) / 0.30
+            def f64 warm_dy = (v - 0.74) / 0.16
+            def f64 warm = exp(-(warm_dx * warm_dx + warm_dy * warm_dy))
+            def f64 horizon_dy = (v - 0.50) / 0.090
+            def f64 horizon = exp(-(horizon_dy * horizon_dy))
             c0 += soft1 * 1.14 + soft2 * 1.14 + fill * 0.30 + warm * 0.04 + horizon * 0.03
             c1 += soft1 * 1.14 + soft2 * 1.14 + fill * 0.30 + warm * 0.04 + horizon * 0.03
             c2 += soft1 * 1.16 + soft2 * 1.16 + fill * 0.31 + warm * 0.03 + horizon * 0.04
          }
-         def p = row + x * 4
+         def int p = row + x * 4
          store8(pixels, _linear_to_srgb_u8_f64(c0), p + 0)
          store8(pixels, _linear_to_srgb_u8_f64(c1), p + 1)
          store8(pixels, _linear_to_srgb_u8_f64(c2), p + 2)

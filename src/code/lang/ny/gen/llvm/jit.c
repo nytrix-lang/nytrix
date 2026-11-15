@@ -1001,6 +1001,8 @@ void ny_jit_add_runtime_symbols(void) {
   LLVMAddSymbol("rt_tbuf_set_f64_bits",
                 (void *)(uintptr_t)rt_tbuf_set_f64_bits);
   LLVMAddSymbol("rt_sin_f64", (void *)(uintptr_t)rt_sin_f64);
+  LLVMAddSymbol("rt_exp_f64", (void *)(uintptr_t)rt_exp_f64);
+  LLVMAddSymbol("rt_log_f64", (void *)(uintptr_t)rt_log_f64);
   LLVMAddSymbol("rt_cos_f64", (void *)(uintptr_t)rt_cos_f64);
   LLVMAddSymbol("rt_f64_round", (void *)(uintptr_t)rt_f64_round);
   LLVMAddSymbol("rt_f64_pow", (void *)(uintptr_t)rt_f64_pow);
@@ -1431,6 +1433,10 @@ void ny_jit_define_runtime_trampolines(LLVMModuleRef mod) {
                                    (void *)(uintptr_t)rt_bigfloat_to_str);
   ny_jit_define_runtime_trampoline(mod, "rt_sin_f64",
                                    (void *)(uintptr_t)rt_sin_f64);
+  ny_jit_define_runtime_trampoline(mod, "rt_exp_f64",
+                                   (void *)(uintptr_t)rt_exp_f64);
+  ny_jit_define_runtime_trampoline(mod, "rt_log_f64",
+                                   (void *)(uintptr_t)rt_log_f64);
   ny_jit_define_runtime_trampoline(mod, "rt_cos_f64",
                                    (void *)(uintptr_t)rt_cos_f64);
   ny_jit_define_runtime_trampoline(mod, "rt_bounds_check",

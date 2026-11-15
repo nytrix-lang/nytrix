@@ -23,6 +23,18 @@ typedef struct {
   bool limit_is_const;
   bool trip_count_known;
   uint64_t trip_count;
+  /* Constant bounds from operand range facts, for loops whose start or limit
+   * is symbolic. `body_min/body_max` cover values that pass the exit test;
+   * `iv_min/iv_max` also cover the final failing test, which the exit block
+   * observes and the phi's range fact must include. */
+  bool body_bounds_known;
+  int64_t body_min;
+  int64_t body_max;
+  bool iv_bounds_known;
+  int64_t iv_min;
+  int64_t iv_max;
+  bool trip_bound_known;
+  uint64_t trip_bound;
 } nyr_scev_loop_t;
 
 /*

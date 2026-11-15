@@ -218,6 +218,47 @@ void rt_map_oracle_init(void);
 void rt_map_oracle_add(uintptr_t start, size_t size);
 
 /*
+ * Every page of every registered runtime range, as a two-level bitmap: one
+ * 32 KiB leaf per GiB of address space that the runtime has touched.  The
+ * exact-range table above holds 256 entries; a long-running program fills
+ * it, and from then on each check of a newer heap page scanned the table,
+ * missed, and fell back to a mincore probe (20-24% of the samples in a UI
+ * frame).  A bit, once set, stays set: like the table, this records ranges
+ * the runtime owns for the life of the process.  Addresses above 47 bits are
+ * not recorded and take the ordinary path.
+ */
+#define RT_ORACLE_PAGE_ROOT_BITS 17u
+#define RT_ORACLE_PAGE_LEAF_BITS 18u
+#define RT_ORACLE_PAGE_LEAF_WORDS ((1u << RT_ORACLE_PAGE_LEAF_BITS) / 64u)
+extern _Atomic(_Atomic(uint64_t) *)
+    g_rt_oracle_pages[1u << RT_ORACLE_PAGE_ROOT_BITS];
+
+static inline int rt_oracle_page_known(uintptr_t page) {
+  uintptr_t root = page >> RT_ORACLE_PAGE_LEAF_BITS;
+  if (root >> RT_ORACLE_PAGE_ROOT_BITS)
+    return 0;
+  _Atomic(uint64_t) *leaf =
+      atomic_load_explicit(&g_rt_oracle_pages[root], memory_order_acquire);
+  if (!leaf)
+    return 0;
+  uintptr_t bit = page & ((1u << RT_ORACLE_PAGE_LEAF_BITS) - 1u);
+  return (int)((atomic_load_explicit(&leaf[bit >> 6], memory_order_relaxed) >>
+                (bit & 63u)) &
+               1u);
+}
+
+/* True when every page of the inclusive byte range [p, e] is registered. */
+static inline int rt_oracle_pages_contain(uintptr_t p, uintptr_t e) {
+  uintptr_t first = p >> 12, last = e >> 12;
+  if (last - first > 64u)
+    return 0; /* large spans keep using the range tables */
+  for (uintptr_t page = first; page <= last; ++page)
+    if (!rt_oracle_page_known(page))
+      return 0;
+  return 1;
+}
+
+/*
  * Per-thread cache of recently confirmed pages, for raw load/store only.  Those
  * hit the same few pages repeatedly; without this each one rescans the oracle's
  * range table, and memory mapped after its snapshot (Vulkan buffers, foreign
@@ -289,6 +330,10 @@ static inline int rt_oracle_extra_contains(uintptr_t p, uintptr_t e,
       &g_rt_oracle_extra_hints[(page ^ (page >> 8)) &
                                (RT_ORACLE_EXTRA_HINTS - 1u)];
   int single_page = (e >> 12) == page;
+  /* The bitmap holds every registered page, so for an ordinary span it is
+   * the whole answer; only a span too large for it scans the range table. */
+  if ((e >> 12) - page <= 64u)
+    return rt_oracle_pages_contain(p, e);
   if (hint->page == page) {
     if (hint->slot) {
       const rt_oracle_range_t *r = &g_rt_oracle_extra[hint->slot - 1u];
@@ -348,6 +393,16 @@ static inline int rt_map_oracle_check(uintptr_t p, size_t n) {
   uint32_t cnt = g_rt_oracle_snapshot_count;
   if (cnt == 0)
     return 0;
+  /* Probes cluster on a few mappings (the program image, the JIT's data,
+   * the first heap); remember the last two snapshot ranges that answered
+   * before paying for the binary search. The snapshot never changes. */
+  static __thread uint32_t recent_range[2] = {0, 0};
+  for (uint32_t k = 0; k < 2u; ++k) {
+    uint32_t idx = recent_range[k];
+    if (idx < cnt && p >= g_rt_oracle_snapshot[idx].start &&
+        e <= g_rt_oracle_snapshot[idx].end)
+      return 1;
+  }
   uint32_t lo2 = 0, hi2 = cnt;
   while (lo2 < hi2) {
     uint32_t mid = lo2 + (hi2 - lo2) / 2;
@@ -358,8 +413,11 @@ static inline int rt_map_oracle_check(uintptr_t p, size_t n) {
   }
   if (lo2 > 0) {
     const rt_oracle_range_t *r = &g_rt_oracle_snapshot[lo2 - 1];
-    if (e <= r->end)
+    if (e <= r->end) {
+      recent_range[1] = recent_range[0];
+      recent_range[0] = lo2 - 1;
       return 1;
+    }
     if (lo2 >= cnt || p <= r->end)
       return 0;
     /*
@@ -1264,6 +1322,8 @@ double rt_f64_from_bits(int64_t bits);
 int64_t rt_type_name(int64_t value);
 int64_t rt_type_name_tagged(int64_t value, int64_t tag);
 double rt_sin_f64(double value);
+double rt_exp_f64(double value);
+double rt_log_f64(double value);
 double rt_cos_f64(double value);
 double rt_f64_round(double value);
 double rt_f64_pow(double base, double exponent);
