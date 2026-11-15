@@ -451,7 +451,7 @@ fn sha512(any msg, int start=0, int count=0) str {
    def data = _hash_input_bytes(msg, start, count)
    def n = data.len
    def size = ((n + 16) / 128 + 1) * 128
-   def buf = zalloc(size)
+   def buf = zalloc_or_panic(size, "sha512 padding buffer")
    mut i = 0
    while i < n { store8(buf, data[i], i) i += 1 }
    store8(buf, 128, n)
@@ -600,10 +600,29 @@ fn fnv1a(any s, int start=0, int count=0) int {
    h
 }
 
+fn _xx_byte(any s, list data, bool direct, int base, int i) int {
+   if direct { return load8(s, base + i) & 255 }
+   _hash_byte(data.get(i, 0))
+}
+
+fn _xx_le32(any s, list data, bool direct, int base, int i) int {
+   if direct {
+      def int at = base + i
+      return (load8(s, at) & 255) | ((load8(s, at + 1) & 255) << 8) | ((load8(s, at + 2) & 255) << 16) | ((load8(s, at + 3) & 255) << 24)
+   }
+   _hash_le32(data, i)
+}
+
 fn xxh32(any s, int seed=0, int start=0, int count=0) int {
    "Calculates the XXH32 hash, a fast non-cryptographic hash algorithm."
-   def data = _hash_input_bytes(s, start, count)
-   def slen = data.len
+   ;; Text and byte strings are read in place. Copying them into a byte list
+   ;; first made the hash panic inside large programs ("index_read out of
+   ;; range" from the Vulkan texture cache key): the runtime took the list
+   ;; for a string. Other inputs still go through the byte list.
+   def bool direct = is_str(s) || is_bytes(s)
+   def int base = direct ? _hash_norm_start(s, start) : 0
+   def data = direct ? [] : _hash_input_bytes(s, start, count)
+   def int slen = direct ? _hash_norm_span_len(s, base, count) : data.len
    def P1 = 2654435761
    def P2 = 2246822519
    def P3 = 3266489917
@@ -615,10 +634,10 @@ fn xxh32(any s, int seed=0, int start=0, int count=0) int {
       mut v1, v2 = _u32(seed + P1 + P2), _u32(seed + P2)
       mut v3, v4 = _u32(seed), _u32(seed - P1)
       while p + 16 <= slen {
-         v1 = _hash_mul32(_rotl32(_u32(v1 + _hash_mul32(_bit(_hash_le32(data, p)), P2)), 13), P1)
-         v2 = _hash_mul32(_rotl32(_u32(v2 + _hash_mul32(_bit(_hash_le32(data, p + 4)), P2)), 13), P1)
-         v3 = _hash_mul32(_rotl32(_u32(v3 + _hash_mul32(_bit(_hash_le32(data, p + 8)), P2)), 13), P1)
-         v4 = _hash_mul32(_rotl32(_u32(v4 + _hash_mul32(_bit(_hash_le32(data, p + 12)), P2)), 13), P1)
+         v1 = _hash_mul32(_rotl32(_u32(v1 + _hash_mul32(_bit(_xx_le32(s, data, direct, base, p)), P2)), 13), P1)
+         v2 = _hash_mul32(_rotl32(_u32(v2 + _hash_mul32(_bit(_xx_le32(s, data, direct, base, p + 4)), P2)), 13), P1)
+         v3 = _hash_mul32(_rotl32(_u32(v3 + _hash_mul32(_bit(_xx_le32(s, data, direct, base, p + 8)), P2)), 13), P1)
+         v4 = _hash_mul32(_rotl32(_u32(v4 + _hash_mul32(_bit(_xx_le32(s, data, direct, base, p + 12)), P2)), 13), P1)
          p += 16
       }
       h32 = _u32(_rotl32(v1, 1) + _rotl32(v2, 7) + _rotl32(v3, 12) + _rotl32(v4, 18))
@@ -627,11 +646,11 @@ fn xxh32(any s, int seed=0, int start=0, int count=0) int {
    }
    h32 = _u32(h32 + slen)
    while p + 4 <= slen {
-      h32 = _hash_mul32(_rotl32(_u32(h32 + _hash_mul32(_bit(_hash_le32(data, p)), P3)), 17), P4)
+      h32 = _hash_mul32(_rotl32(_u32(h32 + _hash_mul32(_bit(_xx_le32(s, data, direct, base, p)), P3)), 17), P4)
       p = p + 4
    }
    while p < slen {
-      h32 = _hash_mul32(_rotl32(_u32(h32 + _hash_mul32(_hash_byte(data.get(p)), P5)), 11), P1)
+      h32 = _hash_mul32(_rotl32(_u32(h32 + _hash_mul32(_xx_byte(s, data, direct, base, p), P5)), 11), P1)
       p += 1
    }
    h32 = (h32 ^ _lshr32(h32, 15))
@@ -657,7 +676,7 @@ fn sha1(any s, int start=0, int count=0) str {
    mut h2, h3 = 2562383102, 271733878
    mut h4 = 3285377520
    def p_len = ((slen + 8) / 64 + 1) * 64
-   mut m = zalloc(p_len)
+   mut m = zalloc_or_panic(p_len, "hash padding buffer")
    mut cpi = 0
    while cpi < slen {
       store8(m, data.get(cpi), cpi)
@@ -743,7 +762,7 @@ fn md5(any s, int start=0, int count=0) str {
    mut h0, h1 = 1732584193, 4023233417
    mut h2, h3 = 2562383102, 271733878
    def p_len = ((slen + 8) / 64 + 1) * 64
-   mut m = zalloc(p_len)
+   mut m = zalloc_or_panic(p_len, "hash padding buffer")
    mut cpi = 0
    while cpi < slen {
       store8(m, data.get(cpi), cpi)

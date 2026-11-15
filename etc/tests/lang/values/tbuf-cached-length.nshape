@@ -35,7 +35,7 @@ while i < 4097 {
   assert(length(buffer) == i + 1, "length after append and growth")
   i += 1
 }
-assert(length(original) == 0, "growth preserves the original empty alias")
+assert(length(original) == 4097, "growth forwarding updates the original alias: " + to_str(length(original)))
 assert(length(bytes) == 17, "cache replacement retains other lengths")
 
 def unrelated = malloc_raw(64)

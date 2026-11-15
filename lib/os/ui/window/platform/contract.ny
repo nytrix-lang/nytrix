@@ -44,6 +44,7 @@ comptime table WindowCapName {
 fn make(i32 backend, i32 mask, i32 required=REQUIRED_WINDOW) ptr {
    "Builds make."
    def out = malloc(__layout_size("WindowBackendContract"))
+   if !out { return 0 }
    store_layout(out, "WindowBackendContract", backend, mask, required)
    return out
 }

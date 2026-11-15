@@ -1,0 +1,21 @@
+shape stdlib_module_global_init {
+  family "runtime/modules"
+  generator "regression"
+  features [module globals initialization stdlib]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.ui.window as window
+use core.math.parse.data.lz4 as lz4
+
+;; Stdlib module bodies do not run as program code, so their `mut` globals
+;; started as integer zero: `mut cache = dict(32)` was not a dict and
+;; `mut name = ""` was not a string until some function reassigned them, and
+;; in-place writes such as `cache[k] = v` were lost.
+assert(is_dict(window._scancode_query_cache), "stdlib mut dict global is initialized")
+assert(is_str(lz4.error()) && lz4.error() == "", "stdlib mut string global is initialized")
+print("module globals ok")
+NY
+}

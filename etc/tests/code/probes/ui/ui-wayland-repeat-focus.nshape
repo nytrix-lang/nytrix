@@ -13,7 +13,9 @@ use core.os.ui.window.platform.linux.wayland as wl
 use core.os.ui.window.event as event
 use core.os.ui.window.consts as keys
 
-def state = zalloc(512)
+;; Large enough for the whole listener state (_WG_SIZE in the backend); the
+;; repeat path also reads the held key's text at offset 560.
+def state = zalloc(1024)
 def owner = {"handle": 0x123456789, "focused": true, "key_states": {87: true}}
 def other = {"handle": 0x12345678b, "focused": true}
 store64_h(state, 0x123456789, 200)

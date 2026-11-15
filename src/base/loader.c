@@ -3,16 +3,16 @@
  * manages stdlib discovery, and owns the compilation-unit lifecycle.
  */
 #include "base/loader.h"
-#include "base/remote.h"
 #include "base/common.h"
 #include "base/debug.h"
+#include "base/remote.h"
 #include "base/trace.h"
-#include "code/lang/parse/ast.h"
+#include "code/lang/ny/parser/ast.h"
 #ifdef _WIN32
 #include "base/compat.h"
 #endif
 #include "base/util.h"
-#include "code/lang/parse/parser.h"
+#include "code/lang/ny/parser/parser.h"
 
 #include <ctype.h>
 #include <dirent.h>
@@ -119,6 +119,21 @@ static void *ny_loader_xrealloc(void *p, size_t n) {
   return q;
 }
 
+static size_t ny_loader_growth_capacity(size_t current, size_t initial,
+                                        size_t elem_size) {
+  if (!elem_size)
+    ny_loader_oom();
+  size_t next = initial;
+  if (current) {
+    if (current > SIZE_MAX / 2)
+      ny_loader_oom();
+    next = current * 2;
+  }
+  if (next > SIZE_MAX / elem_size)
+    ny_loader_oom();
+  return next;
+}
+
 static char *ny_loader_xstrdup(const char *s) {
   char *d = ny_strdup(s);
   if (!d)
@@ -180,8 +195,9 @@ static void std_push_mod(const char *name, const char *path,
     }
   }
   if (ny_std_mods_len == ny_std_mods_cap) {
-    size_t nc = ny_std_mods_cap ? ny_std_mods_cap * 2 : 64;
-    ny_std_mod *nm = ny_loader_xrealloc(ny_std_mods, nc * sizeof(ny_std_mod));
+    size_t nc =
+        ny_loader_growth_capacity(ny_std_mods_cap, 64, sizeof(*ny_std_mods));
+    ny_std_mod *nm = ny_loader_xrealloc(ny_std_mods, nc * sizeof(*ny_std_mods));
     ny_std_mods = nm;
     ny_std_mods_cap = nc;
   }
@@ -364,8 +380,11 @@ static int mod_cmp(const void *a, const void *b) {
 
 static size_t ny_next_pow2(size_t n) {
   size_t p = 1;
-  while (p < n)
+  while (p < n) {
+    if (p > SIZE_MAX / 2)
+      return 0;
     p <<= 1;
+  }
   return p;
 }
 
@@ -375,7 +394,11 @@ static void ny_std_build_mod_lookup(void) {
   ny_std_mod_ht_cap = 0;
   if (ny_std_mods_len == 0)
     return;
+  if (ny_std_mods_len > (SIZE_MAX - 16) / 2)
+    return;
   size_t cap = ny_next_pow2(ny_std_mods_len * 2 + 16);
+  if (!cap || cap > SIZE_MAX / sizeof(ny_mod_slot))
+    return;
   ny_std_mod_ht = (ny_mod_slot *)calloc(cap, sizeof(ny_mod_slot));
   if (!ny_std_mod_ht)
     return;
@@ -529,11 +552,10 @@ static long long ny_get_tree_mtime(const char *path) {
     if (!fp)
       ny_loader_oom();
     struct stat child;
-    if (stat(fp, &child) == 0 &&
-        (S_ISDIR(child.st_mode) || (S_ISREG(child.st_mode) && is_ny_file(fp)))) {
-      uint64_t value = S_ISDIR(child.st_mode)
-                           ? (uint64_t)ny_get_tree_mtime(fp)
-                           : ny_loader_stat_identity(&child);
+    if (stat(fp, &child) == 0 && (S_ISDIR(child.st_mode) ||
+                                  (S_ISREG(child.st_mode) && is_ny_file(fp)))) {
+      uint64_t value = S_ISDIR(child.st_mode) ? (uint64_t)ny_get_tree_mtime(fp)
+                                              : ny_loader_stat_identity(&child);
       value ^= ny_hash64_cstr(ent->d_name);
       entries += value;
       ++count;
@@ -609,8 +631,7 @@ static bool ny_std_load_cache(long long current_mtime) {
   if (!f)
     return false;
   uint32_t magic = 0;
-  if (fread(&magic, 4, 1, f) != 1 ||
-      magic != 0xACE711DE) {
+  if (fread(&magic, 4, 1, f) != 1 || magic != 0xACE711DE) {
     fclose(f);
     return false;
   }
@@ -855,7 +876,11 @@ static void ny_std_init_packages(void) {
   ny_std_pkg_ht = NULL;
   ny_std_pkg_ht_cap = 0;
   if (ny_std_pkgs_len > 0) {
+    if (ny_std_pkgs_len > (SIZE_MAX - 16) / 2)
+      return;
     size_t cap = ny_next_pow2(ny_std_pkgs_len * 2 + 16);
+    if (!cap || cap > SIZE_MAX / sizeof(ny_pkg_slot))
+      return;
     ny_std_pkg_ht = (ny_pkg_slot *)calloc(cap, sizeof(ny_pkg_slot));
     if (ny_std_pkg_ht) {
       ny_std_pkg_ht_cap = cap;
@@ -1088,8 +1113,8 @@ static uint64_t ny_std_compute_source_fingerprint(void) {
  * ctime detects edits that deliberately restore mtime.
  */
 static uint64_t ny_std_source_metadata_fingerprint(void) {
-  uint64_t h = ny_loader_hash_cstr(1469598103934665603ULL,
-                                  "ny.std.source-metadata.v1");
+  uint64_t h =
+      ny_loader_hash_cstr(1469598103934665603ULL, "ny.std.source-metadata.v1");
   h = ny_loader_hash_u64(h, ny_std_mods_len);
   for (size_t i = 0; i < ny_std_mods_len; ++i) {
     struct stat st;
@@ -1123,7 +1148,7 @@ static uint64_t ny_std_cached_source_fingerprint(void) {
     return ny_std_compute_source_fingerprint();
   char dir[4096], path[4096], tmp[4096];
   int n = snprintf(dir, sizeof(dir), "%s/std-fingerprint",
-                    ny_default_cache_root_dir());
+                   ny_default_cache_root_dir());
   if (n <= 0 || (size_t)n >= sizeof(dir))
     return ny_std_compute_source_fingerprint();
   n = snprintf(path, sizeof(path), "%s/%016" PRIx64, dir, metadata);
@@ -1134,7 +1159,7 @@ static uint64_t ny_std_cached_source_fingerprint(void) {
     char schema[32];
     uint64_t key = 0, value = 0, check = 0;
     bool valid = fscanf(f, "%31s %16" SCNx64 " %16" SCNx64 " %16" SCNx64,
-                         schema, &key, &value, &check) == 4 &&
+                        schema, &key, &value, &check) == 4 &&
                  strcmp(schema, "ny.std.fingerprint.v1") == 0 &&
                  key == metadata && value != 0 &&
                  check == ny_loader_hash_u64(metadata, value);
@@ -1161,9 +1186,10 @@ static uint64_t ny_std_cached_source_fingerprint(void) {
     unlink(tmp);
     return value;
   }
-  bool ok = fprintf(f, "ny.std.fingerprint.v1 %016" PRIx64 " %016" PRIx64
-                       " %016" PRIx64 "\n", metadata, value,
-                     ny_loader_hash_u64(metadata, value)) > 0;
+  bool ok = fprintf(f,
+                    "ny.std.fingerprint.v1 %016" PRIx64 " %016" PRIx64
+                    " %016" PRIx64 "\n",
+                    metadata, value, ny_loader_hash_u64(metadata, value)) > 0;
   if (fclose(f) != 0)
     ok = false;
   if (!ok || rename(tmp, path) != 0)
@@ -1365,8 +1391,11 @@ static void append_text(char **buf, size_t *len, size_t *cap, const char *txt) {
   if (!txt)
     return;
   size_t add = strlen(txt);
-  if (*len + add + 2 > *cap) {
-    size_t new_cap = (*len + add + 2) * 2;
+  if (add > SIZE_MAX - 2 || *len > SIZE_MAX - add - 2)
+    ny_loader_oom();
+  size_t need = *len + add + 2;
+  if (need > *cap) {
+    size_t new_cap = need > SIZE_MAX / 2 ? need : need * 2;
     char *nb = realloc(*buf, new_cap);
     if (!nb) {
       NY_LOG_ERR("oom\n");
@@ -1898,7 +1927,8 @@ static void mod_entry_add_dep(mod_entry *entry, size_t dep_id) {
       return;
   }
   if (entry->deps_len == entry->deps_cap) {
-    size_t nc = entry->deps_cap ? entry->deps_cap * 2 : 4;
+    size_t nc =
+        ny_loader_growth_capacity(entry->deps_cap, 4, sizeof(*entry->deps));
     entry->deps = ny_loader_xrealloc(entry->deps, nc * sizeof(size_t));
     entry->deps_cap = nc;
   }
@@ -1955,9 +1985,12 @@ static void mod_list_visit_deps(mod_list *list, size_t idx,
 static void mod_list_sort_for_bundle(mod_list *list) {
   if (!list || list->len < 2)
     return;
+  size_t entries_bytes = 0;
+  if (!ny_size_mul_ok(list->len, sizeof(size_t), &entries_bytes))
+    return;
   unsigned char *state = calloc(list->len, sizeof(unsigned char));
-  size_t *order = malloc(list->len * sizeof(size_t));
-  size_t *stack = malloc(list->len * sizeof(size_t));
+  size_t *order = malloc(entries_bytes);
+  size_t *stack = malloc(entries_bytes);
   if (!state || !order || !stack) {
     free(state);
     free(order);
@@ -2009,9 +2042,10 @@ static void mod_list_add_ex(mod_list *list, const char *path, const char *name,
     return;
   }
   if (list->len == list->cap) {
-    size_t new_cap = list->cap ? list->cap * 2 : 16;
+    size_t new_cap =
+        ny_loader_growth_capacity(list->cap, 16, sizeof(*list->entries));
     list->entries =
-        ny_loader_xrealloc(list->entries, new_cap * sizeof(mod_entry));
+        ny_loader_xrealloc(list->entries, new_cap * sizeof(*list->entries));
     list->cap = new_cap;
   }
   char *path_dup = ny_loader_xstrdup(path);

@@ -195,6 +195,7 @@ fn get_item(dict d, any key, any default) any {
 
 fn _sound_source_selftest_data(int n) ptr {
    def p = malloc(n)
+   if !p { return 0 }
    mut i = 0
    while i < n {
       store8(p, (i * 7) % 251, i)
@@ -227,6 +228,11 @@ fn _sound_source_selftest_wav(any src) bool {
 #main {
    def data = _sound_source_selftest_data(64)
    def buf = malloc(32)
+   if !data || !buf {
+      if data { free(data) }
+      if buf { free(buf) }
+      panic("sound source self-test allocation failed")
+   }
    def src = make_memory_source(data, 64, 2, 48000, 16)
    assert(is_list(src) && src.get(0) == "SOUND_SOURCE", "sound source tag")
    assert(_sound_source_selftest_format(src, 2, 48000, 16), "sound source format")

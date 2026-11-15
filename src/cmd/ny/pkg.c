@@ -13,8 +13,8 @@
 #include "base/process.h"
 #include "base/sha256.h"
 #include "base/util.h"
-#include "cmd/fmt/ui.h"
-#include "code/lang/pipeline/build.h"
+#include "base/ui.h"
+#include "code/lang/ny/pipeline/build.h"
 
 #include <ctype.h>
 #ifndef _WIN32

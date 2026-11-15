@@ -23,21 +23,45 @@ fn moves(int depth, int x, int y) int {
    }
    total
 }
-def result = moves(4, 2, 0)
+use core
+use core.os.time
+;; 400 repetitions keep the workload in the multi-millisecond range so the
+;; measurement is stable (a single call takes about 20 microseconds). The start
+;; column depends on the running result so the pure call cannot be hoisted.
+def int t0 = ticks()
+mut int result = 0
+mut int rep = 0
+while rep < 400 {
+   result += moves(4, 2 + (result & 3), 0)
+   rep += 1
+}
+def int t1 = ticks()
 print("checksum=", result)
+print("elapsed_ns=", t1 - t0)
 NY
   source c <<'C'
+#include <stdint.h>
 #include <stdio.h>
+#include <time.h>
+
+static int64_t now_ns(void) {
+  struct timespec ts;
+  if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0;
+  return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+}
 
 static int moves(int depth, int x, int y) {
-  static const int dx[8] = {-2, -2, -1, -1, 1, 1, 2, 2};
-  static const int dy[8] = {-1, 1, -2, 2, -2, 2, -1, 1};
   if (depth == 0) return 1;
 
   int total = 0;
   for (int i = 0; i < 8; ++i) {
-    int next_x = x + dx[i];
-    int next_y = y + dy[i];
+    int pair = i >> 1;
+    int dx = pair < 2 ? pair - 2 : pair - 1;
+    int sign = (i & 1) == 0 ? -1 : 1;
+    int magnitude = pair == 0 || pair == 3 ? 1 : 2;
+    int dy = sign * magnitude;
+    int next_x = x + dx;
+    int next_y = y + dy;
     if (next_x >= 0 && next_x < 8 && next_y >= 0 && next_y < 8) {
       total += moves(depth - 1, next_x, next_y);
     }
@@ -46,8 +70,14 @@ static int moves(int depth, int x, int y) {
 }
 
 int main(void) {
-  int result = moves(4, 2, 0);
+  int64_t start = now_ns();
+  int result = 0;
+  for (int rep = 0; rep < 400; ++rep) result += moves(4, 2 + (result & 3), 0);
+  int64_t end = now_ns();
   printf("checksum=%d\n", result);
+  if (end <= start) end = start + 1;
+  printf("elapsed_ns=%lld\n", (long long)(end - start));
+  return 0;
 }
 C
 }

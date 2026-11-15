@@ -163,6 +163,7 @@ fn _no_leaks_recover_from_candidates(list candidates, int unknown) list {
 
 fn _no_leaks_text_from_recovered(list recovered, int fill) str {
    def out = malloc(recovered.len + 1)
+   if !out { return "" }
    mut i = 0
    while i < recovered.len {
       def b = recovered.get(i)

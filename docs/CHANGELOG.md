@@ -25,6 +25,298 @@ artifacts, where mentioned, are not a fresh test of the current checkout.
 
 ### Compiler and backends
 
+- Safe mode also arms the guard-page user heap while retaining RC/RAII
+  cleanup. LLVM AddressSanitizer and ThreadSanitizer passes receive the
+  required function attributes; sanitizer compilation fails closed on
+  unsupported native encoders or failed instrumentation.
+- Strict ownership tracks raw allocation identities through copied and
+  interior local aliases and explicit releasing callees. Uncaught panics run
+  active defers; managed dictionary allocation paths check failures before
+  dereferencing newly allocated storage.
+- Ownership call contracts apply to every annotated parameter. Owned factory
+  results preserve caller-side provenance, and consuming a raw owner also
+  invalidates its copied/interior aliases.
+- Indexed resource extraction conservatively invalidates its collection
+  owner, including resource-bearing layout fields. Ownership-rule errors now
+  fail shared type validation instead of printing an error and returning
+  success. Layout fields use the common generic/alias type grammar; nominal
+  dictionary values retain their layout when reading a field.
+- Native dictionary and set constructors reject capacities above 134,217,728
+  before allocating; growth rejects capacity overflow and reports allocation
+  failure without silently losing insertions. Stdlib bootstrap dictionaries do
+  not consume the user allocation-injection budget.
+  Regression coverage includes scoped-pointer fallthrough, return, loop
+  exits, and panic, plus emitted-code ASan heap/stack/global boundaries.
+- Compiled safe-heap byte accesses check requested sizes rather than rounded
+  allocation capacity, including padding, underflow, and interior pointers.
+  Top-level lexical defers collect their environments before helper emission;
+  resource cleanup and deferred local mutation work outside functions too.
+- Alias summaries distinguish scalar parameter values from address-taken
+  parameter storage. Checked dynamic indices now work in safe-profile stack
+  byte reads without weakening borrow-escape rejection. Stack and explicitly
+  bounded FFI byte accesses have boundary/panic-cleanup coverage on native,
+  LLVM MCJIT, and ORC. Byte load/store APIs also accept an explicit dynamic
+  byte extent, checking stack and FFI boundaries before access and unwinding
+  defers on failure; omitted extents retain the raw compatibility contract.
+- User-memory fuzzing runs deterministic allocation/byte-access mutations under
+  native/LLVM safe heap and emitted ASan. LLVM literal-array backing symbols
+  remain valid ASan COMDAT signatures. Numeric native string conversions use
+  managed storage rather than leaking uncached formatting buffers.
+- Substitution-table growth preserves every moved allocation if a later
+  realloc fails, allowing retry and safe destruction. Failure injection covers
+  each growth allocation and capacity overflow.
+- `--sanitize=memory` instruments emitted code and the runtime with MSan;
+  initialized and uninitialized byte reads have acceptance coverage. TSan
+  checks generated parent/worker writes and distinguishes a join-ordered read.
+  Both lanes link PIE executables for shadow-memory compatibility.
+- `--sanitize=ub`/`undefined` checks emitted signed 64-bit arithmetic and null
+  accesses. Null checks precede LLVM optimization; saved executable coverage
+  includes defined operations and eight failure modes at `-O0` and `-O2`.
+  The sanitizer fuzz command runs all four emitted sanitizer lanes, with
+  valid-operation controls and named failure reports.
+- Bump allocators retain byte offsets without tagged-integer corruption and
+  reject overflowing/exhausted requests without changing their cursor.
+  Pointer arithmetic preserves its pointer result across dynamic boundaries.
+  Native precondition/refinement substitutions use the builder-owned arena.
+- NYC emits real SysV x86-64 stack canaries for stack-protector options,
+  preserving option order, predefines, and GNU function opt-outs. Both output
+  routes detect corrupted frame cookies with FS/GS TLS, linker-resolved
+  offsets, and global guards; checks do not use spillable guard pointers.
+- Single MOVS instructions preserve both tied pointer outputs at every
+  scalar width. Locked and unlocked CMPXCHG16B preserve expected-value fields
+  with or without a condition output. Values live across fixed-register
+  assembly are no longer kept in clobbered caller-saved registers.
+- PadLock SHA256 and repeated port-I/O templates now have explicit operand
+  lowering rather than speculative passthrough. SHA256 hardware execution
+  remains unverified; the strict kernel SHA256 and iomap objects compile.
+  Both native output routes execute byte/word/dword REP INS/OUTS in a
+  ring-zero QEMU guest, checking input data, boundaries, pointer/count
+  outputs, zero counts, and byte output through the debug console.
+- NYC retains prefix `section` attributes on aggregate, integer-array,
+  pointer-array, and callback globals. ELF objects preserve exact section
+  names without inserting a leading dot, matching GNU assembly and enabling
+  linker-generated section bounds.
+- NYC emits inline helpers referenced by static callback tables, and
+  post-inline slot promotion at `-O1` removes disabled short-circuit feature
+  branches before they can retain unavailable linker symbols.
+- Aggregate object aliases declared with GNU `typeof` retain their target,
+  including Linux startup PIC aliases. Both assembly and direct ELF output
+  bind data aliases to the target's original storage and section.
+- Named local labels in file-scope assembly remain addressable from C without
+  requiring `.globl`, preserving trampoline data and local symbol binding.
+- Section-attributed static helpers remain eligible for heuristic inlining
+  while their out-of-line definitions are retained. Empty feature-disabled
+  helpers no longer keep undefined argument symbols alive; argument side
+  effects are preserved.
+- Dominating equality and inequality branches now eliminate contradictory
+  tests without carrying facts through joins or changed memory. Private
+  integer stack fields retain their values across unrelated calls, including
+  their byte, word, and signed-dword load semantics.
+- Casting a nonvolatile C lvalue to `void` discards its read while preserving
+  address-expression side effects; volatile reads remain observable.
+- GNU aggregate-array aliases preserve local binding, including static Linux
+  device-table aliases. Late inline cleanup refreshes instruction effects
+  before verification.
+- Direct ELF output encodes byte, word, dword, and qword memory exchanges,
+  including function-pointer operands and signed narrow return values.
+  Unsupported assembly no longer substitutes GS offset zero or exchanges
+  with uninitialized operands; both output routes reject those templates.
+- C constant objects retain read-only section flags, and `.note.*` sections
+  use ELF note type in both output routes. Linux build notes no longer
+  trigger conflicting section-type or section-attribute assembler warnings.
+- File-scope static and weak bindings are collected through one name index
+  instead of rescanning the whole translation unit for each exported object.
+- Repeated ordinary and typedef callback declarations now denote one object.
+  Weak ELF data and defining-unit reads and writes honor strong interposition
+  in both native output routes, fixing duplicate kernel reboot callbacks.
+- C storage bindings follow actual declarators, not references inside weak
+  functions, prototype parameters, typedef spellings, or initializers.
+  Pointer and suffix attributes do not leak to neighboring declarators.
+  Mixed scalar/pointer initializer lists retain each declarator's type,
+  relocations, and previously initialized storage.
+- Opaque UD2 inline assembly no longer implies C `noreturn`: signal and
+  kernel handlers may resume it. Runtime regressions resume plain traps in
+  both output routes and labelled, section-annotated traps in assembly output.
+  The direct encoder still rejects the unsupported annotated form.
+- Native x86-64 text emission omits branches to the next label, removing a
+  dead zero-offset jump after Linux's fatal BUG trap without guessing trap
+  semantics or suppressing `objtool` diagnostics.
+- NYC frame-pointer options obey their command-line order: a final
+  `-fno-omit-frame-pointer` cancels earlier omission and restores the supported
+  single-function route. The option-order regression executes eight-argument
+  calls with positive and negative values.
+- Private nonescaping C functions propagate scalar parameter constants only
+  when every direct call agrees, without changing signatures, removing calls,
+  bypassing noinline or assuming address-taken formals remain unchanged. A
+  strict kernel `swap_state.o` no longer retains the disabled THP helper.
+- Physical x86-64 assembly and object prologues materialize SysV aggregate
+  parameters as addresses of their actual by-value storage, including mixed
+  integer/SSE register classes, register-bank rollback and stack arguments.
+  Interoperability regressions execute calls from the host compiler through
+  both output routes; the C frontend suite passes.
+- Branch-protected C assembly places ENDBR at address-taken labels as well
+  as function entries. Forward and backward label addresses have runtime
+  landing-byte checks at O2/O3; all 256 BPF interpreter data-relocation targets
+  pass a strict-object byte check. Branch compare fusion honors its earlier
+  adjacency proof rather than reloading operands from reused stack homes.
+- CPUID assembly accepts omitted input/clobber sections, read-write register
+  operands and reordered numeric ties. x86-64 assembly/direct-object and
+  freestanding i386 regressions compare real instruction results with the
+  host compiler; the encoders preserve EBX/RBX.
+- CPUID preservation checks now keep a real RBX value live across calls and
+  exercise live compiler values across the instruction. Assembly restores RBX
+  before loading output addresses; the direct encoder also avoids reading
+  stack homes while temporary pushes change RSP.
+- Raw RDMSR/WRMSR assembly has explicit low/high-word operand lowering for
+  32-bit integer outputs, including structure members and reordered inputs.
+  Ring-zero QEMU execution verifies read/write/readback through x86-64 assembly
+  and direct objects and i386 assembly. The i386 probe also reads, restores and
+  rereads CR0; control-register writes accept omitted trailing asm sections.
+  Physical hardware execution is not verified.
+- Bit-string set/reset/complement operations retain their locked or unlocked
+  instruction semantics and signed indexing across memory words. Carry-output
+  bit tests accept omitted clobber sections without an extra C memory read.
+  Both native routes and i386 execute the boundary regressions; direct-object
+  disassembly distinguishes the actual LOCK prefix.
+- x87 initialization/status assembly marks output locals address-taken rather
+  than reusing their initial constants. i386 and direct-object emitters perform
+  real 16-bit status/control writes, preserving neighboring high bytes. Fresh
+  strict real-mode/compressed CPU probes and boot printf now compile.
+- Repeated byte comparisons preserve tied source/destination cursors, remaining
+  native-width counts and the final comparison flag, including null zero-count
+  inputs and backwards traversal. Assembly/direct-object and i386 runtime
+  regressions cover these cases. i386 local loads no longer write a high word
+  into a four-byte value home and corrupt its live neighbor.
+- Unsigned 64-by-32 inline division accepts tied accumulator inputs and
+  member/indirect quotient and remainder outputs without extra output reads.
+  Two-stage REP word/byte copies preserve both cursors and consume the actual
+  tail count, including backwards traversal. Native assembly/direct-object and
+  all i386 regparm regressions pass with a frozen compiler; the actual boot
+  string and compressed string Kbuild commands now compile.
+- Fixed R9 assembly inputs evaluate the real C operand and write the actual
+  register. Both native output routes pass a protected-page fault/resume probe,
+  return the loaded 64-bit value through R9 and observe subsequent memory
+  changes. The strict decompressor identity-map object now compiles.
+- Explicit FS/GS assembly performs real byte, word and dword accesses without
+  an ordinary C memory read at the unsegmented address. Runtime probes use
+  distinct real segment bases through both x86-64 output routes and all i386
+  regparm settings. Plain selector writes no longer acquire invented exception
+  fixups; i386 selector/memory reads respect narrow value-home allocation.
+  The actual A20 boot object now compiles. General C address-space qualifiers
+  remain a separate incomplete requirement.
+- i386 variadic definitions use pointer-shaped lists and support copies,
+  mixed-width extraction, aggregate arguments and hidden-result returns.
+  GCC interoperability covers all four regparm settings; its nonzero-regparm
+  variadic result-pointer popping differs from Clang's default. x87 conversion
+  preserves full-width integers and restores the rounding control word after
+  truncating toward zero. The C frontend suite and IR effects roundtrip pass.
+- Declaration-binding lookahead resets alias state between declarators,
+  preserving distinct GNU weak function aliases in the VDSO clock objects.
+  Both 32-bit and 64-bit strict VDSO compilation and alias runtime regressions
+  pass.
+- Constant C helper results propagate even when the call must remain for its
+  observable effects or possible nontermination. The late cleanup recognizes
+  these changes without requiring a lower call count. Focused truncate and
+  device-mapper objects no longer reference disabled DAX mapping helpers or
+  `dm_zone_endio`; callback-table reachability and THP specialization remain
+  separate open link blockers.
+- Unreferenced private file-scope data no longer roots dead callback
+  definitions. Explicit used definitions, named sections, public objects,
+  aliases, assembly references, and function-owned statics retain their
+  existing lifetimes. Both output routes pass callback retention/runtime
+  regressions; the strict device-mapper object no longer references
+  `dax_get_private`.
+- NYIR use-def analysis and value replacement keep asm-goto targets in the
+  label namespace, including labels whose numbers overlap SSA value IDs or
+  exceed the value count. Static-feature cleanup no longer fails on those
+  valid inline-assembly branches.
+- Discarded C void expressions remain valid operands of comma expressions,
+  including the connector iteration macros used by DRM.
+- NYC preserves local static pointer tables referenced by other data relocations;
+  the vector PHI classifier now traverses shared copy chains iteratively.
+- GNU C label-address functions are not inlined across function-local label
+  symbols, and DCE recognizes those symbols as roots for their target blocks.
+- C `section` attributes concatenate adjacent string literals, preserving
+  kernel registration sections such as `__governor_thermal_table`.
+- Function section attributes survive parameter-type parsing, preserving
+  kernel placements such as `__init` on functions with parameters.
+- NYC prunes unreferenced `static inline` helpers even when section-attributed,
+  avoiding dead references to feature-disabled implementations.
+- C calls to `noreturn` functions now terminate their lowering path without
+  synthetic continuation code, preserving the declared control-flow contract.
+- NYC preserves signed 32-bit absolute relocations in C assembly and ELF object
+  output, fixing x86-64 kernel trampoline address relocations.
+- C file-scope character-array declarations retain ELF section and alias
+  attributes, including Linux exported-table aliases.
+- C file-scope aggregate definitions retain declarator and type `section`
+  attributes, preserving kernel init/setup tables in their requested sections.
+- C zero-bound aggregate definitions remain complete zero-size objects when
+  following an incomplete `extern` array declaration.
+- Function symbols emitted from file-scope assembly remain functions in C
+  expressions, including address-taking and function-pointer initialization.
+- C weak data attributes are preserved across repeated declarations and
+  definitions, including suffix-form `__weak` used by the kernel's version
+  object.
+- NYIR constant folding carries local facts across an unconditional branch only
+  when it targets the immediately following label with a unique predecessor;
+  facts remain unknown at control-flow joins.
+- NYIR jump threading leaves branch-only blocks intact when their PHI results
+  are used beyond the block, preserving SSA dominance across retargeted edges.
+- Memory SSA keeps differing incoming constants in a real join PHI instead of
+  reusing one predecessor's non-dominating definition.
+- NYC's `-O0` pipeline promotes scalar locals through SSA and folds unsigned
+  right-shift constants, eliminating Linux `GENMASK` runtime `__bad_mask`
+  checks even when the mask crosses a control-flow join. Late CFG simplification
+  is skipped at `-O0` after SSA promotion because it produced verifier-invalid
+  copies on kernel control flow; focused kernel rebuilds validate the route.
+- Linux-kernel-compatible C conditional expressions with a void-valued false
+  arm now preserve both arms' side effects without emitting a value store for
+  the void arm. The x86-64 NYIR encoder also accepts functions with up to
+  65,536 value slots, covering the 46,507-value Intel VDSC function.
+- x86-64 C inline assembly lowers the CRC32B/W/L/Q forms with 32-bit
+  accumulators and 8/16/32/64-bit integer inputs.
+- C logical expressions skip dead right operands when a constant left operand
+  short-circuits, preserving Linux `__builtin_constant_p` guards around
+  jump-label assembly.
+- C `__builtin_strcmp` folds adjacent string literals, and straight-line arms
+  of constant `if` conditions are checked in scratch IR before omitting the
+  unselected arm; this supports Linux scheduler compile-time operator guards at
+  `-O0`.
+- Unreachable C code resumes at enclosing control-flow statements when labels
+  are nested in loops or switches, preserving the correct `break`/`continue`
+  targets while still compiling externally reachable labels.
+- Constant-if pruning retains `used` static locals from dead arms, including
+  Linux static-call addressability anchors in `.discard.addressable`.
+- O0 now runs safe constant folding and constant-branch cleanup, allowing
+  always-inline bitfield helpers to eliminate compile-time error calls.
+- NYC keeps `.discard.addressable` relocations owned by live C functions after
+  optimization and inlining, while frontend pruning still removes anchors from
+  unreachable static functions. Static-local addresses are now emitted on use,
+  avoiding runtime references into linker-discarded anchor sections.
+- O1 whole-unit C compilation considers discardable static helpers of at most
+  eight NYIR instructions for the small inliner, allowing tiny ordinary
+  `static inline` predicates to fold compile-time-disabled kernel paths without
+  enabling the general O2 inliner.
+- C `always_inline` helpers are explicitly cloned at every optimization level
+  before code generation, preserving constant specialization and eliminating
+  out-of-line calls required to disappear by the attribute.
+- File-scope character arrays no longer inherit a stale section attribute from
+  a preceding static addressable anchor; an ELF section regression covers the
+  emitted symbol placement.
+- C file-scope function-pointer objects declared through function-type typedefs
+  retain tentative definitions and their callback signatures, including prior
+  `extern` declarations.
+- The O1 small inliner resolves C-frontend `extern`-flagged calls against
+  registered same-translation-unit definitions; foreign calls outside a C
+  unit remain out of line.
+- NYR jump threading now accepts zero-value control-flow graphs without
+  incorrectly failing constant collection.
+- NYIR typed-value maps allocate regions only for classes observed in a
+  function, sharing one zeroed region among absent classes instead of
+  allocating fourteen full-size arrays.
+- The descriptor-table `sldt %0` inline-assembly form retains its no-result
+  contract; a focused regression guards against assigning it a spurious NYIR
+  destination.
 - Native reachability now trusts the frontend's resolved builtin-operator
   facts, avoiding repeated module/impl scans for ordinary arithmetic.
   Explicitly selected overloads and unresolved expressions retain target
@@ -117,6 +409,28 @@ artifacts, where mentioned, are not a fresh test of the current checkout.
 - Fixed correctness issues in string/list/buffer operations, hashing/crypto
   helpers, subprocess/process handling, terminal and UI behavior, audio
   resource loading, HTTP handling, and platform-specific bridges.
+- Checked the legacy crypt hash scratch-buffer size arithmetic and allocation,
+  and made streamed dictionary scans close their opened file before reporting
+  scratch-buffer allocation failure.
+- BMP decoding now checks pixel-buffer size arithmetic and allocation before
+  initializing the output.
+- GIF decode and encode paths now check temporary pixel, frame, and image
+  buffers before writing through them.
+- Linux filesystem watcher polling now fails clearly if its event buffer cannot
+  be allocated.
+- Sound-file decoding checks metadata/sample allocation sizes and closes native
+  handles on failure; mixer buffers preserve their prior allocation when
+  `realloc` fails.
+- Loader vectors, zlib output growth, and LZ4 frame sizing now check arithmetic
+  before allocation; UI glyph-page allocation stops before writing through null.
+- PNG decode scratch allocations plus JPEG result buffers and TGA encode buffers
+  now fail closed on allocation errors instead of writing through null storage.
+- Wayland window and optional protocol listeners now stop before dereferencing
+  failed allocations, destroying the corresponding proxies on failure.
+- DirectInput GUID and data-format setup now retries only missing allocations
+  after partial OOM instead of treating a partial state as initialized.
+- EGL display/config/context setup now checks every scratch allocation before
+  passing or writing through its storage.
 - Mock-renderer CPU surfaces are now freed when switching to a hardware
   renderer, on failed hardware initialization, and on close/reinitialization.
 - Mock fast-fill skips are disabled during auto-dump, frame-hash, and UI replay
@@ -142,6 +456,10 @@ artifacts, where mentioned, are not a fresh test of the current checkout.
 
 ### Projects, benchmarks, and tooling
 
+- Added an original Breakout game with capped consecutive-clear scoring,
+  animated wall and serve entrances, ball trails, floating score popups, impact
+  sparks, fading win/loss states, pause/restart, and a keyboard playthrough
+  through a headless Vulkan compositor.
 - Improved example projects and interactive demos (terminal graphics, audio,
   HTTP, and small games/utilities) with focused correctness and rendering fixes.
 - Benchmark harness output and reporting were refined for clearer per-fixture
@@ -472,6 +790,9 @@ artifacts, where mentioned, are not a fresh test of the current checkout.
 ### Fixed
 
 - Standard-library import coupling and module-path drift.
+- x86-64 NYIR stack allocation overlapping spill homes when loop-register
+  assignment expands the frame.
+- Direct `return` expressions that call a `noreturn` function in switch arms.
 
 </details>
 

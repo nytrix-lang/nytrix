@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
+  <title>Debug Out</title>
+  <desc>Debug Out icon.</desc>
+  <g transform="translate(2.0000 2.0000) scale(1.25000)">
+<path fill="#c6c6ca" d="M3 15V5H1l1.5-2L4 1l1.5 2L7 5H5v10z"/><path fill="#c6c6ca" d="M7 1v2h8V1Zm2 4v2h6V5Zm0 4v2h6V9Zm-2 4v2h8v-2z"/>
+  </g>
+</svg>

@@ -92,7 +92,7 @@ while i < len(folder_pixels) { if load8(folder_pixels, i) > 0 { covered += 1 } i
 assert(covered > 0 && covered < 256,
        "path icon has visible pixels and transparent margins (covered=" +
        to_str(covered) + ")")
-def code = svg.load_path("etc/assets/images/icons/codeedit.svg", 32)
+def code = svg.load_path("etc/assets/images/icons/code_edit.svg", 32)
 assert(is_dict(code) && int(code.get("width")) == 32, "multi-path icon uses its requested raster size")
 def code_pixels = code.get("data")
 covered = 0

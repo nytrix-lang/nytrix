@@ -108,7 +108,7 @@ fn _snap_value(any value, f64 step) f64 {
 }
 
 fn _slider3(str idp, str title, f64 x0, f64 y0, f64 z0, f64 lo, f64 hi, f64 cell_w, bool packed) list {
-   gui.text_colored(title, [0.70, 0.70, 0.70, 0.94])
+   gui.text_colored(title, gui.theme_color_alpha("text_dim", 0.94))
    if packed {
       def x1 = gui.slider_float(idp + "_x", "X", x0, lo, hi, cell_w)
       gui.same_line(4.0)
@@ -360,7 +360,7 @@ fn _material_section(any state) dict {
    def mat_count = max(materials.len, recs.len)
    if !gui.collapsing_header("inspect_scene_material", "Material", false) { return st }
    if mat_count <= 0 {
-      gui.text_colored("No material records.", [0.68, 0.68, 0.68, 1.0])
+      gui.text_colored("No material records.", gui.theme_color("text_dim"))
       return st
    }
    def selected_part_idx = int(st.get("selected_part", -1))
@@ -467,7 +467,7 @@ fn _object_transform_tab(any state) dict {
    mut st = state
    if !gui.collapsing_header("inspect_object_transform", "Object Transform", true) { return st }
    if !bool(st.get("has_scene", false)) {
-      gui.text_colored("No selected scene object.", [0.68, 0.68, 0.68, 1.0])
+      gui.text_colored("No selected scene object.", gui.theme_color("text_dim"))
       return st
    }
    def tx0, ty0, tz0 = _num(st.get("edit_tx", 0.0)), _num(st.get("edit_ty", 0.0)), _num(st.get("edit_tz", 0.0))
@@ -589,11 +589,11 @@ fn _transform_tab(any state) dict {
       mut mode = int(st.get("gizmo_mode", 0))
       if mode < 0 || mode > 2 { mode = 0 }
       def before = mode
-      if _mode_button("inspect_gizmo_move", "toolmove", "Move", mode == 0) { mode = 0 }
+      if _mode_button("inspect_gizmo_move", "tool_move", "Move", mode == 0) { mode = 0 }
       gui.same_line()
-      if _mode_button("inspect_gizmo_rotate", "toolrotate", "Rotate", mode == 1) { mode = 1 }
+      if _mode_button("inspect_gizmo_rotate", "tool_rotate", "Rotate", mode == 1) { mode = 1 }
       gui.same_line()
-      if _mode_button("inspect_gizmo_scale", "toolscale", "Scale", mode == 2) { mode = 2 }
+      if _mode_button("inspect_gizmo_scale", "tool_scale", "Scale", mode == 2) { mode = 2 }
       st["gizmo_mode"] = mode
       if mode != before { st["gizmo_mode_changed"] = true }
       mut axis = int(st.get("gizmo_axis", 0))
@@ -606,8 +606,8 @@ fn _transform_tab(any state) dict {
          gui.same_line()
          st["gizmo_precise"] = gui.icon_button("inspect_precise", -1, "Precise", 108.0, 30.0, bool(st.get("gizmo_precise", false))) ? !bool(st.get("gizmo_precise", false)) : bool(st.get("gizmo_precise", false))
       } else {
-         gui.text_colored("Axis constraint", [0.70, 0.70, 0.70, 0.94])
-         def free_icon = ui_profile.env_toggle_cached("NY_UI_SVG_INSPECTOR_ICONS", false) ? icons.icon_sprite("tooltransform") : -1
+         gui.text_colored("Axis constraint", gui.theme_color_alpha("text_dim", 0.94))
+         def free_icon = ui_profile.env_toggle_cached("NY_UI_SVG_INSPECTOR_ICONS", false) ? icons.icon_sprite("tool_transform") : -1
          if gui.icon_button("inspect_axis_free", free_icon, "Free", 70.0, 30.0, axis == 0) { axis = 0 }
          gui.same_line()
          if _axis_button("inspect_axis_x", "X", axis == 1) { axis = (axis == 1) ? 0 : 1 }

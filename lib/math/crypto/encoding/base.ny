@@ -7,8 +7,20 @@
 module core.math.crypto.encoding.base(encode64, decode64, encode64_url, decode64_url, encode32, decode32, encode32_hex, decode32_hex, encode16, decode16)
 use core
 use core.str as str
+use core.math.checked (checked_add, checked_mul)
 
 def _BASE16_ALPHABET = "0123456789ABCDEF"
+
+fn _base_encode_capacity(int n, int input_chunk, int output_chunk) int {
+   if n < 0 || input_chunk <= 0 || output_chunk <= 0 { return -1 }
+   mut blocks = n / input_chunk
+   if n % input_chunk != 0 { blocks += 1 }
+   def body_result = checked_mul(blocks, output_chunk)
+   if !is_ok(body_result) { return -1 }
+   def capacity_result = checked_add(int(unwrap(body_result)), 8)
+   if !is_ok(capacity_result) { return -1 }
+   int(unwrap(capacity_result))
+}
 
 fn _base_builder_take(ptr b) str {
    def out = str.builder_to_str(b)
@@ -49,7 +61,9 @@ fn _base_hex_unmap(int c) int {
 fn _encode64_internal(str data, str alphabet, bool padding=true) str {
    if !is_str(data) { return "" }
    def n = data.len
-   mut out = str.Builder(max(16, ((n + 2) / 3) * 4 + 8))
+   def capacity = _base_encode_capacity(n, 3, 4)
+   if capacity < 0 { return "" }
+   mut out = str.Builder(max(16, capacity))
    mut i = 0
    while i < n {
       def b1, b2, b3 = load8(data, i) & 255, (i + 1 < n) ? (load8(data, i + 1) & 255) : 0, (i + 2 < n) ? (load8(data, i + 2) & 255) : 0
@@ -149,7 +163,9 @@ fn _b32_unmap(int c, bool hex=false) int {
 fn _encode32_internal(str data, str alphabet, bool padding=true) str {
    if !is_str(data) { return "" }
    def n = data.len
-   mut out = str.Builder(max(16, ((n + 4) / 5) * 8 + 8))
+   def capacity = _base_encode_capacity(n, 5, 8)
+   if capacity < 0 { return "" }
+   mut out = str.Builder(max(16, capacity))
    mut i = 0
    while i < n {
       def b1, b2 = load8(data, i) & 255, (i + 1 < n) ? (load8(data, i + 1) & 255) : 0
@@ -238,7 +254,9 @@ fn encode16(str data) str {
    "Encodes a byte string into Base16(Hex) (RFC 4648 Section 8)."
    if !is_str(data) { return "" }
    def n = data.len
-   mut out = str.Builder(max(16, n * 2 + 8))
+   def capacity = _base_encode_capacity(n, 1, 2)
+   if capacity < 0 { return "" }
+   mut out = str.Builder(max(16, capacity))
    mut i = 0
    while i < n {
       def b = load8(data, i) & 255

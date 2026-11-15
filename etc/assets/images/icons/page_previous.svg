@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
+  <title id="title1">Page Previous</title>
+  <desc id="desc1">Page Previous editor icon. Original asset id: pageprevious.</desc>
+  <defs id="defs1" />
+  <g transform="translate(2.0000 2.0000) scale(1.66667)" id="g1">
+    <path d="M 7.5,2 A 1,1 0 0 0 6.7929687,2.2929688 L 3.7929688,5.2929687 a 1.0001,1.0001 0 0 0 0,1.4140625 l 2.9999999,3.0000001 a 1,1 0 0 0 1.4140626,0 1,1 0 0 0 0,-1.4140625 L 5.9140625,6 8.2070313,3.7070313 a 1,1 0 0 0 0,-1.4140625 A 1,1 0 0 0 7.5,2 Z" id="path1" fill="#c6c6ca" />
+  </g>
+</svg>

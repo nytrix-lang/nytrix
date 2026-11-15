@@ -265,7 +265,9 @@ fn _png_decode_fail(any msg,
 fn _png_build_gray_lut(int bit_depth, int trns_gray) any {
    if bit_depth < 1 || bit_depth > 8 { return 0 }
    def count = 1 << bit_depth
-   def lut = init_str(malloc(count * 4 + 32), count * 4)
+   def lut_raw = malloc(count * 4 + 32)
+   if !lut_raw { return 0 }
+   def lut = init_str(lut_raw, count * 4)
    def maxv = count - 1
    mut i = 0
    while i < count {
@@ -280,7 +282,9 @@ fn _png_build_gray_lut(int bit_depth, int trns_gray) any {
 fn _png_build_palette_lut(any palette, any palette_alpha) any {
    if !palette || palette.len == 0 || (palette.len % 3) != 0 { return 0 }
    def count = palette.len / 3
-   def lut = init_str(malloc(count * 4 + 32), count * 4)
+   def lut_raw = malloc(count * 4 + 32)
+   if !lut_raw { return 0 }
+   def lut = init_str(lut_raw, count * 4)
    mut i = 0
    while i < count {
       def r, g = load8(palette, i * 3), load8(palette, i * 3 + 1)
@@ -585,8 +589,15 @@ fn _png_decode_fast_rows8(
    int bytes_per_pixel, int color_type, int trns_r, int trns_g, int trns_b,
    any idat, any palette, any palette_alpha, any gray_lut, any palette_lut
 ) list {
-   mut prev_row = init_str(malloc(stride + 32), stride)
-   mut cur_row = init_str(malloc(stride + 32), stride)
+   mut prev_raw = malloc(stride + 32)
+   mut cur_raw = malloc(stride + 32)
+   if !prev_raw || !cur_raw {
+      if prev_raw { free(prev_raw) }
+      if cur_raw { free(cur_raw) }
+      return [true, _png_decode_fail("row buffer alloc failed", raw, idat, palette, palette_alpha, gray_lut, palette_lut, 0, 0, pixels)]
+   }
+   mut prev_row = init_str(prev_raw, stride)
+   mut cur_row = init_str(cur_raw, stride)
    if !prev_row || !cur_row { return [true, _png_decode_fail("row buffer alloc failed", raw, idat, palette, palette_alpha, gray_lut, palette_lut, prev_row, cur_row, pixels)] }
    memset(prev_row, 0, stride)
    mut y = 0
@@ -630,8 +641,15 @@ fn _png_decode_packed_rows(
    int bit_depth, int color_type,
    any idat, any palette, any palette_alpha, any gray_lut, any palette_lut
 ) list {
-   mut prev_row = init_str(malloc(stride + 32), stride)
-   mut cur_row = init_str(malloc(stride + 32), stride)
+   mut prev_raw = malloc(stride + 32)
+   mut cur_raw = malloc(stride + 32)
+   if !prev_raw || !cur_raw {
+      if prev_raw { free(prev_raw) }
+      if cur_raw { free(cur_raw) }
+      return [true, _png_decode_fail("row buffer alloc failed", raw, idat, palette, palette_alpha, gray_lut, palette_lut, 0, 0, pixels)]
+   }
+   mut prev_row = init_str(prev_raw, stride)
+   mut cur_row = init_str(cur_raw, stride)
    if !prev_row || !cur_row { return [true, _png_decode_fail("row buffer alloc failed", raw, idat, palette, palette_alpha, gray_lut, palette_lut, prev_row, cur_row, pixels)] }
    memset(prev_row, 0, stride)
    mut y = 0
@@ -706,7 +724,9 @@ fn _png_scan_decode_chunks(any data) dict {
       def next_p = chunk_data + length + 4
       if next_p > data.len { return {"ok": false, "error": "chunk overflow at " + to_str(p) + " len=" + to_str(length)} }
       if _png_validate_crc_enabled() {
-         def cs = init_str(malloc(length + 4 + 32), length + 4)
+         def cs_raw = malloc(length + 4 + 32)
+         if !cs_raw { return {"ok": false, "error": "out of memory validating PNG chunk"} }
+         def cs = init_str(cs_raw, length + 4)
          store8(cs, load8(data, p + 4), 0)
          store8(cs, load8(data, p + 5), 1)
          store8(cs, load8(data, p + 6), 2)
@@ -729,11 +749,15 @@ fn _png_scan_decode_chunks(any data) dict {
          if compression_method != 0 || filter_method != 0 || (interlace_method != 0 && interlace_method != 1) { return {"ok": false, "error": "unsupported IHDR methods"} }
          if bit_depth != 1 && bit_depth != 2 && bit_depth != 4 && bit_depth != 8 && bit_depth != 16 { return {"ok": false, "error": "unsupported bit depth " + to_str(bit_depth)} }
       } elif _png_chunk_is(data, p, 80, 76, 84, 69) {
-         palette = init_str(malloc(length + 32), length)
+         def palette_raw = malloc(length + 32)
+         if !palette_raw { return {"ok": false, "error": "out of memory reading PNG palette"} }
+         palette = init_str(palette_raw, length)
          if length > 0 { _copy_bytes_safe(palette, 0, data, chunk_data, length) }
       } elif _png_chunk_is(data, p, 116, 82, 78, 83) {
          if color_type == 3 {
-            palette_alpha = init_str(malloc(length + 32), length)
+            def alpha_raw = malloc(length + 32)
+            if !alpha_raw { return {"ok": false, "error": "out of memory reading PNG transparency"} }
+            palette_alpha = init_str(alpha_raw, length)
             if length > 0 { _copy_bytes_safe(palette_alpha, 0, data, chunk_data, length) }
          } elif color_type == 0 && length >= 2 {
             trns_gray = _u16be(data, chunk_data)
@@ -742,7 +766,9 @@ fn _png_scan_decode_chunks(any data) dict {
             trns_b = _u16be(data, chunk_data + 4)
          }
       } elif _png_chunk_is(data, p, 73, 68, 65, 84) {
-         def chunk = init_str(malloc(length + 32), length)
+         def chunk_raw = malloc(length + 32)
+         if !chunk_raw { return {"ok": false, "error": "out of memory reading PNG image data"} }
+         def chunk = init_str(chunk_raw, length)
          if length > 0 { _copy_bytes_safe(chunk, 0, data, chunk_data, length) }
          idat_list = idat_list.append(chunk)
       } elif _png_chunk_is(data, p, 73, 69, 78, 68) {
@@ -788,7 +814,9 @@ fn _png_expected_raw(int w, int h, int channels, int bytes_per_sample, int strid
 }
 
 fn _png_copy_raw(any raw_src, int raw_len) any {
-   mut raw = init_str(malloc(raw_len + 32), raw_len)
+   def raw_ptr = malloc(raw_len + 32)
+   if !raw_ptr { return 0 }
+   mut raw = init_str(raw_ptr, raw_len)
    if !raw { return 0 }
    mut raw_i = 0
    while raw_i < raw_len {
@@ -824,6 +852,7 @@ fn _png_decode_luts(int color_type,
    any pixels) list {
    def gray_lut = (color_type == 0 && bit_depth <= 8) ? _png_build_gray_lut(bit_depth, trns_gray) : 0
    def palette_lut = (color_type == 3) ? _png_build_palette_lut(palette, palette_alpha) : 0
+   if color_type == 0 && bit_depth <= 8 && !gray_lut { return [false, _png_decode_fail("gray lookup build failed", raw, idat, palette, palette_alpha, gray_lut, palette_lut, 0, 0, pixels)] }
    if color_type == 3 && !palette_lut { return [false, _png_decode_fail("palette lookup build failed", raw, idat, palette, palette_alpha, gray_lut, palette_lut, 0, 0, pixels)] }
    mut keep_palette = palette
    mut keep_palette_alpha = palette_alpha
@@ -1114,7 +1143,9 @@ fn decode(any data) any {
    def raw = _png_decode_raw_payload(idat, expect_raw, palette, palette_alpha)
    if !raw { return 0 }
    def raw_len = raw.len
-   def pixels = init_str(malloc(w * h * 4 + 32), w * h * 4)
+   def pixels_raw = malloc(w * h * 4 + 32)
+   if !pixels_raw { return _png_decode_fail("pixel buffer alloc failed", raw, idat, palette, palette_alpha) }
+   def pixels = init_str(pixels_raw, w * h * 4)
    if !pixels { return _png_decode_fail("pixel buffer alloc failed", raw, idat, palette, palette_alpha) }
    memset(pixels, 0, w * h * 4)
    def luts = _png_decode_luts(color_type, bit_depth, trns_gray, palette, palette_alpha, raw, idat, pixels)
@@ -1262,7 +1293,9 @@ fn encode(any img) any {
          0, 0, 255, 255,
          255, 255, 0, 128
       ])
+   if !rgba { panic("png self-test rgba allocation failed") }
    def encoded = encode({"width": 2, "height": 2, "channels": 4, "data": rgba})
+   if !encoded { panic("png self-test encode failed") }
    assert(is_str(encoded), "png encoded string")
    assert(load8(encoded, 0) == 137 && load8(encoded, 1) == 80 && load8(encoded, 2) == 78, "png signature")
    def decoded = decode(encoded)
@@ -1272,5 +1305,6 @@ fn encode(any img) any {
    assert(is_str(data) && data.len == 16, "png data size")
    assert(load8(data, 0) == 255 && load8(data, 1) == 0 && load8(data, 2) == 0 && load8(data, 3) == 255, "png first pixel")
    assert(load8(data, 12) == 255 && load8(data, 13) == 255 && load8(data, 14) == 0 && load8(data, 15) == 128, "png alpha pixel")
+   free(rgba)
    print("✓ core.math.parse.img.png self-test passed")
 }

@@ -1,0 +1,28 @@
+shape bump_allocation_byte_bounds {
+  family "runtime/memory"
+  generator "regression"
+  features [allocation bounds bump exhaustion]
+  template ny-test-case
+  flags_matrix "--native-only; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.alloc
+fn check() int {
+   def arena = bump_new(16)
+   defer { free(arena[0]) }
+   def ptr base = arena[0]
+   assert(bump_capacity(arena) == 16 && bump_used(arena) == 0)
+   assert(bump_alloc(arena, 1) == base && bump_used(arena) == 1, "bump offsets count bytes, not tagged words")
+   assert(bump_alloc(arena, 4611686018427387903) == 0 && bump_used(arena) == 1, "exhaustion preserves the bump mark")
+   assert(bump_alloc_aligned(arena, 9, 8) == 0 && bump_used(arena) == 1, "alignment exhaustion preserves the bump mark")
+   assert(bump_alloc_aligned(arena, 8, 8) == base + 8 && bump_used(arena) == 16, "alignment padding fits the remaining span")
+   assert(bump_alloc(arena, 1) == 0 && bump_used(arena) == 16, "full allocator rejects another byte")
+   bump_reset(arena)
+   assert(bump_alloc(arena, 0) == 0 && bump_alloc(arena, -1) == 0 && bump_used(arena) == 0)
+   assert(bump_alloc(arena, 16) == base && bump_used(arena) == 16, "exact-capacity request remains valid")
+   0
+}
+check()
+NY
+}

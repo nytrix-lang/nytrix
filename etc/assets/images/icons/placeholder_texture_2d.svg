@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
+  <title id="title1">Placeholder Texture 2D</title>
+  <desc id="desc1">Placeholder Texture 2D editor icon. Original asset id: placeholdertexture2d.</desc>
+  <defs id="defs2" />
+  <g transform="translate(2.0000 2.0000) scale(1.25000)" id="g2">
+    <path fill="#c6c6ca" d="M2 1a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V2a1 1 0 0 0-1-1zm1 2h10v8H3z" id="path1" />
+    <g id="path2">
+      <path d="M 7,4.25 4.25,7 m 6.5,-2.75 -5.5,5.5 M 11.75,7 9,9.75" id="path3" fill="#c6c6ca" />
+      <path d="m 10.75,3.5 a 0.75,0.75 0 0 0 -0.53125,0.21875 l -5.5,5.5 a 0.75,0.75 0 0 0 0,1.0625 0.75,0.75 0 0 0 1.0625,0 l 5.5,-5.5 a 0.75,0.75 0 0 0 0,-1.0625 A 0.75,0.75 0 0 0 10.75,3.5 Z m -4.28125,0.21875 -2.75,2.75 a 0.75,0.75 0 0 0 0,1.0625 0.75,0.75 0 0 0 1.0625,0 l 2.75,-2.75 a 0.75,0.75 0 0 0 0,-1.0625 0.75,0.75 0 0 0 -1.0625,0 z M 11.75,6.25 a 0.75,0.75 0 0 0 -0.53125,0.21875 l -2.75,2.75 a 0.75,0.75 0 0 0 0,1.0625 0.75,0.75 0 0 0 1.0625,0 l 2.75,-2.75 a 0.75,0.75 0 0 0 0,-1.0625 A 0.75,0.75 0 0 0 11.75,6.25 Z" id="path4" fill="#c6c6ca" />
+    </g>
+  </g>
+</svg>

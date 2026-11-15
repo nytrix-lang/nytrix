@@ -1,0 +1,30 @@
+shape sanitizer_user_thread_race {
+  family "runtime-sanitize"
+  generator "regression"
+  features [sanitize thread tsan race synchronization]
+  template ny-test-case
+  flags "--native-only"
+  timeout 180
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os (env, file_remove, file_write, pid, run_capture, temp_dir)
+def ny = env("NYTRIX_NY_FULL_BIN")
+assert(is_str(ny) && ny.len > 0)
+def path = temp_dir() + "/ny-tsan-race-" + to_str(pid()) + ".ny"
+defer { file_remove(path) }
+for race in [false, true] {
+   def write = race ? "store8(shared, 1, 0)\n" : ""
+   def source = "use core\nuse core.os.atomic\nuse core.os.thread\nfn race_worker(ptr shared) int {\n   while int(atomic_load(shared, 8)) == 0 {}\n   store8(shared, 2, 0)\n   0\n}\nfn main() int {\n   def shared = malloc(16)\n   assert(shared != 0)\n   store8(shared, 0, 0)\n   atomic_store(shared, 0, 8)\n   def worker = thread_spawn_call(race_worker, [shared])\n   atomic_store(shared, 1, 8)\n" + write + "   thread_join(worker)\n   assert(load8(shared, 0) == 2)\n   free(shared)\n   print(\"joined-clean\")\n   0\n}\n"
+   assert(is_ok(file_write(path, source)))
+   def out = run_capture([ny, "-O0", "--sanitize=thread", path], [], nil, false)
+   def text = to_str(out.get("stdout", "")) + to_str(out.get("stderr", ""))
+   if race {
+      assert(text.contains("ThreadSanitizer: data race") && text.contains("ny_fn_race_worker"), "unsynchronized emitted writes: " + text)
+   } else {
+      assert(out.get("code", 127) == 0 && text.contains("joined-clean") && !text.contains("ThreadSanitizer:"), "join orders emitted access: " + text)
+   }
+}
+0
+NY
+}

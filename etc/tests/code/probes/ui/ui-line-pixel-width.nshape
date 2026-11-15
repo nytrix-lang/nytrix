@@ -1,0 +1,128 @@
+shape ui-line-pixel-width {
+  family "probe-suite"
+  generator "regression"
+  features ["ny", "render", "gizmo", "lines"]
+  template ny-test-case
+  expect compile_and_run
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  timeout 300
+  expect_stdout "UI-LINE-PIXEL-WIDTH-OK"
+  source ny <<'NY'
+;; Screen-space lines keep one pixel width at every camera distance. The quad
+;; that line_px_quad returns is rasterised through the ordinary 3D path, then
+;; the framebuffer is measured: a line across the view, and a line receding
+;; into depth whose near and far ends must be equally wide.
+use core
+use core.os.ui.render as gfx
+use core.os.ui.render.matrix as mx
+
+;; The expansion depends on a correct 4x4 inverse.
+def inv_t = mx.mat4_inverse(mx.mat4_translate(1.0, 2.0, 3.0))
+assert(float(inv_t.get(14)) == -1.0 && float(inv_t.get(15)) == -2.0 && float(inv_t.get(16)) == -3.0 && float(inv_t.get(17)) == 1.0, "inverse of a translation")
+def vp = mx.mat4_mul(mx.mat4_perspective(1.0471975512, 1.0, 0.1, 1000.0), mx.mat4_look_at([3.0, 4.0, 8.0], [0.0, 0.0, 0.0], [0.0, 1.0, 0.0]))
+def round_trip = mx.mat4_mul(vp, mx.mat4_inverse(vp))
+mut int e = 0
+while e < 16 {
+   def int ei = e + 2
+   def f64 want = (e % 5) == 0 ? 1.0 : 0.0
+   assert(abs(float(round_trip.get(ei)) - want) < 0.00001, "view-projection times its inverse is the identity")
+   e += 1
+}
+
+def int W = 240
+def int H = 240
+assert(gfx.set_backend_type(gfx.BACKEND_MOCK), "select mock renderer")
+assert(gfx.init_window(W, H, "line width"), "open mock surface")
+
+mut int covered = 0
+mut widths = []
+def dists = [3.0, 12.0, 48.0, 160.0]
+mut i = 0
+mut prev_wpp = 0.0
+mut prev_d = 0.0
+while i < dists.len {
+   def f64 d = float(dists.get(i, 1.0))
+   assert(gfx.begin_frame_clear([0.0, 0.0, 0.0, 1.0]), "begin frame")
+   assert(gfx.begin_mode_3d({"pos": [0.0, 0.0, d], "target": [0.0, 0.0, 0.0], "up": [0.0, 1.0, 0.0], "fovy": 60.0}), "3D camera")
+   ;; Across the view at the target depth: 5 px wide.
+   def q = gfx.line_px_quad(0.0 - d * 0.4, 0.0, 0.0, d * 0.4, 0.0, 0.0, 5.0)
+   assert(q.len == 12, "quad has four corners")
+   assert(gfx.draw_quad(
+         [float(q.get(0)), float(q.get(1)), float(q.get(2))], [float(q.get(3)), float(q.get(4)), float(q.get(5))],
+         [float(q.get(6)), float(q.get(7)), float(q.get(8))], [float(q.get(9)), float(q.get(10)), float(q.get(11))],
+         [1.0, 1.0, 1.0, 1.0]), "draw horizontal quad")
+   ;; Receding into depth, drawn in red in the upper half: near end at the
+   ;; target depth, far end four times farther away.
+   assert(gfx.draw_line_px([0.0 - d * 0.35, d * 0.3, 0.0], [d * 1.2, d * 1.2, 0.0 - d * 3.0], [1.0, 0.0, 0.0, 1.0], 5.0), "draw receding line")
+   def f64 wpp = gfx.pixel_world_size(0.0, 0.0, 0.0)
+   gfx.end_mode_3d()
+   assert(gfx.end_frame(), "end frame")
+   def fb = gfx.read_framebuffer()
+   def ptr px = __ffi_untag_ptr(fb.get("data", 0))
+   ;; White line: count lit rows in the centre column.
+   mut int rows = 0
+   mut int y = 0
+   while y < H {
+      def int off = (y * W + 120) * 4
+      if load8(px, off) > 128 && load8(px, off + 1) > 128 { rows += 1 }
+      y += 1
+   }
+   ;; Red line: vertical run length in a column near each end. The line is
+   ;; slanted, so its vertical cut is width / cos(angle); both ends share the
+   ;; angle, so equal runs mean equal widths.
+   mut int near_run = 0
+   mut int far_run = 0
+   mut int near_col = -1
+   mut int far_col = -1
+   mut int x = 0
+   while x < W {
+      mut int run = 0
+      y = 0
+      while y < H {
+         def int off = (y * W + x) * 4
+         if load8(px, off) > 128 && load8(px, off + 1) < 64 { run += 1 }
+         y += 1
+      }
+      if run > 0 {
+         if near_col < 0 { near_col = x }
+         far_col = x
+      }
+      x += 1
+   }
+   assert(near_col >= 0 && far_col - near_col > 30, "receding line spans the view")
+   def int c0 = near_col + 8
+   def int c1 = far_col - 8
+   y = 0
+   while y < H {
+      def int o0 = (y * W + c0) * 4
+      def int o1 = (y * W + c1) * 4
+      if load8(px, o0) > 128 && load8(px, o0 + 1) < 64 { near_run += 1 }
+      if load8(px, o1) > 128 && load8(px, o1 + 1) < 64 { far_run += 1 }
+      y += 1
+   }
+   free(px)
+   assert(rows >= 4 && rows <= 6, "5 px line is 5 px tall at distance " + to_str(d) + ", got " + to_str(rows))
+   assert(near_run >= 4 && near_run <= 8, "near end of the receding line is about 5 px, got " + to_str(near_run))
+   assert(far_run >= near_run - 1 && far_run <= near_run + 1, "far end is as wide as the near end: " + to_str(near_run) + " vs " + to_str(far_run))
+   ;; One pixel covers a world length proportional to the distance.
+   assert(wpp > 0.0, "pixel footprint is positive")
+   if prev_d > 0.0 {
+      def f64 ratio = (wpp / prev_wpp) / (d / prev_d)
+      assert(ratio > 0.98 && ratio < 1.02, "pixel footprint grows linearly with distance")
+   }
+   prev_wpp, prev_d = wpp, d
+   widths = widths.append(rows)
+   i += 1
+}
+;; Behind the camera, and with no 3D camera, there is nothing to draw.
+assert(gfx.begin_frame_clear([0.0, 0.0, 0.0, 1.0]), "begin frame")
+assert(gfx.begin_mode_3d({"pos": [0.0, 0.0, 5.0], "target": [0.0, 0.0, 0.0], "up": [0.0, 1.0, 0.0], "fovy": 60.0}), "3D camera")
+assert(gfx.line_px_quad(0.0, 0.0, 20.0, 1.0, 0.0, 30.0, 3.0).len == 0, "segment behind the camera is rejected")
+assert(gfx.line_px_quad(-1.0, 0.0, 20.0, 1.0, 0.0, 0.0, 3.0).len == 12, "segment crossing the eye plane is clipped, not dropped")
+gfx.end_mode_3d()
+assert(gfx.line_px_quad(0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 3.0).len == 0, "no quad without a 3D camera")
+gfx.end_frame()
+gfx.close_window()
+print("UI-LINE-PIXEL-WIDTH-OK")
+NY
+}

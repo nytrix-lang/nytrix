@@ -11,18 +11,18 @@
 #include "base/process.h"
 #include "base/util.h"
 #include "cmd/ny/repl/types.h"
-#include "code/backend/llvm/bridge.h"
-#include "code/backend/native.h"
+#include "code/backend/mach/emit/llvm/bridge.h"
+#include "code/backend/lower/native.h"
 #include "code/backend/runtime/runtime.h"
 #include "code/backend/runtime/shared.h"
-#include "code/backend/wire/cache.h"
-#include "code/lang/code.h"
-#include "code/lang/llvm/jit.h"
-#include "code/lang/parse/json.h"
-#include "code/lang/pipeline/native.h"
-#include "code/lang/priv.h"
-#include "code/lang/types/pipeline.h"
-#include "priv.h"
+#include "code/backend/core/cache/cache.h"
+#include "code/lang/ny/gen/context.h"
+#include "code/lang/ny/gen/llvm/jit.h"
+#include "code/lang/ny/parser/json.h"
+#include "code/lang/ny/pipeline/native.h"
+#include "code/lang/ny/gen/internal.h"
+#include "code/lang/ny/semantics/pipeline.h"
+#include "cmd/ny/repl/priv.h"
 #include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
@@ -1788,6 +1788,7 @@ static void repl_reset_docs_from_source(doc_list_t *docs, const char *src,
   doclist_free(docs);
   memset(docs, 0, sizeof(*docs));
   add_builtin_docs(docs);
+  repl_add_language_docs(docs);
   repl_add_docs_from_source(docs, src, name);
 }
 
@@ -2099,6 +2100,45 @@ static void repl_collect_namespace_members(repl_help_items_t *items,
       continue;
     repl_help_items_add(items, entry->name, repl_doc_kind_name(entry->kind));
   }
+}
+
+static void repl_print_help_items(const char *title,
+                                  const repl_help_items_t *items);
+
+static int repl_print_help_index(const doc_list_t *docs, const char *query) {
+  if (!docs || !query)
+    return 0;
+  bool keywords = strcmp(query, "keywords") == 0;
+  bool internals = strcmp(query, "internals") == 0;
+  if (!keywords && !internals)
+    return 0;
+
+  repl_help_items_t items = {0};
+  for (size_t i = 0; i < docs->len; ++i) {
+    const ny_doc_entry *entry = &docs->data[i];
+    if (!entry->name)
+      continue;
+    bool is_internal = strncmp(entry->name, "__", 2) == 0 ||
+                       strncmp(entry->name, "rt_", 3) == 0 ||
+                       strncmp(entry->name, "ny_", 3) == 0;
+    if ((keywords && (entry->kind == 6 || entry->kind == 7)) ||
+        (internals && is_internal && (entry->kind == 3 || entry->kind == 4)))
+      repl_help_items_add(&items, entry->name,
+                          keywords
+                              ? (entry->kind == 7 ? "Type" : "Language form")
+                              : "Runtime builtin");
+  }
+  if (items.len == 0) {
+    repl_help_items_free(&items);
+    return 0;
+  }
+  repl_print_help_items(keywords ? "Language keywords and forms"
+                                 : "Runtime and compiler internals",
+                        &items);
+  printf("  Tip: use `:help <name>` or put the cursor on a name and press F1 "
+         "for details.\n\n");
+  repl_help_items_free(&items);
+  return 1;
 }
 
 static void repl_print_help_items(const char *title,
@@ -3381,6 +3421,7 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
   if (!batch_mode) {
     g_repl_docs = &docs;
     add_builtin_docs(&docs);
+    repl_add_language_docs(&docs);
     p_docs = &docs;
   }
   if (!repl_native_only())
@@ -3428,8 +3469,15 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
   if (init_code && *init_code) {
     if (batch_mode || !isatty(STDIN_FILENO)) {
       init_lines = malloc(sizeof(char *));
-      init_lines[0] = ny_strdup(init_code);
-      init_lines_len = 1;
+      if (init_lines) {
+        init_lines[0] = ny_strdup(init_code);
+        if (init_lines[0])
+          init_lines_len = 1;
+        else {
+          free(init_lines);
+          init_lines = NULL;
+        }
+      }
     } else {
       init_lines = repl_split_lines(init_code, &init_lines_len);
     }
@@ -3753,6 +3801,7 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
         doclist_free(&docs);
         memset(&docs, 0, sizeof(docs));
         add_builtin_docs(&docs);
+        repl_add_language_docs(&docs);
         repl_shutdown_engine();
         if (g_repl_user_source) {
           free(g_repl_user_source);
@@ -4227,7 +4276,9 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
             char query[512];
             repl_normalize_doc_query(p, query, sizeof(query));
             const char *lookup = query[0] ? query : p;
-            int printed = repl_print_help_query(&docs, lookup);
+            int printed = repl_print_help_index(&docs, lookup);
+            if (!printed)
+              printed = repl_print_help_query(&docs, lookup);
             if (!printed && !doclist_print_missing(&docs, lookup))
               fprintf(stderr,
                       "ny: REPL documentation renderer failed for '%s'\n",
@@ -4274,6 +4325,11 @@ void ny_repl_run(int opt_level, const char *opt_pipeline, const char *init_code,
           printf("  :help core.os.path.sep - Show a specific symbol\n");
           printf("  :help sep             - Resolve a symbol from imported "
                  "modules\n");
+          printf("  :help keywords        - Browse language forms and types\n");
+          printf("  :help for             - Show syntax and its reference\n");
+          printf(
+              "  :help internals       - Browse runtime/compiler builtins\n");
+          printf("  F1 on a keyword or internal name - show contextual docs\n");
           printf("  :trace values aes     - Trace matching calls with return "
                  "values\n");
           printf("  :trace compiler       - Show compiler-side AST/expand info "

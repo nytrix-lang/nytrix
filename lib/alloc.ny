@@ -25,8 +25,10 @@ fn bump_alloc(list state, int n) ptr {
    "Allocates `n` bytes from bump allocator state. Returns 0 when capacity is exhausted."
    if n <= 0 { return 0 }
    state = _ensure_bump_state(state)
-   def base = state[0]  cap = state[1]  off = state[2]
-   if off + n > cap { return 0 }
+   def ptr base = state[0]
+   def int cap = state[1]
+   def int off = state[2]
+   if off < 0 || off > cap || n > cap - off { return 0 }
    def p = base + off
    state.set(2, off + n)
    p
@@ -38,11 +40,17 @@ fn bump_alloc_aligned(list state, int n, int align=8) ptr {
    if align <= 0 { panic("bump alignment must be positive") }
    if (align & (align - 1)) != 0 { panic("bump alignment must be a power-of-two") }
    state = _ensure_bump_state(state)
-   def base = state[0]  cap = state[1]
-   mut off = state[2]
+   def ptr base = state[0]
+   def int cap = state[1]
+   mut int off = state[2]
+   if off < 0 || off > cap { return 0 }
    def rem = off % align
-   if rem != 0 { off += align - rem }
-   if off + n > cap { return 0 }
+   if rem != 0 {
+      def padding = align - rem
+      if padding > cap - off { return 0 }
+      off += padding
+   }
+   if n > cap - off { return 0 }
    def p = base + off
    state.set(2, off + n)
    p

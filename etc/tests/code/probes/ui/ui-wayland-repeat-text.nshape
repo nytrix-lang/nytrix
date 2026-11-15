@@ -1,0 +1,73 @@
+shape ui_wayland_repeat_text {
+  family "runtime/input"
+  generator "regression"
+  features [ui wayland keyboard repeat text]
+  template ny-test-case
+  timeout 120
+  flags_matrix "--native-only -O0; --native-backend=llvm --jit --jit-engine=mcjit -O0"
+  expect compile_and_run
+  expect_message "UI-WAYLAND-REPEAT-TEXT-OK"
+  source ny <<'NY'
+use core
+use core.os.ui.window.platform.linux.wayland as wl
+use core.os.ui.window.event as event
+use core.os.ui.window.consts as keys
+
+;; A held printable key must repeat its text, not only the key event: the
+;; editor inserts from KEY_CHAR, so a repeat without it typed nothing.
+;; Offsets follow the backend listener layout (focus 200, repeat rate 376,
+;; delay 384, key 392, start 408, last 416, held text 560); the setup mirrors
+;; ui-wayland-repeat-focus.
+def state = zalloc(1024)
+def owner = {"handle": 0x123456789, "focused": true, "key_states": {87: true}}
+store64_h(state, 0x123456789, 200)
+store64_h(state, 30, 376)
+store64_h(state, 1, 384)
+store64_h(state, 87, 392)
+;; Same warm-up as ui-wayland-repeat-focus: an unfocused window first.
+def other = {"handle": 0x12345678b, "focused": true}
+wl._synthesize_key_repeat(other, state)
+def other_result = wl.poll_window_events(other)
+assert(other_result.get(1, []).len == 0, "unfocused window gets no repeat")
+def int now_ns = __monotonic_ns_raw()
+store64_h(state, 40, 376)
+store64_h(state, 400, 384)
+store64_h(state, now_ns, 408)
+store64_h(state, now_ns, 416)
+wl._synthesize_key_repeat(owner, state)
+def early = wl.poll_window_events(owner)
+assert(early.get(1, []).len == 0, "repeat respects the delay")
+store64_h(state, now_ns - 2000000000, 408)
+store64_h(state, now_ns - 2000000000, 416)
+store64_h(state, 119, 560)
+wl._synthesize_key_repeat(owner, state)
+def r1 = wl.poll_window_events(owner)
+def got = r1.get(1, [])
+mut presses = 0
+mut chars = 0
+for ev in got {
+   def t = event.event_type(ev)
+   if t == keys.EVENT_KEY_PRESSED { presses += 1 }
+   if t == keys.EVENT_KEY_CHAR {
+      assert(int(event.event_data(ev).get("char", 0)) == 119, "repeated text is the held key's character")
+      chars += 1
+   }
+}
+assert(presses > 0 && presses <= 4, "bounded repeat batch")
+assert(chars == presses, "every key repeat carries its text")
+;; Without held text (an arrow key) the repeat carries no characters.
+store64_h(state, 0, 560)
+store64_h(state, now_ns - 2000000000, 408)
+store64_h(state, now_ns - 2000000000, 416)
+wl._synthesize_key_repeat(owner, state)
+def r2 = wl.poll_window_events(owner)
+def got2 = r2.get(1, [])
+mut chars2 = 0
+for ev in got2 { if event.event_type(ev) == keys.EVENT_KEY_CHAR { chars2 += 1 } }
+assert(got2.len > 0 && chars2 == 0, "non-text keys repeat without characters")
+wl._keyboard_handle_leave(state, 0, 1, 0x123456789)
+assert(load64_h(state, 560) == 0, "focus leave clears the held text")
+free(state)
+print("UI-WAYLAND-REPEAT-TEXT-OK")
+NY
+}

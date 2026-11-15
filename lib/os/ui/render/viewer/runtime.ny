@@ -266,7 +266,10 @@ fn build_crosshair_mesh() list {
    _push_mesh_quad(buf, 12, -1.0, 5.0, 1.0, 9.0, co)
    _push_mesh_quad(buf, 18, -9.0, -1.0, -5.0, 1.0, co)
    _push_mesh_quad(buf, 24, 5.0, -1.0, 9.0, 1.0, co)
-   [buf, mesh_create_cpu(buf, n, false)]
+   mut out = list()
+   out = out.append(buf)
+   out = out.append(mesh_create_cpu(buf, n, false))
+   out
 }
 
 fn load_equirect_skybox(any path) int {

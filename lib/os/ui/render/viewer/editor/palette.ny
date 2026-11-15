@@ -4,9 +4,9 @@
 ;; - core.os.ui.render.viewer.editor.commands
 module core.os.ui.render.viewer.editor.palette(
    commands, matches, which_key,
-   state, open, close, is_open, query, index, set_index,
+   state, open, open_items, items_mode, dismiss, is_open, query, index, set_index,
    scroll, visible, set_visible, scroll_by, visible_matches,
-   state_matches, selected, handle_key, handle_char
+   state_matches, selected, handle_key, wants_choose, handle_char
 )
 
 use core
@@ -21,36 +21,59 @@ fn commands() list {
 }
 
 ;; Returns the result of the `state` operation.
-fn state() dict {
+fn state() any {
    {"open": false, "query": "", "index": 0, "scroll": 0, "visible": 12, "cfg": cmd.config()}
 }
 
-;; Returns the result of the `open` operation.
-fn open(dict st) dict {
+;; The palette state is passed and returned as `any`. Declared `dict`, a state
+;; that went through this module came back as an untagged handle: stored in
+;; the caller's state table it no longer tested as a dict, and the palette
+;; stayed closed the second time it was opened.
+;; Opens the command palette.
+fn open(any st) any {
    st["open"] = true
    st["query"] = ""
    st["index"] = 0
    st["scroll"] = 0
-   st
+   st["items"] = []
+   st["mode"] = ""
+   st["choose"] = false
+   return st
 }
 
-;; Closes resources owned by the state and returns the closed state.
-fn close(dict st) dict {
+;; Opens the palette over an explicit item list instead of the commands.
+;; Rows use the command shape [title, id, key, detail, tag]; `mode` names the
+;; list (for example "buffers") so the caller knows how to apply a choice.
+fn open_items(any st, list rows, str mode) any {
+   st = open(st)
+   st["items"] = rows
+   st["mode"] = mode
+   return st
+}
+
+;; Returns the active item-list mode, or "" for the command palette.
+fn items_mode(any st) str { to_str(st.get("mode", "")) }
+
+;; Hides the palette and returns the state. The name is deliberately unique:
+;; as `close` the call `palette.close(state)` ran the OS file-descriptor
+;; close, and as `hide` it collided with the window module's `hide`, which
+;; also mis-bound the functions exported after it.
+fn dismiss(any st) any {
    st["open"] = false
-   st
+   return st
 }
 
-fn is_open(dict st) bool { bool(st.get("open", false)) }
+fn is_open(any st) bool { bool(st.get("open", false)) }
 
-fn query(dict st) str { to_str(st.get("query", "")) }
+fn query(any st) str { to_str(st.get("query", "")) }
 
-fn index(dict st) int { int(st.get("index", 0)) }
+fn index(any st) int { int(st.get("index", 0)) }
 
-fn scroll(dict st) int { int(st.get("scroll", 0)) }
+fn scroll(any st) int { int(st.get("scroll", 0)) }
 
-fn visible(dict st) int { max(1, int(st.get("visible", 12))) }
+fn visible(any st) int { max(1, int(st.get("visible", 12))) }
 
-fn _cfg(dict st) dict { st.get("cfg", cmd.config()) }
+fn _cfg(any st) dict { st.get("cfg", cmd.config()) }
 
 fn _blob(any row) str {
    def title = str.lower(to_str(row.get(0, "")))
@@ -104,9 +127,12 @@ fn matches(str query, int limit=1000000) list {
 }
 
 ;; Returns the result of the `state_matches` operation.
-fn state_matches(dict st, int limit=1000000) list {
+fn state_matches(any st, int limit=1000000) list {
    def q = str.lower(str.strip(query(st)))
-   def rows = cmd.enabled(_cfg(st))
+   ;; Chosen with if/else: a `cond ? list : list` conditional read the item
+   ;; list shifted by one row, so RET in the buffer picker ran the wrong row.
+   mut any rows = st.get("items", [])
+   if items_mode(st).len <= 0 || !is_list(rows) { rows = cmd.enabled(_cfg(st)) }
    mut out = []
    out = _append_level(out, rows, q, 0, limit)
    out = _append_level(out, rows, q, 1, limit)
@@ -118,7 +144,7 @@ fn _clamp_scroll(int pos, int total, int view) int {
    min(max(0, pos), max(0, total - max(1, view)))
 }
 
-fn _clamp_state(dict st, int total) dict {
+fn _clamp_state(any st, int total) any {
    def view = visible(st)
    def idx = min(max(0, index(st)), max(0, total - 1))
    mut scr = _clamp_scroll(scroll(st), total, view)
@@ -126,24 +152,24 @@ fn _clamp_state(dict st, int total) dict {
    if idx >= scr + view { scr = idx - view + 1 }
    st["index"] = idx
    st["scroll"] = _clamp_scroll(scr, total, view)
-   st
+   return st
 }
 
 ;; Updates the visible and returns the resulting state.
-fn set_visible(dict st, int rows) dict {
+fn set_visible(any st, int rows) any {
    st["visible"] = max(1, rows)
    _clamp_state(st, state_matches(st).len)
 }
 
 ;; Updates the index and returns the resulting state.
-fn set_index(dict st, int idx) dict {
+fn set_index(any st, int idx) any {
    def opts = state_matches(st)
    st["index"] = min(max(0, idx), max(0, opts.len - 1))
    _clamp_state(st, opts.len)
 }
 
 ;; Returns the result of the `scroll_by` operation.
-fn scroll_by(dict st, int delta) dict {
+fn scroll_by(any st, int delta) any {
    def opts = state_matches(st)
    def view = visible(st)
    st["scroll"] = _clamp_scroll(scroll(st) + delta, opts.len, view)
@@ -154,7 +180,7 @@ fn scroll_by(dict st, int delta) dict {
 }
 
 ;; Returns the result of the `visible_matches` operation.
-fn visible_matches(dict st) list {
+fn visible_matches(any st) list {
    def opts = state_matches(st)
    def start = _clamp_scroll(scroll(st), opts.len, visible(st))
    def stop = min(opts.len, start + visible(st))
@@ -168,22 +194,30 @@ fn visible_matches(dict st) list {
 }
 
 ;; Returns the result of the `selected` operation.
-fn selected(dict st) list {
+fn selected(any st) list {
    def opts = state_matches(st)
-   opts.len <= 0 ? [] : opts.get(min(max(index(st), 0), opts.len - 1))
+   if opts.len <= 0 { return [] }
+   mut int at = index(st)
+   if at < 0 { at = 0 }
+   if at >= opts.len { at = opts.len - 1 }
+   opts.get(at)
 }
 
-;; Handles the key operation and returns the resulting state.
-fn handle_key(dict st, any data) dict {
-   mut choose = false
+;; Handles a key press and returns the resulting state; wants_choose(state)
+;; tells whether Enter asked to apply the selection.
+fn handle_key(any st, any data) any {
+   mut picked = false
    def opts = state_matches(st)
    def mods = int(data.get("mods", data.get("mod", 0)))
    def ctrl = (mods & (key.MOD_CONTROL | key.MOD_SUPER | key.MOD_META)) != 0
-   if window.event_key_is(data, key.KEY_ESCAPE) { st = close(st) }
-   elif window.event_key_is(data, key.KEY_ENTER) { choose = true }
+   if window.event_key_is(data, key.KEY_ESCAPE) { st = dismiss(st) }
+   elif window.event_key_is(data, key.KEY_ENTER) { picked = true }
    elif window.event_key_is(data, key.KEY_BACKSPACE) {
       def q = query(st)
-      if q.len > 0 { st["query"] = str.str_slice(q, 0, q.len - 1) }
+      if q.len > 0 {
+         def any shorter = to_str(str.str_slice(q, 0, q.len - 1))
+         st["query"] = shorter
+      }
       st["index"] = 0
       st["scroll"] = 0
    } else {
@@ -194,20 +228,33 @@ fn handle_key(dict st, any data) dict {
       elif window.event_key_is(data, key.KEY_HOME) { st = set_index(st, 0) }
       elif window.event_key_is(data, key.KEY_END) { st = set_index(st, opts.len - 1) }
    }
-   {"st": st, "choose": choose}
+   ;; The state itself is returned, carrying the outcome in "choose". Nesting
+   ;; it in a result dict lost it: the caller read the nested state back as a
+   ;; non-dict and RET then ran the first command instead of the chosen row.
+   ;; `return` is explicit and the flag is not called `choose`: with the
+   ;; window module imported by the caller, a bare trailing `st` after that
+   ;; assignment returned the flag instead of the state.
+   st["choose"] = picked
+   return st
 }
 
+;; Returns true when the last handle_key asked to apply the selected row.
+fn wants_choose(any st) bool { bool(st.get("choose", false)) }
+
 ;; Handles the char operation and returns the resulting state.
-fn handle_char(dict st, any data) dict {
+fn handle_char(any st, any data) any {
    def mods = int(data.get("mods", data.get("mod", 0)))
    if (mods & (key.MOD_CONTROL | key.MOD_SUPER | key.MOD_META)) != 0 { return st }
    def cp = int(data.get("char", 0))
    if cp >= 32 && cp != 127 {
-      st["query"] = query(st) + chr(cp)
+      ;; Built as an `any` value: the typed `str` sum stored straight into the
+      ;; state read back as a number, so no typed filter ever matched.
+      def any next_query = to_str(st.get("query", "")) + str.chr(cp)
+      st["query"] = next_query
       st["index"] = 0
       st["scroll"] = 0
    }
-   st
+   return st
 }
 
 ;; Finds the key and returns the matching result.

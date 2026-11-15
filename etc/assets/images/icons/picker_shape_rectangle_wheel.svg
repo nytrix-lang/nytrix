@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
+  <title id="title1">Picker Shape Rectangle Wheel</title>
+  <desc id="desc1">Picker Shape Rectangle Wheel editor icon. Original asset id: pickershaperectanglewheel.</desc>
+  <defs id="defs1" />
+  <g transform="translate(2.0000 2.0000) scale(1.25000)" id="g1">
+    <path d="M 8,1.875 C 4.62762,1.875 1.875,4.62762 1.875,8 c 0,3.37238 2.75262,6.125 6.125,6.125 3.37238,0 6.125,-2.75262 6.125,-6.125 C 14.125,4.62762 11.37238,1.875 8,1.875 Z m 0,1.75 c 2.42661,0 4.375,1.9483902 4.375,4.375 0,2.42661 -1.94839,4.375 -4.375,4.375 C 5.5733902,12.375 3.625,10.42661 3.625,8 3.625,5.5733902 5.5733902,3.625 8,3.625 Z" id="circle1" fill="#c6c6ca" />
+    <path fill="#c6c6ca" d="M4.9 4.9h6.2v6.2H4.9z" id="path1" />
+  </g>
+</svg>

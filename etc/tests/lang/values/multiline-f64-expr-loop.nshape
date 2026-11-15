@@ -1,0 +1,28 @@
+shape multiline_f64_expr_loop {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "codegen"]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect compile_and_run
+  expect_message "MULTILINE_F64_EXPR_LOOP_OK"
+  source ny <<'NY'
+use core
+fn h(int n) f64 {
+   mut f64 s = 0.0
+   mut i = 0
+   while i < n {
+      def f64 a = float(i)
+      def f64 b = 2.0
+      def f64 c = 0.5
+      def f64 v = a * b + c *
+         a
+      s += v
+      i += 1
+   }
+   s
+}
+assert(h(4) == (0.0 + 2.5 + 5.0 + 7.5), "continued f64 expression in a loop")
+print("MULTILINE_F64_EXPR_LOOP_OK")
+NY
+}

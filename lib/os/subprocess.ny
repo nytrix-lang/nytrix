@@ -27,6 +27,8 @@ fn run_capture(any cmd, any args=[], any input=nil, bool check=true) dict {
    `cmd` may be a string plus `args`, or a full argv list like `['git', 'status']`."
    def argv = _cmd_args(cmd, args)
    def path = to_str(argv.get(0, ""))
+   mut cleanup = [0]
+   defer { if is_dict(cleanup[0]) { pio.close(cleanup[0]) } }
    def p = pio.spawn(path, argv)
    ;; io.spawn returns the process dictionary on success and integer zero on
    ;; setup failure. Test the tagged runtime kind before reading process data.
@@ -39,6 +41,7 @@ fn run_capture(any cmd, any args=[], any input=nil, bool check=true) dict {
       fail["argv"] = argv
       return fail
    }
+   cleanup[0] = p
    if !is_nil(input) && (!is_int(input) || int(input) != 0) {
       def _ignored_send = pio.send(p, input)
       _ignored_send
@@ -47,6 +50,7 @@ fn run_capture(any cmd, any args=[], any input=nil, bool check=true) dict {
    _ignored_shutdown
    def stdout = pio.recv_all(p, 4096)
    def status = pio.close(p)
+   cleanup[0] = 0
    mut code = 1
    if is_ok(status) { code = int(to_int(unwrap(status))) }
    mut out = dict(8)

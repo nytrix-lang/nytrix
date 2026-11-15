@@ -213,10 +213,13 @@ fn write_text(str path, str text) bool {
 
 ;; Returns the result of the `seed_buffers` operation.
 fn seed_buffers(list args, str fallback="README.md") list {
+   ;; Every path argument becomes a buffer, in order; the first is shown.
    mut out = []
-   if args.len > 1 {
-      def path = to_str(args.get(1, ""))
-      if file_exists(path) { out = out.append(read_buffer(path)) }
+   mut i = 1
+   while i < args.len {
+      def path = to_str(args.get(i, ""))
+      if path.len > 0 && !str.startswith(path, "-") && file_exists(path) { out = out.append(read_buffer(path)) }
+      i += 1
    }
    if out.len == 0 && fallback.len > 0 && file_exists(fallback) {
       out = out.append(read_buffer(fallback))

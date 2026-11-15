@@ -54,13 +54,13 @@ use core
 use core.mem
 use core.str (to_hex)
 use core.common as common
-use core.os.ui.debug as ui_profile
+use core.os.ui.debug as ui_debug
 use core.os.ui.window.platform.api
 use core.os.ui.window.platform as ui_backend
 
-fn _is_debug() bool { ui_profile.debug_enabled() }
+fn _is_debug() bool { ui_debug.debug_enabled() }
 
-fn _dbg(any msg) any { if _is_debug() { ui_profile.print_text("[window:native] " + msg) } }
+fn _dbg(any msg) any { if _is_debug() { ui_debug.print_text("[window:native] " + msg) } }
 mut _title_buf = 0
 mut _title_cap = 0
 mut _ready = false

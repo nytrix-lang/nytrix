@@ -57,6 +57,7 @@ fn f64buf_store(ptr buf, int i, f64 v) ptr {
 }
 
 @inline
+
 ;; Stores a byte at element `i` and returns the buffer.
 fn u8buf_store(ptr buf, int i, int v) ptr {
    store8(buf, v, i)
@@ -70,6 +71,7 @@ fn i32buf_store(ptr buf, int i, int v) ptr {
 }
 
 @inline
+
 ;; Stores an i64 at element `i` and returns the buffer.
 fn i64buf_store(ptr buf, int i, int v) ptr {
    store64_i(buf, v, i * 8)

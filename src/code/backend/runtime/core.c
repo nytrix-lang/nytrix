@@ -51,11 +51,23 @@ static int64_t rt_cstr_scalar_at(int64_t str_v, int64_t idx_v, bool checked);
  * data pointers. A tbuf released through free_raw is removed from this bounded
  * registry; tombstones preserve open-addressing probe chains.
  * The registry covers transient compiler-generated buffers as well as
- * long-lived containers.  Keep enough entries for the largest benchmark
- * allocation burst without turning a full registry into a false OOB result.
+ * long-lived containers.
+ *
+ * It is a chain of fixed-size open-addressing segments.  A single 2^22-slot
+ * table used to be the whole registry: a program that keeps its lists alive
+ * (the default heap policy never reclaims them) filled it after about four
+ * million allocations, registration then failed silently, and every list
+ * created afterwards was read as a plain integer.  A segment stops taking
+ * fresh slots at three quarters full, so probes stay short, and the next
+ * segment is allocated on demand.
  */
 #define RT_TBUF_HANDLE_LIMIT (1u << 22)
-static _Atomic(uintptr_t) rt_tbuf_handles[RT_TBUF_HANDLE_LIMIT];
+#define RT_TBUF_HANDLE_SEGMENTS 256u
+#define RT_TBUF_HANDLE_SEGMENT_FILL ((RT_TBUF_HANDLE_LIMIT / 4u) * 3u)
+static _Atomic(uintptr_t) rt_tbuf_handles_first[RT_TBUF_HANDLE_LIMIT];
+static _Atomic(_Atomic(uintptr_t) *) rt_tbuf_segments[RT_TBUF_HANDLE_SEGMENTS];
+static _Atomic(uint32_t) rt_tbuf_segment_used[RT_TBUF_HANDLE_SEGMENTS];
+static _Atomic(uint32_t) rt_tbuf_segment_count = 1;
 #define RT_TBUF_HANDLE_FLAG_MASK ((uintptr_t)0x07u)
 #define RT_TBUF_HANDLE_FREEABLE ((uintptr_t)0x01u)
 #define RT_TBUF_HANDLE_STATIC ((uintptr_t)0x02u)
@@ -220,6 +232,12 @@ static void rt_map_oracle_expand_bounds(uintptr_t start, uintptr_t end) {
   }
 }
 
+__thread rt_probe_cache_entry_t g_rt_probe_cache[RT_PROBE_CACHE_WAYS];
+__thread uint32_t g_rt_probe_cache_next;
+
+__thread rt_probe_cache_entry_t g_rt_probe_cache[RT_PROBE_CACHE_WAYS];
+__thread uint32_t g_rt_probe_cache_next;
+
 void rt_map_oracle_add(uintptr_t start, size_t size) {
   if (!start || (uintptr_t)size > UINTPTR_MAX - start)
     return;
@@ -304,6 +322,43 @@ void rt_map_oracle_add(uintptr_t start, size_t size) {
   atomic_flag_clear_explicit(&g_rt_oracle_extra_lock, memory_order_release);
 }
 
+static _Atomic(uintptr_t) *rt_tbuf_segment(uint32_t index) {
+  if (index == 0)
+    return rt_tbuf_handles_first;
+  if (index >= RT_TBUF_HANDLE_SEGMENTS)
+    return NULL;
+  return atomic_load_explicit(&rt_tbuf_segments[index], memory_order_acquire);
+}
+
+/*
+ * Returns segment `index`, allocating it when it is the next one in the chain.
+ * Zeroed pages are committed lazily, so an untouched segment costs no memory.
+ */
+static _Atomic(uintptr_t) *rt_tbuf_segment_ensure(uint32_t index) {
+  _Atomic(uintptr_t) *seg = rt_tbuf_segment(index);
+  if (seg || index == 0 || index >= RT_TBUF_HANDLE_SEGMENTS)
+    return seg;
+  _Atomic(uintptr_t) *fresh =
+      (_Atomic(uintptr_t) *)calloc(RT_TBUF_HANDLE_LIMIT, sizeof(uintptr_t));
+  if (!fresh)
+    return NULL;
+  _Atomic(uintptr_t) *expected = NULL;
+  if (!atomic_compare_exchange_strong_explicit(
+          &rt_tbuf_segments[index], &expected, fresh, memory_order_acq_rel,
+          memory_order_acquire)) {
+    free(fresh);
+    fresh = expected;
+  }
+  uint32_t count =
+      atomic_load_explicit(&rt_tbuf_segment_count, memory_order_acquire);
+  while (count < index + 1u &&
+         !atomic_compare_exchange_weak_explicit(
+             &rt_tbuf_segment_count, &count, index + 1u, memory_order_acq_rel,
+             memory_order_acquire)) {
+  }
+  return fresh;
+}
+
 static size_t rt_tbuf_handle_slot(uintptr_t data) {
   uint64_t x = (uint64_t)data;
   x ^= x >> 33;
@@ -329,34 +384,56 @@ static void rt_tbuf_cache_handle(uintptr_t data) {
 
 static bool rt_tbuf_header_valid(const int64_t *header);
 
-static void rt_tbuf_register_handle(uintptr_t data, bool freeable) {
-  if (!data || (data & RT_TBUF_HANDLE_FLAG_MASK) != 0)
-    return;
-  uintptr_t value =
-      data | (freeable ? RT_TBUF_HANDLE_FREEABLE : RT_TBUF_HANDLE_STATIC);
+/*
+ * Finds `data` in one segment. Returns its slot, or SIZE_MAX when the probe
+ * chain ends at an empty slot first.
+ */
+static size_t rt_tbuf_segment_find(_Atomic(uintptr_t) *seg, uintptr_t data) {
+  size_t start = rt_tbuf_handle_slot(data);
+  for (size_t probe = 0; probe < RT_TBUF_HANDLE_LIMIT; ++probe) {
+    size_t i = (start + probe) & (RT_TBUF_HANDLE_LIMIT - 1u);
+    uintptr_t seen = atomic_load_explicit(&seg[i], memory_order_acquire);
+    if (!seen)
+      return SIZE_MAX;
+    if ((seen & ~RT_TBUF_HANDLE_FLAG_MASK) == data &&
+        (seen & RT_TBUF_HANDLE_FLAG_MASK) != 0)
+      return i;
+  }
+  return SIZE_MAX;
+}
+
+/*
+ * Tries to store `value` in one segment: a tombstone on the probe chain is
+ * reused, a fresh slot is taken only while the segment is under its fill
+ * limit (`force` lifts that limit for the last resort).
+ */
+static bool rt_tbuf_segment_insert(uint32_t index, _Atomic(uintptr_t) *seg,
+                                   uintptr_t data, uintptr_t value,
+                                   bool force) {
   size_t start = rt_tbuf_handle_slot(data);
   size_t first_tombstone = SIZE_MAX;
   for (size_t probe = 0; probe < RT_TBUF_HANDLE_LIMIT; ++probe) {
     size_t i = (start + probe) & (RT_TBUF_HANDLE_LIMIT - 1u);
-    uintptr_t seen =
-        atomic_load_explicit(&rt_tbuf_handles[i], memory_order_acquire);
-    uintptr_t seen_data = seen & ~RT_TBUF_HANDLE_FLAG_MASK;
-    if (seen_data == data && (seen & RT_TBUF_HANDLE_FLAG_MASK) != 0) {
-      rt_tbuf_cache_handle(data);
-      return;
-    }
+    uintptr_t seen = atomic_load_explicit(&seg[i], memory_order_acquire);
     if (seen == RT_TBUF_HANDLE_TOMBSTONE && first_tombstone == SIZE_MAX)
       first_tombstone = i;
     if (seen != 0)
       continue;
+    if (first_tombstone == SIZE_MAX && !force &&
+        atomic_load_explicit(&rt_tbuf_segment_used[index],
+                             memory_order_relaxed) >=
+            RT_TBUF_HANDLE_SEGMENT_FILL)
+      return false;
     size_t insert_at = first_tombstone == SIZE_MAX ? i : first_tombstone;
     uintptr_t expected =
         first_tombstone == SIZE_MAX ? 0 : RT_TBUF_HANDLE_TOMBSTONE;
-    if (atomic_compare_exchange_strong_explicit(
-            &rt_tbuf_handles[insert_at], &expected, value, memory_order_acq_rel,
-            memory_order_acquire)) {
-      rt_tbuf_cache_handle(data);
-      return;
+    if (atomic_compare_exchange_strong_explicit(&seg[insert_at], &expected,
+                                                value, memory_order_acq_rel,
+                                                memory_order_acquire)) {
+      if (first_tombstone == SIZE_MAX)
+        atomic_fetch_add_explicit(&rt_tbuf_segment_used[index], 1,
+                                  memory_order_relaxed);
+      return true;
     }
     /*
      * A concurrent insertion/removal changed the probe chain; restart.
@@ -366,10 +443,47 @@ static void rt_tbuf_register_handle(uintptr_t data, bool freeable) {
   }
   if (first_tombstone != SIZE_MAX) {
     uintptr_t expected = RT_TBUF_HANDLE_TOMBSTONE;
-    if (atomic_compare_exchange_strong_explicit(
-            &rt_tbuf_handles[first_tombstone], &expected, value,
-            memory_order_acq_rel, memory_order_acquire))
+    return atomic_compare_exchange_strong_explicit(
+        &seg[first_tombstone], &expected, value, memory_order_acq_rel,
+        memory_order_acquire);
+  }
+  return false;
+}
+
+static void rt_tbuf_register_handle(uintptr_t data, bool freeable) {
+  if (!data || (data & RT_TBUF_HANDLE_FLAG_MASK) != 0)
+    return;
+  uintptr_t value =
+      data | (freeable ? RT_TBUF_HANDLE_FREEABLE : RT_TBUF_HANDLE_STATIC);
+  uint32_t count =
+      atomic_load_explicit(&rt_tbuf_segment_count, memory_order_acquire);
+  for (uint32_t s = 0; s < count; ++s) {
+    _Atomic(uintptr_t) *seg = rt_tbuf_segment(s);
+    if (seg && rt_tbuf_segment_find(seg, data) != SIZE_MAX) {
       rt_tbuf_cache_handle(data);
+      return;
+    }
+  }
+  for (uint32_t s = 0; s < RT_TBUF_HANDLE_SEGMENTS; ++s) {
+    _Atomic(uintptr_t) *seg = rt_tbuf_segment_ensure(s);
+    if (!seg)
+      break;
+    if (rt_tbuf_segment_insert(s, seg, data, value, false)) {
+      rt_tbuf_cache_handle(data);
+      return;
+    }
+  }
+  /*
+   * Every segment is at its fill limit or a new one could not be allocated.
+   * Overfill the last one rather than drop the handle.
+   */
+  count = atomic_load_explicit(&rt_tbuf_segment_count, memory_order_acquire);
+  for (uint32_t s = count; s-- > 0;) {
+    _Atomic(uintptr_t) *seg = rt_tbuf_segment(s);
+    if (seg && rt_tbuf_segment_insert(s, seg, data, value, true)) {
+      rt_tbuf_cache_handle(data);
+      return;
+    }
   }
 }
 
@@ -386,18 +500,14 @@ static bool rt_tbuf_registered_handle(uintptr_t data) {
       atomic_load_explicit(&rt_tbuf_handle_epoch, memory_order_acquire) ==
           epoch)
     return true;
-  size_t start = rt_tbuf_handle_slot(data);
-  for (size_t probe = 0; probe < RT_TBUF_HANDLE_LIMIT; ++probe) {
-    size_t i = (start + probe) & (RT_TBUF_HANDLE_LIMIT - 1u);
-    uintptr_t seen =
-        atomic_load_explicit(&rt_tbuf_handles[i], memory_order_acquire);
-    uintptr_t seen_data = seen & ~RT_TBUF_HANDLE_FLAG_MASK;
-    if (seen_data == data && (seen & RT_TBUF_HANDLE_FLAG_MASK) != 0) {
+  uint32_t count =
+      atomic_load_explicit(&rt_tbuf_segment_count, memory_order_acquire);
+  for (uint32_t s = 0; s < count; ++s) {
+    _Atomic(uintptr_t) *seg = rt_tbuf_segment(s);
+    if (seg && rt_tbuf_segment_find(seg, data) != SIZE_MAX) {
       rt_tbuf_cache_handle(data);
       return true;
     }
-    if (!seen)
-      break;
   }
   return false;
 }
@@ -446,20 +556,23 @@ int rt_tbuf_release_handle(int64_t value) {
   uintptr_t data = (uintptr_t)value;
   if (!data || (data & RT_TBUF_HANDLE_FLAG_MASK) != 0)
     return 0;
-  size_t start = rt_tbuf_handle_slot(data);
-  for (size_t probe = 0; probe < RT_TBUF_HANDLE_LIMIT; ++probe) {
-    size_t i = (start + probe) & (RT_TBUF_HANDLE_LIMIT - 1u);
-    uintptr_t seen =
-        atomic_load_explicit(&rt_tbuf_handles[i], memory_order_acquire);
-    if (seen == 0)
-      return 0;
-    if ((seen & ~RT_TBUF_HANDLE_FLAG_MASK) != data)
+  uint32_t count =
+      atomic_load_explicit(&rt_tbuf_segment_count, memory_order_acquire);
+  for (uint32_t s = 0; s < count; ++s) {
+    _Atomic(uintptr_t) *seg = rt_tbuf_segment(s);
+    if (!seg)
       continue;
+    size_t i = rt_tbuf_segment_find(seg, data);
+    if (i == SIZE_MAX)
+      continue;
+    uintptr_t seen = atomic_load_explicit(&seg[i], memory_order_acquire);
+    if ((seen & ~RT_TBUF_HANDLE_FLAG_MASK) != data)
+      return 0;
     bool freeable =
         (seen & RT_TBUF_HANDLE_FLAG_MASK) == RT_TBUF_HANDLE_FREEABLE;
     if (!atomic_compare_exchange_strong_explicit(
-            &rt_tbuf_handles[i], &seen, RT_TBUF_HANDLE_TOMBSTONE,
-            memory_order_acq_rel, memory_order_acquire))
+            &seg[i], &seen, RT_TBUF_HANDLE_TOMBSTONE, memory_order_acq_rel,
+            memory_order_acquire))
       return 0;
     atomic_fetch_add_explicit(&rt_tbuf_handle_epoch, 1, memory_order_acq_rel);
     return freeable ? 1 : -1;
@@ -567,6 +680,9 @@ static bool rt_tbuf_capacity_fits(int64_t capacity, int64_t elem_size) {
  */
 
 int64_t rt_zalloc_raw(int64_t size) {
+  int64_t hooked = rt_user_alloc_hook(size);
+  if (hooked != -1)
+    return hooked;
   if (size <= 0)
     size = 1;
   void *p = calloc(1, (size_t)size);
@@ -1269,6 +1385,16 @@ int64_t rt_tbuf_concat_raw(int64_t left, int64_t right) {
   return out;
 }
 
+static void rt_container_oom(const char *message) {
+  /*
+   * Failure reporting itself must not require another heap allocation.
+   * rt_panic runs active cleanup and transfers to a handler or exits.
+   */
+  fputs(message, stderr);
+  rt_panic(0);
+  abort();
+}
+
 static int64_t rt_set_add_in_place(int64_t set_value, int64_t key) {
   int64_t heap = rt_heap_object_ptr(set_value);
   int64_t tag = 0;
@@ -1280,25 +1406,26 @@ static int64_t rt_set_add_in_place(int64_t set_value, int64_t key) {
     return set_value;
   int64_t count = *(int64_t *)((char *)(uintptr_t)set_value + 0);
   if (count * 10 >= cap * 7) {
+    if (cap >= (INT64_C(1) << 27))
+      rt_container_oom("container capacity overflow\n");
+    if (cap > ((INT64_MAX - 16) / 24) / 2 || rt_user_alloc_injected_failure())
+      rt_container_oom("out of memory growing set\n");
     int64_t newcap = cap * 2;
-    if (newcap > 0 && newcap <= (1LL << 30) &&
-        newcap <= (INT64_MAX - 16) / 24) {
-      int64_t ns = rt_malloc(rt_tag_v(16 + newcap * 24));
-      if (ns) {
-        *(int64_t *)((char *)(uintptr_t)ns - 8) = TAG_SET;
-        *(int64_t *)((char *)(uintptr_t)ns + 0) = 0;
-        *(int64_t *)((char *)(uintptr_t)ns + 8) = newcap;
-        memset((char *)(uintptr_t)ns + 16, 0, (size_t)newcap * 24);
-        for (int64_t i = 0; i < cap; ++i) {
-          int64_t off = 16 + i * 24;
-          if (*(int64_t *)((char *)(uintptr_t)set_value + off + 16) == 1)
-            rt_set_add_in_place(
-                ns, *(int64_t *)((char *)(uintptr_t)set_value + off));
-        }
-        rt_free(set_value);
-        return rt_set_add_in_place(ns, key);
-      }
+    int64_t ns = rt_malloc(rt_tag_v(16 + newcap * 24));
+    if (!ns)
+      rt_container_oom("out of memory growing set\n");
+    *(int64_t *)((char *)(uintptr_t)ns - 8) = TAG_SET;
+    *(int64_t *)((char *)(uintptr_t)ns + 0) = 0;
+    *(int64_t *)((char *)(uintptr_t)ns + 8) = newcap;
+    memset((char *)(uintptr_t)ns + 16, 0, (size_t)newcap * 24);
+    for (int64_t i = 0; i < cap; ++i) {
+      int64_t off = 16 + i * 24;
+      if (*(int64_t *)((char *)(uintptr_t)set_value + off + 16) == 1)
+        rt_set_add_in_place(ns,
+                            *(int64_t *)((char *)(uintptr_t)set_value + off));
     }
+    rt_free(set_value);
+    return rt_set_add_in_place(ns, key);
   }
   uint64_t hash = (uint64_t)key;
   bool key_is_string = rt_native_is_str(key) || is_v_str(key);
@@ -3125,6 +3252,17 @@ int64_t rt_str_repeat_raw(int64_t value, int64_t count) {
   return rt_str_repeat(value, (count << 1) | 1);
 }
 
+/*
+ * Raw-code twin of rt_str_chr for typed callers (`fn chr(int code)`): those
+ * pass an untagged i64, and the tagged entry's RT_UNTAG_INT halves every odd
+ * raw code point (chr(83) became ')'). Mirrors rt_str_repeat_raw.
+ */
+int64_t rt_str_chr_raw(int64_t code) {
+  if (code < 0 || code > 0x10ffff)
+    return rt_str_chr(-1);
+  return rt_str_chr((code << 1) | 1);
+}
+
 int64_t rt_str_chr(int64_t code) {
   RT_UNTAG_INT(code);
   if (code < 0 || code > 0x10ffff)
@@ -3201,6 +3339,7 @@ typedef struct ny_native_dict_t {
   ny_native_dict_slot_t *slots;
   uint8_t *ctrl;
   int64_t vector_dim;
+  bool user_allocation;
 } ny_native_dict_t;
 
 static inline void ny_native_dict_set_ctrl(ny_native_dict_t *dict, size_t idx,
@@ -3473,7 +3612,12 @@ static void *ny_native_dict_table_alloc(size_t bytes) {
 }
 
 static bool ny_native_dict_resize(ny_native_dict_t *dict, int64_t capacity) {
-  if (!dict || capacity < 8 || (capacity & (capacity - 1)) != 0)
+  if (!dict || capacity < 8 || (capacity & (capacity - 1)) != 0 ||
+      capacity > (INT64_MAX - 9) / 7 ||
+      (uint64_t)capacity >
+          (SIZE_MAX - 16) / (sizeof(ny_native_dict_slot_t) + 1))
+    return false;
+  if (dict->user_allocation && rt_user_alloc_injected_failure())
     return false;
   size_t slot_bytes = (size_t)capacity * sizeof(ny_native_dict_slot_t);
   size_t ctrl_bytes = (size_t)capacity + 16;
@@ -3524,16 +3668,29 @@ static bool ny_native_dict_resize(ny_native_dict_t *dict, int64_t capacity) {
   return true;
 }
 
-int64_t rt_dict_new_raw(int64_t capacity) {
+static void ny_native_dict_grow(ny_native_dict_t *dict) {
+  if (dict->capacity >= (INT64_C(1) << 27))
+    rt_container_oom("container capacity overflow\n");
+  if (dict->capacity <= INT64_MAX / 2 &&
+      ny_native_dict_resize(dict, dict->capacity * 2))
+    return;
+  rt_container_oom("out of memory growing dict\n");
+}
+
+static int64_t ny_native_dict_create(int64_t capacity, bool user_allocation) {
+  if (capacity > (INT64_C(1) << 27))
+    rt_container_oom("container capacity overflow\n");
   if (capacity < 8)
     capacity = 8;
   int64_t actual = 8;
   while (actual < capacity && actual <= INT64_MAX / 2)
     actual *= 2;
   ny_native_dict_t *dict = (ny_native_dict_t *)calloc(1, sizeof(*dict));
+  if (dict)
+    dict->user_allocation = user_allocation;
   if (!dict || !ny_native_dict_resize(dict, actual)) {
     free(dict);
-    return 0;
+    rt_container_oom("out of memory creating dict\n");
   }
   dict->magic = NY_NATIVE_DICT_MAGIC;
   /*
@@ -3543,6 +3700,14 @@ int64_t rt_dict_new_raw(int64_t capacity) {
   uintptr_t payload = (uintptr_t)((char *)dict + 16);
   ny_native_dict_registry_add(payload);
   return (int64_t)payload;
+}
+
+int64_t rt_dict_new_raw(int64_t capacity) {
+  return ny_native_dict_create(capacity, true);
+}
+
+int64_t rt_dict_new_internal_raw(int64_t capacity) {
+  return ny_native_dict_create(capacity, false);
 }
 
 int64_t rt_vec_mark(int64_t value, int64_t dimension) {
@@ -3577,17 +3742,21 @@ int64_t rt_vec_mark_raw(int64_t value, int64_t dimension) {
  * count/capacity/24-byte slots and the runtime tag lives at payload - 8.
  */
 int64_t rt_set_new(int64_t capacity) {
+  if (capacity > (INT64_C(1) << 27))
+    rt_container_oom("container capacity overflow\n");
   if (capacity < 8)
     capacity = 8;
   int64_t actual = 8;
   while (actual < capacity && actual <= INT64_MAX / 2)
     actual *= 2;
-  if ((uint64_t)actual > (SIZE_MAX - 24u) / 24u)
-    return 0;
+  if (actual > (INT64_MAX - 16) / 24 ||
+      (uint64_t)actual > (SIZE_MAX - 24u) / 24u ||
+      rt_user_alloc_injected_failure())
+    rt_container_oom("out of memory creating set\n");
   int64_t body = 16 + actual * 24;
   int64_t payload = rt_malloc(rt_tag_v(body));
   if (!payload)
-    return 0;
+    rt_container_oom("out of memory creating set\n");
   memset((void *)(uintptr_t)payload, 0, (size_t)body);
   ((int64_t *)(uintptr_t)payload)[-1] = TAG_SET;
   ((int64_t *)(uintptr_t)payload)[0] = 0;
@@ -3917,9 +4086,8 @@ static int64_t ny_native_dict_set_i64_impl(ny_native_dict_t *dict,
                                            int64_t item) {
   if (!dict)
     return value;
-  if (dict->length >= dict->resize_at &&
-      !ny_native_dict_resize(dict, dict->capacity * 2))
-    return value;
+  if (dict->length >= dict->resize_at)
+    ny_native_dict_grow(dict);
   uint64_t hash = ny_native_dict_hash(key, 0);
   uint64_t mask = (uint64_t)dict->capacity - 1;
   size_t pos = (size_t)(hash & mask);
@@ -4263,9 +4431,8 @@ static int64_t ny_native_dict_set_native_impl(ny_native_dict_t *dict,
                                               uint8_t key_is_string) {
   if (!dict)
     return value;
-  if (dict->length >= dict->resize_at &&
-      !ny_native_dict_resize(dict, dict->capacity * 2))
-    return value;
+  if (dict->length >= dict->resize_at)
+    ny_native_dict_grow(dict);
   bool found = false;
   uint64_t hash = 0;
   ny_native_dict_slot_t *slot =
@@ -4716,8 +4883,80 @@ int64_t rt_value_index_read_tagged(int64_t value, int64_t key,
   return rt_tbuf_index_any_raw(value, rt_untag_v(key));
 }
 
+static inline __attribute__((always_inline)) int64_t
+rt_value_get_tagged_at(int64_t value, int64_t key, int64_t fallback,
+                       uintptr_t caller);
+
 int64_t rt_value_get_tagged(int64_t value, int64_t key, int64_t fallback) {
-  uintptr_t caller = (uintptr_t)__builtin_return_address(0);
+  return rt_value_get_tagged_at(value, key, fallback,
+                                (uintptr_t)__builtin_return_address(0));
+}
+
+/*
+ * Read a descriptor-slot float without boxing it.  Element-24 lists keep f64
+ * payloads as raw bits beside TAG_FLOAT, so the dynamic readers box a fresh
+ * float on every access; `float(rect.get(i, 0.0))` in a frame loop leaked one
+ * box per read under the default heap.  Anything other than an in-range float
+ * slot returns false and takes the ordinary dynamic path.
+ */
+static bool rt_tbuf_try_read_f64(int64_t buffer, int64_t index, double *out) {
+  buffer = rt_tbuf_resolve_handle(buffer);
+  if (NY_NATIVE_IS(buffer) && NY_NATIVE_DECODE(buffer) != NULL) {
+    int64_t decoded = (int64_t)(uintptr_t)NY_NATIVE_DECODE(buffer);
+    if (rt_tbuf_check(decoded, NULL) == RT_TBUF_OK)
+      buffer = decoded;
+  }
+  if (!buffer || !rt_tbuf_known_handle((uintptr_t)buffer) ||
+      !rt_header_readable_cached((uintptr_t)buffer - RT_NATIVE_TBUF_HEADER,
+                                 RT_NATIVE_TBUF_HEADER))
+    return false;
+  int64_t *hdr = (int64_t *)((uintptr_t)buffer - RT_NATIVE_TBUF_HEADER);
+  if (!rt_tbuf_header_valid(hdr))
+    return false;
+  int64_t count = hdr[1], elem_size = hdr[2];
+  if (elem_size < 24)
+    return false;
+  if (index < 0)
+    index += count;
+  if (index < 0 || index >= count)
+    return false;
+  const unsigned char *slot = (const unsigned char *)(uintptr_t)buffer +
+                              (size_t)index * (size_t)elem_size;
+  int64_t value = 0, tag = 0;
+  memcpy(&value, slot, sizeof(value));
+  memcpy(&tag, slot + 16, sizeof(tag));
+  if (tag != TAG_FLOAT)
+    return false;
+  if (is_v_flt(value)) {
+    *out = rt_flt_unbox_double(value);
+  } else {
+    memcpy(out, &value, sizeof(*out));
+  }
+  return true;
+}
+
+/* Fused `float(x.get(key, fallback))`: same contract, no float box. */
+double rt_value_get_f64(int64_t value, int64_t key, int64_t fallback) {
+  if (is_int(key) && !rt_is_bool_imm(key)) {
+    double out = 0.0;
+    if (rt_tbuf_try_read_f64(value, rt_untag_v(key), &out))
+      return out;
+  }
+  return rt_any_to_f64(rt_value_get_tagged_at(
+      value, key, fallback, (uintptr_t)__builtin_return_address(0)));
+}
+
+/* Fused `float(x[index])` for a dynamic receiver and raw index. */
+double rt_tbuf_index_any_f64(int64_t buffer, int64_t index) {
+  double out = 0.0;
+  if (rt_tbuf_try_read_f64(buffer, index, &out))
+    return out;
+  return rt_any_to_f64(rt_tbuf_index_any_impl(buffer, index));
+}
+
+static inline __attribute__((always_inline)) int64_t
+rt_value_get_tagged_at(int64_t value, int64_t key, int64_t fallback,
+                       uintptr_t caller) {
   size_t ic_idx = ((caller ^ (caller >> 4)) & (NY_GET_IC_SIZE - 1));
   ny_get_ic_entry_t *ic = &g_get_ic_table[ic_idx];
 
@@ -5171,8 +5410,7 @@ int64_t rt_native_dict_set_str_compact(int64_t value, int64_t key,
    * immediates, which are already canonical dynamic values.  Raw 0 stays
    * untouched: the dynamic ABI reserves it for nil, and a raw-int producer
    * that needs to store an unambiguous scalar 0 must box it before the call.
-   */
-  /*
+   *
    * Test the cheap properties of `item` first: the managed-dictionary probe
    * can fall back to a mincore syscall, and most stores need no boxing.
    */
@@ -5480,7 +5718,13 @@ rt_tbuf_error_t rt_tbuf_check(int64_t v, const int64_t **header_out) {
   }
   if (!v || v < 4096)
     return RT_TBUF_INVALID_HANDLE;
-  for (unsigned depth = 0; depth < 8; ++depth) {
+  /*
+   * Aliases may survive many capacity doublings when callers retain an old
+   * list handle.  The maximum legal capacity is bounded by PTRDIFF_MAX, so
+   * sixty-four forwarding hops covers every representable growth sequence
+   * while still rejecting cycles and corrupted chains.
+   */
+  for (unsigned depth = 0; depth < 64; ++depth) {
     /*
      * Registration is the allocation-provenance check: only runtime-created
      * tbuf payloads are registered, and release removes that entry before
@@ -6036,13 +6280,15 @@ int64_t rt_len_strict(int64_t value) {
 int64_t rt_sequence_len_safe(int64_t value) {
   if (!value || is_int(value) || is_v_flt(value))
     return 0;
-  if (rt_tbuf_known_handle((uintptr_t)value) &&
-      rt_header_readable_cached((uintptr_t)value - RT_NATIVE_TBUF_HEADER,
-                                RT_NATIVE_TBUF_HEADER)) {
-    int64_t *hdr = (int64_t *)((uintptr_t)value - RT_NATIVE_TBUF_HEADER);
-    if (rt_tbuf_header_valid(hdr))
-      return hdr[1];
-  }
+  /*
+   * Any-call metadata must see the canonical sequence length after growth.
+   * Retained aliases point at forwarding headers, so reading their old
+   * header (or treating the alias as an unknown sequence) reports stale
+   * bounds to the dynamic callback ABI.
+   */
+  const int64_t *tbuf_header = NULL;
+  if (rt_tbuf_check(value, &tbuf_header) == RT_TBUF_OK)
+    return tbuf_header[1];
   if (ny_native_dict_ptr(value) != NULL) {
     return rt_len(value);
   }
@@ -6567,6 +6813,57 @@ void rt_cleanup_small_strings(void) {
     block = next;
   }
   atomic_fetch_add_explicit(&g_rt_sso_generation, 1, memory_order_release);
+}
+
+/*
+ * Whether `v` addresses storage inside this thread's small-string arena. Only
+ * the owning thread may release the arena, so a value that crosses a thread
+ * boundary has to be copied out first, as
+ * rt_thread_release_string_storage does.
+ */
+static bool rt_sso_in_thread_storage(int64_t v) {
+  if (!v)
+    return false;
+  uintptr_t p = (uintptr_t)v;
+  for (rt_sso_block_t *block = g_sso_strings; block; block = block->next) {
+    uintptr_t base = (uintptr_t)block;
+    if (p >= base && p - base < sizeof(*block))
+      return true;
+  }
+  return false;
+}
+
+/* Heap-backed string with no small-string arena involvement. */
+static int64_t rt_alloc_heap_string_len(const char *s, size_t len) {
+  if (!s || len > (SIZE_MAX >> 2))
+    return 0;
+  int64_t p = rt_malloc((int64_t)(((len + 1) << 1) | 1));
+  if (!p)
+    return 0;
+  *(int64_t *)((char *)(uintptr_t)p - 8) = TAG_STR;
+  *(int64_t *)((char *)(uintptr_t)p - 16) = ((int64_t)len << 1) | 1;
+  memcpy((void *)(uintptr_t)p, s, len);
+  ((char *)(uintptr_t)p)[len] = '\0';
+  return p;
+}
+
+/*
+ * Worker threads own a thread-local small-string arena plus intern table. The
+ * main thread releases both through rt_runtime_cleanup, but a worker that
+ * finishes would otherwise abandon them, which LeakSanitizer reports as a
+ * per-thread leak. Copy an arena-owned result to the shared heap before the
+ * arena is freed so the joining thread keeps a usable value.
+ */
+int64_t rt_thread_release_string_storage(int64_t result) {
+  int64_t out = result;
+  if (rt_sso_in_thread_storage(result) && is_v_str(result)) {
+    size_t len = rt_tagged_str_len(result);
+    int64_t copy =
+        rt_alloc_heap_string_len((const char *)(uintptr_t)result, len);
+    out = copy ? copy : 0;
+  }
+  rt_cleanup_small_strings();
+  return out;
 }
 
 #define CALL_STACK_MAX 512
@@ -7843,7 +8140,7 @@ static void trace_print_return_f64_bits_value(int64_t bits) {
 
 int64_t rt_globals_get(void) {
   if (!ny_native_dict_ptr(rt_globals_ptr))
-    rt_globals_ptr = rt_dict_new_raw(16);
+    rt_globals_ptr = ny_native_dict_create(16, false);
   return rt_globals_ptr;
 }
 int64_t rt_globals_set(int64_t p) {
@@ -8964,6 +9261,16 @@ int64_t rt_native_has_tag(int64_t v, int64_t tag) {
    */
   if ((tag < TAG_LIST || tag > TAG_KWARG) && is_int(tag))
     tag = rt_untag_v(tag);
+  /*
+   * A typed list can reach a dynamic predicate as its raw payload pointer:
+   * an inlined `any` formal drops the expanded tag lane, and a direct call
+   * result keeps the typed-buffer ABI.  `is_list` must still hold for it
+   * (simmd.mat4_mul otherwise allocated a fresh output and the caller's
+   * matrix was never written).  The checked validator rejects other words.
+   */
+  if (tag == TAG_LIST && !is_int(v) && v != 0 &&
+      rt_magic_tbuf_elem_size(v) > 0)
+    return rt_sequence_tag(v) == TAG_LIST ? NY_IMM_TRUE : NY_IMM_FALSE;
   return rt_has_tag(v, rt_tag_v(tag));
 }
 int64_t rt_value_tag(int64_t v) {
@@ -9054,8 +9361,10 @@ int64_t rt_raw_word_tag(int64_t value) {
     int64_t *hdr = (int64_t *)((uintptr_t)value - RT_NATIVE_TBUF_HEADER);
     return rt_tbuf_word_is_tuple(hdr[3]) ? TAG_TUPLE : TAG_LIST;
   }
-  /* Native dictionaries are calloc-allocated registry payloads, not rt_malloc
-   * heap objects, so the header/heap probes below cannot classify them. */
+  /*
+   * Native dictionaries are calloc-allocated registry payloads, not rt_malloc
+   * heap objects, so the header/heap probes below cannot classify them.
+   */
   if (ny_native_dict_ptr(value) != NULL)
     return TAG_DICT;
   if (is_ptr(value) && is_heap_ptr(value)) {
@@ -9552,6 +9861,7 @@ int64_t rt_list_new_i64_range(int64_t n) {
 }
 
 int64_t rt_list_as_tuple(int64_t lst) {
+  lst = rt_tbuf_resolve_handle(lst);
   if (rt_tbuf_known_handle((uintptr_t)lst) &&
       rt_header_readable_cached((uintptr_t)lst - RT_NATIVE_TBUF_HEADER,
                                 RT_NATIVE_TBUF_HEADER)) {
@@ -9809,13 +10119,17 @@ int64_t rt_dict_reserve(int64_t d, int64_t additional_v) {
   if (native) {
     int64_t additional =
         is_int(additional_v) ? (additional_v >> 1) : additional_v;
-    int64_t want = native->length + (additional > 0 ? additional : 0);
+    if (additional <= 0)
+      return d;
+    if (additional > INT64_MAX / 2 - native->length)
+      rt_container_oom("out of memory reserving dict\n");
+    int64_t want = native->length + additional;
     int64_t cap = native->capacity;
     int64_t need = cap < 8 ? 8 : cap;
     while (need < want * 2 && need <= INT64_MAX / 2)
       need *= 2;
-    if (need > cap)
-      ny_native_dict_resize(native, need);
+    if (need > cap && !ny_native_dict_resize(native, need))
+      rt_container_oom("out of memory reserving dict\n");
     return d;
   }
   if (!is_ptr(d) || !is_heap_ptr(d))
@@ -9828,19 +10142,21 @@ int64_t rt_dict_reserve(int64_t d, int64_t additional_v) {
     return d;
   int64_t count = rt_dict_raw_i64(*(int64_t *)((char *)(uintptr_t)d + 0));
   int64_t cap = rt_dict_raw_i64(*(int64_t *)((char *)(uintptr_t)d + 8));
+  if (additional > INT64_MAX - count)
+    rt_container_oom("out of memory reserving dict\n");
   int64_t want_count = count + additional;
-  if (want_count < count)
-    return d;
   int64_t min_cap = want_count > (INT64_MAX / 2) ? INT64_MAX : want_count * 2;
   int64_t want_cap = 8;
   while (want_cap > 0 && want_cap < min_cap && want_cap <= (INT64_MAX / 2))
     want_cap *= 2;
   if (want_cap <= 0 || cap >= want_cap)
     return d;
+  if (want_cap > (INT64_MAX - 16) / 24)
+    rt_container_oom("out of memory reserving dict\n");
   int64_t t = rt_dict_table_base(d);
   int64_t nt = rt_malloc(16 + want_cap * 24);
   if (!nt)
-    return d;
+    rt_container_oom("out of memory reserving dict\n");
   *(int64_t *)((char *)(uintptr_t)nt - 8) = TAG_DICT_TBL;
   for (int64_t i = 0; i < cap; i++) {
     int64_t off = (int64_t)i * 24;
@@ -9853,6 +10169,7 @@ int64_t rt_dict_reserve(int64_t d, int64_t additional_v) {
   }
   *(int64_t *)((char *)(uintptr_t)d + 8) = want_cap;
   *(int64_t *)((char *)(uintptr_t)d + 16) = nt;
+  rt_free(t);
   return d;
 }
 
@@ -9936,11 +10253,10 @@ int64_t rt_store_item_fast(int64_t lst, int64_t i_v, int64_t val) {
    */
   int64_t raw_i = is_int(i_v) ? rt_untag_v(i_v) : i_v;
   int64_t raw_val = is_int(val) ? rt_untag_v(val) : val;
-  int64_t tagged_val =
-      (is_int(val) || rt_store_word_is_dynamic(val) ||
-       !ny_small_int_fits_i64(val))
-          ? val
-          : rt_tag_v(val);
+  int64_t tagged_val = (is_int(val) || rt_store_word_is_dynamic(val) ||
+                        !ny_small_int_fits_i64(val))
+                           ? val
+                           : rt_tag_v(val);
   if (rt_header_readable_cached((uintptr_t)lst - RT_NATIVE_TBUF_HEADER,
                                 RT_NATIVE_TBUF_HEADER)) {
     int64_t *hdr = (int64_t *)((uintptr_t)lst - RT_NATIVE_TBUF_HEADER);
@@ -9989,8 +10305,8 @@ int64_t rt_store_item_fast_raw(int64_t lst, int64_t index, int64_t value) {
         hdr = (int64_t *)((uintptr_t)lst - RT_NATIVE_TBUF_HEADER);
       }
       if (hdr[2] >= 24) {
-        int64_t tagged = rt_store_word_is_dynamic(value) ? value
-                                                         : rt_tag_v(value);
+        int64_t tagged =
+            rt_store_word_is_dynamic(value) ? value : rt_tag_v(value);
         return rt_tbuf_set_tagged(lst, index, tagged) ? value : 0;
       }
       return rt_tbuf_set_i64_raw(lst, index, value) ? value : 0;
@@ -10770,15 +11086,20 @@ int64_t rt_fail(int64_t kind_ptr, int64_t msg_ptr) {
 }
 
 int64_t rt_panic(int64_t msg_ptr) {
-  if (msg_ptr && rt_native_is_str(msg_ptr))
-    rt_print_flush();
+  rt_print_flush();
   int64_t defer_target = 0;
   if (rt_current_panic_defer_target(&defer_target)) {
     g_panic_value = msg_ptr;
     panic_env_t pe = g_panic_env_stack.data[g_panic_env_stack.len - 1];
     rt_run_defers_to(defer_target);
+    rt_print_flush();
     NY_LONGJMP(*pe.env, 1);
   }
+  /*
+   * An uncaught panic still exits every active resource scope.
+   */
+  rt_run_defers_to(0);
+  rt_print_flush();
   fputc('\n', stderr);
   fprintf(stderr, "Nytrix trace (most recent call last):\n");
   bool printed = false;

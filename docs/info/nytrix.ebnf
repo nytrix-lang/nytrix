@@ -1,5 +1,5 @@
 (* Parser-oriented summary, not a semantic specification. Keep syntax updates
-   aligned with src/code/lang/parse/lexer.c and src/code/lang/parse/stmt/core.c. *)
+   aligned with src/code/lang/ny/parser/lexer.c and src/code/lang/ny/parser/stmt/core.c. *)
 
 source ::= { stmt } EOF
 

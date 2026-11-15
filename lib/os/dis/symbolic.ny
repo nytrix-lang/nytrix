@@ -336,6 +336,7 @@ fn _ptr_to_list(any p, int n) list {
 
 fn unicorn_mem_map(any engine, int addr, int size, int perms=UC_PROT_READ | UC_PROT_WRITE | UC_PROT_EXEC) dict {
    "Map memory in a Unicorn engine."
+   if size <= 0 { return {"ok": false, "code": -3, "reason": "invalid_size"} }
    if !_load_unicorn() || !_p_uc_mem_map || !engine { return {"ok": false, "code": -1, "reason": "unicorn_unavailable"} }
    def code = ffi.ffi_call(_p_uc_mem_map, [engine, addr, size, perms])
    {"ok": code == 0, "code": code, "reason": code == 0 ? "ok" : unicorn_error(code), "addr": addr, "size": size, "perms": perms}
@@ -355,6 +356,7 @@ fn unicorn_mem_write(any engine, int addr, any data) dict {
 
 fn unicorn_mem_read(any engine, int addr, int size) dict {
    "Read concrete bytes from Unicorn memory."
+   if size < 0 { return {"ok": false, "code": -3, "reason": "invalid_size", "data": ""} }
    if !_load_unicorn() || !_p_uc_mem_read || !engine { return {"ok": false, "code": -1, "reason": "unicorn_unavailable", "data": ""} }
    def p = ffi.malloc(max(1, size))
    if !p { return {"ok": false, "code": -2, "reason": "alloc_failed", "data": ""} }

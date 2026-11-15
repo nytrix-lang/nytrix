@@ -1,0 +1,44 @@
+shape safe_heap_requested_byte_bounds {
+  family "runtime/memory"
+  generator "regression"
+  features ["memory-safety", "safe-heap", "bounds", "dynamic-index"]
+  template ny-test-case
+  flags "--native-only"
+  timeout 240
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os (env, file_remove, file_write, pid, run_capture, temp_dir)
+def ny = env("NYTRIX_NY_FULL_BIN")
+assert(is_str(ny) && ny.len > 0, "full compiler is available")
+def stem = temp_dir() + "/ny-byte-bounds-" + to_str(pid())
+
+fn check(str name, str body, list route, int expected) int {
+   def path = stem + "-" + name + ".ny"
+   assert(is_ok(file_write(path, "use core\n" + body)), "write byte bounds probe")
+   defer { file_remove(path) }
+   mut args = [ny, "--heap=safe"]
+   for flag in route { args = args.append(flag) }
+   args = args.append(path)
+   def out = run_capture(args, [], nil, false)
+   def text = to_str(out.get("stdout", "")) + to_str(out.get("stderr", ""))
+   assert(out.get("code", 127) == expected, name + " exit status: " + text)
+   if expected == 134 {
+      assert(text.contains("Nytrix safe-heap: heap-buffer-overflow"), name + " reports a bounds violation: " + text)
+   } else {
+      assert(text.contains("73") && !text.contains("Nytrix safe-heap: leak:"), name + " preserves valid data and releases its scope: " + text)
+   }
+   0
+}
+
+for route in [["--native-only"], ["--native-backend=llvm", "--jit", "--jit-engine=mcjit"], ["--native-backend=llvm", "--jit", "--jit-engine=orc"]] {
+   check("managed-padding", "fn write(ptr p, int index) int { store8(p, 73, index) 0 }\nwith ptr p = malloc(1) { write(p, 1) }\n0\n", route, 134)
+   check("raw-padding", "fn read(ptr p, int index) int { load8(p, index) }\nwith ptr p = malloc_raw(1) { print(read(p, 1)) }\n0\n", route, 134)
+   check("underflow", "fn write(ptr p, int index) int { store8(p, 73, index) 0 }\nwith ptr p = malloc_raw(4) { write(p, -1) }\n0\n", route, 134)
+   check("interior-padding", "fn write(ptr p, int index) int { store8(p, 73, index) 0 }\nwith ptr p = malloc(4) { def q = p + 3\nwrite(q, 1) }\n0\n", route, 134)
+   check("valid-byte", "with ptr p = malloc(1) { store8(p, 73, 0)\nprint(load8(p, 0)) }\n0\n", route, 0)
+   check("valid-interior", "fn write(ptr p, int index) int { store8(p, 73, index) 0 }\nwith ptr p = malloc_raw(4) { def q = p + 3\nwrite(q, -2)\nprint(load8(p, 1)) }\n0\n", route, 0)
+}
+0
+NY
+}

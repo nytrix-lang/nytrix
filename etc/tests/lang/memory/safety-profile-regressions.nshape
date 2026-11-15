@@ -1,0 +1,68 @@
+shape safety_profile_regressions {
+  family "runtime/memory"
+  generator "regression"
+  features ["ny", "test", "memory-safety", "ownership"]
+  template ny-test-case
+  flags "--native-only"
+  timeout 240
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os (env, file_remove, file_write, pid, run_capture, temp_dir)
+
+def ny = env("NYTRIX_NY_FULL_BIN")
+assert(is_str(ny) && ny.len > 0, "full compiler is available")
+def stem = temp_dir() + "/ny-safety-profile-" + to_str(pid())
+
+fn check(str name, str source, list flags, int code, str message) int {
+   def path = stem + "-" + name + ".ny"
+   assert(is_ok(file_write(path, "use core\n" + source)), "write " + name)
+   defer { file_remove(path) }
+   mut args = [ny]
+   for flag in flags { args = args.append(flag) }
+   args = args.append(path)
+   def out = run_capture(args, [], nil, false)
+   def text = to_str(out.get("stdout", "")) + to_str(out.get("stderr", ""))
+   assert(out.get("code", 127) == code && text.contains(message), name + ": " + text)
+   assert(!text.contains("Nytrix safe-heap: leak:"), name + " leaks a scoped allocation: " + text)
+   0
+}
+
+mut route_id = 0
+for route in [["--native-only"], ["--native-backend=llvm"],
+              ["--native-backend=llvm", "--jit", "--jit-engine=mcjit"],
+              ["--native-backend=llvm", "--jit", "--jit-engine=orc"]] {
+   route_id += 1
+   check("heap" + to_str(route_id), "mut p = malloc(16)\nstore8(p, 2, 16)\n0\n",
+         ["--mode=safe"] + route, 134, "heap-buffer-overflow")
+   check("panic" + to_str(route_id),
+         "fn run() int {\n   defer { print(\"cleanup-ran\") }\n   panic(\"uncaught-probe\")\n   0\n}\nrun()\n",
+         route, 1, "cleanup-ran")
+   check("scoped-panic" + to_str(route_id),
+         "fn run() int {\n   with ptr p = malloc(16) {\n      store8(p, 7, 0)\n      panic(\"scoped-panic\")\n   }\n   0\n}\nrun()\n",
+         ["--heap=safe"] + route, 1, "scoped-panic")
+   check("scoped-return" + to_str(route_id),
+         "fn run() int {\n   with ptr p = malloc(16) {\n      store8(p, 7, 0)\n      return load8(p, 0)\n   }\n   0\n}\nprint(run())\n0\n",
+         ["--heap=safe"] + route, 0, "7")
+   check("scoped-global" + to_str(route_id),
+         "with ptr p = malloc(1) {\n   store8(p, 73, 0)\n   print(load8(p, 0))\n}\n0\n",
+         ["--heap=safe"] + route, 0, "73")
+   check("scoped-global-panic" + to_str(route_id),
+         "with ptr p = malloc(16) {\n   store8(p, 73, 0)\n   panic(\"global-panic\")\n}\n0\n",
+         ["--heap=safe"] + route, 1, "global-panic")
+   check("deferred-global-block-local" + to_str(route_id),
+         "mut observed = 0\n{\n   mut value = 1\n   { defer { value += 2 } }\n   observed = value\n}\nprint(observed)\n0\n",
+         route, 0, "3")
+   check("scoped-control-flow" + to_str(route_id),
+         "fn run() int {\n   mut total = 0\n   with ptr p = malloc(16) {\n      store8(p, 3, 0)\n      total += load8(p, 0)\n   }\n   mut i = 0\n   while i < 2 {\n      i += 1\n      with ptr p = malloc(16) {\n         store8(p, i, 0)\n         total += load8(p, 0)\n         continue\n      }\n   }\n   while true {\n      with ptr p = malloc(16) {\n         store8(p, 5, 0)\n         total += load8(p, 0)\n         break\n      }\n   }\n   total\n}\nprint(run())\n0\n",
+         ["--heap=safe"] + route, 0, "11")
+   check("alias" + to_str(route_id),
+         "fn run() int {\n   def p = malloc(16)\n   def q = p\n   free(p)\n   load8(q)\n}\nrun()\n",
+         ["--ownership-check=strict"] + route, 1, "use after free of raw pointer")
+   check("release" + to_str(route_id),
+         "@releases(p)\nfn dispose(ptr p) int { free(p) 0 }\nfn run() int {\n   def p = malloc(16)\n   dispose(p)\n   load8(p)\n}\nrun()\n",
+         ["--ownership-check=strict"] + route, 1, "use after free of raw pointer")
+}
+0
+NY
+}

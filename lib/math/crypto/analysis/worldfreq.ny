@@ -206,9 +206,31 @@ fn _load_alpha_word_set(str path, int min_len=2, int max_len=24) dict {
          mut i = 0
          while i <= n {
             if i == n || load8(txt, i) == 10 {
-               def token = upper(str.strip(str.str_slice(txt, line_start, i)))
+               def line = str.strip(str.str_slice(txt, line_start, i))
                line_start = i + 1
-               if _alpha_token_ok(token, min_len, max_len) { out = out.set(token, true) }
+               mut token_end = 0
+               while token_end < line.len &&
+                     _ascii_alpha_value(load8(line, token_end)) >= 0 {
+                  token_end += 1
+               }
+               def token = upper(str.str_slice(line, 0, token_end))
+               mut pos = token_end
+               while pos < line.len &&
+                     (load8(line, pos) == 32 || load8(line, pos) == 9) {
+                  pos += 1
+               }
+               mut count = 0
+               mut has_count = false
+               while pos < line.len && load8(line, pos) >= 48 && load8(line, pos) <= 57 {
+                  has_count = true
+                  count = count * 10 + load8(line, pos) - 48
+                  pos += 1
+               }
+               def weighted = has_count && count > 0
+               if _alpha_token_ok(token, min_len, max_len) &&
+                  (!weighted || _weight_bucket(count, 12) > 0) {
+                  out = out.set(token, true)
+               }
             }
             i += 1
          }
@@ -230,6 +252,12 @@ fn _merge_word_set(dict base, dict extra) dict {
 }
 
 fn _profile_name_from_filename(str name) str {
+   if name == "words.txt" || name == "monograms.txt" || name == "bigrams.txt" ||
+      name == "trigrams.txt" || name == "quadgrams.txt" { return "english" }
+   _profile_name_from_prefixed_filename(name)
+}
+
+fn _profile_name_from_prefixed_filename(str name) str {
    if !str.endswith(name, ".txt") { return "" }
    def dash = str.find(name, "-")
    if dash <= 0 { return "" }
@@ -307,25 +335,24 @@ fn worldfreq_profile_names() list {
 }
 
 fn worldfreq_profile_paths(any lang="english") dict {
-   "Returns the expected asset paths for language profile `lang`."
+   "Returns language profile paths. English counts and raw-only words share words.txt."
    def name = _normalize_lang(lang)
    def base = worldfreq_assets_root()
    def stat = worldfreq_stat_root()
+   def prefix = name == "english" ? "" : name + "-"
+   def words_path = ospath.join(base, prefix + "words.txt")
    mut raw_words = ""
-   if name == "english" { raw_words = ospath.join(base, "words.txt") } else {
-      def alt = ospath.join(base, name + "-words.txt")
-      if file_exists(alt) { raw_words = alt }
-   }
+   if name == "english" || file_exists(words_path) { raw_words = words_path }
    {
       "lang": name,
       "root": base,
       "stat_root": stat,
       "raw_words_path": raw_words,
-      "common_words_path": ospath.join(stat, name + "-words.txt"),
-      "monograms_path": ospath.join(stat, name + "-monograms.txt"),
-      "bigrams_path": ospath.join(stat, name + "-bigrams.txt"),
-      "trigrams_path": ospath.join(stat, name + "-trigrams.txt"),
-      "quadgrams_path": ospath.join(stat, name + "-quadgrams.txt")
+      "common_words_path": words_path,
+      "monograms_path": ospath.join(stat, prefix + "monograms.txt"),
+      "bigrams_path": ospath.join(stat, prefix + "bigrams.txt"),
+      "trigrams_path": ospath.join(stat, prefix + "trigrams.txt"),
+      "quadgrams_path": ospath.join(stat, prefix + "quadgrams.txt")
    }
 }
 
@@ -621,7 +648,13 @@ fn worldfreq_detect(str text, any langs=nil, int limit=8) list {
 
 #main {
    def paths = worldfreq_profile_paths("english")
-   assert(worldfreq_profile_exists("english") && paths.get("lang", "") == "english" && paths.get("quadgrams_path", "").len > 0, "worldfreq profile paths")
+   assert(worldfreq_profile_exists("english") &&
+          paths.get("lang", "") == "english" &&
+          paths.get("raw_words_path", "") == paths.get("common_words_path", "") &&
+          paths.get("monograms_path", "") ==
+             ospath.join(worldfreq_assets_root(), "monograms.txt") &&
+          paths.get("quadgrams_path", "").len > 0,
+          "worldfreq profile paths")
    assert(worldfreq_alpha_upper("A b-c! 123") == "ABC", "worldfreq alpha upper")
    def words = worldfreq_word_counter("This is this.")
    assert(words.get("THIS", 0) == 2 && worldfreq_rows_to_table([["AB", 2], ["BA", 1]]) == "AB 2\nBA 1\n", "worldfreq word helpers")

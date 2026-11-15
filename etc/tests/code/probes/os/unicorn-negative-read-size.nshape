@@ -1,0 +1,18 @@
+shape unicorn_mem_read_rejects_negative_size {
+  family "code/probes/os"
+  generator "regression"
+  features ["ffi", "memory", "negative-size", "unicorn"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core.os.dis.symbolic (unicorn_mem_map, unicorn_mem_read)
+
+def result = unicorn_mem_read(1, 0, -1)
+assert(!result.get("ok", true), "negative size is rejected")
+assert(result.get("reason", "") == "invalid_size", "reports invalid size")
+def mapping = unicorn_mem_map(1, 0, -1)
+assert(!mapping.get("ok", true), "negative map size is rejected")
+assert(mapping.get("reason", "") == "invalid_size", "reports invalid map size")
+0
+NY
+}

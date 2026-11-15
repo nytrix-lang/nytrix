@@ -1,0 +1,37 @@
+shape global_shadows_function_name {
+  family "runtime/values"
+  generator "regression"
+  features ["ny", "test", "values", "name-resolution"]
+  flags_matrix "--native; --native-only; --native-backend=llvm --jit"
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+; `long`, `list`, and friends are also core function names.  A global or
+; alias that shadows one is a plain value: list construction must not tag it
+; with the function's closure marker (that stored a shifted pointer).
+mut long = "--native-backend=x86_64"
+mut short = "--flag"
+mut list = "abc"
+def alias = long
+
+assert(repr([long, "x"]) == "[\"--native-backend=x86_64\", \"x\"]",
+       "global named long stays a string: " + repr([long, "x"]))
+assert(repr([short, "x"]) == "[\"--flag\", \"x\"]",
+       "plain global stays a string: " + repr([short, "x"]))
+assert(repr([list, "x"]) == "[\"abc\", \"x\"]",
+       "global named list stays a string: " + repr([list, "x"]))
+assert(repr([alias, "x"]) == "[\"--native-backend=x86_64\", \"x\"]",
+       "alias of a shadowing global stays a string: " + repr([alias, "x"]))
+
+fn bump(int n) int {
+   n + 1
+}
+
+mut calls = [fn(int n) int { n * 3 }, bump]
+assert(calls[0](4) == 12, "lambda elements stay callable")
+assert(calls[1](41) == 42, "function elements stay callable")
+print("shadow-ok")
+NY
+}

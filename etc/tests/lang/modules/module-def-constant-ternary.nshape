@@ -1,0 +1,35 @@
+shape module_def_constant_ternary {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "codegen"]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect compile_and_run
+  expect_message "MODULE-DEF-CONSTANT-TERNARY-OK"
+  source ny <<'NY'
+use core
+module mt(
+   f,
+   setc,
+){
+   def INIT = 4
+   mut _cap = 0
+   fn setc(int c) bool {
+      _cap = c
+      true
+   }
+   fn f() any {
+      mut cap = _cap > 0 ? _cap : INIT
+      def a = cap
+      cap *= 2
+      def bytes = cap * 20
+      [a, cap, bytes]
+   }
+}
+def r1 = mt.f()
+mt.setc(8)
+def r2 = mt.f()
+assert(r1 == [4, 8, 160] && r2 == [8, 16, 320], "a module constant ternary arm keeps its value")
+print("MODULE-DEF-CONSTANT-TERNARY-OK")
+NY
+}

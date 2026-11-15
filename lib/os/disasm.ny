@@ -10,6 +10,7 @@ module core.os.disasm(assemble, asm_hex, disasm, disasm_lines, hexdump, unhex,
    assembler_available, internal_decoder_available, capstone_fallback_available)
 use core
 use core.str
+use core.math.checked (checked_add)
 use core.os (temp_dir, pid, file_write, file_read, file_remove)
 use core.os.clock (ticks)
 use core.os.subprocess as sub
@@ -149,13 +150,13 @@ fn _bytestr(any data) any {
    if is_str(data) || is_bytes(data) { return data }
    if is_list(data) {
       mut out = str.Builder(data.len)
+      defer { str.builder_free(out) }
       mut i = 0
       while i < data.len {
          out = str.builder_append_byte(out, int(data[i]) & 255)
          i += 1
       }
       def result = str.builder_to_str(out)
-      str.builder_free(out)
       return result
    }
    ""
@@ -520,6 +521,7 @@ fn target_address(any row_or_operands, str arch="", int explicit_base=0) int {
 
 fn _cstr_at(any p, int off, int maxn) str {
    mut b = Builder(maxn + 1)
+   defer { builder_free(b) }
    mut i = 0
    while i < maxn {
       def c = load8(p, off + i)
@@ -528,12 +530,14 @@ fn _cstr_at(any p, int off, int maxn) str {
       i += 1
    }
    def out = builder_to_str(b)
-   builder_free(b)
    out
 }
 
 fn _copy_to_ptr(any data) ptr {
-   def p = malloc(data.len + 1)
+   if !is_str(data) { return 0 }
+   def size = checked_add(data.len, 1)
+   if !is_ok(size) { return 0 }
+   def p = malloc(int(unwrap(size)))
    if p == 0 { return 0 }
    mut i = 0
    while i < data.len {
@@ -599,6 +603,7 @@ fn disasm(any code, str arch="x86_64", int address=0) str {
    "Disassembles raw bytes with the in-tree decoder and returns objdump-style printable text."
    def rows = disasm_lines(code, arch, address)
    mut b = Builder(128)
+   defer { builder_free(b) }
    mut i = 0
    def is_a64 = normalize_arch(arch) == "aarch64"
    while i < rows.len {
@@ -633,7 +638,6 @@ fn disasm(any code, str arch="x86_64", int address=0) str {
       i += 1
    }
    def out = builder_to_str(b)
-   builder_free(b)
    out
 }
 

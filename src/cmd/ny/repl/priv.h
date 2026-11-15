@@ -4,7 +4,7 @@
 
 #include "base/compat.h"
 #include "cmd/ny/repl/repl.h"
-#include "code/lang/parse/parser.h"
+#include "code/lang/ny/parser/parser.h"
 #include <ctype.h>
 #include <string.h>
 #ifndef _WIN32
@@ -117,6 +117,7 @@ void doclist_add_recursive(doc_list_t *dl, ny_stmt_list *body,
                            const char *prefix);
 void doclist_add_from_prog(doc_list_t *dl, program_t *prog);
 void add_builtin_docs(doc_list_t *docs);
+void repl_add_language_docs(doc_list_t *docs);
 int doclist_print(const doc_list_t *dl, const char *name);
 int doclist_print_best(const doc_list_t *dl, const char *name);
 int doclist_print_missing(const doc_list_t *dl, const char *name);

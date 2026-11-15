@@ -2,8 +2,9 @@ shape bench_currying_direct_residual_factory {
   family "perf-real"
   generator "stress"
   features ["perf", "calls", "currying", "c-vs-ny", "checksum", "time"]
-  ;; C keeps every iteration, so NYR/C is the closure-call cost (~1500x),
-  ;; not a sub-100ns clock sample. The ceiling only catches a new blow-up.
+  ;; Both sources publish every iteration through a global slot, so NYR/C is
+  ;; the closure-call cost plus one store, not a sub-100ns clock sample. The
+  ;; ceiling only catches a new blow-up.
   budget {
     max_native_c_ratio 8000.0
     max_native_llvm_ratio 4.0
@@ -16,13 +17,22 @@ use core.os.time
 
 fn step(int a, int b) int { a * 3 + b }
 
+;; Both sides publish every result through a global slot so the timed loops
+;; keep one store per iteration.  Without it clang folds the C loops into a
+;; closed form and the comparison measures nothing.
+mut int keep_slot = 0
+fn keep(int v) int {
+   keep_slot = v
+   keep_slot
+}
+
 def int n = 2000 + argc()
 
 mut int direct = 0
 mut int i = 0
 def int t0 = ticks()
 while i < n {
-   direct += step(i, 1)
+   direct += keep(step(i, 1))
    i += 1
 }
 def int t1 = ticks()
@@ -32,7 +42,7 @@ mut int residual = 0
 i = 0
 def int t2 = ticks()
 while i < n {
-   residual += bound(i)
+   residual += keep(bound(i))
    i += 1
 }
 def int t3 = ticks()
@@ -42,7 +52,7 @@ i = 0
 def int t4 = ticks()
 while i < n {
    def p = step(i)
-   factory += p(1)
+   factory += keep(p(1))
    i += 1
 }
 def int t5 = ticks()

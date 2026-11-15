@@ -1,0 +1,30 @@
+shape gui_layout_route_parity {
+  family "runtime-ui"
+  generator "embedded"
+  features [gui layout]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect compile_and_run
+  expect_message "GUI-LAYOUT-ROUTE-PARITY-OK"
+  source ny <<'NY'
+use core
+use core.os.ui.render as gfx
+use core.os.ui.render.viewer.gui as gui
+gfx.apply_backend_env()
+assert(gfx.init_window(800, 600, "lay"), "open")
+gui.set_enabled(true)
+gfx.begin_frame_clear([0.0, 0.0, 0.0, 1.0])
+gfx.set_ortho_2d(0.0, 800.0, 600.0, 0.0)
+gui.begin_frame(0, 0, 800.0, 600.0)
+gui.begin_window("w", "Win", 10.0, 10.0, 300.0, 200.0)
+def mb = gui.begin_menu_bar()
+if mb { gui.end_menu_bar() }
+def r0 = gui.last_item_rect()
+gui.checkbox("c", "Check", false)
+def r1 = gui.last_item_rect()
+gui.end_window()
+assert(r0[2] > 0 && r0[3] > 0 && r1[2] > 0 && r1[3] > 0, "widgets get non-zero rectangles")
+assert(r1[0] == r0[0] && r1[1] > r0[1], "the checkbox sits below the menu bar in the same column")
+print("GUI-LAYOUT-ROUTE-PARITY-OK")
+NY
+}

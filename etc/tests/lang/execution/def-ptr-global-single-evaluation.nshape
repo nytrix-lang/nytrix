@@ -1,0 +1,26 @@
+shape test_def_ptr_global_single_evaluation {
+  family "runtime/execution"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+; A root `def ptr` with a call initializer is one allocation. Functions used to
+; re-lower the initializer, so each got its own zeroed buffer and a store made
+; in one function was invisible everywhere else.
+def ptr buf = zalloc(16)
+fn put(int i, int v) { store8(buf, v, i) }
+fn get(int i) int { load8(buf, i) }
+store8(buf, 2, 3)
+put(5, 7)
+assert(load8(buf, 3) == 2, "top-level store reads back")
+assert(load8(buf, 5) == 7, "function store is visible at top level")
+assert(get(3) == 2, "function load sees the top-level store")
+put(3, get(3) - 1)
+assert(get(3) == 1, "read-modify-write through functions")
+free(buf)
+NY
+}

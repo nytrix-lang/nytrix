@@ -18,11 +18,32 @@ fn queens(int row, int cols, int diag_l, int diag_r) int {
    }
    total
 }
-def result = queens(0, 0, 0, 0)
+use core
+use core.os.time
+;; 200 repetitions keep the workload in the multi-millisecond range so the
+;; measurement is stable (one 8-queens search takes about 50 microseconds).
+;; The pre-blocked column depends on the running result so the pure call cannot be hoisted.
+def int t0 = ticks()
+mut int result = 0
+mut int rep = 0
+while rep < 200 {
+   result += queens(0, result & 1, 0, 0)
+   rep += 1
+}
+def int t1 = ticks()
 print("checksum=", result)
+print("elapsed_ns=", t1 - t0)
 NY
   source c <<'C'
+#include <stdint.h>
 #include <stdio.h>
+#include <time.h>
+
+static int64_t now_ns(void) {
+  struct timespec ts;
+  if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0;
+  return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+}
 
 static int queens(int row, int cols, int diag_l, int diag_r) {
   if (row == 8) return 1;
@@ -39,8 +60,14 @@ static int queens(int row, int cols, int diag_l, int diag_r) {
 }
 
 int main(void) {
-  int result = queens(0, 0, 0, 0);
+  int64_t start = now_ns();
+  int result = 0;
+  for (int rep = 0; rep < 200; ++rep) result += queens(0, result & 1, 0, 0);
+  int64_t end = now_ns();
   printf("checksum=%d\n", result);
+  if (end <= start) end = start + 1;
+  printf("elapsed_ns=%lld\n", (long long)(end - start));
+  return 0;
 }
 C
 }

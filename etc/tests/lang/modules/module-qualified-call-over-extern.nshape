@@ -1,0 +1,26 @@
+shape module_qualified_call_over_extern {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "codegen"]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect compile_and_run
+  expect_message "MODULE-QUALIFIED-CALL-OVER-EXTERN-OK"
+  source ny <<'NY'
+use core
+use core.os.ui.window
+module pal2(
+   close,
+   hide,
+   handle_key,
+){
+   fn close(any st) int { 42 }
+   fn hide(any st) int { 7 }
+   fn handle_key(any st, int k) any { {"k": k} }
+}
+def r1 = pal2.close(0)
+def r2 = pal2.handle_key(0, 5)
+assert(r1 == 42 && is_dict(r2) && r2.get("k", 0) == 5 && pal2.hide(0) == 7, "qualified calls bind to the module")
+print("MODULE-QUALIFIED-CALL-OVER-EXTERN-OK")
+NY
+}

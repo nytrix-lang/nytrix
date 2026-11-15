@@ -1,0 +1,30 @@
+shape sanitizer_user_initialization {
+  family "runtime-sanitize"
+  generator "regression"
+  features [sanitize memory msan initialization]
+  template ny-test-case
+  flags "--native-only"
+  timeout 180
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os (env, file_remove, file_write, pid, run_capture, temp_dir)
+def ny = env("NYTRIX_NY_FULL_BIN")
+assert(is_str(ny) && ny.len > 0)
+def path = temp_dir() + "/ny-msan-initialization-" + to_str(pid()) + ".ny"
+defer { file_remove(path) }
+for initialize in [true, false] {
+   def write = initialize ? "store8(p, 73, 0)\n" : ""
+   def source = "use core\nfn observe() int {\n   def p = malloc_raw(8)\n   assert(p != 0)\n" + write + "   def value = load8(p, 0)\n   free_raw(p)\n   if value == 73 { print(\"chosen\") } else { print(\"other\") }\n   0\n}\nobserve()\n"
+   assert(is_ok(file_write(path, source)))
+   def out = run_capture([ny, "-O0", "--sanitize=memory", path], [], nil, false)
+   def text = to_str(out.get("stdout", "")) + to_str(out.get("stderr", ""))
+   if initialize {
+      assert(out.get("code", 127) == 0 && text.contains("chosen") && !text.contains("MemorySanitizer:"), "initialized emitted read: " + text)
+   } else {
+      assert(out.get("code", 127) == 134 && text.contains("MemorySanitizer: use-of-uninitialized-value") && text.contains("ny_fn_observe"), "uninitialized emitted read: " + text)
+   }
+}
+0
+NY
+}

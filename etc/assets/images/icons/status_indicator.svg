@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
+  <title>Status Indicator</title>
+  <desc>Status Indicator icon.</desc>
+  <g transform="translate(2.0000 2.0000) scale(1.25000)">
+<path fill="#c6c6ca" d="M8 1 5.184 3H2a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V4a1 1 0 0 0-1-1h-3.184ZM3 5h2.584L8 3.4 10.416 5H13v8H3Z"/>
+  </g>
+</svg>

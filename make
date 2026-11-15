@@ -1265,10 +1265,10 @@ def color_ninja_progress(status: str, rest: str = "") -> str:
 def color_source_dir(path: str) -> str:
     palette = (
         ("src/code/", "34"),
-        ("src/code/lang/parse/", "35"),
+        ("src/code/lang/ny/parser/", "35"),
         ("src/cmd/ny/repl/", "36"),
         ("src/base/", "32"),
-        ("src/code/backend/wire/", "33"),
+        ("src/code/backend/core/cache/", "33"),
         ("src/code/backend/runtime/", "31"),
         ("src/cmd/", "36"),
     )
@@ -6338,33 +6338,42 @@ def _stats_display_path(path: str) -> str:
 
 def _backlog_stats() -> dict[str, object] | None:
     """Summarize the public contributor work queue."""
-    todo = ROOT / "docs" / "TODO.md"
-    if not todo.is_file():
-        return None
+    todos = [
+        ROOT / "docs" / "todo" / "ui.md",
+        ROOT / "docs" / "todo" / "perf.md",
+        ROOT / "docs" / "todo" / "nyc.md",
+    ]
     sections: list[dict[str, object]] = []
-    current: dict[str, object] | None = None
-    try:
-        text = todo.read_text(encoding="utf-8")
-    except OSError:
-        return None
-    for line in text.splitlines():
-        if line.startswith("## "):
-            current = {"name": line[3:].strip(), "open": 0, "done": 0,
-                       "open_titles": []}
-            sections.append(current)
-        elif current is not None:
-            stripped = line.lstrip()
-            if stripped.startswith("- [ ]"):
-                current["open"] = int(current["open"]) + 1
-                title = stripped[5:].strip().replace("**:", ":").replace("**", "")
-                if len(current["open_titles"]) < 3:
-                    current["open_titles"].append(title)
-            elif stripped.startswith("- [x]"):
-                current["done"] = int(current["done"]) + 1
+    for todo in todos:
+        if not todo.is_file():
+            continue
+        try:
+            text = todo.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        current: dict[str, object] = {
+            "name": todo.stem.upper(), "open": 0, "done": 0, "open_titles": []
+        }
+        sections.append(current)
+        for line in text.splitlines():
+            if line.startswith("## ") or line.startswith("### "):
+                heading = line.lstrip("#").strip()
+                current = {"name": heading, "open": 0, "done": 0,
+                           "open_titles": []}
+                sections.append(current)
+            else:
+                stripped = line.lstrip()
+                if stripped.startswith("- [ ]"):
+                    current["open"] = int(current["open"]) + 1
+                    title = stripped[5:].strip().replace("**:", ":").replace("**", "")
+                    if len(current["open_titles"]) < 3:
+                        current["open_titles"].append(title)
+                elif stripped.startswith("- [x]"):
+                    current["done"] = int(current["done"]) + 1
     if not sections:
         return None
     return {
-        "path": "docs/TODO.md",
+        "path": "docs/todo/*.md",
         "sections": sections,
         "open": sum(int(s["open"]) for s in sections),
         "done": sum(int(s["done"]) for s in sections),
@@ -6528,7 +6537,7 @@ def print_repo_stats(report: dict[str, object], include_cloc: bool) -> None:
     backlog = report.get("backlog")
     if isinstance(backlog, dict):
         UI.section("Backlog")
-        UI.kv(str(backlog.get("path", "TODO.md")),
+        UI.kv(str(backlog.get("path", "docs/todo/*.md")),
               f"{backlog['open']} open {dot} {backlog['done']} done")
         for entry in backlog["sections"]:
             opens = int(entry["open"])
@@ -6613,7 +6622,7 @@ def run_optcheck(build_root: Path, kind: str, args: list[str]) -> int:
     return 0
 
 def parse(argv: list[str]) -> tuple[list[str], list[str], int, bool, bool, bool, bool, str | None, bool | None, str | None]:
-    known = {"bench-gcc", "all", "bin", "nyc", "bin-static", "tar", "vendor", "fmt", "std", "std_bc", "core", "core_bc", "test", "repl", "fuzz", "bench", "docs", "web", "web-demos", "web-check", "web-test", "wasm", "c2ny", "py2ny", "install", "uninstall", "clean", "debug", "tidy", "audit", "perf", "profile", "gprof", "asan", "ubsan", "coverage", "optcheck", "analyze", "check", "hooks", "fb", "ny", "run", "release", "static", "deps", "cross", "cross-run", "env", "targets", "doctor", "bench-compare", "stats", "prepare", "bare-payload"}
+    known = {"bench-gcc", "all", "bin", "nyc", "bin-static", "tar", "vendor", "fmt", "std", "std_bc", "core", "core_bc", "test", "repl", "fuzz", "bench", "docs", "web", "web-demos", "web-check", "web-test", "wasm", "c2ny", "py2ny", "install", "uninstall", "clean", "debug", "tidy", "audit", "perf", "profile", "gprof", "asan", "ubsan", "coverage", "optcheck", "analyze", "check", "hooks", "fb", "ny", "run", "release", "static", "deps", "cross", "cross-run", "env", "targets", "doctor", "bench-compare", "stats", "prepare", "bare-payload", "unicode"}
     _PASSTHROUGH = {"bench-gcc", "fmt", "analyze", "tidy", "audit", "test", "perf", "profile", "docs", "web", "web-demos", "web-check", "web-test", "wasm", "ny", "repl", "gprof", "asan", "ubsan", "fuzz", "bench", "cross", "cross-run", "static", "bin-static", "tar", "vendor", "env", "targets", "doctor", "stats"}
 
     def looks_like_ny_source(arg: str) -> bool:
@@ -6718,7 +6727,7 @@ def parse(argv: list[str]) -> tuple[list[str], list[str], int, bool, bool, bool,
                 jobs = int(v)
             except Exception:
                 raise SystemExit(f"make: invalid jobs value: {v}")
-        elif a in ("static", "vendor", "cross", "cross-run", "doctor", "profile", "web", "web-demos", "web-check", "web-test", "wasm"):
+        elif a in ("static", "vendor", "cross", "cross-run", "doctor", "profile", "web", "web-demos", "web-check", "web-test", "wasm", "fuzz"):
             cmds.append(a)
             last_cmd = a
             rest = argv[i + 1 :]
@@ -6782,7 +6791,7 @@ def print_command_help(cmd: str) -> None:
         print()
         print(UI.paint("35", "Nytrix") + " " + UI.paint("36", "C compiler (NYC)"))
         code = "36"
-        for line in (ROOT / "src/code/lang/parse/c/help.txt").read_text(
+        for line in (ROOT / "src/code/lang/c/pipeline/help.txt").read_text(
                 encoding="utf-8").splitlines():
             if line.startswith("[") and line.endswith("]"):
                 section = line[1:-1]
@@ -8613,7 +8622,7 @@ def run_make_tar(build_root: Path, kind: str, jobs: int, args: list[str]) -> int
 def main() -> int:
     global COLOR, QUIET_BOOTSTRAP
     (cmds, extra, requested_jobs, verbose, want_help, help_target, want_version,
-     debug_kind, cli_color_mode, cli_bootstrap_logs, cli_glyph_mode) = parse(sys.argv[1:])
+     debug_kind, cli_color_mode, cli_bootstrap_logs, cli_glyph_mode    ) = parse(sys.argv[1:])
     COLOR = apply_cli_color_mode(cli_color_mode)
     UI.color = COLOR
     UI.glyph_style = apply_cli_glyph_mode(cli_glyph_mode)
@@ -8829,7 +8838,7 @@ def main() -> int:
         elif cmd in ("test", "asan", "ubsan"):
             targets = ["ny", "ny-full", "ny-test"]
         elif cmd == "fuzz":
-            targets = ["ny", "ny-test"]
+            targets = ["ny-full", "ny-test"]
         elif cmd == "bench":
             targets = ["ny", "ny-test"]
             # `run_test` treats the benchmark suite as a focused run. Without a
@@ -8858,6 +8867,8 @@ def main() -> int:
         elif cmd in ("std_bc", "core_bc"):
             targets = ["core_bc"]
         elif cmd == "bare-payload":
+            targets = ["ny-make"]
+        elif cmd == "unicode":
             targets = ["ny-make"]
         elif cmd == "install":
             targets = ["ny", "ny-lsp", "core", "ny-fmt", "ny-perf", "ny-test", "ny-doc", "ny-make"]
@@ -8891,6 +8902,17 @@ def main() -> int:
 
         if cmd == "bare-payload":
             c_args = (["debug"] if debug_kind else []) + ["bare-payload", *extra]
+            child_env = os.environ.copy()
+            child_env["BUILD_DIR"] = str(build_root)
+            rc = subprocess.run(
+                [str(make_tool), *c_args], cwd=str(ROOT), env=child_env
+            ).returncode
+            if rc != 0:
+                return rc
+            continue
+
+        if cmd == "unicode":
+            c_args = (["debug"] if debug_kind else []) + ["unicode", *extra]
             child_env = os.environ.copy()
             child_env["BUILD_DIR"] = str(build_root)
             rc = subprocess.run(
@@ -9149,7 +9171,7 @@ def main() -> int:
                 return rc
             return 0
         elif cmd == "fuzz":
-            cmake_build(build_root, active_kind, ["ny", "ny-test"], requested_jobs)
+            cmake_build(build_root, active_kind, ["ny-full", "ny-test"], requested_jobs)
             if extra and extra[0] == "afl":
                 afl = shutil.which("afl-fuzz")
                 if not afl:

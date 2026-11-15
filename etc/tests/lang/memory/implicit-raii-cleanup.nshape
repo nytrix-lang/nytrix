@@ -1,0 +1,58 @@
+shape implicit_raii_cleanup {
+  family "runtime/memory"
+  generator "regression"
+  features ["ny", "test", "memory-safety", "ownership"]
+  template ny-test-case
+  flags "--native-only"
+  timeout 240
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os (env, file_remove, file_write, pid, run_capture, temp_dir)
+
+def ny = env("NYTRIX_NY_FULL_BIN")
+assert(is_str(ny) && ny.len > 0, "full compiler is available")
+def stem = temp_dir() + "/ny-implicit-raii-" + to_str(pid())
+
+fn check(str name, str source, list flags, int code) int {
+   def path = stem + "-" + name + ".ny"
+   assert(is_ok(file_write(path, "use core\n" + source)), "write " + name)
+   defer { file_remove(path) }
+   mut args = [ny]
+   for flag in flags { args = args.append(flag) }
+   args = args.append(path)
+   def out = run_capture(args, [], nil, false)
+   def text = to_str(out.get("stdout", "")) + to_str(out.get("stderr", ""))
+   assert(out.get("code", 127) == code, name + ": " + text)
+   assert(!text.contains("safe-heap: leak:"), name + " leaked: " + text)
+   assert(!text.contains("double free"), name + " double freed: " + text)
+   0
+}
+
+mut route_id = 0
+for route in [["--native-only"], ["--native-backend=llvm"],
+              ["--native-backend=llvm", "--jit", "--jit-engine=mcjit"],
+              ["--native-backend=llvm", "--jit", "--jit-engine=orc"]] {
+   route_id += 1
+   def suffix = to_str(route_id)
+   ;; A local owner used only through raw intrinsics is released at block exit.
+   check("local" + suffix,
+      "fn scoped() int {\n   mut p = malloc(32)\n   store8(p, 4, 0)\n   load8(p, 0)\n}\nprint(\"ok \" + to_str(scoped()))\n",
+      ["--mode=safe"] + route, 0)
+   ;; Nested block scope releases on fallthrough, continue, and break.
+   check("blocks" + suffix,
+      "fn scoped() int {\n   mut total = 0\n   {\n      mut p = malloc(16)\n      store8(p, 6, 0)\n      total = load8(p, 0)\n   }\n   mut i = 0\n   while i < 2 {\n      i += 1\n      {\n         mut p = malloc(16)\n         store8(p, i, 0)\n         total += load8(p, 0)\n         continue\n      }\n   }\n   while true {\n      {\n         mut p = malloc(16)\n         store8(p, 5, 0)\n         total += load8(p, 0)\n         break\n      }\n   }\n   total\n}\nprint(\"ok \" + to_str(scoped()))\n",
+      ["--mode=safe"] + route, 0)
+   ;; Returned, aliased, and stored owners keep manual ownership: the explicit
+   ;; frees below must not double free through an inserted defer.
+   check("escape" + suffix,
+      "fn make() ?ptr {\n   mut p = malloc(24)\n   store8(p, 7, 0)\n   p\n}\nmut keep = dict(2)\nfn stored() int {\n   mut p = malloc(8)\n   store8(p, 5, 0)\n   keep[\"p\"] = p\n   0\n}\nfn aliased() int {\n   mut p = malloc(16)\n   store8(p, 9, 0)\n   def q = p\n   def v = load8(q, 0)\n   free(q)\n   v\n}\ndef owner = make()\nstored()\ndef held = keep.get(\"p\", 0)\nprint(\"ok \" + to_str(aliased()) + \" \" + to_str(load8(owner, 0)) + \" \" + to_str(load8(held, 0)))\nfree(owner)\nfree(held)\n",
+      ["--mode=safe"] + route, 0)
+   ;; An uncaught panic runs the inserted cleanup and exits with the panic code.
+   check("panic" + suffix,
+      "fn explode() int {\n   mut p = malloc(16)\n   store8(p, 3, 0)\n   panic(\"implicit-raii-panic\")\n   0\n}\nexplode()\n",
+      ["--mode=safe"] + route, 1)
+}
+0
+NY
+}

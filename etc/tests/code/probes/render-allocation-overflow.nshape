@@ -1,0 +1,43 @@
+shape render_allocation_size_overflow {
+  family "runtime/system/ui"
+  generator "hand"
+  features ["ui", "memory"]
+  template ny-test-case
+  flags_matrix "-O0; -O3; --native-only -O0; --native-only -O3"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.ui.render.utils as render_utils
+use core.os.ui.render.shared as render_shared
+
+def src = malloc(3 * render_shared.VERTEX_STRIDE)
+def idx = malloc(8)
+assert(src != 0 && idx != 0, "test buffers allocated")
+store32_f32(src, 1.0, 0)
+store32_f32(src, 2.0, render_shared.VERTEX_STRIDE)
+store32_f32(src, 3.0, render_shared.VERTEX_STRIDE * 2)
+store16(idx, 2, 0)
+store16(idx, 0, 2)
+store16(idx, 1, 4)
+def expanded = render_utils.gltf_expand_indexed_vertices(src, 3, idx, 3, false)
+assert(expanded != 0 && load32_f32(expanded, 0) == 3.0 &&
+       load32_f32(expanded, render_shared.VERTEX_STRIDE) == 1.0,
+       "expanded vertex order survives ownership transfer")
+def rewound = render_utils.gltf_rewind_triangle_vertices(src, 3)
+assert(rewound != 0 && load32_f32(rewound, 0) == 1.0 &&
+       load32_f32(rewound, render_shared.VERTEX_STRIDE) == 3.0,
+       "rewound vertex order survives ownership transfer")
+def i64 max_int = 9223372036854775807
+assert(render_utils.gltf_expand_indexed_vertices(src, 1, idx, max_int, false) == 0,
+       "expanded vertex allocation size overflow is rejected")
+assert(render_utils.gltf_expand_indexed_vertices(src, 1, idx, max_int, true) == 0,
+       "expanded index allocation size overflow is rejected")
+assert(render_utils.gltf_rewind_triangle_vertices(src, max_int) == 0,
+       "rewound vertex allocation size overflow is rejected")
+free(src)
+free(idx)
+free(expanded)
+free(rewound)
+print("render allocation overflow guards passed")
+NY
+}

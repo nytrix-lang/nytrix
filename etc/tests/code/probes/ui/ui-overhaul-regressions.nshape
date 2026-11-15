@@ -1,0 +1,115 @@
+shape ui_scancode_query_stable {
+  family "probe-suite"
+  generator "regression"
+  features [ny ui window input]
+  template ny-test-case
+  expect compile_and_run
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect_stdout "UI-SCANCODE-QUERY-OK"
+  source ny <<'NY'
+use core
+use core.os.ui.window as window
+use core.os.ui.window.consts
+;; The scancode list for a logical key is built once and cached. It used to be
+;; assembled through helper-returned [list, dict] pairs and read back from the
+;; cache as an integer, so a later key_down died on `.get`.
+mut i = 0
+while i < 400 {
+   ;; Which physical table is live depends on the selected window backend, so
+   ;; accept the F1 code of any of them and require the answer to be stable.
+   def f1 = window.event_key_is({"key": 0, "scancode": 59}, KEY_F1) ||
+      window.event_key_is({"key": 0, "scancode": 67}, KEY_F1) ||
+      window.event_key_is({"key": 0, "scancode": 122}, KEY_F1)
+   assert(f1, "a function-key scancode maps to F1 on every query")
+   assert(!window.event_key_is({"key": 0, "scancode": 30}, KEY_F1), "a letter scancode is not F1")
+   assert(window.event_key_is({"key": KEY_F1, "scancode": 0}, KEY_F1), "logical key matches directly")
+   assert(!window.event_key_is({"key": KEY_F1 + 1, "scancode": 0}, KEY_F1), "F2 is not F1")
+   i += 1
+}
+print("UI-SCANCODE-QUERY-OK")
+NY
+}
+
+shape ui_fps_sample_ints {
+  family "probe-suite"
+  generator "regression"
+  features [ny ui viewer]
+  template ny-test-case
+  expect compile_and_run
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect_stdout "UI-FPS-SAMPLE-OK"
+  source ny <<'NY'
+use core
+use core.os.ui.render.viewer.loop as ui_loop
+;; The sample result carries typed ints. Stored raw they read back as nil and
+;; the window title showed "nil FPS".
+def early = ui_loop.sample_fps([], 42, 1000, 2000)
+assert(!bool(early.get("sampled", true)), "no sample inside the one-second window")
+assert(int(early.get("frames", -1)) == 42 && int(early.get("last", -1)) == 1000, "pending counters survive")
+def done = ui_loop.sample_fps([], 87, 1000, 1000 + 1000000000)
+assert(bool(done.get("sampled", false)), "sample after one second")
+def fps = done.get("fps", nil)
+assert(fps != nil && int(fps) == 87, "fps is an integer, not nil")
+assert(to_str(int(fps)) == "87", "fps formats as a number")
+assert(int(done.get("frames", -1)) == 0 && int(done.get("last", -1)) == 1000 + 1000000000, "counters reset")
+def hist = done.get("samples", [])
+assert(is_list(hist) && hist.len == 1, "history gains one sample")
+print("UI-FPS-SAMPLE-OK")
+NY
+}
+
+shape ui_engine_state_lists {
+  family "probe-suite"
+  generator "regression"
+  features [ny ui viewer engine]
+  template ny-test-case
+  expect compile_and_run
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect_stdout "UI-ENGINE-STATE-LISTS-OK"
+  source ny <<'NY'
+use core
+use core.os.ui.render.viewer.engine.state
+;; The engine's tab and preset lists are module-level literals that importers
+;; saw as empty, which left the editor tab strip blank. ensure_matrices now
+;; rebuilds them.
+assert(ensure_matrices(), "state initialises")
+assert(is_list(_gui_editor_tab_items) && _gui_editor_tab_items.len == 4, "editor tabs present")
+assert(to_str(_gui_editor_tab_items.get(0, "")) == "Catalog" && to_str(_gui_editor_tab_items.get(3, "")) == "Console", "editor tab order")
+assert(is_list(_gui_layout_preset_items) && _gui_layout_preset_items.len == 4, "layout presets present")
+assert(is_list(_gui_env_mode_items) && _gui_env_mode_items.len == 5, "environment modes present")
+assert(is_list(_gui_msaa_items) && _gui_msaa_items.len == 4, "msaa modes present")
+assert(is_list(_gui_shot_preset_items) && _gui_shot_preset_items.len == 14, "shot presets present")
+assert(is_list(_gui_accent) && _gui_accent.len == 4, "accent is an RGBA list")
+assert(is_list(M_ID) && M_ID.len >= 18, "matrices still initialise")
+assert(float(_cam_fov) == 60.0, "default field of view is 60 degrees")
+print("UI-ENGINE-STATE-LISTS-OK")
+NY
+}
+
+shape ui_gui_tab_strip_labels {
+  family "probe-suite"
+  generator "regression"
+  features [ny render ui gui]
+  template ny-test-case
+  expect compile_and_run
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect_stdout "UI-GUI-TAB-LABELS-OK"
+  source ny <<'NY'
+use core
+use core.os.ui.render.viewer.gui as gui
+;; Tab slots partition the strip exactly, and an out-of-range selection is
+;; returned unchanged when the strip cannot draw (no window is open here).
+def n = 3
+mut x_end = 10.0
+mut i = 0
+while i < n {
+   def slot = gui.tab_strip_slot(10.0, 300.0, n, i)
+   assert(float(slot.get(0)) == x_end, "slot starts where the previous one ended")
+   x_end = float(slot.get(0)) + float(slot.get(1))
+   i += 1
+}
+assert(x_end == 310.0, "slots cover the full strip width")
+assert(gui.tab_strip("probe_tabs_empty", [], 2, 100.0, 24.0) == 2, "empty strip keeps the selection")
+print("UI-GUI-TAB-LABELS-OK")
+NY
+}

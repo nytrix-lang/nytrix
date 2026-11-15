@@ -101,7 +101,11 @@ void nyFfiGates_dispose(void) {
 
 void nyFfiRegisterGate(nyFfiSigKind_t sig, const char *name, void *stub) {
   if (gNyFfi.gate_count >= gNyFfi.gate_capacity) {
+    if (gNyFfi.gate_capacity > SIZE_MAX / 2)
+      return;
     size_t next_capacity = gNyFfi.gate_capacity ? gNyFfi.gate_capacity * 2 : 64;
+    if (next_capacity > SIZE_MAX / sizeof(*gNyFfi.gates))
+      return;
     nyFfiGate_t *next = realloc(gNyFfi.gates, next_capacity * sizeof(*next));
     if (!next)
       return;

@@ -181,6 +181,10 @@ typedef enum {
   NYIR_VEC8_SAR_I64,
   /* Four logical i64 shifts right by the immediate count (0..63), AVX2. */
   NYIR_VEC8_SHR_I64,
+  /* Dedicated native-frame canary word, above addressable local storage.
+   * These volatile accesses never materialize a spillable guard pointer. */
+  NYIR_STACK_GUARD_LOAD,
+  NYIR_STACK_GUARD_STORE,
   NYIR_OP_COUNT,
 } nyr_op_t;
 
@@ -259,7 +263,13 @@ typedef enum {
 /* i386 C scalar widths: unset argument bits denote 32 bits. */
 #define NYIR_INST_F_I386_C_ABI (1u << 17)
 #define NYIR_INST_F_I386_RET32 (1u << 16)
-
+/* RET: variadic i386 regparm functions leave the hidden result pointer for
+ * their caller to pop, despite receiving every argument on the stack. */
+#define NYIR_INST_F_I386_SRET_CALLER_POP (1u << 19)
+/* INLINE_ASM read-modify-write operations omit the LOCK prefix. */
+#define NYIR_INST_F_ASM_UNLOCKED (1u << 20)
+/* Marks a block label whose address is embedded in C static data. */
+#define NYIR_INST_F_LABEL_ADDRESS_TAKEN (1u << 18)
 /*
  * Set on integer ALU operations (add/sub/mul/shl) when range analysis proves
  * the operation cannot overflow. Allows codegen to emit non-checking variants.
@@ -734,6 +744,7 @@ void nyr_inst_discard(nyr_inst_t *in);
 bool nyr_replace_all_uses(nyr_func_t *f, int old_value, int new_value);
 /* Erase an instruction in place as a NOP, releasing its owned operands. */
 bool nyr_erase_instruction(nyr_func_t *f, size_t index);
+/* Index SSA value uses, excluding asm-goto label operands. */
 bool nyr_build_use_def(const nyr_func_t *f, nyr_use_def_t *out);
 void nyr_use_def_free(nyr_use_def_t *uses);
 bool nyr_ir_verify(const nyr_func_t *f, char *err, size_t err_len);
@@ -852,6 +863,7 @@ bool nyr_redundant_load_elim(nyr_func_t *f);
 bool nyr_licm(nyr_func_t *f);
 bool nyr_licm_post_vectorize(nyr_func_t *f);
 bool nyr_jump_thread(nyr_func_t *f);
+bool nyr_invert_fallthrough_branches(nyr_func_t *f);
 /** Optimize `f` at O0--O3. `stats` may be NULL; when supplied it receives
  * before/after counts and per-pass timings. O2+ preserve SSA PHIs until
  * machine lowering. */
@@ -1001,6 +1013,10 @@ typedef struct {
   const nyr_func_t *func;
 } nyr_inline_callee_t;
 void nyr_set_inline_callees(const nyr_inline_callee_t *callees, size_t count);
+/* Thread-local: registry entries with index >= first read their body from
+ * snapshot[index] when that slot is non-NULL. Pass NULL to clear. */
+void nyr_inline_set_thread_snapshot(const nyr_func_t *const *snapshot,
+                                    size_t first);
 /** Whether a collected callee can observe a global cell. */
 bool nyr_inline_callees_reference_symbol(const char *symbol,
                                          const nyr_func_t *exclude);

@@ -29,14 +29,17 @@ concurrency, cleanup, and effect metadata.
 
 `--mode=safe` gives Nytrix its compile-time safety profile. It promotes
 ownership diagnostics to errors and adds RC/RAII cleanup, strict effect/alias
-policy, and stricter raw-memory diagnostics.
+policy, stricter raw-memory diagnostics, and a guard-page heap for user
+allocations. The heap incurs the mapping and quarantine costs described in
+[Safety](../learn/safety.md); it is not a zero-cost profile.
 
 Ordinary compilation leaves ownership/provenance analysis disabled by default.
 `--borrow-check` enables advisory diagnostics without changing heap policy or
 inserting cleanup. `--heap=raii` enables ownership tracking and RAII cleanup;
 `--ownership-check=strict` promotes supported ownership diagnostics to errors.
 `--mode=safe` enables strict ownership checks and RC/RAII cleanup together
-with strict effect/alias policy and tracked raw-memory diagnostics.
+with strict effect/alias policy, tracked raw-memory diagnostics, and safe-heap
+instrumentation.
 
 ```bash
 ny --mode=safe file.ny
@@ -124,6 +127,7 @@ Choose one reclamation policy for a compilation:
 | RAII | `--heap=raii` | Inserts cleanup at supported scope exits; recommended for resource handles. |
 | Reference counting | `--heap=rc` | Tracked ownership uses reference-counted cleanup. |
 | Tracing GC (optional) | `--heap=gc` | Reclaims supported managed object graphs. |
+| Safe heap | `--heap=safe` | Manual cleanup with a guard-page heap for the program's own allocations: traps use-after-free, out-of-bounds access, and double free, and reports leaks at exit. See [Safety](../learn/safety.md). |
 
 The default policy is `manual`; tracing GC is not enabled unless `-gc` or
 `--heap=gc` is selected. Disabling GC does not make unreachable managed values

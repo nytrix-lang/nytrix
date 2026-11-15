@@ -128,35 +128,61 @@ fn popen(str path, list args) any {
    mut rpath = _resolve_cmd(path)
    #windows {
       def argv = _build_argv(path, rpath, args)
+      mut out = [0, 0, 0]
+      mut buf_cleanup = [0]
+      defer { if buf_cleanup[0] { free(buf_cleanup[0]) } }
       def fds = malloc(8)
       if fds == 0 { return 0 }
-      defer { free(fds) }
+      buf_cleanup[0] = fds
+      mut fds_cleanup = [-1, -1]
+      defer {
+         if fds_cleanup[0] >= 0 { sys_close_quiet(fds_cleanup[0]) }
+         if fds_cleanup[1] >= 0 { sys_close_quiet(fds_cleanup[1]) }
+      }
       def int pid = __spawn_pipe(rpath, argv, fds)
       if pid <= 0 { return 0 }
       ;; The spawn helper writes raw 32-bit fds into the buffer; no untag.
       def int stdin_write = load32(fds, 0)
       def int stdout_read = load32(fds, 4)
+      fds_cleanup[0] = stdin_write
+      fds_cleanup[1] = stdout_read
       if stdin_write < 0 || stdout_read < 0 {
-         sys_close_quiet(stdin_write)
-         sys_close_quiet(stdout_read)
          return 0
       }
-      return [__tag(pid), __tag(stdin_write), __tag(stdout_read)]
+      out[0] = __tag(pid)
+      out[1] = __tag(stdin_write)
+      out[2] = __tag(stdout_read)
+      fds_cleanup[0] = -1
+      fds_cleanup[1] = -1
+      return out
    }
    #endif
+   mut out = [0, 0, 0]
+   mut buf_cleanup = [0]
+   defer { if buf_cleanup[0] { free(buf_cleanup[0]) } }
    def fds = malloc(8)
    if fds == 0 { return 0 }
-   defer { free(fds) }
+   buf_cleanup[0] = fds
+   mut fds_cleanup = [-1, -1]
+   defer {
+      if fds_cleanup[0] >= 0 { sys_close_quiet(fds_cleanup[0]) }
+      if fds_cleanup[1] >= 0 { sys_close_quiet(fds_cleanup[1]) }
+   }
    def int pid = __spawn_pipe(rpath, args, fds)
    if pid <= 0 { return 0 }
    def int stdin_write = load32(fds, 0)
    def int stdout_read = load32(fds, 4)
+   fds_cleanup[0] = stdin_write
+   fds_cleanup[1] = stdout_read
    if stdin_write < 0 || stdout_read < 0 {
-      sys_close_quiet(stdin_write)
-      sys_close_quiet(stdout_read)
       return 0
    }
-   [__tag(pid), __tag(stdin_write), __tag(stdout_read)]
+   out[0] = __tag(pid)
+   out[1] = __tag(stdin_write)
+   out[2] = __tag(stdout_read)
+   fds_cleanup[0] = -1
+   fds_cleanup[1] = -1
+   out
 }
 
 #main {

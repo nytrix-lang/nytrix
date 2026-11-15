@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
+  <title id="title1">Audio Stream MP3</title>
+  <desc id="desc1">Audio Stream MP3 editor icon. Original asset id: audiostreammp3.</desc>
+  <defs id="defs4" />
+  <g transform="translate(2.0000 2.0000) scale(1.25000)" id="g4">
+    <linearGradient id="a" x2="0" y1="1" y2="15" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ff5f5f" id="stop1" />
+      <stop offset=".5" stop-color="#e1da5b" id="stop2" />
+      <stop offset="1" stop-color="#5fff97" id="stop3" />
+    </linearGradient>
+    <path fill="#c6c6ca" d="M13 2a1 1 0 0 0-1-1L4.754 3A1 1 0 0 0 4 4v5.55A2.5 2.5 0 1 0 6 12V4.756l5-1.428V6.5l2-1z" id="path3" />
+    <path d="M 10.5,7.5 A 0.5,0.5 0 0 0 10,8 v 5 A 0.5,0.5 0 0 0 10.5,13.5 0.5,0.5 0 0 0 11,13 V 8 A 0.5,0.5 0 0 0 10.5,7.5 Z m 2,1 A 0.5,0.5 0 0 0 12,9 v 3 A 0.5,0.5 0 0 0 12.5,12.5 0.5,0.5 0 0 0 13,12 V 9 A 0.5,0.5 0 0 0 12.5,8.5 Z m -4,1 A 0.5,0.5 0 0 0 8,10 v 1 A 0.5,0.5 0 0 0 8.5,11.5 0.5,0.5 0 0 0 9,11 V 10 A 0.5,0.5 0 0 0 8.5,9.5 Z m 6,0 A 0.5,0.5 0 0 0 14,10 v 1 A 0.5,0.5 0 0 0 14.5,11.5 0.5,0.5 0 0 0 15,11 V 10 A 0.5,0.5 0 0 0 14.5,9.5 Z" id="path4" fill="#c6c6ca" />
+  </g>
+</svg>

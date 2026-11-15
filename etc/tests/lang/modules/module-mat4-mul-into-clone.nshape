@@ -1,0 +1,31 @@
+shape module_mat4_mul_into_clone {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "codegen"]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect compile_and_run
+  expect_message "MODULE_MAT4_MUL_INTO_CLONE_OK"
+  source ny <<'NY'
+use core
+use core.os.ui.render.matrix
+module mm(
+   build,
+){
+   use core.os.ui.render.matrix
+   fn build() list {
+      def a = mat4_translate(1.0, 2.0, 3.0)
+      def b = mat4_scale(2.0, 2.0, 2.0)
+      def m = mat4_identity()
+      mat4_mul_into(a, b, m)
+      def rec = [0, 0, 0]
+      mut rec2 = clone(rec)
+      rec2[1] = m
+      rec2
+   }
+}
+def r = mm.build()
+assert(float(r[1][2]) == 2.0, "mat4_mul_into result stored in a clone")
+print("MODULE_MAT4_MUL_INTO_CLONE_OK")
+NY
+}

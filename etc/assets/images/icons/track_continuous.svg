@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
+  <title id="title1">Track Continuous</title>
+  <desc id="desc1">Track Continuous editor icon. Original asset id: trackcontinuous.</desc>
+  <defs id="defs1" />
+  <g transform="translate(2.0000 7.0000) scale(1.25000)" id="g1">
+    <path d="M 14,1 C 10.777778,1 8.9453125,2.1679688 7.4453125,3.1679688 5.9453125,4.1679687 4.7777778,5 2,5 A 1,1 0 0 0 1,6 1,1 0 0 0 2,7 C 5.2222222,7 7.0546875,5.8320312 8.5546875,4.8320312 10.054688,3.8320313 11.222222,3 14,3 A 1,1 0 0 0 15,2 1,1 0 0 0 14,1 Z" id="path1" fill="#c6c6ca" />
+  </g>
+</svg>

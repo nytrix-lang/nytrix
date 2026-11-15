@@ -1,0 +1,116 @@
+shape test_midi_codec_and_sequencer_loopback {
+  family "runtime/interop"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect compile_and_run
+  expect_message "midi codec ok"
+  source ny <<'NY'
+use core
+use core.os.sound.midi as midi
+use core.os.sound.backend.midi.alsa as seq
+use core.os.sound.midi (encode, parse, parse_bytes, parser, note_on, pitch_bend)
+
+   ;; Codec round trips.
+   def on = encode(note_on(2, 60, 100))
+   assert(on.len == 3 && on[0] == 0x92 && on[1] == 60 && on[2] == 100, "note_on encode")
+   def pb = parse_bytes(encode(pitch_bend(0, -8192)))
+   assert(pb.len == 1 && pb[0].get("value", 0) == -8192, "pitch bend min round trip")
+   def pb2 = parse_bytes(encode(pitch_bend(15, 8191)))
+   assert(pb2[0].get("value", 0) == 8191 && pb2[0].get("channel", 0) == 15, "pitch bend max round trip")
+   ;; Running status: one status byte, two note-ons.
+   def rs = parse_bytes([0x90, 60, 100, 64, 90])
+   assert(rs.len == 2 && rs[1].get("note", 0) == 64 && rs[1].get("velocity", 0) == 90, "running status")
+   ;; Real-time clock inside sysex and between data bytes.
+   def mixed = parse_bytes([0xF0, 0x7E, 0xF8, 0x01, 0xF7, 0xB0, 7, 0xF8, 99])
+   assert(mixed.len == 4, "realtime interleave count")
+   assert(mixed[0].get("type", "") == "clock", "clock delivered first")
+   assert(mixed[1].get("data", []).len == 4, "sysex keeps its 4 bytes without the clock")
+   assert(mixed[2].get("type", "") == "clock", "clock between cc data bytes")
+   assert(mixed[3].get("value", 0) == 99 && mixed[3].get("controller", 0) == 7, "cc around a clock byte")
+   ;; Sysex split across two feeds.
+   def st = parser()
+   assert(parse(st, [0xF0, 1, 2]).len == 0, "partial sysex buffered")
+   def tail = parse(st, [3, 0xF7])
+   assert(tail.len == 1 && tail[0].get("data", []).len == 5, "sysex completes across feeds")
+   ;; System common cancels running status.
+   def sc = parse_bytes([0x90, 60, 1, 0xF3, 5, 61, 2])
+   assert(sc.len == 2 && sc[1].get("type", "") == "song_select", "song select clears running status")
+
+print("midi codec ok")
+
+;; Kernel sequencer loopback through our own two ports: no virtual MIDI
+;; module or external device needed. Skips cleanly without /dev/snd/seq.
+def cl = seq.open_client("nytrix-midi-test")
+if !is_dict(cl) {
+   print("sequencer unavailable; loopback skipped")
+} else {
+   def out_port = seq.create_port(cl, "out", seq.PORT_OUTPUT)
+   def in_port = seq.create_port(cl, "in", seq.PORT_INPUT)
+   assert(out_port >= 0 && in_port >= 0 && out_port != in_port, "ports created")
+   def listed = seq.devices(cl)
+   mut seen = 0
+   mut k = 0
+   while k < listed.len {
+      def d = listed[k]
+      if d.get("client", -1) == seq.client_id(cl) { seen += 1 }
+      k += 1
+   }
+   assert(seen == 2, "enumeration lists our two ports")
+   assert(seq.connect_output(cl, out_port, seq.client_id(cl), in_port), "subscribe out -> in")
+   assert(seq.send(cl, out_port, note_on(3, 61, 77)), "send note_on to subscribers")
+   assert(seq.send(cl, out_port, pitch_bend(1, -1234)), "send pitch bend")
+   assert(seq.send(cl, out_port, midi.control_change(0, 74, 12)), "send cc")
+   assert(seq.send(cl, out_port, midi.sysex([0x7D, 1, 2, 3])), "send sysex")
+   def got = seq.receive(cl, 500)
+   mut more = got
+   mut tries = 0
+   while more.len < 4 && tries < 5 {
+      def extra = seq.receive(cl, 200)
+      mut j = 0
+      while j < extra.len { more = more.append(extra[j]) j += 1 }
+      tries += 1
+   }
+   assert(more.len == 4, "four events delivered, got " + to_str(more.len))
+   assert(more[0].get("type", "") == "note_on" && more[0].get("note", 0) == 61 && more[0].get("velocity", 0) == 77 && more[0].get("channel", 0) == 3, "note_on round trip")
+   assert(more[0].get("source", [])[1] == out_port && more[0].get("port", -1) == in_port, "source and destination ports")
+   assert(more[0].get("time_ns", 0) > 0, "receive timestamp")
+   assert(more[1].get("value", 0) == -1234 && more[1].get("channel", 0) == 1, "pitch bend round trip")
+   assert(more[2].get("controller", 0) == 74 && more[2].get("value", 0) == 12, "cc round trip")
+   def sx = more[3].get("data", [])
+   assert(sx.len == 6 && sx[0] == 0xF0 && sx[4] == 3 && sx[5] == 0xF7, "sysex round trip")
+   ;; Direct addressing bypasses subscriptions, and filters drop types.
+   assert(seq.disconnect_output(cl, out_port, seq.client_id(cl), in_port), "unsubscribe")
+   assert(seq.send(cl, out_port, midi.note_off(3, 61), seq.client_id(cl), in_port), "direct send")
+   assert(seq.send(cl, out_port, {"type": "clock"}, seq.client_id(cl), in_port), "direct clock")
+   def direct = seq.receive(cl, 500, ["clock"])
+   assert(direct.len == 1 && direct[0].get("type", "") == "note_off", "direct delivery with clock filtered")
+   assert(seq.delete_port(cl, in_port) && seq.close_client(cl), "cleanup")
+   print("midi sequencer loopback ok")
+
+   ;; Portable stream API: a separate client plays the part of a keyboard
+   ;; (output port) and a sound module (input port).
+   assert(midi.backend_name() == "alsa", "linux backend")
+   def dev = seq.open_client("Fake Keystation")
+   def key_out = seq.create_port(dev, "keys", seq.PORT_OUTPUT)
+   def synth_in = seq.create_port(dev, "synth", seq.PORT_INPUT)
+   def kb = midi.find_device("fake keystation", true)
+   assert(is_dict(kb) && kb.get("input", false) && kb.get("backend", "") == "alsa", "keyboard listed as input")
+   def kb_stream = midi.open_input(kb)
+   assert(is_dict(kb_stream), "open_input")
+   def mod = midi.find_device("Fake Keystation: synth", false)
+   def mod_stream = midi.open_output(mod)
+   assert(is_dict(mod_stream), "open_output")
+   assert(seq.send(dev, key_out, note_on(9, 36, 127)), "keyboard plays")
+   def heard = midi.read_messages(kb_stream, 500)
+   assert(heard.len == 1 && heard[0].get("note", 0) == 36 && heard[0].get("channel", 0) == 9, "read_messages from device")
+   assert(heard[0].get("device", "") == kb.get("id", ""), "device id stamped")
+   assert(midi.write_message(mod_stream, midi.control_change(2, 1, 64)), "write_message to device")
+   def at_mod = seq.receive(dev, 500)
+   assert(at_mod.len == 1 && at_mod[0].get("controller", 0) == 1 && at_mod[0].get("port", -1) == synth_in, "device received cc")
+   assert(midi.close_stream(kb_stream) && midi.close_stream(mod_stream) && seq.close_client(dev), "stream cleanup")
+   print("midi portable streams ok")
+}
+NY
+}

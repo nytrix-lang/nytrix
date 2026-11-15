@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
+  <title id="title1">Project Upgrade</title>
+  <desc id="desc1">Project Upgrade editor icon. Original asset id: projectupgrade.</desc>
+  <defs id="defs2" />
+  <g transform="translate(2.0000 2.0000) scale(1.25000)" id="g2">
+    <path fill="none" d="M0 0H16V16H0z" id="path1" />
+    <path d="M 8,2.0195313 1.4101562,8.609375 a 1.4,1.4 0 0 0 0,1.980469 1.4,1.4 0 0 0 1.9804688,0 L 8,5.9804687 12.609375,10.589844 a 1.4,1.4 0 0 0 1.980469,0 1.4,1.4 0 0 0 0,-1.980469 z" id="path2" fill="#c6c6ca" />
+  </g>
+</svg>

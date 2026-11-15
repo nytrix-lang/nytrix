@@ -42,7 +42,7 @@ module core.os.ui.render(
    check_collision_recs, check_collision_circles, check_collision_circle_rec,
    check_collision_point_rec, check_collision_point_circle, check_collision_point_triangle,
    check_collision_point_line, check_collision_lines, get_collision_rec,
-   draw_star, draw_grid, draw_grid_pair, draw_grid_pair_axes, draw_axes, draw_cube,
+   draw_star, draw_grid, draw_grid_pair, draw_grid_pair_axes, draw_axes, draw_cube, draw_line_px, line_px_quad, pixel_world_size,
    draw_rect_tex, draw_rect_tex_uv, draw_rect_tex_uv_rot, draw_shader_rect, get_frame_time, get_time, load_shader, load_shader_file,
    load_shader_pipeline, load_shader_agnostic, shader_transpile, get_active_backend, compile_shader,
    create_pipeline, bind_pipeline, push_constants, store_mat4_cm, reset_pipeline,
@@ -1276,7 +1276,39 @@ fn _cpu_project_vertex(f64 x, f64 y, f64 z, any mvp) any {
 fn _cpu_mul_active_mvp_into(any out) bool {
    def mvp = _mvp_matrix
    if !is_list(mvp) { return false }
+   ;; Before the first set_model_matrix the model matrix is empty; the product
+   ;; was then never written and callers projected through a stale matrix.
+   if !_mat4_valid(_model_matrix) { _model_matrix = mat4_identity() }
    mat4_mul_into(mvp, _model_matrix, out)
+   true
+}
+
+;; Allocation-free projection of one point through a 16-entry column-major
+;; MVP held in scalars (see _cpu_line_world_xyz); returns false when clipped.
+fn _cpu_line_world_xyz(f64 ax0, f64 ay0, f64 az0, f64 bx0, f64 by0, f64 bz0, int color, f64 thickness) bool {
+   "Projects and rasterizes one world-space line with no per-call list allocation."
+   if !_cpu_mul_active_mvp_into(_cull_mvp) || !_cpu_ensure_surface() { return false }
+   def off = _mat4_data_off(_cull_mvp)
+   if off < 0 { return false }
+   def m = _cull_mvp
+   def f64 m0, m1, m3 = float(m.get(off + 0, 0.0)), float(m.get(off + 1, 0.0)), float(m.get(off + 3, 0.0))
+   def f64 m4, m5, m7 = float(m.get(off + 4, 0.0)), float(m.get(off + 5, 0.0)), float(m.get(off + 7, 0.0))
+   def f64 m8, m9, m11 = float(m.get(off + 8, 0.0)), float(m.get(off + 9, 0.0)), float(m.get(off + 11, 0.0))
+   def f64 m12, m13, m15 = float(m.get(off + 12, 0.0)), float(m.get(off + 13, 0.0)), float(m.get(off + 15, 1.0))
+   def f64 aw = ax0 * m3 + ay0 * m7 + az0 * m11 + m15
+   def f64 bw = bx0 * m3 + by0 * m7 + bz0 * m11 + m15
+   if aw <= 0.000001 || bw <= 0.000001 { return false }
+   def f64 fw, fh = float(_cpu_w), float(_cpu_h)
+   def f64 ax = ((ax0 * m0 + ay0 * m4 + az0 * m8 + m12) / aw * 0.5 + 0.5) * fw
+   def f64 ay = (1.0 - ((ax0 * m1 + ay0 * m5 + az0 * m9 + m13) / aw * 0.5 + 0.5)) * fh
+   def f64 bx = ((bx0 * m0 + by0 * m4 + bz0 * m8 + m12) / bw * 0.5 + 0.5) * fw
+   def f64 by = (1.0 - ((bx0 * m1 + by0 * m5 + bz0 * m9 + m13) / bw * 0.5 + 0.5)) * fh
+   def f64 dx, dy = bx - ax, by - ay
+   def f64 len = float(sqrt(dx * dx + dy * dy))
+   if len <= 0.000001 { return false }
+   def f64 px, py = -dy / len * (thickness * 0.5), dx / len * (thickness * 0.5)
+   _cpu_draw_triangle(ax + px, ay + py, ax - px, ay - py, bx - px, by - py, color)
+   _cpu_draw_triangle(ax + px, ay + py, bx - px, by - py, bx + px, by + py, color)
    true
 }
 
@@ -2279,6 +2311,7 @@ fn _font_sync_fast_glyph(int font_id, int cp) bool {
    mut page_ptr = load64(root_ptr, page_idx * 8)
    if !page_ptr {
       page_ptr = malloc(256 * 48)
+      if !page_ptr { return false }
       memset(page_ptr, 0, 256 * 48)
       store64_h(root_ptr, page_ptr, page_idx * 8)
    }
@@ -4433,6 +4466,7 @@ fn end_mode_3d() bool {
    _proj_matrix = nil
    _view_matrix = nil
    _mvp_matrix = nil
+   _line_view_proj = nil
    if _backend == BACKEND_VK {
       lib_vkr._update_default_mvp(_active_win)
       _reset_material_state()
@@ -4579,10 +4613,90 @@ comptime template _vk_only_void3(name, doc, call_fn){
    }
 }
 
+fn _cpu_edge_owns(f64 ex, f64 ey) bool {
+   ;; Top-left rule: a pixel centre exactly on an edge belongs to the triangle
+   ;; only for top and left edges, so triangles sharing an edge never both
+   ;; shade it (which would double the alpha along every seam).
+   ey > 0.0 || (ey == 0.0 && ex < 0.0)
+}
+
+fn _cpu_draw_vertices(ptr p, int count) bool {
+   "Software path for raw vertex streams on the mock renderer: screen-space triangles with interpolated vertex colors, alpha blended. Textures are not sampled."
+   if !_cpu_ensure_surface() { return false }
+   mut int t = 0
+   def int tris = count / 3
+   while t < tris {
+      def int o0 = t * 3 * VERTEX_STRIDE
+      def int o1 = o0 + VERTEX_STRIDE
+      def int o2 = o1 + VERTEX_STRIDE
+      mut f64 x0, y0 = float(load32_f32(p, o0 + OFF_X)), float(load32_f32(p, o0 + OFF_Y))
+      mut f64 x1, y1 = float(load32_f32(p, o1 + OFF_X)), float(load32_f32(p, o1 + OFF_Y))
+      mut f64 x2, y2 = float(load32_f32(p, o2 + OFF_X)), float(load32_f32(p, o2 + OFF_Y))
+      mut int c0, c1 = load32(p, o0 + OFF_C), load32(p, o1 + OFF_C)
+      mut int c2 = load32(p, o2 + OFF_C)
+      mut f64 area = (x1 - x0) * (y2 - y0) - (x2 - x0) * (y1 - y0)
+      if area < 0.0 {
+         ;; Same triangle, opposite winding: swap two corners.
+         def f64 tx, ty = x1, y1
+         x1, y1 = x2, y2
+         x2, y2 = tx, ty
+         def int tc = c1
+         c1 = c2
+         c2 = tc
+         area = 0.0 - area
+      }
+      if area > 0.000001 {
+         mut f64 fx0, fx1 = x0 < x1 ? x0 : x1, x0 > x1 ? x0 : x1
+         if x2 < fx0 { fx0 = x2 }
+         if x2 > fx1 { fx1 = x2 }
+         mut f64 fy0, fy1 = y0 < y1 ? y0 : y1, y0 > y1 ? y0 : y1
+         if y2 < fy0 { fy0 = y2 }
+         if y2 > fy1 { fy1 = y2 }
+         mut int min_x, max_x = int(fx0), int(fx1) + 1
+         mut int min_y, max_y = int(fy0), int(fy1) + 1
+         if min_x < 0 { min_x = 0 }
+         if min_y < 0 { min_y = 0 }
+         if max_x > _cpu_w { max_x = _cpu_w }
+         if max_y > _cpu_h { max_y = _cpu_h }
+         def bool own0 = _cpu_edge_owns(x2 - x1, y2 - y1)
+         def bool own1 = _cpu_edge_owns(x0 - x2, y0 - y2)
+         def bool own2 = _cpu_edge_owns(x1 - x0, y1 - y0)
+         def f64 inv = 1.0 / area
+         def f64 r0, g0 = float(c0 & 255) / 255.0, float((c0 >> 8) & 255) / 255.0
+         def f64 b0, a0 = float((c0 >> 16) & 255) / 255.0, float((c0 >> 24) & 255) / 255.0
+         def f64 r1, g1 = float(c1 & 255) / 255.0, float((c1 >> 8) & 255) / 255.0
+         def f64 b1, a1 = float((c1 >> 16) & 255) / 255.0, float((c1 >> 24) & 255) / 255.0
+         def f64 r2, g2 = float(c2 & 255) / 255.0, float((c2 >> 8) & 255) / 255.0
+         def f64 b2, a2 = float((c2 >> 16) & 255) / 255.0, float((c2 >> 24) & 255) / 255.0
+         mut int py = min_y
+         while py < max_y {
+            def f64 sy = float(py) + 0.5
+            mut int px = min_x
+            while px < max_x {
+               def f64 sx = float(px) + 0.5
+               def f64 w0 = (x2 - x1) * (sy - y1) - (y2 - y1) * (sx - x1)
+               def f64 w1 = (x0 - x2) * (sy - y2) - (y0 - y2) * (sx - x2)
+               def f64 w2 = (x1 - x0) * (sy - y0) - (y1 - y0) * (sx - x0)
+               if (w0 > 0.0 || (w0 == 0.0 && own0)) && (w1 > 0.0 || (w1 == 0.0 && own1)) && (w2 > 0.0 || (w2 == 0.0 && own2)) {
+                  def f64 k0, k1 = w0 * inv, w1 * inv
+                  def f64 k2 = w2 * inv
+                  _cpu_blend(px, py, r0 * k0 + r1 * k1 + r2 * k2, g0 * k0 + g1 * k1 + g2 * k2, b0 * k0 + b1 * k1 + b2 * k2, a0 * k0 + a1 * k1 + a2 * k2)
+               }
+               px += 1
+            }
+            py += 1
+         }
+      }
+      t += 1
+   }
+   true
+}
+
 fn draw_vertices(ptr p, int count, int tex_id=-1) bool {
    "Fast-path: submits a raw vertex buffer for drawing."
    if _backend == BACKEND_VK { lib_vkr.draw_vertices(p, count, tex_id) return true }
    if _backend == BACKEND_GL { lib_glr.draw_vertices(p, count, tex_id) return true }
+   if _backend == BACKEND_MOCK { return _cpu_draw_vertices(p, count) }
    false
 }
 
@@ -4645,6 +4759,11 @@ fn push_vertex(
 
 fn set_view_proj(any mat) bool {
    "Sets the View-Projection matrix for 3D rendering."
+   ;; The matrix is also kept for the screen-space line helpers (draw_line_px,
+   ;; pixel_world_size); without it they had no camera and fell back to
+   ;; world-width lines. It is kept apart from _mvp_matrix on purpose: that
+   ;; one also switches CPU frustum culling and the mock 3D path on.
+   if _mat4_valid(mat) { _line_view_proj = mat }
    if _backend == BACKEND_VK { lib_vkr.set_mvp(mat) return true }
    if _backend == BACKEND_GL { lib_glr.set_mvp(mat) return true }
    false
@@ -5068,7 +5187,9 @@ fn _draw_line_impl(list start, list finish, any color, f64 thickness) bool {
          thickness, r, g, b, a)
       return true
    } elif _backend == BACKEND_MOCK && _mvp_matrix {
-      _cpu_line_world(_to_v3(start), _to_v3(finish), _cpu_pack_color_from(color), max(thickness * float(min(_cpu_w, _cpu_h)) * 0.5, 1.0))
+      _cpu_line_world_xyz(float(start.get(0, 0.0)), float(start.get(1, 0.0)), float(start.get(2, 0.0)),
+         float(finish.get(0, 0.0)), float(finish.get(1, 0.0)), float(finish.get(2, 0.0)),
+         _cpu_pack_color_from(color), max(thickness * float(min(_cpu_w, _cpu_h)) * 0.5, 1.0))
       return true
    }
    def ax, bx = _to_v3(start), _to_v3(finish)
@@ -5095,6 +5216,146 @@ fn _draw_line_impl(list start, list finish, any color, f64 thickness) bool {
 fn draw_line(list start, list finish, any color, f64 thickness=0.02) bool {
    "Draws a thick line between two 3D positions."
    _draw_line_impl(start, finish, color, thickness)
+}
+
+;; Assigned on first use: a call initialiser on a module global is not a
+;; stable object to write into.
+mut any _px_inv = nil
+mut any _px_mvp = nil
+mut any _line_view_proj = nil
+
+fn _line_camera_into(any out) bool {
+   "Writes view-projection times model for the line helpers: the camera set through set_camera / begin_mode_3d, or the one last given to set_view_proj."
+   mut any vp = _mvp_matrix
+   if !_mat4_valid(vp) { vp = _line_view_proj }
+   if !_mat4_valid(vp) { return false }
+   if !_mat4_valid(_model_matrix) { _model_matrix = mat4_identity() }
+   mat4_mul_into(vp, _model_matrix, out)
+   true
+}
+
+fn line_px_quad(f64 ax, f64 ay, f64 az, f64 bx, f64 by, f64 bz, f64 px) list {
+   "Returns the world-space corners [A+, A-, B-, B+] (twelve floats) of a quad covering the segment A-B with a constant on-screen width of `px` pixels under the active 3D camera. Returns [] when no 3D camera is active or the segment is behind it or has no screen length."
+   if !_mat4_valid(_px_mvp) { _px_mvp = mat4_identity() }
+   if !_line_camera_into(_px_mvp) { return [] }
+   def m = _px_mvp
+   if _mat4_data_off(m) != 2 { return [] }
+   if !_mat4_valid(_px_inv) { _px_inv = mat4_identity() }
+   def f64 m0, m1 = float(m.get(2, 0.0)), float(m.get(3, 0.0))
+   def f64 m2, m3 = float(m.get(4, 0.0)), float(m.get(5, 0.0))
+   def f64 m4, m5 = float(m.get(6, 0.0)), float(m.get(7, 0.0))
+   def f64 m6, m7 = float(m.get(8, 0.0)), float(m.get(9, 0.0))
+   def f64 m8, m9 = float(m.get(10, 0.0)), float(m.get(11, 0.0))
+   def f64 m10, m11 = float(m.get(12, 0.0)), float(m.get(13, 0.0))
+   def f64 m12, m13 = float(m.get(14, 0.0)), float(m.get(15, 0.0))
+   def f64 m14, m15 = float(m.get(16, 0.0)), float(m.get(17, 1.0))
+   mut f64 acx, acy = ax * m0 + ay * m4 + az * m8 + m12, ax * m1 + ay * m5 + az * m9 + m13
+   mut f64 acz, acw = ax * m2 + ay * m6 + az * m10 + m14, ax * m3 + ay * m7 + az * m11 + m15
+   mut f64 bcx, bcy = bx * m0 + by * m4 + bz * m8 + m12, bx * m1 + by * m5 + bz * m9 + m13
+   mut f64 bcz, bcw = bx * m2 + by * m6 + bz * m10 + m14, bx * m3 + by * m7 + bz * m11 + m15
+   ;; Clip the segment to the view volume (with a margin for the line's own
+   ;; width) in clip space, where it is still linear. Without this an end far
+   ;; outside the view, or just in front of the eye, maps back to world
+   ;; positions whose two corners round to the same 32-bit float, and the
+   ;; line thins to nothing along its whole length.
+   mut f64 t0, t1 = 0.0, 1.0
+   mut int plane = 0
+   while plane < 5 {
+      mut f64 fa, fb = 0.0, 0.0
+      if plane == 0 { fa, fb = acw - 0.02, bcw - 0.02 }
+      elif plane == 1 { fa, fb = acw * 1.25 - acx, bcw * 1.25 - bcx }
+      elif plane == 2 { fa, fb = acw * 1.25 + acx, bcw * 1.25 + bcx }
+      elif plane == 3 { fa, fb = acw * 1.25 - acy, bcw * 1.25 - bcy }
+      else { fa, fb = acw * 1.25 + acy, bcw * 1.25 + bcy }
+      if fa < 0.0 && fb < 0.0 { return [] }
+      if fa < 0.0 {
+         def f64 t = fa / (fa - fb)
+         if t > t0 { t0 = t }
+      } elif fb < 0.0 {
+         def f64 t = fa / (fa - fb)
+         if t < t1 { t1 = t }
+      }
+      plane += 1
+   }
+   if t0 >= t1 { return [] }
+   def f64 sx0, sy0 = acx, acy
+   def f64 sz0, sw0 = acz, acw
+   acx, acy = sx0 + (bcx - sx0) * t0, sy0 + (bcy - sy0) * t0
+   acz, acw = sz0 + (bcz - sz0) * t0, sw0 + (bcw - sw0) * t0
+   bcx, bcy = sx0 + (bcx - sx0) * t1, sy0 + (bcy - sy0) * t1
+   bcz, bcw = sz0 + (bcz - sz0) * t1, sw0 + (bcw - sw0) * t1
+   mut f64 vw, vh = float(_cpu_w), float(_cpu_h)
+   if _backend != BACKEND_MOCK {
+      def fb = framebuffer_size_f64(960.0, 540.0)
+      vw, vh = float(fb.get(0, 960.0)), float(fb.get(1, 540.0))
+   }
+   if vw < 1.0 || vh < 1.0 { return [] }
+   def f64 dx = (bcx / bcw - acx / acw) * vw * 0.5
+   def f64 dy = (bcy / bcw - acy / acw) * vh * 0.5
+   def f64 len = float(sqrt(dx * dx + dy * dy))
+   if len <= 0.000001 { return [] }
+   ;; Half-width normal in pixels, then in NDC; scaling by each end's w moves
+   ;; that end by the same number of pixels whatever its depth.
+   def f64 ox = (0.0 - dy) / len * px * 0.5 * 2.0 / vw
+   def f64 oy = dx / len * px * 0.5 * 2.0 / vh
+   _px_inv = mat4_inverse_into(m, _px_inv)
+   def inv = _px_inv
+   def f64 i0, i1 = float(inv.get(2, 0.0)), float(inv.get(3, 0.0))
+   def f64 i2, i3 = float(inv.get(4, 0.0)), float(inv.get(5, 0.0))
+   def f64 i4, i5 = float(inv.get(6, 0.0)), float(inv.get(7, 0.0))
+   def f64 i6, i7 = float(inv.get(8, 0.0)), float(inv.get(9, 0.0))
+   def f64 i8, i9 = float(inv.get(10, 0.0)), float(inv.get(11, 0.0))
+   def f64 i10, i11 = float(inv.get(12, 0.0)), float(inv.get(13, 0.0))
+   def f64 i12, i13 = float(inv.get(14, 0.0)), float(inv.get(15, 0.0))
+   def f64 i14, i15 = float(inv.get(16, 0.0)), float(inv.get(17, 1.0))
+   mut out = []
+   mut k = 0
+   while k < 4 {
+      def f64 sgn = (k == 0 || k == 3) ? 1.0 : -1.0
+      def f64 cw = k < 2 ? acw : bcw
+      def f64 cx = (k < 2 ? acx : bcx) + sgn * ox * cw
+      def f64 cy = (k < 2 ? acy : bcy) + sgn * oy * cw
+      def f64 cz = k < 2 ? acz : bcz
+      def f64 ww = cx * i3 + cy * i7 + cz * i11 + cw * i15
+      if abs(ww) <= 0.000000000001 { return [] }
+      out = out.append((cx * i0 + cy * i4 + cz * i8 + cw * i12) / ww)
+      out = out.append((cx * i1 + cy * i5 + cz * i9 + cw * i13) / ww)
+      out = out.append((cx * i2 + cy * i6 + cz * i10 + cw * i14) / ww)
+      k += 1
+   }
+   out
+}
+
+fn pixel_world_size(f64 x, f64 y, f64 z) f64 {
+   "Returns the world-space length that spans one pixel at a world position under the active 3D camera, or 0 when the point cannot be projected."
+   ;; A two-pixel-wide quad around a tiny segment through the point: half the
+   ;; distance between its two near corners is one pixel.
+   def q = line_px_quad(x, y, z, x + 0.001, y + 0.0007, z + 0.0003, 2.0)
+   if q.len < 12 { return 0.0 }
+   def f64 ex, ey = float(q.get(0, 0.0)) - float(q.get(3, 0.0)), float(q.get(1, 0.0)) - float(q.get(4, 0.0))
+   def f64 ez = float(q.get(2, 0.0)) - float(q.get(5, 0.0))
+   float(sqrt(ex * ex + ey * ey + ez * ez)) * 0.5
+}
+
+fn draw_line_px(list start, list finish, any color, f64 px=1.5) bool {
+   "Draws a 3D segment whose on-screen width stays `px` pixels at every distance from the camera (gizmos, axes, selection outlines). Without an active 3D camera it falls back to draw_line."
+   if !_mat4_valid(_mvp_matrix) && !_mat4_valid(_line_view_proj) { return _draw_line_impl(start, finish, color, 0.02) }
+   def f64 ax, ay = float(start.get(0, 0.0)), float(start.get(1, 0.0))
+   def f64 az = float(start.get(2, 0.0))
+   def f64 bx, by = float(finish.get(0, 0.0)), float(finish.get(1, 0.0))
+   def f64 bz = float(finish.get(2, 0.0))
+   def f64 width = px < 1.0 ? 1.0 : px
+   def q = line_px_quad(ax, ay, az, bx, by, bz, width)
+   if q.len < 12 { return false }
+   def c0 = [float(q.get(0, 0.0)), float(q.get(1, 0.0)), float(q.get(2, 0.0))]
+   def c1 = [float(q.get(3, 0.0)), float(q.get(4, 0.0)), float(q.get(5, 0.0))]
+   def c2 = [float(q.get(6, 0.0)), float(q.get(7, 0.0)), float(q.get(8, 0.0))]
+   def c3 = [float(q.get(9, 0.0)), float(q.get(10, 0.0)), float(q.get(11, 0.0))]
+   ;; Both windings: the quad faces the camera, but which way it winds depends
+   ;; on the segment's screen direction, and a culling pipeline dropped half
+   ;; of them (the engine's vertical axis vanished).
+   draw_quad(c0, c1, c2, c3, color)
+   draw_quad(c3, c2, c1, c0, color)
 }
 
 fn draw_line_fast(f64 x1, f64 y1, f64 x2, f64 y2, f64 thickness, int c_u32) bool {
@@ -5932,6 +6193,22 @@ fn _destroy_static_buffer_backend(any sbuf) bool {
 
 fn _draw_grid_lines(int slices, f64 spacing, any minor_col, any major_col, f64 thickness, f64 dx=0.0, f64 dz=0.0) bool {
    def extent = float(slices) * spacing
+   if _backend == BACKEND_MOCK && _mvp_matrix {
+      ;; Software path: pack colours once and draw from scalars, so a grid of
+      ;; hundreds of lines allocates no endpoint lists per frame.
+      def int minor = _cpu_pack_color_from(minor_col)
+      def int major = _cpu_pack_color_from(major_col)
+      def f64 px = max(thickness * float(min(_cpu_w, _cpu_h)) * 0.5, 1.0)
+      mut j = 0 - slices
+      while j <= slices {
+         def f64 d = float(j) * spacing
+         def int c = (j == 0) ? major : minor
+         _cpu_line_world_xyz(dx - extent, 0.0, dz + d, dx + extent, 0.0, dz + d, c, px)
+         _cpu_line_world_xyz(dx + d, 0.0, dz - extent, dx + d, 0.0, dz + extent, c, px)
+         j += 1
+      }
+      return true
+   }
    mut i = 0 - slices
    while i <= slices {
       def d = float(i) * spacing
@@ -5941,6 +6218,107 @@ fn _draw_grid_lines(int slices, f64 spacing, any minor_col, any major_col, f64 t
       i += 1
    }
    true
+}
+
+fn _grid_scale_alpha(int color_u32, f64 k) int {
+   "Returns a packed colour with its alpha byte multiplied by `k`."
+   def a = int(float((color_u32 >> 24) & 255) * clamp(k, 0.0, 1.0) + 0.5)
+   ((a & 255) << 24) | (color_u32 & 0x00FFFFFF)
+}
+
+fn _grid_write_fading_segment(
+   ptr p, int idx,
+   f64 x1, f64 z1, f64 x2, f64 z2, f64 y,
+   f64 thickness, int color_near, int color_far
+) int {
+   "Internal: writes one ground-plane line quad whose colour runs from `color_near` at(x1,z1) to `color_far` at(x2,z2)."
+   def dx, dz = x2 - x1, z2 - z1
+   def l = sqrt(dx * dx + dz * dz)
+   if l == 0.0 { return idx }
+   def nx, nz = -dz / l * (thickness * 0.5), dx / l * (thickness * 0.5)
+   render_shared.push_vertex64(p + (idx + 0) * VERTEX_STRIDE, x1 + nx, y, z1 + nz, 0.0, 0.0, color_near, 0)
+   render_shared.push_vertex64(p + (idx + 1) * VERTEX_STRIDE, x1 - nx, y, z1 - nz, 0.0, 0.0, color_near, 0)
+   render_shared.push_vertex64(p + (idx + 2) * VERTEX_STRIDE, x2 - nx, y, z2 - nz, 0.0, 0.0, color_far, 0)
+   render_shared.push_vertex64(p + (idx + 3) * VERTEX_STRIDE, x1 + nx, y, z1 + nz, 0.0, 0.0, color_near, 0)
+   render_shared.push_vertex64(p + (idx + 4) * VERTEX_STRIDE, x2 - nx, y, z2 - nz, 0.0, 0.0, color_far, 0)
+   render_shared.push_vertex64(p + (idx + 5) * VERTEX_STRIDE, x2 + nx, y, z2 + nz, 0.0, 0.0, color_far, 0)
+   idx + 6
+}
+
+fn _grid_write_xz_fading_line_list(
+   ptr buf, int idx, int slices, f64 spacing, f64 extent,
+   f64 dx, f64 dz, int minor_col, int major_col, f64 y=0.0
+) int {
+   "Internal: writes the fading XZ grid as a line list(2 vertices per segment)."
+   ;; Same fade as the quad grid, but rasterized as 1-pixel lines: the width is
+   ;; constant on screen at every distance and resolution, so near lines no
+   ;; longer fatten and far lines no longer break into dots.
+   mut i = 0 - slices
+   while i <= slices {
+      def d = float(i) * spacing
+      def t = float(i) / float(slices)
+      def base = (i == 0) ? major_col : minor_col
+      def mid = _grid_scale_alpha(base, 1.0 - t * t)
+      def edge = _grid_scale_alpha(base, 0.0)
+      render_shared.push_vertex64(buf + (idx + 0) * VERTEX_STRIDE, dx, y, dz + d, 0.0, 0.0, mid, 0)
+      render_shared.push_vertex64(buf + (idx + 1) * VERTEX_STRIDE, dx - extent, y, dz + d, 0.0, 0.0, edge, 0)
+      render_shared.push_vertex64(buf + (idx + 2) * VERTEX_STRIDE, dx, y, dz + d, 0.0, 0.0, mid, 0)
+      render_shared.push_vertex64(buf + (idx + 3) * VERTEX_STRIDE, dx + extent, y, dz + d, 0.0, 0.0, edge, 0)
+      render_shared.push_vertex64(buf + (idx + 4) * VERTEX_STRIDE, dx + d, y, dz, 0.0, 0.0, mid, 0)
+      render_shared.push_vertex64(buf + (idx + 5) * VERTEX_STRIDE, dx + d, y, dz - extent, 0.0, 0.0, edge, 0)
+      render_shared.push_vertex64(buf + (idx + 6) * VERTEX_STRIDE, dx + d, y, dz, 0.0, 0.0, mid, 0)
+      render_shared.push_vertex64(buf + (idx + 7) * VERTEX_STRIDE, dx + d, y, dz + extent, 0.0, 0.0, edge, 0)
+      idx += 8
+      i += 1
+   }
+   idx
+}
+
+fn _draw_grid_static_lines(any cached) bool {
+   if !cached { return false }
+   def owner = _static_buffer_backend(cached)
+   if owner == "gl" || _backend == BACKEND_GL {
+      lib_glr.bind_default_texture()
+      lib_glr.set_vertex_color_mode(1)
+      lib_glr.draw_static_buffer(cached, true, 1.0)
+      lib_glr.set_vertex_color_mode(0)
+      return true
+   }
+   lib_vkr.bind_default_texture()
+   lib_vkr.set_vertex_color_mode(1)
+   lib_vkr.draw_static_buffer(cached, true, 1.0)
+   lib_vkr.set_vertex_color_mode(0)
+   true
+}
+
+fn _grid_screen_lines_enabled() bool {
+   "Screen-space(1 px) grid lines; NY_UI_GRID_QUADS=1 restores world-width quads."
+   !ui_profile.env_truthy_cached("NY_UI_GRID_QUADS")
+}
+
+fn _grid_write_xz_fading_lines(
+   ptr buf, int idx, int slices, f64 spacing, f64 extent,
+   f64 dx, f64 dz, f64 thickness, int minor_col, int major_col, f64 y=0.0
+) int {
+   "Internal: writes an XZ grid that fades to transparent toward its edge."
+   ;; Each line is two quads meeting at its midpoint. The midpoint alpha falls
+   ;; off with the line's distance from the grid centre and both ends are
+   ;; transparent, so the far field dissolves instead of aliasing into dots
+   ;; and the grid has no visible outer boundary.
+   mut i = 0 - slices
+   while i <= slices {
+      def d = float(i) * spacing
+      def t = float(i) / float(slices)
+      def base = (i == 0) ? major_col : minor_col
+      def mid = _grid_scale_alpha(base, 1.0 - t * t)
+      def edge = _grid_scale_alpha(base, 0.0)
+      idx = _grid_write_fading_segment(buf, idx, dx, dz + d, dx - extent, dz + d, y, thickness, mid, edge)
+      idx = _grid_write_fading_segment(buf, idx, dx, dz + d, dx + extent, dz + d, y, thickness, mid, edge)
+      idx = _grid_write_fading_segment(buf, idx, dx + d, dz, dx + d, dz - extent, y, thickness, mid, edge)
+      idx = _grid_write_fading_segment(buf, idx, dx + d, dz, dx + d, dz + extent, y, thickness, mid, edge)
+      i += 1
+   }
+   idx
 }
 
 fn _grid_write_xz_static_lines(
@@ -6001,9 +6379,9 @@ fn draw_grid(
 fn draw_grid_pair(
    int fine_slices, f64 fine_spacing, any fine_minor_col, any fine_major_col, f64 fine_thickness,
    int coarse_slices, f64 coarse_spacing, any coarse_minor_col, any coarse_major_col, f64 coarse_thickness,
-   f64 coarse_dx=0.0, f64 coarse_dz=0.0
+   f64 coarse_dx=0.0, f64 coarse_dz=0.0, bool fade=false
 ) bool {
-   "Draws fine+coarse XZ grids as one cached static buffer."
+   "Draws fine+coarse XZ grids as one cached static buffer. With `fade`, lines dissolve toward the grid edge on GPU backends."
    fine_slices = int(max(1, int(fine_slices)))
    coarse_slices = int(max(1, int(coarse_slices)))
    if _backend == BACKEND_VK || (_backend == BACKEND_GL && !lib_glr.capabilities().get("software_upload", false)) {
@@ -6025,6 +6403,8 @@ fn draw_grid_pair(
       + ":" + to_str(coarse_major)
       + ":" + to_str(rdx)
       + ":" + to_str(rdz)
+      + (fade ? ":fade" : "")
+      + ((fade && _grid_screen_lines_enabled()) ? ":px" : "")
       key = _static_cache_prefix() + key
       mut any cached = _grid_cache.get(key, 0)
       if !cached {
@@ -6032,16 +6412,25 @@ fn draw_grid_pair(
          def f64 coarse_extent = float(coarse_slices) * float(coarse_spacing)
          def int fine_lines = (fine_slices * 2 + 1) * 2
          def int coarse_lines = (coarse_slices * 2 + 1) * 2
-         def int vert_count = (fine_lines + coarse_lines) * 6
+         def int vert_count = (fine_lines + coarse_lines) * (fade ? 12 : 6)
          def buf = malloc(vert_count * VERTEX_STRIDE)
          if !buf { return false }
-         mut int idx = _grid_write_xz_static_lines(buf, 0, fine_slices, fine_spacing, fine_extent, 0.0, 0.0, fine_thickness, fine_minor, fine_major, 0.0)
-         idx = _grid_write_xz_static_lines(buf, idx, coarse_slices, coarse_spacing, coarse_extent, rdx, rdz, coarse_thickness, coarse_minor, coarse_major, 0.001)
+         mut int idx = 0
+         if fade && _grid_screen_lines_enabled() {
+            idx = _grid_write_xz_fading_line_list(buf, 0, fine_slices, fine_spacing, fine_extent, 0.0, 0.0, fine_minor, fine_major, 0.0)
+            idx = _grid_write_xz_fading_line_list(buf, idx, coarse_slices, coarse_spacing, coarse_extent, rdx, rdz, coarse_minor, coarse_major, 0.001)
+         } elif fade {
+            idx = _grid_write_xz_fading_lines(buf, 0, fine_slices, fine_spacing, fine_extent, 0.0, 0.0, fine_thickness, fine_minor, fine_major, 0.0)
+            idx = _grid_write_xz_fading_lines(buf, idx, coarse_slices, coarse_spacing, coarse_extent, rdx, rdz, coarse_thickness, coarse_minor, coarse_major, 0.001)
+         } else {
+            idx = _grid_write_xz_static_lines(buf, 0, fine_slices, fine_spacing, fine_extent, 0.0, 0.0, fine_thickness, fine_minor, fine_major, 0.0)
+            idx = _grid_write_xz_static_lines(buf, idx, coarse_slices, coarse_spacing, coarse_extent, rdx, rdz, coarse_thickness, coarse_minor, coarse_major, 0.001)
+         }
          cached = _create_static_buffer_backend(buf, idx)
          free(buf)
          _grid_cache[key] = cached
       }
-      _draw_grid_static_buffer(cached)
+      if fade && _grid_screen_lines_enabled() { _draw_grid_static_lines(cached) } else { _draw_grid_static_buffer(cached) }
       return true
    }
    _draw_grid_lines(fine_slices, fine_spacing, fine_minor_col, fine_major_col, fine_thickness)
@@ -6269,15 +6658,25 @@ fn camera_set_look_at(any camera, list target) any {
    camera
 }
 
+fn _mat4_copy_into(any src, int off, list dst) list {
+   ;; Writes through a parameter: indexed stores on an aliased module global
+   ;; clone the whole buffer on every element (16 clones per draw).
+   mut i = 0
+   while i < 16 { dst[2 + i] = float(src.get(off + i, 0.0)) i += 1 }
+   dst
+}
+
 fn set_model_matrix(any mat) bool {
    "Sets the transformation matrix for subsequent 3D draw calls."
    if !_mat4_valid(_scratch_model_set) {
       _scratch_model_set = mat4_identity()
    }
    def off = _mat4_data_off(mat)
+   ;; Drop the alias first: while _model_matrix shares the scratch buffer,
+   ;; every element write below cloned it (one matrix allocation per draw).
+   _model_matrix = 0
    if off >= 0 {
-      mut i = 0
-      while i < 16 { _scratch_model_set[2 + i] = mat.get(off + i, 0.0) i += 1 }
+      _mat4_copy_into(mat, off, _scratch_model_set)
    } elif !_mat4_valid(_scratch_ident) {
       mat4_identity_into(_scratch_model_set)
    }
@@ -7640,8 +8039,11 @@ fn texture_destroy(int tex) bool {
 fn texture_create_rgba(int w, int h, any pixels, int format=37, int filter=1, int wrap_s=10497, int wrap_t=10497, bool use_mipmaps=false) int {
    "Creates a backend texture from raw RGBA-like pixel memory."
    if w <= 0 || h <= 0 || !pixels { return -1 }
-   if _backend == BACKEND_GL { return lib_glr.create_texture_ex(w, h, pixels, format, filter, wrap_s, wrap_t, use_mipmaps, 0) }
-   if _backend == BACKEND_VK { return lib_vkr.create_texture_ex(w, h, pixels, format, filter, wrap_s, wrap_t, use_mipmaps, 0) }
+   ;; The id a backend returns from create_texture_ex is not dependable across
+   ;; routes (callers saw another texture's slot), so it is resolved the same
+   ;; way the file loaders do: against the slot the backend created last.
+   if _backend == BACKEND_GL { return _texture_recover_upload_id(lib_glr.create_texture_ex(w, h, pixels, format, filter, wrap_s, wrap_t, use_mipmaps, 0), w, h) }
+   if _backend == BACKEND_VK { return _texture_recover_upload_id(lib_vkr.create_texture_ex(w, h, pixels, format, filter, wrap_s, wrap_t, use_mipmaps, 0), w, h) }
    -1
 }
 
@@ -10945,7 +11347,7 @@ fn set_wireframe(bool enabled) bool {
    assert(color_pack(1.0, 0.0, 0.0, 1.0) != color_pack(0.0, 1.0, 0.0, 1.0), "render color pack")
    assert(BACKEND_NONE == 0 && BACKEND_MOCK == 3, "render backend constants")
    def glyph_off = malloc(render_shared.GLYPH_STRIDE)
-   assert(!!glyph_off, "fast glyph test allocation")
+   if !glyph_off { panic("fast glyph test allocation") }
    store32(glyph_off, 0xffffffff, render_shared.GLYPH_TEX)
    assert(_fast_glyph_texture_id(glyph_off) == -1, "fast glyph unavailable texture sentinel")
    store32(glyph_off, 17, render_shared.GLYPH_TEX)

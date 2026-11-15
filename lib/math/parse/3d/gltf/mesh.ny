@@ -4,6 +4,7 @@ module core.math.parse.3d.gltf.mesh(_gltf_make_indexed_part_from_state, gltf_mes
 use core
 use core.math.bin
 use core.math
+use core.math.checked (checked_mul)
 use core.math.float (is_nan, is_inf)
 use core.str as str
 use core.common as common
@@ -403,11 +404,20 @@ fn _gltf_pack_unique_vertices(dict g, any data, dict meta, int packed_color, int
       _gltf_release_vertex_pack_accessors(pos_res, uv0_res, uv1_res, c_res, n_res, t_res)
       return 0
    }
-   def buf = malloc(count * shr._GLTF_VTX_STRIDE)
+   def buf_size_result = checked_mul(count, shr._GLTF_VTX_STRIDE)
+   if !is_ok(buf_size_result) {
+      _gltf_release_vertex_pack_accessors(pos_res, uv0_res, uv1_res, c_res, n_res, t_res)
+      return 0
+   }
+   def buf_size = int(unwrap(buf_size_result))
+   mut buf_cleanup = 0
+   defer { if buf_cleanup { free(buf_cleanup) } }
+   mut buf = malloc(buf_size)
    if !buf {
       _gltf_release_vertex_pack_accessors(pos_res, uv0_res, uv1_res, c_res, n_res, t_res)
       return 0
    }
+   buf_cleanup = buf
    def pos_ptr = pos_res.get("ptr", 0)
    def pos_comp = pos_res.get("comp", 0)
    def pos_norm = pos_res.get("normalized", false)
@@ -438,6 +448,7 @@ fn _gltf_pack_unique_vertices(dict g, any data, dict meta, int packed_color, int
       t_stride = t_res.get("stride", 0)
    }
    if !pos_ptr {
+      buf_cleanup = 0
       free(buf)
       _gltf_release_vertex_pack_accessors(pos_res, uv0_res, uv1_res, c_res, n_res, t_res)
       return 0
@@ -648,6 +659,7 @@ fn _gltf_pack_unique_vertices(dict g, any data, dict meta, int packed_color, int
    mut out = dict(4)
    out["ptr"] = buf
    out["count"] = count
+   buf_cleanup = 0
    out
 }
 
@@ -759,13 +771,26 @@ fn _gltf_pack_indices(any g, any data, any meta) any {
    }
    def src_count = has_idx ? i_cnt : pos_cnt
    def use_u32 = pos_cnt > 65535
-   def max_out = src_count * 3
+   def max_out_result = checked_mul(src_count, 3)
    def esize = use_u32 ? 4 : 2
-   def out = malloc(max_out * esize)
+   if !is_ok(max_out_result) {
+      if has_idx { ld._gltf_release_accessor_data(idx_res) }
+      return 0
+   }
+   def max_out = int(unwrap(max_out_result))
+   def out_size_result = checked_mul(max_out, esize)
+   if !is_ok(out_size_result) {
+      if has_idx { ld._gltf_release_accessor_data(idx_res) }
+      return 0
+   }
+   mut out_cleanup = 0
+   defer { if out_cleanup { free(out_cleanup) } }
+   mut out = malloc(int(unwrap(out_size_result)))
    if !out {
       if has_idx { ld._gltf_release_accessor_data(idx_res) }
       return 0
    }
+   out_cleanup = out
    mut int out_cnt = 0
    case prim_mode {
       0 -> { out_cnt = _gltf_pack_point_indices(out, use_u32, has_idx, idx_ptr, idx_stride, i_comp, src_count) }
@@ -777,26 +802,35 @@ fn _gltf_pack_indices(any g, any data, any meta) any {
       _ -> { out_cnt = _gltf_pack_triangle_indices(out, use_u32, has_idx, idx_ptr, idx_stride, i_comp, src_count) }
    }
    if has_idx { ld._gltf_release_accessor_data(idx_res) }
-   return {"ptr": out, "count": out_cnt, "u32": use_u32, "mode": prim_mode}
+   def result = {"ptr": out, "count": out_cnt, "u32": use_u32, "mode": prim_mode}
+   out_cleanup = 0
+   return result
 }
 
 fn _gltf_index_value(any iptr, bool idx_u32, int idx) int { idx_u32 ? load32(iptr, idx * 4) : load16(iptr, idx * 2) }
 
 fn _gltf_expand_primitive_vertices(?ptr vptr, int vcnt, ?ptr iptr, int icnt, bool idx_u32=false) any {
    if !vptr || vcnt <= 0 || !iptr || icnt <= 0 { return 0 }
-   def out = malloc(icnt * shr._GLTF_VTX_STRIDE)
+   def input_size_result = checked_mul(vcnt, shr._GLTF_VTX_STRIDE)
+   def output_size_result = checked_mul(icnt, shr._GLTF_VTX_STRIDE)
+   if !is_ok(input_size_result) || !is_ok(output_size_result) { return 0 }
+   mut out_cleanup = 0
+   defer { if out_cleanup { free(out_cleanup) } }
+   mut out = malloc(int(unwrap(output_size_result)))
    if !out { return 0 }
+   out_cleanup = out
    mut i = 0
    while i < icnt {
       def vi = _gltf_index_value(iptr, idx_u32, i)
       if vi < 0 || vi >= vcnt {
-         free(out)
          return 0
       }
       memcpy(ptr_add(out, i * shr._GLTF_VTX_STRIDE), ptr_add(vptr, vi * shr._GLTF_VTX_STRIDE), shr._GLTF_VTX_STRIDE)
       i += 1
    }
-   {"ptr": out, "count": icnt}
+   def result = {"ptr": out, "count": icnt}
+   out_cleanup = 0
+   result
 }
 
 fn _gltf_copy_part_opts(any opts) dict {

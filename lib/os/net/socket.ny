@@ -70,10 +70,12 @@ fn _cptr(any s) any { to_int(mem.cstr(s)) }
 fn _net_ready() bool {
    #windows {
       if _net_ready_done { return true }
+      mut cleanup = [0]
+      defer { if cleanup[0] { free(cleanup[0]) } }
       def data = malloc(512)
       if !data { return false }
+      cleanup[0] = data
       def ok = _c_wsa_startup(0x0202, data) == 0
-      free(data)
       _net_ready_done = ok
       return ok
    } #else {
@@ -222,8 +224,11 @@ fn _make_sockaddr(int ip, int port) any {
    ;; conditional resolve ambiguously and the macOS layout won on Linux
    ;; (sa_family arrived as 0x210 and every bind failed with
    ;; EAFNOSUPPORT).
+   mut cleanup = [0]
+   defer { if cleanup[0] { free(cleanup[0]) } }
    def sa = malloc(16)
    if sa == 0 { return 0 }
+   cleanup[0] = sa
    #if macos {
       store8(sa, 16, 0)
       store8(sa, AF_INET, 1)
@@ -233,6 +238,7 @@ fn _make_sockaddr(int ip, int port) any {
    store16(sa, htons(port), 2)
    store32(sa, ip, 4)
    store64(sa, 0, 8)
+   cleanup[0] = 0
    return sa
 }
 
@@ -240,19 +246,23 @@ fn socket_connect(str host, int port) int {
    "Connect to host:port(TCP). Returns fd or -1."
    def ip = _resolve_host(host)
    if ip == 0 { return -1 }
+   mut fd_cleanup = [-1]
+   defer { if fd_cleanup[0] >= 0 { _net_close(fd_cleanup[0]) } }
    def fd = _net_socket(AF_INET, SOCK_STREAM, 0)
    if fd < 0 { return -1 }
+   fd_cleanup[0] = fd
+   mut sa_cleanup = [0]
+   defer { if sa_cleanup[0] { free(sa_cleanup[0]) } }
    def sa = _make_sockaddr(ip, port)
    if sa == 0 {
-      _net_close(fd)
       return -1
    }
+   sa_cleanup[0] = sa
    def rc = _c_connect(fd, sa, 16)
-   free(sa)
    if rc < 0 {
-      _net_close(fd)
       return -1
    }
+   fd_cleanup[0] = -1
    return fd
 }
 
@@ -260,15 +270,21 @@ fn socket_connect_async(str host, int port) any {
    "Starts a non-blocking TCP connect task. Await it for fd or -1."
    def ip = _resolve_host(host)
    if ip == 0 { return __async_value(-1) }
+   mut fd_cleanup = [-1]
+   defer { if fd_cleanup[0] >= 0 { _net_close(fd_cleanup[0]) } }
    def fd = _net_socket(AF_INET, SOCK_STREAM, 0)
    if fd < 0 { return __async_value(-1) }
+   fd_cleanup[0] = fd
+   mut sa_cleanup = [0]
+   defer { if sa_cleanup[0] { free(sa_cleanup[0]) } }
    def sa = _make_sockaddr(ip, port)
    if sa == 0 {
-      _net_close(fd)
       return __async_value(-1)
    }
+   sa_cleanup[0] = sa
    def h = __async_connect(fd, sa, 16)
-   free(sa)
+   if !h { return __async_value(-1) }
+   fd_cleanup[0] = -1
    h
 }
 
@@ -276,53 +292,60 @@ fn socket_bind(str host, int port) int {
    "Create a TCP socket, binds it to the specified host and port, and starts listening. Returns the file descriptor or -1 on error."
    def ip = _resolve_bind_host(host)
    if ip == 0 && !(host.len == 0 || host == "*" || host == "0.0.0.0") { return -1 }
+   mut fd_cleanup = [-1]
+   defer { if fd_cleanup[0] >= 0 { _net_close(fd_cleanup[0]) } }
    def fd = _net_socket(AF_INET, SOCK_STREAM, 0)
    if fd < 0 {
       print("Socket create failed, errno:", __errno())
       return -1
    }
+   fd_cleanup[0] = fd
+   mut opt_cleanup = [0]
+   defer { if opt_cleanup[0] { free(opt_cleanup[0]) } }
    def opt = malloc(4)
    if opt == 0 {
       print("Socket bind setup failed, errno:", __errno())
-      _net_close(fd)
       return -1
    }
+   opt_cleanup[0] = opt
    store32(opt, 1)
    _c_setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, opt, 4)
-   free(opt)
+   mut sa_cleanup = [0]
+   defer { if sa_cleanup[0] { free(sa_cleanup[0]) } }
    def sa = _make_sockaddr(ip, port)
    if sa == 0 {
-      _net_close(fd)
       return -1
    }
+   sa_cleanup[0] = sa
    def br = _c_bind(fd, sa, 16)
-   free(sa)
    if br < 0 {
       print("Socket bind failed, errno:", __errno())
-      _net_close(fd)
       return -1
    }
    def lr = _c_listen(fd, 128)
    if lr < 0 {
       print("Socket listen failed, errno:", __errno())
-      _net_close(fd)
       return -1
    }
+   fd_cleanup[0] = -1
    return fd
 }
 
 fn socket_bound_port(int fd) int {
    "Return the local TCP port chosen for a bound socket, or -1 on failure."
    if fd < 0 { return -1 }
+   mut cleanup = [0, 0]
+   defer {
+      if cleanup[0] { free(cleanup[0]) }
+      if cleanup[1] { free(cleanup[1]) }
+   }
    def addr = malloc(16)
+   cleanup[0] = addr
    def len = malloc(4)
+   cleanup[1] = len
    if addr == 0 || len == 0 {
-      if addr != 0 { free(addr) }
-      if len != 0 { free(len) }
       return -1
    }
-   defer { free(addr) }
-   defer { free(len) }
    store32(len, 16)
    if _c_getsockname(fd, addr, len) < 0 { return -1 }
    ;; `load16` returns a tagged dynamic integer on the native path.  Decode
@@ -334,38 +357,49 @@ fn socket_bound_port(int fd) int {
 fn socket_accept(int server_fd) int {
    "Accepts an incoming connection on a listening socket. Returns the client file descriptor."
    if server_fd < 0 { return -1 }
+   mut cleanup = [0, 0]
+   defer {
+      if cleanup[0] { free(cleanup[0]) }
+      if cleanup[1] { free(cleanup[1]) }
+   }
    def addr = malloc(16)
+   cleanup[0] = addr
    def len = malloc(4)
+   cleanup[1] = len
    if addr == 0 || len == 0 {
-      if addr != 0 { free(addr) }
-      if len != 0 { free(len) }
       return -1
    }
    store32(len, 16)
    def int res = _c_accept(server_fd, addr, len)
-   free(addr)
-   free(len)
    res
 }
 
 fn socket_accept_info(int server_fd) dict {
    "Accepts an incoming connection and returns fd plus peer IPv4 metadata."
+   mut cleanup = [0, 0]
+   defer {
+      if cleanup[0] { free(cleanup[0]) }
+      if cleanup[1] { free(cleanup[1]) }
+   }
    def addr = malloc(16)
+   cleanup[0] = addr
    def len = malloc(4)
+   cleanup[1] = len
    if addr == 0 || len == 0 {
-      if addr != 0 { free(addr) }
-      if len != 0 { free(len) }
       return {"ok": false, "fd": -1, "host": "", "ip": 0, "port": 0, "addr": ""}
    }
-   defer { free(addr) }
-   defer { free(len) }
    store32(len, 16)
+   mut fd_cleanup = [-1]
+   defer { if fd_cleanup[0] >= 0 { _net_close(fd_cleanup[0]) } }
    def res = _c_accept(server_fd, addr, len)
    if res < 0 { return {"ok": false, "fd": -1, "host": "", "ip": 0, "port": 0, "addr": ""} }
+   fd_cleanup[0] = res
    def ip = load32(addr, 4)
    def port = load8(addr, 2) * 256 + load8(addr, 3)
    def host = ipv4_format(ip)
-   return {"ok": true, "fd": res, "host": host, "ip": ip, "port": port, "addr": host + ":" + to_str(port)}
+   def out = {"ok": true, "fd": res, "host": host, "ip": ip, "port": port, "addr": host + ":" + to_str(port)}
+   fd_cleanup[0] = -1
+   return out
 }
 
 fn socket_accept_async(int server_fd) any {
@@ -377,19 +411,23 @@ fn _socket_set_timeval_opt(int fd, int optname, int timeout_ms) int {
    if fd < 0 { return -1 }
    if timeout_ms < 0 { timeout_ms = 0 }
    #windows {
+      mut cleanup = [0]
+      defer { if cleanup[0] { free(cleanup[0]) } }
       def opt = malloc(4)
       if opt == 0 { return -1 }
+      cleanup[0] = opt
       store32(opt, timeout_ms)
       def rc = _c_setsockopt(fd, SOL_SOCKET, optname, opt, 4)
-      free(opt)
       return rc
    } #else {
+      mut cleanup = [0]
+      defer { if cleanup[0] { free(cleanup[0]) } }
       def tv = malloc(16)
       if tv == 0 { return -1 }
+      cleanup[0] = tv
       store64(tv, timeout_ms / 1000, 0)
       store64(tv, (timeout_ms % 1000) * 1000, 8)
       def rc = _c_setsockopt(fd, SOL_SOCKET, optname, tv, 16)
-      free(tv)
       return rc
    } #endif
 }
@@ -415,16 +453,20 @@ fn read_socket(int fd, int max_len) str {
    mut int len = max_len
    if len <= 0 { return "" }
    if len > 1048576 { len = 1048576 }
+   mut cleanup = [0]
+   defer { if cleanup[0] { free(cleanup[0]) } }
    def ptr buf = malloc(len + 1)
    if buf == 0 { return "" }
+   cleanup[0] = buf
    def n = _c_recv(fd, buf, len, 0)
    if n <= 0 {
-      free(buf)
       return ""
    }
    ;; store8(p, v, i): write the NUL terminator one past the payload.
    store8(buf, 0, n)
-   return init_str(buf, n)
+   def out = init_str(buf, n)
+   cleanup[0] = 0
+   return out
 }
 
 fn read_socket_async(int fd, any max_len) any {
@@ -444,6 +486,7 @@ fn read_socket_exact(int fd, any want_len) str {
    if !is_int(want_len) || want_len <= 0 { return "" }
    if want_len > 1048576 { want_len = 1048576 }
    mut b = Builder(want_len + 1)
+   defer { builder_free(b) }
    mut total = 0
    while total < want_len {
       def chunk = read_socket(fd, want_len - total)
@@ -452,7 +495,6 @@ fn read_socket_exact(int fd, any want_len) str {
       total += chunk.len
    }
    def out = builder_to_str(b)
-   builder_free(b)
    return out
 }
 

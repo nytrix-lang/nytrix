@@ -201,7 +201,9 @@ def modeline_advance = _measure_ui(int(_editor_get("font_modeline")), "0", 0.0)
 _editor_values["FONT_BODY_ADV"] = body_advance >= 2.0 && body_advance <= float(int(_editor_get("font_body_size"))) * 2.0 ? body_advance : float(int(_editor_get("font_body_size"))) * 0.6
 _editor_values["FONT_SMALL_ADV"] = small_advance >= 2.0 && small_advance <= float(int(_editor_get("font_small_size"))) * 2.0 ? small_advance : float(int(_editor_get("font_small_size"))) * 0.6
 _editor_values["FONT_MODELINE_ADV"] = modeline_advance >= 2.0 && modeline_advance <= float(int(_editor_get("font_modeline_size"))) * 2.0 ? modeline_advance : float(int(_editor_get("font_modeline_size"))) * 0.6
-_editor_values["FONT_MODELINE_CLIP_ADV"] = max(9.6, float(_editor_get("FONT_MODELINE_ADV")) * 1.35)
+;; The modeline font is monospace and its advance is measured, so clipping
+;; needs only a small margin. A 35% margin cut text a third too early.
+_editor_values["FONT_MODELINE_CLIP_ADV"] = max(4.0, float(_editor_get("FONT_MODELINE_ADV")) * 1.06)
 def SECTION_H = project.TREE_HEADER_H
 def EDITOR_TEXT_TOP = 6.0
 def INPUT_TRACE = common.env_truthy("NY_EDITOR_INPUT_TRACE")
@@ -220,8 +222,8 @@ def f64 PALETTE_DETAIL_H = 20.0
 def int PALETTE_MAX_ROWS = 12
 def f64 WHICH_KEY_ROW_H = 22.0
 def int WHICH_KEY_MAX_ROWS = 14
-def TOP_TAB_MIN_W = 64.0
-def TOP_TAB_MAX_W = 144.0
+def TOP_TAB_MIN_W = 96.0
+def TOP_TAB_MAX_W = 208.0
 def MOUSE_BACK = 3
 def MOUSE_FORWARD = 4
 def NAV_LIMIT = 96
@@ -639,6 +641,9 @@ fn _editor_omni_dump(dict lay, f64 sw, f64 sh) int {
       " buffers=" + to_str(_editor_get("st").get("buffers", []).len) +
       " cursor=" + to_str(int(_editor_get("st").get("cursor_line", 0))) + ":" + to_str(int(_editor_get("st").get("cursor_col", 0))) +
       " scroll=" + to_str(int(_editor_get("st").get("scroll", 0))) +
+      " mark=" + common.yn(bool(_editor_get("st").get("mark_active", false))) +
+      " sel=" + (bool(_editor_get("st").get("sel_active", false)) ? to_str(int(_editor_get("st").get("sel_a_line", 0))) + ":" + to_str(int(_editor_get("st").get("sel_a_col", 0))) + "-" + to_str(int(_editor_get("st").get("sel_b_line", 0))) + ":" + to_str(int(_editor_get("st").get("sel_b_col", 0))) : "none") +
+      " palette=" + (pal.is_open(_editor_get("palette_state")) ? "open:" + pal.items_mode(_editor_get("palette_state")) : "closed") +
       " file=" + to_str(b.get("name", "")) +
       " kind=" + to_str(b.get("kind", "text")) +
       " path=" + to_str(b.get("path", "")) +
@@ -753,7 +758,7 @@ fn _next_event() any {
 }
 
 fn _draw_icon(str name, f64 x, f64 y, f64 size, any tint=C_TEXT) int {
-   if name == "vcsbranches" {
+   if name == "vcs_branches" {
       def f64 t = float(max(1.0, size / 10.0))
       def f64 sx = x + size * 0.27
       def f64 mx = x + size * 0.68
@@ -901,7 +906,7 @@ fn _touch_content() int {
    _editor_values["syntax_flat_cache"] = borrow(dict(256))
    _editor_values["width_cache"] = borrow(dict(512))
    _editor_values["find_content_rev"] = -1
-   _editor_values["color_state"] = colorpicker.close(_editor_get("color_state"))
+   _editor_values["color_state"] = colorpicker.dismiss(_editor_get("color_state"))
    0
 }
 
@@ -938,7 +943,7 @@ fn _apply_editor_fonts() int {
    _editor_values["FONT_BODY_ADV"] = body_advance >= 2.0 && body_advance <= float(int(_editor_get("font_body_size"))) * 2.0 ? body_advance : float(int(_editor_get("font_body_size"))) * 0.6
    _editor_values["FONT_SMALL_ADV"] = small_advance >= 2.0 && small_advance <= float(int(_editor_get("font_small_size"))) * 2.0 ? small_advance : float(int(_editor_get("font_small_size"))) * 0.6
    _editor_values["FONT_MODELINE_ADV"] = modeline_advance >= 2.0 && modeline_advance <= float(int(_editor_get("font_modeline_size"))) * 2.0 ? modeline_advance : float(int(_editor_get("font_modeline_size"))) * 0.6
-   _editor_values["FONT_MODELINE_CLIP_ADV"] = _clamp_f64(float(_editor_get("FONT_MODELINE_ADV")) * 1.35, 11.0, 10000.0)
+   _editor_values["FONT_MODELINE_CLIP_ADV"] = _clamp_f64(float(_editor_get("FONT_MODELINE_ADV")) * 1.06, 4.0, 10000.0)
    _editor_values["term_state"] = termpane.set_font(_editor_get("term_state"), int(_editor_get("font_body")))
    _invalidate_text_metrics()
    0
@@ -1017,7 +1022,7 @@ fn _open_context(f64 x, f64 y, dict entry, str scope) int {
    mut e = is_dict(entry) ? clone(entry) : dict(8)
    e["scope"] = scope
    _editor_values["context_state"] = prompt.context_open(_editor_get("context_state"), x, y, e)
-   _editor_values["palette_state"] = pal.close(_editor_get("palette_state"))
+   _editor_values["palette_state"] = pal.dismiss(_editor_get("palette_state"))
    0
 }
 
@@ -1580,7 +1585,7 @@ fn _find_open() int {
    if seed.len > 0 { _editor_values["find_state"] = find.set_query(_editor_get("find_state"), seed) }
    _editor_values["find_state"] = find.open(_editor_get("find_state"))
    _editor_values["context_state"] = prompt.context_close(_editor_get("context_state"))
-   _editor_values["palette_state"] = pal.close(_editor_get("palette_state"))
+   _editor_values["palette_state"] = pal.dismiss(_editor_get("palette_state"))
    _completion_close()
    _find_refresh_now()
    _status(seed.len > 0 ? _find_message() : "find")
@@ -1595,7 +1600,7 @@ fn _find_replace_open() int {
 }
 
 fn _find_close() int {
-   _editor_values["find_state"] = find.close(_editor_get("find_state"))
+   _editor_values["find_state"] = find.dismiss(_editor_get("find_state"))
    _status("find closed")
    0
 }
@@ -2157,7 +2162,62 @@ fn _multi_selection_update() int {
    0
 }
 
+;; Emacs mark/region (transient-mark-mode): `set-mark` drops the mark at
+;; point; while it is active the region is mark..point and follows every
+;; cursor motion; C-g, copy, cut, and typing deactivate it.
+fn _set_mark() int {
+   def st = _editor_get("st")
+   st["mark_line"] = int(st.get("cursor_line", 0))
+   st["mark_col"] = int(st.get("cursor_col", 0))
+   st["mark_buffer"] = int(st.get("active", 0))
+   st["mark_active"] = true
+   st["multi_selects"] = []
+   _sync_mark_region()
+   _status("Mark set")
+   0
+}
+
+fn _exchange_mark() int {
+   def st = _editor_get("st")
+   if int(st.get("mark_buffer", -1)) != int(st.get("active", 0)) { _status("No mark set in this buffer") return 0 }
+   def ml = int(st.get("mark_line", 0))
+   def mc = int(st.get("mark_col", 0))
+   st["mark_line"] = int(st.get("cursor_line", 0))
+   st["mark_col"] = int(st.get("cursor_col", 0))
+   st["cursor_line"] = ml
+   st["cursor_col"] = mc
+   st["mark_active"] = true
+   _sync_mark_region()
+   0
+}
+
+fn _deactivate_mark() int {
+   def st = _editor_get("st")
+   if bool(st.get("mark_active", false)) {
+      st["mark_active"] = false
+      st["sel_active"] = false
+   }
+   0
+}
+
+fn _sync_mark_region() int {
+   def st = _editor_get("st")
+   if !bool(st.get("mark_active", false)) { return 0 }
+   ;; The mark belongs to one buffer; switching away deactivates it.
+   if int(st.get("mark_buffer", -1)) != int(st.get("active", 0)) {
+      st["mark_active"] = false
+      return 0
+   }
+   st["sel_a_line"] = int(st.get("mark_line", 0))
+   st["sel_a_col"] = int(st.get("mark_col", 0))
+   st["sel_b_line"] = int(st.get("cursor_line", 0))
+   st["sel_b_col"] = int(st.get("cursor_col", 0))
+   st["sel_active"] = true
+   0
+}
+
 fn _clear_selections() int {
+   _editor_get("st")["mark_active"] = false
    _editor_get("st")["sel_active"] = false
    _editor_get("st")["drag_select"] = false
    _editor_get("st")["multi_selects"] = []
@@ -2663,7 +2723,7 @@ fn _start_new_file(dict entry) int {
    entry["action"] = "new-file"
    entry["name"] = "untitled.ny"
    _editor_values["rename_state"] = prompt.rename_start(_editor_get("rename_state"), entry)
-   _editor_values["palette_state"] = pal.close(_editor_get("palette_state"))
+   _editor_values["palette_state"] = pal.dismiss(_editor_get("palette_state"))
    _editor_values["context_state"] = prompt.context_close(_editor_get("context_state"))
    _status("new file")
    0
@@ -2676,7 +2736,7 @@ fn _start_rename(dict entry) int {
       return 0
    }
    _editor_values["rename_state"] = prompt.rename_start(_editor_get("rename_state"), entry)
-   _editor_values["palette_state"] = pal.close(_editor_get("palette_state"))
+   _editor_values["palette_state"] = pal.dismiss(_editor_get("palette_state"))
    _editor_values["context_state"] = prompt.context_close(_editor_get("context_state"))
    _status("rename")
    0
@@ -2763,9 +2823,9 @@ fn _context_action(str id) int {
       }
       _debug_start_current()
    }
-   elif id == "debug-breakpoint" {
+   elif id == "debug-break_point" {
       if scope != "editor" {
-         if entry.get("dir", false) { _status("select a file for breakpoint") return 0 }
+         if entry.get("dir", false) { _status("select a file for break_point") return 0 }
          _open_file(path)
       }
       _debug_breakpoint()
@@ -2990,7 +3050,7 @@ fn _debug_load_coredump() int {
 
 fn _debug_breakpoint() int {
    def path = _current_path()
-   if path.len <= 0 { _status("save file before breakpoint") return 0 }
+   if path.len <= 0 { _status("save file before break_point") return 0 }
    _debug_send("break " + path + ":" + to_str(int(_editor_get("st").get("cursor_line", 0)) + 1))
 }
 
@@ -4045,7 +4105,7 @@ fn _palette_open() int {
    _editor_get("palette_state")["cfg"] = _editor_get("command_cfg")
    _editor_values["palette_state"] = pal.open(_editor_get("palette_state"))
    _editor_values["context_state"] = prompt.context_close(_editor_get("context_state"))
-   _editor_values["find_state"] = find.close(_editor_get("find_state"))
+   _editor_values["find_state"] = find.dismiss(_editor_get("find_state"))
    _editor_values["rename_state"] = prompt.rename_close(_editor_get("rename_state"))
    _request_full_redraw(3)
    _status("command palette")
@@ -4093,7 +4153,7 @@ fn _pane_resize(str dir) int {
 fn _close_focused_pane() int {
    def focus = to_str(_editor_get("st").get("focus", "editor"))
    if focus == "terminal" {
-      _editor_values["term_state"] = termpane.close(_editor_get("term_state"))
+      _editor_values["term_state"] = termpane.dismiss(_editor_get("term_state"))
       _set_focus("editor")
    } elif focus == "project" {
       _editor_get("st")["show_hierarchy"] = false
@@ -4176,7 +4236,7 @@ fn _run_command(str id) int {
    elif id == "check" { _check_current_file() }
    elif id == "format" { _format_current_file() }
    elif id == "debug" || id == "dap-debug" || id == "debug-start" { _debug_start_current() }
-   elif id == "debug-breakpoint" { _debug_breakpoint() }
+   elif id == "debug-break_point" { _debug_breakpoint() }
    elif id == "debug-continue" { _debug_send("continue") }
    elif id == "debug-next" { _debug_send("next") }
    elif id == "debug-step" { _debug_send("step") }
@@ -4201,16 +4261,36 @@ fn _run_command(str id) int {
    elif id == "find-toggle-case" { _find_toggle("case") }
    elif id == "find-toggle-word" { _find_toggle("word") }
    elif id == "palette" { _palette_open() }
+   elif id == "switch-buffer" { _switch_buffer_open() }
+   elif id == "describe-key" {
+      _editor_values["describe_key"] = true
+      _status("Describe key: press a key or chord")
+   }
+   elif id == "describe-bindings" { _palette_open() }
+   elif id == "describe-prefix" { _open_chord_prefix("C-h") }
+   elif id == "toggle-keymap" {
+      def next_map = cmd.keymap() == "emacs" ? "default" : "emacs"
+      cmd.set_keymap(next_map)
+      _status("keymap: " + next_map)
+   }
    elif id == "quit" {
       if _editor_get("st").get("quit_prompt", false) { window.set_should_close(_editor_get("win"), true) }
       else { _editor_get("st")["quit_prompt"] = true _status("quit? run quit again") }
    }
    elif id == "undo" { _undo() }
    elif id == "redo" { _redo() }
-   elif id == "copy" { _copy_selection_or_buffer() }
-   elif id == "cut" { _cut_selection() }
+   elif id == "copy" {
+      _copy_selection_or_buffer()
+      _deactivate_mark()
+   }
+   elif id == "cut" {
+      _cut_selection()
+      _editor_get("st")["mark_active"] = false
+   }
    elif id == "paste" { _paste_clipboard() }
    elif id == "mark-whole" { _mark_whole_buffer() }
+   elif id == "set-mark" { _set_mark() }
+   elif id == "exchange-mark" { _exchange_mark() }
    elif id == "select-line" { _select_line() }
    elif id == "kill-line" { _kill_line() }
    elif id == "duplicate-line" { _duplicate_line() }
@@ -4245,7 +4325,7 @@ fn _run_command(str id) int {
    elif id == "pane-editor" { _set_focus("editor") }
    elif id == "pane-terminal" { if termpane.is_open(_editor_get("term_state")) { _set_focus("terminal") } else { _status("terminal closed") } }
    elif id == "pane-close" { _close_focused_pane() }
-   elif id == "pane-only" { _editor_get("st")["show_hierarchy"] = false _editor_values["term_state"] = termpane.close(_editor_get("term_state")) _save_ui_cache() _set_focus("editor") }
+   elif id == "pane-only" { _editor_get("st")["show_hierarchy"] = false _editor_values["term_state"] = termpane.dismiss(_editor_get("term_state")) _save_ui_cache() _set_focus("editor") }
    elif id == "pane-split-below" { _editor_values["term_state"] = termpane.open_shell(_editor_get("term_state")) _set_focus("terminal") }
    elif id == "pane-split-right" { _editor_get("st")["show_hierarchy"] = true _editor_get("st")["show_project"] = true _editor_get("st")["show_outline"] = true _save_ui_cache() _set_focus("project") }
    elif id == "pane-balance" { _editor_get("st")["rail_w"] = 240.0 _editor_get("st")["rail_split"] = 0.0 _editor_get("st")["term_h"] = 200.0 _save_ui_cache() _status("panes balanced") }
@@ -4299,20 +4379,60 @@ fn _run_command(str id) int {
    elif id == "lsp-hover" { _lsp_request("hover") }
    elif id == "lsp-definition" { _lsp_request("definition") }
    else { _status("unknown command " + id) }
-   if id != "palette" { _editor_values["palette_state"] = pal.close(_editor_get("palette_state")) }
+   if id != "palette" && id != "switch-buffer" { _editor_values["palette_state"] = pal.dismiss(_editor_get("palette_state")) }
+   0
+}
+
+fn _buffer_switch_rows() list {
+   ;; Most recent first: the buffer you came from is one RET away, as in
+   ;; Emacs `switch-to-buffer`.
+   def bs = _editor_get("st").get("buffers", [])
+   def active = int(_editor_get("st").get("active", 0))
+   mut rows = []
+   mut pass = 0
+   while pass < 2 {
+      mut i = 0
+      while i < bs.len {
+         if (pass == 0) == (i != active) {
+            def any b = bs.get(i, {})
+            def name = to_str(b.get("name", "buffer"))
+            def path = to_str(b.get("path", ""))
+            def flags = (bool(b.get("dirty", false)) ? "* " : "") + (bool(b.get("readonly", false)) ? "% " : "")
+            rows = rows.append([flags + name, "buffer:" + to_str(i), i == active ? "current" : "", path.len > 0 ? path : name, "buffer"])
+         }
+         i += 1
+      }
+      pass += 1
+   }
+   rows
+}
+
+fn _switch_buffer_open() int {
+   _editor_get("palette_state")["cfg"] = _editor_get("command_cfg")
+   _editor_values["palette_state"] = pal.open_items(_editor_get("palette_state"), _buffer_switch_rows(), "buffers")
+   _editor_values["context_state"] = prompt.context_close(_editor_get("context_state"))
+   _editor_values["find_state"] = find.dismiss(_editor_get("find_state"))
+   _request_full_redraw(3)
+   _status("switch to buffer")
    0
 }
 
 fn _palette_choose() int {
    def row = pal.selected(_editor_get("palette_state"))
    if row.len <= 0 { _status("no command") return 0 }
-   _run_command(to_str(row.get(1, "")))
+   def id = to_str(row.get(1, ""))
+   if pal.items_mode(_editor_get("palette_state")) == "buffers" && str.startswith(id, "buffer:") {
+      _editor_values["palette_state"] = pal.dismiss(_editor_get("palette_state"))
+      _select_top_tab(int(str.atof(str.str_slice(id, 7, id.len))))
+      _status("buffer " + to_str(ed.current_buffer(_editor_get("st")).get("name", "")))
+      return 0
+   }
+   _run_command(id)
 }
 
 fn _handle_palette_key(any data) int {
-   def res = pal.handle_key(_editor_get("palette_state"), data)
-   _editor_values["palette_state"] = res.get("st", _editor_get("palette_state"))
-   if res.get("choose", false) { _palette_choose() }
+   _editor_values["palette_state"] = pal.handle_key(_editor_get("palette_state"), data)
+   if pal.wants_choose(_editor_get("palette_state")) { _palette_choose() }
    0
 }
 
@@ -4443,6 +4563,9 @@ fn _finish_selection_move(bool extend) int {
       if _editor_get("st").get("multi_selects", []).len > 0 { _multi_selection_update() }
       else { _editor_values["st"] = ed.update_selection(_editor_get("st")) }
       _editor_get("st")["drag_select"] = false
+   } elif bool(_editor_get("st").get("mark_active", false)) {
+      ;; Emacs transient mark: motion extends the region from the mark.
+      _sync_mark_region()
    } else {
       _clear_selections()
    }
@@ -4532,6 +4655,12 @@ fn _is_ctrl_space_event(any data) bool {
 
 fn _handle_ctrl_space(any data) bool {
    if !_is_ctrl_space_event(data) { return false }
+   ;; Emacs profile: C-SPC sets the mark; the leader chords live on C-c.
+   if cmd.keymap() == "emacs" {
+      _run_command("set-mark")
+      _suppress_char_from_key(data)
+      return true
+   }
    if chord.pending(_editor_get("chord_state")) && chord.describe(_editor_get("chord_state")) == "C-SPC" {
       _editor_values["chord_state"] = chord.clear(_editor_get("chord_state"))
       _run_command("palette")
@@ -4612,10 +4741,18 @@ fn _handle_key(any data) int {
    }
    def had_prefix = chord.pending(_editor_get("chord_state"))
    if SHOW_LAST_KEY || had_prefix { _editor_values["ui_state"] = interact.key_seen(_editor_get("ui_state"), key_chord) }
-   if key_chord == "C-c" && !had_prefix { _copy_selection_or_buffer() }
+   ;; In the default keymap C-c copies at once; in Emacs it is a prefix.
+   if key_chord == "C-c" && !had_prefix && cmd.keymap() != "emacs" { _copy_selection_or_buffer() }
    def res = chord.command_chord(_editor_get("chord_state"), data)
    _editor_values["chord_state"] = res.get(0)
    def resolved = to_str(res.get(1, ""))
+   ;; C-h k: the next complete chord is described instead of run.
+   if resolved.len > 0 && resolved != "cancel" && bool(_editor_values.get("describe_key", false)) {
+      _editor_values["describe_key"] = false
+      _status(cmd.describe_chord(resolved))
+      _suppress_char_from_key(data)
+      return 0
+   }
    if INPUT_TRACE { print("[editor:key] resolved=" + resolved + " prefix=" + chord.describe(_editor_get("chord_state"))) }
    if _handle_command(resolved) {
       _suppress_char_from_key(data)
@@ -4641,6 +4778,8 @@ fn _handle_char(any data) int {
    if cp >= 32 && cp != 127 {
       _editor_get("st")["quit_prompt"] = false
       _editor_values["last_escape_ns"] = 0
+      ;; Typing deactivates an Emacs region rather than replacing it.
+      _deactivate_mark()
    }
    if cp == 40 { _insert_pair("(", ")") return 0 }
    if cp == 91 { _insert_pair("[", "]") return 0 }
@@ -4675,9 +4814,9 @@ fn _handle_escape_key(any data) bool {
    if !_is_escape_key(data) { return false }
    mut cleared = false
    if prompt.rename_is_open(_editor_get("rename_state")) { _editor_values["rename_state"] = prompt.rename_close(_editor_get("rename_state")) cleared = true }
-   if pal.is_open(_editor_get("palette_state")) { _editor_values["palette_state"] = pal.close(_editor_get("palette_state")) cleared = true }
-   if find.is_open(_editor_get("find_state")) { _editor_values["find_state"] = find.close(_editor_get("find_state")) cleared = true }
-   if colorpicker.is_open(_editor_get("color_state")) { _editor_values["color_state"] = colorpicker.close(_editor_get("color_state")) cleared = true }
+   if pal.is_open(_editor_get("palette_state")) { _editor_values["palette_state"] = pal.dismiss(_editor_get("palette_state")) cleared = true }
+   if find.is_open(_editor_get("find_state")) { _editor_values["find_state"] = find.dismiss(_editor_get("find_state")) cleared = true }
+   if colorpicker.is_open(_editor_get("color_state")) { _editor_values["color_state"] = colorpicker.dismiss(_editor_get("color_state")) cleared = true }
    if prompt.context_is_open(_editor_get("context_state")) { _editor_values["context_state"] = prompt.context_close(_editor_get("context_state")) cleared = true }
    if bool(_editor_get("completion_state").get("open", false)) { _completion_close() cleared = true }
    if bool(_editor_get("peek_state").get("open", false)) { _editor_get("peek_state")["open"] = false cleared = true }
@@ -4719,7 +4858,7 @@ fn _handle_mouse_press(dict lay, any data) int {
          return 0
       }
       if pi == -2 {
-         _editor_values["palette_state"] = pal.close(_editor_get("palette_state"))
+         _editor_values["palette_state"] = pal.dismiss(_editor_get("palette_state"))
          return 0
       }
       ;; pi == -1: click landed inside the palette rect but not on a row
@@ -5964,7 +6103,7 @@ fn _hex_color(str hex) any {
 fn _color_picker_open() int {
    def hit = colorpicker.at_cursor(ed.current_lines(_editor_get("st")), int(_editor_get("st").get("cursor_line", 0)), int(_editor_get("st").get("cursor_col", 0)))
    if !is_dict(hit) || hit.len <= 0 {
-      _editor_values["color_state"] = colorpicker.close(_editor_get("color_state"))
+      _editor_values["color_state"] = colorpicker.dismiss(_editor_get("color_state"))
       _status("no hex color")
       return 0
    }
@@ -6170,13 +6309,13 @@ fn _draw_top(dict lay, int fps) int {
          def on = i == active
          def dirty = bool(b.get("dirty", false))
          def kind = to_str(b.get("kind", project.file_kind(to_str(b.get("name", "")))))
-         def icon = kind == "image" ? "asset_image" : (kind == "diff" ? "vcsbranches" : (kind == "term" ? "terminal" : "codeedit"))
+         def icon = kind == "image" ? "asset_image" : (kind == "diff" ? "vcs_branches" : (kind == "term" ? "terminal" : "code_edit"))
          _fill_rect(x, 3.0, min(tab_w - 2.0, sw - x - 6.0), top_h - 5.0, on ? C_PANE_2 : C_PANE)
          _stroke_rect(x, 3.0, min(tab_w - 2.0, sw - x - 6.0), top_h - 5.0, on ? C_LINE_2 : C_LINE, 1.0)
          if on { _fill_rect(x, top_h - 2.0, min(tab_w - 2.0, sw - x - 6.0), 2.0, C_ACCENT) }
          _draw_icon(icon, x + 8.0, _center_y(3.0, top_h - 5.0, 14.0), 14.0, on ? C_ACCENT : C_MUTED)
          def tab_label = _modeline_text((dirty ? "* " : "") + to_str(b.get("name", "buffer")))
-         runs = _append_text_run(runs, _preview_modeline(tab_label, max(20.0, tab_w - 56.0)), x + 28.0, tab_text_y, on ? U_TEXT : U_MUTED)
+         runs = _append_text_run(runs, _preview_modeline(tab_label, max(20.0, tab_w - 50.0)), x + 28.0, tab_text_y, on ? U_TEXT : U_MUTED)
          runs = _append_text_run(runs, "x", x + tab_w - 18.0, tab_text_y, on ? U_MUTED : U_DIM)
       }
       i += 1
@@ -6261,7 +6400,7 @@ fn _toggle_rail_section(str section) int {
 
 fn _draw_rail_tabs(f64 x, f64 y, f64 w) int {
    def active = _rail_tab()
-   def tabs = [["files", "filetree", "Files"], ["timeline", "history", "Time"], ["git", "vcsbranches", "Git"]]
+   def tabs = [["files", "file_tree", "Files"], ["timeline", "history", "Time"], ["git", "vcs_branches", "Git"]]
    def tab_w = w / 3.0
    mut runs = []
    mut i = 0
@@ -6288,7 +6427,7 @@ fn _draw_git_panel(f64 x, f64 y, f64 w, f64 h) int {
    def rows = project.changes(_editor_get("project_state"))
    def counts = project.counts(_editor_get("project_state"))
    def dirty = int(counts.get("modified", 0)) + int(counts.get("added", 0)) + int(counts.get("deleted", 0)) + int(counts.get("untracked", 0))
-   _draw_section_title("vcsbranches", "CHANGES", x, y, w, project.branch(_editor_get("project_state")) + (dirty > 0 ? " +" + to_str(dirty) : ""))
+   _draw_section_title("vcs_branches", "CHANGES", x, y, w, project.branch(_editor_get("project_state")) + (dirty > 0 ? " +" + to_str(dirty) : ""))
    def visible = project.visible_count(h)
    def scroll = project.clamp_scroll(int(_editor_get("st").get("git_scroll", 0)), rows.len, visible)
    _editor_get("st")["git_scroll"] = scroll
@@ -6349,7 +6488,7 @@ fn _draw_timeline_panel(f64 x, f64 y, f64 w, f64 h) int {
       def detail = to_str(row.get(2, ""))
       def baseline_y = _row_baseline_y(int(_editor_get("font_small")), yy, project.TREE_ROW_H)
       def text_y = _row_text_y_from_baseline(int(_editor_get("font_small")), baseline_y, project.TREE_ROW_H)
-      _draw_icon(kind == "buffer" ? "textfile" : "statusindicator", x + 10.0, _center_y(yy, project.TREE_ROW_H, 16.0), 16.0, kind == "buffer" ? C_ACCENT_2 : C_MUTED)
+      _draw_icon(kind == "buffer" ? "text_file" : "status_indicator", x + 10.0, _center_y(yy, project.TREE_ROW_H, 16.0), 16.0, kind == "buffer" ? C_ACCENT_2 : C_MUTED)
       runs = _append_text_run(runs, widgets.preview(label, int(max(8.0, (w - 50.0) / 7.2))), x + 34.0, text_y, kind == "buffer" ? U_TEXT : U_MUTED)
       if detail.len > 0 { runs = _append_right_run(runs, int(_editor_get("font_small")), widgets.preview(detail, 12), x + w - 8.0, text_y, U_DIM) }
       i += 1
@@ -6383,7 +6522,7 @@ fn _draw_project_tree(f64 x, f64 y, f64 w, f64 h) int {
    def dirty = int(counts.get("modified", 0)) + int(counts.get("added", 0)) + int(counts.get("deleted", 0)) + int(counts.get("untracked", 0))
    def branch = project.branch(_editor_get("project_state"))
    def right = (branch.len > 0 ? branch : "cwd") + (dirty > 0 ? " +" + to_str(dirty) : "")
-   _draw_section_title("filetree", ospath.basename(project.root(_editor_get("project_state"))), x, y, w, right)
+   _draw_section_title("file_tree", ospath.basename(project.root(_editor_get("project_state"))), x, y, w, right)
    def rows = project.tree(_editor_get("project_state"))
    def visible = project.visible_count(h)
    def scroll = project.clamp_scroll(int(_editor_get("st").get("tree_scroll", 0)), rows.len, visible)
@@ -6433,7 +6572,7 @@ fn _draw_project_tree(f64 x, f64 y, f64 w, f64 h) int {
 
 fn _draw_outline(f64 x, f64 y, f64 w, f64 h) int {
    def syms = _outline_symbols()
-   _draw_section_title("graphedit", "OUTLINE", x, y, w, to_str(syms.len))
+   _draw_section_title("graph_edit", "OUTLINE", x, y, w, to_str(syms.len))
    def visible = _outline_visible(h)
    def scroll = _outline_clamp(int(_editor_get("st").get("outline_scroll", 0)), syms.len, visible)
    _editor_get("st")["outline_scroll"] = scroll
@@ -6448,7 +6587,7 @@ fn _draw_outline(f64 x, f64 y, f64 w, f64 h) int {
       def active = line == int(_editor_get("st").get("cursor_line", 0))
       if active { _fill_rect(x + 4.0, yy, w - 8.0, row_h, gfx.color_alpha(C_ACCENT, 0.16)) }
       def text_y = _row_text_y(int(_editor_get("font_small")), yy, row_h)
-      _draw_icon(to_str(s.get("icon", "graphnode")), x + 10.0, _center_y(yy, row_h, 15.0), 15.0, active ? C_ACCENT : C_MUTED)
+      _draw_icon(to_str(s.get("icon", "graph_node")), x + 10.0, _center_y(yy, row_h, 15.0), 15.0, active ? C_ACCENT : C_MUTED)
       runs = _append_text_run(runs, widgets.preview(to_str(s.get("name", "")), int(max(8.0, (w - 72.0) / 7.2))), x + 32.0, text_y, active ? U_TEXT : U_MUTED)
       runs = _append_right_run(runs, int(_editor_get("font_small")), to_str(line + 1), x + w - 8.0, text_y, U_MUTED)
       i += 1
@@ -6485,7 +6624,7 @@ fn _draw_rail(dict lay) int {
    def show_project = bool(_editor_get("st").get("show_project", true))
    def show_outline = bool(_editor_get("st").get("show_outline", true))
    if !show_project && !show_outline {
-      _draw_section_title("boxcontainer", "PANES", x, body_y, w, "hidden")
+      _draw_section_title("box_container", "PANES", x, body_y, w, "hidden")
       _text(int(_editor_get("font_small")), "C-SPC t p project  C-SPC t o outline", x + 12.0, body_y + 36.0, C_MUTED)
       return 0
    }
@@ -6655,22 +6794,22 @@ fn _draw_terminal(dict lay) int {
 
 fn _command_icon(str tag, str id) str {
    if id == "run" { return "asset_play" }
-   if id == "check" || id == "lsp-diagnostics" { return "importcheck" }
-   if id == "format" { return "codehighlighter" }
-   if id == "diff-clipboard" { return "vcsbranches" }
+   if id == "check" || id == "lsp-diagnostics" { return "import_check" }
+   if id == "format" { return "code_highlighter" }
+   if id == "diff-clipboard" { return "vcs_branches" }
    if id == "palette" || tag == "search" { return "search" }
    if tag == "file" { return "file" }
-   if tag == "diff" { return "vcsbranches" }
+   if tag == "diff" { return "vcs_branches" }
    if tag == "run" { return "asset_script" }
    if tag == "debug" { return "debug" }
-   if tag == "project" { return "filetree" }
-   if tag == "edit" { return "codeedit" }
-   if tag == "buffer" { return "textfile" }
-   if tag == "pane" { return "boxcontainer" }
+   if tag == "project" { return "file_tree" }
+   if tag == "edit" { return "code_edit" }
+   if tag == "buffer" { return "text_file" }
+   if tag == "pane" { return "box_container" }
    if tag == "terminal" { return "terminal" }
    if tag == "lsp" { return "asset_world" }
-   if tag == "toggle" { return "checkbutton" }
-   "statusindicator"
+   if tag == "toggle" { return "check_button" }
+   "status_indicator"
 }
 
 fn _command_color(str tag) any {
@@ -6867,7 +7006,7 @@ fn _draw_completion(dict lay, f64 sw, f64 sh) int {
       def body_y = _row_text_y(int(_editor_get("font_body")), yy - 4.0, 24.0)
       def small_y = _row_text_y(int(_editor_get("font_small")), yy - 4.0, 24.0)
       if active { _fill_rect(x + 8.0, yy - 4.0, w - 16.0, 24.0, gfx.color_alpha(C_ACCENT, 0.18)) }
-      _draw_icon(kind == "lsp" ? "net" : (kind == "keyword" ? "codeedit" : "doc"), x + 14.0, _center_y(yy - 4.0, 24.0, 15.0), 15.0, active ? C_ACCENT : col)
+      _draw_icon(kind == "lsp" ? "net" : (kind == "keyword" ? "code_edit" : "doc"), x + 14.0, _center_y(yy - 4.0, 24.0, 15.0), 15.0, active ? C_ACCENT : col)
       body_runs = _append_text_run(body_runs, widgets.preview(to_str(item.get("label", "")), int(max(10.0, (w - 178.0) / 8.2))), x + 38.0, body_y, active ? U_TEXT : U_MUTED)
       small_runs = _append_right_run(small_runs, int(_editor_get("font_small")), widgets.preview(to_str(item.get("detail", "")), 24), x + w - 14.0, small_y, active ? U_ACCENT_2 : U_DIM)
       i += 1
@@ -7161,7 +7300,9 @@ fn _draw_status(dict lay) int {
    def line = int(_editor_get("st").get("cursor_line", 0)) + 1
    def col = int(_editor_get("st").get("cursor_col", 0)) + 1
    def int total = int(max(1, ed.current_lines(_editor_get("st")).len))
-   def loc = "Ln " + to_str(line) + ":" + to_str(col) + "  " + to_str((line * 100) / total) + "%"
+   ;; Position through the file: the first line is 0% and the last is 100%.
+   def pos_pct = total > 1 ? to_str(((line - 1) * 100) / (total - 1)) + "%" : "All"
+   def loc = "Ln " + to_str(line) + ":" + to_str(col) + "  " + pos_pct
    def page = "buf " + to_str(int(_editor_get("st").get("active", 0)) + 1) + "/" + to_str(_editor_get("st").get("buffers", []).len)
    def git = branch.len > 0 ? branch + (dirty > 0 ? " +" + to_str(dirty) : "") : "no git"
    def diff = "+" + to_str(add_n) + " ~" + to_str(mod_n) + " -" + to_str(del_n) + (untracked_n > 0 ? " ?" + to_str(untracked_n) : "")
@@ -7180,12 +7321,17 @@ fn _draw_status(dict lay) int {
    def live_status = _modeline_text(interact.status(_editor_get("ui_state")))
    def right = live_status != "ready" ? fps + "  " + live_status + "  " + loc + (sel.len > 0 ? "  " + sel : "") + (cursors.len > 0 ? "  " + cursors : "") + "  " + lsp_label + "  " + term : right_state
    def f64 content_w = float(max(1.0, sw - pad * 2.0 - 16.0))
-   def f64 right_w = float(min(max(228.0, content_w * 0.34), max(128.0, content_w - 260.0)))
-   def f64 left_w = float(min(max(170.0, content_w * 0.36), max(96.0, content_w - right_w - 160.0)))
+   ;; Each zone takes the width its text needs, capped so the other two keep
+   ;; a share. Fixed fractions truncated short text while the bar sat empty.
+   def f64 clip_adv = float(max(1.0, float(_editor_get("FONT_MODELINE_CLIP_ADV"))))
+   def f64 right_need = float(str.utf8_len(right)) * clip_adv + 12.0
+   def f64 left_need = float(str.utf8_len(left)) * clip_adv + 32.0
+   def f64 right_w = float(min(right_need, max(128.0, content_w * 0.48)))
+   def f64 left_w = float(min(left_need, max(96.0, content_w * 0.38)))
    def f64 left_x = pad + 8.0
    def f64 right_x = sw - pad - 8.0
    def f64 right_start = right_x - right_w
-   def left_icon = mode == "MOD" ? "statuswarning" : (mode == "RO" ? "lock" : "statussuccess")
+   def left_icon = mode == "MOD" ? "status_warning" : (mode == "RO" ? "lock" : "status_success")
    def f64 left_text_x = left_x + 20.0
    def f64 mid_icon_x = left_x + left_w + 10.0
    def f64 mid_x = mid_icon_x + 20.0
@@ -7199,7 +7345,7 @@ fn _draw_status(dict lay) int {
    _flush_rects()
    def icon_y = _center_y(y, h, 14.0)
    _draw_icon(left_icon, left_x, icon_y, 14.0, mode == "MOD" ? C_WARN : (mode == "RO" ? C_CYAN : C_ACCENT))
-   _draw_icon("vcsbranches", mid_icon_x, icon_y, 14.0, dirty > 0 ? C_ACCENT_2 : C_DIM)
+   _draw_icon("vcs_branches", mid_icon_x, icon_y, 14.0, dirty > 0 ? C_ACCENT_2 : C_DIM)
    if runs.len > 0 { gfx.draw_text_runs_flat_colors(int(_editor_get("font_modeline")), runs) }
    0
 }
@@ -7639,6 +7785,7 @@ while !gfx.window_should_close(_editor_get("win")) {
       window.push_event(_editor_get("win"), window.EVENT_MOUSE_BUTTON_RELEASED, {"button": 0, "x": sx, "y": sy1})
    }
    _process_events(lay)
+   _sync_mark_region()
    def t_events = FRAME_TRACE ? ticks() : 0
    _editor_omni_dump(lay, sw, sh)
    if probe_flags.get("INPUT", false) && !probe_flags.get("TERMINAL", false) && int(_editor_get("frame_count")) == 0 {
@@ -7813,7 +7960,7 @@ while !gfx.window_should_close(_editor_get("win")) {
 _bench_finish()
 ui_runtime.fps_finish("editor", _editor_get("fps_state"))
 _save_ui_cache()
-_editor_values["term_state"] = termpane.close(_editor_get("term_state"))
+_editor_values["term_state"] = termpane.dismiss(_editor_get("term_state"))
 _release_image_preview_cache()
 gfx.close_window()
 exit(0)

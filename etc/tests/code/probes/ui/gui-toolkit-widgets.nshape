@@ -1,0 +1,330 @@
+shape gui-toolkit-widgets {
+  family "probe-suite"
+  generator "regression"
+  features ["ny", "render", "gui", "toolkit"]
+  template ny-test-case
+  expect compile_and_run
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  timeout 300
+  expect_stdout "GUI-TOOLKIT-WIDGETS-OK"
+  source ny <<'NY'
+;; Drives the immediate-mode toolkit through fed events on the mock renderer:
+;; id scopes, row and column layout, menu bar, submenus, context menus,
+;; popup dismissal, keyboard navigation, tooltips, trees, numeric drag
+;; fields, the disabled scope, tables, drag and drop, item status, themes.
+use core
+use core.os.ui.render as gfx
+use core.os.ui.render.viewer.gui as gui
+use core.os.ui.window.consts
+
+mut any R = dict(64)
+mut val = 1.0
+mut ival = 5
+mut dropped = ""
+mut show_disabled = false
+
+fn rect_of(str k) list { R.get(k, [0.0, 0.0, 0.0, 0.0]) }
+fn note(str k) any { R[k] = gui.last_item_rect() }
+
+fn ui() any {
+   R["file_new"] = false
+   R["ctx_del"] = false
+   R["sub_deep"] = false
+   R["btn"] = false
+   R["rowbtn"] = 0
+   if gui.begin_window("w", "W", 0.0, 0.0, 400.0, 700.0, {"closable": false, "movable": false, "resizable": false, "collapsible": false}) {
+      if gui.begin_menu_bar() {
+         if gui.begin_menu("file", "File") {
+            if gui.menu_item("new", "New", "Ctrl+N") { R["file_new"] = true }
+            note("r_new")
+            gui.menu_item("dis", "Disabled", "", false, false)
+            gui.menu_separator()
+            if gui.begin_menu("recent", "Recent") {
+               if gui.menu_item("deep", "Deep") { R["sub_deep"] = true }
+               note("r_deep")
+               gui.end_menu()
+            }
+            note("r_recent")
+            gui.end_menu()
+         }
+         note("r_file")
+         if gui.begin_menu("edit", "Edit") {
+            gui.menu_item("undo", "Undo", "", true)
+            note("r_undo")
+            gui.end_menu()
+         }
+         note("r_edit")
+         gui.end_menu_bar()
+      }
+      if gui.button("b", "Target", 120.0, 26.0) { R["btn"] = true }
+      note("r_btn")
+      R["tip"] = gui.tooltip("A tip")
+      if gui.begin_context_menu("bctx") {
+         if gui.menu_item("del", "Delete") { R["ctx_del"] = true }
+         note("r_del")
+         gui.end_menu()
+      }
+      ;; repeated widgets under id scopes
+      mut i = 0
+      while i < 3 {
+         gui.push_id(i)
+         if gui.small_button("same", "Row", 60.0, 22.0) { R["rowbtn"] = i + 1 }
+         R["r_row" + to_str(i)] = gui.last_item_rect()
+         R["id_row" + to_str(i)] = gui.last_item_id()
+         gui.pop_id()
+         i += 1
+      }
+      gui.layout_row([100.0, 0.5, 0.0])
+      gui.button("la", "A")  note("r_la")
+      gui.button("lb", "B")  note("r_lb")
+      gui.button("lc", "C")  note("r_lc")
+      gui.button("after", "After", 80.0, 24.0)  note("r_after")
+      gui.begin_columns(2)
+      gui.button("c0", "c0", 50.0, 24.0)  note("r_c0")
+      gui.button("c0b", "c0b", 50.0, 24.0)  note("r_c0b")
+      gui.next_column()
+      gui.button("c1", "c1", 50.0, 24.0)  note("r_c1")
+      gui.end_columns()
+      gui.button("aftercol", "x", 50.0, 24.0)  note("r_aftercol")
+      if gui.tree_node("t", "Root") {
+         note("r_root_open")
+         if gui.tree_node("leaf", "Leaf", false, true) { gui.tree_pop() }
+         note("r_leaf")
+         gui.tree_pop()
+      }
+      gui.button("aftertree", "y", 50.0, 24.0)  note("r_aftertree")
+      val = gui.drag_float("df", "Drag", val, 0.5, 0.0, 100.0, 2, 200.0)
+      note("r_df")
+      ival = gui.drag_int("di", "", ival, 0.25, 0, 0, 200.0)
+      note("r_di")
+      gui.begin_disabled(show_disabled)
+      if gui.button("dis", "Maybe", 100.0, 24.0) { R["dis_clicked"] = true }
+      note("r_dis")
+      gui.end_disabled()
+      if gui.begin_table("tb", ["Name", "Size", "Kind"], [2.0, 1.0, 1.0]) {
+         note("r_th")
+         mut r = 0
+         while r < 3 {
+            gui.table_next_row(false)
+            if gui.table_row_clicked() { R["row_clicked"] = r }
+            gui.table_text("n" + to_str(r))
+            if r == 0 { note("r_cell0") }
+            gui.table_text(to_str(r * 10))
+            if r == 0 { note("r_cell1") }
+            gui.table_next_column()
+            gui.small_button("k" + to_str(r), "go", 40.0, 20.0)
+            r += 1
+         }
+         gui.end_table()
+      }
+      R["sort"] = gui.table_sort_column("tb")
+      R["desc"] = gui.table_sort_descending("tb")
+      gui.button("src", "Source", 90.0, 24.0)  note("r_src")
+      R["dragging"] = gui.drag_source("asset", "payload-7", "Asset")
+      gui.button("dst", "Dest", 90.0, 24.0)  note("r_dst")
+      def any got = gui.drop_target("asset")
+      if is_str(got) { dropped = to_str(got) }
+      gui.button("stat", "S", 60.0, 24.0)
+      R["status_ok"] = gui.item_status("error", "bad")
+      R["status_bad"] = gui.item_status("nonsense")
+   }
+   gui.end_window()
+}
+
+mut mx, my = 0.0, 0.0
+fn frame() any {
+   gui.feed_event(EVENT_MOUSE_POS_CHANGED, {"x": mx, "y": my})
+   gui.prepare_input(0, 400.0, 700.0)
+   gfx.begin_frame_clear([0.0, 0.0, 0.0, 1.0])
+   gfx.set_ortho_2d(0.0, 400.0, 700.0, 0.0)
+   gui.begin_frame(0, 0, 400.0, 700.0)
+   ui()
+   gui.end_frame()
+   gfx.end_frame()
+}
+fn at(str k) any {
+   def r = rect_of(k)
+   mx = float(r.get(0, 0.0)) + float(r.get(2, 0.0)) * 0.5
+   my = float(r.get(1, 0.0)) + float(r.get(3, 0.0)) * 0.5
+}
+fn down() any { gui.feed_event(EVENT_MOUSE_BUTTON_PRESSED, {"button": 0, "x": mx, "y": my}) }
+fn up() any { gui.feed_event(EVENT_MOUSE_BUTTON_RELEASED, {"button": 0, "x": mx, "y": my}) }
+fn click() any { down() frame() up() frame() }
+fn key(int k) any { gui.feed_event(EVENT_KEY_PRESSED, {"key": k, "mod": 0}) }
+fn chr(int c) any { gui.feed_event(EVENT_KEY_CHAR, {"char": c}) }
+
+assert(gfx.set_backend_type(gfx.BACKEND_MOCK), "mock")
+assert(gfx.init_window(400, 700, "g"), "open")
+gui.reset_state()
+gui.set_enabled(true)
+gui.set_headless_input(true)
+gui.set_tooltip_delay(3)
+frame() frame()
+
+fn rpress() any { gui.feed_event(EVENT_MOUSE_BUTTON_PRESSED, {"button": 1, "x": mx, "y": my}) }
+fn chk(bool ok, str what) any { assert(ok, what) }
+;; --- id scopes
+chk(to_str(R.get("id_row0", "")) == "w::0/same" && to_str(R.get("id_row2", "")) == "w::2/same", "push_id scopes ids")
+at("r_row1") down() frame() up() frame()
+chk(int(R.get("rowbtn", 0)) == 2, "only the second repeated button fires")
+;; --- layout rows and columns
+def la, lb = rect_of("r_la"), rect_of("r_lb")
+def lc = rect_of("r_lc")
+chk(float(la.get(2)) == 100.0 && float(la.get(1)) == float(lb.get(1)) && float(lb.get(1)) == float(lc.get(1)), "layout_row puts three cells on one line")
+chk(float(lc.get(0)) + float(lc.get(2)) == 392.0, "flex cell ends at the body edge")
+chk(float(rect_of("r_after").get(1)) > float(la.get(1)), "row ends after its cells")
+def c0, c1 = rect_of("r_c0"), rect_of("r_c1")
+chk(float(c1.get(0)) > float(c0.get(0)) + 100.0 && float(c1.get(1)) == float(c0.get(1)), "second column starts at the top of the band")
+chk(float(rect_of("r_aftercol").get(1)) > float(rect_of("r_c0b").get(1)), "end_columns continues below the tallest column")
+;; --- menu bar
+at("r_file") down() frame() up() frame() frame()
+chk(gui.any_popup_open(), "press on a menu header opens it")
+chk(gui.wants_mouse(), "an open menu claims the pointer")
+at("r_edit") frame() frame() frame()
+chk(float(rect_of("r_undo").get(2)) > 0.0, "hovering a sibling header switches menus")
+at("r_file") frame() frame() frame()
+at("r_recent") frame() frame() frame()
+chk(float(rect_of("r_deep").get(3)) > 0.0, "hovering a submenu row opens the submenu")
+chk(float(rect_of("r_deep").get(0)) > float(rect_of("r_recent").get(0)) + 40.0, "submenu opens to the right")
+;; The submenu lies outside its parent's rectangle; it must still be drawn.
+def deep = rect_of("r_deep")
+def sub_x, sub_y = float(deep.get(0)) + float(deep.get(2)) - 4.0, float(deep.get(1)) + 2.0
+def new_r = rect_of("r_new")
+def fb_open = gfx.read_framebuffer()
+def ptr fb_open_px = __ffi_untag_ptr(fb_open.get("data", 0))
+def int sub_col = int(sub_x)
+def int sub_row = int(sub_y)
+def int par_col = int(float(new_r.get(0)) + float(new_r.get(2)) - 4.0)
+def int par_row = int(float(new_r.get(1)) + 2.0)
+def int sub_off = (sub_row * 400 + sub_col) * 4
+def int par_off = (par_row * 400 + par_col) * 4
+def int sub_open_px = load32(fb_open_px, sub_off)
+def int parent_px = load32(fb_open_px, par_off)
+free(fb_open_px)
+chk(sub_open_px == parent_px, "submenu surface is drawn outside its parent's clip")
+at("r_deep") frame() down() frame() up() frame()
+chk(bool(R.get("sub_deep", false)), "submenu item activates")
+frame()
+chk(!gui.any_popup_open(), "choosing an item closes every menu")
+def fb_closed = gfx.read_framebuffer()
+def ptr fb_closed_px = __ffi_untag_ptr(fb_closed.get("data", 0))
+def int sub_closed_px = load32(fb_closed_px, sub_off)
+free(fb_closed_px)
+chk(sub_closed_px != sub_open_px, "closed menus leave no pixels behind")
+;; reopen, click outside closes without reopening
+at("r_file") down() frame() up() frame() frame()
+chk(gui.any_popup_open(), "menu reopens")
+down() frame() up() frame()
+chk(!gui.any_popup_open(), "pressing the open header closes it")
+at("r_file") down() frame() up() frame() frame()
+key(KEY_ESCAPE) frame()
+chk(!gui.any_popup_open(), "Escape closes the menu")
+;; keyboard: open, Down, Enter
+at("r_file") down() frame() up() frame() frame()
+mx = 390.0 my = 690.0
+key(KEY_DOWN) frame() frame()
+key(KEY_ENTER) frame()
+chk(bool(R.get("file_new", false)), "Down then Enter activates the first menu item")
+frame()
+;; --- context menu
+at("r_btn") frame()
+rpress() frame() frame() frame()
+chk(gui.any_popup_open() && float(rect_of("r_del").get(2)) > 0.0, "secondary press opens the context menu")
+at("r_del") frame() down() frame() up() frame()
+chk(bool(R.get("ctx_del", false)), "context menu item activates")
+frame()
+;; --- tooltip
+at("r_btn") frame() frame()
+chk(!bool(R.get("tip", true)), "tooltip waits for the hover delay")
+frame() frame() frame()
+chk(bool(R.get("tip", false)), "tooltip shows after the delay")
+mx = 390.0 my = 690.0 frame()
+chk(!bool(R.get("tip", true)), "tooltip hides when the pointer leaves")
+
+;; --- tree
+at("r_aftertree")
+def tree_closed_y = my
+mx = 60.0 my = tree_closed_y - 30.0
+down() frame() up() frame() frame()
+chk(float(rect_of("r_leaf").get(3)) > 0.0, "clicking a tree row opens it")
+chk(float(rect_of("r_leaf").get(0)) == float(rect_of("r_root_open").get(0)) + 14.0, "children are indented one level")
+chk(float(rect_of("r_aftertree").get(0)) == 8.0, "tree_pop restores the indent")
+key(KEY_LEFT) frame() frame()
+at("r_aftertree")
+chk(my == tree_closed_y, "Left collapses the focused tree row")
+;; --- drag_float
+at("r_df") down() frame()
+mx = mx + 20.0 frame() frame()
+chk(val == 11.0, "dragging 20 px at speed 0.5 adds 10")
+mx = mx + 4000.0 frame()
+chk(val == 100.0, "drag clamps to the maximum")
+up() frame()
+at("r_df")
+key(KEY_LEFT) frame()
+chk(val == 99.5, "arrow key steps a focused drag field")
+key(KEY_ENTER) frame()
+chk(gui.focused_id() == "w::df", "Enter starts typing")
+chr(52) chr(50) chr(46) chr(53) frame()
+key(KEY_ENTER) frame()
+chk(val == 42.5, "typed value commits on Enter")
+key(KEY_ENTER) frame()
+chr(55) frame()
+key(KEY_ESCAPE) frame() frame()
+chk(val == 42.5, "Escape cancels typing")
+;; double click enters typing too
+at("r_di") down() frame() up() frame() down() frame() up() frame()
+chr(57) frame() key(KEY_ENTER) frame()
+chk(ival == 9, "double click then typing sets a drag_int")
+key(KEY_ESCAPE) frame()
+;; --- disabled scope
+at("r_dis") down() frame() up() frame()
+chk(bool(R.get("dis_clicked", false)), "enabled button clicks")
+R["dis_clicked"] = false
+show_disabled = true
+frame() down() frame() up() frame()
+chk(!bool(R.get("dis_clicked", true)), "disabled button ignores clicks")
+chk(gui.hovered_id() != "w::dis", "disabled button is not hot")
+show_disabled = false
+frame()
+;; --- table
+def cell0, cell1 = rect_of("r_cell0"), rect_of("r_cell1")
+chk(float(cell1.get(0)) > float(cell0.get(0)) + 100.0, "second cell starts in the second column")
+def th = rect_of("r_th")
+mx = float(th.get(0)) + 20.0 my = float(th.get(1)) + 12.0
+down() frame() up() frame() frame()
+chk(int(R.get("sort", -1)) == 0 && !bool(R.get("desc", true)), "header click sorts ascending")
+down() frame() up() frame() frame()
+chk(int(R.get("sort", -1)) == 0 && bool(R.get("desc", false)), "second click flips to descending")
+def col1_x = float(rect_of("r_cell1").get(0))
+mx = col1_x - 6.0
+down() frame() mx = mx - 60.0 frame() frame() up() frame() frame()
+chk(float(rect_of("r_cell1").get(0)) < col1_x - 40.0, "dragging a header edge resizes the column")
+chk(int(R.get("sort", -1)) == 0 && bool(R.get("desc", false)), "resizing does not change the sort")
+at("r_cell0") my = my + 22.0
+R["row_clicked"] = -1
+down() frame() up() frame()
+chk(int(R.get("row_clicked", -1)) == 1, "row press is reported for the second row")
+;; --- drag and drop
+at("r_src") down() frame()
+chk(!bool(R.get("dragging", true)), "a press alone is not a drag")
+mx = mx + 12.0 frame()
+chk(bool(R.get("dragging", false)) && gui.drag_active("asset"), "moving past the threshold starts the drag")
+at("r_dst") frame()
+chk(dropped == "", "no drop while the button is held")
+up() frame()
+chk(dropped == "payload-7", "releasing over the target delivers the payload")
+frame()
+chk(!gui.drag_active(), "drag ends after the release")
+;; --- status
+chk(bool(R.get("status_ok", false)) && !bool(R.get("status_bad", true)), "item_status accepts known kinds only")
+;; --- themes
+chk(gui.theme() == "dark" && gui.set_theme("light") && gui.theme() == "light", "light theme selects")
+def lt, lw = gui.theme_color("text"), gui.theme_color("window")
+chk(float(lt.get(0)) < 0.3 && float(lw.get(0)) > 0.8, "light theme has dark text on a light surface")
+chk(!gui.set_theme("neon") && gui.theme() == "light", "unknown theme is rejected")
+frame()
+gui.set_theme("dark")
+gfx.close_window()
+print("GUI-TOOLKIT-WIDGETS-OK")
+NY
+}

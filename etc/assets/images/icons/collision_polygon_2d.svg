@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
+  <title id="title1">Collision Polygon 2D</title>
+  <desc id="desc1">Collision Polygon 2D editor icon. Original asset id: collisionpolygon2d.</desc>
+  <defs id="defs1" />
+  <g transform="translate(2.0000 2.0000) scale(1.25000)" id="g1">
+    <path d="M 2,1 A 1.0001,1.0001 0 0 0 1,2 v 12 a 1.0001,1.0001 0 0 0 1,1 h 12 a 1.0001,1.0001 0 0 0 0.707031,-1.707031 L 9.4140625,8 14.707031,2.7070313 A 1.0001,1.0001 0 0 0 14,1 Z m 1,2 h 8.585938 L 7.2929687,7.2929687 a 1.0001,1.0001 0 0 0 0,1.4140626 L 11.585938,13 H 3 Z" id="path1" fill="#c6c6ca" />
+  </g>
+</svg>

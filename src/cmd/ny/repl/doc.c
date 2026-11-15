@@ -4,9 +4,9 @@
  */
 #include "base/loader.h"
 #include "base/util.h"
-#include "code/lang/parse/parser.h"
+#include "code/lang/ny/parser/parser.h"
 #include "nytrix/nytrix.h"
-#include "priv.h"
+#include "cmd/ny/repl/priv.h"
 #include <ctype.h>
 #include <stdarg.h>
 #include <stdio.h>

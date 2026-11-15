@@ -4,7 +4,7 @@ shape ownership_rule_exclusive_borrow_overlapping_field_negative {
   features ["error", "ownership", "borrow", "exclusive", "aggregate", "overlap", "negative"]
   template ny-compile-fail
   expect compile_fail
-  flags "--ownership-strict --nyr-verify"
+  flags_matrix "--mode=safe --nyr-verify --native-only; --mode=safe --nyr-verify --native --run; --mode=safe --nyr-verify --native-backend=llvm --jit --jit-engine=mcjit; --mode=safe --nyr-verify --native-backend=llvm --jit --jit-engine=orc; --mode=safe --nyr-verify --wasm"
 
   source ny <<'NY'
 use core

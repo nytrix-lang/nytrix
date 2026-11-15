@@ -66,8 +66,16 @@ fn _timeout_prefix() str {
 }
 
 fn _feed_clipboard_writer(str path, list args, any text) bool {
+   mut cleanup = [0]
+   defer {
+      if is_dict(cleanup[0]) {
+         pio.shutdown_send(cleanup[0])
+         sys_close_quiet(cleanup[0].get("out", -1))
+      }
+   }
    def p = pio.spawn(path, args)
    if !p { return false }
+   cleanup[0] = p
    match pio.send(p, text) {
       ok(ignored) -> { ignored }
       err(ignorederr) -> { ignorederr }
@@ -77,6 +85,7 @@ fn _feed_clipboard_writer(str path, list args, any text) bool {
       err(ignorederr) -> { ignorederr }
    }
    sys_close_quiet(p.get("out", -1))
+   cleanup[0] = 0
    true
 }
 

@@ -7,6 +7,18 @@ use core
 use core as core
 use core.primitives (envc, envp)
 
+def _STR_INT_MAX = 9223372036854775807
+
+fn _str_len_add(int a, int b) int {
+   if a < 0 || b < 0 || a > _STR_INT_MAX - b { return -1 }
+   a + b
+}
+
+fn _str_len_mul(int a, int b) int {
+   if a < 0 || b < 0 || (b != 0 && a > _STR_INT_MAX / b) { return -1 }
+   a * b
+}
+
 fn _env_present(str key) bool {
    ;; __env_get returns a managed string for `NAME=...` entries and nil when
    ;; absent, replacing the manual envp scan (the old scan also misread
@@ -142,7 +154,9 @@ fn pad_start(str s, int width, str pad=" ") str {
    mut int pad_len = pad.len
    if pad_len == 0 { return _substr(s, 0, n) }
    def int total = width
-   mut out = malloc(total + 1)
+   def alloc_size = _str_len_add(total, 1)
+   if alloc_size < 0 { return "" }
+   mut out = malloc(alloc_size)
    if !out { return "" }
    init_str(out, total)
    def int pad_needed = width - n
@@ -304,7 +318,9 @@ fn _substr(str s, int start, int stop) str {
    if stop > n { stop = n }
    if start >= stop { return "" }
    def len = stop - start
-   mut out = __malloc(len + 1)
+   def alloc_size = _str_len_add(len, 1)
+   if alloc_size < 0 { return "" }
+   mut out = __malloc(alloc_size)
    if !out { return "" }
    init_str(out, len)
    mut i = 0
@@ -548,16 +564,20 @@ fn join(list items, str sep="") str {
    }
    def sep_len = sep.len
    mut parts = list(n)
-   mut total = sep_len * (n - 1)
+   mut total = _str_len_mul(sep_len, n - 1)
+   if total < 0 { return "" }
    mut i = 0
    while i < n {
       mut part = items.get(i)
       if !is_str(part) { part = to_str(part) }
       parts = _list_push_reserved(parts, part)
-      total += part.len
+      total = _str_len_add(total, part.len)
+      if total < 0 { return "" }
       i += 1
    }
-   mut out = malloc(total + 1)
+   def alloc_size = _str_len_add(total, 1)
+   if alloc_size < 0 { return "" }
+   mut out = malloc(alloc_size)
    if !out { return "" }
    init_str(out, total)
    mut pos = 0
@@ -613,8 +633,19 @@ fn str_replace(any s, any old, any new) str {
       }
    }
    if count == 0 { return _substr(s, 0, n) }
-   def total = n + count * (new_len - old_len)
-   mut out = malloc(total + 1)
+   mut total = n
+   if new_len >= old_len {
+      def extra = _str_len_mul(count, new_len - old_len)
+      if extra < 0 { return _substr(s, 0, n) }
+      total = _str_len_add(n, extra)
+   } else {
+      def removed = _str_len_mul(count, old_len - new_len)
+      if removed < 0 || removed > n { return _substr(s, 0, n) }
+      total = n - removed
+   }
+   def alloc_size = _str_len_add(total, 1)
+   if alloc_size < 0 { return _substr(s, 0, n) }
+   mut out = malloc(alloc_size)
    if !out { return _substr(s, 0, n) }
    init_str(out, total)
    mut src = 0
@@ -647,7 +678,9 @@ fn to_hex(int n, int width=0) str {
    def hex_chars = "0123456789abcdef"
    if n == 0 {
       if width <= 1 { return "0" }
-      def out = malloc(width + 1)
+      def alloc_size = _str_len_add(width, 1)
+      if alloc_size < 0 { return "" }
+      def out = malloc(alloc_size)
       if !out { return "" }
       init_str(out, width)
       mut k = 0 while k < width - 1 { store8(out, 48, k) k += 1 }
@@ -665,7 +698,9 @@ fn to_hex(int n, int width=0) str {
    }
    def w = (width > nib) ? width : nib
    if w == 0 { return "" }
-   def out = malloc(w + 1)
+   def alloc_size = _str_len_add(w, 1)
+   if alloc_size < 0 { return "" }
+   def out = malloc(alloc_size)
    if !out { return "" }
    init_str(out, w)
    mut k = 0 while k < w - nib { store8(out, 48, k) k += 1 }

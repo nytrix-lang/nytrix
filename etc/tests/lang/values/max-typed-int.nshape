@@ -1,0 +1,16 @@
+shape max_typed_int {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "codegen"]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect compile_and_run
+  expect_message "MAX_TYPED_INT_OK"
+  source ny <<'NY'
+use core
+fn m(int n) int { max(1, n) }
+fn mf(any x) f64 { max(1.0, float(x)) }
+assert(m(3) == 3 && m(0) == 1 && mf(5) == 5.0 && mf(0) == 1.0, "max on typed ints and floats")
+print("MAX_TYPED_INT_OK")
+NY
+}

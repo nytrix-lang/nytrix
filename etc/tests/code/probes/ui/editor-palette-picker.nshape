@@ -1,0 +1,90 @@
+shape editor-palette-picker {
+  family "probe-suite"
+  generator "regression"
+  features ["ny", "ui", "editor", "palette", "find"]
+  template ny-test-case
+  expect compile_and_run
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  timeout 300
+  expect_stdout "EDITOR-PALETTE-PICKER-OK"
+  source ny <<'NY'
+;; The editor keeps each popup's state in one table and replaces it with what
+;; the popup module returns. This drives the buffer picker, the find bar and
+;; the colour picker through that exact pattern, with the window module
+;; imported the way the editor imports it: closing a popup used to hand back
+;; an OS error code (the call resolved to the file-descriptor close), so the
+;; popup could not be opened a second time, and Enter in the picker ran the
+;; first command instead of the chosen row.
+use core
+use core.os.ui.window
+use core.os.ui.window.consts as key
+use core.os.ui.render.viewer.editor.find as find
+use core.os.ui.render.viewer.editor.colorpicker as colorpicker
+use core.os.ui.render.viewer.editor.palette as pal
+
+mut any V = dict(8)
+fn get(str k) any { borrow(V.get(k, nil)) }
+fn buffer_rows() list {
+   return [["set.ny", "buffer:0", "current", "lib/set.ny", "buffer"], ["dict.ny", "buffer:1", "", "lib/dict.ny", "buffer"], ["mod.ny", "buffer:2", "", "lib/mod.ny", "buffer"]]
+}
+fn chosen_id() str {
+   def row = pal.selected(get("p"))
+   if row.len < 2 { return "" }
+   to_str(row.get(1, ""))
+}
+
+V["p"] = borrow(pal.state())
+mut round = 0
+while round < 3 {
+   V["p"] = pal.open_items(get("p"), buffer_rows(), "buffers")
+   assert(is_dict(get("p")) && pal.is_open(get("p")), "picker opens (round " + to_str(round) + ")")
+   assert(pal.items_mode(get("p")) == "buffers" && pal.query(get("p")) == "", "picker starts with an empty query")
+   assert(!pal.wants_choose(get("p")), "a fresh picker has nothing chosen")
+   assert(chosen_id() == "buffer:0", "first row is selected")
+   V["p"] = pal.set_visible(get("p"), 12)
+   ;; Typed characters filter the rows.
+   V["p"] = pal.handle_char(get("p"), {"char": 100})
+   V["p"] = pal.handle_char(get("p"), {"char": 105})
+   V["p"] = pal.handle_char(get("p"), {"char": 99})
+   assert(pal.query(get("p")) == "dic", "typed characters build the query")
+   assert(pal.state_matches(get("p")).len == 1 && chosen_id() == "buffer:1", "the query filters buffers by name")
+   ;; Backspace widens the filter again.
+   V["p"] = pal.handle_key(get("p"), {"key": key.KEY_BACKSPACE, "mod": 0})
+   assert(pal.query(get("p")) == "di" && is_dict(get("p")), "backspace edits the query")
+   assert(!pal.wants_choose(get("p")), "backspace chooses nothing")
+   ;; Enter asks the caller to apply the selected row.
+   V["p"] = pal.handle_key(get("p"), {"key": key.KEY_ENTER, "mod": 0})
+   assert(is_dict(get("p")) && pal.wants_choose(get("p")), "Enter chooses")
+   assert(chosen_id() == "buffer:1", "the chosen row is the filtered buffer, not a command")
+   V["p"] = pal.dismiss(get("p"))
+   assert(is_dict(get("p")) && !pal.is_open(get("p")), "dismiss hides the picker and keeps its state a dict")
+   round += 1
+}
+;; Escape hides without choosing; arrows move the selection.
+V["p"] = pal.open_items(get("p"), buffer_rows(), "buffers")
+V["p"] = pal.handle_key(get("p"), {"key": key.KEY_DOWN, "mod": 0})
+assert(chosen_id() == "buffer:1", "Down moves the selection")
+V["p"] = pal.handle_key(get("p"), {"key": key.KEY_ESCAPE, "mod": 0})
+assert(is_dict(get("p")) && !pal.is_open(get("p")) && !pal.wants_choose(get("p")), "Escape hides without choosing")
+;; The command palette (no item list) still lists commands.
+V["p"] = pal.open(get("p"))
+assert(pal.items_mode(get("p")) == "" && pal.state_matches(get("p")).len > 10, "command palette lists commands")
+V["p"] = pal.dismiss(get("p"))
+
+;; Find bar: open, dismiss, open again.
+V["f"] = borrow(find.state())
+round = 0
+while round < 3 {
+   V["f"] = find.open(get("f"))
+   assert(is_dict(get("f")) && find.is_open(get("f")), "find bar opens (round " + to_str(round) + ")")
+   V["f"] = find.dismiss(get("f"))
+   assert(is_dict(get("f")) && !find.is_open(get("f")), "find bar dismisses and keeps its state")
+   round += 1
+}
+;; Colour picker state survives a dismiss too.
+V["c"] = borrow(colorpicker.state())
+V["c"] = colorpicker.dismiss(get("c"))
+assert(is_dict(get("c")) && !colorpicker.is_open(get("c")), "colour picker dismisses and keeps its state")
+print("EDITOR-PALETTE-PICKER-OK")
+NY
+}

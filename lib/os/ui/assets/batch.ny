@@ -88,7 +88,7 @@ fn _resolved_path(catalog, item) str {
    is_dict(catalog) ? asset_catalog.gltf_catalog_resolve(catalog, item) : ""
 }
 
-fn format_model(item, catalog=0) dict {
+fn format_model(item, any catalog=0) dict {
    "Runs the format model operation."
    def raw = str.strip(to_str(item))
    mut display = raw
@@ -107,7 +107,7 @@ fn format_model(item, catalog=0) dict {
    {"display": display, "spec": spec_path}
 }
 
-fn _apply_missing_filter(models, specs, dump_dir, cli_dump_dir) dict {
+fn _apply_missing_filter(list models, list specs, str dump_dir, str cli_dump_dir) dict {
    if dump_dir.len <= 0 || !is_list(models) || models.len == 0 {
       return {"models": models, "specs": specs, "no_missing": false, "before": is_list(models) ? models.len : 0}
    }
@@ -126,7 +126,7 @@ fn _apply_missing_filter(models, specs, dump_dir, cli_dump_dir) dict {
    {"models": keep_names, "specs": keep_specs, "no_missing": before > 0 && keep_names.len == 0, "before": before}
 }
 
-fn parse_env(cli_raw="", cli_all=false, all_names=[], cli_dump_dir="", cli_delay_frames=-1, cli_missing=false, catalog=0) dict {
+fn parse_env(cli_raw="", cli_all=false, all_names=[], cli_dump_dir="", cli_delay_frames=-1, cli_missing=false, any catalog=0) dict {
    "Parses parse env."
    mut models = []
    mut specs = []

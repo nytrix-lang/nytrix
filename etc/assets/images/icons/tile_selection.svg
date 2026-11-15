@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
+  <title id="title1">Tiles Election</title>
+  <desc id="desc1">Tiles Election editor icon. Original asset id: tileselection.</desc>
+  <defs id="defs3" />
+  <g transform="translate(2.0000 2.0000) scale(4.00000)" id="g3">
+    <g fill="none" id="g2">
+      <path d="M 0,0 V 5 H 5 V 0 Z M 1,1 H 4 V 4 H 1 Z" id="path1" fill="#c6c6ca" />
+      <path d="M 1,1 V 4 H 4 V 1 Z M 2,2 H 3 V 3 H 2 Z" id="path2" fill="#c6c6ca" />
+    </g>
+  </g>
+</svg>

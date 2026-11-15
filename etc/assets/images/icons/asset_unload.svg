@@ -1,1 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><path fill="none" stroke="#f2f2f2" stroke-width="2" d="m3 3 10 10M3 13 13 3"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
+  <title id="title1">Asset Unload</title>
+  <desc id="desc1">Asset Unload editor icon. Original asset id: asset_unload.</desc>
+  <defs id="defs1" />
+  <g transform="translate(2.0000 2.0000) scale(1.25000)" id="g1">
+    <path d="M 3.7070313,2.2929688 2.2929688,3.7070313 6.5859375,8 2.2929688,12.292969 3.7070313,13.707031 8,9.4140625 12.292969,13.707031 13.707031,12.292969 9.4140625,8 13.707031,3.7070313 12.292969,2.2929688 8,6.5859375 Z" id="path1" fill="#c6c6ca" />
+  </g>
+</svg>

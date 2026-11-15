@@ -4,8 +4,8 @@ shape test_repl_help_syntax {
   features ["ny", "test", "repl", "help", "syntax"]
   template ny-test-case
   expect compile_and_run
-  repl_expect "Struct constructor (positional)"
-  repl_commands ":help syntax"
+  repl_expect "Struct constructor (positional)\nIterate over a sequence or range\nLanguage keywords and forms\nRuntime and compiler internals\nUnchecked list element load\nDeclare that a function has no observable side effects"
+  repl_commands ":help syntax\n:help for\n:help keywords\n:help internals\n:help __load_item_fast\n:help @pure"
   source ny <<'NY'
 1 + 2
 NY

@@ -42,13 +42,20 @@ fresh file, so move surprising cases into a file and run them directly.
 
 | Task | Command or action |
 | --- | --- |
+| Inspect the token under the cursor | Press `F1` for a keyword, declaration, module member, or documented runtime builtin |
+| Browse language forms | `:help keywords`, then `:help for`, `:help @pure`, or `:help operators` |
+| Browse runtime/compiler internals | `:help internals`, then `:help __load_item_fast` or press `F1` on an internal name |
 | Check exported names | `ny doc search --symbols name` |
 | Find docs for a topic | `ny doc search --docs topic` |
 | Reproduce a source failure | Save the snippet, then run `ny file.ny` |
 | Validate formatting | `ny fmt --check file.ny` |
 
 Interactive prompt commands are not source syntax. See the prompt's `:help`
-for supported commands.
+for supported commands. `:help keywords` lists language forms and types;
+`F1` and `:help <name>` use the same indexed documentation for language forms,
+loaded module symbols, and runtime builtins. `:help internals` lists internal
+runtime/compiler entries registered by the runtime. Language topics link to
+their specifications under `docs/spec/`.
 
 ## Snapshots
 

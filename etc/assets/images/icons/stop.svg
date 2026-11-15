@@ -1,1 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect width="10" height="10" x="3" y="3" fill="#f2f2f2" rx="1"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
+  <title>Stop</title>
+  <desc>Stop icon.</desc>
+  <g transform="translate(2.0000 2.0000) scale(1.25000)">
+<rect width="10" height="10" x="3" y="3" fill="#c6c6ca" rx="1"/>
+  </g>
+</svg>

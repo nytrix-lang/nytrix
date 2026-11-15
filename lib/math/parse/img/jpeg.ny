@@ -404,15 +404,18 @@ fn _jpeg_prog_render_component(any plane, int plane_len, int plane_w, any coeff,
 
 fn _jpeg_alloc_planes(int plane_sz) any {
    def alloc_sz = plane_sz + 32
-   def cyB = init_str(malloc(alloc_sz), plane_sz)
-   def ccbB = init_str(malloc(alloc_sz), plane_sz)
-   def ccrB = init_str(malloc(alloc_sz), plane_sz)
-   if !cyB || !ccbB || !ccrB {
-      if cyB { free(cyB) }
-      if ccbB { free(ccbB) }
-      if ccrB { free(ccrB) }
+   def cy_raw = malloc(alloc_sz)
+   def ccb_raw = malloc(alloc_sz)
+   def ccr_raw = malloc(alloc_sz)
+   if !cy_raw || !ccb_raw || !ccr_raw {
+      if cy_raw { free(cy_raw) }
+      if ccb_raw { free(ccb_raw) }
+      if ccr_raw { free(ccr_raw) }
       return 0
    }
+   def cyB = init_str(cy_raw, plane_sz)
+   def ccbB = init_str(ccb_raw, plane_sz)
+   def ccrB = init_str(ccr_raw, plane_sz)
    mut i = 0
    while i < plane_sz {
       store8(cyB, 128, i)
@@ -425,7 +428,9 @@ fn _jpeg_alloc_planes(int plane_sz) any {
 
 fn _jpeg_planes_to_rgba(any cyB, any ccbB, any ccrB, int wVal, int hVal) any {
    def tpx = wVal * hVal
-   def pix = init_str(malloc(tpx * 4 + 32), (tpx * 4))
+   def pix_raw = malloc(tpx * 4 + 32)
+   if !pix_raw { return 0 }
+   def pix = init_str(pix_raw, (tpx * 4))
    mut kL = 0
    while kL + 4 <= tpx {
       def y0, y1 = load8(cyB, kL), load8(cyB, kL + 1)
@@ -1603,7 +1608,9 @@ fn _jpeg_append_entropy_payload(list out, list eb) list {
 
 fn _jpeg_bytes_from_list(list out) any {
    def resL = out.len
-   def resP = init_str(malloc(resL + 32), resL)
+   def res_raw = malloc(resL + 32)
+   if !res_raw { return 0 }
+   def resP = init_str(res_raw, resL)
    mut rI = 0
    while rI < resL {
       store8(resP, out.get(rI), rI)

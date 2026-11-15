@@ -3,9 +3,10 @@ shape test_safe {
   generator "embedded"
   features ["ny", "test"]
   template ny-test-case
+  flags_matrix "--native-only; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
   expect compile_and_run
   source ny <<'NY'
-;; flags: --safe-mode
+;; flags: --mode=safe
 use core
 
 with ptr p = malloc(8){

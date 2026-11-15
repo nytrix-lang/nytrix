@@ -1,0 +1,16 @@
+shape any_global_arithmetic {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "codegen"]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect compile_and_run
+  expect_message "ANY-GLOBAL-ARITHMETIC-OK"
+  source ny <<'NY'
+use core
+mut any N = 5
+fn f() any { N + 1 }
+assert(N + 1 == 6 && f() == 6 && to_str(N + 1) == "6", "any global arithmetic")
+print("ANY-GLOBAL-ARITHMETIC-OK")
+NY
+}

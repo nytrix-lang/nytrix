@@ -183,6 +183,23 @@ fn _read_data_window(any hdr) any {
    [x_min, y_min, x_max, y_max]
 }
 
+fn _convert_half_rgba(ptr pix_ptr, ptr rgba_ptr, int pixel_count, ptr lu, ptr la) int {
+   "Converts half-float RGBA pixels to tone-mapped RGBA8 through the lookup tables."
+   ;; Typed pointers and one 32-bit store per pixel: the untyped per-byte
+   ;; loop took about 2 s for the default 4096x2048 sky; this takes ~0.35 s.
+   mut int i = 0
+   while i < pixel_count {
+      def int s = i * _EXR_PIXEL_SIZE
+      def int r = load8(lu, load16(pix_ptr, s) & 65535)
+      def int g = load8(lu, load16(pix_ptr, s + 2) & 65535)
+      def int b = load8(lu, load16(pix_ptr, s + 4) & 65535)
+      def int a = load8(la, load16(pix_ptr, s + 6) & 65535)
+      store32(rgba_ptr, r | (g << 8) | (b << 16) | (a << 24), i * 4)
+      i += 1
+   }
+   i
+}
+
 fn load_path(any path) any {
    "Loads an EXR image from `path` into a standard RGBA image dict."
    _exr_last_error = ""
@@ -216,23 +233,14 @@ fn load_path(any path) any {
    def read_ok = calls.any3(_ptr_ImfInputReadPixels, in_p, y_min, y_max)
    if int(read_ok) == 0 { return _set_error(_exr_error_message("failed reading EXR pixels")) }
    def rgba_len = pixel_count * 4
-   def rgba_ptr = malloc(rgba_len + 32)
+   mut rgba_cleanup = 0
+   defer { if rgba_cleanup { free(rgba_cleanup) } }
+   mut rgba_ptr = malloc(rgba_len + 32)
    if !rgba_ptr { return _set_error("out of memory converting EXR image") }
-   mut i = 0
-   while i < pixel_count {
-      def src = pix_ptr + i * _EXR_PIXEL_SIZE
-      def dst = rgba_ptr + i * 4
-      def hr = load16(src, 0) & 65535
-      def hg = load16(src, 2) & 65535
-      def hb = load16(src, 4) & 65535
-      def ha = load16(src, 6) & 65535
-      store8(dst, load8(_half_u8_lut, hr), 0)
-      store8(dst, load8(_half_u8_lut, hg), 1)
-      store8(dst, load8(_half_u8_lut, hb), 2)
-      store8(dst, load8(_half_a8_lut, ha), 3)
-      i += 1
-   }
+   rgba_cleanup = rgba_ptr
+   _convert_half_rgba(pix_ptr, rgba_ptr, pixel_count, _half_u8_lut, _half_a8_lut)
    def rgba = init_str(rgba_ptr, rgba_len)
+   rgba_cleanup = 0
    mut out = dict(5)
    out["data"] = rgba
    out["width"] = w

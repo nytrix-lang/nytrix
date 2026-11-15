@@ -4,7 +4,7 @@
  */
 #include "base/util.h"
 #include "base/common.h"
-#include "priv.h"
+#include "cmd/ny/repl/priv.h"
 #include <ctype.h>
 #include <errno.h>
 #include <stdio.h>

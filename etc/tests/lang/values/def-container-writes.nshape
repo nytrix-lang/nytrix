@@ -1,0 +1,18 @@
+shape def_container_writes {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "codegen"]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect compile_and_run
+  expect_message "DEF_CONTAINER_WRITES_OK"
+  source ny <<'NY'
+use core
+def X = [1, 2]
+def D = {"a": 1}
+X[0] = 9
+D["a"] = 7
+assert(X[0] == 9 && D.get("a", 0) == 7, "writes to def containers persist")
+print("DEF_CONTAINER_WRITES_OK")
+NY
+}

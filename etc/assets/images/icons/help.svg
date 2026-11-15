@@ -1,1 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><path fill="#f2f2f2" d="M8 2C6 .7 4 .7 2 2v7c2-1.3 4-1.3 6 0 2-1.3 4-1.3 6 0V2C12 .7 10.2.9 9 1.5V6H8zm-8 8v6h2a3 3 0 0 0 0-6zm5 3a3 3 0 0 0 6 0 3 3 0 0 0-6 0zm9 3h1v-2h-1a1 1 0 0 1 0-2h1v-2h-1a3 3 0 0 0 0 6zM2 12a1 1 0 0 1 0 2zm6 0a1 1 0 0 1 0 2 1 1 0 0 1 0-2z"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
+  <title>Help</title>
+  <desc>Help icon.</desc>
+  <g transform="translate(2.0000 2.0000) scale(1.25000)">
+<path fill="#c6c6ca" d="M8 2C6 .7 4 .7 2 2v7c2-1.3 4-1.3 6 0 2-1.3 4-1.3 6 0V2C12 .7 10.2.9 9 1.5V6H8zm-8 8v6h2a3 3 0 0 0 0-6zm5 3a3 3 0 0 0 6 0 3 3 0 0 0-6 0zm9 3h1v-2h-1a1 1 0 0 1 0-2h1v-2h-1a3 3 0 0 0 0 6zM2 12a1 1 0 0 1 0 2zm6 0a1 1 0 0 1 0 2 1 1 0 0 1 0-2z"/>
+  </g>
+</svg>

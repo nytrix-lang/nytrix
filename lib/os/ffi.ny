@@ -518,7 +518,7 @@ fn bind_lib(any name_or_h, list syms) any {
    assert(offsetof_struct(lyt, "a") == 0 && offsetof_struct(lyt, "b") == 4 && offsetof_struct(lyt, "c") == 6, "ffi struct offsets")
    assert(sizeof_struct(lyt) >= 8, "ffi struct size")
    def p = malloc(sizeof_struct(lyt))
-   assert(p, "ffi malloc")
+   if !p { panic("ffi self-test allocation failed") }
    assert(cstruct_set(p, lyt, "a", 0x11223344) && cstruct_set(p, lyt, "b", 0x5566) && cstruct_set(p, lyt, "c", 0x77), "ffi struct stores")
    assert(cstruct_get(p, lyt, "a") == 0x11223344 && cstruct_get(p, lyt, "b") == 0x5566 && cstruct_get(p, lyt, "c") == 0x77, "ffi struct loads")
    free(p)
@@ -534,6 +534,13 @@ fn bind_lib(any name_or_h, list syms) any {
    def b = malloc(4)
    def c = malloc(4)
    def d = malloc(4)
+   if !a || !b || !c || !d {
+      if a { free(a) }
+      if b { free(b) }
+      if c { free(c) }
+      if d { free(d) }
+      panic("ffi version self-test allocation failed")
+   }
    store32(a,0,0) store32(b,0,0) store32(c,0,0) store32(d,0,0)
    pointer4pointerpointerpointervoid(p, a, b, c, d)
    print("ver = " + to_str(load32(a,0)) + "." + to_str(load32(b,0)) + "." + to_str(load32(c,0)) + "." + to_str(load32(d,0)))

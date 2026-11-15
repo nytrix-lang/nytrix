@@ -53,10 +53,22 @@ fn inspect(value)
 fn close(resource)
 ```
 
-Resource-bearing aggregates and field extraction have partial tracking. Do not
-assume every dynamic aggregate or alias shape receives field-sensitive move
-analysis; consult [Implementation status](../learn/status.md) and run the
-focused fixture for the exact form.
+Explicit call contracts participate in the shared checker: all annotated
+`@consumes` and `@releases` parameters affect their caller's state, including
+named arguments. A consumed raw owner's copied/interior aliases cannot
+continue to access it. `@returns_owned` results receive a new caller-side
+ownership identity; `@returns_borrow(parameter)` preserves the input's raw
+allocation provenance where it is known. These are declared contracts, not
+summaries inferred for arbitrary unannotated functions.
+
+Resource-bearing layout fields are tracked separately. Extracting a resource
+through a list or dictionary index conservatively moves its containing
+resource-bearing collection: a second extraction or reuse of the collection
+is rejected. This also applies to collection fields inside layouts. Reading a
+scalar field such as `files[index].fd` does not consume the collection.
+Disjoint-element partial moves and arbitrary dynamic alias graphs are not
+proved; do not treat this as general per-element lifetime inference. See
+`resource-collection-extraction` and [Implementation status](../learn/status.md).
 
 ## Usage intervals
 

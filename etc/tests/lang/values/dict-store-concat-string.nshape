@@ -1,0 +1,24 @@
+shape dict_store_concat_string {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "codegen"]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect compile_and_run
+  expect_message "DICT-STORE-CONCAT-STRING-OK"
+  source ny <<'NY'
+use core
+fn a(any id, any title) str { to_str(id) + to_str(title) }
+fn b(any id, f64 x) str { to_str(id) + to_str(x) }
+fn c(dict st, any id) any {
+   st["seen"] = to_str(id) + to_str(id)
+   st.get("seen", "")
+}
+fn d(dict st, any id, f64 x) any {
+   st["seen"] = to_str(id) + to_str(x)
+   st.get("seen", "")
+}
+assert(a("w", "T") == "wT" && b("w", 3.0) == "w3" && c({}, "w") == "ww" && d({}, "w", 3.0) == "w3", "concatenated strings stored in a dict stay strings")
+print("DICT-STORE-CONCAT-STRING-OK")
+NY
+}

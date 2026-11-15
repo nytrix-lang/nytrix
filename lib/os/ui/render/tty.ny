@@ -9,7 +9,8 @@ module core.os.ui.render.tty(
 
 use core
 use core.str as str
-use core.term as term
+use core.term (write_str, enter_alt_screen, leave_alt_screen, cursor_hide,
+   cursor_show, set_raw_mode, set_cooked_mode)
 use core.os.prim (env)
 
 ;; Returned by decode_keys for Ctrl+C: the window should close.
@@ -48,9 +49,9 @@ fn begin() bool {
    "Enters the alternate screen with raw, unechoed input and a hidden cursor."
    if _active { return true }
    if _interactive() {
-      term.enter_alt_screen()
-      term.cursor_hide()
-      term.set_raw_mode()
+      enter_alt_screen()
+      cursor_hide()
+      set_raw_mode()
    }
    _active = true
    true
@@ -60,10 +61,10 @@ fn end() bool {
    "Restores the cooked terminal, the cursor, and the primary screen."
    if !_active { return false }
    if _interactive() {
-      term.set_cooked_mode()
-      term.write_str("\x1b[0m")
-      term.cursor_show()
-      term.leave_alt_screen()
+      set_cooked_mode()
+      write_str("\x1b[0m")
+      cursor_show()
+      leave_alt_screen()
    }
    _active = false
    true
@@ -131,7 +132,7 @@ fn present_rgba(dict frame) bool {
    def dims = size()
    def output = frame_to_ansi(frame, int(dims.get(0, 80)), int(dims.get(1, 24)))
    if output.len <= 0 { return false }
-   term.write_str(output)
+   write_str(output)
    true
 }
 

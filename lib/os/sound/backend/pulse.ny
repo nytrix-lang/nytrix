@@ -64,6 +64,7 @@ fn stream_open(any stream) any {
    "Opens a PulseAudio playback stream for the provided stream dictionary."
    if !is_available() { return false }
    def ss = malloc(12)
+   if !ss { return false }
    def format = stream.get("format", 1)
    def bits = (format == 2) ? 32 : 16
    def rate = stream.get("sample_rate")
@@ -90,6 +91,10 @@ fn stream_open(any stream) any {
       if minreq < min_minreq { minreq = min_minreq }
       if minreq > tlength { minreq = tlength }
       attr = malloc(20)
+      if !attr {
+         free(ss)
+         return false
+      }
       store32(attr, 4294967295, 0)
       store32(attr, tlength, 4)
       store32(attr, 0, 8)
@@ -97,6 +102,11 @@ fn stream_open(any stream) any {
       store32(attr, 4294967295, 16)
    }
    def err_ptr = malloc(4)
+   if !err_ptr {
+      free(ss)
+      if attr { free(attr) }
+      return false
+   }
    store32(err_ptr, 0, 0)
    mut out_dev = common.env_trim("NY_AUDIO_PULSE_DEVICE")
    if !out_dev { out_dev = "" }
@@ -108,6 +118,15 @@ fn stream_open(any stream) any {
    if !stream_name || stream_name.len == 0 { stream_name = "Nytrix Output" }
    def app_name_c = cstr_dup(app_name)
    def stream_name_c = cstr_dup(stream_name)
+   if !app_name_c || !stream_name_c || (out_dev.len > 0 && !out_dev_c) {
+      if app_name_c { free(app_name_c) }
+      if stream_name_c { free(stream_name_c) }
+      if out_dev_c { free(out_dev_c) }
+      free(ss)
+      if attr { free(attr) }
+      free(err_ptr)
+      return false
+   }
    if sound_debug.enabled() { print("Sound: Pulse: Opening stream: rate=" + to_str(rate) + " chan=" + to_str(channels) + " fmt=" + to_str(format) + " device=" + out_dev) }
    if sound_debug.enabled() { print(f"Audio: Pulse: Calling pa_simple_new(ss={ss}, app={app_name_c}, stream={stream_name_c}, dev={out_dev_c}, err={err_ptr})...") }
    def pa = pa_simple_new(0, app_name_c, PA_STREAM_PLAYBACK, out_dev_c, stream_name_c, ss, 0, attr, err_ptr)
@@ -150,10 +169,12 @@ fn stream_stop(any stream) any {
    mut ?ptr pa = stream.get("handle")
    if pa {
       def err_ptr = malloc(4)
-      store32(err_ptr, 0, 0)
-      pa_simple_drain(pa, err_ptr)
-      pa_simple_flush(pa, err_ptr)
-      free(err_ptr)
+      if err_ptr {
+         store32(err_ptr, 0, 0)
+         pa_simple_drain(pa, err_ptr)
+         pa_simple_flush(pa, err_ptr)
+         free(err_ptr)
+      }
       pa_simple_free(pa)
    }
    stream = stream.set("handle", 0)
@@ -167,6 +188,7 @@ fn write(any pa, any buf, int size) bool {
    def n = size
    if n <= 0 { return true }
    def err_ptr = malloc(4)
+   if !err_ptr { return false }
    store32(err_ptr, 0, 0)
    def rc = pa_simple_write(stream_handle, data, n, err_ptr)
    if rc < 0 && sound_debug.enabled() {

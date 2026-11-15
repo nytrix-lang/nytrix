@@ -3893,41 +3893,7 @@ int64_t rt_bigint_row_submul_auto(int64_t row_k, int64_t row_j, int64_t q) {
     limit--;
   if (limit < 0)
     return row_k;
-  int64_t *rk = (int64_t *)(uintptr_t)((char *)row_k + 16);
-  if (is_int(q)) {
-    int64_t q_raw = rt_untag_v(q);
-    if (q_raw == 1 || q_raw == -1) {
-      int sub_b = q_raw == 1;
-      for (int64_t c = 0; c <= limit; c++) {
-        int64_t b = rj[c];
-        if (_bi_is_zero_fast(b))
-          continue;
-        int64_t fast = 0;
-        rk[c] = (_bi_try_add_int_pair_small(rk[c], b, sub_b, &fast) ||
-                 _bi_try_add_limb2_kind(rk[c], b, sub_b, 1, &fast))
-                    ? fast
-                    : rt_bigint_submul(rk[c], q, b);
-      }
-      return row_k;
-    }
-    for (int64_t c = 0; c <= limit; c++) {
-      int64_t b = rj[c];
-      if (_bi_is_zero_fast(b))
-        continue;
-      int64_t fast = 0;
-      rk[c] = (_bi_try_submul_i64_int_pair_small(rk[c], q_raw, b, &fast) ||
-               _bi_try_submul_i64_limb2(rk[c], q_raw, b, &fast))
-                  ? fast
-                  : rt_bigint_submul(rk[c], q, b);
-    }
-    return row_k;
-  }
-  for (int64_t c = 0; c <= limit; c++) {
-    int64_t b = rj[c];
-    if (!_bi_is_zero_fast(b))
-      rk[c] = rt_bigint_submul(rk[c], q, b);
-  }
-  return row_k;
+  return rt_bigint_row_submul(row_k, row_j, q, rt_tag_v(limit));
 }
 
 int64_t rt_bigint_div(int64_t a, int64_t b) {

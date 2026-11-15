@@ -33,8 +33,8 @@ assert(str.str_contains(html, "<tr><td><code>a | b</code></td><td>bitwise OR</td
    "escaped operator pipes do not create extra table cells")
 assert(str.str_contains(html, "href=\"../../spec/types/#proof-and-refinement-types\""),
    "relative specification links retain their target fragment")
-def source_link = render_static("[Linker](../../src/code/backend/object/linker.c)", "spec/linker")
-assert(str.str_contains(source_link, "href=\"https://github.com/nytrix-lang/nytrix/blob/main/src/code/backend/object/linker.c\""),
+def source_link = render_static("[Linker](../../src/code/backend/mach/linker.c)", "spec/linker")
+assert(str.str_contains(source_link, "href=\"https://github.com/nytrix-lang/nytrix/blob/main/src/code/backend/mach/linker.c\""),
    "repository source links resolve to source rather than nonexistent manual routes")
 assert(str.str_contains(render_static("[Specification](../spec/index.md)", "learn/start"),
        "href=\"../../spec/index/\""),

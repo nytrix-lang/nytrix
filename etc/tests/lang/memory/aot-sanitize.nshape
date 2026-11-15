@@ -3,7 +3,7 @@ shape sanitizer_aot_execution_matrix {
   generator "runtime"
   features [sanitize address undefined aot execution]
   template ny-test-case
-  flags_matrix "--sanitize=address --no-progress --color=never; --sanitize=undefined --no-progress --color=never"
+  flags_matrix "--sanitize=address --native-backend=llvm --no-progress; --sanitize=undefined --native-backend=llvm --no-progress"
   expect compile_and_run
   source ny <<'NY'
 print(42)

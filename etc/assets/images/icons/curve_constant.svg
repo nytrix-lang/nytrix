@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
+  <title id="title1">Curve Constant</title>
+  <desc id="desc1">Curve Constant editor icon. Original asset id: curveconstant.</desc>
+  <defs id="defs1" />
+  <g transform="translate(2.0000 2.0000) scale(1.66667)" id="g1">
+    <path d="M 2,5 A 1,1 0 0 0 1,6 1,1 0 0 0 2,7 h 8 A 1,1 0 0 0 11,6 1,1 0 0 0 10,5 Z" id="path1" fill="#c6c6ca" />
+  </g>
+</svg>

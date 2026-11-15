@@ -56,11 +56,15 @@ fn _read_text(str path) str {
 }
 
 fn _cmd_out(str cmd, list args) str {
+   mut cleanup = [0]
+   defer { if is_dict(cleanup[0]) { close(cleanup[0]) } }
    def p = spawn(cmd, args)
    if !p { return "" }
+   cleanup[0] = p
    shutdown_send(p)
    mut s = recv_all(p)
-   close(p)
+   def ignored_close = close(p)
+   cleanup[0] = 0
    if !is_str(s) { return "" }
    s = str_replace(s, "\r", "")
    strip(s)

@@ -52,6 +52,7 @@ fn _sf_init() bool {
 fn _sf_open(str filename) any {
    if !_sf_init() { return 0 }
    def info = malloc(64)
+   if !info { return 0 }
    memset(info, 0, 64)
    def snd = ffi.any3(_sf_open_fn, ffi.cstr(filename), 0x10, info)
    if !snd { free(info) return 0 }
@@ -75,11 +76,15 @@ fn _sf_range(any st, int start, int count) any {
    if count > frames - start { count = frames - start }
    def channels = int(st.get("channels"))
    if count == 0 {
-      return source.make_memory_source(malloc(1), 0, channels,
+      def empty = malloc(1)
+      if !empty { return 0 }
+      return source.make_memory_source(empty, 0, channels,
          st.get("rate"), 16, source.SAMPLE_FMT_S16, 1)
    }
+   if count > (9223372036854775807 - 1) / channels / 2 { return 0 }
    if int(ffi.any3(_sf_seek_fn, st.get("file"), start, 0)) != start { return 0 }
    def out = malloc(count * channels * 2 + 1)
+   if !out { return 0 }
    def got = int(ffi.any3(_sf_read_frames_fn, st.get("file"), out, count))
    if got <= 0 {
       free(out)
@@ -333,7 +338,15 @@ fn read_range(any st, int start, int count) any {
    def meta = decoded.get(1)
    def frame_size = int(meta.get("frame_size"))
    if skip + count > meta.get("total_frames") { free(meta.get("ptr")) return 0 }
+   if frame_size <= 0 || count > (9223372036854775807 - 1) / frame_size {
+      free(meta.get("ptr"))
+      return 0
+   }
    def out = malloc(count * frame_size + 1)
+   if !out {
+      free(meta.get("ptr"))
+      return 0
+   }
    if per > 1 {
       ;; Packet decoders return independent buffers. Copy by indexed loads here:
       ;; native pointer addition on this dynamic metadata pointer is not a safe

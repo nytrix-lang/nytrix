@@ -34,7 +34,7 @@ use core.math.parse.3d.gltf as gltf
 use core.common as common
 use core.os.ui.render.viewer.term as terminal
 use core.math
-use core.math.float (is_nan, is_inf)
+use core.math.checked (checked_add, checked_mul)use core.math.float (is_nan, is_inf)
 use core.os.ui.render.camera as ui_camera
 use core.os.ui.render as render
 use core.os.ui.render.atlas as atlas
@@ -2993,11 +2993,21 @@ fn _prebake_scene_gpu_parts(any gpu_parts, any scene_model) any {
    while i < gpu_parts_n {
       def rec = gpu_parts.get(i, 0)
       if is_list(rec) && rec.len >= 40 {
-         mut rec2 = clone(rec)
          def part_m = _as_render_model_mat4(rec.get(10, 0))
-         def baked_m = mat4_identity()
-         mat4_mul_into(scene_m, part_m, baked_m)
-         rec2[10] = baked_m
+         ;; The product is taken as a returned value and stored with if/else.
+         ;; Writing into a local identity (`mat4_mul_into(a, b, m)`) left a
+         ;; stale matrix here, and `k == 10 ? baked_m : rec.get(k)` picked the
+         ;; wrong operand; either way every packed part kept its unfitted
+         ;; model and loaded scenes drew at raw asset scale, far too small to see.
+         def any baked_m = mat4_mul(scene_m, part_m)
+         mut rec2 = []
+         mut k = 0
+         def rec_n = rec.len
+         while k < rec_n {
+            if k == 10 { rec2 = rec2.append(baked_m) }
+            else { rec2 = rec2.append(rec.get(k, 0)) }
+            k += 1
+         }
          out = out.append(rec2)
       } else {
          out = out.append(rec)
@@ -3019,8 +3029,7 @@ fn _prebake_scene_render_parts(any parts, any scene_model) any {
       if is_dict(part) {
          mut part2 = part
          def part_m = _as_render_model_mat4(part.get("model", 0))
-         def baked_m = mat4_identity()
-         mat4_mul_into(scene_m, part_m, baked_m)
+         def any baked_m = mat4_mul(scene_m, part_m)
          part2["model"] = baked_m
          out = out.append(part2)
       } else {
@@ -4455,14 +4464,14 @@ fn _mat_diffuse_transmission_color_slot(dict spec, int bsdf2_u32, int sheen_colo
    float(sheen_color_factor.get(1, 0.0)) +
    float(sheen_color_factor.get(2, 0.0))
    if dt_factor <= 0.000001 || sheen_color_energy > 0.000001 || sheen_color_id >= 0 {
-      return [bsdf2_u32, false]
+      return [bsdf2_u32, 0]
    }
    def dtc = spec.get("diffuse_transmission_color_factor", [1.0, 1.0, 1.0])
    def dt_r = band(int((clamp01(float(dtc.get(0, 1.0))) * 255.0)), 255)
    def dt_g = band(int((clamp01(float(dtc.get(1, 1.0))) * 255.0)), 255)
    def dt_b = band(int((clamp01(float(dtc.get(2, 1.0))) * 255.0)), 255)
    def thick_u8 = band(bshr(bsdf2_u32, 24), 255)
-   [bor(dt_r, bor(bshl(dt_g, 8), bor(bshl(dt_b, 16), bshl(thick_u8, 24)))), true]
+   [bor(dt_r, bor(bshl(dt_g, 8), bor(bshl(dt_b, 16), bshl(thick_u8, 24)))), 1]
 }
 
 fn _mat_try_aux_tex(dict spec, int current_id, int current_uv_set, any current_uv_xf, int alpha_u32, int candidate_id, str texcoord_key, any candidate_uv_xf, int flag) list {
@@ -6107,7 +6116,13 @@ fn _scene_merge_indexed_part_run(
       return 0
    }
    def run_same_model = _scene_merge_run_same_model(parts, start_idx, end_idx)
-   def vout, iout = malloc(total_vcnt * VERTEX_STRIDE), malloc(total_icnt * (idx_u32 ? 4 : 2))
+   def vbytes = checked_mul(total_vcnt, VERTEX_STRIDE)
+   def ibytes = checked_mul(total_icnt, idx_u32 ? 4 : 2)
+   if !is_ok(vbytes) || !is_ok(ibytes) {
+      _scene_merge_log_fail("extent", start_idx, end_idx, total_vcnt, total_icnt)
+      return 0
+   }
+   def vout, iout = malloc(int(unwrap(vbytes))), malloc(int(unwrap(ibytes)))
    if !vout || !iout {
       _scene_merge_log_fail("alloc", start_idx, end_idx, total_vcnt, total_icnt)
       return _scene_free_two(vout, iout)
@@ -6849,10 +6864,14 @@ fn _scene_skinned_solid_merge_compatible(any first, any next, int total_vcnt, f6
 
 fn _scene_merge_skinned_solid_run(list parts, int start_idx, int end_idx, int total_vcnt, int total_icnt) any {
    if end_idx <= start_idx + 1 || total_vcnt <= 0 || total_icnt <= 0 { return 0 }
-   def bind_out = malloc(total_vcnt * VERTEX_STRIDE)
-   def joints_out = malloc(total_vcnt * 16)
-   def weights_out = malloc(total_vcnt * 16)
-   def iout = malloc(total_icnt * 4)
+   def vbytes = checked_mul(total_vcnt, VERTEX_STRIDE)
+   def skin_bytes = checked_mul(total_vcnt, 16)
+   def ibytes = checked_mul(total_icnt, 4)
+   if !is_ok(vbytes) || !is_ok(skin_bytes) || !is_ok(ibytes) { return 0 }
+   def bind_out = malloc(int(unwrap(vbytes)))
+   def joints_out = malloc(int(unwrap(skin_bytes)))
+   def weights_out = malloc(int(unwrap(skin_bytes)))
+   def iout = malloc(int(unwrap(ibytes)))
    if !bind_out || !joints_out || !weights_out || !iout { return _scene_free_skin_merge_buffers(bind_out, joints_out, weights_out, iout) }
    mut vbase = 0
    mut iwrite = 0

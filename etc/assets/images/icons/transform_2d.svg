@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
+  <title>Transform 2D</title>
+  <desc>Transform 2D icon.</desc>
+  <g transform="translate(2.0000 4.5000) scale(1.25000)">
+<path fill="#c6c6ca" d="M0 2v2h2v6h2V4h3a1 1 0 0 1 0 2 2 2 0 0 0-2 2v2h7a4 4 0 0 0 0-8h-2v6H7a3 3 0 0 0 0-6zm12 2a2 2 0 0 1 0 4z"/><path fill="#c6c6ca" fill-opacity=".4" d="M6.5 2v2H7a1 1 0 0 1 0 2 2 2 0 0 0-2 2v2h5V8H7a3 3 0 0 0 0-6h-.5z"/>
+  </g>
+</svg>

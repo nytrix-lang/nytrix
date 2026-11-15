@@ -2,7 +2,7 @@
 ;; Virtual terminal state helpers for console-like UI surfaces.
 ;; References:
 ;; - core.os.ui.render.viewer.term
-module core.os.ui.render.viewer.vterm(new, open, close, update, draw, handle_event, put_text, send_input, resize, set_fonts, set_viewport, is_running, get_title, cursor_blink_phase, needs_visual_refresh, idle_sleep_ms, default_shell_path, default_shell_args, env_bg_color, abgr_to_color, selection_dragging, selection_any, clear_selection)
+module core.os.ui.render.viewer.vterm(new, open, dispose, update, draw, handle_event, put_text, send_input, resize, set_fonts, set_viewport, is_running, get_title, cursor_blink_phase, needs_visual_refresh, idle_sleep_ms, default_shell_path, default_shell_args, env_bg_color, abgr_to_color, selection_dragging, selection_any, clear_selection)
 use core
 use core.mem (__copy_mem)
 use core.os (environ, file_read, file_exists, msleep, ticks)
@@ -986,7 +986,9 @@ fn open(dict vt, str cmd="/bin/sh", list args=[]) Result<dict, any> {
    ok(nvt)
 }
 
-fn close(any vt) any {
+;; Named `dispose`, not `close`: `vterm.close(vt)` resolved to the OS
+;; file-descriptor close, so terminals were never torn down.
+fn dispose(any vt) any {
    "Closes the virtual terminal, terminating the associated PTY and freeing resources."
    if !vt || !is_dict(vt) { return 0 }
    def ptr sh = vt.get("shared") store64(sh, 0, 32)
@@ -4477,16 +4479,24 @@ fn resize(dict vt, int cols, int rows) dict {
    def dfg = vt.get("def_fg") def dbg = vt.get("def_bg")
    ;; Detect alt-screen mode up front: in this mode grid and alt_grid point
    ;; at the same buffer (the visible alt screen), and primary_grid holds the
-   ;; hidden main-screen buffer. The previous code unconditionally freed og
-   ;; (== alt_grid) and then freed alt_grid again — a double free — while
-   ;; leaving primary_grid with stale cols/rows, causing out-of-bounds writes
-   ;; after the next alt-screen exit. We now resize whichever buffer is the
-   ;; visible one and also reallocate the hidden one to match the new size.
+   ;; hidden main-screen buffer. Resize the visible buffer and, when needed,
+   ;; pre-allocate a resized hidden primary buffer before committing so an
+   ;; allocation failure leaves the terminal in its previous consistent state.
    def ptr st0 = vt.get("state")
    def in_alt = st0 != 0 && (load32(st0, OFF_MODE) & MODE_ALTSCREEN) != 0
    def ptr og = vt.get("grid")
+   def ptr al = vt.get("alt_grid", 0)
+   def ptr prim = in_alt ? vt.get("primary_grid", 0) : 0
    mut ptr ng = malloc(cols * rows * 16)
    if !ng { return vt }
+   mut ptr pnew = 0
+   if in_alt && prim && prim != og {
+      pnew = malloc(cols * rows * 16)
+      if !pnew {
+         free(ng)
+         return vt
+      }
+   }
    _clear_grid(ng, cols, rows, dfg, dbg)
    def int copy_rows = min(rows, old_rows)
    def int copy_cols = min(cols, old_cols)
@@ -4495,31 +4505,25 @@ fn resize(dict vt, int cols, int rows) dict {
       def ptr src = ptr_add(og, r * old_cols * 16)
       __copy_mem_raw(dst, src, copy_cols * 16)
    }
+   if pnew {
+      _clear_grid(pnew, cols, rows, dfg, dbg)
+      for pr in 0..(copy_rows - 1) {
+         def ptr dst = ptr_add(pnew, pr * cols * 16)
+         def ptr src = ptr_add(prim, pr * old_cols * 16)
+         __copy_mem_raw(dst, src, copy_cols * 16)
+      }
+   }
    mut nvt = vt.set("grid", ng)
    nvt = nvt.set("cols", cols)
    nvt = nvt.set("rows", rows)
    free(og)
-   def ptr al = nvt.get("alt_grid")
    if in_alt {
       ;; grid was == alt_grid (both pointed at og, now freed). Keep them in
-      ;; sync by pointing alt_grid at the new buffer too — do NOT free(al)
-      ;; because al == og here.
+      ;; sync by pointing alt_grid at the new buffer too.
       nvt = nvt.set("alt_grid", ng)
-      ;; Resize the hidden primary_grid so a later alt-screen exit restores a
-      ;; correctly-sized main screen instead of corrupting memory.
-      def ptr prim = nvt.get("primary_grid", 0)
-      if prim && prim != og {
-         mut ptr pnew = malloc(cols * rows * 16)
-         if pnew {
-            _clear_grid(pnew, cols, rows, dfg, dbg)
-            for pr in 0..(copy_rows - 1) {
-               def ptr dst = ptr_add(pnew, pr * cols * 16)
-               def ptr src = ptr_add(prim, pr * old_cols * 16)
-               __copy_mem_raw(dst, src, copy_cols * 16)
-            }
-            free(prim)
-            nvt = nvt.set("primary_grid", pnew)
-         }
+      if pnew {
+         free(prim)
+         nvt = nvt.set("primary_grid", pnew)
       }
    } elif al {
       ;; Not in alt-screen: alt_grid is a stale separate buffer, safe to free.
@@ -4631,7 +4635,7 @@ fn _resize_pty(int m, int cols, int rows, int px_w=0, int px_h=0) any {
    def vt2 = handle_event(vt1, EVENT_KEY_CHAR, {"char": 97, "mod": 0, "plain": true, "ww": 800.0, "wh": 480.0})
    def ptr st2 = vt2.get("state")
    assert(load32(st2, 0) == 1 && load32(st2, 4) == 0, "vterm key char cursor")
-   close(vt)
-   close(vt2)
+   dispose(vt)
+   dispose(vt2)
    print("✓ core.os.ui.render.viewer.vterm self-test passed")
 }

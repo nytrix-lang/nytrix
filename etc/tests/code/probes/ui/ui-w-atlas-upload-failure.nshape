@@ -29,9 +29,24 @@ def sheet = {
 }
 assert(atlas.atlas_flush(sheet) == -1, "failed texture update is reported")
 assert(load32(state, 12) == 1, "dirty atlas data remains queued after failed upload")
+def huge_state = zalloc(64)
+assert(huge_state != 0, "overflow atlas state allocated")
+store32(huge_state, 1, 12)
+store32(huge_state, 1600000000, 24)
+store32(huge_state, 1600000000, 28)
+def huge_sheet = {
+   "width": 1600000000, "height": 1600000000,
+   "state_ptr": huge_state, "cpu_buf": pixels, "tex_id": 3,
+   "backend": "mock", "filter": 0, "items": dict(4)
+}
+assert(atlas.atlas_flush(huge_sheet) == -1,
+       "atlas byte extent overflow is rejected before copying")
+assert(load32(huge_state, 12) == 1,
+       "overflowing atlas remains dirty for a later valid retry")
 atlas.atlas_set_backend("vk")
 free(pixels)
 free(state)
+free(huge_state)
 print("UI-W-ATLAS-UPLOAD-FAILURE-OK")
 NY
 }

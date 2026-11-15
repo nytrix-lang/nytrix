@@ -27,11 +27,11 @@ fn _ident_after(str s, int start) str {
 ;; Returns the result of the `icon_for` operation.
 fn icon_for(str kind) str {
    if kind == "fn" { return "callable" }
-   if kind == "struct" { return "classlist" }
+   if kind == "struct" { return "class_list" }
    if kind == "enum" { return "dictionary" }
    if kind == "module" { return "filesystem" }
-   if kind == "main" { return "debugcontinue" }
-   "graphnode"
+   if kind == "main" { return "debug_continue" }
+   "graph_node"
 }
 
 fn _push_symbol(list out, str kind, str name, int line) list {

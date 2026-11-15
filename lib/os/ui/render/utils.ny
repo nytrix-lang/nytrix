@@ -14,6 +14,7 @@ module core.os.ui.render.utils(
 use core
 use core.mem
 use core.math
+use core.math.checked (checked_mul)
 use core.os.ui.render.dump as ui_profile
 use core.os.ui.render.shared as render_shared
 use core.common as common
@@ -198,8 +199,11 @@ fn pack_bsdf5_u32(dict minfo) int {
 
 fn pack_bsdf_ext_slab(any minfo) any {
    "Allocates a 64-byte future-material slab."
+   mut cleanup = [0]
+   defer { if cleanup[0] { free(cleanup[0]) } }
    def slab = malloc(64)
    if !slab { return 0 }
+   cleanup[0] = slab
    memset(slab, 0, 64)
    store32(slab, pack_bsdf4_u32(minfo), 0)
    store32(slab, pack_bsdf5_u32(minfo), 4)
@@ -215,6 +219,7 @@ fn pack_bsdf_ext_slab(any minfo) any {
    store32_f32(slab, float(ssc.get(0, 1.0)), 36)
    store32_f32(slab, float(ssc.get(1, 1.0)), 40)
    store32_f32(slab, float(ssc.get(2, 1.0)), 44)
+   cleanup[0] = 0
    slab
 }
 
@@ -652,17 +657,22 @@ fn gltf_sync_drawable_parts_from_raw(any existing_parts, any raw_parts, bool upd
 fn gltf_expand_indexed_vertices(?ptr vptr, int vcnt, ?ptr iptr, int icnt, bool idx_u32=false) ?ptr {
    "Expands indexed packed glTF vertices into a linear CPU vertex buffer."
    if !vptr || vcnt <= 0 || !iptr || icnt <= 0 { return 0 }
-   mut ?ptr out = malloc(icnt * render_shared.VERTEX_STRIDE)
+   def output_bytes = checked_mul(icnt, render_shared.VERTEX_STRIDE)
+   def input_bytes = checked_mul(vcnt, render_shared.VERTEX_STRIDE)
+   def idx_step = idx_u32 ? 4 : 2
+   def idx_bytes_result = checked_mul(icnt, idx_step)
+   if !is_ok(output_bytes) || !is_ok(input_bytes) || !is_ok(idx_bytes_result) { return 0 }
+   def output_size = int(unwrap(output_bytes))
+   def idx_bytes_n = int(unwrap(idx_bytes_result))
+   mut cleanup = [0]
+   defer { if cleanup[0] { free(cleanup[0]) } }
+   mut ?ptr out = malloc(output_size)
    if !out { return 0 }
+   cleanup[0] = out
    memset(out, 0, render_shared.VERTEX_STRIDE)
    def trace_expand = common.env_truthy("NY_RENDER_INDEX_TRACE") || common.env_truthy("NY_GLTF_INDEX_TRACE") || common.env_truthy("NY_VK_CAPTURE_TRACE")
-   def idx_step = idx_u32 ? 4 : 2
-   def idx_bytes_n = icnt * idx_step
    def idx_bytes = bytes(idx_bytes_n)
-   if !idx_bytes {
-      free(out)
-      return 0
-   }
+   if !idx_bytes { return 0 }
    __copy_mem(idx_bytes, iptr, idx_bytes_n)
    if trace_expand {
       ui_profile.print_text("[render:expand:bytes] len=" + to_str(len(idx_bytes)) +
@@ -696,14 +706,21 @@ fn gltf_expand_indexed_vertices(?ptr vptr, int vcnt, ?ptr iptr, int icnt, bool i
       dst_off += render_shared.VERTEX_STRIDE
       i += 1
    }
+   cleanup[0] = 0
    out
 }
 
 fn gltf_rewind_triangle_vertices(?ptr vptr, int vcnt) ?ptr {
    "Copies a linear triangle-list vertex buffer with every triangle winding reversed."
    if !vptr || vcnt <= 0 { return 0 }
-   mut ?ptr out = malloc(vcnt * render_shared.VERTEX_STRIDE)
+   def output_bytes = checked_mul(vcnt, render_shared.VERTEX_STRIDE)
+   if !is_ok(output_bytes) { return 0 }
+   def output_size = int(unwrap(output_bytes))
+   mut cleanup = [0]
+   defer { if cleanup[0] { free(cleanup[0]) } }
+   mut ?ptr out = malloc(output_size)
    if !out { return 0 }
+   cleanup[0] = out
    mut i = 0
    while i + 2 < vcnt {
       __copy_mem(out + (i + 0) * render_shared.VERTEX_STRIDE, vptr + (i + 0) * render_shared.VERTEX_STRIDE, render_shared.VERTEX_STRIDE)
@@ -715,14 +732,18 @@ fn gltf_rewind_triangle_vertices(?ptr vptr, int vcnt) ?ptr {
       __copy_mem(out + i * render_shared.VERTEX_STRIDE, vptr + i * render_shared.VERTEX_STRIDE, render_shared.VERTEX_STRIDE)
       i += 1
    }
+   cleanup[0] = 0
    out
 }
 
 fn pack_material_slab(any part) any {
    "Packs a material record into the shared native material slab layout."
    if !is_dict(part) { return 0 }
+   mut cleanup = [0]
+   defer { if cleanup[0] { free(cleanup[0]) } }
    def slab = malloc(160)
    if !slab { return 0 }
+   cleanup[0] = slab
    memset(slab, 0, 160)
    def base_color_u32 = int(part.get("base_color_u32", 0xffffffff))
    def material_u32 = int(part.get("material_u32", 0x0000ff00))
@@ -790,5 +811,6 @@ fn pack_material_slab(any part) any {
       occlusion_uv_xf0, occlusion_uv_xf1, emissive_uv_xf0, emissive_uv_xf1, visible,
       node_idx, normal_tex_word, mesh, model, is_lines, width, unlit, bsdf_ext_slab,
       is_points, bsdf4_u32, bsdf5_u32, ext2_tex_word, flip_winding)
+   cleanup[0] = 0
    slab
 }

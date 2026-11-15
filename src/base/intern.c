@@ -81,13 +81,17 @@ static void ny_intern_ptr_map_put(const char *ptr) {
   }
   size_t mask = g_intern_ptr_map_cap - 1;
   size_t idx = ny_intern_ptr_hash(ptr) & mask;
-  while (g_intern_ptr_map[idx]) {
+  for (size_t probes = 0; probes < g_intern_ptr_map_cap; ++probes) {
     if (g_intern_ptr_map[idx] == ptr)
       return;
+    if (!g_intern_ptr_map[idx]) {
+      g_intern_ptr_map[idx] = ptr;
+      g_intern_ptr_map_len++;
+      return;
+    }
     idx = (idx + 1) & mask;
   }
-  g_intern_ptr_map[idx] = ptr;
-  g_intern_ptr_map_len++;
+  /* The map is an index; exact membership remains recoverable by table scan. */
 }
 
 void ny_intern_init(void) {
@@ -113,7 +117,12 @@ void ny_intern_init(void) {
   g_intern_ptr_map_cap = NY_INTERN_PTR_MAP_CAP_INIT;
   g_intern_ptr_map = calloc(g_intern_ptr_map_cap, sizeof(const char *));
   g_intern_ptr_map_len = 0;
-  ny_intern_ptr_map_put(g_intern_table[0].str);
+  if (g_intern_ptr_map) {
+    ny_intern_ptr_map_put(g_intern_table[0].str);
+  } else {
+    /* The pointer index is optional; lookups fall back to the table scan. */
+    g_intern_ptr_map_cap = 0;
+  }
 }
 
 ny_sym_id ny_intern_str_hashed(const char *str, size_t len, uint64_t hash) {
@@ -164,7 +173,8 @@ ny_sym_id ny_intern_str_hashed(const char *str, size_t len, uint64_t hash) {
   g_intern_table[new_id].str = dup;
   g_intern_table[new_id].len = len;
   g_intern_table[new_id].hash = hash;
-  g_intern_ptr_cache[(((uintptr_t)dup) >> 3) & (NY_INTERN_PTR_CACHE_SLOTS - 1u)] = dup;
+  g_intern_ptr_cache[(((uintptr_t)dup) >> 3) &
+                     (NY_INTERN_PTR_CACHE_SLOTS - 1u)] = dup;
   ny_intern_ptr_map_put(dup);
 
   g_intern_map[idx] = new_id;
@@ -218,16 +228,25 @@ bool ny_intern_contains_ptr(const char *str) {
   size_t slot = (((uintptr_t)str) >> 3) & (NY_INTERN_PTR_CACHE_SLOTS - 1u);
   if (g_intern_ptr_cache[slot] == str)
     return true;
-  if (!g_intern_ptr_map || g_intern_ptr_map_cap == 0)
-    return false;
-  size_t mask = g_intern_ptr_map_cap - 1;
-  size_t idx = ny_intern_ptr_hash(str) & mask;
-  while (g_intern_ptr_map[idx]) {
-    if (g_intern_ptr_map[idx] == str) {
+  if (g_intern_ptr_map && g_intern_ptr_map_cap != 0) {
+    size_t mask = g_intern_ptr_map_cap - 1;
+    size_t idx = ny_intern_ptr_hash(str) & mask;
+    for (size_t probes = 0; probes < g_intern_ptr_map_cap; ++probes) {
+      if (!g_intern_ptr_map[idx])
+        break;
+      if (g_intern_ptr_map[idx] == str) {
+        g_intern_ptr_cache[slot] = str;
+        return true;
+      }
+      idx = (idx + 1) & mask;
+    }
+  }
+  /* Preserve exact answers if the optional pointer index could not grow. */
+  for (size_t i = 1; i < g_intern_count; ++i) {
+    if (g_intern_table[i].str == str) {
       g_intern_ptr_cache[slot] = str;
       return true;
     }
-    idx = (idx + 1) & mask;
   }
   return false;
 }

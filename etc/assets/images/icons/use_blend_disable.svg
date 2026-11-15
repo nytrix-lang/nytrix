@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
+  <title id="title1">Use Blend Disable</title>
+  <desc id="desc1">Use Blend Disable editor icon. Original asset id: useblenddisable.</desc>
+  <defs id="defs2" />
+  <g transform="translate(2.0000 2.0000) scale(1.25000)" id="g2">
+    <path fill="#c6c6ca" d="M4.5 1h7v14h-7z" opacity=".5" id="path1" />
+    <path d="m 1,1 v 2 h 3.5 v 12 h 2 V 3 h 3 v 12 h 2 V 3 H 15 V 1 Z" id="path2" fill="#c6c6ca" />
+  </g>
+</svg>

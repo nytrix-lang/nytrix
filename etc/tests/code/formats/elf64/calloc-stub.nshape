@@ -10,6 +10,7 @@ use core
 
 extern {
   fn calloc(i64 count, i64 size) ptr
+  fn c_free(ptr p) as "free"
 }
 
 fn probe() i64 {
@@ -18,7 +19,7 @@ fn probe() i64 {
   def before = load64_i(p)
   store64_i(p, 42)
   def after = load64_i(p)
-  free(p)
+  c_free(p)
   if before == 0 && after == 42 { 42 } else { 0 }
 }
 

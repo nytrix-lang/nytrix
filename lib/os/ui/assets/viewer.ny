@@ -76,19 +76,19 @@ def list GLTF_ASSET_DEFAULT_ROOTS = [
    "tmp/assets/models"
 ]
 
-fn mono_font(int size, candidates=0, int font_filter=-1) int {
+fn mono_font(int size, any candidates=0, int font_filter=-1) int {
    "Runs the mono font operation."
    if !candidates { candidates = MONO_FONT_CANDIDATES }
    ui_runtime.font_from_candidates(size, candidates, font_filter, "monocraft")
 }
 
-fn editor_font(int size, candidates=0, int font_filter=-1) int {
+fn editor_font(int size, any candidates=0, int font_filter=-1) int {
    "Runs the editor font operation."
    if !candidates { candidates = EDITOR_FONT_CANDIDATES }
    ui_runtime.font_from_candidates(size, candidates, font_filter, "monocraft")
 }
 
-fn ui_font(int size, candidates=0, int font_filter=-1) int {
+fn ui_font(int size, any candidates=0, int font_filter=-1) int {
    "Runs the font operation."
    if !candidates { candidates = UI_FONT_CANDIDATES }
    ui_runtime.ui_font_from_candidates(size, candidates, EDITOR_FONT_CANDIDATES, font_filter)

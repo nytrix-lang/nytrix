@@ -1,0 +1,38 @@
+shape bitwise_primitive_tagged_operands {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "codegen", "bitwise"]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect compile_and_run
+  expect_message "BITWISE-PRIMITIVE-TAGGED-OPERANDS-OK"
+  source ny <<'NY'
+use core
+
+;; core.primitives.bshl forwards `any` parameters to __shl, and the inlined
+;; result is a tagged word. Native lowering shifted the tagged operands
+;; (bshl(255, 8) gave 511 << 17) and bor/+ consumed the tagged result as raw
+;; (2n+1). glTF material colour/alpha words packed this way were garbage.
+fn via_any_shr(any a, any b) any { bshr(a, b) }
+fn packed_alpha(int mode, int cutoff, int occlusion) int {
+   bor(mode, bor(bshl(cutoff, 8), bshl(occlusion, 16)))
+}
+fn packed_color(bool use_alpha) int {
+   def fr = band(int(clamp01(1.0) * 255.0), 255)
+   def fa = use_alpha ? band(int(clamp01(0.5) * 255.0), 255) : 255
+   bor(bor(fr, bshl(fr, 8)), bor(bshl(fr, 16), bshl(fa, 24)))
+}
+
+assert(bshl(255, 8) == 65280, "bshl on literals")
+assert(bshl(1, 3) == 8, "bshl by an odd count")
+assert(bshr(65280, 8) == 255, "bshr on literals")
+assert(via_any_shr(65280, 8) == 255, "bshr on any operands")
+assert(bor(1, bshl(127, 8)) == 32513, "bor of an inlined bshl result")
+assert(bshl(255, 8) + 1 == 65281, "arithmetic on an inlined bshl result")
+assert(band(bshl(255, 8), 65535) == 65280, "band of an inlined bshl result")
+assert(packed_alpha(0, 127, 255) == 0xff7f00, "alpha word packs mode, cutoff, occlusion")
+assert(packed_color(false) == 0xffffffff, "opaque colour word")
+assert(packed_color(true) == 0x7fffffff, "blend colour word keeps the alpha factor")
+print("BITWISE-PRIMITIVE-TAGGED-OPERANDS-OK")
+NY
+}

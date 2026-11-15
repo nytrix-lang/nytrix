@@ -1,0 +1,20 @@
+shape type_proves_early_return_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "proof", "postcondition", "early-return", "soundness"]
+  template ny-compile-fail
+  flags_matrix "--native-only; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_fail
+
+  expect_message "is not proved for a returned value range"
+  source ny <<'NY'
+use core
+
+@proves(result > 0)
+fn bad(bool take_bad) int {
+  if take_bad { return -1 }
+  1
+}
+bad(false)
+NY
+}

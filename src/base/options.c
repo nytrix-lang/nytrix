@@ -690,6 +690,21 @@ static bool ny_parse_heap_policy(const char *raw, ny_heap_policy_t *out) {
     *out = NY_HEAP_GC;
     return true;
   }
+  /*
+   * `safe` keeps the manual ownership model and turns on the runtime safe
+   * heap: guard-page blocks, quarantined frees, use-after-free / overflow /
+   * double-free traps, and a leak report at exit for user allocations.
+   */
+  if (strcmp(raw, "safe") == 0) {
+    *out = NY_HEAP_MANUAL;
+    /*
+     * A build-time switch, not NYTRIX_SAFE_HEAP: the compiler shares the
+     * runtime, and its own allocations must stay on the normal heap. The
+     * lowered program arms the safe heap in its entry prologue instead.
+     */
+    setenv("NYTRIX_SAFE_HEAP_BUILD", "1", 1);
+    return true;
+  }
   return false;
 }
 
@@ -697,7 +712,8 @@ static void ny_set_heap_policy_or_die(ny_options *opt, const char *raw,
                                       const char *argv0) {
   ny_heap_policy_t policy = NY_HEAP_MANUAL;
   if (!ny_parse_heap_policy(raw, &policy)) {
-    fprintf(stderr, "invalid heap policy: %s (expected manual|raii|rc|gc)\n",
+    fprintf(stderr,
+            "invalid heap policy: %s (expected manual|raii|rc|gc|safe)\n",
             raw ? raw : "(null)");
     ny_options_usage(argv0);
     exit(1);
@@ -1469,10 +1485,10 @@ invalid:
   exit(2);
 }
 
-#define NY_TRACE_LIST_VALUES                                  \
+#define NY_TRACE_LIST_VALUES                                                   \
   "tokens|parse|scope|hm|unify|trait|llvm|regalloc|exec|meta"
-#define NY_DUMP_LIST_VALUES                                      \
-  "ast|tokens|llvm|llvm-passes|nyr|vm|funcs|escapes|proofs|obj|" \
+#define NY_DUMP_LIST_VALUES                                                    \
+  "ast|tokens|llvm|llvm-passes|nyr|vm|funcs|escapes|proofs|obj|"               \
   "callgraph|abi|stack|regalloc|elf|expand"
 
 static void ny_options_apply_trace_list(ny_options *opt, const char *items) {
@@ -1518,11 +1534,11 @@ invalid:
 
 static bool ny_options_apply_dump_item(ny_options *opt, const char *item,
                                        size_t length) {
-#define NY_DUMP_ITEM(name, body)                   \
-  if (length == sizeof(name) - 1 &&                \
-      memcmp(item, name, sizeof(name) - 1) == 0) { \
-    body;                                          \
-    return true;                                   \
+#define NY_DUMP_ITEM(name, body)                                               \
+  if (length == sizeof(name) - 1 &&                                            \
+      memcmp(item, name, sizeof(name) - 1) == 0) {                             \
+    body;                                                                      \
+    return true;                                                               \
   }
   NY_DUMP_ITEM("ast", opt->dump_ast = true)
   NY_DUMP_ITEM("tokens", opt->dump_tokens = true)
@@ -2054,7 +2070,7 @@ static const char ny_emit_default_path_marker[] = "\x1fny-default";
 
 static bool ny_emit_assign(ny_options *opt, const char *kind, size_t kind_len,
                            const char *path, size_t path_len) {
-#define NY_EMIT_KIND(name)                                                    \
+#define NY_EMIT_KIND(name)                                                     \
   (kind_len == sizeof(name) - 1 && memcmp(kind, name, sizeof(name) - 1) == 0)
   bool known =
       NY_EMIT_KIND("asm") || NY_EMIT_KIND("ir") || NY_EMIT_KIND("bc") ||
@@ -2505,9 +2521,9 @@ static bool ny_options_apply_common_codegen_option(ny_options *opt,
         name += 3;
         length -= 3;
       }
-#define NY_OPT_ITEM(spelling, field)                                      \
-  (length == sizeof(spelling) - 1 && strncmp(name, spelling, length) == 0 \
-       ? (opt->field = enabled, true)                                     \
+#define NY_OPT_ITEM(spelling, field)                                           \
+  (length == sizeof(spelling) - 1 && strncmp(name, spelling, length) == 0      \
+       ? (opt->field = enabled, true)                                          \
        : false)
       bool matched =
           NY_OPT_ITEM("dce", opt_dce) || NY_OPT_ITEM("loops", opt_loops) ||
@@ -2550,9 +2566,9 @@ static bool ny_options_apply_common_codegen_option(ny_options *opt,
         name += 3;
         length -= 3;
       }
-#define NY_CHECK_ITEM(spelling, field)                                    \
-  (length == sizeof(spelling) - 1 && strncmp(name, spelling, length) == 0 \
-       ? (opt->field = enabled, true)                                     \
+#define NY_CHECK_ITEM(spelling, field)                                         \
+  (length == sizeof(spelling) - 1 && strncmp(name, spelling, length) == 0      \
+       ? (opt->field = enabled, true)                                          \
        : false)
       bool matched = NY_CHECK_ITEM("types", strict_types) ||
                      NY_CHECK_ITEM("effects", effect_require_known) ||
@@ -3454,66 +3470,66 @@ typedef struct {
   const char *scope;
 } ny_option_registry_entry_t;
 
-#define NY_REG_BOOL_OPTION(option_name, option_group, option_summary)     \
-  {option_name, {NULL}, NY_REG_BOOL, NULL,  option_group, option_summary, \
-   "advanced",  NULL,   NULL,        NULL,  NULL,         NULL,           \
+#define NY_REG_BOOL_OPTION(option_name, option_group, option_summary)          \
+  {option_name, {NULL}, NY_REG_BOOL, NULL,  option_group, option_summary,      \
+   "advanced",  NULL,   NULL,        NULL,  NULL,         NULL,                \
    0,           false,  NULL,        false, "global"}
-#define NY_REG_PATH_OPTION(option_name, option_group, option_summary)     \
-  {option_name, {NULL}, NY_REG_PATH, NULL,  option_group, option_summary, \
-   "advanced",  NULL,   NULL,        NULL,  NULL,         NULL,           \
+#define NY_REG_PATH_OPTION(option_name, option_group, option_summary)          \
+  {option_name, {NULL}, NY_REG_PATH, NULL,  option_group, option_summary,      \
+   "advanced",  NULL,   NULL,        NULL,  NULL,         NULL,                \
    0,           true,   NULL,        false, "global"}
-#define NY_REG_TRUSTED_PATH_OPTION(option_name, option_group, option_summary) \
-  {option_name, {NULL}, NY_REG_PATH, NULL, option_group, option_summary,      \
-   "advanced",  NULL,   NULL,        NULL, NULL,         NULL,                \
+#define NY_REG_TRUSTED_PATH_OPTION(option_name, option_group, option_summary)  \
+  {option_name, {NULL}, NY_REG_PATH, NULL, option_group, option_summary,       \
+   "advanced",  NULL,   NULL,        NULL, NULL,         NULL,                 \
    0,           true,   NULL,        true, "global"}
-#define NY_REG_TRUSTED_VALUE_OPTION(option_name, option_kind, values,      \
-                                    option_group, option_summary)          \
-  {option_name, {NULL}, option_kind, values, option_group, option_summary, \
-   "advanced",  NULL,   NULL,        NULL,   NULL,         NULL,           \
+#define NY_REG_TRUSTED_VALUE_OPTION(option_name, option_kind, values,          \
+                                    option_group, option_summary)              \
+  {option_name, {NULL}, option_kind, values, option_group, option_summary,     \
+   "advanced",  NULL,   NULL,        NULL,   NULL,         NULL,               \
    0,           true,   NULL,        true,   "global"}
 #define NY_REG_OPTIONAL_PATH_OPTION(option_name, option_group, option_summary) \
   {option_name, {NULL}, NY_REG_PATH, NULL,  option_group, option_summary,      \
    "advanced",  NULL,   NULL,        NULL,  NULL,         NULL,                \
    0,           false,  NULL,        false, "global"}
-#define NY_REG_TRUSTED_OPTIONAL_PATH_OPTION(option_name, option_group,   \
-                                            option_summary)              \
-  {option_name, {NULL}, NY_REG_PATH, NULL, option_group, option_summary, \
-   "advanced",  NULL,   NULL,        NULL, NULL,         NULL,           \
+#define NY_REG_TRUSTED_OPTIONAL_PATH_OPTION(option_name, option_group,         \
+                                            option_summary)                    \
+  {option_name, {NULL}, NY_REG_PATH, NULL, option_group, option_summary,       \
+   "advanced",  NULL,   NULL,        NULL, NULL,         NULL,                 \
    0,           false,  NULL,        true, "global"}
-#define NY_REG_VALUE_OPTION(option_name, option_kind, values, option_group, \
-                            option_summary)                                 \
-  {option_name, {NULL}, option_kind, values, option_group, option_summary,  \
-   "advanced",  NULL,   NULL,        NULL,   NULL,         NULL,            \
+#define NY_REG_VALUE_OPTION(option_name, option_kind, values, option_group,    \
+                            option_summary)                                    \
+  {option_name, {NULL}, option_kind, values, option_group, option_summary,     \
+   "advanced",  NULL,   NULL,        NULL,   NULL,         NULL,               \
    0,           true,   NULL,        false,  "global"}
-#define NY_REG_FAMILY_VALUE_OPTION(option_name, option_kind, values,         \
-                                   option_group, option_summary, short_name, \
-                                   family_spec)                              \
-  {option_name, {NULL}, option_kind, values, option_group, option_summary,   \
-   "advanced",  NULL,   NULL,        NULL,   short_name,   family_spec,      \
+#define NY_REG_FAMILY_VALUE_OPTION(option_name, option_kind, values,           \
+                                   option_group, option_summary, short_name,   \
+                                   family_spec)                                \
+  {option_name, {NULL}, option_kind, values, option_group, option_summary,     \
+   "advanced",  NULL,   NULL,        NULL,   short_name,   family_spec,        \
    0,           true,   NULL,        false,  "global"}
-#define NY_REG_FAMILY_TRUSTED_VALUE_OPTION(option_name, option_kind, values, \
-                                           option_group, option_summary,     \
-                                           short_name, family_spec)          \
-  {option_name, {NULL}, option_kind, values, option_group, option_summary,   \
-   "advanced",  NULL,   NULL,        NULL,   short_name,   family_spec,      \
+#define NY_REG_FAMILY_TRUSTED_VALUE_OPTION(option_name, option_kind, values,   \
+                                           option_group, option_summary,       \
+                                           short_name, family_spec)            \
+  {option_name, {NULL}, option_kind, values, option_group, option_summary,     \
+   "advanced",  NULL,   NULL,        NULL,   short_name,   family_spec,        \
    0,           true,   NULL,        true,   "global"}
-#define NY_REG_DEPRECATED_BOOL_OPTION(option_name, option_group,   \
-                                      option_summary, replacement) \
-  {option_name,    {NULL},       NY_REG_BOOL, NULL,  option_group, \
-   option_summary, "deprecated", replacement, NULL,  NULL,         \
-   NULL,           NULL,         0,           false, NULL,         \
+#define NY_REG_DEPRECATED_BOOL_OPTION(option_name, option_group,               \
+                                      option_summary, replacement)             \
+  {option_name,    {NULL},       NY_REG_BOOL, NULL,  option_group,             \
+   option_summary, "deprecated", replacement, NULL,  NULL,                     \
+   NULL,           NULL,         0,           false, NULL,                     \
    false,          "global"}
-#define NY_REG_DEPRECATED_VALUE_OPTION(option_name, option_group,   \
-                                       option_summary, replacement) \
-  {option_name,    {NULL},       NY_REG_PATH, NULL, option_group,   \
-   option_summary, "deprecated", replacement, NULL, NULL,           \
-   NULL,           NULL,         0,           true, NULL,           \
+#define NY_REG_DEPRECATED_VALUE_OPTION(option_name, option_group,              \
+                                       option_summary, replacement)            \
+  {option_name,    {NULL},       NY_REG_PATH, NULL, option_group,              \
+   option_summary, "deprecated", replacement, NULL, NULL,                      \
+   NULL,           NULL,         0,           true, NULL,                      \
    true,           "global"}
-#define NY_REG_DEPRECATED_OPTIONAL_PATH_OPTION(option_name, option_group,   \
-                                               option_summary, replacement) \
-  {option_name,    {NULL},       NY_REG_PATH, NULL,  option_group,          \
-   option_summary, "deprecated", replacement, NULL,  NULL,                  \
-   NULL,           NULL,         0,           false, NULL,                  \
+#define NY_REG_DEPRECATED_OPTIONAL_PATH_OPTION(option_name, option_group,      \
+                                               option_summary, replacement)    \
+  {option_name,    {NULL},       NY_REG_PATH, NULL,  option_group,             \
+   option_summary, "deprecated", replacement, NULL,  NULL,                     \
+   NULL,           NULL,         0,           false, NULL,                     \
    true,           "global"}
 
 static const struct {
@@ -3687,7 +3703,7 @@ static const ny_option_registry_entry_t ny_option_registry[] = {
     {"--heap",
      {NULL},
      NY_REG_ENUM,
-     "manual|raii|rc|gc",
+     "manual|raii|rc|gc|safe",
      "memory",
      "Choose the heap ownership policy",
      "common",
@@ -3935,7 +3951,7 @@ static const ny_option_registry_entry_t ny_option_registry[] = {
     {"--sanitize",
      {NULL},
      NY_REG_ENUM,
-     "address|undefined|thread|leak",
+     "address|undefined|ub|memory|thread|leak",
      "run",
      "Enable runtime sanitizers",
      "advanced",
@@ -4647,7 +4663,8 @@ static const ny_option_registry_entry_t ny_option_registry[] = {
                         "auto|none|ptx|o|spv|hsaco", "gpu",
                         "Select the accelerator object format"),
     NY_REG_VALUE_OPTION(
-        "--gpu-target", NY_REG_ENUM,
+        "--gpu-target",
+        NY_REG_ENUM,
         "off|none|auto|cuda|nvptx|ptx|hip|rocm|amdgpu|opencl|spirv|vulkan|spv|"
         "metal|hsaco|hsa|hsa-code-object|hsa_code_object|gcn|rdna",
         "gpu", "Select a compatible GPU target"),
@@ -5670,7 +5687,8 @@ static void ny_options_usage_impl(const char *prog, bool show_env,
       {NULL, NULL, NULL}});
   ny_usage_section("MEMORY");
   ny_usage_items((const ny_usage_entry_t[]){
-      {NY_CLR_MAGENTA, "--heap=MODE", "Heap policy: manual | raii | rc | gc"},
+      {NY_CLR_MAGENTA, "--heap=MODE",
+       "Heap policy: manual | raii | rc | gc | safe"},
       {NY_CLR_MAGENTA, "-gc / -no-gc", "Enable/disable GC nursery"},
       {NY_CLR_MAGENTA, "--rc-gc", "Alias for --heap=rc"},
       {NY_CLR_MAGENTA, "--ownership", "Alias for --heap=raii"},
@@ -5795,7 +5813,7 @@ static void ny_options_usage_impl(const char *prog, bool show_env,
       {NY_CLR_GREEN, "--sanitize=KIND",
        "Compile with sanitizer and run under safe-exec supervisor\n"
        "                                        "
-       "    KIND: address | undefined | thread | leak"},
+       "    KIND: address | undefined (ub) | memory | thread | leak"},
       {NY_CLR_GREEN, "-emit-only", "Compile only; do not execute"},
 #ifdef _WIN32
       {NY_CLR_GREEN, "-o [path]",
@@ -6525,14 +6543,14 @@ static void ny_cli_validate_conflicts(int argc, char **argv) {
    * an ownership heap, or a RAII heap together with RC, is a contradiction:
    * the finalizer used to drop one side and keep going.
    */
-  ny_cli_reject_conflict(
-      ny_cli_option_is(argc, argv, "--heap", "gc"), "--heap=gc",
-      ny_cli_has_flag(argc, argv, "--ownership") ||
-          ny_cli_has_flag(argc, argv, "--raii"),
-      "--ownership");
-  ny_cli_reject_conflict(
-      ny_cli_option_is(argc, argv, "--heap", "raii"), "--heap=raii",
-      ny_cli_has_flag(argc, argv, "--rc-gc"), "--rc-gc");
+  ny_cli_reject_conflict(ny_cli_option_is(argc, argv, "--heap", "gc"),
+                         "--heap=gc",
+                         ny_cli_has_flag(argc, argv, "--ownership") ||
+                             ny_cli_has_flag(argc, argv, "--raii"),
+                         "--ownership");
+  ny_cli_reject_conflict(ny_cli_option_is(argc, argv, "--heap", "raii"),
+                         "--heap=raii", ny_cli_has_flag(argc, argv, "--rc-gc"),
+                         "--rc-gc");
   bool jit = ny_cli_has_flag(argc, argv, "--jit") ||
              ny_cli_has_flag(argc, argv, "-jit");
   bool native = ny_cli_has_flag(argc, argv, "--native") ||
@@ -6590,10 +6608,10 @@ static const char *ny_options_derive_emit_path(ny_options *opt,
 }
 
 static void ny_options_resolve_emit_paths(ny_options *opt) {
-#define NY_RESOLVE_EMIT_PATH(field, extension)                  \
-  do {                                                          \
-    if (opt->field == ny_emit_default_path_marker)              \
-      opt->field = ny_options_derive_emit_path(opt, extension); \
+#define NY_RESOLVE_EMIT_PATH(field, extension)                                 \
+  do {                                                                         \
+    if (opt->field == ny_emit_default_path_marker)                             \
+      opt->field = ny_options_derive_emit_path(opt, extension);                \
   } while (0)
   NY_RESOLVE_EMIT_PATH(emit_asm_path, ".s");
   NY_RESOLVE_EMIT_PATH(emit_ir_path, ".ll");
@@ -8141,12 +8159,16 @@ static void ny_options_parse_expanded(ny_options *opt, int argc, char **argv) {
         ny_safe_run_parse(a + 11, &opt->safe_run, argv[0]);
       } else if ((value = ny_option_value_or_die(a, "--sanitize", &i, argc,
                                                  argv, argv[0])) != NULL) {
+        if (strcmp(value, "ub") == 0)
+          value = "undefined";
         if (strcmp(value, "address") != 0 && strcmp(value, "undefined") != 0 &&
-            strcmp(value, "thread") != 0 && strcmp(value, "leak") != 0) {
-          fprintf(stderr,
-                  "%s: --sanitize: expected address|undefined|thread|leak, "
-                  "got '%s'\n",
-                  argv[0], value);
+            strcmp(value, "memory") != 0 && strcmp(value, "thread") != 0 &&
+            strcmp(value, "leak") != 0) {
+          fprintf(
+              stderr,
+              "%s: --sanitize: expected address|undefined|memory|thread|leak, "
+              "got '%s'\n",
+              argv[0], value);
           ny_options_usage(argv[0]);
           exit(1);
         }
@@ -8869,8 +8891,7 @@ static void ny_options_parse_expanded(ny_options *opt, int argc, char **argv) {
      * program.  Hint once per spelling under --warn=all unless the script
      * inspects argv itself, where the note would be misleading.
      */
-    if (program_arg_idx >= 0 && opt->input_file &&
-        !getenv("NYTRIX_NO_HINTS") &&
+    if (program_arg_idx >= 0 && opt->input_file && !getenv("NYTRIX_NO_HINTS") &&
         !ny_source_reads_argv(opt->input_file)) {
       for (int arg = program_arg_idx; arg < argc; ++arg) {
         const char *spelling = argv[arg];
@@ -8910,6 +8931,21 @@ static void ny_options_parse_expanded(ny_options *opt, int argc, char **argv) {
   }
   if (opt->output_file)
     opt->emit_only = true;
+  if (opt->sanitize && *opt->sanitize) {
+    if (opt->native_only || opt->nyr_run ||
+        (opt->native_backend_explicit &&
+         opt->native_backend != NY_NATIVE_BACKEND_LLVM)) {
+      fprintf(stderr, "--sanitize requires --native-backend=llvm; the native "
+                      "encoder does not emit sanitizer instrumentation\n");
+      exit(1);
+    }
+    /*
+     * Artifact defaults must not silently select an uninstrumented encoder.
+     */
+    opt->native_backend = NY_NATIVE_BACKEND_LLVM;
+    opt->native_backend_raw = "llvm";
+    opt->native_backend_explicit = true;
+  }
   if (opt->output_file || opt->run_aot)
     ny_select_host_native_backend_for_artifact(opt,
                                                opt->argv0 ? opt->argv0 : "ny");
@@ -8933,6 +8969,11 @@ static void ny_options_parse_expanded(ny_options *opt, int argc, char **argv) {
     exit(1);
   }
   if (opt->safe_mode) {
+    /*
+     * Guard user allocations without changing RC/RAII reclamation policy.
+     * The compiler shares this runtime; only the emitted entry point arms it.
+     */
+    setenv("NYTRIX_SAFE_HEAP_BUILD", "1", 1);
     if (opt->gc_flag_seen || opt->heap_policy == NY_HEAP_GC) {
       fprintf(stderr, "--safe-mode cannot be combined with -gc or --heap=gc\n");
       fprintf(stderr,

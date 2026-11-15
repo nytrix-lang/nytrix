@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
+  <title id="title1">Concave Polygon Shape 2D</title>
+  <desc id="desc1">Concave Polygon Shape 2D editor icon. Original asset id: concavepolygonshape2d.</desc>
+  <defs id="defs1" />
+  <g transform="translate(2.0000 2.0000) scale(1.25000)" id="g1">
+    <path d="M 1.6171875,1.0761719 A 1.0001,1.0001 0 0 0 1,2 v 12 a 1.0001,1.0001 0 0 0 1,1 h 12 a 1.0001,1.0001 0 0 0 1,-1 V 2 A 1.0001,1.0001 0 0 0 13.292969,1.2929687 L 8,6.5859375 2.7070313,1.2929687 A 1.0001,1.0001 0 0 0 1.6171875,1.0761719 Z M 3,4.4140625 7.2929687,8.7070313 a 1.0001,1.0001 0 0 0 1.4140626,0 L 13,4.4140625 V 13 H 3 Z" id="path1" fill="#c6c6ca" />
+  </g>
+</svg>

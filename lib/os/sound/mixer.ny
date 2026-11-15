@@ -60,9 +60,10 @@ fn _ensure_acc(any frames) ?ptr {
    if frames <= 0 { return 0 }
    if _acc_buf != 0 && _acc_frames >= frames { return _acc_buf }
    def bytes = frames * 2 * 4
-   if _acc_buf == 0 { _acc_buf = malloc(bytes) }
-   else { _acc_buf = realloc(_acc_buf, bytes) }
-   if _acc_buf != 0 { _acc_frames = frames }
+   def next = _acc_buf == 0 ? malloc(bytes) : realloc(_acc_buf, bytes)
+   if !next { return 0 }
+   _acc_buf = next
+   _acc_frames = frames
    _acc_buf
 }
 
@@ -385,8 +386,10 @@ fn _fx_ensure_delay(int rate) any {
    if frames < 4096 { frames = 4096 }
    if _fx_delay_buf != 0 && _fx_delay_frames >= frames { return nil }
    def bytes = frames * 2 * 4
-   if _fx_delay_buf == 0 { _fx_delay_buf = malloc(bytes) } else { _fx_delay_buf = realloc(_fx_delay_buf, bytes) }
-   if _fx_delay_buf != 0 { _fx_delay_frames = frames
+   def next = _fx_delay_buf == 0 ? malloc(bytes) : realloc(_fx_delay_buf, bytes)
+   if next {
+      _fx_delay_buf = next
+      _fx_delay_frames = frames
       _fx_delay_pos = 0
       memset(_fx_delay_buf, 0, bytes) }
 }
@@ -396,8 +399,10 @@ fn _fx_ensure_mod(int rate) any {
    if frames < 2048 { frames = 2048 }
    if _fx_mod_buf != 0 && _fx_mod_frames >= frames { return nil }
    def bytes = frames * 2 * 4
-   if _fx_mod_buf == 0 { _fx_mod_buf = malloc(bytes) } else { _fx_mod_buf = realloc(_fx_mod_buf, bytes) }
-   if _fx_mod_buf != 0 { _fx_mod_frames = frames
+   def next = _fx_mod_buf == 0 ? malloc(bytes) : realloc(_fx_mod_buf, bytes)
+   if next {
+      _fx_mod_buf = next
+      _fx_mod_frames = frames
       _fx_mod_pos = 0
       memset(_fx_mod_buf, 0, bytes) }
 }

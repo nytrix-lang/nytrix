@@ -11,7 +11,7 @@
 ;; Compiler proof sites currently use a C-side adapter with the same
 ;; obligation format; completing the compiler's policy cutover remains open.
 ;;
-;; Interface (versioned, shared with src/code/lang/types/policy.h):
+;; Interface (versioned, shared with src/code/lang/ny/semantics/policy.h):
 ;;   obligation: ny-proof-obligation-v1|prop|ranges|policy|budgets
 ;;   certificate: ny-proof-certificate-v1|digest|verdict|tactic|backend|cex|explanation
 ;;     verdict: proved | refuted | unknown
@@ -555,7 +555,7 @@ fn tactic_solver(dict proposition, str mode) dict {
 
 ;; Obligations and certificates
 ;; Field escaping: '|' separates fields and '%' introduces escapes, so both
-;; are percent-encoded inside every field (mirrors src/code/lang/types/policy.c).
+;; are percent-encoded inside every field (mirrors src/code/lang/ny/semantics/policy.c).
 fn _field_escape(str s) str {
    replace(replace(s, "%", "%25"), "|", "%7c")
 }

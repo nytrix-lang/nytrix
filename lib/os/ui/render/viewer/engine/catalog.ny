@@ -52,7 +52,10 @@ fn sync_selected(any selected_name, any loaded_name, any names) str {
    if selected.len > 0 { return selected }
    def loaded = to_str(loaded_name)
    if loaded.len > 0 { return loaded }
-   (is_list(names) && names.len > 0) ? to_str(names.get(0, "")) : ""
+   if !is_list(names) || names.len <= 0 { return "" }
+   def first = names.get(0, "")
+   if !is_str(first) { return "" }
+   first
 }
 
 fn filter_cached(any names, any filter, any cache_key="\x00", int source_len=-1, any cached=[]) dict {
@@ -132,7 +135,7 @@ fn grid_h(f64 requested_h, bool compact=false, bool standalone=false, f64 reserv
    out
 }
 
-fn draw_grid(idp, suffix, model_names, win_w, list_h, compact=false, opts=0) dict {
+fn draw_grid(idp, suffix, model_names, win_w, list_h, compact=false, any opts=0) dict {
    "Draws the virtualized model catalog grid and returns selection state."
    def prof = ui_profile.enabled()
    mut t_prof = prof ? ui_profile.now() : 0
@@ -202,7 +205,7 @@ fn draw_grid(idp, suffix, model_names, win_w, list_h, compact=false, opts=0) dic
    }
    t_prof = ui_profile.mark_next(prof, "asset_grid_items", t_prof, " count=" + to_str(max(0, end_i - first_row * cols)))
    if last_row < total_rows { gui.spacer_px(float(total_rows - last_row) * row_step) }
-   if total_items == 0 { gui.text_colored("No models match.", [0.72, 0.72, 0.72, 1.0]) }
+   if total_items == 0 { gui.text_colored("No models match.", gui.theme_color("text_dim")) }
    gui.end_scroll_area()
    ui_profile.mark_done(prof, "asset_grid_end_scroll", t_prof)
    {"clicked": clicked, "count": total_items}

@@ -173,13 +173,27 @@ int ny_process_capture(const char *const argv[], char **out,
   if (pipe(pipefd) != 0)
     return 127;
   posix_spawn_file_actions_t actions;
-  posix_spawn_file_actions_init(&actions);
-  posix_spawn_file_actions_adddup2(&actions, pipefd[1], STDOUT_FILENO);
-  posix_spawn_file_actions_addclose(&actions, pipefd[0]);
-  posix_spawn_file_actions_addclose(&actions, pipefd[1]);
-  if (discard_stderr)
-    posix_spawn_file_actions_addopen(&actions, STDERR_FILENO, "/dev/null",
-                                     O_WRONLY, 0);
+  int actions_rc = posix_spawn_file_actions_init(&actions);
+  if (actions_rc != 0) {
+    close(pipefd[0]);
+    close(pipefd[1]);
+    return 127;
+  }
+  actions_rc =
+      posix_spawn_file_actions_adddup2(&actions, pipefd[1], STDOUT_FILENO);
+  if (actions_rc == 0)
+    actions_rc = posix_spawn_file_actions_addclose(&actions, pipefd[0]);
+  if (actions_rc == 0)
+    actions_rc = posix_spawn_file_actions_addclose(&actions, pipefd[1]);
+  if (actions_rc == 0 && discard_stderr)
+    actions_rc = posix_spawn_file_actions_addopen(&actions, STDERR_FILENO,
+                                                  "/dev/null", O_WRONLY, 0);
+  if (actions_rc != 0) {
+    posix_spawn_file_actions_destroy(&actions);
+    close(pipefd[0]);
+    close(pipefd[1]);
+    return 127;
+  }
   pid_t pid = -1;
   int spawn_rc =
       posix_spawnp(&pid, argv[0], &actions, NULL, (char *const *)argv, environ);

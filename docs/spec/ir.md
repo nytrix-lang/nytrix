@@ -6,7 +6,7 @@
 
 NYIR is the compiler's SSA representation for target-independent analysis and
 optimization. The public C API is declared in [`nyr.md`](nyr.md) and
-`src/include/nyr/`. The verifier in `src/code/backend/ir/verify.c` is the
+`src/include/nyr/`. The verifier in `src/code/backend/core/verify.c` is the
 executable authority for IR validity.
 
 ## Contents
@@ -37,7 +37,7 @@ shared semantic analysis.
 
 The NYIR pipeline has optimization levels selected by the compiler. The exact
 pass list and ordering are implementation details owned by
-`src/code/backend/ir/opt/`; inspect that source or the compiler's pass
+`src/code/backend/passes/`; inspect that source or the compiler's pass
 statistics when changing the pipeline. A transform must preserve verifier
 validity and observable program behavior.
 

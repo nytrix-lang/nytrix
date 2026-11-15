@@ -10,6 +10,7 @@ use core.os.ui.render.vk as vkr
 use core.os.ui.render.vk.texture as vk_texture
 use core.os.ui.render.gl as glr
 use core.math
+use core.math.checked (checked_mul)
 
 mut _atlas_backend = "vk"
 
@@ -250,17 +251,27 @@ fn atlas_flush(any a) int {
    def int rw = dx2 - dx1
    def int rh = dy2 - dy1
    if rw <= 0 || rh <= 0 { return 0 }
-   def int bytes = rw * rh * 4
-   if bytes > _atlas_scratch_cap {
-      if _atlas_scratch { free(_atlas_scratch) }
-      _atlas_scratch = malloc(bytes)
-      _atlas_scratch_cap = _atlas_scratch ? bytes : 0
+   def atlas_pixels_result = checked_mul(aw, ah)
+   if !is_ok(atlas_pixels_result) { return -1 }
+   def atlas_bytes_result = checked_mul(int(unwrap(atlas_pixels_result)), 4)
+   def dirty_pixels_result = checked_mul(rw, rh)
+   if !is_ok(atlas_bytes_result) || !is_ok(dirty_pixels_result) { return -1 }
+   def dirty_bytes_result = checked_mul(int(unwrap(dirty_pixels_result)), 4)
+   if !is_ok(dirty_bytes_result) { return -1 }
+   def int byte_count = int(unwrap(dirty_bytes_result))
+   if byte_count > _atlas_scratch_cap {
+      def replacement = malloc(byte_count)
+      if !replacement { return -1 }
+      def previous = _atlas_scratch
+      _atlas_scratch = replacement
+      _atlas_scratch_cap = byte_count
+      if previous { free(previous) }
    }
    if !_atlas_scratch { return 0 }
-   def int row_bytes = rw * 4
+   def int row_bytes = byte_count / rh
    mut int row = 0
    while row < rh {
-      def ptr dst = ptr_add(_atlas_scratch, int(row * rw * 4))
+      def ptr dst = ptr_add(_atlas_scratch, int(row * row_bytes))
       def ptr src = ptr_add(cpu_buf, int(((dy1 + row) * aw + dx1) * 4))
       __copy_mem_raw(dst, src, row_bytes)
       row += 1

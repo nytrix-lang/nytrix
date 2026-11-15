@@ -1,0 +1,23 @@
+shape test_discard_assignment_evaluates {
+  family "runtime/execution"
+  generator "regression"
+  features ["ny", "test"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+;; `_ = f()` discards the value, not the call. Lowering skipped the whole
+;; statement, so `_ = _ensure_line_pipeline()` in the Vulkan renderer never
+;; created the line pipeline and line lists were drawn as triangles.
+mut hits = 0
+fn bump() bool {
+   hits += 1
+   true
+}
+_ = bump()
+def _ = bump()
+assert(hits == 2, "discarded calls still run")
+NY
+}

@@ -3,7 +3,7 @@
 module core.os.ui.render.terminal(init, frame_to_ansi, present)
 use core
 use core.str as str
-use core.term as term
+use core.term (write_str)
 use core.os.ui.render as gfx
 use core.os.ui.render.tty as render_tty
 
@@ -32,6 +32,6 @@ fn present(int columns=80, int rows=24) bool {
    defer { _frame_free(frame) }
    def output = frame_to_ansi(frame, columns, rows)
    if output.len <= 0 { return false }
-   term.write_str(output)
+   write_str(output)
    true
 }

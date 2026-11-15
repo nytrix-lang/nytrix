@@ -74,12 +74,20 @@ typedef struct nyGcFinalizerEntry {
 static nyGcFinalizerEntry_t *g_finalizer_table = NULL;
 static size_t g_finalizer_count = 0;
 static size_t g_finalizer_cap = 0;
+static void nyGcFatal(const char *what);
 
 static void nyGcFinalizerSet(int64_t obj, void (*fn)(int64_t)) {
-  if (g_finalizer_count * 10 >= g_finalizer_cap * 7) {
+  if (!g_finalizer_cap ||
+      g_finalizer_count >= g_finalizer_cap - g_finalizer_cap / 3) {
+    if (g_finalizer_cap > SIZE_MAX / 2)
+      nyGcFatal("finalizer table capacity overflow");
     size_t new_cap = g_finalizer_cap ? g_finalizer_cap * 2 : 256;
+    if (new_cap > SIZE_MAX / sizeof(nyGcFinalizerEntry_t))
+      nyGcFatal("finalizer table capacity overflow");
     nyGcFinalizerEntry_t *new_table =
         calloc(new_cap, sizeof(nyGcFinalizerEntry_t));
+    if (!new_table)
+      nyGcFatal("finalizer table allocation failed");
     for (size_t i = 0; i < g_finalizer_cap; i++) {
       if (g_finalizer_table[i].obj) {
         size_t idx = (size_t)g_finalizer_table[i].obj % new_cap;
@@ -164,13 +172,19 @@ static void nyGcLargeIndexRebuild(void) {
   size_t count = gNyGc.large_count;
   if (count > g_large_index_cap) {
     size_t next = g_large_index_cap ? g_large_index_cap : 64;
-    while (next < count)
+    while (next < count) {
+      if (next > SIZE_MAX / 2)
+        return;
       next *= 2;
-    free(g_large_index);
-    g_large_index =
-        (nyGcLargeInterval_t *)malloc(next * sizeof(nyGcLargeInterval_t));
-    if (!g_large_index)
+    }
+    if (next > SIZE_MAX / sizeof(nyGcLargeInterval_t))
       return;
+    nyGcLargeInterval_t *grown =
+        (nyGcLargeInterval_t *)malloc(next * sizeof(nyGcLargeInterval_t));
+    if (!grown)
+      return;
+    free(g_large_index);
+    g_large_index = grown;
     g_large_index_cap = next;
   }
   size_t i = 0;
@@ -190,8 +204,18 @@ static void nyGcLargeIndexRebuild(void) {
  * Binary search: find which large object (if any) contains addr.
  */
 static nyGcLargeObject_t *nyGcLargeIndexFind(uint8_t *addr) {
-  if (g_large_index_dirty)
+  if (g_large_index_dirty) {
     nyGcLargeIndexRebuild();
+    if (g_large_index_dirty) {
+      uintptr_t address = (uintptr_t)addr;
+      for (nyGcLargeObject_t *n = gNyGc.large_objects; n; n = n->next) {
+        uintptr_t start = (uintptr_t)n->header;
+        if (address >= start && address - start < n->total_size)
+          return n;
+      }
+      return NULL;
+    }
+  }
   if (!g_large_index || g_large_index_count == 0)
     return NULL;
   /*
@@ -438,7 +462,11 @@ static bool nyGcForwardPush(nyGcForwardMap_t *map, int64_t from, int64_t to) {
   if (!from || from == to)
     return true;
   if (map->count >= map->cap) {
+    if (map->cap > SIZE_MAX / 2)
+      return false;
     size_t next = map->cap ? map->cap * 2 : 256;
+    if (next > SIZE_MAX / sizeof(*map->data))
+      return false;
     nyGcForward_t *data =
         (nyGcForward_t *)realloc(map->data, next * sizeof(*data));
     if (!data)
@@ -1664,11 +1692,18 @@ int64_t nyGcMakeWeak(int64_t target) {
   nyGcHeader_t *header = NULL;
   if (nyGcHeaderForObject(weak_obj, &header))
     header->flags |= NYGC_WEAK;
-  if (g_weak_table.count * 2 >= g_weak_table.capacity) {
-    size_t new_cap = g_weak_table.capacity ? g_weak_table.capacity * 2 : 64;
-    nyGcWeakEntry_t *new_entries = calloc(new_cap, sizeof(*new_entries));
+  if (!g_weak_table.capacity ||
+      g_weak_table.count >= g_weak_table.capacity / 2) {
+    size_t old_cap = g_weak_table.capacity;
+    size_t new_cap = 0;
+    if (old_cap <= SIZE_MAX / 2)
+      new_cap = old_cap ? old_cap * 2 : 64;
+    nyGcWeakEntry_t *new_entries =
+        new_cap && new_cap <= SIZE_MAX / sizeof(*new_entries)
+            ? calloc(new_cap, sizeof(*new_entries))
+            : NULL;
     if (new_entries) {
-      for (size_t i = 0; i < g_weak_table.capacity; i++) {
+      for (size_t i = 0; i < old_cap; i++) {
         if (g_weak_table.entries[i].weak_obj) {
           size_t idx = (uint64_t)g_weak_table.entries[i].weak_obj % new_cap;
           while (new_entries[idx].weak_obj)
@@ -1680,6 +1715,12 @@ int64_t nyGcMakeWeak(int64_t target) {
       g_weak_table.entries = new_entries;
       g_weak_table.capacity = new_cap;
     }
+  }
+  /* Keep one empty slot so failed growth cannot make lookups loop forever. */
+  if (!g_weak_table.capacity ||
+      g_weak_table.count >= g_weak_table.capacity - 1) {
+    nyGcUnlock();
+    return 0;
   }
   if (g_weak_table.capacity) {
     size_t idx = (uint64_t)weak_obj % g_weak_table.capacity;

@@ -1,1 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><circle cx="8" cy="8" r="5" fill="none" stroke="#f2f2f2" stroke-width="2"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
+  <title id="title1">Control</title>
+  <desc id="desc1">Control editor icon. Original asset id: control.</desc>
+  <defs id="defs1" />
+  <g transform="translate(2.0000 2.0000) scale(1.25000)" id="g1">
+    <path d="M 8,2 C 4.6981361,2 2,4.6981361 2,8 c 0,3.301864 2.6981361,6 6,6 3.301864,0 6,-2.698136 6,-6 C 14,4.6981361 11.301864,2 8,2 Z m 0,2 c 2.220984,0 4,1.7790164 4,4 0,2.220984 -1.779016,4 -4,4 C 5.7790164,12 4,10.220984 4,8 4,5.7790164 5.7790164,4 8,4 Z" id="circle1" fill="#c6c6ca" />
+  </g>
+</svg>

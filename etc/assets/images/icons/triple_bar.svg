@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
+  <title id="title1">Triple Bar</title>
+  <desc id="desc1">Triple Bar editor icon. Original asset id: triplebar.</desc>
+  <defs id="defs1" />
+  <g transform="translate(2.0000 2.0000) scale(1.25000)" id="g1">
+    <path d="m 2,3.5 v 1 h 12 v -1 z m 0,4 v 1 h 12 v -1 z m 0,4 v 1 h 12 v -1 z" id="path1" fill="#c6c6ca" />
+  </g>
+</svg>

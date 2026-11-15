@@ -6,6 +6,7 @@
 module core.os.ui.font.truetype(load, load_path, unload, shutdown, available, scale_for_pixel_height, scale_for_em, get_vmetrics, get_hmetrics, get_kern, get_glyph_index, get_glyph_bitmap, get_glyph_box)
 use core
 use core.mem
+use core.math.checked (checked_mul)
 use core.os (file_exists)
 use core.os.ffi (dlopen_checked, dlsym, RTLD_NOW, RTLD_GLOBAL)
 use core.os.ffi as calls
@@ -424,8 +425,14 @@ fn get_glyph_bitmap(dict info, any _scale_x, any scale_y, int gi) any {
       res["yoff"] = bt_s
       return res
    }
-   def bsize = rows * width * 4
-   def bmp = malloc(bsize)
+   def pixels_result = checked_mul(rows, width)
+   if !is_ok(pixels_result) { return 0 }
+   def bsize_result = checked_mul(int(unwrap(pixels_result)), 4)
+   if !is_ok(bsize_result) { return 0 }
+   def int bsize = int(unwrap(bsize_result))
+   mut bitmap_cleanup = 0
+   defer { if bitmap_cleanup { free(bitmap_cleanup) } }
+   mut bmp = malloc(bsize)
    if !bmp {
       mut res = dict(16)
       res["data"] = 0
@@ -435,6 +442,7 @@ fn get_glyph_bitmap(dict info, any _scale_x, any scale_y, int gi) any {
       res["yoff"] = bt_s
       return res
    }
+   bitmap_cleanup = bmp
    memset(bmp, 0, bsize)
    mut int abs_pitch = pitch_s
    if abs_pitch < 0 { abs_pitch = -abs_pitch }
@@ -469,5 +477,6 @@ fn get_glyph_bitmap(dict info, any _scale_x, any scale_y, int gi) any {
    res["yoff"] = bt_s
    res["bpp"] = 4
    res["is_color"] = (mode == 7)
+   bitmap_cleanup = 0
    res
 }

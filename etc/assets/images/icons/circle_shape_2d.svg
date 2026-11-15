@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
+  <title id="title1">Circle Shape 2D</title>
+  <desc id="desc1">Circle Shape 2D editor icon. Original asset id: circleshape2d.</desc>
+  <defs id="defs1" />
+  <g transform="translate(2.0000 2.0000) scale(1.25000)" id="g1">
+    <path d="M 8,1 C 4.1458514,1 1,4.1458514 1,8 c 0,3.854149 3.1458514,7 7,7 3.854149,0 7,-3.145851 7,-7 C 15,4.1458514 11.854149,1 8,1 Z m 0,2 c 2.773268,0 5,2.2267316 5,5 0,2.773268 -2.226732,5 -5,5 C 5.2267316,13 3,10.773268 3,8 3,5.2267316 5.2267316,3 8,3 Z" id="circle1" fill="#c6c6ca" />
+  </g>
+</svg>

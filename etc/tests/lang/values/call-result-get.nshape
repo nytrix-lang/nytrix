@@ -1,0 +1,16 @@
+shape call_result_get {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "codegen"]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect compile_and_run
+  expect_message "CALL_RESULT_GET_OK"
+  source ny <<'NY'
+use core
+fn mk() list { [[1], [2], [3]] }
+def v = mk().get(1, [])
+assert(v == [2], "get on a call result")
+print("CALL_RESULT_GET_OK")
+NY
+}

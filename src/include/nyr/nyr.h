@@ -10,7 +10,12 @@
 #ifndef NYR_PUBLIC_H
 #define NYR_PUBLIC_H
 
+/* Single-header entry point for the complete public NYR surface. The more
+ * focused headers remain available for clients that only need the IR model,
+ * target description, or stable runtime layout constants. */
 #include <nyr/ir.h>
+#include <nyr/layout.h>
+#include <nyr/target.h>
 
 #include <stdbool.h>
 #include <stddef.h>

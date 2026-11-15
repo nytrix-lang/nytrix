@@ -274,18 +274,32 @@ fn z3_global_timeout_ms(any timeout_ms) bool {
 fn z3_version() any {
    "Return Z3 version as [major, minor, build, revision], or nil if unavailable."
    if !_load() { return nil }
+   mut cleanup = [0, 0, 0, 0]
+   defer {
+      if cleanup[0] { free(cleanup[0]) }
+      if cleanup[1] { free(cleanup[1]) }
+      if cleanup[2] { free(cleanup[2]) }
+      if cleanup[3] { free(cleanup[3]) }
+   }
    def a = malloc(4)
    if !a { return nil }
+   cleanup[0] = a
    def b = malloc(4)
-   if !b { free(a) return nil }
+   if !b { return nil }
+   cleanup[1] = b
    def c = malloc(4)
-   if !c { free(a, b) return nil }
+   if !c { return nil }
+   cleanup[2] = c
    def d = malloc(4)
-   if !d { free(a, b, c) return nil }
+   if !d { return nil }
+   cleanup[3] = d
    store32(a,0,0) store32(b,0,0) store32(c,0,0) store32(d,0,0)
    calls.pointer4pointerpointerpointervoid(_p_get_version, a, b, c, d)
    def out = [load32(a,0), load32(b,0), load32(c,0), load32(d,0)]
-   free(a, b, c, d)
+   cleanup[0] = 0
+   cleanup[1] = 0
+   cleanup[2] = 0
+   cleanup[3] = 0
    out
 }
 

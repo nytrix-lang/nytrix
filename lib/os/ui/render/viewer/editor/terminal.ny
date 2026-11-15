@@ -4,7 +4,7 @@
 ;; - core.os.ui.render.viewer.editor.runner
 module core.os.ui.render.viewer.editor.terminal(
    new, is_open, is_focused, title, mode, toggle_shell, toggle_repl,
-   open_shell, open_repl, show_shell, show_repl, open_command, close, close_tab, select_tab, next_tab, prev_tab,
+   open_shell, open_repl, show_shell, show_repl, open_command, dismiss, close_tab, select_tab, next_tab, prev_tab,
    tab_count, active_tab, tab_title, set_font, update, resize, draw, point_contains, handle_event,
    send_text, write_text, visible_cell_count, debug_text
 )
@@ -264,13 +264,13 @@ fn prev_tab(dict st) dict {
 ;; Releases the tab.
 fn close_tab(dict st, int idx=-1) dict {
    mut tabs = _tabs(st)
-   if tabs.len <= 0 { return close(st) }
+   if tabs.len <= 0 { return dismiss(st) }
    if idx < 0 { idx = active_tab(st) }
    if idx < 0 || idx >= tabs.len { return st }
    def old_active = active_tab(st)
    def tab = _tab_at(tabs, idx)
    def vt = tab.get("vt", 0)
-   if is_dict(vt) { vterm.close(vt) }
+   if is_dict(vt) { vterm.dispose(vt) }
    mut out = []
    mut i = 0
    while i < tabs.len {
@@ -407,17 +407,19 @@ fn debug_text(dict st, int max_rows=4, int max_cols=120) str {
    out
 }
 
-;; Closes resources owned by the state and returns the closed state.
-fn close(dict st) dict {
+;; Closes every terminal tab and returns the state.
+;; Named `dismiss`, not `close`: `<alias>.close(state)` resolves to the OS
+;; file-descriptor close and hands the caller an error code instead of the state.
+fn dismiss(dict st) dict {
    def tabs = _tabs(st)
    mut i = 0
    while i < tabs.len {
       def tab = _tab_at(tabs, i)
       def vt = is_dict(tab) ? tab.get("vt", 0) : 0
-      if is_dict(vt) { vterm.close(vt) }
+      if is_dict(vt) { vterm.dispose(vt) }
       i += 1
    }
-   if tabs.len <= 0 && is_dict(st.get("vt")) { vterm.close(st.get("vt")) }
+   if tabs.len <= 0 && is_dict(st.get("vt")) { vterm.dispose(st.get("vt")) }
    st["tabs"] = []
    st["open"] = false
    st["focus"] = false
@@ -574,5 +576,5 @@ fn draw(dict st) dict {
    assert(active_tab(st) == 0 && tab_title(st, 0).len > 0, "terminal tab previous")
    st = close_tab(st, 0)
    assert(tab_count(st) == 1 && active_tab(st) == 0, "terminal tab close")
-   st = close(st)
+   st = dismiss(st)
 }

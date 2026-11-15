@@ -63,7 +63,7 @@ separate from ordinary type inference.
 ### Trait validation
 
 After HM typing, the type pipeline runs trait validation before ABI analysis
-(`NY_TYPE_PIPELINE_STAGE_TRAIT` in `src/code/lang/types/pipeline/emit.c`).
+(`NY_TYPE_PIPELINE_STAGE_TRAIT` in `src/code/lang/ny/semantics/pipeline/emit.c`).
 Failures report `trait validation failed`.
 
 It checks:
@@ -102,7 +102,7 @@ may derive a stronger fact for its own layer, but it must not write that result
 back as a source-level guarantee.
 
 After HM/type checking, the structured source type graph is `ny_type_t`
-(`src/code/lang/types/types.h` / `src/code/lang/types/typeinfer.c`). ABI-facing lowering resolves
+(`src/code/lang/ny/semantics/types.h` / `src/code/lang/ny/semantics/typeinfer.c`). ABI-facing lowering resolves
 source type names through `resolve_type_name` / `resolve_abi_type_name` and
 caches the resulting carrier types in semantic function/variable records. NYIR
 then uses its own typed opcodes and `nyir_type_map_t`; machine lowering consumes
@@ -154,11 +154,11 @@ cloning/solver cost off ordinary release compilation.
 
 ## Lowering and execution
 
-`src/code/lang/lower.c` and `src/code/lang/lower/` own source-to-NYIR lowering.
+`src/code/lang/ny/lower/lower.c` and `src/code/lang/c/lower/` own source-to-NYIR lowering.
 The CLI, REPL, native backends, LLVM backend, and NYIR VM use this shared
 representation; there is no supported AST-to-LLVM execution route.
 
-The LLVM pipeline in `src/code/lang/pipeline/native.c` calls
+The LLVM pipeline in `src/code/lang/ny/pipeline/native.c` calls
 `nyr_build_ir()` and then `ny_llvm_emit_nyir_module()`. LLVM can optimize the
 linked module, execute it through MCJIT or ORC, or emit an object for the host
 linker. `-flto` preserves LLVM optimization after parallel module bitcode is
@@ -170,10 +170,10 @@ Native `-flto` selects the aggressive whole-program NYIR pipeline; it is not
 LLVM bitcode LTO. The NYIR VM interprets the same lowered functions. The
 browser path lowers its supported surface to Wasm with explicit host imports.
 
-`codegen_prepare()` in `src/code/lang/llvm/prepare.c` remains part of compiler
+`codegen_prepare()` in `src/code/lang/ny/gen/llvm/prepare.c` remains part of compiler
 preparation: it collects module, signature, effect, and link information used
 by the shared pipeline. The LLVM backend also uses selected helpers from
-`src/code/lang/llvm/` for declarations and globals. The older AST-body emitters
+`src/code/lang/ny/gen/llvm/` for declarations and globals. The older AST-body emitters
 (`gen_expr`, `gen_stmt`, and `gen_closure`) are not called by the CLI or REPL
 routes; changing them does not change current language behavior. The removed
 `--legacy-llvm-dump` option is rejected rather than selecting a second

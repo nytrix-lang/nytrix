@@ -1,0 +1,26 @@
+shape module_global_max_assign {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "codegen"]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect compile_and_run
+  expect_message "MODULE-GLOBAL-MAX-ASSIGN-OK"
+  source ny <<'NY'
+use core
+module tt(
+   set_delay,
+   delay,
+){
+   mut _d = 0
+   fn set_delay(int n) bool {
+      _d = max(1, n)
+      true
+   }
+   fn delay() int { _d }
+}
+tt.set_delay(3)
+assert(tt.delay() == 3, "max(1, n) stored into a module global")
+print("MODULE-GLOBAL-MAX-ASSIGN-OK")
+NY
+}

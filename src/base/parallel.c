@@ -126,13 +126,26 @@ size_t ny_parallel_min_work(void) {
   return (size_t)v;
 }
 
-bool ny_parallel_enabled(size_t count, size_t work_items) {
+/*
+ * Team size for one region: a worker per min-work grain, capped by the task
+ * count and the configured threads. Sizing the team from the work keeps a
+ * medium region parallel on a wide machine; dividing the work by every
+ * hardware thread instead made a 96-thread host run regions serially that an
+ * 8-thread host parallelized.
+ */
+static size_t ny_parallel_team(size_t count, size_t work_items) {
   int threads = ny_parallel_threads();
   if (!ny_parallel_mode_enabled() || threads < 2)
-    return false;
-  size_t worker_count = count < (size_t)threads ? count : (size_t)threads;
-  return worker_count >= 2 &&
-         work_items / worker_count >= ny_parallel_min_work();
+    return 1;
+  size_t team = count < (size_t)threads ? count : (size_t)threads;
+  size_t by_work = work_items / ny_parallel_min_work();
+  if (team > by_work)
+    team = by_work;
+  return team ? team : 1;
+}
+
+bool ny_parallel_enabled(size_t count, size_t work_items) {
+  return ny_parallel_team(count, work_items) >= 2;
 }
 
 #if NY_PAR_HAVE_PTHREAD
@@ -232,13 +245,26 @@ static bool ny_parallel_pool_start_locked(int threads) {
   if (!threads_buf)
     return g_pool_workers > 0;
   g_pool_threads = threads_buf;
+  /*
+   * Worker stacks must not depend on the inherited RLIMIT_STACK: a child
+   * compiler started under a ~3 MB limit overflowed in every worker (the
+   * x86-64 encode and lowering recursion needs more), while the caller's
+   * thread kept running fine. The pages are reserved lazily, so a generous
+   * size costs address space only.
+   */
+  pthread_attr_t attr;
+  bool have_attr = pthread_attr_init(&attr) == 0;
+  if (have_attr)
+    pthread_attr_setstacksize(&attr, (size_t)64 << 20);
   while (g_pool_workers < want) {
     size_t id = g_pool_workers;
-    if (pthread_create(&g_pool_threads[id], NULL, ny_parallel_pool_worker,
-                       (void *)(uintptr_t)id) != 0)
+    if (pthread_create(&g_pool_threads[id], have_attr ? &attr : NULL,
+                       ny_parallel_pool_worker, (void *)(uintptr_t)id) != 0)
       break;
     ++g_pool_workers;
   }
+  if (have_attr)
+    pthread_attr_destroy(&attr);
   if (!g_pool_atexit) {
     if (g_pool_workers) {
       atexit(ny_parallel_pool_shutdown);
@@ -286,13 +312,13 @@ bool ny_parallel_for(size_t count, size_t work_items, ny_parallel_task_fn fn,
   ny_parallel_register_report();
   atomic_fetch_add_explicit(&g_regions, 1, memory_order_relaxed);
   atomic_fetch_add_explicit(&g_tasks, count, memory_order_relaxed);
-  int threads = ny_parallel_threads();
   /*
    * The minimum is a per-worker grain size. Checking only total work can
    * start a large team for tiny per-item callbacks, where startup and
    * synchronization cost more than the work being parallelized.
    */
-  if (!ny_parallel_enabled(count, work_items)) {
+  int threads = (int)ny_parallel_team(count, work_items);
+  if (threads < 2) {
     atomic_fetch_add_explicit(&g_serial_regions, 1, memory_order_relaxed);
     for (size_t i = 0; i < count; ++i)
       if (!fn(i, ctx))

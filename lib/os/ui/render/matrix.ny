@@ -335,36 +335,61 @@ fn mat4_inverse(list m) list {
 }
 
 fn mat4_inverse_into(list src, list dst) list {
-   "Writes the inverse of `src` into `dst` when it is invertible."
-   def m00=src[2]  def m10=src[3]  def m20=src[4]  def m30=src[5]
-   def m01=src[6]  def m11=src[7]  def m21=src[8]  def m31=src[9]
-   def m02=src[10] def m12=src[11] def m22=src[12] def m32=src[13]
-   def m03=src[14] def m13=src[15] def m23=src[16] def m33=src[17]
-   def c00, c01 = m00*m11 - m10*m01, m00*m21 - m20*m01
-   def c02, c03 = m00*m31 - m30*m01, m10*m21 - m20*m11
-   def c04, c05 = m10*m31 - m30*m11, m20*m31 - m30*m21
-   def c06, c07 = m02*m13 - m12*m03, m02*m23 - m22*m03
-   def c08, c09 = m02*m33 - m32*m03, m12*m23 - m22*m13
-   def c10, c11 = m12*m33 - m32*m13, m22*m33 - m32*m23
-   def det = c00*c11 - c01*c10 + c02*c09 + c03*c08 - c04*c07 + c05*c06
-   if abs(det) < 1e-12 { return dst }
-   def id = 1.0 / det
-   dst[2]  = ( m11*c11 - m21*c10 + m31*c09) * id
-   dst[3]  = (-m10*c11 + m20*c10 - m30*c09) * id
-   dst[4]  = ( m13*c05 - m23*c04 + m33*c03) * id
-   dst[5]  = (-m12*c05 + m22*c04 - m32*c03) * id
-   dst[6]  = (-m01*c11 + m21*c08 - m31*c07) * id
-   dst[7]  = ( m00*c11 - m20*c08 + m30*c07) * id
-   dst[8]  = (-m03*c05 + m23*c02 - m33*c01) * id
-   dst[9]  = ( m02*c05 - m22*c02 + m32*c01) * id
-   dst[10] = ( m01*c10 - m11*c08 + m31*c06) * id
-   dst[11] = (-m00*c10 + m10*c08 - m30*c06) * id
-   dst[12] = ( m03*c04 - m13*c02 + m33*c00) * id
-   dst[13] = (-m02*c04 + m12*c02 - m32*c00) * id
-   dst[14] = (-m01*c09 + m11*c07 - m31*c06) * id
-   dst[15] = ( m00*c09 - m10*c07 + m30*c06) * id
-   dst[16] = (-m03*c03 + m13*c01 - m33*c00) * id
-   dst[17] = ( m02*c03 - m12*c01 + m32*c00) * id
+   "Writes the inverse of `src` into `dst` and returns `dst`. A singular matrix leaves `dst` unchanged."
+   ;; Cofactor expansion over the sixteen elements in storage order. The
+   ;; previous version mixed up several cofactors: it returned a wrong last row
+   ;; for a plain translation and all zeros for a perspective matrix.
+   def f64 m0 = float(src[2])
+   def f64 m1 = float(src[3])
+   def f64 m2 = float(src[4])
+   def f64 m3 = float(src[5])
+   def f64 m4 = float(src[6])
+   def f64 m5 = float(src[7])
+   def f64 m6 = float(src[8])
+   def f64 m7 = float(src[9])
+   def f64 m8 = float(src[10])
+   def f64 m9 = float(src[11])
+   def f64 m10 = float(src[12])
+   def f64 m11 = float(src[13])
+   def f64 m12 = float(src[14])
+   def f64 m13 = float(src[15])
+   def f64 m14 = float(src[16])
+   def f64 m15 = float(src[17])
+   def f64 c0 = m5*m10*m15 - m5*m11*m14 - m9*m6*m15 + m9*m7*m14 + m13*m6*m11 - m13*m7*m10
+   def f64 c1 = 0.0 - m1*m10*m15 + m1*m11*m14 + m9*m2*m15 - m9*m3*m14 - m13*m2*m11 + m13*m3*m10
+   def f64 c2 = m1*m6*m15 - m1*m7*m14 - m5*m2*m15 + m5*m3*m14 + m13*m2*m7 - m13*m3*m6
+   def f64 c3 = 0.0 - m1*m6*m11 + m1*m7*m10 + m5*m2*m11 - m5*m3*m10 - m9*m2*m7 + m9*m3*m6
+   def f64 c4 = 0.0 - m4*m10*m15 + m4*m11*m14 + m8*m6*m15 - m8*m7*m14 - m12*m6*m11 + m12*m7*m10
+   def f64 c5 = m0*m10*m15 - m0*m11*m14 - m8*m2*m15 + m8*m3*m14 + m12*m2*m11 - m12*m3*m10
+   def f64 c6 = 0.0 - m0*m6*m15 + m0*m7*m14 + m4*m2*m15 - m4*m3*m14 - m12*m2*m7 + m12*m3*m6
+   def f64 c7 = m0*m6*m11 - m0*m7*m10 - m4*m2*m11 + m4*m3*m10 + m8*m2*m7 - m8*m3*m6
+   def f64 c8 = m4*m9*m15 - m4*m11*m13 - m8*m5*m15 + m8*m7*m13 + m12*m5*m11 - m12*m7*m9
+   def f64 c9 = 0.0 - m0*m9*m15 + m0*m11*m13 + m8*m1*m15 - m8*m3*m13 - m12*m1*m11 + m12*m3*m9
+   def f64 c10 = m0*m5*m15 - m0*m7*m13 - m4*m1*m15 + m4*m3*m13 + m12*m1*m7 - m12*m3*m5
+   def f64 c11 = 0.0 - m0*m5*m11 + m0*m7*m9 + m4*m1*m11 - m4*m3*m9 - m8*m1*m7 + m8*m3*m5
+   def f64 c12 = 0.0 - m4*m9*m14 + m4*m10*m13 + m8*m5*m14 - m8*m6*m13 - m12*m5*m10 + m12*m6*m9
+   def f64 c13 = m0*m9*m14 - m0*m10*m13 - m8*m1*m14 + m8*m2*m13 + m12*m1*m10 - m12*m2*m9
+   def f64 c14 = 0.0 - m0*m5*m14 + m0*m6*m13 + m4*m1*m14 - m4*m2*m13 - m12*m1*m6 + m12*m2*m5
+   def f64 c15 = m0*m5*m10 - m0*m6*m9 - m4*m1*m10 + m4*m2*m9 + m8*m1*m6 - m8*m2*m5
+   def f64 det = m0*c0 + m1*c4 + m2*c8 + m3*c12
+   if det == 0.0 { return dst }
+   def f64 id = 1.0 / det
+   dst[2] = c0 * id
+   dst[3] = c1 * id
+   dst[4] = c2 * id
+   dst[5] = c3 * id
+   dst[6] = c4 * id
+   dst[7] = c5 * id
+   dst[8] = c6 * id
+   dst[9] = c7 * id
+   dst[10] = c8 * id
+   dst[11] = c9 * id
+   dst[12] = c10 * id
+   dst[13] = c11 * id
+   dst[14] = c12 * id
+   dst[15] = c13 * id
+   dst[16] = c14 * id
+   dst[17] = c15 * id
    dst
 }
 
@@ -386,6 +411,7 @@ fn mat4_inverse_into(list src, list dst) list {
    def vec = mat4_mul_vec4(translated, [1.0, 1.0, 1.0, 1.0])
    assert(vec[0] == 3.0 && vec[1] == 4.0 && vec[2] == 5.0, "mat4 vec4 multiply")
    def buf = malloc(128)
+   if !buf { panic("matrix self-test allocation failed") }
    assert(mat4_to_buffer(translated, buf) == translated, "mat4 buffer store returns matrix")
    def roundtrip = mat4_zero()
    assert(mat4_from_buffer(roundtrip, buf) == roundtrip, "mat4 buffer load returns matrix")

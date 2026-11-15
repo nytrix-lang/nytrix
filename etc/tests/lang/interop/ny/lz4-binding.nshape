@@ -1,0 +1,39 @@
+shape test_lz4_binding_round_trip {
+  family "runtime/interop"
+  generator "embedded"
+  features ["ny", "test", "ffi"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect compile_and_run
+  expect_message "core.math.parse.data.lz4 self-test passed"
+  source ny <<'NY'
+use core
+use core.math.parse.data.lz4 (available, version, error, compress_bound, compress, compress_hc, decompress, frame_bound, compress_frame, decompress_frame, HC_DEFAULT, HC_MAX)
+
+   if !available() {
+      print("lz4 unavailable on this platform; skipping self-test")
+   } else {
+      mut text = ""
+      mut i = 0
+      while i < 400 {
+         text = text + "nytrix lz4 round trip " + to_str(i % 17) + " "
+         i += 1
+      }
+      def packed = compress(text)
+      assert(packed.len > 0 && packed.len < text.len, "block compresses repetitive text")
+      assert_eq(decompress(packed, text.len), text, "block round trip")
+      def hc = compress_hc(text, HC_MAX)
+      assert(hc.len > 0 && hc.len <= packed.len, "HC is at least as small as fast")
+      assert_eq(decompress(hc, text.len), text, "HC round trip")
+      assert_eq(decompress(packed, text.len - 1), "", "wrong size is rejected")
+      assert(error() != "", "wrong size sets an error")
+      def frame = compress_frame(text)
+      assert(frame.len > 4 && load8(frame, 0) == 0x04 && load8(frame, 1) == 0x22, "frame magic")
+      assert_eq(decompress_frame(frame), text, "frame round trip")
+      assert_eq(decompress_frame("not a frame"), "", "garbage frame is rejected")
+      assert_eq(decompress(compress(""), 0), "", "empty block round trip")
+      print("✓ core.math.parse.data.lz4 self-test passed")
+   }
+
+NY
+}

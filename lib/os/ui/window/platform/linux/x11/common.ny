@@ -7,6 +7,7 @@
 module core.os.ui.window.platform.linux.x11.common(encodeUTF8, encodeUTF8String, decodeUTF8, convertLatin1toUTF8, parseUriList, dup_string)
 use core
 use core.str as str
+use core.math.checked (checked_add)
 
 fn _hex_value(int c) int {
    case c {
@@ -20,7 +21,9 @@ fn _hex_value(int c) int {
 fn _percent_decode_uri(any line) any {
    if !is_str(line) { return "" }
    def n = line.len
-   def out = malloc(n + 1)
+   def size_result = checked_add(n, 1)
+   if !is_ok(size_result) { return 0 }
+   def out = malloc(int(unwrap(size_result)))
    if !out { return 0 }
    mut src = 0
    mut dst = 0
@@ -113,12 +116,17 @@ fn convertLatin1toUTF8(any source) any {
    "Convert a Latin-1 byte string to UTF-8."
    if !is_str(source) { return "" }
    def n = source.len
-   mut size = 1
+   mut high_bytes = 0
    mut i = 0
    while i < n {
-      size += band(load8(source, i), 0x80) ? 2 : 1
+      if band(load8(source, i), 0x80) { high_bytes += 1 }
       i += 1
    }
+   def data_size_result = checked_add(n, high_bytes)
+   if !is_ok(data_size_result) { return 0 }
+   def size_result = checked_add(int(unwrap(data_size_result)), 1)
+   if !is_ok(size_result) { return 0 }
+   def size = int(unwrap(size_result))
    def out = malloc(size)
    if !out { return 0 }
    mut src = 0
@@ -161,7 +169,9 @@ fn dup_string(any source) any {
    "Copy a Ny string into owned NUL-terminated string storage."
    if !is_str(source) { return "" }
    def n = source.len
-   def out = malloc(n + 1)
+   def size_result = checked_add(n, 1)
+   if !is_ok(size_result) { return 0 }
+   def out = malloc(int(unwrap(size_result)))
    if !out { return 0 }
    init_str(out, n)
    mut i = 0
@@ -175,7 +185,9 @@ fn dup_string(any source) any {
 
 fn _x11_common_test_latin1(list bytes) any {
    def n = bytes.len
-   def out = malloc(n + 1)
+   def size_result = checked_add(n, 1)
+   if !is_ok(size_result) { return "" }
+   def out = malloc(int(unwrap(size_result)))
    if !out { return "" }
    init_str(out, n)
    mut i = 0

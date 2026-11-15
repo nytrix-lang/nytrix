@@ -518,7 +518,11 @@ fn texture_count() int {
 fn _vk_create_image_and_memory(int width, int height, int format, int mip_levels, int bpp) list {
    mut img_ci = malloc(88)
    mut img_ptr = malloc(8)
-   if !img_ci || !img_ptr { return [0, 0, 0, 0, img_ci, img_ptr] }
+   if !img_ci || !img_ptr {
+      if img_ci { free(img_ci) }
+      if img_ptr { free(img_ptr) }
+      return [0, 0, 0, 0, 0, 0]
+   }
    memset(img_ci, 0, 88)
    store32(img_ci, _vk_stype_image_create_info(), 0)
    store32(img_ci, 0, 16)
@@ -567,10 +571,6 @@ fn _vk_create_image_and_memory(int width, int height, int format, int mip_levels
       return [0, 0, 0, 0, 0, 0]
    }
    mut alloc_info = malloc(64)
-   memset(alloc_info, 0, 64)
-   store32(alloc_info, _vk_stype_memory_allocate_info(), 0)
-   store64_h(alloc_info, size, 16)
-   store32(alloc_info, mem_idx, 24)
    mut mem_ptr = malloc(8)
    if !alloc_info || !mem_ptr {
       destroy_image(_device, image, 0)
@@ -579,6 +579,10 @@ fn _vk_create_image_and_memory(int width, int height, int format, int mip_levels
       if mem_ptr { free(mem_ptr) }
       return [0, 0, 0, 0, 0, 0]
    }
+   memset(alloc_info, 0, 64)
+   store32(alloc_info, _vk_stype_memory_allocate_info(), 0)
+   store64_h(alloc_info, size, 16)
+   store32(alloc_info, mem_idx, 24)
    _tex_debug("[gfx:vulkan] create_texture_ex alloc mem size=" + to_str(int(size)) + " type=" + to_str(int(mem_idx)))
    def alloc_res = allocate_memory(_device, alloc_info, 0, mem_ptr)
    if alloc_res != 0 {
@@ -1147,6 +1151,10 @@ fn blit_buffer(any pixels, int w, int h) any {
    set_unlit(true)
    def ws_w, ws_h = float(_swapchain_extent_w), float(_swapchain_extent_h)
    mut old_mvp = malloc(64)
+   if !old_mvp {
+      set_unlit(last_unlit != 0)
+      return -1
+   }
    if _current_mvp { memcpy(old_mvp, _current_mvp, 64) } else { memset(old_mvp, 0, 64) }
    set_ortho(0.0, ws_w, 0.0, ws_h, -1.0, 1.0)
    draw_rect_tex(0.0, 0.0, ws_w, ws_h, _blit_tex_id, 1.0, 1.0, 1.0, 1.0)

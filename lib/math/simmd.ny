@@ -382,6 +382,12 @@ fn mat4_mul_ptr(ptr a, ptr b, ptr out) ptr {
    def a = malloc(64)
    def b = malloc(64)
    def out = malloc(64)
+   if !a || !b || !out {
+      if a { free(a) }
+      if b { free(b) }
+      if out { free(out) }
+      panic("simmd self-test allocation failed")
+   }
    mut i = 0
    while i < 16 {
       def diag = (i == 0 || i == 5 || i == 10 || i == 15) ? 1.0 : 0.0

@@ -1,0 +1,38 @@
+shape container_allocation_failure {
+  family "runtime/memory"
+  generator "regression"
+  features ["ny", "test", "oom", "memory-safety"]
+  template ny-test-case
+  flags "--native-only"
+  timeout 240
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os (env, file_remove, file_write, pid, run_capture, temp_dir)
+def ny = env("NYTRIX_NY_FULL_BIN")
+assert(is_str(ny) && ny.len > 0, "full compiler is available")
+def stem = temp_dir() + "/ny-container-oom-" + to_str(pid())
+
+fn check(str kind, str body, str route) int {
+   def path = stem + "-" + kind + "-" + to_str(route.len) + ".ny"
+   def executable = path + ".exe"
+   assert(is_ok(file_write(path, "use core\nuse core.set_mod\nfn grow() int {\n   defer { print(\"oom-cleanup-ran\") }\n   with ptr scratch = malloc(16) {\n      store8(scratch, 73, 0)\n" + body + "\n      assert(load8(scratch, 0) == 73, \"scoped allocation stays live\")\n      print(\"grew-all\")\n   }\n   0\n}\ngrow()\n")), "write growth probe")
+   defer { file_remove(path) file_remove(executable) }
+   def compiled = run_capture([ny, route, "--heap=safe", "--output=" + executable, path], [], nil, false)
+   assert(compiled.get("code", 127) == 0, "compile " + kind + " growth probe: " + to_str(compiled.get("stdout", "")))
+   def failed = run_capture(["env", "NYTRIX_FAIL_ALLOC_AFTER=2", executable], [], nil, false)
+   def text = to_str(failed.get("stdout", "")) + to_str(failed.get("stderr", ""))
+   assert(failed.get("code", 127) == 1 && text.contains("out of memory") && text.contains("oom-cleanup-ran") && !text.contains("grew-all") && !text.contains("Nytrix safe-heap: leak:"),
+          kind + " allocation failure unwinds cleanup: " + text)
+   def normal = run_capture([executable], [], nil, false)
+   assert(normal.get("code", 127) == 0 && to_str(normal.get("stdout", "")).contains("grew-all") && !to_str(normal.get("stderr", "")).contains("Nytrix safe-heap: leak:"), "normal " + kind + " growth completes without leaking its scoped allocation")
+   0
+}
+
+for route in ["--native-backend=x86_64", "--native-backend=llvm"] {
+   check("dict", "   mut d = {}\n   mut i = 0\n   while i < 100 { d = d.set(i, i) i += 1 }\n   assert(d.len == 100, \"dict retained every insertion\")", route)
+   check("set", "   mut s = set()\n   mut i = 0\n   while i < 100 { s = s.add(i) i += 1 }\n   assert(s.len == 100, \"set retained every insertion\")", route)
+}
+0
+NY
+}

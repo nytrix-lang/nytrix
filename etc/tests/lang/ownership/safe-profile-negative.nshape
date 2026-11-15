@@ -1,0 +1,39 @@
+shape safe_profile_borrow_escape {
+  family "compiler-errors/ownership"
+  generator "regression"
+  features ["ownership", "negative", "borrow", "safe"]
+  template ny-compile-fail
+  expect compile_fail
+  flags_matrix "--mode=safe --native-only; --mode=safe --native-backend=llvm; --mode=safe --wasm"
+  expect_message "alias policy violation"
+  source ny <<'NY'
+use core
+layout BorrowField { ptr value }
+fn escape(int value) {
+   def ptr box = malloc(__layout_size("BorrowField"))
+   store_layout_field(box, "BorrowField", "value", &value)
+   free(box)
+}
+escape(1)
+NY
+}
+
+shape safe_profile_double_release {
+  family "compiler-errors/ownership"
+  generator "regression"
+  features ["ownership", "negative", "release", "safe"]
+  template ny-compile-fail
+  expect compile_fail
+  flags_matrix "--mode=safe --native-only; --mode=safe --native-backend=llvm; --mode=safe --wasm"
+  expect_message "double release"
+  source ny <<'NY'
+use core
+fn release_twice() int {
+   def value = [1, 2, 3]
+   release(value)
+   release(value)
+   0
+}
+release_twice()
+NY
+}

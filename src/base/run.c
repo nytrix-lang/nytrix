@@ -28,6 +28,20 @@
 #include <unistd.h>
 #endif
 
+/* ASan reserves a very large virtual shadow range.  Applying the normal
+ * RLIMIT_AS memory cap to an instrumented process prevents that reservation
+ * before user code starts.  Keep the RSS telemetry and all other safe-run
+ * limits active in sanitizer builds, but leave address-space enforcement to
+ * the surrounding test runner/cgroup. */
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define NY_SAFE_RUN_ASAN 1
+#endif
+#endif
+#if defined(__SANITIZE_ADDRESS__)
+#define NY_SAFE_RUN_ASAN 1
+#endif
+
 /*
  * Check whether any safe-run limit is actually configured.
  */
@@ -317,8 +331,11 @@ int ny_safe_run_apply_limits(const ny_safe_run_t *sr) {
   }
 
   /*
-   * Address space limit (bytes). RLIMIT_AS caps virtual memory / RSS.
+   * Address space limit (bytes). RLIMIT_AS caps virtual memory / RSS. ASan
+   * needs a huge reserved virtual range for shadow memory, so its instrumented
+   * builds rely on safe-run's RSS sampling plus the external process limit.
    */
+#ifndef NY_SAFE_RUN_ASAN
   if (sr->max_rss_bytes > 0) {
     struct rlimit rl;
     if (getrlimit(RLIMIT_AS, &rl) == 0) {
@@ -340,6 +357,7 @@ int ny_safe_run_apply_limits(const ny_safe_run_t *sr) {
       failures++;
     }
   }
+#endif
 
   /*
    * Open file descriptor limit.

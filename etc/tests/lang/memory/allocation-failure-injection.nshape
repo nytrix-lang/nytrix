@@ -1,0 +1,52 @@
+shape test_allocation_failure_injection {
+  family "runtime/memory"
+  generator "regression"
+  features ["ny", "test", "oom", "memory-safety"]
+  template ny-test-case
+  flags "--native-only"
+  timeout 240
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os (env, file_remove, file_write, pid, run_capture, temp_dir)
+
+;; NYTRIX_FAIL_ALLOC_AFTER=N makes the allocator behave as if memory ran out
+;; after N user allocations: raw allocation and realloc calls return 0 and a
+;; program that checks the result (`if !p`) takes its failure path.
+def ny = env("NYTRIX_NY_FULL_BIN")
+assert(is_str(ny) && ny.len > 0, "test runner exports the full compiler")
+def path = temp_dir() + "/ny-oom-" + to_str(pid()) + ".ny"
+def realloc_exe = path + ".realloc"
+defer { file_remove(path) file_remove(realloc_exe) }
+def program = "use core\n" +
+   "fn grab() int {\n   mut ok = 0\n   mut i = 0\n   while i < 6 {\n" +
+   "      mut p = malloc(32)\n      if !p {\n         print(\"malloc failed after \" + to_str(ok))\n         return ok\n      }\n" +
+   "      ok += 1\n      free(p)\n      i += 1\n   }\n   ok\n}\n" +
+   "fn grabz() int {\n   mut z = zalloc(16)\n   if !z { print(\"zalloc failed\") return 0 }\n   free(z)\n   1\n}\n" +
+   "fn realloc_probe() int {\n   mut p = malloc_raw(8)\n   if !p { print(\"realloc input allocation failed\") return -1 }\n   store8(p, 91, 0)\n   mut q = realloc(p, 64)\n   if q { free_raw(q) return 0 }\n   def kept = load8(p, 0) == 91\n   free_raw(p)\n   print(\"realloc kept original=\" + to_str(kept))\n   if kept { return 1 }\n   -2\n}\n" +
+   "def oom_case = to_str(env(\"NY_OOM_CASE\"))\nif oom_case == \"realloc\" { print(\"realloc_probe=\" + to_str(realloc_probe())) }\n" +
+   "else { print(\"granted=\" + to_str(grab()))\nprint(\"zalloc=\" + to_str(grabz()))\n" +
+   "mut raw = malloc_raw(16)\nif !raw { print(\"malloc_raw failed\") } else { free_raw(raw) print(\"malloc_raw ok\") }\n" +
+   "mut zeroed = calloc_raw(16)\nif !zeroed { print(\"calloc_raw failed\") } else { free_raw(zeroed) print(\"calloc_raw ok\") }\n}\n"
+assert(is_ok(file_write(path, program)), "write the allocation probe")
+def injected = run_capture(["env", "NYTRIX_FAIL_ALLOC_AFTER=3", ny, path], [], nil, false)
+def normal = run_capture([ny, path], [], nil, false)
+def a = to_str(injected.get("code", 127)) + "|" + to_str(injected.get("stdout", ""))
+def b = to_str(normal.get("code", 127)) + "|" + to_str(normal.get("stdout", ""))
+def raw_compiled = run_capture([ny, "--native-backend=llvm", "--output=" + realloc_exe, path], [], nil, false)
+assert(raw_compiled.get("code", 127) == 0, "compile raw realloc probe: " + to_str(raw_compiled.get("stdout", "")))
+def raw_realloc = run_capture(["env", "NYTRIX_FAIL_ALLOC_AFTER=1", "NY_OOM_CASE=realloc", realloc_exe], [], nil, false)
+file_remove(path)
+file_remove(realloc_exe)
+def c = to_str(raw_realloc.get("code", 127)) + "|" + to_str(raw_realloc.get("stdout", ""))
+assert(a.startswith("0|") && a.contains("malloc failed after 3") && a.contains("granted=3"),
+       "the fourth malloc fails and the program handles it: " + a)
+assert(a.contains("zalloc failed") && a.contains("zalloc=0"), "zalloc failure is handled too: " + a)
+assert(a.contains("malloc_raw failed") && a.contains("calloc_raw failed"), "raw allocators return 0 and are handled: " + a)
+assert(b.startswith("0|") && b.contains("granted=6") && b.contains("zalloc=1"),
+       "without injection every allocation succeeds: " + b)
+assert(b.contains("malloc_raw ok") && b.contains("calloc_raw ok"), "raw allocators succeed without injection: " + b)
+assert(c.startswith("0|") && c.contains("realloc_probe=1"),
+       "failed realloc leaves its original raw allocation valid: " + c)
+NY
+}

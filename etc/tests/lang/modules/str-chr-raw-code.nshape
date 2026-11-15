@@ -1,0 +1,25 @@
+shape test_str_chr_raw_code {
+  family "runtime/modules"
+  generator "regression"
+  features ["ny", "test"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.mem
+use core.str as str
+
+;; `str.chr` lowered to the tagged runtime entry with a raw argument, whose
+;; RT_UNTAG_INT halved every odd code point: chr(83) was ')'.
+assert(str.chr(83) == "S" && str.chr(65) == "A" && str.chr(84) == "T", "odd and even ASCII codes")
+def code = 97
+assert(str.chr(code) == "a" && str.chr(code + 1) == "b", "variable arguments")
+def buf = zalloc(4)
+store8(buf, 71, 0)
+store8(buf, 72, 1)
+assert(str.chr(load8(buf, 0)) + str.chr(load8(buf, 1)) == "GH", "bytes read from memory")
+assert(str.chr(233).len == 2 && str.chr(8364).len == 3 && str.chr(128512).len == 4, "multi-byte code points")
+assert(str.chr(-5) == "" && str.chr(1114112) == "", "out-of-range codes give an empty string")
+NY
+}

@@ -10,7 +10,7 @@ use core.mem
 use core.os.fs as osfs
 use core.os.time
 use core.str as str
-use core.os.ui.debug as ui_profile
+use core.os.ui.debug as ui_debug
 use core.os.ui.window.platform.api as backend_api
 use core.os.ui.window.platform.gamepad_map as gamepad_map
 use core.common as common
@@ -140,18 +140,18 @@ fn _set_js_val(str key, any val) any {
 }
 
 fn _is_debug() bool {
-   ui_profile.debug_enabled() || ui_profile.env_truthy_cached("NY_JOYSTICK_DEBUG")
+   ui_debug.debug_enabled() || ui_debug.env_truthy_cached("NY_JOYSTICK_DEBUG")
 }
 
-fn _is_trace() bool { ui_profile.env_truthy_cached("NY_JOYSTICK_TRACE") }
+fn _is_trace() bool { ui_debug.env_truthy_cached("NY_JOYSTICK_TRACE") }
 
 fn _dbg(any msg) bool {
-   if _is_debug() { ui_profile.print_text("[linux:joystick] " + to_str(msg)) }
+   if _is_debug() { ui_debug.print_text("[linux:joystick] " + to_str(msg)) }
    false
 }
 
 fn _trace(any msg) bool {
-   if _is_trace() { ui_profile.print_text("[linux:joystick:trace] " + to_str(msg)) }
+   if _is_trace() { ui_debug.print_text("[linux:joystick:trace] " + to_str(msg)) }
    false
 }
 
@@ -278,7 +278,11 @@ fn _open_fd(str path, int flags, int mode=0) int { __open(__any_to_cstr(path), f
 
 fn _read_fd(int fd, any buf, int n) int { __read_off(fd, buf, n, 0) }
 
-fn _ioctl(int fd, any req, any arg) int { __ioctl(fd, int(req) & 0xffffffff, arg) }
+fn _ioctl(int fd, any req, any arg) int {
+   ;; rt_ioctl untags every odd argument, so a raw odd fd or request number is
+   ;; halved; pass both tagged so the untag is exact for any value.
+   int(__ioctl(__tag(fd), __tag(int(req) & 0xffffffff), arg))
+}
 
 fn _clear_slot(int jid) any {
    mut joysticks = _get_js_val("joysticks", dict(8))

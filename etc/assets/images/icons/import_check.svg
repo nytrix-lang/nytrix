@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
+  <title id="title1">Import Check</title>
+  <desc id="desc1">Import Check editor icon. Original asset id: importcheck.</desc>
+  <defs id="defs1" />
+  <g transform="translate(2.0000 2.0000) scale(1.25000)" id="g1">
+    <path d="M 14,3 A 1,1 0 0 0 13.292969,3.2929688 L 6,10.585938 2.7070313,7.2929687 a 1,1 0 0 0 -1.4140626,0 1,1 0 0 0 0,1.4140626 l 4,3.9999997 a 1.0001,1.0001 0 0 0 1.4140625,0 L 14.707031,4.7070312 a 1,1 0 0 0 0,-1.4140624 A 1,1 0 0 0 14,3 Z" id="path1" fill="#c6c6ca" />
+  </g>
+</svg>

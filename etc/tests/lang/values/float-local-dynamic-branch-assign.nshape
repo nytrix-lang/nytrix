@@ -1,0 +1,38 @@
+shape float_local_dynamic_branch_assign {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "codegen", "float"]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect compile_and_run
+  expect_message "FLOAT-LOCAL-DYNAMIC-BRANCH-ASSIGN-OK"
+  source ny <<'NY'
+use core
+
+;; `1.5 * pow(..)` is a dynamic product (rt_any_mul). Assigned to a float
+;; local in one branch of an if/else, it reached the join still tagged and
+;; the LLVM route returned the box pointer's bits as a double (~4.6e-310).
+;; core.math.parse.img.exr's half-float table, and so every EXR sky, read
+;; back as zero.
+fn scaled(int e) float {
+   mut out = 0.0
+   if e == 0 { out = 0.0 } else { out = 1.5 * pow(2.0, float(e)) }
+   out
+}
+
+fn half_to_float(int bits) float {
+   def exp = (bits >> 10) & 31
+   def frac = bits & 1023
+   mut out = 0.0
+   if exp == 0 { out = float(frac) * pow(2.0, -24.0) }
+   else { out = (1.0 + float(frac) / 1024.0) * pow(2.0, float(exp - 15)) }
+   out
+}
+
+assert(scaled(3) == 12.0, "dynamic product assigned in a branch keeps its value")
+assert(scaled(0) == 0.0, "the other branch still yields its constant")
+assert(half_to_float(0x3c00) == 1.0, "half 0x3c00 decodes to 1.0")
+assert(half_to_float(0x3800) == 0.5, "half 0x3800 decodes to 0.5")
+print("FLOAT-LOCAL-DYNAMIC-BRANCH-ASSIGN-OK")
+NY
+}

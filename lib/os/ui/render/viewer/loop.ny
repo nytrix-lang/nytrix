@@ -11,17 +11,24 @@ use core.os.ui.render.dump as render_profile
 
 fn sample_fps(list samples, int frames, int last_tick, int now, int cap=256) dict {
    "Samples FPS once per second and appends it to history."
+   ;; Typed ints are boxed before they enter the result: stored raw they read
+   ;; back as nil, which surfaced as a "nil FPS" window title.
+   mut dict out = dict(8)
    if now - last_tick < 1000000000 {
-      return {"samples": samples, "frames": frames, "last": last_tick, "fps": 0, "sampled": false}
+      out["samples"] = samples
+      out["frames"] = __box_i64(frames)
+      out["last"] = __box_i64(last_tick)
+      out["fps"] = __box_i64(0)
+      out["sampled"] = false
+      return out
    }
-   def fps = frames
-   {
-      "samples": fps > 0 ? ui_app.app_push_hist_sample(samples, float(fps), cap) : samples,
-      "frames": 0,
-      "last": now,
-      "fps": fps,
-      "sampled": true
-   }
+   if frames > 0 { out["samples"] = ui_app.app_push_hist_sample(samples, float(frames), cap) }
+   else { out["samples"] = samples }
+   out["frames"] = __box_i64(0)
+   out["last"] = __box_i64(now)
+   out["fps"] = __box_i64(frames)
+   out["sampled"] = true
+   out
 }
 
 fn print_fps_summary(int log_enabled, int started_at, int total, list samples, bool show_median=false) bool {

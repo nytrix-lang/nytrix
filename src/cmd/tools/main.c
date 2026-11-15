@@ -17,7 +17,7 @@
 #include <string.h>
 
 #include "base/args.h"
-#include "cmd/fmt/ui.h"
+#include "base/ui.h"
 
 /*
  * Shared utility code uses the process-wide logging/color state that the
@@ -27,22 +27,22 @@ int color_mode = -1;
 int verbose_enabled = 0;
 
 #ifdef NY_TOOL_HAS_FMT
-#include "../fmt/fmt.h"
+#include "cmd/tools/fmt/fmt.h"
 #endif
 #ifdef NY_TOOL_HAS_PERF
-#include "../test/perf/perf.h"
+#include "cmd/tools/test/perf/perf.h"
 #endif
 #ifdef NY_TOOL_HAS_TEST
-#include "../test/test.h"
+#include "cmd/tools/test/runner.h"
 #endif
 #ifdef NY_TOOL_HAS_FUZZ
-#include "../test/fuzz/core.h"
+#include "cmd/tools/test/fuzz/core.h"
 #endif
 #ifdef NY_TOOL_HAS_WEB
-#include "../web/web.h"
+#include "cmd/tools/web/web.h"
 #endif
 #ifdef NY_TOOL_HAS_MAKE
-#include "make/make.h"
+#include "cmd/ny/make/make.h"
 #endif
 
 #ifndef NY_TOOL_ENTRY

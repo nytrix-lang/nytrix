@@ -331,6 +331,448 @@ static inline int ny_mem_pool_slot(size_t total) {
 }
 
 /*
+ * Safe heap (`--heap=safe` / NYTRIX_SAFE_HEAP=1).
+ *
+ * A guard-page allocator for the allocations a user program makes itself
+ * (`malloc`, `zalloc`, the raw heap). Each block lives in its own mapping and
+ * ends at a PROT_NONE page after rounding to 16-byte alignment. Instrumented
+ * byte accesses also check the requested size, including alignment padding.
+ * `free` makes the whole mapping inaccessible instead of recycling
+ * it and keeps it in a quarantine, so a later load or store faults too, and
+ * its address space is not reused until the quarantine evicts it. A fault
+ * handler classifies the address (use-after-free, overflow, double free) and
+ * exits with a clear message; an exit hook reports user blocks never freed.
+ * Runtime-internal objects keep the normal allocator, so the cost is paid only
+ * by allocations the program owns.
+ */
+#include <dlfcn.h>
+#include <errno.h>
+#include <pthread.h>
+#include <signal.h>
+#include <sys/mman.h>
+#include <ucontext.h>
+#include <unistd.h>
+
+typedef struct {
+  uintptr_t user;     /* payload address; 0 = empty slot, 1 = tombstone */
+  uintptr_t map;      /* start of the mapping */
+  size_t map_len;     /* bytes mapped: data + guard + padding page */
+  size_t prot_len;    /* data + guard bytes (the part made inaccessible) */
+  size_t size;        /* requested payload size */
+  uint8_t freed;      /* 1 after free (quarantined) */
+  uint8_t user_block; /* allocated through a user-facing entry point */
+} sh_entry_t;
+
+#define SH_QUARANTINE_MAX 8192u
+#define SH_QUARANTINE_BYTES ((size_t)512 << 20)
+
+static pthread_mutex_t g_sh_lock = PTHREAD_MUTEX_INITIALIZER;
+static sh_entry_t *g_sh_tab;
+static size_t g_sh_cap;
+static size_t g_sh_used;
+static uintptr_t g_sh_quarantine[SH_QUARANTINE_MAX];
+static size_t g_sh_q_head, g_sh_q_len, g_sh_q_bytes;
+static size_t g_sh_live, g_sh_live_bytes;
+static _Atomic int g_sh_state = -1; /* -1 unknown, 0 off, 1 on */
+static int g_sh_handlers;
+
+static bool sh_enabled(void) {
+  int st = atomic_load_explicit(&g_sh_state, memory_order_relaxed);
+  if (__builtin_expect(st >= 0, 1))
+    return st == 1;
+  const char *e = getenv("NYTRIX_SAFE_HEAP");
+  int on = e && *e && strcmp(e, "0") != 0;
+  atomic_store_explicit(&g_sh_state, on, memory_order_relaxed);
+  return on;
+}
+
+/*
+ * Allocation-failure injection for user allocators: with
+ * NYTRIX_FAIL_ALLOC_AFTER=N, the (N+1)th and later `malloc`/`zalloc`/raw-heap
+ * allocation requests, including raw reallocations, return 0, exactly as a
+ * real out-of-memory would. Lets a program (and the test suite) prove its
+ * `if !p` paths run.
+ */
+static _Atomic long g_oom_budget = -2; /* -2 unread, -1 off, >=0 remaining */
+
+static bool rt_oom_inject(void) {
+  long b = atomic_load_explicit(&g_oom_budget, memory_order_relaxed);
+  if (__builtin_expect(b == -1, 1))
+    return false;
+  if (b == -2) {
+    const char *e = getenv("NYTRIX_FAIL_ALLOC_AFTER");
+    long v = e && *e ? strtol(e, NULL, 10) : -1;
+    if (v < 0) {
+      atomic_store_explicit(&g_oom_budget, -1, memory_order_relaxed);
+      return false;
+    }
+    long expected = -2;
+    atomic_compare_exchange_strong(&g_oom_budget, &expected, v);
+    b = atomic_load_explicit(&g_oom_budget, memory_order_relaxed);
+  }
+  for (;;) {
+    if (b <= 0)
+      return true;
+    if (atomic_compare_exchange_weak(&g_oom_budget, &b, b - 1))
+      return false;
+  }
+}
+
+bool rt_user_alloc_injected_failure(void) { return rt_oom_inject(); }
+
+/*
+ * Called from the lowered program's entry prologue under `--heap=safe`.
+ */
+int64_t rt_safe_heap_arm(void) {
+  atomic_store_explicit(&g_sh_state, 1, memory_order_relaxed);
+  return 0;
+}
+
+static size_t sh_hash(uintptr_t p) {
+  return (size_t)((p >> 4) * 0x9E3779B97F4A7C15ull);
+}
+
+static sh_entry_t *sh_find(uintptr_t user) {
+  if (!g_sh_cap)
+    return NULL;
+  size_t i = sh_hash(user) & (g_sh_cap - 1);
+  for (size_t n = 0; n < g_sh_cap; ++n, i = (i + 1) & (g_sh_cap - 1)) {
+    sh_entry_t *e = &g_sh_tab[i];
+    if (e->user == user)
+      return e;
+    if (e->user == 0)
+      return NULL;
+  }
+  return NULL;
+}
+
+static bool sh_grow(void) {
+  size_t cap = g_sh_cap ? g_sh_cap * 2 : 1024;
+  sh_entry_t *tab = calloc(cap, sizeof(*tab));
+  if (!tab)
+    return false;
+  size_t used = 0;
+  for (size_t i = 0; i < g_sh_cap; ++i) {
+    sh_entry_t *old = &g_sh_tab[i];
+    if (old->user <= 1)
+      continue;
+    size_t j = sh_hash(old->user) & (cap - 1);
+    while (tab[j].user)
+      j = (j + 1) & (cap - 1);
+    tab[j] = *old;
+    ++used;
+  }
+  free(g_sh_tab);
+  g_sh_tab = tab;
+  g_sh_cap = cap;
+  g_sh_used = used;
+  return true;
+}
+
+static sh_entry_t *sh_insert(uintptr_t user) {
+  if ((g_sh_used + 1) * 2 > g_sh_cap && !sh_grow())
+    return NULL;
+  size_t i = sh_hash(user) & (g_sh_cap - 1);
+  while (g_sh_tab[i].user > 1)
+    i = (i + 1) & (g_sh_cap - 1);
+  if (g_sh_tab[i].user == 0)
+    ++g_sh_used;
+  g_sh_tab[i].user = user;
+  return &g_sh_tab[i];
+}
+
+static const sh_entry_t *sh_find_address(uintptr_t addr) {
+  const sh_entry_t *exact = addr > 1 ? sh_find(addr) : NULL;
+  if (exact && exact->user > 1)
+    return exact;
+  for (size_t i = 0; i < g_sh_cap; ++i) {
+    const sh_entry_t *e = &g_sh_tab[i];
+    if (e->user > 1 && addr >= e->map && addr - e->map < e->prot_len)
+      return e;
+  }
+  return NULL;
+}
+
+static void sh_message(const char *kind, uintptr_t addr, const sh_entry_t *e) {
+  char buf[320];
+  int n;
+  if (e)
+    n = snprintf(buf, sizeof(buf),
+                 "Nytrix safe-heap: %s at %p (block %p, %zu byte(s))\n", kind,
+                 (void *)addr, (void *)e->user, e->size);
+  else
+    n = snprintf(buf, sizeof(buf), "Nytrix safe-heap: %s at %p\n", kind,
+                 (void *)addr);
+  if (n > 0) {
+    ssize_t ignored = write(2, buf, (size_t)n);
+    (void)ignored;
+  }
+}
+
+static void sh_fault(int sig, siginfo_t *info, void *ctx) {
+  if (getenv("NYTRIX_SAFE_HEAP_TRACE")) {
+    ucontext_t *uc = (ucontext_t *)ctx;
+#if defined(__x86_64__)
+    void *pc = (void *)uc->uc_mcontext.gregs[REG_RIP];
+    Dl_info di;
+    if (dladdr(pc, &di) && di.dli_sname)
+      fprintf(stderr, "Nytrix safe-heap: fault pc=%p in %s+%#lx\n", pc,
+              di.dli_sname, (unsigned long)((char *)pc - (char *)di.dli_saddr));
+    else
+      fprintf(stderr, "Nytrix safe-heap: fault pc=%p\n", pc);
+#else
+    (void)uc;
+#endif
+  }
+  uintptr_t addr = (uintptr_t)info->si_addr;
+  const sh_entry_t *hit = sh_find_address(addr);
+  if (!hit) {
+    signal(sig, SIG_DFL);
+    return; /* not ours: re-fault into the default action */
+  }
+  if (hit->freed)
+    sh_message("use-after-free", addr, hit);
+  else if (addr >= hit->user + hit->size)
+    sh_message("heap-buffer-overflow", addr, hit);
+  else
+    sh_message("invalid access", addr, hit);
+  _exit(134);
+}
+
+static void sh_install(void) {
+  if (g_sh_handlers)
+    return;
+  g_sh_handlers = 1;
+  static char altstack[64 * 1024];
+  stack_t ss = {.ss_sp = altstack, .ss_size = sizeof(altstack), .ss_flags = 0};
+  sigaltstack(&ss, NULL);
+  struct sigaction sa;
+  memset(&sa, 0, sizeof(sa));
+  sa.sa_sigaction = sh_fault;
+  sa.sa_flags = SA_SIGINFO | SA_ONSTACK | SA_NODEFER;
+  sigemptyset(&sa.sa_mask);
+  sigaction(SIGSEGV, &sa, NULL);
+  sigaction(SIGBUS, &sa, NULL);
+}
+
+static void sh_leak_report(void) {
+  size_t blocks = 0, bytes = 0;
+  pthread_mutex_lock(&g_sh_lock);
+  for (size_t i = 0; i < g_sh_cap; ++i) {
+    const sh_entry_t *e = &g_sh_tab[i];
+    if (e->user > 1 && !e->freed && e->user_block) {
+      ++blocks;
+      bytes += e->size;
+    }
+  }
+  pthread_mutex_unlock(&g_sh_lock);
+  if (blocks) {
+    char buf[200];
+    int n = snprintf(buf, sizeof(buf),
+                     "Nytrix safe-heap: leak: %zu allocation(s), %zu byte(s) "
+                     "never freed\n",
+                     blocks, bytes);
+    if (n > 0) {
+      ssize_t ignored = write(2, buf, (size_t)n);
+      (void)ignored;
+    }
+  }
+}
+
+static void sh_evict_one(void) {
+  uintptr_t user = g_sh_quarantine[g_sh_q_head];
+  g_sh_q_head = (g_sh_q_head + 1) % SH_QUARANTINE_MAX;
+  --g_sh_q_len;
+  sh_entry_t *e = sh_find(user);
+  if (!e)
+    return;
+  g_sh_q_bytes -= e->map_len;
+  munmap((void *)e->map, e->map_len);
+  e->user = 1; /* tombstone */
+}
+
+/*
+ * Allocate `size` bytes whose last byte abuts a guard page. `lead` extra
+ * bytes are reserved before the payload (the managed-heap header).
+ */
+static void *sh_alloc(size_t size, size_t lead, bool user_block) {
+  pthread_mutex_lock(&g_sh_lock);
+  sh_install();
+  static bool leak_hook;
+  if (!leak_hook) {
+    leak_hook = true;
+    atexit(sh_leak_report);
+  }
+  size_t page = (size_t)sysconf(_SC_PAGESIZE);
+  size_t body = (size + 15) & ~(size_t)15;
+  size_t data = lead + body;
+  size_t data_pages = (data + page - 1) / page;
+  /*
+   * [data pages][guard page][padding page]. The padding stays readable: the
+   * runtime peeks a few bytes before arbitrary pointers (managed-string
+   * detection), and another mapping placed right after this one must not
+   * have that look-behind land in the guard.
+   */
+  size_t prot_len = (data_pages + 1) * page;
+  size_t map_len = prot_len + page;
+  void *m = mmap(NULL, map_len, PROT_READ | PROT_WRITE,
+                 MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  if (m == MAP_FAILED) {
+    pthread_mutex_unlock(&g_sh_lock);
+    return NULL;
+  }
+  uintptr_t guard = (uintptr_t)m + data_pages * page;
+  mprotect((void *)guard, page, PROT_NONE);
+  uintptr_t user = guard - body;
+  sh_entry_t *e = sh_insert(user);
+  if (!e) {
+    munmap(m, map_len);
+    pthread_mutex_unlock(&g_sh_lock);
+    return NULL;
+  }
+  e->map = (uintptr_t)m;
+  e->map_len = map_len;
+  e->prot_len = prot_len;
+  e->size = size;
+  e->freed = 0;
+  e->user_block = user_block ? 1 : 0;
+  ++g_sh_live;
+  g_sh_live_bytes += size;
+  pthread_mutex_unlock(&g_sh_lock);
+  return (void *)user;
+}
+
+/*
+ * `free(p)` passes the pointer through a variadic list, which stores it as a
+ * tagged word (`p << 1 | 1`). Recover the real address when that decodes to a
+ * safe-heap block; real blocks are 16-byte aligned, so an odd value is never
+ * a safe-heap address itself.
+ */
+static int64_t sh_normalize(int64_t ptr) {
+  if (!g_sh_cap || !(ptr & 1))
+    return ptr;
+  uintptr_t cand = (uintptr_t)ptr >> 1;
+  pthread_mutex_lock(&g_sh_lock);
+  bool known = sh_find(cand) != NULL;
+  pthread_mutex_unlock(&g_sh_lock);
+  return known ? (int64_t)cand : ptr;
+}
+
+static size_t sh_size_of(uintptr_t user) {
+  pthread_mutex_lock(&g_sh_lock);
+  sh_entry_t *e = sh_find(user);
+  size_t n = e && !e->freed ? e->size : 0;
+  pthread_mutex_unlock(&g_sh_lock);
+  return n;
+}
+
+static bool sh_owns(uintptr_t user) {
+  if (!g_sh_cap)
+    return false;
+  pthread_mutex_lock(&g_sh_lock);
+  sh_entry_t *e = sh_find(user);
+  bool owned = e && !e->freed;
+  pthread_mutex_unlock(&g_sh_lock);
+  return owned;
+}
+
+int64_t rt_safe_heap_byte_addr(int64_t base, int64_t offset) {
+  uintptr_t address = (uintptr_t)base + (uintptr_t)offset;
+  if (!sh_enabled())
+    return (int64_t)address;
+  pthread_mutex_lock(&g_sh_lock);
+  const sh_entry_t *entry = sh_find_address((uintptr_t)base);
+  if (!entry && address != (uintptr_t)base)
+    entry = sh_find_address(address);
+  bool invalid = entry && (entry->freed || address < entry->user ||
+                           address - entry->user >= entry->size);
+  if (!invalid) {
+    pthread_mutex_unlock(&g_sh_lock);
+    return (int64_t)address;
+  }
+  /*
+   * Reporting must not retain a pointer into a table another thread can
+   * resize once the mutex is released. No allocation on the failure path.
+   */
+  sh_entry_t failed = *entry;
+  pthread_mutex_unlock(&g_sh_lock);
+  sh_message(failed.freed ? "use-after-free" : "heap-buffer-overflow", address,
+             &failed);
+  _exit(134);
+}
+
+/*
+ * 1 = released, 0 = not a safe-heap block. A double free exits.
+ */
+static int sh_release(uintptr_t user) {
+  if (!g_sh_cap)
+    return 0;
+  pthread_mutex_lock(&g_sh_lock);
+  sh_entry_t *e = sh_find(user);
+  if (!e) {
+    pthread_mutex_unlock(&g_sh_lock);
+    return 0;
+  }
+  if (e->freed) {
+    sh_message("double free", user, e);
+    pthread_mutex_unlock(&g_sh_lock);
+    _exit(134);
+  }
+  mprotect((void *)e->map, e->prot_len, PROT_NONE);
+  e->freed = 1;
+  --g_sh_live;
+  g_sh_live_bytes -= e->size;
+  g_sh_q_bytes += e->map_len;
+  g_sh_quarantine[(g_sh_q_head + g_sh_q_len) % SH_QUARANTINE_MAX] = user;
+  ++g_sh_q_len;
+  while (g_sh_q_len > SH_QUARANTINE_MAX - 1 ||
+         g_sh_q_bytes > SH_QUARANTINE_BYTES)
+    sh_evict_one();
+  pthread_mutex_unlock(&g_sh_lock);
+  return 1;
+}
+
+/*
+ * A pointer given to free() that the safe heap already released.
+ */
+static void sh_check_double_free(uintptr_t user) {
+  if (!g_sh_cap)
+    return;
+  pthread_mutex_lock(&g_sh_lock);
+  const sh_entry_t *e = sh_find(user);
+  bool freed = e && e->freed;
+  if (freed)
+    sh_message("double free", user, e);
+  pthread_mutex_unlock(&g_sh_lock);
+  if (freed)
+    _exit(134);
+}
+
+/*
+ * Managed-heap allocation (`__malloc`): 32-byte header, then the payload.
+ */
+static int64_t sh_traced_alloc(size_t body_in) {
+  size_t body = (body_in + 15) & ~(size_t)15;
+  char *user = sh_alloc(body_in, 32, true);
+  if (!user)
+    return 0;
+  char *base = user - 32;
+  *(uint64_t *)base = NY_MAGIC1;
+  *(uint64_t *)(base + 8) = (uint64_t)((body << 1) | 1);
+  *(uint64_t *)(base + 16) = 0;
+  *(uint64_t *)(base + 24) = 0;
+  int64_t res = (int64_t)(uintptr_t)user;
+  atomic_fetch_add_explicit(&g_ny_alloc_count, 1, memory_order_relaxed);
+  /*
+   * Not registered in the map oracle: it probes page ends, which would touch
+   * the guard page this block deliberately abuts.
+   */
+  rt_managed_ptr_register((uintptr_t)res);
+  rt_rc_adopt_new(res);
+  return res;
+}
+
+/*
  * Two independent heap systems, NOT interconvertible:
  *
  *   GC-traced heap: rt_malloc / rt_malloc_uninit / rt_free / rt_realloc.
@@ -400,6 +842,10 @@ int64_t rt_malloc_uninit(int64_t size) { return rt_malloc_impl(size, 0); }
 int64_t rt_malloc_i64(int64_t size) {
   if (size < 0)
     return 0;
+  if (__builtin_expect(rt_oom_inject(), 0))
+    return 0;
+  if (sh_enabled())
+    return sh_traced_alloc((size_t)size);
   size_t body = (size_t)size;
   body = (body + 15) & ~15ULL;
   size_t total = body + 32;
@@ -645,8 +1091,7 @@ static bool raw_ptr_unregister(uintptr_t p) {
     match->next = slab->free_nodes;
     slab->free_nodes = match;
     ++slab->free_count;
-    if (slab->free_count == RAW_PTR_SLAB_CAPACITY &&
-        g_raw_ptr_slab_count > 1) {
+    if (slab->free_count == RAW_PTR_SLAB_CAPACITY && g_raw_ptr_slab_count > 1) {
       raw_ptr_slab_remove_free(slab);
       --g_raw_ptr_slab_count;
       empty_slab = slab;
@@ -706,6 +1151,24 @@ static bool rt_raw_ptr_is_allocation_base(int64_t ptr) {
   return found;
 }
 
+/*
+ * Shared hook for user allocators defined elsewhere (`zalloc`): returns the
+ * finished allocation, 0 for an injected failure, or -1 when neither the safe
+ * heap nor failure injection applies and the caller allocates as usual.
+ */
+int64_t rt_user_alloc_hook(int64_t size) {
+  if (__builtin_expect(rt_oom_inject(), 0))
+    return 0;
+  if (!sh_enabled())
+    return -1;
+  size_t n = size <= 0 ? 1 : (size_t)size;
+  void *sp = sh_alloc(n, 0, true);
+  if (!sp)
+    return 0;
+  raw_ptr_register((uintptr_t)sp, n, true);
+  return (int64_t)(uintptr_t)sp;
+}
+
 int64_t rt_malloc_raw(int64_t size) {
   int64_t n = is_int(size) ? (size >> 1) : size;
   return rt_malloc_raw_i64(n);
@@ -724,6 +1187,16 @@ int64_t rt_malloc_raw_i64(int64_t size) {
   int64_t n = size;
   if (n <= 0)
     n = 1;
+  if (__builtin_expect(rt_oom_inject(), 0))
+    return 0;
+  if (sh_enabled()) {
+    void *sp = sh_alloc((size_t)n, 0, true);
+    if (!sp)
+      return 0;
+    memset(sp, 0xA5, (size_t)n); /* uninitialized-read canary */
+    raw_ptr_register((uintptr_t)sp, (size_t)n, true);
+    return (int64_t)(uintptr_t)sp;
+  }
   void *p = malloc((size_t)n);
   if (!p)
     return 0;
@@ -741,6 +1214,15 @@ int64_t rt_calloc_raw_i64(int64_t size) {
   int64_t n = size;
   if (n <= 0)
     n = 1;
+  if (__builtin_expect(rt_oom_inject(), 0))
+    return 0;
+  if (sh_enabled()) {
+    void *sp = sh_alloc((size_t)n, 0, true);
+    if (!sp)
+      return 0;
+    raw_ptr_register((uintptr_t)sp, (size_t)n, true);
+    return (int64_t)(uintptr_t)sp;
+  }
   void *p = calloc(1, (size_t)n);
   if (!p)
     return 0;
@@ -760,6 +1242,17 @@ int64_t rt_ptr_key(int64_t ptr) {
 }
 
 static int64_t rt_free_direct(int64_t ptr) {
+  ptr = sh_normalize(ptr);
+  if (g_sh_cap) {
+    sh_check_double_free((uintptr_t)ptr);
+    if (sh_owns((uintptr_t)ptr)) {
+      if (is_heap_ptr(ptr))
+        rt_managed_ptr_unregister((uintptr_t)ptr);
+      else
+        raw_ptr_unregister((uintptr_t)ptr);
+      return sh_release((uintptr_t)ptr) > 0;
+    }
+  }
   /*
    * Invalidate interned-string entries before the pool can recycle this
    * address. Keep this in the common release path so rt_release_owned and
@@ -802,14 +1295,28 @@ static int64_t rt_free_direct(int64_t ptr) {
 }
 
 int64_t rt_free(int64_t ptr) {
+  ptr = sh_normalize(ptr);
+  if (g_sh_cap)
+    sh_check_double_free((uintptr_t)ptr);
   if (is_heap_ptr(ptr))
     rt_rc_forget(ptr);
   return rt_free_direct(ptr);
 }
 
 int64_t rt_free_raw(int64_t ptr) {
+  ptr = sh_normalize(ptr);
   if (!ptr)
     return 1;
+  if (g_sh_cap) {
+    sh_check_double_free((uintptr_t)ptr);
+    if (sh_owns((uintptr_t)ptr)) {
+      if (is_heap_ptr(ptr))
+        rt_managed_ptr_unregister((uintptr_t)ptr);
+      else
+        raw_ptr_unregister((uintptr_t)ptr);
+      return sh_release((uintptr_t)ptr) > 0;
+    }
+  }
   if (raw_ptr_unregister((uintptr_t)ptr)) {
     free((void *)(uintptr_t)ptr);
     return 1;
@@ -1004,6 +1511,24 @@ int64_t rt_realloc(int64_t p_val, int64_t newsz) {
     return p_val;
 
   /*
+   * A safe-heap block has no pool class: grow by moving, so the old mapping
+   * is released (quarantined) and a stale pointer to it faults.
+   */
+  if (g_sh_cap && sh_owns((uintptr_t)p_val)) {
+    int64_t moved = sh_traced_alloc((size_t)newsz);
+    if (!moved)
+      return 0;
+    memcpy((void *)(uintptr_t)moved, (void *)(uintptr_t)p_val, old_cap);
+    *(int64_t *)((char *)(uintptr_t)moved - 16) =
+        *(int64_t *)((char *)(uintptr_t)p_val - 16);
+    *(int64_t *)((char *)(uintptr_t)moved - 8) =
+        *(int64_t *)((char *)(uintptr_t)p_val - 8);
+    atomic_fetch_add_explicit(&g_ny_realloc_count, 1, memory_order_relaxed);
+    rt_free(p_val);
+    return moved;
+  }
+
+  /*
    * A pooled allocation owns the whole size-class chunk, even though the
    * public heap-size header records only the requested body.  Growth that
    * remains in that same class is therefore genuinely in place: publish the
@@ -1052,6 +1577,16 @@ int64_t rt_realloc_raw(int64_t p, int64_t size) {
    */
   if (is_heap_ptr(p))
     return rt_realloc(p, rt_tag_v(size < 0 ? 0 : size));
+  if (g_sh_cap && sh_owns((uintptr_t)p)) {
+    size_t old = sh_size_of((uintptr_t)p);
+    int64_t moved = rt_malloc_raw_i64(size);
+    if (!moved)
+      return 0;
+    memcpy((void *)(uintptr_t)moved, (void *)(uintptr_t)p,
+           old < (size_t)size ? old : (size_t)size);
+    rt_free_raw(p);
+    return moved;
+  }
   /*
    * Native malloc/free own ordinary C allocations, without the managed
    * heap prefix. Keep realloc in that same allocation family and preserve
@@ -1059,6 +1594,8 @@ int64_t rt_realloc_raw(int64_t p, int64_t size) {
    * fresh managed allocation that rt_zfree_raw cannot release.
    */
   if (is_int(p) || (p && (p < 4096 || !rt_addr_readable((uintptr_t)p, 1))))
+    return 0;
+  if (__builtin_expect(rt_oom_inject(), 0))
     return 0;
   if (p && !rt_raw_ptr_is_allocation_base(p)) {
     /*

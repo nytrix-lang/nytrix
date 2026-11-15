@@ -75,6 +75,10 @@ fn _pow2_step(int n, int value) int {
 
 fn _pow2(int n) int {
    if n <= 1 { return 1 }
+   if n > 134217728 {
+      panic("container capacity overflow")
+      return 0
+   }
    _pow2_step(n, 2)
 }
 
@@ -106,9 +110,14 @@ fn _dict_hash(any x) int {
 fn _dict_new(int cap) dict {
    def tsize = 16 + cap * 24
    mut t = __malloc(tsize)
+   if !t { panic("out of memory creating dict table") }
    __memset(t, 0, tsize)
    __store64_idx(t, -8, __runtime_tag("dict_tbl"))
    mut p = __malloc(24)
+   if !p {
+      __free(t)
+      panic("out of memory creating dict")
+   }
    __memset(p, 0, 24)
    __store64_idx(p, -8, __runtime_tag("dict"))
    __store64_idx(p, 0, 0)
@@ -120,7 +129,9 @@ fn _dict_new(int cap) dict {
 @returns_owned
 fn dict(int cap=8) dict {
    "Creates a new empty dictionary."
-   _dict_new(_pow2(cap))
+   def capacity = _pow2(cap)
+   if capacity <= 0 { return nil }
+   _dict_new(capacity)
 }
 
 @inline
@@ -177,10 +188,15 @@ fn _dict_insert_raw(any t, int cap, any key, any val) {
 @returns_owned
 fn _dict_resize(dict d) dict {
    def int old_cap = __load64_idx(d, 8)
+   if old_cap >= 134217728 {
+      panic("container capacity overflow")
+      return d
+   }
    def int new_cap = old_cap < 8 ? 8 : old_cap * 2
    def old_t = __load64_idx(d, 16)
    def tsize = 16 + new_cap * 24
    mut nt = __malloc(tsize)
+   if !nt { panic("out of memory growing dict") }
    __memset(nt, 0, tsize)
    __store64_idx(nt, -8, __runtime_tag("dict_tbl"))
    mut i = 0

@@ -379,6 +379,10 @@ fn _vkr_draw_text_runs_flat_inner(list runs, int color_u32, any glyphs_ptr, any 
                ascii_tid
             )
             if added >= 0 {
+               ;; The fast path bound `ascii_tid`. Keep the tracker in step, or
+               ;; the next mixed-page run skips its page switch and tags its
+               ;; first glyphs with this run's atlas page.
+               page_tid_cur = ascii_tid
                glyph_total += added
                ri += stride
                continue

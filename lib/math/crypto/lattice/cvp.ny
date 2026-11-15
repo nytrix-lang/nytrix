@@ -8,6 +8,7 @@
 module core.math.crypto.lattice.cvp(build_lattice, solve_inequality, solve_inequality_ex, cvp, cvp_report, cvp_babai, cvp_babai_report, cvp_enumerate, cvp_enumerate_report, cvp_list_gso_count_report, cvp_gso_bound_report, affine_cvp, bounded, bounded_ex, qary_lattice, reduce_mod_p, solve_weighted_bounds, solve_multi_mod_linear, solve_underconstrained_linear, enum_brute, mod_arc_is_inside, mod_arc_has_solution, mod_arc_optf, mod_arc_solve_range)
 use core.math.nt
 use core.math.big
+use core.math.checked (checked_mul)
 use core.math.scalar as math
 use core.math.matrix as matrix
 use core.math.crypto.lattice.flatter
@@ -1536,7 +1537,9 @@ fn _cvp_list_scaled_int(any x, int scale) list {
 }
 
 fn _cvp_i64buf(int n) ptr {
-   def bytes = max(1, n) * 8
+   def bytes_result = checked_mul(max(1, n), 8)
+   if !is_ok(bytes_result) { panic("cvp list count buffer size overflow") }
+   def bytes = int(unwrap(bytes_result))
    def p = malloc(bytes)
    if !p { panic("cvp list count buffer allocation failed") }
    memset(p, 0, bytes)
@@ -1545,11 +1548,19 @@ fn _cvp_i64buf(int n) ptr {
 
 fn _cvp_list_fixed_setup_ptr(list<f64> target_coords, any mu, list<f64> norms, f64 radius, int scale) list {
    def n = target_coords.len
-   def target = _cvp_i64buf(n)
-   def norm_buf = _cvp_i64buf(n)
-   def dep_counts = _cvp_i64buf(n)
-   def dep_idx = _cvp_i64buf(n * n)
-   def dep_mu = _cvp_i64buf(n * n)
+   def square_result = checked_mul(n, n)
+   if !is_ok(square_result) { panic("cvp dependency table size overflow") }
+   def square = int(unwrap(square_result))
+   mut target = _cvp_i64buf(n)
+   defer { if target { free(target) } }
+   mut norm_buf = _cvp_i64buf(n)
+   defer { if norm_buf { free(norm_buf) } }
+   mut dep_counts = _cvp_i64buf(n)
+   defer { if dep_counts { free(dep_counts) } }
+   mut dep_idx = _cvp_i64buf(square)
+   defer { if dep_idx { free(dep_idx) } }
+   mut dep_mu = _cvp_i64buf(square)
+   defer { if dep_mu { free(dep_mu) } }
    mut ok = true
    mut i = 0
    while i < n {
@@ -1576,7 +1587,13 @@ fn _cvp_list_fixed_setup_ptr(list<f64> target_coords, any mu, list<f64> norms, f
    }
    def r = _cvp_list_scaled_int(radius, scale * scale)
    if !r[0] { ok = false }
-   [ok, target, norm_buf, nil, int(r[1]), dep_counts, dep_idx, dep_mu]
+   def result = [ok, target, norm_buf, nil, int(r[1]), dep_counts, dep_idx, dep_mu]
+   target = 0
+   norm_buf = 0
+   dep_counts = 0
+   dep_idx = 0
+   dep_mu = 0
+   result
 }
 
 fn _cvp_list_gso_leaf_count_ptr(ptr centers, ptr norms, int scale, int partial_cost, int radius_scaled, ptr counters, int max_solutions, int max_nodes) bool {
@@ -1991,19 +2008,20 @@ fn cvp_list_gso_count_report(list basis, any radius_sq=32.5, any target_coords=n
    def list<f64> target = _cvp_list_target(target_coords, n)
    def list<f64> norms = _cvp_list_norms_f64(gso.get("norms_sq", []), n)
    def fixed = _cvp_list_fixed_setup_ptr(target, gso.get("mu"), norms, _cvp_float(radius_sq), 10000)
+   defer { free(fixed[1], fixed[2], fixed[5], fixed[6], fixed[7]) }
+   mut counters = 0
+   defer { if counters { free(counters) } }
    mut state = _cvp_list_count_record(0, 0, false)
    if fixed[0] {
-      def counters = _cvp_i64buf(3)
+      counters = _cvp_i64buf(3)
       _cvp_list_gso_dfs_fixed_sparse_ptr(n - 1, fixed[1], fixed[5], fixed[6], fixed[7], fixed[2], n, 10000, 0, int(fixed[4]), counters, max_solutions, max_nodes)
       def int final_count = load64(counters, 0)
       def int final_nodes = load64(counters, 8)
       state = _cvp_list_count_record(final_count, final_nodes, final_count >= max_solutions || final_nodes >= max_nodes)
-      free(counters)
    } else {
       def list<int> coeffs = _zero_vec(n)
       state = _cvp_list_gso_dfs_f64(n - 1, target, coeffs, gso.get("mu"), norms, 0.0, _cvp_float(radius_sq), 0, 0, max_solutions, max_nodes)
    }
-   free(fixed[1], fixed[2], fixed[5], fixed[6], fixed[7])
    mut out = _cvp_set_fields(dict(16), [
          ["method", "gso-list-cvp-count"],
          ["ok", !state[2]],

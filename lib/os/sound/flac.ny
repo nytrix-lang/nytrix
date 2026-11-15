@@ -385,8 +385,11 @@ fn read_range(any ctx, int start, int count) any {
    def channels = int(ctx.get("channels"))
    def bits = int(ctx.get("bits"))
    def width = bits <= 16 ? 2 : 4
+   mut cleanup = [0]
+   defer { if cleanup[0] { free(cleanup[0]) } }
    def out = malloc(count * channels * width + 1)
    if !out { return 0 }
+   cleanup[0] = out
    mut at = int(ctx.get("start"))
    mut sample = 0
    def points = ctx.get("seek")
@@ -402,9 +405,9 @@ fn read_range(any ctx, int start, int count) any {
    mut written = 0
    while written < count {
       def frame = _frame(ctx, at)
-      if !frame { free(out) return 0 }
+      if !frame { return 0 }
       def n = int(frame.get("frames"))
-      if int(frame.get("sample")) != sample { free(out) return 0 }
+      if int(frame.get("sample")) != sample { return 0 }
       def buffers = ctx.get("buffers")
       mut j = start > sample ? start - sample : 0
       while j < n && written < count {
@@ -421,8 +424,10 @@ fn read_range(any ctx, int start, int count) any {
       sample += n
       at = int(frame.get("next"))
    }
-   make_memory_source(out, count * channels * width, channels, ctx.get("rate"),
+   def source = make_memory_source(out, count * channels * width, channels, ctx.get("rate"),
       width * 8, width == 2 ? SAMPLE_FMT_S16 : SAMPLE_FMT_S32, 1)
+   cleanup[0] = 0
+   source
 }
 
 fn decode_bytes(any d) any {

@@ -1,0 +1,29 @@
+shape module_list_of_dicts_index {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "codegen"]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect compile_and_run
+  expect_message "MODULE_LIST_OF_DICTS_INDEX_OK"
+  source ny <<'NY'
+use core
+module prod(
+   rows,
+){
+   fn rows() list { [{"n": 1}, {"n": 2}] }
+}
+module cons(
+   second_n,
+){
+   fn second_n() int {
+      def xs = prod.rows()
+      mut i = 1
+      def v = xs[i]
+      int(v.get("n", -1))
+   }
+}
+assert(cons.second_n() == 2, "indexing a list of dicts from another module")
+print("MODULE_LIST_OF_DICTS_INDEX_OK")
+NY
+}

@@ -372,7 +372,7 @@ double rt_f64_max(double a, double b) { return a > b ? a : b; }
 static int64_t s_cached_int_strs[NY_INT_STR_CACHE_SIZE];
 
 /*
- * Format a raw signed 64-bit integer as a freshly-allocated C string.
+ * Format a raw signed 64-bit integer as a managed NUL-terminated string.
  * Used by the native-only path for f-string interpolation of integer
  * expressions (mirrors rt_print_i64_raw's formatting but returns a string).
  */
@@ -395,29 +395,13 @@ int64_t rt_i64_to_cstr_raw(int64_t v) {
   int n = snprintf(buf, sizeof(buf), "%lld", (long long)v);
   if (n < 0 || (size_t)n >= sizeof(buf))
     return 0;
-  char *s = malloc((size_t)n + 1);
-  if (!s)
-    return 0;
-  memcpy(s, buf, (size_t)n + 1);
-  return (int64_t)(uintptr_t)s;
+  return rt_alloc_string_len(buf, (size_t)n);
 }
 
-int64_t rt_bigint_to_cstr_raw(int64_t v) {
-  int64_t tagged = rt_bigint_to_str(v);
-  if (!tagged)
-    return 0;
-  size_t len = rt_tagged_str_len(tagged);
-  const char *src = (const char *)(uintptr_t)tagged;
-  char *out = malloc(len + 1);
-  if (!out)
-    return 0;
-  memcpy(out, src, len);
-  out[len] = '\0';
-  return (int64_t)(uintptr_t)out;
-}
+int64_t rt_bigint_to_cstr_raw(int64_t v) { return rt_bigint_to_str(v); }
 
 /*
- * Format a raw f64 as a freshly-allocated C string (mirrors the runtime's
+ * Format a raw f64 as a managed C string (mirrors the runtime's
  * %g formatting so to_str(f) agrees with print(f) and the JIT path).
  */
 int64_t rt_f64_to_cstr_raw(double v) {
@@ -425,11 +409,7 @@ int64_t rt_f64_to_cstr_raw(double v) {
   int n = snprintf(buf, sizeof(buf), "%g", v);
   if (n < 0 || (size_t)n >= sizeof(buf))
     return 0;
-  char *s = malloc((size_t)n + 1);
-  if (!s)
-    return 0;
-  memcpy(s, buf, (size_t)n + 1);
-  return (int64_t)(uintptr_t)s;
+  return rt_alloc_string_len(buf, (size_t)n);
 }
 
 /*
@@ -502,12 +482,7 @@ int64_t rt_any_to_cstr(int64_t v) {
   rt_val_to_str_info(v, buf, sizeof(buf), &s, &len);
   if (!s || len < 0 || (size_t)len > SIZE_MAX - 1)
     return 0;
-  char *out = malloc((size_t)len + 1);
-  if (!out)
-    return 0;
-  memcpy(out, s, (size_t)len);
-  out[len] = '\0';
-  return (int64_t)(uintptr_t)out;
+  return rt_alloc_string_len(s, (size_t)len);
 }
 
 /*
@@ -828,7 +803,8 @@ void rt_str_intern_insert(const char *s, size_t len, int64_t str) {
       if (tombstone == SIZE_MAX)
         tombstone = idx;
     } else if (g_intern[idx].hash == h && g_intern[idx].len == len &&
-               memcmp((const char *)(uintptr_t)g_intern[idx].ptr, s, len) == 0) {
+               memcmp((const char *)(uintptr_t)g_intern[idx].ptr, s, len) ==
+                   0) {
       return;
     }
     idx = (idx + 1) & (g_intern_cap - 1);

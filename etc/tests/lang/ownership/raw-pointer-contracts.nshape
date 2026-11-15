@@ -1,0 +1,111 @@
+shape raw_owned_return_use_after_free {
+  family "language/ownership"
+  generator "error"
+  features ["ownership", "raw-pointer", "returns-owned", "lifetime"]
+  template ny-compile-fail
+  expect compile_fail
+  flags_matrix "--ownership-check=strict --native-only; --ownership-check=strict --native-backend=llvm; --ownership-check=strict --wasm"
+  expect_message "use after free of raw pointer 'p'"
+  source ny <<'NY'
+use core
+@returns_owned
+fn allocate() ptr { malloc(16) }
+fn run() int {
+   def p = allocate()
+   free(p)
+   load8(p, 0)
+}
+run()
+NY
+}
+
+shape raw_consumed_alias_use_after_move {
+  family "language/ownership"
+  generator "error"
+  features ["ownership", "raw-pointer", "consumes", "alias"]
+  template ny-compile-fail
+  expect compile_fail
+  flags_matrix "--ownership-check=strict --native-only; --ownership-check=strict --native-backend=llvm; --ownership-check=strict --wasm"
+  expect_message "use after move of owned slot 'alias'"
+  source ny <<'NY'
+use core
+@consumes(p)
+fn dispose(ptr p) int { free(p) 0 }
+fn run() int {
+   def p = malloc(16)
+   def alias = p
+   dispose(p)
+   load8(alias, 0)
+}
+run()
+NY
+}
+
+shape raw_alias_double_free_rejected {
+  family "compiler-errors/ownership"
+  generator "regression"
+  features [ownership raw-pointer release-once alias negative]
+  template ny-compile-fail
+  flags_matrix "--ownership-check=strict --native-only; --ownership-check=strict --native-backend=llvm; --ownership-check=strict --wasm"
+  expect compile_fail
+  expect_message "double free of raw pointer"
+  source ny <<'NY'
+use core
+@returns_owned
+fn allocate() ptr { malloc(16) }
+fn run() int {
+   def owner = allocate()
+   def alias = owner
+   free(owner)
+   free(alias)
+   0
+}
+run()
+NY
+}
+
+shape multiple_consumed_arguments_use_after_move {
+  family "language/ownership"
+  generator "error"
+  features ["ownership", "consumes", "multiple-parameters"]
+  template ny-compile-fail
+  expect compile_fail
+  flags_matrix "--ownership-check=strict --native-only; --ownership-check=strict --native-backend=llvm; --ownership-check=strict --wasm"
+  expect_message "use after move of owned slot 'right'"
+  source ny <<'NY'
+use core
+@consumes(first, second)
+fn take(list first, list second) int { forget(first) forget(second) 0 }
+fn run() int {
+   def left = [1]
+   def right = [2]
+   take(left, right)
+   print(right.len)
+   0
+}
+run()
+NY
+}
+
+shape raw_owned_return_positive {
+  family "language/ownership"
+  generator "regression"
+  features ["ownership", "raw-pointer", "returns-owned", "positive"]
+  template ny-test-case
+  expect compile_and_run
+  flags_matrix "--ownership-check=strict --native-only; --ownership-check=strict --native-backend=llvm"
+  source ny <<'NY'
+use core
+@returns_owned
+fn allocate() ptr { malloc(16) }
+fn run() int {
+   def p = allocate()
+   store8(p, 73, 0)
+   assert(load8(p, 0) == 73, "owned factory result remains usable before release")
+   free(p)
+   0
+}
+run()
+0
+NY
+}

@@ -3,7 +3,7 @@
 ;; References:
 ;; - core.os.ui.render.viewer.gui
 ;; - core.os.ui.render.matrix
-module core.os.ui.render.viewer.gizmo(compact_view, metrics, metrics_screen, draw_box, draw_box_corners, draw_axes, project_point, axis_tangent, hit_test, hit_test_screen, draw_overlay)
+module core.os.ui.render.viewer.gizmo(compact_view, metrics, metrics_screen, metrics_pixels, draw_box, draw_box_corners, draw_axes, project_point, axis_tangent, hit_test, hit_test_screen, draw_overlay)
 use core
 use core.math (PI, abs, clamp, cos, max, min, sin, sqrt)
 use core.os.ui.render.dump as ui_profile
@@ -14,32 +14,61 @@ fn compact_view(win_w, win_h) bool {
    min(float(win_w), float(win_h)) < 560.0
 }
 
-fn draw_box(minx, miny, minz, maxx, maxy, maxz, col, thickness) bool {
-   "Draws a world-space bounds box."
-   render.draw_line([minx, miny, minz], [maxx, miny, minz], col, thickness)
-   render.draw_line([minx, maxy, minz], [maxx, maxy, minz], col, thickness)
-   render.draw_line([minx, miny, maxz], [maxx, miny, maxz], col, thickness)
-   render.draw_line([minx, maxy, maxz], [maxx, maxy, maxz], col, thickness)
-   render.draw_line([minx, miny, minz], [minx, maxy, minz], col, thickness)
-   render.draw_line([maxx, miny, minz], [maxx, maxy, minz], col, thickness)
-   render.draw_line([minx, miny, maxz], [minx, maxy, maxz], col, thickness)
-   render.draw_line([maxx, miny, maxz], [maxx, maxy, maxz], col, thickness)
-   render.draw_line([minx, miny, minz], [minx, miny, maxz], col, thickness)
-   render.draw_line([maxx, miny, minz], [maxx, miny, maxz], col, thickness)
-   render.draw_line([minx, maxy, minz], [minx, maxy, maxz], col, thickness)
-   render.draw_line([maxx, maxy, minz], [maxx, maxy, maxz], col, thickness)
+;; Thickness and handle sizes are world units by default. The pixel_units
+;; argument of the draw functions switches them to framebuffer pixels: lines
+;; become screen-space quads and handles are sized from the pixel footprint
+;; at their own position, so the gizmo keeps one weight at every distance.
+mut _pixel_units = false
+
+fn _line(list a, list b, any col, any thickness) bool {
+   if _pixel_units { return render.draw_line_px(a, b, col, float(thickness)) }
+   render.draw_line(a, b, col, float(thickness))
+}
+
+fn _cube(list pos, any size, any col) bool {
+   if _pixel_units {
+      def wpp = render.pixel_world_size(float(pos.get(0, 0.0)), float(pos.get(1, 0.0)), float(pos.get(2, 0.0)))
+      if wpp <= 0.0 { return false }
+      return render.draw_cube(pos, float(size) * wpp, col)
+   }
+   render.draw_cube(pos, float(size), col)
+}
+
+fn metrics_pixels(any mode, any win_w, any win_h) list {
+   "Returns the gizmo's screen-space weights in pixels: [axis line, box line, handle, centre]. Pass them to draw_axes and draw_box_corners with pixel_units=true."
+   def compact = compact_view(win_w, win_h)
+   [compact ? 1.75 : 2.25, 1.25, int(mode) == 2 ? 9.5 : 7.5, 8.0]
+}
+
+fn draw_box(minx, miny, minz, maxx, maxy, maxz, col, thickness, bool pixel_units=false) bool {
+   "Draws a world-space bounds box. `thickness` is world units, or pixels with pixel_units."
+   _pixel_units = pixel_units
+   _line([minx, miny, minz], [maxx, miny, minz], col, thickness)
+   _line([minx, maxy, minz], [maxx, maxy, minz], col, thickness)
+   _line([minx, miny, maxz], [maxx, miny, maxz], col, thickness)
+   _line([minx, maxy, maxz], [maxx, maxy, maxz], col, thickness)
+   _line([minx, miny, minz], [minx, maxy, minz], col, thickness)
+   _line([maxx, miny, minz], [maxx, maxy, minz], col, thickness)
+   _line([minx, miny, maxz], [minx, maxy, maxz], col, thickness)
+   _line([maxx, miny, maxz], [maxx, maxy, maxz], col, thickness)
+   _line([minx, miny, minz], [minx, miny, maxz], col, thickness)
+   _line([maxx, miny, minz], [maxx, miny, maxz], col, thickness)
+   _line([minx, maxy, minz], [minx, maxy, maxz], col, thickness)
+   _line([maxx, maxy, minz], [maxx, maxy, maxz], col, thickness)
+   _pixel_units = false
    true
 }
 
 fn _draw_corner_lines(f64 x, f64 y, f64 z, f64 sx, f64 sy, f64 sz, f64 lx, f64 ly, f64 lz, any col, any thickness) bool {
-   render.draw_line([x, y, z], [x + sx * lx, y, z], col, thickness)
-   render.draw_line([x, y, z], [x, y + sy * ly, z], col, thickness)
-   render.draw_line([x, y, z], [x, y, z + sz * lz], col, thickness)
+   _line([x, y, z], [x + sx * lx, y, z], col, thickness)
+   _line([x, y, z], [x, y + sy * ly, z], col, thickness)
+   _line([x, y, z], [x, y, z + sz * lz], col, thickness)
    true
 }
 
-fn draw_box_corners(minx, miny, minz, maxx, maxy, maxz, col, thickness, any corner_len=0.0) bool {
-   "Draws a world-space bounds box with emphasized corners."
+fn draw_box_corners(minx, miny, minz, maxx, maxy, maxz, col, thickness, any corner_len=0.0, bool pixel_units=false) bool {
+   "Draws a world-space bounds box with emphasized corners. `thickness` is world units, or pixels with pixel_units."
+   _pixel_units = pixel_units
    def dx = max(0.001, abs(float(maxx) - float(minx)))
    def dy = max(0.001, abs(float(maxy) - float(miny)))
    def dz = max(0.001, abs(float(maxz) - float(minz)))
@@ -56,6 +85,7 @@ fn draw_box_corners(minx, miny, minz, maxx, maxy, maxz, col, thickness, any corn
    _draw_corner_lines(maxx, miny, maxz, -1.0, 1.0, -1.0, lx, ly, lz, col, thickness)
    _draw_corner_lines(minx, maxy, maxz, 1.0, -1.0, -1.0, lx, ly, lz, col, thickness)
    _draw_corner_lines(maxx, maxy, maxz, -1.0, -1.0, -1.0, lx, ly, lz, col, thickness)
+   _pixel_units = false
    true
 }
 
@@ -63,8 +93,8 @@ fn _draw_axis(px, py, pz, ax, ay, az, length, col, thickness, handle_size, compa
    def ex = px + ax * length
    def ey = py + ay * length
    def ez = pz + az * length
-   render.draw_line([px, py, pz], [ex, ey, ez], col, thickness)
-   if !compact { render.draw_cube([ex, ey, ez], handle_size, col) }
+   _line([px, py, pz], [ex, ey, ez], col, thickness)
+   if !compact { _cube([ex, ey, ez], handle_size, col) }
    true
 }
 
@@ -73,23 +103,25 @@ fn _draw_move_tip(px, py, pz, ax, ay, az, length, col, thickness, size, compact)
    def ex = px + ax * length
    def ey = py + ay * length
    def ez = pz + az * length
-   def back = max(size * 1.8, length * 0.075)
+   mut tip = float(size)
+   if _pixel_units { tip = tip * render.pixel_world_size(ex, ey, ez) }
+   def back = max(tip * 1.8, length * 0.075)
    def side = back * 0.42
    if abs(ax) > 0.5 {
-      render.draw_line([ex, ey, ez], [ex - ax * back, ey + side, ez], col, thickness)
-      render.draw_line([ex, ey, ez], [ex - ax * back, ey - side, ez], col, thickness)
-      render.draw_line([ex, ey, ez], [ex - ax * back, ey, ez + side], col, thickness)
-      render.draw_line([ex, ey, ez], [ex - ax * back, ey, ez - side], col, thickness)
+      _line([ex, ey, ez], [ex - ax * back, ey + side, ez], col, thickness)
+      _line([ex, ey, ez], [ex - ax * back, ey - side, ez], col, thickness)
+      _line([ex, ey, ez], [ex - ax * back, ey, ez + side], col, thickness)
+      _line([ex, ey, ez], [ex - ax * back, ey, ez - side], col, thickness)
    } elif abs(ay) > 0.5 {
-      render.draw_line([ex, ey, ez], [ex + side, ey - ay * back, ez], col, thickness)
-      render.draw_line([ex, ey, ez], [ex - side, ey - ay * back, ez], col, thickness)
-      render.draw_line([ex, ey, ez], [ex, ey - ay * back, ez + side], col, thickness)
-      render.draw_line([ex, ey, ez], [ex, ey - ay * back, ez - side], col, thickness)
+      _line([ex, ey, ez], [ex + side, ey - ay * back, ez], col, thickness)
+      _line([ex, ey, ez], [ex - side, ey - ay * back, ez], col, thickness)
+      _line([ex, ey, ez], [ex, ey - ay * back, ez + side], col, thickness)
+      _line([ex, ey, ez], [ex, ey - ay * back, ez - side], col, thickness)
    } else {
-      render.draw_line([ex, ey, ez], [ex + side, ey, ez - az * back], col, thickness)
-      render.draw_line([ex, ey, ez], [ex - side, ey, ez - az * back], col, thickness)
-      render.draw_line([ex, ey, ez], [ex, ey + side, ez - az * back], col, thickness)
-      render.draw_line([ex, ey, ez], [ex, ey - side, ez - az * back], col, thickness)
+      _line([ex, ey, ez], [ex + side, ey, ez - az * back], col, thickness)
+      _line([ex, ey, ez], [ex - side, ey, ez - az * back], col, thickness)
+      _line([ex, ey, ez], [ex, ey + side, ez - az * back], col, thickness)
+      _line([ex, ey, ez], [ex, ey - side, ez - az * back], col, thickness)
    }
    true
 }
@@ -98,7 +130,7 @@ fn _draw_move_axis(px, py, pz, ax, ay, az, length, col, thickness, handle_size, 
    def ex = px + ax * length
    def ey = py + ay * length
    def ez = pz + az * length
-   render.draw_line([px, py, pz], [ex, ey, ez], col, thickness)
+   _line([px, py, pz], [ex, ey, ez], col, thickness)
    _draw_move_tip(px, py, pz, ax, ay, az, length, col, thickness, handle_size, compact)
 }
 
@@ -122,7 +154,7 @@ fn _draw_ring(f64 px, f64 py, f64 pz, f64 radius, int plane, any col, f64 thickn
       if plane == 0 { p = [px, py + cos(a) * radius, pz + sin(a) * radius] }
       elif plane == 1 { p = [px + cos(a) * radius, py, pz + sin(a) * radius] }
       else { p = [px + cos(a) * radius, py + sin(a) * radius, pz] }
-      if i > 0 { render.draw_line(prev, p, col, thickness) }
+      if i > 0 { _line(prev, p, col, thickness) }
       prev = p
       i += 1
    }
@@ -328,15 +360,22 @@ fn _axis_col(any col, int axis, int active_axis) list {
    ]
 }
 
-fn draw_axes(px, py, pz, span, axis_len, axis_thick, handle_size, red, green, blue, mode, win_w, win_h, axis=0) bool {
-   "Draws translate/rotate/scale gizmo axes."
+fn draw_axes(px, py, pz, span, axis_len, axis_thick, handle_size, red, green, blue, mode, win_w, win_h, axis=0, bool pixel_units=false) bool {
+   "Draws translate/rotate/scale gizmo axes. `axis_thick` and `handle_size` are world units, or pixels with pixel_units."
+   _pixel_units = pixel_units
+   def ok = _draw_axes_body(px, py, pz, span, axis_len, axis_thick, handle_size, red, green, blue, mode, win_w, win_h, axis)
+   _pixel_units = false
+   ok
+}
+
+fn _draw_axes_body(px, py, pz, span, axis_len, axis_thick, handle_size, red, green, blue, mode, win_w, win_h, axis) bool {
    def compact = compact_view(win_w, win_h)
    def center = [0.92, 0.94, 0.92, 0.82]
    def active_axis = int(axis)
    def red_c = _axis_col(red, 1, active_axis)
    def green_c = _axis_col(green, 2, active_axis)
    def blue_c = _axis_col(blue, 3, active_axis)
-   if !compact { render.draw_cube([px, py, pz], max(handle_size * 0.72, axis_thick * 2.4), center) }
+   if !compact { _cube([px, py, pz], max(handle_size * 0.72, axis_thick * 2.4), center) }
    if int(mode) == 1 {
       def ring_r = max(axis_len * 0.92, span * 0.58)
       def f64 ring_thick = axis_thick * 1.22

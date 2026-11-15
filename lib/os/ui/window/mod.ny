@@ -40,7 +40,7 @@ use core.os.time
 use core.math (abs)
 use core.str as str
 use core.common as common
-use core.os.ui.debug as ui_profile
+use core.os.ui.debug as ui_debug
 use core.os.ui.window.platform as ui_backend
 use core.os.ui.window.platform.api (
    CLIENT_API, NO_API, CURSOR_NORMAL, CURSOR_HIDDEN, CURSOR_DISABLED, ARROW_CURSOR, IBEAM_CURSOR,
@@ -141,11 +141,11 @@ fn _cache_raw_key_pair(int nk, int a, int b) list {
    out
 }
 
-fn _is_debug() bool { "Internal: Checks if UI debug logging is enabled via environment variables." ui_profile.debug_enabled() }
+fn _is_debug() bool { "Internal: Checks if UI debug logging is enabled via environment variables." ui_debug.debug_enabled() }
 
-fn _dbg(any msg) any { if _is_debug() { ui_profile.print_text("[ui:window] " + msg) } }
+fn _dbg(any msg) any { if _is_debug() { ui_debug.print_text("[ui:window] " + msg) } }
 
-fn _dbg_win(any win, any msg) any { if _is_debug() { ui_profile.print_text("[ui:window] win=0x" + str.to_hex(win) + " " + msg) } }
+fn _dbg_win(any win, any msg) any { if _is_debug() { ui_debug.print_text("[ui:window] win=0x" + str.to_hex(win) + " " + msg) } }
 
 fn _ensure_backend_ready() bool {
    if _backend_ready { return _backend_ready }
@@ -1426,7 +1426,6 @@ fn set_window_monitor(any win, any monitor, int xpos, int ypos, int width, int h
 }
 
 struct WindowGeometry { int x, int y, int w, int h }
-
 fn _geometry(int x, int y, int w, int h) any {
    ;; The dictionary boundary transports a dynamic record handle.
    WindowGeometry(x, y, w > 0 ? w : 1, h > 0 ? h : 1)
@@ -1434,7 +1433,7 @@ fn _geometry(int x, int y, int w, int h) any {
 
 fn _restore_geometry(any win, str slot) any {
    win.get(slot, _geometry(int(win.get("x", 100)), int(win.get("y", 100)),
-      int(win.get("w", 800)), int(win.get("h", 450))))
+         int(win.get("w", 800)), int(win.get("h", 450))))
 }
 
 fn _remember_window_geometry(any win, str slot) any {
@@ -2495,7 +2494,7 @@ fn replay_window_frame(any win) bool {
 }
 
 fn _replay_load_events() list {
-   "Loads a test-only event script. Records use frame,type,arg1,arg2,arg3 and are separated by semicolons."
+   "Loads a test-only event script. Records use frame,type,arg1,arg2,arg3 and are separated by semicolons. Types: key_down, key_up (key, mods), char (code point), mouse_move (x, y), mouse_down, mouse_up (button, x, y), resize (w, h), close."
    def raw = common.env_trim("NYTRIX_FIXTURE_EVENTS")
    if raw == _replay_events_cache { return _replay_events_rows }
    _replay_events_cache = raw
@@ -2521,15 +2520,20 @@ fn _replay_apply_frame(any win, int frame, bool report_events=true) bool {
       def row = rows.get(i)
       if common.parse_nonneg_int(row[0]) == frame {
          def kind = str.lower(str.strip(row[1]))
-         def a = row.len > 2 ? common.parse_nonneg_int(row[2]) : 0
-         def b = row.len > 3 ? common.parse_nonneg_int(row[3]) : 0
-         def c = row.len > 4 ? common.parse_nonneg_int(row[4]) : 0
+         ;; Boxed before they enter event payload dicts: a raw parsed int
+         ;; stored as a dict value reads back as nil, which dropped the button
+         ;; index and position of scripted mouse events.
+         def a = __box_i64(row.len > 2 ? common.parse_nonneg_int(row[2]) : 0)
+         def b = __box_i64(row.len > 3 ? common.parse_nonneg_int(row[3]) : 0)
+         def c = __box_i64(row.len > 4 ? common.parse_nonneg_int(row[4]) : 0)
          if report_events {
             print("NYTRIX_UI_EVENT frame=" + to_str(frame) + " type=" + kind)
          }
          case kind {
             "key_down", "key_press" -> push_event(win, EVENT_KEY_PRESSED, {"key": a, "mod": b})
             "key_up", "key_release" -> push_event(win, EVENT_KEY_RELEASED, {"key": a, "mod": b})
+            ;; A typed character (code point), for text fields, pickers and prompts.
+            "char", "text" -> push_event(win, EVENT_KEY_CHAR, {"char": a})
             "mouse_move" -> push_event(win, EVENT_MOUSE_POS_CHANGED, [a, b])
             "mouse_down", "mouse_press" -> push_event(win, EVENT_MOUSE_BUTTON_PRESSED, {"button": a, "x": b, "y": c})
             "mouse_up", "mouse_release" -> push_event(win, EVENT_MOUSE_BUTTON_RELEASED, {"button": a, "x": b, "y": c})

@@ -1,0 +1,181 @@
+shape gui-toolkit-docking {
+  family "probe-suite"
+  generator "regression"
+  features ["ny", "render", "gui", "toolkit", "docking"]
+  template ny-test-case
+  expect compile_and_run
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  timeout 300
+  expect_stdout "GUI-TOOLKIT-DOCKING-OK"
+  source ny <<'NY'
+;; Free docking on the mock renderer, driven by fed events: programmatic
+;; docking, panel rectangles, tab switching, splitter drags, dragging a
+;; floating window into a drop zone, pulling a tab back out, hit-test order
+;; between floating and docked windows, and layout save / load.
+use core
+use core.os.ui.render as gfx
+use core.os.ui.render.viewer.gui as gui
+use core.os.ui.window.consts
+
+def W = 800.0
+def H = 600.0
+mut mx, my = 0.0, 0.0
+mut any hits = dict(8)
+mut any shown = dict(8)
+
+fn panel(str id, str title, f64 x, f64 y) any {
+   shown[id] = false
+   if gui.begin_window(id, title, x, y, 260.0, 200.0, {"closable": true}) {
+      shown[id] = true
+      if gui.button("b", "Press " + title, 120.0, 26.0) { hits[id] = int(hits.get(id, 0)) + 1 }
+   }
+   gui.end_window()
+}
+
+fn frame() any {
+   gui.feed_event(EVENT_MOUSE_POS_CHANGED, {"x": mx, "y": my})
+   gui.prepare_input(0, W, H)
+   gfx.begin_frame_clear([0.0, 0.0, 0.0, 1.0])
+   gfx.set_ortho_2d(0.0, W, H, 0.0)
+   gui.begin_frame(0, 0, W, H)
+   gui.dockspace("main", 0.0, 0.0, W, H)
+   panel("scene", "Scene", 20.0, 20.0)
+   panel("assets", "Assets", 40.0, 40.0)
+   panel("console", "Console", 60.0, 60.0)
+   panel("float", "Float", 300.0, 200.0)
+   gui.end_frame()
+   gfx.end_frame()
+}
+fn down() any { gui.feed_event(EVENT_MOUSE_BUTTON_PRESSED, {"button": 0, "x": mx, "y": my}) }
+fn up() any { gui.feed_event(EVENT_MOUSE_BUTTON_RELEASED, {"button": 0, "x": mx, "y": my}) }
+fn chk(bool ok, str what) any { assert(ok, what) }
+fn rx(str id) f64 { def r = gui.window_rect(id) float(r.get(0, 0.0)) }
+fn ry(str id) f64 { def r = gui.window_rect(id) float(r.get(1, 0.0)) }
+fn rw(str id) f64 { def r = gui.window_rect(id) float(r.get(2, 0.0)) }
+fn rh(str id) f64 { def r = gui.window_rect(id) float(r.get(3, 0.0)) }
+
+assert(gfx.set_backend_type(gfx.BACKEND_MOCK), "mock")
+assert(gfx.init_window(800, 600, "dock"), "open")
+gui.reset_state()
+gui.set_enabled(true)
+gui.set_headless_input(true)
+mx = 790.0 my = 590.0
+frame()
+chk(!gui.window_docked("scene"), "windows start floating")
+
+;; --- programmatic docking builds the tree
+chk(gui.dock_window("main", "scene"), "first window fills the dockspace")
+chk(gui.dock_window("main", "assets", "scene", "right"), "split to the right of a panel")
+chk(gui.dock_window("main", "console", "assets", "center"), "tab into a panel")
+chk(!gui.dock_window("main", "float", "nowhere", "left"), "unknown target is rejected")
+chk(!gui.dock_window("main", "float", "scene", "diagonal"), "unknown side is rejected")
+frame() frame()
+chk(gui.window_docked("scene") && gui.window_docked("assets") && gui.window_docked("console"), "docked flags")
+chk(gui.dock_windows("main").len == 3, "three windows in the tree")
+chk(rx("scene") == 0.0 && rx("assets") > 390.0 && rx("assets") < 410.0, "panels sit side by side")
+chk(rw("scene") + rw("assets") > 790.0 && rw("scene") + rw("assets") <= 800.0, "panels cover the width minus the splitter")
+chk(ry("scene") > 0.0 && ry("scene") + rh("scene") == H, "panel body starts below its tab bar and reaches the bottom")
+chk(bool(shown.get("scene", false)) && bool(shown.get("console", false)) && !bool(shown.get("assets", true)), "only the active tab of a panel is drawn")
+
+;; --- tab switching
+def tab_y = ry("assets") * 0.5
+mx = rx("assets") + 20.0 my = tab_y
+down() frame() up() frame() frame()
+chk(bool(shown.get("assets", false)) && !bool(shown.get("console", true)), "clicking a tab activates it")
+
+;; --- widgets inside a docked panel work
+mx = rx("scene") + 30.0 my = ry("scene") + 20.0
+down() frame() up() frame()
+chk(int(hits.get("scene", 0)) == 1, "button in a docked panel clicks")
+
+;; --- floating window above a docked panel wins the pointer
+mx = 330.0 my = 246.0
+frame()
+down() frame() up() frame()
+chk(int(hits.get("float", 0)) == 1 && int(hits.get("scene", 0)) == 1, "floating window takes the press over the docked panel under it")
+
+;; --- splitter drag
+def split_x = rx("assets") - 2.0
+def w_before = rw("scene")
+mx = split_x my = 520.0
+frame() down() frame()
+mx = split_x - 120.0 frame() frame()
+up() frame() frame()
+chk(rw("scene") < w_before - 100.0 && rw("scene") > w_before - 140.0, "dragging the splitter resizes both panels")
+chk(rw("scene") + rw("assets") > 790.0, "panels still cover the width")
+chk(gui.dock_split_ratio("main", "", 0.5), "ratio can be set by path")
+frame() frame()
+chk(rw("scene") > 390.0 && rw("scene") < 400.0, "split returns to the middle")
+
+;; --- a release away from the indicators leaves the window floating
+mx = rx("float") + 60.0 my = ry("float") + 10.0
+frame() down() frame()
+mx = 150.0 my = 120.0
+frame() frame()
+up() frame() frame()
+chk(!gui.window_docked("float") && rx("float") < 150.0, "dropped off the indicators, the window just moves")
+
+;; --- drag it onto the bottom indicator of the left panel
+def scene_cx = rx("scene") + rw("scene") * 0.5
+mx = rx("float") + 60.0 my = ry("float") + 10.0
+frame() down() frame()
+mx = scene_cx my = H * 0.5 + 38.0
+frame() frame()
+chk(!gui.window_docked("float"), "no docking while the button is held")
+up() frame() frame() frame()
+chk(gui.window_docked("float"), "releasing on a drop indicator docks the window")
+chk(ry("float") > 280.0 && rx("float") == 0.0 && rw("float") == rw("scene"), "it took the bottom half of the left panel")
+chk(ry("scene") + rh("scene") < ry("float"), "the panel above shrank to make room")
+
+;; --- pull its tab out again
+mx = rx("float") + 20.0 my = ry("float") - 10.0
+frame() down() frame()
+my = my - 90.0 mx = mx + 200.0
+frame() frame()
+chk(!gui.window_docked("float"), "dragging a tab out of its bar undocks the window")
+up() frame() frame()
+chk(gui.dock_windows("main").len == 3, "tree lost the undocked window")
+chk(ry("scene") + rh("scene") == H, "the left panel took its space back")
+
+;; --- save, wreck, load
+def saved = gui.dock_layout_save("main")
+chk(saved.len > 20, "layout serialises")
+chk(gui.undock_window("assets") && gui.undock_window("console") && gui.undock_window("scene"), "undock everything")
+frame() frame()
+chk(gui.dock_windows("main").len == 0 && !gui.window_docked("scene"), "dockspace is empty")
+chk(!gui.dock_layout_load("main", "garbage"), "foreign text is rejected")
+chk(gui.dock_layout_load("main", saved), "saved layout loads")
+frame() frame()
+chk(gui.dock_windows("main").len == 3 && gui.window_docked("console"), "tree restored")
+chk(rw("scene") > 390.0 && rw("scene") < 400.0 && rx("assets") > 390.0, "restored panels have their rectangles")
+chk(gui.dock_layout_save("main") == saved, "save after load is identical")
+
+;; --- a closed window keeps its place and returns to it
+gui.show_window("assets", false)
+frame() frame()
+chk(gui.dock_windows("main").len == 3, "a closed window stays in the tree")
+chk(bool(shown.get("console", false)) && !bool(shown.get("assets", true)), "the remaining tab becomes visible")
+gui.show_window("console", false)
+frame() frame()
+chk(rw("scene") > 790.0, "a panel with no open windows gives its space away")
+gui.show_window("assets", true)
+gui.show_window("console", true)
+frame() frame()
+chk(gui.window_docked("assets") && rx("assets") > 390.0 && rw("scene") < 400.0, "reopened windows return to their panel")
+
+;; --- a spacer leaves a hole the pointer passes through
+chk(gui.dock_window("main", "@view", "scene", "top"), "spacer docks like a window")
+frame() frame()
+def hole = gui.dock_spacer_rect("main", "@view")
+chk(hole.len == 4 && float(hole.get(2)) == rw("scene") && float(hole.get(3)) > 200.0, "spacer reports its rectangle")
+chk(ry("scene") > float(hole.get(1)) + float(hole.get(3)) - 1.0, "the panel below starts after the spacer")
+mx = float(hole.get(0)) + 30.0 my = float(hole.get(1)) + 30.0
+frame() frame()
+chk(!gui.wants_mouse() && !gui.hit_test(mx, my), "the pointer over a spacer is not claimed by the GUI")
+chk(gui.dock_spacer_rect("main", "@nothing").len == 0, "unknown spacer has no rectangle")
+def with_spacer = gui.dock_layout_save("main")
+chk(gui.dock_layout_load("main", with_spacer) && gui.dock_layout_save("main") == with_spacer, "spacers survive save and load")
+gfx.close_window()
+print("GUI-TOOLKIT-DOCKING-OK")
+NY
+}

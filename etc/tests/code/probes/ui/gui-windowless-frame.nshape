@@ -1,0 +1,24 @@
+shape gui_windowless_frame {
+  family "runtime-ui"
+  generator "embedded"
+  features [gui layout jit]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect compile_and_run
+  expect_message "GUI-WINDOWLESS-FRAME-OK"
+  source ny <<'NY'
+use core
+use core.os.ui.render as gfx
+use core.os.ui.render.viewer.gui as gui
+;; No gfx.init_window: the toolkit lays a frame out without a surface. The
+;; LLVM JIT routes used to crash here in the first font-atlas allocation.
+gui.set_enabled(true)
+gui.begin_frame(0, 0, 800.0, 600.0)
+gui.begin_window("w", "Win", 10.0, 10.0, 300.0, 200.0)
+gui.checkbox("c", "Check", false)
+def r1 = gui.last_item_rect()
+gui.end_window()
+assert(r1[2] > 0 && r1[3] > 0, "a widget laid out without a window has a non-zero rectangle")
+print("GUI-WINDOWLESS-FRAME-OK")
+NY
+}

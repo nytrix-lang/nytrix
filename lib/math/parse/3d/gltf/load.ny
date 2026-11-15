@@ -4,6 +4,7 @@ module core.math.parse.3d.gltf.load(_gltf_stage_binary_blob, _gltf_data_uri_deco
 use core
 use core.math.bin
 use core.math
+use core.math.checked (checked_mul)
 use core.os (file_exists, file_read, file_write)
 use core.os.interact
 use core.math.parse.data.json
@@ -27,10 +28,15 @@ fn _gltf_stage_binary_blob(any raw) any {
       raw_len = raw.len
    }
    if !raw || raw_len <= 0 { return 0 }
-   def buf = malloc(raw_len)
+   mut buf_cleanup = 0
+   defer { if buf_cleanup { free(buf_cleanup) } }
+   mut buf = malloc(raw_len)
    if !buf { return 0 }
+   buf_cleanup = buf
    memcpy(buf, raw, raw_len)
-   return {"ptr": buf, "len": raw_len, "kind": "buf"}
+   def result = {"ptr": buf, "len": raw_len, "kind": "buf"}
+   buf_cleanup = 0
+   return result
 }
 
 fn _gltf_data_uri_decode(any uri) any {
@@ -392,11 +398,22 @@ fn _gltf_sparse_materialize(
    def idx_data = _gltf_sparse_buffer_ptr(buffers_data, data, int(meta.get(5, 0)))
    def val_data = _gltf_sparse_buffer_ptr(buffers_data, data, int(meta.get(6, 0)))
    if !idx_data || !val_data || count < 0 || elem_size <= 0 { return 0 }
-   def out = malloc(count * elem_size)
+   def out_size_result = checked_mul(count, elem_size)
+   def sparse_size_result = checked_mul(sparse_count, elem_size)
+   if !is_ok(out_size_result) || !is_ok(sparse_size_result) { return 0 }
+   def out_size = int(unwrap(out_size_result))
+   if base_ptr && base_stride >= elem_size {
+      def base_extent_result = checked_mul(count, base_stride)
+      if !is_ok(base_extent_result) { return 0 }
+   }
+   mut out_cleanup = 0
+   defer { if out_cleanup { free(out_cleanup) } }
+   mut out = malloc(out_size)
    if !out { return 0 }
+   out_cleanup = out
    if base_ptr && base_stride >= elem_size {
       if base_stride == elem_size {
-         memcpy(out, base_ptr, count * elem_size)
+         memcpy(out, base_ptr, out_size)
       } else {
          mut i = 0
          while i < count {
@@ -405,7 +422,7 @@ fn _gltf_sparse_materialize(
          }
       }
    } else {
-      memset(out, 0, count * elem_size)
+      memset(out, 0, out_size)
    }
    mut si = 0
    while si < sparse_count {
@@ -415,6 +432,7 @@ fn _gltf_sparse_materialize(
       }
       si += 1
    }
+   out_cleanup = 0
    out
 }
 

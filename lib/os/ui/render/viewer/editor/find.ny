@@ -3,7 +3,7 @@
 ;; References:
 ;; - core.os.ui.render.viewer.editor.core
 module core.os.ui.render.viewer.editor.find(
-   state, open, close, is_open, query, set_query, error, results, count, index, current,
+   state, open, dismiss, is_open, query, set_query, error, results, count, index, current,
    replacement, set_replacement, replace_on, show_replace, hide_replace, toggle_replace,
    active_field, toggle_field, toggle_regex, toggle_case, toggle_word, regex_on, case_on, word_on,
    refresh, next, prev, replace_current, replace_all, summary, handle_key, handle_char
@@ -31,7 +31,12 @@ fn state() dict {
 fn open(dict st) dict { st["open"] = true st }
 
 ;; Closes resources owned by the state and returns the closed state.
-fn close(dict st) dict { st["open"] = false st }
+;; Named `dismiss`, not `close`: `<alias>.close(state)` resolves to the OS
+;; file-descriptor close and hands the caller an error code instead of the state.
+fn dismiss(any st) any {
+   st["open"] = false
+   return st
+}
 
 fn is_open(dict st) bool { bool(st.get("open", false)) }
 
@@ -313,7 +318,7 @@ fn replace_all(dict st, list lines) dict {
 ;; Handles the key operation and returns the resulting state.
 fn handle_key(dict st, any data) dict {
    mut action = ""
-   if window.event_key_is(data, key.KEY_ESCAPE) { st = close(st) action = "close" }
+   if window.event_key_is(data, key.KEY_ESCAPE) { st = dismiss(st) action = "close" }
    elif window.event_key_is(data, key.KEY_TAB) && replace_on(st) { st = toggle_field(st) action = "field" }
    elif window.event_key_is(data, key.KEY_ENTER) {
       def mods = int(data.get("mods", data.get("mod", 0)))

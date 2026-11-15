@@ -206,6 +206,46 @@ static size_t rt_closure_callable_abis_cap;
 
 static void rt_dynamic_callable_lock_acquire(void);
 static void rt_dynamic_callable_lock_release(void);
+static size_t rt_dynamic_callable_hash(uintptr_t fn);
+
+/*
+ * Called with the callable lock held. Closure addresses are nonzero, so an
+ * empty address is also the open-addressed table's empty-slot marker.
+ */
+static rt_closure_callable_abi_t *
+rt_dynamic_closure_abi_slot(uintptr_t closure) {
+  if (!rt_closure_callable_abis_cap)
+    return NULL;
+  size_t at = rt_dynamic_callable_hash(closure) &
+              (rt_closure_callable_abis_cap - 1);
+  while (rt_closure_callable_abis[at].closure &&
+         rt_closure_callable_abis[at].closure != closure)
+    at = (at + 1) & (rt_closure_callable_abis_cap - 1);
+  return &rt_closure_callable_abis[at];
+}
+
+static bool rt_dynamic_closure_abi_grow(void) {
+  size_t old_cap = rt_closure_callable_abis_cap;
+  size_t cap = old_cap ? old_cap * 2 : 128;
+  if (cap < old_cap || cap > SIZE_MAX / sizeof(*rt_closure_callable_abis))
+    return false;
+  rt_closure_callable_abi_t *grown = calloc(cap, sizeof(*grown));
+  if (!grown)
+    return false;
+  for (size_t i = 0; i < old_cap; ++i) {
+    rt_closure_callable_abi_t entry = rt_closure_callable_abis[i];
+    if (!entry.closure)
+      continue;
+    size_t at = rt_dynamic_callable_hash(entry.closure) & (cap - 1);
+    while (grown[at].closure)
+      at = (at + 1) & (cap - 1);
+    grown[at] = entry;
+  }
+  free(rt_closure_callable_abis);
+  rt_closure_callable_abis = grown;
+  rt_closure_callable_abis_cap = cap;
+  return true;
+}
 
 static bool rt_dynamic_callable_is_closure(int64_t fn, uintptr_t *closure_out) {
   if (!is_heap_ptr(fn))
@@ -244,12 +284,9 @@ static uint64_t rt_dynamic_closure_abi_flags(int64_t fn) {
     return 0;
   uint64_t flags = 0;
   rt_dynamic_callable_lock_acquire();
-  for (size_t i = 0; i < rt_closure_callable_abis_len; ++i) {
-    if (rt_closure_callable_abis[i].closure == closure) {
-      flags = rt_closure_callable_abis[i].flags;
-      break;
-    }
-  }
+  rt_closure_callable_abi_t *entry = rt_dynamic_closure_abi_slot(closure);
+  if (entry && entry->closure)
+    flags = entry->flags;
   rt_dynamic_callable_lock_release();
   return flags;
 }
@@ -259,33 +296,22 @@ static bool rt_dynamic_closure_set_abi_flags(int64_t fn, uint64_t flags) {
   if (!rt_dynamic_callable_is_closure(fn, &closure))
     return false;
   rt_dynamic_callable_lock_acquire();
-  for (size_t i = 0; i < rt_closure_callable_abis_len; ++i) {
-    if (rt_closure_callable_abis[i].closure == closure) {
-      if (rt_closure_callable_abis[i].flags == 0)
-        rt_closure_callable_abis[i].flags = flags;
-      rt_dynamic_callable_lock_release();
-      return true;
-    }
+  rt_closure_callable_abi_t *entry = rt_dynamic_closure_abi_slot(closure);
+  if (entry && entry->closure) {
+    if (entry->flags == 0)
+      entry->flags = flags;
+    rt_dynamic_callable_lock_release();
+    return true;
   }
-  if (rt_closure_callable_abis_len == rt_closure_callable_abis_cap) {
-    size_t cap =
-        rt_closure_callable_abis_cap ? rt_closure_callable_abis_cap * 2 : 32;
-    if (cap < rt_closure_callable_abis_cap ||
-        cap > SIZE_MAX / sizeof(*rt_closure_callable_abis)) {
+  if (rt_closure_callable_abis_len >= rt_closure_callable_abis_cap / 2) {
+    if (!rt_dynamic_closure_abi_grow()) {
       rt_dynamic_callable_lock_release();
       return false;
     }
-    rt_closure_callable_abi_t *grown =
-        realloc(rt_closure_callable_abis, cap * sizeof(*grown));
-    if (!grown) {
-      rt_dynamic_callable_lock_release();
-      return false;
-    }
-    rt_closure_callable_abis = grown;
-    rt_closure_callable_abis_cap = cap;
+    entry = rt_dynamic_closure_abi_slot(closure);
   }
-  rt_closure_callable_abis[rt_closure_callable_abis_len++] =
-      (rt_closure_callable_abi_t){closure, flags};
+  *entry = (rt_closure_callable_abi_t){closure, flags};
+  ++rt_closure_callable_abis_len;
   rt_dynamic_callable_lock_release();
   return true;
 }
@@ -1152,6 +1178,48 @@ static int64_t rt_dynamic_callback_call_words(int64_t fn, const int64_t *args,
   }
 }
 
+/* Expand the native parameter slots consumed by typed sequence arguments. */
+static size_t rt_dynamic_callback_expand_word_args(int64_t env,
+                                                   bool has_env,
+                                                   const int64_t *args,
+                                                   size_t arity,
+                                                   bool tagged_args,
+                                                   int64_t *words,
+                                                   size_t capacity) {
+  size_t count = 0;
+  if (has_env) {
+    if (count >= capacity)
+      return 0;
+    words[count++] = env;
+  }
+  for (size_t i = 0; i < arity; ++i) {
+    int64_t value = rt_dynamic_callback_normalize_arg(args[i], !tagged_args);
+    if (!tagged_args) {
+      const int64_t *header = NULL;
+      if (rt_tbuf_check(value, &header) == RT_TBUF_OK) {
+        if (count + 2 > capacity)
+          return 0;
+        words[count++] = value;
+        words[count++] = header[1];
+        continue;
+      }
+      if (rt_native_is_str(value) || is_v_str(value)) {
+        if (count + 3 > capacity)
+          return 0;
+        words[count++] = value;
+        words[count++] = rt_any_len(value);
+        words[count++] = rt_any_tag(value);
+        continue;
+      }
+    }
+    if (count >= capacity)
+      return 0;
+    words[count++] = value;
+  }
+  return count;
+}
+
+
 static int64_t rt_dynamic_callback_call_f64_words(int64_t fn,
                                                   const int64_t *args,
                                                   size_t arity) {
@@ -1360,11 +1428,16 @@ int64_t rt_call_any1(int64_t f, int64_t value) {
     int64_t code, env;
     if (rt_ffi_closure_split(f, &code, &env)) {
       if (abi.word_args) {
-        int64_t words[] = {env, value};
-        words[1] =
-            rt_dynamic_callback_normalize_arg(words[1], !abi.tagged_args);
+        int64_t args[] = {value};
+        int64_t words[4];
+        size_t word_count = rt_dynamic_callback_expand_word_args(
+            env, true, args, 1, abi.tagged_args, words,
+            sizeof(words) / sizeof(words[0]));
+        if (!word_count)
+          return rt_fail(rt_alloc_string("err.type"),
+                         rt_alloc_string("closure argument ABI overflow"));
         int64_t result = rt_dynamic_callback_call_words(
-            code, words, sizeof(words) / sizeof(words[0]));
+            code, words, word_count);
         return rt_dynamic_callback_normalize_result(
             result, dynamic_bool_callable, false, raw_result_callable);
       }
@@ -1392,9 +1465,14 @@ int64_t rt_call_any1(int64_t f, int64_t value) {
    */
   if (dynamic_callable && abi.word_args) {
     int64_t args[] = {value};
-    args[0] =
-        rt_dynamic_callback_normalize_arg(args[0], raw_scalar_callback_args);
-    int64_t result = rt_dynamic_callback_call_words(f, args, 1);
+    int64_t words[3];
+    size_t word_count = rt_dynamic_callback_expand_word_args(
+        0, false, args, 1, tagged_args_callable, words,
+        sizeof(words) / sizeof(words[0]));
+    if (!word_count)
+      return rt_fail(rt_alloc_string("err.type"),
+                     rt_alloc_string("callback argument ABI overflow"));
+    int64_t result = rt_dynamic_callback_call_words(f, words, word_count);
     return rt_dynamic_callback_normalize_result(result, dynamic_bool_callable,
                                                 false, raw_result_callable);
   }
@@ -1429,12 +1507,16 @@ int64_t rt_call_any2(int64_t f, int64_t left, int64_t right) {
     int64_t code, env;
     if (rt_ffi_closure_split(f, &code, &env)) {
       if (abi.word_args) {
-        int64_t words[] = {env, left, right};
-        for (size_t i = 1; i < sizeof(words) / sizeof(words[0]); ++i)
-          words[i] =
-              rt_dynamic_callback_normalize_arg(words[i], !abi.tagged_args);
+        int64_t args[] = {left, right};
+        int64_t words[7];
+        size_t word_count = rt_dynamic_callback_expand_word_args(
+            env, true, args, 2, abi.tagged_args, words,
+            sizeof(words) / sizeof(words[0]));
+        if (!word_count)
+          return rt_fail(rt_alloc_string("err.type"),
+                         rt_alloc_string("closure argument ABI overflow"));
         int64_t result = rt_dynamic_callback_call_words(
-            code, words, sizeof(words) / sizeof(words[0]));
+            code, words, word_count);
         return rt_dynamic_callback_normalize_result(
             result, dynamic_bool_callable, false, raw_result_callable);
       }
@@ -1458,10 +1540,14 @@ int64_t rt_call_any2(int64_t f, int64_t left, int64_t right) {
      */
     if (abi.word_args && !tagged_args_callable) {
       int64_t args[2] = {left, right};
-      for (size_t i = 0; i < 2; ++i)
-        args[i] = rt_dynamic_callback_normalize_arg(args[i],
-                                                    raw_scalar_callback_args);
-      int64_t result = rt_dynamic_callback_call_words(f, args, 2);
+      int64_t words[6];
+      size_t word_count = rt_dynamic_callback_expand_word_args(
+          0, false, args, 2, tagged_args_callable, words,
+          sizeof(words) / sizeof(words[0]));
+      if (!word_count)
+        return rt_fail(rt_alloc_string("err.type"),
+                       rt_alloc_string("callback argument ABI overflow"));
+      int64_t result = rt_dynamic_callback_call_words(f, words, word_count);
       return rt_dynamic_callback_normalize_result(result, dynamic_bool_callable,
                                                   false, raw_result_callable);
     }

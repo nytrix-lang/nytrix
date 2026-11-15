@@ -11,18 +11,18 @@
 #include "base/options.h"
 #include "base/util.h"
 #include "cmd/ny/pkg.h"
-#include "cmd/ny/test.h"
-#include "code/backend/ir/test/opt/test.h"
-#include "code/backend/native.h"
+#include "code/lang/ny/pipeline/embedding.h"
+#include "code/test/backend/registry.h"
+#include "code/backend/lower/native.h"
 #include "code/backend/runtime/runtime.h"
 #include "code/backend/runtime/shared.h"
-#include "code/backend/wire/incremental/incremental.h"
-#include "code/lang/llvm/jit.h"
-#include "code/lang/parse/parser.h"
-#include "code/lang/pipeline.h"
-#include "code/lang/pipeline/native.h"
-#include "code/lang/priv.h"
-#include "code/lang/types/test.h"
+#include "code/backend/core/cache/incremental.h"
+#include "code/lang/ny/gen/llvm/jit.h"
+#include "code/lang/ny/parser/parser.h"
+#include "code/lang/ny/pipeline/pipeline.h"
+#include "code/lang/ny/pipeline/native.h"
+#include "code/lang/ny/gen/internal.h"
+#include "code/lang/ny/semantics/typerunner.h"
 #include <nytrix/nytrix.h>
 #ifndef _WIN32
 #include <sys/mman.h>
@@ -92,6 +92,7 @@ const char *__lsan_default_suppressions() {
          "leak:ny_strdup\n"
          "leak:vec_push_impl\n"
          "leak:LLVM\n"
+         "leak:update_column_bound_callback\n"
          "leak:libnytrixrt.so\n"
          "leak:^rt_malloc$\n"
          "leak:^__flt_box_val$\n"
@@ -1407,6 +1408,10 @@ static bool ny_argv_has_flag(int argc, char **argv, const char *flag) {
     return false;
   static const char *const value_options[] = {"--cross",
                                               "--cross-runner",
+                                              "--core-bc",
+                                              "--core-path",
+                                              "--std-bc",
+                                              "--std-path",
                                               "--profile",
                                               "--runs",
                                               "--mode",
@@ -1466,6 +1471,10 @@ static bool ny_argv_has_flag(int argc, char **argv, const char *flag) {
 static bool ny_cli_takes_value(const char *arg) {
   static const char *const options[] = {"--cross",
                                         "--cross-runner",
+                                        "--core-bc",
+                                        "--core-path",
+                                        "--std-bc",
+                                        "--std-path",
                                         "--profile",
                                         "--runs",
                                         "--mode",
@@ -2319,15 +2328,21 @@ int main(int argc, char **argv, char **envp) {
   if (ny_argv_has_flag(argc, argv, "--nytrix-embed-test"))
     return nytrix_embedding_test();
   for (int i = 1; i < argc; ++i) {
-    static const char option[] = "--ir-opt-test";
-    static const char option_prefix[] = "--ir-opt-test=";
-    if (strcmp(argv[i], option) == 0) {
+    static const char option[] = "--backend-test";
+    static const char option_prefix[] = "--backend-test=";
+    static const char legacy_option[] = "--ir-opt-test";
+    static const char legacy_option_prefix[] = "--ir-opt-test=";
+    if (strcmp(argv[i], option) == 0 ||
+        strcmp(argv[i], legacy_option) == 0) {
       const char *name =
           i + 1 < argc && argv[i + 1][0] != '-' ? argv[i + 1] : NULL;
-      return nyr_ir_opt_test_run(name);
+      return nyr_backend_test_run(name);
     }
     if (strncmp(argv[i], option_prefix, sizeof(option_prefix) - 1) == 0)
-      return nyr_ir_opt_test_run(argv[i] + sizeof(option_prefix) - 1);
+      return nyr_backend_test_run(argv[i] + sizeof(option_prefix) - 1);
+    if (strncmp(argv[i], legacy_option_prefix,
+                sizeof(legacy_option_prefix) - 1) == 0)
+      return nyr_backend_test_run(argv[i] + sizeof(legacy_option_prefix) - 1);
   }
 
   bool trace_requested = ny_argv_has_flag(argc, argv, "-trace") ||

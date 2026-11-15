@@ -1372,11 +1372,14 @@ fn _decode_root(any root, int raster_size=0) any {
    def int out_w = int(max(1, int(src_w * scale + 0.5)))
    def int out_h = int(max(1, int(src_h * scale + 0.5)))
    def int byte_count = out_w * out_h * 4
+   mut cleanup = [0]
+   defer { if cleanup[0] { free(cleanup[0]) } }
    def ptr = malloc(byte_count + 32)
    if !ptr {
       _svg_set_error("out of memory allocating SVG raster")
       return 0
    }
+   cleanup[0] = ptr
    memset(ptr, 0, byte_count)
    mut defs = dict(32)
    _collect_defs(root, defs)
@@ -1396,6 +1399,7 @@ fn _decode_root(any root, int raster_size=0) any {
    }
    _draw_node(ptr, out_w, out_h, root, rs, defs)
    def rgba = init_str(ptr, byte_count)
+   cleanup[0] = 0
    _svg_last_error = ""
    {"data": rgba, "width": out_w, "height": out_h, "channels": 4}
 }

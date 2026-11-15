@@ -157,6 +157,10 @@ fn _dictionary_stream_core(str target_hash, str wordlist_fn, fnptr hash_fn, fnpt
          def max_carry = 1 << 20
          def chunk_n = 1 << 16
          mut buf = malloc(chunk_n + 32)
+         if !buf {
+            unwrap(sys_close(fd))
+            panic("out of memory reading wordlist")
+         }
          while !found {
             def got = sys_read(fd, buf, chunk_n)
             mut nread = 0
@@ -389,10 +393,8 @@ fn _analysis_word_from_line(str text, int start, int stop, int min_len, int max_
 }
 
 fn load_analysis_words_limit(int max_words=0, str lang="english", int min_len=1, int max_len=24) list {
-   "Load lowercase words from the repo-local analysis dictionary.
-   The source is `core.math.crypto.analysis.worldfreq`'s weighted word profile, so
-   this is reproducible from the repository and does not depend on system
-   wordlists. `max_words <= 0` means no limit."
+   "Load lowercase words from the repo-local combined profile dictionary.
+   Weighted entries come first; raw-only words follow. `max_words <= 0` means no limit."
    def path = analysis_wordlist_path(lang)
    if path.len == 0 { return list(0) }
    match file_read(path) {

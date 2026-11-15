@@ -1,0 +1,39 @@
+shape module_global_raw_int_dynamic_read {
+  family "runtime/modules"
+  generator "embedded"
+  features ["ny", "modules", "globals", "abi"]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect compile_and_run
+  expect_message "MODULE-GLOBAL-RAW-INT-DYNAMIC-READ-OK"
+  source ny <<'NY'
+use core
+
+;; `mut cur = -1` is a raw-integer cell. A read typed `any` was stamped as a
+;; tagged word, so odd values halved and even values read as false. The GL
+;; renderer's current-texture global bound texture 3 for texture 7 and drew
+;; every glTF mesh untextured.
+module cell(
+   set_cur,
+   get_cur,
+   cur_plus,
+){
+   mut cur = -1
+   fn set_cur(int v) bool {
+      cur = v
+      true
+   }
+   fn get_cur() any { cur }
+   fn cur_plus() int { cur + 0 }
+}
+
+cell.set_cur(7)
+assert(cell.get_cur() == 7, "odd value read through any")
+assert(cell.cur_plus() == 7, "odd value read as int")
+cell.set_cur(2)
+assert(cell.get_cur() == 2, "even value read through any")
+cell.set_cur(-1)
+assert(cell.get_cur() == -1, "negative value read through any")
+print("MODULE-GLOBAL-RAW-INT-DYNAMIC-READ-OK")
+NY
+}

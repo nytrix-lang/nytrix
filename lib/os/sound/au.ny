@@ -241,7 +241,8 @@ fn _g722(any s, int code, any out, int sample, int stride) {
 }
 
 fn _decode722(any d, int at, int size, int channels, int rate) any {
-   if size <= 0 || size % channels != 0 { return 0 }
+   if size <= 0 || channels <= 0 || size > 9223372036854775807 / 4 ||
+      size % channels != 0 { return 0 }
    def out = malloc(size * 4)
    if !out { return 0 }
    mut states = []
@@ -286,7 +287,9 @@ fn decode_bytes(any d) any {
       return decode(d, at, size, enc, channels, rate)
    }
    if enc == 1 || enc == 27 {
+      if size > 9223372036854775807 / 2 { return 0 }
       def out = malloc(size * 2)
+      if !out { return 0 }
       mut i = 0
       while i < size {
          def b = load8(d, at + i)
@@ -296,7 +299,9 @@ fn decode_bytes(any d) any {
       return make_memory_source(out, size * 2, channels, rate, 16, SAMPLE_FMT_S16, 1)
    }
    if enc == 2 { ;; signed 8-bit linear PCM
+      if size > 9223372036854775807 / 2 { return 0 }
       def out = malloc(size * 2)
+      if !out { return 0 }
       mut i = 0
       while i < size {
          def b = load8(d, at + i)
@@ -309,6 +314,7 @@ fn decode_bytes(any d) any {
       def width = enc == 3 ? 2 : (enc == 4 ? 3 : 4)
       if size % width != 0 { return 0 }
       def out = malloc(size)
+      if !out { return 0 }
       mut i = 0
       while i < size {
          mut b = 0
@@ -324,6 +330,7 @@ fn decode_bytes(any d) any {
    if enc == 6 {
       if size % 4 != 0 { return 0 }
       def out = malloc(size)
+      if !out { return 0 }
       mut i = 0
       while i < size {
          def v = _be32(d, at + i)
@@ -335,8 +342,13 @@ fn decode_bytes(any d) any {
    if enc == 7 {
       if size % 8 != 0 { return 0 }
       def wide = malloc(8)
+      if !wide { return 0 }
       def count = size / 8
       def out = malloc(count * 4)
+      if !out {
+         free(wide)
+         return 0
+      }
       mut i = 0
       while i < count {
          mut b = 0

@@ -1,0 +1,152 @@
+shape fontstash-layout {
+  family "probe-suite"
+  generator "regression"
+  features ["ny", "render", "font", "text", "fontstash"]
+  template ny-test-case
+  expect compile_and_run
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  timeout 300
+  expect_stdout "FONTSTASH-LAYOUT-OK"
+  source ny <<'NY'
+;; Text layout over the font atlas: fallback chains, run splitting, atlas
+;; growth without metric drift, alignment, letter spacing, and the state stack.
+use core
+use core.str as str
+use core.os.path as ospath
+use core.os.ui.render as gfx
+use core.os.ui.render.fontstash as fs
+
+assert(gfx.set_backend_type(gfx.BACKEND_MOCK), "mock renderer")
+assert(gfx.init_window(320, 200, "fontstash"), "open surface")
+def maple = fs.add_font("maple", ospath.resolve_repo_asset("etc/assets/fonts/maplemono.ttf"), 16)
+def pro = fs.add_font("profont", ospath.resolve_repo_asset("etc/assets/fonts/profont.ttf"), 16)
+def quant = fs.add_font("quantico", ospath.resolve_repo_asset("etc/assets/fonts/quantico.ttf"), 16)
+assert(maple == 0 && pro == 1 && quant == 2 && fs.font_count() == 3, "three fonts, handles in order")
+assert(fs.add_font("maple", "nowhere.ttf", 16) == maple, "a known name returns its handle")
+assert(fs.add_font("ghost", "no/such/font.ttf", 16) == -1, "a missing file is rejected")
+assert(fs.font_by_name("profont") == pro && fs.font_by_name("nope") == -1, "lookup by name")
+
+;; Coverage comes from the font files: U+0100 is only in Maple, U+00A4 is in
+;; Maple and ProFont but not Quantico.
+assert(fs.has_glyph(maple, 65) && fs.has_glyph(pro, 65) && fs.has_glyph(quant, 65), "every font has A")
+assert(fs.has_glyph(maple, 256) && !fs.has_glyph(pro, 256) && !fs.has_glyph(quant, 256), "U+0100 only in the first font")
+assert(fs.has_glyph(pro, 164) && !fs.has_glyph(quant, 164), "U+00A4 missing from the third font")
+
+;; Fallback chain: quantico -> profont -> maple.
+assert(fs.resolve(quant, 256) == quant, "no chain: the font answers for itself")
+assert(fs.add_fallback(quant, pro) && fs.add_fallback(pro, maple), "chain builds")
+assert(!fs.add_fallback(quant, pro) && !fs.add_fallback(quant, quant) && !fs.add_fallback(quant, 9), "duplicates, self, and unknown handles are rejected")
+assert(fs.resolve(quant, 65) == quant, "covered code point stays in the base font")
+assert(fs.resolve(quant, 164) == pro, "first fallback that has the glyph wins")
+assert(fs.resolve(quant, 256) == maple, "the chain is followed through a fallback's own fallback")
+assert(fs.resolve(quant, 0x10FFFF) == quant, "nothing covers it: back to the base font")
+
+;; Runs: maximal stretches per resolved font, spaces staying with their run.
+def cur = "\xc2\xa4"
+def amac = "\xc4\x80"
+def text = "AB " + cur + cur + "C" + amac
+def rs = fs.runs(quant, text)
+assert(rs.len == 8, "four runs: " + to_str(rs.len / 2))
+assert(int(float(rs.get(0))) == quant && to_str(rs.get(1)) == "AB ", "first run in the base font, with its space")
+assert(int(float(rs.get(2))) == pro && to_str(rs.get(3)) == cur + cur, "second run in the first fallback")
+assert(int(float(rs.get(4))) == quant && to_str(rs.get(5)) == "C", "back to the base font")
+assert(int(float(rs.get(6))) == maple && to_str(rs.get(7)) == amac, "last run in the deep fallback")
+mut joined = ""
+mut i = 1
+while i < rs.len {
+   joined = joined + to_str(rs.get(i))
+   i += 2
+}
+assert(joined == text, "runs lose no bytes")
+
+;; Metrics and atlas growth: measuring is stable while many new glyphs are
+;; rasterised into the atlas.
+assert(fs.set_font(quant) && fs.current_font() == quant && !fs.set_font(42), "font selection")
+def vm = fs.vert_metrics()
+assert(float(vm.get(0)) > 0.0 && float(vm.get(1)) < 0.0 && float(vm.get(2)) >= float(vm.get(0)), "ascent, descent, line height")
+def w_before = fs.text_width(text)
+def w_ab = fs.text_width("AB")
+assert(w_before > w_ab && w_ab > 0.0, "widths are positive and grow with the text")
+mut grow = ""
+mut cp = 33
+while cp < 127 {
+   grow = grow + str.chr(cp)
+   cp += 1
+}
+cp = 128
+while cp < 192 {
+   ;; U+0100 .. U+013F as UTF-8: lead byte 0xC4, continuation 0x80 .. 0xBF.
+   grow = grow + "\xc4" + str.chr(cp)
+   cp += 1
+}
+assert(fs.prepare(quant, grow) >= 2, "glyphs from several fonts are rasterised")
+assert(gfx.begin_frame_clear([0.0, 0.0, 0.0, 1.0]), "frame")
+fs.draw_text(4.0, 4.0, grow)
+assert(gfx.end_frame(), "end frame")
+assert(fs.text_width(text) == w_before && fs.text_width("AB") == w_ab, "atlas growth does not change earlier metrics")
+
+;; Alignment moves the rectangle, not its size.
+fs.set_align(fs.ALIGN_LEFT | fs.ALIGN_TOP)
+def b0 = fs.text_bounds(100.0, 50.0, "AB")
+assert(float(b0.get(0)) == 100.0 && float(b0.get(1)) == 50.0 && float(b0.get(2)) == w_ab, "left / top")
+fs.set_align(fs.ALIGN_CENTER | fs.ALIGN_MIDDLE)
+def b1 = fs.text_bounds(100.0, 50.0, "AB")
+assert(float(b1.get(0)) == 100.0 - w_ab * 0.5 && float(b1.get(1)) == 50.0 - float(vm.get(2)) * 0.5, "center / middle")
+fs.set_align(fs.ALIGN_RIGHT | fs.ALIGN_BOTTOM)
+def b2 = fs.text_bounds(100.0, 50.0, "AB")
+assert(float(b2.get(0)) == 100.0 - w_ab && float(b2.get(1)) == 50.0 - float(vm.get(2)), "right / bottom")
+fs.set_align(fs.ALIGN_LEFT | fs.ALIGN_BASELINE)
+def b3 = fs.text_bounds(100.0, 50.0, "AB")
+assert(float(b3.get(1)) == 50.0 - float(vm.get(0)) && float(b3.get(2)) == w_ab, "baseline")
+
+;; Letter spacing adds one gap between each pair of glyphs.
+fs.set_spacing(3.0)
+assert(fs.text_width("AB") == w_ab + 3.0 && fs.text_width("A") == fs.text_width("A"), "spacing between glyphs only")
+fs.set_spacing(0.0)
+
+;; The halo kernel is a sampled Gaussian: normalized, symmetric, peaked at
+;; the centre, and falling off by exp(-d^2 / (2 sigma^2)) with sigma px / 2.
+def taps = fs.blur_taps(3.0)
+mut tap_sum, tap_centre, tap_right, tap_left, tap_far = 0.0, 0.0, 0.0, 0.0, 0.0
+mut tap_i = 0
+while tap_i + 2 < taps.len {
+   def tdx, tdy, tw = float(taps.get(tap_i, 0.0)), float(taps.get(tap_i + 1, 0.0)), float(taps.get(tap_i + 2, 0.0))
+   tap_sum = tap_sum + tw
+   if tdx == 0.0 && tdy == 0.0 { tap_centre = tw }
+   if tdx == 1.0 && tdy == 0.0 { tap_right = tw }
+   if tdx == -1.0 && tdy == 0.0 { tap_left = tw }
+   if tdx == 3.0 && tdy == 0.0 { tap_far = tw }
+   assert(tdx * tdx + tdy * tdy <= 9.001 && tw > 0.0, "taps stay inside the blur radius")
+   tap_i += 3
+}
+assert(taps.len == 29 * 3, "a 3 px blur samples the 29 grid points within its radius")
+assert(tap_sum > 0.9999 && tap_sum < 1.0001, "kernel weights sum to one")
+assert(tap_right == tap_left && tap_centre > tap_right && tap_right > tap_far, "kernel is symmetric and peaked")
+def want_ratio = 0.8007374029168081 ;; exp(-1 / (2 * 1.5^2))
+assert(tap_right / tap_centre > want_ratio - 0.0001 && tap_right / tap_centre < want_ratio + 0.0001, "falloff follows the Gaussian")
+assert(fs.blur_taps(0.0).len == 0 && fs.blur_taps(12.0).len <= 81 * 3, "no taps without blur, bounded taps for a wide one")
+
+;; State stack.
+fs.set_align(fs.ALIGN_LEFT | fs.ALIGN_TOP)
+fs.push_state()
+fs.set_font(maple)
+fs.set_spacing(2.0)
+fs.set_align(fs.ALIGN_RIGHT | fs.ALIGN_TOP)
+fs.set_outline(2.0, [1.0, 0.0, 0.0, 1.0])
+fs.set_blur(3.0)
+assert(fs.current_font() == maple && fs.text_width("AB") != w_ab, "inner state is in effect")
+assert(gfx.begin_frame_clear([0.0, 0.0, 0.0, 1.0]), "frame")
+def end_x = fs.draw_text(200.0, 20.0, "AB")
+assert(end_x == 200.0, "right-aligned text ends at its anchor")
+assert(gfx.end_frame(), "end frame")
+assert(fs.pop_state(), "pop")
+assert(fs.current_font() == quant && fs.text_width("AB") == w_ab, "outer state is back")
+def b4 = fs.text_bounds(100.0, 50.0, "AB")
+assert(float(b4.get(0)) == 100.0, "alignment restored")
+assert(!fs.pop_state(), "nothing left to pop")
+fs.clear_state()
+assert(fs.current_font() == maple, "clear_state selects the first font")
+gfx.close_window()
+print("FONTSTASH-LAYOUT-OK")
+NY
+}

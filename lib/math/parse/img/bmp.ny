@@ -229,8 +229,13 @@ fn decode(any data) any {
    def palette_off = 14 + hdr_size
    def palette_entries = _bmp_palette_entries(bpp, palette_off, offset, int(header.get("colors_used", 0)))
    if palette_entries < 0 { return 0 }
-   def pixels = init_str(malloc(w * abs_h * 4), w * abs_h * 4)
-   memset(pixels, 0, w * abs_h * 4)
+   def max_size = 9223372036854775807
+   if w > max_size / abs_h / 4 { return 0 }
+   def pixel_bytes = w * abs_h * 4
+   def pixel_raw = malloc(pixel_bytes)
+   if !pixel_raw { return 0 }
+   def pixels = init_str(pixel_raw, pixel_bytes)
+   memset(pixels, 0, pixel_bytes)
    def bgra_shuffle = _bmp_bgra_shuffle()
    mut y = 0
    while y < abs_h {
@@ -240,6 +245,7 @@ fn decode(any data) any {
       def dst_row = y * w * 4
       if src_row + bpl > data.len {
          if bgra_shuffle { free(bgra_shuffle) }
+         free(pixels)
          return 0
       }
       if bpp == 24 && compression == 0 {

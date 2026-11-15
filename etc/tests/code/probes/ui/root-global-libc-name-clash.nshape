@@ -1,0 +1,28 @@
+shape root_global_libc_name_clash {
+  family "runtime-ui"
+  generator "embedded"
+  features [window llvm globals]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect compile_and_run
+  expect_message "ROOT-GLOBAL-LIBC-NAME-CLASH-OK"
+  source ny <<'NY'
+use core
+use core.os.ui.window as w
+
+;; The window stack declares libc externs (read, write, dup, pipe). On the
+;; LLVM route a root global with one of those names was looked up by its
+;; bare symbol, resolved to the libc function, and the first store wrote
+;; into libc text (editor-keymap-profiles segfaulted on MCJIT).
+mut dup = "cell"
+mut read = 1
+mut write = 2
+mut pipe = 3
+read += 10
+write += 20
+pipe += 30
+dup = dup + "!"
+assert(dup == "cell!" && read == 11 && write == 22 && pipe == 33, "root globals named like libc functions")
+print("ROOT-GLOBAL-LIBC-NAME-CLASH-OK")
+NY
+}

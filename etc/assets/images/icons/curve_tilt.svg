@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
+  <title id="title1">Curve Tilt</title>
+  <desc id="desc1">Curve Tilt editor icon. Original asset id: curvetilt.</desc>
+  <defs id="defs2" />
+  <g transform="translate(2.0000 2.0000) scale(1.25000)" id="g2">
+    <path d="M 8,2 C 4.6981361,2 2,4.6981361 2,8 c 0,3.301864 2.6981361,6 6,6 3.301864,0 6,-2.698136 6,-6 C 14,4.6981361 11.301864,2 8,2 Z m 0,2 c 2.220984,0 4,1.7790164 4,4 0,2.220984 -1.779016,4 -4,4 C 5.7790164,12 4,10.220984 4,8 4,5.7790164 5.7790164,4 8,4 Z" id="circle1" fill="#c6c6ca" />
+    <path d="M 8,2 A 1,1 0 0 0 7,3 V 8 A 1,1 0 0 0 8,9 1,1 0 0 0 9,8 V 3 A 1,1 0 0 0 8,2 Z" id="path1" fill="#c6c6ca" />
+    <path fill="#c6c6ca" d="m8 1c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z" id="path2" />
+  </g>
+</svg>

@@ -1,0 +1,83 @@
+shape editor-keychord-prefix {
+  family "probe-suite"
+  generator "regression"
+  features ["ny", "ui", "editor", "keymap", "emacs"]
+  template ny-test-case
+  expect compile_and_run
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  timeout 300
+  expect_stdout "EDITOR-KEYCHORD-PREFIX-OK"
+  source ny <<'NY'
+;; Prefix keys: a prefix waits for its suffix, expires after PREFIX_TIMEOUT,
+;; is cancelled by C-g, and never leaks into the next chord.
+use core
+use core.os.ui.window.consts as key
+use core.os.ui.render.viewer.editor.commands as cmd
+use core.os.ui.render.viewer.editor.keychord as chord
+
+fn press(any st, int k, int mods) list { chord.command_chord(st, {"key": k, "mods": mods}) }
+
+assert(cmd.set_keymap("emacs"), "emacs keymap")
+mut any st = chord.empty_state()
+assert(!chord.pending(st) && chord.describe(st) == "", "no prefix at rest")
+
+;; C-x waits.
+mut r = press(st, key.KEY_X, key.MOD_CONTROL)
+st = r.get(0)
+assert(chord.pending(st) && chord.describe(st) == "C-x" && to_str(r.get(1, "x")) == "", "C-x is a pending prefix")
+
+;; It survives until just before the timeout, then expires.
+st = chord.tick(st, chord.PREFIX_TIMEOUT * 0.5)
+assert(chord.pending(st), "prefix survives half the timeout")
+st = chord.tick(st, chord.PREFIX_TIMEOUT * 0.4)
+assert(chord.pending(st), "prefix survives most of the timeout")
+st = chord.tick(st, chord.PREFIX_TIMEOUT * 0.2)
+assert(!chord.pending(st) && chord.describe(st) == "", "prefix expires after the timeout")
+
+;; After expiry the next key stands alone: C-s is not read as C-x C-s.
+r = press(st, key.KEY_S, key.MOD_CONTROL)
+st = r.get(0)
+assert(to_str(r.get(1, "")) == "C-s" && !chord.pending(st), "expired prefix does not leak into the next chord")
+assert(cmd.id_for_chord("C-s") != cmd.id_for_chord("C-x C-s"), "the two chords name different commands")
+
+;; Completed in time, the suffix resolves and the state is clean.
+r = press(st, key.KEY_X, key.MOD_CONTROL)
+st = chord.tick(r.get(0), 0.25)
+r = press(st, key.KEY_S, key.MOD_CONTROL)
+st = r.get(0)
+assert(to_str(r.get(1, "")) == "C-x C-s" && !chord.pending(st), "prefix plus suffix resolves")
+assert(cmd.id_for_chord("C-x C-s") == "save", "and names save")
+
+;; Each prefix key press restarts the timer (a three-key chord).
+r = press(st, key.KEY_C, key.MOD_CONTROL)
+st = chord.tick(r.get(0), chord.PREFIX_TIMEOUT * 0.9)
+r = press(st, key.KEY_F, 0)
+st = r.get(0)
+assert(chord.pending(st) && chord.describe(st) == "C-c f", "second prefix key keeps waiting")
+st = chord.tick(st, chord.PREFIX_TIMEOUT * 0.9)
+assert(chord.pending(st), "the timer restarted at the second key")
+r = press(st, key.KEY_S, 0)
+st = r.get(0)
+assert(to_str(r.get(1, "")) == "C-c f s" && !chord.pending(st), "three-key chord resolves")
+
+;; C-g cancels a pending prefix and reports cancel.
+r = press(st, key.KEY_X, key.MOD_CONTROL)
+r = press(r.get(0), key.KEY_G, key.MOD_CONTROL)
+st = r.get(0)
+assert(to_str(r.get(1, "")) == "cancel" && !chord.pending(st), "C-g cancels the prefix")
+
+;; An unbound suffix resolves to the full chord text and clears the prefix,
+;; so the caller can report it instead of inserting the character.
+r = press(st, key.KEY_X, key.MOD_CONTROL)
+r = press(r.get(0), key.KEY_9, 0)
+st = r.get(0)
+assert(to_str(r.get(1, "")) == "C-x 9" && !chord.pending(st), "unbound suffix ends the prefix")
+assert(cmd.id_for_chord("C-x 9") == "", "and names no command")
+
+;; The default profile keeps C-x as an immediate command, not a prefix.
+assert(cmd.set_keymap("default"), "default keymap")
+r = press(chord.empty_state(), key.KEY_X, key.MOD_CONTROL)
+assert(to_str(r.get(1, "")) == "C-x" && !chord.pending(r.get(0)), "C-x is immediate in the default profile")
+print("EDITOR-KEYCHORD-PREFIX-OK")
+NY
+}

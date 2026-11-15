@@ -62,7 +62,8 @@ fn load_obj(str path) any {
 
 fn _calc_normal(list p0, list p1, list p2) list {
    def v1, v2 = v_sub(p1, p0), v_sub(p2, p0)
-   normalize(cross3(v1, v2))
+   def n = normalize3(cross3(v1, v2))
+   [x(n), y(n), z(n)]
 }
 
 fn _obj_vertex_entry(list idx_info, list vs, list vts, list vns, list face_normal, bool has_face_normal) list {

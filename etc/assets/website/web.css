@@ -2231,7 +2231,7 @@ pre code {
     color: var(--accent);
 }
 
-.markdown-content input[type="checkbox"] {
+.markdown-content input[type="check_box"] {
     width: 13px;
     height: 13px;
     margin: 0 7px 0 0;

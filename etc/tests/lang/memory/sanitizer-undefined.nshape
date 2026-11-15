@@ -1,0 +1,42 @@
+shape sanitizer_user_undefined {
+  family "runtime-sanitize"
+  generator "regression"
+  features [sanitize undefined ubsan overflow null]
+  template ny-test-case
+  flags "--native-only"
+  timeout 240
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os (env, file_remove, file_write, pid, run_capture, temp_dir)
+def ny = env("NYTRIX_NY_FULL_BIN")
+assert(is_str(ny) && ny.len > 0)
+def stem = temp_dir() + "/ny-ubsan-" + to_str(pid())
+def path = stem + ".ny"
+def app = stem + "-app"
+defer { file_remove(path) }
+defer { file_remove(app) }
+def source = "use core\nuse core.os (env)\nfn sum(i64 a, i64 b) i64 { a + b }\nfn difference(i64 a, i64 b) i64 { a - b }\nfn product(i64 a, i64 b) i64 { a * b }\nfn quotient(i64 a, i64 b) i64 { a / b }\nfn remainder(i64 a, i64 b) i64 { a % b }\nfn negate(i64 a) i64 { -a }\nfn unsigned_sum(u64 a, u64 b) u64 { a + b }\nfn read_byte(ptr p) int { load8(p, 0) }\nfn write_byte(ptr p) int { store8(p, 17, 0)\n 0 }\ndef i64 half = 4611686018427387903\ndef i64 maximum = sum(sum(half, half), 1)\ndef i64 minimum = difference(negate(maximum), 1)\ndef scenario = env(\"NYTRIX_UB_CASE\")\nif scenario == \"add\" { print(sum(maximum, 1)) }\nelse if scenario == \"subtract\" { print(difference(minimum, 1)) }\nelse if scenario == \"multiply\" { print(product(maximum, 2)) }\nelse if scenario == \"divide\" { print(quotient(minimum, -1)) }\nelse if scenario == \"remainder\" { print(remainder(minimum, -1)) }\nelse if scenario == \"negate\" { print(negate(minimum)) }\nelse if scenario == \"load\" { print(read_byte(0)) }\nelse if scenario == \"store\" { print(write_byte(0)) }\nelse {\n assert(difference(maximum, 1) == sum(half, half))\n assert(product(1234567, 3) == 3703701)\n assert(quotient(42, 7) == 6 && remainder(43, 7) == 1)\n assert(bshr(unsigned_sum(unsigned_sum(half, half), 2), 63) == 1)\n def p = malloc_raw(1)\n assert(p != 0)\n write_byte(p)\n assert(read_byte(p) == 17)\n free_raw(p)\n print(\"ubsan-valid\")\n}\n0\n"
+assert(is_ok(file_write(path, source)))
+for optimization in ["-O0", "-O2"] {
+   def build = run_capture([ny, optimization, "--sanitize=ub", "--run=none", "--output=" + app, path], [], nil, false)
+   def build_text = to_str(build.get("stdout", "")) + to_str(build.get("stderr", ""))
+   assert(build.get("code", 127) == 0, "compile UBSan artifact: " + build_text)
+   for scenario in ["valid", "add", "subtract", "multiply", "divide", "remainder", "negate", "load", "store"] {
+      def out = run_capture(["env", "UBSAN_OPTIONS=halt_on_error=1:abort_on_error=1:print_stacktrace=1", "NYTRIX_UB_CASE=" + scenario, app], [], nil, false)
+      def text = to_str(out.get("stdout", "")) + to_str(out.get("stderr", ""))
+      if scenario == "valid" {
+         assert(out.get("code", 127) == 0 && text.contains("ubsan-valid") && !text.contains("runtime error:"), "defined signed, unsigned, and pointer operations: " + text)
+      } else {
+         assert(out.get("code", 127) == 134 && text.contains("runtime error:") && text.contains("UndefinedBehaviorSanitizer"), "emitted " + scenario + " traps under " + optimization + ": " + text)
+         if scenario == "load" || scenario == "store" {
+            assert(text.contains("null pointer"), "named null-pointer report: " + text)
+         } else {
+            assert(text.contains("cannot be represented"), "named signed arithmetic report: " + text)
+         }
+      }
+   }
+}
+0
+NY
+}

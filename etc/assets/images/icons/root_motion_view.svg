@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
+  <title>Root Motion View</title>
+  <desc>Root Motion View icon.</desc>
+  <g transform="translate(2.0000 2.0000) scale(1.25000)">
+<radialGradient id="a" cx="8" cy="8" r="6" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#fc7f7f"/><stop offset=".833" stop-color="#fc7f7f" stop-opacity=".7"/><stop offset="1" stop-color="#fc7f7f" stop-opacity="0"/></radialGradient><path fill="#c6c6ca" d="M5 2v3H2v2h3v2H2v2h3v3h2v-3h2v3h2v-3h3V9h-3V7h3V5h-3V2H9v3H7V2zm2 5h2v2H7z"/>
+  </g>
+</svg>

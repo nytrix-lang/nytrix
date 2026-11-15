@@ -2150,15 +2150,19 @@ static const repl_static_doc_t k_repl_completion_docs[] = {
     {":std", ":std", "Show standard-library loading information.", 8},
     {":complete", ":complete [prefix]",
      "Print completion candidates for a prefix.", 8},
-    {"fn", "fn name(type arg) ret { ... }", "Define a function.", 6},
+    {"fn", "fn name(type arg) ret { ... }",
+     "Define a function. See docs/spec/functions.md and docs/spec/syntax.md.",
+     6},
     {"def", "def name = value", "Bind an immutable value.", 6},
     {"mut", "mut name = value", "Bind a mutable value.", 6},
     {"if", "if(cond){ ... }", "Branch when a condition is true.", 6},
     {"elif", "elif(cond){ ... }", "Add another condition to an if chain.", 6},
     {"else", "else { ... }", "Fallback branch for an if chain.", 6},
     {"while", "while(cond){ ... }", "Loop while a condition is true.", 6},
-    {"for", "for(x in xs){ ... }", "Iterate over a sequence.", 6},
-    {"in", "for(x in xs)", "Membership/iteration keyword.", 6},
+    {"for", "for value in iterable { body }",
+     "Iterate over a sequence or range. See docs/spec/control-flow.md.", 6},
+    {"in", "for value in iterable",
+     "Separates an iteration binding from its iterable.", 6},
     {"return", "return value", "Return from the current function.", 6},
     {"break", "break", "Exit the nearest loop.", 6},
     {"continue", "continue", "Skip to the next loop iteration.", 6},
@@ -2172,6 +2176,8 @@ static const repl_static_doc_t k_repl_completion_docs[] = {
     {"catch", "catch(e){ ... }", "Handle a try block error.", 6},
     {"throw", "throw value", "Raise an error value.", 6},
     {"finally", "finally { ... }", "Run code after try/catch.", 6},
+    {"with", "with Type name = expression { body }",
+     "Enter a scoped resource/type context. See docs/spec/control-flow.md.", 6},
     {"case", "case value { pattern -> expr }",
      "Match a value against patterns.", 6},
     {"match", "match value { pattern -> expr }",
@@ -2185,8 +2191,12 @@ static const repl_static_doc_t k_repl_completion_docs[] = {
      6},
     {"embed", "embed \"path\"", "Embed file contents at compile time.", 6},
     {"comptime", "comptime { ... }", "Run code during compilation.", 6},
+    {"quote", "quote { ...${expression}... }",
+     "Construct syntax for compile-time templates.", 6},
     {"impl", "impl type { fn method(...) { ... } }",
      "Attach methods/operators to a type.", 6},
+    {"trait", "trait Name { fn method(...) Type }",
+     "Declare a type contract. See docs/spec/traits.md.", 6},
     {"operator", "operator Type + Type: Type = fn_name",
      "Bind an operator implementation.", 6},
     {"self", "self", "Receiver type marker inside impl methods.", 6},
@@ -2197,6 +2207,52 @@ static const repl_static_doc_t k_repl_completion_docs[] = {
     {"del", "del name", "Delete a binding or container entry.", 6},
     {"export", "export fn name(...)", "Expose a declaration from a module.", 6},
     {"type", "type", "Type declaration or type-introspection keyword.", 6},
+    {"#main", "#main { body }",
+     "Mark direct-entry work in a module. See docs/spec/units.md.", 6},
+    {"#run", "#run expression",
+     "Evaluate a compile-time expression. See docs/spec/comptime.md.", 6},
+    {"#comptime", "#comptime expression",
+     "Evaluate a compile-time expression. See docs/spec/comptime.md.", 6},
+    {"static_assert", "static_assert(condition, message)",
+     "Require a compile-time condition to hold.", 6},
+    {"@pure", "@pure",
+     "Declare that a function has no observable side effects.", 6},
+    {"@effects", "@effects(none|io|alloc|ffi|thread|read|write|all)",
+     "Declare a function's effect contract.", 6},
+    {"@consteval", "@consteval",
+     "Require compile-time evaluation when called with constants.", 6},
+    {"@constant_time", "@constant_time",
+     "Mark code whose execution should not depend on secret values.", 6},
+    {"@inline", "@inline",
+     "Request inlining when the compiler's safety and cost rules allow it.", 6},
+    {"@noinline", "@noinline", "Prevent function inlining.", 6},
+    {"@tailcall", "@tailcall",
+     "Request tail-call lowering where the call is eligible.", 6},
+    {"let", "def name = expression",
+     "Retired spelling; use def for immutable bindings.", 6},
+    {"func", "fn name(params) { body }",
+     "Retired spelling; use fn for function declarations.", 6},
+    {"import", "use module.path",
+     "Retired spelling; use use for module imports.", 6},
+    {"var", "mut name = expression",
+     "Retired spelling; use mut for mutable bindings.", 6},
+    {"macro", "comptime template name(args) { declarations }",
+     "Retired statement form; use comptime templates.", 6},
+    {"keywords", "F1 on a keyword, or :help <keyword>",
+     "List Nytrix language keywords and syntax forms.", 6},
+    {"internals", "F1 on a runtime builtin, or :help <builtin>",
+     "List documented runtime/compiler builtins. Names beginning __ are "
+     "internal APIs.",
+     6},
+    {"operators", "Operators, precedence, and associativity",
+     "See docs/spec/operators.md and docs/spec/syntax.md.", 6},
+    {"attributes", "@pure, @effects(...), @inline, @borrows(...), ...",
+     "See docs/spec/functions.md for supported attributes and contracts.", 6},
+    {"types", "Types, generics, traits, and native layouts",
+     "See docs/spec/types.md, docs/spec/traits.md, and docs/spec/native.md.",
+     6},
+    {"syntax", "Declarations, literals, blocks, operators, and imports",
+     "See docs/spec/syntax.md and docs/info/nytrix.ebnf.", 6},
     {"any", "any", "Dynamic value type.", 7},
     {"bool", "bool", "Boolean type.", 7},
     {"int", "int", "Machine integer type.", 7},
@@ -2215,6 +2271,15 @@ static const repl_static_doc_t k_repl_completion_docs[] = {
     {"fnptr", "fnptr", "Function pointer type.", 7},
     {NULL, NULL, NULL, 0},
 };
+
+void repl_add_language_docs(doc_list_t *docs) {
+  if (!docs)
+    return;
+  for (size_t i = 0; k_repl_completion_docs[i].name; ++i) {
+    const repl_static_doc_t *entry = &k_repl_completion_docs[i];
+    doclist_set(docs, entry->name, entry->doc, entry->def, NULL, entry->kind);
+  }
+}
 
 static char **g_repl_comp_sort_matches = NULL;
 
@@ -3335,15 +3400,15 @@ static int repl_run_completion_menu(const char *prompt, char **pbuf, int *cap,
 }
 
 /*
- * Symbol under (or just before) the cursor, e.g. "core.os.path.join".
- * Declaration keywords (fn, def, ...) resolve to the name that follows.
+ * Token under (or just before) the cursor, e.g. a language keyword or
+ * "core.os.path.join". Declarations are documented by their own spelling;
+ * callers can move to the declared name for its symbol documentation.
  */
 static int repl_help_word_at(const char *buf, int len, int pos, char *out,
                              size_t cap) {
-  static const char *const decl[] = {"fn",     "def",    "mut",   "use",
-                                     "struct", "enum",   "layout", "module",
-                                     "extern", "lambda", NULL};
-#define HW_CH(c) (isalnum((unsigned char)(c)) || (c) == '_' || (c) == '.')
+#define HW_CH(c)                                                            \
+  (isalnum((unsigned char)(c)) || (c) == '_' || (c) == '.' || (c) == '@' || \
+   (c) == '#')
   int a = pos;
   if (a > len)
     a = len;
@@ -3355,23 +3420,6 @@ static int repl_help_word_at(const char *buf, int len, int pos, char *out,
     s0--;
   while (e0 < len && HW_CH(buf[e0]))
     e0++;
-  for (int pass = 0; pass < 2; pass++) {
-    if (e0 <= s0)
-      return 0;
-    size_t n = (size_t)(e0 - s0);
-    int is_decl = 0;
-    for (int i = 0; decl[i]; i++)
-      if (strlen(decl[i]) == n && !strncmp(buf + s0, decl[i], n))
-        is_decl = 1;
-    if (!is_decl || pass)
-      break;
-    s0 = e0;
-    while (s0 < len && (buf[s0] == ' ' || buf[s0] == '\t'))
-      s0++;
-    e0 = s0;
-    while (e0 < len && HW_CH(buf[e0]))
-      e0++;
-  }
 #undef HW_CH
   while (e0 > s0 && buf[e0 - 1] == '.')
     e0--;
@@ -3740,7 +3788,8 @@ char *ny_readline(const char *prompt) {
           break;
         } else {
           /*
-           * Don't add newline if buffer already ends with one (e.g., from paste)
+           * Don't add newline if buffer already ends with one (e.g., from
+           * paste)
            */
           if (len > 0 && buf[len - 1] == '\n') {
             if (!pasting && !repl_is_input_pending())

@@ -13,7 +13,7 @@ fn create_context(any share=0) any {
    def fmt_cls = cocoa.get_class("NSOpenGLPixelFormat")
    def ctx_cls = cocoa.get_class("NSOpenGLContext")
    if !fmt_cls || !ctx_cls { return 0 }
-   def attrs = zalloc(40)
+   def attrs = zalloc_or_panic(40, "nsopengl pixel format attributes")
    store32(attrs, 73, 0)
    store32(attrs, 5, 4)
    store32(attrs, 8, 8)

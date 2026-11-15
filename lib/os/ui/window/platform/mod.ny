@@ -86,7 +86,7 @@ use core.mem
 use core.math as math
 use core.str as str
 use core.common as common
-use core.os.ui.debug as ui_profile
+use core.os.ui.debug as ui_debug
 use core.os.ui.window.event (is_event, make_event, event_type, event_window, event_window_id, event_data)
 use core.os.ui.window.consts (EVENT_KEY_PRESSED, EVENT_KEY_RELEASED, EVENT_KEY_CHAR,
    EVENT_FLAGS_DATA_DROP_EVENTS, EVENT_FLAGS_MONITOR_EVENTS,
@@ -206,25 +206,25 @@ fn _register_x11_window(dict native, dict hints, int client_api) any {
 }
 
 fn _is_debug() bool {
-   ui_profile.debug_enabled()
+   ui_debug.debug_enabled()
 }
 
-fn _dbg(any msg) any { if _is_debug() { ui_profile.print_text("[window:platform] " + msg) } }
+fn _dbg(any msg) any { if _is_debug() { ui_debug.print_text("[window:platform] " + msg) } }
 
-fn _dbg_win(any win, any msg) any { if _is_debug() { ui_profile.print_text("[window] win=0x" + str.to_hex(win) + " " + msg) } }
+fn _dbg_win(any win, any msg) any { if _is_debug() { ui_debug.print_text("[window] win=0x" + str.to_hex(win) + " " + msg) } }
 
 fn _dbg_hint(any hint, any val) any { }
 
 fn _dbg_attrib(any win, any attrib, any val) any { }
 
-fn _dbg_err(any msg) any { if _is_debug() { ui_profile.print_text("[window:platform:ERROR] " + msg) } }
+fn _dbg_err(any msg) any { if _is_debug() { ui_debug.print_text("[window:platform:ERROR] " + msg) } }
 
-fn _dbg_warn(any msg) any { if _is_debug() { ui_profile.print_text("[window:platform:WARN] " + msg) } }
+fn _dbg_warn(any msg) any { if _is_debug() { ui_debug.print_text("[window:platform:WARN] " + msg) } }
 
-fn _dbg_v(any msg) any { if _is_debug() { ui_profile.print_text("[window:platform] " + msg) } }
+fn _dbg_v(any msg) any { if _is_debug() { ui_debug.print_text("[window:platform] " + msg) } }
 
 fn _joystick_poll_enabled() bool {
-   if ui_profile.env_truthy_cached("NY_UI_JOYSTICK") { return true }
+   if ui_debug.env_truthy_cached("NY_UI_JOYSTICK") { return true }
    if _get_platform_val("joystick_callback", 0) != 0 { return true }
    false
 }
@@ -240,7 +240,7 @@ fn _dump_window_state(any win) any { return 0 }
 
 fn _dump_all_windows() any {
    if !_is_debug() { return 0 }
-   ui_profile.print_text("[window:state] *** All Windows Dump ***")
+   ui_debug.print_text("[window:state] *** All Windows Dump ***")
    def handles = dict_keys(platform_state._get_platform_dict("native_windows", dict(8)))
    mut i = 0
    def handles_n = handles.len
@@ -249,7 +249,7 @@ fn _dump_all_windows() any {
       _dump_window_state(h)
       i += 1
    }
-   ui_profile.print_text("[window:state] Total windows: " + to_str(handles_n))
+   ui_debug.print_text("[window:state] Total windows: " + to_str(handles_n))
 }
 
 fn _default_window_hints() dict {
@@ -331,15 +331,15 @@ fn _select_backend_name() str {
          else { name = "none" }
       } #endif
    }
-   if ui_profile.debug_enabled() {
+   if ui_debug.debug_enabled() {
       #linux {
-         ui_profile.print_text("[window:platform] backend select: requested='" + requested + "' x11=" + to_str(x11_backend.available()) + " wayland=" + to_str(wayland_backend.available()) + " -> " + name)
+         ui_debug.print_text("[window:platform] backend select: requested='" + requested + "' x11=" + to_str(x11_backend.available()) + " wayland=" + to_str(wayland_backend.available()) + " -> " + name)
       } #elif macos {
-         ui_profile.print_text("[window:platform] backend select: requested='" + requested + "' cocoa=" + to_str(cocoa_impl.available()) + " -> " + name)
+         ui_debug.print_text("[window:platform] backend select: requested='" + requested + "' cocoa=" + to_str(cocoa_impl.available()) + " -> " + name)
       } #elif windows {
-         ui_profile.print_text("[window:platform] backend select: requested='" + requested + "' win32=" + to_str(win32_impl.available()) + " -> " + name)
+         ui_debug.print_text("[window:platform] backend select: requested='" + requested + "' win32=" + to_str(win32_impl.available()) + " -> " + name)
       } #else {
-         ui_profile.print_text("[window:platform] backend select: requested='" + requested + "' -> " + name)
+         ui_debug.print_text("[window:platform] backend select: requested='" + requested + "' -> " + name)
       } #endif
    }
    _set_platform_val("backend_name", name)
@@ -368,7 +368,7 @@ fn get_error() int {
 fn _set_error(int code, str desc) any {
    _set_platform_val("last_error_code", code)
    _set_platform_val("last_error_desc", desc)
-   if _is_debug() { ui_profile.print_text("[window:platform:ERROR] code=0x" + str.to_hex(code) + " desc='" + desc + "'") }
+   if _is_debug() { ui_debug.print_text("[window:platform:ERROR] code=0x" + str.to_hex(code) + " desc='" + desc + "'") }
    def cb = _get_platform_val("error_callback", 0)
    if cb {
       _dbg_v("_set_error: firing callback with code=0x" + str.to_hex(code))
@@ -557,7 +557,7 @@ fn terminate() any {
 fn create_window(str name, int x, int y, int w, int h, int flags, any hint_overrides=0) any {
    "Creates a native platform window and returns its handle."
    def b = _select_backend_name()
-   if ui_profile.debug_enabled() { ui_profile.print_text("[window:platform] create_window: backend=" + b + " title='" + name + "'") }
+   if ui_debug.debug_enabled() { ui_debug.print_text("[window:platform] create_window: backend=" + b + " title='" + name + "'") }
    mut hints = dict_merge(_default_window_hints(), platform_state._get_platform_dict("window_hints", dict(8)))
    if is_dict(hint_overrides) { hints = dict_merge(hints, hint_overrides) }
    mut x11_class = common.env_trim("NY_UI_X11_CLASS_NAME")
@@ -567,8 +567,8 @@ fn create_window(str name, int x, int y, int w, int h, int flags, any hint_overr
    if x11_inst.len == 0 { x11_inst = get(hints, api.X11_INSTANCE_NAME, "nytrix") }
    if wl_app_id.len == 0 { wl_app_id = get(hints, api.WAYLAND_APP_ID, "nytrix") }
    def client_api = band(flags, 0x80000) ? api.NO_API : hints.get(api.CLIENT_API, api.NO_API)
-   if ui_profile.env_truthy_cached("NY_UI_STARTUP_TRACE") {
-      ui_profile.print_text("[window:platform] create_window: client_api=" +
+   if ui_debug.env_truthy_cached("NY_UI_STARTUP_TRACE") {
+      ui_debug.print_text("[window:platform] create_window: client_api=" +
          to_str(client_api) + " hint_keys=" + to_str(dict_keys(hints)) +
          " member=" + to_str(hints.get(api.CLIENT_API, -9)) +
          " generic=" + to_str(get(hints, api.CLIENT_API, -10)))
@@ -577,23 +577,23 @@ fn create_window(str name, int x, int y, int w, int h, int flags, any hint_overr
    mut int depth = 0
    mut ptr x11_display = 0
    if b == "x11" && client_api != api.NO_API {
-      if ui_profile.env_truthy_cached("NY_UI_STARTUP_TRACE") { ui_profile.print_text("[window:platform] x11 display.open.before") }
+      if ui_debug.env_truthy_cached("NY_UI_STARTUP_TRACE") { ui_debug.print_text("[window:platform] x11 display.open.before") }
       x11_display = _x11_open_display()
-      if ui_profile.env_truthy_cached("NY_UI_STARTUP_TRACE") { ui_profile.print_text("[window:platform] x11 display.open.after=" + to_str(bool(x11_display))) }
+      if ui_debug.env_truthy_cached("NY_UI_STARTUP_TRACE") { ui_debug.print_text("[window:platform] x11 display.open.after=" + to_str(bool(x11_display))) }
       if x11_display {
-         if ui_profile.env_truthy_cached("NY_UI_STARTUP_TRACE") { ui_profile.print_text("[window:platform] x11 choose_visual.before") }
+         if ui_debug.env_truthy_cached("NY_UI_STARTUP_TRACE") { ui_debug.print_text("[window:platform] x11 choose_visual.before") }
          def s = _x11_default_screen(x11_display)
          def info = choose_visual(hints, x11_display, s)
          visual, depth = info.get(0), info.get(1)
-         if ui_profile.env_truthy_cached("NY_UI_STARTUP_TRACE") { ui_profile.print_text("[window:platform] x11 choose_visual.after") }
+         if ui_debug.env_truthy_cached("NY_UI_STARTUP_TRACE") { ui_debug.print_text("[window:platform] x11 choose_visual.after") }
       }
    }
    if b == "x11" {
-      if ui_profile.env_truthy_cached("NY_UI_STARTUP_TRACE") { ui_profile.print_text("[window:platform] x11 create_basic_window.before") }
+      if ui_debug.env_truthy_cached("NY_UI_STARTUP_TRACE") { ui_debug.print_text("[window:platform] x11 create_basic_window.before") }
       mut dict native = _x11_create_basic_window(
          name, w, h, x, y, flags, 0, x11_class, x11_inst, visual, depth, x11_display,
       )
-      if ui_profile.env_truthy_cached("NY_UI_STARTUP_TRACE") { ui_profile.print_text("[window:platform] x11 create_basic_window.after") }
+      if ui_debug.env_truthy_cached("NY_UI_STARTUP_TRACE") { ui_debug.print_text("[window:platform] x11 create_basic_window.after") }
       return _register_x11_window(native, hints, client_api)
    }
    mut any native = 0
@@ -640,7 +640,7 @@ fn create_window(str name, int x, int y, int w, int h, int flags, any hint_overr
       mut should_close_flags = platform_state._get_platform_dict("should_close_flags", dict(8))
       should_close_flags[handle] = false
       platform_state._set_platform_dict("should_close_flags", should_close_flags)
-      if ui_profile.env_truthy_cached("NY_UI_STARTUP_TRACE") { ui_profile.print_text("[window:platform] context request=" + to_str(int(client_api))) }
+      if ui_debug.env_truthy_cached("NY_UI_STARTUP_TRACE") { ui_debug.print_text("[window:platform] context request=" + to_str(int(client_api))) }
       if int(client_api) != int(api.NO_API) {
          def ctx = create_context(native, hints)
          if ctx {

@@ -1,0 +1,22 @@
+shape ioctl_odd_arguments {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "codegen"]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect compile_and_run
+  expect_message "IOCTL_ODD_ARGUMENTS_OK"
+  source ny <<'NY'
+use core
+def fds = zalloc(8)
+__pipe(fds)
+def int rfd = load32(fds, 0)
+def int wfd = load32(fds, 4)
+def msg = "hello"
+__write_fd_raw(wfd, msg, 5)
+def nbuf = zalloc(8)
+def r = __ioctl(rfd, 0x541B, nbuf)
+assert(int(r) == 0 && load32(nbuf, 0) == 5, "ioctl with an odd request number")
+print("IOCTL_ODD_ARGUMENTS_OK")
+NY
+}

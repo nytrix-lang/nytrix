@@ -77,6 +77,7 @@ fn _save_text_context(any context, dict state) int {
    }
    0
 }
+
 def C_BG = render.color_rgb(0.0, 0.0, 0.0)
 def C_PANEL = render.color_rgb(0.031, 0.031, 0.031)
 def C_PANEL_ALT = render.color_rgb(0.075, 0.075, 0.094)

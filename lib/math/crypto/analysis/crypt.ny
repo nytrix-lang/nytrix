@@ -164,7 +164,12 @@ fn crypt_md5(str word, str setting) str {
       n = n >> 1
    }
    mut digest = _digest(ctx, 1)
+   def max_size = 9223372036854775807
+   if sb.len > max_size - 64 || pass.len > (max_size - 64 - sb.len) / 2 {
+      return ""
+   }
    def scratch = malloc(pass.len * 2 + sb.len + 64)
+   if !scratch { return "" }
    mut i = 0
    while i < 1000 {
       mut n = 0
@@ -201,7 +206,15 @@ fn _sha_crypt(str word, str setting, int kind) str {
    mut digest = _digest(ctx, kind)
    def P = _repeat_prefix(_digest(_repeat(pw, pw.len), kind), pw.len)
    def S = _repeat_prefix(_digest(_repeat(sb, 16 + digest[0]), kind), sb.len)
+   def max_size = 9223372036854775807
+   if digest.len > (max_size - 8) / 2 { return "" }
+   def digest_bytes = digest.len * 2
+   if S.len > max_size - 8 - digest_bytes ||
+      P.len > (max_size - 8 - digest_bytes - S.len) / 2 {
+      return ""
+   }
    def scratch = malloc(P.len * 2 + S.len + digest.len * 2 + 8)
+   if !scratch { return "" }
    mut i = 0
    while i < rounds {
       mut n = 0

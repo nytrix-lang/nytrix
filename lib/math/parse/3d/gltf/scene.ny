@@ -4,6 +4,7 @@ module core.math.parse.3d.gltf.scene(_gltf_build_node_world_mats, _gltf_root_rel
 use core
 use core.math.bin
 use core.math
+use core.math.checked (checked_mul)
 use core.math.float (is_nan, is_inf)
 use core.str as str
 use core.common as common
@@ -293,19 +294,31 @@ fn _gltf_resolve_part_skin(dict gltf_data, dict g, any data, list nodes, int par
    def skin_idx = is_dict(node_obj) ? int(node_obj.get("skin", -1)) : -1
    def out = {"skin_idx": skin_idx, "skin_bind_vptr": 0, "skin_joints_ptr": 0, "skin_weights_ptr": 0, "skin_vcnt": vcnt, "skin_joints": [], "skin_inv_bind_accessor": -1}
    if !(skin_idx >= 0 && meta.get("is_skinned_candidate", false) && vptr && vcnt > 0) { return out }
-   def skin_bind_vptr = malloc(vcnt * shr._GLTF_VTX_STRIDE)
+   def skin_bind_size_result = checked_mul(vcnt, shr._GLTF_VTX_STRIDE)
+   if !is_ok(skin_bind_size_result) { return out }
+   def skin_bind_size = int(unwrap(skin_bind_size_result))
+   mut skin_bind_cleanup = 0
+   defer { if skin_bind_cleanup { free(skin_bind_cleanup) } }
+   mut skin_bind_vptr = malloc(skin_bind_size)
    if !skin_bind_vptr { return out }
-   memcpy(skin_bind_vptr, vptr, vcnt * shr._GLTF_VTX_STRIDE)
+   skin_bind_cleanup = skin_bind_vptr
+   memcpy(skin_bind_vptr, vptr, skin_bind_size)
    def joints_acc_idx = int(meta.get("joints_acc_idx", -1))
    def weights_acc_idx = int(meta.get("weights_acc_idx", -1))
+   mut skin_side_cleanup = [0, 0]
+   defer {
+      if skin_side_cleanup[0] { free(skin_side_cleanup[0]) }
+      if skin_side_cleanup[1] { free(skin_side_cleanup[1]) }
+   }
    def skin_side = anim._gltf_pack_skin_sidecars(g, data, joints_acc_idx, weights_acc_idx, vcnt)
    if !is_dict(skin_side) {
-      free(skin_bind_vptr)
       return out
    }
+   skin_side_cleanup[0] = skin_side.get("joints_ptr", 0)
+   skin_side_cleanup[1] = skin_side.get("weights_ptr", 0)
    def skin_info = anim.gltf_skin_info(gltf_data, skin_idx)
    def skin_joints = is_dict(skin_info) ? skin_info.get("joints", []) : []
-   return {
+   def result = {
       "skin_idx": skin_idx,
       "skin_bind_vptr": skin_bind_vptr,
       "skin_joints_ptr": skin_side.get("joints_ptr", 0),
@@ -315,6 +328,10 @@ fn _gltf_resolve_part_skin(dict gltf_data, dict g, any data, list nodes, int par
       "skin_inv_bind_accessor": is_dict(skin_info) ? int(skin_info.get("inverse_bind_accessor", -1)) : -1,
       "skin_single_influence": bool(skin_side.get("single_influence", false))
    }
+   skin_bind_cleanup = 0
+   skin_side_cleanup[0] = 0
+   skin_side_cleanup[1] = 0
+   return result
 }
 
 fn gltf_camera_count(any gltf_data) int {

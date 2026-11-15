@@ -292,9 +292,9 @@ fn select_shader_source(str combined_src, str backend="vkglsl450") dict {
    assert(gl_sel.get("backend", "") == SHADER_BACKEND_GLES300 && gl_sel.get("vs", "").contains("#version 300 es") && gl_sel.get("fs", "").contains("out vec4 fragColor"), "webgl shader source selection")
    assert(shader_hash32("abc") == shader_hash32("abc") && shader_hash32("abc") != shader_hash32("abd"), "shader hash")
    mut watch = dict(12)
-   watch = shader_watch(watch, "etc/assets/shaders/ui/lit.vert.glsl", "etc/assets/shaders/ui/lit.frag.glsl", true, 0)
+   watch = shader_watch(watch, "etc/assets/shaders/lit.vert.glsl", "etc/assets/shaders/lit.frag.glsl", true, 0)
    assert(watch.get("ready", false) && watch.get("changed", false), "shader watch initial")
-   watch = shader_watch(watch, "etc/assets/shaders/ui/lit.vert.glsl", "etc/assets/shaders/ui/lit.frag.glsl", true, 0)
+   watch = shader_watch(watch, "etc/assets/shaders/lit.vert.glsl", "etc/assets/shaders/lit.frag.glsl", true, 0)
    assert(watch.get("ready", false) && !watch.get("changed", true), "shader watch stable")
    print("✓ core.os.ui.render.shader self-test passed")
 }

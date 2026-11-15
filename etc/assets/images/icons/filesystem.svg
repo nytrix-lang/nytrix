@@ -1,1 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><path fill="#f2f2f2" d="m1 1v5h2v8h1 5v1h6v-3h-6v1h-5v-4h5v1h6v-3h-6v1h-5v-2h3v-4h-2l-1-1z"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
+  <title>Filesystem</title>
+  <desc>Filesystem icon.</desc>
+  <g transform="translate(2.0000 2.0000) scale(1.25000)">
+<path fill="#c6c6ca" d="m1 1v5h2v8h1 5v1h6v-3h-6v1h-5v-4h5v1h6v-3h-6v1h-5v-2h3v-4h-2l-1-1z"/>
+  </g>
+</svg>

@@ -119,7 +119,9 @@ try {
       "pointer callback receives the C string bytes, not a value-slot address")
    assert(int(calls.any2(strcmp_fn, copy2, ffi.cstr("nytrix pointer ABI"))) == 0,
       "native pointer handles round-trip through a second pointer callback")
-   def free_fn = ffi.dlsym(libc, "free")
+   ;; Resolve the process allocator wrapper so ASan's strdup/free pair shares
+   ;; the same intercepted allocator while still crossing the C function ABI.
+   def free_fn = ffi.dlsym(0, "free")
    calls.void1(free_fn, copy)
    assert(copy2 != 0,
       "generic void callback converts its declared dynamic-word argument")
@@ -257,8 +259,8 @@ try {
    ffi.free(read_buffer)
    assert(int(calls.int64one(fclose_fn, stream)) == 0,
       "zero-argument pointer result can be passed back to C")
-   ffi.free(copy2)
-   ffi.free(odd_copy)
+   calls.void1(free_fn, copy2)
+   calls.void1(free_fn, odd_copy)
    ffi.dlclose(libc)
 } #endif
 NY

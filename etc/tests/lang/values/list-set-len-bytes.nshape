@@ -1,0 +1,25 @@
+shape list_set_len_bytes {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "codegen"]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect compile_and_run
+  expect_message "LIST_SET_LEN_BYTES_OK"
+  source ny <<'NY'
+use core
+fn mk(int n) list {
+   mut xs = list(n)
+   __list_set_len(xs, n)
+   mut i = 0
+   while i < n {
+      xs[i] = i + 65
+      i += 1
+   }
+   xs
+}
+def b = mk(4)
+assert(b.get(0, 0) == 65 && b[3] == 68 && is_list(b) && !is_str(b), "list(n) with __list_set_len stays a list")
+print("LIST_SET_LEN_BYTES_OK")
+NY
+}

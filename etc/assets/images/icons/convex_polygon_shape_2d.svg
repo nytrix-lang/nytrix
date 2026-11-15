@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
+  <title id="title1">Convex Polygon Shape 2D</title>
+  <desc id="desc1">Convex Polygon Shape 2D editor icon. Original asset id: convexpolygonshape2d.</desc>
+  <defs id="defs1" />
+  <g transform="translate(2.0000 2.0000) scale(1.25000)" id="g1">
+    <path d="m 7.2929687,1.2929687 -6,6 A 1.0001,1.0001 0 0 0 1,8 v 6 a 1.0001,1.0001 0 0 0 1,1 h 12 a 1.0001,1.0001 0 0 0 1,-1 V 8 A 1.0001,1.0001 0 0 0 14.707031,7.2929687 l -5.9999997,-6 a 1.0001,1.0001 0 0 0 -1.4140626,0 z M 8,3.4140625 l 5,5 V 13 H 3 V 8.4140625 Z" id="path1" fill="#c6c6ca" />
+  </g>
+</svg>

@@ -488,6 +488,8 @@ fn debug_stage() str {
 }
 
 fn _vk_begin_trace_enabled() bool { _vk_debug_basic == 1 || vk_state._debug_gfx_enabled || ui_profile.env_truthy_cached("NY_VK_BEGIN_TRACE") }
+mut int _swapchain_lost_since_ns = 0
+mut int _swapchain_lost_retry_ns = 0
 
 fn _vk_begin_false(str reason) bool {
    if _vk_begin_trace_enabled() && _vk_begin_false_logs < 48 {
@@ -1979,16 +1981,30 @@ fn begin_frame() bool {
    def backend_is_wayland = has_surface && _backend_is_wayland_fast()
    def backend_is_win32 = has_surface && _backend_is_win32_fast()
    if _swapchain_image_count < 1 {
-      ;; A failed recreation leaves no images. Retry it rather than failing
-      ;; every later frame; a surface that still cannot present fails below.
-      if has_surface {
+      ;; A failed recreation leaves no images: the surface is minimised, the
+      ;; compositor is idle or locked, or the output went away. Retry on a
+      ;; 100 ms cadence and yield in between; retrying and logging on every
+      ;; call pinned a core and wrote tens of thousands of lines while the
+      ;; screen was locked.
+      def now_ns = ticks()
+      if has_surface && (now_ns - _swapchain_lost_retry_ns) >= 100000000 {
+         _swapchain_lost_retry_ns = now_ns
          _schedule_swapchain_recreate(true)
          _vk_begin_frame_prepare_swapchain(has_surface)
       }
       if _swapchain_image_count < 1 {
-         ui_profile.print_text("[begin_frame] FAIL: invalid swapchain image count")
+         if _swapchain_lost_since_ns == 0 {
+            _swapchain_lost_since_ns = now_ns
+            ui_profile.print_text("[begin_frame] swapchain unavailable; waiting for the surface")
+         }
+         msleep(16)
          return false
       }
+   }
+   if _swapchain_lost_since_ns != 0 {
+      ui_profile.print_text("[begin_frame] swapchain restored after " +
+         to_str((ticks() - _swapchain_lost_since_ns) / 1000000) + " ms")
+      _swapchain_lost_since_ns = 0
    }
    if _framebuffers_count < 1 { ui_profile.print_text("[begin_frame] FAIL: no framebuffers allocated") return false }
    if _command_buffers_count < 1 { ui_profile.print_text("[begin_frame] FAIL: no command buffers allocated") return false }

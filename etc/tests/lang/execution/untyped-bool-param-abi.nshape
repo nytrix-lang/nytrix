@@ -1,0 +1,28 @@
+shape test_untyped_bool_param_abi {
+  family "runtime/execution"
+  generator "regression"
+  features ["ny", "test"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+;; `fn skip(x=false)` resolves `x` to the raw bool ABI from its body. The call
+;; site boxed a computed bool to the tagged word (false = 2), which the callee
+;; read as truthy: the engine's static path then skipped every frame.
+mut force = false
+fn allowed() bool { false }
+fn skip(x=false) bool {
+   if !x { return false }
+   true
+}
+fn run() bool {
+   def lc = force ? false : allowed()
+   skip(lc)
+}
+assert(!run(), "computed false stays false across an untyped parameter")
+assert(skip(true), "literal true stays true")
+assert(!skip(), "default false")
+NY
+}

@@ -808,7 +808,10 @@ assert(int(compile_allocation.get("code", 127)) == 0 &&
        "bare mmap typed buffers preserve headers and zero-initialize payloads")
 assert(int(compile_heap.get("code", 127)) == 0 &&
        int(run_heap.get("code", 127)) == 0 &&
-       str(run_heap.get("stdout", "")) == "42\n1 0\n0\n" &&
+       ;; `free` returns nil (printed as 0 on the bare route) for a freed block and
+       ;; for a null pointer alike; the old `1` was the status of freeing the
+       ;; variadic argument list instead of the pointer.
+       str(run_heap.get("stdout", "")) == "42\n0 0\n0\n" &&
        int(heap_dynamic.get("code", 127)) == 0 &&
        (str(heap_dynamic.get("stdout", ""))).contains("There is no dynamic section"),
        "bare general heap allocations support stores, loads, and free without libc")

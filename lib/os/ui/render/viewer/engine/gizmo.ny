@@ -39,13 +39,15 @@ fn _gizmo_draw_transform(list b) bool {
    def red = [1.00, 0.16, 0.12, 0.92]
    def green = [0.20, 0.92, 0.26, 0.92]
    def blue = [0.22, 0.42, 1.00, 0.92]
-   def box_thick = clamp(span * 0.0016, 0.018, 0.090)
+   ;; Line weights and handle sizes are pixels, so the gizmo reads the same
+   ;; whether the selection fills the view or sits at the horizon.
+   def px = viewer_gizmo.metrics_pixels(_gizmo_mode, _win_w, _win_h)
    def corner_len = clamp(span * 0.18, 0.45, span * 0.34)
-   viewer_gizmo.draw_box_corners(x0 - pad, y0 - pad, z0 - pad, x1 + pad, y1 + pad, z1 + pad, box_col, box_thick, corner_len)
+   viewer_gizmo.draw_box_corners(x0 - pad, y0 - pad, z0 - pad, x1 + pad, y1 + pad, z1 + pad, box_col, float(px.get(1, 1.25)), corner_len, true)
    viewer_gizmo.draw_axes(
       float(m.get(0, 0.0)), float(m.get(1, 0.0)), float(m.get(2, 0.0)),
-      float(m.get(3, 1.0)), float(m.get(4, 1.0)), float(m.get(5, 0.004)),
-      float(m.get(7, 0.02)), red, green, blue, _gizmo_mode, _win_w, _win_h, _gizmo_axis
+      float(m.get(3, 1.0)), float(m.get(4, 1.0)), float(px.get(0, 2.25)),
+      float(px.get(2, 7.5)), red, green, blue, _gizmo_mode, _win_w, _win_h, _gizmo_axis, true
    )
    true
 }

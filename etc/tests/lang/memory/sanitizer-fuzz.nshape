@@ -1,0 +1,44 @@
+shape emitted_memory_sanitizer_fuzz {
+  family "runtime/memory"
+  generator "regression"
+  features ["memory-safety", "fuzz", "safe-heap", "asan", "ffi"]
+  template ny-test-case
+  flags "--native-only"
+  timeout 240
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os (env, file_remove, file_write, pid, run_capture, temp_dir)
+def ny = env("NYTRIX_NY_FULL_BIN")
+assert(is_str(ny) && ny.len > 0, "full compiler is available")
+def stem = temp_dir() + "/ny-memory-fuzz-" + to_str(pid())
+def path = stem + ".ny"
+def source = "use core\nuse core.os (env)\nextern \"c\" {\n   fn observe_byte(ptr buffer, i32 byte, int count) ptr as \"memchr\"\n}\nfn next_state(int state) int { (state * 25173 + 13849) % 65521 }\nfn exercise(int seed) int {\n   mut state = seed % 65521\n   for iteration in range(32) {\n      state = next_state(state)\n      def size = 1 + state % 31\n      def p = malloc(size)\n      assert(p != 0, \"fuzz allocation succeeds\")\n      for step in range(16) {\n         state = next_state(state)\n         def index = state % size\n         def value = state % 256\n         store8(p, value, index)\n         assert(load8(p, index) == value, \"fuzz byte round trip\")\n         assert(observe_byte(p + index, value, 1) == p + index, \"C observes fuzz write\")\n      }\n      free(p)\n   }\n   0\n}\nfn overflow(int seed) int {\n   def size = 1 + next_state(seed % 65521) % 31\n   def p = malloc(size)\n   assert(p != 0, \"fuzz overflow allocation succeeds\")\n   print(load8(p, size + 32))\n   free(p)\n   0\n}\nfor seed in [1, 17, 12345, 202607] { exercise(seed) }\nprint(\"fuzz-valid\")\nfor seed in [1, 17, 12345, 202607] {\n   if env(\"NYTRIX_FUZZ_BAD_SEED\") == to_str(seed) { overflow(seed) }\n}\n0\n"
+assert(is_ok(file_write(path, source)), "write memory fuzz program")
+defer { file_remove(path) }
+
+for route in [["--native-backend=x86_64", "--heap=safe"], ["--native-backend=llvm", "--heap=safe"], ["--sanitize=address"]] {
+   def app = stem + "-app"
+   defer { file_remove(app) }
+   mut args = [ny, "-O0", "--run=none", "--output=" + app]
+   for flag in route { args = args.append(flag) }
+   def build = run_capture(args.append(path), [], nil, false)
+   assert(build.get("code", 127) == 0, "compile fuzz lane " + to_str(route) + " rc=" + to_str(build.get("code", 127)) + ": " + to_str(build.get("stdout", "")) + to_str(build.get("stderr", "")))
+   def clean = run_capture(["env", "ASAN_OPTIONS=abort_on_error=1:detect_leaks=1", "NYTRIX_FUZZ_BAD_SEED=", app], [], nil, false)
+   def clean_text = to_str(clean.get("stdout", "")) + to_str(clean.get("stderr", ""))
+   assert(clean.get("code", 127) == 0 && clean_text.contains("fuzz-valid"), "valid fuzz cases: " + clean_text)
+   assert(!clean_text.contains("Nytrix safe-heap: leak:") && !clean_text.contains("ERROR: AddressSanitizer"), "valid fuzz cases clean up: " + clean_text)
+   for seed in [1, 17, 12345, 202607] {
+      def out = run_capture(["env", "ASAN_OPTIONS=abort_on_error=1:detect_leaks=1", "NYTRIX_FUZZ_BAD_SEED=" + to_str(seed), app], [], nil, false)
+      def text = to_str(out.get("stdout", "")) + to_str(out.get("stderr", ""))
+      assert(out.get("code", 127) == 134 && text.contains("heap-buffer-overflow"), "mutated extent traps: " + text)
+      if route[0] == "--sanitize=address" {
+         assert(text.contains("AddressSanitizer"), "emitted sanitizer reports the mutation: " + text)
+      } else {
+         assert(text.contains("Nytrix safe-heap:"), "safe heap reports the mutation: " + text)
+      }
+   }
+}
+0
+NY
+}

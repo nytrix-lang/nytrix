@@ -1,0 +1,18 @@
+shape unicode_identifiers {
+  family "lang/unicode"
+  generator "embedded"
+  features ["ny", "unicode", "identifiers", "utf8", "lexer"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+def café = 40
+def 变量 = 2
+def π = 3
+def 𐐀 = 1
+
+assert(café + 变量 + π + 𐐀 == 46, "unicode identifiers")
+print("UNICODE_IDENTIFIERS_OK")
+NY
+}

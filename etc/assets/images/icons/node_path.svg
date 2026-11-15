@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
+  <title>Node Path</title>
+  <desc>Node Path icon.</desc>
+  <g transform="translate(2.0000 4.5000) scale(1.25000)">
+<path fill="#c6c6ca" d="M0 2v8h2V8a3 3 0 0 0 0-6zm6 0v5a3 3 0 0 0 3 3h1V8H9a1 1 0 0 1-1-1V6h2V4H8V2zm5 0v8h2V6a1 1 0 0 1 1 1v3h2V7a3 3 0 0 0-3-3V2zM2 4a1 1 0 0 1 0 2z"/>
+  </g>
+</svg>

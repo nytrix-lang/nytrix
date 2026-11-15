@@ -1,0 +1,22 @@
+shape module_list_get_float_sum {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "codegen"]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect compile_and_run
+  expect_message "MODULE-LIST-GET-FLOAT-SUM-OK"
+  source ny <<'NY'
+use core
+module tk(
+   g,
+){
+   fn g(int i) f64 {
+      def xs = [0.5, 1.5, 2.5, 3.5, 4.5]
+      xs.get(i + 1, 0.0) + xs.get(i * 2, 0.0)
+   }
+}
+assert(tk.g(1) == 5.0, "sum of two float list reads")
+print("MODULE-LIST-GET-FLOAT-SUM-OK")
+NY
+}

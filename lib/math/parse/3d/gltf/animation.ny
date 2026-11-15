@@ -1765,9 +1765,14 @@ fn gltf_rebuild_animated_mats(any gltf_data, any overrides) dict {
 
 #main {
    def in_ptr = malloc(8)
+   if !in_ptr { panic("GLTF animation self-test allocation failed") }
    store32(in_ptr, 0x00000000, 0)
    store32(in_ptr, 0x3f800000, 4)
    def out_ptr = malloc(24)
+   if !out_ptr {
+      free(in_ptr)
+      panic("GLTF animation self-test allocation failed")
+   }
    store32(out_ptr, 0x00000000, 0)
    store32(out_ptr, 0x00000000, 4)
    store32(out_ptr, 0x00000000, 8)
@@ -1781,6 +1786,11 @@ fn gltf_rebuild_animated_mats(any gltf_data, any overrides) dict {
    assert(interp_quarter == [0.5, 1.0, 1.5], "gltf animation fast sampler keeps in-between vec3")
    assert(rec[8] == 0, "gltf animation fast sampler updates bracket cache")
    def q_ptr = malloc(32)
+   if !q_ptr {
+      free(in_ptr)
+      free(out_ptr)
+      panic("GLTF animation self-test allocation failed")
+   }
    ;; identity -> 180deg around Z should slerp to a smooth 90deg turn at t=0.5
    store32_f32(q_ptr, 0.0, 0)
    store32_f32(q_ptr, 0.0, 4)
@@ -1810,6 +1820,14 @@ fn gltf_rebuild_animated_mats(any gltf_data, any overrides) dict {
    def joints = malloc(16)
    def weights = malloc(16)
    def skin_slab = malloc(64)
+   if !bind || !skinned || !joints || !weights || !skin_slab {
+      if bind { free(bind) }
+      if skinned { free(skinned) }
+      if joints { free(joints) }
+      if weights { free(weights) }
+      if skin_slab { free(skin_slab) }
+      panic("GLTF skinning self-test allocation failed")
+   }
    memset(bind, 0, shr._GLTF_VTX_STRIDE)
    memset(skinned, 0, shr._GLTF_VTX_STRIDE)
    memset(joints, 0, 16)

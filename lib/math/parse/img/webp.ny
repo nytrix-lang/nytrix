@@ -43,7 +43,10 @@ fn _libwebp_load() bool {
    if !lib { return false }
    def gi = ffi.dlsym(lib, "WebPGetInfo")
    def di = ffi.dlsym(lib, "WebPDecodeRGBAInto")
-   if !gi || !di { return false }
+   if !gi || !di {
+      ffi.dlclose(lib)
+      return false
+   }
    _lib = lib
    _getinfo = gi
    _decode_into = di
@@ -62,31 +65,37 @@ fn _image(str rgba, int w, int h) dict {
 
 fn _decode_native(str data) any {
    if !_libwebp_load() { return 0 }
-   def wp = zalloc(4)
-   def hp = zalloc(4)
+   mut dims_cleanup = [0, 0]
+   defer {
+      if dims_cleanup[0] { free(dims_cleanup[0]) }
+      if dims_cleanup[1] { free(dims_cleanup[1]) }
+   }
+   mut wp = zalloc(4)
+   dims_cleanup[0] = wp
+   mut hp = zalloc(4)
+   dims_cleanup[1] = hp
    if !wp || !hp {
-      if wp { free(wp) }
-      if hp { free(hp) }
       return 0
    }
    def ok = ffi.any4(_getinfo, data, data.len, wp, hp)
-   if int(ok) == 0 {
-      free(wp, hp)
-      return 0
-   }
+   if int(ok) == 0 { return 0 }
    def w = load32(wp, 0)
    def h = load32(hp, 0)
+   dims_cleanup[0] = 0
+   dims_cleanup[1] = 0
    free(wp, hp)
    if w < 1 || h < 1 || w > 16384 || h > 16384 || w * h > 16777216 { return 0 }
    def n = w * h * 4
-   def buf = malloc(n + 32)
+   mut buf_cleanup = 0
+   defer { if buf_cleanup { free(buf_cleanup) } }
+   mut buf = malloc(n + 32)
    if !buf { return 0 }
+   buf_cleanup = buf
    def decoded = ffi.any5(_decode_into, data, data.len, buf, n, w * 4)
-   if !decoded {
-      free(buf)
-      return 0
-   }
-   _image(init_str(buf, n), w, h)
+   if !decoded { return 0 }
+   def rgba = init_str(buf, n)
+   buf_cleanup = 0
+   _image(rgba, w, h)
 }
 
 fn _vp8l_dims(str data) list {

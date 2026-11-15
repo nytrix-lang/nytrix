@@ -334,7 +334,7 @@ typedef struct {
   bool bare_native_fallback; /* internal: generic native-only bare compile */
   const char *runtime_mode_raw;
   ny_safe_run_t safe_run;
-  const char *sanitize;   /* --sanitize=address|undefined|thread|leak */
+  const char *sanitize;   /* --sanitize=address|undefined|memory|thread|leak */
   const char *jit_engine; /* --jit-engine=orc|mcjit (default: mcjit) */
   bool jit_fast_isel;     /* --jit-fast-isel: JIT fast instruction selection */
   const char *jit_code_model; /* --jit-code-model=small|kernel|medium|large */

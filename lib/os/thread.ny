@@ -14,13 +14,17 @@ fn _thread_pack_args(any args) any {
    if !is_list(args) { args = [args] }
    def n = args.len
    if n <= 0 { return 0 }
+   mut cleanup = [0]
+   defer { if cleanup[0] { free(cleanup[0]) } }
    def argv = malloc(n * 8)
    if !argv { return 0 }
+   cleanup[0] = argv
    mut i = 0
    while i < n {
       store64(argv, args.get(i, 0), i * 8)
       i += 1
    }
+   cleanup[0] = 0
    argv
 }
 
@@ -29,10 +33,12 @@ fn thread_spawn_call(fnptr target, any args=[]) any {
    if !is_list(args) { args = [args] }
    def n = args.len
    if n > 15 { panic("thread_spawn_call: max 15 arguments(got " + to_str(n) + ")") }
+   mut cleanup = [0]
+   defer { if cleanup[0] { free(cleanup[0]) } }
    def argv = _thread_pack_args(args)
    if n > 0 && !argv { return -1 }
+   cleanup[0] = argv
    def handle = __thread_spawn_call(target, n, argv)
-   if argv { free(argv) }
    handle
 }
 
@@ -41,10 +47,12 @@ fn thread_launch_call(fnptr target, any args=[]) int {
    if !is_list(args) { args = [args] }
    def n = args.len
    if n > 15 { panic("thread_launch_call: max 15 arguments(got " + to_str(n) + ")") }
+   mut cleanup = [0]
+   defer { if cleanup[0] { free(cleanup[0]) } }
    def argv = _thread_pack_args(args)
    if n > 0 && !argv { return -1 }
+   cleanup[0] = argv
    def rc = __thread_launch_call(target, n, argv)
-   if argv { free(argv) }
    rc
 }
 

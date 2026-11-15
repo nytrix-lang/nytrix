@@ -1,0 +1,101 @@
+shape resource_dynamic_list_double_extraction {
+  family "language/ownership"
+  generator "error"
+  features ["ownership", "resource", "linear", "list", "dynamic-index"]
+  template ny-compile-fail
+  expect compile_fail
+  flags_matrix "--ownership-strict --native-only; --ownership-strict --native-backend=llvm; --ownership-strict --wasm"
+  expect_message "linear resource 'files'"
+  source ny <<'NY'
+use core
+linear layout File { int fd }
+@consumes(file)
+fn dispose(File file) int { forget(file) 0 }
+fn run(int index) int {
+   def list<File> files = [File(7), File(8)]
+   def File first = files[index]
+   def File second = files[index]
+   dispose(first)
+   dispose(second)
+   forget(files)
+   0
+}
+run(0)
+NY
+}
+
+shape resource_dynamic_dict_double_extraction {
+  family "language/ownership"
+  generator "error"
+  features ["ownership", "resource", "linear", "dict", "dynamic-index"]
+  template ny-compile-fail
+  expect compile_fail
+  flags_matrix "--ownership-strict --native-only; --ownership-strict --native-backend=llvm; --ownership-strict --wasm"
+  expect_message "linear resource 'files'"
+  source ny <<'NY'
+use core
+linear layout File { int fd }
+@consumes(file)
+fn dispose(File file) int { forget(file) 0 }
+fn run(str key) int {
+   def dict<str, File> files = {"left": File(7), "right": File(8)}
+   def File first = files[key]
+   def File second = files[key]
+   dispose(first)
+   dispose(second)
+   forget(files)
+   0
+}
+run("left")
+NY
+}
+
+shape resource_nested_collection_owner_reuse {
+  family "language/ownership"
+  generator "error"
+  features ["ownership", "resource", "linear", "aggregate", "dynamic-index"]
+  template ny-compile-fail
+  expect compile_fail
+  flags_matrix "--ownership-strict --native-only; --ownership-strict --native-backend=llvm; --ownership-strict --wasm"
+  expect_message "linear resource 'holder.files'"
+  source ny <<'NY'
+use core
+linear layout File { int fd }
+type FileList = list<File>
+layout Holder { FileList files, int tag }
+@consumes(file)
+fn dispose(File file) int { forget(file) 0 }
+fn run(int index) int {
+   def Holder holder = Holder([File(7)], 3)
+   def File chosen = holder.files[index]
+   dispose(chosen)
+   forget(holder)
+   0
+}
+run(0)
+NY
+}
+
+shape resource_collection_scalar_reads_positive {
+  family "language/ownership"
+  generator "regression"
+  features ["ownership", "resource", "linear", "list", "dict", "positive"]
+  template ny-test-case
+  expect compile_and_run
+  flags_matrix "--ownership-strict --native-only; --ownership-strict --native-backend=llvm"
+  source ny <<'NY'
+use core
+linear layout File { int fd }
+fn inspect(int index, str key) int {
+   def list<File> files = [File(7), File(8)]
+   def dict<str, File> entries = {"left": File(11)}
+   def fd = files[index].fd
+   def other = entries[key].fd
+   forget(files)
+   forget(entries)
+   fd + other
+}
+assert(inspect(1, "left") == 19, "scalar projections do not consume their collection")
+0
+NY
+}

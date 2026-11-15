@@ -10,7 +10,7 @@ use core.common as common
 use core.str as str
 use core.math
 use core.math.float (is_nan, is_inf)
-use core.os (exit)
+use core.os (exit, file_read, file_write)
 use core.os.args as process_args
 use core.os.subprocess (run_capture)
 use core.os.fs as osfs
@@ -86,6 +86,7 @@ mut int _gui_last_asset_load_press_seq = 0
 mut bool _gui_asset_load_wait_mouse_up = false
 mut bool _cli_scripted_scene_load = false
 mut bool _scene_load_finalizing = false
+mut _scene_load_async_t0 = 0
 mut int _gui_material_selected_idx = -1
 mut int _gui_material_selected_part_idx = -1
 
@@ -585,6 +586,89 @@ fn _gui_fit_standalone_asset_browser() bool {
    true
 }
 
+;; ---- docking --------------------------------------------------------------
+;; The panels live in a dockspace around a "@viewport" spacer, so they can be
+;; rearranged by dragging tabs and splitters, and the arrangement is restored
+;; on the next start. NY_UI_DOCK=0 keeps the fixed tiled presets instead.
+;; The layout file is NY_UI_LAYOUT_FILE, or engine-layout.txt in the nytrix
+;; config directory; replays do not persist unless the variable is set.
+mut _gui_dock_ready = false
+mut _gui_dock_saved = ""
+mut _gui_dock_preset = ""
+mut int _gui_dock_tick = 0
+
+fn _gui_dock_enabled() bool { ui_profile.env_trim_cached("NY_UI_DOCK") != "0" }
+
+fn _gui_dock_path() str {
+   def explicit = ui_profile.env_trim_cached("NY_UI_LAYOUT_FILE")
+   if explicit.len > 0 { return explicit }
+   if ui_profile.env_truthy_cached("NYTRIX_UI_REPLAY") { return "" }
+   def base = ospath.config_dir()
+   if base.len <= 0 { return "" }
+   base + "/nytrix/engine-layout.txt"
+}
+
+fn _gui_dock_default_layout() bool {
+   "Editor on the left, the viewport in the middle with the asset browser under it, and the other tools tabbed on the right."
+   def ids = ["editor_main", "inspector", "profiler", "workspace_grid", "node_graph", "widget_probe", "widget_gallery", "asset_browser"]
+   mut i = 0
+   while i < ids.len {
+      gui.undock_window(to_str(ids.get(i, "")))
+      i += 1
+   }
+   gui.dock_window("engine", "@viewport")
+   gui.dock_window("engine", "editor_main", "@viewport", "left")
+   gui.dock_window("engine", "inspector", "@viewport", "right")
+   gui.dock_window("engine", "profiler", "inspector", "center")
+   gui.dock_window("engine", "workspace_grid", "inspector", "center")
+   gui.dock_window("engine", "node_graph", "inspector", "center")
+   gui.dock_window("engine", "widget_probe", "inspector", "center")
+   gui.dock_window("engine", "widget_gallery", "inspector", "center")
+   gui.dock_window("engine", "asset_browser", "@viewport", "bottom")
+   ;; Left column about a quarter of the width; the right column a third of the rest.
+   gui.dock_split_ratio("engine", "", 0.24)
+   gui.dock_split_ratio("engine", "b", 0.66)
+   gui.dock_split_ratio("engine", "ba", 0.68)
+   gui.focus_window("inspector")
+   true
+}
+
+fn _gui_dock_begin_frame() bool {
+   "Restores or builds the layout once, runs the dockspace, and writes the layout file when the arrangement has changed."
+   def preset = _gui_layout_preset_env()
+   if !_gui_dock_ready {
+      _gui_dock_ready = true
+      _gui_dock_preset = preset
+      mut loaded = false
+      def path = _gui_dock_path()
+      if path.len > 0 && osfs.is_file(path) {
+         def saved = file_read(path)
+         if is_ok(saved) { loaded = gui.dock_layout_load("engine", str.strip(to_str(unwrap(saved)))) }
+      }
+      if !loaded { _gui_dock_default_layout() }
+      _gui_dock_saved = gui.dock_layout_save("engine")
+   } elif preset != _gui_dock_preset {
+      ;; Choosing a layout preset resets the arrangement.
+      _gui_dock_preset = preset
+      _gui_dock_default_layout()
+   }
+   gui.dockspace("engine", 0.0, 0.0, _win_w, _win_h)
+   _gui_dock_tick += 1
+   if (_gui_dock_tick % 45) == 0 && !gui.mouse_down() {
+      def now = gui.dock_layout_save("engine")
+      if now != _gui_dock_saved {
+         _gui_dock_saved = now
+         def path = _gui_dock_path()
+         if path.len > 0 {
+            def dir = ospath.dirname(path)
+            if dir.len > 0 && !osfs.is_dir(dir) { osfs.make_dir(dir) }
+            file_write(path, now + "\n")
+         }
+      }
+   }
+   true
+}
+
 fn _gui_apply_tiled_layout(bool force=false) bool {
    if !force && !_gui_layout_dirty && _gui_layout_warm_frames <= 0 { return false }
    _gui_sanitize_workspace_state()
@@ -1001,10 +1085,44 @@ fn _scene_runtime_finish_loaded(new_scene, old_scene, old_name, auto_frame=true)
       _cmd_lookat(false)
    }
    _scene_select_active_loaded("scene loaded")
-   terminal.log(_loaded_scene_name + " loaded")
+   ;; Click-to-ready time, so load latency can be read from the console.
+   if _scene_load_async_t0 > 0 {
+      terminal.log(_loaded_scene_name + " loaded in " + str.to_fixed(float(ticks() - _scene_load_async_t0) / 1000000.0, 1) + " ms")
+      _scene_load_async_t0 = 0
+   } else {
+      terminal.log(_loaded_scene_name + " loaded")
+   }
    if ui_profile.env_truthy_cached("NY_UI_ADJACENT_PREFETCH") {
       _schedule_adjacent_prefetch_from_current(1)
    }
+   true
+}
+
+;; Load status shown in the catalog panel: "" (idle), "loading", or "error".
+mut str _scene_load_status = ""
+mut str _scene_load_status_name = ""
+mut str _scene_load_status_detail = ""
+
+fn _gui_draw_load_status() bool {
+   ;; A slow load (over 300 ms) or a failed one is shown here, not only in the
+   ;; console. The error stays until the next load starts or succeeds.
+   if _scene_load_status == "loading" {
+      def ms = _scene_load_async_t0 > 0 ? float(ticks() - _scene_load_async_t0) / 1000000.0 : 0.0
+      if ms < 300.0 { return false }
+      gui.panel_state("loading", "Loading " + _scene_load_status_name, str.to_fixed(ms / 1000.0, 1) + " s", 64.0)
+      return true
+   }
+   if _scene_load_status == "error" {
+      gui.panel_state("error", "Could not load " + _scene_load_status_name, _scene_load_status_detail, 64.0)
+      return true
+   }
+   false
+}
+
+fn _set_scene_load_status(str kind, any name, any detail="") bool {
+   _scene_load_status = kind
+   _scene_load_status_name = to_str(name)
+   _scene_load_status_detail = to_str(detail)
    true
 }
 
@@ -1012,6 +1130,7 @@ fn _resolve_gltf_path_or_log(want) {
    def gltf_path = ui_assets.resolve_gltf_asset_path(want)
    if gltf_path.len == 0 {
       terminal.log("ERROR: glTF asset not found: " + want)
+      _set_scene_load_status("error", want, "The asset file was not found")
    }
    gltf_path
 }
@@ -1033,8 +1152,10 @@ fn _finish_scene_load_path(gltf_path, want, auto_frame=true) {
    def new_scene = scene_engine.load_scene_path(gltf_path, "", camthreed, M_SP, M_PT, M_PS)
    if !is_dict(new_scene) {
       terminal.log("Load failed: " + want)
+      _set_scene_load_status("error", want, "The file could not be parsed or uploaded")
       return false
    }
+   _set_scene_load_status("", "")
    _scene_runtime_finish_loaded(new_scene, old_scene, old_name, auto_frame)
 }
 
@@ -1114,7 +1235,9 @@ fn _load_scene_runtime_async(spec, auto_frame=true) {
       show_scene = false
    }
    _sync_cursor_state("scene load async")
+   _scene_load_async_t0 = ticks()
    terminal.log("Loading in background: " + want)
+   _set_scene_load_status("loading", want)
    false
 }
 
@@ -1137,6 +1260,7 @@ fn _poll_scene_load_async() {
    _scene_load_async_clear()
    if !ok {
       terminal.log("Background load failed: " + want)
+      _set_scene_load_status("error", want, "The file could not be read or parsed")
       if _startup_post_load_pending {
          _startup_post_load_pending = false
       }
@@ -2278,15 +2402,20 @@ fn _apply_startup_render_env() bool {
 }
 
 fn _reset_skybox_resources() bool {
+   _finish_sky_prefetch()
    load_skybox(false, "off")
    true
 }
 
 fn _load_skybox(any visible=true, any source="") bool {
+   ;; The startup worker writes the prefetched sky; wait for it before
+   ;; touching skybox state from the main thread.
+   _finish_sky_prefetch()
    load_skybox(bool(visible), to_str(source))
 }
 
 fn _load_fast_generated_skybox(any visible=true) bool {
+   _finish_sky_prefetch()
    load_skybox(bool(visible), "generated")
 }
 
@@ -2348,8 +2477,10 @@ fn _setup_window() {
 
 fn _setup_camera() {
    cam = camera_init([0.0, 0.0, 0.0], 0.0, 0.0)
-   def start_pos = [22.0, 14.0, 26.0]
-   def start_target = [0.0, 4.0, 0.0]
+   ;; The empty-scene view matches where a fitted model is framed from, so the
+   ;; grid and axes read at the same scale before and after a load.
+   def start_pos = [62.0, 48.0, 84.0]
+   def start_target = [0.0, 12.0, 0.0]
    def f64 fx = float(start_target.get(0, 0.0)) - float(start_pos.get(0, 0.0))
    def f64 fy = float(start_target.get(1, 0.0)) - float(start_pos.get(1, 0.0))
    def f64 fz = float(start_target.get(2, 0.0)) - float(start_pos.get(2, 0.0))
@@ -2357,7 +2488,7 @@ fn _setup_camera() {
    def f64 start_yaw = atan2(fx, -fz) * 180.0 / PI
    def f64 start_pitch = atan2(fy, max(0.000001, fh)) * 180.0 / PI
    camthreed = camera.init(start_pos, start_yaw, start_pitch)
-   mut start_fov = 120.0
+   mut start_fov = 60.0
    def dump_fov_env = ui_profile.env_trim_cached("NY_UI_DUMP_FOV")
    if dump_fov_env.len > 0 {
       def raw = str.atof(dump_fov_env)
@@ -2930,9 +3061,11 @@ fn load_model(any app=0, name="") {
 }
 
 fn _draw_infinite_world_grid(cam_px, cam_pz, include_axes=false) {
-   def fine_cell, fine_span = 32.0, 42
-   def major_cell, major_span = 128.0, 18
-   def line_w, axis_w = 0.40, 0.60
+   ;; Widths are world units. Scenes are fitted to roughly 72 units and viewed
+   ;; from about 100, where 0.16 is close to one pixel at a 60 degree view.
+   def fine_cell, fine_span = 32.0, 20
+   def major_cell, major_span = 128.0, 12
+   def line_w, major_w = 0.16, 0.26
    def gx, gz = floor(cam_px / fine_cell) * fine_cell, floor(cam_pz / fine_cell) * fine_cell
    def mx, mz = floor(cam_px / major_cell) * major_cell, floor(cam_pz / major_cell) * major_cell
    def trace_grid = ui_profile.env_truthy_cached("NY_UI_GROUP_TRACE")
@@ -2942,17 +3075,20 @@ fn _draw_infinite_world_grid(cam_px, cam_pz, include_axes=false) {
    gfx.set_model_matrix(M_PR)
    if trace_grid { ui_profile.print_text("[ui:grid] pair.before") }
    draw_grid_pair(
-      fine_span, fine_cell, [0.42,0.50,0.64,0.58], [0.60,0.72,0.90,0.78], line_w,
-      major_span, major_cell, [0.50,0.60,0.76,0.68], [0.82,0.92,1.00,0.96], line_w,
-      mx - gx, mz - gz
+      fine_span, fine_cell, [0.30,0.30,0.36,0.42], [0.30,0.30,0.36,0.42], line_w,
+      major_span, major_cell, [0.44,0.44,0.52,0.70], [0.44,0.44,0.52,0.70], major_w,
+      mx - gx, mz - gz, true
    )
    if trace_grid { ui_profile.print_text("[ui:grid] pair.after") }
    if include_axes {
       def ax, ay, az = 0.0 - gx, 0.035, 0.0 - gz
       def len = major_cell * float(major_span)
-      draw_line([ax - len,ay,az], [ax + len,ay,az], [1.0,0.12,0.05,1.0], axis_w)
-      draw_line([ax,-len*0.20,az], [ax,len*0.20,az], [0.12,1.0,0.05,1.0], axis_w)
-      draw_line([ax,ay,az - len], [ax,ay,az + len], [0.05,0.18,1.0,1.0], axis_w)
+      ;; X and Z run along the ground; Y is a short up marker at the origin so
+      ;; it orients the view without cutting the viewport in half.
+      ;; Screen-space lines: two pixels wide at the camera and at the horizon.
+      draw_line_px([ax - len,ay,az], [ax + len,ay,az], [0.90,0.30,0.33,1.0], 2.0)
+      draw_line_px([ax,0.0,az], [ax,major_cell * 0.5,az], [0.45,0.80,0.40,1.0], 2.0)
+      draw_line_px([ax,ay,az - len], [ax,ay,az + len], [0.30,0.52,0.95,1.0], 2.0)
    }
    true
 }
@@ -3359,12 +3495,12 @@ fn _icon_mode_button(str id, str icon_name, bool selected, f64 w=36.0, f64 h=30.
 
 fn _draw_asset_mode_bar(str idp, bool compact=false) int {
    mut tab = (int(_gui_browser_tab) == 1) ? 1 : 0
-   gui.text_colored("Assets", [0.82, 0.82, 0.82, 1.0])
+   gui.text_colored("Assets", gui.theme_color("text_dim"))
    if _icon_mode_button(idp + "_mode_catalog", "asset_grid", tab == 0) { tab = 0 }
    gui.same_line()
    if _icon_mode_button(idp + "_mode_hierarchy", "hierarchy", tab == 1) { tab = 1 }
    gui.same_line()
-   gui.text_colored(tab == 1 ? "Hierarchy" : "Catalog", compact ? [0.70, 0.70, 0.70, 0.92] : [0.76, 0.76, 0.76, 0.94])
+   gui.text_colored(tab == 1 ? "Hierarchy" : "Catalog", compact ? gui.theme_color_alpha("text_dim", 0.92) : gui.theme_color_alpha("text_dim", 0.94))
    _gui_browser_tab = tab
    tab
 }
@@ -3480,9 +3616,11 @@ fn _editor_draw_header(rs, layout_now, active_shot, editor_w, editor_h, card_w) 
    header_stats["frame_ms"] = _last_frame_ms
    def display_fps = ui_profile.parity_lock_stats_enabled() ? 0 : fps
    def scene_label = _loaded_scene_name.len > 0 ? _loaded_scene_name : "No scene"
-   gui.text_colored("Nytrix Engine", [0.94, 0.94, 0.94, 0.98])
-   gui.text_colored(scene_label + "  " + to_str(int(display_fps)) + " fps  " + to_str(layout_now), [0.66, 0.66, 0.66, 0.90])
-   def selected = gui.tab_strip("engine_editor_tabs", _gui_editor_tab_items, _gui_editor_tab, max(320.0, float(editor_w) - 28.0), 30.0)
+   gui.text(scene_label)
+   gui.text_colored(to_str(int(display_fps)) + " fps  ·  " + to_str(layout_now) + " layout", "text_dim")
+   ;; Width 0 fills the panel body. A fixed 320 px minimum overflowed the
+   ;; docked panel and pushed the last tab under its edge.
+   def selected = gui.tab_strip("engine_editor_tabs", _gui_editor_tab_items, _gui_editor_tab, 0.0, 30.0)
    selected
 }
 
@@ -3501,7 +3639,21 @@ fn _editor_catalog_tab(bool dense) {
    def pick_names = filter_key.len > 0 ? filtered : names
    _gui_model_selected_name = viewer_catalog.sync_selected(_gui_model_selected_name, _loaded_scene_name, names)
    def selected_idx = max(0, _gui_selected_pick_index(pick_names, _gui_model_selected_name))
-   gui.text_colored("Assets " + to_str(pick_names.len) + " / " + to_str(names.len) + "   selected " + (_gui_model_selected_name.len > 0 ? _gui_model_selected_name : "<none>"), [0.70, 0.70, 0.70, 0.94])
+   ;; The count line reports the filter result; the highlighted row already
+   ;; shows the selection, so it is not repeated as text.
+   mut count_line = to_str(names.len) + " assets"
+   if filter_key.len > 0 { count_line = to_str(pick_names.len) + " of " + to_str(names.len) + " assets" }
+   gui.text_colored(count_line, "text_dim")
+   _gui_draw_load_status()
+   ;; Say why the list is blank instead of showing an empty box.
+   if names.len <= 0 {
+      gui.panel_state("empty", "No assets found", "Add glTF models under the asset directory")
+      return
+   }
+   if pick_names.len <= 0 {
+      gui.panel_state("empty", "No assets match", "Nothing contains \"" + to_str(_gui_model_filter) + "\"")
+      return
+   }
    def grid_h = max(96.0, gui.remaining_h(4.0))
    mut dict grid_opts = dict(10)
    grid_opts["show_paths"] = false
@@ -4166,8 +4318,8 @@ fn _draw_gui_safe_overlay(phase, ww, wh) bool {
    gfx.draw_rect_fast(x, y, w, h, gfx.color_pack(0.0, 0.0, 0.0, 0.82))
    gfx.draw_rect_fast(x, y, w, 2.0, gfx.color_pack(0.86, 0.86, 0.86, 0.86))
    gfx.draw_rect_fast(x, y + h - 1.0, w, 1.0, gfx.color_pack(0.22, 0.22, 0.22, 0.84))
-   gfx.draw_text(_ui_title_font(), "NYTRIX", x + 20.0, y + 20.0, [0.94, 0.94, 0.94, 1.0])
-   gfx.draw_text(_ui_font(), "F1 closes this overlay. Unset NY_UI_SAFE_EDITOR_OVERLAY for the full editor shell.", x + 20.0, y + 66.0, [0.72, 0.72, 0.72, 1.0])
+   gfx.draw_text(_ui_title_font(), "NYTRIX", x + 20.0, y + 20.0, gui.theme_color("text"))
+   gfx.draw_text(_ui_font(), "F1 closes this overlay. Unset NY_UI_SAFE_EDITOR_OVERLAY for the full editor shell.", x + 20.0, y + 66.0, gui.theme_color("text_dim"))
    true
 }
 
@@ -4282,7 +4434,8 @@ fn _draw_editor_gui(phase) {
    _main_loop_trace_once("[ui:editor-gui] begin_frame.before")
    gui.begin_frame(0, _ui_font(), _win_w, _win_h)
    _main_loop_trace_once("[ui:editor-gui] layout.before")
-   _gui_apply_tiled_layout(false)
+   if _gui_dock_enabled() { _gui_dock_begin_frame() }
+   else { _gui_apply_tiled_layout(false) }
    if _gui_show_editor {
       _gui_frame_trace(gui_trace, "editor")
       _main_loop_trace_once("[ui:editor-gui] editor-panel.before")
@@ -4798,6 +4951,7 @@ fn _startup_init_timers_and_skybox() {
    } else {
       _startup_skybox_pending = false
    }
+   _start_sky_prefetch()
    if ui_profile.trace_enabled() {
       print_to_stdout = true
       def _discard_10 = ui_profile.print_text("[profile] NY_UI_PROFILE_TRACE=1 every=" + to_str(ui_profile.frame_print_every()) + " frames")
@@ -5724,6 +5878,9 @@ fn _app_process_events() {
       ;; the editor panels process the same stream causes hover/focus/layout churn
       ;; and visible jitter.
       if _scene_drag_active && (typ == EVENT_MOUSE_POS_CHANGED || typ == EVENT_MOUSE_BUTTON_RELEASED || typ == EVENT_MOUSE_SCROLL) {
+         ;; The GUI still has to learn that the button went up, or it would
+         ;; keep treating the pointer as held; it just does not get to claim it.
+         if gui_on_event && typ == EVENT_MOUSE_BUTTON_RELEASED { gui.feed_event(typ, data) }
          gui_on_event = false
       }
       _ui_set_update_stage("gui.feed")
@@ -6047,6 +6204,33 @@ fn _world_scene_env_allowed() bool {
    if ui_profile.env_truthy_cached("NY_UI_DISABLE_ENV") { return false }
    if ui_profile.env_present_cached("NY_UI_VISIBLE_SKYBOX") && !ui_profile.env_enabled_cached("NY_UI_VISIBLE_SKYBOX") { return false }
    if ui_profile.env_present_cached("NY_UI_SHOW_SKYBOX") && !ui_profile.env_enabled_cached("NY_UI_SHOW_SKYBOX") { return false }
+   true
+}
+
+mut int _sky_prefetch_thread = 0
+
+fn _sky_prefetch_worker() {
+   "Decodes the environment sky off the main thread; the main thread uploads it."
+   prefetch_skybox_image("")
+}
+
+fn _start_sky_prefetch() bool {
+   ;; The first scene needs the EXR sky; decoding it on the main thread was a
+   ;; ~0.8 s frame stall. Start it at startup so it is ready by the first load.
+   if skybox_tex_id >= 0 || _batch_dump_enabled() || ui_profile.env_truthy_cached("NY_UI_SKY_PREFETCH_OFF") { return false }
+   ;; Runs that never show the sky (environment disabled, mock rendering,
+   ;; scripted boot scenes) gain nothing from a second thread; the replay
+   ;; probes crashed intermittently with it running beside the boot load.
+   if ui_profile.env_truthy_cached("NY_UI_DISABLE_ENV") || ui_profile.env_lower_cached("NY_UI_RENDER_BACKEND") == "mock" ||
+      ui_profile.env_trim_cached("NY_UI_BOOT_SCENE").len > 0 { return false }
+   _sky_prefetch_thread = int(thread_spawn(_sky_prefetch_worker))
+   _sky_prefetch_thread != 0
+}
+
+fn _finish_sky_prefetch() bool {
+   if _sky_prefetch_thread == 0 { return false }
+   thread_join(_sky_prefetch_thread)
+   _sky_prefetch_thread = 0
    true
 }
 
@@ -6729,7 +6913,7 @@ fn _sample_fps_tick(int now, bool update_public_fps=false) bool {
    if update_public_fps {
       fps = int(sampled.get("fps", fps))
       if _app_win && !ui_profile.headless_enabled() {
-         set_title(_app_win, "Nytrix UI - " + to_str(fps) + " FPS")
+         set_title(_app_win, "Nytrix Engine - " + to_str(int(fps)) + " fps")
       }
    }
    true

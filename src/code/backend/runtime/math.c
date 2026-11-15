@@ -7,9 +7,34 @@
 #include "code/backend/runtime/shared.h"
 #include <inttypes.h>
 #include <math.h>
+#include <stdatomic.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+/*
+ * Emitted signed-scalar operations call these only in the UBSan lane. The
+ * runtime is compiled with -fsanitize=undefined, so its C frontend supplies
+ * the real overflow/division handlers and platform sanitizer ABI.
+ */
+int64_t rt_ubsan_add_i64(int64_t a, int64_t b) { return a + b; }
+int64_t rt_ubsan_sub_i64(int64_t a, int64_t b) { return a - b; }
+int64_t rt_ubsan_mul_i64(int64_t a, int64_t b) { return a * b; }
+int64_t rt_ubsan_div_i64(int64_t a, int64_t b) { return a / b; }
+int64_t rt_ubsan_mod_i64(int64_t a, int64_t b) { return a % b; }
+
+void rt_ubsan_check_address(int64_t address, int64_t store) {
+  if (!address) {
+    unsigned char *p = (unsigned char *)(uintptr_t)address;
+    if (store)
+      *p = 0;
+    else {
+      unsigned char value = *p;
+      (void)value;
+    }
+  }
+}
 
 int64_t rt_division_by_zero(void) {
   rt_fail(rt_alloc_string("err.div_zero"), rt_alloc_string("division by zero"));
@@ -299,13 +324,13 @@ static inline bool math_stats_enabled(void) {
   return g_math_stats_enabled != 0;
 }
 
-#define MATH_STAT_INC(field)                                  \
-  do {                                                        \
-    if (__builtin_expect(g_math_stats_enabled == 1, 0))       \
-      g_math_stats.field++;                                   \
-    else if (__builtin_expect(g_math_stats_enabled < 0, 0) && \
-             math_stats_enabled())                            \
-      g_math_stats.field++;                                   \
+#define MATH_STAT_INC(field)                                                   \
+  do {                                                                         \
+    if (__builtin_expect(g_math_stats_enabled == 1, 0))                        \
+      g_math_stats.field++;                                                    \
+    else if (__builtin_expect(g_math_stats_enabled < 0, 0) &&                  \
+             math_stats_enabled())                                             \
+      g_math_stats.field++;                                                    \
   } while (0)
 
 __attribute__((destructor)) static void rt_math_stats_dump(void) {
@@ -548,8 +573,69 @@ static void *rt_flt_alloc_slot(void) {
   return p;
 }
 
+/*
+ * Boxed floats are immutable values, and the default heap policy never frees
+ * them, so every `m.get(i, 0.0)` in a render loop leaked a fresh 16-byte box
+ * (the engine grew about 1.5 MB per frame). The first value boxed into each
+ * slot of this table is interned for the rest of the process; later boxes of
+ * the same bits reuse it. A value whose probe run is full falls back to a
+ * fresh box, and interned boxes live in static storage that rt_flt_free never
+ * releases.
+ */
+#define RT_FLT_INTERN_SLOTS (1u << 16)
+static _Alignas(16) unsigned char g_flt_intern_store[RT_FLT_INTERN_SLOTS * 16];
+static _Atomic(uint8_t) g_flt_intern_claim[RT_FLT_INTERN_SLOTS];
+static _Atomic(uintptr_t) g_flt_intern_box[RT_FLT_INTERN_SLOTS];
+
+static bool rt_flt_interned(uintptr_t v) {
+  uintptr_t lo = (uintptr_t)g_flt_intern_store;
+  return v >= lo && v < lo + sizeof(g_flt_intern_store);
+}
+
+static size_t rt_flt_intern_slot(int64_t bits) {
+  uint64_t x = (uint64_t)bits;
+  x ^= x >> 31;
+  x *= UINT64_C(0x9E3779B97F4A7C15);
+  x ^= x >> 29;
+  return (size_t)(x & (RT_FLT_INTERN_SLOTS - 1u));
+}
+
+/* A short probe run keeps interning effective as the table fills: with one
+ * slot per value, every value hashing onto an occupied slot was boxed afresh
+ * on each use. */
+#define RT_FLT_INTERN_PROBES 8u
+
+static int64_t rt_flt_intern(int64_t bits) {
+  size_t home = rt_flt_intern_slot(bits);
+  for (size_t probe = 0; probe < RT_FLT_INTERN_PROBES; ++probe) {
+    size_t i = (home + probe) & (RT_FLT_INTERN_SLOTS - 1u);
+    uintptr_t box =
+        atomic_load_explicit(&g_flt_intern_box[i], memory_order_acquire);
+    if (box) {
+      int64_t have;
+      memcpy(&have, (const void *)box, 8);
+      if (have == bits)
+        return (int64_t)box;
+      continue;
+    }
+    uint8_t unclaimed = 0;
+    if (!atomic_compare_exchange_strong_explicit(
+            &g_flt_intern_claim[i], &unclaimed, 1, memory_order_acq_rel,
+            memory_order_relaxed))
+      return 0; /* another thread is filling this slot right now */
+    unsigned char *slot = g_flt_intern_store + i * 16;
+    *(int64_t *)slot = TAG_FLOAT;
+    memcpy(slot + 8, &bits, 8);
+    uintptr_t out = (uintptr_t)(slot + 8);
+    rt_float_registry_add(out);
+    atomic_store_explicit(&g_flt_intern_box[i], out, memory_order_release);
+    return (int64_t)out;
+  }
+  return 0;
+}
+
 void rt_flt_free(int64_t v) {
-  if (!v)
+  if (!v || rt_flt_interned((uintptr_t)v))
     return;
   rt_float_registry_remove((uintptr_t)v);
   rt_float_cache_forget((uintptr_t)v);
@@ -559,6 +645,9 @@ void rt_flt_free(int64_t v) {
 }
 
 int64_t rt_flt_box_val(int64_t bits) {
+  int64_t interned = rt_flt_intern(bits);
+  if (interned)
+    return interned;
   void *slot = rt_flt_alloc_slot();
   if (!slot)
     return 0;
@@ -664,12 +753,12 @@ int64_t rt_complex_eq(int64_t a, int64_t b) {
              : NY_IMM_FALSE;
 }
 
-#define FLT_OP(name, op)                        \
-  int64_t rt_flt_##name(int64_t a, int64_t b) { \
-    double da = rt_flt_unbox_double(a);         \
-    double db = rt_flt_unbox_double(b);         \
-    double r = da op db;                        \
-    return rt_flt_box_double(r);                \
+#define FLT_OP(name, op)                                                       \
+  int64_t rt_flt_##name(int64_t a, int64_t b) {                                \
+    double da = rt_flt_unbox_double(a);                                        \
+    double db = rt_flt_unbox_double(b);                                        \
+    double r = da op db;                                                       \
+    return rt_flt_box_double(r);                                               \
   }
 
 FLT_OP(add, +)
@@ -684,11 +773,11 @@ int64_t rt_flt_div(int64_t a, int64_t b) {
   return rt_flt_box_double(da / db);
 }
 
-#define FLT_CMP(name, op)                           \
-  int64_t rt_flt_##name(int64_t a, int64_t b) {     \
-    double da = rt_flt_unbox_double(a);             \
-    double db = rt_flt_unbox_double(b);             \
-    return (da op db) ? NY_IMM_TRUE : NY_IMM_FALSE; \
+#define FLT_CMP(name, op)                                                      \
+  int64_t rt_flt_##name(int64_t a, int64_t b) {                                \
+    double da = rt_flt_unbox_double(a);                                        \
+    double db = rt_flt_unbox_double(b);                                        \
+    return (da op db) ? NY_IMM_TRUE : NY_IMM_FALSE;                            \
   }
 
 FLT_CMP(lt, <)
@@ -760,7 +849,9 @@ double rt_f64_round(double value) { return (double)llround(value); }
 double rt_f64_pow(double base, double exponent) { return pow(base, exponent); }
 double rt_f64_floor(double value) { return floor(value); }
 double rt_f64_ceil(double value) { return ceil(value); }
-__attribute__((noinline)) double rt_fmod_f64(double left, double right) { return fmod(left, right); }
+__attribute__((noinline)) double rt_fmod_f64(double left, double right) {
+  return fmod(left, right);
+}
 int64_t rt_flt_exp(int64_t v) {
   return rt_flt_box_double(exp(rt_flt_unbox_double(v)));
 }
@@ -807,6 +898,13 @@ void rt_bounds_check(uint64_t offset, uint64_t len) {
     rt_fail(rt_alloc_string("err.index"),
             rt_alloc_string("index_read out of range"));
   }
+}
+
+int64_t rt_byte_index_checked(int64_t index, int64_t length) {
+  if (length != -1 && (length < 0 || index < 0 || index >= length))
+    rt_fail(rt_alloc_string("err.index"),
+            rt_alloc_string("byte access out of range"));
+  return index;
 }
 
 /*

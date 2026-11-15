@@ -1,0 +1,49 @@
+shape raw_memory_requires_proves_byte_range {
+  family "runtime/proofs"
+  generator "regression"
+  features ["proofs", "requires", "raw-memory", "range", "safe-heap"]
+  template ny-test-case
+  flags "--heap=safe"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+@borrows(address)
+fn read_bounded(ptr address, int index) int
+    requires index >= 0 && index < 8 {
+   load8(address, index)
+}
+
+with ptr address = malloc(8) {
+   store8(address, 73, 3)
+   def int index = 3
+   assert(read_bounded(address, index) == 73,
+          "the requires contract proves a raw byte index in range")
+}
+0
+NY
+}
+
+shape raw_memory_requires_rejects_an_unproved_byte_index {
+  family "compiler-errors/proofs"
+  generator "regression"
+  features ["proofs", "requires", "raw-memory", "range", "negative"]
+  template ny-test-case
+  flags_matrix "--native-only; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_fail
+  expect_message "precondition obligation failed"
+  source ny <<'NY'
+use core
+
+@borrows(address)
+fn read_bounded(ptr address, int index) int
+    requires index >= 0 && index < 8 {
+   load8(address, index)
+}
+
+with ptr address = malloc(8) {
+   read_bounded(address, 8)
+}
+0
+NY
+}

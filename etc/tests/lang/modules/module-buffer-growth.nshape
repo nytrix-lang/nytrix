@@ -1,0 +1,48 @@
+shape module_buffer_growth {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "codegen"]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect compile_and_run
+  expect_message "MODULE-BUFFER-GROWTH-OK"
+  source ny <<'NY'
+use core
+module bq(
+   q,
+   state,
+){
+   def RECT_STRIDE = 20
+   def RECT_INITIAL_CAP = 4
+   mut ptr _rects = 0
+   mut _cap = 0
+   mut _count = 0
+   fn _reserve(int need) bool {
+      if need <= _cap { return true }
+      mut cap = _cap > 0 ? _cap : RECT_INITIAL_CAP
+      while cap < need { cap *= 2 }
+      def bytes = cap * RECT_STRIDE
+      def p = _rects ? realloc(_rects, bytes) : malloc(bytes)
+      if !p { return false }
+      _rects, _cap = p, cap
+      true
+   }
+   fn q(f64 x) bool {
+      if !_reserve(_count + 1) { return false }
+      def rec = _rects + _count * RECT_STRIDE
+      store32_f32(rec, float(x), 0)
+      store32(rec, 7, 16)
+      _count += 1
+      true
+   }
+   fn state() list { [_count, _cap, load32(_rects, 16)] }
+}
+mut i = 0
+while i < 10 {
+   bq.q(float(i))
+   i += 1
+}
+assert(bq.state() == [10, 16, 7], "a growing module buffer keeps every record")
+print("MODULE-BUFFER-GROWTH-OK")
+NY
+}

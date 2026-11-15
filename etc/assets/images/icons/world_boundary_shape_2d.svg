@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
+  <title id="title1">World Boundary Shape 2D</title>
+  <desc id="desc1">World Boundary Shape 2D editor icon. Original asset id: worldboundaryshape2d.</desc>
+  <defs id="defs3" />
+  <g transform="translate(2.0000 2.0000) scale(1.25000)" id="g3">
+    <g fill="none" id="g2">
+      <path d="m 1,10 a 1,1 0 0 0 -1,1 1,1 0 0 0 1,1 h 14 a 1,1 0 0 0 1,-1 1,1 0 0 0 -1,-1 z" id="path1" fill="#c6c6ca" />
+      <path d="M 8,1 A 0.75,0.75 0 0 0 7.8144531,1.0761719 0.750075,0.750075 0 0 0 7.65625,1.140625 0.75,0.75 0 0 0 7.46875,1.21875 l -2,2 a 0.75,0.75 0 0 0 0,1.0625 0.75,0.75 0 0 0 1.0625,0 L 7.25,3.5625 V 10 A 0.75,0.75 0 0 0 8,10.75 0.75,0.75 0 0 0 8.75,10 V 3.5625 l 0.71875,0.71875 a 0.75,0.75 0 0 0 1.0625,0 0.75,0.75 0 0 0 0,-1.0625 l -2,-2 A 0.75,0.75 0 0 0 8,1 Z" id="path2" fill="#c6c6ca" />
+    </g>
+    <path fill="#c6c6ca" fill-opacity=".4" d="M0 11h16v5H0z" id="path3" />
+  </g>
+</svg>

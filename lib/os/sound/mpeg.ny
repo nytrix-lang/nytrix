@@ -919,12 +919,15 @@ fn read_range(any ctx, int start, int count) any {
    def channels = int(ctx.get("channels"))
    def target = start+int(ctx.get("delay"))
    if target < int(ctx.get("block_start")) { _reset(ctx) }
+   mut cleanup = [0]
+   defer { if cleanup[0] { free(cleanup[0]) } }
    def out = malloc(count*channels*2+1)
    if !out { return 0 }
+   cleanup[0] = out
    mut done = 0
    while done < count {
       while target+done >= int(ctx.get("block_start"))+int(ctx.get("block_frames")) {
-         if !_next(ctx) { free(out) return 0 }
+         if !_next(ctx) { return 0 }
       }
       def offset = target+done-int(ctx.get("block_start"))
       def n = _min(count-done,int(ctx.get("block_frames"))-offset)
@@ -933,7 +936,9 @@ fn read_range(any ctx, int start, int count) any {
       while i < n*channels*2 { store8(out,load8(pcm,offset*channels*2+i),done*channels*2+i) i += 1 }
       done += n
    }
-   make_memory_source(out,count*channels*2,channels,ctx.get("rate"),16,SAMPLE_FMT_S16,1)
+   def source = make_memory_source(out,count*channels*2,channels,ctx.get("rate"),16,SAMPLE_FMT_S16,1)
+   cleanup[0] = 0
+   source
 }
 
 fn decode_bytes(any d) any {

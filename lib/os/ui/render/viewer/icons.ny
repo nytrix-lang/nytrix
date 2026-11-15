@@ -43,7 +43,7 @@ fn stable_texture_id(candidate) int {
    tex_id
 }
 
-fn icon_tex(name, int raster_size=32) int {
+fn icon_tex(name, int raster_size=48) int {
    "Loads or returns the cached texture id for a named SVG icon."
    _ensure_caches()
    def trace = ui_profile.env_truthy_cached("NY_GUI_ICON_TRACE")
@@ -127,7 +127,7 @@ fn icon_sprite(name) any {
       _sprite_cache[key] = -1
       return -1
    }
-   def im = svg.load_path(path, 32)
+   def im = svg.load_path(path, 48)
    if !im || !is_dict(im) {
       if trace { ui_profile.print_text("[gui:icon] svg-sprite-decode-failed key=" + key + " path=" + path + " err=" + svg.last_error()) }
       _sprite_cache[key] = -1
@@ -169,7 +169,7 @@ fn warm_sprites(any names) int {
                if trace { ui_profile.print_text("[gui:icon] missing sprite key=" + key + " path=" + path) }
                _sprite_cache[key] = -1
             } else {
-               def im = svg.load_path(path, 32)
+               def im = svg.load_path(path, 48)
                if !im || !is_dict(im) {
                   if trace { ui_profile.print_text("[gui:icon] svg-sprite-decode-failed key=" + key + " path=" + path + " err=" + svg.last_error()) }
                   _sprite_cache[key] = -1

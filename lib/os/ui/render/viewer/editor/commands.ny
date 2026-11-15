@@ -4,11 +4,14 @@
 ;; - core.os.ui.render.viewer.editor.keychord
 module core.os.ui.render.viewer.editor.commands(
    commands, all_commands, enabled, with_tag, by_id, id_for_chord, which_key, has_id,
-   config, set_enabled, is_enabled, toggle, toggles, row_id, row_key, row_tag
+   config, set_enabled, is_enabled, toggle, toggles, row_id, row_key, row_tag,
+   keymap, set_keymap, keymap_names, bindings_for, describe_chord,
+   rebind, unbind, user_bindings, parse_bindings, load_bindings_file
 )
 
 use core
 use core.str as str
+use core.os (env, file_read)
 
 def _COMMANDS = [
    ["Save file", "save", "C-s", "write current buffer", "file"],
@@ -35,8 +38,8 @@ def _COMMANDS = [
    ["Debug start", "debug-start", "C-SPC d d", "start configured debugger", "debug"],
    ["Debug start", "debug-start", "C-c d d", "start configured debugger", "debug"],
    ["Debug start", "debug-start", "F8", "start configured debugger", "debug"],
-   ["Debug breakpoint", "debug-breakpoint", "F9", "break at current line", "debug"],
-   ["Debug breakpoint", "debug-breakpoint", "C-SPC d b", "break at current line", "debug"],
+   ["Debug break_point", "debug-break_point", "F9", "break at current line", "debug"],
+   ["Debug break_point", "debug-break_point", "C-SPC d b", "break at current line", "debug"],
    ["Debug continue", "debug-continue", "F5", "continue debugger", "debug"],
    ["Debug continue", "debug-continue", "C-SPC d r", "continue debugger", "debug"],
    ["Debug next", "debug-next", "C-SPC d n", "step over", "debug"],
@@ -174,11 +177,309 @@ def _COMMANDS = [
 
 def _ALIASES = []
 
+;; Emacs profile. These rows are added in front of the default table; default
+;; rows whose chord is taken by an Emacs binding or prefix (C-x, C-h, C-y, ...)
+;; are dropped, so every chord maps to exactly one command. Help lives under
+;; the C-h prefix, buffers/windows/files under C-x, as in Emacs.
+def _EMACS_COMMANDS = [
+   ["Save", "save", "C-x C-s", "write the buffer to its file", "file"],
+   ["Save all", "save-all", "C-x s", "write every modified buffer", "file"],
+   ["Find file", "open-file", "C-x C-f", "open a file", "file"],
+   ["Revert buffer", "reload", "C-x C-r", "reload the buffer from disk", "file"],
+   ["Kill buffer", "kill-buffer", "C-x k", "close the current buffer", "buffer"],
+   ["Next buffer", "next", "C-x RIGHT", "switch to the next buffer", "buffer"],
+   ["Previous buffer", "prev", "C-x LEFT", "switch to the previous buffer", "buffer"],
+   ["Switch buffer", "switch-buffer", "C-x b", "fuzzy-pick an open buffer", "buffer"],
+   ["List buffers", "switch-buffer", "C-x C-b", "fuzzy-pick an open buffer", "buffer"],
+   ["Other window", "pane-next", "C-x o", "move focus to the next pane", "pane"],
+   ["Delete window", "pane-close", "C-x 0", "close the focused pane", "pane"],
+   ["Delete other windows", "pane-only", "C-x 1", "keep only the focused pane", "pane"],
+   ["Split below", "pane-split-below", "C-x 2", "split the pane horizontally", "pane"],
+   ["Split right", "pane-split-right", "C-x 3", "split the pane vertically", "pane"],
+   ["Mark whole buffer", "mark-whole", "C-x h", "select the whole buffer", "edit"],
+   ["Set mark", "set-mark", "C-SPC", "start a region at point, C-g clears it", "edit"],
+   ["Set mark", "set-mark", "C-@", "start a region at point, C-g clears it", "edit"],
+   ["Exchange point and mark", "exchange-mark", "C-x C-x", "swap point and mark, reactivating the region", "edit"],
+   ["Undo", "undo", "C-x u", "undo the last change", "edit"],
+   ["Quit", "quit", "C-x C-c", "ask before closing", "ui"],
+   ["Incremental search", "find", "C-s", "search forward", "search"],
+   ["Search backward", "find-prev", "C-r", "previous match", "search"],
+   ["Query replace", "replace", "M-%", "replace with confirmation", "search"],
+   ["Cut region", "cut", "C-w", "kill the selection", "edit"],
+   ["Copy region", "copy", "M-w", "copy the selection", "edit"],
+   ["Yank", "paste", "C-y", "paste the last kill", "edit"],
+   ["Kill line", "kill-line", "C-k", "kill to the end of the line", "edit"],
+   ["Forward char", "move-right", "C-f", "move one character right", "cursor"],
+   ["Backward char", "move-left", "C-b", "move one character left", "cursor"],
+   ["Next line", "move-down", "C-n", "move one line down", "cursor"],
+   ["Previous line", "move-up", "C-p", "move one line up", "cursor"],
+   ["Forward word", "move-right-fast", "M-f", "move one word right", "cursor"],
+   ["Backward word", "move-left-fast", "M-b", "move one word left", "cursor"],
+   ["Line start", "line-start", "C-a", "move to the start of the line", "cursor"],
+   ["Line end", "line-end", "C-e", "move to the end of the line", "cursor"],
+   ["Buffer start", "buffer-start", "M-<", "move to the start of the buffer", "cursor"],
+   ["Buffer end", "buffer-end", "M->", "move to the end of the buffer", "cursor"],
+   ["Scroll down", "page-down", "C-v", "next screen", "cursor"],
+   ["Scroll up", "page-up", "M-v", "previous screen", "cursor"],
+   ["Undo", "undo", "C-/", "undo the last change", "edit"],
+   ["Undo", "undo", "C-_", "undo the last change", "edit"],
+   ["Redo", "redo", "C-M-_", "redo the last undone change", "edit"],
+   ["Execute command", "palette", "M-x", "run any command by name", "ui"],
+   ["Keyboard quit", "cancel", "C-g", "cancel the pending chord or prompt", "ui"],
+   ["Describe key", "describe-key", "C-h k", "show what the next chord runs", "help"],
+   ["Describe bindings", "describe-bindings", "C-h b", "list and search every binding", "help"],
+   ["Describe command", "describe-bindings", "C-h x", "search commands by name", "help"],
+   ["Describe function", "describe-bindings", "C-h f", "search commands by name", "help"],
+   ["Which key", "describe-prefix", "C-h C-h", "show the help prefix bindings", "help"],
+]
+
+;; Help and keymap switching exist in every profile.
+def _COMMON_COMMANDS = [
+   ["Describe key", "describe-key", "C-SPC h k", "show what the next chord runs", "help"],
+   ["Describe bindings", "describe-bindings", "C-SPC h b", "list and search every binding", "help"],
+   ["Toggle Emacs keymap", "toggle-keymap", "C-SPC t e", "switch between the default and Emacs keymaps", "toggle"],
+]
+
+;; Default chords that conflict with Emacs meanings and are not kept in the
+;; Emacs profile (C-x/C-h are prefixes there; C-y is yank, C-v scrolls, ...).
+def _EMACS_DROP = ["C-x", "C-h", "C-y", "C-v", "C-a", "C-b", "C-f", "C-s", "C-r", "C-l", "C-t", "C-i", "C-j", "C-z", "C-Shift-z", "C-c"]
+
+;; Profile state lives in one dict: module-level `mut` scalars and lists
+;; written from these functions read back stale from importing modules.
+mut _KM = {"name": "", "built": "", "rows": []}
+
+;; User rebinding: [chord, id] pairs applied on top of the active profile.
+;; An empty id unbinds the chord.
+mut _USER_BINDS = []
+mut _USER_LOADED = false
+
+fn keymap_names() list { ["default", "emacs"] }
+
+fn keymap() str {
+   "Returns the active keymap profile: default or emacs(NY_EDITOR_KEYMAP picks the initial one)."
+   if to_str(_KM.get("name", "")) == "" {
+      def e = env("NY_EDITOR_KEYMAP")
+      _KM = _KM.set("name", (e && to_str(e) == "emacs") ? "emacs" : "default")
+   }
+   to_str(_KM.get("name", "default"))
+}
+
+fn set_keymap(str name) bool {
+   "Selects a keymap profile; returns false for an unknown name."
+   if name != "default" && name != "emacs" { return false }
+   _KM = _KM.set("name", name)
+   _KM = _KM.set("built", "")
+   true
+}
+
+fn _chord_dropped(str chord) bool {
+   ;; A dropped chord, or a sequence that starts with an Emacs prefix.
+   mut i = 0
+   while i < _EMACS_DROP.len {
+      def d = to_str(_EMACS_DROP.get(i))
+      if chord == d || str.startswith(chord, d + " ") { return true }
+      i += 1
+   }
+   mut j = 0
+   while j < _EMACS_COMMANDS.len {
+      if row_key(_EMACS_COMMANDS.get(j)) == chord { return true }
+      j += 1
+   }
+   false
+}
+
+fn _user_chord(str chord) bool {
+   mut i = 0
+   while i < _USER_BINDS.len {
+      if to_str(_USER_BINDS.get(i).get(0, "")) == chord { return true }
+      i += 1
+   }
+   false
+}
+
+fn _template_row(str id) list {
+   ;; A user binding reuses the name/description/tag of the command it names.
+   mut i = 0
+   while i < _COMMANDS.len {
+      def row = _COMMANDS.get(i)
+      if row_id(row) == id { return row }
+      i += 1
+   }
+   mut j = 0
+   while j < _EMACS_COMMANDS.len {
+      def row = _EMACS_COMMANDS.get(j)
+      if row_id(row) == id { return row }
+      j += 1
+   }
+   mut c = 0
+   while c < _COMMON_COMMANDS.len {
+      def row = _COMMON_COMMANDS.get(c)
+      if row_id(row) == id { return row }
+      c += 1
+   }
+   []
+}
+
+fn parse_bindings(str text) list {
+   "Parses `chord = command-id` lines(# starts a comment; `chord =` unbinds). Returns [chord, id] pairs; malformed lines are skipped."
+   mut out = []
+   def lines = str.split(text, "\n")
+   mut i = 0
+   while i < lines.len {
+      mut line = str.strip(to_str(lines.get(i)))
+      i += 1
+      if line.len == 0 || str.startswith(line, "#") { continue }
+      def eq = str.find(line, "=")
+      if eq <= 0 { continue }
+      def chord = str.strip(str.str_slice(line, 0, eq))
+      def id = str.strip(str.str_slice(line, eq + 1, line.len))
+      if chord.len == 0 { continue }
+      out = out.append([chord, id])
+   }
+   out
+}
+
+fn load_bindings_file(str path) int {
+   "Loads user bindings from `path`; returns how many were applied, or -1 if the file cannot be read."
+   mut text = ""
+   mut ok = false
+   match file_read(path) {
+      ok(v) -> { text = v ok = true }
+      err(e) -> { ok = false }
+   }
+   if !ok { return -1 }
+   def pairs = parse_bindings(text)
+   mut n = 0
+   mut i = 0
+   while i < pairs.len {
+      def pr = pairs.get(i)
+      def id = to_str(pr.get(1, ""))
+      if id.len == 0 || _template_row(id).len > 0 {
+         rebind(to_str(pr.get(0, "")), id)
+         n += 1
+      }
+      i += 1
+   }
+   n
+}
+
+fn _ensure_user_bindings() {
+   if _USER_LOADED { return }
+   _USER_LOADED = true
+   def path = env("NY_EDITOR_KEYS")
+   if path && to_str(path).len > 0 { load_bindings_file(to_str(path)) }
+}
+
+fn rebind(str chord, str id) bool {
+   "Binds `chord` to command `id` on top of the active keymap(empty `id` unbinds). Returns false for an unknown command."
+   if id.len > 0 && _template_row(id).len == 0 { return false }
+   mut next = []
+   mut i = 0
+   while i < _USER_BINDS.len {
+      def pr = _USER_BINDS.get(i)
+      if to_str(pr.get(0, "")) != chord { next = next.append(pr) }
+      i += 1
+   }
+   _USER_BINDS = next.append([chord, id])
+   _KM = _KM.set("built", "")
+   true
+}
+
+fn unbind(str chord) bool { rebind(chord, "") }
+
+fn user_bindings() list { _USER_BINDS }
+
+fn _profile_chord(str profile, str chord) str {
+   ;; Emacs keeps C-SPC for the mark; the leader moves to C-c, the prefix
+   ;; Emacs reserves for user and mode bindings.
+   if profile == "emacs" && str.startswith(chord, "C-SPC ") { return "C-c " + str.str_slice(chord, 6, chord.len) }
+   chord
+}
+
+fn _build_rows() list {
+   _ensure_user_bindings()
+   mut out = []
+   ;; User bindings first, so they win over the profile's rows.
+   mut u = 0
+   while u < _USER_BINDS.len {
+      def pr = _USER_BINDS.get(u)
+      def id = to_str(pr.get(1, ""))
+      if id.len > 0 {
+         def t = _template_row(id)
+         out = out.append([to_str(t.get(0, id)), id, to_str(pr.get(0, "")), to_str(t.get(3, "")), to_str(t.get(4, "user"))])
+      }
+      u += 1
+   }
+   def k = keymap()
+   if k == "emacs" {
+      mut i = 0
+      while i < _EMACS_COMMANDS.len {
+         def row = _EMACS_COMMANDS.get(i)
+         if !_user_chord(row_key(row)) { out = out.append(row) }
+         i += 1
+      }
+   }
+   mut j = 0
+   while j < _COMMANDS.len {
+      def row = _COMMANDS.get(j)
+      def chord = row_key(row)
+      if k == "emacs" && str.startswith(chord, "C-SPC ") {
+         def moved = _profile_chord(k, chord)
+         if !_user_chord(moved) { out = out.append([row.get(0, ""), row.get(1, ""), moved, row.get(3, ""), row.get(4, "")]) }
+      } elif (k != "emacs" || !_chord_dropped(chord)) && !_user_chord(chord) {
+         out = out.append(row)
+      }
+      j += 1
+   }
+   mut c = 0
+   while c < _COMMON_COMMANDS.len {
+      def row = _COMMON_COMMANDS.get(c)
+      def chord = _profile_chord(k, row_key(row))
+      if !_user_chord(chord) { out = out.append([row.get(0, ""), row.get(1, ""), chord, row.get(3, ""), row.get(4, "")]) }
+      c += 1
+   }
+   out
+}
+
 ;; Returns the result of the `commands` operation.
-fn commands() list { _COMMANDS }
+fn commands() list { all_commands() }
 
 ;; Returns the result of the `all_commands` operation.
-fn all_commands() list { _COMMANDS }
+fn all_commands() list {
+   def k = keymap()
+   if to_str(_KM.get("built", "")) != k {
+      _KM = _KM.set("rows", _build_rows())
+      _KM = _KM.set("built", k)
+   }
+   _KM.get("rows", [])
+}
+
+fn bindings_for(str id) list {
+   "Returns every chord bound to command `id` in the active keymap."
+   mut out = []
+   def rows = all_commands()
+   mut i = 0
+   while i < rows.len {
+      def row = rows.get(i)
+      if row_id(row) == id { out = out.append(row_key(row)) }
+      i += 1
+   }
+   out
+}
+
+fn describe_chord(str chord) str {
+   "Returns a help line for `chord`: the command it runs and its description."
+   def rows = all_commands()
+   mut i = 0
+   while i < rows.len {
+      def row = rows.get(i)
+      if row_key(row) == chord {
+         return chord + " runs " + row_id(row) + " (" + to_str(row.get(0, "")) + "): " + to_str(row.get(3, ""))
+      }
+      i += 1
+   }
+   chord + " is not bound"
+}
 
 fn row_id(any row) str { to_str(row.get(1, "")) }
 
@@ -210,9 +511,10 @@ fn toggle(dict cfg, str tag) dict {
 ;; Returns the result of the `enabled` operation.
 fn enabled(dict cfg=config()) list {
    mut out = []
+   def rows = all_commands()
    mut i = 0
-   while i < _COMMANDS.len {
-      def row = _COMMANDS.get(i)
+   while i < rows.len {
+      def row = rows.get(i)
       if is_enabled(cfg, row) { out = out.append(row) }
       i += 1
    }
@@ -283,6 +585,7 @@ fn _group_label(str head) str {
    if head == "w" { return "windows and panes" }
    if head == "m" { return "movement" }
    if head == "l" { return "language server" }
+   if head == "h" { return "help" }
    head
 }
 
@@ -315,4 +618,10 @@ fn which_key(str prefix) list {
    mut cfg = config()
    cfg = set_enabled(cfg, "lsp", false)
    assert(which_key("C-SPC").len > 0 && with_tag("lsp", cfg).len == 0 && toggles().len > 0, "editor which-key")
+   assert(set_keymap("emacs") && keymap() == "emacs", "emacs keymap selects")
+   assert(id_for_chord("C-x C-s") == "save" && id_for_chord("C-y") == "paste" && id_for_chord("C-h k") == "describe-key", "emacs bindings")
+   assert(id_for_chord("C-x") == "" && which_key("C-x").len >= 10 && which_key("C-h").len >= 4, "C-x and C-h are prefixes with which-key help")
+   assert(describe_chord("C-x C-f").contains("open-file") && describe_chord("C-q").contains("not bound"), "describe-key text")
+   assert(set_keymap("default") && id_for_chord("C-x") == "cut" && id_for_chord("C-y") == "redo", "default keymap restored")
+   assert(!set_keymap("vim"), "unknown keymap rejected")
 }

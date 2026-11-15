@@ -1,0 +1,77 @@
+shape vector_load_folded_address {
+  family "codegen/x86-64/vector"
+  generator "regression"
+  features ["x86-64", "nyc", "vectorize", "sib"]
+  template ny-test-case
+  flags "--native-only --native-backend=x86_64"
+  timeout 120
+  expect compile_and_run
+  source ny <<'NY'
+use core.os (env, file_remove, file_write, pid, run_capture, temp_dir)
+
+;; A folded-SIB vector load read an unwritten spill slot at -O3 (bce-matrix bench crash).
+mut nyc = env("NYTRIX_NYC")
+if !is_str(nyc) || nyc.len == 0 { nyc = "build/release/nyc" }
+def dir = temp_dir() + "/ny-vector-load-folded-address-" + to_str(pid())
+def source = dir + ".c"
+def c_source =
+   "#include <stdint.h>\n" +
+   "#include <stdio.h>\n" +
+   "#include <stdlib.h>\n" +
+   "#include <time.h>\n" +
+   "\n" +
+   "static int64_t now_ns(void) {\n" +
+   "    struct timespec ts;\n" +
+   "    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0;\n" +
+   "    return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;\n" +
+   "}\n" +
+   "\n" +
+   "int main(void) {\n" +
+   "    int M = 100;\n" +
+   "    int passes = 2048;\n" +
+   "    long *a = (long *)malloc((size_t)M * M * sizeof(long));\n" +
+   "    if (!a) return 2;\n" +
+   "    for (int i = 0; i < M * M; i++) a[i] = i;\n" +
+   "    int64_t start = now_ns();\n" +
+   "    long acc = 0;\n" +
+   "    long state = 0;\n" +
+   "    for (int pass = 0; pass < passes; pass++) {\n" +
+   "        state += pass + 1;\n" +
+   "        for (int i = 0; i < M * M; i++)\n" +
+   "            acc += a[i] + state;\n" +
+   "    }\n" +
+   "    int64_t end = now_ns();\n" +
+   "    printf(\"checksum=%ld\\n\", acc);\n" +
+   "    if (end <= start) end = start + 1;\n" +
+   "    \n" +
+   "    return 0;\n" +
+   "}\n"
+assert(is_ok(file_write(source, c_source)), "write C program")
+mut reference = ""
+def ref_exe = dir + "-ref"
+def ref_build = run_capture(["clang", "-O1", source, "-o", ref_exe], [], nil, false)
+assert(ref_build.get("code", 127) == 0, "clang builds the reference: " + ref_build.get("stderr", ""))
+def ref_run = run_capture([ref_exe], [], nil, false)
+reference = ref_run.get("stdout", "")
+mut level_index = 0
+def levels = ["-O0", "-O1", "-O3"]
+while level_index < levels.len {
+   def level = levels[level_index]
+   def object = dir + level + ".o"
+   def exe = dir + level + "-run"
+   def compiled = run_capture([nyc, level, "-c", source, "-o", object], [], nil, false)
+   assert(compiled.get("code", 127) == 0, "NYC " + level + " compiles: " + compiled.get("stderr", ""))
+   def linked = run_capture(["clang", "-no-pie", object, "-o", exe], [], nil, false)
+   assert(linked.get("code", 127) == 0, "link " + level + ": " + linked.get("stderr", ""))
+   def ran = run_capture([exe], [], nil, false)
+   assert(ran.get("code", 127) == 0, "NYC " + level + " binary ran (crashed?): " + ran.get("stderr", ""))
+   assert(ran.get("stdout", "") == reference, "NYC " + level + " output matches clang: " + ran.get("stdout", "") + " vs " + reference)
+   file_remove(object)
+   file_remove(exe)
+   level_index += 1
+}
+file_remove(source)
+file_remove(ref_exe)
+assert(reference.len > 0, "reference program produced output")
+NY
+}

@@ -10,6 +10,7 @@ use core.os.fixture (ready, start_ui, tick_ui, quit_key, next_ui_key, exit_statu
 use core.math
 use core.os.sound as snd
 use core.os.sound.source.synth as synth
+use core.os.sound.midi as midi
 use core.os.ui.window.consts (WINDOW_CENTER, WINDOW_FOCUS_ON_SHOW, KEY_A, KEY_W, KEY_S, KEY_E, KEY_D, KEY_F, KEY_T, KEY_G, KEY_Y, KEY_H, KEY_U, KEY_J, KEY_K, KEY_O, KEY_L, KEY_P, KEY_SEMICOLON, KEY_Z, KEY_X, KEY_SPACE, KEY_1, KEY_2, KEY_3, KEY_4, KEY_5, KEY_6, KEY_7, KEY_ESCAPE)
 use core.os.ui.render as gfx
 use core.os.ui.render.viewer as viewer
@@ -254,6 +255,111 @@ fn play_note(int midi) any {
    h
 }
 
+;; MIDI keyboard input through core.os.sound.midi (ALSA, WinMM, CoreMIDI). Every
+;; readable hardware/software source is connected at start; other programs
+;; can also connect to the "Nytrix Synth" virtual input. NY_SYNTH_MIDI=0 disables.
+mut any MIDI_STREAMS = []
+mut MIDI_SOURCES = 0
+mut midi_voices = dict(64)
+mut midi_sustain = false
+mut midi_sustained = []
+
+fn midi_init() bool {
+   if common.env_trim("NY_SYNTH_MIDI") == "0" { return false }
+   ;; A virtual input other programs can connect to, plus every connected
+   ;; keyboard/controller opened directly (works on Linux, Windows, macOS).
+   def v = midi.open_virtual_input("Nytrix Synth")
+   if is_dict(v) { MIDI_STREAMS = MIDI_STREAMS.append(v) }
+   def devs = midi.list_devices()
+   mut i = 0
+   while i < devs.len {
+      def any d = devs.get(i, 0)
+      if is_dict(d) && bool(d.get("input", false)) {
+         def s = midi.open_input(d)
+         if is_dict(s) {
+            MIDI_STREAMS = MIDI_STREAMS.append(s)
+            MIDI_SOURCES += 1
+         }
+      }
+      i += 1
+   }
+   print("midi in: backend=" + midi.backend_name() + " sources=" + to_str(MIDI_SOURCES) + " virtual=" + to_str(is_dict(v)))
+   MIDI_STREAMS.len > 0
+}
+
+fn midi_key(int ch, int note) str { to_str(ch) + ":" + to_str(note) }
+
+fn midi_release(str key) {
+   def h = midi_voices.get(key, 0)
+   if h { stop_note(h) }
+   midi_voices = midi_voices.delete(key)
+   return
+}
+
+fn midi_poll() {
+   if MIDI_STREAMS.len == 0 { return }
+   mut events = []
+   mut si = 0
+   while si < MIDI_STREAMS.len {
+      def any st = MIDI_STREAMS.get(si, 0)
+      def got = midi.read_messages(st, 0, ["clock", "active_sensing"])
+      mut gi = 0
+      while gi < got.len {
+         def any ev = got.get(gi, 0)
+         if is_dict(ev) { events = events.append(ev) }
+         gi += 1
+      }
+      si += 1
+   }
+   mut i = 0
+   while i < events.len {
+      def any ev = events.get(i, {})
+      def kind = to_str(ev.get("type", ""))
+      def ch = int(ev.get("channel", 0))
+      def note = int(ev.get("note", 0))
+      def vel = int(ev.get("velocity", 0))
+      if kind == "note_on" && vel > 0 {
+         def key = midi_key(ch, note)
+         midi_release(key)
+         def h = play_note_vel(note, float(vel) / 127.0)
+         if h { midi_voices[key] = h }
+         if common.env_truthy("NY_SYNTH_MIDI_TRACE") { print("midi note_on ch=" + to_str(ch) + " note=" + to_str(note) + " vel=" + to_str(vel)) }
+         last = note_name(note, NOTE_LABELS[note % 12])
+         pulse = 1.0
+      } elif kind == "note_off" || kind == "note_on" {
+         def key = midi_key(ch, note)
+         if midi_sustain { midi_sustained = midi_sustained.append(key) } else { midi_release(key) }
+      } elif kind == "control_change" {
+         def cc = int(ev.get("controller", 0))
+         def value = int(ev.get("value", 0))
+         if cc == 64 {
+            midi_sustain = value >= 64
+            if !midi_sustain {
+               mut k = 0
+               while k < midi_sustained.len {
+                  midi_release(to_str(midi_sustained[k]))
+                  k += 1
+               }
+               midi_sustained = []
+            }
+         } elif cc == 120 || cc == 123 {
+            panic_notes()
+         }
+      }
+      i += 1
+   }
+   return
+}
+
+fn play_note_vel(int note, f64 velocity) any {
+   if !AUDIO_OK || !SRC_PAD { return 0 }
+   def ratio = midi_freq(note) / BASE
+   def v = max_f64(0.05, min_f64(1.0, velocity))
+   def h = snd.play(SRC_PAD, ratio, 0.68 * v, true, 0.0)
+   if SRC_HIT { snd.play(SRC_HIT, ratio, 0.10 * v, false, 0.0) }
+   h
+}
+
 fn stop_note(any h) {
    if h { snd.stop(h) }
    return
@@ -285,6 +391,8 @@ fn init_state() {
 
 fn panic_notes() {
    snd.stop_all()
+   midi_voices = dict(64)
+   midi_sustained = []
    mut i = 0
    while i < inst.len { inst[i] = 0 held[i] = false i += 1 }
    mouse_note = -1
@@ -379,7 +487,7 @@ fn draw_header(f64 sw) {
    def fx_clicked = button("fx_toggle", p_fx ? "FX ON" : "FX OFF", x, 54.0, 86.0, 32.0, p_fx)
    if fx_clicked { p_fx = !p_fx apply_fx() }
    text(font_small, status, x + 104.0, 62.0, c)
-   text(font_small, "oct " + to_str(OCT) + "  on " + to_str(active_count()) + "  last " + last, x + 104.0, 96.0, WHITE)
+   text(font_small, "oct " + to_str(OCT) + "  on " + to_str(active_count()) + "  last " + last + (MIDI_STREAMS.len > 0 ? "  midi " + to_str(MIDI_SOURCES) : ""), x + 104.0, 96.0, WHITE)
    if pulse > 0.0 { gfx.draw_circle(sw - 54.0, 87.0, 16.0 + pulse * 32.0, [0.45, 0.22, 1.0, pulse * 0.28], 64) }
    gfx.draw_circle(sw - 54.0, 87.0, 16.0, active_count() > 0 ? GREEN : LINE, 48)
    return
@@ -551,6 +659,8 @@ AUDIO_OK = gfx.get_backend_type() == int(gfx.BACKEND_MOCK) ? false : snd.init(tr
 if AUDIO_OK { build_sources() }
 init_state()
 set_preset("wide")
+;; Replays and audio-less runs stay deterministic unless MIDI is requested.
+if common.env_trim("NY_SYNTH_MIDI") == "1" || (AUDIO_OK && !common.env_truthy("NYTRIX_UI_REPLAY")) { midi_init() }
 
 print("audio backend=" + snd.get_backend_name() + " ok=" + to_str(AUDIO_OK))
 
@@ -572,6 +682,7 @@ while !gfx.window_should_close(win) && tick_ui(fx) {
    def dt = gfx.get_delta_time()
    if pulse > 0.0 { pulse = max_f64(0.0, pulse - dt * 2.8) }
    update_keys(win)
+   midi_poll()
    draw_ui(ui_w, ui_h)
    if fx_dirty { apply_fx() fx_dirty = false }
    finish_pointer()
@@ -579,6 +690,8 @@ while !gfx.window_should_close(win) && tick_ui(fx) {
 }
 
 panic_notes()
+mut msi = 0
+while msi < MIDI_STREAMS.len { midi.close_stream(MIDI_STREAMS.get(msi, 0)) msi += 1 }
 snd.shutdown()
 gfx.close_window()
 exit(exit_status(fx))

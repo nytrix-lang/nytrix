@@ -3,7 +3,7 @@
 ;; References:
 ;; - core.os.ui.assets.viewer
 ;; - core.os.ui.render.scene
-module core.os.ui.render.viewer.engine.env(load_skybox, build_generated_textures)
+module core.os.ui.render.viewer.engine.env(load_skybox, build_generated_textures, prefetch_skybox_image)
 use core
 use core.str as str
 use core.os.fs as osfs
@@ -109,6 +109,36 @@ fn _reset_skybox_resources() {
    true
 }
 
+;; A decoded EXR sky prepared off the main thread. Written only by the scene
+;; load worker, read on the main thread after that worker is joined.
+mut any _sky_prefetch_path = ""
+mut any _sky_prefetch_img = nil
+
+fn prefetch_skybox_image(any source="") bool {
+   "Decodes the default (or `source`) EXR sky for a later upload; safe on a worker thread."
+   if skybox_tex_id >= 0 || is_dict(_sky_prefetch_img) { return true }
+   def source_arg = ui_assets.skybox_source_arg(source)
+   if ui_assets.skybox_source_is_off(source_arg) || ui_assets.skybox_source_is_generated(source_arg) { return false }
+   def path = ui_assets.skybox_resolve_source_path(source_arg)
+   if !str.endswith(str.lower(path), ".exr") || !osfs.is_file(path) { return false }
+   def im = exr.load_path(path)
+   if !is_dict(im) { return false }
+   _sky_prefetch_img = im
+   _sky_prefetch_path = path
+   true
+}
+
+fn _take_prefetched_skybox_image(str path) any {
+   if !is_dict(_sky_prefetch_img) { return nil }
+   def im = _sky_prefetch_img
+   def same = to_str(_sky_prefetch_path) == path
+   _sky_prefetch_img = nil
+   _sky_prefetch_path = ""
+   if same { return im }
+   img.free(im)
+   nil
+}
+
 fn _load_skybox_source_tex(path, verbose) {
    if !osfs.is_file(path) {
       skybox_tex_id = -1
@@ -120,7 +150,8 @@ fn _load_skybox_source_tex(path, verbose) {
       return -2
    }
    if str.endswith(str.lower(path), ".exr") {
-      def exr_im = exr.load_path(path)
+      mut exr_im = _take_prefetched_skybox_image(to_str(path))
+      if !is_dict(exr_im) { exr_im = exr.load_path(path) }
       if exr_im && is_dict(exr_im) {
          return texture_upload_image_ex(exr_im, path, 37, false, false, 1, 10497, 33071, "", true)
       }
@@ -216,14 +247,6 @@ fn _build_neutral_env(env_w, env_h) {
    false
 }
 
-fn _build_skybox_generated_envs(env_w, env_h) {
-   _build_skybox_studio_env(env_w, env_h)
-   _build_compare_reflect_env(env_w, env_h)
-   _build_compare_visible_env(env_w, env_h)
-   _build_neutral_env(env_w, env_h)
-   true
-}
-
 fn build_generated_textures(studio=true, compare_visible=true, neutral=true, compare_reflect=false) bool {
    "Builds missing generated environment textures requested by the viewer world planner."
    def env_w = ui_profile.generated_env_width(false, false)
@@ -257,16 +280,15 @@ fn load_skybox(visible=true, source="") {
    }
    def path = ui_assets.skybox_resolve_source_path(source_arg)
    _reset_skybox_resources()
-   def env_size = ui_assets.skybox_env_size(false)
-   def env_w = env_size.get(0, 1024)
-   def env_h = env_size.get(1, 512)
    def tex = _load_skybox_source_tex(path, verbose)
    if tex == -2 {
       return false
    }
    if tex >= 0 {
       _install_skybox_tex(tex, visible)
-      _build_skybox_generated_envs(env_w, env_h)
+      ;; Studio/neutral/compare environments are built on demand by the
+      ;; engine's per-frame generated-env plan when a scene prefers one.
+      ;; Building all of them here cost ~10 s on the first frame with a sky.
       if verbose {
          terminal.log("skybox loaded: tex=" + to_str(tex))
       }

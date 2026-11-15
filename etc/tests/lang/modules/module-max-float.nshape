@@ -1,0 +1,19 @@
+shape module_max_float {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "codegen"]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect compile_and_run
+  expect_message "MODULE_MAX_FLOAT_OK"
+  source ny <<'NY'
+use core
+module mx(
+   f,
+){
+   fn f(any x) f64 { max(1.0, float(x)) }
+}
+assert(mx.f(5) == 5.0 && mx.f(0) == 1.0, "max inside a module")
+print("MODULE_MAX_FLOAT_OK")
+NY
+}

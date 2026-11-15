@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
+  <title>Packed Float32 Array</title>
+  <desc>Packed Float32 Array icon.</desc>
+  <g transform="translate(2.0000 4.5000) scale(1.25000)">
+<path fill="#c6c6ca" d="M0 0v12h4v-2H2V2h2V0zm12 0v2h2v8h-2v2h4V0z"/><path fill="#c6c6ca" d="M6 2a3 3 0 0 0-3 3v5h2V8h1V6H5V5a1 1 0 0 1 1-1zm1 0v5a3 3 0 0 0 3 3V8a1 1 0 0 1-1-1V2zm3 0v5a3 3 0 0 0 3 3V8a1 1 0 0 1-1-1V6h1V4h-1V2z"/><path fill="#c6c6ca" fill-opacity=".4" d="M7 2v5a3 3 0 0 0 3 3V8a1 1 0 0 1-1-1V2z"/>
+  </g>
+</svg>

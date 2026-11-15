@@ -1,0 +1,28 @@
+shape test_untyped_ptr_def_single_evaluation {
+  family "runtime/execution"
+  generator "regression"
+  features ["ny", "test"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.mem
+
+;; An untyped root `def p = zalloc(8)` was re-evaluated at every use, so each
+;; function saw its own fresh zeroed buffer and stores never met loads.
+def p = zalloc(16)
+store8(p, 83, 0)
+store8(p, 84, 1)
+fn first() int { load8(p, 0) }
+fn second() int { load8(p, 1) }
+fn poke() int {
+   store8(p, 99, 2)
+   0
+}
+assert(first() == 83 && second() == 84, "values stored at top level are visible in functions")
+poke()
+assert(load8(p, 2) == 99, "a store inside a function is visible at top level")
+assert(first() == 83, "the buffer was not replaced")
+NY
+}

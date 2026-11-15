@@ -1,0 +1,53 @@
+shape checked_stack_and_foreign_byte_bounds {
+  family "runtime/memory"
+  generator "regression"
+  features ["memory-safety", "bounds", "runtime-index", "ffi", "stack"]
+  template ny-test-case
+  flags "--native-only"
+  timeout 480
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os (env, file_remove, file_write, pid, run_capture, temp_dir)
+def ny = env("NYTRIX_NY_FULL_BIN")
+assert(is_str(ny) && ny.len > 0, "full compiler is available")
+def stem = temp_dir() + "/ny-foreign-byte-bounds-" + to_str(pid())
+
+def stack_source = "use core\nfn fetch(int length, int raw_index) int requires length == 8 {\n   mut int cell = (73 << 56) | 73\n   def p = addr_of(cell)\n   defer { print(\"bounds-cleanup\") }\n   def index Fin<length> = checked_fin(raw_index, length)\n   load8(p, index)\n}\n"
+def foreign_source = "use core\nextern \"c\" {\n   fn foreign_alloc(int count, int width) ptr as \"calloc\"\n   fn foreign_free(ptr address) as \"free\"\n   fn foreign_compare(ptr left, cstr right, int count) i32 as \"memcmp\"\n}\nfn fetch(int length, int raw_index) int {\n   def p = foreign_alloc(length, 1)\n   assert(p != 0, \"foreign allocation succeeds\")\n   defer { foreign_free(p)\nprint(\"bounds-cleanup\") }\n   def index Fin<length> = checked_fin(raw_index, length)\n   store8(p, 73, index)\n   assert(foreign_compare(p + index, \"I\", 1) == 0, \"foreign observer sees the checked byte write\")\n   load8(p, index)\n}\n"
+
+def bounded_stack_source = "use core\nfn fetch(int length, int raw_index) int {\n   mut int cell = (73 << 56) | 73\n   def p = addr_of(cell)\n   defer { print(\"bounds-cleanup\") }\n   load8(p, raw_index, length)\n}\n"
+def bounded_foreign_source = "use core\nextern \"c\" {\n   fn foreign_alloc(int count, int width) ptr as \"calloc\"\n   fn foreign_free(ptr address) as \"free\"\n   fn foreign_compare(ptr left, cstr right, int count) i32 as \"memcmp\"\n}\nfn fetch(int length, int raw_index) int {\n   def p = foreign_alloc(8, 1)\n   assert(p != 0, \"foreign allocation succeeds\")\n   defer { foreign_free(p)\nprint(\"bounds-cleanup\") }\n   store8(p, 73, raw_index, length)\n   assert(foreign_compare(p + raw_index, \"I\", 1) == 0, \"C observes bounded store\")\n   load8(p, raw_index, length)\n}\n"
+
+fn check(str name, str source, str profile, list route, int index, bool valid, str diagnostic="checked_fin value out of range", int extent=8) int {
+   def path = stem + "-" + name + ".ny"
+   assert(is_ok(file_write(path, source + "print(fetch(" + to_str(extent) + ", " + to_str(index) + "))\n0\n")), "write checked byte probe")
+   defer { file_remove(path) }
+   mut args = [ny, profile]
+   for flag in route { args = args.append(flag) }
+   args = args.append(path)
+   def out = run_capture(args, [], nil, false)
+   def text = to_str(out.get("stdout", "")) + to_str(out.get("stderr", ""))
+   assert(out.get("code", 127) == (valid ? 0 : 1), name + " " + to_str(route) + " index=" + to_str(index) + " code=" + to_str(out.get("code", 127)) + " checked byte result: " + text)
+   assert(text.contains("bounds-cleanup") && !text.contains("Nytrix safe-heap: leak:"), name + " cleans up a checked range exit: " + text)
+   if valid {
+      assert(text.contains("73"), name + " preserves the boundary byte: " + text)
+   } else {
+      assert(text.contains(diagnostic), name + " rejects the dynamic index before raw access: " + text)
+   }
+   0
+}
+
+for route in [["--native-only"], ["--native-backend=llvm", "--jit", "--jit-engine=mcjit"], ["--native-backend=llvm", "--jit", "--jit-engine=orc"]] {
+   for index in [-1, 0, 7, 8] {
+      check("stack", stack_source, "--mode=safe", route, index, index == 0 || index == 7)
+      check("foreign", foreign_source, "--heap=safe", route, index, index == 0 || index == 7)
+      check("bounded-stack", bounded_stack_source, "--mode=safe", route, index, index == 0 || index == 7, "byte access out of range")
+      check("bounded-foreign", bounded_foreign_source, "--heap=safe", route, index, index == 0 || index == 7, "byte access out of range")
+   }
+   check("empty-foreign", bounded_foreign_source, "--heap=safe", route, 0, false, "byte access out of range", 0)
+   check("negative-foreign", bounded_foreign_source, "--heap=safe", route, 0, false, "byte access out of range", -2)
+}
+0
+NY
+}

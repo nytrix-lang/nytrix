@@ -298,6 +298,7 @@ fn get_backend_name(any ctx) str {
    assert(is_dict(stream) && stream.get("format", 0) == FORMAT_S16LE, "sound backend io stream")
    assert(!outstream_open(stream, FORMAT_S16LE, 44100, 2, nil) && !outstream_start(stream), "sound backend io unopened stream")
    def buf = malloc(32)
+   if !buf { panic("sound backend io self-test allocation failed") }
    memset(buf, 0, 32)
    assert(!outstream_write(stream, buf, 32) && !outstream_write_frames(stream, buf, 8), "sound backend io write without backend")
    outstream_destroy(stream)

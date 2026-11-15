@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
+  <title id="title1">Curve Out</title>
+  <desc id="desc1">Curve Out editor icon. Original asset id: curveout.</desc>
+  <defs id="defs1" />
+  <g transform="translate(2.0000 2.0000) scale(1.66667)" id="g1">
+    <path d="M 10,1 C 7.3,1 5.0072435,1.828694 3.4179688,3.4179688 1.828694,5.0072435 1,7.3 1,10 a 1,1 0 0 0 1,1 1,1 0 0 0 1,-1 C 3,7.7 3.671306,5.9927565 4.8320312,4.8320312 5.9927565,3.671306 7.7,3 10,3 A 1,1 0 0 0 11,2 1,1 0 0 0 10,1 Z" id="path1" fill="#c6c6ca" />
+  </g>
+</svg>

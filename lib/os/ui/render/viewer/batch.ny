@@ -355,11 +355,14 @@ fn static_checker(list cache, f64 world_left, f64 world_top, f64 sw, f64 sh, f64
       } else {
          mode = 2
          if need > cap {
-            if buf { free(buf) }
-            buf = malloc(need * RECT_STRIDE)
-            cap = need
+            def next_buf = malloc(need * RECT_STRIDE)
+            if next_buf {
+               if buf { free(buf) }
+               buf = next_buf
+               cap = need
+            }
          }
-         count = buf ? _static_checker_dynamic(buf, cap, start_col, start_row, end_col, end_row, cell, color_a) : 0
+         count = buf && cap >= need ? _static_checker_dynamic(buf, cap, start_col, start_row, end_col, end_row, cell, color_a) : 0
       }
    }
    gfx.set_ortho_2d(world_left, world_left + sw, world_top, world_top + sh)

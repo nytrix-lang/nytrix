@@ -559,7 +559,13 @@ fn get_gamepad_state(any js, any state_ptr) bool {
    def buttons = malloc(15)
    def hats = malloc(1)
    def state = malloc(64)
-   assert(axes && buttons && hats && state, "gamepad state buffers allocate")
+   if !axes || !buttons || !hats || !state {
+      if axes { free(axes) }
+      if buttons { free(buttons) }
+      if hats { free(hats) }
+      if state { free(state) }
+      panic("gamepad state buffers allocate")
+   }
    memset(axes, 0, 6 * 4)
    memset(buttons, 0, 15)
    memset(hats, 0, 1)

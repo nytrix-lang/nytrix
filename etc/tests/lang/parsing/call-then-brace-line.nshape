@@ -1,0 +1,19 @@
+shape call_then_brace_line {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "codegen"]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect compile_and_run
+  expect_message "CALL_THEN_BRACE_LINE_OK"
+  source ny <<'NY'
+use core
+fn g() dict {
+   def x = 1
+   print("side")
+   {"a": x}
+}
+assert(is_dict(g()) && g().get("a", 0) == 1, "a call statement does not swallow a dict on the next line")
+print("CALL_THEN_BRACE_LINE_OK")
+NY
+}

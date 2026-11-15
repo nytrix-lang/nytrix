@@ -104,7 +104,7 @@ fn _term_shutdown() any {
    "Closes the child terminal and renderer/window resources once."
    if _term_shutdown_done { return 0 }
    _term_shutdown_done = true
-   if vt { vterm.close(vt) }
+   if vt { vterm.dispose(vt) }
    close_window()
    if is_dict(win) { window.close(win) }
    0

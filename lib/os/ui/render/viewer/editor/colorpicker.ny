@@ -3,7 +3,7 @@
 ;; References:
 ;; - core.os.ui.render.viewer.gui
 module core.os.ui.render.viewer.editor.colorpicker(
-   state, open, close, is_open,
+   state, open, dismiss, is_open,
    hex, line, start, end, rgb, rgb_label,
    normalize, scan_hex_literal, at_cursor, swatches_visible,
    rgba, rgba_hex, same_rgba, changed, edit4, picker4
@@ -27,7 +27,12 @@ fn open(dict st, dict hit) dict {
 }
 
 ;; Closes resources owned by the state and returns the closed state.
-fn close(dict st) dict { st["open"] = false st }
+;; Named `dismiss`, not `close`: `<alias>.close(state)` resolves to the OS
+;; file-descriptor close and hands the caller an error code instead of the state.
+fn dismiss(any st) any {
+   st["open"] = false
+   return st
+}
 
 fn is_open(dict st) bool { bool(st.get("open", false)) }
 

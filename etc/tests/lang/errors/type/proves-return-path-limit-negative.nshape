@@ -1,0 +1,36 @@
+shape type_proves_return_path_limit_fails_closed {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "proof", "postcondition", "return-paths", "soundness"]
+  template ny-compile-fail
+  flags_matrix "--native-only; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_fail
+
+  expect_message "@proves cannot validate every return path"
+  source ny <<'NY'
+use core
+
+@proves(result > 0)
+fn many_returns(int choice) int {
+  if choice == 0 { return 1 }
+  if choice == 1 { return 1 }
+  if choice == 2 { return 1 }
+  if choice == 3 { return 1 }
+  if choice == 4 { return 1 }
+  if choice == 5 { return 1 }
+  if choice == 6 { return 1 }
+  if choice == 7 { return 1 }
+  if choice == 8 { return 1 }
+  if choice == 9 { return 1 }
+  if choice == 10 { return 1 }
+  if choice == 11 { return 1 }
+  if choice == 12 { return 1 }
+  if choice == 13 { return 1 }
+  if choice == 14 { return 1 }
+  if choice == 15 { return 1 }
+  if choice == 16 { return 1 }
+  1
+}
+many_returns(16)
+NY
+}

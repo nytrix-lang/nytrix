@@ -6,6 +6,7 @@
 ;; - core.os.ui.window.consts
 module core.os.ui.window.platform.opengl(get_proc_address, create_context, create_offscreen_context, destroy_offscreen_context, make_context_current, release_context_current, get_current_context, create_osmesa_context, destroy_osmesa_context, swap_buffers, swap_interval, resize_wayland_window)
 use core
+use core.math.checked (checked_mul)
 use core.common as common
 use core.os.ui.window.platform.api as api
 use core.os.ui.window.platform.state as platform_state
@@ -245,15 +246,28 @@ fn get_current_context() any {
 fn create_osmesa_context(int width=1, int height=1) any {
    "Creates an OSMesa software-rendered offscreen context. Returns 0 if OSMesa is unavailable."
    #macos {
-      def ctx = OSMesaCreateContext(0x1908, 0)
+      if width <= 0 || height <= 0 { return 0 }
+      def pixels_result = checked_mul(width, height)
+      if !is_ok(pixels_result) { return 0 }
+      def bytes_result = checked_mul(int(unwrap(pixels_result)), 4)
+      if !is_ok(bytes_result) { return 0 }
+      def bytes = int(unwrap(bytes_result))
+      mut ctx = OSMesaCreateContext(0x1908, 0)
       if !ctx { return 0 }
-      def buf = malloc(width * height * 4)
+      mut buf = malloc(bytes)
       if !buf {
          OSMesaDestroyContext(ctx)
          return 0
       }
-      memset(buf, 0, width * height * 4)
-      return {"type": "osmesa", "context": ctx, "buffer": buf, "width": width, "height": height}
+      defer {
+         if buf { free(buf) }
+         if ctx { OSMesaDestroyContext(ctx) }
+      }
+      memset(buf, 0, bytes)
+      def result = {"type": "osmesa", "context": ctx, "buffer": buf, "width": width, "height": height}
+      ctx = 0
+      buf = 0
+      return result
    } #endif
    0
 }

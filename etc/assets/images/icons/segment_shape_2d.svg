@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
+  <title id="title1">Segment Shape 2D</title>
+  <desc id="desc1">Segment Shape 2D editor icon. Original asset id: segmentshape2d.</desc>
+  <defs id="defs1" />
+  <g transform="translate(2.0000 2.0000) scale(1.25000)" id="g1">
+    <path d="M 14,1 A 1,1 0 0 0 13.292969,1.2929687 L 1.2929687,13.292969 a 1,1 0 0 0 0,1.414062 1,1 0 0 0 1.4140626,0 L 14.707031,2.7070313 a 1,1 0 0 0 0,-1.4140626 A 1,1 0 0 0 14,1 Z" id="path1" fill="#c6c6ca" />
+  </g>
+</svg>

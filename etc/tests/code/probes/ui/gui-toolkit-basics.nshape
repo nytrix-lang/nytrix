@@ -1,0 +1,254 @@
+shape gui-toolkit-basics {
+  family "probe-suite"
+  generator "regression"
+  features ["ny", "render", "gui", "toolkit"]
+  template ny-test-case
+  expect compile_and_run
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  timeout 300
+  expect_stdout "GUI-TOOLKIT-BASICS-OK"
+  source ny <<'NY'
+;; Core widgets of the immediate-mode toolkit, driven by fed events on the
+;; mock renderer: choices, sliders, combo box, text entry, tabs, headers,
+;; selectable rows, scroll areas, keyboard focus order, and window chrome.
+use core
+use core.os.ui.render as gfx
+use core.os.ui.render.viewer.gui as gui
+use core.os.ui.window.consts
+
+def W = 640.0
+def H = 760.0
+mut any R = dict(64)
+mut cb, tg = false, false
+mut radio = 0
+mut sl = 0.25
+mut si = 3
+mut combo = 0
+mut txt = "ab"
+mut tab = 0
+mut header_open = true
+mut row_sel = -1
+mut clicks = 0
+mut area_scroll = 0.0
+mut second_clicks = 0
+mut mx, my = 0.0, 0.0
+
+fn note(str k) any { R[k] = gui.last_item_rect() }
+fn rect_of(str k) list { R.get(k, [0.0, 0.0, 0.0, 0.0]) }
+
+fn ui() any {
+   if gui.begin_window("w", "Widgets", 10.0, 10.0, 400.0, 720.0, {"closable": false, "collapsible": false}) {
+      if gui.button("go", "Go", 120.0, 26.0) { clicks += 1 }
+      note("go")
+      cb = gui.checkbox("cb", "Check", cb)  note("cb")
+      tg = gui.toggle("tg", "Toggle", tg)  note("tg")
+      if gui.radio_button("r0", "Zero", radio == 0) { radio = 0 }  note("r0")
+      if gui.radio_button("r1", "One", radio == 1) { radio = 1 }  note("r1")
+      sl = gui.slider_float("sl", "Slide", sl, 0.0, 1.0, 300.0)  note("sl")
+      si = gui.slider_int("si", "Steps", si, 0, 10, 300.0)  note("si")
+      txt = gui.input_text("tx", "Name", txt, "type", 300.0)  note("tx")
+      tab = gui.tab_strip("tabs", ["One", "Two", "Three"], tab, 300.0, 26.0)  note("tabs")
+      header_open = gui.collapsing_header("hd", "Section", true)  note("hd")
+      if header_open {
+         gui.text("inside")
+         note("inside")
+      }
+      mut i = 0
+      while i < 3 {
+         if gui.selectable("row" + to_str(i), "Row " + to_str(i), row_sel == i, 300.0, 24.0) { row_sel = i }
+         R["row" + to_str(i)] = gui.last_item_rect()
+         i += 1
+      }
+      gui.set_scroll_area_content_hint("area", 600.0)
+      if gui.begin_scroll_area("area", 300.0, 100.0) {
+         area_scroll = gui.scroll_area_scroll_y()
+         i = 0
+         while i < 20 {
+            gui.text("line " + to_str(i))
+            i += 1
+         }
+      }
+      gui.end_scroll_area()
+      combo = gui.combo_box("cmb", "Pick", ["alpha", "beta", "gamma", "delta"], combo, 300.0)  note("cmb")
+      R["state_empty"] = gui.panel_state("empty", "Nothing here", "detail", 60.0)
+      R["state_error"] = gui.panel_state("error", "Failed", "", 40.0)
+   }
+   gui.end_window()
+   if gui.begin_window("w2", "Second", 430.0, 10.0, 200.0, 160.0, {}) {
+      if gui.button("b2", "Two", 100.0, 26.0) { second_clicks += 1 }
+      note("b2")
+   }
+   gui.end_window()
+}
+
+fn frame() any {
+   gui.feed_event(EVENT_MOUSE_POS_CHANGED, {"x": mx, "y": my})
+   gui.prepare_input(0, W, H)
+   gfx.begin_frame_clear([0.0, 0.0, 0.0, 1.0])
+   gfx.set_ortho_2d(0.0, W, H, 0.0)
+   gui.begin_frame(0, 0, W, H)
+   ui()
+   gui.end_frame()
+   gfx.end_frame()
+}
+fn at(str k, f64 fx=0.5, f64 fy=0.5) any {
+   def r = rect_of(k)
+   mx = float(r.get(0, 0.0)) + float(r.get(2, 0.0)) * fx
+   my = float(r.get(1, 0.0)) + float(r.get(3, 0.0)) * fy
+}
+fn down() any { gui.feed_event(EVENT_MOUSE_BUTTON_PRESSED, {"button": 0, "x": mx, "y": my}) }
+fn up() any { gui.feed_event(EVENT_MOUSE_BUTTON_RELEASED, {"button": 0, "x": mx, "y": my}) }
+fn click() any { frame() down() frame() up() frame() }
+fn key(int k, int mods=0) any { gui.feed_event(EVENT_KEY_PRESSED, {"key": k, "mod": mods}) }
+fn chr(int c) any { gui.feed_event(EVENT_KEY_CHAR, {"char": c}) }
+fn chk(bool ok, str what) any { assert(ok, what) }
+
+assert(gfx.set_backend_type(gfx.BACKEND_MOCK), "mock")
+assert(gfx.init_window(640, 760, "basics"), "open")
+gui.reset_state()
+gui.set_enabled(true)
+gui.set_headless_input(true)
+mx = 630.0 my = 750.0
+frame() frame()
+
+;; --- choices
+at("cb") click()
+chk(cb, "checkbox toggles on")
+click()
+chk(!cb, "checkbox toggles off")
+at("tg") click()
+chk(tg, "toggle switches on")
+at("r1") click()
+chk(radio == 1, "radio selects its option")
+at("r0") click()
+chk(radio == 0, "radio group moves back")
+
+;; --- sliders
+at("sl", 0.75, 0.75) frame() down() frame()
+chk(sl > 0.70 && sl < 0.80, "slider jumps to the pressed position: " + to_str(sl))
+at("sl", 0.25, 0.75) frame()
+chk(sl > 0.20 && sl < 0.30, "slider follows a drag: " + to_str(sl))
+up() frame()
+def sl_before = sl
+key(KEY_RIGHT) frame()
+chk(sl > sl_before && sl < sl_before + 0.02, "arrow key steps the focused slider")
+at("si", 0.5, 0.75) click()
+chk(si == 5, "integer slider rounds to a step: " + to_str(si))
+
+;; --- text entry
+at("tx", 0.5, 0.75) click()
+chk(gui.focused_id() == "w::tx", "clicking a text field focuses it")
+key(KEY_END) frame()
+chr(99) chr(100) frame()
+chk(txt == "abcd", "typed characters append at the cursor: " + txt)
+key(KEY_BACKSPACE) frame()
+chk(txt == "abc", "backspace removes the previous character")
+key(KEY_HOME) frame() chr(122) frame()
+chk(txt == "zabc", "Home moves the cursor to the start")
+key(KEY_A, MOD_CONTROL) frame() chr(113) frame()
+chk(txt == "q", "select-all then typing replaces the text")
+key(KEY_ENTER) frame()
+chk(gui.focused_id() != "w::tx", "Enter leaves the field")
+chr(120) frame()
+chk(txt == "q", "an unfocused field ignores typing")
+
+;; --- tabs, header, selectable rows
+at("tabs", 0.5, 0.5) click()
+chk(tab == 1, "tab strip selects the clicked tab")
+at("tabs", 0.9, 0.5) click()
+chk(tab == 2, "last tab is reachable")
+def row0_y = float(rect_of("row0").get(1, 0.0))
+at("hd") click()
+chk(!header_open, "collapsing header closes")
+frame()
+chk(float(rect_of("row0").get(1, 0.0)) < row0_y, "content below a closed header moves up")
+at("hd") click()
+chk(header_open, "collapsing header reopens")
+frame()
+at("row1") click()
+chk(row_sel == 1, "selectable row selects")
+
+;; --- scroll area
+def last_row = rect_of("row2")
+mx = float(last_row.get(0, 0.0)) + 60.0
+my = float(last_row.get(1, 0.0)) + float(last_row.get(3, 0.0)) + 50.0
+frame()
+gui.feed_event(EVENT_MOUSE_SCROLL, {"dx": 0.0, "dy": -3.0, "x": mx, "y": my})
+frame() frame()
+chk(area_scroll > 10.0, "wheel scrolls the area under the pointer: " + to_str(area_scroll))
+
+;; --- combo box
+at("cmb", 0.5, 0.75) click() frame()
+def cr = rect_of("cmb")
+mx = float(cr.get(0, 0.0)) + 40.0
+my = float(cr.get(1, 0.0)) + float(cr.get(3, 0.0)) * 2.6
+click() frame()
+chk(combo == 1, "clicking a popup row selects it: " + to_str(combo))
+mx = 630.0 my = 750.0
+frame()
+chk(gui.hovered_id() == "", "the combo popup is gone after choosing")
+
+;; --- panel states take their rows in the layout
+def se, sr = rect_of("state_empty"), rect_of("state_error")
+chk(float(se.get(2)) > 100.0 && float(se.get(3)) == 60.0, "panel_state reserves the requested height")
+chk(float(sr.get(1)) >= float(se.get(1)) + 60.0 && float(sr.get(3)) == 40.0, "states stack like any other widget")
+
+;; --- keyboard focus order
+at("go") click()
+chk(clicks == 1 && gui.focused_id() == "w::go", "clicking a button focuses it")
+mx = 630.0 my = 750.0
+key(KEY_TAB) frame() frame()
+chk(gui.focused_id() == "w::cb", "Tab moves focus to the next widget: " + gui.focused_id())
+key(KEY_SPACE) frame()
+chk(cb, "Space activates the focused check_box")
+key(KEY_TAB, MOD_SHIFT) frame() frame()
+chk(gui.focused_id() == "w::go", "Shift-Tab moves focus back")
+key(KEY_ENTER) frame()
+chk(clicks == 2, "Enter activates the focused button")
+key(KEY_ESCAPE) frame()
+chk(gui.focused_id() == "", "Escape clears keyboard focus")
+
+;; --- window chrome on the second window
+def w2 = gui.window_rect("w2")
+def w2x, w2y = float(w2.get(0, 0.0)), float(w2.get(1, 0.0))
+def w2w, w2h = float(w2.get(2, 0.0)), float(w2.get(3, 0.0))
+at("b2") click()
+chk(second_clicks == 1, "second window takes clicks")
+;; resize by the corner grip
+mx = w2x + w2w - 5.0 my = w2y + w2h - 5.0
+frame() down() frame()
+my = my + 60.0
+frame() frame() up() frame()
+def grown = gui.window_rect("w2")
+chk(float(grown.get(3, 0.0)) > w2h + 50.0, "dragging the corner grip resizes the window")
+;; move by the title bar
+mx = w2x + 40.0 my = w2y + 12.0
+frame() down() frame()
+mx = mx - 120.0 my = my + 200.0
+frame() frame() up() frame()
+def moved = gui.window_rect("w2")
+chk(float(moved.get(0, 0.0)) < w2x - 100.0 && float(moved.get(1, 0.0)) > w2y + 180.0, "dragging the title bar moves the window")
+;; collapse hides the body, expand brings it back
+def mvx, mvy = float(moved.get(0, 0.0)), float(moved.get(1, 0.0))
+def mvw = float(moved.get(2, 0.0))
+second_clicks = 0
+mx = mvx + mvw - 22.0 - 22.0 - 10.0 + 11.0 my = mvy + 13.0
+click()
+at("b2") down() frame() up() frame()
+chk(second_clicks == 0, "a collapsed window draws no body")
+mx = mvx + mvw - 22.0 - 22.0 - 10.0 + 11.0 my = mvy + 13.0
+click() frame()
+at("b2") click()
+chk(second_clicks == 1, "expanding restores the body")
+;; close
+mx = mvx + mvw - 22.0 - 10.0 + 11.0 my = mvy + 13.0
+click() frame()
+chk(!gui.window_visible("w2") && gui.window_closed("w2"), "the close button closes the window and reports it once")
+chk(!gui.window_closed("w2"), "the close event is consumed")
+gui.show_window("w2", true)
+frame()
+chk(gui.window_visible("w2"), "show_window reopens it")
+gfx.close_window()
+print("GUI-TOOLKIT-BASICS-OK")
+NY
+}

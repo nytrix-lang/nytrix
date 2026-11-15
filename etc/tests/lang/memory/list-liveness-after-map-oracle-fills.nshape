@@ -1,0 +1,30 @@
+shape test_list_liveness_after_map_oracle_fills {
+  family "runtime/memory"
+  generator "embedded"
+  features ["ny", "test", "native"]
+  template ny-test-case
+  flags_matrix "--native --run"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+fn mk(f64 a, f64 b) list<f64> { [a, b] }
+
+; The runtime's address oracle records at most 256 extra mapped ranges. Once
+; that table filled, a gap between snapshot ranges was taken as proof of
+; "unmapped", so lists allocated later (about 4.9 million in this loop) failed
+; is_list and read as plain integers. The long-running UI apps hit this after
+; roughly two minutes.
+mut i = 0
+mut bad = 0
+while i < 5400000 {
+   def v = mk(1.0 + float(i), 2.0)
+   if !is_list(v) {
+      if bad == 0 { print("first bad at " + to_str(i)) }
+      bad += 1
+   }
+   i += 1
+}
+assert(bad == 0, "every freshly allocated list stays a list")
+NY
+}

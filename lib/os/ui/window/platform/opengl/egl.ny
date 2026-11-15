@@ -167,6 +167,10 @@ fn init_display(any native_display) any {
    if !dpy { return 0 }
    def major = zalloc(4)
    def minor = zalloc(4)
+   if !major || !minor {
+      free(major, minor)
+      return 0
+   }
    if eglInitialize(dpy, major, minor) == 0 {
       free(major, minor)
       return 0
@@ -180,9 +184,17 @@ fn choose_config(any display, list attrs) any {
    if !display { return 0 }
    def num_configs = zalloc(4)
    def config_ptr = zalloc(8)
+   if !num_configs || !config_ptr {
+      free(num_configs, config_ptr)
+      return 0
+   }
    mut count = 0
    while attrs.get(count, 0x3038) != 0x3038 { count += 1 }
    def attr_list = zalloc((count + 1) * 4)
+   if !attr_list {
+      free(num_configs, config_ptr)
+      return 0
+   }
    mut i = 0
    while i < count {
       store32(attr_list, int(attrs.get(i)), i * 4)
@@ -212,6 +224,7 @@ fn create_context(any display, any config, any share=0, int gles_ver=0) any {
    if gles_ver <= 0 { return 0 }
    eglBindAPI(0x30A0)
    def attrs = zalloc(12)
+   if !attrs { return 0 }
    store32(attrs, 0x3098, 0)
    store32(attrs, int(gles_ver), 4)
    store32(attrs, 0x3038, 8)
@@ -236,6 +249,7 @@ fn get_config_attrib(any display, any config, any attrib) int {
    "Returns get config attrib."
    if !display || !config { return 0 }
    def val = zalloc(4)
+   if !val { return 0 }
    mut res = 0
    if eglGetConfigAttrib(display, config, int(attrib), val) != 0 { res = int(load32(val, 0)) }
    free(val)

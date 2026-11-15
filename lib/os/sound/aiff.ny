@@ -60,8 +60,10 @@ fn _ima4(any d, int at, int size, int frames, int channels, int rate) any {
    if channels <= 0 || channels > 32 { return 0 }
    def packets = size / (channels * 34)
    if packets <= 0 { return 0 }
+   if packets > 9223372036854775807 / 64 / channels / 2 { return 0 }
    def total = packets * 64
    def out = malloc(total * channels * 2)
+   if !out { return 0 }
    ;; A header that agrees with the running state keeps its full precision.
    def state_value = list()
    def state_index = list()
@@ -159,6 +161,7 @@ fn decode_bytes(any d) any {
       if need * width > sound_size { return 0 }
       if bits == 8 {
          def out = malloc(need * 2)
+         if !out { return 0 }
          mut i = 0
          while i < need {
             def b = load8(d, sound_at + i)
@@ -169,6 +172,7 @@ fn decode_bytes(any d) any {
          return make_memory_source(out, need * 2, channels, rate, 16, SAMPLE_FMT_S16, 1)
       }
       def out = malloc(need * width)
+      if !out { return 0 }
       mut i = 0
       while i < need {
          mut b = 0
@@ -188,12 +192,17 @@ fn decode_bytes(any d) any {
       def width = (comp == "fl32" || comp == "FL32") ? 4 : 8
       if need * width > sound_size { return 0 }
       def out = malloc(need * 4)
+      if !out { return 0 }
       mut i = 0
       while i < need {
          if width == 4 {
             store32(out, _be32(d, sound_at + i * 4), i * 4)
          } else {
             def wide = malloc(8)
+            if !wide {
+               free(out)
+               return 0
+            }
             mut b = 0
             while b < 8 {
                store8(wide, load8(d, sound_at + i * 8 + 7 - b), b)
@@ -209,6 +218,7 @@ fn decode_bytes(any d) any {
    if comp == "alaw" || comp == "ulaw" {
       if need > sound_size { return 0 }
       def out = malloc(need * 2)
+      if !out { return 0 }
       mut i = 0
       while i < need {
          def v = load8(d, sound_at + i)

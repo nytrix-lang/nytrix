@@ -1,0 +1,110 @@
+shape struct_copy_computed_address {
+  family "codegen/x86-64/struct-copy"
+  generator "regression"
+  features ["x86-64", "nyc", "struct-copy", "regalloc"]
+  template ny-test-case
+  flags "--native-only --native-backend=x86_64"
+  timeout 120
+  expect compile_and_run
+  source ny <<'NY'
+use core.os (env, file_remove, file_write, pid, run_capture, temp_dir)
+
+;; Struct assignment between computed addresses read unflushed stack homes (dict-set bench crash).
+mut nyc = env("NYTRIX_NYC")
+if !is_str(nyc) || nyc.len == 0 { nyc = "build/release/nyc" }
+def dir = temp_dir() + "/ny-struct-copy-computed-address-" + to_str(pid())
+def source = dir + ".c"
+def c_source =
+   "#include <stdint.h>\n" +
+   "#include <stdio.h>\n" +
+   "#include <stdlib.h>\n" +
+   "#include <time.h>\n" +
+   "\n" +
+   "/* Store both 64-bit keys and values, as the Ny dictionary does. */\n" +
+   "typedef struct { int64_t key; int64_t value; int used; } Slot;\n" +
+   "\n" +
+   "static int64_t now_ns(void) {\n" +
+   "  struct timespec ts;\n" +
+   "  clock_gettime(CLOCK_MONOTONIC, &ts);\n" +
+   "  return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;\n" +
+   "}\n" +
+   "\n" +
+   "static unsigned hash_int(unsigned x) {\n" +
+   "  x ^= x >> 16;\n" +
+   "  x *= 0x7feb352dU;\n" +
+   "  x ^= x >> 15;\n" +
+   "  x *= 0x846ca68bU;\n" +
+   "  return x ^ (x >> 16);\n" +
+   "}\n" +
+   "\n" +
+   "int main(void) {\n" +
+   "  const int n = 500000;\n" +
+   "  size_t capacity = 8;\n" +
+   "  Slot *tbl = calloc(capacity, sizeof(*tbl));\n" +
+   "  if (!tbl) return 2;\n" +
+   "  int64_t t0 = now_ns();\n" +
+   "  for (int i = 0; i < n; ++i) {\n" +
+   "    if (((size_t)i + 1) * 10 >= capacity * 7) {\n" +
+   "      size_t next_capacity = capacity * 2;\n" +
+   "      Slot *next = calloc(next_capacity, sizeof(*next));\n" +
+   "      if (!next) { free(tbl); return 4; }\n" +
+   "      for (size_t j = 0; j < capacity; ++j) {\n" +
+   "        if (!tbl[j].used) continue;\n" +
+   "        unsigned h = hash_int((unsigned)tbl[j].key) & (next_capacity - 1);\n" +
+   "        while (next[h].used) h = (h + 1) & (next_capacity - 1);\n" +
+   "        next[h] = tbl[j];\n" +
+   "      }\n" +
+   "      free(tbl);\n" +
+   "      tbl = next;\n" +
+   "      capacity = next_capacity;\n" +
+   "    }\n" +
+   "    unsigned h = hash_int((unsigned)i) & (capacity - 1);\n" +
+   "    while (tbl[h].used) h = (h + 1) & (capacity - 1);\n" +
+   "    tbl[h].used = 1;\n" +
+   "    tbl[h].key = i;\n" +
+   "    tbl[h].value = i;\n" +
+   "  }\n" +
+   "  int64_t t1 = now_ns();\n" +
+   "  int64_t checksum = 0;\n" +
+   "  const int probes[] = {0, n / 2, n - 1};\n" +
+   "  for (size_t i = 0; i < sizeof(probes) / sizeof(probes[0]); ++i) {\n" +
+   "    unsigned h = hash_int((unsigned)probes[i]) & (capacity - 1);\n" +
+   "    while (tbl[h].used && tbl[h].key != probes[i])\n" +
+   "      h = (h + 1) & (capacity - 1);\n" +
+   "    if (!tbl[h].used) { free(tbl); return 3; }\n" +
+   "    checksum += tbl[h].value;\n" +
+   "  }\n" +
+   "  free(tbl);\n" +
+   "  printf(\"checksum=%lld\\n\", (long long)checksum);\n" +
+   "  if (t1 < t0) return 5;\n" +
+   "  return 0;\n" +
+   "}\n"
+assert(is_ok(file_write(source, c_source)), "write C program")
+mut reference = ""
+def ref_exe = dir + "-ref"
+def ref_build = run_capture(["clang", "-O1", source, "-o", ref_exe], [], nil, false)
+assert(ref_build.get("code", 127) == 0, "clang builds the reference: " + ref_build.get("stderr", ""))
+def ref_run = run_capture([ref_exe], [], nil, false)
+reference = ref_run.get("stdout", "")
+mut level_index = 0
+def levels = ["-O0", "-O1", "-O3"]
+while level_index < levels.len {
+   def level = levels[level_index]
+   def object = dir + level + ".o"
+   def exe = dir + level + "-run"
+   def compiled = run_capture([nyc, level, "-c", source, "-o", object], [], nil, false)
+   assert(compiled.get("code", 127) == 0, "NYC " + level + " compiles: " + compiled.get("stderr", ""))
+   def linked = run_capture(["clang", "-no-pie", object, "-o", exe], [], nil, false)
+   assert(linked.get("code", 127) == 0, "link " + level + ": " + linked.get("stderr", ""))
+   def ran = run_capture([exe], [], nil, false)
+   assert(ran.get("code", 127) == 0, "NYC " + level + " binary ran (crashed?): " + ran.get("stderr", ""))
+   assert(ran.get("stdout", "") == reference, "NYC " + level + " output matches clang: " + ran.get("stdout", "") + " vs " + reference)
+   file_remove(object)
+   file_remove(exe)
+   level_index += 1
+}
+file_remove(source)
+file_remove(ref_exe)
+assert(reference.len > 0, "reference program produced output")
+NY
+}

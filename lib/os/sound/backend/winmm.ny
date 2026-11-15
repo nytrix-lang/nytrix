@@ -72,7 +72,12 @@ fn shutdown(any ctx) any { "Shuts down WinMM backend state stored in `ctx`." }
 fn stream_open(any stream) any {
    "Opens a WinMM playback stream for the provided stream dictionary."
    def hWaveOut = malloc(8)
+   if !hWaveOut { return false }
    def wfx = malloc(18)
+   if !wfx {
+      free(hWaveOut)
+      return false
+   }
    def format = stream.get("format")
    def sample_rate = stream.get("sample_rate")
    def channels = stream.get("channels")
@@ -116,8 +121,10 @@ fn stream_stop(any stream) bool {
 fn write(any h, any buf, int bytes) bool {
    "Writes `bytes` of PCM data to a WinMM output stream."
    if !h { return false }
+   if bytes <= 0 { return true }
    def hdr_size = 32
    def hdr = malloc(hdr_size)
+   if !hdr { return false }
    memset(hdr, 0, hdr_size)
    store64(hdr, buf, 0)
    store32(hdr, bytes, 8)

@@ -3676,8 +3676,10 @@ fn _siqs_collect_poly_pass(
       with ptr raw_scores = malloc(sieve_radius * 2 + 1){
          if raw_scores {
             with ptr raw_root_filters = malloc(base.len * 32){
-               def raw_report = _qs_sieve_scores_siqs_raw_into(raw_scores, raw_root_filters, modulus, base, sqrt_roots, A, B, sieve_radius)
-               return _siqs_collect_poly_pass_int_raw(raw_scores, raw_root_filters, relations, state, poly, pi, pass, A, B, C, raw_report, base, trial_base, sieve_radius, score_min, max_relations, multiplier, include_relation_details, include_poly_report)
+               if raw_root_filters {
+                  def raw_report = _qs_sieve_scores_siqs_raw_into(raw_scores, raw_root_filters, modulus, base, sqrt_roots, A, B, sieve_radius)
+                  return _siqs_collect_poly_pass_int_raw(raw_scores, raw_root_filters, relations, state, poly, pi, pass, A, B, C, raw_report, base, trial_base, sieve_radius, score_min, max_relations, multiplier, include_relation_details, include_poly_report)
+               }
             }
             def raw_report = _qs_sieve_scores_siqs_raw_into(raw_scores, nil, modulus, base, sqrt_roots, A, B, sieve_radius)
             return _siqs_collect_poly_pass_int_raw(raw_scores, nil, relations, state, poly, pi, pass, A, B, C, raw_report, base, trial_base, sieve_radius, score_min, max_relations, multiplier, include_relation_details, include_poly_report)

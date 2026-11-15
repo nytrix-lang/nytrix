@@ -198,8 +198,10 @@ fn _source(any out, int len, dict fmt, int bits, int sample_fmt, int tag) any {
 fn _decode_pcm(any d, int at, int size, dict fmt, bool big) any {
    def width = fmt.get("bits", 0) <= 8 ? 1 : (fmt.get("bits", 0) + 7) / 8
    def count = size / width
+   if count <= 0 { return 0 }
    if width == 1 {
       def out = malloc(count)
+      if !out { return 0 }
       memcpy(out, ptr_add(d, at), count)
       return _source(out, count, fmt, 8, _FMT_U8, 1)
    }
@@ -207,6 +209,7 @@ fn _decode_pcm(any d, int at, int size, dict fmt, bool big) any {
    ;; already scaled like a 16-bit one.
    if width == 2 {
       def out = malloc(count * 2)
+      if !out { return 0 }
       mut i = 0
       while i < count {
          store16(out, _u16(d, at + i * 2, big), i * 2)
@@ -216,6 +219,7 @@ fn _decode_pcm(any d, int at, int size, dict fmt, bool big) any {
    }
    if width == 3 {
       def out = malloc(count * 3)
+      if !out { return 0 }
       mut i = 0
       while i < count {
          def p = at + i * 3
@@ -228,6 +232,7 @@ fn _decode_pcm(any d, int at, int size, dict fmt, bool big) any {
    }
    if width == 4 {
       def out = malloc(count * 4)
+      if !out { return 0 }
       mut i = 0
       while i < count {
          store32(out, _u32(d, at + i * 4, big), i * 4)
@@ -237,6 +242,7 @@ fn _decode_pcm(any d, int at, int size, dict fmt, bool big) any {
    }
    if width == 8 {
       def out = malloc(count * 4)
+      if !out { return 0 }
       mut i = 0
       while i < count {
          store32(out, _u32(d, at + i * 8 + (big ? 0 : 4), big), i * 4)
@@ -250,7 +256,9 @@ fn _decode_pcm(any d, int at, int size, dict fmt, bool big) any {
 fn _decode_float(any d, int at, int size, dict fmt, bool big) any {
    if fmt.get("bits", 0) == 32 {
       def count = size / 4
+      if count <= 0 { return 0 }
       def out = malloc(count * 4)
+      if !out { return 0 }
       mut i = 0
       while i < count {
          store32(out, _u32(d, at + i * 4, big), i * 4)
@@ -260,8 +268,14 @@ fn _decode_float(any d, int at, int size, dict fmt, bool big) any {
    }
    if fmt.get("bits", 0) == 64 {
       def count = size / 8
+      if count <= 0 { return 0 }
       def wide = malloc(8)
+      if !wide { return 0 }
       def out = malloc(count * 4)
+      if !out {
+         free(wide)
+         return 0
+      }
       mut i = 0
       while i < count {
          mut b = 0
@@ -297,7 +311,9 @@ fn _mulaw(int u) int {
 }
 
 fn _decode_companded(any d, int at, int size, dict fmt, bool mu) any {
+   if size <= 0 { return 0 }
    def out = malloc(size * 2)
+   if !out { return 0 }
    mut i = 0
    while i < size {
       def b = load8(d, at + i)
@@ -348,8 +364,12 @@ fn _decode_ms_adpcm(any d, int at, int size, dict fmt) any {
    def int blocks = size / block
    def int tail = size % block
    def int tail_frames = tail >= 7 * channels ? (tail - 7 * channels) * 2 / channels + 2 : 0
+   def int max_frames = (9223372036854775807 - 16) / (channels * 2)
+   if per_block <= 0 || tail_frames > max_frames ||
+      blocks > (max_frames - tail_frames) / per_block { return 0 }
    def int total = blocks * per_block + tail_frames
    def out = malloc(total * channels * 2 + 16)
+   if !out { return 0 }
    def tables = _ms_coefs(d, fmt)
    def ptr c1 = tables[0]
    def ptr c2 = tables[1]
@@ -416,7 +436,12 @@ fn _decode_ima_adpcm(any d, int at, int size, dict fmt) any {
    def int blocks = size / block
    def int tail = size % block
    def int tail_frames = tail >= 4 * channels ? (tail - 4 * channels) * 2 / channels + 1 : 0
-   def out = malloc((blocks * per_block + tail_frames) * channels * 2 + 16)
+   def int max_frames = (9223372036854775807 - 16) / (channels * 2)
+   if per_block <= 0 || tail_frames > max_frames ||
+      blocks > (max_frames - tail_frames) / per_block { return 0 }
+   def int total = blocks * per_block + tail_frames
+   def out = malloc(total * channels * 2 + 16)
+   if !out { return 0 }
    def state = i64buf_new(4)
    mut int written = 0
    mut int b = 0

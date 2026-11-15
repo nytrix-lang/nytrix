@@ -8,6 +8,7 @@ module core.os.ui.window.platform.linux.x11(available, get_backend_name, InputOu
 use core
 use core.mem
 use core.math (abs)
+use core.math.checked (checked_mul)
 use core.os.prim
 use core.os.time
 use core.str as str
@@ -20,7 +21,7 @@ use core.os.ui.window.platform.state (_get_platform_val as _platform_get_val, _s
 use core.os.ui.window.platform.linux.x11.common as x11_common
 use core.os.ui.window.platform.linux.x11.keymap as x11_keymap
 use core.common as common
-use core.os.ui.debug as ui_profile
+use core.os.ui.debug as ui_debug
 
 fn _get_x11_val(str key, any default=0) any {
    _dbg_input("state.get.before")
@@ -44,12 +45,12 @@ fn _set_x11_val(str key, any val) any {
 }
 
 fn _is_debug() bool {
-   ui_profile.debug_enabled()
+   ui_debug.debug_enabled()
 }
 
 fn _dbg_tagged(str tag, any msg, str env_gate="") bool {
-   if env_gate.len > 0 && !ui_profile.env_truthy_cached(env_gate) { return false }
-   ui_profile.eprint_text("[" + tag + "] " + to_str(msg))
+   if env_gate.len > 0 && !ui_debug.env_truthy_cached(env_gate) { return false }
+   ui_debug.eprint_text("[" + tag + "] " + to_str(msg))
 }
 
 fn _dbg(any msg) bool {
@@ -58,7 +59,7 @@ fn _dbg(any msg) bool {
 }
 
 fn _dbg_v(any msg) bool {
-   if !ui_profile.debug_verbose_enabled() { return false }
+   if !ui_debug.debug_verbose_enabled() { return false }
    _dbg_tagged("ui:x11", msg)
 }
 
@@ -69,7 +70,7 @@ fn _input_debug_enabled() bool {
    ;; During captured camera look and gizmo drags those logs can dominate the
    ;; frame and make glTF animation look frozen.  Use NY_UI_INPUT_TRACE=1 when
    ;; the actual input stream is needed.
-   ui_profile.env_truthy_cached("NY_UI_INPUT_TRACE") || ui_profile.event_trace_enabled()
+   ui_debug.env_truthy_cached("NY_UI_INPUT_TRACE") || ui_debug.event_trace_enabled()
 }
 
 fn _dbg_input(any msg) bool {
@@ -918,7 +919,7 @@ fn _open_input_method(any display) any {
       _c_xset_locale_modifiers(cstr("POSIX"))
       im = _c_xopenim(_x11_raw(display), 0, 0, 0)
    }
-   if im && ui_profile.debug_verbose_enabled() { _dbg("_open_input_method: XIM opened successfully") }
+   if im && ui_debug.debug_verbose_enabled() { _dbg("_open_input_method: XIM opened successfully") }
    im
 }
 
@@ -1007,7 +1008,7 @@ fn _emit_ic_chars(list events, dict win, ptr event_ptr, int mods, bool plain) li
    store64_h(keysym_ptr, 0, 0)
    mut count = _c_xutf8_lookup_string(_x11_raw(ic), event_ptr, buffer, buffer_cap, keysym_ptr, status_ptr)
    mut status = load32(status_ptr, 0)
-   if ui_profile.env_truthy_cached("NY_UI_INPUT_TRACE") {
+   if ui_debug.env_truthy_cached("NY_UI_INPUT_TRACE") {
       _dbg_input("xim lookup count=" + to_str(count) +
          " status=" + to_str(status) +
          " keysym=0x" + str.to_hex(load64_h(keysym_ptr, 0)))
@@ -1024,7 +1025,7 @@ fn _emit_ic_chars(list events, dict win, ptr event_ptr, int mods, bool plain) li
       store64_h(keysym_ptr, 0, 0)
       count = _c_xutf8_lookup_string(_x11_raw(ic), event_ptr, buffer, buffer_cap, keysym_ptr, status_ptr)
       status = load32(status_ptr, 0)
-      if ui_profile.env_truthy_cached("NY_UI_INPUT_TRACE") {
+      if ui_debug.env_truthy_cached("NY_UI_INPUT_TRACE") {
          _dbg_input("xim lookup resize count=" + to_str(count) +
             " status=" + to_str(status) +
             " keysym=0x" + str.to_hex(load64_h(keysym_ptr, 0)))
@@ -1371,18 +1372,18 @@ fn iconify_window(any win) bool {
 }
 
 fn _show_window_raw(any display, any window_handle, bool floating=false, any net_wm_state_atom=0, any above_atom=0) bool {
-   def trace = ui_profile.env_truthy_cached("NY_UI_STARTUP_TRACE") || ui_profile.env_truthy_cached("NY_UI_DEBUG_WINDOW")
+   def trace = ui_debug.env_truthy_cached("NY_UI_STARTUP_TRACE") || ui_debug.env_truthy_cached("NY_UI_DEBUG_WINDOW")
    if floating && net_wm_state_atom && above_atom {
-      if trace { ui_profile.print_text("[x11:show] floating.before") }
+      if trace { ui_debug.print_text("[x11:show] floating.before") }
       append_atom_property(display, window_handle, net_wm_state_atom, above_atom)
-      if trace { ui_profile.print_text("[x11:show] floating.after") }
+      if trace { ui_debug.print_text("[x11:show] floating.after") }
    }
-   if trace { ui_profile.print_text("[x11:show] map.before") }
+   if trace { ui_debug.print_text("[x11:show] map.before") }
    _c_xmap_raised(_x11_raw(display), _x11_raw(window_handle))
-   if trace { ui_profile.print_text("[x11:show] map.after") }
-   if trace { ui_profile.print_text("[x11:show] flush.before") }
+   if trace { ui_debug.print_text("[x11:show] map.after") }
+   if trace { ui_debug.print_text("[x11:show] flush.before") }
    flush(display)
-   if trace { ui_profile.print_text("[x11:show] flush.after") }
+   if trace { ui_debug.print_text("[x11:show] flush.after") }
    true
 }
 
@@ -1932,7 +1933,7 @@ fn focus_window(any win) bool {
    if ic { _c_xseticfocus(_x11_raw(ic)) }
    def root = win.get("root", 0)
    def net_active_window = win.get("net_active_window", 0)
-   if ui_profile.env_truthy_cached("NY_UI_INPUT_TRACE") {
+   if ui_debug.env_truthy_cached("NY_UI_INPUT_TRACE") {
       _dbg_input("focus state display=" + to_str(_x11_raw(display)) +
          " root=" + to_str(root) + " handle=" + to_str(handle))
    }
@@ -2196,10 +2197,10 @@ fn _set_cursor_capture_flags(any win, bool captured, bool disabled) any {
 }
 
 fn _x11_auto_raw_lock_allowed() bool {
-   if ui_profile.env_truthy_cached("NY_UI_X11_DISABLE_RAW_LOCK") {
+   if ui_debug.env_truthy_cached("NY_UI_X11_DISABLE_RAW_LOCK") {
       return false
    }
-   if ui_profile.env_present_cached("NY_UI_RAW_MOUSE") && !ui_profile.env_truthy_cached("NY_UI_RAW_MOUSE") {
+   if ui_debug.env_present_cached("NY_UI_RAW_MOUSE") && !ui_debug.env_truthy_cached("NY_UI_RAW_MOUSE") {
       return false
    }
    true
@@ -3339,11 +3340,11 @@ fn x11_error_handler(any display, ptr error_ptr) int {
    def suppress = _get_x11_val("suppress_errors", 0)
    if suppress != 0 { return 0 }
    if _is_debug() {
-      ui_profile.print_text("[x11:ERROR] X11 error occurred:")
-      ui_profile.print_text("[x11:ERROR]   error_code: " + to_str(error_code))
-      ui_profile.print_text("[x11:ERROR]   request_code: " + to_str(request_code))
-      ui_profile.print_text("[x11:ERROR]   minor_code: " + to_str(minor_code))
-      ui_profile.print_text("[x11:ERROR]   resource_id: 0x" + str.to_hex(resource_id))
+      ui_debug.print_text("[x11:ERROR] X11 error occurred:")
+      ui_debug.print_text("[x11:ERROR]   error_code: " + to_str(error_code))
+      ui_debug.print_text("[x11:ERROR]   request_code: " + to_str(request_code))
+      ui_debug.print_text("[x11:ERROR]   minor_code: " + to_str(minor_code))
+      ui_debug.print_text("[x11:ERROR]   resource_id: 0x" + str.to_hex(resource_id))
    }
    0
 }
@@ -4395,7 +4396,7 @@ fn _translate_configure_event(any win, any event_ptr, list events, any display, 
       if out_y { free(out_y) }
       if child { free(child) }
    }
-   if ui_profile.debug_verbose_enabled() { _dbg("ConfigureNotify: win=0x" + str.to_hex(win.get("handle", 0))) }
+   if ui_debug.debug_verbose_enabled() { _dbg("ConfigureNotify: win=0x" + str.to_hex(win.get("handle", 0))) }
    if width != win_w || height != win_h {
       win["w"] = width
       win["h"] = height
@@ -5161,6 +5162,16 @@ fn flush(any display) any {
 fn put_pixels(any display, any win_ref, ptr buf, int w, int h) bool {
    "Blits an RGBA pixel buffer to an X11 window using XPutImage."
    if !display || !win_ref || !buf || w <= 0 || h <= 0 { return false }
+   ;; XCreateImage and XPutImage take C int dimensions. Check both the ABI
+   ;; boundary and the byte-count arithmetic before allocating the conversion
+   ;; buffer.
+   if w > 2147483647 || h > 2147483647 { return false }
+   def pixels_result = checked_mul(w, h)
+   if !is_ok(pixels_result) { return false }
+   def n = int(unwrap(pixels_result))
+   def bytes_result = checked_mul(n, 4)
+   if !is_ok(bytes_result) { return false }
+   def byte_count = int(unwrap(bytes_result))
    mut win_handle = win_ref
    if is_dict(win_ref) { win_handle = win_ref.get("handle", 0) }
    if !win_handle { return false }
@@ -5171,12 +5182,13 @@ fn put_pixels(any display, any win_ref, ptr buf, int w, int h) bool {
       vis = win_ref.get("visual", vis)
       depth = int(win_ref.get("depth", depth))
    }
-   def n = w * h
    mut cvt_buf = _get_x11_val("sw_cvt_buf", 0)
    def cvt_n = _get_x11_val("sw_cvt_n", 0)
-   if cvt_n != n {
+   if cvt_n != n || !cvt_buf {
+      def new_cvt_buf = malloc(byte_count)
+      if !new_cvt_buf { return false }
       if cvt_buf { free(cvt_buf) }
-      cvt_buf = malloc(n * 4)
+      cvt_buf = new_cvt_buf
       _set_x11_val("sw_cvt_buf", cvt_buf)
       _set_x11_val("sw_cvt_n", n)
    }
@@ -5578,7 +5590,7 @@ fn create_basic_window(
 ) dict {
    "Creates and maps a basic X11 top-level window using Ny-side logic."
    if !available() { return dict(0) }
-   if ui_profile.env_truthy_cached("NY_UI_INPUT_TRACE") {
+   if ui_debug.env_truthy_cached("NY_UI_INPUT_TRACE") {
       _dbg_input("create.entry title=" + title +
          " flags=0x" + str.to_hex(flags) +
          " event_arg=0x" + str.to_hex(event_mask) +
@@ -5689,7 +5701,7 @@ fn create_basic_window(
       }
    }
    _sync_window_state(win)
-   if ui_profile.env_truthy_cached("NY_UI_INPUT_TRACE") {
+   if ui_debug.env_truthy_cached("NY_UI_INPUT_TRACE") {
       _dbg_input("create.return handle=" + to_str(win.get("handle", 0)) +
          " root=" + to_str(win.get("root", 0)) +
          " keys=" + to_str(dict_keys(win)))
@@ -5771,7 +5783,7 @@ fn _finish_vk_surface_create(any surface, int res, str label) int {
    }
    def handle_val = load64(surface, 0)
    if handle_val == 0 || handle_val == 0x8000000000 {
-      if ui_profile.debug_verbose_enabled() {
+      if ui_debug.debug_verbose_enabled() {
          print(
             "[x11] " + label +
             " invalid handle=0x" + str.to_hex(handle_val) +
@@ -5787,16 +5799,16 @@ fn _finish_vk_surface_create(any surface, int res, str label) int {
 fn _create_xcb_surface(any instance, any display, any handle, any surface) int {
    def connection = _c_xgetxcbconnection(_x11_raw(display))
    if !connection {
-      if ui_profile.debug_verbose_enabled() { print("[x11] XCB surface unavailable: XGetXCBConnection returned null") }
+      if ui_debug.debug_verbose_enabled() { print("[x11] XCB surface unavailable: XGetXCBConnection returned null") }
       return -1
    }
    def info = _vk_xcb_surface_create_info(connection, handle)
    if !info {
-      if ui_profile.debug_verbose_enabled() { print("[x11] XCB surface unavailable: create-info allocation failed") }
+      if ui_debug.debug_verbose_enabled() { print("[x11] XCB surface unavailable: create-info allocation failed") }
       return -1
    }
    store64(surface, 0, 0)
-   if ui_profile.debug_verbose_enabled() {
+   if ui_debug.debug_verbose_enabled() {
       print(
          "[x11] XCB info ptr=" + to_str(info) +
          " stype=" + to_str(load32(info, 0)) +
@@ -5807,7 +5819,7 @@ fn _create_xcb_surface(any instance, any display, any handle, any surface) int {
       )
    }
    def res = vk_create_xcb_surface_khr(instance, info, 0, surface)
-   if ui_profile.debug_verbose_enabled() {
+   if ui_debug.debug_verbose_enabled() {
       print(
          "[x11] vkCreateXcbSurfaceKHR res=" + to_str(res) +
          " surf=0x" + str.to_hex(load64(surface, 0)) +
@@ -5831,7 +5843,7 @@ fn _create_xlib_surface(any instance, any display, any handle, any surface) int 
    store64_h(info, display, 24)
    store64_h(info, handle, 32)
    _c_xsync(_x11_raw(display), 0)
-   if ui_profile.debug_verbose_enabled() {
+   if ui_debug.debug_verbose_enabled() {
       print(
          "[x11] BEFORE vkCreateXlibSurfaceKHR surf_ptr=" + to_str(surface) +
          " surf_val=0x" + str.to_hex(load64(surface, 0)) +
@@ -5844,7 +5856,7 @@ fn _create_xlib_surface(any instance, any display, any handle, any surface) int 
       )
    }
    def res = vk_create_xlib_surface_khr(instance, info, 0, surface)
-   if ui_profile.debug_verbose_enabled() {
+   if ui_debug.debug_verbose_enabled() {
       print(
          "[x11] vkCreateXlibSurfaceKHR res=" + to_str(res) +
          " surf=0x" + str.to_hex(load64(surface, 0)) +
@@ -5866,7 +5878,7 @@ fn _restore_window_event_mask(any win, any display, any handle) bool {
       win["event_mask"] = mask
       _sync_window_state(win)
    }
-   if ui_profile.env_truthy_cached("NY_UI_INPUT_TRACE") {
+   if ui_debug.env_truthy_cached("NY_UI_INPUT_TRACE") {
       _dbg_input("restore event_mask=0x" + str.to_hex(mask) + " win=0x" + str.to_hex(handle))
    }
    true

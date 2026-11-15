@@ -1,0 +1,51 @@
+shape test_safe_heap_traps {
+  family "runtime/memory"
+  generator "regression"
+  features ["ny", "test", "safe-heap", "memory-safety"]
+  template ny-test-case
+  flags "--native-only"
+  timeout 240
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os (env, file_remove, file_write, pid, run_capture, temp_dir)
+
+;; `--heap=safe` puts user allocations on guard pages: an access past the end,
+;; a use after free, and a double free each trap with a named error (exit 134),
+;; blocks never freed are reported at exit, and a correct program is silent.
+def ny = env("NYTRIX_NY_FULL_BIN")
+assert(is_str(ny) && ny.len > 0, "test runner exports the full compiler")
+def stem = temp_dir() + "/ny-safe-heap-" + to_str(pid())
+
+fn run_case(str name, str body) str {
+   def path = stem + "-" + name + ".ny"
+   assert(is_ok(file_write(path, "use core\nuse core.mem\nfn run() int {\n" + body + "\n   0\n}\nrun()\n")), "write " + name)
+   def out = run_capture([ny, "--heap=safe", path], [], nil, false)
+   file_remove(path)
+   ;; "<exit code>|<combined output>": run_capture merges stderr into stdout.
+   to_str(out.get("code", 127)) + "|" + to_str(out.get("stdout", "")) + to_str(out.get("stderr", ""))
+}
+
+def uaf = run_case("uaf", "   mut p = malloc(16)\n   store8(p, 7, 0)\n   free(p)\n   print(load8(p, 0))")
+assert(uaf.startswith("134|") && uaf.contains("use-after-free"),
+       "read after free traps: " + to_str(uaf))
+
+def oob = run_case("oob", "   mut p = malloc(16)\n   store8(p, 1, 15)\n   store8(p, 2, 16)")
+assert(oob.startswith("134|") && oob.contains("heap-buffer-overflow"),
+       "a store one past the allocation traps: " + to_str(oob))
+
+def dbl = run_case("dbl", "   mut p = malloc(8)\n   free(p)\n   free(p)")
+assert(dbl.startswith("134|") && dbl.contains("double free"),
+       "freeing twice is reported: " + to_str(dbl))
+
+def leak = run_case("leak", "   mut p = malloc(24)\n   store8(p, 1, 0)")
+assert(leak.startswith("0|") && leak.contains("leak: 1 allocation(s)"),
+       "an unfreed block is reported at exit: " + to_str(leak))
+
+def clean = run_case("clean",
+   "   mut i = 0\n   while i < 50 {\n      mut p = malloc(64)\n      store8(p, i, 0)\n      store8(p, 5, 63)\n      free(p)\n      i += 1\n   }\n   mut r = malloc(8)\n   r = realloc(r, 4096)\n   store8(r, 9, 4095)\n   free(r)")
+assert(clean.startswith("0|") && !clean.contains("Nytrix safe-heap:"),
+       "a correct program runs silently under the safe heap: " + to_str(clean))
+assert(clean.startswith("0|"), "done")
+NY
+}

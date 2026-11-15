@@ -82,20 +82,30 @@ fn _is_printable_ascii(int b) bool { b >= 32 && b <= 126 }
 fn _hexdump_preview(str s, int max_bytes=96) str {
    def n = s.len
    def take = (n < max_bytes) ? n : max_bytes
+   mut cleanup = [0, 0]
+   defer {
+      if cleanup[0] { builder_free(cleanup[0]) }
+      if cleanup[1] { builder_free(cleanup[1]) }
+   }
    mut hex_b = Builder(take * 2 + 8)
+   cleanup[0] = hex_b
    mut asc_b = Builder(take + 8)
+   cleanup[1] = asc_b
    mut i = 0
    while i < take {
       def b = load8(s, i)
       hex_b = builder_append(hex_b, to_hex(b, 2))
+      cleanup[0] = hex_b
       asc_b = builder_append(asc_b, _is_printable_ascii(b) ? chr(b) : ".")
+      cleanup[1] = asc_b
       i += 1
    }
-   if n > take { asc_b = builder_append(asc_b, "...") }
+   if n > take {
+      asc_b = builder_append(asc_b, "...")
+      cleanup[1] = asc_b
+   }
    def hex = builder_to_str(hex_b)
    def asc = builder_to_str(asc_b)
-   builder_free(hex_b)
-   builder_free(asc_b)
    hex + " |" + asc + "|"
 }
 
@@ -204,9 +214,14 @@ fn process(str path, list args=[], any level="", int timeout_ms=-1, int chunk_si
          i += 1
       }
    }
+   mut cleanup = [0]
+   defer { if is_dict(cleanup[0]) { pio.close(cleanup[0]) } }
    def p = pio.spawn(path, argv)
    if p == 0 { return 0 }
-   tube_process(p, path, level, timeout_ms, chunk_size)
+   cleanup[0] = p
+   def io = tube_process(p, path, level, timeout_ms, chunk_size)
+   cleanup[0] = 0
+   io
 }
 
 fn proc(str path, list args=[], any level="", int timeout_ms=-1, int chunk_size=0) any {
@@ -285,14 +300,19 @@ fn transcript(any io) list {
 fn transcript_text(any io) str {
    "Returns a compact text rendering of the tube transcript."
    def rows = transcript(io)
+   mut cleanup = [0]
+   defer { if cleanup[0] { builder_free(cleanup[0]) } }
    mut b, i = Builder(64), 0
+   cleanup[0] = b
    while i < rows.len {
       def row = rows.get(i, 0)
-      if is_dict(row) { b = builder_append(b, row.get("op", "?") + " " + repr(row.get("data", "")) + "\n") }
+      if is_dict(row) {
+         b = builder_append(b, row.get("op", "?") + " " + repr(row.get("data", "")) + "\n")
+         cleanup[0] = b
+      }
       i += 1
    }
    def out = builder_to_str(b)
-   builder_free(b)
    out
 }
 
@@ -307,13 +327,17 @@ fn remote(str host, int port, any level="", int timeout_ms=-1, int chunk_size=0)
    "Connects to host:port and returns a buffered tube, or 0 on failure."
    def lvl = (is_str(level) && strip(level).len > 0) ? netctx.level_name(level) : netctx.default_level()
    _log_connect(host, port, lvl, "connect")
+   mut fd_cleanup = [-1]
+   defer { if fd_cleanup[0] >= 0 { sock.close_socket(fd_cleanup[0]) } }
    def fd = sock.socket_connect(host, port)
    if fd < 0 {
       _log_connect(host, port, lvl, "connect failed")
       return 0
    }
+   fd_cleanup[0] = fd
    def io = tube_fd(fd, host, port, lvl, timeout_ms, chunk_size)
    _log(io, "info", "connected")
+   fd_cleanup[0] = -1
    return io
 }
 
@@ -554,16 +578,19 @@ fn _find_bytes(str data, str needle) int {
 fn recvn(any io, int n) str {
    "Receives up to exactly `n` bytes, stopping early on EOF."
    if !is_dict(io) || n <= 0 { return "" }
+   mut cleanup = [0]
+   defer { if cleanup[0] { builder_free(cleanup[0]) } }
    mut out = Builder(n + 1)
+   cleanup[0] = out
    mut total = 0
    while total < n {
       def chunk = _recv_take(io, n - total)
       if chunk.len == 0 { break }
       out = builder_append(out, chunk)
+      cleanup[0] = out
       total += chunk.len
    }
    def s = builder_to_str(out)
-   builder_free(out)
    return s
 }
 
@@ -615,11 +642,15 @@ fn recvline(any io, bool keepends=true, any max_bytes=65536) str { return recv_l
 fn recv_all(any io, int max_bytes=65536) str {
    "Receives until EOF or `max_bytes` is reached."
    if !is_dict(io) { return "" }
+   mut cleanup = [0]
+   defer { if cleanup[0] { builder_free(cleanup[0]) } }
    mut b = Builder(max(16, max_bytes + 8))
+   cleanup[0] = b
    mut total = 0
    def pending = clean(io)
    if pending.len > 0 {
       b = builder_append(b, pending)
+      cleanup[0] = b
       total += pending.len
    }
    while total < max_bytes && connected(io) {
@@ -628,10 +659,10 @@ fn recv_all(any io, int max_bytes=65536) str {
       def chunk = _read_more(io, want)
       if chunk.len == 0 { break }
       b = builder_append(b, chunk)
+      cleanup[0] = b
       total += chunk.len
    }
    def out = builder_to_str(b)
-   builder_free(b)
    return out
 }
 
@@ -758,15 +789,19 @@ fn _write_fd(int fd, any data) int {
 }
 
 fn _read_stdin_byte() str {
+   mut cleanup = [0]
+   defer { if cleanup[0] { free(cleanup[0]) } }
    def p = malloc(2)
    if !p { return "" }
+   cleanup[0] = p
    match sys.sys_read(0, p, 1) {
       ok(n) -> {
-         if n <= 0 { free(p) return "" }
-         init_str(p, 1)
-         return p
+         if n <= 0 { return "" }
+         def out = init_str(p, 1)
+         cleanup[0] = 0
+         return out
       }
-      err(ignorederr) -> { ignorederr  free(p) return "" }
+      err(ignorederr) -> { ignorederr  return "" }
    }
 }
 

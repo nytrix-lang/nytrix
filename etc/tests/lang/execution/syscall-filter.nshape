@@ -38,6 +38,7 @@ use core.os.ffi as calls
       ; tagged integer. Linux x86_64 open(2) should decode it and report ENOENT.
       def libc = ffi.dlopen("libc.so.6", ffi.RTLD_NOW())
       def strdup_fn = ffi.dlsym(libc, "strdup")
+      def free_fn = ffi.dlsym(0, "free")
       def missing_path = calls.pointer1(strdup_fn,
          ffi.cstr("/nytrix-abi-test/no-such-file"))
       def native_open_result = syscall(2, missing_path, 0, 0, 0, 0, 0)
@@ -64,7 +65,7 @@ use core.os.ffi as calls
          "write decodes descriptor, native buffer, and byte count")
       assert(syscall(3, null_fd, 0, 0, 0, 0, 0) == 0,
          "close decodes descriptor argument")
-      ffi.free(write_payload)
+      calls.void1(free_fn, write_payload)
       ; mmap uses all six raw-word arguments; arguments 4–6 carry flags, the
       ; signed fd sentinel, and the page offset.
       def mapped_page = syscall(9, 0, 4096, 3, 34, -1, 0)
@@ -97,7 +98,7 @@ use core.os.ffi as calls
       assert(syscall(270, 0, 0, 0, 0, select_timeout, signal_mask_arg) == 0,
          "pselect6 decodes signal-mask descriptor in argument 6")
       free(select_timeout, signal_mask_arg)
-      ffi.free(missing_path)
+      calls.void1(free_fn, missing_path)
       ffi.dlclose(libc)
       ; Use a path that cannot exist: valid argv/envp vectors must reach the
       ; host execve call and report its failure result, while malformed sequences return

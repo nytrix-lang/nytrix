@@ -46,7 +46,7 @@ mut bool _move_ctrl = false
 mut f64 _cam_px_cache = 0.0
 mut f64 _cam_py_cache = 0.0
 mut f64 _cam_pz_cache = 0.0
-mut f64 _cam_fov = 120.0
+mut f64 _cam_fov = 60.0
 mut int fps = 0
 mut list _fps_samples = own([])
 mut int frame_num = 0
@@ -237,7 +237,7 @@ mut bool _gui_show_inspector = false
 mut f64 _gui_scale = 1.0
 mut f64 _gui_dpi_scale = 1.0
 mut bool _gui_scale_manual = false
-mut list _gui_accent = [0.76, 0.76, 0.76, 0.96]
+mut list _gui_accent = [0.714, 0.627, 1.0, 1.0]
 mut str _gui_last_probe_text = ""
 mut str _gui_shot_name = ""
 mut str _gui_console_input = ""
@@ -384,7 +384,7 @@ mut bool _gui_probe_bootstrapped = false
 mut bool _hotkey_f1_down = false
 mut int _hotkey_f1_last_ns = 0
 mut int _hotkey_text_suppress_until_ns = 0
-mut list _gui_editor_tab_items = ["Catalog", "Hierarchy", "Theme", "Console"]
+mut list _gui_editor_tab_items = ["Catalog", "Tree", "Theme", "Console"]
 mut list _gui_layout_preset_items = ["default", "probe", "graph", "compact"]
 mut list _gui_env_mode_items = ["Auto", "Studio", "Neutral", "Raw Sky", "None"]
 mut list _gui_msaa_items = ["1x off", "2x", "4x", "8x"]
@@ -414,6 +414,41 @@ mut list _gui_demo_context_items = [
 mut f64 _render_phase = 0.0
 mut f64 _render_dt = 0.0
 
+fn _ensure_ui_lists() bool {
+   ;; Module-level list literals are not reliably materialised for importers
+   ;; (they read back as empty non-lists), which left the editor tab strip and
+   ;; every preset combo without items. Rebuild them on first use, as
+   ;; ensure_matrices does for the matrices.
+   if !is_list(_gui_editor_tab_items) || _gui_editor_tab_items.len == 0 { _gui_editor_tab_items = ["Catalog", "Tree", "Theme", "Console"] }
+   if !is_list(_gui_layout_preset_items) || _gui_layout_preset_items.len == 0 { _gui_layout_preset_items = ["default", "probe", "graph", "compact"] }
+   if !is_list(_gui_env_mode_items) || _gui_env_mode_items.len == 0 { _gui_env_mode_items = ["Auto", "Studio", "Neutral", "Raw Sky", "None"] }
+   if !is_list(_gui_msaa_items) || _gui_msaa_items.len == 0 { _gui_msaa_items = ["1x off", "2x", "4x", "8x"] }
+   if !is_list(_gui_browser_tab_items) || _gui_browser_tab_items.len == 0 { _gui_browser_tab_items = ["Catalog", "Hierarchy"] }
+   if !is_list(_gui_layout_slot_items) || _gui_layout_slot_items.len == 0 { _gui_layout_slot_items = ["Slot 1", "Slot 2", "Slot 3", "Slot 4"] }
+   if !is_list(_gui_layout_slots) || _gui_layout_slots.len == 0 { _gui_layout_slots = [0, 0, 0, 0] }
+   if !is_list(_gui_shot_preset_items) || _gui_shot_preset_items.len == 0 {
+      _gui_shot_preset_items = [
+         "full_editor", "full_editor_workspace", "editor_catalog", "editor_hierarchy",
+         "editor_scene", "editor_scene_compact", "editor_view", "editor_probe",
+         "gallery_basics", "browser_catalog", "inspector_scene", "inspector_settings",
+         "graph", "profiler"
+      ]
+   }
+   if !is_list(_gui_demo_context_items) || _gui_demo_context_items.len == 0 {
+      _gui_demo_context_items = [
+         "Scene Editing", "Material Authoring", "Animation", "Lighting",
+         "Profiling", "Build / Export", "Automation", "Validation"
+      ]
+   }
+   if !is_list(_gui_accent) || _gui_accent.len < 4 { _gui_accent = [0.714, 0.627, 1.0, 1.0] }
+   if !is_list(_selection_overlay_panel_rect) || _selection_overlay_panel_rect.len < 4 { _selection_overlay_panel_rect = [0.0, 0.0, 0.0, 0.0] }
+   if !is_list(_selection_overlay_toolbar_rect) || _selection_overlay_toolbar_rect.len < 4 { _selection_overlay_toolbar_rect = [0.0, 0.0, 0.0, 0.0] }
+   if !is_list(_selection_overlay_move_rect) || _selection_overlay_move_rect.len < 4 { _selection_overlay_move_rect = [0.0, 0.0, 0.0, 0.0] }
+   if !is_list(_selection_overlay_rotate_rect) || _selection_overlay_rotate_rect.len < 4 { _selection_overlay_rotate_rect = [0.0, 0.0, 0.0, 0.0] }
+   if !is_list(_selection_overlay_scale_rect) || _selection_overlay_scale_rect.len < 4 { _selection_overlay_scale_rect = [0.0, 0.0, 0.0, 0.0] }
+   true
+}
+
 fn ensure_matrices() bool {
    "Initializes reusable engine matrices before the first scene or camera update."
    if !is_list(M_ID) || M_ID.len < 18 { M_ID = rmat.mat4_identity() }
@@ -431,5 +466,6 @@ fn ensure_matrices() bool {
    if !is_list(M_VP_SKY) || M_VP_SKY.len < 18 { M_VP_SKY = rmat.mat4_identity() }
    if !is_list(M_SP) || M_SP.len < 18 { M_SP = rmat.mat4_identity() }
    if !is_list(M_cross_t) || M_cross_t.len < 18 { M_cross_t = rmat.mat4_identity() }
+   _ensure_ui_lists()
    true
 }

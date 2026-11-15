@@ -122,7 +122,7 @@ fn create_cubemap(int face_size, list face_pixels_list) int {
          faces = faces.append(cp)
          s_i += 1
       }
-      _tex_live[id] = {"width": face_size, "height": face_size, "format": GL_RGBA, "filter": 1, "cubemap": true}
+      _tex_live[id] = {"width": face_size, "height": face_size, "format": GL_RGBA, "filter": 1, "cube_map": true}
       _tex_formats[id] = GL_RGBA
       _tex_pixels[id] = faces
       return id
@@ -140,7 +140,7 @@ fn create_cubemap(int face_size, list face_pixels_list) int {
       if !_call9("glTexImage2D", CUBE_PX + u_i, 0, GL_RGBA8, face_size, face_size, 0, GL_RGBA, GL_UNSIGNED_BYTE, face_pixels_list.get(u_i, 0)) { return -1 }
       u_i += 1
    }
-   _tex_live[id] = {"width": face_size, "height": face_size, "format": GL_RGBA, "filter": 1, "cubemap": true}
+   _tex_live[id] = {"width": face_size, "height": face_size, "format": GL_RGBA, "filter": 1, "cube_map": true}
    _tex_formats[id] = GL_RGBA
    _bound_tex = -999999
    _last_tex = id

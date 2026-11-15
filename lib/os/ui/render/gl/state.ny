@@ -1681,6 +1681,17 @@ fn end_frame() bool {
       _frame_open = false
       return true
    }
+   ;; The EGL config carries an alpha channel, and fixed-function lighting /
+   ;; texture modulation can leave alpha below 1 on opaque scene pixels. The
+   ;; compositor then blended the desktop through every glTF mesh (all models
+   ;; showed Weston's wallpaper pattern). Force an opaque backbuffer before
+   ;; presenting, as the Vulkan swapchain does with its opaque alpha mode.
+   reset_scissor_rect()
+   _call4("glColorMask", 0, 0, 0, 1)
+   _call4f("glClearColor", 0.0, 0.0, 0.0, 1.0)
+   _call1("glClear", GL_COLOR_BUFFER_BIT)
+   _call4("glColorMask", 1, 1, 1, 1)
+   _call4f("glClearColor", _clear_r, _clear_g, _clear_b, _clear_a)
    lib_uiw.swap_buffers(_win)
    _frame_open = false
    true

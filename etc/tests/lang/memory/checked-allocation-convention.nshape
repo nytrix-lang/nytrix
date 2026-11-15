@@ -1,0 +1,44 @@
+shape checked_allocation_convention {
+  family "runtime/memory"
+  generator "regression"
+  features ["ny", "test", "oom", "memory-safety"]
+  template ny-test-case
+  flags "--native-only"
+  timeout 240
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os (env, file_remove, file_write, pid, run_capture, temp_dir)
+def ny = env("NYTRIX_NY_FULL_BIN")
+assert(is_str(ny) && ny.len > 0, "full compiler is available")
+def stem = temp_dir() + "/ny-checked-alloc-" + to_str(pid())
+
+fn build(str name, str source, str route) str {
+   def path = stem + "-" + name + ".ny"
+   def executable = path + ".exe"
+   assert(is_ok(file_write(path, "use core\n" + source)), "write " + name)
+   def compiled = run_capture([ny, route, "--output=" + executable, path], [], nil, false)
+   assert(compiled.get("code", 127) == 0, "compile " + name + ": " + to_str(compiled.get("stdout", "")))
+   executable
+}
+
+for cand in ["--native-backend=x86_64", "--native-backend=llvm"] {
+   def helpers = build("helpers", "fn probe() int {\n   def p = zalloc_or_panic(64, \"probe buffer\")\n   store8(p, 42, 0)\n   assert(load8(p, 0) == 42, \"zeroed helper buffer is usable\")\n   def q = malloc_or_panic(8, \"malloc probe\")\n   store8(q, 7, 0)\n   assert(load8(q, 0) == 7, \"malloc helper buffer is usable\")\n   def grown = realloc_or_panic(q, 32, \"realloc probe\")\n   store8(grown, 9, 31)\n   assert(load8(grown, 31) == 9, \"realloc helper grows the buffer\")\n   free(grown)\n   free(p)\n   print(\"helper-ok\")\n   0\n}\nprobe()\n", cand)
+   defer { file_remove(helpers) file_remove(stem + "-helpers.ny") }
+   def normal = run_capture([helpers], [], nil, false)
+   assert(normal.get("code", 127) == 0 && to_str(normal.get("stdout", "")).contains("helper-ok") && !to_str(normal.get("stderr", "")).contains("Nytrix safe-heap: leak:"),
+          "checked helpers allocate usable buffers without leaking: " + to_str(normal.get("stderr", "")))
+   def failed = run_capture(["env", "NYTRIX_FAIL_ALLOC_AFTER=0", helpers], [], nil, false)
+   def failed_text = to_str(failed.get("stdout", "")) + to_str(failed.get("stderr", ""))
+   assert(failed.get("code", 127) == 1 && failed_text.contains("out of memory: probe buffer"),
+          "checked helper panics with its label on allocation failure: " + failed_text)
+
+   def raw = build("raw", "fn probe() int {\n   def p = zalloc(16)\n   if !p {\n      print(\"raw-null\")\n      return 0\n   }\n   free(p)\n   print(\"raw-ok\")\n   0\n}\nprobe()\n", cand)
+   defer { file_remove(raw) file_remove(stem + "-raw.ny") }
+   def raw_failed = run_capture(["env", "NYTRIX_FAIL_ALLOC_AFTER=0", raw], [], nil, false)
+   assert(raw_failed.get("code", 127) == 0 && to_str(raw_failed.get("stdout", "")).contains("raw-null"),
+          "raw zalloc keeps its null-return contract: " + to_str(raw_failed.get("stderr", "")))
+}
+0
+NY
+}

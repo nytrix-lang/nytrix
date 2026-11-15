@@ -8,8 +8,22 @@ samples and two warm-ups. Times are medians unless identified as individual
 observations. Matching checksums establish agreement for the measured input,
 not general correctness.
 
+The latest run is summarized as a runtime-ratio distribution against Host C,
+not a wall of per-fixture timing columns. Ratios below `1×` are faster than C;
+ratios above `1×` are slower. The linked raw JSON retains every fixture's
+measurements, checksums, and route metadata for exact comparisons.
+
 Prerequisites: none; these are dated measurements, not current performance
 claims.
+
+## Quick navigation
+
+- [Latest full benchmark graph](#latest-full-benchmark-run)
+- [Measurement and profiling method](performance.md)
+- [Compilation and startup results](#compilation-and-startup)
+- [Compiler build-time fixes (2026-11-12)](#compiler-build-time-fixes-2026-11-12)
+- [Runtime and code-generation investigations](#vectorization-floating-point-and-addressing)
+- [Contribution and verification procedures](../CONTRIBUTE.md)
 
 [Performance](performance.md) owns investigation methods;
 [Contributing](../CONTRIBUTE.md) owns build and verification procedures.
@@ -168,13 +182,13 @@ or parallel HM was implemented.
 
 The retained changes are confined to two compiler translation units:
 
-- `src/code/backend/ir/verify.c` builds a last-definition index during its
+- `src/code/backend/core/verify.c` builds a last-definition index during its
   existing verification setup. Scalar-class and ownership checks use constant
   time definition lookup instead of repeatedly scanning the whole function.
   Same-block reaching-store checks, recursion bounds, and all ABI/ownership
   checks remain. PHI, select, and local-store helpers avoid building analyses
   when there are no corresponding instructions.
-- `src/code/lang/lower.c` indexes immediate valid `use` declarations per module
+- `src/code/lang/ny/lower/lower.c` indexes immediate valid `use` declarations per module
   or block for each compilation snapshot. Recursive re-export lookup visits
   those declarations in the same source order, without rescanning unrelated
   function and variable declarations. Alias, wildcard, cycle, and depth rules
@@ -711,102 +725,53 @@ reverted; this correctness fix does not establish a compile-time speedup.
 
 ## Latest full benchmark run
 
-Generated automatically by the full `ny-test --bench` run at 2026-11-11 08:57:04 CET.
-Host: AMD EPYC 7642; target `x86_64`; compiler `fnv1a64:c2e30831b14c1e99`.
+Generated automatically by the full `ny-test --bench` run at 2026-11-13 21:20:02 CET.
+Host: AMD EPYC 7642; target `x86_64`; compiler `fnv1a64:a2dcf474083c09de`.
 NYR: `-O3`, profile `peak`, tier `opt`, engine `NYR`, cache `warm`.
 C: clang version 23.1.4; flags `-O3 -march=native`. NYC flags `-O3 -c`.
-Samples: 3 plus 1 warm-up; fixture workers 15, route workers 1.
+Samples: 3 plus 1 warm-up; fixture workers 20, route workers 1.
 Results: 77 fixtures; 75 passed, 1 failed or mismatched, 1 timer controls.
-Measurement qualifiers: 0 low-time, 0 noisy; 0 fixture budget misses.
+Measurement qualifiers: 0 low-time, 0 noisy; 1 fixture budget misses.
 
-| Fixture | Status | NYR | LLVM | Host C | NYC | NYR/C | LLVM/C | NYR/LLVM |
-| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| `binary-trees` | ok | 2.3µs | 2.9µs | 2.6µs | 2.4µs | 0.86x | 1.10x | 0.79x |
-| `binary` | ok | 840µs | 282µs | 2.39ms | 1.77ms | 0.35x | 0.12x | 2.98x |
-| `collatz` | ok | 82µs | 53µs | 39µs | 47µs | 2.10x | 1.36x | 1.54x |
-| `euler9` | ok | 65µs | 56µs | 22µs | 29µs | 2.99x | 2.56x | 1.17x |
-| `expression-tree` | ok | 7.18ms | 6.99ms | 7.87ms | 10.3ms | 0.91x | 0.89x | 1.03x |
-| `fannkuch` | ok | 233ms | 210ms | 218ms | 245ms | 1.06x | 0.96x | 1.11x |
-| `graph-bfs` | ok | 35.6ms | 29.4ms | 28.1ms | 40.3ms | 1.26x | 1.04x | 1.21x |
-| `havlak` | ok | 2.72ms | 2.67ms | 2.45ms | 3.17ms | 1.11x | 1.09x | 1.02x |
-| `knight` | ok | 57µs | 155µs | 33µs | 42µs | 1.74x | 4.71x | 0.37x |
-| `knucleotide` | ok | 442µs | 530µs | 373µs | 478µs | 1.19x | 1.42x | 0.83x |
-| `mandel` | ok | 129µs | 99µs | 78µs | 101µs | 1.65x | 1.27x | 1.30x |
-| `mandelbrot` | ok | 322µs | 253µs | 252µs | 430µs | 1.28x | 1.00x | 1.27x |
-| `n-body` | ok | 2.76ms | 1.99ms | 1.98ms | 2.36ms | 1.39x | 1.00x | 1.39x |
-| `nqueens` | ok | 32.1ms | 21.2ms | 20.8ms | 33.1ms | 1.54x | 1.02x | 1.51x |
-| `page-rank` | ok | 19µs | 7.6µs | 4.8µs | 19µs | 3.96x | 1.58x | 2.50x |
-| `pbkdf2` | ok | 138µs | 134µs | 1.19ms | 2.46ms | 0.12x | 0.11x | 1.03x |
-| `prime` | ok | 1.38ms | 1.28ms | 1.26ms | 1.38ms | 1.09x | 1.01x | 1.07x |
-| `queen` | ok | 74µs | 67µs | 51µs | 52µs | 1.45x | 1.30x | 1.11x |
-| `sha256` | ok | 1.43ms | 1.42ms | 939µs | 2.54ms | 1.53x | 1.51x | 1.01x |
-| `sieve` | ok | 5.49ms | 6.26ms | 4.85ms | 5.57ms | 1.13x | 1.29x | 0.88x |
-| `sor` | ok | 987µs | 938µs | 1.04ms | 1.42ms | 0.95x | 0.90x | 1.05x |
-| `spectral` | ok | 84µs | 58µs | 51µs | 93µs | 1.65x | 1.14x | 1.45x |
-| `call-chain` | ok | 530µs | 541µs | 249µs | 510µs | 2.13x | 2.17x | 0.98x |
-| `calls` | ok | 115µs | 111µs | 102µs | 124µs | 1.13x | 1.09x | 1.03x |
-| `thread-ring` | ok | 5.48ms | 5.33ms | 5.04ms | 2.88ms | 1.09x | 1.06x | 1.03x |
-| `dict-oracle` | ok | 83µs | 73µs | 28µs | 27µs | 2.99x | 2.62x | 1.14x |
-| `dict-set` | fail | 48.1ms | 104ms | 65.1ms | — | 0.74x | 1.60x | 0.46x |
-| `dict` | ok | 9.96ms | 11.9ms | 5.67ms | 6.76ms | 1.76x | 2.10x | 0.84x |
-| `hash` | ok | 4.62ms | 5.36ms | 3.95ms | 4.60ms | 1.17x | 1.35x | 0.86x |
-| `heapsort` | ok | 4.73ms | 2.77ms | 2.63ms | 5.19ms | 1.80x | 1.05x | 1.71x |
-| `iter` | ok | 368µs | 409µs | 641µs | 874µs | 0.57x | 0.64x | 0.90x |
-| `list-any-append` | ok | 9.52ms | 11.4ms | 11.4ms | 10.2ms | 0.83x | 1.00x | 0.83x |
-| `list-dynamic` | ok | 4.28ms | 4.70ms | 4.60ms | 5.49ms | 0.93x | 1.02x | 0.91x |
-| `list` | ok | 4.35ms | 4.46ms | 4.25ms | 4.45ms | 1.02x | 1.05x | 0.98x |
-| `records` | ok | 45.5ms | 51.8ms | 18.5ms | 61.9ms | 2.47x | 2.81x | 0.88x |
-| `splay` | ok | 4.24ms | 3.65ms | 3.83ms | 6.31ms | 1.11x | 0.95x | 1.16x |
-| `vector` | ok | 379µs | 381µs | 265µs | 387µs | 1.43x | 1.44x | 0.99x |
-| `bce-matrix` | ok | 2.86ms | 6.38ms | 2.29ms | 6.45ms | 1.25x | 2.79x | 0.45x |
-| `bigint-oracle` | ok | 39.5ms | 34.1ms | 3.74ms | 3.95ms | 10.57x | 9.13x | 1.16x |
-| `dgemm` | ok | 62µs | 42µs | 44µs | 63µs | 1.41x | 0.94x | 1.50x |
-| `fft` | ok | 17µs | 28µs | 14µs | 23µs | 1.15x | 1.94x | 0.59x |
-| `fibonacci` | ok | 113µs | 170µs | 131µs | 165µs | 0.86x | 1.29x | 0.67x |
-| `float-cmp-oracle` | ok | 15µs | 15µs | 14µs | 18µs | 1.10x | 1.07x | 1.03x |
-| `float` | ok | 9.71ms | 9.49ms | 9.55ms | 9.71ms | 1.02x | 0.99x | 1.02x |
-| `intops` | ok | 653µs | 636µs | 526µs | 592µs | 1.24x | 1.21x | 1.03x |
-| `linpack` | ok | 161µs | 108µs | 146µs | 286µs | 1.11x | 0.74x | 1.49x |
-| `matrix-raw` | ok | 45µs | 26µs | 28µs | 34µs | 1.60x | 0.94x | 1.70x |
-| `matrix` | ok | 22µs | 15µs | 7.4µs | 24µs | 3.04x | 2.04x | 1.49x |
-| `pbkdf2` | ok | 1.02ms | 371µs | 1.18ms | 2.44ms | 0.87x | 0.31x | 2.76x |
-| `pidigits` | ok | 9.5µs | 7.1µs | 5.9µs | 15µs | 1.61x | 1.20x | 1.34x |
-| `sha256` | ok | 784µs | 732µs | 941µs | 2.40ms | 0.83x | 0.78x | 1.07x |
-| `cmov-sort` | ok | 476µs | 693µs | 368µs | 815µs | 1.30x | 1.88x | 0.69x |
-| `currying` | ok | 4.77ms | 6.81ms | 6.0µs | 5.9µs | 791.81x | 1130.78x | 0.70x |
-| `dce` | ok | 18µs | 11µs | 3.27ms | 2.79ms | <0.01x | <0.01x | 1.66x |
-| `escape-loop` | ok | 4.76ms | 4.13ms | 4.21ms | 8.25ms | 1.13x | 0.98x | 1.15x |
-| `gcbench` | ok | 46.3ms | 47.8ms | 25.6ms | 27.9ms | 1.81x | 1.87x | 0.97x |
-| `inline` | ok | 58µs | 57µs | 26µs | 75µs | 2.20x | 2.16x | 1.02x |
-| `licm-math` | ok | 4.68ms | 4.71ms | 4.78ms | 5.41ms | 0.98x | 0.99x | 0.99x |
-| `licm` | ok | 77µs | 85µs | 39µs | 102µs | 1.95x | 2.15x | 0.91x |
-| `loop-unswitch` | ok | 4.52ms | 4.90ms | 4.28ms | 4.55ms | 1.06x | 1.14x | 0.92x |
-| `loop` | ok | 1.16ms | 1.16ms | 1.04ms | 1.16ms | 1.12x | 1.11x | 1.00x |
-| `mixed-static-island` | ok | 18µs | 14µs | 28µs | 28µs | 0.63x | 0.51x | 1.24x |
-| `native-oracle` | ok | 61µs | 53µs | 27µs | 25µs | 2.28x | 2.00x | 1.14x |
-| `recursive-fibonacci` | ok | 291ns | 221ns | 220ns | 240ns | 1.32x | 1.00x | 1.32x |
-| `startup` | ok | 29ns | 28ns | 28ns | 28ns | n/a | n/a | n/a |
-| `straight` | ok | 20µs | 20µs | 20µs | 20µs | 1.01x | 1.01x | 1.00x |
-| `tce-recursion` | ok | 93µs | 106µs | 83µs | 93µs | 1.12x | 1.28x | 0.87x |
-| `time-profile` | ok | 47µs | 44µs | 33µs | 35µs | 1.43x | 1.34x | 1.07x |
-| `append-scaling` | ok | 9.91ms | 7.75ms | 6.48ms | 18.5ms | 1.53x | 1.20x | 1.28x |
-| `fasta` | ok | 1.34ms | 1.53ms | 977µs | 1.17ms | 1.37x | 1.56x | 0.88x |
-| `json-parser` | ok | 15.5ms | 10.7ms | 12.3ms | 24.9ms | 1.25x | 0.87x | 1.45x |
-| `knucleotide` | ok | 107µs | 74µs | 71µs | 104µs | 1.50x | 1.03x | 1.45x |
-| `repeat` | ok | 85.8ms | 83.9ms | 85.3ms | 119ms | 1.01x | 0.98x | 1.02x |
-| `revcomp` | ok | 6.0µs | 5.2µs | 2.7µs | 8.1µs | 2.24x | 1.95x | 1.15x |
-| `string` | ok | 181µs | 206µs | 189µs | 272µs | 0.96x | 1.09x | 0.88x |
-| `word-frequency-scan` | ok | 3.04ms | 2.34ms | 2.24ms | 3.25ms | 1.36x | 1.04x | 1.30x |
-| `word-frequency` | ok | 4.73ms | 4.76ms | 3.74ms | 5.93ms | 1.26x | 1.27x | 0.99x |
+### Runtime relative to Host C
+
+Fixture medians are grouped by **Nytrix / C time**: lower is faster. Only correctness-passing, stable, above-timer-floor comparisons are counted; the `1×` boundary means parity. This distribution is an overview, not a replacement for per-fixture samples in the linked raw report.
+
+<svg width="880" height="330" viewBox="0 0 880 330" role="img" aria-label="Distribution of NYR and LLVM benchmark ratios relative to Host C">
+<text x="440" y="22" text-anchor="middle" font-size="16" fill="currentColor">Workloads by relative runtime</text>
+<line x1="82" y1="232" x2="780" y2="232" stroke="var(--border)" stroke-width="1"/><text x="70" y="236" text-anchor="end" font-size="11" fill="var(--muted)">0</text>
+<line x1="82" y1="186" x2="780" y2="186" stroke="var(--border)" stroke-width="1"/><text x="70" y="190" text-anchor="end" font-size="11" fill="var(--muted)">9</text>
+<line x1="82" y1="140" x2="780" y2="140" stroke="var(--border)" stroke-width="1"/><text x="70" y="144" text-anchor="end" font-size="11" fill="var(--muted)">18</text>
+<line x1="82" y1="94" x2="780" y2="94" stroke="var(--border)" stroke-width="1"/><text x="70" y="98" text-anchor="end" font-size="11" fill="var(--muted)">27</text>
+<line x1="82" y1="48" x2="780" y2="48" stroke="var(--border)" stroke-width="1"/><text x="70" y="52" text-anchor="end" font-size="11" fill="var(--muted)">36</text>
+<rect x="110" y="222" width="34" height="10" rx="3" fill="var(--c1)"/><text x="127" y="218" text-anchor="middle" font-size="11" fill="currentColor">2</text>
+<rect x="152" y="207" width="34" height="25" rx="3" fill="var(--c2)"/><text x="169" y="203" text-anchor="middle" font-size="11" fill="currentColor">5</text>
+<text x="148" y="250" text-anchor="middle" font-size="11" fill="var(--muted)"><0.5×</text>
+<rect x="252" y="202" width="34" height="30" rx="3" fill="var(--c1)"/><text x="269" y="198" text-anchor="middle" font-size="11" fill="currentColor">6</text>
+<rect x="294" y="202" width="34" height="30" rx="3" fill="var(--c2)"/><text x="311" y="198" text-anchor="middle" font-size="11" fill="currentColor">6</text>
+<text x="290" y="250" text-anchor="middle" font-size="11" fill="var(--muted)">0.5–0.8×</text>
+<rect x="394" y="94" width="34" height="138" rx="3" fill="var(--c1)"/><text x="411" y="90" text-anchor="middle" font-size="11" fill="currentColor">27</text>
+<rect x="436" y="54" width="34" height="178" rx="3" fill="var(--c2)"/><text x="453" y="61" text-anchor="middle" font-size="11" fill="currentColor">35</text>
+<text x="432" y="250" text-anchor="middle" font-size="11" fill="var(--muted)">0.8–1.25×</text>
+<rect x="536" y="105" width="34" height="127" rx="3" fill="var(--c1)"/><text x="553" y="101" text-anchor="middle" font-size="11" fill="currentColor">25</text>
+<rect x="578" y="146" width="34" height="86" rx="3" fill="var(--c2)"/><text x="595" y="142" text-anchor="middle" font-size="11" fill="currentColor">17</text>
+<text x="574" y="250" text-anchor="middle" font-size="11" fill="var(--muted)">1.25–2×</text>
+<rect x="678" y="156" width="34" height="76" rx="3" fill="var(--c1)"/><text x="695" y="152" text-anchor="middle" font-size="11" fill="currentColor">15</text>
+<rect x="720" y="171" width="34" height="61" rx="3" fill="var(--c2)"/><text x="737" y="167" text-anchor="middle" font-size="11" fill="currentColor">12</text>
+<text x="716" y="250" text-anchor="middle" font-size="11" fill="var(--muted)">≥2×</text>
+<text x="26" y="140" text-anchor="middle" font-size="11" fill="var(--muted)">fixture count</text>
+<rect x="590" y="295" width="12" height="12" rx="2" fill="var(--c1)"/><text x="608" y="306" font-size="12" fill="currentColor">NYR (75)</text><rect x="708" y="295" width="12" height="12" rx="2" fill="var(--c2)"/><text x="726" y="306" font-size="12" fill="currentColor">LLVM (75)</text>
+</svg>
+
 
 Checksum and execution failures:
 
 | Fixture | Status | NYR checksum | LLVM checksum | C checksum | NYC checksum | Return codes (NYR/LLVM/C/NYC) | NYC diagnostic |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `dict-set` | fail | `749999` | `749999` | `749999` | `—` | 0/0/0/139 | NYC execution failed (exit 139, failures 9) |
+| `currying` | fail | `14017005` | `14017005` | `14017005` | `—` | 0/0/0/139 | NYC execution failed (exit 139, failures 9) |
 
 The empty timer control is shown for completeness and is excluded from workload ratios.
-Raw report: `build/bench-reports/bench-20261111-085551-3992942.json`.
+Raw report: `build/bench-reports/bench-20261113-211904-2583504.json`.
 
 <!-- AUTO_BENCHMARK_RESULTS_END -->
 
@@ -1673,6 +1638,243 @@ the reference and candidate. An earlier aggregate SMT check reached its 40 s
 timeout on both the reference and initial candidate, and supplies no passing
 execution result. The normal `ny-full` build and focused range, boolean, VRP,
 and bounds-check drivers also passed in the shared checkout.
+
+### Runtime gate investigation (2026-11-13)
+
+`./make bench --jobs 4 --bench-run 5 --bench-warmup 2` completed all 77
+fixtures with matching checksums and no execution failures. Its JSON classified
+62 rows as `ok`, 14 as unstable, and `gcbench` as a fixture-budget regression.
+Sixty fixtures had at least one comparable NYR/C, LLVM/C, or NYC/C ratio above
+1.2x. The EPYC 7642 host was shared with compiler and kernel builds (load roughly
+39–50, 66 GB available in `/tmp`). This is investigation evidence, not an idle
+host gate pass. The report precedes the scalar and wrapper changes below.
+
+The `iter` post-inline failure exposed two separate vectorizer assumptions:
+unrolling copied only instructions before the induction update, potentially
+omitting a later reduction update; vector accumulation emitted the final
+reduction at a named successor after an unlabeled exit had already observed it.
+Unrolling now requires the reduction update within its cloned prefix. The
+accumulator result is emitted at the actual exit block, preserving vectorization
+and dominance of exit observations. The vector metadata driver checks both
+orders and exit observations with vector accumulation enabled and disabled.
+Native and LLVM return checksum `400020000`.
+
+The C `iter` reference now uses preallocated, zero-initialized buffers, matching
+the Ny fixture's allocation scope instead of timing dynamic append growth.
+This changes the reference baseline. A focused 5+2 run reported NYR 34 µs and
+LLVM 27 µs; a later cold run under contention reported noisy 72/52 µs results.
+Neither focused result replaces the full gate. `time-profile` also remains
+noise-sensitive; its status has not been hidden or its samples discarded.
+
+The `iter` reduction also exposed a loop-phi carry gap in register allocation.
+`coalesce_loop_edges` rejected any phi edge whose edge block had more than one
+predecessor, even when the copy source was defined in that edge block. The
+accumulator phi (header block 13, `v279`) therefore spilled and reloaded every
+iteration. The carry now accepts a source defined on the edge and uses that
+edge's live segment; only a source that must arrive across the branch still
+requires a unique predecessor and a terminator-ending segment. After the fix,
+the hot latch is `vpaddq ymm10, ymm10, ymm9` with the accumulator resident in
+`ymm10`; the only remaining stack traffic is the loop-exit store/reload at
+`[rbp-2352]`. Focused 5+2 warm runs pinned to an idle CPU reported checksum
+`400020000`, NYR 357–369 µs, LLVM 356–364 µs, C 267–275 µs, NYC 304–307 µs
+(NYR/C 1.30–1.38x, NYR/LLVM 1.00–1.02x).
+
+That harness ratio is not a code comparison. The same fixture built as a
+standalone AOT executable measured 288–307 µs against C at 266–276 µs
+(1.08–1.12x). Both kernels fault the same pages inside the timed region (about
+80 in map, 78 in reverse, none in sum), but `ny -run` starts with about 6,300
+user page faults against C's 260. Pre-touching 24.6 MB in the standalone AOT
+process raised it to about 342 µs and C to about 351 µs, reproducing the
+harness range. The extra cost is first-touch allocation amplified by the
+compiler's resident set, not generated loop code. The result is also
+cache-state sensitive: forcing a fresh stencil or JIT compile
+(`NYTRIX_STENCIL_CACHE=0` or `NYTRIX_JIT_CACHE=0`) pre-faults the heap during
+compilation and the same timed region reports about 34 µs, while the default
+warm-cache harness reports about 350 µs. Keep the cache state fixed when
+comparing and do not read the cold-compile figure as a code result.
+
+One real code gap remains in this fixture: the reverse loop is scalar because
+the affine vectorizer rejects negative strides (`access.stride < 0` in
+`loop_vectorize.c`), while C emits a 4-lane `vpermq` reverse load. It accounts
+for roughly 10 µs of the standalone gap and is left as a vectorizer item.
+
+The new `phi_elim_deep_vec8` regression also showed that vector phi
+elimination materialized `vec8.load.i64`/`vec8.store.i64` without the
+`MAY_TRAP` effect bit required by the verifier, and that its hand-built loop
+used a backedge label that was not a CFG predecessor. Both are fixed and the
+driver passes.
+
+Scalar assembly review found that `3 * n` retained a constant left operand and
+missed the x86 immediate/LEA selection used by `n * 3`. Machine lowering now
+normalizes integer commutative operands without changing floating operations.
+Native execution tests cover both operand orders, factors 3/5/9, large and
+negative constants, live inputs, and wrapping limits. The boolean peephole also
+removes positive-polarity comparisons of an exact `x & 1` result. Its regression
+checks negative inputs, integer extremes, both mask operand orders, and
+comparisons against -1/0/1/2. Native `collatz` assembly uses LEA and omits the
+previous materialized equality comparison; its checksum remains `178`.
+
+## Collatz mask-test fusion (2026-11-13)
+
+The collatz inner loop lowers `if (n & 1) == 1 { n = 3*n+1 } else { n >>= 1 }`
+to a SELECT whose condition is the mask `n & 1` itself (not a `==`/`!=` compare
+against it). The x86-64 NIR emitter in
+`src/code/backend/mach/arch/x86/machine.c` now recognizes a SELECT whose
+condition is directly `AND(x, 1)` and emits `testq $1, %rax` + `cmovne`, dropping
+the `and` instruction and the redundant register copies entirely. The AND's
+stack home is elided, and the source value stays live through the SELECT for
+register coloring.
+
+Before: `mov n,%rax; and $1,%rax; mov n,%r9; sar $1,%r9; ...; test %rax,%rax; cmovne`.
+After: `sar $1,%r9; lea (%r9,%r9,2),%r9; add $1,%r9; test $1,%rax; cmovne`.
+
+Checksum `178` matches C/LLVM/NYC. Focused timing shows the Ny kernel at
+~12µs vs C ~8.5µs (~1.4x; the reported 2.9x was a `ny--time` JIT-run overhead
+artifact, not a kernel gap). Whole-program Ny time improved from ~15ms to
+~12ms, still dominated by runtime and page-fault cost rather than the kernel.
+
+A matching object-encoder pass was prototyped in `src/code/backend/mach/arch/x86/object.c`
+but produced a checksum mismatch (`9` vs `178`) and was reverted; the NIR
+emitter path is sufficient and correct.
+
+A cold GCC rerun exposed an independent reference-wrapper defect: macro-renaming
+C `main` removes its implicit successful return. The timer wrapper now inserts
+an explicit final zero return into that body, preserving explicit early failure
+returns. Its body scan skips comments and quoted braces. The wrapper regression
+executes fallthrough, explicit failure, nested-block, quoted-brace, and argc/argv
+cases through the selected host compiler.
+
+Before runtime work was prioritized, a current-tree editor object compile with
+six caches disabled took 99.24 s wall and 2,772,484 KiB peak RSS. Reported phases
+were 10.36 s type validation, 12.37 s code generation, and 85.69 s object emission;
+phase timings may be nested and must not be summed. A 10-second CPU sample put
+19.28% of samples in `nyr_find_module_in_root_cached`. That helper now rejects
+statement kinds that cannot contain modules before hashing/caching guaranteed
+misses. Four existing alias/reexport/module fixtures passed cold. No isolated
+compile-time speedup or 15-second acceptance result is claimed.
+
+### Compiler build-time fixes (2026-11-12)
+
+Machine: AMD EPYC 7642, 96 threads, 62 GB, shared with other agents. Cold means
+the native, AOT, JIT, stencil, and stdlib caches disabled with a private build
+of the current tree. These are single-session measurements taken at load 8–20,
+not gate evidence. Twelve of the thirteen root projects meet 15 s; no UI
+project does, so the all-project target stays open.
+
+| Project (`-o`, cold) | wall | dominant phase |
+| --- | --- | --- |
+| herodoc | 0.36 s | parse/codegen |
+| ffi | 1.15 s | codegen |
+| args, 110, hexdump, matrix, conway | 2.6–3.5 s | codegen, emit |
+| ant, brainfuck, donut, server | 3.8–4.3 s | emit |
+| sound | 8.7 s | emit |
+| animation | 26.6 s | emit 19.5 s |
+| pong | 36.5 s | emit 28.0 s |
+| term | 51.8 s | emit 36.1 s |
+| monitor | 54.7 s | emit 43.1 s |
+| synth | 60.6 s | emit 49.1 s |
+| input | 95.1 s | emit 78.2 s |
+| engine | 87.0 s | emit 72.9 s |
+| editor | 73.2 s | emit 60.6 s |
+| xtool | 6.8 s | emit 5.1 s |
+
+Emit object is the dominant phase in every UI project. Per-project fixes in
+this batch removed the HM blockers in the UI library (Wayland clipboard
+wrappers, asset font/catalog defaults, engineering batch helpers, camera
+`scale`). The remaining inference fixes made heterogeneous list literals
+`list<any>` and bare
+`list`/`set`/`tuple`/`dict` annotations use `any` elements; the `gf` scalar
+overloads were rewritten from a comptime template into three explicit
+functions, which removed `editor`'s nested-dict error and `xtool`'s
+`expected gf, got int` error. A per-vreg first/last live-range pre-check in
+`nyr_mach_regalloc_segment_at` measured no gain (animation emit 25.4 s vs
+24.6 s, input 75.5 s vs 73.2 s) and was reverted.
+
+The inliner was the other dominant cost. `nyr_inline_general` rebuilt the
+caller CFG topology, loop depths, and type map after every committed splice, so
+a 63k-instruction driver with thousands of tiny calls became quadratic. It now
+stops after 128 splices per function (`NYTRIX_INLINE_MAX_SPLICES`) and skips
+bodies above 100k instructions (`NYTRIX_INLINE_BODY_CAP`). Functions with fewer
+than 128 inlinable calls are unchanged. This took `editor` from 270.7 s (at a
+512-splice cap) to 205.8 s and `engine` from 122.9 s to 93.4 s. Indexing float
+and vector segments by the instruction where they start or end (the scalar
+allocator already did this) then took `engine` to 87.0 s. Finally, the
+loop-edge coalescer's per-candidate `segment_in_block_vreg` scan was replaced
+with a per-vreg index, and then with a one-time `(vreg, block) -> unique
+segment` hash table; a block can hold thousands of segments and a long-lived
+value can have thousands of its own, so both scans were quadratic. That took
+`editor` from 205.8 s to 73.2 s (emit 189.5 s to 60.6 s). The `engine` and
+`animation` objects are byte-identical before and after the index changes
+(SHA-256 prefixes `f1a8e01a67f1f0a5` and `14a899e7b7b03d59`); engine re-runs
+ranged 85.8–93.3 s (emit 72.2–79.2 s) at load ~20. The focused benchmark
+fixtures still pass, but a full runtime benchmark comparison at this cap is
+still owed.
+
+NYIR type-map initialization now allocates flag regions after type propagation:
+one region per class observed in the function, plus one zeroed region shared
+by absent classes. Typed functions no longer allocate and clear fourteen
+full-size value/local arrays when fewer than seven classes are present. The
+earlier profile attributed 1.85% self time to type-map initialization; this
+allocation change has no matched before/after compile-time measurement, so no
+speedup is claimed and the build-time acceptance items remain open.
+
+Run route `--run=native` with the mock replay environment: pong 36–41 s, input
+109 s, engine 142 s (349 s before this batch's fixes). The default LLVM run
+route takes pong 56 s and input 102 s, and engine segfaults in LLVM
+SimplifyCFG after about 115 s on a malformed PHI (the unmodified release
+compiler does the same, so it is separate from the native route).
+
+Remaining engine native time (87.0 s): encode 72.9 s. In the profile taken
+before the segment index, `nyr_mach_regalloc_segment_at` was 12.3 % self,
+`coalesce_loop_edges` 8.2 %, `mach_float_begin_segments` 6.6 %, and
+`mach_float_end_segments` 2.4 %. The float and vector begin/end scans now use
+per-instruction start/end indexes, like the scalar scans;
+`mach_flush_float_to_home_mode` still scans every vreg once per block. A
+persistent per-function object cache is the larger lever for iteration time.
+`editor` still spends 60.6 s in emit on its giant function, so it remains far
+from the 15 s target even though it now compiles.
+
+### Rejected NYIR CFG-boundary scan experiment (2026-11-12)
+
+On the same AMD EPYC 7642 host, a focused `sound.ny` native compile sampled
+`nyr_cfg_build_impl` at 4.04% of 520 CPU-clock samples. The experiment removed
+its temporary boundary bitmap and one full scan, calculating block starts
+directly in two passes. It passed the CFG regression and x86-64 target suites;
+the emitted object stayed byte-identical
+(`7df680223713507fe982ffb1cec8cb25bbb8412b96990520812393dc5dc2f917`).
+
+The A/B used `build/ny-full-before-cfg` (BuildID
+`994641023b6455a692f0dd04ff5036a9e0809a2f`) and the candidate `ny-full`
+(BuildID `3f061e09c999dd80dc81a1a54bd67ecd807bbaab`) with:
+
+```bash
+NYTRIX_STD_CACHE=0 NYTRIX_STD_BC_CACHE_AUTO=0 \
+  perf stat -r 5 -e task-clock,cycles,instructions -- \
+  build/release/ny-full --no-progress --native-only --opt-level=3 \
+  --run=none --output=build/perf-sound-time.o etc/projects/sound.ny
+```
+
+The same command was run against each compiler twice, in baseline/candidate
+then candidate/baseline order. `nice -n 19` was applied to all runs. The host
+was shared with the NYC Linux build. The user later clarified that it was run
+with `-j32`, not `-j16` as initially recorded; the observed load averages were
+16–20. The OS page cache was not cleared. These timings were taken under
+substantial contention; retain them only as a rejected exploratory run, not
+evidence of a real speedup or regression:
+
+| Order | Baseline elapsed | Candidate elapsed |
+| --- | ---: | ---: |
+| First pair | 7.990 s ± 0.22% | 8.168 s ± 0.43% |
+| Reverse pair | 8.067 s ± 0.18% | 8.104 s ± 0.15% |
+| Mean of pair means | 8.028 s | 8.136 s |
+
+Candidate task-clock and instruction counts were also slightly higher. Its
+single CPU-clock profile sampled `nyr_cfg_build_impl` at 2.91% of 516 samples,
+but that small sample-count shift did not correspond to an end-to-end gain.
+The candidate was reverted; no speedup is claimed. The baseline compiler
+passed `cfg_simplify`, the candidate passed `cfg_simplify` and all 166 x86-64
+target tests, and both compilers emitted the identical object above. This
+experiment did not change the open compile-time acceptance items.
 
 ### Native JIT relocation lookup
 

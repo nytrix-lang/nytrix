@@ -1,0 +1,23 @@
+shape extern_alias_root_global_clash {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "codegen"]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect compile_and_run
+  expect_message "EXTERN_ALIAS_ROOT_GLOBAL_CLASH_OK"
+  source ny <<'NY'
+use core
+module cfd(
+   dup_fd,
+){
+   extern "" {
+      fn _c_dup(i32 fd) i32 as "dup"
+   }
+   fn dup_fd(int fd) int { int(_c_dup(fd)) }
+}
+mut dup = "cell"
+assert(dup == "cell" && cfd.dup_fd(1) > 2, "extern aliased to a C name beside a same-named root global")
+print("EXTERN_ALIAS_ROOT_GLOBAL_CLASH_OK")
+NY
+}

@@ -93,7 +93,7 @@ fn _pipe_log_ms(str stage, any t0) f64 {
    ms
 }
 
-fn _shader_ui_dir() str { "etc/assets/shaders/ui" }
+fn _shader_ui_dir() str { "etc/assets/shaders" }
 
 fn _shader_ui_source_root() str {
    if is_str(_shader_ui_source_root_cache) && _shader_ui_source_root_cache.len > 0 { return _shader_ui_source_root_cache }

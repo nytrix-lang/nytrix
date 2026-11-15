@@ -25,6 +25,7 @@ use core.error
 use core.str
 use core.math.crypto.encoding.base
 use core.math.big
+use core.math.checked (checked_add, checked_mul)
 use core.math.simmd as simmd
 
 fn _bin_max_int(int a, int b) int { a > b ? a : b }
@@ -427,8 +428,12 @@ fn _bytes_to_hex(list<int> b) str {
    "Convert bytes list to hex string."
    def n = b.len
    if n <= 0 { return "" }
-   def out_len = n * 2
-   def out = malloc(out_len + 1)
+   def out_len_result = checked_mul(n, 2)
+   if !is_ok(out_len_result) { return "" }
+   def out_len = int(unwrap(out_len_result))
+   def out_size_result = checked_add(out_len, 1)
+   if !is_ok(out_size_result) { return "" }
+   def out = malloc(int(unwrap(out_size_result)))
    if !out { return "" }
    mut i, p = 0, 0
    while i < n {
@@ -652,7 +657,9 @@ fn _bytes_to_str(list<int> b) str {
    "Convert bytes list to string."
    def n = b.len
    if n <= 0 { return "" }
-   def out = malloc(n + 1)
+   def out_size_result = checked_add(n, 1)
+   if !is_ok(out_size_result) { return "" }
+   def out = malloc(int(unwrap(out_size_result)))
    if !out { return "" }
    mut i = 0
    while i < n {
@@ -831,7 +838,9 @@ fn zero_bytes(int n) list {
 fn from_list(list xs) str {
    "Converts a list of byte values into a NUL-terminated byte string."
    def n = xs.len
-   def out = malloc(n + 1)
+   def out_size_result = checked_add(n, 1)
+   if !is_ok(out_size_result) { return "" }
+   def out = malloc(int(unwrap(out_size_result)))
    if !out { return "" }
    mut i = 0
    while i < n {

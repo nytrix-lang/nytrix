@@ -437,6 +437,10 @@ fn linear_to_srgb_u8(any x) int {
 }
 
 @jit
+fn _texel_linear(any data, int i) f64 {
+   _srgb_to_linear_chan_f64(float(load8(data, i) & 255) / 255.0)
+}
+
 fn image_sample_linear_rgb_uv(any im, any u, any v) list {
    "Samples an RGBA image dictionary in linear RGB using wrapped U and clamped V."
    if !is_dict(im) { return [0.0, 0.0, 0.0] }
@@ -444,12 +448,16 @@ fn image_sample_linear_rgb_uv(any im, any u, any v) list {
    def w = int(im.get("width", 0))
    def h = int(im.get("height", 0))
    if !data || !is_str(data) || w <= 0 || h <= 0 { return [0.0, 0.0, 0.0] }
-   mut uu = float(u) - floor(float(u))
-   mut vv = clamp(float(v), 0.0, 1.0)
-   def fx, fy = uu * float(w) - 0.5, vv * float(h) - 0.5
-   mut x0, y0 = int(floor(fx)), int(floor(fy))
-   mut x1, y1 = x0 + 1, y0 + 1
-   def tx, ty = fx - float(x0), fy - float(y0)
+   def f64 uu = float(u) - float(floor(float(u)))
+   def f64 vv = float(clamp(float(v), 0.0, 1.0))
+   def f64 fx = uu * float(w) - 0.5
+   def f64 fy = vv * float(h) - 0.5
+   mut int x0 = int(floor(fx))
+   mut int y0 = int(floor(fy))
+   mut int x1 = x0 + 1
+   mut int y1 = y0 + 1
+   def f64 tx = fx - float(x0)
+   def f64 ty = fy - float(y0)
    while x0 < 0 { x0 += w }
    while x1 < 0 { x1 += w }
    x0, x1 = x0 % w, x1 % w
@@ -457,43 +465,20 @@ fn image_sample_linear_rgb_uv(any im, any u, any v) list {
    if y1 < 0 { y1 = 0 }
    if y0 >= h { y0 = h - 1 }
    if y1 >= h { y1 = h - 1 }
-   def i00, i10 = ((y0 * w) + x0) * 4, ((y0 * w) + x1) * 4
-   def i01, i11 = ((y1 * w) + x0) * 4, ((y1 * w) + x1) * 4
-   def c00 = [
-      _srgb_to_linear_chan_f64(float(load8(data, i00 + 0) & 255) / 255.0),
-      _srgb_to_linear_chan_f64(float(load8(data, i00 + 1) & 255) / 255.0),
-      _srgb_to_linear_chan_f64(float(load8(data, i00 + 2) & 255) / 255.0)
-   ]
-   def c10 = [
-      _srgb_to_linear_chan_f64(float(load8(data, i10 + 0) & 255) / 255.0),
-      _srgb_to_linear_chan_f64(float(load8(data, i10 + 1) & 255) / 255.0),
-      _srgb_to_linear_chan_f64(float(load8(data, i10 + 2) & 255) / 255.0)
-   ]
-   def c01 = [
-      _srgb_to_linear_chan_f64(float(load8(data, i01 + 0) & 255) / 255.0),
-      _srgb_to_linear_chan_f64(float(load8(data, i01 + 1) & 255) / 255.0),
-      _srgb_to_linear_chan_f64(float(load8(data, i01 + 2) & 255) / 255.0)
-   ]
-   def c11 = [
-      _srgb_to_linear_chan_f64(float(load8(data, i11 + 0) & 255) / 255.0),
-      _srgb_to_linear_chan_f64(float(load8(data, i11 + 1) & 255) / 255.0),
-      _srgb_to_linear_chan_f64(float(load8(data, i11 + 2) & 255) / 255.0)
-   ]
-   def a0 = [
-      c00[0] + (c10[0] - c00[0]) * tx,
-      c00[1] + (c10[1] - c00[1]) * tx,
-      c00[2] + (c10[2] - c00[2]) * tx
-   ]
-   def a1 = [
-      c01[0] + (c11[0] - c01[0]) * tx,
-      c01[1] + (c11[1] - c01[1]) * tx,
-      c01[2] + (c11[2] - c01[2]) * tx
-   ]
-   [
-      a0[0] + (a1[0] - a0[0]) * ty,
-      a0[1] + (a1[1] - a0[1]) * ty,
-      a0[2] + (a1[2] - a0[2]) * ty
-   ]
+   def int i00 = ((y0 * w) + x0) * 4
+   def int i10 = ((y0 * w) + x1) * 4
+   def int i01 = ((y1 * w) + x0) * 4
+   def int i11 = ((y1 * w) + x1) * 4
+   ;; Scalar bilinear blend per channel. The previous version built and
+   ;; indexed small f64 lists and returned near-zero colour for bright texels.
+   def f64 w00 = (1.0 - tx) * (1.0 - ty)
+   def f64 w10 = tx * (1.0 - ty)
+   def f64 w01 = (1.0 - tx) * ty
+   def f64 w11 = tx * ty
+   def f64 r = _texel_linear(data, i00) * w00 + _texel_linear(data, i10) * w10 + _texel_linear(data, i01) * w01 + _texel_linear(data, i11) * w11
+   def f64 g = _texel_linear(data, i00 + 1) * w00 + _texel_linear(data, i10 + 1) * w10 + _texel_linear(data, i01 + 1) * w01 + _texel_linear(data, i11 + 1) * w11
+   def f64 b = _texel_linear(data, i00 + 2) * w00 + _texel_linear(data, i10 + 2) * w10 + _texel_linear(data, i01 + 2) * w01 + _texel_linear(data, i11 + 2) * w11
+   [r, g, b]
 }
 
 @jit
@@ -537,11 +522,23 @@ fn _importance_sample_ggx(any xi_x, any xi_y, any roughness, any N) list {
       ])
 }
 
+fn _lin_bilerp(ptr lin, int p00, int p10, int p01, int p11, f64 w00, f64 w10, f64 w01, f64 w11) f64 {
+   def f64 a = float(load64_f64(lin, p00))
+   def f64 b = float(load64_f64(lin, p10))
+   def f64 c = float(load64_f64(lin, p01))
+   def f64 d = float(load64_f64(lin, p11))
+   a * w00 + b * w10 + c * w01 + d * w11
+}
+
 fn generate_spec_env_slab(any im, int base_w=256) any {
-   "Generates a packed specular environment mip slab from an equirectangular RGBA image."
+   "Generates a packed specular environment mip slab from an equirectangular RGBA image.
+   Each level is GGX-prefiltered for its roughness. The source is linearised
+   once and the tangent-space sample set is built once per level, so the inner
+   loop is plain arithmetic with no list, dict, or box allocation."
    if !is_dict(im) { return 0 }
    def src_w, src_h = int(im.get("width", 0)), int(im.get("height", 0))
-   if src_w <= 0 || src_h <= 0 { return 0 }
+   def data = im.get("data", 0)
+   if src_w <= 0 || src_h <= 0 || !data || !is_str(data) { return 0 }
    mut w0 = clamp(int(base_w), 64, 512)
    if w0 > src_w { w0 = src_w }
    def h0 = max(1, w0 / 2)
@@ -557,63 +554,143 @@ fn generate_spec_env_slab(any im, int base_w=256) any {
    }
    def slab = malloc(total)
    if !slab { return 0 }
+   ;; Linear RGB of the source, 3 f64 per texel.
+   def lut = malloc(256 * 8)
+   def lin = malloc(src_w * src_h * 24)
+   def samples = malloc(64 * 24)
+   if !lut || !lin || !samples {
+      free(slab)
+      if lut { free(lut) }
+      if lin { free(lin) }
+      if samples { free(samples) }
+      return 0
+   }
+   mut li = 0
+   while li < 256 {
+      store64_f64(lut, _srgb_to_linear_chan_f64(float(li) / 255.0), li * 8)
+      li += 1
+   }
+   def int texels = src_w * src_h
+   mut ti = 0
+   while ti < texels {
+      def int sp = ti * 4
+      def int dp = ti * 24
+      store64_f64(lin, float(load64_f64(lut, (load8(data, sp) & 255) * 8)), dp)
+      store64_f64(lin, float(load64_f64(lut, (load8(data, sp + 1) & 255) * 8)), dp + 8)
+      store64_f64(lin, float(load64_f64(lut, (load8(data, sp + 2) & 255) * 8)), dp + 16)
+      ti += 1
+   }
+   def f64 fsw, fsh = float(src_w), float(src_h)
    mut off = 0
    mut level = 0
    while level < levels {
       def w, h = max(1, w0 >> level), max(1, h0 >> level)
-      def roughness = (levels > 1) ? float(level) / float(levels - 1) : 0.0
+      def f64 roughness = (levels > 1) ? float(level) / float(levels - 1) : 0.0
       mut sample_count = 1
       if level > 0 {
          if roughness < 0.15 { sample_count = 64 }
          elif roughness < 0.5 { sample_count = 32 }
          else { sample_count = 16 }
       }
+      ;; GGX half vectors in tangent space depend only on the level.
+      def f64 a = roughness * roughness
+      def f64 a2 = a * a
+      mut si = 0
+      while si < sample_count {
+         def f64 xi_x = float(si) / float(sample_count)
+         def f64 xi_y = _radical_inverse_vdc32(si)
+         def f64 phi_s = 6.283185307179586 * xi_x
+         def f64 cos_t = float(sqrt((1.0 - xi_y) / max(1.0 + (a2 - 1.0) * xi_y, 1e-6)))
+         def f64 sin_t = float(sqrt(max(1.0 - cos_t * cos_t, 0.0)))
+         store64_f64(samples, float(cos(phi_s)) * sin_t, si * 24)
+         store64_f64(samples, float(sin(phi_s)) * sin_t, si * 24 + 8)
+         store64_f64(samples, cos_t, si * 24 + 16)
+         si += 1
+      }
       mut y = 0
       while y < h {
-         def vv = (float(y) + 0.5) / float(h)
-         def elev = (0.5 - vv) * 3.141592653589793
-         def sin_e = sin(elev)
-         def cos_e = cos(elev)
+         def f64 vv = (float(y) + 0.5) / float(h)
+         def f64 elev = (0.5 - vv) * 3.141592653589793
+         def f64 sin_e = float(sin(elev))
+         def f64 cos_e = float(cos(elev))
          mut x = 0
          while x < w {
-            def uu = (float(x) + 0.5) / float(w)
-            def phi = (uu - 0.5) * 6.283185307179586
-            def N = _v3_norm([cos_e * cos(phi), sin_e, cos_e * sin(phi)])
-            mut c0, c1 = 0.0, 0.0
-            mut c2 = 0.0
-            mut weight = 0.0
-            if roughness <= 0.0 || sample_count <= 1 {
-               def uv = env_dir_to_uv(N)
-               def s = image_sample_linear_rgb_uv(im, uv.get(0, 0.0), uv.get(1, 0.0))
-               c0, c1 = s.get(0, 0.0), s.get(1, 0.0)
-               c2 = s.get(2, 0.0)
-               weight = 1.0
-            } else {
-               mut i = 0
-               while i < sample_count {
-                  def xi_x, xi_y = float(i) / float(sample_count), _radical_inverse_vdc32(i)
-                  def H = _importance_sample_ggx(xi_x, xi_y, roughness, N)
-                  def VoH = max(_v3_dot(N, H), 0.0)
-                  def L = _v3_norm([
-                        2.0 * VoH * H.get(0, 0.0) - N.get(0, 0.0),
-                        2.0 * VoH * H.get(1, 0.0) - N.get(1, 0.0),
-                        2.0 * VoH * H.get(2, 0.0) - N.get(2, 0.0)
-                     ])
-                  def NoL = max(_v3_dot(N, L), 0.0)
-                  if NoL > 0.0 {
-                     def uv = env_dir_to_uv(L)
-                     def s = image_sample_linear_rgb_uv(im, uv.get(0, 0.0), uv.get(1, 0.0))
-                     c0 += s.get(0, 0.0) * NoL
-                     c1 += s.get(1, 0.0) * NoL
-                     c2 += s.get(2, 0.0) * NoL
-                     weight += NoL
-                  }
-                  i += 1
+            def f64 uu = (float(x) + 0.5) / float(w)
+            def f64 phi = (uu - 0.5) * 6.283185307179586
+            ;; N is unit length by construction.
+            def f64 nx = cos_e * float(cos(phi))
+            def f64 ny = sin_e
+            def f64 nz = cos_e * float(sin(phi))
+            ;; Tangent frame: up x N, then N x tangent (as the reference does).
+            mut f64 ux, uy, uz = 0.0, 0.0, 1.0
+            if float(abs(nz)) >= 0.999 { ux, uy, uz = 1.0, 0.0, 0.0 }
+            mut f64 tx = uy * nz - uz * ny
+            mut f64 ty = uz * nx - ux * nz
+            mut f64 tz = ux * ny - uy * nx
+            def f64 tl = float(sqrt(tx * tx + ty * ty + tz * tz))
+            if tl > 0.0 { tx, ty, tz = tx / tl, ty / tl, tz / tl }
+            def f64 bx = ny * tz - nz * ty
+            def f64 by = nz * tx - nx * tz
+            def f64 bz = nx * ty - ny * tx
+            mut f64 c0, c1, c2, weight = 0.0, 0.0, 0.0, 0.0
+            mut s = 0
+            while s < sample_count {
+               mut f64 lx, ly, lz = nx, ny, nz
+               mut f64 nol = 1.0
+               if sample_count > 1 {
+                  def f64 hx0 = float(load64_f64(samples, s * 24))
+                  def f64 hy0 = float(load64_f64(samples, s * 24 + 8))
+                  def f64 hz0 = float(load64_f64(samples, s * 24 + 16))
+                  mut f64 hx = tx * hx0 + bx * hy0 + nx * hz0
+                  mut f64 hy = ty * hx0 + by * hy0 + ny * hz0
+                  mut f64 hz = tz * hx0 + bz * hy0 + nz * hz0
+                  def f64 hl = float(sqrt(hx * hx + hy * hy + hz * hz))
+                  if hl > 0.0 { hx, hy, hz = hx / hl, hy / hl, hz / hl }
+                  def f64 voh = float(max(nx * hx + ny * hy + nz * hz, 0.0))
+                  lx = 2.0 * voh * hx - nx
+                  ly = 2.0 * voh * hy - ny
+                  lz = 2.0 * voh * hz - nz
+                  def f64 ll = float(sqrt(lx * lx + ly * ly + lz * lz))
+                  if ll > 0.0 { lx, ly, lz = lx / ll, ly / ll, lz / ll }
+                  nol = float(max(nx * lx + ny * ly + nz * lz, 0.0))
                }
+               if nol > 0.0 {
+                  ;; Direction to equirectangular UV, then bilinear fetch.
+                  def f64 u_raw = 0.5 + float(atan2(lx, 0.0 - lz)) / 6.283185307179586
+                  def f64 su = u_raw - float(floor(u_raw))
+                  def f64 sv = float(clamp(0.5 - float(asin(float(clamp(ly, -1.0, 1.0)))) / 3.141592653589793, 0.00001, 0.99999))
+                  def f64 fx = su * fsw - 0.5
+                  def f64 fy = sv * fsh - 0.5
+                  mut int x0 = int(floor(fx))
+                  mut int y0 = int(floor(fy))
+                  def f64 wx = fx - float(x0)
+                  def f64 wy = fy - float(y0)
+                  mut int x1 = x0 + 1
+                  mut int y1 = y0 + 1
+                  while x0 < 0 { x0 += src_w }
+                  while x1 < 0 { x1 += src_w }
+                  x0, x1 = x0 % src_w, x1 % src_w
+                  if y0 < 0 { y0 = 0 }
+                  if y1 < 0 { y1 = 0 }
+                  if y0 >= src_h { y0 = src_h - 1 }
+                  if y1 >= src_h { y1 = src_h - 1 }
+                  def int p00 = (y0 * src_w + x0) * 24
+                  def int p10 = (y0 * src_w + x1) * 24
+                  def int p01 = (y1 * src_w + x0) * 24
+                  def int p11 = (y1 * src_w + x1) * 24
+                  def f64 w00 = (1.0 - wx) * (1.0 - wy)
+                  def f64 w10 = wx * (1.0 - wy)
+                  def f64 w01 = (1.0 - wx) * wy
+                  def f64 w11 = wx * wy
+                  c0 += _lin_bilerp(lin, p00, p10, p01, p11, w00, w10, w01, w11) * nol
+                  c1 += _lin_bilerp(lin, p00 + 8, p10 + 8, p01 + 8, p11 + 8, w00, w10, w01, w11) * nol
+                  c2 += _lin_bilerp(lin, p00 + 16, p10 + 16, p01 + 16, p11 + 16, w00, w10, w01, w11) * nol
+                  weight += nol
+               }
+               s += 1
             }
             if weight > 0.0 {
-               c0, c1 = c0 / weight, c1 / weight
-               c2 = c2 / weight
+               c0, c1, c2 = c0 / weight, c1 / weight, c2 / weight
             }
             def dp = off + ((y * w) + x) * 4
             store8(slab, _linear_to_srgb_u8_f64(c0), dp + 0)
@@ -627,6 +704,9 @@ fn generate_spec_env_slab(any im, int base_w=256) any {
       off += w * h * 4
       level += 1
    }
+   free(lut)
+   free(lin)
+   free(samples)
    mut out = dict(8)
    out["pixels"] = slab
    out["width"] = w0

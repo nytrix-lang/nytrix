@@ -26,12 +26,18 @@ fn spawn(any path, any args) any {
    "Starts `path` with stdin/stdout pipes and returns a process object."
    if !is_str(path) { return 0 }
    if !is_list(args) { return 0 }
+   ;; Allocate the wrapper before spawning so a failure to create the result
+   ;; object cannot strand the child process or its pipe descriptors.
+   mut p = dict(4)
+   p["pid"] = 0
+   p["in"] = -1
+   p["out"] = -1
+   p["alive"] = false
    def res = popen(path, args)
    ;; popen uses an integer zero as its failure sentinel. Check the runtime
    ;; representation first; comparing an `any` sentinel to a tagged integer
    ;; let some native routes fall through to `res.get`.
    if is_int(res) { return 0 }
-   mut p = dict(4)
    p["pid"] = res.get(0)
    p["in"] = res.get(1)
    p["out"] = res.get(2)
@@ -85,15 +91,16 @@ fn recv(any p, any n=1024) any {
    mut int size = is_int(n) ? int(n) : 1024
    if size <= 0 { size = 1024 }
    if size > 8 * 1024 * 1024 { size = 8 * 1024 * 1024 }
+   mut cleanup = [0]
+   defer { if cleanup[0] { free(cleanup[0]) } }
    mut buf = malloc(size + 1)
    if buf == 0 { return "" }
+   cleanup[0] = buf
    def int rr = __read_fd_raw(fd, buf, size)
-   if rr <= 0 {
-      free(buf)
-      return ""
-   }
+   if rr <= 0 { return "" }
    store8(buf, 0, rr)
    def str out = __init_str_raw(buf, rr)
+   cleanup[0] = 0
    out
 }
 
@@ -101,9 +108,15 @@ fn recv_line(any p) str {
    "Receives a single line from process `p`'s stdout."
    def fd = _pfd(p, "out")
    if fd < 0 { return "" }
+   mut c_cleanup = [0]
+   defer { if c_cleanup[0] { free(c_cleanup[0]) } }
    mut c_buf = malloc(2)
    if c_buf == 0 { return "" }
+   c_cleanup[0] = c_buf
+   mut builder_cleanup = [0]
+   defer { if builder_cleanup[0] { builder_free(builder_cleanup[0]) } }
    mut b = Builder(128)
+   builder_cleanup[0] = b
    while 1 {
       def int res = __read_fd_raw(fd, c_buf, 1)
       if res <= 0 { break }
@@ -112,8 +125,6 @@ fn recv_line(any p) str {
       if byte == 10 { break }
    }
    def out = builder_to_str(b)
-   builder_free(b)
-   free(c_buf)
    out
 }
 
@@ -121,14 +132,16 @@ fn recv_all(any p, any n=1024) str {
    "Receives all available data from process `p`'s stdout."
    if !is_int(n) || n <= 0 { n = 1024 }
    if n > 8 * 1024 * 1024 { n = 8 * 1024 * 1024 }
+   mut builder_cleanup = [0]
+   defer { if builder_cleanup[0] { builder_free(builder_cleanup[0]) } }
    mut b = Builder(4096)
+   builder_cleanup[0] = b
    while 1 {
       def chunk = recv(p, n)
       if !is_str(chunk) || chunk.len == 0 { break }
       b = builder_append(b, chunk)
    }
    def out = builder_to_str(b)
-   builder_free(b)
    out
 }
 

@@ -113,7 +113,7 @@ fn _glx_raw(any value) int {
 fn choose_fb_config(any display, any screen, any attrs=0) any {
    "Runs the choose fb config operation."
    if !display { return 0 }
-   def count_ptr = zalloc(4)
+   def count_ptr = zalloc_or_panic(4, "glx fbconfig count")
    mut final_attrs = []
    if is_list(attrs) && attrs.len > 0 { final_attrs = attrs } else {
       final_attrs = [
@@ -130,7 +130,7 @@ fn choose_fb_config(any display, any screen, any attrs=0) any {
       ]
    }
    def final_attrs_n = final_attrs.len
-   def attr_list = zalloc((final_attrs_n + 1) * 4)
+   def attr_list = zalloc_or_panic((final_attrs_n + 1) * 4, "glx fbconfig attributes")
    mut i = 0
    while i < final_attrs_n {
       store32(attr_list, int(final_attrs.get(i)), i * 4)

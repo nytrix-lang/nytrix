@@ -32,6 +32,9 @@ fn decompress_zlib_limit(any s, int out_cap) str {
    "Inflates zlib data into a fixed-size buffer to avoid realloc loops."
    def n = s.len
    if out_cap < 256 { out_cap = 256 }
+   if out_cap > 9223372036854775807 - 32 {
+      return _set_error("output size overflow")
+   }
    mut raw_buf = malloc(out_cap + 32)
    if raw_buf == 0 { return _set_error("output alloc failed") }
    def out_len_p = zalloc(8)
@@ -61,8 +64,14 @@ fn decompress_zlib(any s, int out_cap=0) str {
    "Inflates zlib data. If `out_cap` is 0, tries to guess or use incremental growth."
    if out_cap > 0 { return decompress_zlib_limit(s, out_cap) }
    def n = s.len
+   if n > 9223372036854775807 / 4 {
+      return _set_error("input size overflow")
+   }
    mut cap = n * 4
    if cap < 4096 { cap = 4096 }
+   if cap > 9223372036854775807 - 32 {
+      return _set_error("output size overflow")
+   }
    mut raw_buf = malloc(cap + 32)
    if raw_buf == 0 { return _set_error("output alloc failed") }
    def out_len_p = zalloc(8)
@@ -70,6 +79,10 @@ fn decompress_zlib(any s, int out_cap=0) str {
    store64_h(out_len_p, cap, 0)
    mut r = __zlib_uncompress(raw_buf, out_len_p, to_int(s), n)
    while r == -5 {
+      if cap > (9223372036854775807 - 32) / 2 {
+         free(out_len_p, raw_buf)
+         return _set_error("output size overflow")
+      }
       cap = cap * 2
       def next_buf = realloc(raw_buf, cap + 32)
       if next_buf == 0 {
@@ -87,6 +100,10 @@ fn decompress_zlib(any s, int out_cap=0) str {
    }
    def out_len = load64_h(out_len_p, 0)
    free(out_len_p)
+   if out_len < 0 || out_len > cap {
+      free(raw_buf)
+      return _set_error("invalid uncompressed size")
+   }
    def out = init_str(raw_buf, out_len)
    store8(out, 0, out_len)
    _last_out_len = out_len

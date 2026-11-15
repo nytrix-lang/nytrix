@@ -39,7 +39,7 @@ def compile = run_capture(
 assert(compile.get("code", 127) == 0 && fs.is_file(object),
        "compile Win64 aggregate probe: " + compile.get("stdout", ""))
 
-def host = root + "/src/code/lang/parse/c/tests/win64-ny-aggregate-host.c"
+def host = root + "/src/code/test/lang/c/win64-ny-aggregate-host.c"
 def link = run_capture(
    [cc, "-std=c11", "-Wall", "-Wextra", "-Werror", "-I", root,
     "-o", executable, host, object],

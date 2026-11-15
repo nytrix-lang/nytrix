@@ -13,11 +13,11 @@
 #include <sys/mman.h>
 #include <unistd.h>
 #if defined(__x86_64__)
-#include "code/backend/bare/x86_64.inc"
+#include "code/backend/mach/arch/x86/payload.h"
 #define CODE ny_bare_x86_64_code
 #define ENTRY ny_bare_x86_64_entry
 #else
-#include "code/backend/bare/aarch64.inc"
+#include "code/backend/mach/arch/a64/payload.h"
 #define CODE ny_bare_aarch64_code
 #define ENTRY ny_bare_aarch64_entry
 #endif

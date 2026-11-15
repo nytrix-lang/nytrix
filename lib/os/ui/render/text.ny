@@ -7,6 +7,7 @@ module core.os.ui.render.text(
    draw_text_batch, draw_text_runs, draw_text_runs_flat,
    draw_text_runs_flat_colors, measure_text, measure_text_fast
 )
+
 use core.os.ui.render (
    FONT_FILTER_DEFAULT, FONT_FILTER_NEAREST, FONT_FILTER_LINEAR,
    FONT_FILTER_BILINEAR, font_load, font_load_first, font_destroy,

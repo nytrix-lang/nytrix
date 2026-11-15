@@ -8,7 +8,8 @@ use core
 fn atomic_i64(int initial=0) ptr {
    "Allocates an atomic Ny integer slot initialized to `initial`."
    def p = malloc(8)
-   if p { __atomic_store64(p, 0, initial) }
+   if !p { return 0 }
+   __atomic_store64(p, 0, initial)
    p
 }
 

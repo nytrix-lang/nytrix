@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
+  <title id="title1">Keep Aspect</title>
+  <desc id="desc1">Keep Aspect editor icon. Original asset id: keepaspect.</desc>
+  <defs id="defs3" />
+  <g transform="translate(2.0000 2.0000) scale(1.25000)" id="g3">
+    <g fill="none" stroke-miterlimit="0" id="g2">
+      <path d="m 10.875,2.6601563 v 1 h 2.275391 v 2.4121093 h 1 V 3.1601563 a 0.50005,0.50005 0 0 0 -0.5,-0.5 z" id="path1" transform="matrix(1.1315 0 0 1.1398 -.914 -1.888)" fill="#c6c6ca" />
+      <path d="m 1.7128906,11.277344 v 2.914062 a 0.50005,0.50005 0 0 0 0.5,0.5 h 2.7753906 v -1 H 2.7128906 v -2.414062 z" id="path2" transform="matrix(1.1315 0 0 1.1398 -1.035 -1.888)" fill="#c6c6ca" />
+    </g>
+    <path fill="#c6c6ca" d="m11.509 10.223-1.1866 1.1424 2.0978 2.0196-1.5046 1.4485h4.1955v-4.0392l-1.5046 1.4485-2.0978-2.0196zm-10.592-9.0557v4.0897l1.5233-1.4666 2.124 2.0448 1.2014-1.1566-2.124-2.0448 1.5233-1.4666h-4.2479z" id="path3" />
+  </g>
+</svg>

@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
+  <title>Snap Keys</title>
+  <desc>Snap Keys icon.</desc>
+  <g transform="translate(2.0000 2.0000) scale(1.25000)">
+<path fill="#c6c6ca" d="m 7,13 v 2 h 2 v -2 z m 6,0 v 2 h 2 v -2 z"/><path fill="#c6c6ca" fill-opacity=".686" d="m 7,13 h 2 v -2 a 2,2 0 0 1 4,0 v 2 h 2 v -2 a 4,4 0 0 0 -8,0 z"/><path fill="#c6c6ca" d="M 5,1 1,5 5,9 9,5 Z"/>
+  </g>
+</svg>

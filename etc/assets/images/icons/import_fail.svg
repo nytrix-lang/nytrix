@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
+  <title id="title1">Import Fail</title>
+  <desc id="desc1">Import Fail editor icon. Original asset id: importfail.</desc>
+  <defs id="defs1" />
+  <g transform="translate(2.0000 2.0000) scale(1.25000)" id="g1">
+    <path d="M 13,2 A 1,1 0 0 0 12.292969,2.2929688 L 8,6.5859375 3.7070313,2.2929688 a 1,1 0 0 0 -1.4140625,0 1,1 0 0 0 0,1.4140625 L 6.5859375,8 2.2929688,12.292969 a 1,1 0 0 0 0,1.414062 1,1 0 0 0 1.4140625,0 L 8,9.4140625 12.292969,13.707031 a 1,1 0 0 0 1.414062,0 1,1 0 0 0 0,-1.414062 L 9.4140625,8 13.707031,3.7070313 a 1,1 0 0 0 0,-1.4140625 A 1,1 0 0 0 13,2 Z" id="path1" fill="#c6c6ca" />
+  </g>
+</svg>

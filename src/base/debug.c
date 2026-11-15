@@ -4,7 +4,7 @@
 #include "base/debug.h"
 #include "base/common.h"
 #include "base/json.h"
-#include "code/backend/ir/opt/util.h"
+#include "code/backend/passes/util.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>

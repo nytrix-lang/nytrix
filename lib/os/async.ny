@@ -17,11 +17,13 @@ fn backend() str {
 @effects(io, alloc, e)
 fn _task_from_call(fnptr work, any arg=0) any {
    def callback = __mark_dynamic_callable_tagged_args(work)
+   mut cleanup = [0]
+   defer { if cleanup[0] { free(cleanup[0]) } }
    def argv = malloc(8)
    if !argv { return 0 }
+   cleanup[0] = argv
    store64(argv, arg, 0)
    def h = __async_task_new(callback, 1, argv)
-   free(argv)
    h
 }
 

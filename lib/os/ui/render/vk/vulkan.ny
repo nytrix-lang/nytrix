@@ -1407,7 +1407,7 @@ fn vk_cmd_end_debug_utils_label(any cb) int { "Ends a debug utils label when bac
    expect_stype(img, VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, "vulkan image stype")
    assert(load32(img, 20) == 2 && load32(img, 28) == 64 && load32(img, 32) == 32 && load32(img, 80) == VK_IMAGE_LAYOUT_UNDEFINED, "vulkan image fields")
    free(img)
-   def barrier = zalloc(72)
+   def barrier = zalloc_or_panic(72, "vulkan barrier selftest")
    assert(VkImageMemoryBarrierColor(barrier, 0x1234, VK_ACCESS_TRANSFER_READ_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) == barrier, "vulkan barrier returns input")
    expect_stype(barrier, VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER, "vulkan barrier stype")
    assert(load32(barrier, 48) == VK_IMAGE_ASPECT_COLOR_BIT && load32(barrier, 56) == 1 && load32(barrier, 64) == 1, "vulkan barrier ranges")

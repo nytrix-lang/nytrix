@@ -28,6 +28,16 @@ fn five() int { 5 }
 
 assert(five() == 5, "proves param-independent decide")
 
+;; Every explicit return and the fallthrough expression contributes to the
+;; post-condition proof.
+@proves(result > 0)
+fn positive_branch(bool take_first) int {
+   if take_first { return 2 }
+   3
+}
+assert(positive_branch(true) == 2 && positive_branch(false) == 3,
+       "proves checks all return paths")
+
 ;; 5.3: pure-function output range cache
 @pure
 fn double_it(int x) int { x * 2 }

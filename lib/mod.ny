@@ -21,7 +21,7 @@
 ;; Use aliases when a flat export surface would hide its owner, for example
 ;; `use core.str as str`. Recoverable failures are explicit values;
 ;; compiler diagnostics handle invalid Nytrix programs.
-module core(bool, init_str, load8, load16, load32, load64, load32_h, load64_h, load64_i, load32_f32, load64_f64, store8, store16, store32, store64, store32_h, store64_h, store64_i, store32_f32, store64_f64, memcpy, memset, memcmp, memchr, ptr_add, ptr_sub, addr_of, malloc, free, malloc_raw, calloc_raw, free_raw, realloc, zalloc, borrow, borrow_mut, own, release, forget, list, vec2, vec3, vec4, bytes, bytes_get, bytes_set, Vector2, Vector3, Vector4, is_ptr, is_nil, is_none, is_int, is_nytrix_obj, is_list, is_dict, is_set, is_tuple, is_range, is_str, is_bytes, is_float, to_int, from_int, is_kwargs, __kwarg, kwarg, get_kwarg_key, get_kwarg_val, len, clone, load_item, store_item, swap, swapped, get, set_idx, index_read, slice, put, delete, clear, append, pop, extend, sort, sorted, replace, join, to_str, str, dict, dict_has, dict_del, dict_get, dict_set, dict_pop, dict_popitem, dict_setdefault, dict_clone, dict_merge, dict_items, dict_keys, dict_values, dict_clear, items, keys, values, set, contains, startswith, endswith, type, type_shape, is_shape, require_shape, assert_shape, hash, repr, debug_print_val, debug_print, breakpoint, print_history_drain, print_history_clear, print_to_stdout, add, sub, mul, div, mod, pow, band, bor, bxor, bshl, bshr, bnot, eq, ne, lt, le, gt, ge, argc, argv, __argv, envc, envp, errno, atoi, globals, set_globals, OS, ARCH, IS_LINUX, IS_MACOS, IS_WINDOWS, IS_X86_64, IS_AARCH64, IS_ARM, is_truthy, is_falsy, not_none, min, max, sqrt, abs, round, divmod, ok, err, is_ok, is_err, unwrap, unwrap_or, panic, panic_if, assert, assert_eq, checked_fin, print, eprint, _eprint_raw, chr, retain, rc_count, _pow2, _core_bigint_to_bytes, _clone_list, mapcat, flatten, map, filter, take, drop, reverse, range, range2, reduce, sum, each, count, count_if, first, last, compact, chunk, windowed, Counter, counter, counter_add, counter_inc, counter_update, count_by, most_common, group_by, default_get, Queue, queue, queue_push, queue_pop, queue_try_pop, queue_peek, queue_len, queue_empty, queue_clear, Channel, channel, chan, chan_send, chan_try_send, chan_recv, chan_try_recv, chan_close, chan_closed, chan_len)
+module core(bool, init_str, load8, load16, load32, load64, load32_h, load64_h, load64_i, load32_f32, load64_f64, store8, store16, store32, store64, store32_h, store64_h, store64_i, store32_f32, store64_f64, memcpy, memset, memcmp, memchr, ptr_add, ptr_sub, addr_of, malloc, free, malloc_raw, calloc_raw, free_raw, realloc, zalloc, malloc_or_panic, zalloc_or_panic, realloc_or_panic, borrow, borrow_mut, own, release, forget, list, vec2, vec3, vec4, bytes, bytes_get, bytes_set, Vector2, Vector3, Vector4, is_ptr, is_nil, is_none, is_int, is_nytrix_obj, is_list, is_dict, is_set, is_tuple, is_range, is_str, is_bytes, is_float, to_int, from_int, is_kwargs, __kwarg, kwarg, get_kwarg_key, get_kwarg_val, len, clone, load_item, store_item, swap, swapped, get, set_idx, index_read, slice, put, delete, clear, append, pop, extend, sort, sorted, replace, join, to_str, str, dict, dict_has, dict_del, dict_get, dict_set, dict_pop, dict_popitem, dict_setdefault, dict_clone, dict_merge, dict_items, dict_keys, dict_values, dict_clear, items, keys, values, set, contains, startswith, endswith, type, type_shape, is_shape, require_shape, assert_shape, hash, repr, debug_print_val, debug_print, breakpoint, print_history_drain, print_history_clear, print_to_stdout, add, sub, mul, div, mod, pow, band, bor, bxor, bshl, bshr, bnot, eq, ne, lt, le, gt, ge, argc, argv, __argv, envc, envp, errno, atoi, globals, set_globals, OS, ARCH, IS_LINUX, IS_MACOS, IS_WINDOWS, IS_X86_64, IS_AARCH64, IS_ARM, is_truthy, is_falsy, not_none, min, max, sqrt, abs, round, divmod, ok, err, is_ok, is_err, unwrap, unwrap_or, panic, panic_if, assert, assert_eq, checked_fin, print, eprint, _eprint_raw, chr, retain, rc_count, _pow2, _core_bigint_to_bytes, _clone_list, mapcat, flatten, map, filter, take, drop, reverse, range, range2, reduce, sum, each, count, count_if, first, last, compact, chunk, windowed, Counter, counter, counter_add, counter_inc, counter_update, count_by, most_common, group_by, default_get, Queue, queue, queue_push, queue_pop, queue_try_pop, queue_peek, queue_len, queue_empty, queue_clear, Channel, channel, chan, chan_send, chan_try_send, chan_recv, chan_try_recv, chan_close, chan_closed, chan_len)
 use core.primitives
 use core.reflect as core_ref
 use core.dict_mod
@@ -36,6 +36,7 @@ use core.collections as collections
 use core.str as core_str
 
 mut _print_history = nil
+mut _print_history_start = 0
 mut print_to_stdout = true
 
 fn _ensure_print_history() list {
@@ -43,25 +44,42 @@ fn _ensure_print_history() list {
    _print_history
 }
 
+fn _print_ring_put(list ring, int at, any line) list {
+   ring[at] = line
+   ring
+}
+
 fn _append_print_history(any line) int {
+   ;; Keep the last 512 lines in a fixed ring. Re-slicing the list after
+   ;; every print allocated a fresh 512-entry list per line in long runs.
    if !is_str(line) { line = to_str(line) }
    _ensure_print_history()
-   _print_history = borrow(_print_history.append(line))
-   if _print_history.len > 512 { _print_history = borrow(slice(_print_history, _print_history.len - 512, _print_history.len, 1)) }
+   if _print_history.len < 512 {
+      _print_history = borrow(_print_history.append(line))
+      return 0
+   }
+   _print_ring_put(_print_history, _print_history_start, line)
+   _print_history_start = (_print_history_start + 1) % 512
    0
 }
 
 fn print_history_drain() list {
    "Returns the accumulated print history and clears the internal buffer."
    _ensure_print_history()
-   def out = _print_history
+   mut out = _print_history
+   def start = _print_history_start
+   if start > 0 && start < out.len {
+      out = slice(out, start, out.len, 1) + slice(out, 0, start, 1)
+   }
    _print_history = borrow([])
+   _print_history_start = 0
    out
 }
 
 fn print_history_clear() int {
    "Clears the accumulated print history buffer."
    _print_history = borrow([])
+   _print_history_start = 0
    0
 }
 
@@ -610,8 +628,11 @@ fn init_str(ptr p, int n) str {
 }
 
 @jit
-fn load8(any p, int i=0) int {
-   "Loads a single byte from address `p + i`."
+fn load8(any p, int i=0, int size=-1) int {
+   "Loads a byte at `p + i`. A nonnegative `size` checks the byte offset; -1 retains unchecked raw access."
+   if size != -1 {
+      assert(size >= 0 && i >= 0 && i < size, "byte access out of range")
+   }
    __load8_idx(p, i)
 }
 
@@ -643,8 +664,11 @@ fn load64_i(any p, int i=0) int {
 }
 
 @jit
-fn store8(any p, int v, int i=0) any {
-   "Stores byte `v` at address `p + i`."
+fn store8(any p, int v, int i=0, int size=-1) any {
+   "Stores byte `v` at `p + i`. A nonnegative `size` checks the byte offset; -1 retains unchecked raw access."
+   if size != -1 {
+      assert(size >= 0 && i >= 0 && i < size, "byte access out of range")
+   }
    __store8_idx(p, i, v)
 }
 
@@ -776,16 +800,15 @@ fn ptr_sub(any p, int n) any {
 
 @returns_owned
 fn malloc(int n) ptr {
-   "Allocates `n` bytes of heap memory."
+   "Allocates `n` bytes of heap memory. Returns 0 on failure; the caller checks it."
    __malloc(n)
 }
 
 fn free(...ptrs) any {
    "Frees one or more heap memory blocks. Nil/zero pointers are ignored."
-   if is_ptr(ptrs) {
-      if ptrs { __free(ptrs) }
-      return nil
-   }
+   ;; `ptrs` is always the variadic argument list. An `is_ptr(ptrs)` shortcut
+   ;; here was true for that list handle itself, so `free(p)` released the
+   ;; argument list and never `p` (visible under --heap=safe as a leak).
    mut i = 0
    while i < ptrs.len {
       def p = ptrs[i]
@@ -797,13 +820,13 @@ fn free(...ptrs) any {
 
 @returns_owned
 fn malloc_raw(int n) ptr {
-   "Allocates unmanaged raw bytes for performance/FFI buffers. Free with free_raw."
+   "Allocates unmanaged raw bytes for performance/FFI buffers. Returns 0 on failure; free with free_raw."
    __malloc_raw(n)
 }
 
 @returns_owned
 fn calloc_raw(int n) ptr {
-   "Allocates unmanaged zero-initialized raw bytes. Free with free_raw."
+   "Allocates unmanaged zero-initialized raw bytes. Returns 0 on failure; free with free_raw."
    __calloc_raw(n)
 }
 
@@ -861,17 +884,45 @@ fn forget(any x) int {
 }
 
 fn realloc(any p, int n) ptr {
-   "Resizes heap memory block `p` to `n` bytes."
+   "Resizes heap block `p` to `n` bytes. Returns 0 on failure and leaves `p` valid."
    __realloc(p, n)
 }
 
 @returns_owned
 fn zalloc(int n) ptr {
-   "Allocates `n` bytes of heap memory and zeroes it out."
+   "Allocates and zeroes `n` bytes. Returns 0 on failure; the caller checks it."
    def p = malloc(n)
    if !p { return 0 }
    __memset(p, 0, n)
    p
+}
+
+;; Fixed-size internal scratch buffers have no failure return path: callers
+;; write through them immediately (kernel structs, padding blocks, argv slots).
+;; The checked helpers state that panic contract once instead of every call
+;; site repeating a null test. Public APIs that can report failure keep using
+;; `malloc`/`zalloc` and their null-return contract.
+@returns_owned
+fn malloc_or_panic(int n, str what="buffer") ptr {
+   "Allocates `n` bytes for an internal buffer with no failure path; panics with `what` on allocation failure."
+   def p = malloc(n)
+   if !p && n > 0 { panic("out of memory: " + what) }
+   p
+}
+
+@returns_owned
+fn zalloc_or_panic(int n, str what="buffer") ptr {
+   "Zero-allocates `n` bytes for an internal buffer with no failure path; panics with `what` on allocation failure."
+   def p = zalloc(n)
+   if !p && n > 0 { panic("out of memory: " + what) }
+   p
+}
+
+fn realloc_or_panic(any p, int n, str what="buffer") ptr {
+   "Resizes an internal buffer that has no failure path; panics with `what` on allocation failure and leaves `p` valid."
+   def grown = realloc(p, n)
+   if !grown && n > 0 { panic("out of memory: " + what) }
+   grown
 }
 
 @returns_owned
@@ -1880,6 +1931,10 @@ fn _pow2_step(int n, int value) int {
 
 fn _pow2(int n) int {
    if n <= 1 { return 1 }
+   if n > 134217728 {
+      panic("container capacity overflow")
+      return 0
+   }
    _pow2_step(n, 2)
 }
 

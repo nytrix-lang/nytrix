@@ -108,6 +108,7 @@ fn _snd_decode(str filepath) any {
    if _snd_disable() { return 0 }
    if _snd_available() {
       def info_ptr = malloc(64)
+      if !info_ptr { return 0 }
       memset(info_ptr, 0, 64)
       def path_cstr = cstr(filepath)
       def sf = ffi.any3(_snd_fn_open, path_cstr, 0x10, info_ptr) ;; SFM_READ
@@ -124,9 +125,17 @@ fn _snd_decode(str filepath) any {
          def channels = load32(info_ptr, 12)
          if debug { print("RES: Sndfile opened " + filepath + " frames=" + to_str(frames) + " rate=" + to_str(rate) + " channels=" + to_str(channels)) }
          free(info_ptr)
-         if frames <= 0 || channels <= 0 || channels > 32 { return 0 }
+         if frames <= 0 || channels <= 0 || channels > 32 ||
+            frames > 9223372036854775807 / channels / 2 {
+            ffi.any1(_snd_fn_close, sf)
+            return 0
+         }
          def n_samples = frames * channels
          def out_ptr = malloc(n_samples * 2)
+         if !out_ptr {
+            ffi.any1(_snd_fn_close, sf)
+            return 0
+         }
          def got = ffi.any3(_snd_fn_read_short, sf, out_ptr, n_samples)
          ffi.any1(_snd_fn_close, sf)
          if got <= 0 {
@@ -168,6 +177,7 @@ fn _decode_sf(str filepath) any {
    if _snd_disable() { return 0 }
    if _snd_available() {
       def info_ptr = malloc(64)
+      if !info_ptr { return 0 }
       memset(info_ptr, 0, 64)
       def path_cstr = cstr(filepath)
       def sf = ffi.any3(_snd_fn_open, path_cstr, 0x10, info_ptr)
@@ -185,9 +195,17 @@ fn _decode_sf(str filepath) any {
       def channels = load32(info_ptr, 12)
       if debug { print("RES: Sndfile opened " + filepath + " frames=" + to_str(frames) + " rate=" + to_str(rate) + " channels=" + to_str(channels)) }
       free(info_ptr)
-      if frames <= 0 || channels <= 0 || channels > 32 { return 0 }
+      if frames <= 0 || channels <= 0 || channels > 32 ||
+         frames > 9223372036854775807 / channels / 2 {
+         ffi.any1(_snd_fn_close, sf)
+         return 0
+      }
       def n_samples = frames * channels
       def out_ptr = malloc(n_samples * 2)
+      if !out_ptr {
+         ffi.any1(_snd_fn_close, sf)
+         return 0
+      }
       def got = ffi.any3(_snd_fn_read_short, sf, out_ptr, n_samples)
       ffi.any1(_snd_fn_close, sf)
       if got <= 0 {

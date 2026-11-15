@@ -16,10 +16,10 @@ extern int64_t rt_alloc_string_len(const char *s, size_t len);
 
 /*
  * Policy interface constants and functions from the compiler side
- * (src/code/lang/types/policy.h); the runtime links the compiler object
+ * (src/code/lang/ny/semantics/policy.h); the runtime links the compiler object
  * library, so direct calls are available.
  */
-#include "code/lang/types/policy.h"
+#include "code/lang/ny/semantics/policy.h"
 
 typedef struct {
   char kind;

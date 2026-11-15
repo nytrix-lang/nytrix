@@ -33,12 +33,15 @@ fn _socket_probe_server_task(list arg) int {
    }
    store64(state + 8, bound_port)
    store64(state, 1)
-   def c = socket_accept(s)
+   def peer = socket_accept_info(s)
+   def c = peer.get("fd", -1)
    if c < 0 {
       store64(state, -2)
-      print("Server: socket_accept failed, error:", c, ", errno:", errno())
+      print("Server: socket_accept_info failed, error:", c, ", errno:", errno())
       return -1
    }
+   assert(peer.get("ok", false) && peer.get("host", "") == "127.0.0.1" && peer.get("port", 0) > 0,
+          "socket accept info returns peer metadata")
    defer { close_socket(c) }
    store64(state, 2)
    def req = read_socket(c, 1024)

@@ -116,8 +116,13 @@ fn hierarchy_node_detail(any node) str {
 
 fn virtual_row_range(any total_rows, any row_step, any visible_h, any scroll_y, any overscan=3) list {
    "Runs the virtual row range operation."
-   def total = max(0, int(total_rows))
-   def step = max(1.0, float(row_step))
+   ;; Plain comparisons instead of max(): inside this module `max` of a mixed
+   ;; int/float pair returned the wrong operand, which capped the list at
+   ;; about 11 rows whatever the panel height.
+   mut int total = int(total_rows)
+   if total < 0 { total = 0 }
+   mut f64 step = float(row_step)
+   if step < 1.0 { step = 1.0 }
    mut first_row = int(float(scroll_y) / step)
    if first_row < 0 { first_row = 0 }
    if first_row > total { first_row = total }
@@ -333,13 +338,12 @@ fn _gltf_catalog_scan_dir(str dir, list names, dict paths, int depth) list {
          def str ext = str.lower(ospath.extname(entry))
          if str._str_eq(ext, ".gltf") || str._str_eq(ext, ".glb") {
             def added = _gltf_catalog_add(names, paths, _gltf_catalog_name_for_file(full), full)
+            ;; Dicts mutate by reference; only the names list needs rebinding.
             names = added[0]
-            paths = added[1]
          }
       } elif osfs.is_dir(full) {
          def scanned = _gltf_catalog_scan_dir(full, names, paths, depth + 1)
          names = scanned[0]
-         paths = scanned[1]
       }
       i += 1
    }
@@ -406,7 +410,8 @@ fn gltf_catalog_ensure(dict catalog) bool {
    "Ensures the catalog has been scanned."
    def mu = _catalog_mutex(catalog)
    mutex_lock(mu)
-   if is_list(catalog.get("names", [])) && catalog.get("names", []).len > 0 {
+   def have = catalog.get("names", 0)
+   if is_list(have) && have.len > 0 {
       mutex_unlock(mu)
       return true
    }
@@ -415,14 +420,16 @@ fn gltf_catalog_ensure(dict catalog) bool {
    mutex_lock(mu)
    catalog["names"] = scanned[0]
    catalog["paths"] = scanned[1]
-   def ok = catalog.get("names", []).len > 0
+   def got = catalog.get("names", 0)
+   def ok = is_list(got) && got.len > 0
    mutex_unlock(mu)
    ok
 }
 
 fn _catalog_store(dict catalog, str raw, str path, any mu=0) str {
    if mu { mutex_lock(mu) }
-   def cache = catalog.get("cache", dict(512))
+   mut cache = catalog.get("cache", 0)
+   if !is_dict(cache) { cache = dict(512) }
    cache[raw] = path
    catalog["cache"] = cache
    if mu { mutex_unlock(mu) }
@@ -435,8 +442,10 @@ fn gltf_catalog_resolve(dict catalog, any spec) str {
    if raw.len == 0 { return "" }
    def mu = _catalog_mutex(catalog)
    mutex_lock(mu)
-   def cache = catalog.get("cache", dict(512))
-   if cache.contains(raw) {
+   ;; Resolved every frame by the engine catalog: an eager `dict(512)`
+   ;; default allocated a 512-slot table per call.
+   def cache = catalog.get("cache", 0)
+   if is_dict(cache) && cache.contains(raw) {
       def cached = to_str(cache.get(raw, ""))
       mutex_unlock(mu)
       return cached
@@ -458,8 +467,8 @@ fn gltf_catalog_resolve(dict catalog, any spec) str {
       ri += 1
    }
    if simple_name && gltf_catalog_ensure(catalog) {
-      def paths = catalog.get("paths", dict(512))
-      if paths.contains(raw) {
+      def paths = catalog.get("paths", 0)
+      if is_dict(paths) && paths.contains(raw) {
          def named = to_str(paths.get(raw, ""))
          if named.len > 0 { return _catalog_store(catalog, raw, named, mu) }
       }

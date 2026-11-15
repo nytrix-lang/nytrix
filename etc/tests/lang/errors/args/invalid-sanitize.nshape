@@ -6,7 +6,7 @@ shape args-invalid-sanitize {
   expect compile_fail
 
   flags "--sanitize=bogus"
-  expect_message "expected address|undefined|thread|leak"
+  expect_message "expected address|undefined|memory|thread|leak"
   source ny <<'NY'
 use core
 print("ok")

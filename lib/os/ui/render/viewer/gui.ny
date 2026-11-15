@@ -3,7 +3,7 @@
 ;; References:
 ;; - core.os.ui.render.viewer.batch
 ;; - core.os.ui.window
-module core.os.ui.render.viewer.gui(set_enabled, enabled, set_scale, scale, set_fonts, set_accent, accent, set_debug_overlay, debug_overlay, rect, inset, center_rect, clamp_rect, split_cols, split_rows, apply_window_rect, apply_window_rect_if_visible, tile_editor_shell, tile_editor_shell_preset, prepare_input, feed_event, key_pressed, begin_frame, end_frame, reset_state, wants_mouse, wants_keyboard, hit_test, suppress_mouse_clicks, hovered_id, active_id, focused_id, mouse_down, mouse_press_seq, last_item_rect, focus_window, request_focus, clear_focus, show_window, window_visible, window_closed, set_window_pos, set_window_size, window_rect, reset_window_scroll, warm_text_pipeline, begin_window, end_window, begin_scroll_area, set_scroll_area_content_hint, scroll_area_ensure_visible, end_scroll_area, scroll_area_scroll_y, scroll_area_visible_h, push_clip_rect, pop_clip_rect, same_line, spacing, spacer_px, reset_cursor, layout_gap, remaining_h, separator, text, label, text_colored, property_row, title_input_text, button, small_button, image, icon_button, selectable, selectable_file, input_text, checkbox, toggle, radio_button, tab_strip, tab_strip_slot, combo_box, slider_float, slider_int, progress_bar, stat_card, plot_lines, grid_canvas, node_canvas, collapsing_header, color_edit4, color_picker4)
+module core.os.ui.render.viewer.gui(remaining_w, set_enabled, enabled, set_scale, scale, set_fonts, set_accent, accent, theme_color, theme_color_alpha, set_theme_color, set_debug_overlay, debug_overlay, rect, inset, center_rect, clamp_rect, split_cols, split_rows, apply_window_rect, apply_window_rect_if_visible, tile_editor_shell, tile_editor_shell_preset, prepare_input, feed_event, key_pressed, begin_frame, end_frame, reset_state, wants_mouse, wants_keyboard, hit_test, suppress_mouse_clicks, hovered_id, active_id, focused_id, mouse_down, mouse_press_seq, last_item_rect, focus_window, request_focus, clear_focus, show_window, window_visible, window_closed, set_window_pos, set_window_size, window_rect, reset_window_scroll, warm_text_pipeline, begin_window, end_window, begin_scroll_area, set_scroll_area_content_hint, scroll_area_ensure_visible, end_scroll_area, scroll_area_scroll_y, scroll_area_visible_h, push_clip_rect, pop_clip_rect, same_line, spacing, spacer_px, reset_cursor, layout_gap, remaining_h, separator, text, label, text_colored, property_row, title_input_text, button, small_button, image, icon_button, selectable, selectable_file, input_text, checkbox, toggle, radio_button, tab_strip, tab_strip_slot, combo_box, slider_float, slider_int, progress_bar, stat_card, plot_lines, grid_canvas, node_canvas, collapsing_header, color_edit4, color_picker4, set_headless_input, set_theme, theme, push_id, pop_id, indent, unindent, layout_row, begin_columns, next_column, end_columns, begin_disabled, end_disabled, item_status, tooltip, set_tooltip_delay, open_popup, close_popup, close_all_popups, popup_open, any_popup_open, begin_popup, end_popup, begin_menu_bar, end_menu_bar, begin_menu, end_menu, menu_item, menu_separator, begin_context_menu, tree_node, tree_pop, drag_float, drag_int, begin_table, table_next_row, table_next_column, table_text, table_row_clicked, table_sort_column, table_sort_descending, end_table, drag_source, drop_target, drag_active, last_item_id, dockspace, dock_window, undock_window, window_docked, dock_windows, dock_split_ratio, dock_layout_save, dock_layout_load, dock_spacer_rect, panel_state)
 use core
 use core.math
 use core.os.ui.window.consts
@@ -15,7 +15,8 @@ use core.str as str
 use core.common as common
 use core.cache as cache
 
-mut _enabled, _scale = true, 1.0
+mut bool _enabled = true
+mut f64 _scale = 1.0
 mut any _win = nil
 mut _font, _font_title, _font_small = 0, 0, 0
 mut _fb_w, _fb_h = 0.0, 0.0
@@ -71,12 +72,62 @@ mut _hot_rect = [0.0, 0.0, 0.0, 0.0]
 mut _active_rect = [0.0, 0.0, 0.0, 0.0]
 mut _iw_visible, _iw_hovered, _iw_held, _iw_clicked, _iw_released = false, false, false, false, false
 mut _same_line_next, _same_line_gap = false, 0.0
-mut _scroll_area_active, _scroll_area_parent, _scroll_area_id = false, 0, ""
+mut _scroll_area_active, _scroll_area_id = false, ""
+;; Declared `any` on its own: as an untyped slot of a multi-assignment the saved
+;; parent no longer tested as a dict when the area ended, so every widget after
+;; a scroll area was laid out at a zero rectangle and end_window was skipped.
+mut any _scroll_area_parent = nil
 mut _scroll_area_rect = [0.0, 0.0, 0.0, 0.0]
 mut _scroll_area_start_y, _scroll_area_scroll_y = 0.0, 0.0
 mut _scroll_area_clip_pushed, _scroll_area_capture_window = false, ""
 mut _scroll_area_capture_rect = [0.0, 0.0, 0.0, 0.0]
 mut _text_fit_cache = dict(512)
+
+;; Toolkit layer state: overlay command list, popups, layout scopes, drag and drop.
+mut _ov_cmds = []
+mut _ov_stack = []
+mut _ov_pending = []
+mut _ov_top = []
+mut _win_layers = []
+mut _dock_frame_active = false
+mut any _dock_spaces = nil
+mut _ov_depth, _ov_discard = 0, 0
+mut _popup_stack = []
+mut _popup_dismissed = []
+mut _popup_depth = 0
+mut _ctx_stack = []
+mut _menu_measure_w = 0.0
+mut _menubar_active, _menubar_open = false, ""
+mut _menubar_x, _menubar_y, _menubar_h = 0.0, 0.0, 0.0
+mut _headless_input = false
+;; Button state as last reported by fed events. Once an event has reported the
+;; primary button it is authoritative until focus is lost: polling the window
+;; between a fed press and its release dropped scripted drags on real
+;; backends, where injected events do not change the polled button state.
+mut _fed_down0, _fed_down0_valid = false, false
+mut _fed_down0_stale = 0
+mut _mouse_pressed1, _event_mouse_pressed1 = false, false
+mut _disabled_depth, _disabled_on = 0, 0
+mut _dis_text_u32, _dis_dim_u32, _dis_accent_u32 = 0, 0, 0
+mut _id_stack = []
+mut _indent_stack = []
+mut _row_cells = []
+mut _row_n, _row_i = 0, 0
+mut _row_y, _row_bottom = 0.0, 0.0
+mut _col_stack = []
+mut _tip_x, _tip_y = -1.0, -1.0
+mut _tip_frames, _tip_seen, _tip_delay = 0, -1, 30
+mut _tip_text = ""
+mut _last_item_id = ""
+mut _dnd_active, _dnd_type, _dnd_label, _dnd_source = false, "", "", ""
+mut any _dnd_payload = nil
+mut _tbl_id = ""
+mut _tbl_cols = []
+mut _tbl_n, _tbl_col, _tbl_row = 0, -1, -1
+mut _tbl_x, _tbl_w, _tbl_row_y, _tbl_row_bottom, _tbl_row_h = 0.0, 0.0, 0.0, 0.0, 0.0
+mut _tbl_base_x, _tbl_base_w = 0.0, 0.0
+mut _tbl_row_hit = false
+mut _theme_name = "dark"
 mut _text_measure_cache = dict(1024)
 mut _font_h_cache = dict(16)
 mut _text_caches_ready = false
@@ -84,20 +135,21 @@ mut _gui_frame_id = 0
 mut _font_metric_frame = -1
 mut _cached_body_h, _cached_title_h, _cached_small_h = 0.0, 0.0, 0.0
 mut _text_run_queue = []
+mut any _text_run_batch = nil
 def int _TEXT_SELECT_ALL = -9001
 def int _TEXT_COPY = -9002
 def int _TEXT_CUT = -9003
 def int _TEXT_PASTE = -9004
 mut _theme_dirty, _theme_ready = true, false
-mut _accent_rgba = [0.760, 0.760, 0.760, 0.96]
-mut _press_rgba = [0.180, 0.180, 0.185, 0.96]
-mut _window_bg_rgba = [0.000, 0.000, 0.000, 0.96]
-mut _window_body_rgba = [0.018, 0.018, 0.020, 0.94]
-mut _window_hdr_rgba = [0.030, 0.030, 0.034, 0.98]
-mut _panel_rgba = [0.016, 0.016, 0.018, 0.88]
-mut _panel_hover_rgba = [0.074, 0.074, 0.078, 0.92]
-mut _panel_active_rgba = [0.125, 0.125, 0.132, 0.96]
-mut _popup_rgba = [0.000, 0.000, 0.000, 1.00]
+mut _accent_rgba = [0.714, 0.627, 1.000, 1.00]
+mut _press_rgba = [0.290, 0.243, 0.447, 1.00]
+mut _window_bg_rgba = [0.020, 0.020, 0.024, 1.00]
+mut _window_body_rgba = [0.031, 0.031, 0.039, 0.98]
+mut _window_hdr_rgba = [0.055, 0.055, 0.067, 1.00]
+mut _panel_rgba = [0.067, 0.067, 0.082, 1.00]
+mut _panel_hover_rgba = [0.102, 0.102, 0.125, 1.00]
+mut _panel_active_rgba = [0.141, 0.141, 0.173, 1.00]
+mut _popup_rgba = [0.047, 0.047, 0.059, 1.00]
 
 fn _ensure_text_caches() any {
    if _text_caches_ready { return 0 }
@@ -112,6 +164,7 @@ fn _ensure_gui_state() any {
    if !is_dict(_widget_state) { _widget_state = dict(64) }
    if !is_dict(_window_closed_events) { _window_closed_events = dict(32) }
    if !is_list(_window_order) { _window_order = [] }
+   if !is_dict(_dock_spaces) { _dock_spaces = dict(4) }
 }
 
 fn _ui_text(any txt) str {
@@ -124,12 +177,13 @@ fn _ui_text(any txt) str {
    is_str(s) ? s : ""
 }
 
-mut _border_rgba = [0.220, 0.220, 0.230, 0.58]
-mut _text_rgba = [0.925, 0.925, 0.930, 0.98]
-mut _text_dim_rgba = [0.650, 0.650, 0.665, 0.90]
-mut _ok_rgba = [0.780, 0.780, 0.790, 0.96]
-mut _warn_rgba = [0.720, 0.720, 0.730, 0.96]
-mut _danger_rgba = [0.360, 0.360, 0.370, 0.96]
+mut _border_rgba = [0.149, 0.149, 0.180, 1.00]
+mut _text_rgba = [0.941, 0.941, 0.953, 1.00]
+mut _text_dim_rgba = [0.643, 0.643, 0.682, 1.00]
+mut _ok_rgba = [0.545, 0.863, 0.604, 1.00]
+mut _warn_rgba = [0.949, 0.784, 0.475, 1.00]
+mut _danger_rgba = [1.000, 0.478, 0.420, 1.00]
+mut _text_faint_rgba = [0.435, 0.435, 0.478, 1.00]
 mut _accent_u32 = 0
 mut _accent_soft_u32 = 0
 mut _press_u32 = 0
@@ -152,6 +206,10 @@ mut _text_dim_u32 = 0
 mut _ok_u32 = 0
 mut _warn_u32 = 0
 mut _danger_u32 = 0
+mut _text_faint_u32 = 0
+mut _select_u32 = 0
+mut _focus_u32 = 0
+mut _shadow_u32 = 0
 
 @inline
 @jit
@@ -169,11 +227,11 @@ comptime template _scaled_metric_triplet(n1, b1, n2, b2, n3, b3){
    comptime emit _scaled_metric(n3, b3)
 }
 
-def _M_PAD = 6.0
+def _M_PAD = 8.0
 def _M_GAP = 3.0
 def _M_TINY_GAP = 2.0
-def _M_TITLE_H = 22.0
-def _M_ITEM_PAD_X = 6.0
+def _M_TITLE_H = 26.0
+def _M_ITEM_PAD_X = 8.0
 def _M_ITEM_PAD_Y = 2.0
 def _M_SLIDER_H = 32.0
 def _M_TOGGLE_W = 38.0
@@ -205,6 +263,7 @@ fn _clear_pending_input_events() any {
    _event_mouse_has_pos, _event_mouse_down0_known, _event_mouse_down0 = false, false, false
    _event_mouse_pressed0, _event_mouse_released0 = false, false
    _event_scroll_dx, _event_scroll_dy = 0.0, 0.0
+   _event_mouse_pressed1 = false
 }
 
 fn _clear_key_masks() any {
@@ -406,6 +465,8 @@ fn apply_window_rect(any id, list r) any {
    if _active_window_move == key || _active_window_resize == key {
       return 0
    }
+   ;; A docked window's rectangle belongs to its dockspace.
+   if to_str(st.get("dock", "")) != "" { return 0 }
    st["x"] = nx
    st["y"] = ny
    st["w"] = nw
@@ -512,37 +573,42 @@ fn tile_editor_shell_preset(str name, f64 ww, f64 wh, f64 gap=10.0) dict {
 }
 
 fn _ensure_theme_colors() any {
-   if !is_list(_accent_rgba) { _accent_rgba = [0.760, 0.760, 0.760, 0.96] }
-   if !is_list(_press_rgba) { _press_rgba = [0.180, 0.180, 0.185, 0.96] }
-   if !is_list(_window_bg_rgba) { _window_bg_rgba = [0.000, 0.000, 0.000, 0.96] }
-   if !is_list(_window_body_rgba) { _window_body_rgba = [0.018, 0.018, 0.020, 0.94] }
-   if !is_list(_window_hdr_rgba) { _window_hdr_rgba = [0.030, 0.030, 0.034, 0.98] }
-   if !is_list(_panel_rgba) { _panel_rgba = [0.016, 0.016, 0.018, 0.88] }
-   if !is_list(_panel_hover_rgba) { _panel_hover_rgba = [0.074, 0.074, 0.078, 0.92] }
-   if !is_list(_panel_active_rgba) { _panel_active_rgba = [0.125, 0.125, 0.132, 0.96] }
-   if !is_list(_popup_rgba) { _popup_rgba = [0.000, 0.000, 0.000, 1.00] }
-   if !is_list(_border_rgba) { _border_rgba = [0.220, 0.220, 0.230, 0.58] }
-   if !is_list(_text_rgba) { _text_rgba = [0.925, 0.925, 0.930, 0.98] }
-   if !is_list(_text_dim_rgba) { _text_dim_rgba = [0.650, 0.650, 0.665, 0.90] }
-   if !is_list(_ok_rgba) { _ok_rgba = [0.780, 0.780, 0.790, 0.96] }
-   if !is_list(_warn_rgba) { _warn_rgba = [0.720, 0.720, 0.730, 0.96] }
-   if !is_list(_danger_rgba) { _danger_rgba = [0.360, 0.360, 0.370, 0.96] }
+   if !is_list(_accent_rgba) { _accent_rgba = [0.714, 0.627, 1.000, 1.00] }
+   if !is_list(_press_rgba) { _press_rgba = [0.290, 0.243, 0.447, 1.00] }
+   if !is_list(_window_bg_rgba) { _window_bg_rgba = [0.020, 0.020, 0.024, 1.00] }
+   if !is_list(_window_body_rgba) { _window_body_rgba = [0.031, 0.031, 0.039, 0.98] }
+   if !is_list(_window_hdr_rgba) { _window_hdr_rgba = [0.055, 0.055, 0.067, 1.00] }
+   if !is_list(_panel_rgba) { _panel_rgba = [0.067, 0.067, 0.082, 1.00] }
+   if !is_list(_panel_hover_rgba) { _panel_hover_rgba = [0.102, 0.102, 0.125, 1.00] }
+   if !is_list(_panel_active_rgba) { _panel_active_rgba = [0.141, 0.141, 0.173, 1.00] }
+   if !is_list(_popup_rgba) { _popup_rgba = [0.047, 0.047, 0.059, 1.00] }
+   if !is_list(_border_rgba) { _border_rgba = [0.149, 0.149, 0.180, 1.00] }
+   if !is_list(_text_rgba) { _text_rgba = [0.941, 0.941, 0.953, 1.00] }
+   if !is_list(_text_dim_rgba) { _text_dim_rgba = [0.643, 0.643, 0.682, 1.00] }
+   if !is_list(_ok_rgba) { _ok_rgba = [0.545, 0.863, 0.604, 1.00] }
+   if !is_list(_warn_rgba) { _warn_rgba = [0.949, 0.784, 0.475, 1.00] }
+   if !is_list(_danger_rgba) { _danger_rgba = [1.000, 0.478, 0.420, 1.00] }
+   if !is_list(_text_faint_rgba) { _text_faint_rgba = [0.435, 0.435, 0.478, 1.00] }
    0
 }
 
+fn _accent_alpha(f64 a) int {
+   color_pack(float(_accent_rgba.get(0, 0.0)), float(_accent_rgba.get(1, 0.0)), float(_accent_rgba.get(2, 0.0)), a)
+}
+
 fn _theme_refresh() any {
+   ;; Packs the semantic palette once per change. Widgets read only the packed
+   ;; tokens below, so a theme is these fifteen RGBA lists and nothing else.
    if !_theme_dirty && _theme_ready { return 0 }
    _ensure_theme_colors()
    _accent_u32 = _theme_pack(_accent_rgba)
    _press_u32 = _theme_pack(_press_rgba)
    _press_soft_u32 = color_pack(float(_press_rgba.get(0, 0.0)), float(_press_rgba.get(1, 0.0)), float(_press_rgba.get(2, 0.0)), 0.58)
-   _accent_soft_u32 = color_pack(float(_accent_rgba.get(0,
-            0.0)),
-      float(_accent_rgba.get(1,
-            0.0)),
-      float(_accent_rgba.get(2,
-            0.0)),
-      0.24)
+   _accent_soft_u32 = _accent_alpha(0.22)
+   _select_u32 = _accent_alpha(0.30)
+   _focus_u32 = _accent_alpha(0.85)
+   ;; A light surface needs a much fainter drop edge than a dark one.
+   _shadow_u32 = color_pack(0.0, 0.0, 0.0, _theme_name == "light" ? 0.12 : 0.35)
    _window_bg_u32 = _theme_pack(_window_bg_rgba)
    _window_body_u32 = _theme_pack(_window_body_rgba)
    _window_hdr_u32 = _theme_pack(_window_hdr_rgba)
@@ -551,30 +617,91 @@ fn _theme_refresh() any {
    _panel_active_u32 = _theme_pack(_panel_active_rgba)
    _popup_u32 = _theme_pack(_popup_rgba)
    _border_u32 = _theme_pack(_border_rgba)
-   _scroll_track_u32 = color_pack(0.018, 0.018, 0.020, 0.62)
-   _scroll_thumb_u32 = color_pack(float(_accent_rgba.get(0,
-            0.0)),
-      float(_accent_rgba.get(1,
-            0.0)),
-      float(_accent_rgba.get(2,
-            0.0)),
-      0.46)
-   _scroll_thumb_hot_u32 = color_pack(float(_accent_rgba.get(0,
-            0.0)),
-      float(_accent_rgba.get(1,
-            0.0)),
-      float(_accent_rgba.get(2,
-            0.0)),
-      0.62)
-   _grid_major_u32 = color_pack(0.220, 0.220, 0.230, 0.18)
-   _grid_minor_u32 = color_pack(0.080, 0.080, 0.085, 0.10)
+   _scroll_track_u32 = color_pack(float(_panel_rgba.get(0, 0.0)), float(_panel_rgba.get(1, 0.0)), float(_panel_rgba.get(2, 0.0)), 0.60)
+   _scroll_thumb_u32 = color_pack(float(_text_dim_rgba.get(0, 0.0)), float(_text_dim_rgba.get(1, 0.0)), float(_text_dim_rgba.get(2, 0.0)), 0.34)
+   _scroll_thumb_hot_u32 = _accent_alpha(0.80)
+   _grid_major_u32 = color_pack(float(_border_rgba.get(0, 0.0)), float(_border_rgba.get(1, 0.0)), float(_border_rgba.get(2, 0.0)), 0.55)
+   _grid_minor_u32 = color_pack(float(_border_rgba.get(0, 0.0)), float(_border_rgba.get(1, 0.0)), float(_border_rgba.get(2, 0.0)), 0.25)
    _text_u32 = _theme_pack(_text_rgba)
    _text_dim_u32 = _theme_pack(_text_dim_rgba)
+   _text_faint_u32 = _theme_pack(_text_faint_rgba)
    _ok_u32 = _theme_pack(_ok_rgba)
    _warn_u32 = _theme_pack(_warn_rgba)
    _danger_u32 = _theme_pack(_danger_rgba)
    _theme_dirty = false
    _theme_ready = true
+}
+
+fn _theme_token_index(str name) int {
+   ;; One table for both the getter and the setter, aliases included.
+   if name == "text" { return 0 }
+   if name == "text_dim" || name == "muted" { return 1 }
+   if name == "text_faint" || name == "faint" || name == "disabled" { return 2 }
+   if name == "accent" || name == "info" { return 3 }
+   if name == "ok" || name == "success" { return 4 }
+   if name == "warn" || name == "warning" { return 5 }
+   if name == "danger" || name == "error" { return 6 }
+   if name == "surface" || name == "panel" { return 7 }
+   if name == "surface_hover" { return 8 }
+   if name == "surface_active" { return 9 }
+   if name == "window" { return 10 }
+   if name == "header" { return 11 }
+   if name == "popup" { return 12 }
+   if name == "border" { return 13 }
+   -1
+}
+
+fn theme_color(str name) list {
+   "Returns the RGBA list of a semantic theme token: text, text_dim, text_faint, accent, ok, warn, danger, surface, surface_hover, surface_active, window, header, popup, or border. Unknown names return the text color."
+   _ensure_theme_colors()
+   def idx = _theme_token_index(name)
+   if idx == 1 { return _text_dim_rgba }
+   if idx == 2 { return _text_faint_rgba }
+   if idx == 3 { return _accent_rgba }
+   if idx == 4 { return _ok_rgba }
+   if idx == 5 { return _warn_rgba }
+   if idx == 6 { return _danger_rgba }
+   if idx == 7 { return _panel_rgba }
+   if idx == 8 { return _panel_hover_rgba }
+   if idx == 9 { return _panel_active_rgba }
+   if idx == 10 { return _window_body_rgba }
+   if idx == 11 { return _window_hdr_rgba }
+   if idx == 12 { return _popup_rgba }
+   if idx == 13 { return _border_rgba }
+   _text_rgba
+}
+
+fn theme_color_alpha(str name, f64 alpha) list {
+   "Returns a semantic theme token with its alpha replaced by `alpha` (for lines, overlays, and faded text)."
+   def c = theme_color(name)
+   [float(c.get(0, 0.0)), float(c.get(1, 0.0)), float(c.get(2, 0.0)), clamp(alpha, 0.0, 1.0)]
+}
+
+fn set_theme_color(str name, list rgba) bool {
+   "Overrides one semantic theme token with an RGBA list. Returns false for an unknown token or a short list."
+   _ensure_theme_colors()
+   def idx = _theme_token_index(name)
+   if idx < 0 || rgba.len < 3 { return false }
+   def c = [
+      clamp(float(rgba.get(0, 0.0)), 0.0, 1.0), clamp(float(rgba.get(1, 0.0)), 0.0, 1.0),
+      clamp(float(rgba.get(2, 0.0)), 0.0, 1.0), clamp(float(rgba.get(3, 1.0)), 0.0, 1.0)
+   ]
+   if idx == 0 { _text_rgba = c }
+   elif idx == 1 { _text_dim_rgba = c }
+   elif idx == 2 { _text_faint_rgba = c }
+   elif idx == 3 { _accent_rgba = c }
+   elif idx == 4 { _ok_rgba = c }
+   elif idx == 5 { _warn_rgba = c }
+   elif idx == 6 { _danger_rgba = c }
+   elif idx == 7 { _panel_rgba = c }
+   elif idx == 8 { _panel_hover_rgba = c }
+   elif idx == 9 { _panel_active_rgba = c }
+   elif idx == 10 { _window_body_rgba = c }
+   elif idx == 11 { _window_hdr_rgba = c }
+   elif idx == 12 { _popup_rgba = c }
+   else { _border_rgba = c }
+   _theme_dirty = true
+   true
 }
 
 fn set_enabled(bool v) any { "Enables or disables GUI input and rendering helpers." _enabled = !!v }
@@ -589,11 +716,24 @@ fn reset_state() any {
    _nav_focus_target, _nav_focus_window = "", ""
    _last_item, _hot_rect, _active_rect = [0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0]
    _same_line_next, _same_line_gap = false, 0.0
-   _scroll_area_active, _scroll_area_parent, _scroll_area_id = false, 0, ""
+   _scroll_area_active, _scroll_area_id = false, ""
+   _scroll_area_parent = nil
    _scroll_area_rect = [0.0, 0.0, 0.0, 0.0]
    _scroll_area_start_y, _scroll_area_scroll_y = 0.0, 0.0
    _scroll_area_clip_pushed, _scroll_area_capture_window = false, ""
    _scroll_area_capture_rect = [0.0, 0.0, 0.0, 0.0]
+   _popup_close_from(0)
+   _popup_dismissed, _ov_cmds, _ctx_stack = [], [], []
+   _ov_top, _win_layers, _dock_frame_active = [], [], false
+   _ov_depth, _ov_discard, _popup_depth = 0, 0, 0
+   _id_stack, _indent_stack, _col_stack, _row_n, _tbl_id = [], [], [], 0, ""
+   _menubar_active, _menubar_open = false, ""
+   _tip_x, _tip_y, _tip_frames, _tip_seen, _tip_text = -1.0, -1.0, 0, -1, ""
+   _dnd_active, _dnd_type, _dnd_label, _dnd_source = false, "", "", ""
+   _dnd_payload = nil
+   _last_item_id = ""
+   _mouse_pressed1, _event_mouse_pressed1 = false, false
+   _fed_down0, _fed_down0_valid = false, false
 }
 
 fn _reset_font_metric_caches() any {
@@ -655,11 +795,22 @@ fn _measure_text_ui(int font_id, any txt) list {
    def fid = (font_id > 0) ? font_id : _font_body()
    def s = _ui_text(txt)
    def n = str.len(s)
-   def key = (fid > 0 && n <= 256) ? (to_str(fid) + ":" + s) : ""
-   def use_cache = is_str(key) && str.len(key) > 0
-   if use_cache && _text_measure_cache.contains(key) { return _text_measure_cache.get(key, [0.0, 0.0]) }
+   def use_cache = fid > 0 && n > 0 && n <= 256
+   ;; One table per font, keyed by the text: building a "font:text" key
+   ;; allocated a string for every label on every frame.
+   mut any per_font = use_cache ? _text_measure_cache.get(fid, nil) : nil
+   if use_cache && is_dict(per_font) {
+      def any hit = per_font.get(s, nil)
+      if is_list(hit) { return hit }
+   }
    def m = measure_text_fast(fid, s)
-   if use_cache { _text_measure_cache = cache.cache_put_reset(_text_measure_cache, key, m, 4096, 1024) }
+   if use_cache {
+      if !is_dict(per_font) || per_font.len >= 4096 {
+         per_font = dict(1024)
+         _text_measure_cache[fid] = per_font
+      }
+      per_font[s] = m
+   }
    m
 }
 
@@ -714,7 +865,8 @@ fn _text_fit_cache_put(str key, str value) str {
 }
 
 fn _text_fit_width(int font_id, str s) f64 {
-   def measured = float(_measure_text_ui(font_id, s).get(0, 0.0))
+   def measured_m = _measure_text_ui(font_id, s)
+   def measured = float(measured_m.get(0, 0.0))
    def n = str.len(s)
    if n <= 0 { return measured }
    max(measured, float(n) * _font_h_for(font_id) * 0.56)
@@ -773,11 +925,25 @@ fn _text_color_u32(any color) int {
 
 fn _flush_rect_batch() int { gui_batch.flush() }
 
+fn _ov_push(any kind, any a, any b, any c, any d, any e) bool {
+   "Appends one overlay draw command; popups, menus, and tooltips replay these above every window at end_frame."
+   if _ov_discard > 0 { return true }
+   _ov_cmds = _ov_cmds.append(kind)
+   _ov_cmds = _ov_cmds.append(a)
+   _ov_cmds = _ov_cmds.append(b)
+   _ov_cmds = _ov_cmds.append(c)
+   _ov_cmds = _ov_cmds.append(d)
+   _ov_cmds = _ov_cmds.append(e)
+   true
+}
+
 fn _gui_rect_fast(f64 x, f64 y, f64 w, f64 h, int color) bool {
+   if _ov_depth > 0 { return _ov_push(0, _snap(x), _snap(y), max(1.0, _snap(w)), max(1.0, _snap(h)), color) }
    gui_batch.queue_rect(_snap(x), _snap(y), max(1.0, _snap(w)), max(1.0, _snap(h)), color)
 }
 
 fn _gui_rect_outline_fast(f64 x, f64 y, f64 w, f64 h, int color) bool {
+   if _ov_depth > 0 { return _ov_push(1, _snap(x), _snap(y), max(1.0, _snap(w)), max(1.0, _snap(h)), color) }
    gui_batch.queue_outline(_snap(x), _snap(y), max(1.0, _snap(w)), max(1.0, _snap(h)), color)
 }
 
@@ -785,6 +951,7 @@ fn _gui_rect_tex_uv(
    f64 x, f64 y, f64 w, f64 h, int tex_id,
    f64 u1, f64 v1, f64 u2, f64 v2,
    f64 r, f64 g, f64 b, f64 a) bool {
+   if _ov_depth > 0 { return _ov_push(5, [x, y, w, h, u1, v1, u2, v2, r, g, b, a], tex_id, 0, 0, 0) }
    gui_batch.draw_tex_uv(x, y, w, h, tex_id, u1, v1, u2, v2, r, g, b, a)
 }
 
@@ -816,11 +983,15 @@ fn _gui_tex_ref_uv(
 }
 
 fn _draw_text_ui_now(int font_id, any txt, f64 x, f64 y, any color, f64 shadow_alpha=0.0, f64 max_w=0.0) any {
-   _flush_rect_batch()
    def px, py = _snap(float(x)), _snap(float(y))
    def fid = (font_id > 0) ? font_id : _font_body()
    def fit_txt = _text_fit(fid, txt, max_w)
    def packed = _text_color_u32(color)
+   if _ov_depth > 0 {
+      if str.len(fit_txt) > 0 { _ov_push(2, fid, fit_txt, px, py, packed) }
+      return 0
+   }
+   _flush_rect_batch()
    def a = float((packed >> 24) & 255) / 255.0
    def sh_a = clamp(float(shadow_alpha), 0.0, 1.0)
    if a > 0.001 && sh_a > 0.001 { draw_text(fid, fit_txt, px + 1.0, py + 1.0, color_pack(0.0, 0.0, 0.0, min(sh_a, a * sh_a))) }
@@ -831,6 +1002,10 @@ fn _queue_text_ui(int font_id, any txt, f64 x, f64 y, any color, f64 max_w=0.0) 
    def fid = (font_id > 0) ? font_id : _font_body()
    def fit_txt = _text_fit(fid, txt, max_w)
    if str.len(fit_txt) <= 0 { return 0 }
+   if _ov_depth > 0 {
+      _ov_push(2, fid, fit_txt, _snap(float(x)), _snap(float(y)), _text_color_u32(color))
+      return 0
+   }
    if !is_list(_text_run_queue) { _text_run_queue = [] }
    _text_run_queue = _text_run_queue.append(fid)
    _text_run_queue = _text_run_queue.append(fit_txt)
@@ -848,7 +1023,11 @@ fn _flush_text_runs() any {
    def t0 = prof ? ui_profile.now() : 0
    mut batches = 0
    mut batch_font = -1
-   mut batch = []
+   ;; The queue and the batch are reused across frames: a fresh list per
+   ;; flush is never reclaimed under the default heap.
+   if !is_list(_text_run_batch) { _text_run_batch = [] }
+   mut batch = _text_run_batch
+   clear(batch)
    mut i = 0
    while i + 4 < qn {
       def fid, txt = int(_text_run_queue.get(i, _font_body())), _text_run_queue.get(i + 1, "")
@@ -857,7 +1036,7 @@ fn _flush_text_runs() any {
       if is_str(txt) && str.len(txt) > 0 {
          if batch.len > 0 && fid != batch_font {
             draw_text_runs_flat_colors(batch_font, batch)
-            batch = []
+            clear(batch)
             batches += 1
          }
          batch_font = fid
@@ -872,7 +1051,7 @@ fn _flush_text_runs() any {
       draw_text_runs_flat_colors(batch_font, batch)
       batches += 1
    }
-   _text_run_queue = []
+   clear(_text_run_queue)
    if prof { ui_profile.mark("flush_text_internal", t0, " runs=" + to_str(qn / 5) + " batches=" + to_str(batches)) }
 }
 
@@ -883,7 +1062,7 @@ fn warm_text_pipeline(int body_font=0, int title_font=0, int small_font=0) bool 
       set_fonts(body_font, title_font, small_font)
    }
    _theme_refresh()
-   _text_run_queue = []
+   if is_list(_text_run_queue) { clear(_text_run_queue) } else { _text_run_queue = [] }
    def sample = "ABCDEFGHIJKLMNOPQRSTUVWXYZ abcdefghijklmnopqrstuvwxyz 0123456789 [](){}<>:/._-+*=%,"
    if _font_body() > 0 { font_prepare(_font_body(), sample) }
    if _font_title_id() > 0 { font_prepare(_font_title_id(), sample) }
@@ -1051,30 +1230,49 @@ fn _window_order_touch(any id, bool to_front=false) any {
 }
 
 fn _top_window_id_at(f64 px, f64 py) str {
+   mut pi = _popup_stack.len - 1
+   while pi >= 0 {
+      def pid = to_str(_popup_stack.get(pi, ""))
+      def pst = _windows.get(pid, 0)
+      if is_dict(pst) {
+         if _rect_hit(px, py, float(pst.get("x", 0.0)), float(pst.get("y", 0.0)), float(pst.get("w", 0.0)), float(pst.get("h", 0.0))) { return pid }
+      }
+      pi -= 1
+   }
    if _popup_hit_active {
       if _rect_hit(px, py, _popup_hit_x, _popup_hit_y, _popup_hit_w, _popup_hit_h) {
          return _popup_hit_window
       }
    }
-   mut i = _window_order.len - 1
-   while i >= 0 {
-      def wid = to_str(_window_order.get(i, ""))
-      def st = _windows.get(wid, 0)
-      if is_dict(st) && st.get("open", true) {
-         if _rect_hit(px, py,
-            float(st.get("x", 0.0)),
-            float(st.get("y", 0.0)),
-            float(st.get("w", 0.0)),
-            float(st.get("h", 0.0))){
-            return wid
+   ;; Floating windows sit above docked ones, and a docked window only counts
+   ;; while it is the visible tab of its panel.
+   mut pass = 0
+   while pass < 2 {
+      mut i = _window_order.len - 1
+      while i >= 0 {
+         def wid = to_str(_window_order.get(i, ""))
+         def st = _windows.get(wid, 0)
+         if is_dict(st) && st.get("open", true) {
+            def docked = to_str(st.get("dock", "")) != ""
+            def counts = pass == 0 ? !docked : (docked && bool(st.get("dock_show", true)))
+            if counts && _rect_hit(px, py,
+               float(st.get("x", 0.0)),
+               float(st.get("y", 0.0)),
+               float(st.get("w", 0.0)),
+               float(st.get("h", 0.0))){
+               return wid
+            }
          }
+         i -= 1
       }
-      i -= 1
+      pass += 1
    }
+   def chrome_id = _dock_chrome_hit(px, py)
+   if chrome_id != "" { return chrome_id }
    if _window_order.len > 0 { return "" }
+   mut i = 0
    mut ks = dict_keys(_windows)
    if !is_list(ks) { return "" }
-   i = 0
    def ks_n = ks.len
    while i < ks_n {
       def st = _windows.get(ks.get(i), 0)
@@ -1212,11 +1410,12 @@ fn prepare_input(any win, f64 ww=0.0, f64 wh=0.0) any {
    _win = win
    if float(ww) > 0.0 { _fb_w = float(ww) }
    if float(wh) > 0.0 { _fb_h = float(wh) }
-   if !_enabled || !win {
+   if !_enabled || (!win && !_headless_input) {
       _window_hovered = ""
       _wants_mouse, _wants_keyboard = false, false
       _mouse_down0, _mouse_down0_prev = false, false
       _mouse_pressed0, _mouse_released0 = false, false
+      _mouse_pressed1 = false
       _key_events = []
       _clear_key_masks()
       _clear_pending_input_events()
@@ -1224,12 +1423,31 @@ fn prepare_input(any win, f64 ww=0.0, f64 wh=0.0) any {
    }
    if _event_mouse_has_pos {
       _mouse_x, _mouse_y = _event_mouse_x, _event_mouse_y
-   } else {
+   } elif win {
       def mp = uiw.cursor_pos(win)
       def vp = _pointer_view_xy(mp.get(0, 0.0), mp.get(1, 0.0))
       _mouse_x, _mouse_y = float(vp.get(0, 0.0)), float(vp.get(1, 0.0))
    }
-   def sampled_down0 = _event_mouse_down0_known ? _event_mouse_down0 : uiw.mouse_down(win, 0)
+   ;; Headless input (no window handle) is driven only by fed events, so the
+   ;; pointer and the button keep their last fed state between frames.
+   mut sampled_down0 = _mouse_down0_prev
+   if _event_mouse_down0_known { sampled_down0 = _event_mouse_down0 }
+   elif _fed_down0_valid {
+      sampled_down0 = _fed_down0
+      ;; Safety net for a release that was never fed (an app that withheld
+      ;; the event): if the window has reported the button up for a long
+      ;; stretch with no button event, believe the window again.
+      if _fed_down0 && win {
+         if uiw.mouse_down(win, 0) { _fed_down0_stale = 0 }
+         else { _fed_down0_stale += 1 }
+         if _fed_down0_stale > 240 {
+            _fed_down0, _fed_down0_valid = false, false
+            _fed_down0_stale = 0
+            sampled_down0 = false
+         }
+      }
+   } elif win { sampled_down0 = uiw.mouse_down(win, 0) }
+   _mouse_pressed1 = _event_mouse_pressed1
    def sampled_pressed0 = (_event_mouse_pressed0 || (sampled_down0 && !_mouse_down0_prev)) && sampled_down0
    def sampled_released0 = _event_mouse_released0 || (_mouse_down0_prev && !sampled_down0)
    _mouse_down0, _mouse_pressed0 = sampled_down0, sampled_pressed0
@@ -1260,12 +1478,15 @@ fn prepare_input(any win, f64 ww=0.0, f64 wh=0.0) any {
       _mouse_scroll_dx, _mouse_scroll_dy = _event_scroll_dx, _event_scroll_dy
       _last_scroll_x += _event_scroll_dx
       _last_scroll_y += _event_scroll_dy
-   } else {
+   } elif win {
       def sp, sx = uiw.scroll_pos(win), float(sp.get(0, 0.0))
       def sy = float(sp.get(1, 0.0))
       _mouse_scroll_dx, _mouse_scroll_dy = sx - _last_scroll_x, sy - _last_scroll_y
       _last_scroll_x, _last_scroll_y = sx, sy
+   } else {
+      _mouse_scroll_dx, _mouse_scroll_dy = 0.0, 0.0
    }
+   if (_mouse_pressed0 || _mouse_pressed1) && _popup_stack.len > 0 { _popup_dismiss_outside() }
    _window_hovered = _top_window_id_at(_mouse_x, _mouse_y)
    if _mouse_pressed0 && _window_hovered.len == 0 && _active_window_move == "" && _active_window_resize == "" {
       _focused_window, _text_focus_id, _kbd_focus_id, _active_widget_id = "", "", "", ""
@@ -1287,10 +1508,14 @@ fn feed_event(int typ, dict data) bool {
       def b = int(data.get("button", -1))
       _capture_event_pointer_pos(data)
       if b == 0 {
+         _fed_down0, _fed_down0_valid = typ == EVENT_MOUSE_BUTTON_PRESSED, true
+         _fed_down0_stale = 0
          _event_mouse_down0_known = true
          _event_mouse_down0 = typ == EVENT_MOUSE_BUTTON_PRESSED
          if typ == EVENT_MOUSE_BUTTON_PRESSED { _event_mouse_pressed0 = true }
          else { _event_mouse_released0 = true }
+      } elif b == 1 && typ == EVENT_MOUSE_BUTTON_PRESSED {
+         _event_mouse_pressed1 = true
       }
       return _event_pointer_claimed()
    }
@@ -1299,6 +1524,11 @@ fn feed_event(int typ, dict data) bool {
       _event_scroll_dx += float(data.get("dx", 0.0))
       _event_scroll_dy += float(data.get("dy", 0.0))
       return _pointer_window_id() != ""
+   }
+   if typ == EVENT_FOCUS_OUT {
+      ;; A release may never arrive once focus is gone; fall back to polling.
+      _fed_down0, _fed_down0_valid = false, false
+      return false
    }
    if typ == EVENT_KEY_CHAR || typ == EVENT_KEY_CHAR_MODS {
       def cp = int(data.get("char", data.get("codepoint", 0)))
@@ -1313,6 +1543,11 @@ fn feed_event(int typ, dict data) bool {
       def k = int(data.get("key", 0))
       def text_active = _text_focus_id != ""
       def ctrl = (mods & MOD_CONTROL) != 0
+      ;; Escape closes the innermost popup before it clears any focus.
+      if k == KEY_ESCAPE && !text_active && _popup_stack.len > 0 {
+         _popup_close_from(_popup_stack.len - 1)
+         return true
+      }
       if text_active && (mods & (MOD_ALT | MOD_SUPER | MOD_META)) == 0 {
          if ctrl {
             if k == KEY_A { _queue_key_event(_TEXT_SELECT_ALL) }
@@ -1420,8 +1655,10 @@ fn _text_cursor_from_x(int font_id, any s, f64 px, f64 text_x) int {
       def next_i = _utf8_next_index(txt, i)
       def before = str.str_slice(txt, 0, i)
       def thru = str.str_slice(txt, 0, next_i)
-      def bw = float(_measure_text_ui(font_id, before).get(0, 0.0))
-      def nw = float(_measure_text_ui(font_id, thru).get(0, 0.0))
+      def bw_m = _measure_text_ui(font_id, before)
+      def bw = float(bw_m.get(0, 0.0))
+      def nw_m = _measure_text_ui(font_id, thru)
+      def nw = float(nw_m.get(0, 0.0))
       if target < (bw + nw) * 0.5 { return i }
       i = next_i
    }
@@ -1457,11 +1694,19 @@ fn begin_frame(any win=0, int font=0, f64 ww=0.0, f64 wh=0.0) any {
    }
    _hot_id, _hot_rect = "", [0.0, 0.0, 0.0, 0.0]
    _same_line_next, _same_line_gap = false, _gap()
-   _text_run_queue = []
+   if is_list(_text_run_queue) { clear(_text_run_queue) } else { _text_run_queue = [] }
    _popup_next_hit_active = false
    _popup_next_hit_window = ""
    _popup_combo_active = false
    _popup_combo_labels = []
+   _ov_cmds, _ov_stack, _ov_pending = [], [], []
+   _ov_top, _win_layers, _dock_frame_active = [], [], false
+   _ov_depth, _ov_discard, _popup_depth = 0, 0, 0
+   _ctx_stack, _id_stack, _indent_stack, _col_stack = [], [], [], []
+   _row_n, _tbl_id, _menubar_active = 0, "", false
+   _tip_text, _last_item_id = "", ""
+   if _disabled_on > 0 { _disabled_restore() }
+   _disabled_depth = 0
    gui_batch.reset()
    _sync_current_layout_cache(0)
    _focus_collect_active = false
@@ -1494,6 +1739,7 @@ fn end_frame() any {
    def run_count = (prof && is_list(_text_run_queue)) ? _text_run_queue.len : 0
    _flush_popup_draw_queue()
    _flush_text_runs()
+   _overlay_finish()
    if prof { ui_profile.mark("flush_text", t_flush, " runs=" + to_str(run_count)) }
    def t_tail = prof ? ui_profile.now() : 0
    if !_mouse_down0 {
@@ -1528,6 +1774,12 @@ fn end_frame() any {
    _key_events = []
    _clear_key_masks()
    _text_events = ""
+   _popup_dismissed = []
+   _mouse_pressed1 = false
+   if _dnd_active && !_mouse_down0 {
+      _dnd_active, _dnd_type, _dnd_label, _dnd_source = false, "", "", ""
+      _dnd_payload = nil
+   }
 }
 
 fn wants_mouse() bool { "Returns true when GUI wants mouse input." _enabled && _wants_mouse }
@@ -1634,6 +1886,7 @@ fn set_window_pos(any id, f64 x, f64 y) any {
    "Sets stored position for a named GUI window."
    mut st = _window_lookup(id)
    if !is_dict(st) { return 0 }
+   if to_str(st.get("dock", "")) != "" { return 0 }
    st["x"] = float(x)
    st["y"] = float(y)
    st = _clamp_window_pos(st)
@@ -1644,6 +1897,7 @@ fn set_window_size(any id, f64 w, f64 h) any {
    "Sets stored size for a named GUI window."
    mut st = _window_lookup(id)
    if !is_dict(st) { return 0 }
+   if to_str(st.get("dock", "")) != "" { return 0 }
    st["w"] = max(float(w), _min_win_w())
    st["h"] = max(float(h), _min_win_h())
    st = _clamp_window_pos(st)
@@ -1725,7 +1979,16 @@ fn _ensure_window(any id, any title, f64 x, f64 y, f64 w, f64 h, any opts=0) dic
    st["scrollable"] = next_scrollable
    st["collapsible"] = next_collapsible
    st["titlebar"] = next_titlebar
-   st = _clamp_window_pos(st)
+   if to_str(st.get("dock", "")) != "" {
+      ;; The dockspace draws the tab and owns the rectangle.
+      st["titlebar"] = false
+      st["movable"] = false
+      st["resizable"] = false
+      st["collapsible"] = false
+      st["collapsed"] = false
+   } else {
+      st = _clamp_window_pos(st)
+   }
    _window_store(st)
    _window_order_touch(key, false)
    st
@@ -1736,6 +1999,10 @@ fn _register_focusable(any full_id) bool {
    if !is_dict(win) { return false }
    def fid = to_str(full_id)
    if fid.len == 0 { return false }
+   if _disabled_on > 0 {
+      if _kbd_focus_id == fid { _kbd_focus_id = "" }
+      return false
+   }
    if !_focus_collect_active { return false }
    mut ids = win.get("focusables", [])
    if !is_list(ids) { ids = [] }
@@ -1781,24 +2048,41 @@ fn _key_event_present(int key) bool {
    false
 }
 
-fn _widget_key_activate(any full_id) bool { (_kbd_focus_id == full_id) && (_key_event_present(KEY_ENTER) || _key_event_present(KEY_SPACE)) }
+fn _widget_key_activate(any full_id) bool { _disabled_on == 0 && (_kbd_focus_id == full_id) && (_key_event_present(KEY_ENTER) || _key_event_present(KEY_SPACE)) }
 
 fn _text_selected_all(any full_id) bool { _state_get_num(full_id, "select_all", 0.0) > 0.5 }
 
 fn _text_set_selected_all(any full_id, bool selected) any { _state_set_num(full_id, "select_all", selected ? 1.0 : 0.0) }
 
 fn _begin_interact_widget(any full_id, f64 x, f64 y, f64 w, f64 h, bool visible=true) any {
-   def rect = [x, y, w, h]
-   mut clip = rect
+   ;; Called for every widget each frame: keep the clip in scalars. Building
+   ;; the widget and clip rects as lists leaked two lists per widget per frame.
+   mut cx, cy, cw, ch = x, y, w, h
    def win = _current_window_state()
-   if is_dict(win) { clip = _window_active_clip(win) }
-   _iw_visible = !!visible && _rect_intersects(rect, clip)
-   _iw_hovered = _iw_visible && _rect_hit(_mouse_x, _mouse_y,
-      float(clip.get(0, 0.0)), float(clip.get(1, 0.0)),
-      float(clip.get(2, 0.0)), float(clip.get(3, 0.0))) && _current_window_pointer_hit(x, y, w, h)
+   if is_dict(win) {
+      def override = win.get("clip_override", 0)
+      if is_list(override) && override.len >= 4 {
+         cx, cy = float(override.get(0, 0.0)), float(override.get(1, 0.0))
+         cw, ch = float(override.get(2, 0.0)), float(override.get(3, 0.0))
+      } else {
+         def title_h = win.get("titlebar", true) ? _title_h() : 0.0
+         cx = float(win.get("x", 0.0)) + _pad()
+         cy = float(win.get("y", 0.0)) + title_h
+         cw = max(1.0, float(win.get("w", _min_win_w())) - _pad() * 2.0)
+         ch = max(1.0, float(win.get("h", _min_win_h())) - title_h)
+      }
+   }
+   _iw_visible = !!visible && !(x + w <= cx || cx + cw <= x || y + h <= cy || cy + ch <= y)
+   _last_item_id = full_id
+   if _disabled_on > 0 {
+      _iw_hovered, _iw_held, _iw_released, _iw_clicked = false, false, false, false
+      if _active_widget_id == full_id { _active_widget_id = "" }
+      return 0
+   }
+   _iw_hovered = _iw_visible && _rect_hit(_mouse_x, _mouse_y, cx, cy, cw, ch) && _current_window_pointer_hit(x, y, w, h)
    if _iw_hovered {
       _hot_id = full_id
-      _hot_rect = rect
+      _hot_rect = [x, y, w, h]
       _ensure_cursors()
       _want_cursor(_cursor_hand)
    }
@@ -1806,7 +2090,7 @@ fn _begin_interact_widget(any full_id, f64 x, f64 y, f64 w, f64 h, bool visible=
       if _text_focus_id != "" && _text_focus_id != full_id { _text_focus_id = "" }
       _active_widget_id = full_id
       _kbd_focus_id = full_id
-      _active_rect = rect
+      _active_rect = [x, y, w, h]
       if _current_window_id_cache.len > 0 { _focused_window = _current_window_id_cache }
    }
    _iw_held = (_active_widget_id == full_id) && _mouse_down0
@@ -1899,6 +2183,11 @@ fn _current_body_w() f64 {
    max(1.0, _current_body_w_cache)
 }
 
+fn remaining_w() f64 {
+   "Returns the width of the current window body(the layout's available row width)."
+   _current_body_w()
+}
+
 fn remaining_h(any reserve=0.0) f64 {
    "Returns remaining vertical room in the current window body."
    max(0.0,
@@ -1914,6 +2203,11 @@ fn _current_clip() list {
 
 fn push_clip_rect(any x, any y=0.0, any w=0.0, any h=0.0) any {
    "Pushes a scissor clip rectangle for subsequent GUI drawing."
+   if _ov_depth > 0 {
+      if is_list(x) { _ov_push(3, float(x.get(0, 0.0)), float(x.get(1, 0.0)), float(x.get(2, 0.0)), float(x.get(3, 0.0)), 0) }
+      else { _ov_push(3, float(x), float(y), float(w), float(h), 0) }
+      return 0
+   }
    _flush_text_runs()
    if is_list(x) {
       scissor_push(
@@ -1929,6 +2223,10 @@ fn push_clip_rect(any x, any y=0.0, any w=0.0, any h=0.0) any {
 
 fn pop_clip_rect() any {
    "Pops the current GUI scissor clip rectangle."
+   if _ov_depth > 0 {
+      _ov_push(4, 0, 0, 0, 0, 0)
+      return 0
+   }
    _flush_text_runs()
    scissor_pop()
 }
@@ -1936,6 +2234,7 @@ fn pop_clip_rect() any {
 @jit
 fn _layout_rect(any w, any h) list {
    if _current_window_id_cache.len <= 0 { return [0.0, 0.0, 0.0, 0.0] }
+   if _row_n > 0 { return _row_take(max(1.0, float(h))) }
    mut x, y = _current_body_x_cache, _current_cursor_y_cache
    def desired_w, desired_h = max(1.0, float(w)), max(1.0, float(h))
    def body_x, body_w = _current_body_x_cache, max(1.0, _current_body_w_cache)
@@ -2019,7 +2318,11 @@ fn text(any msg) any { _text_line(msg, _text_u32) }
 fn label(any msg) any { text(msg) }
 
 fn text_colored(any msg, any color) any {
-   "Draws a single text line with an RGBA color."
+   "Draws a single text line in an RGBA color or a semantic token name such as \"text_dim\" or \"warn\"."
+   if is_str(color) {
+      _text_line(msg, _text_color_u32(theme_color(to_str(color))))
+      return 0
+   }
    _text_line(msg, [
          clamp(float(color.get(0, 1.0)), 0.0, 1.0),
          clamp(float(color.get(1, 1.0)), 0.0, 1.0),
@@ -2029,33 +2332,84 @@ fn text_colored(any msg, any color) any {
 }
 
 fn property_row(any id, any label, any value, any tone=0) list {
-   "Draws a two-column property row and returns its rectangle."
+   "Draws a two-column property row and returns its rectangle. `tone` is an RGBA list or a theme token name."
    def lbl = _ui_text(label)
    def val = _ui_text(value)
-   def tone_col = is_list(tone) ? tone : _text_u32
-   def row_h = max(_small_item_h(), _sx(24.0))
+   mut tone_col = _text_u32
+   if is_list(tone) { tone_col = _text_color_u32(tone) }
+   elif is_str(tone) { tone_col = _text_color_u32(theme_color(to_str(tone))) }
+   def row_h = max(_small_item_h(), _sx(22.0))
    def rect = _layout_rect(_current_body_w(), row_h)
    def clip = _current_clip()
    if !_rect_intersects(rect, clip) { return rect }
    def x, y = float(rect.get(0, 0.0)), float(rect.get(1, 0.0))
    def w, h = float(rect.get(2, 0.0)), float(rect.get(3, 0.0))
-   def hot = _current_window_pointer_hit(x, y, w, h)
-   _gui_rect_fast(x, y, w, h, hot ? _panel_hover_u32 : _panel_u32)
-   _gui_rect_fast(x, y, _sx(2.0), h, _border_u32)
-   def label_w = clamp(w * 0.38, _sx(96.0), _sx(168.0))
+   ;; Rows sit directly on the window surface; only the hovered row is filled,
+   ;; so a long property list reads as a table instead of a stack of boxes.
+   if _current_window_pointer_hit(x, y, w, h) { _gui_rect_fast(x, y, w, h, _panel_u32) }
+   def label_w = clamp(w * 0.46, _sx(104.0), _sx(200.0))
    def tx = x + _item_pad_x()
    def ty = _text_center_y_for(_font_small_id(), y, h)
-   _draw_text_ui_small_clipped(lbl, tx, ty, _text_dim_u32, max(1.0, label_w - _item_pad_x()), _clip_rect_inset(x,
-         y,
-         w,
-         h,
-         1.0))
-   _draw_text_ui_small_clipped(val, x + label_w, ty, tone_col, max(1.0, w - label_w - _item_pad_x()), _clip_rect_inset(x,
-         y,
-         w,
-         h,
-         1.0))
+   def row_clip = _clip_rect_inset(x, y, w, h, 0.0)
+   _draw_text_ui_small_clipped(lbl, tx, ty, _text_dim_u32, max(1.0, label_w - _item_pad_x() * 2.0), row_clip)
+   _draw_text_ui_small_clipped(val, x + label_w, ty, tone_col, max(1.0, w - label_w - _item_pad_x()), row_clip)
    rect
+}
+
+fn _label_h() f64 {
+   "Height of the caption line above a labelled field."
+   _font_h_for(_font_small_id()) + _sx(4.0)
+}
+
+fn _field_h() f64 {
+   "Height of an editable field: one body text line plus vertical padding."
+   max(_text_h() + _sx(8.0), _sx(26.0))
+}
+
+fn _labelled_h(str lbl) f64 {
+   "Total layout height of a field with an optional caption above it."
+   (str.len(lbl) > 0) ? (_label_h() + _field_h()) : _field_h()
+}
+
+fn _gui_diag(f64 x0, f64 y0, f64 x1, f64 y1, f64 t, int color) any {
+   "Draws a pixel-stepped diagonal stroke, `t` pixels tall, from(x0,y0) to(x1,y1)."
+   def steps = int(max(abs(x1 - x0), 1.0))
+   mut i = 0
+   while i <= steps {
+      def k = float(i) / float(steps)
+      _gui_rect_fast(x0 + (x1 - x0) * k, y0 + (y1 - y0) * k, 1.0, t, color)
+      i += 1
+   }
+}
+
+fn _gui_check_mark(f64 bx, f64 by, f64 box, int color) any {
+   "Draws a check mark inside the square at(bx,by) with side `box`."
+   def u = box / 16.0
+   def t = max(2.0, _snap(2.0 * u))
+   _gui_diag(bx + 4.0 * u, by + 8.0 * u, bx + 7.0 * u, by + 11.0 * u, t, color)
+   _gui_diag(bx + 7.0 * u, by + 11.0 * u, bx + 12.0 * u, by + 4.0 * u, t, color)
+}
+
+fn _gui_chevron(f64 cx, f64 cy, f64 size, bool down, int color) any {
+   "Draws a filled disclosure triangle centred on(cx,cy): pointing down when open, right when closed."
+   def half = max(2.0, _snap(size * 0.5))
+   def n = int(half)
+   mut i = 0
+   while i <= n {
+      def span = float(n - i) * 2.0 + 1.0
+      if down {
+         _gui_rect_fast(cx - float(n - i), cy - half * 0.5 + float(i), span, 1.0, color)
+      } else {
+         _gui_rect_fast(cx - half * 0.5 + float(i), cy - float(n - i), 1.0, span, color)
+      }
+      i += 1
+   }
+}
+
+fn _gui_focus_ring(f64 x, f64 y, f64 w, f64 h) any {
+   "Draws the keyboard focus indicator: a two-pixel accent frame, so it reads on filled and unfilled widgets in both themes."
+   _gui_rect_outline_fast(x, y, w, h, _focus_u32)
+   if w > 4.0 && h > 4.0 { _gui_rect_outline_fast(x + 1.0, y + 1.0, w - 2.0, h - 2.0, _focus_u32) }
 }
 
 fn _draw_centered_text(any txt, any x, any y, any w, any h, any color) any { _draw_centered_text_ex(_font_body(), txt, x, y, w, h, color) }
@@ -2108,9 +2462,9 @@ fn button(any id, any label, any w=0.0, any h=0.0) bool {
    def focused = _kbd_focus_id == full
    def clicked = _iw_clicked || _widget_key_activate(full)
    if visible {
-      _gui_rect_fast(x, y, ww, hh, held ? _press_u32 : (hovered ? _panel_hover_u32 : _panel_u32))
-      if focused || hovered || held { _gui_rect_fast(x, y, ww, held ? _sx(3.0) : _sx(2.0), _accent_u32) }
-      _gui_rect_outline_fast(x, y, ww, hh, held ? _accent_u32 : ((hovered || focused) ? _accent_u32 : _border_u32))
+      _gui_rect_fast(x, y, ww, hh, held ? _press_u32 : (hovered ? _panel_active_u32 : _panel_hover_u32))
+      _gui_rect_outline_fast(x, y, ww, hh, held ? _accent_u32 : (hovered ? _text_faint_u32 : _border_u32))
+      if focused { _gui_focus_ring(x, y, ww, hh) }
       _draw_centered_text(txt, x, y, ww, hh, _text_u32)
    }
    clicked
@@ -2134,9 +2488,9 @@ fn small_button(any id, any label, any w=0.0, any h=0.0) bool {
    def focused = _kbd_focus_id == full
    def clicked = _iw_clicked || _widget_key_activate(full)
    if _iw_visible {
-      _gui_rect_fast(x, y, ww, hh, held ? _press_u32 : (hovered ? _panel_hover_u32 : _panel_u32))
-      if focused || hovered || held { _gui_rect_fast(x, y, ww, held ? _sx(3.0) : _sx(2.0), _accent_u32) }
-      _gui_rect_outline_fast(x, y, ww, hh, held ? _accent_u32 : ((hovered || focused) ? _accent_u32 : _border_u32))
+      _gui_rect_fast(x, y, ww, hh, held ? _press_u32 : (hovered ? _panel_active_u32 : _panel_hover_u32))
+      _gui_rect_outline_fast(x, y, ww, hh, held ? _accent_u32 : (hovered ? _text_faint_u32 : _border_u32))
+      if focused { _gui_focus_ring(x, y, ww, hh) }
       _draw_centered_text_ex(_font_small_id(), txt, x, y, ww, hh, _text_u32)
    }
    clicked
@@ -2264,20 +2618,23 @@ fn selectable(any id, any label, bool selected=false, f64 w=0.0, f64 h=0.0, any 
       def x, y = float(rect.get(0, 0.0)), float(rect.get(1, 0.0))
       def rwf, rhf = float(rect.get(2, 0.0)), float(rect.get(3, 0.0))
       def clip = _clip_rect_inset(x, y, rwf, rhf, 1.0)
-      def bg = selected ? _accent_soft_u32 : (held ? _panel_active_u32 : (hovered ? _panel_hover_u32 : _panel_u32))
       def title_y = (d.len > 0) ? (y + _sx(5.0)) : _text_center_y_for(_font_body(), y, rhf)
       def icon_sz = (_tex_ref_id(tex_id) >= 0) ? min(_sx(22.0), max(_sx(14.0), rhf - _sx(10.0))) : 0.0
-      def text_x = x + _item_pad_x() + ((icon_sz > 0.0) ? (icon_sz + _sx(7.0)) : 0.0)
+      def text_x = x + _item_pad_x() + _sx(4.0) + ((icon_sz > 0.0) ? (icon_sz + _sx(7.0)) : 0.0)
       def text_w = max(1.0, rw - (text_x - x) - _item_pad_x())
-      _gui_rect_fast(x, y, rwf, rhf, bg)
-      if selected || focused || hovered { _gui_rect_outline_fast(x, y, rwf, rhf, (selected || focused) ? _accent_u32 : _border_u32) }
+      ;; Unselected rows are transparent; hover, press and selection are the
+      ;; only fills, and the selected row carries a leading accent bar.
+      if selected { _gui_rect_fast(x, y, rwf, rhf, held ? _select_u32 : _accent_soft_u32) }
+      elif held { _gui_rect_fast(x, y, rwf, rhf, _panel_active_u32) }
+      elif hovered { _gui_rect_fast(x, y, rwf, rhf, _panel_hover_u32) }
+      if selected { _gui_rect_fast(x, y, _sx(3.0), rhf, _accent_u32) }
+      if focused { _gui_focus_ring(x, y, rwf, rhf) }
       if icon_sz > 0.0 {
          _gui_tex_ref_uv(x + _item_pad_x(), y + max(_sx(5.0), (rhf - icon_sz) * 0.5), icon_sz, icon_sz,
             tex_id, 1.0, 1.0, 1.0, selected ? 1.0 : 0.88)
       }
       _draw_text_ui_clipped(txt, text_x, title_y, _text_u32, text_w, clip)
       if d.len > 0 { _draw_text_ui_small_clipped(d, text_x, y + _sx(5.0) + _text_h() + _tiny_gap(), _text_dim_u32, text_w, clip) }
-      if selected { _gui_rect_fast(x + rwf - _sx(5.0), y, _sx(5.0), rhf, _accent_u32) }
    }
    clicked
 }
@@ -2411,7 +2768,9 @@ fn input_text(any id, any label, any value, any placeholder="", f64 w=0.0) str {
    def lbl = _ui_text(label)
    def ph = _ui_text(placeholder)
    def rw = _pick_positive(w, _current_body_w())
-   def rect = _layout_rect(rw, _slider_h())
+   ;; The caption owns its own line above the field. Reserving a fixed height
+   ;; for both let the field spill into the next widget's row.
+   def rect = _layout_rect(rw, _labelled_h(lbl))
    _begin_interact_widget(full,
       float(rect.get(0,
             0.0)),
@@ -2424,8 +2783,8 @@ fn input_text(any id, any label, any value, any placeholder="", f64 w=0.0) str {
       true)
    def x, y = float(rect.get(0, 0.0)), float(rect.get(1, 0.0))
    def rwf = float(rect.get(2, 0.0))
-   def field_y = y + _text_h() + _tiny_gap()
-   def field_h = max(_small_item_h(), float(rect.get(3, 0.0)) - _text_h() - _tiny_gap())
+   def field_y = y + ((str.len(lbl) > 0) ? _label_h() : 0.0)
+   def field_h = _field_h()
    def tx = x + _item_pad_x()
    def field_hover = _current_window_pointer_hit(x, field_y, rwf, field_h)
    if field_hover {
@@ -2451,22 +2810,18 @@ fn input_text(any id, any label, any value, any placeholder="", f64 w=0.0) str {
       _text_state_set_cursor(full, cursor)
    }
    if _iw_visible {
-      def label_clip = _clip_rect_inset(x, y, rwf, _text_h(), 0.0)
+      def label_clip = _clip_rect_inset(x, y, rwf, _label_h(), 0.0)
       def field_clip = _clip_rect_inset(x, field_y, rwf, field_h, 1.0)
-      _gui_rect_fast(x,
-         field_y,
-         rwf,
-         field_h,
-         active_text ? _panel_active_u32 : (_iw_hovered ? _panel_hover_u32 : _panel_u32))
-      _gui_rect_outline_fast(x, field_y, rwf, field_h, active_text ? _accent_u32 : _border_u32)
+      _gui_rect_fast(x, field_y, rwf, field_h, active_text ? _window_bg_u32 : (field_hover ? _panel_hover_u32 : _panel_u32))
+      _gui_rect_outline_fast(x, field_y, rwf, field_h, active_text ? _accent_u32 : (field_hover ? _text_faint_u32 : _border_u32))
       def draw_s = (out.len > 0) ? out : ph
-      mut draw_col = _text_dim_u32
+      mut draw_col = _text_faint_u32
       if out.len > 0 { draw_col = _text_u32 }
       def ty = _text_center_y_for(_font_body(), field_y, field_h)
-      _draw_text_ui_small_clipped(lbl, x, y, _text_u32, rwf, label_clip)
+      if str.len(lbl) > 0 { _draw_text_ui_small_clipped(lbl, x, y, _text_dim_u32, rwf, label_clip) }
       if active_text && _text_selected_all(full) && out.len > 0 {
          def mw_sel = _measure_text_ui(_font_body(), out)
-         _gui_rect_fast(tx, field_y + _sx(4.0), min(rwf - _item_pad_x() * 2.0, float(mw_sel.get(0, 0.0)) + _sx(3.0)), max(_sx(8.0), field_h - _sx(8.0)), _accent_soft_u32)
+         _gui_rect_fast(tx - 1.0, field_y + _sx(4.0), min(rwf - _item_pad_x() * 2.0, float(mw_sel.get(0, 0.0)) + _sx(3.0)), max(_sx(8.0), field_h - _sx(8.0)), _select_u32)
       }
       _draw_text_ui_clipped(draw_s, tx, ty, draw_col, rwf - _item_pad_x() * 2.0, field_clip)
       if active_text && ((int(get_time() * 2.0) % 2) == 0) {
@@ -2560,34 +2915,28 @@ fn title_input_text(any id, any value, any placeholder="", any w=0.0) str {
 }
 
 fn _choice_box_interact(any id, any txt, any box) list {
-   def m = _measure_text_ui(_font_body(), txt)
-   def rect = _layout_rect(_current_body_w(), max(box, float(m.get(1, box))))
+   def rect = _layout_rect(_current_body_w(), max(float(box) + _sx(6.0), _small_item_h()))
    def full = _wid(id)
    _register_focusable(full)
    _begin_interact_widget(full,
-      float(rect.get(0,
-            0.0)),
-      float(rect.get(1,
-            0.0)),
-      float(rect.get(2,
-            0.0)),
-      float(rect.get(3,
-            0.0)),
+      float(rect.get(0, 0.0)), float(rect.get(1, 0.0)),
+      float(rect.get(2, 0.0)), float(rect.get(3, 0.0)),
       true)
    [rect, full, _kbd_focus_id == full]
 }
 
 fn _draw_choice_label(any txt, any rect, any box, any bx, any by) any {
+   def ry, rh = float(rect.get(1, 0.0)), float(rect.get(3, 0.0))
    _draw_text_ui_clipped(
-      txt, bx + box + _gap(), _text_center_y_for(_font_body(), by, box), _text_u32,
-      float(rect.get(2, 0.0)) - box - _gap(),
-      _clip_rect_inset(bx, by, float(rect.get(2, 0.0)), float(rect.get(3, 0.0)), 1.0)
+      txt, bx + box + _sx(8.0), _text_center_y_for(_font_body(), ry, rh), _text_u32,
+      float(rect.get(2, 0.0)) - box - _sx(8.0),
+      _clip_rect_inset(float(rect.get(0, 0.0)), ry, float(rect.get(2, 0.0)), rh, 0.0)
    )
 }
 
 fn _choice_control(any id, any label, any value, bool radio=false) bool {
    def txt = _ui_text(label)
-   def box = _small_item_h()
+   def box = _sx(16.0)
    def hit = _choice_box_interact(id, txt, box)
    def rect = hit.get(0, [0.0, 0.0, 0.0, 0.0])
    def full = hit.get(1, "")
@@ -2595,15 +2944,17 @@ fn _choice_control(any id, any label, any value, bool radio=false) bool {
    def focused = hit.get(2, false)
    if _iw_clicked || _widget_key_activate(full) { out = radio ? true : !out }
    if _iw_visible {
-      def bx, by = float(rect.get(0, 0.0)), float(rect.get(1, 0.0))
-      _gui_rect_fast(bx, by, box, box, out ? _accent_soft_u32 : _panel_u32)
-      _gui_rect_outline_fast(bx, by, box, box, (_iw_hovered || focused) ? _accent_u32 : _border_u32)
+      def bx = float(rect.get(0, 0.0)) + _sx(2.0)
+      def by = _snap(float(rect.get(1, 0.0)) + (float(rect.get(3, 0.0)) - box) * 0.5)
+      ;; A set box is filled with the accent and carries a dark mark, so the
+      ;; state reads at a glance and never depends on the mark's own colour.
+      _gui_rect_fast(bx, by, box, box, out ? _accent_u32 : (_iw_held ? _panel_active_u32 : (_iw_hovered ? _panel_hover_u32 : _panel_u32)))
+      _gui_rect_outline_fast(bx, by, box, box, out ? _accent_u32 : (_iw_hovered ? _text_faint_u32 : _border_u32))
       if out {
-         if radio { _gui_rect_fast(bx + _sx(5.0), by + _sx(5.0), box - _sx(10.0), box - _sx(10.0), _accent_u32) } else {
-            _gui_rect_fast(bx + _sx(5.0), by + _sx(9.0), _sx(5.0), _sx(2.0), _ok_u32)
-            _gui_rect_fast(bx + _sx(9.0), by + _sx(5.0), _sx(8.0), _sx(2.0), _ok_u32)
-         }
+         if radio { _gui_rect_fast(bx + _sx(5.0), by + _sx(5.0), box - _sx(10.0), box - _sx(10.0), _window_bg_u32) }
+         else { _gui_check_mark(bx, by, box, _window_bg_u32) }
       }
+      if focused { _gui_focus_ring(bx - _sx(2.0), by - _sx(2.0), box + _sx(4.0), box + _sx(4.0)) }
       _draw_choice_label(txt, rect, box, bx, by)
    }
    out
@@ -2656,8 +3007,11 @@ fn tab_strip_slot(f64 x, f64 width, int count, int index) list {
 
 fn tab_strip(any id, list labels, int selected=0, f64 w=0.0, f64 h=0.0) int {
    "Draws a tab strip and returns the selected tab index."
-   def items = is_list(labels) ? labels : []
-   if items.len == 0 { return int(selected) }
+   ;; `labels` is used as passed. Routing a typed list through an
+   ;; `is_list(x) ? x : []` guard reads it back shifted by one element, which
+   ;; put the second label in the first slot and blanked the rest.
+   def n = labels.len
+   if n == 0 { return int(selected) }
    def id_s = to_str(id)
    def rw = _pick_positive(w, _current_body_w())
    def rh = _pick_positive(h, _item_h())
@@ -2668,9 +3022,9 @@ fn tab_strip(any id, list labels, int selected=0, f64 w=0.0, f64 h=0.0) int {
    def x, y = float(rect.get(0, 0.0)), float(rect.get(1, 0.0))
    def ww = float(rect.get(2, 0.0))
    def hh = float(rect.get(3, 0.0))
-   def n = items.len
-   _gui_rect_fast(x, y, ww, hh, _window_bg_u32)
-   _gui_rect_outline_fast(x, y, ww, hh, _border_u32)
+   ;; A tab strip is a row of text buttons over one baseline rule. The active
+   ;; tab is bright with an accent underline; nothing else is filled at rest.
+   _gui_rect_fast(x, y + hh - 1.0, ww, 1.0, _border_u32)
    mut i = 0
    while i < n {
       def slot = tab_strip_slot(x, ww, n, i)
@@ -2683,15 +3037,11 @@ fn tab_strip(any id, list labels, int selected=0, f64 w=0.0, f64 h=0.0) int {
       def focused = _kbd_focus_id == full
       if _iw_clicked || _widget_key_activate(full) { out = i }
       def active = out == i
-      _gui_rect_fast(tx,
-         y,
-         tw,
-         hh,
-         active ? _accent_soft_u32 : (held ? _panel_active_u32 : (hovered ? _panel_hover_u32 : _panel_u32)))
-      if focused && !active { _gui_rect_outline_fast(tx, y, tw, hh, _accent_u32) }
-      if i > 0 { _gui_rect_fast(tx, y + _sx(5.0), 1.0, hh - _sx(10.0), _border_u32) }
-      if active { _gui_rect_fast(tx + _sx(6.0), y + hh - _sx(3.0), max(_sx(12.0), tw - _sx(12.0)), _sx(3.0), _accent_u32) }
-      _draw_centered_text(to_str(items.get(i, "")), tx, y, tw, hh, active ? _text_u32 : _text_dim_u32)
+      if held { _gui_rect_fast(tx, y, tw, hh - 1.0, _panel_active_u32) }
+      elif hovered && !active { _gui_rect_fast(tx, y, tw, hh - 1.0, _panel_u32) }
+      if focused { _gui_focus_ring(tx, y, tw, hh) }
+      if active { _gui_rect_fast(tx, y + hh - _sx(2.0), tw, _sx(2.0), _accent_u32) }
+      _draw_centered_text(to_str(labels.get(i, "")), tx, y, tw, hh, active ? _text_u32 : _text_dim_u32)
       i += 1
    }
    out
@@ -2928,14 +3278,15 @@ fn _combo_selected_index(list values, int selected) int {
    out
 }
 
-fn _combo_layout(f64 w) list {
+fn _combo_layout(f64 w, str lbl="x") list {
    def rw = _pick_positive(w, _current_body_w())
-   def field_h = _small_item_h()
-   def rect = _layout_rect(rw, _text_h() + _tiny_gap() + field_h)
+   def field_h = _field_h()
+   def cap_h = (str.len(lbl) > 0) ? _label_h() : 0.0
+   def rect = _layout_rect(rw, cap_h + field_h)
    def x = float(rect.get(0, 0.0))
    def y = float(rect.get(1, 0.0))
    def rwf = float(rect.get(2, 0.0))
-   [rect, x, y, rwf, y + _text_h() + _tiny_gap(), field_h]
+   [rect, x, y, rwf, y + cap_h, field_h]
 }
 
 fn _combo_apply_trigger(str full, bool open, bool forced_open, bool nav_focus) bool {
@@ -2987,41 +3338,34 @@ fn _combo_scroll_state(bool open, list values, int out, str popup_key, bool popu
 
 fn _draw_combo_field(str full, str lbl, list values, int out, bool open, f64 x, f64 y, f64 rwf, f64 field_y, f64 field_h) any {
    if !_iw_visible { return 0 }
-   def label_clip = _clip_rect_inset(x, y, rwf, _text_h(), 0.0)
    def field_clip = _clip_rect_inset(x, field_y, rwf, field_h, 1.0)
-   _gui_rect_fast(x,
-      field_y,
-      rwf,
-      field_h,
-      open ? _panel_active_u32 : (_iw_hovered ? _panel_hover_u32 : _panel_u32))
-   _gui_rect_outline_fast(x, field_y, rwf, field_h, (_kbd_focus_id == full || open) ? _accent_u32 : _border_u32)
+   def focused = _kbd_focus_id == full
+   _gui_rect_fast(x, field_y, rwf, field_h, open ? _panel_active_u32 : (_iw_hovered ? _panel_hover_u32 : _panel_u32))
+   _gui_rect_outline_fast(x, field_y, rwf, field_h, open ? _accent_u32 : (_iw_hovered ? _text_faint_u32 : _border_u32))
+   if focused && !open { _gui_focus_ring(x, field_y, rwf, field_h) }
    def show_txt = ((values.len > 0) && out >= 0 && out < values.len) ? _ui_text(values.get(out, "")) : "<empty>"
    def text_y = _text_center_y_for(_font_body(), field_y, field_h)
-   def show_col = (values.len > 0) ? _text_u32 : _text_dim_u32
-   _draw_text_ui_clipped(lbl, x, y, _text_u32, rwf, label_clip)
+   def show_col = (values.len > 0) ? _text_u32 : _text_faint_u32
+   if str.len(lbl) > 0 { _draw_text_ui_small_clipped(lbl, x, y, _text_dim_u32, rwf, _clip_rect_inset(x, y, rwf, _label_h(), 0.0)) }
    _draw_text_ui_clipped(show_txt,
       x + _item_pad_x(),
       text_y,
       show_col,
-      rwf - _item_pad_x() * 2.0 - _sx(14.0),
+      rwf - _item_pad_x() * 2.0 - _sx(16.0),
       field_clip)
-   _draw_text_ui_small_clipped(open ? "^" : "v",
-      x + rwf - _item_pad_x() - _sx(8.0),
-      text_y,
-      _text_dim_u32,
-      _sx(10.0),
-      field_clip)
+   _gui_chevron(x + rwf - _item_pad_x() - _sx(7.0), field_y + field_h * 0.5, _sx(9.0), true, (open || _iw_hovered) ? _text_u32 : _text_dim_u32)
 }
 
 fn combo_box(any id, any label, list items, int selected=0, f64 w=0.0, int max_visible=6) int {
    "Draws a combo box and returns the selected item index."
-   def values = is_list(items) ? items : []
+   ;; See tab_strip: a typed list must not pass through an is_list guard.
+   def values = items
    mut out = _combo_selected_index(values, selected)
    def full = _wid(id)
    def open_key = full + "#open"
    def popup_key = full + "#popup"
    def lbl = _ui_text(label)
-   def geom = _combo_layout(w)
+   def geom = _combo_layout(w, lbl)
    def x, y = float(geom.get(1, 0.0)), float(geom.get(2, 0.0))
    def rwf, field_y = float(geom.get(3, 0.0)), float(geom.get(4, 0.0))
    def field_h = float(geom.get(5, _small_item_h()))
@@ -3057,7 +3401,7 @@ fn slider_float(any id, any label, f64 value, f64 min_v, f64 max_v, f64 w=0.0) f
    }
    mut out = clamp(float(value), lo, hi)
    def full_w = _pick_positive(w, _current_body_w())
-   def rect = _layout_rect(full_w, _slider_h())
+   def rect = _layout_rect(full_w, _label_h() + _sx(18.0))
    def full = _wid(id)
    _register_focusable(full)
    _begin_interact_widget(full,
@@ -3083,27 +3427,29 @@ fn slider_float(any id, any label, f64 value, f64 min_v, f64 max_v, f64 w=0.0) f
    }
    if _iw_visible {
       def x, y = float(rect.get(0, 0.0)), float(rect.get(1, 0.0))
-      def rw, ry = float(rect.get(2, 0.0)), y + _text_h() + _sx(10.0)
-      def rh, rx = _sx(8.0), x + _item_pad_x()
+      def rw = float(rect.get(2, 0.0))
       def tw = max(_sx(24.0), rw - _item_pad_x() * 2.0)
+      def rx = x + _item_pad_x()
+      ;; Caption and value share the first line; the track is centred in the
+      ;; band below it with the knob straddling the track.
+      def band_y = y + _label_h()
+      def track_h = _sx(4.0)
+      def ry = _snap(band_y + (_sx(18.0) - track_h) * 0.5)
       def norm = (hi > lo) ? clamp((out - lo) / (hi - lo), 0.0, 1.0) : 0.0
-      def fill_w = max(_sx(6.0), tw * norm)
-      def clip = _clip_rect_inset(x, y, rw, float(rect.get(3, 0.0)), 1.0)
-      _draw_text_ui_clipped(_ui_text(label), x, y, _text_u32, rw - _sx(90.0), clip)
-      _draw_text_ui_small_clipped(f"{out:.3f}", x + rw - _sx(84.0), y + _sx(1.0), _text_dim_u32, _sx(80.0), clip)
-      _gui_rect_fast(rx, ry, tw, rh, _panel_u32)
-      _gui_rect_fast(rx, ry, fill_w, rh, _accent_u32)
-      _gui_rect_outline_fast(rx,
-         ry,
-         tw,
-         rh,
-         (_iw_hovered || _kbd_focus_id == full) ? _accent_u32 : _border_u32)
-      def knob_x = rx + tw * norm - _sx(5.0)
-      _gui_rect_fast(knob_x,
-         ry - _sx(4.0),
-         _sx(10.0),
-         _sx(16.0),
-         _iw_held ? _panel_active_u32 : _panel_hover_u32)
+      def clip = _clip_rect_inset(x, y, rw, float(rect.get(3, 0.0)), 0.0)
+      def val_s = f"{out:.3f}"
+      def val_w = float(_measure_text_ui(_font_small_id(), val_s).get(0, 0.0))
+      _draw_text_ui_small_clipped(_ui_text(label), x, y, _text_dim_u32, max(1.0, rw - val_w - _sx(12.0)), clip)
+      _draw_text_ui_small_clipped(val_s, x + rw - val_w - _item_pad_x(), y, _text_u32, val_w + _item_pad_x(), clip)
+      def hot = _iw_hovered || _iw_held || _kbd_focus_id == full
+      _gui_rect_fast(rx, ry, tw, track_h, _panel_active_u32)
+      _gui_rect_fast(rx, ry, max(1.0, tw * norm), track_h, _accent_u32)
+      def knob_w, knob_h = _sx(8.0), _sx(14.0)
+      def knob_x = _snap(rx + tw * norm - knob_w * 0.5)
+      def knob_y = _snap(ry + track_h * 0.5 - knob_h * 0.5)
+      _gui_rect_fast(knob_x, knob_y, knob_w, knob_h, hot ? _text_u32 : _text_dim_u32)
+      _gui_rect_outline_fast(knob_x, knob_y, knob_w, knob_h, _window_bg_u32)
+      if _kbd_focus_id == full { _gui_focus_ring(knob_x - _sx(2.0), knob_y - _sx(2.0), knob_w + _sx(4.0), knob_h + _sx(4.0)) }
    }
    out
 }
@@ -3115,30 +3461,23 @@ fn slider_int(any id, any label, any value, any min_v, any max_v, any w=0.0) int
 }
 
 fn progress_bar(any id, any value, any label="", any w=0.0) any {
-   "Draws a bounded progress bar."
+   "Draws a bounded progress bar with its caption and percentage on the line above."
    def full_w = _pick_positive(w, _current_body_w())
-   def rect = _layout_rect(full_w, _small_item_h() + _sx(10.0))
+   def rect = _layout_rect(full_w, _label_h() + _sx(10.0))
    def p = clamp(float(value), 0.0, 1.0)
    if _rect_intersects(rect, _current_clip()) {
       def label_s = _ui_text(label)
       def x = float(rect.get(0, 0.0))
       def y = float(rect.get(1, 0.0))
       def rw = float(rect.get(2, 0.0))
-      def rh = float(rect.get(3, 0.0))
-      def inset = _sx(2.0)
-      _gui_rect_fast(x, y, rw, rh, _panel_u32)
-      _gui_rect_fast(x + inset, y + inset, max(1.0, rw - inset * 2.0), max(1.0, rh - inset * 2.0), _window_bg_u32)
-      _gui_rect_fast(x + inset,
-         y + inset,
-         max(_sx(2.0),
-            (rw - inset * 2.0) * p),
-         max(1.0,
-            rh - inset * 2.0),
-         _accent_u32)
-      _gui_rect_outline_fast(x, y, rw, rh, _border_u32)
+      def clip = _clip_rect_inset(x, y, rw, float(rect.get(3, 0.0)), 0.0)
       def pct = f"{p * 100.0:.0f}%"
-      def txt = (label_s.len > 0) ? (label_s + "  " + pct) : (to_str(id) + "  " + pct)
-      _draw_centered_text_ex(_font_small_id(), txt, x, y, rw, rh, _text_u32)
+      def pct_w = float(_measure_text_ui(_font_small_id(), pct).get(0, 0.0))
+      _draw_text_ui_small_clipped((label_s.len > 0) ? label_s : to_str(id), x, y, _text_dim_u32, max(1.0, rw - pct_w - _sx(8.0)), clip)
+      _draw_text_ui_small_clipped(pct, x + rw - pct_w, y, _text_u32, pct_w, clip)
+      def by, bh = y + _label_h() + _sx(2.0), _sx(4.0)
+      _gui_rect_fast(x, by, rw, bh, _panel_active_u32)
+      if p > 0.0 { _gui_rect_fast(x, by, max(_sx(2.0), rw * p), bh, (p >= 1.0) ? _ok_u32 : _accent_u32) }
    }
 }
 
@@ -3419,9 +3758,9 @@ fn _node_canvas_draw_links(any links, any slot_pos) any {
          def x1, y1 = float(p0.get(0, 0.0)), float(p0.get(1, 0.0))
          def x2, y2 = float(p1.get(0, 0.0)), float(p1.get(1, 0.0))
          def mx = x1 + (x2 - x1) * 0.5
-         draw_line_2d(x1, y1, mx, y1, _accent_rgba, 2.0)
-         draw_line_2d(mx, y1, mx, y2, _accent_rgba, 2.0)
-         draw_line_2d(mx, y2, x2, y2, _accent_rgba, 2.0)
+         _gui_line(x1, y1, mx, y1, _accent_rgba, 2.0)
+         _gui_line(mx, y1, mx, y2, _accent_rgba, 2.0)
+         _gui_line(mx, y2, x2, y2, _accent_rgba, 2.0)
       }
       li += 1
    }
@@ -3449,58 +3788,24 @@ fn collapsing_header(any id, any label, bool default_open=true) bool {
    _register_focusable(full)
    mut open = _state_get_bool(full, default_open)
    def rect = _layout_rect(_current_body_w(), _item_h())
-   _begin_interact_widget(full,
-      float(rect.get(0,
-            0.0)),
-      float(rect.get(1,
-            0.0)),
-      float(rect.get(2,
-            0.0)),
-      float(rect.get(3,
-            0.0)),
-      true)
+   def x, y = float(rect.get(0, 0.0)), float(rect.get(1, 0.0))
+   def w, h = float(rect.get(2, 0.0)), float(rect.get(3, 0.0))
+   _begin_interact_widget(full, x, y, w, h, true)
    def focused = _kbd_focus_id == full
    if _iw_clicked || _widget_key_activate(full) {
       open = !open
       _state_set_bool(full, open)
    }
    if _iw_visible {
-      _gui_rect_fast(float(rect.get(0, 0.0)), float(rect.get(1, 0.0)), float(rect.get(2, 0.0)), float(rect.get(3, 0.0)),
-         _iw_held ? _panel_active_u32 : (_iw_hovered ? _panel_hover_u32 : _panel_u32))
-      _gui_rect_outline_fast(float(rect.get(0,
-               0.0)),
-         float(rect.get(1,
-               0.0)),
-         float(rect.get(2,
-               0.0)),
-         float(rect.get(3,
-               0.0)),
-         focused ? _accent_u32 : _border_u32)
-      def clip = _clip_rect_inset(float(rect.get(0,
-               0.0)),
-         float(rect.get(1,
-               0.0)),
-         float(rect.get(2,
-               0.0)),
-         float(rect.get(3,
-               0.0)),
-         1.0)
-      def text_y = _text_center_y_for(_font_body(), float(rect.get(1, 0.0)), float(rect.get(3, 0.0)))
-      _draw_text_ui_clipped(open ? "[-]" : "[+]",
-         float(rect.get(0,
-               0.0)) + _item_pad_x(),
-         text_y,
-         _accent_u32,
-         _sx(42.0),
-         clip)
+      _gui_rect_fast(x, y, w, h, _iw_held ? _panel_active_u32 : (_iw_hovered ? _panel_hover_u32 : _window_hdr_u32))
+      if focused { _gui_focus_ring(x, y, w, h) }
+      _gui_chevron(x + _item_pad_x() + _sx(6.0), y + h * 0.5, _sx(9.0), open, _iw_hovered ? _text_u32 : _text_dim_u32)
       _draw_text_ui_clipped(_ui_text(label),
-         float(rect.get(0,
-               0.0)) + _item_pad_x() + _sx(48.0),
-         text_y,
+         x + _item_pad_x() + _sx(20.0),
+         _text_center_y_for(_font_body(), y, h),
          _text_u32,
-         float(rect.get(2,
-               0.0)) - _sx(54.0),
-         clip)
+         w - _item_pad_x() * 2.0 - _sx(20.0),
+         _clip_rect_inset(x, y, w, h, 0.0))
    }
    open
 }
@@ -3912,7 +4217,7 @@ fn end_scroll_area() any {
    }
    _state_set_num(_scroll_area_id, "scroll_y", scroll_y)
    _scroll_area_active = false
-   _scroll_area_parent = 0
+   _scroll_area_parent = nil
    _scroll_area_id = ""
    _scroll_area_rect = [0.0, 0.0, 0.0, 0.0]
    _scroll_area_start_y = 0.0
@@ -3931,36 +4236,54 @@ fn _draw_window_frame(any id, any title, dict st, bool titlebar, bool collapsed,
    def button_left = sx + sw - close_btn_w - collapse_btn_w - _sx(10.0)
    def collapse_x = button_left
    def close_x = sx + sw - close_btn_w - _sx(10.0)
-   def collapse_hover = titlebar && collapsible && _window_pointer_hit(id, collapse_x, sy + _sx(5.0), collapse_btn_w, title_h - _sx(10.0))
-   def close_hover = titlebar && closable && _window_pointer_hit(id, close_x, sy + _sx(5.0), close_btn_w, title_h - _sx(10.0))
+   def collapse_hover = titlebar && collapsible && _window_pointer_hit(id, collapse_x, sy + _sx(3.0), collapse_btn_w, title_h - _sx(6.0))
+   def close_hover = titlebar && closable && _window_pointer_hit(id, close_x, sy + _sx(3.0), close_btn_w, title_h - _sx(6.0))
    def resize_hover = resizable && !collapsed && _window_pointer_hit(id, sx + sw - _resize_h(), sy + sh - _resize_h(), _resize_h(), _resize_h())
-   _gui_rect_fast(sx + _sx(1.0), sy + _sx(2.0), sw, sh, color_pack(0.0, 0.0, 0.0, 0.20))
+   def is_focused = _focused_window == to_str(id)
+   def btn_y, btn_h = sy + _sx(3.0), title_h - _sx(6.0)
+   ;; One soft drop edge, one border, and a header that brightens with focus.
+   ;; Hover alone never recolours the frame: with tiled panels the pointer is
+   ;; always over one of them, and a frame that lights up under it is noise.
+   _gui_rect_fast(sx + _sx(2.0), sy + _sx(3.0), sw, sh, _shadow_u32)
    _gui_rect_fast(sx, sy, sw, sh, _window_bg_u32)
    if !collapsed {
       _gui_rect_fast(sx + 1.0, sy + title_h, max(1.0, sw - 2.0), max(1.0, sh - title_h - 1.0), _window_body_u32)
    }
-   _gui_rect_outline_fast(sx, sy, sw, sh, (_window_hovered == to_str(id) || _focused_window == to_str(id)) ? _accent_u32 : _border_u32)
    if titlebar {
-      _gui_rect_fast(sx, sy, sw, title_h, (_focused_window == to_str(id)) ? _accent_soft_u32 : _window_hdr_u32)
-      _gui_rect_fast(sx, sy, sw, _sx(2.0), (_focused_window == to_str(id)) ? _accent_u32 : _border_u32)
+      _gui_rect_fast(sx + 1.0, sy + 1.0, max(1.0, sw - 2.0), max(1.0, title_h - 1.0), is_focused ? _panel_hover_u32 : _window_hdr_u32)
+      if !collapsed { _gui_rect_fast(sx + 1.0, sy + title_h - 1.0, max(1.0, sw - 2.0), 1.0, _border_u32) }
+      if is_focused { _gui_rect_fast(sx + 1.0, sy + 1.0, _sx(3.0), max(1.0, title_h - 2.0), _accent_u32) }
       def title_w = max(1.0, button_left - (sx + _pad()) - _sx(10.0))
       def title_hh = _font_h_for(_font_title_id())
       def title_y = _snap(float(sy) + max(0.0, (title_h - title_hh) * 0.5))
-      _draw_text_ui_title_clipped(to_str(title), sx + _pad(), title_y, _text_u32, title_w, [sx + 1.0, sy + 1.0, max(1.0, title_w), max(1.0, title_h - 2.0)])
+      _draw_text_ui_title_clipped(to_str(title), sx + _pad() + _sx(4.0), title_y, is_focused ? _text_u32 : _text_dim_u32, title_w, [sx + 1.0, sy + 1.0, max(1.0, title_w), max(1.0, title_h - 2.0)])
    }
+   _gui_rect_outline_fast(sx, sy, sw, sh, is_focused ? _text_faint_u32 : _border_u32)
    if titlebar && collapsible {
-      _gui_rect_fast(collapse_x, sy + _sx(5.0), collapse_btn_w, title_h - _sx(10.0), collapse_hover ? _panel_hover_u32 : _panel_u32)
-      _gui_rect_outline_fast(collapse_x, sy + _sx(5.0), collapse_btn_w, title_h - _sx(10.0), _border_u32)
-      _draw_centered_text(collapsed ? "+" : "-", collapse_x, sy + _sx(5.0), collapse_btn_w, title_h - _sx(10.0), _text_u32)
+      if collapse_hover { _gui_rect_fast(collapse_x, btn_y, collapse_btn_w, btn_h, _panel_active_u32) }
+      def mcol = collapse_hover ? _text_u32 : _text_dim_u32
+      def mcx, mcy = _snap(collapse_x + collapse_btn_w * 0.5), _snap(btn_y + btn_h * 0.5)
+      _gui_rect_fast(mcx - _sx(4.0), mcy, _sx(9.0), max(1.0, _sx(1.0)), mcol)
+      if collapsed { _gui_rect_fast(mcx, mcy - _sx(4.0), max(1.0, _sx(1.0)), _sx(9.0), mcol) }
    }
    if titlebar && closable {
-      _gui_rect_fast(close_x, sy + _sx(5.0), close_btn_w, title_h - _sx(10.0), close_hover ? _danger_u32 : _panel_u32)
-      _gui_rect_outline_fast(close_x, sy + _sx(5.0), close_btn_w, title_h - _sx(10.0), _border_u32)
-      _draw_centered_text("x", close_x, sy + _sx(5.0), close_btn_w, title_h - _sx(10.0), _text_u32)
+      if close_hover { _gui_rect_fast(close_x, btn_y, close_btn_w, btn_h, _danger_u32) }
+      def xcol = close_hover ? _window_bg_u32 : _text_dim_u32
+      def xcx, xcy = _snap(close_x + close_btn_w * 0.5), _snap(btn_y + btn_h * 0.5)
+      def arm = _sx(4.0)
+      _gui_diag(xcx - arm, xcy - arm, xcx + arm, xcy + arm, max(1.0, _sx(1.0)), xcol)
+      _gui_diag(xcx - arm, xcy + arm, xcx + arm, xcy - arm, max(1.0, _sx(1.0)), xcol)
    }
    if !collapsed && resizable {
-      _gui_rect_fast(sx + sw - _resize_h(), sy + sh - _resize_h(), _resize_h(), _resize_h(), resize_hover ? _panel_hover_u32 : _panel_u32)
-      _gui_rect_outline_fast(sx + sw - _resize_h(), sy + sh - _resize_h(), _resize_h(), _resize_h(), _border_u32)
+      ;; Three stepped strokes in the corner; the hit target stays the full square.
+      def gcol = resize_hover ? _text_u32 : _text_faint_u32
+      def gx, gy = sx + sw - _sx(3.0), sy + sh - _sx(3.0)
+      mut gi = 0
+      while gi < 3 {
+         def off = _sx(3.0) * float(gi + 1)
+         _gui_diag(gx - off, gy, gx, gy - off, max(1.0, _sx(1.0)), gcol)
+         gi += 1
+      }
    }
 }
 
@@ -3976,10 +4299,23 @@ fn begin_window(any id, any title, f64 x, f64 y, f64 w, f64 h, any opts=0) bool 
    if !st.get("open", true) {
       return false
    }
+   def docked = to_str(st.get("dock", "")) != ""
+   if docked && !bool(st.get("dock_show", true)) {
+      ;; A background tab: nothing to draw until its tab is chosen.
+      st["layered"] = false
+      _window_store(st)
+      return false
+   }
+   ;; Beside a dockspace, floating windows are recorded and replayed in
+   ;; z-order at end_frame so they stay above the docked panels.
+   def layered = !docked && _dock_frame_active
+   st["layered"] = layered
+   if layered { _layer_begin() }
    _focus_collect_active = _focus_collect_for_window(id)
    st["clip_override"] = 0
    mut sx, sy = _snap(float(st.get("x", x))), _snap(float(st.get("y", y)))
    mut sw, sh = max(_snap(float(st.get("w", w))), _min_win_w()), max(_snap(float(st.get("h", h))), _min_win_h())
+   if docked { sw, sh = max(1.0, _snap(float(st.get("w", w)))), max(1.0, _snap(float(st.get("h", h)))) }
    def closable = st.get("closable", true)
    def movable = st.get("movable", true)
    def resizable = st.get("resizable", true)
@@ -4009,8 +4345,8 @@ fn begin_window(any id, any title, f64 x, f64 y, f64 w, f64 h, any opts=0) bool 
    def collapse_x = button_left
    def close_x = sx + sw - close_btn_w - _sx(10.0)
    def title_hover = titlebar && _window_pointer_hit(id, sx, sy, sw, title_h)
-   def collapse_hover = titlebar && collapsible && _window_pointer_hit(id, collapse_x, sy + _sx(5.0), collapse_btn_w, title_h - _sx(10.0))
-   def close_hover = titlebar && closable && _window_pointer_hit(id, close_x, sy + _sx(5.0), close_btn_w, title_h - _sx(10.0))
+   def collapse_hover = titlebar && collapsible && _window_pointer_hit(id, collapse_x, sy + _sx(3.0), collapse_btn_w, title_h - _sx(6.0))
+   def close_hover = titlebar && closable && _window_pointer_hit(id, close_x, sy + _sx(3.0), close_btn_w, title_h - _sx(6.0))
    if movable && title_hover && !collapse_hover && !close_hover {
       _ensure_cursors()
       _want_cursor(_cursor_move)
@@ -4054,7 +4390,8 @@ fn begin_window(any id, any title, f64 x, f64 y, f64 w, f64 h, any opts=0) bool 
    if _active_window_resize == to_str(id) && _mouse_down0 && _mouse_drag_ready() { sw, sh = max(_min_win_w(), _snap(_mouse_x - sx + _resize_pad_x)), max(_min_win_h(), _snap(_mouse_y - sy + _resize_pad_y)) }
    st["x"] = sx st["y"] = sy
    st["w"] = sw st["h"] = sh
-   st, sx = _clamp_window_pos(st), float(st.get("x", sx))
+   if !docked { st = _clamp_window_pos(st) }
+   sx = float(st.get("x", sx))
    sy, sw = float(st.get("y", sy)), float(st.get("w", sw))
    sh = float(st.get("h", sh))
    if scrollable && whole_hover && abs(_mouse_scroll_dy) > 0.000001 && !collapsed && !_pointer_over_scroll_area(id) { scroll_y = clamp(scroll_y - _mouse_scroll_dy * _scroll_step(), 0.0, max_scroll) }
@@ -4102,6 +4439,7 @@ fn end_window() any {
    if st.get("clip_active", false) { pop_clip_rect() }
    if st.get("collapsed", false) {
       _window_store(st)
+      if st.get("layered", false) { _layer_end(win_id) }
       _current_window = 0
       _sync_current_layout_cache(0)
       _focus_collect_active = false
@@ -4164,10 +4502,2188 @@ fn end_window() any {
          (_active_widget_id == scroll_id || thumb_hover) ? _scroll_thumb_hot_u32 : _scroll_thumb_u32)
    }
    _window_store(st)
+   if st.get("layered", false) { _layer_end(win_id) }
    _current_window = 0
    _sync_current_layout_cache(0)
    _focus_collect_active = false
    _same_line_next = false
+}
+
+;; ---------------------------------------------------------------------------
+;; Toolkit layer: overlay command list, popups and menus, tooltips, trees,
+;; numeric drag fields, tables, drag and drop, layout scopes, themes.
+;;
+;; Widget contract (every entry has a mock probe in
+;; etc/tests/code/probes/ui/gui-toolkit-*.nshape):
+;;
+;;   windows            begin_window / end_window (move, resize, collapse, close, scroll)
+;;   menu bar, menus    begin_menu_bar, begin_menu (nests as submenus), menu_item, menu_separator
+;;   context menus      begin_context_menu (secondary button on the previous item)
+;;   popups             open_popup, begin_popup, close_popup; Escape and outside press dismiss
+;;   tabs               tab_strip
+;;   trees              collapsing_header, tree_node / tree_pop
+;;   buttons            button, small_button, icon_button, selectable
+;;   choices            checkbox, toggle, radio_button, combo_box
+;;   numbers            slider_float, slider_int, drag_float, drag_int (double click or Enter to type)
+;;   text entry         input_text, title_input_text (clipboard, select-all, UTF-8 cursor)
+;;   tooltips           tooltip (after an item, shown after a hover delay)
+;;   scrolling          window scroll, begin_scroll_area
+;;   tables, lists      begin_table (sortable, resizable columns), selectable_file
+;;   drag and drop      drag_source / drop_target (typed payloads, inside one GUI)
+;;   keyboard           Tab / Shift-Tab focus order, Enter / Space activate, arrows in menus
+;;   layout             same_line, layout_row, begin_columns, indent, spacing, split_cols / split_rows
+;;   identity           push_id / pop_id scope repeated widgets; ids are window-scoped by default
+;;   state              begin_disabled, item_status ("warn" / "error" / "ok"),
+;;                      panel_state ("empty" / "loading" / "error")
+;;   themes             set_theme("dark" | "light"), set_theme_color, set_accent
+;;   draw order         overlay command list (popups, menus, tooltips draw above all windows)
+;;
+;;   docking            dockspace, dock_window / undock_window, dock_layout_save / dock_layout_load
+;;
+;; Intentionally unsupported: modal popups, multi-line text
+;; entry (the editor owns that), IME pre-edit display inside input_text (the
+;; committed text arrives as character events), and drags between two OS
+;; windows.
+;; ---------------------------------------------------------------------------
+fn set_headless_input(bool on=true) any {
+   "Drives the GUI from fed events alone, with no window handle: prepare_input(0, w, h) then keeps the pointer and button state between frames. Used by probes and replays."
+   _headless_input = !!on
+}
+
+fn last_item_id() str { "Returns the full id of the last interactive item." _last_item_id }
+
+fn _overlay_replay(list cmds) any {
+   def int n = cmds.len
+   if n <= 0 { return 0 }
+   mut int i = 0
+   while i + 5 < n {
+      def int i1, i2 = i + 1, i + 2
+      def int i3, i4 = i + 3, i + 4
+      def int i5 = i + 5
+      def kind = int(cmds.get(i, 0))
+      if kind == 0 {
+         gui_batch.queue_rect(float(cmds.get(i1, 0.0)), float(cmds.get(i2, 0.0)), float(cmds.get(i3, 0.0)), float(cmds.get(i4, 0.0)), int(cmds.get(i5, 0)))
+      } elif kind == 1 {
+         gui_batch.queue_outline(float(cmds.get(i1, 0.0)), float(cmds.get(i2, 0.0)), float(cmds.get(i3, 0.0)), float(cmds.get(i4, 0.0)), int(cmds.get(i5, 0)))
+      } elif kind == 2 {
+         _flush_rect_batch()
+         draw_text(int(cmds.get(i1, 0)), to_str(cmds.get(i2, "")), float(cmds.get(i3, 0.0)), float(cmds.get(i4, 0.0)), int(cmds.get(i5, 0)))
+      } elif kind == 3 {
+         _flush_rect_batch()
+         scissor_push(float(cmds.get(i1, 0.0)), float(cmds.get(i2, 0.0)), float(cmds.get(i3, 0.0)), float(cmds.get(i4, 0.0)))
+      } elif kind == 4 {
+         _flush_rect_batch()
+         scissor_pop()
+      } elif kind == 6 {
+         _flush_rect_batch()
+         def any ln = cmds.get(i1, 0)
+         if is_list(ln) { draw_line_2d(float(ln.get(0, 0.0)), float(ln.get(1, 0.0)), float(ln.get(2, 0.0)), float(ln.get(3, 0.0)), cmds.get(i2, 0), float(ln.get(4, 1.0))) }
+      } elif kind == 5 {
+         _flush_rect_batch()
+         def any t = cmds.get(i1, 0)
+         if is_list(t) {
+            gui_batch.draw_tex_uv(float(t.get(0, 0.0)), float(t.get(1, 0.0)), float(t.get(2, 0.0)), float(t.get(3, 0.0)), int(cmds.get(i2, -1)),
+               float(t.get(4, 0.0)), float(t.get(5, 0.0)), float(t.get(6, 1.0)), float(t.get(7, 1.0)),
+               float(t.get(8, 1.0)), float(t.get(9, 1.0)), float(t.get(10, 1.0)), float(t.get(11, 1.0)))
+         }
+      }
+      i += 6
+   }
+   _flush_rect_batch()
+}
+
+fn _overlay_finish() any {
+   "Queues the drag preview and the tooltip, then replays the overlay above the windows."
+   if _dnd_active && _dnd_label.len > 0 { _overlay_tag(_dnd_label, _mouse_x + _sx(14.0), _mouse_y + _sx(10.0), _accent_u32) }
+   if _tip_text.len > 0 {
+      _overlay_tag(_tip_text, _mouse_x + _sx(12.0), _mouse_y + _sx(18.0), _border_u32)
+      _tip_text = ""
+   }
+   ;; Floating window layers bottom to top, then popups, then the tooltip,
+   ;; drag preview, and dock drop preview.
+   def int layer_n = _win_layers.len
+   if layer_n > 0 {
+      mut oi = 0
+      def int order_n = _window_order.len
+      while oi < order_n {
+         def wid = to_str(_window_order.get(oi, ""))
+         mut li = 0
+         while li + 1 < layer_n {
+            if to_str(_win_layers.get(li, "")) == wid {
+               def int seg_i = li + 1
+               def any seg = _win_layers.get(seg_i, 0)
+               if is_list(seg) { _overlay_replay(seg) }
+            }
+            li += 2
+         }
+         oi += 1
+      }
+      _win_layers = []
+   }
+   def top = _ov_top
+   _ov_top = []
+   _overlay_replay(top)
+   def misc = _ov_cmds
+   _ov_cmds = []
+   _overlay_replay(misc)
+}
+
+fn _layer_begin() any {
+   _ov_depth += 1
+   _ov_stack = _ov_stack.append(_ov_cmds)
+   _ov_cmds = []
+}
+
+fn _layer_end(str win_id) any {
+   def seg = _ov_cmds
+   def int sn = _ov_stack.len
+   def any parent = sn > 0 ? _ov_stack.get(sn - 1, 0) : 0
+   _ov_stack = _list_drop_last(_ov_stack)
+   mut restored = []
+   if is_list(parent) { restored = parent }
+   _ov_cmds = restored
+   _ov_depth -= 1
+   _win_layers = _win_layers.append(win_id)
+   _win_layers = _win_layers.append(seg)
+}
+
+fn _gui_line(f64 x1, f64 y1, f64 x2, f64 y2, any rgba, f64 thick) any {
+   "Draws a 2D line through the window layer when one is being recorded."
+   if _ov_depth > 0 {
+      _ov_push(6, [x1, y1, x2, y2, thick], rgba, 0, 0, 0)
+      return 0
+   }
+   draw_line_2d(x1, y1, x2, y2, rgba, thick)
+}
+
+fn _overlay_tag(str txt, f64 x, f64 y, int edge) any {
+   def fid = _font_small_id()
+   def tw = _text_fit_width(fid, txt)
+   def w, h = tw + _sx(12.0), _font_h_for(fid) + _sx(8.0)
+   mut px, py = x, y
+   if _fb_w > 0.0 && px + w > _fb_w { px = max(0.0, _fb_w - w) }
+   if _fb_h > 0.0 && py + h > _fb_h { py = max(0.0, _mouse_y - h - _sx(4.0)) }
+   _ov_depth += 1
+   _gui_rect_fast(px + _sx(2.0), py + _sx(2.0), w, h, _shadow_u32)
+   _gui_rect_fast(px, py, w, h, _popup_u32)
+   _gui_rect_outline_fast(px, py, w, h, edge)
+   _queue_text_ui(fid, txt, px + _sx(6.0), py + _sx(4.0), _text_u32, 0.0)
+   _ov_depth -= 1
+}
+
+;; ---- themes ---------------------------------------------------------------
+fn set_theme(str name) bool {
+   "Selects a built-in palette: \"dark\" (default) or \"light\". Token overrides made with set_theme_color are replaced."
+   if name == "light" {
+      _accent_rgba = [0.380, 0.270, 0.800, 1.00]
+      _press_rgba = [0.760, 0.710, 0.950, 1.00]
+      _window_bg_rgba = [0.930, 0.930, 0.950, 1.00]
+      _window_body_rgba = [0.965, 0.965, 0.975, 0.98]
+      _window_hdr_rgba = [0.900, 0.900, 0.925, 1.00]
+      _panel_rgba = [0.915, 0.915, 0.935, 1.00]
+      _panel_hover_rgba = [0.870, 0.870, 0.900, 1.00]
+      _panel_active_rgba = [0.810, 0.810, 0.860, 1.00]
+      _popup_rgba = [0.985, 0.985, 0.990, 1.00]
+      _border_rgba = [0.740, 0.740, 0.790, 1.00]
+      _text_rgba = [0.090, 0.090, 0.120, 1.00]
+      _text_dim_rgba = [0.330, 0.330, 0.390, 1.00]
+      _text_faint_rgba = [0.550, 0.550, 0.610, 1.00]
+      _ok_rgba = [0.100, 0.520, 0.240, 1.00]
+      _warn_rgba = [0.660, 0.430, 0.020, 1.00]
+      _danger_rgba = [0.780, 0.160, 0.120, 1.00]
+   } elif name == "dark" {
+      _accent_rgba = [0.714, 0.627, 1.000, 1.00]
+      _press_rgba = [0.290, 0.243, 0.447, 1.00]
+      _window_bg_rgba = [0.020, 0.020, 0.024, 1.00]
+      _window_body_rgba = [0.031, 0.031, 0.039, 0.98]
+      _window_hdr_rgba = [0.055, 0.055, 0.067, 1.00]
+      _panel_rgba = [0.067, 0.067, 0.082, 1.00]
+      _panel_hover_rgba = [0.102, 0.102, 0.125, 1.00]
+      _panel_active_rgba = [0.141, 0.141, 0.173, 1.00]
+      _popup_rgba = [0.047, 0.047, 0.059, 1.00]
+      _border_rgba = [0.149, 0.149, 0.180, 1.00]
+      _text_rgba = [0.941, 0.941, 0.953, 1.00]
+      _text_dim_rgba = [0.643, 0.643, 0.682, 1.00]
+      _text_faint_rgba = [0.435, 0.435, 0.478, 1.00]
+      _ok_rgba = [0.545, 0.863, 0.604, 1.00]
+      _warn_rgba = [0.949, 0.784, 0.475, 1.00]
+      _danger_rgba = [1.000, 0.478, 0.420, 1.00]
+   } else {
+      return false
+   }
+   _theme_name = name
+   _theme_dirty = true
+   true
+}
+
+fn theme() str { "Returns the name of the active built-in palette." _theme_name }
+
+;; ---- identity and layout scopes -------------------------------------------
+fn push_id(any id) any {
+   "Scopes the ids of the following widgets under `id`, so repeated rows can reuse the same widget ids."
+   _id_stack = _id_stack.append(_widget_id_prefix)
+   _widget_id_prefix = _widget_id_prefix + to_str(id) + "/"
+}
+
+fn pop_id() any {
+   "Leaves the innermost push_id scope."
+   def n = _id_stack.len
+   if n <= 0 { return 0 }
+   _widget_id_prefix = to_str(_id_stack.get(n - 1, ""))
+   _id_stack = _list_drop_last(_id_stack)
+}
+
+fn _list_drop_last(list xs) list {
+   mut out = []
+   mut i = 0
+   def n = xs.len - 1
+   while i < n {
+      out = out.append(xs.get(i, 0))
+      i += 1
+   }
+   out
+}
+
+fn indent(any px=0.0) any {
+   "Shifts the layout origin right by `px` (default one tree level) until the matching unindent."
+   def d = _pick_positive(px, _sx(14.0))
+   def step = min(d, max(0.0, _current_body_w_cache - _sx(24.0)))
+   _indent_stack = _indent_stack.append(step)
+   _current_body_x_cache = _current_body_x_cache + step
+   _current_body_w_cache = _current_body_w_cache - step
+}
+
+fn unindent() any {
+   "Undoes the innermost indent."
+   def n = _indent_stack.len
+   if n <= 0 { return 0 }
+   def step = float(_indent_stack.get(n - 1, 0.0))
+   _indent_stack = _list_drop_last(_indent_stack)
+   _current_body_x_cache = _current_body_x_cache - step
+   _current_body_w_cache = _current_body_w_cache + step
+}
+
+fn layout_row(list widths, f64 gap=-1.0) int {
+   "Lays the next `widths.len` widgets out on one row. A width above 1 is pixels, a width in(0,1] is a fraction of the row, and 0 shares what is left equally. Returns the cell count."
+   def n = widths.len
+   if n <= 0 || _current_window_id_cache.len <= 0 { return 0 }
+   def g = gap >= 0.0 ? gap : _gap()
+   def total = max(1.0, _current_body_w_cache - g * float(n - 1))
+   mut fixed = 0.0
+   mut flex = 0
+   mut i = 0
+   while i < n {
+      def wv = float(widths.get(i, 0.0))
+      if wv > 1.0 { fixed += wv }
+      elif wv > 0.0 { fixed += total * wv }
+      else { flex += 1 }
+      i += 1
+   }
+   def share = flex > 0 ? max(1.0, (total - fixed) / float(flex)) : 0.0
+   mut cells = []
+   mut x = _current_body_x_cache
+   def right = _current_body_x_cache + _current_body_w_cache
+   i = 0
+   while i < n {
+      def wv = float(widths.get(i, 0.0))
+      mut cw = share
+      if wv > 1.0 { cw = wv }
+      elif wv > 0.0 { cw = total * wv }
+      if i == n - 1 && flex > 0 { cw = max(1.0, right - x) }
+      cw = max(1.0, min(cw, max(1.0, right - x)))
+      cells = cells.append(_snap(x))
+      cells = cells.append(_snap(cw))
+      x = x + cw + g
+      i += 1
+   }
+   _row_cells = cells
+   _row_n, _row_i = n, 0
+   _row_y, _row_bottom = _current_cursor_y_cache, _current_cursor_y_cache
+   _same_line_next = false
+   n
+}
+
+fn _row_take(f64 h) list {
+   def int cx_i, cw_i = _row_i * 2, _row_i * 2 + 1
+   def x = float(_row_cells.get(cx_i, _current_body_x_cache))
+   def w = float(_row_cells.get(cw_i, 1.0))
+   def rect = [x, _snap(_row_y), w, _snap(h)]
+   _row_bottom = max(_row_bottom, _row_y + h + _gap())
+   _row_i += 1
+   if _row_i >= _row_n {
+      _row_n = 0
+      _current_cursor_y_cache = max(_current_cursor_y_cache, _row_bottom)
+   }
+   _same_line_next = false
+   _last_item = rect
+   rect
+}
+
+fn begin_columns(any spec, f64 gap=-1.0) int {
+   "Splits the body into columns and enters the first. `spec` is a column count or a list of weights. Returns the column count."
+   if _current_window_id_cache.len <= 0 { return 0 }
+   mut weights = []
+   if is_list(spec) { weights = spec }
+   else {
+      mut k = 0
+      def cnt = max(1, int(spec))
+      while k < cnt {
+         weights = weights.append(1.0)
+         k += 1
+      }
+   }
+   def n = weights.len
+   if n <= 0 { return 0 }
+   def g = gap >= 0.0 ? gap : _pad()
+   def cols = split_cols([_current_body_x_cache, 0.0, _current_body_w_cache, 1.0], weights, g)
+   mut xs = []
+   mut i = 0
+   while i < n {
+      def any c = cols.get(i, 0)
+      xs = xs.append(float(c.get(0, 0.0)))
+      xs = xs.append(max(1.0, float(c.get(2, 1.0))))
+      i += 1
+   }
+   ;; [x/w pairs, count, index, base_x, base_w, band top, band bottom]
+   _col_stack = _col_stack.append([xs, n, 0, _current_body_x_cache, _current_body_w_cache, _current_cursor_y_cache, _current_cursor_y_cache])
+   _current_body_x_cache = float(xs.get(0, 0.0))
+   _current_body_w_cache = float(xs.get(1, 1.0))
+   _same_line_next = false
+   n
+}
+
+fn next_column() bool {
+   "Moves to the next column; after the last one it wraps to the first, below the tallest column so far."
+   def depth = _col_stack.len
+   if depth <= 0 { return false }
+   def any c = _col_stack.get(depth - 1, 0)
+   def any xs = c.get(0, 0)
+   def n = int(c.get(1, 1))
+   mut idx = int(c.get(2, 0)) + 1
+   mut top = float(c.get(5, 0.0))
+   mut bottom = max(float(c.get(6, 0.0)), _current_cursor_y_cache)
+   if idx >= n {
+      idx = 0
+      top = bottom
+   }
+   _col_stack = _list_drop_last(_col_stack).append([xs, n, idx, float(c.get(3, 0.0)), float(c.get(4, 1.0)), top, bottom])
+   def int cx_i, cw_i = idx * 2, idx * 2 + 1
+   _current_body_x_cache = float(xs.get(cx_i, 0.0))
+   _current_body_w_cache = float(xs.get(cw_i, 1.0))
+   _current_cursor_y_cache = top
+   _same_line_next = false
+   true
+}
+
+fn end_columns() any {
+   "Leaves the column layout; the cursor continues below the tallest column."
+   def depth = _col_stack.len
+   if depth <= 0 { return 0 }
+   def any c = _col_stack.get(depth - 1, 0)
+   _col_stack = _list_drop_last(_col_stack)
+   _current_body_x_cache = float(c.get(3, 0.0))
+   _current_body_w_cache = float(c.get(4, 1.0))
+   _current_cursor_y_cache = max(float(c.get(6, 0.0)), _current_cursor_y_cache)
+   _same_line_next = false
+}
+
+;; ---- disabled scope and item status ---------------------------------------
+fn _disabled_restore() any {
+   _text_u32, _text_dim_u32, _accent_u32 = _dis_text_u32, _dis_dim_u32, _dis_accent_u32
+   _disabled_on = 0
+}
+
+fn begin_disabled(bool disabled=true) any {
+   "Starts a scope whose widgets draw faded and ignore pointer, keyboard, and focus when `disabled` is true. Scopes nest."
+   _disabled_depth += 1
+   if !disabled {
+      return 0
+   }
+   if _disabled_on == 0 {
+      _theme_refresh()
+      _dis_text_u32, _dis_dim_u32, _dis_accent_u32 = _text_u32, _text_dim_u32, _accent_u32
+      _text_u32, _text_dim_u32, _accent_u32 = _text_faint_u32, _text_faint_u32, _text_faint_u32
+      _disabled_on = _disabled_depth
+   }
+}
+
+fn end_disabled() any {
+   "Ends the innermost begin_disabled scope."
+   if _disabled_depth <= 0 { return 0 }
+   if _disabled_on == _disabled_depth { _disabled_restore() }
+   _disabled_depth -= 1
+}
+
+fn item_status(str kind, any message="") bool {
+   "Marks the previous item as \"error\", \"warn\", or \"ok\": frames it in the matching token and shows `message` as its tooltip. Returns true for a known kind."
+   mut col = 0
+   if kind == "error" || kind == "danger" { col = _danger_u32 }
+   elif kind == "warn" || kind == "warning" { col = _warn_u32 }
+   elif kind == "ok" || kind == "success" { col = _ok_u32 }
+   else { return false }
+   def x, y = float(_last_item.get(0, 0.0)), float(_last_item.get(1, 0.0))
+   def w, h = float(_last_item.get(2, 0.0)), float(_last_item.get(3, 0.0))
+   if _rect_intersects(_last_item, _current_clip()) {
+      _gui_rect_outline_fast(x, y, w, h, col)
+      _gui_rect_fast(x, y + h - _sx(2.0), w, _sx(2.0), col)
+   }
+   def msg = _ui_text(message)
+   if msg.len > 0 { tooltip(msg) }
+   true
+}
+
+fn _panel_state_split(int fid, str txt, f64 max_w) list {
+   ;; Breaks a detail message onto two lines at the last space that fits, so a
+   ;; narrow panel shows the whole reason instead of an ellipsis.
+   if float(_measure_text_ui(fid, txt).get(0, 0.0)) <= max_w { return [txt, ""] }
+   def words = txt.split(" ")
+   mut head = ""
+   mut k = 0
+   while k < words.len {
+      def cand = head.len > 0 ? (head + " " + to_str(words[k])) : to_str(words[k])
+      if head.len > 0 && float(_measure_text_ui(fid, cand).get(0, 0.0)) > max_w { break }
+      head = cand
+      k += 1
+   }
+   mut tail = ""
+   while k < words.len {
+      tail = tail.len > 0 ? (tail + " " + to_str(words[k])) : to_str(words[k])
+      k += 1
+   }
+   [head, tail]
+}
+
+fn _panel_state_text(int fid, str txt, f64 x, f64 y, f64 w, any color, list clip) any {
+   ;; Centred on `w` and clipped to the whole panel: a clip one line high cut
+   ;; the ascenders of the title.
+   def tw = float(_measure_text_ui(fid, txt).get(0, 0.0))
+   _draw_text_ui_ex_clipped(fid, txt, _snap(x + max(0.0, (w - tw) * 0.5)), _snap(y), color, 0.0, max(1.0, w), clip)
+}
+
+fn panel_state(str kind, any title, any detail="", f64 h=0.0) list {
+   "Fills the rest of a panel (or `h` pixels) with a centred state message and returns its rectangle. `kind` is \"empty\", \"loading\", or \"error\": empty is quiet, loading shows a moving bar, error uses the danger token. A detail wider than the panel continues on a second line."
+   def small_id = _font_small_id()
+   def line = _text_h()
+   def small = _font_h_for(small_id)
+   def detail_s = _ui_text(detail)
+   def has_detail = detail_s.len > 0
+   def body_w = _current_body_w()
+   mut str detail_a = ""
+   mut str detail_b = ""
+   if has_detail {
+      def list parts = _panel_state_split(small_id, detail_s, max(1.0, body_w - _sx(8.0)))
+      detail_a = to_str(parts.get(0, ""))
+      detail_b = to_str(parts.get(1, ""))
+   }
+   mut f64 detail_lines = 0.0
+   if has_detail { detail_lines = 1.0 }
+   if detail_b.len > 0 { detail_lines = 2.0 }
+   def block = _sx(10.0) + line + detail_lines * (small + _sx(4.0))
+   def want = h > 0.0 ? h : max(_sx(72.0), remaining_h(0.0))
+   ;; A requested height is kept; only a wrapped detail may grow the row.
+   def hh = detail_b.len > 0 ? max(want, block + _sx(12.0)) : want
+   def rect = _layout_rect(body_w, hh)
+   def x, y = float(rect.get(0, 0.0)), float(rect.get(1, 0.0))
+   def w = float(rect.get(2, 0.0))
+   if !_rect_intersects(rect, _current_clip()) { return rect }
+   def top = _snap(y + max(0.0, (hh - block) * 0.5))
+   mut tone = _text_dim_u32
+   if kind == "error" { tone = _danger_u32 }
+   elif kind == "loading" { tone = _text_u32 }
+   ;; A short rule above the text carries the state: still for empty and
+   ;; error, sweeping for loading.
+   def bar_w = min(_sx(96.0), w * 0.5)
+   def bar_x = _snap(x + (w - bar_w) * 0.5)
+   _gui_rect_fast(bar_x, top, bar_w, _sx(2.0), kind == "error" ? _danger_u32 : _border_u32)
+   if kind == "loading" {
+      def phase = float(_gui_frame_id % 90) / 90.0
+      def seg = bar_w * 0.3
+      _gui_rect_fast(_snap(bar_x + (bar_w - seg) * phase), top, seg, _sx(2.0), _accent_u32)
+   }
+   def text_y = top + _sx(10.0)
+   _panel_state_text(_font_body(), _ui_text(title), x, text_y, w, tone, rect)
+   if has_detail {
+      _panel_state_text(small_id, detail_a, x, text_y + line + _sx(4.0), w, _text_faint_u32, rect)
+      if detail_b.len > 0 { _panel_state_text(small_id, detail_b, x, text_y + line + small + _sx(8.0), w, _text_faint_u32, rect) }
+   }
+   rect
+}
+
+;; ---- tooltips -------------------------------------------------------------
+fn set_tooltip_delay(int frames) any {
+   "Sets how many consecutive hovered frames pass before a tooltip appears."
+   ;; Not `max(1, frames)`: on a typed int that returned the tagged word.
+   _tip_delay = frames
+   if _tip_delay < 1 { _tip_delay = 1 }
+}
+
+fn tooltip(any text) bool {
+   "Shows `text` near the pointer once the previous item has been hovered for the tooltip delay. Returns true while the tooltip is shown."
+   if !_enabled || _mouse_down0 || _dnd_active { return false }
+   def x, y = float(_last_item.get(0, 0.0)), float(_last_item.get(1, 0.0))
+   def w, h = float(_last_item.get(2, 0.0)), float(_last_item.get(3, 0.0))
+   if !_current_window_pointer_hit(x, y, w, h) { return false }
+   def clip = _current_clip()
+   if !_rect_hit(_mouse_x, _mouse_y, float(clip.get(0, 0.0)), float(clip.get(1, 0.0)), float(clip.get(2, 0.0)), float(clip.get(3, 0.0))) { return false }
+   if _tip_x == x && _tip_y == y && _tip_seen >= _gui_frame_id - 1 {
+      if _tip_seen != _gui_frame_id { _tip_frames += 1 }
+   } else {
+      _tip_x, _tip_y = x, y
+      _tip_frames = 1
+   }
+   _tip_seen = _gui_frame_id
+   if _tip_frames < _tip_delay { return false }
+   _tip_text = _ui_text(text)
+   true
+}
+
+;; ---- popups ---------------------------------------------------------------
+fn _popup_key(any id) str {
+   ;; A popup is a window of its own, so its key must not contain the "::"
+   ;; that separates a window id from a widget id.
+   def full = _wid(id)
+   def sep = str.find(full, "::")
+   if sep < 0 { return "~" + full }
+   "~" + str.str_slice(full, 0, sep) + "~" + str.str_slice(full, sep + 2, full.len)
+}
+
+fn _popup_index(str pid) int { _list_find_text(_popup_stack, pid) }
+
+fn _popup_close_from(int idx) any {
+   "Closes the popup at stack position `idx` and everything opened from it."
+   def n = _popup_stack.len
+   if idx < 0 || idx >= n { return 0 }
+   mut keep = []
+   mut i = 0
+   while i < n {
+      def pid = to_str(_popup_stack.get(i, ""))
+      if i < idx { keep = keep.append(pid) }
+      else {
+         mut st = _windows.get(pid, 0)
+         if is_dict(st) {
+            st["open"] = false
+            st["w"] = 0.0
+            st["h"] = 0.0
+            _windows[pid] = st
+         }
+         if _focused_window == pid { _focused_window = "" }
+         if _full_id_window_id(_kbd_focus_id) == pid { _kbd_focus_id = "" }
+         if _full_id_window_id(_text_focus_id) == pid { _text_focus_id = "" }
+         if _full_id_window_id(_active_widget_id) == pid { _active_widget_id = "" }
+         if _menubar_open == pid { _menubar_open = "" }
+         _popup_dismissed = _popup_dismissed.append(pid)
+      }
+      i += 1
+   }
+   _popup_stack = keep
+}
+
+fn _popup_dismiss_outside() any {
+   ;; A press closes every popup above the one it lands in; a press outside
+   ;; all of them closes the whole stack and then reaches what is underneath.
+   mut i = _popup_stack.len - 1
+   while i >= 0 {
+      def pst = _windows.get(to_str(_popup_stack.get(i, "")), 0)
+      if is_dict(pst) {
+         if _rect_hit(_mouse_x, _mouse_y, float(pst.get("x", 0.0)), float(pst.get("y", 0.0)), float(pst.get("w", 0.0)), float(pst.get("h", 0.0))) {
+            _popup_close_from(i + 1)
+            return 0
+         }
+      }
+      i -= 1
+   }
+   _popup_close_from(0)
+}
+
+fn _popup_open_at(str pid, f64 x, f64 y, int parent_depth) any {
+   if _popup_index(pid) >= 0 { return 0 }
+   _popup_close_from(parent_depth)
+   mut st = dict(24)
+   st["id"] = pid
+   st["popup"] = true
+   st["open"] = true
+   st["ax"] = x
+   st["ay"] = y
+   st["x"] = x
+   st["y"] = y
+   st["w"] = 0.0
+   st["h"] = 0.0
+   st["titlebar"] = false
+   st["scroll_y"] = 0.0
+   st["content_h"] = -1.0
+   st["want_w"] = 0.0
+   _windows[pid] = st
+   _popup_stack = _popup_stack.append(pid)
+   _focused_window = pid
+   _kbd_focus_id, _text_focus_id = "", ""
+}
+
+fn _ctx_push() any {
+   mut st = _current_window_state()
+   if is_dict(st) {
+      st["cursor_y"] = _current_cursor_y_cache
+      _current_window = st
+   }
+   _ctx_stack = _ctx_stack.append([st, _widget_id_prefix, _same_line_next, _same_line_gap, _last_item,
+         _focus_collect_active, _current_body_x_cache, _current_body_w_cache, _current_cursor_y_cache,
+         _menu_measure_w, _menubar_active, _menubar_x])
+}
+
+fn _ctx_pop() any {
+   def n = _ctx_stack.len
+   if n <= 0 { return 0 }
+   def any c = _ctx_stack.get(n - 1, 0)
+   _ctx_stack = _list_drop_last(_ctx_stack)
+   def any st = c.get(0, 0)
+   if is_dict(st) { _current_window = st }
+   else { _current_window = 0 }
+   _sync_current_layout_cache(st)
+   _widget_id_prefix = to_str(c.get(1, ""))
+   _same_line_next = bool(c.get(2, false))
+   _same_line_gap = float(c.get(3, 0.0))
+   _last_item = c.get(4, [0.0, 0.0, 0.0, 0.0])
+   _focus_collect_active = bool(c.get(5, false))
+   _current_body_x_cache = float(c.get(6, 0.0))
+   _current_body_w_cache = float(c.get(7, 1.0))
+   _current_cursor_y_cache = float(c.get(8, 0.0))
+   _menu_measure_w = float(c.get(9, 0.0))
+   _menubar_active = bool(c.get(10, false))
+   _menubar_x = float(c.get(11, 0.0))
+}
+
+fn _popup_begin(str pid, f64 want_w, f64 pad) bool {
+   mut st = _windows.get(pid, 0)
+   if !is_dict(st) { return false }
+   if !st.get("open", false) { return false }
+   if _popup_index(pid) < 0 { return false }
+   ;; The first frame only measures: nothing is drawn and the popup has no
+   ;; hit area until its content height is known.
+   def measuring = float(st.get("content_h", -1.0)) < 0.0
+   mut w = want_w
+   if w <= 0.0 { w = max(_sx(140.0), float(st.get("want_w", 0.0))) }
+   mut h = measuring ? 0.0 : (float(st.get("content_h", 0.0)) + pad * 2.0)
+   if _fb_h > 0.0 { h = min(h, max(1.0, _fb_h - _sx(8.0))) }
+   mut x, y = float(st.get("ax", 0.0)), float(st.get("ay", 0.0))
+   if _fb_w > 0.0 { x = clamp(x, 0.0, max(0.0, _fb_w - w)) }
+   if _fb_h > 0.0 && y + h > _fb_h { y = max(0.0, _fb_h - h) }
+   x, y = _snap(x), _snap(y)
+   st["x"] = x
+   st["y"] = y
+   st["w"] = measuring ? 0.0 : w
+   st["h"] = h
+   st["measuring"] = measuring
+   ;; Arrow keys walk the innermost popup's rows, using the focus order the
+   ;; previous frame collected (it is rebuilt below).
+   if _popup_index(pid) == _popup_stack.len - 1 {
+      if _key_event_present(KEY_DOWN) {
+         _focused_window = pid
+         _request_focus_step(1)
+      } elif _key_event_present(KEY_UP) {
+         _focused_window = pid
+         _request_focus_step(-1)
+      }
+   }
+   _ctx_push()
+   _popup_depth += 1
+   _ov_depth += 1
+   ;; Each popup records into its own command list. A submenu is begun while
+   ;; its parent's clip is still pushed, so its commands are replayed after
+   ;; the parent's, not inside them.
+   _ov_stack = _ov_stack.append(_ov_cmds)
+   _ov_cmds = []
+   if measuring { _ov_discard += 1 }
+   _gui_rect_fast(x + _sx(3.0), y + _sx(4.0), w, h, _shadow_u32)
+   _gui_rect_fast(x, y, w, h, _popup_u32)
+   _gui_rect_outline_fast(x, y, w, h, _border_u32)
+   def clip = [x + 1.0, y + 1.0, max(1.0, w - 2.0), measuring ? 100000.0 : max(1.0, h - 2.0)]
+   st["body_x"] = x + pad
+   st["body_y"] = y + pad
+   st["body_w"] = max(1.0, w - pad * 2.0)
+   st["body_h"] = max(1.0, h - pad * 2.0)
+   st["cursor_y"] = y + pad
+   st["clip_override"] = clip
+   st["focusables"] = []
+   st["focusable_map"] = dict(32)
+   _windows[pid] = st
+   _current_window = st
+   _sync_current_layout_cache(st)
+   _focus_collect_active = true
+   _same_line_next, _same_line_gap = false, _gap()
+   _last_item = [x + pad, y + pad, 0.0, 0.0]
+   _menu_measure_w = 0.0
+   _menubar_active = false
+   push_clip_rect(clip)
+   true
+}
+
+fn _popup_end() any {
+   mut st = _current_window_state()
+   if !is_dict(st) { return 0 }
+   if !st.get("popup", false) { return 0 }
+   pop_clip_rect()
+   st["content_h"] = max(1.0, _current_cursor_y_cache - float(st.get("body_y", 0.0)))
+   if _menu_measure_w > 0.0 { st["want_w"] = _menu_measure_w }
+   def measuring = bool(st.get("measuring", false))
+   _windows[to_str(st.get("id", ""))] = st
+   _ov_depth -= 1
+   if measuring { _ov_discard -= 1 }
+   _popup_depth -= 1
+   mut pending = [_ov_cmds]
+   mut pi = 0
+   while pi < _ov_pending.len {
+      pending = pending.append(_ov_pending.get(pi, 0))
+      pi += 1
+   }
+   def sn = _ov_stack.len
+   def any parent = sn > 0 ? _ov_stack.get(sn - 1, 0) : 0
+   _ov_stack = _list_drop_last(_ov_stack)
+   mut restored = []
+   if is_list(parent) { restored = parent }
+   if _popup_depth <= 0 {
+      ;; Popups draw above every window layer, whatever they were opened from.
+      pi = 0
+      while pi < pending.len {
+         def any seg = pending.get(pi, 0)
+         if is_list(seg) {
+            mut si = 0
+            def int seg_n = seg.len
+            while si < seg_n {
+               _ov_top = _ov_top.append(seg.get(si, 0))
+               si += 1
+            }
+         }
+         pi += 1
+      }
+      pending = []
+   }
+   _ov_cmds = restored
+   _ov_pending = pending
+   _ctx_pop()
+}
+
+fn open_popup(any id, any x=nil, any y=nil) bool {
+   "Opens the popup `id` at the pointer, or at `(x, y)`. Call it from the scope that will call begin_popup with the same id."
+   def px = x == nil ? _mouse_x : float(x)
+   def py = y == nil ? _mouse_y : float(y)
+   _popup_open_at(_popup_key(id), px, py, _popup_depth)
+   true
+}
+
+fn popup_open(any id) bool { "Returns true while the popup `id` (in the current id scope) is open." _popup_index(_popup_key(id)) >= 0 }
+
+fn any_popup_open() bool { "Returns true while any popup or menu is open." _popup_stack.len > 0 }
+
+fn close_popup() any {
+   "Closes the popup being built, or every popup when called outside one."
+   if _popup_depth > 0 { _popup_close_from(_popup_depth - 1) }
+   else { _popup_close_from(0) }
+}
+
+fn close_all_popups() any { "Closes every open popup and menu." _popup_close_from(0) }
+
+fn begin_popup(any id, f64 w=0.0) bool {
+   "Begins the popup `id` when it is open; pair with end_popup only when this returns true. The height follows the content."
+   if !_enabled { return false }
+   _popup_begin(_popup_key(id), w > 0.0 ? w : _sx(220.0), _pad())
+}
+
+fn end_popup() any { "Ends the popup started by begin_popup." _popup_end() }
+
+;; ---- menus ----------------------------------------------------------------
+fn begin_menu_bar() bool {
+   "Reserves a menu bar row in the current window; follow with begin_menu calls and end_menu_bar."
+   if !_enabled || _current_window_id_cache.len <= 0 { return false }
+   def h = _small_item_h() + _sx(2.0)
+   def rect = _layout_rect(_current_body_w(), h)
+   def x, y = float(rect.get(0, 0.0)), float(rect.get(1, 0.0))
+   def w = float(rect.get(2, 0.0))
+   if _rect_intersects(rect, _current_clip()) {
+      _gui_rect_fast(x, y, w, h, _window_hdr_u32)
+      _gui_rect_fast(x, y + h - 1.0, w, 1.0, _border_u32)
+   }
+   _menubar_active = true
+   _menubar_x, _menubar_y, _menubar_h = x, y, h
+   true
+}
+
+fn end_menu_bar() any {
+   "Ends the menu bar row."
+   _menubar_active = false
+   _last_item = [_current_body_x_cache, _menubar_y, _current_body_w_cache, _menubar_h]
+}
+
+fn begin_menu(any id, any label, bool enabled=true) bool {
+   "Draws a menu header(in a menu bar) or a submenu row(inside a menu) and begins its popup when open; pair with end_menu only when this returns true."
+   if !_enabled || _current_window_id_cache.len <= 0 { return false }
+   def txt = _ui_text(label)
+   def key = to_str(id) + "#menu"
+   def full = _wid(key)
+   def pid = _popup_key(key)
+   def is_open = _popup_index(pid) >= 0
+   def fid = _font_small_id()
+   if _menubar_active {
+      def w = _text_fit_width(fid, txt) + _sx(18.0)
+      def x, y, h = _menubar_x, _menubar_y, _menubar_h
+      _menubar_x = x + w
+      if enabled { _register_focusable(full) }
+      _begin_interact_widget(full, x, y, w, h, true)
+      if !enabled { _iw_hovered = false }
+      def pressed = _iw_hovered && _mouse_pressed0
+      if enabled {
+         if pressed || _widget_key_activate(full) {
+            if is_open { _popup_close_from(_popup_index(pid)) }
+            elif _list_find_text(_popup_dismissed, pid) < 0 {
+               _popup_open_at(pid, x, y + h, 0)
+               _menubar_open = pid
+            }
+         } elif _iw_hovered && !is_open && _menubar_open != "" && _popup_index(_menubar_open) >= 0 {
+            _popup_open_at(pid, x, y + h, 0)
+            _menubar_open = pid
+         }
+      }
+      if _iw_visible {
+         def lit = _popup_index(pid) >= 0
+         if lit || _iw_hovered { _gui_rect_fast(x, y, w, h - 1.0, lit ? _panel_active_u32 : _panel_hover_u32) }
+         if _kbd_focus_id == full { _gui_focus_ring(x, y, w, h) }
+         _draw_centered_text_ex(fid, txt, x, y, w, h, enabled ? _text_u32 : _text_faint_u32)
+      }
+      _last_item = [x, y, w, h]
+   } else {
+      def h = _small_item_h() + _sx(2.0)
+      def rect = _layout_rect(_current_body_w(), h)
+      _current_cursor_y_cache = _current_cursor_y_cache - _gap()
+      def x, y = float(rect.get(0, 0.0)), float(rect.get(1, 0.0))
+      def w = float(rect.get(2, 0.0))
+      _menu_measure_w = max(_menu_measure_w, _text_fit_width(fid, txt) + _sx(46.0) + _item_pad_x() * 2.0)
+      if enabled { _register_focusable(full) }
+      _begin_interact_widget(full, x, y, w, h, true)
+      if !enabled { _iw_hovered = false }
+      def focused = _kbd_focus_id == full
+      if enabled && !is_open {
+         if _iw_hovered || _widget_key_activate(full) || (focused && _key_event_present(KEY_RIGHT)) {
+            _popup_open_at(pid, x + w - _sx(2.0), y - _sx(4.0), _popup_depth)
+         }
+      }
+      if _iw_visible {
+         def lit = _popup_index(pid) >= 0
+         if lit || _iw_hovered || focused { _gui_rect_fast(x, y, w, h, _panel_active_u32) }
+         def ty = _text_center_y_for(fid, y, h)
+         _draw_text_ui_small_clipped(txt, x + _sx(22.0), ty, enabled ? _text_u32 : _text_faint_u32, max(1.0, w - _sx(40.0)), _clip_rect_inset(x, y, w, h, 0.0))
+         _gui_chevron(x + w - _sx(10.0), y + h * 0.5, _sx(8.0), false, _text_dim_u32)
+      }
+   }
+   _popup_begin(pid, 0.0, _sx(4.0))
+}
+
+fn end_menu() any { "Ends the menu started by begin_menu." _popup_end() }
+
+fn menu_item(any id, any label, any shortcut="", bool checked=false, bool enabled=true) bool {
+   "Draws a menu row with an optional shortcut hint and check mark. Returns true when chosen, which also closes the menu."
+   def txt, sc = _ui_text(label), _ui_text(shortcut)
+   def fid = _font_small_id()
+   def h = _small_item_h() + _sx(2.0)
+   def rect = _layout_rect(_current_body_w(), h)
+   _current_cursor_y_cache = _current_cursor_y_cache - _gap()
+   def x, y = float(rect.get(0, 0.0)), float(rect.get(1, 0.0))
+   def w = float(rect.get(2, 0.0))
+   def full = _wid(id)
+   def sw = sc.len > 0 ? (_text_fit_width(fid, sc) + _sx(24.0)) : 0.0
+   _menu_measure_w = max(_menu_measure_w, _text_fit_width(fid, txt) + sw + _sx(30.0) + _item_pad_x() * 2.0)
+   mut clicked = false
+   if enabled { _register_focusable(full) }
+   _begin_interact_widget(full, x, y, w, h, true)
+   if enabled {
+      clicked = _iw_clicked || _widget_key_activate(full)
+      if _iw_hovered && _popup_depth > 0 { _popup_close_from(_popup_depth) }
+   } else {
+      _iw_hovered, _iw_held = false, false
+   }
+   if _iw_visible {
+      def focused = _kbd_focus_id == full
+      if _iw_held { _gui_rect_fast(x, y, w, h, _press_u32) }
+      elif _iw_hovered || focused { _gui_rect_fast(x, y, w, h, _panel_active_u32) }
+      def ty = _text_center_y_for(fid, y, h)
+      def col = enabled ? _text_u32 : _text_faint_u32
+      def row_clip = _clip_rect_inset(x, y, w, h, 0.0)
+      if checked { _gui_check_mark(x + _sx(4.0), y + (h - _sx(14.0)) * 0.5, _sx(14.0), enabled ? _accent_u32 : _text_faint_u32) }
+      _draw_text_ui_small_clipped(txt, x + _sx(22.0), ty, col, max(1.0, w - sw - _sx(26.0)), row_clip)
+      if sc.len > 0 { _draw_text_ui_small_clipped(sc, x + w - sw + _sx(12.0), ty, _text_faint_u32, sw, row_clip) }
+   }
+   if clicked { _popup_close_from(0) }
+   clicked
+}
+
+fn menu_separator() any {
+   "Draws a divider between menu rows."
+   def rect = _layout_rect(_current_body_w(), _sx(7.0))
+   _current_cursor_y_cache = _current_cursor_y_cache - _gap()
+   _gui_rect_fast(float(rect.get(0, 0.0)) + _sx(6.0), float(rect.get(1, 0.0)) + _sx(3.0), max(1.0, float(rect.get(2, 0.0)) - _sx(12.0)), 1.0, _border_u32)
+}
+
+fn begin_context_menu(any id) bool {
+   "Opens a menu when the secondary button is pressed on the previous item, and begins it while open; pair with end_menu only when this returns true."
+   if !_enabled || _current_window_id_cache.len <= 0 { return false }
+   def key = to_str(id) + "#ctx"
+   def pid = _popup_key(key)
+   if _mouse_pressed1 && _disabled_on == 0 {
+      def x, y = float(_last_item.get(0, 0.0)), float(_last_item.get(1, 0.0))
+      if _current_window_pointer_hit(x, y, float(_last_item.get(2, 0.0)), float(_last_item.get(3, 0.0))) {
+         _popup_close_from(_popup_depth)
+         _popup_open_at(pid, _mouse_x, _mouse_y, _popup_depth)
+      }
+   }
+   _popup_begin(pid, 0.0, _sx(4.0))
+}
+
+;; ---- trees ----------------------------------------------------------------
+fn tree_node(any id, any label, bool default_open=false, bool leaf=false, bool selected=false) bool {
+   "Draws a tree row. Returns true when it is open and has children: draw them, then call tree_pop. Left and Right collapse and expand a focused row."
+   def full = _wid(id) + "#tree"
+   _register_focusable(full)
+   mut open = leaf ? false : _state_get_bool(full, default_open)
+   def h = _small_item_h()
+   def rect = _layout_rect(_current_body_w(), h)
+   _current_cursor_y_cache = _current_cursor_y_cache - _gap()
+   def x, y = float(rect.get(0, 0.0)), float(rect.get(1, 0.0))
+   def w = float(rect.get(2, 0.0))
+   _begin_interact_widget(full, x, y, w, h, true)
+   def focused = _kbd_focus_id == full
+   if !leaf {
+      mut want = open
+      if _iw_clicked || _widget_key_activate(full) { want = !open }
+      if focused && _key_event_present(KEY_RIGHT) { want = true }
+      if focused && _key_event_present(KEY_LEFT) { want = false }
+      if want != open {
+         open = want
+         _state_set_bool(full, open)
+      }
+   }
+   if _iw_visible {
+      if selected { _gui_rect_fast(x, y, w, h, _accent_soft_u32) }
+      elif _iw_held { _gui_rect_fast(x, y, w, h, _panel_active_u32) }
+      elif _iw_hovered { _gui_rect_fast(x, y, w, h, _panel_hover_u32) }
+      if focused { _gui_focus_ring(x, y, w, h) }
+      def mark = _iw_hovered ? _text_u32 : _text_dim_u32
+      if leaf { _gui_rect_fast(x + _sx(6.0), y + h * 0.5 - _sx(1.0), _sx(3.0), _sx(3.0), _text_faint_u32) }
+      else { _gui_chevron(x + _sx(8.0), y + h * 0.5, _sx(8.0), open, mark) }
+      _draw_text_ui_small_clipped(_ui_text(label), x + _sx(18.0), _text_center_y_for(_font_small_id(), y, h), _text_u32, max(1.0, w - _sx(20.0)), _clip_rect_inset(x, y, w, h, 0.0))
+   }
+   if open { indent(_sx(14.0)) }
+   open
+}
+
+fn tree_pop() any { "Closes the children of an open tree_node." unindent() }
+
+;; ---- numeric drag fields --------------------------------------------------
+fn _fmt_fixed(f64 v, int decimals) str {
+   mut d = decimals
+   if d < 0 { d = 0 }
+   if d > 9 { d = 9 }
+   mut scale = 1.0
+   mut i = 0
+   while i < d {
+      scale = scale * 10.0
+      i += 1
+   }
+   def neg = v < 0.0
+   def a = neg ? (0.0 - v) : v
+   def scaled = int(a * scale + 0.5)
+   def ip = scaled / int(scale)
+   def fp = scaled - ip * int(scale)
+   mut out = to_str(ip)
+   if d > 0 {
+      mut frac = to_str(fp)
+      while frac.len < d { frac = "0" + frac }
+      out = out + "." + frac
+   }
+   (neg && scaled > 0) ? ("-" + out) : out
+}
+
+fn drag_float(any id, any label, f64 value, f64 speed=0.01, f64 min_v=0.0, f64 max_v=0.0, int decimals=3, f64 w=0.0) f64 {
+   "Draws a numeric field edited by dragging horizontally or with the arrow keys; a double click or Enter switches to typing(Enter commits, Escape cancels). The value is clamped when max_v > min_v."
+   mut out = value
+   def bounded = max_v > min_v
+   def lbl = _ui_text(label)
+   def full = _wid(id)
+   def rw = _pick_positive(w, _current_body_w())
+   def rect = _layout_rect(rw, _labelled_h(lbl))
+   def x, y = float(rect.get(0, 0.0)), float(rect.get(1, 0.0))
+   def rwf = float(rect.get(2, 0.0))
+   def fy = y + ((lbl.len > 0) ? _label_h() : 0.0)
+   def fh = _field_h()
+   _register_focusable(full)
+   _begin_interact_widget(full, x, fy, rwf, fh, true)
+   mut wst = _widget_state.get(full, 0)
+   if !is_dict(wst) { wst = dict(8) }
+   mut editing = float(wst.get("edit", 0.0)) > 0.5
+   mut buf = to_str(wst.get("buf", ""))
+   if editing {
+      if _text_focus_id != full {
+         editing = false
+      } else {
+         def enter = _key_event_present(KEY_ENTER)
+         def edit = _text_edit_apply_input(full, buf, _text_state_cursor(full, buf.len))
+         buf = to_str(edit.get(0, buf))
+         _text_state_set_cursor(full, int(edit.get(1, buf.len)))
+         if enter {
+            out = str.atof(buf)
+            editing = false
+            _kbd_focus_id = full
+         }
+      }
+   } else {
+      mut start = false
+      if _iw_hovered && _mouse_pressed0 {
+         if float(_gui_frame_id) - float(wst.get("press_frame", -1000.0)) <= 24.0 { start = true }
+         wst["press_frame"] = float(_gui_frame_id)
+         wst["drag_x"] = _mouse_x
+         wst["drag_v"] = out
+      }
+      if _iw_held && _mouse_drag_ready() && !start {
+         out = float(wst.get("drag_v", out)) + (_mouse_x - float(wst.get("drag_x", _mouse_x))) * speed
+      }
+      if _kbd_focus_id == full && _disabled_on == 0 {
+         if _key_event_present(KEY_LEFT) || _key_event_present(KEY_DOWN) { out = out - speed }
+         if _key_event_present(KEY_RIGHT) || _key_event_present(KEY_UP) { out = out + speed }
+         if _key_event_present(KEY_ENTER) { start = true }
+      }
+      if start {
+         editing = true
+         buf = _fmt_fixed(out, decimals)
+         _text_focus_id, _kbd_focus_id = full, full
+         _active_widget_id = ""
+         _text_state_set_cursor(full, buf.len)
+         _text_set_selected_all(full, true)
+         wst = _widget_state.get(full, wst)
+      }
+   }
+   if bounded { out = clamp(out, min_v, max_v) }
+   wst["edit"] = editing ? 1.0 : 0.0
+   wst["buf"] = buf
+   _widget_state[full] = wst
+   if _iw_visible {
+      def focused = _kbd_focus_id == full
+      _gui_rect_fast(x, fy, rwf, fh, editing ? _window_bg_u32 : (_iw_hovered ? _panel_hover_u32 : _panel_u32))
+      if bounded && !editing {
+         def t = clamp((out - min_v) / (max_v - min_v), 0.0, 1.0)
+         if t > 0.0 { _gui_rect_fast(x + 1.0, fy + fh - _sx(3.0), max(1.0, (rwf - 2.0) * t), _sx(2.0), _accent_u32) }
+      }
+      _gui_rect_outline_fast(x, fy, rwf, fh, editing ? _accent_u32 : (_iw_hovered ? _text_faint_u32 : _border_u32))
+      if focused && !editing { _gui_focus_ring(x, fy, rwf, fh) }
+      if lbl.len > 0 { _draw_text_ui_small_clipped(lbl, x, y, _text_dim_u32, rwf, _clip_rect_inset(x, y, rwf, _label_h(), 0.0)) }
+      def shown = editing ? buf : _fmt_fixed(out, decimals)
+      if editing {
+         def tx = x + _item_pad_x()
+         def ty = _text_center_y_for(_font_body(), fy, fh)
+         if _text_selected_all(full) && buf.len > 0 {
+            _gui_rect_fast(tx - 1.0, fy + _sx(4.0), min(rwf - _item_pad_x() * 2.0, float(_measure_text_ui(_font_body(), buf).get(0, 0.0)) + _sx(3.0)), max(_sx(8.0), fh - _sx(8.0)), _select_u32)
+         }
+         _draw_text_ui_clipped(shown, tx, ty, _text_u32, rwf - _item_pad_x() * 2.0, _clip_rect_inset(x, fy, rwf, fh, 1.0))
+      } else {
+         _draw_centered_text(shown, x, fy, rwf, fh, _text_u32)
+      }
+      if !editing && _iw_hovered {
+         _ensure_cursors()
+         _want_cursor(_cursor_resize)
+      }
+   }
+   _last_item = [x, fy, rwf, fh]
+   out
+}
+
+fn drag_int(any id, any label, int value, f64 speed=0.25, int min_v=0, int max_v=0, f64 w=0.0) int {
+   "Integer form of drag_float. The fractional drag position is kept between frames, so slow drags still step."
+   def full = _wid(id)
+   mut acc = _state_get_num(full, "acc", float(value))
+   if int(acc + (acc < 0.0 ? -0.5 : 0.5)) != value { acc = float(value) }
+   acc = drag_float(id, label, acc, speed, float(min_v), float(max_v), 0, w)
+   _state_set_num(full, "acc", acc)
+   int(acc + (acc < 0.0 ? -0.5 : 0.5))
+}
+
+;; ---- tables ---------------------------------------------------------------
+fn _table_arrow(f64 cx, f64 cy, bool down, int color) any {
+   def n = int(max(2.0, _sx(3.0)))
+   mut i = 0
+   while i <= n {
+      def half = float(down ? (n - i) : i)
+      _gui_rect_fast(cx - half, cy - float(n) * 0.5 + float(i), half * 2.0 + 1.0, 1.0, color)
+      i += 1
+   }
+}
+
+fn begin_table(any id, list labels, any weights=0) bool {
+   "Begins a table with a header row. Clicking a header sorts by it(read with table_sort_column / table_sort_descending); dragging a header edge resizes the two columns beside it. Fill rows with table_next_row and table_next_column or table_text, then call end_table."
+   if !_enabled || _current_window_id_cache.len <= 0 || _tbl_id != "" { return false }
+   def n = labels.len
+   if n <= 0 { return false }
+   def full = _wid(id) + "#table"
+   mut st = _widget_state.get(full, 0)
+   if !is_dict(st) { st = dict(8) }
+   mut any fr = st.get("fr", 0)
+   mut have = false
+   if is_list(fr) { have = fr.len == n }
+   if !have {
+      mut total = 0.0
+      mut k = 0
+      while k < n {
+         total += is_list(weights) ? max(0.01, float(weights.get(k, 1.0))) : 1.0
+         k += 1
+      }
+      fr = []
+      k = 0
+      while k < n {
+         fr = fr.append((is_list(weights) ? max(0.01, float(weights.get(k, 1.0))) : 1.0) / total)
+         k += 1
+      }
+   }
+   mut sort_col = int(float(st.get("sort", -1.0)))
+   mut desc = float(st.get("desc", 0.0)) > 0.5
+   def hh = _small_item_h() + _sx(2.0)
+   def rect = _layout_rect(_current_body_w(), hh)
+   _current_cursor_y_cache = _current_cursor_y_cache - _gap()
+   def x, y = float(rect.get(0, 0.0)), float(rect.get(1, 0.0))
+   def w = float(rect.get(2, 0.0))
+   def vis = _rect_intersects(rect, _current_clip())
+   if vis { _gui_rect_fast(x, y, w, hh, _window_hdr_u32) }
+   mut cols = []
+   mut cx = x
+   mut i = 0
+   while i < n {
+      def cw = (i == n - 1) ? max(1.0, x + w - cx) : max(1.0, _snap(w * float(fr.get(i, 0.1))))
+      def hid = full + "#h" + to_str(i)
+      _register_focusable(hid)
+      _begin_interact_widget(hid, cx, y, cw, hh, true)
+      if _iw_clicked || _widget_key_activate(hid) {
+         if sort_col == i { desc = !desc }
+         else {
+            sort_col = i
+            desc = false
+         }
+      }
+      if vis {
+         if _iw_held { _gui_rect_fast(cx, y, cw, hh, _panel_active_u32) }
+         elif _iw_hovered { _gui_rect_fast(cx, y, cw, hh, _panel_hover_u32) }
+         if _kbd_focus_id == hid { _gui_focus_ring(cx, y, cw, hh) }
+         _draw_text_ui_small_clipped(_ui_text(labels.get(i, "")), cx + _item_pad_x(), _text_center_y_for(_font_small_id(), y, hh), sort_col == i ? _text_u32 : _text_dim_u32, max(1.0, cw - _item_pad_x() * 2.0 - (sort_col == i ? _sx(10.0) : 0.0)), _clip_rect_inset(cx, y, cw, hh, 0.0))
+         if sort_col == i { _table_arrow(cx + cw - _sx(9.0), y + hh * 0.5, desc, _accent_u32) }
+      }
+      cols = cols.append(cx)
+      cols = cols.append(cw)
+      cx = cx + cw
+      i += 1
+   }
+   ;; Resize handles are submitted after the header cells, so a press on a
+   ;; column edge belongs to the handle and never toggles the sort.
+   mut nfr = fr
+   i = 0
+   while i < n - 1 {
+      def int cx_i, cw_i = i * 2, i * 2 + 1
+      def int nx_i = i + 1
+      def bx = float(cols.get(cx_i, 0.0)) + float(cols.get(cw_i, 0.0))
+      def rid = full + "#r" + to_str(i)
+      _begin_interact_widget(rid, bx - _sx(3.0), y, _sx(6.0), hh, true)
+      if _iw_hovered || _iw_held {
+         _ensure_cursors()
+         _want_cursor(_cursor_resize)
+      }
+      if _iw_held && w > 1.0 {
+         def pair = float(fr.get(i, 0.1)) + float(fr.get(nx_i, 0.1))
+         def left = clamp((_mouse_x - float(cols.get(cx_i, 0.0))) / w, 0.04, max(0.04, pair - 0.04))
+         mut out = []
+         mut k = 0
+         while k < n {
+            if k == i { out = out.append(left) }
+            elif k == nx_i { out = out.append(pair - left) }
+            else { out = out.append(float(fr.get(k, 0.1))) }
+            k += 1
+         }
+         nfr = out
+      }
+      if vis { _gui_rect_fast(bx, y + _sx(3.0), 1.0, hh - _sx(6.0), (_iw_hovered || _iw_held) ? _accent_u32 : _border_u32) }
+      i += 1
+   }
+   if vis { _gui_rect_fast(x, y + hh - 1.0, w, 1.0, _border_u32) }
+   st["fr"] = nfr
+   st["sort"] = float(sort_col)
+   st["desc"] = desc ? 1.0 : 0.0
+   _widget_state[full] = st
+   _tbl_id = full
+   _tbl_cols = cols
+   _tbl_n, _tbl_col, _tbl_row = n, -1, -1
+   _tbl_x, _tbl_w = x, w
+   _tbl_base_x, _tbl_base_w = _current_body_x_cache, _current_body_w_cache
+   _tbl_row_y, _tbl_row_bottom = _current_cursor_y_cache, _current_cursor_y_cache
+   _tbl_row_h = _small_item_h()
+   _tbl_row_hit = false
+   _same_line_next = false
+   true
+}
+
+fn table_next_row(bool selected=false) bool {
+   "Starts the next table row and returns whether it is inside the visible clip, so long tables can skip hidden rows' content."
+   if _tbl_id == "" { return false }
+   _tbl_row_bottom = max(_tbl_row_bottom, _current_cursor_y_cache)
+   _tbl_row += 1
+   _tbl_col = -1
+   _tbl_row_y = _tbl_row_bottom
+   _tbl_row_bottom = _tbl_row_y + _tbl_row_h
+   _current_cursor_y_cache = _tbl_row_y
+   _current_body_x_cache, _current_body_w_cache = _tbl_base_x, _tbl_base_w
+   def vis = _rect_intersects([_tbl_x, _tbl_row_y, _tbl_w, _tbl_row_h], _current_clip())
+   def hover = vis && _disabled_on == 0 && _current_window_pointer_hit(_tbl_x, _tbl_row_y, _tbl_w, _tbl_row_h)
+   _tbl_row_hit = hover && _mouse_pressed0
+   if vis {
+      if selected { _gui_rect_fast(_tbl_x, _tbl_row_y, _tbl_w, _tbl_row_h, _accent_soft_u32) }
+      elif hover { _gui_rect_fast(_tbl_x, _tbl_row_y, _tbl_w, _tbl_row_h, _panel_hover_u32) }
+      elif (_tbl_row % 2) == 1 { _gui_rect_fast(_tbl_x, _tbl_row_y, _tbl_w, _tbl_row_h, _panel_u32) }
+   }
+   _last_item = [_tbl_x, _tbl_row_y, _tbl_w, _tbl_row_h]
+   vis
+}
+
+fn table_row_clicked() bool { "Returns true when the pointer was pressed on the current table row this frame." _tbl_row_hit }
+
+fn table_next_column() bool {
+   "Moves layout into the next cell of the current row; widgets submitted afterwards fill that cell."
+   if _tbl_id == "" || _tbl_row < 0 { return false }
+   _tbl_row_bottom = max(_tbl_row_bottom, _current_cursor_y_cache)
+   _tbl_col += 1
+   if _tbl_col >= _tbl_n { return false }
+   def padx = _sx(6.0)
+   def int cx_i, cw_i = _tbl_col * 2, _tbl_col * 2 + 1
+   _current_body_x_cache = float(_tbl_cols.get(cx_i, _tbl_x)) + padx
+   _current_body_w_cache = max(1.0, float(_tbl_cols.get(cw_i, 1.0)) - padx * 2.0)
+   _current_cursor_y_cache = _tbl_row_y
+   _same_line_next = false
+   true
+}
+
+fn table_text(any txt, any tone=0) bool {
+   "Fills the next cell with one clipped line of text. `tone` is a theme token name or an RGBA list."
+   if !table_next_column() { return false }
+   mut col = _text_u32
+   if is_str(tone) { col = _text_color_u32(theme_color(to_str(tone))) }
+   elif is_list(tone) { col = _text_color_u32(tone) }
+   def x, w = _current_body_x_cache, _current_body_w_cache
+   def cell = [x, _tbl_row_y, w, _tbl_row_h]
+   if _rect_intersects(cell, _current_clip()) {
+      _draw_text_ui_small_clipped(_ui_text(txt), x, _text_center_y_for(_font_small_id(), _tbl_row_y, _tbl_row_h), col, w, cell)
+   }
+   _current_cursor_y_cache = _tbl_row_y + _tbl_row_h
+   _last_item = cell
+   true
+}
+
+fn table_sort_column(any id) int {
+   "Returns the column a table is sorted by, or -1 before any header was chosen."
+   int(_state_get_num(_wid(id) + "#table", "sort", -1.0))
+}
+
+fn table_sort_descending(any id) bool { "Returns true when the table's sort order is descending." _state_get_num(_wid(id) + "#table", "desc", 0.0) > 0.5 }
+
+fn end_table() any {
+   "Ends the table started by begin_table."
+   if _tbl_id == "" { return 0 }
+   _tbl_row_bottom = max(_tbl_row_bottom, _current_cursor_y_cache)
+   _current_body_x_cache, _current_body_w_cache = _tbl_base_x, _tbl_base_w
+   _gui_rect_fast(_tbl_x, _tbl_row_bottom, _tbl_w, 1.0, _border_u32)
+   _current_cursor_y_cache = _tbl_row_bottom + 1.0 + _gap()
+   _last_item = [_tbl_x, _tbl_row_bottom, _tbl_w, 1.0]
+   _tbl_id = ""
+   _tbl_row, _tbl_col = -1, -1
+   _same_line_next = false
+}
+
+;; ---- drag and drop --------------------------------------------------------
+fn drag_source(any kind, any payload, any label="") bool {
+   "Makes the previous item draggable: once it is dragged past the threshold, `payload` travels with the pointer under the type name `kind`. Returns true while this item is the active drag."
+   if !_enabled || _last_item_id == "" { return false }
+   if !_dnd_active && _active_widget_id == _last_item_id && _mouse_down0 && _mouse_drag_ready() {
+      _dnd_active = true
+      _dnd_type = to_str(kind)
+      _dnd_payload = payload
+      _dnd_label = _ui_text(label)
+      _dnd_source = _last_item_id
+   }
+   _dnd_active && _dnd_source == _last_item_id
+}
+
+fn drop_target(any kind) any {
+   "Makes the previous item accept drags of type `kind`. Returns the payload on the frame it is dropped here, otherwise nil."
+   if !_enabled || !_dnd_active { return nil }
+   if _dnd_type != to_str(kind) { return nil }
+   def x, y = float(_last_item.get(0, 0.0)), float(_last_item.get(1, 0.0))
+   def w, h = float(_last_item.get(2, 0.0)), float(_last_item.get(3, 0.0))
+   if !_rect_hit(_mouse_x, _mouse_y, x, y, w, h) { return nil }
+   ;; The dragged item keeps the pointer captured, so the window test asks
+   ;; which window is under the pointer rather than which one owns it.
+   if _top_window_id_at(_mouse_x, _mouse_y) != _current_window_id_cache { return nil }
+   if _rect_intersects(_last_item, _current_clip()) {
+      _gui_rect_outline_fast(x, y, w, h, _accent_u32)
+      _gui_rect_outline_fast(x + 1.0, y + 1.0, max(1.0, w - 2.0), max(1.0, h - 2.0), _accent_u32)
+   }
+   if !_mouse_down0 { return _dnd_payload }
+   nil
+}
+
+fn drag_active(any kind="") bool {
+   "Returns true while a drag is in flight(of type `kind`, when given)."
+   def k = to_str(kind)
+   _dnd_active && (k.len == 0 || k == _dnd_type)
+}
+
+;; ---- docking --------------------------------------------------------------
+;;
+;; A dockspace owns a rectangle and a tree of panels. A leaf holds one or more
+;; windows as tabs; a split divides its rectangle between two children. Call
+;; dockspace() once per frame before the windows it may contain:
+;;
+;;   gui.dockspace("main", 0.0, 0.0, w, h)
+;;   if gui.begin_window("scene", ...) { ... } gui.end_window()
+;;
+;; Dragging a floating window by its title bar over the dockspace shows drop
+;; indicators: a cross on the panel under the pointer (centre adds a tab, an
+;; arm splits that panel) and one on each rim (splits the whole dockspace).
+;; Releasing anywhere else leaves the window floating. Dragging a tab out
+;; of its bar undocks the window again; dragging a splitter resizes. The tree
+;; is plain nested lists and every edit builds a new tree:
+;;
+;;   leaf   ["L", active_index, [window ids]]
+;;   split  ["S", "h" | "v", ratio, first, second]    h: side by side, v: stacked
+;;
+;; A closed window keeps its place in the tree and returns to it when shown
+;; again; undock_window (or pulling its tab out) removes it. An id starting
+;; with "@" is a spacer: a panel-shaped hole with no tab bar where the app
+;; draws its own content, read back with dock_spacer_rect.
+;;
+;; dock_layout_save / dock_layout_load turn the tree and the floating window
+;; rectangles into one line of text, so an app can restore its layout.
+
+fn _dk_is_leaf(any n) bool {
+   if !is_list(n) { return false }
+   to_str(n.get(0, "")) == "L"
+}
+
+fn _dk_is_split(any n) bool {
+   if !is_list(n) { return false }
+   to_str(n.get(0, "")) == "S"
+}
+
+fn _dk_contains(any n, str win) bool {
+   if _dk_is_leaf(n) {
+      def any ids = n.get(2, 0)
+      if !is_list(ids) { return false }
+      return _list_find_text(ids, win) >= 0
+   }
+   if _dk_is_split(n) { return _dk_contains(n.get(3, 0), win) || _dk_contains(n.get(4, 0), win) }
+   false
+}
+
+fn _dk_windows_into(any n, list out) list {
+   if _dk_is_leaf(n) {
+      def any ids = n.get(2, 0)
+      mut acc = out
+      if is_list(ids) {
+         mut i = 0
+         def int cnt = ids.len
+         while i < cnt {
+            acc = acc.append(to_str(ids.get(i, "")))
+            i += 1
+         }
+      }
+      return acc
+   }
+   if _dk_is_split(n) { return _dk_windows_into(n.get(4, 0), _dk_windows_into(n.get(3, 0), out)) }
+   out
+}
+
+fn _dk_remove(any n, str win) any {
+   "Returns the tree without `win`; an emptied leaf disappears and its sibling takes the parent's place."
+   if _dk_is_leaf(n) {
+      def any ids = n.get(2, 0)
+      mut keep = []
+      mut i = 0
+      def int cnt = is_list(ids) ? ids.len : 0
+      mut removed_at = -1
+      while i < cnt {
+         def cur = to_str(ids.get(i, ""))
+         if cur == win { removed_at = i }
+         else { keep = keep.append(cur) }
+         i += 1
+      }
+      if keep.len == 0 { return 0 }
+      mut active = int(float(n.get(1, 0.0)))
+      if removed_at >= 0 && active >= removed_at && active > 0 { active -= 1 }
+      if active >= keep.len { active = keep.len - 1 }
+      return ["L", float(active), keep]
+   }
+   if _dk_is_split(n) {
+      def any a = _dk_remove(n.get(3, 0), win)
+      def any b = _dk_remove(n.get(4, 0), win)
+      if !is_list(a) { return b }
+      if !is_list(b) { return a }
+      return ["S", to_str(n.get(1, "h")), float(n.get(2, 0.5)), a, b]
+   }
+   0
+}
+
+fn _dk_wrap(any n, str win, str side) any {
+   def any fresh = ["L", 0.0, [win]]
+   if !is_list(n) { return fresh }
+   if side == "left" { return ["S", "h", 0.5, fresh, n] }
+   if side == "right" { return ["S", "h", 0.5, n, fresh] }
+   if side == "top" { return ["S", "v", 0.5, fresh, n] }
+   if side == "bottom" { return ["S", "v", 0.5, n, fresh] }
+   n
+}
+
+fn _dk_insert(any n, str target, str win, str side) any {
+   "Returns the tree with `win` docked beside (or tabbed into) the leaf that holds `target`."
+   if _dk_is_leaf(n) {
+      if !_dk_contains(n, target) { return n }
+      if side == "center" {
+         def any ids = n.get(2, 0)
+         mut next = []
+         mut i = 0
+         def int cnt = is_list(ids) ? ids.len : 0
+         while i < cnt {
+            next = next.append(to_str(ids.get(i, "")))
+            i += 1
+         }
+         next = next.append(win)
+         return ["L", float(next.len - 1), next]
+      }
+      return _dk_wrap(n, win, side)
+   }
+   if _dk_is_split(n) {
+      return ["S", to_str(n.get(1, "h")), float(n.get(2, 0.5)), _dk_insert(n.get(3, 0), target, win, side), _dk_insert(n.get(4, 0), target, win, side)]
+   }
+   n
+}
+
+fn _dk_set_active(any n, str win) any {
+   if _dk_is_leaf(n) {
+      def any ids = n.get(2, 0)
+      def idx = is_list(ids) ? _list_find_text(ids, win) : -1
+      if idx < 0 { return n }
+      return ["L", float(idx), ids]
+   }
+   if _dk_is_split(n) {
+      return ["S", to_str(n.get(1, "h")), float(n.get(2, 0.5)), _dk_set_active(n.get(3, 0), win), _dk_set_active(n.get(4, 0), win)]
+   }
+   n
+}
+
+fn _dk_set_ratio(any n, str path, int depth, f64 ratio) any {
+   "Returns the tree with the split addressed by `path` (a string of a/b turns from the root) resized."
+   if !_dk_is_split(n) { return n }
+   if depth >= path.len { return ["S", to_str(n.get(1, "h")), clamp(ratio, 0.08, 0.92), n.get(3, 0), n.get(4, 0)] }
+   def turn = str.str_slice(path, depth, depth + 1)
+   def int next_depth = depth + 1
+   if turn == "a" { return ["S", to_str(n.get(1, "h")), float(n.get(2, 0.5)), _dk_set_ratio(n.get(3, 0), path, next_depth, ratio), n.get(4, 0)] }
+   ["S", to_str(n.get(1, "h")), float(n.get(2, 0.5)), n.get(3, 0), _dk_set_ratio(n.get(4, 0), path, next_depth, ratio)]
+}
+
+fn _dk_is_spacer_id(str id) bool { str.startswith(id, "@") }
+
+fn _dk_filter(any n, str path) any {
+   "Returns the part of the tree that is on screen: closed windows are left out (they keep their place in the stored tree and return to it when shown again), and each split remembers its path in the stored tree."
+   if _dk_is_leaf(n) {
+      def any ids = n.get(2, 0)
+      def int cnt = is_list(ids) ? ids.len : 0
+      def int active = int(float(n.get(1, 0.0)))
+      mut keep = []
+      mut act = 0
+      mut i = 0
+      while i < cnt {
+         def id = to_str(ids.get(i, ""))
+         mut shown = true
+         if !_dk_is_spacer_id(id) {
+            def st = _window_lookup(id)
+            if is_dict(st) { shown = bool(st.get("open", true)) }
+         }
+         if shown {
+            if i == active { act = keep.len }
+            keep = keep.append(id)
+         }
+         i += 1
+      }
+      if keep.len == 0 { return 0 }
+      return ["L", float(act), keep]
+   }
+   if _dk_is_split(n) {
+      def any a = _dk_filter(n.get(3, 0), path + "a")
+      def any b = _dk_filter(n.get(4, 0), path + "b")
+      if !is_list(a) { return b }
+      if !is_list(b) { return a }
+      return ["S", to_str(n.get(1, "h")), float(n.get(2, 0.5)), a, b, path]
+   }
+   0
+}
+
+mut _dk_leaves = []
+mut _dk_splits = []
+
+fn _dk_layout(any n, f64 x, f64 y, f64 w, f64 h, str path) any {
+   "Collects leaf rectangles (x, y, w, h, node, path) and splitter rectangles (x, y, w, h, dir, path, parent x, y, w, h)."
+   if _dk_is_leaf(n) {
+      _dk_leaves = _dk_leaves.append(x)
+      _dk_leaves = _dk_leaves.append(y)
+      _dk_leaves = _dk_leaves.append(w)
+      _dk_leaves = _dk_leaves.append(h)
+      _dk_leaves = _dk_leaves.append(n)
+      _dk_leaves = _dk_leaves.append(path)
+      return 0
+   }
+   if !_dk_is_split(n) { return 0 }
+   def dir = to_str(n.get(1, "h"))
+   def ratio = clamp(float(n.get(2, 0.5)), 0.08, 0.92)
+   def bar = max(3.0, _sx(5.0))
+   ;; A filtered tree carries each split's path in the stored tree.
+   def split_path = n.len > 5 ? to_str(n.get(5, path)) : path
+   mut sx, sy, sw, sh = 0.0, 0.0, 0.0, 0.0
+   if dir == "h" {
+      def aw = _snap(max(1.0, (w - bar) * ratio))
+      sx, sy, sw, sh = x + aw, y, bar, h
+      _dk_layout(n.get(3, 0), x, y, aw, h, path + "a")
+      _dk_layout(n.get(4, 0), x + aw + bar, y, max(1.0, w - aw - bar), h, path + "b")
+   } else {
+      def ah = _snap(max(1.0, (h - bar) * ratio))
+      sx, sy, sw, sh = x, y + ah, w, bar
+      _dk_layout(n.get(3, 0), x, y, w, ah, path + "a")
+      _dk_layout(n.get(4, 0), x, y + ah + bar, w, max(1.0, h - ah - bar), path + "b")
+   }
+   _dk_splits = _dk_splits.append(sx)
+   _dk_splits = _dk_splits.append(sy)
+   _dk_splits = _dk_splits.append(sw)
+   _dk_splits = _dk_splits.append(sh)
+   _dk_splits = _dk_splits.append(dir)
+   _dk_splits = _dk_splits.append(split_path)
+   _dk_splits = _dk_splits.append(x)
+   _dk_splits = _dk_splits.append(y)
+   _dk_splits = _dk_splits.append(w)
+   _dk_splits = _dk_splits.append(h)
+}
+
+fn _dock_space(str key) dict {
+   if !is_dict(_dock_spaces) { _dock_spaces = dict(4) }
+   mut sp = _dock_spaces.get(key, 0)
+   if !is_dict(sp) {
+      sp = dict(12)
+      sp["tree"] = 0
+      sp["x"] = 0.0
+      sp["y"] = 0.0
+      sp["w"] = 0.0
+      sp["h"] = 0.0
+      sp["chrome"] = []
+      _dock_spaces[key] = sp
+   }
+   sp
+}
+
+fn _dock_tab_h() f64 { _small_item_h() + _sx(4.0) }
+
+fn _dock_window_state(str win) dict {
+   mut st = _window_lookup(win)
+   if !is_dict(st) {
+      st = dict(32)
+      st["id"] = win
+      st["open"] = true
+      st["title"] = win
+   }
+   st
+}
+
+fn _dock_mark(str key, str win) any {
+   "Flags a window as docked and remembers its floating size."
+   if _dk_is_spacer_id(win) { return 0 }
+   mut st = _dock_window_state(win)
+   if to_str(st.get("dock", "")) == "" {
+      st["float_w"] = float(st.get("w", 420.0))
+      st["float_h"] = float(st.get("h", 320.0))
+   }
+   st["dock"] = key
+   st["collapsed"] = false
+   _window_store(st)
+}
+
+fn _dock_unmark(str win, f64 x, f64 y) any {
+   mut st = _window_lookup(win)
+   if !is_dict(st) { return 0 }
+   st["dock"] = ""
+   st["dock_show"] = true
+   st["x"] = x
+   st["y"] = y
+   st["w"] = max(_min_win_w(), float(st.get("float_w", 420.0)))
+   st["h"] = max(_min_win_h(), float(st.get("float_h", 320.0)))
+   st["titlebar"] = true
+   st["movable"] = true
+   st["resizable"] = true
+   _window_store(st)
+}
+
+fn window_docked(any id) bool {
+   "Returns true while the window is docked in a dockspace."
+   def st = _window_lookup(to_str(id))
+   if !is_dict(st) { return false }
+   to_str(st.get("dock", "")) != ""
+}
+
+fn dock_window(any space, any id, any target="", str side="center") bool {
+   "Docks window `id` into dockspace `space`: as a tab of the panel holding `target` (side \"center\"), split off one of its edges (\"left\", \"right\", \"top\", \"bottom\"), or, with an empty target, against the whole dockspace. Returns false for an unknown side or target."
+   def key, win = to_str(space), to_str(id)
+   def tgt = to_str(target)
+   if win.len == 0 { return false }
+   if side != "center" && side != "left" && side != "right" && side != "top" && side != "bottom" { return false }
+   mut sp = _dock_space(key)
+   mut any tree = _dk_remove(sp.get("tree", 0), win)
+   if !is_list(tree) {
+      tree = ["L", 0.0, [win]]
+   } elif tgt.len == 0 {
+      if side == "center" {
+         def any first = _dk_windows_into(tree, [])
+         tree = _dk_insert(tree, to_str(first.get(0, "")), win, "center")
+      } else { tree = _dk_wrap(tree, win, side) }
+   } else {
+      if tgt == win || !_dk_contains(tree, tgt) { return false }
+      tree = _dk_insert(tree, tgt, win, side)
+   }
+   sp["tree"] = tree
+   _dock_spaces[key] = sp
+   _dock_mark(key, win)
+   true
+}
+
+fn undock_window(any id) bool {
+   "Removes a window from its dockspace and floats it where its panel was."
+   def win = to_str(id)
+   def st = _window_lookup(win)
+   if !is_dict(st) { return false }
+   def key = to_str(st.get("dock", ""))
+   if key.len == 0 { return false }
+   mut sp = _dock_space(key)
+   sp["tree"] = _dk_remove(sp.get("tree", 0), win)
+   _dock_spaces[key] = sp
+   _dock_unmark(win, float(st.get("x", 0.0)) + _sx(24.0), float(st.get("y", 0.0)) + _sx(24.0))
+   true
+}
+
+fn dock_split_ratio(any space, str path, f64 ratio) bool {
+   "Sets the ratio of the split addressed by `path` (a/b turns from the root; \"\" is the root split)."
+   mut sp = _dock_space(to_str(space))
+   sp["tree"] = _dk_set_ratio(sp.get("tree", 0), path, 0, ratio)
+   _dock_spaces[to_str(space)] = sp
+   true
+}
+
+fn dock_windows(any space) list {
+   "Returns the ids of the windows docked in `space`, in tree order."
+   _dk_windows_into(_dock_space(to_str(space)).get("tree", 0), [])
+}
+
+fn _dock_chrome_hit(f64 px, f64 py) str {
+   "Returns the pseudo window id of the dockspace whose tab bar or splitter is under the point."
+   if !is_dict(_dock_spaces) { return "" }
+   def keys = dict_keys(_dock_spaces)
+   if !is_list(keys) { return "" }
+   mut k = 0
+   def int keys_n = keys.len
+   while k < keys_n {
+      def key = to_str(keys.get(k, ""))
+      def any sp = _dock_spaces.get(key, 0)
+      if is_dict(sp) {
+         def any chrome = sp.get("chrome", 0)
+         if is_list(chrome) {
+            mut i = 0
+            def int cn = chrome.len
+            while i + 3 < cn {
+               def int i1, i2 = i + 1, i + 2
+               def int i3 = i + 3
+               if _rect_hit(px, py, float(chrome.get(i, 0.0)), float(chrome.get(i1, 0.0)), float(chrome.get(i2, 0.0)), float(chrome.get(i3, 0.0))) { return "#dock:" + key }
+               i += 4
+            }
+         }
+      }
+      k += 1
+   }
+   ""
+}
+
+fn _dock_target_size() f64 { max(24.0, _sx(34.0)) }
+
+fn _dock_target_rect(str zone, f64 x, f64 y, f64 w, f64 h) list {
+   "Returns the indicator square of one drop zone: a cross of five squares at the centre of the panel."
+   def s = _dock_target_size()
+   def step = s + _sx(4.0)
+   mut cx, cy = x + w * 0.5 - s * 0.5, y + h * 0.5 - s * 0.5
+   if zone == "left" { cx = cx - step }
+   elif zone == "right" { cx = cx + step }
+   elif zone == "top" { cy = cy - step }
+   elif zone == "bottom" { cy = cy + step }
+   [_snap(cx), _snap(cy), s, s]
+}
+
+fn _dock_rim_rect(str zone, f64 x, f64 y, f64 w, f64 h) list {
+   "Returns the indicator square on the dockspace rim that splits the whole dockspace."
+   def s = _dock_target_size()
+   def inset = _sx(8.0)
+   if zone == "left" { return [_snap(x + inset), _snap(y + h * 0.5 - s * 0.5), s, s] }
+   if zone == "right" { return [_snap(x + w - inset - s), _snap(y + h * 0.5 - s * 0.5), s, s] }
+   if zone == "top" { return [_snap(x + w * 0.5 - s * 0.5), _snap(y + inset), s, s] }
+   [_snap(x + w * 0.5 - s * 0.5), _snap(y + h - inset - s), s, s]
+}
+
+fn _dock_zone_name(int k) str {
+   if k == 0 { return "center" }
+   if k == 1 { return "left" }
+   if k == 2 { return "right" }
+   if k == 3 { return "top" }
+   "bottom"
+}
+
+fn _dock_draw_target(list r, str zone, bool hot) any {
+   def tx, ty = float(r.get(0, 0.0)), float(r.get(1, 0.0))
+   def ts = float(r.get(2, 0.0))
+   _gui_rect_fast(tx, ty, ts, ts, hot ? _accent_u32 : _popup_u32)
+   _gui_rect_outline_fast(tx, ty, ts, ts, hot ? _text_u32 : _text_faint_u32)
+   ;; A small pictogram of where the window will land.
+   def p = _sx(6.0)
+   def half = _dock_zone_rect(zone, tx + p, ty + p, ts - p * 2.0, ts - p * 2.0)
+   _gui_rect_fast(float(half.get(0, 0.0)), float(half.get(1, 0.0)), float(half.get(2, 0.0)), float(half.get(3, 0.0)), hot ? _window_bg_u32 : _text_dim_u32)
+}
+
+fn _dock_zone_rect(str zone, f64 x, f64 y, f64 w, f64 h) list {
+   if zone == "left" { return [x, y, w * 0.5, h] }
+   if zone == "right" { return [x + w * 0.5, y, w * 0.5, h] }
+   if zone == "top" { return [x, y, w, h * 0.5] }
+   if zone == "bottom" { return [x, y + h * 0.5, w, h * 0.5] }
+   [x, y, w, h]
+}
+
+fn dockspace(any id, f64 x, f64 y, f64 w, f64 h) bool {
+   "Lays out, draws, and handles input for a dockspace. Call once per frame before the windows it may hold. Returns true when the dockspace holds at least one window."
+   if !_enabled { return false }
+   _ensure_gui_state()
+   _theme_refresh()
+   def key = to_str(id)
+   def pseudo = "#dock:" + key
+   _dock_frame_active = true
+   mut sp = _dock_space(key)
+   mut any tree = sp.get("tree", 0)
+   sp["x"] = x
+   sp["y"] = y
+   sp["w"] = w
+   sp["h"] = h
+   ;; Lay out what is on screen; closed windows stay in the stored tree.
+   mut i = 0
+   mut int cnt = 0
+   _dk_leaves, _dk_splits = [], []
+   mut any shown_tree = _dk_filter(tree, "")
+   if is_list(shown_tree) { _dk_layout(shown_tree, _snap(x), _snap(y), _snap(w), _snap(h), "") }
+   def leaves, splits = _dk_leaves, _dk_splits
+   def tab_h = _dock_tab_h()
+   def on_chrome = _window_hovered == pseudo
+   mut chrome = []
+   ;; A floating window dragged by its title bar: preview the drop zone, and
+   ;; dock on release.
+   def moving = _active_window_move
+   mut drop_done = false
+   if moving != "" && !window_docked(moving) && _rect_hit(_mouse_x, _mouse_y, x, y, w, h) && (_mouse_drag_ready() || !_mouse_down0) {
+      ;; Drop targets: a cross of indicators on the panel under the pointer
+      ;; and one on each rim of the dockspace. Only a release on an indicator
+      ;; docks, so a window can also be left floating above the panels.
+      mut zone, target = "", ""
+      mut zx, zy, zw, zh = x, y, w, h
+      mut lx0, ly0, lw0, lh0 = x, y, w, h
+      mut have_leaf = !is_list(shown_tree)
+      mut over_spacer = false
+      mut li = 0
+      def int ln = leaves.len
+      while li + 5 < ln {
+         def int l1, l2 = li + 1, li + 2
+         def int l3, l4 = li + 3, li + 4
+         def lx, ly = float(leaves.get(li, 0.0)), float(leaves.get(l1, 0.0))
+         def lw, lh = float(leaves.get(l2, 0.0)), float(leaves.get(l3, 0.0))
+         if _rect_hit(_mouse_x, _mouse_y, lx, ly, lw, lh) {
+            def any leaf = leaves.get(l4, 0)
+            def any ids = leaf.get(2, 0)
+            target = to_str(ids.get(0, ""))
+            lx0, ly0, lw0, lh0 = lx, ly, lw, lh
+            have_leaf = true
+            over_spacer = _dk_is_spacer_id(target)
+         }
+         li += 6
+      }
+      _ov_depth += 1
+      mut k = 0
+      while k < 5 {
+         def zn = _dock_zone_name(k)
+         if have_leaf && (k == 0 || is_list(shown_tree)) && !(k == 0 && over_spacer) {
+            def tr = _dock_target_rect(zn, lx0, ly0, lw0, lh0)
+            def hot = _rect_hit(_mouse_x, _mouse_y, float(tr.get(0, 0.0)), float(tr.get(1, 0.0)), float(tr.get(2, 0.0)), float(tr.get(3, 0.0)))
+            if hot {
+               zone = zn
+               zx, zy, zw, zh = lx0, ly0, lw0, lh0
+            }
+            if _mouse_down0 { _dock_draw_target(tr, zn, hot) }
+         }
+         if k > 0 && is_list(shown_tree) {
+            def rr = _dock_rim_rect(zn, x, y, w, h)
+            def hot = _rect_hit(_mouse_x, _mouse_y, float(rr.get(0, 0.0)), float(rr.get(1, 0.0)), float(rr.get(2, 0.0)), float(rr.get(3, 0.0)))
+            if hot {
+               zone = zn
+               target = ""
+               zx, zy, zw, zh = x, y, w, h
+            }
+            if _mouse_down0 { _dock_draw_target(rr, zn, hot) }
+         }
+         k += 1
+      }
+      if zone != "" && _mouse_down0 {
+         def zr = _dock_zone_rect(zone, zx, zy, zw, zh)
+         _gui_rect_fast(float(zr.get(0, 0.0)), float(zr.get(1, 0.0)), float(zr.get(2, 0.0)), float(zr.get(3, 0.0)), _accent_soft_u32)
+         _gui_rect_outline_fast(float(zr.get(0, 0.0)), float(zr.get(1, 0.0)), float(zr.get(2, 0.0)), float(zr.get(3, 0.0)), _accent_u32)
+      }
+      _ov_depth -= 1
+      if zone != "" && !_mouse_down0 {
+         sp["tree"] = tree
+         _dock_spaces[key] = sp
+         dock_window(key, moving, target, zone)
+         sp = _dock_space(key)
+         tree = sp.get("tree", 0)
+         _active_window_move = ""
+         drop_done = true
+      }
+   }
+   if drop_done {
+      _dk_leaves, _dk_splits = [], []
+      shown_tree = _dk_filter(tree, "")
+      if is_list(shown_tree) { _dk_layout(shown_tree, _snap(x), _snap(y), _snap(w), _snap(h), "") }
+   }
+   mut leaves2, splits2 = leaves, splits
+   if drop_done { leaves2, splits2 = _dk_leaves, _dk_splits }
+   ;; Splitters.
+   i = 0
+   cnt = splits2.len
+   while i + 9 < cnt {
+      def int s1, s2 = i + 1, i + 2
+      def int s3, s4 = i + 3, i + 4
+      def int s5, s6 = i + 5, i + 6
+      def int s7, s8 = i + 7, i + 8
+      def int s9 = i + 9
+      def sx, sy = float(splits2.get(i, 0.0)), float(splits2.get(s1, 0.0))
+      def sw, sh = float(splits2.get(s2, 0.0)), float(splits2.get(s3, 0.0))
+      def dir, path = to_str(splits2.get(s4, "h")), to_str(splits2.get(s5, ""))
+      def sid = pseudo + "::split:" + path
+      def grab = _sx(3.0)
+      def hot = on_chrome && _active_widget_id == "" && _rect_hit(_mouse_x, _mouse_y, sx - grab, sy - grab, sw + grab * 2.0, sh + grab * 2.0)
+      if hot && _mouse_pressed0 { _active_widget_id = sid }
+      def held = _active_widget_id == sid && _mouse_down0
+      if hot || held {
+         _ensure_cursors()
+         _want_cursor(_cursor_resize)
+      }
+      if held {
+         def px0, py0 = float(splits2.get(s6, 0.0)), float(splits2.get(s7, 0.0))
+         def pw, ph = float(splits2.get(s8, 1.0)), float(splits2.get(s9, 1.0))
+         def r = dir == "h" ? ((_mouse_x - px0 - sw * 0.5) / max(1.0, pw - sw)) : ((_mouse_y - py0 - sh * 0.5) / max(1.0, ph - sh))
+         tree = _dk_set_ratio(tree, path, 0, r)
+      }
+      _gui_rect_fast(sx, sy, sw, sh, held ? _accent_u32 : (hot ? _text_faint_u32 : _border_u32))
+      chrome = chrome.append(sx - grab)
+      chrome = chrome.append(sy - grab)
+      chrome = chrome.append(sw + grab * 2.0)
+      chrome = chrome.append(sh + grab * 2.0)
+      i += 10
+   }
+   ;; Tab bars, and the rectangle each docked window gets below its bar.
+   i = 0
+   cnt = leaves2.len
+   mut undock_win = ""
+   mut close_win = ""
+   mut spacers = []
+   while i + 5 < cnt {
+      def int l1, l2 = i + 1, i + 2
+      def int l3, l4 = i + 3, i + 4
+      def lx, ly = float(leaves2.get(i, 0.0)), float(leaves2.get(l1, 0.0))
+      def lw, lh = float(leaves2.get(l2, 0.0)), float(leaves2.get(l3, 0.0))
+      def any leaf = leaves2.get(l4, 0)
+      def any ids = leaf.get(2, 0)
+      def int n = ids.len
+      mut active = int(float(leaf.get(1, 0.0)))
+      if active < 0 || active >= n { active = 0 }
+      if _dk_is_spacer_id(to_str(ids.get(0, ""))) {
+         ;; A spacer is a hole in the dockspace: no tab bar, no window, and the
+         ;; pointer passes through to whatever the app draws there.
+         spacers = spacers.append(to_str(ids.get(0, "")))
+         spacers = spacers.append([lx, ly, lw, lh])
+         i += 6
+         continue
+      }
+      _gui_rect_fast(lx, ly, lw, tab_h, _window_hdr_u32)
+      _gui_rect_fast(lx, ly + tab_h - 1.0, lw, 1.0, _border_u32)
+      chrome = chrome.append(lx)
+      chrome = chrome.append(ly)
+      chrome = chrome.append(lw)
+      chrome = chrome.append(tab_h)
+      ;; Tabs share the bar: up to 180 px each, and when there are more than
+      ;; fit at a comfortable width they all shrink so none is cut off.
+      mut tab_w = min(_sx(180.0), lw / float(n))
+      if tab_w < _sx(18.0) { tab_w = _sx(18.0) }
+      mut t = 0
+      while t < n {
+         def win = to_str(ids.get(t, ""))
+         mut st = _dock_window_state(win)
+         def tx = lx + float(t) * tab_w
+         def tid = pseudo + "::tab:" + win
+         def is_active = t == active
+         def closable = bool(st.get("closable", true))
+         def close_w = closable && is_active ? _sx(18.0) : 0.0
+         def hot = on_chrome && _rect_hit(_mouse_x, _mouse_y, tx, ly, tab_w, tab_h) && tx + tab_w <= lx + lw + 0.5
+         def close_hot = hot && close_w > 0.0 && _mouse_x >= tx + tab_w - close_w
+         if hot && _mouse_pressed0 {
+            if close_hot { close_win = win }
+            else {
+               _active_widget_id = tid
+               _focused_window = win
+               if !is_active { tree = _dk_set_active(tree, win) }
+            }
+         }
+         def held = _active_widget_id == tid && _mouse_down0
+         ;; Pulling a tab out of its bar undocks the window and hands the drag
+         ;; over to the ordinary window move.
+         if held && _mouse_drag_ready() && (_mouse_y < ly - _sx(6.0) || _mouse_y > ly + tab_h + _sx(6.0)) { undock_win = win }
+         if tx + tab_w <= lx + lw + 0.5 {
+            if is_active { _gui_rect_fast(tx, ly, tab_w, tab_h - 1.0, _focused_window == win ? _panel_hover_u32 : _panel_u32) }
+            elif hot { _gui_rect_fast(tx, ly, tab_w, tab_h - 1.0, _panel_u32) }
+            if is_active { _gui_rect_fast(tx, ly + tab_h - _sx(2.0), tab_w, _sx(2.0), _focused_window == win ? _accent_u32 : _text_faint_u32) }
+            _draw_text_ui_small_clipped(to_str(st.get("title", win)), tx + _sx(8.0), _text_center_y_for(_font_small_id(), ly, tab_h), is_active ? _text_u32 : _text_dim_u32, max(1.0, tab_w - _sx(14.0) - close_w), [tx, ly, max(1.0, tab_w - close_w), tab_h])
+            if close_w > 0.0 {
+               def ccx, ccy = _snap(tx + tab_w - close_w * 0.5 - _sx(2.0)), _snap(ly + tab_h * 0.5)
+               def arm = _sx(3.0)
+               def xcol = close_hot ? _danger_u32 : _text_dim_u32
+               _gui_diag(ccx - arm, ccy - arm, ccx + arm, ccy + arm, max(1.0, _sx(1.0)), xcol)
+               _gui_diag(ccx - arm, ccy + arm, ccx + arm, ccy - arm, max(1.0, _sx(1.0)), xcol)
+            }
+            if t > 0 { _gui_rect_fast(tx, ly + _sx(4.0), 1.0, tab_h - _sx(8.0), _border_u32) }
+         }
+         st["dock"] = key
+         st["dock_show"] = is_active
+         st["x"] = lx
+         st["y"] = ly + tab_h
+         st["w"] = lw
+         st["h"] = max(1.0, lh - tab_h)
+         st["collapsed"] = false
+         _window_store(st)
+         t += 1
+      }
+      i += 6
+   }
+   if close_win != "" {
+      ;; Closed, not undocked: the window keeps its place for show_window.
+      mut cst = _dock_window_state(close_win)
+      cst["open"] = false
+      _window_store(cst)
+      _window_closed_events[close_win] = true
+   }
+   if undock_win != "" {
+      tree = _dk_remove(tree, undock_win)
+      def fw = max(_min_win_w(), float(_dock_window_state(undock_win).get("float_w", 420.0)))
+      _dock_unmark(undock_win, _mouse_x - min(fw * 0.5, _sx(80.0)), _mouse_y - _title_h() * 0.5)
+      _active_widget_id = ""
+      _active_window_move = undock_win
+      _move_off_x, _move_off_y = min(fw * 0.5, _sx(80.0)), _title_h() * 0.5
+      _mouse_press_x, _mouse_press_y = _mouse_x - _sx(100.0), _mouse_y
+      _focused_window = undock_win
+      _window_order_touch(undock_win, true)
+   }
+   sp["tree"] = tree
+   sp["chrome"] = chrome
+   sp["spacers"] = spacers
+   _dock_spaces[key] = sp
+   _flush_rect_batch()
+   is_list(shown_tree)
+}
+
+fn dock_spacer_rect(any space, any name) list {
+   "Returns the rectangle [x, y, w, h] the dockspace left free for spacer `name` (an id starting with \"@\", docked like a window) at its last layout, or [] when it has none. An app draws its own content there: a viewport, a canvas."
+   def sp = _dock_space(to_str(space))
+   def any spacers = sp.get("spacers", 0)
+   if !is_list(spacers) { return [] }
+   def want = to_str(name)
+   mut i = 0
+   def int n = spacers.len
+   while i + 1 < n {
+      if to_str(spacers.get(i, "")) == want {
+         def int ri = i + 1
+         def any r = spacers.get(ri, 0)
+         if is_list(r) { return r }
+      }
+      i += 2
+   }
+   []
+}
+
+;; ---- layout persistence ---------------------------------------------------
+
+fn _dk_save(any n) str {
+   if _dk_is_leaf(n) {
+      def any ids = n.get(2, 0)
+      mut out = "{" + to_str(int(float(n.get(1, 0.0))))
+      mut i = 0
+      def int cnt = ids.len
+      while i < cnt {
+         out = out + " " + to_str(ids.get(i, ""))
+         i += 1
+      }
+      return out + "}"
+   }
+   if _dk_is_split(n) {
+      return "[" + to_str(n.get(1, "h")) + " " + _fmt_fixed(float(n.get(2, 0.5)), 4) + " " + _dk_save(n.get(3, 0)) + " " + _dk_save(n.get(4, 0)) + "]"
+   }
+   "-"
+}
+
+mut _dk_parse_pos = 0
+
+fn _dk_token(str s) str {
+   "Reads the next space-delimited word, stopping before a bracket."
+   def int n = s.len
+   while _dk_parse_pos < n && str.str_slice(s, _dk_parse_pos, _dk_parse_pos + 1) == " " { _dk_parse_pos += 1 }
+   def int start = _dk_parse_pos
+   while _dk_parse_pos < n {
+      def c = str.str_slice(s, _dk_parse_pos, _dk_parse_pos + 1)
+      if c == " " || c == "}" || c == "]" || c == "{" || c == "[" || c == "|" { break }
+      _dk_parse_pos += 1
+   }
+   str.str_slice(s, start, _dk_parse_pos)
+}
+
+fn _dk_parse(str s) any {
+   "Parses one node at _dk_parse_pos; returns 0 for an empty or malformed node."
+   def int n = s.len
+   while _dk_parse_pos < n && str.str_slice(s, _dk_parse_pos, _dk_parse_pos + 1) == " " { _dk_parse_pos += 1 }
+   if _dk_parse_pos >= n { return 0 }
+   def c = str.str_slice(s, _dk_parse_pos, _dk_parse_pos + 1)
+   if c == "{" {
+      _dk_parse_pos += 1
+      def active = str.atof(_dk_token(s))
+      mut ids = []
+      while _dk_parse_pos < n {
+         def w = _dk_token(s)
+         if w.len == 0 { break }
+         ids = ids.append(w)
+      }
+      if _dk_parse_pos < n && str.str_slice(s, _dk_parse_pos, _dk_parse_pos + 1) == "}" { _dk_parse_pos += 1 }
+      if ids.len == 0 { return 0 }
+      mut act = active
+      if act < 0.0 || act >= float(ids.len) { act = 0.0 }
+      return ["L", act, ids]
+   }
+   if c == "[" {
+      _dk_parse_pos += 1
+      def dir = _dk_token(s)
+      def ratio = str.atof(_dk_token(s))
+      def any a = _dk_parse(s)
+      def any b = _dk_parse(s)
+      while _dk_parse_pos < n && str.str_slice(s, _dk_parse_pos, _dk_parse_pos + 1) == " " { _dk_parse_pos += 1 }
+      if _dk_parse_pos < n && str.str_slice(s, _dk_parse_pos, _dk_parse_pos + 1) == "]" { _dk_parse_pos += 1 }
+      if !is_list(a) { return b }
+      if !is_list(b) { return a }
+      return ["S", dir == "v" ? "v" : "h", clamp(ratio, 0.08, 0.92), a, b]
+   }
+   if c == "-" { _dk_parse_pos += 1 }
+   0
+}
+
+fn dock_layout_save(any space) str {
+   "Returns the dockspace tree and every floating window rectangle as one line of text, for dock_layout_load."
+   _ensure_gui_state()
+   def key = to_str(space)
+   mut out = "dock1 " + _dk_save(_dock_space(key).get("tree", 0))
+   def keys = dict_keys(_windows)
+   mut i = 0
+   def int cnt = is_list(keys) ? keys.len : 0
+   while i < cnt {
+      def win = to_str(keys.get(i, ""))
+      def st = _windows.get(win, 0)
+      if is_dict(st) {
+         if !st.get("popup", false) && !_dk_is_spacer_id(win) && str.find(win, " ") < 0 && str.find(win, "|") < 0 {
+            def docked = to_str(st.get("dock", "")) != ""
+            def fw = docked ? float(st.get("float_w", 420.0)) : float(st.get("w", 420.0))
+            def fh = docked ? float(st.get("float_h", 320.0)) : float(st.get("h", 320.0))
+            out = out + " |" + win + " " + to_str(int(float(st.get("x", 0.0)))) + " " + to_str(int(float(st.get("y", 0.0)))) + " " + to_str(int(fw)) + " " + to_str(int(fh)) + " " + (st.get("open", true) ? "1" : "0")
+         }
+      }
+      i += 1
+   }
+   out
+}
+
+fn dock_layout_load(any space, str text) bool {
+   "Restores a layout written by dock_layout_save. Returns false, changing nothing, when the text is not a saved layout."
+   _ensure_gui_state()
+   def key = to_str(space)
+   if str.find(text, "dock1 ") != 0 { return false }
+   _dk_parse_pos = 6
+   def any tree = _dk_parse(text)
+   ;; Undock everything first, then mark what the loaded tree holds.
+   def any old = _dk_windows_into(_dock_space(key).get("tree", 0), [])
+   mut i = 0
+   mut int cnt = old.len
+   while i < cnt {
+      def oid = to_str(old.get(i, ""))
+      if !_dk_is_spacer_id(oid) {
+         mut ost = _dock_window_state(oid)
+         ost["dock"] = ""
+         ost["dock_show"] = true
+         _window_store(ost)
+      }
+      i += 1
+   }
+   ;; Floating rectangles: "|id x y w h open".
+   def int n = text.len
+   while _dk_parse_pos < n {
+      def c = str.str_slice(text, _dk_parse_pos, _dk_parse_pos + 1)
+      if c != "|" {
+         _dk_parse_pos += 1
+         continue
+      }
+      _dk_parse_pos += 1
+      def win = _dk_token(text)
+      def fx, fy = str.atof(_dk_token(text)), str.atof(_dk_token(text))
+      def fw, fh = str.atof(_dk_token(text)), str.atof(_dk_token(text))
+      def open = _dk_token(text) != "0"
+      if win.len > 0 && fw > 0.0 && fh > 0.0 {
+         mut st = _dock_window_state(win)
+         st["x"] = fx
+         st["y"] = fy
+         st["w"] = fw
+         st["h"] = fh
+         st["float_w"] = fw
+         st["float_h"] = fh
+         st["open"] = open
+         _window_store(st)
+      }
+   }
+   mut sp = _dock_space(key)
+   sp["tree"] = tree
+   _dock_spaces[key] = sp
+   def any now = _dk_windows_into(tree, [])
+   i = 0
+   cnt = now.len
+   while i < cnt {
+      def nid = to_str(now.get(i, ""))
+      if !_dk_is_spacer_id(nid) {
+         mut nst = _dock_window_state(nid)
+         nst["dock"] = key
+         nst["collapsed"] = false
+         _window_store(nst)
+      }
+      i += 1
+   }
+   true
 }
 
 #main {

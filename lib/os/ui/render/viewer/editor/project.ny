@@ -661,8 +661,8 @@ fn file_kind(str name) str {
 fn file_icon(dict e) str {
    if e.get("dir", false) { return "folder" }
    case to_str(e.get("kind", file_kind(to_str(e.get("name", ""))))){
-      "code" -> "codeedit"
-      "doc" -> "textfile"
+      "code" -> "code_edit"
+      "doc" -> "text_file"
       "data" -> "dictionary"
       "image" -> "asset_image"
       "model", "shader" -> "asset_shader"

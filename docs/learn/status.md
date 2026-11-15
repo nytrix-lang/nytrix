@@ -42,6 +42,7 @@ interactive execution, and [Browser](browser.md) for browser capabilities.
 
 | Area | Current boundary | Reference |
 | --- | --- | --- |
+| Memory safety checks | `--heap=safe` and `--mode=safe` enable guard pages and quarantine for user allocations. LLVM AddressSanitizer, MemorySanitizer, and ThreadSanitizer instrument emitted code and its runtime. UBSan checks emitted signed 64-bit arithmetic and null accesses; ownership analysis stays opt-in and bounded. | [Safety](safety.md), [Ownership](ownership.md) |
 | Types, traits, and overloads | Shared semantic checks precede backend selection; lowering still has target- and shape-specific limits. | [Types](../spec/types.md), [Traits](../spec/traits.md) |
 | Refinements and proofs | A bounded calculus; false and unknown proof obligations are not evidence. | [Types](../spec/types.md#proof-and-refinement-types), [Proofs](proofs.md) |
 | Preconditions and termination | `requires`, `decreases`, and `@total` have distinct checks; a measure alone is not a termination proof. | [Function contracts](../spec/functions.md#preconditions-and-termination-measures) |

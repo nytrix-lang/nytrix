@@ -1,0 +1,34 @@
+shape exr_default_sky_decode {
+  family "runtime-ui"
+  generator "embedded"
+  features [image exr]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect compile_and_run
+  expect_message "EXR-DEFAULT-SKY-DECODE-OK"
+  source ny <<'NY'
+use core
+use core.math.parse.img.exr as exr
+
+;; The bundled HDR sky decodes to tone-mapped RGBA8. On the LLVM route the
+;; half-float table used to decode to zero (black sky), and the conversion
+;; loop took ~2 s on the main thread. Skipped when OpenEXR is not installed.
+if !exr.available() {
+   print("EXR-DEFAULT-SKY-DECODE-OK")
+} else {
+   assert(exr._half_to_float(0x3c00) == 1.0 && exr._half_to_float(0x3800) == 0.5, "half floats decode")
+   def im = exr.load_path("etc/assets/images/DaySkyHDRI041B_4K_HDR.exr")
+   assert(is_dict(im), "default sky decodes")
+   def w = int(im.get("width", 0))
+   assert(w == 4096 && int(im.get("height", 0)) == 2048, "default sky size")
+   def d = im.get("data", 0)
+   def top = (50 * w + 1500) * 4
+   def low = (350 * w + 1500) * 4
+   assert(load8(d, top) == 110 && load8(d, top + 1) == 122 && load8(d, top + 2) == 131 && load8(d, top + 3) == 255,
+      "sky pixel near the top")
+   assert(load8(d, low) == 139 && load8(d, low + 1) == 149 && load8(d, low + 2) == 155 && load8(d, low + 3) == 255,
+      "sky pixel lower down")
+   print("EXR-DEFAULT-SKY-DECODE-OK")
+}
+NY
+}

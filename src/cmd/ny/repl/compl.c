@@ -11,8 +11,8 @@
 #endif
 #include "base/util.h"
 #include "cmd/ny/repl/types.h"
-#include "code/lang/parse/parser.h"
-#include "priv.h"
+#include "code/lang/ny/parser/parser.h"
+#include "cmd/ny/repl/priv.h"
 #include <ctype.h>
 #include <dirent.h>
 #include <stdio.h>

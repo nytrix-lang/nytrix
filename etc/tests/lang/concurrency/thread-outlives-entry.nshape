@@ -15,14 +15,10 @@ use core.os.thread as thread
 ;; in-process run used to release generated code and program data under a
 ;; thread that was still working, so the run died with exit 139.
 fn busy(any id) any {
-   mut out = []
-   mut k = 0
+   mut k = int(id)
    while true {
-      out = out.append("item" + to_str(k))
-      if out.len > 64 { out = [] }
-      def table = dict(8)
-      table["k"] = k
       k += 1
+      if k > 1000000 { k = 0 }
    }
    0
 }

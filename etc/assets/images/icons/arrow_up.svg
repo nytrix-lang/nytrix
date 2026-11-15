@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
+  <title id="title1">Arrow Up</title>
+  <desc id="desc1">Arrow Up editor icon. Original asset id: arrowup.</desc>
+  <defs id="defs1" />
+  <g transform="translate(2.0000 2.0000) scale(1.25000)" id="g1">
+    <path d="M 8,3 A 1,1 0 0 0 7.2929687,3.2929688 L 3.2929688,7.2929687 a 1,1 0 0 0 0,1.4140626 1,1 0 0 0 1.4140624,0 L 7,6.4140625 V 11 a 1,1 0 0 0 1,1 1,1 0 0 0 1,-1 V 6.4140625 l 2.292969,2.2929688 a 1,1 0 0 0 1.414062,0 1,1 0 0 0 0,-1.4140626 L 8.7070313,3.2929688 A 1,1 0 0 0 8.4589844,3.1894531 1.0001,1.0001 0 0 0 8.2480469,3.1035156 1,1 0 0 0 8,3 Z" id="path1" fill="#c6c6ca" />
+  </g>
+</svg>

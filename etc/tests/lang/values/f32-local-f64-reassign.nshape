@@ -1,0 +1,44 @@
+shape f32_local_f64_reassign {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "codegen", "float"]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect compile_and_run
+  expect_message "F32-LOCAL-F64-REASSIGN-OK"
+  source ny <<'NY'
+use core
+use core.math.bin
+
+;; `mut n = f32le(p)` is an f32 local. Dividing it by an f64 length keeps the
+;; slot f32. The quotient used to be stored without conversion, so a read
+;; after a use of `n` (or after an if-join) relabeled f32 bits as f64 and
+;; normalized vectors came out as zero.
+fn after_use(any p) f64 {
+   mut n = f32le(p, 4)
+   def len = sqrt(n * n)
+   def shown = to_str(n)
+   n /= len
+   n
+}
+
+fn normalize(any p) list {
+   mut x = f32le(p, 0)
+   mut y = f32le(p, 4)
+   mut z = f32le(p, 8)
+   def len = sqrt(x * x + y * y + z * z)
+   if len > 0.00001 { x /= len y /= len z /= len }
+   [x, y, z]
+}
+
+def p = malloc(16)
+store32_f32(p, 0.0, 0)
+store32_f32(p, 4.0, 4)
+store32_f32(p, 0.0, 8)
+assert(after_use(p) == 1.0, "an f32 local divided by an f64 keeps its value")
+def v = normalize(p)
+assert(v[0] == 0.0 && v[1] == 1.0 && v[2] == 0.0, "f32 components normalize across an if-join")
+free(p)
+print("F32-LOCAL-F64-REASSIGN-OK")
+NY
+}

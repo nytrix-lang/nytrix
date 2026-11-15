@@ -1,0 +1,35 @@
+shape ui_spec_env_prefilter {
+  family "runtime-ui"
+  generator "regression"
+  features [ui render environment ibl performance]
+  template ny-test-case
+  timeout 240
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect compile_and_run
+  expect_message "UI-SPEC-ENV-OK"
+  source ny <<'NY'
+use core
+use core.os.ui.render.texture as tex
+
+;; The GGX specular prefilter used to take about 3 minutes at the default
+;; 256-wide environment (per-sample list and box allocation), and its texel
+;; sampler returned near-black for bright texels.
+def im = tex.generate_env_image(1, 128, 64)
+def d = im.get("data", "")
+def bright = tex.image_sample_linear_rgb_uv(im, 0.5, 0.01)
+assert(float(bright.get(0, 0.0)) > 0.5, "bilinear sample of a bright sky texel is bright")
+def t0 = ticks()
+def slab = tex.generate_spec_env_slab(im, 128)
+def ms = (ticks() - t0) / 1000000
+assert(ms < 30000, "prefilter finishes quickly")
+assert(int(slab.get("levels", 0)) == 8, "mip chain down to 1x1")
+def px = slab.get("pixels", 0)
+;; Level 0 is an unfiltered resample of the source.
+def dr = abs((load8(px, 0) & 255) - (load8(d, 0) & 255))
+assert(dr <= 4, "level 0 tracks the source sky colour")
+;; The roughest levels stay inside the source's colour range, not black.
+def last = int(slab.get("bytes", 0)) - 4
+assert((load8(px, last) & 255) > 120, "roughest level keeps environment brightness")
+print("UI-SPEC-ENV-OK ms=" + to_str(ms))
+NY
+}

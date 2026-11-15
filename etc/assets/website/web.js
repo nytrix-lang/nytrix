@@ -483,7 +483,7 @@ function docIconName(route) {
     case "ny":
       return "book";
     case "todo": return "checklist";
-    case "contribute": return "git-branch";
+    case "contribute": return "git_branch";
     case "changelog":
     case "measurements":
       return "history";
@@ -561,7 +561,7 @@ function moduleIconName(route) {
   if (r.includes(".gpu") || r.includes(".vulkan") || r.includes(".opencl"))
     return "zap";
   if (r.includes(".parse.3d") || r.includes(".gltf") || r.includes(".obj"))
-    return "file3d";
+    return "file_3d";
   if (r.includes(".parse.img") || r.includes(".image") || r.includes(".font"))
     return "image";
   if (r.includes(".parse.syntax")) return "code";

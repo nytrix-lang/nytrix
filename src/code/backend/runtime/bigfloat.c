@@ -114,6 +114,8 @@ static bool mag_reserve(bf_mag_t *a, size_t cap) {
       return false;
     nc *= 2;
   }
+  if (nc > SIZE_MAX / sizeof(*a->d))
+    return false;
   uint64_t *p = a->d == a->local ? malloc(nc * sizeof(*p))
                                  : realloc(a->d, nc * sizeof(*p));
   if (!p)
@@ -461,12 +463,16 @@ static bool mag_div(bf_mag_t *q, bf_mag_t *r, const bf_mag_t *u,
   uint32_t qq_local[BF_DIV_LOCAL_WORDS];
   uint32_t vnorm_local[BF_DIV_LOCAL_WORDS];
   uint32_t unorm_local[BF_DIV_LOCAL_WORDS];
+  if (u->n > (SIZE_MAX - 4) / 2 || v->n > (SIZE_MAX - 3) / 2)
+    return false;
   size_t un_cap = u->n * 2 + 2;
   size_t vn_cap = v->n * 2 + 2;
-  bool local_workspace = un_cap + 2 <= BF_DIV_LOCAL_WORDS &&
-                         vn_cap + 1 <= BF_DIV_LOCAL_WORDS &&
-                         u->n * 2 + 2 <= BF_DIV_LOCAL_WORDS &&
-                         v->n * 2 <= BF_DIV_LOCAL_WORDS;
+  if (un_cap + 2 > SIZE_MAX / sizeof(*uu_local) ||
+      vn_cap + 1 > SIZE_MAX / sizeof(*vv_local))
+    return false;
+  bool local_workspace =
+      un_cap + 2 <= BF_DIV_LOCAL_WORDS && vn_cap + 1 <= BF_DIV_LOCAL_WORDS &&
+      u->n * 2 + 2 <= BF_DIV_LOCAL_WORDS && v->n * 2 <= BF_DIV_LOCAL_WORDS;
   uint32_t *uu = uu_local;
   uint32_t *vv = vv_local;
   uint32_t *qq = NULL;
@@ -499,6 +505,10 @@ static bool mag_div(bf_mag_t *q, bf_mag_t *r, const bf_mag_t *u,
     return false;
   }
   size_t qn = un - vn + 1;
+  if (qn == SIZE_MAX || qn + 1 > SIZE_MAX / sizeof(*qq_local) ||
+      vn > SIZE_MAX / sizeof(*vnorm_local) || un == SIZE_MAX ||
+      un + 1 > SIZE_MAX / sizeof(*unorm_local))
+    goto div_allocation_failed;
   if (local_workspace) {
     qq = qq_local;
     vnorm = vnorm_local;
@@ -512,14 +522,7 @@ static bool mag_div(bf_mag_t *q, bf_mag_t *r, const bf_mag_t *u,
     unorm = calloc(un + 1, sizeof(*unorm));
   }
   if (!qq || !vnorm || !unorm) {
-    if (!local_workspace) {
-      free(uu);
-      free(vv);
-      free(qq);
-      free(vnorm);
-      free(unorm);
-    }
-    return false;
+    goto div_allocation_failed;
   }
   unsigned s = bf_clz32(vv[vn - 1]);
   uint32_t carry = 0;
@@ -582,14 +585,7 @@ static bool mag_div(bf_mag_t *q, bf_mag_t *r, const bf_mag_t *u,
   }
   size_t qwords = (qn + 1) / 2;
   if (!mag_reserve(q, qwords + 1)) {
-    if (!local_workspace) {
-      free(uu);
-      free(vv);
-      free(qq);
-      free(vnorm);
-      free(unorm);
-    }
-    return false;
+    goto div_allocation_failed;
   }
   memset(q->d, 0, (qwords + 1) * sizeof(*q->d));
   for (size_t i = 0; i < qn; ++i)
@@ -600,6 +596,8 @@ static bool mag_div(bf_mag_t *q, bf_mag_t *r, const bf_mag_t *u,
     size_t rn = vn;
     uint32_t rr_local[BF_DIV_LOCAL_WORDS];
     uint32_t *rr = rr_local;
+    if (rn == SIZE_MAX || rn + 1 > SIZE_MAX / sizeof(*rr))
+      goto div_allocation_failed;
     bool rr_heap = rn + 1 > BF_DIV_LOCAL_WORDS;
     if (rr_heap)
       rr = calloc(rn + 1, sizeof(*rr));
@@ -608,14 +606,7 @@ static bool mag_div(bf_mag_t *q, bf_mag_t *r, const bf_mag_t *u,
     if (!rr || !mag_reserve(r, (rn + 1) / 2 + 1)) {
       if (rr_heap)
         free(rr);
-      if (!local_workspace) {
-        free(uu);
-        free(vv);
-        free(qq);
-        free(vnorm);
-        free(unorm);
-      }
-      return false;
+      goto div_allocation_failed;
     }
     if (!s) {
       memcpy(rr, unorm, rn * sizeof(*rr));
@@ -643,6 +634,16 @@ static bool mag_div(bf_mag_t *q, bf_mag_t *r, const bf_mag_t *u,
     free(unorm);
   }
   return true;
+
+div_allocation_failed:
+  if (!local_workspace) {
+    free(uu);
+    free(vv);
+    free(qq);
+    free(vnorm);
+    free(unorm);
+  }
+  return false;
 }
 
 static int64_t bf_alloc_zero(uint32_t precision) {

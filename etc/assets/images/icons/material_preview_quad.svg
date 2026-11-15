@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
+  <title id="title1">Material Preview Quad</title>
+  <desc id="desc1">Material Preview Quad editor icon. Original asset id: materialpreviewquad.</desc>
+  <defs id="defs2" />
+  <g transform="translate(2.0000 2.0000) scale(1.25000)" id="g2">
+    <path d="M 2.0839844,0.00390625 A 1.0001,1.0001 0 0 0 1,1 v 13 a 1.0001,1.0001 0 0 0 1.0839844,0.996094 l 11.9999996,-1 A 1.0001,1.0001 0 0 0 15,13 V 2 A 1.0001,1.0001 0 0 0 14.083984,1.0039062 Z M 3,2.0859375 13,2.9199219 V 12.080078 L 3,12.914063 Z" id="path1" fill="#c6c6ca" fill-opacity="0.8" />
+    <path fill="#c6c6ca" d="m2 14 12-1v-11l-12-1z" id="path2" />
+  </g>
+</svg>

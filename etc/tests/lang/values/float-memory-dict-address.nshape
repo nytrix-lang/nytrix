@@ -1,0 +1,37 @@
+shape float_memory_dict_address {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "codegen", "memory", "float"]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect compile_and_run
+  expect_message "FLOAT-MEMORY-DICT-ADDRESS-OK"
+  source ny <<'NY'
+use core
+use core.math.bin
+
+;; An address read back from a dict is a tagged `any` integer. The float
+;; memory helpers must decode it like load32/load8 do: load32_f32 used to
+;; read 0 and load64_f64 dereferenced addr*2+1, so glTF attributes stored at
+;; a non-zero buffer offset (normals, UVs) packed as zeros.
+fn read_f32(any p, int off) f64 { load32_f32(p, off) }
+
+def base = malloc(64)
+store32(base, 77, 8)
+store32_f32(base, 1.5, 12)
+store64_f64(base, 2.25, 16)
+def record = {"ptr": ptr_add(base, 8)}
+def any p = record.get("ptr", 0)
+assert(load32(p, 0) == 77, "integer load decodes a dict-held address")
+assert(load32_f32(p, 4) == 1.5, "f32 load decodes a dict-held address")
+assert(f32le(p, 4) == 1.5, "f32le decodes a dict-held address")
+assert(read_f32(record.get("ptr", 0), 4) == 1.5, "any formal decodes a dict-held address")
+assert(load64_f64(p, 8) == 2.25, "f64 load decodes a dict-held address")
+store32_f32(p, 3.5, 4)
+store64_f64(p, 4.75, 8)
+assert(load32_f32(base, 12) == 3.5, "f32 store decodes a dict-held address")
+assert(load64_f64(base, 16) == 4.75, "f64 store decodes a dict-held address")
+free(base)
+print("FLOAT-MEMORY-DICT-ADDRESS-OK")
+NY
+}

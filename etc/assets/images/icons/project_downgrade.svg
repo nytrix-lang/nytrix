@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
+  <title id="title1">Project Downgrade</title>
+  <desc id="desc1">Project Downgrade editor icon. Original asset id: projectdowngrade.</desc>
+  <defs id="defs2" />
+  <g transform="translate(2.0000 2.0000) scale(1.25000)" id="g2">
+    <path fill="none" d="M0 0H16V16H0z" id="path1" />
+    <path d="M 13.599609,4 A 1.4,1.4 0 0 0 12.609375,4.4101562 L 8,9.0195313 3.390625,4.4101562 a 1.4,1.4 0 0 0 -1.9804688,0 1.4,1.4 0 0 0 0,1.9804688 L 8,12.980469 14.589844,6.390625 a 1.4,1.4 0 0 0 0,-1.9804688 A 1.4,1.4 0 0 0 13.599609,4 Z" id="path2" fill="#c6c6ca" />
+  </g>
+</svg>

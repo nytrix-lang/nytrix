@@ -1,0 +1,84 @@
+shape editor_keymap_profiles {
+  family "runtime-ui"
+  generator "regression"
+  features [ui editor keymap emacs help]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit"
+  timeout 420
+  expect compile_and_run
+  expect_message "commands ok"
+  source ny <<'NY'
+use core
+use core.os.ui.render.viewer.editor.commands (rebind, unbind, user_bindings, parse_bindings, load_bindings_file, commands, all_commands, enabled, with_tag, by_id, id_for_chord, which_key, has_id, config, set_enabled, is_enabled, toggle, toggles, row_id, row_key, row_tag, keymap, set_keymap, keymap_names, bindings_for, describe_chord)
+
+assert(id_for_chord("C-SPC f s") == "save" && id_for_chord("C-c") == "copy" && id_for_chord("C-y") == "redo" && by_id("lsp-status").len > 0, "editor commands")
+mut cfg = config()
+cfg = set_enabled(cfg, "lsp", false)
+assert(which_key("C-SPC").len > 0 && with_tag("lsp", cfg).len == 0 && toggles().len > 0, "editor which-key")
+assert(set_keymap("emacs") && keymap() == "emacs", "emacs keymap selects")
+assert(id_for_chord("C-x C-s") == "save" && id_for_chord("C-y") == "paste" && id_for_chord("C-h k") == "describe-key", "emacs bindings")
+assert(id_for_chord("C-x") == "" && which_key("C-x").len >= 10 && which_key("C-h").len >= 4, "C-x and C-h are prefixes with which-key help")
+assert(describe_chord("C-x C-f").contains("open-file") && describe_chord("C-q").contains("not bound"), "describe-key text")
+assert(set_keymap("default") && id_for_chord("C-x") == "cut" && id_for_chord("C-y") == "redo", "default keymap restored")
+assert(!set_keymap("vim"), "unknown keymap rejected")
+
+;; Every chord in the Emacs profile maps to exactly one command.
+set_keymap("emacs")
+def rows = all_commands()
+mut seen = dict(256)
+mut dup = ""
+mut i = 0
+while i < rows.len {
+   def k = row_key(rows.get(i))
+   if seen.contains(k) && to_str(seen.get(k, "")) != row_id(rows.get(i)) { dup = k }
+   seen[k] = row_id(rows.get(i))
+   i += 1
+}
+assert(dup == "", "emacs keymap has no conflicting chord: " + dup)
+;; No chord is both bound and the prefix of a longer chord (that would make
+;; the longer one unreachable through the prefix timeout).
+mut shadow = ""
+mut a = 0
+while a < rows.len {
+   def ka = row_key(rows.get(a))
+   mut c = 0
+   while c < rows.len {
+      def kc = row_key(rows.get(c))
+      if kc.len > ka.len && kc.slice(0, ka.len + 1) == ka + " " { shadow = ka + " shadows " + kc }
+      c += 1
+   }
+   a += 1
+}
+assert(shadow == "", "emacs keymap prefix conflict: " + shadow)
+assert(id_for_chord("C-SPC") == "set-mark" && id_for_chord("C-x C-x") == "exchange-mark", "emacs mark bindings")
+assert(id_for_chord("C-c f s") == "save" && which_key("C-c").len > 0, "emacs leader lives on C-c")
+assert(id_for_chord("C-x b") == "switch-buffer" && id_for_chord("C-x C-b") == "switch-buffer", "emacs buffer switcher")
+assert(bindings_for("save").contains("C-x C-s"), "bindings_for lists Emacs save")
+set_keymap("default")
+;; User rebinding wins over the profile and can unbind.
+assert(rebind("C-q", "save") && id_for_chord("C-q") == "save", "user binding applies")
+assert(rebind("C-s", "find") && id_for_chord("C-s") == "find", "user binding overrides a profile chord")
+assert(unbind("C-s") && id_for_chord("C-s") == "", "unbind removes a chord")
+assert(!rebind("C-q", "no-such-command"), "unknown command rejected")
+def parsed = parse_bindings("# comment\nC-x C-k = kill-buffer\nbad line\nC-o =\n")
+assert(parsed.len == 2 && to_str(parsed.get(0).get(1, "")) == "kill-buffer" && to_str(parsed.get(1).get(1, "x")) == "", "binding file parser")
+assert(load_bindings_file("/nonexistent/keys") == -1, "missing file reported")
+
+;; Buffer switcher: the palette over an item list (C-x b).
+use core.os.ui.render.viewer.editor.palette as pal
+def buf_rows = [["README.md", "buffer:0", "current", "docs/README.md", "buffer"],
+                ["engine.ny", "buffer:1", "", "etc/projects/ui/engine.ny", "buffer"],
+                ["* scratch", "buffer:2", "", "scratch", "buffer"]]
+mut ps = pal.open_items(pal.state(), buf_rows, "buffers")
+assert(pal.is_open(ps) && pal.items_mode(ps) == "buffers", "item palette opens in buffers mode")
+assert(pal.state_matches(ps).len == 3, "an empty query lists every buffer")
+ps["query"] = "eng"
+def eng_hit = pal.state_matches(ps)
+assert(eng_hit.len == 1 && to_str(eng_hit.get(0).get(1)) == "buffer:1", "the query filters buffers by name")
+ps["query"] = "scr"
+assert(pal.state_matches(ps).len == 1 && to_str(pal.state_matches(ps).get(0).get(1)) == "buffer:2", "dirty buffers match their name")
+ps = pal.open(ps)
+assert(pal.items_mode(ps) == "" && pal.state_matches(ps).len > 3, "a plain open returns to the command list")
+print("commands ok")
+NY
+}

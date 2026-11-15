@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
+  <title id="title1">Theme Select Full</title>
+  <desc id="desc1">Theme Select Full editor icon. Original asset id: themeselectfull.</desc>
+  <defs id="defs2" />
+  <g transform="translate(2.0000 2.0000) scale(1.25000)" id="g2">
+    <g id="path1">
+      <path d="m 1.5,1.5 h 3 v 3 h -3 z m 0,5 h 3 v 3 h -3 z m 0,5 h 3 v 3 h -3 z m 5,-10 h 3 v 3 h -3 z m 0,5 h 3 v 3 h -3 z m 0,5 h 3 v 3 h -3 z" id="path3" fill="#c6c6ca" />
+      <path d="M 1,1 V 5 H 5 V 1 Z m 5,0 v 4 h 4 V 1 Z M 2,2 H 4 V 4 H 2 Z M 7,2 H 9 V 4 H 7 Z M 1,6 v 4 H 5 V 6 Z m 5,0 v 4 h 4 V 6 Z M 2,7 H 4 V 9 H 2 Z M 7,7 H 9 V 9 H 7 Z m -6,4 v 4 h 4 v -4 z m 5,0 v 4 h 4 v -4 z m -4,1 h 2 v 2 H 2 Z m 5,0 h 2 v 2 H 7 Z" id="path4" fill="#c6c6ca" />
+    </g>
+    <path fill="#c6c6ca" d="M11 2h3v2h-3zm0 5h3v2h-3zm0 5h3v2h-3z" id="path2" />
+  </g>
+</svg>

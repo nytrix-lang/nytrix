@@ -1,0 +1,32 @@
+shape sanitizer_user_access {
+  family "runtime-sanitize"
+  generator "regression"
+  features ["sanitize", "address", "aot", "memory-safety"]
+  template ny-test-case
+  flags "--native-only"
+  timeout 240
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os (env, file_remove, file_write, pid, run_capture, temp_dir)
+def ny = env("NYTRIX_NY_FULL_BIN")
+assert(is_str(ny) && ny.len > 0, "full compiler is available")
+def stem = temp_dir() + "/ny-user-asan-" + to_str(pid())
+
+fn check(str name, str body, str category) int {
+   def path = stem + "-" + name + ".ny"
+   assert(is_ok(file_write(path, "use core\n" + body)), "write " + name + " ASan probe")
+   defer { file_remove(path) }
+   def out = run_capture([ny, "--sanitize=address", "-O0", path], [], nil, false)
+   def text = to_str(out.get("stdout", "")) + to_str(out.get("stderr", ""))
+   assert(out.get("code", 127) == 134 && text.contains("AddressSanitizer: " + category) && text.contains("_ny_top_entry"),
+          "ASan detects the " + name + " access in emitted user code: " + text)
+   0
+}
+
+check("heap", "mut p = malloc_raw(16)\nstore8(p, 1, 16)\nfree_raw(p)\n0\n", "heap-buffer-overflow")
+check("stack", "fn run(int offset) int {\n   mut int cell = 0\n   def p = addr_of(cell)\n   store8(p, 1, offset)\n   cell\n}\nprint(run(8))\n0\n", "stack-buffer-overflow")
+check("global", "mut int cell = 0\ndef p = addr_of(cell)\nstore8(p, 1, 8)\nprint(cell)\n0\n", "global-buffer-overflow")
+0
+NY
+}

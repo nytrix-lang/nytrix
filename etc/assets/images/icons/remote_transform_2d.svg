@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
+  <title>Remote Transform 2D</title>
+  <desc>Remote Transform 2D icon.</desc>
+  <g transform="translate(2.0000 2.0000) scale(1.25000)">
+<path fill="#c6c6ca" d="M8 1a8 8 0 0 0-6.928 4 1 1 0 0 0 1.733 1 6 6 0 0 1 10.39 0 1 1 0 0 0 1.733-1A8 8 0 0 0 8 1zm0 4a4 4 0 0 0-3.863 2.965 1 1 0 0 0 1.931.517 2 2 0 0 1 3.864 0 1 1 0 0 0 1.931-.517A4 4 0 0 0 8 5zm0 4a1 1 0 0 0-1 1v1H4a4 4 0 0 0 8 0H9v-1a1 1 0 0 0-1-1z"/>
+  </g>
+</svg>

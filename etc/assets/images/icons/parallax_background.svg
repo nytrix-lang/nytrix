@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
+  <title id="title1">Parallax Background</title>
+  <desc id="desc1">Parallax Background editor icon. Original asset id: parallaxbackground.</desc>
+  <defs id="defs1" />
+  <g transform="translate(2.0000 2.0000) scale(1.25000)" id="g1">
+    <path d="M 2.5,1 C 1.6776486,1 1,1.6776486 1,2.5 v 11 C 1,14.322351 1.6776486,15 2.5,15 h 11 C 14.322351,15 15,14.322351 15,13.5 V 2.5 C 15,1.6776486 14.322351,1 13.5,1 Z m 0,1 h 11 C 13.785649,2 14,2.2143514 14,2.5 v 11 C 14,13.785649 13.785649,14 13.5,14 H 2.5 C 2.2143514,14 2,13.785649 2,13.5 V 2.5 C 2,2.2143514 2.2143514,2 2.5,2 Z" id="rect1" fill="#c6c6ca" />
+    <path fill="#c6c6ca" d="M7 5v6L4 8zm2 0v6l3-3z" id="path1" />
+  </g>
+</svg>

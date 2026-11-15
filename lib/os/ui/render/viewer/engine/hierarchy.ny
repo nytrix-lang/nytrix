@@ -125,7 +125,7 @@ fn _virtual_row_range(total_rows, row_step, overscan=3) {
 fn _draw_parts(idp, parts, win_w, list_h, max_rows, parity_lock, model_icon) int {
    gui.text_colored("Draw Parts", [0.78, 0.86, 0.88, 1.0])
    if !is_list(parts) || parts.len == 0 {
-      gui.text_colored("No draw parts available.", [0.68, 0.68, 0.68, 1.0])
+      gui.text_colored("No draw parts available.", gui.theme_color("text_dim"))
       return 0
    }
    def row_h = 32.0
@@ -154,7 +154,7 @@ fn _draw_parts(idp, parts, win_w, list_h, max_rows, parity_lock, model_icon) int
    }
    if last_row < total_rows { gui.spacer_px(float(total_rows - last_row) * row_step) }
    if parts.len > max_rows {
-      gui.text_colored("Part list truncated to " + to_str(int(max_rows)) + " rows.", [0.68, 0.68, 0.68, 1.0])
+      gui.text_colored("Part list truncated to " + to_str(int(max_rows)) + " rows.", gui.theme_color("text_dim"))
    }
    gui.end_scroll_area()
    total_rows
@@ -202,7 +202,7 @@ fn _draw_tree(idp, nodes, roots, win_w, tree_h, parity_lock, camera_icon, model_
       ri += 1
    }
    if drawn >= 180 {
-      gui.text_colored("Hierarchy truncated to 180 rows for UI responsiveness.", [0.68, 0.68, 0.68, 1.0])
+      gui.text_colored("Hierarchy truncated to 180 rows for UI responsiveness.", gui.theme_color("text_dim"))
    }
    gui.end_scroll_area()
    drawn
@@ -211,7 +211,7 @@ fn _draw_tree(idp, nodes, roots, win_w, tree_h, parity_lock, camera_icon, model_
 fn draw_body(idp, scene, win_w, win_h, compact=false, parity_lock=false, camera_icon=-1, model_icon=-1, node_icon=-1) int {
    "Draws the scene hierarchy and draw-part browser body."
    if !is_dict(scene) {
-      gui.text_colored("No loaded scene.", [0.68, 0.68, 0.68, 1.0])
+      gui.text_colored("No loaded scene.", gui.theme_color("text_dim"))
       gui.text("Load a model from Catalog to populate the hierarchy.")
       return 0
    }
@@ -223,7 +223,7 @@ fn draw_body(idp, scene, win_w, win_h, compact=false, parity_lock=false, camera_
    def parts = scene.get("parts", [])
    def part_count = _summary(nodes, parts, meshes, materials, animations)
    if nodes.len == 0 {
-      gui.text_colored("Scene has no glTF node list; showing draw parts instead.", [0.68, 0.68, 0.68, 1.0])
+      gui.text_colored("Scene has no glTF node list; showing draw parts instead.", gui.theme_color("text_dim"))
       return _draw_parts(idp, parts, win_w, _parts_h(win_h, compact), compact ? 260 : 360, parity_lock, model_icon)
    }
    def roots = _roots(g, nodes)

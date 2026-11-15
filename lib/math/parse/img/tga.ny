@@ -28,8 +28,9 @@ fn decode(str data) any {
       p += map_len * (map_entry_size / 8)
    }
    def tpx = w * h
-   def pix = init_str(malloc(tpx * 4 + 1), tpx * 4)
-   if !pix { return 0 }
+   def pix_raw = malloc(tpx * 4 + 1)
+   if !pix_raw { return 0 }
+   def pix = init_str(pix_raw, tpx * 4)
    if bpp == 24 && !flip_x && !flip_y {
       mut y = 0
       while y < h {
@@ -116,7 +117,9 @@ fn encode(dict img) str {
    def int w, h = int(img.get("width", 0)), int(img.get("height", 0))
    def d = img.get("data")
    def int ch = int(img.get("channels", 4))
-   def hdr = init_str(malloc(19), 18)
+   def hdr_raw = malloc(19)
+   if !hdr_raw { return "" }
+   def hdr = init_str(hdr_raw, 18)
    memset(hdr, 0, 18)
    store8(hdr, 2, 2)
    store8(hdr, w & 255, 12)
@@ -125,8 +128,14 @@ fn encode(dict img) str {
    store8(hdr, h >> 8, 15)
    store8(hdr, 32, 16)
    store8(hdr, 40, 17)
-   def out = init_str(malloc(w * h * 4 + 19), w * h * 4 + 18)
+   def out_raw = malloc(w * h * 4 + 19)
+   if !out_raw {
+      free(hdr)
+      return ""
+   }
+   def out = init_str(out_raw, w * h * 4 + 18)
    __copy_mem(out, hdr, 18)
+   free(hdr)
    mut y = 0
    while y < h {
       mut x = 0
@@ -163,7 +172,9 @@ fn save(dict img, str path) Result {
 #main {
    def w = 2
    def h = 2
-   def data = init_str(malloc(w * h * 4 + 1), w * h * 4)
+   def data_raw = malloc(w * h * 4 + 1)
+   if !data_raw { panic("TGA self-test allocation failed") }
+   def data = init_str(data_raw, w * h * 4)
    store8(data, 255, 0)  store8(data, 0, 1)    store8(data, 0, 2)    store8(data, 255, 3)
    store8(data, 0, 4)    store8(data, 255, 5)  store8(data, 0, 6)    store8(data, 255, 7)
    store8(data, 0, 8)    store8(data, 0, 9)    store8(data, 255, 10)  store8(data, 255, 11)

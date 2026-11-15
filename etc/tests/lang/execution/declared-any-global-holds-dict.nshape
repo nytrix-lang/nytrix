@@ -1,0 +1,36 @@
+shape test_declared_any_global_holds_dict {
+  family "runtime/execution"
+  generator "regression"
+  features ["ny", "test"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+;; `mut any g = 0` keeps tagged storage. Loads used to be stamped raw because
+;; of the integer initializer, so returning the global re-tagged a stored
+;; dict into an integer (the MIDI front end's shared client vanished).
+mut any CLIENT = 0
+fn make() any { {"id": 7} }
+fn client() any {
+   if !is_dict(CLIENT) { CLIENT = make() }
+   CLIENT
+}
+assert(is_dict(client()), "first call returns the dict")
+assert(is_dict(client()) && client().get("id", 0) == 7, "later calls keep it")
+
+;; Container initializers were integer-boxed into the any slot (2p+1).
+mut any PENDING = dict(8)
+mut any QUEUE = []
+fn push(str k) any {
+   PENDING[k] = 1
+   QUEUE = QUEUE.append(k)
+   0
+}
+push("a")
+push("b")
+assert(is_dict(PENDING) && PENDING.get("b", 0) == 1, "any dict global keeps writes")
+assert(is_list(QUEUE) && QUEUE.len == 2, "any list global keeps appends")
+NY
+}

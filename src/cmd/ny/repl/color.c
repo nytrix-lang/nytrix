@@ -7,8 +7,8 @@
 #endif
 #include "base/loader.h"
 #include "base/util.h"
-#include "code/lang/parse/lexer.h"
-#include "priv.h"
+#include "code/lang/ny/parser/lexer.h"
+#include "cmd/ny/repl/priv.h"
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>

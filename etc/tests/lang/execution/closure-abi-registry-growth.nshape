@@ -1,0 +1,49 @@
+shape closure_abi_registry_growth {
+  family "runtime/execution"
+  generator "embedded"
+  features [ny closures callbacks abi registry growth]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit -O0; --native-backend=llvm --jit --jit-engine=orc -O2"
+  timeout 90
+  expect compile_and_run
+  expect_message "CLOSURE-ABI-GROWTH-OK"
+  source ny <<'NY'
+use core
+
+fn make_int(int base) fnptr { return fn(int x) int { base + x } }
+fn make_bool(int base) fnptr { return fn(int x) bool { base == x } }
+fn make_float(f64 base) fnptr { return fn(int x) f64 { base + float(x) } }
+@effects(all)
+fn call_int(fnptr f, int x) int { f(x) }
+@effects(all)
+fn call_bool(fnptr f, int x) bool { f(x) }
+@effects(all)
+fn call_float(fnptr f, int x) f64 { f(x) }
+
+mut list<fnptr> integers = []
+mut list<fnptr> predicates = []
+mut list<fnptr> floats = []
+mut int i = 0
+while i < 4096 {
+   integers.append(make_int(i))
+   predicates.append(make_bool(i))
+   floats.append(make_float(float(i) + 0.25))
+   i += 1
+}
+;; Retain every closure, then revisit both old and recent entries after all
+;; registry growth. Odd raw integers and bool/f64 results have distinct ABIs.
+i = 4095
+while i >= 0 {
+   def integer = integers.get(i)
+   def predicate = predicates.get(i)
+   def floating = floats.get(i)
+   assert(call_int(integer, 1) == i + 1, "integer ABI survives growth")
+   assert(call_bool(predicate, i), "boolean true survives growth")
+   assert(!call_bool(predicate, i + 1), "boolean false survives growth")
+   assert(call_float(floating, 2) == float(i) + 2.25,
+          "floating ABI survives growth")
+   i -= 1
+}
+print("CLOSURE-ABI-GROWTH-OK")
+NY
+}

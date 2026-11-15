@@ -1,0 +1,62 @@
+shape ivelim_secondary_iv_accumulator {
+  family "codegen/loops/ivelim"
+  generator "regression"
+  features ["x86-64", "ivelim", "closed-form", "strength-reduce"]
+  template ny-test-case
+  flags "-O3 --native-only --native-backend=x86_64"
+  timeout 60
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+;; `s = s + i * c` is strength-reduced to a second induction variable before
+;; the closed-form pass runs. It must still fold to a formula, and the formula
+;; must agree with the loop for every runtime bound, including empty and
+;; negative ranges, odd bounds, and non-unit steps.
+fn lin(int n) int {
+   mut int s = 0
+   mut int i = 0
+   while i < n {
+      s = s + i * 2
+      i += 1
+   }
+   s
+}
+fn lin3(int n) int {
+   mut int s = 7
+   mut int i = 0
+   while i < n {
+      s = s + i * 3 + 5
+      i += 1
+   }
+   s
+}
+fn stepped(int n) int {
+   mut int s = 1
+   mut int i = 1
+   while i < n {
+      s = s + i * 4
+      i += 3
+   }
+   s
+}
+fn ref_lin(int n) int { n <= 0 ? 0 : n * (n - 1) }
+fn ref_lin3(int n) int { 7 + (n <= 0 ? 0 : 3 * (n * (n - 1) / 2) + 5 * n) }
+fn ref_stepped(int n) int {
+   ;; terms i = 1, 4, 7, ... < n, each contributing 4 * i
+   if n <= 1 { return 1 }
+   def t = (n - 1 + 2) / 3
+   1 + 4 * (t + 3 * (t * (t - 1) / 2))
+}
+def bounds = [0, 1, 2, 3, 4, 5, 7, 10, 99, 100, 101, 102, 103, 104, 1000, -1, -7, -100]
+mut k = 0
+while k < bounds.len {
+   def n = int(bounds.get(k, 0))
+   assert(lin(n) == ref_lin(n), "linear sum matches closed form for n=" + to_str(n) + ": " + to_str(lin(n)) + " vs " + to_str(ref_lin(n)))
+   assert(lin3(n) == ref_lin3(n), "scaled+offset sum for n=" + to_str(n) + ": " + to_str(lin3(n)) + " vs " + to_str(ref_lin3(n)))
+   assert(stepped(n) == ref_stepped(n), "non-unit step sum for n=" + to_str(n) + ": " + to_str(stepped(n)) + " vs " + to_str(ref_stepped(n)))
+   k += 1
+}
+assert(k == bounds.len, "all bounds checked")
+NY
+}

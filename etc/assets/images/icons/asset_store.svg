@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
+  <title id="title1">Asset Store</title>
+  <desc id="desc1">Asset Store editor icon. Original asset id: assetstore.</desc>
+  <defs id="defs3" />
+  <g transform="translate(2.0000 2.0000) scale(1.25000)" id="g3">
+    <g fill="none" id="g2">
+      <path d="M 7,1 V 7.5859375 L 4.7070312,5.2929687 3.2929688,6.7070312 7.2929687,10.707031 7.4003906,10.599609 a 1.0001,1.0001 0 0 0 1.3066407,0.107422 L 12.707031,6.7070312 11.292969,5.2929687 9,7.5859375 V 1 Z" id="path1" fill="#c6c6ca" />
+      <path d="m 2,9 a 1,1 0 0 0 -1,1 v 4 a 1.0001,1.0001 0 0 0 1,1 h 12 a 1.0001,1.0001 0 0 0 1,-1 v -4 a 1,1 0 0 0 -1,-1 1,1 0 0 0 -1,1 v 3 H 3 V 10 A 1,1 0 0 0 2,9 Z" id="path2" fill="#c6c6ca" />
+    </g>
+  </g>
+</svg>

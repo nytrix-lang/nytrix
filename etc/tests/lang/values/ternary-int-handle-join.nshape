@@ -1,0 +1,19 @@
+shape ternary_int_handle_join {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "codegen"]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect compile_and_run
+  expect_message "TERNARY-INT-HANDLE-JOIN-OK"
+  source ny <<'NY'
+use core
+def win = {"w": 1}
+fn pick(bool c) any { c ? 0 : win }
+def la = [1, 2, 3]
+def lb = [4, 5, 6]
+fn pl(bool c) list { c ? la : lb }
+assert(pick(true) == 0 && is_dict(pick(false)) && pl(false)[0] == 4 && pl(true)[0] == 1, "ternary joins an int with a handle")
+print("TERNARY-INT-HANDLE-JOIN-OK")
+NY
+}

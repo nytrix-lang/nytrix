@@ -56,43 +56,29 @@ static int64_t now_ns(void) {
     return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
 }
 
-typedef struct { int64_t *data; size_t len, capacity; } I64Vec;
-
-static int append(I64Vec *v, int64_t value) {
-    if (v->len == v->capacity) {
-        size_t next = v->capacity ? v->capacity * 2 : 8;
-        if (next < v->capacity || next > SIZE_MAX / sizeof(*v->data))
-            return 0;
-        int64_t *grown = realloc(v->data, next * sizeof(*v->data));
-        if (!grown) return 0;
-        v->data = grown;
-        v->capacity = next;
-    }
-    v->data[v->len++] = value;
-    return 1;
-}
-
-static void release(I64Vec *v) { free(v->data); }
-
 int main(void) {
     const int n = 20000;
-    int64_t *xs = malloc((size_t)n * sizeof(*xs));
-    if (!xs) return 2;
+    int64_t *xs = calloc((size_t)n, sizeof(*xs));
+    int64_t *mapped = calloc((size_t)n, sizeof(*mapped));
+    int64_t *reversed = calloc((size_t)n, sizeof(*reversed));
+    int64_t *chained = calloc((size_t)n * 2, sizeof(*chained));
+    if (!xs || !mapped || !reversed || !chained) return 2;
     for (int i = 0; i < n; i++) xs[i] = i;
-    I64Vec mapped = {0}, reversed = {0}, chained = {0};
     int64_t start = now_ns();
     for (int i = 0; i < n; i++) {
         int64_t value = xs[i] + 1;
-        if (!append(&mapped, value) || !append(&chained, value)) return 2;
+        mapped[i] = value;
+        chained[i] = value;
     }
     for (int i = 0; i < n; i++) {
-        int64_t value = mapped.data[n - 1 - i];
-        if (!append(&reversed, value) || !append(&chained, value)) return 2;
+        int64_t value = mapped[n - 1 - i];
+        reversed[i] = value;
+        chained[n + i] = value;
     }
     int64_t sum = 0;
-    for (size_t i = 0; i < chained.len; i++) sum += chained.data[i];
+    for (int i = 0; i < n * 2; i++) sum += chained[i];
     int64_t end = now_ns();
-    free(xs); release(&mapped); release(&reversed); release(&chained);
+    free(xs); free(mapped); free(reversed); free(chained);
     printf("checksum=%lld\n", (long long)sum);
     if (end <= start) end = start + 1;
     printf("elapsed_ns=%lld\n", (long long)(end - start));

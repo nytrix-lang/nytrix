@@ -21,7 +21,9 @@ fn _g_sb(any data, int p) dict {
       total += sz
       q += sz
    }
-   def out = init_str(malloc(total + 1), total)
+   def out_raw = malloc(total + 1)
+   if !out_raw { return nil }
+   def out = init_str(out_raw, total)
    mut w = 0
    mut q2 = p
    while q2 < n {
@@ -52,7 +54,9 @@ fn _g_lzw_dec(any comp, int mcs, int olen) any {
    mut op = 0
    mut guard = 0
    def guard_limit = comp.len * 16 + olen * 32 + 8192
-   def out = init_str(malloc(olen + 1), olen)
+   def out_raw = malloc(olen + 1)
+   if !out_raw { return 0 }
+   def out = init_str(out_raw, olen)
    memset(out, 0, olen)
    while op < olen {
       guard += 1
@@ -117,7 +121,9 @@ fn _g_lzw_dec(any comp, int mcs, int olen) any {
 }
 
 fn _g_di(any src, int w, int h) str {
-   def out = init_str(malloc(w * h + 1), w * h)
+   def out_raw = malloc(w * h + 1)
+   if !out_raw { return "" }
+   def out = init_str(out_raw, w * h)
    memset(out, 0, w * h)
    mut p = 0
    def sta, ste = [0, 4, 2, 1], [8, 8, 4, 2]
@@ -142,13 +148,17 @@ fn _g_di(any src, int w, int h) str {
 }
 
 fn _g_new_canvas(int bytes) str {
-   def canv = init_str(malloc(bytes + 1), bytes)
+   def canv_raw = malloc(bytes + 1)
+   if !canv_raw { return "" }
+   def canv = init_str(canv_raw, bytes)
    memset(canv, 0, bytes)
    canv
 }
 
 fn _g_copy_canvas(any canv, int bytes) str {
-   def out = init_str(malloc(bytes + 1), bytes)
+   def out_raw = malloc(bytes + 1)
+   if !out_raw { return "" }
+   def out = init_str(out_raw, bytes)
    memcpy(out, canv, bytes)
    out
 }
@@ -207,6 +217,7 @@ fn decode_frames(any data) any {
    }
    def canvas_bytes = w * h * 4
    mut canv = _g_new_canvas(canvas_bytes)
+   if canv.len < canvas_bytes { return 0 }
    mut frames = []
    mut trans_idx = -1
    mut disposal = 0
@@ -262,10 +273,16 @@ fn decode_frames(any data) any {
       p = blocks_res.get("next")
       mut idx_data = _g_lzw_dec(blocks_res.get("blob"), mcs, (fw * fh))
       if is_int(idx_data) { return 0 }
-      if ffl & 64 { idx_data = _g_di(idx_data, fw, fh) }
+      if ffl & 64 {
+         idx_data = _g_di(idx_data, fw, fh)
+         if idx_data.len < fw * fh { return 0 }
+      }
       def restore_prev = disposal == 3 ? _g_copy_canvas(canv, canvas_bytes) : 0
+      if disposal == 3 && restore_prev.len < canvas_bytes { return 0 }
       _g_draw_indexed_frame(data, canv, w, h, fx, fy, fw, fh, cp_addr, trans_idx, idx_data)
-      frames = frames.append({"data": _g_copy_canvas(canv, canvas_bytes), "delay": delay_cs, "x": fx, "y": fy, "w": fw, "h": fh})
+      def frame_data = _g_copy_canvas(canv, canvas_bytes)
+      if frame_data.len < canvas_bytes { return 0 }
+      frames = frames.append({"data": frame_data, "delay": delay_cs, "x": fx, "y": fy, "w": fw, "h": fh})
       if disposal == 2 {
          _g_clear_rect(canv, w, h, fx, fy, fw, fh)
       } elif disposal == 3 && restore_prev {
@@ -351,7 +368,9 @@ fn _gif_palette_info(any d, int w, int h, int ch) list {
 }
 
 fn _gif_index_buffer(any d, int w, int h, int ch, any col_map, int trans_idx_enc, bool has_trans_enc, bool use_fix) any {
-   def idx_buf = init_str(malloc(w * h + 1), w * h)
+   def idx_raw = malloc(w * h + 1)
+   if !idx_raw { return 0 }
+   def idx_buf = init_str(idx_raw, w * h)
    mut iC2 = 0
    while iC2 < (w * h) {
       def off_c2 = iC2 * ch
@@ -543,6 +562,7 @@ fn encode(any img) any {
    def has_trans_enc = palette.get(4)
    def use_fix = palette.get(5)
    def idx_buf = _gif_index_buffer(d, w, h, ch, col_map, trans_idx_enc, has_trans_enc, use_fix)
+   if !is_str(idx_buf) || idx_buf.len < w * h { return "" }
    def out_l = _gif_lzw_encode(idx_buf, w * h)
    _gif_emit_file(out_l, w, h, pal_list, n_cols, has_trans_enc, trans_idx_enc, use_fix)
 }

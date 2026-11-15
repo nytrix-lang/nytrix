@@ -38,7 +38,7 @@ operator Circle + Circle: Circle = add
 ## Where the compiler checks this
 
 After Hindley-Milner typing, the **trait validation** stage runs before ABI
-checks (`src/code/lang/types/pipeline/emit.c`, stage `NY_TYPE_PIPELINE_STAGE_TRAIT`).
+checks (`src/code/lang/ny/semantics/pipeline/emit.c`, stage `NY_TYPE_PIPELINE_STAGE_TRAIT`).
 That stage:
 
 1. Validates every **`operator … = target`** declaration (target exists, two
@@ -57,7 +57,7 @@ prepare**, each **`impl`** registers its owner type and attached method
 signatures.
 
 If trait validation fails, the driver reports **`trait validation failed`**
-(`src/code/lang/pipeline/init.c`).
+(`src/code/lang/ny/pipeline/init.c`).
 
 See [Pipeline](pipeline.md#trait-validation) and
 [Implementation status](../learn/status.md).
@@ -87,7 +87,7 @@ assert(Shape.Circle(5).method_area() == 25, "ADT method call")
 ```
 
 - The parser stores methods as qualified names like `Shape.method_area`
-  (`qualify_attached_method` in `src/code/lang/parse/stmt/core.c`).
+  (`qualify_attached_method` in `src/code/lang/ny/parser/stmt/core.c`).
 - Call sites use **`value.method_name(...)`** (member call / receiver syntax).
 - An **`impl`** body may contain **`fn`**, **`operator`**, and **`law`** entries.
 

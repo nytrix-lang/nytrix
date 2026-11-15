@@ -1,1 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><path fill="none" stroke="#f2f2f2" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="m3 8 5 4 5-4"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
+  <title id="title1">Collapse</title>
+  <desc id="desc1">Collapse editor icon. Original asset id: collapse.</desc>
+  <defs id="defs1" />
+  <g transform="translate(2.0000 2.0000) scale(1.25000)" id="g1">
+    <path d="M 3.625,7.21875 A 1,1 0 0 0 2.21875,7.375 1,1 0 0 0 2.375,8.78125 l 5,4 a 1.0001,1.0001 0 0 0 1.25,0 l 5,-4 A 1,1 0 0 0 13.78125,7.375 1,1 0 0 0 12.375,7.21875 l -4.375,3.5 z" id="path1" fill="#c6c6ca" />
+  </g>
+</svg>

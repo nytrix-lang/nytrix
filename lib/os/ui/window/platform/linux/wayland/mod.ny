@@ -15,7 +15,7 @@ use core.os.ui.window.platform.api
 use core.os.ui.window.platform.linux.x11.keymap as x11_keymap
 use core.os.ui.window.platform.linux.joystick as linux_joystick
 use core.common as common
-use core.os.ui.debug as ui_profile
+use core.os.ui.debug as ui_debug
 use core.os.ffi as ffi
 
 #linux {
@@ -81,9 +81,9 @@ use core.os.ffi as ffi
       fn munmap(ptr addr, u64 length) i32
       fn wayland_pipe(ptr fds) i32 as "pipe"
       fn wayland_poll(ptr fds, u64 nfds, i32 timeout) i32 as "poll"
-      fn read(i32 fd, ptr buf, u64 count) i64
+      fn wl_read(i32 fd, ptr buf, u64 count) i64 as "read"
       fn strdup(ptr s) ptr
-      fn write(i32 fd, ptr buf, u64 count) i64
+      fn wl_write(i32 fd, ptr buf, u64 count) i64 as "write"
    }
 } #else {
    fn wl_proxy_marshal_flags(..._args) any {
@@ -270,7 +270,7 @@ use core.os.ffi as ffi
       "Polls poll."
       0
    }
-   fn read(..._args) any {
+   fn wl_read(..._args) any {
       "Reads read."
       0
    }
@@ -278,19 +278,19 @@ use core.os.ffi as ffi
       "Runs the strdup operation."
       0
    }
-   fn write(..._args) any {
+   fn wl_write(..._args) any {
       "Writes write."
       0
    }
 }
 
-fn _is_debug() bool { ui_profile.debug_enabled() }
+fn _is_debug() bool { ui_debug.debug_enabled() }
 
-fn _dbg(any msg) any { if _is_debug() { ui_profile.print_text("[wayland] " + msg) } }
+fn _dbg(any msg) any { if _is_debug() { ui_debug.print_text("[wayland] " + msg) } }
 
-fn _dbgu(any msg) any { if _is_debug() { ui_profile.print_text("[wayland:v] " + msg) } }
+fn _dbgu(any msg) any { if _is_debug() { ui_debug.print_text("[wayland:v] " + msg) } }
 
-fn _dbg_err(any msg) any { if _is_debug() { ui_profile.print_text("[wayland:ERROR] " + msg) } }
+fn _dbg_err(any msg) any { if _is_debug() { ui_debug.print_text("[wayland:ERROR] " + msg) } }
 mut any _wayland_globals = nil
 
 fn set_globals(any g) any {
@@ -406,7 +406,8 @@ def _WG_PENDING_X = 544
 def _WG_PENDING_Y = 548
 def _WG_PENDING_BUTTON = 552
 def _WG_PENDING_ACTION = 556
-def _WG_SIZE = 560
+def _WG_REPEAT_CHAR = 560
+def _WG_SIZE = 568
 def _WRS_HANDLE = 0
 def _WRS_WIDTH = 8
 def _WRS_HEIGHT = 16
@@ -1583,9 +1584,20 @@ fn _create_shell_objects(any win) any {
       return win
    }
    def xdg_surface_listener = zalloc(8)
+   if !xdg_surface_listener {
+      destroy_proxy(toplevel)
+      destroy_proxy(xdg_surface)
+      return win
+   }
    store64_h(xdg_surface_listener, _xdg_surface_handle_configure, 0)
    wl_proxy_add_listener(xdg_surface, xdg_surface_listener, resize_state)
    def toplevel_listener = zalloc(16)
+   if !toplevel_listener {
+      destroy_proxy(toplevel)
+      destroy_proxy(xdg_surface)
+      free(xdg_surface_listener)
+      return win
+   }
    store64_h(toplevel_listener, _xdg_toplevel_handle_configure, 0)
    store64_h(toplevel_listener, _xdg_toplevel_handle_close, 8)
    wl_proxy_add_listener(toplevel, toplevel_listener, resize_state)
@@ -1603,8 +1615,10 @@ fn _create_shell_objects(any win) any {
             if dec_listener {
                store64_h(dec_listener, _decoration_handle_configure, 0)
                wl_proxy_add_listener(decoration, dec_listener, handle)
+            } else {
+               destroy_proxy(decoration)
             }
-            _wl_proxy_marshal_u(decoration, 1, 2)
+            if dec_listener { _wl_proxy_marshal_u(decoration, 1, 2) }
          }
       }
    }
@@ -1635,6 +1649,11 @@ fn create_basic_window(any globals, str title, int width, int height, str app_id
    if !surface { _dbg_err("failed to create surface") return 0 }
    _dbg("  surface=0x" + str.to_hex(surface))
    def wl_surface_listener = zalloc(16)
+   if !wl_surface_listener {
+      destroy_proxy(surface)
+      _dbg_err("failed to allocate surface listener")
+      return 0
+   }
    store64_h(wl_surface_listener, _surface_handle_enter, 0)
    store64_h(wl_surface_listener, _surface_handle_leave, 8)
    wl_proxy_add_listener(surface, wl_surface_listener, surface)
@@ -1656,28 +1675,36 @@ fn create_basic_window(any globals, str title, int width, int height, str app_id
       def ti = _create_text_input(state_gi, seat)
       if ti {
          def ti_listener = zalloc(48)
-         store64_h(ti_listener, _text_input_handle_enter, 0)
-         store64_h(ti_listener, _text_input_handle_leave, 8)
-         store64_h(ti_listener, _text_input_handle_preedit, 16)
-         store64_h(ti_listener, _text_input_handle_commit, 24)
-         store64_h(ti_listener, _text_input_handle_delete_surrounding, 32)
-         store64_h(ti_listener, _text_input_handle_done, 40)
-         wl_proxy_add_listener(ti, ti_listener, surface)
-         win = win.set("text_input", ti)
-         win = win.set("text_input_listener", ti_listener)
+         if ti_listener {
+            store64_h(ti_listener, _text_input_handle_enter, 0)
+            store64_h(ti_listener, _text_input_handle_leave, 8)
+            store64_h(ti_listener, _text_input_handle_preedit, 16)
+            store64_h(ti_listener, _text_input_handle_commit, 24)
+            store64_h(ti_listener, _text_input_handle_delete_surrounding, 32)
+            store64_h(ti_listener, _text_input_handle_done, 40)
+            wl_proxy_add_listener(ti, ti_listener, surface)
+            win = win.set("text_input", ti)
+            win = win.set("text_input_listener", ti_listener)
+         } else {
+            destroy_proxy(ti)
+         }
       }
       def fs = _create_fractional_scale(state_gi, surface)
       if fs {
          def fs_listener = zalloc(8)
-         store64_h(fs_listener, _fractional_scale_handle_preferred_scale, 0)
-         wl_proxy_add_listener(fs, fs_listener, surface)
-         win = win.set("fractional_scale", fs)
-         win = win.set("fractional_scale_listener", fs_listener)
+         if fs_listener {
+            store64_h(fs_listener, _fractional_scale_handle_preferred_scale, 0)
+            wl_proxy_add_listener(fs, fs_listener, surface)
+            win = win.set("fractional_scale", fs)
+            win = win.set("fractional_scale_listener", fs_listener)
+         } else {
+            destroy_proxy(fs)
+         }
       }
    }
    if !is_dict(_windows) { _windows = dict(8) }
    _windows = dict_set(_windows, int(surface), win)
-   if ui_profile.env_truthy_cached("NY_WAYLAND_KEY_TRACE") {
+   if ui_debug.env_truthy_cached("NY_WAYLAND_KEY_TRACE") {
       print("[wayland:registry] create=" + to_str(int(surface)) + " keys=" + to_str(dict_keys(_windows)))
    }
    _wl_proxy_marshal_void(surface, WL_SURFACE_COMMIT)
@@ -1933,7 +1960,7 @@ fn _ensure_data_source_iface() any {
 fn _data_source_send(any data, any source, any mime_type, any fd) any {
    if !_clipboard_text || !fd { close(int(fd)) return 0 }
    def n = _clipboard_text.len
-   if n > 0 { write(int(fd), cstr(_clipboard_text), int(n)) }
+   if n > 0 { wl_write(int(fd), cstr(_clipboard_text), int(n)) }
    close(int(fd))
 }
 
@@ -2006,7 +2033,7 @@ fn _data_device_drop(any data, any device) any {
    def buf = malloc(4096)
    if !buf { close(rfd) return 0 }
    memset(buf, 0, 4096)
-   def n = read(rfd, buf, 4095)
+   def n = wl_read(rfd, buf, 4095)
    close(rfd)
    if n > 0 {
       def text = to_str(buf)
@@ -2103,10 +2130,10 @@ fn get_clipboard(any win) str {
    def buf = malloc(16384)
    if !buf { close(rfd) return "" }
    mut total = 0
-   mut chunk = read(int(rfd), buf + total, 16384 - total)
+   mut chunk = wl_read(int(rfd), buf + total, 16384 - total)
    while chunk > 0 && total < 16383 {
       total += chunk
-      chunk = read(int(rfd), buf + total, 16384 - total - 1)
+      chunk = wl_read(int(rfd), buf + total, 16384 - total - 1)
    }
    close(rfd)
    store8(buf, 0, total)
@@ -2888,6 +2915,7 @@ fn _keyboard_handle_leave(ptr data, ptr keyboard, u32 serial, ptr surface) any {
    store64_h(data, 0, _WG_KEYBOARD_FOCUS)
    store64_h(data, 0, _WG_REPEAT_KEY)
    store64_h(data, 0, _WG_REPEAT_SCANCODE)
+   store64_h(data, 0, _WG_REPEAT_CHAR)
    mut win = _windows.get(int(surface), 0)
    if win {
       def ks_old = win.get("key_states", 0)
@@ -2902,11 +2930,17 @@ fn _keyboard_handle_leave(ptr data, ptr keyboard, u32 serial, ptr surface) any {
    }
 }
 
+fn _wayland_modifier_key(int nk) bool {
+   nk == KEY_LEFT_SHIFT || nk == KEY_RIGHT_SHIFT || nk == KEY_LEFT_CONTROL || nk == KEY_RIGHT_CONTROL ||
+   nk == KEY_LEFT_ALT || nk == KEY_RIGHT_ALT || nk == KEY_LEFT_SUPER || nk == KEY_RIGHT_SUPER ||
+   nk == KEY_CAPS_LOCK || nk == KEY_NUM_LOCK || nk == KEY_SCROLL_LOCK
+}
+
 fn _keyboard_handle_key(ptr data, ptr keyboard, u32 serial, u32 time, u32 key, u32 state) any {
    if !data { return 0 }
    def surface = load64_h(data, _WG_KEYBOARD_FOCUS)
    mut win = _windows.get(int(surface), 0)
-   if ui_profile.env_truthy_cached("NY_WAYLAND_KEY_TRACE") {
+   if ui_debug.env_truthy_cached("NY_WAYLAND_KEY_TRACE") {
       print("[wayland:key] surface=" + to_str(surface) + " known=" + to_str(!!win) +
          " raw=" + to_str(int(key)) + " state=" + to_str(int(state)) + " keys=" + to_str(dict_keys(_windows)))
    }
@@ -2920,7 +2954,7 @@ fn _keyboard_handle_key(ptr data, ptr keyboard, u32 serial, u32 time, u32 key, u
       def sym = xkb_state_key_get_one_sym(xkb_state, int(scancode + 8))
       nk = x11_keymap.translate_keysym(sym)
    }
-   if ui_profile.env_truthy_cached("NY_WAYLAND_KEY_TRACE") {
+   if ui_debug.env_truthy_cached("NY_WAYLAND_KEY_TRACE") {
       print("[wayland:key] translated=" + to_str(nk) + " logical_state=" + to_str(key_state))
    }
    mut ks = win.get("key_states", dict(64))
@@ -2937,8 +2971,11 @@ fn _keyboard_handle_key(ptr data, ptr keyboard, u32 serial, u32 time, u32 key, u
    }
    _push_event(win, kind, ev_data)
    def rate = load64_h(data, _WG_REPEAT_RATE)
+   ;; Modifiers and lock keys never auto-repeat.
+   def bool repeatable = nk != 0 && !_wayland_modifier_key(nk)
    if rate > 0 {
-      if key_state == 1 {
+      if key_state == 1 && repeatable {
+         store64_h(data, 0, _WG_REPEAT_CHAR)
          def int now_ns = __monotonic_ns_raw()
          store64_h(data, nk, _WG_REPEAT_KEY)
          store64_h(data, scancode, _WG_REPEAT_SCANCODE)
@@ -2953,7 +2990,12 @@ fn _keyboard_handle_key(ptr data, ptr keyboard, u32 serial, u32 time, u32 key, u
       if !utf8_buf { return 0 }
       memset(utf8_buf, 0, 8)
       def nbytes = xkb_state_key_get_utf8(xkb_state, int(scancode + 8), utf8_buf, 8)
-      if nbytes > 0 {
+      ;; Control, Alt, and Super chords are shortcuts, not text: emitting a
+      ;; character for them inserted a letter whenever the editor handled
+      ;; Alt+x or Super+key. AltGr is a level shift, not the Alt modifier.
+      def int char_mods = _get_xkb_mods(data)
+      def bool chord = band(char_mods, bor(MOD_CONTROL, bor(MOD_ALT, MOD_SUPER))) != 0
+      if nbytes > 0 && !chord {
          def b0 = load8(utf8_buf, 0)
          if b0 >= 0x20 && b0 != 0x7f {
             mut cp = 0
@@ -2978,6 +3020,7 @@ fn _keyboard_handle_key(ptr data, ptr keyboard, u32 serial, u32 time, u32 key, u
                char_data = char_data.set("mod", mods)
                char_data = char_data.set("mods", mods)
                _push_event(win, EVENT_KEY_CHAR, char_data)
+               if repeatable && load64_h(data, _WG_REPEAT_KEY) == nk { store64_h(data, cp, _WG_REPEAT_CHAR) }
             }
          }
       }
@@ -3017,6 +3060,16 @@ fn _synthesize_key_repeat(any win, any state) any {
    mut int emitted = 0
    while fire_ns <= now_ns && emitted < 4 {
       _push_event(win, EVENT_KEY_PRESSED, ev_data)
+      ;; Held printable keys repeat their text as well as the key event; the
+      ;; editor inserts from KEY_CHAR, so a repeat without it typed nothing.
+      def int repeat_cp = int(load64_h(state, _WG_REPEAT_CHAR))
+      if repeat_cp > 0 {
+         mut char_data = dict(8)
+         char_data = char_data.set("char", repeat_cp)
+         char_data = char_data.set("mod", mods)
+         char_data = char_data.set("mods", mods)
+         _push_event(win, EVENT_KEY_CHAR, char_data)
+      }
       store64_h(state, fire_ns, _WG_REPEAT_LAST_NS)
       fire_ns += interval_ns
       emitted += 1
@@ -3687,10 +3740,10 @@ fn set_input_mode(any win, int mode, int value) dict {
          def constraints = globals.get("pointer_constraints", 0)
          if constraints && pointer && !next_win.get("confined_pointer", 0) {
             _init_unstable_interfaces()
-            def conf_listener = zalloc(16)
+            def conf_listener = zalloc_or_panic(16, "wayland confined pointer listener")
             store64_h(conf_listener, _confined_pointer_handle_confined, 0)
             store64_h(conf_listener, _confined_pointer_handle_unconfined, 8)
-            def conf_data = zalloc(8)
+            def conf_data = zalloc_or_panic(8, "wayland confined pointer state")
             store64_h(conf_data, surface, 0)
             def confined_ptr = wl_proxy_marshal_flags_lock_ptr(constraints,
                2,
@@ -3716,10 +3769,10 @@ fn set_input_mode(any win, int mode, int value) dict {
          if constraints && rel_mgr && pointer {
             _init_unstable_interfaces()
             if !next_win.get("locked_pointer", 0) {
-               def lock_listener = zalloc(16)
+               def lock_listener = zalloc_or_panic(16, "wayland locked pointer listener")
                store64_h(lock_listener, _locked_pointer_handle_locked, 0)
                store64_h(lock_listener, _locked_pointer_handle_unlocked, 8)
-               def lock_data = zalloc(8)
+               def lock_data = zalloc_or_panic(8, "wayland locked pointer state")
                store64_h(lock_data, surface, 0)
                def locked_ptr = wl_proxy_marshal_flags_lock_ptr(constraints,
                   1,
@@ -3739,9 +3792,9 @@ fn set_input_mode(any win, int mode, int value) dict {
                }
             }
             if !next_win.get("relative_pointer", 0) {
-               def rel_listener = zalloc(8)
+               def rel_listener = zalloc_or_panic(8, "wayland relative pointer listener")
                store64_h(rel_listener, _relative_pointer_handle_motion, 0)
-               def rel_data = zalloc(8)
+               def rel_data = zalloc_or_panic(8, "wayland relative pointer state")
                store64_h(rel_data, surface, 0)
                def relative_ptr = wl_proxy_marshal_flags_rel_ptr(rel_mgr,
                   1,

@@ -723,7 +723,7 @@ fn camera_free_move(dict c, any win, f64 dt) dict {
       def nmove = normalize(move)
       def speed = float(c.get("speed", 400.0))
       mut pos = vec3(c.get("pos", [0, 0, 0]))
-      pos = add(pos, scale(nmove, speed * dt))
+      pos = add(pos, vector.scale(nmove, speed * dt))
       c["pos"] = pos
       camera_update(c)
    }

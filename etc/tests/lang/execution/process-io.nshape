@@ -8,6 +8,8 @@ shape test_process_io {
   source ny <<'NY'
 use core
 use core.os.io
+use core.os.process as process
+use core.os.sys as sys
 use core.os.subprocess (run_capture)
 use core.os (file_remove, temp_dir)
 use core.os.fs (make_dir, remove_dir)
@@ -41,6 +43,19 @@ assert(is_dict(exiting_child), "process io nonzero child spawn")
 def exit_result = close(exiting_child)
 assert(is_ok(exit_result) && unwrap(exit_result) == 7,
    "waitpid preserves a nonzero child exit status")
+
+def piped_child = process.popen(exit_command, exit_arguments)
+assert(is_list(piped_child) && piped_child.len == 3,
+   "popen returns pid and both pipe descriptors")
+def piped_pid = piped_child.get(0, -1)
+def piped_stdin = piped_child.get(1, -1)
+def piped_stdout = piped_child.get(2, -1)
+assert(piped_pid > 0 && piped_stdin >= 0 && piped_stdout >= 0,
+   "popen returns valid process handles")
+assert(is_ok(sys.sys_close(piped_stdin)) && is_ok(sys.sys_close(piped_stdout)),
+   "popen pipe descriptors can be closed by the caller")
+assert(process.waitpid(piped_pid, 0) == 7,
+   "popen transfers process ownership to waitpid")
 
 fn test_explicit_relative_executable() {
 #windows {

@@ -1,1 +1,11 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><g fill="none" stroke="#f2f2f2" stroke-width="2"><path stroke-opacity=".325" d="M2 1v13h13"/><path stroke-linecap="round" d="M2 14c8 0 12-4 12-12"/></g></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
+  <title id="title1">Curve</title>
+  <desc id="desc1">Curve editor icon. Original asset id: curve.</desc>
+  <defs id="defs3" />
+  <g transform="translate(2.0000 2.0000) scale(1.25000)" id="g3">
+    <g fill="none" id="g2">
+      <path d="M 1,1 V 15 H 15 V 13 H 3 V 1 Z" id="path1" fill="#c6c6ca" fill-opacity="0.325" />
+      <path d="M 14,1 A 1,1 0 0 0 13,2 C 13,5.8333333 12.057266,8.528671 10.292969,10.292969 8.528671,12.057266 5.8333333,13 2,13 a 1,1 0 0 0 -1,1 1,1 0 0 0 1,1 C 6.1666667,15 9.471329,13.942734 11.707031,11.707031 13.942734,9.471329 15,6.1666667 15,2 A 1,1 0 0 0 14,1 Z" id="path2" fill="#c6c6ca" />
+    </g>
+  </g>
+</svg>

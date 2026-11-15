@@ -144,15 +144,22 @@ fn _prime_stream() any {
 
 fn _start_mixer_thread() bool {
    if _thread { return true }
+   def period_frames = _get_period_frames()
+   def mix_buf = malloc(period_frames * _frame_bytes())
+   if !mix_buf { return false }
    if _mtx == 0 {
       _mtx = mutex_new()
-      if !_mtx { return false }
+      if !_mtx {
+         free(mix_buf)
+         return false
+      }
       _active_sounds = []
    }
    _running = true
-   _thread = thread_spawn(_audio_thread, 0)
+   _thread = thread_spawn(_audio_thread, mix_buf)
    if !_thread {
       _running = false
+      free(mix_buf)
       if _mtx { mutex_free(_mtx) _mtx = 0 }
       _active_sounds = []
       return false
@@ -361,7 +368,8 @@ fn _audio_thread(any arg) int {
    def buf_size = period_frames * _frame_bytes()
    def out_rate = _get_output_rate()
    def idle_sleep = _get_idle_sleep_ms()
-   def mix_buf = malloc(buf_size)
+   def mix_buf = arg
+   if !mix_buf { return 1 }
    if _is_debug() { print("Sound: Background thread started.") }
    while _running {
       memset(mix_buf, 0, buf_size)

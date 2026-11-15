@@ -1,0 +1,238 @@
+shape vg-golden {
+  family "probe-suite"
+  generator "regression"
+  features ["ny", "render", "vg", "vector", "golden"]
+  template ny-test-case
+  expect compile_and_run
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  timeout 420
+  expect_stdout "VG-GOLDEN-OK"
+  source ny <<'NY'
+;; Golden image for core.os.ui.render.vg: a card of fills, holes, gradients,
+;; strokes with every join and cap, hairlines, beziers, transforms, scissor,
+;; and arcs is rendered, snapshotted, reduced to a 16x12 grid of mean colors,
+;; and compared with a stored reference.
+use core
+use core.common as common
+use core.math (PI, sin, cos, abs)
+use core.os (temp_dir, ticks)
+use core.os.ui.window.consts
+use core.os.ui.render as gfx
+use core.os.ui.render.vg as vg
+use core.math.parse.img as img
+
+;; NY_VG_GOLDEN_BACKEND=vk|gl runs the same card on a real backend (needs a
+;; display); the default is the mock renderer. NY_VG_GOLDEN_PRINT=1 prints the
+;; signature instead of checking it.
+def want_backend = common.env_trim("NY_VG_GOLDEN_BACKEND")
+if want_backend == "vk" || want_backend == "gl" { gfx.apply_backend_name(want_backend) }
+else { gfx.set_backend_type(gfx.BACKEND_MOCK) }
+def is_mock = gfx.get_backend_type() == gfx.BACKEND_MOCK
+def win = gfx.init_window(640, 480, "vg golden", consts.WINDOW_CENTER, false, true, 1)
+assert(!!win, "window opens on the " + (is_mock ? "mock" : want_backend) + " backend")
+
+fn card() any {
+   vg.begin_frame(640.0, 480.0)
+   ;; 1 solid shapes
+   vg.begin_path() vg.rect(20.0, 20.0, 100.0, 60.0) vg.fill_color([0.9, 0.2, 0.2, 1.0]) vg.fill()
+   vg.begin_path() vg.rounded_rect(140.0, 20.0, 100.0, 60.0, 14.0) vg.fill_color([0.2, 0.7, 0.3, 1.0]) vg.fill()
+   vg.begin_path() vg.circle(300.0, 50.0, 30.0) vg.fill_color([0.2, 0.4, 0.95, 1.0]) vg.fill()
+   vg.begin_path() vg.ellipse(390.0, 50.0, 44.0, 24.0) vg.fill_color([0.9, 0.8, 0.2, 0.7]) vg.fill()
+   ;; 2 holes and concave
+   vg.begin_path() vg.rect(460.0, 20.0, 80.0, 60.0) vg.circle(500.0, 50.0, 18.0) vg.path_winding(vg.HOLE) vg.fill_color([0.8, 0.8, 0.85, 1.0]) vg.fill()
+   vg.begin_path()
+   mut i = 0
+   while i < 10 {
+      def a = PI * 2.0 * float(i) / 10.0 - PI * 0.5
+      def r = (i % 2) == 0 ? 34.0 : 14.0
+      if i == 0 { vg.move_to(590.0 + cos(a) * r, 50.0 + sin(a) * r) } else { vg.line_to(590.0 + cos(a) * r, 50.0 + sin(a) * r) }
+      i += 1
+   }
+   vg.close_path() vg.fill_color([1.0, 0.6, 0.1, 1.0]) vg.fill()
+   ;; 3 gradients
+   vg.begin_path() vg.rect(20.0, 100.0, 180.0, 60.0)
+   vg.fill_paint(vg.linear_gradient(60.0, 0.0, 160.0, 0.0, [1.0, 0.0, 0.0, 1.0], [0.0, 0.0, 1.0, 1.0])) vg.fill()
+   vg.begin_path() vg.rect(220.0, 100.0, 120.0, 60.0)
+   vg.fill_paint(vg.radial_gradient(280.0, 130.0, 6.0, 44.0, [1.0, 1.0, 1.0, 1.0], [0.1, 0.1, 0.3, 1.0])) vg.fill()
+   vg.begin_path() vg.rect(360.0, 96.0, 140.0, 70.0)
+   vg.fill_paint(vg.box_gradient(374.0, 110.0, 112.0, 42.0, 10.0, 14.0, [0.0, 0.0, 0.0, 0.8], [0.0, 0.0, 0.0, 0.0])) vg.fill()
+   vg.begin_path() vg.rounded_rect(372.0, 106.0, 112.0, 42.0, 10.0) vg.fill_color([0.93, 0.93, 0.96, 1.0]) vg.fill()
+   ;; 4 strokes: joins
+   def joins = [vg.MITER, vg.ROUND, vg.BEVEL]
+   i = 0
+   while i < 3 {
+      def ox = 30.0 + float(i) * 110.0
+      vg.begin_path() vg.move_to(ox, 240.0) vg.line_to(ox + 40.0, 190.0) vg.line_to(ox + 80.0, 240.0)
+      vg.line_join(int(joins.get(i, 4))) vg.line_cap(vg.BUTT) vg.stroke_width(14.0) vg.stroke_color([0.85, 0.85, 0.9, 1.0]) vg.stroke()
+      i += 1
+   }
+   ;; caps
+   def caps = [vg.BUTT, vg.ROUND, vg.SQUARE]
+   i = 0
+   while i < 3 {
+      def y = 196.0 + float(i) * 22.0
+      vg.begin_path() vg.move_to(380.0, y) vg.line_to(470.0, y)
+      vg.line_cap(int(caps.get(i, 0))) vg.stroke_width(12.0) vg.stroke_color([0.4, 0.8, 0.9, 1.0]) vg.stroke()
+      i += 1
+   }
+   ;; hairlines and a closed stroked bezier
+   vg.line_cap(vg.BUTT) vg.line_join(vg.MITER)
+   i = 0
+   while i < 5 {
+      vg.begin_path() vg.move_to(500.0, 190.0 + float(i) * 12.0) vg.line_to(620.0, 200.0 + float(i) * 12.0)
+      vg.stroke_width(0.5 + float(i) * 0.5) vg.stroke_color([1.0, 1.0, 1.0, 1.0]) vg.stroke()
+      i += 1
+   }
+   vg.begin_path() vg.move_to(40.0, 330.0) vg.bezier_to(90.0, 260.0, 150.0, 400.0, 200.0, 330.0) vg.quad_to(120.0, 300.0, 40.0, 330.0) vg.close_path()
+   vg.fill_color([0.5, 0.3, 0.8, 0.6]) vg.fill()
+   vg.stroke_width(3.0) vg.stroke_color([1.0, 1.0, 1.0, 0.9]) vg.stroke()
+   ;; 5 transforms and scissor
+   vg.save()
+   vg.translate(300.0, 330.0) vg.rotate(0.5) vg.scale(1.3, 0.8)
+   vg.begin_path() vg.rounded_rect(-40.0, -30.0, 80.0, 60.0, 8.0)
+   vg.fill_paint(vg.linear_gradient(0.0, -30.0, 0.0, 30.0, [0.2, 0.9, 0.9, 1.0], [0.1, 0.2, 0.5, 1.0])) vg.fill()
+   vg.stroke_width(2.0) vg.stroke_color([1.0, 1.0, 1.0, 1.0]) vg.stroke()
+   vg.restore()
+   vg.save()
+   vg.scissor(400.0, 290.0, 90.0, 60.0)
+   vg.begin_path() vg.circle(445.0, 320.0, 60.0) vg.fill_color([0.9, 0.3, 0.6, 1.0]) vg.fill()
+   vg.restore()
+   vg.begin_path() vg.rect(400.0, 290.0, 90.0, 60.0) vg.stroke_width(1.0) vg.stroke_color([1.0, 1.0, 1.0, 0.5]) vg.stroke()
+   ;; arcs
+   vg.begin_path() vg.arc(560.0, 320.0, 36.0, 0.0, PI * 1.5, vg.CW) vg.stroke_width(8.0) vg.line_cap(vg.ROUND) vg.stroke_color([0.95, 0.75, 0.2, 1.0]) vg.stroke()
+   vg.begin_path() vg.move_to(520.0, 400.0) vg.arc_to(600.0, 400.0, 600.0, 450.0, 24.0) vg.line_to(600.0, 450.0)
+   vg.line_cap(vg.BUTT) vg.stroke_width(4.0) vg.stroke_color([0.6, 0.9, 0.5, 1.0]) vg.stroke()
+   ;; global alpha and text
+   vg.global_alpha(0.5)
+   vg.begin_path() vg.rect(20.0, 400.0, 120.0, 50.0) vg.fill_color([1.0, 1.0, 1.0, 1.0]) vg.fill()
+   vg.global_alpha(1.0)
+   vg.end_frame()
+}
+
+
+def shot = temp_dir() + "/nytrix-vg-golden-" + to_str(ticks()) + ".png"
+mut saved = false
+mut frame = 0
+mut f64 worst_ms = 0.0
+while frame < 6 {
+   ;; Readback is requested before the frame it should capture and collected
+   ;; after that frame has been presented.
+   if frame == 5 { gfx.request_frame_capture() }
+   if gfx.begin_frame_clear([0.07, 0.07, 0.09, 1.0]) {
+      gfx.set_ortho_2d(0.0, 640.0, 480.0, 0.0)
+      def t0 = ticks()
+      card()
+      def f64 ms = float(ticks() - t0) / 1000000.0
+      if frame >= 2 && ms > worst_ms { worst_ms = ms }
+      gfx.end_frame()
+      if frame == 5 { saved = gfx.snapshot(shot) }
+      frame += 1
+   }
+}
+assert(saved, "framebuffer snapshot")
+def stats = vg.frame_stats()
+assert(int(stats.get(0, 0)) == 30 && int(stats.get(1, 0)) > 4000, "card submits its thirty shapes")
+def pic = img.load(shot)
+assert(is_dict(pic), "snapshot decodes")
+def int pw = int(pic.get("width", 0))
+def int ph = int(pic.get("height", 0))
+def int pc = int(pic.get("channels", pic.get("bpp", 4)))
+assert(pw == 640 && ph == 480 && pc >= 3, "snapshot is 640x480")
+def data = pic.get("data", 0)
+
+;; Signature: mean red, green, blue of each 40x40 cell on a 16x12 grid.
+mut sig = []
+mut int cy = 0
+while cy < 12 {
+   mut int cx = 0
+   while cx < 16 {
+      mut int sr = 0
+      mut int sg = 0
+      mut int sb = 0
+      mut int y = 0
+      while y < 40 {
+         def int row = (cy * 40 + y) * pw
+         mut int x = 0
+         while x < 40 {
+            def int off = (row + cx * 40 + x) * pc
+            sr += load8(data, off)
+            sg += load8(data, off + 1)
+            sb += load8(data, off + 2)
+            x += 2
+         }
+         y += 2
+      }
+      sig = sig.append(sr / 400)
+      sig = sig.append(sg / 400)
+      sig = sig.append(sb / 400)
+      cx += 1
+   }
+   cy += 1
+}
+if common.env_trim("NY_VG_GOLDEN_PRINT") == "1" {
+   mut line = "VG_SIG "
+   mut int k = 0
+   while k < sig.len {
+      line = line + to_str(int(sig.get(k, 0))) + (k + 1 < sig.len ? "," : "")
+      k += 1
+   }
+   print(line)
+   print("VG_MS " + to_str(worst_ms))
+}
+def ref_mock = [
+   70, 26, 30, 123, 34, 37, 123, 34, 37, 28, 54, 35, 34, 98, 49, 33, 94, 48, 19, 21, 31, 32, 55, 119, 23, 24, 32, 63, 58, 29, 42, 40, 26, 64, 64, 71, 95, 95, 103, 66, 66, 73, 54, 38, 23, 20, 19, 23,
+   123, 34, 37, 229, 51, 51, 229, 51, 51, 39, 95, 49, 51, 178, 76, 50, 175, 75, 23, 34, 58, 49, 98, 232, 51, 57, 65, 140, 125, 39, 107, 97, 35, 111, 111, 119, 108, 108, 116, 116, 115, 124, 149, 93, 24, 70, 48, 23,
+   76, 13, 20, 113, 9, 40, 85, 9, 68, 52, 9, 96, 24, 13, 125, 20, 22, 40, 21, 21, 49, 21, 21, 50, 19, 19, 36, 68, 68, 74, 94, 94, 100, 96, 96, 102, 29, 29, 34, 20, 20, 25, 18, 18, 23, 18, 18, 23,
+   129, 9, 18, 199, 0, 56, 142, 0, 112, 85, 0, 169, 29, 0, 226, 21, 21, 55, 25, 25, 76, 25, 25, 76, 21, 21, 50, 126, 126, 132, 176, 176, 183, 176, 176, 182, 34, 34, 39, 18, 18, 23, 18, 18, 23, 18, 18, 23,
+   20, 17, 22, 61, 56, 64, 24, 21, 29, 19, 17, 26, 58, 57, 69, 18, 18, 23, 21, 21, 27, 53, 53, 60, 18, 18, 23, 28, 41, 48, 39, 64, 74, 34, 53, 62, 18, 18, 23, 19, 19, 24, 19, 19, 24, 18, 18, 23,
+   41, 41, 47, 90, 90, 98, 96, 96, 104, 69, 69, 76, 86, 86, 94, 72, 72, 79, 94, 94, 102, 89, 89, 97, 44, 44, 50, 43, 74, 85, 60, 111, 126, 54, 99, 112, 37, 37, 42, 46, 46, 50, 43, 43, 47, 31, 31, 36,
+   21, 21, 26, 18, 18, 23, 21, 21, 26, 21, 21, 26, 18, 18, 23, 21, 21, 26, 21, 21, 26, 18, 18, 23, 21, 21, 26, 26, 36, 43, 30, 45, 53, 29, 43, 50, 19, 19, 24, 31, 31, 36, 33, 33, 38, 25, 25, 30,
+   18, 18, 23, 38, 35, 47, 46, 44, 52, 37, 36, 44, 19, 19, 24, 18, 18, 23, 44, 97, 113, 43, 102, 111, 22, 24, 29, 18, 18, 23, 176, 65, 122, 176, 63, 121, 59, 31, 49, 80, 65, 30, 25, 23, 23, 18, 18, 23,
+   19, 19, 23, 39, 37, 46, 28, 27, 34, 68, 53, 94, 82, 68, 106, 18, 18, 23, 36, 54, 78, 41, 114, 156, 51, 133, 152, 18, 18, 23, 179, 66, 124, 179, 64, 123, 60, 31, 50, 81, 66, 30, 82, 67, 31, 18, 18, 23,
+   18, 18, 23, 18, 18, 23, 18, 18, 23, 18, 18, 23, 18, 18, 23, 18, 18, 23, 18, 18, 23, 23, 25, 31, 29, 35, 48, 18, 18, 23, 18, 18, 23, 18, 18, 23, 18, 18, 23, 24, 28, 28, 21, 23, 25, 18, 18, 23,
+   77, 77, 81, 136, 136, 139, 136, 136, 139, 79, 79, 83, 18, 18, 23, 18, 18, 23, 18, 18, 23, 18, 18, 23, 18, 18, 23, 18, 18, 23, 18, 18, 23, 18, 18, 23, 18, 18, 23, 24, 28, 28, 33, 43, 35, 22, 24, 26,
+   34, 34, 38, 50, 50, 54, 50, 50, 54, 35, 35, 39, 18, 18, 23, 18, 18, 23, 18, 18, 23, 18, 18, 23, 18, 18, 23, 18, 18, 23, 18, 18, 23, 18, 18, 23, 18, 18, 23, 18, 18, 23, 19, 20, 24, 19, 20, 24
+]
+def ref_gpu = [
+   70, 26, 30, 123, 34, 37, 123, 34, 37, 28, 54, 35, 34, 98, 49, 33, 94, 48, 19, 21, 31, 32, 55, 119, 23, 24, 32, 63, 58, 29, 42, 40, 26, 64, 64, 71, 95, 95, 103, 66, 66, 73, 54, 38, 23, 20, 19, 23,
+   123, 34, 37, 229, 51, 51, 229, 51, 51, 39, 95, 49, 51, 178, 76, 50, 175, 75, 23, 34, 58, 49, 98, 232, 51, 57, 65, 140, 125, 39, 107, 97, 35, 111, 111, 119, 108, 108, 116, 116, 115, 124, 149, 93, 24, 70, 48, 23,
+   79, 13, 17, 135, 9, 18, 91, 9, 62, 35, 9, 113, 9, 13, 140, 20, 22, 40, 63, 63, 81, 64, 65, 83, 20, 20, 37, 68, 68, 73, 94, 94, 100, 96, 96, 102, 29, 29, 34, 20, 20, 25, 18, 18, 23, 18, 18, 23,
+   136, 9, 11, 243, 0, 11, 154, 0, 100, 51, 0, 203, 0, 0, 255, 22, 22, 56, 135, 135, 162, 140, 140, 165, 23, 23, 52, 124, 124, 130, 175, 175, 181, 174, 174, 180, 33, 33, 38, 18, 18, 23, 18, 18, 23, 18, 18, 23,
+   20, 17, 22, 62, 56, 62, 25, 21, 28, 18, 17, 27, 57, 57, 70, 18, 18, 23, 22, 22, 28, 54, 54, 61, 18, 18, 23, 28, 41, 48, 39, 64, 74, 34, 54, 62, 18, 18, 23, 19, 19, 24, 19, 19, 24, 18, 18, 23,
+   41, 41, 47, 90, 90, 98, 96, 96, 104, 69, 69, 76, 86, 86, 94, 72, 72, 79, 94, 94, 102, 89, 89, 97, 44, 44, 50, 43, 74, 85, 60, 111, 126, 54, 99, 112, 37, 37, 42, 46, 46, 50, 43, 43, 47, 31, 31, 36,
+   21, 21, 26, 18, 18, 23, 21, 21, 26, 21, 21, 26, 18, 18, 23, 21, 21, 26, 21, 21, 26, 18, 18, 23, 21, 21, 26, 26, 36, 43, 30, 45, 53, 29, 43, 50, 19, 19, 24, 31, 31, 36, 33, 33, 38, 25, 25, 30,
+   18, 18, 23, 38, 35, 47, 46, 44, 52, 37, 36, 44, 19, 19, 24, 18, 18, 23, 45, 97, 113, 43, 103, 111, 22, 24, 29, 18, 18, 23, 176, 65, 122, 176, 63, 121, 59, 31, 49, 80, 65, 30, 25, 23, 23, 18, 18, 23,
+   19, 19, 23, 39, 37, 46, 28, 27, 34, 68, 53, 94, 82, 68, 106, 18, 18, 23, 36, 54, 78, 41, 114, 157, 51, 133, 153, 18, 18, 23, 179, 66, 124, 179, 64, 123, 60, 31, 50, 81, 66, 30, 82, 67, 31, 18, 18, 23,
+   18, 18, 23, 18, 18, 23, 18, 18, 23, 18, 18, 23, 18, 18, 23, 18, 18, 23, 18, 18, 23, 23, 25, 31, 29, 35, 48, 18, 18, 23, 18, 18, 23, 18, 18, 23, 18, 18, 23, 24, 28, 28, 21, 23, 25, 18, 18, 23,
+   77, 77, 80, 136, 136, 138, 136, 136, 138, 79, 79, 83, 18, 18, 23, 18, 18, 23, 18, 18, 23, 18, 18, 23, 18, 18, 23, 18, 18, 23, 18, 18, 23, 18, 18, 23, 18, 18, 23, 24, 28, 28, 33, 42, 35, 22, 24, 26,
+   34, 34, 38, 50, 50, 54, 50, 50, 54, 35, 35, 39, 18, 18, 23, 18, 18, 23, 18, 18, 23, 18, 18, 23, 18, 18, 23, 18, 18, 23, 18, 18, 23, 18, 18, 23, 18, 18, 23, 18, 18, 23, 19, 20, 24, 19, 20, 24
+]
+;; The mock renderer rasterises in software and must match almost exactly.
+;; Vulkan and GL share one reference: they may differ from it, and so from
+;; each other, only by filtering and rounding.
+mut int worst = 0
+mut int total = 0
+mut int k = 0
+while k < sig.len {
+   def int want = is_mock ? int(ref_mock.get(k, 0)) : int(ref_gpu.get(k, 0))
+   mut int d = int(sig.get(k, 0)) - want
+   if d < 0 { d = 0 - d }
+   if d > worst { worst = d }
+   total += d
+   k += 1
+}
+def f64 mean = float(total) / float(sig.len)
+print("VG_GOLDEN backend=" + (is_mock ? "mock" : want_backend) + " worst=" + to_str(worst) + " mean=" + to_str(mean) + " frame_ms=" + to_str(worst_ms))
+assert(sig.len == 576, "signature covers the 16x12 grid")
+assert(worst <= (is_mock ? 3 : 10), "no cell is off by more than the tolerance: " + to_str(worst))
+assert(mean <= (is_mock ? 0.5 : 1.5), "mean cell error stays small: " + to_str(mean))
+;; Frame-time budget for this thirty-shape card (about 5,800 vertices): 20 ms
+;; of canvas time on an optimised GPU route (measured 11 ms on GL and 18 ms
+;; on Vulkan). Unoptimised and software routes are slower, so only a gross
+;; regression is asserted here.
+assert(worst_ms < 400.0, "card renders within the frame-time ceiling: " + to_str(worst_ms))
+vg.release()
+gfx.close_window()
+print("VG-GOLDEN-OK")
+NY
+}

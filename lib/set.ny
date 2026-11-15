@@ -50,8 +50,9 @@ fn _set_tombstone_at(set s, int off) set {
 fn _set_new(int cap) set {
    if cap < 8 { cap = 8 }
    cap = _pow2(cap)
+   if cap <= 0 { panic("container capacity overflow") }
    def p = __malloc(16 + cap * 24)
-   if !p { panic("set malloc failed") }
+   if !p { panic("out of memory creating set") }
    store64(p, __runtime_tag("set"), -8)
    store64(p, 0, 0)
    store64(p, cap, 8)
@@ -107,6 +108,7 @@ fn _set_insert(set s, any key) set {
 @consumes(s)
 fn _set_resize(set s, int newcap) set {
    mut ns = _set_new(newcap)
+   if !ns { panic("out of memory growing set") }
    def cap = load64_i(s, 8)
    mut i = 0
    while i < cap {
@@ -153,6 +155,10 @@ fn _set_add(any s, any key) set {
    def count = load64_i(s, 0)
    def cap = load64_i(s, 8)
    if count * 10 >= cap * 7 {
+      if cap >= 134217728 {
+         panic("container capacity overflow")
+         return s
+      }
       def ns = _set_resize(s, cap * 2)
       return _set_insert(ns, key)
    }

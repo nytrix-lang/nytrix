@@ -372,6 +372,7 @@ fn watch_poll(any h) list {
    if ty == "inotify" {
       def fd = int(h.get("fd", -1))
       def b = malloc(8192)
+      if !b { panic("out of memory polling filesystem watcher") }
       def r = watch_read_events(fd, b, 8192)
       free(b)
       return r

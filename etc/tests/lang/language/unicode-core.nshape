@@ -1,0 +1,66 @@
+shape unicode_core {
+  family "lang/unicode"
+  generator "embedded"
+  features ["ny", "unicode", "utf8", "normalization", "segmentation", "security"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.unicode as uni
+use core.unicode as ucase
+use core.unicode as norm
+use core.unicode as seg
+use core.unicode as sec
+
+assert(uni.UNICODE_VERSION == "18.0.0", "version")
+assert(uni.code_points("aé😀").len == 3, "utf8 code points")
+assert(uni.byte_offset("aé😀", 2) == 3, "utf8 byte offsets")
+assert(uni.utf8_valid("é"), "valid utf8")
+
+assert(uni.category(0x1F600) == "So", "emoji category")
+assert(uni.script(0x03C0) == "Greek", "script name")
+assert(uni.combining_class(0x0301) == 230, "combining class")
+assert(uni.is_xid_start(0x03C0), "xid start")
+assert(uni.is_xid_continue(0x0301), "xid continue")
+assert(uni.is_alphabetic(0x03C0), "alphabetic")
+assert(uni.is_numeric(0x0660), "numeric")
+assert(uni.is_whitespace(0x00A0), "whitespace")
+assert(uni.is_uppercase(0x039F), "uppercase")
+assert(uni.is_lowercase(0x03C2), "lowercase")
+assert(uni.is_default_ignorable(0x200B), "default ignorable")
+assert(uni.is_bidi_control(0x202E), "bidi control")
+assert(uni.is_extended_pictographic(0x1F600), "extended pictographic")
+
+assert(ucase.to_upper("straße") == "STRASSE", "full uppercase")
+assert(ucase.to_lower("ΟΣ") == "ος", "final sigma")
+assert(ucase.to_title("hello world") == "Hello world", "title case")
+assert(ucase.case_fold("Straße") == "strasse", "case fold")
+assert(uni.code_points(ucase.to_lower("I", "tr"))[0] == 0x131, "turkic lower")
+assert(uni.code_points(ucase.to_upper("i", "tr"))[0] == 0x130, "turkic upper")
+
+assert(norm.nfd("é") == "e\xcc\x81", "nfd")
+assert(norm.nfc("e\xcc\x81") == "é", "nfc")
+assert(norm.nfkc("①") == "1", "nfkc")
+assert(norm.nfkd("①") == "1", "nfkd")
+assert(norm.nfc(norm.nfd("한")) == "한", "hangul round trip")
+assert(norm.is_normalized("é", "NFC"), "is normalized nfc")
+assert(!norm.is_normalized("e\xcc\x81", "NFC"), "not normalized nfc")
+
+assert(seg.grapheme_len("e\xcc\x81") == 1, "combining grapheme")
+assert(seg.grapheme_len("👩‍👩‍👧‍👦") == 1, "zwj family")
+assert(seg.grapheme_len("🇺🇸") == 1, "regional indicator pair")
+assert(seg.grapheme_len("🇺🇸🇨") == 2, "regional indicator triple")
+assert(seg.grapheme_slice("a👩‍👩‍👧‍👦b", 1, 2) == "👩‍👩‍👧‍👦", "grapheme slice")
+assert(seg.words("Hello, world!").len == 5, "word boundaries")
+assert(seg.sentences("One. Two!").len == 2, "sentence boundaries")
+
+assert(sec.is_mixed_script("aа"), "mixed script")
+assert(sec.skeleton("а") == sec.skeleton("a"), "confusable skeleton")
+assert(sec.has_bidi_control("a\xe2\x80\xaeb"), "bidi control scan")
+assert(sec.has_suspicious_invisible("a\xe2\x80\x8bb"), "invisible scan")
+assert(sec.is_identifier_allowed("café"), "identifier security")
+assert(!sec.is_identifier_allowed("a-b"), "identifier punctuation rejected")
+
+print("UNICODE_CORE_OK")
+NY
+}

@@ -4315,6 +4315,12 @@ static DWORD WINAPI rt_thread_trampoline(LPVOID p) {
       ret = ((int64_t (*)(int64_t))fn)(arg);
     }
   }
+  /*
+   * This thread's small-string arena and intern table are thread-local; only
+   * the main thread reaches runtime cleanup, so release them here. A result
+   * that still points into the arena is copied to the shared heap first.
+   */
+  ret = rt_thread_release_string_storage(ret);
   if (st)
     st->ret = ret;
   if (ta->argv)
@@ -4591,6 +4597,12 @@ static void *rt_thread_trampoline(void *p) {
   }
   if (ta->argv)
     free(ta->argv);
+  /*
+   * This thread's small-string arena and intern table are thread-local; only
+   * the main thread reaches runtime cleanup, so release them here. A result
+   * that still points into the arena is copied to the shared heap first.
+   */
+  res = rt_thread_release_string_storage(res);
   rt_thread_stacks_release();
   atomic_fetch_sub_explicit(&g_rt_live_threads, 1, memory_order_release);
   free(ta);

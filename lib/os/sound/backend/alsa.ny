@@ -119,6 +119,7 @@ fn stream_open(any stream) any {
    def rate = stream.get("sample_rate")
    def channels = stream.get("channels")
    def pcm_ptr = malloc(8)
+   if !pcm_ptr { return false }
    mut ?ptr opened = 0
    mut chosen = ""
    mut tries = _build_candidates(dev_id)
@@ -126,6 +127,10 @@ fn stream_open(any stream) any {
    while i < tries.len && opened == 0 {
       def cand = tries.get(i)
       def cand_c = cstr(cand)
+      if !cand_c {
+         i += 1
+         continue
+      }
       if sound_debug.enabled() { print(f"ALSA: trying device '{cand}' (ptr={pcm_ptr})") }
       def rc = snd_pcm_open(pcm_ptr, cand_c, SND_PCM_STREAM_PLAYBACK, 0)
       if sound_debug.enabled() { print(f"ALSA: snd_pcm_open returned {rc}") }

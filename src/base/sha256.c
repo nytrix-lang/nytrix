@@ -121,3 +121,14 @@ bool ny_sha256_file(const char *path, char *out, size_t out_len) {
   }
   return true;
 }
+
+bool ny_sha256_file_hex(const char *path, char out[65]) {
+  char digest[72];
+  if (!path || !out || !ny_sha256_file(path, digest, sizeof(digest)))
+    return false;
+  if (strncmp(digest, "sha256:", 7) != 0 || strlen(digest) != 71)
+    return false;
+  memcpy(out, digest + 7, 64);
+  out[64] = '\0';
+  return true;
+}

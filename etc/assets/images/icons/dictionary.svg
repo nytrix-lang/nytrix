@@ -1,1 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="16" height="12"><path fill="#f2f2f2" d="M3 2v2a3 3 0 0 0 0 6h2V2zm3 0v2h2V2zm7 0v5a3 3 0 0 0 3 3V8a1 1 0 0 1-1-1V6h1V4h-1V2zm-2 2a3 3 0 0 0 0 6h1V8h-1a1 1 0 0 1 0-2h1V4zM8 7V6H6v4h2zM3 6v2a1 1 0 0 1 0-2z"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
+  <title>Dictionary</title>
+  <desc>Dictionary icon.</desc>
+  <g transform="translate(2.0000 4.5000) scale(1.25000)">
+<path fill="#c6c6ca" d="M3 2v2a3 3 0 0 0 0 6h2V2zm3 0v2h2V2zm7 0v5a3 3 0 0 0 3 3V8a1 1 0 0 1-1-1V6h1V4h-1V2zm-2 2a3 3 0 0 0 0 6h1V8h-1a1 1 0 0 1 0-2h1V4zM8 7V6H6v4h2zM3 6v2a1 1 0 0 1 0-2z"/>
+  </g>
+</svg>

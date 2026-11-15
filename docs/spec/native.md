@@ -396,15 +396,44 @@ order. `-o` also selects the output path in object-emission modes.
 `-O0` through `-O3` select the NYR optimization level; the default is `-O2`.
 `-Os` currently selects the same conservative NYR `-O2` pipeline; NYC does
 not yet use a distinct size-optimization pipeline.
-At O2/O3, ordinary static helpers without retained/section/assembly-label
-constraints enter the existing heuristic inliner. GNU `noinline` and
+At O1 and above, locally bound helpers enter the existing heuristic
+inliner, including section-attributed and retained definitions. Static
+functions bind locally; nonweak global functions also qualify outside PIC
+mode. Interposable PIC globals and weak definitions do not. Retaining
+an out-of-line definition does not prevent cloning its body at a call site.
+GNU `noinline` and
 `__noinline__` attributes are preserved across prototypes and definitions;
 explicit `inline` linkage metadata remains separate from automatic eligibility.
+Inline assembly that defines named global symbols also prevents cloning
+the containing function, avoiding duplicate symbol definitions.
 Functions using `va_start` or `va_arg` are not inline candidates because those
 operations depend on the original call frame.
 `-pthread` defines `_REENTRANT=1` before explicit command-line macro options,
 so `-U_REENTRANT` takes precedence in either argument order. NYC does not
 link executables itself; the external link driver must also receive `-pthread`.
+Whole-unit SysV x86-64 compilation supports `-fstack-protector`,
+`-fstack-protector-strong`, `-fstack-protector-all`, and
+`-fno-stack-protector`, with the last option taking precedence. The default
+mode conservatively protects native frame objects of at least eight bytes;
+strong mode also protects address-taken locals, and all mode protects scalar
+functions. Functions with no normal return need no return-cookie check.
+GNU `no_stack_protector` attributes survive declaration merging and disable
+instrumentation for that function, including under all mode.
+The compiler initializes a dedicated frame word above addressable storage,
+checks it at every normal return, and calls `__stack_chk_fail` on mismatch.
+The check accesses that fixed frame word directly, never through a pointer
+spilled before user code. Guards default to FS offset 40. The
+`-mstack-protector-guard=tls|global`, `-mstack-protector-guard-reg=fs|gs`,
+`-mstack-protector-guard-offset=NUMBER`, and
+`-mstack-protector-guard-symbol=IDENTIFIER` options select the source;
+TLS symbols override numeric offsets. The matching GNU `__SSP__`,
+`__SSP_STRONG__`, or `__SSP_ALL__` predefine precedes explicit `-D`/`-U`
+options. Assembly and direct ELF routes have runtime corruption checks for
+FS, GS, numeric/symbolic TLS offsets, global guards, and opt-outs. Other
+target ABIs and single-function compilation reject enabled stack protection.
+This is not general `__seg_fs`/`__seg_gs` C address-space support, and the
+physical machine pipeline still needs guard-word lowering before its
+stack-encoder fallback can be removed.
 `nyc -c SOURCE.c -o OUTPUT.o` is the whole-unit object route. Options may
 appear before or after the input; `--` ends option parsing. The object driver
 also accepts repeated `-include HEADER` options and Kbuild's
@@ -430,6 +459,13 @@ when register-passed. GNU `regparm(N)` function attributes override the default;
 variadic declarations use stack arguments. Freestanding 32-bit consumers check
 all four register counts, callbacks, explicit cdecl overrides, scalar 64-bit
 values, aggregate copies, and aggregate results across the host/NYC boundary.
+Variadic definitions use the i386 pointer-shaped `va_list`, including
+`va_copy`, by-value list arguments, mixed-width extraction, fixed aggregate
+parameters and hidden result pointers. With nonzero `-mregparm`, variadic
+aggregate results follow GCC's caller-pop convention; Clang's default differs,
+so these GNU-option interoperability checks use GCC. x87 integer conversions
+preserve all 64 bits and truncate toward zero without changing the caller's
+control word.
 Automatic aggregate-pointer arrays retain pointer-sized elements, including
 initialized and uninitialized arrays. Their i386 loads, stores, and strides
 use four bytes. `sizeof`, alignment expressions, and

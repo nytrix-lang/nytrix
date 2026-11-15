@@ -70,10 +70,12 @@ static int rt_simmd_x86_has_lzcnt(void) {
 }
 
 static int rt_simmd_x86_has_sha(void) {
-  /* CPUID is serializing and more expensive than short SHA-NI digests. CPU
+  /*
+   * CPUID is serializing and more expensive than short SHA-NI digests. CPU
    * features are process-wide, so probe once instead of on every digest or
    * compression call. Concurrent first callers may both probe; relaxed
-   * atomics safely publish the same immutable result. */
+   * atomics safely publish the same immutable result.
+   */
   static atomic_int cached = 0;
   int result = atomic_load_explicit(&cached, memory_order_relaxed);
   if (result)
@@ -863,9 +865,11 @@ static void rt_simmd_sha256_finish(uint32_t state[8], const uint8_t *data,
   }
 }
 
-/* Return a direct span for strings and byte arrays, or copy an integer
+/*
+ * Return a direct span for strings and byte arrays, or copy an integer
  * sequence into owned storage. Other element types use the language fallback
- * so their int-conversion and error behavior stays unchanged. */
+ * so their int-conversion and error behavior stays unchanged.
+ */
 static int rt_simmd_sha256_value_bytes(int64_t value, const uint8_t **bytes,
                                        size_t *len, uint8_t **owned) {
   *bytes = NULL;
@@ -915,8 +919,10 @@ static int rt_simmd_sha256_value_bytes(int64_t value, const uint8_t **bytes,
   return 1;
 }
 
-/* Fast HMAC-SHA256 over Ny byte strings/lists. The generic OpenSSL path
- * remains the fallback for values requiring language-level int conversion. */
+/*
+ * Fast HMAC-SHA256 over Ny byte strings/lists. The generic OpenSSL path
+ * remains the fallback for values requiring language-level int conversion.
+ */
 static int64_t rt_simmd_sha256_hmac_value(int64_t key_v, int64_t data_v,
                                           int bytes_result) {
   const uint8_t *key = NULL, *data = NULL;

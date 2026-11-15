@@ -1,0 +1,31 @@
+shape runtime_function_value_select {
+  family "lang-values"
+  generator "embedded"
+  features [function-values runtime-symbols jit]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  expect_message "RUNTIME-FUNCTION-VALUE-OK 77 77"
+  source ny <<'NY'
+use core
+;; `zalloc` and `malloc` used as values name runtime and C functions. The LLVM
+;; routes once emitted a zero data cell called `rt_zalloc_raw` for the value,
+;; which renamed every real declaration and left direct calls unresolved.
+fn pick(bool zeroed=false) any {
+   def a = zeroed ? zalloc : malloc
+   def p = a(16)
+   store64(p, 77, 8)
+   def v = load64(p, 8) + (zeroed ? load64(p, 0) : 0)
+   free(p)
+   v
+}
+fn direct() int {
+   def p = zalloc(64)
+   def v = load64(p, 0)
+   free(p)
+   v
+}
+assert(direct() == 0, "a direct zalloc call still resolves beside the function value")
+print("RUNTIME-FUNCTION-VALUE-OK " + to_str(pick(true)) + " " + to_str(pick(false)))
+NY
+}

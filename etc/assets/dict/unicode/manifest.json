@@ -1,0 +1,31 @@
+{
+  "files": [
+    {
+      "path": "UCD.zip",
+      "sha256": "7b3e555514060b92290d154f53655c5eb0fa62b16eb04c03434ff72d1a66a0d8",
+      "url": "https://www.unicode.org/Public/18.0.0/ucd/UCD.zip"
+    },
+    {
+      "path": "security/confusables.txt",
+      "sha256": "6ed3ee967c9dfdf6677d563c9985182fbc50a2efb7d6059cd57b2e2ce18f5b92",
+      "url": "https://www.unicode.org/Public/security/latest/confusables.txt"
+    },
+    {
+      "path": "security/IdentifierStatus.txt",
+      "sha256": "5863c7d99ca18f213c41c7318aa5528bebfb6d32ec0f1d5944e37192c119aebd",
+      "url": "https://www.unicode.org/Public/security/latest/IdentifierStatus.txt"
+    },
+    {
+      "path": "security/IdentifierType.txt",
+      "sha256": "fa24851acc669e58670e354e7b98a4ec8f52a809ec4f80524b6a60efdb868831",
+      "url": "https://www.unicode.org/Public/security/latest/IdentifierType.txt"
+    }
+  ],
+  "generated": [
+    "lib/unicode.ny",
+    "src/code/lang/ny/parser/unicode.c",
+    "src/code/lang/ny/parser/unicode.h"
+  ],
+  "source": "Unicode Character Database and UTS #39 security data",
+  "version": "18.0.0"
+}

@@ -11,7 +11,8 @@ compiler subsystems.
 | Need | Reference |
 | --- | --- |
 | Dependent types and GADTs | [Feature contract](spec/dependent.md) |
-| Open work | [Backlog](TODO.md) |
+| UI, engine, and editor work | [UI roadmap](todo/ui.md) |
+| Compiler performance work | [Performance backlog](todo/perf.md) |
 | NYC Linux kernel | [Build acceptance](todo/nyc.md) |
 | Source ownership | [Compiler architecture](learn/architecture.md) |
 | Commands, traces, pass isolation, and runtime failures | [Compiler debugging](learn/debugging.md) |
@@ -379,14 +380,18 @@ Additional in-process compiler checks:
 
 ```bash
 build/release/ny-full --type-row-test
-build/release/ny-full --ir-opt-test
-build/release/ny-full --ir-opt-test gvn_pre
+build/release/ny-full --backend-test
+build/release/ny-full --backend-test passes/scalar/gvn_pre
 ```
 
-Type-row tests live in `src/code/lang/types/test.c`; optimizer drivers and
-shared helpers live under `src/code/backend/ir/test/opt/`. Pass the driver
-filename stem to run one optimizer group; an unknown name prints the available
-groups. Loader integration checks live under `src/base/loader/tests/`.
+Backend regression drivers and shared support live under
+`src/code/test/backend/`, grouped by passes, lowering, code generation, cache,
+portable targets, and runtime. Select a test by its path relative to that root
+or by its filename stem. C frontend fixtures live directly in
+`src/code/test/lang/c/`; Ny frontend and embedding test support lives directly
+in `src/code/test/lang/ny/`. The shared language test registrations, fixture
+discovery, and generated stdlib debug-path fixture are managed by
+`src/code/test/lang/run.cmake`.
 
 ### Quality gate
 
@@ -455,7 +460,7 @@ into source to satisfy a fixture.
 Extend the existing formatter converters and keep a fixture for each new input
 shape. Unsupported C or Python input must retain a visible marker and a useful
 diagnostic instead of disappearing during conversion. Converter declarations
-and dispatch live under `src/cmd/fmt/`.
+and dispatch live under `src/cmd/tools/fmt/`.
 
 ### Test processes
 

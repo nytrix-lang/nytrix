@@ -1,0 +1,17 @@
+shape docstring_then_list {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "codegen"]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect compile_and_run
+  expect_message "DOCSTRING_THEN_LIST_OK"
+  source ny <<'NY'
+use core
+fn k() list {
+   "doc." [1, 2]
+}
+assert(k() == [1, 2], "a docstring followed by a list literal")
+print("DOCSTRING_THEN_LIST_OK")
+NY
+}

@@ -17,10 +17,20 @@ mut _io_cap = 0
 fn _io_append(str s) int {
    def n = load64(s, -16)
    if n <= 0 { return 0 }
-   if _io_len + n > _io_cap {
-      def need = _io_len + n
-      mut ncap = _io_cap > 0 ? _io_cap * 2 : 4096
-      while ncap < need { ncap *= 2 }
+   def max_len = 4611686018427387903
+   if _io_len < 0 || _io_len > max_len || n > max_len - _io_len {
+      return 0
+   }
+   def need = _io_len + n
+   if need > _io_cap {
+      mut ncap = _io_cap > 0 ? _io_cap : 4096
+      while ncap < need {
+         if ncap > max_len / 2 {
+            ncap = need
+            break
+         }
+         ncap *= 2
+      }
       def nb = realloc(_io_buf, ncap)
       if !nb { return 0 }
       _io_buf = nb

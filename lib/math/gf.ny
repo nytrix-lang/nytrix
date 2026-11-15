@@ -1106,17 +1106,23 @@ comptime template _gfe_elem_binary_overload(name, helper){
    }
 }
 
-comptime template _gfe_scalar_binary(name, helper){
-   fn ${name}(gfe a, any b) gfe {
-      def gf f = _gfe_field(a)
-      def av, bv = _gfe_value(a), _gf_value_for(f, b)
-      GFElem(f, helper(f, av, bv))
-   }
+fn _gfe_add_scalar(gfe a, any b) gfe {
+   def gf f = _gfe_field(a)
+   def av, bv = _gfe_value(a), _gf_value_for(f, b)
+   GFElem(f, _gf_add_values(f, av, bv))
 }
 
-comptime emit _gfe_scalar_binary(_gfe_add_scalar, _gf_add_values)
-comptime emit _gfe_scalar_binary(_gfe_sub_scalar, _gf_sub_values)
-comptime emit _gfe_scalar_binary(_gfe_mul_scalar, _gf_mul_values)
+fn _gfe_sub_scalar(gfe a, any b) gfe {
+   def gf f = _gfe_field(a)
+   def av, bv = _gfe_value(a), _gf_value_for(f, b)
+   GFElem(f, _gf_sub_values(f, av, bv))
+}
+
+fn _gfe_mul_scalar(gfe a, any b) gfe {
+   def gf f = _gfe_field(a)
+   def av, bv = _gfe_value(a), _gf_value_for(f, b)
+   GFElem(f, _gf_mul_values(f, av, bv))
+}
 
 fn _gfe_pow_scalar(gfe a, any e) gfe {
    def gf f = _gfe_field(a)

@@ -1,0 +1,62 @@
+shape raw_pointer_dangling_borrow {
+  family "compiler-errors/ownership"
+  generator "regression"
+  features ["ownership", "negative", "borrow", "memory-safety"]
+  template ny-compile-fail
+  flags_matrix "--ownership-check=strict --native-only; --ownership-check=strict --native-backend=llvm; --ownership-check=strict --wasm"
+  expect compile_fail
+  expect_message "use after free of raw pointer"
+  source ny <<'NY'
+use core
+fn dangling() int {
+   def p = malloc(16)
+   def borrowed = &p
+   free(p)
+   load8(borrowed)
+}
+dangling()
+NY
+}
+
+shape raw_pointer_use_after_release {
+  family "compiler-errors/ownership"
+  generator "regression"
+  features ["ownership", "negative", "release", "memory-safety"]
+  template ny-compile-fail
+  flags_matrix "--ownership-check=strict --native-only; --ownership-check=strict --native-backend=llvm; --ownership-check=strict --wasm"
+  expect compile_fail
+  expect_message "use after free of raw pointer"
+  source ny <<'NY'
+use core
+fn released() int {
+   def p = malloc(16)
+   release(p)
+   load8(p)
+}
+released()
+NY
+}
+
+shape raw_pointer_rebinding_preserves_old_alias {
+  family "language/ownership"
+  generator "regression"
+  features ["ownership", "positive", "alias", "memory-safety"]
+  template ny-test-case
+  flags_matrix "--ownership-check=strict --native-only; --ownership-check=strict --native-backend=llvm"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+fn rebind() int {
+   mut p = malloc(16)
+   def old = p
+   p = malloc(16)
+   store8(old, 41, 0)
+   store8(p, 42, 0)
+   assert(load8(old, 0) == 41 && load8(p, 0) == 42, "rebinding leaves old aliases live")
+   free(old)
+   free(p)
+   0
+}
+rebind()
+NY
+}

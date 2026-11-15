@@ -116,7 +116,7 @@ fn _quick_pick(dict ctx, list pick_names, int selected_idx, int max_visible, str
 fn _summary_bar(list names, int shown_total, str filter_key, str loaded_label, str selected_label) int {
    def visible = (filter_key.len > 0) ? (to_str(shown_total) + " filtered") : (to_str(shown_total) + " visible")
    def loaded = (loaded_label == selected_label) ? loaded_label : (loaded_label + " / " + selected_label)
-   gui.text_colored("Catalog " + to_str(names.len) + "   " + visible + "   Model " + loaded, [0.70, 0.70, 0.70, 0.94])
+   gui.text_colored("Catalog " + to_str(names.len) + "   " + visible + "   Model " + loaded, gui.theme_color_alpha("text_dim", 0.94))
    0
 }
 
@@ -193,7 +193,7 @@ fn _compact_catalog(dict ctx, f64 win_w, f64 win_h, list names, list filtered_na
    if bool(quick.get("stop", false)) {
       return quick
    }
-   gui.text_colored("Catalog " + to_str(shown_total) + " / " + to_str(names.len), [0.68, 0.68, 0.68, 1.0])
+   gui.text_colored("Catalog " + to_str(shown_total) + " / " + to_str(names.len), gui.theme_color("text_dim"))
    def compact_h = max(82.0, gui.remaining_h(4.0))
    def grid_res = _grid(ctx, "compact", filtered_names, win_w, viewer_catalog.grid_h(compact_h, true, false, 4.0),
       true, draw_state)
@@ -246,7 +246,10 @@ fn _full(dict ctx, f64 win_w, f64 win_h, list names, list filtered_names, int sh
    ;; Embedded sidebars should fill the whole vertical slot.  gui.remaining_h()
    ;; can be conservative inside nested panels, leaving a dead black tail below
    ;; the asset list.  Use the actual panel height budget instead.
-   def requested_h = embedded ? max(160.0, win_h - 150.0) : max(140.0, win_h - 166.0)
+   ;; `win_h` can lag the dock size (it defaults to the panel's initial
+   ;; height), which left only ~11 rows virtualised inside a much taller frame;
+   ;; take whichever budget is larger.
+   def requested_h = max(embedded ? max(160.0, win_h - 150.0) : max(140.0, win_h - 166.0), gui.remaining_h(4.0))
    def out = _grid(ctx, "main", filtered_names, win_w, viewer_catalog.grid_h(requested_h, grid_compact, embedded, 4.0),
       grid_compact, draw_state, embedded && !bool(ctx.get("show_paths", false)))
    ui_profile.mark_done(prof, "asset_full_grid", t_prof)
@@ -263,7 +266,11 @@ fn draw_body(dict state) dict {
    ;; the asset panel will fight automatic tiling.  Developers can still force
    ;; a cap with NY_ASSET_BROWSER_MAX_W when comparing layouts.
    def max_w_override = float(ui_profile.env_int_cached("NY_ASSET_BROWSER_MAX_W", 0, 0, 4096))
-   def win_w = max(180.0, (max_w_override > 0.0) ? min(raw_w, max_w_override) : raw_w)
+   ;; Like the height, the stored width can lag a re-docked or stacked panel;
+   ;; the live body width wins so rows span the panel.
+   def body_w = gui.remaining_w()
+   def live_w = (body_w > raw_w + 8.0) ? body_w : raw_w
+   def win_w = max(180.0, (max_w_override > 0.0) ? min(live_w, max_w_override) : live_w)
    def win_h = max(180.0, raw_h)
    def standalone = bool(state.get("standalone", false))
    def compact = bool(state.get("compact", false))

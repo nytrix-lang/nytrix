@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
+  <title>Un Group</title>
+  <desc>Un Group icon.</desc>
+  <g transform="translate(2.0000 2.0000) scale(1.25000)">
+<path fill="#c6c6ca" fill-opacity=".4" d="M7 1v6H1v8h8V9h6V1zm2 2h4v4H9z"/><path fill="#c6c6ca" d="M7 1v2h2V1H7zm6 0v2h2V1h-2zM1 7v2h2V7H1zm6 0v2h2V7H7zm6 0v2h2V7h-2zM1 13v2h2v-2H1zm6 0v2h2v-2H7z"/>
+  </g>
+</svg>

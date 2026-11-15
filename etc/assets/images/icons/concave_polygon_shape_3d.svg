@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
+  <title>Concave Polygon Shape 3D</title>
+  <desc>Concave Polygon Shape 3D icon.</desc>
+  <g transform="translate(2.0000 2.0000) scale(1.25000)">
+<path fill="#c6c6ca" d="M8 1 1 4v8l7 3 7-3V4zm7 3-2 1v6l-5 2v2l7-3z"/><path fill="#c6c6ca" d="m8 13 5-2-5-2-5 2zM8 1 1 4l2 1 5-2 5 2 2-1z"/><path fill="#c6c6ca" d="m8 9 5 2V5L8 3zM1 4v8l7 3v-2l-5-2V5z"/>
+  </g>
+</svg>
