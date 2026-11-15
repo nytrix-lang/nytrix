@@ -308,7 +308,7 @@ bool ny_jit_cache_enabled(void) {
 /*
  * Bump when JIT artifact compatibility or cache identity changes.
  */
-enum { NY_JIT_CACHE_VERSION = 32 };
+enum { NY_JIT_CACHE_VERSION = 33 };
 /*
  * Bitcode cache entries are invalidated whenever the cache protocol changes.
  * Keep this independent from LLVM_VERSION_STRING: distributions can rebuild
@@ -363,6 +363,20 @@ char *ny_jit_cache_path(const char *source, const char *stdlib_path,
       }
     }
     std_hash ^= ny_cache_semantic_fingerprint(stdlib_path);
+    /*
+     * The pinned stdlib artifact (core.bc / --std-bc) is linked into the
+     * cached module.  Its path alone is not an identity: rebuilding it in
+     * place keeps the name while changing which globals it defines, so an
+     * entry linked against the previous bytes can leave core data symbols
+     * unresolved (observed as a null store at the top of _ny_top_entry).
+     * Bind the entry to the artifact's current bytes and timestamp.
+     */
+    struct stat bc_st;
+    if (stat(stdlib_path, &bc_st) == 0) {
+      std_hash ^= (uint64_t)bc_st.st_size;
+      std_hash ^= (uint64_t)bc_st.st_mtime;
+      std_hash ^= ny_stat_mtime_nsec(&bc_st);
+    }
   }
 
   if (std_latest_mtime && ny_env_enabled("NYTRIX_JIT_CACHE_STRICT_MTIME")) {

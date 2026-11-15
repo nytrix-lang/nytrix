@@ -278,10 +278,28 @@ static bool rt_ffi_closure_split(int64_t f, int64_t *code, int64_t *env) {
   return true;
 }
 
-static uint64_t rt_dynamic_closure_abi_flags(int64_t fn) {
-  uintptr_t closure = 0;
-  if (!rt_dynamic_callable_is_closure(fn, &closure))
-    return 0;
+/*
+ * A closure is typically called from a loop, so the same closure reaches the
+ * generic adapter thousands of times.  Every such call re-derives its ABI
+ * facts from a lock-protected side table and canonicalizes the stored code
+ * word again.  Remember the last resolved closure: the stored code word
+ * validates the memo, because heap addresses are reusable while code words
+ * are not, so a recycled allocation cannot inherit stale flags.
+ */
+typedef struct {
+  uintptr_t closure;
+  int64_t code_word;
+  int64_t code;
+  uint64_t flags;
+} rt_closure_call_memo_t;
+static _Thread_local rt_closure_call_memo_t rt_closure_call_memo;
+
+static void rt_closure_call_memo_invalidate(uintptr_t closure) {
+  if (rt_closure_call_memo.closure == closure)
+    rt_closure_call_memo.closure = 0;
+}
+
+static uint64_t rt_dynamic_closure_abi_flags_at(uintptr_t closure) {
   uint64_t flags = 0;
   rt_dynamic_callable_lock_acquire();
   rt_closure_callable_abi_t *entry = rt_dynamic_closure_abi_slot(closure);
@@ -289,6 +307,38 @@ static uint64_t rt_dynamic_closure_abi_flags(int64_t fn) {
     flags = entry->flags;
   rt_dynamic_callable_lock_release();
   return flags;
+}
+
+static uint64_t rt_closure_call_resolve(uintptr_t closure, int64_t *code,
+                                        int64_t *env);
+
+static uint64_t rt_dynamic_closure_abi_flags(int64_t fn) {
+  uintptr_t closure = 0;
+  if (!rt_dynamic_callable_is_closure(fn, &closure))
+    return 0;
+  int64_t code = 0, env = 0;
+  return rt_closure_call_resolve(closure, &code, &env);
+}
+
+/*
+ * Resolve one closure call: canonical code word plus ABI flags, memoized.
+ * `closure` has already been validated by the caller.
+ */
+static uint64_t rt_closure_call_resolve(uintptr_t closure, int64_t *code,
+                                        int64_t *env) {
+  int64_t code_word = *(int64_t *)closure;
+  if (rt_closure_call_memo.closure == closure &&
+      rt_closure_call_memo.code_word == code_word) {
+    *code = rt_closure_call_memo.code;
+  } else {
+    rt_closure_call_memo.closure = closure;
+    rt_closure_call_memo.code_word = code_word;
+    rt_closure_call_memo.code = rt_prepare_raw_callable(code_word);
+    rt_closure_call_memo.flags = rt_dynamic_closure_abi_flags_at(closure);
+    *code = rt_closure_call_memo.code;
+  }
+  *env = *(int64_t *)(closure + sizeof(int64_t));
+  return rt_closure_call_memo.flags;
 }
 
 static bool rt_dynamic_closure_set_abi_flags(int64_t fn, uint64_t flags) {
@@ -301,6 +351,7 @@ static bool rt_dynamic_closure_set_abi_flags(int64_t fn, uint64_t flags) {
     if (entry->flags == 0)
       entry->flags = flags;
     rt_dynamic_callable_lock_release();
+    rt_closure_call_memo_invalidate(closure);
     return true;
   }
   if (rt_closure_callable_abis_len >= rt_closure_callable_abis_cap / 2) {
@@ -313,6 +364,7 @@ static bool rt_dynamic_closure_set_abi_flags(int64_t fn, uint64_t flags) {
   *entry = (rt_closure_callable_abi_t){closure, flags};
   ++rt_closure_callable_abis_len;
   rt_dynamic_callable_lock_release();
+  rt_closure_call_memo_invalidate(closure);
   return true;
 }
 
@@ -619,11 +671,20 @@ static int64_t rt_dynamic_callable_base(int64_t fn) {
  */
 static uint64_t rt_dynamic_callable_flags(int64_t fn);
 static int64_t rt_dynamic_callable_with_flags(int64_t fn, uint64_t flags) {
-  if (rt_dynamic_callable_is_closure(fn, NULL)) {
+  uintptr_t closure = 0;
+  if (rt_dynamic_callable_is_closure(fn, &closure)) {
     /*
      * The closure's creating function owns its argument and result ABI.
      * Generic call sites must not infer a new result ABI and overwrite it.
+     *
+     * Flags latch once, at creation: rt_dynamic_closure_set_abi_flags()
+     * refuses to overwrite a nonzero entry.  Call sites re-mark the same value
+     * on every use, inside loops, so answer from the resolved memo instead of
+     * taking the callable lock twice for a no-op.
      */
+    int64_t code = 0, env = 0;
+    if (rt_closure_call_resolve(closure, &code, &env) != 0)
+      return fn;
     return rt_dynamic_closure_set_abi_flags(fn, flags) ? fn : 0;
   }
   fn = rt_dynamic_callable_base(fn);
@@ -1401,6 +1462,41 @@ int64_t rt_call_any0(int64_t fn) {
 int64_t rt_call_any1(int64_t f, int64_t value) {
   if (!f || (uintptr_t)f < 0x1000)
     return 0;
+  /*
+   * Captured closures are the recurring shape in loop bodies, adapters and
+   * partial applications.  Resolve their ABI facts once per closure and enter
+   * the body directly instead of walking the generic classification rail
+   * (locked flags lookup, repeated closure predicates, code canonicalization)
+   * on every iteration.  The float-result case stays on the generic rail so
+   * its boxing rules remain in one place.
+   */
+  uintptr_t closure = 0;
+  if (rt_dynamic_callable_is_closure(f, &closure)) {
+    int64_t code = 0, env = 0;
+    uint64_t flags = rt_closure_call_resolve(closure, &code, &env);
+    if ((flags & NY_DYNAMIC_CALLABLE_F64_RESULT_MARK) == 0) {
+      bool returns_bool = (flags & NY_DYNAMIC_CALLABLE_BOOL_MARK) != 0;
+      bool raw_result = (flags & NY_DYNAMIC_CALLABLE_RAW_RESULT_MARK) != 0;
+      bool tagged_args = (flags & NY_DYNAMIC_CALLABLE_TAGGED_ARGS_MARK) != 0;
+      if ((flags & NY_DYNAMIC_CALLABLE_WORD_ARGS_MARK) != 0) {
+        int64_t args[] = {value};
+        int64_t words[4];
+        size_t word_count = rt_dynamic_callback_expand_word_args(
+            env, true, args, 1, tagged_args, words,
+            sizeof(words) / sizeof(words[0]));
+        if (!word_count)
+          return rt_fail(rt_alloc_string("err.type"),
+                         rt_alloc_string("closure argument ABI overflow"));
+        return rt_dynamic_callback_normalize_result(
+            rt_dynamic_callback_call_words(code, words, word_count),
+            returns_bool, false, raw_result);
+      }
+      return rt_dynamic_callback_normalize_result(
+          ((rt_any_fn7)code)(env, value, rt_any_len(value), rt_any_tag(value),
+                             0, 0, 0),
+          returns_bool, false, raw_result);
+    }
+  }
   rt_dynamic_callable_abi_t abi = rt_dynamic_callable_abi(f);
   if (abi.f64_result)
     return rt_dynamic_callback_call_f64(abi, &value, 1);

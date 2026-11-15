@@ -1262,6 +1262,18 @@ bool nyr_peephole(nyr_func_t *f) {
           nir_make_copy(in, left->a);
       }
       break;
+    case NYIR_SELECT_I64:
+      /*
+       * A constant condition selects one arm outright. Unrolled loops leave
+       * these behind whenever the predicate depends only on the induction
+       * value of the expanded copy, and the surviving select costs a compare,
+       * a conditional move, and a home for the dead arm.
+       */
+      if (ak)
+        nir_make_copy(in, av != 0 ? in->b : in->c);
+      else if (in->b == in->c)
+        nir_make_copy(in, in->b);
+      break;
     case NYIR_CMP_I64: {
       if (nir_simplify_mod_parity_compare(f, defs, in, i))
         break;

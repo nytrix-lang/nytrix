@@ -3326,19 +3326,14 @@ static bool mach_mixed_nyir_header(const nyr_func_t *nyir, size_t lo, size_t hi,
      * Colors replace the tag: the tier is yellow = source.
      */
     mixed_c(out, col, MCLR_NYIR);
-    fprintf(out, col ? "%-8s" : "NYIR %-10s", range);
+    fprintf(out, col ? "%-7s " : "S %-9s ", range);
     mixed_c(out, col, MCLR_RESET);
-    *vc += col ? 8u : 12u;
-    fprintf(out, " ");
-    (*vc)++;
-    /*
-     * Truncate summary to the fixed 16-wide column.
-     */
-    fprintf(out, "%-16.16s", summary);
-    *vc += 16;
+    *vc += col ? 8u : 11u;
+    fprintf(out, "%-14.14s", summary);
+    *vc += 14;
     mixed_c(out, col, MCLR_DIM);
-    fputs(col ? "      -> " : " -> ", out);
-    *vc += col ? 7u : 4u;
+    fputs(" -> ", out);
+    *vc += 4;
     mixed_c(out, col, MCLR_RESET);
   } else if (st == 0) {
     char pre[40];
@@ -3469,14 +3464,14 @@ void nyr_mach_dump_mixed(const nyr_func_t *nyir, const nyr_mach_func_t *mach,
   bool col = nyr_mixed_color_for(out);
 
   mixed_c(out, col, MCLR_HDR);
-  fputs("=[mixed] ", out);
+  fputs("== ", out);
   mixed_c(out, col, MCLR_NAME);
   fprintf(out, "%s", name ? name : "<anon>");
   mixed_c(out, col, MCLR_DIM);
-  fprintf(out, "  nyir=%zu mir=%zu nat=%zuB", nyir->len,
+  fprintf(out, "  src=%zu ir=%zu asm=%zuB", nyir->len,
           mach ? mach->inst_len : 0, native_len);
   if (!mach && nyr_mach_mixed_note[0])
-    fprintf(out, "  fallback: %s", nyr_mach_mixed_note);
+    fprintf(out, "  (%s)", nyr_mach_mixed_note);
   nyr_mach_mixed_note[0] = '\0';
   mixed_c(out, col, MCLR_RESET);
   fputc('\n', out);
@@ -3500,8 +3495,7 @@ void nyr_mach_dump_mixed(const nyr_func_t *nyir, const nyr_mach_func_t *mach,
         if (shown < 2) {
           const nyr_mixed_nat_t *r = &rows[nat_i++];
           mixed_c(out, col, MCLR_DIM);
-          fprintf(out,
-                  col ? "        0x%04llx  %-17s " : "PRE 0x%04llx  %-17s ",
+          fprintf(out, col ? "      %04llx %-16s " : "  %04llx %-16s ",
                   (unsigned long long)r->addr, r->bytes);
           mixed_body(out, col, r->text);
           mixed_c(out, col, MCLR_RESET);
@@ -3511,9 +3505,7 @@ void nyr_mach_dump_mixed(const nyr_func_t *nyir, const nyr_mach_func_t *mach,
           nat_i++;
       }
       if (total > shown)
-        fprintf(out,
-                col ? "        ... %zu prelude bytes\n"
-                    : "PRE ... %zu prelude bytes\n",
+        fprintf(out, col ? "      ... +%zu prelude\n" : "    ... +%zu prelude\n",
                 total - shown);
     }
   }
@@ -3522,7 +3514,7 @@ void nyr_mach_dump_mixed(const nyr_func_t *nyir, const nyr_mach_func_t *mach,
   /*
    * Fixed column where MIR text begins, so rows line up vertically.
    */
-  const size_t MIR_COL = col ? 34u : 38u;
+  const size_t MIR_COL = col ? 28u : 32u;
 
 /*
  * Prints one NAT row in aligned sub-columns: address, bytes, mnemonic.
@@ -3530,9 +3522,9 @@ void nyr_mach_dump_mixed(const nyr_func_t *nyir, const nyr_mach_func_t *mach,
 #define MIXED_NAT_ROW(r)                                                       \
   do {                                                                         \
     const nyr_mixed_nat_t *_r = (r);                                           \
-    fputs(col ? "        " : "      NAT ", out);                               \
+    fputs(col ? "      " : "    ", out);                                     \
     mixed_c(out, col, MCLR_DIM);                                               \
-    fprintf(out, "0x%04llx  %-17s ", (unsigned long long)_r->addr, _r->bytes); \
+    fprintf(out, "%04llx %-16s ", (unsigned long long)_r->addr, _r->bytes);    \
     mixed_c(out, col, MCLR_RESET);                                             \
     mixed_body(out, col, _r->text);                                            \
     fputc('\n', out);                                                          \
@@ -3591,7 +3583,7 @@ void nyr_mach_dump_mixed(const nyr_func_t *nyir, const nyr_mach_func_t *mach,
            */
           mixed_pad_to(out, col, &vc, MIR_COL);
           mixed_c(out, col, MCLR_MIR);
-          fprintf(out, col ? "#%zu-%zu " : "MIR #%zu-%zu ", (size_t)idx,
+          fprintf(out, col ? "m%zu-%zu " : "M %zu-%zu ", (size_t)idx,
                   (size_t)run_end);
           mixed_c(out, col, MCLR_RESET);
           char run_sum[96];
@@ -3626,8 +3618,8 @@ void nyr_mach_dump_mixed(const nyr_func_t *nyir, const nyr_mach_func_t *mach,
          */
         mixed_pad_to(out, col, &vc, MIR_COL);
         mixed_c(out, col, MCLR_MIR);
-        fprintf(out, col ? "#%-3zu " : "MIR #%-3zu ", (size_t)idx);
-        vc += col ? 4u : 9u;
+        fprintf(out, col ? "m%-3zu " : "M %-4zu ", (size_t)idx);
+        vc += col ? 5u : 6u;
         mixed_c(out, col, MCLR_RESET);
         mixed_body(out, col, mbuf);
         fputc('\n', out);
@@ -3651,12 +3643,8 @@ void nyr_mach_dump_mixed(const nyr_func_t *nyir, const nyr_mach_func_t *mach,
           size_t vc = 2;
           fputs("  ", out);
           mixed_c(out, col, MCLR_NYIR);
-          fprintf(out, "NYIR %-8zu", i);
-          vc += 10;
-          fprintf(out, " ");
-          vc += 1;
-          fprintf(out, "%-16.16s", plain);
-          vc += 16;
+          fprintf(out, "S %-7zu %-14.14s", i, plain);
+          vc += 23;
           mixed_c(out, col, MCLR_RESET);
           mixed_pad_to(out, col, &vc, MIR_COL);
           /*

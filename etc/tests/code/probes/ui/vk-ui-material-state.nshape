@@ -1,0 +1,26 @@
+shape vk_ui_material_state {
+  family "runtime-ui"
+  generator "embedded"
+  features [vulkan material text modules]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect compile_and_run
+  expect_message "VK-UI-MATERIAL-STATE-OK"
+  source ny <<'NY'
+use core
+use core.os.ui.render.vk.state as st
+use core.os.ui.render.vk.renderer as r
+;; No device is needed: this checks the renderer's material words. The text
+;; batch asks for alpha mode 2 (coverage blend) and vertex-colour mode 12.
+;; The GL state module owns globals with the same names, and the Vulkan
+;; renderer's stores were lost, so text was drawn with alpha mode 0 and the
+;; shader gamma-encoded its colour (0.6 red showed as 202 instead of 153).
+assert(st._current_alpha_u32 == 0 && st._current_vc_mode == 0, "initial material words")
+r.set_ui_material(-1, 2, 12)
+assert(st._current_alpha_u32 == 2, "text batches keep the coverage blend alpha mode")
+assert(st._current_vc_mode == 12 && st._current_base_tex_id == -1, "vertex colour mode and base texture are stored")
+r.set_ui_material(-1, 0, 1)
+assert(st._current_alpha_u32 == 0 && st._current_vc_mode == 1, "a later material replaces them")
+print("VK-UI-MATERIAL-STATE-OK")
+NY
+}

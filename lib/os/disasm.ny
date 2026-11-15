@@ -600,7 +600,7 @@ fn disasm_lines(any code, str arch="x86_64", int address=0) list {
 }
 
 fn disasm(any code, str arch="x86_64", int address=0) str {
-   "Disassembles raw bytes with the in-tree decoder and returns objdump-style printable text."
+   "Disassembles raw bytes with the in-tree decoder and returns compact printable text."
    def rows = disasm_lines(code, arch, address)
    mut b = Builder(128)
    defer { builder_free(b) }
@@ -611,26 +611,17 @@ fn disasm(any code, str arch="x86_64", int address=0) str {
       def ops = row[2]
       def bytes = row.len > 4 ? row[4] : ""
       def addr_hex = to_hex(row[0], is_a64 ? 16 : 8)
-      b = builder_append(b, " " + addr_hex + ": ")
+      b = builder_append(b, addr_hex + ": ")
       if is_str(bytes) && bytes.len > 0 {
          def bytes_clean = strip(bytes)
-         if is_a64 {
-            b = builder_append(b, bytes_clean + "  ")
-         } else {
-            b = builder_append(b, bytes_clean)
-            mut pad = 24 - bytes_clean.len
-            while pad > 0 {
-               b = builder_append(b, " ")
-               pad -= 1
-            }
-            ;
-         }
+         b = builder_append(b, bytes_clean)
+         def pad = max(1, (is_a64 ? 12 : 22) - bytes_clean.len)
+         mut p = 0
+         while p < pad { b = builder_append(b, " ") p += 1 }
       } else {
-         if is_a64 {
-            b = builder_append(b, "                  ")
-         } else {
-            b = builder_append(b, "                        ")
-         }
+         mut p = 0
+         def pad = is_a64 ? 13 : 23
+         while p < pad { b = builder_append(b, " ") p += 1 }
       }
       b = builder_append(b, row[1])
       if is_str(ops) && ops.len > 0 { b = builder_append(b, " " + ops) }

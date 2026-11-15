@@ -643,7 +643,7 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
       }
     }
     if (!l && (b->module_name && b->module_name[0])) {
-      const char *global_name = nyr_globaltab_name_tail(e->as.ident.name);
+      const char *global_name = nyr_global_tail_symbol(b, e->as.ident.name);
       if (global_name) {
         int addr = nyr_ir_emit(&b->nyir, (nyr_inst_t){.op = NYIR_ADDR_SYMBOL,
                                                       .dst = -1,

@@ -5581,6 +5581,10 @@ nyr_find_top_level_value_in_source(const nyr_builder_impl_t *b,
                                    const char *name, const char *source_file);
 static const expr_t *nyr_find_imported_value(const nyr_builder_impl_t *b,
                                              const char *name);
+static const char *nyr_imported_global_symbol(const nyr_builder_impl_t *b,
+                                              const char *name);
+static const char *nyr_global_tail_symbol(const nyr_builder_impl_t *b,
+                                          const char *name);
 static const expr_t *nyr_resolve_member_expr(const nyr_builder_impl_t *b,
                                              const expr_t *e);
 static const stmt_t *nyr_find_user_function(const nyr_builder_impl_t *b,
@@ -15189,9 +15193,21 @@ static int nyr_load_global_scalar(nyr_builder_impl_t *b, int address,
       reference->as.ident.name &&
       !nyr_global_declared_any(b, reference->as.ident.name) &&
       !(name && nyr_global_declared_any(b, name))) {
-    const expr_t *init = nyr_find_top_level_value(b, reference->as.ident.name);
-    if (!init && name)
-      init = nyr_find_top_level_value(b, name);
+    /*
+     * The resolved symbol names the cell. Looking the bare identifier up
+     * first found an unrelated top-level value of the same name in another
+     * module (`alpha`), which hid the literal initializer of the real cell.
+     */
+    const char *bare = reference->as.ident.name;
+    const char *owner_dot = name ? strrchr(name, '.') : NULL;
+    const char *here = b->module_name ? b->module_name : "";
+    bool imported_cell = owner_dot && (strlen(here) != (size_t)(owner_dot - name) ||
+                                       strncmp(here, name, (size_t)(owner_dot - name)) != 0);
+    const expr_t *init = name ? nyr_find_top_level_value(b, name) : NULL;
+    if (!init && imported_cell)
+      init = nyr_find_imported_value(b, bare);
+    if (!init && !imported_cell)
+      init = nyr_find_top_level_value(b, bare);
     /* `mut x = -1` is a unary minus over the literal. */
     while (init && init->kind == NY_E_UNARY && init->as.unary.op &&
            (strcmp(init->as.unary.op, "-") == 0 ||
@@ -15202,6 +15218,17 @@ static int nyr_load_global_scalar(nyr_builder_impl_t *b, int address,
         init->as.literal.kind == NY_LIT_INT && init->tok.kind != NY_T_NIL) {
       if (b->nyir.len && b->nyir.data[b->nyir.len - 1].dst == value)
         b->nyir.data[b->nyir.len - 1].scalar_class = NYIR_SCALAR_I64_RAW;
+      /*
+       * An importing module has no declaration to prove the cell is an
+       * integer, so every operator on the identifier takes the dynamic path:
+       * `alpha == a` compared the raw word as a tagged value and
+       * `alpha * 1000` dispatched to sequence repeat (the Vulkan renderer
+       * read its blend mode back as 0 and drew text gamma-encoded). Hand
+       * those consumers the canonical tagged word they expect.
+       */
+      if (imported_cell && nyr_expr_is_any(b, reference))
+        return nyr_emit_runtime_call(b, "rt_tag", value, -1, -1, 1,
+                                     NYIR_SCALAR_I64_TAGGED);
       return value;
     }
   }
@@ -16722,6 +16749,70 @@ static bool ny_import_value_name_possible(const nyr_builder_impl_t *b,
   const uint64_t *bits = owner->import_value_names;
   return ((bits[h1 >> 6] >> (h1 & 63u)) & 1u) &&
          ((bits[h2 >> 6] >> (h2 & 63u)) & 1u);
+}
+
+/*
+ * The global cell a bare identifier names through the current module's
+ * imports, or NULL.  Two modules may each own a global with the same leaf
+ * name (the Vulkan and GL renderer states both keep `_current_alpha_u32`);
+ * a leaf-only lookup is then ambiguous, the identifier stopped resolving to
+ * a cell at all, reads folded to an initializer and stores went nowhere.
+ * The importing module's `use` list says which owner is meant.
+ */
+static const char *nyr_imported_global_symbol(const nyr_builder_impl_t *b,
+                                              const char *name) {
+  if (!b || !b->prog || !name || !*name || strchr(name, '.') ||
+      !b->module_name || !b->module_name[0])
+    return NULL;
+  /* Most identifiers name no top-level variable anywhere; skip the walk. */
+  if (!ny_import_value_name_possible(b, name))
+    return NULL;
+  const stmt_t *mod = nyr_find_module_in_prog(ny_native_fn_index_for(b),
+                                              b->prog, b->module_name);
+  if (!mod || mod->kind != NY_S_MODULE)
+    return NULL;
+  /* The module's own declaration of the name (a folded `def` has no cell)
+   * shadows anything it imports. */
+  if (nyr_find_module_member_in(b, mod, name, 0))
+    return NULL;
+  for (size_t i = 0; i < mod->as.module.body.len; ++i) {
+    const stmt_t *use = mod->as.module.body.data[i];
+    if (!use || use->kind != NY_S_USE || !use->as.use.module)
+      continue;
+    const char *owner = nyr_use_module_canonical(b, use->as.use.module);
+    if (!owner || !*owner)
+      continue;
+    const char *member = NULL;
+    for (size_t j = 0; j < use->as.use.imports.len && !member; ++j) {
+      const use_item_t *item = &use->as.use.imports.data[j];
+      const char *visible = item->alias ? item->alias : item->name;
+      if (visible && item->name && strcmp(visible, name) == 0)
+        member = item->name;
+    }
+    /* A whole-module import names the owner even under an alias: bare
+     * leaves already resolve into any loaded module when they are unique,
+     * and existing modules rely on that (`use ...vk.state as vk_state`). */
+    if (!member && (use->as.use.import_all || use->as.use.imports.len == 0))
+      member = name;
+    if (!member)
+      continue;
+    char qualified[512];
+    int n = snprintf(qualified, sizeof(qualified), "%s.%s", owner, member);
+    if (n <= 0 || (size_t)n >= sizeof(qualified))
+      continue;
+    const char *symbol = nyr_globaltab_name(qualified);
+    if (symbol)
+      return symbol;
+  }
+  return NULL;
+}
+
+/* A leaf-name lookup that falls back to the import list when the leaf is
+ * owned by more than one module. */
+static const char *nyr_global_tail_symbol(const nyr_builder_impl_t *b,
+                                          const char *name) {
+  const char *symbol = nyr_globaltab_name_tail(name);
+  return symbol ? symbol : nyr_imported_global_symbol(b, name);
 }
 
 /*

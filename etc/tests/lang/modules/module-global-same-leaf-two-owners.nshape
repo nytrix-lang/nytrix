@@ -1,0 +1,53 @@
+shape module_global_same_leaf_two_owners {
+  family "runtime/modules"
+  generator "embedded"
+  features ["ny", "modules", "globals", "imports"]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect compile_and_run
+  expect_message "MODULE-GLOBAL-SAME-LEAF-OK"
+  source ny <<'NY'
+use core
+
+;; Two state modules each own a global named `zq_blend`. A leaf-only lookup
+;; is ambiguous, so a third module using the bare name through its import
+;; stopped addressing a cell: reads folded to an initializer and stores were
+;; dropped. The Vulkan renderer lost its text blend mode this way, because
+;; the GL state module keeps globals with the same names.
+module state_a(zq_blend, zq_mode){
+   mut zq_blend = 0
+   mut zq_mode = 0
+}
+module state_b(zq_blend, zq_mode){
+   mut zq_blend = 7
+   mut zq_mode = 12
+}
+module user_a(set_a, sum_a){
+   use state_a as sa
+   fn set_a(int blend = 0, int mode = 12) bool {
+      if zq_blend == blend && zq_mode == mode { return false }
+      zq_blend = blend
+      zq_mode = mode
+      true
+   }
+   fn sum_a() int { zq_blend * 100 + zq_mode }
+}
+module user_b(set_b, sum_b){
+   use state_b
+   fn set_b(int blend) bool {
+      zq_blend = blend
+      true
+   }
+   fn sum_b() int { zq_blend * 100 + zq_mode }
+}
+
+assert(user_a.sum_a() == 0 && user_b.sum_b() == 712, "each user starts from its own module's initializers")
+assert(user_a.set_a(2, 12), "a changed value is stored")
+assert(user_a.sum_a() == 212, "the store is visible to a later read in the importing module")
+assert(user_b.sum_b() == 712, "the other owner is untouched")
+assert(!user_a.set_a(2, 12), "an unchanged value compares equal")
+user_b.set_b(3)
+assert(user_b.sum_b() == 312 && user_a.sum_a() == 212, "the second owner updates independently")
+print("MODULE-GLOBAL-SAME-LEAF-OK")
+NY
+}

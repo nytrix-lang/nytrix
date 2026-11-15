@@ -84,13 +84,6 @@ work is tracked in [Performance work](perf.md).
   for the thirty-shape card against a 20 ms budget). Remaining: blend
   operators other than source-over (the renderer has one alpha blend
   pipeline), and glyphs that follow rotation and scale.
-- [ ] **Vulkan tints coloured `gfx.draw_text` brighter than GL.** Found
-  2026-11-15 in the `fontstash` capture: a packed colour drawn through
-  `gfx.draw_text` (`__vkr_draw_text`) comes out with an extra linear-to-sRGB
-  encode on Vulkan (0.6, 0.1, 0.1 shows as 202, 89, 89; GL shows 153, 25,
-  25). White text and the toolkit's batched text
-  (`draw_text_runs_flat_color_ptr`) match on both backends. Acceptance: the
-  same coloured string has equal pixels on Vulkan and GL, with a probe.
 - [ ] **Port/fix `smem` process memory scanner UI (`etc/projects/ui/smem.ny`).**
   Single-file Nytrix port of `x3ric/smem` (https://github.com/x3ric/smem);
   original reference cloned at `/tmp/kilo/smem` (`README.md`, `src/main.rs`,
@@ -137,6 +130,22 @@ work is tracked in [Performance work](perf.md).
   - **Acceptance:** behavior and controls match the upstream README/source for
     supported Linux `/proc` workflows, no compile warnings, stable on native/JIT
     routes used for UI tools, and no regressions in existing UI/tool checks.
+
+### Compiler defects found during this work (open)
+
+- A module global whose name matches a variable anywhere else in the loaded
+  libraries can be lowered as that other value. With `mut alpha = 0` in one
+  module, an importing module's `alpha * 1000 + vc` calls the list-repeat
+  runtime and returns 12 after `alpha = 2`, because the bare-name lookup
+  finds `def alpha = [0, 1]` inside a function of `lib/math/gf.ny`. Renaming
+  the global to a unique name gives 2012. The resolved cell symbol, not the
+  bare name, should drive the operand type.
+- A module global initialised with a negative literal (`mut word = -1`) and
+  assigned from an importing module reads back `nil` through `owner.word`
+  from the root program.
+- With two inline modules that both own a global `x`, the root program's
+  `second.x` reads the first module's cell. Importing modules now resolve
+  the bare name correctly (`lang/modules/module-global-same-leaf-two-owners`).
 
 ## Execution brief
 

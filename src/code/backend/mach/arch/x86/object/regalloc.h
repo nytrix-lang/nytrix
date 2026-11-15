@@ -172,6 +172,69 @@ static size_t mach_home_active_pop(size_t *active, size_t *active_len,
   return result;
 }
 
+/*
+ * Spill-slot coloring. A home only has to be unique while its value is live,
+ * so two values whose live ranges do not overlap can share one slot. The
+ * single-block path above only covers block-local residents; the frame is
+ * dominated by spill slots, which stay live across blocks and calls. Take the
+ * union of every segment of a spilled value as its range, which is a superset
+ * of the true live set and therefore keeps overlapping temp reuse honest.
+ */
+static bool mach_vreg_home_spill_interval(const nyr_x64_mach_enc_t *e,
+                                          size_t vreg,
+                                          mach_home_interval_t *out) {
+  if (!e || !e->mach || !out || !e->mach->vreg_types ||
+      !e->mach->vreg_classes || vreg >= e->mach->vreg_len ||
+      e->mach->vreg_classes[vreg] != NYR_MACH_REGCLASS_GPR ||
+      !e->regalloc.vreg_offsets || e->regalloc.vreg_len != e->mach->vreg_len)
+    return false;
+  if (mach_vreg_home_size(e->mach, vreg) != 8)
+    return false;
+  size_t first = e->regalloc.vreg_offsets[vreg];
+  size_t last = e->regalloc.vreg_offsets[vreg + 1];
+  if (last <= first || last > e->regalloc.segment_len)
+    return false;
+  size_t lo = SIZE_MAX, hi = 0;
+  bool uses_home = false;
+  for (size_t i = first; i < last; ++i) {
+    const nyr_mach_live_segment_t *s = &e->regalloc.segments[i];
+    if (s->vreg != vreg || s->block >= e->mach->block_len ||
+        s->start > s->end || s->end >= e->mach->inst_len)
+      return false;
+    const nyr_mach_block_t *b = &e->mach->blocks[s->block];
+    if (!b->inst_count || s->start < b->first_inst ||
+        s->end >= b->first_inst + b->inst_count)
+      return false;
+    if (s->spill || s->reload || s->color < 0)
+      uses_home = true;
+    if (s->start < lo)
+      lo = s->start;
+    if (s->end > hi)
+      hi = s->end;
+  }
+  if (!uses_home || lo == SIZE_MAX || lo > hi)
+    return false;
+  for (size_t pc = lo; pc <= hi; ++pc) {
+    const nyr_mach_inst_t *in = &e->mach->insts[pc];
+    /*
+     * A frame-loaded value's home identifies its incoming argument home, and
+     * floating predicates materialize through the GPR result path; both keep
+     * their canonical, unshared slots.
+     */
+    if (in->opcode == NYR_MACH_LOAD && in->dst.kind == NYR_MACH_OPERAND_VREG &&
+        in->dst.as.reg == vreg && in->src0.kind == NYR_MACH_OPERAND_FRAME)
+      return false;
+    if (in->opcode == NYR_MACH_CMP && in->dst.kind == NYR_MACH_OPERAND_VREG &&
+        in->dst.as.reg == vreg && mach_is_float(e->mach, &in->src0))
+      return false;
+  }
+  *out = (mach_home_interval_t){.start = lo,
+                                .end = hi,
+                                .vreg = (uint32_t)vreg,
+                                .block = 0};
+  return true;
+}
+
 static bool mach_append_vreg_home(nyr_x64_mach_enc_t *e,
                                   size_t frame_slots_bytes, size_t width,
                                   size_t *used, int *out) {
@@ -183,6 +246,143 @@ static bool mach_append_vreg_home(nyr_x64_mach_enc_t *e,
   if (below_rbp > (size_t)INT_MAX)
     return false;
   *out = -(int)below_rbp;
+  return true;
+}
+
+typedef struct {
+  int off;
+  int new_off;
+  size_t width;
+  size_t weight;
+} mach_home_slot_t;
+
+static int mach_home_slot_hot_cmp(const void *lhs, const void *rhs) {
+  const mach_home_slot_t *a = lhs;
+  const mach_home_slot_t *b = rhs;
+  if (a->weight != b->weight)
+    return a->weight > b->weight ? -1 : 1;
+  return a->off < b->off ? -1 : a->off > b->off;
+}
+
+static int mach_home_offset_low_cmp(const void *lhs, const void *rhs) {
+  int a = *(const int *)lhs;
+  int b = *(const int *)rhs;
+  /* Largest offset is closest to %rbp, hence first inside disp8 reach. */
+  return a < b ? 1 : (a > b ? -1 : 0);
+}
+
+/*
+ * Hot-slot ordering. disp8 frame addressing reaches only the 128 bytes below
+ * %rbp, so which value owns which slot decides three bytes per access. The
+ * coloring pass allocates in live-range order, which says nothing about how
+ * often a slot is touched: a value defined once and spilled everywhere ends up
+ * beside a hot accumulator. Count MACH operand references per vreg, group the
+ * vregs that share a slot, then permute the offsets of equal-width slots so
+ * the most-used homes sit closest to %rbp.
+ *
+ * Only offsets move. Every slot keeps its byte range, its width, and the
+ * disjointness the coloring pass proved, so the frame stays the same size and
+ * no two live values can alias; width-16/32 vector homes are left in place.
+ * NYTRIX_NO_HOT_HOMES=1 keeps allocation order for A/B runs.
+ */
+static bool mach_order_hot_homes(nyr_x64_mach_enc_t *e, int *offs,
+                                 size_t vreg_len) {
+  if (!e || !e->mach || !offs || !vreg_len)
+    return true;
+  const char *skip = getenv("NYTRIX_NO_HOT_HOMES");
+  if (skip && strcmp(skip, "0") != 0 && strcmp(skip, "off") != 0)
+    return true;
+  const nyr_mach_func_t *mach = e->mach;
+  size_t *weights = calloc(vreg_len, sizeof(*weights));
+  mach_home_slot_t *slots = calloc(vreg_len, sizeof(*slots));
+  int *orig = calloc(vreg_len, sizeof(*orig));
+  int *low = calloc(vreg_len, sizeof(*low));
+  bool *home_used = calloc(vreg_len, sizeof(*home_used));
+  if (!weights || !slots || !orig || !low || !home_used) {
+    /* Ordering is an optimization; never fail the compile over it. */
+    free(weights);
+    free(slots);
+    free(orig);
+    free(low);
+    free(home_used);
+    return true;
+  }
+  /*
+   * Only a value that reaches its home competes for a shallow slot. A fully
+   * resident value still appears in many operands, and counting those would
+   * let it push a hot spilled value out of disp8 reach.
+   */
+  bool have_segments =
+      e->regalloc.vreg_offsets && e->regalloc.vreg_len == vreg_len;
+  for (size_t v = 0; v < vreg_len; ++v) {
+    home_used[v] = !have_segments;
+    if (!have_segments)
+      continue;
+    size_t first = e->regalloc.vreg_offsets[v];
+    size_t last = e->regalloc.vreg_offsets[v + 1];
+    if (last > e->regalloc.segment_len)
+      last = e->regalloc.segment_len;
+    for (size_t i = first; i < last; ++i) {
+      const nyr_mach_live_segment_t *seg = &e->regalloc.segments[i];
+      if (seg->spill || seg->reload || seg->color < 0) {
+        home_used[v] = true;
+        break;
+      }
+    }
+  }
+  for (size_t pc = 0; pc < mach->inst_len; ++pc) {
+    const nyr_mach_inst_t *in = &mach->insts[pc];
+    const nyr_mach_operand_t *ops[] = {&in->dst, &in->src0, &in->src1,
+                                       &in->src2};
+    for (size_t k = 0; k < sizeof(ops) / sizeof(ops[0]); ++k)
+      if (ops[k]->kind == NYR_MACH_OPERAND_VREG &&
+          ops[k]->as.reg < vreg_len && home_used[ops[k]->as.reg])
+        ++weights[ops[k]->as.reg];
+    for (size_t k = 0; k < in->args_len; ++k)
+      if (in->args[k].kind == NYR_MACH_OPERAND_VREG &&
+          in->args[k].as.reg < vreg_len && home_used[in->args[k].as.reg])
+        ++weights[in->args[k].as.reg];
+  }
+  size_t slot_len = 0;
+  for (size_t v = 0; v < vreg_len; ++v) {
+    orig[v] = offs[v];
+    if (!offs[v])
+      continue;
+    size_t at = 0;
+    while (at < slot_len && slots[at].off != offs[v])
+      ++at;
+    if (at == slot_len) {
+      slots[at].off = offs[v];
+      slots[at].new_off = offs[v];
+      slots[at].width = mach_vreg_home_size(mach, v);
+      ++slot_len;
+    }
+    slots[at].weight += weights[v];
+  }
+  size_t low_len = 0;
+  for (size_t i = 0; i < slot_len; ++i)
+    if (slots[i].width == 8)
+      low[low_len++] = slots[i].off;
+  qsort(low, low_len, sizeof(*low), mach_home_offset_low_cmp);
+  qsort(slots, slot_len, sizeof(*slots), mach_home_slot_hot_cmp);
+  size_t at = 0;
+  for (size_t i = 0; i < slot_len; ++i)
+    if (slots[i].width == 8 && at < low_len)
+      slots[i].new_off = low[at++];
+  for (size_t v = 0; v < vreg_len; ++v) {
+    if (!orig[v])
+      continue;
+    for (size_t i = 0; i < slot_len; ++i)
+      if (slots[i].off == orig[v]) {
+        offs[v] = slots[i].new_off;
+        break;
+      }
+  }
+  free(weights);
+  free(slots);
+  free(orig);
+  free(low);
+  free(home_used);
   return true;
 }
 
@@ -219,11 +419,27 @@ static bool mach_build_vreg_homes(nyr_x64_mach_enc_t *e,
         break;
       }
   }
+  /*
+   * Spill-slot reuse is opt-out so both layouts can be measured from a single
+   * binary: NYTRIX_NO_SPILL_HOME_COLOR=1 restores one slot per value.
+   */
+  bool spill_color = true;
+  {
+    const char *off_env = getenv("NYTRIX_NO_SPILL_HOME_COLOR");
+    spill_color = !(off_env && strcmp(off_env, "0") != 0 &&
+                    strcmp(off_env, "off") != 0);
+  }
   size_t interval_len = 0;
-  for (size_t v = 0; v < mach->vreg_len; ++v)
+  for (size_t v = 0; v < mach->vreg_len; ++v) {
     if (mach_vreg_home_colorable(e, v, block_has_call,
-                                 &intervals[interval_len]))
+                                 &intervals[interval_len])) {
       ++interval_len;
+      continue;
+    }
+    if (spill_color &&
+        mach_vreg_home_spill_interval(e, v, &intervals[interval_len]))
+      ++interval_len;
+  }
   qsort(intervals, interval_len, sizeof(*intervals), mach_home_interval_cmp);
   size_t *active_homes = calloc(mach->vreg_len, sizeof(*active_homes));
   size_t *free_homes = calloc(mach->vreg_len, sizeof(*free_homes));
@@ -241,10 +457,10 @@ static bool mach_build_vreg_homes(nyr_x64_mach_enc_t *e,
   for (size_t i = 0; i < interval_len; ++i) {
     const mach_home_interval_t *interval = &intervals[i];
     /*
-     * These intervals have exactly one non-spilled segment and no uses
-     * outside their defining block. Call-bearing blocks were excluded above;
-     * other block-local values can share homes because each is dead when
-     * control leaves its block.
+     * Each interval covers every instruction at which its value can be live:
+     * block-local residents use their single segment, spilled values use the
+     * union of their segments. Two values whose ranges are disjoint are never
+     * live at the same time, so they can share one slot.
      */
     while (active_len && home_ends[active_homes[0]] < interval->start)
       free_homes[free_len++] =
@@ -284,6 +500,16 @@ static bool mach_build_vreg_homes(nyr_x64_mach_enc_t *e,
       free(free_homes);
       return mach_err(e, "x64 machine form encode: vreg home overflow");
     }
+  }
+  if (!mach_order_hot_homes(e, offs, mach->vreg_len)) {
+    free(offs);
+    free(intervals);
+    free(block_has_call);
+    free(home_ends);
+    free(home_offs);
+    free(active_homes);
+    free(free_homes);
+    return mach_err(e, "x64 machine form encode: vreg home ordering");
   }
   ny_dbg_heuristic_event(
       "regalloc",

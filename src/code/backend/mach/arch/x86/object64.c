@@ -97,6 +97,13 @@ typedef struct {
    */
   bool loop_carry_seeding;
   /*
+   * Elide a register copy whose source and destination already share a
+   * physical color instead of staging it through %rax. Measured on `knight`:
+   * 498 -> 418 instructions and 5240 -> 5016 bytes of `moves` text.
+   * NYTRIX_NO_SAME_COLOR_COPY restores the staging path for A/B runs.
+   */
+  bool same_color_copy_fold;
+  /*
    * Vector loop carries have a separate allocator proof and XMM/YMM seeding
    * path, so they can be enabled without opting GPR/FPR carries in.
    */
@@ -2466,9 +2473,22 @@ static bool mach_remat_addr_preg(nyr_x64_mach_enc_t *e, int preg,
   return false;
 }
 
+/*
+ * Frame ModRM narrowing is opt-out so the disp8 layout can be A/B measured:
+ * NYTRIX_NO_FRAME_DISP8=1 restores disp32 for every home access.
+ */
+static bool mach_no_frame_disp8(void) {
+  static int cached = -1;
+  if (cached < 0) {
+    const char *v = getenv("NYTRIX_NO_FRAME_DISP8");
+    cached = v && strcmp(v, "0") != 0 && strcmp(v, "off") != 0;
+  }
+  return cached != 0;
+}
+
 static bool mach_rbp_disp(nyr_x64_mach_enc_t *e, unsigned reg, int off) {
   unsigned r = (reg & 7) << 3;
-  if (off >= -128 && off <= 127)
+  if (!mach_no_frame_disp8() && off >= -128 && off <= 127)
     return mach_u8(e, 0x45 | r) && mach_u8(e, (unsigned char)off);
   return mach_u8(e, 0x85 | r) && mach_i32(e, off);
 }
@@ -9677,13 +9697,20 @@ static bool mach_float_fast_eligible(const nyr_mach_func_t *mach) {
   return has_float;
 }
 
-static bool mach_rsp_disp(nyr_x64_mach_enc_t *e, int off) {
-  if (!off)
-    return mach_u8(e, 0x04) && mach_u8(e, 0x24);
-  if (off >= -128 && off <= 127)
-    return mach_u8(e, 0x44) && mach_u8(e, 0x24) &&
+/*
+ * RSP-based ModRM+SIB: always a SIB byte, and disp8 whenever the offset fits
+ * (mod=01) so stack staging stays three bytes shorter than disp32.
+ */
+static bool mach_rsp_disp(nyr_x64_mach_enc_t *e, unsigned reg, int off) {
+  unsigned r = (reg & 7) << 3;
+  bool narrow = !mach_no_frame_disp8();
+  if (narrow && !off)
+    return mach_u8(e, (unsigned char)(0x04 | r)) && mach_u8(e, 0x24);
+  if (narrow && off >= -128 && off <= 127)
+    return mach_u8(e, (unsigned char)(0x44 | r)) && mach_u8(e, 0x24) &&
            mach_u8(e, (unsigned char)off);
-  return mach_u8(e, 0x84) && mach_u8(e, 0x24) && mach_i32(e, off);
+  return mach_u8(e, (unsigned char)(0x84 | r)) && mach_u8(e, 0x24) &&
+         mach_i32(e, off);
 }
 
 static bool mach_load_eax(nyr_x64_mach_enc_t *e, int off) {
@@ -9692,18 +9719,18 @@ static bool mach_load_eax(nyr_x64_mach_enc_t *e, int off) {
 }
 
 static bool mach_store_eax_rsp(nyr_x64_mach_enc_t *e, int off) {
-  return mach_u8(e, 0x89) && mach_rsp_disp(e, off);
+  return mach_u8(e, 0x89) && mach_rsp_disp(e, 0, off);
 }
 
 static bool mach_store_rax_rsp(nyr_x64_mach_enc_t *e, int off) {
   return mach_rex(e, true, false, false, false) && mach_u8(e, 0x89) &&
-         mach_rsp_disp(e, off);
+         mach_rsp_disp(e, 0, off);
 }
 
 static bool mach_load_rax_rsp(nyr_x64_mach_enc_t *e, int off) {
   mach_rax_invalidate(e);
   return mach_rex(e, true, false, false, false) && mach_u8(e, 0x8b) &&
-         mach_rsp_disp(e, off);
+         mach_rsp_disp(e, 0, off);
 }
 
 static bool mach_store_gpr(nyr_x64_mach_enc_t *e, int off, int reg) {
@@ -9947,7 +9974,7 @@ static bool mach_spill_params(nyr_x64_mach_enc_t *e) {
         stack_arg += aggregate.chunks;
       }
       if (!mach_rex(e, true, false, false, false) || !mach_u8(e, 0x8d) ||
-          !mach_u8(e, 0x85) || !mach_i32(e, home) ||
+          !mach_rbp_disp(e, 0, home) ||
           !mach_store_rax(e, e->frame_slot_offsets[slot])) {
         free(params);
         return false;
@@ -10010,13 +10037,14 @@ static bool mach_spill_params(nyr_x64_mach_enc_t *e) {
 }
 
 /*
- * SSE scalar op xmm0, mem: F2/F3 0F opc 85 disp — opc: 58 add 5c sub 59 mul
- * 5e div
+ * SSE scalar op xmm0, mem: F2/F3 0F opc /r — opc: 58 add 5c sub 59 mul 5e
+ * div. The ModRM comes from mach_rbp_disp so a home inside disp8 range costs
+ * five bytes instead of eight.
  */
 static bool mach_sse_op_mem(nyr_x64_mach_enc_t *e, int off, bool f32,
                             unsigned opc) {
   return mach_u8(e, f32 ? 0xf3 : 0xf2) && mach_u8(e, 0x0f) && mach_u8(e, opc) &&
-         mach_u8(e, 0x85) && mach_i32(e, off);
+         mach_rbp_disp(e, 0, off);
 }
 
 bool nyr_native_x64_regalloc_metrics(const nyr_mach_func_t *mach,
@@ -10561,6 +10589,10 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
   e->loop_carry_seeding = loop_carry_env && strcmp(loop_carry_env, "0") != 0 &&
                           strcmp(loop_carry_env, "off") != 0 &&
                           strcmp(loop_carry_env, "false") != 0;
+  const char *no_same_color = getenv("NYTRIX_NO_SAME_COLOR_COPY");
+  e->same_color_copy_fold =
+      !(no_same_color && strcmp(no_same_color, "0") != 0 &&
+        strcmp(no_same_color, "off") != 0);
   /*
    * The vector allocator enables only chains that pass the all-edge proof;
    * its opt-out simply leaves every vector segment home-backed.
@@ -11262,8 +11294,14 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
             return false;
           int sp = mach_vreg_preg(e, in->src0.as.reg);
           int dp = mach_vreg_def_preg(e, in->dst.as.reg);
-          if (sp >= 0 && dp >= 0 && sp != dp) {
-            if (!mach_mov_preg_preg(e, dp, sp))
+          if (sp >= 0 && dp >= 0 && (sp != dp || e->same_color_copy_fold)) {
+            /*
+             * A copy whose source and destination already share a color
+             * needs no move at all. Staging it through %rax produced
+             * `mov %rax,%r13; mov %r13,%rax` pairs around every coalesced
+             * definition (37 adjacent pairs in `knight`'s `moves`).
+             */
+            if (sp != dp && !mach_mov_preg_preg(e, dp, sp))
               return false;
             /*
              * Same bookkeeping as mach_commit_vreg: clobber every other
@@ -11342,7 +11380,7 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
              */
             if (in->src0.kind == NYR_MACH_OPERAND_FRAME) {
               if (!mach_u8(e, 0xc4) || !mach_u8(e, 0xe1) || !mach_u8(e, 0x7e) ||
-                  !mach_u8(e, 0x6f) || !mach_u8(e, 0x85) || !mach_i32(e, a))
+                  !mach_u8(e, 0x6f) || !mach_rbp_disp(e, 0, a))
                 return false;
             } else if (in->src0.kind == NYR_MACH_OPERAND_VREG) {
               if (!mach_load_op_rax(e, &in->src0) || !mach_u8(e, 0xc4) ||
@@ -11355,7 +11393,7 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
              * Store ymm0 back to home.
              */
             if (!mach_u8(e, 0xc4) || !mach_u8(e, 0xe1) || !mach_u8(e, 0x7e) ||
-                !mach_u8(e, 0x7f) || !mach_u8(e, 0x85) || !mach_i32(e, dst))
+                !mach_u8(e, 0x7f) || !mach_rbp_disp(e, 0, dst))
               return false;
             break;
           }
@@ -11818,7 +11856,7 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
             return false;
         } else if (in->src0.kind == NYR_MACH_OPERAND_FRAME) {
           if (!mach_rex(e, true, false, false, false) || !mach_u8(e, 0x8d) ||
-              !mach_u8(e, 0x85) || !mach_i32(e, a) ||
+              !mach_rbp_disp(e, 0, a) ||
               !mach_commit_vreg(e, &in->dst, dst))
             return false;
         } else if (in->src0.kind == NYR_MACH_OPERAND_SYMBOL &&
@@ -12027,10 +12065,10 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
       case NYR_MACH_COS:
         if (!mach_is_f64(mach, &in->dst) || !mach_is_f64(mach, &in->src0))
           return mach_err(e, "x64 machine form encode: unsupported trig type");
-        if (!mach_u8(e, 0xdd) || !mach_u8(e, 0x85) || !mach_i32(e, a) ||
+        if (!mach_u8(e, 0xdd) || !mach_rbp_disp(e, 0, a) ||
             !mach_u8(e, 0xd9) ||
             !mach_u8(e, in->opcode == NYR_MACH_SIN ? 0xfe : 0xff) ||
-            !mach_u8(e, 0xdd) || !mach_u8(e, 0x9d) || !mach_i32(e, dst))
+            !mach_u8(e, 0xdd) || !mach_rbp_disp(e, 3, dst))
           return false;
         break;
       case NYR_MACH_BSWAP64:
@@ -12238,9 +12276,9 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
                                 : in->opcode == NYR_MACH_OR  ? 0xeb
                                                              : 0xef;
             if (!mach_u8(e, 0xc4) || !mach_u8(e, 0xe1) || !mach_u8(e, 0x7d) ||
-                !mach_u8(e, opc) || !mach_u8(e, 0x85) || !mach_i32(e, b) ||
+                !mach_u8(e, opc) || !mach_rbp_disp(e, 0, b) ||
                 !mach_u8(e, 0xc4) || !mach_u8(e, 0xe1) || !mach_u8(e, 0x7d) ||
-                !mach_u8(e, 0x7f) || !mach_u8(e, 0x85) || !mach_i32(e, dst))
+                !mach_u8(e, 0x7f) || !mach_rbp_disp(e, 0, dst))
               return false;
           } else if (vt == NYR_MACH_TYPE_V256_F64) {
             /*
@@ -12256,11 +12294,11 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
                                 : in->opcode == NYR_MACH_MUL ? 0x59
                                                              : 0x5e;
             if (!mach_u8(e, 0xc4) || !mach_u8(e, 0xe1) || !mach_u8(e, 0x7e) ||
-                !mach_u8(e, 0x6f) || !mach_u8(e, 0x85) || !mach_i32(e, a) ||
+                !mach_u8(e, 0x6f) || !mach_rbp_disp(e, 0, a) ||
                 !mach_u8(e, 0xc4) || !mach_u8(e, 0xe1) || !mach_u8(e, 0x7d) ||
-                !mach_u8(e, opc) || !mach_u8(e, 0x85) || !mach_i32(e, b) ||
+                !mach_u8(e, opc) || !mach_rbp_disp(e, 0, b) ||
                 !mach_u8(e, 0xc4) || !mach_u8(e, 0xe1) || !mach_u8(e, 0x7e) ||
-                !mach_u8(e, 0x7f) || !mach_u8(e, 0x85) || !mach_i32(e, dst))
+                !mach_u8(e, 0x7f) || !mach_rbp_disp(e, 0, dst))
               return false;
           } else if (vt == NYR_MACH_TYPE_V128_F64) {
             /*
@@ -12930,13 +12968,13 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
             op = 0x33;
           else {
             if (!mach_rex(e, true, false, false, false) || !mach_u8(e, 0x0f) ||
-                !mach_u8(e, 0xaf) || !mach_u8(e, 0x85) || !mach_i32(e, b) ||
+                !mach_u8(e, 0xaf) || !mach_rbp_disp(e, 0, b) ||
                 !mach_commit_vreg(e, &in->dst, dst))
               return false;
             break;
           }
           if (!mach_rex(e, true, false, false, false) || !mach_u8(e, op) ||
-              !mach_u8(e, 0x85) || !mach_i32(e, b) ||
+              !mach_rbp_disp(e, 0, b) ||
               !mach_commit_vreg(e, &in->dst, dst))
             return false;
         }
@@ -13707,7 +13745,7 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
           int true_slot = mach_slot_off(e, &in->src1);
           if (!mach_rex(e, true, false, false, false) || !mach_u8(e, 0x0f) ||
               !mach_u8(e, cmov_opcode) || !mach_u8(e, 0x85) ||
-              !mach_i32(e, true_slot))
+              !mach_rbp_disp(e, 0, true_slot))
             return false;
         }
         if (!mach_commit_vreg(e, &in->dst, dst))
@@ -13977,7 +14015,7 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
          * cmpq $0, mem; jne rel32
          */
         if (!mach_rex(e, true, false, false, false) || !mach_u8(e, 0x83) ||
-            !mach_u8(e, 0xbd) || !mach_i32(e, a) || !mach_u8(e, 0x00) ||
+            !mach_rbp_disp(e, 7, a) || !mach_u8(e, 0x00) ||
             !mach_u8(e, 0x0f) || !mach_u8(e, 0x85) ||
             !mach_add_patch(e, in->src1.as.block_index) || !mach_i32(e, 0))
           return false;
@@ -14462,9 +14500,8 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
               !mach_rex(e, true, false, false, false) || !mach_u8(e, 0x89) ||
               !mach_u8(e, 0xc6) || /* mov %rax,%rsi */
               !mach_rex(e, true, false, false, false) || !mach_u8(e, 0x8d) ||
-              !mach_u8(e, 0xbc) || !mach_u8(e, 0x24) ||
-              !mach_i32(e, (int32_t)(shadow +
-                                     stack_i * 8)) || /* lea disp(%rsp),%rdi */
+              !mach_rsp_disp(e, 7, (int32_t)(shadow +
+                                             stack_i * 8)) || /* lea disp(%rsp),%rdi */
               !mach_rex(e, true, false, false, false) ||
               !mach_u8(e, 0xc7) || !mach_u8(e, 0xc1) ||
               !mach_i32(e, (int32_t)size) || /* mov $size,%rcx */

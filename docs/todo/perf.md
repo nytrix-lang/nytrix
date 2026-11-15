@@ -53,6 +53,130 @@ fixture or a bench row that passes.
   phi elimination also publishes the `MAY_TRAP` effect bits the verifier now
   requires (`phi_elim_deep_vec8`).
 
+### Assembly and code-size audit (2026-11-15)
+
+- All 77 bench sources now have a `--bench-show-asm` record in the
+  [assembly audit](../learn/asm-audit.md): 91,714,429 bytes of emitted x86-64
+  code, median 26,381 bytes per fixture. The largest programs are generated
+  fixtures (`pbkdf2` 5.6 MB, `sha256` 5.6 MB, `inline` 5.4 MB).
+- The cost is MACH-to-x64 expansion, not a missed opcode idiom. `ny_fn_moves`
+  in `knight` is 188 MACH instructions and 498 x64 instructions; 199 of those
+  reference `(%rbp)` homes. Zero tests already use `test %reg,%reg` and
+  immediates already take the compact forms, so `cmp $0` / `mov $0` rewrites
+  have no targets.
+- Fixed 2026-11-15: the 37 reversed register pairs in `knight` came from the
+  scalar COPY path staging an equal-color copy through `%rax`. The guard now
+  accepts equal colors, so `ny_fn_moves` is 418 x64 instructions (was 498) and
+  5,016 bytes of text (was 5,240) with checksum `340233` and neutral timing.
+  `NYTRIX_NO_SAME_COLOR_COPY=1` restores the old path.
+- Open: single-use copy chains that still stage through `%rax` on the
+  arithmetic path, and a MACH-level copy-forwarding pass for the remaining
+  `copy a,b; copy b,a` shapes outside the scalar COPY emitter.
+
+### Fixed 2026-11-15: i386 object writer stops paying for disp32 everywhere
+
+The i386 ELF object writer emitted every `(%ebp)` home access as mod=10 disp32
+and every frame reservation/adjustment through the `0x81` imm32 group. It now
+uses the disp8 form for offsets in `[-128,127]` (ModRM built from the register
+field; offset 0 still needs mod=01 because base=EBP has no no-displacement
+form) and the imm8 form for `sub $frame,%esp` (frame <= 127) and post-call
+`add $stack,%esp` (stack <= 127). `NYTRIX_NO_I386_DISP8=1` restores the old
+memops for A/B.
+
+Measured with `--native-backend x86 --native-only -O3 --nyr-verify -emit-only
+-o out.o` and `objcopy -O binary --only-section=.text | wc -c`:
+
+| input | before | after | delta |
+| --- | --- | --- | --- |
+| `knight` | 8,379 | 7,909 | -470 (-5.6%) |
+| recursive `fib(12)` via `-e` | 1,036 | 804 | -232 (-22.4%) |
+
+`knight`'s 616-byte frame is out of imm8 reach, so its gain is purely the disp8
+memops; the small recursive fixture shows the combined effect. `--pattern i386`
+13/13 and `--pattern elf32` 45/45 pass, and the ELF32 link-run fixtures link the
+emitted objects with clang and execute them under qemu, so the new encodings are
+verified by running, not just by assembling.
+
+A related generalization was tried and reverted: letting
+`mach_vreg_home_colorable` share a home across the union of a value's resident
+segments is safe but changed nothing on `knight` (5,016-byte `.text`, checksum
+`340233`, stack-relative ops 199 -> 206, all still disp8), because the values
+that stay resident are already register-allocated and the shareable remainder
+are cold spill slots. See `learn/measurements.md`.
+
+### Fixed 2026-11-15: spill-slot reuse in the x64 home layout
+
+`mach_build_vreg_homes` reserved a unique frame slot for every value that was
+not a single-block resident, which is the spilled population that dominates the
+frame. `mach_vreg_home_spill_interval` now colors spilled values by the union of
+all their live segments (GPR class, 8-byte home, must touch its home), so
+values with disjoint live ranges reuse one slot while overlapping ones keep
+separate slots. Incoming-argument homes and floating-predicate GPR results stay
+unshared, as in the resident path. `NYTRIX_NO_SPILL_HOME_COLOR=1` restores one
+slot per value.
+
+| fixture | `.text` | frame bytes |
+| --- | --- | --- |
+| `knight` | 5,016 -> 4,688 (-6.5%) | 616 -> 488 |
+| `compose-local` | 7,040 -> 6,800 (-3.4%) | 632 -> 488 |
+| `combs-test` | 3,152 -> 3,152 | 88 -> 72 |
+| `eq-test` | 3,928 -> 3,912 | 136 -> 136 |
+
+`knight` checksum `340233` is unchanged. `--pattern x86` 223/223, `regalloc`
+11/11, `codegen` 15/15, `copy` 8/8. The full `--bench-correctness` sweep is
+2,357/2,366, and all 9 failures (`doc-rank`, `doc-meta`,
+`sanitizer-thread-race`, `bare/asm-artifacts`, `terminal`,
+`vm-disasm-artifact-diff`, `comptime-contracts`, both parser
+`invalid-byte-stops` fixtures) fail identically with
+`NYTRIX_NO_SPILL_HOME_COLOR=1 NYTRIX_NO_SAME_COLOR_COPY=1`, so they are
+pre-existing.
+
+### Kept 2026-11-15: every x64 frame ModRM goes through the range-checked helper
+
+Eleven hand-rolled `0x85 disp32` frame accesses now use `mach_rbp_disp`, and the
+struct-argument staging `lea disp(%rsp), %rdi` uses a reg-aware
+`mach_rsp_disp`: aggregate-param home `lea`, SSE scalar op with a memory
+operand, v256 `ymm` load/store, packed add/sub/and/or/xor, x87 `fld`/`fstp` for
+sin/cos, `imul` and ALU with a memory operand, `cmov`/`cmp` with a memory
+source, and `cmpq $0, mem; jne` (which now also keeps the `83 /7 ib` imm8:
+`48 83 7d d8 00` instead of `48 83 bd <disp32> 00`).
+
+`NYTRIX_NO_FRAME_DISP8=1` forces disp32 from both helpers, so the whole frame
+encoding is A/B-able from one binary. On `knight` the hatch costs 424 bytes
+(5,112 vs 4,688): that is the cumulative value of frame narrowing, 8.3% of
+`.text`.
+
+The converted sites are cold in the fixtures that build today, so `.text` is
+byte-identical to the pre-change encoder on `knight`, `compose-local`,
+`combs-test` and a small float kernel. The open opportunity is therefore not
+more encoding work but slot ordering: 303 of `knight`'s frame accesses still pay
+disp32 only because their offsets sit below -128 bytes, so ranking homes by
+access frequency and packing the hottest into the low 128 bytes would convert
+them.
+
+### Kept 2026-11-15: hot-slot ordering puts the busiest x64 homes in disp8 reach
+
+Frame narrowing only pays for homes inside the 128 bytes below `%rbp`, and the
+coloring pass allocates in live-range order rather than access order. New
+`mach_order_hot_homes` counts MACH operand references per vreg, but only for
+vregs that actually reach a home, groups the vregs that share a slot, and
+permutes the offsets of equal-width slots so the most-used homes sit closest to
+`%rbp`. Slots keep their byte ranges, widths and proven disjointness, vector
+homes are untouched, and the frame size does not change.
+
+| fixture | allocation order | hot ordering |
+| --- | --- | --- |
+| `knight` | 4,688 | 4,560 (-2.7%) |
+| `compose-local` | 6,800 | 6,712 (-1.3%) |
+
+`NYTRIX_NO_HOT_HOMES=1` restores allocation order for A/B runs. Weighting every
+operand reference instead of only home-using vregs cost `unicode-identifiers` 8
+bytes, because resident values have many operands and no home traffic.
+
+The remaining ceiling is the low 128 bytes themselves: they also hold the
+callee-save slots and the source frame slots, so only a handful of 8-byte homes
+fit in disp8 reach. Ordering frame slots by access frequency is the next lever.
+
 ### Current evidence - still open
 
 - The complete 2026-11-13 run (`./make bench --jobs 4 --bench-run 5
@@ -98,6 +222,25 @@ fixture or a bench row that passes.
   1.68x to 2.29x C across repeated runs (noise 0.4% over 3 samples), NYC 1.62x
   to 1.64x, checksum `340233` matching on NYR/C/NYC. The row is still above the
   1.2x gate and needs the same treatment as the other >1.2x rows.
+- `knight` select folding. Its body is fully unrolled, but every ternary in the
+  expanded loop (`dx`, `sign`, `magnitude`, and the two arms of `dy`) has an
+  induction-value predicate, and nothing folded a `SELECT_I64` whose condition
+  was already a constant. `select_chain_fold` now folds that to a copy of the
+  taken arm (R0) after releasing the dead arm, and `peephole` does the same for
+  conditions it has proven constant by the end of the pipeline. `ny_fn_moves`
+  fell from 565 to 498 instructions with no conditional moves left. The NYR row
+  moved from 1.75x to 1.59-1.62x C (2.33-2.38 ms against C 1.47 ms, 5 runs,
+  1.9-2.3% noise), spills/reloads from 485/903 to 382/800, and checksum
+  `340233` still matches on every route. The residual gap is home traffic: 199 of the 498
+  instructions touch `(%rbp)` homes because cross-block GPR residency is opt-in
+  and loop-only (`NYTRIX_GPR_LOOP_CARRY`), so `x`, `y`, `nx`, `ny`, and `total`
+  reload at each unrolled block boundary. Eight compares also cannot use the
+  flags-fused branch because their condition value is live-out. Relaxing the
+  acyclic unchanged-value carry to allow call-spanning regions in callee-saved
+  colors was measured and reverted: it accepted 478 values but left the object
+  unchanged (`x` and `y` were already resident, and the rest is join-boundary
+  traffic). The next step is acyclic PHI/join coalescing, not another peephole;
+  see the 2026-11-15 measurements.
 - `collatz` verifies with the mask-test fusion: NYR 96µs (2.66x C), LLVM 53µs
   (1.46x C), NYC 45µs (1.24x C), checksum `178` on every route.
 - `currying` fixture parity. Both sources now publish each iteration through a
@@ -108,15 +251,32 @@ fixture or a bench row that passes.
   roughly 270ns per call, which is the effect the row is meant to expose, not a
   fixture artifact.
 
-### New blocker 2026-11-15
+### Fixed 2026-11-15: LLVM rows segfaulted on core-importing fixtures
 
-- LLVM reference rows segfault inside `ny-test --bench` for fixtures that
-  `use core`. `knight` and `currying` report `llvm_rc=139` after `JIT Compile`
-  with `llvm_runs=0` and nine failures, while the identical command line
-  (`ny-full -O3 --jit --jit-engine=mcjit -time <materialized>.ny`) exits 0 and
-  prints the matching checksum. `collatz`, which imports nothing, completes its
-  LLVM row in the harness (53µs). Until this is fixed, the LLVM/C and NYR/LLVM
-  columns stay unavailable for core-importing rows.
+`knight` and `currying` reported `llvm_rc=139` at `-O3` while standalone runs
+of the same materialized source exited 0. The pinned stdlib bitcode was the
+cause, not MCJIT: `./make bench` reused an existing `build/release/core.bc`
+without refreshing it, and the JIT cache key hashed only the artifact _path_,
+so modules linked against an older `core.bc` were reused after it was rebuilt.
+Those modules stored to core globals the stale bitcode no longer defined,
+which resolved to address 0 at the top of `_ny_top_entry`. The bench now
+builds `core_bc` before pinning it, and `ny_jit_cache_path` folds the pinned
+artifact's size and timestamp into the key (`NY_JIT_CACHE_VERSION` 33
+invalidates older entries). After the fix `./make bench knight -O3` passes:
+NYR 2.56ms (1.75x C, 2.00x LLVM), LLVM 1.28-1.31ms (0.88x C), NYR 1.64x NYC,
+checksum `340233` on every route, three runs agreeing within 0.4%.
+- `currying` measures its LLVM row (2.36ms) but still fails the 4.0x NYR/LLVM
+  ratio: a 20000-iteration micro-benchmark puts its indirect closure call at
+  about 588ns while the same loop's direct call costs about 2ns. The
+  adapter rail is not the bulk of it. Closure ABI flags latch once at
+  creation, so a call-site re-mark is a no-op; `ffi.c` now answers those
+  re-marks and the per-call flag lookup from a memoized resolution instead of
+  taking the callable lock, which moved the row from 688x to 668x NYR/C. What
+  the remaining ~580ns is not: not a syscall (`strace -c` shows 2502 calls
+  total, all during compile), and not the generated trampoline, which is three
+  instructions. `perf` is denied here and the emitted artifact is a relocatable
+  object, so the cost is still unattributed; attribute it before changing the
+  adapter again.
 - The bench decoder oracle reports a text divergence on SIB operands
   (`[rdi*1+r9]` internal versus `[r9+rdi]` objdump) and an internal decode count
   of 1102 against objdump's 1112 for `knight`; `collatz` shows the same operand

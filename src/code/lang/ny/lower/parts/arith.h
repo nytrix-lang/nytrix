@@ -475,7 +475,7 @@ static bool nyr_expr_is_immutable_nil(const nyr_builder_t *b, const expr_t *e,
         global_symbol = nyr_globaltab_name(qualified);
     }
   }
-  if (global_symbol || nyr_globaltab_name_tail(e->as.ident.name))
+  if (global_symbol || nyr_global_tail_symbol(b, e->as.ident.name))
     return false;
   const expr_t *value =
       nyr_find_unshadowed_top_level_value(b, e->as.ident.name);

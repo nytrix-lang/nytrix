@@ -106,31 +106,63 @@ static bool ny_i386_obj_i32(nyr_i386_obj_ctx_t *c, int32_t v) {
 }
 
 /*
- * disp32(%ebp) memops: opcode bytes then i32 displacement.
+ * (%ebp) memops. Use the disp8 form when the home offset fits in a signed
+ * byte (mod=01, base=EBP, disp8) and fall back to disp32 (mod=10) otherwise;
+ * mod=00 with base=EBP would mean disp32-without-base, so offset 0 still takes
+ * the disp8 form with a zero byte. This saves three bytes per access for the
+ * low homes, which is where the hottest values live.
  */
-#define NY_I386_EBP_OP(name, ...)                                              \
-  static bool name(nyr_i386_obj_ctx_t *c, int off) {                           \
-    static const unsigned char op[] = {__VA_ARGS__};                           \
-    return ny_i386_obj_bytes(c, op, sizeof(op)) && ny_i386_obj_i32(c, off);    \
+static bool ny_i386_obj_narrow_disp(int off) {
+  static int enabled = -1;
+  if (enabled < 0) {
+    const char *off_env = getenv("NYTRIX_NO_I386_DISP8");
+    enabled = !(off_env && strcmp(off_env, "0") != 0 &&
+                strcmp(off_env, "off") != 0);
   }
-NY_I386_EBP_OP(ny_i386_obj_lea_eax, 0x8d, 0x85)
-NY_I386_EBP_OP(ny_i386_obj_load_eax, 0x8b, 0x85)
-NY_I386_EBP_OP(ny_i386_obj_load_ebx, 0x8b, 0x9d)
-NY_I386_EBP_OP(ny_i386_obj_load_ecx, 0x8b, 0x8d)
-NY_I386_EBP_OP(ny_i386_obj_store_eax, 0x89, 0x85)
-NY_I386_EBP_OP(ny_i386_obj_store_edx, 0x89, 0x95)
-NY_I386_EBP_OP(ny_i386_obj_fldl, 0xdd, 0x85)
-NY_I386_EBP_OP(ny_i386_obj_fstpl, 0xdd, 0x9d)
-NY_I386_EBP_OP(ny_i386_obj_fildl, 0xdb, 0x85)
-NY_I386_EBP_OP(ny_i386_obj_flds, 0xd9, 0x85)
-NY_I386_EBP_OP(ny_i386_obj_fstps, 0xd9, 0x9d)
+  return enabled && off >= -128 && off <= 127;
+}
+
+#define NY_I386_EBP_OP(name, opc, reg)                                         \
+  static bool name(nyr_i386_obj_ctx_t *c, int off) {                           \
+    bool narrow = ny_i386_obj_narrow_disp(off);                                \
+    unsigned char op[] = {(unsigned char)(opc),                                \
+                          (unsigned char)((narrow ? 0x40u : 0x80u) |           \
+                                          ((unsigned)(reg) << 3) | 5u)};       \
+    return ny_i386_obj_bytes(c, op, sizeof(op)) &&                             \
+           (narrow ? ny_i386_obj_u8(c, (unsigned)off)                          \
+                   : ny_i386_obj_i32(c, off));                                 \
+  }
+NY_I386_EBP_OP(ny_i386_obj_lea_eax, 0x8d, 0)
+NY_I386_EBP_OP(ny_i386_obj_load_eax, 0x8b, 0)
+NY_I386_EBP_OP(ny_i386_obj_load_ebx, 0x8b, 3)
+NY_I386_EBP_OP(ny_i386_obj_load_ecx, 0x8b, 1)
+NY_I386_EBP_OP(ny_i386_obj_store_eax, 0x89, 0)
+NY_I386_EBP_OP(ny_i386_obj_store_edx, 0x89, 2)
+NY_I386_EBP_OP(ny_i386_obj_fldl, 0xdd, 0)
+NY_I386_EBP_OP(ny_i386_obj_fstpl, 0xdd, 3)
+NY_I386_EBP_OP(ny_i386_obj_fildl, 0xdb, 0)
+NY_I386_EBP_OP(ny_i386_obj_flds, 0xd9, 0)
+NY_I386_EBP_OP(ny_i386_obj_fstps, 0xd9, 3)
 #undef NY_I386_EBP_OP
 
 static bool ny_i386_obj_mov_imm32(nyr_i386_obj_ctx_t *c, int off,
                                   uint32_t imm) {
-  static const unsigned char op[] = {0xc7, 0x85};
-  return ny_i386_obj_bytes(c, op, sizeof(op)) && ny_i386_obj_i32(c, off) &&
+  bool narrow = ny_i386_obj_narrow_disp(off);
+  unsigned char op[] = {0xc7, (unsigned char)(narrow ? 0x45 : 0x85)};
+  return ny_i386_obj_bytes(c, op, sizeof(op)) &&
+         (narrow ? ny_i386_obj_u8(c, (unsigned)off) : ny_i386_obj_i32(c, off)) &&
          ny_i386_obj_i32(c, (int32_t)imm);
+}
+
+/* Release a stack adjustment: add $imm8,%esp when it fits (0x83 /0). */
+static bool ny_i386_obj_add_esp_imm(nyr_i386_obj_ctx_t *c, int bytes) {
+  if (bytes <= 0)
+    return true;
+  if (bytes <= 127)
+    return ny_i386_obj_bytes(c, (const unsigned char[]){0x83, 0xc4}, 2) &&
+           ny_i386_obj_u8(c, (unsigned)bytes);
+  return ny_i386_obj_bytes(c, (const unsigned char[]){0x81, 0xc4}, 2) &&
+         ny_i386_obj_i32(c, bytes);
 }
 
 static bool ny_i386_obj_store_f64_bits(nyr_i386_obj_ctx_t *c, int off,
@@ -842,10 +874,20 @@ bool nyr_i386_obj_emit_code(nyr_i386_obj_ctx_t *c, const nyr_func_t *nyir,
     return false;
   if (!ny_i386_obj_bytes(c, (const unsigned char[]){0x55, 0x89, 0xe5, 0x53}, 4))
     return false;
-  if (c->frame_bytes > 0 &&
-      (!ny_i386_obj_bytes(c, (const unsigned char[]){0x81, 0xec}, 2) ||
-       !ny_i386_obj_i32(c, c->frame_bytes)))
-    return false;
+  if (c->frame_bytes > 0) {
+    /*
+     * Reserve the frame with the short immediate form when it fits in a
+     * signed byte: sub $imm8,%esp (0x83 /5) saves three bytes.
+     */
+    if (c->frame_bytes <= 127) {
+      if (!ny_i386_obj_bytes(c, (const unsigned char[]){0x83, 0xec}, 2) ||
+          !ny_i386_obj_u8(c, (unsigned)c->frame_bytes))
+        return false;
+    } else if (!ny_i386_obj_bytes(c, (const unsigned char[]){0x81, 0xec}, 2) ||
+               !ny_i386_obj_i32(c, c->frame_bytes)) {
+      return false;
+    }
+  }
   if (!ny_i386_obj_emit_param_spills(c, nyir))
     return false;
   for (size_t i = 0; i < nyir->len; ++i) {
@@ -1220,9 +1262,7 @@ bool nyr_i386_obj_emit_code(nyr_i386_obj_ctx_t *c, const nyr_func_t *nyir,
       }
       if (!ny_i386_obj_i32(c, -4) || !ny_i386_obj_add_reloc(c, symbol, disp))
         return false;
-      if (stack_bytes > 0 &&
-          (!ny_i386_obj_bytes(c, (const unsigned char[]){0x81, 0xc4}, 2) ||
-           !ny_i386_obj_i32(c, stack_bytes)))
+      if (stack_bytes > 0 && !ny_i386_obj_add_esp_imm(c, stack_bytes))
         return false;
       if (in->dst >= 0) {
         if (in->dst < c->value_slots && c->value_f64 && c->value_f64[in->dst]) {

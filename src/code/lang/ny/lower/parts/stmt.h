@@ -446,6 +446,11 @@ static const char *nyr_global_symbol(const nyr_builder_t *b, const char *name) {
     return nyr_find_imported_value((const nyr_builder_impl_t *)b, name)
                ? nyr_globaltab_name_tail(name)
                : NULL;
+  /* The importing module's `use` list decides before the leaf-only lookup,
+   * which is ambiguous when two modules own a global of this name. */
+  symbol = nyr_imported_global_symbol((const nyr_builder_impl_t *)b, name);
+  if (symbol)
+    return symbol;
   symbol = nyr_globaltab_name_tail(name);
   if (symbol)
     return symbol;

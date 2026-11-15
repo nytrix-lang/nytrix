@@ -8854,6 +8854,11 @@ def main() -> int:
             ).strip().lower()
             if shared_core_setting in ("1", "true", "yes", "on"):
                 targets.append("core_bc")
+            elif (cmake_build_dir(build_root, active_kind) / "core.bc").is_file():
+                # "auto" pins the existing core.bc for every sample, so refresh
+                # it first: a stale pin links JIT samples against bitcode that
+                # no longer defines the core globals they store to.
+                targets.append("core_bc")
         elif cmd in ("cross", "cross-run"):
             targets = ["ny"]
         elif cmd == "profile":

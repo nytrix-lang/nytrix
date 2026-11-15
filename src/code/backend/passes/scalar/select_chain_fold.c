@@ -463,6 +463,22 @@ static bool scf_round(nyr_func_t *f, bool *changed) {
       int v = -1;
       int64_t k = 0;
       /*
+       * R0: a condition already folded to a constant picks one arm. Loop
+       * unrolling makes every ternary in the expanded body a compile-time
+       * predicate; replacing the select with a copy of the taken arm also
+       * releases the dead arm so its own fold chain collapses.
+       */
+      int64_t cond_value = 0;
+      if (scf_const(&s, in->a, &cond_value)) {
+        int taken = cond_value != 0 ? in->b : in->c;
+        int dead = cond_value != 0 ? in->c : in->b;
+        nir_make_copy(in, taken);
+        scf_drop_use(&s, in->a);
+        scf_drop_use(&s, dead);
+        *changed = true;
+        continue;
+      }
+      /*
        * R1
        */
       if (scf_is_eq_const(&s, in->a, &v, &k) && scf_single_add_use(&s, in->b)) {
