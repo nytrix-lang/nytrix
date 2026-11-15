@@ -10085,11 +10085,15 @@ ordinary_call:
        callable_global->kind == NY_E_CALL) ||
       (!callee_fn && !known_raw_callable && callable_local && callable_global &&
        callable_global->kind == NY_E_CALL) ||
-      /* Lambda entry points use the expanded callback ABI even without a
-       * captured environment.  Directly calling a zero-capture lambda with
-       * raw source arguments skipped its value/length/tag normalization and
-       * made tagged lambda parameters decode the range-loop raw integer. */
-      local_lambda || global_lambda ||
+      /*
+       * A captured lambda needs the closure ABI, but a zero-capture lambda is
+       * a plain function value and can be invoked directly by address.  The
+       * dynamic bridge is substantially more expensive and defeats direct-call
+       * optimizations on hot paths (currying, callback loops), so keep it only
+       * where an environment is required.
+       */
+      (local_lambda && local_lambda->capture_count > 0) ||
+      (global_lambda && global_lambda->capture_count > 0) ||
       /* Values loaded from a dynamic registry are callable at runtime even
        * though semantic analysis cannot attach a closure representation to
        * the local (`handler(...)`, `predicate(...)`). */

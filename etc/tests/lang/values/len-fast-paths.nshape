@@ -1,0 +1,43 @@
+shape len_fast_paths {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "len", "dict", "list", "abi"]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit; --nyr-run --nyr-run-max-steps=50000000 -O0"
+  expect compile_and_run
+  expect_message "LEN-FAST-PATHS-OK"
+  source ny <<'NY'
+use core
+;; len() checks the typed-buffer handle cache and the native dictionary
+;; registry before the layout probes. Every value kind must keep its length,
+;; and vector-typed dictionaries keep their dimension.
+fn dyn_len(any v) int { len(v) }
+def any d = {"a": 1, "b": 2, "c": 3}
+mut any m = dict(8)
+m["x"] = 1
+def any v3 = {"__type": "vec3", "x": 1.0, "y": 2.0, "z": 3.0}
+def any v2 = {"__type": "Vector2", "x": 1.0, "y": 2.0}
+def any other = {"__type": "point", "x": 1.0}
+def any l = [1.0, 2.0, 3.0, 4.0]
+def any e = []
+def any s = "hello"
+def any t = (1, 2)
+def any st = set([1, 2, 3])
+assert(dyn_len(d) == 3 && dyn_len(m) == 1, "dictionary key counts")
+assert(dyn_len(v3) == 3 && dyn_len(v2) == 2, "vector dictionaries report their dimension")
+assert(dyn_len(other) == 2, "another __type keeps the key count")
+assert(dyn_len(l) == 4 && dyn_len(e) == 0, "list lengths")
+assert(dyn_len(s) == 5 && dyn_len(t) == 2 && dyn_len(st) == 3, "string, tuple and set")
+assert(dyn_len(nil) == 0, "nil is empty")
+mut i = 0
+mut grow = []
+while i < 50 {
+   grow = grow.append(i)
+   assert(dyn_len(grow) == i + 1, "a growing list is never read from a stale handle")
+   i += 1
+}
+m["y"] = 2
+assert(d.len == 3 && m.len == 2 && l.len == 4, "member len after updates")
+print("LEN-FAST-PATHS-OK")
+NY
+}

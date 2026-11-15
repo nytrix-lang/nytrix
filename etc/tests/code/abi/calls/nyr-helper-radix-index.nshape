@@ -1,0 +1,49 @@
+shape nyr_helper_radix_index {
+  family "codegen/native/calls"
+  generator "regression"
+  features ["ny", "native", "regalloc", "calls", "tbuf", "checksum"]
+  meta "Helper-based fixed-depth binary radix indexing must produce correct results at -O2/-O3 (was: segfault)"
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O1; --native-only -O2; --native-only -O3"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.tbuf
+
+;; Fixed-depth binary radix lookup assembled by a helper function.
+;; The reduced form that formerly segfaulted at -O2/-O3: a helper assembles
+;; a leaf index with node = node * 2 + bit and then indexes an i64buf.
+;; Inline equivalent passes; this tests the helper-call path.
+fn leaf_index(int keyval, int bits) int {
+   mut node = 1
+   mut b = bits - 1
+   while b >= 0 {
+      node = node * 2 + ((keyval >> b) & 1)
+      b -= 1
+   }
+   node
+}
+
+def BITS = 20
+def CAP = 2097152
+def keys = i64buf_new(CAP)
+mut i = 0
+while i < 65536 {
+   def keyval = (i * 1103515245 + 12345) % 1048576
+   def node = leaf_index(keyval, BITS)
+   i64buf_store(keys, node, keyval + 1)
+   i += 1
+}
+mut hits = 0
+i = 0
+while i < 1000 {
+   def keyval = (i * 37 + 11) % 1048576
+   def node = leaf_index(keyval, BITS)
+   if i64buf_load(keys, node) != 0 { hits += 1 }
+   i += 1
+}
+;; Expect 62 hits: verified against inline form and C reference.
+assert(hits == 62, "helper-based radix index must match inline result")
+print("checksum=", hits)
+NY
+}

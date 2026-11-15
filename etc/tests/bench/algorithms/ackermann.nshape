@@ -1,0 +1,43 @@
+shape ackermann {
+  family "perf-real"
+  generator "stress"
+  features ["perf", "integer", "recursion", "c-vs-ny", "native", "checksum", "time"]
+  meta "Ackermann-inspired deep recursion (A(3,4) repeated)"
+  timeout 180
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+fn ack(int m, int n) int {
+  if m == 0 { return n + 1 }
+  if n == 0 { return ack(m - 1, 1) }
+  ack(m - 1, ack(m, n - 1))
+}
+
+mut sum = 0
+mut i = 0
+while i < 60 {
+  sum = sum + ack(3, 4)
+  i = i + 1
+}
+print("checksum=", sum)
+NY
+  source c <<'C'
+#include <stdint.h>
+#include <stdio.h>
+
+static int64_t ack(int64_t m, int64_t n) {
+  if (m == 0) return n + 1;
+  if (n == 0) return ack(m - 1, 1);
+  return ack(m - 1, ack(m, n - 1));
+}
+
+int main(void) {
+  int64_t sum = 0;
+  for (int64_t i = 0; i < 60; ++i) sum += ack(3, 4);
+  printf("checksum=%lld\n", (long long)sum);
+  return 0;
+}
+C
+}

@@ -7534,6 +7534,8 @@ static int64_t nyr_static_dyn_tag(const expr_t *e) {
   return -1;
 }
 static bool nyr_global_declared_any(nyr_builder_t *b, const char *name);
+static const char *nyr_global_declared_type(nyr_builder_t *b,
+                                            const char *name);
 static void nyr_record_global_dyn_tag(nyr_builder_impl_t *b, const char *name,
                                       int value) {
   if (!b || !name || value < 0)
@@ -7790,6 +7792,23 @@ static int nyr_emit_runtime_call(nyr_builder_impl_t *b, const char *symbol,
   if (a >= 0 && strcmp(symbol, "rt_any_to_i64") == 0 &&
       nyr_value_is_any_decoded(b, a))
     return a;
+  /*
+   * Dynamic-callable markers are idempotent, but each emitted call is work.
+   * Skip an exact redundant mark when the argument is already the result of
+   * the same marker.
+   */
+  if (a >= 0 && argc == 1 && symbol &&
+      strncmp(symbol, "rt_mark_dynamic_", 16) == 0) {
+    for (size_t i = b->nyir.len; i > 0; --i) {
+      const nyr_inst_t *def = &b->nyir.data[i - 1];
+      if (def->dst != a)
+        continue;
+      if (def->op == NYIR_CALL && def->symbol &&
+          strcmp(def->symbol, symbol) == 0 && def->imm == 1)
+        return a;
+      break;
+    }
+  }
   const char *canonical = nyr_runtime_symbol(symbol);
   if (canonical)
     symbol =
@@ -15239,7 +15258,11 @@ static int nyr_load_global_scalar(nyr_builder_impl_t *b, int address,
        * read its blend mode back as 0 and drew text gamma-encoded). Hand
        * those consumers the canonical tagged word they expect.
        */
-      if (imported_cell && nyr_expr_is_any(b, reference))
+      /* Only an untyped cell: a typed one (`mut ?handle p = 0`, `mut int n
+       * = 0`) gives its consumers the declared type, and tagging a handle
+       * corrupted it (the Vulkan pipeline handle on the executable route). */
+      if (imported_cell && nyr_expr_is_any(b, reference) &&
+          !nyr_global_declared_type(b, name))
         return nyr_emit_runtime_call(b, "rt_tag", value, -1, -1, 1,
                                      NYIR_SCALAR_I64_TAGGED);
       return value;

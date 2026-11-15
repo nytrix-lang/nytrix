@@ -32,6 +32,31 @@ static bool nyr_register_defer(nyr_builder_t *b, const stmt_t *body);
  * turns a dict or list into its raw address).  Module globals may be named
  * with or without their module prefix, so compare leaf names.
  */
+/* The type annotation of a top-level variable, or NULL when it has none. */
+static const char *nyr_global_declared_type(nyr_builder_t *b,
+                                            const char *name) {
+  const stmt_t *decl = nyr_find_top_level_var_stmt(b, name);
+  if (!decl || decl->kind != NY_S_VAR || !name)
+    return NULL;
+  const char *leaf = strrchr(name, '.');
+  leaf = leaf ? leaf + 1 : name;
+  for (size_t i = 0; i < decl->as.var.names.len; ++i) {
+    const char *candidate = decl->as.var.names.data[i];
+    if (!candidate)
+      continue;
+    const char *cleaf = strrchr(candidate, '.');
+    cleaf = cleaf ? cleaf + 1 : candidate;
+    if (strcmp(cleaf, leaf) != 0)
+      continue;
+    const char *type =
+        i < decl->as.var.types.len ? decl->as.var.types.data[i] : NULL;
+    if (!type && decl->as.var.types.len == 1)
+      type = decl->as.var.types.data[0];
+    return type && *type ? type : NULL;
+  }
+  return NULL;
+}
+
 static bool nyr_global_declared_any(nyr_builder_t *b, const char *name) {
   const stmt_t *decl = nyr_find_top_level_var_stmt(b, name);
   if (!decl || decl->kind != NY_S_VAR || !name)

@@ -8957,32 +8957,49 @@ static void hm_desugar_partial_call(ny_hm_state_t *hm, ny_hm_env_list *env,
   if (!actuals)
     return;
   /*
-   * A callable held in a local or module binding does not have a direct
-   * scheme.  Elaborate it as one residual closure that captures the binding
-   * and calls it by name.  Routing the callable through an untyped factory
-   * parameter erased the call signature, and returning the inner closure from
-   * that factory produced an invalid escaping environment.  Identifier and
-   * literal actuals are already stable values, so reading them from the
-   * closure is the same as evaluating them once at construction.
+   * A direct partial application with only stable supplied arguments
+   * (literals/identifiers) can be expressed as one residual closure over
+   * those arguments. This avoids the factory call and, for constant or
+   * non-captured arguments, the per-application closure allocation that the
+   * general factory form requires. Defaults between the supplied prefix and
+   * the last required parameter are evaluated in the residual body so
+   * positional binding remains intact.
    */
-  if (!scheme && callee && callee->kind == NY_E_IDENT) {
-    bool stable_args = true;
-    for (size_t p = 0; p < given; ++p) {
-      expr_t *arg = e->as.call.args.data[p].val;
-      if (!arg || (arg->kind != NY_E_LITERAL && arg->kind != NY_E_IDENT))
-        stable_args = false;
+  bool stable_direct = callee && callee->kind == NY_E_IDENT;
+  for (size_t p = 0; stable_direct && p < given; ++p) {
+    expr_t *arg = e->as.call.args.data[p].val;
+    if (!arg || (arg->kind != NY_E_LITERAL && arg->kind != NY_E_IDENT))
+      stable_direct = false;
+  }
+  if (stable_direct) {
+    expr_t *partial = expr_new(arena, NY_E_FN, e->tok);
+    if (!scheme && type && type->a) {
+      char *ret = hm_type_string(type->a);
+      if (ret)
+        partial->as.lambda.return_type =
+            arena_strndup(arena, ret, strlen(ret));
+      free(ret);
     }
-    if (stable_args) {
-      expr_t *partial = expr_new(arena, NY_E_FN, e->tok);
-      if (type->a) {
-        char *ret = hm_type_string(type->a);
-        if (ret)
-          partial->as.lambda.return_type =
-              arena_strndup(arena, ret, strlen(ret));
-        free(ret);
-      }
-      expr_t *invoke = expr_new(arena, NY_E_CALL, e->tok);
-      expr_t *direct = expr_new(arena, NY_E_IDENT, callee->tok);
+    if (scheme && scheme->stmt && scheme->stmt->kind == NY_S_FUNC &&
+        scheme->stmt->as.fn.return_type) {
+      ny_hm_type_t *result = hm_subst_return_indices(
+          hm, scheme->stmt, type->a, &e->as.call.args, 0, self_name);
+      char *spelling = hm_type_string(result);
+      if (spelling)
+        partial->as.lambda.return_type =
+            arena_strndup(arena, spelling, strlen(spelling));
+      free(spelling);
+    }
+    expr_t *invoke = expr_new(arena, NY_E_CALL, e->tok);
+    expr_t *direct = expr_new(arena, NY_E_IDENT, callee->tok);
+    if (scheme && scheme->stmt && scheme->stmt->kind == NY_S_FUNC) {
+      direct->as.ident.name = ny_intern_get(ny_intern_cstr(
+          scheme->full_name ? scheme->full_name : scheme->name));
+      direct->as.ident.syntax_ctx = callee->as.ident.syntax_ctx;
+      invoke->as.call.callee = direct;
+      invoke->semantic.canonical_callee = direct->as.ident.name;
+      invoke->semantic.canonical_callee_stmt = scheme->stmt;
+    } else {
       const char *direct_name = callee->as.ident.name;
       stmt_t *direct_stmt = NULL;
       ny_hm_env_entry_t *alias_entry = hm_env_entry_ctx(
@@ -8996,65 +9013,75 @@ static void hm_desugar_partial_call(ny_hm_state_t *hm, ny_hm_env_list *env,
       invoke->as.call.callee = direct;
       invoke->semantic.canonical_callee = direct_name;
       invoke->semantic.canonical_callee_stmt = direct_stmt;
-      for (size_t p = 0; p < given; ++p) {
-        actuals[p] = e->as.call.args.data[p].val;
-        vec_push_arena(arena, &invoke->as.call.args, e->as.call.args.data[p]);
-      }
-      for (size_t p = given; p < param_count; ++p) {
-        const char *formal =
-            params && p < params->len ? params->data[p].name : NULL;
-        expr_t *param_def =
-            params && p < params->len ? params->data[p].def : NULL;
-        if (p < required_end && param_def) {
-          expr_t *value = param_def;
-          for (size_t j = 0; j < p; ++j) {
-            const char *prev =
-                params && j < params->len ? params->data[j].name : NULL;
-            if (prev && actuals[j])
-              value = ny_expr_subst(arena, value, prev, actuals[j]);
-          }
-          actuals[p] = value;
-          vec_push_arena(arena, &invoke->as.call.args,
-                         ((call_arg_t){.val = value}));
-          continue;
-        }
-        char name[96];
-        snprintf(name, sizeof(name), "$partial_%d_%zu", hm->next_var++, p);
-        const char *owned_name = arena_strndup(arena, name, strlen(name));
-        if (formal && *formal)
-          owned_name = formal;
-        expr_t *reference = expr_new(arena, NY_E_IDENT, e->tok);
-        reference->as.ident.name = owned_name;
-        param_t parameter = {.name = owned_name, .tok = e->tok};
-        if (p < type->args.len) {
-          char *spelling = hm_type_string(type->args.data[p]);
-          if (spelling)
-            parameter.type = arena_strndup(arena, spelling, strlen(spelling));
-          free(spelling);
-        }
-        if (param_def) {
-          expr_t *value = param_def;
-          for (size_t j = 0; j < p; ++j) {
-            const char *prev =
-                params && j < params->len ? params->data[j].name : NULL;
-            if (prev && actuals[j])
-              value = ny_expr_subst(arena, value, prev, actuals[j]);
-          }
-          parameter.def = value;
-        }
-        actuals[p] = reference;
-        vec_push_arena(arena, &partial->as.lambda.params, parameter);
-        vec_push_arena(arena, &invoke->as.call.args,
-                       ((call_arg_t){.val = reference}));
-      }
-      stmt_t *inner = stmt_new(arena, NY_S_BLOCK, e->tok);
-      stmt_t *inner_return = stmt_new(arena, NY_S_RETURN, e->tok);
-      inner_return->as.ret.value = invoke;
-      vec_push_arena(arena, &inner->as.block.body, inner_return);
-      partial->as.lambda.body = inner;
-      *e = *partial;
-      return;
     }
+    for (size_t p = 0; p < given; ++p) {
+      expr_t *argument = e->as.call.args.data[p].val;
+      actuals[p] = argument;
+      vec_push_arena(arena, &invoke->as.call.args,
+                     ((call_arg_t){.val = argument}));
+    }
+    for (size_t p = given; p < param_count; ++p) {
+      const char *formal =
+          params && p < params->len ? params->data[p].name : NULL;
+      expr_t *param_def =
+          params && p < params->len ? params->data[p].def : NULL;
+      if (p < required_end && param_def) {
+        expr_t *value = param_def;
+        for (size_t j = 0; j < p; ++j) {
+          const char *prev =
+              params && j < params->len ? params->data[j].name : NULL;
+          if (prev && actuals[j])
+            value = ny_expr_subst(arena, value, prev, actuals[j]);
+        }
+        actuals[p] = value;
+        vec_push_arena(arena, &invoke->as.call.args,
+                       ((call_arg_t){.val = value}));
+        continue;
+      }
+      char name[96];
+      snprintf(name, sizeof(name), "$partial_%d_%zu", hm->next_var++, p);
+      const char *owned_name = arena_strndup(arena, name, strlen(name));
+      if (formal && *formal)
+        owned_name = formal;
+      expr_t *reference = expr_new(arena, NY_E_IDENT, e->tok);
+      reference->as.ident.name = owned_name;
+      param_t parameter = {.name = owned_name, .tok = e->tok};
+      if (scheme && scheme->stmt && scheme->stmt->kind == NY_S_FUNC &&
+          p < scheme->stmt->as.fn.params.len) {
+        char *substituted =
+            hm_subst_param_type_text(hm, scheme->stmt, p, &e->as.call.args, 0);
+        parameter.type =
+            substituted ? arena_strndup(arena, substituted, strlen(substituted))
+                        : scheme->stmt->as.fn.params.data[p].type;
+        free(substituted);
+      } else if (p < type->args.len) {
+        char *spelling = hm_type_string(type->args.data[p]);
+        if (spelling)
+          parameter.type = arena_strndup(arena, spelling, strlen(spelling));
+        free(spelling);
+      }
+      if (param_def) {
+        expr_t *value = param_def;
+        for (size_t j = 0; j < p; ++j) {
+          const char *prev =
+              params && j < params->len ? params->data[j].name : NULL;
+          if (prev && actuals[j])
+            value = ny_expr_subst(arena, value, prev, actuals[j]);
+        }
+        parameter.def = value;
+      }
+      actuals[p] = reference;
+      vec_push_arena(arena, &partial->as.lambda.params, parameter);
+      vec_push_arena(arena, &invoke->as.call.args,
+                     ((call_arg_t){.val = reference}));
+    }
+    stmt_t *inner = stmt_new(arena, NY_S_BLOCK, e->tok);
+    stmt_t *inner_return = stmt_new(arena, NY_S_RETURN, e->tok);
+    inner_return->as.ret.value = invoke;
+    vec_push_arena(arena, &inner->as.block.body, inner_return);
+    partial->as.lambda.body = inner;
+    *e = *partial;
+    return;
   }
   expr_t *factory = expr_new(arena, NY_E_FN, e->tok);
   expr_t *partial = expr_new(arena, NY_E_FN, e->tok);

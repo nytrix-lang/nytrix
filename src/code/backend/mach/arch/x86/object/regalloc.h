@@ -386,6 +386,111 @@ static bool mach_order_hot_homes(nyr_x64_mach_enc_t *e, int *offs,
   return true;
 }
 
+/*
+ * Frame-slot ordering by access frequency.
+ *
+ * disp8 frame addressing reaches only the 128 bytes below %%rbp, so which value
+ * owns which slot decides three bytes per access. The coloring pass allocates in
+ * live-range order, which says nothing about how often a slot is touched: a value
+ * defined once and spilled everywhere ends up beside a hot accumulator. Count MACH
+ * operand references per vreg that actually reaches a home, group equal-width slots,
+ * and permute the offsets of 8-byte slots so the most-used homes sit closest to
+ * %%rbp. Only offsets move — every slot keeps its byte range, its width, and the
+ * disjointness the coloring pass proved; the frame stays the same size and no two
+ * live values can alias; width-16/32 vector homes keep their offsets.  
+ * NYTRIX_NO_FRAME_SLOT_ORDER=1 keeps allocation order for A/B runs.
+ */
+static bool mach_order_frame_slots_by_access(nyr_x64_mach_enc_t *e, int *offs,
+                                              size_t frame_slot_len) {
+  if (!e || !e->mach || !offs || !frame_slot_len)
+    return true;
+  const char *skip = getenv("NYTRIX_NO_FRAME_SLOT_ORDER");
+  if (skip && strcmp(skip, "0") != 0 && strcmp(skip, "off") != 0)
+    return true;
+  const nyr_mach_func_t *mach = e->mach;
+  /*
+   * Count references per vreg that reaches a home. A fully resident value
+   * still appears in many operands and counting those would push a hot spilled
+   * value out of disp8 reach. Only count vregs that have a home (are spill/reload).
+   */
+  size_t *weights = calloc(frame_slot_len, sizeof(*weights));
+  bool *home_reachable = calloc(frame_slot_len, sizeof(*home_reachable));
+  if (!weights || !home_reachable) {
+    free(weights);
+    free(home_reachable);
+    return true;
+  }
+  for (size_t pc = 0; pc < mach->inst_len; ++pc) {
+    const nyr_mach_inst_t *in = &mach->insts[pc];
+    const nyr_mach_operand_t *ops[] = {&in->dst, &in->src0, &in->src1,
+                                       &in->src2};
+    for (size_t k = 0; k < sizeof(ops) / sizeof(ops[0]); ++k) {
+      if (ops[k]->kind == NYR_MACH_OPERAND_VREG &&
+          ops[k]->as.reg < frame_slot_len && home_reachable[ops[k]->as.reg])
+        ++weights[ops[k]->as.reg];
+      if (ops[k]->kind == NYR_MACH_OPERAND_FRAME) {
+        int slot = ops[k]->as.frame_index;
+        if (slot >= 0 && (size_t)slot < frame_slot_len)
+          home_reachable[slot] = true;
+      }
+    }
+    for (size_t k = 0; k < in->args_len; ++k)
+      if (in->args[k].kind == NYR_MACH_OPERAND_VREG &&
+          in->args[k].as.reg < frame_slot_len && home_reachable[in->args[k].as.reg])
+        ++weights[in->args[k].as.reg];
+  }
+  /*
+   * Group slots by width (8 = GPR, 16/32 = vector). Vector homes keep their
+   * original offsets; only 8-byte slots are reordered.
+   */
+  int *slot_idx = malloc(frame_slot_len * sizeof(*slot_idx));
+  int *slot_weight = malloc(frame_slot_len * sizeof(*slot_weight));
+  int *slot_off = malloc(frame_slot_len * sizeof(*slot_off));
+  if (!slot_idx || !slot_weight || !slot_off) {
+    free(weights); free(home_reachable); free(slot_idx); free(slot_weight); free(slot_off);
+    return true;
+  }
+  for (size_t slot = 0; slot < frame_slot_len; ++slot) {
+    slot_idx[slot] = (int)slot;
+    slot_weight[slot] = (int)weights[slot];
+    slot_off[slot] = offs[slot];
+  }
+  /* Sort 8-byte slots by weight descending; keep non-8-byte in place. */
+  { size_t write = 0;
+    for (size_t read = 0; read < frame_slot_len; ++read) {
+      if (slot_off[read] != 0 && mach_vreg_home_size(mach, read) == 8) {
+        slot_idx[write] = slot_idx[read];
+        slot_weight[write] = slot_weight[read];
+        ++write;
+      }
+    }
+    size_t n_8 = write;
+    /* Bubble sort the 8-byte slots by weight (typically small n_8). */
+    for (size_t i = 0; i < n_8; ++i)
+      for (size_t j = i + 1; j < n_8; ++j)
+        if (slot_weight[i] < slot_weight[j]) {
+          int w = slot_weight[i]; slot_weight[i] = slot_weight[j]; slot_weight[j] = w;
+          int idx = slot_idx[i]; slot_idx[i] = slot_idx[j]; slot_idx[j] = idx;
+        }
+    /* Assign new offsets to 8-byte slots starting from the lowest (closest
+     * to %%rbp). The first n_8 offsets below %%rbp + cs_slots*8 are the
+     * disp8 reach.  We place them sequentially, keeping the existing
+     * displacement-range invariant.
+     */
+    int base_off = (int)((size_t)e->cs_slots * 8u);
+    for (size_t i = 0; i < n_8; ++i) {
+      int slot = slot_idx[i];
+      offs[slot] = base_off + (int)(i * 8u);
+    }
+    /* Restore non-8-byte slots to their original offsets. */
+    for (size_t slot = 0; slot < frame_slot_len; ++slot)
+      if (slot_off[slot] == 0 || mach_vreg_home_size(mach, slot) != 8)
+        offs[slot] = slot_off[slot];
+  }
+  free(weights); free(slot_idx); free(slot_weight); free(slot_off);
+  return true;
+}
+
 static bool mach_build_vreg_homes(nyr_x64_mach_enc_t *e,
                                   size_t frame_slots_bytes) {
   if (!e || !e->mach)
@@ -500,6 +605,9 @@ static bool mach_build_vreg_homes(nyr_x64_mach_enc_t *e,
       free(free_homes);
       return mach_err(e, "x64 machine form encode: vreg home overflow");
     }
+  }
+  if (!mach_order_frame_slots_by_access(e, offs, mach->vreg_len)) {
+    /* fall through: hot-home ordering is a separate optimization */
   }
   if (!mach_order_hot_homes(e, offs, mach->vreg_len)) {
     free(offs);

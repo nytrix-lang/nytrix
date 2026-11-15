@@ -1,0 +1,95 @@
+shape viterbi {
+  family "perf-real"
+  generator "stress"
+  features ["perf", "integer", "dynamic-programming", "c-vs-ny", "native", "checksum", "time"]
+  meta "Viterbi trellis, 64 states by 512 observations"
+  timeout 180
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.time
+use core.tbuf
+;; Viterbi maximum-likelihood path over an integer trellis. Transition weights
+;; are deterministic, so the final score is exactly comparable with C.
+def S = 64
+def T = 512
+def cur = i64buf_new(S)
+def nxt = i64buf_new(S)
+mut j = 0
+while j < S {
+   i64buf_store(cur, j, j % 17)
+   j += 1
+}
+def int t0 = ticks()
+mut t = 0
+while t < T {
+   mut k = 0
+   while k < S {
+      mut best = -1000000000
+      mut sj = 0
+      while sj < S {
+         def cand = i64buf_load(cur, sj) + ((sj * 13 + k * 7 + t * 3) % 101)
+         if cand > best { best = cand }
+         sj += 1
+      }
+      i64buf_store(nxt, k, best)
+      k += 1
+   }
+   k = 0
+   while k < S {
+      i64buf_store(cur, k, i64buf_load(nxt, k))
+      k += 1
+   }
+   t += 1
+}
+mut ck = 0
+j = 0
+while j < S {
+   ck = (ck + i64buf_load(cur, j)) % 1000000007
+   j += 1
+}
+def int t1 = ticks()
+print("checksum=", ck)
+print("elapsed_ns=", t1 - t0)
+NY
+  source c <<'C'
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+
+static int64_t now_ns(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0;
+    return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+}
+
+int main(void) {
+    const int S = 64, T = 512;
+    int64_t *cur = malloc((size_t)S * sizeof(int64_t));
+    int64_t *nxt = malloc((size_t)S * sizeof(int64_t));
+    for (int j = 0; j < S; j++) cur[j] = j % 17;
+    int64_t t0 = now_ns();
+    for (int t = 0; t < T; t++) {
+        for (int k = 0; k < S; k++) {
+            int64_t best = -1000000000LL;
+            for (int sj = 0; sj < S; sj++) {
+                int64_t cand = cur[sj] + (sj * 13 + k * 7 + t * 3) % 101;
+                if (cand > best) best = cand;
+            }
+            nxt[k] = best;
+        }
+        for (int k = 0; k < S; k++) cur[k] = nxt[k];
+    }
+    int64_t ck = 0;
+    for (int j = 0; j < S; j++) ck = (ck + cur[j]) % 1000000007LL;
+    int64_t t1 = now_ns();
+    printf("checksum=%lld\n", (long long)ck);
+    if (t1 <= t0) t1 = t0 + 1;
+    printf("elapsed_ns=%lld\n", (long long)(t1 - t0));
+    free(cur); free(nxt);
+    return 0;
+}
+C
+}

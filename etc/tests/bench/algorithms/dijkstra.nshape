@@ -1,0 +1,133 @@
+shape dijkstra {
+  family "perf-real"
+  generator "stress"
+  features ["perf", "integer", "graph", "shortest-path", "c-vs-ny", "native", "checksum", "time"]
+  meta "Dense Dijkstra over a 384-vertex graph, 64 sources"
+  timeout 180
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.time
+use core.tbuf
+;; Dense O(V^2) Dijkstra. Distinct from sssp (Bellman-Ford): this exercises the
+;; selection scan and edge relaxation, not repeated full-edge passes.
+def N = 384
+def BIG = 1000000000
+def w = i64buf_new(N * N)
+def dist = i64buf_new(N)
+def done = i64buf_new(N)
+fn run(ptr w, ptr dist, ptr done, int src, int n) int {
+   mut i = 0
+   while i < n {
+      i64buf_store(dist, i, BIG)
+      i64buf_store(done, i, 0)
+      i += 1
+   }
+   i64buf_store(dist, src, 0)
+   mut it = 0
+   while it < n {
+      mut best = -1
+      mut bd = BIG
+      mut v = 0
+      while v < n {
+         if i64buf_load(done, v) == 0 && i64buf_load(dist, v) < bd {
+            bd = i64buf_load(dist, v)
+            best = v
+         }
+         v += 1
+      }
+      if best < 0 {
+         it = n
+      } else {
+         i64buf_store(done, best, 1)
+         mut u = 0
+         while u < n {
+            def nd = bd + i64buf_load(w, best * n + u)
+            if i64buf_load(done, u) == 0 && nd < i64buf_load(dist, u) {
+               i64buf_store(dist, u, nd)
+            }
+            u += 1
+         }
+         it += 1
+      }
+   }
+   0
+}
+mut i = 0
+while i < N * N {
+   i64buf_store(w, i, (i * 31 + 7) % 97 + 1)
+   i += 1
+}
+i = 0
+while i < N {
+   i64buf_store(w, i * N + i, 0)
+   i += 1
+}
+def int t0 = ticks()
+mut ck = 0
+mut src = 0
+while src < 64 {
+   run(w, dist, done, src, N)
+   mut j = 0
+   while j < N {
+      ck = (ck + i64buf_load(dist, j)) % 1000000007
+      j += 1
+   }
+   src += 1
+}
+def int t1 = ticks()
+print("checksum=", ck)
+print("elapsed_ns=", t1 - t0)
+NY
+  source c <<'C'
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+
+static int64_t now_ns(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0;
+    return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+}
+
+static void run(int64_t *w, int64_t *dist, int64_t *done, int src, int n) {
+    for (int i = 0; i < n; i++) { dist[i] = 1000000000; done[i] = 0; }
+    dist[src] = 0;
+    for (int it = 0; it < n; it++) {
+        int best = -1;
+        int64_t bd = 1000000000;
+        for (int v = 0; v < n; v++)
+            if (!done[v] && dist[v] < bd) { bd = dist[v]; best = v; }
+        if (best < 0) break;
+        done[best] = 1;
+        for (int u = 0; u < n; u++) {
+            int64_t nd = bd + w[best * n + u];
+            if (!done[u] && nd < dist[u]) dist[u] = nd;
+        }
+    }
+}
+
+int main(void) {
+    const int N = 384;
+    int64_t *w = malloc((size_t)N * N * sizeof(int64_t));
+    int64_t *dist = malloc((size_t)N * sizeof(int64_t));
+    int64_t *done = malloc((size_t)N * sizeof(int64_t));
+    for (int i = 0; i < N * N; i++) w[i] = (i * 31 + 7) % 97 + 1;
+    for (int i = 0; i < N; i++) w[i * N + i] = 0;
+    int64_t t0 = now_ns();
+    int64_t ck = 0;
+    for (int src = 0; src < 64; src++) {
+        run(w, dist, done, src, N);
+        for (int j = 0; j < N; j++) ck = (ck + dist[j]) % 1000000007LL;
+    }
+    int64_t t1 = now_ns();
+    printf("checksum=%lld\n", (long long)ck);
+    if (t1 <= t0) t1 = t0 + 1;
+    printf("elapsed_ns=%lld\n", (long long)(t1 - t0));
+    free(w); free(dist); free(done);
+    return 0;
+}
+C
+}

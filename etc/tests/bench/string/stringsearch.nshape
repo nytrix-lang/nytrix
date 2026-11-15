@@ -1,0 +1,108 @@
+shape stringsearch {
+  family "perf-real"
+  generator "stress"
+  features ["perf", "integer", "string", "search", "c-vs-ny", "native", "checksum", "time"]
+  meta "Boyer-Moore-Horspool search over a 1 MiB byte text"
+  timeout 180
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.time
+use core.tbuf
+;; Boyer-Moore-Horspool: 12-byte pattern over a 1 MiB text. The text has an
+;; embedded match every 4096 bytes and enough natural noise to exercise skips.
+def N = 1048576
+def M = 12
+def text = i64buf_new(N)
+def pat = i64buf_new(M)
+def skip = i64buf_new(26)
+mut i = 0
+while i < N {
+   i64buf_store(text, i, (i * 37 + i / 13) % 26)
+   i += 1
+}
+i = 0
+while i < M {
+   i64buf_store(pat, i, i)
+   i += 1
+}
+mut base = 0
+while base + M <= N {
+   mut k = 0
+   while k < M {
+      i64buf_store(text, base + k, k)
+      k += 1
+   }
+   base += 4096
+}
+mut s = 0
+while s < 26 {
+   i64buf_store(skip, s, M)
+   s += 1
+}
+mut k = 0
+while k < M - 1 {
+   i64buf_store(skip, i64buf_load(pat, k), M - 1 - k)
+   k += 1
+}
+def int t0 = ticks()
+mut count = 0
+mut pos = 0
+while pos + M <= N {
+   mut j = M - 1
+   while j >= 0 && i64buf_load(text, pos + j) == i64buf_load(pat, j) {
+      j -= 1
+   }
+   if j < 0 {
+      count += 1
+      pos += M
+   } else {
+      pos += i64buf_load(skip, i64buf_load(text, pos + M - 1))
+   }
+}
+def int t1 = ticks()
+print("checksum=", count)
+print("elapsed_ns=", t1 - t0)
+NY
+  source c <<'C'
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <time.h>
+
+static int64_t now_ns(void) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0;
+    return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+}
+
+int main(void) {
+    const int N = 1048576, M = 12;
+    int64_t *text = malloc((size_t)N * sizeof(int64_t));
+    int64_t *pat = malloc((size_t)M * sizeof(int64_t));
+    int64_t *skip = malloc(26 * sizeof(int64_t));
+    for (int i = 0; i < N; i++) text[i] = (i * 37 + i / 13) % 26;
+    for (int i = 0; i < M; i++) pat[i] = i;
+    for (int base = 0; base + M <= N; base += 4096)
+        for (int k = 0; k < M; k++) text[base + k] = k;
+    for (int s = 0; s < 26; s++) skip[s] = M;
+    for (int k = 0; k < M - 1; k++) skip[pat[k]] = M - 1 - k;
+    int64_t t0 = now_ns();
+    int64_t count = 0;
+    int pos = 0;
+    while (pos + M <= N) {
+        int j = M - 1;
+        while (j >= 0 && text[pos + j] == pat[j]) j--;
+        if (j < 0) { count++; pos += M; }
+        else pos += skip[text[pos + M - 1]];
+    }
+    int64_t t1 = now_ns();
+    printf("checksum=%lld\n", (long long)count);
+    if (t1 <= t0) t1 = t0 + 1;
+    printf("elapsed_ns=%lld\n", (long long)(t1 - t0));
+    free(text); free(pat); free(skip);
+    return 0;
+}
+C
+}

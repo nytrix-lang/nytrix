@@ -23,6 +23,16 @@ typedef struct {
   bool limit_is_const;
   bool trip_count_known;
   uint64_t trip_count;
+  /* Symbolic trip count `trip_expr_pos - trip_expr_neg + trip_expr_const`
+   * when provable (e.g. entered loop with invariant bounds). */
+  bool trip_expr_known;
+  int trip_expr_pos;
+  int trip_expr_neg;
+  int64_t trip_expr_const;
+  /* Exit value/range facts for the induction variable after loop exit. */
+  bool exit_value_known;
+  bool exit_lb_known;
+  int64_t exit_lb;
   /* Constant bounds from operand range facts, for loops whose start or limit
    * is symbolic. `body_min/body_max` cover values that pass the exit test;
    * `iv_min/iv_max` also cover the final failing test, which the exit block

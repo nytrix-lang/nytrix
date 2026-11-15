@@ -74,6 +74,10 @@ work is tracked in [Performance work](perf.md).
   `rt_heap_ptr_registry_has` 4%. `rt_addr_readable` was 22% plus 9% kernel
   time in `mincore`; a page bitmap of runtime-owned ranges and a two-entry
   cache in front of the mapping snapshot's binary search brought it down.
+  `len()` now checks the typed-buffer handle cache and the native
+  dictionary registry before the layout probes (182 -> 42 ns on a dict,
+  67 -> 13 ns on a list); `ny_native_dict_ptr` (12.5%) and `rt_len` (7.7%)
+  are still the top two, called mostly from JIT code through `rt_len`.
   Acceptance: no single classifier above 3% of samples in an idle engine
   frame, with the `lang/memory` fixtures passing.
 
@@ -148,6 +152,16 @@ work is tracked in [Performance work](perf.md).
   - **Acceptance:** behavior and controls match the upstream README/source for
     supported Linux `/proc` workflows, no compile warnings, stable on native/JIT
     routes used for UI tools, and no regressions in existing UI/tool checks.
+
+### Compiler defects found during this work (open)
+
+- The engine built as a standalone executable (`--run=none --output`, -O1
+  and -O3) crashes on Vulkan in its first frame: `_select_static_draw_pipeline`
+  passes the line pipeline as a tagged word (`0x34091021` for handle
+  `0x1a048810`) to `vkCmdBindPipeline`. The same engine runs on the default
+  LLVM route and `ny --native-only`; a compiler from 2026-11-13 also crashed
+  on this route (earlier, in OpenEXR `findSlice`). A minimal module-global
+  `?handle` written in one module and read in another does not reproduce it.
 
 ## Execution brief
 
