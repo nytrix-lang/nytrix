@@ -1,0 +1,37 @@
+shape classify_word_after_protected_page {
+  family "runtime/memory"
+  generator "embedded"
+  features ["ny", "runtime", "memory"]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect compile_and_run
+  expect_message "CLASSIFY-AFTER-PROTECTED-PAGE-OK"
+  source ny <<'NY'
+use core
+;; A dynamic word that happens to be the first address of a mapping is
+;; classified by reading the header in front of it. When the page in front
+;; is reserved but not readable (the tail of a glibc arena, a stack guard),
+;; that read must be refused: a probe that only asks whether the page is
+;; mapped let len() and the truth test fault here.
+#linux {
+   extern "" {
+      fn probe_mmap(ptr addr, u64 length, i32 prot, i32 flags, i32 fd, i64 offset) ptr as "mmap"
+      fn probe_mprotect(ptr addr, u64 length, i32 prot) i32 as "mprotect"
+   }
+   def base = probe_mmap(0, 8192, 3, 34, -1, 0)
+   assert(int(base) > 4096, "anonymous mapping")
+   assert(probe_mprotect(base, 4096, 0) == 0, "first page made unreadable")
+   def any word = base + 4096
+   mut hits = 0
+   mut i = 0
+   while i < 64 {
+      if word { hits += 1 }
+      if len(word) >= 0 { hits += 1 }
+      if type(word) != "str" { hits += 1 }
+      i += 1
+   }
+   assert(hits == 192, "every classification of the word returned")
+}
+print("CLASSIFY-AFTER-PROTECTED-PAGE-OK")
+NY
+}

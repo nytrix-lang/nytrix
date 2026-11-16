@@ -1588,7 +1588,19 @@ static bool nyr_lower_var(nyr_builder_t *b, const stmt_t *s) {
         is_f64 || is_f32 || is_cstr || raw_scalar_ternary ||
         (declared_type && (strcmp(declared_type, "bool") == 0 ||
                            ny_native_type_name_is_int(declared_type)));
-    if (canonical_dynamic_init && !declared_raw_scalar) {
+    /* An assignment carries no annotation of its own, so the declaration's
+     * `ptr`/`handle` contract is read from the existing slot.  An imported
+     * typed cell (`target = _line_pipeline`) can keep a conservative dynamic
+     * expression fact while its load is the raw word; flipping the slot to
+     * tagged here stored `rt_tag(handle)` next to the raw initializer. */
+    bool prior_raw_handle_slot =
+        !v->is_decl && prior_raw_integer_slot && prior_type_name &&
+        (ny_native_type_name_is_ptr(prior_type_name) ||
+         strcmp(prior_type_name[0] == '?' ? prior_type_name + 1
+                                          : prior_type_name,
+                "handle") == 0);
+    if (canonical_dynamic_init && !declared_raw_scalar &&
+        !prior_raw_handle_slot) {
       is_any = true;
       is_f64 = false;
       is_f32 = false;

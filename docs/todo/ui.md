@@ -103,39 +103,42 @@ work is tracked in [Performance work](perf.md).
   Acceptance: no single classifier above 3% of samples in an idle engine
   frame, with the `lang/memory` fixtures passing.
 
-### Compiler defects found during this work (open)
-
-- The engine built as a standalone executable (`--run=none --output`, -O1
-  -O1, -O3 and -O0) crashes on Vulkan in its first frame: `_select_static_draw_pipeline`
-  passes the line pipeline as a tagged word (`0x34091021` for handle
-  `0x1a048810`) to `vkCmdBindPipeline`. The same engine runs on the default
-  LLVM route and `ny --native-only`; a compiler from 2026-11-13 also crashed
-  on this route (earlier, in OpenEXR `findSlice`). A minimal module-global
-  `?handle` written in one module and read in another does not reproduce it.
-
 ## Handoff notes (2026-11-16)
 
 Where the last session stopped, so the next one can resume without
 re-deriving it.
 
-- **Next item in progress: standalone engine crash** (compiler defects
-  above). Reproduce: `ny --native-only -O1 --run=none --output eng.exe
-  etc/projects/ui/engine.ny`, run under headless Weston with
-  `NY_UI_RENDER_BACKEND=vk NYTRIX_UI_REPLAY=1 NYTRIX_UI_REPLAY_BACKEND=vk
-  NYTRIX_FIXTURE_FRAMES=30`; -O0 executables crash the same way, JIT routes
-  do not. Found so far: the global `core.os.ui.render.vk.state._line_pipeline`
-  holds the raw handle (gdb watchpoint), but in
-  `vk/draw.ny:_select_static_draw_pipeline` the executable route lowers
-  `target = _line_pipeline` (and the other pipeline globals) through
-  `rt_tag`, i.e. the `mut ?handle target` local is a dynamic slot there and
-  a raw one on the JIT route (diff the function with `NY_DUMP_FN=
-  core.os.ui.render.vk.draw._select_static_draw_pipeline` on both routes).
-  Treating declared `ptr`/`handle` locals as raw in the stmt.h slot join
-  (`declared_raw_scalar`) did NOT fix it and was reverted; the dynamic slot
-  decision comes from another rule (look at `prior_dynamic_slot` and
-  `canonical_dynamic_init` for the declaration, and why `nyr_expr_is_any`
-  differs for imported cells between `--run=none` and the JIT). A small
-  two-module `?handle` repro does not reproduce it.
+- **Standalone engine crash: fixed and removed from the list.** Two causes.
+  (1) `stmt.h`: an assignment to a declared `ptr`/`?handle` local from an
+  expression carrying a dynamic fact flipped the slot to tagged (the
+  declaration's type is not on the assignment; it is now read from the
+  existing slot). (2) An intermittent startup segfault in `rt_len` ->
+  `is_v_str`: the runtime's readability probe used `mincore`, which accepts
+  `PROT_NONE` pages (glibc arena tails); it now asks the kernel to read a
+  byte (`process_vm_readv`, `mincore` fallback). Evidence: `ny --native-only
+  -O1 --run=none --output eng.exe etc/projects/ui/engine.ny` under headless
+  Weston on Vulkan, 12 of 12 runs render 30 frames (before: first-frame
+  crash, then 1 in 3). Fixtures: `lang/memory/classify-word-after-protected-page`
+  (fails before the fix) and `lang/modules/handle-local-assign-from-imported-cell`
+  (shape coverage only: no small program reproduces the dynamic fact, which
+  needs the stdlib Vulkan modules).
+- **P0 design notes (nothing implemented).** Massif on the `-O3 -g` exe, 400
+  mock frames, 2026-11-16: live heap 49 MB -> 88 MB; growth is lists 25 MB
+  (`rt_tbuf_new_impl` 20, append growth 5: a grown list keeps its old block
+  as a forwarding header), dicts 7.4 MB, `rt_malloc` 6.3 MB. Lists and
+  dicts have no free path at all, and the dict registry, the typed-buffer
+  page bitmap, and the map oracle's page bitmap assume objects are
+  immortal, so any collector must also retire those entries. Candidate
+  design: track objects allocated on the main thread since the last
+  collection, and at a frame boundary scan conservatively only the pages
+  written since then (Linux soft-dirty: `/proc/self/clear_refs` +
+  `pagemap`), skipping unmarked young objects; free what is unreached.
+  Other Ny threads must be stopped during the scan.
+- Suite state with these fixes (`lang` + `code/probes`, 75% through when the
+  session ended): the six known failures plus
+  `ownership/generated-allowance-flow-differential` and
+  `execution/currying:automatic_partial_application`, which also fail on a
+  build without these changes.
 - **P2** has not been touched since its entry was written.
 - **P1** remaining: fractional scale (needs `wp_viewport`/buffer scale,
   swapchain/EGL resize, toolkit scale), IME (text-input-v3), clipboard, and

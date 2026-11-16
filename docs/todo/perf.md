@@ -12,7 +12,6 @@ Working rules:
 
 ## NYR
 
-- [x] **Benchmark corpus coverage (2026-11-15).** The 19 and 14 paired Ny/C fixtures added 2026-11-15 are present in `etc/tests/bench` with checksums and harness coverage documented in [measurements](../learn/measurements.md#benchmark-corpus-expansion-2026-11-15) and [measurements](../learn/measurements.md#additional-paired-cny-corpus-shapes-2026-11-15); focused `ny-test --bench` runs verified checksum agreement across routes for these fixtures.
 - [ ] **At most 1.2x of C on every backend.** No valid, comparable benchmark
   above 1.2x on NYR, NYC, or LLVM. Accept: a fresh complete `./make bench`
   report on an idle host with valid checksums, stable measurements, and

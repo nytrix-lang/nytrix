@@ -44,6 +44,14 @@ enum { RT_NATIVE_TBUF_HEADER = 32 };
 #include <errno.h>
 #include <fcntl.h>
 #include <sys/mman.h>
+#ifdef __linux__
+#include <sys/uio.h>
+/* Declared here: runtime units are not all built with _GNU_SOURCE. */
+extern ssize_t process_vm_readv(pid_t pid, const struct iovec *local_iov,
+                                unsigned long liovcnt,
+                                const struct iovec *remote_iov,
+                                unsigned long riovcnt, unsigned long flags);
+#endif
 #include <unistd.h>
 #ifdef __APPLE__
 #include <mach/mach.h>
@@ -498,6 +506,38 @@ static inline int rt_addr_probe_os(uintptr_t p, size_t n) {
   uintptr_t start = p & ~mask;
   uintptr_t end = (p + n - 1) & ~mask;
   unsigned char vec = 0;
+#ifdef __linux__
+  /*
+   * mincore answers "is this page mapped", not "can it be read": a PROT_NONE
+   * reservation (the unused tail of a glibc arena, a thread stack guard)
+   * passes it, and the header load that follows faults.  Have the kernel
+   * copy one byte per page instead; it reports EFAULT for anything that is
+   * not readable.  Sandboxes that forbid the call fall back to mincore.
+   */
+  static _Atomic int vm_read_unavailable = 0;
+  if (!atomic_load_explicit(&vm_read_unavailable, memory_order_relaxed)) {
+    int saved_errno = errno;
+    pid_t self = getpid();
+    uintptr_t cur = p;
+    for (;;) {
+      struct iovec local = {&vec, 1};
+      struct iovec remote = {(void *)cur, 1};
+      if (process_vm_readv(self, &local, 1, &remote, 1, 0) != 1) {
+        int err = errno;
+        errno = saved_errno;
+        if (err == EFAULT)
+          return 0;
+        atomic_store_explicit(&vm_read_unavailable, 1, memory_order_relaxed);
+        break;
+      }
+      if ((cur & ~mask) == end) {
+        errno = saved_errno;
+        return 1;
+      }
+      cur = (cur & ~mask) + (uintptr_t)ps;
+    }
+  }
+#endif
   for (uintptr_t cur = start; cur <= end; cur += (uintptr_t)ps) {
     if (mincore((void *)cur, (size_t)ps, (void *)&vec) != 0)
       return 0;

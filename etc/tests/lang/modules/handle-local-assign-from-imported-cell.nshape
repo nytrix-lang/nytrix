@@ -1,0 +1,82 @@
+shape handle_local_assign_from_imported_cell {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "codegen", "modules"]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O1; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect compile_and_run
+  expect_message "HANDLE-LOCAL-ASSIGN-OK"
+  source ny <<'NY'
+use core
+;; A `?handle` local keeps the raw word for its whole lifetime. Assignments
+;; carry no annotation, so the slot contract comes from the declaration: an
+;; imported typed cell assigned in a branch must store the same raw handle
+;; the initializer did, never a tagged copy (the Vulkan pipeline selector
+;; handed `rt_tag(handle)` to vkCmdBindPipeline in standalone executables).
+module hst(_pa, _pb, _pc, _pd, _tp, _wf, _mask, _dirty, _lw, _unlit, setup, set_wire, set_unlit){
+   mut ?handle _pa = 0
+   mut ?handle _pb = 0
+   mut ?handle _pc = 0
+   mut ?handle _pd = 0
+   mut ?handle _tp = 0
+   mut _wf = false
+   mut _mask = 0
+   mut _dirty = false
+   mut f64 _lw = 1.0
+   mut _unlit = 0
+   fn setup() bool {
+      _pa = malloc(64)
+      _pb = malloc(64)
+      _pc = malloc(64)
+      _pd = malloc(64)
+      true
+   }
+   fn set_wire(bool on) bool { _wf = on true }
+   fn set_unlit(int on) bool { _unlit = on true }
+}
+module hutil(same, bind){
+   use hst
+   fn same(?handle a, ?handle b) bool { a == b }
+   fn bind(?handle cb, ?handle p) bool { if !p { return false } true }
+}
+module hdraw(pick){
+   use hst as st
+   use hutil
+   fn pick(?handle cb, bool is_lines, f64 width, ?handle pipe_override, bool is_points=false) ?handle {
+      if !cb { return 0 }
+      mut ?handle target = _pa
+      if is_points && _pc != 0 {
+         target = _pc
+         if _mask != 0 { _mask = 0 _dirty = true }
+      } elif is_lines && _pb != 0 {
+         target = _pb
+         if width != _lw { _lw = width }
+      } else {
+         if pipe_override { target = pipe_override } else {
+            mut base_pipe = _pa
+            if _unlit != 0 { base_pipe = _pd }
+            target = _tp
+            if !target || target == _pa || target == _pc { target = base_pipe }
+            if _wf && _pd != 0 {
+               if target == _pa || target == base_pipe { target = _pd }
+            }
+         }
+      }
+      if !bind(cb, target) { return 0 }
+      target
+   }
+}
+hst.setup()
+def ?handle cb = hst._pa
+assert(hutil.same(hdraw.pick(cb, false, 1.0, 0), hst._pa), "default pipeline")
+assert(hutil.same(hdraw.pick(cb, true, 2.0, 0), hst._pb), "line pipeline")
+assert(hutil.same(hdraw.pick(cb, false, 1.0, 0, true), hst._pc), "point pipeline")
+assert(hutil.same(hdraw.pick(cb, false, 1.0, hst._pd), hst._pd), "override")
+hst.set_wire(true)
+assert(hutil.same(hdraw.pick(cb, false, 1.0, 0), hst._pd), "wire pipeline")
+hst.set_wire(false)
+hst.set_unlit(1)
+assert(hutil.same(hdraw.pick(cb, false, 1.0, 0), hst._pd), "unlit base")
+print("HANDLE-LOCAL-ASSIGN-OK")
+NY
+}
