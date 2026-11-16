@@ -4,6 +4,7 @@
 ;; - core.os.ui.window
 ;; - core.os.ui.window.consts
 module core.os.ui.window.platform(
+   inject_input,
    init, terminate, init_hint, init_allocator, init_vulkan_loader, get_version, get_version_string,
    get_platform, get_error, set_error_callback, get_proc_address, get_instance_proc_address, make_context_current, get_time,
    set_time, get_timer_value, get_timer_frequency, wait_events, wait_events_timeout, create_window,
@@ -2439,4 +2440,12 @@ fn get_cocoa_view(any win) any {
    destroy_window(win)
    assert(!should_close(win), "platform destroy clears close flag")
    print("✓ core.os.ui.window.platform self-test passed")
+}
+
+fn inject_input(any win, str kind, int a=0, int b=0, str path="") bool {
+   "Test hook: delivers a compositor input event through the native backend's own listeners (Wayland only). See core.os.ui.window.platform.linux.wayland.inject_input."
+   if _select_backend_name() != "wayland" { return false }
+   def native = _native_window(win)
+   if !is_dict(native) { return false }
+   wayland_backend.inject_input(native, kind, a, b, path)
 }

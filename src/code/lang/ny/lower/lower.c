@@ -523,6 +523,7 @@ const nyr_runtime_alias_t nyr_runtime_aliases[] = {
     {"core.bytes_get", "rt_bytes_get_raw"},
     {"core.bytes_set", "rt_bytes_set_raw"},
     {"core.compiler.syntax.type.is_bool", "rt_is_bool_obj"},
+    {"core.compiler.syntax.type.is_float", "rt_is_float_obj"},
     {"core.compiler.syntax.type.is_str", "rt_is_str_obj"},
     {"core.contains", "rt_contains_raw"},
     {"core.dict_mod.dict_len", "rt_dict_len_raw"},
@@ -531,12 +532,36 @@ const nyr_runtime_alias_t nyr_runtime_aliases[] = {
     {"core.len", "rt_len"},
     {"core.list", "rt_list_new_raw"},
     {"core.list.long", "rt_long"},
+    {"core.math.cos", "rt_cos_f64"},
     {"core.math.float.is_float", "rt_is_float_obj"},
+    {"core.math.scalar.sqrt", "rt_sqrt_f64"},
+    {"core.math.sin", "rt_sin_f64"},
+    {"core.math.sqrt", "rt_sqrt_f64"},
+    {"core.os.arch", "rt_arch_name"},
     {"core.os.args.args", "rt_args_raw"},
     {"core.os.exit", "rt_exit"},
     {"core.os.ffi.__call4_ptr_ptr_ptr_ptr_i32", "rt_call4_ptr_ptr_ptr_ptr_i32"},
     {"core.os.ffi.__call4_ptr_u64_ptr_ptr_i32", "rt_call4_ptr_u64_ptr_ptr_i32"},
+    {"core.os.ffi.free", "rt_free"},
+    {"core.os.ffi.malloc", "rt_malloc"},
     {"core.os.file_exists", "rt_file_exists_raw"},
+    {"core.os.mutex_free", "rt_mutex_free"},
+    {"core.os.mutex_lock", "rt_mutex_lock64"},
+    {"core.os.mutex_new", "rt_mutex_new"},
+    {"core.os.mutex_unlock", "rt_mutex_unlock64"},
+    {"core.os.os", "rt_os_name"},
+    {"core.os.prim.arch", "rt_arch_name"},
+    {"core.os.prim.os", "rt_os_name"},
+    {"core.os.thread.mutex_free", "rt_mutex_free"},
+    {"core.os.thread.mutex_lock", "rt_mutex_lock64"},
+    {"core.os.thread.mutex_new", "rt_mutex_new"},
+    {"core.os.thread.mutex_unlock", "rt_mutex_unlock64"},
+    {"core.os.thread.thread_join", "rt_thread_join"},
+    {"core.os.thread.thread_launch_call", "rt_thread_launch_call"},
+    {"core.os.thread.thread_spawn_call", "rt_thread_spawn_call"},
+    {"core.os.thread_join", "rt_thread_join"},
+    {"core.os.thread_launch_call", "rt_thread_launch_call"},
+    {"core.os.thread_spawn_call", "rt_thread_spawn_call"},
     {"core.primitives.__list_set_len", "rt_list_set_len_raw"},
     {"core.primitives.globals", "rt_globals_get"},
     {"core.primitives.set_globals", "rt_globals_set"},
@@ -3012,8 +3037,30 @@ static const char *ny_native_runtime_symbol_for_expr(const char *name,
       e->semantic.canonical_callee_stmt->kind == NY_S_FUNC &&
       ny_is_stdlib_tok(e->semantic.canonical_callee_stmt->tok)) {
     const char *decl_name = e->semantic.canonical_callee_stmt->as.fn.name;
+    const char *decl_sym = decl_name ? nyr_runtime_symbol(decl_name) : NULL;
+    if (decl_sym)
+      return decl_sym;
+    /* The leaf alone names an intrinsic only for the root stdlib files (or
+     * an unqualified declaration). A nested stdlib module's function that
+     * shares a leaf with one (`core.os.ui.render.postfx.color` and the
+     * terminal `color`) is its own function; intrinsic wrappers in nested
+     * modules have qualified entries in the table. */
     const char *decl_leaf = ny_name_leaf(decl_name);
-    const char *decl_sym = nyr_runtime_symbol(decl_leaf);
+    bool root_decl = decl_name && decl_leaf &&
+                     (decl_leaf == decl_name ||
+                      (strncmp(decl_name, "core.", 5) == 0 &&
+                       decl_leaf == decl_name + 5));
+    /* Root stdlib files (lib/<name>.ny: core.str, core.dict_mod, core.term,
+     * ...) are the intrinsic facades; modules in subdirectories are not. */
+    if (!root_decl && decl_leaf) {
+      const char *file = e->semantic.canonical_callee_stmt->tok.filename;
+      const char *lib = file ? strstr(file, "/lib/") : NULL;
+      if (!lib && file && strncmp(file, "lib/", 4) == 0)
+        lib = file - 1;
+      if (lib && !strchr(lib + 5, '/'))
+        root_decl = true;
+    }
+    decl_sym = root_decl ? nyr_runtime_symbol(decl_leaf) : NULL;
     if (decl_sym)
       return decl_sym;
   }

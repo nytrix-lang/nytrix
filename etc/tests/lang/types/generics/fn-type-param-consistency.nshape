@@ -1,0 +1,36 @@
+shape fn_type_param_consistency_positive {
+  family "runtime/language"
+  generator "embedded"
+  features [ny generics]
+  template ny-test-case
+  flags_matrix "--native-only -O0"
+  expect compile_and_run
+  expect_message "SAME-OK"
+  source ny <<'NY'
+use core
+
+;; One parameter, two arguments: both ints, so the call is consistent and the
+;; declaration needs no per-instance specialization to run.
+fn same<A>(A a, A b) A { a }
+print(same(1, 2))
+print("SAME-OK")
+NY
+}
+
+shape fn_type_param_consistency_negative {
+  family "typing/generics"
+  generator "error"
+  features [ny generics typing negative]
+  template ny-compile-fail
+  flags_matrix "--native-only -O0"
+  expect compile_fail
+  expect_message "type parameter 'A' instantiated inconsistently"
+  source ny <<'NY'
+use core
+
+;; Both arguments are bound to A by the declaration, so int and str in one call
+;; must be rejected rather than silently dispatched dynamically.
+fn same<A>(A a, A b) A { a }
+print(same(1, "s"))
+NY
+}

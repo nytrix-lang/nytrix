@@ -1,0 +1,24 @@
+shape verified_small_algorithm {
+  family "typing/proofs"
+  generator "embedded"
+  features ["ny", "test", "proof", "refinement"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+refine NonNegative = int where (v) { v >= 0 }
+
+;; A specification written as an ordinary type, discharged without a hand
+;; written proof term: a literal initializer and a refinement identity both
+;; close the obligation, and nothing about them survives to runtime.
+fn five() NonNegative { 5 }
+fn pass(NonNegative n) NonNegative { n }
+
+assert_eq(five(), 5, "constant initializer discharges the refinement")
+def NonNegative four = 4
+assert_eq(pass(four), 4, "identity preserves the refinement")
+print("ok verified small algorithm")
+NY
+}

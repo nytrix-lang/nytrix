@@ -1,0 +1,111 @@
+shape memscan {
+  family "runtime-os"
+  generator "embedded"
+  features [os proc memory scanner]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect compile_and_run
+  expect_message "MEMSCAN-OK"
+  source ny <<'NY'
+use core
+use core.os (pid)
+use core.os.memscan as ms
+;; The scanner attaches to this process through /proc/<pid>/mem (always
+;; allowed for oneself) and searches a buffer whose contents the test sets.
+def int N = 4096
+def ptr buf = zalloc(N)
+assert(!!buf, "buffer")
+def int base = int(buf)
+;; Known cells: Int32 123456 at 64 and 512, Int16 123 at 1000, Float32 3.5
+;; at 2048, Int64 at 3000, a byte 7 at 3500.
+store32(buf, 123456, 64)
+store32(buf, 123456, 512)
+store16(buf, 123, 1000)
+store32_f32(buf, 3.5, 2048)
+store64(buf, 9876543210, 3000)
+store8(buf, 7, 3500)
+def regions = [[base, base + N]]
+
+;; Parsing follows smem.
+assert(ms.parse_value("int32:5") && ms.parsed_type() == 2 && ms.parsed_int() == 5, "int32 prefix")
+assert(ms.parse_value("hex:ff") && ms.parsed_type() == 4 && ms.parsed_int() == 255, "hex picks the smallest unsigned type")
+assert(ms.parse_value("70000") && ms.parsed_type() == 2, "a bare number takes the smallest signed type that holds it")
+assert(ms.parse_value("3.25") && ms.parsed_type() == 8, "a bare float is Float32")
+assert(ms.parse_value("bool:true") && ms.parsed_type() == 12, "bool prefix")
+assert(!ms.parse_value("int8:300") && !ms.parse_value("nope:1") && !ms.parse_value("abc"), "bad values are rejected")
+
+assert(ms.attach(pid()), "attach to self: " + ms.last_error())
+assert(ms.attached() && ms.pid() == pid(), "attached state")
+def maps = ms.load_maps(pid())
+assert(maps.len > 0 && to_str(maps[0].get("name", "")) == "[Anonymous]", "maps grouped, anonymous first")
+
+;; Exact, Auto types: 123456 parses as Int32 and also scans Int64 and Int16.
+assert(ms.scan(regions, "123456", "Exact", "Auto"), "first scan: " + ms.last_error())
+mut found = []
+mut int i = 0
+while i < ms.count() {
+   if ms.type_at(i) == 2 { found = found.append(ms.addr_at(i) - base) }
+   i += 1
+}
+assert(found.len == 2 && int(found[0]) == 64 && int(found[1]) == 512, "both Int32 cells found: " + to_str(found))
+assert(ms.value_text(0) == "123456", "result value reads back")
+
+;; A bare number matches numerically in every scanned type: 123 parses as
+;; Int8 but the Int16 cell at 1000 holds it.
+ms.reset()
+assert(ms.scan(regions, "123", "Exact", "Auto"), "scan 123")
+mut bool has16 = false
+i = 0
+while i < ms.count() {
+   if ms.addr_at(i) - base == 1000 && ms.type_at(i) == 1 { has16 = true }
+   i += 1
+}
+assert(has16, "Int16 cell matched by a value parsed as Int8")
+
+;; Next scans: change one Int32 cell and narrow down.
+ms.reset()
+assert(ms.scan(regions, "123456", "Exact", "Int32") && ms.count() == 2, "typed first scan")
+store32(buf, 123460, 512)
+assert(ms.scan(regions, "0", "Increased", "Int32") && ms.count() == 1 && ms.addr_at(0) - base == 512, "increased keeps the changed cell")
+assert(ms.depth() == 2, "two levels")
+assert(ms.previous() && ms.count() == 2, "previous returns to the first level")
+assert(ms.scan(regions, "4", "Increased by", "Int32") && ms.count() == 1, "increased by 4")
+assert(ms.previous() && ms.scan(regions, "0", "Unchanged", "Int32") && ms.count() == 1 && ms.addr_at(0) - base == 64, "unchanged keeps the other cell")
+
+;; Float scan.
+ms.reset()
+assert(ms.scan(regions, "float:3.5", "Exact", "Auto") && ms.count() >= 1, "float32 found")
+assert(ms.addr_at(0) - base == 2048 && ms.type_at(0) == 8, "float32 cell address and type")
+
+;; Unknown initial value: a snapshot, then Decreased finds the cell that went down.
+ms.reset()
+assert(ms.scan(regions, "", "Unchanged", "UInt8") && ms.is_snapshot() && ms.snapshot_bytes() == N, "snapshot first scan")
+store8(buf, 3, 3500)
+assert(ms.scan(regions, "", "Decreased", "UInt8") && ms.count() == 1 && ms.addr_at(0) - base == 3500, "decreased byte found")
+
+;; Writes go through /proc/<pid>/mem.
+ms.reset()
+assert(ms.scan(regions, "9876543210", "Exact", "Int64") && ms.count() == 1, "int64 found")
+assert(ms.set_all("1234567890123"), "set_all: " + ms.last_error())
+assert(load64(buf, 3000) == 1234567890123, "the write landed in memory")
+assert(!ms.set_all("bad value"), "unparsable writes are refused")
+
+;; Lock rewrites the value after it changes.
+assert(ms.lock_start("42") && ms.lock_active(), "lock starts")
+assert(load64(buf, 3000) == 42, "lock writes at once")
+store64(buf, 1, 3000)
+mut int spins = 0
+while load64(buf, 3000) != 42 && spins < 400000000 {
+   ms.lock_tick()
+   spins += 1
+}
+assert(load64(buf, 3000) == 42, "lock rewrites the changed value")
+ms.lock_stop()
+assert(!ms.lock_active(), "lock stops")
+
+ms.detach_process()
+assert(!ms.attached() && ms.depth() == 0, "detach drops the scan")
+assert(!ms.attach(999999999), "a missing process does not attach")
+print("MEMSCAN-OK")
+NY
+}

@@ -11645,6 +11645,65 @@ static void ny_native_lambda_capture_locals(const stmt_t *s,
   }
 }
 
+/* `alias.VALUE` read through a module alias: a folded `def` is lowered
+ * inline at the read, so the calls in its initializer are reachable from
+ * here (`def X = other.mk(...)` in an imported module left `mk` unemitted:
+ * "unresolved symbol ny_fn_...mk"). The identifier path does the same for
+ * bare names. */
+static void ny_native_scan_member_global_initializer(const expr_t *e,
+                                                     ny_native_fn_collector_t *col) {
+  if (!e || !col || e->kind != NY_E_MEMBER || !e->as.member.name ||
+      !e->as.member.target)
+    return;
+  char path[512];
+  if (!nyr_qualified_expr(e->as.member.target, path, sizeof(path)))
+    return;
+  nyr_builder_impl_t probe = {
+      .prog = col->prog,
+      .options = col->opt,
+      .module_name = col->scope_fn
+                         ? ny_native_fn_module(
+                               ny_native_fn_index_for(col->shared_cache),
+                               col->prog, col->scope_fn)
+                         : NULL,
+      .source_file = e->tok.filename,
+      .cache_owner = col->shared_cache};
+  char root[256];
+  const char *dot = strchr(path, '.');
+  size_t root_len = dot ? (size_t)(dot - path) : strlen(path);
+  if (root_len == 0 || root_len >= sizeof(root))
+    return;
+  memcpy(root, path, root_len);
+  root[root_len] = '\0';
+  const char *resolved = nyr_resolve_use_alias(&probe, root);
+  char module_path[768];
+  int n = snprintf(module_path, sizeof(module_path), "%s%s",
+                   resolved ? resolved : root, dot ? dot : "");
+  if (n <= 0 || (size_t)n >= sizeof(module_path))
+    return;
+  const stmt_t *mod =
+      nyr_find_module_walk_in_prog(&probe, col->prog, module_path);
+  if (!mod)
+    return;
+  const expr_t *initializer =
+      nyr_find_module_member_in(&probe, mod, e->as.member.name, 0);
+  if (!initializer || initializer == e)
+    return;
+  for (size_t i = 0; i < col->scanned_global_initializer_count; ++i)
+    if (col->scanned_global_initializers[i] == initializer)
+      return;
+  if (col->scanned_global_initializer_count >=
+      sizeof(col->scanned_global_initializers) /
+          sizeof(col->scanned_global_initializers[0]))
+    return;
+  col->scanned_global_initializers[col->scanned_global_initializer_count++] =
+      initializer;
+  bool was_scanning_initializer = col->scanning_global_initializer;
+  col->scanning_global_initializer = true;
+  ny_native_scan_expr_for_calls(initializer, col);
+  col->scanning_global_initializer = was_scanning_initializer;
+}
+
 static void ny_native_scan_expr_for_calls(const expr_t *e,
                                           ny_native_fn_collector_t *col) {
   if (!e || !col)
@@ -12269,6 +12328,7 @@ static void ny_native_scan_expr_for_calls(const expr_t *e,
        * ny_native_add_reachable_fn retain
        * ambiguous impl bodies. */
       ny_native_add_reachable_fn(col, e->as.member.name);
+    ny_native_scan_member_global_initializer(e, col);
     ny_native_scan_expr_for_calls(e->as.member.target, col);
     break;
   case NY_E_UNARY:

@@ -21,6 +21,7 @@ their full contracts.
 | [Values](values.md) | Literals, containers, equality, and value operations |
 | [Types](types.md) | Type forms, inference, refinements, and proofs |
 | [Dependent types and indexed data](dependent.md) | Refinements, Pi and Sigma types, GADTs, first-class `Type` values, type-level functions, and runtime indices |
+| [Kernel, erasure, and soundness](kernel.md) | Trusted core rules, the erasure and ABI model, and the soundness risk register |
 | [Functions](functions.md) | Calls, parameters, closures, and function contracts |
 | [Control flow](control-flow.md) | Branches, loops, exits, cleanup, and error handling |
 | [Operators](operators.md) | Precedence, built-ins, and overloads |

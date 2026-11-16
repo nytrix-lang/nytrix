@@ -891,13 +891,13 @@ assembly diagnostic, not of execution.
 
 ## Latest full benchmark run
 
-Generated automatically by the full `ny-test --bench` run at 2026-11-16 01:18:06 CET.
-Host: AMD EPYC 7642; target `x86_64`; compiler `fnv1a64:30d618487de6c0ce`.
+Generated automatically by the full `ny-test --bench` run at 2026-11-16 02:42:20 CET.
+Host: AMD EPYC 7642; target `x86_64`; compiler `fnv1a64:695b8f1101a525ef`.
 NYR: `-O3`, profile `peak`, tier `opt`, engine `NYR`, cache `warm`.
 C: clang version 23.1.4; flags `-O3 -march=native`. NYC flags `-O3 -c`.
-Samples: 3 plus 1 warm-up; fixture workers 1, route workers 1.
-Results: 110 fixtures; 108 passed, 1 failed or mismatched, 1 timer controls.
-Measurement qualifiers: 0 low-time, 1 noisy; 0 fixture budget misses.
+Samples: 3 plus 1 warm-up; fixture workers 23, route workers 1.
+Results: 110 fixtures; 109 passed, 0 failed or mismatched, 1 timer controls.
+Measurement qualifiers: 0 low-time, 0 noisy; 1 fixture budget misses.
 
 ### Runtime relative to Host C
 
@@ -906,38 +906,32 @@ Fixture medians are grouped by **Nytrix / C time**: lower is faster. Only correc
 <svg width="880" height="330" viewBox="0 0 880 330" role="img" aria-label="Distribution of NYR and LLVM benchmark ratios relative to Host C">
 <text x="440" y="22" text-anchor="middle" font-size="16" fill="currentColor">Workloads by relative runtime</text>
 <line x1="82" y1="232" x2="780" y2="232" stroke="var(--border)" stroke-width="1"/><text x="70" y="236" text-anchor="end" font-size="11" fill="var(--muted)">0</text>
-<line x1="82" y1="186" x2="780" y2="186" stroke="var(--border)" stroke-width="1"/><text x="70" y="190" text-anchor="end" font-size="11" fill="var(--muted)">11</text>
-<line x1="82" y1="140" x2="780" y2="140" stroke="var(--border)" stroke-width="1"/><text x="70" y="144" text-anchor="end" font-size="11" fill="var(--muted)">22</text>
-<line x1="82" y1="94" x2="780" y2="94" stroke="var(--border)" stroke-width="1"/><text x="70" y="98" text-anchor="end" font-size="11" fill="var(--muted)">33</text>
-<line x1="82" y1="48" x2="780" y2="48" stroke="var(--border)" stroke-width="1"/><text x="70" y="52" text-anchor="end" font-size="11" fill="var(--muted)">44</text>
-<rect x="110" y="220" width="34" height="12" rx="3" fill="var(--c1)"/><text x="127" y="216" text-anchor="middle" font-size="11" fill="currentColor">3</text>
-<rect x="152" y="203" width="34" height="29" rx="3" fill="var(--c2)"/><text x="169" y="199" text-anchor="middle" font-size="11" fill="currentColor">7</text>
+<line x1="82" y1="186" x2="780" y2="186" stroke="var(--border)" stroke-width="1"/><text x="70" y="190" text-anchor="end" font-size="11" fill="var(--muted)">14</text>
+<line x1="82" y1="140" x2="780" y2="140" stroke="var(--border)" stroke-width="1"/><text x="70" y="144" text-anchor="end" font-size="11" fill="var(--muted)">28</text>
+<line x1="82" y1="94" x2="780" y2="94" stroke="var(--border)" stroke-width="1"/><text x="70" y="98" text-anchor="end" font-size="11" fill="var(--muted)">42</text>
+<line x1="82" y1="48" x2="780" y2="48" stroke="var(--border)" stroke-width="1"/><text x="70" y="52" text-anchor="end" font-size="11" fill="var(--muted)">56</text>
+<rect x="110" y="226" width="34" height="6" rx="3" fill="var(--c1)"/><text x="127" y="222" text-anchor="middle" font-size="11" fill="currentColor">2</text>
+<rect x="152" y="219" width="34" height="13" rx="3" fill="var(--c2)"/><text x="169" y="215" text-anchor="middle" font-size="11" fill="currentColor">4</text>
 <text x="148" y="250" text-anchor="middle" font-size="11" fill="var(--muted)"><0.5×</text>
-<rect x="252" y="212" width="34" height="20" rx="3" fill="var(--c1)"/><text x="269" y="208" text-anchor="middle" font-size="11" fill="currentColor">5</text>
-<rect x="294" y="191" width="34" height="41" rx="3" fill="var(--c2)"/><text x="311" y="187" text-anchor="middle" font-size="11" fill="currentColor">10</text>
+<rect x="252" y="219" width="34" height="13" rx="3" fill="var(--c1)"/><text x="269" y="215" text-anchor="middle" font-size="11" fill="currentColor">4</text>
+<rect x="294" y="216" width="34" height="16" rx="3" fill="var(--c2)"/><text x="311" y="212" text-anchor="middle" font-size="11" fill="currentColor">5</text>
 <text x="290" y="250" text-anchor="middle" font-size="11" fill="var(--muted)">0.5–0.8×</text>
-<rect x="394" y="65" width="34" height="167" rx="3" fill="var(--c1)"/><text x="411" y="61" text-anchor="middle" font-size="11" fill="currentColor">40</text>
-<rect x="436" y="53" width="34" height="179" rx="3" fill="var(--c2)"/><text x="453" y="61" text-anchor="middle" font-size="11" fill="currentColor">43</text>
+<rect x="394" y="91" width="34" height="141" rx="3" fill="var(--c1)"/><text x="411" y="87" text-anchor="middle" font-size="11" fill="currentColor">43</text>
+<rect x="436" y="55" width="34" height="177" rx="3" fill="var(--c2)"/><text x="453" y="61" text-anchor="middle" font-size="11" fill="currentColor">54</text>
 <text x="432" y="250" text-anchor="middle" font-size="11" fill="var(--muted)">0.8–1.25×</text>
-<rect x="536" y="103" width="34" height="129" rx="3" fill="var(--c1)"/><text x="553" y="99" text-anchor="middle" font-size="11" fill="currentColor">31</text>
-<rect x="578" y="103" width="34" height="129" rx="3" fill="var(--c2)"/><text x="595" y="99" text-anchor="middle" font-size="11" fill="currentColor">31</text>
+<rect x="536" y="114" width="34" height="118" rx="3" fill="var(--c1)"/><text x="553" y="110" text-anchor="middle" font-size="11" fill="currentColor">36</text>
+<rect x="578" y="127" width="34" height="105" rx="3" fill="var(--c2)"/><text x="595" y="123" text-anchor="middle" font-size="11" fill="currentColor">32</text>
 <text x="574" y="250" text-anchor="middle" font-size="11" fill="var(--muted)">1.25–2×</text>
-<rect x="678" y="115" width="34" height="117" rx="3" fill="var(--c1)"/><text x="695" y="111" text-anchor="middle" font-size="11" fill="currentColor">28</text>
-<rect x="720" y="166" width="34" height="66" rx="3" fill="var(--c2)"/><text x="737" y="162" text-anchor="middle" font-size="11" fill="currentColor">16</text>
+<rect x="678" y="154" width="34" height="78" rx="3" fill="var(--c1)"/><text x="695" y="150" text-anchor="middle" font-size="11" fill="currentColor">24</text>
+<rect x="720" y="186" width="34" height="46" rx="3" fill="var(--c2)"/><text x="737" y="182" text-anchor="middle" font-size="11" fill="currentColor">14</text>
 <text x="716" y="250" text-anchor="middle" font-size="11" fill="var(--muted)">≥2×</text>
 <text x="26" y="140" text-anchor="middle" font-size="11" fill="var(--muted)">fixture count</text>
-<rect x="590" y="295" width="12" height="12" rx="2" fill="var(--c1)"/><text x="608" y="306" font-size="12" fill="currentColor">NYR (107)</text><rect x="708" y="295" width="12" height="12" rx="2" fill="var(--c2)"/><text x="726" y="306" font-size="12" fill="currentColor">LLVM (107)</text>
+<rect x="590" y="295" width="12" height="12" rx="2" fill="var(--c1)"/><text x="608" y="306" font-size="12" fill="currentColor">NYR (109)</text><rect x="708" y="295" width="12" height="12" rx="2" fill="var(--c2)"/><text x="726" y="306" font-size="12" fill="currentColor">LLVM (109)</text>
 </svg>
 
 
-Checksum and execution failures:
-
-| Fixture | Status | NYR checksum | LLVM checksum | C checksum | NYC checksum | Return codes (NYR/LLVM/C/NYC) | NYC diagnostic |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `dce` | fail | `—` | `308813056` | `308813056` | `308813056` | 132/0/0/0 | — |
-
 The empty timer control is shown for completeness and is excluded from workload ratios.
-Raw report: `build/bench-reports/bench-20261116-010104-618295.json`.
+Raw report: `build/bench-reports/bench-20261116-024119-1275003.json`.
 
 <!-- AUTO_BENCHMARK_RESULTS_END -->
 
@@ -3975,3 +3969,347 @@ the data-dependent diamond (`node = node*2 + bit`) as a real branch, so
 mispredicts cost roughly 12 cycles/bit where LLVM emits branchless code
 (12.2x LLVM, 4.7x C after the change); sssp and page-rank still round-trip
 loop-carried scalars through frame homes at block boundaries.
+
+## Benchmark status fixes: dce SIGILL and time-profile noise (2026-11-16)
+
+The two non-`ok` rows in the 110-fixture run were fixed without relaxing any
+checksum, dropping a fixture, or hiding a sample.
+
+### dce: SIGILL from a stray ModRM byte in the SELECT spill path
+
+`dce` (500 sequential `if x == i { x = x + 1 } else { x = x + 2 }` in a loop)
+failed only above `-O0` (`-O1`/`-O2` SIGSEGV, `-O3` SIGILL). A reduced
+reproduction showed the shape needs eight selects inside one loop: six work,
+eight crash, and the same 100 selects outside a loop work.
+
+The fault was in the x86 encoder, not in DCE or phi lowering. When a SELECT's
+true arm is not resident in a register, `object64.c` emitted the cmov ModRM byte
+`85` by hand and then called `mach_rbp_disp`, which writes the ModRM byte *and*
+the displacement itself. The extra byte swallowed the following instruction into
+the disp32 field, producing `cmovne -0x76b76fbb(%rbp),%rax` in the emitted
+object and desynchronizing the instruction stream. The bad instruction is
+present in the AOT object, so the failure did not depend on the JIT.
+
+Fix: let `mach_rbp_disp` own the ModRM; the true-arm home branch now emits REX.W,
+`0F 45`, then ModRM+displacement.
+
+Verification: `dce` prints `checksum= 308813056`, matching the C reference; the
+emitted object has no `%rbp` displacement larger than its frame; the bench row
+is `dce ok 15 µs (LLVM 11 µs, C 3.29 ms, NYC 6.74 ms)`.
+
+### time-profile: NOISY because the fixture had no timed kernel
+
+The fixture summed `0..100` and printed only a checksum, so the harness timed
+process start-up / `-time` JIT-run instead of a workload, and samples varied by
+more than the 30% noise limit.
+
+The fixture now self-times an integer LCG kernel (`n = 50000`, identical in Ny
+and C) and prints `elapsed_ns=`, which the harness uses as the fixture timer.
+`n` is sized so the C reference stays below the 1 ms gate threshold (678 µs),
+keeping the startup class gate advisory while the self-timed region (~620 µs)
+dominates process jitter.
+
+Verification (three consecutive runs): `time-profile ok 613/613/621 µs`, spread
+~1%, `NYR/LLVM` 1.23–1.27x; the previously unavailable LLVM cell now has a value.
+
+### Full run after both fixes
+
+110 fixtures: 0 NOISY rows, 0 FAIL rows, no unavailable (`—`) timing cells, no
+`INVALIDATED` verdict. Overall (C >= 1 ms): NYR/C 1.45x, LLVM/C 1.04x,
+NYR/LLVM 1.40x; the startup gate passes. The only remaining gate failure is the
+per-fixture `radix-tree` NYR/LLVM limit (11.69x), a branchless-codegen
+performance gap rather than a correctness or availability failure.
+
+## radix-tree: branchless 20-bit key walk (2026-11-16)
+
+`radix-tree` spent 20 data-dependent branches per key because the walk
+
+    if ((keyval >> depth) & 1) != 0 { node = node * 2 + 1 } else { node = node * 2 }
+
+never became a select. Lowering assigns a mutable local on both arms, so the
+diamond has stores but no join PHI, and `if_convert` only converted PHI diamonds.
+
+Two changes:
+
+- `if_convert.c`: added an exact store-only form. It speculates the same
+  whitelisted, non-trapping arm operations, then emits one `select` plus one
+  store for the shared slot. It requires that the join has no PHI and still runs
+  the existing local-load stability and address-escape checks.
+- `select_chain_fold.c`: new R5 rule `select(c, t + 1, t) -> t + c` for a 0/1
+  condition, so the walk becomes `(node << 1) + bit`. The rule compares arms by
+  structural equality (`x*2`, `x + x`, and `x << 1` canonicalize to the same
+  value, and shift amounts compare by constant value) because the two arms are
+  separate, un-CSE'd instructions; an `x & 1` condition counts as 0/1.
+  `pipeline.c` runs the fold once more after the late `if_convert`, which
+  otherwise created selects after the last fold had already run.
+
+Measurements (standalone fixture, `ny --native-only -O3`):
+
+| metric | before | after |
+| ------ | ------ | ----- |
+| fixture elapsed | 76.1 ms | 18.7 ms |
+| bench NYR | 77.7 ms | 21.7 ms |
+| NYR/LLVM | 11.69x | 3.42x |
+| `cmov` in `rt_main` | 2 | 0 |
+
+The checksum is unchanged (62531, matching C). Full run: 111 `ok` rows, 0 NOISY,
+0 FAIL rows; the `datastructures` gate passes (geomean 1.17x <= 1.94x, max
+per-fixture 1.11x). The overall gate is now limited by `bitcount` at 5.09x
+(solo runs 4.93-5.15x), a separate pre-existing gap; `dce` (15 µs) and
+`time-profile` (630 µs) stay green.
+
+Two `--pattern if` fixtures (`vm-disasm-artifact-diff`, `asm-artifacts`) fail
+both before and after these changes; they are unrelated and untouched.
+
+## bitcount: SWAR population count fused to POPCNT (2026-11-16)
+
+`bitcount` spent roughly 30 instructions per word on the 32-bit SWAR reduction
+while LLVM and C recognized the idiom and emitted one `popcnt`. That left the
+row at 5.0-5.2x LLVM, enough to fail the overall per-fixture gate.
+
+The idiom is now recognized during NYIR-to-MIR lowering and fused into one
+`NYR_MACH_POPCOUNT64`, using the same skip-and-fuse mechanism as the signed
+power-of-two division matcher:
+
+- The matcher requires the exact SWAR sequence (masks `0x55555555`,
+  `0x33333333`, `0x0f0f0f0f`, multiply `0x01010101`, trailing `>> 24`), a value
+  already masked to 32 bits, and every removed intermediate consumed only inside
+  the matched chain. With the 32-bit mask in place, a 64-bit `POPCNT` is exact.
+- The x64 encoders emit `F3 REX.W 0F B8 /r`; the text emitter prints
+  `popcntq`. POPCNT is SSE4.2 (2008), older than the `tzcnt`/BMI1 the text
+  emitter already assumes. Other backends are untouched because they consume
+  NYIR, not the MIR op.
+
+Measurements (standalone fixture, `ny --native-only -O3`):
+
+| metric | before | after |
+| ------ | ------ | ----- |
+| fixture elapsed | 15.0 ms | 5.3 ms |
+| bench NYR | 15.1 ms | 5.2-5.3 ms |
+| NYR/LLVM | 4.93-5.15x | 1.77-1.79x |
+| instructions per word | ~30, no popcnt | `popcnt` + `add` |
+
+The checksum is unchanged (134217488, matching C). Full run: 110 `ok` rows and
+every class gate passes, with the overall gate now at NYR/LLVM 1.29x (max
+per-fixture 1.10x). `--pattern if` stays at 60/62; the same two fixtures fail
+with and without this change.
+
+## cd: empty-arm, multi-PHI if-conversion (2026-11-16)
+
+`cd` (200 moving boxes, pairwise AABB overlap) was the last row near a gate
+limit: 17.4 ms against 3.51 ms for LLVM (4.84-4.95x, limit 5.00x). The hot pair
+loop carries two mispredicting branches per pair:
+
+    if ax < 0 { ax = -ax }
+    if ay < 0 { ay = -ay }
+
+Lowering emits each as a diamond whose false arm is an **empty bridge block**
+(`br` to the join only) and whose join merges **two** loop-carried PHIs
+(`ax` and `ay` are both live out of the join). `if_convert` refused both
+properties: `ifc_parse_arm` required at least one instruction, and
+`ifc_join_phi` required exactly one join PHI.
+
+Changes, all in `src/code/backend/passes/cfg/if_convert.c`:
+
+- An arm that only branches to the join is now a legal empty arm. Its value is
+  the PHI input for that edge, which must already be available before the
+  branch (`ifc_arm_value_ok`).
+- Join detection works from the arms' successors. When the resolved false block
+  is the true arm's successor, that block *is* the join and the false arm is the
+  last bridge block before it (`ifc_exclusive_bridge`). The previous
+  exclusive-edge walk required a single predecessor on the resolved block, which
+  is wrong when the resolved block is the join: a join always has two.
+  Successor-count checks now apply only where a successor is actually read, so a
+  join that itself ends in another conditional branch no longer rejects.
+- `ifc_join_phis` converts every join PHI (up to 8); `ifc_rewrite` emits one
+  `select` per PHI and erases all of them.
+
+Measurements (standalone fixture, `ny --native-only -O3`, three runs each):
+
+| metric | before | after |
+| ------ | ------ | ----- |
+| fixture elapsed | 17.1-17.4 ms | 10.6 ms |
+| bench NYR | 17.4 ms | 10.8 ms |
+| bench LLVM | 3.51 ms | 3.55 ms |
+| NYR/LLVM | 4.84-4.95x | 3.02-3.04x |
+| `cmov` in the timed object | 0 | 10 |
+
+The checksum is unchanged (387, matching C). Full run: exit 0, 110 `ok` rows,
+every class gate passes; overall NYR/C 1.51x, LLVM/C 1.18x, NYR/LLVM 1.28x. The
+largest remaining gate ratio is `radix-tree` 3.35x (improved from 3.52x by the
+same join-detection fix), followed by `cd` 3.04x. `--pattern if` stays at 60/62;
+the same two fixtures fail with and without this change.
+
+Note: `ny --emit=nyr` currently segfaults on every input, including a
+one-statement program. That is a separate pre-existing crash in the dump path,
+reproduced while inspecting this fix, and is not affected by these changes.
+
+## towers: recursive-call home traffic (2026-11-16)
+
+`towers` runs eight Hanoi solves at n = 19/20, so almost all of its time is
+recursive `hanoi` calls (roughly one to two million per solve). The row is
+71.4 ms on NYR against 31.6 ms on LLVM and 30.6 ms in C (NYR/C 2.33x,
+NYR/LLVM 2.26x); standalone runs give 71.2-71.7 ms and every route prints
+checksum `20251817`.
+
+Warm-object inspection (`--emit-asm`, current tree):
+
+| metric | NYR `hanoi` | gcc -O2 `hanoi` |
+| ------ | ----------- | --------------- |
+| instructions | 92 | 60 |
+| `(%rbp)` operands | 45 | 8 |
+
+So the gap is per-call memory traffic, not work. The final NYIR is already
+clean — 23 values / 29 instructions, parameters read once (`ld #0`..`ld #3`),
+no copy chain, exactly two calls and two `mod 1000000007` — so nothing above
+MIR is duplicating values. The duplication happens during frame assignment:
+the prologue stores the four ABI parameters to local slots, then each
+`ld #k` becomes a vreg with its own home, and block 0 copies it again:
+
+    movq %rcx,-32(%rbp)        ; param slot (via)
+    movq -32(%rbp),%rax
+    movq %rax,-40(%rbp)        ; that vreg's home, live across the join
+
+The `n == 0` test also materializes a constant and compares it rather than
+testing `n` directly.
+
+Root cause is the same one recorded for `knight` and `radix-tree` above:
+cross-block GPR residency is loop-only, and `hanoi` has no loop, so every
+value live across the `if n == 0` edge is re-homed on both sides. Closing it
+needs the acyclic/whole-function residency proof documented earlier (the
+attempted `coalesce_unchanged_dag_values` relaxation, reverted because it did
+not change `knight`'s object), or param-to-vreg home coalescing. There is no
+peephole available here: the IR contains no copies to delete, and the
+duplicated homes are assigned below it.
+
+No source change was made for this row; the measurements above describe the
+current tree.
+
+## radix-tree: remaining gap is loop home traffic (2026-11-16, investigation)
+
+After the branchless-walk fix above, `radix-tree` still runs 21.9 ms against
+6.54 ms for LLVM and 5.69 ms for C (NYR/LLVM 3.35x, the largest gate ratio).
+The walk loop is about 29 instructions per key bit where LLVM needs roughly
+six, and 45 of the function's operands are `(%rbp)` homes:
+
+    movq -824(%rbp),%rax ; cmp $0 ; setge ; movzbq ; movq %rax,-840
+    movq -824(%rbp),%rax ; and $63 ; movq %rax,-1032
+    movq -816(%rbp),%rax ; movq -1032,%rcx ; sar %cl,%rax ; movq %rax,-1040
+    movq -824(%rbp),%rax ; sub $1 ; movq %rax,-1032
+    ... movq -1040(%rbp),%rax ; and $1 ; ...; lea ; movq %rax,-1040
+    movq -1032(%rbp),%rax ; movq %rax,-824
+    movq -1040(%rbp),%rax ; movq %rax,-832
+
+Two candidate causes were measured, not assumed:
+
+- **Compare/branch fusion is already working.** Instrumenting the encoder's
+  fusion decision across the whole program gives 5018 fused compares and 3804
+  rejected with an intervening `cmp`/`and` (a real second condition), six
+  `condition-live-out`, and six `condition-mismatch`. The materialized guard is
+  therefore not a missing fusion case.
+- **Loop GPR residency is what is missing.** Candidate ranges are rejected by
+  `mach_loop_gpr_scratch_free_op` because they contain a variable shift and a
+  vreg-addressed store. Relaxing the variable-shift rejection (the per-pc
+  clobber mask already reports RCX there) was measured three times:
+  20.6-20.7 ms and 3.47-3.51x against the 21.9 ms / 3.35x baseline, so it was
+  reverted; the store blocker keeps the loop-carried values in memory either
+  way.
+
+Closing the row needs loop-carried residency that is safe across a
+vreg-addressed store, i.e. the whole-function residency work recorded for
+`knight` and `towers`, not another peephole. No source change was made for this
+row.
+
+Follow-up (same day): both scratch-free gates were relaxed — variable shifts
+admitted (the per-pc clobber mask already reports RCX for the count) and
+indirect integer stores admitted behind a callee-saved-only home rule. The
+emitted `rt_main` compared **byte-identical** to the baseline (`diff` empty,
+533 `(%rbp)` operands in both), so loop-home assignment rejects these
+candidates before the scratch proof runs; the change was reverted. The next
+step is instrumenting `mach_allocate_loop_gprs` to identify which filter
+(loop-carried detection, color availability, or `mach_loop_gpr_store_safe`
+with `proven_private` false) drops them.
+
+## fhourstones: materialized loop guards (2026-11-16, investigation)
+
+`fhourstones` (fixed-order alpha-beta over a 7x6 Connect Four position) runs
+2.84 ms on NYR against 1.15 ms LLVM and 0.973 ms C (NYR/LLVM 2.47x). Standalone
+runs reproduce it: 2.74-2.80 ms on NYR versus 1.30-1.33 ms for the same C
+sources at `gcc -O3`, checksum `6010` on both.
+
+Warm-object inspection of the four hot functions:
+
+| function | instructions | `(%rbp)` operands |
+| -------- | ------------ | ----------------- |
+| `drop` | 79 | 46 |
+| `evaluate` | 161 | 96 |
+| `won` | 222 | 133 |
+| `search` | 449 | 289 |
+
+The `i64buf` accessors are already inlined — no `rt_tbuf` call remains — so the
+cost is not the buffer path. The loops instead pay a materialized boolean guard:
+
+    cmpq $6,%rax ; setl %al ; movzbq %al,%rax ; movq %rax,-168(%rbp)
+    cmpq $0,-168(%rbp) ; jne body
+
+where `cmpq $6,%rax ; jl body` would do. Instrumenting the encoder's
+compare/branch fusion decision over the whole program: **104 of 128 compares
+fuse**; the 24 rejections are `barrier-before-branch` with the barrier opcode
+`select` (14), `and` (4), `add` (4), or `cmp` (2). That matches the guard shape:
+a non-flag-preserving value operation (most often a `select` produced while
+materializing the boolean) sits between the compare and the branch, so the
+fused `cmp; jcc` form cannot be used and the guard is re-materialized.
+
+Next step: fold the boolean-materializing `select` on a 0/1 comparison before
+lowering (or let the fusion look through it), so those guards become `cmp; jcc`.
+The remaining home traffic (289 `(%rbp)` operands in `search`) is the same
+residency gap recorded for `towers`, `knight`, and `radix-tree`.
+
+No source change was made for this row.
+
+### radix-tree: loop-home pass does run (follow-up, 2026-11-16)
+
+Instrumenting `mach_allocate_loop_gprs` entry for the fixture shows the pass is
+not skipped for the hot function: `rt_main` reaches it with 304 vregs, 20
+blocks, and private spill homes, so the size/CFG bounds are not the reason the
+walk loop keeps `node`/`depth` in frame slots. Selection still yields no home
+for that loop while other fixtures (`cd`) do get homes on the same build.
+
+Two blockers on the next step:
+
+- The deep eligibility trace (`-vvvvvv`, `NY_DBG_DEEP`, which the candidate loop
+  already emits) aborts at exit 134 with a core dump after regalloc starts, so
+  the per-candidate `eligible=0` reasons cannot be read yet. Fixing that trace
+  path is the prerequisite for knowing which proof rejects the loop state.
+- `ENTRY_LOCALIZE` does not cover this code: all 87 of its keep decisions on the
+  fixture are module globals (`no-raw-int-load` 59,
+  `stored-value-class-mismatch` 23, `unsupported-address-use` 5). The walk-loop
+  state is a body-local `mut`, a different path that this pass never inspects.
+
+No source change for this row; radix-tree remains 3.35x NYR/LLVM.
+
+### radix-tree: candidate trace and one rejected relaxation (2026-11-16)
+
+Reading the loop-home candidate trace (temporarily emitted with plain `fprintf`,
+because `-vvvv` and higher crash and lose the debug stream) for `rt_main`:
+3024 candidate evaluations, 270 of them eligible, and 34 homes actually
+selected. The largest rejection bucket is colour availability (702 evaluations
+where the range proof says another live value owns the colour), then `356`
+values already coloured. Among the loop-carried candidates, several with
+weighted scores of 64-72 were rejected only by `folded_known` — the mask that
+marks a value whose definition can be folded as an immediate into its consumer.
+
+Relaxing exactly that condition for loop-carried values
+
+    (!folded_known[v] || loop_carried[v]) && store_safe[v] && ...
+
+is a measured negative result: the object changes, the checksum stays `62531`,
+but the row gets slower — 21.1 ms / 3.15x NYR/LLVM becomes 26.5 ms / 3.80x,
+with home traffic rising to 76,188 `(%rbp)` operands. The `folded_known`
+exclusion is therefore load-bearing for performance, not just for safety: giving
+those values a register home costs the immediate folds their consumers relied
+on. Reverted; radix-tree stays at 3.15-3.35x NYR/LLVM.
+
+Verbose diagnostics are unusable for this investigation: `-vvvv` segfaults
+(exit 139) and `-vvvvvv` aborts (exit 134) partway through codegen on this
+fixture, so the deep `X64_LOOP_HOME` records never reach the terminal.

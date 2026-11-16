@@ -1,0 +1,23 @@
+shape eq_closed_refl {
+  family "typing/proofs"
+  generator "embedded"
+  features ["ny", "test", "proof"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+;; Closed equations are decided by the existing proof kernel. `proof<2 == 2>`
+;; is the reflexivity case: the obligation discharges because both sides are
+;; convertible closed terms, and the witness erases.
+fn require_equal(proof<2 == 2> evidence) int { 1 }
+def proof refl_two = prove(2 == 2)
+assert_eq(require_equal(refl_two), 1, "refl discharges a closed equation")
+
+;; Normalization makes the equation true by evaluation, not by a rewrite rule.
+def proof normalized = prove(3 + 4 == 7)
+assert_eq(require_equal(refl_two), 1, "the erased witness carries no runtime data")
+print("ok eq closed refl")
+NY
+}

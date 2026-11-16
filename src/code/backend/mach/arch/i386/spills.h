@@ -320,7 +320,7 @@ static int sm_i386_color_spill_homes(const nyr_func_t *func,
 static bool sm_i386_cleanup_spills(nyr_writer_t *assembly, int value_bytes,
                                      const int *local_offsets, size_t locals,
                                      int local_bytes, const nyr_func_t *func,
-                                     nyr_writer_t *colored) {
+                                     nyr_writer_t *colored, bool registers_only) {
   if (local_bytes < 0 || local_bytes > INT_MAX - value_bytes) return true;
   int bytes = value_bytes + local_bytes;
   if (!assembly->data || bytes <= 0 || getenv("NYC_DISABLE_I386_SPILL_CLEANUP"))
@@ -432,6 +432,11 @@ static bool sm_i386_cleanup_spills(nyr_writer_t *assembly, int value_bytes,
       if (in->write >= 0) in->reads = 0;
     }
   }
+  /* The register-only passes below are also run on the promoted variants,
+   * whose homes are registers and whose frame is shifted. The memory passes
+   * would interpret the wrong slots there, so skip the whole group. */
+  bool changed;
+  if (!registers_only) {
   /* Fold an adjacent stack-word read/modify/write triplet into the x86 memory
    * form. No intervening instruction can observe an escaped stack address, and
    * the memory form has the same result and flag effects as the register form. */
@@ -551,7 +556,6 @@ static bool sm_i386_cleanup_spills(nyr_writer_t *assembly, int value_bytes,
       for (int r = 0; r < 8; ++r) cached[r] = -1;
     }
   }
-  bool changed;
   do {
     changed = false;
     for (size_t at = count; at-- > 0;) {
@@ -580,6 +584,10 @@ static bool sm_i386_cleanup_spills(nyr_writer_t *assembly, int value_bytes,
     if (in->write >= 0 && !banned[in->write] && i + 1 < count &&
         !(live[(i + 1) * words + (size_t)in->write / 64] &
           (UINT64_C(1) << (in->write % 64)))) in->removed = true;
+  }
+  }
+  for (size_t i = 0; i < count; ++i) {
+    sm_i386_spill_line_t *in = &lines[i];
     if (in->terminal && in->target > i && in->target < count) {
       bool adjacent = true;
       for (size_t k = i + 1; k < in->target; ++k)
@@ -605,7 +613,7 @@ static bool sm_i386_cleanup_spills(nyr_writer_t *assembly, int value_bytes,
         in->reg_write = (unsigned char)(1u << dst);
         read = sm_i386_spill_register_mask(a);
         int slot = sm_i386_spill_slot(a, bytes);
-        in->reg_removable = dst < 6 &&
+        in->reg_removable = !registers_only && dst < 6 &&
             (!strcmp(in->op, "leal") || a[0] == '$' ||
              sm_i386_spill_register(a) >= 0 ||
              (slot >= 0 && !banned[slot]));
@@ -662,7 +670,7 @@ static bool sm_i386_cleanup_spills(nyr_writer_t *assembly, int value_bytes,
    * extends a memory byte to 32 bits and immediately compares/tests it; CMPB
    * has identical signed conditions and avoids the extension and 32-bit op. */
   bool narrowed_compare = false;
-  for (size_t i = 1; i < count; ++i) {
+  for (size_t i = 1; !registers_only && i < count; ++i) {
     sm_i386_spill_line_t *cmp = &lines[i];
     bool is_test = !strcmp(cmp->op, "testl");
     if (cmp->removed || (!is_test && strcmp(cmp->op, "cmpl")) || !cmp->args ||
@@ -772,7 +780,8 @@ static bool sm_i386_cleanup_spills(nyr_writer_t *assembly, int value_bytes,
   }
   /* Compare stack-home values in memory when the load's register dies at the
    * compare. This keeps operand order and lets x86 read the home directly. */
-  for (size_t i = 1; i < count && !getenv("NYC_DISABLE_I386_HOME_CMP_FOLD"); ++i) {
+  for (size_t i = 1; !registers_only && i < count &&
+       !getenv("NYC_DISABLE_I386_HOME_CMP_FOLD"); ++i) {
     sm_i386_spill_line_t *cmp = &lines[i], *load = &lines[i - 1];
     if (cmp->removed || strcmp(cmp->op, "cmpl") || !cmp->args ||
         load->removed || strcmp(load->op, "movl") || load->label) continue;
@@ -897,10 +906,13 @@ static bool sm_i386_cleanup_spills(nyr_writer_t *assembly, int value_bytes,
       }
     } while (changed);
   }
-  /* Propagate a register copy into its single consumer. A plain register
-   * copy whose destination dies at the next instruction lets that
-   * instruction read the original register, so the copy disappears without
-   * ever mentioning a stack home (and without perturbing home coloring). */
+  /* Propagate a value load or copy into its single consumer. When the
+   * destination register dies at the next instruction, that instruction can
+   * read the original register, stack home or immediate instead, so the dead
+   * load disappears. Only the source operand of the consumer is rewritten and
+   * the consumer keeps its line, so a stack-home reference merely moves from
+   * the removed line onto the adjacent consumer line; the home-use multiset
+   * is unchanged, which keeps home ranking and coloring byte-identical. */
   for (bool round_changed = true; round_changed &&
        !getenv("NYC_DISABLE_I386_COPY_PROPAGATE");) {
     round_changed = false;
@@ -908,34 +920,42 @@ static bool sm_i386_cleanup_spills(nyr_writer_t *assembly, int value_bytes,
       sm_i386_spill_line_t *def = &lines[i - 1], *use = &lines[i];
       if (def->removed || def->label || use->removed || use->label ||
           strcmp(def->op, "movl") || !def->args || !use->args) continue;
-      char src[192], dst[192];
-      if (!sm_i386_spill_split(def, src, dst)) continue;
-      int sreg = sm_i386_spill_register(src), dreg = sm_i386_spill_register(dst);
-      if (sreg < 0 || dreg < 0 || sreg == dreg || sreg >= 6 || dreg >= 6 ||
-          strcmp(src, sm_i386_gpr[sreg]) || strcmp(dst, sm_i386_gpr[dreg]))
+      char src[192], dst[192], lhs[192], rhs[192];
+      if (!sm_i386_spill_split(def, src, dst) ||
+          !sm_i386_spill_split(use, lhs, rhs))
         continue;
-      unsigned dbit = 1u << dreg, sbit = 1u << sreg;
-      if (!(use->reg_read & dbit) || (use->reg_write & (dbit | sbit)))
+      int dreg = sm_i386_spill_register(dst);
+      if (dreg < 0 || dreg >= 6 || strcmp(dst, sm_i386_gpr[dreg]) ||
+          strcmp(lhs, dst))
+        continue;
+      unsigned dbit = 1u << dreg;
+      if (!(use->reg_read & dbit) || (use->reg_write & dbit) ||
+          (sm_i386_spill_register_mask(rhs) & dbit))
         continue;
       unsigned out = (i + 1 < count ? lines[i + 1].reg_live : 0) |
                      (use->target < count ? lines[use->target].reg_live : 0);
       if (out & dbit) continue;
-      nyr_writer_t replacement = {0};
-      bool formatted = nyr_printf(&replacement, "\t%s\t", use->op);
-      const char *cursor = use->args;
-      while (formatted && *cursor) {
-        const char *hit = strstr(cursor, dst);
-        if (!hit) { formatted = nyr_put(&replacement, cursor); break; }
-        formatted =
-            nyr_printf(&replacement, "%.*s%s", (int)(hit - cursor), cursor, src);
-        if (!formatted) break;
-        cursor = hit + strlen(dst);
+      int sreg = sm_i386_spill_register(src);
+      unsigned sread;
+      if (sreg >= 0) {
+        if (sreg == dreg || sreg >= 6 || strcmp(src, sm_i386_gpr[sreg]) ||
+            (use->reg_write & (1u << sreg)))
+          continue;
+        sread = 1u << sreg;
+      } else {
+        bool immediate = src[0] == '$';
+        bool memory = !immediate && strchr(src, '(');
+        if (!immediate && !memory) continue;
+        if (memory && strchr(rhs, '(')) continue;
+        sread = sm_i386_spill_register_mask(src);
       }
+      nyr_writer_t replacement = {0};
+      bool formatted = nyr_printf(&replacement, "\t%s\t%s, %s", use->op, src, rhs);
       if (!formatted) { free(replacement.data); ok = false; goto done; }
       free(use->replacement);
       use->replacement = replacement.data;
       use->args = use->replacement + 1 + strlen(use->op) + 1;
-      use->reg_read = (unsigned char)((use->reg_read & ~dbit) | sbit);
+      use->reg_read = (unsigned char)((use->reg_read & ~dbit) | sread);
       def->removed = true;
       round_changed = true;
     }
@@ -1108,7 +1128,7 @@ static bool sm_i386_cleanup_spills(nyr_writer_t *assembly, int value_bytes,
     rank[r].weight = map[s] - s;
   }
   for (size_t s = 0; s < slots; ++s) map[s] = s;
-  if (!colored && !getenv("NYC_DISABLE_I386_HOME_RANKING")) {
+  if (!colored && !registers_only && !getenv("NYC_DISABLE_I386_HOME_RANKING")) {
     qsort(rank, ranked, sizeof(*rank), sm_i386_home_rank_order);
     size_t r = 0;
     for (size_t s = 0; s < rank_limit; ++s)

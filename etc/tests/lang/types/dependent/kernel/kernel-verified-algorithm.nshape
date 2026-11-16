@@ -1,0 +1,31 @@
+shape kernel_verified_algorithm {
+  family "runtime/language"
+  generator "embedded"
+  features ["ny", "test", "gadt", "dependent"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+;; Index refinement makes the impossible arm unnecessary: a Shape<int> can only
+;; be a Square, so the Label arm is not required for exhaustiveness.
+enum Shape<t> {
+  Square(int) where t is int,
+  Label(str) where t is str
+}
+
+fn area(Shape<int> shape, list<int> side) int {
+  match shape {
+    Shape.Square(n) -> n * side[1]
+  }
+}
+
+def Shape<int> square = Shape.Square(3)
+def Shape<str> label = Shape.Label("unit")
+
+assert_eq(area(square, [1, 7]), 21, "indexed elimination feeds a bounded lookup")
+assert_eq(area(Shape.Square(-2), [1, 5]), -10, "negative payload keeps arithmetic identity")
+print("✓ kernel-verified-algorithm ok")
+NY
+}

@@ -4815,7 +4815,21 @@ static ny_hm_type_t *hm_parse_type_name(ny_hm_state_t *hm, const char *raw,
    */
   {
     const char *leaf = ny_name_leaf(raw);
-    if (leaf && strncmp(leaf, "Type", 4) == 0 && leaf[4] == '\0')
+    /*
+     * `Type` and its leveled spellings (`Type 3`) are the same erased value;
+     * the level is a static index, not runtime data.
+     */
+    bool universe = leaf && strncmp(leaf, "Type", 4) == 0;
+    if (universe && leaf[4] == ' ') {
+      const char *d = leaf + 5;
+      universe = *d != '\0';
+      for (; universe && *d; ++d)
+        if (*d < '0' || *d > '9')
+          universe = false;
+    } else if (universe) {
+      universe = leaf[4] == '\0';
+    }
+    if (universe)
       return hm_name(hm, "str");
   }
   if (raw[0] == '?')

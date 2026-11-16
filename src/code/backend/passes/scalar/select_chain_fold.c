@@ -451,6 +451,104 @@ static bool scf_merge_add_const(scf_t *s, size_t at) {
   return false;
 }
 
+/*
+ * x*2, x + x, and x << 1 are the same value. Strength reduction picks one of
+ * them per instruction, so arms that compute the same expression can still
+ * differ syntactically.
+ */
+static bool scf_double_value(const scf_t *s, int v, int *x) {
+  const nyr_inst_t *d = scf_def(s, v);
+  if (!d)
+    return false;
+  if (d->op == NYIR_MUL_I64 || d->op == NYIR_SHL_I64) {
+    int64_t want = d->op == NYIR_MUL_I64 ? 2 : 1;
+    int64_t k = 0;
+    if (scf_const(s, d->b, &k) && k == want) {
+      *x = scf_strip(s, d->a);
+      return true;
+    }
+    if (scf_const(s, d->a, &k) && k == want) {
+      *x = scf_strip(s, d->b);
+      return true;
+    }
+    return false;
+  }
+  if (d->op == NYIR_ADD_I64) {
+    int a = scf_strip(s, d->a);
+    if (a >= 0 && a == scf_strip(s, d->b)) {
+      *x = a;
+      return true;
+    }
+  }
+  return false;
+}
+
+/*
+ * Structural equality for the pure scalar expressions that if-conversion moves
+ * out of diamond arms. Two arms that compute the same value from the same
+ * inputs are interchangeable even when they were never CSE'd into one vreg.
+ */
+static bool scf_same_value(const scf_t *s, int a, int b, int depth) {
+  if (a == b)
+    return a >= 0;
+  if (depth > 4)
+    return false;
+  int xa = -1, xb = -1;
+  if (scf_double_value(s, a, &xa) && scf_double_value(s, b, &xb) &&
+      scf_same_value(s, xa, xb, depth + 1))
+    return true;
+  const nyr_inst_t *da = scf_def(s, a);
+  const nyr_inst_t *db = scf_def(s, b);
+  if (!da || !db || da->op != db->op ||
+      da->scalar_class != db->scalar_class)
+    return false;
+  switch (da->op) {
+  case NYIR_CONST_I64:
+    return da->imm == db->imm;
+  case NYIR_ADD_I64:
+  case NYIR_SUB_I64:
+  case NYIR_MUL_I64:
+  case NYIR_AND_I64:
+  case NYIR_OR_I64:
+  case NYIR_XOR_I64:
+    return scf_same_value(s, scf_strip(s, da->a), scf_strip(s, db->a),
+                          depth + 1) &&
+           scf_same_value(s, scf_strip(s, da->b), scf_strip(s, db->b),
+                          depth + 1);
+  case NYIR_SHL_I64:
+  case NYIR_SAR_I64:
+  case NYIR_ROR_I64: {
+    if (!scf_same_value(s, scf_strip(s, da->a), scf_strip(s, db->a),
+                        depth + 1))
+      return false;
+    if (da->imm == db->imm && da->b == db->b)
+      return true;
+    int64_t ka = 0, kb = 0;
+    return scf_const(s, da->b, &ka) && scf_const(s, db->b, &kb) && ka == kb;
+  }
+  default:
+    return false;
+  }
+}
+
+/* A raw compare or `x & 1` is 0/1, so it is a valid arithmetic operand. */
+static bool scf_boolean_value(const scf_t *s, int v) {
+  const nyr_inst_t *d = scf_def(s, scf_strip(s, v));
+  if (!d)
+    return false;
+  if (d->op == NYIR_CMP_I64 || d->op == NYIR_CMP_F64 ||
+      d->op == NYIR_CMP_F32)
+    return true;
+  if (d->op == NYIR_AND_I64) {
+    int64_t mask = 0;
+    if (scf_const(s, d->b, &mask) && mask == 1)
+      return true;
+    if (scf_const(s, d->a, &mask) && mask == 1)
+      return true;
+  }
+  return d->op == NYIR_CONST_I64 && (d->imm == 0 || d->imm == 1);
+}
+
 static bool scf_round(nyr_func_t *f, bool *changed) {
   scf_t s;
   if (!scf_init(&s, f)) {
@@ -491,6 +589,44 @@ static bool scf_round(nyr_func_t *f, bool *changed) {
           scf_drop_use(&s, ta);
           scf_drop_use(&s, tb);
           *changed = true;
+        }
+      }
+      /*
+       * R5: select(c, t + 1, t) with a 0/1 c is t + c. The two arms are often
+       * independently computed but structurally identical, so compare them by
+       * expression rather than by vreg. This removes the compare and cmov that
+       * a bit-by-bit radix walk would otherwise spend one mispredictable branch
+       * or cmov on per key bit.
+       */
+      {
+        int cond_v = scf_strip(&s, in->a);
+        int true_v = scf_strip(&s, in->b);
+        int false_v = scf_strip(&s, in->c);
+        const nyr_inst_t *ad = scf_def(&s, true_v);
+        if (ad && ad->op == NYIR_ADD_I64 && false_v >= 0 &&
+            scf_boolean_value(&s, cond_v)) {
+          for (int side = 0; side < 2; ++side) {
+            int base = scf_strip(&s, side ? ad->b : ad->a);
+            int64_t step = 0;
+            if (!scf_const(&s, side ? ad->a : ad->b, &step) || step != 1 ||
+                !scf_same_value(&s, base, false_v, 0))
+              continue;
+            int old_a = in->a, old_b = in->b, old_c = in->c;
+            in->op = NYIR_ADD_I64;
+            in->a = false_v;
+            in->b = cond_v;
+            in->c = -1;
+            in->d = in->e = in->f = -1;
+            in->imm = 0;
+            in->scalar_class = NYIR_SCALAR_I64_RAW;
+            scf_add_use(&s, false_v);
+            scf_add_use(&s, cond_v);
+            scf_drop_use(&s, old_a);
+            scf_drop_use(&s, old_b);
+            scf_drop_use(&s, old_c);
+            *changed = true;
+            break;
+          }
         }
       }
       /*

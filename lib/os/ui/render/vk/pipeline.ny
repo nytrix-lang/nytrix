@@ -35,6 +35,8 @@ def _PIPE_BLEND_OPAQUE = 0
 def _PIPE_BLEND_UI = 1
 def _PIPE_BLEND_ALPHA = 2
 def _PIPE_BLEND_FACTORS = 0x10000
+;; With _PIPE_BLEND_FACTORS: blend the color only, keep the destination alpha.
+def _PIPE_BLEND_KEEP_ALPHA = 0x100
 ;; Porter-Duff operator pipelines, built on first use. Typed handles are
 ;; kept in typed globals: a handle stored in a list can read back mangled.
 mut ?handle _blend_pipe_1 = 0
@@ -83,11 +85,20 @@ fn _vk_blend_factor(int code) int {
    if code == 3 { return 7 }
    if code == 4 { return 8 }
    if code == 5 { return 9 }
+   if code == 6 { return 4 }
+   if code == 7 { return 5 }
+   if code == 8 { return 2 }
+   if code == 9 { return 3 }
    0
 }
 
+;; Pipelines for set_blend_factors pairs: 100 raw slots indexed by
+;; source * 10 + destination (raw memory, so the handles stay untagged).
+mut ptr _blend_custom_pipes = 0
+
 fn blend_op_pipeline(int op, int fsrc_code, int fdst_code) ?handle {
    "Returns the unlit 2D triangle pipeline that blends with the given premultiplied factors (codes from core.os.ui.render.blend_factors) for operator `op`, building it once."
+   if op == 11 { return _blend_custom_pipeline(fsrc_code, fdst_code) }
    if op <= 0 || op > 10 { return 0 }
    def ?handle have = _blend_pipe_get(op)
    if have { return have }
@@ -95,6 +106,23 @@ fn blend_op_pipeline(int op, int fsrc_code, int fdst_code) ?handle {
    def int enc = _PIPE_BLEND_FACTORS | (_vk_blend_factor(fsrc_code) << 4) | _vk_blend_factor(fdst_code)
    def ?handle pipe = _create_pipeline_ex(_vert_module, _frag_module, _VK_TOPO_TRIANGLES, 0, 0, _VK_CULL_NONE, _VK_FRONT_DEFAULT, 0, 0, 1.0, enc)
    _blend_pipe_set(op, pipe)
+   pipe
+}
+
+fn _blend_custom_pipeline(int fsrc_code, int fdst_code) ?handle {
+   if fsrc_code < 0 || fsrc_code > 9 || fdst_code < 0 || fdst_code > 9 { return 0 }
+   if !_blend_custom_pipes {
+      _blend_custom_pipes = malloc(100 * 8)
+      if !_blend_custom_pipes { return 0 }
+      memset(_blend_custom_pipes, 0, 100 * 8)
+   }
+   def int slot = (fsrc_code * 10 + fdst_code) * 8
+   def ?handle have = load64(_blend_custom_pipes, slot)
+   if have { return have }
+   if !_mesh_pipeline_ready_basic() { return 0 }
+   def int enc = _PIPE_BLEND_FACTORS | _PIPE_BLEND_KEEP_ALPHA | (_vk_blend_factor(fsrc_code) << 4) | _vk_blend_factor(fdst_code)
+   def ?handle pipe = _create_pipeline_ex(_vert_module, _frag_module, _VK_TOPO_TRIANGLES, 0, 0, _VK_CULL_NONE, _VK_FRONT_DEFAULT, 0, 0, 1.0, enc)
+   store64(_blend_custom_pipes, pipe, slot)
    pipe
 }
 
@@ -342,7 +370,8 @@ fn _create_pipeline_ex(?handle vert_mod, ?handle frag_mod, int topology=_VK_TOPO
       ;; the same pair for color and alpha.
       def int fsrc = (blend_enable >> 4) & 15
       def int fdst = blend_enable & 15
-      cba = VkPipelineColorBlendAttachmentState(1, fsrc, fdst, 0, fsrc, fdst, 0, 15)
+      if (blend_enable & _PIPE_BLEND_KEEP_ALPHA) != 0 { cba = VkPipelineColorBlendAttachmentState(1, fsrc, fdst, 0, 0, 1, 0, 15) }
+      else { cba = VkPipelineColorBlendAttachmentState(1, fsrc, fdst, 0, fsrc, fdst, 0, 15) }
    } elif blend_enable == _PIPE_BLEND_OPAQUE { cba = VkPipelineColorBlendAttachmentState(0, 1, 7, 0, 1, 7, 0, 15) }
    elif blend_enable == _PIPE_BLEND_ALPHA { cba = VkPipelineColorBlendAttachmentState(1, 6, 7, 0, 1, 7, 0, 15) } else {
       cba = VkPipelineColorBlendAttachmentState(blend_enable, 6, 7, 0, 1, 7, 0, 15)

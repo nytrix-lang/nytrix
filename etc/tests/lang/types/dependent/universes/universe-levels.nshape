@@ -1,0 +1,26 @@
+shape universe_levels {
+  family "runtime/language"
+  generator "embedded"
+  features ["ny", "test", "dependent", "universe"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+;; `Type n` inhabits `Type (n + 1)`: every level sits one above the types it
+;; names, so a type value can be bound at any strictly higher level.
+def Type Word = int
+def Type 1 Lower = Type 0
+def Type 2 Higher = Type 1
+
+;; Cumulativity: a type value inhabits every strictly higher level, not just
+;; the next one.
+def Type 5 Deep = Type 0
+def Type 9 Deeper = Type 3
+
+;; A type value erases to its canonical name at runtime.
+assert(Word == "int", "bare Type is level 0 and holds int")
+print("ok universe levels")
+NY
+}

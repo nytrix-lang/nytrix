@@ -1,0 +1,17 @@
+shape kernel_universe_value_negative {
+  family "typing/dependent"
+  generator "error"
+  features [error typing dependent negative]
+  template ny-compile-fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_fail
+  expect_message "universe level too low"
+  source ny <<'NY'
+use core
+
+;; A bare `Type` is level 0, so `Type` may not inhabit `Type`: the level rule
+;; rejects it instead of letting the alias erase to a runtime symbol.
+def Type T = Type
+print(1)
+NY
+}

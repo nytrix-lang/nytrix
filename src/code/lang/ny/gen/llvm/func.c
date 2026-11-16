@@ -95,6 +95,28 @@ LLVMTypeRef ny_fn_resolve_user_abi_type(codegen_t *cg, const stmt_t *fn,
   if (fn && fn->kind == NY_S_FUNC && !fn->as.fn.is_extern &&
       ny_type_is(type_name, "fnptr"))
     return cg->type_i64;
+  /*
+   * A declared type parameter is a binding, not an unknown type. Reaching the
+   * ABI resolver with one means the call site was never instantiated: say that
+   * plainly instead of reporting the name as unknown and sending the reader
+   * looking for a typo or a missing `use`.
+   */
+  if (fn && fn->kind == NY_S_FUNC && type_name) {
+    const char *bare = type_name;
+    while (*bare == '?' || *bare == '*') {
+      ++bare;
+    }
+    for (size_t i = 0; i < fn->as.fn.type_params.len; ++i) {
+      const char *param = fn->as.fn.type_params.data[i];
+      if (!param || strcmp(bare, param) != 0)
+        continue;
+      ny_diag_error(tok, "type parameter '%s' is not instantiated", param);
+      ny_diag_hint("generic functions parse but are not lowered yet; write a "
+                   "concrete parameter type such as 'fn id(int x) int'");
+      cg->had_error = 1;
+      return cg->type_i64;
+    }
+  }
   return resolve_abi_type_name(cg, type_name, tok);
 }
 

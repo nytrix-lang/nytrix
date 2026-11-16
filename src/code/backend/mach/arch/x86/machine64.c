@@ -8034,6 +8034,7 @@ static bool nyr_x64_mach_scalar_supported(const nyr_mach_func_t *mach,
       break;
     case NYR_MACH_BSWAP64:
     case NYR_MACH_BSWAP32:
+    case NYR_MACH_POPCOUNT64:
       if (!nyr_x64_mach_is_i64(mach, &in->dst) ||
           !nyr_x64_mach_is_i64(mach, &in->src0))
         return nyr_x64_mach_scalar_reject(mach, check_inst);
@@ -8787,6 +8788,7 @@ static bool nyr_x64_mach_can_forward_rax_result(const nyr_mach_func_t *mach,
   case NYR_MACH_ROR:
   case NYR_MACH_BSWAP64:
   case NYR_MACH_BSWAP32:
+  case NYR_MACH_POPCOUNT64:
   case NYR_MACH_CMP:
   case NYR_MACH_SELECT:
   case NYR_MACH_RET:
@@ -8820,6 +8822,7 @@ static bool nyr_x64_mach_preserves_xmm0(const nyr_mach_func_t *mach,
   case NYR_MACH_ROR32:
   case NYR_MACH_BSWAP32:
   case NYR_MACH_BSWAP64:
+  case NYR_MACH_POPCOUNT64:
     return !nyr_x64_mach_is_float(mach, &in->dst) &&
            !nyr_x64_mach_is_float(mach, &in->src0) &&
            !nyr_x64_mach_is_float(mach, &in->src1);
@@ -10422,6 +10425,14 @@ static bool nyr_x86_64_emit_mach_scalar_impl(
           }
         }
         rax_cached_off = in->dst.kind == NYR_MACH_OPERAND_VREG ? dst : -1;
+        break;
+      case NYR_MACH_POPCOUNT64:
+        if (!ny_x64_scalar_emit_rax_load(w, &in->src0, a, rax_cached_off) ||
+            !nyr_printf(w, "\tpopcntq\t%%rax, %%rax\n") ||
+            !nyr_x64_mach_emit_rax_result(w, mach, uses, b->first_inst + n,
+                                          b->first_inst + b->inst_count, in,
+                                          dst, &rax_cached_off))
+          return false;
         break;
       case NYR_MACH_BSWAP64:
       case NYR_MACH_BSWAP32:

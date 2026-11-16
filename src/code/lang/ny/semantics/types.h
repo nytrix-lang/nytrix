@@ -242,6 +242,32 @@ typedef struct ny_type_arena_t {
   int next_var_id;
 } ny_type_arena_t;
 
+/*
+ * Universe level term. Checkpoint 1 of the level work (kernel.md, "Level terms")
+ * ships literals only. `max` and variables exist in the representation so the
+ * next stages extend it instead of reshaping the type graph again, but no
+ * surface form produces them yet, so no behaviour depends on them.
+ */
+typedef enum ny_level_kind_t {
+  NY_LEVEL_LITERAL = 0,
+  NY_LEVEL_VAR,
+  NY_LEVEL_MAX,
+} ny_level_kind_t;
+
+typedef struct ny_level_t {
+  ny_level_kind_t kind;
+  unsigned literal;
+  unsigned var;
+  const struct ny_level_t *left;
+  const struct ny_level_t *right;
+} ny_level_t;
+
+const ny_level_t *ny_level_literal(ny_type_arena_t *arena, unsigned value);
+const ny_level_t *ny_level_var(ny_type_arena_t *arena, unsigned var);
+const ny_level_t *ny_level_max(ny_type_arena_t *arena, const ny_level_t *a,
+                               const ny_level_t *b);
+bool ny_level_equal(const ny_level_t *a, const ny_level_t *b);
+
 #define NY_TYPE_CAPABILITY_NAME_MAX 63u
 
 struct ny_type_t {
@@ -292,9 +318,11 @@ struct ny_type_t {
       ny_type_t *index_type;
       ny_type_t *value_type;
     } sigma;
-    /* First-class type universe value: Type. */
+    /* First-class type universe value: Type. `level` is the universe index:
+     * `Type n` inhabits `Type (n + 1)` and never `Type n`. */
     struct {
       const char *name;
+      const ny_level_t *level;
     } type_univ;
   } as;
 };
@@ -323,6 +351,8 @@ ny_type_t *ny_type_dep_arrow(ny_type_arena_t *arena, const char *param_name,
 ny_type_t *ny_type_sigma(ny_type_arena_t *arena, const char *index_name,
                          ny_type_t *index_type, ny_type_t *value_type);
 ny_type_t *ny_type_type_univ(ny_type_arena_t *arena, const char *name);
+ny_type_t *ny_type_type_univ_level(ny_type_arena_t *arena, const char *name,
+                                   unsigned level);
 ny_type_t *ny_type_effect_row_with_builtin_mask(ny_type_arena_t *arena,
                                                 uint32_t mask, ny_type_t *row);
 /* Compose effect sets, unify payloads for duplicate labels, and constrain

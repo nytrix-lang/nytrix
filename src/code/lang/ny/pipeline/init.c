@@ -599,8 +599,14 @@ static int ny_run_native_only(const program_t *prog, const ny_options *opt,
     nyr_jit_image_t image = {0};
     char jit_err[512] = {0};
     if (!ny_pipeline_jit_compile(prog, opt, &image, jit_err, sizeof(jit_err))) {
-      NY_LOG_ERR("Native in-memory JIT failed: %s\n",
-                 jit_err[0] ? jit_err : "unsupported native shape");
+      /* An unresolved name is already reported as a located diagnostic with a
+       * hint by the lowering path; repeating the raw emission error adds no
+       * information. Other JIT failures keep their message. */
+      bool already_reported = ny_diag_error_total_count() > 0 &&
+                              strstr(jit_err, "undefined symbol") != NULL;
+      if (!already_reported)
+        NY_LOG_ERR("Native in-memory JIT failed: %s\n",
+                   jit_err[0] ? jit_err : "unsupported native shape");
       return 1;
     }
     if (opt->do_timing)

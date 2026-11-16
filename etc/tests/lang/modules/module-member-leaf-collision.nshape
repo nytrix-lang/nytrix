@@ -1,0 +1,77 @@
+shape module_member_leaf_collision {
+  family "runtime/modules"
+  generator "embedded"
+  features ["ny", "modules", "imports", "effects", "intrinsics"]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect compile_and_run
+  expect_message "MODULE-MEMBER-LEAF-OK"
+  source ny <<'NY'
+use core
+use core.os.ui.render.postfx as fx
+
+;; `alias.name` must reach the module's own `name`, never another module's
+;; function or a runtime intrinsic with the same leaf:
+;; - the effect pass resolved `lm.detach()` inside a function to core.os's
+;;   thread detach (its import aliases were not bound yet), failing the
+;;   effect policy;
+;; - a stdlib module's `color` lowered to the terminal intrinsic `color`;
+;; - `fx.EFFECTS.len` became the function value `core.any.len` (a pointer
+;;   on native, 0 on LLVM), and a loop bounded by it ran away;
+;; - `initmod.PAIR` is a folded `def` that calls another module's function;
+;;   read through an alias, that function was never emitted (native:
+;;   unresolved symbol, LLVM: crash);
+;; - a module's own `extern "" { fn dup(i32) i32 }` lost to the `def dup`
+;;   in core.mem's self-test and was called as a dynamic value.
+module leafmod(detach, color, NAMES){
+   fn detach() str { "leafmod.detach" }
+   fn color(str n) str { "leafmod.color " + n }
+   def NAMES = ["a", "b", "c"]
+}
+use leafmod as lm
+
+module makermod(mk){
+   fn mk(f64 a, f64 b) list { [a, b] }
+}
+module initmod(PAIR){
+   use makermod as mm
+   def PAIR = mm.mk(0.5, 0.25)
+}
+use initmod as im
+
+module externmod(dup_ok){
+   extern "" {
+      fn dup(i32 fd) i32
+      fn close(i32 fd) i32
+   }
+   fn dup_ok() bool {
+      def int fd = dup(1)
+      def bool ok = fd > 2
+      close(fd)
+      ok
+   }
+}
+use externmod as xm
+
+fn in_function() int {
+   assert(lm.detach() == "leafmod.detach", "detach in a function")
+   assert(lm.color("x") == "leafmod.color x", "color in a function")
+   assert(lm.NAMES.len == 3, "module list length in a function")
+   assert(fx.EFFECTS.len == 8, "stdlib module list length in a function")
+   mut int n = 0
+   mut int i = 0
+   while i < fx.EFFECTS.len {
+      n += 1
+      i += 1
+   }
+   n
+}
+
+assert(lm.detach() == "leafmod.detach", "detach at top level")
+assert(lm.NAMES.len == 3 && fx.EFFECTS.len == 8, "module list lengths at top level")
+assert(in_function() == 8, "loop bounded by an imported list length")
+assert(xm.dup_ok(), "a module's extern wins over another module's same-named value")
+assert(float(im.PAIR[0]) == 0.5 && float(im.PAIR[1]) == 0.25, "folded def initializer calls are emitted")
+print("MODULE-MEMBER-LEAF-OK")
+NY
+}

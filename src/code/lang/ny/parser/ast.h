@@ -579,6 +579,13 @@ typedef struct stmt_func_t {
   ny_type_t *return_type_ty;
   ny_expr_semantic_t return_semantic;
   ny_param_list params;
+  /* Explicit type parameters from `fn name<A, B>(...)`. */
+  ny_type_param_list type_params;
+  /* Original annotations before type-parameter erasure, aligned with params;
+   * a NULL entry means that annotation did not name a declared parameter.
+   * Retained so call sites can check repeated parameters statically. */
+  ny_type_param_list erased_param_types;
+  const char *erased_return_type;
   stmt_t *body;
   const char *doc;
   bool is_variadic;

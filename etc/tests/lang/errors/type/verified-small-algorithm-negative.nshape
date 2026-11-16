@@ -1,0 +1,20 @@
+shape verified_small_algorithm_negative {
+  family "typing/proofs"
+  generator "error"
+  features [error typing proof refinement negative]
+  template ny-compile-fail
+  flags_matrix "--native-only"
+  expect compile_fail
+  expect_message "refinement obligation is not proved for type 'NonNegative'"
+  source ny <<'NY'
+use core
+
+refine NonNegative = int where (v) { v >= 0 }
+
+;; Each operand is inside Fin<4>, but the solver does not yet combine the two
+;; hypotheses into 0 <= a + b, so this must stay a compile error rather than
+;; become unchecked evidence.
+fn add_checked(Fin<4> a, Fin<4> b) NonNegative { a + b }
+print(1)
+NY
+}

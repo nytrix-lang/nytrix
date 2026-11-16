@@ -1,0 +1,30 @@
+shape kernel_safe_index {
+  family "runtime/language"
+  generator "embedded"
+  features ["ny", "test", "dependent"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+;; A literal bound is erased: the value keeps the integer ABI and the bound is
+;; checked at construction, so indexing needs no runtime test.
+fn slot(Fin<4> index, list<int> xs) int { xs[index] }
+
+;; A symbolic bound is not a proved fact: checked_fin keeps its runtime test and
+;; records Fin<bound> in the result type.
+fn at(int n, int raw, list<int> xs) int {
+  def i Fin<n> = checked_fin(raw, n)
+  xs[i]
+}
+
+def values = [10, 20, 30, 40]
+assert_eq(slot(2, values), 30, "literal index inside Fin<4>")
+assert_eq(at(4, 3, values), 40, "runtime bound keeps the dynamic check")
+
+def Fin<4> selected = 2
+assert_eq(slot(selected, values), 30, "bounded binding keeps the integer ABI")
+print("✓ kernel-safe-index ok")
+NY
+}

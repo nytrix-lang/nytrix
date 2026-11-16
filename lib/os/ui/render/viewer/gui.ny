@@ -3,7 +3,7 @@
 ;; References:
 ;; - core.os.ui.render.viewer.batch
 ;; - core.os.ui.window
-module core.os.ui.render.viewer.gui(remaining_w, set_enabled, enabled, set_scale, scale, set_fonts, set_accent, accent, theme_color, theme_color_alpha, set_theme_color, set_debug_overlay, debug_overlay, rect, inset, center_rect, clamp_rect, split_cols, split_rows, apply_window_rect, apply_window_rect_if_visible, tile_editor_shell, tile_editor_shell_preset, prepare_input, feed_event, key_pressed, begin_frame, end_frame, reset_state, wants_mouse, wants_keyboard, hit_test, suppress_mouse_clicks, hovered_id, active_id, focused_id, mouse_down, mouse_press_seq, last_item_rect, focus_window, request_focus, clear_focus, show_window, window_visible, window_closed, set_window_pos, set_window_size, window_rect, reset_window_scroll, warm_text_pipeline, begin_window, end_window, begin_scroll_area, set_scroll_area_content_hint, scroll_area_ensure_visible, end_scroll_area, scroll_area_scroll_y, scroll_area_visible_h, push_clip_rect, pop_clip_rect, same_line, spacing, spacer_px, reset_cursor, layout_gap, remaining_h, separator, text, label, text_colored, property_row, title_input_text, button, small_button, image, icon_button, selectable, selectable_file, input_text, checkbox, toggle, radio_button, tab_strip, tab_strip_slot, combo_box, slider_float, slider_int, progress_bar, stat_card, plot_lines, grid_canvas, node_canvas, collapsing_header, color_edit4, color_picker4, set_headless_input, set_theme, theme, push_id, pop_id, indent, unindent, layout_row, begin_columns, next_column, end_columns, begin_disabled, end_disabled, item_status, tooltip, set_tooltip_delay, open_popup, close_popup, close_all_popups, popup_open, any_popup_open, begin_popup, end_popup, begin_menu_bar, end_menu_bar, begin_menu, end_menu, menu_item, menu_separator, begin_context_menu, tree_node, tree_pop, drag_float, drag_int, begin_table, table_next_row, table_next_column, table_text, table_row_clicked, table_sort_column, table_sort_descending, end_table, drag_source, drop_target, drag_active, last_item_id, dockspace, dock_window, undock_window, window_docked, dock_windows, dock_split_ratio, dock_layout_save, dock_layout_load, dock_spacer_rect, panel_state)
+module core.os.ui.render.viewer.gui(paint_rect, paint_text, item_hovered, mouse_xy, remaining_w, set_enabled, enabled, set_scale, scale, set_fonts, set_accent, accent, theme_color, theme_color_alpha, set_theme_color, set_debug_overlay, debug_overlay, rect, inset, center_rect, clamp_rect, split_cols, split_rows, apply_window_rect, apply_window_rect_if_visible, tile_editor_shell, tile_editor_shell_preset, prepare_input, feed_event, key_pressed, begin_frame, end_frame, reset_state, wants_mouse, wants_keyboard, hit_test, suppress_mouse_clicks, hovered_id, active_id, focused_id, mouse_down, mouse_press_seq, last_item_rect, focus_window, request_focus, clear_focus, show_window, window_visible, window_closed, set_window_pos, set_window_size, window_rect, reset_window_scroll, warm_text_pipeline, begin_window, end_window, begin_scroll_area, set_scroll_area_content_hint, scroll_area_ensure_visible, end_scroll_area, scroll_area_scroll_y, scroll_area_visible_h, push_clip_rect, pop_clip_rect, same_line, spacing, spacer_px, reset_cursor, layout_gap, remaining_h, separator, text, label, text_colored, property_row, title_input_text, button, small_button, image, icon_button, selectable, selectable_file, input_text, checkbox, toggle, radio_button, tab_strip, tab_strip_slot, combo_box, slider_float, slider_int, progress_bar, stat_card, plot_lines, grid_canvas, node_canvas, collapsing_header, color_edit4, color_picker4, set_headless_input, set_theme, theme, push_id, pop_id, indent, unindent, layout_row, begin_columns, next_column, end_columns, begin_disabled, end_disabled, item_status, tooltip, set_tooltip_delay, open_popup, close_popup, close_all_popups, popup_open, any_popup_open, begin_popup, end_popup, begin_menu_bar, end_menu_bar, begin_menu, end_menu, menu_item, menu_separator, begin_context_menu, tree_node, tree_pop, drag_float, drag_int, begin_table, table_next_row, table_next_column, table_text, table_row_clicked, table_sort_column, table_sort_descending, end_table, drag_source, drop_target, drag_active, last_item_id, dockspace, dock_window, undock_window, window_docked, dock_windows, dock_split_ratio, dock_layout_save, dock_layout_load, dock_spacer_rect, panel_state)
 use core
 use core.math
 use core.os.ui.window.consts
@@ -28,6 +28,10 @@ mut int _mouse_press_seq = 0
 mut _mouse_scroll_dx, _mouse_scroll_dy = 0.0, 0.0
 mut _last_scroll_x, _last_scroll_y = 0.0, 0.0
 mut _event_mouse_has_pos, _event_mouse_down0_known = false, false
+;; A press and its release fed before one prepare_input (a fast click inside
+;; one compositor frame) would cancel out; the release is held for a frame.
+mut bool _defer_release0 = false
+mut bool _apply_release0 = false
 mut _event_mouse_x, _event_mouse_y = 0.0, 0.0
 mut _event_mouse_down0, _event_mouse_pressed0, _event_mouse_released0 = false, false, false
 mut _suppress_mouse_frames, _suppress_mouse_until_up = 0, false
@@ -1421,6 +1425,14 @@ fn prepare_input(any win, f64 ww=0.0, f64 wh=0.0) any {
       _clear_pending_input_events()
       return 0
    }
+   if _apply_release0 {
+      _apply_release0 = false
+      if !_event_mouse_pressed0 {
+         _event_mouse_down0_known, _event_mouse_down0 = true, false
+         _event_mouse_released0 = true
+         _fed_down0, _fed_down0_valid = false, true
+      }
+   }
    if _event_mouse_has_pos {
       _mouse_x, _mouse_y = _event_mouse_x, _event_mouse_y
    } elif win {
@@ -1495,6 +1507,10 @@ fn prepare_input(any win, f64 ww=0.0, f64 wh=0.0) any {
    _wants_keyboard = _text_focus_id != "" || _kbd_focus_id != "" || _focused_window != "" || _active_widget_id != ""
    _cursor_want = 0
    _clear_pending_input_events()
+   if _defer_release0 {
+      _defer_release0 = false
+      _apply_release0 = true
+   }
 }
 
 fn feed_event(int typ, dict data) bool {
@@ -1507,6 +1523,10 @@ fn feed_event(int typ, dict data) bool {
    if typ == EVENT_MOUSE_BUTTON_PRESSED || typ == EVENT_MOUSE_BUTTON_RELEASED {
       def b = int(data.get("button", -1))
       _capture_event_pointer_pos(data)
+      if b == 0 && typ == EVENT_MOUSE_BUTTON_RELEASED && _event_mouse_pressed0 && _event_mouse_down0_known && _event_mouse_down0 {
+         _defer_release0 = true
+         return _event_pointer_claimed()
+      }
       if b == 0 {
          _fed_down0, _fed_down0_valid = typ == EVENT_MOUSE_BUTTON_PRESSED, true
          _fed_down0_stale = 0
@@ -2271,6 +2291,30 @@ fn spacing(any amount=1.0) any {
    if _current_window_id_cache.len <= 0 { return 0 }
    _current_cursor_y_cache += float(amount) * _gap()
 }
+
+fn paint_rect(f64 x, f64 y, f64 w, f64 h, any color) bool {
+   "Fills a rectangle in the current window's draw order (a packed RGBA int or an [r, g, b, a] list); for custom views such as byte grids."
+   if !_enabled || w <= 0.0 || h <= 0.0 { return false }
+   _gui_rect_fast(x, y, w, h, _text_color_u32(color))
+}
+
+fn paint_text(f64 x, f64 y, any txt, any color=0, bool small=false) any {
+   "Draws text at (x, y) in the current window's draw order, in the body or small font."
+   if !_enabled { return 0 }
+   def col = is_int(color) && int(color) == 0 ? _text_u32 : _text_color_u32(color)
+   _queue_text_ui(small ? _font_small_id() : _font_body(), txt, _snap(x), _snap(y), col)
+}
+
+fn item_hovered() bool {
+   "True when the pointer is over the last submitted item inside the visible clip."
+   def x, y = float(_last_item.get(0, 0.0)), float(_last_item.get(1, 0.0))
+   def w, h = float(_last_item.get(2, 0.0)), float(_last_item.get(3, 0.0))
+   if !_current_window_pointer_hit(x, y, w, h) { return false }
+   def clip = _current_clip()
+   _rect_hit(_mouse_x, _mouse_y, float(clip.get(0, 0.0)), float(clip.get(1, 0.0)), float(clip.get(2, 0.0)), float(clip.get(3, 0.0)))
+}
+
+fn mouse_xy() list { "Returns the pointer position GUI sees, [x, y]." [_mouse_x, _mouse_y] }
 
 fn spacer_px(any px=0.0) any {
    "Adds vertical layout spacing measured in pixels."

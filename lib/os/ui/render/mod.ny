@@ -5,7 +5,7 @@
 ;; - core.os.ui.render.matrix
 module core.os.ui.render(
    BACKEND_NONE, BACKEND_GL, BACKEND_VK, BACKEND_MOCK, BACKEND_TTY, BACKEND_AUTO,
-   window_error, set_blend_mode, blend_mode, blend_factors,
+   window_error, set_blend_mode, set_blend_factors, blend_mode, blend_factors,
    WHITE, BLACK, RED, GREEN, BLUE, YELLOW, CYAN, MAGENTA, ORANGE, PURPLE, GRAY, CLEAR,
    color_rgba, color_rgb, color_gray, color_hex, color_255, color_lerp, color_alpha,
    rect, rect_x, rect_y, rect_w, rect_h,
@@ -1131,8 +1131,13 @@ fn _cpu_put(int x, int y, int c) bool {
    true
 }
 
+def int BLEND_CUSTOM = 11
+mut int _blend_custom_src = 1
+mut int _blend_custom_dst = 3
+
 fn blend_factors(int op) list {
-   "Returns [source factor, destination factor] of a Porter-Duff operator for premultiplied colors, as codes 0 zero, 1 one, 2 source alpha, 3 one minus source alpha, 4 destination alpha, 5 one minus destination alpha. Operator 0 is source-over."
+   "Returns [source factor, destination factor] of a Porter-Duff operator for premultiplied colors, as codes 0 zero, 1 one, 2 source alpha, 3 one minus source alpha, 4 destination alpha, 5 one minus destination alpha, 6 destination color, 7 one minus destination color, 8 source color, 9 one minus source color. Operator 0 is source-over; operator 11 is the pair given to set_blend_factors."
+   if op == BLEND_CUSTOM { return [_blend_custom_src, _blend_custom_dst] }
    if op == 1 { return [4, 0] }
    if op == 2 { return [5, 0] }
    if op == 3 { return [4, 3] }
@@ -1146,7 +1151,13 @@ fn blend_factors(int op) list {
    [1, 3]
 }
 
-fn _blend_factor_value(int code, f64 sa, f64 da) f64 {
+fn _blend_factor_value(int code, f64 sa, f64 da, f64 sc=0.0, f64 dc=0.0) f64 {
+   ;; sc and dc are the source and destination values of the channel being
+   ;; blended, for the color factors 6..9.
+   if code == 6 { return dc }
+   if code == 7 { return 1.0 - dc }
+   if code == 8 { return sc }
+   if code == 9 { return 1.0 - sc }
    if code == 1 { return 1.0 }
    if code == 2 { return sa }
    if code == 3 { return 1.0 - sa }
@@ -1161,6 +1172,19 @@ fn set_blend_mode(int op) bool {
    "Selects the Porter-Duff operator for later 2D vertex draws (core.os.ui.render.vg's operator numbering; 0 restores straight-alpha source-over). Operators 1..10 expect premultiplied vertex colors. Returns false for an unknown operator."
    if op < 0 || op > 10 { return false }
    if op == _blend_op { return true }
+   return _apply_blend_op(op)
+}
+
+fn set_blend_factors(int fsrc, int fdst) bool {
+   "Blends later 2D vertex draws as source * fsrc + destination * fdst, with premultiplied vertex colors and the factor codes of blend_factors (0..9). The destination alpha is kept. Multiply is (6, 0), screen (1, 9), invert-against-white (7, 0). set_blend_mode(0) restores the UI blend. Returns false for an unknown code."
+   if fsrc < 0 || fsrc > 9 || fdst < 0 || fdst > 9 { return false }
+   if _blend_op == BLEND_CUSTOM && fsrc == _blend_custom_src && fdst == _blend_custom_dst { return true }
+   _blend_custom_src = fsrc
+   _blend_custom_dst = fdst
+   _apply_blend_op(BLEND_CUSTOM)
+}
+
+fn _apply_blend_op(int op) bool {
    _blend_op = op
    def list f = blend_factors(op)
    def int fsrc = int(f.get(0, 1))
@@ -1178,12 +1202,14 @@ fn _cpu_blend_op_px(int off, f64 r, f64 g, f64 b, f64 a) bool {
    def f64 dg = float((dst >> 8) & 255) / 255.0 * da
    def f64 dr = float(dst & 255) / 255.0 * da
    def list f = blend_factors(_blend_op)
-   def f64 fs = _blend_factor_value(int(f.get(0, 1)), a, da)
-   def f64 fd = _blend_factor_value(int(f.get(1, 3)), a, da)
-   def f64 oa = min(1.0, a * fs + da * fd)
-   mut f64 or = min(1.0, r * fs + dr * fd)
-   mut f64 og = min(1.0, g * fs + dg * fd)
-   mut f64 ob = min(1.0, b * fs + db * fd)
+   def int cs = int(f.get(0, 1))
+   def int cd = int(f.get(1, 3))
+   ;; set_blend_factors blends the color channels and keeps the destination alpha.
+   mut f64 oa = da
+   if _blend_op != BLEND_CUSTOM { oa = min(1.0, a * _blend_factor_value(cs, a, da, a, da) + da * _blend_factor_value(cd, a, da, a, da)) }
+   mut f64 or = min(1.0, r * _blend_factor_value(cs, a, da, r, dr) + dr * _blend_factor_value(cd, a, da, r, dr))
+   mut f64 og = min(1.0, g * _blend_factor_value(cs, a, da, g, dg) + dg * _blend_factor_value(cd, a, da, g, dg))
+   mut f64 ob = min(1.0, b * _blend_factor_value(cs, a, da, b, db) + db * _blend_factor_value(cd, a, da, b, db))
    if oa > 0.000001 {
       or = min(1.0, or / oa)
       og = min(1.0, og / oa)

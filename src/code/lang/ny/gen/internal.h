@@ -522,6 +522,7 @@ void ny_diag_set_warn_as_error(bool value);
 void ny_diag_set_shadow_warnings(bool value);
 int ny_diag_warn_as_error_count(void);
 void ny_diag_error(token_t tok, const char *fmt, ...);
+int ny_diag_error_total_count(void);
 void ny_diag_warning(token_t tok, const char *fmt, ...);
 void ny_diag_error_code(token_t tok, int code, const char *fmt, ...);
 void ny_diag_warning_code(token_t tok, int code, const char *fmt, ...);

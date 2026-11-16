@@ -1,0 +1,37 @@
+;; Omitting arguments is partial application, not an arity error
+;; (docs/spec/functions.md §Partial application). Supplying more arguments than
+;; the declaration accepts is the arity violation.
+shape invariant-excess-call-arity {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "invariant", "arity", "call", "negative"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "too many arguments"
+  source ny <<'NY'
+use core
+
+fn add_pair(int a, int b) int {
+   a + b
+}
+
+add_pair(42, 1, 7)
+NY
+}
+shape invariant-excess-call-arity-via-partial {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "invariant", "arity", "call", "partial", "negative"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "too many arguments"
+  source ny <<'NY'
+use core
+
+fn add_pair(int a, int b) int {
+   a + b
+}
+
+add_pair(42)(1, 7)
+NY
+}

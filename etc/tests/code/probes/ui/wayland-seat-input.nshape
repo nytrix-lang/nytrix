@@ -1,0 +1,160 @@
+shape wayland-seat-input {
+  family "probe-suite"
+  generator "regression"
+  features ["ny", "ui", "wayland", "input", "pointer", "keyboard", "gui"]
+  template ny-test-case
+  expect compile_and_run
+  flags_matrix "--native-only -O0; --native-backend=llvm --jit --jit-engine=mcjit"
+  timeout 420
+  expect_stdout "WAYLAND-SEAT-INPUT-OK"
+  source ny <<'NY'
+;; Pointer and keyboard input on a real Wayland window, through the
+;; backend's own wl_pointer / wl_keyboard listeners (window.
+;; inject_platform_input calls them as libwayland does, so this also runs on a
+;; compositor without a seat, such as headless Weston). The app loop is the
+;; one UI apps use: window events -> gui.feed_event -> gui widgets.
+;; A press and a release, each in its own wl_pointer.frame, must click a
+;; button; a press and release inside ONE frame must click too; keys typed
+;; with an XKB keymap must reach a focused text field, Shift included.
+;; Without WAYLAND_DISPLAY (or on another backend) it reports a skip.
+use core
+use core.common as common
+use core.os (file_read, temp_dir, file_write)
+use core.os.subprocess (run_capture)
+use core.os.ui.window as window
+use core.os.ui.window.consts as keyc
+use core.os.ui.render as gfx
+use core.os.ui.render.viewer.gui as gui
+use core.os.ui.assets.viewer as assets
+
+mut any win = 0
+mut int clicks = 0
+mut str text = ""
+mut list btn_rect = []
+mut list field_rect = []
+
+fn frame() any {
+   mut any e = window.check_event(win)
+   while !is_nil(e) && !(is_int(e) && int(e) == 0) {
+      gui.feed_event(window.event_type(e), window.event_data(e))
+      e = window.check_event(win)
+   }
+   def fb = gfx.framebuffer_size_f64(640, 360)
+   def f64 w = float(fb.get(0, 640))
+   def f64 h = float(fb.get(1, 360))
+   if !gfx.begin_frame_clear([0.05, 0.05, 0.06, 1.0]) { return 0 }
+   gui.prepare_input(win, w, h)
+   gfx.set_ortho_2d(0.0, w, h, 0.0)
+   gui.begin_frame(0, 0, w, h)
+   gui.begin_window("seat", "Seat", 20.0, 20.0, 400.0, 240.0, {"movable": false, "resizable": false})
+   if gui.button("press", "Press me", 160.0, 32.0) { clicks += 1 }
+   btn_rect = gui.last_item_rect()
+   text = gui.input_text("field", "Text", text, "type here", 300.0)
+   field_rect = gui.last_item_rect()
+   gui.end_window()
+   gui.end_frame()
+   gfx.end_frame()
+   0
+}
+
+fn frames(int n) any {
+   mut int i = 0
+   while i < n {
+      frame()
+      i += 1
+   }
+   0
+}
+
+fn centre(list r) list {
+   [int(float(r.get(0, 0.0)) + float(r.get(2, 0.0)) * 0.5), int(float(r.get(1, 0.0)) + float(r.get(3, 0.0)) * 0.5)]
+}
+
+fn inject(str kind, int a=0, int b=0, str path="") bool { window.inject_platform_input(win, kind, a, b, path) }
+
+fn type_key(int code, bool shift=false) any {
+   if shift {
+      inject("key", 42, 1)
+      inject("modifiers", 1, 0)
+   }
+   inject("key", code, 1)
+   frames(1)
+   inject("key", code, 0)
+   if shift {
+      inject("key", 42, 0)
+      inject("modifiers", 0, 0)
+   }
+   frames(1)
+}
+
+if common.env_trim("WAYLAND_DISPLAY").len == 0 {
+   print("skip: no WAYLAND_DISPLAY")
+   print("WAYLAND-SEAT-INPUT-OK")
+} else {
+   gfx.apply_backend_name("vk")
+   win = gfx.init_window(640, 360, "seat input", keyc.WINDOW_CENTER, false, true, 1)
+   assert(!!win, "window opens")
+   def int active = gfx.get_backend_type()
+   def int mock = gfx.BACKEND_MOCK
+   if window.backend() != "wayland" || active == mock {
+      print("skip: not a Wayland GPU window (" + window.backend() + ")")
+      print("WAYLAND-SEAT-INPUT-OK")
+   } else {
+      gui.set_enabled(true)
+      def int font = gfx.font_load_first(assets.MONO_FONT_CANDIDATES, 16)
+      gui.set_fonts(font, font, font)
+      frames(4)
+      ;; Pointer: enter, move to the button, press and release in separate frames.
+      def list bc = centre(btn_rect)
+      assert(inject("enter", int(bc[0]), int(bc[1])) && inject("frame"), "pointer enter")
+      frames(2)
+      assert(int(float(gui.mouse_xy().get(0, -1.0))) == int(bc[0]), "pointer position reaches the toolkit: " + to_str(gui.mouse_xy()) + " vs " + to_str(bc))
+      inject("button", 0x110, 1)
+      inject("frame")
+      frames(1)
+      inject("button", 0x110, 0)
+      inject("frame")
+      frames(2)
+      print("clicks after a separate press/release: " + to_str(clicks))
+      assert(clicks == 1, "a click on a Wayland window presses the button")
+      ;; A fast click: press and release delivered in one wl_pointer.frame.
+      inject("button", 0x110, 1)
+      inject("button", 0x110, 0)
+      inject("frame")
+      frames(3)
+      print("clicks after a press+release in one frame: " + to_str(clicks))
+      assert(clicks == 2, "a press and release in one pointer frame is still a click")
+      ;; Keyboard: keymap, focus, click the field, type "Hi 7".
+      def str keymap = temp_dir() + "/ny-seat-input.xkb"
+      def res = run_capture(["xkbcli", "compile-keymap", "--layout", "us"], [], nil, false)
+      def str km = to_str(res.get("stdout", ""))
+      assert(km.len > 1000, "xkbcli compiles a US keymap")
+      file_write(keymap, km + "\0")
+      assert(inject("keymap", km.len + 1, 0, keymap), "keymap")
+      inject("kenter")
+      def list fc = centre(field_rect)
+      inject("motion", int(fc[0]), int(fc[1]))
+      inject("frame")
+      frames(1)
+      inject("button", 0x110, 1)
+      inject("frame")
+      frames(1)
+      inject("button", 0x110, 0)
+      inject("frame")
+      frames(2)
+      type_key(35, true)
+      type_key(23)
+      type_key(57)
+      type_key(8)
+      frames(2)
+      print("typed: '" + text + "'")
+      assert(text == "Hi 7", "keys typed on a Wayland window reach the focused field")
+      type_key(14)
+      frames(1)
+      assert(text == "Hi ", "backspace edits the field")
+      gfx.close_window()
+      print("WAYLAND-SEAT-INPUT-OK")
+   }
+}
+NY
+}

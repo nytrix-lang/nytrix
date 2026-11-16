@@ -527,8 +527,12 @@ static bool stmt_looks_type_first_binding(parser_t *p) {
                       next == NY_T_LPAREN;
     bool alias_apply =
         next == NY_T_LPAREN && parser_current_token_is_type_alias(p);
-    if (!sigma_type && !alias_apply && next != NY_T_IDENT && next != NY_T_LT &&
-        next != NY_T_DOT)
+    bool universe_level =
+        next == NY_T_NUMBER &&
+        parser_type_ref_is_type_universe(
+            arena_strndup(p->arena, p->cur.lexeme, p->cur.len));
+    if (!sigma_type && !alias_apply && !universe_level && next != NY_T_IDENT &&
+        next != NY_T_LT && next != NY_T_DOT)
       return false;
   }
 
@@ -1414,6 +1418,101 @@ static const char *parse_type_ref(parser_t *p, const char *err_msg) {
     base = owner;
   }
   /*
+   * Universe levels: `Type 2` canonicalizes to "Type 2" so the level is
+   * carried in one place. A bare `Type` stays the base universe (level 0).
+   */
+  /*
+   * Level constraint over literals: `Type max(3, 5)` folds to the least upper
+   * bound, `Type 5`, so a constraint over closed levels needs no solver. A
+   * malformed constraint is an error rather than a silent level 0.
+   */
+  if (parser_type_ref_is_type_universe(base) && p->cur.kind == NY_T_IDENT &&
+      p->cur.len == 3 && strncmp(p->cur.lexeme, "max", 3) == 0 &&
+      parser_peek(p).kind == NY_T_LPAREN) {
+    parser_advance(p); /* max */
+    parser_advance(p); /* ( */
+    unsigned long levels[2] = {0, 0};
+    bool ok = true;
+    for (int i = 0; i < 2 && ok; ++i) {
+      if (p->cur.kind != NY_T_NUMBER) {
+        parser_error(p, p->cur, "expected an integer level in max(...)",
+                     "write 'Type max(2, 3)'");
+        ok = false;
+        break;
+      }
+      unsigned long v = 0;
+      for (size_t k = 0; k < p->cur.len; ++k) {
+        char c = p->cur.lexeme[k];
+        if (c < '0' || c > '9') {
+          ok = false;
+          break;
+        }
+        if (v <= 1000ul)
+          v = v * 10ul + (unsigned long)(c - '0');
+      }
+      if (!ok) {
+        parser_error(p, p->cur, "level in max(...) must be an integer literal",
+                     "levels are unsaturated decimal literals");
+        break;
+      }
+      levels[i] = v > 1000ul ? 1000ul : v;
+      parser_advance(p);
+      if (i == 0 && !parser_match(p, NY_T_COMMA)) {
+        parser_error(p, p->cur, "expected ',' between max(...) levels",
+                     "write 'Type max(2, 3)'");
+        ok = false;
+      }
+    }
+    if (ok && !parser_match(p, NY_T_RPAREN)) {
+      parser_error(p, p->cur, "expected ')' after max(...) levels",
+                   "write 'Type max(2, 3)'");
+      ok = false;
+    }
+    if (!ok) {
+      free(base);
+      return NULL;
+    }
+    unsigned long folded = levels[0] > levels[1] ? levels[0] : levels[1];
+    size_t total = strlen(base) + 32;
+    char *canon = arena_alloc(p->arena, total);
+    if (!canon) {
+      free(base);
+      parser_error(p, p->cur, "out of memory", NULL);
+      return NULL;
+    }
+    snprintf(canon, total, "%s %lu", base, folded);
+    free(base);
+    return canon;
+  }
+  if (parser_type_ref_is_type_universe(base) && p->cur.kind == NY_T_NUMBER) {
+    bool digits = p->cur.len > 0 && p->cur.lexeme;
+    unsigned long level = 0;
+    for (size_t i = 0; digits && i < p->cur.len; ++i) {
+      char c = p->cur.lexeme[i];
+      if (c < '0' || c > '9') {
+        digits = false;
+        break;
+      }
+      if (level <= 1000ul)
+        level = level * 10ul + (unsigned long)(c - '0');
+    }
+    if (digits) {
+      if (level > 1000ul)
+        level = 1000ul;
+      size_t total = strlen(base) + 32;
+      char *canon = arena_alloc(p->arena, total);
+      if (!canon) {
+        free(base);
+        parser_error(p, p->cur, "out of memory", NULL);
+        return NULL;
+      }
+      snprintf(canon, total, "%s %lu", base, level);
+      parser_advance(p);
+      free(base);
+      return canon;
+    }
+  }
+  /*
    * Dependent pair (sigma) type: `exists(IndexType binder) ValueType`.  Keep
    * the binder in the canonical spelling so the type checker can substitute
    * the first component into the payload type at construction.
@@ -1992,6 +2091,45 @@ static const char *func_dependent_return_param(const char *return_type,
   return NULL;
 }
 
+static bool fn_type_names_param(const stmt_func_t *fn, const char *type_name) {
+  if (!fn || !type_name)
+    return false;
+  while (*type_name == '?' || *type_name == '*')
+    ++type_name;
+  for (size_t i = 0; i < fn->type_params.len; ++i) {
+    const char *param = fn->type_params.data[i];
+    if (param && strcmp(type_name, param) == 0)
+      return true;
+  }
+  return false;
+}
+
+/*
+ * A declared type parameter has no runtime representation yet. Erase the
+ * annotations that name it so the declaration takes exactly the dynamic path a
+ * function with unannotated parameters already takes; a call then passes a
+ * tagged value and the body operates on it dynamically. This gives working
+ * instantiation for int and str while static per-instance checking remains
+ * unimplemented.
+ */
+static void fn_erase_type_param_annotations(parser_t *p, stmt_t *s) {
+  if (!s || s->kind != NY_S_FUNC || s->as.fn.type_params.len == 0)
+    return;
+  if (s->as.fn.erased_param_types.len == 0) {
+    for (size_t i = 0; i < s->as.fn.params.len; ++i)
+      vec_push_arena(p->arena, &s->as.fn.erased_param_types,
+                     s->as.fn.params.data[i].type);
+    s->as.fn.erased_return_type = s->as.fn.return_type;
+  }
+  for (size_t i = 0; i < s->as.fn.params.len; ++i) {
+    if (fn_type_names_param(&s->as.fn, s->as.fn.params.data[i].type))
+      s->as.fn.params.data[i].type = NULL;
+  }
+  if (fn_type_names_param(&s->as.fn, s->as.fn.return_type))
+    s->as.fn.return_type = NULL;
+  s->as.fn.dependent_return_param = NULL;
+}
+
 static stmt_t *parse_func(parser_t *p, ny_attribute_list attrs) {
   token_t tok = p->cur;
   parser_expect(p, NY_T_FN, "'fn'", NULL);
@@ -2001,9 +2139,43 @@ static stmt_t *parse_func(parser_t *p, ny_attribute_list attrs) {
   char *name = parse_qualified_name(p);
   if (!name)
     return NULL;
+  stmt_t *fn_stmt = stmt_new(p->arena, is_lemma ? NY_S_LEMMA : NY_S_FUNC, tok);
+  /*
+   * Explicit type parameters: `fn id<A>(A x) A`. The list is recorded on the
+   * declaration so later stages can bind the names; nothing consumes it yet, so
+   * `A` in a parameter type still resolves as an ordinary type name.
+   */
+  if (parser_match(p, NY_T_LT)) {
+    if (is_lemma) {
+      parser_error(p, p->prev, "lemma declarations cannot take type parameters",
+                   NULL);
+      return NULL;
+    }
+    while (p->cur.kind != NY_T_GT && p->cur.kind != NY_T_EOF) {
+      if (p->cur.kind != NY_T_IDENT) {
+        parser_error(p, p->cur, "expected function type parameter name",
+                     "write 'fn id<A>(A x) A'");
+        return NULL;
+      }
+      const char *param_name = parser_intern(p, p->cur.lexeme, p->cur.len);
+      vec_push_arena(p->arena, &fn_stmt->as.fn.type_params, param_name);
+      parser_advance(p);
+      if (!parser_match(p, NY_T_COMMA))
+        break;
+    }
+    if (!parser_match(p, NY_T_GT)) {
+      parser_error(p, p->cur, "expected '>' after function type parameters",
+                   "write 'fn id<A>(A x) A'");
+      return NULL;
+    }
+    if (fn_stmt->as.fn.type_params.len == 0) {
+      parser_error(p, p->prev, "empty function type parameter list",
+                   "remove the '<>' or name at least one parameter");
+      return NULL;
+    }
+  }
   parser_expect(p, NY_T_LPAREN, NULL, "'(' ");
   ny_param_list params = {0};
-  stmt_t *fn_stmt = stmt_new(p->arena, is_lemma ? NY_S_LEMMA : NY_S_FUNC, tok);
   while (p->cur.kind != NY_T_RPAREN) {
     if (p->cur.kind == NY_T_COMPTIME) {
       token_t splice_tok = p->cur;
@@ -2225,6 +2397,7 @@ static stmt_t *parse_func(parser_t *p, ny_attribute_list attrs) {
     stmt_t *s = fn_stmt;
     s->as.fn.name = name;
     s->as.fn.params = params;
+    fn_erase_type_param_annotations(p, s);
     s->as.fn.body = blk;
     s->as.fn.doc = NULL;
     s->as.fn.src_start = tok.lexeme;
@@ -2236,6 +2409,7 @@ static stmt_t *parse_func(parser_t *p, ny_attribute_list attrs) {
     stmt_t *s = fn_stmt;
     s->as.fn.name = name;
     s->as.fn.params = params;
+    fn_erase_type_param_annotations(p, s);
     s->as.fn.body = NULL;
     s->as.fn.doc = NULL;
     s->as.fn.src_start = tok.lexeme;
@@ -2279,6 +2453,7 @@ static stmt_t *parse_func(parser_t *p, ny_attribute_list attrs) {
   stmt_t *s = fn_stmt;
   s->as.fn.name = name;
   s->as.fn.params = params;
+  fn_erase_type_param_annotations(p, s);
   s->as.fn.body = body;
   s->as.fn.doc = doc;
   s->as.fn.src_start = tok.lexeme;
@@ -3698,6 +3873,33 @@ static stmt_t *parse_enum(parser_t *p) {
       while (p->cur.kind != NY_T_RPAREN && p->cur.kind != NY_T_EOF) {
         enum_field_t field = {0};
         field.tok = p->cur;
+        /*
+         * Constructor payloads are data. A function type would place the
+         * family in a negative position, so reject it explicitly rather than
+         * failing later on the generic payload parse.
+         */
+        if (p->cur.kind == NY_T_FN) {
+          parser_error(p, p->cur, "enum payload fields must be data types",
+                       "function types are not admitted in constructor "
+                       "arguments (positivity)");
+          /* Skip the whole function type, including its nested parameter
+           * list, so only the positivity error is reported. Stopping at the
+           * first ')' would leave the return type unconsumed and cascade. */
+          int payload_depth = 0;
+          while (p->cur.kind != NY_T_EOF) {
+            if (p->cur.kind == NY_T_LPAREN) {
+              payload_depth++;
+            } else if (p->cur.kind == NY_T_RPAREN) {
+              if (payload_depth == 0)
+                break;
+              payload_depth--;
+            } else if (p->cur.kind == NY_T_RBRACE && payload_depth == 0) {
+              break;
+            }
+            parser_advance(p);
+          }
+          break;
+        }
         field.type_name = parse_type_ref(p, "expected enum payload field type");
 
         parser_match(p, NY_T_COLON);

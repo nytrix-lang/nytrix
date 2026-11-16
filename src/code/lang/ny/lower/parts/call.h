@@ -1677,7 +1677,77 @@ static int nyr_lower_refine_membership(nyr_builder_t *b,
       (nyr_inst_t){.op = NYIR_AND_I64, .dst = -1, .a = lhs, .b = rhs, .c = -1});
 }
 
+/*
+ * A declaration like `fn same<A>(A a, A b)` binds every argument annotated
+ * with A to one type parameter. The annotations are erased for lowering, but
+ * the declared binding is still a static fact: all such arguments must have
+ * the same inferred type. Open types (uninferred, any) are skipped so this
+ * never rejects a value the lowering cannot see.
+ */
+static bool nyr_check_type_param_consistency(nyr_builder_t *b,
+                                             const expr_t *e) {
+  if (!b || !e || e->kind != NY_E_CALL)
+    return true;
+  const stmt_t *fn = e->semantic.canonical_callee_stmt;
+  const char *callee_name =
+      e->as.call.callee && e->as.call.callee->kind == NY_E_IDENT
+          ? e->as.call.callee->as.ident.name
+          : NULL;
+  if (!fn && callee_name)
+    fn = nyr_find_user_function_for_arity(b, callee_name,
+                                          e->as.call.args.len);
+  if (!fn && callee_name)
+    fn = nyr_find_user_function(b, callee_name);
+  if (!fn || fn->kind != NY_S_FUNC || fn->as.fn.type_params.len == 0 ||
+      fn->as.fn.erased_param_types.len == 0)
+    return true;
+  size_t ntypes = fn->as.fn.type_params.len;
+  const char **bound = calloc(ntypes, sizeof(*bound));
+  if (!bound)
+    return true;
+  for (size_t j = 0; j < fn->as.fn.params.len && j < e->as.call.args.len; ++j) {
+    const char *annotated = fn->as.fn.erased_param_types.data[j];
+    if (!annotated)
+      continue;
+    while (*annotated == '?' || *annotated == '*')
+      ++annotated;
+    size_t which = ntypes;
+    for (size_t k = 0; k < ntypes; ++k) {
+      const char *param = fn->as.fn.type_params.data[k];
+      if (param && strcmp(annotated, param) == 0) {
+        which = k;
+        break;
+      }
+    }
+    if (which == ntypes)
+      continue;
+    const expr_t *arg = e->as.call.args.data[j].val;
+    if (!arg)
+      continue;
+    const char *got = nyr_expr_type_name(b, arg);
+    if (!got || !*got || strcmp(got, "any") == 0 ||
+        strcmp(got, "dynamic") == 0 || got[0] == '\'')
+      continue;
+    if (!bound[which]) {
+      bound[which] = got;
+      continue;
+    }
+    if (strcmp(bound[which], got) == 0)
+      continue;
+    nyr_fail_at((nyr_builder_impl_t *)b, arg->tok,
+                "type parameter '%s' instantiated inconsistently: '%s' here, "
+                "'%s' earlier in this call",
+                fn->as.fn.type_params.data[which], got, bound[which]);
+    free(bound);
+    return false;
+  }
+  free(bound);
+  return true;
+}
+
 static int nyr_lower_call(nyr_builder_t *b, const expr_t *e) {
+  if (!nyr_check_type_param_consistency(b, e))
+    return -1;
   /* A statically known dictionary receiver can use the typed stdlib reader.
    * Keep it ahead of the global and local raw lookup shortcuts, which lose
    * the dynamic tag on fields loaded from layouts and generated adapters. */
@@ -4488,6 +4558,25 @@ ordinary_call:
     int arg = nyr_lower_int_value(b, arg_expr);
     if (arg < 0)
       return -1;
+    /* `int(p)` of a pointer is the address as an integer. Keep the register
+     * but re-class it: left as a pointer, `dict_set(d, int(p), v)` passed it
+     * untagged as if it were already a dynamic value and stored a pointer
+     * key, so a later `d.get(int(p))` (boxed as an int) never matched. The
+     * Wayland backend looked windows up this way and dropped all input. */
+    if (nyr_value_scalar_class(b, arg) == NYIR_SCALAR_POINTER ||
+        nyr_expr_is_ptr(b, arg_expr)) {
+      int copied = nyr_ir_emit(&b->nyir,
+                               (nyr_inst_t){.op = NYIR_COPY,
+                                            .dst = -1,
+                                            .a = arg,
+                                            .b = -1,
+                                            .scalar_class = NYIR_SCALAR_I64_RAW});
+      if (copied >= 0) {
+        ((expr_t *)e)->semantic.rep = NY_SEM_REP_RAW_INT;
+        ((expr_t *)e)->semantic.resolved = true;
+      }
+      return copied;
+    }
     return arg;
   }
   /* `__flt_to_int` is an internal typed conversion, unlike the public
@@ -9945,6 +10034,19 @@ ordinary_call:
                  : (e->as.call.callee->kind == NY_E_IDENT
                         ? nyr_find_user_function_for_arity(b, name, call_argc)
                         : nyr_find_user_function(b, name)));
+  /* An `extern` the caller's own source declares names the C symbol: a
+   * same-leaf function elsewhere in the program (the window `close`, the
+   * stdlib `cstr_dup` for `dup`) must not capture the call. */
+  if (callee_fn && name && !strchr(name, '.') && e->tok.filename &&
+      e->as.call.callee->kind == NY_E_IDENT &&
+      !(callee_fn->tok.filename &&
+        nyr_same_source_file(callee_fn->tok.filename, e->tok.filename))) {
+    const stmt_t *local_ext =
+        nyr_find_extern_decl_in_prog(b, b->prog, name, b->options);
+    if (local_ext && local_ext->tok.filename &&
+        nyr_same_source_file(local_ext->tok.filename, e->tok.filename))
+      callee_fn = NULL;
+  }
   if (callee_fn && name && e->tok.filename && callee_fn->tok.filename &&
       nyr_same_source_file(callee_fn->tok.filename, e->tok.filename) &&
       callee_fn->tok.line > e->tok.line &&
@@ -10050,6 +10152,16 @@ ordinary_call:
       !callee_fn->as.fn.link_name &&
       !nyr_same_source_file(callable_global->tok.filename, b->source_file))
     callable_global = NULL;
+  /* So does an extern the caller's source declares (`dup` against the
+   * `def dup` in core.mem's self-test). */
+  if (callable_global && e->tok.filename && callable_global->tok.filename &&
+      !nyr_same_source_file(callable_global->tok.filename, e->tok.filename)) {
+    const stmt_t *local_ext = nyr_find_extern_decl_in_prog(
+        b, b->prog, e->as.call.callee->as.ident.name, b->options);
+    if (local_ext && local_ext->tok.filename &&
+        nyr_same_source_file(local_ext->tok.filename, e->tok.filename))
+      callable_global = NULL;
+  }
   ny_native_lambda_entry_t *local_lambda =
       callable_local && callable_local->callable_expr
           ? ny_native_lambda_find(ny_native_lambda_cache_for(b),
@@ -10810,6 +10922,11 @@ ordinary_call:
       !declared_external &&
       ny_builtin_alloc_kind(leaf) == NY_BUILTIN_ALLOC_NONE) {
     const char *keyword = ny_keyword_typo_suggestion(name);
+    ny_diag_error(e->tok, "undefined symbol '%s'", name);
+    if (keyword)
+      ny_diag_hint("did you mean keyword '%s'?", keyword);
+    else
+      ny_diag_hint("declare or import '%s' before this call", name);
     return nyr_fail(
                b,
                "native NYIR lower: undefined symbol '%s'; no native body or "

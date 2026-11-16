@@ -23,6 +23,12 @@ typedef struct {
   int true_value;
 } ifc_store_pair_t;
 
+typedef struct {
+  size_t phi_index;
+  int false_value;
+  int true_value;
+} ifc_phi_pair_t;
+
 static size_t ifc_label_block(const nyr_cfg_t *cfg, int64_t label) {
   if (!cfg)
     return SIZE_MAX;
@@ -145,6 +151,44 @@ static bool ifc_exclusive_edge(const nyr_func_t *f, const nyr_cfg_t *cfg,
       return false;
     predecessor = edge_entry;
     edge_entry = cfg->succ_blocks[cfg->succ_offsets[edge_entry]];
+  }
+  return false;
+}
+
+/*
+ * A resolved arm may be the join itself when the arm block only branches to
+ * it.  That edge is still exclusive: every block on the way down to the join
+ * has exactly one predecessor, and the join owns the diamond's two.
+ */
+static bool ifc_exclusive_bridge(const nyr_func_t *f, const nyr_cfg_t *cfg,
+                                 size_t header, size_t entry, size_t join,
+                                 size_t *arm_block) {
+  size_t predecessor = header;
+  size_t last = SIZE_MAX;
+  for (size_t hops = 0;
+       hops < cfg->block_count && entry < cfg->block_count; ++hops) {
+    if (entry == join) {
+      if (arm_block)
+        *arm_block = last;
+      return last != SIZE_MAX;
+    }
+    if (!ifc_single_predecessor(cfg, entry, predecessor))
+      return false;
+    last = entry;
+    size_t branch = SIZE_MAX;
+    for (size_t i = cfg->block_start[entry]; i < cfg->block_end[entry]; ++i) {
+      nyr_op_t op = f->data[i].op;
+      if (op == NYIR_LABEL || op == NYIR_NOP)
+        continue;
+      if (op != NYIR_BR || branch != SIZE_MAX)
+        return false;
+      branch = i;
+    }
+    if (branch == SIZE_MAX ||
+        cfg->succ_offsets[entry + 1] - cfg->succ_offsets[entry] != 1)
+      return false;
+    predecessor = entry;
+    entry = cfg->succ_blocks[cfg->succ_offsets[entry]];
   }
   return false;
 }
@@ -350,42 +394,58 @@ static bool ifc_parse_arm(const nyr_func_t *f, const nyr_cfg_t *cfg,
       return false;
     arm->insts[arm->count++] = i;
   }
-  return arm->count != 0;
+  /*
+   * An arm that only branches to the join contributes no speculation: its
+   * value is the one the PHI already names for this edge.
+   */
+  return arm->count != 0 || arm->branch != SIZE_MAX;
 }
 
-static bool ifc_join_phi(const nyr_func_t *f, const nyr_cfg_t *cfg, size_t join,
-                         const ifc_arm_t *false_arm, const ifc_arm_t *true_arm,
-                         size_t *phi_index, int *false_value, int *true_value) {
-  if (!f || !cfg || !false_arm || !true_arm || !phi_index || !false_value ||
-      !true_value || join >= cfg->block_count || cfg->block_label[join] < 0)
+static bool ifc_arm_defines(const nyr_func_t *f, const ifc_arm_t *arm,
+                            int value);
+
+static bool ifc_arm_value_ok(const nyr_func_t *f, const nyr_cfg_t *cfg,
+                             const int *defs, const ifc_arm_t *arm,
+                             size_t header, size_t header_branch, int value) {
+  if (ifc_arm_defines(f, arm, value))
+    return true;
+  return ifc_value_available(cfg, defs, arm, header, header_branch, value);
+}
+
+/*
+ * A join may merge several values; convert them all so the arm blocks can be
+ * removed without leaving PHIs that name dead predecessors.
+ */
+static bool ifc_join_phis(const nyr_func_t *f, const nyr_cfg_t *cfg, size_t join,
+                          const ifc_arm_t *false_arm,
+                          const ifc_arm_t *true_arm, ifc_phi_pair_t *pairs,
+                          size_t *pair_count) {
+  if (!f || !cfg || !false_arm || !true_arm || !pairs || !pair_count ||
+      join >= cfg->block_count || cfg->block_label[join] < 0)
     return false;
-  size_t found = SIZE_MAX;
+  *pair_count = 0;
   for (size_t i = cfg->block_start[join]; i < cfg->block_end[join]; ++i) {
-    if (f->data[i].op != NYIR_PHI)
+    const nyr_inst_t *phi = &f->data[i];
+    if (phi->op != NYIR_PHI)
       continue;
-    if (found != SIZE_MAX)
+    if (*pair_count >= 8)
       return false;
-    found = i;
-  }
-  if (found == SIZE_MAX)
-    return false;
-  const nyr_inst_t *phi = &f->data[found];
-  if (phi->dst < 0 || phi->phi_incoming_len != 2 || !phi->phi_incoming)
-    return false;
-  *false_value = -1;
-  *true_value = -1;
-  for (size_t i = 0; i < phi->phi_incoming_len; ++i) {
-    if (phi->phi_incoming[i].predecessor_label == false_arm->label)
-      *false_value = phi->phi_incoming[i].value;
-    else if (phi->phi_incoming[i].predecessor_label == true_arm->label)
-      *true_value = phi->phi_incoming[i].value;
-    else
+    if (phi->dst < 0 || phi->phi_incoming_len != 2 || !phi->phi_incoming)
       return false;
+    int false_value = -1, true_value = -1;
+    for (size_t k = 0; k < phi->phi_incoming_len; ++k) {
+      if (phi->phi_incoming[k].predecessor_label == false_arm->label)
+        false_value = phi->phi_incoming[k].value;
+      else if (phi->phi_incoming[k].predecessor_label == true_arm->label)
+        true_value = phi->phi_incoming[k].value;
+      else
+        return false;
+    }
+    if (false_value < 0 || true_value < 0)
+      return false;
+    pairs[(*pair_count)++] = (ifc_phi_pair_t){i, false_value, true_value};
   }
-  if (*false_value < 0 || *true_value < 0)
-    return false;
-  *phi_index = found;
-  return true;
+  return *pair_count > 0;
 }
 
 static bool ifc_arm_defines(const nyr_func_t *f, const ifc_arm_t *arm,
@@ -400,17 +460,21 @@ static bool ifc_arm_defines(const nyr_func_t *f, const ifc_arm_t *arm,
 
 static bool ifc_rewrite(nyr_func_t *f, size_t branch,
                         const ifc_arm_t *false_arm, const ifc_arm_t *true_arm,
-                        size_t phi_index, int false_value, int true_value,
+                        const ifc_phi_pair_t *phis, size_t phi_count,
                         const ifc_store_pair_t *store_pairs,
                         size_t store_pair_count, int64_t join_label,
                         bool normalize_condition) {
+  if (!f || !phis || phi_count == 0 || phi_count > 8)
+    return false;
   size_t moved_count = 0;
   for (size_t i = 0; i < false_arm->count; ++i)
     moved_count += f->data[false_arm->insts[i]].op != NYIR_STORE_LOCAL;
   for (size_t i = 0; i < true_arm->count; ++i)
     moved_count += f->data[true_arm->insts[i]].op != NYIR_STORE_LOCAL;
-  size_t inserted =
-      moved_count + 2 * store_pair_count + 2 + (normalize_condition ? 2 : 0);
+  if (moved_count > 32)
+    return false;
+  size_t inserted = moved_count + 2 * store_pair_count + phi_count + 1 +
+                    (normalize_condition ? 2 : 0);
   size_t delta = inserted - 1;
   nyr_inst_t moved[32];
   size_t n = 0;
@@ -421,7 +485,9 @@ static bool ifc_rewrite(nyr_func_t *f, size_t branch,
     if (f->data[true_arm->insts[i]].op != NYIR_STORE_LOCAL)
       moved[n++] = f->data[true_arm->insts[i]];
   nyr_inst_t old_branch = f->data[branch];
-  nyr_inst_t phi = f->data[phi_index];
+  nyr_inst_t old_phis[8];
+  for (size_t i = 0; i < phi_count; ++i)
+    old_phis[i] = f->data[phis[i].phi_index];
   int condition = old_branch.a;
   int zero = -1;
   if (normalize_condition) {
@@ -431,26 +497,6 @@ static bool ifc_rewrite(nyr_func_t *f, size_t branch,
   int selected_stores[8];
   for (size_t i = 0; i < store_pair_count; ++i)
     selected_stores[i] = f->next_value++;
-  /*
-   * The SELECT replaces the PHI result, so keep facts attached to that
-   * result.  The incoming-edge allocation remains owned by the old PHI and
-   * must not be copied to the scalar instruction.
-   */
-  nyr_inst_t select = phi;
-  select.op = NYIR_SELECT_I64;
-  select.scalar_class = NYIR_SCALAR_I64_RAW;
-  select.a = condition;
-  select.b = true_value;
-  select.c = false_value;
-  select.d = select.e = select.f = -1;
-  select.imm = 0;
-  select.phi_incoming = NULL;
-  select.phi_incoming_len = 0;
-  select.extra_args = NULL;
-  select.extra_args_len = 0;
-  select.arg_sizes = NULL;
-  select.symbol = NULL;
-  select.debug = phi.debug;
   if (!nir_ensure_inst_space(f, delta))
     return false;
   memmove(&f->data[branch + inserted], &f->data[branch + 1],
@@ -500,7 +546,28 @@ static bool ifc_rewrite(nyr_func_t *f, size_t branch,
                                         .imm = store_pairs[i].slot,
                                         .scalar_class = NYIR_SCALAR_I64_RAW};
   }
-  f->data[select_at++] = select;
+  for (size_t i = 0; i < phi_count; ++i) {
+    /*
+     * The SELECT replaces the PHI result, so keep facts attached to that
+     * result.  The incoming-edge allocation remains owned by the old PHI and
+     * must not be copied to the scalar instruction.
+     */
+    nyr_inst_t select = old_phis[i];
+    select.op = NYIR_SELECT_I64;
+    select.scalar_class = NYIR_SCALAR_I64_RAW;
+    select.a = condition;
+    select.b = phis[i].true_value;
+    select.c = phis[i].false_value;
+    select.d = select.e = select.f = -1;
+    select.imm = 0;
+    select.phi_incoming = NULL;
+    select.phi_incoming_len = 0;
+    select.extra_args = NULL;
+    select.extra_args_len = 0;
+    select.arg_sizes = NULL;
+    select.symbol = NULL;
+    f->data[select_at++] = select;
+  }
   f->data[select_at] = (nyr_inst_t){.op = NYIR_BR,
                                     .dst = -1,
                                     .a = -1,
@@ -519,7 +586,131 @@ static bool ifc_rewrite(nyr_func_t *f, size_t branch,
     (void)nyr_erase_instruction(f, false_arm->branch + delta);
   if (true_arm->branch != SIZE_MAX)
     (void)nyr_erase_instruction(f, true_arm->branch + delta);
-  (void)nyr_erase_instruction(f, phi_index + delta);
+  for (size_t i = 0; i < phi_count; ++i)
+    (void)nyr_erase_instruction(f, phis[i].phi_index + delta);
+  nyr_refresh_metadata(f);
+  return true;
+}
+
+static bool ifc_block_has_phi(const nyr_func_t *f, const nyr_cfg_t *cfg,
+                              size_t block) {
+  if (!f || !cfg || block >= cfg->block_count)
+    return true;
+  for (size_t i = cfg->block_start[block]; i < cfg->block_end[block]; ++i)
+    if (f->data[i].op == NYIR_PHI)
+      return true;
+  return false;
+}
+
+/*
+ * A diamond whose arms assign the same mutable local has no join PHI: lowering
+ * stores the slot on both arms. Speculate the same whitelisted arm operations
+ * as the PHI form, then select the stored value and keep one store.
+ */
+static bool ifc_rewrite_store_only(nyr_func_t *f, size_t branch,
+                                   const ifc_arm_t *false_arm,
+                                   const ifc_arm_t *true_arm,
+                                   const ifc_store_pair_t *store_pairs,
+                                   size_t store_pair_count,
+                                   int64_t join_label,
+                                   bool normalize_condition) {
+  if (!f || !false_arm || !true_arm || !store_pair_count)
+    return false;
+  size_t moved_count = 0;
+  for (size_t i = 0; i < false_arm->count; ++i)
+    moved_count += f->data[false_arm->insts[i]].op != NYIR_STORE_LOCAL;
+  for (size_t i = 0; i < true_arm->count; ++i)
+    moved_count += f->data[true_arm->insts[i]].op != NYIR_STORE_LOCAL;
+  if (moved_count > 32)
+    return false;
+  size_t inserted = moved_count + 2 * store_pair_count + 1 +
+                    (normalize_condition ? 2 : 0);
+  size_t delta = inserted - 1;
+  nyr_inst_t moved[32];
+  size_t n = 0;
+  for (size_t i = 0; i < false_arm->count; ++i)
+    if (f->data[false_arm->insts[i]].op != NYIR_STORE_LOCAL)
+      moved[n++] = f->data[false_arm->insts[i]];
+  for (size_t i = 0; i < true_arm->count; ++i)
+    if (f->data[true_arm->insts[i]].op != NYIR_STORE_LOCAL)
+      moved[n++] = f->data[true_arm->insts[i]];
+  nyr_inst_t old_branch = f->data[branch];
+  int condition = old_branch.a;
+  int zero = -1;
+  if (normalize_condition) {
+    zero = f->next_value++;
+    condition = f->next_value++;
+  }
+  int selected_stores[8];
+  for (size_t i = 0; i < store_pair_count; ++i)
+    selected_stores[i] = f->next_value++;
+  if (!nir_ensure_inst_space(f, delta))
+    return false;
+  memmove(&f->data[branch + inserted], &f->data[branch + 1],
+          (f->len - branch - 1) * sizeof(*f->data));
+  f->len += delta;
+  for (size_t i = 0; i < n; ++i)
+    f->data[branch + i] = moved[i];
+  size_t at = branch + n;
+  if (normalize_condition) {
+    f->data[at++] = (nyr_inst_t){.op = NYIR_CONST_I64,
+                                 .dst = zero,
+                                 .a = -1,
+                                 .b = -1,
+                                 .c = -1,
+                                 .d = -1,
+                                 .e = -1,
+                                 .f = -1,
+                                 .imm = 0};
+    f->data[at++] = (nyr_inst_t){.op = NYIR_CMP_I64,
+                                 .dst = condition,
+                                 .a = old_branch.a,
+                                 .b = zero,
+                                 .c = -1,
+                                 .d = -1,
+                                 .e = -1,
+                                 .f = -1,
+                                 .cmp = NYIR_CMP_NE};
+  }
+  for (size_t i = 0; i < store_pair_count; ++i) {
+    f->data[at++] = (nyr_inst_t){.op = NYIR_SELECT_I64,
+                                 .dst = selected_stores[i],
+                                 .a = condition,
+                                 .b = store_pairs[i].true_value,
+                                 .c = store_pairs[i].false_value,
+                                 .d = -1,
+                                 .e = -1,
+                                 .f = -1,
+                                 .scalar_class = NYIR_SCALAR_I64_RAW};
+    f->data[at++] = (nyr_inst_t){.op = NYIR_STORE_LOCAL,
+                                 .dst = -1,
+                                 .a = selected_stores[i],
+                                 .b = -1,
+                                 .c = -1,
+                                 .d = -1,
+                                 .e = -1,
+                                 .f = -1,
+                                 .imm = store_pairs[i].slot,
+                                 .scalar_class = NYIR_SCALAR_I64_RAW};
+  }
+  f->data[at] = (nyr_inst_t){.op = NYIR_BR,
+                             .dst = -1,
+                             .a = -1,
+                             .b = -1,
+                             .c = -1,
+                             .d = -1,
+                             .e = -1,
+                             .f = -1,
+                             .imm = join_label,
+                             .debug = old_branch.debug};
+  for (size_t i = 0; i < false_arm->count; ++i)
+    (void)nyr_erase_instruction(f, false_arm->insts[i] + delta);
+  for (size_t i = 0; i < true_arm->count; ++i)
+    (void)nyr_erase_instruction(f, true_arm->insts[i] + delta);
+  if (false_arm->branch != SIZE_MAX)
+    (void)nyr_erase_instruction(f, false_arm->branch + delta);
+  if (true_arm->branch != SIZE_MAX)
+    (void)nyr_erase_instruction(f, true_arm->branch + delta);
   nyr_refresh_metadata(f);
   return true;
 }
@@ -543,9 +734,13 @@ bool nyr_if_convert(nyr_func_t *f) {
       size_t end = cfg.block_end[header];
       while (end > cfg.block_start[header] && f->data[end - 1].op == NYIR_NOP)
         --end;
-      if (!cfg.reachable[header] || end == cfg.block_start[header] ||
-          f->data[end - 1].op != NYIR_BR_IF ||
-          cfg.succ_offsets[header + 1] - cfg.succ_offsets[header] != 2)
+      if (!cfg.reachable[header])
+        continue;
+      if (end == cfg.block_start[header])
+        continue;
+      if (f->data[end - 1].op != NYIR_BR_IF)
+        continue;
+      if (cfg.succ_offsets[header + 1] - cfg.succ_offsets[header] != 2)
         continue;
       size_t branch = end - 1;
       const nyr_inst_t *br = &f->data[branch];
@@ -572,59 +767,109 @@ bool nyr_if_convert(nyr_func_t *f) {
       bool raw_condition =
           br->a >= 0 && br->a < f->next_value && defs[br->a] >= 0 &&
           f->data[(size_t)defs[br->a]].scalar_class == NYIR_SCALAR_I64_RAW;
-      if ((!condition_is_boolean && !raw_condition) ||
-          false_block >= cfg.block_count || true_block == SIZE_MAX ||
+      if (!condition_is_boolean && !raw_condition)
+        continue;
+      if (false_block >= cfg.block_count || true_block == SIZE_MAX ||
           true_block == false_block || true_block <= header ||
-          false_entry == SIZE_MAX ||
-          !ifc_exclusive_edge(f, &cfg, header, false_entry, false_block) ||
-          !ifc_exclusive_edge(f, &cfg, header, true_entry, true_block))
+          false_entry == SIZE_MAX)
         continue;
-      if (cfg.succ_offsets[false_block + 1] - cfg.succ_offsets[false_block] !=
-              1 ||
-          cfg.succ_offsets[true_block + 1] - cfg.succ_offsets[true_block] != 1)
+      size_t false_count =
+          cfg.succ_offsets[false_block + 1] - cfg.succ_offsets[false_block];
+      size_t true_count =
+          cfg.succ_offsets[true_block + 1] - cfg.succ_offsets[true_block];
+      /*
+       * An arm that only branches to the join is a legal empty arm.  Bridge
+       * resolution walks such an entry straight into the join, so the join is
+       * whatever the other arm branches to and the arm itself is the last
+       * bridge block before it.
+       */
+      size_t false_arm_block = false_block;
+      size_t true_arm_block = true_block;
+      bool false_empty = false, true_empty = false;
+      size_t join;
+      if (true_count == 1 &&
+          cfg.succ_blocks[cfg.succ_offsets[true_block]] == false_block) {
+        join = false_block;
+        false_empty = true;
+      } else if (false_count == 1 &&
+                 cfg.succ_blocks[cfg.succ_offsets[false_block]] == true_block) {
+        join = true_block;
+        true_empty = true;
+      } else if (false_count == 1 && true_count == 1 &&
+                 cfg.succ_blocks[cfg.succ_offsets[false_block]] ==
+                     cfg.succ_blocks[cfg.succ_offsets[true_block]]) {
+        join = cfg.succ_blocks[cfg.succ_offsets[false_block]];
+      } else {
         continue;
-      size_t false_successor = cfg.succ_blocks[cfg.succ_offsets[false_block]];
-      if (cfg.succ_blocks[cfg.succ_offsets[true_block]] != false_successor ||
-          false_successor <= true_block || false_successor >= cfg.block_count)
+      }
+      if (join >= cfg.block_count)
         continue;
-      size_t join = false_successor;
+      if (false_empty) {
+        if (!ifc_exclusive_bridge(f, &cfg, header, false_entry, join,
+                                  &false_arm_block))
+          continue;
+      } else if (!ifc_exclusive_edge(f, &cfg, header, false_entry, false_block)) {
+        continue;
+      }
+      if (true_empty) {
+        if (!ifc_exclusive_bridge(f, &cfg, header, true_entry, join,
+                                  &true_arm_block))
+          continue;
+      } else if (!ifc_exclusive_edge(f, &cfg, header, true_entry, true_block)) {
+        continue;
+      }
+      if (false_arm_block == join || true_arm_block == join)
+        continue;
       int64_t join_label = cfg.block_label[join];
-      if (join_label < 0 ||
-          !ifc_two_predecessors(&cfg, join, false_block, true_block))
+      if (join_label < 0 || !ifc_two_predecessors(&cfg, join, false_arm_block,
+                                                  true_arm_block))
         continue;
       ifc_arm_t false_arm, true_arm;
       ifc_store_pair_t store_pairs[8];
       size_t store_pair_count = 0;
-      size_t phi = SIZE_MAX;
-      int false_value = -1, true_value = -1;
-      if (!ifc_parse_arm(f, &cfg, defs, false_block, header, branch, join_label,
-                         &false_arm) ||
-          !ifc_parse_arm(f, &cfg, defs, true_block, header, branch, join_label,
-                         &true_arm) ||
+      ifc_phi_pair_t phis[8];
+      size_t phi_count = 0;
+      if (!ifc_parse_arm(f, &cfg, defs, false_arm_block, header, branch,
+                         join_label, &false_arm) ||
+          !ifc_parse_arm(f, &cfg, defs, true_arm_block, header, branch,
+                         join_label, &true_arm) ||
           !ifc_arm_store_pairs(f, &false_arm, &true_arm, store_pairs,
                                &store_pair_count) ||
           !ifc_arms_have_stable_local_loads(f, &cfg, header, branch, &false_arm,
-                                            &true_arm) ||
-          !ifc_join_phi(f, &cfg, join, &false_arm, &true_arm, &phi,
-                        &false_value, &true_value) ||
-          !ifc_arm_defines(f, &false_arm, false_value) ||
-          !ifc_arm_defines(f, &true_arm, true_value))
+                                            &true_arm))
         continue;
-      const nyr_inst_t *phi_inst = &f->data[phi];
-      /*
-       * Loop collapsing can leave an unclassified PHI whose incoming
-       * definitions still carry exact raw-i64 ABI facts. Recover only that
-       * unambiguous class; tagged values and pointers remain excluded.
-       */
-      bool raw_phi = phi_inst->scalar_class == NYIR_SCALAR_I64_RAW;
-      if (phi_inst->scalar_class == NYIR_SCALAR_UNKNOWN &&
-          defs[false_value] >= 0 && defs[true_value] >= 0)
-        raw_phi =
-            f->data[defs[false_value]].scalar_class == NYIR_SCALAR_I64_RAW &&
-            f->data[defs[true_value]].scalar_class == NYIR_SCALAR_I64_RAW;
-      if (!raw_phi || types.value_f64[false_value] ||
-          types.value_f32[false_value] || types.value_f64[true_value] ||
-          types.value_f32[true_value])
+      bool have_phi = ifc_join_phis(f, &cfg, join, &false_arm, &true_arm, phis,
+                                    &phi_count);
+      for (size_t i = 0; have_phi && i < phi_count; ++i) {
+        if (!ifc_arm_value_ok(f, &cfg, defs, &false_arm, header, branch,
+                              phis[i].false_value) ||
+            !ifc_arm_value_ok(f, &cfg, defs, &true_arm, header, branch,
+                              phis[i].true_value)) {
+          have_phi = false;
+          break;
+        }
+        const nyr_inst_t *phi_inst = &f->data[phis[i].phi_index];
+        /*
+         * Loop collapsing can leave an unclassified PHI whose incoming
+         * definitions still carry exact raw-i64 ABI facts. Recover only that
+         * unambiguous class; tagged values and pointers remain excluded.
+         */
+        bool raw_phi = phi_inst->scalar_class == NYIR_SCALAR_I64_RAW;
+        if (phi_inst->scalar_class == NYIR_SCALAR_UNKNOWN &&
+            defs[phis[i].false_value] >= 0 && defs[phis[i].true_value] >= 0)
+          raw_phi = f->data[defs[phis[i].false_value]].scalar_class ==
+                        NYIR_SCALAR_I64_RAW &&
+                    f->data[defs[phis[i].true_value]].scalar_class ==
+                        NYIR_SCALAR_I64_RAW;
+        if (!raw_phi || types.value_f64[phis[i].false_value] ||
+            types.value_f32[phis[i].false_value] ||
+            types.value_f64[phis[i].true_value] ||
+            types.value_f32[phis[i].true_value])
+          have_phi = false;
+      }
+      bool store_only =
+          !have_phi && store_pair_count > 0 && !ifc_block_has_phi(f, &cfg, join);
+      if (!have_phi && !store_only)
         continue;
       size_t cost = ifc_arm_cost(f, &false_arm) + ifc_arm_cost(f, &true_arm);
       size_t budget =
@@ -634,9 +879,17 @@ bool nyr_if_convert(nyr_func_t *f) {
               : 4;
       if (cost > budget)
         continue;
-      if (!ifc_rewrite(f, branch, &false_arm, &true_arm, phi, false_value,
-                       true_value, store_pairs, store_pair_count, join_label,
-                       !condition_is_boolean)) {
+      bool rewritten = false;
+      if (have_phi) {
+        rewritten = ifc_rewrite(f, branch, &false_arm, &true_arm, phis,
+                                phi_count, store_pairs, store_pair_count,
+                                join_label, !condition_is_boolean);
+      } else {
+        rewritten = ifc_rewrite_store_only(
+            f, branch, &false_arm, &true_arm, store_pairs, store_pair_count,
+            join_label, !condition_is_boolean);
+      }
+      if (!rewritten) {
         free(defs);
         nyr_cfg_free(&cfg);
         nyr_type_map_free(&types);

@@ -222,6 +222,31 @@ static const stmt_t *nyr_namespace_function_value(nyr_builder_impl_t *b,
       memcpy(qualified, canonical, (size_t)n + 1);
     }
   }
+  /* `alias.VALUE.member` reads a member of a module's top-level value, not a
+   * function in a namespace: `fx.EFFECTS.len` must not become a function value
+   * of some `len`. */
+  {
+    const char *last = strrchr(qualified, '.');
+    if (last && last > qualified) {
+      char owner_path[512];
+      size_t owner_len = (size_t)(last - qualified);
+      if (owner_len < sizeof(owner_path)) {
+        memcpy(owner_path, qualified, owner_len);
+        owner_path[owner_len] = '\0';
+        if (strchr(owner_path, '.') && nyr_globaltab_name(owner_path))
+          return NULL;
+        /* A folded `def` has no cell: look for the declaration itself. */
+        char *leaf = strrchr(owner_path, '.');
+        if (leaf) {
+          *leaf = '\0';
+          const stmt_t *owner_mod =
+              nyr_find_module_walk_in_prog(b, b->prog, owner_path);
+          if (owner_mod && nyr_find_module_member_in(b, owner_mod, leaf + 1, 0))
+            return NULL;
+        }
+      }
+    }
+  }
   const stmt_t *function = nyr_find_user_function(b, qualified);
   if (!function && e->semantic.canonical_callee_stmt &&
       e->semantic.canonical_callee_stmt->kind == NY_S_FUNC)
@@ -867,6 +892,8 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
           (!leaf || ny_native_runtime_symbol_for_expr(NULL, leaf, e) == NULL) &&
           (!leaf || ny_native_leaf_kind(leaf) == NY_NATIVE_LEAF_NONE) &&
           (!leaf || ny_builtin_alloc_kind(leaf) == NY_BUILTIN_ALLOC_NONE)) {
+        ny_diag_error(e->tok, "undefined symbol '%s'", e->as.ident.name);
+        ny_diag_hint("declare or import '%s' before this use", e->as.ident.name);
         return nyr_fail(b, "undefined symbol '%s'", e->as.ident.name), -1;
       }
       const char *symbol = e->as.ident.name;
@@ -907,6 +934,8 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
      * loop-local promotion path below may consume a candidate without this.
      */
     if (!l) {
+      ny_diag_error(e->tok, "undefined symbol '%s'", e->as.ident.name);
+      ny_diag_hint("declare or import '%s' before this use", e->as.ident.name);
       return nyr_fail(b, "undefined symbol '%s'", e->as.ident.name), -1;
     }
     l->sb_candidate = false;

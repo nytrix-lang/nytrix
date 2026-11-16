@@ -75,6 +75,26 @@ static bool stmt_looks_type_value_binding(parser_t *p) {
   return probe.cur.kind == NY_T_ASSIGN;
 }
 
+/*
+ * Canonical universe spellings carry their level after a space: "Type" is
+ * level 0, "Type 3" is level 3. Absent or malformed suffixes are level 0.
+ */
+static unsigned stmt_universe_level_text(const char *text) {
+  if (!text)
+    return 0;
+  const char *space = strrchr(text, ' ');
+  if (!space || !space[1])
+    return 0;
+  unsigned long level = 0;
+  for (const char *d = space + 1; *d; ++d) {
+    if (*d < '0' || *d > '9')
+      return 0;
+    if (level <= 1000ul)
+      level = level * 10ul + (unsigned long)(*d - '0');
+  }
+  return level > 1000ul ? 1000u : (unsigned)level;
+}
+
 static bool parse_var_binding_target(parser_t *p, stmt_t *s) {
   const char *var_type = NULL;
   token_t ident = {0};
@@ -391,6 +411,8 @@ static stmt_t *p_parse_stmt_raw(parser_t *p) {
                              (p->cur.kind == NY_T_IDENT &&
                               (parser_token_is_builtin_type(p->cur) ||
                                parser_current_token_is_type_alias(p) ||
+                               parser_type_ref_is_type_universe(arena_strndup(
+                                   p->arena, p->cur.lexeme, p->cur.len)) ||
                                (p->cur.len == 6 && p->cur.lexeme &&
                                 strncmp(p->cur.lexeme, "exists", 6) == 0))));
         if (type_literal) {
@@ -412,12 +434,61 @@ static stmt_t *p_parse_stmt_raw(parser_t *p) {
                          "'Type' bindings are compile-time values",
                          "declare the type value with 'def', not 'mut'");
           }
+          /*
+           * Universe values obey the level rule: `Type n` inhabits
+           * `Type (n + 1)` and never `Type n`. The annotation names the
+           * universe the binding lives in (a bare `Type` is level 0), so the
+           * value's level must be strictly lower. This is what makes
+           * `Type : Type` fail instead of escaping to runtime symbol
+           * resolution.
+           */
+          if (parser_type_ref_is_type_universe(type_value)) {
+            unsigned decl_level = stmt_universe_level_text(decl_type);
+            unsigned value_level = stmt_universe_level_text(type_value);
+            if (value_level + 1u > decl_level) {
+              parser_error(p, type_value_tok,
+                           "universe level too low for this type value",
+                           "'Type n' inhabits 'Type (n + 1)'; annotate the "
+                           "binding with 'Type (n + 1)' or use a lower-level "
+                           "type value");
+              parser_sync_stmt_boundary(p);
+              stmt_free_members(s);
+              return NULL;
+            }
+          }
           if (p->block_depth == 0 && init_index < s->as.var.names.len) {
+            /*
+             * Validate like `type Name = Body` so a self-referential alias
+             * (`def Type T = T`) is rejected by the normalization cycle check
+             * instead of being accepted and expanded forever at use sites.
+             */
             parser_register_type_alias(p, s->as.var.names.data[init_index],
                                        NULL, 0, type_value, type_value_tok,
-                                       false);
+                                       true);
           }
           initializer = ct_string_expr(p, type_value_tok, type_value);
+        } else if (decl_type &&
+                   parser_type_ref_is_type_universe(decl_type) &&
+                   p->cur.kind == NY_T_IDENT && p->cur.len) {
+          /*
+           * `def Type T = T` names the binding inside its own type value.
+           * That is not a type literal (so it would be parsed as an
+           * expression referring to the binding being created) and it can
+           * never resolve to a concrete type; reject the cycle where it is
+           * written, like `type Bad<T> = Bad<T>`.
+           */
+          const char *bound = s->as.var.names.data[init_index];
+          const char *dot = strrchr(bound, '.');
+          const char *leaf = dot ? dot + 1 : bound;
+          if (p->cur.lexeme && strlen(leaf) == p->cur.len &&
+              strncmp(leaf, p->cur.lexeme, p->cur.len) == 0) {
+            parser_error(p, p->cur, "type value cannot refer to itself",
+                         "define the alias in terms of another type");
+            parser_sync_stmt_boundary(p);
+            stmt_free_members(s);
+            return NULL;
+          }
+          initializer = p_parse_expr(p, 0);
         } else {
           initializer = p_parse_expr(p, 0);
         }

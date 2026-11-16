@@ -2,13 +2,22 @@
 # UI, Engine, and Editor Roadmap (Fable 5.2)
 
 Only open work is listed; finished items are removed once their acceptance
-check has passed. State on 2026-11-15 (private build of the
-current tree): the UI probe directory passes on native -O0, native -O3, and
-LLVM JIT (85 shapes, no exceptions; `editor-keymap-profiles` now passes on
-MCJIT). Loaded glTF scenes draw textured on Vulkan and GL over the default
-HDR sky. Compositor checks run on headless Weston with Vulkan and GL;
-scripted pointer input goes through the window event queue
-(`NYTRIX_FIXTURE_EVENTS`) and drives widgets on the real backends.
+check has passed. State on 2026-11-16 (private snapshot `acdf17fa` plus the
+handoff commit): `etc/tests/code/probes` + `etc/tests/lang` run 1686 fixtures
+with only six pre-existing failures (`comptime-contracts`, `doc-meta`,
+`doc-rank`, `terminal:test_term_quit_key`, two lexer-invalid-byte fixtures);
+`lang/modules` + `code/probes/ui` (173) all pass. Loaded glTF scenes draw
+textured on Vulkan and GL over the default HDR sky. Compositor checks run on
+headless Weston with Vulkan and GL. Two input paths exist and both matter:
+`NYTRIX_FIXTURE_EVENTS` pushes events into the window facade queue (drives
+widgets, but bypasses the Wayland listeners); `window.inject_platform_input`
+calls the real wl_pointer/wl_keyboard listeners (see P1).
+
+Finished in this pass and removed from the list: the old P3 (editor palette,
+context menu, find bar and colour picker are `viewer/gui.ny` windows; probe
+`editor-gui-popups`), and P4 (smem rewritten on `core.os.memscan`, probe
+`os/memscan`; screen effects `core.os.ui.render.postfx` with
+`set_blend_factors`, probe `postfx-effects`, demo `etc/projects/ui/postfx.ny`).
 
 UI performance work stays in this checklist. Compiler and NYR performance
 work is tracked in [Performance work](perf.md).
@@ -58,9 +67,22 @@ work is tracked in [Performance work](perf.md).
     restores the terminal on `exit()` as well as on `close_window()` (the
     runtime exit skipped its terminal restore, leaving raw mode, the
     alternate screen, and a hidden cursor).
-  Still untested: fractional scales, resize, IME composition/commit/cancel,
-  clipboard, and pointer/keyboard events from a compositor seat (headless
-  Weston has none). Acceptance: captures/probes at each supported scale and
+  - Seat input (2026-11-16): on a real compositor (Hyprland) no click or
+    key reached any app. The Wayland listeners keyed windows by
+    `int(surface)`, which the compiler stored as a pointer key but looked
+    up as an int, so every lookup missed (compiler fixed: `int(ptr)` is an
+    integer); the keymap handler's bare `close(fd)` resolved to the window
+    `close` and quit the app; a press and release inside one
+    `wl_pointer.frame`, or one toolkit frame, lost the click. All fixed.
+    `window.inject_platform_input` drives the backend's own listeners, so
+    `code/probes/ui/wayland-seat-input` covers pointer, fast clicks, XKB
+    typing with Shift, and Backspace on headless Weston (also under the
+    kiosk shell, which forces the window size as tiling compositors do).
+  - A JIT-run app on Mesa llvmpipe (software GL) crashes in shader
+    compilation: Mesa's LLVM 21 and the compiler's LLVM 23 share symbols
+    in one process. Standalone executables are not affected.
+  Still untested: fractional scales, IME composition/commit/cancel,
+  clipboard, and events from a physical seat. Acceptance: captures/probes at each supported scale and
   size, no lost input or text, and an explicit support result for each
   backend.
 
@@ -81,77 +103,58 @@ work is tracked in [Performance work](perf.md).
   Acceptance: no single classifier above 3% of samples in an idle engine
   frame, with the `lang/memory` fixtures passing.
 
-### P3 — Editor and panels
-
-- [ ] **Move the editor's popups onto the shared toolkit.** The engine and the
-  gallery use `viewer/gui.ny` for menus, popups, tables, and docking; the
-  editor still draws its own palette, context menu, find bar, and colour
-  picker. Port them to `gui` popups and delete the duplicates. Acceptance:
-  each subsystem has focused probes and no widget behaviour is implemented
-  twice.
-
-### P4 — Native media and UI libraries
-
-- [ ] **Shader effects and render handling.** Needs the effect list the user
-  supplied earlier; it is not in the repository. Acceptance: each effect
-  renders on Vulkan and GL on the compositor with a capture, toggles at run
-  time, and has a probe.
-- [ ] **Port/fix `smem` process memory scanner UI (`etc/projects/ui/smem.ny`).**
-  Single-file Nytrix port of `x3ric/smem` (https://github.com/x3ric/smem);
-  original reference cloned at `/tmp/kilo/smem` (`README.md`, `src/main.rs`,
-  `src/types.rs`, `src/scan.rs`, `src/ui.rs`, `test`). Current state (verified
-  from `/home/e/nytrix`): `./build/release/ny etc/projects/ui/smem.ny` and
-  `./make ny etc/projects/ui/smem.ny` compile and run (warnings only);
-  `timeout 150 env NY_UI_HEADLESS=1 ./build/release/ny etc/projects/ui/smem.ny`
-  and `timeout 180 ./make ny etc/projects/ui/smem.ny` exit 0. Implements typed
-  parsing/encoding/compare (`bool/byte/hex/int*/float*/size/ptr`, auto sizing,
-  scan helpers), `/proc/<pid>/maps` grouping and `/proc/<pid>/comm` PID
-  listing/filtering, attach/detach via `/proc/<pid>/mem` (`__open_raw`,
-  `__read_off_raw`/`__write_off_raw` with `ptr_add`), scan history with
-  first/next/prev/reset and modes (Exact/Changed/Unchanged/Increased/Increased
-  or Greater/Increased by/Decreased/Decreased or Less/Decreased by), set-all
-  and lock writer (mutex-guarded background thread), GUI panels for
-  attach/results/maps with hex preview and address copy, hotkeys F2/F3/F4/F5/
-  F11/F12, and optional PID argv. Remaining work to completely fix/finish and
-  reach parity with upstream behavior/UI:
-  - **Feature parity:** implement missing controls/hotkeys from README (`S`/`R`
-    scan/region view toggles, `F1` attach/detach, `F5` focus specific address,
-    `F7` lock toggle/management with visible state, `F8-F10` quick scans for
-    changed/increased/decreased), per-region selection/filter behavior matching
-    upstream `selected_region` semantics, and full results/maps interaction.
-  - **Visualization/UI fidelity:** replace capped text/hex preview with a
-    responsive byte-grid/value visualization closer to `smem`'s egui view
-    (zoom-scaled cells, row addressing, hover tooltip/value decode at pointer,
-    right-click copy behavior), correct scroll/viewport handling for large
-    maps/results, and polish layout/state (view mode `auto/maps/results`,
-    PID/process picker UX, error/status reporting).
-  - **Correctness/perf:** audit scan correctness on real processes (type scan
-    ordering, baseline/next semantics, partial reads, large regions chunking,
-    address/value refresh), ensure lock thread lifecycle/start-stop safety and
-    no stale writes after detach/reset, and avoid UI stalls on large `/proc`
-    scans or previews.
-  - **Compiler/runtime warnings:** eliminate `W2101/W2102` dynamic-type-fallback
-    warnings in `etc/projects/ui/smem.ny` (currently includes e.g. comparison
-    operands inferred as `any == bool` at `107:30`, `any < f64` at `231:48`,
-    `232:48`, `233:22`, with suppressed follow-ups) by adding precise types/
-    guards so strict verification is clean.
-  - **Verification:** exercise interactively on a real display/compositor and
-    against a known target process (`./build/release/ny etc/projects/ui/smem.ny
-    <pid>` as root/capable user) to confirm attach, scan/filter/set/lock, map
-    browsing, copy/tooltip, and hotkeys; keep headless/mock paths working.
-  - **Acceptance:** behavior and controls match the upstream README/source for
-    supported Linux `/proc` workflows, no compile warnings, stable on native/JIT
-    routes used for UI tools, and no regressions in existing UI/tool checks.
-
 ### Compiler defects found during this work (open)
 
 - The engine built as a standalone executable (`--run=none --output`, -O1
-  and -O3) crashes on Vulkan in its first frame: `_select_static_draw_pipeline`
+  -O1, -O3 and -O0) crashes on Vulkan in its first frame: `_select_static_draw_pipeline`
   passes the line pipeline as a tagged word (`0x34091021` for handle
   `0x1a048810`) to `vkCmdBindPipeline`. The same engine runs on the default
   LLVM route and `ny --native-only`; a compiler from 2026-11-13 also crashed
   on this route (earlier, in OpenEXR `findSlice`). A minimal module-global
   `?handle` written in one module and read in another does not reproduce it.
+
+## Handoff notes (2026-11-16)
+
+Where the last session stopped, so the next one can resume without
+re-deriving it.
+
+- **Next item in progress: standalone engine crash** (compiler defects
+  above). Reproduce: `ny --native-only -O1 --run=none --output eng.exe
+  etc/projects/ui/engine.ny`, run under headless Weston with
+  `NY_UI_RENDER_BACKEND=vk NYTRIX_UI_REPLAY=1 NYTRIX_UI_REPLAY_BACKEND=vk
+  NYTRIX_FIXTURE_FRAMES=30`; -O0 executables crash the same way, JIT routes
+  do not. Found so far: the global `core.os.ui.render.vk.state._line_pipeline`
+  holds the raw handle (gdb watchpoint), but in
+  `vk/draw.ny:_select_static_draw_pipeline` the executable route lowers
+  `target = _line_pipeline` (and the other pipeline globals) through
+  `rt_tag`, i.e. the `mut ?handle target` local is a dynamic slot there and
+  a raw one on the JIT route (diff the function with `NY_DUMP_FN=
+  core.os.ui.render.vk.draw._select_static_draw_pipeline` on both routes).
+  Treating declared `ptr`/`handle` locals as raw in the stmt.h slot join
+  (`declared_raw_scalar`) did NOT fix it and was reverted; the dynamic slot
+  decision comes from another rule (look at `prior_dynamic_slot` and
+  `canonical_dynamic_init` for the declaration, and why `nyr_expr_is_any`
+  differs for imported cells between `--run=none` and the JIT). A small
+  two-module `?handle` repro does not reproduce it.
+- **P2** has not been touched since its entry was written.
+- **P1** remaining: fractional scale (needs `wp_viewport`/buffer scale,
+  swapchain/EGL resize, toolkit scale), IME (text-input-v3), clipboard, and
+  a check with a physical seat. The user's Hyprland monitor is scale 1.
+- **P0** needs a design decision (reclaiming heap vs frame region); nothing
+  started.
+- **Test environment used:** a clean copy of the repo at
+  `$N/tree` (N = the session scratchpad) with other agents' uncommitted
+  backend edits reverted to HEAD, built in `build/p2`; live-tree edits were
+  copied or patched into it before building. Headless Weston helper scripts
+  (`shoot.sh`, `in_weston.sh`, kiosk variant) and the smem test target
+  (`target/target.c`, a C program with known values; `smem_run.sh` starts it
+  as smem's child so ptrace scope allows attaching) lived in that
+  scratchpad and are not in the repo; the recipes are in this file and in
+  the agent memory notes.
+- **User-visible state:** input on real Wayland works (the user confirmed
+  clicks and typing on Hyprland after the fixes); apps no longer launch
+  twice on close (the runtime calls `main()`; apps must not call it
+  themselves). smem has the one-row icon top bar the user asked for.
 
 ## Execution brief
 

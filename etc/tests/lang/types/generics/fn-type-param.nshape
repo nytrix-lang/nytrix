@@ -1,0 +1,64 @@
+shape fn_type_param_dynamic_instantiation {
+  family "runtime/language"
+  generator "embedded"
+  features [ny generics]
+  template ny-test-case
+  flags_matrix "--native-only -O0"
+  expect compile_and_run
+  expect_message "GENERIC-OK"
+  source ny <<'NY'
+use core
+
+;; A declared type parameter is erased: `A x` lowers exactly like an
+;; unannotated parameter, so one declaration serves int and str at runtime.
+;; Per-instance static checking is not implemented; these calls prove the
+;; erasure path reaches codegen for both value shapes.
+fn id<A>(A x) A { x }
+print(id(3))
+print(id("s"))
+print("GENERIC-OK")
+NY
+}
+
+shape fn_type_param_multiple {
+  family "runtime/language"
+  generator "embedded"
+  features [ny generics]
+  template ny-test-case
+  flags_matrix "--native-only -O0"
+  expect compile_and_run
+  expect_message "MULTI-OK"
+  source ny <<'NY'
+use core
+
+;; Two declared parameters are independently erased; the call works without
+;; naming them at the call site.
+fn first<A, B>(A a, B b) A { a }
+print(first(7, "ignored"))
+print("MULTI-OK")
+NY
+}
+
+shape fn_type_param_empty_list_negative {
+  family "compiler-errors/frontend"
+  generator "error"
+  features [ny generics parse negative]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "empty function type parameter list"
+  source ny <<'NY'
+fn id<>(int x) int { x }
+NY
+}
+
+shape fn_type_param_unterminated_negative {
+  family "compiler-errors/frontend"
+  generator "error"
+  features [ny generics parse negative]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "expected '>' after function type parameters"
+  source ny <<'NY'
+fn id<A B>(int x) int { x }
+NY
+}

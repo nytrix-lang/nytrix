@@ -1,0 +1,21 @@
+shape universe_values_as_expressions {
+  family "runtime/language"
+  generator "embedded"
+  features [ny dependent universe value]
+  template ny-test-case
+  flags_matrix "--native-only -O0"
+  expect compile_and_run
+  expect_message "Type 3"
+  source ny <<'NY'
+use core
+
+;; A universe is an erased static index; its runtime tag is a string, so a
+;; universe value in expression position is the tag rather than an unresolved
+;; symbol. Bare `Type` is level 0.
+def root = Type
+def lvl3 = Type 3
+assert(root == "Type", "bare Type evaluates to the level-0 tag")
+assert(lvl3 == "Type 3", "leveled Type carries its level")
+print(lvl3)
+NY
+}

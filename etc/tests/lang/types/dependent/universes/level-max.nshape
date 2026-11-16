@@ -1,0 +1,51 @@
+shape level_max_literal_normalization {
+  family "runtime/language"
+  generator "embedded"
+  features [ny dependent universe level]
+  template ny-test-case
+  flags_matrix "--native-only -O0"
+  expect compile_and_run
+  expect_message "LEVEL-MAX-OK"
+  source ny <<'NY'
+use core
+
+;; A closed level constraint needs no solver: max over literals folds to the
+;; larger level, in expression position and in type position.
+def t = Type max(3, 5)
+assert(t == "Type 5", "max(3, 5) folds to 5")
+def u = Type max(2, 2)
+assert(u == "Type 2", "max is idempotent")
+print("LEVEL-MAX-OK")
+NY
+}
+
+shape level_max_cumulativity {
+  family "runtime/language"
+  generator "embedded"
+  features [ny dependent universe level cumulativity]
+  template ny-test-case
+  flags_matrix "--native-only -O0"
+  expect compile_and_run
+  expect_message "LEVEL-CUM-OK"
+  source ny <<'NY'
+use core
+
+;; Type n inhabits every Type m with m > n, so the folded level 2 fits in 3.
+def Type 3 folded = Type max(1, 2)
+print("LEVEL-CUM-OK")
+NY
+}
+
+shape level_max_too_low_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features [ny dependent universe level negative]
+  template ny-compile-fail
+  expect compile_fail
+  source ny <<'NY'
+use core
+
+;; Folding to 2 does not fit in Type 2: a universe never inhabits its own level.
+def Type 2 folded = Type max(1, 2)
+NY
+}

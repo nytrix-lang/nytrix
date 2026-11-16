@@ -12327,6 +12327,20 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
             !mach_u8(e, 0xdd) || !mach_rbp_disp(e, 3, dst))
           return false;
         break;
+      case NYR_MACH_POPCOUNT64:
+        if (!mach_is_i64(mach, &in->dst) || !mach_is_i64(mach, &in->src0))
+          return mach_err(
+              e, "x64 machine form encode: popcount needs i64 operands");
+        if (!mach_load_op_rax(e, &in->src0))
+          return false;
+        /*
+         * popcnt rax, rax: F3 REX.W 0F B8 C0.
+         */
+        if (!mach_u8(e, 0xf3) || !mach_rex(e, true, false, false, false) ||
+            !mach_u8(e, 0x0f) || !mach_u8(e, 0xb8) || !mach_u8(e, 0xc0) ||
+            !mach_store_rax(e, dst))
+          return false;
+        break;
       case NYR_MACH_BSWAP64:
       case NYR_MACH_BSWAP32:
         if (!mach_is_i64(mach, &in->dst) || !mach_is_i64(mach, &in->src0))
@@ -13999,8 +14013,14 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
             return false;
         } else {
           int true_slot = mach_slot_off(e, &in->src1);
+          /*
+           * mach_rbp_disp writes the ModRM byte together with the
+           * displacement (disp8: 45, disp32: 85). Emitting 85 here as well
+           * added a stray byte, so the next instruction was swallowed into
+           * the displacement and the stream desynchronized.
+           */
           if (!mach_rex(e, true, false, false, false) || !mach_u8(e, 0x0f) ||
-              !mach_u8(e, cmov_opcode) || !mach_u8(e, 0x85) ||
+              !mach_u8(e, cmov_opcode) ||
               !mach_rbp_disp(e, 0, true_slot))
             return false;
         }

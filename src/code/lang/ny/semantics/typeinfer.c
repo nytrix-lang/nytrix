@@ -450,12 +450,93 @@ ny_type_t *ny_type_sigma(ny_type_arena_t *arena, const char *index_name,
   return t;
 }
 
-ny_type_t *ny_type_type_univ(ny_type_arena_t *arena, const char *name) {
+/* Canonical universe names carry their level as a suffix: "Type" is level 0,
+ * "Type 3" is level 3. Malformed or absent suffixes fall back to level 0. */
+static unsigned ny_type_univ_level_from_name(const char *name) {
+  if (!name)
+    return 0;
+  const char *space = strrchr(name, ' ');
+  if (!space || !space[1])
+    return 0;
+  unsigned long level = 0;
+  for (const char *d = space + 1; *d; ++d) {
+    if (*d < '0' || *d > '9')
+      return 0;
+    if (level <= 1000ul)
+      level = level * 10ul + (unsigned long)(*d - '0');
+  }
+  return level > 1000ul ? 1000u : (unsigned)level;
+}
+
+static ny_level_t *ny_level_new(ny_type_arena_t *arena) {
+  arena_t *storage =
+      arena ? (arena->source_storage ? arena->source_storage : &arena->arena)
+            : NULL;
+  ny_level_t *level = (ny_level_t *)arena_alloc(storage, sizeof(*level));
+  if (level)
+    memset(level, 0, sizeof(*level));
+  return level;
+}
+
+const ny_level_t *ny_level_literal(ny_type_arena_t *arena, unsigned value) {
+  ny_level_t *level = ny_level_new(arena);
+  if (!level)
+    return NULL;
+  level->kind = NY_LEVEL_LITERAL;
+  level->literal = value > 1000u ? 1000u : value;
+  return level;
+}
+
+const ny_level_t *ny_level_var(ny_type_arena_t *arena, unsigned var) {
+  ny_level_t *level = ny_level_new(arena);
+  if (!level)
+    return NULL;
+  level->kind = NY_LEVEL_VAR;
+  level->var = var;
+  return level;
+}
+
+const ny_level_t *ny_level_max(ny_type_arena_t *arena, const ny_level_t *a,
+                               const ny_level_t *b) {
+  ny_level_t *level = ny_level_new(arena);
+  if (!level)
+    return NULL;
+  level->kind = NY_LEVEL_MAX;
+  level->left = a;
+  level->right = b;
+  return level;
+}
+
+bool ny_level_equal(const ny_level_t *a, const ny_level_t *b) {
+  if (a == b)
+    return true;
+  if (!a || !b || a->kind != b->kind)
+    return false;
+  switch (a->kind) {
+  case NY_LEVEL_LITERAL:
+    return a->literal == b->literal;
+  case NY_LEVEL_VAR:
+    return a->var == b->var;
+  case NY_LEVEL_MAX:
+    return ny_level_equal(a->left, b->left) &&
+           ny_level_equal(a->right, b->right);
+  }
+  return false;
+}
+
+ny_type_t *ny_type_type_univ_level(ny_type_arena_t *arena, const char *name,
+                                   unsigned level) {
   ny_type_t *t = ny_type_new(arena, NY_TYPE_TYPE);
   if (!t)
     return NULL;
   t->as.type_univ.name = name ? ny_type_arena_strdup(arena, name) : NULL;
+  t->as.type_univ.level = ny_level_literal(arena, level);
   return t;
+}
+
+ny_type_t *ny_type_type_univ(ny_type_arena_t *arena, const char *name) {
+  return ny_type_type_univ_level(arena, name,
+                                 ny_type_univ_level_from_name(name));
 }
 
 ny_type_t *ny_type_find(ny_type_t *type) {
@@ -550,7 +631,8 @@ static bool ny_type_structurally_equal_depth(ny_type_t *a, ny_type_t *b,
                                             b->as.sigma.value_type, depth + 1);
   case NY_TYPE_TYPE:
     return a->as.type_univ.name && b->as.type_univ.name &&
-           strcmp(a->as.type_univ.name, b->as.type_univ.name) == 0;
+           strcmp(a->as.type_univ.name, b->as.type_univ.name) == 0 &&
+           ny_level_equal(a->as.type_univ.level, b->as.type_univ.level);
   }
   return false;
 }
@@ -817,7 +899,8 @@ bool ny_type_unify_with_subst(ny_subst_t *s, ny_type_t *a, ny_type_t *b) {
                                     b->as.sigma.value_type);
   case NY_TYPE_TYPE:
     return a->as.type_univ.name && b->as.type_univ.name &&
-           strcmp(a->as.type_univ.name, b->as.type_univ.name) == 0;
+           strcmp(a->as.type_univ.name, b->as.type_univ.name) == 0 &&
+           ny_level_equal(a->as.type_univ.level, b->as.type_univ.level);
   case NY_TYPE_VAR:
   case NY_TYPE_EFFECT_VAR:
     return true;

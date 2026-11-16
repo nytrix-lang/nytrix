@@ -1345,6 +1345,76 @@ static expr_t *parse_primary(parser_t *p) {
       lit->as.literal.as.s.len = strlen(sym_name);
       return lit;
     }
+    /*
+     * First-class universe value. `Type` and its leveled spellings are erased
+     * static indices; a universe shares the `str` runtime representation in the
+     * ABI (see the universe ABI note in semantics/types.c), so a universe in
+     * expression position evaluates to that tag instead of failing symbol
+     * resolution. Only a number on the same line is taken as the level.
+     */
+    if (tok.len == 4 && strncmp(tok.lexeme, "Type", 4) == 0) {
+      char univ[32];
+      size_t univ_len = 4;
+      memcpy(univ, "Type", 4);
+      if (p->cur.kind == NY_T_NUMBER && p->cur.line == tok.line) {
+        size_t digits = 0;
+        while (digits < p->cur.len && p->cur.lexeme[digits] >= '0' &&
+               p->cur.lexeme[digits] <= '9')
+          digits++;
+        if (digits > 0 && digits <= sizeof(univ) - 6) {
+          univ[univ_len++] = ' ';
+          memcpy(univ + univ_len, p->cur.lexeme, digits);
+          univ_len += digits;
+          parser_advance(p);
+        }
+      } else if (p->cur.kind == NY_T_IDENT && p->cur.len == 3 &&
+                 strncmp(p->cur.lexeme, "max", 3) == 0 &&
+                 parser_peek(p).kind == NY_T_LPAREN) {
+        /* Closed level constraint: `Type max(3, 5)` evaluates to `Type 5`. */
+        parser_advance(p); /* max */
+        parser_advance(p); /* ( */
+        unsigned long levels[2] = {0, 0};
+        bool ok = true;
+        for (int i = 0; i < 2 && ok; ++i) {
+          if (p->cur.kind != NY_T_NUMBER) {
+            ok = false;
+            break;
+          }
+          unsigned long v = 0;
+          for (size_t k = 0; k < p->cur.len; ++k) {
+            char c = p->cur.lexeme[k];
+            if (c < '0' || c > '9') {
+              ok = false;
+              break;
+            }
+            if (v <= 1000ul)
+              v = v * 10ul + (unsigned long)(c - '0');
+          }
+          if (!ok)
+            break;
+          levels[i] = v > 1000ul ? 1000ul : v;
+          parser_advance(p);
+          if (i == 0 && !parser_match(p, NY_T_COMMA)) {
+            ok = false;
+            break;
+          }
+        }
+        if (!ok || !parser_match(p, NY_T_RPAREN)) {
+          parser_error(p, p->cur, "malformed max(...) level",
+                       "write 'Type max(2, 3)' with integer literals");
+        } else {
+          unsigned long folded = levels[0] > levels[1] ? levels[0] : levels[1];
+          int written = snprintf(univ + 4, sizeof(univ) - 5, " %lu", folded);
+          if (written > 0)
+            univ_len = 4 + (size_t)written;
+        }
+      }
+      expr_t *lit = expr_new(p->arena, NY_E_LITERAL, tok);
+      lit->as.literal.kind = NY_LIT_STR;
+      lit->as.literal.as.s.data = arena_strndup(p->arena, univ, univ_len);
+      lit->as.literal.as.s.len = univ_len;
+      return lit;
+    }
     expr_t *id = expr_new(p->arena, NY_E_IDENT, tok);
     id->as.ident.name = parser_intern_hash(p, tok.lexeme, tok.len, tok.hash);
     id->as.ident.sym_id = tok.sym_id;

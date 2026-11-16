@@ -305,6 +305,12 @@ static int ny_diag_code_for_fmt(diag_fmt_code_t *table, int *next_code,
   }
 }
 
+/* Total primary errors emitted in this process; used to suppress a generic
+ * pipeline message when a located diagnostic already explained the failure. */
+static int g_diag_error_total = 0;
+
+int ny_diag_error_total_count(void) { return g_diag_error_total; }
+
 void ny_diag_error(token_t tok, const char *fmt, ...) {
   char code_buf[16];
   int code =
@@ -315,6 +321,7 @@ void ny_diag_error(token_t tok, const char *fmt, ...) {
   ny_diag_primary("error", code_buf, NY_CLR_BRIGHT_RED, NY_CLR_BRIGHT_CYAN, tok,
                   fmt, ap);
   va_end(ap);
+  g_diag_error_total++;
 }
 
 void ny_diag_warning(token_t tok, const char *fmt, ...) {

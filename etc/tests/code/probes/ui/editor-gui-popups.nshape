@@ -1,0 +1,29 @@
+shape editor-gui-popups {
+  family "runtime-ui"
+  generator "embedded"
+  features [ui editor gui popups palette find context colorpicker]
+  template ny-test-case
+  flags "--native --run -O0 --no-progress"
+  timeout 600
+  expect compile_and_run
+  expect_stdout "EDITOR-GUI-POPUPS-OK"
+  source ny <<'NY'
+;; The editor's command palette, context menu, find bar and colour picker are
+;; toolkit (viewer/gui.ny) windows. The editor's POPUPS probe opens each one
+;; and clicks its widgets through the window event queue: a palette row runs
+;; its command, a click outside closes the context menu and a menu item runs,
+;; the find bar's Case toggle flips the search option, and a click in the
+;; colour picker rewrites the hex literal in the buffer.
+use core
+use core.os.subprocess (run_capture)
+def compiler = env("NYTRIX_NY_FULL_BIN")
+assert(is_str(compiler) && compiler.len > 0, "runner provides compiler")
+def result = run_capture(["env", "NY_UI_HEADLESS=1", "NY_EDITOR_PROBE_POPUPS=1", "NYTRIX_UI_REPLAY=1",
+   "NYTRIX_UI_REPLAY_HASH=0", "NY_EDITOR_FRAME_HASH_FRAME=1000", "NYTRIX_FIXTURE_FRAMES=60",
+   compiler, "--native-only", "-O0", "etc/projects/ui/editor.ny"], [], nil, false)
+def out = to_str(result.get("stdout", ""))
+assert(int(result.get("code", 127)) == 0, "editor popup probe exits cleanly: " + out)
+assert(out.contains("EDITOR-GUI-POPUPS-OK"), "editor popup probe reached the end")
+print("EDITOR-GUI-POPUPS-OK")
+NY
+}

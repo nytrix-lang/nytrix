@@ -1,0 +1,43 @@
+;; Omitted trailing arguments are partial application (docs/spec/functions.md),
+;; so call arity violations are the excess side; the diagnostic reports both the
+;; declared limit and the supplied count.
+shape desugar-excess-arg-multi {
+  family "compiler-errors/desugar"
+  generator "error"
+  features ["error", "desugar", "arity", "negative"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "too many arguments"
+  expect_message "expected at most 4, got 5"
+  source ny <<'NY'
+use core
+fn f(int a, int b, int c, int d) int { a + b + c + d }
+f(1, 2, 3, 4, 5)
+NY
+}
+shape desugar-excess-arg-single {
+  family "compiler-errors/desugar"
+  generator "error"
+  features ["error", "desugar", "arity", "negative"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "too many arguments"
+  source ny <<'NY'
+use core
+fn f(int a, int b) int { a + b }
+f(1, 2, 3)
+NY
+}
+shape desugar-excess-arg-after-partial {
+  family "compiler-errors/desugar"
+  generator "error"
+  features ["error", "desugar", "arity", "partial", "negative"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "too many arguments"
+  source ny <<'NY'
+use core
+fn f(int a, int b, int c, int d) int { a + b + c + d }
+f(1)(2)(3, 4, 5)
+NY
+}

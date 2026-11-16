@@ -1,0 +1,161 @@
+shape postfx-effects {
+  family "probe-suite"
+  generator "regression"
+  features ["ny", "render", "postfx", "blend", "effects"]
+  template ny-test-case
+  expect compile_and_run
+  flags_matrix "--native-only -O0; --native-backend=llvm --jit --jit-engine=mcjit"
+  timeout 420
+  expect_stdout "POSTFX-OK"
+  source ny <<'NY'
+;; core.os.ui.render.postfx: every effect is drawn alone over an opaque
+;; canvas of one known color and the framebuffer is read back. Tint, glow and
+;; invert check the color-factor blends (multiply, screen, one minus
+;; destination) that set_blend_factors adds; fade, scanlines, vignette,
+;; letterbox and grain check their geometry. Effects toggle at run time.
+;; NY_POSTFX_BACKEND=vk|gl runs it on a real backend (needs a display).
+use core
+use core.common as common
+use core.math (abs)
+use core.os (temp_dir)
+use core.os.ui.window.consts
+use core.os.ui.render as gfx
+use core.os.ui.render.postfx as fx
+use core.math.parse.img as img
+
+def want_backend = common.env_trim("NY_POSTFX_BACKEND")
+if want_backend == "vk" || want_backend == "gl" { gfx.apply_backend_name(want_backend) }
+else { gfx.set_backend_type(gfx.BACKEND_MOCK) }
+def win = gfx.init_window(400, 300, "postfx", consts.WINDOW_CENTER, false, true, 1)
+assert(!!win, "window opens")
+
+assert(!gfx.set_blend_factors(10, 0) && !gfx.set_blend_factors(0, -1), "unknown factor codes are rejected")
+assert(!fx.enable("blur") && fx.effect_index("vignette") == 6, "effect names")
+assert(fx.toggle("tint") && fx.enabled("tint") && !fx.toggle("tint") && fx.enabled_mask() == 0, "toggles at run time")
+
+def list base = [0.2, 0.5, 0.8]
+mut int shot_n = 0
+
+;; Draws the canvas plus the effect `name` (mask only that effect) and returns
+;; the decoded snapshot.
+fn render(str name) dict {
+   fx.disable_all()
+   if name.len > 0 { assert(fx.enable(name), "enable " + name) }
+   def shot = temp_dir() + "/ny-postfx-" + name + "-" + to_str(shot_n) + ".png"
+   shot_n += 1
+   mut saved = false
+   mut int frame = 0
+   while frame < 6 {
+      if frame == 4 { gfx.request_frame_capture() }
+      if gfx.begin_frame_clear([float(base[0]), float(base[1]), float(base[2]), 1.0]) {
+         gfx.set_ortho_2d(0.0, 400.0, 300.0, 0.0)
+         fx.apply(400.0, 300.0, 1.0)
+         gfx.end_frame()
+         if frame == 4 { saved = gfx.snapshot(shot) }
+         frame += 1
+      }
+   }
+   assert(saved, "snapshot " + name)
+   def pic = img.load(shot)
+   assert(is_dict(pic), "snapshot decodes " + name)
+   pic
+}
+
+fn px(dict pic, int x, int y) list {
+   def int w = int(pic.get("width", 0))
+   def int ch = int(pic.get("channels", pic.get("bpp", 4)))
+   def ptr data = pic.get("data", 0)
+   def int off = (y * w + x) * ch
+   [float(load8(data, off)) / 255.0, float(load8(data, off + 1)) / 255.0, float(load8(data, off + 2)) / 255.0]
+}
+
+fn near(list got, list want, f64 tol) bool {
+   def f64 d0 = float(abs(float(got[0]) - float(want[0])))
+   def f64 d1 = float(abs(float(got[1]) - float(want[1])))
+   def f64 d2 = float(abs(float(got[2]) - float(want[2])))
+   d0 <= tol && d1 <= tol && d2 <= tol
+}
+
+fn check(str what, list got, list want) any {
+   print(what + " got " + to_str(got) + " want " + to_str(want))
+   assert(near(got, want, 0.035), what)
+}
+
+def plain = render("")
+check("no effect leaves the frame", px(plain, 200, 150), base)
+
+;; tint: multiply by its color.
+def tc = fx.effect_color("tint")
+check("tint multiplies", px(render("tint"), 200, 150), [0.2 * float(tc[0]), 0.5 * float(tc[1]), 0.8 * float(tc[2])])
+
+;; glow: screen blend s + d (1 - s), s = color * amount.
+def gc = fx.effect_color("glow")
+def f64 ga = fx.amount("glow")
+fn screen(f64 s, f64 d) f64 { s + d * (1.0 - s) }
+check("glow screens", px(render("glow"), 200, 150), [screen(float(gc[0]) * ga, 0.2), screen(float(gc[1]) * ga, 0.5), screen(float(gc[2]) * ga, 0.8)])
+
+;; invert: full and a quarter.
+check("invert complements", px(render("invert"), 200, 150), [0.8, 0.5, 0.2])
+fx.set_amount("invert", 0.25)
+check("invert mixes by amount", px(render("invert"), 200, 150), [0.2 * 0.5 + 0.25, 0.5 * 0.5 + 0.25, 0.8 * 0.5 + 0.25])
+fx.set_amount("invert", 0.75)
+check("invert past a half", px(render("invert"), 200, 150), [0.25 * 0.2 + 0.75 * 0.8, 0.5, 0.25 * 0.8 + 0.75 * 0.2])
+fx.set_amount("invert", 1.0)
+
+;; fade: straight alpha toward its color.
+def fc = fx.effect_color("fade")
+def f64 fa = fx.amount("fade")
+check("fade mixes", px(render("fade"), 200, 150), [0.2 * (1.0 - fa) + float(fc[0]) * fa, 0.5 * (1.0 - fa) + float(fc[1]) * fa, 0.8 * (1.0 - fa) + float(fc[2]) * fa])
+
+;; scanlines: every third row darkened, the rows between untouched.
+def sl = render("scanlines")
+def f64 sa = fx.amount("scanlines")
+check("scanline row darkened", px(sl, 200, 150), [0.2 * (1.0 - sa), 0.5 * (1.0 - sa), 0.8 * (1.0 - sa)])
+check("row between scanlines untouched", px(sl, 200, 151), base)
+
+;; vignette: the centre untouched, a corner darker than an edge midpoint.
+def vg = render("vignette")
+check("vignette leaves the centre", px(vg, 200, 150), base)
+def list corner = px(vg, 2, 2)
+def list edge = px(vg, 200, 2)
+assert(float(corner[2]) < float(edge[2]) && float(edge[2]) < 0.8 * 0.6, "vignette darkens edges and corners more")
+
+;; letterbox 2.35 on 400x300: bars of (300 - 400 / 2.35) / 2 = 64.9 px.
+def lb = render("letterbox")
+check("letterbox bar", px(lb, 200, 30), [0.0, 0.0, 0.0])
+check("letterbox picture", px(lb, 200, 150), base)
+check("letterbox bottom bar", px(lb, 200, 290), [0.0, 0.0, 0.0])
+
+;; grain: some pixels move off the base color, most stay.
+def gr = render("grain")
+mut int moved = 0
+mut int y = 0
+while y < 300 {
+   mut int x = 0
+   while x < 400 {
+      if !near(px(gr, x, y), base, 0.02) { moved += 1 }
+      x += 7
+   }
+   y += 5
+}
+print("grain moved " + to_str(moved))
+assert(moved > 20 && moved < 2400, "grain specks")
+
+;; Several at once keep their order and leave the UI blend mode behind.
+fx.set_mask(1 | 64 | 128)
+assert(fx.enabled("tint") && fx.enabled("vignette") && fx.enabled("letterbox") && !fx.enabled("grain"), "mask sets several")
+mut int passes = 0
+mut int f = 0
+while f < 2 {
+   if gfx.begin_frame_clear([0.2, 0.5, 0.8, 1.0]) {
+      gfx.set_ortho_2d(0.0, 400.0, 300.0, 0.0)
+      passes = fx.apply(400.0, 300.0, 1.0)
+      gfx.end_frame()
+      f += 1
+   }
+}
+assert(passes == 3 && gfx.blend_mode() == 0, "three passes, UI blend restored after apply")
+gfx.close_window()
+print("POSTFX-OK")
+NY
+}

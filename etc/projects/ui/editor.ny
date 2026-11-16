@@ -37,6 +37,7 @@ use core.os.ui.render.viewer.editor.session as session
 use core.os.ui.render.viewer.editor.terminal as termpane
 use core.os.ui.render.viewer.editor.tools as tools
 use core.os.ui.render.viewer.icons as icons
+use core.os.ui.render.viewer.gui as gui
 use core.os.ui.render.viewer.runtime as ui_runtime
 use core.os.ui.render.viewer.widgets
 use core.os.ui.window
@@ -213,12 +214,12 @@ def int HIGHLIGHT_MAX_LINE_BYTES = 900
 def OUTLINE_MAX_LINES = 5000
 def int LINE_DRAW_EXTRA_COLS = 96
 def RAIL_TABS_H = 28.0
-def CONTEXT_W = 260.0
-def CONTEXT_ROW_H = 27.0
+def CONTEXT_W = 330.0
+def CONTEXT_ROW_H = 24.0
 def FIND_BAR_H = 48.0
-def f64 PALETTE_HEADER_H = 32.0
-def f64 PALETTE_ROW_H = 22.0
-def f64 PALETTE_DETAIL_H = 20.0
+def f64 PALETTE_HEADER_H = 44.0
+def f64 PALETTE_ROW_H = 26.0
+def f64 PALETTE_DETAIL_H = 44.0
 def int PALETTE_MAX_ROWS = 12
 def f64 WHICH_KEY_ROW_H = 22.0
 def int WHICH_KEY_MAX_ROWS = 14
@@ -505,7 +506,8 @@ def probe_flags = {
    "SELECT": _editor_probe("SELECT"),
    "TEXTGRID": _editor_probe("TEXTGRID"),
    "IMAGE": _editor_probe("IMAGE"),
-   "BENCH": _editor_probe("BENCH")
+   "BENCH": _editor_probe("BENCH"),
+   "POPUPS": _editor_probe("POPUPS")
 }
 def bool MOCK_BENCH_FAST = probe_flags.get("BENCH", false) && common.env_truthy("NY_UI_HEADLESS") && !common.env_truthy("NYTRIX_AUTO_DUMP")
 def int BENCH_FRAME_LIMIT = int(common.env_int_clamped("NY_EDITOR_BENCH_FRAMES", 240, 1, 100000))
@@ -831,21 +833,6 @@ fn _palette_contains(dict lay, f64 mx, f64 my) bool {
    if !pal.is_open(_editor_get("palette_state")) { return false }
    def r = _palette_rect(_layout_sw(lay), _layout_sh(lay), _palette_matches().len)
    widgets.hit(mx, my, float(r.get(0, 0.0)), float(r.get(1, 0.0)), float(r.get(2, 0.0)), float(r.get(3, 0.0)))
-}
-
-fn _palette_row_hit(dict lay, f64 mx, f64 my) int {
-   if !pal.is_open(_editor_get("palette_state")) { return -1 }
-   def matches = _palette_matches()
-   def r = _palette_rect(_layout_sw(lay), _layout_sh(lay), matches.len)
-   def x = float(r.get(0, 0.0))
-   def y = float(r.get(1, 0.0))
-   def w = float(r.get(2, 0.0))
-   def rows = int(r.get(4, 0))
-   _editor_values["palette_state"] = pal.set_visible(_editor_get("palette_state"), rows)
-   if !widgets.hit(mx, my, x, y, w, float(r.get(3, 0.0))) { return -2 }
-   def row = int((my - (y + PALETTE_HEADER_H)) / PALETTE_ROW_H)
-   def idx = pal.scroll(_editor_get("palette_state")) + row
-   (row >= 0 && row < rows && idx < matches.len) ? idx : -1
 }
 
 fn _which_key_rect(f64 sw, f64 sh, int total) list {
@@ -1383,7 +1370,7 @@ fn _cache_append_project_ops(list rows, str prefix, list ops) list {
 
 fn _restore_session_allowed() bool {
    if common.env_truthy("NYTRIX_UI_REPLAY") { return false }
-   cli.args().len <= 1 && !probe_flags.get("INPUT", false) && !probe_flags.get("CONTEXT", false) && !probe_flags.get("TERMINAL", false) && !probe_flags.get("TERMINAL_DUMP", false) && !probe_flags.get("SYNTAX", false) && !probe_flags.get("NAV", false) && !probe_flags.get("UNDO", false) && !probe_flags.get("ESCAPE", false) && !probe_flags.get("MODELINE", false) && !probe_flags.get("CHORD", false) && !probe_flags.get("FIND", false) && !probe_flags.get("PALETTE", false) && !probe_flags.get("WHICH_KEY", false) && !probe_flags.get("MULTICURSOR", false) && !probe_flags.get("ZOOM", false) && !probe_flags.get("SCROLLBAR", false) && !probe_flags.get("GOTO", false) && !probe_flags.get("GIT", false) && !probe_flags.get("TAB", false) && !probe_flags.get("SELECT", false) && !probe_flags.get("TEXTGRID", false) && !probe_flags.get("IMAGE", false) && !probe_flags.get("BENCH", false)
+   cli.args().len <= 1 && !probe_flags.get("INPUT", false) && !probe_flags.get("CONTEXT", false) && !probe_flags.get("TERMINAL", false) && !probe_flags.get("TERMINAL_DUMP", false) && !probe_flags.get("SYNTAX", false) && !probe_flags.get("NAV", false) && !probe_flags.get("UNDO", false) && !probe_flags.get("ESCAPE", false) && !probe_flags.get("MODELINE", false) && !probe_flags.get("CHORD", false) && !probe_flags.get("FIND", false) && !probe_flags.get("PALETTE", false) && !probe_flags.get("POPUPS", false) && !probe_flags.get("WHICH_KEY", false) && !probe_flags.get("MULTICURSOR", false) && !probe_flags.get("ZOOM", false) && !probe_flags.get("SCROLLBAR", false) && !probe_flags.get("GOTO", false) && !probe_flags.get("GIT", false) && !probe_flags.get("TAB", false) && !probe_flags.get("SELECT", false) && !probe_flags.get("TEXTGRID", false) && !probe_flags.get("IMAGE", false) && !probe_flags.get("BENCH", false)
 }
 
 @returns_owned
@@ -4794,10 +4781,6 @@ fn _handle_char(any data) int {
    0
 }
 
-fn _context_hit_action(f64 mx, f64 my) str {
-   prompt.context_hit(_editor_get("context_state"), mx, my, CONTEXT_W, CONTEXT_ROW_H)
-}
-
 fn _handle_mouse_nav_button(any data) bool {
    if !is_dict(data) { return false }
    def button = int(data.get("button", -1))
@@ -4850,21 +4833,21 @@ fn _handle_mouse_press(dict lay, any data) int {
    def mx = float(data.get("x", p.get(0, 0.0)))
    def my = float(data.get("y", p.get(1, 0.0)))
    def button = int(data.get("button", 0))
+   ;; The palette is modal: a click inside it belongs to its toolkit rows,
+   ;; a click outside dismisses it. A click inside the context menu or the
+   ;; find bar belongs to the toolkit too.
    if pal.is_open(_editor_get("palette_state")) {
-      def pi = _palette_row_hit(lay, mx, my)
-      if pi >= 0 {
-         _editor_values["palette_state"] = pal.set_index(_editor_get("palette_state"), pi)
-         _palette_choose()
-         return 0
-      }
-      if pi == -2 {
-         _editor_values["palette_state"] = pal.dismiss(_editor_get("palette_state"))
-         return 0
-      }
-      ;; pi == -1: click landed inside the palette rect but not on a row
-      ;; (e.g. on the palette header padding). Swallow it so the click does
-      ;; not fall through to tab/terminal handlers behind the modal.
-      if pi == -1 { return 0 }
+      if !_palette_contains(lay, mx, my) { _editor_values["palette_state"] = pal.dismiss(_editor_get("palette_state")) }
+      return 0
+   }
+   if _context_contains(lay, mx, my) { return 0 }
+   if _gui_overlay_live && gui.window_rect("ed_find").len >= 4 && find.is_open(_editor_get("find_state")) {
+      def fr = gui.window_rect("ed_find")
+      if widgets.hit(mx, my, float(fr.get(0, 0.0)), float(fr.get(1, 0.0)), float(fr.get(2, 0.0)), float(fr.get(3, 0.0))) { return 0 }
+   }
+   if _gui_overlay_live && colorpicker.is_open(_editor_get("color_state")) {
+      def cr = gui.window_rect("ed_color")
+      if cr.len >= 4 && widgets.hit(mx, my, float(cr.get(0, 0.0)), float(cr.get(1, 0.0)), float(cr.get(2, 0.0)), float(cr.get(3, 0.0))) { return 0 }
    }
    def tab_hit_top = _top_tab_hit(lay, mx, my)
    def top_action = to_str(tab_hit_top.get("action", ""))
@@ -4903,8 +4886,6 @@ fn _handle_mouse_press(dict lay, any data) int {
       _set_focus("project", false)
       return 0
    }
-   def action = _context_hit_action(mx, my)
-   if action.len > 0 { _context_action(action) return 0 }
    _editor_values["context_state"] = prompt.context_close(_editor_get("context_state"))
    if (button == 0 || button == 1) && _dock_resize_hit(lay, mx, my) {
       _editor_get("st")["drag_terminal"] = true
@@ -5496,6 +5477,7 @@ fn _process_events(dict lay) int {
       def is_mouse_move = typ == window.EVENT_MOUSE_POS_CHANGED
       def is_scroll = typ == window.EVENT_MOUSE_SCROLL
       def is_drop = typ == window.EVENT_DATA_DROP
+      if is_mouse_press || is_mouse_release || is_mouse_move || is_scroll { _gui_feed_mouse(typ, data) }
       ;; Focus loss / mouse leave: drop any armed chord prefix and the quit
       ;; prompt so the user does not return to a half-armed editor that
       ;; silently runs C-x k on the next keystroke.
@@ -5634,10 +5616,6 @@ fn _process_events(dict lay) int {
       _status("input queue throttled; continuing next frame")
    }
    if have_motion {
-      if pal.is_open(_editor_get("palette_state")) {
-         def pi = _palette_row_hit(lay, float(motion_data.get("x", -1.0)), float(motion_data.get("y", -1.0)))
-         if pi >= 0 { _editor_values["palette_state"] = pal.set_index(_editor_get("palette_state"), pi) }
-      }
       mut consumed = false
       def editor_dragging = _editor_get("st").get("drag_terminal", false) || _editor_get("st").get("drag_divider", false) || _editor_get("st").get("drag_select", false) || _editor_get("st").get("drag_scrollbar", false) || _editor_get("project_drag").get("armed", false)
       if termpane.is_open(_editor_get("term_state")) && !editor_dragging {
@@ -6139,6 +6117,8 @@ fn _draw_color_swatches_visible(list lines, int scroll, int rows, f64 text_x, f6
 }
 
 fn _draw_color_picker(dict lay, f64 sw, f64 sh) int {
+   ;; The hex literal under the cursor, edited with the toolkit's picker; a
+   ;; change is written back into the buffer as the same literal.
    if !colorpicker.is_open(_editor_get("color_state")) { return 0 }
    def hex = colorpicker.hex(_editor_get("color_state"))
    if hex.len < 7 { return 0 }
@@ -6147,25 +6127,44 @@ fn _draw_color_picker(dict lay, f64 sw, f64 sh) int {
    def x0 = float(lay.get("edit_x", 0.0))
    def y0 = float(lay.get("edit_y", 0.0))
    def rows = ed.visible_rows(float(lay.get("edit_h", 0.0)))
-   def w = min(220.0, max(1.0, sw - 16.0))
-   def h = min(88.0, max(1.0, sh - 16.0))
+   def f64 w = float(min(300.0, max(1.0, sw - 16.0)))
+   def f64 h = float(min(440.0, max(1.0, sh - 16.0)))
    mut fit0 = _fit_rect(x0 + 42.0, y0 + 40.0, w, h, sw, sh, 8.0)
-   mut x = float(fit0.get(0, 8.0))
-   mut y = float(fit0.get(1, 8.0))
    if row >= scroll && row < scroll + rows {
       def line = to_str(ed.current_lines(_editor_get("st")).get(row, ""))
       def f64 row_y = float(_editor_row_y(y0, row - scroll))
       fit0 = _fit_rect(_line_text_x(lay) + _measure_prefix(line, colorpicker.start(_editor_get("color_state"))) + 18.0, row_y + float(ed.LINE_H) + 2.0, w, h, sw, sh, 8.0)
-      x = float(fit0.get(0, x))
-      y = float(fit0.get(1, y))
    }
-   def col = _hex_color(hex)
-   _fill_rect(x, y, w, h, gfx.color_alpha(C_RAIL, 0.97))
-   _stroke_rect(x, y, w, h, C_ACCENT, 1.0)
-   _fill_rect(x + 14.0, y + 16.0, 46.0, 46.0, col)
-   _stroke_rect(x + 14.0, y + 16.0, 46.0, 46.0, C_LINE_2, 1.0)
-   _text(int(_editor_get("font_body")), hex, x + 76.0, y + 18.0, C_TEXT)
-   _text(int(_editor_get("font_small")), colorpicker.rgb_label(hex), x + 76.0, y + 43.0, C_MUTED)
+   _gui_overlay_window("ed_color", float(fit0.get(0, 8.0)), float(fit0.get(1, 8.0)), w, h)
+   gui.text_colored(hex + "   " + colorpicker.rgb_label(hex), "text")
+   def list rgba = colorpicker.rgba(hex)
+   def list picked = gui.color_picker4("ed_color_pick", "", rgba)
+   gui.text_colored("Esc closes; edits write back to the buffer", "text_dim")
+   gui.end_window()
+   def str next_hex = colorpicker.rgba_hex(picked)
+   def str was_hex = str.lower(str.str_slice(hex, 0, 7))
+   def str now_hex = str.lower(next_hex)
+   if now_hex != was_hex { _color_picker_write(next_hex + str.str_slice(hex, 7, hex.len)) }
+   0
+}
+
+fn _color_picker_write(str hex) int {
+   def cs = _editor_get("color_state")
+   def int li = colorpicker.line(cs)
+   def int a = colorpicker.start(cs)
+   def int b = colorpicker.end(cs)
+   def lines = ed.current_lines(_editor_get("st"))
+   if li < 0 || li >= lines.len { return 0 }
+   def line = to_str(lines.get(li, ""))
+   if a < 0 || b > line.len || b <= a { return 0 }
+   _editor_values["hist"] = history.push(_editor_get("hist"), _editor_get("st"))
+   mut out = lines
+   out[li] = str.str_slice(line, 0, a) + hex + str.str_slice(line, b, line.len)
+   _editor_values["st"] = ed.set_lines(_editor_get("st"), out)
+   _touch_content()
+   def hit = colorpicker.at_cursor(out, li, a)
+   if is_dict(hit) && hit.len > 0 { _editor_values["color_state"] = colorpicker.open(cs, hit) }
+   _status(hex + " " + colorpicker.rgb_label(hex))
    0
 }
 
@@ -6832,62 +6831,54 @@ fn _queue_key_badge(list runs, str label, f64 x, f64 y, any col=C_MUTED) list {
 }
 
 fn _draw_find_bar(f64 sw, f64 sh) int {
+   ;; Typing stays with the find module (it owns the query, the replacement and
+   ;; the key bindings); the bar's options and actions are toolkit widgets.
    if !find.is_open(_editor_get("find_state")) { return 0 }
    _find_refresh_if_needed()
-   def replace_on = find.replace_on(_editor_get("find_state"))
-   def f64 bar_h = replace_on ? 86.0 : float(FIND_BAR_H)
-   def f64 w0 = float(min(760.0, max(280.0, sw - 34.0)))
+   def fs = _editor_get("find_state")
+   def replace_on = find.replace_on(fs)
+   def f64 bar_h = replace_on ? 102.0 : 84.0
+   def f64 w0 = float(min(780.0, max(280.0, sw - 34.0)))
    def fit = _fit_rect(sw * 0.5 - w0 * 0.5, sh - bar_h - float(ed.STATUS_H) - 10.0, w0, bar_h, sw, sh, 8.0)
-   def x = float(fit.get(0, 8.0))
-   def y = float(fit.get(1, 8.0))
-   def w = float(fit.get(2, w0))
-   def h = float(fit.get(3, bar_h))
-   _fill_rect(x, y, w, h, gfx.color_alpha(C_RAIL, 0.98))
-   _stroke_rect(x, y, w, h, find.error(_editor_get("find_state")).len > 0 ? C_WARN : C_ACCENT, 1.0)
-   _draw_icon("search", x + 13.0, y + 13.0, 18.0, find.error(_editor_get("find_state")).len > 0 ? C_WARN : C_ACCENT)
-   mut body_runs = []
-   mut small_runs = []
-   def q = find.query(_editor_get("find_state"))
-   def repl = find.replacement(_editor_get("find_state"))
-   def field = find.active_field(_editor_get("find_state"))
-   body_runs = _append_text_run(body_runs, _preview_body(q.len > 0 ? q : "find in buffer", w - 300.0), x + 40.0, y + 10.0, field == "find" ? U_ACCENT : (q.len > 0 ? U_TEXT : U_DIM))
+   def f64 w = float(fit.get(2, w0))
+   _gui_overlay_window("ed_find", float(fit.get(0, 8.0)), float(fit.get(1, 8.0)), w, float(fit.get(3, bar_h)))
+   def q = find.query(fs)
+   def repl = find.replacement(fs)
+   def field = find.active_field(fs)
+   def bool err = find.error(fs).len > 0
+   gui.layout_row([w - 230.0, 190.0], 8.0)
+   gui.text_colored((field == "find" ? "> " : "  ") + (q.len > 0 ? q : "find in buffer"), field == "find" ? "accent" : (q.len > 0 ? "text" : "text_dim"))
+   gui.text_colored(find.summary(fs), err ? "warn" : "text_dim")
    if replace_on {
-      _draw_icon("edit", x + 14.0, y + 35.0, 16.0, field == "replace" ? C_ACCENT : C_MUTED)
-      body_runs = _append_text_run(body_runs, _preview_body(repl.len > 0 ? repl : "replace with", w - 300.0), x + 40.0, y + 34.0, field == "replace" ? U_ACCENT : (repl.len > 0 ? U_TEXT : U_DIM))
+      gui.text_colored((field == "replace" ? "> " : "  ") + (repl.len > 0 ? repl : "replace with"), field == "replace" ? "accent" : (repl.len > 0 ? "text" : "text_dim"))
    }
-   small_runs = _append_right_run(small_runs, int(_editor_get("font_small")), find.summary(_editor_get("find_state")), x + w - 14.0, y + 16.0, find.error(_editor_get("find_state")).len > 0 ? U_WARN : U_ACCENT)
-   _fill_rect(x + 13.0, y + (replace_on ? 58.0 : 28.0), w - 26.0, 1.0, C_LINE)
-   def chips = [
-      ["Enter", "next"],
-      ["S-Enter", "prev"],
-      ["C-h", replace_on ? "replace on" : "replace"],
-      ["Tab", field],
-      ["C-Enter", "all"],
-      ["C-r", find.regex_on(_editor_get("find_state")) ? "regex on" : "regex"],
-      ["C-c", find.case_on(_editor_get("find_state")) ? "case on" : "case"],
-      ["C-w", find.word_on(_editor_get("find_state")) ? "word on" : "word"]
-   ]
-   mut f64 cx = x + 14.0
-   mut i = 0
-   while i < chips.len {
-      def chip = chips.get(i)
-      def key_label = to_str(chip.get(0, ""))
-      def text = to_str(chip.get(1, ""))
-      def hot = str.str_contains(text, "on") || (key_label == "Tab" && replace_on)
-      small_runs = _queue_key_badge(small_runs, key_label, cx, y + (replace_on ? 62.0 : 30.0), hot ? C_ACCENT : C_MUTED)
-      cx += float(max(30.0, _measure_ui(int(_editor_get("font_small")), key_label, 0.0) + 16.0)) + 5.0
-      small_runs = _append_text_run(small_runs, text, cx, y + (replace_on ? 65.0 : 33.0), hot ? U_ACCENT : U_DIM)
-      cx += float(_measure_ui(int(_editor_get("font_small")), text, 0.0)) + 14.0
-      i += 1
+   ;; Options are chips: highlighted while on, a click flips them.
+   gui.layout_row([96.0, 86.0, 86.0, 112.0, 64.0, 64.0, 64.0], 6.0)
+   mut str act = ""
+   if gui.selectable("f_regex", "Regex", find.regex_on(fs), 96.0, 24.0, "", -1, false) { act = "regex" }
+   if gui.selectable("f_case", "Case", find.case_on(fs), 86.0, 24.0, "", -1, false) { act = "case" }
+   _probe_note_rect("f_case")
+   if gui.selectable("f_word", "Word", find.word_on(fs), 86.0, 24.0, "", -1, false) { act = "word" }
+   if gui.selectable("f_repl", "Replace", replace_on, 112.0, 24.0, "", -1, false) { act = "replace" }
+   if gui.small_button("f_prev", "Prev") { act = "prev" }
+   if gui.small_button("f_next", "Next") { act = "next" }
+   if replace_on {
+      if gui.small_button("f_all", "All") { act = "all" }
+   } else {
+      if gui.small_button("f_close", "Close") { act = "close" }
    }
-   small_runs = _append_right_run(small_runs, int(_editor_get("font_small")), "Esc close", x + w - 14.0, y + (replace_on ? 65.0 : 33.0), U_MUTED)
-   _flush_rects()
-   if body_runs.len > 0 { gfx.draw_text_runs_flat_colors(int(_editor_get("font_body")), body_runs) }
-   if small_runs.len > 0 { gfx.draw_text_runs_flat_colors(int(_editor_get("font_small")), small_runs) }
+   gui.end_window()
+   if act == "prev" { _find_step(-1) }
+   elif act == "next" { _find_step(1) }
+   elif act == "all" { _find_replace_all() }
+   elif act == "close" { _find_close() }
+   elif act.len > 0 { _find_toggle(act) }
    0
 }
 
 fn _draw_palette(f64 sw, f64 sh) int {
+   ;; The palette's query and keyboard selection live in the palette module;
+   ;; the rows, hover and clicks are toolkit selectables.
    if !pal.is_open(_editor_get("palette_state")) { return 0 }
    def matches = _palette_matches()
    def rect = _palette_rect(sw, sh, matches.len)
@@ -6897,66 +6888,41 @@ fn _draw_palette(f64 sw, f64 sh) int {
    def h = float(rect.get(3, 0.0))
    def rows = int(rect.get(4, 0))
    _editor_values["palette_state"] = pal.set_visible(_editor_get("palette_state"), rows)
-   def start = pal.scroll(_editor_get("palette_state"))
-   def f64 header_h = float(PALETTE_HEADER_H)
-   def f64 row_h = float(PALETTE_ROW_H)
-   def f64 detail_h = float(PALETTE_DETAIL_H)
-   _fill_rect(x, y, w, h, gfx.color_alpha(C_RAIL, 0.98))
-   _stroke_rect(x, y, w, h, C_ACCENT, 1.0)
-   _fill_rect(x + 10.0, y + header_h - 1.0, w - 20.0, 1.0, C_LINE)
-   mut body_runs = []
-   mut small_runs = []
-   def q = pal.query(_editor_get("palette_state"))
-   def header_y = _row_text_y(int(_editor_get("font_body")), y, header_h)
-   def header_small_y = _row_text_y(int(_editor_get("font_small")), y, header_h)
-   body_runs = _append_text_run(body_runs, _preview_body(q.len > 0 ? q : "command", w - 230.0), x + 14.0, header_y, q.len > 0 ? U_TEXT : U_DIM)
-   def pos_label = matches.len > 0 ? to_str(min(matches.len, pal.index(_editor_get("palette_state")) + 1)) + "/" + to_str(matches.len) : "0/0"
-   small_runs = _append_right_run(small_runs, int(_editor_get("font_small")), pos_label + "  Enter run  Tab next", x + w - 14.0, header_small_y, U_MUTED)
-   def f64 name_x = x + 14.0
-   def f64 key_right = x + w - 16.0
-   def f64 key_w = float(min(112.0, max(62.0, w * 0.16)))
-   def f64 detail_x = x + float(max(220.0, w * 0.43))
-   def f64 name_w = float(max(80.0, detail_x - name_x - 12.0))
-   def f64 detail_w = float(max(70.0, key_right - key_w - detail_x - 12.0))
+   def ps = _editor_get("palette_state")
+   def start = pal.scroll(ps)
+   def int sel_idx = pal.index(ps)
+   _gui_overlay_window("ed_palette", x, y, w, h)
+   def q = pal.query(ps)
+   def pos_label = matches.len > 0 ? to_str(min(matches.len, sel_idx + 1)) + "/" + to_str(matches.len) : "0/0"
+   gui.layout_row([w - 110.0, 70.0], 8.0)
+   gui.text_colored("> " + (q.len > 0 ? q : "type a command"), q.len > 0 ? "text" : "text_dim")
+   gui.text_colored(pos_label, "text_dim")
+   gui.separator()
+   mut int chosen = -1
    mut i = 0
    while i < rows && start + i < matches.len {
       def row = matches.get(start + i)
       def actual = start + i
-      def f64 yy = y + header_h + float(i) * row_h
-      def tag = cmd.row_tag(row)
-      def active = actual == pal.index(_editor_get("palette_state"))
-      def col = _command_color(tag)
-      def body_y = _row_text_y(int(_editor_get("font_body")), yy, row_h)
-      def small_y = _row_text_y(int(_editor_get("font_small")), yy, row_h)
-      if active { _fill_rect(x + 7.0, yy + 2.0, w - 14.0, row_h - 4.0, gfx.color_alpha(C_ACCENT, 0.17)) }
-      elif i > 0 { _fill_rect(x + 12.0, yy, w - 24.0, 1.0, gfx.color_alpha(C_LINE, 0.36)) }
-      _fill_rect(x + 8.0, yy + 7.0, 3.0, 8.0, active ? C_ACCENT : col)
-      body_runs = _append_text_run(body_runs, _preview_body(to_str(row.get(0, "")), name_w), name_x, body_y, active ? U_TEXT : U_MUTED)
-      small_runs = _append_text_run(small_runs, _preview_small(to_str(row.get(3, "")), detail_w), detail_x, small_y, active ? U_ACCENT_2 : U_DIM)
-      small_runs = _append_right_run(small_runs, int(_editor_get("font_small")), _preview_small(to_str(row.get(2, "")), key_w), key_right, small_y, active ? U_ACCENT : U_DIM)
+      def detail = to_str(row.get(2, ""))
+      def label = to_str(row.get(0, ""))
+      def info = to_str(row.get(3, ""))
+      if gui.selectable("pal_" + to_str(actual), label + (info.len > 0 ? "   " + info : ""), actual == sel_idx, w - 28.0, float(PALETTE_ROW_H) - 4.0, detail, -1, false) { chosen = actual }
+      _probe_note_rect("pal_" + to_str(i))
       i += 1
    }
-   if matches.len == 0 { body_runs = _append_text_run(body_runs, "No commands", x + 14.0, y + PALETTE_HEADER_H + 5.0, U_WARN) }
-   if matches.len > rows {
-      def track_x = x + w - 6.0
-      def f64 track_y = y + header_h + 3.0
-      def f64 track_h = float(rows) * row_h - 6.0
-      def f64 thumb_h = float(max(18.0, track_h * float(rows) / float(max(rows, matches.len))))
-      def f64 thumb_y = track_y + (track_h - thumb_h) * float(start) / float(max(1, matches.len - rows))
-      _fill_rect(track_x, track_y, 2.0, track_h, gfx.color_alpha(C_LINE_2, 0.62))
-      _fill_rect(track_x, thumb_y, 2.0, thumb_h, gfx.color_alpha(C_ACCENT, 0.76))
+   if matches.len == 0 { gui.text_colored("No commands", "warn") }
+   if matches.len > 0 {
+      def sel = matches.get(min(max(sel_idx, 0), matches.len - 1), [])
+      gui.separator()
+      gui.layout_row([w - 230.0, 190.0], 8.0)
+      gui.text_colored(widgets.preview(to_str(sel.get(1, "")) + "  " + to_str(sel.get(4, "")) + "   " + to_str(sel.get(3, "")), int((w - 230.0) / 9.0)), "accent")
+      gui.text_colored("Enter run  Tab next", "text_dim")
    }
-   def sel = matches.len > 0 ? matches.get(min(max(pal.index(_editor_get("palette_state")), 0), matches.len - 1), []) : []
-   if sel.len > 0 {
-      def f64 detail_y = y + h - detail_h - 3.0
-      _fill_rect(x + 12.0, detail_y, w - 24.0, 1.0, C_LINE)
-      def detail_text_y = _row_text_y(int(_editor_get("font_small")), detail_y + 2.0, detail_h - 5.0)
-      small_runs = _append_text_run(small_runs, _preview_small(to_str(sel.get(1, "")) + "  " + to_str(sel.get(4, "")), w * 0.32), x + 14.0, detail_text_y, U_ACCENT)
-      small_runs = _append_text_run(small_runs, _preview_small(to_str(sel.get(3, "")), w * 0.58), x + w * 0.36, detail_text_y, U_MUTED)
+   gui.end_window()
+   if chosen >= 0 {
+      _editor_values["palette_state"] = pal.set_index(_editor_get("palette_state"), chosen)
+      _palette_choose()
    }
-   _flush_rects()
-   if body_runs.len > 0 { gfx.draw_text_runs_flat_colors(int(_editor_get("font_body")), body_runs) }
-   if small_runs.len > 0 { gfx.draw_text_runs_flat_colors(int(_editor_get("font_small")), small_runs) }
    0
 }
 
@@ -7103,44 +7069,193 @@ fn _draw_which_key(f64 sw, f64 sh) int {
 
 fn _draw_context_menu(f64 sw, f64 sh) int {
    if !prompt.context_is_open(_editor_get("context_state")) { return 0 }
-   def f64 w = float(min(CONTEXT_W, max(1.0, sw - 16.0)))
-   def f64 row_h = float(CONTEXT_ROW_H)
+   def rect = _context_rect(sw, sh)
    def actions = prompt.context_actions_for(_editor_get("context_state"))
-   def f64 h = float(min(float(actions.len) * row_h, max(1.0, sh - 16.0)))
-   _editor_values["context_state"] = prompt.context_clamp(_editor_get("context_state"), sw, sh, w, row_h)
-   def fit = _fit_rect(prompt.context_x(_editor_get("context_state")), prompt.context_y(_editor_get("context_state")), w, h, sw, sh, 8.0)
-   def x = float(fit.get(0, 8.0))
-   def y = float(fit.get(1, 8.0))
-   _editor_get("context_state")["x"] = x
-   _editor_get("context_state")["y"] = y
-   def mp = window.mouse_pos(_editor_get("win"))
-   def int visible_actions = int(min(actions.len, max(1, int(h / row_h))))
-   def mx = float(mp.get(0, -1.0))
-   def my = float(mp.get(1, -1.0))
-   def int hover_idx = (mx >= x && mx <= x + w && my >= y && my <= y + h) ? int((my - y) / row_h) : -1
-   _fill_rect(x, y, w, h, gfx.color_alpha(C_RAIL, 0.98))
-   _stroke_rect(x, y, w, h, C_LINE, 1.0)
-   mut runs = []
+   _gui_overlay_window("ed_context", float(rect.get(0, 8.0)), float(rect.get(1, 8.0)), float(rect.get(2, CONTEXT_W)), float(rect.get(3, 84.0)))
+   mut str chosen = ""
    mut i = 0
-   while i < visible_actions {
+   while i < actions.len {
       def row = actions.get(i)
-      def yy = y + float(i) * row_h
-      def id = to_str(row.get(1, ""))
-      def key_label = to_str(row.get(2, ""))
-      def tag = to_str(row.get(3, ""))
+      if gui.menu_item("ctx_" + to_str(i), to_str(row.get(0, "")), to_str(row.get(2, ""))) { chosen = to_str(row.get(1, "")) }
+      _probe_note_rect("ctx_" + to_str(i))
       def detail = to_str(row.get(4, ""))
-      def col = _command_color(tag)
-      def text_y = _row_text_y(int(_editor_get("font_small")), yy, row_h)
-      if i == hover_idx { _fill_rect(x + 4.0, yy + 2.0, w - 8.0, row_h - 4.0, gfx.color_alpha(C_ACCENT, 0.18)) }
-      elif i > 0 { _fill_rect(x + 4.0, yy, w - 8.0, 1.0, gfx.color_alpha(C_LINE, 0.50)) }
-      _draw_icon(_command_icon(tag, id), x + 10.0, _center_y(yy, row_h, 15.0), 15.0, i == hover_idx ? C_ACCENT : col)
-      runs = _append_text_run(runs, widgets.preview(to_str(row.get(0, "")), 26), x + 34.0, text_y, i == hover_idx ? U_TEXT : U_MUTED)
-      if key_label.len > 0 { runs = _append_right_run(runs, int(_editor_get("font_small")), key_label, x + w - 10.0, text_y, i == hover_idx ? U_ACCENT : U_DIM) }
-      if detail.len > 0 { runs = _append_text_run(runs, widgets.preview(detail, 42), x + 34.0, yy + 22.0, U_DIM) }
+      if detail.len > 0 { gui.tooltip(detail) }
       i += 1
    }
+   gui.end_window()
+   if chosen.len > 0 { _context_action(chosen) }
+   0
+}
+
+fn _context_rect(f64 sw, f64 sh) list {
+   ;; One place for the menu's rectangle: drawing and click routing both use it.
+   def f64 w = float(min(CONTEXT_W, max(1.0, sw - 16.0)))
+   def actions = prompt.context_actions_for(_editor_get("context_state"))
+   def f64 h = float(min(float(actions.len) * CONTEXT_ROW_H + 14.0, max(1.0, sh - 16.0)))
+   _editor_values["context_state"] = prompt.context_clamp(_editor_get("context_state"), sw, sh, w, CONTEXT_ROW_H)
+   def fit = _fit_rect(prompt.context_x(_editor_get("context_state")), prompt.context_y(_editor_get("context_state")), w, h, sw, sh, 8.0)
+   _editor_get("context_state")["x"] = float(fit.get(0, 8.0))
+   _editor_get("context_state")["y"] = float(fit.get(1, 8.0))
+   [float(fit.get(0, 8.0)), float(fit.get(1, 8.0)), w, float(max(84.0, h))]
+}
+
+fn _context_contains(dict lay, f64 mx, f64 my) bool {
+   if !prompt.context_is_open(_editor_get("context_state")) { return false }
+   def r = _context_rect(_layout_sw(lay), _layout_sh(lay))
+   widgets.hit(mx, my, float(r.get(0, 0.0)), float(r.get(1, 0.0)), float(r.get(2, 0.0)), float(r.get(3, 0.0)))
+}
+
+;; ---- toolkit overlays ------------------------------------------------------
+;; The palette, context menu, find bar and colour picker are drawn with the
+;; shared toolkit (viewer/gui.ny) in a gui frame after the editor's own
+;; drawing. Mouse events reach the toolkit while one of them is open.
+
+def GUI_OVERLAY_OPTS = {"titlebar": false, "resizable": false, "movable": false, "collapsible": false, "closable": false, "scrollbar": false}
+mut bool _gui_overlay_live = false
+
+fn _probe_note_rect(str name) any {
+   if probe_flags.get("POPUPS", false) { _editor_values["probe_rect_" + name] = gui.last_item_rect() }
+   0
+}
+
+fn _probe_click(str name, f64 fx=0.5, f64 fy=0.5) any {
+   ;; Clicks the recorded widget through the window's event queue, the same
+   ;; path a real pointer takes.
+   def r = _editor_get("probe_rect_" + name)
+   assert(is_list(r) && r.len >= 4 && float(r.get(2, 0.0)) > 0.0, "popup probe: widget " + name + " was drawn")
+   _probe_click_at(float(r.get(0, 0.0)) + float(r.get(2, 0.0)) * fx, float(r.get(1, 0.0)) + float(r.get(3, 0.0)) * fy)
+}
+
+fn _probe_click_at(f64 x, f64 y) any {
+   window.push_event(_editor_get("win"), window.EVENT_MOUSE_POS_CHANGED, {"x": x, "y": y})
+   window.push_event(_editor_get("win"), window.EVENT_MOUSE_BUTTON_PRESSED, {"button": 0, "x": x, "y": y})
+   _editor_values["probe_release"] = [x, y]
+   0
+}
+
+fn _probe_popups_show(int f) any {
+   ;; NY_EDITOR_PROBE_POPUPS_SHOW=palette|context|find|color opens that popup
+   ;; with sample content and leaves it up for a compositor capture.
+   def what = common.env_trim("NY_EDITOR_PROBE_POPUPS_SHOW")
+   if f != 1 { return 0 }
+   if what == "palette" {
+      _handle_key({"key": key.KEY_P, "mods": key.MOD_CONTROL | key.MOD_SHIFT})
+      _editor_values["palette_state"] = pal.handle_char(_editor_get("palette_state"), {"char": 102, "mods": 0})
+   } elif what == "context" {
+      _open_context(260.0, 180.0, _editor_context_entry(), "editor")
+   } elif what == "find" {
+      _find_replace_open()
+      _editor_values["find_state"] = find.set_query(_editor_get("find_state"), "tw")
+      _find_refresh_now()
+   } elif what == "color" {
+      _editor_values["st"] = ed.state([ed.buffer("theme.ny", "", "def accent = \"#9f86d9\"\ndef warn = \"#e0a030\"\n")])
+      _editor_values["hist"] = history.new()
+      _editor_get("st")["cursor_line"] = 0
+      _editor_get("st")["cursor_col"] = 16
+      _color_picker_open()
+   }
+   _request_full_redraw(2)
+   0
+}
+
+fn _probe_popups_step(int f) any {
+   if common.env_trim("NY_EDITOR_PROBE_POPUPS_SHOW").len > 0 { return _probe_popups_show(f) }
+   ;; Each popup is drawn by the toolkit and answers a click on its widgets.
+   ;; A click's release goes out a frame after its press, as a pointer's does.
+   def rel = _editor_get("probe_release")
+   if is_list(rel) && rel.len == 2 {
+      window.push_event(_editor_get("win"), window.EVENT_MOUSE_BUTTON_RELEASED, {"button": 0, "x": float(rel.get(0, 0.0)), "y": float(rel.get(1, 0.0))})
+      _editor_values["probe_release"] = []
+   }
+   if f == 0 {
+      _handle_key({"key": key.KEY_P, "mods": key.MOD_CONTROL | key.MOD_SHIFT})
+      assert(pal.is_open(_editor_get("palette_state")), "palette opens")
+   } elif f == 3 {
+      assert(float(gui.window_rect("ed_palette").get(2, 0.0)) > 0.0, "palette is a toolkit window")
+      _probe_click("pal_1")
+   } elif f == 6 {
+      assert(!pal.is_open(_editor_get("palette_state")), "clicking a palette row runs it and closes the palette")
+      _open_context(200.0, 160.0, _editor_context_entry(), "editor")
+      assert(prompt.context_is_open(_editor_get("context_state")), "context menu opens")
+   } elif f == 9 {
+      assert(float(gui.window_rect("ed_context").get(2, 0.0)) > 0.0, "context menu is a toolkit window")
+      _probe_click_at(4.0, float(START_H) - 4.0)
+   } elif f == 12 {
+      assert(!prompt.context_is_open(_editor_get("context_state")), "a click outside closes the context menu")
+      _open_context(200.0, 160.0, _editor_context_entry(), "editor")
+   } elif f == 15 {
+      _probe_click("ctx_0")
+   } elif f == 18 {
+      assert(!prompt.context_is_open(_editor_get("context_state")), "clicking a menu item runs it and closes the menu")
+      _find_open()
+      _editor_values["find_state"] = find.set_query(_editor_get("find_state"), "tw")
+      _find_refresh_now()
+   } elif f == 21 {
+      assert(!find.case_on(_editor_get("find_state")), "case starts off")
+      _probe_click("f_case")
+   } elif f == 24 {
+      assert(find.case_on(_editor_get("find_state")), "the find bar's Case toggle is a toolkit toggle")
+      _find_close()
+      _editor_values["st"] = ed.state([ed.buffer("color.ny", "", "def c = \"#ff0000\"\n")])
+      _editor_values["hist"] = history.new()
+      _editor_get("st")["cursor_line"] = 0
+      _editor_get("st")["cursor_col"] = 10
+      _color_picker_open()
+      assert(colorpicker.is_open(_editor_get("color_state")), "colour picker opens on a hex literal")
+   } elif f == 27 {
+      assert(float(gui.window_rect("ed_color").get(2, 0.0)) > 0.0, "colour picker is a toolkit window")
+      ;; Inside the saturation/value plane, under the hex line and swatch row.
+      def wr = gui.window_rect("ed_color")
+      _probe_click_at(float(wr.get(0, 0.0)) + float(wr.get(2, 0.0)) * 0.3, float(wr.get(1, 0.0)) + 100.0)
+   } elif f == 30 {
+      def line = to_str(ed.current_lines(_editor_get("st")).get(0, ""))
+      print("popup colour line " + line)
+      assert(!str.str_contains(line, "#ff0000") && str.str_contains(line, "#"), "picking a colour writes the literal back")
+      print("EDITOR-GUI-POPUPS-OK")
+      window.set_should_close(_editor_get("win"), true)
+   }
+   _request_full_redraw(2)
+   0
+}
+
+fn _gui_overlay_open() bool {
+   pal.is_open(_editor_get("palette_state")) || prompt.context_is_open(_editor_get("context_state")) || find.is_open(_editor_get("find_state")) || colorpicker.is_open(_editor_get("color_state"))
+}
+
+fn _gui_overlay_window(str id, f64 x, f64 y, f64 w, f64 h) any {
+   gui.begin_window(id, "", x, y, w, h, GUI_OVERLAY_OPTS)
+   gui.set_window_pos(id, x, y)
+   gui.set_window_size(id, w, h)
+   0
+}
+
+fn _gui_feed_mouse(int typ, any data) bool {
+   if !_gui_overlay_live || !is_dict(data) { return false }
+   gui.feed_event(typ, data)
+}
+
+fn _draw_gui_overlays(dict lay, f64 sw, f64 sh) int {
+   if !_gui_overlay_open() {
+      _gui_overlay_live = false
+      return 0
+   }
+   if !_gui_overlay_live {
+      ;; A press from before the overlay opened must not count as a click.
+      gui.feed_event(window.EVENT_MOUSE_BUTTON_RELEASED, {"button": 0, "x": -1.0, "y": -1.0})
+      gui.prepare_input(0, sw, sh)
+      _gui_overlay_live = true
+   }
    _flush_rects()
-   if runs.len > 0 { gfx.draw_text_runs_flat_colors(int(_editor_get("font_small")), runs) }
+   gui.set_enabled(true)
+   gui.set_fonts(int(_editor_get("font_body")), int(_editor_get("font_title")), int(_editor_get("font_small")))
+   gui.prepare_input(_editor_get("win"), sw, sh)
+   gfx.set_ortho_2d(0.0, sw, sh, 0.0)
+   gui.begin_frame(0, int(_editor_get("font_body")), sw, sh)
+   _draw_context_menu(sw, sh)
+   _draw_color_picker(lay, sw, sh)
+   _draw_find_bar(sw, sh)
+   _draw_palette(sw, sh)
+   gui.end_frame()
    0
 }
 
@@ -7367,7 +7482,7 @@ fn _initial_buffers() list {
    if probe_flags.get("ZOOM", false) { return [ed.buffer("zoom-test.ny", "", "use core\n")] }
    if probe_flags.get("GOTO", false) { return [ed.buffer("goto-test.ny", "", "use core\nfn local_target() int { return 1 }\nfn main() int {\n   local_target()\n   project_target()\n}\n")] }
    if probe_flags.get("MULTICURSOR", false) { return [ed.buffer("multi-cursor.ny", "", "aaa\nbbb\nccc")] }
-   if probe_flags.get("FIND", false) || probe_flags.get("PALETTE", false) || probe_flags.get("WHICH_KEY", false) { return [ed.buffer("ui-probe.ny", "", PROBE_TEXT)] }
+   if probe_flags.get("FIND", false) || probe_flags.get("PALETTE", false) || probe_flags.get("POPUPS", false) || probe_flags.get("WHICH_KEY", false) { return [ed.buffer("ui-probe.ny", "", PROBE_TEXT)] }
    if probe_flags.get("ESCAPE", false) { return [ed.buffer("escape-test.ny", "", "use core\n")] }
    if probe_flags.get("NAV", false) || probe_flags.get("TAB", false) { return [ed.buffer("nav-a.ny", "", "alpha"), ed.buffer("nav-b.ny", "", "beta")] }
    if probe_flags.get("SELECT", false) { return [ed.buffer("select-all.ny", "", "one\ntwo\nthree")] }
@@ -7834,6 +7949,7 @@ while !gfx.window_should_close(_editor_get("win")) {
    if probe_flags.get("ESCAPE", false) && int(_editor_get("frame_count")) == 1 {
       assert(window.should_close(_editor_get("win")), "esc esc closes editor")
    }
+   if probe_flags.get("POPUPS", false) { _probe_popups_step(int(_editor_get("frame_count"))) }
    if probe_flags.get("CHORD", false) && int(_editor_get("frame_count")) == 0 {
       assert(_current_text() == "", "command chord chars do not insert")
       window.set_should_close(_editor_get("win"), true)
@@ -7906,13 +8022,10 @@ while !gfx.window_should_close(_editor_get("win")) {
       _stroke_rect(px, py, pw, ph, C_ACCENT, 2.0)
       _text_center(int(_editor_get("font_body")), "Quit? Esc again", px + pw * 0.5, py + 26.0, C_TEXT)
    }
-   _draw_context_menu(sw, sh)
    _draw_rename_prompt(sw, sh)
    _draw_completion(lay, sw, sh)
-   _draw_color_picker(lay, sw, sh)
-   _draw_find_bar(sw, sh)
-   _draw_palette(sw, sh)
    _draw_which_key(sw, sh)
+   _draw_gui_overlays(lay, sw, sh)
    def t_draw = FRAME_TRACE ? ticks() : 0
    _trace_draw(int(_editor_get("frame_count")), t_begin, t_top, t_rail, t_editor, t_terminal, t_status, t_draw)
    _flush_rects()

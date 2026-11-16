@@ -465,6 +465,22 @@ static const char *ny_infer_generic_adt_return_type(codegen_t *cg,
 static ny_builtin_type_kind_t classify_builtin_type_exact(const char *name) {
   if (!name || !*name)
     return NY_BT_UNKNOWN;
+  /*
+   * `Type` and its leveled spellings (`Type 0`, `Type 12`) are the same erased
+   * type value; the level is static, so every level shares the string ABI.
+   */
+  if (memcmp(name, "Type", 4) == 0) {
+    if (name[4] == '\0')
+      return NY_BT_STR;
+    if (name[4] == ' ' && name[5] != '\0') {
+      bool digits = true;
+      for (const char *d = name + 5; *d; ++d)
+        if (*d < '0' || *d > '9')
+          digits = false;
+      if (digits)
+        return NY_BT_STR;
+    }
+  }
   size_t len = strlen(name);
   switch (len) {
   case 2:

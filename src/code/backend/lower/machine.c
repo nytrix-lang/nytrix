@@ -2452,6 +2452,7 @@ static bool mach_verify_opcode_shape(const nyr_mach_func_t *func,
            mach_is_none(&inst->src1) && mach_is_none(&inst->src2);
   case NYR_MACH_BSWAP64:
   case NYR_MACH_BSWAP32:
+  case NYR_MACH_POPCOUNT64:
     return inst->effects == NYR_MACH_EFFECT_NONE &&
            mach_value_type(func, &inst->dst) == NYR_MACH_TYPE_I64 &&
            mach_value_type(func, &inst->src0) == NYR_MACH_TYPE_I64 &&
@@ -2738,6 +2739,8 @@ const char *nyr_mach_opcode_name(nyr_mach_opcode_t op) {
     return "bswap64";
   case NYR_MACH_BSWAP32:
     return "bswap32";
+  case NYR_MACH_POPCOUNT64:
+    return "popcount64";
   case NYR_MACH_FMA:
     return "fma";
   case NYR_MACH_SQRT:
@@ -3808,7 +3811,7 @@ bool nyr_mach_verify(const nyr_mach_func_t *func, unsigned caps, char *err,
     const char *bad_field = NULL;
     const char *bad_operand_name = NULL;
     const nyr_mach_operand_t *bad_operand = NULL;
-    if (inst->opcode > NYR_MACH_VSHR)
+    if (inst->opcode > NYR_MACH_POPCOUNT64)
       bad_field = "opcode";
     else if (inst->condition > NYR_MACH_COND_GE)
       bad_field = "condition";
@@ -4916,6 +4919,196 @@ mach_nir_match_signed_pow2_div(const nyr_func_t *f, const int *definitions,
   return true;
 }
 
+static int mach_swar_def(const nyr_func_t *f, const int *definitions, int value,
+                         nyr_op_t op) {
+  if (!f || !definitions || value < 0 || value >= f->next_value)
+    return -1;
+  int pc = definitions[value];
+  if (pc < 0 || (size_t)pc >= f->len)
+    return -1;
+  return f->data[pc].op == op ? pc : -1;
+}
+
+/*
+ * Recognize the 32-bit SWAR population count:
+ *
+ *   v = x & 0xffffffff
+ *   v = v - ((v >> 1) & 0x55555555)
+ *   v = (v & 0x33333333) + ((v >> 2) & 0x33333333)
+ *   v = (v + (v >> 4)) & 0x0f0f0f0f
+ *   n = ((v * 0x01010101) & 0xffffffff) >> 24
+ *
+ * The input already carries the 32-bit mask, so a 64-bit POPCNT is exact.
+ * Every removed value must be consumed only inside the matched chain, and
+ * each value keeps a single definition.
+ */
+static bool mach_nir_match_swar_popcount(const nyr_func_t *f,
+                                         const int *definitions,
+                                         const nyr_use_def_t *uses,
+                                         const nyr_cfg_t *cfg, size_t final_pc,
+                                         int *input_out, size_t skipped[16],
+                                         size_t *skipped_len) {
+  if (!f || !definitions || !cfg || !input_out || !skipped_len ||
+      final_pc >= f->len)
+    return false;
+  const nyr_inst_t *fin = &f->data[final_pc];
+  int64_t shift = 0;
+  if (fin->op != NYIR_SAR_I64 ||
+      !mach_nir_const_i64(f, definitions, fin->b, &shift) || shift != 24)
+    return false;
+  size_t block = cfg->inst_block[final_pc];
+  size_t n = 0;
+  int64_t mask = 0;
+  int v = fin->a;
+  int pc = mach_swar_def(f, definitions, v, NYIR_AND_I64);
+  if (pc >= 0 && mach_nir_const_i64(f, definitions, f->data[pc].b, &mask) &&
+      mask == INT64_C(0xffffffff)) {
+    skipped[n++] = (size_t)pc;
+    v = f->data[pc].a;
+  }
+  pc = mach_swar_def(f, definitions, v, NYIR_MUL_I64);
+  if (pc < 0)
+    return false;
+  {
+    const nyr_inst_t *mul = &f->data[pc];
+    int64_t k = 0;
+    if (!mach_nir_const_i64(f, definitions, mul->b, &k) ||
+        k != INT64_C(0x01010101))
+      return false;
+    v = mul->a;
+  }
+  skipped[n++] = (size_t)pc;
+  pc = mach_swar_def(f, definitions, v, NYIR_AND_I64);
+  if (pc < 0)
+    return false;
+  {
+    const nyr_inst_t *and4 = &f->data[pc];
+    int64_t k = 0;
+    if (!mach_nir_const_i64(f, definitions, and4->b, &k) ||
+        k != INT64_C(0x0f0f0f0f))
+      return false;
+    v = and4->a;
+  }
+  skipped[n++] = (size_t)pc;
+  pc = mach_swar_def(f, definitions, v, NYIR_ADD_I64);
+  if (pc < 0)
+    return false;
+  {
+    const nyr_inst_t *add2 = &f->data[pc];
+    int base = -1;
+    for (int side = 0; side < 2; ++side) {
+      int s = side == 0 ? add2->a : add2->b;
+      int other = side == 0 ? add2->b : add2->a;
+      int spc = mach_swar_def(f, definitions, s, NYIR_SAR_I64);
+      int64_t sh = 0;
+      if (spc >= 0 &&
+          mach_nir_const_i64(f, definitions, f->data[spc].b, &sh) && sh == 4 &&
+          f->data[spc].a == other) {
+        base = other;
+        skipped[n++] = (size_t)spc;
+        break;
+      }
+    }
+    if (base < 0)
+      return false;
+    v = base;
+  }
+  skipped[n++] = (size_t)pc;
+  pc = mach_swar_def(f, definitions, v, NYIR_ADD_I64);
+  if (pc < 0)
+    return false;
+  {
+    const nyr_inst_t *add1 = &f->data[pc];
+    int subv = -1;
+    for (int side = 0; side < 2; ++side) {
+      int a = side == 0 ? add1->a : add1->b;
+      int b = side == 0 ? add1->b : add1->a;
+      int apc = mach_swar_def(f, definitions, a, NYIR_AND_I64);
+      int bpc = mach_swar_def(f, definitions, b, NYIR_AND_I64);
+      int64_t ka = 0, kb = 0;
+      int64_t sh = 0;
+      int bsh = -1;
+      if (apc < 0 || bpc < 0)
+        continue;
+      if (!mach_nir_const_i64(f, definitions, f->data[apc].b, &ka) ||
+          ka != INT64_C(0x33333333))
+        continue;
+      if (!mach_nir_const_i64(f, definitions, f->data[bpc].b, &kb) ||
+          kb != INT64_C(0x33333333))
+        continue;
+      bsh = mach_swar_def(f, definitions, f->data[bpc].a, NYIR_SAR_I64);
+      if (bsh < 0 ||
+          !mach_nir_const_i64(f, definitions, f->data[bsh].b, &sh) || sh != 2 ||
+          f->data[bsh].a != f->data[apc].a)
+        continue;
+      subv = f->data[apc].a;
+      skipped[n++] = (size_t)apc;
+      skipped[n++] = (size_t)bpc;
+      skipped[n++] = (size_t)bsh;
+      break;
+    }
+    if (subv < 0)
+      return false;
+    v = subv;
+  }
+  skipped[n++] = (size_t)pc;
+  pc = mach_swar_def(f, definitions, v, NYIR_SUB_I64);
+  if (pc < 0)
+    return false;
+  {
+    const nyr_inst_t *sub = &f->data[pc];
+    int andpc = mach_swar_def(f, definitions, sub->b, NYIR_AND_I64);
+    int64_t k = 0;
+    int64_t sh = 0;
+    int sarpc = -1;
+    if (andpc < 0 ||
+        !mach_nir_const_i64(f, definitions, f->data[andpc].b, &k) ||
+        k != INT64_C(0x55555555))
+      return false;
+    sarpc = mach_swar_def(f, definitions, f->data[andpc].a, NYIR_SAR_I64);
+    if (sarpc < 0 ||
+        !mach_nir_const_i64(f, definitions, f->data[sarpc].b, &sh) || sh != 1 ||
+        f->data[sarpc].a != sub->a)
+      return false;
+    skipped[n++] = (size_t)andpc;
+    skipped[n++] = (size_t)sarpc;
+    v = sub->a;
+  }
+  skipped[n++] = (size_t)pc;
+  {
+    int maskpc = mach_swar_def(f, definitions, v, NYIR_AND_I64);
+    int64_t k = 0;
+    if (maskpc < 0 ||
+        !mach_nir_const_i64(f, definitions, f->data[maskpc].b, &k) ||
+        k != INT64_C(0xffffffff))
+      return false;
+  }
+  for (size_t i = 0; i < n; ++i) {
+    size_t at = skipped[i];
+    int dv = f->data[at].dst;
+    if (cfg->inst_block[at] != block)
+      return false;
+    if (dv < 0 || dv >= f->next_value || definitions[dv] != (int)at)
+      return false;
+    if (uses) {
+      if ((size_t)dv + 1 >= uses->value_count)
+        return false;
+      for (size_t u = uses->offsets[dv]; u < uses->offsets[dv + 1]; ++u) {
+        size_t user = uses->users[u];
+        bool inside = user == final_pc;
+        for (size_t j = 0; j < n && !inside; ++j)
+          if (skipped[j] == user)
+            inside = true;
+        if (!inside)
+          return false;
+      }
+    }
+  }
+  *input_out = v;
+  *skipped_len = n;
+  return true;
+}
+
 bool nyr_mach_lower_nir(const nyr_func_t *nyir, nyr_mach_func_t *out,
                         unsigned caps, char *err, size_t err_len) {
   if (ny_trace_enabled("NY_TRACE_EMIT"))
@@ -4946,6 +5139,7 @@ bool nyr_mach_lower_nir(const nyr_func_t *nyir, nyr_mach_func_t *out,
   int64_t *fused_divisor = NULL;
   int *fused_lea_base = NULL;
   int *fused_lea_index = NULL;
+  int *fused_popcount = NULL;
   unsigned *fused_lea_scale = NULL;
   bool *skip_fused_inst = NULL;
   nyr_use_def_t uses = {0};
@@ -5084,6 +5278,46 @@ bool nyr_mach_lower_nir(const nyr_func_t *nyir, nyr_mach_func_t *out,
                 nyir, definitions, &uses, &cfg, fused_lea_base, i))
           continue;
         skip_fused_inst[i] = true;
+      }
+    }
+  }
+  if (nyir->len && definitions) {
+    bool candidate = false;
+    for (size_t i = 0; i < nyir->len; ++i) {
+      int input = -1;
+      size_t skipped[16];
+      size_t skipped_len = 0;
+      if (mach_nir_match_swar_popcount(nyir, definitions, NULL, &cfg, i,
+                                       &input, skipped, &skipped_len)) {
+        candidate = true;
+        break;
+      }
+    }
+    if (candidate) {
+      if (!skip_fused_inst)
+        skip_fused_inst = ny_calloc_array(nyir->len, sizeof(*skip_fused_inst));
+      fused_popcount = ny_malloc_array(nyir->len, sizeof(*fused_popcount));
+      if (!skip_fused_inst || !fused_popcount ||
+          (!uses.offsets && !nyr_build_use_def(nyir, &uses)))
+        goto oom;
+      for (size_t i = 0; i < nyir->len; ++i)
+        fused_popcount[i] = -1;
+      for (size_t i = 0; i < nyir->len; ++i) {
+        int input = -1;
+        size_t skipped[16];
+        size_t skipped_len = 0;
+        if (!mach_nir_match_swar_popcount(nyir, definitions, &uses, &cfg, i,
+                                          &input, skipped, &skipped_len))
+          continue;
+        bool clash = false;
+        for (size_t k = 0; k < skipped_len; ++k)
+          if (skip_fused_inst[skipped[k]])
+            clash = true;
+        if (clash)
+          continue;
+        for (size_t k = 0; k < skipped_len; ++k)
+          skip_fused_inst[skipped[k]] = true;
+        fused_popcount[i] = input;
       }
     }
   }
@@ -5659,6 +5893,11 @@ bool nyr_mach_lower_nir(const nyr_func_t *nyir, nyr_mach_func_t *out,
           goto oom;
       }
       continue;
+    } else if (fused_popcount && fused_popcount[i] >= 0) {
+      inst.opcode = NYR_MACH_POPCOUNT64;
+      inst.dst = mach_vreg(&lowered, values[in->dst]);
+      inst.src0 = mach_vreg(&lowered, values[fused_popcount[i]]);
+      inst.effects = NYR_MACH_EFFECT_NONE;
     } else if (fused_dividend && fused_dividend[i] >= 0) {
       inst.opcode = NYR_MACH_DIV;
       inst.dst = mach_vreg(&lowered, values[in->dst]);
@@ -6085,6 +6324,7 @@ bool nyr_mach_lower_nir(const nyr_func_t *nyir, nyr_mach_func_t *out,
 done:
   free(definitions);
   free(fused_dividend);
+  free(fused_popcount);
   free(fused_divisor);
   free(fused_lea_base);
   free(fused_lea_index);
@@ -6158,6 +6398,7 @@ static bool mach_schedule_opcode_allowed(nyr_mach_opcode_t opcode) {
   case NYR_MACH_XOR:
   case NYR_MACH_BSWAP64:
   case NYR_MACH_BSWAP32:
+  case NYR_MACH_POPCOUNT64:
   case NYR_MACH_FMA:
   case NYR_MACH_SQRT:
   case NYR_MACH_SIN:
@@ -6579,6 +6820,7 @@ static bool mach_outline_inst_ok(const nyr_mach_func_t *func,
   case NYR_MACH_VSHR:
   case NYR_MACH_BSWAP64:
   case NYR_MACH_BSWAP32:
+  case NYR_MACH_POPCOUNT64:
   case NYR_MACH_FMA:
   case NYR_MACH_SQRT:
   case NYR_MACH_SIN:

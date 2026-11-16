@@ -5077,17 +5077,23 @@ static bool sm_emit(nyr_writer_t *w, const ny_native_target_info_t *target,
       for (int pass = 0; emitted && pass < 2; ++pass)
         emitted = sm_i386_cleanup_spills(&baseline, value_bytes, local_offsets,
                                           high_local_count, local_bytes, nyir,
-                                          pass == 1 ? &colored : NULL) &&
+                                          pass == 1 ? &colored : NULL, false) &&
                   sm_i386_cleanup_spills(&compact, value_bytes + 16, local_offsets,
-                                          high_local_count, local_bytes, nyir, NULL) &&
+                                          high_local_count, local_bytes, nyir, NULL,
+                                          false) &&
                   sm_i386_cleanup_spills(&four, value_bytes, local_offsets,
                                           high_local_count, local_bytes, nyir,
-                                          pass == 1 ? &colored_four : NULL) &&
+                                          pass == 1 ? &colored_four : NULL, false) &&
                   sm_i386_cleanup_spills(&three, value_bytes, local_offsets,
                                           high_local_count, local_bytes, nyir,
-                                          NULL);
+                                          NULL, false);
     }
     if (emitted && high_values) {
+      int value_bytes = 0;
+      for (int v = 0; v < nyir->next_value; ++v) {
+        int end = i386_value_offsets[v] + (high_values[v] ? 8 : 4);
+        if (end > value_bytes) value_bytes = end;
+      }
       int a = sm_i386_promote_homes(nyir, i386_value_offsets, high_values,
                                      baseline.data, &promoted);
       int b = sm_i386_promote_homes(nyir, i386_value_offsets, high_values,
@@ -5095,6 +5101,20 @@ static bool sm_emit(nyr_writer_t *w, const ny_native_target_info_t *target,
       int c = sm_i386_promote_homes(nyir, i386_value_offsets, high_values,
                                      three.data, &promoted_three);
       emitted = a >= 0 && b >= 0 && c >= 0;
+      /* The promoted writer replaces stack homes with registers, so its output
+       * has not seen the cleanup passes. Run the register-only subset over each
+       * promoted variant; the memory passes would misread the register homes
+       * and the shifted frame. */
+      if (emitted)
+        emitted = sm_i386_cleanup_spills(&promoted, value_bytes + 16,
+                                          local_offsets, high_local_count,
+                                          local_bytes, nyir, NULL, true) &&
+                  sm_i386_cleanup_spills(&promoted_four, value_bytes + 16,
+                                          local_offsets, high_local_count,
+                                          local_bytes, nyir, NULL, true) &&
+                  sm_i386_cleanup_spills(&promoted_three, value_bytes + 16,
+                                          local_offsets, high_local_count,
+                                          local_bytes, nyir, NULL, true);
     }
     if (emitted) {
       /* Keep the existing sequence when local allocation's save/restore

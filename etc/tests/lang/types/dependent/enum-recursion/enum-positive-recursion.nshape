@@ -1,0 +1,27 @@
+shape enum_positive_recursion {
+  family "runtime/language"
+  generator "embedded"
+  features ["ny", "test", "dependent", "enum"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+;; Strictly positive recursion: the enum appears in constructor arguments as
+;; ordinary data, which is the only form the shipped enum grammar admits.
+enum Tree { Leaf, Node(Tree, Tree) }
+
+fn size(Tree t) int {
+  match t {
+    Tree.Leaf -> 0
+    Tree.Node(a, b) -> 1 + size(a) + size(b)
+  }
+}
+
+def Tree small = Tree.Node(Tree.Leaf, Tree.Leaf)
+assert_eq(size(Tree.Leaf), 0, "leaf has size 0")
+assert_eq(size(small), 1, "one node above two leaves")
+print("ok enum recursion")
+NY
+}

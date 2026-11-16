@@ -4,7 +4,7 @@
 ;; - core.os.ui.window.platform.linux
 ;; - core.os.ui.window
 ;; - core.os.ui.window.consts
-module core.os.ui.window.platform.linux.wayland(surface_buffer_ready, available, get_backend_name, connect_display, disconnect_display, get_registry, destroy_registry, flush, roundtrip, get_fd, dispatch_pending, dispatch, prepare_read, cancel_read, read_events, wait_events, wait_events_queue, create_event_queue, destroy_event_queue, prepare_read_queue, dispatch_queue_pending, create_proxy_wrapper, destroy_proxy_wrapper, set_proxy_queue, get_proxy_user_data, set_proxy_user_data, get_proxy_version, destroy_proxy, bootstrap_globals, destroy_globals, set_globals, vulkan_supported, vulkan_required_extensions, probe_display, presentation_supported, create_surface, create_wl_surface, create_xdg_surface, create_xdg_toplevel, xdg_toplevel_set_title, create_basic_window, destroy_basic_window, poll_window_events, show_window, hide_window, iconify_window, restore_window, maximize_window, get_window_attrib, set_window_opacity, set_window_resizable, set_title, get_size, set_size, get_cursor_pos, set_cursor_pos, set_window_icon, create_cursor, create_standard_cursor, destroy_cursor, set_cursor, get_key_state, get_mouse_button_state, get_key_name, get_window_monitor, set_window_monitor, set_clipboard, get_clipboard, get_gamma_ramp, set_gamma_ramp, get_monitors, get_primary_monitor, get_monitor_pos, get_monitor_workarea, get_monitor_physical_size, get_monitor_content_scale, get_monitor_name, get_wayland_monitor, get_video_mode, get_video_modes, set_input_mode, get_input_mode, get_key_name, get_key_scancode, text_input_enable, text_input_disable, get_window_content_scale, get_window_opacity, get_window_frame_size, request_window_attention, get_seat_capabilities, poll_joystick_events)
+module core.os.ui.window.platform.linux.wayland(surface_buffer_ready, available, get_backend_name, connect_display, disconnect_display, get_registry, destroy_registry, flush, roundtrip, get_fd, dispatch_pending, dispatch, prepare_read, cancel_read, read_events, wait_events, wait_events_queue, create_event_queue, destroy_event_queue, prepare_read_queue, dispatch_queue_pending, create_proxy_wrapper, destroy_proxy_wrapper, set_proxy_queue, get_proxy_user_data, set_proxy_user_data, get_proxy_version, destroy_proxy, bootstrap_globals, destroy_globals, set_globals, vulkan_supported, vulkan_required_extensions, probe_display, presentation_supported, create_surface, create_wl_surface, create_xdg_surface, create_xdg_toplevel, xdg_toplevel_set_title, create_basic_window, destroy_basic_window, poll_window_events, show_window, hide_window, iconify_window, restore_window, maximize_window, get_window_attrib, set_window_opacity, set_window_resizable, set_title, get_size, set_size, get_cursor_pos, set_cursor_pos, set_window_icon, create_cursor, create_standard_cursor, destroy_cursor, set_cursor, get_key_state, get_mouse_button_state, get_key_name, get_window_monitor, set_window_monitor, set_clipboard, get_clipboard, get_gamma_ramp, set_gamma_ramp, get_monitors, get_primary_monitor, get_monitor_pos, get_monitor_workarea, get_monitor_physical_size, get_monitor_content_scale, get_monitor_name, get_wayland_monitor, get_video_mode, get_video_modes, set_input_mode, get_input_mode, get_key_name, get_key_scancode, text_input_enable, text_input_disable, get_window_content_scale, get_window_opacity, get_window_frame_size, request_window_attention, get_seat_capabilities, poll_joystick_events, inject_input)
 use core
 use core.mem (cstr)
 use core.str as str
@@ -77,6 +77,7 @@ use core.os.ffi as ffi
    }
    extern "" {
       fn close(i32 fd) i32
+      fn wl_close_fd(i32 fd) i32 as "close"
       fn mmap(ptr addr, u64 length, i32 prot, i32 flags, i32 fd, i64 offset) ptr
       fn munmap(ptr addr, u64 length) i32
       fn wayland_pipe(ptr fds) i32 as "pipe"
@@ -252,6 +253,10 @@ use core.os.ffi as ffi
    }
    fn close(..._args) any {
       "Closes close."
+      0
+   }
+   fn wl_close_fd(..._args) any {
+      "Closes a file descriptor (stub)."
       0
    }
    fn mmap(..._args) any {
@@ -549,7 +554,7 @@ fn _broadcast_event(int typ, any data=0) any {
    mut i = 0
    def keys_n = keys.len
    while i < keys_n {
-      def win = _windows.get(int(keys.get(i)), 0)
+      def win = dict_get(_windows, int(keys.get(i)), 0)
       if is_dict(win) { _push_event(win, typ, data) }
       i += 1
    }
@@ -1343,7 +1348,7 @@ fn xdg_toplevel_unset_maximized(any toplevel) any {
 }
 
 fn _surface_handle_enter(ptr data, ptr surface, ptr output) any {
-   mut win = _windows.get(int(data), 0)
+   mut win = dict_get(_windows, int(data), 0)
    if !win || !is_dict(win) { return 0 }
    def outputs = win.get("outputs", [])
    win = win.set("outputs", outputs.append(output))
@@ -1351,7 +1356,7 @@ fn _surface_handle_enter(ptr data, ptr surface, ptr output) any {
 }
 
 fn _surface_handle_leave(ptr data, ptr surface, ptr output) any {
-   mut win = _windows.get(int(data), 0)
+   mut win = dict_get(_windows, int(data), 0)
    if !win || !is_dict(win) { return 0 }
    def outputs = win.get("outputs", [])
    mut next_outputs = []
@@ -1493,7 +1498,7 @@ fn _wait_queued_commits(any win) any {
 fn surface_buffer_ready(any win, int w, int h) bool {
    "Records that a presentable buffer of w x h exists and acknowledges any resize waiting for it."
    def handle = is_dict(win) ? win.get("handle", 0) : win
-   def current = handle ? _windows.get(int(handle), 0) : 0
+   def current = handle ? dict_get(_windows, int(handle), 0) : 0
    if !is_dict(current) { return false }
    def state = current.get("resize_state", 0)
    if !state { return false }
@@ -1555,7 +1560,7 @@ fn _xdg_toplevel_handle_close(ptr resize_state, ptr toplevel) any {
 }
 
 fn _decoration_handle_configure(ptr win_obj, ptr decoration, u32 mode) any {
-   mut win = _windows.get(int(win_obj), 0)
+   mut win = dict_get(_windows, int(win_obj), 0)
    if win && is_dict(win) {
       win = win.set("decoration_mode", int(from_int(mode)))
       _windows = dict_set(_windows, int(win_obj), win)
@@ -1715,7 +1720,7 @@ fn create_basic_window(any globals, str title, int width, int height, str app_id
       wl_display_roundtrip(display)
       _dbgu("create_basic_window roundtrip end surface=0x" + str.to_hex(surface))
    }
-   _windows.get(int(surface), win)
+   dict_get(_windows, int(surface), win)
 }
 
 fn _wl_destroy_proxy_slot(dict win, str key_proxy, str key_listener="", str key_data="") bool {
@@ -1757,7 +1762,7 @@ fn get_size(any win) list {
    win = _apply_shell_state(win)
    def handle = win.get("handle", 0)
    if handle {
-      def current = _windows.get(int(handle), 0)
+      def current = dict_get(_windows, int(handle), 0)
       if is_dict(current) {
          win = current
       }
@@ -1769,7 +1774,7 @@ fn set_size(any win, int w, int h) bool {
    "Resizes a floating Wayland window; a client chooses its own size unless the compositor constrains it."
    if !win || !is_dict(win) || w <= 0 || h <= 0 { return false }
    def handle = win.get("handle", 0)
-   def current = handle ? _windows.get(int(handle), 0) : 0
+   def current = handle ? dict_get(_windows, int(handle), 0) : 0
    if !is_dict(current) { return false }
    def state = current.get("resize_state", 0)
    if state && (load64_h(state, _WRS_MAXIMIZED) || load64_h(state, _WRS_FULLSCREEN)) { return false }
@@ -1958,10 +1963,10 @@ fn _ensure_data_source_iface() any {
 }
 
 fn _data_source_send(any data, any source, any mime_type, any fd) any {
-   if !_clipboard_text || !fd { close(int(fd)) return 0 }
+   if !_clipboard_text || !fd { wl_close_fd(int(fd)) return 0 }
    def n = _clipboard_text.len
    if n > 0 { wl_write(int(fd), cstr(_clipboard_text), int(n)) }
-   close(int(fd))
+   wl_close_fd(int(fd))
 }
 
 fn _data_source_cancelled(any data, any source) any {
@@ -1985,7 +1990,7 @@ fn _data_device_enter(any data, any device, any serial, any surface, any x, any 
    if !data { return 0 }
    store64_h(data, offer, _WG_DND_OFFER)
    store64_h(data, surface, _WG_DND_SURFACE)
-   def win = _windows.get(int(surface), 0)
+   def win = dict_get(_windows, int(surface), 0)
    if win && is_dict(win) {
       mut ev = dict(8)
       ev = ev.set("x", int(x))
@@ -2004,7 +2009,7 @@ fn _data_device_motion(any data, any device, any time, any x, any y) any {
    if !data { return 0 }
    def surface = load64_h(data, _WG_DND_SURFACE)
    if !surface { return 0 }
-   def win = _windows.get(int(surface), 0)
+   def win = dict_get(_windows, int(surface), 0)
    if win && is_dict(win) {
       mut ev = dict(8)
       ev = ev.set("x", int(x))
@@ -2019,7 +2024,7 @@ fn _data_device_drop(any data, any device) any {
    def surface = load64_h(data, _WG_DND_SURFACE)
    if !offer || !surface { return 0 }
    def display = load64_h(data, _WG_DISPLAY)
-   def win = _windows.get(int(surface), 0)
+   def win = dict_get(_windows, int(surface), 0)
    if !win || !is_dict(win) { return 0 }
    def fds = malloc(8)
    if !fds { return 0 }
@@ -2028,13 +2033,13 @@ fn _data_device_drop(any data, any device) any {
    def rfd, wfd = int(load32(fds, 0)), int(load32(fds, 4))
    free(fds)
    wl_proxy_marshal_flags_s_fd(offer, 1, 0, int(get_proxy_version(offer)), 0, cstr("text/uri-list"), wfd)
-   close(wfd)
+   wl_close_fd(wfd)
    if display { wl_display_flush(display) }
    def buf = malloc(4096)
-   if !buf { close(rfd) return 0 }
+   if !buf { wl_close_fd(rfd) return 0 }
    memset(buf, 0, 4096)
    def n = wl_read(rfd, buf, 4095)
-   close(rfd)
+   wl_close_fd(rfd)
    if n > 0 {
       def text = to_str(buf)
       mut ev = dict(8)
@@ -2125,17 +2130,17 @@ fn get_clipboard(any win) str {
       offer, 1, 0, int(get_proxy_version(offer)),
       0, cstr("text/plain;charset=utf-8"), int(wfd),
    )
-   close(wfd)
+   wl_close_fd(wfd)
    if display { wl_display_flush(display) }
    def buf = malloc(16384)
-   if !buf { close(rfd) return "" }
+   if !buf { wl_close_fd(rfd) return "" }
    mut total = 0
    mut chunk = wl_read(int(rfd), buf + total, 16384 - total)
    while chunk > 0 && total < 16383 {
       total += chunk
       chunk = wl_read(int(rfd), buf + total, 16384 - total - 1)
    }
-   close(rfd)
+   wl_close_fd(rfd)
    store8(buf, 0, total)
    def result = to_str(buf)
    free(buf)
@@ -2387,7 +2392,7 @@ fn _output_handle_scale(ptr data, ptr wl_output, i32 factor) any {
    def keys_n = keys.len
    while i < keys_n {
       def handle = keys.get(i)
-      def win = _windows.get(int(handle), 0)
+      def win = dict_get(_windows, int(handle), 0)
       if is_dict(win) {
          def outputs = win.get("outputs", [])
          mut on_it = false
@@ -2553,7 +2558,7 @@ fn _pointer_apply_cursor(any data, any pointer, any serial, any win) any {
 }
 
 fn _pointer_push_motion(any surface, any x, any y) bool {
-   mut win = _windows.get(int(surface), 0)
+   mut win = dict_get(_windows, int(surface), 0)
    if !win { return false }
    def prev_x = float(win.get("mouse_x", x))
    def prev_y = float(win.get("mouse_y", y))
@@ -2566,7 +2571,7 @@ fn _pointer_push_motion(any surface, any x, any y) bool {
 }
 
 fn _pointer_push_button(any surface, int btn, bool action) bool {
-   mut win = _windows.get(int(surface), 0)
+   mut win = dict_get(_windows, int(surface), 0)
    if !win { return false }
    win = win.set("mouse_button_" + to_str(btn), action ? 1 : 0)
    _windows = dict_set(_windows, int(surface), win)
@@ -2584,7 +2589,7 @@ fn _pointer_push_button(any surface, int btn, bool action) bool {
 fn _pointer_handle_enter(ptr data, ptr pointer, u32 serial, ptr surface, i32 sx, i32 sy) any {
    if !data { return 0 }
    store64_h(data, from_int(serial), _WG_POINTER_ENTER_SERIAL)
-   def win = _windows.get(int(surface), 0)
+   def win = dict_get(_windows, int(surface), 0)
    if !win { return 0 }
    def fx, fy = float(from_int(sx)) / 256.0, float(from_int(sy)) / 256.0
    _pointer_set_pending(data, bor(_WP_PENDING_SURFACE, _WP_PENDING_MOTION))
@@ -2602,7 +2607,7 @@ fn _pointer_handle_leave(ptr data, ptr pointer, u32 serial, ptr surface) any {
 fn _pointer_handle_motion(ptr data, ptr pointer, u32 time, i32 sx, i32 sy) any {
    if !data { return 0 }
    def surface = _pointer_active_surface(data)
-   def win = _windows.get(int(surface), 0)
+   def win = dict_get(_windows, int(surface), 0)
    if !win { return 0 }
    def fx = float(from_int(sx)) / 256.0
    def fy = float(from_int(sy)) / 256.0
@@ -2614,11 +2619,14 @@ fn _pointer_handle_motion(ptr data, ptr pointer, u32 time, i32 sx, i32 sy) any {
 fn _pointer_handle_button(ptr data, ptr pointer, u32 serial, u32 time, u32 button, u32 state) any {
    if !data { return 0 }
    def surface = _pointer_active_surface(data)
-   def win = _windows.get(int(surface), 0)
+   def win = dict_get(_windows, int(surface), 0)
    if !win { return 0 }
    store64_h(data, from_int(serial), _WG_POINTER_BUTTON_SERIAL)
    def btn = int(from_int(button)) - 0x110
    if btn < 0 { return 0 }
+   ;; One pending slot per frame: a fast click can bring its press and its
+   ;; release in the same wl_pointer.frame, so deliver the earlier one first.
+   if band(_pointer_pending(data), _WP_PENDING_BUTTON) { _pointer_flush_frame(data, pointer) }
    _pointer_set_pending(data, _WP_PENDING_BUTTON)
    store32(data, btn, _WG_PENDING_BUTTON)
    store32(data, (from_int(state) == 1) ? 1 : 0, _WG_PENDING_ACTION)
@@ -2664,7 +2672,7 @@ fn _pointer_flush_scroll(any data) any {
    _pointer_reset_scroll(data)
    if dx == 0.0 && dy == 0.0 { return 0 }
    def surface = load64_h(data, _WG_POINTER_FOCUS)
-   def win = _windows.get(int(surface), 0)
+   def win = dict_get(_windows, int(surface), 0)
    if !win { return 0 }
    def ev_data = {
       "dx": dx,
@@ -2689,12 +2697,12 @@ fn _pointer_flush_frame(any data, any pointer=0) any {
       def old_surface = load64_h(data, _WG_POINTER_FOCUS)
       def next_surface = load64_h(data, _WG_PENDING_SURFACE)
       if old_surface && old_surface != next_surface {
-         def old_win = _windows.get(int(old_surface), 0)
+         def old_win = dict_get(_windows, int(old_surface), 0)
          if old_win { _push_event(old_win, EVENT_MOUSE_LEAVE, 0) }
       }
       store64_h(data, next_surface, _WG_POINTER_FOCUS)
       if next_surface && old_surface != next_surface {
-         def win = _windows.get(int(next_surface), 0)
+         def win = dict_get(_windows, int(next_surface), 0)
          if win {
             _pointer_apply_cursor(data, common.value_or(pointer, load64_h(data, _WG_POINTER)), load64_h(data,
                   _WG_POINTER_ENTER_SERIAL),
@@ -2767,7 +2775,7 @@ fn _pointer_handle_axis_relative_direction(ptr data, ptr pointer, u32 axis, u32 
 fn _relative_pointer_handle_motion(ptr data, ptr rel_ptr, u32 utime_hi, u32 utime_lo, i32 dx, i32 dy, i32 dx_unaccel, i32 dy_unaccel) any {
    if !data { return 0 }
    def surface = load64_h(data, 0)
-   mut win = _windows.get(int(surface), 0)
+   mut win = dict_get(_windows, int(surface), 0)
    if !win { return 0 }
    def fdx, fdy = float(from_int(dx)) / 256.0, float(from_int(dy)) / 256.0
    mut mx, my = float(win.get("mouse_x", 0)), float(win.get("mouse_y", 0))
@@ -2857,21 +2865,21 @@ fn _keyboard_handle_keymap(ptr data, ptr keyboard, u32 keymap_format_raw, i32 fd
    def keymap_format = from_int(keymap_format_raw)
    def keymap_fd = int(from_int(fd))
    def keymap_size = int(from_int(size))
-   if !data { if keymap_fd >= 0 { close(keymap_fd) } return 0 }
+   if !data { if keymap_fd >= 0 { wl_close_fd(keymap_fd) } return 0 }
    if keymap_format != XKB_KEYMAP_FORMAT_TEXT_V1 {
-      close(keymap_fd)
+      wl_close_fd(keymap_fd)
       return 0
    }
    def PROT_READ = 1
    def MAP_PRIVATE = 2
    def map = mmap(0, keymap_size, PROT_READ, MAP_PRIVATE, keymap_fd, 0)
-   if int(map) == -1 { close(keymap_fd) return 0 }
+   if int(map) == -1 { wl_close_fd(keymap_fd) return 0 }
    def ctx = load64(data, _WG_XKB_CONTEXT)
    if !ctx {
       def next_ctx = xkb_context_new(0)
       if next_ctx { store64(data, next_ctx, _WG_XKB_CONTEXT) } else {
          munmap(map, keymap_size)
-         close(keymap_fd)
+         wl_close_fd(keymap_fd)
          return 0
       }
    }
@@ -2896,13 +2904,13 @@ fn _keyboard_handle_keymap(ptr data, ptr keyboard, u32 keymap_format_raw, i32 fd
       }
    }
    munmap(map, keymap_size)
-   close(keymap_fd)
+   wl_close_fd(keymap_fd)
 }
 
 fn _keyboard_handle_enter(ptr data, ptr keyboard, u32 serial, ptr surface, ptr keys) any {
    if !data { return 0 }
    store64_h(data, surface, _WG_KEYBOARD_FOCUS)
-   mut win = _windows.get(int(surface), 0)
+   mut win = dict_get(_windows, int(surface), 0)
    if win && !win.get("focused", false) {
       win = win.set("focused", true)
       _windows = dict_set(_windows, int(surface), win)
@@ -2916,7 +2924,7 @@ fn _keyboard_handle_leave(ptr data, ptr keyboard, u32 serial, ptr surface) any {
    store64_h(data, 0, _WG_REPEAT_KEY)
    store64_h(data, 0, _WG_REPEAT_SCANCODE)
    store64_h(data, 0, _WG_REPEAT_CHAR)
-   mut win = _windows.get(int(surface), 0)
+   mut win = dict_get(_windows, int(surface), 0)
    if win {
       def ks_old = win.get("key_states", 0)
       if ks_old { win = win.set("key_states", dict(64)) }
@@ -2939,7 +2947,7 @@ fn _wayland_modifier_key(int nk) bool {
 fn _keyboard_handle_key(ptr data, ptr keyboard, u32 serial, u32 time, u32 key, u32 state) any {
    if !data { return 0 }
    def surface = load64_h(data, _WG_KEYBOARD_FOCUS)
-   mut win = _windows.get(int(surface), 0)
+   mut win = dict_get(_windows, int(surface), 0)
    if ui_debug.env_truthy_cached("NY_WAYLAND_KEY_TRACE") {
       print("[wayland:key] surface=" + to_str(surface) + " known=" + to_str(!!win) +
          " raw=" + to_str(int(key)) + " state=" + to_str(int(state)) + " keys=" + to_str(dict_keys(_windows)))
@@ -3026,6 +3034,39 @@ fn _keyboard_handle_key(ptr data, ptr keyboard, u32 serial, u32 time, u32 key, u
       }
       free(utf8_buf)
    }
+}
+
+fn inject_input(any win, str kind, int a=0, int b=0, str path="") bool {
+   "Test hook: calls this window's seat listeners exactly as libwayland would for a compositor event, so input can be exercised on a compositor without a seat (headless Weston). `kind`: enter/motion (surface x, y), button (Linux code such as 0x110, 1 press / 0 release), axis (axis, value*256), frame, kenter, keymap (path to an XKB keymap file), key (evdev code, 1 press / 0 release), modifiers (depressed, locked)."
+   if !is_dict(win) { return false }
+   def globals = win.get("globals", 0)
+   def state = globals ? globals.get("listener_state", 0) : 0
+   def surface = win.get("handle", 0)
+   if !state || !surface { return false }
+   if kind == "enter" {
+      _pointer_handle_enter(state, 0, 1, surface, a * 256, b * 256)
+   } elif kind == "motion" {
+      _pointer_handle_motion(state, 0, 0, a * 256, b * 256)
+   } elif kind == "button" {
+      _pointer_handle_button(state, 0, 2, 0, a, b)
+   } elif kind == "axis" {
+      _pointer_handle_axis(state, 0, 0, a, b)
+   } elif kind == "frame" {
+      _pointer_handle_frame(state, 0)
+   } elif kind == "kenter" {
+      _keyboard_handle_enter(state, 0, 3, surface, 0)
+   } elif kind == "keymap" {
+      def int fd = __open_raw(path, 0, 0)
+      if fd < 0 { return false }
+      _keyboard_handle_keymap(state, 0, XKB_KEYMAP_FORMAT_TEXT_V1, fd, a)
+   } elif kind == "key" {
+      _keyboard_handle_key(state, 0, 4, 0, a, b)
+   } elif kind == "modifiers" {
+      _keyboard_handle_modifiers(state, 0, 5, a, 0, b, 0)
+   } else {
+      return false
+   }
+   true
 }
 
 fn _synthesize_key_repeat(any win, any state) any {
@@ -3118,7 +3159,7 @@ fn poll_window_events(any win, int max_events=64) list {
       i += 1
    }
    _pending_events = remaining
-   def latest_win = _windows.get(int(handle), win)
+   def latest_win = dict_get(_windows, int(handle), win)
    _dbgu("poll_window_events: " + to_str(count) + " events dispatched, " + to_str(remaining.len) + " still pending")
    _dbgu("poll_window_events: output=" + to_str(len(out)))
    return [latest_win, out]
@@ -3857,7 +3898,7 @@ fn wl_proxy_marshal_flags_full_set_cursor(any pointer, int serial, any surface, 
 
 fn _text_input_handle_commit(ptr data, ptr text_input, ptr text) any {
    if !data || !text { return 0 }
-   def win = _windows.get(int(data), 0)
+   def win = dict_get(_windows, int(data), 0)
    if !win || !is_dict(win) { return 0 }
    mut i = 0
    while true {
@@ -3906,7 +3947,7 @@ fn _text_input_handle_leave(ptr data, ptr text_input, ptr surface) any {
 
 fn _fractional_scale_handle_preferred_scale(ptr data, ptr fs_obj, u32 scale_120) any {
    if !data { return 0 }
-   mut win = _windows.get(int(data), 0)
+   mut win = dict_get(_windows, int(data), 0)
    if !win || !is_dict(win) { return 0 }
    def scale = float(from_int(scale_120)) / 120.0
    win = win.set("content_scale", scale)

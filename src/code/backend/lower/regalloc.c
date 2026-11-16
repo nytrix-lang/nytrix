@@ -614,6 +614,7 @@ static bool verify_tied_input(const nyr_mach_inst_t *in, uint32_t value,
   case NYR_MACH_VSHR:
   case NYR_MACH_BSWAP64:
   case NYR_MACH_BSWAP32:
+  case NYR_MACH_POPCOUNT64:
   case NYR_MACH_FMA:
   case NYR_MACH_SQRT:
   case NYR_MACH_SHUFFLE:

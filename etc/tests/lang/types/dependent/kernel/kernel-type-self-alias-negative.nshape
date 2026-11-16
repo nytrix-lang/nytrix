@@ -1,0 +1,17 @@
+shape kernel_type_self_alias_negative {
+  family "typing/dependent"
+  generator "error"
+  features [error typing dependent negative]
+  template ny-compile-fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_fail
+  expect_message "type value cannot refer to itself"
+  source ny <<'NY'
+use core
+
+;; A type value that names the binding being created can never resolve to a
+;; concrete type; it must be a cycle error, like `type Bad<T> = Bad<T>`.
+def Type T = T
+print(1)
+NY
+}

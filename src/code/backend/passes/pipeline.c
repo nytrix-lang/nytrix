@@ -2335,9 +2335,10 @@ static bool nyr_optimize_pipeline(nyr_func_t *f, nyr_opt_stats_t *stats,
       nyr_run_pass(f, nyr_invert_fallthrough_branches, stats, dump, &ok);
     if (ok) {
       static bool (*const cfg[])(nyr_func_t *) = {
-          nyr_cfg_simplify, nyr_phiopt,    nyr_if_convert,
-          nyr_peephole,     nyr_copy_prop, nyr_dce};
-      nyr_run_seq(f, cfg, 6, stats, dump, &ok);
+          nyr_cfg_simplify,        nyr_phiopt,    nyr_if_convert,
+          nyr_select_chain_fold,   nyr_peephole,  nyr_copy_prop,
+          nyr_dce};
+      nyr_run_seq(f, cfg, 7, stats, dump, &ok);
     }
     if (ok && !nyr_pass_stopped) {
       static bool (*const gvn_cleanup[])(nyr_func_t *) = {

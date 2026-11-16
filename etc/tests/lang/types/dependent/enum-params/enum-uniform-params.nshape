@@ -1,0 +1,43 @@
+shape enum_uniform_parameters {
+  family "runtime/language"
+  generator "embedded"
+  features ["ny", "test", "dependent", "enum"]
+  template ny-test-case
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+;; Uniform constructor parameters: every constructor of `Box<a>` uses the same
+;; `a`, so a parameterised enum behaves like an ordinary generic type.
+type Wrap<a> = Box<a>
+
+enum Box<a> { Held(a) }
+enum Pair<a, b> { Two(a, b) }
+
+fn unwrap(Box<int> b) int {
+  match b {
+    Box.Held(v) -> v
+  }
+}
+
+fn first(Pair<int, str> p) int {
+  match p {
+    Pair.Two(n, _) -> n
+  }
+}
+
+;; A type-level alias over a parameterised enum expands at type references.
+fn get(Wrap<int> b) int {
+  match b {
+    Box.Held(v) -> v
+  }
+}
+
+def Box<int> boxed = Box.Held(7)
+assert_eq(unwrap(boxed), 7, "uniform enum parameter")
+assert_eq(first(Pair.Two(3, "x")), 3, "two uniform parameters")
+assert_eq(get(Box.Held(9)), 9, "alias over a parameterised enum")
+print("✓ enum-uniform-params ok")
+NY
+}

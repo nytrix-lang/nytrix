@@ -132,6 +132,8 @@ typedef enum {
   NYR_MACH_VA_ARG,
   /* Packed logical i64 shift right by an immediate (V256_I64 only). */
   NYR_MACH_VSHR,
+  /* POPCNT of a value already masked to 32 bits. */
+  NYR_MACH_POPCOUNT64,
 } nyr_mach_opcode_t;
 
 typedef enum {

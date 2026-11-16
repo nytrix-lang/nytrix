@@ -1,0 +1,18 @@
+shape enum_payload_function_negative {
+  family "typing/proofs"
+  generator "error"
+  features [error typing dependent enum negative]
+  template ny-compile-fail
+  flags_matrix "--native-only"
+  expect compile_fail
+  expect_message "enum payload fields must be data types"
+  source ny <<'NY'
+use core
+
+;; A function-typed payload would put the family in a negative position, which
+;; the positivity rule forbids; the diagnostic must name the reason, not fall
+;; through to a generic payload parse error.
+enum Bad { Mk(fn(Bad) int) }
+print(1)
+NY
+}

@@ -1091,6 +1091,10 @@ fn _gl_blend_factor(int code) int {
    if code == 3 { return GL_ONE_MINUS_SRC_ALPHA }
    if code == 4 { return 0x0304 }
    if code == 5 { return 0x0305 }
+   if code == 6 { return 0x0306 }
+   if code == 7 { return 0x0307 }
+   if code == 8 { return 0x0300 }
+   if code == 9 { return 0x0301 }
    0
 }
 
@@ -1103,7 +1107,9 @@ fn set_blend_mode(int op, int fsrc=1, int fdst=3) bool {
    }
    def int fs = _gl_blend_factor(fsrc)
    def int fd = _gl_blend_factor(fdst)
-   if _has("glBlendFuncSeparate") { _ny_glBlendFuncSeparate(fs, fd, fs, fd) }
+   ;; Operator 11 (set_blend_factors) blends color only and keeps the alpha.
+   if op == 11 && _has("glBlendFuncSeparate") { _ny_glBlendFuncSeparate(fs, fd, 0, GL_ONE) }
+   elif _has("glBlendFuncSeparate") { _ny_glBlendFuncSeparate(fs, fd, fs, fd) }
    else { _ny_glBlendFunc(fs, fd) }
    true
 }

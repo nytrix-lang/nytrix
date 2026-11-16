@@ -1,0 +1,17 @@
+shape universe_type_type_negative {
+  family "typing/dependent"
+  generator "error"
+  features [error typing dependent negative universe]
+  template ny-compile-fail
+  flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
+  expect compile_fail
+  expect_message "universe level too low"
+  source ny <<'NY'
+use core
+
+;; `Type 0` may not inhabit `Type 0`: that is the `Type : Type` paradox the
+;; level rule exists to reject.
+def Type 0 Self = Type 0
+print(1)
+NY
+}

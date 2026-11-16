@@ -7550,6 +7550,17 @@ static fun_sig *ny_purity_resolve_memcall_sig(codegen_t *cg, expr_memcall_t *mc,
   }
   const char *module_name = resolve_import_alias(cg, target_name);
   bool module_like = module_name != NULL;
+  /* Import aliases are not bound in the codegen tables yet while effects
+   * are inferred; resolve `alias.fn` through the use statements, or a bare
+   * leaf fallback below picks any loaded module's `fn` (m.detach became the
+   * thread-detach in core.os). */
+  char alias_module[1024];
+  if (!module_name &&
+      ny_resolve_module_expr_path(cg, NULL, 0, mc->target, alias_module,
+                                  sizeof(alias_module))) {
+    module_name = alias_module;
+    module_like = true;
+  }
   if (!module_name)
     module_name = target_name;
   if (!module_like) {

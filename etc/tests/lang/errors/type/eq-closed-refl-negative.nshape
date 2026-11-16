@@ -1,0 +1,17 @@
+shape eq_closed_refl_negative {
+  family "typing/proofs"
+  generator "error"
+  features [error typing proof negative]
+  template ny-compile-fail
+  flags_matrix "--native-only"
+  expect compile_fail
+  expect_message "proof obligation failed"
+  source ny <<'NY'
+use core
+
+;; A false closed equation must not become evidence: there is no rewrite rule
+;; that could make 2 == 3 hold, so the obligation fails closed.
+def proof bad = prove(2 == 3)
+print(1)
+NY
+}

@@ -472,6 +472,8 @@ static void dump_stmt(dump_context_t *ctx, const stmt_t *s,
     STMT(s->as.tr.handler, "handler");
     break;
   case NY_S_FUNC:
+    for (size_t i = 0; i < s->as.fn.type_params.len; ++i)
+      dump_named(ctx, "type-parameter", s->as.fn.type_params.data[i]);
     dump_named(ctx, "return", s->as.fn.return_type);
     dump_semantic(ctx, &s->as.fn.return_semantic);
     dump_params(c, &s->as.fn.params);
