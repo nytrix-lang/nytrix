@@ -6,6 +6,12 @@
 #include "base/loader.h"
 #include "code/lang/ny/semantics/ownership.h"
 
+#include "base/strbuf.h"
+static char *hm_proof_compact(const char *text);
+static char *hm_proof_subst_args(ny_hm_state_t *hm, stmt_t *fn,
+                                 const char *type_text, ny_call_arg_list *args,
+                                 size_t arg_offset, size_t limit);
+
 static char *hm_arena_strdup(ny_hm_state_t *hm, const char *s) {
   if (!s)
     s = "";
@@ -1036,10 +1042,22 @@ static bool hm_unify(ny_hm_state_t *hm, ny_hm_type_t *want, ny_hm_type_t *got,
    */
   if (want->kind == NY_HM_NAME && got->kind == NY_HM_NAME &&
       strncmp(want->name ? want->name : "", "proof<", 6) == 0 &&
-      strncmp(got->name ? got->name : "", "proof<", 6) == 0 &&
-      strcmp(want->name, got->name) != 0 &&
-      ny_proof_proposition_shape_matches(want->name, got->name))
-    return true;
+      strncmp(got->name ? got->name : "", "proof<", 6) == 0) {
+    /*
+     * Proof propositions match exactly (up to printer spacing).  Call sites
+     * instantiate the callee's binders with the actual argument terms first
+     * (hm_proof_subst_args), so renaming tolerance is no longer needed; it
+     * let `proof<a < 10>` stand for `proof<c < 10>`.
+     */
+    char *w = hm_proof_compact(want->name), *g = hm_proof_compact(got->name);
+    bool same = w && g && strcmp(w, g) == 0;
+    free(w);
+    free(g);
+    if (same)
+      return true;
+    hm_unify_diag(hm, tok, "proof-proposition-mismatch", context, want, got);
+    return false;
+  }
   if (hm_is_name(got, "nil")) {
     if (want->kind == NY_HM_NAME && strcmp(want->name, "nil") == 0)
       return true;
@@ -4795,6 +4813,25 @@ static ny_hm_type_t *hm_parse_type_name(ny_hm_state_t *hm, const char *raw,
   while (*raw == ' ' || *raw == '\t')
     raw++;
   /*
+   * An indexed proof type is one atomic name: its canonical proposition may
+   * contain `<`/`>` operators (`proof<binary:<(name:a,int:10)>`), which the
+   * generic-argument parser below would split, collapsing every such
+   * proposition to the same mangled `proof<binary:<>>`.
+   */
+  if (strncmp(raw, "proof<", 6) == 0) {
+    size_t rl = strlen(raw);
+    while (rl > 0 && (raw[rl - 1] == ' ' || raw[rl - 1] == '\t'))
+      --rl;
+    if (rl > 7 && raw[rl - 1] == '>') {
+      char *exact = ny_strndup(raw, rl);
+      char *compact = hm_proof_compact(exact);
+      ny_hm_type_t *t = hm_name(hm, compact ? compact : exact);
+      free(compact);
+      free(exact);
+      return t;
+    }
+  }
+  /*
    * A dependent pair is represented by its erased two-element tuple shape.
    * The `exists` annotation itself is retained on the binding, where the
    * construction check and projections consult it for the index and payload
@@ -6060,6 +6097,16 @@ static ny_hm_type_t *hm_subst_return_indices(ny_hm_state_t *hm, stmt_t *fn,
                                              const char *self_name) {
   if (!fn || fn->kind != NY_S_FUNC || !args || !base)
     return base;
+  if (fn->as.fn.return_type &&
+      strncmp(fn->as.fn.return_type, "proof<", 6) == 0) {
+    char *inst = hm_proof_subst_args(hm, fn, fn->as.fn.return_type, args,
+                                     arg_offset, fn->as.fn.params.len);
+    if (inst) {
+      ny_hm_type_t *t = hm_name(hm, inst);
+      free(inst);
+      return t;
+    }
+  }
   char *name = hm_type_string(base);
   if (!name || !strchr(name, '<')) {
     free(name);
@@ -6598,48 +6645,105 @@ static bool hm_type_text_mentions_index(const char *text, const char *name) {
   return false;
 }
 
-/*
- * Replace each canonical `name:<param>` token of a proof proposition with
- * `int:<value>`; a token boundary is `(`, `,`, `)`, space or `>`.  Returns
- * NULL when nothing changed.
- */
-static char *hm_subst_proof_name(const char *text, const char *param,
-                                 int64_t value) {
-  if (!text || !param || !*param)
+/* Drop the ", " spacing some printers emit so canonical texts compare. */
+static char *hm_proof_compact(const char *text) {
+  if (!text)
     return NULL;
-  char needle[256];
-  int nlen = snprintf(needle, sizeof(needle), "name:%s", param);
-  if (nlen <= 0 || (size_t)nlen >= sizeof(needle))
-    return NULL;
-  char repl[48];
-  int rlen = snprintf(repl, sizeof(repl), "int:%lld", (long long)value);
-  size_t tlen = strlen(text);
-  char *out = malloc(tlen * 2 + 64 + tlen / (size_t)nlen * (size_t)rlen);
+  size_t len = strlen(text);
+  char *out = malloc(len + 1);
   if (!out)
     return NULL;
   size_t o = 0;
-  bool changed = false;
-  for (size_t i = 0; i < tlen;) {
-    bool start_ok = i == 0 || text[i - 1] == '(' || text[i - 1] == ',' ||
-                    text[i - 1] == ' ' || text[i - 1] == '<';
-    if (start_ok && strncmp(text + i, needle, (size_t)nlen) == 0) {
-      char after = text[i + (size_t)nlen];
-      if (after == ',' || after == ')' || after == ' ' || after == '>' ||
-          after == '\0') {
-        memcpy(out + o, repl, (size_t)rlen);
-        o += (size_t)rlen;
-        i += (size_t)nlen;
-        changed = true;
-        continue;
-      }
-    }
-    out[o++] = text[i++];
+  bool in_str = false;
+  for (size_t i = 0; i < len; ++i) {
+    if (text[i] == '"')
+      in_str = !in_str;
+    if (!in_str && text[i] == ' ' && i > 0 && text[i - 1] == ',')
+      continue;
+    out[o++] = text[i];
   }
   out[o] = '\0';
-  if (!changed) {
-    free(out);
+  return out;
+}
+
+/*
+ * Pi instantiation for proof types: replace every `name:<param>` of the
+ * callee's parameters [0, limit) by the canonical term of the actual
+ * argument, simultaneously, then re-normalize.  Arguments whose term is
+ * opaque (`ast:`) are not substituted, so the proposition keeps the
+ * parameter name and fails the exact match below instead of passing.
+ */
+static char *hm_proof_subst_args(ny_hm_state_t *hm, stmt_t *fn,
+                                 const char *type_text, ny_call_arg_list *args,
+                                 size_t arg_offset, size_t limit) {
+  if (!fn || fn->kind != NY_S_FUNC || !type_text || !args ||
+      strncmp(type_text, "proof<", 6) != 0)
     return NULL;
+  ny_param_list *params = &fn->as.fn.params;
+  if (limit > params->len)
+    limit = params->len;
+  char *terms[64] = {0};
+  bool any = false;
+  for (size_t j = arg_offset; j < limit && j < 64; ++j) {
+    if (j - arg_offset >= args->len || !params->data[j].name)
+      continue;
+    expr_t *arg = args->data[j - arg_offset].val;
+    char *full = arg ? ny_proof_type_from_expr(arg) : NULL;
+    size_t fl = full ? strlen(full) : 0;
+    if (full && fl > 7 && strncmp(full, "proof<", 6) == 0 &&
+        full[fl - 1] == '>' && !strstr(full, "ast:")) {
+      terms[j] = ny_strndup(full + 6, fl - 7);
+      any = terms[j] != NULL;
+    }
+    free(full);
   }
+  char *text = any ? hm_proof_compact(type_text) : NULL;
+  char *out = NULL;
+  if (text) {
+    ny_strbuf_t b;
+    ny_strbuf_init(&b);
+    bool changed = false;
+    for (size_t i = 0; text[i];) {
+      bool start_ok = i == 0 || text[i - 1] == '(' || text[i - 1] == ',' ||
+                      text[i - 1] == '<';
+      if (start_ok && strncmp(text + i, "name:", 5) == 0) {
+        size_t n = 5;
+        while (text[i + n] && text[i + n] != ',' && text[i + n] != ')' &&
+               text[i + n] != '>')
+          ++n;
+        const char *term = NULL;
+        for (size_t j = arg_offset; j < limit && j < 64 && !term; ++j)
+          if (terms[j] && strlen(params->data[j].name) == n - 5 &&
+              strncmp(text + i + 5, params->data[j].name, n - 5) == 0)
+            term = terms[j];
+        if (term) {
+          ny_strbuf_append(&b, term);
+          changed = true;
+        } else {
+          ny_strbuf_append_n(&b, text + i, n);
+        }
+        i += n;
+        continue;
+      }
+      ny_strbuf_append_n(&b, text + i, 1);
+      ++i;
+    }
+    char *subst = ny_strbuf_take(&b);
+    if (changed && subst) {
+      size_t sl = strlen(subst);
+      char *inner = sl > 7 ? ny_strndup(subst + 6, sl - 7) : NULL;
+      expr_t *prop =
+          inner ? ny_proof_expr_from_canonical(&hm->arena, inner) : NULL;
+      out = prop ? ny_proof_type_from_expr(prop) : NULL;
+      if (!out)
+        out = ny_strdup(subst);
+      free(inner);
+    }
+    free(subst);
+  }
+  free(text);
+  for (size_t j = 0; j < 64; ++j)
+    free(terms[j]);
   return out;
 }
 
@@ -6655,6 +6759,9 @@ static char *hm_subst_param_type_text(ny_hm_state_t *hm, stmt_t *fn,
   param_t *target = &params->data[param_index];
   if (!target->type)
     return NULL;
+  if (strncmp(target->type, "proof<", 6) == 0)
+    return hm_proof_subst_args(hm, fn, target->type, args, arg_offset,
+                               param_index);
   char *text = ny_strdup(target->type);
   if (!text)
     return NULL;
@@ -6675,33 +6782,6 @@ static char *hm_subst_param_type_text(ny_hm_state_t *hm, stmt_t *fn,
      * ordinary parameter name is not rewritten where it appears as a type
      * constructor or an unrelated identifier.
      */
-    if (strncmp(text, "proof<", 6) == 0) {
-      /*
-       * A proof parameter's proposition is a Pi body over the earlier value
-       * parameters: instantiate `name:x` with the literal argument so
-       * `need(3, prove(3 == 3))` meets `fn need(int x, proof<x == 3> p)`.
-       */
-      char *next = hm_subst_proof_name(text, prev->name, arg->as.literal.as.i);
-      if (next) {
-        free(text);
-        text = next;
-        changed = true;
-        /* Re-normalize so folded literals compare like a prove(...) witness. */
-        size_t tl = strlen(text);
-        if (tl > 7 && text[tl - 1] == '>') {
-          char *inner = ny_strndup(text + 6, tl - 7);
-          expr_t *prop =
-              inner ? ny_proof_expr_from_canonical(&hm->arena, inner) : NULL;
-          char *normal = prop ? ny_proof_type_from_expr(prop) : NULL;
-          if (normal) {
-            free(text);
-            text = normal;
-          }
-          free(inner);
-        }
-      }
-      continue;
-    }
     if (!hm_type_text_mentions_index(text, prev->name))
       continue;
     char *next =
@@ -6797,6 +6877,50 @@ static ny_hm_type_t *hm_call_named(ny_hm_state_t *hm, ny_hm_env_list *env,
                                      "unwrap_or payload");
       return hm_type_is_dynamic(ok_t) ? fallback_t : ok_t;
     }
+  }
+  if (!target && leaf && ny_proof_rule_name(leaf) && args) {
+    /*
+     * Equality kernel rules: the result proposition is computed from the
+     * argument propositions, so these are typed here rather than by a
+     * fixed signature.  eq_cong's last argument names the function.
+     */
+    const char *props[2] = {NULL, NULL};
+    char *owned[2] = {NULL, NULL};
+    size_t nproofs = 0;
+    const char *fn_name = NULL;
+    bool cong = strcmp(leaf, "eq_cong") == 0;
+    for (size_t i = 0; i < args->len; ++i) {
+      expr_t *arg = args->data[i].val;
+      if (cong && i == args->len - 1 && arg && arg->kind == NY_E_IDENT) {
+        fn_name = arg->as.ident.name;
+        continue;
+      }
+      ny_hm_type_t *at = hm_prune(hm_infer_expr(hm, env, arg, self_name));
+      if (nproofs < 2) {
+        owned[nproofs] = hm_type_string(at);
+        props[nproofs] = owned[nproofs];
+      }
+      ++nproofs;
+    }
+    const char *reason = NULL;
+    char *result = nproofs <= 2 ? ny_proof_rule_result(leaf, props, nproofs,
+                                                      fn_name, &reason)
+                                : NULL;
+    free(owned[0]);
+    free(owned[1]);
+    if (!result) {
+      tp_add_diag_ex(hm->ctx, tok, "hm", "proof-rule-misuse", leaf, "proof",
+                     NULL, NULL,
+                     "equality rules take proofs of equations and compute "
+                     "the proposition they establish",
+                     "pass proof<a == b> evidence built by prove/refl or "
+                     "another rule",
+                     "%s: %s", leaf, reason ? reason : "invalid arguments");
+      return hm_name(hm, "proof");
+    }
+    ny_hm_type_t *out = hm_name(hm, result);
+    free(result);
+    return out;
   }
   ny_hm_type_t *builtin = hm_builtin_call_type(hm, name, args);
 
@@ -7438,6 +7562,18 @@ static ny_hm_type_t *hm_infer_expr_impl(ny_hm_state_t *hm, ny_hm_env_list *env,
                      "cannot capture runtime mutable variable '%s' in "
                      "compile-time evaluation",
                      e->as.ident.name);
+    }
+    if (e->as.ident.name && e->as.ident.name[0] == '?') {
+      for (size_t h = 0; hm && h < hm->hole_count; ++h)
+        if (hm->holes[h].expr == e)
+          return hm->holes[h].type;
+      ny_hm_type_t *hole = hm_var(hm);
+      if (hm && hm->hole_count < sizeof(hm->holes) / sizeof(hm->holes[0])) {
+        hm->holes[hm->hole_count].expr = e;
+        hm->holes[hm->hole_count].type = hole;
+        ++hm->hole_count;
+      }
+      return hole;
     }
     ny_hm_type_t *t =
         hm_env_get_ctx(env, e->as.ident.name, e->as.ident.syntax_ctx);
@@ -10304,6 +10440,30 @@ static void hm_infer_function_scheme(ny_hm_state_t *hm, ny_hm_scheme_t *scheme,
     vec_free(&env);
 }
 
+/*
+ * Report every named hole with the type inference settled on.  A hole is a
+ * goal display, never a value: reporting it as an error keeps programs with
+ * holes from running.
+ */
+static void hm_report_holes(ny_hm_state_t *hm) {
+  for (size_t h = 0; hm && h < hm->hole_count; ++h) {
+    const expr_t *e = hm->holes[h].expr;
+    char *ty = hm_type_string(hm_prune(hm->holes[h].type));
+    /* An unsolved type variable prints as 'mN: nothing constrained it. */
+    const char *shown = ty && ty[0] && ty[0] != '\'' ? ty : NULL;
+    tp_add_diag_ex(hm->ctx, e->tok, "hm", "hm-unsolved-hole", "hole",
+                   shown ? shown : "unconstrained", NULL, NULL,
+                   "a named hole is a placeholder whose type inference "
+                   "reports; it cannot be compiled or run",
+                   "replace the hole with an expression of the reported type",
+                   "unsolved hole '%s' : %s", e->as.ident.name,
+                   shown ? shown : "unconstrained");
+    free(ty);
+  }
+  if (hm)
+    hm->hole_count = 0;
+}
+
 static void hm_run(ny_hm_state_t *hm, ny_tp_ctx_t *ctx) {
   bool trace_timing = ny_env_enabled("NYTRIX_TRACE_TYPE_PIPELINE_TIMING");
   ny_tick_t stage_start = trace_timing ? ny_ticks_now() : 0;
@@ -10379,6 +10539,7 @@ static void hm_run(ny_hm_state_t *hm, ny_tp_ctx_t *ctx) {
             hm->schemes.len, first_pass_function_inferences);
   vec_free(&function_env_scratch);
   vec_free(&env);
+  hm_report_holes(hm);
   if (hm->debug_std_default_constraints_suppressed > 0) {
     char summary[192];
     snprintf(summary, sizeof(summary),
@@ -10525,6 +10686,7 @@ static void hm_run_reachable(ny_hm_state_t *hm, ny_tp_ctx_t *ctx,
   if (ctx && ctx->collect_semantic_artifact_facts)
     hm_finalize_expr_type_facts(hm);
   vec_free(&env);
+  hm_report_holes(hm);
 }
 
 static void hm_dispose(ny_hm_state_t *hm) {

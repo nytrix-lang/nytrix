@@ -560,6 +560,40 @@ static inline int rt_addr_probe_os(uintptr_t p, size_t n) {
 
 bool rt_heap_ptr_registry_has(uintptr_t value);
 bool rt_gc_owns_pointer(uintptr_t value);
+
+/*
+ * Heap collector (memory.c). Lists, dictionaries and strings allocated by the
+ * thread that drives the collector are recorded as "young"; a collection at
+ * a frame boundary frees the ones nothing refers to any more.
+ */
+#define RT_FC_KIND_LIST 1u
+#define RT_FC_KIND_DICT 2u
+#define RT_FC_KIND_MANAGED 3u
+extern __thread int g_rt_fc_tracking;
+void rt_fc_track_slow(uintptr_t ptr, uint32_t kind, size_t bytes);
+static inline void rt_fc_track(uintptr_t ptr, uint32_t kind, size_t bytes) {
+  if (__builtin_expect(g_rt_fc_tracking, 0))
+    rt_fc_track_slow(ptr, kind, bytes);
+}
+void rt_fc_thread_enter(void);
+void rt_fc_thread_exit(void);
+int rt_fc_list_range(uintptr_t data, uintptr_t *start, uintptr_t *end);
+void rt_fc_list_free(uintptr_t data);
+uintptr_t rt_fc_list_forward_target(uintptr_t data);
+int rt_fc_dict_ranges(uintptr_t payload, uintptr_t out[4]);
+void rt_fc_dict_free(uintptr_t payload);
+size_t rt_fc_core_excludes(uintptr_t (*out)[2], size_t cap);
+void rt_fc_intern_table(uintptr_t *start, uintptr_t *end);
+void rt_fc_str_hash_cache(uintptr_t *start, uintptr_t *end);
+/*
+ * Storage for collectable objects. Once the collector records, blocks come
+ * from its own zeroed pools (NULL: use the C allocator). rt_fc_block_free
+ * takes a block from either source.
+ */
+void *rt_fc_block_alloc(size_t bytes);
+void rt_fc_block_free(void *ptr, size_t bytes);
+int64_t rt_heap_collect(int64_t mode);
+int64_t rt_heap_collect_raw(int64_t mode);
 extern int64_t rt_cstr_to_str(int64_t p);
 extern int64_t rt_magic_tbuf_elem_size(int64_t v);
 typedef enum {
@@ -581,6 +615,28 @@ static __thread uintptr_t rt_non_str_cache_keys[RT_NON_STR_CACHE_SIZE];
 extern __thread uintptr_t rt_float_cache_keys[RT_FLOAT_CACHE_SIZE];
 extern __thread uintptr_t rt_non_float_cache_keys[RT_FLOAT_CACHE_SIZE];
 bool rt_float_registry_has(uintptr_t value);
+
+/*
+ * The caches above exist once per translation unit and per thread, and they
+ * hold object addresses without owning them. Each unit tells the heap
+ * collector where its copies are so they are not mistaken for references.
+ */
+#if defined(__linux__) && defined(__GNUC__)
+/* Weak: tools that link single runtime units have no collector. */
+__attribute__((weak)) void
+rt_fc_register_cache_reporter(void (*report)(void (*add)(uintptr_t,
+                                                         uintptr_t)));
+static void rt_fc_report_unit_caches(void (*add)(uintptr_t, uintptr_t)) {
+  add((uintptr_t)rt_const_str_cache_keys,
+      (uintptr_t)rt_const_str_cache_keys + sizeof(rt_const_str_cache_keys));
+  add((uintptr_t)rt_non_str_cache_keys,
+      (uintptr_t)rt_non_str_cache_keys + sizeof(rt_non_str_cache_keys));
+}
+__attribute__((constructor)) static void rt_fc_register_unit_caches(void) {
+  if (rt_fc_register_cache_reporter)
+    rt_fc_register_cache_reporter(rt_fc_report_unit_caches);
+}
+#endif
 
 static inline uintptr_t rt_const_str_cache_slot(uintptr_t p) {
   return ((p >> 4) ^ (p >> 12) ^ (p >> 21)) & RT_CONST_STR_CACHE_MASK;

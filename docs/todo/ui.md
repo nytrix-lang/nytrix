@@ -6,6 +6,7 @@ check has passed. State on 2026-11-16 (private snapshot `acdf17fa` plus the
 handoff commit): `etc/tests/code/probes` + `etc/tests/lang` run 1686 fixtures
 with only six pre-existing failures (`comptime-contracts`, `doc-meta`,
 `doc-rank`, `terminal:test_term_quit_key`, two lexer-invalid-byte fixtures);
+those are fixed since, and the later run is 1724/1724 green;
 `lang/modules` + `code/probes/ui` (173) all pass. Loaded glTF scenes draw
 textured on Vulkan and GL over the default HDR sky. Compositor checks run on
 headless Weston with Vulkan and GL. Two input paths exist and both matter:

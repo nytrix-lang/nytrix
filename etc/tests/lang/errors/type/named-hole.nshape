@@ -1,0 +1,30 @@
+shape named_hole_reports_goal_type {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "hole", "elaboration"]
+  template ny-compile-fail
+  flags_matrix "--native-only; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_fail
+  expect_message "unsolved hole '?todo' : int"
+  source ny <<'NY'
+use core
+;; A named hole is a typed placeholder: inference reports the goal it must
+;; fill, and the program never runs.
+fn area(int w, int h) int { w * ?todo }
+print(area(2, 3))
+NY
+}
+
+shape named_hole_unconstrained {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "hole", "elaboration"]
+  template ny-compile-fail
+  flags_matrix "--native-only"
+  expect compile_fail
+  expect_message "unsolved hole '?free' : unconstrained"
+  source ny <<'NY'
+use core
+def x = ?free
+NY
+}

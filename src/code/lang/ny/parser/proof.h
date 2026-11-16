@@ -33,4 +33,11 @@ bool ny_proof_canon_range(const char *s, ny_proof_name_range_fn env, void *ctx,
 bool ny_proof_canon_split_binary(const char *s, char *opbuf, size_t opcap,
                                  char **out_l, char **out_r);
 
+/* Equality kernel rules (eq_sym, eq_trans, eq_cong, transport): compute the
+ * result proof type from the argument proof types; NULL + reason on misuse. */
+char *ny_proof_rule_result(const char *rule, const char *const *proofs,
+                           size_t proof_count, const char *fn_name,
+                           const char **reason);
+bool ny_proof_rule_name(const char *leaf);
+
 #endif

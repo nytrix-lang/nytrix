@@ -1148,6 +1148,9 @@ RT_DEF(
     "Returns allocator calls observed while a function and its children ran.")
 RT_DEF("__gc_stat", rt_gc_stat, 1, "fn __gc_stat(metric) int",
        "Returns a managed heap/collector statistic by stable metric index.")
+RT_DEF("__heap_collect", rt_heap_collect, 1, "fn __heap_collect(mode) int",
+       "Frees unreachable lists, dicts and strings at a frame boundary "
+       "(0 = when due, 1 = now, 2 = full); returns the bytes freed.")
 RT_DEF("__gc_tag_bytes", rt_gc_tag_bytes, 1, "fn __gc_tag_bytes(tag) int",
        "Returns allocated managed heap payload bytes for a runtime tag.")
 RT_DEF("__runtime_alloc_count", rt_runtime_alloc_count, 0,

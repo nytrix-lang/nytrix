@@ -62,3 +62,62 @@ shape fn_type_param_unterminated_negative {
 fn id<A B>(int x) int { x }
 NY
 }
+
+shape fn_implicit_type_binder {
+  family "runtime/compiler"
+  generator "embedded"
+  features [ny generics implicit binders]
+  template ny-test-case
+  flags_matrix "--native-only; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  expect_stdout "IMPLICIT-OK"
+  source ny <<'NY'
+use core
+;; `{Type A}` is the implicit-binder spelling of `<A>`: inferred per call,
+;; never passed, and it may follow an explicit `<...>` list.
+fn id{Type A}(A x) A { x }
+fn first{Type A, B}(A a, B b) A { a }
+fn both<A>{Type B}(A a, B b) A { a }
+assert(id(3) == 3 && id("s") == "s", "implicit binder instantiates per call")
+assert(first(7, "x") == 7 && both(4, 5) == 4, "mixed binder lists")
+print("IMPLICIT-OK")
+NY
+}
+
+shape fn_implicit_type_binder_inconsistent_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features [ny generics implicit binders negative]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "instantiated inconsistently"
+  source ny <<'NY'
+use core
+fn same{Type A}(A a, A b) A { a }
+same(1, "s")
+NY
+}
+
+shape fn_implicit_value_binder_negative {
+  family "compiler-errors/frontend"
+  generator "error"
+  features [ny generics implicit binders parse negative]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "implicit value binders are not supported"
+  source ny <<'NY'
+fn bad{int n}(int x) int { x }
+NY
+}
+
+shape fn_implicit_empty_binder_negative {
+  family "compiler-errors/frontend"
+  generator "error"
+  features [ny generics implicit binders parse negative]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "empty implicit binder list"
+  source ny <<'NY'
+fn bad{}(int x) int { x }
+NY
+}

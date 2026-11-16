@@ -4313,3 +4313,48 @@ on. Reverted; radix-tree stays at 3.15-3.35x NYR/LLVM.
 Verbose diagnostics are unusable for this investigation: `-vvvv` segfaults
 (exit 139) and `-vvvvvv` aborts (exit 134) partway through codegen on this
 fixture, so the deep `X64_LOOP_HOME` records never reach the terminal.
+
+## x86-64 encoder correctness and instruction counts (2026-11-16)
+
+Three encoder changes, measured by **user-space instructions retired**
+(`perf stat -e instructions:u`) on the 110-fixture bench corpus, old compiler
+= the tree before this pass, new = after; checksums match on every row.
+Wall-clock minima were not used as evidence here: allocation-heavy fixtures
+(`list`, `records`, `stringsearch`, `spectral`) are bimodal run to run on this
+host (the same `list` binary measured 2.2 ms and 4.2 ms with identical page
+faults), so a one-shot timing table showed both large wins and 2.5×
+"regressions" that the instruction counts do not support.
+
+- **Spill-home pools** (`object/regalloc.h`): spill-slot coloring let a
+  block-local resident value and a spilled value share one home. The
+  sticky-RAX tag is keyed by home offset, so a later read of the resident
+  value reused the dead neighbour left in `%rax`; `x64_loop_recolor` returned
+  `read0 ^ read7` instead of the XOR of all eight. The two kinds are now
+  colored in separate pools. Cost: `qrsyndrome` +2.1% instructions (some of
+  the removed sharing was a legitimate reuse); no other row moved by more
+  than 0.5% because of it.
+- **Dead literal publish** (`object64.c`): an uncolored 64-bit literal whose
+  only consumer is the next load's address was published through `%rax` and
+  then rematerialized by the load (`movabs rax, A; movabs rax, A`). The
+  publish is skipped for that pattern only; other consumers may read the
+  home and keep it. Excluding literals from the eviction recolor was tried
+  and rejected: `intops` gained 1.9% instructions because a recolored
+  literal is cheaper than per-use rematerialization.
+- **Runtime ABI table order** (`lower/lower.c`): the binary-searched table had
+  three misplaced entries, so nine symbols (`rt_byte_index_checked`,
+  `rt_str_chr*`, `rt_safe_heap_*`, …) never found their declared flags. No
+  instruction-count change on the corpus.
+
+| fixture | old instr | new instr | new/old |
+| --- | ---: | ---: | ---: |
+| vector | 2,452,994 | 2,323,930 | 0.947 |
+| splay | 28,447,031 | 27,180,822 | 0.956 |
+| licm-math | 25,617,197 | 24,616,539 | 0.961 |
+| loop | 6,618,734 | 6,366,897 | 0.962 |
+| word-frequency-scan | 23,150,557 | 22,502,305 | 0.972 |
+| knight | 27,455,645 | 27,045,739 | 0.985 |
+| qrsyndrome | 77,998,123 | 79,637,155 | 1.021 |
+
+Geomean over the 107 rows both compilers build: 0.9975. `deltablue`,
+`mont64` and `currying` failed to build on the old compiler and build and
+match checksums on the new one (the f64 callable-ID fix covers `currying`).

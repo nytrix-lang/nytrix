@@ -136,17 +136,39 @@ static size_t rt_managed_ptr_slot(uintptr_t value) {
   return (size_t)x & RT_MANAGED_PTR_TABLE_MASK;
 }
 
+/*
+ * Writers (register, unregister) serialize on this lock; lookups stay
+ * lock-free. With one writer at a time a released slot can be returned to
+ * "empty" whenever the slot after it is empty, so tombstones do not pile up:
+ * a program that allocates and frees strings every frame would otherwise
+ * fill the table with them, and every miss would walk the whole table.
+ */
+static atomic_flag rt_managed_ptr_lock = ATOMIC_FLAG_INIT;
+
+static inline void rt_managed_ptr_writer_lock(void) {
+  while (atomic_flag_test_and_set_explicit(&rt_managed_ptr_lock,
+                                           memory_order_acquire)) {
+  }
+}
+
+static inline void rt_managed_ptr_writer_unlock(void) {
+  atomic_flag_clear_explicit(&rt_managed_ptr_lock, memory_order_release);
+}
+
 static void rt_managed_ptr_register(uintptr_t value) {
   if (!value || value == RT_MANAGED_PTR_TOMBSTONE)
     return;
   size_t start = rt_managed_ptr_slot(value);
   size_t tombstone = SIZE_MAX;
+  rt_managed_ptr_writer_lock();
   for (size_t probe = 0; probe < RT_MANAGED_PTR_TABLE_SIZE; ++probe) {
     size_t slot = (start + probe) & RT_MANAGED_PTR_TABLE_MASK;
     uintptr_t seen =
-        atomic_load_explicit(&rt_managed_ptr_table[slot], memory_order_acquire);
-    if (seen == value)
+        atomic_load_explicit(&rt_managed_ptr_table[slot], memory_order_relaxed);
+    if (seen == value) {
+      rt_managed_ptr_writer_unlock();
       return;
+    }
     if (seen == RT_MANAGED_PTR_TOMBSTONE && tombstone == SIZE_MAX)
       tombstone = slot;
     /*
@@ -155,56 +177,56 @@ static void rt_managed_ptr_register(uintptr_t value) {
      * walked every tombstone left by earlier frees (97% of the time in a
      * defer-heavy loop).
      */
-    if (tombstone != SIZE_MAX && probe >= RT_MANAGED_PTR_REUSE_WINDOW) {
-      uintptr_t reusable = RT_MANAGED_PTR_TOMBSTONE;
-      if (atomic_compare_exchange_strong_explicit(
-              &rt_managed_ptr_table[tombstone], &reusable, value,
-              memory_order_release, memory_order_relaxed))
-        return;
-      probe = (size_t)-1;
-      tombstone = SIZE_MAX;
-      continue;
-    }
-    if (!seen) {
+    if (!seen || (tombstone != SIZE_MAX && probe >= RT_MANAGED_PTR_REUSE_WINDOW)) {
       size_t target = tombstone == SIZE_MAX ? slot : tombstone;
-      uintptr_t expected = tombstone == SIZE_MAX ? 0 : RT_MANAGED_PTR_TOMBSTONE;
-      if (atomic_compare_exchange_strong_explicit(
-              &rt_managed_ptr_table[target], &expected, value,
-              memory_order_release, memory_order_relaxed))
-        return;
-      probe = (size_t)-1;
-      tombstone = SIZE_MAX;
+      atomic_store_explicit(&rt_managed_ptr_table[target], value,
+                            memory_order_release);
+      rt_managed_ptr_writer_unlock();
+      return;
     }
   }
-  if (tombstone != SIZE_MAX) {
-    uintptr_t expected = RT_MANAGED_PTR_TOMBSTONE;
-    (void)atomic_compare_exchange_strong_explicit(
-        &rt_managed_ptr_table[tombstone], &expected, value,
-        memory_order_release, memory_order_relaxed);
-  }
+  if (tombstone != SIZE_MAX)
+    atomic_store_explicit(&rt_managed_ptr_table[tombstone], value,
+                          memory_order_release);
+  rt_managed_ptr_writer_unlock();
 }
 
 static void rt_managed_ptr_unregister(uintptr_t value) {
   if (!value || value == RT_MANAGED_PTR_TOMBSTONE)
     return;
   size_t start = rt_managed_ptr_slot(value);
+  rt_managed_ptr_writer_lock();
   for (size_t probe = 0; probe < RT_MANAGED_PTR_TABLE_SIZE; ++probe) {
     size_t slot = (start + probe) & RT_MANAGED_PTR_TABLE_MASK;
     uintptr_t seen =
-        atomic_load_explicit(&rt_managed_ptr_table[slot], memory_order_acquire);
+        atomic_load_explicit(&rt_managed_ptr_table[slot], memory_order_relaxed);
     if (!seen)
-      return;
-    if (seen == value) {
-      if (atomic_compare_exchange_strong_explicit(
-              &rt_managed_ptr_table[slot], &seen, RT_MANAGED_PTR_TOMBSTONE,
-              memory_order_acq_rel, memory_order_acquire)) {
-        atomic_fetch_add_explicit(&rt_managed_ptr_epoch, 1,
-                                  memory_order_release);
-        return;
+      break;
+    if (seen != value)
+      continue;
+    size_t next = (slot + 1) & RT_MANAGED_PTR_TABLE_MASK;
+    if (atomic_load_explicit(&rt_managed_ptr_table[next],
+                             memory_order_relaxed) != 0) {
+      atomic_store_explicit(&rt_managed_ptr_table[slot],
+                            RT_MANAGED_PTR_TOMBSTONE, memory_order_release);
+    } else {
+      /* Nothing probes past an empty slot: this one, and any run of
+       * tombstones before it, can be empty again. */
+      atomic_store_explicit(&rt_managed_ptr_table[slot], 0,
+                            memory_order_release);
+      size_t prev = (slot - 1) & RT_MANAGED_PTR_TABLE_MASK;
+      while (atomic_load_explicit(&rt_managed_ptr_table[prev],
+                                  memory_order_relaxed) ==
+             RT_MANAGED_PTR_TOMBSTONE) {
+        atomic_store_explicit(&rt_managed_ptr_table[prev], 0,
+                              memory_order_release);
+        prev = (prev - 1) & RT_MANAGED_PTR_TABLE_MASK;
       }
-      probe = (size_t)-1;
     }
+    atomic_fetch_add_explicit(&rt_managed_ptr_epoch, 1, memory_order_release);
+    break;
   }
+  rt_managed_ptr_writer_unlock();
 }
 
 bool rt_heap_ptr_registry_has(uintptr_t value) {
@@ -828,6 +850,7 @@ static int64_t rt_malloc_impl(int64_t size, int zero_fill) {
   rt_map_oracle_add((uintptr_t)p, (size_t)total);
   rt_managed_ptr_register((uintptr_t)res);
   rt_rc_adopt_new(res);
+  rt_fc_track((uintptr_t)res, RT_FC_KIND_MANAGED, total);
   if (mem_trace_enabled() && total > 1024 * 1024) {
     fprintf(stderr, "[mem] large alloc %p (body=%zu, total=%zu)\n",
             (void *)(uintptr_t)res, body, total);
@@ -2146,4 +2169,1293 @@ int64_t rt_atomic_cas64(int64_t addr, int64_t idx, int64_t expected,
              slot, &exp, desired, memory_order_seq_cst, memory_order_seq_cst)
              ? NY_IMM_TRUE
              : NY_IMM_FALSE;
+}
+
+/*
+ * Heap collector.
+ *
+ * Lists, dictionaries and strings have no owner in the language: a function
+ * returns a fresh list, the caller reads four numbers from it and drops it.
+ * Without a collector every such temporary stays allocated, which is harmless
+ * in a batch program and unbounded in a program that draws frames.
+ *
+ * The program calls rt_heap_collect at a point where its own stack is
+ * shallow (the end of a frame). The first call starts recording the objects
+ * the calling thread allocates ("young" objects). A later call frees every
+ * young object that no memory refers to and forgets the rest ("old").
+ *
+ * Reachability is conservative: any aligned word that holds an address
+ * inside a young object, directly or as a tagged integer, keeps it alive. No
+ * compiler support is needed, so the collector is correct for code that keeps
+ * objects in raw buffers, in C structures, or in registers.
+ *
+ * A collection does not read the whole process. Linux records which pages
+ * were written since the last request (soft-dirty bits), and a reference to
+ * a young object can only live on such a page: the object did not exist
+ * when the others were last written. Young objects themselves are skipped
+ * until something else reaches them. Every so often a full collection scans
+ * all writable memory and also reconsiders the old objects.
+ *
+ * Other threads started by the runtime are parked with a signal for the
+ * duration of the scan; their registers are on their stacks while parked.
+ * Platforms without this machinery never start recording and behave as
+ * before.
+ */
+__thread int g_rt_fc_tracking = 0;
+
+#if defined(__linux__) && defined(__GLIBC__) && !NY_WITH_ASAN
+
+#include <malloc.h>
+#include <pthread.h>
+#include <sched.h>
+#include <setjmp.h>
+#include <signal.h>
+#include <time.h>
+#include <ucontext.h>
+
+typedef struct fc_obj {
+  uintptr_t ptr;
+  uint32_t kind;
+  uint32_t mark;
+} fc_obj_t;
+
+typedef struct fc_range {
+  uintptr_t start;
+  uintptr_t end;
+  uint32_t obj;
+} fc_range_t;
+
+/* The memory one candidate owns: one block, or two for a dictionary. */
+typedef struct fc_extent {
+  uintptr_t r[4];
+  uint32_t count;
+} fc_extent_t;
+
+typedef struct fc_buf {
+  void *data;
+  size_t bytes;
+} fc_buf_t;
+
+enum {
+  FC_BUF_YOUNG,
+  FC_BUF_OLD,
+  FC_BUF_CAND,
+  FC_BUF_RANGES,
+  FC_BUF_STACK,
+  FC_BUF_MAPS,
+  FC_BUF_PAGE,
+  FC_BUF_PAGEMAP,
+  FC_BUF_EXTENTS,
+  FC_BUF_SORT,
+  FC_BUF_FILTER,
+  FC_BUF_COUNT
+};
+
+#define FC_PAGE_BATCH 64u
+#define FC_MAX_EXCLUDES 320u
+#define FC_MAX_THREADS 256u
+#define FC_LARGE_OBJECT ((size_t)8 << 20)
+
+static fc_buf_t fc_bufs[FC_BUF_COUNT];
+static size_t fc_young_n, fc_old_n;
+static size_t fc_young_bytes, fc_promoted_bytes;
+static size_t fc_minor_threshold = (size_t)4 << 20;
+static size_t fc_major_threshold = (size_t)48 << 20;
+static int fc_state; /* 0 = not started, 1 = recording, -1 = disabled */
+static int fc_soft_dirty; /* 0 = untested, 1 = usable, -1 = unavailable */
+static int fc_in_collect;
+static uint64_t fc_stat_collections, fc_stat_major, fc_stat_freed_objects,
+    fc_stat_freed_bytes, fc_stat_last_ns, fc_stat_max_ns;
+static size_t fc_dbg_pages, fc_dbg_words;
+static int fc_trace_level;
+static const uintptr_t *fc_dbg_word;
+static int fc_dbg_shown;
+static int fc_dbg_fwd_shown;
+static int fc_dbg_str_shown;
+static size_t fc_dbg_freed_n[4], fc_dbg_freed_b[4], fc_dbg_young_kind[4];
+static uint64_t fc_dbg_t[6];
+static uintptr_t fc_stack_low; /* lowest address of the recording thread's stack */
+static uintptr_t fc_excludes[FC_MAX_EXCLUDES][2];
+static size_t fc_exclude_n;
+
+static pthread_mutex_t fc_threads_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_t fc_threads[FC_MAX_THREADS];
+static size_t fc_thread_n;
+static int fc_thread_overflow;
+static _Atomic int fc_parking;
+static _Atomic int fc_parked;
+static int fc_signal;
+
+static bool fc_buf_reserve(int which, size_t bytes) {
+  fc_buf_t *b = &fc_bufs[which];
+  if (b->bytes >= bytes)
+    return true;
+  size_t want = b->bytes ? b->bytes : ((size_t)1 << 16);
+  while (want < bytes) {
+    if (want > SIZE_MAX / 2)
+      return false;
+    want *= 2;
+  }
+  void *fresh = mmap(NULL, want, PROT_READ | PROT_WRITE,
+                     MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  if (fresh == MAP_FAILED)
+    return false;
+  if (b->data) {
+    memcpy(fresh, b->data, b->bytes);
+    munmap(b->data, b->bytes);
+  }
+  b->data = fresh;
+  b->bytes = want;
+  return true;
+}
+
+/*
+ * Collector heap. Blocks for lists and dictionaries come from mapped chunks
+ * that are never returned to the system, in fixed size classes with one free
+ * list each. Three things follow that the C allocator cannot give:
+ * a free block is all zero except one link word stored complemented, so
+ * freed memory never looks like a reference; addresses are high, where no
+ * small integer or text fragment collides with them; and the pages stay
+ * mapped, so what the runtime's address oracle learned stays true.
+ * Only the recording thread allocates; any thread may free.
+ */
+#define FC_CHUNK_BYTES ((size_t)4 << 20)
+#define FC_POOL_MAX ((size_t)64 << 10)
+#define FC_POOL_CLASSES 112u
+#define FC_MAX_CHUNKS 1024u
+static uintptr_t fc_chunks[FC_MAX_CHUNKS];
+static _Atomic size_t fc_chunk_n;
+static uintptr_t fc_chunk_lo = UINTPTR_MAX, fc_chunk_hi;
+static uintptr_t fc_bump, fc_bump_end;
+static uintptr_t fc_pool_free[FC_POOL_CLASSES];
+static _Atomic(uintptr_t) fc_foreign_free;
+
+/* 16-byte steps to 1 KiB, then eight steps per doubling. */
+static inline unsigned fc_pool_class(size_t bytes, size_t *rounded) {
+  if (bytes <= 1024) {
+    size_t r = (bytes + 15u) & ~(size_t)15u;
+    if (r < 16)
+      r = 16;
+    *rounded = r;
+    return (unsigned)(r / 16u) - 1u; /* 0..63 */
+  }
+  unsigned shift = 63u - (unsigned)__builtin_clzll((unsigned long long)(bytes - 1u));
+  size_t step = (size_t)1 << (shift - 3u);
+  size_t r = (bytes + step - 1u) & ~(step - 1u);
+  *rounded = r;
+  size_t base = (size_t)1 << shift;
+  unsigned idx = r == base * 2u ? 8u : (unsigned)((r - base) / step);
+  return 64u + (shift - 10u) * 8u + idx - 1u;
+}
+
+static inline bool fc_pool_owns(uintptr_t p) {
+  if (p < fc_chunk_lo || p >= fc_chunk_hi)
+    return false;
+  size_t n = atomic_load_explicit(&fc_chunk_n, memory_order_acquire);
+  for (size_t i = 0; i < n; ++i)
+    if (p - fc_chunks[i] < FC_CHUNK_BYTES)
+      return true;
+  return false;
+}
+
+static void fc_pool_drain_foreign(void) {
+  uintptr_t node = atomic_exchange_explicit(&fc_foreign_free, 0,
+                                            memory_order_acq_rel);
+  while (node) {
+    uintptr_t *words = (uintptr_t *)node;
+    uintptr_t next = ~words[0];
+    unsigned cls = (unsigned)words[1];
+    words[1] = 0;
+    words[0] = ~fc_pool_free[cls];
+    fc_pool_free[cls] = node;
+    node = next;
+  }
+}
+
+void *rt_fc_block_alloc(size_t bytes) {
+  if (!g_rt_fc_tracking || bytes == 0 || bytes > FC_POOL_MAX)
+    return NULL;
+  size_t rounded = 0;
+  unsigned cls = fc_pool_class(bytes, &rounded);
+  if (cls >= FC_POOL_CLASSES)
+    return NULL;
+  uintptr_t block = fc_pool_free[cls];
+  if (!block && atomic_load_explicit(&fc_foreign_free, memory_order_relaxed)) {
+    fc_pool_drain_foreign();
+    block = fc_pool_free[cls];
+  }
+  if (block) {
+    uintptr_t *words = (uintptr_t *)block;
+    fc_pool_free[cls] = ~words[0];
+    words[0] = 0;
+    return (void *)block;
+  }
+  if (fc_bump_end - fc_bump < rounded) {
+    size_t n = atomic_load_explicit(&fc_chunk_n, memory_order_relaxed);
+    if (n >= FC_MAX_CHUNKS)
+      return NULL;
+    void *chunk = mmap(NULL, FC_CHUNK_BYTES, PROT_READ | PROT_WRITE,
+                       MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (chunk == MAP_FAILED)
+      return NULL;
+    rt_map_oracle_add((uintptr_t)chunk, FC_CHUNK_BYTES);
+    fc_chunks[n] = (uintptr_t)chunk;
+    if ((uintptr_t)chunk < fc_chunk_lo)
+      fc_chunk_lo = (uintptr_t)chunk;
+    if ((uintptr_t)chunk + FC_CHUNK_BYTES > fc_chunk_hi)
+      fc_chunk_hi = (uintptr_t)chunk + FC_CHUNK_BYTES;
+    atomic_store_explicit(&fc_chunk_n, n + 1, memory_order_release);
+    fc_bump = (uintptr_t)chunk;
+    fc_bump_end = fc_bump + FC_CHUNK_BYTES;
+  }
+  block = fc_bump;
+  fc_bump += rounded;
+  return (void *)block;
+}
+
+void rt_fc_block_free(void *ptr, size_t bytes) {
+  if (!ptr)
+    return;
+  if (!fc_pool_owns((uintptr_t)ptr)) {
+    /* From the C allocator. While the collector runs, do not leave
+     * references behind in memory it will read as roots. */
+    if (fc_state > 0 && bytes <= ((size_t)1 << 20))
+      memset(ptr, 0, bytes);
+    free(ptr);
+    return;
+  }
+  size_t rounded = 0;
+  unsigned cls = fc_pool_class(bytes, &rounded);
+  memset(ptr, 0, rounded);
+  uintptr_t *words = (uintptr_t *)ptr;
+  if (g_rt_fc_tracking) {
+    words[0] = ~fc_pool_free[cls];
+    fc_pool_free[cls] = (uintptr_t)ptr;
+    return;
+  }
+  /* Another thread: hand the block to the owner. */
+  words[1] = cls;
+  uintptr_t head = atomic_load_explicit(&fc_foreign_free, memory_order_acquire);
+  do {
+    words[0] = ~head;
+  } while (!atomic_compare_exchange_weak_explicit(
+      &fc_foreign_free, &head, (uintptr_t)ptr, memory_order_acq_rel,
+      memory_order_acquire));
+}
+
+void rt_fc_track_slow(uintptr_t ptr, uint32_t kind, size_t bytes) {
+  if (fc_in_collect || !ptr)
+    return;
+  if (!fc_buf_reserve(FC_BUF_YOUNG, (fc_young_n + 1) * sizeof(fc_obj_t)))
+    return;
+  fc_obj_t *young = (fc_obj_t *)fc_bufs[FC_BUF_YOUNG].data;
+  young[fc_young_n].ptr = ptr;
+  young[fc_young_n].kind = kind;
+  young[fc_young_n].mark = 0;
+  ++fc_young_n;
+  fc_young_bytes += bytes ? bytes : 96;
+}
+
+void rt_fc_thread_enter(void) {
+  pthread_mutex_lock(&fc_threads_lock);
+  if (fc_thread_n < FC_MAX_THREADS)
+    fc_threads[fc_thread_n++] = pthread_self();
+  else
+    fc_thread_overflow = 1;
+  pthread_mutex_unlock(&fc_threads_lock);
+}
+
+void rt_fc_thread_exit(void) {
+  pthread_t self = pthread_self();
+  pthread_mutex_lock(&fc_threads_lock);
+  for (size_t i = 0; i < fc_thread_n; ++i) {
+    if (pthread_equal(fc_threads[i], self)) {
+      fc_threads[i] = fc_threads[--fc_thread_n];
+      break;
+    }
+  }
+  pthread_mutex_unlock(&fc_threads_lock);
+}
+
+static void fc_park_handler(int sig) {
+  (void)sig;
+  int saved = errno;
+  atomic_fetch_add_explicit(&fc_parked, 1, memory_order_release);
+  while (atomic_load_explicit(&fc_parking, memory_order_acquire)) {
+    struct timespec ts = {0, 50000};
+    nanosleep(&ts, NULL);
+  }
+  atomic_fetch_sub_explicit(&fc_parked, 1, memory_order_release);
+  errno = saved;
+}
+
+static uint64_t fc_now_ns(void) {
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return (uint64_t)ts.tv_sec * UINT64_C(1000000000) + (uint64_t)ts.tv_nsec;
+}
+
+/* Parks every runtime thread but the caller. Returns false, with nothing
+ * parked, when one of them does not answer. Holds fc_threads_lock on
+ * success so no thread starts or ends while the world is stopped. */
+static bool fc_stop_world(void) {
+  pthread_mutex_lock(&fc_threads_lock);
+  if (fc_thread_overflow) {
+    pthread_mutex_unlock(&fc_threads_lock);
+    return false;
+  }
+  if (!fc_signal) {
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = fc_park_handler;
+    sa.sa_flags = SA_RESTART;
+    sigemptyset(&sa.sa_mask);
+    int sig = SIGRTMIN + 6;
+    if (sig > SIGRTMAX || sigaction(sig, &sa, NULL) != 0) {
+      pthread_mutex_unlock(&fc_threads_lock);
+      return false;
+    }
+    fc_signal = sig;
+  }
+  /* A handler from the previous collection may still be on its way out. */
+  uint64_t deadline = fc_now_ns() + UINT64_C(200000000);
+  while (atomic_load_explicit(&fc_parked, memory_order_acquire) != 0) {
+    if (fc_now_ns() > deadline) {
+      pthread_mutex_unlock(&fc_threads_lock);
+      return false;
+    }
+    sched_yield();
+  }
+  atomic_store_explicit(&fc_parking, 1, memory_order_release);
+  pthread_t self = pthread_self();
+  int sent = 0;
+  for (size_t i = 0; i < fc_thread_n; ++i) {
+    if (pthread_equal(fc_threads[i], self))
+      continue;
+    if (pthread_kill(fc_threads[i], fc_signal) == 0)
+      ++sent;
+  }
+  while (atomic_load_explicit(&fc_parked, memory_order_acquire) < sent) {
+    if (fc_now_ns() > deadline) {
+      atomic_store_explicit(&fc_parking, 0, memory_order_release);
+      pthread_mutex_unlock(&fc_threads_lock);
+      return false;
+    }
+    sched_yield();
+  }
+  return true;
+}
+
+static void fc_start_world(void) {
+  atomic_store_explicit(&fc_parking, 0, memory_order_release);
+  pthread_mutex_unlock(&fc_threads_lock);
+}
+
+/* LSD radix sort by start address into `scratch` and back: four 11-bit
+ * digits cover the 44 significant bits of a 16-byte-aligned user address.
+ * No allocation and no recursion while the world is stopped. */
+static void fc_sort_ranges(fc_range_t *v, fc_range_t *scratch, size_t n) {
+  if (n < 2)
+    return;
+  fc_range_t *src = v, *dst = scratch;
+  for (unsigned pass = 0; pass < 4; ++pass) {
+    unsigned shift = 4u + pass * 11u;
+    size_t count[2048];
+    memset(count, 0, sizeof(count));
+    for (size_t i = 0; i < n; ++i)
+      ++count[(src[i].start >> shift) & 2047u];
+    size_t sum = 0;
+    for (size_t d = 0; d < 2048; ++d) {
+      size_t next = sum + count[d];
+      count[d] = sum;
+      sum = next;
+    }
+    for (size_t i = 0; i < n; ++i)
+      dst[count[(src[i].start >> shift) & 2047u]++] = src[i];
+    fc_range_t *t = src;
+    src = dst;
+    dst = t;
+  }
+  /* Four passes: the result is back in `v`. Finish the bits a digit sort
+   * does not see (the low four, and anything above bit 47). */
+  for (size_t i = 1; i < n; ++i) {
+    fc_range_t key = v[i];
+    size_t j = i;
+    while (j > 0 && v[j - 1].start > key.start) {
+      v[j] = v[j - 1];
+      --j;
+    }
+    v[j] = key;
+  }
+}
+
+typedef struct fc_ctx {
+  fc_obj_t *cand;
+  size_t cand_n;
+  fc_range_t *ranges;
+  size_t range_n;
+  uintptr_t lo, hi; /* [lo, hi) covers every candidate range */
+  fc_extent_t *extents;
+  /* Hashed set of the 64-byte granules candidates occupy. Most words that
+   * land in the span point at something else; this rejects them without a
+   * search. A false positive only costs the search. */
+  uint64_t *filter;
+  uint32_t *stack;
+  size_t stack_n;
+  size_t marked;
+} fc_ctx_t;
+
+/* Index of the first range whose end is above `addr`. */
+static size_t fc_range_lower(const fc_ctx_t *c, uintptr_t addr) {
+  size_t lo = 0, hi = c->range_n;
+  while (lo < hi) {
+    size_t mid = lo + (hi - lo) / 2;
+    if (c->ranges[mid].end <= addr)
+      lo = mid + 1;
+    else
+      hi = mid;
+  }
+  return lo;
+}
+
+#define FC_FILTER_BITS 23u
+static inline uint64_t fc_filter_bit(uintptr_t addr) {
+  return (((uint64_t)addr >> 6) * UINT64_C(0x9E3779B97F4A7C15)) >>
+         (64u - FC_FILTER_BITS);
+}
+
+static inline void fc_mark_addr(fc_ctx_t *c, uintptr_t addr) {
+  uint64_t bit = fc_filter_bit(addr);
+  if (!((c->filter[bit >> 6] >> (bit & 63u)) & 1u))
+    return;
+  size_t i = fc_range_lower(c, addr);
+  if (i >= c->range_n || c->ranges[i].start > addr)
+    return;
+  fc_obj_t *o = &c->cand[c->ranges[i].obj];
+  if (o->mark)
+    return;
+  if (fc_trace_level > 4 && fc_dbg_word && fc_dbg_fwd_shown < 60 &&
+      o->kind == RT_FC_KIND_LIST &&
+      *(const uint64_t *)(o->ptr - 32) == UINT64_C(0x4e5954464f525744)) {
+    ++fc_dbg_fwd_shown;
+    size_t pi = fc_range_lower(c, (uintptr_t)fc_dbg_word);
+    bool in_cand = pi < c->range_n &&
+                   c->ranges[pi].start <= (uintptr_t)fc_dbg_word;
+    const fc_obj_t *par = in_cand ? &c->cand[c->ranges[pi].obj] : NULL;
+    fprintf(stderr,
+            "[heap-collect]     fwd %p <- word@%p %s parent=%p kind=%u "
+            "off=%ld phdr=%llx\n",
+            (void *)o->ptr, (void *)fc_dbg_word, in_cand ? "object" : "root",
+            par ? (void *)par->ptr : NULL, par ? par->kind : 0,
+            par ? (long)((uintptr_t)fc_dbg_word - par->ptr) : 0L,
+            par && par->kind == RT_FC_KIND_LIST
+                ? (unsigned long long)*(const uint64_t *)(par->ptr - 32)
+                : 0ULL);
+    if (!in_cand && fc_dbg_fwd_shown < 14) {
+      fprintf(stderr, "[heap-collect]       ctx:");
+      for (int k = -8; k <= 5; ++k)
+        fprintf(stderr, k == 0 ? " [%lx]" : " %lx",
+                (unsigned long)fc_dbg_word[k]);
+      fprintf(stderr, "\n");
+    }
+  }
+  if (fc_trace_level == 6 && fc_dbg_word && o->kind == RT_FC_KIND_MANAGED &&
+      fc_dbg_str_shown < 50) {
+    ++fc_dbg_str_shown;
+    size_t pi = fc_range_lower(c, (uintptr_t)fc_dbg_word);
+    bool in_cand = pi < c->range_n &&
+                   c->ranges[pi].start <= (uintptr_t)fc_dbg_word;
+    fprintf(stderr, "[heap-collect]     str \"%.50s\" <- word@%p %s kind=%u\n",
+            (const char *)o->ptr, (void *)fc_dbg_word,
+            in_cand ? "object" : "root",
+            in_cand ? c->cand[c->ranges[pi].obj].kind : 0u);
+  }
+  if (fc_trace_level > 2 && fc_trace_level < 4 && fc_dbg_word && fc_dbg_shown < 40 &&
+      ((uintptr_t)fc_dbg_word >> 20) != ((uintptr_t)c->stack >> 20)) {
+    ++fc_dbg_shown;
+    fprintf(stderr,
+            "[heap-collect]     word@%p -> %p kind=%u  ctx: %lx %lx %lx [%lx] "
+            "%lx %lx\n",
+            (void *)fc_dbg_word, (void *)o->ptr, o->kind,
+            (unsigned long)fc_dbg_word[-3], (unsigned long)fc_dbg_word[-2],
+            (unsigned long)fc_dbg_word[-1], (unsigned long)fc_dbg_word[0],
+            (unsigned long)fc_dbg_word[1], (unsigned long)fc_dbg_word[2]);
+  }
+  o->mark = 1;
+  ++c->marked;
+  c->stack[c->stack_n++] = c->ranges[i].obj;
+}
+
+/*
+ * A reference is the address itself, or the address carried as a tagged
+ * integer ((p << 1) | 1, what an integer-typed slot holding a pointer turns
+ * into at a dynamic boundary), or the native encoding.
+ */
+static inline void fc_scan_word(fc_ctx_t *c, uintptr_t w) {
+  uintptr_t span = c->hi - c->lo;
+  if (w - c->lo < span) {
+    fc_mark_addr(c, w);
+    return;
+  }
+  if (w & 1u) {
+    uintptr_t untagged = w >> 1;
+    if (untagged - c->lo < span)
+      fc_mark_addr(c, untagged);
+    return;
+  }
+  if (NY_NATIVE_IS(w)) {
+    uintptr_t decoded = (uintptr_t)NY_NATIVE_DECODE(w);
+    if (decoded - c->lo < span)
+      fc_mark_addr(c, decoded);
+  }
+}
+
+static void fc_scan_words(fc_ctx_t *c, const uintptr_t *words, size_t n) {
+  for (size_t i = 0; i < n; ++i) {
+    fc_dbg_word = &words[i];
+    fc_scan_word(c, words[i]);
+  }
+}
+
+/* Scans live memory [s, e) that belongs to no candidate and no excluded
+ * table. `copy` holds the bytes of [base, ...). */
+static void fc_scan_root_piece(fc_ctx_t *c, uintptr_t base,
+                               const unsigned char *copy, uintptr_t s,
+                               uintptr_t e) {
+  s = (s + 7u) & ~(uintptr_t)7u;
+  e &= ~(uintptr_t)7u;
+  while (s < e) {
+    uintptr_t stop = e;
+    if (s < c->hi && e > c->lo) {
+      size_t i = fc_range_lower(c, s);
+      if (i < c->range_n) {
+        if (c->ranges[i].start <= s) {
+          s = (c->ranges[i].end + 7u) & ~(uintptr_t)7u;
+          continue;
+        }
+        if (c->ranges[i].start < stop)
+          stop = c->ranges[i].start & ~(uintptr_t)7u;
+      }
+    }
+    if (stop > s) {
+      fc_dbg_words += (stop - s) / sizeof(uintptr_t);
+      fc_scan_words(c, (const uintptr_t *)(copy + (s - base)),
+                    (stop - s) / sizeof(uintptr_t));
+    }
+    s = stop > s ? stop : s + 8u;
+  }
+}
+
+/*
+ * Root memory is read in place. A thread the collector does not control (a
+ * driver's, the JIT's) can unmap a page between the page listing and the
+ * read, so the scan runs under a fault guard: a fault skips to the next page
+ * instead of ending the process.
+ */
+static __thread sigjmp_buf *fc_fault_jmp;
+static __thread volatile uintptr_t fc_fault_addr;
+static struct sigaction fc_old_segv, fc_old_bus;
+
+static void fc_fault_handler(int sig, siginfo_t *info, void *uctx) {
+  if (fc_fault_jmp) {
+    fc_fault_addr = (uintptr_t)info->si_addr;
+    siglongjmp(*fc_fault_jmp, 1);
+  }
+  const struct sigaction *old = sig == SIGBUS ? &fc_old_bus : &fc_old_segv;
+  if (old->sa_flags & SA_SIGINFO) {
+    if (old->sa_sigaction) {
+      old->sa_sigaction(sig, info, uctx);
+      return;
+    }
+  } else if (old->sa_handler != SIG_DFL && old->sa_handler != SIG_IGN) {
+    old->sa_handler(sig);
+    return;
+  }
+  /* No earlier handler: restore the default and let the fault recur. */
+  signal(sig, SIG_DFL);
+}
+
+static void fc_fault_guard_install(void) {
+  struct sigaction sa;
+  memset(&sa, 0, sizeof(sa));
+  sa.sa_sigaction = fc_fault_handler;
+  sa.sa_flags = SA_SIGINFO | SA_ONSTACK | SA_NODEFER;
+  sigemptyset(&sa.sa_mask);
+  sigaction(SIGSEGV, &sa, &fc_old_segv);
+  sigaction(SIGBUS, &sa, &fc_old_bus);
+}
+
+static void fc_fault_guard_remove(void) {
+  sigaction(SIGSEGV, &fc_old_segv, NULL);
+  sigaction(SIGBUS, &fc_old_bus, NULL);
+}
+
+static __attribute__((noinline)) void fc_scan_root_run(fc_ctx_t *c,
+                                                       uintptr_t s,
+                                                       uintptr_t e) {
+  volatile uintptr_t cursor = s;
+  sigjmp_buf jmp;
+  if (sigsetjmp(jmp, 1) != 0) {
+    /* The page at the fault is gone; continue after it. */
+    uintptr_t at = fc_fault_addr;
+    uintptr_t next = ((at >= cursor && at < e ? at : cursor) &
+                      ~(uintptr_t)4095u) + 4096u;
+    cursor = next;
+  }
+  fc_fault_jmp = &jmp;
+  while (cursor < e) {
+    uintptr_t cur = cursor;
+    uintptr_t piece_end = (cur & ~(uintptr_t)4095u) + 4096u;
+    if (piece_end > e)
+      piece_end = e;
+    /* Drop the parts that are runtime tables or collector storage. */
+    bool skip = false;
+    for (size_t i = 0; i < fc_exclude_n; ++i) {
+      if (fc_excludes[i][0] <= cur && cur < fc_excludes[i][1]) {
+        cursor = fc_excludes[i][1];
+        skip = true;
+        break;
+      }
+      if (fc_excludes[i][0] > cur && fc_excludes[i][0] < piece_end)
+        piece_end = fc_excludes[i][0];
+    }
+    if (skip)
+      continue;
+    fc_scan_root_piece(c, cur, (const unsigned char *)cur, cur, piece_end);
+    cursor = piece_end;
+  }
+  fc_fault_jmp = NULL;
+}
+
+static uintptr_t fc_parse_hex(const char **p) {
+  uintptr_t v = 0;
+  for (;; ++*p) {
+    char ch = **p;
+    unsigned d;
+    if (ch >= '0' && ch <= '9')
+      d = (unsigned)(ch - '0');
+    else if (ch >= 'a' && ch <= 'f')
+      d = (unsigned)(ch - 'a') + 10u;
+    else
+      break;
+    v = (v << 4) | d;
+  }
+  return v;
+}
+
+#define FC_PM_SOFT_DIRTY (UINT64_C(1) << 55)
+#define FC_PM_SWAPPED (UINT64_C(1) << 62)
+#define FC_PM_PRESENT (UINT64_C(1) << 63)
+
+/* Scans every writable private mapping; with `dirty_only`, only the pages
+ * written since the soft-dirty bits were last cleared. */
+static bool fc_scan_roots(fc_ctx_t *c, bool dirty_only) {
+  int maps_fd = open("/proc/self/maps", O_RDONLY | O_CLOEXEC);
+  if (maps_fd < 0)
+    return false;
+  char *maps = (char *)fc_bufs[FC_BUF_MAPS].data;
+  size_t cap = fc_bufs[FC_BUF_MAPS].bytes;
+  size_t len = 0;
+  for (;;) {
+    ssize_t got = read(maps_fd, maps + len, cap - 1 - len);
+    if (got < 0 && errno == EINTR)
+      continue;
+    if (got <= 0)
+      break;
+    len += (size_t)got;
+    if (len >= cap - 1) {
+      close(maps_fd);
+      return false;
+    }
+  }
+  close(maps_fd);
+  maps[len] = '\0';
+  int pm_fd = open("/proc/self/pagemap", O_RDONLY | O_CLOEXEC);
+  if (pm_fd < 0)
+    return false;
+  uint64_t *pm = (uint64_t *)fc_bufs[FC_BUF_PAGEMAP].data;
+  size_t pm_cap = fc_bufs[FC_BUF_PAGEMAP].bytes / sizeof(uint64_t);
+  bool ok = true;
+  const char *p = maps;
+  while (*p && ok) {
+    const char *line = p;
+    const char *eol = strchr(p, '\n');
+    if (!eol)
+      eol = maps + len;
+    uintptr_t start = fc_parse_hex(&p);
+    if (*p != '-') {
+      p = *eol ? eol + 1 : eol;
+      continue;
+    }
+    ++p;
+    uintptr_t end = fc_parse_hex(&p);
+    const char *perms = *p == ' ' ? p + 1 : p;
+    bool wanted = perms[0] == 'r' && perms[1] == 'w' && perms[3] == 'p';
+    if (wanted) {
+      /* Device memory is not ordinary storage; never read it. */
+      for (const char *q = line; q + 6 <= eol; ++q) {
+        if (memcmp(q, " /dev/", 6) == 0) {
+          wanted = false;
+          break;
+        }
+      }
+    }
+    p = *eol ? eol + 1 : eol;
+    if (!wanted || end <= start)
+      continue;
+    size_t marked_before = c->marked;
+    fc_dbg_shown = (end - start) > (2u << 20) && (end - start) < (3u << 20) ? 0 : 1000;
+    for (uintptr_t at = start; at < end && ok;) {
+      size_t pages = (end - at) >> 12;
+      if (pages > pm_cap)
+        pages = pm_cap;
+      ssize_t got = pread(pm_fd, pm, pages * sizeof(uint64_t),
+                          (off_t)((at >> 12) * sizeof(uint64_t)));
+      if (got <= 0) {
+        ok = false;
+        break;
+      }
+      size_t have = (size_t)got / sizeof(uint64_t);
+      size_t i = 0;
+      while (i < have) {
+        uint64_t need = dirty_only ? FC_PM_SOFT_DIRTY : 0;
+        if (!(pm[i] & (FC_PM_PRESENT | FC_PM_SWAPPED)) ||
+            (pm[i] & need) != need) {
+          ++i;
+          continue;
+        }
+        size_t j = i + 1;
+        while (j < have && (pm[j] & (FC_PM_PRESENT | FC_PM_SWAPPED)) &&
+               (pm[j] & need) == need)
+          ++j;
+        fc_dbg_pages += j - i;
+        fc_scan_root_run(c, at + ((uintptr_t)i << 12),
+                         at + ((uintptr_t)j << 12));
+        i = j;
+      }
+      at += (uintptr_t)have << 12;
+    }
+    if (fc_trace_level > 1 && c->marked > marked_before)
+      fprintf(stderr, "[heap-collect]   %zu marked from %.*s\n",
+              c->marked - marked_before, (int)(eol - line), line);
+  }
+  close(pm_fd);
+  return ok;
+}
+
+static bool fc_clear_soft_dirty(void) {
+  int fd = open("/proc/self/clear_refs", O_WRONLY | O_CLOEXEC);
+  if (fd < 0)
+    return false;
+  ssize_t wrote = write(fd, "4", 1);
+  close(fd);
+  return wrote == 1;
+}
+
+/* One-time check that the kernel really tracks soft-dirty pages. */
+static bool fc_probe_soft_dirty(void) {
+  volatile char *page = mmap(NULL, 8192, PROT_READ | PROT_WRITE,
+                             MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  if (page == MAP_FAILED)
+    return false;
+  page[0] = 1;
+  page[4096] = 1;
+  bool ok = fc_clear_soft_dirty();
+  int fd = ok ? open("/proc/self/pagemap", O_RDONLY | O_CLOEXEC) : -1;
+  if (fd < 0)
+    ok = false;
+  if (ok) {
+    page[4096] = 2;
+    uint64_t bits[2] = {0, 0};
+    if (pread(fd, bits, sizeof(bits),
+              (off_t)(((uintptr_t)page >> 12) * sizeof(uint64_t))) !=
+        (ssize_t)sizeof(bits))
+      ok = false;
+    else
+      ok = (bits[0] & FC_PM_PRESENT) && !(bits[0] & FC_PM_SOFT_DIRTY) &&
+           (bits[1] & FC_PM_SOFT_DIRTY);
+  }
+  if (fd >= 0)
+    close(fd);
+  munmap((void *)page, 8192);
+  return ok;
+}
+
+#define FC_MAX_CACHE_REPORTERS 32u
+static void (*fc_cache_reporters[FC_MAX_CACHE_REPORTERS])(
+    void (*add)(uintptr_t, uintptr_t));
+static size_t fc_cache_reporter_n;
+
+void rt_fc_register_cache_reporter(void (*report)(void (*add)(uintptr_t,
+                                                             uintptr_t))) {
+  for (size_t i = 0; i < fc_cache_reporter_n; ++i)
+    if (fc_cache_reporters[i] == report)
+      return;
+  if (fc_cache_reporter_n < FC_MAX_CACHE_REPORTERS)
+    fc_cache_reporters[fc_cache_reporter_n++] = report;
+}
+
+static void fc_add_exclude(uintptr_t start, uintptr_t end) {
+  if (fc_exclude_n < FC_MAX_EXCLUDES && end > start) {
+    fc_excludes[fc_exclude_n][0] = start;
+    fc_excludes[fc_exclude_n][1] = end;
+    ++fc_exclude_n;
+  }
+}
+
+static size_t fc_managed_total(uintptr_t ptr) {
+  uint64_t body = *(const uint64_t *)(ptr - 24);
+  if (body & 1u)
+    body >>= 1;
+  return (size_t)((body + 15u) & ~UINT64_C(15)) + 32u;
+}
+
+static void fc_free_object(const fc_obj_t *o) {
+  switch (o->kind) {
+  case RT_FC_KIND_LIST:
+    rt_fc_list_free(o->ptr);
+    break;
+  case RT_FC_KIND_DICT:
+    rt_fc_dict_free(o->ptr);
+    break;
+  case RT_FC_KIND_MANAGED:
+    rt_free((int64_t)o->ptr);
+    break;
+  default:
+    break;
+  }
+}
+
+static __attribute__((noinline)) int64_t fc_collect(bool major,
+                                                    uintptr_t stack_mark) {
+  uint64_t t0 = fc_now_ns();
+  fc_obj_t *young = (fc_obj_t *)fc_bufs[FC_BUF_YOUNG].data;
+  fc_obj_t *old = (fc_obj_t *)fc_bufs[FC_BUF_OLD].data;
+  size_t total = fc_young_n + (major ? fc_old_n : 0);
+  if (total == 0 || total > UINT32_MAX / 2)
+    return 0;
+  if (!fc_buf_reserve(FC_BUF_CAND, total * sizeof(fc_obj_t)) ||
+      !fc_buf_reserve(FC_BUF_RANGES, total * 2 * sizeof(fc_range_t)) ||
+      !fc_buf_reserve(FC_BUF_STACK, total * sizeof(uint32_t)) ||
+      !fc_buf_reserve(FC_BUF_OLD, (fc_old_n + total) * sizeof(fc_obj_t)) ||
+      !fc_buf_reserve(FC_BUF_MAPS, (size_t)8 << 20) ||
+      !fc_buf_reserve(FC_BUF_PAGEMAP, (size_t)1 << 16) ||
+      !fc_buf_reserve(FC_BUF_EXTENTS, total * sizeof(fc_extent_t)) ||
+      !fc_buf_reserve(FC_BUF_SORT, total * 2 * sizeof(fc_range_t)) ||
+      !fc_buf_reserve(FC_BUF_FILTER, ((size_t)1 << FC_FILTER_BITS) / 8u))
+    return 0;
+  old = (fc_obj_t *)fc_bufs[FC_BUF_OLD].data;
+  if (!fc_stop_world())
+    return 0;
+  fc_dbg_pages = fc_dbg_words = 0;
+  fc_dbg_str_shown = 0;
+  memset(fc_dbg_freed_n, 0, sizeof(fc_dbg_freed_n));
+  memset(fc_dbg_freed_b, 0, sizeof(fc_dbg_freed_b));
+  memset(fc_dbg_young_kind, 0, sizeof(fc_dbg_young_kind));
+  for (size_t i = 0; i < fc_young_n; ++i)
+    if (young[i].kind < 4)
+      ++fc_dbg_young_kind[young[i].kind];
+  fc_dbg_fwd_shown = major ? 0 : 1000;
+  fc_dbg_t[0] = fc_now_ns();
+
+  fc_ctx_t c;
+  memset(&c, 0, sizeof(c));
+  c.cand = (fc_obj_t *)fc_bufs[FC_BUF_CAND].data;
+  c.ranges = (fc_range_t *)fc_bufs[FC_BUF_RANGES].data;
+  c.stack = (uint32_t *)fc_bufs[FC_BUF_STACK].data;
+  c.extents = (fc_extent_t *)fc_bufs[FC_BUF_EXTENTS].data;
+  c.lo = UINTPTR_MAX;
+
+  /* Candidates: every recorded object that is still what it was recorded
+   * as. Anything else (released by the program, not a collectable kind,
+   * too large) is dropped from the books and treated as plain memory. */
+  for (int pass = 0; pass < (major ? 2 : 1); ++pass) {
+    const fc_obj_t *src = pass == 0 ? young : old;
+    size_t n = pass == 0 ? fc_young_n : fc_old_n;
+    for (size_t i = 0; i < n; ++i) {
+      uintptr_t r[4];
+      size_t nr = 0;
+      uintptr_t ptr = src[i].ptr;
+      if (src[i].kind == RT_FC_KIND_LIST) {
+        if (rt_fc_list_range(ptr, &r[0], &r[1]))
+          nr = 1;
+      } else if (src[i].kind == RT_FC_KIND_DICT) {
+        if (rt_fc_dict_ranges(ptr, r))
+          nr = 2;
+      } else if (src[i].kind == RT_FC_KIND_MANAGED) {
+        if (rt_heap_ptr_registry_has(ptr) &&
+            *(const int64_t *)(ptr - 8) == TAG_STR) {
+          r[0] = ptr - 32;
+          r[1] = r[0] + fc_managed_total(ptr);
+          nr = 1;
+        }
+      }
+      if (nr == 0)
+        continue;
+      bool large = false;
+      for (size_t k = 0; k < nr; ++k)
+        if (r[2 * k + 1] - r[2 * k] >= FC_LARGE_OBJECT)
+          large = true;
+      if (large)
+        continue;
+      uint32_t idx = (uint32_t)c.cand_n++;
+      c.cand[idx] = src[i];
+      c.cand[idx].mark = 0;
+      c.extents[idx].count = (uint32_t)nr;
+      memcpy(c.extents[idx].r, r, nr * 2 * sizeof(uintptr_t));
+      for (size_t k = 0; k < nr; ++k) {
+        fc_range_t *out = &c.ranges[c.range_n++];
+        out->start = r[2 * k];
+        out->end = r[2 * k + 1];
+        out->obj = idx;
+        if (out->start < c.lo)
+          c.lo = out->start;
+        if (out->end > c.hi)
+          c.hi = out->end;
+      }
+    }
+  }
+  fc_dbg_t[1] = fc_now_ns();
+  fc_sort_ranges(c.ranges, (fc_range_t *)fc_bufs[FC_BUF_SORT].data,
+                 c.range_n);
+  fc_dbg_t[2] = fc_now_ns();
+  /* The same address recorded twice (released and reused) yields identical
+   * ranges; keep one and mark the duplicate object so it is not freed
+   * twice. Overlap of any other kind means the books are wrong: keep all. */
+  bool sane = true;
+  size_t w = 0;
+  for (size_t i = 0; i < c.range_n; ++i) {
+    if (w > 0 && c.ranges[i].start < c.ranges[w - 1].end) {
+      if (c.ranges[i].start == c.ranges[w - 1].start &&
+          c.ranges[i].end == c.ranges[w - 1].end &&
+          c.cand[c.ranges[i].obj].ptr == c.cand[c.ranges[w - 1].obj].ptr &&
+          c.cand[c.ranges[i].obj].kind == c.cand[c.ranges[w - 1].obj].kind) {
+        c.cand[c.ranges[i].obj].mark = 2; /* duplicate record */
+        continue;
+      }
+      sane = false;
+      break;
+    }
+    c.ranges[w++] = c.ranges[i];
+  }
+  c.range_n = w;
+
+  int64_t freed_bytes = 0;
+  bool scanned = false;
+  if (sane && c.range_n > 0) {
+    c.filter = (uint64_t *)fc_bufs[FC_BUF_FILTER].data;
+    memset(c.filter, 0, ((size_t)1 << FC_FILTER_BITS) / 8u);
+    for (size_t i = 0; i < c.range_n; ++i) {
+      for (uintptr_t g = c.ranges[i].start >> 6;
+           g <= (c.ranges[i].end - 1u) >> 6; ++g) {
+        uint64_t bit = fc_filter_bit(g << 6);
+        c.filter[bit >> 6] |= UINT64_C(1) << (bit & 63u);
+      }
+    }
+  }
+  if (sane && c.range_n > 0) {
+    fc_exclude_n = 0;
+    for (int i = 0; i < FC_BUF_COUNT; ++i)
+      if (fc_bufs[i].data)
+        fc_add_exclude((uintptr_t)fc_bufs[i].data,
+                       (uintptr_t)fc_bufs[i].data + fc_bufs[i].bytes);
+    fc_add_exclude((uintptr_t)rt_managed_ptr_table,
+                   (uintptr_t)rt_managed_ptr_table +
+                       sizeof(rt_managed_ptr_table));
+    fc_add_exclude((uintptr_t)rt_managed_ptr_cache,
+                   (uintptr_t)rt_managed_ptr_cache +
+                       sizeof(rt_managed_ptr_cache));
+    /* Everything below the caller's frame on this stack is dead: frames
+     * that already returned (full of stale references to this frame's
+     * temporaries) and the collector's own. */
+    if (fc_stack_low && fc_stack_low < stack_mark)
+      fc_add_exclude(fc_stack_low, stack_mark);
+    else
+      fc_add_exclude(stack_mark - ((size_t)256 << 10), stack_mark);
+    uintptr_t intern_start = 0, intern_end = 0;
+    rt_fc_intern_table(&intern_start, &intern_end);
+    fc_add_exclude(intern_start, intern_end);
+    rt_fc_str_hash_cache(&intern_start, &intern_end);
+    fc_add_exclude(intern_start, intern_end);
+    /* Per-thread classification caches: addresses, not references. */
+#define FC_EXCLUDE_ARRAY(a)                                                    \
+  fc_add_exclude((uintptr_t)(a), (uintptr_t)(a) + sizeof(a))
+    for (size_t i = 0; i < fc_cache_reporter_n; ++i)
+      fc_cache_reporters[i](fc_add_exclude);
+    FC_EXCLUDE_ARRAY(rt_float_cache_keys);
+    FC_EXCLUDE_ARRAY(rt_non_float_cache_keys);
+    FC_EXCLUDE_ARRAY(g_rt_sso_probe_cache);
+    FC_EXCLUDE_ARRAY(g_rt_probe_cache);
+#undef FC_EXCLUDE_ARRAY
+    fc_exclude_n += rt_fc_core_excludes(&fc_excludes[fc_exclude_n],
+                                        FC_MAX_EXCLUDES - fc_exclude_n);
+    bool dirty_only = !major && fc_soft_dirty > 0;
+    fc_fault_guard_install();
+    scanned = fc_scan_roots(&c, dirty_only);
+    fc_dbg_t[3] = fc_now_ns();
+    if (scanned) {
+      while (c.stack_n > 0) {
+        uint32_t idx = c.stack[--c.stack_n];
+        /* Strings hold bytes, not references. */
+        if (c.cand[idx].kind == RT_FC_KIND_MANAGED)
+          continue;
+        if (c.cand[idx].kind == RT_FC_KIND_LIST) {
+          /* A forwarded list refers only to its current storage. */
+          const uint64_t *hdr = (const uint64_t *)(c.cand[idx].ptr - 32);
+          if (hdr[0] == UINT64_C(0x4e5954464f525744)) {
+            uintptr_t target = rt_fc_list_forward_target(c.cand[idx].ptr);
+            if (target) {
+              fc_dbg_word = NULL;
+              if (target - c.lo < c.hi - c.lo)
+                fc_mark_addr(&c, target);
+              continue;
+            }
+          }
+        }
+        const fc_extent_t *x = &c.extents[idx];
+        for (size_t k = 0; k < x->count; ++k) {
+          uintptr_t s0 = (x->r[2 * k] + 7u) & ~(uintptr_t)7u;
+          uintptr_t e0 = x->r[2 * k + 1] & ~(uintptr_t)7u;
+          if (e0 > s0)
+            fc_scan_words(&c, (const uintptr_t *)s0,
+                          (e0 - s0) / sizeof(uintptr_t));
+        }
+      }
+    }
+    fc_fault_guard_remove();
+  }
+  fc_dbg_t[4] = fc_now_ns();
+  fc_start_world();
+
+  if (fc_trace_level > 3 && major && scanned) {
+    size_t kinds[4] = {0, 0, 0, 0}, bytes[4] = {0, 0, 0, 0};
+    size_t shown = 0;
+    for (size_t i = c.cand_n; i-- > 0;) {
+      const fc_obj_t *o = &c.cand[i];
+      if (o->mark != 1 || o->kind > 3)
+        continue;
+      size_t b = 0;
+      for (size_t k = 0; k < c.extents[i].count; ++k)
+        b += c.extents[i].r[2 * k + 1] - c.extents[i].r[2 * k];
+      ++kinds[o->kind];
+      bytes[o->kind] += b;
+      if (shown < 60 && (i % 97) == 0) {
+        ++shown;
+        if (o->kind == RT_FC_KIND_MANAGED)
+          fprintf(stderr, "[heap-collect]   live str %zu: \"%.60s\"\n", b,
+                  (const char *)o->ptr);
+        else if (o->kind == RT_FC_KIND_LIST) {
+          const int64_t *h = (const int64_t *)(o->ptr - 32);
+          fprintf(stderr,
+                  "[heap-collect]   live list bytes=%zu magic=%llx len=%lld "
+                  "elem=%lld cap=%lld w0=%llx w1=%llx\n",
+                  b, (unsigned long long)h[0], (long long)h[1],
+                  (long long)h[2], (long long)(h[3] & INT64_MAX),
+                  (unsigned long long)h[4], (unsigned long long)h[5]);
+        } else
+          fprintf(stderr, "[heap-collect]   live dict bytes=%zu len=%lld\n", b,
+                  (long long)*(const int64_t *)o->ptr);
+      }
+    }
+    fprintf(stderr,
+            "[heap-collect]   live lists=%zu (%zu B) dicts=%zu (%zu B) "
+            "strings=%zu (%zu B)\n",
+            kinds[1], bytes[1], kinds[2], bytes[2], kinds[3], bytes[3]);
+  }
+  size_t kept = major ? 0 : fc_old_n;
+  size_t survivors_bytes = 0;
+  if (scanned) {
+    for (size_t i = 0; i < c.cand_n; ++i) {
+      fc_obj_t *o = &c.cand[i];
+      if (o->mark == 2)
+        continue;
+      size_t bytes = 0;
+      for (size_t k = 0; k < c.extents[i].count; ++k)
+        bytes += c.extents[i].r[2 * k + 1] - c.extents[i].r[2 * k];
+      if (o->mark == 1) {
+        old[kept] = *o;
+        old[kept].mark = 0;
+        ++kept;
+        survivors_bytes += bytes;
+        continue;
+      }
+      fc_free_object(o);
+      if (o->kind < 4) {
+        ++fc_dbg_freed_n[o->kind];
+        fc_dbg_freed_b[o->kind] += bytes;
+      }
+      freed_bytes += (int64_t)bytes;
+      ++fc_stat_freed_objects;
+    }
+  } else {
+    /* Nothing could be proved: keep every candidate. */
+    for (size_t i = 0; i < c.cand_n; ++i) {
+      if (c.cand[i].mark == 2)
+        continue;
+      old[kept] = c.cand[i];
+      old[kept].mark = 0;
+      ++kept;
+    }
+    survivors_bytes = fc_young_bytes;
+  }
+  /*
+   * Forget which pages were written, after the sweep: clearing write-protects
+   * every page, and the sweep touches a page per freed object. No young
+   * object exists between the scan and this point (only this thread records
+   * them), so no reference to one can be missed.
+   */
+  fc_dbg_t[5] = fc_now_ns();
+  if (scanned && fc_soft_dirty > 0 && !fc_clear_soft_dirty())
+    fc_soft_dirty = -1;
+  fc_old_n = kept;
+  fc_young_n = 0;
+  fc_young_bytes = 0;
+  fc_promoted_bytes = major ? 0 : fc_promoted_bytes + survivors_bytes;
+  fc_stat_freed_bytes += (uint64_t)freed_bytes;
+  ++fc_stat_collections;
+  if (major)
+    ++fc_stat_major;
+  fc_stat_last_ns = fc_now_ns() - t0;
+  if (fc_stat_last_ns > fc_stat_max_ns)
+    fc_stat_max_ns = fc_stat_last_ns;
+  if (fc_trace_level > 0)
+    fprintf(stderr,
+            "[heap-collect]   young lists=%zu dicts=%zu managed=%zu; freed "
+            "lists=%zu (%zu B) dicts=%zu (%zu B) strings=%zu (%zu B)\n",
+            fc_dbg_young_kind[1], fc_dbg_young_kind[2], fc_dbg_young_kind[3],
+            fc_dbg_freed_n[1], fc_dbg_freed_b[1], fc_dbg_freed_n[2],
+            fc_dbg_freed_b[2], fc_dbg_freed_n[3], fc_dbg_freed_b[3]);
+  if (fc_trace_level > 0)
+    fprintf(stderr,
+            "[heap-collect] %s candidates=%zu marked=%zu freed=%lld bytes "
+            "old=%zu scanned=%d %.2f ms (ranges %.2f sort %.2f roots %.2f "
+            "mark %.2f sweep %.2f clear %.2f; %zu pages, %zu words)\n",
+            major ? "major" : "minor", c.cand_n, c.marked,
+            (long long)freed_bytes, fc_old_n, (int)scanned,
+            (double)fc_stat_last_ns / 1e6,
+            (double)(fc_dbg_t[1] - fc_dbg_t[0]) / 1e6,
+            (double)(fc_dbg_t[2] - fc_dbg_t[1]) / 1e6,
+            (double)(fc_dbg_t[3] - fc_dbg_t[2]) / 1e6,
+            (double)(fc_dbg_t[4] - fc_dbg_t[3]) / 1e6,
+            (double)(fc_dbg_t[5] - fc_dbg_t[4]) / 1e6,
+            (double)(fc_now_ns() - fc_dbg_t[5]) / 1e6, fc_dbg_pages,
+            fc_dbg_words);
+  return freed_bytes;
+}
+
+static bool fc_start(void) {
+  const char *off = getenv("NYTRIX_HEAP_COLLECT");
+  if (off && (*off == '0' || strcmp(off, "off") == 0)) {
+    fc_state = -1;
+    return false;
+  }
+  const char *trace = getenv("NYTRIX_HEAP_COLLECT_TRACE");
+  fc_trace_level = trace ? atoi(trace) : 0;
+  const char *minor = getenv("NYTRIX_HEAP_COLLECT_BYTES");
+  if (minor && atoll(minor) > 0)
+    fc_minor_threshold = (size_t)atoll(minor);
+  const char *major = getenv("NYTRIX_HEAP_COLLECT_MAJOR_BYTES");
+  if (major && atoll(major) > 0)
+    fc_major_threshold = (size_t)atoll(major);
+  /*
+   * The runtime's address oracle remembers pages it has seen allocations
+   * on. Keep freed memory mapped so those answers stay true.
+   */
+  mallopt(M_TRIM_THRESHOLD, 1 << 30);
+  mallopt(M_MMAP_THRESHOLD, 32 << 20);
+  fc_soft_dirty = fc_probe_soft_dirty() ? 1 : -1;
+  if (fc_soft_dirty < 0)
+    fc_minor_threshold *= 8;
+  pthread_attr_t attr;
+  if (pthread_getattr_np(pthread_self(), &attr) == 0) {
+    void *stack_addr = NULL;
+    size_t stack_size = 0;
+    if (pthread_attr_getstack(&attr, &stack_addr, &stack_size) == 0)
+      fc_stack_low = (uintptr_t)stack_addr;
+    pthread_attr_destroy(&attr);
+  }
+  fc_state = 1;
+  g_rt_fc_tracking = 1;
+  return true;
+}
+
+/*
+ * mode 0: frame boundary; starts recording on the first call and collects
+ *         when enough young objects have accumulated.
+ * mode 1: collect young objects now.  mode 2: full collection now.
+ * mode 10..15: statistics (collections, full collections, objects freed,
+ *         bytes freed, last pause in microseconds, recorded old objects).
+ * Returns the bytes freed by this call, or the statistic.
+ */
+int64_t rt_heap_collect_raw(int64_t mode) {
+  switch (mode) {
+  case 10:
+    return (int64_t)fc_stat_collections;
+  case 11:
+    return (int64_t)fc_stat_major;
+  case 12:
+    return (int64_t)fc_stat_freed_objects;
+  case 13:
+    return (int64_t)fc_stat_freed_bytes;
+  case 14:
+    return (int64_t)(fc_stat_last_ns / 1000u);
+  case 15:
+    return (int64_t)fc_old_n;
+  case 16:
+    return (int64_t)(fc_stat_max_ns / 1000u);
+  default:
+    break;
+  }
+  if (mode < 0 || mode > 2 || fc_state < 0)
+    return 0;
+  if (fc_state == 0) {
+    (void)fc_start();
+    return 0;
+  }
+  if (!g_rt_fc_tracking || fc_in_collect)
+    return 0; /* only the recording thread collects */
+  bool major = mode == 2 || fc_promoted_bytes >= fc_major_threshold;
+  if (mode == 0 && !major && fc_young_bytes < fc_minor_threshold)
+    return 0;
+  /* Spill callee-saved registers: a reference may live only there. */
+  ucontext_t regs;
+  getcontext(&regs);
+  fc_in_collect = 1;
+  int64_t freed = fc_collect(major, (uintptr_t)&regs);
+  fc_in_collect = 0;
+  return freed;
+}
+
+#else
+
+void rt_fc_track_slow(uintptr_t ptr, uint32_t kind, size_t bytes) {
+  (void)ptr;
+  (void)kind;
+  (void)bytes;
+}
+void rt_fc_thread_enter(void) {}
+void rt_fc_thread_exit(void) {}
+void *rt_fc_block_alloc(size_t bytes) {
+  (void)bytes;
+  return NULL;
+}
+void rt_fc_block_free(void *ptr, size_t bytes) {
+  (void)bytes;
+  free(ptr);
+}
+#if defined(__linux__) && defined(__GNUC__)
+void rt_fc_register_cache_reporter(void (*report)(void (*add)(uintptr_t,
+                                                             uintptr_t))) {
+  (void)report;
+}
+#endif
+int64_t rt_heap_collect_raw(int64_t mode) {
+  (void)mode;
+  return 0;
+}
+
+#endif
+
+int64_t rt_heap_collect(int64_t mode) {
+  return rt_tag_v(rt_heap_collect_raw(rt_any_to_i64(mode)));
 }

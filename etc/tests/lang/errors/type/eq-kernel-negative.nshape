@@ -1,0 +1,119 @@
+shape eq_trans_no_shared_side_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "proof", "equality", "soundness"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "eq_trans: the two equations share no side"
+  source ny <<'NY'
+use core
+fn f(int a, int b, int c, int d, proof<a == b> p, proof<c == d> q) proof<a == d> {
+   eq_trans(p, q)
+}
+NY
+}
+
+shape eq_sym_not_equation_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "proof", "equality", "soundness"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "eq_sym: argument is not a proof of an equation"
+  source ny <<'NY'
+use core
+fn f(int a, int b, proof<a < b> p) proof<b == a> { eq_sym(p) }
+NY
+}
+
+shape transport_wrong_target_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "proof", "equality", "soundness"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "proof proposition does not match"
+  source ny <<'NY'
+use core
+fn f(int a, int b, int c, proof<a == b> p, proof<a < 10> q) proof<c < 10> {
+   transport(p, q)
+}
+NY
+}
+
+shape proof_names_are_not_renamable_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "proof", "soundness"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "proof proposition does not match"
+  source ny <<'NY'
+use core
+;; A proof about `a` is not a proof about `c`.
+fn f(int a, int c, proof<a < 10> q) proof<c < 10> { q }
+NY
+}
+
+shape proof_ordering_operators_are_exact_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "proof", "soundness"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "proof proposition does not match"
+  source ny <<'NY'
+use core
+;; `<` inside proof<...> once collapsed every ordering proposition to one type.
+def proof<2 < 10> r = prove(1 < 10)
+NY
+}
+
+shape proof_call_instantiates_argument_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "proof", "dependent", "soundness"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "proof proposition does not match"
+  source ny <<'NY'
+use core
+fn need(int c, proof<c < 10> r) int { c }
+fn f(int a, int c, proof<a < 10> q) int { need(c, q) }
+NY
+}
+
+shape requires_evidence_weaker_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "proof", "requires", "soundness"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "prove condition must be known at compile time"
+  source ny <<'NY'
+use core
+fn f(int n) int requires n > 0 {
+   def proof<n > 1> h = prove(n > 1)
+   n
+}
+f(3)
+NY
+}
+
+shape requires_evidence_reassigned_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "proof", "requires", "soundness"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "prove condition must be known at compile time"
+  source ny <<'NY'
+use core
+fn f(int n) int requires n > 0 {
+   n = 0
+   def proof<n > 0> h = prove(n > 0)
+   n
+}
+f(3)
+NY
+}

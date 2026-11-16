@@ -395,6 +395,7 @@ const nyr_runtime_alias_t nyr_runtime_aliases[] = {
     {"__gc_tag_bytes", "rt_gc_tag_bytes_raw"},
     {"__globals", "rt_globals_get"},
     {"__has_tag", "rt_native_has_tag"},
+    {"__heap_collect", "rt_heap_collect_raw"},
     {"__init_str", "rt_init_str"},
     {"__init_str_raw", "rt_init_str_raw"},
     {"__is_int", "rt_native_is_int"},
@@ -1514,6 +1515,10 @@ const ny_native_runtime_abi_decl_t ny_native_runtime_abi_decls[] = {
     NY_NATIVE_ENTRY("rt_handle_valid",
                     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
                         NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(0) |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_heap_collect_raw",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
                         NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
                     NY_NATIVE_VM_CALL_NONE),
     NY_NATIVE_ENTRY_FN("rt_i64_max",

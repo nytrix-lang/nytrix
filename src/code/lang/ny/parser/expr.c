@@ -1268,6 +1268,32 @@ static expr_t *parse_primary(parser_t *p) {
     e->as.splice.syntax_ctx = splice_ctx;
     return e;
   }
+  case NY_T_QUESTION: {
+    /*
+     * Named hole `?goal`: a typed placeholder.  It parses as an identifier
+     * whose name keeps the `?`; HM gives it a fresh type variable and, once
+     * inference settles, reports the goal type as an unsolved-hole error.
+     * Holes never reach lowering, so they cannot be run or proved.
+     */
+    token_t next = parser_peek(p);
+    if (next.kind == NY_T_IDENT && next.lexeme == tok.lexeme + tok.len) {
+      parser_advance(p);
+      parser_advance(p);
+      size_t n = 1 + (size_t)next.len;
+      char *name = arena_alloc(p->arena, n + 1);
+      name[0] = '?';
+      memcpy(name + 1, next.lexeme, (size_t)next.len);
+      name[n] = '\0';
+      token_t hole_tok = tok;
+      hole_tok.len = (int)n;
+      expr_t *hole = expr_new(p->arena, NY_E_IDENT, hole_tok);
+      hole->as.ident.name = name;
+      return hole;
+    }
+    parser_error(p, tok, "unexpected token '?'",
+                 "a named hole is written '?name' with no space");
+    return NULL;
+  }
   case NY_T_IDENT: {
     parser_advance(p);
     if (tok.len == 6 && strncmp(tok.lexeme, "exists", 6) == 0 &&

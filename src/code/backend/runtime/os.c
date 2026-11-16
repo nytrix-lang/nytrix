@@ -4591,6 +4591,7 @@ static void *rt_thread_trampoline(void *p) {
   int64_t fn = ta->fn;
   int64_t arg = ta->arg;
   int64_t res = 0;
+  rt_fc_thread_enter();
   if (ta->argc >= 0) {
     res = rt_thread_call_dispatch_abi(fn, ta->argc, ta->argv, ta->raw_fn,
                                       ta->result_kind);
@@ -4621,6 +4622,7 @@ static void *rt_thread_trampoline(void *p) {
    */
   res = rt_thread_release_string_storage(res);
   rt_thread_stacks_release();
+  rt_fc_thread_exit();
   atomic_fetch_sub_explicit(&g_rt_live_threads, 1, memory_order_release);
   free(ta);
   return (void *)(uintptr_t)res;

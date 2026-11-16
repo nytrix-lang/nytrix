@@ -4373,6 +4373,10 @@ fn end_frame() bool {
       }
       lib_uiw.replay_advance_frame()
    }
+   ;; A frame builds thousands of short-lived lists, dicts and strings. This
+   ;; is the one point where the program's stack is shallow, so let the
+   ;; runtime free the ones nothing refers to any more.
+   __heap_collect(0)
    return ok
 }
 

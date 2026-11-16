@@ -24,7 +24,13 @@ Working rules:
 - [ ] **x86-64 codegen quality (measured).** Pursue recoverable hot-path wins
   indicated by assembly/profile evidence (copy forwarding, frame-home/disp8
   placement, join-boundary traffic, register pressure), validated by checksums
-  and benchmarks.
+  and benchmarks. Use instruction counts for allocation-heavy rows; their wall
+  time is bimodal on this host. Latest pass and the rejected literal-recolor
+  experiment: [measurements](../learn/measurements.md#x86-64-encoder-correctness-and-instruction-counts-2026-11-16).
+  Next measured targets: `page-rank`'s `newrank[0] +=` loop carries its sum
+  through memory (needs alias-proven store promotion), and the spill-home pool
+  split costs `qrsyndrome` 2.1% that a sticky-RAX tag keyed by vreg instead of
+  home offset would recover.
 
 Measurement rule: use focused fixtures while diagnosing; use the complete
 benchmark and inspect timed-kernel assembly only after correctness is restored.

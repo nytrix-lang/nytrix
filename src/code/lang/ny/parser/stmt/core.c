@@ -2174,6 +2174,58 @@ static stmt_t *parse_func(parser_t *p, ny_attribute_list attrs) {
       return NULL;
     }
   }
+  /*
+   * Implicit binders: `fn id{Type A}(A x) A` is the elaboration-time
+   * spelling of `fn id<A>(A x) A` — the binder is inferred at each call and
+   * never passed.  Only type binders (`Type A`, or a bare `A`) are accepted;
+   * an implicit value binder (`{int n}`) has no elaboration yet.
+   */
+  if (p->cur.kind == NY_T_LBRACE &&
+      (parser_peek(p).kind == NY_T_IDENT ||
+       parser_peek(p).kind == NY_T_RBRACE)) {
+    if (is_lemma) {
+      parser_error(p, p->cur, "lemma declarations cannot take implicit binders",
+                   NULL);
+      return NULL;
+    }
+    parser_advance(p);
+    size_t before = fn_stmt->as.fn.type_params.len;
+    while (p->cur.kind != NY_T_RBRACE && p->cur.kind != NY_T_EOF) {
+      if (tok_is_ident_text(p->cur, "Type"))
+        parser_advance(p);
+      else if (p->cur.kind == NY_T_IDENT &&
+               (parser_peek(p).kind == NY_T_IDENT)) {
+        parser_error(p, p->cur, "implicit value binders are not supported",
+                     "only type binders are implicit: write '{Type A}'");
+        return NULL;
+      }
+      if (p->cur.kind != NY_T_IDENT) {
+        parser_error(p, p->cur, "expected implicit binder name",
+                     "write 'fn id{Type A}(A x) A'");
+        return NULL;
+      }
+      const char *param_name = parser_intern(p, p->cur.lexeme, p->cur.len);
+      for (size_t i = 0; i < fn_stmt->as.fn.type_params.len; ++i)
+        if (strcmp(fn_stmt->as.fn.type_params.data[i], param_name) == 0) {
+          parser_error(p, p->cur, "duplicate function type parameter", NULL);
+          return NULL;
+        }
+      vec_push_arena(p->arena, &fn_stmt->as.fn.type_params, param_name);
+      parser_advance(p);
+      if (!parser_match(p, NY_T_COMMA))
+        break;
+    }
+    if (!parser_match(p, NY_T_RBRACE)) {
+      parser_error(p, p->cur, "expected '}' after implicit binders",
+                   "write 'fn id{Type A}(A x) A'");
+      return NULL;
+    }
+    if (fn_stmt->as.fn.type_params.len == before) {
+      parser_error(p, p->prev, "empty implicit binder list",
+                   "remove the '{}' or name at least one binder");
+      return NULL;
+    }
+  }
   parser_expect(p, NY_T_LPAREN, NULL, "'(' ");
   ny_param_list params = {0};
   while (p->cur.kind != NY_T_RPAREN) {

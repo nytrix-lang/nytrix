@@ -554,6 +554,8 @@ static inline bool rt_tbuf_page_possible(uintptr_t data) {
 static void rt_tbuf_register_handle(uintptr_t data, bool freeable) {
   if (!data || (data & RT_TBUF_HANDLE_FLAG_MASK) != 0)
     return;
+  if (freeable)
+    rt_fc_track(data, RT_FC_KIND_LIST, 0);
   rt_tbuf_mark_page(data);
   uintptr_t value =
       data | (freeable ? RT_TBUF_HANDLE_FREEABLE : RT_TBUF_HANDLE_STATIC);
@@ -823,7 +825,9 @@ static int64_t rt_tbuf_new_impl(int64_t count, int64_t elem_size, int tracked,
     return 0;
   size_t bytes = RT_NATIVE_TBUF_HEADER + (size_t)capacity * (size_t)elem_size;
   unsigned char *base =
-      zero_elements ? calloc(1, bytes) : (unsigned char *)malloc(bytes);
+      tracked ? (unsigned char *)rt_fc_block_alloc(bytes) : NULL;
+  if (!base)
+    base = zero_elements ? calloc(1, bytes) : (unsigned char *)malloc(bytes);
   if (!base)
     return 0;
   int64_t *hdr = (int64_t *)base;
@@ -989,7 +993,9 @@ int64_t rt_tbuf_append_raw(int64_t buffer, int64_t value, int64_t is_string) {
     bool keep_alias = rt_tbuf_known_handle(old_data);
     unsigned char *grown = NULL;
     if (keep_alias) {
-      grown = malloc(new_bytes);
+      grown = (unsigned char *)rt_fc_block_alloc(new_bytes);
+      if (!grown)
+        grown = malloc(new_bytes);
       if (grown)
         memcpy(grown, raw_base, old_bytes);
     } else if (is_heap_ptr((int64_t)(uintptr_t)raw_base)) {
@@ -1322,7 +1328,9 @@ int64_t rt_tbuf_append_i64_raw(int64_t buffer, int64_t value) {
   bool keep_alias = rt_tbuf_known_handle((uintptr_t)buffer);
   unsigned char *grown = NULL;
   if (keep_alias) {
-    grown = malloc(new_bytes);
+    grown = (unsigned char *)rt_fc_block_alloc(new_bytes);
+      if (!grown)
+        grown = malloc(new_bytes);
     if (grown)
       memcpy(grown, raw_base, old_bytes);
   } else if (is_heap_ptr((int64_t)(uintptr_t)raw_base)) {
@@ -1879,7 +1887,9 @@ int64_t rt_tbuf_reserve(int64_t buffer, int64_t capacity) {
   bool keep_alias = rt_tbuf_known_handle((uintptr_t)buffer);
   unsigned char *grown = NULL;
   if (keep_alias) {
-    grown = malloc(new_bytes);
+    grown = (unsigned char *)rt_fc_block_alloc(new_bytes);
+      if (!grown)
+        grown = malloc(new_bytes);
     if (grown)
       memcpy(grown, (unsigned char *)hdr, old_bytes);
   } else if (is_heap_ptr((int64_t)(uintptr_t)hdr)) {
@@ -3515,6 +3525,14 @@ static inline void ny_native_dict_set_ctrl(ny_native_dict_t *dict, size_t idx,
 static _Atomic(uintptr_t) ny_native_dict_registry[NY_NATIVE_DICT_REGISTRY_SIZE];
 static _Thread_local uintptr_t ny_native_dict_last_address;
 static _Thread_local ny_native_dict_t *ny_native_dict_last;
+/*
+ * The heap collector releases dictionaries. A released entry becomes a
+ * tombstone that a later insertion reuses, and the epoch tells each thread
+ * that its one-entry receiver cache may name a released dictionary.
+ */
+#define NY_NATIVE_DICT_REGISTRY_TOMBSTONE ((uintptr_t)1)
+static _Atomic(uint64_t) ny_native_dict_epoch;
+static _Thread_local uint64_t ny_native_dict_last_epoch;
 
 static inline size_t ny_native_dict_registry_slot(uintptr_t value) {
   uint64_t x = (uint64_t)value;
@@ -3547,6 +3565,7 @@ static void ny_native_dict_registry_add(uintptr_t value) {
   if (!value)
     return;
   size_t start = ny_native_dict_registry_slot(value);
+  _Atomic(uintptr_t) *reusable = NULL;
   for (size_t probe = 0; probe < NY_NATIVE_DICT_REGISTRY_MAX_PROBES; ++probe) {
     _Atomic(uintptr_t) *slot =
         &ny_native_dict_registry[(start + probe) &
@@ -3554,8 +3573,15 @@ static void ny_native_dict_registry_add(uintptr_t value) {
     uintptr_t seen = atomic_load_explicit(slot, memory_order_acquire);
     if (seen == value)
       return;
+    if (seen == NY_NATIVE_DICT_REGISTRY_TOMBSTONE) {
+      if (!reusable)
+        reusable = slot;
+      continue;
+    }
     if (seen)
       continue;
+    if (reusable)
+      break;
     uintptr_t empty = 0;
     if (atomic_compare_exchange_strong_explicit(
             slot, &empty, value, memory_order_acq_rel, memory_order_acquire))
@@ -3563,6 +3589,32 @@ static void ny_native_dict_registry_add(uintptr_t value) {
     if (empty == value)
       return;
   }
+  if (reusable) {
+    uintptr_t tombstone = NY_NATIVE_DICT_REGISTRY_TOMBSTONE;
+    (void)atomic_compare_exchange_strong_explicit(
+        reusable, &tombstone, value, memory_order_acq_rel,
+        memory_order_acquire);
+  }
+}
+
+static void ny_native_dict_registry_remove(uintptr_t value) {
+  if (!value)
+    return;
+  size_t start = ny_native_dict_registry_slot(value);
+  for (size_t probe = 0; probe < NY_NATIVE_DICT_REGISTRY_MAX_PROBES; ++probe) {
+    _Atomic(uintptr_t) *slot =
+        &ny_native_dict_registry[(start + probe) &
+                                 NY_NATIVE_DICT_REGISTRY_MASK];
+    uintptr_t seen = atomic_load_explicit(slot, memory_order_acquire);
+    if (!seen)
+      break;
+    if (seen == value) {
+      atomic_store_explicit(slot, NY_NATIVE_DICT_REGISTRY_TOMBSTONE,
+                            memory_order_release);
+      break;
+    }
+  }
+  atomic_fetch_add_explicit(&ny_native_dict_epoch, 1, memory_order_release);
 }
 
 static bool rt_set_layout(int64_t value) {
@@ -3590,7 +3642,10 @@ static ny_native_dict_t *ny_native_dict_ptr(int64_t value) {
   uintptr_t address = (uintptr_t)value;
   if (address < 4096 || address >= UINT64_C(0x0000800000000000) || address < 16)
     return NULL;
-  if (address == ny_native_dict_last_address && ny_native_dict_last)
+  uint64_t dict_epoch =
+      atomic_load_explicit(&ny_native_dict_epoch, memory_order_relaxed);
+  if (address == ny_native_dict_last_address && ny_native_dict_last &&
+      ny_native_dict_last_epoch == dict_epoch)
     return ny_native_dict_last;
   ny_native_dict_t *dict = ny_native_dict_registry_find(address);
   /*
@@ -3603,6 +3658,7 @@ static ny_native_dict_t *ny_native_dict_ptr(int64_t value) {
   if (dict) {
     ny_native_dict_last_address = 0;
     ny_native_dict_last = dict;
+    ny_native_dict_last_epoch = dict_epoch;
     ny_native_dict_last_address = address;
     return dict;
   }
@@ -3738,6 +3794,9 @@ static uint32_t ny_native_dict_hash(int64_t key, uint8_t key_kind) {
  * between identical runs. The result is always released with free().
  */
 static void *ny_native_dict_table_alloc(size_t bytes) {
+  void *pooled = rt_fc_block_alloc(bytes);
+  if (pooled)
+    return pooled;
 #if defined(__linux__) && defined(MADV_HUGEPAGE)
   const size_t huge = (size_t)2 << 20;
   if (bytes >= huge) {
@@ -3805,7 +3864,9 @@ static bool ny_native_dict_resize(ny_native_dict_t *dict, int64_t capacity) {
      * for every copied slot; the old length already accounts for tombstones.
      */
     dict->length = old_length;
-    free(old_slots);
+    rt_fc_block_free(old_slots,
+                     (size_t)old_cap * sizeof(ny_native_dict_slot_t) +
+                         (size_t)old_cap + 16);
   }
   return true;
 }
@@ -3827,11 +3888,14 @@ static int64_t ny_native_dict_create(int64_t capacity, bool user_allocation) {
   int64_t actual = 8;
   while (actual < capacity && actual <= INT64_MAX / 2)
     actual *= 2;
-  ny_native_dict_t *dict = (ny_native_dict_t *)calloc(1, sizeof(*dict));
+  ny_native_dict_t *dict = (ny_native_dict_t *)rt_fc_block_alloc(sizeof(*dict));
+  if (!dict)
+    dict = (ny_native_dict_t *)calloc(1, sizeof(*dict));
   if (dict)
     dict->user_allocation = user_allocation;
   if (!dict || !ny_native_dict_resize(dict, actual)) {
-    free(dict);
+    if (dict)
+      rt_fc_block_free(dict, sizeof(*dict));
     rt_container_oom("out of memory creating dict\n");
   }
   dict->magic = NY_NATIVE_DICT_MAGIC;
@@ -3841,6 +3905,8 @@ static int64_t ny_native_dict_create(int64_t capacity, bool user_allocation) {
   dict->tag = TAG_DICT;
   uintptr_t payload = (uintptr_t)((char *)dict + 16);
   ny_native_dict_registry_add(payload);
+  rt_fc_track(payload, RT_FC_KIND_DICT,
+              sizeof(*dict) + (size_t)actual * (sizeof(ny_native_dict_slot_t) + 1));
   return (int64_t)payload;
 }
 
@@ -5866,6 +5932,7 @@ rt_tbuf_error_t rt_tbuf_check(int64_t v, const int64_t **header_out) {
    * sixty-four forwarding hops covers every representable growth sequence
    * while still rejecting cycles and corrupted chains.
    */
+  int64_t *first_forward = NULL;
   for (unsigned depth = 0; depth < 64; ++depth) {
     /*
      * Registration is the allocation-provenance check: only runtime-created
@@ -5889,6 +5956,8 @@ rt_tbuf_error_t rt_tbuf_check(int64_t v, const int64_t **header_out) {
       if (next < 4096 || next == v ||
           !rt_tbuf_registered_handle((uintptr_t)next))
         return RT_TBUF_CORRUPT_HEADER;
+      if (!first_forward)
+        first_forward = hdr;
       v = next;
       continue;
     }
@@ -5896,6 +5965,14 @@ rt_tbuf_error_t rt_tbuf_check(int64_t v, const int64_t **header_out) {
       return RT_TBUF_INVALID_HANDLE;
     if (hdr[1] < 0 || hdr[2] <= 0 || rt_tbuf_capacity_word(hdr[3]) < hdr[1])
       return RT_TBUF_CORRUPT_HEADER;
+    /*
+     * A list that is replaced again and again leaves a chain of forwarding
+     * headers behind the handle an alias kept. Point that handle straight at
+     * the current storage: the walk stays one hop, and the links in between
+     * stop being reachable through it.
+     */
+    if (depth > 1 && first_forward)
+      first_forward[1] = v;
     if (header_out)
       *header_out = hdr;
     return RT_TBUF_OK;
@@ -11338,5 +11415,128 @@ int64_t rt_breakpoint(void) {
 #else
   raise(SIGTRAP);
 #endif
+  return 0;
+}
+
+/*
+ * Heap collector hooks for the object kinds this file owns. The collector
+ * (memory.c) calls the range functions with every other runtime thread
+ * parked, so they read object headers without taking locks or allocating.
+ */
+int rt_fc_list_range(uintptr_t data, uintptr_t *start, uintptr_t *end) {
+  if (!rt_tbuf_registered_handle(data))
+    return 0;
+  const int64_t *hdr = (const int64_t *)(data - RT_NATIVE_TBUF_HEADER);
+  int64_t capacity = rt_tbuf_capacity_word(hdr[3]);
+  int64_t elem_size = hdr[2];
+  if ((uint64_t)hdr[0] != (uint64_t)NY_NATIVE_TBUF_MAGIC &&
+      (uint64_t)hdr[0] != (uint64_t)NY_NATIVE_TBUF_FORWARD_MAGIC)
+    return 0;
+  if (capacity < 0 || elem_size <= 0 || elem_size > 4096 ||
+      !rt_tbuf_capacity_fits(capacity, elem_size))
+    return 0;
+  *start = (uintptr_t)hdr;
+  *end = data + (uintptr_t)capacity * (uintptr_t)elem_size;
+  return 1;
+}
+
+void rt_fc_list_free(uintptr_t data) {
+  if (rt_tbuf_release_handle((int64_t)data) != 1)
+    return;
+  int64_t *hdr = (int64_t *)(data - RT_NATIVE_TBUF_HEADER);
+  /*
+   * Erase the contents, not only the magic. The allocator hands the same
+   * addresses out again within a frame, so a reference left in freed memory
+   * soon names an unrelated new object and would keep it alive.
+   */
+  int64_t capacity = rt_tbuf_capacity_word(hdr[3]);
+  int64_t elem_size = hdr[2];
+  if (capacity > 0 && elem_size > 0 && elem_size <= 4096 &&
+      rt_tbuf_capacity_fits(capacity, elem_size)) {
+    rt_fc_block_free(hdr, RT_NATIVE_TBUF_HEADER +
+                              (size_t)capacity * (size_t)elem_size);
+    return;
+  }
+  hdr[0] = 0;
+  rt_fc_block_free(hdr, RT_NATIVE_TBUF_HEADER);
+}
+
+int rt_fc_dict_ranges(uintptr_t payload, uintptr_t out[4]) {
+  ny_native_dict_t *dict = (ny_native_dict_t *)(payload - 16);
+  if (dict->magic != NY_NATIVE_DICT_MAGIC || dict->capacity < 8 ||
+      dict->capacity > (INT64_C(1) << 27) || !dict->slots)
+    return 0;
+  out[0] = (uintptr_t)dict;
+  out[1] = (uintptr_t)dict + sizeof(*dict);
+  out[2] = (uintptr_t)dict->slots;
+  out[3] = out[2] +
+           (uintptr_t)dict->capacity * sizeof(ny_native_dict_slot_t) +
+           (uintptr_t)dict->capacity + 16u;
+  return 1;
+}
+
+void rt_fc_dict_free(uintptr_t payload) {
+  ny_native_dict_t *dict = (ny_native_dict_t *)(payload - 16);
+  ny_native_dict_registry_remove(payload);
+  if (ny_native_dict_last_address == payload)
+    ny_native_dict_last_address = 0;
+  if (dict->slots && dict->capacity >= 8 &&
+      dict->capacity <= (INT64_C(1) << 27))
+    rt_fc_block_free(dict->slots,
+                     (size_t)dict->capacity * sizeof(ny_native_dict_slot_t) +
+                         (size_t)dict->capacity + 16);
+  else
+    free(dict->slots);
+  rt_fc_block_free(dict, sizeof(*dict));
+}
+
+/* Runtime tables that index objects by address; they are not references. */
+size_t rt_fc_core_excludes(uintptr_t (*out)[2], size_t cap) {
+  size_t n = 0;
+  if (n < cap) {
+    out[n][0] = (uintptr_t)ny_native_dict_registry;
+    out[n][1] = out[n][0] + sizeof(ny_native_dict_registry);
+    ++n;
+  }
+  uint32_t count =
+      atomic_load_explicit(&rt_tbuf_segment_count, memory_order_acquire);
+  for (uint32_t i = 0; i < count && n < cap; ++i) {
+    _Atomic(uintptr_t) *seg = rt_tbuf_segment(i);
+    if (!seg)
+      continue;
+    out[n][0] = (uintptr_t)seg;
+    out[n][1] = out[n][0] + (size_t)RT_TBUF_HANDLE_LIMIT * sizeof(uintptr_t);
+    ++n;
+  }
+  if (n < cap) {
+    out[n][0] = (uintptr_t)rt_tbuf_handle_cache;
+    out[n][1] = out[n][0] + sizeof(rt_tbuf_handle_cache);
+    ++n;
+  }
+  return n;
+}
+
+/*
+ * For a forwarding header: the storage it finally leads to (0 when the chain
+ * is broken). The header is rewritten to point there directly; what the
+ * block held before it was forwarded is dead and refers to nothing.
+ */
+uintptr_t rt_fc_list_forward_target(uintptr_t data) {
+  int64_t *first = (int64_t *)(data - RT_NATIVE_TBUF_HEADER);
+  if ((uint64_t)first[0] != (uint64_t)NY_NATIVE_TBUF_FORWARD_MAGIC)
+    return 0;
+  uintptr_t v = (uintptr_t)first[1];
+  for (unsigned depth = 0; depth < (1u << 20); ++depth) {
+    if (v < 4096 || !rt_tbuf_registered_handle(v))
+      return 0;
+    const int64_t *hdr = (const int64_t *)(v - RT_NATIVE_TBUF_HEADER);
+    if ((uint64_t)hdr[0] != (uint64_t)NY_NATIVE_TBUF_FORWARD_MAGIC) {
+      first[1] = (int64_t)v;
+      return v;
+    }
+    if ((uintptr_t)hdr[1] == v)
+      return 0;
+    v = (uintptr_t)hdr[1];
+  }
   return 0;
 }

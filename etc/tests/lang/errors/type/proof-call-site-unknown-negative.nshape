@@ -5,7 +5,7 @@ shape type_proof_call_site_unknown_negative {
   template ny-compile-fail
   expect compile_fail
 
-  expect_message "mapped value ranges do not prove it"
+  expect_message "proof proposition does not match"
   source ny <<'NY'
 use core
 

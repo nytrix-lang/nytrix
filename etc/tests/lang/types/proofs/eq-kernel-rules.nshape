@@ -1,0 +1,60 @@
+shape eq_kernel_rules {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "proof", "equality", "transport", "congruence"]
+  template ny-test-case
+  flags_matrix "--native-only; --native-only -O3; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  expect_stdout "EQ-KERNEL-OK"
+  source ny <<'NY'
+use core
+;; The identity type is proof<a == b>; refl is prove(t == t).  These rules
+;; are its eliminator and derived lemmas, checked on canonical propositions
+;; and erased at runtime.
+fn sym(int x, int y, proof<x == y> p) proof<y == x> { eq_sym(p) }
+fn trans(int a, int b, int c, proof<a == b> p, proof<b == c> q) proof<a == c> {
+   eq_trans(p, q)
+}
+fn twice(int v) int { v * 2 }
+fn cong(int a, int b, proof<a == b> p) proof<twice(a) == twice(b)> {
+   eq_cong(p, twice)
+}
+;; J / substitution: a fact about `a` becomes the same fact about `b`.
+fn subst(int a, int b, proof<a == b> p, proof<a < 10> q) proof<b < 10> {
+   transport(p, q)
+}
+fn use_all(int n) int {
+   def proof<n == n> r = prove(n == n)
+   def proof<n == n> back = sym(n, n, r)
+   def proof<n == n> chain = trans(n, n, n, r, back)
+   def proof<twice(n) == twice(n)> lifted = cong(n, n, chain)
+   n
+}
+assert(use_all(4) == 4, "rules compose and erase")
+def proof<3 < 10> small = prove(3 < 10)
+def proof<1 + 2 == 3> e = prove(1 + 2 == 3)
+def proof<3 < 10> moved = subst(3, 3, e, small)
+print("EQ-KERNEL-OK")
+NY
+}
+
+shape requires_is_evidence {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "proof", "contracts", "requires"]
+  template ny-test-case
+  flags_matrix "--native-only; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  expect_stdout "REQ-EVIDENCE-OK"
+  source ny <<'NY'
+use core
+;; A precondition is evidence inside the body: its bounds discharge prove().
+fn clamp_index(int n) int requires n >= 0 && n < 8 {
+   def proof<n < 8> in_range = prove(n < 8)
+   def proof<n >= 0> nonneg = prove(n >= 0)
+   n
+}
+assert(clamp_index(5) == 5, "requires bounds are usable evidence")
+print("REQ-EVIDENCE-OK")
+NY
+}

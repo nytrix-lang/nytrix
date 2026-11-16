@@ -1673,6 +1673,160 @@ static bool nyr_check_type_param_consistency(nyr_builder_t *b,
   return true;
 }
 
+static bool nyr_stmt_assigns_ident(const stmt_t *s, const char *name);
+/*
+ * Range environment for @proves on the NYIR route.  `result` is the range of
+ * the return expression under test; an integer parameter takes the bounds its
+ * `requires` conjunction states, but only while the body never reassigns it,
+ * so the precondition still describes the returned value.
+ */
+typedef struct {
+  const stmt_t *fn;
+  const char *ret_canon;
+  char *req_canon;
+} nyr_proves_env_t;
+
+static bool nyr_proves_requires_bound(const char *canon, const char *name,
+                                      int64_t *lo, int64_t *hi, int depth) {
+  char op[16];
+  char *l = NULL, *r = NULL;
+  if (!canon || depth > NY_PROOF_CANON_MAX_DEPTH ||
+      !ny_proof_canon_split_binary(canon, op, sizeof(op), &l, &r)) {
+    free(l);
+    free(r);
+    return false;
+  }
+  bool found = false;
+  if (strcmp(op, "&&") == 0) {
+    found = nyr_proves_requires_bound(l, name, lo, hi, depth + 1);
+    found = nyr_proves_requires_bound(r, name, lo, hi, depth + 1) || found;
+  } else {
+    char want[300];
+    snprintf(want, sizeof(want), "name:%s", name);
+    bool name_left = strcmp(l, want) == 0 && strncmp(r, "int:", 4) == 0;
+    bool name_right = strcmp(r, want) == 0 && strncmp(l, "int:", 4) == 0;
+    if (name_left || name_right) {
+      int64_t c = strtoll((name_left ? r : l) + 4, NULL, 10);
+      /* Normalize to `name OP c`. */
+      if (name_right) {
+        if (strcmp(op, "<") == 0)
+          strcpy(op, ">");
+        else if (strcmp(op, "<=") == 0)
+          strcpy(op, ">=");
+        else if (strcmp(op, ">") == 0)
+          strcpy(op, "<");
+        else if (strcmp(op, ">=") == 0)
+          strcpy(op, "<=");
+      }
+      found = true;
+      if (strcmp(op, ">") == 0 && c < INT64_MAX && c + 1 > *lo)
+        *lo = c + 1;
+      else if (strcmp(op, ">=") == 0 && c > *lo)
+        *lo = c;
+      else if (strcmp(op, "<") == 0 && c > INT64_MIN && c - 1 < *hi)
+        *hi = c - 1;
+      else if (strcmp(op, "<=") == 0 && c < *hi)
+        *hi = c;
+      else if (strcmp(op, "==") == 0) {
+        if (c > *lo)
+          *lo = c;
+        if (c < *hi)
+          *hi = c;
+      } else
+        found = false;
+    }
+  }
+  free(l);
+  free(r);
+  return found;
+}
+
+static bool nyr_proves_env_range(void *ctx, const char *name, int64_t *out_lo,
+                                 int64_t *out_hi) {
+  nyr_proves_env_t *env = (nyr_proves_env_t *)ctx;
+  if (!env || !name)
+    return false;
+  if (strcmp(name, "result") == 0) {
+    if (!env->ret_canon || strstr(env->ret_canon, "name:result"))
+      return false;
+    return ny_proof_canon_range(env->ret_canon, nyr_proves_env_range, env,
+                                out_lo, out_hi, 1);
+  }
+  const stmt_t *fn = env->fn;
+  if (!env->req_canon || !fn || fn->kind != NY_S_FUNC)
+    return false;
+  bool is_int_param = false;
+  for (size_t i = 0; i < fn->as.fn.params.len; ++i) {
+    const param_t *p = &fn->as.fn.params.data[i];
+    if (p->name && strcmp(p->name, name) == 0) {
+      is_int_param = p->type && (strcmp(p->type, "int") == 0 ||
+                                 strcmp(p->type, "i64") == 0);
+      break;
+    }
+  }
+  if (!is_int_param || nyr_stmt_assigns_ident(fn->as.fn.body, name))
+    return false;
+  /* A tagged `int` carries 63 bits, which also keeps `n + c` rangeable. */
+  int64_t lo = INT64_MIN / 2, hi = INT64_MAX / 2;
+  if (!nyr_proves_requires_bound(env->req_canon, name, &lo, &hi, 0) || lo > hi)
+    return false;
+  *out_lo = lo;
+  *out_hi = hi;
+  return true;
+}
+
+
+/*
+ * Canonical proof type of an evidence expression on the native path: a
+ * prove(...) witness, an equality-rule application, or a local declared with
+ * an indexed proof type.  NULL when it is not derivable here (the witness is
+ * erased either way).
+ */
+static char *nyr_proof_rule_witness_type(nyr_builder_t *b, const expr_t *e,
+                                         int depth) {
+  if (!e || depth > 32)
+    return NULL;
+  if (e->kind == NY_E_CALL && e->as.call.callee &&
+      e->as.call.callee->kind == NY_E_IDENT && e->as.call.callee->as.ident.name) {
+    const char *leaf = ny_name_leaf(e->as.call.callee->as.ident.name);
+    if (leaf && strcmp(leaf, "prove") == 0 && e->as.call.args.len >= 1)
+      return ny_proof_type_from_expr(e->as.call.args.data[0].val);
+    if (leaf && ny_proof_rule_name(leaf)) {
+      char *props[2] = {NULL, NULL};
+      size_t n = 0;
+      const char *fn_name = NULL;
+      bool cong = strcmp(leaf, "eq_cong") == 0;
+      for (size_t i = 0; i < e->as.call.args.len; ++i) {
+        const expr_t *arg = e->as.call.args.data[i].val;
+        if (cong && i == e->as.call.args.len - 1 && arg &&
+            arg->kind == NY_E_IDENT) {
+          fn_name = arg->as.ident.name;
+          continue;
+        }
+        if (n < 2)
+          props[n] = nyr_proof_rule_witness_type(b, arg, depth + 1);
+        ++n;
+      }
+      const char *reason = NULL;
+      char *out = n <= 2 && (n < 1 || props[0]) && (n < 2 || props[1])
+                      ? ny_proof_rule_result(leaf, (const char *const *)props,
+                                             n, fn_name, &reason)
+                      : NULL;
+      free(props[0]);
+      free(props[1]);
+      return out;
+    }
+    return NULL;
+  }
+  if (e->kind == NY_E_IDENT && e->as.ident.name) {
+    const nyr_local_t *local = nyr_find_local(b, e->as.ident.name);
+    if (local && local->type_name &&
+        strncmp(local->type_name, "proof<", 6) == 0)
+      return ny_strdup(local->type_name);
+  }
+  return NULL;
+}
+
 /*
  * Reflexivity: `t == t`, `t <= t` and `t >= t` hold for every pure,
  * deterministic, non-floating term, closed or not (NaN is the only value
@@ -1696,7 +1850,7 @@ static bool nyr_prove_reflexive(nyr_builder_t *b, const expr_t *condition) {
   char *rhs = ny_proof_type_from_expr((expr_t *)condition->as.binary.right);
   bool same = lhs && rhs && strcmp(lhs, rhs) == 0;
   if (same) {
-    static const char *const impure[] = {"call", "member", "index", "flt:",
+    static const char *const impure[] = {"call", "app:", "member", "index", "flt:",
                                          "str:", "float", "unknown", "any"};
     for (size_t i = 0; same && i < sizeof(impure) / sizeof(impure[0]); ++i)
       if (strstr(lhs, impure[i]))
@@ -7701,6 +7855,18 @@ ordinary_call:
       return -1;
     return nyr_emit_const(b, 0);
   }
+  if (canon_leaf && ny_proof_rule_name(canon_leaf) &&
+      !nyr_user_defined_fn(b, name)) {
+    /*
+     * Equality kernel rules were checked by HM; the evidence they build is
+     * erased, so the call evaluates nothing and yields the witness digest of
+     * its result proposition when that is derivable here.
+     */
+    char *result = nyr_proof_rule_witness_type(b, e, 0);
+    uint64_t digest = result ? ny_hash64_cstr(result) : 0;
+    free(result);
+    return nyr_emit_const(b, (int64_t)digest);
+  }
   ny_native_leaf_kind_t proof_kind = ny_native_leaf_kind(canon_leaf);
   if (!nyr_user_defined_fn(b, name) &&
       (proof_kind == NY_NATIVE_LEAF_PROVE ||
@@ -7779,6 +7945,34 @@ ordinary_call:
         nyr_prove_reflexive(b, condition)) {
       exact_proof_value = true;
       proof_value = 1;
+    }
+    if (proof_kind == NY_NATIVE_LEAF_PROVE && !exact_proof_value &&
+        condition && b->current_fn_name) {
+      /*
+       * Preconditions are evidence: inside `fn f(int n) requires n > 0`,
+       * prove(...) may use the bounds `requires` states for parameters the
+       * body never reassigns.  The obligation still has to follow from
+       * those bounds; anything else fails closed below.
+       */
+      const stmt_t *fn = nyr_find_user_function(b, b->current_fn_name);
+      if (fn && fn->kind == NY_S_FUNC && fn->as.fn.requires_cond) {
+        char *req = ny_proof_type_from_expr(fn->as.fn.requires_cond);
+        char *cond = ny_proof_type_from_expr((expr_t *)condition);
+        size_t rl = req ? strlen(req) : 0, cl = cond ? strlen(cond) : 0;
+        nyr_proves_env_t env = {
+            fn, NULL,
+            rl > 7 ? ny_strndup(req + 6, rl - 7) : NULL};
+        char *inner = cl > 7 ? ny_strndup(cond + 6, cl - 7) : NULL;
+        if (env.req_canon && inner &&
+            ny_proof_canon_decide(inner, nyr_proves_env_range, &env, 0) == 1) {
+          exact_proof_value = true;
+          proof_value = 1;
+        }
+        free(inner);
+        free(env.req_canon);
+        free(req);
+        free(cond);
+      }
     }
     if (proof_kind == NY_NATIVE_LEAF_PROVE && !exact_proof_value && condition) {
       /*

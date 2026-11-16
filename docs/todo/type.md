@@ -287,10 +287,18 @@ name). Resolved items are removed from this roadmap.
   repeated-parameter consistency check recorded as
   [Function type parameters](../spec/kernel.md#resolved-decisions) and tested by
   [fn-type-param](../../etc/tests/lang/types/generics/fn-type-param.nshape). What
-  is still missing is the `{}` spelling, binding through a nested type
-  (`list<A>`), and static per-instance instantiation.
+  is still missing is implicit *value* binders (`{int n}`, rejected with
+  `implicit value binders are not supported`), binding through a nested type
+  (`list<A>`), and static per-instance instantiation. The `{}` spelling for
+  type binders ships: `fn id{Type A}(A x) A` is the implicit form of `<A>`
+  ([fn-type-param](../../etc/tests/lang/types/generics/fn-type-param.nshape)).
 - [ ] **Unification/holes.** Constraint solving for implicits/holes with clear
-  unsolved/mismatch diagnostics; deterministic where specified.
+  unsolved/mismatch diagnostics; deterministic where specified. Named holes
+  ship as goal displays: `?goal` gets a fresh HM variable and is reported as
+  `unsolved hole '?goal' : int` (or `unconstrained`) once inference settles
+  ([named-hole](../../etc/tests/lang/errors/type/named-hole.nshape)). Still
+  open: anonymous `_` holes that the elaborator *fills* (today `_` is an
+  undefined symbol) and solving implicit value binders.
 
 Acceptance: core typing/equality tests; implicit-arg inference fixtures;
 universe error diagnostics; no regressions in existing type/proof fixtures.
@@ -304,7 +312,9 @@ and
 [universe-type-type-negative](../../etc/tests/lang/types/dependent/universes/universe-type-type-negative.nshape).
 
 Measured blockers for the two open elaborator items (probed 2026-11-16):
-`fn id{Type A}(A x) A` is a parse error at `{`; a parameter list binds values,
+`fn id{Type A}(A x) A` now parses and instantiates like `<A>`, but `{int n}`
+has no elaboration (no unifier solves a value from argument types); a
+parameter list binds values,
 so `fn id(Type A, A x) A` still fails as `unknown type name 'A'`; a matching
 `fn id<A>(A x) A` instantiates only dynamically; `list<A>` annotations are
 accepted without relating to the argument's element type; and `Type max(u, 3)`

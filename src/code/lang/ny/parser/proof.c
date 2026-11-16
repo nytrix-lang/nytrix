@@ -614,6 +614,33 @@ static char *proof_prop_expr_depth(expr_t *e, int depth) {
     return ny_strbuf_take(&b);
   }
 
+  /*
+   * Direct application `f(a, b)` prints as `app:f(A,B)` so congruence can
+   * build and compare it; anything else keeps the opaque `ast:` form.
+   */
+  if (e->kind == NY_E_CALL && e->as.call.callee &&
+      e->as.call.callee->kind == NY_E_IDENT &&
+      e->as.call.callee->as.ident.name) {
+    bool plain = true;
+    for (size_t i = 0; i < e->as.call.args.len; ++i)
+      if (e->as.call.args.data[i].name || !e->as.call.args.data[i].val)
+        plain = false;
+    if (plain) {
+      ny_strbuf_t ab;
+      ny_strbuf_init(&ab);
+      ny_strbuf_appendf(&ab, "app:%s(", e->as.call.callee->as.ident.name);
+      for (size_t i = 0; i < e->as.call.args.len; ++i) {
+        char *arg = proof_prop_expr_depth(e->as.call.args.data[i].val,
+                                          depth + 1);
+        if (i)
+          ny_strbuf_append(&ab, ",");
+        ny_strbuf_append(&ab, arg ? arg : "invalid");
+        free(arg);
+      }
+      ny_strbuf_append(&ab, ")");
+      return ny_strbuf_take(&ab);
+    }
+  }
   char *json = ny_expr_to_json(e);
   ny_strbuf_t b;
   ny_strbuf_init(&b);
@@ -635,7 +662,8 @@ static char *proof_prop_expr_depth(expr_t *e, int depth) {
  */
 static void proof_canon_skip(const char **p) {
   const char *s = *p;
-  if (strncmp(s, "binary:", 7) == 0 || strncmp(s, "unary:", 6) == 0) {
+  if (strncmp(s, "binary:", 7) == 0 || strncmp(s, "unary:", 6) == 0 ||
+      strncmp(s, "app:", 4) == 0) {
     const char *open = strchr(s, '(');
     if (!open) {
       *p = s + strlen(s);
@@ -1092,4 +1120,202 @@ int ny_proof_canon_decide(const char *s, ny_proof_name_range_fn env, void *ctx,
     return res;
   }
   return 0;
+}
+
+/*
+ * Equality kernel rules over canonical propositions.  Each takes the
+ * canonical proof types of its proof arguments (`proof<...>`, with or
+ * without HM's ", " spacing) and returns the owned result type, or NULL with
+ * a static reason.  Equations are canonically sorted, so `a == b` and
+ * `b == a` are one proposition and symmetry is definitional.
+ *
+ *   eq_sym(p : a == b)                 : b == a
+ *   eq_trans(p : a == b, q : b == c)   : a == c   (shared side, any order)
+ *   eq_cong(p : a == b, f)             : f(a) == f(b)
+ *   transport(p : a == b, q : P)       : P with a replaced by b (J/subst)
+ */
+static char *proof_rule_strip(const char *type) {
+  if (!type)
+    return NULL;
+  size_t len = strlen(type);
+  const char *body = type;
+  if (len >= 7 && strncmp(type, "proof<", 6) == 0 && type[len - 1] == '>') {
+    body = type + 6;
+    len -= 7;
+  } else {
+    return NULL;
+  }
+  char *out = malloc(len + 1);
+  if (!out)
+    return NULL;
+  size_t o = 0;
+  bool in_str = false;
+  for (size_t i = 0; i < len; ++i) {
+    char c = body[i];
+    if (c == '"')
+      in_str = !in_str;
+    if (!in_str && c == ' ' && i > 0 && body[i - 1] == ',')
+      continue;
+    out[o++] = c;
+  }
+  out[o] = '\0';
+  return out;
+}
+
+static bool proof_rule_equation(const char *canon, char **lhs, char **rhs) {
+  char op[16];
+  *lhs = *rhs = NULL;
+  if (!ny_proof_canon_split_binary(canon, op, sizeof(op), lhs, rhs) ||
+      strcmp(op, "==") != 0) {
+    free(*lhs);
+    free(*rhs);
+    *lhs = *rhs = NULL;
+    return false;
+  }
+  return true;
+}
+
+static char *proof_rule_wrap(const char *canon) {
+  ny_strbuf_t b;
+  ny_strbuf_init(&b);
+  ny_strbuf_appendf(&b, "proof<%s>", canon);
+  return ny_strbuf_take(&b);
+}
+
+/* Re-normalize so the result compares like a prove(...) witness; forms the
+ * canonical parser does not cover keep their constructed spelling. */
+static char *proof_rule_normalize(const char *canon) {
+  arena_t arena = {0};
+  expr_t *e = ny_proof_expr_from_canonical(&arena, canon);
+  char *out = e ? ny_proof_type_from_expr(e) : NULL;
+  arena_free(&arena);
+  return out ? out : proof_rule_wrap(canon);
+}
+
+static char *proof_rule_equation_type(const char *a, const char *b) {
+  ny_strbuf_t eq;
+  ny_strbuf_init(&eq);
+  bool swap = strcmp(a, b) > 0;
+  ny_strbuf_appendf(&eq, "binary:==(%s,%s)", swap ? b : a, swap ? a : b);
+  char *canon = ny_strbuf_take(&eq);
+  char *out = proof_rule_normalize(canon);
+  free(canon);
+  return out;
+}
+
+/* Replace token-aligned occurrences of `from` by `to` in `canon`. */
+static char *proof_rule_replace(const char *canon, const char *from,
+                                const char *to, bool *changed) {
+  size_t fl = strlen(from), tl = strlen(to), cl = strlen(canon);
+  ny_strbuf_t b;
+  ny_strbuf_init(&b);
+  *changed = false;
+  for (size_t i = 0; i < cl;) {
+    bool start_ok = i == 0 || canon[i - 1] == '(' || canon[i - 1] == ',';
+    char after = canon[i + fl];
+    if (start_ok && i + fl <= cl && strncmp(canon + i, from, fl) == 0 &&
+        (after == '\0' || after == ',' || after == ')')) {
+      ny_strbuf_append_n(&b, to, tl);
+      i += fl;
+      *changed = true;
+      continue;
+    }
+    ny_strbuf_append_n(&b, canon + i, 1);
+    ++i;
+  }
+  return ny_strbuf_take(&b);
+}
+
+char *ny_proof_rule_result(const char *rule, const char *const *proofs,
+                           size_t proof_count, const char *fn_name,
+                           const char **reason) {
+  static const char *const r_arity = "wrong number of proof arguments";
+  static const char *const r_eq = "argument is not a proof of an equation";
+  *reason = NULL;
+  if (!rule)
+    return NULL;
+  char *p0 = proof_count > 0 ? proof_rule_strip(proofs[0]) : NULL;
+  char *p1 = proof_count > 1 ? proof_rule_strip(proofs[1]) : NULL;
+  char *a = NULL, *b = NULL, *c = NULL, *d = NULL, *out = NULL;
+  if (strcmp(rule, "eq_sym") == 0) {
+    if (proof_count != 1 || !p0)
+      *reason = r_arity;
+    else if (!proof_rule_equation(p0, &a, &b))
+      *reason = r_eq;
+    else
+      out = proof_rule_equation_type(b, a);
+  } else if (strcmp(rule, "eq_trans") == 0) {
+    if (proof_count != 2 || !p0 || !p1)
+      *reason = r_arity;
+    else if (!proof_rule_equation(p0, &a, &b) ||
+             !proof_rule_equation(p1, &c, &d))
+      *reason = r_eq;
+    else if (strcmp(b, c) == 0)
+      out = proof_rule_equation_type(a, d);
+    else if (strcmp(b, d) == 0)
+      out = proof_rule_equation_type(a, c);
+    else if (strcmp(a, c) == 0)
+      out = proof_rule_equation_type(b, d);
+    else if (strcmp(a, d) == 0)
+      out = proof_rule_equation_type(b, c);
+    else
+      *reason = "the two equations share no side";
+  } else if (strcmp(rule, "eq_cong") == 0) {
+    if (proof_count != 1 || !p0 || !fn_name || !*fn_name)
+      *reason = "eq_cong expects an equation proof and a function name";
+    else if (!proof_rule_equation(p0, &a, &b))
+      *reason = r_eq;
+    else {
+      ny_strbuf_t fa, fb;
+      ny_strbuf_init(&fa);
+      ny_strbuf_init(&fb);
+      ny_strbuf_appendf(&fa, "app:%s(%s)", fn_name, a);
+      ny_strbuf_appendf(&fb, "app:%s(%s)", fn_name, b);
+      char *sa = ny_strbuf_take(&fa), *sb = ny_strbuf_take(&fb);
+      bool swap = strcmp(sa, sb) > 0;
+      ny_strbuf_t eq;
+      ny_strbuf_init(&eq);
+      ny_strbuf_appendf(&eq, "binary:==(%s,%s)", swap ? sb : sa,
+                        swap ? sa : sb);
+      char *canon = ny_strbuf_take(&eq);
+      out = proof_rule_wrap(canon);
+      free(canon);
+      free(sa);
+      free(sb);
+    }
+  } else if (strcmp(rule, "transport") == 0) {
+    if (proof_count != 2 || !p0 || !p1)
+      *reason = r_arity;
+    else if (!proof_rule_equation(p0, &a, &b))
+      *reason = r_eq;
+    else {
+      bool changed = false;
+      char *next = proof_rule_replace(p1, a, b, &changed);
+      if (!changed) {
+        free(next);
+        next = proof_rule_replace(p1, b, a, &changed);
+      }
+      if (!changed) {
+        *reason = "the transported proposition mentions neither side of "
+                  "the equation";
+      } else {
+        out = proof_rule_normalize(next);
+      }
+      free(next);
+    }
+  } else {
+    *reason = "unknown equality rule";
+  }
+  free(p0);
+  free(p1);
+  free(a);
+  free(b);
+  free(c);
+  free(d);
+  return out;
+}
+
+bool ny_proof_rule_name(const char *leaf) {
+  return leaf && (strcmp(leaf, "eq_sym") == 0 || strcmp(leaf, "eq_trans") == 0 ||
+                  strcmp(leaf, "eq_cong") == 0 || strcmp(leaf, "transport") == 0);
 }

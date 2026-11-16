@@ -212,6 +212,11 @@ typedef struct {
    * Type-sized, disjoint stack homes for vregs (negative rbp offsets).
    */
   int *vreg_home_offs;
+  /*
+   * Literals uncolored by mach_decolor_literals (uses rematerialize the
+   * immediate); see the single-consumer publish skip in the COPY encoder.
+   */
+  bool *decolored_literal;
   int *frame_slot_offsets;
   size_t vreg_home_bytes;
   /*
@@ -336,6 +341,8 @@ static void mach_free_remat_maps(nyr_x64_mach_enc_t *e) {
   free((void *)e->addr_fold);
   free((void *)e->addr_fold_known);
   free(e->vreg_home_offs);
+  free(e->decolored_literal);
+  e->decolored_literal = NULL;
   free(e->frame_slot_offsets);
   e->imm_fold = NULL;
   e->imm_fold_known = NULL;
@@ -648,7 +655,15 @@ static void mach_decolor_literals(nyr_x64_mach_enc_t *e,
     return;
   int64_t *value = calloc(m->vreg_len, sizeof(*value));
   bool *known = calloc(m->vreg_len, sizeof(*known));
-  if (value && known && mach_build_imm_fold(m, value, known))
+  if (value && known && mach_build_imm_fold(m, value, known)) {
+    /*
+     * Remember the decolored literals for the encoder: a definition whose
+     * only consumer rematerializes the immediate need not publish it.
+     */
+    free(e->decolored_literal);
+    e->decolored_literal = calloc(m->vreg_len, sizeof(bool));
+    if (e->decolored_literal)
+      memcpy(e->decolored_literal, known, m->vreg_len * sizeof(bool));
     for (size_t i = 0; i < e->regalloc.segment_len; ++i) {
       nyr_mach_live_segment_t *s = &e->regalloc.segments[i];
       if (s->vreg >= m->vreg_len || !known[s->vreg] || s->color < 0)
@@ -659,6 +674,7 @@ static void mach_decolor_literals(nyr_x64_mach_enc_t *e,
       if (s->spill_reason != NYR_MACH_SPILL_FIXED_CLOBBER)
         s->spill_reason = NYR_MACH_SPILL_REGISTER_PRESSURE;
     }
+  }
   free(value);
   free(known);
 }
@@ -11478,6 +11494,33 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
             e->color_seeded[in->dst.as.reg] = true;
             break;
           }
+        }
+        /*
+         * An uncolored literal whose only consumer is the next instruction's
+         * load address is rematerialized there from imm_fold; publishing it
+         * through %rax first only produced a duplicate `movabs rax, imm`.
+         * Other consumers may read the home, so they keep the publish.
+         */
+        if (in->src0.kind == NYR_MACH_OPERAND_IMM &&
+            in->dst.kind == NYR_MACH_OPERAND_VREG && !in->narrow32 &&
+            mach_is_i64(mach, &in->dst) && e->decolored_literal &&
+            e->imm_fold_known && in->dst.as.reg < mach->vreg_len &&
+            e->decolored_literal[in->dst.as.reg] &&
+            e->imm_fold_known[in->dst.as.reg] &&
+            mach_vreg_def_preg(e, in->dst.as.reg) < 0 &&
+            mach_vreg_can_forward_to_next_rax(e, in->dst.as.reg) &&
+            e->cur_inst + 1 < mach->inst_len &&
+            mach->insts[e->cur_inst + 1].opcode == NYR_MACH_LOAD &&
+            mach->insts[e->cur_inst + 1].src0.kind ==
+                NYR_MACH_OPERAND_VREG &&
+            mach->insts[e->cur_inst + 1].src0.as.reg == in->dst.as.reg &&
+            !(mach->insts[e->cur_inst + 1].src1.kind ==
+                  NYR_MACH_OPERAND_VREG &&
+              mach->insts[e->cur_inst + 1].src1.as.reg == in->dst.as.reg)) {
+          if (e->last_rax_valid &&
+              e->last_rax_off == mach_vreg_home_off(e, in->dst.as.reg))
+            mach_rax_invalidate(e);
+          break;
         }
         /*
          * Constant into a colored destination: materialize it in place

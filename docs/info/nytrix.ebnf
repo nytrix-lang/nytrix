@@ -146,7 +146,11 @@ attribute ::= '@' attr_name ['(' [expr { ',' expr } [',']] ')']
 attr_name ::= identifier | number | string | fstring | lexer_keyword
 attr_fn ::= attribute { attribute } fn_decl
 
-fn_decl ::= 'fn' path '(' [params] ')' [type_ref] fn_body
+fn_decl ::= 'fn' path [fn_type_params] [implicit_binders] '(' [params] ')' [type_ref] fn_body
+fn_type_params ::= '<' ident { ',' ident } '>'
+implicit_binders ::= '{' implicit_binder { ',' implicit_binder } '}'
+implicit_binder ::= [ 'Type' ] ident
+named_hole ::= '?' ident (* no space; reported as an unsolved goal *)
 fn_body ::= block | '=' expr | same_line_expr | empty_extern_body
 same_line_expr ::= expr
 empty_extern_body ::= ε
@@ -350,6 +354,7 @@ call_args ::= call_arg { ',' call_arg } [',']
 call_arg ::= expr | identifier '=' expr
 
 primary ::= identifier
+          | named_hole
           | literal
           | list_lit
           | tuple_lit

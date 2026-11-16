@@ -3120,4 +3120,10 @@ typedef struct ny_hm_state_t {
   expr_t *stmt_partial_call;
   const char *stmt_partial_missing;
   size_t stmt_partial_missing_count;
+  /* Named holes `?goal` seen during inference, reported after it settles. */
+  struct {
+    const expr_t *expr;
+    ny_hm_type_t *type;
+  } holes[64];
+  size_t hole_count;
 } ny_hm_state_t;

@@ -838,6 +838,19 @@ static _Thread_local rt_str_hash_cache_t g_str_hash_cache[RT_STR_HASH_CACHE];
  */
 void rt_str_forget_pointer(int64_t v);
 
+/* The intern table of the calling thread: an index of strings by content,
+ * not a reference to them (rt_free removes a freed string's entry). */
+void rt_fc_intern_table(uintptr_t *start, uintptr_t *end) {
+  *start = (uintptr_t)g_intern;
+  *end = *start + g_intern_cap * sizeof(*g_intern);
+}
+
+void rt_fc_str_hash_cache(uintptr_t *start, uintptr_t *end) {
+  *start = (uintptr_t)g_str_hash_cache;
+  *end = *start + sizeof(g_str_hash_cache);
+}
+
+
 void rt_str_intern_clear(void) {
   free(g_intern);
   g_intern = NULL;
