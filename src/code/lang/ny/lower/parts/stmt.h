@@ -6517,56 +6517,6 @@ static int nyr_lower_tail_return(nyr_builder_t *b, const expr_t *value) {
   return 1;
 }
 
-/* Prove that an expression lowers to a raw
- * i64 payload in NYIR: integer literals,
- * arithmetic/bitwise trees over proven
- * operands, ternaries whose arms are
- * proven, and idents bound to typed int
- * locals.  Index/get reads are deliberately
- * unproven here because their payload
- * follows the element representation, not
- * the static type. */
-static bool nyr_expr_is_proven_raw_int(nyr_builder_t *b, const expr_t *e,
-                                       unsigned depth) {
-  if (!b || !e || depth > 6)
-    return false;
-  if (e->kind == NY_E_LITERAL)
-    return e->as.literal.kind == NY_LIT_INT && e->tok.kind != NY_T_NIL;
-  if (e->semantic.resolved) {
-    if (e->semantic.rep == NY_SEM_REP_RAW_INT)
-      return true;
-    if (e->semantic.rep == NY_SEM_REP_TAGGED_DYNAMIC ||
-        e->semantic.rep == NY_SEM_REP_F64 || e->semantic.rep == NY_SEM_REP_F32)
-      return false;
-  }
-  switch (e->kind) {
-  case NY_E_IDENT: {
-    if (!e->as.ident.name)
-      return false;
-    const nyr_local_t *local = nyr_find_local(b, e->as.ident.name);
-    if (!local)
-      return false;
-    if (local->is_any || local->is_f64 || local->is_f32 || local->is_cstr ||
-        local->is_list || local->is_dict)
-      return false;
-    if (local->semantic_rep == NY_SEM_REP_RAW_INT)
-      return true;
-    return local->type_name && ny_native_type_name_is_int(local->type_name);
-  }
-  case NY_E_TERNARY:
-    return nyr_expr_is_proven_raw_int(b, e->as.ternary.true_expr, depth + 1) &&
-           nyr_expr_is_proven_raw_int(b, e->as.ternary.false_expr, depth + 1);
-  case NY_E_BINARY: {
-    if (nyr_cmp(e->as.binary.op, NULL))
-      return false;
-    return nyr_expr_is_proven_raw_int(b, e->as.binary.left, depth + 1) &&
-           nyr_expr_is_proven_raw_int(b, e->as.binary.right, depth + 1);
-  }
-  default:
-    return false;
-  }
-}
-
 /* Whether a function body contains a value-less `return` (outside nested
  * lambdas, which are separate statements trees). */
 static bool nyr_stmt_has_bare_return(const stmt_t *s, unsigned depth) {
@@ -8490,6 +8440,121 @@ static void nyr_trace_function_boundary(size_t index, size_t count,
   fflush(stderr);
 }
 
+/*
+ * Range environment for @proves on the NYIR route.  `result` is the range of
+ * the return expression under test; an integer parameter takes the bounds its
+ * `requires` conjunction states, but only while the body never reassigns it,
+ * so the precondition still describes the returned value.
+ */
+typedef struct {
+  const stmt_t *fn;
+  const char *ret_canon;
+  char *req_canon;
+} nyr_proves_env_t;
+
+static bool nyr_proves_requires_bound(const char *canon, const char *name,
+                                      int64_t *lo, int64_t *hi, int depth) {
+  char op[16];
+  char *l = NULL, *r = NULL;
+  if (!canon || depth > NY_PROOF_CANON_MAX_DEPTH ||
+      !ny_proof_canon_split_binary(canon, op, sizeof(op), &l, &r)) {
+    free(l);
+    free(r);
+    return false;
+  }
+  bool found = false;
+  if (strcmp(op, "&&") == 0) {
+    found = nyr_proves_requires_bound(l, name, lo, hi, depth + 1);
+    found = nyr_proves_requires_bound(r, name, lo, hi, depth + 1) || found;
+  } else {
+    char want[300];
+    snprintf(want, sizeof(want), "name:%s", name);
+    bool name_left = strcmp(l, want) == 0 && strncmp(r, "int:", 4) == 0;
+    bool name_right = strcmp(r, want) == 0 && strncmp(l, "int:", 4) == 0;
+    if (name_left || name_right) {
+      int64_t c = strtoll((name_left ? r : l) + 4, NULL, 10);
+      /* Normalize to `name OP c`. */
+      if (name_right) {
+        if (strcmp(op, "<") == 0)
+          strcpy(op, ">");
+        else if (strcmp(op, "<=") == 0)
+          strcpy(op, ">=");
+        else if (strcmp(op, ">") == 0)
+          strcpy(op, "<");
+        else if (strcmp(op, ">=") == 0)
+          strcpy(op, "<=");
+      }
+      found = true;
+      if (strcmp(op, ">") == 0 && c < INT64_MAX && c + 1 > *lo)
+        *lo = c + 1;
+      else if (strcmp(op, ">=") == 0 && c > *lo)
+        *lo = c;
+      else if (strcmp(op, "<") == 0 && c > INT64_MIN && c - 1 < *hi)
+        *hi = c - 1;
+      else if (strcmp(op, "<=") == 0 && c < *hi)
+        *hi = c;
+      else if (strcmp(op, "==") == 0) {
+        if (c > *lo)
+          *lo = c;
+        if (c < *hi)
+          *hi = c;
+      } else
+        found = false;
+    }
+  }
+  free(l);
+  free(r);
+  return found;
+}
+
+static bool nyr_proves_env_range(void *ctx, const char *name, int64_t *out_lo,
+                                 int64_t *out_hi) {
+  nyr_proves_env_t *env = (nyr_proves_env_t *)ctx;
+  if (!env || !name)
+    return false;
+  if (strcmp(name, "result") == 0) {
+    if (!env->ret_canon || strstr(env->ret_canon, "name:result"))
+      return false;
+    return ny_proof_canon_range(env->ret_canon, nyr_proves_env_range, env,
+                                out_lo, out_hi, 1);
+  }
+  const stmt_t *fn = env->fn;
+  if (!env->req_canon || !fn || fn->kind != NY_S_FUNC)
+    return false;
+  bool is_int_param = false;
+  for (size_t i = 0; i < fn->as.fn.params.len; ++i) {
+    const param_t *p = &fn->as.fn.params.data[i];
+    if (p->name && strcmp(p->name, name) == 0) {
+      is_int_param = p->type && (strcmp(p->type, "int") == 0 ||
+                                 strcmp(p->type, "i64") == 0);
+      break;
+    }
+  }
+  if (!is_int_param || nyr_stmt_assigns_ident(fn->as.fn.body, name))
+    return false;
+  /* A tagged `int` carries 63 bits, which also keeps `n + c` rangeable. */
+  int64_t lo = INT64_MIN / 2, hi = INT64_MAX / 2;
+  if (!nyr_proves_requires_bound(env->req_canon, name, &lo, &hi, 0) || lo > hi)
+    return false;
+  *out_lo = lo;
+  *out_hi = hi;
+  return true;
+}
+
+static char *nyr_proves_strip_proof(char *full) {
+  if (!full)
+    return NULL;
+  const char *inner = full;
+  if (strncmp(inner, "proof<", 6) == 0)
+    inner += 6;
+  size_t ilen = strlen(inner);
+  char *canon = (ilen > 0 && inner[ilen - 1] == '>')
+                    ? ny_strndup(inner, ilen - 1)
+                    : ny_strdup(inner);
+  free(full);
+  return canon;
+}
+
 static void nyr_proves_collect_returns(const stmt_t *stmt,
                                        const expr_t **returns, size_t cap,
                                        size_t *count, bool *overflow) {
@@ -8813,6 +8878,19 @@ static bool nyr_build_function(const program_t *prog, const stmt_t *fn,
               d = ny_proof_canon_decide(replaced, NULL, NULL, 0);
             }
           }
+        }
+        if (d != 1 && rets[r]) {
+          nyr_proves_env_t penv = {
+              fn,
+              nyr_proves_strip_proof(
+                  ny_proof_type_from_expr((expr_t *)rets[r])),
+              fn->as.fn.requires_cond
+                  ? nyr_proves_strip_proof(
+                        ny_proof_type_from_expr(fn->as.fn.requires_cond))
+                  : NULL};
+          d = ny_proof_canon_decide(canon, nyr_proves_env_range, &penv, 0);
+          free((char *)penv.ret_canon);
+          free(penv.req_canon);
         }
         if (d != 1) {
           nyr_fail(&b,

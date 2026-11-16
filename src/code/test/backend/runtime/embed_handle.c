@@ -7,12 +7,23 @@
 #include "code/backend/runtime/shared.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 extern int64_t rt_append(int64_t list, int64_t value);
 
 int main(void) {
   char err[256] = {0};
+  /*
+   * The moving nursery is opt-in (NYTRIX_GC=1); without it nyGcAlloc is a
+   * plain malloc and there is no GC-owned object to root.  Enable it before
+   * the lazy collector init so this test always exercises handle rooting.
+   */
+#ifdef _WIN32
+  _putenv_s("NYTRIX_GC", "1");
+#else
+  setenv("NYTRIX_GC", "1", 1);
+#endif
   if (!nytrix_embed_startup(err, sizeof(err))) {
     fprintf(stderr, "embedding startup failed: %s\n", err);
     return 1;

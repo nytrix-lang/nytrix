@@ -3052,6 +3052,8 @@ int64_t rt_tbuf_pop_any(int64_t buffer) {
   return value;
 }
 
+static _Thread_local int rt_tbuf_to_cstr_depth;
+
 int64_t rt_tbuf_to_cstr(int64_t buffer) {
   buffer = rt_tbuf_resolve_handle(buffer);
   int64_t count = rt_tbuf_len_raw(buffer);
@@ -3147,6 +3149,42 @@ int64_t rt_tbuf_to_cstr(int64_t buffer) {
       }
       memcpy(out + used, item, (size_t)n);
       used += (size_t)n;
+    } else if (value && rt_tbuf_check(value, NULL) == RT_TBUF_OK) {
+      /*
+       * Nested sequences render structurally, capped at the same depth as
+       * core.reflect.to_str; printing the payload address as an integer
+       * made every list of lists unreadable.
+       */
+      const char *s = NULL;
+      size_t len = 0;
+      int64_t nested = 0;
+      if (rt_tbuf_to_cstr_depth >= 3) {
+        s = rt_tbuf_word_is_tuple(((int64_t *)((uintptr_t)value -
+                                                RT_NATIVE_TBUF_HEADER))[3])
+                ? "(...)"
+                : "[...]";
+        len = 5;
+      } else {
+        ++rt_tbuf_to_cstr_depth;
+        nested = rt_tbuf_to_cstr(value);
+        --rt_tbuf_to_cstr_depth;
+        s = nested ? (const char *)(uintptr_t)rt_any_to_cstr(nested) : "[]";
+        len = s ? strlen(s) : 0;
+      }
+      if (used + len + 3 >= cap) {
+        size_t next = cap;
+        while (used + len + 3 >= next)
+          next *= 2;
+        char *grown = (char *)realloc(out, next);
+        if (!grown) {
+          free(out);
+          return 0;
+        }
+        out = grown;
+        cap = next;
+      }
+      memcpy(out + used, s, len);
+      used += len;
     } else {
       n = snprintf(item, sizeof(item), "%lld", (long long)value);
       if (n < 0 || used + (size_t)n + 1 >= cap) {

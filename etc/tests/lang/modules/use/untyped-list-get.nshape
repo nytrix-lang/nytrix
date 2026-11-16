@@ -1,0 +1,50 @@
+shape test_untyped_list_get_provider {
+  family "runtime/modules/use"
+  generator "embedded"
+  features ["ny", "test", "list"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+module untyped_list_get(second, sort_indices)
+use core
+
+fn second(list src) any {
+   mut r = []
+   mut i = 0
+   while i < src.len {
+      r = r.append(src.get(i))
+      i += 1
+   }
+   r.get(1)
+}
+
+fn sort_indices(list scores0) list {
+   mut result = []
+   mut scores = []
+   mut index = 0
+   while index < scores0.len {
+      result = result.append(index)
+      scores = scores.append(scores0.get(index))
+      index += 1
+   }
+   mut i = 1
+   while i < result.len {
+      def item = int(result.get(i))
+      def item_score = int(scores.get(i))
+      mut at = i
+      while at > 0 {
+         def prior = int(result.get(at - 1))
+         def prior_score = int(scores.get(at - 1))
+         if !(item_score > prior_score) { break }
+         result[at] = prior
+         scores[at] = prior_score
+         at -= 1
+      }
+      result[at] = item
+      scores[at] = item_score
+      i += 1
+   }
+   result
+}
+NY
+}

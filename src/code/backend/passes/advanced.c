@@ -66,12 +66,15 @@ bool nyr_null_align_facts(nyr_func_t *f) {
     if (in->dst >= 0 && in->dst < f->next_value) {
       const nyr_range_t *r = &facts[in->dst].range;
       if (r->has_min && r->min > 0 && !in->range.has_min) {
+        /*
+         * Instructions carry a closed interval or none at all; the verifier
+         * rejects a one-sided fact. A missing upper bound is trivially
+         * INT64_MAX, not a reason to drop the lower bound.
+         */
         in->range.has_min = true;
         in->range.min = r->min;
-        if (r->has_max) {
-          in->range.has_max = true;
-          in->range.max = r->max;
-        }
+        in->range.has_max = true;
+        in->range.max = r->has_max ? r->max : INT64_MAX;
       }
     }
     /*

@@ -477,13 +477,18 @@ bool nyr_vrp(nyr_func_t *f) {
     if (in->dst < 0 || (size_t)in->dst >= num_values)
       continue;
     in->range = (nyr_range_t){0};
-    if (ranges[in->dst].has_min) {
+    /*
+     * VRP tracks one-sided bounds internally, but an instruction range is a
+     * closed interval: complete an absent side with the trivial bound rather
+     * than publishing a fact the verifier rejects.
+     */
+    if (ranges[in->dst].has_min || ranges[in->dst].has_max) {
       in->range.has_min = true;
-      in->range.min = ranges[in->dst].min;
-    }
-    if (ranges[in->dst].has_max) {
       in->range.has_max = true;
-      in->range.max = ranges[in->dst].max;
+      in->range.min = ranges[in->dst].has_min ? ranges[in->dst].min
+                                              : INT64_MIN;
+      in->range.max = ranges[in->dst].has_max ? ranges[in->dst].max
+                                              : INT64_MAX;
     }
   }
 

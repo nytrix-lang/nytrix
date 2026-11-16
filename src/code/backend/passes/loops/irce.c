@@ -154,7 +154,16 @@ static bool irce_hoist_one_invariant_check(nyr_func_t *f, bool *moved) {
   }
   for (size_t li = 0; li < info.count; ++li) {
     const nyr_scev_loop_t *l = &info.loops[li];
-    if (!l->trip_count_known || l->trip_count == 0 ||
+    /*
+     * Hoisting a trap out of the loop is only equivalent when the loop is
+     * guaranteed to run at least once. A constant positive trip count says
+     * so directly; a symbolic trip expression says so because the analysis
+     * only records one for an entry test a dominating guard (or the operand
+     * ranges) already proves.
+     */
+    bool positive_trip =
+        (l->trip_count_known && l->trip_count > 0) || l->trip_expr_known;
+    if (!positive_trip ||
         l->preheader_block >= cfg.block_count ||
         l->header_block >= cfg.block_count || l->latch_block >= cfg.block_count)
       continue;

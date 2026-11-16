@@ -18,6 +18,23 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* `lo <= hi` (or `lo < hi` when `strict`) established on every path to a
+ * query point. */
+typedef struct {
+  int lo;
+  int hi;
+  bool strict;
+} scev_le_fact_t;
+
+static bool scev_collect_le_facts(const nyr_func_t *f, const int *defs,
+                                  const nyr_cfg_t *cfg, size_t at,
+                                  scev_le_fact_t *facts, size_t *count,
+                                  size_t cap);
+static bool scev_le_reaches(int from, int to, const scev_le_fact_t *facts,
+                            size_t count);
+static bool scev_lt_reaches(int from, int to, const scev_le_fact_t *facts,
+                            size_t count);
+
 static int root_copy(const nyr_func_t *f, const int *defs, int value) {
   return nyr_strip_copy_chain(f, defs, value, 32);
 }
@@ -108,6 +125,36 @@ static bool compute_trip(nyr_scev_loop_t *l) {
 }
 
 /*
+ * Range of a runtime length-style call result. These helpers return a count
+ * and report zero on failure, so the useful fact is non-negativity; the upper
+ * end stays INT64_MAX because the length is dynamic. This is the general
+ * call-result fact: it feeds the same range consumers as an operand range
+ * without pretending to know a bound the callee does not promise.
+ */
+static bool scev_call_nonnegative_range(const nyr_func_t *f, const int *defs,
+                                        int value, nyr_range_t *out) {
+  if (!f || !defs || !out || getenv("NYTRIX_NO_SCEV_CALL_RANGES"))
+    return false;
+  int di = def_index(f, defs, value);
+  if (di < 0 || (size_t)di >= f->len)
+    return false;
+  const nyr_inst_t *in = &f->data[di];
+  if (in->op != NYIR_CALL || !in->symbol)
+    return false;
+  static const char *const nonnegative[] = {
+      "rt_tbuf_len_raw", "rt_list_len_raw", "rt_list_len", "rt_len",
+      "rt_len_strict",   "rt_dict_len_raw", "rt_set_len_raw"};
+  for (size_t i = 0; i < sizeof(nonnegative) / sizeof(nonnegative[0]); ++i) {
+    if (strcmp(in->symbol, nonnegative[i]) != 0)
+      continue;
+    *out = (nyr_range_t){
+        .has_min = true, .has_max = true, .min = 0, .max = INT64_MAX};
+    return true;
+  }
+  return false;
+}
+
+/*
  * Constant bounds for a counted loop whose start or limit is not a literal.
  *
  * The limit must be loop invariant: defined outside the loop in a block that
@@ -123,6 +170,12 @@ static bool compute_trip(nyr_scev_loop_t *l) {
  * the test still holds; otherwise wrapping can revisit earlier values and no
  * single interval is valid. All arithmetic is 128-bit and checked.
  */
+static bool scev_value_invariant_in_loop(const nyr_func_t *f,
+                                         const nyr_cfg_t *cfg,
+                                         const bool *in_loop, const int *defs,
+                                         int value,
+                                         const nyr_scev_loop_t *l);
+
 static void compute_range_bounds(const nyr_func_t *f,
                                  const nyr_value_fact_t *facts,
                                  const nyr_cfg_t *cfg, const bool *in_loop,
@@ -143,14 +196,34 @@ static void compute_range_bounds(const nyr_func_t *f,
   size_t lim_block = cfg->inst_block[(size_t)lim_def];
   size_t init_block = cfg->inst_block[(size_t)init_def];
   if (lim_block >= cfg->block_count || init_block >= cfg->block_count ||
-      in_loop[lim_block] || in_loop[init_block] ||
       !nyr_cfg_dominates(cfg, lim_block, l->header_block) ||
       !nyr_cfg_dominates(cfg, init_block, l->header_block))
     return;
+  nyr_scev_loop_t inv = {.header_block = l->header_block};
+  bool lim_inv = !in_loop[lim_block] ||
+                 scev_value_invariant_in_loop(f, cfg, in_loop, defs,
+                                              l->limit_value, &inv);
+  bool init_inv = !in_loop[init_block] ||
+                  scev_value_invariant_in_loop(f, cfg, in_loop, defs,
+                                               l->init_value, &inv);
+  if (!lim_inv || !init_inv)
+    return;
   nyr_range_t ir = {0}, lr = {0};
-  if (!nir_value_range_at(f, facts, l->init_value, at, &ir) ||
-      !nir_value_range_at(f, facts, l->limit_value, at, &lr) || !ir.has_min ||
-      !ir.has_max || !lr.has_min || !lr.has_max)
+  bool ir_ok = nir_value_range_at(f, facts, l->init_value, at, &ir) &&
+               ir.has_min && ir.has_max;
+  bool lr_ok = nir_value_range_at(f, facts, l->limit_value, at, &lr) &&
+               lr.has_min && lr.has_max;
+  if (!ir_ok)
+    ir_ok = scev_call_nonnegative_range(f, defs, l->init_value, &ir);
+  if (!lr_ok)
+    lr_ok = scev_call_nonnegative_range(f, defs, l->limit_value, &lr);
+  if (!ir_ok || !lr_ok)
+    return;
+  /* A call result is only known non-negative: its INT64_MAX end gives no
+   * usable interval, and recording [0, INT64_MAX) bounds would displace a
+   * tighter fact a consumer has elsewhere (a tbuf length set to a constant
+   * before the loop). Such a range still serves the entry test below. */
+  if ((ir.has_max && ir.max == INT64_MAX) || (lr.has_max && lr.max == INT64_MAX))
     return;
   __int128 body_lo, body_hi, exit_edge, iv_lo, iv_hi, span;
   if (up) {
@@ -198,9 +271,229 @@ static void compute_range_bounds(const nyr_func_t *f,
   }
 }
 
+static uint64_t scev_magnitude_i64(int64_t value) {
+  return value < 0 ? (uint64_t)(-(value + 1)) + 1u : (uint64_t)value;
+}
+
+static uint64_t scev_gcd_u64(uint64_t a, uint64_t b) {
+  while (b) {
+    uint64_t t = a % b;
+    a = b;
+    b = t;
+  }
+  return a;
+}
+
+/* The value's definition is outside the natural loop and dominates its
+ * header, so the value is loop invariant. A local load defined inside the loop
+ * is also accepted when the slot is never stored to, its address is never
+ * taken, and no instruction in the loop body may write memory or have unknown
+ * side effects, so every iteration observes the same value. */
+static bool scev_value_invariant_in_loop(const nyr_func_t *f,
+                                         const nyr_cfg_t *cfg,
+                                         const bool *in_loop, const int *defs,
+                                         int value,
+                                         const nyr_scev_loop_t *l) {
+  int di = def_index(f, defs, value);
+  if (di < 0 || (size_t)di >= f->len)
+    return false;
+  size_t block = cfg->inst_block[(size_t)di];
+  if (block < cfg->block_count && !in_loop[block] &&
+      nyr_cfg_dominates(cfg, block, l->header_block))
+    return true;
+  if (getenv("NYTRIX_NO_SCEV_RELOAD_INVARIANT"))
+    return false;
+  if (block >= cfg->block_count || !in_loop[block])
+    return false;
+  const nyr_inst_t *load = &f->data[(size_t)di];
+  if (load->op != NYIR_LOAD_LOCAL || load->imm < 0)
+    return false;
+  int64_t slot = load->imm;
+  for (size_t b = 0; b < cfg->block_count; ++b) {
+    if (!in_loop[b])
+      continue;
+    size_t start = cfg->block_start[b], end = cfg->block_end[b];
+    for (size_t i = start; i < end && i < f->len; ++i) {
+      const nyr_inst_t *in = &f->data[i];
+      if (in->op == NYIR_STORE_LOCAL && in->imm == slot)
+        return false;
+      if (in->op == NYIR_ADDR_LOCAL && in->imm == slot)
+        return false;
+      unsigned eff = nyr_effective_effects(in);
+      if (eff & (NYIR_EFFECT_WRITE_MEMORY | NYIR_EFFECT_UNKNOWN_SIDE_EFFECT))
+        return false;
+    }
+  }
+  return true;
+}
+
+/*
+ * Symbolic trip count for `for (i = init; i < limit; ++i)` (and `<=`), where
+ * start and limit may both be SSA values. The count is the expression
+ * `limit - init (+ 1 for <=)`; it is only recorded when the loop is provably
+ * entered and the subtraction stays in i64, because outside those conditions
+ * the expression is either negative (zero-trip loop) or wrapped.
+ *
+ * Entry comes from operand ranges when they decide the test, or from a
+ * dominating branch fact (`init < limit`, or `init <= limit`). Requiring the
+ * start and limit intervals also bounds `limit - init` away from overflow.
+ */
+static bool compute_trip_expr(const nyr_func_t *f,
+                              const nyr_value_fact_t *facts,
+                              const nyr_cfg_t *cfg, const bool *in_loop,
+                              const int *defs, size_t at,
+                              nyr_scev_loop_t *l) {
+  if (!f || !facts || !cfg || !in_loop || !defs || !l || at >= f->len ||
+      l->trip_count_known || l->step != 1 ||
+      (l->predicate != NYIR_CMP_LT && l->predicate != NYIR_CMP_LE))
+    return false;
+  if (!scev_value_invariant_in_loop(f, cfg, in_loop, defs, l->init_value, l) ||
+      !scev_value_invariant_in_loop(f, cfg, in_loop, defs, l->limit_value, l))
+    return false;
+  nyr_range_t ir = {0}, lr = {0};
+  bool ir_ok = nir_value_range_at(f, facts, l->init_value, at, &ir) &&
+               ir.has_min && ir.has_max;
+  bool lr_ok = nir_value_range_at(f, facts, l->limit_value, at, &lr) &&
+               lr.has_min && lr.has_max;
+  if (!ir_ok)
+    ir_ok = scev_call_nonnegative_range(f, defs, l->init_value, &ir);
+  if (!lr_ok)
+    lr_ok = scev_call_nonnegative_range(f, defs, l->limit_value, &lr);
+  if (!ir_ok || !lr_ok)
+    return false;
+  bool entered = l->predicate == NYIR_CMP_LT ? ir.max < lr.min
+                                              : ir.max <= lr.min;
+  if (!entered) {
+    scev_le_fact_t guard_facts[64];
+    size_t guard_count = 0;
+    if (!scev_collect_le_facts(f, defs, cfg, at, guard_facts, &guard_count,
+                               64))
+      return false;
+    entered = l->predicate == NYIR_CMP_LT
+                  ? scev_lt_reaches(root_copy(f, defs, l->init_value),
+                                    root_copy(f, defs, l->limit_value),
+                                    guard_facts, guard_count)
+                  : scev_le_reaches(root_copy(f, defs, l->init_value),
+                                    root_copy(f, defs, l->limit_value),
+                                    guard_facts, guard_count);
+  }
+  if (!entered)
+    return false;
+  /*
+   * The exit block observes `limit` for `<` and `limit + 1` for `<=`. The
+   * latter needs an extra representable value, so it is recorded only when
+   * the limit's proven range leaves room. `exit_lb` is the same expression's
+   * lower bound, using the entry proof to tighten the limit below.
+   */
+  l->exit_value_known = true;
+  l->exit_value = root_copy(f, defs, l->limit_value);
+  l->exit_value_const = l->predicate == NYIR_CMP_LE ? 1 : 0;
+  if (l->predicate == NYIR_CMP_LE && lr.max == INT64_MAX)
+    l->exit_value_known = false;
+  __int128 exit_lb_init =
+      l->predicate == NYIR_CMP_LT ? (__int128)ir.min + 1 : (__int128)ir.min;
+  if (exit_lb_init < lr.min)
+    exit_lb_init = lr.min;
+  if (exit_lb_init >= INT64_MIN && exit_lb_init <= INT64_MAX) {
+    l->exit_lb_known = true;
+    l->exit_lb = (int64_t)exit_lb_init;
+  }
+  __int128 upper =
+      (__int128)lr.max - ir.min + (l->predicate == NYIR_CMP_LE ? 1 : 0);
+  if (upper > INT64_MAX)
+    return false;
+  l->trip_expr_known = true;
+  l->trip_expr_pos = root_copy(f, defs, l->limit_value);
+  l->trip_expr_neg = root_copy(f, defs, l->init_value);
+  l->trip_expr_const = l->predicate == NYIR_CMP_LE ? 1 : 0;
+  return true;
+}
+
+/*
+ * Every value an unwrapped recurrence visits is `init + k*step`, so it is a
+ * multiple of gcd(|init|, |step|). Recurrences that may wrap are excluded:
+ * wrapping destroys divisibility for non-power-of-two steps. The facts used
+ * are an exact trip count or a range-derived IV interval, both of which
+ * already prove the exit value stays representable.
+ */
+static void compute_multiple(nyr_scev_loop_t *l) {
+  if (!l || !l->init_is_const || l->step == 0)
+    return;
+  if (!l->trip_count_known && !l->iv_bounds_known)
+    return;
+  uint64_t step = scev_magnitude_i64(l->step);
+  uint64_t start = scev_magnitude_i64(l->init);
+  uint64_t multiple = scev_gcd_u64(start, step);
+  if (multiple < 2 || multiple > (uint64_t)INT64_MAX)
+    return;
+  l->iv_multiple_known = true;
+  l->iv_multiple = (int64_t)multiple;
+}
+
 static bool block_for_label(const nyr_cfg_t *cfg, int64_t label,
                             size_t *out_block) {
   return nyr_cfg_block_for_label(cfg, label, out_block);
+}
+
+/*
+ * Resolve a `select` to the arm selected on every path to `at`.
+ *
+ * This is the expression-level half of guard facts: when a dominating branch
+ * tests exactly the select's condition, and one of that branch's successors
+ * dominates the query, the arm taken there is the only value the select can
+ * produce. The value is resolved recursively, so nested selects work, and the
+ * original value is returned unchanged when no such branch exists (the select
+ * then remains an opaque value, exactly as before).
+ */
+static int scev_resolve_select_at(const nyr_func_t *f, const int *defs,
+                                  const nyr_cfg_t *cfg, size_t at, int value,
+                                  unsigned depth) {
+  if (!f || !defs || !cfg || at >= f->len || depth > 8 ||
+      getenv("NYTRIX_NO_SCEV_SELECT_FACTS"))
+    return value;
+  value = root_copy(f, defs, value);
+  int di = def_index(f, defs, value);
+  if (di < 0 || (size_t)di >= f->len)
+    return value;
+  const nyr_inst_t *sel = &f->data[di];
+  if (sel->op != NYIR_SELECT_I64 || sel->a < 0 || sel->b < 0 || sel->c < 0)
+    return value;
+  int cond = root_copy(f, defs, sel->a);
+  int cdi = def_index(f, defs, cond);
+  if (cdi < 0 || (size_t)cdi >= f->len || f->data[cdi].op != NYIR_CMP_I64)
+    return value;
+  size_t at_block = cfg->inst_block[at];
+  if (at_block >= cfg->block_count)
+    return value;
+  for (size_t b = 0; b < cfg->block_count; ++b) {
+    if (b == at_block || !nyr_cfg_dominates(cfg, b, at_block))
+      continue;
+    size_t end = nyr_block_last_non_nop(f, cfg, b);
+    if (end <= cfg->block_start[b])
+      continue;
+    const nyr_inst_t *term = &f->data[end - 1];
+    if (term->op != NYIR_BR_IF || root_copy(f, defs, term->a) != cond)
+      continue;
+    size_t taken = SIZE_MAX;
+    if (!block_for_label(cfg, term->imm, &taken) ||
+        taken >= cfg->block_count)
+      continue;
+    size_t other = SIZE_MAX;
+    for (size_t e = cfg->succ_offsets[b]; e < cfg->succ_offsets[b + 1]; ++e) {
+      size_t succ = cfg->succ_blocks[e];
+      if (succ != taken)
+        other = succ;
+    }
+    if (other == SIZE_MAX)
+      continue;
+    bool took_taken = nyr_cfg_dominates(cfg, taken, at_block);
+    bool took_other = nyr_cfg_dominates(cfg, other, at_block);
+    if (took_taken == took_other)
+      continue;
+    int arm = took_taken ? sel->b : sel->c;
+    return scev_resolve_select_at(f, defs, cfg, at, arm, depth + 1);
+  }
+  return value;
 }
 
 static bool append_loop(nyr_scev_info_t *out, const nyr_scev_loop_t *loop) {
@@ -398,6 +691,9 @@ bool nyr_scev_analyze(const nyr_func_t *f, nyr_scev_info_t *out) {
               if (facts && cmp_at < f->len)
                 compute_range_bounds(f, facts, &cfg, in_loop, defs, cmp_at,
                                      &loop);
+              if (facts && !getenv("NYTRIX_NO_SCEV_TRIP_EXPR"))
+                compute_trip_expr(f, facts, &cfg, in_loop, defs, cmp_at, &loop);
+              compute_multiple(&loop);
             } else if (trip_known && loop.init_is_const) {
               loop.trip_count_known = true;
               loop.trip_count = trip_count;
@@ -989,11 +1285,6 @@ static bool scev_tbuf_payload(const nyr_func_t *f, const int *defs, int value,
   return ok;
 }
 
-/* `lo <= hi` established on every path to a query point. */
-typedef struct {
-  int lo;
-  int hi;
-} scev_le_fact_t;
 
 static nyr_cmp_t scev_cmp_invert(nyr_cmp_t cmp) {
   switch (cmp) {
@@ -1011,6 +1302,41 @@ static nyr_cmp_t scev_cmp_invert(nyr_cmp_t cmp) {
     return NYIR_CMP_EQ;
   }
   return NYIR_CMP_NE;
+}
+
+/* Append the ordering facts implied by one comparison predicate. */
+static bool scev_push_order_facts(int x, int y, nyr_cmp_t pred,
+                                  scev_le_fact_t *facts, size_t *count,
+                                  size_t cap) {
+  bool le_xy = false, le_yx = false, strict = false;
+  switch (pred) {
+  case NYIR_CMP_LT:
+    le_xy = true;
+    strict = true;
+    break;
+  case NYIR_CMP_LE:
+    le_xy = true;
+    break;
+  case NYIR_CMP_GT:
+    le_yx = true;
+    strict = true;
+    break;
+  case NYIR_CMP_GE:
+    le_yx = true;
+    break;
+  case NYIR_CMP_EQ:
+    le_xy = le_yx = true;
+    break;
+  case NYIR_CMP_NE:
+    break;
+  }
+  if ((le_xy && *count >= cap) || (le_yx && *count + 1 >= cap))
+    return false;
+  if (le_xy)
+    facts[(*count)++] = (scev_le_fact_t){.lo = x, .hi = y, .strict = strict};
+  if (le_yx)
+    facts[(*count)++] = (scev_le_fact_t){.lo = y, .hi = x, .strict = strict};
+  return true;
 }
 
 /*
@@ -1062,35 +1388,91 @@ static bool scev_collect_le_facts(const nyr_func_t *f, const int *defs,
     if (took_taken == took_other)
       continue;
     nyr_cmp_t pred = took_taken ? cmp->cmp : scev_cmp_invert(cmp->cmp);
-    int x = root_copy(f, defs, cmp->a);
-    int y = root_copy(f, defs, cmp->b);
-    bool le_xy = false, le_yx = false;
-    switch (pred) {
-    case NYIR_CMP_LT: /* x < y */
-    case NYIR_CMP_LE:
-      le_xy = true;
-      break;
-    case NYIR_CMP_GT: /* x > y */
-    case NYIR_CMP_GE:
-      le_yx = true;
-      break;
-    case NYIR_CMP_EQ:
-      le_xy = le_yx = true;
-      break;
-    case NYIR_CMP_NE:
-      break;
+    int x = scev_resolve_select_at(f, defs, cfg, at,
+                                   root_copy(f, defs, cmp->a), 0);
+    int y = scev_resolve_select_at(f, defs, cfg, at,
+                                   root_copy(f, defs, cmp->b), 0);
+    scev_push_order_facts(x, y, pred, facts, count, cap);
+  }
+  /*
+   * Assume-marked comparisons are facts at this point without a CFG edge: the
+   * front end (or a lowering stage) promises the compare is true. The scan is
+   * instruction-level because the assume need not be a block terminator; it
+   * must still dominate the query, and in the same block it must precede it.
+   */
+  bool allow_assume = !getenv("NYTRIX_NO_SCEV_ASSUME_FACTS");
+  for (size_t j = 0; j < f->len && j <= at && allow_assume; ++j) {
+    const nyr_inst_t *cmp = &f->data[j];
+    if (cmp->op != NYIR_CMP_I64 || !(cmp->flags & NYIR_INST_F_ASSUME) ||
+        cmp->a < 0 || cmp->b < 0)
+      continue;
+    size_t cb = cfg->inst_block[j];
+    if (cb >= cfg->block_count)
+      continue;
+    if (cb != at_block) {
+      if (!nyr_cfg_dominates(cfg, cb, at_block))
+        continue;
+    } else if (j > at) {
+      continue;
     }
-    if ((le_xy && *count == cap) || (le_yx && *count + 1 >= cap))
-      return *count > 0;
-    if (le_xy)
-      facts[(*count)++] = (scev_le_fact_t){.lo = x, .hi = y};
-    if (le_yx)
-      facts[(*count)++] = (scev_le_fact_t){.lo = y, .hi = x};
+    int x = scev_resolve_select_at(f, defs, cfg, at,
+                                   root_copy(f, defs, cmp->a), 0);
+    int y = scev_resolve_select_at(f, defs, cfg, at,
+                                   root_copy(f, defs, cmp->b), 0);
+    scev_push_order_facts(x, y, cmp->cmp, facts, count, cap);
   }
   return *count > 0;
 }
 
 /* Transitive closure of the collected `<=` facts, bounded by the fact count. */
+/* Transitive closure that reports whether some `from <= to` chain contains a
+ * strict edge, i.e. proves `from < to`. */
+static bool scev_lt_reaches(int from, int to, const scev_le_fact_t *facts,
+                            size_t count) {
+  if (from == to || !facts || !count)
+    return false;
+  int nodes[64];
+  bool strict[64];
+  size_t node_count = 0;
+  nodes[node_count] = from;
+  strict[node_count++] = false;
+  for (size_t iter = 0; iter <= count; ++iter) {
+    bool added = false;
+    for (size_t i = 0; i < count; ++i) {
+      size_t lo = node_count, hi = node_count;
+      for (size_t k = 0; k < node_count; ++k) {
+        if (nodes[k] == facts[i].lo)
+          lo = k;
+        if (nodes[k] == facts[i].hi)
+          hi = k;
+      }
+      if (lo == node_count)
+        continue;
+      bool want_strict = facts[i].strict || strict[lo];
+      if (hi < node_count) {
+        if (want_strict && !strict[hi]) {
+          strict[hi] = true;
+          added = true;
+          if (nodes[hi] == to)
+            return true;
+        }
+        continue;
+      }
+      if (node_count == 64)
+        return false;
+      nodes[node_count] = facts[i].hi;
+      strict[node_count] = want_strict;
+      added = true;
+      if (facts[i].hi == to && want_strict)
+        return true;
+      ++node_count;
+    }
+    if (!added)
+      break;
+  }
+  return false;
+}
+
 static bool scev_le_reaches(int from, int to, const scev_le_fact_t *facts,
                             size_t count) {
   if (from == to)
@@ -1176,8 +1558,9 @@ static bool scev_guard_proves_offset(const nyr_func_t *f,
     base = scaled_base;
   if (length_scale != scale)
     return false;
-  int length_root = root_copy(f, defs, base);
-  int limit_root = root_copy(f, defs, loop->limit_value);
+  int length_root = scev_resolve_select_at(f, defs, cfg, at, base, 0);
+  int limit_root = scev_resolve_select_at(f, defs, cfg, at,
+                                          loop->limit_value, 0);
   bool ordered = length_root == limit_root;
   if (!ordered) {
     /* Predicated guard: the limit is at most the check's length here. */
@@ -1207,6 +1590,178 @@ static bool scev_guard_proves_offset(const nyr_func_t *f,
       nyr_cfg_dominates(cfg, body_entry, at_block);
   free(members);
   return on_body_path;
+}
+
+/*
+ * Symbolic linear form in the loop's exit value: `scale * exit + constant`.
+ * This is the analysis-side symbolic range layer; it is never serialized.
+ */
+typedef struct {
+  bool uses_exit;
+  int64_t scale;
+  int64_t constant;
+} scev_exit_form_t;
+
+static bool scev_exit_form_combine(scev_exit_form_t *out,
+                                   const scev_exit_form_t *a,
+                                   const scev_exit_form_t *b, int sign) {
+  __int128 scale = (__int128)a->scale + sign * (__int128)b->scale;
+  __int128 constant = (__int128)a->constant + sign * (__int128)b->constant;
+  if (scale < INT64_MIN || scale > INT64_MAX || constant < INT64_MIN ||
+      constant > INT64_MAX)
+    return false;
+  *out = (scev_exit_form_t){.uses_exit = a->uses_exit || b->uses_exit,
+                            .scale = (int64_t)scale,
+                            .constant = (int64_t)constant};
+  return true;
+}
+
+static bool scev_exit_form_build(const nyr_func_t *f, const int *defs, int iv,
+                                 int64_t exit_const, int value,
+                                 unsigned depth, scev_exit_form_t *out) {
+  if (!f || !defs || !out || depth > 32)
+    return false;
+  value = root_copy(f, defs, value);
+  if (value == iv) {
+    *out = (scev_exit_form_t){
+        .uses_exit = true, .scale = 1, .constant = exit_const};
+    return true;
+  }
+  int di = def_index(f, defs, value);
+  if (di < 0 || (size_t)di >= f->len)
+    return false;
+  const nyr_inst_t *in = &f->data[di];
+  if (in->op == NYIR_CONST_I64) {
+    *out = (scev_exit_form_t){.scale = 0, .constant = in->imm};
+    return true;
+  }
+  scev_exit_form_t a = {0}, b = {0};
+  if (in->op == NYIR_ADD_I64 &&
+      scev_exit_form_build(f, defs, iv, exit_const, in->a, depth + 1, &a) &&
+      scev_exit_form_build(f, defs, iv, exit_const, in->b, depth + 1, &b))
+    return scev_exit_form_combine(out, &a, &b, 1);
+  if (in->op == NYIR_SUB_I64 &&
+      scev_exit_form_build(f, defs, iv, exit_const, in->a, depth + 1, &a) &&
+      scev_exit_form_build(f, defs, iv, exit_const, in->b, depth + 1, &b))
+    return scev_exit_form_combine(out, &a, &b, -1);
+  if (in->op == NYIR_MUL_I64) {
+    int variable = in->a;
+    int64_t scale = 0;
+    if (!const_value(f, defs, in->b, &scale)) {
+      variable = in->b;
+      if (!const_value(f, defs, in->a, &scale))
+        return false;
+    }
+    if (!scev_exit_form_build(f, defs, iv, exit_const, variable, depth + 1, &a))
+      return false;
+    __int128 new_scale = (__int128)a.scale * scale;
+    __int128 new_const = (__int128)a.constant * scale;
+    if (new_scale < INT64_MIN || new_scale > INT64_MAX ||
+        new_const < INT64_MIN || new_const > INT64_MAX)
+      return false;
+    *out = (scev_exit_form_t){.uses_exit = a.uses_exit,
+                              .scale = (int64_t)new_scale,
+                              .constant = (int64_t)new_const};
+    return true;
+  }
+  if (in->op == NYIR_SHL_I64) {
+    int64_t shift = 0;
+    if (!const_value(f, defs, in->b, &shift) || shift < 0 || shift >= 63)
+      return false;
+    if (!scev_exit_form_build(f, defs, iv, exit_const, in->a, depth + 1, &a))
+      return false;
+    int64_t scale = INT64_C(1) << (unsigned)shift;
+    __int128 new_scale = (__int128)a.scale * scale;
+    __int128 new_const = (__int128)a.constant * scale;
+    if (new_scale < INT64_MIN || new_scale > INT64_MAX ||
+        new_const < INT64_MIN || new_const > INT64_MAX)
+      return false;
+    *out = (scev_exit_form_t){.uses_exit = a.uses_exit,
+                              .scale = (int64_t)new_scale,
+                              .constant = (int64_t)new_const};
+    return true;
+  }
+  return false;
+}
+
+/*
+ * Post-loop proof. The induction variable seen after a single-exit counted
+ * loop is the exit value (`limit` for `<`, `limit + 1` for `<=`). When both
+ * the checked offset and the checked length are linear in that value with the
+ * same positive scale, their difference is the constant difference, so
+ * `offset < length` can be proved with no constant range on the limit. The
+ * offset's lower bound uses `exit_lb`, which the entry proof tightened to at
+ * least `init + 1` for `<`.
+ */
+static bool scev_exit_proves_check(const nyr_func_t *f,
+                                   const nyr_scev_info_t *info,
+                                   const int *defs, const nyr_cfg_t *cfg,
+                                   size_t at, const nyr_inst_t *check) {
+  if (!f || !info || !defs || !cfg || !check || check->b < 0 ||
+      check->c < 0 || at >= f->len ||
+      getenv("NYTRIX_NO_SCEV_EXIT_VALUE"))
+    return false;
+  size_t at_block = cfg->inst_block[at];
+  if (at_block >= cfg->block_count)
+    return false;
+  bool *in_loop = calloc(cfg->block_count, sizeof(*in_loop));
+  if (!in_loop)
+    return false;
+  bool proved = false;
+  for (size_t li = 0; li < info->count && !proved; ++li) {
+    const nyr_scev_loop_t *loop = &info->loops[li];
+    if (!loop->exit_value_known || !loop->exit_lb_known)
+      continue;
+    if (!nyr_cfg_natural_loop_blocks(cfg, loop->latch_block,
+                                     loop->header_block, in_loop,
+                                     cfg->block_count))
+      continue;
+    if (in_loop[at_block])
+      continue;
+    bool single_exit = true;
+    size_t sole_exit = SIZE_MAX;
+    for (size_t b = 0; b < cfg->block_count && single_exit; ++b) {
+      if (!in_loop[b])
+        continue;
+      for (size_t e = cfg->succ_offsets[b]; e < cfg->succ_offsets[b + 1];
+           ++e) {
+        size_t succ = cfg->succ_blocks[e];
+        if (in_loop[succ])
+          continue;
+        /*
+         * The exit value is `limit` only if the tested header edge is the
+         * only way out. A break edge to the same exit block carries an
+         * intermediate IV, and treating it as the limit would drop a live
+         * check on that path.
+         */
+        if (b != loop->header_block ||
+            (sole_exit != SIZE_MAX && sole_exit != succ)) {
+          single_exit = false;
+          break;
+        }
+        sole_exit = succ;
+      }
+    }
+    if (!single_exit || sole_exit == SIZE_MAX ||
+        !nyr_cfg_dominates(cfg, sole_exit, at_block))
+      continue;
+    scev_exit_form_t offset = {0}, length = {0};
+    if (!scev_exit_form_build(f, defs, loop->iv, loop->exit_value_const,
+                              check->b, 0, &offset) ||
+        !scev_exit_form_build(f, defs, loop->iv, loop->exit_value_const,
+                              check->c, 0, &length))
+      continue;
+    if (!offset.uses_exit || !length.uses_exit || offset.scale <= 0 ||
+        offset.scale != length.scale ||
+        offset.constant >= length.constant)
+      continue;
+    __int128 low = (__int128)offset.scale * loop->exit_lb + offset.constant;
+    if (low < 0)
+      continue;
+    proved = true;
+  }
+  free(in_loop);
+  return proved;
 }
 
 bool nyr_scev_tbuf_bounds_check_safe_cfg(const nyr_func_t *f,
@@ -1240,9 +1795,11 @@ bool nyr_scev_tbuf_bounds_check_safe_cfg(const nyr_func_t *f,
     if (have_length && length_min > 0 && offset.range.max < length_min)
       return true;
   }
-  /* Symbolic proof from the loop's own exit test. */
-  return check->c >= 0 &&
-         scev_guard_proves_offset(f, info, defs, cfg, at, check);
+  /* Symbolic proof from the loop's own exit test, inside the body. */
+  if (check->c >= 0 && scev_guard_proves_offset(f, info, defs, cfg, at, check))
+    return true;
+  /* Symbolic proof from the value the exit block observes. */
+  return scev_exit_proves_check(f, info, defs, cfg, at, check);
 }
 
 bool nyr_scev_tbuf_bounds_check_safe(const nyr_func_t *f,
@@ -1258,6 +1815,69 @@ bool nyr_scev_tbuf_bounds_check_safe(const nyr_func_t *f,
       nyr_scev_tbuf_bounds_check_safe_cfg(f, info, defs, &cfg, at, check);
   nyr_cfg_free(&cfg);
   return safe;
+}
+
+/*
+ * Fold `iv % d` to zero inside a counted loop when the loop's induction
+ * values are all multiples of `d`. The multiple fact (compute_multiple) only
+ * exists for a constant start and step with a wrap-free recurrence, so the
+ * remainder is exactly zero. `% 0` and the i64 `INT64_MIN % -1` trap are
+ * excluded by requiring |d| >= 2. NYTRIX_NO_SCEV_MULTIPLE_FOLD=1 disables it.
+ */
+static void scev_fold_iv_multiples(nyr_func_t *f, const nyr_scev_info_t *info,
+                                   const nyr_cfg_t *cfg, const int *defs) {
+  for (size_t li = 0; li < info->count; ++li) {
+    const nyr_scev_loop_t *l = &info->loops[li];
+    if (!l->iv_multiple_known || l->iv_multiple < 2 || l->iv < 0)
+      continue;
+    bool *in_loop = calloc(cfg->block_count, sizeof(*in_loop));
+    if (!in_loop)
+      return;
+    if (!nyr_cfg_natural_loop_blocks(cfg, l->latch_block, l->header_block,
+                                     in_loop, cfg->block_count)) {
+      free(in_loop);
+      continue;
+    }
+    for (size_t b = 0; b < cfg->block_count; ++b) {
+      if (!in_loop[b])
+        continue;
+      for (size_t i = cfg->block_start[b]; i < cfg->block_end[b]; ++i) {
+        nyr_inst_t *in = &f->data[i];
+        if (in->op != NYIR_MOD_I64 || in->a < 0 || in->b < 0)
+          continue;
+        if (root_copy(f, defs, in->a) != l->iv)
+          continue;
+        int64_t divisor = 0;
+        if (!const_value(f, defs, in->b, &divisor) || divisor == 0)
+          continue;
+        uint64_t magnitude = scev_magnitude_i64(divisor);
+        if (magnitude < 2 ||
+            (uint64_t)l->iv_multiple % magnitude != 0)
+          continue;
+        /*
+         * MOD owns no side buffers and cannot trap for |d| >= 2, so the
+         * instruction can become a zero constant in place.
+         */
+        nyr_inst_t repl = {.op = NYIR_CONST_I64,
+                           .dst = in->dst,
+                           .a = -1,
+                           .b = -1,
+                           .c = -1,
+                           .d = -1,
+                           .e = -1,
+                           .f = -1,
+                           .imm = 0,
+                           .debug = in->debug,
+                           .scalar_class = in->scalar_class,
+                           .range = {.has_min = true,
+                                     .has_max = true,
+                                     .min = 0,
+                                     .max = 0}};
+        *in = repl;
+      }
+    }
+    free(in_loop);
+  }
 }
 
 /*
@@ -1322,6 +1942,29 @@ bool nyr_scev_lite(nyr_func_t *f) {
       break;
     }
   }
+  /*
+   * Known-multiple consumer: replace `iv % d` with zero where divisibility is
+   * proven. This runs here because SCEV is the only analysis that knows the
+   * recurrence is wrap-free.
+   */
+  nyr_cfg_t cfg = {0};
+  int *defs = NULL;
+  bool have_cfg = false;
+  if (!getenv("NYTRIX_NO_SCEV_MULTIPLE_FOLD")) {
+    have_cfg = nyr_cfg_build(f, &cfg);
+    if (have_cfg) {
+      defs = nyr_build_defs(f);
+      if (!defs) {
+        nyr_cfg_free(&cfg);
+        have_cfg = false;
+      }
+    }
+  }
+  if (have_cfg)
+    scev_fold_iv_multiples(f, &info, &cfg, defs);
+  free(defs);
+  if (have_cfg)
+    nyr_cfg_free(&cfg);
   nyr_scev_free(&info);
   return true;
 }

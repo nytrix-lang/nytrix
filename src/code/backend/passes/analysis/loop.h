@@ -23,16 +23,6 @@ typedef struct {
   bool limit_is_const;
   bool trip_count_known;
   uint64_t trip_count;
-  /* Symbolic trip count `trip_expr_pos - trip_expr_neg + trip_expr_const`
-   * when provable (e.g. entered loop with invariant bounds). */
-  bool trip_expr_known;
-  int trip_expr_pos;
-  int trip_expr_neg;
-  int64_t trip_expr_const;
-  /* Exit value/range facts for the induction variable after loop exit. */
-  bool exit_value_known;
-  bool exit_lb_known;
-  int64_t exit_lb;
   /* Constant bounds from operand range facts, for loops whose start or limit
    * is symbolic. `body_min/body_max` cover values that pass the exit test;
    * `iv_min/iv_max` also cover the final failing test, which the exit block
@@ -45,6 +35,40 @@ typedef struct {
   int64_t iv_max;
   bool trip_bound_known;
   uint64_t trip_bound;
+  /*
+   * Exact symbolic trip count for an entered ascending unit-step loop:
+   *
+   *   trip = trip_expr_pos - trip_expr_neg + trip_expr_const
+   *
+   * This is an expression over SSA values, not a constant interval. It is
+   * recorded only when the entry test is provable (operand ranges or a
+   * dominating guard), so a consumer may use it outside the loop, and when
+   * the subtraction cannot overflow i64. `trip_expr_known` therefore implies
+   * at least one iteration.
+   */
+  bool trip_expr_known;
+  int trip_expr_pos;
+  int trip_expr_neg;
+  int64_t trip_expr_const;
+  /*
+   * Positive divisor of every induction value observed by the loop, derived
+   * from a constant start and step once the recurrence is known not to wrap.
+   * `{0,+,3}` has multiple 3; `{4,+,6}` has multiple gcd(4,6) == 2.
+   */
+  bool iv_multiple_known;
+  int64_t iv_multiple;
+  /*
+   * Value observed by the induction variable in the exit block, recorded as
+   * `exit_value + exit_value_const` (the dimensionless limit for `<`, limit+1
+   * for `<=`). Valid only for an entered loop whose sole exit is the tested
+   * edge. `exit_lb` is a constant lower bound for that value, which is what
+   * lets a post-loop check prove its offset non-negative.
+   */
+  bool exit_value_known;
+  int exit_value;
+  int64_t exit_value_const;
+  bool exit_lb_known;
+  int64_t exit_lb;
 } nyr_scev_loop_t;
 
 /*

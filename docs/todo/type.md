@@ -367,13 +367,19 @@ Acceptance: equational proofs (sym/trans/cong/subst), indexed transport examples
 and mixed refinement+equality fixtures; solver results produce/check kernel terms
 or are explicitly reported as automation-only.
 
-Open in this phase (2026-11-16): the identity type, `refl`, and
-transport/`J`, plus bridging the proof surface to core evidence. There is no
-`Eq` spelling: a parser sugar for `Eq<A, x, y>` was tried and reverted because
-`prove` induces `proof<binary:==(int:2,int:2)>` while a hand-written
-`proof<2 == 2>` annotation does not normalize to that form, so the gap is
-proposition normalization in HM, not parser rewriting. What does work is the
-existing obligation path, recorded in
+Open in this phase (2026-11-16): an identity *type* with its eliminator
+(transport/`J`), and bridging the proof surface to core evidence. `refl` itself
+now exists as a rule: `prove(t == t)` discharges structurally for any pure
+integer term, symbolic or closed
+([eq-refl-symbolic](../../etc/tests/lang/types/proofs/eq-refl-symbolic.nshape)),
+and proof parameters instantiate over earlier literal binders, so a Pi body
+such as `proof<x + 1 == y>` checks at the call site. Hand-written and inferred
+closed propositions already agree (`proof<2 == 2>` accepts `prove(1 + 1 == 2)`
+and the reverse), so the earlier note that annotation normalization blocks an
+`Eq<A, x, y>` spelling is obsolete. Measured blocker (probed 2026-11-16): there
+is no way to *use* an equation — no substitution of `x` by `y` under
+`proof<x == y>` inside a type, so `sym`/`trans`/`cong` cannot be stated over
+symbolic terms; closed instances already decide by evaluation. Recorded in
 [kernel.md](../spec/kernel.md#resolved-decisions): closed equations discharge
 and erase
 ([eq-closed-refl](../../etc/tests/lang/types/proofs/eq-closed-refl.nshape)) and

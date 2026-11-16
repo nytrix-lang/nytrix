@@ -247,6 +247,14 @@ typedef enum {
  * friends treat provably pure user calls like any other pure operation.
  */
 #define NYIR_INST_F_EFFECTS_KNOWN 128u
+/*
+ * Set on NYIR_CMP_I64 to mark the comparison as an assumption: the compare is
+ * known true at this point even though no branch tests it. The instruction
+ * still computes its boolean value. Effects report MAY_TRAP (see
+ * nyr_effective_effects), so DCE keeps the fact and motion passes do not
+ * speculate it; SCEV consumes it as a guard fact without a CFG edge.
+ */
+#define NYIR_INST_F_ASSUME (1u << 21)
 
 /* The strict ownership checker proved this call returns an exclusive borrow
  * of exactly one argument. The verifier checks the call's return-borrow

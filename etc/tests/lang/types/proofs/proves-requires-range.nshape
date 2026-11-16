@@ -1,0 +1,24 @@
+shape proves_requires_range {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "proof", "postcondition", "contracts"]
+  template ny-test-case
+  flags_matrix "--native-only; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  expect_message "PROVES-OK"
+  source ny <<'NY'
+use core
+@proves(result > 1)
+fn above_one(int n) int requires n > 1 { return n }
+@proves(result > 1)
+fn shifted(int n) int requires n > 0 { return n + 1 }
+@proves(result >= 2)
+fn bounded(int n) int requires n >= 2 && n <= 100 {
+   if n > 50 { return n }
+   return 2
+}
+assert(above_one(2) == 2 && shifted(1) == 2 && bounded(60) == 60 && bounded(3) == 2,
+       "requires bounds prove each returned value")
+print("PROVES-OK")
+NY
+}

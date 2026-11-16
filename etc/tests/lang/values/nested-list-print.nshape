@@ -1,0 +1,17 @@
+shape nested_list_print {
+  family "runtime/values"
+  generator "embedded"
+  features ["ny", "list", "print"]
+  template ny-test-case
+  flags_matrix "--native-only; --native-only -O3; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  expect_stdout "[[1], [2]]"
+  source ny <<'NY'
+use core
+print([[1], [2]])
+print([("a", 1), (2, 3)])
+print([["x", "y"], []])
+print(to_str([[1], [2]]))
+print([[[[[1]]]]])
+NY
+}

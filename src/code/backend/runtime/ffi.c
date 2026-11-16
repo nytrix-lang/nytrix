@@ -405,6 +405,15 @@ static bool rt_dynamic_callable_rehash(size_t capacity) {
   return true;
 }
 
+/*
+ * Bits 58-63 are ABI flags (F64_RESULT is bit 58) and bits 0-2 the tag, so a
+ * table ID occupies bits 3-57.  Masking bit 58 into the ID made every
+ * f64-result callable decode to an out-of-range ID and dispatch to NULL.
+ */
+static inline uint64_t rt_dynamic_callable_id_bits(int64_t callable) {
+  return (((uint64_t)callable) & ((UINT64_C(1) << 58) - 1)) >> 3;
+}
+
 int64_t rt_dynamic_callable_encode(void *fn, uint64_t flags) {
   if (!fn)
     return 0;
@@ -442,7 +451,7 @@ int64_t rt_dynamic_callable_encode(void *fn, uint64_t flags) {
     while (rt_dynamic_callable_buckets[at])
       at = (at + 1) & (rt_dynamic_callable_buckets_cap - 1);
   }
-  if (rt_dynamic_callable_functions_len >= (UINT64_C(1) << 56) ||
+  if (rt_dynamic_callable_functions_len >= (UINT64_C(1) << 55) ||
       rt_dynamic_callable_functions_len == SIZE_MAX) {
     rt_dynamic_callable_lock_release();
     return 0;
@@ -493,10 +502,7 @@ int64_t rt_dynamic_callable_encode(void *fn, uint64_t flags) {
 void *rt_dynamic_callable_decode(int64_t callable) {
   if (!NY_DYNAMIC_CALLABLE_IS(callable))
     return NULL;
-  /*
-   * Bits 59–63 are ABI flags. IDs occupy bits 3–58 only.
-   */
-  uint64_t id64 = (((uint64_t)callable) & ((UINT64_C(1) << 59) - 1)) >> 3;
+  uint64_t id64 = rt_dynamic_callable_id_bits(callable);
   if (id64 == 0 || id64 > SIZE_MAX)
     return NULL;
   size_t id = (size_t)id64;
@@ -518,7 +524,7 @@ static bool rt_dynamic_callable_store_arg_mask(int64_t callable,
                                                uint64_t arg_mask) {
   if (!NY_DYNAMIC_CALLABLE_IS(callable))
     return false;
-  uint64_t id64 = (((uint64_t)callable) & ((UINT64_C(1) << 59) - 1)) >> 3;
+  uint64_t id64 = rt_dynamic_callable_id_bits(callable);
   if (id64 == 0 || id64 > SIZE_MAX)
     return false;
   size_t id = (size_t)id64;
@@ -533,7 +539,7 @@ static bool rt_dynamic_callable_store_arg_mask(int64_t callable,
 bool rt_dynamic_callable_has_arg_mask(int64_t callable) {
   if (!NY_DYNAMIC_CALLABLE_IS(callable))
     return false;
-  uint64_t id64 = (((uint64_t)callable) & ((UINT64_C(1) << 59) - 1)) >> 3;
+  uint64_t id64 = rt_dynamic_callable_id_bits(callable);
   if (id64 == 0 || id64 > SIZE_MAX)
     return false;
   size_t id = (size_t)id64;
@@ -552,7 +558,7 @@ bool rt_dynamic_callable_uses_any_abi(int64_t callable) {
 static uint64_t rt_dynamic_callable_arg_mask(int64_t callable) {
   if (!NY_DYNAMIC_CALLABLE_IS(callable))
     return 0;
-  uint64_t id64 = (((uint64_t)callable) & ((UINT64_C(1) << 59) - 1)) >> 3;
+  uint64_t id64 = rt_dynamic_callable_id_bits(callable);
   if (id64 == 0 || id64 > SIZE_MAX)
     return 0;
   size_t id = (size_t)id64;

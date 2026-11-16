@@ -36,11 +36,6 @@ static int nyr_raw_byte_address(nyr_builder_t *b, int base, int offset) {
   return nyr_emit_add_i64(b, base, offset);
 }
 
-typedef struct {
-  const char *name;
-  int64_t value;
-} ny_native_proof_binding_t;
-
 static inline bool nyr_size_fits_i64(size_t n) {
   return n <= (size_t)INT64_MAX;
 }
@@ -57,14 +52,6 @@ static bool ny_native_type_name_is_128bit_int(const char *name) {
   return leaf && (strcmp(leaf, "i128") == 0 || strcmp(leaf, "u128") == 0);
 }
 
-static bool ny_native_proof_binding_range(void *ctx, const char *name,
-                                          int64_t *lo, int64_t *hi) {
-  const ny_native_proof_binding_t *binding = ctx;
-  if (strcmp(name, binding->name) != 0)
-    return false;
-  *lo = *hi = binding->value;
-  return true;
-}
 
 /*
  * Semantic-first early-leaf resolution.  The intrinsic groups below decide
@@ -300,81 +287,6 @@ static bool ny_proof_type_names_ident(const char *proof_type,
       return true;
   }
   return false;
-}
-
-/* Resolve the representation of a source expression at a dynamic boundary.
- * Top-level constant identifiers are lowered from raw storage, but their
- * identifier node can retain an unresolved/dynamic semantic fact after module
- * flattening. Keep this query tied to declaration and local ABI facts; do not
- * infer representation from the value's low bits. */
-static bool ny_proof_condition_touches_runtime(const nyr_builder_t *b,
-                                               const expr_t *e, unsigned depth,
-                                               bool *out) {
-  if (!e || !out || depth > 64)
-    return false;
-  if (e->kind == NY_E_IDENT && e->as.ident.name) {
-    const nyr_local_t *local =
-        nyr_find_local((nyr_builder_t *)b, e->as.ident.name);
-    if (!local)
-      local = nyr_find_local_nearest((nyr_builder_t *)b, e->as.ident.name);
-    const stmt_t *decl = nyr_find_top_level_var_stmt(b, e->as.ident.name);
-    if (local) {
-      *out = true;
-      return false;
-    }
-    if (decl && decl->kind == NY_S_VAR && decl->as.var.is_mut) {
-      *out = true;
-      return false;
-    }
-    return false;
-  }
-  switch (e->kind) {
-  case NY_E_UNARY:
-    return ny_proof_condition_touches_runtime(b, e->as.unary.right, depth + 1,
-                                              out);
-  case NY_E_BINARY:
-    return ny_proof_condition_touches_runtime(b, e->as.binary.left, depth + 1,
-                                              out) ||
-           ny_proof_condition_touches_runtime(b, e->as.binary.right, depth + 1,
-                                              out);
-  case NY_E_LOGICAL:
-    return ny_proof_condition_touches_runtime(b, e->as.logical.left, depth + 1,
-                                              out) ||
-           ny_proof_condition_touches_runtime(b, e->as.logical.right, depth + 1,
-                                              out);
-  case NY_E_TERNARY:
-    return ny_proof_condition_touches_runtime(b, e->as.ternary.cond, depth + 1,
-                                              out) ||
-           ny_proof_condition_touches_runtime(b, e->as.ternary.true_expr,
-                                              depth + 1, out) ||
-           ny_proof_condition_touches_runtime(b, e->as.ternary.false_expr,
-                                              depth + 1, out);
-  case NY_E_INDEX:
-    return ny_proof_condition_touches_runtime(b, e->as.index.target, depth + 1,
-                                              out) ||
-           ny_proof_condition_touches_runtime(b, e->as.index.start, depth + 1,
-                                              out);
-  case NY_E_CALL:
-    for (size_t i = 0; i < e->as.call.args.len; ++i)
-      if (ny_proof_condition_touches_runtime(b, e->as.call.args.data[i].val,
-                                             depth + 1, out))
-        return true;
-    return false;
-  case NY_E_MEMCALL:
-    if (ny_proof_condition_touches_runtime(b, e->as.memcall.target, depth + 1,
-                                           out))
-      return true;
-    for (size_t i = 0; i < e->as.memcall.args.len; ++i)
-      if (ny_proof_condition_touches_runtime(b, e->as.memcall.args.data[i].val,
-                                             depth + 1, out))
-        return true;
-    return false;
-  case NY_E_MEMBER:
-    return ny_proof_condition_touches_runtime(b, e->as.member.target, depth + 1,
-                                              out);
-  default:
-    return false;
-  }
 }
 
 static bool nyr_expr_has_raw_int_abi(const nyr_builder_t *b, const expr_t *e,
@@ -631,20 +543,36 @@ static int nyr_box_dict_fallback(nyr_builder_t *b, int fallback,
   return fallback;
 }
 
-static bool nyr_mapped_proof_holds(const char *proof_type, const char *param,
-                                   int64_t value) {
-  if (!proof_type || !param || !*param)
-    return false;
-  size_t len = strlen(proof_type);
+typedef struct {
+  const char *names[16];
+  int64_t values[16];
+  size_t len;
+} nyr_proof_bindings_t;
+
+static bool nyr_proof_bindings_range(void *ctx, const char *name, int64_t *lo,
+                                     int64_t *hi) {
+  const nyr_proof_bindings_t *bindings = ctx;
+  for (size_t i = 0; i < bindings->len; ++i)
+    if (strcmp(name, bindings->names[i]) == 0) {
+      *lo = *hi = bindings->values[i];
+      return true;
+    }
+  return false;
+}
+
+/* Decide a proof parameter's proposition with every literal-mapped earlier
+ * parameter substituted at once (`proof<x + 1 == y>` needs both x and y). */
+static bool nyr_mapped_proof_holds_all(const char *proof_type,
+                                       const nyr_proof_bindings_t *bindings) {
+  size_t len = proof_type ? strlen(proof_type) : 0;
   if (len < 7 || strncmp(proof_type, "proof<", 6) != 0 ||
       proof_type[len - 1] != '>')
     return false;
   char *proposition = ny_strndup(proof_type + 6, len - 7);
   if (!proposition)
     return false;
-  ny_native_proof_binding_t binding = {param, value};
-  int decision = ny_proof_canon_decide(
-      proposition, ny_native_proof_binding_range, &binding, 0);
+  int decision = ny_proof_canon_decide(proposition, nyr_proof_bindings_range,
+                                       (void *)bindings, 0);
   free(proposition);
   return decision == 1;
 }
@@ -1743,6 +1671,40 @@ static bool nyr_check_type_param_consistency(nyr_builder_t *b,
   }
   free(bound);
   return true;
+}
+
+/*
+ * Reflexivity: `t == t`, `t <= t` and `t >= t` hold for every pure,
+ * deterministic, non-floating term, closed or not (NaN is the only value
+ * unequal to itself).  The canonical proposition is compared structurally,
+ * so this is the `refl` rule of the equality kernel rather than evaluation;
+ * any call, member access, index or floating/string literal fails closed.
+ */
+static bool nyr_prove_reflexive(nyr_builder_t *b, const expr_t *condition) {
+  if (!condition || condition->kind != NY_E_BINARY || !condition->as.binary.op ||
+      !condition->as.binary.left || !condition->as.binary.right)
+    return false;
+  const char *op = condition->as.binary.op;
+  if (strcmp(op, "==") != 0 && strcmp(op, "<=") != 0 && strcmp(op, ">=") != 0)
+    return false;
+  if (nyr_expr_is_f64(b, condition->as.binary.left) ||
+      nyr_expr_is_f32(b, condition->as.binary.left) ||
+      nyr_expr_is_f64(b, condition->as.binary.right) ||
+      nyr_expr_is_f32(b, condition->as.binary.right))
+    return false;
+  char *lhs = ny_proof_type_from_expr((expr_t *)condition->as.binary.left);
+  char *rhs = ny_proof_type_from_expr((expr_t *)condition->as.binary.right);
+  bool same = lhs && rhs && strcmp(lhs, rhs) == 0;
+  if (same) {
+    static const char *const impure[] = {"call", "member", "index", "flt:",
+                                         "str:", "float", "unknown", "any"};
+    for (size_t i = 0; same && i < sizeof(impure) / sizeof(impure[0]); ++i)
+      if (strstr(lhs, impure[i]))
+        same = false;
+  }
+  free(lhs);
+  free(rhs);
+  return same;
 }
 
 static int nyr_lower_call(nyr_builder_t *b, const expr_t *e) {
@@ -3276,20 +3238,21 @@ ordinary_call:
       const char *proof_type = callee_fn->as.fn.params.data[pi].type;
       if (!proof_type || strncmp(proof_type, "proof<", 6) != 0)
         continue;
+      nyr_proof_bindings_t bindings = {.len = 0};
       for (size_t ai = 0; ai < pi && ai < callee_fn->as.fn.params.len; ++ai) {
         const char *mapped = callee_fn->as.fn.params.data[ai].name;
         if (!mapped || !strstr(proof_type, mapped) || ai >= e->as.call.args.len)
           continue;
         const expr_t *actual = e->as.call.args.data[ai].val;
         if (actual && actual->kind == NY_E_LITERAL &&
-            actual->as.literal.kind == NY_LIT_INT) {
-          bool holds = nyr_mapped_proof_holds(proof_type, mapped,
-                                              actual->as.literal.as.i);
-          if (!holds) {
-            return nyr_fail(b, "mapped value ranges do not prove it"), -1;
-          }
+            actual->as.literal.kind == NY_LIT_INT &&
+            bindings.len < sizeof(bindings.names) / sizeof(bindings.names[0])) {
+          bindings.names[bindings.len] = mapped;
+          bindings.values[bindings.len++] = actual->as.literal.as.i;
         }
       }
+      if (bindings.len && !nyr_mapped_proof_holds_all(proof_type, &bindings))
+        return nyr_fail(b, "mapped value ranges do not prove it"), -1;
       for (size_t ci = 0; caller_fn && ci < caller_fn->as.fn.params.len; ++ci) {
         const char *unknown = caller_fn->as.fn.params.data[ci].name;
         if (!unknown || !ny_proof_type_names_ident(proof_type, unknown))
@@ -7811,6 +7774,11 @@ ordinary_call:
         message = strat;
       return nyr_fail_at(b, condition ? condition->tok : e->tok, "%s", message),
              -1;
+    }
+    if (proof_kind == NY_NATIVE_LEAF_PROVE && !exact_proof_value &&
+        nyr_prove_reflexive(b, condition)) {
+      exact_proof_value = true;
+      proof_value = 1;
     }
     if (proof_kind == NY_NATIVE_LEAF_PROVE && !exact_proof_value && condition) {
       /*

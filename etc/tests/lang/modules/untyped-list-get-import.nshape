@@ -1,0 +1,17 @@
+shape untyped_list_get_import {
+  family "runtime/modules"
+  generator "embedded"
+  features ["ny", "modules", "list"]
+  template ny-test-case
+  flags_matrix "--native-only; --native-only -O3; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  expect_stdout "LIST-GET-OK"
+  source ny <<'NY'
+use core
+use "./use/untyped-list-get.ny" (second, sort_indices)
+assert(second([7, 8, 9]) == 8, "module list.get on an appended list returns the element")
+assert(sort_indices([19793, 16491, 16950]) == [0, 2, 1],
+       "module insertion sort reads appended elements")
+print("LIST-GET-OK")
+NY
+}

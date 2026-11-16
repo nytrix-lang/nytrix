@@ -242,6 +242,10 @@ static bool nir_flags_valid(const nyr_inst_t *in) {
   case NYIR_SAR_I64:
     allowed = NYIR_INST_F_NARROW32;
     break;
+  case NYIR_CMP_I64:
+    /* The flag is the assume marker; the compare still computes its value. */
+    allowed = NYIR_INST_F_ASSUME;
+    break;
   case NYIR_SUB_I64:
   case NYIR_MUL_I64:
   case NYIR_AND_I64:

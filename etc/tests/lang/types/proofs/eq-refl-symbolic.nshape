@@ -1,0 +1,43 @@
+shape eq_refl_symbolic {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "proof", "equality", "refl"]
+  template ny-test-case
+  flags_matrix "--native-only; --native-only -O3; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  expect_stdout "REFL-OK"
+  source ny <<'NY'
+use core
+
+;; Reflexivity is structural: `t == t` holds for any pure integer term, so it
+;; discharges for parameters whose values are unknown at compile time.
+fn same(int x, int y) int {
+   def proof<x == x> refl_x = prove(x == x)
+   def proof<x + y * 2 == x + y * 2> refl_sum = prove(x + y * 2 == x + y * 2)
+   def proof<y <= y> le = prove(y <= y)
+   x + y
+}
+assert(same(3, 4) == 7, "symbolic reflexive proofs erase")
+print("REFL-OK")
+NY
+}
+
+shape proof_param_literal_instantiation {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "proof", "dependent", "pi"]
+  template ny-test-case
+  flags_matrix "--native-only; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  expect_stdout "PI-OK"
+  source ny <<'NY'
+use core
+;; A proof parameter is a Pi body over the earlier value parameters: literal
+;; arguments instantiate it before the witness is compared.
+fn exactly_three(int x, proof<x == 3> p) int { x }
+fn successor(int x, int y, proof<x + 1 == y> p) int { y - x }
+assert(exactly_three(3, prove(3 == 3)) == 3, "single-binder instantiation")
+assert(successor(2, 3, prove(2 + 1 == 3)) == 1, "two binders, normalized")
+print("PI-OK")
+NY
+}

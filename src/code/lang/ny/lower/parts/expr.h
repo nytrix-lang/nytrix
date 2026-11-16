@@ -3980,8 +3980,21 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
                                    : nyr_emit_const(b, 0);
       if (list < 0 || index < 0 || fallback < 0)
         return -1;
+      /*
+       * rt_tbuf_get hands back the raw slot payload.  That is only usable when
+       * the element representation is statically known; for a list whose
+       * elements were never typed (`mut r = []` grown by append) the raw word
+       * would cross a tagged return or `any` boundary unboxed, and a module
+       * function returning `r.get(1)` yielded nil.  Unknown elements take the
+       * representation-aware accessor instead.
+       */
+      bool element_known = nyr_expr_is_raw_int(e) ||
+                           nyr_expr_is_f64(b, e) || nyr_expr_is_f32(b, e) ||
+                           (e->semantic.resolved &&
+                            e->semantic.rep != NY_SEM_REP_TAGGED_DYNAMIC);
       bool dynamic_get = nyr_expr_is_dyn_list(b, e->as.memcall.target) ||
-                         nyr_expr_is_any(b, e) || b->force_dynamic_get_any;
+                         nyr_expr_is_any(b, e) || b->force_dynamic_get_any ||
+                         !element_known;
       /* The fallback lane is an i64 in both accessors. Dynamic buffers need
        * a boxed Ny float; typed scalar buffers store f64 payload bits and
        * therefore need the unboxed bit pattern. Never pass an XMM f64

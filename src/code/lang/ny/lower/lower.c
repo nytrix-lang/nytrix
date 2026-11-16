@@ -1013,16 +1013,16 @@ const ny_native_runtime_abi_decl_t ny_native_runtime_abi_decls[] = {
                     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
                         NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
                     NY_NATIVE_VM_CALL_NONE),
-    NY_NATIVE_ENTRY_FN("rt_byte_index_checked",
-                       NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-                           NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
-                       NY_NATIVE_VM_I64_BINARY_TO_I64, i64_binary_i64,
-                       rt_byte_index_checked),
     NY_NATIVE_ENTRY_FN("rt_bshr_raw",
                        NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
                            NY_NATIVE_RUNTIME_ABI_RESULT_RAW_WORD,
                        NY_NATIVE_VM_I64_BINARY_TO_I64, i64_binary_i64,
                        rt_bshr_raw),
+    NY_NATIVE_ENTRY_FN("rt_byte_index_checked",
+                       NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                           NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
+                       NY_NATIVE_VM_I64_BINARY_TO_I64, i64_binary_i64,
+                       rt_byte_index_checked),
     NY_NATIVE_ENTRY("rt_bytes_get_raw",
                     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
                         NY_NATIVE_RUNTIME_ABI_SOURCE_PREFERRED,
@@ -1334,10 +1334,10 @@ const ny_native_runtime_abi_decl_t ny_native_runtime_abi_decls[] = {
                         NY_NATIVE_RUNTIME_ABI_TAGGED_ARG(1) |
                         NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
                     NY_NATIVE_VM_CALL_NONE),
-    NY_NATIVE_ENTRY("rt_dict_new_raw", NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
-                    NY_NATIVE_VM_CALL_NONE),
     NY_NATIVE_ENTRY("rt_dict_new_internal_raw",
                     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_dict_new_raw", NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
                     NY_NATIVE_VM_CALL_NONE),
     NY_NATIVE_ENTRY("rt_dict_set_i64_raw",
                     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
@@ -1735,6 +1735,14 @@ const ny_native_runtime_abi_decl_t ny_native_runtime_abi_decls[] = {
                     NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
                         NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
                     NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_safe_heap_arm",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
+                    NY_NATIVE_VM_CALL_NONE),
+    NY_NATIVE_ENTRY("rt_safe_heap_byte_addr",
+                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
+                        NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
+                    NY_NATIVE_VM_CALL_NONE),
     NY_NATIVE_ENTRY_FN(
         "rt_sequence_len_raw", NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING,
         NY_NATIVE_VM_I64_UNARY_TO_I64, i64_unary_i64, rt_sequence_len_raw),
@@ -1885,14 +1893,6 @@ const ny_native_runtime_abi_decl_t ny_native_runtime_abi_decls[] = {
     NY_NATIVE_ENTRY("rt_str_chr", NY_NATIVE_RUNTIME_ABI_RESULT_CSTR,
                     NY_NATIVE_VM_CALL_NONE),
     NY_NATIVE_ENTRY("rt_str_chr_raw", NY_NATIVE_RUNTIME_ABI_RESULT_CSTR,
-                    NY_NATIVE_VM_CALL_NONE),
-    NY_NATIVE_ENTRY("rt_safe_heap_arm",
-                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-                        NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
-                    NY_NATIVE_VM_CALL_NONE),
-    NY_NATIVE_ENTRY("rt_safe_heap_byte_addr",
-                    NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
-                        NY_NATIVE_RUNTIME_ABI_RESULT_RAW_INT,
                     NY_NATIVE_VM_CALL_NONE),
     NY_NATIVE_ENTRY("rt_str_repeat", NY_NATIVE_RUNTIME_ABI_RESULT_CSTR,
                     NY_NATIVE_VM_CALL_NONE),

@@ -1,0 +1,72 @@
+shape eq_refl_distinct_names_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "proof", "equality", "soundness"]
+  template ny-compile-fail
+  flags_matrix "--native-only; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_fail
+  expect_message "prove condition must be known at compile time"
+  source ny <<'NY'
+use core
+fn f(int x, int y) int {
+   def proof p = prove(x == y)
+   x
+}
+f(3, 3)
+NY
+}
+
+shape eq_refl_float_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "proof", "equality", "soundness"]
+  template ny-compile-fail
+  flags_matrix "--native-only; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_fail
+  expect_message "prove condition must be known at compile time"
+  source ny <<'NY'
+use core
+;; NaN is unequal to itself, so float reflexivity is not a theorem.
+fn f(f64 x) int {
+   def proof p = prove(x == x)
+   1
+}
+f(1.0)
+NY
+}
+
+shape eq_refl_call_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "proof", "equality", "soundness"]
+  template ny-compile-fail
+  flags_matrix "--native-only"
+  expect compile_fail
+  expect_message "must be"
+  source ny <<'NY'
+use core
+mut counter = 0
+fn tick() int { counter += 1
+ counter }
+fn f() int {
+   def proof p = prove(tick() == tick())
+   1
+}
+f()
+NY
+}
+
+shape proof_param_false_instance_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "proof", "dependent", "soundness"]
+  template ny-compile-fail
+  flags_matrix "--native-only"
+  expect compile_fail
+  expect_message "proof proposition does not match"
+  source ny <<'NY'
+use core
+fn exactly_three(int x, proof<x == 3> p) int { x }
+exactly_three(4, prove(3 == 3))
+NY
+}

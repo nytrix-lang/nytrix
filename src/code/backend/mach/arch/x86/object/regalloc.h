@@ -48,6 +48,8 @@ typedef struct {
   size_t end;
   uint32_t vreg;
   uint32_t block;
+  /* 0: block-local resident home, 1: spill-colored home (separate pool). */
+  uint32_t pool;
 } mach_home_interval_t;
 
 static int mach_home_interval_cmp(const void *lhs, const void *rhs) {
@@ -541,8 +543,10 @@ static bool mach_build_vreg_homes(nyr_x64_mach_enc_t *e,
       continue;
     }
     if (spill_color &&
-        mach_vreg_home_spill_interval(e, v, &intervals[interval_len]))
+        mach_vreg_home_spill_interval(e, v, &intervals[interval_len])) {
+      intervals[interval_len].pool = 1;
       ++interval_len;
+    }
   }
   qsort(intervals, interval_len, sizeof(*intervals), mach_home_interval_cmp);
   size_t *active_homes = calloc(mach->vreg_len, sizeof(*active_homes));
@@ -557,9 +561,21 @@ static bool mach_build_vreg_homes(nyr_x64_mach_enc_t *e,
     free(home_offs);
     return mach_err(e, "x64 machine form encode: OOM (home interval map)");
   }
+  /*
+   * Block-local residents and spill-colored values never share a slot.  A
+   * resident value can be defined in its register without writing its home,
+   * while the encoder's sticky-RAX tag names a home offset; a spilled
+   * neighbour tagged on the same slot then reads as the resident value
+   * (x64_loop_recolor plain/8: the XOR chain's last step reused a dead
+   * partial result from %rax).  Each pool is colored independently.
+   */
   size_t used = 0, home_len = 0, active_len = 0, free_len = 0;
+  for (uint32_t pool = 0; pool < 2; ++pool) {
+  active_len = free_len = 0;
   for (size_t i = 0; i < interval_len; ++i) {
     const mach_home_interval_t *interval = &intervals[i];
+    if (interval->pool != pool)
+      continue;
     /*
      * Each interval covers every instruction at which its value can be live:
      * block-local residents use their single segment, spilled values use the
@@ -588,6 +604,7 @@ static bool mach_build_vreg_homes(nyr_x64_mach_enc_t *e,
     offs[interval->vreg] = home_offs[home];
     home_ends[home] = interval->end;
     mach_home_active_push(active_homes, &active_len, home_ends, home);
+  }
   }
   size_t colored_homes = home_len;
   for (size_t v = 0; v < mach->vreg_len; ++v) {

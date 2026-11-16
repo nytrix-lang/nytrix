@@ -188,6 +188,17 @@ static inline void nyr_opt_phi(nyr_func_t *f, int64_t pred0, int value0,
   nyr_ir_emit(f, inst);
 }
 
+/* Mark the comparison that defines `cond` as an assumption (known true). */
+static inline bool nyr_opt_mark_assume(nyr_func_t *f, int cond) {
+  for (size_t i = f->len; i > 0; --i) {
+    if (f->data[i - 1].dst != cond)
+      continue;
+    f->data[i - 1].flags |= NYIR_INST_F_ASSUME;
+    return true;
+  }
+  return false;
+}
+
 /* Reset a function for hand-built construction. */
 static inline void nyr_opt_begin(nyr_func_t *f) {
   memset(f, 0, sizeof(*f));

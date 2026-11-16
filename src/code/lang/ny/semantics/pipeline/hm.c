@@ -6598,6 +6598,51 @@ static bool hm_type_text_mentions_index(const char *text, const char *name) {
   return false;
 }
 
+/*
+ * Replace each canonical `name:<param>` token of a proof proposition with
+ * `int:<value>`; a token boundary is `(`, `,`, `)`, space or `>`.  Returns
+ * NULL when nothing changed.
+ */
+static char *hm_subst_proof_name(const char *text, const char *param,
+                                 int64_t value) {
+  if (!text || !param || !*param)
+    return NULL;
+  char needle[256];
+  int nlen = snprintf(needle, sizeof(needle), "name:%s", param);
+  if (nlen <= 0 || (size_t)nlen >= sizeof(needle))
+    return NULL;
+  char repl[48];
+  int rlen = snprintf(repl, sizeof(repl), "int:%lld", (long long)value);
+  size_t tlen = strlen(text);
+  char *out = malloc(tlen * 2 + 64 + tlen / (size_t)nlen * (size_t)rlen);
+  if (!out)
+    return NULL;
+  size_t o = 0;
+  bool changed = false;
+  for (size_t i = 0; i < tlen;) {
+    bool start_ok = i == 0 || text[i - 1] == '(' || text[i - 1] == ',' ||
+                    text[i - 1] == ' ' || text[i - 1] == '<';
+    if (start_ok && strncmp(text + i, needle, (size_t)nlen) == 0) {
+      char after = text[i + (size_t)nlen];
+      if (after == ',' || after == ')' || after == ' ' || after == '>' ||
+          after == '\0') {
+        memcpy(out + o, repl, (size_t)rlen);
+        o += (size_t)rlen;
+        i += (size_t)nlen;
+        changed = true;
+        continue;
+      }
+    }
+    out[o++] = text[i++];
+  }
+  out[o] = '\0';
+  if (!changed) {
+    free(out);
+    return NULL;
+  }
+  return out;
+}
+
 static char *hm_subst_param_type_text(ny_hm_state_t *hm, stmt_t *fn,
                                       size_t param_index,
                                       ny_call_arg_list *args,
@@ -6630,6 +6675,33 @@ static char *hm_subst_param_type_text(ny_hm_state_t *hm, stmt_t *fn,
      * ordinary parameter name is not rewritten where it appears as a type
      * constructor or an unrelated identifier.
      */
+    if (strncmp(text, "proof<", 6) == 0) {
+      /*
+       * A proof parameter's proposition is a Pi body over the earlier value
+       * parameters: instantiate `name:x` with the literal argument so
+       * `need(3, prove(3 == 3))` meets `fn need(int x, proof<x == 3> p)`.
+       */
+      char *next = hm_subst_proof_name(text, prev->name, arg->as.literal.as.i);
+      if (next) {
+        free(text);
+        text = next;
+        changed = true;
+        /* Re-normalize so folded literals compare like a prove(...) witness. */
+        size_t tl = strlen(text);
+        if (tl > 7 && text[tl - 1] == '>') {
+          char *inner = ny_strndup(text + 6, tl - 7);
+          expr_t *prop =
+              inner ? ny_proof_expr_from_canonical(&hm->arena, inner) : NULL;
+          char *normal = prop ? ny_proof_type_from_expr(prop) : NULL;
+          if (normal) {
+            free(text);
+            text = normal;
+          }
+          free(inner);
+        }
+      }
+      continue;
+    }
     if (!hm_type_text_mentions_index(text, prev->name))
       continue;
     char *next =

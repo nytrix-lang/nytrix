@@ -334,7 +334,15 @@ unsigned nyr_effective_effects(const nyr_inst_t *inst) {
       return inst->effects;
     return nyr_call_effect_summary(inst);
   }
-  return inst->effects | nyr_inst_effects(inst);
+  unsigned effects = inst->effects | nyr_inst_effects(inst);
+  /*
+   * An assume-marked comparison is not speculative: the fact is only valid at
+   * this program point. Report a trap so DCE keeps the instruction and motion
+   * passes do not hoist the assumption out of its guard.
+   */
+  if (inst->op == NYIR_CMP_I64 && (inst->flags & NYIR_INST_F_ASSUME))
+    effects |= NYIR_EFFECT_MAY_TRAP;
+  return effects;
 }
 
 /*
