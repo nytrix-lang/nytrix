@@ -898,6 +898,32 @@ hashes. The original Linux setup linker still rejects the image at its
 16.2.1 yields 11,664 bytes of `.text`, so the remaining gap is code-generation
 quality rather than one outlier object.
 
+i386 copy-propagation extension to memory/immediate sources (2026-11-16):
+the register-only copy propagation was extended to fold `movl home,%eax;
+movl %eax,%R` and `movl $imm,%eax; movl %eax,%R` patterns. The def instruction
+is restricted to `movl` (width-safe; excludes `leal`). Rewriting uses operand-
+level replacement: the source operand of the consumer is changed from the
+destination register to the original register/home/immediate, and the consumer
+line is kept while the def is removed. Because a stack-home reference merely
+moves from the removed def onto the adjacent use, the home-use multiset is
+unchanged — home ranking and coloring see byte-identical inputs. Verified:
+20-unit `.text` 31,265 → 31,134 (−131 B); link `.text` 31,255; `.text32` END
+`0x7d86`; 523/523 differential corpus identical (only pre-existing flaky
+`i386-lsl-alternative`); QEMU probe `FOLD 149d8d80` PASS; i386 runtime probes
+(spill-arithmetic, register-runs, aggregate-abi) 72 cases 0 differences;
+forced-variant probes 96 cases 0 differences; valgrind clean.
+
+i386 register-only cleanup for promoted variants (2026-11-16): the three
+promoted variants (`promoted`, `promoted-four`, `promoted-three`) previously
+skipped `sm_i386_cleanup_spills` entirely. Added a `registers_only` parameter
+that runs only the register-copy-propagation, dead-register-def removal, and
+terminal-branch cleanup passes while skipping RMW fold, home-compare fold,
+home ranking/coloring, and `reg_removable` logic (which could misclassify
+promoted-frame offsets). The three promoted variants now receive this pass
+after `sm_i386_promote_homes`. Verified: 20-unit `.text` 31,134 → 30,873
+(−261 B); link `.text` 30,994; `.text32` END `0x7c81`; all correctness gates
+identical to above.
+
 ## Correctness verification programme
 
 Merged from `docs/todo/kcc.md` (2026-11-15). The artifact requirements in
