@@ -258,6 +258,14 @@ static int sm_i386_reg_load(sm_i386_regs_t *r, int value, bool byte) {
   return target;
 }
 
+/* True when the source value's current register can be overwritten by the
+ * result of the instruction at r->at: the value is resident, dead after this
+ * instruction, and not needed beyond the run boundary. */
+static bool sm_i386_reg_reusable(const sm_i386_regs_t *r, int value) {
+  if (value < 0 || value >= r->c->nyir->next_value) return false;
+  return r->values[value].reg >= 0 && r->values[value].last <= r->at;
+}
+
 static int sm_i386_reg_result(sm_i386_regs_t *r, int dst, int source,
                                bool byte, bool copy_source) {
   int reg = source >= 0 ? r->values[source].reg : -1;
@@ -612,10 +620,22 @@ static int sm_i386_emit_register_run(ny_sm_ctx_t *c, size_t start, size_t *next,
         i += length;
         continue;
       }
-      result = a < 0 ? -1 : sm_i386_reg_result(&r, dst,
-                                               fold_load ? fold_base[in->a]
-                                                         : in->a,
-                                               compare,
+      int src_value = fold_load ? fold_base[in->a] : in->a;
+      int other_reg = b;
+      /* For a commutative operation, if the left operand's register cannot be
+       * reused but the right operand's can, compute into the right register
+       * and combine the left into it. This removes the copy that reg_result
+       * would otherwise emit to preserve the still-live left operand. */
+      if (!compare && !has_immediate && a >= 0 && b >= 0 &&
+          (in->op == NYIR_ADD_I64 || in->op == NYIR_MUL_I64 ||
+           in->op == NYIR_AND_I64 || in->op == NYIR_OR_I64 ||
+           in->op == NYIR_XOR_I64) &&
+          !sm_i386_reg_reusable(&r, src_value) &&
+          sm_i386_reg_reusable(&r, in->b)) {
+        src_value = in->b;
+        other_reg = a;
+      }
+      result = a < 0 ? -1 : sm_i386_reg_result(&r, dst, src_value, compare,
                                                !compare && in->op != NYIR_LOAD_I64);
       ok = result >= 0;
       if (ok && in->op == NYIR_LOAD_I64)
@@ -668,8 +688,9 @@ static int sm_i386_emit_register_run(ny_sm_ctx_t *c, size_t start, size_t *next,
                                        op, (uint32_t)immediate,
                                        sm_i386_gpr[result]));
         } else {
-          ok = b >= 0 && nyr_printf(c->w, "\t%sl\t%s, %s\n", op,
-                                     sm_i386_gpr[b], sm_i386_gpr[result]);
+          ok = other_reg >= 0 && nyr_printf(c->w, "\t%sl\t%s, %s\n", op,
+                                            sm_i386_gpr[other_reg],
+                                            sm_i386_gpr[result]);
         }
       }
     }

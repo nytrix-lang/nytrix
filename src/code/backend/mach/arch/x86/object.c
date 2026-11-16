@@ -1398,6 +1398,18 @@ static uint8_t ny_x64_obj_i64_vector_lanes(nyr_op_t op) {
   case NYIR_VEC8_AND_I64:
   case NYIR_VEC8_OR_I64:
   case NYIR_VEC8_XOR_I64:
+  case NYIR_VEC8_SAR_I64:
+  case NYIR_VEC8_SHR_I64:
+    return 4;
+  case NYIR_VEC4_LOAD_F64:
+  case NYIR_VEC4_STORE_F64:
+  case NYIR_VEC4_ADD_F64:
+  case NYIR_VEC4_SUB_F64:
+  case NYIR_VEC4_MUL_F64:
+  case NYIR_VEC4_DIV_F64:
+  case NYIR_VEC4_FMA_F64:
+  case NYIR_VEC4_SET1_F64:
+  case NYIR_VEC4_SHUFFLE_F64:
     return 4;
   default:
     return 0;
@@ -2808,6 +2820,105 @@ static bool ny_x64_obj_i64_vector_memory(nyr_x64_obj_ctx_t *c,
   return true;
 }
 
+
+static bool ny_x64_obj_i64_vec_binop(nyr_x64_obj_ctx_t *c, const nyr_inst_t *in,
+                                     unsigned lanes, const unsigned char *op_bytes,
+                                     size_t op_len) {
+  if (!c || !in || in->dst < 0 || in->dst >= c->value_slots ||
+      in->a < 0 || in->a >= c->value_slots ||
+      in->b < 0 || in->b >= c->value_slots)
+    return false;
+  for (unsigned lane = 0; lane < lanes; ++lane) {
+    int da = ny_x64_obj_value_off(c, in->a) - (int)(lane * 8u);
+    int db = ny_x64_obj_value_off(c, in->b) - (int)(lane * 8u);
+    int dd = ny_x64_obj_value_off(c, in->dst) - (int)(lane * 8u);
+    if (!ny_x64_obj_load_rax(c, da) || !ny_x64_obj_load_r10(c, db) ||
+        !ny_x64_obj_bytes(c, op_bytes, op_len) || !ny_x64_obj_store_rax(c, dd))
+      return false;
+  }
+  return true;
+}
+
+static bool ny_x64_obj_i64_vec_shift_imm(nyr_x64_obj_ctx_t *c,
+                                         const nyr_inst_t *in, unsigned lanes,
+                                         bool arithmetic) {
+  if (!c || !in || in->dst < 0 || in->dst >= c->value_slots ||
+      in->a < 0 || in->a >= c->value_slots)
+    return false;
+  unsigned shift = (unsigned)(in->imm & 63);
+  for (unsigned lane = 0; lane < lanes; ++lane) {
+    int da = ny_x64_obj_value_off(c, in->a) - (int)(lane * 8u);
+    int dd = ny_x64_obj_value_off(c, in->dst) - (int)(lane * 8u);
+    unsigned char op = arithmetic ? 0xf8 : 0xe8;
+    if (!ny_x64_obj_load_rax(c, da) ||
+        !ny_x64_obj_bytes(c, (const unsigned char[]){0x48, 0xc1, op}, 3) ||
+        !ny_x64_obj_u8(c, shift) || !ny_x64_obj_store_rax(c, dd))
+      return false;
+  }
+  return true;
+}
+
+static bool ny_x64_obj_i64_vec_reduce_add(nyr_x64_obj_ctx_t *c,
+                                          const nyr_inst_t *in,
+                                          unsigned lanes) {
+  if (!c || !in || in->dst < 0 || in->dst >= c->value_slots ||
+      in->a < 0 || in->a >= c->value_slots ||
+      in->b < 0 || in->b >= c->value_slots)
+    return false;
+  if (!ny_x64_obj_load_value_rax(c, in->a))
+    return false;
+  for (unsigned lane = 0; lane < lanes; ++lane) {
+    int db = ny_x64_obj_value_off(c, in->b) - (int)(lane * 8u);
+    if (!ny_x64_obj_load_r10(c, db) ||
+        !ny_x64_obj_bytes(c, (const unsigned char[]){0x4c, 0x01, 0xd0}, 3))
+      return false;
+  }
+  return ny_x64_obj_store_value_rax(c, in->dst);
+}
+
+
+static bool ny_x64_obj_movsd_load_disp(nyr_x64_obj_ctx_t *c, int xmm, int base,
+                                       int disp) {
+  /* movsd xmm, [base+disp] ; base=rax(0) */
+  if (xmm < 0 || xmm > 7 || base != 0)
+    return false;
+  if (disp == 0)
+    return ny_x64_obj_bytes(c, (const unsigned char[]){0xf2, 0x0f, 0x10,
+                           (unsigned char)(0x00 | (xmm << 3))}, 4);
+  if (disp >= -128 && disp <= 127)
+    return ny_x64_obj_bytes(c, (const unsigned char[]){0xf2, 0x0f, 0x10,
+                           (unsigned char)(0x40 | (xmm << 3)),
+                           (unsigned char)(disp & 0xff)}, 5);
+  return ny_x64_obj_bytes(c, (const unsigned char[]){0xf2, 0x0f, 0x10,
+                         (unsigned char)(0x80 | (xmm << 3))}, 4) &&
+         ny_x64_obj_i32(c, disp);
+}
+
+static bool ny_x64_obj_movsd_store_disp(nyr_x64_obj_ctx_t *c, int xmm, int base,
+                                        int disp) {
+  if (xmm < 0 || xmm > 7 || base != 0)
+    return false;
+  if (disp == 0)
+    return ny_x64_obj_bytes(c, (const unsigned char[]){0xf2, 0x0f, 0x11,
+                           (unsigned char)(0x00 | (xmm << 3))}, 4);
+  if (disp >= -128 && disp <= 127)
+    return ny_x64_obj_bytes(c, (const unsigned char[]){0xf2, 0x0f, 0x11,
+                           (unsigned char)(0x40 | (xmm << 3)),
+                           (unsigned char)(disp & 0xff)}, 5);
+  return ny_x64_obj_bytes(c, (const unsigned char[]){0xf2, 0x0f, 0x11,
+                         (unsigned char)(0x80 | (xmm << 3))}, 4) &&
+         ny_x64_obj_i32(c, disp);
+}
+
+static bool ny_x64_obj_vec4_f64_lane_off(const nyr_x64_obj_ctx_t *c, int v,
+                                         unsigned lane, int *out) {
+  if (!c || !out || v < 0 || v >= c->value_slots || !c->value_i64_vector_lanes ||
+      c->value_i64_vector_lanes[v] < 4 || lane >= 4)
+    return false;
+  *out = ny_x64_obj_value_off(c, v) - (int)(lane * 8u);
+  return true;
+}
+
 static bool ny_x64_obj_emit_inst(nyr_x64_obj_ctx_t *c, const nyr_inst_t *in) {
   static const unsigned char add[] = {0x4c, 0x01, 0xd0};
   static const unsigned char sub[] = {0x4c, 0x29, 0xd0};
@@ -2966,6 +3077,7 @@ static bool ny_x64_obj_emit_inst(nyr_x64_obj_ctx_t *c, const nyr_inst_t *in) {
       return false;
     return ny_x64_obj_store_value_rax(c, in->dst);
   }
+
   case NYIR_SELECT_I64:
     /*
      * Branchless scalar select.  TEST establishes the condition flags; MOV
@@ -3743,6 +3855,170 @@ static bool ny_x64_obj_emit_inst(nyr_x64_obj_ctx_t *c, const nyr_inst_t *in) {
     return ny_x64_obj_i64_vector_memory(c, in, 2, true);
   case NYIR_VEC8_STORE_I64:
     return ny_x64_obj_i64_vector_memory(c, in, 4, true);
+  case NYIR_VEC4_SET1_I64:
+  case NYIR_VEC8_SET1_I64: {
+    unsigned lanes = in->op == NYIR_VEC8_SET1_I64 ? 4u : 2u;
+    if (in->dst < 0 || in->dst >= c->value_slots ||
+        !c->value_i64_vector_lanes ||
+        c->value_i64_vector_lanes[in->dst] < lanes ||
+        !ny_x64_obj_load_value_rax(c, in->a))
+      return false;
+    for (unsigned lane = 0; lane < lanes; ++lane) {
+      int slot = ny_x64_obj_value_off(c, in->dst) - (int)(lane * 8u);
+      if (!ny_x64_obj_store_rax(c, slot))
+        return false;
+    }
+    return true;
+  }
+  case NYIR_VEC4_ADD_I64:
+    return ny_x64_obj_i64_vec_binop(c, in, 2u,
+                                    (const unsigned char[]){0x4c, 0x01, 0xd0}, 3);
+  case NYIR_VEC4_SUB_I64:
+    return ny_x64_obj_i64_vec_binop(c, in, 2u,
+                                    (const unsigned char[]){0x4c, 0x29, 0xd0}, 3);
+  case NYIR_VEC4_AND_I64:
+    return ny_x64_obj_i64_vec_binop(c, in, 2u,
+                                    (const unsigned char[]){0x4c, 0x21, 0xd0}, 3);
+  case NYIR_VEC4_OR_I64:
+    return ny_x64_obj_i64_vec_binop(c, in, 2u,
+                                    (const unsigned char[]){0x4c, 0x09, 0xd0}, 3);
+  case NYIR_VEC4_XOR_I64:
+    return ny_x64_obj_i64_vec_binop(c, in, 2u,
+                                    (const unsigned char[]){0x4c, 0x31, 0xd0}, 3);
+  case NYIR_VEC8_ADD_I64:
+    return ny_x64_obj_i64_vec_binop(c, in, 4u,
+                                    (const unsigned char[]){0x4c, 0x01, 0xd0}, 3);
+  case NYIR_VEC8_SUB_I64:
+    return ny_x64_obj_i64_vec_binop(c, in, 4u,
+                                    (const unsigned char[]){0x4c, 0x29, 0xd0}, 3);
+  case NYIR_VEC8_AND_I64:
+    return ny_x64_obj_i64_vec_binop(c, in, 4u,
+                                    (const unsigned char[]){0x4c, 0x21, 0xd0}, 3);
+  case NYIR_VEC8_OR_I64:
+    return ny_x64_obj_i64_vec_binop(c, in, 4u,
+                                    (const unsigned char[]){0x4c, 0x09, 0xd0}, 3);
+  case NYIR_VEC8_XOR_I64:
+    return ny_x64_obj_i64_vec_binop(c, in, 4u,
+                                    (const unsigned char[]){0x4c, 0x31, 0xd0}, 3);
+  case NYIR_VEC4_REDUCE_ADD_I64:
+    return ny_x64_obj_i64_vec_reduce_add(c, in, 2u);
+  case NYIR_VEC8_REDUCE_ADD_I64:
+    return ny_x64_obj_i64_vec_reduce_add(c, in, 4u);
+  case NYIR_VEC4_SHL_I64:
+  case NYIR_VEC8_SAR_I64:
+  case NYIR_VEC8_SHR_I64: {
+    unsigned lanes = in->op == NYIR_VEC4_SHL_I64 ? 2u : 4u;
+    /* shl rax, imm8: 48 c1 e0 imm (op!=arithmetic uses e0 but shl is e0/e4; easier special case) */
+    if (in->op == NYIR_VEC4_SHL_I64) {
+      unsigned shift = (unsigned)(in->imm & 63);
+      for (unsigned lane = 0; lane < lanes; ++lane) {
+        int da = ny_x64_obj_value_off(c, in->a) - (int)(lane * 8u);
+        int dd = ny_x64_obj_value_off(c, in->dst) - (int)(lane * 8u);
+        if (!ny_x64_obj_load_rax(c, da) ||
+            !ny_x64_obj_bytes(c, (const unsigned char[]){0x48, 0xc1, 0xe0}, 3) ||
+            !ny_x64_obj_u8(c, shift) || !ny_x64_obj_store_rax(c, dd))
+          return false;
+      }
+      return true;
+    }
+    return ny_x64_obj_i64_vec_shift_imm(c, in, lanes,
+                                        in->op == NYIR_VEC8_SAR_I64);
+  }
+  case NYIR_VEC4_SAR_I64: {
+    unsigned shift = (unsigned)(in->imm & 63);
+    for (unsigned lane = 0; lane < 2u; ++lane) {
+      int da = ny_x64_obj_value_off(c, in->a) - (int)(lane * 8u);
+      int dd = ny_x64_obj_value_off(c, in->dst) - (int)(lane * 8u);
+      if (!ny_x64_obj_load_rax(c, da) ||
+          !ny_x64_obj_bytes(c, (const unsigned char[]){0x48, 0xc1, 0xf8}, 3) ||
+          !ny_x64_obj_u8(c, shift) || !ny_x64_obj_store_rax(c, dd))
+        return false;
+    }
+    return true;
+  }
+  case NYIR_VEC4_LOAD_F64:
+    return ny_x64_obj_i64_vector_memory(c, in, 4, false);
+  case NYIR_VEC4_STORE_F64:
+    return ny_x64_obj_i64_vector_memory(c, in, 4, true);
+  case NYIR_VEC4_SET1_F64: {
+    if (in->dst < 0 || in->dst >= c->value_slots || !c->value_i64_vector_lanes ||
+        c->value_i64_vector_lanes[in->dst] < 4u ||
+        !ny_x64_obj_load_value_xmm(c, in->a, 0))
+      return false;
+    for (unsigned lane = 0; lane < 4u; ++lane) {
+      int slot = ny_x64_obj_value_off(c, in->dst) - (int)(lane * 8u);
+      if (!ny_x64_obj_store_xmm(c, slot, 0))
+        return false;
+    }
+    return true;
+  }
+  case NYIR_VEC4_ADD_F64:
+  case NYIR_VEC4_SUB_F64:
+  case NYIR_VEC4_MUL_F64:
+  case NYIR_VEC4_DIV_F64: {
+    unsigned char opc = in->op == NYIR_VEC4_ADD_F64 ? 0x58
+                        : in->op == NYIR_VEC4_SUB_F64 ? 0x5c
+                        : in->op == NYIR_VEC4_MUL_F64 ? 0x59
+                                                      : 0x5e;
+    if (in->dst < 0 || in->dst >= c->value_slots || in->a < 0 || in->b < 0)
+      return false;
+    for (unsigned lane = 0; lane < 4u; ++lane) {
+      int da = ny_x64_obj_value_off(c, in->a) - (int)(lane * 8u);
+      int db = ny_x64_obj_value_off(c, in->b) - (int)(lane * 8u);
+      int dd = ny_x64_obj_value_off(c, in->dst) - (int)(lane * 8u);
+      if (!ny_x64_obj_load_xmm(c, da, 0) || !ny_x64_obj_load_xmm(c, db, 1) ||
+          !ny_x64_obj_bytes(c, (const unsigned char[]){0xf2, 0x0f, opc, 0xc1}, 4) ||
+          !ny_x64_obj_store_xmm(c, dd, 0))
+        return false;
+    }
+    return true;
+  }
+  case NYIR_VEC4_FMA_F64: {
+    /* dst = a*b + c per lane */
+    if (in->dst < 0 || in->dst >= c->value_slots || in->a < 0 || in->b < 0 || in->c < 0)
+      return false;
+    for (unsigned lane = 0; lane < 4u; ++lane) {
+      int da = ny_x64_obj_value_off(c, in->a) - (int)(lane * 8u);
+      int db = ny_x64_obj_value_off(c, in->b) - (int)(lane * 8u);
+      int dc = ny_x64_obj_value_off(c, in->c) - (int)(lane * 8u);
+      int dd = ny_x64_obj_value_off(c, in->dst) - (int)(lane * 8u);
+      /* xmm0=a, xmm1=b, xmm2=c; mulsd xmm0,xmm1; addsd xmm0,xmm2 */
+      if (!ny_x64_obj_load_xmm(c, da, 0) || !ny_x64_obj_load_xmm(c, db, 1) ||
+          !ny_x64_obj_load_xmm(c, dc, 2) ||
+          !ny_x64_obj_bytes(c, (const unsigned char[]){0xf2, 0x0f, 0x59, 0xc1}, 4) ||
+          !ny_x64_obj_bytes(c, (const unsigned char[]){0xf2, 0x0f, 0x58, 0xc2}, 4) ||
+          !ny_x64_obj_store_xmm(c, dd, 0))
+        return false;
+    }
+    return true;
+  }
+  case NYIR_VEC4_REDUCE_ADD_F64: {
+    /* scalar dst = acc + sum(lanes of b) */
+    if (in->dst < 0 || in->dst >= c->value_slots || in->a < 0 || in->b < 0 ||
+        !ny_x64_obj_load_value_xmm(c, in->a, 0))
+      return false;
+    for (unsigned lane = 0; lane < 4u; ++lane) {
+      int db = ny_x64_obj_value_off(c, in->b) - (int)(lane * 8u);
+      if (!ny_x64_obj_load_xmm(c, db, 1) ||
+          !ny_x64_obj_bytes(c, (const unsigned char[]){0xf2, 0x0f, 0x58, 0xc1}, 4))
+        return false;
+    }
+    return ny_x64_obj_store_value_xmm(c, in->dst, 0);
+  }
+  case NYIR_VEC4_SHUFFLE_F64: {
+    /* dst lanes = src lanes selected by imm mask (2 bits per lane, 4 lanes) */
+    if (in->dst < 0 || in->dst >= c->value_slots || in->a < 0)
+      return false;
+    uint32_t mask = (uint32_t)in->imm;
+    for (unsigned lane = 0; lane < 4u; ++lane) {
+      unsigned src_lane = (mask >> (lane * 2u)) & 3u;
+      int da = ny_x64_obj_value_off(c, in->a) - (int)(src_lane * 8u);
+      int dd = ny_x64_obj_value_off(c, in->dst) - (int)(lane * 8u);
+      if (!ny_x64_obj_load_xmm(c, da, 0) || !ny_x64_obj_store_xmm(c, dd, 0))
+        return false;
+    }
+    return true;
+  }
   case NYIR_STORE_I64:
     if (in->scalar_class == NYIR_SCALAR_F32) {
       return ny_x64_obj_load_value_rax(c, in->a) &&
@@ -4683,6 +4959,57 @@ static bool ny_x64_obj_classify_values(nyr_x64_obj_ctx_t *c,
           (in->op == NYIR_CALL || in->op == NYIR_LOAD_I64))))
       c->value_f32[in->dst] = true;
   }
+  /* Infer vector lane counts from uses (some paths may not tag producers). */
+  for (size_t i = 0; nyir && i < nyir->len; ++i) {
+    const nyr_inst_t *in = &nyir->data[i];
+    unsigned need_a = 0, need_b = 0, need_c = 0;
+    switch (in->op) {
+    case NYIR_VEC4_STORE_I64:
+    case NYIR_VEC4_REDUCE_ADD_I64:
+      need_b = 2;
+      break;
+    case NYIR_VEC8_STORE_I64:
+    case NYIR_VEC8_REDUCE_ADD_I64:
+      need_b = 4;
+      break;
+    case NYIR_VEC4_ADD_I64: case NYIR_VEC4_SUB_I64:
+    case NYIR_VEC4_AND_I64: case NYIR_VEC4_OR_I64: case NYIR_VEC4_XOR_I64:
+      need_a = need_b = 2;
+      break;
+    case NYIR_VEC4_SHL_I64: case NYIR_VEC4_SAR_I64:
+      need_a = 2;
+      break;
+    case NYIR_VEC8_ADD_I64: case NYIR_VEC8_SUB_I64:
+    case NYIR_VEC8_AND_I64: case NYIR_VEC8_OR_I64: case NYIR_VEC8_XOR_I64:
+      need_a = need_b = 4;
+      break;
+    case NYIR_VEC8_SAR_I64: case NYIR_VEC8_SHR_I64:
+      need_a = 4;
+      break;
+    case NYIR_VEC4_STORE_F64:
+    case NYIR_VEC4_REDUCE_ADD_F64:
+      need_b = 4;
+      break;
+    case NYIR_VEC4_ADD_F64: case NYIR_VEC4_SUB_F64:
+    case NYIR_VEC4_MUL_F64: case NYIR_VEC4_DIV_F64:
+      need_a = need_b = 4;
+      break;
+    case NYIR_VEC4_FMA_F64:
+      need_a = need_b = need_c = 4;
+      break;
+    default:
+      break;
+    }
+    if (need_a && in->a >= 0 && in->a < c->value_slots &&
+        c->value_i64_vector_lanes[in->a] < need_a)
+      c->value_i64_vector_lanes[in->a] = need_a;
+    if (need_b && in->b >= 0 && in->b < c->value_slots &&
+        c->value_i64_vector_lanes[in->b] < need_b)
+      c->value_i64_vector_lanes[in->b] = need_b;
+    if (need_c && in->c >= 0 && in->c < c->value_slots &&
+        c->value_i64_vector_lanes[in->c] < need_c)
+      c->value_i64_vector_lanes[in->c] = need_c;
+  }
   bool changed = true;
   while (changed) {
     changed = false;
@@ -4706,6 +5033,15 @@ static bool ny_x64_obj_classify_values(nyr_x64_obj_ctx_t *c,
         c->value_i64_vector_lanes[in->dst] = c->value_i64_vector_lanes[in->a];
         changed = true;
       }
+      /* Backward: if a vector copy/phi destination requires lanes, the source
+       * must carry them too so allocation reserves enough storage. */
+      if (in->op == NYIR_COPY && in->dst >= 0 && in->a >= 0 &&
+          in->dst < c->value_slots && in->a < c->value_slots &&
+          c->value_i64_vector_lanes[in->dst] >
+              c->value_i64_vector_lanes[in->a]) {
+        c->value_i64_vector_lanes[in->a] = c->value_i64_vector_lanes[in->dst];
+        changed = true;
+      }
       if (in->op == NYIR_PHI && in->dst >= 0 && in->dst < c->value_slots) {
         for (size_t k = 0; k < in->phi_incoming_len; ++k) {
           int value = in->phi_incoming[k].value;
@@ -4714,6 +5050,13 @@ static bool ny_x64_obj_classify_values(nyr_x64_obj_ctx_t *c,
                   c->value_i64_vector_lanes[in->dst]) {
             c->value_i64_vector_lanes[in->dst] =
                 c->value_i64_vector_lanes[value];
+            changed = true;
+          }
+          if (value >= 0 && value < c->value_slots &&
+              c->value_i64_vector_lanes[in->dst] >
+                  c->value_i64_vector_lanes[value]) {
+            c->value_i64_vector_lanes[value] =
+                c->value_i64_vector_lanes[in->dst];
             changed = true;
           }
         }

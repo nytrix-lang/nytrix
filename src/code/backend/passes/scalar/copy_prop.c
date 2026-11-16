@@ -47,6 +47,16 @@ static bool nir_copy_dst_calls_safe(const nyr_func_t *f, const int *defs,
   if (!call_used || !in || in->dst < 0 || !call_used[in->dst])
     return true;
   /*
+   * Raw numeric scalars carry no ownership fact to contradict: the argument
+   * is passed by value, and the per-position ABI class is unchanged when a
+   * copy of the same scalar class is folded into the argument. Only object
+   * and aggregate values need the ownership-preserving alias below.
+   */
+  if (in->scalar_class == NYIR_SCALAR_I64_RAW ||
+      in->scalar_class == NYIR_SCALAR_F32 ||
+      in->scalar_class == NYIR_SCALAR_F64)
+    return true;
+  /*
    * A call-argument alias may fold when its canonical producer carries an
    * ownership fact. The call site keeps its argument contract, and the
    * refresh below replaces the stale value-ownership fact with the producer's
@@ -80,7 +90,10 @@ static bool nir_copy_class_preserved(const nyr_scalar_class_t *vclass,
    * bound to the specific value, and rewriting the argument can contradict
    * it in ways post-rewrite refresh cannot always reconstruct.
    */
-  if (call_used && in->dst >= 0 && call_used[in->dst])
+  if (call_used && in->dst >= 0 && call_used[in->dst] &&
+      in->scalar_class != NYIR_SCALAR_I64_RAW &&
+      in->scalar_class != NYIR_SCALAR_F32 &&
+      in->scalar_class != NYIR_SCALAR_F64)
     return false;
   int src = nir_alias_find(alias, in->a);
   if (src < 0)
@@ -159,7 +172,12 @@ static int nir_alias_for_use(const int *alias, const size_t *alias_blk,
   if (value < 0)
     return value;
   int source = nir_alias_find(alias, value);
+  /*
+   * A copy already scanned in this block precedes the use: the walk is in
+   * program order, so same-block availability only needs the block match.
+   */
   if (source == value || !alias_blk || alias_blk[value] == SIZE_MAX ||
+      alias_blk[value] == use_blk ||
       nyr_cfg_dominates(cfg, alias_blk[value], use_blk))
     return source;
   return value;
@@ -248,36 +266,42 @@ static bool copy_prop_cfg(nyr_func_t *f) {
     if (in->a >= 0) {
       int s = nir_alias_find(alias, in->a);
       if (s != in->a && (alias_blk[in->a] == SIZE_MAX ||
+                         alias_blk[in->a] == blk ||
                          nyr_cfg_dominates(&cfg, alias_blk[in->a], blk)))
         in->a = s;
     }
     if (in->b >= 0) {
       int s = nir_alias_find(alias, in->b);
       if (s != in->b && (alias_blk[in->b] == SIZE_MAX ||
+                         alias_blk[in->b] == blk ||
                          nyr_cfg_dominates(&cfg, alias_blk[in->b], blk)))
         in->b = s;
     }
     if (!asm_goto && in->c >= 0) {
       int s = nir_alias_find(alias, in->c);
       if (s != in->c && (alias_blk[in->c] == SIZE_MAX ||
+                         alias_blk[in->c] == blk ||
                          nyr_cfg_dominates(&cfg, alias_blk[in->c], blk)))
         in->c = s;
     }
     if (in->d >= 0) {
       int s = nir_alias_find(alias, in->d);
       if (s != in->d && (alias_blk[in->d] == SIZE_MAX ||
+                         alias_blk[in->d] == blk ||
                          nyr_cfg_dominates(&cfg, alias_blk[in->d], blk)))
         in->d = s;
     }
     if (in->e >= 0) {
       int s = nir_alias_find(alias, in->e);
       if (s != in->e && (alias_blk[in->e] == SIZE_MAX ||
+                         alias_blk[in->e] == blk ||
                          nyr_cfg_dominates(&cfg, alias_blk[in->e], blk)))
         in->e = s;
     }
     if (in->f >= 0) {
       int s = nir_alias_find(alias, in->f);
       if (s != in->f && (alias_blk[in->f] == SIZE_MAX ||
+                         alias_blk[in->f] == blk ||
                          nyr_cfg_dominates(&cfg, alias_blk[in->f], blk)))
         in->f = s;
     }
@@ -286,7 +310,7 @@ static bool copy_prop_cfg(nyr_func_t *f) {
       if (v < 0)
         continue;
       int s = nir_alias_find(alias, v);
-      if (s != v && (alias_blk[v] == SIZE_MAX ||
+      if (s != v && (alias_blk[v] == SIZE_MAX || alias_blk[v] == blk ||
                      nyr_cfg_dominates(&cfg, alias_blk[v], blk)))
         in->extra_args[k] = s;
     }

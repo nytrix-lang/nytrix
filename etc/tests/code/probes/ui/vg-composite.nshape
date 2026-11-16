@@ -1,0 +1,130 @@
+shape vg-composite {
+  family "probe-suite"
+  generator "regression"
+  features ["ny", "render", "vg", "vector", "blend"]
+  template ny-test-case
+  expect compile_and_run
+  flags_matrix "--native-only -O0; --native-backend=llvm --jit --jit-engine=mcjit"
+  timeout 420
+  expect_stdout "VG-COMPOSITE-OK"
+  source ny <<'NY'
+;; Porter-Duff operators of core.os.ui.render.vg. Each operator gets a cell:
+;; an opaque red destination rectangle on an opaque grey canvas, then a blue
+;; source rectangle with alpha 0.6 drawn with the operator, overlapping the
+;; right half of it. The overlap (over red) and the source-only part (over
+;; grey) must hold the premultiplied Porter-Duff results; the
+;; destination-only part must be untouched (operators apply where geometry
+;; is drawn, as in NanoVG). The canvas is opaque because snapshots report
+;; opaque pixels and the backends store translucent ones differently.
+;; NY_VG_COMPOSITE_BACKEND=vk|gl runs it on a real backend (needs a display).
+use core
+use core.common as common
+use core.math (abs)
+use core.os (temp_dir)
+use core.os.ui.window.consts
+use core.os.ui.render as gfx
+use core.os.ui.render.vg as vg
+use core.math.parse.img as img
+
+def want_backend = common.env_trim("NY_VG_COMPOSITE_BACKEND")
+if want_backend == "vk" || want_backend == "gl" { gfx.apply_backend_name(want_backend) }
+else { gfx.set_backend_type(gfx.BACKEND_MOCK) }
+def is_mock = gfx.get_backend_type() == gfx.BACKEND_MOCK
+def win = gfx.init_window(440, 120, "vg composite", consts.WINDOW_CENTER, false, true, 1)
+assert(!!win, "window opens")
+
+def ops = [vg.SOURCE_OVER, vg.SOURCE_IN, vg.SOURCE_OUT, vg.ATOP, vg.DESTINATION_OVER, vg.DESTINATION_IN,
+   vg.DESTINATION_OUT, vg.DESTINATION_ATOP, vg.LIGHTER, vg.COPY, vg.XOR]
+def names = ["source-over", "source-in", "source-out", "atop", "destination-over", "destination-in",
+   "destination-out", "destination-atop", "lighter", "copy", "xor"]
+assert(!vg.global_composite_operation(11) && !vg.global_composite_operation(-1), "unknown operators are rejected")
+
+;; Cell k: x0 = 40 * k; destination x0..x0+26, source x0+13..x0+39, both y 20..100.
+fn card() any {
+   vg.begin_frame(440.0, 120.0)
+   mut int k = 0
+   while k < ops.len {
+      def f64 x0 = 40.0 * float(k)
+      vg.global_composite_operation(vg.SOURCE_OVER)
+      vg.begin_path() vg.rect(x0, 20.0, 26.0, 80.0) vg.fill_color([1.0, 0.0, 0.0, 1.0]) vg.fill()
+      assert(vg.global_composite_operation(int(ops[k])), "operator accepted")
+      vg.begin_path() vg.rect(x0 + 13.0, 20.0, 26.0, 80.0) vg.fill_color([0.0, 0.0, 1.0, 0.6]) vg.fill()
+      k += 1
+   }
+   vg.global_composite_operation(vg.SOURCE_OVER)
+   vg.end_frame()
+}
+
+def shot = temp_dir() + "/ny-vg-composite-" + to_str(want_backend.len > 0 ? want_backend : "mock") + ".png"
+mut saved = false
+mut frame = 0
+while frame < 6 {
+   if frame == 4 { gfx.request_frame_capture() }
+   if gfx.begin_frame_clear([0.2, 0.2, 0.2, 1.0]) {
+      gfx.set_ortho_2d(0.0, 440.0, 120.0, 0.0)
+      card()
+      gfx.end_frame()
+      if frame == 4 { saved = gfx.snapshot(shot) }
+      frame += 1
+   }
+}
+assert(saved, "framebuffer snapshot")
+def pic = img.load(shot)
+assert(is_dict(pic), "snapshot decodes")
+def int pw = int(pic.get("width", 0))
+def int pc = int(pic.get("channels", pic.get("bpp", 4)))
+def ptr data = pic.get("data", 0)
+
+;; Premultiplied stored color at (x, y): the mock renderer keeps straight
+;; alpha, the GPU backends keep the blended (premultiplied) bytes.
+fn px(ptr pix, int w, int ch, int x, int y) list {
+   def int off = (y * w + x) * ch
+   def f64 r = float(load8(pix, off)) / 255.0
+   def f64 g = float(load8(pix, off + 1)) / 255.0
+   def f64 b = float(load8(pix, off + 2)) / 255.0
+   [r, g, b]
+}
+
+fn factor(int code, f64 sa, f64 da) f64 {
+   if code == 1 { return 1.0 }
+   if code == 2 { return sa }
+   if code == 3 { return 1.0 - sa }
+   if code == 4 { return da }
+   if code == 5 { return 1.0 - da }
+   0.0
+}
+
+;; Expected premultiplied color of the source drawn over premultiplied `d`
+;; with destination alpha `da`.
+fn expect(int op, list d, f64 da) list {
+   def list f = gfx.blend_factors(op)
+   def f64 sa = 0.6
+   def f64 fs = factor(int(f[0]), sa, da)
+   def f64 fd = factor(int(f[1]), sa, da)
+   def list sp = [0.0, 0.0, 0.6]
+   [min(1.0, float(sp[0]) * fs + float(d[0]) * fd), min(1.0, float(sp[1]) * fs + float(d[1]) * fd), min(1.0, float(sp[2]) * fs + float(d[2]) * fd)]
+}
+
+fn near(list got, list want, f64 tol) bool {
+   abs(float(got[0]) - float(want[0])) <= tol && abs(float(got[1]) - float(want[1])) <= tol && abs(float(got[2]) - float(want[2])) <= tol
+}
+
+def f64 tol = 0.03
+mut int k = 0
+while k < ops.len {
+   def int x0 = 40 * k
+   def list only_dst = px(data, pw, pc, x0 + 6, 60)
+   def list overlap = px(data, pw, pc, x0 + 19, 60)
+   def list only_src = px(data, pw, pc, x0 + 33, 60)
+   def int op = int(ops[k])
+   def list want_overlap = expect(op, [1.0, 0.0, 0.0], 1.0)
+   def list want_src = expect(op, [0.2, 0.2, 0.2], 1.0)
+   if !near(only_dst, [1.0, 0.0, 0.0], tol) || !near(overlap, want_overlap, tol) || !near(only_src, want_src, tol) {
+      print("VG_COMPOSITE_FAIL " + to_str(names[k]) + " dst=" + to_str(only_dst) + " overlap=" + to_str(overlap) + " want " + to_str(want_overlap) + " src=" + to_str(only_src) + " want " + to_str(want_src))
+      assert(false, "operator " + to_str(names[k]) + " matches the Porter-Duff formula")
+   }
+   k += 1
+}
+print("VG-COMPOSITE-OK " + (is_mock ? "mock" : want_backend))
+NY
+}

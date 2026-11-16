@@ -4,7 +4,7 @@
 ;; - core.os.ui.render.vk
 ;; - core.os.ui.render
 ;; - core.os.ui.render.matrix
-module core.os.ui.render.vk.pipeline(compile_glsl_to_spirv, create_shader_module_from_source, create_pipeline, create_pipeline_no_vertex_input, bind_pipeline, push_constants, shader_pc_bytes, _get_default_pipeline, _get_nocull_pipeline, _get_unlit_nocull_pipeline, _get_flip_pipeline, _get_flip_unlit_pipeline, _get_mesh_opaque_pipeline, _get_mesh_opaque_nocull_pipeline, _get_mesh_opaque_nocull_flip_pipeline, _get_mesh_opaque_unlit_pipeline, _get_mesh_opaque_unlit_nocull_pipeline, _get_mesh_opaque_unlit_nocull_flip_pipeline, _get_mesh_fast_opaque_pipeline, _get_mesh_fast_opaque_nocull_pipeline, _get_mesh_fast_opaque_flip_pipeline, _get_mesh_fast_opaque_nocull_flip_pipeline, _get_mesh_fast_env_opaque_pipeline, _get_mesh_fast_env_opaque_nocull_pipeline, _get_mesh_fast_env_opaque_flip_pipeline, _get_mesh_fast_env_opaque_nocull_flip_pipeline, _get_mesh_alpha_pipeline, _get_mesh_alpha_nocull_pipeline, _get_mesh_alpha_nocull_flip_pipeline, _get_mesh_alpha_unlit_pipeline, _get_mesh_alpha_unlit_nocull_pipeline, _get_mesh_alpha_unlit_nocull_flip_pipeline, _get_mesh_alpha_flip_pipeline, _get_mesh_alpha_unlit_flip_pipeline, _create_shader_module, _ensure_shader_binaries, _create_graphics_pipeline, _ensure_nocull_pipeline, _ensure_line_pipeline, _ensure_sdf_line_pipeline, _ensure_point_pipeline, _ensure_wire_pipeline, _ensure_circle_pipeline, _ensure_ring_pipeline, _ensure_rounded_rect_pipeline, _ensure_skybox_pipeline)
+module core.os.ui.render.vk.pipeline(blend_op_pipeline, compile_glsl_to_spirv, create_shader_module_from_source, create_pipeline, create_pipeline_no_vertex_input, bind_pipeline, push_constants, shader_pc_bytes, _get_default_pipeline, _get_nocull_pipeline, _get_unlit_nocull_pipeline, _get_flip_pipeline, _get_flip_unlit_pipeline, _get_mesh_opaque_pipeline, _get_mesh_opaque_nocull_pipeline, _get_mesh_opaque_nocull_flip_pipeline, _get_mesh_opaque_unlit_pipeline, _get_mesh_opaque_unlit_nocull_pipeline, _get_mesh_opaque_unlit_nocull_flip_pipeline, _get_mesh_fast_opaque_pipeline, _get_mesh_fast_opaque_nocull_pipeline, _get_mesh_fast_opaque_flip_pipeline, _get_mesh_fast_opaque_nocull_flip_pipeline, _get_mesh_fast_env_opaque_pipeline, _get_mesh_fast_env_opaque_nocull_pipeline, _get_mesh_fast_env_opaque_flip_pipeline, _get_mesh_fast_env_opaque_nocull_flip_pipeline, _get_mesh_alpha_pipeline, _get_mesh_alpha_nocull_pipeline, _get_mesh_alpha_nocull_flip_pipeline, _get_mesh_alpha_unlit_pipeline, _get_mesh_alpha_unlit_nocull_pipeline, _get_mesh_alpha_unlit_nocull_flip_pipeline, _get_mesh_alpha_flip_pipeline, _get_mesh_alpha_unlit_flip_pipeline, _create_shader_module, _ensure_shader_binaries, _create_graphics_pipeline, _ensure_nocull_pipeline, _ensure_line_pipeline, _ensure_sdf_line_pipeline, _ensure_point_pipeline, _ensure_wire_pipeline, _ensure_circle_pipeline, _ensure_ring_pipeline, _ensure_rounded_rect_pipeline, _ensure_skybox_pipeline)
 use core
 use core.mem
 use core.os (file_exists, file_read, file_remove, file_write, ticks)
@@ -34,6 +34,69 @@ def _VK_POLYGON_LINE = 1
 def _PIPE_BLEND_OPAQUE = 0
 def _PIPE_BLEND_UI = 1
 def _PIPE_BLEND_ALPHA = 2
+def _PIPE_BLEND_FACTORS = 0x10000
+;; Porter-Duff operator pipelines, built on first use. Typed handles are
+;; kept in typed globals: a handle stored in a list can read back mangled.
+mut ?handle _blend_pipe_1 = 0
+mut ?handle _blend_pipe_2 = 0
+mut ?handle _blend_pipe_3 = 0
+mut ?handle _blend_pipe_4 = 0
+mut ?handle _blend_pipe_5 = 0
+mut ?handle _blend_pipe_6 = 0
+mut ?handle _blend_pipe_7 = 0
+mut ?handle _blend_pipe_8 = 0
+mut ?handle _blend_pipe_9 = 0
+mut ?handle _blend_pipe_10 = 0
+
+fn _blend_pipe_get(int op) ?handle {
+   if op == 1 { return _blend_pipe_1 }
+   if op == 2 { return _blend_pipe_2 }
+   if op == 3 { return _blend_pipe_3 }
+   if op == 4 { return _blend_pipe_4 }
+   if op == 5 { return _blend_pipe_5 }
+   if op == 6 { return _blend_pipe_6 }
+   if op == 7 { return _blend_pipe_7 }
+   if op == 8 { return _blend_pipe_8 }
+   if op == 9 { return _blend_pipe_9 }
+   if op == 10 { return _blend_pipe_10 }
+   0
+}
+
+fn _blend_pipe_set(int op, ?handle p) any {
+   if op == 1 { _blend_pipe_1 = p }
+   elif op == 2 { _blend_pipe_2 = p }
+   elif op == 3 { _blend_pipe_3 = p }
+   elif op == 4 { _blend_pipe_4 = p }
+   elif op == 5 { _blend_pipe_5 = p }
+   elif op == 6 { _blend_pipe_6 = p }
+   elif op == 7 { _blend_pipe_7 = p }
+   elif op == 8 { _blend_pipe_8 = p }
+   elif op == 9 { _blend_pipe_9 = p }
+   elif op == 10 { _blend_pipe_10 = p }
+   0
+}
+
+fn _vk_blend_factor(int code) int {
+   ;; core.os.ui.render.blend_factors codes -> VkBlendFactor.
+   if code == 1 { return 1 }
+   if code == 2 { return 6 }
+   if code == 3 { return 7 }
+   if code == 4 { return 8 }
+   if code == 5 { return 9 }
+   0
+}
+
+fn blend_op_pipeline(int op, int fsrc_code, int fdst_code) ?handle {
+   "Returns the unlit 2D triangle pipeline that blends with the given premultiplied factors (codes from core.os.ui.render.blend_factors) for operator `op`, building it once."
+   if op <= 0 || op > 10 { return 0 }
+   def ?handle have = _blend_pipe_get(op)
+   if have { return have }
+   if !_mesh_pipeline_ready_basic() { return 0 }
+   def int enc = _PIPE_BLEND_FACTORS | (_vk_blend_factor(fsrc_code) << 4) | _vk_blend_factor(fdst_code)
+   def ?handle pipe = _create_pipeline_ex(_vert_module, _frag_module, _VK_TOPO_TRIANGLES, 0, 0, _VK_CULL_NONE, _VK_FRONT_DEFAULT, 0, 0, 1.0, enc)
+   _blend_pipe_set(op, pipe)
+   pipe
+}
 
 fn _max_textures_value() int { 4096 }
 
@@ -274,7 +337,13 @@ fn _create_pipeline_ex(?handle vert_mod, ?handle frag_mod, int topology=_VK_TOPO
    def rs = VkPipelineRasterizationStateCreateInfo(depth_clamp, 0, polygon_mode, cull_mode, front_face, depth_bias, 0.0, 0.0, 0.0, float(line_width))
    def ms = VkPipelineMultisampleStateCreateInfo(_cfg_msaa, 0, 0.0, 0, 0, 0)
    mut cba = 0
-   if blend_enable == _PIPE_BLEND_OPAQUE { cba = VkPipelineColorBlendAttachmentState(0, 1, 7, 0, 1, 7, 0, 15) }
+   if blend_enable >= _PIPE_BLEND_FACTORS {
+      ;; Explicit factors: bits 4..7 source, 0..3 destination (VkBlendFactor),
+      ;; the same pair for color and alpha.
+      def int fsrc = (blend_enable >> 4) & 15
+      def int fdst = blend_enable & 15
+      cba = VkPipelineColorBlendAttachmentState(1, fsrc, fdst, 0, fsrc, fdst, 0, 15)
+   } elif blend_enable == _PIPE_BLEND_OPAQUE { cba = VkPipelineColorBlendAttachmentState(0, 1, 7, 0, 1, 7, 0, 15) }
    elif blend_enable == _PIPE_BLEND_ALPHA { cba = VkPipelineColorBlendAttachmentState(1, 6, 7, 0, 1, 7, 0, 15) } else {
       cba = VkPipelineColorBlendAttachmentState(blend_enable, 6, 7, 0, 1, 7, 0, 15)
    }

@@ -96,16 +96,6 @@ work is tracked in [Performance work](perf.md).
   supplied earlier; it is not in the repository. Acceptance: each effect
   renders on Vulkan and GL on the compositor with a capture, toggles at run
   time, and has a probe.
-- [ ] **Vector graphics: composite modes.** `core.os.ui.render.vg` covers
-  paths, fills with holes, strokes, joins and caps, antialiasing, gradients,
-  image patterns, transforms, scissor, and text that follows rotation, scale
-  and skew on Vulkan and GL (`vg-golden` passes on mock, Vulkan, and GL).
-  Remaining: blend operators other than source-over. They need
-  premultiplied output from `vg` (vertex colours, baked gradients, image
-  patterns), a blend-factor setter in the renderer with one Vulkan pipeline
-  per factor set, `glBlendFuncSeparate` on GL, and the same formulas in the
-  software renderer. Acceptance: the eleven Porter-Duff operators match a
-  reference card on all three backends, with a probe.
 - [ ] **Port/fix `smem` process memory scanner UI (`etc/projects/ui/smem.ny`).**
   Single-file Nytrix port of `x3ric/smem` (https://github.com/x3ric/smem);
   original reference cloned at `/tmp/kilo/smem` (`README.md`, `src/main.rs`,

@@ -4,7 +4,7 @@
 ;; - core.os.ui.render.vk
 ;; - core.os.ui.render
 ;; - core.os.ui.render.matrix
-module core.os.ui.render.vk.draw(draw_rect_fast, draw_rect_outline_fast, draw_rects_fast_ptr, draw_line_fast, draw_lines_2d_fast_ptr, draw_rect, draw_rect_tex, draw_rect_tex_uv, draw_rect_tex_uv_rot, _vk_draw_shader_rect, draw_line, draw_glyph, _draw_triangle_2d, draw_triangle_3d, draw_quad_3d, draw_rect_lines_2d, draw_chamfer_rect_2d, draw_rounded_rect_2d, draw_rounded_rect_sdf, draw_fan_2d, draw_ellipse_lines_2d, draw_arc_2d, draw_sector_2d, draw_star_2d, draw_vertices, draw_lines_raw, draw_vertices_indexed_raw, draw_line_3d, draw_grid_3d, draw_axes_3d, draw_cube_3d, draw_line_strip_2d, draw_points_raw, draw_static_buffer, draw_static_buffer_raw, draw_static_buffer_indexed, draw_static_buffer_indexed_raw, draw_circle_sdf, draw_ring_sdf, _ensure_default_triangle_pipeline, _draw_raw_stream_current_material, mesh_build_axes_3d)
+module core.os.ui.render.vk.draw(set_blend_mode, draw_rect_fast, draw_rect_outline_fast, draw_rects_fast_ptr, draw_line_fast, draw_lines_2d_fast_ptr, draw_rect, draw_rect_tex, draw_rect_tex_uv, draw_rect_tex_uv_rot, _vk_draw_shader_rect, draw_line, draw_glyph, _draw_triangle_2d, draw_triangle_3d, draw_quad_3d, draw_rect_lines_2d, draw_chamfer_rect_2d, draw_rounded_rect_2d, draw_rounded_rect_sdf, draw_fan_2d, draw_ellipse_lines_2d, draw_arc_2d, draw_sector_2d, draw_star_2d, draw_vertices, draw_lines_raw, draw_vertices_indexed_raw, draw_line_3d, draw_grid_3d, draw_axes_3d, draw_cube_3d, draw_line_strip_2d, draw_points_raw, draw_static_buffer, draw_static_buffer_raw, draw_static_buffer_indexed, draw_static_buffer_indexed_raw, draw_circle_sdf, draw_ring_sdf, _ensure_default_triangle_pipeline, _draw_raw_stream_current_material, mesh_build_axes_3d)
 use core
 use core.mem
 use core.math
@@ -17,7 +17,7 @@ use core.os.ui.render.vk.vulkan (
 
 use core.os.ui.render.dump as ui_profile
 use core.os.ui.render.vk.utils
-use core.os.ui.render.vk.pipeline (_ensure_circle_pipeline,
+use core.os.ui.render.vk.pipeline (blend_op_pipeline, _ensure_circle_pipeline,
    _ensure_ring_pipeline,
    _ensure_rounded_rect_pipeline,
    _ensure_line_pipeline,
@@ -688,6 +688,22 @@ fn draw_rect_tex_uv_rot(f64 cx,
    0
 }
 
+mut int _ui_blend_op = 0
+mut int _ui_blend_src = 1
+mut int _ui_blend_dst = 3
+
+fn set_blend_mode(int op, int fsrc=1, int fdst=3) bool {
+   "Selects the Porter-Duff operator of later draw_vertices calls; factor codes as in core.os.ui.render.blend_factors. Operator 0 restores the straight-alpha UI blend."
+   def int prev = _ui_blend_op
+   _ui_blend_op = op
+   _ui_blend_src = fsrc
+   _ui_blend_dst = fdst
+   ;; Other draw paths keep the current pipeline; leave none of them on an
+   ;; operator pipeline.
+   if prev != 0 && op == 0 && vk_state.frame_open() { _use_default_triangle_pipeline() }
+   true
+}
+
 fn draw_vertices(any p, int count, int tex_id) bool {
    "Bulk-uploads raw vertex data(packed vertex stride) to the local mapping."
    if !vk_state.frame_open() || count <= 0 || !p { return false }
@@ -695,6 +711,10 @@ fn draw_vertices(any p, int count, int tex_id) bool {
       if !_begin_ui_triangle_stream(tex_id) { return false }
    } else {
       if !_begin_ui_default_triangle_stream() { return false }
+   }
+   if _ui_blend_op != 0 {
+      def ?handle bp = blend_op_pipeline(_ui_blend_op, _ui_blend_src, _ui_blend_dst)
+      if bp { _activate_pipeline_target(bp) }
    }
    def bytes = count * _VKR_VERT_STRIDE
    if !_check_flush(bytes) { return false }

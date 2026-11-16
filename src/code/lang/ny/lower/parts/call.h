@@ -13563,6 +13563,15 @@ ordinary_call:
         if (source_local && source_local->dyn_tag_slot >= 0)
           tag = nyr_load_local_value(b, source_local->dyn_tag_slot);
       }
+      /* A float, nil or boolean has no length: rt_len walked every layout
+       * probe to return 0 for it, and float arguments to `any` formals
+       * (math helpers in the frame loop) made that a third of a UI frame. */
+      if (length < 0 &&
+          (arg_expr_f64 || arg_expr_f32 || ny_expr_is_nil_literal(arg_expr) ||
+           (arg_expr && arg_expr->kind == NY_E_LITERAL &&
+            (arg_expr->as.literal.kind == NY_LIT_BOOL ||
+             arg_expr->as.literal.kind == NY_LIT_FLOAT))))
+        length = nyr_emit_const(b, 0);
       if (length < 0) {
         bool arg_local_canonical =
             arg_expr && arg_expr->kind == NY_E_IDENT &&

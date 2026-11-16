@@ -34,9 +34,11 @@
 ;;   text         font_face, text_align, text, text_bounds (glyphs follow the
 ;;                whole transform on Vulkan and GL; the software renderer
 ;;                keeps them upright at the transformed position)
-;;   compositing  global_alpha, and source-over blending only: the renderer
-;;                has one alpha blend pipeline, so the other Porter-Duff
-;;                operators are rejected by global_composite_operation.
+;;   compositing  global_alpha, and the eleven Porter-Duff operators of
+;;                global_composite_operation (fills and strokes; text stays
+;;                source-over). Operators other than SOURCE_OVER draw
+;;                premultiplied colors; an image pattern with translucent
+;;                texels is treated as opaque-premultiplied there.
 module core.os.ui.render.vg(
    begin_frame, end_frame, save, restore, reset,
    stroke_color, fill_color, stroke_paint, fill_paint, stroke_width, miter_limit, line_cap, line_join,
@@ -50,7 +52,8 @@ module core.os.ui.render.vg(
    frame_stats, release,
    BUTT, ROUND, SQUARE, BEVEL, MITER, SOLID, HOLE, CCW, CW,
    ALIGN_LEFT, ALIGN_CENTER, ALIGN_RIGHT, ALIGN_TOP, ALIGN_MIDDLE, ALIGN_BOTTOM, ALIGN_BASELINE,
-   SOURCE_OVER
+   SOURCE_OVER, SOURCE_IN, SOURCE_OUT, ATOP, DESTINATION_OVER, DESTINATION_IN, DESTINATION_OUT,
+   DESTINATION_ATOP, LIGHTER, COPY, XOR
 )
 use core
 use core.math (sqrt, sin, cos, tan, atan2, acos, abs, PI)
@@ -76,6 +79,16 @@ def ALIGN_MIDDLE = 16
 def ALIGN_BOTTOM = 32
 def ALIGN_BASELINE = 64
 def SOURCE_OVER = 0
+def SOURCE_IN = 1
+def SOURCE_OUT = 2
+def ATOP = 3
+def DESTINATION_OVER = 4
+def DESTINATION_IN = 5
+def DESTINATION_OUT = 6
+def DESTINATION_ATOP = 7
+def LIGHTER = 8
+def COPY = 9
+def XOR = 10
 
 ;; Current state. save() copies these into a list; restore() reads them back.
 mut _xa, _xb, _xc, _xd, _xe, _xf = 1.0, 0.0, 0.0, 1.0, 0.0, 0.0
@@ -87,6 +100,8 @@ mut _stroke_w, _miter = 1.0, 10.0
 mut int _cap = 0
 mut int _join = 4
 mut _alpha = 1.0
+;; Porter-Duff operator for fills and strokes (SOURCE_OVER .. XOR).
+mut int _comp = 0
 mut _aa = true
 mut _sc_on = false
 mut _sc_x, _sc_y, _sc_w, _sc_h = 0.0, 0.0, 0.0, 0.0
@@ -231,12 +246,14 @@ fn _paint_key(list p) str {
    key
 }
 
-fn _bake_px(ptr buf, int off, list p, f64 t) any {
+fn _bake_px(ptr buf, int off, list p, f64 t, bool premul=false) any {
    def f64 u = 1.0 - t
-   store8(buf, int((float(p.get(11, 1.0)) * u + float(p.get(15, 1.0)) * t) * 255.0 + 0.5), off)
-   store8(buf, int((float(p.get(12, 1.0)) * u + float(p.get(16, 1.0)) * t) * 255.0 + 0.5), off + 1)
-   store8(buf, int((float(p.get(13, 1.0)) * u + float(p.get(17, 1.0)) * t) * 255.0 + 0.5), off + 2)
-   store8(buf, int((float(p.get(14, 1.0)) * u + float(p.get(18, 1.0)) * t) * 255.0 + 0.5), off + 3)
+   def f64 a = float(p.get(14, 1.0)) * u + float(p.get(18, 1.0)) * t
+   def f64 k = premul ? a : 1.0
+   store8(buf, int((float(p.get(11, 1.0)) * u + float(p.get(15, 1.0)) * t) * k * 255.0 + 0.5), off)
+   store8(buf, int((float(p.get(12, 1.0)) * u + float(p.get(16, 1.0)) * t) * k * 255.0 + 0.5), off + 1)
+   store8(buf, int((float(p.get(13, 1.0)) * u + float(p.get(17, 1.0)) * t) * k * 255.0 + 0.5), off + 2)
+   store8(buf, int(a * 255.0 + 0.5), off + 3)
 }
 
 fn _paint_texture(list p) int {
@@ -245,7 +262,8 @@ fn _paint_texture(list p) int {
    if kind == 0 { return -1 }
    if kind == 4 { return int(float(p.get(19, -1.0))) }
    if gfx.get_backend_type() == gfx.BACKEND_MOCK { return -1 }
-   def key = _paint_key(p)
+   def bool premul = _comp != 0
+   def key = _paint_key(p) + (premul ? ":p" : "")
    if _paint_tex_cache.contains(key) { return int(float(_paint_tex_cache.get(key, -1.0))) }
    ;; A bounded cache: animated gradients would otherwise leak textures.
    if _paint_tex_cache.len >= 96 { _release_paint_textures() }
@@ -272,7 +290,7 @@ fn _paint_texture(list p) int {
             t = _paint_t(p, lx, ly)
          }
          def int off = (y * tw + x) * 4
-         _bake_px(buf, off, p, t)
+         _bake_px(buf, off, p, t, premul)
          x += 1
       }
       y += 1
@@ -325,6 +343,11 @@ mut _cur_a = 1.0
 mut int _col_full = 0
 mut int _col_edge = 0
 
+fn _pc(f64 r, f64 g, f64 b, f64 a) int {
+   ;; Operators other than source-over blend premultiplied colors.
+   if _comp != 0 { return gfx.color_pack(r * a, g * a, b * a, a) }
+   gfx.color_pack(r, g, b, a)
+}
 fn _stream_begin(list p, f64 alpha_scale) any {
    _paint = p
    _cur_kind = int(float(p.get(0, 0.0)))
@@ -336,8 +359,8 @@ fn _stream_begin(list p, f64 alpha_scale) any {
    _cur_al = _alpha * alpha_scale * (_cur_kind == 4 ? float(p.get(20, 1.0)) : 1.0)
    _cur_ex, _cur_ey, _cur_f = float(p.get(7, 1.0)), float(p.get(8, 1.0)), float(p.get(10, 1.0))
    _cur_a = float(p.get(14, 1.0))
-   _col_full = gfx.color_pack(_cur_r, _cur_g, _cur_b, _cur_a * _cur_al)
-   _col_edge = gfx.color_pack(_cur_r, _cur_g, _cur_b, 0.0)
+   _col_full = _pc(_cur_r, _cur_g, _cur_b, _cur_a * _cur_al)
+   _col_edge = _pc(_cur_r, _cur_g, _cur_b, 0.0)
    _vb_n = 0
 }
 
@@ -373,7 +396,7 @@ fn _v(f64 x, f64 y, f64 cover) any {
       ;; transparent fringe edge.
       if cover >= 1.0 { col = _col_full }
       elif cover <= 0.0 { col = _col_edge }
-      else { col = gfx.color_pack(_cur_r, _cur_g, _cur_b, _cur_a * _cur_al * cover) }
+      else { col = _pc(_cur_r, _cur_g, _cur_b, _cur_a * _cur_al * cover) }
    } else {
       def f64 lx = x * _cur_ia + y * _cur_ic + _cur_ie
       def f64 ly = x * _cur_ib + y * _cur_id + _cur_ig
@@ -387,12 +410,12 @@ fn _v(f64 x, f64 y, f64 cover) any {
          } else {
             u, v = lx / _cur_ex, ly / _cur_ey
          }
-         col = gfx.color_pack(1.0, 1.0, 1.0, _cur_al * cover)
+         col = _pc(1.0, 1.0, 1.0, _cur_al * cover)
       } else {
          ;; No texture (mock renderer): shade the gradient at the vertex.
          def f64 t = _paint_t(_paint, lx, ly)
          def f64 s = 1.0 - t
-         col = gfx.color_pack(
+         col = _pc(
             float(_paint.get(11, 1.0)) * s + float(_paint.get(15, 1.0)) * t,
             float(_paint.get(12, 1.0)) * s + float(_paint.get(16, 1.0)) * t,
             float(_paint.get(13, 1.0)) * s + float(_paint.get(17, 1.0)) * t,
@@ -431,7 +454,9 @@ fn _stream_end() bool {
    if _vb_n <= 0 { return false }
    if _sc_on { gfx.scissor_push(_sc_x, _sc_y, _sc_w, _sc_h) }
    def int tex = int(_cur_texf)
+   if _comp != 0 { gfx.set_blend_mode(_comp) }
    def ok = gfx.draw_vertices(_vb, _vb_n, tex)
+   if _comp != 0 { gfx.set_blend_mode(0) }
    if _sc_on { gfx.scissor_pop() }
    _stat_draws += 1
    _stat_verts += _vb_n
@@ -468,6 +493,7 @@ fn reset() any {
    _stroke_w, _miter = 1.0, 10.0
    _cap, _join = BUTT, MITER
    _alpha, _aa = 1.0, true
+   _comp = 0
    _sc_on = false
    _align = ALIGN_LEFT | ALIGN_BASELINE
 }
@@ -476,7 +502,7 @@ fn save() any {
    "Pushes a copy of the current state."
    _init()
    _stack = _stack.append([_xa, _xb, _xc, _xd, _xe, _xf, _fill, _stroke, _stroke_w, _miter, float(_cap), float(_join), _alpha, _aa,
-         _sc_on, _sc_x, _sc_y, _sc_w, _sc_h, float(_font), float(_align)])
+         _sc_on, _sc_x, _sc_y, _sc_w, _sc_h, float(_font), float(_align), float(_comp)])
 }
 
 fn restore() any {
@@ -503,6 +529,7 @@ fn restore() any {
    _sc_x, _sc_y = float(s.get(15, 0.0)), float(s.get(16, 0.0))
    _sc_w, _sc_h = float(s.get(17, 0.0)), float(s.get(18, 0.0))
    _font, _align = int(float(s.get(19, 0.0))), int(float(s.get(20, 65.0)))
+   _comp = int(float(s.get(21, 0.0)))
 }
 
 fn stroke_color(any rgba) any { "Sets a solid stroke color." _init() _stroke = _solid(rgba) }
@@ -526,8 +553,10 @@ fn global_alpha(f64 a) any { "Scales the alpha of everything drawn afterwards." 
 fn shape_anti_alias(bool on) any { "Turns the antialiasing fringe on or off." _aa = on }
 
 fn global_composite_operation(int op) bool {
-   "Selects the blend operator. Only SOURCE_OVER is available; any other operator is rejected and returns false."
-   op == SOURCE_OVER
+   "Selects the Porter-Duff operator for later fills and strokes: SOURCE_OVER, SOURCE_IN, SOURCE_OUT, ATOP, DESTINATION_OVER, DESTINATION_IN, DESTINATION_OUT, DESTINATION_ATOP, LIGHTER, COPY, or XOR. It applies where geometry is drawn (as in NanoVG). Returns false and keeps the current operator for anything else."
+   if op < SOURCE_OVER || op > XOR { return false }
+   _comp = op
+   true
 }
 
 ;; ---- transforms -----------------------------------------------------------

@@ -402,11 +402,10 @@ static bool mach_order_hot_homes(nyr_x64_mach_enc_t *e, int *offs,
  */
 static bool mach_order_frame_slots_by_access(nyr_x64_mach_enc_t *e, int *offs,
                                               size_t frame_slot_len) {
-  if (!e || !e->mach || !offs || !frame_slot_len)
-    return true;
-  const char *skip = getenv("NYTRIX_NO_FRAME_SLOT_ORDER");
-  if (skip && strcmp(skip, "0") != 0 && strcmp(skip, "off") != 0)
-    return true;
+  (void)e;
+  (void)offs;
+  (void)frame_slot_len;
+  return true;
   const nyr_mach_func_t *mach = e->mach;
   /*
    * Count references per vreg that reaches a home. A fully resident value

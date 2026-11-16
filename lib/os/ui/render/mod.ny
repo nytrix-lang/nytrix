@@ -5,7 +5,7 @@
 ;; - core.os.ui.render.matrix
 module core.os.ui.render(
    BACKEND_NONE, BACKEND_GL, BACKEND_VK, BACKEND_MOCK, BACKEND_TTY, BACKEND_AUTO,
-   window_error,
+   window_error, set_blend_mode, blend_mode, blend_factors,
    WHITE, BLACK, RED, GREEN, BLUE, YELLOW, CYAN, MAGENTA, ORANGE, PURPLE, GRAY, CLEAR,
    color_rgba, color_rgb, color_gray, color_hex, color_255, color_lerp, color_alpha,
    rect, rect_x, rect_y, rect_w, rect_h,
@@ -236,6 +236,8 @@ mut _skybox_pitch_deg = 0.0
 mut _skybox_fov_deg = 60.0
 mut _backend = 2
 mut _cpu_buf = 0
+;; Porter-Duff operator of later 2D draws (0 = source-over, straight alpha).
+mut int _blend_op = 0
 mut _cpu_w = 0
 mut _cpu_h = 0
 mut _cpu_clear_color = 0xFF000000
@@ -1129,9 +1131,73 @@ fn _cpu_put(int x, int y, int c) bool {
    true
 }
 
+fn blend_factors(int op) list {
+   "Returns [source factor, destination factor] of a Porter-Duff operator for premultiplied colors, as codes 0 zero, 1 one, 2 source alpha, 3 one minus source alpha, 4 destination alpha, 5 one minus destination alpha. Operator 0 is source-over."
+   if op == 1 { return [4, 0] }
+   if op == 2 { return [5, 0] }
+   if op == 3 { return [4, 3] }
+   if op == 4 { return [5, 1] }
+   if op == 5 { return [0, 2] }
+   if op == 6 { return [0, 3] }
+   if op == 7 { return [5, 2] }
+   if op == 8 { return [1, 1] }
+   if op == 9 { return [1, 0] }
+   if op == 10 { return [5, 3] }
+   [1, 3]
+}
+
+fn _blend_factor_value(int code, f64 sa, f64 da) f64 {
+   if code == 1 { return 1.0 }
+   if code == 2 { return sa }
+   if code == 3 { return 1.0 - sa }
+   if code == 4 { return da }
+   if code == 5 { return 1.0 - da }
+   0.0
+}
+
+fn blend_mode() int { "Returns the Porter-Duff operator in effect (0 = source-over)." _blend_op }
+
+fn set_blend_mode(int op) bool {
+   "Selects the Porter-Duff operator for later 2D vertex draws (core.os.ui.render.vg's operator numbering; 0 restores straight-alpha source-over). Operators 1..10 expect premultiplied vertex colors. Returns false for an unknown operator."
+   if op < 0 || op > 10 { return false }
+   if op == _blend_op { return true }
+   _blend_op = op
+   def list f = blend_factors(op)
+   def int fsrc = int(f.get(0, 1))
+   def int fdst = int(f.get(1, 3))
+   if _backend == BACKEND_VK { lib_vkr.set_blend_mode(op, fsrc, fdst) }
+   elif _backend == BACKEND_GL { lib_glr.set_blend_mode(op, fsrc, fdst) }
+   true
+}
+
+fn _cpu_blend_op_px(int off, f64 r, f64 g, f64 b, f64 a) bool {
+   ;; Premultiplied source against the stored straight-alpha destination.
+   def dst = load32(_cpu_buf, off)
+   def f64 da = float((dst >> 24) & 255) / 255.0
+   def f64 db = float((dst >> 16) & 255) / 255.0 * da
+   def f64 dg = float((dst >> 8) & 255) / 255.0 * da
+   def f64 dr = float(dst & 255) / 255.0 * da
+   def list f = blend_factors(_blend_op)
+   def f64 fs = _blend_factor_value(int(f.get(0, 1)), a, da)
+   def f64 fd = _blend_factor_value(int(f.get(1, 3)), a, da)
+   def f64 oa = min(1.0, a * fs + da * fd)
+   mut f64 or = min(1.0, r * fs + dr * fd)
+   mut f64 og = min(1.0, g * fs + dg * fd)
+   mut f64 ob = min(1.0, b * fs + db * fd)
+   if oa > 0.000001 {
+      or = min(1.0, or / oa)
+      og = min(1.0, og / oa)
+      ob = min(1.0, ob / oa)
+   }
+   store32(_cpu_buf, _cpu_pack_color(or, og, ob, oa), off)
+   true
+}
+
 fn _cpu_blend(int x, int y, f64 r, f64 g, f64 b, f64 a) bool {
-   if x < 0 || y < 0 || x >= _cpu_w || y >= _cpu_h || a <= 0.0 { return false }
+   if x < 0 || y < 0 || x >= _cpu_w || y >= _cpu_h { return false }
+   if a <= 0.0 && _blend_op == 0 { return false }
    if x < _cpu_clip_x0 || y < _cpu_clip_y0 || x >= _cpu_clip_x1 || y >= _cpu_clip_y1 { return false }
+   if _blend_op != 0 { return _cpu_blend_op_px(((y * _cpu_w) + x) * 4, r, g, b, a) }
    def off = ((y * _cpu_w) + x) * 4
    def dst = load32(_cpu_buf, off)
    def da = float((dst >> 24) & 255) / 255.0
@@ -6710,6 +6776,24 @@ fn log(any msg) bool {
    true
 }
 
+fn _snapshot_flatten_straight(any data, int w, int h) bool {
+   "Composites a straight-alpha RGBA buffer (the mock renderer's) over black and makes it opaque, so a snapshot shows what the GPU backends store: premultiplied bytes."
+   if !data || w <= 0 || h <= 0 { return false }
+   mut int i = 0
+   def int end = w * h * 4
+   while i < end {
+      def int a = load8(data, i + 3)
+      if a < 255 {
+         store8(data, (load8(data, i) * a + 127) / 255, i)
+         store8(data, (load8(data, i + 1) * a + 127) / 255, i + 1)
+         store8(data, (load8(data, i + 2) * a + 127) / 255, i + 2)
+         store8(data, 255, i + 3)
+      }
+      i += 4
+   }
+   true
+}
+
 fn _snapshot_fill_alpha(ptr data, int w, int h) bool {
    if !data || w <= 0 || h <= 0 { return false }
    mut ai = 3
@@ -6839,9 +6923,9 @@ fn read_framebuffer() any {
 fn snapshot(str filename) bool {
    "Saves the current framebuffer to an image file. Supports TGA, PNG, BMP formats based on extension."
    if _backend == BACKEND_MOCK && _cpu_buf != 0 && _cpu_w > 0 && _cpu_h > 0 {
-      _snapshot_fill_alpha(_cpu_buf, _cpu_w, _cpu_h)
       def owned = bytes(_cpu_w * _cpu_h * 4)
       memcpy(owned, _cpu_buf, _cpu_w * _cpu_h * 4)
+      _snapshot_flatten_straight(owned, _cpu_w, _cpu_h)
       def fb = {"width": _cpu_w, "height": _cpu_h, "data": owned, "channels": 4, "bpp": 4}
       match lib_img.save(fb, filename) { ok(ignoredok) -> { ignoredok  _snapshot_cache_hash(_cpu_buf, _cpu_w, _cpu_h)  return true } err(ignorederr) -> { ignorederr  return false } }
    }

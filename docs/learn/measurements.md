@@ -891,13 +891,13 @@ assembly diagnostic, not of execution.
 
 ## Latest full benchmark run
 
-Generated automatically by the full `ny-test --bench` run at 2026-11-15 23:18:41 CET.
-Host: AMD EPYC 7642; target `x86_64`; compiler `fnv1a64:d1a7064e10cadb25`.
+Generated automatically by the full `ny-test --bench` run at 2026-11-16 01:18:06 CET.
+Host: AMD EPYC 7642; target `x86_64`; compiler `fnv1a64:30d618487de6c0ce`.
 NYR: `-O3`, profile `peak`, tier `opt`, engine `NYR`, cache `warm`.
 C: clang version 23.1.4; flags `-O3 -march=native`. NYC flags `-O3 -c`.
-Samples: 3 plus 1 warm-up; fixture workers 20, route workers 1.
-Results: 110 fixtures; 100 passed, 9 failed or mismatched, 1 timer controls.
-Measurement qualifiers: 0 low-time, 0 noisy; 1 fixture budget misses.
+Samples: 3 plus 1 warm-up; fixture workers 1, route workers 1.
+Results: 110 fixtures; 108 passed, 1 failed or mismatched, 1 timer controls.
+Measurement qualifiers: 0 low-time, 1 noisy; 0 fixture budget misses.
 
 ### Runtime relative to Host C
 
@@ -906,27 +906,27 @@ Fixture medians are grouped by **Nytrix / C time**: lower is faster. Only correc
 <svg width="880" height="330" viewBox="0 0 880 330" role="img" aria-label="Distribution of NYR and LLVM benchmark ratios relative to Host C">
 <text x="440" y="22" text-anchor="middle" font-size="16" fill="currentColor">Workloads by relative runtime</text>
 <line x1="82" y1="232" x2="780" y2="232" stroke="var(--border)" stroke-width="1"/><text x="70" y="236" text-anchor="end" font-size="11" fill="var(--muted)">0</text>
-<line x1="82" y1="186" x2="780" y2="186" stroke="var(--border)" stroke-width="1"/><text x="70" y="190" text-anchor="end" font-size="11" fill="var(--muted)">17</text>
-<line x1="82" y1="140" x2="780" y2="140" stroke="var(--border)" stroke-width="1"/><text x="70" y="144" text-anchor="end" font-size="11" fill="var(--muted)">34</text>
-<line x1="82" y1="94" x2="780" y2="94" stroke="var(--border)" stroke-width="1"/><text x="70" y="98" text-anchor="end" font-size="11" fill="var(--muted)">51</text>
-<line x1="82" y1="48" x2="780" y2="48" stroke="var(--border)" stroke-width="1"/><text x="70" y="52" text-anchor="end" font-size="11" fill="var(--muted)">68</text>
-<rect x="110" y="227" width="34" height="5" rx="3" fill="var(--c1)"/><text x="127" y="223" text-anchor="middle" font-size="11" fill="currentColor">2</text>
-<rect x="152" y="224" width="34" height="8" rx="3" fill="var(--c2)"/><text x="169" y="220" text-anchor="middle" font-size="11" fill="currentColor">3</text>
+<line x1="82" y1="186" x2="780" y2="186" stroke="var(--border)" stroke-width="1"/><text x="70" y="190" text-anchor="end" font-size="11" fill="var(--muted)">11</text>
+<line x1="82" y1="140" x2="780" y2="140" stroke="var(--border)" stroke-width="1"/><text x="70" y="144" text-anchor="end" font-size="11" fill="var(--muted)">22</text>
+<line x1="82" y1="94" x2="780" y2="94" stroke="var(--border)" stroke-width="1"/><text x="70" y="98" text-anchor="end" font-size="11" fill="var(--muted)">33</text>
+<line x1="82" y1="48" x2="780" y2="48" stroke="var(--border)" stroke-width="1"/><text x="70" y="52" text-anchor="end" font-size="11" fill="var(--muted)">44</text>
+<rect x="110" y="220" width="34" height="12" rx="3" fill="var(--c1)"/><text x="127" y="216" text-anchor="middle" font-size="11" fill="currentColor">3</text>
+<rect x="152" y="203" width="34" height="29" rx="3" fill="var(--c2)"/><text x="169" y="199" text-anchor="middle" font-size="11" fill="currentColor">7</text>
 <text x="148" y="250" text-anchor="middle" font-size="11" fill="var(--muted)"><0.5×</text>
-<rect x="252" y="232" width="34" height="0" rx="3" fill="var(--c1)"/><text x="269" y="228" text-anchor="middle" font-size="11" fill="currentColor">0</text>
-<rect x="294" y="224" width="34" height="8" rx="3" fill="var(--c2)"/><text x="311" y="220" text-anchor="middle" font-size="11" fill="currentColor">3</text>
+<rect x="252" y="212" width="34" height="20" rx="3" fill="var(--c1)"/><text x="269" y="208" text-anchor="middle" font-size="11" fill="currentColor">5</text>
+<rect x="294" y="191" width="34" height="41" rx="3" fill="var(--c2)"/><text x="311" y="187" text-anchor="middle" font-size="11" fill="currentColor">10</text>
 <text x="290" y="250" text-anchor="middle" font-size="11" fill="var(--muted)">0.5–0.8×</text>
-<rect x="394" y="197" width="34" height="35" rx="3" fill="var(--c1)"/><text x="411" y="193" text-anchor="middle" font-size="11" fill="currentColor">13</text>
-<rect x="436" y="89" width="34" height="143" rx="3" fill="var(--c2)"/><text x="453" y="85" text-anchor="middle" font-size="11" fill="currentColor">53</text>
+<rect x="394" y="65" width="34" height="167" rx="3" fill="var(--c1)"/><text x="411" y="61" text-anchor="middle" font-size="11" fill="currentColor">40</text>
+<rect x="436" y="53" width="34" height="179" rx="3" fill="var(--c2)"/><text x="453" y="61" text-anchor="middle" font-size="11" fill="currentColor">43</text>
 <text x="432" y="250" text-anchor="middle" font-size="11" fill="var(--muted)">0.8–1.25×</text>
-<rect x="536" y="178" width="34" height="54" rx="3" fill="var(--c1)"/><text x="553" y="174" text-anchor="middle" font-size="11" fill="currentColor">20</text>
-<rect x="578" y="162" width="34" height="70" rx="3" fill="var(--c2)"/><text x="595" y="158" text-anchor="middle" font-size="11" fill="currentColor">26</text>
+<rect x="536" y="103" width="34" height="129" rx="3" fill="var(--c1)"/><text x="553" y="99" text-anchor="middle" font-size="11" fill="currentColor">31</text>
+<rect x="578" y="103" width="34" height="129" rx="3" fill="var(--c2)"/><text x="595" y="99" text-anchor="middle" font-size="11" fill="currentColor">31</text>
 <text x="574" y="250" text-anchor="middle" font-size="11" fill="var(--muted)">1.25–2×</text>
-<rect x="678" y="57" width="34" height="175" rx="3" fill="var(--c1)"/><text x="695" y="61" text-anchor="middle" font-size="11" fill="currentColor">65</text>
-<rect x="720" y="192" width="34" height="40" rx="3" fill="var(--c2)"/><text x="737" y="188" text-anchor="middle" font-size="11" fill="currentColor">15</text>
+<rect x="678" y="115" width="34" height="117" rx="3" fill="var(--c1)"/><text x="695" y="111" text-anchor="middle" font-size="11" fill="currentColor">28</text>
+<rect x="720" y="166" width="34" height="66" rx="3" fill="var(--c2)"/><text x="737" y="162" text-anchor="middle" font-size="11" fill="currentColor">16</text>
 <text x="716" y="250" text-anchor="middle" font-size="11" fill="var(--muted)">≥2×</text>
 <text x="26" y="140" text-anchor="middle" font-size="11" fill="var(--muted)">fixture count</text>
-<rect x="590" y="295" width="12" height="12" rx="2" fill="var(--c1)"/><text x="608" y="306" font-size="12" fill="currentColor">NYR (100)</text><rect x="708" y="295" width="12" height="12" rx="2" fill="var(--c2)"/><text x="726" y="306" font-size="12" fill="currentColor">LLVM (100)</text>
+<rect x="590" y="295" width="12" height="12" rx="2" fill="var(--c1)"/><text x="608" y="306" font-size="12" fill="currentColor">NYR (107)</text><rect x="708" y="295" width="12" height="12" rx="2" fill="var(--c2)"/><text x="726" y="306" font-size="12" fill="currentColor">LLVM (107)</text>
 </svg>
 
 
@@ -934,18 +934,10 @@ Checksum and execution failures:
 
 | Fixture | Status | NYR checksum | LLVM checksum | C checksum | NYC checksum | Return codes (NYR/LLVM/C/NYC) | NYC diagnostic |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `ackermann` | fail | `—` | `7500` | `7500` | `7500` | 1/0/0/0 | — |
-| `binary` | fail | `—` | `3360874588549334` | `3360874588549334` | `—` | 1/0/0/139 | NYC execution failed (exit 139, failures 9) |
-| `sor` | fail | `1725461952` | `1725461952` | `1725461952` | `—` | 0/0/0/127 | /tmp/ny-benchc-3053-1302884541-56.c: C object writer failed while emitting function ny_bench_program_main: x86-64 ELF object writer: unsupported op vec4.set1.f64 |
-| `iter` | fail | `—` | `400020000` | `400020000` | `—` | 1/0/0/127 | /tmp/ny-benchc-3063-1302801969-14.c: C object writer failed while emitting function ny_bench_program_main: x86-64 ELF object writer: unsupported op vec4.set1.i64 |
-| `bce-matrix` | fail | `—` | `14439925760000` | `14439925760000` | `—` | 1/0/0/127 | /tmp/ny-benchc-3101-1302810824-14.c: C object writer failed while emitting function ny_bench_program_main: x86-64 ELF object writer: unsupported op vec4.set1.i64 |
-| `dgemm` | fail | `—` | `1` | `1` | `—` | 1/0/0/127 | /tmp/ny-benchc-3058-1302829305-19.c: C object writer failed while emitting function ny_bench_program_main: x86-64 ELF object writer: unsupported op vec4.set1.f64 |
-| `linpack` | fail | `1` | `1` | `1` | `—` | 0/0/0/127 | /tmp/ny-benchc-3053-1302937089-121.c: C object writer failed while emitting function ny_bench_program_main: x86-64 ELF object writer: unsupported op vec4.load.f64 |
-| `matmul-int` | fail | `—` | `553981683` | `553981683` | `—` | 1/0/0/127 | /tmp/ny-benchc-3074-1302818069-19.c: C object writer failed while emitting function ny_bench_program_main: x86-64 ELF object writer: unsupported op vec4.set1.i64 |
-| `pbkdf2` | fail | `—` | `2991` | `2991` | `2991` | 1/0/0/0 | — |
+| `dce` | fail | `—` | `308813056` | `308813056` | `308813056` | 132/0/0/0 | — |
 
 The empty timer control is shown for completeness and is excluded from workload ratios.
-Raw report: `build/bench-reports/bench-20261115-231521-4191907.json`.
+Raw report: `build/bench-reports/bench-20261116-010104-618295.json`.
 
 <!-- AUTO_BENCHMARK_RESULTS_END -->
 
@@ -3945,3 +3937,41 @@ difference (`3579272` versus `2069072`) was the only signal.
   second pass reads the border cells the first pass never writes.
 - Ny pointers are not indexable; buffer elements go through `i64buf_load` and
   `i64buf_store`.
+
+### NYR codegen: cast-call folding and copy propagation (2026-11-16)
+
+Two native x86-64 codegen changes. Checksums agree on the 41 fixtures sampled
+across algorithms, numeric, string, crypto, concurrency and datastructures, and
+the `--pattern copy` / `--pattern opt` fixture sets report no new failures (the
+four `opt` failures — `select-flag-preservation`,
+`loop-register-call-homes`,
+`kernel-list-alias-cow:entry_fill_preserves_observable_globals` and
+`nested-loop-specialize` — reproduce on the unmodified tree).
+
+- `lower/machine.c`: a `rt_f64_to_i64` call with one f64 argument and a raw i64
+  result now lowers to `NYR_MACH_CONVERT`, so the encoder emits `cvttsd2si`
+  instead of a call plus the xmm0 stack round trip. page-rank's object shows
+  two `cvttsd2si` and no `rt_f64_to_i64` relocation.
+- `passes/scalar/copy_prop.c`: copies established earlier in the same block are
+  available to later uses (the walk is in program order), and copies of raw
+  scalar values fold into call arguments, which carry no ownership metadata.
+  `hanoi` drops from 36 to 29 NYIR instructions; the seven `mov` temporaries
+  feeding its two recursive calls are gone.
+
+Measured on this host with `NYTRIX_NATIVE_CACHE=0 NYTRIX_AOT_CACHE=0
+--bench-run 9 --bench-warmup 2`; the "before" column is the same tree with
+`copy_prop.c` reverted and rebuilt:
+
+| fixture   | before  | after   | NYR/LLVM before → after |
+| --------- | ------- | ------- | ----------------------- |
+| sssp      | 6.01 ms | 4.91 ms | 2.80x → 2.30x (-18%)    |
+| ackermann | 108 µs  | 107 µs  | 0.97x → 1.02x           |
+
+Unchanged within noise: towers 71.3 ms, page-rank 18 µs, radix-tree 77.5 ms,
+binary 827 µs, heapsort-int 58.2 ms, fhourstones 2.88 ms.
+
+Root causes identified but not fixed here: radix-tree's 20-bit key walk lowers
+the data-dependent diamond (`node = node*2 + bit`) as a real branch, so
+mispredicts cost roughly 12 cycles/bit where LLVM emits branchless code
+(12.2x LLVM, 4.7x C after the change); sssp and page-rank still round-trip
+loop-carried scalars through frame homes at block boundaries.

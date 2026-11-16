@@ -1294,7 +1294,11 @@ static int64_t rt_free_direct(int64_t ptr) {
   return 0;
 }
 
+/* Bumped by every free so per-thread address caches can drop stale bases. */
+_Atomic uint64_t rt_mem_free_epoch = 0;
+
 int64_t rt_free(int64_t ptr) {
+  atomic_fetch_add_explicit(&rt_mem_free_epoch, 1, memory_order_release);
   ptr = sh_normalize(ptr);
   if (g_sh_cap)
     sh_check_double_free((uintptr_t)ptr);
@@ -1304,6 +1308,7 @@ int64_t rt_free(int64_t ptr) {
 }
 
 int64_t rt_free_raw(int64_t ptr) {
+  atomic_fetch_add_explicit(&rt_mem_free_epoch, 1, memory_order_release);
   ptr = sh_normalize(ptr);
   if (!ptr)
     return 1;
@@ -1932,8 +1937,28 @@ int64_t rt_store16_idx(int64_t addr, int64_t idx, int64_t val) {
   return val;
 }
 
+/*
+ * The last raw (non-heap) base a 32-bit store went through after its full
+ * checks, per thread. Vertex writes into a mapped GPU buffer repeat the same
+ * base with growing offsets; for those, the heap registry lookup and the
+ * oob probe answered the same thing every time (7% of a UI frame).
+ */
+static __thread uintptr_t rt_store32_raw_base;
+static __thread uint64_t rt_store32_raw_epoch;
+
 int64_t rt_store32_idx(int64_t addr, int64_t idx, int64_t val) {
   RT_UNTAG_INT(idx);
+  if ((uintptr_t)addr == rt_store32_raw_base && idx >= 0 &&
+      rt_store32_raw_epoch ==
+          atomic_load_explicit(&rt_mem_free_epoch, memory_order_acquire)) {
+    uintptr_t q = (uintptr_t)((intptr_t)addr + (intptr_t)idx);
+    if (q >= 0x1000 && rt_probe_cache_hit(q, 4)) {
+      int64_t v = (val & 1) ? (val >> 1) : val;
+      uint32_t raw = (uint32_t)v;
+      memcpy((void *)q, &raw, sizeof(raw));
+      return val;
+    }
+  }
   bool hdr = (idx < 0);
   bool heap = is_heap_ptr(addr);
   if (hdr) {
@@ -1951,6 +1976,11 @@ int64_t rt_store32_idx(int64_t addr, int64_t idx, int64_t val) {
     return val;
   if (!hdr && !heap && !rt_addr_access_ok(p, 4))
     return val;
+  if (!hdr && !heap) {
+    rt_store32_raw_base = (uintptr_t)addr;
+    rt_store32_raw_epoch =
+        atomic_load_explicit(&rt_mem_free_epoch, memory_order_acquire);
+  }
   int64_t v = (val & 1) ? (val >> 1) : val;
   uint32_t raw = (uint32_t)v;
   if ((p & (uintptr_t)3u) == 0) {

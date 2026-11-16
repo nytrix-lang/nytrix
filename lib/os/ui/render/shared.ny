@@ -62,11 +62,9 @@ def BUILTIN_GLYPH_ROW_MASK = (1 << BUILTIN_GLYPH_WIDTH) - 1
 
 ;; Returns the result of the `safe_f32_limit` operation.
 fn safe_f32_limit(any v, f64 fallback=0.0, f64 limit=1048576.0) f64 {
-   def fv = fmath.float(v)
-   if fmath.is_nan(fv) || fmath.is_inf(fv) { return fallback }
-   if fv > limit { return limit }
-   if fv < 0.0 - limit { return 0.0 - limit }
-   fv
+   ;; Decode once and clamp in f64: boxing the value to ask is_nan / is_inf
+   ;; cost two float boxes per coordinate in every vertex write.
+   _safe_f32_limit_f64(float(v), fallback, limit)
 }
 
 @pure
@@ -131,11 +129,12 @@ fn store_mat4_cm_raw(ptr dst, any mat, bool allow_plain16=false) bool {
 
 ;; Returns the result of the `store_vertex64` operation.
 fn store_vertex64(ptr base, int idx, any x, any y, any z, any u, any v, any color, any tex_id=0, any nx=0.0, any ny=0.0, any nz=1.0) any {
+   ;; store_vertex64_typed clamps every coordinate; only decode here.
    store_vertex64_typed(
       base, idx,
-      safe_f32_limit(x), safe_f32_limit(y), safe_f32_limit(z),
-      safe_f32_limit(u), safe_f32_limit(v), color_u32(color), int(tex_id),
-      safe_f32_limit(nx), safe_f32_limit(ny), safe_f32_limit(nz, 1.0),
+      float(x), float(y), float(z),
+      float(u), float(v), color_u32(color), int(tex_id),
+      float(nx), float(ny), float(nz),
    )
 }
 

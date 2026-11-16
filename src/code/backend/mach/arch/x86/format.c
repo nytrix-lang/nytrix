@@ -2294,10 +2294,16 @@ static bool nyr_x64_obj_build_c_bundle(
       bool machine = false;
       static int mach_objects = -1;
       if (mach_objects < 0) {
+        const char *force = getenv("NYC_USE_MACH_OBJECT");
         const char *off = getenv("NYC_NO_MACH_OBJECT");
-        mach_objects = !(off && off[0] && off[0] != '0');
+        if (off && off[0] && off[0] != '0')
+          mach_objects = 0;
+        else if (force && force[0] && force[0] != '0')
+          mach_objects = 1;
+        else
+          mach_objects = 2; /* try direct encoder first for correctness */
       }
-      if (mach_objects && !omit_frame_pointer && !position_independent &&
+      if (mach_objects == 1 && !omit_frame_pointer && !position_independent &&
           !retpoline_indirect_calls && !retpoline_inline_calls && !section &&
           !nyr_x64_c_func_needs_direct_encoder(&funcs[i])) {
         nyr_mach_func_t mach = {0};
@@ -2305,9 +2311,6 @@ static bool nyr_x64_obj_build_c_bundle(
         if (nyr_mach_lower_nir(&funcs[i], &mach, target->caps, reason,
                                sizeof(reason))) {
           mach.c_abi = true;
-          /*
-           * C calls use the plain symbol, never the language's mangling.
-           */
           for (size_t ii = 0; ii < mach.inst_len; ++ii)
             if (mach.insts[ii].opcode == NYR_MACH_CALL)
               mach.insts[ii].call_is_extern = true;
@@ -2345,16 +2348,60 @@ static bool nyr_x64_obj_build_c_bundle(
       }
       if (!machine)
         nyr_phi_elim((nyr_func_t *)&funcs[i]);
-      if (!machine &&
-          !nyr_x64_obj_append_function_with_frame(
-              code, defs, def_count, relocs, reloc_count, &funcs[i], target,
-              symbol, omit_frame_pointer, position_independent,
-              retpoline_indirect_calls, retpoline_inline_calls, function_err,
-              sizeof(function_err))) {
-        nyr_set_error(err, err_len,
-                      "C object writer failed while emitting function %s: %s",
-                      name, function_err[0] ? function_err : "unknown error");
-        return false;
+      bool emitted_direct = false;
+      if (!machine) {
+        if (nyr_x64_obj_append_function_with_frame(
+                code, defs, def_count, relocs, reloc_count, &funcs[i], target,
+                symbol, omit_frame_pointer, position_independent,
+                retpoline_indirect_calls, retpoline_inline_calls, function_err,
+                sizeof(function_err))) {
+          emitted_direct = true;
+        } else if (mach_objects == 2 && !omit_frame_pointer &&
+                   !position_independent && !retpoline_indirect_calls &&
+                   !retpoline_inline_calls && !section &&
+                   !nyr_x64_c_func_needs_direct_encoder(&funcs[i])) {
+          /* Direct encoder does not support this function; try machine encoder. */
+          size_t saved_def = *def_count, saved_reloc = *reloc_count;
+          size_t saved_len = code->len;
+          char reason[256] = {0};
+          nyr_mach_func_t mach = {0};
+          bool mach_ok = false;
+          if (nyr_mach_lower_nir(&funcs[i], &mach, target->caps, reason,
+                                 sizeof(reason))) {
+            mach.c_abi = true;
+            for (size_t ii = 0; ii < mach.inst_len; ++ii)
+              if (mach.insts[ii].opcode == NYR_MACH_CALL)
+                mach.insts[ii].call_is_extern = true;
+            size_t *inst_offsets = NULL;
+            size_t inst_offsets_len = 0;
+            mach_ok = nyr_x64_mach_append_function_debug(
+                code, defs, def_count, relocs, reloc_count, &mach, target,
+                symbol, false, false, NULL, NULL, NULL, NULL, reason,
+                sizeof(reason), &inst_offsets, &inst_offsets_len);
+            int emitted =
+                mach_ok ? nyr_x64_obj_def_index(defs, *def_count, symbol) : -1;
+            if (emitted >= 0)
+              nyr_mach_dump_mixed(&funcs[i], &mach,
+                                  code->data + defs[emitted].off,
+                                  defs[emitted].size, inst_offsets,
+                                  inst_offsets_len, name, stderr);
+            free(inst_offsets);
+          }
+          nyr_mach_func_free(&mach);
+          if (mach_ok) {
+            emitted_direct = true;
+          } else {
+            *def_count = saved_def;
+            *reloc_count = saved_reloc;
+            code->len = saved_len;
+          }
+        }
+        if (!emitted_direct) {
+          nyr_set_error(err, err_len,
+                        "C object writer failed while emitting function %s: %s",
+                        name, function_err[0] ? function_err : "unknown error");
+          return false;
+        }
       }
       defs[function_def].is_local = function_local && function_local[i];
       defs[function_def].section = section;

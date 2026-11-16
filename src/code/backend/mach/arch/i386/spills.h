@@ -897,39 +897,50 @@ static bool sm_i386_cleanup_spills(nyr_writer_t *assembly, int value_bytes,
       }
     } while (changed);
   }
-  /* Fold a zero test of a freshly loaded home into the compare form. TESTL
-   * and CMPL $0 leave every observable flag identical (ZF/SF/PF from the
-   * same value, CF/OF clear), so the loaded register can die at the test. */
-  bool folded_zero_test = false;
-  for (size_t i = 1; i < count && !getenv("NYC_DISABLE_I386_HOME_TEST_FOLD");
-       ++i) {
-    sm_i386_spill_line_t *test = &lines[i], *load = &lines[i - 1];
-    if (test->removed || strcmp(test->op, "testl") || !test->args ||
-        load->removed || strcmp(load->op, "movl") || load->label) continue;
-    char lhs[192], rhs[192], source[192], destination[192];
-    if (!sm_i386_spill_split(test, lhs, rhs) ||
-        !sm_i386_spill_split(load, source, destination)) continue;
-    int slot = sm_i386_spill_slot(source, bytes);
-    int reg = sm_i386_spill_register(destination);
-    if (slot < 0 || reg < 0 || strcmp(destination, sm_i386_gpr[reg]) ||
-        strcmp(lhs, rhs) || strcmp(lhs, sm_i386_gpr[reg]) || banned[slot])
-      continue;
-    if ((i + 1 < count ? lines[i + 1].reg_live : 0) & (1u << reg)) continue;
-    nyr_writer_t replacement = {0};
-    if (!nyr_printf(&replacement, "\tcmpl\t$0, %s", source)) {
-      free(replacement.data); ok = false; goto done;
+  /* Propagate a register copy into its single consumer. A plain register
+   * copy whose destination dies at the next instruction lets that
+   * instruction read the original register, so the copy disappears without
+   * ever mentioning a stack home (and without perturbing home coloring). */
+  for (bool round_changed = true; round_changed &&
+       !getenv("NYC_DISABLE_I386_COPY_PROPAGATE");) {
+    round_changed = false;
+    for (size_t i = 1; i < count; ++i) {
+      sm_i386_spill_line_t *def = &lines[i - 1], *use = &lines[i];
+      if (def->removed || def->label || use->removed || use->label ||
+          strcmp(def->op, "movl") || !def->args || !use->args) continue;
+      char src[192], dst[192];
+      if (!sm_i386_spill_split(def, src, dst)) continue;
+      int sreg = sm_i386_spill_register(src), dreg = sm_i386_spill_register(dst);
+      if (sreg < 0 || dreg < 0 || sreg == dreg || sreg >= 6 || dreg >= 6 ||
+          strcmp(src, sm_i386_gpr[sreg]) || strcmp(dst, sm_i386_gpr[dreg]))
+        continue;
+      unsigned dbit = 1u << dreg, sbit = 1u << sreg;
+      if (!(use->reg_read & dbit) || (use->reg_write & (dbit | sbit)))
+        continue;
+      unsigned out = (i + 1 < count ? lines[i + 1].reg_live : 0) |
+                     (use->target < count ? lines[use->target].reg_live : 0);
+      if (out & dbit) continue;
+      nyr_writer_t replacement = {0};
+      bool formatted = nyr_printf(&replacement, "\t%s\t", use->op);
+      const char *cursor = use->args;
+      while (formatted && *cursor) {
+        const char *hit = strstr(cursor, dst);
+        if (!hit) { formatted = nyr_put(&replacement, cursor); break; }
+        formatted =
+            nyr_printf(&replacement, "%.*s%s", (int)(hit - cursor), cursor, src);
+        if (!formatted) break;
+        cursor = hit + strlen(dst);
+      }
+      if (!formatted) { free(replacement.data); ok = false; goto done; }
+      free(use->replacement);
+      use->replacement = replacement.data;
+      use->args = use->replacement + 1 + strlen(use->op) + 1;
+      use->reg_read = (unsigned char)((use->reg_read & ~dbit) | sbit);
+      def->removed = true;
+      round_changed = true;
     }
-    free(test->replacement);
-    test->replacement = replacement.data;
-    test->args = test->replacement + strlen("\tcmpl\t");
-    strcpy(test->op, "cmpl");
-    test->reg_read = (unsigned char)sm_i386_spill_register_mask(source);
-    test->reads = 1;
-    test->read[0] = slot;
-    load->removed = true;
-    folded_zero_test = true;
+    if (round_changed) sm_i386_spill_reg_live(lines, count);
   }
-  if (folded_zero_test) sm_i386_spill_reg_live(lines, count);
   /* Forward a register through a dead copy: a definition of B followed by
    * a copy of B into C with B dead afterwards redefines C directly. Backward
    * sweeps fold whole copy chains; liveness is recomputed between rounds. */
@@ -1002,8 +1013,11 @@ static bool sm_i386_cleanup_spills(nyr_writer_t *assembly, int value_bytes,
         strcmp(push->op, "pushl") || strcmp(sar->op, "sarl") ||
         strcmp(pop->op, "popl") || !push->args || !sar->args || !pop->args)
       continue;
-    if (strcmp(push->args, sar->args) || strcmp(push->args, pop->args))
-      continue;
+    if (strcmp(push->args, pop->args)) continue;
+    /* SARL names its register as the second operand ("$31, %eax"). */
+    char shift_lhs[192], shift_rhs[192];
+    if (!sm_i386_spill_split(sar, shift_lhs, shift_rhs)) continue;
+    if (strcmp(shift_rhs, push->args)) continue;
     int reg = sm_i386_spill_register(push->args);
     if (reg < 0 || reg >= 6) continue;
     bool blocked = false;

@@ -24,10 +24,56 @@
 #include <stdlib.h>
 #include <string.h>
 
+typedef enum {
+  NYR_PHI_VEC_NONE = 0,
+  NYR_PHI_VEC4_I64,
+  NYR_PHI_VEC8_I64,
+  NYR_PHI_VEC4_F64,
+} nyr_phi_vec_kind_t;
+
+static inline int nyr_phi_vec_bytes(nyr_phi_vec_kind_t kind) {
+  switch (kind) {
+  case NYR_PHI_VEC4_I64:
+    return 16;
+  case NYR_PHI_VEC8_I64:
+  case NYR_PHI_VEC4_F64:
+    return 32;
+  default:
+    return 0;
+  }
+}
+
+static inline nyr_op_t nyr_phi_vec_load_op(nyr_phi_vec_kind_t kind) {
+  switch (kind) {
+  case NYR_PHI_VEC4_I64:
+    return NYIR_VEC4_LOAD_I64;
+  case NYR_PHI_VEC8_I64:
+    return NYIR_VEC8_LOAD_I64;
+  case NYR_PHI_VEC4_F64:
+    return NYIR_VEC4_LOAD_F64;
+  default:
+    return NYIR_NOP;
+  }
+}
+
+static inline nyr_op_t nyr_phi_vec_store_op(nyr_phi_vec_kind_t kind) {
+  switch (kind) {
+  case NYR_PHI_VEC4_I64:
+    return NYIR_VEC4_STORE_I64;
+  case NYR_PHI_VEC8_I64:
+    return NYIR_VEC8_STORE_I64;
+  case NYR_PHI_VEC4_F64:
+    return NYIR_VEC4_STORE_F64;
+  default:
+    return NYIR_NOP;
+  }
+}
+
 typedef struct {
   size_t insert_at; /* f->data index to insert the store before */
   int slot;         /* local slot written */
-  int vec_addr;     /* 32-byte home of a four-lane i64 PHI, or -1 */
+  int vec_addr;     /* vector PHI home address value, or -1 */
+  nyr_phi_vec_kind_t vec_kind; /* vector kind when vec_addr >= 0 */
   int value;        /* value stored (defined at the insert point) */
   nyr_scalar_class_t scalar_class;
   nyr_debug_loc_t debug;
@@ -84,15 +130,15 @@ static nyr_scalar_class_t nyr_phi_value_class(const nyr_func_t *f,
 }
 
 /*
- * Four-lane i64 values (VEC8_*_I64) are 32 bytes; an 8-byte local slot would
- * keep only lane 0. Such PHIs are lowered through a 32-byte stack home
- * instead (VEC8_STORE_I64 on each edge, VEC8_LOAD_I64 in the header).
+ * Multi-lane vector values (VEC4 i64: 16 bytes, VEC8 i64 / VEC4 f64: 32 bytes)
+ * cannot be lowered through an 8-byte local slot. Such PHIs are lowered through
+ * a stack ALLOCA home of the right size with matching vector load/store ops.
  */
-static bool nyr_phi_value_is_vec8_i64(const nyr_func_t *f, int value,
-                                      const size_t *defs, size_t *seen,
-                                      size_t generation, int *pending) {
+static nyr_phi_vec_kind_t nyr_phi_value_vec_kind(const nyr_func_t *f, int value,
+                                                 const size_t *defs, size_t *seen,
+                                                 size_t generation, int *pending) {
   if (!f || value < 0 || value >= f->next_value)
-    return false;
+    return NYR_PHI_VEC_NONE;
   size_t pending_count = 0;
   seen[value] = generation;
   pending[pending_count++] = value;
@@ -112,7 +158,29 @@ static bool nyr_phi_value_is_vec8_i64(const nyr_func_t *f, int value,
     case NYIR_VEC8_SET1_I64:
     case NYIR_VEC8_SAR_I64:
     case NYIR_VEC8_SHR_I64:
-      return true;
+    case NYIR_VEC8_REDUCE_ADD_I64:
+      return NYR_PHI_VEC8_I64;
+    case NYIR_VEC4_LOAD_I64:
+    case NYIR_VEC4_ADD_I64:
+    case NYIR_VEC4_SUB_I64:
+    case NYIR_VEC4_AND_I64:
+    case NYIR_VEC4_OR_I64:
+    case NYIR_VEC4_XOR_I64:
+    case NYIR_VEC4_SET1_I64:
+    case NYIR_VEC4_SHL_I64:
+    case NYIR_VEC4_SAR_I64:
+    case NYIR_VEC4_REDUCE_ADD_I64:
+      return NYR_PHI_VEC4_I64;
+    case NYIR_VEC4_LOAD_F64:
+    case NYIR_VEC4_ADD_F64:
+    case NYIR_VEC4_SUB_F64:
+    case NYIR_VEC4_MUL_F64:
+    case NYIR_VEC4_DIV_F64:
+    case NYIR_VEC4_FMA_F64:
+    case NYIR_VEC4_SET1_F64:
+    case NYIR_VEC4_SHUFFLE_F64:
+    case NYIR_VEC4_REDUCE_ADD_F64:
+      return NYR_PHI_VEC4_F64;
     case NYIR_COPY:
       if (def->a >= 0 && def->a < f->next_value && seen[def->a] != generation) {
         seen[def->a] = generation;
@@ -133,40 +201,54 @@ static bool nyr_phi_value_is_vec8_i64(const nyr_func_t *f, int value,
       break;
     }
   }
-  return false;
+  return NYR_PHI_VEC_NONE;
 }
 
 /*
- * Give every four-lane i64 PHI a 32-byte ALLOCA home at function entry.
- * `homes[dst]` receives the home address value; other entries stay -1.
+ * Give every multi-lane vector PHI an ALLOCA home at function entry.
+ * `homes[dst]` receives the home address value and `kinds[dst]` the vector
+ * kind; other entries stay -1 / NONE.
  */
-static int *nyr_phi_vec8_homes(nyr_func_t *f, bool *ok) {
+static int *nyr_phi_vec_homes(nyr_func_t *f, nyr_phi_vec_kind_t **kinds_out,
+                              bool *ok) {
+  if (kinds_out)
+    *kinds_out = NULL;
   size_t value_count = (size_t)f->next_value;
   if (!value_count)
     return NULL;
 
   size_t count = 0;
-  bool has_vec8 = false;
+  bool has_vec = false;
   for (size_t i = 0; i < f->len; ++i) {
     nyr_op_t op = f->data[i].op;
-    has_vec8 |= op == NYIR_VEC8_LOAD_I64 || op == NYIR_VEC8_ADD_I64 ||
-                op == NYIR_VEC8_SUB_I64 || op == NYIR_VEC8_AND_I64 ||
-                op == NYIR_VEC8_OR_I64 || op == NYIR_VEC8_XOR_I64 ||
-                op == NYIR_VEC8_SET1_I64 || op == NYIR_VEC8_SAR_I64 ||
-                op == NYIR_VEC8_SHR_I64;
+    has_vec |= op == NYIR_VEC8_LOAD_I64 || op == NYIR_VEC8_ADD_I64 ||
+               op == NYIR_VEC8_SUB_I64 || op == NYIR_VEC8_AND_I64 ||
+               op == NYIR_VEC8_OR_I64 || op == NYIR_VEC8_XOR_I64 ||
+               op == NYIR_VEC8_SET1_I64 || op == NYIR_VEC8_SAR_I64 ||
+               op == NYIR_VEC8_SHR_I64 || op == NYIR_VEC8_REDUCE_ADD_I64 ||
+               op == NYIR_VEC4_LOAD_I64 || op == NYIR_VEC4_ADD_I64 ||
+               op == NYIR_VEC4_SUB_I64 || op == NYIR_VEC4_AND_I64 ||
+               op == NYIR_VEC4_OR_I64 || op == NYIR_VEC4_XOR_I64 ||
+               op == NYIR_VEC4_SET1_I64 || op == NYIR_VEC4_SHL_I64 ||
+               op == NYIR_VEC4_SAR_I64 || op == NYIR_VEC4_REDUCE_ADD_I64 ||
+               op == NYIR_VEC4_LOAD_F64 || op == NYIR_VEC4_ADD_F64 ||
+               op == NYIR_VEC4_SUB_F64 || op == NYIR_VEC4_MUL_F64 ||
+               op == NYIR_VEC4_DIV_F64 || op == NYIR_VEC4_FMA_F64 ||
+               op == NYIR_VEC4_SET1_F64 || op == NYIR_VEC4_SHUFFLE_F64 ||
+               op == NYIR_VEC4_REDUCE_ADD_F64;
   }
-  if (!has_vec8)
+  if (!has_vec)
     return NULL;
 
   size_t *defs = calloc(value_count, sizeof(*defs));
   size_t *seen = calloc(value_count, sizeof(*seen));
   int *pending = calloc(value_count, sizeof(*pending));
-  bool *vec8_values = calloc(value_count, sizeof(*vec8_values));
-  if (!defs || !seen || !pending || !vec8_values) {
+  nyr_phi_vec_kind_t *kinds = calloc(value_count, sizeof(*kinds));
+  if (!defs || !seen || !pending || !kinds) {
     free(defs);
     free(seen);
     free(pending);
-    free(vec8_values);
+    free(kinds);
     *ok = false;
     return NULL;
   }
@@ -186,8 +268,10 @@ static int *nyr_phi_vec8_homes(nyr_func_t *f, bool *ok) {
       generation = 1;
     }
     int dst = f->data[i].dst;
-    if (nyr_phi_value_is_vec8_i64(f, dst, defs, seen, generation, pending)) {
-      vec8_values[dst] = true;
+    nyr_phi_vec_kind_t kind =
+        nyr_phi_value_vec_kind(f, dst, defs, seen, generation, pending);
+    if (kind != NYR_PHI_VEC_NONE) {
+      kinds[dst] = kind;
       ++count;
     }
   }
@@ -195,7 +279,7 @@ static int *nyr_phi_vec8_homes(nyr_func_t *f, bool *ok) {
     free(defs);
     free(seen);
     free(pending);
-    free(vec8_values);
+    free(kinds);
     return NULL;
   }
 
@@ -204,7 +288,7 @@ static int *nyr_phi_vec8_homes(nyr_func_t *f, bool *ok) {
     free(defs);
     free(seen);
     free(pending);
-    free(vec8_values);
+    free(kinds);
     *ok = false;
     return NULL;
   }
@@ -212,10 +296,9 @@ static int *nyr_phi_vec8_homes(nyr_func_t *f, bool *ok) {
   for (size_t i = 0; i < f->len; ++i) {
     int dst = f->data[i].dst;
     if (f->data[i].op == NYIR_PHI && dst >= 0 && (size_t)dst < value_count &&
-        vec8_values[dst])
+        kinds[dst] != NYR_PHI_VEC_NONE)
       phi_dst[phi_count++] = dst;
   }
-  free(vec8_values);
 
   int value_limit = f->next_value;
   int *homes = calloc(value_count, sizeof(*homes));
@@ -223,6 +306,7 @@ static int *nyr_phi_vec8_homes(nyr_func_t *f, bool *ok) {
     free(defs);
     free(seen);
     free(pending);
+    free(kinds);
     free(phi_dst);
     *ok = false;
     return NULL;
@@ -231,6 +315,7 @@ static int *nyr_phi_vec8_homes(nyr_func_t *f, bool *ok) {
     homes[v] = -1;
   for (size_t k = 0; k < phi_count; ++k) {
     int dst = phi_dst[k];
+    int bytes = nyr_phi_vec_bytes(kinds[dst]);
     nyr_inst_t home = {.op = NYIR_ALLOCA,
                        .dst = -1,
                        .a = -1,
@@ -239,7 +324,7 @@ static int *nyr_phi_vec8_homes(nyr_func_t *f, bool *ok) {
                        .d = -1,
                        .e = -1,
                        .f = -1,
-                       .imm = 32};
+                       .imm = bytes};
     size_t before = f->len;
     int addr = nyr_ir_emit(f, home);
     if (addr < 0 || f->len != before + 1) {
@@ -247,6 +332,7 @@ static int *nyr_phi_vec8_homes(nyr_func_t *f, bool *ok) {
       free(defs);
       free(seen);
       free(pending);
+      free(kinds);
       free(phi_dst);
       *ok = false;
       return NULL;
@@ -263,6 +349,10 @@ static int *nyr_phi_vec8_homes(nyr_func_t *f, bool *ok) {
   free(defs);
   free(seen);
   free(pending);
+  if (kinds_out)
+    *kinds_out = kinds;
+  else
+    free(kinds);
   return homes;
 }
 
@@ -280,7 +370,8 @@ bool nyr_phi_elim(nyr_func_t *f) {
   if (!has_phi)
     return true;
   bool homes_ok = true;
-  int *vec_homes = nyr_phi_vec8_homes(f, &homes_ok);
+  nyr_phi_vec_kind_t *vec_kinds = NULL;
+  int *vec_homes = nyr_phi_vec_homes(f, &vec_kinds, &homes_ok);
   if (!homes_ok)
     return false;
   const int vec_home_limit = f->next_value;
@@ -338,6 +429,7 @@ bool nyr_phi_elim(nyr_func_t *f) {
     }
     if (neg_count > 1) {
       free(vec_homes);
+      free(vec_kinds);
       if (next_label != stk_next_lbl)
         free(next_label);
       return true;
@@ -351,6 +443,7 @@ bool nyr_phi_elim(nyr_func_t *f) {
         }
       if (!defined_in_entry) {
         free(vec_homes);
+        free(vec_kinds);
         if (next_label != stk_next_lbl)
           free(next_label);
         return true;
@@ -361,6 +454,7 @@ bool nyr_phi_elim(nyr_func_t *f) {
   nyr_type_map_t value_types = {0};
   if (!nyr_type_map_init(&value_types, f, nyr_max_local(f))) {
     free(vec_homes);
+    free(vec_kinds);
     if (next_label != stk_next_lbl)
       free(next_label);
     return true;
@@ -446,9 +540,12 @@ bool nyr_phi_elim(nyr_func_t *f) {
       int vec_addr = vec_homes && in->dst >= 0 && in->dst < vec_home_limit
                          ? vec_homes[in->dst]
                          : -1;
+      nyr_phi_vec_kind_t vec_kind =
+          (vec_addr >= 0 && vec_kinds) ? vec_kinds[in->dst] : NYR_PHI_VEC_NONE;
       stores[store_count++] = (nyr_phi_store_t){.insert_at = insert_at,
                                                 .slot = slot,
                                                 .vec_addr = vec_addr,
+                                                .vec_kind = vec_kind,
                                                 .value = value,
                                                 .scalar_class = scalar_class,
                                                 .debug = in->debug};
@@ -478,8 +575,10 @@ bool nyr_phi_elim(nyr_func_t *f) {
     free(in->phi_incoming);
     int vec_addr =
         vec_homes && dst >= 0 && dst < vec_home_limit ? vec_homes[dst] : -1;
-    if (vec_addr >= 0) {
-      *in = (nyr_inst_t){.op = NYIR_VEC8_LOAD_I64,
+    nyr_phi_vec_kind_t vec_kind =
+        (vec_addr >= 0 && vec_kinds) ? vec_kinds[dst] : NYR_PHI_VEC_NONE;
+    if (vec_addr >= 0 && vec_kind != NYR_PHI_VEC_NONE) {
+      *in = (nyr_inst_t){.op = nyr_phi_vec_load_op(vec_kind),
                          .dst = dst,
                          .a = vec_addr,
                          .b = -1,
@@ -525,8 +624,8 @@ bool nyr_phi_elim(nyr_func_t *f) {
       goto done;
     }
     memmove(&f->data[at + 1], &f->data[at], (f->len - at) * sizeof(nyr_inst_t));
-    if (stores[i].vec_addr >= 0) {
-      f->data[at] = (nyr_inst_t){.op = NYIR_VEC8_STORE_I64,
+    if (stores[i].vec_addr >= 0 && stores[i].vec_kind != NYR_PHI_VEC_NONE) {
+      f->data[at] = (nyr_inst_t){.op = nyr_phi_vec_store_op(stores[i].vec_kind),
                                  .dst = -1,
                                  .a = stores[i].vec_addr,
                                  .b = stores[i].value,
@@ -558,6 +657,7 @@ bool nyr_phi_elim(nyr_func_t *f) {
 done:
   nyr_type_map_free(&value_types);
   free(vec_homes);
+  free(vec_kinds);
   free(stores);
   if (next_label != stk_next_lbl)
     free(next_label);

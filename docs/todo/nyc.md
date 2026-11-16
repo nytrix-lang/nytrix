@@ -851,6 +851,53 @@ and new binaries. The focused setup link falls another 769 bytes:
 bytes to the `0x7000` threshold. Address-accumulator `addl $imm, %reg`
 sites in the setup assembly fell from 287 to 109.
 
+i386 register copy propagation and dead SARL brackets (2026-11-16): two
+spill-cleanup passes in `src/code/backend/mach/arch/i386/spills.h` remove
+whole instructions without touching stack homes, so the home-coloring and
+home-ranking passes see byte-identical inputs and cannot regress.
+
+1. Register copy propagation. A plain `movl %A, %B` whose `%B` is read once
+   by the next instruction and is dead afterwards is folded: that instruction
+   reads `%A` and the copy is deleted. Only register-to-register copies qualify
+   (never an immediate or a home), so no operand form or home reference changes.
+   It fires only when `%B` is dead at the next instruction and at the
+   successor; liveness is recomputed between rounds.
+
+2. Dead `pushl %R; sarl $31, %R; popl %R` bracket removal. This three-line
+   sequence restores `%R` and only alters flags, so it is dropped when no later
+   instruction consumes those flags before overwriting them. The scan walks
+   mov/lea/push/pop/cltd/nop, follows single `jmp` edges (bounded), stops at any
+   flag writer, and refuses to cross a label with a live incoming edge. The
+   earlier revision compared the whole `sar` operand string (`$31, %eax`)
+   against `push`/`pop` (`%eax`) and therefore never matched; the fix splits the
+   shift operands and compares only the destination register.
+
+A rejected predecessor used the same idea on home reads (`movl home,%R;
+testl %R,%R` → `cmpl $0,home`). It is byte-identical in isolation but moves a
+home read across a label, which perturbs the heuristic home-coloring pass and
+netted +81 bytes across the corpus, so it was replaced by the register-only
+copy propagation above.
+
+Measured with the pre-edit compiler `/tmp/nyc-preedit` (built from
+`6eed9a3e^`) over the 20 focused setup C units, default per-function variant
+choice, `-Os`: `.text` falls from 32,409 to 31,908 bytes (501 bytes). Every
+one of the 20 units shrinks or stays equal, and every forced register variant
+(`baseline`, `compact`, `four`, `three`, `promoted`, `promoted-four`,
+`colored`, `colored-four`) shrinks or stays equal; no unit grows under any
+variant. Per-pass contribution: copy propagation −284 bytes, SARL-bracket
+removal −205 bytes, move-forwarding 0 bytes (it never fires; the remaining
+adjacent register copies are already handled by copy propagation or carry a
+second use). The focused link with `/tmp/setup-permissive.ld` reports
+`.text` 32,530 → 32,029 and `.text32` end `0x8281` → `0x808c`, leaving 4,172
+bytes to the `0x7000` threshold. The 523-test differential C corpus shows no
+behavioral change other than the pre-existing flaky `i386-lsl-alternative`
+fixture (it reads RDPID hardware state and returns different values run to run
+under either binary), and the real-mode QEMU probe prints identical `FOLD`
+hashes. The original Linux setup linker still rejects the image at its
+64-sector cap. For reference, compiling the same 20 units with the host GCC
+16.2.1 yields 11,664 bytes of `.text`, so the remaining gap is code-generation
+quality rather than one outlier object.
+
 ## Correctness verification programme
 
 Merged from `docs/todo/kcc.md` (2026-11-15). The artifact requirements in

@@ -7792,23 +7792,6 @@ static int nyr_emit_runtime_call(nyr_builder_impl_t *b, const char *symbol,
   if (a >= 0 && strcmp(symbol, "rt_any_to_i64") == 0 &&
       nyr_value_is_any_decoded(b, a))
     return a;
-  /*
-   * Dynamic-callable markers are idempotent, but each emitted call is work.
-   * Skip an exact redundant mark when the argument is already the result of
-   * the same marker.
-   */
-  if (a >= 0 && argc == 1 && symbol &&
-      strncmp(symbol, "rt_mark_dynamic_", 16) == 0) {
-    for (size_t i = b->nyir.len; i > 0; --i) {
-      const nyr_inst_t *def = &b->nyir.data[i - 1];
-      if (def->dst != a)
-        continue;
-      if (def->op == NYIR_CALL && def->symbol &&
-          strcmp(def->symbol, symbol) == 0 && def->imm == 1)
-        return a;
-      break;
-    }
-  }
   const char *canonical = nyr_runtime_symbol(symbol);
   if (canonical)
     symbol =

@@ -496,9 +496,65 @@ static bool rt_tbuf_segment_insert(uint32_t index, _Atomic(uintptr_t) *seg,
   return false;
 }
 
+/*
+ * Pages that ever held a registered typed-buffer payload, as a two-level
+ * bitmap (one 32 KiB leaf per GiB touched). Lookups of other words (strings,
+ * floats, dictionaries) are by far the common case in a UI frame, and each
+ * used to probe every registry segment before answering no. A clear bit is a
+ * definite no; bits are never cleared, so a set bit only means "search".
+ */
+#define RT_TBUF_PAGE_ROOT_BITS 17u
+#define RT_TBUF_PAGE_LEAF_BITS 18u
+static _Atomic(_Atomic(uint64_t) *) rt_tbuf_pages[1u << RT_TBUF_PAGE_ROOT_BITS];
+
+static void rt_tbuf_mark_page(uintptr_t data) {
+  uintptr_t page = data >> 12;
+  uintptr_t root = page >> RT_TBUF_PAGE_LEAF_BITS;
+  if (root >> RT_TBUF_PAGE_ROOT_BITS)
+    return;
+  _Atomic(uint64_t) *leaf =
+      atomic_load_explicit(&rt_tbuf_pages[root], memory_order_acquire);
+  if (!leaf) {
+    _Atomic(uint64_t) *fresh =
+        calloc((1u << RT_TBUF_PAGE_LEAF_BITS) / 64u, sizeof(*fresh));
+    if (!fresh)
+      return;
+    _Atomic(uint64_t) *expected = NULL;
+    if (atomic_compare_exchange_strong_explicit(&rt_tbuf_pages[root], &expected,
+                                                fresh, memory_order_acq_rel,
+                                                memory_order_acquire)) {
+      leaf = fresh;
+    } else {
+      free(fresh);
+      leaf = expected;
+    }
+  }
+  uintptr_t bit = page & ((1u << RT_TBUF_PAGE_LEAF_BITS) - 1u);
+  atomic_fetch_or_explicit(&leaf[bit >> 6], UINT64_C(1) << (bit & 63u),
+                           memory_order_release);
+}
+
+/* False when no typed buffer was ever registered on `data`'s page. Addresses
+ * outside the bitmap's range answer true so the registry decides. */
+static inline bool rt_tbuf_page_possible(uintptr_t data) {
+  uintptr_t page = data >> 12;
+  uintptr_t root = page >> RT_TBUF_PAGE_LEAF_BITS;
+  if (root >> RT_TBUF_PAGE_ROOT_BITS)
+    return true;
+  _Atomic(uint64_t) *leaf =
+      atomic_load_explicit(&rt_tbuf_pages[root], memory_order_acquire);
+  if (!leaf)
+    return false;
+  uintptr_t bit = page & ((1u << RT_TBUF_PAGE_LEAF_BITS) - 1u);
+  return (atomic_load_explicit(&leaf[bit >> 6], memory_order_acquire) >>
+          (bit & 63u)) &
+         1u;
+}
+
 static void rt_tbuf_register_handle(uintptr_t data, bool freeable) {
   if (!data || (data & RT_TBUF_HANDLE_FLAG_MASK) != 0)
     return;
+  rt_tbuf_mark_page(data);
   uintptr_t value =
       data | (freeable ? RT_TBUF_HANDLE_FREEABLE : RT_TBUF_HANDLE_STATIC);
   uint32_t count =
@@ -534,7 +590,7 @@ static void rt_tbuf_register_handle(uintptr_t data, bool freeable) {
 }
 
 static bool rt_tbuf_registered_handle(uintptr_t data) {
-  if (!data)
+  if (!data || (data & RT_TBUF_HANDLE_FLAG_MASK) != 0)
     return false;
   uint64_t epoch =
       atomic_load_explicit(&rt_tbuf_handle_epoch, memory_order_acquire);
@@ -546,6 +602,8 @@ static bool rt_tbuf_registered_handle(uintptr_t data) {
       atomic_load_explicit(&rt_tbuf_handle_epoch, memory_order_acquire) ==
           epoch)
     return true;
+  if (!rt_tbuf_page_possible(data))
+    return false;
   uint32_t count =
       atomic_load_explicit(&rt_tbuf_segment_count, memory_order_acquire);
   for (uint32_t s = 0; s < count; ++s) {
@@ -6124,6 +6182,27 @@ int64_t rt_set_len_raw(int64_t value) {
   return *(int64_t *)(uintptr_t)value;
 }
 
+/*
+ * Length of a native dictionary. The standard vector type names override the
+ * key count; anything else reports its SwissTable count.
+ */
+static int64_t rt_len_native_dict(int64_t value) {
+  int64_t vector_type =
+      rt_dict_get_str_raw(value, (int64_t)(uintptr_t)"__type", 0);
+  if (vector_type) {
+    if (rt_cstr_eq(vector_type, (int64_t)(uintptr_t)"vec2") ||
+        rt_cstr_eq(vector_type, (int64_t)(uintptr_t)"Vector2"))
+      return 2;
+    if (rt_cstr_eq(vector_type, (int64_t)(uintptr_t)"vec3") ||
+        rt_cstr_eq(vector_type, (int64_t)(uintptr_t)"Vector3"))
+      return 3;
+    if (rt_cstr_eq(vector_type, (int64_t)(uintptr_t)"vec4") ||
+        rt_cstr_eq(vector_type, (int64_t)(uintptr_t)"Vector4"))
+      return 4;
+  }
+  return rt_dict_len_raw(value);
+}
+
 int64_t rt_len(int64_t value) {
   if (!value)
     return 0;
@@ -6137,6 +6216,13 @@ int64_t rt_len(int64_t value) {
     if (rt_tbuf_check(value, &header) == RT_TBUF_OK)
       return header[1];
   }
+  /*
+   * The native dictionary registry is filled only by the dictionary
+   * constructor, so a hit is authoritative. Checking it first spares a
+   * dictionary the string, typed-buffer, set and vector probes below.
+   */
+  if (ny_native_dict_registry_find((uintptr_t)value))
+    return rt_len_native_dict(value);
   /*
    * Managed sequences have an authoritative tag and count. Do not probe
    * foreign buffer/vector layouts for an allocator-owned list or dict.
@@ -6224,25 +6310,8 @@ int64_t rt_len(int64_t value) {
   int vector_dim = ny_vec_dim_impl(value);
   if (vector_dim)
     return vector_dim;
-  if (ny_native_dict_ptr(value) != NULL) {
-    int64_t vector_type =
-        rt_dict_get_str_raw(value, (int64_t)(uintptr_t)"__type", 0);
-    if (rt_cstr_eq(vector_type, (int64_t)(uintptr_t)"vec2") ||
-        rt_cstr_eq(vector_type, (int64_t)(uintptr_t)"Vector2"))
-      return 2;
-    if (rt_cstr_eq(vector_type, (int64_t)(uintptr_t)"vec3") ||
-        rt_cstr_eq(vector_type, (int64_t)(uintptr_t)"Vector3"))
-      return 3;
-    if (rt_cstr_eq(vector_type, (int64_t)(uintptr_t)"vec4") ||
-        rt_cstr_eq(vector_type, (int64_t)(uintptr_t)"Vector4"))
-      return 4;
-    /*
-     * Native dictionaries can also carry the generic dict tag.  Read their
-     * SwissTable count before the managed-dictionary header probe below.
-     * Only the standard vector type names override dictionary key count.
-     */
-    return rt_dict_len_raw(value);
-  }
+  if (ny_native_dict_ptr(value) != NULL)
+    return rt_len_native_dict(value);
   if (ny_native_managed_dict_ptr(value)) {
     int64_t count = *(int64_t *)(uintptr_t)value;
     return is_int(count) ? rt_untag_v(count) : count;
@@ -6294,7 +6363,14 @@ int64_t rt_len_strict(int64_t value) {
    * selected.  Test authoritative container layouts before the low-bit
    * immediate-integer predicate; managed dictionaries are commonly odd
    * addresses and were being rejected as integers.
+   *
+   * The typed-buffer handle cache and the native dictionary registry are
+   * authoritative and cost a table lookup; check them before the layout
+   * probes, which read memory around the word (a list paid three probes).
    */
+  if (rt_tbuf_cached_handle((uintptr_t)value) ||
+      ny_native_dict_registry_find((uintptr_t)value))
+    return rt_len(value);
   if (ny_native_dict_ptr(value))
     return rt_len(value);
   if (rt_set_layout(value))

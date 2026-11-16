@@ -5500,6 +5500,43 @@ bool nyr_mach_lower_nir(const nyr_func_t *nyir, nyr_mach_func_t *out,
       }
       continue;
     } else if (in->op == NYIR_CALL) {
+      /*
+       * Float-to-int casts can be lowered as `rt_f64_to_i64` calls even though
+       * the helper is exactly a truncating conversion. Expand that call into
+       * NYR_MACH_CONVERT so the encoder emits one cvttsd2si instead of a call
+       * plus the stack round trip needed to marshal the value through xmm0.
+       * Anything the fast path cannot prove (tagged results, indirect calls,
+       * untyped values) keeps the ordinary call shape.
+       */
+      if (in->symbol && in->dst >= 0 &&
+          (in->flags & NYIR_INST_F_INDIRECT) == 0 &&
+          in->scalar_class == NYIR_SCALAR_I64_RAW &&
+          strcmp(in->symbol, "rt_f64_to_i64") == 0) {
+        int conv_args[NYIR_CALL_MAX_ARGS] = {0};
+        int conv_argc = 0;
+        if (nyr_call_args(in, nyir->next_value, conv_args,
+                          NYIR_CALL_MAX_ARGS, &conv_argc, NULL, 0) &&
+            conv_argc == 1 && conv_args[0] >= 0 &&
+            nyr_call_arg_class_get(in, 0) == NYIR_SCALAR_F64) {
+          nyr_mach_operand_t conv_src =
+              mach_vreg(&lowered, values[conv_args[0]]);
+          nyr_mach_operand_t conv_dst = mach_vreg(&lowered, values[in->dst]);
+          nyr_mach_type_t conv_dst_type =
+              mach_value_type(&lowered, &conv_dst);
+          if (mach_value_type(&lowered, &conv_src) == NYR_MACH_TYPE_F64 &&
+              (conv_dst_type == NYR_MACH_TYPE_I64 ||
+               conv_dst_type == NYR_MACH_TYPE_PTR)) {
+            nyr_mach_inst_t conv = {.opcode = NYR_MACH_CONVERT,
+                                    .source_pc = (uint32_t)i,
+                                    .dst = conv_dst,
+                                    .src0 = conv_src,
+                                    .effects = NYR_MACH_EFFECT_NONE};
+            if (!nyr_mach_emit(&lowered, conv))
+              goto oom;
+            continue;
+          }
+        }
+      }
       inst.opcode = NYR_MACH_CALL;
       inst.runtime_operation = ny_native_runtime_operation(in->symbol);
       if (in->dst >= 0)

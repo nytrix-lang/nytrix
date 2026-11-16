@@ -163,8 +163,9 @@ fn __vkr_pack_color(any r, any g, any b, any a) int {
 }
 
 @jit
-fn _vkr_store_vertex(any base, int idx, any x, any y, any z, any u, any v, any color, any tex_id=0, any nx=0.0, any ny=0.0, any nz=1.0) any {
-   render_shared.store_vertex64(base, idx, x, y, z, u, v, color, tex_id, nx, ny, nz)
+fn _vkr_store_vertex(any base, int idx, f64 x, f64 y, f64 z, f64 u, f64 v, any color, any tex_id=0, f64 nx=0.0, f64 ny=0.0, f64 nz=1.0) any {
+   ;; Typed coordinates: the any-typed form boxed each float on every vertex.
+   render_shared.store_vertex64_typed(base, idx, x, y, z, u, v, render_shared.color_u32(color), int(tex_id), nx, ny, nz)
 }
 
 @jit
