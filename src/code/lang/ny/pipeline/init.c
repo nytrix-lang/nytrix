@@ -3099,6 +3099,9 @@ int ny_pipeline_run(ny_options *opt) {
     }
     if (opt->dump_ast)
       goto exit_success;
+    /* The kernel accepted the program: erase proof parameters before the
+     * native lowering sees it. */
+    (void)ny_erase_proof_params(&prog, arena, parse_name);
   }
 
   /*
@@ -3533,6 +3536,10 @@ int ny_pipeline_run(ny_options *opt) {
     }
     goto exit_success;
   }
+
+  /* The kernel accepted the program: erase proof parameters before any
+   * backend lowers it, so every route sees the same runtime signatures. */
+  (void)ny_erase_proof_params(&prog, arena, parse_name);
 
 #ifndef _WIN32
   ny_module_job *mod_jobs = NULL;

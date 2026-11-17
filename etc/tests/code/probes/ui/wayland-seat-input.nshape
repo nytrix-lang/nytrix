@@ -17,6 +17,9 @@ shape wayland-seat-input {
 ;; button; a press and release inside ONE frame must click too; keys typed
 ;; with an XKB keymap must reach a focused text field, Shift included.
 ;; Without WAYLAND_DISPLAY (or on another backend) it reports a skip.
+;; On a scaled output (weston --scale=2) the framebuffer is the window size
+;; times the content scale, the toolkit lays out in framebuffer pixels, and
+;; the pointer arrives in surface units: clicks must still land.
 use core
 use core.common as common
 use core.os (file_read, temp_dir, file_write)
@@ -66,8 +69,16 @@ fn frames(int n) any {
    0
 }
 
+fn content_scale() f64 {
+   def f64 s = float(window.get_window_content_scale(win).get(0, 1.0))
+   s > 0.0 ? s : 1.0
+}
+
+;; Centre of a toolkit rect (framebuffer pixels) in surface units, as the
+;; compositor reports pointer positions.
 fn centre(list r) list {
-   [int(float(r.get(0, 0.0)) + float(r.get(2, 0.0)) * 0.5), int(float(r.get(1, 0.0)) + float(r.get(3, 0.0)) * 0.5)]
+   def f64 s = content_scale()
+   [int((float(r.get(0, 0.0)) + float(r.get(2, 0.0)) * 0.5) / s), int((float(r.get(1, 0.0)) + float(r.get(3, 0.0)) * 0.5) / s)]
 }
 
 fn inject(str kind, int a=0, int b=0, str path="") bool { window.inject_platform_input(win, kind, a, b, path) }
@@ -104,11 +115,19 @@ if common.env_trim("WAYLAND_DISPLAY").len == 0 {
       def int font = gfx.font_load_first(assets.MONO_FONT_CANDIDATES, 16)
       gui.set_fonts(font, font, font)
       frames(4)
+      def f64 scale = content_scale()
+      def list wsize = window.size(win)
+      def list fbsize = gfx.framebuffer_size_f64(640, 360)
+      print("content scale " + to_str(scale) + " window " + to_str(wsize) + " framebuffer " + to_str(fbsize))
+      assert(int(float(fbsize.get(0, 0.0))) == int(float(wsize.get(0, 0)) * scale), "framebuffer width is the window width times the content scale")
       ;; Pointer: enter, move to the button, press and release in separate frames.
       def list bc = centre(btn_rect)
       assert(inject("enter", int(bc[0]), int(bc[1])) && inject("frame"), "pointer enter")
       frames(2)
-      assert(int(float(gui.mouse_xy().get(0, -1.0))) == int(bc[0]), "pointer position reaches the toolkit: " + to_str(gui.mouse_xy()) + " vs " + to_str(bc))
+      def f64 seen_x = float(gui.mouse_xy().get(0, -1.0))
+      def f64 want_x = float(int(bc[0])) * scale
+      def f64 off_x = seen_x > want_x ? seen_x - want_x : want_x - seen_x
+      assert(off_x <= scale, "pointer position reaches the toolkit in framebuffer pixels: " + to_str(gui.mouse_xy()) + " vs " + to_str(bc) + " x " + to_str(scale))
       inject("button", 0x110, 1)
       inject("frame")
       frames(1)

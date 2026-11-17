@@ -1,0 +1,28 @@
+shape enum_strict_positivity {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "enum", "positivity", "inductive"]
+  template ny-test-case
+  flags_matrix "--native-only; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  expect_stdout "POSITIVE-OK"
+  source ny <<'NY'
+use core
+;; Function-typed payloads are admitted when the family stays strictly
+;; positive: it may appear in a result (an infinitely branching tree), never
+;; among a function's parameters.
+enum Ord { Zero, Limit(fn(int) Ord branch) }
+enum Box { Wrap(fn(int) int f) }
+;; A parameter used only in results may be instantiated with the family.
+enum Stream<A> { Next(fn(int) A step) }
+enum Tree { Leaf, Node(Stream<Tree> kids) }
+type Step = fn(int) Ord
+def w = Box.Wrap(fn(int n) int { n + 1 })
+match w { Box.Wrap(f) -> assert(f(41) == 42, "typed function payload runs") }
+def o = Ord.Limit(fn(int n) Ord { Ord.Zero })
+match o {
+   Ord.Limit(next) -> match next(0) { Ord.Zero -> print("POSITIVE-OK") Ord.Limit(x) -> print("bad") }
+   Ord.Zero -> print("bad")
+}
+NY
+}

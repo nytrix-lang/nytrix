@@ -2,6 +2,7 @@
  * Proof-parser bridge: extracts proof constraints and refinement
  * annotations from parse nodes for the semantic proof-checking layer.
  */
+#include "code/lang/ny/parser/index_expr.h"
 #include "code/lang/ny/parser/proof.h"
 #include "base/strbuf.h"
 #include "base/util.h"
@@ -1312,6 +1313,99 @@ char *ny_proof_rule_result(const char *rule, const char *const *proofs,
   free(b);
   free(c);
   free(d);
+  return out;
+}
+
+/* Index spelling of a canonical term: `name:n` is `n`, `int:3` is `3`,
+ * `binary:+(name:n,int:1)` is `n+1`; NULL when it is not an index term. */
+static char *proof_index_term(const char *canon) {
+  if (!canon)
+    return NULL;
+  if (strncmp(canon, "name:", 5) == 0)
+    return ny_strdup(canon + 5);
+  if (strncmp(canon, "int:", 4) == 0)
+    return ny_strdup(canon + 4);
+  char op[16];
+  char *l = NULL, *r = NULL;
+  if (!ny_proof_canon_split_binary(canon, op, sizeof(op), &l, &r))
+    return NULL;
+  char *li = proof_index_term(l), *ri = proof_index_term(r);
+  char *out = NULL;
+  if (li && ri && (strcmp(op, "+") == 0 || strcmp(op, "-") == 0)) {
+    char raw[256], canon_out[256];
+    snprintf(raw, sizeof(raw), "%s%s%s", li, op, ri);
+    if (ny_index_canon(raw, canon_out, sizeof(canon_out)))
+      out = ny_strdup(canon_out);
+  }
+  free(l);
+  free(r);
+  free(li);
+  free(ri);
+  return out;
+}
+
+/* Rewrites one index term by another in the generic arguments of `type`. */
+static char *proof_index_rewrite(const char *type, const char *from,
+                                 const char *to, bool *changed) {
+  ny_strbuf_t b;
+  ny_strbuf_init(&b);
+  size_t fl = strlen(from), tl = strlen(to);
+  int depth = 0;
+  for (size_t i = 0; type[i];) {
+    char c = type[i];
+    if (c == '<')
+      depth++;
+    else if (c == '>')
+      depth--;
+    bool at_arg = depth > 0 && i > 0 &&
+                  (type[i - 1] == '<' || type[i - 1] == ',' ||
+                   (type[i - 1] == ' ' && i > 1 && type[i - 2] == ','));
+    if (at_arg && strncmp(type + i, from, fl) == 0 &&
+        (type[i + fl] == ',' || type[i + fl] == '>')) {
+      ny_strbuf_append_n(&b, to, tl);
+      i += fl;
+      *changed = true;
+      continue;
+    }
+    ny_strbuf_append_n(&b, type + i, 1);
+    ++i;
+  }
+  return ny_strbuf_take(&b);
+}
+
+char *ny_proof_index_transport(const char *equation, const char *type,
+                               const char **reason) {
+  *reason = NULL;
+  char *eq = proof_rule_strip(equation);
+  char *a = NULL, *b = NULL;
+  if (!eq || !proof_rule_equation(eq, &a, &b)) {
+    *reason = "argument is not a proof of an equation";
+    free(eq);
+    return NULL;
+  }
+  char *ai = proof_index_term(a), *bi = proof_index_term(b);
+  char *out = NULL;
+  if (!ai || !bi) {
+    *reason = "the equation's sides are not index terms";
+  } else {
+    bool changed = false;
+    out = proof_index_rewrite(type, ai, bi, &changed);
+    if (!changed) {
+      free(out);
+      out = proof_index_rewrite(type, bi, ai, &changed);
+    }
+    if (!changed) {
+      free(out);
+      out = NULL;
+      *reason = "the value's type has neither side of the equation as an "
+                "index";
+    }
+  }
+  free(eq);
+  free(a);
+  free(b);
+  free(ai);
+  free(bi);
   return out;
 }
 

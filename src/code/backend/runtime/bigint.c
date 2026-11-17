@@ -4618,7 +4618,7 @@ int64_t rt_long(int64_t v) {
     memcpy(&d, &bits, sizeof(d));
     return _bi_from_f64_trunc(d);
   }
-  if (is_v_str(v) || rt_native_is_str(v)) {
+  if (is_v_str(v)) {
     size_t len = 0;
     if (is_v_str(v)) {
       len = rt_tagged_str_len(v);

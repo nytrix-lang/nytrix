@@ -3,6 +3,7 @@
  * sub-parser (core, comptime, dispatch) based on token kind.
  */
 #include "../internal.h"
+#include "code/lang/ny/parser/index_expr.h"
 #include "base/util.h"
 #include <ctype.h>
 #include <stdlib.h>

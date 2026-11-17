@@ -10,7 +10,7 @@ module core.os.ui.render.dump(
    split_model_list, model_skipped, suite_field, suite_parse_line, suite_snapshot_path,
    suite_parse_text, suite_parse_env, suite_exit_enabled, gizmo_mode, framebuffer_hash_line,
    set_framebuffer_hash_line,
-   env_truthy_cached, env_present_cached, env_enabled_cached, env_toggle_cached, env_int_cached,
+   env_truthy_cached, env_generation, env_present_cached, env_enabled_cached, env_toggle_cached, env_int_cached,
    env_trim_cached, env_lower_cached, mode_truthy_cached, set_bool, set_bools, set_str, apply_verbose_argv, reset_env_cache,
    debug_enabled, debug_verbose_enabled, debug_deep_enabled, gfx_frame_trace_enabled, enabled,
    trace_enabled, deep_enabled, gui_trace_enabled, dump_trace_enabled, text_immediate_enabled,
@@ -49,6 +49,10 @@ use core.os.ui.window
 use core.math.parse.img as img_mod
 
 mut _env_bool_cache, _env_int_cache, _env_str_cache = dict(64), dict(32), dict(32)
+;; Bumped whenever a cached flag may change (reset or override), so hot
+;; per-frame callers can keep a flag in a local variable and re-read it only
+;; when this changes.
+mut int _env_gen = 1
 mut _dump_path_cache, _counter_values = dict(16), dict(64)
 mut _profile_dump_mode, _bench_mode = -1, -1
 mut _batch_prefetch_mode, _batch_fast_env_mode = -1, -1
@@ -173,6 +177,7 @@ fn _str_cache() dict {
 fn reset_env_cache() any {
    "Clears cached UI profile environment flags."
    _env_bool_cache, _env_int_cache, _env_str_cache = dict(64), dict(32), dict(32)
+   _env_gen += 1
    _dump_path_cache = dict(16)
    _min_ms_cache = -1
 }
@@ -181,6 +186,7 @@ fn set_bool(any name, any value) bool {
    "Overrides a cached boolean profile/env flag for this process."
    def k = _key(name)
    _bool_cache()
+   _env_gen += 1
    _env_bool_cache[k] = bool(value)
    _env_bool_cache["present:" + k] = bool(value)
    _env_bool_cache["enabled:" + k] = bool(value)
@@ -206,6 +212,7 @@ fn set_str(any name, any value) bool {
    def v = to_str(value)
    _str_cache()
    _bool_cache()
+   _env_gen += 1
    _env_str_cache["trim:" + k] = str.strip(v)
    _env_str_cache["lower:" + k] = str.lower(str.strip(v))
    _env_bool_cache["present:" + k] = true
@@ -296,6 +303,11 @@ fn env_truthy_cached(any name) bool {
    def bool value = _ny_trace_has_value(k) ? _ny_trace_truthy(k) : common.env_truthy(k)
    if cached { _env_bool_cache[k] = value }
    value
+}
+
+fn env_generation() int {
+   "Returns a counter that changes whenever cached environment flags may change."
+   _env_gen
 }
 
 fn env_present_cached(any name) bool {
@@ -396,9 +408,16 @@ fn dump_trace_enabled() bool {
    env_truthy_cached("NY_UI_GUI_DUMP_TRACE")
 }
 
+mut int _text_immediate_gen = 0
+mut bool _text_immediate_on = false
+
 fn text_immediate_enabled() bool {
    "Returns true when text should bypass queued batching for diagnosis."
-   env_truthy_cached("NY_GUI_TEXT_IMMEDIATE") || env_truthy_cached("NY_UI_TEXT_IMMEDIATE")
+   if _text_immediate_gen != _env_gen {
+      _text_immediate_on = env_truthy_cached("NY_GUI_TEXT_IMMEDIATE") || env_truthy_cached("NY_UI_TEXT_IMMEDIATE")
+      _text_immediate_gen = _env_gen
+   }
+   _text_immediate_on
 }
 
 fn text_group_batches_enabled() bool {

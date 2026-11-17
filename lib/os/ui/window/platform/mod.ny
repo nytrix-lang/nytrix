@@ -1172,6 +1172,10 @@ fn swap_buffers(any win) any {
    def ctx = window_contexts.get(handle, 0)
    if ctx {
       if b == "wayland" {
+         ;; The swap presents the buffer drawn this frame; set the surface's
+         ;; scale for that buffer, then size the next one.
+         def drawn = opengl_backend.wayland_buffer_size(ctx)
+         wayland_backend.apply_buffer_scale(_native_window(win), int(drawn.get(0, 0)), int(drawn.get(1, 0)))
          def size = get_framebuffer_size(win)
          opengl_backend.resize_wayland_window(ctx, int(size.get(0, 0)), int(size.get(1, 0)))
       }

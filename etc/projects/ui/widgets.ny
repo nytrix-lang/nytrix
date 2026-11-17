@@ -50,19 +50,20 @@ mut ui_scale = 1.0
 def env_scale = str.atof(common.env_trim("NY_WIDGETS_SCALE"))
 if env_scale >= 0.5 { ui_scale = env_scale }
 
-;; Fonts are rasterised at the UI scale, so text stays crisp and fills its
-;; rows; F3 / F4 reload them.
+;; Fonts are rasterised at the size they appear on screen (the UI scale times
+;; the window's content scale, 2 on a HiDPI output), so text stays crisp and
+;; fills its rows; F3 / F4 and scale changes reload them.
 def fonts = viewer.FONT_CANDIDATES
 mut font_body, font_title, font_small = 0, 0, 0
 mut font_scale = 0.0
-fn load_fonts() any {
-   if font_scale == ui_scale { return 0 }
-   font_body = render.font_load_first(fonts, int(15.0 * ui_scale + 0.5))
-   font_title = render.font_load_first(fonts, int(16.0 * ui_scale + 0.5))
-   font_small = render.font_load_first(fonts, int(13.0 * ui_scale + 0.5))
-   font_scale = ui_scale
+fn load_fonts(f64 s) any {
+   if font_scale == s { return 0 }
+   font_body = render.font_load_first(fonts, int(15.0 * s + 0.5))
+   font_title = render.font_load_first(fonts, int(16.0 * s + 0.5))
+   font_small = render.font_load_first(fonts, int(13.0 * s + 0.5))
+   font_scale = s
 }
-load_fonts()
+load_fonts(ui_scale)
 if common.env_trim("NY_WIDGETS_THEME") == "light" { gui.set_theme("light") }
 def frame_limit = int(str.atof(common.env_trim("NY_WIDGETS_FRAMES")))
 def snapshot_path = common.env_trim("NY_WIDGETS_SNAPSHOT")
@@ -401,8 +402,11 @@ while !render.window_should_close(win) {
    def sw, sh = max(1.0, float(fb.get(0, START_W))), max(1.0, float(fb.get(1, START_H)))
    gui.set_headless_input(script_has_pos)
    gui.set_enabled(true)
-   load_fonts()
-   gui.set_scale(ui_scale)
+   ;; Framebuffer pixels per window unit; layout is in framebuffer pixels.
+   def f64 dpi = float(window.get_window_content_scale(win).get(0, 1.0))
+   def f64 draw_scale = ui_scale * (dpi > 0.0 ? dpi : 1.0)
+   load_fonts(draw_scale)
+   gui.set_scale(draw_scale)
    gui.set_fonts(font_body, font_title, font_small)
    ;; Two calls rather than `script_has_pos ? 0 : win`: that conditional
    ;; yielded the window even while a script owned the pointer.

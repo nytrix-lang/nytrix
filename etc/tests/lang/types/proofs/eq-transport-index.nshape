@@ -1,0 +1,42 @@
+shape eq_transport_index {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "proof", "equality", "transport", "dependent"]
+  template ny-test-case
+  flags_matrix "--native-only; --native-only -O3; --native-backend=llvm --jit --jit-engine=orc; --wasm"
+  expect compile_and_run
+  expect_message "EQ-TRANSPORT-OK 9 3 7"
+  source ny <<'NY'
+use core
+use core.math.lemma.arith
+;; Indexed transport: a value moves along an equation between the indices
+;; of its type, and is the same value at run time.
+enum Vec<A, n> {
+   Nil where n is 0,
+   Cons(A head, Vec<A, k> tail) where n is k + 1
+}
+fn head_of(int m, Vec<int, m> xs) int {
+   match xs { Vec.Nil -> 0 Vec.Cons(h, t) -> h }
+}
+fn retag(int n, int m, proof<n == m> p, Vec<int, n> xs) int {
+   def Vec<int, m> ys = transport(p, xs)
+   head_of(m, ys)
+}
+def Vec<int, 1> one = Vec.Cons(9, Vec.Nil)
+;; Refinements and equations mix: a precondition is evidence, and
+;; transport carries it across an equation.
+fn moved(int a, int b, proof<a == b> p) int requires a > 0 {
+   def proof<a > 0> pa = prove(a > 0)
+   def proof<b > 0> pb = transport(p, pa)
+   b
+}
+;; A lemma instance is evidence for its conclusion at those arguments, so
+;; it composes with the equality rules.
+def proof<3 + 4 == 4 + 3> comm = prove(add_comm_bounded(3, 4))
+def proof<4 + 3 == 3 + 4> back = eq_sym(comm)
+def proof p1 = prove(add_comm_bounded(3, 4))
+assert(proof_matches(p1, add_comm_bounded(3, 4)), "lemma witness")
+print("EQ-TRANSPORT-OK", retag(1, 1, prove(1 == 1), one),
+      moved(3, 3, prove(3 == 3)), 3 + 4)
+NY
+}

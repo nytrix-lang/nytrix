@@ -457,7 +457,7 @@ int64_t rt_any_to_cstr(int64_t v) {
    * expressions as raw C pointers. Resolve string provenance before inspecting
    * tag bits: an unboxed string pointer can share the BigInt tag bits.
    */
-  if (is_v_str(v) || rt_native_is_str(v))
+  if (is_v_str(v))
     return v;
   /*
    * Native string pointers can share the encoded-native low tag bits.  In
@@ -471,7 +471,7 @@ int64_t rt_any_to_cstr(int64_t v) {
     if (rt_addr_readable_safe(raw, 1))
       return v;
     if (rt_addr_readable_safe(decoded, 1) &&
-        (is_v_str((int64_t)decoded) || rt_native_is_str((int64_t)decoded)))
+        is_v_str((int64_t)decoded))
       return (int64_t)decoded;
   }
   if (rt_value_tag(v) == TAG_BIGINT)
@@ -851,7 +851,11 @@ void rt_fc_str_hash_cache(uintptr_t *start, uintptr_t *end) {
 }
 
 
+_Atomic uint64_t g_rt_str_forget_gen = 1;
+_Atomic uint64_t g_rt_literal_str_bits[1024];
+
 void rt_str_intern_clear(void) {
+  atomic_fetch_add_explicit(&g_rt_str_forget_gen, 1, memory_order_release);
   free(g_intern);
   g_intern = NULL;
   g_intern_cap = 0;
@@ -860,16 +864,42 @@ void rt_str_intern_clear(void) {
   memset(g_str_hash_cache, 0, sizeof(g_str_hash_cache));
 }
 
+/* The decimal-string cache indexes strings by value; like the intern table
+ * it is told when one of them goes away. */
+static void rt_int_str_cache_forget(int64_t v) {
+  const unsigned char *text = (const unsigned char *)(uintptr_t)v;
+  int64_t value = 0;
+  size_t n = 0;
+  for (; n < 6 && text[n]; ++n) {
+    if (text[n] < '0' || text[n] > '9')
+      return;
+    value = value * 10 + (text[n] - '0');
+  }
+  if (n == 0 || n == 6 || value >= NY_INT_STR_CACHE_SIZE)
+    return;
+  if (s_cached_int_strs[value] == v)
+    s_cached_int_strs[value] = 0;
+}
+
+void rt_fc_int_str_cache(uintptr_t *start, uintptr_t *end) {
+  *start = (uintptr_t)s_cached_int_strs;
+  *end = *start + sizeof(s_cached_int_strs);
+}
+
 void rt_str_forget_pointer(int64_t v) {
   uint64_t idx = ((uint64_t)(uintptr_t)v >> 4) & (RT_STR_HASH_CACHE - 1);
   if (g_str_hash_cache[idx].ptr == v)
     g_str_hash_cache[idx].ptr = 0;
 
   /*
-   * SSO strings live until thread cleanup. Heap strings are removed before
-   * their storage is released; keep a tombstone to preserve the probe chain.
+   * A string is removed before its storage is released (heap strings by
+   * rt_free, small strings by the heap collector); keep a tombstone to
+   * preserve the probe chain.
    */
-  if (!g_intern_cap || !is_heap_ptr(v) || !is_v_str(v))
+  if (!is_v_str(v) || (!is_heap_ptr(v) && !rt_is_sso_string(v)))
+    return;
+  rt_int_str_cache_forget(v);
+  if (!g_intern_cap)
     return;
   size_t len = rt_tagged_str_len(v);
   uint64_t hash = rt_intern_fnv((const unsigned char *)(uintptr_t)v, len);
@@ -882,6 +912,15 @@ void rt_str_forget_pointer(int64_t v) {
       slot->ptr = RT_INTERN_TOMBSTONE;
       --g_intern_count;
       ++g_intern_tombstones;
+      /* Literal caches (rt_cstr_to_str) hold interned results only; they
+       * stop trusting their entries once one of theirs leaves an intern
+       * table. (They keep what they hold reachable, so that is rare.) */
+      unsigned bit = rt_literal_str_bit(v);
+      if (atomic_load_explicit(&g_rt_literal_str_bits[bit >> 6],
+                               memory_order_acquire) &
+          (UINT64_C(1) << (bit & 63)))
+        atomic_fetch_add_explicit(&g_rt_str_forget_gen, 1,
+                                  memory_order_release);
       return;
     }
     at = (at + 1) & (g_intern_cap - 1);

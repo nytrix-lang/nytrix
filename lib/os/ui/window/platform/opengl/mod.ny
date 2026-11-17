@@ -4,7 +4,7 @@
 ;; - core.os.ui.window.platform
 ;; - core.os.ui.window
 ;; - core.os.ui.window.consts
-module core.os.ui.window.platform.opengl(get_proc_address, create_context, create_offscreen_context, destroy_offscreen_context, make_context_current, release_context_current, get_current_context, create_osmesa_context, destroy_osmesa_context, swap_buffers, swap_interval, resize_wayland_window)
+module core.os.ui.window.platform.opengl(get_proc_address, create_context, create_offscreen_context, destroy_offscreen_context, make_context_current, release_context_current, get_current_context, create_osmesa_context, destroy_osmesa_context, swap_buffers, swap_interval, resize_wayland_window, wayland_buffer_size)
 use core
 use core.math.checked (checked_mul)
 use core.common as common
@@ -477,6 +477,12 @@ fn resize_wayland_window(any ctx, int width, int height) any {
    "Resizes the Wayland window of an OpenGL context."
    if is_dict(ctx) { egl.wayland_window_resize(ctx.get("wayland_window", 0), width, height) }
    0
+}
+
+fn wayland_buffer_size(any ctx) list {
+   "Returns [width, height] of the buffer the next swap of a Wayland EGL context presents."
+   if !is_dict(ctx) || ctx.get("type", "") != "egl" { return [0, 0] }
+   egl.surface_size(ctx.get("display", 0), ctx.get("surface", 0))
 }
 
 #main {

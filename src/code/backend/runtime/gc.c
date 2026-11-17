@@ -384,8 +384,13 @@ static bool nyGcHeaderForObject(int64_t obj, nyGcHeader_t **out) {
   return false;
 }
 
+_Atomic int g_rt_gc_heap_used = 0;
+
 bool rt_gc_owns_pointer(uintptr_t value) {
-  if (!value || !gNyGc.initialized)
+  /* No object yet: nothing to look up, and no lock to take on every
+   * is_heap_ptr of a program that never uses this heap. */
+  if (!value || !gNyGc.initialized ||
+      !atomic_load_explicit(&g_rt_gc_heap_used, memory_order_acquire))
     return false;
   nyGcLock();
   bool found = nyGcHeaderForObject((int64_t)value, NULL);
@@ -396,6 +401,8 @@ bool rt_gc_owns_pointer(uintptr_t value) {
 static void nyGcInitObject(nyGcHeader_t *header, size_t size, uint32_t flags,
                            uint32_t age) {
   size_t total = nyGcAllocSize(size);
+  if (!atomic_load_explicit(&g_rt_gc_heap_used, memory_order_relaxed))
+    atomic_store_explicit(&g_rt_gc_heap_used, 1, memory_order_release);
   memset(header, 0, total);
   header->flags = flags;
   header->age = age;

@@ -1,0 +1,36 @@
+shape binders_and_holes {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "generics", "binders", "holes", "dependent"]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=orc; --wasm"
+  expect compile_and_run
+  expect_message "BINDERS-OK 2 4 s int 5 2 9 str 3"
+  source ny <<'NY'
+use core
+;; Type parameters instantiate per call for checking, also through nested
+;; types: first([1, 2]) is an int, so arithmetic on it type-checks.
+fn first<A>(list<A> xs) A { xs[0] }
+;; An explicit binder: the type is an argument (passed as its erased value,
+;; its name) and fixes A for the parameters after it.
+fn id(Type A, A x) A { x }
+fn name_of(Type A, A x) str { A }
+;; An implicit value binder is solved from the argument types.
+fn bound{int n}(Fin<n> i) int { n }
+enum Vec<A, n> {
+   Nil where n is 0,
+   Cons(A head, Vec<A, k> tail) where n is k + 1
+}
+fn length{int n}(Vec<int, n> xs) int { n }
+;; `_` is a hole the elaborator fills: a result type, a type argument, or
+;; an implicit binder.
+fn twice(int x) _ { x * 2 }
+;; Universe levels: a level variable takes the argument's level.
+fn level_name{level u}(Type u A) str { A }
+def Fin<5> i = 2
+def Vec<int, 2> two = Vec.Cons(1, Vec.Cons(2, Vec.Nil))
+print("BINDERS-OK", first([1, 2]) + 1, id(int, 3) + 1, id(str, "s"),
+      name_of(_, 7), bound(i), length(two), twice(4) + 1,
+      level_name(str), bound(_, i) - 2)
+NY
+}

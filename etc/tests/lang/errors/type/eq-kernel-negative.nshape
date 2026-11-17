@@ -117,3 +117,338 @@ fn f(int n) int requires n > 0 {
 f(3)
 NY
 }
+
+shape total_non_structural_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "total", "inductive", "soundness"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "recursive termination is not certified"
+  source ny <<'NY'
+use core
+enum Nat { Zero, Succ(Nat n) }
+@total
+fn grow(Nat a) Nat decreases(a) { Nat.Succ(grow(Nat.Succ(a))) }
+NY
+}
+
+shape total_io_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "total", "effects", "soundness"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "function has side effects"
+  source ny <<'NY'
+use core
+@total
+fn loud(int n) int {
+   print(n)
+   n
+}
+loud(1)
+NY
+}
+
+shape match_motive_arm_mismatch_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "match", "motive"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "cannot assign string literal to int"
+  source ny <<'NY'
+use core
+enum Color { Red, Green }
+def code = match Color.Red as int {
+   Color.Red -> 1
+   Color.Green -> "green"
+}
+NY
+}
+
+shape total_recursor_non_structural_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "total", "recursor", "soundness"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "recursive termination is not certified"
+  source ny <<'NY'
+use core
+;; Relative totality covers the callback, not the recursion: calling the
+;; recursor on the same value is still refused.
+enum Nat { Zero, Succ(Nat n) }
+@total
+@effects(e)
+fn nat_rec(Nat n, int z, fnptr step) int decreases(n) {
+   match n { Nat.Zero -> z Nat.Succ(k) -> step(nat_rec(n, z, step)) }
+}
+NY
+}
+
+shape total_recursor_own_effect_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "total", "recursor", "effects"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "outside the open row"
+  source ny <<'NY'
+use core
+;; Its own body stays effect-checked: printing is not the callback's effect.
+enum Nat { Zero, Succ(Nat n) }
+@total
+@effects(e)
+fn nat_rec(Nat n, int z, fnptr step) int decreases(n) {
+   print(1)
+   z
+}
+NY
+}
+
+shape match_motive_arm_proof_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "match", "motive", "proof"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "proof proposition does not match"
+  source ny <<'NY'
+use core
+;; Each literal arm is checked against the motive at its pattern.
+fn g(int n) int {
+   def proof<n == n> p = match n as (v) -> proof<v == v> {
+      0 -> prove(1 == 1)
+      _ -> prove(n == n)
+   }
+   n
+}
+print(g(2))
+NY
+}
+
+shape vec_index_construction_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "dependent", "index"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "type mismatch: expected 'Vec<int, 2>', got 'Vec<int, 1>'"
+  source ny <<'NY'
+use core
+;; Construction computes the index: a one-element vector is not a Vec<int, 2>.
+enum Vec<A, n> { Nil where n is 0, Cons(A head, Vec<A, k> tail) where n is k + 1 }
+def Vec<int, 0> e = Vec.Nil
+def Vec<int, 2> bad = Vec.Cons(5, e)
+print(1)
+NY
+}
+
+shape vec_index_impossible_arm_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "dependent", "index"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "cannot match 'Vec<int, 2>'"
+  source ny <<'NY'
+use core
+;; A literal index rules out the constructor that cannot produce it.
+enum Vec<A, n> { Nil where n is 0, Cons(A head, Vec<A, k> tail) where n is k + 1 }
+fn h(Vec<int, 2> xs) int { match xs { Vec.Nil -> 0 Vec.Cons(a, t) -> a } }
+print(1)
+NY
+}
+
+shape vec_index_payload_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "dependent", "index"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "Vec<int, 1>"
+  source ny <<'NY'
+use core
+;; The tail of a Vec<int, 2> is a Vec<int, 1>, not a Vec<int, 2>.
+enum Vec<A, n> { Nil where n is 0, Cons(A head, Vec<A, k> tail) where n is k + 1 }
+fn h(Vec<int, 2> xs) int { match xs { Vec.Cons(a, t) -> keep(t) } }
+fn keep(Vec<int, 2> v) int { 0 }
+print(1)
+NY
+}
+
+shape eq_transport_index_missing_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "proof", "transport"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "expected 'Vec<int, m>', got 'Vec<int, n>'"
+  source ny <<'NY'
+use core
+;; Without the equation the indices differ.
+enum Vec<A, n> { Nil where n is 0, Cons(A head, Vec<A, k> tail) where n is k + 1 }
+fn retag(int n, int m, Vec<int, n> xs) int {
+   def Vec<int, m> ys = xs
+   0
+}
+print(1)
+NY
+}
+
+shape eq_transport_index_unrelated_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "proof", "transport"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "neither side of the equation"
+  source ny <<'NY'
+use core
+;; An equation that names no index of the value's type moves nothing.
+enum Vec<A, n> { Nil where n is 0, Cons(A head, Vec<A, k> tail) where n is k + 1 }
+fn retag(int n, int a, int b, proof<a == b> p, Vec<int, n> xs) int {
+   def Vec<int, b> ys = transport(p, xs)
+   0
+}
+print(1)
+NY
+}
+
+shape binder_type_argument_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "binders"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "type parameter 'A' instantiated inconsistently"
+  source ny <<'NY'
+use core
+;; An explicit binder fixes the parameters after it.
+fn id(Type A, A x) A { x }
+print(id(int, "s"))
+NY
+}
+
+shape generic_nested_instance_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "binders"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "expected str, got int"
+  source ny <<'NY'
+use core
+;; The instance is checked statically: first of a list of ints is an int.
+fn first<A>(list<A> xs) A { xs[0] }
+def str s = first([1, 2])
+NY
+}
+
+shape implicit_binder_unsolved_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "binders"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "cannot infer implicit binder 'n'"
+  source ny <<'NY'
+use core
+;; An implicit binder needs an argument type that fixes it.
+fn bound{int n}(Fin<n> i) int { n }
+fn g(int k) int { bound(k) }
+print(1)
+NY
+}
+
+shape hole_unsolved_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "binders"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "unsolved hole '_'"
+  source ny <<'NY'
+use core
+;; A hole no argument determines is an error.
+fn pick(Type A, int x) int { x }
+print(pick(_, 3))
+NY
+}
+
+shape universe_binder_level_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "binders"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "universe level too low"
+  source ny <<'NY'
+use core
+;; A type argument must live in the binder's universe.
+fn small(Type 0 A) str { A }
+print(small(Type 0))
+NY
+}
+
+shape universe_level_undeclared_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "binders"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "undeclared universe level"
+  source ny <<'NY'
+use core
+;; A level variable must be declared.
+fn bad(Type w A) str { A }
+NY
+}
+
+shape extern_proof_param_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "erasure"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "takes an erased parameter 'p'"
+  source ny <<'NY'
+use core
+;; A proof has no runtime representation at an FFI boundary.
+extern fn take(proof<5 > 0> p, int x) int
+print(1)
+NY
+}
+
+shape extern_type_param_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "erasure"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "takes an erased parameter 'A'"
+  source ny <<'NY'
+use core
+;; Neither does a type value.
+extern fn take(Type A, int x) int
+print(1)
+NY
+}
+
+shape erased_witness_still_checked_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "erasure"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "prove condition must be known at compile time"
+  source ny <<'NY'
+use core
+;; An erased argument is still checked: a witness that is not known at compile time is rejected.
+fn need(int x, proof<x > 0> p) int { x * 2 }
+fn g(int a) int { need(a, prove(a > 0)) }
+print(g(3))
+NY
+}

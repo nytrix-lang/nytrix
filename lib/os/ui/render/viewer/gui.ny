@@ -138,8 +138,16 @@ mut _text_caches_ready = false
 mut _gui_frame_id = 0
 mut _font_metric_frame = -1
 mut _cached_body_h, _cached_title_h, _cached_small_h = 0.0, 0.0, 0.0
+;; Queued text, already in the layout draw_text_runs_flat_colors takes:
+;; `_text_run_queue` holds the runs (text, x, y, color) of the latest font,
+;; `_text_run_font`; runs of earlier fonts wait in `_text_run_segments`
+;; (font, list pairs) so the queue order is kept. Spare lists are reused
+;; across frames. (Queuing five mixed values per run and re-packing them per
+;; font at flush read and classified each value twice.)
 mut _text_run_queue = []
-mut any _text_run_batch = nil
+mut int _text_run_font = -1
+mut _text_run_segments = []
+mut _text_run_spare = []
 def int _TEXT_SELECT_ALL = -9001
 def int _TEXT_COPY = -9002
 def int _TEXT_CUT = -9003
@@ -1011,52 +1019,69 @@ fn _queue_text_ui(int font_id, any txt, f64 x, f64 y, any color, f64 max_w=0.0) 
       return 0
    }
    if !is_list(_text_run_queue) { _text_run_queue = [] }
-   _text_run_queue = _text_run_queue.append(fid)
+   if fid != _text_run_font {
+      if _text_run_queue.len > 0 {
+         _text_run_segments = _text_run_segments.append(_text_run_font)
+         _text_run_segments = _text_run_segments.append(_text_run_queue)
+         _text_run_queue = _text_run_spare.len > 0 ? _text_run_spare.pop() : []
+      }
+      _text_run_font = fid
+   }
    _text_run_queue = _text_run_queue.append(fit_txt)
    _text_run_queue = _text_run_queue.append(_snap(float(x)))
    _text_run_queue = _text_run_queue.append(_snap(float(y)))
    _text_run_queue = _text_run_queue.append(_text_color_u32(color))
 }
 
+fn _text_runs_reset() any {
+   mut i = 1
+   while i < _text_run_segments.len {
+      def seg = _text_run_segments.get(i, nil)
+      if is_list(seg) {
+         clear(seg)
+         _text_run_spare = _text_run_spare.append(seg)
+      }
+      i += 2
+   }
+   clear(_text_run_segments)
+   if is_list(_text_run_queue) { clear(_text_run_queue) } else { _text_run_queue = [] }
+   _text_run_font = -1
+}
+
+fn _text_runs_queued() int {
+   mut n = is_list(_text_run_queue) ? _text_run_queue.len / 4 : 0
+   mut i = 1
+   while i < _text_run_segments.len {
+      def seg = _text_run_segments.get(i, nil)
+      if is_list(seg) { n += seg.len / 4 }
+      i += 2
+   }
+   n
+}
+
 fn _flush_text_runs() any {
    _flush_rect_batch()
    if !is_list(_text_run_queue) { _text_run_queue = [] }
-   def qn = _text_run_queue.len
-   if qn <= 0 { return 0 }
+   if _text_run_queue.len <= 0 && _text_run_segments.len <= 0 { return 0 }
    def prof = ui_profile.enabled()
    def t0 = prof ? ui_profile.now() : 0
+   def runs = prof ? _text_runs_queued() : 0
    mut batches = 0
-   mut batch_font = -1
-   ;; The queue and the batch are reused across frames: a fresh list per
-   ;; flush is never reclaimed under the default heap.
-   if !is_list(_text_run_batch) { _text_run_batch = [] }
-   mut batch = _text_run_batch
-   clear(batch)
    mut i = 0
-   while i + 4 < qn {
-      def fid, txt = int(_text_run_queue.get(i, _font_body())), _text_run_queue.get(i + 1, "")
-      def x, y = float(_text_run_queue.get(i + 2, 0.0)), float(_text_run_queue.get(i + 3, 0.0))
-      def col = int(_text_run_queue.get(i + 4, 0xffffffff))
-      if is_str(txt) && str.len(txt) > 0 {
-         if batch.len > 0 && fid != batch_font {
-            draw_text_runs_flat_colors(batch_font, batch)
-            clear(batch)
-            batches += 1
-         }
-         batch_font = fid
-         batch = batch.append(txt)
-         batch = batch.append(x)
-         batch = batch.append(y)
-         batch = batch.append(col)
+   while i + 1 < _text_run_segments.len {
+      def seg = _text_run_segments.get(i + 1, nil)
+      if is_list(seg) && seg.len > 0 {
+         draw_text_runs_flat_colors(int(_text_run_segments.get(i, _font_body())), seg)
+         batches += 1
       }
-      i += 5
+      i += 2
    }
-   if batch.len > 0 {
-      draw_text_runs_flat_colors(batch_font, batch)
+   if _text_run_queue.len > 0 {
+      draw_text_runs_flat_colors(_text_run_font, _text_run_queue)
       batches += 1
    }
-   clear(_text_run_queue)
-   if prof { ui_profile.mark("flush_text_internal", t0, " runs=" + to_str(qn / 5) + " batches=" + to_str(batches)) }
+   _text_runs_reset()
+   if prof { ui_profile.mark("flush_text_internal", t0, " runs=" + to_str(runs) + " batches=" + to_str(batches)) }
 }
 
 fn warm_text_pipeline(int body_font=0, int title_font=0, int small_font=0) bool {
@@ -1066,7 +1091,7 @@ fn warm_text_pipeline(int body_font=0, int title_font=0, int small_font=0) bool 
       set_fonts(body_font, title_font, small_font)
    }
    _theme_refresh()
-   if is_list(_text_run_queue) { clear(_text_run_queue) } else { _text_run_queue = [] }
+   _text_runs_reset()
    def sample = "ABCDEFGHIJKLMNOPQRSTUVWXYZ abcdefghijklmnopqrstuvwxyz 0123456789 [](){}<>:/._-+*=%,"
    if _font_body() > 0 { font_prepare(_font_body(), sample) }
    if _font_title_id() > 0 { font_prepare(_font_title_id(), sample) }
@@ -1714,7 +1739,7 @@ fn begin_frame(any win=0, int font=0, f64 ww=0.0, f64 wh=0.0) any {
    }
    _hot_id, _hot_rect = "", [0.0, 0.0, 0.0, 0.0]
    _same_line_next, _same_line_gap = false, _gap()
-   if is_list(_text_run_queue) { clear(_text_run_queue) } else { _text_run_queue = [] }
+   _text_runs_reset()
    _popup_next_hit_active = false
    _popup_next_hit_window = ""
    _popup_combo_active = false
@@ -1756,7 +1781,7 @@ fn end_frame() any {
    if !_enabled { return 0 }
    def prof = ui_profile.enabled()
    def t_flush = prof ? ui_profile.now() : 0
-   def run_count = (prof && is_list(_text_run_queue)) ? _text_run_queue.len : 0
+   def run_count = prof ? _text_runs_queued() : 0
    _flush_popup_draw_queue()
    _flush_text_runs()
    _overlay_finish()

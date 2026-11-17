@@ -2299,8 +2299,16 @@ fn _font_bitmap_is_color_like(any font_obj, any bm) bool {
    if color_like { return color_like }
    def path = font_obj.get("path", "")
    if !is_str(path) { return false }
+   ;; Glyph sync asks this for every glyph; the answer depends only on the
+   ;; font's path, so remember it on the font object.
+   if font_obj.get("_color_path", 0) == path { return bool(font_obj.get("_color_path_like", false)) }
    def lp = lib_str.lower(path)
-   (lib_str.find(lp, "coloremoji") >= 0) || (lib_str.find(lp, "emoji") >= 0) || (lib_str.find(lp, "seguiemj") >= 0) || (lib_str.find(lp, "apple color emoji") >= 0) || (lib_str.find(lp, "twemoji") >= 0)
+   def bool like = (lib_str.find(lp, "coloremoji") >= 0) || (lib_str.find(lp, "emoji") >= 0) || (lib_str.find(lp, "seguiemj") >= 0) || (lib_str.find(lp, "apple color emoji") >= 0) || (lib_str.find(lp, "twemoji") >= 0)
+   if is_dict(font_obj) {
+      font_obj["_color_path"] = path
+      font_obj["_color_path_like"] = like
+   }
+   like
 }
 
 fn _font_raster_oversample(dict font_obj) f64 {

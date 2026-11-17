@@ -381,8 +381,16 @@ fn _vkr_bind_dynamic_vertex_buffer(any cb) any {
 
 fn _vkr_pipe_eq(any a, any b) bool { a && b && to_int(a) == to_int(b) }
 
+mut int _vkr_pipe_diag_gen = 0
+mut bool _vkr_pipe_diag_on = false
+
 fn _vkr_pipe_diag(str msg) any {
-   if !(ui_profile.env_truthy_cached("NY_GLTF_FORCE_GROUP_DIAG") || ui_profile.env_truthy_cached("NY_VK_PIPE_TRACE")) { return 0 }
+   def int gen = ui_profile.env_generation()
+   if _vkr_pipe_diag_gen != gen {
+      _vkr_pipe_diag_on = ui_profile.env_truthy_cached("NY_GLTF_FORCE_GROUP_DIAG") || ui_profile.env_truthy_cached("NY_VK_PIPE_TRACE")
+      _vkr_pipe_diag_gen = gen
+   }
+   if !_vkr_pipe_diag_on { return 0 }
    if _vkr_pipe_diag_counter < 24 { ui_profile.print_text("[vk:pipe:diag] " + msg) }
    _vkr_pipe_diag_counter += 1
    0

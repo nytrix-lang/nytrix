@@ -236,14 +236,20 @@ parser_parse_param_type_first(parser_t *p, param_t *pr,
                     next.kind == NY_T_LPAREN;
   bool alias_apply =
       next.kind == NY_T_LPAREN && parser_current_token_is_type_alias(p);
-  if (!sigma_type && !alias_apply && p->cur.kind == NY_T_IDENT &&
-      next.kind != NY_T_COLON && next.kind != NY_T_DOT &&
-      next.kind != NY_T_LT && next.kind != NY_T_IDENT) {
+  /* `Type 0 A`: a leveled universe annotation, never a parameter name. */
+  bool leveled_universe = p->cur.kind == NY_T_IDENT && p->cur.len == 4 &&
+                          strncmp(p->cur.lexeme, "Type", 4) == 0 &&
+                          next.kind == NY_T_NUMBER;
+  if (!sigma_type && !alias_apply && !leveled_universe &&
+      p->cur.kind == NY_T_IDENT && next.kind != NY_T_COLON &&
+      next.kind != NY_T_DOT && next.kind != NY_T_LT &&
+      next.kind != NY_T_IDENT) {
     pr->name = arena_strndup(p->arena, p->cur.lexeme, p->cur.len);
     parser_advance(p);
     return true;
   }
-  if (!parser_token_can_start_type_ref(p->cur)) {
+  /* `fn(int) int f`: a function-typed parameter (erased to fnptr). */
+  if (!parser_token_can_start_type_ref(p->cur) && p->cur.kind != NY_T_FN) {
     parser_error(p, p->cur, "param must be identifier or type", NULL);
     return false;
   }
@@ -270,6 +276,9 @@ expr_t *p_parse_expr(parser_t *p, int prec);
 stmt_t *p_parse_stmt(parser_t *p);
 stmt_t *p_parse_block(parser_t *p);
 stmt_t *p_parse_match(parser_t *p);
+const char *ny_parser_type_ref(parser_t *p, const char *err_msg);
+const char *parser_type_src_text(parser_t *p, const char *start,
+                                 const char *end);
 stmt_t *ny_parse_stmt_or_block(parser_t *p);
 stmt_t *ny_parse_if_stmt(parser_t *p);
 stmt_t *ny_parse_while_stmt(parser_t *p);

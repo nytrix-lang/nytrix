@@ -1,0 +1,25 @@
+shape match_enum_constant_scrutinee {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "match", "enum"]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect compile_and_run
+  expect_message "MATCH-ENUM-CONSTANT-OK"
+  source ny <<'NY'
+use core
+;; A match whose scrutinee is an enum member written out, bound at top level
+;; next to a function. The checker types that scrutinee `any` while it lowers
+;; to a raw tag; tagging the patterns against it made `Red` match `Green`.
+enum Color { Red, Green }
+enum Three { A, B, C }
+fn helper() int { 0 }
+def a = match Color.Green { Color.Red -> 1 Color.Green -> 2 }
+mut b = match Color.Green { Color.Red -> 1 Color.Green -> 2 }
+def c = Color.Green
+def d = match c { Color.Red -> 1 Color.Green -> 2 }
+def e = match Three.C { Three.A -> 1 Three.B -> 2 Three.C -> 3 }
+assert(a == 2 && b == 2 && d == 2 && e + helper() == 3, "constant enum scrutinee")
+print("MATCH-ENUM-CONSTANT-OK")
+NY
+}

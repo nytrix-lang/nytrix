@@ -782,6 +782,15 @@ char *ny_infer_fn_return_type(stmt_t *fn, const char **param_types);
 void infer_pure_functions(codegen_t *cg);
 /* Call after the shared frontend has attached checked descent to call sites. */
 bool ny_verify_totality(codegen_t *cg);
+/* Strict positivity of every enum payload in the program (positivity.c). */
+bool ny_check_enum_positivity(const program_t *prog);
+/* Removes erased proof parameters and arguments before lowering; returns
+ * the number of parameters erased. */
+size_t ny_erase_proof_params(program_t *prog, arena_t *arena,
+                             const char *main_file);
+/* Rejects erased content (proofs, type values, implicit binders) at FFI
+ * boundaries. */
+bool ny_check_erased_representations(const program_t *prog);
 
 void add_import_alias(codegen_t *cg, const char *alias, const char *full_name);
 void add_import_alias_from_full(codegen_t *cg, const char *full_name);

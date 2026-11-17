@@ -311,8 +311,43 @@ typedef struct tp_requires_proof_ctx_t {
 typedef struct tp_param_mutation_scan_t {
   codegen_t *cg;
   const expr_t *premise;
+  /* The premise reads only names and arithmetic over them: a callee that
+   * writes memory cannot change it, only a rebinding of those names can. */
+  bool names_only;
   bool invalidated;
 } tp_param_mutation_scan_t;
+
+static bool tp_premise_reads_names_only(const expr_t *e, unsigned depth) {
+  if (!e)
+    return true;
+  if (depth > 32)
+    return false;
+  switch (e->kind) {
+  case NY_E_IDENT:
+  case NY_E_LITERAL:
+    return true;
+  case NY_E_UNARY:
+    return tp_premise_reads_names_only(e->as.unary.right, depth + 1);
+  case NY_E_BINARY:
+    return tp_premise_reads_names_only(e->as.binary.left, depth + 1) &&
+           tp_premise_reads_names_only(e->as.binary.right, depth + 1);
+  case NY_E_LOGICAL:
+    return tp_premise_reads_names_only(e->as.logical.left, depth + 1) &&
+           tp_premise_reads_names_only(e->as.logical.right, depth + 1);
+  case NY_E_CALL:
+    /* `decreases(measure(a, b))`: the lexicographic tuple of names. */
+    if (!e->as.call.callee || e->as.call.callee->kind != NY_E_IDENT ||
+        !e->as.call.callee->as.ident.name ||
+        strcmp(e->as.call.callee->as.ident.name, "measure") != 0)
+      return false;
+    for (size_t i = 0; i < e->as.call.args.len; ++i)
+      if (!tp_premise_reads_names_only(e->as.call.args.data[i].val, depth + 1))
+        return false;
+    return true;
+  default:
+    return false;
+  }
+}
 
 typedef struct tp_contract_operator_scan_t {
   ny_tp_ctx_t *tp;
@@ -1863,7 +1898,9 @@ tp_proof_record_status_json(ny_tp_json_t *j, bool decided,
     tp_json_str(j, "unknown");
   else
     tp_append(j, "null");
-  tp_append(j, "}");
+  /* The bounded solver decides these; it is automation, not the kernel.
+   * Equality rules and refl are checked as proposition terms instead. */
+  tp_append(j, ",\"authority\":\"automation\"}");
 }
 
 static void tp_emit_invariant_obligation_json(tp_proof_obligations_ctx_t *pc,
@@ -2089,10 +2126,34 @@ static void tp_emit_proof_obligations_json(ny_tp_json_t *j, ny_tp_ctx_t *ctx) {
   tp_append(j, "]}");
 }
 
+/* `Nat.Succ(x)` / `Succ(x)`: building an enum value writes no memory. */
+static bool tp_expr_is_enum_constructor(codegen_t *cg, const expr_t *expr) {
+  if (!cg || !expr)
+    return false;
+  char qualified[512];
+  const char *name = NULL;
+  if (expr->kind == NY_E_CALL && expr->as.call.callee &&
+      expr->as.call.callee->kind == NY_E_IDENT)
+    name = expr->as.call.callee->as.ident.name;
+  else if (expr->kind == NY_E_MEMCALL && expr->as.memcall.target &&
+           expr->as.memcall.target->kind == NY_E_IDENT &&
+           expr->as.memcall.target->as.ident.name && expr->as.memcall.name) {
+    int n = snprintf(qualified, sizeof(qualified), "%s.%s",
+                     expr->as.memcall.target->as.ident.name,
+                     expr->as.memcall.name);
+    if (n > 0 && (size_t)n < sizeof(qualified))
+      name = qualified;
+  }
+  enum_def_t *owner = NULL;
+  return name && lookup_enum_member_owner(cg, name, &owner) && owner;
+}
+
 static bool tp_contract_call_may_write(codegen_t *cg, const expr_t *expr) {
   if (expr->kind == NY_E_ASM)
     return true;
   if (expr->kind != NY_E_CALL && expr->kind != NY_E_MEMCALL)
+    return false;
+  if (!expr->semantic.canonical_callee && tp_expr_is_enum_constructor(cg, expr))
     return false;
   fun_sig *callee = cg && expr->semantic.canonical_callee
                         ? lookup_fun_exact(cg, expr->semantic.canonical_callee)
@@ -2163,7 +2224,7 @@ static bool tp_param_mutation_scan_pre(ny_visitor_t *visitor, expr_t *expr) {
       visitor ? (tp_param_mutation_scan_t *)visitor->ctx : NULL;
   if (!scan || !expr)
     return true;
-  if (tp_contract_call_may_write(scan->cg, expr)) {
+  if (!scan->names_only && tp_contract_call_may_write(scan->cg, expr)) {
     scan->invalidated = true;
     return false;
   }
@@ -2241,7 +2302,10 @@ static bool tp_statement_changes_premise(tp_requires_proof_ctx_t *ctx,
                                          stmt_t *stmt, const expr_t *premise) {
   if (!stmt || !premise)
     return false;
-  tp_param_mutation_scan_t scan = {.cg = ctx->tp->cg, .premise = premise};
+  tp_param_mutation_scan_t scan = {
+      .cg = ctx->tp->cg,
+      .premise = premise,
+      .names_only = tp_premise_reads_names_only(premise, 0)};
   ny_visitor_t visitor = {
       .ctx = &scan,
       .visit_expr_pre = tp_param_mutation_scan_pre,
@@ -4479,6 +4543,13 @@ int ny_type_pipeline_validate_semantics(
 
   tp_validate_contract_call_proofs(prog, &ctx);
   NY_TP_STAGE_TIMED("contract-call-proofs");
+  if (!ny_check_enum_positivity(prog) || !ny_check_erased_representations(prog)) {
+    if (failed_stage)
+      *failed_stage = NY_TYPE_PIPELINE_STAGE_TRAIT;
+    hm_dispose(&hm);
+    tp_ctx_dispose(&ctx);
+    return 1;
+  }
   if (!ny_verify_totality(cg)) {
     if (failed_stage)
       *failed_stage = NY_TYPE_PIPELINE_STAGE_TRAIT;

@@ -1,0 +1,38 @@
+shape match_explicit_motive {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "match", "motive", "dependent"]
+  template ny-test-case
+  flags_matrix "--native-only; --native-backend=llvm --jit --jit-engine=orc; --wasm"
+  expect compile_and_run
+  expect_stdout "MOTIVE-OK"
+  source ny <<'NY'
+use core
+enum Color { Red, Green }
+;; `as T` fixes the result type every arm must produce.
+def code = match Color.Green as int {
+   Color.Red -> 1
+   Color.Green -> 2
+}
+;; `as (v) -> P` names the scrutinee inside a proof motive.
+fn refl_by_cases(int n) int {
+   def proof<n == n> p = match n as (v) -> proof<v == v> {
+      0 -> prove(n == n)
+      _ -> prove(n == n)
+   }
+   n
+}
+;; Dependent elimination: a literal arm is checked at its own pattern.
+fn mul_one(int n) int {
+   def proof<n * 1 == n> p = match n as (v) -> proof<v * 1 == v> {
+      0 -> prove(0 * 1 == 0)
+      1 -> prove(1 * 1 == 1)
+      _ -> prove(n * 1 == n)
+   }
+   n
+}
+assert(code == 2 && refl_by_cases(5) == 5, "motives check every arm")
+assert(mul_one(0) == 0 && mul_one(1) == 1 && mul_one(7) == 7, "per-arm motive")
+print("MOTIVE-OK")
+NY
+}

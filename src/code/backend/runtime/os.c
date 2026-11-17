@@ -120,7 +120,7 @@ static char **ny_process_argv_view(int64_t value, bool *needs_free) {
     int64_t item = native_tbuf ? rt_tbuf_get((int64_t)native_ptr, (int64_t)i, 0)
                                : managed_slots[i];
     if (native_tbuf) {
-      if (!rt_native_is_str(item) && !is_v_str(item)) {
+      if (!is_v_str(item)) {
         free(argv);
         return NULL;
       }
@@ -533,18 +533,18 @@ static int rt_os_path_raw_cstr(int64_t value) {
 }
 
 static int rt_os_path_is_string(int64_t value) {
-  if (is_v_str(value) || rt_native_is_str(value) || rt_os_path_raw_cstr(value))
+  if (is_v_str(value) || rt_os_path_raw_cstr(value))
     return 1;
   if (NY_NATIVE_IS(value)) {
     int64_t decoded = (int64_t)(uintptr_t)NY_NATIVE_DECODE(value);
-    return is_v_str(decoded) || rt_native_is_str(decoded) ||
+    return is_v_str(decoded) ||
            rt_os_path_raw_cstr(decoded);
   }
   return 0;
 }
 
 static intptr_t rt_os_path_cstr(int64_t value) {
-  if (is_v_str(value) || rt_native_is_str(value))
+  if (is_v_str(value))
     return (intptr_t)value;
   if (rt_os_path_raw_cstr(value))
     return (intptr_t)value;
@@ -559,7 +559,7 @@ static intptr_t rt_os_path_cstr(int64_t value) {
     uintptr_t decoded = (uintptr_t)NY_NATIVE_DECODE(value);
     if (!rt_addr_readable_safe(raw, 1) && rt_addr_readable_safe(decoded, 1)) {
       value = (int64_t)decoded;
-      if (is_v_str(value) || rt_native_is_str(value) ||
+      if (is_v_str(value) ||
           rt_os_path_raw_cstr(value))
         return (intptr_t)value;
     }

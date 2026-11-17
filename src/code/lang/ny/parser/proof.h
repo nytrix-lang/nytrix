@@ -35,6 +35,10 @@ bool ny_proof_canon_split_binary(const char *s, char *opbuf, size_t opcap,
 
 /* Equality kernel rules (eq_sym, eq_trans, eq_cong, transport): compute the
  * result proof type from the argument proof types; NULL + reason on misuse. */
+/* `transport(p, v)` for a value: the type of `v` with one side of the
+ * equation `p` rewritten to the other where it is a type argument. */
+char *ny_proof_index_transport(const char *equation, const char *type,
+                               const char **reason);
 char *ny_proof_rule_result(const char *rule, const char *const *proofs,
                            size_t proof_count, const char *fn_name,
                            const char **reason);

@@ -9,6 +9,22 @@ stmt_t *p_parse_match(parser_t *p) {
   parser_advance(p);
   stmt_t *s = stmt_new(p->arena, NY_S_MATCH, tok);
   s->as.match.test = p_parse_expr(p, 0);
+  if (parser_match(p, NY_T_AS)) {
+    /* Explicit motive: `as T` or `as (v) -> T`. */
+    if (parser_match(p, NY_T_LPAREN)) {
+      if (p->cur.kind != NY_T_IDENT) {
+        parser_error(p, p->cur, "expected motive binder name",
+                     "write 'match e as (v) -> T { ... }'");
+      } else {
+        s->as.match.motive_binder =
+            arena_strndup(p->arena, p->cur.lexeme, p->cur.len);
+        parser_advance(p);
+      }
+      parser_expect(p, NY_T_RPAREN, "')' after motive binder", NULL);
+      parser_expect(p, NY_T_ARROW, "'->' after motive binder", NULL);
+    }
+    s->as.match.motive_type = ny_parser_type_ref(p, "expected motive type");
+  }
   parser_expect(p, NY_T_LBRACE, "'{'", NULL);
   s->as.match.default_conseq = NULL;
   while (p->cur.kind != NY_T_RBRACE && p->cur.kind != NY_T_EOF) {

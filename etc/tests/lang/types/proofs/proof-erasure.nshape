@@ -1,0 +1,42 @@
+shape proof_erasure_routes {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "proofs", "erasure"]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=orc; --wasm"
+  expect compile_and_run
+  expect_message "ERASE-OK 6 7 7"
+  source ny <<'NY'
+use core
+;; Erased: the witness is only forwarded to erased slots, so `need` and
+;; `relay` take one runtime argument each.
+fn need(int x, proof<x > 0> p) int { x * 2 }
+fn relay(int a, proof<a > 0> q) int { need(a, q) + 1 }
+;; Kept: the witness feeds an equality rule, so `flip` and its caller keep
+;; the slot. Both shapes must compute the same results on every route.
+fn flip(int a, int b, proof<a == b> e) proof<b == a> { eq_sym(e) }
+fn ok_flip(proof<2 == 2> e) int {
+  def proof<2 == 2> r = flip(2, 2, e)
+  7
+}
+def proof<3 > 0> w = prove(3 > 0)
+print("ERASE-OK", need(3, prove(3 > 0)), relay(3, w), ok_flip(prove(2 == 2)))
+NY
+}
+
+shape proof_erasure_abi {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "proofs", "erasure", "abi"]
+  template ny-test-case
+  flags "--native-only -O0 --nyr-dump"
+  expect compile_and_run
+  ;; The call passes only `x`: no slot for the proof.
+  expect_message "call need v2 [abi=i64-raw] [arg-abi 0:i64-raw] @"
+  source ny <<'NY'
+use core
+@noinline
+fn need(int x, proof<x > 0> p) int { x * 2 }
+print(need(3, prove(3 > 0)))
+NY
+}

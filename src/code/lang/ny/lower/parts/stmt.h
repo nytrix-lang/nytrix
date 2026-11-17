@@ -6303,9 +6303,14 @@ static bool nyr_lower_match_impl(nyr_builder_t *b, const stmt_t *s) {
   int test_value = nyr_lower_expr(b, s->as.match.test);
   if (test_value < 0)
     return false;
-  bool test_any =
-      nyr_expr_is_any(b, s->as.match.test) ||
-      nyr_value_scalar_class(b, test_value) == NYIR_SCALAR_I64_TAGGED;
+  /* The emitted producer class decides: a scrutinee the checker left as
+   * `any` (an enum member read at top level, for one) can still lower to a
+   * raw tag, and tagging the patterns against it made `Red`'s tagged 0 equal
+   * `Green`'s raw 1. */
+  nyr_scalar_class_t test_class = nyr_value_scalar_class(b, test_value);
+  bool test_any = test_class == NYIR_SCALAR_I64_TAGGED ||
+                  (test_class != NYIR_SCALAR_I64_RAW &&
+                   nyr_expr_is_any(b, s->as.match.test));
   const char *result_ok_type =
       nyr_result_payload_type(b, s->as.match.test, false);
   const char *result_err_type =

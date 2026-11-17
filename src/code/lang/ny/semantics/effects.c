@@ -9328,6 +9328,55 @@ static bool ny_totality_edge_pre(ny_visitor_t *visitor, expr_t *expr) {
       expr->semantic.canonical_callee
           ? lookup_fun_exact(ctx->cg, expr->semantic.canonical_callee)
           : NULL;
+  if (!callee && expr->kind == NY_E_CALL && expr->as.call.callee &&
+      expr->as.call.callee->kind == NY_E_IDENT &&
+      expr->as.call.callee->as.ident.name) {
+    /*
+     * An enum constructor is data, not a call edge: `Nat.Succ(add(k, b))`
+     * terminates iff its arguments do, so keep visiting them.
+     */
+    enum_def_t *owner = NULL;
+    if (lookup_enum_member_owner(ctx->cg, expr->as.call.callee->as.ident.name,
+                                 &owner) &&
+        owner)
+      return true;
+  }
+  if (!callee && expr->kind == NY_E_MEMCALL && expr->as.memcall.target &&
+      expr->as.memcall.target->kind == NY_E_IDENT &&
+      expr->as.memcall.target->as.ident.name && expr->as.memcall.name) {
+    char qualified[512];
+    int n = snprintf(qualified, sizeof(qualified), "%s.%s",
+                     expr->as.memcall.target->as.ident.name,
+                     expr->as.memcall.name);
+    enum_def_t *owner = NULL;
+    if (n > 0 && (size_t)n < sizeof(qualified) &&
+        lookup_enum_member_owner(ctx->cg, qualified, &owner) && owner) {
+      for (size_t i = 0; i < expr->as.memcall.args.len; ++i)
+        ny_visit_expr(visitor, expr->as.memcall.args.data[i].val);
+      return false;
+    }
+  }
+  if (!callee && expr->kind == NY_E_CALL && expr->as.call.callee &&
+      expr->as.call.callee->kind == NY_E_IDENT &&
+      expr->as.call.callee->as.ident.name) {
+    /*
+     * A call through the caller's own callback parameter is not an edge of
+     * the call graph. Under an open effect row the claim is totality
+     * relative to that callback, so only its arguments are visited.
+     */
+    const fun_sig *caller = &ctx->cg->fun_sigs.data[ctx->caller];
+    const stmt_t *fn = caller->stmt_t;
+    if (fn && fn->kind == NY_S_FUNC &&
+        ny_sig_has_polymorphic_effect_contract(caller)) {
+      for (size_t i = 0; i < fn->as.fn.params.len; ++i) {
+        const param_t *param = &fn->as.fn.params.data[i];
+        if (param->name &&
+            strcmp(param->name, expr->as.call.callee->as.ident.name) == 0 &&
+            ny_effect_param_is_callable(param->type))
+          return true;
+      }
+    }
+  }
   if (!callee || callee->stmt_t != expr->semantic.canonical_callee_stmt) {
     ctx->valid = false;
     return false;
@@ -9486,7 +9535,26 @@ bool ny_verify_totality(codegen_t *cg) {
         measure_proved = certificates[component] > 0;
       }
     }
-    if (!sig->is_pure || !sig->effects_known || sig->effects != NY_FX_NONE) {
+    /*
+     * Totality is termination plus the absence of observable effects.
+     * Allocating fresh immutable data (an enum constructor, a list literal)
+     * terminates and is unobservable, so ALLOC alone is accepted; I/O, FFI,
+     * threads, memory writes, and unknown effects still refuse the claim.
+     */
+    bool alloc_only = sig->effects == NY_FX_ALLOC;
+    /*
+     * An eliminator takes its motive/step as a callback under an open effect
+     * row (`@effects(e) fn nat_rec(Nat n, int z, fnptr s)`). Its own body may
+     * then be impure only through that callback, which the purity summary
+     * counts as escaping arguments; the claim is totality relative to the
+     * callback, recorded on the signature, while its own latent effects must
+     * still be at most allocation.
+     */
+    bool relative = ny_sig_has_polymorphic_effect_contract(sig) &&
+                    sig->effects_known &&
+                    (sig->effects & ~(unsigned)NY_FX_ALLOC) == 0;
+    if ((!sig->is_pure && !alloc_only && !relative) || !sig->effects_known ||
+        (sig->effects & ~(unsigned)NY_FX_ALLOC) != 0) {
       ny_diag_error(sig->stmt_t->tok,
                     "@total claim refused for '%s': "
                     "function has side effects, "

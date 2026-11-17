@@ -3126,4 +3126,13 @@ typedef struct ny_hm_state_t {
     ny_hm_type_t *type;
   } holes[64];
   size_t hole_count;
+  /* Function type parameters in scope while a signature is read: each name
+   * stands for one HM variable, which instantiation copies per call. */
+  const char *tvar_names[16];
+  struct ny_hm_type_t *tvar_types[16];
+  size_t tvar_count;
+  /* `_` holes in type-argument positions of the calls being checked. */
+  expr_t *type_holes[16];
+  struct ny_hm_type_t *type_hole_vars[16];
+  size_t type_hole_count;
 } ny_hm_state_t;

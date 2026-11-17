@@ -447,6 +447,9 @@ static inline int rt_map_oracle_check(uintptr_t p, size_t n) {
 }
 
 static inline int rt_addr_probe_os(uintptr_t p, size_t n);
+/* Whether the byte at `p` can be read, decided by having the kernel copy it
+ * (works for device mappings that process_vm_readv refuses). Linux only. */
+int rt_addr_probe_copy(uintptr_t p);
 
 static inline int rt_addr_mapped(uintptr_t p, size_t n) {
   if (p < 0x1000 || n == 0)
@@ -513,6 +516,9 @@ static inline int rt_addr_probe_os(uintptr_t p, size_t n) {
    * passes it, and the header load that follows faults.  Have the kernel
    * copy one byte per page instead; it reports EFAULT for anything that is
    * not readable.  Sandboxes that forbid the call fall back to mincore.
+   * process_vm_readv also reports EFAULT for device memory mapped with
+   * VM_IO/VM_PFNMAP (a Vulkan buffer mapped from /dev/dri), which the
+   * program reads and writes directly; rt_addr_probe_copy settles those.
    */
   static _Atomic int vm_read_unavailable = 0;
   if (!atomic_load_explicit(&vm_read_unavailable, memory_order_relaxed)) {
@@ -525,8 +531,14 @@ static inline int rt_addr_probe_os(uintptr_t p, size_t n) {
       if (process_vm_readv(self, &local, 1, &remote, 1, 0) != 1) {
         int err = errno;
         errno = saved_errno;
-        if (err == EFAULT)
-          return 0;
+        if (err == EFAULT) {
+          if (!rt_addr_probe_copy(cur))
+            return 0;
+          if ((cur & ~mask) == end)
+            return 1;
+          cur = (cur & ~mask) + (uintptr_t)ps;
+          continue;
+        }
         atomic_store_explicit(&vm_read_unavailable, 1, memory_order_relaxed);
         break;
       }
@@ -560,6 +572,10 @@ static inline int rt_addr_probe_os(uintptr_t p, size_t n) {
 
 bool rt_heap_ptr_registry_has(uintptr_t value);
 bool rt_gc_owns_pointer(uintptr_t value);
+/* Set once the GC heap has made an object. Its pages are not registered with
+ * the map oracle, so checks that rely on "every runtime object lies on a
+ * registered page" must not be skipped after that. */
+extern _Atomic int g_rt_gc_heap_used;
 
 /*
  * Heap collector (memory.c). Lists, dictionaries and strings allocated by the
@@ -569,6 +585,7 @@ bool rt_gc_owns_pointer(uintptr_t value);
 #define RT_FC_KIND_LIST 1u
 #define RT_FC_KIND_DICT 2u
 #define RT_FC_KIND_MANAGED 3u
+#define RT_FC_KIND_SSO 4u
 extern __thread int g_rt_fc_tracking;
 void rt_fc_track_slow(uintptr_t ptr, uint32_t kind, size_t bytes);
 static inline void rt_fc_track(uintptr_t ptr, uint32_t kind, size_t bytes) {
@@ -577,14 +594,19 @@ static inline void rt_fc_track(uintptr_t ptr, uint32_t kind, size_t bytes) {
 }
 void rt_fc_thread_enter(void);
 void rt_fc_thread_exit(void);
-int rt_fc_list_range(uintptr_t data, uintptr_t *start, uintptr_t *end);
+int rt_fc_list_range(uintptr_t data, uintptr_t *start, uintptr_t *end,
+                     int check_registry);
 void rt_fc_list_free(uintptr_t data);
 uintptr_t rt_fc_list_forward_target(uintptr_t data);
 int rt_fc_dict_ranges(uintptr_t payload, uintptr_t out[4]);
 void rt_fc_dict_free(uintptr_t payload);
+int rt_fc_sso_range(uintptr_t bytes, uintptr_t *start, uintptr_t *end);
+void rt_fc_sso_free(uintptr_t bytes);
+void rt_str_forget_pointer(int64_t v);
 size_t rt_fc_core_excludes(uintptr_t (*out)[2], size_t cap);
 void rt_fc_intern_table(uintptr_t *start, uintptr_t *end);
 void rt_fc_str_hash_cache(uintptr_t *start, uintptr_t *end);
+void rt_fc_int_str_cache(uintptr_t *start, uintptr_t *end);
 /*
  * Storage for collectable objects. Once the collector records, blocks come
  * from its own zeroed pools (NULL: use the C allocator). rt_fc_block_free
@@ -592,6 +614,7 @@ void rt_fc_str_hash_cache(uintptr_t *start, uintptr_t *end);
  */
 void *rt_fc_block_alloc(size_t bytes);
 void rt_fc_block_free(void *ptr, size_t bytes);
+bool rt_fc_pool_owns(const void *ptr);
 int64_t rt_heap_collect(int64_t mode);
 int64_t rt_heap_collect_raw(int64_t mode);
 extern int64_t rt_cstr_to_str(int64_t p);
@@ -1055,18 +1078,33 @@ static inline int rt_is_sso_string(int64_t v) {
   return result;
 }
 
+/* is_v_str for a value whose managed object is `heap_v` (from
+ * rt_heap_object_ptr, nonzero). */
+static inline int is_v_str_managed(int64_t heap_v) {
+  uintptr_t p = (uintptr_t)heap_v;
+  int64_t tag = 0;
+  /* Allocator/GC provenance already guarantees the live object header.
+   * Only foreign/static addresses need the mapping probe below. */
+  memcpy(&tag, (const void *)(p - 8), sizeof(tag));
+  if (tag == TAG_STR_CONST)
+    rt_const_str_cache_store(p);
+  return (tag == TAG_STR || tag == TAG_STR_CONST);
+}
+
+/* is_v_str for a value rt_heap_object_ptr does not know: small strings and
+ * strings outside the managed heap (constants). */
+static inline int is_v_str_unmanaged(int64_t v);
+
+/* Whether `v` is a Ny string. Callers that already asked rt_heap_object_ptr
+ * use the two halves above instead of asking the registry again. */
 static inline int is_v_str(int64_t v) {
   int64_t heap_v = rt_heap_object_ptr(v);
-  if (heap_v) {
-    uintptr_t p = (uintptr_t)heap_v;
-    int64_t tag = 0;
-    /* Allocator/GC provenance already guarantees the live object header.
-     * Only foreign/static addresses need the mapping probe below. */
-    memcpy(&tag, (const void *)(p - 8), sizeof(tag));
-    if (tag == TAG_STR_CONST)
-      rt_const_str_cache_store(p);
-    return (tag == TAG_STR || tag == TAG_STR_CONST);
-  }
+  if (heap_v)
+    return is_v_str_managed(heap_v);
+  return is_v_str_unmanaged(v);
+}
+
+static inline int is_v_str_unmanaged(int64_t v) {
   if (!is_ptr(v) || ((v) & 7) != 0)
     return 0;
   uintptr_t p = (uintptr_t)v;
@@ -1095,10 +1133,25 @@ static inline int is_v_str(int64_t v) {
 
 /* Return string length for a tagged Ny string-like object; 0 when unavailable.
  */
-static inline size_t rt_tagged_str_len(int64_t v) {
-  if (!is_v_str(v))
+/* Length of `v` if it is a string, where `heap_v` = rt_heap_object_ptr(v)
+ * (the caller asked already); -1 when `v` is not a string. */
+static inline int64_t rt_tagged_str_len_known(int64_t v, int64_t heap_v) {
+  if (!(heap_v ? is_v_str_managed(heap_v) : is_v_str_unmanaged(v)))
+    return -1;
+  uintptr_t lp = (uintptr_t)(heap_v ? heap_v : v) - 16;
+  if (!heap_v && !rt_addr_readable(lp, sizeof(int64_t)))
     return 0;
+  int64_t tagged_len = 0;
+  memcpy(&tagged_len, (const void *)lp, sizeof(tagged_len));
+  if (!is_int(tagged_len))
+    return 0;
+  return tagged_len >> 1;
+}
+
+static inline size_t rt_tagged_str_len(int64_t v) {
   int64_t heap_v = rt_heap_object_ptr(v);
+  if (!(heap_v ? is_v_str_managed(heap_v) : is_v_str_unmanaged(v)))
+    return 0;
   uintptr_t lp = (uintptr_t)(heap_v ? heap_v : v) - 16;
   if (!heap_v && !rt_addr_readable(lp, sizeof(int64_t)))
     return 0;
@@ -1290,6 +1343,14 @@ int64_t rt_alloc_string_len_ptr(const char *a, size_t a_len, const char *b,
 #define RT_SSO_MAX 23
 #define RT_INTERN_MAX_LEN 64
 int64_t rt_str_intern_lookup(const char *s, size_t len);
+/* Changes whenever a string that a literal cache may hold leaves an intern
+ * table (freed or cleared), so those caches can tell that their entries may
+ * be stale. A cache marks the strings it holds in g_rt_literal_str_bits. */
+extern _Atomic uint64_t g_rt_str_forget_gen;
+extern _Atomic uint64_t g_rt_literal_str_bits[1024];
+static inline unsigned rt_literal_str_bit(int64_t str) {
+  return (unsigned)(((uint64_t)str * UINT64_C(0x9E3779B97F4A7C15)) >> 48);
+}
 void rt_str_intern_insert(const char *s, size_t len, int64_t str);
 size_t rt_utf8_valid_width(const unsigned char *s, size_t remaining);
 void rt_str_intern_clear(void);

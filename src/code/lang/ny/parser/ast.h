@@ -205,6 +205,9 @@ typedef struct param_t {
   /* Deferred `comptime fields(Type)` sequence in a template parameter list. */
   const char *comptime_fields_layout;
   bool comptime_fields_required;
+  /* An implicit value binder (`fn f{int n}(Fin<n> i)`): a leading parameter
+   * the checker fills from the other arguments' types at each call. */
+  bool implicit;
 } param_t;
 
 typedef VEC(param_t) ny_param_list;
@@ -221,6 +224,10 @@ typedef struct stmt_match_t {
   expr_t *test;
   ny_match_arm_list arms;
   stmt_t *default_conseq;
+  /* Explicit motive `match e as (v) -> T`: the checked result type, and the
+   * optional binder naming the scrutinee inside it (NULL when absent). */
+  const char *motive_type;
+  const char *motive_binder;
 } stmt_match_t;
 
 typedef struct dict_pair_t {
@@ -403,6 +410,10 @@ typedef struct enum_field_t {
   const token_t *expansion_origin;
   const char *name;
   const char *type_name;
+  /* The payload type as written, with type-level definitions expanded
+   * (`fn(Bad) int` where type_name is the erased `fnptr`); read by the
+   * strict-positivity check, which needs function domains. */
+  const char *type_src;
 } enum_field_t;
 
 typedef VEC(enum_field_t) ny_enum_field_list;
@@ -581,6 +592,8 @@ typedef struct stmt_func_t {
   ny_param_list params;
   /* Explicit type parameters from `fn name<A, B>(...)`. */
   ny_type_param_list type_params;
+  /* Universe level variables from `fn name{level u}(...)`. */
+  ny_type_param_list level_params;
   /* Original annotations before type-parameter erasure, aligned with params;
    * a NULL entry means that annotation did not name a declared parameter.
    * Retained so call sites can check repeated parameters statically. */

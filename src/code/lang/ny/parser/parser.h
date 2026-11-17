@@ -60,6 +60,9 @@ typedef struct parser_type_alias {
   size_t arity;
   size_t param_count;
   const char *body;
+  /* The definition as written (`fn(Bad) int` where body is `fnptr`), for
+   * the strict-positivity check of enum payloads. */
+  const char *src_body;
   token_t tok;
   bool expanding;
   struct parser_type_alias *next;
@@ -120,6 +123,9 @@ typedef struct parser_t {
   parser_gensym_scope *gensym_scopes;
   uint32_t syntax_ctx_stack[64];
   size_t syntax_ctx_depth;
+  /* Level variables in scope while a function signature is parsed. */
+  const char *level_scope[8];
+  size_t level_scope_len;
 } parser_t;
 
 typedef struct parser_module_origin_scope_t {

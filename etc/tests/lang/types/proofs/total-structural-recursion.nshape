@@ -1,0 +1,71 @@
+shape total_structural_recursion {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "total", "decreases", "inductive", "recursor"]
+  template ny-test-case
+  flags_matrix "--native-only; --native-only -O3; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  expect_stdout "STRUCTURAL-OK 3"
+  source ny <<'NY'
+use core
+;; The eliminator of an inductive family is checked structural recursion:
+;; `decreases(a)` with recursive calls on constructor payloads of `a`,
+;; including calls nested inside a constructor of the result.
+enum Nat { Zero, Succ(Nat n) }
+@total
+fn add(Nat a, Nat b) Nat decreases(a) {
+   match a {
+      Nat.Zero -> b
+      Nat.Succ(k) -> Nat.Succ(add(k, b))
+   }
+}
+@total
+fn to_int(Nat a) int decreases(a) {
+   match a {
+      Nat.Zero -> 0
+      Nat.Succ(k) -> 1 + to_int(k)
+   }
+}
+def two = Nat.Succ(Nat.Succ(Nat.Zero))
+print("STRUCTURAL-OK", to_int(add(two, Nat.Succ(Nat.Zero))))
+NY
+}
+
+shape total_derived_recursor {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "total", "decreases", "inductive", "recursor", "effects"]
+  template ny-test-case
+  flags_matrix "--native-only; --native-only -O3; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  expect_message "RECURSOR-OK 6 7"
+  source ny <<'NY'
+use core
+;; A recursor is an ordinary total function, not a kernel primitive: the
+;; step arrives as a callback under an open effect row, so the claim is
+;; totality relative to that callback while the recursion on `n` is checked
+;; structurally.
+enum Nat { Zero, Succ(Nat n) }
+@total
+@effects(e)
+fn nat_rec(Nat n, int z, fnptr step) int decreases(n) {
+   match n {
+      Nat.Zero -> z
+      Nat.Succ(k) -> step(nat_rec(k, z, step))
+   }
+}
+enum Tree { Leaf, Node(Tree l, Tree r) }
+@total
+@effects(e)
+fn tree_rec(Tree t, int leaf, fnptr node) int decreases(t) {
+   match t {
+      Tree.Leaf -> leaf
+      Tree.Node(l, r) -> node(tree_rec(l, leaf, node), tree_rec(r, leaf, node))
+   }
+}
+def three = Nat.Succ(Nat.Succ(Nat.Succ(Nat.Zero)))
+def t = Tree.Node(Tree.Node(Tree.Leaf, Tree.Leaf), Tree.Node(Tree.Leaf, Tree.Leaf))
+print("RECURSOR-OK", nat_rec(three, 0, fn(int x) int { x + 2 }),
+      tree_rec(t, 1, fn(int a, int b) int { a + b + 1 }))
+NY
+}

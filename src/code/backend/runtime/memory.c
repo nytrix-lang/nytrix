@@ -109,31 +109,54 @@ _Thread_local mem_pool_node_t *g_mem_pools[NUM_POOLS] = {0};
 #define RT_MANAGED_PTR_TOMBSTONE UINTPTR_MAX
 #define RT_MANAGED_PTR_REUSE_WINDOW 16u
 static _Atomic(uintptr_t) rt_managed_ptr_table[RT_MANAGED_PTR_TABLE_SIZE];
-static _Atomic(uint64_t) rt_managed_ptr_epoch;
-#define RT_MANAGED_PTR_CACHE_SIZE 8u
+/*
+ * Per-thread answers of rt_heap_ptr_registry_has, both "yes" and "no". Each
+ * cache slot has a generation shared by all threads; registering or
+ * unregistering a value advances the generation of the slot the value maps
+ * to, so every thread drops answers about it (and only those). The classifiers
+ * ask about the same few hundred words again and again in a UI frame; most
+ * are not managed, and every such miss used to be a load from a random place
+ * in the 32 MiB table. (The previous 8-entry cache held only hits and was
+ * cleared on every free.)
+ */
+#define RT_MANAGED_PTR_CACHE_BITS 11u
+#define RT_MANAGED_PTR_CACHE_SIZE (1u << RT_MANAGED_PTR_CACHE_BITS)
 typedef struct rt_managed_ptr_cache_entry {
   uintptr_t value;
-  uint64_t epoch;
+  uint32_t gen;
+  uint32_t has;
 } rt_managed_ptr_cache_entry_t;
 static _Thread_local rt_managed_ptr_cache_entry_t
     rt_managed_ptr_cache[RT_MANAGED_PTR_CACHE_SIZE];
+static _Atomic(uint32_t) rt_managed_ptr_cache_gen[RT_MANAGED_PTR_CACHE_SIZE];
+
+static inline size_t rt_managed_ptr_cache_slot(uintptr_t value) {
+  return (size_t)(((uint64_t)value * UINT64_C(0x9E3779B97F4A7C15)) >>
+                  (64u - RT_MANAGED_PTR_CACHE_BITS));
+}
+
+/* Called by writers (under the lock) after the table changed for `value`. */
+static inline void rt_managed_ptr_cache_invalidate(uintptr_t value) {
+  atomic_fetch_add_explicit(
+      &rt_managed_ptr_cache_gen[rt_managed_ptr_cache_slot(value)], 1,
+      memory_order_acq_rel);
+}
 
 static size_t rt_managed_ptr_slot(uintptr_t value) {
   /*
-   * Managed payloads are aligned and commonly adjacent. Keep their low
-   * address bits local in the table, folding higher regions into the slot
-   * instead of scattering every allocation onto an unrelated cache line.
-   * Exact keys and open-addressing probes still resolve collisions.
+   * Managed payloads are aligned and commonly adjacent. The 32-byte granules
+   * of one 4 KiB page map to one 128-slot run (the smallest managed block is
+   * 48 bytes, so neighbours get distinct slots and share the run's cache
+   * lines); pages map to runs through a multiplicative hash, which also
+   * moves thread arenas 64 MiB apart away from each other. Mapping every
+   * granule to the next slot made densely packed payloads one probe chain,
+   * and every miss (a classifier asking about a non-managed word) walked it.
    */
-  uint64_t x = (uint64_t)value >> 4;
-  /*
-   * Thread arenas sit 64 MiB apart, exactly one table size in this key, so
-   * XOR-folding the region left them on the same slots and linear probes grew
-   * with every thread. An odd multiplier moves each region far away while
-   * adjacent payloads stay adjacent.
-   */
-  x += (x >> RT_MANAGED_PTR_TABLE_BITS) * UINT64_C(0x9E3779B97F4A7C15);
-  return (size_t)x & RT_MANAGED_PTR_TABLE_MASK;
+  uint64_t page = (uint64_t)value >> 12;
+  uint64_t run = (page * UINT64_C(0x9E3779B97F4A7C15)) >>
+                 (64u - (RT_MANAGED_PTR_TABLE_BITS - 7u));
+  return (size_t)((run << 7) | (((uint64_t)value >> 5) & 127u)) &
+         RT_MANAGED_PTR_TABLE_MASK;
 }
 
 /*
@@ -155,12 +178,26 @@ static inline void rt_managed_ptr_writer_unlock(void) {
   atomic_flag_clear_explicit(&rt_managed_ptr_lock, memory_order_release);
 }
 
+/*
+ * Lowest and highest address ever registered. Most values the classifiers
+ * ask about are integers (tagged or raw) far below every heap address; they
+ * are answered here instead of by a miss in the 32 MiB table, which is a
+ * cache miss each time.
+ */
+static _Atomic(uintptr_t) rt_managed_ptr_lo = UINTPTR_MAX;
+static _Atomic(uintptr_t) rt_managed_ptr_hi = 0;
 static void rt_managed_ptr_register(uintptr_t value) {
   if (!value || value == RT_MANAGED_PTR_TOMBSTONE)
     return;
   size_t start = rt_managed_ptr_slot(value);
   size_t tombstone = SIZE_MAX;
   rt_managed_ptr_writer_lock();
+  /* Writers hold the lock, so plain read-modify-write is enough; widen the
+   * bounds before the entry is published. */
+  if (value < atomic_load_explicit(&rt_managed_ptr_lo, memory_order_relaxed))
+    atomic_store_explicit(&rt_managed_ptr_lo, value, memory_order_release);
+  if (value > atomic_load_explicit(&rt_managed_ptr_hi, memory_order_relaxed))
+    atomic_store_explicit(&rt_managed_ptr_hi, value, memory_order_release);
   for (size_t probe = 0; probe < RT_MANAGED_PTR_TABLE_SIZE; ++probe) {
     size_t slot = (start + probe) & RT_MANAGED_PTR_TABLE_MASK;
     uintptr_t seen =
@@ -181,13 +218,16 @@ static void rt_managed_ptr_register(uintptr_t value) {
       size_t target = tombstone == SIZE_MAX ? slot : tombstone;
       atomic_store_explicit(&rt_managed_ptr_table[target], value,
                             memory_order_release);
+      rt_managed_ptr_cache_invalidate(value);
       rt_managed_ptr_writer_unlock();
       return;
     }
   }
-  if (tombstone != SIZE_MAX)
+  if (tombstone != SIZE_MAX) {
     atomic_store_explicit(&rt_managed_ptr_table[tombstone], value,
                           memory_order_release);
+    rt_managed_ptr_cache_invalidate(value);
+  }
   rt_managed_ptr_writer_unlock();
 }
 
@@ -223,7 +263,7 @@ static void rt_managed_ptr_unregister(uintptr_t value) {
         prev = (prev - 1) & RT_MANAGED_PTR_TABLE_MASK;
       }
     }
-    atomic_fetch_add_explicit(&rt_managed_ptr_epoch, 1, memory_order_release);
+    rt_managed_ptr_cache_invalidate(value);
     break;
   }
   rt_managed_ptr_writer_unlock();
@@ -232,26 +272,34 @@ static void rt_managed_ptr_unregister(uintptr_t value) {
 bool rt_heap_ptr_registry_has(uintptr_t value) {
   if (!value || value == RT_MANAGED_PTR_TOMBSTONE)
     return false;
+  if (value < atomic_load_explicit(&rt_managed_ptr_lo, memory_order_acquire) ||
+      value > atomic_load_explicit(&rt_managed_ptr_hi, memory_order_acquire))
+    return false;
+  size_t cache_slot = rt_managed_ptr_cache_slot(value);
+  uint32_t gen = atomic_load_explicit(&rt_managed_ptr_cache_gen[cache_slot],
+                                      memory_order_acquire);
+  rt_managed_ptr_cache_entry_t *cached = &rt_managed_ptr_cache[cache_slot];
+  if (cached->value == value && cached->gen == gen)
+    return cached->has != 0;
   size_t start = rt_managed_ptr_slot(value);
-  uint64_t epoch =
-      atomic_load_explicit(&rt_managed_ptr_epoch, memory_order_acquire);
-  rt_managed_ptr_cache_entry_t *cached =
-      &rt_managed_ptr_cache[start & (RT_MANAGED_PTR_CACHE_SIZE - 1u)];
-  if (cached->value == value && cached->epoch == epoch)
-    return true;
+  bool has = false;
   for (size_t probe = 0; probe < RT_MANAGED_PTR_TABLE_SIZE; ++probe) {
     uintptr_t seen = atomic_load_explicit(
         &rt_managed_ptr_table[(start + probe) & RT_MANAGED_PTR_TABLE_MASK],
         memory_order_acquire);
     if (seen == value) {
-      cached->value = value;
-      cached->epoch = epoch;
-      return true;
+      has = true;
+      break;
     }
     if (!seen)
-      return false;
+      break;
   }
-  return false;
+  /* `gen` was read before the table: a change since then left a newer
+   * generation, and this entry will not be used. */
+  cached->value = value;
+  cached->gen = gen;
+  cached->has = has ? 1u : 0u;
+  return has;
 }
 
 typedef struct ny_rc_entry {
@@ -825,7 +873,9 @@ static int64_t rt_malloc_impl(int64_t size, int zero_fill) {
     p = g_mem_pools[slot];
     g_mem_pools[slot] = g_mem_pools[slot]->next;
   } else {
-    p = ny_aligned_alloc(16, (slot >= 0) ? g_pool_sizes[slot] : total);
+    p = slot >= 0 ? rt_fc_block_alloc(g_pool_sizes[slot]) : NULL;
+    if (!p)
+      p = ny_aligned_alloc(16, (slot >= 0) ? g_pool_sizes[slot] : total);
   }
 
   if (__builtin_expect(!p, 0))
@@ -879,7 +929,9 @@ int64_t rt_malloc_i64(int64_t size) {
     p = g_mem_pools[slot];
     g_mem_pools[slot] = g_mem_pools[slot]->next;
   } else {
-    p = ny_aligned_alloc(16, (slot >= 0) ? g_pool_sizes[slot] : total);
+    p = slot >= 0 ? rt_fc_block_alloc(g_pool_sizes[slot]) : NULL;
+    if (!p)
+      p = ny_aligned_alloc(16, (slot >= 0) ? g_pool_sizes[slot] : total);
   }
 
   if (__builtin_expect(!p, 0))
@@ -1317,6 +1369,58 @@ static int64_t rt_free_direct(int64_t ptr) {
   return 0;
 }
 
+#ifdef __linux__
+#include <fcntl.h>
+/*
+ * Writing a byte from `p` into a pipe makes the kernel read it the way the
+ * program would: device memory mapped with VM_IO/VM_PFNMAP copies fine,
+ * while an unmapped or PROT_NONE page fails with EFAULT. The byte is read
+ * back at once; with several threads probing, any byte drains any other.
+ */
+int rt_addr_probe_copy(uintptr_t p) {
+  static _Atomic int fds_state = 0; /* 0 = unopened, 1 = open, -1 = failed */
+  static int fds[2] = {-1, -1};
+  static pthread_mutex_t open_lock = PTHREAD_MUTEX_INITIALIZER;
+  unsigned char vec = 0;
+  /* Unmapped is the common failure; answer it without the pipe. */
+  if (mincore((void *)(p & ~(uintptr_t)4095u), 4096, &vec) != 0)
+    return 0;
+  int state = atomic_load_explicit(&fds_state, memory_order_acquire);
+  if (state == 0) {
+    pthread_mutex_lock(&open_lock);
+    state = atomic_load_explicit(&fds_state, memory_order_relaxed);
+    if (state == 0) {
+      state = pipe2(fds, O_CLOEXEC | O_NONBLOCK) == 0 ? 1 : -1;
+      atomic_store_explicit(&fds_state, state, memory_order_release);
+    }
+    pthread_mutex_unlock(&open_lock);
+  }
+  if (state < 0)
+    return 0; /* keep the old, conservative answer */
+  int saved_errno = errno;
+  int ok = 0;
+  for (int attempt = 0; attempt < 2; ++attempt) {
+    ssize_t wrote = write(fds[1], (const void *)p, 1);
+    if (wrote == 1) {
+      ok = 1;
+      break;
+    }
+    if (errno != EAGAIN)
+      break;
+    /* Full from other threads' bytes: drain and try once more. */
+    unsigned char sink[256];
+    while (read(fds[0], sink, sizeof(sink)) > 0) {
+    }
+  }
+  if (ok) {
+    unsigned char back;
+    (void)read(fds[0], &back, 1);
+  }
+  errno = saved_errno;
+  return ok;
+}
+#endif
+
 /* Bumped by every free so per-thread address caches can drop stale bases. */
 _Atomic uint64_t rt_mem_free_epoch = 0;
 
@@ -1451,7 +1555,10 @@ int64_t rt_pool_release(void) {
     g_mem_pools[i] = NULL;
     while (node) {
       mem_pool_node_t *next = node->next;
-      ny_aligned_free(node);
+      if (rt_fc_pool_owns(node))
+        rt_fc_block_free(node, g_pool_sizes[i]);
+      else
+        ny_aligned_free(node);
       freed_count++;
       node = next;
     }
@@ -1781,7 +1888,7 @@ int64_t rt_load8_idx(int64_t addr, int64_t idx) {
 int64_t rt_str_byte(int64_t value, int64_t index) {
   if (index < 0)
     return 0;
-  if (!is_v_str(value) && !rt_native_is_str(value))
+  if (!is_v_str(value))
     return 0;
   const char *s = (const char *)(uintptr_t)value;
   size_t len = (size_t)rt_cstr_len(value);
@@ -1961,26 +2068,64 @@ int64_t rt_store16_idx(int64_t addr, int64_t idx, int64_t val) {
 }
 
 /*
- * The last raw (non-heap) base a 32-bit store went through after its full
- * checks, per thread. Vertex writes into a mapped GPU buffer repeat the same
- * base with growing offsets; for those, the heap registry lookup and the
- * oob probe answered the same thing every time (7% of a UI frame).
+ * Pages that raw stores have found readable, per thread, for stores through
+ * pointers into foreign memory. Vertex writes into a mapped GPU buffer pass
+ * a different pointer for every vertex and walk the buffer page by page;
+ * each store repeated the heap-registry lookup and a readability probe that
+ * costs a syscall for memory mapped after the oracle's snapshot (one fifth
+ * of a UI frame). A store may skip both when:
+ *  - the pointer's page is not registered with the map oracle: every
+ *    managed, list and dictionary allocation registers its pages, so no
+ *    runtime object, and no bounds to check, can begin there (the safe heap
+ *    and the GC heap do not register theirs; the shortcut is off while
+ *    either is in use);
+ *  - every page written was found readable by a full check on this thread
+ *    recently. Entries are dropped after a bounded number of uses, as in the
+ *    probe cache, so a page unmapped since is noticed.
  */
-static __thread uintptr_t rt_store32_raw_base;
-static __thread uint64_t rt_store32_raw_epoch;
+#define RT_RAW_STORE_PAGES 64u
+#define RT_RAW_STORE_REVALIDATE 65536u
+static __thread uintptr_t rt_raw_store_pages[RT_RAW_STORE_PAGES];
+static __thread uint32_t rt_raw_store_uses;
+
+static inline bool rt_raw_store_page_cached(uintptr_t page) {
+  return rt_raw_store_pages[page & (RT_RAW_STORE_PAGES - 1u)] == page + 1u;
+}
+
+static inline bool rt_raw_store_fast(int64_t addr, int64_t idx, size_t n) {
+  uintptr_t a = (uintptr_t)addr;
+  uintptr_t q = a + (uintptr_t)idx;
+  if (idx < 0 || a < 0x1000 || q < a || q > UINTPTR_MAX - n)
+    return false;
+  if (__builtin_expect(++rt_raw_store_uses >= RT_RAW_STORE_REVALIDATE, 0)) {
+    memset(rt_raw_store_pages, 0, sizeof(rt_raw_store_pages));
+    rt_raw_store_uses = 0;
+    return false;
+  }
+  uintptr_t first = q >> 12, last = (q + n - 1u) >> 12;
+  if (!rt_raw_store_page_cached(first) ||
+      (last != first && !rt_raw_store_page_cached(last)))
+    return false;
+  if (g_sh_cap ||
+      atomic_load_explicit(&g_rt_gc_heap_used, memory_order_relaxed))
+    return false;
+  return !rt_oracle_page_known(a >> 12);
+}
+
+/* After a full check passed for a non-object pointer: remember the pages. */
+static inline void rt_raw_store_note(uintptr_t q, size_t n) {
+  uintptr_t first = q >> 12, last = (q + n - 1u) >> 12;
+  for (uintptr_t pg = first; pg <= last; ++pg)
+    rt_raw_store_pages[pg & (RT_RAW_STORE_PAGES - 1u)] = pg + 1u;
+}
 
 int64_t rt_store32_idx(int64_t addr, int64_t idx, int64_t val) {
   RT_UNTAG_INT(idx);
-  if ((uintptr_t)addr == rt_store32_raw_base && idx >= 0 &&
-      rt_store32_raw_epoch ==
-          atomic_load_explicit(&rt_mem_free_epoch, memory_order_acquire)) {
-    uintptr_t q = (uintptr_t)((intptr_t)addr + (intptr_t)idx);
-    if (q >= 0x1000 && rt_probe_cache_hit(q, 4)) {
-      int64_t v = (val & 1) ? (val >> 1) : val;
-      uint32_t raw = (uint32_t)v;
-      memcpy((void *)q, &raw, sizeof(raw));
-      return val;
-    }
+  if (rt_raw_store_fast(addr, idx, 4)) {
+    int64_t v = (val & 1) ? (val >> 1) : val;
+    uint32_t raw = (uint32_t)v;
+    memcpy((void *)((uintptr_t)addr + (uintptr_t)idx), &raw, sizeof(raw));
+    return val;
   }
   bool hdr = (idx < 0);
   bool heap = is_heap_ptr(addr);
@@ -1999,11 +2144,8 @@ int64_t rt_store32_idx(int64_t addr, int64_t idx, int64_t val) {
     return val;
   if (!hdr && !heap && !rt_addr_access_ok(p, 4))
     return val;
-  if (!hdr && !heap) {
-    rt_store32_raw_base = (uintptr_t)addr;
-    rt_store32_raw_epoch =
-        atomic_load_explicit(&rt_mem_free_epoch, memory_order_acquire);
-  }
+  if (!hdr && !heap)
+    rt_raw_store_note(p, 4);
   int64_t v = (val & 1) ? (val >> 1) : val;
   uint32_t raw = (uint32_t)v;
   if ((p & (uintptr_t)3u) == 0) {
@@ -2205,11 +2347,21 @@ __thread int g_rt_fc_tracking = 0;
 
 #if defined(__linux__) && defined(__GLIBC__) && !NY_WITH_ASAN
 
+#include <linux/fs.h>
+#include <linux/userfaultfd.h>
+#include <sys/syscall.h>
+#if defined(PAGEMAP_SCAN) && defined(UFFD_FEATURE_WP_ASYNC) &&                 \
+    defined(UFFD_USER_MODE_ONLY) && defined(SYS_userfaultfd)
+#define FC_HAVE_WRITE_TRACKING 1
+#else
+#define FC_HAVE_WRITE_TRACKING 0
+#endif
 #include <malloc.h>
 #include <pthread.h>
 #include <sched.h>
 #include <setjmp.h>
 #include <signal.h>
+#include <sys/ioctl.h>
 #include <time.h>
 #include <ucontext.h>
 
@@ -2248,6 +2400,11 @@ enum {
   FC_BUF_EXTENTS,
   FC_BUF_SORT,
   FC_BUF_FILTER,
+  FC_BUF_PENDING,
+  FC_BUF_PAGEBITS,
+  FC_BUF_WRITTEN,     /* pages written since the collector started */
+  FC_BUF_WRITTEN_NEW, /* pages the current pass found written */
+  FC_BUF_WRITTEN_TMP, /* merge scratch */
   FC_BUF_COUNT
 };
 
@@ -2257,23 +2414,22 @@ enum {
 #define FC_LARGE_OBJECT ((size_t)8 << 20)
 
 static fc_buf_t fc_bufs[FC_BUF_COUNT];
-static size_t fc_young_n, fc_old_n;
+static size_t fc_young_n, fc_old_n, fc_old_after_major;
+static size_t fc_pending_n, fc_pending_pos; /* unreachable, not yet freed */
 static size_t fc_young_bytes, fc_promoted_bytes;
-static size_t fc_minor_threshold = (size_t)4 << 20;
+static size_t fc_minor_threshold = (size_t)2 << 20;
 static size_t fc_major_threshold = (size_t)48 << 20;
+static size_t fc_young_limit = (size_t)256 << 20;
+static uint64_t fc_last_end_ns;
+static uint64_t fc_kernel_ns; /* kernel time of the last collection */
 static int fc_state; /* 0 = not started, 1 = recording, -1 = disabled */
 static int fc_soft_dirty; /* 0 = untested, 1 = usable, -1 = unavailable */
 static int fc_in_collect;
 static uint64_t fc_stat_collections, fc_stat_major, fc_stat_freed_objects,
     fc_stat_freed_bytes, fc_stat_last_ns, fc_stat_max_ns;
-static size_t fc_dbg_pages, fc_dbg_words;
+static size_t fc_trace_pages, fc_trace_words;
 static int fc_trace_level;
-static const uintptr_t *fc_dbg_word;
-static int fc_dbg_shown;
-static int fc_dbg_fwd_shown;
-static int fc_dbg_str_shown;
-static size_t fc_dbg_freed_n[4], fc_dbg_freed_b[4], fc_dbg_young_kind[4];
-static uint64_t fc_dbg_t[6];
+static uint64_t fc_trace_t[6];
 static uintptr_t fc_stack_low; /* lowest address of the recording thread's stack */
 static uintptr_t fc_excludes[FC_MAX_EXCLUDES][2];
 static size_t fc_exclude_n;
@@ -2357,6 +2513,8 @@ static inline bool fc_pool_owns(uintptr_t p) {
       return true;
   return false;
 }
+
+bool rt_fc_pool_owns(const void *ptr) { return fc_pool_owns((uintptr_t)ptr); }
 
 static void fc_pool_drain_foreign(void) {
   uintptr_t node = atomic_exchange_explicit(&fc_foreign_free, 0,
@@ -2595,6 +2753,13 @@ typedef struct fc_ctx {
   fc_range_t *ranges;
   size_t range_n;
   uintptr_t lo, hi; /* [lo, hi) covers every candidate range */
+  /* The same, split: candidates in the collector heap and candidates in the
+   * C heap sit far apart, and almost no stray word falls in either. */
+  uintptr_t lo_a, span_a, lo_b, span_b;
+  /* One bit per 4 KiB page of each span: set where a candidate has memory.
+   * Small enough to stay in cache, and it turns away the commonest stray
+   * word, a pointer to something else in the same heap. */
+  const uint64_t *pages_a, *pages_b;
   fc_extent_t *extents;
   /* Hashed set of the 64-byte granules candidates occupy. Most words that
    * land in the span point at something else; this rejects them without a
@@ -2624,7 +2789,8 @@ static inline uint64_t fc_filter_bit(uintptr_t addr) {
          (64u - FC_FILTER_BITS);
 }
 
-static inline void fc_mark_addr(fc_ctx_t *c, uintptr_t addr) {
+static __attribute__((noinline)) void fc_mark_addr(fc_ctx_t *c,
+                                                   uintptr_t addr) {
   uint64_t bit = fc_filter_bit(addr);
   if (!((c->filter[bit >> 6] >> (bit & 63u)) & 1u))
     return;
@@ -2634,53 +2800,6 @@ static inline void fc_mark_addr(fc_ctx_t *c, uintptr_t addr) {
   fc_obj_t *o = &c->cand[c->ranges[i].obj];
   if (o->mark)
     return;
-  if (fc_trace_level > 4 && fc_dbg_word && fc_dbg_fwd_shown < 60 &&
-      o->kind == RT_FC_KIND_LIST &&
-      *(const uint64_t *)(o->ptr - 32) == UINT64_C(0x4e5954464f525744)) {
-    ++fc_dbg_fwd_shown;
-    size_t pi = fc_range_lower(c, (uintptr_t)fc_dbg_word);
-    bool in_cand = pi < c->range_n &&
-                   c->ranges[pi].start <= (uintptr_t)fc_dbg_word;
-    const fc_obj_t *par = in_cand ? &c->cand[c->ranges[pi].obj] : NULL;
-    fprintf(stderr,
-            "[heap-collect]     fwd %p <- word@%p %s parent=%p kind=%u "
-            "off=%ld phdr=%llx\n",
-            (void *)o->ptr, (void *)fc_dbg_word, in_cand ? "object" : "root",
-            par ? (void *)par->ptr : NULL, par ? par->kind : 0,
-            par ? (long)((uintptr_t)fc_dbg_word - par->ptr) : 0L,
-            par && par->kind == RT_FC_KIND_LIST
-                ? (unsigned long long)*(const uint64_t *)(par->ptr - 32)
-                : 0ULL);
-    if (!in_cand && fc_dbg_fwd_shown < 14) {
-      fprintf(stderr, "[heap-collect]       ctx:");
-      for (int k = -8; k <= 5; ++k)
-        fprintf(stderr, k == 0 ? " [%lx]" : " %lx",
-                (unsigned long)fc_dbg_word[k]);
-      fprintf(stderr, "\n");
-    }
-  }
-  if (fc_trace_level == 6 && fc_dbg_word && o->kind == RT_FC_KIND_MANAGED &&
-      fc_dbg_str_shown < 50) {
-    ++fc_dbg_str_shown;
-    size_t pi = fc_range_lower(c, (uintptr_t)fc_dbg_word);
-    bool in_cand = pi < c->range_n &&
-                   c->ranges[pi].start <= (uintptr_t)fc_dbg_word;
-    fprintf(stderr, "[heap-collect]     str \"%.50s\" <- word@%p %s kind=%u\n",
-            (const char *)o->ptr, (void *)fc_dbg_word,
-            in_cand ? "object" : "root",
-            in_cand ? c->cand[c->ranges[pi].obj].kind : 0u);
-  }
-  if (fc_trace_level > 2 && fc_trace_level < 4 && fc_dbg_word && fc_dbg_shown < 40 &&
-      ((uintptr_t)fc_dbg_word >> 20) != ((uintptr_t)c->stack >> 20)) {
-    ++fc_dbg_shown;
-    fprintf(stderr,
-            "[heap-collect]     word@%p -> %p kind=%u  ctx: %lx %lx %lx [%lx] "
-            "%lx %lx\n",
-            (void *)fc_dbg_word, (void *)o->ptr, o->kind,
-            (unsigned long)fc_dbg_word[-3], (unsigned long)fc_dbg_word[-2],
-            (unsigned long)fc_dbg_word[-1], (unsigned long)fc_dbg_word[0],
-            (unsigned long)fc_dbg_word[1], (unsigned long)fc_dbg_word[2]);
-  }
   o->mark = 1;
   ++c->marked;
   c->stack[c->stack_n++] = c->ranges[i].obj;
@@ -2691,29 +2810,64 @@ static inline void fc_mark_addr(fc_ctx_t *c, uintptr_t addr) {
  * integer ((p << 1) | 1, what an integer-typed slot holding a pointer turns
  * into at a dynamic boundary), or the native encoding.
  */
+static inline bool fc_in_spans(const fc_ctx_t *c, uintptr_t w) {
+  return w - c->lo_a < c->span_a || w - c->lo_b < c->span_b;
+}
+
+static inline bool fc_page_bit(const uint64_t *bits, uintptr_t offset) {
+  uintptr_t page = offset >> 12;
+  return bits && ((bits[page >> 6] >> (page & 63u)) & 1u);
+}
+
+/* In a span and on a page that holds a candidate. */
+static inline bool fc_candidate_page(const fc_ctx_t *c, uintptr_t w) {
+  if (w - c->lo_a < c->span_a)
+    return !c->pages_a || fc_page_bit(c->pages_a, w - c->lo_a);
+  if (w - c->lo_b < c->span_b)
+    return !c->pages_b || fc_page_bit(c->pages_b, w - c->lo_b);
+  return false;
+}
+
 static inline void fc_scan_word(fc_ctx_t *c, uintptr_t w) {
-  uintptr_t span = c->hi - c->lo;
-  if (w - c->lo < span) {
-    fc_mark_addr(c, w);
+  if (fc_in_spans(c, w)) {
+    if (fc_candidate_page(c, w))
+      fc_mark_addr(c, w);
     return;
   }
   if (w & 1u) {
     uintptr_t untagged = w >> 1;
-    if (untagged - c->lo < span)
+    if (fc_candidate_page(c, untagged))
       fc_mark_addr(c, untagged);
     return;
   }
   if (NY_NATIVE_IS(w)) {
     uintptr_t decoded = (uintptr_t)NY_NATIVE_DECODE(w);
-    if (decoded - c->lo < span)
+    if (fc_candidate_page(c, decoded))
       fc_mark_addr(c, decoded);
   }
 }
 
+
+/*
+ * The hot loop. Root memory is mostly pixels, vertices and text, where
+ * whether a word is odd is a coin toss, so the three forms a reference can
+ * take are tested without branching and only a word that lands in a
+ * candidate span leaves the loop body.
+ */
 static void fc_scan_words(fc_ctx_t *c, const uintptr_t *words, size_t n) {
+  const uintptr_t lo_a = c->lo_a, span_a = c->span_a;
+  const uintptr_t lo_b = c->lo_b, span_b = c->span_b;
   for (size_t i = 0; i < n; ++i) {
-    fc_dbg_word = &words[i];
-    fc_scan_word(c, words[i]);
+    uintptr_t w = words[i];
+    uintptr_t untagged = w >> 1;
+    uintptr_t decoded = (uintptr_t)NY_NATIVE_DECODE(w);
+    unsigned hit = (unsigned)(w - lo_a < span_a) | (unsigned)(w - lo_b < span_b) |
+                   (unsigned)(untagged - lo_a < span_a) |
+                   (unsigned)(untagged - lo_b < span_b) |
+                   (unsigned)(decoded - lo_a < span_a) |
+                   (unsigned)(decoded - lo_b < span_b);
+    if (__builtin_expect(hit, 0))
+      fc_scan_word(c, w);
   }
 }
 
@@ -2724,25 +2878,37 @@ static void fc_scan_root_piece(fc_ctx_t *c, uintptr_t base,
                                uintptr_t e) {
   s = (s + 7u) & ~(uintptr_t)7u;
   e &= ~(uintptr_t)7u;
+  if (s >= e)
+    return;
+  if (s >= c->hi || e <= c->lo) {
+    fc_trace_words += (e - s) / sizeof(uintptr_t);
+    fc_scan_words(c, (const uintptr_t *)(copy + (s - base)),
+                  (e - s) / sizeof(uintptr_t));
+    return;
+  }
+  /* Walk the candidate ranges that overlap the piece once, in order. */
+  size_t i = fc_range_lower(c, s);
   while (s < e) {
     uintptr_t stop = e;
-    if (s < c->hi && e > c->lo) {
-      size_t i = fc_range_lower(c, s);
-      if (i < c->range_n) {
-        if (c->ranges[i].start <= s) {
-          s = (c->ranges[i].end + 7u) & ~(uintptr_t)7u;
-          continue;
-        }
-        if (c->ranges[i].start < stop)
-          stop = c->ranges[i].start & ~(uintptr_t)7u;
+    if (i < c->range_n) {
+      if (c->ranges[i].start <= s) {
+        uintptr_t after = (c->ranges[i].end + 7u) & ~(uintptr_t)7u;
+        ++i;
+        if (after > s)
+          s = after;
+        continue;
       }
+      if (c->ranges[i].start < stop)
+        stop = c->ranges[i].start & ~(uintptr_t)7u;
     }
     if (stop > s) {
-      fc_dbg_words += (stop - s) / sizeof(uintptr_t);
+      fc_trace_words += (stop - s) / sizeof(uintptr_t);
       fc_scan_words(c, (const uintptr_t *)(copy + (s - base)),
                     (stop - s) / sizeof(uintptr_t));
+      s = stop;
+    } else {
+      s += 8u;
     }
-    s = stop > s ? stop : s + 8u;
   }
 }
 
@@ -2752,7 +2918,9 @@ static void fc_scan_root_piece(fc_ctx_t *c, uintptr_t base,
  * read, so the scan runs under a fault guard: a fault skips to the next page
  * instead of ending the process.
  */
-static __thread sigjmp_buf *fc_fault_jmp;
+/* volatile: the only reader is the signal handler, which the compiler
+ * cannot see; without it the store before the scan loop is removed. */
+static __thread sigjmp_buf *volatile fc_fault_jmp;
 static __thread volatile uintptr_t fc_fault_addr;
 static struct sigaction fc_old_segv, fc_old_bus;
 
@@ -2795,7 +2963,8 @@ static __attribute__((noinline)) void fc_scan_root_run(fc_ctx_t *c,
                                                        uintptr_t e) {
   volatile uintptr_t cursor = s;
   sigjmp_buf jmp;
-  if (sigsetjmp(jmp, 1) != 0) {
+  /* The handler runs with SA_NODEFER and an empty mask: nothing to restore. */
+  if (sigsetjmp(jmp, 0) != 0) {
     /* The page at the fault is gone; continue after it. */
     uintptr_t at = fc_fault_addr;
     uintptr_t next = ((at >= cursor && at < e ? at : cursor) &
@@ -2805,7 +2974,8 @@ static __attribute__((noinline)) void fc_scan_root_run(fc_ctx_t *c,
   fc_fault_jmp = &jmp;
   while (cursor < e) {
     uintptr_t cur = cursor;
-    uintptr_t piece_end = (cur & ~(uintptr_t)4095u) + 4096u;
+    /* A few pages at a time, so a fault loses little. */
+    uintptr_t piece_end = (cur & ~(uintptr_t)4095u) + 16u * 4096u;
     if (piece_end > e)
       piece_end = e;
     /* Drop the parts that are runtime tables or collector storage. */
@@ -2825,6 +2995,30 @@ static __attribute__((noinline)) void fc_scan_root_run(fc_ctx_t *c,
     cursor = piece_end;
   }
   fc_fault_jmp = NULL;
+}
+
+/* Scans the pages [rs, re) of root memory. Most written pages belong to the
+ * runtime's own tables; those are stepped over here rather than inside the
+ * guarded scan. */
+static void fc_scan_root_span(fc_ctx_t *c, uintptr_t rs, uintptr_t re) {
+  fc_trace_pages += (re - rs) >> 12;
+  while (rs < re) {
+    uintptr_t next_excl = re;
+    bool inside = false;
+    for (size_t x = 0; x < fc_exclude_n; ++x) {
+      if (fc_excludes[x][0] <= rs && rs < fc_excludes[x][1]) {
+        rs = fc_excludes[x][1];
+        inside = true;
+        break;
+      }
+      if (fc_excludes[x][0] > rs && fc_excludes[x][0] < next_excl)
+        next_excl = fc_excludes[x][0];
+    }
+    if (inside)
+      continue;
+    fc_scan_root_run(c, rs, next_excl);
+    rs = next_excl;
+  }
 }
 
 static uintptr_t fc_parse_hex(const char **p) {
@@ -2847,12 +3041,11 @@ static uintptr_t fc_parse_hex(const char **p) {
 #define FC_PM_SWAPPED (UINT64_C(1) << 62)
 #define FC_PM_PRESENT (UINT64_C(1) << 63)
 
-/* Scans every writable private mapping; with `dirty_only`, only the pages
- * written since the soft-dirty bits were last cleared. */
-static bool fc_scan_roots(fc_ctx_t *c, bool dirty_only) {
+/* Reads /proc/self/maps into the maps buffer; returns its length or 0. */
+static size_t fc_read_maps(void) {
   int maps_fd = open("/proc/self/maps", O_RDONLY | O_CLOEXEC);
   if (maps_fd < 0)
-    return false;
+    return 0;
   char *maps = (char *)fc_bufs[FC_BUF_MAPS].data;
   size_t cap = fc_bufs[FC_BUF_MAPS].bytes;
   size_t len = 0;
@@ -2865,11 +3058,345 @@ static bool fc_scan_roots(fc_ctx_t *c, bool dirty_only) {
     len += (size_t)got;
     if (len >= cap - 1) {
       close(maps_fd);
-      return false;
+      return 0;
     }
   }
   close(maps_fd);
   maps[len] = '\0';
+  return len;
+}
+
+#if FC_HAVE_WRITE_TRACKING
+/*
+ * Write tracking through userfaultfd (Linux 6.7 and later). Mappings are
+ * registered for asynchronous write protection; one PAGEMAP_SCAN call then
+ * returns the pages written since the previous call and protects them again,
+ * atomically. Unlike the soft-dirty interface there is no separate pass over
+ * every page of the process to clear bits and no per-page record to read,
+ * which matters when the process is large (a program run in-process by the
+ * JIT shares its address space with the compiler). Pages in mappings that
+ * are not registered (created since the last registration, or of a kind
+ * that cannot be) are always treated as written.
+ */
+static int fc_uffd = -1;
+static int fc_pagemap_fd = -1;
+static bool fc_register_due;
+static unsigned fc_register_age;
+static size_t fc_trace_unregistered_pages;
+
+static size_t fc_written_n, fc_written_new_n;
+static bool fc_written_ok;
+static long fc_tracked_pass(fc_ctx_t *c, bool scan);
+
+static void fc_uffd_register_all(void) {
+  size_t len = fc_read_maps();
+  if (!len)
+    return;
+  const char *maps = (const char *)fc_bufs[FC_BUF_MAPS].data;
+  const char *p = maps;
+  while (*p) {
+    const char *eol = strchr(p, '\n');
+    if (!eol)
+      eol = maps + len;
+    uintptr_t start = fc_parse_hex(&p);
+    if (*p == '-') {
+      ++p;
+      uintptr_t end = fc_parse_hex(&p);
+      const char *perms = *p == ' ' ? p + 1 : p;
+      if (perms[0] == 'r' && perms[1] == 'w' && perms[3] == 'p' &&
+          end > start) {
+        /* Anonymous memory only: inode 0 and no path, or a bracketed name
+         * such as [heap] and [stack]. */
+        const char *q = perms + 4;
+        for (int field = 0; field < 3 && q < eol; ++field) {
+          while (q < eol && *q == ' ')
+            ++q;
+          while (q < eol && *q != ' ')
+            ++q;
+        }
+        while (q < eol && *q == ' ')
+          ++q;
+        if (q == eol || *q == '[') {
+          struct uffdio_register reg;
+          memset(&reg, 0, sizeof(reg));
+          reg.range.start = start;
+          reg.range.len = end - start;
+          reg.mode = UFFDIO_REGISTER_MODE_WP;
+          (void)ioctl(fc_uffd, UFFDIO_REGISTER, &reg);
+        }
+      }
+    }
+    p = *eol ? eol + 1 : eol;
+  }
+  fc_register_due = false;
+}
+
+static bool fc_uffd_start(void) {
+  int fd = (int)syscall(SYS_userfaultfd, O_CLOEXEC | UFFD_USER_MODE_ONLY);
+  if (fd < 0)
+    return false;
+  struct uffdio_api api;
+  memset(&api, 0, sizeof(api));
+  api.api = UFFD_API;
+  api.features = UFFD_FEATURE_WP_ASYNC | UFFD_FEATURE_WP_UNPOPULATED;
+  int pm = -1;
+  if (ioctl(fd, UFFDIO_API, &api) != 0 ||
+      !(api.features & UFFD_FEATURE_WP_ASYNC) ||
+      (pm = open("/proc/self/pagemap", O_RDONLY | O_CLOEXEC)) < 0) {
+    close(fd);
+    return false;
+  }
+  /* The scan interface must exist as well. */
+  struct pm_scan_arg probe;
+  memset(&probe, 0, sizeof(probe));
+  probe.size = sizeof(probe);
+  probe.start = (uintptr_t)&probe & ~(uintptr_t)4095u;
+  probe.end = probe.start + 4096u;
+  probe.category_mask = PAGE_IS_PRESENT;
+  probe.return_mask = PAGE_IS_PRESENT;
+  struct page_region one;
+  probe.vec = (uintptr_t)&one;
+  probe.vec_len = 1;
+  if (ioctl(pm, PAGEMAP_SCAN, &probe) < 0) {
+    close(pm);
+    close(fd);
+    return false;
+  }
+  fc_uffd = fd;
+  fc_pagemap_fd = pm;
+  if (!fc_buf_reserve(FC_BUF_MAPS, (size_t)8 << 20) ||
+      !fc_buf_reserve(FC_BUF_PAGEMAP, (size_t)1 << 16)) {
+    close(pm);
+    close(fd);
+    fc_uffd = fc_pagemap_fd = -1;
+    return false;
+  }
+  fc_uffd_register_all();
+  /*
+   * Protect everything now, before the first object is recorded, so the
+   * first collection reads only what the program wrote since and the
+   * written set starts empty.
+   */
+  fc_written_ok = false;
+  if (fc_tracked_pass(NULL, false) >= 0) {
+    fc_written_ok = fc_buf_reserve(FC_BUF_WRITTEN_NEW, (size_t)1 << 16);
+    fc_written_n = fc_written_new_n = 0;
+  }
+  return true;
+}
+
+/*
+ * Pages written since the collector started, as sorted, disjoint
+ * [start, end) pairs. Every recorded object was allocated after the start,
+ * so a reference to one can only be in memory written since then, or in
+ * memory that is not tracked. A full collection reads these pages instead
+ * of every page of the process: a program run in-process by the JIT shares
+ * the address space with gigabytes of compiler memory that it never writes.
+ * `fc_written_ok` is false when the set could not be kept (out of memory,
+ * or tracking did not start with everything protected); full collections
+ * then read everything.
+ */
+static void fc_written_note(uintptr_t start, uintptr_t end) {
+  if (!fc_written_ok)
+    return;
+  uintptr_t *v = (uintptr_t *)fc_bufs[FC_BUF_WRITTEN_NEW].data;
+  if (fc_written_new_n > 0 && v[2 * fc_written_new_n - 1] == start) {
+    v[2 * fc_written_new_n - 1] = end;
+    return;
+  }
+  if (!fc_buf_reserve(FC_BUF_WRITTEN_NEW,
+                      (fc_written_new_n + 1) * 2 * sizeof(uintptr_t))) {
+    fc_written_ok = false;
+    return;
+  }
+  v = (uintptr_t *)fc_bufs[FC_BUF_WRITTEN_NEW].data;
+  v[2 * fc_written_new_n] = start;
+  v[2 * fc_written_new_n + 1] = end;
+  ++fc_written_new_n;
+}
+
+/* Folds the pages of the last pass into the set. Both lists are sorted. */
+static void fc_written_merge(void) {
+  size_t a_n = fc_written_n, b_n = fc_written_new_n;
+  fc_written_new_n = 0;
+  if (!fc_written_ok || b_n == 0)
+    return;
+  if (!fc_buf_reserve(FC_BUF_WRITTEN_TMP,
+                      (a_n + b_n) * 2 * sizeof(uintptr_t))) {
+    fc_written_ok = false;
+    return;
+  }
+  const uintptr_t *a = (const uintptr_t *)fc_bufs[FC_BUF_WRITTEN].data;
+  const uintptr_t *b = (const uintptr_t *)fc_bufs[FC_BUF_WRITTEN_NEW].data;
+  uintptr_t *out = (uintptr_t *)fc_bufs[FC_BUF_WRITTEN_TMP].data;
+  size_t i = 0, j = 0, n = 0;
+  while (i < a_n || j < b_n) {
+    const uintptr_t *r;
+    if (j >= b_n || (i < a_n && a[2 * i] <= b[2 * j]))
+      r = &a[2 * i++];
+    else
+      r = &b[2 * j++];
+    if (n > 0 && r[0] <= out[2 * n - 1]) {
+      if (r[1] > out[2 * n - 1])
+        out[2 * n - 1] = r[1];
+    } else {
+      out[2 * n] = r[0];
+      out[2 * n + 1] = r[1];
+      ++n;
+    }
+  }
+  fc_buf_t swap = fc_bufs[FC_BUF_WRITTEN];
+  fc_bufs[FC_BUF_WRITTEN] = fc_bufs[FC_BUF_WRITTEN_TMP];
+  fc_bufs[FC_BUF_WRITTEN_TMP] = swap;
+  fc_written_n = n;
+}
+
+/* One PAGEMAP_SCAN pass over [from, to); every returned region is scanned
+ * as root memory when `scan` is set and added to the written set when
+ * `record` is. Returns pages seen, or -1. */
+static long fc_pagemap_pass_range(fc_ctx_t *c, uint64_t from, uint64_t to,
+                                  uint64_t flags, uint64_t mask, uint64_t anyof,
+                                  uint64_t inverted, bool scan, bool record) {
+  struct page_region *regions =
+      (struct page_region *)fc_bufs[FC_BUF_PAGEMAP].data;
+  size_t cap = fc_bufs[FC_BUF_PAGEMAP].bytes / sizeof(*regions);
+  const uint64_t top = to;
+  uint64_t at = from;
+  long pages = 0;
+  while (at < top) {
+    struct pm_scan_arg arg;
+    memset(&arg, 0, sizeof(arg));
+    arg.size = sizeof(arg);
+    arg.flags = flags;
+    arg.start = at;
+    arg.end = top;
+    arg.vec = (uintptr_t)regions;
+    arg.vec_len = cap;
+    arg.category_mask = mask;
+    arg.category_anyof_mask = anyof;
+    arg.category_inverted = inverted;
+    arg.return_mask = PAGE_IS_PRESENT;
+    uint64_t t_io = fc_now_ns();
+    long n = ioctl(fc_pagemap_fd, PAGEMAP_SCAN, &arg);
+    fc_kernel_ns += fc_now_ns() - t_io;
+    if (n < 0)
+      return -1;
+    for (long i = 0; i < n; ++i) {
+      pages += (long)((regions[i].end - regions[i].start) >> 12);
+      if (record)
+        fc_written_note((uintptr_t)regions[i].start,
+                        (uintptr_t)regions[i].end);
+      if (scan)
+        fc_scan_root_span(c, (uintptr_t)regions[i].start,
+                          (uintptr_t)regions[i].end);
+    }
+    if (arg.walk_end <= at || arg.walk_end >= top)
+      break;
+    at = arg.walk_end;
+  }
+  return pages;
+}
+
+static long fc_pagemap_pass(fc_ctx_t *c, uint64_t flags, uint64_t mask,
+                            uint64_t anyof, uint64_t inverted, bool scan) {
+  return fc_pagemap_pass_range(c, 4096, (UINT64_C(1) << 47) - 4096u, flags,
+                               mask, anyof, inverted, scan, false);
+}
+
+/*
+ * The tracked pass: pages of registered mappings written since the last
+ * pass, which it protects again. Only populated pages: an untouched page
+ * carries no reference, and once written it is populated without the
+ * protection bit, so the next pass reports it. (Asking for unpopulated
+ * pages as well makes the kernel report every hole of a sparse mapping,
+ * such as the compiler's freed thread arenas, and reading those holes then
+ * maps zero pages that every later pass has to walk.)
+ */
+static long fc_tracked_pass(fc_ctx_t *c, bool scan) {
+  return fc_pagemap_pass_range(
+      c, 4096, (UINT64_C(1) << 47) - 4096u, PM_SCAN_WP_MATCHING,
+      PAGE_IS_WRITTEN | PAGE_IS_FILE | PAGE_IS_WPALLOWED,
+      PAGE_IS_PRESENT | PAGE_IS_SWAPPED, PAGE_IS_FILE, scan, true);
+}
+
+static bool fc_scan_roots_uffd(fc_ctx_t *c, bool dirty_only) {
+  if (fc_register_due)
+    fc_uffd_register_all();
+  /* Written pages of registered mappings; protects them again. A full
+   * collection reads everything below, but still needs the protection
+   * renewed so the next one starts from now. */
+  uint64_t t_a = fc_now_ns();
+  long written = fc_tracked_pass(c, dirty_only);
+  fc_written_merge();
+  if (written < 0)
+    return false;
+  uint64_t t_b = fc_now_ns();
+  long other;
+  if (!dirty_only && fc_written_ok) {
+    /* Full collection: every page written since the start that is still
+     * populated, then everything in mappings that are not tracked. */
+    const uintptr_t *w = (const uintptr_t *)fc_bufs[FC_BUF_WRITTEN].data;
+    long since = 0;
+    for (size_t i = 0; i < fc_written_n && since >= 0; ++i) {
+      long got = fc_pagemap_pass_range(c, w[2 * i], w[2 * i + 1], 0, 0,
+                                       PAGE_IS_PRESENT | PAGE_IS_SWAPPED, 0,
+                                       true, false);
+      since = got < 0 ? -1 : since + got;
+    }
+    if (since < 0)
+      return false;
+    other = fc_pagemap_pass(c, 0, PAGE_IS_WPALLOWED | PAGE_IS_FILE,
+                            PAGE_IS_PRESENT | PAGE_IS_SWAPPED,
+                            PAGE_IS_WPALLOWED | PAGE_IS_FILE, true);
+    if (fc_trace_level > 1)
+      fprintf(stderr,
+              "[heap-collect]   full: %ld written-since-start pages in %zu "
+              "ranges\n",
+              since, fc_written_n);
+  } else if (dirty_only) {
+    /* Everything present in mappings that are not tracked. */
+    other = fc_pagemap_pass(c, 0, PAGE_IS_WPALLOWED | PAGE_IS_FILE,
+                            PAGE_IS_PRESENT | PAGE_IS_SWAPPED,
+                            PAGE_IS_WPALLOWED | PAGE_IS_FILE, true);
+    /* New mappings appear all the time (allocator arenas, thread stacks,
+     * the collector's own heap); pick them up every few collections. */
+    if (other > 256 && ++fc_register_age >= 8) {
+      fc_register_due = true;
+      fc_register_age = 0;
+    }
+    fc_trace_unregistered_pages = other > 0 ? (size_t)other : 0;
+  } else {
+    other = fc_pagemap_pass(c, 0, PAGE_IS_FILE,
+                            PAGE_IS_PRESENT | PAGE_IS_SWAPPED, PAGE_IS_FILE,
+                            true);
+  }
+  if (fc_trace_level > 1)
+    fprintf(stderr,
+            "[heap-collect]   tracked pass %.2f ms (%ld pages), other pass "
+            "%.2f ms (%ld pages), in the kernel %.2f ms\n",
+            (double)(t_b - t_a) / 1e6, written,
+            (double)(fc_now_ns() - t_b) / 1e6, other,
+            (double)fc_kernel_ns / 1e6);
+  return other >= 0;
+}
+
+#else
+static int fc_uffd = -1;
+static bool fc_uffd_start(void) { return false; }
+static bool fc_scan_roots_uffd(fc_ctx_t *c, bool dirty_only) {
+  (void)c;
+  (void)dirty_only;
+  return false;
+}
+#endif
+
+/* Scans every writable private mapping; with `dirty_only`, only the pages
+ * written since the soft-dirty bits were last cleared. */
+static bool fc_scan_roots_legacy(fc_ctx_t *c, bool dirty_only) {
+  size_t len = fc_read_maps();
+  if (!len)
+    return false;
+  char *maps = (char *)fc_bufs[FC_BUF_MAPS].data;
   int pm_fd = open("/proc/self/pagemap", O_RDONLY | O_CLOEXEC);
   if (pm_fd < 0)
     return false;
@@ -2904,7 +3431,7 @@ static bool fc_scan_roots(fc_ctx_t *c, bool dirty_only) {
     if (!wanted || end <= start)
       continue;
     size_t marked_before = c->marked;
-    fc_dbg_shown = (end - start) > (2u << 20) && (end - start) < (3u << 20) ? 0 : 1000;
+    size_t pages_before = fc_trace_pages, words_before = fc_trace_words;
     for (uintptr_t at = start; at < end && ok;) {
       size_t pages = (end - at) >> 12;
       if (pages > pm_cap)
@@ -2928,19 +3455,26 @@ static bool fc_scan_roots(fc_ctx_t *c, bool dirty_only) {
         while (j < have && (pm[j] & (FC_PM_PRESENT | FC_PM_SWAPPED)) &&
                (pm[j] & need) == need)
           ++j;
-        fc_dbg_pages += j - i;
-        fc_scan_root_run(c, at + ((uintptr_t)i << 12),
-                         at + ((uintptr_t)j << 12));
+        fc_scan_root_span(c, at + ((uintptr_t)i << 12),
+                          at + ((uintptr_t)j << 12));
         i = j;
       }
       at += (uintptr_t)have << 12;
     }
-    if (fc_trace_level > 1 && c->marked > marked_before)
-      fprintf(stderr, "[heap-collect]   %zu marked from %.*s\n",
-              c->marked - marked_before, (int)(eol - line), line);
+    if (fc_trace_level == 2 &&
+        (c->marked > marked_before || fc_trace_pages - pages_before > 64))
+      fprintf(stderr, "[heap-collect]   %zu marked, %zu pages, %zu words from %.*s\n",
+              c->marked - marked_before, fc_trace_pages - pages_before,
+              fc_trace_words - words_before, (int)(eol - line), line);
   }
   close(pm_fd);
   return ok;
+}
+
+static bool fc_scan_roots(fc_ctx_t *c, bool dirty_only) {
+  if (fc_uffd >= 0)
+    return fc_scan_roots_uffd(c, dirty_only);
+  return fc_scan_roots_legacy(c, dirty_only);
 }
 
 static bool fc_clear_soft_dirty(void) {
@@ -3010,6 +3544,19 @@ static size_t fc_managed_total(uintptr_t ptr) {
   return (size_t)((body + 15u) & ~UINT64_C(15)) + 32u;
 }
 
+/*
+ * Managed blocks that are language values. A block without one of these
+ * tags is memory the program asked for with malloc and frees itself.
+ */
+static inline bool fc_managed_has_references(int64_t tag) {
+  return tag == TAG_OK || tag == TAG_ERR;
+}
+
+static inline bool fc_managed_collectable(int64_t tag) {
+  return tag == TAG_STR || tag == TAG_BYTES || tag == TAG_BIGINT ||
+         fc_managed_has_references(tag);
+}
+
 static void fc_free_object(const fc_obj_t *o) {
   switch (o->kind) {
   case RT_FC_KIND_LIST:
@@ -3020,6 +3567,9 @@ static void fc_free_object(const fc_obj_t *o) {
     break;
   case RT_FC_KIND_MANAGED:
     rt_free((int64_t)o->ptr);
+    break;
+  case RT_FC_KIND_SSO:
+    rt_fc_sso_free(o->ptr);
     break;
   default:
     break;
@@ -3042,21 +3592,15 @@ static __attribute__((noinline)) int64_t fc_collect(bool major,
       !fc_buf_reserve(FC_BUF_PAGEMAP, (size_t)1 << 16) ||
       !fc_buf_reserve(FC_BUF_EXTENTS, total * sizeof(fc_extent_t)) ||
       !fc_buf_reserve(FC_BUF_SORT, total * 2 * sizeof(fc_range_t)) ||
-      !fc_buf_reserve(FC_BUF_FILTER, ((size_t)1 << FC_FILTER_BITS) / 8u))
+      !fc_buf_reserve(FC_BUF_FILTER, ((size_t)1 << FC_FILTER_BITS) / 8u) ||
+      !fc_buf_reserve(FC_BUF_PENDING, total * sizeof(fc_obj_t)))
     return 0;
   old = (fc_obj_t *)fc_bufs[FC_BUF_OLD].data;
   if (!fc_stop_world())
     return 0;
-  fc_dbg_pages = fc_dbg_words = 0;
-  fc_dbg_str_shown = 0;
-  memset(fc_dbg_freed_n, 0, sizeof(fc_dbg_freed_n));
-  memset(fc_dbg_freed_b, 0, sizeof(fc_dbg_freed_b));
-  memset(fc_dbg_young_kind, 0, sizeof(fc_dbg_young_kind));
-  for (size_t i = 0; i < fc_young_n; ++i)
-    if (young[i].kind < 4)
-      ++fc_dbg_young_kind[young[i].kind];
-  fc_dbg_fwd_shown = major ? 0 : 1000;
-  fc_dbg_t[0] = fc_now_ns();
+  fc_trace_pages = fc_trace_words = 0;
+  fc_kernel_ns = 0;
+  fc_trace_t[0] = fc_now_ns();
 
   fc_ctx_t c;
   memset(&c, 0, sizeof(c));
@@ -3077,14 +3621,17 @@ static __attribute__((noinline)) int64_t fc_collect(bool major,
       size_t nr = 0;
       uintptr_t ptr = src[i].ptr;
       if (src[i].kind == RT_FC_KIND_LIST) {
-        if (rt_fc_list_range(ptr, &r[0], &r[1]))
+        if (rt_fc_list_range(ptr, &r[0], &r[1], pass != 0))
           nr = 1;
       } else if (src[i].kind == RT_FC_KIND_DICT) {
         if (rt_fc_dict_ranges(ptr, r))
           nr = 2;
+      } else if (src[i].kind == RT_FC_KIND_SSO) {
+        if (rt_fc_sso_range(ptr, &r[0], &r[1]))
+          nr = 1;
       } else if (src[i].kind == RT_FC_KIND_MANAGED) {
         if (rt_heap_ptr_registry_has(ptr) &&
-            *(const int64_t *)(ptr - 8) == TAG_STR) {
+            fc_managed_collectable(*(const int64_t *)(ptr - 8))) {
           r[0] = ptr - 32;
           r[1] = r[0] + fc_managed_total(ptr);
           nr = 1;
@@ -3115,10 +3662,10 @@ static __attribute__((noinline)) int64_t fc_collect(bool major,
       }
     }
   }
-  fc_dbg_t[1] = fc_now_ns();
+  fc_trace_t[1] = fc_now_ns();
   fc_sort_ranges(c.ranges, (fc_range_t *)fc_bufs[FC_BUF_SORT].data,
                  c.range_n);
-  fc_dbg_t[2] = fc_now_ns();
+  fc_trace_t[2] = fc_now_ns();
   /* The same address recorded twice (released and reused) yields identical
    * ranges; keep one and mark the duplicate object so it is not freed
    * twice. Overlap of any other kind means the books are wrong: keep all. */
@@ -3145,6 +3692,42 @@ static __attribute__((noinline)) int64_t fc_collect(bool major,
   if (sane && c.range_n > 0) {
     c.filter = (uint64_t *)fc_bufs[FC_BUF_FILTER].data;
     memset(c.filter, 0, ((size_t)1 << FC_FILTER_BITS) / 8u);
+    uintptr_t a_lo = UINTPTR_MAX, a_hi = 0, b_lo = UINTPTR_MAX, b_hi = 0;
+    for (size_t i = 0; i < c.range_n; ++i) {
+      if (c.ranges[i].start >= fc_chunk_lo && c.ranges[i].end <= fc_chunk_hi) {
+        if (c.ranges[i].start < a_lo)
+          a_lo = c.ranges[i].start;
+        if (c.ranges[i].end > a_hi)
+          a_hi = c.ranges[i].end;
+      } else {
+        if (c.ranges[i].start < b_lo)
+          b_lo = c.ranges[i].start;
+        if (c.ranges[i].end > b_hi)
+          b_hi = c.ranges[i].end;
+      }
+    }
+    c.lo_a = a_hi ? a_lo & ~(uintptr_t)4095u : 0;
+    c.span_a = a_hi ? a_hi - c.lo_a : 0;
+    c.lo_b = b_hi ? b_lo & ~(uintptr_t)4095u : 0;
+    c.span_b = b_hi ? b_hi - c.lo_b : 0;
+    /* Page bitmaps for both spans (skipped for an absurdly wide span). */
+    size_t words_a = ((c.span_a >> 12) + 64u) / 64u;
+    size_t words_b = ((c.span_b >> 12) + 64u) / 64u;
+    if (words_a + words_b <= ((size_t)64 << 20) / 8u &&
+        fc_buf_reserve(FC_BUF_PAGEBITS, (words_a + words_b) * 8u)) {
+      uint64_t *bits = (uint64_t *)fc_bufs[FC_BUF_PAGEBITS].data;
+      memset(bits, 0, (words_a + words_b) * 8u);
+      for (size_t i = 0; i < c.range_n; ++i) {
+        bool in_a = c.span_a && c.ranges[i].start - c.lo_a < c.span_a;
+        uint64_t *dst = in_a ? bits : bits + words_a;
+        uintptr_t base = in_a ? c.lo_a : c.lo_b;
+        for (uintptr_t pg = (c.ranges[i].start - base) >> 12;
+             pg <= (c.ranges[i].end - 1u - base) >> 12; ++pg)
+          dst[pg >> 6] |= UINT64_C(1) << (pg & 63u);
+      }
+      c.pages_a = bits;
+      c.pages_b = bits + words_a;
+    }
     for (size_t i = 0; i < c.range_n; ++i) {
       for (uintptr_t g = c.ranges[i].start >> 6;
            g <= (c.ranges[i].end - 1u) >> 6; ++g) {
@@ -3177,6 +3760,8 @@ static __attribute__((noinline)) int64_t fc_collect(bool major,
     fc_add_exclude(intern_start, intern_end);
     rt_fc_str_hash_cache(&intern_start, &intern_end);
     fc_add_exclude(intern_start, intern_end);
+    rt_fc_int_str_cache(&intern_start, &intern_end);
+    fc_add_exclude(intern_start, intern_end);
     /* Per-thread classification caches: addresses, not references. */
 #define FC_EXCLUDE_ARRAY(a)                                                    \
   fc_add_exclude((uintptr_t)(a), (uintptr_t)(a) + sizeof(a))
@@ -3189,15 +3774,19 @@ static __attribute__((noinline)) int64_t fc_collect(bool major,
 #undef FC_EXCLUDE_ARRAY
     fc_exclude_n += rt_fc_core_excludes(&fc_excludes[fc_exclude_n],
                                         FC_MAX_EXCLUDES - fc_exclude_n);
-    bool dirty_only = !major && fc_soft_dirty > 0;
+    bool dirty_only = !major && (fc_uffd >= 0 || fc_soft_dirty > 0);
     fc_fault_guard_install();
     scanned = fc_scan_roots(&c, dirty_only);
-    fc_dbg_t[3] = fc_now_ns();
+    fc_trace_t[3] = fc_now_ns();
     if (scanned) {
       while (c.stack_n > 0) {
         uint32_t idx = c.stack[--c.stack_n];
-        /* Strings hold bytes, not references. */
-        if (c.cand[idx].kind == RT_FC_KIND_MANAGED)
+        /* Strings, byte buffers and big integers hold no references. */
+        if (c.cand[idx].kind == RT_FC_KIND_SSO)
+          continue;
+        if (c.cand[idx].kind == RT_FC_KIND_MANAGED &&
+            !fc_managed_has_references(
+                *(const int64_t *)(c.cand[idx].ptr - 8)))
           continue;
         if (c.cand[idx].kind == RT_FC_KIND_LIST) {
           /* A forwarded list refers only to its current storage. */
@@ -3205,8 +3794,7 @@ static __attribute__((noinline)) int64_t fc_collect(bool major,
           if (hdr[0] == UINT64_C(0x4e5954464f525744)) {
             uintptr_t target = rt_fc_list_forward_target(c.cand[idx].ptr);
             if (target) {
-              fc_dbg_word = NULL;
-              if (target - c.lo < c.hi - c.lo)
+              if (fc_in_spans(&c, target))
                 fc_mark_addr(&c, target);
               continue;
             }
@@ -3224,46 +3812,25 @@ static __attribute__((noinline)) int64_t fc_collect(bool major,
     }
     fc_fault_guard_remove();
   }
-  fc_dbg_t[4] = fc_now_ns();
+  fc_trace_t[4] = fc_now_ns();
+  /*
+   * Forget which pages were written. Nothing young exists from here until
+   * the caller's thread allocates again, so no reference to a young object
+   * can be written before the bits are clear.
+   */
+  if (scanned && fc_uffd < 0 && fc_soft_dirty > 0 && !fc_clear_soft_dirty())
+    fc_soft_dirty = -1;
+  fc_trace_t[5] = fc_now_ns();
+  /* Without the scan interface the kernel's share is not measured; the
+   * clearing pass is about a quarter of it. */
+  if (fc_uffd < 0)
+    fc_kernel_ns = (fc_trace_t[5] - fc_trace_t[4]) * 4u;
   fc_start_world();
 
-  if (fc_trace_level > 3 && major && scanned) {
-    size_t kinds[4] = {0, 0, 0, 0}, bytes[4] = {0, 0, 0, 0};
-    size_t shown = 0;
-    for (size_t i = c.cand_n; i-- > 0;) {
-      const fc_obj_t *o = &c.cand[i];
-      if (o->mark != 1 || o->kind > 3)
-        continue;
-      size_t b = 0;
-      for (size_t k = 0; k < c.extents[i].count; ++k)
-        b += c.extents[i].r[2 * k + 1] - c.extents[i].r[2 * k];
-      ++kinds[o->kind];
-      bytes[o->kind] += b;
-      if (shown < 60 && (i % 97) == 0) {
-        ++shown;
-        if (o->kind == RT_FC_KIND_MANAGED)
-          fprintf(stderr, "[heap-collect]   live str %zu: \"%.60s\"\n", b,
-                  (const char *)o->ptr);
-        else if (o->kind == RT_FC_KIND_LIST) {
-          const int64_t *h = (const int64_t *)(o->ptr - 32);
-          fprintf(stderr,
-                  "[heap-collect]   live list bytes=%zu magic=%llx len=%lld "
-                  "elem=%lld cap=%lld w0=%llx w1=%llx\n",
-                  b, (unsigned long long)h[0], (long long)h[1],
-                  (long long)h[2], (long long)(h[3] & INT64_MAX),
-                  (unsigned long long)h[4], (unsigned long long)h[5]);
-        } else
-          fprintf(stderr, "[heap-collect]   live dict bytes=%zu len=%lld\n", b,
-                  (long long)*(const int64_t *)o->ptr);
-      }
-    }
-    fprintf(stderr,
-            "[heap-collect]   live lists=%zu (%zu B) dicts=%zu (%zu B) "
-            "strings=%zu (%zu B)\n",
-            kinds[1], bytes[1], kinds[2], bytes[2], kinds[3], bytes[3]);
-  }
   size_t kept = major ? 0 : fc_old_n;
   size_t survivors_bytes = 0;
+  fc_obj_t *pending = (fc_obj_t *)fc_bufs[FC_BUF_PENDING].data;
+  fc_pending_n = fc_pending_pos = 0;
   if (scanned) {
     for (size_t i = 0; i < c.cand_n; ++i) {
       fc_obj_t *o = &c.cand[i];
@@ -3279,11 +3846,9 @@ static __attribute__((noinline)) int64_t fc_collect(bool major,
         survivors_bytes += bytes;
         continue;
       }
-      fc_free_object(o);
-      if (o->kind < 4) {
-        ++fc_dbg_freed_n[o->kind];
-        fc_dbg_freed_b[o->kind] += bytes;
-      }
+      /* Unreachable. Freed in slices by fc_sweep, not here: releasing tens
+       * of thousands of objects is the longest part of a collection. */
+      pending[fc_pending_n++] = *o;
       freed_bytes += (int64_t)bytes;
       ++fc_stat_freed_objects;
     }
@@ -3298,49 +3863,60 @@ static __attribute__((noinline)) int64_t fc_collect(bool major,
     }
     survivors_bytes = fc_young_bytes;
   }
-  /*
-   * Forget which pages were written, after the sweep: clearing write-protects
-   * every page, and the sweep touches a page per freed object. No young
-   * object exists between the scan and this point (only this thread records
-   * them), so no reference to one can be missed.
-   */
-  fc_dbg_t[5] = fc_now_ns();
-  if (scanned && fc_soft_dirty > 0 && !fc_clear_soft_dirty())
-    fc_soft_dirty = -1;
   fc_old_n = kept;
   fc_young_n = 0;
   fc_young_bytes = 0;
   fc_promoted_bytes = major ? 0 : fc_promoted_bytes + survivors_bytes;
+  if (major)
+    fc_old_after_major = fc_old_n;
   fc_stat_freed_bytes += (uint64_t)freed_bytes;
   ++fc_stat_collections;
   if (major)
     ++fc_stat_major;
-  fc_stat_last_ns = fc_now_ns() - t0;
+  fc_last_end_ns = fc_now_ns();
+  fc_stat_last_ns = fc_last_end_ns - t0;
   if (fc_stat_last_ns > fc_stat_max_ns)
     fc_stat_max_ns = fc_stat_last_ns;
   if (fc_trace_level > 0)
     fprintf(stderr,
-            "[heap-collect]   young lists=%zu dicts=%zu managed=%zu; freed "
-            "lists=%zu (%zu B) dicts=%zu (%zu B) strings=%zu (%zu B)\n",
-            fc_dbg_young_kind[1], fc_dbg_young_kind[2], fc_dbg_young_kind[3],
-            fc_dbg_freed_n[1], fc_dbg_freed_b[1], fc_dbg_freed_n[2],
-            fc_dbg_freed_b[2], fc_dbg_freed_n[3], fc_dbg_freed_b[3]);
-  if (fc_trace_level > 0)
-    fprintf(stderr,
             "[heap-collect] %s candidates=%zu marked=%zu freed=%lld bytes "
             "old=%zu scanned=%d %.2f ms (ranges %.2f sort %.2f roots %.2f "
-            "mark %.2f sweep %.2f clear %.2f; %zu pages, %zu words)\n",
+            "mark %.2f clear %.2f queue %.2f; %zu pages, %zu words)\n",
             major ? "major" : "minor", c.cand_n, c.marked,
             (long long)freed_bytes, fc_old_n, (int)scanned,
             (double)fc_stat_last_ns / 1e6,
-            (double)(fc_dbg_t[1] - fc_dbg_t[0]) / 1e6,
-            (double)(fc_dbg_t[2] - fc_dbg_t[1]) / 1e6,
-            (double)(fc_dbg_t[3] - fc_dbg_t[2]) / 1e6,
-            (double)(fc_dbg_t[4] - fc_dbg_t[3]) / 1e6,
-            (double)(fc_dbg_t[5] - fc_dbg_t[4]) / 1e6,
-            (double)(fc_now_ns() - fc_dbg_t[5]) / 1e6, fc_dbg_pages,
-            fc_dbg_words);
+            (double)(fc_trace_t[1] - fc_trace_t[0]) / 1e6,
+            (double)(fc_trace_t[2] - fc_trace_t[1]) / 1e6,
+            (double)(fc_trace_t[3] - fc_trace_t[2]) / 1e6,
+            (double)(fc_trace_t[4] - fc_trace_t[3]) / 1e6,
+            (double)(fc_trace_t[5] - fc_trace_t[4]) / 1e6,
+            (double)(fc_now_ns() - fc_trace_t[5]) / 1e6, fc_trace_pages,
+            fc_trace_words);
   return freed_bytes;
+}
+
+/* Frees queued unreachable objects: all of them, or as many as fit in
+ * `budget_ns`. Returns true when the queue is empty. */
+static bool fc_sweep(uint64_t budget_ns) {
+  if (fc_pending_pos >= fc_pending_n)
+    return true;
+  const fc_obj_t *pending = (const fc_obj_t *)fc_bufs[FC_BUF_PENDING].data;
+  uint64_t deadline = budget_ns ? fc_now_ns() + budget_ns : 0;
+  fc_in_collect = 1;
+  while (fc_pending_pos < fc_pending_n) {
+    size_t stop = fc_pending_pos + 256;
+    if (stop > fc_pending_n)
+      stop = fc_pending_n;
+    for (; fc_pending_pos < stop; ++fc_pending_pos)
+      fc_free_object(&pending[fc_pending_pos]);
+    if (deadline && fc_now_ns() >= deadline)
+      break;
+  }
+  fc_in_collect = 0;
+  if (fc_pending_pos < fc_pending_n)
+    return false;
+  fc_pending_n = fc_pending_pos = 0;
+  return true;
 }
 
 static bool fc_start(void) {
@@ -3361,10 +3937,23 @@ static bool fc_start(void) {
    * The runtime's address oracle remembers pages it has seen allocations
    * on. Keep freed memory mapped so those answers stay true.
    */
+  /*
+   * Finding written pages costs the kernel time for every resident page of
+   * the process. A program started in-process by the JIT shares it with the
+   * compiler, whose freed memory is still resident: hand that back first.
+   */
+  malloc_trim(0);
   mallopt(M_TRIM_THRESHOLD, 1 << 30);
   mallopt(M_MMAP_THRESHOLD, 32 << 20);
-  fc_soft_dirty = fc_probe_soft_dirty() ? 1 : -1;
-  if (fc_soft_dirty < 0)
+  const char *track = getenv("NYTRIX_HEAP_COLLECT_TRACK");
+  if (!(track && strcmp(track, "soft-dirty") == 0) &&
+      !(track && strcmp(track, "none") == 0))
+    (void)fc_uffd_start();
+  if (fc_uffd < 0 && !(track && strcmp(track, "none") == 0))
+    fc_soft_dirty = fc_probe_soft_dirty() ? 1 : -1;
+  else if (fc_uffd < 0)
+    fc_soft_dirty = -1;
+  if (fc_uffd < 0 && fc_soft_dirty < 0)
     fc_minor_threshold *= 8;
   pthread_attr_t attr;
   if (pthread_getattr_np(pthread_self(), &attr) == 0) {
@@ -3414,8 +4003,30 @@ int64_t rt_heap_collect_raw(int64_t mode) {
   }
   if (!g_rt_fc_tracking || fc_in_collect)
     return 0; /* only the recording thread collects */
-  bool major = mode == 2 || fc_promoted_bytes >= fc_major_threshold;
+  /*
+   * What the last collection found unreachable is freed a slice per frame.
+   * Until that is done its memory still holds old references, so the next
+   * collection waits for it.
+   */
+  if (!fc_sweep(mode == 0 ? UINT64_C(700000) : 0))
+    return 0;
+  /* A full collection when enough has been promoted, by bytes or by count:
+   * objects that outlive one collection and die later are found only there. */
+  bool major = mode == 2 || fc_promoted_bytes >= fc_major_threshold ||
+               fc_old_n >= fc_old_after_major * 2 + 8192;
   if (mode == 0 && !major && fc_young_bytes < fc_minor_threshold)
+    return 0;
+  /*
+   * Asking the kernel which pages were written costs time for every
+   * resident page of the process, whatever the amount of garbage: well
+   * under a millisecond in a standalone program, tens of milliseconds next
+   * to the JIT compiler's heap. Space collections out so that this fixed
+   * part takes at most a fortieth of the time, unless young objects pile up
+   * past the limit. (The rest of a collection grows with the young objects
+   * themselves, so pacing on it would only make each collection larger.)
+   */
+  if (mode == 0 && fc_young_bytes < fc_young_limit &&
+      fc_now_ns() - fc_last_end_ns < fc_kernel_ns * 40u)
     return 0;
   /* Spill callee-saved registers: a reference may live only there. */
   ucontext_t regs;
@@ -3423,6 +4034,8 @@ int64_t rt_heap_collect_raw(int64_t mode) {
   fc_in_collect = 1;
   int64_t freed = fc_collect(major, (uintptr_t)&regs);
   fc_in_collect = 0;
+  if (mode != 0)
+    (void)fc_sweep(0);
   return freed;
 }
 
@@ -3442,6 +4055,10 @@ void *rt_fc_block_alloc(size_t bytes) {
 void rt_fc_block_free(void *ptr, size_t bytes) {
   (void)bytes;
   free(ptr);
+}
+bool rt_fc_pool_owns(const void *ptr) {
+  (void)ptr;
+  return false;
 }
 #if defined(__linux__) && defined(__GNUC__)
 void rt_fc_register_cache_reporter(void (*report)(void (*add)(uintptr_t,

@@ -44,12 +44,18 @@ lands, and then leaves the roadmap; anything not in this table is still open.
 | Type-value validation | `def Type` bindings validate through the same normalization/cycle path as `type` declarations. | the two `def Type` fixtures above |
 | Universe values | `Type` and `Type n` are first-class in expression position and evaluate to the erased universe tag (`"Type"`, `"Type n"`), matching the `str` runtime representation, instead of failing symbol resolution. Levels stay static indices, not runtime data. | [universe-values](../../etc/tests/lang/types/dependent/universes/universe-values.nshape) |
 | Closed level constraints | `Type max(n, m)` folds to the larger literal at parse time in both type and expression position (`max(3, 5)` behaves as `Type 5`), including idempotence; a malformed constraint is an error, never a silent level 0. | [level-max](../../etc/tests/lang/types/dependent/universes/level-max.nshape) |
-| Function type parameters | `fn id<A>(A x) A` declares its parameters, and annotations that name a declared parameter are erased to the unannotated dynamic path, so one declaration serves both value shapes: `id(3)` prints `3` and `id("s")` prints `s`, and `fn first<A, B>(A a, B b) A` instantiates independently. Annotations that mention a parameter inside a larger type (`list<A>`) are not erased; the resolver accepts the generic container type and the parameter stays unrelated to the call's argument type. A parameter that appears in more than one argument position is checked statically at the call site: `same(1, "s")` for `fn same<A>(A a, A b)` is rejected with `type parameter 'A' instantiated inconsistently`, and the pipeline never runs a program that reported an error. Instantiation is otherwise dynamic: per-instance specialization and name-based monomorphization are not implemented. | [fn-type-param](../../etc/tests/lang/types/generics/fn-type-param.nshape) |
-| Implicit type binders | `fn id{Type A}(A x) A` (or `{A}`) declares the same erased, call-inferred binder as `fn id<A>`, may follow an explicit `<...>` list, and shares the inconsistent-instantiation check; an implicit value binder (`{int n}`) and an empty `{}` are parse errors. | [fn-type-param](../../etc/tests/lang/types/generics/fn-type-param.nshape) |
+| Function type parameters | `fn id<A>(A x) A` declares erased type parameters: annotations naming one take the dynamic runtime path, but checking is static and per call. Each parameter is one variable of the signature, instantiated at every call, also through nested types (`fn first<A>(list<A> xs) A` makes `first([1, 2])` an `int`), and a parameter fixed by one argument and contradicted by another is rejected with `type parameter 'A' instantiated inconsistently`. | [fn-type-param](../../etc/tests/lang/types/generics/fn-type-param.nshape), [binders-and-holes](../../etc/tests/lang/types/generics/binders-and-holes.nshape) |
+| Implicit binders | `fn id{Type A}(A x) A` (or `{A}`) is the implicit spelling of `<A>`. `{int n}` is an implicit value binder: a leading parameter the checker fills at each call from the other arguments' types (`fn bound{int n}(Fin<n> i)` called on a `Fin<5>` passes 5); it must occur in some parameter type, and a call whose arguments do not fix it to a literal is rejected with `cannot infer implicit binder`. | [fn-type-param](../../etc/tests/lang/types/generics/fn-type-param.nshape), [binders-and-holes](../../etc/tests/lang/types/generics/binders-and-holes.nshape) |
+| Explicit binders (Pi over types) | A parameter typed by a universe (`fn id(Type A, A x) A`) binds `A` for the parameters and result after it. A written type as its argument instantiates `A` and is passed as the erased type value, its name; inside the body the binder is that `str`. | [binders-and-holes](../../etc/tests/lang/types/generics/binders-and-holes.nshape) |
+| Anonymous holes | `_` is filled by elaboration in three places: a result type (`fn twice(int x) _`), a type argument (`id(_, 3)` takes `A` from the other arguments), and an implicit binder written out (`bound(_, i)`). A hole nothing determines is rejected with `unsolved hole '_'`. | [binders-and-holes](../../etc/tests/lang/types/generics/binders-and-holes.nshape), negatives in [eq-kernel-negative](../../etc/tests/lang/errors/type/eq-kernel-negative.nshape) |
+| Level variables | `{level u}` declares a universe level variable on a function; `Type u` and `Type max(u, n)` may then appear in its signature (`max(u, u)` is `u`). Each call instantiates the levels: a written type is level 0 and a universe value `Type n` passed as a type is level n + 1; a level variable takes the argument's level, a literal level must be at least it. An undeclared level is a parse error. | [binders-and-holes](../../etc/tests/lang/types/generics/binders-and-holes.nshape), negatives in [eq-kernel-negative](../../etc/tests/lang/errors/type/eq-kernel-negative.nshape) |
 | Named holes | `?name` in expression position is a typed placeholder: HM infers its goal type and reports `unsolved hole '?name' : T` (or `unconstrained`), so a program with a hole never lowers or runs. Holes carry no kernel semantics. | [named-hole](../../etc/tests/lang/errors/type/named-hole.nshape) |
 | Parameterised enums | Uniform and multi-parameter enums, plus type-level aliases over them, compile and run. | [enum-uniform-params](../../etc/tests/lang/types/dependent/enum-params/enum-uniform-params.nshape) |
 | Positive recursion | Constructor arguments may recurse as ordinary data and eliminate by `match`. | [enum-positive-recursion](../../etc/tests/lang/types/dependent/enum-recursion/enum-positive-recursion.nshape) |
-| Structural positivity | Negative occurrences are inexpressible; a function-typed payload is rejected with `enum payload fields must be data types`. | [negative fixture](../../etc/tests/lang/errors/type/enum-payload-function-negative.nshape), note in [Inductives](#inductives-and-elimination) |
+| Strict positivity | Constructor arguments may be function types; the family may occur only in strictly positive positions, never in a function domain at any depth. The check runs over the whole program once every enum is known, so an occurrence behind a type-level definition (`type F = fn(Bad) int`, also applied), in a function-valued result (`fn(int) fn(Bad) int`), in a mutual group (the family set is the strongly connected component of enums that mention each other), or through another enum's parameter (`W(T<Bad>)` where `T<A>` uses `A` in a domain) is rejected with `enum payload breaks strict positivity`. A parameter used only in results may be instantiated with the family (`Node(Stream<Tree>)`). | [enum-strict-positivity](../../etc/tests/lang/types/dependent/enum-recursion/enum-strict-positivity.nshape), [negatives](../../etc/tests/lang/errors/type/enum-payload-function-negative.nshape) |
+| Value-indexed families | Enum parameters may be value indices with linear evidence (`Cons(A head, Vec<A, k> tail) where n is k + 1`); index terms in type arguments are linear over at most one name and have one canonical spelling (`n+1`, `3`). Construction binds the evidence's names from the argument types and computes the index (`Cons(5, Nil)` is a `Vec<int, 1>`); a match solves them from the scrutinee, so payloads get their own indices (the tail of a `Vec<int, 2>` is a `Vec<int, 1>`). A literal index rules out a constructor whose literal evidence differs; a symbolic index keeps every constructor possible, because index names are not known to be natural. | [vec-length-index](../../etc/tests/lang/types/dependent/value-index/vec-length-index.nshape), negatives in [eq-kernel-negative](../../etc/tests/lang/errors/type/eq-kernel-negative.nshape) |
+| Dependent match motives | `match e as T { ... }` checks every arm against `T`; `match e as (v) -> proof<P(v)>` instantiates the motive at the scrutinee for the match and at the pattern for each literal or nullary-constructor arm, where evidence at either the pattern or the scrutinee is accepted (they are equal on that arm). Non-exhaustive enum matches are errors, naming the missing constructors; constructors that cannot produce the scrutinee's index are rejected and need no arm. | [match-motive](../../etc/tests/lang/types/dependent/gadt/match-motive.nshape), negatives in [eq-kernel-negative](../../etc/tests/lang/errors/type/eq-kernel-negative.nshape) |
+| Structural recursion and recursors | `@total` with `decreases(x)` accepts recursive calls on constructor payloads of `x`, including calls nested in a constructor of the result, and refuses any other recursive argument. Recursors are ordinary total functions: one that receives its step as a callback under an open effect row (`@total @effects(e) fn nat_rec(Nat n, int z, fnptr step)`) is total relative to that callback, while its own body stays effect-checked and its recursion structural. A measure over names alone survives calls that may write memory, which cannot rebind a parameter. | [total-structural-recursion](../../etc/tests/lang/types/proofs/total-structural-recursion.nshape), negatives in [eq-kernel-negative](../../etc/tests/lang/errors/type/eq-kernel-negative.nshape) |
 | Bounded indexing | Literal `Fin<N>` indexing is checked at construction; a symbolic bound keeps the runtime `checked_fin` test. | [kernel-safe-index](../../etc/tests/lang/types/dependent/kernel/kernel-safe-index.nshape) |
 | Indexed elimination | Constructors refine the index; impossible arms are not demanded. | [kernel-verified-algorithm](../../etc/tests/lang/types/dependent/kernel/kernel-verified-algorithm.nshape), GADT fixtures in [Dependent types](dependent.md) |
 | Closed-equation evidence | `proof<a == b>` with `prove` discharges convertible closed equations and erases. | [eq-closed-refl](../../etc/tests/lang/types/proofs/eq-closed-refl.nshape) |
@@ -59,6 +65,8 @@ lands, and then leaves the roadmap; anything not in this table is still open.
 | Fail-closed proofs | A false equation and an unproved bounded-arithmetic refinement stay errors. | [eq negative](../../etc/tests/lang/errors/type/eq-closed-refl-negative.nshape), [refinement negative](../../etc/tests/lang/errors/type/verified-small-algorithm-negative.nshape) |
 | Verified small algorithm | Literal initializers and refinement-to-refinement identities discharge without a hand-written proof. | [verified-small-algorithm](../../etc/tests/lang/types/proofs/verified-small-algorithm.nshape) |
 | Undefined-name diagnostic | A name with no local, function, module export, runtime symbol, constant, or alloc builtin reports a located `[E2001] error: undefined symbol 'x'` with a hint at the point resolution becomes final, instead of surfacing only as a NYIR build failure. | [lexer-invalid-byte-stops](../../etc/tests/lang/errors/parser/lexer-invalid-byte-stops.nshape), [undefined-call](../../etc/tests/lang/errors/type/undefined-call.nshape) |
+| Equality rules | `eq_sym`, `eq_trans`, `eq_cong`, and `transport` (`J`) compute their result proposition from canonical proof types and erase; `transport` also moves a value along an equation between indices of its type. | [eq-kernel-rules](../../etc/tests/lang/types/proofs/eq-kernel-rules.nshape), [eq-transport-index](../../etc/tests/lang/types/proofs/eq-transport-index.nshape), negatives in [eq-kernel-negative](../../etc/tests/lang/errors/type/eq-kernel-negative.nshape) |
+| Legacy proof bridge | `prove(P)` is `proof<P>`; `requires` bounds are evidence; `prove(lemma(args))` is a proof of the lemma's conclusion instance; the bounded solver's verdicts are reported as automation (`"authority":"automation"`). | [eq-transport-index](../../etc/tests/lang/types/proofs/eq-transport-index.nshape), [proves-requires-range](../../etc/tests/lang/types/proofs/proves-requires-range.nshape) |
 | Call arity | Omitted trailing arguments are partial application, so only excess arguments are an arity error: `too many arguments: expected at most N, got M`. | [excess-arg](../../etc/tests/lang/errors/desugar/excess-arg.nshape), [excess-call-arity](../../etc/tests/lang/errors/invariant/excess-call-arity.nshape), [Partial application](functions.md#partial-application) |
 
 ## Core terms
@@ -112,9 +120,9 @@ argument levels. `Type u : Type (u + 1)`, so `Type : Type` is rejected.
 inhabits `Type (n + 1)` and never `Type n`, so `Type : Type` is rejected
 instead of escaping into runtime symbol resolution; a bare `Type` is level 0.
 Cumulativity holds for type values: `Type n` inhabits every `Type m` with
-`m > n`, not merely `m = n + 1`. Level variables, level constraints (`max`),
-and level-polymorphic definitions remain open Phase 1 work, so an unsolved level
-is an error rather than silently 0.
+`m > n`, not merely `m = n + 1`. Level variables are declared with
+`{level u}` and instantiated per call; see
+[resolved decisions](#resolved-decisions).
 
 Probed on the current tree (2026-11-16):
 
@@ -140,14 +148,10 @@ Elimination is `Match` with a motive; the kernel checks:
 
 - **Positivity:** the recursive occurrence may appear only in strictly positive
   position in constructor arguments. Negative or double-negative occurrences are
-  rejected. Measured today (2026-11-16): constructor arguments admit data types
-  only, so a negative occurrence cannot be written at all —
-  `enum Bad { Mk(fn(Bad) int) }` is a parse error, not a checked rejection.
-  Positivity is therefore structural for the shipped grammar, and an explicit
-  kernel check is required before higher-order constructor arguments are
-  admitted; do not relax the grammar without it. Since 2026-11-16 that rejection
-  carries a dedicated diagnostic (`enum payload fields must be data types`)
-  rather than failing through the generic payload parse.
+  rejected. *Implemented* as a whole-program check (`semantics/positivity.c`)
+  over the payload types as written, with type-level definitions expanded,
+  mutual groups taken as one family, and enum parameters followed into their
+  own constructors.
 - **Index refinement:** matching a value at index `i` refines the constructor's
   indices to `i`. A branch whose constructor cannot produce `i` is impossible
   and is not required for exhaustiveness. *Implemented* for GADT constructor
@@ -160,27 +164,30 @@ added to the kernel.
 
 ## Equality
 
-*Proposed as a primitive; today equality is reasoning inside refinement
-predicates.* The kernel provides `Eq A x y`, `refl : Eq A x x`, and the `J`
-eliminator (equivalently `subst`), with the computation rule
+The identity type is `proof<a == b>`; `refl` is `prove(t == t)`, accepted for
+any pure term structurally. The eliminator and its derived rules are checked
+on canonical propositions by the type checker and erase at runtime:
 
-    J A x (λ y e. P y e) p x refl  ≡  p
+| Rule | Type |
+| --- | --- |
+| `eq_sym(p)` | `proof<a == b>` to `proof<b == a>` |
+| `eq_trans(p, q)` | `proof<a == b>`, `proof<b == c>` to `proof<a == c>` (any shared side) |
+| `eq_cong(p, f)` | `proof<a == b>` to `proof<f(a) == f(b)>` |
+| `transport(p, q)` | `J`/`subst`: a proof of `P(a)` becomes a proof of `P(b)` |
+| `transport(p, v)` | indexed transport: a value of type `T<..., a, ...>` is the same value at `T<..., b, ...>` |
 
-`refl` is available only when both sides are convertible. There is no
-proof-irrelevance rule, no univalence, and no function extensionality in the
-core: those are opt-in axioms, which the risk register below tracks.
+The computation rule holds by construction: transporting along `refl`
+rewrites a term to itself. There is no proof irrelevance, univalence, or
+function extensionality in the core; those would be opt-in axioms, tracked by
+the risk register below.
 
-Measured today (2026-11-16): there is no kernel identity type, `refl`
-constructor, or eliminator. What exists is the proof-obligation path —
-`proof<2 == 2>` with `prove(2 == 2)` discharges a closed equation and erases,
-while `prove(2 == 3)` fails with `proof obligation failed`. A surface
-`type Eq<a, x, y> = proof<x == y>` does not parse, because the proposition's
-`>` closes the alias argument list, so `Eq` has no surface spelling yet and
-transport is unimplemented. A parser-level `Eq<A, x, y>` sugar was attempted and
-reverted: `prove` induces `proof<binary:==(int:2,int:2)>`, and writing that
-canonical proposition by hand as an annotation is also rejected, so the gap is
-proposition normalization in HM, not parser rewriting. The Phase 3 items stay
-open.
+Evidence from the rest of the proof surface feeds the same rules:
+`prove(P)` is `proof<P>`, a `requires` bound is usable evidence inside the body,
+and a lemma instance `prove(lemma(args))` is a proof of the lemma's conclusion
+at those arguments (its premise is checked by `prove`). The bounded solver that
+decides `prove` of arithmetic is automation, not the kernel: every obligation it
+decides is reported with `"authority":"automation"` in the semantic artifact's
+proof-obligation records.
 
 ## Totality
 
@@ -201,16 +208,35 @@ totality check.
 
 ## Erasure and the ABI model
 
-Proof-only content must not reach the object file. Erasure runs after kernel
-checking and before lowering:
+Proof-only content must not reach the object file. Erasure is a pass of its
+own (`src/code/lang/ny/semantics/erasure.c`) that runs after kernel checking and
+before any backend lowers the program, so the native, LLVM, and Wasm routes see
+the same runtime signatures. It removes a `proof<P>` parameter, and the matching
+argument at every call, when the function is declared at the top level of the
+main file, every use of it is a direct positional call, and the body only
+forwards the witness to other erased slots. An erased argument must be an
+identifier, a literal, or a `prove(...)` witness; a witness is hoisted to an
+expression statement before its statement, so lowering still discharges it, and
+is then discarded. Anything else (a function used as a value, a witness fed to
+an equality rule, a witness in a match arm or lambda) keeps the parameter,
+which is always correct, only not minimal. `NYTRIX_TRACE_ERASURE=1` reports each
+erased function; `NYTRIX_NO_PROOF_ERASURE=1` disables the pass for comparison.
+Proof:
+[proof-erasure](../../etc/tests/lang/types/proofs/proof-erasure.nshape)
+(results on native `-O0`/`-O3`, LLVM ORC, and Wasm; the NYIR call passes only
+the runtime argument).
 
 | Content | Erased | Notes |
 | --- | --- | --- |
-| `proof<P>` values and parameters | yes | Implemented; no ABI slot, no runtime body. |
+| `proof<P>` parameters | yes, by the pass above | No ABI slot and no argument; a parameter the pass cannot prove irrelevant keeps a slot holding the witness digest. |
+| `proof<P>` values | yes | A witness is a compile-time digest constant; no runtime check runs. |
 | Refinement predicates on a value | yes | The predicate is a compile-time obligation; the value keeps its base representation. |
 | `Fin<N>` bound with a literal `N` | yes | Implemented; values keep the integer ABI and `N` is checked at construction. |
 | `Fin<N>` bound with a symbolic `N` | no | `checked_fin(value, bound)` keeps its mandatory runtime test; a symbolic bound is not a proved fact. |
-| Type parameters (`Type A`) | yes | No runtime slot for the type argument. |
+| Type parameters (`<A>`, `{Type A}`) | yes | No runtime slot for the type argument. |
+| Explicit type binders (`fn f(Type A, ...)`) | no | The binder is a value parameter holding the type's name (`str`). |
+| Implicit value binders (`{int n}`) | no | Filled at the call and passed like any parameter (rule 1). |
+| Universe levels (`{level u}`) | yes | Static only; never a parameter. |
 | Indices that do not affect layout | yes | `Vec<A, n>`-style length evidence. |
 | Indices used for layout or bounds checks | no | Must be materialised; the layout rule below applies. |
 | `@total` proof functions reached only from proofs | yes | Emitted only if reflected or called from computational code. |
@@ -224,7 +250,9 @@ Representation rules:
    buffers) must have that index available at runtime; if it cannot be
    recovered, the program is rejected rather than guessed.
 3. `extern`/FFI boundaries accept only fully erased, runtime-representable
-   signatures. A proof or type parameter at an FFI boundary is an error.
+   signatures. A proof, type value, or implicit binder at an FFI boundary is
+   rejected (`extern 'f' takes an erased parameter`); negatives in
+   [eq-kernel-negative](../../etc/tests/lang/errors/type/eq-kernel-negative.nshape).
 4. Erasure must not change observable behaviour: the pass may remove arguments
    and bodies, never reorder or coalesce runtime parameters.
 
@@ -343,7 +371,6 @@ The two closed universe holes are guarded by negative fixtures:
 and
 [kernel-type-self-alias-negative](../../etc/tests/lang/types/dependent/kernel/kernel-type-self-alias-negative.nshape).
 
-A `Vec`-head example and an equality-transport example are deliberately absent:
-`Vec` needs the Phase 2 inductive families and transport needs the Phase 3 `Eq`
-primitive, so neither can be a passing fixture yet. This page only fixes the
-judgements they must satisfy.
+The `Vec` and equality-transport examples are
+[vec-length-index](../../etc/tests/lang/types/dependent/value-index/vec-length-index.nshape)
+and [eq-transport-index](../../etc/tests/lang/types/proofs/eq-transport-index.nshape).

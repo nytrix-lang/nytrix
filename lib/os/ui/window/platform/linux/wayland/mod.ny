@@ -4,7 +4,7 @@
 ;; - core.os.ui.window.platform.linux
 ;; - core.os.ui.window
 ;; - core.os.ui.window.consts
-module core.os.ui.window.platform.linux.wayland(surface_buffer_ready, available, get_backend_name, connect_display, disconnect_display, get_registry, destroy_registry, flush, roundtrip, get_fd, dispatch_pending, dispatch, prepare_read, cancel_read, read_events, wait_events, wait_events_queue, create_event_queue, destroy_event_queue, prepare_read_queue, dispatch_queue_pending, create_proxy_wrapper, destroy_proxy_wrapper, set_proxy_queue, get_proxy_user_data, set_proxy_user_data, get_proxy_version, destroy_proxy, bootstrap_globals, destroy_globals, set_globals, vulkan_supported, vulkan_required_extensions, probe_display, presentation_supported, create_surface, create_wl_surface, create_xdg_surface, create_xdg_toplevel, xdg_toplevel_set_title, create_basic_window, destroy_basic_window, poll_window_events, show_window, hide_window, iconify_window, restore_window, maximize_window, get_window_attrib, set_window_opacity, set_window_resizable, set_title, get_size, set_size, get_cursor_pos, set_cursor_pos, set_window_icon, create_cursor, create_standard_cursor, destroy_cursor, set_cursor, get_key_state, get_mouse_button_state, get_key_name, get_window_monitor, set_window_monitor, set_clipboard, get_clipboard, get_gamma_ramp, set_gamma_ramp, get_monitors, get_primary_monitor, get_monitor_pos, get_monitor_workarea, get_monitor_physical_size, get_monitor_content_scale, get_monitor_name, get_wayland_monitor, get_video_mode, get_video_modes, set_input_mode, get_input_mode, get_key_name, get_key_scancode, text_input_enable, text_input_disable, get_window_content_scale, get_window_opacity, get_window_frame_size, request_window_attention, get_seat_capabilities, poll_joystick_events, inject_input)
+module core.os.ui.window.platform.linux.wayland(surface_buffer_ready, apply_buffer_scale, available, get_backend_name, connect_display, disconnect_display, get_registry, destroy_registry, flush, roundtrip, get_fd, dispatch_pending, dispatch, prepare_read, cancel_read, read_events, wait_events, wait_events_queue, create_event_queue, destroy_event_queue, prepare_read_queue, dispatch_queue_pending, create_proxy_wrapper, destroy_proxy_wrapper, set_proxy_queue, get_proxy_user_data, set_proxy_user_data, get_proxy_version, destroy_proxy, bootstrap_globals, destroy_globals, set_globals, vulkan_supported, vulkan_required_extensions, probe_display, presentation_supported, create_surface, create_wl_surface, create_xdg_surface, create_xdg_toplevel, xdg_toplevel_set_title, create_basic_window, destroy_basic_window, poll_window_events, show_window, hide_window, iconify_window, restore_window, maximize_window, get_window_attrib, set_window_opacity, set_window_resizable, set_title, get_size, set_size, get_cursor_pos, set_cursor_pos, set_window_icon, create_cursor, create_standard_cursor, destroy_cursor, set_cursor, get_key_state, get_mouse_button_state, get_key_name, get_window_monitor, set_window_monitor, set_clipboard, get_clipboard, get_gamma_ramp, set_gamma_ramp, get_monitors, get_primary_monitor, get_monitor_pos, get_monitor_workarea, get_monitor_physical_size, get_monitor_content_scale, get_monitor_name, get_wayland_monitor, get_video_mode, get_video_modes, set_input_mode, get_input_mode, get_key_name, get_key_scancode, text_input_enable, text_input_disable, get_window_content_scale, get_window_opacity, get_window_frame_size, request_window_attention, get_seat_capabilities, poll_joystick_events, inject_input)
 use core
 use core.mem (cstr)
 use core.str as str
@@ -318,6 +318,7 @@ def WL_OUTPUT_MODE_CURRENT = 0x1
 def WL_SURFACE_ATTACH = 1
 def WL_SURFACE_FRAME = 3
 def WL_SURFACE_COMMIT = 6
+def WL_SURFACE_SET_BUFFER_SCALE = 8
 def XDG_WM_BASE_PONG = 3
 def XDG_WM_BASE_GET_XDG_SURFACE = 2
 def XDG_SURFACE_GET_TOPLEVEL = 1
@@ -882,19 +883,19 @@ fn _init_unstable_interfaces() any {
    def wl_surface_iface = _interface_symbol("wl_surface_interface")
    def wl_seat_iface = _interface_symbol("wl_seat_interface")
    _wp_relative_pointer_interface = _create_interface("zwp_relative_pointer_v1", 1,
-      [["destroy", "n", 0]],
+      [["destroy", "", 0]],
       [["relative_motion", "uuffff", 0]])
    _wp_relative_pointer_manager_interface = _create_interface("zwp_relative_pointer_manager_v1", 1,
-      [["destroy", "n", 0],
+      [["destroy", "", 0],
          ["get_relative_pointer", "no", [_wp_relative_pointer_interface, wl_pointer_iface]]])
    _wp_locked_pointer_interface = _create_interface("zwp_locked_pointer_v1", 1,
-      [["destroy", "n", 0],
+      [["destroy", "", 0],
          ["set_cursor_position_hint", "ff", 0],
          ["set_region", "?o", [wl_region_iface]]],
       [["locked", "", 0],
          ["unlocked", "", 0]])
    _wp_confined_pointer_interface = _create_interface("zwp_confined_pointer_v1", 1,
-      [["destroy", "n", 0],
+      [["destroy", "", 0],
          ["set_region", "?o", [wl_region_iface]]],
       [["confined", "", 0],
          ["unconfined", "", 0]])
@@ -913,19 +914,19 @@ fn _init_unstable_interfaces() any {
       0,
    ]
    _wp_pointer_constraints_interface = _create_interface("zwp_pointer_constraints_v1", 1,
-      [["destroy", "n", 0],
+      [["destroy", "", 0],
          ["lock_pointer", "noo?ou", lock_pointer_types],
          ["confine_pointer", "noo?ou", confine_pointer_types]])
    _wp_toplevel_decoration_interface = _create_interface("zxdg_toplevel_decoration_v1", 1,
-      [["destroy", "n", 0],
+      [["destroy", "", 0],
          ["set_mode", "u", 0],
          ["unset_mode", "n", 0]],
       [["configure", "u", 0]])
    _wp_decoration_manager_interface = _create_interface("zxdg_decoration_manager_v1", 1,
-      [["destroy", "n", 0],
+      [["destroy", "", 0],
          ["get_toplevel_decoration", "no", [_wp_toplevel_decoration_interface, _xdg_toplevel_interface]]])
    _wp_text_input_interface = _create_interface("zwp_text_input_v3", 1,
-      [["destroy", "n", 0],
+      [["destroy", "", 0],
          ["enable", "", 0],
          ["disable", "", 0],
          ["set_content_type", "uu", 0],
@@ -939,23 +940,23 @@ fn _init_unstable_interfaces() any {
          ["delete_surrounding_text", "uu", 0],
          ["done", "u", 0]])
    _wp_text_input_manager_interface = _create_interface("zwp_text_input_manager_v3", 1,
-      [["destroy", "n", 0],
+      [["destroy", "", 0],
          ["get_text_input", "no", [_wp_text_input_interface, wl_seat_iface]]],
       0)
    _wp_viewport_interface = _create_interface("wp_viewport", 1,
-      [["destroy", "n", 0],
+      [["destroy", "", 0],
          ["set_source", "ffff", 0],
          ["set_destination", "ii", 0]],
       0)
    _wp_viewporter_interface = _create_interface("wp_viewporter", 1,
-      [["destroy", "n", 0],
+      [["destroy", "", 0],
          ["get_viewport", "no", [_wp_viewport_interface, wl_surface_iface]]],
       0)
    _wp_fractional_scale_interface = _create_interface("wp_fractional_scale_v1", 1,
-      [["destroy", "n", 0]],
+      [["destroy", "", 0]],
       [["preferred_scale", "u", 0]])
    _wp_fractional_scale_manager_interface = _create_interface("wp_fractional_scale_manager_v1", 1,
-      [["destroy", "n", 0],
+      [["destroy", "", 0],
          ["get_fractional_scale", "no", [_wp_fractional_scale_interface, wl_surface_iface]]],
       0)
 }
@@ -1353,6 +1354,7 @@ fn _surface_handle_enter(ptr data, ptr surface, ptr output) any {
    def outputs = win.get("outputs", [])
    win = win.set("outputs", outputs.append(output))
    _windows = dict_set(_windows, int(data), win)
+   _refresh_window_scale(int(data))
 }
 
 fn _surface_handle_leave(ptr data, ptr surface, ptr output) any {
@@ -1369,6 +1371,93 @@ fn _surface_handle_leave(ptr data, ptr surface, ptr output) any {
    }
    win = win.set("outputs", next_outputs)
    _windows = dict_set(_windows, int(data), win)
+   _refresh_window_scale(int(data))
+}
+
+;; HiDPI. A window is drawn at its target scale: the compositor's preferred
+;; fractional scale when it sends one (wp_fractional_scale_v1), otherwise the
+;; largest integer scale of the outputs the surface is on. `content_scale`
+;; holds it, so the framebuffer size is the window size times the scale while
+;; window sizes and pointer positions stay in surface (logical) units.
+fn _window_target_scale(dict win) f64 {
+   def f64 pref = float(win.get("fractional_pref", 0.0))
+   if pref > 0.0 { return pref }
+   mut int best = 1
+   def outputs = win.get("outputs", [])
+   mut i = 0
+   def outputs_n = outputs.len
+   while i < outputs_n {
+      def o = outputs.get(i)
+      def out_state = o ? get_proxy_user_data(o) : 0
+      if out_state {
+         def int s = int(load64_h(out_state, _WO_SCALE))
+         if s > best { best = s }
+      }
+      i += 1
+   }
+   float(best)
+}
+
+fn _refresh_window_scale(int handle) any {
+   mut win = dict_get(_windows, handle, 0)
+   if !is_dict(win) { return 0 }
+   def f64 target = _window_target_scale(win)
+   if float(win.get("content_scale", 1.0)) == target { return 0 }
+   _dbgu("window scale handle=0x" + str.to_hex(handle) + " scale=" + to_str(target))
+   win = win.set("content_scale", target)
+   _windows = dict_set(_windows, handle, win)
+   mut data = dict(4)
+   data = data.set("xscale", target).set("yscale", target)
+   _push_event(win, EVENT_SCALE_UPDATED, data)
+}
+
+;; Surface units covered by a buffer of `px` pixels at `scale`: the inverse of
+;; the framebuffer rule px = int(units * scale), exact for scale >= 1.
+fn _buffer_units(int px, f64 scale) int {
+   if scale <= 1.0 { return px }
+   def f64 units = float(px) / scale
+   mut int u = int(units)
+   if float(u) < units - 0.000001 { u += 1 }
+   u
+}
+
+fn apply_buffer_scale(any win, int w, int h) bool {
+   "Tells the compositor how the buffer about to be presented maps to the surface: an integer buffer scale, or a viewport for a fractional scale. Applies only when the w x h buffer was drawn at the window's current scale, so a buffer of the old size is never committed with the new scale."
+   def handle = is_dict(win) ? win.get("handle", 0) : win
+   mut current = handle ? dict_get(_windows, int(handle), 0) : 0
+   if !is_dict(current) || w <= 0 || h <= 0 { return false }
+   def int lw = int(current.get("w", 0))
+   def int lh = int(current.get("h", 0))
+   def f64 scale = float(current.get("content_scale", 1.0))
+   if lw <= 0 || lh <= 0 || scale <= 0.0 { return false }
+   if w != int(float(lw) * scale) || h != int(float(lh) * scale) { return false }
+   def int whole = int(scale)
+   def bool fractional = float(whole) != scale
+   def viewport = current.get("viewport", 0)
+   def int applied = int(current.get("buffer_scale", 1))
+   if fractional {
+      if !viewport { return false }
+      if current.get("viewport_w", 0) != lw || current.get("viewport_h", 0) != lh {
+         wl_proxy_marshal_flags_ptr_ii(viewport, 2, 0, int(get_proxy_version(viewport)), 0, lw, lh)
+         current = current.set("viewport_w", lw).set("viewport_h", lh)
+      }
+      if applied != 1 {
+         _wl_proxy_marshal_u(handle, WL_SURFACE_SET_BUFFER_SCALE, 1)
+         current = current.set("buffer_scale", 1)
+      }
+   } else {
+      if viewport && current.get("viewport_w", 0) {
+         wl_proxy_marshal_flags_ptr_ii(viewport, 2, 0, int(get_proxy_version(viewport)), 0, -1, -1)
+         current = current.set("viewport_w", 0).set("viewport_h", 0)
+      }
+      if applied != whole {
+         _wl_proxy_marshal_u(handle, WL_SURFACE_SET_BUFFER_SCALE, whole)
+         current = current.set("buffer_scale", whole)
+         _dbgu("set_buffer_scale handle=0x" + str.to_hex(handle) + " scale=" + to_str(whole) + " buffer=" + to_str(w) + "x" + to_str(h))
+      }
+   }
+   _windows = dict_set(_windows, int(handle), current)
+   true
 }
 
 fn _apply_shell_state(any win) any {
@@ -1502,15 +1591,20 @@ fn surface_buffer_ready(any win, int w, int h) bool {
    if !is_dict(current) { return false }
    def state = current.get("resize_state", 0)
    if !state { return false }
-   store64_h(state, w, _WRS_BUFFER_W)
-   store64_h(state, h, _WRS_BUFFER_H)
+   ;; Configure sizes are surface units; the buffer is w x h pixels.
+   def f64 scale = float(current.get("content_scale", 1.0))
+   def int uw = _buffer_units(w, scale)
+   def int uh = _buffer_units(h, scale)
+   store64_h(state, uw, _WRS_BUFFER_W)
+   store64_h(state, uh, _WRS_BUFFER_H)
    store64_h(state, 1, _WRS_DEFER_ACK)
    if !load64_h(state, _WRS_MAXIMIZED) && !load64_h(state, _WRS_FULLSCREEN) {
-      store64_h(state, w, _WRS_FLOAT_W)
-      store64_h(state, h, _WRS_FLOAT_H)
+      store64_h(state, uw, _WRS_FLOAT_W)
+      store64_h(state, uh, _WRS_FLOAT_H)
    }
    if load64_h(state, _WRS_ACK_SERIAL) { _wait_queued_commits(current) }
    _flush_deferred_ack(state)
+   apply_buffer_scale(handle, w, h)
    true
 }
 
@@ -1702,6 +1796,9 @@ fn create_basic_window(any globals, str title, int width, int height, str app_id
             wl_proxy_add_listener(fs, fs_listener, surface)
             win = win.set("fractional_scale", fs)
             win = win.set("fractional_scale_listener", fs_listener)
+            ;; A fractional scale is applied through a viewport.
+            def vp = _create_viewport(state_gi, surface)
+            if vp { win = win.set("viewport", vp) }
          } else {
             destroy_proxy(fs)
          }
@@ -1748,6 +1845,8 @@ fn destroy_basic_window(any win) bool {
    def resize_state = win.get("resize_state", 0)
    _wl_destroy_proxy_slot(win, "locked_pointer", "lock_listener", "lock_data")
    _wl_destroy_proxy_slot(win, "relative_pointer", "rel_listener", "rel_data")
+   _wl_destroy_proxy_slot(win, "viewport")
+   _wl_destroy_proxy_slot(win, "fractional_scale", "fractional_scale_listener")
    if toplevel { destroy_proxy(toplevel) }
    if xdg_surface { destroy_proxy(xdg_surface) }
    if surface { destroy_proxy(surface) }
@@ -1956,7 +2055,7 @@ fn set_cursor(any win, any cursor) any {
 fn _ensure_data_source_iface() any {
    if !_wl_data_source_iface {
       _wl_data_source_iface = _create_interface("wl_data_source", 3,
-         [["offer", "s", 0], ["destroy", "n", 0], ["set_actions", "u", 0]],
+         [["offer", "s", 0], ["destroy", "", 0], ["set_actions", "u", 0]],
          [["target", "?s", 0], ["send", "sh", 0], ["cancelled", "", 0]])
    }
    _wl_data_source_iface
@@ -2402,7 +2501,7 @@ fn _output_handle_scale(ptr data, ptr wl_output, i32 factor) any {
             if outputs.get(j) == wl_output { on_it = true break }
             j += 1
          }
-         if on_it { _push_event(win, EVENT_SCALE_UPDATED, next_scale) }
+         if on_it { _refresh_window_scale(int(handle)) }
       }
       i += 1
    }
@@ -3950,8 +4049,17 @@ fn _fractional_scale_handle_preferred_scale(ptr data, ptr fs_obj, u32 scale_120)
    mut win = dict_get(_windows, int(data), 0)
    if !win || !is_dict(win) { return 0 }
    def scale = float(from_int(scale_120)) / 120.0
-   win = win.set("content_scale", scale)
+   win = win.set("fractional_pref", scale)
    _windows = dict_set(_windows, int(data), win)
+   _refresh_window_scale(int(data))
+}
+
+fn _create_viewport(any state, any surface) any {
+   def mgr = load64_h(state, _WG_VIEWPORTER)
+   if !mgr { return 0 }
+   _init_unstable_interfaces()
+   if !_wp_viewport_interface { return 0 }
+   wl_proxy_marshal_flags_ptr_obj(mgr, 1, _wp_viewport_interface, int(get_proxy_version(mgr)), 0, 0, surface)
 }
 
 fn _create_text_input(any state, any seat) any {
@@ -3991,8 +4099,11 @@ fn text_input_disable(any win) bool {
 }
 
 fn get_window_content_scale(any win) list {
-   "Returns [sx, sy] content scale for a Wayland window(from wp_fractional_scale_v1 or 1.0)."
+   "Returns [sx, sy] content scale for a Wayland window: the preferred fractional scale, else the largest integer scale of its outputs, else 1.0."
    if !win || !is_dict(win) { return [1.0, 1.0] }
+   def handle = win.get("handle", 0)
+   def current = handle ? dict_get(_windows, int(handle), 0) : 0
+   if is_dict(current) { win = current }
    def scale = float(win.get("content_scale", 1.0))
    [scale, scale]
 }

@@ -7862,6 +7862,17 @@ ordinary_call:
      * erased, so the call evaluates nothing and yields the witness digest of
      * its result proposition when that is derivable here.
      */
+    /* `transport(p, v)` of a value (not of a proof) is that value. */
+    if (strcmp(canon_leaf, "transport") == 0 && e->as.call.args.len == 2) {
+      const expr_t *moved = e->as.call.args.data[1].val;
+      char *moved_proof = nyr_proof_rule_witness_type(b, moved, 0);
+      const char *moved_type = nyr_expr_type_name(b, moved);
+      bool is_proof = moved_proof ||
+                      (moved_type && strncmp(moved_type, "proof<", 6) == 0);
+      free(moved_proof);
+      if (!is_proof)
+        return nyr_lower_expr(b, moved);
+    }
     char *result = nyr_proof_rule_witness_type(b, e, 0);
     uint64_t digest = result ? ny_hash64_cstr(result) : 0;
     free(result);

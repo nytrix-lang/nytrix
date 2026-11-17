@@ -1,0 +1,39 @@
+shape vec_length_index {
+  family "runtime/compiler"
+  generator "embedded"
+  features ["ny", "dependent", "inductive", "index", "match"]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=orc; --wasm"
+  expect compile_and_run
+  expect_message "VEC-INDEX-OK 1 5 2"
+  source ny <<'NY'
+use core
+;; A length-indexed vector: the evidence `where n is k + 1` relates the
+;; family's index to the tail's. Construction computes the index from the
+;; arguments, a literal index rules out the constructor that cannot produce
+;; it, and each payload is typed at its solved index (the tail of a
+;; `Vec<int, 2>` is a `Vec<int, 1>`).
+enum Vec<A, n> {
+   Nil where n is 0,
+   Cons(A head, Vec<A, k> tail) where n is k + 1
+}
+def Vec<int, 0> e = Vec.Nil
+def Vec<int, 1> one = Vec.Cons(5, e)
+def Vec<int, 2> two = Vec.Cons(7, one)
+def Vec<int, 3> three = Vec.Cons(1, two)
+fn head3(Vec<int, 3> xs) int {
+   match xs { Vec.Cons(h, t) -> h }
+}
+fn second(Vec<int, 2> xs) int {
+   match xs { Vec.Cons(h, t) -> match t { Vec.Cons(h2, t2) -> h2 } }
+}
+;; A symbolic index keeps both constructors possible.
+fn len_at_most_two(int m, Vec<int, m> xs) int {
+   match xs {
+      Vec.Nil -> 0
+      Vec.Cons(h, t) -> match t { Vec.Nil -> 1 Vec.Cons(h2, t2) -> 2 }
+   }
+}
+print("VEC-INDEX-OK", head3(three), second(two), len_at_most_two(2, two))
+NY
+}

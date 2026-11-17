@@ -1270,7 +1270,7 @@ static size_t rt_dynamic_callback_expand_word_args(int64_t env,
         words[count++] = header[1];
         continue;
       }
-      if (rt_native_is_str(value) || is_v_str(value)) {
+      if (is_v_str(value)) {
         if (count + 3 > capacity)
           return 0;
         words[count++] = value;

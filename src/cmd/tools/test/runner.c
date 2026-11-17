@@ -6685,6 +6685,12 @@ static int run_suite(const char *suite_name, StrVec *files, const char *bin,
 #endif
           if (rc == 0) {
             char *message = shape_meta_string(run[i].path, "expect_message");
+            /* `expect_stdout` is the other spelling fixtures use; it was
+             * read nowhere, so 61 fixtures checked only their exit code. */
+            if (!message || !*message) {
+              free(message);
+              message = shape_meta_string(run[i].path, "expect_stdout");
+            }
             if (message && *message) {
               char *output = read_small_file(run[i].tmp_out);
               rc = output && strstr(output, message) ? 0 : 1;

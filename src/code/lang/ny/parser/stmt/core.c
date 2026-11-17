@@ -1393,7 +1393,250 @@ bool parser_register_type_alias(parser_t *p, const char *name,
   return true;
 }
 
+static const char *parse_type_ref(parser_t *p, const char *err_msg);
+
+/*
+ * Continues a value index after its first term: `n` `+ 1` `- k` ... and
+ * returns the canonical spelling (`n+1`). `first` is the term already read.
+ */
+static const char *parse_index_tail(parser_t *p, const char *first) {
+  if (p->cur.kind != NY_T_PLUS && p->cur.kind != NY_T_MINUS)
+    return first;
+  char raw[256];
+  size_t n = (size_t)snprintf(raw, sizeof(raw), "%s", first ? first : "");
+  while ((p->cur.kind == NY_T_PLUS || p->cur.kind == NY_T_MINUS) &&
+         n + 2 < sizeof(raw)) {
+    raw[n++] = p->cur.kind == NY_T_PLUS ? '+' : '-';
+    parser_advance(p);
+    if (p->cur.kind != NY_T_NUMBER && p->cur.kind != NY_T_IDENT) {
+      parser_error(p, p->cur, "expected an index term after '+' or '-'",
+                   "indices are linear: 'n + 1', 'k - 2', '3'");
+      break;
+    }
+    size_t take = p->cur.len < sizeof(raw) - n - 1 ? p->cur.len
+                                                    : sizeof(raw) - n - 1;
+    memcpy(raw + n, p->cur.lexeme, take);
+    n += take;
+    parser_advance(p);
+  }
+  raw[n] = '\0';
+  char canon[256];
+  ny_index_canon(raw, canon, sizeof(canon));
+  return parser_intern(p, canon, strlen(canon));
+}
+
+static bool type_src_ident_start(char c) {
+  return isalpha((unsigned char)c) || c == '_';
+}
+static bool type_src_ident_char(char c) {
+  return isalnum((unsigned char)c) || c == '_' || c == '.';
+}
+
+/* Appends `src` to `out`, replacing each name of a type-level definition by
+ * its source body (parameters substituted by the written arguments). */
+static bool type_src_expand(parser_t *p, const char *src, size_t len,
+                            char *out, size_t cap, size_t *used,
+                            unsigned depth) {
+  if (depth > 16)
+    return false;
+  size_t i = 0;
+  while (i < len) {
+    if (!type_src_ident_start(src[i]) ||
+        (i > 0 && type_src_ident_char(src[i - 1]))) {
+      if (*used + 1 >= cap)
+        return false;
+      out[(*used)++] = src[i++];
+      continue;
+    }
+    size_t start = i;
+    while (i < len && type_src_ident_char(src[i]))
+      i++;
+    char name[256];
+    size_t nlen = i - start < sizeof(name) - 1 ? i - start : sizeof(name) - 1;
+    memcpy(name, src + start, nlen);
+    name[nlen] = '\0';
+    parser_type_alias *a = parser_find_type_alias(p, name);
+    if (!a || !a->src_body) {
+      if (*used + nlen >= cap)
+        return false;
+      memcpy(out + *used, src + start, nlen);
+      *used += nlen;
+      continue;
+    }
+    /* Arguments `<...>` of an applied definition. */
+    const char *args[16];
+    size_t arg_len[16];
+    size_t argc = 0;
+    size_t j = i;
+    while (j < len && src[j] == ' ')
+      j++;
+    if (j < len && src[j] == '<') {
+      int level = 0;
+      size_t arg_start = j + 1;
+      for (; j < len; ++j) {
+        char c = src[j];
+        if (c == '<' || c == '(')
+          level++;
+        else if (c == '>' || c == ')') {
+          level--;
+          if (level == 0) {
+            if (argc < 16) {
+              args[argc] = src + arg_start;
+              arg_len[argc++] = j - arg_start;
+            }
+            j++;
+            break;
+          }
+        } else if (c == ',' && level == 1 && argc < 16) {
+          args[argc] = src + arg_start;
+          arg_len[argc++] = j - arg_start;
+          arg_start = j + 1;
+        }
+      }
+      i = j;
+    }
+    /* Substitute parameters, then expand the body in turn. */
+    char body[1024];
+    size_t bused = 0;
+    const char *b = a->src_body;
+    size_t blen = strlen(b);
+    for (size_t k = 0; k < blen;) {
+      if (type_src_ident_start(b[k]) && (k == 0 || !type_src_ident_char(b[k - 1]))) {
+        size_t s0 = k;
+        while (k < blen && type_src_ident_char(b[k]))
+          k++;
+        bool replaced = false;
+        for (size_t m = 0; m < a->param_count && m < argc; ++m) {
+          if (a->params[m] && strlen(a->params[m]) == k - s0 &&
+              strncmp(a->params[m], b + s0, k - s0) == 0) {
+            if (bused + arg_len[m] >= sizeof(body))
+              return false;
+            memcpy(body + bused, args[m], arg_len[m]);
+            bused += arg_len[m];
+            replaced = true;
+            break;
+          }
+        }
+        if (!replaced) {
+          if (bused + (k - s0) >= sizeof(body))
+            return false;
+          memcpy(body + bused, b + s0, k - s0);
+          bused += k - s0;
+        }
+        continue;
+      }
+      if (bused + 1 >= sizeof(body))
+        return false;
+      body[bused++] = b[k++];
+    }
+    if (!type_src_expand(p, body, bused, out, cap, used, depth + 1))
+      return false;
+  }
+  return true;
+}
+
+/* Source text of a type between two source positions, whitespace collapsed
+ * and type-level definitions expanded. */
+const char *parser_type_src_text(parser_t *p, const char *start,
+                                 const char *end) {
+  if (!p || !start || !end || end <= start || end - start > 2048)
+    return NULL;
+  char raw[2048];
+  size_t r = 0;
+  for (const char *q = start; q < end && r + 1 < sizeof(raw); ++q) {
+    char c = *q;
+    if (c == '\n' || c == '\t' || c == '\r')
+      c = ' ';
+    if (c == ' ' && (r == 0 || raw[r - 1] == ' '))
+      continue;
+    raw[r++] = c;
+  }
+  while (r > 0 && raw[r - 1] == ' ')
+    r--;
+  char out[4096];
+  size_t used = 0;
+  if (!type_src_expand(p, raw, r, out, sizeof(out), &used, 0))
+    return parser_intern(p, raw, r);
+  return parser_intern(p, out, used);
+}
+
+/*
+ * Function type spelling `fn(T1, T2) R` (R optional).  Returns the
+ * structural text, e.g. `fn(int,Nat) Ord`; type references erase it to the
+ * runtime `fnptr`, while enum declarations inspect the domain for strict
+ * positivity.
+ */
+static const char *parse_fn_type_text_in(parser_t *p, bool nested) {
+  if (!parser_match(p, NY_T_FN))
+    return NULL;
+  if (!parser_match(p, NY_T_LPAREN)) {
+    parser_error(p, p->cur, "expected '(' in function type",
+                 "write 'fn(int) int'");
+    return NULL;
+  }
+  char buf[1024];
+  size_t used = 0;
+  used += (size_t)snprintf(buf + used, sizeof(buf) - used, "fn(");
+  bool first = true;
+  while (p->cur.kind != NY_T_RPAREN && p->cur.kind != NY_T_EOF) {
+    const char *arg = p->cur.kind == NY_T_FN
+                          ? parse_fn_type_text_in(p, true)
+                          : parse_type_ref(p, "expected parameter type in "
+                                              "function type");
+    if (!arg)
+      return NULL;
+    if (used < sizeof(buf))
+      used += (size_t)snprintf(buf + used, sizeof(buf) - used, "%s%s",
+                               first ? "" : ",", arg);
+    first = false;
+    if (!parser_match(p, NY_T_COMMA))
+      break;
+  }
+  if (!parser_match(p, NY_T_RPAREN)) {
+    parser_error(p, p->cur, "expected ')' in function type", NULL);
+    return NULL;
+  }
+  if (used < sizeof(buf))
+    used += (size_t)snprintf(buf + used, sizeof(buf) - used, ")");
+  if (p->cur.kind == NY_T_FN || p->cur.kind == NY_T_IDENT ||
+      p->cur.kind == NY_T_QUESTION || p->cur.kind == NY_T_STAR) {
+    /* A trailing identifier may be the parameter/field name: only treat it
+     * as the result type when another identifier follows it. */
+    bool has_result = nested || p->cur.kind != NY_T_IDENT;
+    if (!has_result) {
+      token_t next = parser_peek(p);
+      has_result = next.kind == NY_T_IDENT || next.kind == NY_T_LT ||
+                   next.kind == NY_T_DOT;
+    }
+    if (has_result) {
+      const char *ret = p->cur.kind == NY_T_FN
+                            ? parse_fn_type_text_in(p, nested)
+                            : parse_type_ref(p, "expected function result "
+                                                "type");
+      if (!ret)
+        return NULL;
+      if (used < sizeof(buf))
+        used += (size_t)snprintf(buf + used, sizeof(buf) - used, " %s", ret);
+    }
+  }
+  if (used >= sizeof(buf)) {
+    parser_error(p, p->prev, "function type is too long", NULL);
+    return NULL;
+  }
+  return parser_intern(p, buf, used);
+}
+
+static const char *parse_fn_type_text(parser_t *p) {
+  return parse_fn_type_text_in(p, false);
+}
+
+const char *ny_parser_type_ref(parser_t *p, const char *err_msg) {
+  return parse_type_ref(p, err_msg);
+}
+
 static const char *parse_type_ref(parser_t *p, const char *err_msg) {
+  if (p->cur.kind == NY_T_FN)
+    return parse_fn_type_text(p) ? "fnptr" : NULL;
   size_t nullable_depth = 0;
   while (parser_match(p, NY_T_QUESTION))
     nullable_depth++;
@@ -1426,6 +1669,101 @@ static const char *parse_type_ref(parser_t *p, const char *err_msg) {
    * bound, `Type 5`, so a constraint over closed levels needs no solver. A
    * malformed constraint is an error rather than a silent level 0.
    */
+  /* `Type w A` where `w` was never declared as a level. */
+  if (parser_type_ref_is_type_universe(base) && p->cur.kind == NY_T_IDENT &&
+      parser_peek(p).kind == NY_T_IDENT) {
+    bool known = false;
+    for (size_t i = 0; i < p->level_scope_len; ++i)
+      known |= strlen(p->level_scope[i]) == p->cur.len &&
+               strncmp(p->level_scope[i], p->cur.lexeme, p->cur.len) == 0;
+    if (!known) {
+      parser_error(p, p->cur, "undeclared universe level",
+                   "declare it with '{level u}' on the function");
+      free(base);
+      return NULL;
+    }
+  }
+  /* `Type u` for a level variable in scope; `Type max(u, 3)`. */
+  if (parser_type_ref_is_type_universe(base) && p->cur.kind == NY_T_IDENT &&
+      p->level_scope_len > 0) {
+    for (size_t i = 0; i < p->level_scope_len; ++i) {
+      if (strlen(p->level_scope[i]) == p->cur.len &&
+          strncmp(p->level_scope[i], p->cur.lexeme, p->cur.len) == 0) {
+        size_t total = strlen(base) + p->cur.len + 2;
+        char *canon = arena_alloc(p->arena, total);
+        if (!canon) {
+          free(base);
+          return NULL;
+        }
+        snprintf(canon, total, "%s %s", base, p->level_scope[i]);
+        parser_advance(p);
+        free(base);
+        return canon;
+      }
+    }
+  }
+  if (parser_type_ref_is_type_universe(base) && p->cur.kind == NY_T_IDENT &&
+      p->cur.len == 3 && strncmp(p->cur.lexeme, "max", 3) == 0 &&
+      parser_peek(p).kind == NY_T_LPAREN && p->level_scope_len > 0) {
+    parser_t probe = *p;
+    parser_advance(&probe);
+    parser_advance(&probe);
+    bool symbolic = probe.cur.kind == NY_T_IDENT;
+    parser_advance(&probe);
+    if (probe.cur.kind == NY_T_COMMA) {
+      parser_advance(&probe);
+      symbolic = symbolic || probe.cur.kind == NY_T_IDENT;
+    }
+    if (symbolic) {
+      parser_advance(p); /* max */
+      parser_advance(p); /* ( */
+      char parts[2][64] = {{0}, {0}};
+      for (int i = 0; i < 2; ++i) {
+        if (p->cur.kind != NY_T_IDENT && p->cur.kind != NY_T_NUMBER) {
+          parser_error(p, p->cur, "expected a level in max(...)",
+                       "write 'Type max(u, 3)'");
+          free(base);
+          return NULL;
+        }
+        bool known = p->cur.kind == NY_T_NUMBER;
+        for (size_t k = 0; !known && k < p->level_scope_len; ++k)
+          known = strlen(p->level_scope[k]) == p->cur.len &&
+                  strncmp(p->level_scope[k], p->cur.lexeme, p->cur.len) == 0;
+        if (!known) {
+          parser_error(p, p->cur, "undeclared universe level",
+                       "declare it with '{level u}' on the function");
+          free(base);
+          return NULL;
+        }
+        snprintf(parts[i], sizeof(parts[i]), "%.*s", (int)p->cur.len,
+                 p->cur.lexeme);
+        parser_advance(p);
+        if (i == 0 && !parser_match(p, NY_T_COMMA)) {
+          parser_error(p, p->cur, "expected ',' between max(...) levels", NULL);
+          free(base);
+          return NULL;
+        }
+      }
+      if (!parser_match(p, NY_T_RPAREN)) {
+        parser_error(p, p->cur, "expected ')' after max(...) levels", NULL);
+        free(base);
+        return NULL;
+      }
+      /* max(u, u) is u; otherwise the constraint stays symbolic. */
+      size_t total = strlen(base) + 140;
+      char *canon = arena_alloc(p->arena, total);
+      if (!canon) {
+        free(base);
+        return NULL;
+      }
+      if (strcmp(parts[0], parts[1]) == 0)
+        snprintf(canon, total, "%s %s", base, parts[0]);
+      else
+        snprintf(canon, total, "%s max(%s,%s)", base, parts[0], parts[1]);
+      free(base);
+      return canon;
+    }
+  }
   if (parser_type_ref_is_type_universe(base) && p->cur.kind == NY_T_IDENT &&
       p->cur.len == 3 && strncmp(p->cur.lexeme, "max", 3) == 0 &&
       parser_peek(p).kind == NY_T_LPAREN) {
@@ -1632,6 +1970,9 @@ static const char *parse_type_ref(parser_t *p, const char *err_msg) {
       } else {
         arg = parse_type_ref(p, "expected generic type argument");
       }
+      /* A value index may be linear arithmetic: `Vec<A, n + 1>`. */
+      if (arg)
+        arg = parse_index_tail(p, arg);
       if (!arg)
         break;
       size_t arg_len = strlen(arg);
@@ -1767,13 +2108,26 @@ static stmt_t *parse_type_level_stmt(parser_t *p) {
     parser_sync_stmt_boundary(p);
     return NULL;
   }
-  const char *body = parse_type_ref(p, "expected type-level definition body");
+  const char *body_start = p->cur.lexeme;
+  /* A function type here always has its result: nothing follows the body
+   * that could be a binder name (`type F = fn(int) int`). */
+  const char *body =
+      p->cur.kind == NY_T_FN
+          ? (parse_fn_type_text_in(p, true) ? "fnptr" : NULL)
+          : parse_type_ref(p, "expected type-level definition body");
   if (!body) {
     parser_sync_stmt_boundary(p);
     return NULL;
   }
+  const char *body_src =
+      parser_type_src_text(p, body_start, p->prev.lexeme + p->prev.len);
   parser_match(p, NY_T_SEMI);
-  parser_register_type_alias(p, name, patterns, arity, body, name_tok, true);
+  if (parser_register_type_alias(p, name, patterns, arity, body, name_tok,
+                                 true)) {
+    parser_type_alias *a = parser_find_type_alias(p, name);
+    if (a)
+      a->src_body = body_src;
+  }
   return NULL;
 }
 
@@ -2034,6 +2388,13 @@ static size_t parse_align_attr(parser_t *p, const char *kind) {
 }
 
 static const char *parse_func_return_type(parser_t *p) {
+  /* `fn f(...) _ { ... }`: a hole for the result type, which inference
+   * fills exactly as for an unannotated result. */
+  if (p->cur.kind == NY_T_IDENT && p->cur.len == 1 && p->cur.lexeme[0] == '_' &&
+      parser_peek(p).kind == NY_T_LBRACE) {
+    parser_advance(p);
+    return NULL;
+  }
   if (!parser_token_can_start_type_ref(p->cur))
     return NULL;
   parser_t probe = *p;
@@ -2112,8 +2473,61 @@ static bool fn_type_names_param(const stmt_func_t *fn, const char *type_name) {
  * instantiation for int and str while static per-instance checking remains
  * unimplemented.
  */
+static bool type_ref_is_universe(const char *t) {
+  if (!t || strncmp(t, "Type", 4) != 0)
+    return false;
+  if (t[4] == '\0')
+    return true;
+  if (t[4] != ' ' || !t[5])
+    return false;
+  /* `Type 3`, `Type u`, `Type max(u,3)`. */
+  for (const char *d = t + 5; *d; ++d)
+    if (!(isalnum((unsigned char)*d) || *d == '_' || *d == '(' || *d == ')' ||
+          *d == ','))
+      return false;
+  return true;
+}
+
 static void fn_erase_type_param_annotations(parser_t *p, stmt_t *s) {
-  if (!s || s->kind != NY_S_FUNC || s->as.fn.type_params.len == 0)
+  if (!s || s->kind != NY_S_FUNC)
+    return;
+  /* An implicit value binder must be fixed by some parameter's type, or no
+   * call could ever solve it. */
+  if (s->as.fn.erased_param_types.len == 0)
+    for (size_t i = 0; i < s->as.fn.params.len; ++i) {
+      const param_t *binder = &s->as.fn.params.data[i];
+      if (!binder->implicit || !binder->name)
+        continue;
+      bool used = false;
+      for (size_t j = 0; j < s->as.fn.params.len && !used; ++j) {
+        const param_t *other = &s->as.fn.params.data[j];
+        used = !other->implicit && other->type &&
+               type_ref_contains_ident(other->type, strlen(other->type),
+                                       binder->name);
+      }
+      if (!used)
+        parser_error(p, binder->tok,
+                     "implicit binder is not determined by any parameter type",
+                     "mention it in a parameter's type, e.g. 'Fin<n> i'");
+    }
+  /*
+   * An explicit type binder (`fn id(Type A, A x) A`) is a parameter whose
+   * type is a universe: it stays a runtime argument (the erased type value)
+   * and also declares `A` for the parameters after it, as `<A>` does.
+   */
+  if (s->as.fn.erased_param_types.len == 0)
+    for (size_t i = 0; i < s->as.fn.params.len; ++i) {
+      const param_t *param = &s->as.fn.params.data[i];
+      if (!param->name || !type_ref_is_universe(param->type))
+        continue;
+      bool seen = false;
+      for (size_t k = 0; k < s->as.fn.type_params.len; ++k)
+        if (strcmp(s->as.fn.type_params.data[k], param->name) == 0)
+          seen = true;
+      if (!seen)
+        vec_push_arena(p->arena, &s->as.fn.type_params, param->name);
+    }
+  if (s->as.fn.type_params.len == 0)
     return;
   if (s->as.fn.erased_param_types.len == 0) {
     for (size_t i = 0; i < s->as.fn.params.len; ++i)
@@ -2124,13 +2538,30 @@ static void fn_erase_type_param_annotations(parser_t *p, stmt_t *s) {
   for (size_t i = 0; i < s->as.fn.params.len; ++i) {
     if (fn_type_names_param(&s->as.fn, s->as.fn.params.data[i].type))
       s->as.fn.params.data[i].type = NULL;
+    /* An explicit binder's argument is the erased type value, a `str`; the
+     * universe annotation stays in erased_param_types for checking. */
+    else if (type_ref_is_universe(s->as.fn.params.data[i].type))
+      s->as.fn.params.data[i].type = "str";
   }
   if (fn_type_names_param(&s->as.fn, s->as.fn.return_type))
     s->as.fn.return_type = NULL;
+  else if (type_ref_is_universe(s->as.fn.return_type))
+    s->as.fn.return_type = "str"; /* a type value result is its name */
   s->as.fn.dependent_return_param = NULL;
 }
 
+static stmt_t *parse_func_impl(parser_t *p, ny_attribute_list attrs);
+
+/* Level variables are scoped to the function that declares them. */
 static stmt_t *parse_func(parser_t *p, ny_attribute_list attrs) {
+  size_t saved = p->level_scope_len;
+  p->level_scope_len = 0;
+  stmt_t *s = parse_func_impl(p, attrs);
+  p->level_scope_len = saved;
+  return s;
+}
+
+static stmt_t *parse_func_impl(parser_t *p, ny_attribute_list attrs) {
   token_t tok = p->cur;
   parser_expect(p, NY_T_FN, "'fn'", NULL);
   bool is_lemma = tok_is_ident_text(p->cur, "lemma");
@@ -2180,6 +2611,8 @@ static stmt_t *parse_func(parser_t *p, ny_attribute_list attrs) {
    * never passed.  Only type binders (`Type A`, or a bare `A`) are accepted;
    * an implicit value binder (`{int n}`) has no elaboration yet.
    */
+  ny_param_list implicit_values = {0};
+  size_t value_binders = 0;
   if (p->cur.kind == NY_T_LBRACE &&
       (parser_peek(p).kind == NY_T_IDENT ||
        parser_peek(p).kind == NY_T_RBRACE)) {
@@ -2195,9 +2628,33 @@ static stmt_t *parse_func(parser_t *p, ny_attribute_list attrs) {
         parser_advance(p);
       else if (p->cur.kind == NY_T_IDENT &&
                (parser_peek(p).kind == NY_T_IDENT)) {
-        parser_error(p, p->cur, "implicit value binders are not supported",
-                     "only type binders are implicit: write '{Type A}'");
-        return NULL;
+        /* `{int n}`: an implicit value binder, solved at each call from
+         * the argument types (`Fin<5>` gives n = 5). */
+        param_t binder = {0};
+        binder.type = parser_intern(p, p->cur.lexeme, p->cur.len);
+        parser_advance(p);
+        if (strcmp(binder.type, "level") == 0) {
+          /* `{level u}`: a universe level variable, a static index only. */
+          const char *level = parser_intern(p, p->cur.lexeme, p->cur.len);
+          vec_push_arena(p->arena, &fn_stmt->as.fn.level_params, level);
+          if (p->level_scope_len < 8)
+            p->level_scope[p->level_scope_len++] = level;
+          parser_advance(p);
+          ++value_binders;
+          if (!parser_match(p, NY_T_COMMA))
+            break;
+          continue;
+        }
+        binder.tok = p->cur;
+        binder.name = parser_intern(p, p->cur.lexeme, p->cur.len);
+        binder.implicit = true;
+        binder.syntax_ctx = p->current_syntax_ctx;
+        vec_push_arena(p->arena, &implicit_values, binder);
+        parser_advance(p);
+        ++value_binders;
+        if (!parser_match(p, NY_T_COMMA))
+          break;
+        continue;
       }
       if (p->cur.kind != NY_T_IDENT) {
         parser_error(p, p->cur, "expected implicit binder name",
@@ -2220,7 +2677,7 @@ static stmt_t *parse_func(parser_t *p, ny_attribute_list attrs) {
                    "write 'fn id{Type A}(A x) A'");
       return NULL;
     }
-    if (fn_stmt->as.fn.type_params.len == before) {
+    if (fn_stmt->as.fn.type_params.len == before && value_binders == 0) {
       parser_error(p, p->prev, "empty implicit binder list",
                    "remove the '{}' or name at least one binder");
       return NULL;
@@ -2228,6 +2685,8 @@ static stmt_t *parse_func(parser_t *p, ny_attribute_list attrs) {
   }
   parser_expect(p, NY_T_LPAREN, NULL, "'(' ");
   ny_param_list params = {0};
+  for (size_t i = 0; i < implicit_values.len; ++i)
+    vec_push_arena(p->arena, &params, implicit_values.data[i]);
   while (p->cur.kind != NY_T_RPAREN) {
     if (p->cur.kind == NY_T_COMPTIME) {
       token_t splice_tok = p->cur;
@@ -3926,33 +4385,25 @@ static stmt_t *parse_enum(parser_t *p) {
         enum_field_t field = {0};
         field.tok = p->cur;
         /*
-         * Constructor payloads are data. A function type would place the
-         * family in a negative position, so reject it explicitly rather than
-         * failing later on the generic payload parse.
+         * A function-typed payload is admitted here; whether the family stays
+         * strictly positive in it is decided once every enum is known
+         * (`ny_check_enum_positivity`), from the source text kept in
+         * `type_src`, because aliases, mutual families, and parameterised
+         * enums can each hide a negative occurrence.
          */
+        const char *field_start = p->cur.lexeme;
         if (p->cur.kind == NY_T_FN) {
-          parser_error(p, p->cur, "enum payload fields must be data types",
-                       "function types are not admitted in constructor "
-                       "arguments (positivity)");
-          /* Skip the whole function type, including its nested parameter
-           * list, so only the positivity error is reported. Stopping at the
-           * first ')' would leave the return type unconsumed and cascade. */
-          int payload_depth = 0;
-          while (p->cur.kind != NY_T_EOF) {
-            if (p->cur.kind == NY_T_LPAREN) {
-              payload_depth++;
-            } else if (p->cur.kind == NY_T_RPAREN) {
-              if (payload_depth == 0)
-                break;
-              payload_depth--;
-            } else if (p->cur.kind == NY_T_RBRACE && payload_depth == 0) {
-              break;
-            }
-            parser_advance(p);
-          }
-          break;
+          const char *fn_type = parse_fn_type_text(p);
+          if (!fn_type)
+            break;
+          field.type_name = "fnptr";
+        } else {
+          field.type_name =
+              parse_type_ref(p, "expected enum payload field type");
         }
-        field.type_name = parse_type_ref(p, "expected enum payload field type");
+        if (field.type_name)
+          field.type_src = parser_type_src_text(
+              p, field_start, p->prev.lexeme + p->prev.len);
 
         parser_match(p, NY_T_COLON);
         if (p->cur.kind == NY_T_IDENT) {
@@ -4009,8 +4460,17 @@ static stmt_t *parse_enum(parser_t *p) {
                        "write 'Variant(...) where t is int'");
         } else {
           parser_advance(p);
+          /* A type (`where t is int`) or a value index (`where n is 0`,
+           * `where n is k + 1`). */
+          const char *index;
+          if (p->cur.kind == NY_T_NUMBER) {
+            index = arena_strndup(p->arena, p->cur.lexeme, p->cur.len);
+            parser_advance(p);
+          } else {
+            index = parse_type_ref(p, "expected enum index type after 'is'");
+          }
           item.index_constraint_type =
-              parse_type_ref(p, "expected enum index type after 'is'");
+              index ? parse_index_tail(p, index) : NULL;
         }
       }
     }

@@ -1,0 +1,154 @@
+shape heap_collect_frees_unreachable_keeps_reachable {
+  family "runtime/memory"
+  generator "embedded"
+  features ["ny", "runtime", "memory", "collector"]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect compile_and_run
+  expect_message "HEAP-COLLECT-OK"
+  source ny <<'NY'
+use core
+;; __heap_collect is the frame-boundary hook of the UI loop: lists, dicts and
+;; strings that nothing refers to are freed, everything still reachable is
+;; untouched. Reachability is conservative, so objects held only in a global,
+;; inside another container, in raw memory, in a list that keeps growing or
+;; in a closure must all survive, with their contents intact.
+mut keep = []
+mut kd = {"seed": [1, 2, 3]}
+mut ptr raw = 0
+mut grown = []
+fn rect(int i) list { [i, i + 1, i + 2, i + 3] }
+fn make_counter(list state) any {
+   return fn(int k) int { state[k] }
+}
+;; The list this makes is referenced from raw memory only.
+fn park(ptr slot) bool {
+   def fresh = [41, 42, 43]
+   __store64_idx(slot, 0, fresh)
+   true
+}
+fn frame(int f) int {
+   mut sum = 0
+   mut i = 0
+   while i < 400 {
+      def r = rect(i)
+      def d = {"x": r, "name": "w" + to_str(i)}
+      def any nm = d["name"]
+      sum += r[2] + len(nm)
+      i += 1
+   }
+   if f % 10 == 0 {
+      keep = keep.append([f, "frame" + to_str(f), {"f": f}])
+      kd["k" + to_str(f)] = [f, f * 2]
+   }
+   grown = grown.append(f)
+   sum
+}
+def started = __heap_collect(0)
+assert(started == 0, "the first call only starts recording")
+raw = malloc(64)
+park(raw)
+def counter = make_counter([7, 8, 9])
+mut f = 0
+mut total = 0
+mut freed = 0
+while f < 200 {
+   total += frame(f)
+   if f % 4 == 3 { freed += __heap_collect(1) }
+   f += 1
+}
+freed += __heap_collect(2)
+#linux {
+   assert(freed > 0, "unreachable temporaries were freed")
+   assert(__heap_collect(10) >= 50, "every forced collection ran")
+   assert(__heap_collect(11) >= 1, "the full collection ran")
+}
+assert(total == 200 * 82090, "frame sums")
+assert(len(keep) == 20, "kept frames")
+mut j = 0
+while j < len(keep) {
+   def e = keep[j]
+   def any d = e[2]
+   assert(e[0] == j * 10, "kept number")
+   assert(e[1] == "frame" + to_str(j * 10), "kept string")
+   assert(d["f"] == j * 10, "kept dict")
+   def v = kd["k" + to_str(j * 10)]
+   assert(v[0] == j * 10 && v[1] == j * 20, "kept list in dict")
+   j += 1
+}
+assert(kd["seed"] == [1, 2, 3], "list that predates the collector")
+def any back = __load64_tagged_idx(raw, 0)
+assert(len(back) == 3 && back[1] == 42, "list held only in raw memory")
+assert(len(grown) == 200 && grown[199] == 199, "grown list")
+assert(counter(0) == 7 && counter(2) == 9, "list captured by a closure")
+free(raw)
+print("HEAP-COLLECT-OK")
+NY
+}
+shape heap_collect_keeps_objects_held_by_another_thread {
+  family "runtime/memory"
+  generator "embedded"
+  features ["ny", "runtime", "memory", "collector", "threads"]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect compile_and_run
+  expect_message "HEAP-COLLECT-THREAD-OK"
+  source ny <<'NY'
+use core
+use core.os.atomic
+use core.os.thread
+;; The collecting thread parks every other runtime thread and reads its
+;; stack and registers. A list the main thread created and no longer refers
+;; to, but a worker still holds, must survive every collection.
+fn worker(ptr shared, list held) int {
+   mut spins = 0
+   while int(atomic_load(shared, 8)) == 0 { spins += 1 }
+   mut sum = 0
+   mut i = 0
+   while i < len(held) {
+      sum += held[i]
+      i += 1
+   }
+   atomic_store(shared, sum, 16)
+   0
+}
+fn start(ptr shared) any {
+   mut held = []
+   mut i = 0
+   while i < 1000 {
+      held = held.append(i)
+      i += 1
+   }
+   thread_spawn_call(worker, [shared, held])
+}
+fn churn(int n) int {
+   mut sum = 0
+   mut i = 0
+   while i < n {
+      def r = [i, i + 1, i + 2]
+      def d = {"k": r, "s": "v" + to_str(i)}
+      sum += r[1]
+      i += 1
+   }
+   sum
+}
+def shared = malloc(32)
+atomic_store(shared, 0, 8)
+atomic_store(shared, 0, 16)
+__heap_collect(0)
+def t = start(shared)
+mut round = 0
+mut total = 0
+while round < 40 {
+   total += churn(500)
+   __heap_collect(round % 8 == 7 ? 2 : 1)
+   round += 1
+}
+atomic_store(shared, 1, 8)
+thread_join(t)
+assert(total == 40 * (500 * 499 / 2 + 500), "churn sums")
+assert(int(atomic_load(shared, 16)) == 499500, "the worker read its list intact")
+free(shared)
+print("HEAP-COLLECT-THREAD-OK")
+NY
+}

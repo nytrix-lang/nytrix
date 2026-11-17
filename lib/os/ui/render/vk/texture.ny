@@ -123,6 +123,18 @@ fn _copy_upload_bytes(any dst, any src, int n) bool {
    true
 }
 
+mut int _tex_trace_sync_all_gen = 0
+mut bool _tex_trace_sync_all_on = false
+
+fn _tex_trace_sync_all() bool {
+   def int gen = ui_profile.env_generation()
+   if _tex_trace_sync_all_gen != gen {
+      _tex_trace_sync_all_on = ui_profile.env_truthy_cached("NY_UI_TEX_TRACE_SYNC_ALL")
+      _tex_trace_sync_all_gen = gen
+   }
+   _tex_trace_sync_all_on
+}
+
 fn _tex_trace_enabled() bool {
    ui_profile.env_truthy_cached("NY_UI_TEX_TRACE")
 }
@@ -453,7 +465,7 @@ fn bindless_sync_texture_slot(any tex_id) bool {
    def synced_view = tex_obj.get("bindless_synced_view", 0)
    def synced_sampler = tex_obj.get("bindless_synced_sampler", 0)
    def sync_changed = !synced || synced_view != tex_view || synced_sampler != tex_sampler
-   if sync_changed || ui_profile.env_truthy_cached("NY_UI_TEX_TRACE_SYNC_ALL") {
+   if sync_changed || _tex_trace_sync_all() {
       _tex_trace("[vk:tex] sync tex=" + to_str(tex_id) +
          " view=0x" + str.to_hex(tex_view) +
          " sampler=0x" + str.to_hex(tex_sampler) +

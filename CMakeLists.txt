@@ -2724,6 +2724,14 @@ if (NYTRIX_BUILD_SHARED AND NOT WIN32 AND NYTRIX_USE_LLVM)
     endif()
     add_test(NAME nytrix-map-oracle-dedup COMMAND nytrix-map-oracle-dedup)
     set_tests_properties(nytrix-map-oracle-dedup PROPERTIES TIMEOUT 30)
+    add_executable(nytrix-addr-probe-device
+      "${NYTRIX_ROOT}/src/code/test/backend/runtime/addr_probe_device.c")
+    target_include_directories(nytrix-addr-probe-device PRIVATE
+      "${NYTRIX_ROOT}/src" "${NYTRIX_ROOT}/src/include")
+    target_compile_options(nytrix-addr-probe-device PRIVATE -Wall -Wextra -Werror)
+    target_link_libraries(nytrix-addr-probe-device PRIVATE nytrixrt)
+    add_test(NAME nytrix-addr-probe-device COMMAND nytrix-addr-probe-device)
+    set_tests_properties(nytrix-addr-probe-device PROPERTIES TIMEOUT 30)
     add_executable(nytrix-sso-probe-cache
       "${NYTRIX_ROOT}/src/code/test/backend/runtime/sso_probe_cache.c")
     target_include_directories(nytrix-sso-probe-cache PRIVATE

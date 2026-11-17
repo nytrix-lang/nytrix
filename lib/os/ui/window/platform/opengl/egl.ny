@@ -4,7 +4,7 @@
 ;; - core.os.ui.window.platform.opengl
 ;; - core.os.ui.window
 ;; - core.os.ui.window.consts
-module core.os.ui.window.platform.opengl.egl(create_context, destroy_context, make_current, swap_buffers, swap_interval, get_proc_address, init_display, choose_config, create_surface, destroy_surface, get_config_attrib, wayland_window_create, wayland_window_destroy, wayland_window_resize)
+module core.os.ui.window.platform.opengl.egl(create_context, destroy_context, make_current, swap_buffers, swap_interval, get_proc_address, init_display, choose_config, create_surface, destroy_surface, get_config_attrib, wayland_window_create, wayland_window_destroy, wayland_window_resize, surface_size)
 use core
 use core.mem (cstr)
 use core.os.ui.window.platform.api as backend_api
@@ -29,6 +29,7 @@ use core.os.ui.window.platform.api as backend_api
       fn eglDestroyContext(ptr display, ptr ctx) i32
       fn eglMakeCurrent(ptr display, ptr draw, ptr read, ptr ctx) i32
       fn eglSwapBuffers(ptr display, ptr surface) i32
+      fn eglQuerySurface(ptr display, ptr surface, i32 attribute, ptr value) i32
       fn eglSwapInterval(ptr display, i32 interval) i32
       fn eglGetProcAddress(ptr name) ptr
    }
@@ -97,6 +98,10 @@ fn wayland_window_resize(any window, int width, int height) any {
       "Runs the eglSwapBuffers operation."
       0
    }
+   fn eglQuerySurface(any _display, any _surface, any _attribute, any _value) int {
+      "Runs the eglQuerySurface operation."
+      0
+   }
    fn eglSwapInterval(any _display, any _interval) int {
       "Runs the eglSwapInterval operation."
       0
@@ -149,6 +154,10 @@ fn wayland_window_resize(any window, int width, int height) any {
    }
    fn eglSwapBuffers(any _display, any _surface) int {
       "Runs the eglSwapBuffers operation."
+      0
+   }
+   fn eglQuerySurface(any _display, any _surface, any _attribute, any _value) int {
+      "Runs the eglQuerySurface operation."
       0
    }
    fn eglSwapInterval(any _display, any _interval) int {
@@ -273,6 +282,18 @@ fn swap_buffers(any display, any surface) bool {
    if !surface { return false }
    eglSwapBuffers(display, surface)
    true
+}
+
+fn surface_size(any display, any surface) list {
+   "Returns [width, height] of an EGL surface's current back buffer, or [0, 0]."
+   if !display || !surface { return [0, 0] }
+   def val = zalloc(4)
+   if !val { return [0, 0] }
+   mut w, h = 0, 0
+   if eglQuerySurface(display, surface, 0x3057, val) != 0 { w = int(load32(val, 0)) }
+   if eglQuerySurface(display, surface, 0x3056, val) != 0 { h = int(load32(val, 0)) }
+   free(val)
+   [w, h]
 }
 
 fn swap_interval(any display, any interval) bool {

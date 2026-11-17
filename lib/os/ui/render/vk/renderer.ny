@@ -38,8 +38,23 @@ fn _renderer_alloc(int size) any {
 
 mut _flush_diag_counter = 0
 
+mut int _vk_capture_trace_mode = -1
+
+fn _vk_capture_trace() bool {
+   if _vk_capture_trace_mode < 0 { _vk_capture_trace_mode = common.env_truthy("NY_VK_CAPTURE_TRACE") ? 1 : 0 }
+   _vk_capture_trace_mode == 1
+}
+
+mut int _flush_diag_gen = 0
+mut bool _flush_diag_on = false
+
 fn _flush_diag(str msg) any {
-   if !(ui_profile.env_truthy_cached("NY_GLTF_FORCE_GROUP_DIAG") || ui_profile.env_truthy_cached("NY_VK_PIPE_TRACE")) { return 0 }
+   def int gen = ui_profile.env_generation()
+   if _flush_diag_gen != gen {
+      _flush_diag_on = ui_profile.env_truthy_cached("NY_GLTF_FORCE_GROUP_DIAG") || ui_profile.env_truthy_cached("NY_VK_PIPE_TRACE")
+      _flush_diag_gen = gen
+   }
+   if !_flush_diag_on { return 0 }
    if _flush_diag_counter < 24 { ui_profile.print_text("[vk:flush:diag] " + msg) }
    _flush_diag_counter += 1
    0
@@ -258,8 +273,16 @@ fn _vk_deep_every() int {
    ui_profile.env_int_cached("NY_DEBUG_DEEP_EVERY", 60, 1, 1000000)
 }
 
+mut int _vk_profile_gen = 0
+mut bool _vk_profile_on = false
+
 fn _vk_profile_enabled() bool {
-   ui_profile.env_truthy_cached("NY_VK_PROFILE_TRACE")
+   def int gen = ui_profile.env_generation()
+   if _vk_profile_gen != gen {
+      _vk_profile_on = ui_profile.env_truthy_cached("NY_VK_PROFILE_TRACE")
+      _vk_profile_gen = gen
+   }
+   _vk_profile_on
 }
 
 fn _vk_frame_scratch_ready() bool {
@@ -476,9 +499,17 @@ mut _vk_debug_basic = 0
 mut _vk_begin_false_logs = 0
 mut _vk_debug_stage = ""
 
+mut int _vk_stage_trace_gen = 0
+mut bool _vk_stage_trace_on = false
+
 fn _vk_stage(str stage) bool {
-   _vk_debug_stage = to_str(stage)
-   if ui_profile.env_truthy_cached("NY_VK_STAGE_TRACE") { ui_profile.print_text("[gfx:vulkan:stage] " + _vk_debug_stage) }
+   _vk_debug_stage = stage
+   def int gen = ui_profile.env_generation()
+   if _vk_stage_trace_gen != gen {
+      _vk_stage_trace_on = ui_profile.env_truthy_cached("NY_VK_STAGE_TRACE")
+      _vk_stage_trace_gen = gen
+   }
+   if _vk_stage_trace_on { ui_profile.print_text("[gfx:vulkan:stage] " + _vk_debug_stage) }
    true
 }
 
@@ -3148,7 +3179,7 @@ fn _sync_pc() any {
    }
    def cb = _current_frame_cb
    if cb && _pipeline_layout && _pc_dirty {
-      if common.env_truthy("NY_VK_CAPTURE_TRACE") && _vk_pc_trace_logs < 24 {
+      if _vk_capture_trace() && _vk_pc_trace_logs < 24 {
          _vk_pc_trace_logs += 1
          ui_profile.print_text("[vk:pc] frame=" + to_str(_total_frames) +
             " mvp=(" + to_str(load32_f32(pc_ptr, 0)) + "," + to_str(load32_f32(pc_ptr, 20)) + "," + to_str(load32_f32(pc_ptr, 40)) + "," + to_str(load32_f32(pc_ptr, 60)) + ")" +
@@ -3234,7 +3265,7 @@ fn _flush() any {
          + " unlit=" + to_str(_current_is_unlit)
       )
    }
-   if common.env_truthy("NY_VK_CAPTURE_TRACE") {
+   if _vk_capture_trace() {
       ui_profile.print_text("[vk:flush] first=" + to_str(first_vert) +
          " count=" + to_str(count) +
          " pipe=0x" + text.to_hex(target) +
@@ -3329,7 +3360,7 @@ fn _vk_end_frame_download_capture(bool has_surface) bool {
             if pixels {
                __copy_mem(pixels, _staging_map, size)
                _vkr_bgra_to_rgba_if_needed(pixels, size, _swapchain_format)
-               if _debug_gfx_enabled || common.env_truthy("NY_VK_CAPTURE_TRACE") || common.env_truthy("NY_GLTF_INDEX_TRACE") {
+               if _debug_gfx_enabled || _vk_capture_trace() || common.env_truthy("NY_GLTF_INDEX_TRACE") {
                   def p0 = size >= 4 ? (load8(pixels, 0) | (load8(pixels, 1) << 8) | (load8(pixels, 2) << 16) | (load8(pixels, 3) << 24)) : 0
                   def pc = size >= 4 ? (((h / 2) * w + (w / 2)) * 4) : 0
                   def c0 = (pc >= 0 && pc + 3 < size) ? (load8(pixels, pc) | (load8(pixels, pc + 1) << 8) | (load8(pixels, pc + 2) << 16) | (load8(pixels, pc + 3) << 24)) : 0
@@ -3365,7 +3396,7 @@ fn _vk_end_frame_download_capture(bool has_surface) bool {
             }
          }
       }
-      elif _debug_gfx_enabled || common.env_truthy("NY_VK_CAPTURE_TRACE") {
+      elif _debug_gfx_enabled || _vk_capture_trace() {
          ui_profile.print_text("[gfx:vulkan] capture fence wait failed code=" + to_str(capture_wait_res))
       }
    }

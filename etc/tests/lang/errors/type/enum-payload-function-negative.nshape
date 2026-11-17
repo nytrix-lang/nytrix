@@ -5,7 +5,7 @@ shape enum_payload_function_negative {
   template ny-compile-fail
   flags_matrix "--native-only"
   expect compile_fail
-  expect_message "enum payload fields must be data types"
+  expect_message "enum payload breaks strict positivity"
   source ny <<'NY'
 use core
 
@@ -13,6 +13,100 @@ use core
 ;; the positivity rule forbids; the diagnostic must name the reason, not fall
 ;; through to a generic payload parse error.
 enum Bad { Mk(fn(Bad) int) }
+print(1)
+NY
+}
+
+shape enum_payload_doubly_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "enum", "positivity", "soundness"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "enum payload breaks strict positivity"
+  source ny <<'NY'
+use core
+;; Strict positivity also rejects the family inside a nested domain.
+enum Bad { Mk(fn(fn(Bad) int) int f) }
+print(1)
+NY
+}
+
+shape enum_payload_alias_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "enum", "positivity", "soundness"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "enum payload breaks strict positivity"
+  source ny <<'NY'
+use core
+;; A type-level definition does not hide the domain.
+type F = fn(Bad) int
+enum Bad { Mk(F f) }
+print(1)
+NY
+}
+
+shape enum_payload_generic_alias_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "enum", "positivity", "soundness"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "enum payload breaks strict positivity"
+  source ny <<'NY'
+use core
+;; Nor does an applied one.
+type G<X> = fn(X) int
+enum Bad { Mk(G<Bad> g) }
+print(1)
+NY
+}
+
+shape enum_payload_function_result_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "enum", "positivity", "soundness"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "enum payload breaks strict positivity"
+  source ny <<'NY'
+use core
+;; A result that is itself a function keeps its own domain.
+enum Bad { Mk(fn(int) fn(Bad) int f) }
+print(1)
+NY
+}
+
+shape enum_payload_mutual_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "enum", "positivity", "soundness"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "enum payload breaks strict positivity"
+  source ny <<'NY'
+use core
+;; Mutually defined families share one positivity check.
+enum A { MkA(fn(B) int f) }
+enum B { MkB(A a) }
+print(1)
+NY
+}
+
+shape enum_payload_nested_parameter_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "enum", "positivity", "soundness"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "enum payload breaks strict positivity"
+  source ny <<'NY'
+use core
+;; A family passed to a parameter used in a function domain.
+enum T<A> { Mk(fn(A) int f) }
+enum Bad { W(T<Bad> t) }
 print(1)
 NY
 }
