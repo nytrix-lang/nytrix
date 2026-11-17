@@ -1000,14 +1000,14 @@ fn _adjust_window_rect(any rect, any style, any ex_style, any hwnd=0) bool {
 
 fn _frame_size_for_client(any hwnd, int width, int height, any style, any ex_style) list {
    def rect = zalloc(16)
-   if !rect { return [common.max(1, width), common.max(1, height)] }
+   if !rect { return [max(1, width), max(1, height)] }
    store32(rect, 0, 0)
    store32(rect, 0, 4)
-   store32(rect, common.max(1, width), 8)
-   store32(rect, common.max(1, height), 12)
-   mut out = [common.max(1, width), common.max(1, height)]
+   store32(rect, max(1, width), 8)
+   store32(rect, max(1, height), 12)
+   mut out = [max(1, width), max(1, height)]
    if _adjust_window_rect(rect, style, ex_style, hwnd) {
-      out = [common.max(1, _rect_width(rect)), common.max(1, _rect_height(rect))]
+      out = [max(1, _rect_width(rect)), max(1, _rect_height(rect))]
    }
    free(rect)
    out
@@ -1028,7 +1028,7 @@ fn _centered_client_pos(int width, int height) list {
    }
    if w <= 0 { w = 1280 }
    if h <= 0 { h = 720 }
-   [x + common.max(0, (w - width) / 2), y + common.max(0, (h - height) / 2)]
+   [x + max(0, (w - width) / 2), y + max(0, (h - height) / 2)]
 }
 
 fn _system_metric(int index, int dpi=0) int {
@@ -2808,8 +2808,8 @@ fn set_size(any win, int width, int height) bool {
    def ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE)
    def frame_sz = _frame_size_for_client(hwnd, width, height, style, ex_style)
    mut ok = MoveWindow(hwnd, frame_x, frame_y,
-      int(frame_sz.get(0, common.max(1, width))),
-      int(frame_sz.get(1, common.max(1, height))),
+      int(frame_sz.get(0, max(1, width))),
+      int(frame_sz.get(1, max(1, height))),
       1) != 0
    def live = _window_client_size(win, false)
    if !_size_matches(live, width, height) {
@@ -2817,8 +2817,8 @@ fn set_size(any win, int width, int height) bool {
       def dh = height - int(live.get(1, height))
       def retry_sz = _frame_size_for_client(hwnd, width + dw, height + dh, style, ex_style)
       ok = MoveWindow(hwnd, frame_x, frame_y,
-         int(retry_sz.get(0, common.max(1, width + dw))),
-         int(retry_sz.get(1, common.max(1, height + dh))),
+         int(retry_sz.get(0, max(1, width + dw))),
+         int(retry_sz.get(1, max(1, height + dh))),
          1) != 0 || ok
    }
    free(rect)

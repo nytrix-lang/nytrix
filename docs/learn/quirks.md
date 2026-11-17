@@ -41,6 +41,26 @@ Prerequisites: none; this is a lookup page.
 | Indexing and `get` differ | Dictionary indexing returns the runtime default when a key is absent; `get(key, fallback)` makes the fallback explicit. | [Values](../spec/values.md#lookup-insertion-and-identity) |
 | Truthiness is broad | Zero, `nil`, empty strings, and empty containers are false. Pointers, handles, and callables are true. | [Control flow](../spec/control-flow.md#truthiness) |
 
+## Open representation defects in library code
+
+These are compiler defects, not language rules: inside standard-library
+modules a value's raw/boxed representation can be lost at the boundaries
+below. Library code works around them as shown; remove a workaround only with
+a fixture that fails without it.
+
+| Pattern | Symptom | Workaround in the tree |
+| --- | --- | --- |
+| A record from a ternary, `def r = h ? dict_get(m, h, 0) : 0`, then `r = r.set(...)` | The record is typed `int` and stored back as a bare handle (the Wayland window table lost every field at fractional scales) | Assign in an `if` |
+| `return d.set(k, v)` from a function returning a record | The caller receives a raw handle | Bind `out = out.set(...)`, then return `out` |
+| A local named `s` holding a dict | It reads as `str` | Use another name |
+| An empty list stored in a record, read in another module | It reads as an integer | Check `is_list` and fall back to `[]` |
+| A typed `int` parameter or C callback argument stored in a dict | It reads back as `nil` or halved | `__box_i64(v)`, or type callback parameters (`i32 fd`) instead of `any` |
+| An `int` match payload appended to a list in a stdlib module | It is stored untagged | Append `h + 0` |
+| Reassigning an `int` parameter from `min`/`max` | The value is halved | Clamp into a fresh local |
+| `mut any x = dict(8)` as a module global | The global never holds the dict | Initialise with the concrete type |
+| `.len` read straight off an imported list global on `--native-only` | Wrong length | Bind to a typed local first |
+| A stdlib function named like a `core` function (`split`) | Calls inside the module reach it and crash | Use a distinct name |
+
 ## Types, modules, and native code
 
 | Remember | Nytrix rule | Full details |

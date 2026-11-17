@@ -6002,8 +6002,11 @@ static int test_max_heavy_jobs(int jobs) {
 static int test_requires_host_exclusive(const char *p) {
   if (!p)
     return 0;
+  /* Compositor probes drive the shared seat and input method of the session
+   * they run in; two at once steal each other's pointer and IME. */
   return strncmp(p, "lib/os/ui/", 10) == 0 ||
-         strncmp(p, "lib/os/sound/", 13) == 0;
+         strncmp(p, "lib/os/sound/", 13) == 0 ||
+         strstr(p, "probes/ui/wayland-") != NULL;
 }
 
 static const char *suite_for_path(const char *p, const char *fallback) {

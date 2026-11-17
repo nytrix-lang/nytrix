@@ -18,7 +18,12 @@ use core.cache as cache
 mut bool _enabled = true
 mut f64 _scale = 1.0
 mut any _win = nil
-mut _font, _font_title, _font_small = 0, 0, 0
+;; Separate typed globals: as one multi-assigned declaration the font ids
+;; were read back tagged in compiled executables (font 3 became 7, an
+;; unknown font, so text fell back to the bitmap font).
+mut int _font = 0
+mut int _font_title = 0
+mut int _font_small = 0
 mut _fb_w, _fb_h = 0.0, 0.0
 mut _mouse_x, _mouse_y = 0.0, 0.0
 mut _mouse_down0, _mouse_down0_prev = false, false
@@ -40,6 +45,15 @@ mut _key_events = []
 mut _key_mask_0, _key_mask_1, _key_mask_2, _key_mask_3 = 0, 0, 0, 0
 mut _key_mask_4, _key_mask_5, _key_mask_6, _key_mask_7 = 0, 0, 0, 0
 mut _text_events = ""
+;; Input-method composition for the focused text field (EVENT_TEXT_PREEDIT /
+;; EVENT_TEXT_DELETE_SURROUNDING from the window backend). The preedit is
+;; shown at the caret but is not part of the value until it is committed.
+mut _ime_preedit = ""
+mut _ime_preedit_cursor = -1
+mut _ime_delete_before = 0
+mut _ime_delete_after = 0
+mut _ime_claimed = false
+mut _ime_active = false
 mut dict _windows = dict(32)
 mut dict _widget_state = dict(64)
 mut any _current_window = nil
@@ -792,15 +806,24 @@ fn debug_overlay() bool { "Returns true when the GUI debug overlay is enabled." 
 
 @inline
 @jit
-fn _font_body() int { (_font > 0) ? _font : _font_title }
+fn _font_body() int {
+   if _font > 0 { return _font }
+   _font_title
+}
 
 @inline
 @jit
-fn _font_title_id() int { (_font_title > 0) ? _font_title : _font_body() }
+fn _font_title_id() int {
+   if _font_title > 0 { return _font_title }
+   _font_body()
+}
 
 @inline
 @jit
-fn _font_small_id() int { (_font_small > 0) ? _font_small : _font_body() }
+fn _font_small_id() int {
+   if _font_small > 0 { return _font_small }
+   _font_body()
+}
 
 fn _measure_text_ui(int font_id, any txt) list {
    if !_text_caches_ready { _ensure_text_caches() }
@@ -1575,6 +1598,17 @@ fn feed_event(int typ, dict data) bool {
       _fed_down0, _fed_down0_valid = false, false
       return false
    }
+   if typ == EVENT_TEXT_PREEDIT {
+      _ime_preedit = to_str(data.get("text", ""))
+      ;; Byte offset into the composition, like the field's own caret.
+      _ime_preedit_cursor = int(data.get("cursor", -1))
+      return _text_focus_id != ""
+   }
+   if typ == EVENT_TEXT_DELETE_SURROUNDING {
+      _ime_delete_before += int(data.get("before", 0))
+      _ime_delete_after += int(data.get("after", 0))
+      return _text_focus_id != ""
+   }
    if typ == EVENT_KEY_CHAR || typ == EVENT_KEY_CHAR_MODS {
       def cp = int(data.get("char", data.get("codepoint", 0)))
       if cp > 31 && cp != 127 {
@@ -1698,8 +1732,8 @@ fn _text_cursor_from_x(int font_id, any s, f64 px, f64 text_x) int {
    mut i = 0
    while i < n {
       def next_i = _utf8_next_index(txt, i)
-      def before = str.str_slice(txt, 0, i)
-      def thru = str.str_slice(txt, 0, next_i)
+      def before = str._substr(txt, 0, i)
+      def thru = str._substr(txt, 0, next_i)
       def bw_m = _measure_text_ui(font_id, before)
       def bw = float(bw_m.get(0, 0.0))
       def nw_m = _measure_text_ui(font_id, thru)
@@ -1785,6 +1819,7 @@ fn end_frame() any {
    _flush_popup_draw_queue()
    _flush_text_runs()
    _overlay_finish()
+   _ime_end_frame()
    if prof { ui_profile.mark("flush_text", t_flush, " runs=" + to_str(run_count)) }
    def t_tail = prof ? ui_profile.now() : 0
    if !_mouse_down0 {
@@ -2773,7 +2808,7 @@ fn _text_edit_apply_input(any full_id, str value, int cursor) list {
                out = clip
                cur = out.len
             } else {
-               out = str.str_slice(out, 0, cur) + clip + str.str_slice(out, cur, out.len)
+               out = str._substr(out, 0, cur) + clip + str._substr(out, cur, out.len)
                cur += clip.len
             }
             selected_all = false
@@ -2785,7 +2820,7 @@ fn _text_edit_apply_input(any full_id, str value, int cursor) list {
             selected_all = false
          } elif cur > 0 {
             def prev = _utf8_prev_index(out, cur)
-            out = str.str_slice(out, 0, prev) + str.str_slice(out, cur, out.len)
+            out = str._substr(out, 0, prev) + str._substr(out, cur, out.len)
             cur = prev
          }
       } elif k == KEY_DELETE {
@@ -2795,7 +2830,7 @@ fn _text_edit_apply_input(any full_id, str value, int cursor) list {
             selected_all = false
          } elif cur < out.len {
             def nxt = _utf8_next_index(out, cur)
-            out = str.str_slice(out, 0, cur) + str.str_slice(out, nxt, out.len)
+            out = str._substr(out, 0, cur) + str._substr(out, nxt, out.len)
          }
       } elif k == KEY_LEFT {
          selected_all = false
@@ -2821,13 +2856,59 @@ fn _text_edit_apply_input(any full_id, str value, int cursor) list {
          out = _text_events
          cur = out.len
       } else {
-         out = str.str_slice(out, 0, cur) + _text_events + str.str_slice(out, cur, out.len)
+         out = str._substr(out, 0, cur) + _text_events + str._substr(out, cur, out.len)
          cur += _text_events.len
       }
       selected_all = false
    }
    _text_set_selected_all(full_id, selected_all)
    [out, cur]
+}
+
+
+;; Removes UTF-8 bytes around the caret for an IME delete-surrounding request.
+fn _ime_apply_delete(str value, int cursor) list {
+   def n = value.len
+   mut c = int(cursor)
+   if c > n { c = n }
+   if c < 0 { c = 0 }
+   mut lo = c - _ime_delete_before
+   mut hi = c + _ime_delete_after
+   if lo < 0 { lo = 0 }
+   if hi > n { hi = n }
+   ;; The IME counts bytes; keep the cut on character boundaries.
+   while lo > 0 && (load8(value, lo) & 0xC0) == 0x80 { lo -= 1 }
+   while hi < n && (load8(value, hi) & 0xC0) == 0x80 { hi += 1 }
+   _ime_delete_before = 0
+   _ime_delete_after = 0
+   [str._substr(value, 0, lo) + str._substr(value, hi, n), lo]
+}
+
+;; A focused text field asks the window for composition at its caret; the
+;; rectangle is in window (surface) coordinates, the layout's are pixels.
+fn _ime_claim(f64 cx, f64 cy, f64 ch) any {
+   _ime_claimed = true
+   if !_win { return 0 }
+   mut sc = 1.0
+   def scl = uiw.get_window_content_scale(_win)
+   if is_list(scl) && scl.len > 0 { sc = max(0.01, float(scl.get(0, 1.0))) }
+   uiw.text_input_start(_win, [int(cx / sc), int(cy / sc), 2, max(1, int(ch / sc))])
+   _ime_active = true
+}
+
+fn _ime_end_frame() any {
+   if _ime_active && !_ime_claimed {
+      if _win { uiw.text_input_stop(_win) }
+      _ime_active = false
+      _ime_preedit = ""
+      _ime_preedit_cursor = -1
+   }
+   _ime_claimed = false
+}
+
+fn ime_preedit() str {
+   "Returns the input-method composition shown in the focused text field."
+   _ime_preedit
 }
 
 fn input_text(any id, any label, any value, any placeholder="", f64 w=0.0) str {
@@ -2874,18 +2955,30 @@ fn input_text(any id, any label, any value, any placeholder="", f64 w=0.0) str {
    if active_text && _text_focus_id != full { _text_focus_id = full }
    mut cursor = _text_state_cursor(full, out.len)
    if active_text {
+      if _ime_delete_before > 0 || _ime_delete_after > 0 {
+         def ime_del = _ime_apply_delete(out, cursor)
+         out, cursor = to_str(ime_del.get(0, out)), int(ime_del.get(1, cursor))
+      }
       def edit = _text_edit_apply_input(full, out, cursor)
       out, cursor = to_str(edit.get(0, out)), int(edit.get(1, cursor))
       _text_state_set_cursor(full, cursor)
+      def caret_before = _measure_text_ui(_font_body(), str._substr(out, 0, cursor))
+      _ime_claim(tx + float(caret_before.get(0, 0.0)), field_y, field_h)
    }
+   ;; The composition is drawn spliced in at the caret, underlined.
+   def composing = active_text && _ime_preedit.len > 0
    if _iw_visible {
       def label_clip = _clip_rect_inset(x, y, rwf, _label_h(), 0.0)
       def field_clip = _clip_rect_inset(x, field_y, rwf, field_h, 1.0)
       _gui_rect_fast(x, field_y, rwf, field_h, active_text ? _window_bg_u32 : (field_hover ? _panel_hover_u32 : _panel_u32))
       _gui_rect_outline_fast(x, field_y, rwf, field_h, active_text ? _accent_u32 : (field_hover ? _text_faint_u32 : _border_u32))
-      def draw_s = (out.len > 0) ? out : ph
+      mut draw_s = (out.len > 0) ? out : ph
       mut draw_col = _text_faint_u32
       if out.len > 0 { draw_col = _text_u32 }
+      if composing {
+         draw_s = str._substr(out, 0, cursor) + _ime_preedit + str._substr(out, cursor, str.len(out))
+         draw_col = _text_u32
+      }
       def ty = _text_center_y_for(_font_body(), field_y, field_h)
       if str.len(lbl) > 0 { _draw_text_ui_small_clipped(lbl, x, y, _text_dim_u32, rwf, label_clip) }
       if active_text && _text_selected_all(full) && out.len > 0 {
@@ -2893,8 +2986,19 @@ fn input_text(any id, any label, any value, any placeholder="", f64 w=0.0) str {
          _gui_rect_fast(tx - 1.0, field_y + _sx(4.0), min(rwf - _item_pad_x() * 2.0, float(mw_sel.get(0, 0.0)) + _sx(3.0)), max(_sx(8.0), field_h - _sx(8.0)), _select_u32)
       }
       _draw_text_ui_clipped(draw_s, tx, ty, draw_col, rwf - _item_pad_x() * 2.0, field_clip)
-      if active_text && ((int(get_time() * 2.0) % 2) == 0) {
-         def before = str.str_slice(out, 0, cursor)
+      mut caret_extra = ""
+      if composing {
+         def pre_x = tx + float(_measure_text_ui(_font_body(), str._substr(out, 0, cursor)).get(0, 0.0))
+         def pre_w = float(_measure_text_ui(_font_body(), _ime_preedit).get(0, 0.0))
+         _gui_rect_fast(pre_x, field_y + field_h - _sx(5.0), max(1.0, pre_w), 1.0, _accent_u32)
+         if _ime_preedit_cursor >= 0 {
+            caret_extra = str._substr(_ime_preedit, 0, _ime_preedit_cursor)
+         } else {
+            caret_extra = _ime_preedit
+         }
+      }
+      if active_text && (composing || (int(get_time() * 2.0) % 2) == 0) {
+         def before = str._substr(out, 0, cursor) + caret_extra
          def mw = _measure_text_ui(_font_body(), before)
          def cx = tx + float(mw.get(0, 0.0))
          _gui_rect_fast(cx, field_y + _sx(5.0), 1.0, max(_sx(8.0), field_h - _sx(10.0)), _accent_u32)
@@ -2974,7 +3078,7 @@ fn title_input_text(any id, any value, any placeholder="", any w=0.0) str {
          max(1.0,
             field_h - 2.0)])
    if active_text && ((int(get_time() * 2.0) % 2) == 0) {
-      def before = str.str_slice(out, 0, cursor)
+      def before = str._substr(out, 0, cursor)
       def mw = _measure_text_ui(_font_small_id(), before)
       def cx = min(x + rw - _sx(6.0), tx + float(mw.get(0, 0.0)))
       _gui_rect_fast(cx, y + _sx(4.0), 1.0, max(_sx(8.0), field_h - _sx(8.0)), _accent_u32)

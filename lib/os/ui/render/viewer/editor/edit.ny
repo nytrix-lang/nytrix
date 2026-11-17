@@ -34,7 +34,7 @@ fn _append_lines(list out, list src, int a, int b) list {
 fn line_insert(str line, int col, str text) str {
    if text.len <= 0 { return line }
    ;; Clamp into a fresh local: reassigning the `int` parameter from a
-   ;; `number`-typed `min`/`max` result halves it (see docs/todo/ui.md), which
+   ;; `number`-typed `min`/`max` result halves it (see docs/learn/quirks.md, open representation defects), which
    ;; inserted text at the wrong column.
    def at = int(min(max(col, 0), line.len))
    str.str_slice(line, 0, at) + text + str.str_slice(line, at, line.len)

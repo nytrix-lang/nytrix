@@ -1,0 +1,38 @@
+shape raw_builtin_result_local {
+  family "runtime/compiler"
+  generator "regression"
+  features ["ny", "abi", "builtins", "raw"]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  expect_message "RAW-BUILTIN-OK"
+  source ny <<'NY'
+use core
+use core.os (file_read, temp_dir)
+;; `__open_raw` returns a raw word. An inferred local holding it was passed
+;; to `__write_off` (a tagged-argument builtin) unboxed, so an odd fd such
+;; as 5 was decoded as 2 and the bytes went to stderr; a Wayland app wrote
+;; them into its compositor socket. Odd and even fds must both work.
+fn probe(str path) int {
+   def fd = __open_raw(path, 577, 420)
+   if fd < 0 { return -1 }
+   def written = __write_off(fd, "ok", 2, 0)
+   __close(fd)
+   fd
+}
+def str dir = temp_dir()
+mut list held = []
+mut int i = 0
+while i < 4 {
+   def str p = dir + "/ny-raw-builtin-" + to_str(i)
+   def int fd = probe(p)
+   assert(fd >= 0, "file opens")
+   def got = file_read(p)
+   assert(is_ok(got) && to_str(unwrap(got)) == "ok", "the write reached file descriptor " + to_str(fd))
+   ;; Keep a descriptor open so the next probe gets the other parity.
+   held = held.append(__open_raw(p, 0, 0))
+   i += 1
+}
+print("RAW-BUILTIN-OK")
+NY
+}

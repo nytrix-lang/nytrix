@@ -11,7 +11,7 @@ compiler subsystems.
 | Need | Reference |
 | --- | --- |
 | Dependent types and GADTs | [Feature contract](spec/dependent.md) |
-| UI, engine, and editor work | [UI roadmap](todo/ui.md) |
+| UI, engine, and editor work | [UI guide](learn/ui.md#verification) |
 | Compiler performance work | [Performance backlog](todo/perf.md) |
 | NYC Linux kernel | [Build acceptance](todo/nyc.md) |
 | Source ownership | [Compiler architecture](learn/architecture.md) |

@@ -7867,6 +7867,21 @@ static int nyr_emit_runtime_call(nyr_builder_impl_t *b, const char *symbol,
           "formal=i64-tagged action=box-at-runtime-funnel",
           b->current_fn_name ? b->current_fn_name : "<entry>");
   }
+  /*
+   * The tagged accessors take a tagged key. A key whose producer is a raw
+   * integer (a module constant such as `api.CLIENT_API` read as `any`)
+   * would decode as a different integer and miss; box it here, where the
+   * physical class is known, whatever the AST said about the key.
+   */
+  if ((strcmp(symbol, "rt_value_get_tagged") == 0 ||
+       strcmp(symbol, "rt_dict_has_raw") == 0) &&
+      argc >= 2 && b_arg >= 0 &&
+      nyr_value_scalar_class(b, b_arg) == NYIR_SCALAR_I64_RAW) {
+    b_arg = nyr_emit_runtime_call(b, "rt_box_i64", b_arg, -1, -1, 1,
+                                  NYIR_SCALAR_I64_TAGGED);
+    if (b_arg < 0)
+      return -1;
+  }
   if ((strcmp(symbol, "rt_native_dict_set_nir_i64") == 0 ||
        strcmp(symbol, "rt_native_dict_set_str_compact") == 0) &&
       argc >= 3 && c >= 0 && nyr_value_is_f64(b, c, 0)) {

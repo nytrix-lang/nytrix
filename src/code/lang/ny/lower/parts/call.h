@@ -12753,9 +12753,23 @@ ordinary_call:
         nyr_expr_has_raw_int_abi(b, arg_expr, 0);
     bool explicit_raw_ternary = arg_expr && arg_expr->kind == NY_E_TERNARY &&
                                 nyr_expr_has_raw_int_abi(b, arg_expr, 0);
+    /* A local whose slot was fixed raw (`def fd = __open_raw(...)`) is not
+     * a canonical dynamic word, whatever HM inferred for its name. */
+    bool raw_slot_local = arg_local && !arg_local->is_any &&
+                          arg_local->semantic_rep == NY_SEM_REP_RAW_INT;
+    /* Nor is an integer constant: a folded module `def K = 0x80604521`
+     * reached here as a raw immediate and, relabeled tagged, an odd value
+     * was halved (an ioctl request in compiled executables). */
+    {
+      const nyr_inst_t *producer = NULL;
+      if (arg >= 0 && nyr_def_of(b, arg, &producer) && producer &&
+          producer->op == NYIR_CONST_I64 &&
+          nyr_value_scalar_class(b, arg) != NYIR_SCALAR_I64_TAGGED)
+        raw_slot_local = true;
+    }
     if (box_dynamic_argument && arg_expr &&
         nyr_expr_is_canonical_dynamic_value(b, arg_expr) &&
-        !explicit_raw_call_result && !explicit_raw_ternary &&
+        !explicit_raw_call_result && !explicit_raw_ternary && !raw_slot_local &&
         !nyr_expr_is_raw_integer_conversion(b, arg_expr)) {
       raw_object_argument = true;
       raw_integer_argument = false;
@@ -13540,7 +13554,8 @@ ordinary_call:
     } else if (formal_class == NYIR_SCALAR_I64_TAGGED &&
                producer_class == NYIR_SCALAR_I64_TAGGED &&
                final_arg_class == NYIR_SCALAR_UNKNOWN &&
-               !raw_integer_argument) {
+               !raw_integer_argument &&
+               nyr_value_scalar_class(b, arg) != NYIR_SCALAR_I64_RAW) {
       /* Earlier dynamic-list expansion can already box this raw scalar while
        * the producer map still reports unknown. Only that ambiguous case may
        * preserve the bits. A known raw integer is not already boxed and must
@@ -13559,6 +13574,10 @@ ordinary_call:
       arg = tagged;
     } else if (formal_class == NYIR_SCALAR_I64_TAGGED &&
                (final_arg_class == NYIR_SCALAR_I64_RAW ||
+                /* The physical producer is raw even when the source called
+                 * the value `any` (`def fd = __open_raw(...)`); relabeling
+                 * it tagged made `__write_off(fd, ...)` decode fd 5 as 2. */
+                nyr_value_scalar_class(b, arg) == NYIR_SCALAR_I64_RAW ||
                 (final_arg_class == NYIR_SCALAR_UNKNOWN &&
                  raw_integer_argument) ||
                 (final_arg_class == NYIR_SCALAR_I64_TAGGED &&

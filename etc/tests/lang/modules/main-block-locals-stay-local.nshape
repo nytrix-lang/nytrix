@@ -1,0 +1,49 @@
+shape main_block_locals_stay_local {
+  family "modules/scope"
+  generator "regression"
+  features ["ny", "modules", "hm", "scope"]
+  template ny-test-case
+  flags_matrix "--native-only --run=aot; --native-only -O2 --run=aot; --native-only -O0"
+  expect compile_and_run
+  expect_message "MAIN-BLOCK-SCOPE-OK"
+  source ny <<'NY'
+;; No explicit `use`: the implicit prelude brings core.counter in.
+;; An imported module's `#main { ... }` self-test is not module scope.
+;; core.counter's self-test binds `mut c = counter(xs)` (a dict); the type
+;; checker inferred that block in the module environment, so the dict type
+;; became a global `c` and a loop counter `c` declared inside a nested loop
+;; failed with "function argument: expected int, got dict<any, any>"
+;; (etc/projects/ui/breakout.ny did not compile). Only whole-program
+;; executable builds (`--run=aot`) type-check the imported self-tests.
+fn h(int a, int b) int { a + b }
+;; The literal bound matters: the guard `h(c, r) > 15` was inferred before
+;; the inner declaration of `c` was seen.
+fn first_over_15() int {
+   mut int r = 0
+   while r < 7 {
+      mut int c = 0
+      while c < 12 {
+         if h(c, r) > 15 { return r * 12 + c }
+         c += 1
+      }
+      r += 1
+   }
+   -1
+}
+fn first_over_100() int {
+   mut int r = 0
+   while r < 7 {
+      mut int c = 0
+      while c < 12 {
+         if h(c, r) > 100 { return 1 }
+         c += 1
+      }
+      r += 1
+   }
+   -1
+}
+assert(first_over_100() == -1, "no cell is over 100")
+assert(first_over_15() == 5 * 12 + 11, "first cell over 15")
+print("MAIN-BLOCK-SCOPE-OK")
+NY
+}

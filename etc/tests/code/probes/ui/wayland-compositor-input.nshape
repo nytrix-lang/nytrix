@@ -1,0 +1,404 @@
+shape wayland-compositor-input-vk {
+  family "probe-suite"
+  generator "regression"
+  features ["ny", "ui", "wayland", "input", "ime", "clipboard", "gui"]
+  template ny-test-case
+  expect compile_and_run
+  flags_matrix "--native-only -O0; --native --run"
+  timeout 600
+  expect_stdout "COMPOSITOR-INPUT-OK"
+  source ny <<'NY'
+;; Input through a real compositor seat, not the app's own listeners: a
+;; virtual pointer clicks a button, a virtual keyboard types into a field,
+;; an input method (zwp_input_method_v2) composes, commits, cancels and
+;; deletes surrounding text over zwp_text_input_v3, and the clipboard goes
+;; both ways through wl_data_device. The seat is driven by
+;; fixtures/wl_seat_driver.py, which needs a compositor exposing those
+;; protocols (sway does; headless Weston does not, and the probe then reports
+;; a skip). Run under a private headless sway at several output scales.
+def str PROBE_BACKEND = "vk"
+use core
+use core.common as common
+use core.os (file_read, file_write, temp_dir, file_exists)
+use core.os.subprocess (run_capture)
+use core.os.time (now_ms)
+use core.os.ui.window as window
+use core.os.ui.window.consts as keyc
+use core.os.ui.render as gfx
+use core.os.ui.render.viewer.gui as gui
+use core.os.ui.assets.viewer as assets
+
+mut any win = 0
+mut int clicks = 0
+mut str text = ""
+mut list btn_rect = []
+mut list field_rect = []
+mut bool saw_preedit = false
+mut bool saw_cancel = false
+mut str last_preedit = ""
+
+fn frame() any {
+   mut any e = window.check_event(win)
+   while !is_nil(e) && !(is_int(e) && int(e) == 0) {
+      gui.feed_event(window.event_type(e), window.event_data(e))
+      e = window.check_event(win)
+   }
+   def fb = gfx.framebuffer_size_f64(640, 360)
+   def f64 w = float(fb.get(0, 640))
+   def f64 h = float(fb.get(1, 360))
+   if !gfx.begin_frame_clear([0.05, 0.05, 0.06, 1.0]) { return 0 }
+   gui.prepare_input(win, w, h)
+   gfx.set_ortho_2d(0.0, w, h, 0.0)
+   gui.begin_frame(0, 0, w, h)
+   gui.begin_window("seat", "Seat", 20.0, 20.0, 520.0, 260.0, {"movable": false, "resizable": false})
+   if gui.button("press", "Press me", 160.0, 32.0) { clicks += 1 }
+   btn_rect = gui.last_item_rect()
+   text = gui.input_text("field", "Text", text, "type here", 400.0)
+   field_rect = gui.last_item_rect()
+   gui.end_window()
+   gui.end_frame()
+   gfx.end_frame()
+   def str pre = gui.ime_preedit()
+   if pre != last_preedit {
+      print("preedit '" + pre + "' text '" + text + "'")
+      if pre == "ni" { saw_preedit = true }
+      if last_preedit == "ab" && pre == "" && text.contains("ab") == false { saw_cancel = true }
+      last_preedit = pre
+   }
+   0
+}
+
+fn content_scale() f64 {
+   def f64 s = float(window.get_window_content_scale(win).get(0, 1.0))
+   s > 0.0 ? s : 1.0
+}
+
+;; Centre of a toolkit rect (framebuffer pixels) in surface units.
+fn centre(list r) list {
+   def f64 s = content_scale()
+   [int((float(r.get(0, 0.0)) + float(r.get(2, 0.0)) * 0.5) / s), int((float(r.get(1, 0.0)) + float(r.get(3, 0.0)) * 0.5) / s)]
+}
+
+def str driver = "etc/tests/code/probes/ui/fixtures/wl_seat_driver.py"
+mut bool usable = common.env_trim("WAYLAND_DISPLAY").len > 0
+if usable {
+   def probe = run_capture(["python3", driver, "probe"], [], nil, false)
+   usable = int(probe.get("code", 1)) == 0
+   if !usable { print("skip: compositor lacks a virtual seat / input method: " + to_str(probe.get("stdout", ""))) }
+} else {
+   print("skip: no WAYLAND_DISPLAY")
+}
+if usable {
+   gfx.apply_backend_name(PROBE_BACKEND)
+   win = gfx.init_window(640, 360, "compositor input", keyc.WINDOW_CENTER, false, true, 1)
+   assert(!!win, "window opens")
+   if window.backend() != "wayland" || gfx.get_backend_type() == gfx.BACKEND_MOCK {
+      print("skip: not a Wayland GPU window (" + window.backend() + ")")
+      usable = false
+   }
+}
+if usable {
+   gui.set_enabled(true)
+   def int font = gfx.font_load_first(assets.MONO_FONT_CANDIDATES, 16)
+   gui.set_fonts(font, font, font)
+   mut int i = 0
+   while i < 30 {
+      frame()
+      i += 1
+   }
+   def list ws = window.size(win)
+   def f64 scale = content_scale()
+   print("backend " + PROBE_BACKEND + " scale " + to_str(scale) + " window " + to_str(ws) +
+      " framebuffer " + to_str(gfx.framebuffer_size_f64(640, 360)))
+   def list bc = centre(btn_rect)
+   def list fc = centre(field_rect)
+   def str dir = temp_dir() + "/ny-compositor-input-" + PROBE_BACKEND
+   run_capture(["mkdir", "-p", dir], [], nil, false)
+   def str ready = dir + "/ready"
+   def str script = dir + "/script"
+   run_capture(["rm", "-f", ready, dir + "/driver.log"], [], nil, false)
+   file_write(script,
+      "wait_file " + ready + "\n" +
+      "click " + to_str(bc[0]) + " " + to_str(bc[1]) + "\n" +
+      "sleep 0.3\n" +
+      "click " + to_str(fc[0]) + " " + to_str(fc[1]) + "\n" +
+      "sleep 0.3\n" +
+      "type Hi 7\n" +
+      "sleep 0.3\n" +
+      "wait_active\n" +
+      "preedit ni 2\n" +
+      "sleep 0.5\n" +
+      "commit 你好\n" +
+      "sleep 0.5\n" +
+      "preedit ab 1\n" +
+      "sleep 0.5\n" +
+      "cancel\n" +
+      "sleep 0.5\n" +
+      "delete 3 0\n" +
+      "sleep 0.5\n")
+   def str log = dir + "/driver.log"
+   run_capture(["sh", "-c", "NY_DRIVER_OUTPUT_W=" + to_str(ws.get(0, 640)) + " NY_DRIVER_OUTPUT_H=" +
+      to_str(ws.get(1, 360)) + " python3 " + driver + " run " + script + " > " + log + " 2>&1 &"], [], nil, false)
+   file_write(ready, "1")
+   mut int n = 0
+   mut bool done = false
+   def int started = now_ms()
+   while now_ms() - started < 120000 && !done {
+      frame()
+      n += 1
+      if n % 30 == 0 {
+         def lr = file_read(log)
+         if is_ok(lr) && to_str(unwrap(lr)).contains("DRIVER-") { done = true }
+         if is_ok(lr) && to_str(unwrap(lr)).contains("Error") { done = true }
+         if is_ok(lr) && to_str(unwrap(lr)).contains("timed out") { done = true }
+      }
+   }
+   i = 0
+   while i < 20 {
+      frame()
+      i += 1
+   }
+   def lr = file_read(log)
+   print("driver: " + (is_ok(lr) ? to_str(unwrap(lr)) : "no log"))
+   print("clicks " + to_str(clicks) + " text '" + text + "'")
+   assert(clicks == 1, "a compositor click presses the button")
+   assert(saw_preedit, "the input method's composition is shown")
+   assert(saw_cancel, "a cancelled composition is dropped")
+   assert(text == "Hi 7你", "typed keys, an IME commit, and a delete-surrounding edit the field")
+   ;; Clipboard both ways through wl_data_device.
+   window.set_clipboard(win, "from-ny é")
+   i = 0
+   while i < 10 {
+      frame()
+      i += 1
+   }
+   ;; The app serves its selection from its own event loop, so the reader
+   ;; runs in the background while frames keep dispatching.
+   def str pasted_path = dir + "/pasted"
+   run_capture(["rm", "-f", pasted_path, pasted_path + ".tmp", pasted_path + ".err"], [], nil, false)
+   run_capture(["sh", "-c", "(wl-paste -n > " + pasted_path + ".tmp 2> " + pasted_path + ".err; mv " + pasted_path + ".tmp " + pasted_path + ") < /dev/null > /dev/null 2>&1 &"], [], nil, false)
+   def int paste_start = now_ms()
+   while now_ms() - paste_start < 20000 && !file_exists(pasted_path) { frame() }
+   def pr = file_read(pasted_path)
+   def str pasted = is_ok(pr) ? to_str(unwrap(pr)) : ""
+   def perr = file_read(pasted_path + ".err")
+   print("wl-paste: '" + pasted + "'" + (is_ok(perr) ? " " + to_str(unwrap(perr)) : ""))
+   assert(pasted == "from-ny é", "the app's selection reaches other clients")
+   run_capture(["sh", "-c", "wl-copy to-ny < /dev/null > /dev/null 2>&1"], [], nil, false)
+   i = 0
+   while i < 10 {
+      frame()
+      i += 1
+   }
+   def got = window.get_clipboard(win)
+   print("get_clipboard: '" + got + "'")
+   assert(got == "to-ny", "another client's selection reaches the app")
+   gfx.close_window()
+}
+print("COMPOSITOR-INPUT-OK")
+
+NY
+}
+
+shape wayland-compositor-input-gl {
+  family "probe-suite"
+  generator "regression"
+  features ["ny", "ui", "wayland", "input", "ime", "clipboard", "gui"]
+  template ny-test-case
+  expect compile_and_run
+  flags_matrix "--native-only -O0; --native --run"
+  timeout 600
+  expect_stdout "COMPOSITOR-INPUT-OK"
+  source ny <<'NY'
+;; Input through a real compositor seat, not the app's own listeners: a
+;; virtual pointer clicks a button, a virtual keyboard types into a field,
+;; an input method (zwp_input_method_v2) composes, commits, cancels and
+;; deletes surrounding text over zwp_text_input_v3, and the clipboard goes
+;; both ways through wl_data_device. The seat is driven by
+;; fixtures/wl_seat_driver.py, which needs a compositor exposing those
+;; protocols (sway does; headless Weston does not, and the probe then reports
+;; a skip). Run under a private headless sway at several output scales.
+def str PROBE_BACKEND = "gl"
+use core
+use core.common as common
+use core.os (file_read, file_write, temp_dir, file_exists)
+use core.os.subprocess (run_capture)
+use core.os.time (now_ms)
+use core.os.ui.window as window
+use core.os.ui.window.consts as keyc
+use core.os.ui.render as gfx
+use core.os.ui.render.viewer.gui as gui
+use core.os.ui.assets.viewer as assets
+
+mut any win = 0
+mut int clicks = 0
+mut str text = ""
+mut list btn_rect = []
+mut list field_rect = []
+mut bool saw_preedit = false
+mut bool saw_cancel = false
+mut str last_preedit = ""
+
+fn frame() any {
+   mut any e = window.check_event(win)
+   while !is_nil(e) && !(is_int(e) && int(e) == 0) {
+      gui.feed_event(window.event_type(e), window.event_data(e))
+      e = window.check_event(win)
+   }
+   def fb = gfx.framebuffer_size_f64(640, 360)
+   def f64 w = float(fb.get(0, 640))
+   def f64 h = float(fb.get(1, 360))
+   if !gfx.begin_frame_clear([0.05, 0.05, 0.06, 1.0]) { return 0 }
+   gui.prepare_input(win, w, h)
+   gfx.set_ortho_2d(0.0, w, h, 0.0)
+   gui.begin_frame(0, 0, w, h)
+   gui.begin_window("seat", "Seat", 20.0, 20.0, 520.0, 260.0, {"movable": false, "resizable": false})
+   if gui.button("press", "Press me", 160.0, 32.0) { clicks += 1 }
+   btn_rect = gui.last_item_rect()
+   text = gui.input_text("field", "Text", text, "type here", 400.0)
+   field_rect = gui.last_item_rect()
+   gui.end_window()
+   gui.end_frame()
+   gfx.end_frame()
+   def str pre = gui.ime_preedit()
+   if pre != last_preedit {
+      print("preedit '" + pre + "' text '" + text + "'")
+      if pre == "ni" { saw_preedit = true }
+      if last_preedit == "ab" && pre == "" && text.contains("ab") == false { saw_cancel = true }
+      last_preedit = pre
+   }
+   0
+}
+
+fn content_scale() f64 {
+   def f64 s = float(window.get_window_content_scale(win).get(0, 1.0))
+   s > 0.0 ? s : 1.0
+}
+
+;; Centre of a toolkit rect (framebuffer pixels) in surface units.
+fn centre(list r) list {
+   def f64 s = content_scale()
+   [int((float(r.get(0, 0.0)) + float(r.get(2, 0.0)) * 0.5) / s), int((float(r.get(1, 0.0)) + float(r.get(3, 0.0)) * 0.5) / s)]
+}
+
+def str driver = "etc/tests/code/probes/ui/fixtures/wl_seat_driver.py"
+mut bool usable = common.env_trim("WAYLAND_DISPLAY").len > 0
+if usable {
+   def probe = run_capture(["python3", driver, "probe"], [], nil, false)
+   usable = int(probe.get("code", 1)) == 0
+   if !usable { print("skip: compositor lacks a virtual seat / input method: " + to_str(probe.get("stdout", ""))) }
+} else {
+   print("skip: no WAYLAND_DISPLAY")
+}
+if usable {
+   gfx.apply_backend_name(PROBE_BACKEND)
+   win = gfx.init_window(640, 360, "compositor input", keyc.WINDOW_CENTER, false, true, 1)
+   assert(!!win, "window opens")
+   if window.backend() != "wayland" || gfx.get_backend_type() == gfx.BACKEND_MOCK {
+      print("skip: not a Wayland GPU window (" + window.backend() + ")")
+      usable = false
+   }
+}
+if usable {
+   gui.set_enabled(true)
+   def int font = gfx.font_load_first(assets.MONO_FONT_CANDIDATES, 16)
+   gui.set_fonts(font, font, font)
+   mut int i = 0
+   while i < 30 {
+      frame()
+      i += 1
+   }
+   def list ws = window.size(win)
+   def f64 scale = content_scale()
+   print("backend " + PROBE_BACKEND + " scale " + to_str(scale) + " window " + to_str(ws) +
+      " framebuffer " + to_str(gfx.framebuffer_size_f64(640, 360)))
+   def list bc = centre(btn_rect)
+   def list fc = centre(field_rect)
+   def str dir = temp_dir() + "/ny-compositor-input-" + PROBE_BACKEND
+   run_capture(["mkdir", "-p", dir], [], nil, false)
+   def str ready = dir + "/ready"
+   def str script = dir + "/script"
+   run_capture(["rm", "-f", ready, dir + "/driver.log"], [], nil, false)
+   file_write(script,
+      "wait_file " + ready + "\n" +
+      "click " + to_str(bc[0]) + " " + to_str(bc[1]) + "\n" +
+      "sleep 0.3\n" +
+      "click " + to_str(fc[0]) + " " + to_str(fc[1]) + "\n" +
+      "sleep 0.3\n" +
+      "type Hi 7\n" +
+      "sleep 0.3\n" +
+      "wait_active\n" +
+      "preedit ni 2\n" +
+      "sleep 0.5\n" +
+      "commit 你好\n" +
+      "sleep 0.5\n" +
+      "preedit ab 1\n" +
+      "sleep 0.5\n" +
+      "cancel\n" +
+      "sleep 0.5\n" +
+      "delete 3 0\n" +
+      "sleep 0.5\n")
+   def str log = dir + "/driver.log"
+   run_capture(["sh", "-c", "NY_DRIVER_OUTPUT_W=" + to_str(ws.get(0, 640)) + " NY_DRIVER_OUTPUT_H=" +
+      to_str(ws.get(1, 360)) + " python3 " + driver + " run " + script + " > " + log + " 2>&1 &"], [], nil, false)
+   file_write(ready, "1")
+   mut int n = 0
+   mut bool done = false
+   def int started = now_ms()
+   while now_ms() - started < 120000 && !done {
+      frame()
+      n += 1
+      if n % 30 == 0 {
+         def lr = file_read(log)
+         if is_ok(lr) && to_str(unwrap(lr)).contains("DRIVER-") { done = true }
+         if is_ok(lr) && to_str(unwrap(lr)).contains("Error") { done = true }
+         if is_ok(lr) && to_str(unwrap(lr)).contains("timed out") { done = true }
+      }
+   }
+   i = 0
+   while i < 20 {
+      frame()
+      i += 1
+   }
+   def lr = file_read(log)
+   print("driver: " + (is_ok(lr) ? to_str(unwrap(lr)) : "no log"))
+   print("clicks " + to_str(clicks) + " text '" + text + "'")
+   assert(clicks == 1, "a compositor click presses the button")
+   assert(saw_preedit, "the input method's composition is shown")
+   assert(saw_cancel, "a cancelled composition is dropped")
+   assert(text == "Hi 7你", "typed keys, an IME commit, and a delete-surrounding edit the field")
+   ;; Clipboard both ways through wl_data_device.
+   window.set_clipboard(win, "from-ny é")
+   i = 0
+   while i < 10 {
+      frame()
+      i += 1
+   }
+   ;; The app serves its selection from its own event loop, so the reader
+   ;; runs in the background while frames keep dispatching.
+   def str pasted_path = dir + "/pasted"
+   run_capture(["rm", "-f", pasted_path, pasted_path + ".tmp", pasted_path + ".err"], [], nil, false)
+   run_capture(["sh", "-c", "(wl-paste -n > " + pasted_path + ".tmp 2> " + pasted_path + ".err; mv " + pasted_path + ".tmp " + pasted_path + ") < /dev/null > /dev/null 2>&1 &"], [], nil, false)
+   def int paste_start = now_ms()
+   while now_ms() - paste_start < 20000 && !file_exists(pasted_path) { frame() }
+   def pr = file_read(pasted_path)
+   def str pasted = is_ok(pr) ? to_str(unwrap(pr)) : ""
+   def perr = file_read(pasted_path + ".err")
+   print("wl-paste: '" + pasted + "'" + (is_ok(perr) ? " " + to_str(unwrap(perr)) : ""))
+   assert(pasted == "from-ny é", "the app's selection reaches other clients")
+   run_capture(["sh", "-c", "wl-copy to-ny < /dev/null > /dev/null 2>&1"], [], nil, false)
+   i = 0
+   while i < 10 {
+      frame()
+      i += 1
+   }
+   def got = window.get_clipboard(win)
+   print("get_clipboard: '" + got + "'")
+   assert(got == "to-ny", "another client's selection reaches the app")
+   gfx.close_window()
+}
+print("COMPOSITOR-INPUT-OK")
+
+NY
+}
+

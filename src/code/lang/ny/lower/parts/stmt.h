@@ -2604,9 +2604,21 @@ static bool nyr_lower_var(nyr_builder_t *b, const stmt_t *s) {
           !v->is_decl && prior_local && prior_local->type_name &&
           ny_native_type_name_is_int(prior_local->type_name) && init &&
           init->kind == NY_E_CALL && nyr_expr_has_raw_int_abi(b, init, 0);
-      bool inferred_raw_integer_initializer =
+      /* A runtime builtin with a raw integer ABI (`__open_raw`) returns a
+       * raw word whatever HM inferred for it; an inferred local holding it
+       * stays raw, or `def fd = __open_raw(...)` relabels fd 5 as a tagged
+       * word that `__write_off` decodes as fd 2. */
+      bool raw_builtin_initializer =
           v->is_decl && !declared_type && is_any && init &&
-          init->kind == NY_E_CALL && nyr_expr_has_raw_int_abi(b, init, 0);
+          init->kind == NY_E_CALL && init->as.call.callee &&
+          init->as.call.callee->kind == NY_E_IDENT &&
+          init->as.call.callee->as.ident.name &&
+          strncmp(init->as.call.callee->as.ident.name, "__", 2) == 0 &&
+          val >= 0 && nyr_value_scalar_class(b, val) == NYIR_SCALAR_I64_RAW;
+      bool inferred_raw_integer_initializer =
+          (v->is_decl && !declared_type && is_any && init &&
+           init->kind == NY_E_CALL && nyr_expr_has_raw_int_abi(b, init, 0)) ||
+          raw_builtin_initializer;
       if (raw_integer_call_initializer || inferred_raw_integer_initializer) {
         /* A typed raw slot remains raw when an inferred direct call returns a
          * proven raw integer. HM can conservatively stamp that call dynamic;

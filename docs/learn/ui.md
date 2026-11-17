@@ -121,6 +121,64 @@ Slow first frames can include font discovery, shader setup, atlas uploads, and
 software rasterization. Choose startup/settle limits from measured frame cost;
 do not turn a timeout into a pass by waiting indefinitely.
 
+### Wayland compositor support
+
+Measured on 2026-11-17 against a private headless sway 1.12 (wlroots), with
+`etc/tests/code/probes/ui/wayland-compositor-input.nshape`. Every cell is the
+whole probe: a virtual-pointer click on a button, virtual-keyboard typing into a
+field, an input-method composition (preedit, commit, cancel, and a
+delete-surrounding edit of a CJK commit), and the clipboard both ways.
+
+| Output scale (logical size) | Vulkan | OpenGL (EGL) |
+| --- | --- | --- |
+| 1 (1280x720) | supported | supported |
+| 1.25 fractional (1000x640, 800x560) | supported | supported |
+| 1.5 fractional (1000x600) | supported | supported |
+| 2 (800x500) | supported | supported |
+
+Both the JIT route (`--native-only`) and compiled executables (`--native
+--run`) pass, and grim captures of the widgets demo from both routes and both
+backends at scales 1, 1.25, and 1.5 show the same frame (text, widgets,
+popups). Compiled executables also detect gamepads (`core.os.ui.window`
+joystick probing) like the JIT route. Fractional scales present through `wp_viewport` with a buffer of
+window size times scale; pointer positions arrive in surface units and the
+toolkit maps them to framebuffer pixels. Headless Weston has no seat or input
+method: there the probe reports a skip, and
+`wayland-seat-input.nshape` covers pointer and keyboard by calling the
+backend's own listeners. Software OpenGL (Mesa llvmpipe) also runs on the JIT
+route: the compiler loads a copy of its LLVM whose GNU-unique symbols are
+rebound as weak (`build/<dir>/llvm-local`, made by `ny-elf-unique`), so the
+LLVM that Mesa loads no longer shares them.
+
+Input methods go through `zwp_text_input_v3`. A text field enables it while
+focused; other code can do the same:
+
+```ny
+window.text_input_start(win, [caret_x, caret_y, 2, line_h])   ;; surface units
+;; EVENT_TEXT_PREEDIT {text, cursor}: composition to show at the caret
+;; EVENT_KEY_CHAR: committed characters, like typed ones
+;; EVENT_TEXT_DELETE_SURROUNDING {before, after}: bytes to remove first
+window.text_input_stop(win)
+```
+
+`window.set_clipboard`/`get_clipboard` use `wl_data_device`; the selection is
+served from the application's event loop, so a client reading it must not be
+waited on synchronously from the same loop.
+
+To reproduce, start a private compositor (never the desktop session's) and run
+the probes serially (the runner already serializes `probes/ui/wayland-*`):
+
+```bash
+printf 'output HEADLESS-1 resolution 1500x900 scale 1.5\ndefault_border none\n' > /tmp/sway.cfg
+WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 sway -c /tmp/sway.cfg &
+# WAYLAND_DISPLAY = the new wayland-N socket in $XDG_RUNTIME_DIR
+ny-test --bin build/release/ny etc/tests/code/probes/ui/wayland-compositor-input.nshape
+```
+
+`fixtures/wl_seat_driver.py` is the seat: a dependency-free Wayland client that
+binds `zwp_virtual_keyboard_v1`, `zwlr_virtual_pointer_v1`, and
+`zwp_input_method_v2`, and replays a step script.
+
 ### Backend parity
 
 Use the same source, assets, input sequence, window dimensions, and observed

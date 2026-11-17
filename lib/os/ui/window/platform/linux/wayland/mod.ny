@@ -4,7 +4,7 @@
 ;; - core.os.ui.window.platform.linux
 ;; - core.os.ui.window
 ;; - core.os.ui.window.consts
-module core.os.ui.window.platform.linux.wayland(surface_buffer_ready, apply_buffer_scale, available, get_backend_name, connect_display, disconnect_display, get_registry, destroy_registry, flush, roundtrip, get_fd, dispatch_pending, dispatch, prepare_read, cancel_read, read_events, wait_events, wait_events_queue, create_event_queue, destroy_event_queue, prepare_read_queue, dispatch_queue_pending, create_proxy_wrapper, destroy_proxy_wrapper, set_proxy_queue, get_proxy_user_data, set_proxy_user_data, get_proxy_version, destroy_proxy, bootstrap_globals, destroy_globals, set_globals, vulkan_supported, vulkan_required_extensions, probe_display, presentation_supported, create_surface, create_wl_surface, create_xdg_surface, create_xdg_toplevel, xdg_toplevel_set_title, create_basic_window, destroy_basic_window, poll_window_events, show_window, hide_window, iconify_window, restore_window, maximize_window, get_window_attrib, set_window_opacity, set_window_resizable, set_title, get_size, set_size, get_cursor_pos, set_cursor_pos, set_window_icon, create_cursor, create_standard_cursor, destroy_cursor, set_cursor, get_key_state, get_mouse_button_state, get_key_name, get_window_monitor, set_window_monitor, set_clipboard, get_clipboard, get_gamma_ramp, set_gamma_ramp, get_monitors, get_primary_monitor, get_monitor_pos, get_monitor_workarea, get_monitor_physical_size, get_monitor_content_scale, get_monitor_name, get_wayland_monitor, get_video_mode, get_video_modes, set_input_mode, get_input_mode, get_key_name, get_key_scancode, text_input_enable, text_input_disable, get_window_content_scale, get_window_opacity, get_window_frame_size, request_window_attention, get_seat_capabilities, poll_joystick_events, inject_input)
+module core.os.ui.window.platform.linux.wayland(surface_buffer_ready, apply_buffer_scale, available, get_backend_name, connect_display, disconnect_display, get_registry, destroy_registry, flush, roundtrip, get_fd, dispatch_pending, dispatch, prepare_read, cancel_read, read_events, wait_events, wait_events_queue, create_event_queue, destroy_event_queue, prepare_read_queue, dispatch_queue_pending, create_proxy_wrapper, destroy_proxy_wrapper, set_proxy_queue, get_proxy_user_data, set_proxy_user_data, get_proxy_version, destroy_proxy, bootstrap_globals, destroy_globals, set_globals, vulkan_supported, vulkan_required_extensions, probe_display, presentation_supported, create_surface, create_wl_surface, create_xdg_surface, create_xdg_toplevel, xdg_toplevel_set_title, create_basic_window, destroy_basic_window, poll_window_events, show_window, hide_window, iconify_window, restore_window, maximize_window, get_window_attrib, set_window_opacity, set_window_resizable, set_title, get_size, set_size, get_cursor_pos, set_cursor_pos, set_window_icon, create_cursor, create_standard_cursor, destroy_cursor, set_cursor, get_key_state, get_mouse_button_state, get_key_name, get_window_monitor, set_window_monitor, set_clipboard, get_clipboard, get_gamma_ramp, set_gamma_ramp, get_monitors, get_primary_monitor, get_monitor_pos, get_monitor_workarea, get_monitor_physical_size, get_monitor_content_scale, get_monitor_name, get_wayland_monitor, get_video_mode, get_video_modes, set_input_mode, get_input_mode, get_key_name, get_key_scancode, text_input_enable, text_input_disable, text_input_state, get_window_content_scale, get_window_opacity, get_window_frame_size, request_window_attention, get_seat_capabilities, poll_joystick_events, inject_input)
 use core
 use core.mem (cstr)
 use core.str as str
@@ -925,17 +925,20 @@ fn _init_unstable_interfaces() any {
    _wp_decoration_manager_interface = _create_interface("zxdg_decoration_manager_v1", 1,
       [["destroy", "", 0],
          ["get_toplevel_decoration", "no", [_wp_toplevel_decoration_interface, _xdg_toplevel_interface]]])
+   ;; Message order is the protocol's (text-input-unstable-v3.xml): opcodes
+   ;; are positions, so a reordered table sends the wrong request.
    _wp_text_input_interface = _create_interface("zwp_text_input_v3", 1,
       [["destroy", "", 0],
          ["enable", "", 0],
          ["disable", "", 0],
+         ["set_surrounding_text", "sii", 0],
+         ["set_text_change_cause", "u", 0],
          ["set_content_type", "uu", 0],
          ["set_cursor_rectangle", "iiii", 0],
-         ["set_surrounding_text", "sii", 0],
          ["commit", "", 0]],
       [["enter", "o", [wl_surface_iface]],
          ["leave", "o", [wl_surface_iface]],
-         ["preedit_string", "?si", 0],
+         ["preedit_string", "?sii", 0],
          ["commit_string", "?s", 0],
          ["delete_surrounding_text", "uu", 0],
          ["done", "u", 0]])
@@ -1407,7 +1410,8 @@ fn _refresh_window_scale(int handle) any {
    win = win.set("content_scale", target)
    _windows = dict_set(_windows, handle, win)
    mut data = dict(4)
-   data = data.set("xscale", target).set("yscale", target)
+   data = data.set("xscale", target)
+   data = data.set("yscale", target)
    _push_event(win, EVENT_SCALE_UPDATED, data)
 }
 
@@ -1423,9 +1427,14 @@ fn _buffer_units(int px, f64 scale) int {
 
 fn apply_buffer_scale(any win, int w, int h) bool {
    "Tells the compositor how the buffer about to be presented maps to the surface: an integer buffer scale, or a viewport for a fractional scale. Applies only when the w x h buffer was drawn at the window's current scale, so a buffer of the old size is never committed with the new scale."
-   def handle = is_dict(win) ? win.get("handle", 0) : win
-   mut current = handle ? dict_get(_windows, int(handle), 0) : 0
-   if !is_dict(current) || w <= 0 || h <= 0 { return false }
+   mut any handle = win
+   if is_dict(win) { handle = win.get("handle", 0) }
+   if !handle || w <= 0 || h <= 0 { return false }
+   ;; No ternary here: `c ? record : 0` typed the record as an int, and the
+   ;; updated window was stored back as a bare handle (every later event of
+   ;; the window then carried handle 0 and was never delivered).
+   mut any current = dict_get(_windows, int(handle), 0)
+   if !is_dict(current) { return false }
    def int lw = int(current.get("w", 0))
    def int lh = int(current.get("h", 0))
    def f64 scale = float(current.get("content_scale", 1.0))
@@ -1439,7 +1448,8 @@ fn apply_buffer_scale(any win, int w, int h) bool {
       if !viewport { return false }
       if current.get("viewport_w", 0) != lw || current.get("viewport_h", 0) != lh {
          wl_proxy_marshal_flags_ptr_ii(viewport, 2, 0, int(get_proxy_version(viewport)), 0, lw, lh)
-         current = current.set("viewport_w", lw).set("viewport_h", lh)
+         current = current.set("viewport_w", lw)
+         current = current.set("viewport_h", lh)
       }
       if applied != 1 {
          _wl_proxy_marshal_u(handle, WL_SURFACE_SET_BUFFER_SCALE, 1)
@@ -1448,7 +1458,8 @@ fn apply_buffer_scale(any win, int w, int h) bool {
    } else {
       if viewport && current.get("viewport_w", 0) {
          wl_proxy_marshal_flags_ptr_ii(viewport, 2, 0, int(get_proxy_version(viewport)), 0, -1, -1)
-         current = current.set("viewport_w", 0).set("viewport_h", 0)
+         current = current.set("viewport_w", 0)
+         current = current.set("viewport_h", 0)
       }
       if applied != whole {
          _wl_proxy_marshal_u(handle, WL_SURFACE_SET_BUFFER_SCALE, whole)
@@ -1491,9 +1502,12 @@ fn _apply_shell_state(any win) any {
       def height = int(load64_h(state, _WRS_HEIGHT))
       if width > 0 && height > 0 {
          if width != win.get("w", 0) || height != win.get("h", 0) {
-            win = win.set("w", width).set("h", height).set("configured", true)
+            win = win.set("w", width)
+            win = win.set("h", height)
+            win = win.set("configured", true)
             mut data = dict(4)
-            data = data.set("w", width).set("h", height)
+            data = data.set("w", width)
+            data = data.set("h", height)
             _push_event(win, EVENT_WINDOW_RESIZED, data)
             changed = true
          } else {
@@ -1587,7 +1601,8 @@ fn _wait_queued_commits(any win) any {
 fn surface_buffer_ready(any win, int w, int h) bool {
    "Records that a presentable buffer of w x h exists and acknowledges any resize waiting for it."
    def handle = is_dict(win) ? win.get("handle", 0) : win
-   def current = handle ? dict_get(_windows, int(handle), 0) : 0
+   mut any current = 0
+   if handle { current = dict_get(_windows, int(handle), 0) }
    if !is_dict(current) { return false }
    def state = current.get("resize_state", 0)
    if !state { return false }
@@ -1873,15 +1888,18 @@ fn set_size(any win, int w, int h) bool {
    "Resizes a floating Wayland window; a client chooses its own size unless the compositor constrains it."
    if !win || !is_dict(win) || w <= 0 || h <= 0 { return false }
    def handle = win.get("handle", 0)
-   def current = handle ? dict_get(_windows, int(handle), 0) : 0
+   mut any current = 0
+   if handle { current = dict_get(_windows, int(handle), 0) }
    if !is_dict(current) { return false }
    def state = current.get("resize_state", 0)
    if state && (load64_h(state, _WRS_MAXIMIZED) || load64_h(state, _WRS_FULLSCREEN)) { return false }
    if current.get("w", 0) == w && current.get("h", 0) == h { return true }
-   def updated = current.set("w", w).set("h", h)
+   mut updated = current.set("w", w)
+   updated = updated.set("h", h)
    _windows = dict_set(_windows, int(handle), updated)
    mut data = dict(4)
-   data = data.set("w", w).set("h", h)
+   data = data.set("w", w)
+   data = data.set("h", h)
    _push_event(updated, EVENT_WINDOW_RESIZED, data)
    true
 }
@@ -2061,14 +2079,16 @@ fn _ensure_data_source_iface() any {
    _wl_data_source_iface
 }
 
-fn _data_source_send(any data, any source, any mime_type, any fd) any {
-   if !_clipboard_text || !fd { wl_close_fd(int(fd)) return 0 }
+;; Listener arguments arrive as C words: typed parameters keep the fd raw
+;; (an `any` fd was read as a tagged word, so fd 41 became 20).
+fn _data_source_send(ptr data, ptr source, ptr mime_type, i32 fd) any {
+   if !_clipboard_text || fd < 0 { wl_close_fd(int(fd)) return 0 }
    def n = _clipboard_text.len
    if n > 0 { wl_write(int(fd), cstr(_clipboard_text), int(n)) }
    wl_close_fd(int(fd))
 }
 
-fn _data_source_cancelled(any data, any source) any {
+fn _data_source_cancelled(ptr data, ptr source) any {
    if source && source == _clipboard_source {
       destroy_proxy(source)
       _clipboard_source = 0
@@ -2076,48 +2096,48 @@ fn _data_source_cancelled(any data, any source) any {
    }
 }
 
-fn _data_device_data_offer(any data, any device, any offer) any {
+fn _data_device_data_offer(ptr data, ptr device, ptr offer) any {
 }
 
-fn _data_device_selection(any data, any device, any offer) any {
+fn _data_device_selection(ptr data, ptr device, ptr offer) any {
    def prev = load64_h(data, _WG_CLIPBOARD_OFFER)
    if prev && prev != offer { destroy_proxy(prev) }
    store64_h(data, offer, _WG_CLIPBOARD_OFFER)
 }
 
-fn _data_device_enter(any data, any device, any serial, any surface, any x, any y, any offer) any {
+fn _data_device_enter(ptr data, ptr device, u32 serial, ptr surface, i32 x, i32 y, ptr offer) any {
    if !data { return 0 }
    store64_h(data, offer, _WG_DND_OFFER)
    store64_h(data, surface, _WG_DND_SURFACE)
    def win = dict_get(_windows, int(surface), 0)
    if win && is_dict(win) {
       mut ev = dict(8)
-      ev = ev.set("x", int(x))
-      ev = ev.set("y", int(y))
+      ev = ev.set("x", __box_i64(int(x) / 256))
+      ev = ev.set("y", __box_i64(int(y) / 256))
       _push_event(win, EVENT_DATA_DRAG, ev)
    }
 }
 
-fn _data_device_leave(any data, any device) any {
+fn _data_device_leave(ptr data, ptr device) any {
    if !data { return 0 }
    store64_h(data, 0, _WG_DND_OFFER)
    store64_h(data, 0, _WG_DND_SURFACE)
 }
 
-fn _data_device_motion(any data, any device, any time, any x, any y) any {
+fn _data_device_motion(ptr data, ptr device, u32 time, i32 x, i32 y) any {
    if !data { return 0 }
    def surface = load64_h(data, _WG_DND_SURFACE)
    if !surface { return 0 }
    def win = dict_get(_windows, int(surface), 0)
    if win && is_dict(win) {
       mut ev = dict(8)
-      ev = ev.set("x", int(x))
-      ev = ev.set("y", int(y))
+      ev = ev.set("x", __box_i64(int(x) / 256))
+      ev = ev.set("y", __box_i64(int(y) / 256))
       _push_event(win, EVENT_DATA_DRAG, ev)
    }
 }
 
-fn _data_device_drop(any data, any device) any {
+fn _data_device_drop(ptr data, ptr device) any {
    if !data { return 0 }
    def offer = load64_h(data, _WG_DND_OFFER)
    def surface = load64_h(data, _WG_DND_SURFACE)
@@ -2241,7 +2261,8 @@ fn get_clipboard(any win) str {
    }
    wl_close_fd(rfd)
    store8(buf, 0, total)
-   def result = to_str(buf)
+   ;; The pipe filled a C buffer: copy it out as text, not as its address.
+   def result = str.cstr_to_str(buf)
    free(buf)
    result
 }
@@ -3995,24 +4016,57 @@ fn wl_proxy_marshal_flags_full_set_cursor(any pointer, int serial, any surface, 
    )
 }
 
-fn _text_input_handle_commit(ptr data, ptr text_input, ptr text) any {
-   if !data || !text { return 0 }
-   def win = dict_get(_windows, int(data), 0)
-   if !win || !is_dict(win) { return 0 }
+def _TI_ENABLE = 1
+def _TI_DISABLE = 2
+def _TI_SET_CURSOR_RECTANGLE = 6
+def _TI_COMMIT = 7
+
+;; zwp_text_input_v3 state, per window handle: events accumulate and apply
+;; together on `done`, in the protocol's order (delete surrounding text,
+;; insert the commit, then show the new preedit).
+mut _ti_state = dict(8)
+
+fn _ti_get(int handle) dict {
+   def cur = dict_get(_ti_state, handle, 0)
+   if is_dict(cur) { return cur }
+   mut st = dict(16)
+   st = st.set("preedit", "")
+   st = st.set("preedit_cursor", -1)
+   st = st.set("commit", "")
+   st = st.set("before", 0)
+   st = st.set("after", 0)
+   st = st.set("shown_preedit", "")
+   st = st.set("commits", 0)
+   st = st.set("focused", false)
+   st = st.set("wanted", false)
+   st = st.set("rect", [0, 0, 1, 1])
+   st
+}
+
+fn _ti_put(int handle, dict st) any {
+   _ti_state = dict_set(_ti_state, handle, st)
+}
+
+fn _ti_cstr(ptr text) str {
+   if !text { return "" }
+   str.cstr_to_str(text)
+}
+
+fn _ti_push_chars(any win, str text) any {
    mut i = 0
-   while true {
+   def n = text.len
+   while i < n {
       def b0 = load8(text, i)
-      if b0 == 0 { break }
       mut cp = -1
       mut next = i + 1
-      if b0 < 0x80 { cp = b0 } elif band(b0, 0xe0) == 0xc0 && load8(text, i + 1) != 0 {
+      if b0 < 0x80 { cp = b0 } elif band(b0, 0xe0) == 0xc0 && i + 1 < n {
          cp = bor(bshl(band(b0, 0x1f), 6), band(load8(text, i + 1), 0x3f))
          next = i + 2
-      } elif band(b0, 0xf0) == 0xe0 && load8(text, i + 1) != 0 && load8(text, i + 2) != 0 {
+      } elif band(b0, 0xf0) == 0xe0 && i + 2 < n {
          cp = bor(bshl(band(b0, 0x0f), 12),
             bor(bshl(band(load8(text, i + 1), 0x3f), 6), band(load8(text, i + 2), 0x3f)))
          next = i + 3
-      } elif band(b0, 0xf8) == 0xf0 && load8(text, i + 1) != 0 && load8(text, i + 2) != 0 && load8(text, i + 3) != 0 {
+      } elif band(b0, 0xf8) == 0xf0 && i + 3 < n {
          cp = bor(bshl(band(b0, 0x07), 18),
             bor(bshl(band(load8(text, i + 1), 0x3f), 12),
                bor(bshl(band(load8(text, i + 2), 0x3f), 6), band(load8(text, i + 3), 0x3f))))
@@ -4023,25 +4077,113 @@ fn _text_input_handle_commit(ptr data, ptr text_input, ptr text) any {
          char_data = char_data.set("char", cp)
          char_data = char_data.set("mod", 0)
          char_data = char_data.set("mods", 0)
+         char_data = char_data.set("ime", true)
          _push_event(win, EVENT_KEY_CHAR, char_data)
       }
       i = next
    }
 }
 
+fn _text_input_handle_commit(ptr data, ptr text_input, ptr text) any {
+   if !data { return 0 }
+   def handle = int(data)
+   mut st = _ti_get(handle)
+   st = st.set("commit", _ti_cstr(text))
+   _ti_put(handle, st)
+}
+
 fn _text_input_handle_preedit(ptr data, ptr text_input, ptr text, i32 cursor_begin, i32 cursor_end) any {
+   if !data { return 0 }
+   def handle = int(data)
+   mut st = _ti_get(handle)
+   st = st.set("preedit", _ti_cstr(text))
+   st = st.set("preedit_cursor", __box_i64(int(cursor_begin)))
+   _ti_put(handle, st)
 }
 
 fn _text_input_handle_delete_surrounding(ptr data, ptr text_input, u32 before_length, u32 after_length) any {
+   if !data { return 0 }
+   def handle = int(data)
+   mut st = _ti_get(handle)
+   st = st.set("before", __box_i64(int(before_length)))
+   st = st.set("after", __box_i64(int(after_length)))
+   _ti_put(handle, st)
 }
 
 fn _text_input_handle_done(ptr data, ptr text_input, u32 serial) any {
+   if !data { return 0 }
+   def handle = int(data)
+   def win = dict_get(_windows, handle, 0)
+   mut st = _ti_get(handle)
+   if is_dict(win) {
+      def before = int(st.get("before", 0))
+      def after = int(st.get("after", 0))
+      if before > 0 || after > 0 {
+         mut removal = dict(4)
+         removal = removal.set("before", __box_i64(before))
+         removal = removal.set("after", __box_i64(after))
+         _push_event(win, EVENT_TEXT_DELETE_SURROUNDING, removal)
+      }
+      def commit = to_str(st.get("commit", ""))
+      if commit.len > 0 { _ti_push_chars(win, commit) }
+      def preedit = to_str(st.get("preedit", ""))
+      if preedit != to_str(st.get("shown_preedit", "")) || commit.len > 0 {
+         mut pre = dict(4)
+         pre = pre.set("text", preedit)
+         pre = pre.set("cursor", __box_i64(int(st.get("preedit_cursor", -1))))
+         _push_event(win, EVENT_TEXT_PREEDIT, pre)
+      }
+      st = st.set("shown_preedit", preedit)
+   }
+   ;; Pending state is per `done`: an event that is not repeated is reset.
+   st = st.set("preedit", "")
+   st = st.set("preedit_cursor", -1)
+   st = st.set("commit", "")
+   st = st.set("before", 0)
+   st = st.set("after", 0)
+   _ti_put(handle, st)
+}
+
+fn _ti_send_state(any ti, dict st) any {
+   if !ti { return 0 }
+   def v = int(get_proxy_version(ti))
+   if st.get("wanted", false) {
+      wl_proxy_marshal_flags_ptr(ti, _TI_ENABLE, 0, v, 0, 0)
+      def r = st.get("rect", [0, 0, 1, 1])
+      wl_proxy_marshal_flags_cursor(ti, _TI_SET_CURSOR_RECTANGLE, 0, v, 0,
+         int(r.get(0, 0)), int(r.get(1, 0)), int(r.get(2, 1)), int(r.get(3, 1)))
+   } else {
+      wl_proxy_marshal_flags_ptr(ti, _TI_DISABLE, 0, v, 0, 0)
+   }
+   wl_proxy_marshal_flags_void(ti, _TI_COMMIT, 0, v, 0)
 }
 
 fn _text_input_handle_enter(ptr data, ptr text_input, ptr surface) any {
+   if !data { return 0 }
+   def handle = int(data)
+   mut st = _ti_get(handle)
+   st = st.set("focused", true)
+   _ti_put(handle, st)
+   ;; Enabling only counts while the surface has text-input focus, so a
+   ;; field focused earlier is re-announced on enter.
+   if st.get("wanted", false) { _ti_send_state(text_input, st) }
 }
 
 fn _text_input_handle_leave(ptr data, ptr text_input, ptr surface) any {
+   if !data { return 0 }
+   def handle = int(data)
+   mut st = _ti_get(handle)
+   st = st.set("focused", false)
+   def had = to_str(st.get("shown_preedit", ""))
+   st = st.set("shown_preedit", "")
+   _ti_put(handle, st)
+   def win = dict_get(_windows, handle, 0)
+   if had.len > 0 && is_dict(win) {
+      mut pre = dict(4)
+      pre = pre.set("text", "")
+      pre = pre.set("cursor", -1)
+      _push_event(win, EVENT_TEXT_PREEDIT, pre)
+   }
 }
 
 fn _fractional_scale_handle_preferred_scale(ptr data, ptr fs_obj, u32 scale_120) any {
@@ -4078,31 +4220,52 @@ fn _create_fractional_scale(any state, any surface) any {
    wl_proxy_marshal_flags_ptr_obj(mgr, 1, _wp_fractional_scale_interface, int(get_proxy_version(mgr)), 0, 0, surface)
 }
 
-fn text_input_enable(any win) bool {
-   "Enables zwp_text_input_v3 for IME on the given Wayland window."
+fn text_input_enable(any win, any rect=0) bool {
+   "Enables zwp_text_input_v3 (IME) for the window; rect [x, y, w, h] is the caret box in surface coordinates."
    if !win || !is_dict(win) { return false }
    def ti = win.get("text_input", 0)
    if !ti { return false }
-   wl_proxy_marshal_flags_ptr(ti, 1, 0, int(get_proxy_version(ti)), 0, 0)
-   wl_proxy_marshal_flags_ptr(ti, 6, 0, int(get_proxy_version(ti)), 0, 0)
+   def handle = int(win.get("handle", 0))
+   mut st = _ti_get(handle)
+   def was = st.get("wanted", false)
+   def old_rect = st.get("rect", [0, 0, 1, 1])
+   st = st.set("wanted", true)
+   if is_list(rect) && rect.len >= 4 {
+      st = st.set("rect", [int(rect.get(0, 0)), int(rect.get(1, 0)),
+         max(1, int(rect.get(2, 1))), max(1, int(rect.get(3, 1)))])
+   }
+   _ti_put(handle, st)
+   ;; Re-send only on a change: each commit is a new state for the IME.
+   if !was || to_str(old_rect) != to_str(st.get("rect")) { _ti_send_state(ti, st) }
    true
 }
 
 fn text_input_disable(any win) bool {
-   "Disables zwp_text_input_v3 for IME on the given Wayland window."
+   "Disables zwp_text_input_v3 (IME) for the window."
    if !win || !is_dict(win) { return false }
    def ti = win.get("text_input", 0)
    if !ti { return false }
-   wl_proxy_marshal_flags_ptr(ti, 2, 0, int(get_proxy_version(ti)), 0, 0)
-   wl_proxy_marshal_flags_ptr(ti, 6, 0, int(get_proxy_version(ti)), 0, 0)
+   def handle = int(win.get("handle", 0))
+   mut st = _ti_get(handle)
+   if !st.get("wanted", false) { return true }
+   st = st.set("wanted", false)
+   _ti_put(handle, st)
+   _ti_send_state(ti, st)
    true
+}
+
+fn text_input_state(any win) dict {
+   "Returns the window's text-input state: wanted, focused, shown_preedit."
+   if !win || !is_dict(win) { return dict(4) }
+   _ti_get(int(win.get("handle", 0)))
 }
 
 fn get_window_content_scale(any win) list {
    "Returns [sx, sy] content scale for a Wayland window: the preferred fractional scale, else the largest integer scale of its outputs, else 1.0."
    if !win || !is_dict(win) { return [1.0, 1.0] }
    def handle = win.get("handle", 0)
-   def current = handle ? dict_get(_windows, int(handle), 0) : 0
+   mut any current = 0
+   if handle { current = dict_get(_windows, int(handle), 0) }
    if is_dict(current) { win = current }
    def scale = float(win.get("content_scale", 1.0))
    [scale, scale]

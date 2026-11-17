@@ -25,7 +25,8 @@ module core.os.ui.window.platform(
    get_egl_display, get_egl_context, get_egl_surface, get_egl_config, get_osmesa_context,
    get_osmesa_color_buffer, get_osmesa_depth_buffer, get_window_monitor, set_window_monitor,
    get_x11_selection_string, set_x11_selection_string, set_window_decorated, set_window_floating,
-   set_window_resizable, get_clipboard, set_clipboard, get_surface_support, joystick_present,
+   set_window_resizable, get_clipboard, set_clipboard, text_input_start, text_input_stop,
+   text_input_state, get_surface_support, joystick_present,
    get_joystick_axes, get_joystick_buttons, get_joystick_hats, get_joystick_name, get_joystick_guid,
    joystick_is_gamepad, get_gamepad_name, get_gamepad_state, update_gamepad_mappings,
    get_joystick_user_pointer, set_joystick_user_pointer, get_gamma_ramp, set_gamma_ramp, get_monitors,
@@ -1763,6 +1764,24 @@ fn get_clipboard(any win) str {
    elif b == "win32" { return win32_impl.get_clipboard(native) }
    elif b == "cocoa" { return cocoa_impl.get_clipboard(native) }
    ""
+}
+
+fn text_input_start(any win, any rect=0) bool {
+   "Starts input-method composition for the window (Wayland zwp_text_input_v3); rect is the caret box [x, y, w, h] in window coordinates. Returns false where the backend has no input-method protocol."
+   if _select_backend_name() != "wayland" { return false }
+   wayland_backend.text_input_enable(_native_window(win), rect)
+}
+
+fn text_input_stop(any win) bool {
+   "Stops input-method composition for the window."
+   if _select_backend_name() != "wayland" { return false }
+   wayland_backend.text_input_disable(_native_window(win))
+}
+
+fn text_input_state(any win) dict {
+   "Returns the backend's text-input state (wanted, focused, shown_preedit)."
+   if _select_backend_name() != "wayland" { return dict(4) }
+   wayland_backend.text_input_state(_native_window(win))
 }
 
 fn set_clipboard(any win, any text) any {

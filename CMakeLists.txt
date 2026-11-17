@@ -2490,6 +2490,38 @@ else()
     endif()
     target_link_options(ny-full PRIVATE -rdynamic)
 
+    # A JIT-run program that opens Mesa's llvmpipe loads a second LLVM into
+    # this process. glibc binds STB_GNU_UNIQUE symbols by name across versions,
+    # so the other LLVM ran this one's template statics and crashed. ny-full
+    # loads a copy of its LLVM with those symbols rebound as weak (versioned
+    # lookup then keeps the two apart); see src/cmd/tools/elfuniq/main.c.
+    if (UNIX AND NOT APPLE AND NYTRIX_LLVM_LIBDIR)
+      file(GLOB _nytrix_llvm_shared "${NYTRIX_LLVM_LIBDIR}/libLLVM.so.*")
+      list(SORT _nytrix_llvm_shared)
+      if (_nytrix_llvm_shared)
+        list(GET _nytrix_llvm_shared 0 _nytrix_llvm_shared_lib)
+        set(_nytrix_llvm_local "${CMAKE_BINARY_DIR}/llvm-local")
+        add_executable(ny-elf-unique "${NYTRIX_ROOT}/src/cmd/tools/elfuniq/main.c")
+        add_dependencies(ny-full ny-elf-unique)
+        add_custom_command(TARGET ny-full POST_BUILD
+          COMMAND ${CMAKE_COMMAND} -E make_directory "${_nytrix_llvm_local}"
+          COMMAND $<TARGET_FILE:ny-elf-unique> "${_nytrix_llvm_shared_lib}" "${_nytrix_llvm_local}"
+          VERBATIM)
+        get_target_property(_nytrix_full_rpath ny-full BUILD_RPATH)
+        if (_nytrix_full_rpath)
+          set_property(TARGET ny-full PROPERTY BUILD_RPATH "$ORIGIN/llvm-local;${_nytrix_full_rpath}")
+        else()
+          set_property(TARGET ny-full PROPERTY BUILD_RPATH "$ORIGIN/llvm-local")
+        endif()
+        # The installed compiler loads the same rebound copy.
+        include(GNUInstallDirs)
+        set_property(TARGET ny-full PROPERTY INSTALL_RPATH
+          "$ORIGIN/../${CMAKE_INSTALL_LIBDIR}/nytrix/llvm-local")
+        install(DIRECTORY "${_nytrix_llvm_local}/"
+          DESTINATION "${CMAKE_INSTALL_LIBDIR}/nytrix/llvm-local")
+      endif()
+    endif()
+
     if (NYTRIX_BUILD_LSP)
       target_link_libraries(ny-lsp PRIVATE m pthread util "${NYTRIX_CLANG_LIBRARY_FOUND}")
       foreach(_flag IN LISTS _all_ldflags)
