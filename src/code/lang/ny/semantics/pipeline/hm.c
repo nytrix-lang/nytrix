@@ -6410,7 +6410,7 @@ static ny_hm_type_t *hm_subst_return_indices(ny_hm_state_t *hm, stmt_t *fn,
      */
     char indexed_base[512];
     bool value_indexed =
-        strncmp(param->type, "Fin<", 4) == 0 ||
+        param->implicit || strncmp(param->type, "Fin<", 4) == 0 ||
         (hm->ctx && hm->ctx->cg &&
          ny_indexed_declared_type_base(hm->ctx->cg, param->type, indexed_base,
                                        sizeof(indexed_base)));
@@ -6423,6 +6423,15 @@ static ny_hm_type_t *hm_subst_return_indices(ny_hm_state_t *hm, stmt_t *fn,
     if (text != name)
       free(text);
     text = next;
+  }
+  if (text != name) {
+    /* `Vec<int, n + 1>` with n = 0 reads `Vec<int, 1>`. */
+    hm_index_map_t none = {0};
+    char *canon = hm_index_subst(text, &none);
+    if (canon) {
+      free(text);
+      text = canon;
+    }
   }
   ny_hm_type_t *result =
       text == name ? base : hm_parse_type_name(hm, text, self_name);
@@ -7313,6 +7322,13 @@ static char *hm_subst_param_type_text(ny_hm_state_t *hm, stmt_t *fn,
     free(text);
     return NULL;
   }
+  /* `Vec<int, n + 1>` with n = 1 is `Vec<int, 2>`: fold index arithmetic. */
+  hm_index_map_t none = {0};
+  char *canon = hm_index_subst(text, &none);
+  if (canon) {
+    free(text);
+    text = canon;
+  }
   return text;
 }
 
@@ -7345,9 +7361,16 @@ static bool hm_bind_value_binder(const char *tmpl, size_t tlen,
   if (strcmp(t, name) == 0) {
     char an[64];
     int64_t off = 0;
-    if (!ny_index_parse(a, an, sizeof(an), &off) || an[0])
-      return false; /* only a known literal fills a runtime binder */
-    snprintf(out, cap, "%lld", (long long)off);
+    if (!ny_index_parse(a, an, sizeof(an), &off))
+      return false;
+    /* A literal, or exactly a name: the caller's own binder (`n` inside
+     * `fn f{int n}(Vec<A, n> xs)`) is forwarded as a value. */
+    if (an[0] && off != 0)
+      return false;
+    if (an[0])
+      snprintf(out, cap, "%s", an);
+    else
+      snprintf(out, cap, "%lld", (long long)off);
     return true;
   }
   char var[64], solved[160];
@@ -7358,6 +7381,10 @@ static bool hm_bind_value_binder(const char *tmpl, size_t tlen,
     int64_t off = 0;
     if (!ny_index_parse(solved, sn, sizeof(sn), &off) || sn[0])
       return false;
+    /* An index written `n + k` is a successor: it never solves to a
+     * negative n (`Vec<A, n + 1>` does not match `Vec<A, 0>`). */
+    if (off < 0)
+      return false;
     snprintf(out, cap, "%lld", (long long)off);
     return true;
   }
@@ -7365,8 +7392,23 @@ static bool hm_bind_value_binder(const char *tmpl, size_t tlen,
   size_t tl[16], al[16], tb = 0, ab = 0;
   size_t tn = hm_index_split_args(t, tp, tl, 16, &tb);
   size_t an2 = hm_index_split_args(a, ap, al, 16, &ab);
-  if (!tn || tn != an2 || tb != ab || strncmp(t, a, tb) != 0)
+  if (!tn || tn != an2)
     return false;
+  /* `Vec<...>` declared in a module matches `ix.Vec<...>` at a use site:
+   * compare the leaf names of the type constructors. */
+  {
+    const char *tl_leaf = t, *al_leaf = a;
+    for (size_t i = 0; i < tb; ++i)
+      if (t[i] == '.')
+        tl_leaf = t + i + 1;
+    for (size_t i = 0; i < ab; ++i)
+      if (a[i] == '.')
+        al_leaf = a + i + 1;
+    size_t tl_len = tb - (size_t)(tl_leaf - t);
+    size_t al_len = ab - (size_t)(al_leaf - a);
+    if (tl_len != al_len || strncmp(tl_leaf, al_leaf, tl_len) != 0)
+      return false;
+  }
   for (size_t i = 0; i < tn; ++i)
     if (hm_bind_value_binder(tp[i], tl[i], ap[i], al[i], name, out, cap))
       return true;
@@ -7411,6 +7453,12 @@ static void hm_fill_implicit_binders(ny_hm_state_t *hm, ny_hm_env_list *env,
   char values[8][64];
   if (implicits > 8)
     return;
+  uint32_t tok_ctx = 0;
+  for (size_t j = 0; j < args->len; ++j)
+    if (args->data[j].val && args->data[j].val->kind == NY_E_IDENT) {
+      tok_ctx = args->data[j].val->as.ident.syntax_ctx;
+      break;
+    }
   for (size_t k = 0; k < implicits; ++k) {
     const char *name = fn->as.fn.params.data[k].name;
     bool solved = false;
@@ -7426,6 +7474,12 @@ static void hm_fill_implicit_binders(ny_hm_state_t *hm, ny_hm_env_list *env,
                                       got_s, strlen(got_s), name, values[k],
                                       sizeof(values[k]));
       free(got_s);
+    }
+    if (solved && (isalpha((unsigned char)values[k][0]) ||
+                   values[k][0] == '_')) {
+      /* A symbolic index is only usable when it names a value in scope. */
+      ny_hm_type_t *bound = hm_env_get_ctx(env, values[k], tok_ctx);
+      solved = bound != NULL;
     }
     if (!solved) {
       tp_add_diag_ex(hm->ctx, tok, "hm", "hm-implicit-binder-unsolved",
@@ -7450,10 +7504,16 @@ static void hm_fill_implicit_binders(ny_hm_state_t *hm, ny_hm_env_list *env,
     if (!lit)
       return;
     memset(lit, 0, sizeof(*lit));
-    lit->kind = NY_E_LITERAL;
     lit->tok = tok;
-    lit->as.literal.kind = NY_LIT_INT;
-    lit->as.literal.as.i = strtoll(values[k], NULL, 10);
+    if (isalpha((unsigned char)values[k][0]) || values[k][0] == '_') {
+      lit->kind = NY_E_IDENT;
+      lit->as.ident.name = ny_intern_get(ny_intern_cstr(values[k]));
+      lit->as.ident.syntax_ctx = tok_ctx;
+    } else {
+      lit->kind = NY_E_LITERAL;
+      lit->as.literal.kind = NY_LIT_INT;
+      lit->as.literal.as.i = strtoll(values[k], NULL, 10);
+    }
     data[k].val = lit;
   }
   memcpy(data + implicits, args->data, args->len * sizeof(*data));

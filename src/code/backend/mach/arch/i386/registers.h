@@ -18,7 +18,17 @@ typedef struct {
   unsigned used;
   size_t at;
   char stack_bias[224];
+  const unsigned char *targeted; /* branch-targeted NYIR labels, or NULL */
+  size_t label_max;
 } sm_i386_regs_t;
+
+/* An unreferenced label is reachable only by fallthrough, so the current
+ * register mapping is valid across it and the run can continue. */
+static bool sm_i386_reg_label_targeted(const sm_i386_regs_t *r, int64_t label) {
+  if (!r->targeted || label < 0 || (uint64_t)label > r->label_max)
+    return true;
+  return r->targeted[label] != 0;
+}
 
 static const char *const sm_i386_gpr[] = {
     "%eax", "%ecx", "%edx", "%ebx", "%esi", "%edi"};
@@ -92,6 +102,8 @@ static size_t sm_i386_reg_instruction(sm_i386_regs_t *r, size_t i) {
        sm_i386_reg_representation(r, in->dst) == 4))
     return 0;
   switch (in->op) {
+  case NYIR_LABEL:
+    return !sm_i386_reg_label_targeted(r, in->imm);
   case NYIR_CONST_I64:
   case NYIR_LOAD_LOCAL:
     return 1;
@@ -385,6 +397,36 @@ static int sm_i386_emit_register_run(ny_sm_ctx_t *c, size_t start, size_t *next,
   for (size_t i = 0; i < c->nyir->len; ++i)
     if (c->nyir->data[i].dst >= 0)
       ++r.values[c->nyir->data[i].dst].definitions;
+  /* Labels without any incoming branch are pure fallthrough markers: the
+   * current register mapping remains valid across them. Collect the set of
+   * real branch targets so the scan and the emitter agree. */
+  size_t label_max = 0;
+  bool have_labels = false, label_overflow = false;
+  for (size_t i = 0; i < c->nyir->len; ++i) {
+    const nyr_inst_t *in = &c->nyir->data[i];
+    if (in->op != NYIR_LABEL && in->op != NYIR_BR && in->op != NYIR_BR_IF)
+      continue;
+    have_labels = true;
+    if (in->imm < 0 || in->imm > (int64_t)(1u << 20)) {
+      label_overflow = true;
+      break;
+    }
+    if ((size_t)in->imm + 1 > label_max)
+      label_max = (size_t)in->imm + 1;
+  }
+  unsigned char *targeted = NULL;
+  if (have_labels && !label_overflow && label_max) {
+    targeted = calloc(label_max, 1);
+    if (targeted)
+      for (size_t i = 0; i < c->nyir->len; ++i) {
+        const nyr_inst_t *in = &c->nyir->data[i];
+        if ((in->op == NYIR_BR || in->op == NYIR_BR_IF) && in->imm >= 0 &&
+            (size_t)in->imm < label_max)
+          targeted[in->imm] = 1;
+      }
+  }
+  r.targeted = targeted;
+  r.label_max = targeted ? label_max - 1 : 0;
   size_t end = start, step = 0;
   bool has_alloca = false;
   while (end < c->nyir->len && (step = sm_i386_reg_instruction(&r, end))) {
@@ -394,6 +436,7 @@ static int sm_i386_emit_register_run(ny_sm_ctx_t *c, size_t start, size_t *next,
   /* Even single instructions can benefit when the result has no stack home
    * users beyond this run. */
   if (end - start < 1) {
+    free(targeted);
     free(fold_base);
     free(fold_disp);
     free(r.values);
@@ -432,6 +475,12 @@ static int sm_i386_emit_register_run(ny_sm_ctx_t *c, size_t start, size_t *next,
     r.at = i + length - 1;
     r.pinned = 0;
     int a = -1, b = -1, dst = in->dst, result = -1;
+    if (in->op == NYIR_LABEL) {
+      /* Unreferenced label carried inside the run: the mapping is unchanged. */
+      ok = nyr_printf(c->w, "%s_nyir_L%" PRId64 ":\n", c->epilogue, in->imm);
+      ++i;
+      continue;
+    }
     if (in->op == NYIR_BR_IF) {
       /* Make homes valid for the taken edge, then keep the register mapping
        * for the linear fallthrough path in this run. */
@@ -718,6 +767,7 @@ static int sm_i386_emit_register_run(ny_sm_ctx_t *c, size_t start, size_t *next,
     if (!c->i386_global_registers && (r.used & (1u << reg)))
       ok = nyr_printf(output, "\tpopl\t%s\n", sm_i386_gpr[reg]);
   free(body.data);
+  free(targeted);
   free(fold_base);
   free(fold_disp);
   free(r.values);

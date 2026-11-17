@@ -5134,6 +5134,14 @@ static bool rt_word_is_plain_scalar(int64_t value) {
     return false;
   if (rt_heap_object_ptr(value))
     return false;
+  /*
+   * A block from the raw allocator (zalloc/malloc) is a pointer, not a
+   * number. Tagging it at a dynamic boundary turned a buffer kept in a
+   * dictionary (the gamepad module's per-pad state) into an odd integer that
+   * the next load8 used as an address.
+   */
+  if (rt_raw_ptr_registered(value))
+    return false;
   rt_plain_scalar_store((uintptr_t)value);
   return true;
 }
@@ -9564,6 +9572,9 @@ int64_t rt_native_is_int(int64_t v) {
   if (is_heap_ptr(v))
     return 0;
   if (rt_native_is_str(v))
+    return 0;
+  /* A block from the raw allocator (zalloc/malloc) is a pointer. */
+  if (rt_raw_ptr_registered(v))
     return 0;
   return 1;
 }

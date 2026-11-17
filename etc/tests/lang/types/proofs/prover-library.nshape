@@ -1,0 +1,82 @@
+shape prover_goal_state_and_tactics {
+  family "runtime/library"
+  generator "embedded"
+  features ["ny", "proofs", "prover", "tactics"]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  expect_message "PROVER-OK 3 2"
+  source ny <<'NY'
+use core
+use core.prover as pr
+
+;; Terms read from source spelling and print back; `->` is `!a || b`.
+def t = pr.term("x + 1 > 0 && (y == x -> y >= 0)")
+assert(pr.show(t) == "((x + 1) > 0) && (!(y == x) || (y >= 0))", "term round trip")
+assert(pr.term("x +").get("kind") == "error", "malformed terms are values, not panics")
+
+;; A goal state driven by hand: split the conjunction, close each half.
+def g = pr.goal(["x >= 0"], "x + 1 > 0 && x * 2 >= x", "x=0..100")
+mut st = pr.begin(g)
+st = pr.apply_rule(st, pr.split_conj)
+assert(pr.open_goals(st) == 2, "split leaves two goals")
+assert(pr.state_text(st) ==
+   "goal 1/2: x >= 0 |- (x + 1) > 0  [x=0..100]\ngoal 2/2: x >= 0 |- (x * 2) >= x  [x=0..100]",
+   "goal display")
+st = pr.apply_rule(st, pr.decide)
+st = pr.apply_rule(st, pr.decide)
+def manual = pr.qed(st)
+assert(manual.get("proved"), "both halves closed by checked certificates")
+
+;; Search: hypotheses, disjunction cases, and substitution.
+def h = pr.goal(["y == x + 1", "x >= 3 || x <= -3"], "y * y > 3",
+   "x=-20..20;y=-50..50")
+assert(pr.qed(pr.auto(pr.begin(h))).get("proved"), "auto proves the goal")
+
+;; A false goal is refuted, never proved.
+def bad = pr.qed(pr.auto(pr.begin(pr.goal([], "x * x > x", "x=-5..5"))))
+assert(!bad.get("proved") && bad.get("why").contains("refuted"), "refutation")
+
+;; A user tactic: case split on the sign of x. Its goals are accepted only
+;; because the checker proves they entail the goal.
+fn sign_cases(any g) any {
+   def r = g.get("ranges")
+   def tgt = g.get("target")
+   mut gs = []
+   gs = gs.append(pr.goal(["x >= 0"], tgt, r))
+   gs = gs.append(pr.goal(["x < 0"], tgt, r))
+   mut out = {}
+   out = out.set("ok", true)
+   out = out.set("goals", gs)
+   out
+}
+mut us = pr.by(pr.begin(pr.goal([], "x * x >= 0", "x=-50..50")), sign_cases,
+   "sign_cases")
+us = pr.auto(us)
+def user = pr.qed(us)
+assert(user.get("proved"), "user tactic plus search")
+
+;; Wrong tactics fail: one swaps the goal for a trivial one, the other
+;; mutates its argument to add a false hypothesis.
+fn cheat(any g) any {
+   mut gs = []
+   gs = gs.append(pr.goal([], "1 > 0", g.get("ranges")))
+   mut out = {}
+   out = out.set("ok", true)
+   out = out.set("goals", gs)
+   out
+}
+fn smuggle(any g) any {
+   def hs = g.get("hyps")
+   hs.append(pr.term("1 > 2"))
+   cheat(g)
+}
+def cheated = pr.by(pr.begin(pr.goal([], "x > 0", "x=-5..5")), cheat, "cheat")
+assert(cheated.get("error").contains("do not entail"), "cheat rejected")
+assert(!pr.qed(cheated).get("proved"), "a rejected tactic proves nothing")
+def smuggled = pr.by(pr.begin(pr.goal([], "x > 0", "x=-5..5")), smuggle,
+   "smuggle")
+assert(smuggled.get("error").contains("do not entail"), "mutation rejected")
+print("PROVER-OK", len(manual.get("steps")), len(user.get("steps")) - 1)
+NY
+}

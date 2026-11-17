@@ -4,7 +4,9 @@
 Only open work is listed; finished items are removed once their acceptance
 check has passed. State on 2026-11-17 (third pass): `etc/tests/lang` +
 `etc/tests/code/probes` run 1743/1743 under headless Weston (isolated tree:
-HEAD plus the uncommitted runtime and UI files), and the C test
+HEAD plus the uncommitted runtime and UI files; the nine UI replay probes
+that timed out while other sessions loaded the machine pass when re-run
+alone), and the C test
 `nytrix-addr-probe-device` passes. Two input paths exist and both matter:
 `NYTRIX_FIXTURE_EVENTS` pushes events into the window facade queue (drives
 widgets, but bypasses the Wayland listeners); `window.inject_platform_input`
@@ -22,24 +24,35 @@ work is tracked in [Performance work](perf.md).
 - [ ] **Exercise window and text-input environments.** Done: window creation
   failure reporting (`code/probes/ui/window-error-report`), TTY backend in a
   pty, seat input on headless Weston and the kiosk shell, integer scale 2 on
-  Vulkan and GL (above). Still untested, because no available compositor
-  offers them: fractional scales (`wp_fractional_scale_v1` + `wp_viewport`
-  code exists but has never run against a compositor), IME
-  composition/commit/cancel (`zwp_text_input_v3`; listeners exist, handlers
-  are empty), clipboard (`wl_data_device` needs a seat), and events from a
-  physical seat. Headless Weston 15 has no seat, only text-input v1 and no
-  fractional scale; Hyprland nested in headless Weston refuses to start
-  (needs `wl_compositor` v6, Weston offers v5). A headless sway
-  (`WLR_BACKENDS=headless`) has a seat, text-input-v3/input-method-v2 and
-  fractional scale; it is not installed system-wide. The signed Arch packages
-  (`sway 1:1.12-4`, `wlroots0.20 0.20.2-1`, `wtype 0.4-2`) unpack and resolve
-  against the installed libraries without root, but starting a private
-  instance from them was refused by the agent's permission policy in the
-  2026-11-17 third pass, so this needs the user to install sway or allow
-  running it. A JIT-run app on Mesa llvmpipe
-  (software GL) crashes in shader compilation: the system `libLLVM.so.23`
-  that Mesa loads binds its internal calls to the compiler's unversioned
-  vendored `libLLVM.so.21` symbols. Standalone executables are not affected.
+  Vulkan and GL, and (2026-11-17, headless sway 1.12, now installed)
+  **fractional scales on Vulkan**: at output scale 1.5 and 1.25 the widgets
+  demo receives `wp_fractional_scale_v1` (scale 1.5/1.25), logical
+  1000x600/1200x720, and presents a 1500x900 buffer through the viewport
+  (captured with grim from the private compositor, sharp). Harness: a
+  private headless sway (`WLR_BACKENDS=headless`, own socket, system binary)
+  exposes wl_seat, text-input-v3, input-method-v2, fractional scale,
+  viewporter, data device, virtual keyboard/pointer and screencopy.
+  Open:
+  - **GL on compiled executables never gets a context** (Weston and sway
+    alike; the JIT route worked in the earlier pass): `--gl` selects GL, the
+    renderer passes `CLIENT_API = OPENGL_API` in the hint overrides, but in
+    `platform.create_window` the merged hints answer `get(CLIENT_API)` with
+    the fallback while `contains(CLIENT_API)` is true; even
+    `_default_window_hints().get(CLIENT_API, -5)` returns -5 there. The same
+    calls in a standalone program (typed and `any` keys, growth to 31 keys,
+    `window_hint` + merge) all work, so the miss depends on the app's state
+    (suspects: the per-call-site cache in `rt_value_get_tagged`/
+    `ny_native_dict_get_impl`, or the key's representation at that call
+    site). Also seen while narrowing it: a typed int key and the same int
+    held in an `any` local do not find each other (`def any kk = k` lowers to
+    `rt_tag` and its use as a key to `rt_box_i64` of the tagged value).
+  - IME composition/commit/cancel (`zwp_text_input_v3`; listeners exist,
+    handlers are empty), clipboard (`wl_data_device`), and seat input through
+    the compositor (virtual keyboard/pointer). Untested.
+  A JIT-run app on Mesa llvmpipe (software GL) crashes in shader
+  compilation: the system `libLLVM.so.23` that Mesa loads binds its internal
+  calls to the compiler's unversioned vendored `libLLVM.so.21` symbols.
+  Standalone executables are not affected.
   Acceptance: captures/probes at each supported scale and size, no lost input
   or text, and an explicit support result for each backend.
 
@@ -80,6 +93,14 @@ work is tracked in [Performance work](perf.md).
   now ask the kernel unless the page is in a stable mapping (file, main stack,
   vDSO), and freed large blocks leave the oracle (`rt_map_oracle_forget`).
   Engine wall time is unchanged (20.4 s vs 20.3 s for 4,000 frames).
+
+- **Gamepad not found in the input demo.** The DualSense was detected, but
+  the gamepad module keeps each pad's 64-byte state buffer (from `zalloc`) in
+  a dictionary, and reading it back tagged the pointer as an integer
+  (`rt_word_is_plain_scalar` and `rt_native_is_int` did not know raw
+  allocator blocks), so the first `load8` on it crashed. Fixed; fixture
+  `lang/memory/raw-pointer-in-dict` (fails before, passes after, all three
+  routes). Suite 1744/1744.
 
 ## Handoff notes (2026-11-17, third pass)
 

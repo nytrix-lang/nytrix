@@ -62,7 +62,12 @@ fn _node_bin(str op, any l, any r) any {
 ;; Canonical text of a node (the format core.proof and the compiler share).
 fn canon(any node) str {
    def str kind = node.get("kind")
-   if kind == "int" { return "int:" + to_str(node.get("value")) }
+   if kind == "int" {
+      def v = node.get("value")
+      ;; The canonical spelling has no negative literals: -3 is unary minus.
+      if v < 0 { return "unary:-(int:" + to_str(0 - v) + ")" }
+      return "int:" + to_str(v)
+   }
    if kind == "name" { return "name:" + node.get("name") }
    if kind == "bool" {
       if node.get("value") { return "bool:true" }
@@ -275,7 +280,7 @@ fn goal(any hyps, any target, str ranges="") any {
    mut hs = []
    mut i = 0
    while i < len(hyps) {
-      hs = hs.append(_as_node(get(hyps, i)))
+      hs = hs.append(_as_node(hyps.get(i, nil)))
       i += 1
    }
    mut g = {}
@@ -289,6 +294,23 @@ fn _with(any g, any hyps, any target) any {
    goal(hyps, target, g.get("ranges"))
 }
 
+fn _copy_node(any node) any {
+   def parsed = proof.parse_canonical(canon(node))
+   if parsed.get("ok", false) { return parsed.get("node") }
+   node
+}
+
+fn _copy_goal(any g) any {
+   mut hs = []
+   def old = _lst(g.get("hyps"))
+   mut i = 0
+   while i < len(old) {
+      hs = hs.append(_copy_node(old.get(i, nil)))
+      i += 1
+   }
+   goal(hs, _copy_node(g.get("target")), g.get("ranges"))
+}
+
 fn begin(any g) any {
    mut state = {}
    state = state.set("goals", [g])
@@ -298,15 +320,15 @@ fn begin(any g) any {
    state
 }
 
-fn open_goals(any st) int { len(st.get("goals")) }
+fn open_goals(any st) int { len(_lst(st.get("goals"))) }
 
 fn goal_text(any g) str {
    mut out = ""
-   def hs = g.get("hyps")
+   def hs = _lst(g.get("hyps"))
    mut i = 0
    while i < len(hs) {
       if i > 0 { out = out + ", " }
-      out = out + show(get(hs, i))
+      out = out + show(hs.get(i, nil))
       i += 1
    }
    out = out + " |- " + show(g.get("target"))
@@ -316,16 +338,32 @@ fn goal_text(any g) str {
 
 ;; The goal state as text, one open goal per line.
 fn state_text(any st) str {
-   def gs = st.get("goals")
+   def gs = _lst(st.get("goals"))
    if len(gs) == 0 { return "no goals" }
    mut out = ""
    mut i = 0
    while i < len(gs) {
       out = out + "goal " + to_str(i + 1) + "/" + to_str(len(gs)) + ": " +
-      goal_text(get(gs, i))
+      goal_text(gs.get(i, nil))
       if i + 1 < len(gs) { out = out + "\n" }
       i += 1
    }
+   out
+}
+
+
+;; Reads a list field. An empty list stored in a record can come back as a
+;; plain integer across the module boundary; it reads as the empty list.
+fn _lst(any v) any {
+   if is_list(v) { return v }
+   []
+}
+
+;; Record update. Returning `d.set(...)` directly hands back a raw handle on
+;; some routes, so the result is bound before it is returned.
+fn _put(any d, str key, any value) any {
+   mut out = d
+   out = out.set(key, value)
    out
 }
 
@@ -355,10 +393,10 @@ fn _conj(any nodes) any {
       t = t.set("value", true)
       return t
    }
-   mut acc = get(nodes, 0)
+   mut acc = nodes.get(0, nil)
    mut i = 1
    while i < len(nodes) {
-      acc = _node_bin("&&", acc, get(nodes, i))
+      acc = _node_bin("&&", acc, nodes.get(i, nil))
       i += 1
    }
    acc
@@ -366,7 +404,7 @@ fn _conj(any nodes) any {
 
 ;; The sequent `hyps |- target` as one proposition.
 fn _sequent(any g) any {
-   def hs = g.get("hyps")
+   def hs = _lst(g.get("hyps"))
    if len(hs) == 0 { return g.get("target") }
    _node_bin("||", _node_not(_conj(hs)), g.get("target"))
 }
@@ -379,7 +417,7 @@ fn split_conj(any g) any {
    if t.get("kind") != "bin" || t.get("op") != "&&" {
       return _no("split_conj", "target is not a conjunction")
    }
-   def hs = g.get("hyps")
+   def hs = _lst(g.get("hyps"))
    _ok("split_conj", [_with(g, hs, t.get("left")), _with(g, hs, t.get("right"))])
 }
 
@@ -393,21 +431,21 @@ fn intro(any g) any {
    if premise.get("kind") != "not" {
       return _no("intro", "target is not an implication")
    }
-   def hs = g.get("hyps")
+   def hs = _lst(g.get("hyps"))
    _ok("intro", [_with(g, hs.append(premise.get("value")), t.get("right"))])
 }
 
 ;; a || b, H |- t   gives   a, H |- t   and   b, H |- t
 fn cases(any g) any {
-   def hs = g.get("hyps")
+   def hs = _lst(g.get("hyps"))
    mut i = 0
    while i < len(hs) {
-      def h = get(hs, i)
+      def h = hs.get(i, nil)
       if h.get("kind") == "bin" && h.get("op") == "||" {
          mut rest = []
          mut k = 0
          while k < len(hs) {
-            if k != i { rest = rest.append(get(hs, k)) }
+            if k != i { rest = rest.append(hs.get(k, nil)) }
             k += 1
          }
          return _ok("cases", [_with(g, rest.append(h.get("left")),
@@ -450,6 +488,16 @@ fn _replace(any node, str name, any repl) any {
    node
 }
 
+fn _replace_all(any nodes, str name, any repl) any {
+   mut out = []
+   mut i = 0
+   while i < len(nodes) {
+      out = out.append(_replace(nodes.get(i, nil), name, repl))
+      i += 1
+   }
+   out
+}
+
 fn _drop_range(str ranges, str name) str {
    if ranges == "" { return "" }
    def sep = chr(59)
@@ -457,7 +505,7 @@ fn _drop_range(str ranges, str name) str {
    mut out = ""
    mut i = 0
    while i < len(entries) {
-      def str e = get(entries, i)
+      def str e = entries.get(i, nil)
       if !startswith(e, name + "=") {
          if out != "" { out = out + sep }
          out = out + e
@@ -471,10 +519,10 @@ fn _drop_range(str ranges, str name) str {
 ;; value of x the hypothesis allows equals e. The range of x is dropped,
 ;; which only strengthens the new goal.
 fn subst(any g) any {
-   def hs = g.get("hyps")
+   def hs = _lst(g.get("hyps"))
    mut i = 0
    while i < len(hs) {
-      def h = get(hs, i)
+      def h = hs.get(i, nil)
       if h.get("kind") == "bin" && h.get("op") == "==" {
          mut name = ""
          mut repl = {}
@@ -491,7 +539,7 @@ fn subst(any g) any {
             mut rest = []
             mut k = 0
             while k < len(hs) {
-               if k != i { rest = rest.append(_replace(get(hs, k), name, repl)) }
+               if k != i { rest = rest.append(_replace(hs.get(k, nil), name, repl)) }
                k += 1
             }
             return _ok("subst " + name,
@@ -511,20 +559,27 @@ fn split_range(any g, str name) any {
    def entries = split(ranges, sep)
    mut i = 0
    while i < len(entries) {
-      def str e = get(entries, i)
+      def str e = entries.get(i, nil)
       if startswith(e, name + "=") {
          def body = slice(e, len(name) + 1, len(e))
          def ends = split(body, "..")
          if len(ends) != 2 { return _no("split_range", "malformed range") }
-         def lo = _to_int(get(ends, 0))
-         def hi = _to_int(get(ends, 1))
-         if lo >= hi { return _no("split_range", "range has one value") }
+         def lo = _to_int(ends.get(0, nil))
+         def hi = _to_int(ends.get(1, nil))
+         if lo > hi { return _no("split_range", "empty range") }
+         if lo == hi {
+            ;; One value: the range forces the name, substitute it.
+            return _ok("fix " + name + "=" + to_str(lo),
+               [goal(_replace_all(_lst(g.get("hyps")), name, _node_int(lo)),
+                  _replace(g.get("target"), name, _node_int(lo)),
+                  _drop_range(ranges, name))])
+         }
          def mid = lo + (hi - lo) / 2
          def a = name + "=" + to_str(lo) + ".." + to_str(mid)
          def b = name + "=" + to_str(mid + 1) + ".." + to_str(hi)
          return _ok("split_range " + name,
-            [goal(g.get("hyps"), g.get("target"), _swap_range(entries, i, a)),
-               goal(g.get("hyps"), g.get("target"), _swap_range(entries, i, b))])
+            [goal(_lst(g.get("hyps")), g.get("target"), _swap_range(entries, i, a)),
+               goal(_lst(g.get("hyps")), g.get("target"), _swap_range(entries, i, b))])
       }
       i += 1
    }
@@ -552,7 +607,7 @@ fn _swap_range(any entries, int at, str entry) str {
    mut i = 0
    while i < len(entries) {
       if i > 0 { out = out + sep }
-      if i == at { out = out + entry } else { out = out + get(entries, i) }
+      if i == at { out = out + entry } else { out = out + entries.get(i, nil) }
       i += 1
    }
    out
@@ -578,32 +633,32 @@ fn decide(any g) any {
 ;; ------------------------------------------------------------ driving
 
 fn _replace_first(any st, any r) any {
-   def gs = st.get("goals")
-   mut next = r.get("goals")
+   def gs = _lst(st.get("goals"))
+   mut next = _lst(r.get("goals"))
    mut i = 1
    while i < len(gs) {
-      next = next.append(get(gs, i))
+      next = next.append(gs.get(i, nil))
       i += 1
    }
-   mut certs = st.get("certs")
-   def new_certs = r.get("certs")
+   mut certs = _lst(st.get("certs"))
+   def new_certs = _lst(r.get("certs"))
    mut k = 0
    while k < len(new_certs) {
-      certs = certs.append(get(new_certs, k))
+      certs = certs.append(new_certs.get(k, nil))
       k += 1
    }
    mut out = st.set("goals", next)
    out = out.set("certs", certs)
-   out = out.set("log", st.get("log").append(r.get("rule")))
+   out = out.set("log", _lst(st.get("log")).append(r.get("rule")))
    out
 }
 
 ;; Applies a built-in rule (one of the functions above) to the first goal.
 fn apply_rule(any st, any rule) any {
-   def gs = st.get("goals")
-   if len(gs) == 0 { return st.set("error", "no goals") }
-   def r = rule(get(gs, 0))
-   if !r.get("ok") { return st.set("error", r.get("rule") + ": " + r.get("why")) }
+   def gs = _lst(st.get("goals"))
+   if len(gs) == 0 { return _put(st, "error", "no goals") }
+   def r = rule(gs.get(0, nil))
+   if !r.get("ok") { return _put(st, "error", r.get("rule") + ": " + r.get("why")) }
    _replace_first(st, r)
 }
 
@@ -611,32 +666,37 @@ fn apply_rule(any st, any rule) any {
 ;; goal only if the checker proves they entail it under the same ranges:
 ;; (s1 && ... && sn) -> goal. A tactic cannot close a goal by itself.
 fn by(any st, any tactic, str name="user") any {
-   def gs = st.get("goals")
-   if len(gs) == 0 { return st.set("error", "no goals") }
-   def g = get(gs, 0)
-   def r = tactic(g)
+   def gs = _lst(st.get("goals"))
+   if len(gs) == 0 { return _put(st, "error", "no goals") }
+   def g = gs.get(0, nil)
+   ;; The tactic sees a deep copy, and the entailment is checked against the
+   ;; goal's text taken before it runs: mutating its argument (or nodes that
+   ;; other goals share) cannot change what is proved.
+   def goal_text_before = canon(_sequent(g))
+   def r = tactic(_copy_goal(g))
    if !r.get("ok", false) {
-      return st.set("error", name + ": " + r.get("why", "tactic failed"))
+      return _put(st, "error", name + ": " + r.get("why", "tactic failed"))
    }
-   def subs = r.get("goals", [])
+   def subs = _lst(r.get("goals"))
    if len(subs) == 0 {
-      return st.set("error", name + ": a tactic must leave goals, use decide")
+      return _put(st, "error", name + ": a tactic must leave goals, use decide")
    }
    mut seqs = []
    mut i = 0
    while i < len(subs) {
-      def sg = get(subs, i)
+      def sg = subs.get(i, nil)
       if sg.get("ranges") != g.get("ranges") {
-         return st.set("error", name + ": a tactic may not change ranges")
+         return _put(st, "error", name + ": a tactic may not change ranges")
       }
       seqs = seqs.append(_sequent(sg))
       i += 1
    }
-   def entail = _node_bin("||", _node_not(_conj(seqs)), _sequent(g))
-   def ob = proof.obligation(canon(entail), g.get("ranges"))
+   def entail = "binary:||(unary:!(" + canon(_conj(seqs)) + ")," +
+   goal_text_before + ")"
+   def ob = proof.obligation(entail, g.get("ranges"))
    def cert = proof.solve(ob)
    if proof.verdict_of(cert) != "proved" || !proof.check(cert) {
-      return st.set("error", name + ": its goals do not entail the goal")
+      return _put(st, "error", name + ": its goals do not entail the goal")
    }
    mut checked = {}
    checked = checked.set("ok", true)
@@ -653,13 +713,13 @@ fn _first_range_name(str ranges) str {
    mut width = 0
    mut i = 0
    while i < len(entries) {
-      def str e = get(entries, i)
+      def str e = entries.get(i, nil)
       def at = find_from(e, "=", 0)
       if at > 0 {
          def ends = split(slice(e, at + 1, len(e)), "..")
          if len(ends) == 2 {
-            def w = _to_int(get(ends, 1)) - _to_int(get(ends, 0))
-            if w > width {
+            def w = _to_int(ends.get(1, nil)) - _to_int(ends.get(0, nil))
+            if best == "" || w > width {
                width = w
                best = slice(e, 0, at)
             }
@@ -678,11 +738,15 @@ fn auto(any state, int depth=8) any {
    mut budget = 256
    while open_goals(st) > 0 && budget > 0 {
       budget -= 1
-      def g = get(st.get("goals"), 0)
+      def g = _lst(st.get("goals")).get(0, nil)
       def closed = apply_rule(st, decide)
       if closed.get("error") == "" {
          st = closed
          continue
+      }
+      ;; A checked refutation ends the search: the goal is false.
+      if contains(closed.get("error"), "refuted") {
+         return _put(st, "error", "auto: refuted: " + goal_text(g))
       }
       mut moved = false
       for rule in [split_conj, intro, cases, subst] {
@@ -696,39 +760,39 @@ fn auto(any state, int depth=8) any {
       }
       if moved { continue }
       def name = _first_range_name(g.get("ranges"))
-      if name == "" || len(st.get("log")) > depth * 32 {
-         return st.set("error", "auto: stuck on " + goal_text(g))
+      if name == "" || len(_lst(st.get("log"))) > depth * 32 {
+         return _put(st, "error", "auto: stuck on " + goal_text(g))
       }
       def r = split_range(g, name)
-      if !r.get("ok") { return st.set("error", "auto: " + r.get("why")) }
+      if !r.get("ok") { return _put(st, "error", "auto: " + r.get("why")) }
       st = _replace_first(st, r)
    }
-   if open_goals(st) > 0 { return st.set("error", "auto: budget exhausted") }
+   if open_goals(st) > 0 { return _put(st, "error", "auto: budget exhausted") }
    st
 }
 
 ;; A theorem: no open goals and every certificate re-checked.
 fn qed(any st) any {
    mut out = {}
-   out = out.set("steps", st.get("log"))
-   out = out.set("certificates", len(st.get("certs")))
+   out = out.set("steps", _lst(st.get("log")))
+   out = out.set("certificates", __box_i64(len(_lst(st.get("certs")))))
    if st.get("error") != "" {
       out = out.set("proved", false)
-      return out.set("why", st.get("error"))
+      return _put(out, "why", st.get("error"))
    }
    if open_goals(st) > 0 {
       out = out.set("proved", false)
-      return out.set("why", to_str(open_goals(st)) + " open goal(st)")
+      return _put(out, "why", to_str(open_goals(st)) + " open goal(s)")
    }
-   def certs = st.get("certs")
+   def certs = _lst(st.get("certs"))
    mut i = 0
    while i < len(certs) {
-      if !proof.check(get(certs, i)) {
+      if !proof.check(certs.get(i, nil)) {
          out = out.set("proved", false)
-         return out.set("why", "certificate " + to_str(i) + " failed recheck")
+         return _put(out, "why", "certificate " + to_str(i) + " failed recheck")
       }
       i += 1
    }
    out = out.set("proved", true)
-   out.set("why", "")
+   _put(out, "why", "")
 }

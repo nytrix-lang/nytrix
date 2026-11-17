@@ -452,3 +452,34 @@ fn g(int a) int { need(a, prove(a > 0)) }
 print(g(3))
 NY
 }
+
+shape typed_hole_proof_goal {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "holes", "goals"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "unsolved hole '?evidence' : proof<0 < y> | in scope: y : int"
+  source ny <<'NY'
+use core
+;; A typed hole reports its goal in source spelling and the locals in scope; editors receive the same text through ny-lsp.
+fn need(int x, proof<x > 0> p) int { x }
+fn g(int y) int { need(y, ?evidence) }
+print(1)
+NY
+}
+
+shape typed_hole_anonymous {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "holes", "goals"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "unsolved hole '_' : int | in scope: s : str, x : int"
+  source ny <<'NY'
+use core
+;; An unbound `_` in expression position is an anonymous hole.
+fn f(int x, str s) int { x + _ }
+print(f(1, "a"))
+NY
+}

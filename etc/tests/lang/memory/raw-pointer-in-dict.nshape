@@ -1,0 +1,34 @@
+shape raw_pointer_survives_a_dictionary {
+  family "runtime/memory"
+  generator "embedded"
+  features ["ny", "runtime", "memory", "dict"]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect compile_and_run
+  expect_message "RAW-POINTER-IN-DICT-OK"
+  source ny <<'NY'
+use core
+;; A block from the raw allocator kept in a dictionary must come back as the
+;; same address. The gamepad module keeps each pad's 64-byte state buffer
+;; this way; the dictionary read used to tag the pointer as an integer and
+;; the next load8 faulted on the odd address.
+mut states = dict(8)
+fn state(int jid) ptr {
+   if !states.get(jid, 0) { states[jid] = zalloc(64) }
+   states.get(jid)
+}
+def p = state(2)
+store8(p, 7, 3)
+def q = state(2)
+assert(p == q, "same buffer on the second read")
+assert(load8(q, 3) == 7, "bytes written through the first read")
+mut list_states = []
+list_states = list_states.append(zalloc(16))
+def ptr r = list_states.get(0, 0)
+store8(r, 9, 0)
+assert(load8(r, 0) == 9, "raw pointer read back from a list")
+free(p)
+free(r)
+print("RAW-POINTER-IN-DICT-OK")
+NY
+}

@@ -1306,6 +1306,134 @@ static void publish_diagnostics(const char *uri, const lsp_diag_vec_t *diags) {
   free(body.data);
 }
 
+
+#ifndef _WIN32
+#include <sys/wait.h>
+
+/* Reads `"key":"value"` or `"key":number` from a JSON object slice. */
+static bool goal_json_field(const char *obj, const char *end, const char *key,
+                            char *out, size_t cap) {
+  char pat[64];
+  snprintf(pat, sizeof(pat), "\"%s\":", key);
+  size_t plen = strlen(pat);
+  for (const char *p = obj; p + plen < end; ++p) {
+    if (strncmp(p, pat, plen) != 0)
+      continue;
+    p += plen;
+    size_t n = 0;
+    if (*p == '"') {
+      for (++p; p < end && *p != '"' && n + 1 < cap; ++p) {
+        if (*p == '\\' && p + 1 < end)
+          ++p;
+        out[n++] = *p;
+      }
+    } else {
+      while (p < end && (isdigit((unsigned char)*p) || *p == '-') &&
+             n + 1 < cap)
+        out[n++] = *p++;
+    }
+    out[n] = '\0';
+    return true;
+  }
+  return false;
+}
+
+/*
+ * Goals: runs the compiler's type checker (`ny --stop-after=hm
+ * --collect-errors`) on a scratch copy of the document and publishes every
+ * typed hole (`?name`, or `_` in expression position) as an information
+ * diagnostic carrying the goal type and the locals in scope. The checker is
+ * the same one the build uses; the server only relays its errors.v1.json.
+ * NYTRIX_LSP_GOALS=0 turns it off.
+ */
+static void analyze_goals(const char *text, lsp_diag_vec_t *out) {
+  const char *flag = getenv("NYTRIX_LSP_GOALS");
+  if ((flag && strcmp(flag, "0") == 0) || !text ||
+      (!strstr(text, "?") && !strstr(text, "_")))
+    return;
+  char exe[PATH_MAX];
+  ssize_t n = readlink("/proc/self/exe", exe, sizeof(exe) - 1);
+  if (n <= 0)
+    return;
+  exe[n] = '\0';
+  char *slash = strrchr(exe, '/');
+  if (!slash)
+    return;
+  char ny[PATH_MAX];
+  snprintf(ny, sizeof(ny), "%.*s/ny", (int)(slash - exe), exe);
+  if (access(ny, X_OK) != 0)
+    return;
+  char dir[] = "/tmp/ny-lsp-goals-XXXXXX";
+  if (!mkdtemp(dir))
+    return;
+  char src[PATH_MAX], json[PATH_MAX], dump_flag[PATH_MAX + 16];
+  snprintf(src, sizeof(src), "%s/doc.ny", dir);
+  snprintf(json, sizeof(json), "%s/errors.v1.json", dir);
+  snprintf(dump_flag, sizeof(dump_flag), "--dump-dir=%s", dir);
+  FILE *f = fopen(src, "wb");
+  if (f) {
+    fwrite(text, 1, strlen(text), f);
+    fclose(f);
+    pid_t pid = fork();
+    if (pid == 0) {
+      int devnull = open("/dev/null", O_WRONLY);
+      if (devnull >= 0) {
+        dup2(devnull, 1);
+        dup2(devnull, 2);
+      }
+      alarm(20);
+      execl(ny, ny, "--stop-after=hm", "--collect-errors", dump_flag, src,
+            (char *)NULL);
+      _exit(127);
+    }
+    if (pid > 0) {
+      int status = 0;
+      (void)waitpid(pid, &status, 0);
+      size_t len = 0;
+      char *data = NULL;
+      FILE *j = fopen(json, "rb");
+      if (j) {
+        fseek(j, 0, SEEK_END);
+        long size = ftell(j);
+        fseek(j, 0, SEEK_SET);
+        if (size > 0 && (data = malloc((size_t)size + 1)) != NULL) {
+          len = fread(data, 1, (size_t)size, j);
+          data[len] = '\0';
+        }
+        fclose(j);
+      }
+      for (const char *p = data ? strstr(data, "\"code\":\"hm-unsolved-hole\"")
+                                : NULL;
+           p; p = strstr(p + 1, "\"code\":\"hm-unsolved-hole\"")) {
+        const char *obj_end = strchr(p, '}');
+        if (!obj_end)
+          break;
+        char message[1024], line[32], col[32], lexeme[256];
+        if (!goal_json_field(p, obj_end, "message", message, sizeof(message)) ||
+            !goal_json_field(p, obj_end, "line", line, sizeof(line)) ||
+            !goal_json_field(p, obj_end, "col", col, sizeof(col)))
+          continue;
+        if (!goal_json_field(p, obj_end, "lexeme", lexeme, sizeof(lexeme)))
+          lexeme[0] = '\0';
+        int l = atoi(line) - 1, c = atoi(col) - 1;
+        diag_vec_push(out, l, c, l, c + (int)(lexeme[0] ? strlen(lexeme) : 1),
+                      3, "NYGOAL", message,
+                      "fill the hole with a term of the goal type", "nytrix");
+      }
+      free(data);
+    }
+  }
+  unlink(json);
+  unlink(src);
+  rmdir(dir);
+}
+#else
+static void analyze_goals(const char *text, lsp_diag_vec_t *out) {
+  (void)text;
+  (void)out;
+}
+#endif
+
 static bool analyze_text(const char *text, lsp_diag_vec_t *out) {
   if (!text || !out)
     return false;
@@ -1326,6 +1454,8 @@ static bool analyze_text(const char *text, lsp_diag_vec_t *out) {
         parser.last_error_hint[0] ? parser.last_error_hint : NULL, "nytrix");
   }
   analyze_style_hints(text, out);
+  if (parser.error_count == 0)
+    analyze_goals(text, out);
   return out->len > 0;
 }
 

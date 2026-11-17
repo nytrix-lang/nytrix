@@ -1,0 +1,35 @@
+shape indexed_library_vectors {
+  family "runtime/library"
+  generator "embedded"
+  features ["ny", "dependent", "indexed", "library"]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  expect_message "INDEXED-OK 2 7 8 1 [7, 8] 15 5 3"
+  source ny <<'NY'
+use core
+use core.indexed as ix
+;; Lengths are computed by the constructors' types and read back through
+;; implicit binders; head/tail only accept non-empty vectors.
+def two = ix.vcons(7, ix.vcons(8, ix.vnil()))
+def Fin<5> i = 3
+print("INDEXED-OK", ix.vlength(two), ix.vhead(two), ix.vhead(ix.vtail(two)),
+      ix.vlength(ix.vtail(two)), ix.vto_list(two), ix.vsum(two),
+      ix.fin_bound(i), ix.fin_value(i))
+NY
+}
+
+shape indexed_library_empty_head_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "dependent", "indexed", "library"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "cannot infer implicit binder 'n'"
+  source ny <<'NY'
+use core
+use core.indexed as ix
+;; `vhead` takes `Vec<int, n + 1>`; an empty vector has no such n.
+print(ix.vhead(ix.vnil()))
+NY
+}
