@@ -33,6 +33,9 @@ bool ny_proof_canon_range(const char *s, ny_proof_name_range_fn env, void *ctx,
 bool ny_proof_canon_split_binary(const char *s, char *opbuf, size_t opcap,
                                  char **out_l, char **out_r);
 
+/* Source spelling of a canonical proposition, for goal displays. */
+char *ny_proof_canon_infix(const char *canon);
+
 /* Equality kernel rules (eq_sym, eq_trans, eq_cong, transport): compute the
  * result proof type from the argument proof types; NULL + reason on misuse. */
 /* `transport(p, v)` for a value: the type of `v` with one side of the

@@ -204,6 +204,11 @@ typedef struct rt_oracle_range {
 } rt_oracle_range_t;
 
 extern rt_oracle_range_t g_rt_oracle_snapshot[RT_ORACLE_SNAPSHOT_MAX];
+/* Nonzero for a snapshot range that stays mapped for the life of the process
+ * (a file mapping, the main stack, the vDSO). Anonymous memory (thread
+ * stacks, C-heap arenas, JIT pages) can be unmapped after the snapshot, so a
+ * span crossing pages of it is "unknown". The ranges still bound the gaps. */
+extern uint8_t g_rt_oracle_snapshot_stable[RT_ORACLE_SNAPSHOT_MAX];
 extern uint32_t g_rt_oracle_snapshot_count;
 extern rt_oracle_range_t g_rt_oracle_extra[RT_ORACLE_EXTRA_MAX];
 extern _Atomic uint32_t g_rt_oracle_extra_count;
@@ -224,6 +229,36 @@ extern const uintptr_t g_rt_oracle_gap;
 
 void rt_map_oracle_init(void);
 void rt_map_oracle_add(uintptr_t start, size_t size);
+/* Drop a freed range: its pages may be unmapped by the C allocator (large
+ * blocks are their own mappings) and later probes must not trust them. */
+void rt_map_oracle_forget(uintptr_t start, size_t size);
+/* Blocks at least this large may be returned to the kernel by free/realloc. */
+#define RT_ORACLE_FORGET_MIN ((size_t)64u * 1024u)
+#if defined(__GLIBC__)
+#include <malloc.h>
+#endif
+/* Tell the map oracle before a C-heap block the runtime registered goes
+ * back to the allocator, which may unmap it. */
+static inline void rt_oracle_before_release(void *p) {
+#if defined(__GLIBC__)
+  if (p) {
+    size_t n = malloc_usable_size(p);
+    if (n >= RT_ORACLE_FORGET_MIN)
+      rt_map_oracle_forget((uintptr_t)p, n);
+  }
+#else
+  (void)p;
+#endif
+}
+static inline void rt_oracle_free(void *p) {
+  rt_oracle_before_release(p);
+  free(p);
+}
+static inline void *rt_oracle_realloc(void *p, size_t n) {
+  /* realloc may move a large block to a new mapping and unmap the old. */
+  rt_oracle_before_release(p);
+  return realloc(p, n);
+}
 
 /*
  * Every page of every registered runtime range, as a two-level bitmap: one
@@ -408,7 +443,8 @@ static inline int rt_map_oracle_check(uintptr_t p, size_t n) {
   for (uint32_t k = 0; k < 2u; ++k) {
     uint32_t idx = recent_range[k];
     if (idx < cnt && p >= g_rt_oracle_snapshot[idx].start &&
-        e <= g_rt_oracle_snapshot[idx].end)
+        e <= g_rt_oracle_snapshot[idx].end &&
+        (g_rt_oracle_snapshot_stable[idx] || (p >> 12) == (e >> 12)))
       return 1;
   }
   uint32_t lo2 = 0, hi2 = cnt;
@@ -422,6 +458,10 @@ static inline int rt_map_oracle_check(uintptr_t p, size_t n) {
   if (lo2 > 0) {
     const rt_oracle_range_t *r = &g_rt_oracle_snapshot[lo2 - 1];
     if (e <= r->end) {
+      /* Anonymous memory may have been unmapped since; a span reaching
+       * into another page of it is probed (see rt_addr_readable). */
+      if (!g_rt_oracle_snapshot_stable[lo2 - 1] && (p >> 12) != (e >> 12))
+        return 0;
       recent_range[1] = recent_range[0];
       recent_range[0] = lo2 - 1;
       return 1;
@@ -760,10 +800,19 @@ static inline int rt_addr_readable(uintptr_t p, size_t n) {
    * the subsequent header load.  The map snapshot may still answer stable
    * mappings or reject distant invalid words; uncertain addresses must be
    * checked against the current process map and must not be cached.
+   *
+   * A span that crosses into another page asks the kernel directly instead of
+   * rt_addr_mapped, whose page cache can outlive a mapping: a header read
+   * just below a block that starts a fresh mapping (the small-string check
+   * reads p - 32) reached a neighbouring page that had been unmapped since it
+   * was cached (a compiler worker thread's stack) and faulted. Within one
+   * page the word itself is what the caller asks about, so the cache stays.
    */
   int oracle = rt_map_oracle_check(p, n);
   if (oracle != 0)
     return oracle > 0;
+  if ((p >> 12) != ((p + n - 1) >> 12))
+    return rt_addr_probe_os(p, n);
   return rt_addr_mapped(p, n);
 #endif
 }

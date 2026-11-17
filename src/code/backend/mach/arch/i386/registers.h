@@ -722,5 +722,10 @@ static int sm_i386_emit_register_run(ny_sm_ctx_t *c, size_t start, size_t *next,
   free(fold_disp);
   free(r.values);
   *next = end;
-  return ok ? 1 : -1;
+  /* A register run is an optimization: when allocation cannot fit the run
+   * (for example a select that keeps three inputs plus a result live with
+   * only `i386_register_limit` registers), leave the whole run to the general
+   * emitter instead of failing the function. The general emitter always
+   * produces a correct sequence, and no output was committed to `output`. */
+  return ok ? 1 : 0;
 }

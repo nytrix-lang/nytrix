@@ -1,0 +1,60 @@
+shape classifier_caches_follow_frees_and_collections {
+  family "runtime/memory"
+  generator "embedded"
+  features ["ny", "runtime", "memory", "collector"]
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect compile_and_run
+  expect_message "CLASSIFIER-CACHES-OK"
+  source ny <<'NY'
+use core
+;; The runtime remembers what it learned about words: which string a literal
+;; converts to, which addresses are managed objects or typed lists, and the
+;; answer for "not one". Frames free and reallocate those objects at the same
+;; addresses all the time; every answer must follow. Literal keys, list
+;; reads, lengths and type tests below run across many collections while
+;; lists and strings are freed and their memory is reused.
+fn frame(int f, dict seen) int {
+   mut sum = 0
+   mut i = 0
+   while i < 300 {
+      def xs = [i, "s" + to_str(i), 1.5, [i, i]]
+      def d = {"edit_tx": i, "edit_ty": f}
+      seen["edit_tx"] = i
+      sum += int(d.get("edit_tx", -1)) + int(d.get("edit_ty", -1))
+      def any s = xs.get(1, "")
+      def any inner = xs.get(3, [])
+      assert(is_str(s) && !is_list(s), "string element")
+      assert(is_list(inner) && !is_str(inner), "list element")
+      assert(len(s) == len("s" + to_str(i)), "string length")
+      assert(len(inner) == 2 && len(xs) == 4, "list lengths")
+      assert(int(xs.get(0, -1)) == i, "int element")
+      assert(is_float(xs.get(2, 0)) && !is_str(xs.get(2, 0)), "float element")
+      sum += len(s)
+      i += 1
+   }
+   sum
+}
+def started = __heap_collect(0)
+mut seen = {"edit_tx": -1}
+mut f = 0
+mut total = 0
+mut want = 0
+while f < 60 {
+   total += frame(f, seen)
+   mut i = 0
+   while i < 300 {
+      want += i + f + len("s" + to_str(i))
+      i += 1
+   }
+   __heap_collect(f % 10 == 9 ? 2 : 1)
+   assert(seen["edit_tx"] == 299, "literal key after a collection")
+   assert(seen.get("edit_tx", 0) == 299, "literal key through get")
+   f += 1
+}
+assert(total == want, "frame sums")
+def k = "edit_" + "tx"
+assert(k == "edit_tx" && seen[k] == 299, "built key equals the literal")
+print("CLASSIFIER-CACHES-OK")
+NY
+}

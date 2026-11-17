@@ -1413,3 +1413,96 @@ bool ny_proof_rule_name(const char *leaf) {
   return leaf && (strcmp(leaf, "eq_sym") == 0 || strcmp(leaf, "eq_trans") == 0 ||
                   strcmp(leaf, "eq_cong") == 0 || strcmp(leaf, "transport") == 0);
 }
+
+/* Renders a canonical proposition (`binary:<(int:0,name:y)`) as source
+ * (`0 < y`) for goal displays. Unknown forms keep their canonical text. */
+static bool proof_infix_into(const char *s, size_t len, char *out, size_t cap,
+                             size_t *used, int depth) {
+#define PI_PUT(text, n)                                                        \
+  do {                                                                         \
+    size_t pi_n = (n);                                                         \
+    if (*used + pi_n + 1 > cap)                                                \
+      return false;                                                            \
+    memcpy(out + *used, (text), pi_n);                                         \
+    *used += pi_n;                                                             \
+    out[*used] = '\0';                                                         \
+  } while (0)
+  if (depth > 48)
+    return false;
+  if (len > 4 && strncmp(s, "int:", 4) == 0) {
+    PI_PUT(s + 4, len - 4);
+    return true;
+  }
+  if (len > 5 && strncmp(s, "name:", 5) == 0) {
+    PI_PUT(s + 5, len - 5);
+    return true;
+  }
+  if (len > 5 && strncmp(s, "bool:", 5) == 0) {
+    PI_PUT(s + 5, len - 5);
+    return true;
+  }
+  bool unary = len > 6 && strncmp(s, "unary:", 6) == 0;
+  bool binary = len > 7 && strncmp(s, "binary:", 7) == 0;
+  if ((unary || binary) && s[len - 1] == ')') {
+    const char *op = s + (unary ? 6 : 7);
+    const char *open = memchr(op, '(', len - (size_t)(op - s));
+    if (!open)
+      return false;
+    const char *inner = open + 1;
+    size_t inner_len = len - (size_t)(inner - s) - 1;
+    if (unary) {
+      PI_PUT(op, (size_t)(open - op));
+      PI_PUT("(", 1);
+      if (!proof_infix_into(inner, inner_len, out, cap, used, depth + 1))
+        return false;
+      PI_PUT(")", 1);
+      return true;
+    }
+    int nest = 0;
+    size_t comma = inner_len;
+    for (size_t i = 0; i < inner_len; ++i) {
+      if (inner[i] == '(')
+        nest++;
+      else if (inner[i] == ')')
+        nest--;
+      else if (inner[i] == ',' && nest == 0) {
+        comma = i;
+        break;
+      }
+    }
+    if (comma == inner_len)
+      return false;
+    bool wrap = depth > 0;
+    if (wrap)
+      PI_PUT("(", 1);
+    if (!proof_infix_into(inner, comma, out, cap, used, depth + 1))
+      return false;
+    PI_PUT(" ", 1);
+    PI_PUT(op, (size_t)(open - op));
+    PI_PUT(" ", 1);
+    if (!proof_infix_into(inner + comma + 1, inner_len - comma - 1, out, cap,
+                          used, depth + 1))
+      return false;
+    if (wrap)
+      PI_PUT(")", 1);
+    return true;
+  }
+  return false;
+#undef PI_PUT
+}
+
+char *ny_proof_canon_infix(const char *canon) {
+  if (!canon)
+    return NULL;
+  size_t cap = strlen(canon) * 2 + 32;
+  char *out = malloc(cap);
+  if (!out)
+    return NULL;
+  size_t used = 0;
+  out[0] = '\0';
+  if (!proof_infix_into(canon, strlen(canon), out, cap, &used, 0)) {
+    free(out);
+    return ny_strdup(canon);
+  }
+  return out;
+}

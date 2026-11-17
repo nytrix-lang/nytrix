@@ -984,4 +984,4 @@ fn main() int {
    0
 }
 
-;; The runtime calls main(); calling it here as well ran the app twice.
+;; The runtime calls main(); calling it here as well runs the app twice.

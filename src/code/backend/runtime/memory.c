@@ -1357,10 +1357,13 @@ static int64_t rt_free_direct(int64_t ptr) {
       g_mem_pools[slot] = node;
       return 1;
     }
+#ifndef _WIN32
+    rt_oracle_before_release(base);
+#endif
     ny_aligned_free(base);
     return 1;
   } else if (raw_ptr_unregister((uintptr_t)ptr)) {
-    free((void *)(uintptr_t)ptr);
+    rt_oracle_free((void *)(uintptr_t)ptr);
     return 1;
   } else if (is_v_flt(ptr)) {
     rt_flt_free(ptr);
@@ -1450,12 +1453,12 @@ int64_t rt_free_raw(int64_t ptr) {
     }
   }
   if (raw_ptr_unregister((uintptr_t)ptr)) {
-    free((void *)(uintptr_t)ptr);
+    rt_oracle_free((void *)(uintptr_t)ptr);
     return 1;
   }
   int tbuf_release = rt_tbuf_release_handle(ptr);
   if (tbuf_release > 0) {
-    free((void *)((uintptr_t)ptr - RT_NATIVE_TBUF_HEADER));
+    rt_oracle_free((void *)((uintptr_t)ptr - RT_NATIVE_TBUF_HEADER));
     return 1;
   }
   if (tbuf_release < 0) {
@@ -1745,7 +1748,7 @@ int64_t rt_realloc_raw(int64_t p, int64_t size) {
       rt_raw_ptr_register_range((int64_t)(uintptr_t)foreign, (size_t)size);
     return (int64_t)(uintptr_t)foreign;
   }
-  void *grown = realloc((void *)(uintptr_t)p, (size_t)size);
+  void *grown = rt_oracle_realloc((void *)(uintptr_t)p, (size_t)size);
   if (grown) {
     if (p)
       raw_ptr_unregister((uintptr_t)p);
@@ -2579,7 +2582,7 @@ void rt_fc_block_free(void *ptr, size_t bytes) {
      * references behind in memory it will read as roots. */
     if (fc_state > 0 && bytes <= ((size_t)1 << 20))
       memset(ptr, 0, bytes);
-    free(ptr);
+    rt_oracle_free(ptr);
     return;
   }
   size_t rounded = 0;
@@ -4054,7 +4057,7 @@ void *rt_fc_block_alloc(size_t bytes) {
 }
 void rt_fc_block_free(void *ptr, size_t bytes) {
   (void)bytes;
-  free(ptr);
+  rt_oracle_free(ptr);
 }
 bool rt_fc_pool_owns(const void *ptr) {
   (void)ptr;

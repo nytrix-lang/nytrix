@@ -8293,15 +8293,35 @@ static ny_hm_type_t *hm_infer_expr_impl(ny_hm_state_t *hm, ny_hm_env_list *env,
                      "compile-time evaluation",
                      e->as.ident.name);
     }
-    if (e->as.ident.name && e->as.ident.name[0] == '?') {
+    /* `?goal`, or an unbound `_` in expression position: a typed hole. */
+    if (e->as.ident.name &&
+        (e->as.ident.name[0] == '?' ||
+         (strcmp(e->as.ident.name, "_") == 0 &&
+          !hm_env_get_ctx(env, "_", e->as.ident.syntax_ctx)))) {
       for (size_t h = 0; hm && h < hm->hole_count; ++h)
         if (hm->holes[h].expr == e)
           return hm->holes[h].type;
       ny_hm_type_t *hole = hm_var(hm);
       if (hm && hm->hole_count < sizeof(hm->holes) / sizeof(hm->holes[0])) {
-        hm->holes[hm->hole_count].expr = e;
-        hm->holes[hm->hole_count].type = hole;
-        ++hm->hole_count;
+        size_t slot = hm->hole_count++;
+        hm->holes[slot].expr = e;
+        hm->holes[slot].type = hole;
+        hm->holes[slot].ctx_len = 0;
+        for (size_t i = env ? env->len : 0; i-- > 0 &&
+                                            hm->holes[slot].ctx_len < 8;) {
+          const ny_hm_env_entry_t *entry = &env->data[i];
+          if (!entry->name || entry->name[0] == '_' || !entry->type ||
+              strchr(entry->name, '.'))
+            continue;
+          bool seen = false;
+          for (size_t k = 0; k < hm->holes[slot].ctx_len && !seen; ++k)
+            seen = strcmp(hm->holes[slot].ctx_names[k], entry->name) == 0;
+          if (seen)
+            continue;
+          hm->holes[slot].ctx_names[hm->holes[slot].ctx_len] = entry->name;
+          hm->holes[slot].ctx_types[hm->holes[slot].ctx_len] = entry->type;
+          hm->holes[slot].ctx_len++;
+        }
       }
       return hole;
     }
@@ -11359,15 +11379,47 @@ static void hm_report_holes(ny_hm_state_t *hm) {
   for (size_t h = 0; hm && h < hm->hole_count; ++h) {
     const expr_t *e = hm->holes[h].expr;
     char *ty = hm_type_string(hm_prune(hm->holes[h].type));
+    /* A proof goal reads as its proposition: `proof<0 < y>`. */
+    if (ty && strncmp(ty, "proof<", 6) == 0 && ty[strlen(ty) - 1] == '>') {
+      char *canon = ny_strndup(ty + 6, strlen(ty) - 7);
+      char *infix = ny_proof_canon_infix(canon);
+      if (infix) {
+        size_t n = strlen(infix) + 8;
+        char *shown_proof = malloc(n);
+        if (shown_proof) {
+          snprintf(shown_proof, n, "proof<%s>", infix);
+          free(ty);
+          ty = shown_proof;
+        }
+      }
+      free(infix);
+      free(canon);
+    }
     /* An unsolved type variable prints as 'mN: nothing constrained it. */
     const char *shown = ty && ty[0] && ty[0] != '\'' ? ty : NULL;
+    /* The goal's context: `x : int, s : str`, innermost first. */
+    char context[512];
+    size_t used = 0;
+    context[0] = '\0';
+    for (size_t k = 0; k < hm->holes[h].ctx_len && used + 2 < sizeof(context);
+         ++k) {
+      char *ct = hm_type_string(hm_prune(hm->holes[h].ctx_types[k]));
+      int n = snprintf(context + used, sizeof(context) - used, "%s%s : %s",
+                       k ? ", " : "", hm->holes[h].ctx_names[k],
+                       ct && ct[0] != '\'' ? ct : "?");
+      free(ct);
+      if (n < 0 || (size_t)n >= sizeof(context) - used)
+        break;
+      used += (size_t)n;
+    }
     tp_add_diag_ex(hm->ctx, e->tok, "hm", "hm-unsolved-hole", "hole",
                    shown ? shown : "unconstrained", NULL, NULL,
                    "a named hole is a placeholder whose type inference "
                    "reports; it cannot be compiled or run",
                    "replace the hole with an expression of the reported type",
-                   "unsolved hole '%s' : %s", e->as.ident.name,
-                   shown ? shown : "unconstrained");
+                   "unsolved hole '%s' : %s%s%s", e->as.ident.name,
+                   shown ? shown : "unconstrained",
+                   used ? " | in scope: " : "", context);
     free(ty);
   }
   if (hm)

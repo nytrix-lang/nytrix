@@ -3124,6 +3124,10 @@ typedef struct ny_hm_state_t {
   struct {
     const expr_t *expr;
     ny_hm_type_t *type;
+    /* Locals in scope at the hole, innermost first: the goal's context. */
+    const char *ctx_names[8];
+    ny_hm_type_t *ctx_types[8];
+    size_t ctx_len;
   } holes[64];
   size_t hole_count;
   /* Function type parameters in scope while a signature is read: each name

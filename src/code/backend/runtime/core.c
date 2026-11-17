@@ -96,6 +96,7 @@ static __thread uintptr_t rt_tbuf_last_fast_handle;
 static __thread uint32_t rt_tbuf_last_fast_gen;
 
 rt_oracle_range_t g_rt_oracle_snapshot[RT_ORACLE_SNAPSHOT_MAX] = {{0, 0}};
+uint8_t g_rt_oracle_snapshot_stable[RT_ORACLE_SNAPSHOT_MAX];
 uint32_t g_rt_oracle_snapshot_count = 0;
 rt_oracle_range_t g_rt_oracle_extra[RT_ORACLE_EXTRA_MAX] = {{0, 0}};
 _Atomic uint32_t g_rt_oracle_extra_count = 0;
@@ -155,6 +156,25 @@ static bool rt_map_parse_readable_line(const char *line,
   range->end = end;
   return true;
 }
+
+/* Whether a /proc/self/maps line names a mapping that is never unmapped
+ * while the process runs: a file mapping, the main stack or the vDSO. */
+static bool rt_map_line_stable(const char *line) {
+  /* Fields: range perms offset dev inode [path]. */
+  const char *p = line;
+  for (int field = 0; field < 5; ++field) {
+    while (*p && *p != ' ' && *p != '\t')
+      ++p;
+    while (*p == ' ' || *p == '\t')
+      ++p;
+  }
+  if (*p == '\0' || *p == '\n')
+    return false; /* anonymous */
+  if (*p == '/')
+    return true;
+  return strncmp(p, "[stack]", 7) == 0 || strncmp(p, "[vdso]", 6) == 0 ||
+         strncmp(p, "[vvar]", 6) == 0;
+}
 #endif
 
 void rt_map_oracle_init(void) {
@@ -174,28 +194,36 @@ void rt_map_oracle_init(void) {
     uint32_t n = 0;
     while (n < RT_ORACLE_SNAPSHOT_MAX && fgets(line, sizeof line, f)) {
       rt_oracle_range_t range;
-      if (rt_map_parse_readable_line(line, &range))
+      if (rt_map_parse_readable_line(line, &range)) {
+        g_rt_oracle_snapshot_stable[n] = rt_map_line_stable(line) ? 1 : 0;
         g_rt_oracle_snapshot[n++] = range;
+      }
     }
     fclose(f);
     for (uint32_t i = 1; i < n; ++i) {
       rt_oracle_range_t t = g_rt_oracle_snapshot[i];
+      uint8_t t_stable = g_rt_oracle_snapshot_stable[i];
       uint32_t j = i;
       while (j > 0 && g_rt_oracle_snapshot[j - 1].start > t.start) {
         g_rt_oracle_snapshot[j] = g_rt_oracle_snapshot[j - 1];
+        g_rt_oracle_snapshot_stable[j] = g_rt_oracle_snapshot_stable[j - 1];
         j--;
       }
       g_rt_oracle_snapshot[j] = t;
+      g_rt_oracle_snapshot_stable[j] = t_stable;
     }
+    /* Merge touching ranges of the same kind only, so a stable range never
+     * absorbs anonymous memory next to it. */
     uint32_t m = 0;
     for (uint32_t i = 0; i < n; ++i) {
-      if (m == 0) {
-        g_rt_oracle_snapshot[m++] = g_rt_oracle_snapshot[i];
-      } else if (g_rt_oracle_snapshot[i].start <=
-                 g_rt_oracle_snapshot[m - 1].end) {
+      if (m > 0 &&
+          g_rt_oracle_snapshot[i].start <= g_rt_oracle_snapshot[m - 1].end &&
+          g_rt_oracle_snapshot_stable[i] ==
+              g_rt_oracle_snapshot_stable[m - 1]) {
         if (g_rt_oracle_snapshot[i].end > g_rt_oracle_snapshot[m - 1].end)
           g_rt_oracle_snapshot[m - 1].end = g_rt_oracle_snapshot[i].end;
       } else {
+        g_rt_oracle_snapshot_stable[m] = g_rt_oracle_snapshot_stable[i];
         g_rt_oracle_snapshot[m++] = g_rt_oracle_snapshot[i];
       }
     }
@@ -242,8 +270,10 @@ __thread uint32_t g_rt_probe_cache_next;
 _Atomic(_Atomic(uint64_t) *) g_rt_oracle_pages[1u << RT_ORACLE_PAGE_ROOT_BITS];
 
 /* Set the bit of every page in [s, e); both are page aligned. */
+static __thread uintptr_t rt_oracle_mark_last_s = 0, rt_oracle_mark_last_e = 0;
+#define last_s rt_oracle_mark_last_s
+#define last_e rt_oracle_mark_last_e
 static void rt_map_oracle_mark_pages(uintptr_t s, uintptr_t e) {
-  static __thread uintptr_t last_s = 0, last_e = 0;
   if (s >= last_s && e <= last_e)
     return;
   uintptr_t page = s >> 12, end = e >> 12;
@@ -283,6 +313,12 @@ static void rt_map_oracle_mark_pages(uintptr_t s, uintptr_t e) {
   last_s = s;
   last_e = e;
 }
+#undef last_s
+#undef last_e
+
+static __thread uintptr_t rt_oracle_dedup_s[RT_ORACLE_DEDUP];
+static __thread uintptr_t rt_oracle_dedup_e[RT_ORACLE_DEDUP];
+static __thread uint32_t rt_oracle_dedup_idx;
 
 void rt_map_oracle_add(uintptr_t start, size_t size) {
   if (!start || (uintptr_t)size > UINTPTR_MAX - start)
@@ -301,9 +337,8 @@ void rt_map_oracle_add(uintptr_t start, size_t size) {
     rt_map_oracle_expand_bounds(s, e);
     return;
   }
-  static __thread uintptr_t dedup_s[RT_ORACLE_DEDUP] = {0};
-  static __thread uintptr_t dedup_e[RT_ORACLE_DEDUP] = {0};
-  static __thread uint32_t dedup_idx = 0;
+  uintptr_t *dedup_s = rt_oracle_dedup_s, *dedup_e = rt_oracle_dedup_e;
+#define dedup_idx rt_oracle_dedup_idx
   /*
    * Adjacent allocations usually share the most recently registered pages.
    * Check that same cached range before scanning the other dedup entries.
@@ -366,6 +401,65 @@ void rt_map_oracle_add(uintptr_t start, size_t size) {
   if (!duplicate)
     atomic_store_explicit(&g_rt_oracle_extra_count, cnt + 1,
                           memory_order_release);
+  atomic_flag_clear_explicit(&g_rt_oracle_extra_lock, memory_order_release);
+}
+#undef dedup_idx
+
+/*
+ * The table and the page bitmap only ever grew, so a freed block kept
+ * answering "mapped" after the C allocator returned it to the kernel (large
+ * blocks are mappings of their own). A probe of the word just before a live
+ * block that starts a fresh mapping then read the unmapped page before it:
+ * rt_is_sso_string checks p - 32, which crashed for such blocks.
+ */
+void rt_map_oracle_forget(uintptr_t start, size_t size) {
+  if (!start || size == 0 || (uintptr_t)size > UINTPTR_MAX - start)
+    return;
+  uintptr_t s = start & ~(uintptr_t)4095u;
+  uintptr_t e = (start + (uintptr_t)size + 4095u) & ~(uintptr_t)4095u;
+  /* Pages shared with a live neighbour lose their bit too; probes of those
+   * then take the exact path, which is slower but correct. */
+  for (uintptr_t page = s >> 12; page < (e >> 12);) {
+    uintptr_t root = page >> RT_ORACLE_PAGE_LEAF_BITS;
+    uintptr_t leaf_end = (root + 1u) << RT_ORACLE_PAGE_LEAF_BITS;
+    uintptr_t stop = (e >> 12) < leaf_end ? (e >> 12) : leaf_end;
+    _Atomic(uint64_t) *leaf =
+        root < (1u << RT_ORACLE_PAGE_ROOT_BITS)
+            ? atomic_load_explicit(&g_rt_oracle_pages[root],
+                                   memory_order_acquire)
+            : NULL;
+    if (!leaf) {
+      page = stop;
+      continue;
+    }
+    while (page < stop) {
+      uintptr_t bit = page & ((1u << RT_ORACLE_PAGE_LEAF_BITS) - 1u);
+      uintptr_t room = 64u - (bit & 63u);
+      uintptr_t take = stop - page < room ? stop - page : room;
+      uint64_t mask = take == 64u ? ~UINT64_C(0)
+                                  : ((UINT64_C(1) << take) - 1u) << (bit & 63u);
+      atomic_fetch_and_explicit(&leaf[bit >> 6], ~mask, memory_order_release);
+      page += take;
+    }
+  }
+  /* This thread's memos would skip re-registering the range. */
+  if (rt_oracle_mark_last_e > s && rt_oracle_mark_last_s < e)
+    rt_oracle_mark_last_s = rt_oracle_mark_last_e = 0;
+  for (uint32_t i = 0; i < RT_ORACLE_DEDUP; ++i)
+    if (rt_oracle_dedup_e[i] > s && rt_oracle_dedup_s[i] < e)
+      rt_oracle_dedup_s[i] = rt_oracle_dedup_e[i] = 0;
+  /* Ranges inside the block stop matching: an empty end never contains a
+   * span. Readers load start, then end, so a single store suffices. */
+  while (atomic_flag_test_and_set_explicit(&g_rt_oracle_extra_lock,
+                                           memory_order_acquire)) {
+  }
+  uint32_t cnt =
+      atomic_load_explicit(&g_rt_oracle_extra_count, memory_order_relaxed);
+  for (uint32_t i = 0; i < cnt; ++i)
+    if (g_rt_oracle_extra[i].end && g_rt_oracle_extra[i].start >= s &&
+        g_rt_oracle_extra[i].end <= e)
+      __atomic_store_n(&g_rt_oracle_extra[i].end, (uintptr_t)0,
+                       __ATOMIC_RELEASE);
   atomic_flag_clear_explicit(&g_rt_oracle_extra_lock, memory_order_release);
 }
 
@@ -850,7 +944,7 @@ int64_t rt_zalloc_raw(int64_t size) {
 int64_t rt_zfree_raw(int64_t ptr) {
   if (ptr) {
     rt_raw_ptr_unregister(ptr);
-    free((void *)(uintptr_t)ptr);
+    rt_oracle_free((void *)(uintptr_t)ptr);
   }
   return 0;
 }
@@ -1040,7 +1134,7 @@ int64_t rt_tbuf_append_raw(int64_t buffer, int64_t value, int64_t is_string) {
       if (grown)
         memcpy(grown, raw_base, old_bytes);
     } else if (is_heap_ptr((int64_t)(uintptr_t)raw_base)) {
-      grown = realloc(raw_base, new_bytes);
+      grown = rt_oracle_realloc(raw_base, new_bytes);
     } else {
       grown = malloc(new_bytes);
       if (grown)
@@ -1380,7 +1474,7 @@ int64_t rt_tbuf_append_i64_raw(int64_t buffer, int64_t value) {
     if (grown)
       memcpy(grown, raw_base, old_bytes);
   } else if (is_heap_ptr((int64_t)(uintptr_t)raw_base)) {
-    grown = realloc(raw_base, new_bytes);
+    grown = rt_oracle_realloc(raw_base, new_bytes);
   } else {
     grown = malloc(new_bytes);
     if (grown)
@@ -1943,7 +2037,7 @@ int64_t rt_tbuf_reserve(int64_t buffer, int64_t capacity) {
     if (grown)
       memcpy(grown, (unsigned char *)hdr, old_bytes);
   } else if (is_heap_ptr((int64_t)(uintptr_t)hdr)) {
-    grown = realloc((unsigned char *)hdr, new_bytes);
+    grown = rt_oracle_realloc((unsigned char *)hdr, new_bytes);
   } else {
     grown = malloc(new_bytes);
     if (grown)
@@ -4504,29 +4598,33 @@ static int64_t ny_native_dict_bridge_key(int64_t dict, int64_t key,
   bool managed = !ny_native_dict_ptr(dict) && ny_native_managed_dict_ptr(dict);
   uint8_t string_key = 0;
   switch (rep) {
-  case NY_DICT_KEY_DYNAMIC_VALUE:
+  case NY_DICT_KEY_DYNAMIC_VALUE: {
+    int64_t payload = key == NY_IMM_NIL ? 0 : rt_heap_object_ptr(key);
     string_key = key == NY_IMM_NIL
                      ? 2
-                     : (is_v_str(key) ? 1 : 0);
+                     : ((payload ? is_v_str_managed(payload)
+                                 : is_v_str_unmanaged(key))
+                            ? 1
+                            : 0);
     /*
      * Mirror the RAW_CSTR normalization: setter bridges store heap-string
      * keys as payload pointers for native dictionaries, so a dynamic getter
      * must probe the same form or it hashes the boxed object's header bytes
      * into a different bucket than the stored key's content hash.
      */
-    if (string_key == 1 && !managed) {
-      int64_t payload = rt_heap_object_ptr(key);
-      if (payload)
-        key = payload;
-    }
+    if (string_key == 1 && !managed && payload)
+      key = payload;
     break;
+  }
   case NY_DICT_KEY_RAW_I64:
     if (managed)
       key = ny_native_managed_i64_key(key);
     break;
-  case NY_DICT_KEY_RAW_CSTR:
+  case NY_DICT_KEY_RAW_CSTR: {
     string_key = key != 0 ? 1 : 0;
-    if (string_key && is_v_str(key)) {
+    int64_t key_heap = string_key ? rt_heap_object_ptr(key) : 0;
+    if (string_key && (key_heap ? is_v_str_managed(key_heap)
+                                : is_v_str_unmanaged(key))) {
       /*
        * Native dictionary string slots store raw C-string pointers.  The
        * typed lowering path can feed a boxed Ny string to the raw-C-string
@@ -4535,7 +4633,7 @@ static int64_t ny_native_dict_bridge_key(int64_t dict, int64_t key,
        * managed dictionaries continue to use the tagged key representation.
        */
       if (!managed) {
-        int64_t payload = rt_heap_object_ptr(key);
+        int64_t payload = key_heap;
         /*
          * Static string constants are readable C strings, but are not
          * allocator-owned objects and therefore have no managed payload.
@@ -4547,6 +4645,7 @@ static int64_t ny_native_dict_bridge_key(int64_t dict, int64_t key,
       key = ny_native_managed_string_key(key);
     }
     break;
+  }
   case NY_DICT_KEY_NIR_VALUE:
     string_key = key == NY_IMM_NIL
                      ? 2
@@ -9571,8 +9670,16 @@ int64_t rt_has_tag(int64_t v, int64_t tag_v) {
    * their compact native-handle encoding. Resolve only validated tbuf handles
    * before classifying immediates or managed heap tags.
    */
-  v = rt_tbuf_resolve_handle(v);
   int64_t want = is_int(tag_v) ? (tag_v >> 1) : tag_v;
+  /* One check resolves, decodes and validates a typed buffer. */
+  const int64_t *tbuf_hdr = NULL;
+  if (rt_tbuf_check(v, &tbuf_hdr) == RT_TBUF_OK) {
+    v = (int64_t)((uintptr_t)tbuf_hdr + RT_NATIVE_TBUF_HEADER);
+    if (want == TAG_FLOAT)
+      return is_v_flt(v) ? NY_IMM_TRUE : NY_IMM_FALSE;
+    int64_t actual = rt_tbuf_word_is_tuple(tbuf_hdr[3]) ? TAG_TUPLE : TAG_LIST;
+    return (want == actual) ? NY_IMM_TRUE : NY_IMM_FALSE;
+  }
   if (is_int(v))
     return (want == 1) ? NY_IMM_TRUE : NY_IMM_FALSE;
   if ((uint64_t)v < 4096)
@@ -9581,15 +9688,6 @@ int64_t rt_has_tag(int64_t v, int64_t tag_v) {
     return is_v_flt(v) ? NY_IMM_TRUE : NY_IMM_FALSE;
   if (v == 0)
     return want == 0 ? NY_IMM_TRUE : NY_IMM_FALSE;
-  if (rt_tbuf_known_handle((uintptr_t)v) &&
-      rt_header_readable_cached((uintptr_t)v - RT_NATIVE_TBUF_HEADER,
-                                RT_NATIVE_TBUF_HEADER)) {
-    int64_t *hdr = (int64_t *)((uintptr_t)v - RT_NATIVE_TBUF_HEADER);
-    if (rt_tbuf_header_valid(hdr)) {
-      int64_t actual = rt_tbuf_word_is_tuple(hdr[3]) ? TAG_TUPLE : TAG_LIST;
-      return (want == actual) ? NY_IMM_TRUE : NY_IMM_FALSE;
-    }
-  }
   if (want == TAG_DICT || want == TAG_SET) {
     ny_native_dict_t *dict = ny_native_dict_ptr(v);
     if (dict)

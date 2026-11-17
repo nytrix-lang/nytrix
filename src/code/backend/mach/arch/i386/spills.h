@@ -87,6 +87,17 @@ static unsigned sm_i386_spill_register_mask(const char *s) {
   return mask;
 }
 
+/* Whether a two-operand opcode accepts an immediate in its source (first)
+ * position. Copy propagation may substitute a constant into the consumer's
+ * source operand, but `cmov`/`set`/`movz`/`movs`/`lea` take an r/m operand
+ * there and reject an immediate. Only fold constants into the ALU forms. */
+static bool sm_i386_spill_imm_source(const char *op) {
+  return !strcmp(op, "movl") || !strcmp(op, "addl") || !strcmp(op, "subl") ||
+         !strcmp(op, "adcl") || !strcmp(op, "sbbl") || !strcmp(op, "andl") ||
+         !strcmp(op, "orl") || !strcmp(op, "xorl") || !strcmp(op, "cmpl") ||
+         !strcmp(op, "testl") || !strcmp(op, "imull");
+}
+
 static bool sm_i386_spill_split(const sm_i386_spill_line_t *in,
                                   char a[192], char b[192]) {
   if (!in->args || strlen(in->args) >= 190) return false;
@@ -946,6 +957,7 @@ static bool sm_i386_cleanup_spills(nyr_writer_t *assembly, int value_bytes,
         bool immediate = src[0] == '$';
         bool memory = !immediate && strchr(src, '(');
         if (!immediate && !memory) continue;
+        if (immediate && !sm_i386_spill_imm_source(use->op)) continue;
         if (memory && strchr(rhs, '(')) continue;
         sread = sm_i386_spill_register_mask(src);
       }

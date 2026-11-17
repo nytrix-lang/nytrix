@@ -924,6 +924,79 @@ after `sm_i386_promote_homes`. Verified: 20-unit `.text` 31,134 → 30,873
 (−261 B); link `.text` 30,994; `.text32` END `0x7c81`; all correctness gates
 identical to above.
 
+i386 register-run fallback and constant-fold opcode guard (2026-11-17): two
+regressions introduced by later passes and by the copy-propagation extension
+above stopped the Linux setup tree from assembling/compiling at `HEAD`, so they
+are fixed together.
+
+1. Register-run allocation fallback. The select-chain folding pass emits
+   `NYIR_SELECT_I64` with constant operands. The i386 run emitter loads all
+   three inputs (`a`, `b`, `c`) and the result into registers; with the `three`
+   variant (`i386_register_limit` 3) a select whose condition and both values
+   stay live across the instruction needs four registers, so
+   `sm_i386_emit_register_run` returned `-1` and aborted the whole function with
+   "i386 local register allocation failed" (reproduced on
+   `arch/x86/boot/early_serial_console.c`). A register run is an optimization,
+   so the emitter now returns 0 — leaving the whole run to the general emitter,
+   which always produces a correct sequence — when allocation cannot fit it.
+   No output is committed to the real writer before the fallback.
+
+2. Constant-fold opcode guard. The memory/immediate copy propagation above
+   folded an immediate into a consumer without checking the opcode, emitting
+   `cmovnel $imm, %reg` (invalid) in `arch/x86/boot/cpu.c`. Constant folding is
+   now restricted by `sm_i386_spill_imm_source` to the `mov`/ALU forms whose
+   source operand accepts an immediate; `cmov`, `set`, `movz`, `movs` and `lea`
+   are excluded.
+
+Verified with both fixes: all 20 setup units compile and assemble; the
+permissive link reports `.text` END `0x7ca8` and `.text32` END `0x7cc6` (69
+bytes above the `683dd0f0`-based `0x7c81`, the cost of the newer middle-end
+passes, not the fixes); 522/523 differential corpus identical (only the
+pre-existing flaky `i386-lsl-alternative`); real-mode QEMU probe `FOLD 149d8d80`
+PASS; i386 runtime probes 72 cases 0 differences.
+
+Full-kernel compile+assemble scan and i386 setup size diagnosis (2026-11-17): the
+frozen Linux 7.3 Kbuild command corpus (3,025 saved `.<obj>.o.cmd` files) was
+replayed through `nyc-fix2` (`HEAD` plus both fixes) with `-S` in place of `-c`
+and GNU `as` in place of the assembler (`--64` for the kernel, `--32` for the
+`-m16`/`-m32` setup units). Output names are keyed on the full source path so
+that units sharing a stem (`core.c`, `main.c`, ...) do not overwrite each other.
+
+- Every kernel-target C unit compiles and assembles: 2,974/2,974, with no warning
+  suppression and no fallback. This is stricter than the build, because each
+  unit's flags are re-derived from its own saved command.
+- 51 units are host-side build tools under `tools/`, `scripts/` and
+  `arch/x86/tools/`. 31 have no source in the frozen tree (only the `.o.cmd`
+  was saved), 2 compile, and 18 expose NYC gaps: one option gap
+  (`-falign-jumps=1`, on the synthetic `scripts/mod/.empty.o.cmd`) and 17 genuine
+  C-frontend errors on `scripts/kconfig/*`, `scripts/mod/*`,
+  `scripts/sorttable.c`, `scripts/tracepoint-update.c` and
+  `arch/x86/tools/relocs_*.c` (recurring classes: `address-of parenthesized array
+  subscript requires an lvalue`, `C array parameter requires constant extents` in
+  `/usr/include/regex.h`, unsupported `__may_alias__`, and undeclared `popen`).
+  The acceptance explicitly permits the host compiler for host tools, so these do
+  not block the kernel target build; they are recorded as frontend-capability
+  gaps, not acceptance failures.
+
+Size diagnosis for `arch/x86/boot/setup.elf`: the permissive link reports `.text`
+END `0x7ca8` and `.text32` END `0x7cc6` against the `0x7000` milestone. The real
+`arch/x86/boot/setup.ld` requires `_end <= 0x8000`. Because `.pecompat` is
+`salign = 0x1000`-aligned (`header.S`), `_end = ALIGN(text32_end, 0x1000) +
+0x18c0`, so `_end <= 0x8000` actually needs `.text32` END `<= 0x6000` — a
+~7,366-byte (23.7%) text cut, not the 3,270 bytes the `0x7000` milestone implies.
+Instrumenting the run emitter shows register runs already cover 70.6% of NYIR
+instructions but average only 4.4 instructions each: the opcode rejections are
+`BR` (38%), `LABEL` (34%), `CALL` (19%) and `RET` (7%) — i.e. control-flow run
+boundaries — while the `definitions != 1` gate is a non-issue (`defs = 0`; NYIR
+values are SSA) and wide values are only 0.8%. The dominant `movl` traffic (44.6%
+of code bytes; 2,169 adjacent `movl`/`movl` pairs) is short-run boundary
+spill/reload plus the general emitter's stack-home style, i.e. a whole-function
+register-allocation problem, not a fixable gate. Frame-idiom overhead is ~797
+instructions (~9.6%); eliding the frame for the 104 functions whose bodies never
+address `%bp` saves only ~397 bytes and dead `%ebx` saves ~85 bytes. These
+micro-wins cannot close the gap; reaching the 32 KiB setup bound needs
+architectural value-in-register allocation, not peepholes.
+
 ## Correctness verification programme
 
 Merged from `docs/todo/kcc.md` (2026-11-15). The artifact requirements in

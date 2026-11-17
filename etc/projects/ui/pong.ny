@@ -1,8 +1,7 @@
 #!/usr/bin/env ny
 
 ;; Keywords: ui pong game example
-;; Single-player arcade Pong with an AI opponent, independently implemented for Nytrix.
-;; Visual inspiration: https://github.com/tsoding/ping-pong-love-remastered
+;; Single-player arcade Pong
 
 use core
 use core.os (exit)
