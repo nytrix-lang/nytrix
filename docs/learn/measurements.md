@@ -4316,6 +4316,10 @@ fixture, so the deep `X64_LOOP_HOME` records never reach the terminal.
 
 ## x86-64 encoder correctness and instruction counts (2026-11-16)
 
+This pass closed the "x86-64 codegen quality" roadmap item in
+[Performance work](../todo/perf.md); its two remaining measured leads moved to
+the "Reduce >1.2x runtime gaps" item there.
+
 Three encoder changes, measured by **user-space instructions retired**
 (`perf stat -e instructions:u`) on the 110-fixture bench corpus, old compiler
 = the tree before this pass, new = after; checksums match on every row.
