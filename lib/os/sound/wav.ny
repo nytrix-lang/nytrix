@@ -366,7 +366,7 @@ fn _decode_ms_adpcm(any d, int at, int size, dict fmt) any {
    def int tail_frames = tail >= 7 * channels ? (tail - 7 * channels) * 2 / channels + 2 : 0
    def int max_frames = (4611686018427387903 - 16) / (channels * 2)
    if per_block <= 0 || tail_frames > max_frames ||
-      blocks > (max_frames - tail_frames) / per_block { return 0 }
+   blocks > (max_frames - tail_frames) / per_block { return 0 }
    def int total = blocks * per_block + tail_frames
    def out = malloc(total * channels * 2 + 16)
    if !out { return 0 }
@@ -438,7 +438,7 @@ fn _decode_ima_adpcm(any d, int at, int size, dict fmt) any {
    def int tail_frames = tail >= 4 * channels ? (tail - 4 * channels) * 2 / channels + 1 : 0
    def int max_frames = (4611686018427387903 - 16) / (channels * 2)
    if per_block <= 0 || tail_frames > max_frames ||
-      blocks > (max_frames - tail_frames) / per_block { return 0 }
+   blocks > (max_frames - tail_frames) / per_block { return 0 }
    def int total = blocks * per_block + tail_frames
    def out = malloc(total * channels * 2 + 16)
    if !out { return 0 }

@@ -60,12 +60,16 @@ static bool check_known(int64_t start, int64_t limit, int64_t step,
   ok = nyr_opt_verify(&f, "ne-known") && nyr_scev_analyze(&f, &info);
   const nyr_scev_loop_t *loop = ok ? find_loop(&info, iv) : NULL;
   ok = ok && loop && loop->trip_count_known && loop->trip_count == want_trip;
-  /* The exit block returns the value that satisfied `iv == limit`. */
+  /*
+   * The exit block returns the value that satisfied `iv == limit`.
+   */
   int64_t locals[8] = {0};
   int64_t value = 0;
   ok = ok && nyr_opt_eval_locals(&f, "ne-known", locals, 8, &value) &&
        value == limit;
-  /* And the exported range is the closed interval [init, limit]. */
+  /*
+   * And the exported range is the closed interval [init, limit].
+   */
   ok = ok && nyr_scev_lite(&f) && nyr_opt_verify(&f, "ne-known-lite");
   int64_t lo = start < limit ? start : limit;
   int64_t hi = start < limit ? limit : start;
@@ -88,7 +92,9 @@ static bool check_known(int64_t start, int64_t limit, int64_t step,
   return ok;
 }
 
-/* No exact count: the loop misses the limit and wraps instead. */
+/*
+ * No exact count: the loop misses the limit and wraps instead.
+ */
 static bool check_unknown(int64_t start, int64_t limit, int64_t step,
                           const char *why) {
   nyr_func_t f;
@@ -98,7 +104,9 @@ static bool check_unknown(int64_t start, int64_t limit, int64_t step,
   bool ok = nyr_opt_verify(&f, "ne-unknown") && nyr_scev_analyze(&f, &info);
   const nyr_scev_loop_t *loop = ok ? find_loop(&info, iv) : NULL;
   ok = ok && loop != NULL && !loop->trip_count_known;
-  /* scev_lite must not invent a range fact for a loop with no exact count. */
+  /*
+   * scev_lite must not invent a range fact for a loop with no exact count.
+   */
   ok = ok && nyr_scev_lite(&f) && !f.data[phi].range.has_min;
   if (!ok) {
     fprintf(stderr,

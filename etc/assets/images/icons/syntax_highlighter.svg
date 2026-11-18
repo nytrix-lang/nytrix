@@ -1,7 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
-  <title>Syntax Highlighter</title>
-  <desc>Syntax Highlighter icon.</desc>
-  <g transform="translate(2.0000 2.0000) scale(1.25000)">
-<linearGradient id="a"><stop offset=".25" stop-color="#ffe345"/><stop offset=".75" stop-color="#919191"/></linearGradient><path fill="#c6c6ca" d="M4 4v2h5V4z"/><path fill="#c6c6ca" d="M11 4v2h4V4Z"/><path fill="#c6c6ca" d="M1 8v2h3V8z"/><path fill="#c6c6ca" d="M6 8v2h7V8z"/><path fill="#c6c6ca" d="M1 12v2h5v-2zm7 0v2h6v-2z"/><path fill="#c6c6ca" d="M1 1.5h1.25V6H1z"/>
-  </g>
-</svg>

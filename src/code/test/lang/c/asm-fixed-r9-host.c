@@ -1,3 +1,6 @@
+/*
+ * Host-side C counterpart for the asm fixed r9 test.
+ */
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
 #endif

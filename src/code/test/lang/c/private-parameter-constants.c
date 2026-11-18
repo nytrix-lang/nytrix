@@ -1,3 +1,6 @@
+/*
+ * C front-end regression test: private parameter constants.
+ */
 extern int absent_private_feature(void);
 static volatile int visits;
 

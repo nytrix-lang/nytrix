@@ -78,8 +78,101 @@ static bool mach_home_color_boundary(const nyr_mach_inst_t *in) {
          in->src2.kind == NYR_MACH_OPERAND_PREG;
 }
 
+/*
+ * Range facts for home coloring. Both interval builders used to rescan every
+ * instruction of a value's live range per value (quadratic on large bodies:
+ * 2.5 s to encode one 36k-instruction function). These answer the same
+ * questions from one linear pass:
+ *  - boundary_prefix[pc]: color boundaries among instructions [0, pc);
+ *  - pin_pcs (by vreg, ascending pc): instructions that pin a value's home
+ *    (a frame load into it, or a float compare producing it).
+ */
+typedef struct {
+  uint32_t *boundary_prefix;
+  uint32_t *pin_start; /* vreg -> first index in pin_pcs; vreg_len + 1 */
+  uint32_t *pin_pcs;
+} mach_home_ranges_t;
+
+static bool mach_home_inst_pins(const nyr_mach_func_t *mach,
+                                const nyr_mach_inst_t *in, size_t *vreg) {
+  if (in->dst.kind != NYR_MACH_OPERAND_VREG)
+    return false;
+  if ((in->opcode == NYR_MACH_LOAD &&
+       in->src0.kind == NYR_MACH_OPERAND_FRAME) ||
+      (in->opcode == NYR_MACH_CMP && mach_is_float(mach, &in->src0))) {
+    *vreg = (size_t)in->dst.as.reg;
+    return true;
+  }
+  return false;
+}
+
+static void mach_home_ranges_free(mach_home_ranges_t *r) {
+  free(r->boundary_prefix);
+  free(r->pin_start);
+  free(r->pin_pcs);
+  *r = (mach_home_ranges_t){0};
+}
+
+static bool mach_home_ranges_build(const nyr_mach_func_t *mach,
+                                   mach_home_ranges_t *r) {
+  *r = (mach_home_ranges_t){0};
+  size_t n = mach->inst_len, vn = mach->vreg_len;
+  if (n >= UINT32_MAX || vn >= UINT32_MAX)
+    return false;
+  r->boundary_prefix = malloc((n + 1) * sizeof(*r->boundary_prefix));
+  r->pin_start = calloc(vn + 1, sizeof(*r->pin_start));
+  if (!r->boundary_prefix || !r->pin_start) {
+    mach_home_ranges_free(r);
+    return false;
+  }
+  uint32_t count = 0, pins = 0;
+  for (size_t pc = 0; pc < n; ++pc) {
+    r->boundary_prefix[pc] = count;
+    if (mach_home_color_boundary(&mach->insts[pc]))
+      count++;
+    size_t v = 0;
+    if (mach_home_inst_pins(mach, &mach->insts[pc], &v) && v < vn) {
+      r->pin_start[v + 1]++;
+      pins++;
+    }
+  }
+  r->boundary_prefix[n] = count;
+  for (size_t v = 0; v < vn; ++v)
+    r->pin_start[v + 1] += r->pin_start[v];
+  r->pin_pcs = malloc((pins ? pins : 1) * sizeof(*r->pin_pcs));
+  uint32_t *fill = malloc((vn ? vn : 1) * sizeof(*fill));
+  if (!r->pin_pcs || !fill) {
+    free(fill);
+    mach_home_ranges_free(r);
+    return false;
+  }
+  memcpy(fill, r->pin_start, vn * sizeof(*fill));
+  for (size_t pc = 0; pc < n; ++pc) {
+    size_t v = 0;
+    if (mach_home_inst_pins(mach, &mach->insts[pc], &v) && v < vn)
+      r->pin_pcs[fill[v]++] = (uint32_t)pc;
+  }
+  free(fill);
+  return true;
+}
+
+/* True when some instruction in [lo, hi] pins vreg's home. */
+static bool mach_home_pinned_in(const mach_home_ranges_t *r, size_t vreg,
+                                size_t lo, size_t hi) {
+  uint32_t a = r->pin_start[vreg], b = r->pin_start[vreg + 1];
+  while (a < b) { /* first pin pc >= lo */
+    uint32_t m = a + (b - a) / 2;
+    if (r->pin_pcs[m] < lo)
+      a = m + 1;
+    else
+      b = m;
+  }
+  return a < r->pin_start[vreg + 1] && r->pin_pcs[a] <= hi;
+}
+
 static bool mach_vreg_home_colorable(const nyr_x64_mach_enc_t *e, size_t vreg,
                                      const bool *block_has_call,
+                                     const mach_home_ranges_t *ranges,
                                      mach_home_interval_t *out) {
   if (!e || !e->mach || !out || !e->mach->vreg_types ||
       !e->mach->vreg_classes || vreg >= e->mach->vreg_len ||
@@ -107,7 +200,13 @@ static bool mach_vreg_home_colorable(const nyr_x64_mach_enc_t *e, size_t vreg,
   if (!block->inst_count || seg->start < block->first_inst ||
       seg->end >= block->first_inst + block->inst_count)
     return false;
-  for (size_t pc = seg->start; pc <= seg->end; ++pc) {
+  if (ranges) {
+    if (ranges->boundary_prefix[seg->end + 1] !=
+            ranges->boundary_prefix[seg->start] ||
+        mach_home_pinned_in(ranges, vreg, seg->start, seg->end))
+      return false;
+  }
+  for (size_t pc = seg->start; !ranges && pc <= seg->end; ++pc) {
     const nyr_mach_inst_t *in = &e->mach->insts[pc];
     if (mach_home_color_boundary(in))
       return false;
@@ -184,6 +283,7 @@ static size_t mach_home_active_pop(size_t *active, size_t *active_len,
  */
 static bool mach_vreg_home_spill_interval(const nyr_x64_mach_enc_t *e,
                                           size_t vreg,
+                                          const mach_home_ranges_t *ranges,
                                           mach_home_interval_t *out) {
   if (!e || !e->mach || !out || !e->mach->vreg_types ||
       !e->mach->vreg_classes || vreg >= e->mach->vreg_len ||
@@ -207,6 +307,15 @@ static bool mach_vreg_home_spill_interval(const nyr_x64_mach_enc_t *e,
     if (!b->inst_count || s->start < b->first_inst ||
         s->end >= b->first_inst + b->inst_count)
       return false;
+    /*
+     * A value that is register-resident anywhere can be defined in its
+     * register without writing the home.  The encoder's sticky-RAX tag is
+     * keyed by home offset and assumes the slot still names the live value,
+     * so such a value must keep a private slot: sharing it let a later read
+     * reuse a dead neighbour left in %rax (x64_loop_recolor, plain/8 homes).
+     */
+    if (s->color >= 0)
+      return false;
     if (s->spill || s->reload || s->color < 0)
       uses_home = true;
     if (s->start < lo)
@@ -216,7 +325,9 @@ static bool mach_vreg_home_spill_interval(const nyr_x64_mach_enc_t *e,
   }
   if (!uses_home || lo == SIZE_MAX || lo > hi)
     return false;
-  for (size_t pc = lo; pc <= hi; ++pc) {
+  if (ranges && mach_home_pinned_in(ranges, vreg, lo, hi))
+    return false;
+  for (size_t pc = lo; !ranges && pc <= hi; ++pc) {
     const nyr_mach_inst_t *in = &e->mach->insts[pc];
     /*
      * A frame-loaded value's home identifies its incoming argument home, and
@@ -287,6 +398,48 @@ static int mach_home_offset_low_cmp(const void *lhs, const void *rhs) {
  * no two live values can alias; width-16/32 vector homes are left in place.
  * NYTRIX_NO_HOT_HOMES=1 keeps allocation order for A/B runs.
  */
+/*
+ * Offset -> slot index map for mach_order_hot_homes. Slots have unique
+ * offsets; both lookups used to scan every slot per value (quadratic on
+ * functions with tens of thousands of homes).
+ */
+typedef struct {
+  int *keys;
+  size_t *vals;
+  size_t cap;
+} mach_off_map_t;
+
+static bool mach_off_map_init(mach_off_map_t *m, size_t n) {
+  m->cap = 16;
+  while (m->cap < n * 2 + 2)
+    m->cap *= 2;
+  m->keys = malloc(m->cap * sizeof(*m->keys));
+  m->vals = malloc(m->cap * sizeof(*m->vals));
+  if (!m->keys || !m->vals) {
+    free(m->keys);
+    free(m->vals);
+    return false;
+  }
+  for (size_t i = 0; i < m->cap; ++i)
+    m->keys[i] = 0; /* offset 0 means "no home" and is never a key */
+  return true;
+}
+
+static size_t *mach_off_map_slot(mach_off_map_t *m, int key, bool *found) {
+  size_t mask = m->cap - 1;
+  size_t at = ((uint32_t)key * 2654435761u) & mask;
+  while (m->keys[at] != 0 && m->keys[at] != key)
+    at = (at + 1) & mask;
+  *found = m->keys[at] == key;
+  m->keys[at] = key;
+  return &m->vals[at];
+}
+
+static void mach_off_map_free(mach_off_map_t *m) {
+  free(m->keys);
+  free(m->vals);
+}
+
 static bool mach_order_hot_homes(nyr_x64_mach_enc_t *e, int *offs,
                                  size_t vreg_len) {
   if (!e || !e->mach || !offs || !vreg_len)
@@ -346,13 +499,23 @@ static bool mach_order_hot_homes(nyr_x64_mach_enc_t *e, int *offs,
         ++weights[in->args[k].as.reg];
   }
   size_t slot_len = 0;
+  mach_off_map_t by_off = {0};
+  bool indexed = mach_off_map_init(&by_off, vreg_len);
   for (size_t v = 0; v < vreg_len; ++v) {
     orig[v] = offs[v];
     if (!offs[v])
       continue;
     size_t at = 0;
-    while (at < slot_len && slots[at].off != offs[v])
-      ++at;
+    if (indexed) {
+      bool found = false;
+      size_t *slot = mach_off_map_slot(&by_off, offs[v], &found);
+      if (!found)
+        *slot = slot_len;
+      at = *slot;
+    } else {
+      while (at < slot_len && slots[at].off != offs[v])
+        ++at;
+    }
     if (at == slot_len) {
       slots[at].off = offs[v];
       slots[at].new_off = offs[v];
@@ -371,15 +534,35 @@ static bool mach_order_hot_homes(nyr_x64_mach_enc_t *e, int *offs,
   for (size_t i = 0; i < slot_len; ++i)
     if (slots[i].width == 8 && at < low_len)
       slots[i].new_off = low[at++];
+  if (indexed) {
+    /* rebuild for the sorted slot order */
+    mach_off_map_free(&by_off);
+    indexed = mach_off_map_init(&by_off, slot_len);
+    for (size_t i = 0; indexed && i < slot_len; ++i) {
+      bool found = false;
+      size_t *slot = mach_off_map_slot(&by_off, slots[i].off, &found);
+      if (!found)
+        *slot = i;
+    }
+  }
   for (size_t v = 0; v < vreg_len; ++v) {
     if (!orig[v])
       continue;
+    if (indexed) {
+      bool found = false;
+      size_t *slot = mach_off_map_slot(&by_off, orig[v], &found);
+      if (found) /* every home offset is some slot's offset */
+        offs[v] = slots[*slot].new_off;
+      continue;
+    }
     for (size_t i = 0; i < slot_len; ++i)
       if (slots[i].off == orig[v]) {
         offs[v] = slots[i].new_off;
         break;
       }
   }
+  if (indexed)
+    mach_off_map_free(&by_off);
   free(weights);
   free(slots);
   free(orig);
@@ -399,7 +582,7 @@ static bool mach_order_hot_homes(nyr_x64_mach_enc_t *e, int *offs,
  * and permute the offsets of 8-byte slots so the most-used homes sit closest to
  * %%rbp. Only offsets move — every slot keeps its byte range, its width, and the
  * disjointness the coloring pass proved; the frame stays the same size and no two
- * live values can alias; width-16/32 vector homes keep their offsets.  
+ * live values can alias; width-16/32 vector homes keep their offsets.
  * NYTRIX_NO_FRAME_SLOT_ORDER=1 keeps allocation order for A/B runs.
  */
 static bool mach_order_frame_slots_by_access(nyr_x64_mach_enc_t *e, int *offs,
@@ -492,6 +675,65 @@ static bool mach_order_frame_slots_by_access(nyr_x64_mach_enc_t *e, int *offs,
   return true;
 }
 
+/*
+ * A scalar parameter slot that the body only reads through one LOAD already
+ * holds its value for the whole call (the prologue spills the argument there).
+ * Give the loaded vreg that slot as its home: the entry load then needs no
+ * reload/store pair, and every later home access reads the argument slot
+ * directly. Recursive calls (towers, queens) paid a load and a store per
+ * parameter per call for the copy. NYTRIX_NO_PARAM_HOME_ALIAS=1 disables it.
+ */
+static void mach_alias_param_homes(nyr_x64_mach_enc_t *e, int *offs) {
+  const nyr_mach_func_t *mach = e->mach;
+  if (!mach || !offs || !mach->param_count || !e->frame_slot_offsets ||
+      mach->param_count > mach->frame_slot_len ||
+      getenv("NYTRIX_NO_PARAM_HOME_ALIAS"))
+    return;
+  for (size_t slot = 0; slot < mach->param_count; ++slot) {
+    if (mach->param_types && mach->param_types[slot] == NYIR_PARAM_AGGREGATE)
+      continue;
+    nyr_mach_type_t type = mach->frame_slots[slot].type;
+    if (mach->frame_slots[slot].size > 8 || type == NYR_MACH_TYPE_F32 ||
+        type == NYR_MACH_TYPE_F64)
+      continue;
+    size_t refs = 0, load_at = SIZE_MAX;
+    for (size_t i = 0; i < mach->inst_len && refs < 2; ++i) {
+      const nyr_mach_inst_t *in = &mach->insts[i];
+      const nyr_mach_operand_t *ops[] = {&in->dst, &in->src0, &in->src1,
+                                         &in->src2};
+      for (size_t k = 0; k < 4; ++k)
+        if (ops[k]->kind == NYR_MACH_OPERAND_FRAME &&
+            ops[k]->as.frame_index == slot) {
+          ++refs;
+          if (k == 1 && in->opcode == NYR_MACH_LOAD)
+            load_at = i;
+        }
+      for (size_t k = 0; k < in->args_len; ++k)
+        if (in->args[k].kind == NYR_MACH_OPERAND_FRAME &&
+            in->args[k].as.frame_index == slot)
+          refs += 2;
+    }
+    if (refs != 1 || load_at == SIZE_MAX)
+      continue;
+    const nyr_mach_inst_t *load = &mach->insts[load_at];
+    if (load->dst.kind != NYR_MACH_OPERAND_VREG ||
+        load->dst.as.reg >= mach->vreg_len ||
+        mach_is_float(mach, &load->dst) || mach_is_v128(mach, &load->dst))
+      continue;
+    uint32_t v = load->dst.as.reg;
+    size_t defs = 0;
+    for (size_t i = 0; i < mach->inst_len && defs < 2; ++i) {
+      const nyr_mach_inst_t *in = &mach->insts[i];
+      if (in->dst.kind == NYR_MACH_OPERAND_VREG && in->dst.as.reg == v &&
+          in->opcode != NYR_MACH_STORE)
+        ++defs;
+    }
+    if (defs != 1)
+      continue;
+    offs[v] = e->frame_slot_offsets[slot];
+  }
+}
+
 static bool mach_build_vreg_homes(nyr_x64_mach_enc_t *e,
                                   size_t frame_slots_bytes) {
   if (!e || !e->mach)
@@ -536,18 +778,27 @@ static bool mach_build_vreg_homes(nyr_x64_mach_enc_t *e,
                     strcmp(off_env, "off") != 0);
   }
   size_t interval_len = 0;
+  mach_home_ranges_t ranges_storage;
+  const mach_home_ranges_t *ranges =
+      getenv("NYTRIX_HOME_RANGE_SCAN") ||
+              !mach_home_ranges_build(mach, &ranges_storage)
+          ? NULL
+          : &ranges_storage;
   for (size_t v = 0; v < mach->vreg_len; ++v) {
-    if (mach_vreg_home_colorable(e, v, block_has_call,
+    if (mach_vreg_home_colorable(e, v, block_has_call, ranges,
                                  &intervals[interval_len])) {
       ++interval_len;
       continue;
     }
     if (spill_color &&
-        mach_vreg_home_spill_interval(e, v, &intervals[interval_len])) {
+        mach_vreg_home_spill_interval(e, v, ranges,
+                                      &intervals[interval_len])) {
       intervals[interval_len].pool = 1;
       ++interval_len;
     }
   }
+  if (ranges)
+    mach_home_ranges_free(&ranges_storage);
   qsort(intervals, interval_len, sizeof(*intervals), mach_home_interval_cmp);
   size_t *active_homes = calloc(mach->vreg_len, sizeof(*active_homes));
   size_t *free_homes = calloc(mach->vreg_len, sizeof(*free_homes));
@@ -647,7 +898,10 @@ static bool mach_build_vreg_homes(nyr_x64_mach_enc_t *e,
   free(home_offs);
   free(active_homes);
   free(free_homes);
+  mach_alias_param_homes(e, offs);
   e->vreg_home_offs = offs;
+  free(e->vreg_home_shared);
+  e->vreg_home_shared = NULL;
   e->vreg_home_bytes = used;
   return true;
 }

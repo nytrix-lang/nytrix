@@ -695,9 +695,11 @@ static int spawn_with_host_flags(const char *const base[], const char *env,
 }
 #endif
 
-/* A requested generated-code sanitizer owns the sanitizer runtime at link
+/*
+ * A requested generated-code sanitizer owns the sanitizer runtime at link
  * time.  In particular, the build's ASan host flags must not be combined with
- * a fixture's explicit MSan or TSan mode. */
+ * a fixture's explicit MSan or TSan mode.
+ */
 static int spawn_with_host_flags_for_sanitizer(
     const char *const base[], const char *env, const char *sanitize_kind,
     char *pool[], size_t *pool_len) {

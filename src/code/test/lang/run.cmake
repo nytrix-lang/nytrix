@@ -586,6 +586,797 @@ if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux")
   endforeach()
 endif()
 
+# Profiling entry hooks: -pg calls mcount, -mfentry calls __fentry__, and
+# no_instrument_function opts a function out.
+file(WRITE "${BINARY_DIR}/profile-entry.c"
+  "__attribute__((noinline)) int profiled(int a) { return a + 1; }\n")
+file(WRITE "${BINARY_DIR}/profile-entry-skip.c"
+  "__attribute__((no_instrument_function)) int skipped(int a) { return a + 2; }\n")
+nyc_execute_ok(
+  [=[-pg entry instrumentation failed\n${stdout}${stderr}]=]
+  COMMAND "${NYC}" -pg -S "${BINARY_DIR}/profile-entry.c"
+          -o "${BINARY_DIR}/profile-entry-pg.s"
+)
+file(READ "${BINARY_DIR}/profile-entry-pg.s" profile_entry_pg)
+if(NOT profile_entry_pg MATCHES "call[ \t]+mcount")
+  message(FATAL_ERROR "-pg did not emit the mcount entry hook")
+endif()
+nyc_execute_ok(
+  [=[-pg -mfentry entry instrumentation failed\n${stdout}${stderr}]=]
+  COMMAND "${NYC}" -pg -mfentry -S "${BINARY_DIR}/profile-entry.c"
+          -o "${BINARY_DIR}/profile-entry-fentry.s"
+)
+file(READ "${BINARY_DIR}/profile-entry-fentry.s" profile_entry_fentry)
+if(NOT profile_entry_fentry MATCHES "call[ \t]+__fentry__" OR
+   profile_entry_fentry MATCHES "call[ \t]+mcount")
+  message(FATAL_ERROR
+    "-mfentry did not replace the mcount entry hook with __fentry__")
+endif()
+nyc_execute_ok(
+  [=[no_instrument_function opt-out failed to compile\n${stdout}${stderr}]=]
+  COMMAND "${NYC}" -pg -S "${BINARY_DIR}/profile-entry-skip.c"
+          -o "${BINARY_DIR}/profile-entry-skip.s"
+)
+file(READ "${BINARY_DIR}/profile-entry-skip.s" profile_entry_skip)
+if(profile_entry_skip MATCHES "call[ \t]+mcount")
+  message(FATAL_ERROR "no_instrument_function still emitted a profiling hook")
+endif()
+nyc_execute_ok(
+  [=[-mfentry without -pg should not instrument\n${stdout}${stderr}]=]
+  COMMAND "${NYC}" -mfentry -S "${BINARY_DIR}/profile-entry.c"
+          -o "${BINARY_DIR}/profile-entry-plain.s"
+)
+file(READ "${BINARY_DIR}/profile-entry-plain.s" profile_entry_plain)
+if(profile_entry_plain MATCHES "__fentry__")
+  message(FATAL_ERROR "-mfentry instrumented a function without -pg")
+endif()
+
+# Frame-pointer omission in object mode: ordinary call, loop, array, and leaf
+# shapes must not open an rbp frame. The entry byte is checked at runtime
+# instead of relying on objdump being installed.
+file(WRITE "${BINARY_DIR}/omit-fp-defs.c" [=[
+int callee(int);
+int calls(int x) { return callee(x); }
+int loop(int n) { int s = 0; for (int i = 0; i < n; ++i) s += i; return s; }
+int array(int x) { int a[4]; a[0] = x; return a[0]; }
+int leaf(void) { return 4; }
+int vol(void) { volatile int v = 3; v = v + 1; return v; }
+]=])
+file(WRITE "${BINARY_DIR}/omit-fp-main.c" [=[
+#include <stdio.h>
+int callee(int x) { return x + 1; }
+int calls(int); int loop(int); int array(int); int leaf(void); int vol(void);
+static int opens_frame(const void *fn) {
+  return ((const unsigned char *)fn)[0] == 0x55;
+}
+int main(void) {
+  printf("%d %d %d %d %d %d\n", opens_frame((const void *)calls),
+         opens_frame((const void *)loop), opens_frame((const void *)array),
+         opens_frame((const void *)leaf), opens_frame((const void *)vol),
+         calls(1) + loop(3) + array(2) + leaf() + vol());
+  return 0;
+}
+]=])
+nyc_execute_ok(
+  [=[omit-frame-pointer definitions failed\n${stdout}${stderr}]=]
+  COMMAND "${NYC}" -O2 -fomit-frame-pointer -c "${BINARY_DIR}/omit-fp-defs.c"
+          -o "${BINARY_DIR}/omit-fp-defs.o"
+)
+nyc_execute_ok(
+  [=[omit-frame-pointer caller failed\n${stdout}${stderr}]=]
+  COMMAND "${CC}" -c "${BINARY_DIR}/omit-fp-main.c"
+          -o "${BINARY_DIR}/omit-fp-main.o"
+)
+nyc_execute_ok(
+  [=[omit-frame-pointer link failed\n${stdout}${stderr}]=]
+  COMMAND "${CC}" "${BINARY_DIR}/omit-fp-defs.o" "${BINARY_DIR}/omit-fp-main.o"
+          -o "${BINARY_DIR}/omit-fp"
+)
+execute_process(
+  COMMAND "${BINARY_DIR}/omit-fp"
+  RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+if(NOT status EQUAL 0 OR NOT stdout STREQUAL "0 0 0 0 0 15\n")
+  message(FATAL_ERROR
+    "-fomit-frame-pointer left an rbp frame in object mode: ${stdout}${stderr}")
+endif()
+
+# Assembly-route PIC must use GOT-relative data addressing like the object
+# route, and stay direct without -fPIC.
+file(WRITE "${BINARY_DIR}/pic-asm.c" [=[
+int g = 7;
+int read(void) { return g; }
+]=])
+nyc_execute_ok(
+  [=[-fPIC -S compilation failed\n${stdout}${stderr}]=]
+  COMMAND "${NYC}" -O2 -fPIC -S "${BINARY_DIR}/pic-asm.c"
+          -o "${BINARY_DIR}/pic-asm.s"
+)
+file(READ "${BINARY_DIR}/pic-asm.s" pic_asm)
+if(NOT pic_asm MATCHES "GOTPCREL")
+  message(FATAL_ERROR
+    "assembly-route -fPIC did not use GOTPCREL data addressing")
+endif()
+nyc_execute_ok(
+  [=[-S compilation failed\n${stdout}${stderr}]=]
+  COMMAND "${NYC}" -O2 -S "${BINARY_DIR}/pic-asm.c"
+          -o "${BINARY_DIR}/pic-asm-plain.s"
+)
+file(READ "${BINARY_DIR}/pic-asm-plain.s" pic_asm_plain)
+if(pic_asm_plain MATCHES "GOTPCREL")
+  message(FATAL_ERROR "non-PIC assembly used GOTPCREL data addressing")
+endif()
+
+# Unsigned arithmetic, 16/32-bit widths, and named sections must agree across
+# the assembly and direct-object routes and with the pinned reference output.
+file(WRITE "${BINARY_DIR}/width-parity.c" [=[
+#include <stdio.h>
+__attribute__((section("mydata"))) int sec_g = 5;
+__attribute__((section(".mytext"))) int secf(void) { return sec_g; }
+int main(void) {
+  unsigned a = 0xffffffffu, q, r;
+  unsigned short s = 65535; short ss = -32768; unsigned char uc = 250;
+  unsigned long long u64 = 0xffffffffffffffffULL;
+  unsigned short s2 = (unsigned short)(s + 1), prod = (unsigned short)(s * 3u);
+  q = a / 3u; r = a % 3u;
+  printf("%u %u %u %d %u %d\n", q, r, a >> 31, (int)ss, (unsigned)s2, (int)uc);
+  printf("%llu %llu %u %u %d\n", u64 / 10u, u64 % 10u,
+         (unsigned)(s / 7u), (unsigned)prod, (int)(s2 < 2));
+  printf("%d %u %d\n", secf(), (unsigned)(uc + 10u) & 0xffu, (int)(ss >> 3));
+  return 0;
+}
+]=])
+set(width_expected "1431655765 0 1 -32768 0 250\n1844674407370955161 5 9362 65533 1\n5 4 -4096\n")
+nyc_execute_ok(
+  [=[width parity object compilation failed\n${stdout}${stderr}]=]
+  COMMAND "${NYC}" -O2 -c "${BINARY_DIR}/width-parity.c"
+          -o "${BINARY_DIR}/width-parity.o"
+)
+nyc_execute_ok(
+  [=[width parity object link failed\n${stdout}${stderr}]=]
+  COMMAND "${CC}" -o "${BINARY_DIR}/width-parity-obj"
+          "${BINARY_DIR}/width-parity.o"
+)
+execute_process(
+  COMMAND "${BINARY_DIR}/width-parity-obj"
+  RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+if(NOT status EQUAL 0 OR NOT stdout STREQUAL "${width_expected}")
+  message(FATAL_ERROR
+    "width parity object mode mismatch (exit ${status}): ${stdout}${stderr}")
+endif()
+nyc_execute_ok(
+  [=[width parity assembly compilation failed\n${stdout}${stderr}]=]
+  COMMAND "${NYC}" -O2 -S "${BINARY_DIR}/width-parity.c"
+          -o "${BINARY_DIR}/width-parity.s"
+)
+nyc_execute_ok(
+  [=[width parity assembly link failed\n${stdout}${stderr}]=]
+  COMMAND "${CC}" -o "${BINARY_DIR}/width-parity-asm"
+          "${BINARY_DIR}/width-parity.s"
+)
+execute_process(
+  COMMAND "${BINARY_DIR}/width-parity-asm"
+  RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+if(NOT status EQUAL 0 OR NOT stdout STREQUAL "${width_expected}")
+  message(FATAL_ERROR
+    "width parity assembly mode mismatch (exit ${status}): ${stdout}${stderr}")
+endif()
+file(READ "${BINARY_DIR}/width-parity.s" width_asm)
+string(FIND "${width_asm}" ".section \"mydata\"" width_asm_data)
+string(FIND "${width_asm}" ".section \".mytext\"" width_asm_text)
+if(width_asm_data EQUAL -1 OR width_asm_text EQUAL -1)
+  message(FATAL_ERROR "assembly route dropped a named section")
+endif()
+if(READELF)
+  execute_process(
+    COMMAND "${READELF}" -SW "${BINARY_DIR}/width-parity.o"
+    RESULT_VARIABLE status OUTPUT_VARIABLE sections ERROR_VARIABLE stderr)
+  string(FIND "${sections}" "mydata" width_obj_data)
+  string(FIND "${sections}" ".mytext" width_obj_text)
+  if(NOT status EQUAL 0 OR width_obj_data EQUAL -1 OR width_obj_text EQUAL -1)
+    message(FATAL_ERROR "object route dropped a named section: ${sections}${stderr}")
+  endif()
+endif()
+# These shapes must reach the physical machine encoder, not the stack encoder.
+execute_process(
+  COMMAND "${CMAKE_COMMAND}" -E env NYC_TRACE_MACHINE_FALLBACK=1
+          "${NYC}" -O2 -c "${BINARY_DIR}/width-parity.c"
+          -o "${BINARY_DIR}/width-parity-trace.o"
+  RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+if(NOT status EQUAL 0 OR stderr MATCHES "object fallback")
+  message(FATAL_ERROR
+    "width shapes reached the stack encoder instead of machine form: ${stderr}")
+endif()
+
+# Floating point, a by-value struct with a 16-bit member and an address-taken
+# member, arrays, and break/continue/switch control flow must agree across both
+# routes and with the pinned reference output.
+file(WRITE "${BINARY_DIR}/mixed-shapes.c" [=[
+#include <stdio.h>
+struct P { int x; short y; };
+struct P make(int a, int b) { struct P p; p.x = a; p.y = (short)b; return p; }
+int sumP(struct P p) { int *q = &p.x; *q += 3; return p.x + (int)p.y; }
+int loops(int n) {
+  int s = 0;
+  for (int i = 0; i < n; ++i) { if (i == 3) continue; s += i * 3; }
+  int j = 0;
+  while (j < n) { ++j; if (j > 7) break; s += 1; }
+  switch (n % 3) { case 0: s += 2; break; case 1: s -= 1; break; default: s += 5; }
+  return s;
+}
+int array_sum(int a) {
+  int arr[5];
+  for (int i = 0; i < 5; ++i) arr[i] = i * a;
+  int s = 0;
+  for (int i = 0; i < 5; ++i) s += arr[i];
+  return s;
+}
+int main(void) {
+  int A = 17, B = 23;
+  double D = A * 1.25 + B * 0.5;
+  double E = D / 2.0;
+  float F = (float)(D * 0.5f);
+  int I = (int)(E * 4.0);
+  struct P p = make(A + 1, B - 2);
+  printf("%d %d %.4f %.4f %.4f %d %d %d\n", sumP(p), loops(A % 9), D, E,
+         (double)F, I, array_sum(B), A < B);
+  return 0;
+}
+]=])
+set(mixed_expected "42 87 32.7500 16.3750 16.3750 65 230 1\n")
+nyc_execute_ok(
+  [=[mixed shapes object compilation failed\n${stdout}${stderr}]=]
+  COMMAND "${NYC}" -O2 -c "${BINARY_DIR}/mixed-shapes.c"
+          -o "${BINARY_DIR}/mixed-shapes.o"
+)
+nyc_execute_ok(
+  [=[mixed shapes object link failed\n${stdout}${stderr}]=]
+  COMMAND "${CC}" -o "${BINARY_DIR}/mixed-shapes-obj"
+          "${BINARY_DIR}/mixed-shapes.o"
+)
+execute_process(
+  COMMAND "${BINARY_DIR}/mixed-shapes-obj"
+  RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+if(NOT status EQUAL 0 OR NOT stdout STREQUAL "${mixed_expected}")
+  message(FATAL_ERROR
+    "mixed shapes object mode mismatch (exit ${status}): ${stdout}${stderr}")
+endif()
+nyc_execute_ok(
+  [=[mixed shapes assembly compilation failed\n${stdout}${stderr}]=]
+  COMMAND "${NYC}" -O2 -S "${BINARY_DIR}/mixed-shapes.c"
+          -o "${BINARY_DIR}/mixed-shapes.s"
+)
+nyc_execute_ok(
+  [=[mixed shapes assembly link failed\n${stdout}${stderr}]=]
+  COMMAND "${CC}" -o "${BINARY_DIR}/mixed-shapes-asm"
+          "${BINARY_DIR}/mixed-shapes.s"
+)
+execute_process(
+  COMMAND "${BINARY_DIR}/mixed-shapes-asm"
+  RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+if(NOT status EQUAL 0 OR NOT stdout STREQUAL "${mixed_expected}")
+  message(FATAL_ERROR
+    "mixed shapes assembly mode mismatch (exit ${status}): ${stdout}${stderr}")
+endif()
+# The register-allocating object encoder must cover these shapes too. Force it
+# with NYC_USE_MACH_OBJECT=1 and require identical output with no fallback.
+execute_process(
+  COMMAND "${CMAKE_COMMAND}" -E env NYC_USE_MACH_OBJECT=1
+          NYC_TRACE_MACHINE_FALLBACK=1
+          "${NYC}" -O2 -c "${BINARY_DIR}/mixed-shapes.c"
+          -o "${BINARY_DIR}/mixed-shapes-mach.o"
+  RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+if(NOT status EQUAL 0)
+  message(FATAL_ERROR
+    "forced machine object compilation failed: ${stdout}${stderr}")
+endif()
+if(stderr MATCHES "object fallback")
+  message(FATAL_ERROR
+    "mixed shapes fell back from the forced machine encoder: ${stderr}")
+endif()
+nyc_execute_ok(
+  [=[mixed shapes machine object link failed\n${stdout}${stderr}]=]
+  COMMAND "${CC}" -o "${BINARY_DIR}/mixed-shapes-mach"
+          "${BINARY_DIR}/mixed-shapes-mach.o"
+)
+execute_process(
+  COMMAND "${BINARY_DIR}/mixed-shapes-mach"
+  RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+if(NOT status EQUAL 0 OR NOT stdout STREQUAL "${mixed_expected}")
+  message(FATAL_ERROR
+    "mixed shapes machine object mismatch (exit ${status}): ${stdout}${stderr}")
+endif()
+execute_process(
+  COMMAND "${CMAKE_COMMAND}" -E env NYC_TRACE_MACHINE_FALLBACK=1
+          "${NYC}" -O2 -c "${BINARY_DIR}/mixed-shapes.c"
+          -o "${BINARY_DIR}/mixed-shapes-trace.o"
+  RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+if(NOT status EQUAL 0 OR stderr MATCHES "object fallback")
+  message(FATAL_ERROR
+    "mixed shapes reached the stack encoder instead of machine form: ${stderr}")
+endif()
+
+# The assembly-route machine text emitter must encode the 16/32-bit, unsigned,
+# and SHR shapes C lowering produces, so these functions must not fall back to
+# the NYIR emitter and their output must stay correct.
+file(WRITE "${BINARY_DIR}/asm-machine-reject.c" [=[
+int leaf(int x) { return x + 1; }
+int caller(int x) { return leaf(x) * 2; }
+unsigned udiv(unsigned a, unsigned b) { return a / b; }
+unsigned ushr(unsigned a) { return a >> 3; }
+int narrow(short a) { return a + 1; }
+int main(void) {
+  return caller(3) == 8 && udiv(9, 2) == 4 && ushr(16) == 2 &&
+                 narrow(-2) == -1
+             ? 0
+             : 1;
+}
+]=])
+execute_process(
+  COMMAND "${CMAKE_COMMAND}" -E env NYC_TRACE_MACHINE_FALLBACK=1
+          "${NYC}" -O2 -S "${BINARY_DIR}/asm-machine-reject.c"
+          -o "${BINARY_DIR}/asm-machine-reject.s"
+  RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+if(NOT status EQUAL 0 OR stderr MATCHES "machine fallback")
+  message(FATAL_ERROR
+    "assembly machine form fell back for C width shapes: ${stdout}${stderr}")
+endif()
+nyc_execute_ok(
+  [=[assembly machine rejection output did not link\n${stdout}${stderr}]=]
+  COMMAND "${CC}" -o "${BINARY_DIR}/asm-machine-reject"
+          "${BINARY_DIR}/asm-machine-reject.s"
+)
+nyc_execute_ok(
+  [=[assembly machine rejection fallback output was wrong\n${stdout}${stderr}]=]
+  COMMAND "${BINARY_DIR}/asm-machine-reject"
+)
+
+# Assembly-route stack guards and extern retpoline thunks must be emitted and
+# remain executable.
+file(WRITE "${BINARY_DIR}/asm-hardening.c" [=[
+#include <stdio.h>
+int (*volatile fp)(int) = 0;
+int inc(int x) { return x + 1; }
+int call_through(int x) { return fp ? fp(x) : x; }
+int guarded(const char *s) { char b[8]; b[0] = s[0]; b[1] = 0; return b[0]; }
+int main(void) {
+  fp = inc;
+  printf("%d %d\n", call_through(1), guarded("A"));
+  return 0;
+}
+]=])
+file(WRITE "${BINARY_DIR}/asm-hardening-stub.c" [=[
+__asm__(".globl __x86_indirect_thunk_rax\n"
+        "__x86_indirect_thunk_rax:\n"
+        "jmp *%rax\n"
+        ".globl __x86_indirect_thunk_r11\n"
+        "__x86_indirect_thunk_r11:\n"
+        "jmp *%r11\n");
+]=])
+nyc_execute_ok(
+  [=[assembly hardening compilation failed\n${stdout}${stderr}]=]
+  COMMAND "${NYC}" -O2 -S -fstack-protector-all
+          -mindirect-branch=thunk-extern "${BINARY_DIR}/asm-hardening.c"
+          -o "${BINARY_DIR}/asm-hardening.s"
+)
+file(READ "${BINARY_DIR}/asm-hardening.s" hardening_asm)
+string(FIND "${hardening_asm}" "__stack_chk_fail" hardening_guard)
+string(FIND "${hardening_asm}" "__x86_indirect_thunk_" hardening_thunk)
+if(hardening_guard EQUAL -1 OR hardening_thunk EQUAL -1)
+  message(FATAL_ERROR "assembly route dropped its stack guard or retpoline thunk")
+endif()
+nyc_execute_ok(
+  [=[assembly hardening link failed\n${stdout}${stderr}]=]
+  COMMAND "${CC}" -o "${BINARY_DIR}/asm-hardening"
+          "${BINARY_DIR}/asm-hardening.s"
+          "${BINARY_DIR}/asm-hardening-stub.c"
+)
+execute_process(
+  COMMAND "${BINARY_DIR}/asm-hardening"
+  RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+if(NOT status EQUAL 0 OR NOT stdout STREQUAL "2 65\n")
+  message(FATAL_ERROR
+    "assembly-route guard/retpoline behavior mismatch: ${stdout}${stderr}")
+endif()
+
+# Complex component access through a pointer, including address-of a complex
+# local. Offsets are 0 and 8 for double complex and 0 and 4 for float complex.
+file(WRITE "${BINARY_DIR}/complex-components.c" [=[
+#include <stdio.h>
+struct S { double _Complex z; };
+void store(double _Complex *p, double re, double im) {
+  __real__ *p = re;
+  __imag__ *p = im;
+}
+double load_real(double _Complex *p) { return __real__ *p; }
+double load_imag(double _Complex *p) { return __imag__ *p; }
+void fstore(float _Complex *p, float re, float im) {
+  __real__ *p = re;
+  __imag__ *p = im;
+}
+float fload_real(float _Complex *p) { return __real__ *p; }
+float fload_imag(float _Complex *p) { return __imag__ *p; }
+int main(void) {
+  double _Complex z;
+  float _Complex w;
+  store(&z, 1.25, -2.5);
+  fstore(&w, 0.5f, -1.5f);
+  printf("%g %g\n", load_real(&z), load_imag(&z));
+  printf("%g %g\n", fload_real(&w), fload_imag(&w));
+  struct S s;
+  struct S *sp = &s;
+  __real__ sp->z = 1.25;
+  __imag__ sp->z = -2.5;
+  __real__ s.z += 0.25;
+  printf("%g %g\n", __real__ s.z, __imag__ s.z);
+  struct S t;
+  t.z = s.z;
+  printf("%g %g\n", __real__ t.z, __imag__ t.z);
+  return 0;
+}
+]=])
+nyc_execute_ok(
+  [=[complex component object compilation failed\n${stdout}${stderr}]=]
+  COMMAND "${NYC}" -O2 -c "${BINARY_DIR}/complex-components.c"
+          -o "${BINARY_DIR}/complex-components.o"
+)
+nyc_execute_ok(
+  [=[complex component link failed\n${stdout}${stderr}]=]
+  COMMAND "${CC}" "${BINARY_DIR}/complex-components.o"
+          -o "${BINARY_DIR}/complex-components"
+)
+execute_process(
+  COMMAND "${BINARY_DIR}/complex-components"
+  RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+if(NOT status EQUAL 0 OR
+   NOT stdout STREQUAL "1.25 -2.5\n0.5 -1.5\n1.5 -2.5\n1.5 -2.5\n")
+  message(FATAL_ERROR
+    "complex component access mismatch: ${stdout}${stderr}")
+endif()
+
+# Complex locals are aggregate objects: two eight-byte slots for double
+# complex, one for float complex. Copies must survive the optimizer at -O2.
+file(WRITE "${BINARY_DIR}/complex-locals.c" [=[
+#include <complex.h>
+#include <stdio.h>
+struct S { double _Complex z; };
+static double _Complex cadd(double _Complex a, double _Complex b) {
+  return a + b;
+}
+static float _Complex fcadd(float _Complex a, float _Complex b) {
+  return a + b;
+}
+static void complex_copy(double _Complex *d, double _Complex *s) { *d = *s; }
+int main(void) {
+  double _Complex x, y;
+  __real__ x = 1.5;
+  __imag__ x = 2.5;
+  y = x;
+  printf("%zu %zu %g %g %g %g\n", sizeof x, sizeof y, __real__ y, __imag__ y,
+         __real__ x, __imag__ x);
+  __real__ y += 0.25;
+  printf("%g %g\n", __real__ y, __imag__ y);
+  float _Complex a, b;
+  __real__ a = 0.5f;
+  __imag__ a = -1.5f;
+  b = a;
+  printf("%g %g\n", __real__ b, __imag__ b);
+  struct S s, t;
+  __real__ s.z = 1.25;
+  __imag__ s.z = -2.5;
+  t.z = s.z;
+  printf("%g %g\n", __real__ t.z, __imag__ t.z);
+  double _Complex u, v;
+  __real__ u = 3.5;
+  __imag__ u = -4.5;
+  complex_copy(&v, &u);
+  printf("%g %g\n", __real__ v, __imag__ v);
+  double _Complex p, q, r;
+  __real__ p = 1.5;
+  __imag__ p = 2.5;
+  __real__ q = 0.5;
+  __imag__ q = -4.0;
+  r = p + q;
+  printf("%g %g\n", __real__ r, __imag__ r);
+  r = p - q;
+  printf("%g %g\n", __real__ r, __imag__ r);
+  float _Complex fp, fq, fr;
+  __real__ fp = 1.5f;
+  __imag__ fp = 2.5f;
+  __real__ fq = 0.5f;
+  __imag__ fq = -4.0f;
+  fr = fp + fq;
+  printf("%g %g\n", __real__ fr, __imag__ fr);
+  r = p * q;
+  printf("%g %g\n", __real__ r, __imag__ r);
+  r = p / q;
+  printf("%g %g\n", __real__ r, __imag__ r);
+  r = cadd(p, q);
+  printf("%g %g\n", __real__ r, __imag__ r);
+  fr = fcadd(fp, fq);
+  printf("%g %g\n", __real__ fr, __imag__ fr);
+  fr = fp * fq;
+  printf("%g %g\n", __real__ fr, __imag__ fr);
+  fr = fp / fq;
+  printf("%g %g\n", __real__ fr, __imag__ fr);
+  double _Complex lit;
+  lit = 2.0i;
+  printf("%g %g\n", __real__ lit, __imag__ lit);
+  lit = 2.0;
+  printf("%g %g\n", __real__ lit, __imag__ lit);
+  lit = 3;
+  printf("%g %g\n", __real__ lit, __imag__ lit);
+  float _Complex flit;
+  flit = 1.5fi;
+  printf("%g %g\n", __real__ flit, __imag__ flit);
+  double _Complex dfromf;
+  dfromf = 1.0iF;
+  printf("%g %g\n", __real__ dfromf, __imag__ dfromf);
+  float _Complex ffromd;
+  ffromd = 2.0i;
+  printf("%g %g\n", __real__ ffromd, __imag__ ffromd);
+  double _Complex initd = 2.0i;
+  printf("%g %g\n", __real__ initd, __imag__ initd);
+  float _Complex initf = 1.5fi;
+  printf("%g %g\n", __real__ initf, __imag__ initf);
+  double _Complex initv = 4.0;
+  printf("%g %g\n", __real__ initv, __imag__ initv);
+  double _Complex initcross = 3.0iF;
+  printf("%g %g\n", __real__ initcross, __imag__ initcross);
+  double _Complex mixc = 2.0 * I;
+  printf("%g %g\n", __real__ mixc, __imag__ mixc);
+  double _Complex sqc = I * I;
+  printf("%g %g\n", __real__ sqc, __imag__ sqc);
+  double _Complex negc = -(2.0 + 3.0i);
+  printf("%g %g\n", __real__ negc, __imag__ negc);
+  printf("%d %d\n", mixc == mixc, mixc != sqc);
+  return 0;
+}
+]=])
+foreach(complex_opt IN ITEMS -O0 -O2)
+  string(REPLACE "-" "" complex_tag "${complex_opt}")
+  nyc_execute_ok(
+    [=[complex local object compilation failed\n${stdout}${stderr}]=]
+    COMMAND "${NYC}" ${complex_opt} -c "${BINARY_DIR}/complex-locals.c"
+            -o "${BINARY_DIR}/complex-locals-${complex_tag}.o"
+  )
+  nyc_execute_ok(
+    [=[complex local link failed\n${stdout}${stderr}]=]
+    COMMAND "${CC}" "${BINARY_DIR}/complex-locals-${complex_tag}.o"
+            -o "${BINARY_DIR}/complex-locals-${complex_tag}"
+  )
+  execute_process(
+    COMMAND "${BINARY_DIR}/complex-locals-${complex_tag}"
+    RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+  if(NOT status EQUAL 0 OR
+     NOT stdout STREQUAL
+         "16 16 1.5 2.5 1.5 2.5\n1.75 2.5\n0.5 -1.5\n1.25 -2.5\n3.5 -4.5\n2 -1.5\n1 6.5\n2 -1.5\n10.75 -4.75\n-0.569231 0.446154\n2 -1.5\n2 -1.5\n10.75 -4.75\n-0.569231 0.446154\n0 2\n2 0\n3 0\n0 1.5\n0 1\n0 2\n0 2\n0 1.5\n4 0\n0 3\n0 2\n-1 0\n-2 -3\n1 1\n")
+    message(FATAL_ERROR
+      "complex local value mismatch at ${complex_opt}: ${stdout}${stderr}")
+  endif()
+endforeach()
+
+# Unsupported complex forms must stay hard diagnostics, never a scalar or an
+# unclassified aggregate substitute.
+file(WRITE "${BINARY_DIR}/complex-unsupported.c" [=[
+void bad(void) { double _Complex a, b; a = a % b; }
+]=])
+execute_process(
+  COMMAND "${NYC}" -O2 -c "${BINARY_DIR}/complex-unsupported.c"
+          -o "${BINARY_DIR}/complex-unsupported.o"
+  RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+if(status EQUAL 0 OR
+   NOT stderr MATCHES "unsupported complex binary operator")
+  message(FATAL_ERROR
+    "unsupported complex form was not rejected:\n${stdout}${stderr}")
+endif()
+file(WRITE "${BINARY_DIR}/complex-long-double.c" [=[
+long double _Complex z;
+long double real_part(void) { return __real__ z; }
+]=])
+execute_process(
+  COMMAND "${NYC}" -O2 -c "${BINARY_DIR}/complex-long-double.c"
+          -o "${BINARY_DIR}/complex-long-double.o"
+  RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+if(status EQUAL 0 OR
+   NOT stderr MATCHES "requires a double or float complex object")
+  message(FATAL_ERROR
+    "long double complex component was not rejected:\n${stdout}${stderr}")
+endif()
+
+# Cross-compiler ABI: NYC-compiled and host-compiled counterparts must
+# interoperate in both directions for mixed INTEGER/SSE, SSE/SSE, and
+# MEMORY-class (sret) aggregate returns. Compiling both sides with NYC hides
+# a wrong but self-consistent convention, so the host compiler is the oracle.
+file(WRITE "${BINARY_DIR}/abi-cross-defs.c" [=[
+struct MI { long i; double d; };
+struct MM { double a, b; };
+struct BIG { long a, b, c; double d; };
+struct MI f_mi(struct MI v) { v.i += 1; v.d *= 2; return v; }
+struct MM f_mm(struct MM v) { v.a += v.b; v.b -= 1; return v; }
+struct BIG f_big(struct BIG v) { v.a += 1; v.d += 2; return v; }
+]=])
+file(WRITE "${BINARY_DIR}/abi-cross-main.c" [=[
+#include <stdio.h>
+struct MI { long i; double d; };
+struct MM { double a, b; };
+struct BIG { long a, b, c; double d; };
+struct MI f_mi(struct MI v);
+struct MM f_mm(struct MM v);
+struct BIG f_big(struct BIG v);
+int main(void) {
+  struct MI a = f_mi((struct MI){3, 1.5});
+  struct MM b = f_mm((struct MM){2.5, 4.0});
+  struct BIG c = f_big((struct BIG){1, 2, 3, 4.5});
+  printf("%ld %g | %g %g | %ld %ld %ld %g\n",
+         a.i, a.d, b.a, b.b, c.a, c.b, c.c, c.d);
+  return 0;
+}
+]=])
+set(abi_cross_expected "4 3 | 6.5 3 | 2 2 3 6.5\n")
+nyc_execute_ok(
+  [=[cross ABI: NYC callees compilation failed\n${stdout}${stderr}]=]
+  COMMAND "${NYC}" -O2 -c "${BINARY_DIR}/abi-cross-defs.c"
+          -o "${BINARY_DIR}/abi-cross-defs-nyc.o"
+)
+nyc_execute_ok(
+  [=[cross ABI: host caller compilation failed\n${stdout}${stderr}]=]
+  COMMAND "${CC}" -O2 -c "${BINARY_DIR}/abi-cross-main.c"
+          -o "${BINARY_DIR}/abi-cross-main-cc.o"
+)
+nyc_execute_ok(
+  [=[cross ABI: NYC callee link failed\n${stdout}${stderr}]=]
+  COMMAND "${CC}" "${BINARY_DIR}/abi-cross-defs-nyc.o"
+          "${BINARY_DIR}/abi-cross-main-cc.o"
+          -o "${BINARY_DIR}/abi-cross-nyc-callee"
+)
+execute_process(
+  COMMAND "${BINARY_DIR}/abi-cross-nyc-callee"
+  RESULT_VARIABLE abi_callee_status OUTPUT_VARIABLE abi_callee_stdout
+  ERROR_VARIABLE abi_callee_stderr)
+if(NOT abi_callee_status EQUAL 0 OR
+   NOT abi_callee_stdout STREQUAL abi_cross_expected)
+  message(FATAL_ERROR
+    "cross ABI: NYC callees\nexpected: ${abi_cross_expected}actual:\n${abi_callee_stdout}${abi_callee_stderr}")
+endif()
+nyc_execute_ok(
+  [=[cross ABI: host callees compilation failed\n${stdout}${stderr}]=]
+  COMMAND "${CC}" -O2 -c "${BINARY_DIR}/abi-cross-defs.c"
+          -o "${BINARY_DIR}/abi-cross-defs-cc.o"
+)
+nyc_execute_ok(
+  [=[cross ABI: NYC caller compilation failed\n${stdout}${stderr}]=]
+  COMMAND "${NYC}" -O2 -c "${BINARY_DIR}/abi-cross-main.c"
+          -o "${BINARY_DIR}/abi-cross-main-nyc.o"
+)
+nyc_execute_ok(
+  [=[cross ABI: NYC caller link failed\n${stdout}${stderr}]=]
+  COMMAND "${CC}" "${BINARY_DIR}/abi-cross-defs-cc.o"
+          "${BINARY_DIR}/abi-cross-main-nyc.o"
+          -o "${BINARY_DIR}/abi-cross-nyc-caller"
+)
+execute_process(
+  COMMAND "${BINARY_DIR}/abi-cross-nyc-caller"
+  RESULT_VARIABLE abi_caller_status OUTPUT_VARIABLE abi_caller_stdout
+  ERROR_VARIABLE abi_caller_stderr)
+if(NOT abi_caller_status EQUAL 0 OR
+   NOT abi_caller_stdout STREQUAL abi_cross_expected)
+  message(FATAL_ERROR
+    "cross ABI: NYC caller\nexpected: ${abi_cross_expected}actual:\n${abi_caller_stdout}${abi_caller_stderr}")
+endif()
+
+# SysV aggregate/variadic boundary audit: mixed integer/SSE classes, hidden
+# sret, stack aggregates, register-bank rollback, and fixed aggregate named
+# arguments before va_start.
+file(WRITE "${BINARY_DIR}/sysv-boundary.c" [=[
+#include <stdarg.h>
+#include <stdio.h>
+struct MI { long i; double d; };
+struct MM { double a, b; };
+struct II { long a, b; };
+struct BIG { long a, b, c; double d; };
+struct MI f_mi(struct MI v) { v.i += 1; v.d *= 2; return v; }
+struct MM f_mm(struct MM v) { v.a += v.b; v.b -= 1; return v; }
+struct II f_ii(struct II v) { v.a += v.b; v.b *= 3; return v; }
+struct BIG f_big(struct BIG v) { v.a += 1; v.d += 2; return v; }
+double spill(int a, int b, int c, int d, int e, struct MI m, struct MM n,
+             struct II o, long p) {
+  return a + b + c + d + e + m.i + m.d + n.a + n.b + o.a + o.b + p;
+}
+double stacked(int a, int b, int c, int d, int e, int f, int g,
+               struct II h, struct MM i, struct MI j) {
+  return a + b + c + d + e + f + g + h.a + h.b + i.a + i.b + j.i + j.d;
+}
+double va_after(struct MI fixed, int n, ...) {
+  va_list ap; va_start(ap, n);
+  double s = fixed.i + fixed.d;
+  for (int k = 0; k < n; ++k) s += va_arg(ap, double);
+  va_end(ap); return s;
+}
+double va_scalars(int a, double b, int c, double d, int n, ...) {
+  va_list ap; va_start(ap, n);
+  double s = a + b + c + d;
+  for (int k = 0; k < n; ++k) { s += va_arg(ap, int); s += va_arg(ap, double); }
+  va_end(ap); return s;
+}
+int main(void) {
+  struct MI mi = f_mi((struct MI){3, 1.5});
+  struct MM mm = f_mm((struct MM){2.5, 4.0});
+  struct II ii = f_ii((struct II){7, 5});
+  struct BIG bg = f_big((struct BIG){1, 2, 3, 4.5});
+  printf("%ld %g\n", mi.i, mi.d);
+  printf("%g %g\n", mm.a, mm.b);
+  printf("%ld %ld\n", ii.a, ii.b);
+  printf("%ld %ld %ld %g\n", bg.a, bg.b, bg.c, bg.d);
+  printf("%g\n", spill(1,2,3,4,5,(struct MI){6,0.5},(struct MM){1.5,2.5},(struct II){8,9},10));
+  printf("%g\n", stacked(1,2,3,4,5,6,7,(struct II){8,9},(struct MM){1.5,2.5},(struct MI){6,0.5}));
+  printf("%g\n", va_after((struct MI){4,0.25}, 2, 1.5, 2.5));
+  printf("%g\n", va_scalars(1,2.5,3,4.5,2, 5,6.5,7,8.5));
+  return 0;
+}
+]=])
+nyc_execute_ok(
+  [=[SysV boundary object compilation failed\n${stdout}${stderr}]=]
+  COMMAND "${NYC}" -O2 -c "${BINARY_DIR}/sysv-boundary.c"
+          -o "${BINARY_DIR}/sysv-boundary.o"
+)
+nyc_execute_ok(
+  [=[SysV boundary link failed\n${stdout}${stderr}]=]
+  COMMAND "${CC}" "${BINARY_DIR}/sysv-boundary.o"
+          -o "${BINARY_DIR}/sysv-boundary"
+)
+execute_process(
+  COMMAND "${BINARY_DIR}/sysv-boundary"
+  RESULT_VARIABLE sysv_status OUTPUT_VARIABLE sysv_stdout
+  ERROR_VARIABLE sysv_stderr)
+set(sysv_expected "4 3\n6.5 3\n12 15\n2 2 3 6.5\n52.5\n55.5\n8.25\n38\n")
+if(NOT sysv_status EQUAL 0 OR NOT sysv_stdout STREQUAL sysv_expected)
+  message(FATAL_ERROR
+    "SysV aggregate/variadic boundary mismatch (${sysv_status})\n"
+    "expected:\n${sysv_expected}\nactual:\n${sysv_stdout}${sysv_stderr}")
+endif()
+
+# Complex type layout: sizes and alignments must match the host ABI.
+file(WRITE "${BINARY_DIR}/complex-layout.c" [=[
+#include <stdio.h>
+struct S { double _Complex z; };
+struct F { float _Complex z; };
+struct M { char c; double _Complex z; };
+struct L { long double _Complex z; };
+int main(void) {
+  printf("%zu %zu %zu %zu %zu %zu %zu %zu %zu %zu\n",
+         sizeof(double _Complex), sizeof(float _Complex),
+         _Alignof(double _Complex), _Alignof(float _Complex),
+         sizeof(struct S), sizeof(struct F), sizeof(struct M),
+         sizeof(long double _Complex), _Alignof(long double _Complex),
+         sizeof(struct L));
+  double _Complex g;
+  __real__ g = 1.5;
+  __imag__ g = -2.5;
+  printf("%g %g\n", __real__ g, __imag__ g);
+  return 0;
+}
+]=])
+nyc_execute_ok(
+  [=[complex layout object compilation failed\n${stdout}${stderr}]=]
+  COMMAND "${NYC}" -O2 -c "${BINARY_DIR}/complex-layout.c"
+          -o "${BINARY_DIR}/complex-layout.o"
+)
+nyc_execute_ok(
+  [=[complex layout link failed\n${stdout}${stderr}]=]
+  COMMAND "${CC}" "${BINARY_DIR}/complex-layout.o"
+          -o "${BINARY_DIR}/complex-layout"
+)
+execute_process(
+  COMMAND "${BINARY_DIR}/complex-layout"
+  RESULT_VARIABLE complex_status OUTPUT_VARIABLE complex_stdout
+  ERROR_VARIABLE complex_stderr)
+if(NOT complex_status EQUAL 0 OR
+   NOT complex_stdout STREQUAL "16 8 8 4 16 8 24 32 16 32\n1.5 -2.5\n")
+  message(FATAL_ERROR
+    "complex sizeof/_Alignof mismatch (${complex_status})\n"
+    "expected: 16 8 8 4 16 8 24 32 16 32\n1.5 -2.5\nactual:\n${complex_stdout}${complex_stderr}")
+endif()
+
 file(READ "${BINARY_DIR}/zero-bound-aggregate-global.s"
      zero_bound_aggregate_assembly)
 if(NOT zero_bound_aggregate_assembly MATCHES
@@ -1416,17 +2207,96 @@ if(status EQUAL 0 OR
     "nyc did not reject unsupported full control-flow protection\n${stdout}${stderr}")
 endif()
 set(cf_protection_source "${NY_C_CORPUS_cf-protection-branch.c}")
-execute_process(
-  COMMAND "${NYC}" -fcf-protection=branch -c "${cf_protection_source}"
-          -o "${BINARY_DIR}/cf-protection-branch.o"
-  RESULT_VARIABLE status
-  OUTPUT_VARIABLE stdout
-  ERROR_VARIABLE stderr
+file(WRITE "${BINARY_DIR}/ibt-target.c" [=[
+int ibt_target(void) { volatile int v = 5; return v; }
+]=])
+file(WRITE "${BINARY_DIR}/ibt-main.c" [=[
+#include <stdio.h>
+int ibt_target(void);
+int main(void) {
+  unsigned char *p = (unsigned char *)(void *)ibt_target;
+  printf("%d %d %d %d %d\n", p[0], p[1], p[2], p[3], ibt_target());
+  return 0;
+}
+]=])
+nyc_execute_ok(
+  [=[IBT object compilation failed\n${stdout}${stderr}]=]
+  COMMAND "${NYC}" -O0 -fcf-protection=branch -c "${BINARY_DIR}/ibt-target.c"
+          -o "${BINARY_DIR}/ibt-target.o"
 )
-if(status EQUAL 0 OR
-   NOT stderr MATCHES "-fcf-protection=branch currently requires -S output")
+nyc_execute_ok(
+  [=[IBT caller compilation failed\n${stdout}${stderr}]=]
+  COMMAND "${CC}" -c "${BINARY_DIR}/ibt-main.c"
+          -o "${BINARY_DIR}/ibt-main.o"
+)
+nyc_execute_ok(
+  [=[IBT object link failed\n${stdout}${stderr}]=]
+  COMMAND "${CC}" "${BINARY_DIR}/ibt-target.o" "${BINARY_DIR}/ibt-main.o"
+          -o "${BINARY_DIR}/ibt-object"
+)
+execute_process(
+  COMMAND "${BINARY_DIR}/ibt-object"
+  RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+if(NOT status EQUAL 0 OR NOT stdout STREQUAL "243 15 30 250 5\n")
   message(FATAL_ERROR
-    "nyc silently accepted branch protection without protected object emission\n${stdout}${stderr}")
+    "IBT object entry is missing its endbr64 landing pad: ${stdout}${stderr}")
+endif()
+set(rethunk_source "${NY_C_CORPUS_cf-protection-branch.c}")
+file(WRITE "${BINARY_DIR}/return-thunk-target.c" [=[
+int rethunk_target(void) { volatile int v = 7; return v; }
+]=])
+file(WRITE "${BINARY_DIR}/return-thunk-stub.s" [=[
+	.text
+	.globl __x86_return_thunk
+	.type __x86_return_thunk,@function
+__x86_return_thunk:
+	ret
+	.size __x86_return_thunk, .-__x86_return_thunk
+]=])
+file(WRITE "${BINARY_DIR}/return-thunk-main.c" [=[
+#include <stdio.h>
+int rethunk_target(void);
+int main(void) { printf("%d\n", rethunk_target()); return 0; }
+]=])
+nyc_execute_ok(
+  [=[return-thunk object compilation failed\n${stdout}${stderr}]=]
+  COMMAND "${NYC}" -O0 -mfunction-return=thunk-extern -c
+          "${BINARY_DIR}/return-thunk-target.c"
+          -o "${BINARY_DIR}/return-thunk-target.o"
+)
+nyc_execute_ok(
+  [=[return-thunk stub assembly failed\n${stdout}${stderr}]=]
+  COMMAND "${CC}" -c "${BINARY_DIR}/return-thunk-stub.s"
+          -o "${BINARY_DIR}/return-thunk-stub.o"
+)
+nyc_execute_ok(
+  [=[return-thunk main compilation failed\n${stdout}${stderr}]=]
+  COMMAND "${CC}" -c "${BINARY_DIR}/return-thunk-main.c"
+          -o "${BINARY_DIR}/return-thunk-main.o"
+)
+nyc_execute_ok(
+  [=[return-thunk link failed\n${stdout}${stderr}]=]
+  COMMAND "${CC}" "${BINARY_DIR}/return-thunk-target.o"
+          "${BINARY_DIR}/return-thunk-stub.o"
+          "${BINARY_DIR}/return-thunk-main.o" -o "${BINARY_DIR}/return-thunk"
+)
+execute_process(
+  COMMAND "${BINARY_DIR}/return-thunk"
+  RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+if(NOT status EQUAL 0 OR NOT stdout STREQUAL "7\n")
+  message(FATAL_ERROR
+    "return-thunk object runtime failed: ${stdout}${stderr}")
+endif()
+nyc_execute_ok(
+  [=[nyc could not emit return-thunk C assembly\n${stdout}${stderr}]=]
+  COMMAND "${NYC}" -O0 -mfunction-return=thunk-extern -S "${rethunk_source}"
+            -o "${BINARY_DIR}/return-thunk.s"
+)
+file(READ "${BINARY_DIR}/return-thunk.s" rethunk_assembly)
+string(FIND "${rethunk_assembly}" "jmp\t__x86_return_thunk" rethunk_offset)
+if(rethunk_offset EQUAL -1)
+  message(FATAL_ERROR
+    "NYC accepted -mfunction-return=thunk-extern but emitted no __x86_return_thunk")
 endif()
 nyc_execute_ok(
   [=[nyc could not emit branch-protected C functions\n${stdout}${stderr}]=]
@@ -1538,12 +2408,16 @@ execute_process(
   OUTPUT_VARIABLE stdout
   ERROR_VARIABLE stderr
 )
+# i386 whole-unit C now reaches GNU as, so the old "requires x86-64 ELF"
+# driver gate no longer applies. This fixture deliberately uses alternative
+# inline asm that the i386 text emitter does not encode, so the build must
+# still fail at that boundary rather than silently dropping the statement.
 if(status EQUAL 0 OR
    NOT "${stdout}${stderr}" MATCHES
-       "whole-unit output currently requires x86-64 ELF, or i386 GNU assembly output" OR
+       "(i386 assembly emission failed|unsupported inline assembly)" OR
    "${stdout}${stderr}" MATCHES "_Static_assert condition is false")
   message(FATAL_ERROR
-    "nyc i386 data-model assertions failed before the known emitter boundary\n${stdout}${stderr}")
+    "nyc i386 data-model assertions failed before the i386 asm emitter boundary\n${stdout}${stderr}")
 endif()
 if(NYC_AS_EXECUTABLE)
   set(i386_vdso_ops_source "${NY_C_CORPUS_i386-vdso-ops.c}")

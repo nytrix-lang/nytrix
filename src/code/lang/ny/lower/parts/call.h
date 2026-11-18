@@ -52,7 +52,6 @@ static bool ny_native_type_name_is_128bit_int(const char *name) {
   return leaf && (strcmp(leaf, "i128") == 0 || strcmp(leaf, "u128") == 0);
 }
 
-
 /*
  * Semantic-first early-leaf resolution.  The intrinsic groups below decide
  * raw vs dynamic by the call's canonical callee when the frontend resolved
@@ -1774,7 +1773,6 @@ static bool nyr_proves_env_range(void *ctx, const char *name, int64_t *out_lo,
   *out_hi = hi;
   return true;
 }
-
 
 /*
  * Canonical proof type of an evidence expression on the native path: a
@@ -8368,38 +8366,38 @@ ordinary_call:
       int m32 = nyr_emit_const(b, (int64_t)0x00000000ffffffffLL);
       if (m63 < 0 || m62 < 0 || m60 < 0 || m56 < 0 || m48 < 0 || m32 < 0)
         return -1;
-#define NY_BREV_STEP(xin, sh, msk, cm)                                         \
-  do {                                                                         \
-    int _r = nyr_ir_emit(                                                      \
-        &b->nyir,                                                              \
-        (nyr_inst_t){.op = NYIR_SAR_I64, .dst = -1, .a = (xin), .b = (sh)});   \
-    if (_r < 0)                                                                \
-      return -1;                                                               \
-    _r = nyr_ir_emit(                                                          \
-        &b->nyir,                                                              \
-        (nyr_inst_t){.op = NYIR_AND_I64, .dst = -1, .a = _r, .b = (msk)});     \
-    if (_r < 0)                                                                \
-      return -1;                                                               \
-    _r = nyr_ir_emit(                                                          \
-        &b->nyir,                                                              \
-        (nyr_inst_t){.op = NYIR_AND_I64, .dst = -1, .a = _r, .b = (cm)});      \
-    if (_r < 0)                                                                \
-      return -1;                                                               \
-    int _l = nyr_ir_emit(                                                      \
-        &b->nyir,                                                              \
-        (nyr_inst_t){.op = NYIR_AND_I64, .dst = -1, .a = (xin), .b = (cm)});   \
-    if (_l < 0)                                                                \
-      return -1;                                                               \
-    _l = nyr_ir_emit(                                                          \
-        &b->nyir,                                                              \
-        (nyr_inst_t){.op = NYIR_SHL_I64, .dst = -1, .a = _l, .b = (sh)});      \
-    if (_l < 0)                                                                \
-      return -1;                                                               \
-    (xin) = nyr_ir_emit(                                                       \
-        &b->nyir,                                                              \
-        (nyr_inst_t){.op = NYIR_OR_I64, .dst = -1, .a = _r, .b = _l});         \
-    if ((xin) < 0)                                                             \
-      return -1;                                                               \
+#define NY_BREV_STEP(xin, sh, msk, cm)                                       \
+  do {                                                                       \
+    int _r = nyr_ir_emit(                                                    \
+        &b->nyir,                                                            \
+        (nyr_inst_t){.op = NYIR_SAR_I64, .dst = -1, .a = (xin), .b = (sh)}); \
+    if (_r < 0)                                                              \
+      return -1;                                                             \
+    _r = nyr_ir_emit(                                                        \
+        &b->nyir,                                                            \
+        (nyr_inst_t){.op = NYIR_AND_I64, .dst = -1, .a = _r, .b = (msk)});   \
+    if (_r < 0)                                                              \
+      return -1;                                                             \
+    _r = nyr_ir_emit(                                                        \
+        &b->nyir,                                                            \
+        (nyr_inst_t){.op = NYIR_AND_I64, .dst = -1, .a = _r, .b = (cm)});    \
+    if (_r < 0)                                                              \
+      return -1;                                                             \
+    int _l = nyr_ir_emit(                                                    \
+        &b->nyir,                                                            \
+        (nyr_inst_t){.op = NYIR_AND_I64, .dst = -1, .a = (xin), .b = (cm)}); \
+    if (_l < 0)                                                              \
+      return -1;                                                             \
+    _l = nyr_ir_emit(                                                        \
+        &b->nyir,                                                            \
+        (nyr_inst_t){.op = NYIR_SHL_I64, .dst = -1, .a = _l, .b = (sh)});    \
+    if (_l < 0)                                                              \
+      return -1;                                                             \
+    (xin) = nyr_ir_emit(                                                     \
+        &b->nyir,                                                            \
+        (nyr_inst_t){.op = NYIR_OR_I64, .dst = -1, .a = _r, .b = _l});       \
+    if ((xin) < 0)                                                           \
+      return -1;                                                             \
   } while (0)
       NY_BREV_STEP(x, one, m63, c1);
       NY_BREV_STEP(x, two, m62, c2);

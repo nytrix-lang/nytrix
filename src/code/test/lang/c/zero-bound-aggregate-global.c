@@ -1,3 +1,6 @@
+/*
+ * C front-end regression test: zero bound aggregate global.
+ */
 struct zero_bound_range {
   unsigned long start;
   unsigned long end;

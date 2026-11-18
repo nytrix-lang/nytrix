@@ -22,7 +22,11 @@ enum Vec<A, n> {
 
 ;; Constructors: the result's length is computed from the argument's.
 fn vnil() Vec<int, 0> { Vec.Nil }
-fn vcons{int n}(int h, Vec<int, n> t) Vec<int, n + 1> { Vec.Cons(h, t) }
+
+fn vcons{int n}(int h, Vec<int, n> t) Vec<int, n + 1> {
+   "Prepends `h` to `t`; the result is one longer."
+   Vec.Cons(h, t)
+}
 
 ;; The length is a static index, filled in at the call.
 fn vlength{int n}(Vec<int, n> xs) int { n }
@@ -35,6 +39,7 @@ fn vhead{int n}(Vec<int, n + 1> xs) int {
 }
 
 fn vtail{int n}(Vec<int, n + 1> xs) Vec<int, n> {
+   "Returns everything after the first element of a non-empty vector."
    match xs {
       Vec.Cons(h, t) -> t
    }
@@ -61,6 +66,7 @@ fn vto_list{int n}(Vec<int, n> xs) list {
 }
 
 fn vsum{int n}(Vec<int, n> xs) int {
+   "Returns the sum of the elements."
    mut total = 0
    mut cur = xs
    mut go = true
@@ -78,4 +84,8 @@ fn vsum{int n}(Vec<int, n> xs) int {
 
 ;; A bounded index knows its bound statically.
 fn fin_bound{int n}(Fin<n> i) int { n }
-fn fin_value{int n}(Fin<n> i) int { i }
+
+fn fin_value{int n}(Fin<n> i) int {
+   "Returns the index as a plain int."
+   i
+}

@@ -1,0 +1,24 @@
+shape string_unicode_escapes {
+  family "runtime/execution"
+  generator "embedded"
+  features [ny strings unicode escapes]
+  ;; \uXXXX, \UXXXXXXXX and \u{...} encode one code point as UTF-8; malformed
+  ;; or out-of-range escapes keep their letter. They used to drop the
+  ;; backslash and keep the hex digits ("café".len was 8).
+  template ny-test-case
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit -O0"
+  expect compile_and_run
+  expect_message "UNICODE-ESCAPES-OK"
+  source ny <<'NY'
+use core
+assert("café".len == 5, "two-byte escape")
+assert("\u{4e2d}".len == 3, "braced three-byte escape")
+assert("x\U0001F600".len == 5, "eight-digit escape")
+assert("A\u{42}\U00000043" == "ABC", "ascii escapes")
+assert(load8("é", 0) == 195 && load8("é", 1) == 169, "utf-8 bytes")
+assert("\uZZ" == "uZZ", "malformed escape keeps its letter")
+assert("\u{110000}".len == 9, "out of range escape is literal")
+assert("a\\u0041".len == 7, "escaped backslash")
+print("UNICODE-ESCAPES-OK")
+NY
+}

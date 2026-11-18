@@ -1,3 +1,6 @@
+/*
+ * Host-side C counterpart for the i386 varargs test.
+ */
 struct pair {
   int first, second;
 };

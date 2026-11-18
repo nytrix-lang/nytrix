@@ -6,6 +6,7 @@
  * exactly one join PHI, then moves both bounded arms before SELECT_I64.
  */
 #include "code/backend/passes/util.h"
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -715,6 +716,42 @@ static bool ifc_rewrite_store_only(nyr_func_t *f, size_t branch,
   return true;
 }
 
+/*
+ * Raw-i64 provenance of an unclassified value: its definition is raw, or it
+ * is a copy/PHI (a running max carried by the loop header PHI) whose every
+ * source is raw. A cycle back to the PHI being converted is consistent.
+ */
+static bool ifc_value_raw(const nyr_func_t *f, const int *defs, int v,
+                          int root, unsigned depth) {
+  /* Only a cycle reached through another PHI may close on the root; an arm
+   * value that is the join PHI itself would make the SELECT read its own
+   * result. */
+  if (v == root)
+    return depth > 0;
+  if (!f || !defs || v < 0 || v >= f->next_value || defs[v] < 0 ||
+      depth > 6)
+    return false;
+  const nyr_inst_t *def = &f->data[(size_t)defs[v]];
+  if (def->scalar_class == NYIR_SCALAR_I64_RAW)
+    return true;
+  if (def->scalar_class != NYIR_SCALAR_UNKNOWN ||
+      getenv("NYTRIX_NO_IFCONV_PHI_RAW"))
+    return false;
+  /* An unclassified i64 immediate is a raw integer constant. */
+  if (def->op == NYIR_CONST_I64 && !getenv("NYTRIX_NO_IFCONV_PHI_RAW"))
+    return true;
+  if (def->op == NYIR_COPY)
+    return ifc_value_raw(f, defs, def->a, root, depth + 1);
+  if (def->op != NYIR_PHI || !def->phi_incoming || !def->phi_incoming_len)
+    return false;
+  for (size_t k = 0; k < def->phi_incoming_len; ++k) {
+    int in = def->phi_incoming[k].value;
+    if (in != v && !ifc_value_raw(f, defs, in, root, depth + 1))
+      return false;
+  }
+  return true;
+}
+
 bool nyr_if_convert(nyr_func_t *f) {
   if (!f || f->next_value <= 0)
     return true;
@@ -769,9 +806,20 @@ bool nyr_if_convert(nyr_func_t *f) {
           f->data[(size_t)defs[br->a]].scalar_class == NYIR_SCALAR_I64_RAW;
       if (!condition_is_boolean && !raw_condition)
         continue;
-      if (false_block >= cfg.block_count || true_block == SIZE_MAX ||
-          true_block == false_block || true_block <= header ||
-          false_entry == SIZE_MAX)
+      /*
+       * Both arms empty (`if c { x = a }` lowered to two bridge blocks that
+       * only branch to the join): bridge resolution lands both on the join.
+       * The join PHI alone selects the value.
+       */
+      bool both_empty = false_block < cfg.block_count &&
+                        true_block == false_block && true_block > header &&
+                        false_entry != SIZE_MAX && true_entry != SIZE_MAX &&
+                        true_entry != false_entry &&
+                        !getenv("NYTRIX_NO_IFCONV_BOTH_EMPTY");
+      if (!both_empty &&
+          (false_block >= cfg.block_count || true_block == SIZE_MAX ||
+           true_block == false_block || true_block <= header ||
+           false_entry == SIZE_MAX))
         continue;
       size_t false_count =
           cfg.succ_offsets[false_block + 1] - cfg.succ_offsets[false_block];
@@ -787,7 +835,10 @@ bool nyr_if_convert(nyr_func_t *f) {
       size_t true_arm_block = true_block;
       bool false_empty = false, true_empty = false;
       size_t join;
-      if (true_count == 1 &&
+      if (both_empty) {
+        join = true_block;
+        false_empty = true_empty = true;
+      } else if (true_count == 1 &&
           cfg.succ_blocks[cfg.succ_offsets[true_block]] == false_block) {
         join = false_block;
         false_empty = true;
@@ -855,12 +906,22 @@ bool nyr_if_convert(nyr_func_t *f) {
          * unambiguous class; tagged values and pointers remain excluded.
          */
         bool raw_phi = phi_inst->scalar_class == NYIR_SCALAR_I64_RAW;
-        if (phi_inst->scalar_class == NYIR_SCALAR_UNKNOWN &&
-            defs[phis[i].false_value] >= 0 && defs[phis[i].true_value] >= 0)
-          raw_phi = f->data[defs[phis[i].false_value]].scalar_class ==
-                        NYIR_SCALAR_I64_RAW &&
-                    f->data[defs[phis[i].true_value]].scalar_class ==
-                        NYIR_SCALAR_I64_RAW;
+        if (phi_inst->scalar_class == NYIR_SCALAR_UNKNOWN) {
+          /*
+           * One arm must be a proven raw-i64 definition; the other may reach
+           * raw values through constants, copies and loop PHIs (a running
+           * max). Two unclassified arms can be pointers carried through PHIs
+           * and stay as branches.
+           */
+          int fv = phis[i].false_value, tv = phis[i].true_value;
+          bool f_direct = defs[fv] >= 0 &&
+                          f->data[defs[fv]].scalar_class == NYIR_SCALAR_I64_RAW;
+          bool t_direct = defs[tv] >= 0 &&
+                          f->data[defs[tv]].scalar_class == NYIR_SCALAR_I64_RAW;
+          raw_phi = (f_direct || t_direct) &&
+                    ifc_value_raw(f, defs, fv, phi_inst->dst, 0) &&
+                    ifc_value_raw(f, defs, tv, phi_inst->dst, 0);
+        }
         if (!raw_phi || types.value_f64[phis[i].false_value] ||
             types.value_f32[phis[i].false_value] ||
             types.value_f64[phis[i].true_value] ||

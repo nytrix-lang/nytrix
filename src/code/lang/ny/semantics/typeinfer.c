@@ -450,8 +450,10 @@ ny_type_t *ny_type_sigma(ny_type_arena_t *arena, const char *index_name,
   return t;
 }
 
-/* Canonical universe names carry their level as a suffix: "Type" is level 0,
- * "Type 3" is level 3. Malformed or absent suffixes fall back to level 0. */
+/*
+ * Canonical universe names carry their level as a suffix: "Type" is level 0,
+ * "Type 3" is level 3. Malformed or absent suffixes fall back to level 0.
+ */
 static unsigned ny_type_univ_level_from_name(const char *name) {
   if (!name)
     return 0;

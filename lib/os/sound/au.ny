@@ -242,7 +242,7 @@ fn _g722(any s, int code, any out, int sample, int stride) {
 
 fn _decode722(any d, int at, int size, int channels, int rate) any {
    if size <= 0 || channels <= 0 || size > 9223372036854775807 / 4 ||
-      size % channels != 0 { return 0 }
+   size % channels != 0 { return 0 }
    def out = malloc(size * 4)
    if !out { return 0 }
    mut states = []

@@ -1,3 +1,6 @@
+/*
+ * C front-end regression test: linux local static function pointer array.
+ */
 static int add_one(int value) { return value + 1; }
 static int add_two(int value) { return value + 2; }
 

@@ -305,8 +305,10 @@ static int ny_diag_code_for_fmt(diag_fmt_code_t *table, int *next_code,
   }
 }
 
-/* Total primary errors emitted in this process; used to suppress a generic
- * pipeline message when a located diagnostic already explained the failure. */
+/*
+ * Total primary errors emitted in this process; used to suppress a generic
+ * pipeline message when a located diagnostic already explained the failure.
+ */
 static int g_diag_error_total = 0;
 
 int ny_diag_error_total_count(void) { return g_diag_error_total; }

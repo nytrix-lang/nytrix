@@ -1,8 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
-  <title id="title1">Tube Trail Mesh</title>
-  <desc id="desc1">Tube Trail Mesh editor icon. Original asset id: tubetrailmesh.</desc>
-  <defs id="defs1" />
-  <g transform="translate(2.0000 2.0000) scale(1.25000)" id="g1">
-    <path d="M 3.25,1 A 1.0001,1.0001 0 0 0 2.3886719,1.4902344 c -2.05837652,3.4787161 -2.05837652,8.5408146 0,12.0195316 A 1.0001,1.0001 0 0 0 3.25,14 h 8.5 a 1.0001,1.0001 0 0 0 0.861328,-0.490234 c 2.058377,-3.478717 2.058377,-8.5408155 0,-12.0195316 A 1.0001,1.0001 0 0 0 11.75,1 Z m 0.671875,2 h 7.15625 c 1.273358,2.5775327 1.273358,6.4224673 0,9 h -7.15625 c -1.2733577,-2.5775327 -1.2733577,-6.4224673 0,-9 z M 4,6.5 v 2 h 7 v -2 z" id="path1" fill="#c6c6ca" />
-  </g>
-</svg>

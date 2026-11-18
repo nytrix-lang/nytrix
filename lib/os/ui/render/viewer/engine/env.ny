@@ -115,7 +115,7 @@ mut any _sky_prefetch_path = ""
 mut any _sky_prefetch_img = nil
 
 fn prefetch_skybox_image(any source="") bool {
-   "Decodes the default (or `source`) EXR sky for a later upload; safe on a worker thread."
+   "Decodes the default(or `source`) EXR sky for a later upload; safe on a worker thread."
    if skybox_tex_id >= 0 || is_dict(_sky_prefetch_img) { return true }
    def source_arg = ui_assets.skybox_source_arg(source)
    if ui_assets.skybox_source_is_off(source_arg) || ui_assets.skybox_source_is_generated(source_arg) { return false }

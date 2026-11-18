@@ -1,23 +1,25 @@
-/* Exercise memory arithmetic across the 32-bit carry and borrow boundary. */
+/*
+ * Exercise memory arithmetic across the 32-bit carry and borrow boundary.
+ */
 typedef unsigned int u32;
 typedef unsigned long long u64;
-#define OP(name, type, suffix, operation) \
+#define OP(name, type, suffix, operation)                     \
   type name##suffix(type a, type b) { return a operation b; }
-#define OPS(type, suffix) \
+#define OPS(type, suffix)  \
   OP(add, type, suffix, +) \
   OP(sub, type, suffix, -) \
   OP(and, type, suffix, &) \
-  OP(or, type, suffix, |) \
+  OP(or, type, suffix, |)  \
   OP(xor, type, suffix, ^)
 OPS(u32, 32)
 OPS(u64, 64)
 OP(mul, u32, 32, *)
 int signed_less(int a, int b) { return a < b; }
 int unsigned_less(u32 a, u32 b) { return a < b; }
-#define PROMOTED(bits, type) \
-  int promoted##bits(u64 a, u64 b) { \
-    type x = (type)a, y = (type)b; \
-    return (x < y) | ((x <= y) << 1) | ((x > y) << 2) | \
+#define PROMOTED(bits, type)                                    \
+  int promoted##bits(u64 a, u64 b) {                            \
+    type x = (type)a, y = (type)b;                              \
+    return (x < y) | ((x <= y) << 1) | ((x > y) << 2) |         \
            ((x >= y) << 3) | ((x == y) << 4) | ((x != y) << 5); \
   }
 PROMOTED(8, signed char)

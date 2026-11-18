@@ -92,7 +92,8 @@ static bool nyr_op_v256_i64(nyr_op_t op) {
   return op == NYIR_VEC8_LOAD_I64 || op == NYIR_VEC8_SET1_I64 ||
          op == NYIR_VEC8_ADD_I64 || op == NYIR_VEC8_SUB_I64 ||
          op == NYIR_VEC8_AND_I64 || op == NYIR_VEC8_OR_I64 ||
-         op == NYIR_VEC8_XOR_I64 || op == NYIR_VEC8_SAR_I64 ||
+         op == NYIR_VEC8_XOR_I64 || op == NYIR_VEC8_MUL_I64 ||
+         op == NYIR_VEC8_SAR_I64 ||
          op == NYIR_VEC8_SHR_I64;
 }
 
@@ -141,6 +142,227 @@ void nyr_type_map_free(nyr_type_map_t *map) {
   *map = (nyr_type_map_t){0};
 }
 
+static bool nyr_type_has_typed_values(const nyr_func_t *nyir,
+                                      size_t param_count) {
+  bool has_typed_values = false;
+  for (size_t i = 0; i < param_count; ++i)
+    has_typed_values |= nyir->param_types[i] == NYIR_PARAM_F64 ||
+                        nyir->param_types[i] == NYIR_PARAM_F32;
+  for (size_t i = 0; i < nyir->len && !has_typed_values; ++i) {
+    const nyr_inst_t *in = &nyir->data[i];
+    has_typed_values =
+        in->scalar_class == NYIR_SCALAR_F64 ||
+        in->scalar_class == NYIR_SCALAR_F32 || nyr_op_is_f64(in->op) ||
+        nyr_op_is_f32(in->op) || nyr_op_v128_i64(in->op) ||
+        nyr_op_v256_i64(in->op) || nyr_op_v256_f64(in->op) ||
+        nyr_op_v128_f32(in->op) ||
+        (in->op == NYIR_CAPTURE_RET && in->imm >= 10 && in->imm <= 13);
+  }
+  return has_typed_values;
+}
+
+/*
+ * Union-find over value/local nodes plus the class bits of every root: the
+ * part of the type map that answers a query. nyr_type_map_init scatters it
+ * into flag arrays; nyr_type_roots_* answer single values from it directly.
+ */
+static void nyr_type_roots_fill(size_t value_count, const nyr_func_t *nyir,
+                                size_t local_count, size_t param_count,
+                                size_t *parents, unsigned char *root_types) {
+  /*
+   * Copies and unclassified local loads/stores preserve type. An explicit
+   * scalar_class on a local access is the representation contract for that
+   * value; do not let a different store on another control-flow path widen
+   * that value through the shared slot. Collapse compatible constraints once
+   * so long chains remain near-linear instead of rescanning the function.
+   */
+  for (size_t i = 0; i < nyir->len; ++i) {
+    const nyr_inst_t *in = &nyir->data[i];
+    if (in->op == NYIR_COPY && in->dst >= 0 && in->a >= 0 &&
+        (size_t)in->dst < value_count && (size_t)in->a < value_count)
+      nyr_type_union(parents, (size_t)in->dst, (size_t)in->a);
+    if (in->op == NYIR_PHI && in->dst >= 0 &&
+        (size_t)in->dst < value_count) {
+      for (size_t k = 0; k < in->phi_incoming_len; ++k) {
+        int incoming = in->phi_incoming[k].value;
+        if (incoming >= 0 && (size_t)incoming < value_count)
+          nyr_type_union(parents, (size_t)in->dst, (size_t)incoming);
+      }
+    }
+    if (in->op == NYIR_LOAD_LOCAL && in->scalar_class == NYIR_SCALAR_UNKNOWN &&
+        in->dst >= 0 && in->imm >= 0 && (size_t)in->dst < value_count &&
+        (size_t)in->imm < local_count)
+      nyr_type_union(parents, (size_t)in->dst,
+                     value_count + (size_t)in->imm);
+    if (in->op == NYIR_STORE_LOCAL && in->scalar_class == NYIR_SCALAR_UNKNOWN &&
+        in->a >= 0 && in->imm >= 0 && (size_t)in->a < value_count &&
+        (size_t)in->imm < local_count)
+      nyr_type_union(parents, (size_t)in->a,
+                     value_count + (size_t)in->imm);
+  }
+
+  for (size_t i = 0; i < param_count; ++i) {
+    size_t root = nyr_type_root(parents, value_count + i);
+    if (nyir->param_types[i] == NYIR_PARAM_F64)
+      root_types[root] |= 1u;
+    else if (nyir->param_types[i] == NYIR_PARAM_F32)
+      root_types[root] |= 2u;
+  }
+
+  for (size_t i = 0; i < nyir->len; ++i) {
+    const nyr_inst_t *in = &nyir->data[i];
+    bool f64_result =
+        in->scalar_class == NYIR_SCALAR_F64 || nyr_op_is_f64(in->op);
+    bool f32_result =
+        in->scalar_class == NYIR_SCALAR_F32 || nyr_op_is_f32(in->op);
+    /*
+     * A classified store declares the slot's carrier on that path. Seed the
+     * local root with it so an unclassified load in a merge block (where the
+     * reaching store lives in a predecessor) still observes the float fact.
+     * Mixed-class slots surface through the store/load ABI checks instead.
+     */
+    if (in->op == NYIR_STORE_LOCAL && in->a >= 0 && in->imm >= 0 &&
+        (size_t)in->imm < local_count) {
+      size_t local_root =
+          nyr_type_root(parents, value_count + (size_t)in->imm);
+      if (in->scalar_class == NYIR_SCALAR_F64)
+        root_types[local_root] |= 1u;
+      else if (in->scalar_class == NYIR_SCALAR_F32)
+        root_types[local_root] |= 2u;
+    }
+    bool v128_i64_result =
+        nyr_op_v128_i64(in->op) ||
+        (in->op == NYIR_CAPTURE_RET && in->imm >= 10 && in->imm <= 13);
+    bool v256_i64_result = nyr_op_v256_i64(in->op);
+    bool v256_f64_result = nyr_op_v256_f64(in->op);
+    bool v128_f32_result = nyr_op_v128_f32(in->op);
+    if (in->dst >= 0 && (size_t)in->dst < value_count) {
+      size_t root = nyr_type_root(parents, (size_t)in->dst);
+      if (f64_result)
+        root_types[root] |= 1u;
+      if (f32_result)
+        root_types[root] |= 2u;
+      if (v128_i64_result)
+        root_types[root] |= 4u;
+      if (v256_i64_result)
+        root_types[root] |= 4u | 32u;
+      if (v256_f64_result)
+        root_types[root] |= 64u;
+      if (v128_f32_result)
+        root_types[root] |= 16u;
+    }
+    /*
+     * RET's scalar_class describes the ABI contract. It must not be fed back
+     * into the producer's type facts, or a mismatched annotation would make
+     * the producer appear to have both float widths.
+     */
+    bool f64_operands = in->op == NYIR_ADD_F64 || in->op == NYIR_SUB_F64 ||
+                        in->op == NYIR_MUL_F64 || in->op == NYIR_DIV_F64 ||
+                        in->op == NYIR_CMP_F64 || in->op == NYIR_F64_TO_F32 ||
+                        in->op == NYIR_SQRT_F64 || in->op == NYIR_SIN_F64 ||
+                        in->op == NYIR_COS_F64;
+    bool f32_operands = in->op == NYIR_ADD_F32 || in->op == NYIR_SUB_F32 ||
+                        in->op == NYIR_MUL_F32 || in->op == NYIR_DIV_F32 ||
+                        in->op == NYIR_CMP_F32 || in->op == NYIR_F32_TO_F64;
+    bool v128_i64_ops =
+        in->op == NYIR_VEC4_ADD_I64 || in->op == NYIR_VEC4_SUB_I64 ||
+        in->op == NYIR_VEC4_AND_I64 || in->op == NYIR_VEC4_OR_I64 ||
+        in->op == NYIR_VEC4_XOR_I64 || in->op == NYIR_VEC4_SHL_I64 ||
+        in->op == NYIR_VEC4_SAR_I64;
+    bool v256_i64_ops =
+        in->op == NYIR_VEC8_ADD_I64 || in->op == NYIR_VEC8_SUB_I64 ||
+        in->op == NYIR_VEC8_AND_I64 || in->op == NYIR_VEC8_OR_I64 ||
+        in->op == NYIR_VEC8_XOR_I64 || in->op == NYIR_VEC8_MUL_I64 ||
+        in->op == NYIR_VEC8_SAR_I64 ||
+        in->op == NYIR_VEC8_SHR_I64;
+    bool v256_f64_ops =
+        in->op == NYIR_VEC4_ADD_F64 || in->op == NYIR_VEC4_SUB_F64 ||
+        in->op == NYIR_VEC4_MUL_F64 || in->op == NYIR_VEC4_DIV_F64 ||
+        in->op == NYIR_VEC4_FMA_F64 || in->op == NYIR_VEC4_SHUFFLE_F64;
+    bool v128_f32_ops =
+        in->op == NYIR_VEC8_ADD_F32 || in->op == NYIR_VEC8_SUB_F32 ||
+        in->op == NYIR_VEC8_MUL_F32 || in->op == NYIR_VEC8_DIV_F32 ||
+        in->op == NYIR_VEC8_FMA_F32 || in->op == NYIR_VEC8_SHUFFLE_F32;
+    if (in->a >= 0 && (size_t)in->a < value_count) {
+      size_t root = nyr_type_root(parents, (size_t)in->a);
+      if (f64_operands)
+        root_types[root] |= 1u;
+      if (f32_operands)
+        root_types[root] |= 2u;
+      if (v128_i64_ops)
+        root_types[root] |= 4u;
+      if (v256_i64_ops)
+        root_types[root] |= 4u | 32u;
+      if (v256_f64_ops)
+        root_types[root] |= 64u;
+      if (v128_f32_ops)
+        root_types[root] |= 16u;
+    }
+    if (in->b >= 0 && (size_t)in->b < value_count) {
+      size_t root = nyr_type_root(parents, (size_t)in->b);
+      if (f64_operands)
+        root_types[root] |= 1u;
+      if (f32_operands)
+        root_types[root] |= 2u;
+      if (v128_i64_ops)
+        root_types[root] |= 4u;
+      if (v256_i64_ops)
+        root_types[root] |= 4u | 32u;
+      if (v256_f64_ops)
+        root_types[root] |= 64u;
+      if (v128_f32_ops)
+        root_types[root] |= 16u;
+    }
+    /*
+     * FMA's c operand is a vector input; a typed memory store's class is an
+     * assertion about the destination layout and must not rewrite the
+     * producer's independent scalar fact.
+     */
+    if (in->c >= 0 && (size_t)in->c < value_count &&
+        (in->op == NYIR_VEC4_FMA_F64 || in->op == NYIR_VEC8_FMA_F32)) {
+      size_t root = nyr_type_root(parents, (size_t)in->c);
+      if (in->op == NYIR_VEC4_FMA_F64)
+        root_types[root] |= 64u;
+      else
+        root_types[root] |= 16u;
+    }
+    if (in->op == NYIR_VEC4_REDUCE_ADD_F64) {
+      if (in->a >= 0 && (size_t)in->a < value_count) {
+        size_t root = nyr_type_root(parents, (size_t)in->a);
+        root_types[root] |= 1u;
+      }
+      if (in->b >= 0 && (size_t)in->b < value_count) {
+        size_t root = nyr_type_root(parents, (size_t)in->b);
+        root_types[root] |= 64u;
+      }
+    }
+    if (in->op == NYIR_VEC4_REDUCE_ADD_I64 ||
+        in->op == NYIR_VEC8_REDUCE_ADD_I64) {
+      if (in->b >= 0 && (size_t)in->b < value_count) {
+        size_t root = nyr_type_root(parents, (size_t)in->b);
+        root_types[root] |=
+            in->op == NYIR_VEC8_REDUCE_ADD_I64 ? (4u | 32u) : 4u;
+      }
+    }
+    if (in->op == NYIR_VEC4_STORE_I64 || in->op == NYIR_VEC8_STORE_I64 ||
+        in->op == NYIR_VEC4_STORE_F64 || in->op == NYIR_VEC8_STORE_F32) {
+      int value = in->b >= 0 ? in->b : in->c;
+      if (value >= 0 && (size_t)value < value_count) {
+        size_t root = nyr_type_root(parents, (size_t)value);
+        if (in->op == NYIR_VEC4_STORE_I64)
+          root_types[root] |= 4u;
+        else if (in->op == NYIR_VEC8_STORE_I64)
+          root_types[root] |= 4u | 32u;
+        else if (in->op == NYIR_VEC4_STORE_F64)
+          root_types[root] |= 64u;
+        else
+          root_types[root] |= 16u;
+      }
+    }
+  }
+
+}
+
 bool nyr_type_map_init(nyr_type_map_t *map, const nyr_func_t *nyir,
                        size_t local_count) {
   if (!map || !nyir)
@@ -158,20 +380,7 @@ bool nyr_type_map_init(nyr_type_map_t *map, const nyr_func_t *nyir,
 
   size_t param_count =
       nyir->param_count < local_count ? nyir->param_count : local_count;
-  bool has_typed_values = false;
-  for (size_t i = 0; i < param_count; ++i)
-    has_typed_values |= nyir->param_types[i] == NYIR_PARAM_F64 ||
-                        nyir->param_types[i] == NYIR_PARAM_F32;
-  for (size_t i = 0; i < nyir->len && !has_typed_values; ++i) {
-    const nyr_inst_t *in = &nyir->data[i];
-    has_typed_values =
-        in->scalar_class == NYIR_SCALAR_F64 ||
-        in->scalar_class == NYIR_SCALAR_F32 || nyr_op_is_f64(in->op) ||
-        nyr_op_is_f32(in->op) || nyr_op_v128_i64(in->op) ||
-        nyr_op_v256_i64(in->op) || nyr_op_v256_f64(in->op) ||
-        nyr_op_v128_f32(in->op) ||
-        (in->op == NYIR_CAPTURE_RET && in->imm >= 10 && in->imm <= 13);
-  }
+  bool has_typed_values = nyr_type_has_typed_values(nyir, param_count);
   if (!has_typed_values) {
     if (!flag_count)
       return true;
@@ -216,196 +425,8 @@ bool nyr_type_map_init(nyr_type_map_t *map, const nyr_func_t *nyir,
   for (size_t i = 0; i < node_count; ++i)
     parents[i] = i;
 
-  /*
-   * Copies and unclassified local loads/stores preserve type. An explicit
-   * scalar_class on a local access is the representation contract for that
-   * value; do not let a different store on another control-flow path widen
-   * that value through the shared slot. Collapse compatible constraints once
-   * so long chains remain near-linear instead of rescanning the function.
-   */
-  for (size_t i = 0; i < nyir->len; ++i) {
-    const nyr_inst_t *in = &nyir->data[i];
-    if (in->op == NYIR_COPY && in->dst >= 0 && in->a >= 0 &&
-        (size_t)in->dst < map->value_count && (size_t)in->a < map->value_count)
-      nyr_type_union(parents, (size_t)in->dst, (size_t)in->a);
-    if (in->op == NYIR_PHI && in->dst >= 0 &&
-        (size_t)in->dst < map->value_count) {
-      for (size_t k = 0; k < in->phi_incoming_len; ++k) {
-        int incoming = in->phi_incoming[k].value;
-        if (incoming >= 0 && (size_t)incoming < map->value_count)
-          nyr_type_union(parents, (size_t)in->dst, (size_t)incoming);
-      }
-    }
-    if (in->op == NYIR_LOAD_LOCAL && in->scalar_class == NYIR_SCALAR_UNKNOWN &&
-        in->dst >= 0 && in->imm >= 0 && (size_t)in->dst < map->value_count &&
-        (size_t)in->imm < local_count)
-      nyr_type_union(parents, (size_t)in->dst,
-                     map->value_count + (size_t)in->imm);
-    if (in->op == NYIR_STORE_LOCAL && in->scalar_class == NYIR_SCALAR_UNKNOWN &&
-        in->a >= 0 && in->imm >= 0 && (size_t)in->a < map->value_count &&
-        (size_t)in->imm < local_count)
-      nyr_type_union(parents, (size_t)in->a,
-                     map->value_count + (size_t)in->imm);
-  }
-
-  for (size_t i = 0; i < param_count; ++i) {
-    size_t root = nyr_type_root(parents, map->value_count + i);
-    if (nyir->param_types[i] == NYIR_PARAM_F64)
-      root_types[root] |= 1u;
-    else if (nyir->param_types[i] == NYIR_PARAM_F32)
-      root_types[root] |= 2u;
-  }
-
-  for (size_t i = 0; i < nyir->len; ++i) {
-    const nyr_inst_t *in = &nyir->data[i];
-    bool f64_result =
-        in->scalar_class == NYIR_SCALAR_F64 || nyr_op_is_f64(in->op);
-    bool f32_result =
-        in->scalar_class == NYIR_SCALAR_F32 || nyr_op_is_f32(in->op);
-    /*
-     * A classified store declares the slot's carrier on that path. Seed the
-     * local root with it so an unclassified load in a merge block (where the
-     * reaching store lives in a predecessor) still observes the float fact.
-     * Mixed-class slots surface through the store/load ABI checks instead.
-     */
-    if (in->op == NYIR_STORE_LOCAL && in->a >= 0 && in->imm >= 0 &&
-        (size_t)in->imm < local_count) {
-      size_t local_root =
-          nyr_type_root(parents, map->value_count + (size_t)in->imm);
-      if (in->scalar_class == NYIR_SCALAR_F64)
-        root_types[local_root] |= 1u;
-      else if (in->scalar_class == NYIR_SCALAR_F32)
-        root_types[local_root] |= 2u;
-    }
-    bool v128_i64_result =
-        nyr_op_v128_i64(in->op) ||
-        (in->op == NYIR_CAPTURE_RET && in->imm >= 10 && in->imm <= 13);
-    bool v256_i64_result = nyr_op_v256_i64(in->op);
-    bool v256_f64_result = nyr_op_v256_f64(in->op);
-    bool v128_f32_result = nyr_op_v128_f32(in->op);
-    if (in->dst >= 0 && (size_t)in->dst < map->value_count) {
-      size_t root = nyr_type_root(parents, (size_t)in->dst);
-      if (f64_result)
-        root_types[root] |= 1u;
-      if (f32_result)
-        root_types[root] |= 2u;
-      if (v128_i64_result)
-        root_types[root] |= 4u;
-      if (v256_i64_result)
-        root_types[root] |= 4u | 32u;
-      if (v256_f64_result)
-        root_types[root] |= 64u;
-      if (v128_f32_result)
-        root_types[root] |= 16u;
-    }
-    /*
-     * RET's scalar_class describes the ABI contract. It must not be fed back
-     * into the producer's type facts, or a mismatched annotation would make
-     * the producer appear to have both float widths.
-     */
-    bool f64_operands = in->op == NYIR_ADD_F64 || in->op == NYIR_SUB_F64 ||
-                        in->op == NYIR_MUL_F64 || in->op == NYIR_DIV_F64 ||
-                        in->op == NYIR_CMP_F64 || in->op == NYIR_F64_TO_F32 ||
-                        in->op == NYIR_SQRT_F64 || in->op == NYIR_SIN_F64 ||
-                        in->op == NYIR_COS_F64;
-    bool f32_operands = in->op == NYIR_ADD_F32 || in->op == NYIR_SUB_F32 ||
-                        in->op == NYIR_MUL_F32 || in->op == NYIR_DIV_F32 ||
-                        in->op == NYIR_CMP_F32 || in->op == NYIR_F32_TO_F64;
-    bool v128_i64_ops =
-        in->op == NYIR_VEC4_ADD_I64 || in->op == NYIR_VEC4_SUB_I64 ||
-        in->op == NYIR_VEC4_AND_I64 || in->op == NYIR_VEC4_OR_I64 ||
-        in->op == NYIR_VEC4_XOR_I64 || in->op == NYIR_VEC4_SHL_I64 ||
-        in->op == NYIR_VEC4_SAR_I64;
-    bool v256_i64_ops =
-        in->op == NYIR_VEC8_ADD_I64 || in->op == NYIR_VEC8_SUB_I64 ||
-        in->op == NYIR_VEC8_AND_I64 || in->op == NYIR_VEC8_OR_I64 ||
-        in->op == NYIR_VEC8_XOR_I64 || in->op == NYIR_VEC8_SAR_I64 ||
-        in->op == NYIR_VEC8_SHR_I64;
-    bool v256_f64_ops =
-        in->op == NYIR_VEC4_ADD_F64 || in->op == NYIR_VEC4_SUB_F64 ||
-        in->op == NYIR_VEC4_MUL_F64 || in->op == NYIR_VEC4_DIV_F64 ||
-        in->op == NYIR_VEC4_FMA_F64 || in->op == NYIR_VEC4_SHUFFLE_F64;
-    bool v128_f32_ops =
-        in->op == NYIR_VEC8_ADD_F32 || in->op == NYIR_VEC8_SUB_F32 ||
-        in->op == NYIR_VEC8_MUL_F32 || in->op == NYIR_VEC8_DIV_F32 ||
-        in->op == NYIR_VEC8_FMA_F32 || in->op == NYIR_VEC8_SHUFFLE_F32;
-    if (in->a >= 0 && (size_t)in->a < map->value_count) {
-      size_t root = nyr_type_root(parents, (size_t)in->a);
-      if (f64_operands)
-        root_types[root] |= 1u;
-      if (f32_operands)
-        root_types[root] |= 2u;
-      if (v128_i64_ops)
-        root_types[root] |= 4u;
-      if (v256_i64_ops)
-        root_types[root] |= 4u | 32u;
-      if (v256_f64_ops)
-        root_types[root] |= 64u;
-      if (v128_f32_ops)
-        root_types[root] |= 16u;
-    }
-    if (in->b >= 0 && (size_t)in->b < map->value_count) {
-      size_t root = nyr_type_root(parents, (size_t)in->b);
-      if (f64_operands)
-        root_types[root] |= 1u;
-      if (f32_operands)
-        root_types[root] |= 2u;
-      if (v128_i64_ops)
-        root_types[root] |= 4u;
-      if (v256_i64_ops)
-        root_types[root] |= 4u | 32u;
-      if (v256_f64_ops)
-        root_types[root] |= 64u;
-      if (v128_f32_ops)
-        root_types[root] |= 16u;
-    }
-    /*
-     * FMA's c operand is a vector input; a typed memory store's class is an
-     * assertion about the destination layout and must not rewrite the
-     * producer's independent scalar fact.
-     */
-    if (in->c >= 0 && (size_t)in->c < map->value_count &&
-        (in->op == NYIR_VEC4_FMA_F64 || in->op == NYIR_VEC8_FMA_F32)) {
-      size_t root = nyr_type_root(parents, (size_t)in->c);
-      if (in->op == NYIR_VEC4_FMA_F64)
-        root_types[root] |= 64u;
-      else
-        root_types[root] |= 16u;
-    }
-    if (in->op == NYIR_VEC4_REDUCE_ADD_F64) {
-      if (in->a >= 0 && (size_t)in->a < map->value_count) {
-        size_t root = nyr_type_root(parents, (size_t)in->a);
-        root_types[root] |= 1u;
-      }
-      if (in->b >= 0 && (size_t)in->b < map->value_count) {
-        size_t root = nyr_type_root(parents, (size_t)in->b);
-        root_types[root] |= 64u;
-      }
-    }
-    if (in->op == NYIR_VEC4_REDUCE_ADD_I64 ||
-        in->op == NYIR_VEC8_REDUCE_ADD_I64) {
-      if (in->b >= 0 && (size_t)in->b < map->value_count) {
-        size_t root = nyr_type_root(parents, (size_t)in->b);
-        root_types[root] |=
-            in->op == NYIR_VEC8_REDUCE_ADD_I64 ? (4u | 32u) : 4u;
-      }
-    }
-    if (in->op == NYIR_VEC4_STORE_I64 || in->op == NYIR_VEC8_STORE_I64 ||
-        in->op == NYIR_VEC4_STORE_F64 || in->op == NYIR_VEC8_STORE_F32) {
-      int value = in->b >= 0 ? in->b : in->c;
-      if (value >= 0 && (size_t)value < map->value_count) {
-        size_t root = nyr_type_root(parents, (size_t)value);
-        if (in->op == NYIR_VEC4_STORE_I64)
-          root_types[root] |= 4u;
-        else if (in->op == NYIR_VEC8_STORE_I64)
-          root_types[root] |= 4u | 32u;
-        else if (in->op == NYIR_VEC4_STORE_F64)
-          root_types[root] |= 64u;
-        else
-          root_types[root] |= 16u;
-      }
-    }
-  }
+  nyr_type_roots_fill(map->value_count, nyir, local_count, param_count,
+                      parents, root_types);
 
   /*
    * A function usually carries only one or two scalar or vector classes. Give
@@ -500,6 +521,468 @@ bool nyr_type_map_init(nyr_type_map_t *map, const nyr_func_t *nyir,
   }
   free(workspace);
   return true;
+}
+
+/*
+ * Per-thread workspace reused across queries: lowering asks the class of one
+ * value at a time, hundreds of thousands of times per large program, and
+ * building, scattering and freeing a whole flag map per question dominated
+ * the serial lowering stage.
+ */
+static _Thread_local size_t *nyr_type_roots_ws;
+static _Thread_local size_t nyr_type_roots_ws_nodes;
+
+/*
+ * Incremental single-value class query for code that asks while it is still
+ * appending instructions (the Nytrix lowerer asks hundreds of thousands of
+ * times per program; recomputing the union-find for each question was 14%
+ * of a large serial compile). The per-thread state covers a prefix of the
+ * function. Every query re-validates that prefix against a compact snapshot
+ * of the fields the analysis reads, since callers rewrite earlier
+ * instructions in place (PHI incoming lists, stamped classes). Any change
+ * rebuilds from scratch; otherwise only the new tail is folded in. Unions
+ * merge class bits, so the result equals nyr_type_map_init's value flags.
+ * Nodes interleave values (2v) and locals (2l+1) so either side can grow.
+ */
+#define TI_V(v) (2u * (v))
+#define TI_L(l) (2u * (l) + 1u)
+#define TI_SNAP_WORDS 9u
+static _Thread_local struct {
+  uint32_t *parent;
+  unsigned char *bits;
+  size_t node_cap;
+  uint32_t *snap;
+  size_t snap_cap;
+  size_t len;
+  const void *param_types;
+  unsigned param_count;
+  bool valid;
+  size_t node_used; /* nodes [0, node_used) may differ from identity */
+  /*
+   * Temporary folding of the unstable tail: no path compression, every
+   * write logged for rollback.
+   */
+  bool temp;
+  uint32_t *undo; /* triples: node, old parent, old bits */
+  size_t undo_len, undo_cap;
+} g_ti;
+
+static bool ti_log(uint32_t node) {
+  if (g_ti.undo_len + 3 > g_ti.undo_cap) {
+    size_t cap = g_ti.undo_cap ? g_ti.undo_cap * 2 : 768;
+    uint32_t *u = realloc(g_ti.undo, cap * sizeof(*u));
+    if (!u)
+      return false;
+    g_ti.undo = u;
+    g_ti.undo_cap = cap;
+  }
+  g_ti.undo[g_ti.undo_len++] = node;
+  g_ti.undo[g_ti.undo_len++] = g_ti.parent[node];
+  g_ti.undo[g_ti.undo_len++] = g_ti.bits[node];
+  return true;
+}
+
+static void ti_rollback(void) {
+  while (g_ti.undo_len >= 3) {
+    g_ti.undo_len -= 3;
+    uint32_t node = g_ti.undo[g_ti.undo_len];
+    g_ti.parent[node] = g_ti.undo[g_ti.undo_len + 1];
+    g_ti.bits[node] = (unsigned char)g_ti.undo[g_ti.undo_len + 2];
+  }
+  g_ti.undo_len = 0;
+}
+
+static uint32_t ti_root(size_t node) {
+  uint32_t r = (uint32_t)node;
+  while (g_ti.parent[r] != r)
+    r = g_ti.parent[r];
+  if (g_ti.temp)
+    return r;
+  uint32_t x = (uint32_t)node;
+  while (g_ti.parent[x] != r) {
+    uint32_t next = g_ti.parent[x];
+    g_ti.parent[x] = r;
+    x = next;
+  }
+  return r;
+}
+
+static void ti_union(size_t a, size_t b) {
+  uint32_t ra = ti_root(a), rb = ti_root(b);
+  if (ra == rb)
+    return;
+  if (g_ti.temp) {
+    ti_log(rb);
+    ti_log(ra);
+  }
+  g_ti.parent[rb] = ra;
+  g_ti.bits[ra] |= g_ti.bits[rb];
+}
+
+static void ti_or(size_t node, unsigned bits) {
+  if (g_ti.temp && (g_ti.bits[node] | bits) != g_ti.bits[node])
+    ti_log((uint32_t)node);
+  g_ti.bits[node] |= (unsigned char)bits;
+}
+
+static bool ti_reserve_nodes(size_t need) {
+  if (need > g_ti.node_used)
+    g_ti.node_used = need;
+  if (need <= g_ti.node_cap)
+    return true;
+  size_t cap = g_ti.node_cap ? g_ti.node_cap : 1024;
+  while (cap < need)
+    cap *= 2;
+  if (cap > UINT32_MAX)
+    return false;
+  uint32_t *parent = realloc(g_ti.parent, cap * sizeof(*parent));
+  if (!parent)
+    return false;
+  g_ti.parent = parent;
+  unsigned char *bits = realloc(g_ti.bits, cap);
+  if (!bits)
+    return false;
+  g_ti.bits = bits;
+  for (size_t i = g_ti.node_cap; i < cap; ++i) {
+    g_ti.parent[i] = (uint32_t)i;
+    g_ti.bits[i] = 0;
+  }
+  g_ti.node_cap = cap;
+  return true;
+}
+
+static void ti_pack(const nyr_inst_t *in, uint32_t *w) {
+  uint32_t phi = 0;
+  if (in->op == NYIR_PHI) {
+    phi = 2166136261u ^ (uint32_t)in->phi_incoming_len;
+    for (size_t k = 0; k < in->phi_incoming_len; ++k)
+      phi = (phi ^ (uint32_t)in->phi_incoming[k].value) * 16777619u;
+  }
+  w[0] = (uint32_t)in->op;
+  w[1] = (uint32_t)in->dst;
+  w[2] = (uint32_t)in->a;
+  w[3] = (uint32_t)in->b;
+  w[4] = (uint32_t)in->c;
+  w[5] = (uint32_t)in->scalar_class;
+  w[6] = (uint32_t)(uint64_t)in->imm;
+  w[7] = (uint32_t)((uint64_t)in->imm >> 32);
+  w[8] = phi;
+}
+
+static void ti_reset(void) {
+  for (size_t i = 0; i < g_ti.node_used && i < g_ti.node_cap; ++i) {
+    g_ti.parent[i] = (uint32_t)i;
+    g_ti.bits[i] = 0;
+  }
+  g_ti.len = 0;
+  g_ti.node_used = 0;
+  g_ti.valid = false;
+}
+
+/*
+ * Returns false when an operand is outside [0, value_count): the caller then
+ * uses the full map, which ignores such operands.
+ */
+static bool ti_fold(const nyr_inst_t *in, size_t value_count) {
+  int ops[4] = {in->dst, in->a, in->b, in->c};
+  for (int k = 0; k < 4; ++k)
+    if (ops[k] >= 0 && (size_t)ops[k] >= value_count)
+      return false;
+  if (in->op == NYIR_PHI)
+    for (size_t k = 0; k < in->phi_incoming_len; ++k)
+      if (in->phi_incoming[k].value >= 0 &&
+          (size_t)in->phi_incoming[k].value >= value_count)
+        return false;
+  size_t need = TI_V(value_count) + 2u;
+  if ((in->op == NYIR_LOAD_LOCAL || in->op == NYIR_STORE_LOCAL ||
+       in->op == NYIR_ADDR_LOCAL) &&
+      in->imm >= 0 && TI_L((size_t)in->imm) + 1u > need)
+    need = TI_L((size_t)in->imm) + 1u;
+  if (!ti_reserve_nodes(need))
+    return false;
+  if (in->op == NYIR_COPY && in->dst >= 0 && in->a >= 0)
+    ti_union(TI_V((size_t)in->dst), TI_V((size_t)in->a));
+  if (in->op == NYIR_PHI && in->dst >= 0)
+    for (size_t k = 0; k < in->phi_incoming_len; ++k)
+      if (in->phi_incoming[k].value >= 0)
+        ti_union(TI_V((size_t)in->dst),
+                 TI_V((size_t)in->phi_incoming[k].value));
+  if (in->op == NYIR_LOAD_LOCAL && in->scalar_class == NYIR_SCALAR_UNKNOWN &&
+      in->dst >= 0 && in->imm >= 0)
+    ti_union(TI_V((size_t)in->dst), TI_L((size_t)in->imm));
+  if (in->op == NYIR_STORE_LOCAL && in->scalar_class == NYIR_SCALAR_UNKNOWN &&
+      in->a >= 0 && in->imm >= 0)
+    ti_union(TI_V((size_t)in->a), TI_L((size_t)in->imm));
+    bool f64_result =
+        in->scalar_class == NYIR_SCALAR_F64 || nyr_op_is_f64(in->op);
+    bool f32_result =
+        in->scalar_class == NYIR_SCALAR_F32 || nyr_op_is_f32(in->op);
+    /*
+     * A classified store declares the slot's carrier on that path. Seed the
+     * local root with it so an unclassified load in a merge block (where the
+     * reaching store lives in a predecessor) still observes the float fact.
+     * Mixed-class slots surface through the store/load ABI checks instead.
+     */
+    if (in->op == NYIR_STORE_LOCAL && in->a >= 0 && in->imm >= 0 &&
+        true) {
+      size_t local_root =
+          ti_root(TI_L((size_t)in->imm));
+      if (in->scalar_class == NYIR_SCALAR_F64)
+        ti_or(local_root, 1u);
+      else if (in->scalar_class == NYIR_SCALAR_F32)
+        ti_or(local_root, 2u);
+    }
+    bool v128_i64_result =
+        nyr_op_v128_i64(in->op) ||
+        (in->op == NYIR_CAPTURE_RET && in->imm >= 10 && in->imm <= 13);
+    bool v256_i64_result = nyr_op_v256_i64(in->op);
+    bool v256_f64_result = nyr_op_v256_f64(in->op);
+    bool v128_f32_result = nyr_op_v128_f32(in->op);
+    if (in->dst >= 0 && (size_t)in->dst < value_count) {
+      size_t root = ti_root(TI_V((size_t)in->dst));
+      if (f64_result)
+        ti_or(root, 1u);
+      if (f32_result)
+        ti_or(root, 2u);
+      if (v128_i64_result)
+        ti_or(root, 4u);
+      if (v256_i64_result)
+        ti_or(root, 4u | 32u);
+      if (v256_f64_result)
+        ti_or(root, 64u);
+      if (v128_f32_result)
+        ti_or(root, 16u);
+    }
+    /*
+     * RET's scalar_class describes the ABI contract. It must not be fed back
+     * into the producer's type facts, or a mismatched annotation would make
+     * the producer appear to have both float widths.
+     */
+    bool f64_operands = in->op == NYIR_ADD_F64 || in->op == NYIR_SUB_F64 ||
+                        in->op == NYIR_MUL_F64 || in->op == NYIR_DIV_F64 ||
+                        in->op == NYIR_CMP_F64 || in->op == NYIR_F64_TO_F32 ||
+                        in->op == NYIR_SQRT_F64 || in->op == NYIR_SIN_F64 ||
+                        in->op == NYIR_COS_F64;
+    bool f32_operands = in->op == NYIR_ADD_F32 || in->op == NYIR_SUB_F32 ||
+                        in->op == NYIR_MUL_F32 || in->op == NYIR_DIV_F32 ||
+                        in->op == NYIR_CMP_F32 || in->op == NYIR_F32_TO_F64;
+    bool v128_i64_ops =
+        in->op == NYIR_VEC4_ADD_I64 || in->op == NYIR_VEC4_SUB_I64 ||
+        in->op == NYIR_VEC4_AND_I64 || in->op == NYIR_VEC4_OR_I64 ||
+        in->op == NYIR_VEC4_XOR_I64 || in->op == NYIR_VEC4_SHL_I64 ||
+        in->op == NYIR_VEC4_SAR_I64;
+    bool v256_i64_ops =
+        in->op == NYIR_VEC8_ADD_I64 || in->op == NYIR_VEC8_SUB_I64 ||
+        in->op == NYIR_VEC8_AND_I64 || in->op == NYIR_VEC8_OR_I64 ||
+        in->op == NYIR_VEC8_XOR_I64 || in->op == NYIR_VEC8_MUL_I64 ||
+        in->op == NYIR_VEC8_SAR_I64 ||
+        in->op == NYIR_VEC8_SHR_I64;
+    bool v256_f64_ops =
+        in->op == NYIR_VEC4_ADD_F64 || in->op == NYIR_VEC4_SUB_F64 ||
+        in->op == NYIR_VEC4_MUL_F64 || in->op == NYIR_VEC4_DIV_F64 ||
+        in->op == NYIR_VEC4_FMA_F64 || in->op == NYIR_VEC4_SHUFFLE_F64;
+    bool v128_f32_ops =
+        in->op == NYIR_VEC8_ADD_F32 || in->op == NYIR_VEC8_SUB_F32 ||
+        in->op == NYIR_VEC8_MUL_F32 || in->op == NYIR_VEC8_DIV_F32 ||
+        in->op == NYIR_VEC8_FMA_F32 || in->op == NYIR_VEC8_SHUFFLE_F32;
+    if (in->a >= 0 && (size_t)in->a < value_count) {
+      size_t root = ti_root(TI_V((size_t)in->a));
+      if (f64_operands)
+        ti_or(root, 1u);
+      if (f32_operands)
+        ti_or(root, 2u);
+      if (v128_i64_ops)
+        ti_or(root, 4u);
+      if (v256_i64_ops)
+        ti_or(root, 4u | 32u);
+      if (v256_f64_ops)
+        ti_or(root, 64u);
+      if (v128_f32_ops)
+        ti_or(root, 16u);
+    }
+    if (in->b >= 0 && (size_t)in->b < value_count) {
+      size_t root = ti_root(TI_V((size_t)in->b));
+      if (f64_operands)
+        ti_or(root, 1u);
+      if (f32_operands)
+        ti_or(root, 2u);
+      if (v128_i64_ops)
+        ti_or(root, 4u);
+      if (v256_i64_ops)
+        ti_or(root, 4u | 32u);
+      if (v256_f64_ops)
+        ti_or(root, 64u);
+      if (v128_f32_ops)
+        ti_or(root, 16u);
+    }
+    /*
+     * FMA's c operand is a vector input; a typed memory store's class is an
+     * assertion about the destination layout and must not rewrite the
+     * producer's independent scalar fact.
+     */
+    if (in->c >= 0 && (size_t)in->c < value_count &&
+        (in->op == NYIR_VEC4_FMA_F64 || in->op == NYIR_VEC8_FMA_F32)) {
+      size_t root = ti_root(TI_V((size_t)in->c));
+      if (in->op == NYIR_VEC4_FMA_F64)
+        ti_or(root, 64u);
+      else
+        ti_or(root, 16u);
+    }
+    if (in->op == NYIR_VEC4_REDUCE_ADD_F64) {
+      if (in->a >= 0 && (size_t)in->a < value_count) {
+        size_t root = ti_root(TI_V((size_t)in->a));
+        ti_or(root, 1u);
+      }
+      if (in->b >= 0 && (size_t)in->b < value_count) {
+        size_t root = ti_root(TI_V((size_t)in->b));
+        ti_or(root, 64u);
+      }
+    }
+    if (in->op == NYIR_VEC4_REDUCE_ADD_I64 ||
+        in->op == NYIR_VEC8_REDUCE_ADD_I64) {
+      if (in->b >= 0 && (size_t)in->b < value_count) {
+        size_t root = ti_root(TI_V((size_t)in->b));
+        ti_or(root, in->op == NYIR_VEC8_REDUCE_ADD_I64 ? (4u | 32u) : 4u);
+      }
+    }
+    if (in->op == NYIR_VEC4_STORE_I64 || in->op == NYIR_VEC8_STORE_I64 ||
+        in->op == NYIR_VEC4_STORE_F64 || in->op == NYIR_VEC8_STORE_F32) {
+      int value = in->b >= 0 ? in->b : in->c;
+      if (value >= 0 && (size_t)value < value_count) {
+        size_t root = ti_root(TI_V((size_t)value));
+        if (in->op == NYIR_VEC4_STORE_I64)
+          ti_or(root, 4u);
+        else if (in->op == NYIR_VEC8_STORE_I64)
+          ti_or(root, 4u | 32u);
+        else if (in->op == NYIR_VEC4_STORE_F64)
+          ti_or(root, 64u);
+        else
+          ti_or(root, 16u);
+      }
+    }
+  return true;
+}
+
+int nyr_type_value_bits_incremental(const nyr_func_t *nyir, int value) {
+  if (!nyir || value < 0 || value >= nyir->next_value)
+    return 0;
+  if (nyir->param_count && !nyir->param_types)
+    return -1;
+  size_t value_count = (size_t)nyir->next_value;
+  bool reuse = g_ti.valid && g_ti.len <= nyir->len &&
+               g_ti.param_types == (const void *)nyir->param_types &&
+               g_ti.param_count == nyir->param_count;
+  uint32_t w[TI_SNAP_WORDS];
+  for (size_t i = 0; reuse && i < g_ti.len; ++i) {
+    ti_pack(&nyir->data[i], w);
+    if (memcmp(w, &g_ti.snap[i * TI_SNAP_WORDS], sizeof(w)) != 0)
+      reuse = false;
+  }
+  if (!reuse) {
+    ti_reset();
+    g_ti.param_types = nyir->param_types;
+    g_ti.param_count = nyir->param_count;
+    if (!ti_reserve_nodes(TI_L((size_t)nyir->param_count) + 1u))
+      return -1;
+    for (size_t i = 0; i < nyir->param_count; ++i) {
+      if (nyir->param_types[i] == NYIR_PARAM_F64)
+        ti_or(ti_root(TI_L(i)), 1u);
+      else if (nyir->param_types[i] == NYIR_PARAM_F32)
+        ti_or(ti_root(TI_L(i)), 2u);
+    }
+    g_ti.valid = true;
+  }
+  if (nyir->len > g_ti.snap_cap) {
+    size_t cap = g_ti.snap_cap ? g_ti.snap_cap : 1024;
+    while (cap < nyir->len)
+      cap *= 2;
+    uint32_t *snap = realloc(g_ti.snap, cap * TI_SNAP_WORDS * sizeof(*snap));
+    if (!snap) {
+      g_ti.valid = false;
+      return -1;
+    }
+    g_ti.snap = snap;
+    g_ti.snap_cap = cap;
+  }
+  /*
+   * Callers rewrite the newest few instructions (stamping a class, filling a
+   * PHI) far more often than older ones: fold those only temporarily.
+   */
+  size_t stable = nyir->len > 16 ? nyir->len - 16 : 0;
+  for (size_t i = g_ti.len; i < stable; ++i) {
+    if (!ti_fold(&nyir->data[i], value_count)) {
+      g_ti.valid = false;
+      return -1;
+    }
+    ti_pack(&nyir->data[i], &g_ti.snap[i * TI_SNAP_WORDS]);
+    g_ti.len = i + 1;
+  }
+  g_ti.temp = true;
+  g_ti.undo_len = 0;
+  int result = -1;
+  bool ok = true;
+  for (size_t i = g_ti.len; ok && i < nyir->len; ++i)
+    ok = ti_fold(&nyir->data[i], value_count);
+  if (ok && ti_reserve_nodes(TI_V((size_t)value) + 1u))
+    result = g_ti.bits[ti_root(TI_V((size_t)value))];
+  ti_rollback();
+  g_ti.temp = false;
+  return result;
+}
+
+bool nyr_type_roots_init(nyr_type_roots_t *roots, const nyr_func_t *nyir,
+                         size_t local_count) {
+  if (!roots || !nyir)
+    return false;
+  if (nyir->param_count && !nyir->param_types)
+    return false;
+  *roots = (nyr_type_roots_t){.value_count = (size_t)nyir->next_value};
+  size_t node_count = roots->value_count + local_count;
+  if (node_count < roots->value_count ||
+      node_count > SIZE_MAX / (14 * sizeof(bool)))
+    return false;
+  size_t param_count =
+      nyir->param_count < local_count ? nyir->param_count : local_count;
+  if (!nyr_type_has_typed_values(nyir, param_count))
+    return true;
+  size_t words = node_count + (node_count + sizeof(size_t) - 1) / sizeof(size_t);
+  if (node_count && words > nyr_type_roots_ws_nodes) {
+    size_t want = words * 2;
+    size_t *grown = realloc(nyr_type_roots_ws, want * sizeof(size_t));
+    if (!grown)
+      return false;
+    nyr_type_roots_ws = grown;
+    nyr_type_roots_ws_nodes = want;
+  }
+  size_t *parents = nyr_type_roots_ws;
+  unsigned char *root_types =
+      node_count ? (unsigned char *)(parents + node_count) : NULL;
+  if (node_count)
+    memset(root_types, 0, node_count);
+  for (size_t i = 0; i < node_count; ++i)
+    parents[i] = i;
+  nyr_type_roots_fill(roots->value_count, nyir, local_count, param_count,
+                      parents, root_types);
+  roots->parents = parents;
+  roots->root_types = root_types;
+  return true;
+}
+
+unsigned nyr_type_roots_value_bits(const nyr_type_roots_t *roots, int value) {
+  if (roots && roots->incremental) {
+    const nyr_func_t *f = roots->incremental;
+    int bits = nyr_type_value_bits_incremental(f, value);
+    if (bits >= 0)
+      return (unsigned)bits;
+    nyr_type_roots_t full = {0};
+    if (!nyr_type_roots_init(&full, f, nyr_max_local(f)))
+      return 0;
+    return nyr_type_roots_value_bits(&full, value);
+  }
+  if (!roots || !roots->parents || value < 0 ||
+      (size_t)value >= roots->value_count)
+    return 0;
+  return roots->root_types[nyr_type_root(roots->parents, (size_t)value)];
 }
 
 int64_t nyr_f64_to_bits(double v) {
@@ -896,13 +1379,13 @@ bool nyr_build_use_def(const nyr_func_t *f, nyr_use_def_t *out) {
   size_t *offsets = calloc(values + 1, sizeof(*offsets));
   if (!offsets)
     return false;
-#define NIR_COUNT_USE(v)                                                       \
-  do {                                                                         \
-    if ((v) >= 0) {                                                            \
-      if ((size_t)(v) >= values || offsets[(size_t)(v) + 1] == SIZE_MAX)       \
-        goto fail;                                                             \
-      ++offsets[(size_t)(v) + 1];                                              \
-    }                                                                          \
+#define NIR_COUNT_USE(v)                                                 \
+  do {                                                                   \
+    if ((v) >= 0) {                                                      \
+      if ((size_t)(v) >= values || offsets[(size_t)(v) + 1] == SIZE_MAX) \
+        goto fail;                                                       \
+      ++offsets[(size_t)(v) + 1];                                        \
+    }                                                                    \
   } while (0)
   for (size_t i = 0; i < f->len; ++i) {
     const nyr_inst_t *in = &f->data[i];
@@ -933,10 +1416,10 @@ bool nyr_build_use_def(const nyr_func_t *f, nyr_use_def_t *out) {
   }
   if (values)
     memcpy(cursor, offsets, values * sizeof(*cursor));
-#define NIR_ADD_USE(v)                                                         \
-  do {                                                                         \
-    if ((v) >= 0)                                                              \
-      users[cursor[(size_t)(v)]++] = i;                                        \
+#define NIR_ADD_USE(v)                  \
+  do {                                  \
+    if ((v) >= 0)                       \
+      users[cursor[(size_t)(v)]++] = i; \
   } while (0)
   for (size_t i = 0; i < f->len; ++i) {
     const nyr_inst_t *in = &f->data[i];
@@ -1172,6 +1655,8 @@ const char *nyr_op_name(nyr_op_t op) {
     return "vec8.or.i64";
   case NYIR_VEC8_XOR_I64:
     return "vec8.xor.i64";
+  case NYIR_VEC8_MUL_I64:
+    return "vec8.mul.i64";
   case NYIR_VEC8_REDUCE_ADD_I64:
     return "vec8.reduce_add.i64";
   case NYIR_SELECT_I64:
@@ -1250,6 +1735,7 @@ unsigned nyr_inst_effects(const nyr_inst_t *inst) {
   case NYIR_VEC8_AND_I64:
   case NYIR_VEC8_OR_I64:
   case NYIR_VEC8_XOR_I64:
+  case NYIR_VEC8_MUL_I64:
   case NYIR_VEC8_REDUCE_ADD_I64:
   case NYIR_SIN_F64:
   case NYIR_COS_F64:
@@ -1425,6 +1911,7 @@ static void nyr_normalize_operands(nyr_inst_t *inst) {
   case NYIR_VEC8_AND_I64:
   case NYIR_VEC8_OR_I64:
   case NYIR_VEC8_XOR_I64:
+  case NYIR_VEC8_MUL_I64:
     inst->c = -1;
     inst->d = -1;
     inst->e = -1;
@@ -1926,13 +2413,13 @@ bool nyr_fmt_inst(const nyr_inst_t *in, char *buf, size_t n) {
     return false;
   }
   size_t used = 0;
-#define APP(...)                                                               \
-  do {                                                                         \
-    int _w = snprintf(buf + used, n > used ? n - used : 0, __VA_ARGS__);       \
-    if (_w > 0)                                                                \
-      used += (size_t)_w < (n > used ? n - used : 0)                           \
-                  ? (size_t)_w                                                 \
-                  : (n > used ? n - used : 0);                                 \
+#define APP(...)                                                         \
+  do {                                                                   \
+    int _w = snprintf(buf + used, n > used ? n - used : 0, __VA_ARGS__); \
+    if (_w > 0)                                                          \
+      used += (size_t)_w < (n > used ? n - used : 0)                     \
+                  ? (size_t)_w                                           \
+                  : (n > used ? n - used : 0);                           \
   } while (0)
 
   if (in->op == NYIR_LABEL) {

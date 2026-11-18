@@ -500,6 +500,49 @@ char *parser_unescape_string(arena_t *arena, const char *cur, size_t len,
         }
         break;
       }
+      case 'u':
+      case 'U': {
+        /*
+         * \uXXXX, \UXXXXXXXX and \u{X..XXXXXX} encode one code point as
+         * UTF-8 (never longer than the escape itself). A malformed or
+         * out-of-range escape keeps its letter, as before.
+         */
+        const char *p = cur + 1;
+        bool braced = *cur == 'u' && p < end && *p == '{';
+        size_t want = braced ? 6 : (*cur == 'u' ? 4 : 8);
+        if (braced)
+          p++;
+        uint32_t cp = 0;
+        size_t digits = 0;
+        while (p < end && digits < want && isxdigit((unsigned char)*p)) {
+          char d = *p++;
+          cp = cp * 16u + (uint32_t)(d <= '9' ? d - '0' : (d | 32) - 'a' + 10);
+          digits++;
+        }
+        bool ok = braced ? (digits > 0 && p < end && *p == '}')
+                         : digits == want;
+        if (!ok || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) {
+          out[oi++] = *cur;
+          break;
+        }
+        if (cp < 0x80) {
+          out[oi++] = (char)cp;
+        } else if (cp < 0x800) {
+          out[oi++] = (char)(0xC0 | (cp >> 6));
+          out[oi++] = (char)(0x80 | (cp & 0x3F));
+        } else if (cp < 0x10000) {
+          out[oi++] = (char)(0xE0 | (cp >> 12));
+          out[oi++] = (char)(0x80 | ((cp >> 6) & 0x3F));
+          out[oi++] = (char)(0x80 | (cp & 0x3F));
+        } else {
+          out[oi++] = (char)(0xF0 | (cp >> 18));
+          out[oi++] = (char)(0x80 | ((cp >> 12) & 0x3F));
+          out[oi++] = (char)(0x80 | ((cp >> 6) & 0x3F));
+          out[oi++] = (char)(0x80 | (cp & 0x3F));
+        }
+        cur = braced ? p : p - 1;
+        break;
+      }
       case '0':
       case '1':
       case '2':

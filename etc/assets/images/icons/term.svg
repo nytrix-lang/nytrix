@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+  <title>REPL</title>
+  <desc>Interactive console with command prompt and cursor.</desc>
+  <path fill="#22d3ee" fill-rule="evenodd" d="M4.5 3H19.5A2.5 2.5 0 0 1 22 5.5V18.5A2.5 2.5 0 0 1 19.5 21H4.5A2.5 2.5 0 0 1 2 18.5V5.5A2.5 2.5 0 0 1 4.5 3ZM5.4 8.5A.9.9 0 0 0 4.5 9.4V17.6A.9.9 0 0 0 5.4 18.5H18.6A.9.9 0 0 0 19.5 17.6V9.4A.9.9 0 0 0 18.6 8.5ZM6.5 5.1A.8.8 0 1 0 6.5 6.7A.8.8 0 1 0 6.5 5.1ZM9 5.1A.8.8 0 1 0 9 6.7A.8.8 0 1 0 9 5.1Z"/>
+  <path fill="#22d3ee" d="M7.5 10.3 11 13A.9.9 0 0 1 11 14.4L7.5 17.1 6.3 15.5 9.2 13.7 6.3 11.9Z"/>
+  <path fill="#22d3ee" d="M13.5 15.2H17A.9.9 0 0 1 17 17H13.5A.9.9 0 0 1 13.5 15.2Z"/>
+</svg>

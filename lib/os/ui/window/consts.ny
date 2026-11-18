@@ -158,6 +158,7 @@ def int EVENT_WINDOW_RESTORED = 20
 def int EVENT_SCALE_UPDATED = 21
 def int EVENT_MONITOR_CONNECTED = 22
 def int EVENT_MONITOR_DISCONNECTED = 23
+
 ;; Input-method composition (zwp_text_input_v3 on Wayland). PREEDIT data:
 ;; {"text": str, "cursor": int} replaces the composition shown at the caret
 ;; (an empty text ends it); committed text arrives as EVENT_KEY_CHAR.

@@ -1,7 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
-  <title>Code Edit</title>
-  <desc>Code Edit icon.</desc>
-  <g transform="translate(2.0000 2.0000) scale(1.25000)">
-<path fill="#c6c6ca" d="M3 1a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V3a2 2 0 0 0-2-2zm0 2h10v10H3zm2 1L4 5l1 1-1 1 1 1 2-2zm2 3v1h2V7z"/>
-  </g>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+  <title>Edit Code</title>
+  <desc>Edit source code icon.</desc>
+  <path fill="#c084fc" d="M4.8 2.6H19.2A2.2 2.2 0 0 1 21.4 4.8V13.2L13.2 21.4H4.8A2.2 2.2 0 0 1 2.6 19.2V4.8A2.2 2.2 0 0 1 4.8 2.6Z"/>
+  <path fill="#a855f7" d="M8.4 7.2 11.6 10.4 8.4 13.6 7.1 12.3 9 10.4 7.1 8.5Z"/>
+  <path fill="#a855f7" d="M12.6 7.2 13.9 8.5 12 10.4 13.9 12.3 12.6 13.6 9.4 10.4Z"/>
+  <path fill="#f0abfc" d="M12.6 19.6 19.4 12.8 21.4 14.8 14.6 21.6 12.2 22.2Z"/>
 </svg>

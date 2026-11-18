@@ -324,13 +324,13 @@ static inline bool math_stats_enabled(void) {
   return g_math_stats_enabled != 0;
 }
 
-#define MATH_STAT_INC(field)                                                   \
-  do {                                                                         \
-    if (__builtin_expect(g_math_stats_enabled == 1, 0))                        \
-      g_math_stats.field++;                                                    \
-    else if (__builtin_expect(g_math_stats_enabled < 0, 0) &&                  \
-             math_stats_enabled())                                             \
-      g_math_stats.field++;                                                    \
+#define MATH_STAT_INC(field)                                  \
+  do {                                                        \
+    if (__builtin_expect(g_math_stats_enabled == 1, 0))       \
+      g_math_stats.field++;                                   \
+    else if (__builtin_expect(g_math_stats_enabled < 0, 0) && \
+             math_stats_enabled())                            \
+      g_math_stats.field++;                                   \
   } while (0)
 
 __attribute__((destructor)) static void rt_math_stats_dump(void) {
@@ -457,7 +457,9 @@ static inline size_t rt_float_chunk_slot(uintptr_t page, size_t mask) {
   return (size_t)x & mask;
 }
 
-/* Called with the registry locked. */
+/*
+ * Called with the registry locked.
+ */
 static void rt_float_chunk_insert(rt_float_chunk_entry_t *entries, size_t mask,
                                   uintptr_t page, uintptr_t base) {
   size_t slot = rt_float_chunk_slot(page, mask);
@@ -467,7 +469,9 @@ static void rt_float_chunk_insert(rt_float_chunk_entry_t *entries, size_t mask,
   entries[slot].base = base;
 }
 
-/* A chunk is not page aligned, so it is entered under each page it covers. */
+/*
+ * A chunk is not page aligned, so it is entered under each page it covers.
+ */
 static void rt_float_chunk_register(uintptr_t base) {
   uintptr_t first = base >> 12;
   uintptr_t last = (base + RT_FLT_CHUNK_BYTES - 1) >> 12;
@@ -543,8 +547,10 @@ static void *rt_flt_alloc_slot(void) {
     *(void **)curr = next;
   }
   *(void **)(chunk + ((slot_count - 1) * 16)) = NULL;
-  /* Registered only once every slot holds a free-list link, so no stale
-   * word in the fresh chunk can pass for a float header. */
+  /*
+   * Registered only once every slot holds a free-list link, so no stale
+   * word in the fresh chunk can pass for a float header.
+   */
   rt_float_chunk_register((uintptr_t)chunk);
   g_flt_cache = (void *)chunk;
   void *p = g_flt_cache;
@@ -571,7 +577,9 @@ static bool rt_flt_interned(uintptr_t v) {
   return v >= lo && v < lo + sizeof(g_flt_intern_store);
 }
 
-/* An interned slot is live once its box address has been published. */
+/*
+ * An interned slot is live once its box address has been published.
+ */
 static bool rt_flt_interned_live(uintptr_t v) {
   uintptr_t off = v - (uintptr_t)g_flt_intern_store;
   if ((off & 15) != 8)
@@ -588,9 +596,11 @@ static size_t rt_flt_intern_slot(int64_t bits) {
   return (size_t)(x & (RT_FLT_INTERN_SLOTS - 1u));
 }
 
-/* A short probe run keeps interning effective as the table fills: with one
+/*
+ * A short probe run keeps interning effective as the table fills: with one
  * slot per value, every value hashing onto an occupied slot was boxed afresh
- * on each use. */
+ * on each use.
+ */
 #define RT_FLT_INTERN_PROBES 8u
 
 static int64_t rt_flt_intern(int64_t bits) {
@@ -624,8 +634,10 @@ static int64_t rt_flt_intern(int64_t bits) {
 void rt_flt_free(int64_t v) {
   if (!v || rt_flt_interned((uintptr_t)v))
     return;
-  /* Only a live box returns to the pool; freeing one twice would link the
-   * slot into the free list twice. */
+  /*
+   * Only a live box returns to the pool; freeing one twice would link the
+   * slot into the free list twice.
+   */
   if (!rt_float_registry_has((uintptr_t)v))
     return;
   rt_float_cache_forget((uintptr_t)v);
@@ -742,12 +754,12 @@ int64_t rt_complex_eq(int64_t a, int64_t b) {
              : NY_IMM_FALSE;
 }
 
-#define FLT_OP(name, op)                                                       \
-  int64_t rt_flt_##name(int64_t a, int64_t b) {                                \
-    double da = rt_flt_unbox_double(a);                                        \
-    double db = rt_flt_unbox_double(b);                                        \
-    double r = da op db;                                                       \
-    return rt_flt_box_double(r);                                               \
+#define FLT_OP(name, op)                        \
+  int64_t rt_flt_##name(int64_t a, int64_t b) { \
+    double da = rt_flt_unbox_double(a);         \
+    double db = rt_flt_unbox_double(b);         \
+    double r = da op db;                        \
+    return rt_flt_box_double(r);                \
   }
 
 FLT_OP(add, +)
@@ -762,11 +774,11 @@ int64_t rt_flt_div(int64_t a, int64_t b) {
   return rt_flt_box_double(da / db);
 }
 
-#define FLT_CMP(name, op)                                                      \
-  int64_t rt_flt_##name(int64_t a, int64_t b) {                                \
-    double da = rt_flt_unbox_double(a);                                        \
-    double db = rt_flt_unbox_double(b);                                        \
-    return (da op db) ? NY_IMM_TRUE : NY_IMM_FALSE;                            \
+#define FLT_CMP(name, op)                           \
+  int64_t rt_flt_##name(int64_t a, int64_t b) {     \
+    double da = rt_flt_unbox_double(a);             \
+    double db = rt_flt_unbox_double(b);             \
+    return (da op db) ? NY_IMM_TRUE : NY_IMM_FALSE; \
   }
 
 FLT_CMP(lt, <)
@@ -834,8 +846,10 @@ int64_t rt_flt_sqrt(int64_t v) {
 double rt_sqrt_f64(double value) { return sqrt(value); }
 double rt_sin_f64(double value) { return sin(value); }
 double rt_cos_f64(double value) { return cos(value); }
-/* Raw-double forms: the boxed rt_flt_exp/rt_flt_log allocate a float box
- * for the argument and another for the result on every call. */
+/*
+ * Raw-double forms: the boxed rt_flt_exp/rt_flt_log allocate a float box
+ * for the argument and another for the result on every call.
+ */
 double rt_exp_f64(double value) { return exp(value); }
 double rt_log_f64(double value) { return log(value); }
 double rt_f64_round(double value) { return (double)llround(value); }

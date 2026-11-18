@@ -682,9 +682,11 @@ static bool nyr_native_jit_materialize_x64(
   for (size_t i = 0; i < reloc_count; ++i) {
     void *target_ptr;
     int def_index = nyr_x64_obj_def_index(defs, def_count, relocs[i].symbol);
-    /* A call relocation never targets a data cell. A Ny global named like a
+    /*
+     * A call relocation never targets a data cell. A Ny global named like a
      * C function (`mut dup = ""` beside an extern bound `as "dup"`) shares
-     * the symbol; resolve the call to the external function, not the cell. */
+     * the symbol; resolve the call to the external function, not the cell.
+     */
     if (def_index >= 0 && defs[def_index].is_data &&
         relocs[i].type == NY_RELOC_PLT32 && runtime_services &&
         runtime_services->resolve_symbol) {
@@ -1020,19 +1022,35 @@ bool nyr_jit_compile(nyr_backend_module_t *module, const ny_options *opt,
       mach = (nyr_mach_func_t){0};
       ny_dbg_lower_fn(names && names[i] ? names[i] : "unknown_fn");
       ny_dbg_scope_stdlib(names && names[i] && strchr(names[i], '.') != NULL);
-      if (!nyr_mach_lower_nir(&funcs[i], &mach, target.caps, mach_err,
-                              sizeof(mach_err)) ||
-          !nyr_mach_verify(&mach, 0, mach_err, sizeof(mach_err))) {
+      bool lowered = nyr_mach_lower_nir(&funcs[i], &mach, target.caps,
+                                        mach_err, sizeof(mach_err));
+      /*
+       * An unsupported shape may fall back to the NYIR object encoder, but a
+       * machine verifier rejection after successful lowering is a compiler
+       * bug: fail closed instead of shipping a form the verifier rejected.
+       */
+      if (lowered && !nyr_mach_verify(&mach, 0, mach_err, sizeof(mach_err))) {
         if (ny_trace_enabled("NY_TRACE_MACHINE_FAIL")) {
           ny_trace_line("MACHINE_FAIL",
-                        "machine form rejected for function %zu: %s", i,
+                        "machine form verification failed for function "
+                        "%zu: %s",
+                        i, mach_err[0] ? mach_err : "unknown error");
+          nyr_mach_dump(&mach, stderr);
+        }
+        nyr_set_error(err, err_len,
+                      "native JIT: machine form verification failed for "
+                      "function %zu: %s",
+                      i, mach_err[0] ? mach_err : "verify");
+        nyr_mach_func_free(&mach);
+        goto fail_nir;
+      }
+      if (!lowered) {
+        if (ny_trace_enabled("NY_TRACE_MACHINE_FAIL")) {
+          ny_trace_line("MACHINE_FAIL",
+                        "machine form unsupported for function %zu: %s", i,
                         mach_err[0] ? mach_err : "unknown error");
           nyr_mach_dump(&mach, stderr);
         }
-        nyr_set_error(
-            err, err_len,
-            "native JIT: machine form gate failed for function %zu: %s", i,
-            mach_err[0] ? mach_err : "verify");
         nyr_mach_func_free(&mach);
         mach = (nyr_mach_func_t){0};
       } else if (getenv("NY_DUMP_MACH")) {
@@ -1164,6 +1182,8 @@ static void *nyr_api_jit_resolve_symbol(void *userdata, const char *symbol) {
   HMODULE process = GetModuleHandleA(NULL);
   return process && symbol ? (void *)GetProcAddress(process, symbol) : NULL;
 #else
+  /* JIT code is the user's own program; it may call any process export, as
+   * the AOT-linked program could (Brainfuck's generated code calls calloc). */
   return symbol ? dlsym(RTLD_DEFAULT, symbol) : NULL;
 #endif
 }

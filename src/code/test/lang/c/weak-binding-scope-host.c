@@ -1,3 +1,6 @@
+/*
+ * Host-side C counterpart for the weak binding scope test.
+ */
 __attribute__((weak)) int strong_body = -11;
 __attribute__((weak)) int strong_parameter = -13;
 __attribute__((weak)) int strong_typeof = -17;

@@ -5120,6 +5120,18 @@ static int run_error_case(const char *bin, const char *path,
     return 0;
   }
 
+  /*
+   * A diagnostic followed by a crash is not a clean rejection: the parser's
+   * nesting limit once printed its error and then overflowed the C stack,
+   * and the expected message alone let that pass.
+   */
+  if (rc > 128 && rc < 128 + 64) {
+    snprintf(why, why_len, "compiler crashed (signal %d) instead of failing",
+             rc - 128);
+    free(out);
+    return 0;
+  }
+
   if (expect && *expect && !strstr(out, expect)) {
     char *nl = strchr(out, '\n');
     if (nl)
@@ -6002,8 +6014,10 @@ static int test_max_heavy_jobs(int jobs) {
 static int test_requires_host_exclusive(const char *p) {
   if (!p)
     return 0;
-  /* Compositor probes drive the shared seat and input method of the session
-   * they run in; two at once steal each other's pointer and IME. */
+  /*
+   * Compositor probes drive the shared seat and input method of the session
+   * they run in; two at once steal each other's pointer and IME.
+   */
   return strncmp(p, "lib/os/ui/", 10) == 0 ||
          strncmp(p, "lib/os/sound/", 13) == 0 ||
          strstr(p, "probes/ui/wayland-") != NULL;
@@ -6688,8 +6702,10 @@ static int run_suite(const char *suite_name, StrVec *files, const char *bin,
 #endif
           if (rc == 0) {
             char *message = shape_meta_string(run[i].path, "expect_message");
-            /* `expect_stdout` is the other spelling fixtures use; it was
-             * read nowhere, so 61 fixtures checked only their exit code. */
+            /*
+             * `expect_stdout` is the other spelling fixtures use; it was
+             * read nowhere, so 61 fixtures checked only their exit code.
+             */
             if (!message || !*message) {
               free(message);
               message = shape_meta_string(run[i].path, "expect_stdout");

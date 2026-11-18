@@ -58,7 +58,9 @@ static nyr_op_t rng_op(rng_t *r) {
   return ops[rng_below(r, (unsigned)(sizeof(ops) / sizeof(ops[0])))];
 }
 
-/* Leaves stay small so constant folding is exercised, not just tree shape. */
+/*
+ * Leaves stay small so constant folding is exercised, not just tree shape.
+ */
 static int gen_leaf(nyr_func_t *f, rng_t *r) {
   if (rng_below(r, 3) == 0)
     return nyr_opt_emit_imm(f, NYIR_LOAD_LOCAL, 0);
@@ -72,7 +74,9 @@ static int gen_expr(nyr_func_t *f, rng_t *r, size_t depth) {
   int lhs = gen_expr(f, r, depth - 1);
   int rhs = gen_expr(f, r, depth - 1);
   if (op == NYIR_SHL_I64 || op == NYIR_SAR_I64) {
-    /* Mask the count: an oversized shift is not the behavior under test. */
+    /*
+     * Mask the count: an oversized shift is not the behavior under test.
+     */
     rhs = nyr_opt_binop(f, NYIR_AND_I64, rhs, nyr_opt_const(f, 63));
   }
   return nyr_opt_binop(f, op, lhs, rhs);

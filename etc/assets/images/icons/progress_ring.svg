@@ -1,8 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
-  <title id="title1">Progress Ring</title>
-  <desc id="desc1">Progress Ring editor icon. Original asset id: progressring.</desc>
-  <defs id="defs1" />
-  <g transform="translate(2.0000 2.0000) scale(1.25000)" id="g1">
-    <path d="M 8,0 C 3.6054113,0 0,3.6054113 0,8 c 0,4.394589 3.6054113,8 8,8 4.394589,0 8,-3.605411 8,-8 C 16,3.6054113 12.394589,0 8,0 Z m 0,4 c 2.232828,0 4,1.7671717 4,4 0,2.232828 -1.767172,4 -4,4 C 5.7671717,12 4,10.232828 4,8 4,5.7671717 5.7671717,4 8,4 Z" id="circle1" fill="#c6c6ca" />
-  </g>
-</svg>

@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+  <title>Source Code</title>
+  <desc>Source code file icon.</desc>
+  <path fill="#dbc979" fill-rule="evenodd" d="M6 2.5H13.6L20 8.9V19A2.5 2.5 0 0 1 17.5 21.5H6A2.5 2.5 0 0 1 3.5 19V5A2.5 2.5 0 0 1 6 2.5ZM9.7 10.4 6.9 13.2 9.7 16 8.6 17.1 4.7 13.2 8.6 9.3ZM14.3 10.4 17.1 13.2 14.3 16 15.4 17.1 19.3 13.2 15.4 9.3Z"/>
+  <path fill="#b8a44e" d="M13.6 2.5 20 8.9H13.6Z"/>
+</svg>

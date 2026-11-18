@@ -98,6 +98,7 @@ fn draw_quad_3d(f64 x1, f64 y1, f64 z1, f64 x2, f64 y2, f64 z2, f64 x3, f64 y3, 
 fn draw_glyph_bitmap_scaled(ptr data, int src_w, int src_h, int dst_w, int dst_h, f64 ox, f64 oy, f64 r, f64 g, f64 b, f64 a, int bpp=4, bool is_color=false) bool { d.draw_glyph_bitmap_scaled(data, src_w, src_h, dst_w, dst_h, ox, oy, r, g, b, a, bpp, is_color) }
 
 fn set_unlit(any enabled) any { s.set_unlit(enabled) }
+
 fn set_blend_mode(int op, int fsrc=1, int fdst=3) bool { s.set_blend_mode(op, fsrc, fdst) }
 
 fn set_vertex_color_mode(int mode) any { s.set_vertex_color_mode(mode) }

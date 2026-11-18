@@ -94,7 +94,9 @@ static void rule_div_one(nyr_func_t *f, bool rw) {
   nyr_opt_ret(f, rw ? x : nyr_opt_binop(f, NYIR_DIV_I64, x, nyr_opt_const(f, 1)));
 }
 
-/* (x & 0xff) & 0x0f  ==  x & 0x0f ; mask chains combine. */
+/*
+ * (x & 0xff) & 0x0f  ==  x & 0x0f ; mask chains combine.
+ */
 static void rule_mask_combine(nyr_func_t *f, bool rw) {
   nyr_opt_begin(f);
   int x = nyr_opt_emit_imm(f, NYIR_LOAD_LOCAL, 0);
@@ -106,7 +108,9 @@ static void rule_mask_combine(nyr_func_t *f, bool rw) {
   nyr_opt_ret(f, nyr_opt_binop(f, NYIR_AND_I64, low, nyr_opt_const(f, 0x0f)));
 }
 
-/* (x + 3) + 4  ==  x + 7 ; constant reassociation. */
+/*
+ * (x + 3) + 4  ==  x + 7 ; constant reassociation.
+ */
 static void rule_add_combine(nyr_func_t *f, bool rw) {
   nyr_opt_begin(f);
   int x = nyr_opt_emit_imm(f, NYIR_LOAD_LOCAL, 0);
@@ -118,7 +122,9 @@ static void rule_add_combine(nyr_func_t *f, bool rw) {
   nyr_opt_ret(f, nyr_opt_binop(f, NYIR_ADD_I64, a, nyr_opt_const(f, 4)));
 }
 
-/* select(x < 0, 7, 9) is not constant; select(1, 7, 9) folds to 7. */
+/*
+ * select(x < 0, 7, 9) is not constant; select(1, 7, 9) folds to 7.
+ */
 static void rule_select_const(nyr_func_t *f, bool rw) {
   nyr_opt_begin(f);
   int seven = nyr_opt_const(f, 7);

@@ -1,7 +1,10 @@
+/*
+ * Host-side C counterpart for the i386 spill arithmetic test.
+ */
 typedef unsigned int u32;
 typedef unsigned long long u64;
 #define DECL(name, type, suffix) extern type name##suffix(type, type);
-#define DECLS(type, suffix) \
+#define DECLS(type, suffix)                                               \
   DECL(add, type, suffix) DECL(sub, type, suffix) DECL(and, type, suffix) \
   DECL(or, type, suffix) DECL(xor, type, suffix)
 DECLS(u32, 32)
@@ -24,8 +27,10 @@ void mutate_wide(u64 *value) { *value ^= 0x8000000100000003ULL; }
 extern long long signed_divide(u64, u64), signed_remainder(u64, u64);
 extern u64 unsigned_divide(u64, u64), unsigned_remainder(u64, u64);
 
-/* Independent bit-at-a-time oracle avoids a host compiler-runtime dependency
- * in this freestanding 32-bit executable. Carry is part of the remainder. */
+/*
+ * Independent bit-at-a-time oracle avoids a host compiler-runtime dependency
+ * in this freestanding 32-bit executable. Carry is part of the remainder.
+ */
 static u64 divide_reference(u64 a, u64 b, u64 *rest) {
   u64 q = 0, r = 0;
   for (unsigned bit = 0; bit < 64; ++bit) {
@@ -54,11 +59,11 @@ static int check(void) {
       int cycle_expected = (first < 0) | ((first < second) << 1) |
                            ((first == second) << 2) | ((second < 0) << 3);
       if (cycle_bounds(x, y) != cycle_expected) return 12;
-#define CHECK(name, suffix, a, b, operation) \
+#define CHECK(name, suffix, a, b, operation)                   \
       if (name##suffix(a, b) != ((a) operation (b))) return 1;
-#define CHECKS(suffix, a, b) \
+#define CHECKS(suffix, a, b)                                  \
       CHECK(add, suffix, a, b, +) CHECK(sub, suffix, a, b, -) \
-      CHECK(and, suffix, a, b, &) CHECK(or, suffix, a, b, |) \
+      CHECK(and, suffix, a, b, &) CHECK(or, suffix, a, b, |)  \
       CHECK(xor, suffix, a, b, ^)
       CHECKS(32, x, y)
       CHECKS(64, a, b)
@@ -72,11 +77,11 @@ static int check(void) {
           256u * ((int)x > (int)y) + 512u * ((int)x >= (int)y);
       if (branch_mix(x, y) != expected)
         return 3;
-#define CHECK_PROMOTED(bits, type) { \
-        type l = (type)a, r = (type)b; \
-        int want = (l < r) | ((l <= r) << 1) | ((l > r) << 2) | \
+#define CHECK_PROMOTED(bits, type) {                                    \
+        type l = (type)a, r = (type)b;                                  \
+        int want = (l < r) | ((l <= r) << 1) | ((l > r) << 2) |         \
                    ((l >= r) << 3) | ((l == r) << 4) | ((l != r) << 5); \
-        if (promoted##bits(a, b) != want) return 4; \
+        if (promoted##bits(a, b) != want) return 4;                     \
       }
       CHECK_PROMOTED(8, signed char)
       CHECK_PROMOTED(16, short)

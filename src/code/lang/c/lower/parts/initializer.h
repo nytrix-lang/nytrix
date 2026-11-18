@@ -82,6 +82,141 @@ static bool lower_initializer_field(c_parser_t *p, const c_agg_field_t *field,
       NULL);
 }
 
+/*
+ * Complex locals live in the entry-block aggregate area like struct locals,
+ * so their sixteen-byte copies go through the aggregate alias path instead
+ * of single-slot local homes.
+ */
+static c_agg_type_t c_complex_local_f32 = {
+    .scope_id = SIZE_MAX,
+    .complete = true,
+    .size = 8,
+    .align = 4,
+    .field_count = 2,
+    .fields = {{.kind = C_AGG_FIELD_F32, .offset = 0, .size = 4, .align = 4},
+               {.kind = C_AGG_FIELD_F32, .offset = 4, .size = 4, .align = 4}}};
+static c_agg_type_t c_complex_local_f64 = {
+    .scope_id = SIZE_MAX,
+    .complete = true,
+    .size = 16,
+    .align = 8,
+    .field_count = 2,
+    .fields = {{.kind = C_AGG_FIELD_F64, .offset = 0, .size = 8, .align = 8},
+               {.kind = C_AGG_FIELD_F64, .offset = 8, .size = 8, .align = 8}}};
+/*
+ * nyc models `long double` as an eight-byte type, so `long double _Complex` is
+ * two eight-byte lanes, matching double _Complex on this target.
+ */
+static c_agg_type_t c_complex_local_ldouble = {
+    .scope_id = SIZE_MAX,
+    .complete = true,
+    .size = 16,
+    .align = 8,
+    .field_count = 2,
+    .fields = {{.kind = C_AGG_FIELD_F64, .offset = 0, .size = 8, .align = 8},
+               {.kind = C_AGG_FIELD_F64, .offset = 8, .size = 8, .align = 8}}};
+
+static c_agg_type_t *c_complex_aggregate(c_type_t type) {
+  return type == C_C64     ? &c_complex_local_f32
+         : type == C_C128  ? &c_complex_local_f64
+                           : &c_complex_local_ldouble;
+}
+
+/*
+ * Store an initializer into a complex object: a matching complex value copies,
+ * a float/integer complex value converts lanes, and a real value fills the
+ * real lane with the imaginary lane zeroed.
+ */
+static bool lower_complex_initialize(c_parser_t *p, int base,
+                                     const c_agg_type_t *agg,
+                                     c_value_t value) {
+  if (!agg || agg->scope_id != SIZE_MAX || base < 0 || value.value < 0)
+    return false;
+  if (agg->size != 8 && agg->size != 16) {
+    fail(p, "long double _Complex initializers are not supported yet");
+    return false;
+  }
+  bool single = agg->size == 8;
+  bool value_complex =
+      value.type == C_AGG && value.agg && value.agg->scope_id == SIZE_MAX;
+  if (value_complex && value.agg->size == agg->size)
+    return lower_copy_struct(p, base, value.value, agg->size);
+  if (value_complex &&
+      (value.agg->size == 8 || value.agg->size == 16)) {
+    int real_source = single ? lower_load_field(p, value.value, true, false)
+                             : lower_load_f32_field(p, value.value, false);
+    int imag_address = lower_add_const(p, value.value, single ? 8 : 4);
+    int imag_source =
+        imag_address < 0 ? -1
+                         : single ? lower_load_field(p, imag_address, true, false)
+                                  : lower_load_f32_field(p, imag_address, false);
+    int real_value =
+        real_source < 0
+            ? -1
+            : emit_value(p, (nyr_inst_t){
+                                 .op = single ? NYIR_F64_TO_F32
+                                              : NYIR_F32_TO_F64,
+                                 .dst = -1,
+                                 .a = real_source,
+                                 .scalar_class = single ? NYIR_SCALAR_F32
+                                                        : NYIR_SCALAR_F64});
+    int imag_value =
+        imag_source < 0
+            ? -1
+            : emit_value(p, (nyr_inst_t){
+                                 .op = single ? NYIR_F64_TO_F32
+                                              : NYIR_F32_TO_F64,
+                                 .dst = -1,
+                                 .a = imag_source,
+                                 .scalar_class = single ? NYIR_SCALAR_F32
+                                                        : NYIR_SCALAR_F64});
+    int imag_target = lower_add_const(p, base, single ? 4 : 8);
+    if (real_value < 0 || imag_value < 0 || imag_target < 0)
+      return false;
+    return single ? lower_store_f32_field(p, base, real_value, false) &&
+                        lower_store_f32_field(p, imag_target, imag_value, false)
+                  : lower_store_field(p, base, real_value, true, false) &&
+                        lower_store_field(p, imag_target, imag_value, true,
+                                          false);
+  }
+  if (value.type != C_F32 && value.type != C_F64 &&
+      !c_type_is_integer(value.type)) {
+    fail(p, "complex initializer requires a complex or real value");
+    return false;
+  }
+  int converted = value.value;
+  if (single && value.type == C_F64)
+    converted = emit_value(p, (nyr_inst_t){.op = NYIR_F64_TO_F32,
+                                           .dst = -1,
+                                           .a = value.value,
+                                           .scalar_class = NYIR_SCALAR_F32});
+  else if (!single && value.type == C_F32)
+    converted = emit_value(p, (nyr_inst_t){.op = NYIR_F32_TO_F64,
+                                           .dst = -1,
+                                           .a = value.value,
+                                           .scalar_class = NYIR_SCALAR_F64});
+  else if (c_type_is_integer(value.type))
+    converted = emit_value(
+        p, (nyr_inst_t){.op = single ? NYIR_I64_TO_F32 : NYIR_I64_TO_F64,
+                        .dst = -1,
+                        .a = value.value,
+                        .scalar_class = single ? NYIR_SCALAR_F32
+                                               : NYIR_SCALAR_F64});
+  int zero = emit_value(
+      p, (nyr_inst_t){.op = single ? NYIR_CONST_F32 : NYIR_CONST_F64,
+                      .dst = -1,
+                      .imm = 0,
+                      .scalar_class = single ? NYIR_SCALAR_F32
+                                             : NYIR_SCALAR_F64});
+  int imag_target = lower_add_const(p, base, single ? 4 : 8);
+  if (converted < 0 || zero < 0 || imag_target < 0)
+    return false;
+  return single ? lower_store_f32_field(p, base, converted, false) &&
+                      lower_store_f32_field(p, imag_target, zero, false)
+                : lower_store_field(p, base, converted, true, false) &&
+                      lower_store_field(p, imag_target, zero, true, false);
+}
+
 static bool add_local(c_parser_t *p, ny_ctok_t name, c_type_t type, int value,
                       bool is_const, bool is_volatile) {
   for (size_t i = p->local_count; i > p->scope_start; --i) {
@@ -103,11 +238,24 @@ static bool add_local(c_parser_t *p, ny_ctok_t name, c_type_t type, int value,
   if (value >= 0 && stored_value < 0)
     return false;
   int volatile_address = -1;
-  if (is_volatile || type == C_VA_LIST) {
+  if (type == C_VA_LIST) {
     volatile_address =
         emit_value(p, (nyr_inst_t){.op = NYIR_ALLOCA,
                                    .dst = -1,
-                                   .imm = type == C_VA_LIST ? 24 : 8,
+                                   .imm = 24,
+                                   .scalar_class = NYIR_SCALAR_I64_RAW});
+    if (volatile_address < 0)
+      return false;
+  } else if (is_volatile) {
+    /*
+     * A volatile local lives in its ordinary slot; every access goes through
+     * the slot address with volatile effects.  Keeping it out of the alloca
+     * path lets -fomit-frame-pointer drop the frame for these functions.
+     */
+    volatile_address =
+        emit_value(p, (nyr_inst_t){.op = NYIR_ADDR_LOCAL,
+                                   .dst = -1,
+                                   .imm = (int64_t)slot,
                                    .scalar_class = NYIR_SCALAR_I64_RAW});
     if (volatile_address < 0)
       return false;
@@ -1271,8 +1419,16 @@ static bool lower_aggregate_declaration(c_parser_t *p, bool semicolon) {
       ok = false;
       break;
     }
-    if ((!is_static && local_section.len) ||
-        p->last_type_alignment != local_alignment ||
+    /*
+     * Alignment requests at or below the type's natural alignment cannot
+     * weaken the object, and automatic arrays are already 16-byte aligned.
+     */
+    size_t natural_alignment = c_type_alignment(p->abi, type);
+    bool alignment_satisfied =
+        p->last_type_alignment == local_alignment ||
+        p->last_type_alignment <= natural_alignment ||
+        (p->last_type_is_array && p->last_type_alignment <= 16);
+    if ((!is_static && local_section.len) || !alignment_satisfied ||
         !tok_same(p->last_type_mode, local_mode)) {
       if (!getenv("NYC_KERNEL_COMPAT")) {
         fail(p, "placement and type attributes on local declarations are "
@@ -2622,6 +2778,15 @@ static bool lower_scalar_assignment(c_parser_t *p, bool semicolon) {
         }
         ++p->pos;
         c_value_t value = parse_expr(p, 1);
+        if ((field->kind == C_AGG_FIELD_C64 ||
+             field->kind == C_AGG_FIELD_C128) &&
+            ny_ctok_eq(assignment_op, "=") && value.value >= 0 &&
+            value.type == C_AGG && value.agg &&
+            value.agg->scope_id == SIZE_MAX) {
+          if (semicolon && !expect(p, ";"))
+            return false;
+          return lower_copy_struct(p, address, value.value, field->size);
+        }
         bool compatible =
             pointer_offset ? c_type_is_integer(value.type)
             : is_float_field
@@ -2970,6 +3135,111 @@ static bool lower_scalar_assignment(c_parser_t *p, bool semicolon) {
         return false;
       return lower_store_pointer_field(p, base, value.value, false);
     }
+    bool complex_target = target_agg && target_agg->scope_id == SIZE_MAX;
+    bool complex_value =
+        value.type == C_AGG && value.agg && value.agg->scope_id == SIZE_MAX;
+    if (complex_target && complex_value && value.value >= 0 &&
+        target_agg->size != value.agg->size &&
+        (target_agg->size == 8 || target_agg->size == 16) &&
+        (value.agg->size == 8 || value.agg->size == 16)) {
+      bool target_single = target_agg->size == 8;
+      int real_source = target_single
+                            ? lower_load_field(p, value.value, true, false)
+                            : lower_load_f32_field(p, value.value, false);
+      int imag_address =
+          lower_add_const(p, value.value, target_single ? 8 : 4);
+      int imag_source =
+          imag_address < 0
+              ? -1
+              : target_single
+                    ? lower_load_field(p, imag_address, true, false)
+                    : lower_load_f32_field(p, imag_address, false);
+      int real_value =
+          real_source < 0
+              ? -1
+              : emit_value(p, (nyr_inst_t){
+                                   .op = target_single ? NYIR_F64_TO_F32
+                                                       : NYIR_F32_TO_F64,
+                                   .dst = -1,
+                                   .a = real_source,
+                                   .scalar_class = target_single
+                                                       ? NYIR_SCALAR_F32
+                                                       : NYIR_SCALAR_F64});
+      int imag_value =
+          imag_source < 0
+              ? -1
+              : emit_value(p, (nyr_inst_t){
+                                   .op = target_single ? NYIR_F64_TO_F32
+                                                       : NYIR_F32_TO_F64,
+                                   .dst = -1,
+                                   .a = imag_source,
+                                   .scalar_class = target_single
+                                                       ? NYIR_SCALAR_F32
+                                                       : NYIR_SCALAR_F64});
+      int imag_target = lower_add_const(p, base, target_single ? 4 : 8);
+      bool stored =
+          real_value >= 0 && imag_value >= 0 && imag_target >= 0 &&
+          (target_single
+               ? lower_store_f32_field(p, base, real_value, false) &&
+                     lower_store_f32_field(p, imag_target, imag_value, false)
+               : lower_store_field(p, base, real_value, true, false) &&
+                     lower_store_field(p, imag_target, imag_value, true, false));
+      if (!stored)
+        return false;
+      if (semicolon && !expect(p, ";"))
+        return false;
+      return true;
+    }
+    bool same_complex_shape =
+        target_agg && value.agg && target_agg->scope_id == SIZE_MAX &&
+        value.agg->scope_id == SIZE_MAX &&
+        target_agg->size == value.agg->size;
+    if (same_complex_shape && value.value >= 0) {
+      if (semicolon && !expect(p, ";"))
+        return false;
+      return lower_copy_struct(p, base, value.value, target_agg->size);
+    }
+    if (target_agg && target_agg->scope_id == SIZE_MAX && value.value >= 0 &&
+        (value.type == C_F32 || value.type == C_F64 ||
+         c_type_is_integer(value.type))) {
+      bool single = target_agg->size == 8;
+      int converted = value.value;
+      if (single && value.type == C_F64)
+        converted = emit_value(p, (nyr_inst_t){.op = NYIR_F64_TO_F32,
+                                               .dst = -1,
+                                               .a = value.value,
+                                               .scalar_class = NYIR_SCALAR_F32});
+      else if (!single && value.type == C_F32)
+        converted = emit_value(p, (nyr_inst_t){.op = NYIR_F32_TO_F64,
+                                               .dst = -1,
+                                               .a = value.value,
+                                               .scalar_class = NYIR_SCALAR_F64});
+      else if (c_type_is_integer(value.type))
+        converted = emit_value(
+            p, (nyr_inst_t){.op = single ? NYIR_I64_TO_F32 : NYIR_I64_TO_F64,
+                            .dst = -1,
+                            .a = value.value,
+                            .scalar_class = single ? NYIR_SCALAR_F32
+                                                   : NYIR_SCALAR_F64});
+      int zero = emit_value(
+          p, (nyr_inst_t){.op = single ? NYIR_CONST_F32 : NYIR_CONST_F64,
+                          .dst = -1,
+                          .imm = 0,
+                          .scalar_class = single ? NYIR_SCALAR_F32
+                                                 : NYIR_SCALAR_F64});
+      int high = lower_add_const(p, base, single ? 4 : 8);
+      bool stored =
+          converted >= 0 && zero >= 0 && high >= 0 &&
+          (single ? lower_store_f32_field(p, base, converted, false) &&
+                        lower_store_f32_field(p, high, zero, false)
+                  : lower_store_field(p, base, converted, true, false) &&
+                        lower_store_field(p, high, zero, true, false));
+      if (!stored)
+        return false;
+      if (semicolon && !expect(p, ";"))
+        return false;
+      return true;
+    }
     if (value.value < 0 || value.type != C_AGG || value.agg != target_agg) {
       if (value.value >= 0) {
         char message[256];
@@ -3185,6 +3455,31 @@ static bool lower_pointer_store(c_parser_t *p, c_value_t address,
     return (!wrapped || expect(p, ")")) && expect(p, ";") &&
            lower_store_pointer_field(p, address.value, value.value, false);
   }
+  if (address.type == C_C64_PTR || address.type == C_C128_PTR ||
+      address.type == C_C_LDOUBLE_PTR) {
+    if (read_only) {
+      fail(p, "cannot assign through a pointer to const complex data");
+      return false;
+    }
+    if (!expect(p, "="))
+      return false;
+    c_value_t value = parse_expr(p, 1);
+    if (value.value < 0)
+      return false;
+    c_type_t complex_type = address.type == C_C64_PTR     ? C_C64
+                            : address.type == C_C128_PTR ? C_C128
+                                                         : C_C_LDOUBLE;
+    c_agg_type_t *complex_agg = c_complex_aggregate(complex_type);
+    if (value.type != C_AGG || !value.agg ||
+        value.agg->scope_id != SIZE_MAX ||
+        value.agg->size != complex_agg->size) {
+      fail(p, "complex pointer assignment requires a matching complex value");
+      return false;
+    }
+    if (!expect(p, ";"))
+      return false;
+    return lower_copy_struct(p, address.value, value.value, complex_agg->size);
+  }
   if (address.type != C_CHAR_PTR && address.type != C_I8_PTR &&
       address.type != C_I32_PTR && address.type != C_U32_PTR &&
       address.type != C_I64_PTR && address.type != C_U64_PTR &&
@@ -3313,8 +3608,10 @@ static bool lower_pointer_store(c_parser_t *p, c_value_t address,
   if (!simple) {
     int old_value =
         address.type == C_I16_PTR || address.type == C_U16_PTR
-            ? lower_load_u16_field(p, address.value, element_type,
-                                   c_value_pointee_volatile(address))
+            ? lower_load_u16_field_seg(
+                  p, address.value, element_type,
+                  c_value_pointee_volatile(address),
+                  c_value_seg_flags(address))
             : emit_value(
                   p,
                   (nyr_inst_t){
@@ -3328,18 +3625,20 @@ static bool lower_pointer_store(c_parser_t *p, c_value_t address,
                                       ? NYIR_EFFECT_VOLATILE
                                       : 0),
                       .flags =
-                          address.type == C_CHAR_PTR || address.type == C_I8_PTR
-                              ? NYIR_INST_F_MEM_BYTE
-                          : (address.type == C_I16_PTR ||
-                             address.type == C_U16_PTR)
-                              ? 0
-                              : (address.type == C_I32_PTR ||
-                                         address.type == C_U32_PTR ||
-                                         address.type == C_F32_PTR ||
-                                         (p->abi == NYC_ABI_I386 &&
-                                          pointer_slot)
-                                     ? NYIR_INST_F_MEM_I32
-                                     : 0),
+                          (unsigned)((address.type == C_CHAR_PTR ||
+                                              address.type == C_I8_PTR
+                                          ? NYIR_INST_F_MEM_BYTE
+                                      : (address.type == C_I16_PTR ||
+                                         address.type == C_U16_PTR)
+                                          ? 0
+                                          : (address.type == C_I32_PTR ||
+                                                     address.type == C_U32_PTR ||
+                                                     address.type == C_F32_PTR ||
+                                                     (p->abi == NYC_ABI_I386 &&
+                                                      pointer_slot)
+                                                 ? NYIR_INST_F_MEM_I32
+                                                 : 0)) |
+                                     c_value_seg_flags(address)),
                       .scalar_class = c_type_is_float(element_type)
                                           ? c_float_scalar_class(element_type)
                                           : NYIR_SCALAR_I64_RAW});
@@ -3403,8 +3702,10 @@ static bool lower_pointer_store(c_parser_t *p, c_value_t address,
   if (!expect(p, ";"))
     return false;
   if (address.type == C_I16_PTR || address.type == C_U16_PTR)
-    return lower_store_u16_field(p, address.value, value.value, element_type,
-                                 c_value_pointee_volatile(address));
+    return lower_store_u16_field_seg(p, address.value, value.value,
+                                     element_type,
+                                     c_value_pointee_volatile(address),
+                                     c_value_seg_flags(address));
   return emit(
       p,
       (nyr_inst_t){
@@ -3417,15 +3718,20 @@ static bool lower_pointer_store(c_parser_t *p, c_value_t address,
               NYIR_EFFECT_WRITE_MEMORY | NYIR_EFFECT_MAY_TRAP |
               (c_value_pointee_volatile(address) ? NYIR_EFFECT_VOLATILE : 0),
           .flags =
-              address.type == C_CHAR_PTR || address.type == C_I8_PTR
-                  ? NYIR_INST_F_MEM_BYTE
-              : address.type == C_I16_PTR || address.type == C_U16_PTR
-                  ? 0
-                  : (address.type == C_I32_PTR || address.type == C_U32_PTR ||
-                             address.type == C_F32_PTR ||
-                             (p->abi == NYC_ABI_I386 && pointer_slot)
-                         ? NYIR_INST_F_MEM_I32
-                         : 0),
+              (unsigned)((address.type == C_CHAR_PTR ||
+                                  address.type == C_I8_PTR
+                              ? NYIR_INST_F_MEM_BYTE
+                          : address.type == C_I16_PTR ||
+                                    address.type == C_U16_PTR
+                              ? 0
+                              : (address.type == C_I32_PTR ||
+                                         address.type == C_U32_PTR ||
+                                         address.type == C_F32_PTR ||
+                                         (p->abi == NYC_ABI_I386 &&
+                                          pointer_slot)
+                                     ? NYIR_INST_F_MEM_I32
+                                     : 0)) |
+                         c_value_seg_flags(address)),
           .scalar_class = c_type_is_float(element_type)
                               ? c_float_scalar_class(element_type)
                               : NYIR_SCALAR_I64_RAW},

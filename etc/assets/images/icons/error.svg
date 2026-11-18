@@ -1,7 +1,3 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
-  <title>Error</title>
-  <desc>Error icon.</desc>
-  <g transform="translate(2.0000 2.0000) scale(1.25000)">
-<circle cx="8" cy="8" r="4" fill="#c6c6ca"/>
-  </g>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+  <path d="M10.3 3.4A2 2 0 0 1 13.7 3.4L22 18A2.3 2.3 0 0 1 20 21.5H4A2.3 2.3 0 0 1 2 18ZM10.7 8V14.2H13.3V8ZM12 16A1.55 1.55 0 1 0 12 19.1A1.55 1.55 0 1 0 12 16Z" fill="#f87171" fill-rule="evenodd"/>
 </svg>

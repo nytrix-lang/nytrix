@@ -24,6 +24,7 @@
  *       -> select(c, add(A, C1), add(B, C2)), each add having no other use.
  *   R4  add(add(b, C1), C2) -> add(b, C1 + C2) when C2 has no other use.
  */
+#include "base/debug.h"
 #include "code/backend/passes/analysis/loop.h"
 #include "code/backend/passes/util.h"
 #include <math.h>
@@ -531,7 +532,9 @@ static bool scf_same_value(const scf_t *s, int a, int b, int depth) {
   }
 }
 
-/* A raw compare or `x & 1` is 0/1, so it is a valid arithmetic operand. */
+/*
+ * A raw compare or `x & 1` is 0/1, so it is a valid arithmetic operand.
+ */
 static bool scf_boolean_value(const scf_t *s, int v) {
   const nyr_inst_t *d = scf_def(s, scf_strip(s, v));
   if (!d)
@@ -548,6 +551,12 @@ static bool scf_boolean_value(const scf_t *s, int v) {
   }
   return d->op == NYIR_CONST_I64 && (d->imm == 0 || d->imm == 1);
 }
+
+#define SCF_TRACE(...)                                                         \
+  do {                                                                         \
+    if (ny_trace_enabled("NY_TRACE_SCF"))                                      \
+      ny_trace_line("SCF", __VA_ARGS__);                                       \
+  } while (0)
 
 static bool scf_round(nyr_func_t *f, bool *changed) {
   scf_t s;
@@ -570,8 +579,16 @@ static bool scf_round(nyr_func_t *f, bool *changed) {
       if (scf_const(&s, in->a, &cond_value)) {
         int taken = cond_value != 0 ? in->b : in->c;
         int dead = cond_value != 0 ? in->c : in->b;
+        SCF_TRACE("R0 @%zu v%d = select const %lld -> v%d", i, in->dst,
+                  (long long)cond_value, taken);
+        /* Save the condition first: nir_make_copy overwrites `a` with the
+         * taken arm, and dropping `in->a` afterwards released the taken
+         * arm's use instead. Its count then reached zero while still live,
+         * R4 treated shared constants as single-use and rewrote them in
+         * place (a swap loop folded to 82 instead of 45). */
+        int cond_use = in->a;
         nir_make_copy(in, taken);
-        scf_drop_use(&s, in->a);
+        scf_drop_use(&s, cond_use);
         scf_drop_use(&s, dead);
         *changed = true;
         continue;
@@ -585,6 +602,8 @@ static bool scf_round(nyr_func_t *f, bool *changed) {
         if ((scf_strip(&s, t->a) == v && scf_const(&s, t->b, &c)) ||
             (scf_strip(&s, t->b) == v && scf_const(&s, t->a, &c))) {
           int ta = t->a, tb = t->b;
+          SCF_TRACE("R1 @%zu v%d: v%d := %lld (eq v%d %lld)", i, in->dst,
+                    in->b, (long long)(k + c), v, (long long)k);
           nir_make_const(t, (int64_t)((uint64_t)k + (uint64_t)c));
           scf_drop_use(&s, ta);
           scf_drop_use(&s, tb);
@@ -612,6 +631,7 @@ static bool scf_round(nyr_func_t *f, bool *changed) {
                 !scf_same_value(&s, base, false_v, 0))
               continue;
             int old_a = in->a, old_b = in->b, old_c = in->c;
+            SCF_TRACE("R5 @%zu v%d = v%d + v%d", i, in->dst, false_v, cond_v);
             in->op = NYIR_ADD_I64;
             in->a = false_v;
             in->b = cond_v;
@@ -643,8 +663,11 @@ static bool scf_round(nyr_func_t *f, bool *changed) {
           const nyr_inst_t *xd = scf_def(&s, x);
           if (!xd || xd->op != NYIR_SELECT_I64 || scf_strip(&s, xd->a) != cond)
             continue;
-          if (scf_retarget_add(&s, av, x, arm ? xd->c : xd->b))
+          if (scf_retarget_add(&s, av, x, arm ? xd->c : xd->b)) {
+            SCF_TRACE("R3 @%zu v%d arm %d: v%d reads v%d instead of v%d", i,
+                      in->dst, arm, av, arm ? xd->c : xd->b, x);
             *changed = true;
+          }
           break;
         }
       }
@@ -653,8 +676,10 @@ static bool scf_round(nyr_func_t *f, bool *changed) {
     /*
      * R4
      */
-    if (in->op == NYIR_ADD_I64 && in->dst >= 0 && scf_merge_add_const(&s, i))
+    if (in->op == NYIR_ADD_I64 && in->dst >= 0 && scf_merge_add_const(&s, i)) {
+      SCF_TRACE("R4 @%zu v%d", i, in->dst);
       *changed = true;
+    }
     /*
      * R2
      */
@@ -674,6 +699,7 @@ static bool scf_round(nyr_func_t *f, bool *changed) {
         continue;
       int ia = in->a, ib = in->b;
       if (ra == rb) {
+        SCF_TRACE("R2 @%zu v%d := %d", i, in->dst, ra);
         nir_make_const(in, ra);
         scf_drop_use(&s, ia);
         scf_drop_use(&s, ib);
@@ -685,6 +711,7 @@ static bool scf_round(nyr_func_t *f, bool *changed) {
         const nyr_inst_t *cd = scf_def(&s, scf_strip(&s, sd->a));
         if (cd && cd->op == NYIR_CMP_I64) {
           int cond = scf_strip(&s, sd->a);
+          SCF_TRACE("R2 @%zu v%d := v%d", i, in->dst, cond);
           scf_add_use(&s, cond);
           nir_make_copy(in, cond);
           scf_drop_use(&s, ia);

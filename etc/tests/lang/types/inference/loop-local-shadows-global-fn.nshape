@@ -1,0 +1,31 @@
+shape test_loop_local_shadows_global_fn {
+  family "types/inference"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+;; A loop-body local must shadow a same-named global function. The loop
+;; guard's operator-overload probe once inferred `m + int(row[2])` before
+;; `row` was bound and reported "index target ... got fn" for valid code.
+fn row(any vt, int y) str { "global" }
+
+fn total() int {
+   def rows = [["a", 1.0, 16], ["b", 2.0, 4]]
+   mut i = 0
+   mut m = 0
+   while i < rows.len {
+      def row = rows[i]
+      m = m + int(row[2])
+      i += 1
+   }
+   m
+}
+
+assert(total() == 20, "loop-local row shadows the global fn row")
+assert(row(0, 0) == "global", "the global fn is still callable")
+print("LOOP-LOCAL-SHADOWS-GLOBAL-FN-OK")
+NY
+}

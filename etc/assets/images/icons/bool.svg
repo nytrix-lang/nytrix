@@ -1,7 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
-  <title>Boolean</title>
-  <desc>Boolean value icon.</desc>
-  <g transform="translate(2.0000 2.0000) scale(1.25000)">
-<path fill="#c6c6ca" d="M0 4v8h2a3 3 0 0 0 2.5-1.346 3 3 0 0 0 4.5.578 3 3 0 0 0 4.5-.578A3 3 0 0 0 16 12v-2a1 1 0 0 1-1-1V4h-2v2.77a3 3 0 0 0-4 0 3 3 0 0 0-4.5.578A3 3 0 0 0 2 6V4zm2 4a1 1 0 0 1 0 2zm5 0a1 1 0 0 1 0 2 1 1 0 0 1 0-2zm4 0a1 1 0 0 1 0 2 1 1 0 0 1 0-2z"/>
-  </g>
-</svg>

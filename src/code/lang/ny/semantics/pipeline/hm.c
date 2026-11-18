@@ -1281,6 +1281,21 @@ static ny_hm_type_t *hm_instantiate(ny_hm_state_t *hm, ny_hm_type_t *scheme) {
 static ny_hm_env_entry_t *
 hm_env_entry_ctx(ny_hm_env_list *env, const char *name, uint32_t syntax_ctx);
 
+static inline void hm_env_bloom_add(ny_hm_env_list *env, uint32_t hash) {
+  env->name_bloom[(hash >> 6) & 511u] |= UINT64_C(1) << (hash & 63u);
+  uint32_t h2 = hash >> 15;
+  env->name_bloom[(h2 >> 6) & 511u] |= UINT64_C(1) << (h2 & 63u);
+}
+
+static inline bool hm_env_bloom_may_have(const ny_hm_env_list *env,
+                                         uint32_t hash) {
+  uint32_t h2 = hash >> 15;
+  return (env->name_bloom[(hash >> 6) & 511u] >> (hash & 63u) & 1u) &&
+         (env->name_bloom[(h2 >> 6) & 511u] >> (h2 & 63u) & 1u);
+}
+
+static inline uint32_t hm_name_hash(const char *name);
+
 static void hm_env_init(ny_hm_state_t *hm, ny_hm_env_list *env) {
   *env = (ny_hm_env_list){0};
   env->generation = ++hm->next_env_generation;
@@ -1306,6 +1321,7 @@ static void hm_env_set_ctx(ny_hm_env_list *env, const char *name,
   }
   ny_hm_env_entry_t new_entry = {
       .name = name, .syntax_ctx = syntax_ctx, .type = type};
+  hm_env_bloom_add(env, hm_name_hash(name));
   vec_push(env, new_entry);
 }
 
@@ -1314,6 +1330,7 @@ static void hm_env_push_ctx(ny_hm_env_list *env, const char *name,
   if (!env || !name || !*name)
     return;
   ny_hm_env_entry_t e = {.name = name, .syntax_ctx = syntax_ctx, .type = type};
+  hm_env_bloom_add(env, hm_name_hash(name));
   vec_push(env, e);
 }
 
@@ -1342,6 +1359,8 @@ hm_env_entry_ctx(ny_hm_env_list *env, const char *name, uint32_t syntax_ctx) {
   if (!env || !name)
     return NULL;
   uint32_t name_hash = hm_name_hash(name);
+  if (!hm_env_bloom_may_have(env, name_hash))
+    return NULL;
   uint64_t cache_key = ((uintptr_t)env >> 4) ^ env->generation ^
                        ((uint64_t)name_hash << 32) ^ syntax_ctx;
   cache_key ^= cache_key >> 30;
@@ -1393,8 +1412,8 @@ hm_env_entry_ctx(ny_hm_env_list *env, const char *name, uint32_t syntax_ctx) {
             .len = env->len,
             .index = i - 1u,
         };
-        return e;
       }
+      return e;
     }
   }
   if (cached) {
@@ -1842,9 +1861,34 @@ static bool hm_refinement_operator_may_be_overloaded(ny_hm_state_t *hm,
         return true;
     return false;
   }
+  bool op_has_impl = false;
+  for (size_t i = 0; cg && i < cg->operators.len && !op_has_impl; ++i)
+    op_has_impl = cg->operators.data[i].op &&
+                  strcmp(cg->operators.data[i].op, op) == 0;
+  if (!op_has_impl)
+    return false;
+  /*
+   * Speculative: the guard's env lacks bindings made later in the region,
+   * so operand names can resolve to unrelated globals. Drop diagnostics.
+   */
+  size_t diag_before = hm->ctx ? hm->ctx->diagnostics.len : 0;
+  size_t fallback_before = hm->ctx ? hm->ctx->fallbacks.len : 0;
   ny_hm_type_t *left_type = hm_infer_expr(hm, env, expr->as.binary.left, NULL);
   ny_hm_type_t *right_type =
       hm_infer_expr(hm, env, expr->as.binary.right, NULL);
+  if (hm->ctx && hm->ctx->diagnostics.len > diag_before) {
+    for (size_t i = diag_before; i < hm->ctx->diagnostics.len; ++i)
+      tp_diag_dispose(&hm->ctx->diagnostics.data[i]);
+    hm->ctx->diagnostics.len = diag_before;
+  }
+  /*
+   * Dynamic-fallback warnings (W2101) are recorded separately.
+   */
+  if (hm->ctx && hm->ctx->fallbacks.len > fallback_before) {
+    for (size_t i = fallback_before; i < hm->ctx->fallbacks.len; ++i)
+      free(hm->ctx->fallbacks.data[i].reason);
+    hm->ctx->fallbacks.len = fallback_before;
+  }
   char *left_name = hm_type_string(hm_prune(left_type));
   char *right_name = hm_type_string(hm_prune(right_type));
   if (!left_name || !right_name || strcmp(left_name, "any") == 0 ||
@@ -2599,7 +2643,7 @@ static bool hm_refinement_local_binding_named(const stmt_t *stmt,
  * is deliberately conservative: it can forgo a proof, but cannot make one
  * unsound.
  */
-#define HM_REFINEMENT_BINDING_MATCH(binding)                                   \
+#define HM_REFINEMENT_BINDING_MATCH(binding)  \
   ((binding) && strcmp((binding), name) == 0)
   switch (stmt->kind) {
   case NY_S_VAR:
@@ -4869,7 +4913,9 @@ static ny_hm_type_t *hm_parse_type_name(ny_hm_state_t *hm, const char *raw,
      */
     bool universe = leaf && strncmp(leaf, "Type", 4) == 0;
     if (universe && leaf[4] == ' ') {
-      /* `Type 3`, a level variable `Type u`, or `Type max(u,3)`. */
+      /*
+       * `Type 3`, a level variable `Type u`, or `Type max(u,3)`.
+       */
       const char *d = leaf + 5;
       universe = *d != '\0';
       for (; universe && *d; ++d)
@@ -5130,6 +5176,20 @@ static void hm_infer_stmt(ny_hm_state_t *hm, ny_hm_env_list *env, stmt_t *s,
 static void hm_infer_stmt_mode(ny_hm_state_t *hm, ny_hm_env_list *env,
                                stmt_t *s, const char *self_name,
                                ny_hm_type_t *ret, bool allow_tail_expr);
+/*
+ * `#main { ... }` parses as `if comptime { return __main() } { ... }`.
+ */
+static bool hm_stmt_is_main_guard(const stmt_t *s) {
+  if (!s || s->kind != NY_S_IF || !s->as.iff.test ||
+      s->as.iff.test->kind != NY_E_COMPTIME)
+    return false;
+  const stmt_t *body = s->as.iff.test->as.comptime_expr.body;
+  if (body && body->kind == NY_S_BLOCK && body->as.block.body.len == 1)
+    body = body->as.block.body.data[0];
+  return body && body->kind == NY_S_RETURN &&
+         ny_expr_is_zero_arg_call_named(body->as.ret.value, "__main");
+}
+
 static void hm_env_clone(ny_hm_state_t *hm, ny_hm_env_list *dst,
                          const ny_hm_env_list *src);
 
@@ -5190,6 +5250,8 @@ static ny_hm_type_t *hm_infer_comptime_expr(ny_hm_state_t *hm,
 static void hm_env_clone(ny_hm_state_t *hm, ny_hm_env_list *dst,
                          const ny_hm_env_list *src) {
   hm_env_init(hm, dst);
+  if (src)
+    memcpy(dst->name_bloom, src->name_bloom, sizeof(dst->name_bloom));
   if (src && src->len) {
     vec_reserve(dst, src->len);
     memcpy(dst->data, src->data, src->len * sizeof(*src->data));
@@ -5202,6 +5264,10 @@ static void hm_env_clone_reuse(ny_hm_state_t *hm, ny_hm_env_list *dst,
   if (!hm || !dst)
     return;
   dst->len = 0;
+  if (src)
+    memcpy(dst->name_bloom, src->name_bloom, sizeof(dst->name_bloom));
+  else
+    memset(dst->name_bloom, 0, sizeof(dst->name_bloom));
   dst->generation = ++hm->next_env_generation;
   if (!dst->generation)
     dst->generation = ++hm->next_env_generation;
@@ -5359,8 +5425,10 @@ static bool hm_index_is_bindable(const enum_def_t *owner,
   return false;
 }
 
-/* Splits the arguments of `Base<a, b>`; returns the count (0 when `text`
- * is not applied). Pointers are into `text`. */
+/*
+ * Splits the arguments of `Base<a, b>`; returns the count (0 when `text`
+ * is not applied). Pointers are into `text`.
+ */
 static size_t hm_index_split_args(const char *text, const char **parts,
                                   size_t *lens, size_t max, size_t *base_len) {
   const char *lt = strchr(text, '<');
@@ -5395,7 +5463,9 @@ static size_t hm_index_split_args(const char *text, const char **parts,
   return n;
 }
 
-/* Binds the names of `tmpl` (a field type) against the actual type text. */
+/*
+ * Binds the names of `tmpl` (a field type) against the actual type text.
+ */
 static bool hm_index_bind(const enum_def_t *owner,
                           const enum_member_def_t *member, const char *tmpl,
                           size_t tlen, const char *actual, size_t alen,
@@ -5411,14 +5481,18 @@ static bool hm_index_bind(const enum_def_t *owner,
   t[tlen] = '\0';
   memcpy(a, actual, alen);
   a[alen] = '\0';
-  /* A bare bindable name. */
+  /*
+   * A bare bindable name.
+   */
   size_t k = 0;
   while (isalnum((unsigned char)t[k]) || t[k] == '_')
     k++;
   if (k == tlen && k > 0 && hm_index_is_bindable(owner, member, t, k)) {
-    /* An actual that is itself an unsolved parameter (`Vec.Nil : Vec<A, 0>`)
+    /*
+     * An actual that is itself an unsolved parameter (`Vec.Nil : Vec<A, 0>`)
      * says nothing; a conflicting binding is left for unification to
-     * report on the field. */
+     * report on the field.
+     */
     if (hm_index_is_bindable(owner, NULL, a, strlen(a)))
       return true;
     char canon[160];
@@ -5426,7 +5500,9 @@ static bool hm_index_bind(const enum_def_t *owner,
     (void)hm_index_map_put(m, t, strchr(a, '<') ? a : canon);
     return true;
   }
-  /* A linear index over a bindable name: `k+1` against `3`. */
+  /*
+   * A linear index over a bindable name: `k+1` against `3`.
+   */
   char var[64], solved[160];
   if ((strchr(t, '+') || strchr(t, '-')) && !strchr(t, '<') &&
       ny_index_solve(t, a, var, sizeof(var), solved, sizeof(solved)) &&
@@ -5434,7 +5510,9 @@ static bool hm_index_bind(const enum_def_t *owner,
     (void)hm_index_map_put(m, var, solved);
     return true;
   }
-  /* Same constructor applied: bind argument-wise. */
+  /*
+   * Same constructor applied: bind argument-wise.
+   */
   const char *tp[16], *ap[16];
   size_t tl[16], al[16], tb = 0, ab = 0;
   size_t tn = hm_index_split_args(t, tp, tl, 16, &tb);
@@ -5446,7 +5524,9 @@ static bool hm_index_bind(const enum_def_t *owner,
   return true;
 }
 
-/* Substitutes bound names into `text` and canonicalizes each index. */
+/*
+ * Substitutes bound names into `text` and canonicalizes each index.
+ */
 static char *hm_index_subst(const char *text, const hm_index_map_t *m) {
   if (!text)
     return NULL;
@@ -5471,7 +5551,9 @@ static char *hm_index_subst(const char *text, const hm_index_map_t *m) {
     out[n++] = *q++;
   }
   out[n] = '\0';
-  /* Canonicalize each top-level generic argument that is an index term. */
+  /*
+   * Canonicalize each top-level generic argument that is an index term.
+   */
   const char *parts[16];
   size_t lens[16], base_len = 0;
   size_t argc = hm_index_split_args(out, parts, lens, 16, &base_len);
@@ -5510,7 +5592,9 @@ static bool hm_index_member_uses_values(const enum_member_def_t *member) {
   return isdigit((unsigned char)c[0]) || strchr(c, '+') || strchr(c, '-');
 }
 
-/* Does any field type of the member name an existential of its evidence? */
+/*
+ * Does any field type of the member name an existential of its evidence?
+ */
 static bool hm_index_member_binds(const enum_def_t *owner,
                                   const enum_member_def_t *member) {
   if (!member)
@@ -5524,7 +5608,6 @@ static bool hm_index_member_binds(const enum_def_t *owner,
   }
   return false;
 }
-
 
 static ny_hm_type_t *hm_adt_field_match_type(ny_hm_state_t *hm,
                                              enum_def_t *owner,
@@ -5598,7 +5681,9 @@ static void hm_refine_match_pattern(ny_hm_state_t *hm, ny_hm_env_list *env,
   if (!ny_expr_call_args(pat, &args, &len))
     return;
   char *subject_name = hm_type_string(subject_t);
-  /* Indexed payloads: solve the evidence against the scrutinee's indices. */
+  /*
+   * Indexed payloads: solve the evidence against the scrutinee's indices.
+   */
   hm_index_map_t index_map = {0};
   bool indexed = owner->type_params.len > 0 && subject_name &&
                  ny_generic_type_base_is(subject_name, owner->name) &&
@@ -5670,8 +5755,10 @@ static bool hm_member_index_matches(ny_hm_state_t *hm, enum_def_t *owner,
       return true;
     bool ok;
     if (hm_index_member_uses_values(member)) {
-      /* Value indices: a literal against a literal decides; a term with a
-       * name could take either value, so the arm stays possible. */
+      /*
+       * Value indices: a literal against a literal decides; a term with a
+       * name could take either value, so the arm stays possible.
+       */
       char an[64], cn[64];
       int64_t ao = 0, co = 0;
       bool a_lin = ny_index_parse(actual, an, sizeof(an), &ao);
@@ -6425,7 +6512,9 @@ static ny_hm_type_t *hm_subst_return_indices(ny_hm_state_t *hm, stmt_t *fn,
     text = next;
   }
   if (text != name) {
-    /* `Vec<int, n + 1>` with n = 0 reads `Vec<int, 1>`. */
+    /*
+     * `Vec<int, n + 1>` with n = 0 reads `Vec<int, 1>`.
+     */
     hm_index_map_t none = {0};
     char *canon = hm_index_subst(text, &none);
     if (canon) {
@@ -6710,8 +6799,10 @@ static bool hm_bind_type_argument(ny_hm_state_t *hm, ny_hm_env_list *env,
     (void)hm_infer_expr(hm, env, arg, self_name);
     return true;
   }
-  /* `id(_, 3)`: a hole for the type argument, filled once the other
-   * arguments have fixed the binder (hm_fill_type_holes). */
+  /*
+   * `id(_, 3)`: a hole for the type argument, filled once the other
+   * arguments have fixed the binder (hm_fill_type_holes).
+   */
   if (arg && arg->kind == NY_E_IDENT && arg->as.ident.name &&
       strcmp(arg->as.ident.name, "_") == 0) {
     if (hm->type_hole_count < 16) {
@@ -6737,8 +6828,10 @@ static bool hm_bind_type_argument(ny_hm_state_t *hm, ny_hm_env_list *env,
   return true;
 }
 
-/* Fills type-argument holes recorded during a call, after its arguments
- * have been unified. An unsolved hole is an error. */
+/*
+ * Fills type-argument holes recorded during a call, after its arguments
+ * have been unified. An unsolved hole is an error.
+ */
 static void hm_fill_type_holes(ny_hm_state_t *hm, size_t from) {
   for (size_t i = from; i < hm->type_hole_count; ++i) {
     expr_t *arg = hm->type_holes[i];
@@ -6956,7 +7049,9 @@ static ny_hm_type_t *hm_builtin_call_type(ny_hm_state_t *hm, const char *name,
       if (lemma && lemma->kind == NY_S_LEMMA && lemma->as.lemma.proposition &&
           claim->as.call.args.len == lemma->as.lemma.params.len) {
         expr_t *conclusion = lemma->as.lemma.proposition;
-        /* `premise -> conclusion` is kept as `!premise || conclusion`. */
+        /*
+         * `premise -> conclusion` is kept as `!premise || conclusion`.
+         */
         if (conclusion->kind == NY_E_BINARY && conclusion->as.binary.op &&
             strcmp(conclusion->as.binary.op, "->") == 0)
           conclusion = conclusion->as.binary.right;
@@ -7011,7 +7106,6 @@ static bool hm_tagged_type_exists(ny_hm_state_t *hm, const char *name) {
   return false;
 }
 
-
 static ny_hm_type_t *
 hm_adt_constructor_type(ny_hm_state_t *hm, ny_hm_env_list *env,
                         enum_def_t *owner, enum_member_def_t *member,
@@ -7035,7 +7129,9 @@ hm_adt_constructor_type(ny_hm_state_t *hm, ny_hm_env_list *env,
                             strlen(got), &map);
       free(got);
     }
-    /* The evidence fixes its parameter from the bound names. */
+    /*
+     * The evidence fixes its parameter from the bound names.
+     */
     if (member->index_constraint_param && member->index_constraint_type) {
       char *value = hm_index_subst(member->index_constraint_type, &map);
       if (value) {
@@ -7053,9 +7149,11 @@ hm_adt_constructor_type(ny_hm_state_t *hm, ny_hm_env_list *env,
       const char *param = owner->type_params.data[p];
       const char *v = param ? hm_index_map_get(&map, param, strlen(param))
                             : NULL;
-      /* An unsolved type parameter is left open (`Vec.Nil` fits any element
+      /*
+       * An unsolved type parameter is left open (`Vec.Nil` fits any element
        * type); an unsolved value index keeps its name, so it can only agree
-       * with itself. */
+       * with itself.
+       */
       bool value_index = false;
       for (size_t k = 0; param && k < owner->members.len; ++k)
         if (owner->members.data[k].index_constraint_param &&
@@ -7171,7 +7269,9 @@ static bool hm_type_text_mentions_index(const char *text, const char *name) {
   return false;
 }
 
-/* Drop the ", " spacing some printers emit so canonical texts compare. */
+/*
+ * Drop the ", " spacing some printers emit so canonical texts compare.
+ */
 static char *hm_proof_compact(const char *text) {
   if (!text)
     return NULL;
@@ -7322,7 +7422,9 @@ static char *hm_subst_param_type_text(ny_hm_state_t *hm, stmt_t *fn,
     free(text);
     return NULL;
   }
-  /* `Vec<int, n + 1>` with n = 1 is `Vec<int, 2>`: fold index arithmetic. */
+  /*
+   * `Vec<int, n + 1>` with n = 1 is `Vec<int, 2>`: fold index arithmetic.
+   */
   hm_index_map_t none = {0};
   char *canon = hm_index_subst(text, &none);
   if (canon) {
@@ -7332,10 +7434,11 @@ static char *hm_subst_param_type_text(ny_hm_state_t *hm, stmt_t *fn,
   return text;
 }
 
-
-/* Binds `name` where it occurs in the type text `tmpl` against `actual`:
+/*
+ * Binds `name` where it occurs in the type text `tmpl` against `actual`:
  * `Fin<n>` against `Fin<5>` gives 5; `Vec<A, n+1>` against `Vec<int, 3>`
- * gives 2. */
+ * gives 2.
+ */
 static bool hm_bind_value_binder(const char *tmpl, size_t tlen,
                                  const char *actual, size_t alen,
                                  const char *name, char *out, size_t cap) {
@@ -7363,8 +7466,10 @@ static bool hm_bind_value_binder(const char *tmpl, size_t tlen,
     int64_t off = 0;
     if (!ny_index_parse(a, an, sizeof(an), &off))
       return false;
-    /* A literal, or exactly a name: the caller's own binder (`n` inside
-     * `fn f{int n}(Vec<A, n> xs)`) is forwarded as a value. */
+    /*
+     * A literal, or exactly a name: the caller's own binder (`n` inside
+     * `fn f{int n}(Vec<A, n> xs)`) is forwarded as a value.
+     */
     if (an[0] && off != 0)
       return false;
     if (an[0])
@@ -7381,8 +7486,10 @@ static bool hm_bind_value_binder(const char *tmpl, size_t tlen,
     int64_t off = 0;
     if (!ny_index_parse(solved, sn, sizeof(sn), &off) || sn[0])
       return false;
-    /* An index written `n + k` is a successor: it never solves to a
-     * negative n (`Vec<A, n + 1>` does not match `Vec<A, 0>`). */
+    /*
+     * An index written `n + k` is a successor: it never solves to a
+     * negative n (`Vec<A, n + 1>` does not match `Vec<A, 0>`).
+     */
     if (off < 0)
       return false;
     snprintf(out, cap, "%lld", (long long)off);
@@ -7394,8 +7501,10 @@ static bool hm_bind_value_binder(const char *tmpl, size_t tlen,
   size_t an2 = hm_index_split_args(a, ap, al, 16, &ab);
   if (!tn || tn != an2)
     return false;
-  /* `Vec<...>` declared in a module matches `ix.Vec<...>` at a use site:
-   * compare the leaf names of the type constructors. */
+  /*
+   * `Vec<...>` declared in a module matches `ix.Vec<...>` at a use site:
+   * compare the leaf names of the type constructors.
+   */
   {
     const char *tl_leaf = t, *al_leaf = a;
     for (size_t i = 0; i < tb; ++i)
@@ -7432,8 +7541,10 @@ static void hm_fill_implicit_binders(ny_hm_state_t *hm, ny_hm_env_list *env,
     implicits++;
   if (implicits == 0)
     return;
-  /* `bound(_, i)`: holes written for the implicit binders are filled the
-   * same way as omitted ones. */
+  /*
+   * `bound(_, i)`: holes written for the implicit binders are filled the
+   * same way as omitted ones.
+   */
   if (args->len == fn->as.fn.params.len) {
     for (size_t k = 0; k < implicits; ++k) {
       const expr_t *a = args->data[k].val;
@@ -7477,7 +7588,9 @@ static void hm_fill_implicit_binders(ny_hm_state_t *hm, ny_hm_env_list *env,
     }
     if (solved && (isalpha((unsigned char)values[k][0]) ||
                    values[k][0] == '_')) {
-      /* A symbolic index is only usable when it names a value in scope. */
+      /*
+       * A symbolic index is only usable when it names a value in scope.
+       */
       ny_hm_type_t *bound = hm_env_get_ctx(env, values[k], tok_ctx);
       solved = bound != NULL;
     }
@@ -7921,7 +8034,9 @@ static ny_hm_type_t *hm_call_named(ny_hm_state_t *hm, ny_hm_env_list *env,
     ny_hm_type_t *arg_t = hm_infer_expr_dynamic_literal_ok(
         hm, env, args->data[i].val, self_name, allow_dynamic_literal_args);
     size_t param = i + offset;
-    /* A type parameter already fixed by an earlier argument of this call. */
+    /*
+     * A type parameter already fixed by an earlier argument of this call.
+     */
     if (param < fn->args.len && scheme && scheme->stmt &&
         scheme->stmt->kind == NY_S_FUNC &&
         param < scheme->stmt->as.fn.erased_param_types.len &&
@@ -8353,7 +8468,9 @@ static ny_hm_type_t *hm_infer_expr_impl(ny_hm_state_t *hm, ny_hm_env_list *env,
                      "compile-time evaluation",
                      e->as.ident.name);
     }
-    /* `?goal`, or an unbound `_` in expression position: a typed hole. */
+    /*
+     * `?goal`, or an unbound `_` in expression position: a typed hole.
+     */
     if (e->as.ident.name &&
         (e->as.ident.name[0] == '?' ||
          (strcmp(e->as.ident.name, "_") == 0 &&
@@ -8824,8 +8941,10 @@ static ny_hm_type_t *hm_infer_expr_impl(ny_hm_state_t *hm, ny_hm_env_list *env,
     if (enum_owner && hm && hm->ctx && hm->ctx->cg && e->as.member.target &&
         e->as.member.target->kind == NY_E_IDENT &&
         e->as.member.target->as.ident.name && e->as.member.name) {
-      /* A nullary constructor with value evidence (`Vec.Nil`) carries its
-       * index: it is a `Vec<A, 0>`, not a bare `Vec`. */
+      /*
+       * A nullary constructor with value evidence (`Vec.Nil`) carries its
+       * index: it is a `Vec<A, 0>`, not a bare `Vec`.
+       */
       char qualified[512];
       snprintf(qualified, sizeof(qualified), "%s.%s",
                e->as.member.target->as.ident.name, e->as.member.name);
@@ -9333,8 +9452,10 @@ static ny_hm_type_t *hm_infer_expr_impl(ny_hm_state_t *hm, ny_hm_env_list *env,
             hm_infer_stmt_mode(hm, &arm_env, arm->conseq, self_name, arm_ret,
                                true);
           } else {
-            /* On this arm the scrutinee is the pattern, so evidence for the
-             * motive at the scrutinee is evidence at the pattern too. */
+            /*
+             * On this arm the scrutinee is the pattern, so evidence for the
+             * motive at the scrutinee is evidence at the pattern too.
+             */
             ny_hm_type_t *got = hm_var(hm);
             hm_infer_stmt_mode(hm, &arm_env, arm->conseq, self_name, got,
                                true);
@@ -9964,7 +10085,9 @@ static void hm_desugar_partial_call(ny_hm_state_t *hm, ny_hm_env_list *env,
       !hm->ctx->cg)
     return;
   expr_t *callee = e->as.call.callee;
-  /* Implicit value binders are filled before the call can look partial. */
+  /*
+   * Implicit value binders are filled before the call can look partial.
+   */
   if (callee->kind == NY_E_IDENT && callee->as.ident.name &&
       !hm_env_get_ctx(env, callee->as.ident.name,
                       callee->as.ident.syntax_ctx)) {
@@ -10874,8 +10997,23 @@ static void hm_infer_stmt_mode(ny_hm_state_t *hm, ny_hm_env_list *env,
       guard_entry->guard_base_type = saved_guard_type;
       guard_entry->type = guard_type;
     }
-    hm_infer_stmt_mode(hm, env, s->as.iff.conseq, self_name, ret,
-                       allow_tail_expr);
+    if (hm_stmt_is_main_guard(s)) {
+      /*
+       * `#main { ... }` is a script entry block, not module scope: its
+       * locals must not become globals of the module. Inferring it in the
+       * module environment made a self-test's `mut c = counter(...)` the
+       * type of an importer's `c` wherever HM met a use before the local
+       * declaration (a nested loop counter typed dict).
+       */
+      ny_hm_env_list main_env;
+      hm_env_clone(hm, &main_env, env);
+      hm_infer_stmt_mode(hm, &main_env, s->as.iff.conseq, self_name, ret,
+                         allow_tail_expr);
+      vec_free(&main_env);
+    } else {
+      hm_infer_stmt_mode(hm, env, s->as.iff.conseq, self_name, ret,
+                         allow_tail_expr);
+    }
     if (guard_entry_idx >= 0 && (size_t)guard_entry_idx < env->len) {
       ny_hm_env_entry_t *restored = &env->data[guard_entry_idx];
       bool invalidated_outer_guard =
@@ -11085,7 +11223,9 @@ static ny_hm_type_t *hm_make_func_type(ny_hm_state_t *hm, stmt_t *fn,
       hm->tvar_types[hm->tvar_count] = hm_var(hm);
       hm->tvar_count++;
     }
-    /* Level variables are instantiated per call like type parameters. */
+    /*
+     * Level variables are instantiated per call like type parameters.
+     */
     for (size_t i = 0; i < fn->as.fn.level_params.len && hm->tvar_count < 16;
          ++i) {
       hm->tvar_names[hm->tvar_count] = fn->as.fn.level_params.data[i];
@@ -11097,8 +11237,10 @@ static ny_hm_type_t *hm_make_func_type(ny_hm_state_t *hm, stmt_t *fn,
     param_t *p = &fn->as.fn.params.data[i];
     const char *type = generic ? fn->as.fn.erased_param_types.data[i]
                                : p->type;
-    /* The explicit binder of `fn id(Type A, A x)`: its argument is a type,
-     * which instantiates `A` at the call. */
+    /*
+     * The explicit binder of `fn id(Type A, A x)`: its argument is a type,
+     * which instantiates `A` at the call.
+     */
     if (generic && type && strncmp(type, "Type", 4) == 0 && p->name) {
       ny_hm_type_t *bound = NULL;
       for (size_t k = 0; k < hm->tvar_count; ++k)
@@ -11107,8 +11249,10 @@ static ny_hm_type_t *hm_make_func_type(ny_hm_state_t *hm, stmt_t *fn,
       if (bound) {
         ny_hm_type_t *binder = hm_name(hm, "Type");
         hm_args_push(hm, binder, bound);
-        /* Second argument: the binder's universe level, a literal or a
-         * level variable (`Type u A`). */
+        /*
+         * Second argument: the binder's universe level, a literal or a
+         * level variable (`Type u A`).
+         */
         const char *level = type[4] == ' ' ? type + 5 : "0";
         ny_hm_type_t *level_t = NULL;
         for (size_t k = 0; k < hm->tvar_count; ++k)
@@ -11312,7 +11456,9 @@ static void hm_infer_function_scheme(ny_hm_state_t *hm, ny_hm_scheme_t *scheme,
   for (size_t i = 0; i < fn->as.fn.params.len; ++i) {
     param_t *p = &fn->as.fn.params.data[i];
     if (i < ft->args.len) {
-      /* Inside the body an explicit binder is its erased value, a `str`. */
+      /*
+       * Inside the body an explicit binder is its erased value, a `str`.
+       */
       ny_hm_type_t *slot = hm_prune(ft->args.data[i]);
       bool binder = slot && slot->kind == NY_HM_NAME && slot->name &&
                     strcmp(slot->name, "Type") == 0 && slot->args.len >= 1;
@@ -11439,7 +11585,9 @@ static void hm_report_holes(ny_hm_state_t *hm) {
   for (size_t h = 0; hm && h < hm->hole_count; ++h) {
     const expr_t *e = hm->holes[h].expr;
     char *ty = hm_type_string(hm_prune(hm->holes[h].type));
-    /* A proof goal reads as its proposition: `proof<0 < y>`. */
+    /*
+     * A proof goal reads as its proposition: `proof<0 < y>`.
+     */
     if (ty && strncmp(ty, "proof<", 6) == 0 && ty[strlen(ty) - 1] == '>') {
       char *canon = ny_strndup(ty + 6, strlen(ty) - 7);
       char *infix = ny_proof_canon_infix(canon);
@@ -11455,9 +11603,13 @@ static void hm_report_holes(ny_hm_state_t *hm) {
       free(infix);
       free(canon);
     }
-    /* An unsolved type variable prints as 'mN: nothing constrained it. */
+    /*
+     * An unsolved type variable prints as 'mN: nothing constrained it.
+     */
     const char *shown = ty && ty[0] && ty[0] != '\'' ? ty : NULL;
-    /* The goal's context: `x : int, s : str`, innermost first. */
+    /*
+     * The goal's context: `x : int, s : str`, innermost first.
+     */
     char context[512];
     size_t used = 0;
     context[0] = '\0';
@@ -11489,14 +11641,14 @@ static void hm_report_holes(ny_hm_state_t *hm) {
 static void hm_run(ny_hm_state_t *hm, ny_tp_ctx_t *ctx) {
   bool trace_timing = ny_env_enabled("NYTRIX_TRACE_TYPE_PIPELINE_TIMING");
   ny_tick_t stage_start = trace_timing ? ny_ticks_now() : 0;
-#define NY_HM_STAGE_TIMED(label)                                               \
-  do {                                                                         \
-    if (trace_timing) {                                                        \
-      ny_tick_t stage_end = ny_ticks_now();                                    \
-      fprintf(stderr, "[type-hm-timing] stage=%s elapsed=%.3f s\n", label,     \
-              ny_ticks_elapsed_sec(stage_start));                              \
-      stage_start = stage_end;                                                 \
-    }                                                                          \
+#define NY_HM_STAGE_TIMED(label)                                           \
+  do {                                                                     \
+    if (trace_timing) {                                                    \
+      ny_tick_t stage_end = ny_ticks_now();                                \
+      fprintf(stderr, "[type-hm-timing] stage=%s elapsed=%.3f s\n", label, \
+              ny_ticks_elapsed_sec(stage_start));                          \
+      stage_start = stage_end;                                             \
+    }                                                                      \
   } while (0)
   memset(hm, 0, sizeof(*hm));
   hm->ctx = ctx;

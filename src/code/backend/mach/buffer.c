@@ -85,6 +85,21 @@ bool nyr_obj_pad_to(nyr_obj_buf_t *b, size_t align) {
   return true;
 }
 
+/*
+ * Padding inside an executable section must decode as instructions: objtool
+ * walks those ranges and rejects a truncated zero run, while 0x90 is a
+ * complete one-byte nop at any alignment.
+ */
+bool nyr_obj_pad_code(nyr_obj_buf_t *b, size_t align) {
+  if (align == 0)
+    return true;
+  while ((b->len % align) != 0) {
+    if (!nyr_obj_u8(b, 0x90))
+      return false;
+  }
+  return true;
+}
+
 bool nyr_obj_zero(nyr_obj_buf_t *b, size_t len) {
   if (!ny_obj_reserve(b, len))
     return false;

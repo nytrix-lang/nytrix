@@ -1,8 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
-  <title id="title1">Interpolation Linear</title>
-  <desc id="desc1">Inter P Linear editor icon. Original asset id: interplinear.</desc>
-  <defs id="defs1" />
-  <g transform="translate(2.0000 7.0000) scale(1.25000)" id="g1">
-    <path d="m 7.4453125,1.1679687 -6,4 A 1,1 0 0 0 1.1679687,6.5546875 1,1 0 0 0 2.5546875,6.8320312 L 8,3.2011719 13.445313,6.8320312 A 1,1 0 0 0 14.832031,6.5546875 1,1 0 0 0 14.554688,5.1679687 l -6.0000005,-4 a 1.0001,1.0001 0 0 0 -1.109375,0 z" id="path1" fill="#c6c6ca" />
-  </g>
-</svg>

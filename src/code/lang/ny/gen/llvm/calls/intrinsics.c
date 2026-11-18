@@ -1027,8 +1027,10 @@ static bool ny_gencall_precheck_safe_raw_memory_api(codegen_t *cg, expr_t *e,
     if (!public_api && !intrinsic)
       continue;
 
-    /* Explicit byte extents are checked before the access at run time.
-     * The -1 compatibility sentinel still needs the ordinary static proof. */
+    /*
+     * Explicit byte extents are checked before the access at run time.
+     * The -1 compatibility sentinel still needs the ordinary static proof.
+     */
     size_t extent_arg = s->store ? 3u : 2u;
     if (public_api && s->width == 1 && c->args.len == extent_arg + 1) {
       int64_t lo = 0, hi = 0;
@@ -1940,10 +1942,10 @@ ny_build_memoized_direct_call(codegen_t *cg, token_t tok, LLVMTypeRef ft,
                               unsigned argc, bool memo_enabled, bool int_only) {
   if (!cg || !cg->builder)
     return 0;
-#define NY_MEMO_FALLBACK_CALL()                                                \
-  do {                                                                         \
-    ny_dbg_loc(cg, tok);                                                       \
-    return LLVMBuildCall2(cg->builder, ft, callee, args, argc, "");            \
+#define NY_MEMO_FALLBACK_CALL()                                     \
+  do {                                                              \
+    ny_dbg_loc(cg, tok);                                            \
+    return LLVMBuildCall2(cg->builder, ft, callee, args, argc, ""); \
   } while (0)
   if (!memo_enabled)
     NY_MEMO_FALLBACK_CALL();

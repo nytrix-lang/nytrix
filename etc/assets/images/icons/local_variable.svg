@@ -1,7 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
-  <title>Local Variable</title>
-  <desc>Local Variable icon.</desc>
-  <g transform="translate(2.0000 2.0000) scale(1.25000)">
-<g fill="#c6c6ca"><path d="M9 5c-4 0-4 6 0 6h2v-6zm0 4c-1.3333 0-1.3333-2 0-2zM14 5c-1.6569 0-3 1.3431-3 3v3h2v-3c0-.55228.44772-1 1-1h1v-2z"/><path d="m1 5v6h2c1.6569 0 3-1.3431 3-3v-3h-2v3c0 0.55228-0.44772 1-1 1v-4z"/></g>
-  </g>
-</svg>

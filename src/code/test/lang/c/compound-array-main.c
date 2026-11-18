@@ -1,3 +1,6 @@
+/*
+ * Entry point for the compound array C front-end test.
+ */
 int nyc_compound_array_a(void);
 int nyc_compound_array_b(void);
 

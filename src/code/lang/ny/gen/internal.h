@@ -788,6 +788,10 @@ bool ny_check_enum_positivity(const program_t *prog);
  * the number of parameters erased. */
 size_t ny_erase_proof_params(program_t *prog, arena_t *arena,
                              const char *main_file);
+/* Removes erased proof parameters and arguments before lowering; returns
+ * the number of parameters erased. */
+size_t ny_erase_proof_params(program_t *prog, arena_t *arena,
+                             const char *main_file);
 /* Rejects erased content (proofs, type values, implicit binders) at FFI
  * boundaries. */
 bool ny_check_erased_representations(const program_t *prog);

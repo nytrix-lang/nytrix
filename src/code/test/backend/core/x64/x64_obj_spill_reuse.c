@@ -65,7 +65,8 @@ static int check(void) {
             nyr_target_info_init(&target, &request) &&
             nyr_x64_obj_append_function_with_frame(
                 &code, defs, &def_count, relocs, &reloc_count, &ir, &target,
-                "spill_reuse", false, true, false, false, err, sizeof(err));
+                "spill_reuse", false, true, false, false, false, false, err,
+                sizeof(err));
   int symbol = -1;
   for (size_t i = 0; ok && i < def_count; ++i) {
     if (strcmp(defs[i].name, "spill_reuse") == 0) {

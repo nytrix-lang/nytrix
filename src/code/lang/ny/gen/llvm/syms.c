@@ -228,6 +228,13 @@ typedef struct ny_sym_state_t {
   bool use_module_ready;
   bool user_use_module_ready;
   bool overload_name_ready;
+  /*
+   * first fun_sigs index per name whose stmt is a function (see
+   * ny_first_func_sig_index); slots hold index + 1
+   */
+  uint32_t *first_func_sig_slots;
+  size_t first_func_sig_cap;
+  size_t first_func_sig_indexed;
 } ny_sym_state_t;
 
 typedef struct ny_lookup_prof_t {
@@ -337,6 +344,7 @@ void ny_sym_state_free(codegen_t *cg) {
   if (!cg || !cg->sym_state)
     return;
   ny_sym_state_t *s = (ny_sym_state_t *)cg->sym_state;
+  free(s->first_func_sig_slots);
   if (s->overload_name_next)
     free(s->overload_name_next);
   free(s);
@@ -381,6 +389,62 @@ static bool ny_global_is_root_user_var(const binding *b) {
          b->stmt_t->kind == NY_S_VAR && !ny_is_stdlib_tok(b->stmt_t->tok);
 }
 
+/*
+ * Index of the first fun_sigs entry named `name` whose statement is a
+ * function, or SIZE_MAX. fun_sigs only grows, so new entries are folded in
+ * as they appear; a shrink rebuilds. Replaces a strcmp scan of every
+ * signature per query (11% of HM inference).
+ */
+static size_t ny_first_func_sig_index(const codegen_t *cg, const char *name) {
+  ny_sym_state_t *st = ny_get_sym_state(cg);
+  size_t len = cg->fun_sigs.len;
+  if (len < st->first_func_sig_indexed || len >= UINT32_MAX) {
+    free(st->first_func_sig_slots);
+    st->first_func_sig_slots = NULL;
+    st->first_func_sig_cap = 0;
+    st->first_func_sig_indexed = 0;
+    if (len >= UINT32_MAX)
+      return SIZE_MAX - 1; /* caller falls back to the scan */
+  }
+  if ((len + 1) * 2 > st->first_func_sig_cap) {
+    size_t cap = st->first_func_sig_cap ? st->first_func_sig_cap : 1024;
+    while (cap < (len + 1) * 2)
+      cap *= 2;
+    uint32_t *slots = calloc(cap, sizeof(*slots));
+    if (!slots)
+      return SIZE_MAX - 1;
+    free(st->first_func_sig_slots);
+    st->first_func_sig_slots = slots;
+    st->first_func_sig_cap = cap;
+    st->first_func_sig_indexed = 0;
+  }
+  size_t mask = st->first_func_sig_cap - 1;
+  for (size_t i = st->first_func_sig_indexed; i < len; ++i) {
+    const fun_sig *sig = &cg->fun_sigs.data[i];
+    if (!sig->name || !sig->stmt_t || sig->stmt_t->kind != NY_S_FUNC)
+      continue;
+    size_t at = ny_hash_name(sig->name, strlen(sig->name)) & mask;
+    for (;; at = (at + 1) & mask) {
+      uint32_t e = st->first_func_sig_slots[at];
+      if (!e) {
+        st->first_func_sig_slots[at] = (uint32_t)(i + 1);
+        break;
+      }
+      if (strcmp(cg->fun_sigs.data[e - 1].name, sig->name) == 0)
+        break; /* keep the first */
+    }
+  }
+  st->first_func_sig_indexed = len;
+  for (size_t at = ny_hash_name(name, strlen(name)) & mask;;
+       at = (at + 1) & mask) {
+    uint32_t e = st->first_func_sig_slots[at];
+    if (!e)
+      return SIZE_MAX;
+    if (strcmp(cg->fun_sigs.data[e - 1].name, name) == 0)
+      return e - 1;
+  }
+}
+
 static bool ny_block_implicit_std_symbol(const codegen_t *cg, const char *query,
                                          const char *candidate_name) {
   if (!ny_user_ctx_is_non_std(cg))
@@ -389,11 +453,16 @@ static bool ny_block_implicit_std_symbol(const codegen_t *cg, const char *query,
     return false;
   if (!candidate_name || !*candidate_name)
     return false;
-  for (size_t i = 0; i < cg->fun_sigs.len; ++i) {
-    const fun_sig *sig = &cg->fun_sigs.data[i];
-    if (sig->name && strcmp(sig->name, candidate_name) == 0 && sig->stmt_t &&
-        sig->stmt_t->kind == NY_S_FUNC)
-      return ny_is_stdlib_tok(sig->stmt_t->tok);
+  size_t first = ny_first_func_sig_index(cg, candidate_name);
+  if (first < cg->fun_sigs.len) {
+    return ny_is_stdlib_tok(cg->fun_sigs.data[first].stmt_t->tok);
+  } else if (first == SIZE_MAX - 1) {
+    for (size_t i = 0; i < cg->fun_sigs.len; ++i) {
+      const fun_sig *sig = &cg->fun_sigs.data[i];
+      if (sig->name && strcmp(sig->name, candidate_name) == 0 &&
+          sig->stmt_t && sig->stmt_t->kind == NY_S_FUNC)
+        return ny_is_stdlib_tok(sig->stmt_t->tok);
+    }
   }
   size_t len = strlen(candidate_name);
   char owner[512];

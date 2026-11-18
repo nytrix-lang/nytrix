@@ -429,8 +429,8 @@ fail:
 }
 
 /* Match NUL-terminated assembly fragments without repeating literal lengths. */
-#define INLINE_ASM_HAS(text)                                                   \
-  (assembly_len >= sizeof(text) - 1 &&                                         \
+#define INLINE_ASM_HAS(text)                               \
+  (assembly_len >= sizeof(text) - 1 &&                     \
    memmem(assembly, assembly_len, text, sizeof(text) - 1))
 
 #endif

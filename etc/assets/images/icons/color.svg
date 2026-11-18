@@ -1,7 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
-  <title>Color</title>
-  <desc>Color icon.</desc>
-  <g transform="translate(2.0000 4.5000) scale(1.25000)">
-<path fill="#c6c6ca" d="M4 4a3 3 0 0 0 0 6h1V8H4a1 1 0 0 1 0-2h1V4z"/><path fill="#c6c6ca" d="M6 2v5a3 3 0 0 0 3 3h1V8H9a1 1 0 0 1-1-1V2z"/><path fill="#c6c6ca" d="M14 4a3 3 0 0 0-3 3v3h2V7a1 1 0 0 1 1-1h1V4z"/>
-  </g>
-</svg>

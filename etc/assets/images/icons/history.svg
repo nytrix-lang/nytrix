@@ -1,7 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
   <title>History</title>
-  <desc>History icon.</desc>
-  <g transform="translate(2.0000 2.0000) scale(1.25000)">
-<path fill="#c6c6ca" d="M5 8a4 4 0 1 1 4 4v2a6 6 0 1 0-6-6H1l3 4 3-4zm3-3h2v2h2v2H8z"/>
-  </g>
+  <desc>History and time icon.</desc>
+  <path fill="#f472b6" fill-rule="evenodd" d="M12 2.6A9.4 9.4 0 1 1 12 21.4A9.4 9.4 0 0 1 12 2.6ZM12 5.2A6.8 6.8 0 1 0 12 18.8A6.8 6.8 0 0 0 12 5.2Z"/>
+  <path fill="#f472b6" d="M11.1 7.2H12.9V12.2H16.2V13.9H11.1Z"/>
 </svg>

@@ -88,7 +88,9 @@ assert(source_output == bundle_output,
 assert(source_output_o3 == bundle_output_o3,
        "first divergent optimized VM opcode region: " +
        first_vm_listing_divergence(source_output_o3, bundle_output_o3))
-assert(source_output.contains("0002  v2=add v0 v1 [abi=i64-raw]"),
+;; Match the executed addition, not its value numbering: -O0 lowering may add
+;; parameter loads and copies before it.
+assert(source_output.contains("=add v") && source_output.contains("ret v"),
        "source O0 VM listing contains the executed addition; output: " +
        str.str_slice(source_output, 0, min(source_output.len, 2048)))
 assert(source_output.contains("result=42"),

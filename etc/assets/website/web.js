@@ -220,32 +220,16 @@ const OVERVIEW_DOC_ROUTES = {
     "learn/status",
     "learn/examples",
     "learn/library",
-    "learn/native",
-    "learn/testing",
     "learn/ui",
-    "learn/comptime",
-    "learn/effect",
-    "learn/ownership",
-    "learn/performance",
-    "learn/tooling",
-    "learn/programs",
-    "learn/troubleshooting",
+    "learn/native",
   ]),
   spec: new Set([
-    "spec/units",
-    "spec/pipeline",
     "spec/syntax",
     "spec/types",
     "spec/values",
-    "spec/memory",
     "spec/functions",
-    "spec/operators",
-    "spec/patterns",
-    "spec/control-flow",
+    "spec/memory",
     "spec/errors",
-    "spec/comptime",
-    "spec/native",
-    "spec/runtime",
   ]),
 };
 const DOC_CARD_SUMMARIES = new Map(
@@ -442,7 +426,7 @@ const markdownDocSummary = (doc) => {
     listFallbacks.find((s) => /[A-Za-z]/.test(s) && s.length >= 24) ||
     stripDocText(paragraphs[0] || listFallbacks[0] || "");
   if (!text) return `${markdownDocLabel(doc)} manual page.`;
-  return text.length > 170 ? `${text.slice(0, 167).trim()}...` : text;
+  return clipSummary(text, 170);
 };
 const markdownDocCardSummary = (doc) => {
   const route = String((doc && doc.name) || "");
@@ -451,8 +435,21 @@ const markdownDocCardSummary = (doc) => {
   let text = markdownDocSummary(doc);
   const sentence = text.match(/^(.{24,92}?[.!?])(?:\s|$)/);
   if (sentence) text = sentence[1];
-  return text.length > 96 ? `${text.slice(0, 93).trim()}...` : text;
+  return clipSummary(text, 96);
 };
+// Shorten a summary without cutting through TeX: a clip inside `$..$` or
+// `\\(..\\)` leaves an unbalanced delimiter MathJax then mis-renders.
+function clipSummary(text, max) {
+  if (text.length <= max) return text;
+  let cut = text.slice(0, max - 3);
+  const opens = (cut.match(/\\\(/g) || []).length;
+  const closes = (cut.match(/\\\)/g) || []).length;
+  if (opens > closes) cut = cut.slice(0, cut.lastIndexOf("\\("));
+  if ((cut.replace(/\\\$/g, "").match(/\$/g) || []).length % 2)
+    cut = cut.slice(0, cut.lastIndexOf("$"));
+  return `${cut.trim()}...`;
+}
+
 const markdownDocLabel = (doc) => {
   const route = String((doc && doc.name) || "");
   return (
@@ -461,91 +458,82 @@ const markdownDocLabel = (doc) => {
   );
 };
 
+const ICON_MASKS =
+  typeof location !== "undefined" && location.protocol !== "file:" &&
+  typeof CSS !== "undefined" && CSS.supports &&
+  (CSS.supports("mask-image", "url(x.svg)") ||
+   CSS.supports("-webkit-mask-image", "url(x.svg)"));
+
 function icon(name, cls = "ico") {
   const safe =
     String(name || "box")
-      .replace(/[^a-z0-9-]/gi, "")
+      .replace(/[^a-z0-9_-]/gi, "")
       .toLowerCase() || "box";
-  return `<img class="${cls} ico-${safe}" src="assets/website/svg/${safe}.svg" alt="" aria-hidden="true">`;
+  const src = `assets/website/svg/${safe}.svg`;
+  // Masked spans take the palette's currentColor (the --ico-* tokens); the
+  // SVG files keep one neutral fill. Browsers refuse CSS masks over file://,
+  // so a page opened from disk keeps the plain image.
+  if (ICON_MASKS)
+    return `<span class="${cls} ico-${safe} ico-mask" style="--ico-src:url('${src}')" aria-hidden="true"></span>`;
+  return `<img class="${cls} ico-${safe}" src="${src}" alt="" aria-hidden="true">`;
 }
 
 const collapseIcon = () =>
   `<span class="collapse-icon">${icon("chevron", "ico ico-xs")}</span>`;
 
+// One distinct icon per manual page; Learn and Specification share an icon
+// only where both pages describe the same subsystem.
+const DOC_ICONS = {
+  readme: "book", overview: "book", index: "book", cookbook: "book", ny: "book",
+  todo: "checklist", contribute: "git_branch", changelog: "history",
+  architecture: "hierarchy", browser: "globe", build: "wrench",
+  comptime: "comptime", concurrency: "timer", currying: "functional",
+  debugging: "debug", effect: "effect", examples: "script",
+  library: "library", measurements: "history", native: "native",
+  networking: "network", numbers: "math", ownership: "lock",
+  packages: "package", performance: "gauge", programs: "mod",
+  proofs: "proof", quirks: "list", repl: "repl", safety: "shield",
+  start: "play", status: "info", testing: "test", tooling: "gear",
+  tour: "route", troubleshooting: "alert", ui: "window",
+  verification: "prover", "control-flow": "workflow", dependent: "dependent",
+  errors: "error", functions: "callable", ir: "compiler", kernel: "kernel",
+  linker: "link", memory: "mem", nyr: "cpu", nytrix: "nytrix",
+  operators: "hash", patterns: "regex", pipeline: "tree", runtime: "runtime",
+  syntax: "code", traits: "reflect", types: "primitives", units: "collections",
+  values: "database",
+};
+
 function docIconName(route) {
   const name = String(route || "").toLowerCase();
   const topic = name.slice(name.lastIndexOf("/") + 1);
-  switch (topic) {
-    case "readme":
-    case "overview":
-    case "index":
-    case "cookbook":
-    case "ny":
-      return "book";
-    case "todo": return "checklist";
-    case "contribute": return "git_branch";
-    case "changelog":
-    case "measurements":
-      return "history";
-    case "architecture":
-    case "pipeline":
-    case "concurrency":
-    case "control-flow":
-      return "workflow";
-    case "debugging": return "bug";
-    case "quirks": return "list";
-    case "repl": return "terminal";
-    case "ui": return "window";
-    case "performance": return "gauge";
-    case "proofs":
-    case "effect":
-    case "traits":
-      return "shield";
-    case "ownership": return "lock";
-    case "build": return "wrench";
-    case "browser": return "globe";
-    case "status": return "info";
-    case "start": return "play";
-    case "programs": return "folder";
-    case "examples":
-    case "syntax":
-    case "functions":
-      return "code";
-    case "numbers":
-    case "operators":
-      return "math";
-    case "values": return "database";
-    case "library": return "library";
-    case "networking": return "network";
-    case "packages": return "package";
-    case "comptime":
-    case "native":
-    case "runtime":
-    case "nyr":
-    case "nytrix":
-      return "cpu";
-    case "errors":
-    case "troubleshooting":
-      return "alert";
-    case "testing": return "check";
-    case "tooling": return "gear";
-    case "types":
-    case "units":
-    case "memory":
-    case "ir":
-      return "layers";
-    case "tour":
-    case "patterns":
-      return "route";
-    case "linker": return "link";
-    default: return "file";
-  }
+  return DOC_ICONS[topic] || "text_file";
 }
+
+// Core modules with a dedicated icon (etc/assets/images/icons/<name>.svg).
+const MODULE_ICONS = new Set([
+  "alloc", "cache", "collections", "common", "compiler", "comptime", "config",
+  "counter", "cps", "debug", "dependent", "dict", "effect", "error", "format",
+  "functional", "general", "indexed", "io", "iter", "kernel", "math", "mem",
+  "mod", "native", "nytrix", "os", "primitives", "progress", "proof",
+  "prover", "query", "reflect", "regex", "runtime", "set", "str", "tactic",
+  "tbuf", "test", "tuple", "unicode", "glob", "inspect", "parser", "report",
+  "term",
+]);
 
 function moduleIconName(route) {
   const r = String(route || "");
   if (r === "Home") return "home";
   if (r === "Tags" || r === "tag") return "tag";
+  if (r === "core") return "nytrix";
+  const segs = r.split(".");
+  // A module's own icon first (core.str, core.math, core.os.io), then the
+  // subsystem heuristics below for deeper families without one.
+  if (segs[0] === "core") {
+    const leaf = segs[segs.length - 1];
+    if (MODULE_ICONS.has(leaf)) return leaf;
+    if (segs.length === 2 && leaf === "set_mod") return "set";
+    if (segs.length === 2 && leaf === "dict_mod") return "dict";
+  }
   if (r.includes(".net.server") || r.includes(".http")) return "server";
   if (
     r.includes(".net.socket") ||
@@ -581,6 +569,17 @@ function moduleIconName(route) {
   if (r.includes(".thread") || r.includes(".async") || r.includes(".time"))
     return "timer";
   if (r.includes(".ffi") || r.includes(".disasm")) return "cpu";
+  if (r.includes(".common") || r === "core.common") return "common";
+  if (r.includes(".config") || r === "core.config") return "config";
+  if (r.includes(".counter") || r === "core.counter") return "counter";
+  if (r.includes(".cps") || r === "core.cps") return "cps";
+  if (r.includes(".error") || r === "core.error") return "error";
+  if (r.includes(".format") || r === "core.format") return "format";
+  if (r.includes(".functional") || r === "core.functional") return "functional";
+  if (r.includes(".general") || r === "core.general") return "general";
+  if (r.includes(".indexed") || r === "core.indexed") return "indexed";
+  if (r.includes(".iter") || r === "core.iter") return "iter";
+  if (r.includes(".mod") || r === "core.mod") return "mod";
   if (r.includes(".process") || r.includes(".io") || r.includes(".term"))
     return "terminal";
   if (r.includes(".os") || r === "core.os") return "terminal";
@@ -594,6 +593,8 @@ function moduleIconName(route) {
   if (r.includes(".tbuf") || r.includes(".buffer")) return "layers";
   if (r.includes(".test") || r.includes(".assert")) return "check";
   if (r.includes(".alloc") || r.includes(".cache")) return "cpu";
+  if (segs[0] === "core" && segs.length > 2 && MODULE_ICONS.has(segs[1]))
+    return segs[1];
   return "box";
 }
 
@@ -965,18 +966,33 @@ function highlightBash(code) {
   return out + esc(code.substring(lastIdx));
 }
 
+// TeX in docs: $$..$$, \\[..\\], \\(..\\), \\begin{env}..\\end{env} and inline
+// $..$ (no space inside the delimiters, so "$5 and $10" stays text). The
+// Markdown passes would otherwise turn `*`, `_` and backticks inside math into
+// markup before MathJax reads it; math is swapped for inert tokens, then put
+// back (HTML-escaped when the source was raw text) after Markdown runs.
+const TEX_MATH =
+  /\$\$[^]+?\$\$|\\\[[^]+?\\\]|\\\([^]+?\\\)|\\begin\{([a-zA-Z*]+)\}[^]*?\\end\{\1\}|(?<![\\$\w])\$(?=[^\s$])[^$\n]+?(?<![\s\\])\$(?![\w$])/g;
+function protectMath(src, escapeOnRestore) {
+  const math = [];
+  const text = String(src || "").replace(TEX_MATH, (m) => {
+    math.push(escapeOnRestore ? esc(m) : m);
+    return `NYMATHTOKEN${math.length - 1}Z`;
+  });
+  const restore = (html) =>
+    math.length ? String(html).replace(/NYMATHTOKEN(\d+)Z/g, (_, i) => math[+i] ?? "") : html;
+  return { text, restore };
+}
+function markdownHtml(src) {
+  const { text, restore } = protectMath(src, true);
+  return DOMPurify.sanitize(restore(marked.parse(text)));
+}
+
 function renderRichDocstring(text) {
   if (!text) return "";
-  let html = esc(text);
-  // Protect TeX delimiters while applying the small Markdown subset below.
-  // Otherwise emphasis/code substitutions can corrupt expressions such as
-  // `\(p \mathbin{\oplus} q\)` before MathJax sees the document.
-  const math = [];
-  html = html.replace(/\\\(([^]*?)\\\)|\\\[([^]*?)\\\]/g, (_, inline, display) => {
-    const token = `\u0000NYMATH${math.length}\u0000`;
-    math.push(display !== undefined ? `\\[${display}\\]` : `\\(${inline}\\)`);
-    return token;
-  });
+  // Protect TeX before the small Markdown subset below (see protectMath).
+  const guarded = protectMath(esc(text), false);
+  let html = guarded.text;
   html = html
     .replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
     .replace(/\*([^*]+)\*/g, "<i>$1</i>")
@@ -993,7 +1009,7 @@ function renderRichDocstring(text) {
       const mod = p1.trim();
       return `<a href="${routeHash(mod)}" onclick="selectModule('${jsArg(mod)}');event.preventDefault();">${esc(mod)}</a>`;
     });
-  html = html.replace(/\u0000NYMATH(\d+)\u0000/g, (_, index) => math[Number(index)]);
+  html = guarded.restore(html);
   return html;
 }
 
@@ -1158,7 +1174,7 @@ function renderModuleDoc(modOrText) {
   if (doc.summary)
     html += `<div class="module-summary">${renderRichDocstring(doc.summary)}</div>`;
   if (doc.markdown)
-    html += `<div class="module-doc-markdown markdown-content">${DOMPurify.sanitize(marked.parse(doc.markdown))}</div>`;
+    html += `<div class="module-doc-markdown markdown-content">${markdownHtml(doc.markdown)}</div>`;
   doc.sections.forEach((section) => {
     html += `<div class="module-doc-section"><div class="module-doc-title">${esc(section.title)}</div><div class="module-doc-body">${renderRichDocstring(section.body)}</div></div>`;
   });
@@ -1765,9 +1781,10 @@ function renderTagSection(depth = 0) {
     const selected = tagEntries.find((entry) => entry.tag === currentTag);
     if (selected) visible.unshift(selected);
   }
-  let html = `<button type="button" class="gtitle is-folder is-root collapsible ${active ? "active" : open ? "open" : ""}" style="--nav-depth: ${depth};" aria-controls="${tagId}" aria-expanded="${open}" onclick="toggleNavCategory('${tagId}')"><span class="nav-label">${icon("tag", "ico nav-ico")}<span>TAGS</span></span>${collapseIcon()}</button>`;
+  // One row: the label toggles the chip cloud, the count opens the full tag
+  // index, and the chevron mirrors the toggle.
+  let html = `<div class="gtitle is-folder is-root collapsible tags-head ${active ? "active" : open ? "open" : ""}" style="--nav-depth: ${depth};"><button type="button" class="nav-label tags-toggle" aria-controls="${tagId}" aria-expanded="${open}" onclick="toggleNavCategory('${tagId}')">${icon("tag", "ico nav-ico")}<span>TAGS</span></button><a class="tag-count tag-count-link ${current === "Tags" ? "active" : ""}" href="${routeHash("tags")}" aria-label="All ${tagEntries.length} tags" aria-current="${current === "Tags" ? "page" : "false"}" onclick="selectTagIndex();event.preventDefault();">${tagEntries.length}</a><button type="button" class="nav-toggle" aria-label="Toggle tags" aria-controls="${tagId}" aria-expanded="${open}" onclick="toggleNavCategory('${tagId}')">${collapseIcon()}</button></div>`;
   html += `<div id="${tagId}" class="collapsible-content ${open ? "active" : ""}" style="--nav-depth: ${depth};">`;
-  html += `<a class="item tags-index-item ${current === "Tags" ? "active" : ""}" aria-current="${current === "Tags" ? "page" : "false"}" href="${routeHash("tags")}" onclick="selectTagIndex();event.preventDefault();" style="--nav-depth: ${depth + 1};"><span class="nav-label">${icon("list", "ico nav-ico")}<span>All tags</span></span><span class="tag-count">${tagEntries.length}</span></a>`;
   html += `<div class="tag-nav-cloud" style="--nav-depth: ${depth + 1};">`;
   visible.forEach((entry) => {
     const itemActive = current === `tag::${entry.tag}`;
@@ -1779,7 +1796,7 @@ function renderTagSection(depth = 0) {
 function renderSourceNavItem(mod, depth) {
   if (!mod || !mod.source) return "";
   const sourceCurrent = current === `${mod.name}::${SOURCE_SYMBOL_ID}`;
-  return `<a class="item is-source ${sourceCurrent ? "active" : ""}" aria-current="${sourceCurrent ? "page" : "false"}" href="${routeHash(mod.name, SOURCE_SYMBOL_ID)}" onclick="selectModule('${jsArg(mod.name)}', '${SOURCE_SYMBOL_ID}');event.preventDefault();" style="--nav-depth: ${depth};"><span class="nav-label">${icon("file", "ico nav-ico")}<span>Source</span></span></a>`;
+  return `<a class="item is-source ${sourceCurrent ? "active" : ""}" aria-current="${sourceCurrent ? "page" : "false"}" href="${routeHash(mod.name, SOURCE_SYMBOL_ID)}" onclick="selectModule('${jsArg(mod.name)}', '${SOURCE_SYMBOL_ID}');event.preventDefault();" style="--nav-depth: ${depth};"><span class="nav-label">${icon("file_code", "ico nav-ico")}<span>Source</span></span></a>`;
 }
 
 function renderSymbolNavItems(mod, depth) {
@@ -1853,7 +1870,7 @@ function renderNav() {
       const active =
         current &&
         (current === groupPath || current.startsWith(groupPath + "/"));
-      html += `<button type="button" class="gtitle is-folder collapsible ${active ? "active" : ""}" style="--nav-depth: ${depth};" aria-controls="${groupId}" aria-expanded="${Boolean(active)}" onclick="toggleNavCategory('${groupId}')"><span class="nav-label">${icon("folder", "ico nav-ico")}<span>${docSegmentNavTitle(entry.key)}</span></span>${collapseIcon()}</button>`;
+      html += `<button type="button" class="gtitle is-folder collapsible ${active ? "active" : ""}" style="--nav-depth: ${depth};" aria-controls="${groupId}" aria-expanded="${Boolean(active)}" onclick="toggleNavCategory('${groupId}')"><span class="nav-label">${icon("hierarchy", "ico nav-ico")}<span>${docSegmentNavTitle(entry.key)}</span></span>${collapseIcon()}</button>`;
       html += `<div id="${groupId}" class="collapsible-content ${active ? "active" : ""}" style="--nav-depth: ${depth};">`;
       html += renderMarkdownDocTree(entry.node, depth + 1);
       html += `</div>`;
@@ -1866,7 +1883,7 @@ function renderNav() {
     const infoId = `nav-info-${depth}`;
     const infoActive = infoDocs.some((doc) => doc.name === current);
     let html = "";
-    html += `<button type="button" class="gtitle is-folder ${depth === 0 ? "is-root" : ""} collapsible ${infoActive ? "active" : ""}" style="--nav-depth: ${depth};" aria-controls="${infoId}" aria-expanded="${infoActive}" onclick="toggleNavCategory('${infoId}')"><span class="nav-label">${icon("folder", "ico nav-ico")}<span>INFO</span></span>${collapseIcon()}</button>`;
+    html += `<button type="button" class="gtitle is-folder ${depth === 0 ? "is-root" : ""} collapsible ${infoActive ? "active" : ""}" style="--nav-depth: ${depth};" aria-controls="${infoId}" aria-expanded="${infoActive}" onclick="toggleNavCategory('${infoId}')"><span class="nav-label">${icon("info", "ico nav-ico")}<span>INFO</span></span>${collapseIcon()}</button>`;
     html += `<div id="${infoId}" class="collapsible-content ${infoActive ? "active" : ""}" style="--nav-depth: ${depth};">`;
     infoDocs.forEach((doc) => {
       const itemActive = current === doc.name;
@@ -1915,6 +1932,23 @@ function renderNav() {
           (overviewMod &&
             overviewMod.markdown_docs.some((d) => d.name === current));
         const hasHomeDocs = miscDocs.length > 0 || infoDocs.length > 0;
+        // At the root, Home is not a folder of its own: its groups (Learn,
+        // Specification, ...) and pages sit directly in the sidebar.
+        if (depth === 0) {
+          if (hasHomeDocs) {
+            const homeDocTree = docTreeCache || buildDocTree(miscDocs);
+            nodeHtml += renderMarkdownDocTree(
+              { entries: homeDocTree.entries.filter((e) => e.type === "group") },
+              depth,
+            );
+            nodeHtml += renderMarkdownDocTree(
+              { entries: homeDocTree.entries.filter((e) => e.type === "doc") },
+              depth,
+            );
+          }
+          nodeHtml += renderInfoSection(depth);
+          return;
+        }
         const homeTag = hasHomeDocs ? "button" : "div";
         nodeHtml += `<${homeTag} class="gtitle is-folder ${depth === 0 ? "is-root" : ""} ${hasHomeDocs ? "collapsible" : ""} ${isActive ? "active" : ""}" style="--nav-depth: ${depth};" ${hasHomeDocs ? `type="button" aria-controls="${categoryId}" aria-expanded="${Boolean(isActive)}" onclick="toggleNavCategory('${categoryId}')"` : ""}><span class="nav-label">${icon("home", "ico nav-ico")}<span>${esc(key)}</span></span>${hasHomeDocs ? collapseIcon() : ""}</${homeTag}>`;
         if (hasHomeDocs) {
@@ -1966,14 +2000,15 @@ function renderNav() {
           currentCategory._modules.length > 0 ||
           Object.keys(currentCategory).some((subKey) => subKey !== "_modules");
         const isActive = isPathActive;
-        const defaultOpen = depth === 0 && key === "std";
+        // The root library namespace stays expanded on every page.
+        const defaultOpen = depth === 0 && (key === "core" || key === "std");
         const isOpen = isActive || defaultOpen;
         const categoryModule = currentCategory._modules.find(
           (m) => m.name === newPath,
         );
         const navTarget = categoryModule ? categoryModule.name : newPath;
 
-        nodeHtml += `<div class="gtitle is-folder ${depth === 0 ? "is-root" : ""} ${hasChildren ? "collapsible" : ""} ${isActive ? "active" : isOpen ? "open" : ""}" style="--nav-depth: ${depth};"><a class="nav-label" aria-current="${current === navTarget ? "page" : "false"}" href="${routeHash(navTarget)}" onclick="selectModule('${jsArg(navTarget)}');event.preventDefault();">${icon("folder", "ico nav-ico")}<span>${highlightNavLabel(key, "module")}</span></a>${hasChildren ? `<button type="button" class="nav-toggle" aria-label="Toggle ${esc(navTarget)} namespace" aria-controls="${categoryId}" aria-expanded="${Boolean(isOpen)}" onclick="toggleNavCategory('${categoryId}')">${collapseIcon()}</button>` : ""}</div>`;
+        nodeHtml += `<div class="gtitle is-folder ${depth === 0 ? "is-root" : ""} ${hasChildren ? "collapsible" : ""} ${isActive ? "active" : isOpen ? "open" : ""}" style="--nav-depth: ${depth};"><a class="nav-label" aria-current="${current === navTarget ? "page" : "false"}" href="${routeHash(navTarget)}" onclick="selectModule('${jsArg(navTarget)}');event.preventDefault();">${icon(moduleIconName(navTarget), "ico nav-ico")}<span>${highlightNavLabel(key, "module")}</span></a>${hasChildren ? `<button type="button" class="nav-toggle" aria-label="Toggle ${esc(navTarget)} namespace" aria-controls="${categoryId}" aria-expanded="${Boolean(isOpen)}" onclick="toggleNavCategory('${categoryId}')">${collapseIcon()}</button>` : ""}</div>`;
         if (hasChildren)
           nodeHtml += `<div id="${categoryId}" class="collapsible-content ${isOpen ? "active" : ""}" style="--nav-depth: ${depth};">`;
 
@@ -2108,7 +2143,7 @@ function renderOverviewBody(source, sections) {
   let match;
   while ((match = marker.exec(source))) {
     const prose = source.slice(start, match.index);
-    if (prose.trim()) html += `<section class="overview-body markdown-content">${DOMPurify.sanitize(marked.parse(prose))}</section>`;
+    if (prose.trim()) html += `<section class="overview-body markdown-content">${markdownHtml(prose)}</section>`;
     try {
       const config = JSON.parse(match[1]);
       const title = String(config.title || "");
@@ -2127,7 +2162,7 @@ function renderOverviewBody(source, sections) {
     start = marker.lastIndex;
   }
   const tail = source.slice(start);
-  if (tail.trim()) html += `<section class="overview-body markdown-content">${DOMPurify.sanitize(marked.parse(tail))}</section>`;
+  if (tail.trim()) html += `<section class="overview-body markdown-content">${markdownHtml(tail)}</section>`;
   if (includeRootReadme && sections.rootReadmeHtml) {
     /* The root README is already the repository's canonical project narrative.
      * Reuse everything after its centered hero. The overview page owns the
@@ -2163,10 +2198,10 @@ function renderDocsHome(overviewMod) {
     ? overviewParts[0].split("<!-- overview:quick-start -->")
     : [];
   const overviewLeadHtml = overviewLeadParts.length
-    ? DOMPurify.sanitize(marked.parse(overviewLeadParts[0]))
+    ? markdownHtml(overviewLeadParts[0])
     : "<p>Read the manual to explore Nytrix.</p>";
   const overviewQuickStartHtml = overviewLeadParts.length > 1
-    ? DOMPurify.sanitize(marked.parse(overviewLeadParts.slice(1).join("<!-- overview:quick-start -->")))
+    ? markdownHtml(overviewLeadParts.slice(1).join("<!-- overview:quick-start -->"))
     : "";
   const overviewBodySource = overviewParts.length > 1
     ? overviewParts.slice(1).join("<!-- overview:body -->")
@@ -2192,7 +2227,7 @@ function renderDocsHome(overviewMod) {
     "book",
   );
   html += `<div class="docs-home">`;
-  html += `<section class="docs-hero"><div class="docs-hero-copy overview-hero-lead"><div class="docs-eyebrow">${icon("zap", "ico ico-xs")}<span>Overview</span></div><div class="overview-source overview-lead markdown-content">${overviewLeadHtml}</div><div class="hero-actions"><a class="hero-action hero-action-github primary" href="https://github.com/nytrix-lang/nytrix" target="_blank" rel="noopener noreferrer">${icon("github", "ico ico-xs")}<span>GitHub</span></a><a class="hero-action hero-action-start" href="${routeHash("learn/start")}" data-select-module="learn/start">${icon("play", "ico ico-xs")}<span>Start</span></a>${renderHeroUpdates()}</div>${overviewQuickStartHtml}</div>${heroPanel}</section>`;
+  html += `<section class="docs-hero"><div class="docs-hero-copy overview-hero-lead"><div class="docs-eyebrow">${icon("zap", "ico ico-xs")}<span>Overview</span></div><div class="overview-source overview-lead markdown-content">${overviewLeadHtml}</div><div class="hero-actions"><a class="hero-action hero-action-github primary" href="https://github.com/nytrix-lang/nytrix" target="_blank" rel="noopener noreferrer">${icon("github", "ico ico-xs")}<span>GitHub</span></a>${renderHeroUpdates()}</div>${overviewQuickStartHtml}</div>${heroPanel}</section>`;
   html += overviewBodyHtml;
   html += `</div>`;
   setHTML("content", html);
@@ -2246,7 +2281,7 @@ function codeBox(code, label = "IMPLEMENTATION") {
 function sourceBox(mod) {
   const source = String((mod && mod.source) || "");
   if (!source.trim()) return "";
-  return `<div class="codebox sourcebox expanded" id="${SOURCE_SYMBOL_ID}" data-module-source><div class="codehd"><span class="source-label">${icon("file", "ico ico-xs")}<span>SOURCE</span></span><button class="copy" data-copy-source>${icon("copy", "ico ico-xs")}<span>COPY SOURCE</span></button></div><pre><code class="language-ny">${highlight(source)}</code></pre></div>`;
+  return `<div class="codebox sourcebox expanded" id="${SOURCE_SYMBOL_ID}" data-module-source><div class="codehd"><span class="source-label">${icon("file_code", "ico ico-xs")}<span>SOURCE</span></span><button class="copy" data-copy-source>${icon("copy", "ico ico-xs")}<span>COPY SOURCE</span></button></div><pre><code class="language-ny">${highlight(source)}</code></pre></div>`;
 }
 
 function setCodeBoxOpen(box, open) {
@@ -2255,7 +2290,7 @@ function setCodeBoxOpen(box, open) {
   box.classList.toggle("expanded", open);
   box.classList.toggle("collapsed", !open);
   const label = btn.dataset.codeLabel || "IMPLEMENTATION";
-  const ico = label === "SOURCE" ? "file" : "code";
+  const ico = label === "SOURCE" ? "file_code" : "code";
   btn.innerHTML = `${icon(ico, "ico ico-xs")}<span>${open ? `HIDE ${label}` : `SHOW ${label}`}</span>`;
   btn.setAttribute("aria-expanded", open ? "true" : "false");
 }
@@ -2274,7 +2309,7 @@ function setAllCode(open) {
 
 function setSourceButtonState(btn, open) {
   if (!btn) return;
-  btn.innerHTML = `${icon("file", "ico ico-xs")}<span>${open ? "HIDE SOURCE" : "SHOW SOURCE"}</span>`;
+  btn.innerHTML = `${icon("file_code", "ico ico-xs")}<span>${open ? "HIDE SOURCE" : "SHOW SOURCE"}</span>`;
   btn.setAttribute("aria-expanded", open ? "true" : "false");
 }
 
@@ -2323,7 +2358,7 @@ function toggleInternalSymbols(btn) {
 
 function moduleToolbar(mod, codeCount, sourceOpen = false, internalCount = 0) {
   const sourceAction = mod.source
-    ? `<button data-source-module="${esc(mod.name)}" aria-expanded="${sourceOpen ? "true" : "false"}">${icon("file", "ico ico-xs")}<span>${sourceOpen ? "HIDE SOURCE" : "SHOW SOURCE"}</span></button>`
+    ? `<button data-source-module="${esc(mod.name)}" aria-expanded="${sourceOpen ? "true" : "false"}">${icon("file_code", "ico ico-xs")}<span>${sourceOpen ? "HIDE SOURCE" : "SHOW SOURCE"}</span></button>`
     : "";
   const internalAction =
     internalCount > 0
@@ -2510,9 +2545,8 @@ function renderOverviewPage(overviewMod, specificDocName = null) {
         (d) => d.name !== "NY" && d.name !== "NYTRIX" && !isOverviewDoc(d),
       );
   docsToRender.forEach((doc) => {
-    const body = DOMPurify.sanitize(
-      doc.format === "html" ? doc.html : marked.parse(doc.html),
-    );
+    const body =
+      doc.format === "html" ? DOMPurify.sanitize(doc.html) : markdownHtml(doc.html);
     const cls = doc.format === "html" ? "html-content" : "markdown-content";
     html += `<div class="md-section" id="md-${esc(doc.name)}" data-doc-route="${esc(doc.name)}"><div class="${cls}">${body}</div></div>`;
   });

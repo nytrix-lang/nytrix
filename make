@@ -6621,9 +6621,263 @@ def run_optcheck(build_root: Path, kind: str, args: list[str]) -> int:
     ok("optcheck: ny-test completed native oracle directory")
     return 0
 
+MEASUREMENT_CHARTS_BEGIN = "<!-- AUTO_MEASUREMENT_CHARTS_BEGIN -->"
+MEASUREMENT_CHARTS_END = "<!-- AUTO_MEASUREMENT_CHARTS_END -->"
+
+
+def _bench_report_rows(path: Path) -> tuple[str, list[dict]]:
+    """(timestamp label, benchmark rows) of one bench-report JSON."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return "", []
+    rows = data.get("benchmarks") if isinstance(data, dict) else None
+    m = re.match(r"bench-(\d{8})-(\d{6})", path.name)
+    label = ""
+    if m:
+        d, t = m.group(1), m.group(2)
+        label = f"{d[4:6]}-{d[6:8]} {t[:2]}:{t[2:4]}"
+    return label, rows if isinstance(rows, list) else []
+
+
+def _ratio_ok(row: dict, key: str, valid_key: str) -> float | None:
+    v = row.get(key)
+    if not isinstance(v, (int, float)) or v <= 0:
+        return None
+    if row.get(valid_key) is False or row.get("checksum_ok") is False:
+        return None
+    return float(v)
+
+
+def _geomean(values: list[float]) -> float | None:
+    vals = [v for v in values if v and v > 0]
+    if not vals:
+        return None
+    import math
+    return math.exp(sum(math.log(v) for v in vals) / len(vals))
+
+
+def _svg_esc(text: str) -> str:
+    return (text.replace("&", "&amp;").replace("<", "&lt;")
+            .replace(">", "&gt;").replace('"', "&quot;"))
+
+
+def _chart_trend(points: list[tuple[str, float | None, float | None, float | None]]) -> str:
+    """Geomean NYR/LLVM/NYC over runs, one polyline per backend."""
+    w, h, left, right, top, bottom = 880, 300, 64, 24, 40, 64
+    vals = [v for p in points for v in p[1:] if v]
+    hi = max(2.0, max(vals) * 1.1) if vals else 2.0
+    lo = 0.8
+    pw, ph = w - left - right, h - top - bottom
+    n = len(points)
+
+    def x(i: int) -> float:
+        return left + (pw * i / (n - 1) if n > 1 else pw / 2)
+
+    def y(v: float) -> float:
+        return top + ph * (1 - (v - lo) / (hi - lo))
+
+    out = [f'<svg width="{w}" height="{h}" viewBox="0 0 {w} {h}" role="img" '
+           'aria-label="Geometric-mean runtime relative to C across benchmark runs">',
+           f'<text x="{w // 2}" y="22" text-anchor="middle" font-size="16" fill="currentColor">'
+           'Geomean runtime vs C, per full run (lower is better)</text>']
+    step = 0.2 if hi <= 2.4 else 0.5
+    t = 1.0
+    while t <= hi + 1e-9:
+        out.append(f'<line x1="{left}" y1="{y(t):.1f}" x2="{w - right}" y2="{y(t):.1f}" '
+                   'stroke="var(--border)" stroke-width="1"/>'
+                   f'<text x="{left - 8}" y="{y(t) + 4:.1f}" text-anchor="end" font-size="11" '
+                   f'fill="var(--muted)">{t:.1f}×</text>')
+        t += step
+    out.append(f'<line x1="{left}" y1="{y(1.2):.1f}" x2="{w - right}" y2="{y(1.2):.1f}" '
+               'stroke="var(--ok)" stroke-width="1.5" stroke-dasharray="5 4"/>'
+               f'<text x="{w - right}" y="{y(1.2) - 5:.1f}" text-anchor="end" font-size="11" '
+               'fill="var(--ok)">1.2× goal</text>')
+    for k, (name, color) in enumerate((("NYR", "var(--c1)"), ("LLVM", "var(--c2)"), ("NYC", "var(--c3)"))):
+        pts = [(x(i), y(p[k + 1])) for i, p in enumerate(points) if p[k + 1]]
+        if len(pts) > 1:
+            out.append(f'<polyline fill="none" stroke="{color}" stroke-width="2.2" '
+                       'stroke-linejoin="round" points="'
+                       + " ".join(f"{a:.1f},{b:.1f}" for a, b in pts) + '"/>')
+        for a, b in pts:
+            out.append(f'<circle cx="{a:.1f}" cy="{b:.1f}" r="3" fill="{color}"/>')
+        lx = left + 16 + k * 110
+        out.append(f'<rect x="{lx}" y="{h - 22}" width="12" height="12" rx="2" fill="{color}"/>'
+                   f'<text x="{lx + 18}" y="{h - 12}" font-size="12" fill="currentColor">{name}</text>')
+    stride = max(1, (n + 9) // 10)
+    for i, p in enumerate(points):
+        if i % stride == 0 or i == n - 1:
+            anchor = "end" if i == n - 1 and n > 1 else "start" if i == 0 and n > 1 else "middle"
+            out.append(f'<text x="{x(i):.1f}" y="{top + ph + 16}" text-anchor="{anchor}" '
+                       f'font-size="10" fill="var(--muted)">{_svg_esc(p[0])}</text>')
+    out.append("</svg>")
+    return "\n".join(out)
+
+
+def _chart_bars(rows: list[tuple[str, float, float]]) -> str:
+    """Latest NYR/C ratio per benchmark, sorted, log-scaled, banded colors."""
+    import math
+    bar, gap, left, right, top = 11, 3, 150, 64, 40
+    w = 880
+    h = top + len(rows) * (bar + gap) + 36
+    cap = 16.0
+    pw = w - left - right
+
+    def x(v: float) -> float:
+        v = min(max(v, 0.125), cap)
+        return left + pw * (math.log2(v) + 3) / (math.log2(cap) + 3)
+
+    out = [f'<svg width="{w}" height="{h}" viewBox="0 0 {w} {h}" role="img" '
+           'aria-label="NYR runtime relative to C for each benchmark">',
+           f'<text x="{w // 2}" y="22" text-anchor="middle" font-size="16" fill="currentColor">'
+           'NYR runtime vs C, latest run (log scale; ≤1.2× green, ≤2× amber, &gt;2× red)</text>']
+    for t in (0.25, 0.5, 1.0, 1.2, 2.0, 4.0, 8.0, 16.0):
+        stroke = "var(--ok)" if t == 1.2 else "var(--border)"
+        dash = ' stroke-dasharray="4 3"' if t == 1.2 else ""
+        out.append(f'<line x1="{x(t):.1f}" y1="{top - 6}" x2="{x(t):.1f}" y2="{h - 30}" '
+                   f'stroke="{stroke}" stroke-width="1"{dash}/>'
+                   f'<text x="{x(t):.1f}" y="{h - 14}" text-anchor="middle" font-size="10" '
+                   f'fill="var(--muted)">{t:g}×</text>')
+    for i, (name, ratio, c_ms) in enumerate(rows):
+        yy = top + i * (bar + gap)
+        color = "var(--ok)" if ratio <= 1.2 else "var(--warn)" if ratio <= 2.0 else "var(--bad)"
+        opacity = "0.55" if c_ms < 1.0 else "1"
+        x0, x1 = x(1.0), x(ratio)
+        a, b = (x0, x1) if x1 >= x0 else (x1, x0)
+        out.append(f'<text x="{left - 6}" y="{yy + bar - 2}" text-anchor="end" font-size="10" '
+                   f'fill="currentColor">{_svg_esc(name)}</text>'
+                   f'<rect x="{a:.1f}" y="{yy}" width="{max(1.5, b - a):.1f}" height="{bar}" rx="2" '
+                   f'fill="{color}" fill-opacity="{opacity}"/>'
+                   f'<text x="{max(x1, x0) + 4:.1f}" y="{yy + bar - 2}" font-size="9" '
+                   f'fill="var(--muted)">{("<0.01" if ratio < 0.01 else f"{ratio:.2f}")}</text>')
+    out.append("</svg>")
+    return "\n".join(out)
+
+
+def _chart_bands(series: list[tuple[str, str, list[float]]]) -> str:
+    """Benchmarks per ratio band, one bar group per band and backend."""
+    bands = [("≤1×", 0, 1.0), ("1–1.2×", 1.0, 1.2), ("1.2–1.5×", 1.2, 1.5),
+             ("1.5–2×", 1.5, 2.0), ("2–4×", 2.0, 4.0), ("&gt;4×", 4.0, 1e18)]
+    counts = [[sum(1 for v in vals if lo < v <= hi or (lo == 0 and v <= hi)) for _, lo, hi in bands]
+              for _, _, vals in series]
+    peak = max([max(c) for c in counts] + [1])
+    w, h, left, top, bottom = 880, 300, 64, 40, 64
+    ph = h - top - bottom
+    group = (w - left - 24) / len(bands)
+    bw = min(34, (group - 16) / max(1, len(series)))
+    out = [f'<svg width="{w}" height="{h}" viewBox="0 0 {w} {h}" role="img" '
+           'aria-label="Benchmarks per runtime-ratio band and backend">',
+           f'<text x="{w // 2}" y="22" text-anchor="middle" font-size="16" fill="currentColor">'
+           'Benchmarks per runtime band vs C, latest run</text>']
+    for gi, (label, _, _) in enumerate(bands):
+        gx = left + gi * group + (group - bw * len(series)) / 2
+        for si, (_, color, _) in enumerate(series):
+            c = counts[si][gi]
+            bh = ph * c / peak
+            bx = gx + si * bw
+            out.append(f'<rect x="{bx:.1f}" y="{top + ph - bh:.1f}" width="{bw - 3:.1f}" '
+                       f'height="{bh:.1f}" rx="3" fill="{color}"/>'
+                       f'<text x="{bx + (bw - 3) / 2:.1f}" y="{top + ph - bh - 4:.1f}" '
+                       f'text-anchor="middle" font-size="10" fill="currentColor">{c}</text>')
+        out.append(f'<text x="{left + gi * group + group / 2:.1f}" y="{top + ph + 16}" '
+                   f'text-anchor="middle" font-size="11" fill="var(--muted)">{label}</text>')
+    for si, (name, color, vals) in enumerate(series):
+        lx = left + 16 + si * 150
+        out.append(f'<rect x="{lx}" y="{h - 22}" width="12" height="12" rx="2" fill="{color}"/>'
+                   f'<text x="{lx + 18}" y="{h - 12}" font-size="12" fill="currentColor">'
+                   f'{name} ({len(vals)})</text>')
+    out.append("</svg>")
+    return "\n".join(out)
+
+
+def render_measurement_charts(build_root: Path, quiet: bool = False) -> bool:
+    """Regenerate the chart overview in docs/learn/measurements.md from every
+    saved bench report (build/bench-reports/bench-*.json)."""
+    doc = ROOT / "docs" / "learn" / "measurements.md"
+    reports = sorted((build_root / "bench-reports").glob("bench-*.json"))
+    runs = []
+    for path in reports:
+        label, rows = _bench_report_rows(path)
+        full = [r for r in rows if isinstance(r, dict)]
+        if len(full) < 60:  # targeted runs are not comparable overviews
+            continue
+        g = [_geomean([v for v in (_ratio_ok(r, k, kv) for r in full) if v])
+             for k, kv in (("native_ratio", "native_ratio_valid"),
+                           ("llvm_ratio", "llvm_ratio_valid"),
+                           ("nyc_c_ratio", "nyc_c_comparable"))]
+        runs.append((path, label, full, g))
+    if not runs:
+        if not quiet:
+            err("measurements: no full bench reports in build/bench-reports")
+        return False
+    runs = runs[-24:]
+    latest_path, latest_label, latest_rows, latest_g = runs[-1]
+    bars = []
+    for r in latest_rows:
+        v = _ratio_ok(r, "native_ratio", "native_ratio_valid")
+        if v is None or r.get("name") in ("empty", "timer-control"):
+            continue
+        name = str(r.get("name", "?"))
+        backend = str(r.get("backend", ""))
+        bars.append((name if backend in ("", "x86_64") else f"{name} ({backend})",
+                     v, float(r.get("c_ms") or 0.0)))
+    seen: dict[str, int] = {}
+    for i, (name, v, c) in enumerate(bars):
+        seen[name] = seen.get(name, 0) + 1
+        if seen[name] > 1:
+            bars[i] = (f"{name} #{seen[name]}", v, c)
+    bars.sort(key=lambda t: t[1])
+    series = []
+    for name, color, key, kv in (("NYR", "var(--c1)", "native_ratio", "native_ratio_valid"),
+                                 ("LLVM", "var(--c2)", "llvm_ratio", "llvm_ratio_valid"),
+                                 ("NYC", "var(--c3)", "nyc_c_ratio", "nyc_c_comparable")):
+        vals = [v for v in (_ratio_ok(r, key, kv) for r in latest_rows) if v]
+        series.append((name, color, vals))
+    gaps = sorted((b for b in bars if b[2] >= 1.0 and b[1] > 1.2), key=lambda t: -t[1])[:15]
+    fmt = lambda v: f"{v:.2f}×" if v else "–"
+    lines = [MEASUREMENT_CHARTS_BEGIN, "",
+             "## Benchmark dashboard", "",
+             f"Generated from {len(runs)} full `./make bench` reports; the latest is "
+             f"`{latest_path.relative_to(build_root.parent) if build_root.parent in latest_path.parents else latest_path.name}` "
+             f"({latest_label}). Ratios are runtime relative to Host C on the same host: "
+             "below `1×` is faster than C. Only checksum-correct, valid comparisons count. "
+             "Wall times on this host are noisy (C references moved up to 2× between runs), "
+             "so read trends, not single points.", "",
+             "| Backend | Geomean vs C | Benchmarks ≤1.2× | Compared |",
+             "|---|---|---|---|"]
+    for (name, _, vals), g in zip(series, latest_g):
+        within = sum(1 for v in vals if v <= 1.2)
+        lines.append(f"| {name} | {fmt(g)} | {within} | {len(vals)} |")
+    lines += ["", _chart_trend([(lab, *g) for _, lab, _, g in runs]), "",
+              _chart_bands(series), "", _chart_bars(bars), "",
+              "### Largest NYR gaps (C reference ≥ 1 ms)", "",
+              "| Benchmark | NYR / C | C time |", "|---|---|---|"]
+    lines += [f"| {n} | {r:.2f}× | {c:.1f} ms |" for n, r, c in gaps]
+    lines += ["", "Bars for workloads whose C reference is under 1 ms are drawn lighter: "
+              "their ratios are dominated by timer resolution.", "", MEASUREMENT_CHARTS_END]
+    block = "\n".join(lines)
+    try:
+        text = doc.read_text(encoding="utf-8")
+    except OSError as exc:
+        err(f"measurements: cannot read {doc}: {exc}")
+        return False
+    if MEASUREMENT_CHARTS_BEGIN in text and MEASUREMENT_CHARTS_END in text:
+        a = text.index(MEASUREMENT_CHARTS_BEGIN)
+        b = text.index(MEASUREMENT_CHARTS_END) + len(MEASUREMENT_CHARTS_END)
+        text = text[:a] + block + text[b:]
+    else:
+        marker = "<!-- AUTO_BENCHMARK_RESULTS_BEGIN -->"
+        at = text.find(marker)
+        text = (text[:at] + block + "\n\n" + text[at:]) if at >= 0 else (text + "\n" + block + "\n")
+    doc.write_text(text, encoding="utf-8")
+    if not quiet:
+        ok(f"measurements: dashboard regenerated from {len(runs)} reports")
+    return True
+
+
 def parse(argv: list[str]) -> tuple[list[str], list[str], int, bool, bool, bool, bool, str | None, bool | None, str | None]:
-    known = {"bench-gcc", "all", "bin", "nyc", "bin-static", "tar", "vendor", "fmt", "std", "std_bc", "core", "core_bc", "test", "repl", "fuzz", "bench", "docs", "web", "web-demos", "web-check", "web-test", "wasm", "c2ny", "py2ny", "install", "uninstall", "clean", "debug", "tidy", "audit", "perf", "profile", "gprof", "asan", "ubsan", "coverage", "optcheck", "analyze", "check", "hooks", "fb", "ny", "run", "release", "static", "deps", "cross", "cross-run", "env", "targets", "doctor", "bench-compare", "stats", "prepare", "bare-payload", "unicode"}
-    _PASSTHROUGH = {"bench-gcc", "fmt", "analyze", "tidy", "audit", "test", "perf", "profile", "docs", "web", "web-demos", "web-check", "web-test", "wasm", "ny", "repl", "gprof", "asan", "ubsan", "fuzz", "bench", "cross", "cross-run", "static", "bin-static", "tar", "vendor", "env", "targets", "doctor", "stats"}
+    known = {"bench-gcc", "all", "bin", "nyc", "bin-static", "tar", "vendor", "fmt", "std", "std_bc", "core", "core_bc", "test", "repl", "fuzz", "bench", "docs", "serve", "web", "web-demos", "web-check", "web-test", "wasm", "c2ny", "py2ny", "install", "uninstall", "clean", "debug", "tidy", "audit", "perf", "profile", "gprof", "asan", "ubsan", "coverage", "optcheck", "analyze", "check", "hooks", "fb", "ny", "run", "release", "static", "deps", "cross", "cross-run", "env", "targets", "doctor", "bench-compare", "stats", "prepare", "bare-payload", "unicode"}
+    _PASSTHROUGH = {"bench-gcc", "fmt", "analyze", "tidy", "audit", "test", "perf", "profile", "docs", "serve", "web", "web-demos", "web-check", "web-test", "wasm", "ny", "repl", "gprof", "asan", "ubsan", "fuzz", "bench", "cross", "cross-run", "static", "bin-static", "tar", "vendor", "env", "targets", "doctor", "stats"}
 
     def looks_like_ny_source(arg: str) -> bool:
         if not arg or arg == "--" or arg.startswith("-"):
@@ -6775,7 +7029,7 @@ def print_help() -> None:
     UI.emit_wrapped("Usage: ", "./make <command> [options]")
     UI.hint("Build: all, bin, nyc, static, tar, vendor, std, std_bc, install, clean")
     UI.hint("Check: fmt, analyze, audit, check, test, bench, perf")
-    UI.hint("Run: ny, repl, run, docs, web, wasm, cross")
+    UI.hint("Run: ny, repl, run, docs, serve, web, wasm, cross")
     UI.hint("Inspect: env, targets, doctor, stats, hooks")
     UI.hint("Options: -j N, -v, --debug, --color MODE, --glyphs MODE")
     UI.hint("Use ./make help <command> for command-specific options.")
@@ -8684,6 +8938,10 @@ def main() -> int:
         "wasm", "cross", "cross-run", "gprof", "perf",
         "docs", "std", "std_bc",
     }
+    if "docs" in cmds:
+        # The portal shows the measurement dashboard; refresh it from the
+        # saved bench reports before the C frontend renders the pages.
+        render_measurement_charts(build_root, quiet=True)
     if cmds and all(cmd in c_owned_commands for cmd in cmds) and make_tool.is_file():
         c_args: list[str] = ["debug"] if debug_kind else []
         c_args.extend(cmds)
@@ -8750,7 +9008,7 @@ def main() -> int:
 
     # Commands that need LLVM/deps (build, test, bench, etc.)
     build_cmds = {"bin", "nyc", "test", "bench", "asan", "ubsan", "debug", "release",
-                  "perf", "profile", "docs", "web", "web-demos", "wasm",
+                  "perf", "profile", "docs", "serve", "web", "web-demos", "wasm",
                   "cross", "cross-run", "fuzz", "repl", "profile", "gprof",
                   "ny", "run", "install", "uninstall", "profile"}
 
@@ -9014,6 +9272,10 @@ def main() -> int:
             rc = bench_gcc_compare(build_root, active_kind, extra)
         elif cmd == "perf":
             rc = run_tool(build_root, active_kind, "ny-perf", extra)
+        elif cmd == "docs" and extra[:1] == ["serve"]:
+            # `./make docs serve [-p PORT]` is the same as `./make serve`.
+            rc = subprocess.run([sys.executable, str(ROOT / "make"), "serve", *extra[1:]],
+                                cwd=str(ROOT)).returncode
         elif cmd == "docs":
             std_file = str(cmake_build_dir(build_root, active_kind) / "core.ny")
             out_dir = str(build_root / "docs")
@@ -9026,6 +9288,111 @@ def main() -> int:
             rc = run_web_check(build_root, active_kind, extra)
         elif cmd == "web-test":
             rc = run_web_test(build_root, active_kind, extra)
+        elif cmd == "serve":
+            port = 8080
+            for k, a in enumerate(extra):
+                if a.startswith("--port="):
+                    port = int(a.split("=", 1)[1])
+                elif a in ("--port", "-p") and k + 1 < len(extra):
+                    port = int(extra[k + 1])
+            std_file = str(cmake_build_dir(build_root, active_kind) / "core.ny")
+            out_dir = str(build_root / "docs")
+            reload_stamp = Path(out_dir) / "__reload.txt"
+
+            def build_served_docs() -> int:
+                """Build the site, then let open pages poll a stamp file and
+                reload themselves when the next rebuild lands."""
+                code = run_tool(build_root, active_kind, "ny-doc", [std_file, "-o", out_dir])
+                if code != 0:
+                    return code
+                reload_stamp.write_text(str(time.time_ns()), encoding="utf-8")
+                index = Path(out_dir) / "index.html"
+                snippet = (
+                    "<script>(()=>{let s=null;setInterval(async()=>{try{"
+                    "const t=await (await fetch('__reload.txt',{cache:'no-store'})).text();"
+                    "if(s!==null&&t!==s)location.reload();s=t;}catch(e){}},1000);})();</script>"
+                )
+                try:
+                    html = index.read_text(encoding="utf-8")
+                    if "__reload.txt" not in html:
+                        index.write_text(html.replace("</body>", snippet + "</body>", 1),
+                                         encoding="utf-8")
+                except OSError:
+                    pass
+                return 0
+
+            rc = build_served_docs()
+            if rc != 0:
+                return rc
+            # Start HTTP server in background
+            ny_bin = resolve_tool_bin(build_root, active_kind, "ny")
+            server = subprocess.Popen(
+                [str(ny_bin), "doc", "-s", "-p", str(port), out_dir],
+                cwd=str(ROOT),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+            log("SERVE", f"docs server on http://127.0.0.1:{port}/ (Ctrl+C to stop)")
+            # Watch docs/, etc/assets/website/, src/cmd/tools/web/ for changes
+            watch_dirs = [
+                ROOT / "docs",
+                ROOT / "lib",
+                ROOT / "etc" / "assets" / "website",
+                ROOT / "etc" / "assets" / "images" / "icons",
+                ROOT / "src" / "cmd" / "tools" / "web",
+            ]
+            mtimes = {}
+            for wd in watch_dirs:
+                if wd.is_dir():
+                    for f in wd.rglob("*"):
+                        if f.is_file():
+                            try:
+                                mtimes[str(f)] = f.stat().st_mtime
+                            except OSError:
+                                pass
+            try:
+                while True:
+                    time.sleep(1.0)
+                    changed = False
+                    for wd in watch_dirs:
+                        if not wd.is_dir():
+                            continue
+                        for f in wd.rglob("*"):
+                            if not f.is_file():
+                                continue
+                            try:
+                                mt = f.stat().st_mtime
+                                key = str(f)
+                                if key not in mtimes:
+                                    mtimes[key] = mt
+                                    changed = True
+                                elif mtimes[key] != mt:
+                                    mtimes[key] = mt
+                                    changed = True
+                            except OSError:
+                                pass
+                    if changed:
+                        log("SERVE", "file change detected, rebuilding docs...")
+                        rc = build_served_docs()
+                        if rc != 0:
+                            log("SERVE", "docs rebuild failed, keeping previous build")
+                        else:
+                            log("SERVE", "docs rebuilt successfully")
+                    # Check if server died
+                    if server.poll() is not None:
+                        log("SERVE", "server exited, stopping")
+                        return server.returncode
+            except KeyboardInterrupt:
+                log("SERVE", "shutting down server...")
+                server.terminate()
+                try:
+                    server.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    server.kill()
+                return 0
         elif cmd == "c2ny":
             if not extra:
                 nyt_err("c2ny", "usage: ./make c2ny <file.c> [-o <out.ny>]")
@@ -9332,6 +9699,13 @@ def main() -> int:
                     cwd=str(ROOT), env=_vendor_env(build_root),
                     suite_lock=bench_run_lock,
                 )
+                full_run = not any(
+                    arg == "--pattern" or arg.startswith("--pattern=") or arg.endswith(".nshape")
+                    or arg == "--list-bench"
+                    for arg in bench_extra
+                )
+                if rc == 0 and full_run:
+                    render_measurement_charts(build_root, quiet=True)
             finally:
                 _remove_suite_files(_trace_snapshot_files(trace_dir))
                 try:

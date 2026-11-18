@@ -182,7 +182,7 @@ typedef struct {
 
 static bool op_is_vec_i64_bin(nyr_op_t op) {
   return op == NYIR_ADD_I64 || op == NYIR_SUB_I64 || op == NYIR_AND_I64 ||
-         op == NYIR_OR_I64 || op == NYIR_XOR_I64;
+         op == NYIR_OR_I64 || op == NYIR_XOR_I64 || op == NYIR_MUL_I64;
 }
 
 static bool op_is_vec_f64_bin(nyr_op_t op) {
@@ -203,6 +203,8 @@ static nyr_op_t vec_i64_bin(nyr_op_t op, int vf) {
       return NYIR_VEC8_OR_I64;
     case NYIR_XOR_I64:
       return NYIR_VEC8_XOR_I64;
+    case NYIR_MUL_I64:
+      return NYIR_VEC8_MUL_I64;
     default:
       return NYIR_NOP;
     }
@@ -1199,6 +1201,18 @@ static bool guarded_induction_range(const nyr_func_t *f, const int *defs,
         continue;
       int cmp_v = nyr_vectorize_resolve_value(f, defs, br->a);
       const nyr_inst_t *cmp = &f->data[(size_t)defs[cmp_v]];
+      /*
+       * Loop headers often test a materialized boolean, `(k < n) != 0`;
+       * look through the zero test to the compare that bounds `k`.
+       */
+      int64_t zero = -1;
+      if (cmp->op == NYIR_CMP_I64 && cmp->cmp == NYIR_CMP_NE &&
+          nyr_const_i64(f, defs, cmp->b, &zero) && zero == 0) {
+        int inner = nyr_vectorize_resolve_value(f, defs, cmp->a);
+        if (inner >= 0 && inner < f->next_value && defs[inner] >= 0 &&
+            f->data[(size_t)defs[inner]].op == NYIR_CMP_I64)
+          cmp = &f->data[(size_t)defs[inner]];
+      }
       int64_t limit = 0;
       bool inclusive = cmp->cmp == NYIR_CMP_LE;
       if (cmp->op != NYIR_CMP_I64 || (cmp->cmp != NYIR_CMP_LT && !inclusive) ||
@@ -2762,6 +2776,11 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
     uint64_t estimated_trip = 0;
     bool is_f64 = false;
     bool is_i64 = false;
+    /*
+     * i64 multiply only exists in the four-lane VEC8 form, so a loop body
+     * that uses it must not be narrowed to the two-lane VEC4 width later.
+     */
+    bool has_i64_mul = false;
     nyr_op_t vload_op = NYIR_NOP, vstore_op = NYIR_NOP;
     if (is_var_trip) {
       /*
@@ -2869,6 +2888,29 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
         this_reduction_f64 = back_def->op == NYIR_ADD_F64;
       }
       /*
+       * An affine recurrence with a constant stride is an address IV, not a
+       * reduction, even though `phi + constant` also matches the reduction
+       * shape.  Earlier loop passes materialize byte offsets such as
+       * `off = off + 8`; reducing those back to a scalar would sum every
+       * lane of the vector register and poison the next iteration's
+       * address.  Prefer the affine interpretation first: a genuine
+       * reduction accumulates a loop-varying term, which affine_value
+       * rejects, and `sum += constant` remains correct when advanced by
+       * vf * stride in the scalar latch.
+       */
+      affine_t extra = affine_value(f, defs, &cfg, in_loop, phi->dst, iv, 0);
+      bool affine_extra = extra.ok && extra.root < 0 && extra.stride != 0;
+      if (affine_extra) {
+        if (extra_phi_dst >= 0) {
+          extra_phi = true;
+          break;
+        }
+        extra_phi_dst = phi->dst;
+        extra_update_idx = (size_t)defs[back_in];
+        extra_step = extra.stride;
+        continue;
+      }
+      /*
        * The vector reduction takes the original scalar PHI as its seed, so
        * the seed may be loop-invariant state carried from an enclosing loop.
        * Requiring a literal initializer unnecessarily blocked reductions in
@@ -2887,15 +2929,8 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
         reduction_f64 = this_reduction_f64;
         continue;
       }
-      affine_t extra = affine_value(f, defs, &cfg, in_loop, phi->dst, iv, 0);
-      if (!extra.ok || extra.root >= 0 || extra.stride == 0 ||
-          extra_phi_dst >= 0) {
-        extra_phi = true;
-        break;
-      }
-      extra_phi_dst = phi->dst;
-      extra_update_idx = (size_t)defs[back_in];
-      extra_step = extra.stride;
+      extra_phi = true;
+      break;
     }
     if (extra_phi) {
       f->vectorize_rejected_loops++;
@@ -3046,6 +3081,18 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
         bool vb =
             in->b >= 0 && (size_t)in->b < scalar_value_count && vec[in->b];
         if (va || vb) {
+          /*
+           * Packed i64 multiply exists only as the four-lane VEC8 form (an
+           * AVX2 VPMULUDQ sequence, or per-lane imul in the fallbacks).
+           * Only reject if the multiply would actually be vectorized.
+           */
+          if (in->op == NYIR_MUL_I64 &&
+              (vf != 4 || getenv("NYTRIX_NO_VEC_MUL_I64"))) {
+            bad = true;
+            reject_reason = "i64 multiply needs the four-lane vector form";
+            reject_pc = i;
+            break;
+          }
           if (!va) {
             if (in->a < 0 || (size_t)in->a >= scalar_value_count ||
                 value_defined_in_loop(f, defs, &cfg, in_loop, in->a)) {
@@ -3069,6 +3116,8 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
           vec[in->dst] = true;
           rewrite[i] = true;
           is_i64 = true;
+          if (in->op == NYIR_MUL_I64)
+            has_i64_mul = true;
           vec_ops++;
         }
         continue;
@@ -3172,7 +3221,18 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
           needs_broadcast = true;
           break;
         }
-      if (needs_broadcast && !supports_vec8_i64_broadcast) {
+      if (needs_broadcast && !supports_vec8_i64_broadcast && has_i64_mul) {
+        /*
+         * There is no two-lane i64 multiply to pair with the portable
+         * 128-bit broadcast, so leave this loop scalar instead of emitting
+         * an opcode the vectorizer cannot lower.
+         */
+        bad = true;
+        reject_reason =
+            "i64 multiply needs the four-lane vector form, which this "
+            "target's i64 broadcast does not support";
+        reject_pc = head_idx;
+      } else if (needs_broadcast && !supports_vec8_i64_broadcast) {
         /*
          * NYIR currently has a portable 128-bit i64 broadcast.  Prefer a
          * legal two-lane vector over rejecting the loop entirely; the wider
@@ -3202,7 +3262,7 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
             head_idx, (unsigned long long)estimated_trip,
             is_var_trip ? "yes" : "no", vec_loads, vec_stores, vec_ops,
             (unsigned long long)cost4, (unsigned long long)cost2);
-      if (cost2 < cost4) {
+      if (cost2 < cost4 && !has_i64_mul) {
         vf = 2;
         vload_op = NYIR_VEC4_LOAD_I64;
         vstore_op = NYIR_VEC4_STORE_I64;
@@ -3229,7 +3289,7 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
                             fixed_trip >= 4 && fixed_trip % 4 == 0;
     if (!bad && reduction_phi_dst >= 0 && !reduction_f64 && !is_var_trip &&
         fixed_trip >= 2 && fixed_trip % 2 == 0 && !keep_four_lane_reduction &&
-        !wide_accumulator) {
+        !wide_accumulator && !has_i64_mul) {
       vf = 2;
       vload_op = NYIR_VEC4_LOAD_I64;
       vstore_op = NYIR_VEC4_STORE_I64;

@@ -1,3 +1,6 @@
+/*
+ * C front-end regression test: i386 main entry.
+ */
 extern int main(void);
 
 void _start(void) {

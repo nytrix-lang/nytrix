@@ -311,8 +311,10 @@ typedef struct tp_requires_proof_ctx_t {
 typedef struct tp_param_mutation_scan_t {
   codegen_t *cg;
   const expr_t *premise;
-  /* The premise reads only names and arithmetic over them: a callee that
-   * writes memory cannot change it, only a rebinding of those names can. */
+  /*
+   * The premise reads only names and arithmetic over them: a callee that
+   * writes memory cannot change it, only a rebinding of those names can.
+   */
   bool names_only;
   bool invalidated;
 } tp_param_mutation_scan_t;
@@ -335,7 +337,9 @@ static bool tp_premise_reads_names_only(const expr_t *e, unsigned depth) {
     return tp_premise_reads_names_only(e->as.logical.left, depth + 1) &&
            tp_premise_reads_names_only(e->as.logical.right, depth + 1);
   case NY_E_CALL:
-    /* `decreases(measure(a, b))`: the lexicographic tuple of names. */
+    /*
+     * `decreases(measure(a, b))`: the lexicographic tuple of names.
+     */
     if (!e->as.call.callee || e->as.call.callee->kind != NY_E_IDENT ||
         !e->as.call.callee->as.ident.name ||
         strcmp(e->as.call.callee->as.ident.name, "measure") != 0)
@@ -1898,8 +1902,10 @@ tp_proof_record_status_json(ny_tp_json_t *j, bool decided,
     tp_json_str(j, "unknown");
   else
     tp_append(j, "null");
-  /* The bounded solver decides these; it is automation, not the kernel.
-   * Equality rules and refl are checked as proposition terms instead. */
+  /*
+   * The bounded solver decides these; it is automation, not the kernel.
+   * Equality rules and refl are checked as proposition terms instead.
+   */
   tp_append(j, ",\"authority\":\"automation\"}");
 }
 
@@ -2126,7 +2132,9 @@ static void tp_emit_proof_obligations_json(ny_tp_json_t *j, ny_tp_ctx_t *ctx) {
   tp_append(j, "]}");
 }
 
-/* `Nat.Succ(x)` / `Succ(x)`: building an enum value writes no memory. */
+/*
+ * `Nat.Succ(x)` / `Succ(x)`: building an enum value writes no memory.
+ */
 static bool tp_expr_is_enum_constructor(codegen_t *cg, const expr_t *expr) {
   if (!cg || !expr)
     return false;

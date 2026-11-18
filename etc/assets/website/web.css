@@ -48,6 +48,15 @@
     --ico-system: #c6c6ca;
     --ico-media: #82d8cc;
     --ico-warn: #ff9580;
+    /* Chart tokens used by inline SVG in the measurement docs. Undefined,
+       strokes fell back to black and vanished on the dark background. */
+    --border: #3a3846;
+    --ok: #8bdc9a;
+    --warn: #dbc979;
+    --bad: #ff9580;
+    --c1: #b6a0ff;
+    --c2: #8ccfff;
+    --c3: #8bdc9a;
     --font-ui: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     --font-display: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     --font-text: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -106,6 +115,13 @@
         --ico-system: #4b4852;
         --ico-media: #1f6a60;
         --ico-warn: #a13529;
+        --border: #c9c5d4;
+        --ok: #286b38;
+        --warn: #695400;
+        --bad: #a13529;
+        --c1: #5b3fa0;
+        --c2: #155d83;
+        --c3: #286b38;
     }
 }
 
@@ -196,8 +212,8 @@ input {
 }
 
 .ico {
-    width: 15px;
-    height: 15px;
+    width: 17px;
+    height: 17px;
     display: inline-block;
     flex: 0 0 auto;
     color: currentColor;
@@ -209,19 +225,28 @@ input {
 }
 
 
+.ico-mask {
+    opacity: 1;
+    background-color: currentColor;
+    -webkit-mask: var(--ico-src) center / contain no-repeat;
+    mask: var(--ico-src) center / contain no-repeat;
+}
+
 .ico-xs {
-    width: 17px;
-    height: 17px;
+    width: 18px;
+    height: 18px;
 }
 
 .ico-lg {
-    width: 22px;
-    height: 22px;
+    width: 20px;
+    height: 20px;
 }
 
 .nav-ico {
     color: var(--dim);
     opacity: 0.86;
+    width: 18px;
+    height: 18px;
 }
 
 .ico-home,
@@ -266,14 +291,52 @@ input {
 }
 
 .ico-image,
-.ico-file3d,
+.ico-file_3d,
 .ico-window,
 .ico-sound {
     color: var(--ico-media);
 }
 
+/* Module and manual icon families: one palette token per family so the
+   whole sidebar reads as a set (masked icons take currentColor). */
+.ico-nytrix, .ico-proof, .ico-prover, .ico-tactic, .ico-dependent,
+.ico-kernel, .ico-repl, .ico-script, .ico-mod {
+    color: var(--ico-doc);
+}
+
+.ico-collections, .ico-dict, .ico-set, .ico-tuple, .ico-indexed, .ico-iter,
+.ico-tbuf, .ico-query, .ico-primitives, .ico-str, .ico-unicode, .ico-regex,
+.ico-format, .ico-glob, .ico-parser {
+    color: var(--ico-data);
+}
+
+.ico-io, .ico-os, .ico-runtime, .ico-native, .ico-compiler, .ico-mem,
+.ico-alloc, .ico-cache, .ico-progress, .ico-config, .ico-general,
+.ico-common, .ico-term, .ico-report {
+    color: var(--ico-net);
+}
+
+.ico-functional, .ico-cps, .ico-effect, .ico-comptime, .ico-reflect,
+.ico-counter, .ico-callable, .ico-hash, .ico-inspect {
+    color: var(--ico-math);
+}
+
+.ico-error, .ico-debug {
+    color: var(--ico-warn);
+}
+
+.ico-test, .ico-gauge, .ico-history {
+    color: var(--ico-media);
+}
+
 .ico-alert {
     color: var(--ico-warn);
+}
+
+.ico-git_branch,
+.ico-github,
+.ico-rss {
+    color: var(--ico-net);
 }
 
 .ico-box,
@@ -610,10 +673,10 @@ aside.active {
 .gtitle,
 .item {
     position: relative;
-    min-height: 26px;
+    min-height: 22px;
     display: flex;
     align-items: center;
-    gap: 7px;
+    gap: 5px;
     border-radius: var(--radius);
     color: var(--muted);
     transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
@@ -621,28 +684,73 @@ aside.active {
 
 .gtitle {
     width: 100%;
-    margin: 1px 0;
-    padding: 5px 7px;
+    margin: 0.5px 0;
+    padding: 3px 6px;
     border: 1px solid transparent;
     background: transparent;
     text-align: left;
-    font: 730 10.5px var(--font-text);
+    font: 730 10px var(--font-text);
 }
 
-#nav .gtitle,
-#nav .item,
-#nav .tag-nav-cloud {
-    padding-left: calc(12px + var(--nav-depth, 0) * 12px);
+#nav > .gtitle,
+#nav > .item,
+#nav > .tag-nav-cloud {
+    padding-left: 0;
+    padding-right: 4px;
+    margin: 0.5px 0;
+    gap: 4px;
+}
+
+#nav > .gtitle {
+    padding: 2px 4px;
+}
+
+#nav > .item {
+    padding: 2px 4px;
+}
+
+#nav > .gtitle .nav-label,
+#nav > .item .nav-label {
+    gap: 4px;
+}
+
+#nav > .gtitle .nav-ico,
+#nav > .item .nav-ico {
+    width: 14px;
+    height: 14px;
+}
+
+.collapsible-content.active {
+    display: block;
+}
+
+.tag-count-link {
+    color: var(--dim);
+    text-decoration: none;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 1px 4px;
+    border-radius: var(--radius);
+    background: var(--panel-deep);
+    margin-left: 4px;
+    border: 1px solid transparent;
+    transition: background 0.14s ease, border-color 0.14s ease, color 0.14s ease;
+}
+
+.tag-count-link:hover {
+    background: var(--chip);
+    border-color: var(--line2);
+    color: var(--ink);
 }
 
 .gtitle.is-folder {
-    min-height: 30px;
-    font-size: 11.5px;
+    min-height: 26px;
+    font-size: 11px;
     font-weight: 750;
 }
 
 .gtitle.is-module {
-    font-size: 11.5px;
+    font-size: 11px;
     font-weight: 500;
 }
 
@@ -655,8 +763,8 @@ aside.active {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    flex: 0 0 24px;
-    min-height: 24px;
+    flex: 0 0 20px;
+    min-height: 20px;
     padding: 0;
     border: 0;
     background: transparent;
@@ -685,9 +793,9 @@ aside.active {
 }
 
 .gtitle.is-root {
-    margin-top: 6px;
-    padding-top: 7px;
-    padding-bottom: 7px;
+    margin-top: 4px;
+    padding-top: 5px;
+    padding-bottom: 5px;
     color: var(--muted);
     font-weight: 800;
     background: var(--panel);
@@ -695,11 +803,11 @@ aside.active {
 }
 
 .item {
-    margin: 1px 0;
-    padding: 4px 7px;
+    margin: 0.5px 0;
+    padding: 3px 6px;
     border: 1px solid transparent;
     border-left: 2px solid transparent;
-    font: 500 11.5px var(--font-text);
+    font: 500 11px var(--font-text);
 }
 
 .item:hover {
@@ -737,7 +845,7 @@ aside.active {
 .nav-label {
     display: flex;
     align-items: center;
-    gap: 7px;
+    gap: 5px;
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -847,17 +955,6 @@ aside.active {
     display: none;
 }
 
-#nav .collapsible-content::before {
-    content: "";
-    position: absolute;
-    top: 3px;
-    bottom: 6px;
-    left: calc(20px + var(--nav-depth, 0) * 12px);
-    width: 1px;
-    background: var(--line2);
-    pointer-events: none;
-}
-
 .collapsible-content.active {
     display: block;
 }
@@ -868,7 +965,7 @@ main {
     min-width: 0;
     height: 100vh;
     overflow: auto;
-    padding: 48px 14px 58px;
+    padding: 28px 16px 40px;
     scroll-padding-top: 20px;
     transition: transform 0.18s ease;
 }
@@ -883,8 +980,8 @@ main.aside-active {
 }
 
 .header {
-    margin-bottom: 14px;
-    padding-bottom: 12px;
+    margin-bottom: 10px;
+    padding-bottom: 10px;
     border-bottom: 1px solid var(--line);
 }
 
@@ -914,28 +1011,28 @@ main.aside-active {
 
 .desc {
     max-width: 78ch;
-    margin-top: 8px;
+    margin-top: 6px;
     color: var(--muted);
     font: 450 14px/1.55 var(--font-text);
 }
 
 .stats {
-    margin-top: 10px;
+    margin-top: 6px;
     color: var(--dim);
     font: 700 12px var(--font-mono);
 }
 
 .docs-home {
     display: grid;
-    gap: 14px;
+    gap: 10px;
 }
 
 .docs-hero {
     display: grid;
     grid-template-columns: minmax(0, 1.05fr) minmax(420px, .95fr);
-    gap: 18px;
+    gap: 14px;
     align-items: center;
-    padding: 18px;
+    padding: 14px;
     border: 1px solid var(--line);
     border-radius: var(--radius);
     background: var(--panel);
@@ -943,7 +1040,7 @@ main.aside-active {
 
 .docs-hero-aside {
     display: grid;
-    gap: 8px;
+    gap: 6px;
     min-width: 0;
     width: 100%;
     align-content: center;
@@ -1013,7 +1110,7 @@ main.aside-active {
     min-width: 0;
     max-width: 100%;
     overflow: auto;
-    padding: 12px;
+    padding: 10px;
     border: 1px solid var(--line);
     border-radius: var(--radius);
     background: var(--code);
@@ -1025,8 +1122,8 @@ main.aside-active {
 .quick-start-list {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px;
-    margin-top: 12px;
+    gap: 5px;
+    margin-top: 10px;
 }
 
 .quick-start-list div {
@@ -1074,15 +1171,15 @@ main.aside-active {
     flex-wrap: wrap;
     align-items: center;
     gap: 6px;
-    margin-top: 12px;
+    margin-top: 10px;
 }
 
 .hero-action {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    min-height: 29px;
-    padding: 5px 9px;
+    min-height: 28px;
+    padding: 4px 8px;
     border: 1px solid var(--line2);
     border-radius: var(--radius);
     background: var(--code);
@@ -1105,18 +1202,17 @@ main.aside-active {
 }
 
 .hero-action-github .ico { opacity: 1; }
-.hero-action-start .ico { opacity: 1; }
 .hero-action-rss .ico { opacity: 1; }
 
 .docs-pitch {
     display: grid;
-    gap: 10px;
+    gap: 8px;
 }
 
 .claim-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-    gap: 7px;
+    gap: 6px;
 }
 
 .claim-card {
@@ -1124,8 +1220,8 @@ main.aside-active {
     grid-template-columns: auto 1fr;
     grid-template-rows: auto 1fr;
     min-width: 0;
-    gap: 5px 8px;
-    min-height: 92px;
+    gap: 4px 8px;
+    min-height: 84px;
     padding: 8px;
     border: 1px solid var(--line);
     border-radius: var(--radius);
@@ -1148,17 +1244,18 @@ main.aside-active {
 
 .doc-card-grid {
     display: grid;
-    grid-template-columns: repeat(7, minmax(0, 1fr));
-    gap: 8px;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 240px));
+    justify-content: center;
+    gap: 10px;
 }
 
 .project-card {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr) auto;
     align-items: center;
-    gap: 10px;
-    min-height: 82px;
-    padding: 10px;
+    gap: 8px;
+    min-height: 74px;
+    padding: 8px 10px;
     border: 1px solid var(--line);
     border-radius: var(--radius);
     background: var(--panel);
@@ -1168,7 +1265,7 @@ main.aside-active {
 .project-card-grid {
     display: grid;
     grid-template-columns: 1fr;
-    gap: 7px;
+    gap: 6px;
 }
 
 .project-card:hover,
@@ -1207,9 +1304,9 @@ main.aside-active {
     grid-template-rows: auto auto 1fr auto;
     min-width: 0;
     max-width: 100%;
-    min-height: 94px;
-    gap: 5px;
-    padding: 7px;
+    min-height: 96px;
+    gap: 4px;
+    padding: 8px;
     border: 1px solid var(--line);
     border-radius: var(--radius);
     background: var(--panel);
@@ -1221,27 +1318,30 @@ main.aside-active {
 .doc-card-top {
     display: flex;
     align-items: center;
-    gap: 7px;
+    gap: 8px;
     min-width: 0;
 }
 
 .card-icon {
-    width: 24px;
-    height: 24px;
-    display: grid;
-    place-items: center;
+    width: 26px;
+    height: 26px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     flex: 0 0 auto;
-    /*
-    border: 1px solid var(--line);
-    border-radius: var(--radius);
-    background: var(--code);
-    */
-    color: var(--muted);
 }
 
 .card-icon .ico {
-    width: 19px;
-    height: 19px;
+    width: 18px;
+    height: 18px;
+    opacity: 1;
+}
+
+.doc-card .doc-card-kicker {
+    color: var(--dim);
+    font: 700 10px/1.2 var(--font-mono);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
 }
 
 .doc-card:hover,
@@ -1258,12 +1358,12 @@ main.aside-active {
 
 .doc-card-title {
     color: var(--ink);
-    font: 720 14.5px/1.2 var(--font-ui);
+    font: 720 14.5px/1.25 var(--font-ui);
 }
 
 .doc-card p {
     color: var(--muted);
-    font: 450 12.5px/1.45 var(--font-text);
+    font: 450 12px/1.45 var(--font-text);
     overflow-wrap: anywhere;
     display: -webkit-box;
     -webkit-line-clamp: 3;
@@ -1281,19 +1381,19 @@ main.aside-active {
 
 .docs-section {
     display: grid;
-    gap: 8px;
+    gap: 6px;
 }
 
 .api-section {
     display: grid;
-    gap: 10px;
-    margin-top: 18px;
+    gap: 8px;
+    margin-top: 14px;
 }
 
 .api-card-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-    gap: 8px;
+    gap: 6px;
 }
 
 .api-card {
@@ -1301,9 +1401,9 @@ main.aside-active {
     grid-template-rows: auto 1fr auto;
     min-width: 0;
     max-width: 100%;
-    min-height: 100px;
-    gap: 6px;
-    padding: 9px;
+    min-height: 92px;
+    gap: 4px;
+    padding: 8px;
     border: 1px solid var(--line);
     border-radius: var(--radius);
     background: var(--panel);
@@ -1371,8 +1471,8 @@ main.aside-active {
     display: flex;
     align-items: end;
     justify-content: space-between;
-    gap: 12px;
-    padding-top: 4px;
+    gap: 10px;
+    padding-top: 2px;
 }
 
 .docs-section-head > span {
@@ -1391,18 +1491,18 @@ main.aside-active {
 }
 
 .docs-section-head p {
-    margin-top: 3px;
+    margin-top: 2px;
     color: var(--dim);
     font: 450 12.5px/1.45 var(--font-text);
 }
 
 .grid {
     display: grid;
-    gap: 10px;
+    gap: 8px;
 }
 
 .module-divider {
-    margin: 28px 0;
+    margin: 18px 0;
     border-top: 1px solid var(--line2);
 }
 
@@ -1410,8 +1510,8 @@ main.aside-active {
     display: block;
     min-width: 0;
     max-width: 100%;
-    min-height: 70px;
-    padding: 7px;
+    min-height: 64px;
+    padding: 6px;
     border: 1px solid var(--line);
     border-radius: var(--radius);
     background: var(--panel);
@@ -1447,8 +1547,8 @@ main.aside-active {
     justify-content: space-between;
     min-width: 0;
     gap: 8px;
-    padding: 5px 6px;
-    margin-bottom: 6px;
+    padding: 4px 6px;
+    margin-bottom: 5px;
     border-radius: var(--radius);
     background: var(--code);
 }
@@ -1478,7 +1578,7 @@ main.aside-active {
 
 .card-body {
     display: grid;
-    gap: 7px;
+    gap: 5px;
 }
 
 .doc-label {
@@ -1514,9 +1614,9 @@ main.aside-active {
 
 .module-doc-panel {
     display: grid;
-    gap: 10px;
-    margin: -6px 0 14px;
-    padding: 9px;
+    gap: 8px;
+    margin: -4px 0 10px;
+    padding: 8px;
     border: 1px solid var(--line);
     border-radius: var(--radius);
     background: var(--panel);
@@ -1664,6 +1764,52 @@ main.aside-active {
     font: 760 13px var(--font-mono);
 }
 
+.tag-module-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+    gap: 8px;
+}
+
+.tag-module-card {
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    min-width: 0;
+    max-width: 100%;
+    min-height: 96px;
+    gap: 5px;
+    padding: 8px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--panel);
+    color: var(--ink);
+    transition: border-color 0.14s ease, background 0.14s ease;
+    contain: content;
+}
+
+.tag-module-card:hover,
+.tag-module-card:focus-visible {
+    border-color: var(--line2);
+    background: var(--chip);
+    outline: none;
+}
+
+.tag-module-card p {
+    color: var(--muted);
+    font: 450 13px/1.5 var(--font-text);
+    overflow-wrap: anywhere;
+}
+
+.tag-module-name {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font: 760 13px var(--font-mono);
+}
+
 .tag-card-tags {
     display: flex;
     flex-wrap: wrap;
@@ -1675,9 +1821,9 @@ main.aside-active {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 12px;
-    margin: -6px 0 14px;
-    padding: 7px 8px;
+    gap: 10px;
+    margin: -4px 0 10px;
+    padding: 6px 8px;
     border: 1px solid var(--line);
     border-radius: var(--radius);
     background: var(--panel);
@@ -1703,7 +1849,7 @@ main.aside-active {
 .tag-index-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-    gap: 8px;
+    gap: 6px;
 }
 
 .tag-index-card {
@@ -1711,9 +1857,9 @@ main.aside-active {
     grid-template-rows: auto auto 1fr;
     min-width: 0;
     max-width: 100%;
-    min-height: 84px;
-    gap: 6px;
-    padding: 8px;
+    min-height: 78px;
+    gap: 4px;
+    padding: 7px;
     border: 1px solid var(--line);
     border-radius: var(--radius);
     background: var(--panel);
@@ -1762,20 +1908,20 @@ main.aside-active {
 }
 
 .imports ul {
-    margin: 8px 0;
+    margin: 6px 0;
     padding-left: 24px;
 }
 
 .imports li {
-    margin-bottom: 4px;
+    margin-bottom: 3px;
 }
 
 .module-toolbar {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 10px;
-    margin: -6px 0 10px;
+    gap: 8px;
+    margin: -4px 0 8px;
     padding: 6px;
     border: 1px solid var(--line);
     border-radius: var(--radius);
@@ -1880,7 +2026,7 @@ main.aside-active {
 }
 
 .sourcebox {
-    margin-bottom: 10px;
+    margin-bottom: 8px;
 }
 
 .sourcebox pre {
@@ -1896,7 +2042,7 @@ main.aside-active {
     align-items: center;
     justify-content: space-between;
     gap: 8px;
-    padding: 6px 8px;
+    padding: 5px 8px;
     border-bottom: 1px solid var(--line);
     background: var(--chip);
     color: var(--dim);
@@ -1915,7 +2061,7 @@ main.aside-active {
 
 pre {
     margin: 0;
-    padding: 10px 11px;
+    padding: 10px 12px;
     overflow: auto;
     tab-size: 3;
     white-space: pre;
@@ -2014,9 +2160,9 @@ pre code {
 
 .doc-pager-link {
     display: grid;
-    gap: 5px;
+    gap: 4px;
     min-width: 0;
-    padding: 10px;
+    padding: 8px 10px;
     border: 1px solid var(--line);
     border-radius: var(--radius);
     background: var(--panel);
@@ -2076,15 +2222,15 @@ pre code {
 .overview-card-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 9px;
-    margin: 18px 0 8px;
+    gap: 8px;
+    margin: 12px 0 6px;
 }
 
 .overview-card {
     display: grid;
-    gap: 5px;
+    gap: 4px;
     min-width: 0;
-    padding: 12px;
+    padding: 10px;
     border: 1px solid var(--line);
     border-radius: var(--radius);
     background: var(--code);
@@ -2170,15 +2316,15 @@ pre code {
 
 .markdown-content h1,
 .html-content h1 {
-    margin: 28px 0 14px;
-    padding-bottom: 10px;
+    margin: 20px 0 10px;
+    padding-bottom: 8px;
     border-bottom: 1px solid var(--line);
     font-size: 26px;
 }
 
 .markdown-content h2,
 .html-content h2 {
-    margin: 25px 0 10px;
+    margin: 18px 0 8px;
     padding-left: 10px;
     border-left: 2px solid var(--accent);
     font-size: 19px;
@@ -2186,14 +2332,14 @@ pre code {
 
 .markdown-content h3,
 .html-content h3 {
-    margin: 20px 0 8px;
+    margin: 14px 0 6px;
     color: var(--accent2);
     font-size: 16px;
 }
 
 .markdown-content h4,
 .html-content h4 {
-    margin: 20px 0 8px;
+    margin: 14px 0 6px;
     color: var(--muted);
     font-size: 15px;
 }
@@ -2202,14 +2348,14 @@ pre code {
 .markdown-content li,
 .html-content p,
 .html-content li {
-    margin-bottom: 10px;
+    margin-bottom: 8px;
 }
 
 .markdown-content ul,
 .markdown-content ol,
 .html-content ul,
 .html-content ol {
-    margin: 8px 0 14px;
+    margin: 6px 0 10px;
     padding-left: 20px;
     overflow-wrap: anywhere;
 }
@@ -2222,8 +2368,8 @@ pre code {
 .html-content ol ol,
 .html-content ul ol,
 .html-content ol ul {
-    margin-top: 6px;
-    margin-bottom: 6px;
+    margin-top: 4px;
+    margin-bottom: 4px;
 }
 
 .markdown-content li::marker,
@@ -2272,7 +2418,7 @@ pre code {
 .html-content pre,
 .html-content .example,
 .html-content .smallexample {
-    margin: 14px 0;
+    margin: 10px 0;
     padding: 0;
     overflow-x: auto;
     border: 1px solid var(--line);
@@ -2286,7 +2432,7 @@ pre code {
 .html-content .example code,
 .html-content .smallexample code {
     display: block;
-    padding: 12px 13px;
+    padding: 10px 12px;
     border: 0;
     border-radius: 0;
     background: transparent;
@@ -2299,8 +2445,8 @@ pre code {
 
 .markdown-content blockquote,
 .html-content blockquote {
-    /* margin: 14px 0; */
-    padding: 0px 12px;
+    margin: 10px 0;
+    padding: 6px 12px;
     border-left: 2px solid var(--accent);
     border-radius: 0;
     background: var(--panel-deep);
@@ -2310,9 +2456,48 @@ pre code {
 .markdown-content table,
 .html-content table {
     width: 100%;
-    margin: 14px 0;
+    margin: 10px 0;
     border-collapse: collapse;
     font-size: 14px;
+}
+
+.markdown-content svg,
+.html-content svg {
+    display: block;
+    box-sizing: border-box;
+    width: 100%;
+    max-width: 100%;
+    height: auto;
+    margin: 12px auto;
+    padding: 10px;
+    border: 1px solid var(--border, var(--line2));
+    border-radius: 8px;
+    background: linear-gradient(135deg, rgba(var(--accent-rgb), 0.055), rgba(var(--cyan-rgb), 0.025));
+}
+
+.markdown-content img:not(.ico):not(.nav-ico):not(.api-card-ico),
+.html-content img:not(.ico):not(.nav-ico):not(.api-card-ico) {
+    display: block;
+    box-sizing: border-box;
+    width: auto;
+    max-width: min(100%, 980px);
+    height: auto;
+    margin: 14px auto;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--panel);
+}
+
+.markdown-content p > img:not(.ico):only-child,
+.html-content p > img:not(.ico):only-child,
+.markdown-content a > img:not(.ico):only-child,
+.html-content a > img:not(.ico):only-child,
+.markdown-content figure > img:not(.ico),
+.html-content figure > img:not(.ico),
+.markdown-content figure a > img:not(.ico),
+.html-content figure a > img:not(.ico) {
+    width: auto;
+    max-width: min(100%, 1100px);
 }
 
 .markdown-content th,
@@ -2332,16 +2517,46 @@ pre code {
     font-weight: 700;
 }
 
+.markdown-content img,
+.html-content img,
+.markdown-content svg,
+.html-content svg {
+    display: block;
+    box-sizing: border-box;
+    max-width: 100%;
+    width: auto;
+    height: auto;
+    margin: 16px auto;
+}
+
+.markdown-content p > img:only-child,
+.html-content p > img:only-child,
+.markdown-content p > svg:only-child,
+.html-content p > svg:only-child,
+.markdown-content figure > img,
+.html-content figure > img,
+.markdown-content figure > svg,
+.html-content figure > svg {
+    max-width: min(100%, 1100px);
+}
+
 .doc-outline {
     display: grid;
-    gap: 4px;
+    gap: 3px;
     max-height: min(360px, 45vh);
     overflow-y: auto;
-    margin: 0 0 18px;
-    padding: 10px;
+    margin: 0 0 12px;
+    padding: 8px 10px;
     border: 1px solid var(--line);
     border-radius: var(--radius);
     background: var(--panel);
+}
+
+.doc-pager {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    margin: 18px 0 6px;
 }
 
 .doc-outline-title {
@@ -2595,4 +2810,66 @@ pre code {
     .tag-index-card:focus-visible {
         transform: none;
     }
+}
+
+
+/* TAGS row: label toggle, count chip that opens the tag index, chevron. */
+.tags-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.tags-head .tags-toggle {
+    flex: 1 1 auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    letter-spacing: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.tags-head .tag-count-link {
+    flex: 0 0 auto;
+    padding: 1px 7px;
+    background: var(--accent-soft);
+    border: 1px solid var(--accent-line);
+    color: var(--accent);
+    font-size: 11px;
+    font-weight: 700;
+    text-decoration: none;
+}
+
+.tags-head .tag-count-link:hover,
+.tags-head .tag-count-link.active {
+    background: var(--accent);
+    color: var(--bg);
+}
+
+
+/* Sidebar hierarchy: the first level under a root (core, tags, learn) sits
+   flush with no guide lines; each deeper level steps in, so nesting reads
+   from indentation alone. Rows stay compact. */
+#nav .collapsible-content .collapsible-content {
+    padding-left: 11px;
+}
+
+#nav .collapsible-content .gtitle,
+#nav .collapsible-content .item {
+    padding-top: 2px;
+    padding-bottom: 2px;
+    margin: 0;
+    border-left-width: 1px;
+}
+
+#nav .gtitle .nav-label,
+#nav .item .nav-label {
+    gap: 6px;
 }

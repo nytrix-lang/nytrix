@@ -921,7 +921,9 @@ static bool ny_native_emit_elf64_x64_object_bundle_code(
   uint32_t *reloc_name_offs =
       calloc(NY_X64_OBJ_MAX_RELOCS, sizeof(*reloc_name_offs));
   if (!reloc_symbols || !def_name_offs || !reloc_name_offs) {
-    /* `done` releases all three; freeing here double-freed on failure. */
+    /*
+     * `done` releases all three; freeing here double-freed on failure.
+     */
     nyr_set_error(err, err_len, "x86-64 ELF object writer: allocation failed");
     goto done;
   }
@@ -1652,7 +1654,9 @@ static bool ny_native_emit_coff_x64_object_bundle_code(
   uint32_t *reloc_name_offs =
       calloc(NY_X64_OBJ_MAX_RELOCS, sizeof(*reloc_name_offs));
   if (!reloc_symbols || !def_name_offs || !reloc_name_offs) {
-    /* `done` releases all three; freeing here double-freed on failure. */
+    /*
+     * `done` releases all three; freeing here double-freed on failure.
+     */
     nyr_set_error(err, err_len, "x86-64 COFF object writer: allocation failed");
     goto done;
   }
@@ -1801,7 +1805,9 @@ static bool ny_native_emit_macho_x64_object_bundle_code(
       calloc(NY_X64_OBJ_MAX_RELOCS, sizeof(*macho_relocs));
   if (!reloc_symbols || !def_name_offs || !reloc_name_offs || !macho_defs ||
       !macho_relocs) {
-    /* `done` releases all five; freeing here double-freed on failure. */
+    /*
+     * `done` releases all five; freeing here double-freed on failure.
+     */
     nyr_set_error(err, err_len,
                   "x86-64 Mach-O object writer: allocation failed");
     goto done;
@@ -2038,8 +2044,15 @@ static bool nyr_x64_c_bundle_append_data_group(
       return false;
     }
     size_t alignment = data[i].alignment ? data[i].alignment : 1;
-    if ((alignment & (alignment - 1)) != 0 || alignment > 4096) {
-      nyr_set_error(err, err_len, "C object data alignment is invalid");
+    /*
+     * Per-CPU IRQ stacks are page-aligned and then rounded to IRQ_STACK_SIZE
+     * (16 KiB on x86-64), so ELF section alignment may legitimately exceed a
+     * page. Keep a finite power-of-two ceiling to reject bogus attributes.
+     */
+    if ((alignment & (alignment - 1)) != 0 || alignment > 65536) {
+      nyr_set_error(err, err_len,
+                    "C object data alignment is invalid for %s (%zu)",
+                    data[i].name, alignment);
       return false;
     }
     if (!nyr_obj_pad_to(code, alignment))
@@ -2126,6 +2139,27 @@ static bool nyr_x64_c_bundle_pad_section(nyr_obj_buf_t *code,
 }
 
 /*
+ * The default section's alignment padding still lands inside .text: the data
+ * region starts only after it. Those bytes must decode as instructions, so
+ * this variant uses nops instead of zeros.
+ */
+static bool nyr_x64_c_bundle_pad_code_start(nyr_obj_buf_t *code,
+                                            const nyr_c_object_data_t *data,
+                                            size_t data_count, size_t minimum,
+                                            char *err, size_t err_len) {
+  size_t alignment = minimum;
+  for (size_t i = 0; i < data_count; ++i)
+    if (!data[i].section && data[i].alignment > alignment &&
+        data[i].alignment <= 4096 &&
+        !(data[i].alignment & (data[i].alignment - 1)))
+      alignment = data[i].alignment;
+  if (nyr_obj_pad_code(code, alignment))
+    return true;
+  nyr_set_error(err, err_len, "C object section alignment failed");
+  return false;
+}
+
+/*
  * Constructs only the direct NYIR encoder implements: SysV by-value aggregate
  * parameters and returns, and inline asm with operands or a result, which
  * machine lowering would silently drop.
@@ -2203,7 +2237,7 @@ static bool nyr_x64_c_bundle_append_float_helpers(
       nyr_set_error(err, err_len, "too many C object symbols");
       return false;
     }
-    if (!nyr_obj_pad_to(code, 16)) {
+    if (!nyr_obj_pad_code(code, 16)) {
       nyr_set_error(err, err_len, "C object helper emission failed");
       return false;
     }
@@ -2227,6 +2261,7 @@ static bool nyr_x64_obj_build_c_bundle(
     const char *const *function_sections, const bool *function_local,
     bool omit_frame_pointer, bool position_independent,
     bool retpoline_indirect_calls, bool retpoline_inline_calls,
+    bool function_return_thunk_extern, bool cf_protection_branch,
     const nyr_c_object_data_t *data, size_t data_count,
     const ny_native_target_info_t *target, nyr_obj_buf_t *code,
     nyr_x64_obj_symbol_def_t *defs, size_t *def_count,
@@ -2353,14 +2388,17 @@ static bool nyr_x64_obj_build_c_bundle(
         if (nyr_x64_obj_append_function_with_frame(
                 code, defs, def_count, relocs, reloc_count, &funcs[i], target,
                 symbol, omit_frame_pointer, position_independent,
-                retpoline_indirect_calls, retpoline_inline_calls, function_err,
-                sizeof(function_err))) {
+                retpoline_indirect_calls, retpoline_inline_calls,
+                function_return_thunk_extern, cf_protection_branch,
+                function_err, sizeof(function_err))) {
           emitted_direct = true;
         } else if (mach_objects == 2 && !omit_frame_pointer &&
                    !position_independent && !retpoline_indirect_calls &&
                    !retpoline_inline_calls && !section &&
                    !nyr_x64_c_func_needs_direct_encoder(&funcs[i])) {
-          /* Direct encoder does not support this function; try machine encoder. */
+          /*
+           * Direct encoder does not support this function; try machine encoder.
+           */
           size_t saved_def = *def_count, saved_reloc = *reloc_count;
           size_t saved_len = code->len;
           char reason[256] = {0};
@@ -2415,8 +2453,8 @@ static bool nyr_x64_obj_build_c_bundle(
    * are later taken from its own start. Sections must begin at an offset
    * that satisfies their strictest member, whatever length the code had.
    */
-  if (!nyr_x64_c_bundle_pad_section(code, data, data_count, NULL, 16, err,
-                                    err_len))
+  if (!nyr_x64_c_bundle_pad_code_start(code, data, data_count, 16, err,
+                                      err_len))
     return false;
   if (!nyr_strtab_append_defs(code, defs, def_count, err, err_len)) {
     if (err && err_len && !err[0])
@@ -2528,6 +2566,7 @@ bool nyr_native_emit_elf64_c_object_from_nirs_with_data(
     const char *const *function_sections, const bool *function_local,
     bool omit_frame_pointer, bool position_independent,
     bool retpoline_indirect_calls, bool retpoline_inline_calls,
+    bool function_return_thunk_extern, bool cf_protection_branch,
     const nyr_c_object_data_t *data, size_t data_count,
     const ny_native_target_info_t *target, const char *path, char *err,
     size_t err_len) {
@@ -2548,7 +2587,8 @@ bool nyr_native_emit_elf64_c_object_from_nirs_with_data(
     ok = nyr_x64_obj_build_c_bundle(
         funcs, func_names, func_count, function_sections, function_local,
         omit_frame_pointer, position_independent, retpoline_indirect_calls,
-        retpoline_inline_calls, data, data_count, target, &code, defs,
+        retpoline_inline_calls, function_return_thunk_extern,
+        cf_protection_branch, data, data_count, target, &code, defs,
         &def_count, relocs, &reloc_count, err, err_len);
   if (ok)
     qsort(defs, def_count, sizeof(*defs), nyr_c_symbol_binding_order);
@@ -2574,7 +2614,7 @@ bool nyr_native_emit_elf64_c_object_from_nirs(
     size_t err_len) {
   return nyr_native_emit_elf64_c_object_from_nirs_with_data(
       funcs, func_names, func_count, NULL, NULL, false, false, false, false,
-      NULL, 0, target, path, err, err_len);
+      false, false, NULL, 0, target, path, err, err_len);
 }
 
 /*

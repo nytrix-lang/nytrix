@@ -1,7 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
   <title>Info</title>
-  <desc>Info icon.</desc>
-  <g transform="translate(2.0000 2.0000) scale(1.25000)">
-<path fill="#c6c6ca" d="M8 1a7 7 0 0 0 0 14A7 7 0 0 0 8 1m1 12H7v-2h2v2M4.5 6a3.5 3.4 0 1 1 7 0C11.3 8.9 9 8.5 9 10H7c.1-2.6 2.4-2.8 2.5-4a1.5 1.4 0 0 0-3 0z"/>
-  </g>
+  <desc>Information icon.</desc>
+  <path fill="#60a5fa" fill-rule="evenodd" d="M12 2.5A9.5 9.5 0 1 1 12 21.5A9.5 9.5 0 0 1 12 2.5ZM12 6.4A1.6 1.6 0 1 0 12 9.6A1.6 1.6 0 0 0 12 6.4ZM10.6 10.8H13.4V17.6H10.6Z"/>
 </svg>

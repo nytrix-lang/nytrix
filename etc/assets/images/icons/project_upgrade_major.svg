@@ -1,9 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
-  <title id="title1">Project Upgrade Major</title>
-  <desc id="desc1">Project Upgrade Major editor icon. Original asset id: projectupgrademajor.</desc>
-  <defs id="defs2" />
-  <g transform="translate(2.0000 2.0000) scale(1.25000)" id="g2">
-    <path fill="none" d="M0 0H16V16H0z" id="path1" />
-    <path d="M 8,0.01953125 1.4101562,6.609375 a 1.4,1.4 0 0 0 0,1.9804688 1.4,1.4 0 0 0 1.9804688,0 L 8,3.9804688 l 4.609375,4.609375 a 1.4,1.4 0 0 0 1.980469,0 1.4,1.4 0 0 0 0,-1.9804688 z M 8,6.5859375 1.4101562,13.175781 a 1.4,1.4 0 0 0 0,1.978516 1.4,1.4 0 0 0 1.9804688,0 L 8,10.544922 l 4.609375,4.609375 a 1.4,1.4 0 0 0 1.980469,0 1.4,1.4 0 0 0 0,-1.978516 z" id="path2" fill="#c6c6ca" />
-  </g>
-</svg>

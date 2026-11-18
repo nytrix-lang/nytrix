@@ -1,9 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
-  <title id="title1">Dir Access</title>
-  <desc id="desc1">Dir Access editor icon. Original asset id: diraccess.</desc>
-  <defs id="defs2" />
-  <g transform="translate(2.0000 2.0000) scale(1.25000)" id="g2">
-    <path d="M 3,2 A 1.0001,1.0001 0 0 0 2,3 V 6 H 4 V 4 H 7.8828125 L 8.6054688,5.4472656 A 1.0001,1.0001 0 0 0 9.5,6 H 13 v 6 H 4 V 10 H 2 v 3 a 1.0001,1.0001 0 0 0 1,1 h 11 a 1.0001,1.0001 0 0 0 1,-1 V 5 A 1.0001,1.0001 0 0 0 14,4 H 10.117188 L 9.3945313,2.5527344 A 1.0001,1.0001 0 0 0 8.5,2 Z" id="path1" fill="#c6c6ca" />
-    <path fill="#c6c6ca" d="M6 11V9H1V7h5V5l3 3z" id="path2" />
-  </g>
-</svg>

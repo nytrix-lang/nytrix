@@ -573,7 +573,7 @@ static inline void mach_cc_rename(nyr_mach_operand_t *op, uint32_t from,
     op->as.reg = to;
 }
 
-#define MACH_CC_BIT(set, block, v)                                             \
+#define MACH_CC_BIT(set, block, v)                         \
   (((set)[(block) * words + (v) / 64] >> ((v) % 64)) & 1u)
 
 /*
@@ -666,11 +666,11 @@ static void mach_fuse_int_widening(nyr_mach_func_t *m) {
         uses[op->as.reg]++;
     }
   }
-#define MACH_CONST_OP(op, value)                                               \
-  ((op).kind == NYR_MACH_OPERAND_IMM                                           \
-       ? (op).as.imm == (value)                                                \
-       : ((op).kind == NYR_MACH_OPERAND_VREG && (op).as.reg < nv &&            \
-          known[(op).as.reg] && defs[(op).as.reg] == 1 &&                      \
+#define MACH_CONST_OP(op, value)                                    \
+  ((op).kind == NYR_MACH_OPERAND_IMM                                \
+       ? (op).as.imm == (value)                                     \
+       : ((op).kind == NYR_MACH_OPERAND_VREG && (op).as.reg < nv && \
+          known[(op).as.reg] && defs[(op).as.reg] == 1 &&           \
           constant[(op).as.reg] == (value)))
   bool changed = false;
   for (size_t b = 0; b < m->block_len; ++b) {
@@ -2936,6 +2936,13 @@ void nyr_mach_dump(const nyr_mach_func_t *func, FILE *out) {
         fprintf(out, ", ");
         mach_dump_operand(&inst->src2, out);
       }
+      if (inst->opcode == NYR_MACH_LOAD || inst->opcode == NYR_MACH_STORE) {
+        fprintf(out, " [mem=%u%s%s%s%s]", (unsigned)inst->mem_size,
+                inst->byte_width ? " byte" : "",
+                inst->sext_load ? " sext_load" : "",
+                inst->sext32 ? " sext32" : "",
+                inst->unsigned_arith ? " unsigned" : "");
+      }
       if (inst->opcode == NYR_MACH_CALL && inst->args_len > 1) {
         fprintf(out, " [");
         for (size_t a = 1; a < inst->args_len; a++) {
@@ -3008,10 +3015,10 @@ static void mach_mixed_inst_text(const nyr_mach_inst_t *in, char *buf,
   size_t off =
       (size_t)snprintf(buf, n, "%s%s", nyr_mach_opcode_name(in->opcode),
                        mach_cond_name(in->condition));
-#define MIXED_APP(...)                                                         \
-  do {                                                                         \
-    if (off < n)                                                               \
-      off += (size_t)snprintf(buf + off, n - off, ##__VA_ARGS__);              \
+#define MIXED_APP(...)                                            \
+  do {                                                            \
+    if (off < n)                                                  \
+      off += (size_t)snprintf(buf + off, n - off, ##__VA_ARGS__); \
   } while (0)
   char obuf[160];
   if (mach_is_value(&in->dst))
@@ -3522,15 +3529,15 @@ void nyr_mach_dump_mixed(const nyr_func_t *nyir, const nyr_mach_func_t *mach,
 /*
  * Prints one NAT row in aligned sub-columns: address, bytes, mnemonic.
  */
-#define MIXED_NAT_ROW(r)                                                       \
-  do {                                                                         \
-    const nyr_mixed_nat_t *_r = (r);                                           \
-    fputs(col ? "      " : "    ", out);                                     \
-    mixed_c(out, col, MCLR_DIM);                                               \
-    fprintf(out, "%04llx %-16s ", (unsigned long long)_r->addr, _r->bytes);    \
-    mixed_c(out, col, MCLR_RESET);                                             \
-    mixed_body(out, col, _r->text);                                            \
-    fputc('\n', out);                                                          \
+#define MIXED_NAT_ROW(r)                                                    \
+  do {                                                                      \
+    const nyr_mixed_nat_t *_r = (r);                                        \
+    fputs(col ? "      " : "    ", out);                                    \
+    mixed_c(out, col, MCLR_DIM);                                            \
+    fprintf(out, "%04llx %-16s ", (unsigned long long)_r->addr, _r->bytes); \
+    mixed_c(out, col, MCLR_RESET);                                          \
+    mixed_body(out, col, _r->text);                                         \
+    fputc('\n', out);                                                       \
   } while (0)
 
   if (mach) {
@@ -4621,6 +4628,7 @@ bool nyr_mach_opcode_supported(nyr_op_t op) {
   case NYIR_VEC8_AND_I64:
   case NYIR_VEC8_OR_I64:
   case NYIR_VEC8_XOR_I64:
+  case NYIR_VEC8_MUL_I64:
   case NYIR_VEC4_REDUCE_ADD_I64:
   case NYIR_VEC8_REDUCE_ADD_I64:
   case NYIR_VA_SAVE:
@@ -5119,6 +5127,19 @@ bool nyr_mach_lower_nir(const nyr_func_t *nyir, nyr_mach_func_t *out,
   char verify_err[256] = {0};
   if (!nyr_ir_verify(nyir, verify_err, sizeof(verify_err)))
     return nyr_err(err, err_len, "machine lower: invalid NYIR: %s", verify_err);
+  /*
+   * Segment-relative accesses need a %fs:/%gs: prefix on the memory operand.
+   * The machine form has no field for that, so let the NYIR emitter, which
+   * does, take the function instead of emitting an unprefixed access.
+   */
+  for (size_t i = 0; i < nyir->len; ++i) {
+    const nyr_inst_t *in = &nyir->data[i];
+    if ((in->op == NYIR_LOAD_I64 || in->op == NYIR_STORE_I64) &&
+        (in->flags & (NYIR_INST_F_MEM_SEG_FS | NYIR_INST_F_MEM_SEG_GS)))
+      return nyr_err(err, err_len,
+                     "machine lower: segment-relative access requires the "
+                     "NYIR emitter");
+  }
   bool trace_lowering =
       ny_dbg_is_enabled(NY_DBG_LOWER) || ny_dbg_is_enabled(NY_DBG_VALUE);
   if (ny_dbg_is_enabled(NY_DBG_LOWER) && trace_lowering &&
@@ -6035,7 +6056,8 @@ bool nyr_mach_lower_nir(const nyr_func_t *nyir, nyr_mach_func_t *out,
                in->op == NYIR_VEC8_DIV_F32 || in->op == NYIR_VEC4_SHL_I64 ||
                in->op == NYIR_VEC4_SAR_I64 || in->op == NYIR_VEC8_ADD_I64 ||
                in->op == NYIR_VEC8_SUB_I64 || in->op == NYIR_VEC8_AND_I64 ||
-               in->op == NYIR_VEC8_OR_I64 || in->op == NYIR_VEC8_XOR_I64) {
+               in->op == NYIR_VEC8_OR_I64 || in->op == NYIR_VEC8_XOR_I64 ||
+               in->op == NYIR_VEC8_MUL_I64) {
       /*
        * Packed vector ALU: one machine op, element type on the vreg.
        */
@@ -6058,6 +6080,8 @@ bool nyr_mach_lower_nir(const nyr_func_t *nyir, nyr_mach_func_t *out,
         inst.opcode = NYR_MACH_OR;
       else if (in->op == NYIR_VEC8_XOR_I64)
         inst.opcode = NYR_MACH_XOR;
+      else if (in->op == NYIR_VEC8_MUL_I64)
+        inst.opcode = NYR_MACH_MUL;
       else if (in->op == NYIR_VEC4_SHL_I64)
         inst.opcode = NYR_MACH_SHL;
       else if (in->op == NYIR_VEC4_SAR_I64)

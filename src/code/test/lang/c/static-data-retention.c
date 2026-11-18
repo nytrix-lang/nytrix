@@ -1,3 +1,6 @@
+/*
+ * C front-end regression test: static data retention.
+ */
 struct operations {
   int (*callback)(int);
 };

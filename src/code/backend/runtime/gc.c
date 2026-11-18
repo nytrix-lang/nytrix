@@ -387,8 +387,10 @@ static bool nyGcHeaderForObject(int64_t obj, nyGcHeader_t **out) {
 _Atomic int g_rt_gc_heap_used = 0;
 
 bool rt_gc_owns_pointer(uintptr_t value) {
-  /* No object yet: nothing to look up, and no lock to take on every
-   * is_heap_ptr of a program that never uses this heap. */
+  /*
+   * No object yet: nothing to look up, and no lock to take on every
+   * is_heap_ptr of a program that never uses this heap.
+   */
   if (!value || !gNyGc.initialized ||
       !atomic_load_explicit(&g_rt_gc_heap_used, memory_order_acquire))
     return false;
@@ -1723,7 +1725,9 @@ int64_t nyGcMakeWeak(int64_t target) {
       g_weak_table.capacity = new_cap;
     }
   }
-  /* Keep one empty slot so failed growth cannot make lookups loop forever. */
+  /*
+   * Keep one empty slot so failed growth cannot make lookups loop forever.
+   */
   if (!g_weak_table.capacity ||
       g_weak_table.count >= g_weak_table.capacity - 1) {
     nyGcUnlock();

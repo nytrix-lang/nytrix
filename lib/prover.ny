@@ -30,7 +30,6 @@ use core.proof as proof
 def PROVER_VERSION = "core.prover@1"
 
 ;; ---------------------------------------------------------------- terms
-
 fn _node_int(int v) any {
    mut out = {}
    out = out.set("kind", "int")
@@ -38,18 +37,21 @@ fn _node_int(int v) any {
    out = out.set("value", __box_i64(v))
    out
 }
+
 fn _node_name(str n) any {
    mut out = {}
    out = out.set("kind", "name")
    out = out.set("name", n)
    out
 }
+
 fn _node_not(any v) any {
    mut out = {}
    out = out.set("kind", "not")
    out = out.set("value", v)
    out
 }
+
 fn _node_bin(str op, any l, any r) any {
    mut out = {}
    out = out.set("kind", "bin")
@@ -100,7 +102,9 @@ fn show(any node) str { _show_at(node, true) }
 
 ;; Tokenizer for `term`: integers, names, and the operators below.
 fn _is_space(int b) bool { b == 32 || b == 9 || b == 10 || b == 13 }
+
 fn _is_digit_b(int b) bool { b >= 48 && b <= 57 }
+
 fn _is_name_b(int b) bool {
    (b >= 97 && b <= 122) || (b >= 65 && b <= 90) || b == 95 || _is_digit_b(b)
 }
@@ -268,7 +272,6 @@ fn term(str text) any {
 }
 
 ;; ---------------------------------------------------------------- goals
-
 ;; A goal: hypotheses (source strings or nodes), target, and ranges in the
 ;; core.proof spelling ("x=0..9" entries joined by the separator below).
 fn _as_node(any t) any {
@@ -351,7 +354,6 @@ fn state_text(any st) str {
    out
 }
 
-
 ;; Reads a list field. An empty list stored in a record can come back as a
 ;; plain integer across the module boundary; it reads as the empty list.
 fn _lst(any v) any {
@@ -368,7 +370,6 @@ fn _put(any d, str key, any value) any {
 }
 
 ;; ------------------------------------------------------- rule results
-
 fn _ok(str rule, any goals) any {
    mut r = {}
    r = r.set("ok", true)
@@ -410,7 +411,6 @@ fn _sequent(any g) any {
 }
 
 ;; ---------------------------------------------------- structural rules
-
 ;; split_conj:  |- a && b   gives   |- a   and   |- b
 fn split_conj(any g) any {
    def t = g.get("target")
@@ -449,8 +449,8 @@ fn cases(any g) any {
             k += 1
          }
          return _ok("cases", [_with(g, rest.append(h.get("left")),
-            g.get("target")), _with(g, rest.append(h.get("right")),
-            g.get("target"))])
+                  g.get("target")), _with(g, rest.append(h.get("right")),
+                  g.get("target"))])
       }
       i += 1
    }
@@ -544,7 +544,7 @@ fn subst(any g) any {
             }
             return _ok("subst " + name,
                [goal(rest, _replace(g.get("target"), name, repl),
-                  _drop_range(g.get("ranges"), name))])
+                     _drop_range(g.get("ranges"), name))])
          }
       }
       i += 1
@@ -571,8 +571,8 @@ fn split_range(any g, str name) any {
             ;; One value: the range forces the name, substitute it.
             return _ok("fix " + name + "=" + to_str(lo),
                [goal(_replace_all(_lst(g.get("hyps")), name, _node_int(lo)),
-                  _replace(g.get("target"), name, _node_int(lo)),
-                  _drop_range(ranges, name))])
+                     _replace(g.get("target"), name, _node_int(lo)),
+                     _drop_range(ranges, name))])
          }
          def mid = lo + (hi - lo) / 2
          def a = name + "=" + to_str(lo) + ".." + to_str(mid)
@@ -614,7 +614,6 @@ fn _swap_range(any entries, int at, str entry) str {
 }
 
 ;; ---------------------------------------------------------- closing
-
 ;; Closes a goal repl a checked certificate for `hyps -> target`.
 fn decide(any g) any {
    def ob = proof.obligation(canon(_sequent(g)), g.get("ranges"))
@@ -631,7 +630,6 @@ fn decide(any g) any {
 }
 
 ;; ------------------------------------------------------------ driving
-
 fn _replace_first(any st, any r) any {
    def gs = _lst(st.get("goals"))
    mut next = _lst(r.get("goals"))

@@ -1,3 +1,6 @@
+/*
+ * Host-side C counterpart for the resumable asm test.
+ */
 #define _GNU_SOURCE
 #include <signal.h>
 #include <stdlib.h>

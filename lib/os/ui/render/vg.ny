@@ -55,6 +55,7 @@ module core.os.ui.render.vg(
    SOURCE_OVER, SOURCE_IN, SOURCE_OUT, ATOP, DESTINATION_OVER, DESTINATION_IN, DESTINATION_OUT,
    DESTINATION_ATOP, LIGHTER, COPY, XOR
 )
+
 use core
 use core.math (sqrt, sin, cos, tan, atan2, acos, abs, PI)
 use core.str as str
@@ -92,6 +93,7 @@ def XOR = 10
 
 ;; Current state. save() copies these into a list; restore() reads them back.
 mut _xa, _xb, _xc, _xd, _xe, _xf = 1.0, 0.0, 0.0, 1.0, 0.0, 0.0
+
 ;; Model matrix reused for transformed text.
 mut any _text_mat = nil
 mut any _fill = nil
@@ -100,6 +102,7 @@ mut _stroke_w, _miter = 1.0, 10.0
 mut int _cap = 0
 mut int _join = 4
 mut _alpha = 1.0
+
 ;; Porter-Duff operator for fills and strokes (SOURCE_OVER .. XOR).
 mut int _comp = 0
 mut _aa = true
@@ -144,7 +147,6 @@ fn _init() any {
 ;;   1..6 inverse of the paint-to-screen transform
 ;;   7, 8 extent; 9 radius or inner radius; 10 feather or outer radius
 ;;   11..14 inner RGBA; 15..18 outer RGBA; 19 image texture; 20 image alpha
-
 fn _c(any col, int i, f64 fallback) f64 {
    if is_list(col) { return float(col.get(i, fallback)) }
    fallback
@@ -180,7 +182,7 @@ fn _paint_make(f64 kind, f64 pa, f64 pb, f64 pc, f64 pd, f64 pe, f64 pf, f64 ex,
 }
 
 fn linear_gradient(f64 sx, f64 sy, f64 ex, f64 ey, any icol, any ocol) list {
-   "Returns a paint that blends from `icol` at (sx, sy) to `ocol` at (ex, ey)."
+   "Returns a paint that blends from `icol` at(sx, sy) to `ocol` at(ex, ey)."
    mut f64 dx, dy = ex - sx, ey - sy
    mut f64 len = float(sqrt(dx * dx + dy * dy))
    if len < 0.0001 {
@@ -193,7 +195,7 @@ fn linear_gradient(f64 sx, f64 sy, f64 ex, f64 ey, any icol, any ocol) list {
 }
 
 fn radial_gradient(f64 cx, f64 cy, f64 inr, f64 outr, any icol, any ocol) list {
-   "Returns a paint that is `icol` inside radius `inr` and blends to `ocol` at radius `outr` around (cx, cy)."
+   "Returns a paint that is `icol` inside radius `inr` and blends to `ocol` at radius `outr` around(cx, cy)."
    def f64 r1 = outr > inr ? outr : (inr + 0.001)
    _paint_make(2.0, 1.0, 0.0, 0.0, 1.0, cx, cy, r1, r1, inr, r1, icol, ocol, -1.0, 1.0)
 }
@@ -204,7 +206,7 @@ fn box_gradient(f64 x, f64 y, f64 w, f64 h, f64 r, f64 f, any icol, any ocol) li
 }
 
 fn image_pattern(f64 ox, f64 oy, f64 ex, f64 ey, f64 angle, int image, f64 alpha=1.0) list {
-   "Returns a paint that maps texture `image` onto the rectangle at (ox, oy) of size (ex, ey), rotated by `angle` radians around its origin."
+   "Returns a paint that maps texture `image` onto the rectangle at(ox, oy) of size(ex, ey), rotated by `angle` radians around its origin."
    def f64 cs, sn = float(cos(angle)), float(sin(angle))
    _paint_make(4.0, cs, sn, 0.0 - sn, cs, ox, oy, ex == 0.0 ? 1.0 : ex, ey == 0.0 ? 1.0 : ey, 0.0, 0.0, [1.0, 1.0, 1.0, 1.0], [1.0, 1.0, 1.0, 1.0], float(image), alpha)
 }
@@ -305,6 +307,7 @@ fn _paint_texture(list p) int {
    free(buf)
    _paint_tex_cache[key] = float(tex)
    _stat_bakes += 1
+   if _debug_tex { print("[vg] bake kind=" + to_str(kind) + " tex=" + to_str(tex) + " last=" + to_str(gfx.texture_last_created_id())) }
    tex
 }
 
@@ -330,7 +333,6 @@ fn release() any {
 }
 
 ;; ---- vertex stream --------------------------------------------------------
-
 ;; The bound texture is kept as a float and converted where it is used: as an
 ;; integer module global it read back halved for odd ids, which bound the
 ;; wrong texture for every other gradient.
@@ -348,6 +350,7 @@ fn _pc(f64 r, f64 g, f64 b, f64 a) int {
    if _comp != 0 { return gfx.color_pack(r * a, g * a, b * a, a) }
    gfx.color_pack(r, g, b, a)
 }
+
 fn _stream_begin(list p, f64 alpha_scale) any {
    _paint = p
    _cur_kind = int(float(p.get(0, 0.0)))
@@ -388,7 +391,7 @@ fn _reserve(int extra) bool {
 }
 
 fn _v(f64 x, f64 y, f64 cover) any {
-   "Appends one vertex at a screen position; `cover` is the antialiasing coverage (1 inside, 0 at the fringe edge)."
+   "Appends one vertex at a screen position; `cover` is the antialiasing coverage(1 inside, 0 at the fringe edge)."
    mut f64 u, v = 0.0, 0.0
    mut int col = 0
    if _cur_kind == 0 {
@@ -465,7 +468,6 @@ fn _stream_end() bool {
 }
 
 ;; ---- frame and state ------------------------------------------------------
-
 fn begin_frame(f64 w, f64 h, f64 pixel_ratio=1.0) any {
    "Starts a canvas frame for a `w` by `h` target and resets the state. `pixel_ratio` is the framebuffer scale: it sets the width of the antialiasing fringe."
    _init()
@@ -553,14 +555,13 @@ fn global_alpha(f64 a) any { "Scales the alpha of everything drawn afterwards." 
 fn shape_anti_alias(bool on) any { "Turns the antialiasing fringe on or off." _aa = on }
 
 fn global_composite_operation(int op) bool {
-   "Selects the Porter-Duff operator for later fills and strokes: SOURCE_OVER, SOURCE_IN, SOURCE_OUT, ATOP, DESTINATION_OVER, DESTINATION_IN, DESTINATION_OUT, DESTINATION_ATOP, LIGHTER, COPY, or XOR. It applies where geometry is drawn (as in NanoVG). Returns false and keeps the current operator for anything else."
+   "Selects the Porter-Duff operator for later fills and strokes: SOURCE_OVER, SOURCE_IN, SOURCE_OUT, ATOP, DESTINATION_OVER, DESTINATION_IN, DESTINATION_OUT, DESTINATION_ATOP, LIGHTER, COPY, or XOR. It applies where geometry is drawn(as in NanoVG). Returns false and keeps the current operator for anything else."
    if op < SOURCE_OVER || op > XOR { return false }
    _comp = op
    true
 }
 
 ;; ---- transforms -----------------------------------------------------------
-
 fn reset_transform() any { "Resets the transform to the identity." _xa, _xb, _xc, _xd, _xe, _xf = 1.0, 0.0, 0.0, 1.0, 0.0, 0.0 }
 
 fn transform(f64 a, f64 b, f64 c, f64 d, f64 e, f64 f) any {
@@ -597,7 +598,6 @@ fn _avg_scale() f64 {
 }
 
 ;; ---- scissor --------------------------------------------------------------
-
 fn _scissor_box(f64 x, f64 y, f64 w, f64 h) list {
    ;; Bounding box of the transformed rectangle.
    mut f64 x0, y0 = x * _xa + y * _xc + _xe, x * _xb + y * _xd + _xf
@@ -640,7 +640,6 @@ fn intersect_scissor(f64 x, f64 y, f64 w, f64 h) any {
 fn reset_scissor() any { "Removes the scissor." _sc_on = false }
 
 ;; ---- path building --------------------------------------------------------
-
 fn begin_path() any {
    "Clears the current path."
    _init()
@@ -668,7 +667,7 @@ fn _add_point(f64 x, f64 y) any {
 }
 
 fn move_to(f64 x, f64 y) any {
-   "Starts a new subpath at (x, y)."
+   "Starts a new subpath at(x, y)."
    _init()
    _subs = _subs.append(float(_px.len))
    _subs = _subs.append(0.0)
@@ -678,13 +677,13 @@ fn move_to(f64 x, f64 y) any {
 }
 
 fn line_to(f64 x, f64 y) any {
-   "Adds a line from the pen to (x, y)."
+   "Adds a line from the pen to(x, y)."
    if _subs.len <= 0 { return move_to(x, y) }
    _add_point(x, y)
 }
 
 fn bezier_to(f64 c1x, f64 c1y, f64 c2x, f64 c2y, f64 x, f64 y) any {
-   "Adds a cubic bezier from the pen through two control points to (x, y)."
+   "Adds a cubic bezier from the pen through two control points to(x, y)."
    if _subs.len <= 0 { move_to(c1x, c1y) }
    def f64 x0, y0 = _pen_x, _pen_y
    ;; Segment count from the control polygon length on screen.
@@ -706,7 +705,7 @@ fn bezier_to(f64 c1x, f64 c1y, f64 c2x, f64 c2y, f64 x, f64 y) any {
 }
 
 fn quad_to(f64 cx, f64 cy, f64 x, f64 y) any {
-   "Adds a quadratic bezier from the pen through one control point to (x, y)."
+   "Adds a quadratic bezier from the pen through one control point to(x, y)."
    def f64 x0, y0 = _pen_x, _pen_y
    bezier_to(x0 + 2.0 / 3.0 * (cx - x0), y0 + 2.0 / 3.0 * (cy - y0), x + 2.0 / 3.0 * (cx - x), y + 2.0 / 3.0 * (cy - y), x, y)
 }
@@ -720,7 +719,7 @@ fn close_path() any {
 }
 
 fn path_winding(int dir) any {
-   "Marks the current subpath as SOLID (the default) or as a HOLE cut out of the shapes around it."
+   "Marks the current subpath as SOLID(the default) or as a HOLE cut out of the shapes around it."
    def int sn = _subs.len
    if sn <= 0 { return 0 }
    def int wi = sn - 1
@@ -728,7 +727,7 @@ fn path_winding(int dir) any {
 }
 
 fn arc(f64 cx, f64 cy, f64 r, f64 a0, f64 a1, int dir=CW) any {
-   "Adds a circular arc around (cx, cy) from angle a0 to a1 (radians), clockwise (CW) or counter-clockwise (CCW). It connects to the pen with a line when a subpath is open."
+   "Adds a circular arc around(cx, cy) from angle a0 to a1(radians), clockwise(CW) or counter-clockwise(CCW). It connects to the pen with a line when a subpath is open."
    mut f64 da = a1 - a0
    if dir == CW {
       if abs(da) >= PI * 2.0 { da = PI * 2.0 }
@@ -751,7 +750,7 @@ fn arc(f64 cx, f64 cy, f64 r, f64 a0, f64 a1, int dir=CW) any {
 }
 
 fn arc_to(f64 x1, f64 y1, f64 x2, f64 y2, f64 radius) any {
-   "Adds an arc of `radius` tangent to the lines pen-(x1, y1) and (x1, y1)-(x2, y2), joined to the pen by a line."
+   "Adds an arc of `radius` tangent to the lines pen-(x1, y1) and(x1, y1)-(x2, y2), joined to the pen by a line."
    if _subs.len <= 0 { return move_to(x1, y1) }
    def f64 x0, y0 = _pen_x, _pen_y
    mut f64 dx0, dy0 = x0 - x1, y0 - y1
@@ -790,7 +789,7 @@ fn rect(f64 x, f64 y, f64 w, f64 h) any {
 }
 
 fn rounded_rect_varying(f64 x, f64 y, f64 w, f64 h, f64 rtl, f64 rtr, f64 rbr, f64 rbl) any {
-   "Adds a closed rounded rectangle with one radius per corner (top-left, top-right, bottom-right, bottom-left)."
+   "Adds a closed rounded rectangle with one radius per corner(top-left, top-right, bottom-right, bottom-left)."
    def f64 hw, hh = abs(w) * 0.5, abs(h) * 0.5
    def f64 lim = hw < hh ? hw : hh
    def f64 tl, tr = rtl < lim ? rtl : lim, rtr < lim ? rtr : lim
@@ -829,7 +828,6 @@ fn ellipse(f64 cx, f64 cy, f64 rx, f64 ry) any {
 fn circle(f64 cx, f64 cy, f64 r) any { "Adds a closed circle." ellipse(cx, cy, r, r) }
 
 ;; ---- fill -----------------------------------------------------------------
-
 fn _sub_area(int first, int cnt) f64 {
    mut f64 a = 0.0
    mut int i = 0
@@ -1020,7 +1018,7 @@ fn _fill_scanline() any {
 }
 
 fn fill() bool {
-   "Fills the current path with the fill paint. Subpaths are closed implicitly; overlapping solids merge and HOLE subpaths cut out (nonzero rule)."
+   "Fills the current path with the fill paint. Subpaths are closed implicitly; overlapping solids merge and HOLE subpaths cut out(nonzero rule)."
    _init()
    def int sn = _subs.len
    if sn < 4 { return false }
@@ -1068,7 +1066,6 @@ fn fill() bool {
 }
 
 ;; ---- stroke ---------------------------------------------------------------
-
 mut any _sx = nil
 mut any _sy = nil
 mut any _sk = nil
@@ -1298,7 +1295,6 @@ fn stroke() bool {
 }
 
 ;; ---- text -----------------------------------------------------------------
-
 fn font_face(int font) any { "Selects the font used by text and text_bounds." _font = font }
 
 fn text_align(int align) any { "Sets text alignment from ALIGN_LEFT / CENTER / RIGHT and ALIGN_TOP / MIDDLE / BOTTOM / BASELINE flags." _align = align }
@@ -1341,7 +1337,7 @@ fn _text_local_origin(f64 x, f64 y, any s) list {
 }
 
 fn text(f64 x, f64 y, any s) f64 {
-   "Draws a line of text at (x, y) in the fill color and returns the x where it ends. Glyphs follow the whole transform (rotation, scale, skew) on the Vulkan and GL backends; the software renderer keeps them upright at the transformed position."
+   "Draws a line of text at(x, y) in the fill color and returns the x where it ends. Glyphs follow the whole transform(rotation, scale, skew) on the Vulkan and GL backends; the software renderer keeps them upright at the transformed position."
    _init()
    if _font <= 0 { return x }
    def int col = gfx.color_pack(float(_fill.get(11, 1.0)), float(_fill.get(12, 1.0)), float(_fill.get(13, 1.0)), float(_fill.get(14, 1.0)) * _alpha)

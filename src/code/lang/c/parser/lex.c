@@ -26,6 +26,7 @@ void ny_lex_init(ny_lexer_t *lx, const char *src, size_t len) {
   lx->line = 1;
   lx->col = 1;
   lx->line_start = 1;
+  lx->continued = false;
 }
 
 const char *ny_ctok_kind_name(ny_ctok_kind_t kind) {
@@ -102,6 +103,7 @@ static ny_ctok_t lex_tok(ny_lexer_t *lx, ny_ctok_kind_t kind, size_t start,
   t.line = line;
   t.col = col;
   t.error = NULL;
+  t.continued = lx->continued;
   if (kind != NY_CTOK_EOF)
     lx->line_start = 0;
   return t;
@@ -117,10 +119,13 @@ static ny_ctok_t lex_error(ny_lexer_t *lx, size_t start, unsigned line,
 }
 
 static int lex_skip_ws_and_comments(ny_lexer_t *lx, ny_ctok_t *error) {
+  bool continued = false;
   for (;;) {
     int c = lex_peek(lx, 0);
-    if (!lex_has(lx, 0))
+    if (!lex_has(lx, 0)) {
+      lx->continued = continued;
       return 1;
+    }
     if (c == 0) {
       *error =
           lex_error(lx, lx->pos, lx->line, lx->col, "NUL byte in C source");
@@ -130,6 +135,7 @@ static int lex_skip_ws_and_comments(ny_lexer_t *lx, ny_ctok_t *error) {
                       (lex_peek(lx, 1) == '\r' && lex_peek(lx, 2) == '\n'))) {
       (void)lex_get(lx);
       (void)lex_get(lx);
+      continued = true;
       continue;
     }
     if (c == ' ' || c == '\t' || c == '\f' || c == '\v') {
@@ -187,6 +193,7 @@ static int lex_skip_ws_and_comments(ny_lexer_t *lx, ny_ctok_t *error) {
       }
       continue;
     }
+    lx->continued = continued;
     return 1;
   }
 }

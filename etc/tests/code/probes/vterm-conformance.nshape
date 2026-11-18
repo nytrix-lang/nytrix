@@ -1,0 +1,215 @@
+shape vterm-conformance {
+  family "probe-suite"
+  timeout 240
+  generator "stress"
+  features ["ny", "sys"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+;; VT/xterm conformance checks for core.os.ui.render.viewer.vterm, fed
+;; through the pty reader path (update) and put_text. Prints PASS/FAIL per case and a summary.
+;; Expected results follow xterm (and vttest) behaviour.
+use core
+use core.os.ui.render.viewer.vterm as vterm
+
+def int CO = 10
+def int RO = 5
+def FONTS = {"regular": 0, "bold": 0, "italic": 0, "emoji": 0}
+mut int passed = 0
+mut int failed = 0
+
+fn fresh() any { vterm.new(CO, RO, FONTS, 0, 0) }
+
+fn row(any vt, int y) str {
+   def ptr g = vt.get("grid")
+   def int co = int(vt.get("cols"))
+   mut str out = ""
+   mut int x = 0
+   while x < co {
+      def int cp = load32(g, (y * co + x) * 16)
+      out = out + (cp == 0 ? " " : chr(cp))
+      x += 1
+   }
+   out
+}
+
+fn cx(any vt) int { load32(vt.get("state"), 0) }
+fn cy(any vt) int { load32(vt.get("state"), 4) }
+
+fn check(str name, bool ok, str detail) any {
+   if ok { passed += 1 print("PASS " + name) }
+   else { failed += 1 print("FAIL " + name + "  " + detail) }
+   0
+}
+
+fn rows_detail(any vt) str {
+   mut str d = "cursor=(" + to_str(cx(vt)) + "," + to_str(cy(vt)) + ") rows="
+   mut int y = 0
+   while y < RO { d = d + "[" + row(vt, y) + "]" y += 1 }
+   d
+}
+
+fn expect_rows(str name, any vt, list want) any {
+   mut bool ok = true
+   mut int y = 0
+   while y < want.len {
+      if row(vt, y) != want[y] { ok = false }
+      y += 1
+   }
+   check(name, ok, rows_detail(vt))
+}
+
+fn expect_cursor(str name, any vt, int x, int y) any {
+   check(name, cx(vt) == x && cy(vt) == y, rows_detail(vt))
+}
+
+fn feed(any vt, str s) any {
+   ;; Same path as pty output: bytes into the shared reader buffer, then update.
+   def ptr shared = vt.get("shared")
+   def ptr buf = load64(shared, 8)
+   memcpy(buf, cptr(s), s.len)
+   store64(shared, s.len, 16)
+   vterm.update(vt)
+}
+
+fn run(str s) any { feed(fresh(), s) }
+
+fn put_vt(any vt, str s) any { vterm.put_text(vt, s) }
+
+;; --- cursor addressing
+mut vt = run("ABC\x1b[2;3HX")
+expect_rows("CUP row/col", vt, ["ABC       ", "  X       "])
+expect_cursor("CUP cursor after print", vt, 3, 1)
+vt = run("\x1b[5;5H\x1b[10A")
+expect_cursor("CUU clamps at top", vt, 4, 0)
+vt = run("\x1b[2;5H\x1b[10B")
+expect_cursor("CUD clamps at bottom", vt, 4, 4)
+vt = run("\x1b[2;5H\x1b[20C")
+expect_cursor("CUF clamps at right", vt, 9, 1)
+vt = run("\x1b[2;5H\x1b[20D")
+expect_cursor("CUB clamps at left", vt, 0, 1)
+vt = run("\x1b[3;4H\x1b[0;0H")
+expect_cursor("CUP 0;0 means 1;1", vt, 0, 0)
+vt = run("\x1b[2;2H\x1b[5G")
+expect_cursor("CHA column", vt, 4, 1)
+vt = run("\x1b[2;2H\x1b[4d")
+expect_cursor("VPA row", vt, 1, 3)
+vt = run("\x1b[3;3f")
+expect_cursor("HVP", vt, 2, 2)
+vt = run("\x1b[3;3H\x1b[E")
+expect_cursor("CNL next line col 0", vt, 0, 3)
+vt = run("\x1b[3;3H\x1b[F")
+expect_cursor("CPL prev line col 0", vt, 0, 1)
+
+;; --- wrapping
+vt = run("0123456789")
+expect_cursor("deferred wrap keeps cursor on last column", vt, 9, 0)
+vt = run("0123456789A")
+expect_rows("wrap continues on next row", vt, ["0123456789", "A         "])
+vt = run("0123456789\rX")
+expect_rows("CR cancels pending wrap", vt, ["X123456789", "          "])
+vt = run("0123456789\x1b[1;1HZ")
+expect_rows("CUP cancels pending wrap", vt, ["Z123456789", "          "])
+vt = run("\x1b[?7l0123456789AB")
+expect_rows("DECAWM off overwrites last column", vt, ["012345678B", "          "])
+vt = run("AB\nC")
+expect_rows("LF keeps column", vt, ["AB        ", "  C       "])
+vt = run("AB\x08\x08\x08X")
+expect_rows("BS stops at column 0", vt, ["XB        "])
+
+;; --- erase
+vt = run("ABCDEFGHIJ\x1b[1;5H\x1b[K")
+expect_rows("EL 0 erases to end", vt, ["ABCD      "])
+vt = run("ABCDEFGHIJ\x1b[1;5H\x1b[1K")
+expect_rows("EL 1 erases through cursor", vt, ["     FGHIJ"])
+vt = run("ABCDEFGHIJ\x1b[1;5H\x1b[2K")
+expect_rows("EL 2 erases line", vt, ["          "])
+vt = run("AAAAAAAAAA\r\nBBBBBBBBBB\r\nCCCCCCCCCC\x1b[2;5H\x1b[J")
+expect_rows("ED 0 from cursor", vt, ["AAAAAAAAAA", "BBBB      ", "          "])
+vt = run("AAAAAAAAAA\r\nBBBBBBBBBB\r\nCCCCCCCCCC\x1b[2;5H\x1b[1J")
+expect_rows("ED 1 through cursor", vt, ["          ", "     BBBBB", "CCCCCCCCCC"])
+vt = run("ABCDE\x1b[1;2H\x1b[2X")
+expect_rows("ECH erases without shifting", vt, ["A  DE     "])
+
+;; --- insert/delete
+vt = run("ABCDE\x1b[1;2H\x1b[2@")
+expect_rows("ICH inserts blanks", vt, ["A  BCDE   "])
+vt = run("ABCDE\x1b[1;2H\x1b[2P")
+expect_rows("DCH deletes characters", vt, ["ADE       "])
+vt = run("1\r\n2\r\n3\r\n4\r\n5\x1b[2;1H\x1b[L")
+expect_rows("IL inserts line", vt, ["1         ", "          ", "2         ", "3         ", "4         "])
+vt = run("1\r\n2\r\n3\r\n4\r\n5\x1b[2;1H\x1b[M")
+expect_rows("DL deletes line", vt, ["1         ", "3         ", "4         ", "5         ", "          "])
+vt = run("ABC\x1b[1;1H\x1b[4hXY")
+expect_rows("IRM insert mode", vt, ["XYABC     "])
+vt = run("A\x1b[3b")
+expect_rows("REP repeats last char", vt, ["AAAA      "])
+
+;; --- scrolling regions
+vt = run("1\r\n2\r\n3\r\n4\r\n5\x1b[2;4r\x1b[4;1H\nX")
+expect_rows("LF at region bottom scrolls region only", vt, ["1         ", "3         ", "4         ", "X         ", "5         "])
+vt = run("1\r\n2\r\n3\r\n4\r\n5\x1b[2;4r")
+expect_cursor("DECSTBM homes cursor", vt, 0, 0)
+vt = run("1\r\n2\r\n3\r\n4\r\n5\x1b[2;4r\x1b[2;1H\x1bM")
+expect_rows("RI at region top scrolls down", vt, ["1         ", "          ", "2         ", "3         ", "5         "])
+vt = run("1\r\n2\r\n3\r\n4\r\n5\x1b[2;4r\x1b[3;1H\x1b[L")
+expect_rows("IL respects region", vt, ["1         ", "2         ", "          ", "3         ", "5         "])
+vt = run("1\r\n2\r\n3\r\n4\r\n5\x1b[2;4r\x1b[S")
+expect_rows("SU scrolls region", vt, ["1         ", "3         ", "4         ", "          ", "5         "])
+vt = run("1\r\n2\r\n3\r\n4\r\n5\x1b[2;4r\x1b[T")
+expect_rows("SD scrolls region", vt, ["1         ", "          ", "2         ", "3         ", "5         "])
+vt = run("\x1b[2;4r\x1b[?6h\x1b[1;1H")
+expect_cursor("DECOM CUP is region relative", vt, 0, 1)
+vt = run("\x1b[2;4r\x1b[?6h\x1b[9;1H")
+expect_cursor("DECOM clamps to region", vt, 0, 3)
+vt = run("\x1bD\x1bD")
+expect_cursor("IND moves down", vt, 0, 2)
+vt = run("AB\x1bE")
+expect_cursor("NEL moves to next line start", vt, 0, 1)
+
+;; --- tabs, save/restore, alt screen
+vt = run("\tX")
+expect_rows("HT default stops", vt, ["        X "])
+vt = run("\x1b[3I")
+expect_cursor("CHT clamps at last column", vt, 9, 0)
+vt = run("\x1b[1;8H\x1b[Z")
+expect_cursor("CBT back tab", vt, 0, 0)
+vt = run("\x1b[2;3H\x1b7\x1b[5;5H\x1b8")
+expect_cursor("DECSC/DECRC", vt, 2, 1)
+vt = run("\x1b[2;3H\x1b[s\x1b[5;5H\x1b[u")
+expect_cursor("SCOSC/SCORC", vt, 2, 1)
+vt = run("MAIN\x1b[?1049hALT\x1b[?1049l")
+expect_rows("alt screen restores main", vt, ["MAIN      "])
+expect_cursor("1049 restores cursor", vt, 4, 0)
+vt = run("\x1b#8")
+expect_rows("DECALN fills E", vt, ["EEEEEEEEEE", "EEEEEEEEEE"])
+
+;; --- regressions: grid pointer swaps, origin mode edges
+vt = run("MAIN\x1bc")
+expect_rows("RIS clears screen", vt, ["          "])
+vt = run("MAIN\x1b[?1049hALT\x1bcX\x1b[?1049hY\x1b[?1049l")
+check("RIS in alt keeps a usable main screen", row(vt, 0).len == CO, rows_detail(vt))
+vt = put_vt(fresh(), "MAIN\x1b[?1049hALT\x1b[?1049l")
+expect_rows("alt screen via put_text restores main", vt, ["MAIN      "])
+vt = run("\x1b[2;4r\x1b[?6h\x1b[?6l\x1b[1;1H")
+expect_cursor("DECOM reset is absolute", vt, 0, 0)
+vt = run("\x1b[?6h\x1b[2;4r")
+expect_cursor("DECSTBM homes to region top under DECOM", vt, 0, 1)
+vt = run("\x1b#8\x1b[1;1HX")
+expect_rows("DECALN then write", vt, ["XEEEEEEEEE", "EEEEEEEEEE"])
+
+;; --- unicode
+vt = run("A你B")
+check("wide char takes two cells", row(vt, 0).len >= 0 && cx(vt) == 4, rows_detail(vt))
+vt = run("012345678你")
+check("wide char at last column wraps", load32(vt.get("grid"), (1 * CO + 0) * 16) == 0x4f60, rows_detail(vt))
+mut sv = fresh()
+sv = feed(sv, "\xe4")
+sv = feed(sv, "\xbd\xa0")
+check("UTF-8 split across writes", load32(sv.get("grid"), 0) == 0x4f60, rows_detail(sv))
+
+print("vt-conformance passed=" + to_str(passed) + " failed=" + to_str(failed))
+assert(failed == 0, "vterm conformance: every VT/xterm case passes")
+print("VTERM-CONFORMANCE-OK")
+NY
+}

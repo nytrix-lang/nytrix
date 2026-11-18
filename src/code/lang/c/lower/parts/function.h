@@ -157,6 +157,24 @@ static bool compile_function(c_parser_t *parser, c_function_t *fn,
   parser->lvalue_count = 0;
   parser->va_save_area = -1;
   parser->has_auto_arrays = false;
+  /*
+   * Complex values use the SysV two-SSE form. Lower the declared signature as
+   * the equivalent synthetic aggregate so parameter passing, register return
+   * capture, and the MEMORY-class hidden buffer all share the aggregate ABI
+   * path instead of carrying two lanes through one integer value.
+   */
+  if (c_type_is_complex(fn->result)) {
+    fn->result_agg = c_complex_aggregate(fn->result);
+    fn->result = C_AGG;
+  }
+  for (size_t complex_param = 0; complex_param < fn->param_count;
+       ++complex_param) {
+    c_type_t declared = fn->params[complex_param].type;
+    if (!c_type_is_complex(declared))
+      continue;
+    fn->params[complex_param].agg = c_complex_aggregate(declared);
+    fn->params[complex_param].type = C_AGG;
+  }
   parser->pos = fn->body_start;
   parser->param_count = fn->param_count;
   parser->next_local = fn->param_count;
@@ -291,6 +309,7 @@ static bool compile_function(c_parser_t *parser, c_function_t *fn,
                     .pointee_const = param.pointee_const,
                     .is_volatile = param.is_volatile,
                     .pointee_volatile = param.pointee_volatile,
+                    .pointee_seg = param.pointee_seg,
                     .pointee_array_size = param.pointee_array_size,
                     .pointee_array = param.pointee_array,
                     .volatile_address = -1,

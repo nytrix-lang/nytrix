@@ -1,3 +1,6 @@
+/*
+ * C front-end regression test: asm segment memory.
+ */
 typedef unsigned char u8;
 typedef unsigned short u16;
 typedef unsigned int u32;
@@ -8,21 +11,21 @@ volatile u32 fs_memory[4] = {0x11223344u, 0x55667788u, 0xaabbccddu,
 volatile u32 gs_memory[4] = {0x99aabbccu, 0xddeeff00u, 0x12345678u,
                              0xfeedfaceu};
 
-#define ACCESSORS(segment, suffix, type, output_constraint, input_constraint)  \
-  __attribute__((noinline)) type read_##segment##suffix(usize address) {       \
-    type *pointer = (type *)address;                                           \
-    type value;                                                                \
-    __asm__ volatile("mov" #suffix " %%" #segment ":%1,%0"                     \
-                     : output_constraint(value)                                \
-                     : "m"(*pointer));                                         \
-    return value;                                                              \
-  }                                                                            \
-  __attribute__((noinline)) void write_##segment##suffix(type value,           \
-                                                         usize address) {      \
-    type *pointer = (type *)address;                                           \
-    __asm__ volatile("mov" #suffix " %1,%%" #segment ":%0"                     \
-                     : "+m"(*pointer)                                          \
-                     : input_constraint(value));                               \
+#define ACCESSORS(segment, suffix, type, output_constraint, input_constraint) \
+  __attribute__((noinline)) type read_##segment##suffix(usize address) {      \
+    type *pointer = (type *)address;                                          \
+    type value;                                                               \
+    __asm__ volatile("mov" #suffix " %%" #segment ":%1,%0"                    \
+                     : output_constraint(value)                               \
+                     : "m"(*pointer));                                        \
+    return value;                                                             \
+  }                                                                           \
+  __attribute__((noinline)) void write_##segment##suffix(type value,          \
+                                                         usize address) {     \
+    type *pointer = (type *)address;                                          \
+    __asm__ volatile("mov" #suffix " %1,%%" #segment ":%0"                    \
+                     : "+m"(*pointer)                                         \
+                     : input_constraint(value));                              \
   }
 
 ACCESSORS(fs, b, u8, "=q", "qi")

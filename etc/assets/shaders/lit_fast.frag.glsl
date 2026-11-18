@@ -160,7 +160,11 @@ void main(){
 
 	  vec3 baseColor = vertexColorPrimary ? baseTint.rgb : (vertexCoverageMask ? baseTint.rgb : tex.rgb * baseTint.rgb) ;
 	  if(pc.isUnlit != 0){
-	    outColor = vec4(linearToSrgb(sat3(baseColor)), outAlpha) ;
+	    // UI colours are authored in display space: vertex-coloured quads and
+	    // coverage text pass through, as in lit.frag. Encoding them again drew
+	    // coloured text brighter here than on the GL backend.
+	    bool displaySpace = vertexColorPrimary || vertexCoverageMask ;
+	    outColor = vec4(displaySpace ? sat3(baseColor) : linearToSrgb(sat3(baseColor)), outAlpha) ;
     return ;
   }
 

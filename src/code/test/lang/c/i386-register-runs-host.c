@@ -1,3 +1,6 @@
+/*
+ * Host-side C counterpart for the i386 register runs test.
+ */
 #define NYC_REFERENCE
 #include "i386-register-runs.c"
 extern u32 nyc_register_run(u32 *, u32 *, u32);

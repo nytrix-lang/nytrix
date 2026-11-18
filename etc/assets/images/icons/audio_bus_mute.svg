@@ -1,8 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
-  <title id="title1">Audio Bus Mute</title>
-  <desc id="desc1">Audio Bus Mute editor icon. Original asset id: audiobusmute.</desc>
-  <defs id="defs1" />
-  <g transform="translate(2.0000 2.0000) scale(1.25000)" id="g1">
-    <path d="M 3.6699219,3.0566406 A 1.0001,1.0001 0 0 0 3,4 v 8 a 1,1 0 0 0 1,1 1,1 0 0 0 1,-1 V 6.8515625 L 7.21875,9.625 a 1.0001,1.0001 0 0 0 1.5625,0 L 11,6.8515625 V 12 a 1,1 0 0 0 1,1 1,1 0 0 0 1,-1 V 4 A 1.0001,1.0001 0 0 0 11.21875,3.375 L 8,7.3984375 4.78125,3.375 A 1.0001,1.0001 0 0 0 3.6699219,3.0566406 Z" id="path1" fill="#c6c6ca" />
-  </g>
-</svg>

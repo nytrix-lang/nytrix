@@ -7,6 +7,7 @@ module core.os.ui.render.viewer.editor(
    LINE_H, STATUS_H,
    split_lines, join_lines, buffer, state,
    current_buffer, current_lines, set_lines, clamp_cursor,
+   char_prev, char_next, char_snap,
    line_insert, line_delete_before, insert_text, newline, backspace, delete_char,
    switch_buffer, select_buffer, set_selection_anchor, update_selection,
    selection_range, selection_valid, selection_text, delete_selection,
@@ -40,6 +41,9 @@ fn current_lines(dict st) list { editor_core.current_lines(st) }
 fn set_lines(dict st, list lines) dict { editor_core.set_lines(st, lines) }
 
 fn clamp_cursor(dict st) dict { editor_core.clamp_cursor(st) }
+fn char_prev(str line, int col) int { editor_core.char_prev(line, col) }
+fn char_next(str line, int col) int { editor_core.char_next(line, col) }
+fn char_snap(str line, int col) int { editor_core.char_snap(line, col) }
 
 fn line_insert(str line, int col, str text) str { edit.line_insert(line, col, text) }
 

@@ -27,7 +27,9 @@ static bool expect_accept(const char *what, const nyr_func_t *f, bool want) {
   return false;
 }
 
-/* x = local0; return (x + 1) * 2  -- the control for the straight-line cases. */
+/*
+ * x = local0; return (x + 1) * 2  -- the control for the straight-line cases.
+ */
 static void build_chain(nyr_func_t *f) {
   nyr_opt_begin(f);
   int x = nyr_opt_emit_imm(f, NYIR_LOAD_LOCAL, 0);
@@ -38,14 +40,18 @@ static void build_chain(nyr_func_t *f) {
   nyr_opt_ret(f, scaled);
 }
 
-/* Local index of the ADD inside build_chain(). */
+/*
+ * Local index of the ADD inside build_chain().
+ */
 enum { CHAIN_ADD = 3, CHAIN_MUL = 4, CHAIN_RET = 5 };
 
 static void case_control(void) {
   nyr_func_t f;
   build_chain(&f);
   expect_accept("control chain", &f, true);
-  /* The same function must also evaluate, so the control is not vacuous. */
+  /*
+   * The same function must also evaluate, so the control is not vacuous.
+   */
   int64_t locals[8] = {5};
   int64_t value = 0;
   if (!nyr_opt_eval_locals(&f, "control", locals, 8, &value) || value != 12) {
@@ -131,7 +137,9 @@ static void case_non_dominating_use(void) {
   nyr_ir_func_free(&f);
 }
 
-/* Valid diamond: both arms define a value, joined by a two-edge PHI. */
+/*
+ * Valid diamond: both arms define a value, joined by a two-edge PHI.
+ */
 static size_t build_diamond(nyr_func_t *f) {
   nyr_opt_begin(f);
   int x = nyr_opt_emit_imm(f, NYIR_LOAD_LOCAL, 0);

@@ -2182,6 +2182,96 @@ static const char *ny_resolve_dotted_module_export_alias(codegen_t *cg,
                                         name_hash);
 }
 
+/*
+ * ny_module_local_import_target answers from the module's AST alone (its
+ * `use` statements, comptime guards and public surfaces, all fixed once the
+ * program is expanded). Bare-name alias resolution asks it for every used
+ * module and every unresolved identifier, mostly locals, and each walk
+ * re-normalized every `use` path: 11% of a large serial compile. Remember
+ * the answer per (codegen, module, name).
+ */
+typedef struct ny_local_import_memo_t {
+  const codegen_t *cg;
+  const stmt_t *mod;
+  char *name;
+  char *target; /* NULL when the module does not import the name */
+  uint64_t hash;
+} ny_local_import_memo_t;
+static _Thread_local ny_local_import_memo_t *g_local_import_memo;
+static _Thread_local size_t g_local_import_memo_cap, g_local_import_memo_len;
+
+static uint64_t ny_local_import_memo_hash(const codegen_t *cg,
+                                          const stmt_t *mod,
+                                          const char *name) {
+  uint64_t h = 1469598103934665603ULL ^ (uint64_t)(uintptr_t)cg;
+  h = (h ^ (uint64_t)(uintptr_t)mod) * 1099511628211ULL;
+  for (const unsigned char *p = (const unsigned char *)name; *p; ++p)
+    h = (h ^ *p) * 1099511628211ULL;
+  return h ? h : 1;
+}
+
+static bool ny_local_import_memo_grow(void) {
+  size_t cap = g_local_import_memo_cap ? g_local_import_memo_cap * 2 : 4096;
+  ny_local_import_memo_t *t = calloc(cap, sizeof(*t));
+  if (!t)
+    return false;
+  for (size_t i = 0; i < g_local_import_memo_cap; ++i) {
+    ny_local_import_memo_t *e = &g_local_import_memo[i];
+    if (!e->hash)
+      continue;
+    size_t at = e->hash & (cap - 1);
+    while (t[at].hash)
+      at = (at + 1) & (cap - 1);
+    t[at] = *e;
+  }
+  free(g_local_import_memo);
+  g_local_import_memo = t;
+  g_local_import_memo_cap = cap;
+  return true;
+}
+
+static bool ny_module_local_import_target(codegen_t *cg, stmt_t *mod,
+                                          const char *target, char *out,
+                                          size_t out_cap, int depth);
+
+static bool ny_module_local_import_target_memo(codegen_t *cg, stmt_t *mod,
+                                               const char *name, char *out,
+                                               size_t out_cap) {
+  if (getenv("NYTRIX_NO_IMPORT_MEMO"))
+    return ny_module_local_import_target(cg, mod, name, out, out_cap, 0);
+  if ((g_local_import_memo_len + 1) * 10 >= g_local_import_memo_cap * 7 &&
+      !ny_local_import_memo_grow())
+    return ny_module_local_import_target(cg, mod, name, out, out_cap, 0);
+  uint64_t h = ny_local_import_memo_hash(cg, mod, name);
+  size_t mask = g_local_import_memo_cap - 1;
+  size_t at = h & mask;
+  for (; g_local_import_memo[at].hash; at = (at + 1) & mask) {
+    ny_local_import_memo_t *e = &g_local_import_memo[at];
+    if (e->hash == h && e->cg == cg && e->mod == mod &&
+        strcmp(e->name, name) == 0) {
+      if (!e->target)
+        return false;
+      size_t n = strlen(e->target);
+      if (n >= out_cap)
+        return ny_module_local_import_target(cg, mod, name, out, out_cap, 0);
+      memcpy(out, e->target, n + 1);
+      return true;
+    }
+  }
+  bool found = ny_module_local_import_target(cg, mod, name, out, out_cap, 0);
+  char *key = strdup(name);
+  char *value = found ? strdup(out) : NULL;
+  if (!key || (found && !value)) {
+    free(key);
+    free(value);
+    return found;
+  }
+  g_local_import_memo[at] = (ny_local_import_memo_t){
+      .cg = cg, .mod = mod, .name = key, .target = value, .hash = h};
+  g_local_import_memo_len++;
+  return found;
+}
+
 const char *ny_resolve_used_module_export_alias(codegen_t *cg,
                                                 const char *name) {
   if (!cg || !name || !*name)
@@ -2208,8 +2298,8 @@ const char *ny_resolve_used_module_export_alias(codegen_t *cg,
       continue;
 
     char local_target[1024];
-    if (!ny_module_local_import_target(cg, mod, name, local_target,
-                                       sizeof(local_target), 0))
+    if (!ny_module_local_import_target_memo(cg, mod, name, local_target,
+                                            sizeof(local_target)))
       continue;
 
     char resolved_target[1024];
@@ -2272,21 +2362,135 @@ static bool ny_module_path_write(char *out, size_t out_cap, const char *first,
   return true;
 }
 
+/*
+ * Per-statement facts the import walks recomputed on every query: a `use`
+ * statement's normalized module name and declaration, and a module's
+ * exported child modules. They depend only on the parsed program, so they
+ * are kept per (codegen, statement) and dropped when another program is
+ * attached. Bare-name alias resolution asks the walks for every used module
+ * and unresolved identifier; normalizing paths and building child names
+ * there was most of its cost.
+ */
+typedef struct {
+  const codegen_t *cg;
+  const stmt_t *key;
+  char *mod;      /* use: normalized module name */
+  stmt_t *used;   /* use: declaration of mod, or NULL */
+  struct ny_child_export_t *children; /* module: exported child modules */
+  size_t child_len;
+  bool child_failed; /* child list incomplete: walk uncached */
+} ny_stmt_fact_t;
+
+typedef struct ny_child_export_t {
+  char *path;
+  stmt_t *mod;
+} ny_child_export_t;
+
+static _Thread_local ny_stmt_fact_t *g_stmt_facts;
+static _Thread_local size_t g_stmt_facts_cap, g_stmt_facts_len;
+static _Thread_local size_t g_stmt_facts_progs = SIZE_MAX;
+static _Thread_local const codegen_t *g_stmt_facts_cg;
+
+static void ny_stmt_facts_reset(void) {
+  for (size_t i = 0; i < g_stmt_facts_cap; ++i) {
+    ny_stmt_fact_t *f = &g_stmt_facts[i];
+    if (!f->key)
+      continue;
+    free(f->mod);
+    for (size_t k = 0; k < f->child_len; ++k)
+      free(f->children[k].path);
+    free(f->children);
+  }
+  free(g_stmt_facts);
+  g_stmt_facts = NULL;
+  g_stmt_facts_cap = g_stmt_facts_len = 0;
+}
+
+/*
+ * Returns the slot for (cg, key); *fresh says whether it must be filled.
+ */
+static ny_stmt_fact_t *ny_stmt_fact_slot(codegen_t *cg, const stmt_t *key,
+                                         bool *fresh) {
+  *fresh = false;
+  if (getenv("NYTRIX_NO_USE_FACT_CACHE"))
+    return NULL;
+  if (g_stmt_facts_cg != cg || g_stmt_facts_progs != cg->extra_progs.len) {
+    ny_stmt_facts_reset();
+    g_stmt_facts_cg = cg;
+    g_stmt_facts_progs = cg->extra_progs.len;
+  }
+  if ((g_stmt_facts_len + 1) * 2 > g_stmt_facts_cap) {
+    size_t cap = g_stmt_facts_cap ? g_stmt_facts_cap * 2 : 1024;
+    ny_stmt_fact_t *t = calloc(cap, sizeof(*t));
+    if (!t)
+      return NULL;
+    for (size_t i = 0; i < g_stmt_facts_cap; ++i) {
+      if (!g_stmt_facts[i].key)
+        continue;
+      size_t at = ((uintptr_t)g_stmt_facts[i].key >> 4) & (cap - 1);
+      while (t[at].key)
+        at = (at + 1) & (cap - 1);
+      t[at] = g_stmt_facts[i];
+    }
+    free(g_stmt_facts);
+    g_stmt_facts = t;
+    g_stmt_facts_cap = cap;
+  }
+  size_t mask = g_stmt_facts_cap - 1;
+  size_t at = ((uintptr_t)key >> 4) & mask;
+  while (g_stmt_facts[at].key && g_stmt_facts[at].key != key)
+    at = (at + 1) & mask;
+  if (!g_stmt_facts[at].key) {
+    g_stmt_facts[at] = (ny_stmt_fact_t){.cg = cg, .key = key};
+    g_stmt_facts_len++;
+    *fresh = true;
+  }
+  return &g_stmt_facts[at];
+}
+
+/*
+ * The normalized module of a `use` statement; owned by the cache unless
+ * *owned is set (caller frees).
+ */
+static const char *ny_use_stmt_module(codegen_t *cg, stmt_t *s, stmt_t **used,
+                                      bool *owned) {
+  bool fresh = false;
+  ny_stmt_fact_t *f = ny_stmt_fact_slot(cg, s, &fresh);
+  if (!f) {
+    char *mod =
+        normalize_use_module_name_at(cg, s->as.use.module, s->tok.filename);
+    *owned = true;
+    if (used)
+      *used = mod ? ny_module_lookup_stmt_by_name(cg, mod) : NULL;
+    return mod;
+  }
+  *owned = false;
+  if (fresh) {
+    f->mod = normalize_use_module_name_at(cg, s->as.use.module, s->tok.filename);
+    f->used = f->mod ? ny_module_lookup_stmt_by_name(cg, f->mod) : NULL;
+  }
+  if (used)
+    *used = f->used;
+  return f->mod;
+}
+
 static bool ny_module_local_import_target_inner(codegen_t *cg, stmt_t *s,
                                                 const char *target, char *out,
                                                 size_t out_cap, int depth) {
   if (!cg || !s || !target || !*target || !out || out_cap == 0 || depth > 8)
     return false;
   if (s->kind == NY_S_USE) {
-    char *mod =
-        normalize_use_module_name_at(cg, s->as.use.module, s->tok.filename);
+    bool mod_owned = false;
+    stmt_t *cached_used = NULL;
+    char *mod = (char *)ny_use_stmt_module(cg, s, &cached_used, &mod_owned);
     if (!mod)
       return false;
     bool alias_only =
         !s->as.use.import_all && s->as.use.imports.len == 0 && s->as.use.alias;
     if (alias_only && s->as.use.alias && strcmp(s->as.use.alias, target) == 0) {
       bool copied = ny_module_path_write(out, out_cap, mod, NULL);
-      free(mod);
+      if (mod_owned)
+        free(mod);
       return copied;
     }
     if (s->as.use.imports.len > 0) {
@@ -2298,10 +2502,12 @@ static bool ny_module_local_import_target_inner(codegen_t *cg, stmt_t *s,
         if (!local || strcmp(local, target) != 0)
           continue;
         bool copied = ny_module_path_write(out, out_cap, mod, item->name);
+        if (mod_owned)
         free(mod);
         return copied;
       }
-      free(mod);
+      if (mod_owned)
+        free(mod);
       return false;
     }
 
@@ -2310,24 +2516,31 @@ static bool ny_module_local_import_target_inner(codegen_t *cg, stmt_t *s,
     if (s->as.use.import_all || bare_use) {
       const char *leaf = ny_name_leaf(mod);
       if (bare_use && leaf && strcmp(leaf, target) == 0 &&
-          ny_module_lookup_stmt_by_name(cg, mod)) {
+          (mod_owned ? ny_module_lookup_stmt_by_name(cg, mod)
+                     : cached_used)) {
         bool copied = ny_module_path_write(out, out_cap, mod, NULL);
+        if (mod_owned)
         free(mod);
         return copied;
       }
-      stmt_t *used = ny_module_lookup_stmt_by_name(cg, mod);
+      stmt_t *used =
+          mod_owned ? ny_module_lookup_stmt_by_name(cg, mod) : cached_used;
       if (used && ny_module_public_target(cg, used, target, out, out_cap,
                                           s->as.use.profile, true, depth + 1)) {
+        if (mod_owned)
         free(mod);
         return true;
       }
       if (!used) {
         bool copied = ny_module_path_write(out, out_cap, mod, target);
+        if (mod_owned)
         free(mod);
         return copied;
       }
     }
-    free(mod);
+    if (mod_owned)
+      if (mod_owned)
+        free(mod);
     return false;
   }
   if (s->kind == NY_S_IF) {
@@ -2367,6 +2580,64 @@ static bool ny_module_exported_child_target(codegen_t *cg, stmt_t *mod,
   const char *mod_name = mod->as.module.name;
   if (!mod_name || !*mod_name)
     return false;
+  bool fresh = false;
+  ny_stmt_fact_t *facts = ny_stmt_fact_slot(cg, mod, &fresh);
+  if (facts && fresh) {
+    /*
+     * Same enumeration as below, recorded once: (child path, module).
+     */
+    for (size_t i = 0; i < mod->as.module.body.len; ++i) {
+      stmt_t *child = mod->as.module.body.data[i];
+      if (!child || child->kind != NY_S_EXPORT || child->as.exprt.is_internal)
+        continue;
+      if (!ny_export_profile_visible(child->as.exprt.profile, NULL))
+        continue;
+      for (size_t j = 0; j < child->as.exprt.names.len; ++j) {
+        const char *name = child->as.exprt.names.data[j];
+        if (!name || !*name)
+          continue;
+        char child_path[1024];
+        bool copied =
+            strchr(name, '.')
+                ? ny_module_path_write(child_path, sizeof(child_path), name,
+                                       NULL)
+                : ny_module_path_write(child_path, sizeof(child_path),
+                                       mod_name, name);
+        if (!copied)
+          continue;
+        stmt_t *child_mod = ny_module_lookup_stmt_by_name(cg, child_path);
+        if (!child_mod)
+          continue;
+        ny_child_export_t *grown = realloc(
+            facts->children, (facts->child_len + 1) * sizeof(*grown));
+        char *dup = strdup(child_path);
+        if (!grown || !dup) {
+          free(dup);
+          if (grown)
+            facts->children = grown;
+          facts->child_failed = true;
+          break;
+        }
+        facts->children = grown;
+        facts->children[facts->child_len++] =
+            (ny_child_export_t){.path = dup, .mod = child_mod};
+      }
+      if (facts->child_failed)
+        break;
+    }
+  }
+  if (facts && !facts->child_failed) {
+    for (size_t k = 0; k < facts->child_len; ++k) {
+      const char *child_path = facts->children[k].path;
+      const char *child_leaf = ny_name_leaf(child_path);
+      if (child_leaf && strcmp(child_leaf, target) == 0)
+        return ny_module_path_write(out, out_cap, child_path, NULL);
+      if (ny_module_public_target(cg, facts->children[k].mod, target, out,
+                                  out_cap, NULL, true, depth + 1))
+        return true;
+    }
+    return false;
+  }
   for (size_t i = 0; i < mod->as.module.body.len; ++i) {
     stmt_t *child = mod->as.module.body.data[i];
     if (!child || child->kind != NY_S_EXPORT || child->as.exprt.is_internal)
@@ -3161,6 +3432,31 @@ static bool ny_import_used_in_module_body(const stmt_t *module,
   return scan.used;
 }
 
+/*
+ * Top-level script imports have no owning module: scan the program's
+ * statements from the same file instead (`use M as m` at script scope with
+ * `m.f()` was reported unused).
+ */
+static const program_t *g_lint_prog;
+
+static bool ny_import_used_in_program(const program_t *prog,
+                                      const char *alias, const char *file) {
+  if (!prog || !alias || !*alias)
+    return false;
+  ny_import_usage_scan_t scan = {.alias = alias, .used = false};
+  ny_visitor_t visitor = {.ctx = &scan,
+                          .visit_expr_pre = ny_import_usage_expr_pre};
+  for (size_t i = 0; i < prog->body.len && !scan.used; ++i) {
+    stmt_t *child = prog->body.data[i];
+    if (!child || child->kind == NY_S_MODULE || child->kind == NY_S_USE)
+      continue;
+    if (file && child->tok.filename && strcmp(file, child->tok.filename) != 0)
+      continue;
+    ny_visit_stmt(&visitor, child);
+  }
+  return scan.used;
+}
+
 static void ny_lint_use_stmt(codegen_t *cg, stmt_t *s,
                              const stmt_t *owner_module) {
   if (!cg || !s || s->kind != NY_S_USE)
@@ -3230,6 +3526,11 @@ static void ny_lint_use_stmt(codegen_t *cg, stmt_t *s,
    * before emitting a diagnostic.
    */
   if (owner_module && ny_import_used_in_module_body(owner_module, alias)) {
+    free(mod);
+    return;
+  }
+  if (!owner_module &&
+      ny_import_used_in_program(g_lint_prog, alias, s->tok.filename)) {
     free(mod);
     return;
   }
@@ -3312,6 +3613,8 @@ static void ny_lint_unused_imports_stmt(codegen_t *cg, stmt_t *s,
 void ny_lint_unused_imports(codegen_t *cg, program_t *prog) {
   if (!cg || !prog)
     return;
+  g_lint_prog = prog;
   for (size_t i = 0; i < prog->body.len; ++i)
     ny_lint_unused_imports_stmt(cg, prog->body.data[i], NULL);
+  g_lint_prog = NULL;
 }

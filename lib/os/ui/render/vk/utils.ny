@@ -380,7 +380,6 @@ fn _vkr_bind_dynamic_vertex_buffer(any cb) any {
 }
 
 fn _vkr_pipe_eq(any a, any b) bool { a && b && to_int(a) == to_int(b) }
-
 mut int _vkr_pipe_diag_gen = 0
 mut bool _vkr_pipe_diag_on = false
 

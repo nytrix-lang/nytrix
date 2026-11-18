@@ -1,3 +1,6 @@
+/*
+ * Host-side C counterpart for the frame pointer order test.
+ */
 extern long omit_fp_sum8(long, long, long, long, long, long, long, long);
 
 int main(void) {

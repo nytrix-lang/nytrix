@@ -1,3 +1,6 @@
+/*
+ * C front-end regression test: stack protector.
+ */
 #if NYC_EXPECT_SSP == 3
 #if !defined(__SSP_ALL__) || __SSP_ALL__ != 2
 #error incorrect stack-protector-all predefines

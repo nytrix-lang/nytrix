@@ -66,7 +66,8 @@ static bool check(unsigned lanes, bool omit_frame, bool convert) {
   } else if (ok) {
     ok = nyr_x64_obj_append_function_with_frame(
                 &code, defs, &def_count, relocs, &reloc_count, &ir, &target,
-                "vector_copy", omit_frame, true, false, false, err, sizeof(err));
+                "vector_copy", omit_frame, true, false, false, false, false,
+                err, sizeof(err));
   }
   int symbol = ok ? nyr_x64_obj_def_index(defs, def_count, "vector_copy") : -1;
   void *mapping = MAP_FAILED;

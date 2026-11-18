@@ -45,7 +45,9 @@ static bool emit(nyr_mach_func_t *mach, nyr_mach_opcode_t opcode,
                                                 : NYR_MACH_EFFECT_NONE});
 }
 
-/* v0 = 0; v1 = v0 + v0; return v1 */
+/*
+ * v0 = 0; v1 = v0 + v0; return v1
+ */
 static bool build_valid(nyr_mach_func_t *mach, nyr_mach_reg_t *out) {
   uint32_t entry = 0;
   nyr_mach_reg_t v0 = NYR_MACH_REG_INVALID, v1 = NYR_MACH_REG_INVALID;
@@ -96,7 +98,9 @@ int main(void) {
     nyr_mach_func_free(&mach);
   }
   {
-    /* Operand names a vreg the function never allocated. */
+    /*
+     * Operand names a vreg the function never allocated.
+     */
     nyr_mach_func_t mach = {0};
     nyr_mach_reg_t v1 = NYR_MACH_REG_INVALID;
     build_valid(&mach, &v1);
@@ -105,7 +109,9 @@ int main(void) {
     nyr_mach_func_free(&mach);
   }
   {
-    /* Register class disagrees with the vreg's declared type. */
+    /*
+     * Register class disagrees with the vreg's declared type.
+     */
     nyr_mach_func_t mach = {0};
     build_valid(&mach, NULL);
     mach.insts[1].src0 = vreg(mach.insts[1].src0.as.reg, NYR_MACH_REGCLASS_FPR);
@@ -113,7 +119,9 @@ int main(void) {
     nyr_mach_func_free(&mach);
   }
   {
-    /* Entry block falls off the end without RET or BR. */
+    /*
+     * Entry block falls off the end without RET or BR.
+     */
     nyr_mach_func_t mach = {0};
     build_valid(&mach, NULL);
     mach.insts[mach.inst_len - 1].opcode = NYR_MACH_NOP;
@@ -121,7 +129,9 @@ int main(void) {
     nyr_mach_func_free(&mach);
   }
   {
-    /* Branch target names a block that does not exist. */
+    /*
+     * Branch target names a block that does not exist.
+     */
     nyr_mach_func_t mach = {0};
     build_valid(&mach, NULL);
     nyr_mach_reg_t v1 = NYR_MACH_REG_INVALID;
@@ -136,7 +146,9 @@ int main(void) {
     nyr_mach_func_free(&mach);
   }
   {
-    /* Two blocks claiming the same label. */
+    /*
+     * Two blocks claiming the same label.
+     */
     nyr_mach_func_t mach = {0};
     uint32_t first = 0, second = 0;
     bool built = nyr_mach_begin_block(&mach, 4, &first) && first == 0;

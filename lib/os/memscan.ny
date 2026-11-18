@@ -28,8 +28,10 @@ module core.os.memscan(
    load_maps, read_bytes, write_bytes,
    scan, previous, reset, depth, count, truncated, is_snapshot,
    snapshot_bytes, addr_at, type_at, read_value_text, value_text, decode_text,
-   set_all, set_one, lock_start, lock_stop, lock_active, lock_tick
+   set_all, set_one, lock_start, lock_stop, lock_active, lock_tick,
+   write_value, read_value, region_writable, region_shared
 )
+
 use core
 use core.str as str
 use core.os (file_read, ticks)
@@ -38,18 +40,20 @@ def TYPE_NAMES = ["Int8", "Int16", "Int32", "Int64", "UInt8", "UInt16", "UInt32"
    "Float32", "Float64", "Pointer", "Size", "Bool"]
 def MODES = ["Exact", "Changed", "Unchanged", "Increased", "Increased or Greater", "Increased by",
    "Decreased", "Decreased or Less", "Decreased by"]
+
 ;; Result entries kept per scan; a scan that finds more stops there and
 ;; reports truncated().
 def int MAX_RESULTS = 4000000
+
 ;; Bytes a snapshot (first scan without a value) may hold in total.
 def int MAX_SNAPSHOT = 536870912
+
 ;; Scan levels kept for previous().
 def int MAX_DEPTH = 32
 
 ;; ---- types ----------------------------------------------------------------
-
 fn type_index(str name) int {
-   "Returns the index of a type name, or -1 (also for \"Auto\")."
+   "Returns the index of a type name, or -1(also for \"Auto\")."
    mut int i = 0
    while i < 13 {
       if to_str(TYPE_NAMES.get(i, "")) == name { return i }
@@ -123,6 +127,7 @@ fn _bits_of_f64(f64 v) int {
 }
 
 mut int _scratch_p = 0
+
 fn _scratch() ptr {
    if _scratch_p == 0 { _scratch_p = int(malloc(16)) }
    ptr_add(0, _scratch_p)
@@ -150,7 +155,6 @@ fn decode_text(int bits, int t) str {
 }
 
 ;; ---- parsing --------------------------------------------------------------
-
 mut int _pv_ok = 0
 mut int _pv_type = -1
 mut int _pv_int = 0
@@ -158,7 +162,9 @@ mut f64 _pv_float = 0.0
 mut int _pv_is_float = 0
 
 fn parsed_type() int { "Returns the type index of the last parse_value." _pv_type }
+
 fn parsed_int() int { "Returns the integer of the last parse_value." _pv_int }
+
 fn parsed_float() f64 { "Returns the number of the last parse_value as a float." _pv_float }
 
 fn _digits_only(str t, int from) bool {
@@ -232,7 +238,7 @@ fn _parse_float(str s) bool {
 }
 
 fn parse_value(str input) bool {
-   "Parses a smem value (`type:value` or a bare number). Returns false when it does not parse; parsed_type/parsed_int/parsed_float hold the result."
+   "Parses a smem value(`type:value` or a bare number). Returns false when it does not parse; parsed_type/parsed_int/parsed_float hold the result."
    _pv_ok = 0
    _pv_type = -1
    def str t = str.strip(input)
@@ -318,6 +324,7 @@ fn _auto_types(int t) list {
 
 ;; Bits of the parsed value in type t, or -1 in _enc_ok when it does not fit.
 mut int _enc_ok = 0
+
 fn _encode(int t) int {
    _enc_ok = 1
    def int c = _cls(t)
@@ -400,24 +407,25 @@ fn _mode_index(str mode) int {
 }
 
 ;; ---- process access -------------------------------------------------------
-
 mut int _fd = -1
 mut int _pid = 0
 mut str _err = ""
 
 fn last_error() str { "Returns the last error message, or \"\"." _err }
+
 fn attached() bool { "True while a process is attached." _fd >= 0 }
+
 fn pid() int { "Returns the attached process id, or 0." _pid }
 
 fn attach(int p) bool {
-   "Opens /proc/<p>/mem for reading and writing. Returns false and sets last_error when it cannot (permissions, no such process)."
+   "Opens /proc/<p>/mem for reading and writing. Returns false and sets last_error when it cannot(permissions, no such process)."
    detach_process()
    _err = ""
    if p <= 0 { _err = "invalid pid" return false }
    mut int fd = __open_raw("/proc/" + to_str(p) + "/mem", 2, 0)
    if fd < 0 { fd = __open_raw("/proc/" + to_str(p) + "/mem", 0, 0) }
    if fd < 0 {
-      _err = "cannot open /proc/" + to_str(p) + "/mem (needs ptrace access: run as root or set kernel.yama.ptrace_scope=0)"
+      _err = "cannot open /proc/" + to_str(p) + "/mem(needs ptrace access: run as root or set kernel.yama.ptrace_scope=0)"
       return false
    }
    _fd = fd
@@ -452,10 +460,11 @@ fn _sys_pwrite_nr() int {
 ;; Positioned reads and writes on /proc/<pid>/mem: the file offset is the
 ;; address. (__read_off_raw's offset is into the buffer, not the file.)
 fn _pread(ptr buf, int len, int addr) int { __syscall_raw(_sys_pread_nr(), _fd, int(buf), len, addr, 0, 0) }
+
 fn _pwrite(ptr buf, int len, int addr) int { __syscall_raw(_sys_pwrite_nr(), _fd, int(buf), len, addr, 0, 0) }
 
 fn read_bytes(int addr, int len) ptr {
-   "Reads `len` bytes at `addr` into a fresh buffer (the caller frees it), or returns 0 when any byte is unreadable."
+   "Reads `len` bytes at `addr` into a fresh buffer(the caller frees it), or returns 0 when any byte is unreadable."
    if _fd < 0 || len <= 0 { return 0 }
    def ptr buf = malloc(len)
    if !buf { return 0 }
@@ -501,7 +510,7 @@ fn _write_bits(int addr, int bits, int t) bool {
 }
 
 fn load_maps(int p) list {
-   "Returns the readable mappings of process `p` grouped by name, smem's order: [Anonymous], [heap], other [..], then files. Each group is {name, enabled, regions: [[start, end], ...]}."
+   "Returns the readable mappings of process `p` grouped by name, smem's order: [Anonymous], [heap], other [..], then files. Each group is {name, enabled, regions: [[start, end, perms], ...]}; perms is the maps column(`rw-p`)."
    if p <= 0 { return [] }
    def res = file_read("/proc/" + to_str(p) + "/maps")
    if is_err(res) { return [] }
@@ -548,7 +557,7 @@ fn load_maps(int p) list {
          gi = names.len - 1
       }
       mut any rl = regs.get(gi, [])
-      rl = rl.append([a0, a1])
+      rl = rl.append([a0, a1, perms])
       regs[gi] = rl
    }
    ;; Order by rank then name: repeatedly move the first remaining group.
@@ -611,7 +620,6 @@ fn _fields(str line) list {
 ;; vals, snapshot regions, snapshot region count, truncated flag.
 ;; A list stores per entry: address (i64), type (u8) and bits (i64).
 ;; A snapshot stores per region: start, size, buffer, plus the scan types.
-
 mut int _lv = 0
 mut int _depth = 0
 
@@ -621,6 +629,7 @@ fn _lvp() ptr {
 }
 
 fn _lget(int level, int field) int { load64(_lvp(), (level * 8 + field) * 8) }
+
 fn _lset(int level, int field, int v) any { store64(_lvp(), v, (level * 8 + field) * 8) }
 
 fn _free_level(int level) any {
@@ -658,15 +667,17 @@ fn reset() any {
 }
 
 fn previous() bool {
-   "Goes back one scan level (the first level stays). Returns false when there is nothing to go back to."
+   "Goes back one scan level(the first level stays). Returns false when there is nothing to go back to."
    if _depth <= 1 { return false }
    _depth -= 1
    _free_level(_depth)
    true
 }
 
-fn depth() int { "Returns how many scan levels exist (0 before the first scan)." _depth }
-fn is_snapshot() bool { "True when the current level is a value-less first scan (a byte snapshot)." _depth > 0 && _lget(_depth - 1, 0) == 2 }
+fn depth() int { "Returns how many scan levels exist(0 before the first scan)." _depth }
+
+fn is_snapshot() bool { "True when the current level is a value-less first scan(a byte snapshot)." _depth > 0 && _lget(_depth - 1, 0) == 2 }
+
 fn truncated() bool { "True when the current level stopped at MAX_RESULTS." _depth > 0 && _lget(_depth - 1, 7) != 0 }
 
 fn _count() int {
@@ -675,7 +686,7 @@ fn _count() int {
    _lget(_depth - 1, 1)
 }
 
-fn count() int { "Returns the number of results of the current level (0 for a snapshot)." _count() }
+fn count() int { "Returns the number of results of the current level(0 for a snapshot)." _count() }
 
 fn snapshot_bytes() int {
    "Returns the bytes held by the current snapshot level."
@@ -694,10 +705,12 @@ fn addr_at(int i) int {
    "Returns the address of result `i`."
    (i >= 0 && i < _count()) ? load64(ptr_add(0, _lget(_depth - 1, 2)), i * 8) : 0
 }
+
 fn type_at(int i) int {
    "Returns the type index of result `i`."
    (i >= 0 && i < _count()) ? load8(ptr_add(0, _lget(_depth - 1, 3)), i) : -1
 }
+
 fn _val_at(int i) int { load64(ptr_add(0, _lget(_depth - 1, 4)), i * 8) }
 
 fn read_value_text(int addr, int t) str {
@@ -977,8 +990,19 @@ fn _next_scan(int m, list types) bool {
          def int sz = type_size(t)
          if !filter || t == only {
             if page_at < 0 || a < page_at || a + sz > page_at + page_len {
+               ;; The 64 KiB window can start in an unmapped hole before a
+               ;; small mapping; then the read fails as a whole. Fall back to
+               ;; the 4 KiB page, then to the cell itself.
                page_at = a & (0 - 65536)
                page_len = _read_into(page, page_at, 65536)
+               if page_len <= 0 || a + sz > page_at + page_len {
+                  page_at = a & (0 - 4096)
+                  page_len = _read_into(page, page_at, 4096)
+               }
+               if page_len <= 0 || a + sz > page_at + page_len {
+                  page_at = a
+                  page_len = _read_into(page, a, sz)
+               }
             }
             if a + sz <= page_at + page_len {
                def int nbits = _bits(page, a - page_at, t)
@@ -994,7 +1018,6 @@ fn _next_scan(int m, list types) bool {
 }
 
 ;; ---- writes and locks -----------------------------------------------------
-
 fn set_one(int i, str value) bool {
    "Writes `value` to result `i`, encoded in that result's type."
    if !parse_value(value) { _err = "cannot parse value '" + value + "'" return false }
@@ -1002,6 +1025,34 @@ fn set_one(int i, str value) bool {
    def int bits = _encode(t)
    if _enc_ok == 0 { _err = value + " does not fit " + type_name(t) return false }
    _write_bits(addr_at(i), bits, t)
+}
+
+fn write_value(int addr, str value, int t) bool {
+   "Writes `value` encoded as type index `t` at `addr`. Returns false and sets last_error when it does not parse, does not fit, or the write fails."
+   _err = ""
+   if _fd < 0 { _err = "not attached" return false }
+   if t < 0 || t >= TYPE_NAMES.len { _err = "unknown type" return false }
+   if !parse_value(value) { _err = "cannot parse value '" + value + "'" return false }
+   def int bits = _encode(t)
+   if _enc_ok == 0 { _err = value + " does not fit " + type_name(t) return false }
+   if !_write_bits(addr, bits, t) { _err = "write failed at 0x" + str.to_hex(addr, 0) return false }
+   true
+}
+
+fn read_value(int addr, int t) str {
+   "Alias of read_value_text: the value at `addr` as type index `t`, or \"??\"."
+   read_value_text(addr, t)
+}
+
+fn region_writable(any r) bool {
+   "True when a load_maps region is writable(its perms contain w)."
+   str.find(to_str(r.get(2, "")), "w") >= 0
+}
+
+fn region_shared(any r) bool {
+   "True when a load_maps region is a shared mapping(perms end in s), e.g. memfd or SysV shm."
+   def str pm = to_str(r.get(2, ""))
+   pm.len >= 4 && str.str_slice(pm, 3, 4) == "s"
 }
 
 fn set_all(str value) bool {
@@ -1028,7 +1079,7 @@ mut str _lock_value = ""
 mut int _lock_last = 0
 
 fn lock_start(str value) bool {
-   "Keeps writing `value` to the current results about every 100 ms (call lock_tick from the frame loop). Returns false when the value does not parse or there are no results."
+   "Keeps writing `value` to the current results about every 100 ms(call lock_tick from the frame loop). Returns false when the value does not parse or there are no results."
    if !parse_value(value) { _err = "cannot parse value '" + value + "'" return false }
    if _count() == 0 { _err = "no results to lock" return false }
    _lock_value = value
@@ -1038,6 +1089,7 @@ fn lock_start(str value) bool {
 }
 
 fn lock_stop() any { "Stops the value lock." _lock_on = 0 }
+
 fn lock_active() bool { "True while a lock is writing." _lock_on == 1 }
 
 fn lock_tick() bool {

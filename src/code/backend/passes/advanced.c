@@ -3653,9 +3653,282 @@ static bool nyr_inline_summary_covered(const nyr_inst_t *call,
   return unrepresented == 0;
 }
 
+/*
+ * Known-callable devirtualization.
+ *
+ * A partial application such as `def bound = step(1)` lowers to a specialized
+ * one-parameter function F plus a dynamic call at each use:
+ *
+ *   m = call rt_mark_dynamic_callable_word_args_raw_result (sym F)
+ *   r = call rt_call_any1 m, tag(x)
+ *   v = call rt_any_to_i64 r
+ *
+ * For a plain code address the marker carries exactly WORD_ARGS|RAW_RESULT
+ * (a code address has no prior flags), so rt_call_any1 untags the integer
+ * argument, calls F(x), and boxes the raw result with rt_box_i64, which
+ * rt_any_to_i64 then unboxes: v == F(x).  Rewrite the pair into that direct
+ * call so the inliner can see F's body.  The argument must be provably an
+ * integer (a tagged literal or `x << 1 | 1`): only then is the untagged word
+ * exactly what the runtime would pass.  NYTRIX_NO_CALLABLE_DEVIRT=1 disables.
+ */
+static int nyr_known_callable_resolve_copy(const nyr_func_t *f,
+                                           const int *defs, int value) {
+  for (int depth = 0; depth < 16; ++depth) {
+    if (value < 0 || value >= f->next_value || defs[value] < 0)
+      return -1;
+    const nyr_inst_t *in = &f->data[defs[value]];
+    if (in->op != NYIR_COPY)
+      return value;
+    value = in->a;
+  }
+  return -1;
+}
+
+static bool nyr_known_callable_const(const nyr_func_t *f, const int *defs,
+                                     int value, int64_t *out) {
+  value = nyr_known_callable_resolve_copy(f, defs, value);
+  if (value < 0)
+    return false;
+  const nyr_inst_t *in = &f->data[defs[value]];
+  if (in->op != NYIR_CONST_I64 || in->symbol)
+    return false;
+  *out = in->imm;
+  return true;
+}
+
+/* Raw integer behind a provably tagged-integer argument. */
+static bool nyr_known_callable_untag(const nyr_func_t *f, const int *defs,
+                                     int value, bool *is_const, int64_t *raw,
+                                     int *raw_value) {
+  int64_t k = 0;
+  if (nyr_known_callable_const(f, defs, value, &k)) {
+    if ((k & 1) == 0)
+      return false;
+    *is_const = true;
+    *raw = k >> 1;
+    return true;
+  }
+  value = nyr_known_callable_resolve_copy(f, defs, value);
+  if (value < 0)
+    return false;
+  const nyr_inst_t *orr = &f->data[defs[value]];
+  if (orr->op != NYIR_OR_I64)
+    return false;
+  int shl_value = -1;
+  if (nyr_known_callable_const(f, defs, orr->b, &k) && k == 1)
+    shl_value = orr->a;
+  else if (nyr_known_callable_const(f, defs, orr->a, &k) && k == 1)
+    shl_value = orr->b;
+  shl_value = nyr_known_callable_resolve_copy(f, defs, shl_value);
+  if (shl_value < 0)
+    return false;
+  const nyr_inst_t *shl = &f->data[defs[shl_value]];
+  if (shl->op != NYIR_SHL_I64 || !nyr_known_callable_const(f, defs, shl->b, &k) ||
+      k != 1 || shl->a < 0)
+    return false;
+  *is_const = false;
+  *raw_value = shl->a;
+  return true;
+}
+
+/* F's every returned value is a raw integer. */
+static bool nyr_known_callable_returns_raw_i64(const nyr_func_t *callee) {
+  int *defs = nyr_build_defs(callee);
+  if (!defs)
+    return false;
+  bool saw = false, ok = true;
+  for (size_t k = 0; k < callee->len && ok; ++k) {
+    const nyr_inst_t *ret = &callee->data[k];
+    if (ret->op != NYIR_RET)
+      continue;
+    saw = true;
+    if (ret->a < 0 || ret->a >= callee->next_value || defs[ret->a] < 0) {
+      ok = false;
+      break;
+    }
+    const nyr_inst_t *def = &callee->data[defs[ret->a]];
+    ok = def->scalar_class == NYIR_SCALAR_I64_RAW ||
+         (def->op == NYIR_CONST_I64 && !def->symbol &&
+          def->scalar_class == NYIR_SCALAR_UNKNOWN);
+  }
+  free(defs);
+  return saw && ok;
+}
+
+/* No live consumer: every use is a COPY whose result is itself dead. */
+static bool nyr_known_callable_value_dead(const nyr_func_t *f,
+                                          const nyr_use_def_t *uses,
+                                          int value, int depth) {
+  if (value < 0 || (size_t)value >= uses->value_count || depth > 8)
+    return false;
+  for (size_t u = uses->offsets[value]; u < uses->offsets[value + 1]; ++u) {
+    const nyr_inst_t *user = &f->data[uses->users[u]];
+    if (user->op == NYIR_NOP)
+      continue;
+    if (user->op != NYIR_COPY ||
+        !nyr_known_callable_value_dead(f, uses, user->dst, depth + 1))
+      return false;
+  }
+  return true;
+}
+
+static void nyr_known_callable_discard_dead(nyr_func_t *f,
+                                            const nyr_use_def_t *uses,
+                                            int value, int depth) {
+  if (value < 0 || (size_t)value >= uses->value_count || depth > 8)
+    return;
+  for (size_t u = uses->offsets[value]; u < uses->offsets[value + 1]; ++u) {
+    nyr_inst_t *user = &f->data[uses->users[u]];
+    if (user->op != NYIR_COPY)
+      continue;
+    nyr_known_callable_discard_dead(f, uses, user->dst, depth + 1);
+    nyr_debug_loc_t debug = user->debug;
+    nyr_inst_discard(user);
+    user->debug = debug;
+  }
+}
+
+static bool nyr_devirt_known_callables(nyr_func_t *f) {
+  static int disabled = -1;
+  if (disabled < 0) {
+    const char *env = getenv("NYTRIX_NO_CALLABLE_DEVIRT");
+    disabled = env && env[0] && strcmp(env, "0") != 0;
+  }
+  if (disabled || !f || f->next_value <= 0)
+    return true;
+  bool any = false;
+  for (size_t i = 0; i < f->len && !any; ++i)
+    any = f->data[i].op == NYIR_CALL && f->data[i].symbol &&
+          strcmp(f->data[i].symbol, "rt_call_any1") == 0;
+  if (!any)
+    return true;
+  int *defs = nyr_build_defs(f);
+  nyr_use_def_t uses = {0};
+  if (!defs || !nyr_build_use_def(f, &uses)) {
+    free(defs);
+    return false;
+  }
+  int *markers = NULL;
+  size_t marker_count = 0;
+  bool changed = false;
+  for (size_t i = 0; i < f->len; ++i) {
+    nyr_inst_t *call = &f->data[i];
+    if (call->op != NYIR_CALL || !call->symbol || call->dst < 0 ||
+        call->imm != 2 || strcmp(call->symbol, "rt_call_any1") != 0 ||
+        call->extra_args_len)
+      continue;
+    /* r must feed exactly one rt_any_to_i64. */
+    size_t ub = uses.offsets[call->dst], ue = uses.offsets[call->dst + 1];
+    if (ue - ub != 1)
+      continue;
+    nyr_inst_t *unbox = &f->data[uses.users[ub]];
+    if (unbox->op != NYIR_CALL || !unbox->symbol || unbox->dst < 0 ||
+        unbox->imm != 1 || unbox->a != call->dst ||
+        strcmp(unbox->symbol, "rt_any_to_i64") != 0)
+      continue;
+    int marker_value = nyr_known_callable_resolve_copy(f, defs, call->a);
+    if (marker_value < 0)
+      continue;
+    nyr_inst_t *marker = &f->data[defs[marker_value]];
+    if (marker->op != NYIR_CALL || !marker->symbol || marker->imm != 1 ||
+        strcmp(marker->symbol,
+               "rt_mark_dynamic_callable_word_args_raw_result") != 0)
+      continue;
+    int sym_value = nyr_known_callable_resolve_copy(f, defs, marker->a);
+    if (sym_value < 0)
+      continue;
+    const nyr_inst_t *sym = &f->data[defs[sym_value]];
+    if ((sym->op != NYIR_ADDR_SYMBOL && sym->op != NYIR_CONST_I64) ||
+        !sym->symbol)
+      continue;
+    const nyr_func_t *callee = nyr_find_inline_callee(sym->symbol);
+    if (!callee || callee == f || callee->param_count != 1 ||
+        !callee->param_types || callee->param_types[0] != NYIR_PARAM_I64 ||
+        callee->return_aggregate_size ||
+        !nyr_known_callable_returns_raw_i64(callee))
+      continue;
+    bool is_const = false;
+    int64_t raw = 0;
+    int raw_value = -1;
+    if (!nyr_known_callable_untag(f, defs, call->b, &is_const, &raw,
+                                  &raw_value))
+      continue;
+    if (ny_trace_enabled("NY_TRACE_DEVIRT"))
+      ny_trace_line("DEVIRT", "devirt: known callable %s @%zu", sym->symbol,
+                    i);
+    /* r := untagged argument; v := call F(r). */
+    nyr_debug_loc_t debug = call->debug;
+    int r = call->dst;
+    nyr_inst_t direct = *call;
+    nyr_inst_discard(call);
+    call->debug = debug;
+    call->dst = r;
+    call->scalar_class = NYIR_SCALAR_I64_RAW;
+    if (is_const) {
+      call->op = NYIR_CONST_I64;
+      call->imm = raw;
+    } else {
+      call->op = NYIR_COPY;
+      call->a = raw_value;
+    }
+    direct.dst = unbox->dst;
+    direct.symbol = sym->symbol;
+    direct.imm = 1;
+    direct.a = r;
+    direct.b = direct.c = direct.d = direct.e = direct.f = -1;
+    direct.flags &= ~(NYIR_INST_F_EXTERN | NYIR_INST_F_EFFECTS_KNOWN |
+                      NYIR_INST_F_INDIRECT | NYIR_INST_F_VARIADIC);
+    direct.effects = 0;
+    direct.scalar_class = NYIR_SCALAR_I64_RAW;
+    memset(direct.arg_scalar_classes, 0, sizeof(direct.arg_scalar_classes));
+    nyr_call_arg_class_set(direct.arg_scalar_classes, 0, NYIR_SCALAR_I64_RAW);
+    memset(direct.arg_ownership, 0, sizeof(direct.arg_ownership));
+    memset(direct.arg_contracts, 0, sizeof(direct.arg_contracts));
+    direct.arg_sizes = NULL;
+    direct.extra_args = NULL;
+    direct.extra_args_len = 0;
+    direct.phi_incoming = NULL;
+    direct.phi_incoming_len = 0;
+    direct.alias_class = 0;
+    direct.debug = unbox->debug;
+    free(unbox->arg_sizes);
+    free(unbox->extra_args);
+    *unbox = direct;
+    int *grown = realloc(markers, (marker_count + 1) * sizeof(*markers));
+    if (grown) {
+      markers = grown;
+      markers[marker_count++] = marker_value;
+    }
+    changed = true;
+  }
+  if (changed && marker_count) {
+    /* Drop markers whose only consumers were the rewritten calls. */
+    nyr_use_def_free(&uses);
+    if (nyr_build_use_def(f, &uses)) {
+      for (size_t m = 0; m < marker_count; ++m) {
+        int value = markers[m];
+        int def = defs[value];
+        if (def < 0 || f->data[def].op != NYIR_CALL ||
+            !nyr_known_callable_value_dead(f, &uses, value, 0))
+          continue;
+        nyr_known_callable_discard_dead(f, &uses, value, 0);
+        nyr_debug_loc_t debug = f->data[def].debug;
+        nyr_inst_discard(&f->data[def]);
+        f->data[def].debug = debug;
+      }
+    }
+  }
+  free(markers);
+  free(defs);
+  nyr_use_def_free(&uses);
+  return true;
+}
+
 bool nyr_inline_small(nyr_func_t *f) {
   if (!f || nyr_inline_callee_count == 0)
     return true;
+  if (!nyr_devirt_known_callables(f))
+    return false;
   for (size_t i = 0; i < f->len; ++i) {
     nyr_inst_t *in = &f->data[i];
     if (in->op != NYIR_CALL || !in->symbol)
@@ -3972,7 +4245,9 @@ bool nyr_inline_small(nyr_func_t *f) {
           "three-instruction body with constant operation operand");
       if (!nyr_ensure_insert(f, i, 1))
         return false;
-      /* The shifted CALL at i + 1 is replaced below; free what it owns. */
+      /*
+       * The shifted CALL at i + 1 is replaced below; free what it owns.
+       */
       nyr_inst_discard(&f->data[i + 1]);
       int cdst = f->next_value++;
       f->data[i] = (nyr_inst_t){
@@ -4717,9 +4992,29 @@ static int nyr_inline_local_count(const nyr_func_t *f) {
  * Recover concrete ABI classes when inlining materializes a formal. A caller
  * value may itself be a local load; accept its class only when every store to
  * that slot agrees, leaving mixed/dynamic locals conservative.
+ *
+ * The caller's float facts are needed only when an argument's class is not
+ * stamped on its producer; build the union-find roots then, once per inline
+ * site, instead of a full type map for every site (general inlining rebuilt
+ * one per call site of large callers).
  */
+typedef struct {
+  const nyr_func_t *f;
+  size_t local_count;
+  nyr_type_roots_t roots;
+  int state; /* 0 unbuilt, 1 ready, -1 failed */
+} nyr_inline_lazy_types_t;
+
+static unsigned nyr_inline_lazy_bits(nyr_inline_lazy_types_t *t, int value) {
+  if (!t)
+    return 0;
+  if (t->state == 0)
+    t->state = nyr_type_roots_init(&t->roots, t->f, t->local_count) ? 1 : -1;
+  return t->state > 0 ? nyr_type_roots_value_bits(&t->roots, value) : 0;
+}
+
 static nyr_scalar_class_t nyr_inline_value_class(const nyr_func_t *f,
-                                                 const nyr_type_map_t *types,
+                                                 nyr_inline_lazy_types_t *types,
                                                  int value, unsigned depth) {
   if (!f || value < 0 || value >= f->next_value || depth > 32)
     return NYIR_SCALAR_UNKNOWN;
@@ -4766,10 +5061,11 @@ static nyr_scalar_class_t nyr_inline_value_class(const nyr_func_t *f,
     }
     return joined;
   }
-  if (types && (size_t)value < types->value_count) {
-    bool f32 = types->value_f32[value];
-    bool f64 = types->value_f64[value];
-    if (f32 != f64)
+  if (types && types->state >= 0 && value < f->next_value) {
+    unsigned bits = nyr_inline_lazy_bits(types, value);
+    bool f32 = (bits & 2u) != 0;
+    bool f64 = (bits & 1u) != 0;
+    if (types->state > 0 && f32 != f64)
       return f64 ? NYIR_SCALAR_F64 : NYIR_SCALAR_F32;
   }
   return NYIR_SCALAR_UNKNOWN;
@@ -4789,7 +5085,7 @@ static size_t nyr_inline_clone_body(nyr_func_t *caller, size_t call_idx,
     return 0;
 
   nyr_func_t clone = {0}, body = {0};
-  nyr_type_map_t caller_types = {0};
+  nyr_inline_lazy_types_t caller_types = {0};
   nyr_cfg_t ccfg = {0}, fcfg = {0};
   int *vmap = NULL, *ret_values = NULL;
   int64_t *labels = NULL, *ret_labels = NULL;
@@ -4809,9 +5105,10 @@ static size_t nyr_inline_clone_body(nyr_func_t *caller, size_t call_idx,
       !nyr_cfg_build_topology(&clone, &fcfg) || fcfg.block_count == 0 ||
       !nyr_cfg_build_topology(caller, &ccfg))
     goto done;
-  if (!nyr_type_map_init(&caller_types, caller,
-                         (size_t)nyr_inline_local_count(caller)))
-    goto done;
+  if (caller->param_count && !caller->param_types)
+    goto done; /* the type map rejected such callers */
+  caller_types.f = caller;
+  caller_types.local_count = (size_t)nyr_inline_local_count(caller);
   caller_local_count = nyr_inline_local_count(caller);
   callee_local_count = nyr_inline_local_count(&clone);
   for (int p = 0; p < NYIR_CALL_MAX_ARGS; ++p)
@@ -5192,7 +5489,9 @@ static size_t nyr_inline_clone_body(nyr_func_t *caller, size_t call_idx,
   ok = true;
 
 done:
-  nyr_type_map_free(&caller_types);
+  /*
+   * roots live in a per-thread workspace: nothing to free
+   */
   nyr_ir_func_free(&body);
   nyr_ir_func_free(&clone);
   nyr_cfg_free(&ccfg);
@@ -7289,8 +7588,8 @@ bool nyr_tbuf_private_object(nyr_func_t *f) {
 
 /*
  * Apply NyP1 profile: boost inline candidate size when edge density is high.
+ * Selected per function, and functions are optimized on pool threads.
  */
-/* Selected per function, and functions are optimized on pool threads. */
 static _Thread_local uint64_t ny_profile_edges;
 static _Thread_local uint64_t ny_profile_steps;
 

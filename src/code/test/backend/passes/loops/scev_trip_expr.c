@@ -93,7 +93,9 @@ static bool fail(const char *what, const char *why) {
   return false;
 }
 
-/* Where is the surviving bounds check: inside the natural loop or not? */
+/*
+ * Where is the surviving bounds check: inside the natural loop or not?
+ */
 static bool check_placement(nyr_func_t *f, size_t header_block,
                             size_t latch_block, bool *inside, bool *found) {
   nyr_cfg_t cfg = {0};
@@ -122,7 +124,9 @@ static bool check_placement(nyr_func_t *f, size_t header_block,
 }
 
 int main(void) {
-  /* Entered loop: expression is `limit - init`, and IRCE hoists the check. */
+  /*
+   * Entered loop: expression is `limit - init`, and IRCE hoists the check.
+   */
   nyr_func_t f;
   size_t phi = build_loop(&f, true);
   int iv = f.data[phi].dst;
@@ -133,13 +137,17 @@ int main(void) {
     fail("entered", "loop not analyzed");
     return 1;
   }
-  /* init is symbolic here, so no constant count may exist next to it. */
+  /*
+   * init is symbolic here, so no constant count may exist next to it.
+   */
   if (!loop->trip_expr_known || loop->trip_count_known)
     fail("entered", "symbolic trip expression missing");
   if (loop->trip_expr_pos != loop->limit_value ||
       loop->trip_expr_neg != loop->init_value || loop->trip_expr_const != 0)
     fail("entered", "trip expression is not limit - init");
-  /* Every observed value is 2..6, so the count is 5 when the guard holds. */
+  /*
+   * Every observed value is 2..6, so the count is 5 when the guard holds.
+   */
   int64_t locals[8] = {0, 2, 7, 64};
   int64_t before = 0;
   ok = nyr_opt_eval_locals(&f, "trip-expr-before", locals, 8, &before);
@@ -159,7 +167,9 @@ int main(void) {
   nyr_scev_free(&info);
   nyr_ir_func_free(&f);
 
-  /* Zero-trip guard: no expression and no hoist may appear. */
+  /*
+   * Zero-trip guard: no expression and no hoist may appear.
+   */
   phi = build_loop(&f, false);
   iv = f.data[phi].dst;
   nyr_scev_info_t no_info = {0};

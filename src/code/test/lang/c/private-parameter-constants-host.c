@@ -1,3 +1,6 @@
+/*
+ * Host-side C counterpart for the private parameter constants test.
+ */
 void mutate_parameter(int *value) { *value = 31; }
 
 struct mixed_aggregate {

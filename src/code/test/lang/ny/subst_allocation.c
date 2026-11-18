@@ -1,4 +1,6 @@
-/* Exercise failure after each independently moving substitution-table grow. */
+/*
+ * Exercise failure after each independently moving substitution-table grow.
+ */
 #include "code/lang/ny/semantics/typeinfer.h"
 #ifdef NDEBUG
 #undef NDEBUG
@@ -54,7 +56,9 @@ int main(void) {
     assert(ny_subst_fresh(s) == -1);
     assert(s->count == 2 && s->capacity == 2);
     assert(s->parent[1] == 0 && s->rank[0] == 1 && s->binding[0] == &sentinel);
-    /* A caller may retry after OOM; every successful realloc stays owned. */
+    /*
+     * A caller may retry after OOM; every successful realloc stays owned.
+     */
     fail_at = 0;
     calls = 0;
     assert(ny_subst_fresh(s) == 2 && s->capacity == 4);

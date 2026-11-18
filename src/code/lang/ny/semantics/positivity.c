@@ -29,7 +29,9 @@
 typedef struct {
   const stmt_t **enums;
   size_t len, cap;
-  /* Reachability matrix over enums (mention graph), n*n bits as bytes. */
+  /*
+   * Reachability matrix over enums (mention graph), n*n bits as bytes.
+   */
   unsigned char *reach;
 } ny_pos_ctx_t;
 
@@ -68,8 +70,10 @@ static bool pos_ident_char(char ch) {
   return isalnum((unsigned char)ch) || ch == '_' || ch == '.';
 }
 
-/* Index of the enum whose leaf name is `name[0..len)`, or -1. When several
- * modules declare the same leaf, the one in `prefer_file` wins. */
+/*
+ * Index of the enum whose leaf name is `name[0..len)`, or -1. When several
+ * modules declare the same leaf, the one in `prefer_file` wins.
+ */
 static long pos_find(const ny_pos_ctx_t *c, const char *name, size_t len,
                      const char *prefer_file) {
   long found = -1;
@@ -86,31 +90,35 @@ static long pos_find(const ny_pos_ctx_t *c, const char *name, size_t len,
   return found;
 }
 
-/* Calls `fn` for each identifier in the text. */
-#define POS_FOR_EACH_IDENT(text, len, body)                                    \
-  for (size_t _i = 0; _i < (len);) {                                          \
-    if (!pos_ident_start((text)[_i]) ||                                        \
-        (_i > 0 && pos_ident_char((text)[_i - 1]))) {                          \
-      _i++;                                                                    \
-      continue;                                                                \
-    }                                                                          \
-    size_t _s = _i;                                                            \
-    while (_i < (len) && pos_ident_char((text)[_i]))                           \
-      _i++;                                                                    \
-    const char *_id = (text) + _s;                                             \
-    size_t _n = _i - _s;                                                       \
-    const char *_dot = NULL;                                                   \
-    for (size_t _k = 0; _k < _n; ++_k)                                         \
-      if (_id[_k] == '.')                                                      \
-        _dot = _id + _k;                                                       \
-    if (_dot) {                                                                \
-      _n -= (size_t)(_dot + 1 - _id);                                          \
-      _id = _dot + 1;                                                          \
-    }                                                                          \
-    body                                                                       \
+/*
+ * Calls `fn` for each identifier in the text.
+ */
+#define POS_FOR_EACH_IDENT(text, len, body)           \
+  for (size_t _i = 0; _i < (len);) {                  \
+    if (!pos_ident_start((text)[_i]) ||               \
+        (_i > 0 && pos_ident_char((text)[_i - 1]))) { \
+      _i++;                                           \
+      continue;                                       \
+    }                                                 \
+    size_t _s = _i;                                   \
+    while (_i < (len) && pos_ident_char((text)[_i]))  \
+      _i++;                                           \
+    const char *_id = (text) + _s;                    \
+    size_t _n = _i - _s;                              \
+    const char *_dot = NULL;                          \
+    for (size_t _k = 0; _k < _n; ++_k)                \
+      if (_id[_k] == '.')                             \
+        _dot = _id + _k;                              \
+    if (_dot) {                                       \
+      _n -= (size_t)(_dot + 1 - _id);                 \
+      _id = _dot + 1;                                 \
+    }                                                 \
+    body                                              \
   }
 
-/* The set of names the current check treats as "the family". */
+/*
+ * The set of names the current check treats as "the family".
+ */
 typedef struct {
   const char *names[64];
   size_t lens[64];
@@ -128,7 +136,9 @@ static bool pos_mentions(const char *text, size_t len,
   return hit;
 }
 
-/* End of the balanced region that starts at `open` (`(` or `<`). */
+/*
+ * End of the balanced region that starts at `open` (`(` or `<`).
+ */
 static size_t pos_close(const char *t, size_t len, size_t open) {
   int level = 0;
   for (size_t i = open; i < len; ++i) {
@@ -143,7 +153,9 @@ static size_t pos_close(const char *t, size_t len, size_t open) {
   return len;
 }
 
-/* Splits `t[0..len)` at top-level commas. */
+/*
+ * Splits `t[0..len)` at top-level commas.
+ */
 static size_t pos_split(const char *t, size_t len, const char **parts,
                         size_t *lens, size_t max) {
   size_t n = 0, start = 0;
@@ -173,7 +185,9 @@ static size_t pos_split(const char *t, size_t len, const char **parts,
 typedef struct {
   ny_pos_ctx_t *ctx;
   const char *file;
-  /* (enum, parameter) pairs being checked, to cut recursion. */
+  /*
+   * (enum, parameter) pairs being checked, to cut recursion.
+   */
   long stack_enum[32];
   size_t stack_param[32];
   size_t depth;
@@ -195,13 +209,17 @@ static bool pos_type_ok(pos_walk_t *w, const char *t, size_t len,
     len--;
   if (len == 0 || !pos_mentions(t, len, fam))
     return true;
-  /* Parenthesised type. */
+  /*
+   * Parenthesised type.
+   */
   if (*t == '(') {
     size_t close = pos_close(t, len, 0);
     if (close + 1 >= len)
       return pos_type_ok(w, t + 1, close > 0 ? close - 1 : 0, fam);
   }
-  /* Function type: no mention in the domain; the result is checked. */
+  /*
+   * Function type: no mention in the domain; the result is checked.
+   */
   if (len > 3 && strncmp(t, "fn", 2) == 0 && (t[2] == '(' || t[2] == ' ')) {
     size_t open = 2;
     while (open < len && t[open] == ' ')
@@ -215,7 +233,9 @@ static bool pos_type_ok(pos_walk_t *w, const char *t, size_t len,
       return false;
     return pos_type_ok(w, t + close + 1, len - close - 1, fam);
   }
-  /* Named type, possibly applied. */
+  /*
+   * Named type, possibly applied.
+   */
   size_t n = 0;
   while (n < len && pos_ident_char(t[n]))
     n++;
@@ -224,8 +244,10 @@ static bool pos_type_ok(pos_walk_t *w, const char *t, size_t len,
   size_t rest = n;
   while (rest < len && t[rest] == ' ')
     rest++;
-  /* A dependent pair or proof proposition: every occurrence must be
-   * positive data; reject a function type that mentions the family. */
+  /*
+   * A dependent pair or proof proposition: every occurrence must be
+   * positive data; reject a function type that mentions the family.
+   */
   if (rest < len && (t[rest] == '<' || t[rest] == '(')) {
     size_t close = pos_close(t, len, rest);
     const char *inner = t + rest + 1;
@@ -255,7 +277,9 @@ static bool pos_type_ok(pos_walk_t *w, const char *t, size_t len,
       if (target >= 0 && !pos_param_positive(w, target, a))
         return false;
     }
-    /* Whatever follows the application (`exists(T x) V`) is a type too. */
+    /*
+     * Whatever follows the application (`exists(T x) V`) is a type too.
+     */
     if (close + 1 < len)
       return pos_type_ok(w, t + close + 1, len - close - 1, fam);
     return true;
@@ -263,8 +287,10 @@ static bool pos_type_ok(pos_walk_t *w, const char *t, size_t len,
   return true;
 }
 
-/* True when parameter `param` of enum `e` occurs only strictly positively in
- * its constructors. */
+/*
+ * True when parameter `param` of enum `e` occurs only strictly positively in
+ * its constructors.
+ */
 static bool pos_param_positive(pos_walk_t *w, long e, size_t param) {
   const stmt_t *s = w->ctx->enums[e];
   if (param >= s->as.enu.type_params.len)
@@ -317,7 +343,9 @@ static void pos_build_reach(ny_pos_ctx_t *c) {
       }
     }
   }
-  /* Transitive closure (Warshall); enum counts are small. */
+  /*
+   * Transitive closure (Warshall); enum counts are small.
+   */
   for (size_t k = 0; k < n; ++k)
     for (size_t i = 0; i < n; ++i)
       if (c->reach[i * n + k])
@@ -346,7 +374,9 @@ bool ny_check_enum_positivity(const program_t *prog) {
         }
       }
   }
-  /* No payload mentions a function type anywhere: nothing can be negative. */
+  /*
+   * No payload mentions a function type anywhere: nothing can be negative.
+   */
   if (!any_fn_payload) {
     free(c.enums);
     return true;

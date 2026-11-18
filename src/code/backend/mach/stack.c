@@ -274,6 +274,12 @@ static const char *sm_i386_frame_reg(const ny_sm_ctx_t *c) {
 
 static bool sm_movi(ny_sm_ctx_t *c, const char *reg, int64_t v);
 
+static const char *sm_i386_seg_prefix(unsigned flags) {
+  return (flags & NYIR_INST_F_MEM_SEG_GS) ? "%gs:"
+         : (flags & NYIR_INST_F_MEM_SEG_FS) ? "%fs:"
+                                            : "";
+}
+
 static bool sm_ld(ny_sm_ctx_t *c, const char *reg, int off) {
   switch (c->kind) {
   case NY_SM_ARM:
@@ -333,8 +339,10 @@ static bool sm_st(ny_sm_ctx_t *c, int off, const char *reg) {
 static bool sm_ldv(ny_sm_ctx_t *c, const char *reg, int v) {
   if (!sm_err_val(c, v, "value"))
     return false;
-  /* Only the first value load in a whitelisted adjacent instruction may
-   * reuse EAX. Later loads must observe that instruction's own clobbers. */
+  /*
+   * Only the first value load in a whitelisted adjacent instruction may
+   * reuse EAX. Later loads must observe that instruction's own clobbers.
+   */
   bool reuse = c->kind == NY_SM_I386 && c->i386_eax_reuse == v &&
                strcmp(reg, "%eax") == 0;
   c->i386_eax_reuse = -1;
@@ -477,10 +485,12 @@ static bool sm_i386_range_for_value_path(const ny_sm_ctx_t *c, int value,
     return false;
   for (size_t i = 0; i < depth; ++i)
     if (path[i] == value) {
-      /* COPY/SELECT/local cycles carry the union of their entry values.
+      /*
+       * COPY/SELECT/local cycles carry the union of their entry values.
        * An empty interval contributes no new bounds; unsupported arithmetic
        * on any path still fails below. Never use this induction for values
-       * redefined by PHI destruction or other mutable-value lowering. */
+       * redefined by PHI destruction or other mutable-value lowering.
+       */
       for (size_t p = 0; p < depth; ++p) {
         unsigned definitions = 0;
         for (size_t k = 0; k < c->nyir->len; ++k)
@@ -516,9 +526,11 @@ static bool sm_i386_range_for_value_path(const ny_sm_ctx_t *c, int value,
       *range = (nyr_range_t){.has_min = true, .has_max = true, .min = 0, .max = 1};
       return true;
     }
-    /* C integer promotions commonly arrive as (x << N) >> N. Even when
+    /*
+     * C integer promotions commonly arrive as (x << N) >> N. Even when
      * optimizer range metadata is absent, SAR alone proves these bounds.
-     * Never infer signed bounds merely from the low-word instruction flag. */
+     * Never infer signed bounds merely from the low-word instruction flag.
+     */
     int64_t constant = 0;
     if (in->op == NYIR_SAR_I64 &&
         sm_i386_const_value(c, in->b, &constant) &&
@@ -588,8 +600,10 @@ static bool sm_i386_range_for_value_path(const ny_sm_ctx_t *c, int value,
         maximum = sign_extended ? INT32_MAX : (int64_t)UINT32_MAX;
         initialized = true;
       }
-      /* A local whose address escapes or whose asm may write a home cannot
-       * be bounded by its explicit STORE_LOCAL instructions alone. */
+      /*
+       * A local whose address escapes or whose asm may write a home cannot
+       * be bounded by its explicit STORE_LOCAL instructions alone.
+       */
       for (size_t k = 0; k < c->nyir->len; ++k) {
         const nyr_inst_t *store = &c->nyir->data[k];
         if ((store->op == NYIR_ADDR_LOCAL && store->imm == in->imm) ||
@@ -604,8 +618,10 @@ static bool sm_i386_range_for_value_path(const ny_sm_ctx_t *c, int value,
         if (source.max > maximum) maximum = source.max;
         initialized |= source.min <= source.max;
       }
-      /* A cycle without any entry value stays empty until an enclosing
-       * union supplies a concrete seed. The public query rejects emptiness. */
+      /*
+       * A cycle without any entry value stays empty until an enclosing
+       * union supplies a concrete seed. The public query rejects emptiness.
+       */
       if (!initialized) minimum = INT64_MAX, maximum = INT64_MIN;
       *range = (nyr_range_t){.has_min = true, .has_max = true,
                              .min = minimum, .max = maximum};
@@ -867,9 +883,11 @@ static bool sm_i386_assign_value_slots(ny_sm_ctx_t *c, int *offsets,
             slots[v].first <= slots[p].last && slots[p].first <= slots[v].last;
         bool byte_overlap = candidate < offsets[p] + slots[p].bytes &&
                             offsets[p] < candidate + slots[v].bytes;
-        /* A dying COPY source and its destination contain the same bits at
+        /*
+         * A dying COPY source and its destination contain the same bits at
          * their only overlapping instruction. Coalesce exact homes only;
-         * loop-expanded lifetimes and partial overlaps remain conflicts. */
+         * loop-expanded lifetimes and partial overlaps remain conflicts.
+         */
         bool copy_boundary = has_definition && slots[v].first == definition &&
             slots[p].last == definition && candidate == offsets[p] &&
             slots[v].bytes == slots[p].bytes &&
@@ -903,8 +921,10 @@ static bool sm_i386_assign_value_slots(ny_sm_ctx_t *c, int *offsets,
   return true;
 }
 
-/* CFG-aware coloring reuses homes for values that cannot be live together
- * even when their lexical ranges overlap across alternative paths. */
+/*
+ * CFG-aware coloring reuses homes for values that cannot be live together
+ * even when their lexical ranges overlap across alternative paths.
+ */
 static bool sm_i386_assign_value_slots_cfg(ny_sm_ctx_t *c, int *offsets,
                                            int *value_bytes) {
   if (!c || !c->nyir || !value_bytes)
@@ -942,7 +962,9 @@ static bool sm_i386_assign_value_slots_cfg(ny_sm_ctx_t *c, int *offsets,
       goto done;
     ++definitions[dst];
   }
-  /* The second output of the i386 divmod pair is defined by the same asm. */
+  /*
+   * The second output of the i386 divmod pair is defined by the same asm.
+   */
   for (size_t v = 0; v < count; ++v)
     if (definitions[v] > 1)
       goto done;
@@ -1705,8 +1727,10 @@ static bool sm_emit_binop(ny_sm_ctx_t *c, const nyr_inst_t *in, const char *arm,
   return sm_binop3(c, op) && sm_stv(c, in->dst, c->t0);
 }
 
-/* Arithmetic can read a spill home directly. Keep the source homes intact:
- * their intervals can overlap other values across control-flow edges. */
+/*
+ * Arithmetic can read a spill home directly. Keep the source homes intact:
+ * their intervals can overlap other values across control-flow edges.
+ */
 static bool sm_i386_binary_operand(ny_sm_ctx_t *c, const char *op,
                                     const char *reg, int value) {
   int64_t constant = 0;
@@ -4035,18 +4059,23 @@ static bool sm_inst(ny_sm_ctx_t *c, const nyr_inst_t *in) {
       return nyr_put(c->w, "\tldr\tx0, [x0]\n") && sm_stv(c, in->dst, c->t0);
     case NY_SM_I386:
       if (in->flags & NYIR_INST_F_MEM_U16) {
-        return nyr_put(c->w, "\tmovzwl\t(%eax), %ecx\n") &&
+        return nyr_printf(c->w, "\tmovzwl\t%s(%%eax), %%ecx\n",
+                          sm_i386_seg_prefix(in->flags)) &&
                sm_stv(c, in->dst, "%ecx") &&
                sm_i386_store_high_if_used(c, in->dst);
       }
       if (in->flags & (NYIR_INST_F_MEM_BYTE | NYIR_INST_F_MEM_I32)) {
-        const char *load = (in->flags & NYIR_INST_F_MEM_BYTE)
-                               ? "\tmovzbl\t(%eax), %ecx\n"
-                               : "\tmovl\t(%eax), %ecx\n";
-        return nyr_put(c->w, load) && sm_stv(c, in->dst, "%ecx") &&
+        const char *load =
+            (in->flags & NYIR_INST_F_MEM_BYTE) ? "movzbl" : "movl";
+        return nyr_printf(c->w, "\t%s\t%s(%%eax), %%ecx\n", load,
+                          sm_i386_seg_prefix(in->flags)) &&
+               sm_stv(c, in->dst, "%ecx") &&
                sm_i386_store_high_if_used(c, in->dst);
       }
-      return nyr_put(c->w, "\tmovl\t(%eax), %ecx\n\tmovl\t4(%eax), %edx\n") &&
+      return nyr_printf(c->w, "\tmovl\t%s(%%eax), %%ecx\n",
+                        sm_i386_seg_prefix(in->flags)) &&
+             nyr_printf(c->w, "\tmovl\t%s4(%%eax), %%edx\n",
+                        sm_i386_seg_prefix(in->flags)) &&
              sm_stv(c, in->dst, "%ecx") &&
              (!sm_i386_high_word_used_wide(c, in->dst) ||
               sm_st(c, sm_voff(c, in->dst) + 4, "%edx"));
@@ -4065,13 +4094,19 @@ static bool sm_inst(ny_sm_ctx_t *c, const nyr_inst_t *in) {
       return nyr_put(c->w, "\tstr\tx1, [x0]\n");
     case NY_SM_I386:
       if (in->flags & NYIR_INST_F_MEM_BYTE)
-        return nyr_put(c->w, "\tmovb\t%cl, (%eax)\n");
+        return nyr_printf(c->w, "\tmovb\t%%cl, %s(%%eax)\n",
+                          sm_i386_seg_prefix(in->flags));
       if (in->flags & NYIR_INST_F_MEM_U16)
-        return nyr_put(c->w, "\tmovw\t%cx, (%eax)\n");
+        return nyr_printf(c->w, "\tmovw\t%%cx, %s(%%eax)\n",
+                          sm_i386_seg_prefix(in->flags));
       if (in->flags & NYIR_INST_F_MEM_I32)
-        return nyr_put(c->w, "\tmovl\t%ecx, (%eax)\n");
+        return nyr_printf(c->w, "\tmovl\t%%ecx, %s(%%eax)\n",
+                          sm_i386_seg_prefix(in->flags));
       return sm_ld(c, "%edx", sm_voff(c, in->c) + 4) &&
-             nyr_put(c->w, "\tmovl\t%ecx, (%eax)\n\tmovl\t%edx, 4(%eax)\n");
+             nyr_printf(c->w, "\tmovl\t%%ecx, %s(%%eax)\n",
+                        sm_i386_seg_prefix(in->flags)) &&
+             nyr_printf(c->w, "\tmovl\t%%edx, %s4(%%eax)\n",
+                        sm_i386_seg_prefix(in->flags));
     case NY_SM_RISCV:
       return nyr_put(c->w, "\tsd\ta1, 0(a0)\n");
     }
@@ -4471,9 +4506,11 @@ static bool sm_emit_impl(nyr_writer_t *w, const ny_native_target_info_t *target,
         }
         c.i386_eax_reuse = incoming_eax;
       }
-      /* A single-use low word can travel directly in EAX to an adjacent
+      /*
+       * A single-use low word can travel directly in EAX to an adjacent
        * consumer whose first load will reuse it. Do not omit a home for
-       * repeated operands, wide values, labels or nonadjacent consumers. */
+       * repeated operands, wide values, labels or nonadjacent consumers.
+       */
       bool call_arg = in->dst >= 0 && i + 1 < nyir->len &&
                       sm_i386_single_eax_call_arg(&c, &nyir->data[i + 1],
                                                   in->dst);
@@ -4502,13 +4539,17 @@ static bool sm_emit_impl(nyr_writer_t *w, const ny_native_target_info_t *target,
           break;
         default: break;
         }
-        /* A coalesced COPY may emit no store of its own. Its input home
-         * must therefore remain initialized for later nonadjacent users. */
+        /*
+         * A coalesced COPY may emit no store of its own. Its input home
+         * must therefore remain initialized for later nonadjacent users.
+         */
         if (producer && consumer && !sm_i386_high_word_used_wide(&c, in->dst))
           c.i386_elide_value = in->dst;
       }
-      /* These emitters load their first operand before clobbering EAX.
-       * Labels, calls and other instructions terminate adjacency. */
+      /*
+       * These emitters load their first operand before clobbering EAX.
+       * Labels, calls and other instructions terminate adjacency.
+       */
       switch (in->op) {
       case NYIR_ADD_I64: case NYIR_SUB_I64: case NYIR_MUL_I64:
       case NYIR_AND_I64: case NYIR_OR_I64: case NYIR_XOR_I64:
@@ -4523,9 +4564,11 @@ static bool sm_emit_impl(nyr_writer_t *w, const ny_native_target_info_t *target,
           nyir->data[i + 1].op == NYIR_BR_IF &&
           nyir->data[i + 1].a == in->dst &&
           sm_i386_cmp32_mode(&c, in, &unsigned_compare)) {
-        /* SETcc, MOVZX and the boolean's home stores preserve CMP flags.
+        /*
+         * SETcc, MOVZX and the boolean's home stores preserve CMP flags.
          * Materialize the boolean only if another instruction uses it; the
-         * full use index includes backward edges and PHI inputs too. */
+         * full use index includes backward edges and PHI inputs too.
+         */
         const char *condition = sm_i386_cmp_condition(in->cmp, unsigned_compare);
         bool compared = c.i386_single_use[in->dst]
             ? sm_ldv(&c, "%eax", in->a) &&
@@ -4579,8 +4622,10 @@ static bool sm_emit_impl(nyr_writer_t *w, const ny_native_target_info_t *target,
     }
     c.i386_eax_reuse = -1;
     if (c.kind == NY_SM_I386) {
-      /* These paths finish with the result's low word in EAX. All stores
-       * remain in place, so stack homes and control-flow edges stay canonical. */
+      /*
+       * These paths finish with the result's low word in EAX. All stores
+       * remain in place, so stack homes and control-flow edges stay canonical.
+       */
       switch (in->op) {
       case NYIR_ADD_I64: case NYIR_SUB_I64: case NYIR_MUL_I64:
       case NYIR_AND_I64: case NYIR_OR_I64: case NYIR_XOR_I64:
@@ -4689,10 +4734,12 @@ static bool sm_i386_put_raw_asm(ny_sm_ctx_t *c, const char *assembly) {
 }
 
 static bool sm_i386_write_code16(nyr_writer_t *w, const char *assembly) {
-  /* EBP is reserved as this emitter's frame pointer, so generated (%ebp)
+  /*
+   * EBP is reserved as this emitter's frame pointer, so generated (%ebp)
    * operands are frame slots. Linux setup keeps its stack in the low 64 KiB;
    * use BP there to avoid an address-size prefix. Preserve explicit raw-asm
-   * operands via marker. */
+   * operands via marker.
+   */
   const char *at = assembly;
   const char *keep_marker = "__NYC_KEEP_EBP__)";
   while (*at) {
@@ -4717,9 +4764,11 @@ static bool sm_i386_write_code16(nyr_writer_t *w, const char *assembly) {
   return true;
 }
 
-/* Leaf functions which never address a stack slot do not need a frame.
+/*
+ * Leaf functions which never address a stack slot do not need a frame.
  * The stack emitter currently reserves homes before its final spill cleanup,
- * so simple functions can otherwise retain an unused frame prologue. */
+ * so simple functions can otherwise retain an unused frame prologue.
+ */
 static bool sm_i386_elide_unused_leaf_frame(const nyr_func_t *func,
                                              const char *assembly,
                                              nyr_writer_t *out) {
@@ -5101,10 +5150,12 @@ static bool sm_emit(nyr_writer_t *w, const ny_native_target_info_t *target,
       int c = sm_i386_promote_homes(nyir, i386_value_offsets, high_values,
                                      three.data, &promoted_three);
       emitted = a >= 0 && b >= 0 && c >= 0;
-      /* The promoted writer replaces stack homes with registers, so its output
+      /*
+       * The promoted writer replaces stack homes with registers, so its output
        * has not seen the cleanup passes. Run the register-only subset over each
        * promoted variant; the memory passes would misread the register homes
-       * and the shifted frame. */
+       * and the shifted frame.
+       */
       if (emitted)
         emitted = sm_i386_cleanup_spills(&promoted, value_bytes + 16,
                                           local_offsets, high_local_count,
@@ -5117,8 +5168,10 @@ static bool sm_emit(nyr_writer_t *w, const ny_native_target_info_t *target,
                                           local_bytes, nyir, NULL, true);
     }
     if (emitted) {
-      /* Keep the existing sequence when local allocation's save/restore
-       * and boundary stores exceed its removed spill instructions. */
+      /*
+       * Keep the existing sequence when local allocation's save/restore
+       * and boundary stores exceed its removed spill instructions.
+       */
       const char *chosen = baseline.data;
       const char *candidates[] = {compact.data, four.data, three.data, promoted.data,
                                   promoted_four.data, promoted_three.data,

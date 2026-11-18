@@ -660,9 +660,11 @@ static stmt_t *p_parse_stmt_raw(parser_t *p) {
       parser_sync_stmt_boundary(p);
       return NULL;
     }
-    /* Only a `{` on the call's own line is a (retired) trailing block. A
+    /*
+     * Only a `{` on the call's own line is a (retired) trailing block. A
      * `{` on the next line starts the next statement (`{"a": x}` as the
-     * function's result), which used to be swallowed into this call. */
+     * function's result), which used to be swallowed into this call.
+     */
     if (lhs->kind == NY_E_CALL && lhs->as.call.callee &&
         lhs->as.call.callee->kind == NY_E_IDENT && p->cur.kind == NY_T_LBRACE &&
         p->cur.line == p->prev.line) {
@@ -989,9 +991,26 @@ static stmt_t *p_parse_stmt_raw(parser_t *p) {
   }
 }
 
+/*
+ * Blocks recurse through the statement parser (if/while/fn/lambda bodies),
+ * so unbounded nesting exhausted the C stack. Mirror the expression limit:
+ * report once, then skip to end of file so the enclosing loops terminate
+ * instead of re-entering at the same depth.
+ */
+#define NY_MAX_BLOCK_DEPTH 512
+
 stmt_t *p_parse_block(parser_t *p) {
   token_t tok = p->cur;
   parser_expect(p, NY_T_LBRACE, "'{'", NULL);
+  if (p->block_depth >= NY_MAX_BLOCK_DEPTH || p->expr_depth_exceeded) {
+    if (!p->expr_depth_exceeded)
+      parser_error(p, tok, "maximum block nesting depth exceeded (512)",
+                   "move inner blocks into separate functions");
+    p->expr_depth_exceeded = true;
+    while (p->cur.kind != NY_T_EOF)
+      parser_advance(p);
+    return stmt_new(p->arena, NY_S_BLOCK, tok);
+  }
   p->block_depth++;
   stmt_t *blk = stmt_new(p->arena, NY_S_BLOCK, tok);
   vec_reserve_arena(p->arena, &blk->as.block.body, 8);

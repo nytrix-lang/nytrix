@@ -1,7 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
   <title>Play</title>
-  <desc>Play icon.</desc>
-  <g transform="translate(2.0000 2.0000) scale(1.25000)">
-<path fill="#c6c6ca" d="M4 12a1 1 0 0 0 1.555.832l6-4a1 1 0 0 0 0-1.664l-6-4A1 1 0 0 0 4 4z"/>
-  </g>
+  <desc>Run and play icon.</desc>
+  <path fill="#34d399" fill-rule="evenodd" d="M12 2.5A9.5 9.5 0 1 1 12 21.5A9.5 9.5 0 0 1 12 2.5ZM9.8 7.4 17.2 12 9.8 16.6Z"/>
 </svg>

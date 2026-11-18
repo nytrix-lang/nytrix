@@ -256,7 +256,7 @@ use core.os.ffi as ffi
       0
    }
    fn wl_close_fd(..._args) any {
-      "Closes a file descriptor (stub)."
+      "Closes a file descriptor(stub)."
       0
    }
    fn mmap(..._args) any {
@@ -3157,7 +3157,7 @@ fn _keyboard_handle_key(ptr data, ptr keyboard, u32 serial, u32 time, u32 key, u
 }
 
 fn inject_input(any win, str kind, int a=0, int b=0, str path="") bool {
-   "Test hook: calls this window's seat listeners exactly as libwayland would for a compositor event, so input can be exercised on a compositor without a seat (headless Weston). `kind`: enter/motion (surface x, y), button (Linux code such as 0x110, 1 press / 0 release), axis (axis, value*256), frame, kenter, keymap (path to an XKB keymap file), key (evdev code, 1 press / 0 release), modifiers (depressed, locked)."
+   "Test hook: calls this window's seat listeners exactly as libwayland would for a compositor event, so input can be exercised on a compositor without a seat(headless Weston). `kind`: enter/motion(surface x, y), button(Linux code such as 0x110, 1 press / 0 release), axis(axis, value*256), frame, kenter, keymap(path to an XKB keymap file), key(evdev code, 1 press / 0 release), modifiers(depressed, locked)."
    if !is_dict(win) { return false }
    def globals = win.get("globals", 0)
    def state = globals ? globals.get("listener_state", 0) : 0
@@ -4221,7 +4221,7 @@ fn _create_fractional_scale(any state, any surface) any {
 }
 
 fn text_input_enable(any win, any rect=0) bool {
-   "Enables zwp_text_input_v3 (IME) for the window; rect [x, y, w, h] is the caret box in surface coordinates."
+   "Enables zwp_text_input_v3(IME) for the window; rect [x, y, w, h] is the caret box in surface coordinates."
    if !win || !is_dict(win) { return false }
    def ti = win.get("text_input", 0)
    if !ti { return false }
@@ -4232,7 +4232,7 @@ fn text_input_enable(any win, any rect=0) bool {
    st = st.set("wanted", true)
    if is_list(rect) && rect.len >= 4 {
       st = st.set("rect", [int(rect.get(0, 0)), int(rect.get(1, 0)),
-         max(1, int(rect.get(2, 1))), max(1, int(rect.get(3, 1)))])
+            max(1, int(rect.get(2, 1))), max(1, int(rect.get(3, 1)))])
    }
    _ti_put(handle, st)
    ;; Re-send only on a change: each commit is a new state for the IME.
@@ -4241,7 +4241,7 @@ fn text_input_enable(any win, any rect=0) bool {
 }
 
 fn text_input_disable(any win) bool {
-   "Disables zwp_text_input_v3 (IME) for the window."
+   "Disables zwp_text_input_v3(IME) for the window."
    if !win || !is_dict(win) { return false }
    def ti = win.get("text_input", 0)
    if !ti { return false }

@@ -1,3 +1,6 @@
+/*
+ * C front-end regression test: linux function pointer xchg.
+ */
 typedef void (*handler_t)(int);
 
 static void old_handler(int value) { (void)value; }

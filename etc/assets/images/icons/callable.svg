@@ -1,7 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
   <title>Callable</title>
-  <desc>Callable icon.</desc>
-  <g transform="translate(2.0000 2.0000) scale(1.25000)">
-<path fill="#c6c6ca" d="m12 1c-2 2-4 4-7 4h-4v5h4c3 0 5 2 7 4zm1 4v5c2.59-.016 2.59-4.985 0-5zm-11 6v4h2l1-4z"/>
-  </g>
+  <desc>Function and callable icon.</desc>
+  <path fill="#22d3ee" fill-rule="evenodd" d="M4.8 2.6H19.2A2.2 2.2 0 0 1 21.4 4.8V19.2A2.2 2.2 0 0 1 19.2 21.4H4.8A2.2 2.2 0 0 1 2.6 19.2V4.8A2.2 2.2 0 0 1 4.8 2.6ZM9.9 6.1Q7.6 8.9 7.6 12Q7.6 15.1 9.9 17.9L8.5 18.9Q5.4 15.8 5.4 12Q5.4 8.2 8.5 5.1ZM14.1 6.1Q16.4 8.9 16.4 12Q16.4 15.1 14.1 17.9L15.5 18.9Q18.6 15.8 18.6 12Q18.6 8.2 15.5 5.1Z"/>
 </svg>

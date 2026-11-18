@@ -241,6 +241,8 @@ typedef struct {
   bool position_independent;
   bool retpoline_indirect_calls;
   bool retpoline_inline_calls;
+  bool function_return_thunk_extern;
+  bool cf_protection_branch;
   bool stack_guard;
   size_t temporary_stack_bytes;
   int value_slots, spill_slots, callee_save_slots, local_slots, frame_bytes;
@@ -310,6 +312,7 @@ typedef struct {
 void nyr_obj_free(nyr_obj_buf_t *b);
 bool nyr_obj_emit(nyr_obj_buf_t *b, const void *data, size_t len);
 bool nyr_obj_pad_to(nyr_obj_buf_t *b, size_t align);
+bool nyr_obj_pad_code(nyr_obj_buf_t *b, size_t align);
 bool nyr_obj_zero(nyr_obj_buf_t *b, size_t len);
 bool nyr_obj_u8(nyr_obj_buf_t *b, unsigned v);
 bool nyr_obj_u16(nyr_obj_buf_t *b, uint16_t v);
@@ -360,7 +363,8 @@ bool nyr_x64_obj_append_function_with_frame(
     nyr_x64_obj_reloc_t *relocs, size_t *reloc_count, const nyr_func_t *nyir,
     const ny_native_target_info_t *target, const char *symbol,
     bool omit_frame_pointer, bool position_independent,
-    bool retpoline_indirect_calls, bool retpoline_inline_calls, char *err,
+    bool retpoline_indirect_calls, bool retpoline_inline_calls,
+    bool function_return_thunk_extern, bool cf_protection_branch, char *err,
     size_t err_len);
 bool nyr_x64_obj_append_function_debug(
     nyr_obj_buf_t *code, nyr_x64_obj_symbol_def_t *defs, size_t *def_count,

@@ -1245,7 +1245,9 @@ static int64_t rt_dynamic_callback_call_words(int64_t fn, const int64_t *args,
   }
 }
 
-/* Expand the native parameter slots consumed by typed sequence arguments. */
+/*
+ * Expand the native parameter slots consumed by typed sequence arguments.
+ */
 static size_t rt_dynamic_callback_expand_word_args(int64_t env,
                                                    bool has_env,
                                                    const int64_t *args,
@@ -1285,7 +1287,6 @@ static size_t rt_dynamic_callback_expand_word_args(int64_t env,
   }
   return count;
 }
-
 
 static int64_t rt_dynamic_callback_call_f64_words(int64_t fn,
                                                   const int64_t *args,

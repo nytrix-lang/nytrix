@@ -1,0 +1,85 @@
+shape editor-utf8 {
+  family "probe-suite"
+  generator "stress"
+  features ["ny", "sys", "render", "unicode"]
+    ;; Cursor columns count code points (the unit str_slice uses); movement and
+  ;; deletion treat a base plus its combining marks, ZWJ emoji sequences and
+  ;; flag pairs as one character and never split UTF-8.
+  template ny-test-case
+  expect compile_and_run
+  ;; -O3 is excluded until docs/todo/bugs.md "Native -O3 drops an editor
+  ;; backspace" is fixed.
+  flags_matrix "--native-only -O0; --native-backend=llvm --jit --jit-engine=mcjit"
+  expect_stdout "EDITOR-UTF8-OK"
+  source ny <<'NY'
+use core
+use core.str as str
+use core.os.ui.render.viewer.editor as ed
+
+fn check(bool ok, str what) { assert(ok, what) }
+fn text(dict st) str { ed.join_lines(ed.current_lines(st)) }
+fn col(dict st) int { int(st.get("cursor_col", -1)) }
+fn setc(dict st, int line, int c) {
+   st["cursor_line"] = __box_i64(line)
+   st["cursor_col"] = __box_i64(c)
+}
+fn at_end(str s) dict {
+   mut st = ed.state([ed.buffer("u", "", s)])
+   setc(st, 0, str.utf8_len(s))
+   st
+}
+
+fn bs(str s) dict { ed.backspace(at_end(s)) }
+
+fn case_backspace() {
+   ;; Accented (2 bytes), CJK (3), emoji (4): one backspace, one character
+   def a = bs("café")
+   check(text(a) == "caf" && col(a) == 3, "backspace accented")
+   def b = bs("a中")
+   check(text(b) == "a" && col(b) == 1, "backspace cjk")
+   def c = bs("x😀")
+   check(text(c) == "x" && col(c) == 1, "backspace emoji")
+   ;; Combining mark, ZWJ family and flag pair stay with their base
+   check(text(bs("aé")) == "a", "backspace combining")
+   check(text(bs("-👨‍👩‍👧")) == "-", "backspace zwj sequence")
+   check(text(bs("-🇫🇷")) == "-", "backspace flag")
+   def d = bs("abc")
+   check(text(d) == "ab" && col(d) == 2, "ascii backspace")
+}
+
+fn case_delete() {
+   mut st = ed.state([ed.buffer("u", "", "ééz")])
+   setc(st, 0, 0)
+   st = ed.delete_char(st)
+   check(text(st) == "éz", "delete accented")
+   st = ed.delete_char(st)
+   check(text(st) == "z", "delete combining")
+}
+
+fn case_steps() {
+   def line = "aé中😀"
+   check(ed.char_next(line, 0) == 1 && ed.char_next(line, 1) == 2, "next ascii/2-byte")
+   check(ed.char_next(line, 2) == 3 && ed.char_next(line, 3) == 4, "next 3/4-byte")
+   check(ed.char_prev(line, 4) == 3 && ed.char_prev(line, 3) == 2, "prev 4/3-byte")
+   check(ed.char_prev(line, 2) == 1 && ed.char_prev(line, 1) == 0, "prev 2-byte/ascii")
+   check(ed.char_next("aéz", 1) == 3 && ed.char_prev("aéz", 3) == 1, "combining is one step")
+   mut st = ed.state([ed.buffer("u", "", line)])
+   setc(st, 0, 9)
+   st = ed.clamp_cursor(st)
+   check(col(st) == 4, "clamp to code points")
+   check(ed.line_delete_before("abé", 4) == "ab", "line_delete_before utf8")
+}
+
+fn case_insert() {
+   mut st = at_end("é")
+   st = ed.insert_text(st, "中x")
+   check(text(st) == "é中x" && col(st) == 3, "insert advances by code points")
+}
+
+case_backspace()
+case_delete()
+case_steps()
+case_insert()
+print("EDITOR-UTF8-OK")
+NY
+}

@@ -1,3 +1,6 @@
+/*
+ * C front-end regression test: linux rep movsl tail.
+ */
 typedef __SIZE_TYPE__ size_t;
 
 static int copy_tail(void *to, const void *from, size_t n) {

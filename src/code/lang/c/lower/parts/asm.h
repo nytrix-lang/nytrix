@@ -8478,6 +8478,75 @@ static bool lower_inline_asm_statement(c_parser_t *p) {
     free(assembly);
     return ok;
   }
+  /*
+   * `movb/movw/movl (%1),%%al/ax/eax` dereference a pointer held in a general
+   * register instead of using an `m` operand, so the matcher above cannot
+   * express them. They still load one value from that address; model each as
+   * a load through the pointer value so every target keeps the same fault and
+   * volatile semantics.
+   */
+  const char *register_load_template = NULL;
+  c_type_t register_load_type = C_BAD;
+  uint32_t register_load_flags = 0;
+  if (assembly_len == sizeof("movb (%1),%%al") - 1 &&
+      memcmp(assembly, "movb (%1),%%al", assembly_len) == 0) {
+    register_load_template = "movb (%1),%%al";
+    register_load_type = C_U8;
+    register_load_flags = NYIR_INST_F_MEM_BYTE;
+  } else if (assembly_len == sizeof("movw (%1),%%ax") - 1 &&
+             memcmp(assembly, "movw (%1),%%ax", assembly_len) == 0) {
+    register_load_template = "movw (%1),%%ax";
+    register_load_type = C_U16;
+    register_load_flags = NYIR_INST_F_MEM_U16;
+  } else if (assembly_len == sizeof("movl (%1),%%eax") - 1 &&
+             memcmp(assembly, "movl (%1),%%eax", assembly_len) == 0) {
+    register_load_template = "movl (%1),%%eax";
+    register_load_type = C_U32;
+    register_load_flags = NYIR_INST_F_MEM_I32;
+  }
+  if (register_load_template) {
+    ny_ctok_t output_name;
+    if (!expect(p, ":") ||
+        !inline_asm_string_sequence_is(p, "=a", &p->pos) ||
+        !expect(p, "(") || !parse_name(p, &output_name) || !expect(p, ")") ||
+        !expect(p, ":") ||
+        !inline_asm_string_sequence_is(p, "r", &p->pos) || !expect(p, "("))
+      return defer_unsupported_asm(p, open, assembly);
+    c_value_t pointer = parse_expr(p, 1);
+    if (!expect(p, ")"))
+      return defer_unsupported_asm(p, open, assembly);
+    if (accept(p, ":")) {
+      size_t clobber_end = p->pos;
+      if (!inline_asm_clobber_list_is(p, &clobber_end))
+        return defer_unsupported_asm(p, open, assembly);
+      p->pos = clobber_end;
+    }
+    if (!expect(p, ")") || !expect(p, ";"))
+      return defer_unsupported_asm(p, open, assembly);
+    c_local_t *output = find_local(p, output_name);
+    if (pointer.value < 0 || !c_type_is_pointer(pointer.type) || !output ||
+        output->array_rank || output->is_const ||
+        output->type != register_load_type) {
+      free(assembly);
+      fail(p, "unsupported register-addressed load inline-assembly operand");
+      return false;
+    }
+    int loaded = emit_value(
+        p, (nyr_inst_t){.op = NYIR_LOAD_I64,
+                        .dst = -1,
+                        .a = pointer.value,
+                        .effects = NYIR_EFFECT_READ_MEMORY |
+                                   NYIR_EFFECT_MAY_TRAP | NYIR_EFFECT_VOLATILE,
+                        .flags = register_load_flags,
+                        .scalar_class = NYIR_SCALAR_I64_RAW});
+    if (register_load_type == C_U16 && loaded >= 0)
+      loaded = normalize_u16(p, loaded);
+    else if (register_load_type == C_U32 && loaded >= 0)
+      loaded = normalize_u32(p, loaded);
+    bool ok = loaded >= 0 && lower_local_store(p, output, loaded);
+    free(assembly);
+    return ok;
+  }
   const char *memory_write_constraint = NULL;
   c_type_t memory_write_type = C_BAD;
   uint32_t memory_write_flags = 0;
@@ -8529,6 +8598,70 @@ static bool lower_inline_asm_statement(c_parser_t *p) {
                                            NYIR_EFFECT_MAY_TRAP |
                                            NYIR_EFFECT_VOLATILE,
                                 .flags = memory_write_flags,
+                                .scalar_class = NYIR_SCALAR_I64_RAW},
+                   NULL);
+    free(assembly);
+    return ok;
+  }
+  /*
+   * `movb/movw/movl %%al/ax/eax,(%1)` store to an address held in a general
+   * register. The value is an `a` input and the pointer an `r` input, so this
+   * is a width-specific store through the pointer value.
+   */
+  const char *register_store_template = NULL;
+  c_type_t register_store_type = C_BAD;
+  uint32_t register_store_flags = 0;
+  if (assembly_len == sizeof("movb %%al,(%1)") - 1 &&
+      memcmp(assembly, "movb %%al,(%1)", assembly_len) == 0) {
+    register_store_template = "movb %%al,(%1)";
+    register_store_type = C_U8;
+    register_store_flags = NYIR_INST_F_MEM_BYTE;
+  } else if (assembly_len == sizeof("movw %%ax,(%1)") - 1 &&
+             memcmp(assembly, "movw %%ax,(%1)", assembly_len) == 0) {
+    register_store_template = "movw %%ax,(%1)";
+    register_store_type = C_U16;
+    register_store_flags = NYIR_INST_F_MEM_U16;
+  } else if (assembly_len == sizeof("movl %%eax,(%1)") - 1 &&
+             memcmp(assembly, "movl %%eax,(%1)", assembly_len) == 0) {
+    register_store_template = "movl %%eax,(%1)";
+    register_store_type = C_U32;
+    register_store_flags = NYIR_INST_F_MEM_I32;
+  }
+  if (register_store_template) {
+    if (!expect(p, ":") || !expect(p, ":") ||
+        !inline_asm_string_sequence_is(p, "a", &p->pos) ||
+        !expect(p, "("))
+      return defer_unsupported_asm(p, open, assembly);
+    c_value_t value = parse_expr(p, 1);
+    if (value.value < 0 || value.type != register_store_type ||
+        !expect(p, ")") || !expect(p, ",") ||
+        !inline_asm_string_sequence_is(p, "r", &p->pos) || !expect(p, "("))
+      return defer_unsupported_asm(p, open, assembly);
+    c_value_t pointer = parse_expr(p, 1);
+    if (!expect(p, ")"))
+      return defer_unsupported_asm(p, open, assembly);
+    if (accept(p, ":")) {
+      size_t clobber_end = p->pos;
+      if (!inline_asm_clobber_list_is(p, &clobber_end))
+        return defer_unsupported_asm(p, open, assembly);
+      p->pos = clobber_end;
+    }
+    if (!expect(p, ")") || !expect(p, ";"))
+      return defer_unsupported_asm(p, open, assembly);
+    if (pointer.value < 0 || !c_type_is_pointer(pointer.type)) {
+      free(assembly);
+      fail(p, "unsupported register-addressed store inline-assembly operand");
+      return false;
+    }
+    bool ok = emit(p,
+                   (nyr_inst_t){.op = NYIR_STORE_I64,
+                                .dst = -1,
+                                .a = pointer.value,
+                                .c = value.value,
+                                .effects = NYIR_EFFECT_WRITE_MEMORY |
+                                           NYIR_EFFECT_MAY_TRAP |
+                                           NYIR_EFFECT_VOLATILE,
+                                .flags = register_store_flags,
                                 .scalar_class = NYIR_SCALAR_I64_RAW},
                    NULL);
     free(assembly);

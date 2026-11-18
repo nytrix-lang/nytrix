@@ -1396,7 +1396,9 @@ static expr_t *parse_primary(parser_t *p) {
       } else if (p->cur.kind == NY_T_IDENT && p->cur.len == 3 &&
                  strncmp(p->cur.lexeme, "max", 3) == 0 &&
                  parser_peek(p).kind == NY_T_LPAREN) {
-        /* Closed level constraint: `Type max(3, 5)` evaluates to `Type 5`. */
+        /*
+         * Closed level constraint: `Type max(3, 5)` evaluates to `Type 5`.
+         */
         parser_advance(p); /* max */
         parser_advance(p); /* ( */
         unsigned long levels[2] = {0, 0};
@@ -1835,6 +1837,8 @@ static bool expr_ternary_has_colon(parser_t *p) {
 
 static expr_t *parse_postfix(parser_t *p) {
   expr_t *expr = parse_primary(p);
+  if (!expr && p->expr_depth_exceeded)
+    return NULL;
   for (;;) {
     if (p->cur.kind == NY_T_QUESTION) {
       token_t tok = p->cur;
@@ -1894,7 +1898,14 @@ static expr_t *parse_postfix(parser_t *p) {
       token_t id_tok = p->cur;
       char *name = arena_strndup(p->arena, id_tok.lexeme, id_tok.len);
       parser_advance(p);
-      if (p->cur.kind == NY_T_LPAREN) {
+      /*
+       * A '(' starting the next line begins a new statement, not a call on
+       * this member: `b.y` followed by a line beginning with '(' is a field
+       * read plus a parenthesized expression, matching the plain-call rule
+       * above. Without this, the second line is absorbed as `b.y(...)` and
+       * the member becomes an unresolved method call.
+       */
+      if (p->cur.kind == NY_T_LPAREN && !p->skipped_newline) {
         parser_advance(p);
         expr_t *mc = expr_new(p->arena, NY_E_MEMCALL, id_tok);
         mc->as.memcall.target = expr;
@@ -1922,7 +1933,7 @@ static expr_t *parse_postfix(parser_t *p) {
       expr_t *target = expr;
       expr_t *access;
 
-      if (p->cur.kind == NY_T_LPAREN) {
+      if (p->cur.kind == NY_T_LPAREN && !p->skipped_newline) {
 
         parser_advance(p);
         expr_t *mc = expr_new(p->arena, NY_E_MEMCALL, id_tok);
@@ -1952,9 +1963,11 @@ static expr_t *parse_postfix(parser_t *p) {
     } else if (p->cur.kind == NY_T_LBRACK) {
       if (p->skipped_newline)
         break;
-      /* `"doc." [a, b]`: a string literal is indexed only when `[` follows
+      /*
+       * `"doc." [a, b]`: a string literal is indexed only when `[` follows
        * it directly (`"abc"[0]`). With a space it is a docstring followed by
-       * a list literal, which used to parse as an index expression. */
+       * a list literal, which used to parse as an index expression.
+       */
       if (expr->kind == NY_E_LITERAL && expr->as.literal.kind == NY_LIT_STR &&
           (p->cur.line != p->prev.line ||
            p->cur.col != p->prev.col + (int)p->prev.len))
@@ -2314,10 +2327,13 @@ static expr_t *parse_expr_impl(parser_t *p, int prec) {
 expr_t *p_parse_expr(parser_t *p, int prec) {
   if (!p)
     return NULL;
+  if (p->expr_depth_exceeded)
+    return NULL;
   if (p->expr_depth >= NY_MAX_PARSE_DEPTH) {
     parser_error(
         p, p->cur, "maximum expression nesting depth exceeded (512)",
         "simplify the expression or split it into intermediate values");
+    p->expr_depth_exceeded = true;
     return NULL;
   }
   p->expr_depth++;

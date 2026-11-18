@@ -2873,14 +2873,14 @@ static char *build_promotion_result_json(const char *row,
     (void)sb_append_json_str(&fail, case_name);
     (void)sb_append(&fail, ",\"missing\":[");
     bool first = true;
-#define ADD_MISSING_SOURCE(path_value)                                         \
-  do {                                                                         \
-    if (!path_exists_file(path_value)) {                                       \
-      if (!first)                                                              \
-        (void)sb_append_c(&fail, ',');                                         \
-      first = false;                                                           \
-      (void)sb_append_json_str(&fail, path_value ? path_value : "");           \
-    }                                                                          \
+#define ADD_MISSING_SOURCE(path_value)                               \
+  do {                                                               \
+    if (!path_exists_file(path_value)) {                             \
+      if (!first)                                                    \
+        (void)sb_append_c(&fail, ',');                               \
+      first = false;                                                 \
+      (void)sb_append_json_str(&fail, path_value ? path_value : ""); \
+    }                                                                \
   } while (0)
     ADD_MISSING_SOURCE(c_source);
     ADD_MISSING_SOURCE(ny_source);
@@ -5842,14 +5842,14 @@ static int cmd_public_corpus_audit(int argc, char **argv,
     (void)sb_appendf(&row, ",\"duplicate\":%s,\"missing_paths\":[",
                      duplicate ? "true" : "false");
     bool first_missing = true;
-#define APPEND_MISSING(path_value, missing_flag)                               \
-  do {                                                                         \
-    if ((missing_flag)) {                                                      \
-      if (!first_missing)                                                      \
-        (void)sb_append_c(&row, ',');                                          \
-      first_missing = false;                                                   \
-      (void)sb_append_json_str(&row, (path_value) ? (path_value) : "");        \
-    }                                                                          \
+#define APPEND_MISSING(path_value, missing_flag)                        \
+  do {                                                                  \
+    if ((missing_flag)) {                                               \
+      if (!first_missing)                                               \
+        (void)sb_append_c(&row, ',');                                   \
+      first_missing = false;                                            \
+      (void)sb_append_json_str(&row, (path_value) ? (path_value) : ""); \
+    }                                                                   \
   } while (0)
     APPEND_MISSING(c_path, c_missing);
     APPEND_MISSING(ny_path, ny_missing);
@@ -9972,7 +9972,8 @@ static int cmd_public_fuzz_sanitizers_run(int argc, char **argv) {
     if (no_bootstrap_logs && !lanes[i].fixture)
       proc_argv[pa++] = "--no-bootstrap-logs";
     proc_argv[pa] = NULL;
-    /* Borrow the argv storage for reporting; execution uses the same command.
+    /*
+     * Borrow the argv storage for reporting; execution uses the same command.
      */
     string_list_t cmd = {.items = proc_argv, .count = pa};
     str_buf_t row = {0};
@@ -11155,12 +11156,12 @@ static int cmd_public_fuzz_gc_campaign_run(int argc, char **argv,
     }                                                                          \
   } while (0)
 
-#define RUN_GC_LANE_COUNT(counter_name, lane_name, timeout_value, ...)         \
-  do {                                                                         \
-    int before_count = lane_metric_count;                                      \
-    RUN_GC_LANE((lane_name), (timeout_value), __VA_ARGS__);                    \
-    if (lane_metric_count > before_count)                                      \
-      ++(counter_name);                                                        \
+#define RUN_GC_LANE_COUNT(counter_name, lane_name, timeout_value, ...) \
+  do {                                                                 \
+    int before_count = lane_metric_count;                              \
+    RUN_GC_LANE((lane_name), (timeout_value), __VA_ARGS__);            \
+    if (lane_metric_count > before_count)                              \
+      ++(counter_name);                                                \
   } while (0)
 
   if (soak) {

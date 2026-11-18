@@ -45,7 +45,9 @@ static void lexer_error(lexer_t *lx, size_t start, const char *msg,
                         const char *hint);
 static void lex_number_suffix_digits(lexer_t *lx, bool underscore_allows_float);
 
-/* Strict UTF-8 scalar decoder used only for identifier code points. */
+/*
+ * Strict UTF-8 scalar decoder used only for identifier code points.
+ */
 static bool ny_lex_utf8(const unsigned char *p, size_t n, uint32_t *out,
                         size_t *width) {
   if (!n)
@@ -773,8 +775,10 @@ token_t lexer_next(lexer_t *lx) {
     return make_token(lx, NY_T_ARROW, start);
   }
   if (IS_ALPHA(c) || (unsigned char)c >= 0x80) {
-    /* The fast path is byte-wise; non-ASCII code points are decoded and
-     * checked against the generated Unicode 18 XID tables. */
+    /*
+     * The fast path is byte-wise; non-ASCII code points are decoded and
+     * checked against the generated Unicode 18 XID tables.
+     */
     if ((unsigned char)c >= 0x80) {
       uint32_t cp = 0;
       size_t w = 0;

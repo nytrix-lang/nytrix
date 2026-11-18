@@ -28,11 +28,13 @@
 #include <unistd.h>
 #endif
 
-/* ASan reserves a very large virtual shadow range.  Applying the normal
+/*
+ * ASan reserves a very large virtual shadow range.  Applying the normal
  * RLIMIT_AS memory cap to an instrumented process prevents that reservation
  * before user code starts.  Keep the RSS telemetry and all other safe-run
  * limits active in sanitizer builds, but leave address-space enforcement to
- * the surrounding test runner/cgroup. */
+ * the surrounding test runner/cgroup.
+ */
 #if defined(__has_feature)
 #if __has_feature(address_sanitizer)
 #define NY_SAFE_RUN_ASAN 1

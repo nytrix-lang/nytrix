@@ -1183,8 +1183,10 @@ static char *proof_rule_wrap(const char *canon) {
   return ny_strbuf_take(&b);
 }
 
-/* Re-normalize so the result compares like a prove(...) witness; forms the
- * canonical parser does not cover keep their constructed spelling. */
+/*
+ * Re-normalize so the result compares like a prove(...) witness; forms the
+ * canonical parser does not cover keep their constructed spelling.
+ */
 static char *proof_rule_normalize(const char *canon) {
   arena_t arena = {0};
   expr_t *e = ny_proof_expr_from_canonical(&arena, canon);
@@ -1204,7 +1206,9 @@ static char *proof_rule_equation_type(const char *a, const char *b) {
   return out;
 }
 
-/* Replace token-aligned occurrences of `from` by `to` in `canon`. */
+/*
+ * Replace token-aligned occurrences of `from` by `to` in `canon`.
+ */
 static char *proof_rule_replace(const char *canon, const char *from,
                                 const char *to, bool *changed) {
   size_t fl = strlen(from), tl = strlen(to), cl = strlen(canon);
@@ -1316,8 +1320,10 @@ char *ny_proof_rule_result(const char *rule, const char *const *proofs,
   return out;
 }
 
-/* Index spelling of a canonical term: `name:n` is `n`, `int:3` is `3`,
- * `binary:+(name:n,int:1)` is `n+1`; NULL when it is not an index term. */
+/*
+ * Index spelling of a canonical term: `name:n` is `n`, `int:3` is `3`,
+ * `binary:+(name:n,int:1)` is `n+1`; NULL when it is not an index term.
+ */
 static char *proof_index_term(const char *canon) {
   if (!canon)
     return NULL;
@@ -1344,7 +1350,9 @@ static char *proof_index_term(const char *canon) {
   return out;
 }
 
-/* Rewrites one index term by another in the generic arguments of `type`. */
+/*
+ * Rewrites one index term by another in the generic arguments of `type`.
+ */
 static char *proof_index_rewrite(const char *type, const char *from,
                                  const char *to, bool *changed) {
   ny_strbuf_t b;
@@ -1414,18 +1422,20 @@ bool ny_proof_rule_name(const char *leaf) {
                   strcmp(leaf, "eq_cong") == 0 || strcmp(leaf, "transport") == 0);
 }
 
-/* Renders a canonical proposition (`binary:<(int:0,name:y)`) as source
- * (`0 < y`) for goal displays. Unknown forms keep their canonical text. */
+/*
+ * Renders a canonical proposition (`binary:<(int:0,name:y)`) as source
+ * (`0 < y`) for goal displays. Unknown forms keep their canonical text.
+ */
 static bool proof_infix_into(const char *s, size_t len, char *out, size_t cap,
                              size_t *used, int depth) {
-#define PI_PUT(text, n)                                                        \
-  do {                                                                         \
-    size_t pi_n = (n);                                                         \
-    if (*used + pi_n + 1 > cap)                                                \
-      return false;                                                            \
-    memcpy(out + *used, (text), pi_n);                                         \
-    *used += pi_n;                                                             \
-    out[*used] = '\0';                                                         \
+#define PI_PUT(text, n)                \
+  do {                                 \
+    size_t pi_n = (n);                 \
+    if (*used + pi_n + 1 > cap)        \
+      return false;                    \
+    memcpy(out + *used, (text), pi_n); \
+    *used += pi_n;                     \
+    out[*used] = '\0';                 \
   } while (0)
   if (depth > 48)
     return false;

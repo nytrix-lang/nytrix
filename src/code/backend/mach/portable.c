@@ -1808,6 +1808,7 @@ static bool nyr_port_instruction_uses_value(const nyr_inst_t *in, int value) {
   case NYIR_VEC8_AND_I64:
   case NYIR_VEC8_OR_I64:
   case NYIR_VEC8_XOR_I64:
+  case NYIR_VEC8_MUL_I64:
   case NYIR_VEC4_REDUCE_ADD_I64:
   case NYIR_VEC8_REDUCE_ADD_I64:
   case NYIR_VEC4_REDUCE_ADD_F64:
@@ -2950,6 +2951,11 @@ static bool nyr_port_emit_inst(nyr_port_ctx_t *c, const nyr_inst_t *in) {
                                                 : "b",
                       c->epilogue_label);
   case NYIR_LOAD_I64:
+    if (in->flags & (NYIR_INST_F_MEM_SEG_FS | NYIR_INST_F_MEM_SEG_GS)) {
+      nyr_set_error(c->err, c->err_len,
+                    "portable backend: segment-relative load is unsupported");
+      return false;
+    }
     if (c->kind == NY_PORT_AVR) {
       if (!nyr_port_load_value(c, c->tmp0, in->a) ||
           !nyr_put(c->w, "\tmovw\tr30,"
@@ -3019,6 +3025,11 @@ static bool nyr_port_emit_inst(nyr_port_ctx_t *c, const nyr_inst_t *in) {
     }
     return nyr_port_store_value(c, in->dst, c->tmp1);
   case NYIR_STORE_I64:
+    if (in->flags & (NYIR_INST_F_MEM_SEG_FS | NYIR_INST_F_MEM_SEG_GS)) {
+      nyr_set_error(c->err, c->err_len,
+                    "portable backend: segment-relative store is unsupported");
+      return false;
+    }
     if (c->kind == NY_PORT_WASM) {
       if (!nyr_port_wasm_checked_address(c, in->a) ||
           !nyr_port_load_value(c, c->tmp1, in->c))
@@ -3286,6 +3297,7 @@ static bool nyr_port_emit_inst(nyr_port_ctx_t *c, const nyr_inst_t *in) {
   case NYIR_VEC8_AND_I64:
   case NYIR_VEC8_OR_I64:
   case NYIR_VEC8_XOR_I64:
+  case NYIR_VEC8_MUL_I64:
   case NYIR_VEC4_REDUCE_ADD_I64:
   case NYIR_VEC8_REDUCE_ADD_I64:
     break;

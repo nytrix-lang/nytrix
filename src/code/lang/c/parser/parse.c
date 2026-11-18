@@ -40,6 +40,7 @@ typedef struct {
   bool pointee_const;
   bool is_volatile;
   bool pointee_volatile;
+  unsigned char pointee_seg;
   size_t pointee_array_size;
   c_array_shape_t pointee_array;
 } c_param_t;
@@ -61,6 +62,7 @@ typedef struct {
   bool always_inline;
   bool noinline;
   bool no_stack_protector;
+  bool no_instrument_function;
   bool is_weak;
   bool no_emit;
   bool is_used;
@@ -95,6 +97,7 @@ typedef struct {
   ny_ctok_t fixed_register;
 
   bool pointee_volatile;
+  unsigned char pointee_seg;
   size_t pointee_array_size;
   c_array_shape_t pointee_array;
   int volatile_address;
@@ -193,6 +196,10 @@ typedef struct {
   bool has_asm_register;
   ny_ctok_t alias_target;
   bool is_volatile;
+  /*
+   * C_SEG_* qualifier on the object a global pointer addresses.
+   */
+  unsigned char pointee_seg;
 } c_global_t;
 
 typedef struct {
@@ -334,13 +341,21 @@ typedef struct {
   bool last_type_bool;
   bool last_type_const_pointer;
   bool last_type_volatile;
+  unsigned char last_type_seg;
   bool last_type_long_long;
   /*
    * Declaration lookahead classifies types without defining aggregate tags.
    */
   bool type_lookahead;
+  /*
+   * A sizeof probe that must build an anonymous aggregate skips assertion
+   * diagnostics whose constant expression depends on full macro machinery;
+   * ordinary declaration parses still evaluate them.
+   */
+  bool suppress_static_asserts;
   bool last_value_const;
   bool last_value_pointee_const;
+  unsigned char last_value_pointee_seg;
   bool last_value_null_pointer_constant;
   bool last_value_array;
   bool global_const_unsigned;
@@ -562,14 +577,79 @@ static bool apply_mode_attribute(c_parser_t *p, c_type_t *type) {
   return true;
 }
 
+enum { C_SEG_NONE = 0, C_SEG_GS = 1, C_SEG_FS = 2 };
+
+/*
+ * Pointee qualifiers travel on the value's agg marker so that a pointer value
+ * keeps its address space through casts and re-association. The markers are
+ * opaque identities; only their addresses are compared.
+ */
+static const c_agg_type_t c_gs_pointee_marker;
+static const c_agg_type_t c_fs_pointee_marker;
+static const c_agg_type_t c_volatile_gs_pointee_marker;
+static const c_agg_type_t c_volatile_fs_pointee_marker;
+static const c_agg_type_t c_const_gs_pointee_marker;
+static const c_agg_type_t c_const_fs_pointee_marker;
+static const c_agg_type_t c_const_volatile_gs_pointee_marker;
+static const c_agg_type_t c_const_volatile_fs_pointee_marker;
+
+static const c_agg_type_t *c_pointee_marker(bool is_const, bool is_volatile,
+                                            unsigned char seg) {
+  if (seg == C_SEG_GS)
+    return is_const ? (is_volatile ? &c_const_volatile_gs_pointee_marker
+                                   : &c_const_gs_pointee_marker)
+                    : (is_volatile ? &c_volatile_gs_pointee_marker
+                                   : &c_gs_pointee_marker);
+  if (seg == C_SEG_FS)
+    return is_const ? (is_volatile ? &c_const_volatile_fs_pointee_marker
+                                   : &c_const_fs_pointee_marker)
+                    : (is_volatile ? &c_volatile_fs_pointee_marker
+                                   : &c_fs_pointee_marker);
+  return is_const ? (is_volatile ? &c_const_volatile_pointee_marker
+                                 : &c_const_pointee_marker)
+                  : (is_volatile ? &c_volatile_pointee_marker : NULL);
+}
+
+static unsigned char c_marker_seg(const c_agg_type_t *marker) {
+  if (marker == &c_gs_pointee_marker ||
+      marker == &c_volatile_gs_pointee_marker ||
+      marker == &c_const_gs_pointee_marker ||
+      marker == &c_const_volatile_gs_pointee_marker)
+    return C_SEG_GS;
+  if (marker == &c_fs_pointee_marker ||
+      marker == &c_volatile_fs_pointee_marker ||
+      marker == &c_const_fs_pointee_marker ||
+      marker == &c_const_volatile_fs_pointee_marker)
+    return C_SEG_FS;
+  return C_SEG_NONE;
+}
+
+static unsigned c_seg_flags(unsigned char seg) {
+  return seg == C_SEG_GS   ? NYIR_INST_F_MEM_SEG_GS
+         : seg == C_SEG_FS ? NYIR_INST_F_MEM_SEG_FS
+                           : 0;
+}
+
+static unsigned c_value_seg_flags(c_value_t value) {
+  return c_seg_flags(c_marker_seg(value.agg));
+}
+
 static bool c_value_pointee_volatile(c_value_t value) {
   return value.agg == &c_volatile_pointee_marker ||
-         value.agg == &c_const_volatile_pointee_marker;
+         value.agg == &c_const_volatile_pointee_marker ||
+         value.agg == &c_volatile_gs_pointee_marker ||
+         value.agg == &c_volatile_fs_pointee_marker ||
+         value.agg == &c_const_volatile_gs_pointee_marker ||
+         value.agg == &c_const_volatile_fs_pointee_marker;
 }
 
 static bool c_value_pointee_const(c_value_t value) {
   return value.agg == &c_const_pointee_marker ||
-         value.agg == &c_const_volatile_pointee_marker;
+         value.agg == &c_const_volatile_pointee_marker ||
+         value.agg == &c_const_gs_pointee_marker ||
+         value.agg == &c_const_fs_pointee_marker ||
+         value.agg == &c_const_volatile_gs_pointee_marker ||
+         value.agg == &c_const_volatile_fs_pointee_marker;
 }
 
 static bool record_lvalue(c_parser_t *p, int value, int address, c_type_t type,
@@ -857,8 +937,10 @@ static bool starts_scalar_type(c_parser_t *p) {
   return tok_is_attribute(p, p->pos) || tok_is(p, p->pos, "static") ||
          tok_is(p, p->pos, "register") || tok_is(p, p->pos, "enum") ||
          tok_is(p, p->pos, "const") || tok_is(p, p->pos, "volatile") ||
+         tok_is(p, p->pos, "__seg_gs") || tok_is(p, p->pos, "__seg_fs") ||
          tok_is(p, p->pos, "long") || tok_is(p, p->pos, "double") ||
          tok_is(p, p->pos, "float") || tok_is(p, p->pos, "_Float32") ||
+         tok_is(p, p->pos, "_Complex") || tok_is(p, p->pos, "__complex__") ||
          tok_is(p, p->pos, "_Float64") || tok_is(p, p->pos, "_Float32x") ||
          tok_is(p, p->pos, "unsigned") || tok_is(p, p->pos, "signed") ||
          tok_is(p, p->pos, "short") || tok_is(p, p->pos, "char") ||
@@ -1044,6 +1126,7 @@ static size_t skip_balanced(c_parser_t *p, size_t at, const char *left,
 static bool parse_array_extent_expr(c_parser_t *p, int min_precedence,
                                     uint64_t *value);
 static bool parse_global_const_expr(c_parser_t *p, size_t *at, int64_t *value);
+static bool global_const_cast_type(c_parser_t *p, size_t open, size_t close);
 static bool preproc_attribute_accepted(const char *name, size_t name_len);
 static bool parse_global_float_add(c_parser_t *p, size_t *at, double *value);
 static bool initialize_data_pointer(c_parser_t *p, c_global_t *data,
@@ -1685,10 +1768,16 @@ static bool parse_array_extent_atom(c_parser_t *p, uint64_t *value) {
   }
   if (accept(p, "__builtin_ctz") || accept(p, "__builtin_ctzl") ||
       accept(p, "__builtin_ctzll")) {
-    if (!expect(p, "(") || !parse_array_extent_expr(p, 1, value) ||
-        !expect(p, ")") || !*value)
+    if (!expect(p, "("))
       return false;
-    *value = (uint64_t)__builtin_ctzl((unsigned long)*value);
+    size_t argument = p->pos;
+    int64_t constant = 0;
+    if (!parse_global_const_expr(p, &argument, &constant))
+      return false;
+    p->pos = argument;
+    if (!expect(p, ")") || !constant)
+      return false;
+    *value = (uint64_t)__builtin_ctzl((unsigned long)constant);
     return true;
   }
   unsigned bswap_width = accept(p, "__builtin_bswap16")   ? 16
@@ -2764,6 +2853,22 @@ static bool parse_field_declarator(c_parser_t *p, c_type_t type,
                       : (type == C_U16 ? C_AGG_FIELD_U16 : C_AGG_FIELD_I16);
     return true;
   }
+  if (c_type_is_complex(type)) {
+    if (count != 1) {
+      fail(p, "arrays of complex struct fields are not supported yet");
+      return false;
+    }
+    field->agg = NULL;
+    field->elem_f64 = false;
+    field->elem_unsigned = false;
+    field->size = type == C_C64 ? 8 : type == C_C128 ? 16 : 32;
+    field->align = type == C_C64 ? 4 : type == C_C128 ? 8 : 16;
+    field->elem_size = field->size;
+    field->kind = type == C_C64    ? C_AGG_FIELD_C64
+                  : type == C_C128 ? C_AGG_FIELD_C128
+                                   : C_AGG_FIELD_C_LDOUBLE;
+    return true;
+  }
   if (type != C_I64 && type != C_U64 && type != C_F64) {
     fail(p, "struct fields must be long, double, pointer, struct, or union");
     return false;
@@ -3312,6 +3417,22 @@ static bool static_typeof_expr_type_impl(c_parser_t *p, c_type_t *type,
     p->last_type_array_decayed = false;
     p->last_type_base_type = *type;
     p->last_type_base_valid = true;
+  } else if (tok_is(p, p->pos, "typeof") || tok_is(p, p->pos, "__typeof__") ||
+             tok_is(p, p->pos, "__typeof") ||
+             tok_is(p, p->pos, "__typeof_unqual__")) {
+    /*
+     * A typeof construct is itself a type-valued expression, so it can be
+     * the operand of an enclosing typeof; container_of's type check does
+     * exactly that through typeof_member().
+     */
+    bool leading_const = p->last_type_const;
+    bool leading_volatile = p->last_type_volatile;
+    if (!parse_typeof_type(p, type))
+      return false;
+    p->last_type_const |= leading_const;
+    p->last_type_volatile |= leading_volatile;
+    p->last_type_base_type = *type;
+    p->last_type_base_valid = true;
   } else if (tok_is(p, p->pos, "_Generic")) {
     if (!resolve_static_generic_type(p, type, depth))
       return false;
@@ -3370,6 +3491,57 @@ static bool static_typeof_expr_type_impl(c_parser_t *p, c_type_t *type,
       return false;
     p->pos = close + 1;
   } else if (tok_is(p, p->pos, "*")) {
+    /*
+     * `*(function designator)` is the function type itself.  The kernel's
+     * `RCU_INITIALIZER(v)` spells this as `typeof(*(v)) *` when v names a
+     * function, so resolve the signature without treating the designator
+     * as a pointer to an incomplete type.
+     */
+    size_t designator_at = p->pos + 1;
+    size_t designator_parens = 0;
+    while (tok_is(p, designator_at, "(")) {
+      ++designator_at;
+      ++designator_parens;
+    }
+    if (designator_at < p->token_count &&
+        tok_ident(p->tokens[designator_at]) &&
+        /*
+         * Only a bare designator denotes the function type.  A call such as
+         * `*task_pid_ptr(task, type)` dereferences the call result; treating
+         * it as a designator would type the whole RCU expression as a
+         * function pointer instead of the pointee.
+         */
+        !tok_is(p, designator_at + 1, "(") &&
+        !find_local(p, p->tokens[designator_at]) &&
+        !find_global(p, p->tokens[designator_at])) {
+      c_function_t *fn = find_function(p, p->tokens[designator_at]);
+      size_t designator_end = designator_at + 1;
+      size_t closing = designator_parens;
+      while (closing && tok_is(p, designator_end, ")")) {
+        ++designator_end;
+        --closing;
+      }
+      if (fn && !closing) {
+        p->pos = designator_end;
+        if (tok_is(p, p->pos, "(")) {
+          size_t after = skip_balanced(p, p->pos, "(", ")");
+          if (after <= p->pos || after >= p->token_count)
+            return false;
+          p->pos = after;
+        }
+        *type = C_FUNC_PTR;
+        p->last_type_agg = NULL;
+        p->last_type_function_result_type = fn->result;
+        p->last_type_function_result_agg = fn->result_agg;
+        p->last_type_function_void_params =
+            fn->param_count == 0 && !fn->variadic;
+        p->last_type_function_type = true;
+        p->last_type_is_function_declarator = true;
+        p->last_type_is_array = false;
+        p->last_type_array_size = 0;
+        return true;
+      }
+    }
     ++p->pos;
     if (!static_typeof_expr_type(p, type, depth + 1))
       return false;
@@ -3396,24 +3568,21 @@ static bool static_typeof_expr_type_impl(c_parser_t *p, c_type_t *type,
       p->last_type_array_size = c_array_shape_size(&p->last_type_array);
     }
     if (*type == C_BAD) {
-      if (pointer_type == C_VOID_PTR || getenv("NYC_KERNEL_COMPAT")) {
-        /*
-         * Kernel compat: macros like rcu_dereference do typeof(*p) through
-         * complex casts; NYC may lose the pointee type. Fall back to an
-         * integer type to keep parsing (static asserts are lenient in
-         * kernel compat).
-         */
-        *type = C_U64;
-        p->last_type_agg = NULL;
-        p->last_type_is_array = false;
-        p->last_type_array = (c_array_shape_t){0};
-        p->last_type_array_size = 0;
-        p->last_type_pointee_array = (c_array_shape_t){0};
-        p->last_type_is_function_declarator = false;
-      } else {
-        fail(p, "typeof of a dereferenced void pointer is unsupported");
+      /*
+       * This frontend spells the plain void type C_BAD, so typeof(*p) for a
+       * void pointer is void, exactly as GCC defines it. Anything else that
+       * collapses to C_BAD is a genuinely unsupported pointee type.
+       */
+      if (pointer_type != C_VOID_PTR) {
+        fail(p, "typeof of a dereferenced incomplete pointer is unsupported");
         return false;
       }
+      p->last_type_agg = NULL;
+      p->last_type_is_array = false;
+      p->last_type_array = (c_array_shape_t){0};
+      p->last_type_array_size = 0;
+      p->last_type_pointee_array = (c_array_shape_t){0};
+      p->last_type_is_function_declarator = false;
     }
     if (*type != C_AGG && *type != C_AGG_PTR && *type != C_AGG_PTR_PTR &&
         !(c_type_is_pointer(*type) && p->last_type_agg))
@@ -3837,6 +4006,15 @@ static bool static_typeof_expr_type_impl(c_parser_t *p, c_type_t *type,
                                                        : C_U32;
       } else {
         switch (field->kind) {
+        case C_AGG_FIELD_C64:
+          member_type = C_C64;
+          break;
+        case C_AGG_FIELD_C128:
+          member_type = C_C128;
+          break;
+        case C_AGG_FIELD_C_LDOUBLE:
+          member_type = C_C_LDOUBLE;
+          break;
         case C_AGG_FIELD_AGG:
           member_type = C_AGG;
           break;
@@ -4403,11 +4581,13 @@ static bool parse_type_pointers(c_parser_t *p, unsigned *levels,
 static bool parse_type(c_parser_t *p, c_type_t *type, bool allow_void) {
   bool is_unsigned = false, is_signed = false, is_float = false,
        is_double = false, is_long = false, is_long_long = false, is_int = false,
-       is_void = false, is_char = false, is_short = false;
+       is_void = false, is_char = false, is_short = false,
+       is_complex = false, is_long_double = false;
   bool typeof_resolved = false;
   p->last_type_const = false;
   p->last_type_const_pointer = false;
   p->last_type_volatile = false;
+  p->last_type_seg = C_SEG_NONE;
   p->last_type_long_long = false;
   p->last_type_agg = NULL;
   p->last_type_section = (ny_ctok_t){0};
@@ -4431,6 +4611,14 @@ static bool parse_type(c_parser_t *p, c_type_t *type, bool allow_void) {
   p->last_type_alignment = 0;
   p->last_type_mode = (ny_ctok_t){0};
   p->last_type_base_valid = false;
+  /*
+   * `_Complex` may start the specifier list: `_Complex double`.
+   */
+  while (tok_is(p, p->pos, "_Complex") ||
+         tok_is(p, p->pos, "__complex__")) {
+    is_complex = true;
+    ++p->pos;
+  }
   while (tok_is(p, p->pos, "const") || tok_is(p, p->pos, "volatile") ||
          tok_is(p, p->pos, "__volatile") || tok_is(p, p->pos, "__volatile__") ||
          tok_is(p, p->pos, "static") || tok_is(p, p->pos, "extern") ||
@@ -4483,11 +4671,22 @@ static bool parse_type(c_parser_t *p, c_type_t *type, bool allow_void) {
       continue;
     }
     /*
-     * Linux marks per-CPU declarations with an address-space qualifier;
-     * actual GS-relative accesses are expressed in the surrounding inline
-     * assembly templates.
+     * `_Complex` may precede the base type: `_Complex double`.
+     */
+    if (tok_is(p, p->pos, "_Complex") ||
+        tok_is(p, p->pos, "__complex__")) {
+      is_complex = true;
+      ++p->pos;
+      continue;
+    }
+    /*
+     * Linux marks per-CPU declarations with an address-space qualifier. The
+     * qualifier belongs to the pointed-to object, so record it and let the
+     * pointer lowerer emit the matching segment prefix on every access.
      */
     if (tok_is(p, p->pos, "__seg_gs") || tok_is(p, p->pos, "__seg_fs")) {
+      p->last_type_seg =
+          tok_is(p, p->pos, "__seg_gs") ? C_SEG_GS : C_SEG_FS;
       ++p->pos;
       continue;
     }
@@ -4591,7 +4790,12 @@ static bool parse_type(c_parser_t *p, c_type_t *type, bool allow_void) {
         p->last_type_const = true;
       else if (accept(p, "volatile"))
         p->last_type_volatile = true;
-      else
+      else if (tok_is(p, p->pos, "__seg_gs") ||
+               tok_is(p, p->pos, "__seg_fs")) {
+        p->last_type_seg =
+            tok_is(p, p->pos, "__seg_gs") ? C_SEG_GS : C_SEG_FS;
+        ++p->pos;
+      } else
         ++p->pos;
     }
     /*
@@ -4812,6 +5016,7 @@ static bool parse_type(c_parser_t *p, c_type_t *type, bool allow_void) {
       } else if (accept(p, "long")) {
         if (accept(p, "double")) {
           is_double = true;
+          is_long_double = true;
         } else {
           is_long = true;
           if (accept(p, "long"))
@@ -4898,6 +5103,26 @@ static bool parse_type(c_parser_t *p, c_type_t *type, bool allow_void) {
       p->last_type_long_long = is_long_long;
     }
   }
+  /*
+   * `_Complex` may follow the base type: `double _Complex`.
+   */
+  while (tok_is(p, p->pos, "_Complex") ||
+         tok_is(p, p->pos, "__complex__")) {
+    is_complex = true;
+    ++p->pos;
+  }
+  if (is_complex) {
+    if (is_long_double)
+      *type = C_C_LDOUBLE;
+    else if (*type == C_F32)
+      *type = C_C64;
+    else if (*type == C_F64)
+      *type = C_C128;
+    else {
+      fail(p, "_Complex requires a floating base type");
+      return false;
+    }
+  }
   while (
       tok_is(p, p->pos, "const") || tok_is(p, p->pos, "volatile") ||
       tok_is(p, p->pos, "__seg_gs") || tok_is(p, p->pos, "__seg_fs") ||
@@ -4906,10 +5131,11 @@ static bool parse_type(c_parser_t *p, c_type_t *type, bool allow_void) {
       p->last_type_const = true;
     else if (accept(p, "volatile")) {
       p->last_type_volatile = true;
-    } else if (accept(p, "__seg_gs") || accept(p, "__seg_fs")) {
-      /*
-       * Explicit GS-relative accesses are emitted by Linux inline asm.
-       */
+    } else if (tok_is(p, p->pos, "__seg_gs") ||
+               tok_is(p, p->pos, "__seg_fs")) {
+      p->last_type_seg =
+          tok_is(p, p->pos, "__seg_gs") ? C_SEG_GS : C_SEG_FS;
+      ++p->pos;
     } else if (!parse_function_type_attributes(p))
       return false;
   }
@@ -5006,6 +5232,12 @@ static bool parse_type(c_parser_t *p, c_type_t *type, bool allow_void) {
     *type = C_F64_PTR;
   else if (pointers == 1 && *type == C_F32)
     *type = C_F32_PTR;
+  else if (pointers == 1 && *type == C_C64)
+    *type = C_C64_PTR;
+  else if (pointers == 1 && *type == C_C128)
+    *type = C_C128_PTR;
+  else if (pointers == 1 && *type == C_C_LDOUBLE)
+    *type = C_C_LDOUBLE_PTR;
   else if (pointers == 1 && *type == C_AGG)
     *type = p->last_type_array_size ? C_AGG_ARRAY_PTR : C_AGG_PTR;
   else if (pointers == 1 && *type == C_VA_LIST)
@@ -5902,6 +6134,33 @@ static bool parse_tag_fields(c_parser_t *p, c_agg_type_t *tag, bool is_union) {
     if (accept(p, ";"))
       continue;
     if (accept(p, "_Static_assert")) {
+      if (p->type_lookahead || p->suppress_static_asserts) {
+        /*
+         * A sizeof/alignof probe only needs the layout; evaluating an
+         * assertion whose condition depends on macro machinery can fail
+         * without changing the type.
+         */
+        int depth = 0;
+        while (p->pos < p->token_count) {
+          if (tok_is(p, p->pos, "(")) {
+            ++depth;
+          } else if (tok_is(p, p->pos, ")")) {
+            if (depth == 0) {
+              ++p->pos;
+              break;
+            }
+            if (--depth == 0) {
+              ++p->pos;
+              break;
+            }
+          }
+          ++p->pos;
+        }
+        while (p->pos < p->token_count && !tok_is(p, p->pos, ";"))
+          ++p->pos;
+        (void)accept(p, ";");
+        continue;
+      }
       int64_t condition = 0;
       size_t sa_pos = p->pos;
       if (!expect(p, "(") || !parse_global_const_expr(p, &p->pos, &condition) ||
@@ -10016,12 +10275,38 @@ static bool parse_global_const_primary(c_parser_t *p, size_t *at,
       if (!expect(&expression_probe, "("))
         return false;
       bool compound_array = false;
-      if (!parse_static_array_compound_literal_size(&expression_probe, &size,
-                                                    &compound_array))
+      bool anonymous_aggregate_size = false;
+      size_t operand = expression_probe.pos;
+      if ((tok_is(p, operand, "struct") || tok_is(p, operand, "union")) &&
+          tok_is(p, operand + 1, "{")) {
+        size_t capacity = expression_probe.tag_count + 1;
+        c_agg_type_t **scratch = malloc(capacity * sizeof(*scratch));
+        if (!scratch)
+          return false;
+        if (expression_probe.tag_count)
+          memcpy(scratch, expression_probe.tags,
+                 expression_probe.tag_count * sizeof(*scratch));
+        c_parser_t aggregate = expression_probe;
+        aggregate.tags = scratch;
+        aggregate.tag_capacity = capacity;
+        aggregate.type_lookahead = false;
+        aggregate.suppress_static_asserts = true;
+        c_type_t aggregate_type = C_BAD;
+        bool aggregate_ok = parse_type(&aggregate, &aggregate_type, false);
+        size = aggregate_ok && aggregate.last_type_agg
+                   ? aggregate.last_type_agg->size
+                   : 0;
+        free(scratch);
+        if (!aggregate_ok || !expect(&aggregate, ")"))
+          return false;
+        expression_probe.pos = aggregate.pos;
+        anonymous_aggregate_size = true;
+      } else if (!parse_static_array_compound_literal_size(
+                     &expression_probe, &size, &compound_array)) {
         return false;
-      if (compound_array && !expect(&expression_probe, ")"))
+      } else if (compound_array && !expect(&expression_probe, ")")) {
         return false;
-      if (!compound_array) {
+      } else if (!compound_array) {
         c_type_t expression_type = C_BAD;
         if (!static_typeof_expr_type(&expression_probe, &expression_type, 0) ||
             !expect(&expression_probe, ")"))
@@ -10033,13 +10318,14 @@ static bool parse_global_const_primary(c_parser_t *p, size_t *at,
                    ? expression_probe.last_type_agg->size
                    : c_type_size(p->abi, expression_type);
       }
-      bool zero_length_array = compound_array && size == 0;
+      bool zero_length_array =
+          compound_array && size == 0 && !anonymous_aggregate_size;
       if (!size && tok_ident(p->tokens[*at + 2]) && tok_is(p, *at + 3, ")")) {
         c_global_t *global = find_global(p, p->tokens[*at + 2]);
         zero_length_array = global && global->is_array &&
                             !global->array_incomplete && global->len == 0;
       }
-      if (!size && !zero_length_array)
+      if (!size && !zero_length_array && !anonymous_aggregate_size)
         return false;
       probe.pos = expression_probe.pos;
     }
@@ -10369,6 +10655,34 @@ static bool parse_global_const_logical_and(c_parser_t *p, size_t *at,
 }
 
 static bool parse_global_const_expr(c_parser_t *p, size_t *at, int64_t *value) {
+  /*
+   * A string literal is a non-null address, so `("x") ? sizeof("x") - 1 : 0`
+   * selects the true operand. The literal itself is not an integer constant,
+   * so recognize this conditional shape before the arithmetic parser sees it.
+   */
+  if (tok_is(p, *at, "(")) {
+    size_t probe = *at + 1;
+    bool have_string = false;
+    while (probe < p->token_count &&
+           p->tokens[probe].kind == NY_CTOK_STRING) {
+      have_string = true;
+      ++probe;
+    }
+    if (have_string && tok_is(p, probe, ")") && tok_is(p, probe + 1, "?")) {
+      *at = probe + 2;
+      int64_t selected = 1;
+      if (!tok_is(p, *at, ":") &&
+          !parse_global_const_expr(p, at, &selected))
+        return false;
+      if (!tok_is(p, *at, ":"))
+        return false;
+      ++*at;
+      *at = global_const_expression_end(p, *at);
+      *value = selected;
+      p->global_const_unsigned = false;
+      return true;
+    }
+  }
   if (!parse_global_const_logical_and(p, at, value))
     return false;
   while (tok_is(p, *at, "||")) {
@@ -11076,6 +11390,75 @@ static bool initialize_data_integer_address(c_parser_t *p, c_global_t *data,
                                             unsigned char *bytes,
                                             bool *handled) {
   *handled = false;
+  /*
+   * A constant conditional initializer may select between a plain value and
+   * an address expression. Select the taken branch before looking for a
+   * leading cast so `&"literal"` can be relocated.
+   */
+  size_t conditional_end = SIZE_MAX;
+  size_t conditional_start = p->pos;
+  if (tok_is(p, p->pos, "(")) {
+    size_t close = skip_balanced(p, p->pos, "(", ")");
+    size_t question = SIZE_MAX;
+    size_t colon = SIZE_MAX;
+    int grouping = 0;
+    int nested_questions = 0;
+    for (size_t at = p->pos + 1; at < close && close <= p->token_count;
+         ++at) {
+      if (tok_is(p, at, "(") || tok_is(p, at, "[") ||
+          tok_is(p, at, "{")) {
+        ++grouping;
+      } else if (tok_is(p, at, ")") || tok_is(p, at, "]") ||
+                 tok_is(p, at, "}")) {
+        if (!grouping)
+          break;
+        --grouping;
+      } else if (!grouping && tok_is(p, at, "?")) {
+        if (question == SIZE_MAX)
+          question = at;
+        else
+          ++nested_questions;
+      } else if (!grouping && tok_is(p, at, ":")) {
+        if (nested_questions) {
+          --nested_questions;
+        } else if (question != SIZE_MAX && colon == SIZE_MAX) {
+          colon = at;
+        }
+      }
+    }
+    if (question != SIZE_MAX && colon != SIZE_MAX) {
+      c_parser_t probe = *p;
+      char probe_error[1] = {0};
+      probe.err = probe_error;
+      probe.err_len = sizeof(probe_error);
+      probe.token_count = question;
+      int64_t condition = 0;
+      size_t condition_at = p->pos + 1;
+      if (parse_global_const_expr(&probe, &condition_at, &condition) &&
+          condition_at == question) {
+        size_t branch = condition ? question + 1 : colon + 1;
+        size_t value_pos = branch;
+        while (tok_is(p, value_pos, "(")) {
+          size_t value_close = skip_balanced(p, value_pos, "(", ")");
+          if (value_close <= value_pos || value_close > p->token_count)
+            break;
+          value_pos = value_close;
+        }
+        bool address_branch =
+            tok_is(p, value_pos, "&") ||
+            (tok_ident(p->tokens[value_pos]) &&
+             (find_function(p, p->tokens[value_pos]) ||
+              (find_global(p, p->tokens[value_pos]) &&
+               find_global(p, p->tokens[value_pos])->is_array)));
+        if (address_branch) {
+          p->pos = branch;
+          conditional_end = close;
+        } else {
+          p->pos = conditional_start;
+        }
+      }
+    }
+  }
   size_t address_pos = p->pos;
   size_t grouping_parentheses = 0;
   while (tok_is(p, address_pos, "(")) {
@@ -11110,6 +11493,19 @@ static bool initialize_data_integer_address(c_parser_t *p, c_global_t *data,
             "storage");
     return false;
   }
+  /*
+   * `(integer)&"literal"` stores the address of the literal's own symbol,
+   * exactly like a pointer field does.
+   */
+  if (tok_is(p, address_pos, "&") && address_pos + 1 < p->token_count &&
+      p->tokens[address_pos + 1].kind == NY_CTOK_STRING) {
+    p->pos = address_pos + 1;
+    if (!append_global_string_reloc(p, data, offset))
+      return false;
+    if (conditional_end != SIZE_MAX)
+      p->pos = conditional_end;
+    return true;
+  }
   p->pos = address_pos;
   size_t reloc_before = data->reloc_count;
   if (!initialize_data_pointer(p, data, offset, bytes))
@@ -11133,6 +11529,8 @@ static bool initialize_data_integer_address(c_parser_t *p, c_global_t *data,
       return false;
     else
       --grouping_parentheses;
+  if (conditional_end != SIZE_MAX)
+    p->pos = conditional_end;
   return true;
 }
 
@@ -12999,6 +13397,21 @@ static bool try_collect_aggregate_global(c_parser_t *p, bool *matched) {
   c_global_t *existing = NULL;
   bool completing_incomplete_array = false;
   bool replacing_incomplete_array = false;
+  /*
+   * `extern typeof(object) object;` declares the object again with its own
+   * type by construction. Array shape carried through typeof can differ from
+   * the declarator's recorded rank, so recognize the form instead of treating
+   * it as a conflicting definition.
+   */
+  bool typeof_redeclaration = false;
+  if (is_external && !has_initializer && p->pos >= 5 &&
+      p->pos < p->token_count &&
+      (tok_is(p, p->pos - 5, "typeof") ||
+       tok_is(p, p->pos - 5, "__typeof__")) &&
+      tok_is(p, p->pos - 4, "(") && tok_is(p, p->pos - 2, ")") &&
+      p->tokens[p->pos - 3].len == name.len &&
+      memcmp(p->tokens[p->pos - 3].start, name.start, name.len) == 0)
+    typeof_redeclaration = true;
   for (;;) {
     existing = find_global(p, name);
     bool matching_extern = is_external && !has_initializer && existing &&
@@ -13031,6 +13444,9 @@ static bool try_collect_aggregate_global(c_parser_t *p, bool *matched) {
         existing->agg == agg && existing->is_array == is_array &&
         existing->array_rank == array_rank && existing->is_const == is_const &&
         !(existing->is_external && !is_external);
+    if (typeof_redeclaration && existing && existing->type == C_AGG &&
+        existing->agg == agg)
+      matching_redeclaration = true;
     if (getenv("NYC_KERNEL_COMPAT") && !has_initializer && existing &&
         !matching_redeclaration && !replacing_incomplete_array &&
         (is_external || !existing->is_external))
@@ -13939,14 +14355,18 @@ static bool try_collect_aggregate_pointer_array(c_parser_t *p, bool *matched) {
             return false;
           }
           if (range_designator) {
-            bool kernel_compat_range = getenv("NYC_KERNEL_COMPAT") != NULL;
-            if ((array_rank != 1 && !kernel_compat_range) || !expect(p, "=")) {
+            if (!expect(p, "=")) {
               free(global.bytes);
               free(global.relocs);
-              fail(p, "pointer-array range designators require a flat array");
+              fail(p, "pointer-array range designator requires an initializer");
               return false;
             }
-            size_t range_stride = array_rank == 1 ? 1u : (size_t)inner_count;
+            /*
+             * Use the effective rank after the element typedef expands; a
+             * per-CPU typedef array has no bracket in the declarator itself.
+             */
+            size_t range_stride =
+                stored_array_rank == 1 ? 1u : (size_t)inner_count;
             element_index = (size_t)designated_index * range_stride;
             range_end = (size_t)designated_last * range_stride +
                         (range_stride ? range_stride - 1u : 0u);
@@ -14946,7 +15366,7 @@ static bool try_collect_scalar_global(c_parser_t *p, bool *matched) {
   if (type != C_I32 && type != C_U32 && type != C_U8 && type != C_CHAR &&
       type != C_I16 && type != C_U16 && type != C_I64 && type != C_U64 &&
       type != C_F64 && type != C_AGG && type != C_BAD &&
-      !c_type_is_pointer(type)) {
+      !c_type_is_complex(type) && !c_type_is_pointer(type)) {
     fail(p, "unsupported file-scope C object type");
     return false;
   }
@@ -15315,6 +15735,8 @@ static bool try_collect_scalar_global(c_parser_t *p, bool *matched) {
       previous->relocs = relocs;
       previous->reloc_count = reloc_count;
       previous->type = type;
+      previous->pointee_seg =
+          c_type_is_pointer(type) ? p->last_type_seg : C_SEG_NONE;
       previous->agg = type_agg;
       previous->function_result_type = function_result_type;
       previous->is_long_long = is_long_long;
@@ -15349,6 +15771,7 @@ static bool try_collect_scalar_global(c_parser_t *p, bool *matched) {
       .relocs = relocs,
       .reloc_count = reloc_count,
       .type = type,
+      .pointee_seg = c_type_is_pointer(type) ? p->last_type_seg : C_SEG_NONE,
       .pointer_base_type = pointer_base_type,
       .pointer_depth = pointer_depth,
       .is_long_long = is_long_long,
@@ -15674,6 +16097,8 @@ static bool parse_signature(c_parser_t *p, c_function_t *fn) {
             p->last_type_volatile && !c_type_is_arithmetic_pointer(type);
         bool pointee_volatile =
             p->last_type_volatile && c_type_is_arithmetic_pointer(type);
+        unsigned char pointee_seg =
+            c_type_is_pointer(type) ? p->last_type_seg : C_SEG_NONE;
         ny_ctok_t param_name = {0};
         unsigned nested_function_pointers = 0;
         if (parse_nested_function_pointer_declarator(
@@ -15842,7 +16267,7 @@ static bool parse_signature(c_parser_t *p, c_function_t *fn) {
             .is_bool = is_bool_param,
             .pointee_const = c_type_is_pointer(type) && p->last_type_const,
             .is_volatile = is_volatile,
-            .pointee_volatile = pointee_volatile,
+            .pointee_volatile = pointee_volatile, .pointee_seg = pointee_seg,
             .pointee_array_size = pointee_array_size,
             .pointee_array = p->last_type_pointee_array};
         if (accept(p, ")"))
@@ -16566,6 +16991,9 @@ static bool collect_functions(c_parser_t *p) {
       fn->noinline |= tok_is(p, j, "noinline") || tok_is(p, j, "__noinline__");
       fn->no_stack_protector |= tok_is(p, j, "no_stack_protector") ||
                                 tok_is(p, j, "__no_stack_protector__");
+      fn->no_instrument_function |=
+          tok_is(p, j, "no_instrument_function") ||
+          tok_is(p, j, "__no_instrument_function__");
       fn->is_weak |= tok_is(p, j, "weak") || tok_is(p, j, "__weak") ||
                      tok_is(p, j, "__weak__");
       fn->is_inline |= fn->always_inline;
@@ -20073,7 +20501,10 @@ int nyc_frontend_preprocess(const nyc_source_t *source, nyc_abi_t abi,
       file = parser.source_runs[run++].file;
     if (line_markers &&
         (file != previous_file || token.line < line || token.line - line > 8)) {
-      if ((!start_of_line && fputc('\n', output) == EOF) ||
+      if ((!start_of_line &&
+           ((source->assembly_input && token.continued &&
+             fputc('\\', output) == EOF) ||
+            fputc('\n', output) == EOF)) ||
           !write_line_marker(output, token.line, parser.files[file].path))
         goto write_failed;
       start_of_line = true;
@@ -20084,14 +20515,58 @@ int nyc_frontend_preprocess(const nyc_source_t *source, nyc_abi_t abi,
                          : 1;
       if (!i)
         gap = 0;
+      if (gap && source->assembly_input && token.continued &&
+          fputc('\\', output) == EOF)
+        goto write_failed;
       for (unsigned n = 0; n < gap; ++n)
         if (fputc('\n', output) == EOF)
           goto write_failed;
       start_of_line = true;
       line = token.line;
     }
-    if ((!start_of_line && pp_tokens_need_space(previous, token) &&
-         fputc(' ', output) == EOF) ||
+    const char *separator = NULL;
+    size_t separator_len = 0;
+    if (!start_of_line) {
+      /*
+       * Assembly input is whitespace-significant (`.section .text`,
+       * `.incbin "file"`, `movq $1, %rax`), so reproduce the horizontal
+       * spacing between adjacent source tokens instead of normalizing it.
+       */
+      if (source->assembly_input && previous.len &&
+          token.start >= previous.start + previous.len) {
+        const char *gap = previous.start + previous.len;
+        size_t length = (size_t)(token.start - gap);
+        bool horizontal = length <= 64;
+        for (size_t n = 0; horizontal && n < length; ++n)
+          horizontal = gap[n] == ' ' || gap[n] == '\t';
+        if (horizontal) {
+          separator = gap;
+          separator_len = length;
+        }
+      }
+      if (!separator && source->assembly_input) {
+        /*
+         * Macro-argument tokens can come from another buffer, so there is no
+         * trustworthy source gap to copy. Separate them, except after the
+         * prefixes that must stay attached to their operand (`%rax`, `$1`,
+         * `.section`, `.Llabel`).
+         */
+        bool attaches = previous.len == 1 &&
+                        (previous.start[0] == '%' ||
+                         previous.start[0] == '$' ||
+                         previous.start[0] == '.');
+        if (!attaches) {
+          separator = " ";
+          separator_len = 1;
+        }
+      }
+      if (!separator && pp_tokens_need_space(previous, token)) {
+        separator = " ";
+        separator_len = 1;
+      }
+    }
+    if ((separator &&
+         fwrite(separator, 1, separator_len, output) != separator_len) ||
         fwrite(token.start, 1, token.len, output) != token.len)
       goto write_failed;
     previous = token;
@@ -20725,9 +21200,11 @@ static void unit_mark_assembly_data(const nyc_unit_t *unit, const size_t *index,
   }
 }
 
-/* Conservatively count references from every function and initializer,
+/*
+ * Conservatively count references from every function and initializer,
  * including currently unreachable ones. This removes unreferenced leaves
- * without requiring a new whole-program data reachability convention. */
+ * without requiring a new whole-program data reachability convention.
+ */
 static bool unit_mark_data_references(const nyc_unit_t *unit, bool *referenced,
                                       bool *roots) {
   if (!unit->data_count)
@@ -20944,6 +21421,8 @@ static bool prune_unreferenced_static_functions(c_parser_t *parser,
       unit->function_noinline[output] = unit->function_noinline[i];
       unit->function_no_stack_protector[output] =
           unit->function_no_stack_protector[i];
+      unit->function_no_instrument_function[output] =
+          unit->function_no_instrument_function[i];
       unit->function_weak[output] = unit->function_weak[i];
       unit->function_no_emit[output] = unit->function_no_emit[i];
       unit->function_discardable[output] = unit->function_discardable[i];
@@ -20992,6 +21471,7 @@ void nyc_unit_destroy(nyc_unit_t *unit) {
   free(unit->function_always_inline);
   free(unit->function_noinline);
   free(unit->function_no_stack_protector);
+  free(unit->function_no_instrument_function);
   free(unit->function_weak);
   free(unit->function_no_emit);
   free(unit->function_discardable);
@@ -21029,6 +21509,8 @@ int nyc_frontend_compile_unit(const nyc_source_t *source, nyc_abi_t abi,
     out->function_noinline = calloc(count, sizeof(*out->function_noinline));
     out->function_no_stack_protector =
         calloc(count, sizeof(*out->function_no_stack_protector));
+    out->function_no_instrument_function =
+        calloc(count, sizeof(*out->function_no_instrument_function));
     out->function_weak = calloc(count, sizeof(*out->function_weak));
     out->function_no_emit = calloc(count, sizeof(*out->function_no_emit));
     out->function_discardable =
@@ -21036,7 +21518,8 @@ int nyc_frontend_compile_unit(const nyc_source_t *source, nyc_abi_t abi,
     if (!out->funcs || !out->names || !out->function_sections ||
         !out->function_local || !out->function_inline ||
         !out->function_always_inline || !out->function_noinline ||
-        !out->function_no_stack_protector || !out->function_weak ||
+        !out->function_no_stack_protector ||
+        !out->function_no_instrument_function || !out->function_weak ||
         !out->function_no_emit || !out->function_discardable) {
       snprintf(err, err_len, "out of memory allocating C function bundle");
       out->count = count;
@@ -21070,6 +21553,8 @@ int nyc_frontend_compile_unit(const nyc_source_t *source, nyc_abi_t abi,
     out->function_always_inline[output_index] = fn->always_inline;
     out->function_noinline[output_index] = fn->noinline;
     out->function_no_stack_protector[output_index] = fn->no_stack_protector;
+    out->function_no_instrument_function[output_index] =
+        fn->no_instrument_function;
     out->function_weak[output_index] = fn->is_weak;
     out->function_no_emit[output_index] = fn->no_emit;
     out->function_discardable[output_index] = fn->is_static && !fn->is_used &&

@@ -1,9 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
-  <title id="title1">XR Anchor 3D</title>
-  <desc id="desc1">XR Anchor 3D editor icon. Original asset id: xranchor3d.</desc>
-  <defs id="defs2" />
-  <g transform="translate(2.0000 2.0000) scale(1.25000)" id="g2">
-    <path d="M 7,1 V 3 H 5 V 5 H 7 V 8.8398438 C 5.7041908,8.5828563 4.5509577,7.9882629 4.1386719,6.8574219 L 2.2597656,7.5429687 C 3.1382309,9.9524735 5.6378049,11.080078 8,11.080078 c 2.362195,0 4.861769,-1.1276045 5.740234,-3.5371093 L 11.861328,6.8574219 C 11.449042,7.9882629 10.295809,8.5828563 9,8.8398438 V 5 h 2 V 3 H 9 V 1 Z" id="path1" fill="#c6c6ca" />
-    <path fill="#c6c6ca" d="M4 12v1a1 1 0 0 0 1 1 1 1 0 0 0-1 1v1h1v-1h1v1h1v-1a1 1 0 0 0-1-1 1 1 0 0 0 1-1v-1H6v1H5v-1zm5 0v4h1v-1h1v1h1v-1a1 1 0 0 0-.137-.5A1 1 0 0 0 12 14v-1a1 1 0 0 0-1-1zm1 1h1v1h-1z" id="path2" />
-  </g>
-</svg>

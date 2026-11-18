@@ -1,3 +1,6 @@
+/*
+ * C front-end regression test: asm divl outputs.
+ */
 typedef unsigned int u32;
 
 struct answer {

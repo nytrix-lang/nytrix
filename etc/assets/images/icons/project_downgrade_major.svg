@@ -1,9 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
-  <title id="title1">Project Downgrade Major</title>
-  <desc id="desc1">Project Downgrade Major editor icon. Original asset id: projectdowngrademajor.</desc>
-  <defs id="defs2" />
-  <g transform="translate(2.0000 2.0000) scale(1.25000)" id="g2">
-    <path fill="none" d="M0 0H16V16H0z" id="path1" />
-    <path d="M 13.599609,0.43554688 A 1.4,1.4 0 0 0 12.609375,0.84570313 L 8,5.4550781 3.390625,0.84570313 a 1.4,1.4 0 0 0 -1.9804688,0 1.4,1.4 0 0 0 0,1.97851567 L 8,9.4140625 14.589844,2.8242188 a 1.4,1.4 0 0 0 0,-1.97851567 1.4,1.4 0 0 0 -0.990235,-0.41015625 z M 13.599609,7 A 1.4,1.4 0 0 0 12.609375,7.4101562 L 8,12.019531 3.390625,7.4101562 a 1.4,1.4 0 0 0 -1.9804688,0 1.4,1.4 0 0 0 0,1.9804688 L 8,15.980469 14.589844,9.390625 a 1.4,1.4 0 0 0 0,-1.9804688 A 1.4,1.4 0 0 0 13.599609,7 Z" id="path2" fill="#c6c6ca" />
-  </g>
-</svg>

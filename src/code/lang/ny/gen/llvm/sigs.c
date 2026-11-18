@@ -231,9 +231,11 @@ void collect_sigs(codegen_t *cg, stmt_t *s) {
           global_type = cg->type_f64;
         else if (global_is_f32)
           global_type = cg->type_f32;
-        /* Root program globals are private; give them a reserved LLVM name
+        /*
+         * Root program globals are private; give them a reserved LLVM name
          * so one named like a C function (`mut dup`) cannot claim the symbol
-         * an extern `as "dup"` is renamed to at emission. */
+         * an extern `as "dup"` is renamed to at emission.
+         */
         bool private_root = (!cg->current_module_name ||
                              !*cg->current_module_name) &&
                             !ny_is_stdlib_tok(s->tok);

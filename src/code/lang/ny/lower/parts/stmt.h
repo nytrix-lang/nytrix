@@ -331,6 +331,16 @@ static const expr_t *nyr_stmt_tail_expr(const stmt_t *s) {
   return last && last->kind == NY_S_EXPR ? last->as.expr.expr : NULL;
 }
 
+/* Object, typed-buffer, string and pointer registers are already valid
+ * dynamic words; rt_tag on them yields 2p+1, an integer. */
+static bool nyr_value_is_heap_carrier(nyr_builder_t *b, int value) {
+  if (!b || value < 0)
+    return false;
+  nyr_scalar_class_t c = nyr_value_scalar_class(b, value);
+  return c == NYIR_SCALAR_OBJECT || c == NYIR_SCALAR_TYPED_BUFFER ||
+         c == NYIR_SCALAR_STRING || c == NYIR_SCALAR_POINTER;
+}
+
 static int nyr_try_normalize_value(nyr_builder_t *b, const expr_t *expr,
                                    int value) {
   if (!b || value < 0 || !expr || !b->return_any)
@@ -1909,8 +1919,8 @@ static bool nyr_lower_var(nyr_builder_t *b, const stmt_t *s) {
       if (dynamic_rhs && !raw_dynamic_update && !raw_dynamic_read &&
           !raw_bitwise_update) {
         int old = nyr_load_local_value(b, prior_local->slot);
-        int boxed = old < 0
-                        ? -1
+        int boxed = old < 0                            ? -1
+                    : nyr_value_is_heap_carrier(b, old) ? old
                         : nyr_emit_runtime_call(b, "rt_tag", old, -1, -1, 1, 0);
         if (boxed < 0 || !nyr_store_local_value(b, prior_local->slot, boxed))
           return false;
@@ -7127,7 +7137,10 @@ static int nyr_normalize_return(nyr_builder_t *b, const expr_t *expr,
           !local->is_dict && !local->is_list && !nyr_expr_is_set(b, expr) &&
           !local->is_bigint && !local->is_f64 && !local->is_f32 &&
           !local->is_bool && local->semantic_rep != NY_SEM_REP_POINTER &&
-          !ny_native_type_name_is_ptr(local->type_name))
+          !ny_native_type_name_is_ptr(local->type_name) &&
+          !(local->type_name &&
+            nyr_rep_for_type(b, local->type_name) == NY_SEM_REP_OBJECT) &&
+          !nyr_value_is_heap_carrier(b, value))
         return nyr_emit_runtime_call(b, "rt_tag", value, -1, -1, 1, 0);
       if (local && local->is_bool)
         return nyr_box_bool(b, value);
@@ -7146,7 +7159,7 @@ static int nyr_normalize_return(nyr_builder_t *b, const expr_t *expr,
         !nyr_expr_is_f64(b, expr) && !nyr_expr_is_f32(b, expr) &&
         !nyr_expr_is_list(b, expr) && !nyr_expr_is_set(b, expr) &&
         !nyr_expr_is_dict(b, expr) && !nyr_expr_is_bigint(b, expr) &&
-        !nyr_expr_is_bigfloat(b, expr))
+        !nyr_expr_is_bigfloat(b, expr) && !nyr_value_is_heap_carrier(b, value))
       return nyr_emit_runtime_call(b, "rt_tag", value, -1, -1, 1, 0);
     return value;
   }
@@ -10443,6 +10456,12 @@ static void ny_native_collector_add_fn(ny_native_fn_collector_t *col,
     if (col->funcs[i] == fn)
       return;
   if (col->count < col->max_funcs) {
+    if (ny_trace_enabled("NY_TRACE_NATIVE_REACHABLE_ADDS"))
+      ny_trace_line("NATIVE_REACHABLE_ADDS", "native-reach-add %s -> %s",
+                    col->scope_fn && col->scope_fn->as.fn.name
+                        ? col->scope_fn->as.fn.name
+                        : "<entry-roots>",
+                    fn->as.fn.name);
     size_t index = col->count++;
     col->funcs[index] = fn;
     ny_native_collector_record_fn(col, fn, index);
@@ -10985,6 +11004,16 @@ static const stmt_t *ny_native_collector_operator(ny_native_fn_collector_t *col,
      * unchanged).
      */
     const char *op = expr->as.binary.op;
+    if (ny_trace_enabled("NY_TRACE_NATIVE_REACHABLE_MISSES"))
+      ny_trace_line("NATIVE_REACHABLE_MISSES",
+                    "native-reach-operator-fallback %s: '%s' at %s:%d "
+                    "(resolved=%d selected=%d) collects every impl body",
+                    col->scope_fn && col->scope_fn->as.fn.name
+                        ? col->scope_fn->as.fn.name
+                        : "<entry-roots>",
+                    op ? op : "?", expr->tok.filename ? expr->tok.filename : "?",
+                    expr->tok.line, (int)expr->semantic.resolved,
+                    selected != NULL);
     for (size_t i = 0; i < col->prog->body.len; ++i)
       ny_native_collect_impl_op_bodies(col, col->prog->body.data[i], op);
     return NULL;
@@ -11426,8 +11455,8 @@ static void ny_native_add_reachable_fn(ny_native_fn_collector_t *col,
       const char *from = col->scope_fn && col->scope_fn->as.fn.name
                              ? col->scope_fn->as.fn.name
                              : "<entry-roots>";
-      ny_trace_line("NATIVE_REACHABLE_EDGES", "native-reach %s -> %s", from,
-                    name);
+      ny_trace_line("NATIVE_REACHABLE_EDGES", "native-reach %s -> %s [%s]",
+                    from, name, fn->as.fn.name);
     }
     if (ny_trace_enabled("NY_TRACE_NATIVE_REACHABLE")) {
       /* Compact single-flow report: buffer
@@ -13125,9 +13154,17 @@ ny_native_collect_reachable_fns(const program_t *prog, const ny_options *opt,
    */
   for (size_t i = 0; i < prog->body.len; ++i) {
     const stmt_t *s = prog->body.data[i];
+    /*
+     * Root the declaration itself. Re-resolving its bare name from the
+     * entry scope (no module, no source file) matched the stdlib first: a
+     * user `fn add` rooted core.any.add, `fn mul` core.mul, and with them
+     * the reflect/matrix/ring/bigint dispatch graphs (call-chain compiled
+     * 286 functions instead of 3).
+     */
     if (s && s->kind == NY_S_FUNC && s->as.fn.name &&
-        !ny_is_stdlib_tok(s->tok)) {
-      ny_native_add_reachable_fn(&col, s->as.fn.name);
+        !ny_is_stdlib_tok(s->tok) && !s->as.fn.is_extern &&
+        !s->as.fn.link_name) {
+      ny_native_collector_add_fn(&col, s);
     }
   }
   NY_NATIVE_REACH_TIMED("function-roots");
@@ -13595,10 +13632,43 @@ typedef struct {
   const nyr_deferred_finalize_t *deferred;
   const ny_options *opt;
   char (*errors)[256];
+  const size_t *schedule; /* task -> function, largest first */
 } nyr_parallel_finalize_ctx_t;
 
-static bool nyr_parallel_finalize_task(size_t i, void *opaque) {
+/* Function indexes ordered by instruction count, largest first, so the
+ * biggest bodies start early instead of ending a parallel region alone. */
+static size_t *nyr_schedule_largest_first(const nyr_func_t *funcs,
+                                          const size_t *ids, size_t n) {
+  size_t *s = malloc((n ? n : 1) * sizeof(*s));
+  if (!s)
+    return NULL;
+  for (size_t i = 0; i < n; ++i)
+    s[i] = ids ? ids[i] : i;
+  /* stable bottom-up merge sort: ties keep their input order */
+  size_t *tmp = malloc((n ? n : 1) * sizeof(*tmp));
+  if (!tmp)
+    return s;
+  for (size_t width = 1; width < n; width *= 2) {
+    for (size_t lo = 0; lo < n; lo += 2 * width) {
+      size_t mid = lo + width < n ? lo + width : n;
+      size_t hi = lo + 2 * width < n ? lo + 2 * width : n;
+      size_t a = lo, b = mid, k = lo;
+      while (a < mid && b < hi)
+        tmp[k++] = funcs[s[b]].len > funcs[s[a]].len ? s[b++] : s[a++];
+      while (a < mid)
+        tmp[k++] = s[a++];
+      while (b < hi)
+        tmp[k++] = s[b++];
+    }
+    memcpy(s, tmp, n * sizeof(*s));
+  }
+  free(tmp);
+  return s;
+}
+
+static bool nyr_parallel_finalize_task(size_t task, void *opaque) {
   nyr_parallel_finalize_ctx_t *ctx = opaque;
+  size_t i = ctx->schedule ? ctx->schedule[task] : task;
   const nyr_deferred_finalize_t *d = &ctx->deferred[i];
   return nyr_finalize_optimize(&ctx->funcs[i], d->opt_level, ctx->opt,
                                d->fn_name, d->profile_name, ctx->errors[i],
@@ -13908,6 +13978,14 @@ static int nyr_parallel_post_inline(nyr_func_t *funcs, size_t func_count,
   result = 1;
   for (size_t l = 0; l < levels && result > 0; ++l) {
     size_t begin = level_start[l], end = level_start[l + 1];
+    {
+      size_t *sorted =
+          nyr_schedule_largest_first(funcs, order + begin, end - begin);
+      if (sorted) {
+        memcpy(order + begin, sorted, (end - begin) * sizeof(*order));
+        free(sorted);
+      }
+    }
     nyr_parallel_post_inline_ctx_t ctx = {.funcs = funcs,
                                           .names = names,
                                           .order = order + begin,
@@ -13946,6 +14024,701 @@ done:
   free(errors);
   return result;
 }
+
+/*
+ * Fork-parallel function lowering (Linux). nyr_build_function is serial by
+ * design: it shares the compilation's lazy caches, the global intern and
+ * string/array tables, and writes semantic facts into the AST. Forked
+ * workers get a private copy-on-write snapshot of all of that, pull function
+ * indexes from a shared counter, and send each lowered function back through
+ * a memfd. The parent merges in function order: string and array table
+ * entries a worker created are re-interned in that order, so numbering does
+ * not depend on which worker lowered what. Any worker failure, crash or
+ * debug/dump mode falls back to the serial loop, which then reports
+ * diagnostics exactly as before.
+ */
+#if defined(__linux__)
+#include <stdatomic.h>
+#include <sys/mman.h>
+#include <sys/wait.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
+typedef struct {
+  unsigned char *data;
+  size_t len, cap;
+  bool oom;
+} nyr_fl_buf_t;
+
+static void nyr_fl_put(nyr_fl_buf_t *b, const void *p, size_t n) {
+  if (b->oom)
+    return;
+  if (b->len + n > b->cap) {
+    size_t cap = b->cap ? b->cap : (1u << 20);
+    while (cap < b->len + n)
+      cap *= 2;
+    unsigned char *d = realloc(b->data, cap);
+    if (!d) {
+      b->oom = true;
+      return;
+    }
+    b->data = d;
+    b->cap = cap;
+  }
+  memcpy(b->data + b->len, p, n);
+  b->len += n;
+}
+static void nyr_fl_u64(nyr_fl_buf_t *b, uint64_t v) { nyr_fl_put(b, &v, 8); }
+static void nyr_fl_str(nyr_fl_buf_t *b, const char *s) {
+  uint64_t n = s ? strlen(s) : UINT64_MAX;
+  nyr_fl_u64(b, n);
+  if (s)
+    nyr_fl_put(b, s, (size_t)n);
+}
+
+typedef struct {
+  const unsigned char *p, *end;
+  bool bad;
+} nyr_fl_rd_t;
+
+static const void *nyr_fl_get(nyr_fl_rd_t *r, size_t n) {
+  if (r->bad || (size_t)(r->end - r->p) < n) {
+    r->bad = true;
+    return NULL;
+  }
+  const void *q = r->p;
+  r->p += n;
+  return q;
+}
+static uint64_t nyr_fl_ru64(nyr_fl_rd_t *r) {
+  const void *q = nyr_fl_get(r, 8);
+  uint64_t v = 0;
+  if (q)
+    memcpy(&v, q, 8);
+  return v;
+}
+/* Returns a pointer into the buffer (not terminated) or NULL. */
+static const char *nyr_fl_rstr(nyr_fl_rd_t *r, size_t *len, bool *present) {
+  uint64_t n = nyr_fl_ru64(r);
+  *present = n != UINT64_MAX;
+  *len = *present ? (size_t)n : 0;
+  return *present ? nyr_fl_get(r, (size_t)n) : NULL;
+}
+
+/* Symbol kinds in the transport. */
+enum { NYR_FL_SYM_PLAIN = 0, NYR_FL_SYM_STR = 1, NYR_FL_SYM_ARR = 2 };
+
+static void nyr_fl_put_symbol(nyr_fl_buf_t *b, const char *sym, size_t str0,
+                              size_t arr0) {
+  unsigned long long n = 0;
+  int used = 0;
+  if (sscanf(sym, "ny_str_%llu%n", &n, &used) == 1 && sym[used] == '\0' &&
+      n >= str0) {
+    const char *bytes = NULL;
+    size_t len = 0;
+    if (nyr_strtab_entry((size_t)n, &bytes, &len)) {
+      unsigned char k = NYR_FL_SYM_STR;
+      nyr_fl_put(b, &k, 1);
+      nyr_fl_u64(b, len);
+      nyr_fl_put(b, bytes, len);
+      return;
+    }
+  }
+  if (sscanf(sym, ".Lnyarr.%llu%n", &n, &used) == 1 && sym[used] == '\0' &&
+      n >= arr0 && n < nyr_arraytab_len) {
+    const ny_arraytab_ent_t *e = &nyr_arraytab[n];
+    unsigned char k = NYR_FL_SYM_ARR;
+    nyr_fl_put(b, &k, 1);
+    nyr_fl_u64(b, e->count);
+    nyr_fl_u64(b, e->stride);
+    for (size_t i = 0; i < e->count; ++i) {
+      nyr_fl_u64(b, (uint64_t)e->values[i].value);
+      nyr_fl_u64(b, (uint64_t)e->values[i].tag);
+      nyr_fl_u64(b, e->values[i].str_len);
+      const char *s = e->strings ? e->strings[i] : NULL;
+      unsigned char has = s != NULL;
+      nyr_fl_put(b, &has, 1);
+      if (s)
+        nyr_fl_put(b, s, e->values[i].str_len);
+    }
+    return;
+  }
+  unsigned char k = NYR_FL_SYM_PLAIN;
+  nyr_fl_put(b, &k, 1);
+  nyr_fl_str(b, sym);
+}
+
+static void nyr_fl_put_func(nyr_fl_buf_t *b, const nyr_func_t *f, size_t str0,
+                            size_t arr0) {
+  nyr_fl_put(b, f, sizeof(*f));
+  if (f->param_count)
+    nyr_fl_put(b, f->param_types, f->param_count * sizeof(*f->param_types));
+  unsigned char has_abi = f->param_abi != NULL;
+  nyr_fl_put(b, &has_abi, 1);
+  if (has_abi)
+    nyr_fl_put(b, f->param_abi, f->param_count * sizeof(*f->param_abi));
+  if (f->source_param_count)
+    nyr_fl_put(b, f->source_param_widths, f->source_param_count);
+  for (size_t i = 0; i < f->len; ++i) {
+    const nyr_inst_t *in = &f->data[i];
+    nyr_fl_put(b, in, sizeof(*in));
+    unsigned char mask = (in->symbol ? 1 : 0) |
+                         (in->debug.file && in->debug.file[0] ? 2 : 0) |
+                         (in->extra_args && in->extra_args_len ? 4 : 0) |
+                         (in->arg_sizes && in->imm > 0 ? 8 : 0) |
+                         (in->phi_incoming && in->phi_incoming_len ? 16 : 0);
+    nyr_fl_put(b, &mask, 1);
+    if (mask & 1)
+      nyr_fl_put_symbol(b, in->symbol, str0, arr0);
+    if (mask & 2)
+      nyr_fl_str(b, in->debug.file);
+    if (mask & 4)
+      nyr_fl_put(b, in->extra_args, in->extra_args_len * sizeof(int));
+    if (mask & 8)
+      nyr_fl_put(b, in->arg_sizes, (size_t)in->imm * sizeof(uint32_t));
+    if (mask & 16)
+      nyr_fl_put(b, in->phi_incoming,
+                 in->phi_incoming_len * sizeof(*in->phi_incoming));
+  }
+}
+
+static const char *nyr_fl_own(nyr_func_t *f, const char *p, size_t n) {
+  char stack[512];
+  char *tmp = n < sizeof(stack) ? stack : malloc(n + 1);
+  if (!tmp)
+    return NULL;
+  memcpy(tmp, p, n);
+  tmp[n] = '\0';
+  const char *owned = nyr_func_own_symbol_copy(f, tmp);
+  if (tmp != stack)
+    free(tmp);
+  return owned;
+}
+
+static const char *nyr_fl_get_symbol(nyr_fl_rd_t *r, nyr_func_t *f) {
+  const unsigned char *k = nyr_fl_get(r, 1);
+  if (!k)
+    return NULL;
+  if (*k == NYR_FL_SYM_STR) {
+    size_t len = (size_t)nyr_fl_ru64(r);
+    const char *bytes = nyr_fl_get(r, len);
+    const char *name = bytes ? nyr_strtab_intern(bytes, len, NULL, 0) : NULL;
+    return name ? nyr_func_own_symbol_copy(f, name) : NULL;
+  }
+  if (*k == NYR_FL_SYM_ARR) {
+    size_t count = (size_t)nyr_fl_ru64(r);
+    size_t stride = (size_t)nyr_fl_ru64(r);
+    if (r->bad || !count || count > (1u << 20))
+      return r->bad = true, NULL;
+    nyr_array_elem_t *v = calloc(count, sizeof(*v));
+    if (!v)
+      return r->bad = true, NULL;
+    for (size_t i = 0; i < count && !r->bad; ++i) {
+      v[i].value = (int64_t)nyr_fl_ru64(r);
+      v[i].tag = (int64_t)nyr_fl_ru64(r);
+      v[i].str_len = (size_t)nyr_fl_ru64(r);
+      const unsigned char *has = nyr_fl_get(r, 1);
+      if (has && *has)
+        v[i].str = nyr_fl_get(r, v[i].str_len);
+    }
+    const char *name =
+        r->bad ? NULL : nyr_arraytab_intern(v, count, stride, NULL, 0);
+    free(v);
+    return name ? nyr_func_own_symbol_copy(f, name) : NULL;
+  }
+  size_t len = 0;
+  bool present = false;
+  const char *s = nyr_fl_rstr(r, &len, &present);
+  return s ? nyr_fl_own(f, s, len) : NULL;
+}
+
+static bool nyr_fl_get_func(nyr_fl_rd_t *r, nyr_func_t *out) {
+  const nyr_func_t *raw = nyr_fl_get(r, sizeof(*raw));
+  if (!raw)
+    return false;
+  nyr_func_t f = *raw;
+  f.data = NULL;
+  f.cap = 0;
+  f.param_types = NULL;
+  f.param_abi = NULL;
+  f.source_param_widths = NULL;
+  f.owned_symbols = NULL;
+  f.owned_symbols_len = f.owned_symbols_cap = 0;
+  size_t len = raw->len;
+  f.len = 0;
+  bool ok = true;
+  if (f.param_count) {
+    const void *pt = nyr_fl_get(r, f.param_count * sizeof(*f.param_types));
+    f.param_types = pt ? malloc(f.param_count * sizeof(*f.param_types)) : NULL;
+    ok = f.param_types != NULL;
+    if (ok)
+      memcpy(f.param_types, pt, f.param_count * sizeof(*f.param_types));
+  }
+  const unsigned char *has_abi = ok ? nyr_fl_get(r, 1) : NULL;
+  ok = ok && has_abi;
+  if (ok && *has_abi) {
+    const void *pa = nyr_fl_get(r, f.param_count * sizeof(*f.param_abi));
+    f.param_abi = pa ? malloc(f.param_count * sizeof(*f.param_abi) + 1) : NULL;
+    ok = f.param_abi != NULL;
+    if (ok)
+      memcpy(f.param_abi, pa, f.param_count * sizeof(*f.param_abi));
+  }
+  if (ok && f.source_param_count) {
+    const void *w = nyr_fl_get(r, f.source_param_count);
+    f.source_param_widths = w ? malloc(f.source_param_count) : NULL;
+    ok = f.source_param_widths != NULL;
+    if (ok)
+      memcpy(f.source_param_widths, w, f.source_param_count);
+  }
+  if (ok && len) {
+    f.data = calloc(len, sizeof(*f.data));
+    ok = f.data != NULL;
+    f.cap = ok ? len : 0;
+  }
+  for (size_t i = 0; ok && i < len; ++i) {
+    const nyr_inst_t *rin = nyr_fl_get(r, sizeof(*rin));
+    const unsigned char *mask = rin ? nyr_fl_get(r, 1) : NULL;
+    if (!mask) {
+      ok = false;
+      break;
+    }
+    nyr_inst_t in = *rin;
+    in.symbol = NULL;
+    in.debug.file = NULL;
+    in.extra_args = NULL;
+    in.arg_sizes = NULL;
+    in.phi_incoming = NULL;
+    if (!(*mask & 4))
+      in.extra_args_len = 0;
+    if (!(*mask & 16))
+      in.phi_incoming_len = 0;
+    f.data[f.len++] = in; /* owned pointers attach below; free-safe */
+    nyr_inst_t *d = &f.data[f.len - 1];
+    if (*mask & 1)
+      ok = (d->symbol = nyr_fl_get_symbol(r, &f)) != NULL;
+    if (ok && (*mask & 2)) {
+      size_t n = 0;
+      bool present = false;
+      const char *s = nyr_fl_rstr(r, &n, &present);
+      ok = s && (d->debug.file = nyr_fl_own(&f, s, n)) != NULL;
+    }
+    if (ok && (*mask & 4)) {
+      const void *a = nyr_fl_get(r, rin->extra_args_len * sizeof(int));
+      d->extra_args = a ? malloc(rin->extra_args_len * sizeof(int)) : NULL;
+      ok = d->extra_args != NULL;
+      if (ok)
+        memcpy(d->extra_args, a, rin->extra_args_len * sizeof(int));
+    }
+    if (ok && (*mask & 8)) {
+      const void *a = nyr_fl_get(r, (size_t)rin->imm * sizeof(uint32_t));
+      d->arg_sizes = a ? malloc((size_t)rin->imm * sizeof(uint32_t)) : NULL;
+      ok = d->arg_sizes != NULL;
+      if (ok)
+        memcpy(d->arg_sizes, a, (size_t)rin->imm * sizeof(uint32_t));
+    }
+    if (ok && (*mask & 16)) {
+      size_t bytes = rin->phi_incoming_len * sizeof(*rin->phi_incoming);
+      const void *a = nyr_fl_get(r, bytes);
+      d->phi_incoming = a ? malloc(bytes) : NULL;
+      ok = d->phi_incoming != NULL;
+      if (ok)
+        memcpy(d->phi_incoming, a, bytes);
+    }
+  }
+  if (!ok || r->bad) {
+    nyr_ir_func_free(&f);
+    return false;
+  }
+  *out = f;
+  return true;
+}
+
+static bool nyr_fork_lower_wanted(const ny_options *opt, size_t fn_count) {
+  const char *on = getenv("NYTRIX_FORK_LOWER");
+  if (on && strcmp(on, "0") == 0)
+    return false;
+  const char *min_s = getenv("NYTRIX_FORK_LOWER_MIN");
+  size_t min_fns = min_s ? (size_t)strtoull(min_s, NULL, 10) : 384;
+  if (fn_count < min_fns || fn_count < 2)
+    return false;
+  if (opt && (opt->native_dump_ir_path || opt->nyr_dump_bin_path))
+    return false;
+  if (getenv("NY_DUMP_FN") || getenv("NY_LIST_FNS") ||
+      getenv("NYTRIX_DEBUG_POOLNAME") || ny_dbg_is_enabled(NY_DBG_ABI) ||
+      ny_dbg_is_enabled(NY_DBG_HEURISTIC) || ny_dbg_json_enabled())
+    return false;
+  return true;
+}
+
+typedef struct {
+  uint32_t index;
+  const unsigned char *rec; /* start of the record body after the index */
+} nyr_fl_rec_t;
+
+/*
+ * Returns true when every reachable function was lowered and merged into
+ * funcs_out/func_names/deferred (count updated). False leaves all outputs
+ * untouched; the caller then runs the serial loop.
+ */
+static bool nyr_fork_lower_functions(
+    const program_t *prog, const stmt_t **all_fns, size_t all_fn_count,
+    const ny_extern_table_t *externs, nyr_func_t *funcs_out,
+    const char **func_names, size_t *count_io,
+    nyr_deferred_finalize_t *deferred, int opt_level, const ny_options *opt,
+    nyr_builder_impl_t *cache) {
+  if (!nyr_fork_lower_wanted(opt, all_fn_count) || *count_io != 0)
+    return false;
+  long ncpu = sysconf(_SC_NPROCESSORS_ONLN);
+  size_t workers = ncpu > 2 ? (size_t)ncpu / 2 : 1;
+  /* Respect the compiler's thread budget (NYTRIX_PARALLEL_THREADS,
+   * OMP_NUM_THREADS, NYTRIX_PARALLEL_MODE=off) so concurrent compiles, as in
+   * the test runner, do not each spawn a worker per core. */
+  if (!ny_parallel_enabled(2, SIZE_MAX / 2))
+    return false;
+  if ((size_t)ny_parallel_threads() < workers)
+    workers = (size_t)ny_parallel_threads();
+  const char *w_s = getenv("NYTRIX_FORK_LOWER_WORKERS");
+  if (w_s && atoi(w_s) > 0)
+    workers = (size_t)atoi(w_s);
+  if (workers > 64)
+    workers = 64;
+  if (workers > all_fn_count / 8)
+    workers = all_fn_count / 8 ? all_fn_count / 8 : 1;
+  if (workers < 1)
+    return false;
+  size_t str0 = nyr_strtab_count(), arr0 = nyr_arraytab_len;
+  /*
+   * A lambda's capture types are recorded while its enclosing function is
+   * lowered, so lambdas with captures must be lowered by the worker that
+   * lowered their owner. Snapshot each lambda's capture types here; a worker
+   * recognises "its" lambdas by a change from the snapshot and claims them.
+   */
+  ny_native_lambda_cache_t *lambdas = ny_native_lambda_cache_for(cache);
+  bool *is_lambda = calloc(all_fn_count, sizeof(*is_lambda));
+  nyr_local_t (*snap)[16] = calloc(all_fn_count, sizeof(*snap));
+  if (!is_lambda || !snap) {
+    free(is_lambda);
+    free(snap);
+    return false;
+  }
+  for (size_t i = 0; i < all_fn_count; ++i) {
+    const stmt_t *s = all_fns[i];
+    if (!s || s->kind != NY_S_FUNC || !s->as.fn.name)
+      continue;
+    const ny_native_lambda_entry_t *e =
+        ny_native_lambda_find_name(lambdas, s->as.fn.name);
+    if (!e)
+      continue;
+    is_lambda[i] = true;
+    memcpy(snap[i], e->capture_types, sizeof(snap[i]));
+  }
+  size_t shared_bytes = 64 + all_fn_count;
+  _Atomic size_t *next = mmap(NULL, shared_bytes, PROT_READ | PROT_WRITE,
+                              MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+  if (next == MAP_FAILED) {
+    free(is_lambda);
+    free(snap);
+    return false;
+  }
+  atomic_store(next, 0);
+  _Atomic unsigned char *claimed = (_Atomic unsigned char *)((char *)next + 64);
+  int *fds = calloc(workers, sizeof(*fds));
+  pid_t *pids = calloc(workers, sizeof(*pids));
+  if (!fds || !pids) {
+    free(fds);
+    free(pids);
+    munmap((void *)next, shared_bytes);
+    free(is_lambda);
+    free(snap);
+    return false;
+  }
+  for (size_t w = 0; w < workers; ++w)
+    fds[w] = -1;
+  bool ok = true;
+  fflush(stdout);
+  fflush(stderr);
+  size_t started = 0;
+  for (size_t w = 0; w < workers && ok; ++w) {
+    fds[w] = memfd_create("nyr-lower", 0);
+    if (fds[w] < 0) {
+      ok = false;
+      break;
+    }
+    pid_t pid = fork();
+    if (pid < 0) {
+      ok = false;
+      break;
+    }
+    if (pid == 0) {
+      ny_parallel_force_serial(true);
+      nyr_fl_buf_t out = {0};
+      bool child_ok = true;
+      size_t lambda_scan = 0;
+      bool lambda_phase = false, progress = false;
+      for (;;) {
+        size_t i;
+        if (!lambda_phase) {
+          i = atomic_fetch_add(next, 1);
+          if (i >= all_fn_count) {
+            lambda_phase = true;
+            lambda_scan = 0;
+            progress = false;
+            continue;
+          }
+          if (is_lambda[i])
+            continue;
+        } else {
+          /* Claim lambdas whose capture types this worker recorded (or that
+           * capture nothing); rescan while that lowers further lambdas. */
+          if (lambda_scan >= all_fn_count) {
+            if (!progress)
+              break;
+            lambda_scan = 0;
+            progress = false;
+            continue;
+          }
+          i = lambda_scan++;
+          if (!is_lambda[i] || atomic_load(&claimed[i]))
+            continue;
+          const ny_native_lambda_entry_t *e =
+              ny_native_lambda_find_name(lambdas, all_fns[i]->as.fn.name);
+          if (!e || (e->capture_count > 0 &&
+                     memcmp(snap[i], e->capture_types, sizeof(snap[i])) == 0))
+            continue;
+          unsigned char expected = 0;
+          if (!atomic_compare_exchange_strong(&claimed[i], &expected, 1))
+            continue;
+          progress = true;
+        }
+        const stmt_t *s = all_fns[i];
+        if (!s)
+          continue;
+        char local_err[256] = {0};
+        nyr_func_t f = {0};
+        nyr_deferred_finalize_t d = {0};
+        if (!nyr_build_function(prog, s, externs, &f, local_err,
+                                sizeof(local_err), opt_level, opt, cache,
+                                deferred ? &d : NULL)) {
+          child_ok = false;
+          break;
+        }
+        const char *emitted = ny_native_emitted_fn_name(
+            ny_native_fn_index_for(cache), prog, opt, s);
+        uint32_t idx = (uint32_t)i;
+        nyr_fl_put(&out, &idx, 4);
+        nyr_fl_put(&out, &d, sizeof(d));
+        nyr_fl_str(&out, emitted);
+        nyr_fl_put_func(&out, &f, str0, arr0);
+      }
+      if (out.oom)
+        child_ok = false;
+      size_t off = 0;
+      while (child_ok && off < out.len) {
+        ssize_t n = write(fds[w], out.data + off, out.len - off);
+        if (n <= 0) {
+          child_ok = false;
+          break;
+        }
+        off += (size_t)n;
+      }
+      _exit(child_ok ? 0 : 3);
+    }
+    pids[w] = pid;
+    started++;
+  }
+  for (size_t w = 0; w < started; ++w) {
+    int status = 0;
+    if (waitpid(pids[w], &status, 0) < 0 || !WIFEXITED(status) ||
+        WEXITSTATUS(status) != 0)
+      ok = false;
+  }
+  munmap((void *)next, shared_bytes);
+  free(is_lambda);
+  free(snap);
+  unsigned char **maps = calloc(workers, sizeof(*maps));
+  size_t *map_len = calloc(workers, sizeof(*map_len));
+  nyr_fl_rec_t *recs = calloc(all_fn_count, sizeof(*recs));
+  bool *have = calloc(all_fn_count, sizeof(*have));
+  ok = ok && maps && map_len && recs && have;
+  for (size_t w = 0; ok && w < started; ++w) {
+    struct stat st;
+    if (fstat(fds[w], &st) != 0) {
+      ok = false;
+      break;
+    }
+    map_len[w] = (size_t)st.st_size;
+    if (!map_len[w])
+      continue;
+    maps[w] = mmap(NULL, map_len[w], PROT_READ, MAP_PRIVATE, fds[w], 0);
+    if (maps[w] == MAP_FAILED) {
+      maps[w] = NULL;
+      ok = false;
+      break;
+    }
+    /* Index the records: skip over each one with a scratch decode. */
+    nyr_fl_rd_t r = {maps[w], maps[w] + map_len[w], false};
+    while (ok && r.p < r.end) {
+      const uint32_t *idx = nyr_fl_get(&r, 4);
+      if (!idx || *idx >= all_fn_count || have[*idx]) {
+        ok = false;
+        break;
+      }
+      recs[*idx].index = *idx;
+      recs[*idx].rec = r.p;
+      have[*idx] = true;
+      /* skip deferred + name + function */
+      nyr_fl_get(&r, sizeof(nyr_deferred_finalize_t));
+      size_t nlen = 0;
+      bool present = false;
+      nyr_fl_rstr(&r, &nlen, &present);
+      const nyr_func_t *raw = nyr_fl_get(&r, sizeof(*raw));
+      if (!raw) {
+        ok = false;
+        break;
+      }
+      if (raw->param_count)
+        nyr_fl_get(&r, raw->param_count * sizeof(*raw->param_types));
+      const unsigned char *has_abi = nyr_fl_get(&r, 1);
+      if (has_abi && *has_abi)
+        nyr_fl_get(&r, raw->param_count * sizeof(*raw->param_abi));
+      if (raw->source_param_count)
+        nyr_fl_get(&r, raw->source_param_count);
+      for (size_t k = 0; k < raw->len && !r.bad; ++k) {
+        const nyr_inst_t *in = nyr_fl_get(&r, sizeof(*in));
+        const unsigned char *mask = in ? nyr_fl_get(&r, 1) : NULL;
+        if (!mask)
+          break;
+        if (*mask & 1) {
+          const unsigned char *kind = nyr_fl_get(&r, 1);
+          if (!kind)
+            break;
+          if (*kind == NYR_FL_SYM_STR) {
+            nyr_fl_get(&r, (size_t)nyr_fl_ru64(&r));
+          } else if (*kind == NYR_FL_SYM_ARR) {
+            size_t cnt = (size_t)nyr_fl_ru64(&r);
+            nyr_fl_ru64(&r);
+            for (size_t e = 0; e < cnt && !r.bad; ++e) {
+              nyr_fl_ru64(&r);
+              nyr_fl_ru64(&r);
+              size_t sl = (size_t)nyr_fl_ru64(&r);
+              const unsigned char *has = nyr_fl_get(&r, 1);
+              if (has && *has)
+                nyr_fl_get(&r, sl);
+            }
+          } else {
+            nyr_fl_rstr(&r, &nlen, &present);
+          }
+        }
+        if (*mask & 2)
+          nyr_fl_rstr(&r, &nlen, &present);
+        if (*mask & 4)
+          nyr_fl_get(&r, in->extra_args_len * sizeof(int));
+        if (*mask & 8)
+          nyr_fl_get(&r, (size_t)in->imm * sizeof(uint32_t));
+        if (*mask & 16)
+          nyr_fl_get(&r, in->phi_incoming_len * sizeof(*in->phi_incoming));
+      }
+      if (r.bad)
+        ok = false;
+    }
+  }
+  for (size_t i = 0; ok && i < all_fn_count; ++i)
+    if (all_fns[i] && !have[i])
+      ok = false;
+  size_t count = 0;
+  for (size_t i = 0; ok && i < all_fn_count; ++i) {
+    if (!all_fns[i])
+      continue;
+    nyr_fl_rd_t r = {recs[i].rec, NULL, false};
+    /* records are bounded by their worker's mapping */
+    for (size_t w = 0; w < started; ++w)
+      if (maps[w] && recs[i].rec >= maps[w] && recs[i].rec < maps[w] + map_len[w])
+        r.end = maps[w] + map_len[w];
+    const nyr_deferred_finalize_t *d = nyr_fl_get(&r, sizeof(*d));
+    size_t nlen = 0;
+    bool present = false;
+    const char *name = nyr_fl_rstr(&r, &nlen, &present);
+    if (!d || !name) {
+      ok = false;
+      break;
+    }
+    if (!nyr_fl_get_func(&r, &funcs_out[count])) {
+      ok = false;
+      break;
+    }
+    if (deferred)
+      deferred[count] = *d;
+    char stack[1024];
+    if (nlen >= sizeof(stack)) {
+      nyr_ir_func_free(&funcs_out[count]);
+      ok = false;
+      break;
+    }
+    memcpy(stack, name, nlen);
+    stack[nlen] = '\0';
+    func_names[count] = nyr_builder_own_string(cache, stack);
+    if (!func_names[count]) {
+      nyr_ir_func_free(&funcs_out[count]);
+      ok = false;
+      break;
+    }
+    bool duplicate_symbol = false;
+    for (size_t j = 0; j < count; ++j)
+      if (func_names[j] && strcmp(func_names[j], func_names[count]) == 0) {
+        duplicate_symbol = true;
+        break;
+      }
+    if (duplicate_symbol) {
+      nyr_ir_func_free(&funcs_out[count]);
+      func_names[count] = NULL;
+      continue;
+    }
+    count++;
+  }
+  for (size_t w = 0; w < workers; ++w) {
+    if (maps && maps[w])
+      munmap(maps[w], map_len[w]);
+    if (fds[w] >= 0)
+      close(fds[w]);
+  }
+  free(maps);
+  free(map_len);
+  free(recs);
+  free(have);
+  free(fds);
+  free(pids);
+  if (!ok) {
+    for (size_t j = 0; j < count; ++j) {
+      nyr_ir_func_free(&funcs_out[j]);
+      func_names[j] = NULL;
+    }
+    /* Tables may have grown during a partial merge; entries are unused. */
+    return false;
+  }
+  /*
+   * nyr_finalize_prepare switches PHI preservation on for these backends as
+   * a process-wide setting; the workers that lowered did so in their own
+   * copies, and the deferred finalize runs here.
+   */
+  if (count && opt && (opt->native_backend == NY_NATIVE_BACKEND_X86_64 ||
+                       opt->native_backend == NY_NATIVE_BACKEND_AARCH64))
+    nyr_set_preserve_phis(true);
+  *count_io = count;
+  return true;
+}
+#else
+static bool nyr_fork_lower_functions(
+    const program_t *prog, const stmt_t **all_fns, size_t all_fn_count,
+    const ny_extern_table_t *externs, nyr_func_t *funcs_out,
+    const char **func_names, size_t *count_io,
+    nyr_deferred_finalize_t *deferred, int opt_level, const ny_options *opt,
+    nyr_builder_impl_t *cache) {
+  (void)prog, (void)all_fns, (void)all_fn_count, (void)externs,
+      (void)funcs_out, (void)func_names, (void)count_io, (void)deferred,
+      (void)opt_level, (void)opt, (void)cache;
+  return false;
+}
+#endif
 
 bool nyr_build_ir(const program_t *prog, const ny_options *opt,
                   nyr_func_t *rt_main_out, nyr_func_t *funcs_out,
@@ -14218,7 +14991,10 @@ bool nyr_build_ir(const program_t *prog, const ny_options *opt,
     nyr_target_request_t abi_request = {0};
     bool have_abi_target = ny_options_target_request(opt, &abi_request) &&
                            nyr_target_info_init(&abi_target, &abi_request);
-    for (size_t i = 0; i < all_fn_count; ++i) {
+    bool fork_lowered = nyr_fork_lower_functions(
+        prog, (const stmt_t **)all_fns, all_fn_count, &externs, funcs_out,
+        func_names, &count, deferred, opt_level, opt, &compilation_cache);
+    for (size_t i = 0; !fork_lowered && i < all_fn_count; ++i) {
       const stmt_t *s = all_fns[i];
       if (!s)
         continue;
@@ -14400,14 +15176,18 @@ bool nyr_build_ir(const program_t *prog, const ny_options *opt,
     if (deferred && count) {
       /* Lowering only verified each body; optimize them all concurrently. */
       char(*finalize_errors)[256] = calloc(count, sizeof(*finalize_errors));
+      size_t *finalize_schedule =
+          nyr_schedule_largest_first(funcs_out, NULL, count);
       nyr_parallel_finalize_ctx_t finalize_ctx = {.funcs = funcs_out,
                                                   .deferred = deferred,
                                                   .opt = opt,
-                                                  .errors = finalize_errors};
+                                                  .errors = finalize_errors,
+                                                  .schedule = finalize_schedule};
       bool finalized =
           finalize_errors &&
           ny_parallel_for(count, nyr_func_range_work(funcs_out, count),
                           nyr_parallel_finalize_task, &finalize_ctx);
+      free(finalize_schedule);
       if (!finalized) {
         size_t failed = 0;
         while (finalize_errors && failed < count && !finalize_errors[failed][0])

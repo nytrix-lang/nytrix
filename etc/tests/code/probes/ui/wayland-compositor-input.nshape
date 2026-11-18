@@ -13,7 +13,8 @@ shape wayland-compositor-input-vk {
 ;; an input method (zwp_input_method_v2) composes, commits, cancels and
 ;; deletes surrounding text over zwp_text_input_v3, and the clipboard goes
 ;; both ways through wl_data_device. The seat is driven by
-;; fixtures/wl_seat_driver.py, which needs a compositor exposing those
+;; tmp/ui/wayland/wl_seat_driver.py (private helper, outside git), which
+;; needs a compositor exposing those
 ;; protocols (sway does; headless Weston does not, and the probe then reports
 ;; a skip). Run under a private headless sway at several output scales.
 def str PROBE_BACKEND = "vk"
@@ -79,8 +80,12 @@ fn centre(list r) list {
    [int((float(r.get(0, 0.0)) + float(r.get(2, 0.0)) * 0.5) / s), int((float(r.get(1, 0.0)) + float(r.get(3, 0.0)) * 0.5) / s)]
 }
 
-def str driver = "etc/tests/code/probes/ui/fixtures/wl_seat_driver.py"
+def str driver = "tmp/ui/wayland/wl_seat_driver.py"
 mut bool usable = common.env_trim("WAYLAND_DISPLAY").len > 0
+if usable && !file_exists(driver) {
+   print("skip: seat driver " + driver + " is not available")
+   usable = false
+}
 if usable {
    def probe = run_capture(["python3", driver, "probe"], [], nil, false)
    usable = int(probe.get("code", 1)) == 0
@@ -215,7 +220,8 @@ shape wayland-compositor-input-gl {
 ;; an input method (zwp_input_method_v2) composes, commits, cancels and
 ;; deletes surrounding text over zwp_text_input_v3, and the clipboard goes
 ;; both ways through wl_data_device. The seat is driven by
-;; fixtures/wl_seat_driver.py, which needs a compositor exposing those
+;; tmp/ui/wayland/wl_seat_driver.py (private helper, outside git), which
+;; needs a compositor exposing those
 ;; protocols (sway does; headless Weston does not, and the probe then reports
 ;; a skip). Run under a private headless sway at several output scales.
 def str PROBE_BACKEND = "gl"
@@ -281,8 +287,12 @@ fn centre(list r) list {
    [int((float(r.get(0, 0.0)) + float(r.get(2, 0.0)) * 0.5) / s), int((float(r.get(1, 0.0)) + float(r.get(3, 0.0)) * 0.5) / s)]
 }
 
-def str driver = "etc/tests/code/probes/ui/fixtures/wl_seat_driver.py"
+def str driver = "tmp/ui/wayland/wl_seat_driver.py"
 mut bool usable = common.env_trim("WAYLAND_DISPLAY").len > 0
+if usable && !file_exists(driver) {
+   print("skip: seat driver " + driver + " is not available")
+   usable = false
+}
 if usable {
    def probe = run_capture(["python3", driver, "probe"], [], nil, false)
    usable = int(probe.get("code", 1)) == 0

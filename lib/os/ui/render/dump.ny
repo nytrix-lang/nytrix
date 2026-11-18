@@ -49,6 +49,7 @@ use core.os.ui.window
 use core.math.parse.img as img_mod
 
 mut _env_bool_cache, _env_int_cache, _env_str_cache = dict(64), dict(32), dict(32)
+
 ;; Bumped whenever a cached flag may change (reset or override), so hot
 ;; per-frame callers can keep a flag in a local variable and re-read it only
 ;; when this changes.

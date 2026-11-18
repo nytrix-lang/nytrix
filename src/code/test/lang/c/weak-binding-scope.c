@@ -1,3 +1,6 @@
+/*
+ * C front-end regression test: weak binding scope.
+ */
 int strong_body = 11;
 __attribute__((weak)) int weak_reader(void) { return strong_body; }
 

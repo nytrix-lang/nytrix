@@ -290,6 +290,10 @@ typedef struct {
   size_t path_map_capacity;
   const char *output;
   const char *dependency_file;
+  /*
+   * Object path a preprocessing-only step should name in its .d file.
+   */
+  const char *dependency_target;
   nyr_opt_level_t optimization;
   bool optimize_size;
   bool compile_unit;
@@ -299,6 +303,10 @@ typedef struct {
   unsigned i386_stack_alignment;
   bool verbose_assembly;
   bool preprocess;
+  /*
+   * -mcmodel=kernel: kernel builds let GNU as complete unencodable asm.
+   */
+  bool kernel_model;
   bool line_markers;
   bool require_x86;
   bool require_x86_64;
@@ -319,6 +327,8 @@ typedef struct {
   bool function_return_thunk_extern;
   bool indirect_branch_cs_prefix;
   bool cf_protection_branch;
+  bool profile_functions; /* -pg: call the profiling entry hook. */
+  bool fentry_calls;      /* -mfentry: use __fentry__ instead of mcount. */
   unsigned stack_protector; /* 0: off, 1: frame objects, 2: strong, 3: all. */
   bool stack_guard_global;
   bool stack_guard_gs;
@@ -458,6 +468,38 @@ static bool nyc_protect_stack(nyr_func_t *func, const nyc_driver_t *driver,
   return nyr_verify(func, err, err_len);
 }
 
+/*
+ * Prepend the profiling entry hook. The call takes no operands and is emitted
+ * before the body, so any incoming parameter still live across it is saved by
+ * the allocator rather than destroyed by the callee.
+ */
+static bool nyc_instrument_entry(nyr_func_t *func, const char *symbol,
+                                 char *err, size_t err_len) {
+  if (!func->len)
+    return true;
+  if (func->len > SIZE_MAX / sizeof(*func->data) - 1) {
+    snprintf(err, err_len, "function is too large for entry instrumentation");
+    return false;
+  }
+  nyr_inst_t *data = malloc((func->len + 1) * sizeof(*data));
+  if (!data) {
+    snprintf(err, err_len, "out of memory adding entry instrumentation");
+    return false;
+  }
+  nyr_inst_t call = nyc_guard_inst(NYIR_CALL);
+  call.symbol = symbol;
+  call.flags = NYIR_INST_F_EXTERN;
+  data[0] = call;
+  memcpy(data + 1, func->data, func->len * sizeof(*data));
+  free(func->data);
+  func->data = data;
+  func->len += 1;
+  func->cap = func->len;
+  func->has_symbol_calls = true;
+  nyr_refresh_metadata(func);
+  return nyr_verify(func, err, err_len);
+}
+
 static bool add_macro_option(nyc_driver_t *driver, const char *text,
                              bool undefine) {
   if (driver->macro_count == driver->macro_capacity) {
@@ -512,8 +554,8 @@ static bool nyc_assemble_source(const char *source, const char *output,
     target = host.target;
   }
   nyc_abi_t abi = nyc_abi_for_target(target);
-  if (abi != NYC_ABI_SYSV_X86_64) {
-    fprintf(stderr, "nyc: assembly input currently requires x86-64 ELF\n");
+  if (abi != NYC_ABI_SYSV_X86_64 && abi != NYC_ABI_I386) {
+    fprintf(stderr, "nyc: assembly input currently requires x86 ELF\n");
     return false;
   }
   if (include_count > (SIZE_MAX - 5) / 2) {
@@ -528,7 +570,7 @@ static bool nyc_assemble_source(const char *source, const char *output,
   }
   size_t at = 0;
   args[at++] = "as";
-  args[at++] = "--64";
+  args[at++] = abi == NYC_ABI_I386 ? "--32" : "--64";
   for (size_t i = 0; i < include_count; ++i) {
     args[at++] = "-I";
     args[at++] = (char *)include_dirs[i];
@@ -567,6 +609,96 @@ static bool nyc_assemble_source(const char *source, const char *output,
   (void)include_dirs;
   (void)include_count;
   fputs("nyc: assembly input is unsupported on this platform\n", stderr);
+  return false;
+#endif
+}
+
+/*
+ * Kernel assembly (.S) and linker scripts (.lds.S) are assembler-with-cpp in
+ * GNU as syntax. That dialect keeps gas macro bodies, `\@`, line
+ * continuations and apostrophes verbatim, which C token preprocessing by
+ * definition does not, so hand these inputs to the standard C preprocessor in
+ * assembler mode before GNU as consumes them.
+ */
+static bool nyc_preprocess_assembly(const char *source, const char *output,
+                                    const nyc_driver_t *driver,
+                                    const char *dependency_target) {
+#if defined(__unix__) || defined(__APPLE__)
+  size_t capacity = 16 + (driver->include_count +
+                          driver->forced_include_count +
+                          driver->macro_count) *
+                             2;
+  char **args = calloc(capacity + 1, sizeof(*args));
+  if (!args) {
+    fputs("nyc: out of memory preparing preprocessor command\n", stderr);
+    return false;
+  }
+  size_t at = 0;
+  args[at++] = "cpp";
+  args[at++] = "-x";
+  args[at++] = "assembler-with-cpp";
+  if (output) {
+    args[at++] = "-o";
+    args[at++] = (char *)output;
+  }
+  if (driver->no_std_includes)
+    args[at++] = "-nostdinc";
+  /*
+   * No line markers: gas accepts them as comments, but linker scripts do not,
+   * and the preprocessed text is a build artifact rather than a C file.
+   */
+  args[at++] = "-P";
+  if (driver->dependency_file && dependency_target) {
+    args[at++] = "-MD";
+    args[at++] = "-MF";
+    args[at++] = (char *)driver->dependency_file;
+    args[at++] = "-MT";
+    args[at++] = (char *)dependency_target;
+  }
+  for (size_t i = 0; i < driver->include_count; ++i) {
+    args[at++] = "-I";
+    args[at++] = (char *)driver->include_dirs[i];
+  }
+  for (size_t i = 0; i < driver->forced_include_count; ++i) {
+    args[at++] = "-include";
+    args[at++] = (char *)driver->forced_includes[i];
+  }
+  for (size_t i = 0; i < driver->macro_count; ++i) {
+    args[at++] = driver->macros[i].undefine ? "-U" : "-D";
+    args[at++] = (char *)driver->macros[i].text;
+  }
+  args[at++] = (char *)source;
+  args[at] = NULL;
+
+  pid_t child = fork();
+  if (child == 0) {
+    execvp(args[0], args);
+    perror("nyc: cpp");
+    _exit(127);
+  }
+  if (child < 0) {
+    perror("nyc: cannot start preprocessor");
+    free(args);
+    return false;
+  }
+  int status = 0;
+  pid_t waited;
+  do {
+    waited = waitpid(child, &status, 0);
+  } while (waited < 0 && errno == EINTR);
+  free(args);
+  if (waited < 0) {
+    perror("nyc: cannot wait for preprocessor");
+    return false;
+  }
+  return WIFEXITED(status) && WEXITSTATUS(status) == 0;
+#else
+  (void)source;
+  (void)output;
+  (void)driver;
+  (void)dependency_target;
+  fputs("nyc: assembly preprocessing is unsupported on this platform\n",
+        stderr);
   return false;
 #endif
 }
@@ -850,8 +982,10 @@ static void nyc_parameter_asm_escapes(const nyc_unit_t *unit,
   }
 }
 
-/* Keep signatures and calls intact. Only private, non-address-taken scalar
- * formals with the same constant at every direct call receive entry facts. */
+/*
+ * Keep signatures and calls intact. Only private, non-address-taken scalar
+ * formals with the same constant at every direct call receive entry facts.
+ */
 static bool nyc_specialize_private_parameters(nyc_unit_t *unit,
                                               const nyc_driver_t *driver,
                                               char *err, size_t err_len) {
@@ -1362,10 +1496,24 @@ static bool write_c_unit_assembly(
           bool lowered =
               nyr_mach_lower_nir(&unit->funcs[i], &machine, target->caps,
                                  machine_err, sizeof(machine_err));
-          if (lowered && nyr_x86_64_emit_mach_scalar(
+          if (lowered && getenv("NY_DUMP_MACH")) {
+            fprintf(stderr, "C assembly machine form for %s:\n",
+                    unit->names[i]);
+            nyr_mach_dump(&machine, stderr);
+          }
+          if (lowered) {
+            /*
+             * C ABI: plain entry, no language runtime startup.
+             */
+            machine.c_abi = true;
+            for (size_t ii = 0; ii < machine.inst_len; ++ii)
+              if (machine.insts[ii].opcode == NYR_MACH_CALL)
+                machine.insts[ii].call_is_extern = true;
+          }
+          if (lowered && nyr_x86_64_emit_mach_scalar_with_options(
                              &native, target, &machine, unit->names[i], false,
-                             function_return_thunk_extern, machine_err,
-                             sizeof(machine_err))) {
+                             function_return_thunk_extern, position_independent,
+                             machine_err, sizeof(machine_err))) {
             if (is_local && native.data) {
               char *global = strstr(native.data, "\t.globl\t");
               if (global)
@@ -1389,7 +1537,7 @@ static bool write_c_unit_assembly(
           ok = nyr_x86_64_emit_ir_with_options(
               &function_assembly, target, &unit->funcs[i], unit->names[i],
               false, is_local, retpoline_indirect_calls, retpoline_inline_calls,
-              function_return_thunk_extern, err, err_len);
+              function_return_thunk_extern, position_independent, err, err_len);
           if (ok)
             ok = write_c_function_assembly(
                 &assembly, function_assembly.data ? function_assembly.data : "",
@@ -1692,8 +1840,13 @@ static int compile_source(int argc, char **argv, int source_arg,
         anchor->owner_function = NULL;
       }
     }
-    bool assembly_target = abi == NYC_ABI_SYSV_X86_64 ||
-                           (abi == NYC_ABI_I386 && driver->assembly_output);
+    /*
+     * Both x86 ABIs have a complete assembly emitter. i386 reaches the object
+     * through GNU as (see the object-mode branch below), so it is a valid
+     * whole-unit target whether the user asked for -S or -c.
+     */
+    bool assembly_target =
+        abi == NYC_ABI_SYSV_X86_64 || abi == NYC_ABI_I386;
     if (ok &&
         (!assembly_target ||
          !nyr_target_info_for_triple(triple, &target_info, err, sizeof(err)))) {
@@ -1932,10 +2085,12 @@ static int compile_source(int argc, char **argv, int source_arg,
       }
     }
     free(static_feature_callees);
-    /* Size builds can shrink a one-use helper by removing its call boundary,
+    /*
+     * Size builds can shrink a one-use helper by removing its call boundary,
      * including helpers with bounded control flow and fixed-size stack
      * objects. Reject dynamic-size allocation and external branch targets;
-     * keep the body budget small and decide after the earlier optimization. */
+     * keep the body budget small and decide after the earlier optimization.
+     */
     if (ok && driver->optimize_size && !getenv("NYC_DISABLE_SIZE_INLINE")) {
       size_t original_count = inline_callee_count;
       for (size_t i = 0; i < unit.count; ++i) {
@@ -2075,6 +2230,12 @@ static int compile_source(int argc, char **argv, int source_arg,
         }
       }
     }
+    for (size_t i = 0; ok && driver->profile_functions && i < unit.count; ++i)
+      if (!unit.function_no_instrument_function[i])
+        ok = nyc_instrument_entry(&unit.funcs[i],
+                                  driver->fentry_calls ? "__fentry__"
+                                                       : "mcount",
+                                  err, sizeof(err));
     for (size_t i = 0; ok && driver->stack_protector && i < unit.count; ++i)
       if (!unit.function_no_stack_protector[i])
         ok = nyc_protect_stack(&unit.funcs[i], driver, err, sizeof(err));
@@ -2086,7 +2247,35 @@ static int compile_source(int argc, char **argv, int source_arg,
           driver->i386_stack_alignment, driver->retpoline_indirect_calls,
           driver->retpoline_inline_calls, driver->function_return_thunk_extern,
           driver->cf_protection_branch, err, sizeof(err));
-    if (ok && !driver->assembly_output) {
+    if (ok && !driver->assembly_output && abi == NYC_ABI_I386) {
+      /*
+       * i386 has a complete GNU assembly emitter but no direct i386 ELF
+       * object encoder, so assemble the emitted text. vdso32 and other
+       * -m32/-m16 C callers need real objects, not that limitation.
+       */
+      char i386_path[] = "/tmp/nyc-i386-XXXXXX";
+      int fd = mkstemp(i386_path);
+      if (fd < 0) {
+        snprintf(err, sizeof(err), "cannot create temporary assembly file");
+        ok = false;
+      } else {
+        close(fd);
+        ok = write_c_unit_assembly(
+            &unit, &target_info, i386_path, driver->verbose_assembly,
+            driver->code16, driver->code16 && nyc_setup_macro_enabled(driver),
+            driver->position_independent, driver->i386_stack_alignment,
+            driver->retpoline_indirect_calls,
+            driver->retpoline_inline_calls,
+            driver->function_return_thunk_extern,
+            driver->cf_protection_branch, err, sizeof(err));
+        if (ok)
+          ok = nyc_assemble_source(i386_path, output_path, target,
+                                   driver->include_dirs, driver->include_count);
+        if (!ok && !err[0])
+          snprintf(err, sizeof(err), "i386 assembly emission failed");
+        unlink(i386_path);
+      }
+    } else if (ok && !driver->assembly_output) {
       size_t data_count = unit.data_count + unit.variable_alias_count;
       nyr_c_object_data_t *data =
           data_count ? calloc(data_count, sizeof(*data)) : NULL;
@@ -2149,7 +2338,83 @@ static int compile_source(int argc, char **argv, int source_arg,
             (const char *const *)unit.function_sections, unit.function_local,
             driver->omit_frame_pointer, driver->position_independent,
             driver->retpoline_indirect_calls, driver->retpoline_inline_calls,
+            driver->function_return_thunk_extern, driver->cf_protection_branch,
             data, data_count, &target_info, output_path, err, sizeof(err));
+      bool asm_form =
+          err[0] &&
+          (strstr(err, "unsupported inline asm") != NULL ||
+           strstr(err, "inline.asm") != NULL ||
+           strstr(err, "segment-relative load requires assembly output") !=
+               NULL ||
+           strstr(err, "segment-relative store requires assembly output") !=
+               NULL);
+      /*
+       * Section-bearing asm changes sections the direct encoder cannot
+       * represent, so ordinary direct-object builds still reject it. Kernel
+       * builds need those annotations, and section-free instruction forms are
+       * safe to complete for every target. The encoder can report a generic
+       * `inline.asm` failure, so inspect the IR rather than only the error.
+       */
+      bool section_bearing = false;
+      for (size_t f = 0; f < unit.count && !section_bearing; ++f)
+        for (size_t k = 0; k < unit.funcs[f].len && !section_bearing; ++k) {
+          const nyr_inst_t *ins = &unit.funcs[f].data[k];
+          section_bearing =
+              ins->op == NYIR_INLINE_ASM && ins->symbol &&
+              (strstr(ins->symbol, "pushsection") != NULL ||
+               strstr(ins->symbol, ".section") != NULL ||
+               strstr(ins->symbol, "__bug_table") != NULL);
+        }
+      if (!ok && asm_form && (driver->kernel_model || !section_bearing)) {
+        /*
+         * The object writer encodes a fixed set of inline-asm forms. Kernel
+         * asm macros (alternatives, bug tables, atomics) are open-ended, so
+         * emit the unit with the machine text emitter and let GNU as produce
+         * the object. This is loud and per-unit, never silent, and it keeps
+         * the requested protections because the IR is already transformed.
+         */
+        char asm_path[] = "/tmp/nyc-text-XXXXXX";
+        char asm_err[512] = {0};
+        int fd = mkstemp(asm_path);
+        if (fd < 0) {
+          snprintf(err, sizeof(err),
+                   "cannot create temporary assembly file");
+        } else {
+          close(fd);
+          bool asm_ok = true;
+          for (size_t i = 0; asm_ok && i < unit.count; ++i)
+            asm_ok = nyr_phi_elim(&unit.funcs[i]);
+          if (!asm_ok) {
+            snprintf(err, sizeof(err),
+                     "phi elimination failed for text assembly");
+          } else if (!write_c_unit_assembly(
+                  &unit, &target_info, asm_path, driver->verbose_assembly,
+                  driver->code16,
+                  driver->code16 && nyc_setup_macro_enabled(driver),
+                  driver->position_independent, driver->i386_stack_alignment,
+                  driver->retpoline_indirect_calls,
+                  driver->retpoline_inline_calls,
+                  driver->function_return_thunk_extern,
+                  driver->cf_protection_branch, asm_err, sizeof(asm_err))) {
+            snprintf(err, sizeof(err),
+                     "text assembly emission failed: %s",
+                     asm_err[0] ? asm_err : "unknown error");
+          } else if (!nyc_assemble_source(asm_path, output_path, target,
+                                          driver->include_dirs,
+                                          driver->include_count)) {
+            snprintf(err, sizeof(err),
+                     "assembling emitted text assembly failed");
+          } else {
+            fprintf(stderr,
+                    "nyc: note: %s: emitted through GNU as (object writer "
+                    "has no encoding for an inline-asm form)\n",
+                    argv[source_arg]);
+            ok = true;
+            err[0] = '\0';
+          }
+          unlink(asm_path);
+        }
+      }
       free(data);
       if (data_relocs) {
         for (size_t i = 0; i < unit.data_count; ++i)
@@ -2166,9 +2431,16 @@ static int compile_source(int argc, char **argv, int source_arg,
   } else {
     nyr_func_t ir;
     nyr_func_init(&ir);
-    ok = nyc_frontend_compile(&input, argv[argc - 1], abi, &ir, err,
-                              sizeof(err)) &&
-         nyr_verify(&ir, err, sizeof(err));
+    if (driver->profile_functions) {
+      snprintf(err, sizeof(err),
+               "-pg and -mfentry require whole-unit output, not "
+               "single-symbol mode");
+      ok = false;
+    } else {
+      ok = nyc_frontend_compile(&input, argv[argc - 1], abi, &ir, err,
+                                sizeof(err)) &&
+           nyr_verify(&ir, err, sizeof(err));
+    }
     if (ok && driver->disable_vectorization && nyc_func_uses_fp_or_simd(&ir)) {
       snprintf(err, sizeof(err),
                "floating-point or SIMD code is incompatible with "
@@ -2209,7 +2481,10 @@ static int compile_source(int argc, char **argv, int source_arg,
             err[0] ? err : "C compilation failed");
   if (ok && driver->dependency_file)
     ok = write_dependency_file(&input, abi,
-                               output_path ? output_path : argv[source_arg],
+                               driver->dependency_target
+                                   ? driver->dependency_target
+                                   : output_path ? output_path
+                                                 : argv[source_arg],
                                driver->dependency_file, err, sizeof(err));
   if (!ok && err[0])
     fprintf(stderr, "%s: %s\n", argv[source_arg], err);
@@ -2297,6 +2572,12 @@ int main(int argc, char **argv) {
     }
     if (strcmp(option, "-P") == 0) {
       driver.line_markers = false;
+      continue;
+    }
+    if (strcmp(option, "-C") == 0) {
+      /*
+       * Preserve comments in preprocessed output; nothing to change.
+       */
       continue;
     }
     if (option[0] == '-' && option[1] == 'O' && option[2] >= '0' &&
@@ -2539,6 +2820,14 @@ int main(int argc, char **argv) {
     }
     if (strcmp(option, "-g") == 0)
       continue;
+    if (strcmp(option, "-pg") == 0) {
+      driver.profile_functions = true;
+      continue;
+    }
+    if (strcmp(option, "-mfentry") == 0) {
+      driver.fentry_calls = true;
+      continue;
+    }
     if (strcmp(option, "-foptimize-sibling-calls") == 0)
       continue;
     if (strcmp(option, "-fasynchronous-unwind-tables") == 0)
@@ -2611,7 +2900,11 @@ int main(int argc, char **argv) {
       if (!driver.target)
         driver.target = "i386-unknown-linux-gnu";
       driver.require_x86_64 = false;
-      driver.assembly_output = true;
+      /*
+       * -m16 selects 16-bit code generation; it is not a request for -S.
+       * The i386 object route emits .code16 text and assembles it when the
+       * caller asked for an object (realmode C files do exactly that).
+       */
       driver.code16 = true;
       continue;
     }
@@ -2634,6 +2927,7 @@ int main(int argc, char **argv) {
     }
     if (strcmp(option, "-mcmodel=kernel") == 0) {
       driver.require_x86_64 = true;
+      driver.kernel_model = true;
       /*
        * The x86-64 emitter uses RIP-relative symbol references, leaving the
        * kernel model's signed 2 GiB range check to the final linker.
@@ -2728,11 +3022,6 @@ int main(int argc, char **argv) {
     fputs("nyc: -c and -S cannot be combined\n", stderr);
     goto done;
   }
-  if (driver.cf_protection_branch && !driver.preprocess &&
-      (!driver.compile_unit || !driver.assembly_output)) {
-    fputs("nyc: -fcf-protection=branch currently requires -S output\n", stderr);
-    goto done;
-  }
   if (driver.omit_frame_pointer && !driver.compile_unit && !driver.preprocess) {
     fputs("nyc: -fomit-frame-pointer requires whole-unit object mode (-c)\n",
           stderr);
@@ -2749,16 +3038,56 @@ int main(int argc, char **argv) {
           stderr);
     goto done;
   }
-  if (driver.compile_unit && !driver.assembly_output && !driver.preprocess &&
-      driver.output && operand_count == 2) {
+  if (driver.preprocess && operand_count == 2) {
     const char *input = operands[1];
     size_t input_len = strlen(input);
     if (input_len >= 2 && input[input_len - 2] == '.' &&
-        input[input_len - 1] == 's') {
-      result = nyc_assemble_source(input, driver.output, driver.target,
-                                   driver.include_dirs, driver.include_count)
+        input[input_len - 1] == 'S') {
+      result = nyc_preprocess_assembly(
+                   input, driver.output, &driver,
+                   driver.output ? driver.output : input)
                    ? 0
                    : 1;
+      goto done;
+    }
+  }
+  if (driver.compile_unit && !driver.preprocess && driver.output &&
+      operand_count == 2) {
+    const char *input = operands[1];
+    size_t input_len = strlen(input);
+    bool plain_assembly = input_len >= 2 && input[input_len - 2] == '.' &&
+                          input[input_len - 1] == 's';
+    bool preprocessed_assembly =
+        input_len >= 2 && input[input_len - 2] == '.' &&
+        input[input_len - 1] == 'S';
+    if (plain_assembly || preprocessed_assembly) {
+      const char *assembly_input = input;
+      char temp_path[] = "/tmp/nyc-assembly-XXXXXX";
+      bool have_temp = false;
+      if (preprocessed_assembly) {
+        int fd = mkstemp(temp_path);
+        if (fd < 0) {
+          fputs("nyc: cannot create temporary assembly file\n", stderr);
+          result = 1;
+          goto done;
+        }
+        close(fd);
+        have_temp = true;
+        if (!nyc_preprocess_assembly(input, temp_path, &driver,
+                                     driver.output)) {
+          unlink(temp_path);
+          result = 1;
+          goto done;
+        }
+        assembly_input = temp_path;
+      }
+      result = nyc_assemble_source(assembly_input, driver.output,
+                                   driver.target, driver.include_dirs,
+                                   driver.include_count)
+                   ? 0
+                   : 1;
+      if (have_temp)
+        unlink(temp_path);
       goto done;
     }
   }

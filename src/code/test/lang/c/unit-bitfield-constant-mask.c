@@ -1,3 +1,6 @@
+/*
+ * C front-end regression test: unit bitfield constant mask.
+ */
 extern void __bad_mask(void);
 
 static inline __attribute__((always_inline)) unsigned long

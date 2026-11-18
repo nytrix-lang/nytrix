@@ -111,7 +111,8 @@ fn col_at(any font, str line, f64 x, f64 text_x) int {
       return min(line.len, max(0, int(target / adv + 0.5)))
    }
    mut lo = 0
-   mut hi = line.len
+   ;; Columns count code points, the unit str_slice indexes by.
+   mut hi = str.utf8_len(line)
    while lo < hi {
       def mid = (lo + hi) / 2
       def w = float(gfx.measure_text_fast(font, str.str_slice(line, 0, mid + 1)).get(0, 0.0))

@@ -1,3 +1,6 @@
+/*
+ * C front-end regression test: sysv byte array union argument.
+ */
 typedef unsigned char u8;
 
 typedef union {

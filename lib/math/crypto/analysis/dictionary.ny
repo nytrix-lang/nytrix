@@ -394,7 +394,7 @@ fn _analysis_word_from_line(str text, int start, int stop, int min_len, int max_
 
 fn load_analysis_words_limit(int max_words=0, str lang="english", int min_len=1, int max_len=24) list {
    "Load lowercase words from the repo-local combined profile dictionary.
-   Weighted entries come first; raw-only words follow. `max_words <= 0` means no limit."
+   Weighted entries come first ; raw-only words follow. `max_words <= 0` means no limit."
    def path = analysis_wordlist_path(lang)
    if path.len == 0 { return list(0) }
    match file_read(path) {

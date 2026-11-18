@@ -1,7 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
   <title>Key</title>
-  <desc>Key icon.</desc>
-  <g transform="translate(2.0000 2.0000) scale(1.25000)">
-<path fill="#c6c6ca" d="M1 7v2h1v2h3V9h2.133a4 4 0 1 0 0-2zm10-1a2 2 0 0 1 0 4 2 2 0 0 1 0-4z"/>
-  </g>
+  <desc>Key and access icon.</desc>
+  <path fill="#facc15" fill-rule="evenodd" d="M8.4 3.4A5 5 0 1 1 8.4 13.4A5 5 0 0 1 8.4 3.4ZM8.4 5.9A2.5 2.5 0 1 0 8.4 10.9A2.5 2.5 0 0 0 8.4 5.9Z"/>
+  <path fill="#facc15" d="M12.4 7.4H21V10H18.4V12.8H15.8V10H12.4Z"/>
 </svg>

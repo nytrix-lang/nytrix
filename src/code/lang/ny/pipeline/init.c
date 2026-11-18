@@ -599,9 +599,11 @@ static int ny_run_native_only(const program_t *prog, const ny_options *opt,
     nyr_jit_image_t image = {0};
     char jit_err[512] = {0};
     if (!ny_pipeline_jit_compile(prog, opt, &image, jit_err, sizeof(jit_err))) {
-      /* An unresolved name is already reported as a located diagnostic with a
+      /*
+       * An unresolved name is already reported as a located diagnostic with a
        * hint by the lowering path; repeating the raw emission error adds no
-       * information. Other JIT failures keep their message. */
+       * information. Other JIT failures keep their message.
+       */
       bool already_reported = ny_diag_error_total_count() > 0 &&
                               strstr(jit_err, "undefined symbol") != NULL;
       if (!already_reported)
@@ -890,8 +892,16 @@ static void maybe_log_phase_time(bool enabled, const char *label,
   double seconds = ny_ticks_elapsed_sec(start_time);
   if (ny_dbg_json_enabled())
     ny_dbg_heuristic_event("PHASE_TIME", "%s %.9fs", label, seconds);
-  else
+  else {
+    /*
+     * The compile progress line is live on stderr; clear it first, or the
+     * label lands at its end (`[8/9] 5.9sNative Cache: ...`).
+     */
+    ny_progress_stderr_lock();
     fprintf(stderr, "%-12s %.9fs\n", label, seconds);
+    fflush(stderr);
+    ny_progress_stderr_unlock();
+  }
 }
 
 typedef struct {
@@ -2370,6 +2380,19 @@ static void ny_pipeline_run_incremental(program_t *prog, ny_options *opt) {
 }
 #endif
 
+bool ny_pipeline_exit_after_run = false;
+
+static bool ny_pipeline_skip_teardown(void) {
+#if defined(__SANITIZE_ADDRESS__)
+  return false;
+#elif defined(__has_feature)
+#if __has_feature(address_sanitizer)
+  return false;
+#endif
+#endif
+  return ny_pipeline_exit_after_run && !getenv("NYTRIX_FULL_TEARDOWN");
+}
+
 int ny_pipeline_run(ny_options *opt) {
   int exit_code = 0;
   bool debug_bundle_written = false;
@@ -2494,7 +2517,7 @@ int ny_pipeline_run(ny_options *opt) {
     output_path =
         ny_windows_output_path(output_path, output_win, sizeof(output_win));
 #endif
-  ny_progress_node_t progress_node = ny_progress_task_begin("read source", 1);
+  ny_progress_node_t *progress_node = ny_progress_task_begin("read source", 1);
   user_src = load_user_source(opt);
   if (!user_src) {
     if (opt->input_file) {
@@ -3099,8 +3122,10 @@ int ny_pipeline_run(ny_options *opt) {
     }
     if (opt->dump_ast)
       goto exit_success;
-    /* The kernel accepted the program: erase proof parameters before the
-     * native lowering sees it. */
+    /*
+     * The kernel accepted the program: erase proof parameters before the
+     * native lowering sees it.
+     */
     (void)ny_erase_proof_params(&prog, arena, parse_name);
   }
 
@@ -3537,8 +3562,10 @@ int ny_pipeline_run(ny_options *opt) {
     goto exit_success;
   }
 
-  /* The kernel accepted the program: erase proof parameters before any
-   * backend lowers it, so every route sees the same runtime signatures. */
+  /*
+   * The kernel accepted the program: erase proof parameters before any
+   * backend lowers it, so every route sees the same runtime signatures.
+   */
   (void)ny_erase_proof_params(&prog, arena, parse_name);
 
 #ifndef _WIN32
@@ -3854,7 +3881,9 @@ int ny_pipeline_run(ny_options *opt) {
       }
       LLVMDisposeMessage(pre_opt_err);
     }
-    /* Null checks must precede LLVM's undefined-load simplification. */
+    /*
+     * Null checks must precede LLVM's undefined-load simplification.
+     */
     const bool sanitize_before_opt =
         opt->sanitize && strcmp(opt->sanitize, "undefined") == 0;
     if (sanitize_before_opt &&
@@ -4547,8 +4576,10 @@ exit_success:
     ny_str_list_free(uses, use_count);
   free(jit_cache_file);
   free(auto_std_bc_cache);
-  codegen_dispose(&cg);
-  program_free(&prog, arena);
+  if (!ny_pipeline_skip_teardown()) {
+    codegen_dispose(&cg);
+    program_free(&prog, arena);
+  }
   ny_lookup_prof_note_pipeline_ms(ny_ticks_elapsed_ms(pipeline_prof_t0));
   if (opt->emit_report_path) {
     FILE *report = fopen(opt->emit_report_path, "ab");

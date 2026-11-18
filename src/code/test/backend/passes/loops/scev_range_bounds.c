@@ -71,7 +71,9 @@ static bool fail(const char *what, const char *why) {
   return false;
 }
 
-/* Upward or downward loop with a masked limit: bounds must be exported. */
+/*
+ * Upward or downward loop with a masked limit: bounds must be exported.
+ */
 static bool check_bounded(const char *what, int64_t init_value, int64_t step,
                           nyr_cmp_t pred, int64_t want_body_min,
                           int64_t want_body_max, int64_t want_iv_min,
@@ -124,7 +126,9 @@ static bool check_bounded(const char *what, int64_t init_value, int64_t step,
     ++failures;
   }
   free(defs);
-  /* The phi's range fact must cover the exit-block observation too. */
+  /*
+   * The phi's range fact must cover the exit-block observation too.
+   */
   ok = nyr_scev_lite(&f) && nyr_opt_verify(&f, "bounded-lite") &&
        f.data[phi].range.has_min && f.data[phi].range.has_max &&
        f.data[phi].range.min == want_iv_min &&
@@ -140,7 +144,9 @@ static bool check_bounded(const char *what, int64_t init_value, int64_t step,
   return ok;
 }
 
-/* Unknown or wrap-prone limits must not produce any interval. */
+/*
+ * Unknown or wrap-prone limits must not produce any interval.
+ */
 static bool check_unbounded(const char *what, nyr_cmp_t pred, bool masked,
                             int64_t mask) {
   nyr_func_t f;
@@ -164,7 +170,9 @@ static bool check_unbounded(const char *what, nyr_cmp_t pred, bool masked,
             (int)loop->trip_count_known);
     ++failures;
   }
-  /* And no range fact may be exported for the induction variable. */
+  /*
+   * And no range fact may be exported for the induction variable.
+   */
   ok = nyr_scev_lite(&f) && !f.data[phi].range.has_min;
   if (!ok) {
     fprintf(stderr, "[scev-range] %s: phi exported range=[%lld..%lld]\n", what,
@@ -178,15 +186,25 @@ static bool check_unbounded(const char *what, nyr_cmp_t pred, bool masked,
 }
 
 int main(void) {
-  /* (n & 7) bounds an upward `<` loop to [0,6] in the body, [0,7] overall. */
+  /*
+   * (n & 7) bounds an upward `<` loop to [0,6] in the body, [0,7] overall.
+   */
   check_bounded("up-lt-mask", 0, 1, NYIR_CMP_LT, 0, 6, 0, 7, 7);
-  /* `<=` includes the limit itself in the body. */
+  /*
+   * `<=` includes the limit itself in the body.
+   */
   check_bounded("up-le-mask", 0, 2, NYIR_CMP_LE, 0, 7, 0, 9, 4);
-  /* Downward loop with a symbolic lower bound. */
+  /*
+   * Downward loop with a symbolic lower bound.
+   */
   check_bounded("down-gt-mask", 7, -1, NYIR_CMP_GT, 1, 7, 0, 7, 7);
-  /* No range fact for the limit: nothing may be claimed. */
+  /*
+   * No range fact for the limit: nothing may be claimed.
+   */
   check_unbounded("no-limit-range", NYIR_CMP_LT, false, 0);
-  /* Range reaching INT64_MAX with `<=`: body + step would wrap, so reject. */
+  /*
+   * Range reaching INT64_MAX with `<=`: body + step would wrap, so reject.
+   */
   check_unbounded("wrap-reject", NYIR_CMP_LE, true, INT64_MAX);
   if (failures) {
     fprintf(stderr, "[scev-range] %d case(s) failed\n", failures);

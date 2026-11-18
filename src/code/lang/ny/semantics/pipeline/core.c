@@ -1230,6 +1230,7 @@ static const char *tp_lookup_global_type(codegen_t *cg, const char *name) {
   binding *b = lookup_global(cg, name);
   if (!b)
     return NULL;
+  if (getenv("NYDBGP") && b->type_name && strncmp(b->type_name, "proof", 5) == 0) fprintf(stderr, "GLOBAL %s [%s] decl[%s]\n", name, b->type_name, b->decl_type_name ? b->decl_type_name : "");
   if (b->type_name && !tp_is_int_type(b->type_name) &&
       !tp_is_float_type(b->type_name))
     return b->type_name;
@@ -3065,6 +3066,14 @@ typedef struct ny_hm_env_list {
   size_t len, cap;
   uint64_t generation;
   ny_hm_env_lookup_cache_entry_t *lookup_cache;
+  /*
+   * Bloom filter over the names of every entry (two bits per name). Binding
+   * a new local looked the name up first, and a name not in the environment
+   * scanned all of it (thousands of module globals per function clone).
+   * Every append sets the bits and clones copy them, so a clear bit proves
+   * the name is absent.
+   */
+  uint64_t name_bloom[512];
 } ny_hm_env_list;
 
 typedef struct ny_hm_scheme_t {
@@ -3120,22 +3129,30 @@ typedef struct ny_hm_state_t {
   expr_t *stmt_partial_call;
   const char *stmt_partial_missing;
   size_t stmt_partial_missing_count;
-  /* Named holes `?goal` seen during inference, reported after it settles. */
+  /*
+   * Named holes `?goal` seen during inference, reported after it settles.
+   */
   struct {
     const expr_t *expr;
     ny_hm_type_t *type;
-    /* Locals in scope at the hole, innermost first: the goal's context. */
+    /*
+     * Locals in scope at the hole, innermost first: the goal's context.
+     */
     const char *ctx_names[8];
     ny_hm_type_t *ctx_types[8];
     size_t ctx_len;
   } holes[64];
   size_t hole_count;
-  /* Function type parameters in scope while a signature is read: each name
-   * stands for one HM variable, which instantiation copies per call. */
+  /*
+   * Function type parameters in scope while a signature is read: each name
+   * stands for one HM variable, which instantiation copies per call.
+   */
   const char *tvar_names[16];
   struct ny_hm_type_t *tvar_types[16];
   size_t tvar_count;
-  /* `_` holes in type-argument positions of the calls being checked. */
+  /*
+   * `_` holes in type-argument positions of the calls being checked.
+   */
   expr_t *type_holes[16];
   struct ny_hm_type_t *type_hole_vars[16];
   size_t type_hole_count;

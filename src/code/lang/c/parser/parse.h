@@ -65,6 +65,7 @@ typedef struct {
   bool *function_always_inline;
   bool *function_noinline;
   bool *function_no_stack_protector;
+  bool *function_no_instrument_function;
   bool *function_weak;
   bool *function_no_emit;
   bool *function_discardable;
@@ -113,6 +114,8 @@ typedef struct {
   bool ms_extensions;
   bool plan9_extensions;
   bool system_includes;
+  /* Preprocessing assembly (.S) keeps horizontal whitespace significant. */
+  bool assembly_input;
   unsigned i386_regparm;
   /* Nyr optimization level the driver will apply. At -O0 the frontend keeps
    * zero-filling uninitialized aggregate locals so every read is

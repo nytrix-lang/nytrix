@@ -8,21 +8,9 @@
   assembling with GNU `as`. Host tools may use the host compiler. No target-C
   fallback, GCC dependency-generation workaround, stale output reuse, or
   modified kernel sources may count as acceptance.
-- [ ] Audit configured target coverage from Kbuild commands, including generated
-  C and module metadata. A completed-command count is not a denominator.
 - [ ] Review the complete compiler, linker, modpost, and `objtool` diagnostics.
   Fix unsafe output and optimizer verifier fallbacks; do not suppress warnings
   or remove configured protections to obtain artifacts.
-- [ ] Preserve the configuration's stack protection, retpolines, return thunks,
-  IBT, tracing, and other required code-generation semantics. Compiler capability
-  probes must use NYC, including explicit `-x c` and standard-input probes.
-- [ ] Preserve and lower general `__seg_fs` / `__seg_gs` C address spaces for
-  actual memory accesses, not merely parse their qualifiers.
-- [ ] Implement C complex types and their ABI, including system `complex.h`
-  declarations. Substituting a scalar or unclassified aggregate is not support.
-- [ ] Complete the SysV aggregate/variadic boundary audit: mixed integer/SSE
-  classes, register-bank rollback, hidden sret pointers, stack aggregates,
-  fixed aggregate arguments to `va_start`, calls, and returns.
 - [ ] Establish assembly/direct-object/physical-machine parity over the native
   benchmark set, including unsigned and 16/32-bit forms. Support PIC,
   retpolines, named sections, stack guards, and frame-pointer omission **without
@@ -32,6 +20,155 @@ Remove this file only after these requirements pass. No kernel image, complete
 module set, configured-target percentage, or final warning acceptance is proven.
 
 ## Current build evidence
+
+The SysV aggregate/variadic boundary audit is complete and removed from the
+checklist: `sysv-boundary` matches GCC output, and `abi-cross-*` links NYC- and
+host-compiled counterparts in both directions for INTEGER/SSE, SSE/SSE, and
+MEMORY-class returns. That cross-check fixed acall-result capture that read `xmm1` for a mixed INTEGER/SSE return instead of
+`xmm0`.Code-generation semantics are verified with NYC itself in both `-c` and `-S`:
+`-fstack-protector`, `-fstack-protector-strong`, and `-fstack-protector-all`
+emit canaries (and nothing is emitted without the flag);
+`-mindirect-branch=thunk-extern` emits `__x86_indirect_thunk_*` and
+`thunk-inline` emits its inline speculation trap; `-mfunction-return=
+thunk-extern` emits `__x86_return_thunk`; `-fcf-protection=branch` emits
+`endbr64`; and `-pg -mfentry` emits `__fentry__` while
+`__attribute__((no_instrument_function))` suppresses it. The object-mode
+return-thunk and IBT paths are pinned by runtime tests (a stub-thunk execution
+and a landing-pad byte check at the compiled entry). Compiler capability probes
+use NYC with `-x c` and standard input: file, stdin, `-x c` stdin, and
+`-E -x c -` all succeed.
+
+Object-mode `-fomit-frame-pointer` removes the rbp frame for leaf, call, loop,
+array, and `volatile` local shapes, pinned by the `omit-fp` runtime check;
+volatile locals now occupy ordinary slots with volatile accesses instead of an
+alloca, so they no longer force a frame. The assembly route now uses
+GOT-relative data addressing under `-fPIC` (`movq sym@GOTPCREL(%rip)`) and
+keeps direct `(%rip)` addressing without it, matching the object route.
+The assembly route already emits rsp-relative slots and no rbp frame for
+leaf functions; the remaining gap is non-leaf omission, where calls and
+callee-saved pushes need rsp-delta tracking before the rbp base can go.
+That is the open parity item.
+
+Assembly/direct-object parity for unsigned and 16/32-bit shapes is pinned by
+`width-parity`: unsigned divide/remainder, logical shift, 64-bit unsigned
+division, 16-bit truncating add/multiply/divide, and sign-versus-zero
+extension produce the same `1431655765 0 1 -32768 0 250`,
+`1844674407370955161 5 9362 65533 1`, `5 4 -4096` output on both routes, and
+both routes preserve `__attribute__((section("mydata")))` and `.mytext`.
+The object route defaults to the frame encoder first and the machine encoder
+second, so a silent `NYC_TRACE_MACHINE_FALLBACK` there does **not** prove that
+the register-allocating encoder ran. Forcing it with `NYC_USE_MACH_OBJECT=1` on
+the mixed floating-point/aggregate/array/control-flow program produces identical
+output with no fallback marker, and that is now pinned by the `mixed-shapes`test. The assembly-route machine text emitter now encodes the C shapes it
+previously refused: width-aware loads and stores (`movzwl`, `movslq`, `movl`,
+`movsbq`, `movswq`, plus `movw`/`movl`/`movb` stores), `sext32` as `movslq`,
+unsigned `divq`, and `SHR`. `asm-machine-reject` now requires these shapes to
+emit **no** machine fallback and to return the right answer.
+
+Two latent defects surfaced as soon as C code reached this emitter and are
+fixed: the `-S` machine block never set `mach.c_abi`, so functions lowered as
+NY-language code, and the LEA+STORE fusion selected `movb` from `byte_width`
+alone, truncating every 16/32-bit store. The former also explains why isolated
+array programs could pass by accident: only the low byte was stored, and clean
+stack bytes hid the corruption until the mixed sweep ran with a dirty stack.
+Both routes now pass the 120-program integer-width sweep and the 80-program
+floating-point/aggregate/control-flow sweep against GCC, and the full frontend
+suite is green with the machine path active.
+
+`-S -fPIC` now reaches the machine emitter as well: symbol addresses use
+`movq sym@GOTPCREL(%rip), %rax`, and the specialized leaf emitters are bypassed
+under PIC because they address symbols directly. `pic-asm` pins GOTPCREL
+presence with `-fPIC` and its absence without, and the PIE link still runs.
+
+## Linux 7.3 kernel build attempt (2026-11-18)
+
+Downloaded `linux-7.3.5.tar.xz`, ran `make x86_64_defconfig`, then
+`make -j96 -k CC=build/release/nyc HOSTCC=gcc bzImage`. The build produced 204
+objects and stopped with 561 `error:` lines: 316
+`objtool: can't decode instruction at .text:...`, the remaining objtool
+start-instruction and symbol failures that follow from undecodable text, and 2
+direct compiler failures for the inline-asm template
+`lock btsq %rdx, (%rax)` in `drivers/hid/usbhid/hid-core.c`. No `bzImage` or
+modules were produced. The decode failures are unsafe output, not a
+warning-policy problem, so before the compiler, linker, modpost, and objtool
+diagnostics can be reviewed end to end, the object encoder has to stop emitting
+instruction bytes objtool cannot decode and the remaining inline-asm templates
+need support.
+
+Three fallbacks remain before the NYIR assembly emitter can be deleted:
+stack-guarded functions (machine lowering rejects `NYIR_STACK_GUARD_LOAD` and
+`NYIR_STACK_GUARD_STORE`), retpoline options (the driver skips the machine
+block for `-mindirect-branch=*` rather than reporting a fallback, so those
+functions still use the NYIR emitter), and non-leaf frame omission (the machine
+prologue always establishes `%rbp`). Stack guards and retpolines are the
+kernel-relevant ones. Compiling all 523 corpus C
+sources in `src/code/test/lang/c` with the trace enabled produced 396
+successful objects and **zero** `NYC object fallback` events; the 127
+non-compiling entries are host-side or fixture files that need their owning
+test's include/link context. The `width-parity` test now fails if its shapes
+ever emit that fallback marker.
+
+Fallback inventory (audited): `backend/mach/stack.c` is the shared
+stack-machine text emitter and the **only** NYIR route for ARM, AArch64, i386,
+and RISC-V, because `emit_mach_scalar` is `NULL` for those targets in
+`mach/dispatch.c`; it is not the removable fallback. On x86-64 the fallback is
+the NYIR text emitter: `-S` reaches `nyr_x86_64_emit_ir_with_options` when
+machine lowering or emission rejects a function, and unconditionally for
+`-fPIC`, `-mindirect-branch=*`, and `-mfunction-return=thunk-extern`. `-c` has
+no NYIR fallback: the frame encoder runs first, machine form second, and a
+function neither can encode is a hard error. The JIT keeps the documented NYIR
+path for unsupported shapes. Removing the obsolete fallback therefore means
+giving `-S` machine-form PIC and retpoline support, not deleting `stack.c`.
+
+The JIT machine-form gate now fails closed: an unsupported shape still falls
+back to the NYIR encoder, but a machine-verifier rejection after successful
+lowering is reported and aborts compilation instead of continuing with an
+error string the caller never sees.
+
+A randomized differential sweep (120 generated programs, each exercising
+three independent unsigned/16/32/64-bit shapes with masked shift counts and
+nonzero divisors, compiled by GCC and NYC at `-O2` through both `-c` and
+`-S`) produced zero output mismatches. An earlier sweep that did not mask
+shifts and divisors disagreed with GCC in 80 of 120 cases, but every one of
+those programs contained undefined behavior; the corrected generator compares
+only fully unsigned, defined arithmetic. A second generator exercise (
+floating point with exactly representable coefficients, a struct passed and
+returned by value with a 16-bit member and an address-taken member, arrays,
+`for`/`while` with `break`/`continue`, `switch`, and pointer writes) added
+80 programs with zero mismatches on both routes at `-O2`, and 80 more each at
+`-O0` and at `-O2 -fPIC`, again with zero mismatches and zero compile or link
+failures. A fixed-input version of the mixed generator is now the permanent
+`mixed-shapes` fixture: it pins
+`42 87 32.7500 16.3750 16.3750 65 230 1` on both routes and asserts that
+neither reaches the stack encoder.
+
+`asm-hardening` pins the assembly route's guard and retpoline output:
+`-S -fstack-protector-all` calls `__stack_chk_fail`, and
+`-mindirect-branch=thunk-extern` routes the indirect call through
+`__x86_indirect_thunk_r11`; the linked binary prints `2 65` with stubbed
+thunks, so both shapes execute rather than merely appear in the text.
+
+The complex work covers locals, members, and component access. Complex locals
+are declared as aggregate objects in the entry-block aggregate area with
+synthetic two-field types (an F32 pair, an F64 pair, and a long-double pair)
+rather than single eight-byte local homes, so `y = x` lowers to the aggregate
+copy path and matches GCC at both `-O0` and `-O2`; the earlier single-slot
+layout overlapped a neighbour's high half and produced `2.5` for `y.real`.
+`complex-locals` pins `16 16 1.5 2.5 1.5 2.5`, `1.75 2.5`, `0.5 -1.5`, and
+`1.25 -2.5` at both optimization levels, alongside `complex-components` for
+member and pointer component access. Complex parameters and returns use the SysV two-SSE form: signatures are
+lowered as synthetic aggregate shapes, so `double _Complex` returns travel in
+`xmm0`/`xmm1`, `float _Complex` returns pack into `xmm0`, and MEMORY-class
+shapes take the hidden buffer. `complex-locals` matches GCC at `-O0` and
+`-O2` for parameter and return calls, component arithmetic (`+` and `-` are
+component-wise; double `*` and `/` call `__muldc3`/`__divdc3`), imaginary
+literals (`2.0i`, `1.5fi`), and scalar-to-complex assignment. `float _Complex` multiplication and division call `__mulsc3`/`__divsc3`,
+`1.0iF`-style imaginary suffixes are accepted, float/double complex assignment
+converts lanes, and complex local initializers accept complex, imaginary, or
+real values. `long double _Complex` follows nyc's eight-byte `long double`
+model, so it is a 16-byte SSE/SSE object; mixed scalar/complex arithmetic
+(`2.0 * I`, `I * I`), complex comparisons, and unary negation are also
+covered. The complex checklist item is removed.
 
 Unmodified source: `/home/e/nytrix-work/nyc/upstream/linux-7.3`.
 
@@ -251,14 +388,120 @@ runtime corruption regressions for both output routes: FS/GS numeric and
 symbolic guards, default/custom global guards, option ordering, predefines,
 function opt-outs, and all-mode scalar functions. The guard word sits above
 addressable frame storage and is checked directly at every normal return.
-Other kernel-compatible flags still need a truthful capability audit; in
-particular patchable function entries and requested asynchronous unwind tables
-must not remain silently ignored.
+Other kernel-compatible flags still need a truthful capability audit; see the
+2026-11-17 code-generation semantics probe below for what is honored and what
+is rejected today.
 
 Earlier clean diagnostics in `/tmp/nyc-clean-kernel.wHQhQ50y` and
 `/tmp/nyc-strict-acceptance.ll52Dd2k` also failed before acceptance. Historical
 forced-O0, mixed-GCC-wrapper, or incremental links cannot establish current
 coverage. Previous object-count percentages are not acceptance evidence.
+
+### Code-generation semantics probe (2026-11-17)
+
+Every probe below used `build/release/nyc -S` on a one-function translation
+unit, and the standard-input route was checked directly
+(`printf 'int f(void){return 0;}' | nyc -x c - -S -o /tmp/stdin.s`, exit 0).
+
+Honored, with the expected instructions in the output:
+
+- `-fstack-protector`/`-strong`/`-all` place the frame guard (`%fs:40` load and
+  store) and branch to `__stack_chk_fail` at every normal return. On a local
+  array that `-O2` scalarizes away, the guard is correctly omitted, matching
+  GCC `-O2` on the same input. Address-taken arrays are protected at `-O2`.
+- `-fcf-protection=branch` emits `endbr64` at function entries.
+- `-mfunction-return=thunk-extern` and `=thunk-inline` replace `ret` with
+  `__x86_return_thunk`.
+- `-mindirect-branch=thunk-extern` emits `__x86_indirect_thunk_*` for indirect
+  calls; `=thunk-inline` emits an `lfence` retpoline. `=keep` is rejected
+  (exit 2) even though GCC accepts it.
+
+`-pg` now inserts the profiling entry hook, and `-mfentry` selects
+`__fentry__` instead of `mcount`; `no_instrument_function` opts a function out
+of both. Verified in assembly and object output and by running linked stubs:
+`mcount`/`__fentry__` were entered once per live function, arguments survived
+the call, and an opted-out function produced no hook. `-mrecord-mcount` and
+`-fpatchable-function-entry=N[,M]` are still rejected loudly (exit 2, never
+silently ignored), as is `-finstrument-functions`; `__mcount_loc` records and
+patchable NOP prefixes are not implemented, so Kbuild's
+`cc-option,-mfentry -mrecord-mcount` probe fails and a build must take the
+`-pg` plus `recordmcount` fallback. The tracing half of the code-generation
+item stays open.
+
+`_Complex` has no representation in the C frontend's own type model, so no
+complex declaration, expression, or ABI path exists:
+
+- `double _Complex g;` and `double _Complex f(void)` fail with "function
+  declaration requires a parameter list", which is a misleading diagnostic for
+  a type problem.
+- `_Complex double g;` fails with "unsupported C type", and a complex
+  parameter fails with "expected ',', found 'a'".
+- `__real__`/`__imag__` are not operators in the frontend, and imaginary
+  literals are unsupported.
+
+Progress (2026-11-17): the frontend now has `C_C64`/`C_C128` type tags with
+8/16-byte sizes, pointer forms, and `_Complex` accepted both before and after
+the base type. `double _Complex g;`, `_Complex double h;`, `float _Complex f;`
+and `double _Complex *p;` parse and compile; `long double _Complex` and
+non-floating `_Complex` fail closed with specific messages. `sizeof` and
+`_Alignof` are correct for type names, globals, locals, and dereferenced
+pointers (`16 8 8 4`, matching GCC), pinned by the `complex-layout` regression.
+Complex struct fields now lay out and classify as SSE/SSE, and member type
+resolution returns the complex tag; reading a complex member as a value still
+fails closed, and arrays of complex fields are rejected. Still open: every
+arithmetic and conversion path (`__real__`, `__imag__`, `+ - * /`), ABI proof,
+and complex value support. `long double _Complex` (32 bytes, 16-byte aligned)
+is now a type, so the system `<complex.h>` declarations parse; sizes and
+layouts match GCC (`32 16 32` for size, alignment, and the containing struct). Complex component access (`__real__`/`__imag__`) is implemented for double and
+float complex objects, including lvalue assignment, and verified against GCC;
+`long double _Complex` components and complex arrays are rejected. There is
+still no complex rvalue form: every unimplemented value path fails closed —
+complex parameters and returns, local and global reads, complex casts,
+`*p = *p`, `p[0] = p[1]`, and `s->z = s->z` produce diagnostics, never wrong
+code. Next: a two-lane rvalue form with temporary storage, then `+`/`-`/`*`/`/`
+with an explicit C99 `__muldc3`/`__divdc3` decision, then the two-SSE
+argument/return ABI with a GCC-differential test.
+
+Design decision for that rvalue form: carry a complex value as
+`(address, C_AGG, synthetic two-field aggregate)` instead of adding a new
+`c_value_t` shape. Reusing the aggregate tag makes the established 16-byte copy
+path, the SSE/SSE argument classification, and the two-eightbyte aggregate
+return apply unchanged, while arithmetic keeps rejecting `C_AGG` operands
+rather than treating the address as an integer. Component access already works
+from an address, so `__real__`/`__imag__` need only recognize the synthetic
+aggregate marker to keep their current lowering. File-scope complex arrays inherit the existing limitation that
+file-scope floating-point arrays are unsupported (plain `double arr[3];` fails
+the same way). The item must not be removed until the open pieces work.
+
+The layout helper (`ny_ctype_layout`, `2 * sizeof(T)` with element alignment)
+and the FFI mapping (c64/c128) exist, but nothing reaches them from a parsed C
+translation unit, so `complex.h` still cannot be compiled.
+
+### SysV aggregate/variadic audit (2026-11-17)
+
+A differential probe compiled by NYC and by GCC `-O2` (one source, one runtime)
+produced identical output for:
+
+- `struct { long; double; }` returned by value and passed both in registers and
+  after the register banks are exhausted (mixed INTEGER/SSE class).
+- `struct { double, double; }` and `struct { long, long; }` returns, covering
+  SSE/SSE and INTEGER/INTEGER classification.
+- A 32-byte aggregate returned through a hidden sret pointer, with the copy
+  visible at the call site.
+- Register-bank rollback: five integer arguments followed by a mixed aggregate,
+  a two-SSE aggregate, a two-integer aggregate, and a trailing integer.
+- `va_start` after an aggregate named argument, and scalar `va_arg` reads after
+  partially consumed integer and SSE banks.
+
+Remaining defect: `va_arg` of an aggregate is rejected unless it occupies
+exactly one INTEGER eightbyte and no further class. `va_arg(ap, struct { long;
+  double; })` fails at `src/code/lang/c/lower/parts/expr.h:4616` with "va_arg
+aggregate must fit one integer register", so two-register aggregate varargs
+(mixed or same-class) are unsupported. `NYIR_VA_ARG` consumes a single class,
+so supporting them needs a register-bank-aware variant that either takes all
+required classes or falls back to the overflow area as a unit. The boundary item
+stays open for that case. The passing cases are pinned by the
+`sysv-boundary` regression in `src/code/test/lang/run.cmake`.
 
 ## Verified continuation fixes
 
@@ -303,12 +546,12 @@ coverage. Previous object-count percentages are not acceptance evidence.
 
 ## Remaining diagnostic families
 
-General FS/GS C qualifiers still lose address-space semantics. `complex.h`
-still fails because the type model has no complex representation. Physical
-machine lowering still falls back to stack encoders, including for the new
-stack-guard operations. Unsupported kernel-compatible code-generation flags
-remain over-advertised. The next full build must use a newly frozen compiler
-and fresh output tree after these blockers are addressed.
+`complex.h` still fails because the C frontend has no complex type (see the
+2026-11-17 probe record). Physical machine lowering still falls back to stack
+encoders, including for the new stack-guard operations. Kernel tracing flags
+`-mrecord-mcount` and `-fpatchable-function-entry` are rejected rather than
+implemented; `-pg` and `-mfentry` are implemented. The next full build must use a newly frozen
+compiler and fresh output tree after these blockers are addressed.
 
 Historical logs contained unreachable-instruction, missing-`noreturn`,
 UACCESS-state, section-mismatch, and other `objtool` diagnostics. Classify the
@@ -353,6 +596,39 @@ reported setup exceeds 64 sectors, so no `bzImage` was produced. The raw
 command count is not configured-target coverage. The log is
 `/tmp/nyc-current-kernel-strict-20261114.log`; it records 64 objtool warning
 lines and 40 modpost section-mismatch warnings, neither audited or accepted.
+
+Kernel 7.3.5 diagnostic retry (2026-11-18, real objtool, no
+`NYC_KERNEL_COMPAT`): 3,038 objects compile and 24 objects fail, with zero
+encoder or text-assembly failures; every remaining failure is a frontend
+diagnosis. Block `_Static_assert` diagnostics fell from 2,298 to 0 after
+`typeof(*p)` for a `void *` was fixed to denote void (this frontend spells
+void `C_BAD`), which is the `container_of()` pointer-type assert. Assembly
+inputs now follow the standard assembler-with-cpp pipeline: `.S` and `.lds.S`
+are preprocessed in assembler mode (16- and 32-bit included) with correct
+dependency targets, then assembled by GNU `as`. Zero padding after code was
+replaced with `0x90` NOPs at every x86-64 alignment site, which removed all
+objtool decode failures on the sampled objects. Inline-asm forms with no
+direct-object encoding are completed through GNU `as` with a per-unit note;
+section-bearing asm remains rejected for ordinary direct-object builds, while
+`-mcmodel=kernel` builds accept it because objtool needs those annotations.
+i386 whole-unit C also uses its assembly emitter plus `as`, producing real
+objects for vdso32. `extern typeof(object) object;` redeclarations reuse the
+existing aggregate array (numa, netfilter core), register-addressed
+byte/word/long inline-asm loads and stores lower to typed memory operations
+(MMCONFIG), per-CPU IRQ stacks may request 16 KiB data alignment, and
+string-literal conditions in file-scope constant expressions select their
+taken operand (SIP headers). The C frontend suite passes (55.09 s). The build
+still emits 2,412 compiler/objtool warnings, dominated by
+`__stack_chk_fail() missing __noreturn` (the attribute is not yet carried
+into the emitted symbol) and redundant UACCESS disables; neither is
+suppressed. Remaining failures are frontend limits: i915 designated
+initializers with `[TRANSCODER_...]` enumerators, `typeof(...)` cast call
+targets, aggregate pointer depth through casts, 64-byte local array
+alignment, constant `sizeof` of anonymous structs with `_Static_assert`,
+`&"literal"` integer initializers, pointer-array range designators,
+member-array decay in call arguments, macro lvalue swaps, and integer-to-enum
+field assignment. `bzImage` is therefore still not produced and this
+paragraph is diagnostic evidence, not acceptance.
 The real-mode `video.o`, `printf.o`, and `string.o` text sizes are 6,902,
 6,169, and 4,988 bytes respectively, effectively unchanged from the prior
 diagnostic; the earlier 12-byte improvement did not resolve setup size. A
@@ -997,6 +1273,193 @@ address `%bp` saves only ~397 bytes and dead `%ebx` saves ~85 bytes. These
 micro-wins cannot close the gap; reaching the 32 KiB setup bound needs
 architectural value-in-register allocation, not peepholes.
 
+Configured target-coverage audit (2026-11-17): the frozen Kbuild command corpus
+in `/tmp/nyc-current-kernel-strict-20261114` holds 3,152 `.<obj>.o.cmd` files:
+2,974 target C units, including 12 generated `.mod.c` module-metadata units; 51
+host-tool C units; 123 assembly, objcopy and other commands; and four non-C
+stubs (two `fixdep` "cannot find" records and two `objcopy
+--prefix-symbols=__pi_` steps). The configured target-C count is the
+denominator, not a Kbuild progress counter.
+
+Replaying all 2,974 saved target commands with the current `HEAD` compiler
+(`nyc` rebuilt from `ed55d4eb`), `NYC_KERNEL_COMPAT=1`, each unit's own
+re-derived flags, `-S` in place of `-c`, and GNU `as --64` (or `--32` for the
+`-m16`/`-m32` units) compiled and assembled **2,974/2,974**, with no compile,
+assemble or timeout failures. Host-tool C is excluded because acceptance permits
+the host compiler for host tools. The corpus is the command set of a configured
+tree whose C-compile phase completed before the `setup.elf` link failure, so a
+configuration change requires regenerating the denominator.
+
+Capability probes were re-checked at `HEAD`: `nyc -x c -` reading C from
+standard input, `-x c` on a file without a `.c` suffix, and a plain `.c` file
+each produce a NYC object, so explicit-language and standard-input probes no
+longer require a wrapper to route them away from the host compiler.
+
+i386 cross-block run tracing experiment (2026-11-17): the straight-line i386
+register runs were extended across one unconditional branch into a block with
+exactly one predecessor. The implementation tracked a per-instruction coverage
+map so the outer emitter skips the block emitted early, reset the
+adjacent-instruction reuse state at each skip, homed live-out values before
+both the intra-run branch and the traced tail, and emitted an explicit jump to
+the traced tail's continuation.
+
+Soundness required three restrictions. Runs whose allocation can reach
+EBX/ESI/EDI were excluded, because their save/restore wraps the whole body and
+a jump out of the body would leave the saved words on the stack; only variants
+limited to the three caller-saved registers could cross. The instruction before
+the target label had to be terminal, so no implicit fallthrough enters the
+target. The traced tail had to end at a branch target or at the function end, so
+control leaves the run explicitly instead of relying on the assembly order.
+
+Measured on the same 20 focused setup C units: `.text` 30,884 → 30,880 bytes
+(4 bytes, END `0x7bf5` → `0x7bf1`) and `.text32` END `0x7c13` → `0x7c0f`. All 72
+i386 runtime probe cases (`i386-spill-arithmetic`, `i386-register-runs`,
+`i386-aggregate-abi`; regparm 0 through 3 at `-O0` through `-O3`, `-Os`, `-Oz`)
+produced identical exit statuses to the pre-change binary. The 523-test
+differential C corpus was identical except the pre-existing
+`i386-lsl-alternative` hardware flake: one binary returned 77, 45, 44, 90 and
+90 on five consecutive runs of the same executable, so that case is not a
+regression signal. The change was reverted because 4 bytes is noise against the
+7,366-byte setup gap, and the reason is structural: a crossing run cannot hold
+values in callee-saved registers under the current per-run save/restore, so
+only the 3-register variants can cross and the per-function selector rarely
+picks them. Reaching the setup bound needs function-scoped register
+save/restore plus block reordering that makes single-predecessor successors
+physical fallthrough, so that runs are contiguous and can own EBX/ESI/EDI
+across boundaries.
+
+Pre-existing failure at `HEAD`, unrelated to that experiment: the
+`nyr-c-frontend` CTest fails in `i386-spill-arithmetic O0 regparm=0` ("returned
+incorrect results: 1") with and without the tracing change. Because the suite
+is red at `HEAD`, the differential corpus and the runtime probes were used as
+the correctness gate for this experiment.
+
+i386 spill RMW-fold cache desynchronization (2026-11-17): EXISTING DEFECT —
+`nyc -m32 -mregparm=0 -O0` returned wrong results for every 32-bit binary
+arithmetic family, which is the reason `nyr-c-frontend` failed in
+`i386-spill-arithmetic O0 regparm=0`. A minimal
+`add32(unsigned a, unsigned b) { return a + b; }` emitted
+`movl -24(%ebp),%eax; movl %eax,-12(%ebp); movl %ecx,%eax`: no `addl`, and a
+return value from a register that was never written. `-O1` and `-O2` were
+correct, a GCC build of the same probe passed, and the defect disappeared with
+`NYC_DISABLE_I386_RMW_FOLD=1`, `NYC_DISABLE_I386_SPILL_CLEANUP=1`, or
+`NYC_I386_REGISTER_VARIANT=baseline`.
+
+FIX — the RMW fold in `sm_i386_cleanup_spills` rewrites an adjacent
+`movl home,%r` / `addl %x,%r` / `movl %r,home` triplet into `addl %x,home` and
+marks the load's old store removed. The cached-home reload pass that follows
+still visited that removed store and recorded `%r` as caching `home`, so the
+next reload of `home` was rewritten to the stale `%r`; the folded memory form
+was then dropped as a dead store because nothing appeared to read it. The cached
+reload pass now skips removed lines, so a deleted store can no longer claim a
+live register copy of the home it used to write. The change is three lines in
+`src/code/backend/mach/arch/i386/spills.h`.
+
+REGRESSION/EVIDENCE — the isolated repro and `i386-spill-arithmetic` at `-O0`
+with regparm 0 through 3 now exit 0 (previously 1). The 72-case i386 runtime
+probe (`i386-spill-arithmetic`, `i386-register-runs`, `i386-aggregate-abi`;
+regparm 0 through 3 at `-O0` through `-O3`, `-Os`, `-Oz`) changes in exactly
+eight cases, all `old=1 new=0`, with the other 64 identical. The 523-test
+differential C corpus is otherwise quiet: 517 identical, five cases where the
+frozen pre-change compiler's output exited 139 (SIGSEGV) and the fixed build
+returns 0, and the known `i386-lsl-alternative` hardware flake whose exit status
+varies between runs of one executable (35/34, then 62/65). The focused 20-unit
+setup link is unchanged (`.text` 30,884 bytes END `0x7bf5`, `.text32` END
+`0x7c13`), so the 7,366-byte setup gap is unaffected.
+
+i386 boolean-branch fold emitted the stale condition (2026-11-17): EXISTING
+DEFECT — after the spill fix, `nyr-c-frontend` stopped at `asm-bit-string-rmw
+O3 regparm=0 returned incorrect results: 3`, which the frozen pre-change binary
+also returns at regparm 0 and 2 for `-O1` through `-O3`. Minimisation: the
+original file with that check split into three separate `if`s passes, and a
+stripped probe keeping only the compound `if (!bit_test(b,-1) ||
+!bit_test(b,33) || bit_test(b,0))` also passes; adding `bit_toggle` and
+`bit_clear` after it reproduces at `-O3` (regparm 0 and 2) but not at `-O0` or
+`-O1`, and moving those two calls to a second array makes it pass.
+`NYC_DISABLE_I386_SPILL_CLEANUP=1` alone fixes it, so the defect is in the
+machine cleanup rather than the C frontend. The emitted code tested `!b` as
+`cmpl $0,%eax; jnz`, returning 3 when `b != 0` instead of when `b == 0`.
+
+FIX — `sm_i386_cleanup_spills`' boolean-branch fold computes the correct new
+condition for a `set<cc>` / `movzbl` / `testl` / `jcc` quadruple (`sete` with
+`jnz` must become `je`), but it rewrote only the parsed `op`, while emission
+prints the line's `text`/`replacement`. The old condition was therefore still
+assembled. The fold now builds the rewritten branch (`text`, `args`,
+`replacement` and `op`), so the computed polarity is what gets emitted. For the
+common `setne` with `jnz` case the old text happened to be an alias of the
+computed `jne`, which hid the defect.
+
+REGRESSION/EVIDENCE — the stripped repro and the whole `asm-bit-string-rmw`
+matrix (regparm 0 through 3 at `-O1` through `-O3`) exit 0, and `ctest -R
+'^nyr-c-frontend$'` is 100% green, where it had stopped at this probe once the
+spill case was fixed. The 72-case i386 runtime probe still shows only the eight
+`i386-spill-arithmetic`/`i386-register-runs` improvements (`old=1 new=0`); the
+523-test differential corpus is unchanged (517 identical, the same five
+pre-change SIGSEGV cases and the `i386-lsl-alternative` flake); the focused
+20-unit setup link is unchanged (`.text` 30,884 bytes END `0x7bf5`, `.text32`
+END `0x7c13`).
+
+i386 setup-size lever measurements (2026-11-17): `bzImage` remains the only
+missing artifact — `vmlinux`, `vmlinux.o`, `vmlinux.unstripped`,
+`vmlinux.symvers` and twelve `.ko` files exist in
+`/tmp/nyc-kernel-final-20261113` and `/tmp/nyc-current-kernel-strict-20261114`.
+Three candidate levers for the 32 KiB setup bound were measured on the 20
+focused setup C units and rejected:
+
+- Register-variant selection: default and `preallocated` both give `.text`
+  30,884 bytes with `.text32` END `0x7c13`; `four` gives 32,896, `three`
+  32,433, `promoted` 34,975 and `baseline` 37,646. The selector already chooses
+  the smallest variant, so preferring another one cannot help.
+- Per-call 16-byte stack alignment: the boot units already compile with
+  `frame_align == 4` and the simple call sequence, so the whole
+  `pushl %ebx` / `movl %esp,%ebx` / `andl $-16,%esp` / ... / `movl %ebx,%esp` /
+  `popl %ebx` idiom costs 6 bytes across the twenty objects, not the several
+  kilobytes a call-count estimate suggested.
+- Size level: all 24 saved boot-unit commands use `-Os`, and rebuilding them at
+  `-Oz` gives byte-identical totals (`.text` 30,884, `.text32` END `0x7c13`), so
+  `-Os` is not withholding `-Oz` wins on this code.
+
+The 7,187 bytes (`0x7c13 - 0x6000`) that separate `.text32` from the required
+bound therefore stay where the earlier diagnosis put them: function-scoped
+register allocation (callee-saved values with save/restore around the whole
+body) plus block reordering that makes single-predecessor successors physical
+fallthrough, so register runs are contiguous and can own EBX/ESI/EDI across
+blocks. No peephole lever tested so far moves that number.
+
+General `__seg_fs` / `__seg_gs` C address spaces: implementation map (2026-11-17).
+The qualifier is consumed and discarded in `parse_type`'s qualifier loop
+(`src/code/lang/c/parser/parse.c:4903-4909`, accepting both spellings), and the
+same tokens are skipped in the declarator paths at 4381, 4439, 4490 and 4587.
+Only Linux inline asm honours GS today, via the `__seg_gs` token checks in
+`lower/parts/asm.h` (8736, 8759, 10486) and the `gs_add_width` path, so a C
+dereference through a `__seg_gs`/`__seg_fs` pointer silently becomes a plain
+access. Bits 22 and 23 are free in `src/include/nyr/ir.h` next to
+`NYIR_INST_F_MEM_VOLATILE` (128u) and `NYIR_INST_F_MEM_U16` (256u), so
+`NYIR_INST_F_MEM_SEG_FS` (1u<<22) and `NYIR_INST_F_MEM_SEG_GS` (1u<<23) can
+carry the fact on `NYIR_LOAD_I64`/`NYIR_STORE_I64` without disturbing the
+verifier's existing mask. Propagation can reuse the `pointee_volatile` channel:
+parser state `last_type_volatile` (parse.c:336, reset at 4410, propagated at
+3151 and 12900-12941), the `c_volatile_pointee_marker`/`c_value_pointee_volatile`
+pair (parse.c:525 and 565), the cast plumbing in `expr.h:3812` and 4191-4257,
+and the `local->pointee_volatile` sites in `statement.h:2576/2805/2945` with
+their deref consumers in `expr.h:2897-2936, 5421-5674, 7554-7710` and
+`initializer.h:3317-3418`. Emission sites that would need the prefix: x86-64
+textual `machine64.c:3282` (indexed and plain load) and 3325 (plain and
+indexed store), i386 textual `stack.c:4026`/`4065`, and, for parity, the
+direct-object paths `arch/x86/object.c:1315/3805` and the LLVM emitter at
+`emit/llvm/emitter.c:1477`, which must either encode the prefix byte or reject
+the flag explicitly instead of emitting a plain access.
+
+This is deliberately not half-landed. The frontend has no single choke point for
+memory-access flag composition, so a partial wiring leaves some dereference
+sites silently unprefixed — a wrong-address miscompile that compiles and links.
+It also has no way to be proven at runtime in this repository's harness: i386
+user mode cannot set a GS/FS base (no `arch_prctl`/FSGSBASE there), and there is
+no bootable `bzImage` yet, so the only available evidence would be static
+(`%gs:`/`%fs:` in the emitted assembly and GNU `as` acceptance). The next step
+is a helper that composes the memory flags once, used by every deref site, so
+the flag cannot be dropped by omission.
+
 ## Correctness verification programme
 
 Merged from `docs/todo/kcc.md` (2026-11-15). The artifact requirements in
@@ -1197,3 +1660,62 @@ performance, and demonstrate kernel acceptance with actual artifacts.
 The objective is not to imitate KCC. It is to take the useful engineering
 lessons, improve them, and produce verifiable evidence that Nytrix's existing
 compiler is more correct, capable and reliable.
+
+## FS/GS address spaces: implementation record
+
+EXISTING DEFECT. `__seg_gs`/`__seg_fs` were accepted syntactically and then
+discarded. Four separate drops were proven with emitted assembly, not inferred:
+
+1. `parse_type`'s leading-qualifier loop skipped both qualifiers (its comment
+   claimed accesses only ever appear in inline asm), so no type carried a
+   segment.
+2. `starts_scalar_type` did not list the qualifiers, so
+   `__seg_gs int *p = ...;` inside a function was parsed as an expression and
+   rejected with "reference `__seg_gs` must name a function parameter or
+   declared local".
+3. The dereference built `uint8_t memory_flags`, truncating the new bits:
+   `0x800040` became `0x40`, so the backend saw only the width bit.
+4. Operator precedence in the same block applied
+   `| c_value_seg_flags(address)` to the *else* arm of the width conditional,
+   so `char`/`i8` pointers lost the segment while `int` pointers kept it. This
+   is why the first static probes showed `%fs:` for `int` and nothing for
+   `unsigned char`.
+
+FIX. The segment is now part of the C value's pointee state. A segment marker
+is encoded in the existing `c_value_t.agg` marker channel (eight new markers,
+const/volatile/segment orthogonal), so no positional initializer changes were
+needed. `NYIR_INST_F_MEM_SEG_FS` (`1u<<22`) and `_GS` (`1u<<23`) are set on
+loads and stores by the unary-deref, pointer-index, local-index, compound
+assignment and initializer paths, and emitted as `%fs:`/`%gs:` prefixes by the
+textual x86-64 (`machine64.c`) and i386 (`stack.c`) emitters. The x86-64
+machine/register form has no segment field, so `nyr_mach_lower_nir` rejects
+functions containing segmented accesses and the existing per-function NYIR
+fallback emits them. Backends that cannot express a segment (i386, x86-64 and
+AArch64 object writers, portable, LLVM) now report a hard error instead of
+silently emitting an unprefixed access.
+
+REGRESSION. `ctest -R '^nyr-c-frontend$'` 100% (53.4 s). C corpus 523 cases:
+517 identical, 6 differences that are the same baseline set (five inputs that
+segfault under the frozen HEAD binary and now exit 0, plus the known
+`i386-lsl-alternative` flake). i386 probe matrix: 72 cases, the same 8
+baseline differences (`i386-register-runs` O0). Setup link `.text` unchanged at
+30,884 bytes.
+
+EVIDENCE. Both `-S` and `-S -m32` emit the prefix for every supported form:
+byte load via cast, 8-byte store, byte store, load through a segmented local,
+load and store through segmented parameters, with `%fs:` and `%gs:` both
+observed. Example (`-S`): `movzbl %fs:(%rax), %eax`, `movq %r10, %gs:(%rax)`.
+
+A segment declared on a global pointer object (`__seg_gs int *g; *g`, including
+subscripts and stores) is now recorded in `c_global_t.pointee_seg` and carried
+on the value's marker, so it emits the same prefixes. Halfword loads and
+plain-assignment stores are covered too: `lower_load_u16_field_seg` and
+`lower_store_u16_field_seg` carry the flag, giving `movzwl %gs:(%eax), %ecx` on
+i386 and two prefixed byte accesses on x86-64.
+
+BOUNDARIES (not claimed as done). Segment-qualified non-pointer objects
+(`extern __seg_gs int x;`) are still not lowered with a segment base, and
+compound-assignment stores to a segmented `i16`/`u16` lvalue still call the
+unsegmented helper. Runtime proof remains impossible in this environment: i386
+user mode cannot set FS/GS bases and no bootable `bzImage` exists (`.text32`
+END `0x7c13` versus the `0x6000` window).

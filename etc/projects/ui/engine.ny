@@ -330,13 +330,13 @@ fn _gui_asset_derived_state() dict {
    def has_scene = is_dict(active_scene)
    if is_dict(_gui_asset_state_cache) &&
       _gui_asset_state_cache.contains("valid") && _gui_asset_state_cache.get("valid", false) &&
-      _gui_asset_state_cache.get("filter_key", "\x00") == filter_key &&
-      _gui_asset_state_cache.get("names_len", -1) == names.len &&
-      _gui_asset_state_cache.get("loaded", "\x00") == _loaded_scene_name &&
-      _gui_asset_state_cache.get("selected", "\x00") == _gui_model_selected_name &&
-      _gui_asset_state_cache.get("show_paths", false) == _gui_model_show_paths &&
-      _gui_asset_state_cache.get("browser_tab", -1) == _gui_browser_tab &&
-      _gui_asset_state_cache.get("has_scene", false) == has_scene &&
+      to_str(_gui_asset_state_cache.get("filter_key", "\x00")) == filter_key &&
+      int(_gui_asset_state_cache.get("names_len", -1)) == names.len &&
+      to_str(_gui_asset_state_cache.get("loaded", "\x00")) == _loaded_scene_name &&
+      to_str(_gui_asset_state_cache.get("selected", "\x00")) == _gui_model_selected_name &&
+      bool(_gui_asset_state_cache.get("show_paths", false)) == _gui_model_show_paths &&
+      int(_gui_asset_state_cache.get("browser_tab", -1)) == _gui_browser_tab &&
+      bool(_gui_asset_state_cache.get("has_scene", false)) == has_scene &&
       _gui_asset_state_cache.contains("names") {
       return _gui_asset_state_cache
    }
@@ -7582,11 +7582,12 @@ fn _main_loop_finish_timeout(timeout_close) {
 fn _ui_replay_matrix_text(any matrix) str {
    if !is_list(matrix) { return "none" }
    mut str out = ""
-   mut i = 2
-   def end = min(matrix.len, 18)
+   def list m = matrix
+   mut int i = 2
+   def int end = int(min(m.len, 18))
    while i < end {
       if i > 2 { out += "," }
-      out += to_str(float(matrix[i]))
+      out += to_str(float(m.get(i, 0.0)))
       i += 1
    }
    out

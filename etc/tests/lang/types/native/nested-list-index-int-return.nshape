@@ -1,0 +1,36 @@
+shape test_nested_list_index_int_return {
+  family "native/typing"
+  generator "embedded"
+  features ["ny", "test"]
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+
+;; A dynamic index read of a nested list row returns a tagged value; an int
+;; function must decode it once (it returned 33 for 16).
+fn tail_read() int {
+   def rows = [[1, 2, 16]]
+   def row = rows[0]
+   row[2]
+}
+
+fn local_read() int {
+   def rows = [[1, 2, 16]]
+   def row = rows[0]
+   def x = row[2]
+   x
+}
+
+fn any_read() any {
+   def rows = [[1, 2, 16]]
+   def row = rows[0]
+   row[2]
+}
+
+assert(tail_read() == 16, "tail dynamic index read in an int fn")
+assert(local_read() == 16, "dynamic index read through a local")
+assert(any_read() == 16, "dynamic index read in an any fn")
+print("NESTED-LIST-INDEX-INT-RETURN-OK")
+NY
+}

@@ -187,7 +187,10 @@ static int check(enum recolor_mode mode, int homes) {
     ok = nyr_opt_execmem_protect(mapping, code.len) == 0;
   }
   if (ok && getenv("NYTRIX_TEST_DUMP_CODE")) {
-    FILE *dump = fopen(getenv("NYTRIX_TEST_DUMP_CODE"), "wb");
+    char dump_path[512];
+    snprintf(dump_path, sizeof(dump_path), "%s%s", getenv("NYTRIX_TEST_DUMP_CODE"),
+             getenv("NYTRIX_DISABLE_LOOP_GPR") ? ".noloop" : "");
+    FILE *dump = fopen(dump_path, "wb");
     if (dump) {
       fwrite(code.data, 1, code.len, dump);
       fclose(dump);

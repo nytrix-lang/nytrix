@@ -1,3 +1,8 @@
+/*
+ * Standalone GC fuzzer: drives the runtime collector (gc.c, included via
+ * NYTRIX_GC_C) with randomized allocation and rooting, then reports
+ * nursery/tenured collection and promotion statistics as JSON.
+ */
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
 #endif

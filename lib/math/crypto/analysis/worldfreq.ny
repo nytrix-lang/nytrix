@@ -210,13 +210,13 @@ fn _load_alpha_word_set(str path, int min_len=2, int max_len=24) dict {
                line_start = i + 1
                mut token_end = 0
                while token_end < line.len &&
-                     _ascii_alpha_value(load8(line, token_end)) >= 0 {
+               _ascii_alpha_value(load8(line, token_end)) >= 0 {
                   token_end += 1
                }
                def token = upper(str.str_slice(line, 0, token_end))
                mut pos = token_end
                while pos < line.len &&
-                     (load8(line, pos) == 32 || load8(line, pos) == 9) {
+               (load8(line, pos) == 32 || load8(line, pos) == 9) {
                   pos += 1
                }
                mut count = 0
@@ -228,7 +228,7 @@ fn _load_alpha_word_set(str path, int min_len=2, int max_len=24) dict {
                }
                def weighted = has_count && count > 0
                if _alpha_token_ok(token, min_len, max_len) &&
-                  (!weighted || _weight_bucket(count, 12) > 0) {
+               (!weighted || _weight_bucket(count, 12) > 0) {
                   out = out.set(token, true)
                }
             }
@@ -253,7 +253,7 @@ fn _merge_word_set(dict base, dict extra) dict {
 
 fn _profile_name_from_filename(str name) str {
    if name == "words.txt" || name == "monograms.txt" || name == "bigrams.txt" ||
-      name == "trigrams.txt" || name == "quadgrams.txt" { return "english" }
+   name == "trigrams.txt" || name == "quadgrams.txt" { return "english" }
    _profile_name_from_prefixed_filename(name)
 }
 
@@ -649,12 +649,12 @@ fn worldfreq_detect(str text, any langs=nil, int limit=8) list {
 #main {
    def paths = worldfreq_profile_paths("english")
    assert(worldfreq_profile_exists("english") &&
-          paths.get("lang", "") == "english" &&
-          paths.get("raw_words_path", "") == paths.get("common_words_path", "") &&
-          paths.get("monograms_path", "") ==
-             ospath.join(worldfreq_assets_root(), "monograms.txt") &&
-          paths.get("quadgrams_path", "").len > 0,
-          "worldfreq profile paths")
+      paths.get("lang", "") == "english" &&
+      paths.get("raw_words_path", "") == paths.get("common_words_path", "") &&
+      paths.get("monograms_path", "") ==
+      ospath.join(worldfreq_assets_root(), "monograms.txt") &&
+      paths.get("quadgrams_path", "").len > 0,
+      "worldfreq profile paths")
    assert(worldfreq_alpha_upper("A b-c! 123") == "ABC", "worldfreq alpha upper")
    def words = worldfreq_word_counter("This is this.")
    assert(words.get("THIS", 0) == 2 && worldfreq_rows_to_table([["AB", 2], ["BA", 1]]) == "AB 2\nBA 1\n", "worldfreq word helpers")

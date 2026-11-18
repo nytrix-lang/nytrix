@@ -1219,7 +1219,9 @@ typedef struct {
 static log_entry_t *g_log_seen = NULL;
 static size_t g_log_seen_cap = 0;
 static size_t g_log_seen_len = 0;
-/* Function bodies are optimized on pool threads, and passes may log. */
+/*
+ * Function bodies are optimized on pool threads, and passes may log.
+ */
 static atomic_flag g_log_seen_lock = ATOMIC_FLAG_INIT;
 
 static bool ny_log_should_emit_locked(const char *fmt);

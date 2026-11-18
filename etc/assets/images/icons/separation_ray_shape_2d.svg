@@ -1,8 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
-  <title id="title1">Separation Ray Shape 2D</title>
-  <desc id="desc1">Separation Ray Shape 2D editor icon. Original asset id: separationrayshape2d.</desc>
-  <defs id="defs1" />
-  <g transform="translate(2.0000 2.0000) scale(1.25000)" id="g1">
-    <path d="M 8,1 A 1,1 0 0 0 7,2 v 9.585938 L 5.7070312,10.292969 a 1,1 0 0 0 -1.4140625,0 1,1 0 0 0 0,1.414062 l 3,3 a 1.0001,1.0001 0 0 0 0.4140625,0 A 1,1 0 0 0 8,15 a 1,1 0 0 0 0.2929688,-0.292969 1.0001,1.0001 0 0 0 0.4140625,0 l 2.9999997,-3 a 1,1 0 0 0 0,-1.414062 1,1 0 0 0 -1.414062,0 L 9,11.585938 V 2 A 1,1 0 0 0 8,1 Z" id="path1" fill="#c6c6ca" />
-  </g>
-</svg>

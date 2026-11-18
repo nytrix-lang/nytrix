@@ -1591,6 +1591,7 @@ fn draw_line_strip_2d(f64 x, f64 y, f64 w, f64 h, list history, f64 scale, f64 r
 fn draw_static_buffer(dict sbuf, bool is_lines=false, f64 width=1.0, ?handle pipe_override=0, bool is_points=false) bool {
    "Records a draw command for a static GPU buffer. Must be called inside a frame."
    if !vk_state.frame_open() || !is_dict(sbuf) { return false }
+   if is_lines { eprint("TMPLINES is_lines width=" + to_str(width) + " linepipe=" + to_str(int(_line_pipeline))) }
    def cpu = sbuf.get("cpu_ptr", 0)
    def cpu_count = int(sbuf.get("cpu_count", 0))
    if cpu && cpu_count > 0 { return _draw_static_cpu_copy(cpu, cpu_count, is_lines, width, pipe_override, is_points) }

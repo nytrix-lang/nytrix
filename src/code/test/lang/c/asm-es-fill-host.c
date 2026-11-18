@@ -1,3 +1,6 @@
+/*
+ * Host-side C counterpart for the asm es fill test.
+ */
 typedef unsigned int u32;
 typedef unsigned short u16;
 extern volatile unsigned char es_memory[256];

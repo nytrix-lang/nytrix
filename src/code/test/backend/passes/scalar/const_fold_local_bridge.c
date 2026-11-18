@@ -10,7 +10,9 @@ static void store_local(nyr_func_t *f, int local, int value) {
                   .op = NYIR_STORE_LOCAL, .dst = -1, .a = value, .imm = local});
 }
 
-/* Helpers return value ids; locate the instruction that defines one. */
+/*
+ * Helpers return value ids; locate the instruction that defines one.
+ */
 static const nyr_inst_t *def_of(const nyr_func_t *f, int value) {
   for (size_t i = 0; i < f->len; ++i)
     if (f->data[i].dst == value)

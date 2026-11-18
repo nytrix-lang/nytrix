@@ -510,6 +510,9 @@ static bool sm_i386_cleanup_spills(nyr_writer_t *assembly, int value_bytes,
         for (int r = 0; r < 8; ++r) cached[r] = -1;
       continue;
     }
+    /* An earlier pass may have deleted this line; a removed store must not
+     * claim that its source register still holds the home it used to write. */
+    if (in->removed) continue;
     char a[192], b[192];
     bool split = sm_i386_spill_split(in, a, b);
     if (!strcmp(in->op, "movl") && split) {
@@ -895,6 +898,20 @@ static bool sm_i386_cleanup_spills(nyr_writer_t *assembly, int value_bytes,
       replacement = sm_i386_spill_inverse(direct);
       if (!replacement) continue;
     }
+    /* The rewritten condition must replace the emitted branch text as well as
+     * the parsed opcode; otherwise the old condition is still assembled and a
+     * negated boolean reappears with the wrong polarity. */
+    char branch_target[192];
+    snprintf(branch_target, sizeof branch_target, "%s",
+             branch->args ? branch->args : "");
+    nyr_writer_t branch_text = {0};
+    if (!nyr_printf(&branch_text, "\t%s\t%s", replacement, branch_target)) {
+      free(branch_text.data); ok = false; goto done;
+    }
+    free(branch->replacement);
+    branch->replacement = branch_text.data;
+    branch->args = branch->replacement + strlen("\t") + strlen(replacement) + 1;
+    branch->text = branch->replacement;
     strcpy(branch->op, replacement);
     set->removed = true;
     extend->removed = true;

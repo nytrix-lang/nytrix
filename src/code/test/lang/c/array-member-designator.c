@@ -1,3 +1,6 @@
+/*
+ * C front-end regression test: array member designator.
+ */
 typedef struct {
   unsigned int reg;
 } i915_reg_t;

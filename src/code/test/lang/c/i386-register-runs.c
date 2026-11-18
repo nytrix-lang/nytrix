@@ -1,3 +1,6 @@
+/*
+ * C front-end regression test: i386 register runs.
+ */
 typedef unsigned int u32;
 extern u32 register_run_callback(u32, u32, u32);
 extern u32 register_run_stack_callback(u32 *, u32 *, u32);

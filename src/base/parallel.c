@@ -133,7 +133,13 @@ size_t ny_parallel_min_work(void) {
  * hardware thread instead made a 96-thread host run regions serially that an
  * 8-thread host parallelized.
  */
+static bool ny_parallel_forced_serial;
+
+void ny_parallel_force_serial(bool on) { ny_parallel_forced_serial = on; }
+
 static size_t ny_parallel_team(size_t count, size_t work_items) {
+  if (ny_parallel_forced_serial)
+    return 1;
   int threads = ny_parallel_threads();
   if (!ny_parallel_mode_enabled() || threads < 2)
     return 1;

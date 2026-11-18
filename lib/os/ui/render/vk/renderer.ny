@@ -37,7 +37,6 @@ fn _renderer_alloc(int size) any {
 }
 
 mut _flush_diag_counter = 0
-
 mut int _vk_capture_trace_mode = -1
 
 fn _vk_capture_trace() bool {
@@ -498,7 +497,6 @@ mut _vk_debug_verbose = -1
 mut _vk_debug_basic = 0
 mut _vk_begin_false_logs = 0
 mut _vk_debug_stage = ""
-
 mut int _vk_stage_trace_gen = 0
 mut bool _vk_stage_trace_on = false
 
@@ -4871,7 +4869,7 @@ fn _create_swapchain(any win) bool {
    def fallback_h = _pending_resize_h > 0 ? _pending_resize_h : (_swapchain_extent_h > 0 ? _swapchain_extent_h : 300)
    def req_extent = _window_swapchain_extent(win, int(fallback_w), int(fallback_h))
    if vk_state._debug_gfx_enabled {
-      ui_profile.print_text("[gfx:vulkan] extent lookup is_dict=" + to_str(is_dict(win)) + " fb=" + to_str(lib_uiw.get_framebuffer_size(win)) +
+      ui_profile.print_text("[gfx:vulkan] extent lookup raw=" + to_str(win) + " ref=" + to_str(vk_state.window_ref()) + " is_dict=" + to_str(is_dict(win)) + " fb=" + to_str(lib_uiw.get_framebuffer_size(win)) +
          " size=" + to_str(lib_uiw.size(win)) + " pending=" + to_str(_pending_resize_w) + "x" + to_str(_pending_resize_h) + " req=" + to_str(req_extent))
    }
    mut req_w, req_h = int(req_extent.get(0, fallback_w)), int(req_extent.get(1, fallback_h))
@@ -5105,6 +5103,7 @@ fn _destroy_swapchain_objects() any {
 
 fn _recreate_swapchain() bool {
    _vk_stage("recreate.enter")
+   if common.env_truthy("NY_RS_TIME") { print("RS " + "recreate.enter t=" + to_str(ticks() / 1000000)) }
    if !vk_state.window_ref() || _device == 0 { return false }
    device_wait_idle(_device)
    _destroy_sync_objects()
@@ -5132,6 +5131,7 @@ fn _recreate_swapchain() bool {
    _swapchain_image_count = 0
    _destroy_depth_msaa_resources()
    _vk_stage("recreate.create_swapchain")
+   if common.env_truthy("NY_RS_TIME") { print("RS " + "recreate.create_swapchain t=" + to_str(ticks() / 1000000)) }
    def ok = _create_swapchain_with_old(vk_state.window_ref(), old_swapchain)
    if old_swapchain != 0 && old_swapchain != _headless_swapchain_sentinel() { destroy_swapchain_khr(_device, old_swapchain, 0) }
    if !ok { return false }
@@ -5139,15 +5139,20 @@ fn _recreate_swapchain() bool {
    if _swapchain_image_count < 1 { ui_profile.print_text("[gfx:vulkan] _recreate_swapchain: zero image count after create") return false }
    if !_create_sync_objects() { return false }
    _vk_stage("recreate.image_views")
+   if common.env_truthy("NY_RS_TIME") { print("RS " + "recreate.image_views t=" + to_str(ticks() / 1000000)) }
    if !_create_swapchain_image_views() { return false }
    if _swapchain_image_views_count < 1 { return false }
    _vk_stage("recreate.draw_format")
+   if common.env_truthy("NY_RS_TIME") { print("RS " + "recreate.draw_format t=" + to_str(ticks() / 1000000)) }
    if !_prepare_draw_image_format() { return false }
    _vk_stage("recreate.depth")
+   if common.env_truthy("NY_RS_TIME") { print("RS " + "recreate.depth t=" + to_str(ticks() / 1000000)) }
    if !_create_depth_resources() { return false }
    _vk_stage("recreate.draw_images")
+   if common.env_truthy("NY_RS_TIME") { print("RS " + "recreate.draw_images t=" + to_str(ticks() / 1000000)) }
    if !_create_draw_images() { return false }
    _vk_stage("recreate.framebuffers")
+   if common.env_truthy("NY_RS_TIME") { print("RS " + "recreate.framebuffers t=" + to_str(ticks() / 1000000)) }
    if !_create_framebuffers() { return false }
    if _framebuffers_count < 1 { return false }
    true

@@ -34,7 +34,9 @@
 #define NY_EG_MAX_ITERS 48
 #define NY_EG_NODE_FUEL 2048
 
-/* Statistics only; functions are optimized concurrently. */
+/*
+ * Statistics only; functions are optimized concurrently.
+ */
 static _Atomic unsigned long long ny_eg_runs;
 static _Atomic unsigned long long ny_eg_fuel_exhausted;
 
@@ -266,7 +268,9 @@ static int eg_intern(ny_egraph_t *g, int op, int64_t imm, int nchild, int c0,
   if (node < 0)
     return -1;
   if (slot < 0) {
-    /* Table saturated (or never built): rebuild it, then re-probe. */
+    /*
+     * Table saturated (or never built): rebuild it, then re-probe.
+     */
     if (!eg_hash_rehash(g, g->n * 4 + 32))
       return -1;
     if (eg_hash_probe(g, op, imm, nchild, c0, c1, &slot) >= 0 || slot < 0)
@@ -1011,8 +1015,7 @@ bool nyr_egraph_rewrite(nyr_func_t *f) {
 
     /*
      * Saturate.
-     */
-    /*
+     *
      * Equality saturation with batched congruence closure.  Rules are applied
      * once per iteration and the e-graph is then canonicalized by one rebuild:
      * every root's children are re-canonicalized, and roots that became

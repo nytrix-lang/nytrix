@@ -3976,7 +3976,10 @@ static bool lu_scalar_pure_op(const nyr_inst_t *in) {
  * Division may trap, so preserve its original block and iteration order.
  */
 static bool lu_clone_ordered_division(const nyr_inst_t *in) {
-  return in && in->op == NYIR_DIV_I64 && !in->symbol && !in->extra_args &&
+  return in &&
+         (in->op == NYIR_DIV_I64 ||
+          (in->op == NYIR_MOD_I64 && !getenv("NYTRIX_NO_UNROLL_MOD"))) &&
+         !in->symbol && !in->extra_args &&
          !in->arg_sizes && !in->phi_incoming &&
          nyr_effective_effects(in) == NYIR_EFFECT_MAY_TRAP;
 }
@@ -3998,6 +4001,20 @@ static bool lu_clone_memory_read(const nyr_inst_t *in) {
                      NYIR_EFFECT_READ_LOCAL)) == 0;
 }
 
+/*
+ * A plain memory store is cloneable too: the unrolled body replays every
+ * iteration in source order, so loads and stores keep their program order
+ * (small fixed-trip limb loops such as mont64's write their accumulator).
+ */
+static bool lu_clone_memory_write(const nyr_inst_t *in) {
+  if (!in || in->op != NYIR_STORE_I64 || in->symbol || in->extra_args ||
+      in->arg_sizes || in->phi_incoming)
+    return false;
+  unsigned effects = nyr_effective_effects(in);
+  return (effects & (NYIR_EFFECT_CALL | NYIR_EFFECT_CONTROL |
+                     NYIR_EFFECT_WRITE_LOCAL | NYIR_EFFECT_READ_LOCAL)) == 0;
+}
+
 static bool lu_clone_reject(const nyr_scev_loop_t *loop, const char *reason) {
   if (ny_dbg_is_enabled(NY_DBG_HEURISTIC))
     ny_dbg_heuristic_event("LOOP_UNROLL_SSA",
@@ -4014,8 +4031,7 @@ static bool lu_clone_reject(const nyr_scev_loop_t *loop, const char *reason) {
  * It is useful when a short outer loop carries constants into a nested loop:
  * after cloning, ordinary propagation and unrolling can specialize the inner
  * loops independently.
- */
-/*
+ *
  * Nested-control loops that are profitable to unroll are often larger than a
  * single block. Keep a hard expanded-size cap, but allow a small counted
  * outer loop with several guarded bodies to be cloned when the trip count is
@@ -4027,7 +4043,7 @@ static bool lu_clone_reject(const nyr_scev_loop_t *loop, const char *reason) {
 static bool lu_try_clone_cfg(nyr_func_t *work, const nyr_scev_loop_t *loop,
                              const nyr_cfg_t *cfg, const bool *members) {
   if (!work || !loop || !cfg || !members || !loop->trip_count_known ||
-      loop->trip_count < 2 || loop->trip_count > 16 || loop->step <= 0 ||
+      loop->trip_count < 2 || loop->trip_count > 32 || loop->step == 0 ||
       loop->iv < 0 || loop->iv >= work->next_value)
     return lu_clone_reject(loop, "loop-shape");
 
@@ -4744,7 +4760,7 @@ done:
 static bool lu_try_one(nyr_func_t *work, const nyr_scev_loop_t *loop) {
   const char *reject_stage = "loop-shape";
   if (!work || !loop || !loop->init_is_const || !loop->trip_count_known ||
-      loop->trip_count < 2 || loop->trip_count > 16 || loop->step <= 0 ||
+      loop->trip_count < 2 || loop->trip_count > 32 || loop->step == 0 ||
       loop->iv < 0)
     return false;
 
@@ -4870,7 +4886,9 @@ static bool lu_try_one(nyr_func_t *work, const nyr_scev_loop_t *loop) {
       continue;
     if (in->op == NYIR_PHI || in->op == NYIR_BR || in->op == NYIR_BR_IF ||
         in->op == NYIR_RET ||
-        (!lu_scalar_pure_op(in) && !lu_clone_memory_read(in)))
+        (!lu_scalar_pure_op(in) && !lu_clone_memory_read(in) &&
+         !lu_clone_ordered_division(in) &&
+         (!lu_clone_memory_write(in) || getenv("NYTRIX_NO_UNROLL_STORES"))))
       goto done;
     ++body_count;
   }
@@ -5196,10 +5214,20 @@ bool nyr_loop_unroll_ssa(nyr_func_t *f) {
                             : -1),
             loop->trip_count_known, (unsigned long long)loop->trip_count,
             (long long)loop->step, (int)loop->predicate);
+      /*
+       * Counting down (`while d >= 0 { ... d -= 1 }`) is as regular as
+       * counting up: the cloner substitutes init + k * step per iteration.
+       * Bit-at-a-time loops run up to 32 trips; the body-size budget below
+       * still bounds the expansion.
+       */
+      bool ascending = (loop->predicate == NYIR_CMP_LT ||
+                        loop->predicate == NYIR_CMP_LE) &&
+                       loop->step > 0;
+      bool descending = (loop->predicate == NYIR_CMP_GT ||
+                         loop->predicate == NYIR_CMP_GE) &&
+                        loop->step < 0 && !getenv("NYTRIX_NO_UNROLL_DOWN");
       if (!loop->trip_count_known || loop->trip_count < 2 ||
-          loop->trip_count > 16 ||
-          (loop->predicate != NYIR_CMP_LT && loop->predicate != NYIR_CMP_LE) ||
-          loop->step <= 0)
+          loop->trip_count > 32 || !(ascending || descending))
         continue;
       /*
        * Unrolling can expose a zero divisor in a branch that is statically
@@ -5214,11 +5242,12 @@ bool nyr_loop_unroll_ssa(nyr_func_t *f) {
       bool unsafe_division = false;
       for (size_t k = loop_begin; k <= loop_end; ++k) {
         const nyr_inst_t *in = &f->data[k];
-        if (in->op == NYIR_MOD_I64) {
+        /* Remainder by a proven-positive divisor cannot trap either. */
+        if (in->op == NYIR_MOD_I64 && getenv("NYTRIX_NO_UNROLL_MOD")) {
           unsafe_division = true;
           break;
         }
-        if (in->op != NYIR_DIV_I64)
+        if (in->op != NYIR_DIV_I64 && in->op != NYIR_MOD_I64)
           continue;
         if (!defs_attempted) {
           defs = nyr_build_defs(f);

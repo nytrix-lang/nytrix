@@ -1,9 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
-  <title id="title1">Sample Library</title>
-  <desc id="desc1">Sample Library editor icon. Original asset id: samplelibrary.</desc>
-  <defs id="defs2" />
-  <g transform="translate(2.0000 2.0000) scale(1.25000)" id="g2">
-    <path fill="#c6c6ca" d="M9 8v7h5a1 1 0 0 0 1-1V9a1 1 0 0 0-1-1v4l-1-1-1 1V8z" id="path1" />
-    <path d="M 6.8320312,1.0136719 A 1.0001,1.0001 0 0 0 6.0078125,1.875 L 5.4179687,6.5976562 4.8945312,5.5527344 A 1.0001,1.0001 0 0 0 4,5 H 2 A 1,1 0 0 0 1,6 1,1 0 0 0 2,7 h 1.3828125 l 1.7226562,3.447266 A 1.0001,1.0001 0 0 0 6.9921875,10.125 L 7.5820312,5.4023437 8.1054688,6.4472656 A 1.0001,1.0001 0 0 0 9,7 h 3 A 1,1 0 0 0 13,6 1,1 0 0 0 12,5 H 9.6171875 L 7.8945312,1.5527344 a 1.0001,1.0001 0 0 0 -1.0625,-0.5390625 z" id="path2" fill="#c6c6ca" />
-  </g>
-</svg>

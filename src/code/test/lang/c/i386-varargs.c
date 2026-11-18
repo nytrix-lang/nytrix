@@ -1,3 +1,6 @@
+/*
+ * C front-end regression test: i386 varargs.
+ */
 typedef __builtin_va_list va_list;
 struct pair {
   int first, second;

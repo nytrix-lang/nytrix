@@ -91,7 +91,9 @@ static void ny_intern_ptr_map_put(const char *ptr) {
     }
     idx = (idx + 1) & mask;
   }
-  /* The map is an index; exact membership remains recoverable by table scan. */
+  /*
+   * The map is an index; exact membership remains recoverable by table scan.
+   */
 }
 
 void ny_intern_init(void) {
@@ -120,7 +122,9 @@ void ny_intern_init(void) {
   if (g_intern_ptr_map) {
     ny_intern_ptr_map_put(g_intern_table[0].str);
   } else {
-    /* The pointer index is optional; lookups fall back to the table scan. */
+    /*
+     * The pointer index is optional; lookups fall back to the table scan.
+     */
     g_intern_ptr_map_cap = 0;
   }
 }
@@ -241,7 +245,9 @@ bool ny_intern_contains_ptr(const char *str) {
       idx = (idx + 1) & mask;
     }
   }
-  /* Preserve exact answers if the optional pointer index could not grow. */
+  /*
+   * Preserve exact answers if the optional pointer index could not grow.
+   */
   for (size_t i = 1; i < g_intern_count; ++i) {
     if (g_intern_table[i].str == str) {
       g_intern_ptr_cache[slot] = str;

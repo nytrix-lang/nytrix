@@ -1,3 +1,6 @@
+/*
+ * C front-end regression test: noreturn call.
+ */
 static void c_noreturn_stop(void) __attribute__((noreturn));
 
 static void c_noreturn_stop(void) {

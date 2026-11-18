@@ -3,11 +3,13 @@ shape bench_currying_direct_residual_factory {
   generator "stress"
   features ["perf", "calls", "currying", "c-vs-ny", "checksum", "time"]
   ;; Both sources publish every iteration through a global slot, so NYR/C is
-  ;; the closure-call cost plus one store, not a sub-100ns clock sample. The
-  ;; ceiling only catches a new blow-up.
+  ;; the closure-call cost plus one store, not a sub-100ns clock sample.
+  ;; Known partial applications now lower to direct calls (~1.2x C), so the
+  ;; C ceiling guards that path. No LLVM ratio: Nytrix has no volatile store,
+  ;; so the LLVM route sums each loop in closed form (~130ns) and the ratio
+  ;; would compare a real loop with none.
   budget {
-    max_native_c_ratio 8000.0
-    max_native_llvm_ratio 4.0
+    max_native_c_ratio 8.0
   }
   template ny-test-case
   expect compile_and_run

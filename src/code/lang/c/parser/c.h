@@ -39,6 +39,8 @@ typedef struct {
   unsigned line;
   unsigned col;
   const char *error;
+  /* Whitespace before this token ended a backslash-newline continuation. */
+  bool continued;
 } ny_ctok_t;
 
 typedef struct {
@@ -48,6 +50,8 @@ typedef struct {
   unsigned line;
   unsigned col;
   unsigned line_start;
+  /* The whitespace just consumed ended a backslash-newline continuation. */
+  bool continued;
 } ny_lexer_t;
 
 typedef struct {

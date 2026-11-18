@@ -1,3 +1,6 @@
+/*
+ * C front-end regression test: linux movntdqa asm.
+ */
 void copy_movntdqa_movaps4(void *destination, const void *source) {
   asm("movntdqa   (%0), %%xmm0\n"
       "movntdqa 16(%0), %%xmm1\n"

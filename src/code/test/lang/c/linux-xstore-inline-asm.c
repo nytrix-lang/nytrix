@@ -1,3 +1,6 @@
+/*
+ * C front-end regression test: linux xstore inline asm.
+ */
 typedef unsigned int u32;
 
 u32 linux_xstore_inline_asm(u32 *address, u32 mode) {

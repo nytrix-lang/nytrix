@@ -2022,6 +2022,19 @@ static bool lower_statement_range(c_parser_t *p, size_t start, size_t end,
       bool decl_is_bool = p->last_type_bool;
       c_type_t decl_function_result_type = p->last_type_function_result_type;
       c_agg_type_t *decl_function_result_agg = p->last_type_function_result_agg;
+      /*
+       * Array brackets on a function-pointer typedef can clear the result
+       * carried by parse_type; recover it from the base alias so an element
+       * call keeps the real return type.
+       */
+      if (decl_function_result_type == C_BAD) {
+        const c_typedef_t *base_alias =
+            find_typedef(p, p->tokens[type_start]);
+        if (base_alias && base_alias->function_result_type != C_BAD) {
+          decl_function_result_type = base_alias->function_result_type;
+          decl_function_result_agg = base_alias->function_result_agg;
+        }
+      }
       bool is_const = c_type_is_pointer(type) ? p->last_type_const_pointer
                                               : p->last_type_const;
       bool is_volatile = p->last_type_volatile;
@@ -2208,6 +2221,8 @@ static bool lower_statement_range(c_parser_t *p, size_t start, size_t end,
         }
         bool pointee_volatile =
             is_volatile && c_type_is_arithmetic_pointer(type);
+        unsigned char pointee_seg =
+            c_type_is_pointer(type) ? p->last_type_seg : C_SEG_NONE;
         if (!declarator_has_pointer)
           declarator_is_volatile = is_volatile && !pointee_volatile;
         ny_ctok_t name;
@@ -2309,12 +2324,28 @@ static bool lower_statement_range(c_parser_t *p, size_t start, size_t end,
           declaration_ok = false;
           break;
         }
+        /*
+         * An alignment request at or below the type's natural alignment
+         * cannot weaken the object, and automatic arrays are already aligned
+         * to 16 bytes. Such requests need no extra placement work.
+         */
+        size_t natural_alignment = c_type_alignment(p->abi, type);
+        bool alignment_satisfied =
+            p->last_type_alignment == local_alignment ||
+            p->last_type_alignment <= natural_alignment ||
+            (p->last_type_is_array && p->last_type_alignment <= 16);
         if ((local_section.len && !is_static_scalar) ||
-            p->last_type_alignment != local_alignment ||
-            !tok_same(p->last_type_mode, local_mode)) {
+            !alignment_satisfied || !tok_same(p->last_type_mode, local_mode)) {
           if (!getenv("NYC_KERNEL_COMPAT")) {
-            fail(p, "placement and type attributes on local declarations are "
-                    "unsupported");
+            char message[192];
+            snprintf(message, sizeof(message),
+                     "placement and type attributes on local declarations are "
+                     "unsupported (section=%zu alignment=%zu natural=%zu "
+                     "mode_changed=%d)",
+                     local_section.len, p->last_type_alignment,
+                     natural_alignment,
+                     !tok_same(p->last_type_mode, local_mode));
+            fail(p, message);
             declaration_ok = false;
             break;
           }
@@ -2407,13 +2438,17 @@ static bool lower_statement_range(c_parser_t *p, size_t start, size_t end,
           }
           /*
            * Fixed NYIR allocas are 16-byte aligned by the x86-64 backend.
+           * A larger requested alignment is honored by over-allocating and
+           * rounding the base up; placement and mode changes stay rejected.
            */
+          size_t array_alignment = p->last_type_alignment;
           if (array_section.len || array_cleanup.len ||
               !tok_same(p->last_type_mode, local_mode) ||
-              p->last_type_alignment > 16) {
+              array_alignment > 65536u) {
             if (getenv("NYC_KERNEL_COMPAT")) {
               /* Kernel code uses local array attributes NYC cannot fully honor;
                  ignore placement/alignment for compilation coverage. */
+              array_alignment = 0;
             } else {
               fail(p, "unsupported placement or over-alignment on local array");
               declaration_ok = false;
@@ -2552,11 +2587,40 @@ static bool lower_statement_range(c_parser_t *p, size_t start, size_t end,
             declaration_ok = false;
             break;
           }
+          size_t array_bytes = count * width;
+          if (array_alignment > 16) {
+            if (array_bytes >
+                (size_t)INT32_MAX - (array_alignment - 1)) {
+              fail(p, "aligned automatic array exceeds frontend capacity");
+              free(string_initializer);
+              declaration_ok = false;
+              break;
+            }
+            array_bytes += array_alignment - 1;
+          }
           int base =
               emit_value(p, (nyr_inst_t){.op = NYIR_ALLOCA,
                                          .dst = -1,
-                                         .imm = (int64_t)(count * width),
+                                         .imm = (int64_t)array_bytes,
                                          .scalar_class = NYIR_SCALAR_I64_RAW});
+          if (base >= 0 && array_alignment > 16) {
+            int bias =
+                emit_i64_constant(p, (int64_t)(array_alignment - 1));
+            int added = bias < 0
+                            ? -1
+                            : emit_value(p, (nyr_inst_t){.op = NYIR_ADD_I64,
+                                                         .dst = -1,
+                                                         .a = base,
+                                                         .b = bias});
+            int mask = emit_i64_constant(
+                p, ~(int64_t)(array_alignment - 1));
+            base = added < 0 || mask < 0
+                       ? -1
+                       : emit_value(p, (nyr_inst_t){.op = NYIR_AND_I64,
+                                                    .dst = -1,
+                                                    .a = added,
+                                                    .b = mask});
+          }
           p->has_auto_arrays = true;
           if (base < 0 || !add_local(p, name, C_I64, base, false, false)) {
             free(string_initializer);
@@ -2574,6 +2638,10 @@ static bool lower_statement_range(c_parser_t *p, size_t start, size_t end,
           local->is_const = declarator_is_const;
           local->is_volatile = declarator_is_volatile;
           local->pointee_volatile = pointee_volatile;
+          local->pointee_seg = pointee_seg;
+          local->function_result_type = decl_function_result_type;
+          if (decl_function_result_agg)
+            local->agg = decl_function_result_agg;
           local->address_taken = true;
           local->array_count = count;
           local->array_rank = rank;
@@ -2780,6 +2848,28 @@ static bool lower_statement_range(c_parser_t *p, size_t start, size_t end,
         int initial_value = -1;
         bool initialized = accept(p, "=");
         if (initialized) {
+          if (c_type_is_complex(type)) {
+            size_t complex_bytes =
+                type == C_C64 ? 8 : type == C_C128 ? 16 : 32;
+            size_t complex_offset = 0;
+            if (!agg_area_alloc(p, complex_bytes, &complex_offset) ||
+                !add_local(p, name, C_AGG, p->agg_base, declarator_is_const,
+                           declarator_is_volatile)) {
+              declaration_ok = false;
+              break;
+            }
+            c_local_t *complex_local = &p->locals[p->local_count - 1];
+            complex_local->agg = c_complex_aggregate(type);
+            int complex_base = lower_local_load(p, complex_local);
+            c_value_t complex_initial = parse_expr(p, 1);
+            if (complex_base < 0 || complex_initial.value < 0 ||
+                !lower_complex_initialize(p, complex_base, complex_local->agg,
+                                          complex_initial)) {
+              declaration_ok = false;
+              break;
+            }
+            continue;
+          }
           if (!add_local(p, name, type, -1, declarator_is_const,
                          declarator_is_volatile)) {
             declaration_ok = false;
@@ -2803,6 +2893,7 @@ static bool lower_statement_range(c_parser_t *p, size_t start, size_t end,
             local->agg = decl_function_result_agg;
           local->pointee_const = c_type_is_pointer(type) && p->last_type_const;
           local->pointee_volatile = pointee_volatile;
+          local->pointee_seg = pointee_seg;
           local->pointee_array_size = local_pointee_array_size
                                           ? local_pointee_array_size
                                           : decl_pointee_array_size;
@@ -2919,7 +3010,19 @@ static bool lower_statement_range(c_parser_t *p, size_t start, size_t end,
           local->has_integer_constant = has_integer_constant;
           local->integer_constant = integer_constant;
         } else {
-          if (!add_local(p, name, type, initial_value, declarator_is_const,
+          c_type_t local_type = type;
+          int local_initial = initial_value;
+          if (c_type_is_complex(type)) {
+            size_t complex_bytes = type == C_C64 ? 8 : type == C_C128 ? 16 : 32;
+            size_t complex_offset = 0;
+            if (!agg_area_alloc(p, complex_bytes, &complex_offset)) {
+              declaration_ok = false;
+              break;
+            }
+            local_type = C_AGG;
+            local_initial = p->agg_base;
+          }
+          if (!add_local(p, name, local_type, local_initial, declarator_is_const,
                          declarator_is_volatile)) {
             declaration_ok = false;
             break;
@@ -2943,10 +3046,13 @@ static bool lower_statement_range(c_parser_t *p, size_t start, size_t end,
           local->pointee_const = c_type_is_pointer(type) && p->last_type_const;
           local->is_volatile = declarator_is_volatile;
           local->pointee_volatile = pointee_volatile;
+          local->pointee_seg = pointee_seg;
           local->pointee_array_size = local_pointee_array_size
                                           ? local_pointee_array_size
                                           : decl_pointee_array_size;
           local->pointee_array = decl_pointee_array;
+          if (c_type_is_complex(type))
+            local->agg = c_complex_aggregate(type);
         }
       } while (accept(p, ","));
       if (!declaration_ok || (!static_array && !expect(p, ";")))

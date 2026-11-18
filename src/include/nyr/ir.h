@@ -146,6 +146,7 @@ typedef enum {
   NYIR_VEC8_AND_I64,
   NYIR_VEC8_OR_I64,
   NYIR_VEC8_XOR_I64,
+  NYIR_VEC8_MUL_I64, /* four-lane wrapping i64 multiply */
   NYIR_VEC8_REDUCE_ADD_I64, /* dst = scalar a + sum of four i64 lanes in b */
   /* Bounds check: verifies addr + offset within [base, base+len).
    * .a = base pointer, .b = offset, .imm = byte length.
@@ -229,6 +230,14 @@ typedef enum {
 #define NYIR_INST_F_MEM_I32 64u
 #define NYIR_INST_F_MEM_VOLATILE 128u
 #define NYIR_INST_F_MEM_U16 256u
+/*
+ * Segment address space of a memory access. At most one may be set on
+ * NYIR_LOAD_I64/NYIR_STORE_I64. Emitters that cannot encode a segment
+ * prefix must reject the instruction; emitting a plain access would silently
+ * address the wrong memory.
+ */
+#define NYIR_INST_F_MEM_SEG_FS (1u << 22)
+#define NYIR_INST_F_MEM_SEG_GS (1u << 23)
 
 /* Set by nyr_narrow() on scalar-int ALU ops with a proven non-negative u32
  * result, exact `& 0xffffffff` masks, and operations in a low-word expression
@@ -316,8 +325,8 @@ typedef enum {
 #define NYIR_ARG_CLASS_HVA_V128 7u
 #define NYIR_ARG_CLASS_AAPCS_INTEGER_A16 8u
 #define NYIR_ARG_AGG_SIZE(v) ((v) & NYIR_ARG_AGG_SIZE_MASK)
-#define NYIR_ARG_AGG_CLASS(v, n)                                               \
-  (((v) >> ((n) ? NYIR_ARG_AGG_CLASS1_SHIFT : NYIR_ARG_AGG_CLASS0_SHIFT)) &    \
+#define NYIR_ARG_AGG_CLASS(v, n)                                            \
+  (((v) >> ((n) ? NYIR_ARG_AGG_CLASS1_SHIFT : NYIR_ARG_AGG_CLASS0_SHIFT)) & \
    NYIR_ARG_AGG_CLASS_MASK)
 
 /* Calls with more than 6 args carry args[6..] out-of-line in extra_args,
@@ -708,6 +717,26 @@ typedef struct {
   int *idom;
 } nyr_cfg_t;
 
+/*
+ * Single-value view of the type map (same facts as nyr_type_map_init's
+ * value_* flags): bit 1 f64, 2 f32, 4 v128.i64, 8 v128.f64, 16 v128.f32,
+ * 32 v256.i64, 64 v256.f64. Valid until the next nyr_type_roots_init on the
+ * same thread.
+ */
+typedef struct nyr_type_roots_t {
+  size_t value_count;
+  size_t *parents;
+  unsigned char *root_types;
+  /* When set, answers come from nyr_type_value_bits_incremental. */
+  const void *incremental;
+} nyr_type_roots_t;
+bool nyr_type_roots_init(nyr_type_roots_t *roots, const nyr_func_t *nyir,
+                         size_t local_count);
+unsigned nyr_type_roots_value_bits(const nyr_type_roots_t *roots, int value);
+/* Class bits of one value (as above) maintained incrementally per thread for
+ * a function that is still growing; -1 when the caller must use the full
+ * map. */
+int nyr_type_value_bits_incremental(const nyr_func_t *nyir, int value);
 bool nyr_type_map_init(nyr_type_map_t *map, const nyr_func_t *nyir,
                        size_t local_count);
 void nyr_type_map_free(nyr_type_map_t *map);

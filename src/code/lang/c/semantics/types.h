@@ -72,7 +72,19 @@ typedef enum {
   /*
    * Pointer to a SysV x86-64 va_list array.
    */
-  C_VA_LIST_PTR
+  C_VA_LIST_PTR,
+  /*
+   * `_Complex float` and `_Complex double`. Values are 8 and 16 bytes and
+   * classify as SSE/SSE under the SysV x86-64 ABI. `long double _Complex`
+   * needs a distinct 32-byte type and is rejected until one exists.
+   */
+  C_C64,
+  C_C128,
+  C_C64_PTR,
+  C_C128_PTR,
+  /* `long double _Complex`: 32 bytes, 16-byte aligned under SysV. */
+  C_C_LDOUBLE,
+  C_C_LDOUBLE_PTR
 } c_type_t;
 
 typedef struct {
@@ -97,7 +109,8 @@ static bool c_type_is_pointer(c_type_t type) {
          type == C_OPAQUE_PTR_PTR_PTR || type == C_VOID_PTR ||
          type == C_I64_PTR_PTR || type == C_U64_PTR_PTR || type == C_AGG_PTR ||
          type == C_AGG_PTR_PTR || type == C_AGG_ARRAY_PTR ||
-         type == C_AGG_PTR_ARRAY_PTR || type == C_VA_LIST_PTR;
+         type == C_AGG_PTR_ARRAY_PTR || type == C_VA_LIST_PTR ||
+         type == C_C64_PTR || type == C_C128_PTR || type == C_C_LDOUBLE_PTR;
 }
 
 static bool c_type_is_object_pointer(c_type_t type) {
@@ -125,9 +138,15 @@ static bool c_type_is_float(c_type_t type) {
   return type == C_F32 || type == C_F64;
 }
 
+static bool c_type_is_complex(c_type_t type) {
+  return type == C_C64 || type == C_C128 || type == C_C_LDOUBLE;
+}
+
 static size_t c_type_size(nyc_abi_t abi, c_type_t type) {
   if (c_type_is_pointer(type))
     return abi == NYC_ABI_I386 ? 4 : 8;
+  if (c_type_is_complex(type))
+    return type == C_C64 ? 8 : type == C_C128 ? 16 : 32;
   return type == C_U8 || type == C_CHAR                    ? 1
          : type == C_I16 || type == C_U16                  ? 2
          : type == C_I32 || type == C_U32 || type == C_F32 ? 4
@@ -148,6 +167,12 @@ static size_t c_type_alignment(nyc_abi_t abi, c_type_t type) {
   size_t size = c_type_size(abi, type);
   if (abi == NYC_ABI_I386 && size > 4)
     return 4;
+  /*
+   * A complex value aligns like its real component, so half its size, not the
+   * full two-lane width.
+   */
+  if (c_type_is_complex(type))
+    return type == C_C64 ? 4 : type == C_C128 ? 8 : 16;
   return size;
 }
 

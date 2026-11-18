@@ -1767,7 +1767,7 @@ fn get_clipboard(any win) str {
 }
 
 fn text_input_start(any win, any rect=0) bool {
-   "Starts input-method composition for the window (Wayland zwp_text_input_v3); rect is the caret box [x, y, w, h] in window coordinates. Returns false where the backend has no input-method protocol."
+   "Starts input-method composition for the window(Wayland zwp_text_input_v3); rect is the caret box [x, y, w, h] in window coordinates. Returns false where the backend has no input-method protocol."
    if _select_backend_name() != "wayland" { return false }
    wayland_backend.text_input_enable(_native_window(win), rect)
 }
@@ -1779,7 +1779,7 @@ fn text_input_stop(any win) bool {
 }
 
 fn text_input_state(any win) dict {
-   "Returns the backend's text-input state (wanted, focused, shown_preedit)."
+   "Returns the backend's text-input state(wanted, focused, shown_preedit)."
    if _select_backend_name() != "wayland" { return dict(4) }
    wayland_backend.text_input_state(_native_window(win))
 }
@@ -2466,7 +2466,7 @@ fn get_cocoa_view(any win) any {
 }
 
 fn inject_input(any win, str kind, int a=0, int b=0, str path="") bool {
-   "Test hook: delivers a compositor input event through the native backend's own listeners (Wayland only). See core.os.ui.window.platform.linux.wayland.inject_input."
+   "Test hook: delivers a compositor input event through the native backend's own listeners(Wayland only). See core.os.ui.window.platform.linux.wayland.inject_input."
    if _select_backend_name() != "wayland" { return false }
    def native = _native_window(win)
    if !is_dict(native) { return false }

@@ -2875,6 +2875,7 @@ int main(int argc, char **argv, char **envp) {
       ny_report_peak_rss(&opt);
       break;
     }
+    ny_pipeline_exit_after_run = !watching;
     exit_code = ny_pipeline_run(&opt);
     ny_report_peak_rss(&opt);
     if (dbg_baseline_path) {

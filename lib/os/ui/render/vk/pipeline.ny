@@ -35,8 +35,10 @@ def _PIPE_BLEND_OPAQUE = 0
 def _PIPE_BLEND_UI = 1
 def _PIPE_BLEND_ALPHA = 2
 def _PIPE_BLEND_FACTORS = 0x10000
+
 ;; With _PIPE_BLEND_FACTORS: blend the color only, keep the destination alpha.
 def _PIPE_BLEND_KEEP_ALPHA = 0x100
+
 ;; Porter-Duff operator pipelines, built on first use. Typed handles are
 ;; kept in typed globals: a handle stored in a list can read back mangled.
 mut ?handle _blend_pipe_1 = 0
@@ -97,7 +99,7 @@ fn _vk_blend_factor(int code) int {
 mut ptr _blend_custom_pipes = 0
 
 fn blend_op_pipeline(int op, int fsrc_code, int fdst_code) ?handle {
-   "Returns the unlit 2D triangle pipeline that blends with the given premultiplied factors (codes from core.os.ui.render.blend_factors) for operator `op`, building it once."
+   "Returns the unlit 2D triangle pipeline that blends with the given premultiplied factors(codes from core.os.ui.render.blend_factors) for operator `op`, building it once."
    if op == 11 { return _blend_custom_pipeline(fsrc_code, fdst_code) }
    if op <= 0 || op > 10 { return 0 }
    def ?handle have = _blend_pipe_get(op)

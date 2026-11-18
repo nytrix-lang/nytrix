@@ -100,6 +100,11 @@ bool nyr_ensure_parent_dir_for_path(const char *path);
 bool nyr_emit_func(nyr_writer_t *w, const ny_native_target_info_t *target,
                    const nyr_func_t *nyir, const char *label, bool tag_return,
                    char *err, size_t err_len);
+bool nyr_x86_64_emit_mach_scalar_with_options(
+    nyr_writer_t *w, const ny_native_target_info_t *target,
+    const nyr_mach_func_t *mach, const char *func_name, bool tag_return,
+    bool function_return_thunk_extern, bool position_independent, char *err,
+    size_t err_len);
 bool nyr_x86_64_emit_ir(nyr_writer_t *w, const ny_native_target_info_t *target,
                         const nyr_func_t *nyir, const char *func_name,
                         bool tag_return, char *err, size_t err_len);
@@ -111,7 +116,8 @@ bool nyr_x86_64_emit_ir_with_options(
     nyr_writer_t *w, const ny_native_target_info_t *target,
     const nyr_func_t *nyir, const char *func_name, bool tag_return,
     bool is_local, bool retpoline_indirect_calls, bool retpoline_inline_calls,
-    bool function_return_thunk_extern, char *err, size_t err_len);
+    bool function_return_thunk_extern, bool position_independent, char *err,
+    size_t err_len);
 /* First executable machine-form consumer. Scalar integer/control-flow subset;
  * callers retain NYIR encode as the explicit fallback for other shapes. */
 bool nyr_x86_64_emit_mach_scalar(nyr_writer_t *w,
@@ -126,6 +132,9 @@ void nyr_strtab_clear(void);
 const char *nyr_strtab_intern(const char *s, size_t len, char *name_out,
                               size_t name_cap);
 const char *nyr_strtab_get(const char *name, size_t *len_out);
+size_t nyr_strtab_count(void);
+/* Entry i of the string table (name ny_str_<i>). */
+bool nyr_strtab_entry(size_t i, const char **bytes, size_t *len);
 
 /* Session-local pool of foldable top-level def constants emitted as
  * 8-byte .data definitions in object files. */
@@ -272,6 +281,7 @@ bool nyr_native_emit_elf64_c_object_from_nirs_with_data(
     const char *const *function_sections, const bool *function_local,
     bool omit_frame_pointer, bool position_independent,
     bool retpoline_indirect_calls, bool retpoline_inline_calls,
+    bool function_return_thunk_extern, bool cf_protection_branch,
     const nyr_c_object_data_t *data, size_t data_count,
     const ny_native_target_info_t *target, const char *path, char *err,
     size_t err_len);

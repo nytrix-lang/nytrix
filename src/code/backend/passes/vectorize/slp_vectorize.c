@@ -773,7 +773,9 @@ static size_t slp_next_store_in_block(const nyr_func_t *f, size_t at,
   return end;
 }
 
-/* Every transform below starts with two stores in one basic block. */
+/*
+ * Every transform below starts with two stores in one basic block.
+ */
 static bool slp_has_store_pair(const nyr_func_t *f) {
   bool seen_store = false;
   for (size_t i = 0; i < f->len; ++i) {

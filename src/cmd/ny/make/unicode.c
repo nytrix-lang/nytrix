@@ -1,4 +1,6 @@
-/* Unicode 18.0 table generator: updates lib/unicode.ny data tables and parser XID tables in place. */
+/*
+ * Unicode 18.0 table generator: updates lib/unicode.ny data tables and parser XID tables in place.
+ */
 #define _POSIX_C_SOURCE 200809L
 #include "unicode.h"
 
@@ -30,12 +32,10 @@ typedef struct {
   size_t len, cap;
 } u32vec;
 
-
 typedef struct {
   char *data;
   size_t len, cap;
 } strbuf;
-
 
 typedef struct {
   uint32_t a, b, cp;
@@ -149,9 +149,9 @@ static bool file_ok_hash(const char *path, const char *want_hex) {
   return strcmp(got, want_hex) == 0;
 }
 
-
-
-/* read a UCD member: try unzip -p */
+/*
+ * read a UCD member: try unzip -p
+ */
 static char *read_ucd_member(const char *zip_path, const char *member,
                              size_t *len) {
   int fds[2];
@@ -197,7 +197,9 @@ static int cmp_triple(const void *a, const void *b) {
   return 0;
 }
 
-/* Ensure cached source files exist and match hashes */
+/*
+ * Ensure cached source files exist and match hashes
+ */
 static int ensure_sources(const char *root) {
   struct {
     const char *rel, *url, *sha;
@@ -226,7 +228,9 @@ static int ensure_sources(const char *root) {
     fprintf(stderr, "unicode: fetch %s and place it at the path above\n", files[i].url);
     return -1;
   }
-  /* update manifest if needed */
+  /*
+   * update manifest if needed
+   */
   char manifest_path[PATH_MAX];
   snprintf(manifest_path, sizeof(manifest_path),
            "%s/etc/assets/dict/unicode/manifest.json", root);
@@ -254,7 +258,9 @@ static int ensure_sources(const char *root) {
   return 0;
 }
 
-/* ---------- parsing helpers ---------- */
+/*
+ * parsing helpers
+ */
 
 static int gc_name_to_id(const char *s) {
   static const char *names[] = {
@@ -283,7 +289,9 @@ static void parse_unicode_data(const char *text,
     memcpy(line, p, ll);
     line[ll] = '\0';
     if (eol) p = eol + 1; else p += ll;
-    /* split by ; */
+    /*
+     * split by ;
+     */
     char *fields[16] = {0};
     int nf = 0;
     char *cur = line;
@@ -330,7 +338,9 @@ static void parse_unicode_data(const char *text,
             char *end = strchr(d, '>');
             if (end) { kind = 2; d = end + 1; while (*d == ' ' || *d == '\t') d++; }
           }
-          /* parse hex sequence */
+          /*
+           * parse hex sequence
+           */
           u32vec seq = {0};
           char *tok = d;
           while (*tok) {
@@ -395,7 +405,9 @@ static void parse_case_folding(const char *text,
     for (int i = 0; i < np; i++) parts[i] = trim(parts[i]);
     uint32_t cp = parse_hex(parts[0]);
     char status = parts[1][0];
-    /* parse seq */
+    /*
+     * parse seq
+     */
     u32vec seq = {0};
     char *tok = parts[2];
     while (*tok) {
@@ -510,10 +522,14 @@ static void parse_security_confusables(const char *text,
   qsort(*out, *nout, sizeof(**out), cmp_seq_entry);
 }
 
-/* iterate lines of "XXXX..YYYY ; Name" or "XXXX ; Name" returning ranges */
+/*
+ * iterate lines of "XXXX..YYYY ; Name" or "XXXX ; Name" returning ranges
+ */
 static void apply_property_ranges(const char *text, const char *target_name,
                                   int mask, uint32_t *prop) {
-  /* For DerivedCoreProperties, target_name can be "Alphabetic" etc or "InCB; Linker" matched specially */
+  /*
+   * For DerivedCoreProperties, target_name can be "Alphabetic" etc or "InCB; Linker" matched specially
+   */
   const char *p = text;
   while (*p) {
     const char *eol = strchr(p, '\n');
@@ -524,7 +540,9 @@ static void apply_property_ranges(const char *text, const char *target_name,
     if (eol) p = eol + 1; else p += ll;
     char *hash = strchr(line, '#'); if (hash) *hash = '\0';
     char *s = trim(line); if (!*s) continue;
-    /* split fields */
+    /*
+     * split fields
+     */
     char *parts[4] = {0}; int np = 0;
     char *cur = s;
     while (np < 4) {
@@ -535,14 +553,18 @@ static void apply_property_ranges(const char *text, const char *target_name,
     }
     if (np < 2) continue;
     for (int i = 0; i < np; i++) parts[i] = trim(parts[i]);
-    /* check if first field is hex/range */
+    /*
+     * check if first field is hex/range
+     */
     bool is_range_field = false;
     for (char *q = parts[0]; *q; q++) {
       if (isxdigit((unsigned char)*q) || *q == '.' ) { is_range_field = true; }
       else { is_range_field = false; break; }
     }
     if (!is_range_field) continue;
-    /* match name */
+    /*
+     * match name
+     */
     bool match = false;
     int apply_mask = mask;
     if (strcmp(parts[1], "InCB") == 0 && np >= 3) {
@@ -585,7 +607,9 @@ static void apply_emoji_ep(const char *text, uint32_t *prop) {
   }
 }
 
-/* scripts */
+/*
+ * scripts
+ */
 
 static void parse_property_value_aliases(const char *text,
                                          char ***script_names, int **script_ids, size_t *nsc) {
@@ -608,7 +632,9 @@ static void parse_property_value_aliases(const char *text,
     while (np < 5) { parts[np++]=cur; char *semi=strchr(cur,';'); if(!semi) break; *semi='\0'; cur=semi+1; }
     if (np < 3) continue;
     for (int i=0;i<np;i++) parts[i]=trim(parts[i]);
-    /* parts[2] is long name */
+    /*
+     * parts[2] is long name
+     */
     const char *name = parts[2];
     bool exists = false;
     for (size_t i=0;i<*nsc;i++) if (strcmp((*script_names)[i], name)==0) { exists=true; break; }
@@ -734,7 +760,9 @@ static void parse_id_status(const char *text, bool *allowed) {
   }
 }
 
-/* ---------- compression ---------- */
+/*
+ * compression
+ */
 
 static void compress_ranges_u8(const uint8_t *arr, uint32_t *dflt_opt_ignored,
                                u32vec *starts, u32vec *vals) {
@@ -801,7 +829,6 @@ static void simple_map_from_entries(const simple_map_entry *ents, size_t n,
   }
 }
 
-
 static void seq_table_build(seq_entry *ents, size_t n,
                             u32vec *starts, u32vec *offs, u32vec *lens, u32vec *pool) {
   starts->len = offs->len = lens->len = pool->len = 0;
@@ -842,14 +869,15 @@ static void ny_list_ascii_u32(strbuf *b, const char *name, const uint32_t *vals)
   ny_list_u32(b, name, tmp, 128);
 }
 
-
 static int generate_unicode(const char *root) {
   if (ensure_sources(root) != 0) return 1;
   char ucd_zip[PATH_MAX], sec_dir[PATH_MAX];
   snprintf(ucd_zip, sizeof(ucd_zip), "%s/etc/assets/dict/unicode/%s/UCD.zip", root, UCD_VERSION);
   snprintf(sec_dir, sizeof(sec_dir), "%s/etc/assets/dict/unicode/%s/security", root, UCD_VERSION);
 
-  /* read UCD members */
+  /*
+   * read UCD members
+   */
   size_t len_ud=0,len_dcp=0,len_pl=0,len_emoji=0,len_pva=0,len_scr=0,len_gb=0,len_wb=0,len_sb=0,len_ce=0,len_cf=0,len_sc=0;
   char *ud = read_ucd_member(ucd_zip, "UnicodeData.txt", &len_ud);
   char *dcp = read_ucd_member(ucd_zip, "DerivedCoreProperties.txt", &len_dcp);
@@ -896,7 +924,9 @@ static int generate_unicode(const char *root) {
   size_t nspu=0, nspl=0, nspt=0;
   parse_special_casing(spc, &sp_up, &nspu, &sp_lo, &nspl, &sp_ti, &nspt);
 
-  /* properties */
+  /*
+   * properties
+   */
   apply_property_ranges(dcp, "Alphabetic", 1, prop);
   apply_property_ranges(dcp, "Uppercase", 8, prop);
   apply_property_ranges(dcp, "Lowercase", 16, prop);
@@ -916,17 +946,23 @@ static int generate_unicode(const char *root) {
     if (gc[cp] != 0) prop[cp] |= 8192;
   }
 
-  /* scripts */
+  /*
+   * scripts
+   */
   char **sc_names = NULL; int *sc_ids = NULL; size_t nsc = 0;
   parse_property_value_aliases(pva, &sc_names, &sc_ids, &nsc);
-  /* build ordered script name list by id */
+  /*
+   * build ordered script name list by id
+   */
   int max_sid = 0; for(size_t i=0;i<nsc;i++) if(sc_ids[i]>max_sid) max_sid=sc_ids[i];
   char **script_name_list = xmalloc((size_t)(max_sid + 1) * sizeof(char*));
   for (int i=0;i<=max_sid;i++) script_name_list[i] = "Unknown";
   for (size_t i=0;i<nsc;i++) script_name_list[sc_ids[i]] = sc_names[i];
   apply_scripts(scr, sc_names, sc_ids, nsc, script);
 
-  /* breaks */
+  /*
+   * breaks
+   */
   const char *gb_names_arr[] = {"Other","CR","LF","Control","Extend","ZWJ","Regional_Indicator","Prepend","SpacingMark","L","V","T","LV","LVT"};
   const char *wb_names_arr[] = {"Other","CR","LF","Newline","Extend","ZWJ","Regional_Indicator","Format","Katakana","Hebrew_Letter","ALetter","Single_Quote","Double_Quote","MidNumLet","MidLetter","MidNum","Numeric","ExtendNumLet","WSegSpace"};
   const char *sb_names_arr[] = {"Other","CR","LF","Extend","Sep","Format","Sp","Lower","Upper","OLetter","Numeric","ATerm","SContinue","STerm","Close"};
@@ -934,7 +970,9 @@ static int generate_unicode(const char *root) {
   parse_break_property(wbp, wb, wb_names_arr, 19);
   parse_break_property(sbp, sb, sb_names_arr, 15);
 
-  /* composition exclusions */
+  /*
+   * composition exclusions
+   */
   bool *excl = xmalloc(UMAX * sizeof(bool));
   memset(excl, 0, UMAX * sizeof(bool));
   {
@@ -948,7 +986,9 @@ static int generate_unicode(const char *root) {
       uint32_t cpv = parse_hex(s); if (cpv<UMAX) excl[cpv]=true;
     }
   }
-  /* composition map: (a,b)->cp */
+  /*
+   * composition map: (a,b)->cp
+   */
   triple *comp = NULL; size_t ncomp = 0, ccomp = 0;
   for (size_t i=0;i<ndecomp;i++) {
     if (decomps[i].kind == 1 && decomps[i].seq.len == 2 && !excl[decomps[i].cp]) {
@@ -960,7 +1000,9 @@ static int generate_unicode(const char *root) {
     }
   }
   qsort(comp, ncomp, sizeof(*comp), cmp_triple);
-  /* build by_comp grouped by base a */
+  /*
+   * build by_comp grouped by base a
+   */
   u32vec comp_bases={0}, comp_offs={0}, comp_combs={0}, comp_vals={0};
   size_t ci = 0;
   while (ci < ncomp) {
@@ -974,9 +1016,11 @@ static int generate_unicode(const char *root) {
     }
   }
 
-  /* full case mappings */
-  /* build simple fold lookup */
-  /* full_upper/lower/title from special casing where not simple one-to-one same as basic */
+  /*
+   * full case mappings
+   * build simple fold lookup
+   * full_upper/lower/title from special casing where not simple one-to-one same as basic
+   */
   seq_entry *full_upper = NULL, *full_lower = NULL, *full_title = NULL;
   size_t nfu=0, nfl=0, nft=0, cfu=0, cfl=0, cft=0;
   for (size_t i=0;i<nspu;i++) {
@@ -997,10 +1041,14 @@ static int generate_unicode(const char *root) {
       full_title[nft++]=sp_ti[i];
     } else free(sp_ti[i].seq.data);
   }
-  /* full_fold: keep only non-simple entries */
+  /*
+   * full_fold: keep only non-simple entries
+   */
   seq_entry *full_fold2 = NULL; size_t nff=0, cff2=0;
   for (size_t i=0;i<nf_fold;i++) {
-    /* find in simple_fold */
+    /*
+     * find in simple_fold
+     */
     size_t lo=0,hi=ns_fold; uint32_t sval=full_fold[i].cp;
     while(lo<hi){size_t mid=(lo+hi)/2; if(simple_fold[mid].cp<full_fold[i].cp) lo=mid+1; else hi=mid;}
     if(lo<ns_fold && simple_fold[lo].cp==full_fold[i].cp){ sval=simple_fold[lo].to; }
@@ -1013,7 +1061,9 @@ static int generate_unicode(const char *root) {
     }
   }
 
-  /* security */
+  /*
+   * security
+   */
   char conf_path[PATH_MAX], idst_path[PATH_MAX], idty_path[PATH_MAX];
   snprintf(conf_path,sizeof(conf_path),"%s/confusables.txt",sec_dir);
   snprintf(idst_path,sizeof(idst_path),"%s/IdentifierStatus.txt",sec_dir);
@@ -1027,7 +1077,9 @@ static int generate_unicode(const char *root) {
   parse_id_status(idst_txt, id_allowed);
   parse_id_type(idty_txt, id_type);
 
-  /* compress */
+  /*
+   * compress
+   */
   u32vec gc_s={0},gc_v={0},ccc_s={0},ccc_v={0},prop_s={0},prop_v={0};
   u32vec scr_s={0},scr_v={0},gb_s={0},gb_v={0},wb_s={0},wb_v={0},sb_s={0},sb_v={0};
   u32vec id_s={0},id_v={0},id_pairs={0};
@@ -1072,7 +1124,8 @@ static int generate_unicode(const char *root) {
     for(size_t j=0;j<conf[i].seq.len;j++) u32_push(&conf_pool,conf[i].seq.data[j]);
   }
 
-  /* Regenerate the generated-data region in lib/unicode.ny in place.
+  /*
+   * Regenerate the generated-data region in lib/unicode.ny in place.
    *
    * Region markers in lib/unicode.ny:
    *   ;; ny-make:unicode:data:begin
@@ -1080,7 +1133,8 @@ static int generate_unicode(const char *root) {
    *
    * The header keywords line is kept first for source indexing; remaining
    * content before :data:begin and everything after :data:end are preserved.
-   * Only the table definitions between the markers are rewritten. */
+   * Only the table definitions between the markers are rewritten.
+   */
   char data_out_path[PATH_MAX];
   snprintf(data_out_path, sizeof(data_out_path), "%s/lib/unicode.ny", root);
   size_t old_len = 0;
@@ -1202,7 +1256,9 @@ static int generate_unicode(const char *root) {
   free(out.data);
   free(old_ny);
 
-  /* generate XID tables for parser */
+  /*
+   * generate XID tables for parser
+   */
   bool *xid_start = xmalloc(UMAX*sizeof(bool));
   bool *xid_cont = xmalloc(UMAX*sizeof(bool));
   for(uint32_t cp=0; cp<UMAX; cp++){ xid_start[cp]=(prop[cp]&32)!=0; xid_cont[cp]=(prop[cp]&64)!=0; }
@@ -1264,7 +1320,9 @@ static int generate_unicode(const char *root) {
   bool changed = changed_data || changed_h || changed_c;
   fprintf(stderr, "unicode %s — %s\n", UCD_VERSION, changed ? "generated" : "verified, unchanged");
 
-  /* cleanup (best effort) */
+  /*
+   * cleanup (best effort)
+   */
   (void)len_ud; (void)len_dcp; (void)len_pl; (void)len_emoji; (void)len_pva; (void)len_scr; (void)len_gb; (void)len_wb; (void)len_sb; (void)len_ce; (void)len_cf; (void)len_sc;
   return 0;
 }

@@ -998,6 +998,7 @@ static bool nyr_ir_eval_with_calls_profile_impl(
     case NYIR_VEC8_OR_I64:
     case NYIR_VEC4_XOR_I64:
     case NYIR_VEC8_XOR_I64:
+    case NYIR_VEC8_MUL_I64:
     case NYIR_VEC4_SHL_I64:
     case NYIR_VEC4_SAR_I64:
     case NYIR_VEC4_REDUCE_ADD_I64:
@@ -1108,6 +1109,9 @@ static bool nyr_ir_eval_with_calls_profile_impl(
         case NYIR_VEC4_XOR_I64:
         case NYIR_VEC8_XOR_I64:
           uv = ua ^ ub;
+          break;
+        case NYIR_VEC8_MUL_I64:
+          uv = ua * ub;
           break;
         case NYIR_VEC4_SHL_I64:
           uv = ua << (ub & 63u);
@@ -1486,6 +1490,7 @@ bool nyr_is_pure_i64_straightline(const nyr_func_t *f) {
     case NYIR_VEC8_AND_I64:
     case NYIR_VEC8_OR_I64:
     case NYIR_VEC8_XOR_I64:
+    case NYIR_VEC8_MUL_I64:
     case NYIR_VEC4_LOAD_F64:
     case NYIR_VEC4_ADD_F64:
     case NYIR_VEC4_SUB_F64:

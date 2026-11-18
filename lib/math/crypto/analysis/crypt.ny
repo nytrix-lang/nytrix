@@ -210,7 +210,7 @@ fn _sha_crypt(str word, str setting, int kind) str {
    if digest.len > (max_size - 8) / 2 { return "" }
    def digest_bytes = digest.len * 2
    if S.len > max_size - 8 - digest_bytes ||
-      P.len > (max_size - 8 - digest_bytes - S.len) / 2 {
+   P.len > (max_size - 8 - digest_bytes - S.len) / 2 {
       return ""
    }
    def scratch = malloc(P.len * 2 + S.len + digest.len * 2 + 8)

@@ -1,7 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
-  <title>Reparent</title>
-  <desc>Reparent icon.</desc>
-  <g transform="translate(2.0000 2.0000) scale(1.25000)">
-<path fill="#c6c6ca" d="M3 2a2 2 0 0 0-1 3.73v5.542A2 2 0 1 0 4.73 14h6.542a2 2 0 1 0-.002-2H4.729A2 2 0 0 0 4 11.27V5.729A2 2 0 0 0 3 2z"/><path fill="#c6c6ca" d="M9 1 5 4l4 3V5a3 3 0 0 1 3 3v2h2V8a5 5 0 0 0-5-5z"/>
-  </g>
-</svg>

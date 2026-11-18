@@ -103,6 +103,11 @@ typedef struct parser_t {
   int loop_depth;
   int expr_depth;
   int stmt_expr_depth;
+  /* Latched once the nesting limit fires: the rest of the parse unwinds
+   * instead of re-entering the expression parser (a `(` after a failed
+   * primary would otherwise parse as a call and recurse until the C stack
+   * overflowed). */
+  bool expr_depth_exceeded;
   bool quiet;
   bool exit_on_limit;
   /* Parse compound assignments into NY_S_AUG statements instead of

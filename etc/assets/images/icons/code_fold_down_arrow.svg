@@ -1,8 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
-  <title id="title1">Code Fold Down Arrow</title>
-  <desc id="desc1">Code Fold Down Arrow editor icon. Original asset id: codefolddownarrow.</desc>
-  <defs id="defs1" />
-  <g transform="translate(2.0000 2.0000) scale(1.66667)" id="g1">
-    <path d="M 9,4 A 1,1 0 0 0 8.2929688,4.2929687 L 6,6.5859375 3.7070313,4.2929687 a 1,1 0 0 0 -1.4140625,0 1,1 0 0 0 0,1.4140625 l 2.9999999,3.0000001 a 1.0001,1.0001 0 0 0 1.4140625,0 L 9.7070313,5.7070312 a 1,1 0 0 0 0,-1.4140625 A 1,1 0 0 0 9,4 Z" id="path1" fill="#c6c6ca" />
-  </g>
-</svg>

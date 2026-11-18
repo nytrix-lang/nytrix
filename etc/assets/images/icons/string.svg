@@ -1,7 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
-  <title>String</title>
-  <desc>String icon.</desc>
-  <g transform="translate(2.0000 4.5000) scale(1.25000)">
-<path fill="#c6c6ca" d="M7 2H4a2.5 2.5 0 0 0 0 5 .5.5 0 0 1 0 1H1v2h3a2.5 2.5 0 0 0 0-5 .5.5 0 0 1 0-1h3zm1 0v5a3 3 0 0 0 3 3V8a1 1 0 0 1-1-1V6h1V4h-1V2zm4 8h2V7a1 1 0 0 1 1-1V4a3 3 0 0 0-3 3z"/>
-  </g>
-</svg>

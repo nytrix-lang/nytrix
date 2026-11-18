@@ -209,6 +209,7 @@ def MODE_WRAP        = 1
 def MODE_ALTSCREEN   = 2
 def MODE_UTF8        = 4
 def MODE_MOUSE       = 8
+def MODE_ORIGIN      = 1024
 def ESC_START      = 1
 def ESC_CSI        = 2
 def ESC_STR        = 4
@@ -1108,9 +1109,8 @@ fn idle_sleep_ms(dict vt, int now_ticks=-1) int {
 fn update(dict vt) dict {
    "Reads new PTY data and updates the terminal grid/state."
    mut nvt = vt
-   mut str csi_buf = ""
-   mut int csi_value = int(nvt.get("csi_value", 0))
-   mut int csi_has_value = bool(nvt.get("csi_has_value", false)) ? 1 : 0
+   ;; A CSI sequence can straddle two reads: resume its parameter bytes.
+   mut str csi_buf = to_str(nvt.get("esc_buf", ""))
    if int(nvt.get("last_update_bytes", 0)) != 0 {
       nvt = nvt.set("last_update_bytes", 0)
    }
@@ -1286,38 +1286,30 @@ fn update(dict vt) dict {
             store32(st, ESC_CSI, OFF_ESC_STATE)
             store8(st, 0, OFF_CSI_PRIV)
             csi_buf = ""
-            csi_value = 0
-            csi_has_value = 0
          } elif load32(st, OFF_ESC_STATE) == ESC_CSI {
             mut bool csi_final = b >= 64
             if csi_final { csi_final = b <= 126 }
             if csi_final {
-               nvt = _tcsihandle_fast(nvt, st, co, ro, g, pal, dfg, dbg, b, csi_has_value != 0 ? to_str(csi_value) : "")
+               ;; The handler needs every parameter and the private marker
+               ;; (`ESC[2;3H`, `ESC[1;31m`, `ESC[?1049h`); keeping only the last
+               ;; number dropped both.
+               nvt = _tcsihandle_fast(nvt, st, co, ro, g, pal, dfg, dbg, b, csi_buf)
+               g = nvt.get("grid", g)
                csi_buf = ""
-               csi_value = 0
-               csi_has_value = 0
                store32(st, 0, OFF_ESC_STATE)
                store8(st, 0, OFF_CSI_PRIV)
                consumed_until = byte_pos + 1
                continue
             }
-            mut bool digit = b >= 48
-            if digit { digit = b <= 57 }
-            if digit {
-               csi_value = csi_value * 10 + b - 48
-               csi_has_value = 1
-            } else {
-               if b == 59 || b == 58 {
-                  csi_value = 0
-                  csi_has_value = 0
-               }
-            }
+            if b >= 60 && b <= 63 && csi_buf.len == 0 { store8(st, b, OFF_CSI_PRIV) }
+            if b >= 32 && b <= 63 { csi_buf = csi_buf + chr(b) }
             consumed_until = byte_pos + 1
             continue
          } else {
             def bool escape_active = load32(st, OFF_ESC_STATE) != 0
             if escape_active {
                nvt = _tputc_fast(nvt, st, co, ro, g, pal, dfg, dbg, b)
+               g = nvt.get("grid", g)
                consumed_until = byte_pos + 1
                continue
             }
@@ -1373,7 +1365,7 @@ fn update(dict vt) dict {
    }
    store32(st, u_len, OFF_UTF8_LEN)
    _vterm_clamp_cursor(nvt, st, co, ro)
-   nvt = nvt.set("esc_buf", csi_buf).set("csi_value", csi_value).set("csi_has_value", csi_has_value)
+   if load32(st, OFF_ESC_STATE) == ESC_CSI { nvt = nvt.set("esc_buf", csi_buf) }
    free(t_buf)
    nvt
 }
@@ -1785,6 +1777,15 @@ fn _vterm_handle_mouse_scroll(dict vt, ptr st, int ro, int hist_len, f64 cw, f64
    vt
 }
 
+fn _tris_fast(ptr st, int co, int ro, ptr g, int dfg, int dbg) any {
+   "RIS on the visible grid: attributes, screen, cursor, margins and modes."
+   _tresetattr_fast(st, dfg, dbg) _tclearregion_fast(st, co, ro, g, dfg, dbg, 0, 0, co - 1, ro - 1)
+   store32(st, 0, OFF_CX) store32(st, 0, OFF_CY)
+   store32(st, 0, OFF_TOP) store32(st, ro - 1, OFF_BOT)
+   store32(st, MODE_WRAP | MODE_UTF8, OFF_MODE) store32(st, 0, OFF_ESC_STATE)
+   0
+}
+
 fn _tputc_fast(dict vt, ptr st, int co, int ro, ptr g, ptr pal, int dfg, int dbg, int u) any {
    if u >= 0xA0 && _is_space_like(u) { u = 32 }
    mut s_state = load32(st, OFF_ESC_STATE)
@@ -1794,7 +1795,8 @@ fn _tputc_fast(dict vt, ptr st, int co, int ro, ptr g, ptr pal, int dfg, int dbg
    } elif s_state == ESC_START {
       def bool csi_start = u == 91
       if csi_start { store32(st, ESC_CSI, OFF_ESC_STATE) store8(st, 0, OFF_CSI_PRIV) return vt.set("esc_buf", "") }
-      if _esc_is_altcharset(u) { store32(st, ESC_ALTCHARSET, OFF_ESC_STATE) return vt }
+      if _esc_is_altcharset(u) { store8(st, 0, OFF_ESC_STR_KIND) store32(st, ESC_ALTCHARSET, OFF_ESC_STATE) return vt }
+      if u == 35 { store8(st, 35, OFF_ESC_STR_KIND) store32(st, ESC_ALTCHARSET, OFF_ESC_STATE) return vt }
       if _esc_is_string_start(u) {
          store8(st, u, OFF_ESC_STR_KIND)
          store32(st, ESC_STR, OFF_ESC_STATE)
@@ -1802,10 +1804,13 @@ fn _tputc_fast(dict vt, ptr st, int co, int ro, ptr g, ptr pal, int dfg, int dbg
       }
       def bool reset_terminal = u == 99
       if reset_terminal {
-         _tresetattr_fast(st, dfg, dbg) _tclearregion_fast(st, co, ro, g, dfg, dbg, 0, 0, co - 1, ro - 1)
-         store32(st, 0, OFF_CX) store32(st, 0, OFF_CY)
-         store32(st, 0, OFF_TOP) store32(st, ro - 1, OFF_BOT)
-         store32(st, MODE_WRAP | MODE_UTF8, OFF_MODE) store32(st, 0, OFF_ESC_STATE) return vt
+         if (load32(st, OFF_MODE) & MODE_ALTSCREEN) != 0 {
+            def dict main_vt = _tswapscreen_fast(vt, st, co, ro, g, dfg, dbg, false)
+            _tris_fast(st, co, ro, main_vt.get("grid", g), dfg, dbg)
+            return main_vt
+         }
+         _tris_fast(st, co, ro, g, dfg, dbg)
+         return vt
       }
       def bool index_down = u == 68
       if index_down { mut nvt = _tnewline_fast(vt, st, co, ro, g, dfg, dbg, false)
@@ -1897,6 +1902,15 @@ fn _tputc_fast(dict vt, ptr st, int co, int ro, ptr g, ptr pal, int dfg, int dbg
       store8(st, 0, OFF_ESC_STR_KIND)
       nvt = nvt.set("esc_buf", "")
       return _tputc_fast(nvt, st, co, ro, g, pal, dfg, dbg, u)
+   } elif s_state == ESC_ALTCHARSET && load8(st, OFF_ESC_STR_KIND) == 35 {
+      store8(st, 0, OFF_ESC_STR_KIND)
+      if u == 56 {
+         _clear_grid(g, co, ro, dfg, dbg)
+         for i in 0..(co * ro - 1) { store32(g, 69, i * 16) }
+         store32(st, 0, OFF_TOP) store32(st, ro - 1, OFF_BOT)
+         store32(st, load32(st, OFF_MODE) & ~MODE_ORIGIN, OFF_MODE)
+         store32(st, 0, OFF_CX) store32(st, 0, OFF_CY)
+      }
    }
    store32(st, 0, OFF_ESC_STATE) vt
 }
@@ -1929,6 +1943,15 @@ fn _tnewline_fast(dict vt, ptr st, int co, int ro, ptr g, int dfg, int dbg, bool
    else { store32(st, cy + 1, OFF_CY) cy += 1 }
    if first_col { store32(st, 0, OFF_CX) }
    nvt
+}
+
+fn _tmoveto_origin(ptr st, int co, int ro, int x, int y) any {
+   "Absolute move for CUP/HVP/VPA: rows are relative to and clamped inside the scroll region under DECOM."
+   if (load32(st, OFF_MODE) & MODE_ORIGIN) == 0 { return _tmoveto_fast(st, co, ro, x, y) }
+   def top, bot = load32(st, OFF_TOP), load32(st, OFF_BOT)
+   mut ny = top + y
+   if ny < top { ny = top } elif ny > bot { ny = bot }
+   _tmoveto_fast(st, co, ro, x, ny)
 }
 
 fn _tmoveto_fast(ptr st, int co, int ro, int x, int y) any {
@@ -2467,7 +2490,7 @@ fn _tcsihandle_fast(dict vt, ptr st, int co, int ro, ptr g, ptr pal, int dfg, in
    elif u == 67 || u == 97 { _tmoveto_fast(st, co, ro, load32(st, OFF_CX) + ((a0 == 0) ? 1 : a0), load32(st, OFF_CY)) }
    elif u == 68 { _tmoveto_fast(st, co, ro, load32(st, OFF_CX) - ((a0 == 0) ? 1 : a0), load32(st, OFF_CY)) }
    elif u == 71 { _tmoveto_fast(st, co, ro, (a0 == 0) ? 0 : a0 - 1, load32(st, OFF_CY)) }
-   elif u == 100 { _tmoveto_fast(st, co, ro, load32(st, OFF_CX), (a0 == 0) ? 0 : a0 - 1) }
+   elif u == 100 { _tmoveto_origin(st, co, ro, load32(st, OFF_CX), (a0 == 0) ? 0 : a0 - 1) }
    elif u == 115 {
       store32(st, load32(st, OFF_CX), OFF_SAVED_CX)
       store32(st, load32(st, OFF_CY), OFF_SAVED_CY)
@@ -2475,12 +2498,22 @@ fn _tcsihandle_fast(dict vt, ptr st, int co, int ro, ptr g, ptr pal, int dfg, in
    elif u == 117 { _tmoveto_fast(st, co, ro, load32(st, OFF_SAVED_CX), load32(st, OFF_SAVED_CY)) }
    elif u == 83 { vt = _tscrollup_fast(vt, st, co, ro, g, dfg, dbg, load32(st, OFF_TOP), (a0 == 0) ? 1 : a0) }
    elif u == 84 { vt = _tscrolldown_fast(vt, st, co, ro, g, dfg, dbg, load32(st, OFF_TOP), (a0 == 0) ? 1 : a0) }
-   elif u == 72 || u == 102 { _tmoveto_fast(st, co, ro, (a1 == 0) ? 0 : a1 - 1, (a0 == 0) ? 0 : a0 - 1) }
+   elif u == 72 || u == 102 { _tmoveto_origin(st, co, ro, (a1 == 0) ? 0 : a1 - 1, (a0 == 0) ? 0 : a0 - 1) }
    elif u == 114 { if !pr { mut t=(a0==0)?1:a0 mut b=(a1==0)?ro:a1 store32(st, t-1, OFF_TOP)
          store32(st, b-1, OFF_BOT)
-         _tmoveto_fast(st, co, ro, 0, 0) } }
+         _tmoveto_origin(st, co, ro, 0, 0) } }
    elif u == 104 { vt = _tsetmode_fast(vt, st, co, ro, g, dfg, dbg, pr, true, ag) }
    elif u == 108 { vt = _tsetmode_fast(vt, st, co, ro, g, dfg, dbg, pr, false, ag) }
+   elif u == 73 || u == 90 {
+      mut cx = load32(st, OFF_CX)
+      mut n = (a0 == 0) ? 1 : a0
+      while n > 0 {
+         if u == 73 { cx = (cx + 8) & ~7 if cx >= co { cx = co - 1 } }
+         elif cx > 0 { cx = ((cx - 1) / 8) * 8 }
+         n -= 1
+      }
+      store32(st, cx, OFF_CX)
+   }
    elif u == 69 { _tmoveto_fast(st, co, ro, 0, load32(st, OFF_CY) + ((a0==0)?1:a0)) }
    elif u == 70 { _tmoveto_fast(st, co, ro, 0, load32(st, OFF_CY) - ((a0==0)?1:a0)) }
    vt
@@ -2590,6 +2623,11 @@ fn _tsetmode_fast(dict vt, ptr st, int co, int ro, ptr g, int dfg, int dbg, bool
       if pr {
          if a == 1049 || a == 47 || a == 1047 { nvt = _tswapscreen_fast(nvt, st, co, ro, g, dfg, dbg, set) }
          elif a == 25 { store8(st, set ? 1 : 0, OFF_CURSOR_VISIBLE) }
+         elif a == 6 {
+            mut m = load32(st, OFF_MODE)
+            store32(st, set ? (m | MODE_ORIGIN) : (m & ~MODE_ORIGIN), OFF_MODE)
+            _tmoveto_origin(st, co, ro, 0, 0)
+         }
          elif a == 7 { mut m = load32(st, OFF_MODE) store32(st, set ? (m | MODE_WRAP) : (m & ~MODE_WRAP), OFF_MODE) }
          elif a == 1 { store8(st, set ? 1 : 0, OFF_APPKEYS) }
          elif a == 1000 || a == 1002 || a == 1003 || a == 1006 {
@@ -3575,6 +3613,24 @@ fn _vterm_draw_line_ptr(ptr g, list history, int hist_len, int co, int abs_r) pt
 
 mut f64 _scroll_smooth_cache = -1.0
 
+mut _dbg_once = false
+
+mut _dbg_once = false
+
+mut _dbg_once = false
+
+mut _dbg_once = false
+
+mut _dbg_once = false
+
+mut _dbg_once = false
+
+mut _dbg_once = false
+
+mut _dbg_once = false
+
+mut _dbg_once = false
+
 fn draw(dict vt, any ww, any wh) any {
    "Draws draw."
    def ptr st = vt.get("state")
@@ -3590,6 +3646,15 @@ fn draw(dict vt, any ww, any wh) any {
    mut int f_reg = int(fonts.get("regular", 0))
    f_reg = font_prepare(f_reg, _terminal_prime_text())
    def f_obj = _font_get(f_reg)
+   if !_dbg_once { _dbg_once = true eprint("[DBG2] fonts_dict=" + to_str(is_dict(fonts)) + " regular=" + to_str(fonts.get("regular", -9)) + " f_reg=" + to_str(f_reg) + " f_obj=" + to_str(is_dict(f_obj)) + " fast=" + to_str(is_dict(f_obj) ? f_obj.get("fast_glyphs", -1) : -2)) }
+   if !_dbg_once { _dbg_once = true eprint("[DBG2] fonts_dict=" + to_str(is_dict(fonts)) + " regular=" + to_str(fonts.get("regular", -9)) + " f_reg=" + to_str(f_reg) + " f_obj=" + to_str(is_dict(f_obj)) + " fast=" + to_str(is_dict(f_obj) ? f_obj.get("fast_glyphs", -1) : -2)) }
+   if !_dbg_once { _dbg_once = true eprint("[DBG2] fonts_dict=" + to_str(is_dict(fonts)) + " regular=" + to_str(fonts.get("regular", -9)) + " f_reg=" + to_str(f_reg) + " f_obj=" + to_str(is_dict(f_obj)) + " fast=" + to_str(is_dict(f_obj) ? f_obj.get("fast_glyphs", -1) : -2)) }
+   if !_dbg_once { _dbg_once = true eprint("[DBG2] fonts_dict=" + to_str(is_dict(fonts)) + " regular=" + to_str(fonts.get("regular", -9)) + " f_reg=" + to_str(f_reg) + " f_obj=" + to_str(is_dict(f_obj)) + " fast=" + to_str(is_dict(f_obj) ? f_obj.get("fast_glyphs", -1) : -2)) }
+   if !_dbg_once { _dbg_once = true eprint("[DBG2] fonts_dict=" + to_str(is_dict(fonts)) + " regular=" + to_str(fonts.get("regular", -9)) + " f_reg=" + to_str(f_reg) + " f_obj=" + to_str(is_dict(f_obj)) + " fast=" + to_str(is_dict(f_obj) ? f_obj.get("fast_glyphs", -1) : -2)) }
+   if !_dbg_once { _dbg_once = true eprint("[DBG2] fonts_dict=" + to_str(is_dict(fonts)) + " regular=" + to_str(fonts.get("regular", -9)) + " f_reg=" + to_str(f_reg) + " f_obj=" + to_str(is_dict(f_obj)) + " fast=" + to_str(is_dict(f_obj) ? f_obj.get("fast_glyphs", -1) : -2)) }
+   if !_dbg_once { _dbg_once = true eprint("[DBG2] fonts_dict=" + to_str(is_dict(fonts)) + " regular=" + to_str(fonts.get("regular", -9)) + " f_reg=" + to_str(f_reg) + " f_obj=" + to_str(is_dict(f_obj)) + " fast=" + to_str(is_dict(f_obj) ? f_obj.get("fast_glyphs", -1) : -2)) }
+   if !_dbg_once { _dbg_once = true eprint("[DBG2] fonts_dict=" + to_str(is_dict(fonts)) + " regular=" + to_str(fonts.get("regular", -9)) + " f_reg=" + to_str(f_reg) + " f_obj=" + to_str(is_dict(f_obj)) + " fast=" + to_str(is_dict(f_obj) ? f_obj.get("fast_glyphs", -1) : -2)) }
+   if !_dbg_once { _dbg_once = true eprint("[DBG2] fonts_dict=" + to_str(is_dict(fonts)) + " regular=" + to_str(fonts.get("regular", -9)) + " f_reg=" + to_str(f_reg) + " f_obj=" + to_str(is_dict(f_obj)) + " fast=" + to_str(is_dict(f_obj) ? f_obj.get("fast_glyphs", -1) : -2)) }
    def f_size = (f_obj != 0) ? float(f_obj.get("size", 16.0)) : 16.0
    def ascent  = (f_obj != 0) ? float(f_obj.get("ascent", 12.0)) : (f_size * 0.80)
    def descent = (f_obj != 0) ? float(f_obj.get("descent", -4.0)) : (0.0 - f_size * 0.20)
@@ -4386,12 +4451,13 @@ fn _decode_utf8_pending(ptr st, int len) int {
 
 fn put_text(dict vt, str s) dict {
    "Writes write."
-   def ptr st = vt.get("state") def int co = int(vt.get("cols")) def int ro = int(vt.get("rows")) def ptr g = vt.get("grid")
+   def ptr st = vt.get("state") def int co = int(vt.get("cols")) def int ro = int(vt.get("rows")) mut ptr g = vt.get("grid")
    def ptr pal = vt.get("palette") def dfg = vt.get("def_fg") def dbg = vt.get("def_bg")
    def ptr src = cptr(s)
    mut int consumed_until = 0
    def int n = s.len
    mut nvt = vt
+   mut alt_seen = load32(st, OFF_MODE) & MODE_ALTSCREEN
    if n > 0 { _vterm_clear_selection_for_output(st) }
    for byte_i in 0..(n - 1) {
       if byte_i < consumed_until { continue }
@@ -4466,6 +4532,7 @@ fn put_text(dict vt, str s) dict {
          }
       }
       nvt = _tputc_fast(nvt, st, co, ro, g, pal, dfg, dbg, cp)
+      if (load32(st, OFF_MODE) & MODE_ALTSCREEN) != alt_seen { g = nvt.get("grid", g) alt_seen = load32(st, OFF_MODE) & MODE_ALTSCREEN }
       consumed_until = i + w
    }
    nvt

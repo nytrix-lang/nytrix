@@ -1,7 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
-  <title>Height Map Shape 3D</title>
-  <desc>Height Map Shape 3D icon.</desc>
-  <g transform="translate(2.0000 2.0000) scale(1.25000)">
-<linearGradient id="a" x2="0" y1="7" y2="10" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#a2d2ff"/><stop offset="1" stop-color="#5fb2ff"/></linearGradient><path fill="#c6c6ca" d="m1 10 7 3 7-3-7-3z"/><path fill="#c6c6ca" d="M3 10c1-1 2-2 2-4s1-3 3-3 3 1 3 3 1 3 2 4z"/>
-  </g>
-</svg>

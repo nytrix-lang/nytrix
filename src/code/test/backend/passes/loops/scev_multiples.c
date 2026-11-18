@@ -113,15 +113,25 @@ static bool check_case(const char *what, int64_t init, int64_t step,
 }
 
 int main(void) {
-  /* {0,+,3}: every value is a multiple of 3, so `iv % 3` is zero. */
+  /*
+   * {0,+,3}: every value is a multiple of 3, so `iv % 3` is zero.
+   */
   check_case("zero-start-three", 0, 3, 30, 3, true, 3, true, 0);
-  /* {1,+,3}: gcd(1,3) == 1, so the modulo stays. */
+  /*
+   * {1,+,3}: gcd(1,3) == 1, so the modulo stays.
+   */
   check_case("odd-start", 1, 3, 30, 3, false, 0, false, 10);
-  /* {4,+,6}: gcd(4,6) == 2, so only an even divisor folds. */
+  /*
+   * {4,+,6}: gcd(4,6) == 2, so only an even divisor folds.
+   */
   check_case("gcd-two-div-two", 4, 6, 40, 2, true, 2, true, 0);
-  /* 4,10,16,22,28,34 modulo 3 is 1 each: six iterations. */
+  /*
+   * 4,10,16,22,28,34 modulo 3 is 1 each: six iterations.
+   */
   check_case("gcd-two-div-three", 4, 6, 40, 3, true, 2, false, 6);
-  /* Multiple 3 does not imply divisibility by 2. */
+  /*
+   * Multiple 3 does not imply divisibility by 2.
+   */
   check_case("three-mod-two", 0, 3, 30, 2, true, 3, false, 5);
   if (failures) {
     fprintf(stderr, "[scev-multiple] %d case(s) failed\n", failures);

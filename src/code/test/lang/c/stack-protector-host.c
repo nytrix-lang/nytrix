@@ -1,3 +1,6 @@
+/*
+ * Host-side C counterpart for the stack protector test.
+ */
 #include <stdint.h>
 #include <string.h>
 #include <sys/syscall.h>

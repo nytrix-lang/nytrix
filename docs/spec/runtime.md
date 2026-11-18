@@ -128,6 +128,7 @@ Choose one reclamation policy for a compilation:
 | Reference counting | `--heap=rc` | Tracked ownership uses reference-counted cleanup. |
 | Tracing GC (optional) | `--heap=gc` | Reclaims supported managed object graphs. |
 | Safe heap | `--heap=safe` | Manual cleanup with a guard-page heap for the program's own allocations: traps use-after-free, out-of-bounds access, and double free, and reports leaks at exit. See [Safety](../learn/safety.md). |
+| Safe heap | `--heap=safe` | Manual cleanup with a guard-page heap for the program's own allocations: traps use-after-free, out-of-bounds access, and double free, and reports leaks at exit. See [Safety](../learn/safety.md). |
 
 The default policy is `manual`; tracing GC is not enabled unless `-gc` or
 `--heap=gc` is selected. Disabling GC does not make unreachable managed values

@@ -2175,6 +2175,12 @@ static bool ny_a64_emit_inst(ny_a64_obj_ctx_t *c, const nyr_inst_t *in) {
     return ny_a64_store_value(c, in->dst, 0);
   }
   case NYIR_LOAD_I64:
+    if (in->flags & (NYIR_INST_F_MEM_SEG_FS | NYIR_INST_F_MEM_SEG_GS)) {
+      nyr_set_error(c->err, c->err_len,
+                    "AArch64 ELF object writer: segment-relative load is "
+                    "unsupported");
+      return false;
+    }
     return ny_a64_load_value(c, 0, in->a) &&
            ny_a64_u32(c, (in->flags & NYIR_INST_F_MEM_BYTE)
                              ? 0x39400000u /* ldrb w0, [x0] */
@@ -2185,6 +2191,12 @@ static bool ny_a64_emit_inst(ny_a64_obj_ctx_t *c, const nyr_inst_t *in) {
                              : 0xf9400000u) &&
            ny_a64_store_value(c, in->dst, 0);
   case NYIR_STORE_I64:
+    if (in->flags & (NYIR_INST_F_MEM_SEG_FS | NYIR_INST_F_MEM_SEG_GS)) {
+      nyr_set_error(c->err, c->err_len,
+                    "AArch64 ELF object writer: segment-relative store is "
+                    "unsupported");
+      return false;
+    }
     return ny_a64_load_value(c, 0, in->a) && ny_a64_load_value(c, 1, in->c) &&
            ny_a64_u32(c, (in->flags & NYIR_INST_F_MEM_BYTE)
                              ? 0x39000001u /* strb w1, [x0] */
@@ -3885,7 +3897,9 @@ bool nyr_native_emit_elf64_aarch64_object_from_nirs(
   def_names = calloc(def_count ? def_count : 1, sizeof(*def_names));
   ext_names = calloc(extern_count ? extern_count : 1, sizeof(*ext_names));
   if ((def_count && !def_names) || (extern_count && !ext_names)) {
-    /* `done` releases both; freeing here double-freed them. */
+    /*
+     * `done` releases both; freeing here double-freed them.
+     */
     goto done;
   }
   if (!nyr_obj_u8(&strtab, 0))

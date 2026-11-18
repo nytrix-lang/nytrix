@@ -1,3 +1,6 @@
+/*
+ * C front-end regression test: asm bit string rmw.
+ */
 typedef unsigned int u32;
 typedef unsigned char u8;
 

@@ -1,3 +1,6 @@
+/*
+ * Host-side C counterpart for the asm segment memory test.
+ */
 extern int run_segment_test(void);
 __asm__(".text\n.globl run_segment_test\n.type run_segment_test,@function\n"
         "run_segment_test:\n"

@@ -1,3 +1,6 @@
+/*
+ * C front-end regression test: linux int128 shift compound.
+ */
 int main(void) {
   unsigned __int128 value = (unsigned __int128)0x8000000000000000ULL;
   value >>= 1;

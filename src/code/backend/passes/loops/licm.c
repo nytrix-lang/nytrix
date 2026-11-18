@@ -418,6 +418,88 @@ static bool licm_uses_stay_in_loop(const nyr_use_def_t *uses,
   return true;
 }
 
+/*
+ * A full-width load whose address is `buffer + offset`, where `buffer` comes
+ * from rt_tbuf_new_typed_raw(count, size) with constant arguments and the
+ * offset's proven range lies inside [0, (count - 1) * size], reads inside a
+ * live allocation and cannot fault, so it may be hoisted out of a loop that
+ * might run zero times (cd's `px[i]` inside the `j` loop).
+ * NYTRIX_NO_LICM_INBOUNDS_LOAD=1 disables it.
+ */
+static int licm_strip_copies(const nyr_func_t *f, const int *defs, int v) {
+  for (unsigned depth = 0; depth < 16 && v >= 0 && v < f->next_value &&
+                           defs[v] >= 0 && (size_t)defs[v] < f->len;
+       ++depth) {
+    const nyr_inst_t *in = &f->data[defs[v]];
+    if (in->op != NYIR_COPY)
+      break;
+    v = in->a;
+  }
+  return v;
+}
+
+static bool licm_const_value(const nyr_func_t *f, const int *defs, int v,
+                             int64_t *out) {
+  v = licm_strip_copies(f, defs, v);
+  if (v < 0 || v >= f->next_value || defs[v] < 0 || (size_t)defs[v] >= f->len)
+    return false;
+  const nyr_inst_t *in = &f->data[defs[v]];
+  if (in->op != NYIR_CONST_I64)
+    return false;
+  *out = in->imm;
+  return true;
+}
+
+static bool licm_load_in_bounds(const nyr_func_t *f, const int *defs,
+                                const nyr_value_fact_t *facts,
+                                const nyr_scev_info_t *scev, size_t at,
+                                const nyr_inst_t *load) {
+  if (!f || !defs || !facts || !load || load->op != NYIR_LOAD_I64 ||
+      (load->flags &
+       (NYIR_INST_F_MEM_BYTE | NYIR_INST_F_MEM_U16 | NYIR_INST_F_MEM_I32)) ||
+      getenv("NYTRIX_NO_LICM_INBOUNDS_LOAD"))
+    return false;
+  int addr = licm_strip_copies(f, defs, load->a);
+  if (addr < 0 || addr >= f->next_value || defs[addr] < 0 ||
+      (size_t)defs[addr] >= f->len)
+    return false;
+  const nyr_inst_t *add = &f->data[defs[addr]];
+  if (add->op != NYIR_ADD_I64)
+    return false;
+  for (int side = 0; side < 2; ++side) {
+    int base = licm_strip_copies(f, defs, side ? add->b : add->a);
+    int off = side ? add->a : add->b;
+    if (base < 0 || base >= f->next_value || defs[base] < 0 ||
+        (size_t)defs[base] >= f->len || off < 0 || off >= f->next_value)
+      continue;
+    const nyr_inst_t *alloc = &f->data[defs[base]];
+    int64_t count = 0, size = 0;
+    if (alloc->op != NYIR_CALL || !alloc->symbol ||
+        strcmp(alloc->symbol, "rt_tbuf_new_typed_raw") != 0 ||
+        !licm_const_value(f, defs, alloc->a, &count) ||
+        !licm_const_value(f, defs, alloc->b, &size) || count <= 0 ||
+        size < 8 || count > (INT64_C(1) << 31) / size)
+      continue;
+    nyr_range_t r = facts[off].range;
+    nyr_scev_affine_t affine;
+    if (scev && nyr_scev_affine_at(f, scev, defs, off, at, &affine)) {
+      /* Value facts can be loose across loop PHIs; SCEV is exact here. */
+      const nyr_range_t *ar = &affine.range;
+      if (ar->has_min && (!r.has_min || ar->min > r.min)) {
+        r.has_min = true;
+        r.min = ar->min;
+      }
+      if (ar->has_max && (!r.has_max || ar->max < r.max)) {
+        r.has_max = true;
+        r.max = ar->max;
+      }
+    }
+    if (r.has_min && r.has_max && r.min >= 0 && r.max <= (count - 1) * size)
+      return true;
+  }
+  return false;
+}
+
 static bool licm_candidate(
     const nyr_func_t *f, const nyr_scev_info_t *scev, const int *defs,
     size_t at, const nyr_inst_t *in, bool loop_writes_memory,
@@ -760,7 +842,100 @@ static bool licm_order_moves(nyr_licm_move_t *moves, size_t move_count) {
  * single CFG mutation lets the caller rebuild dominance/topology before
  * considering another loop, so nested/adjacent loops never consume stale
  * block or instruction indices.
+ *
+ * Whole-function analyses LICM consults for every loop. They describe the
+ * function as it stands, and licm_hoist_one mutates the function only right
+ * before it returns, so one copy serves every loop of a call. Rebuilding
+ * them per loop made LICM quadratic in the loop count (3 s of a large UI
+ * compile).
  */
+typedef struct licm_shared_t {
+  bool ready, failed;
+  nyr_use_def_t uses;
+  nyr_value_fact_t *facts;
+  int *defs;
+  /*
+   * Per-loop scratch flags, allocated once per round and kept all-false
+   * between loops: every flag a loop sets is indexed from one of its own
+   * instructions, so licm_scratch_reset clears exactly those. Allocating
+   * and zeroing five function-sized arrays per loop was O(loops * size).
+   */
+  bool scratch_ready, scratch_failed;
+  size_t local_count;
+  bool *stored, *addr, *loop_def, *sched, *sel;
+} licm_shared_t;
+
+static bool licm_shared_get(nyr_func_t *f, licm_shared_t *sh) {
+  if (sh->ready)
+    return !sh->failed;
+  sh->ready = true;
+  sh->facts = calloc((size_t)f->next_value, sizeof(*sh->facts));
+  sh->defs = malloc((size_t)f->next_value * sizeof(*sh->defs));
+  if (!sh->facts || !sh->defs || !nyr_build_use_def(f, &sh->uses) ||
+      !nyr_analyze_values(f, sh->facts, (size_t)f->next_value, NULL, 0)) {
+    sh->failed = true;
+    return false;
+  }
+  for (int v = 0; v < f->next_value; ++v)
+    sh->defs[v] = -1;
+  for (size_t i = 0; i < f->len; ++i)
+    if (f->data[i].dst >= 0 && f->data[i].dst < f->next_value)
+      sh->defs[f->data[i].dst] = (int)i;
+  return true;
+}
+
+static bool licm_scratch_get(nyr_func_t *f, licm_shared_t *sh) {
+  if (sh->scratch_ready)
+    return !sh->scratch_failed;
+  sh->scratch_ready = true;
+  sh->local_count = nyr_max_local(f);
+  size_t lc = sh->local_count ? sh->local_count : 1;
+  size_t vc = f->next_value > 0 ? (size_t)f->next_value : 1;
+  sh->stored = calloc(lc, sizeof(bool));
+  sh->addr = calloc(lc, sizeof(bool));
+  sh->loop_def = calloc(vc, sizeof(bool));
+  sh->sched = calloc(vc, sizeof(bool));
+  sh->sel = calloc(f->len ? f->len : 1, sizeof(bool));
+  sh->scratch_failed =
+      !sh->stored || !sh->addr || !sh->loop_def || !sh->sched || !sh->sel;
+  return !sh->scratch_failed;
+}
+
+static void licm_scratch_reset(const nyr_func_t *f, const nyr_cfg_t *cfg,
+                               const bool *in_loop, licm_shared_t *sh) {
+  if (!sh->scratch_ready || sh->scratch_failed || !in_loop)
+    return;
+  for (size_t block = 0; block < cfg->block_count; ++block) {
+    if (!in_loop[block])
+      continue;
+    for (size_t i = cfg->block_start[block]; i < cfg->block_end[block]; ++i) {
+      const nyr_inst_t *in = &f->data[i];
+      if ((in->op == NYIR_STORE_LOCAL || in->op == NYIR_ADDR_LOCAL) &&
+          in->imm >= 0 && (size_t)in->imm < sh->local_count) {
+        sh->stored[in->imm] = false;
+        sh->addr[in->imm] = false;
+      }
+      if (in->dst >= 0 && in->dst < f->next_value) {
+        sh->loop_def[in->dst] = false;
+        sh->sched[in->dst] = false;
+      }
+      sh->sel[i] = false;
+    }
+  }
+}
+
+static void licm_shared_free(licm_shared_t *sh) {
+  free(sh->stored);
+  free(sh->addr);
+  free(sh->loop_def);
+  free(sh->sched);
+  free(sh->sel);
+  free(sh->facts);
+  free(sh->defs);
+  nyr_use_def_free(&sh->uses);
+  *sh = (licm_shared_t){0};
+}
+
 static bool licm_hoist_one(nyr_func_t *f, bool *changed) {
   if (changed)
     *changed = false;
@@ -771,9 +946,11 @@ static bool licm_hoist_one(nyr_func_t *f, bool *changed) {
     nyr_scev_free(&scev);
     return false;
   }
+  licm_shared_t shared = {0};
   bool *in_loop = calloc(cfg.block_count, sizeof(*in_loop));
   if (!in_loop) {
-    nyr_cfg_free(&cfg);
+    licm_shared_free(&shared);
+  nyr_cfg_free(&cfg);
     nyr_scev_free(&scev);
     return false;
   }
@@ -851,40 +1028,26 @@ static bool licm_hoist_one(nyr_func_t *f, bool *changed) {
           (!loop_calls_only_len || loop_has_memory_write))
         continue;
 
-      size_t local_count = nyr_max_local(f);
-      bool *stored_local =
-          local_count ? calloc(local_count, sizeof(*stored_local)) : NULL;
-      bool *addr_taken_local =
-          local_count ? calloc(local_count, sizeof(*addr_taken_local)) : NULL;
-      bool *loop_defined = calloc((size_t)f->next_value, sizeof(*loop_defined));
-      bool *scheduled = calloc((size_t)f->next_value, sizeof(*scheduled));
-      bool *selected_inst = calloc(f->len, sizeof(*selected_inst));
-      nyr_value_fact_t *facts = calloc((size_t)f->next_value, sizeof(*facts));
-      int *defs = malloc((size_t)f->next_value * sizeof(*defs));
-      nyr_use_def_t uses = {0};
+      bool scratch_ok = licm_scratch_get(f, &shared);
+      size_t local_count = scratch_ok ? shared.local_count : nyr_max_local(f);
+      bool *stored_local = scratch_ok && local_count ? shared.stored : NULL;
+      bool *addr_taken_local = scratch_ok && local_count ? shared.addr : NULL;
+      bool *loop_defined = scratch_ok ? shared.loop_def : NULL;
+      bool *scheduled = scratch_ok ? shared.sched : NULL;
+      bool *selected_inst = scratch_ok ? shared.sel : NULL;
+      bool shared_ok = licm_shared_get(f, &shared);
+      const nyr_value_fact_t *facts = shared.facts;
+      const int *defs = shared.defs;
+      nyr_use_def_t uses = shared.uses;
       if ((local_count && (!stored_local || !addr_taken_local)) ||
-          !loop_defined || !scheduled || !selected_inst || !facts || !defs ||
-          !nyr_build_use_def(f, &uses) ||
-          !nyr_analyze_values(f, facts, (size_t)f->next_value, NULL, 0)) {
-        free(stored_local);
-        free(addr_taken_local);
-        free(loop_defined);
-        free(scheduled);
-        free(selected_inst);
-        free(facts);
-        free(defs);
-        nyr_use_def_free(&uses);
-        free(in_loop);
-        nyr_cfg_free(&cfg);
+          !loop_defined || !scheduled || !selected_inst || !shared_ok) {
+        licm_scratch_reset(f, &cfg, in_loop, &shared);
+                                free(in_loop);
+        licm_shared_free(&shared);
+  nyr_cfg_free(&cfg);
         nyr_scev_free(&scev);
         return false;
       }
-
-      for (int v = 0; v < f->next_value; ++v)
-        defs[v] = -1;
-      for (size_t i = 0; i < f->len; ++i)
-        if (f->data[i].dst >= 0 && f->data[i].dst < f->next_value)
-          defs[f->data[i].dst] = (int)i;
 
       bool loop_writes_memory = false;
       for (size_t block = 0; block < cfg.block_count; ++block) {
@@ -905,8 +1068,9 @@ static bool licm_hoist_one(nyr_func_t *f, bool *changed) {
               NYIR_EFFECT_UNKNOWN_SIDE_EFFECT;
           if ((effects & memory_clobbers) ||
               (effects & NYIR_EFFECT_ALLOCATION) ||
-              (in->op == NYIR_CALL && !licm_readonly_len_call(in)))
+              (in->op == NYIR_CALL && !licm_readonly_len_call(in))) {
             loop_writes_memory = true;
+          }
           if (in->op == NYIR_STORE_LOCAL && in->imm >= 0 &&
               (size_t)in->imm < local_count)
             stored_local[in->imm] = true;
@@ -932,9 +1096,13 @@ static bool licm_hoist_one(nyr_func_t *f, bool *changed) {
             unsigned effects = nyr_effective_effects(in);
             bool is_may_trap = (effects & NYIR_EFFECT_MAY_TRAP) != 0;
             bool trap_equivalent_read =
-                is_may_trap && licm_trap_equivalent_read(
+                is_may_trap &&
+                licm_load_in_bounds(f, defs, facts, &scev, i, in);
+            trap_equivalent_read =
+                trap_equivalent_read ||
+                (is_may_trap && licm_trap_equivalent_read(
                                    &cfg, in_loop, header, latch, preheader,
-                                   block, in->op == NYIR_CALL, positive_trip);
+                                   block, in->op == NYIR_CALL, positive_trip));
             bool stable_managed_read =
                 in->op == NYIR_CALL && in->symbol &&
                 strcmp(in->symbol, "rt_tbuf_len_raw") == 0 && in->a >= 0 &&
@@ -994,16 +1162,10 @@ static bool licm_hoist_one(nyr_func_t *f, bool *changed) {
                 !licm_grow_moves(&moves, &move_cap,
                                  move_count + required_moves)) {
               free(moves);
-              free(stored_local);
-              free(addr_taken_local);
-              free(loop_defined);
-              free(scheduled);
-              free(selected_inst);
-              free(facts);
-              free(defs);
-              nyr_use_def_free(&uses);
-              free(in_loop);
-              nyr_cfg_free(&cfg);
+              licm_scratch_reset(f, &cfg, in_loop, &shared);
+                                                        free(in_loop);
+              licm_shared_free(&shared);
+  nyr_cfg_free(&cfg);
               nyr_scev_free(&scev);
               return false;
             }
@@ -1057,15 +1219,8 @@ static bool licm_hoist_one(nyr_func_t *f, bool *changed) {
 
       if (move_count == 0) {
         free(moves);
-        free(stored_local);
-        free(addr_taken_local);
-        free(loop_defined);
-        free(scheduled);
-        free(selected_inst);
-        free(facts);
-        free(defs);
-        nyr_use_def_free(&uses);
-        continue;
+        licm_scratch_reset(f, &cfg, in_loop, &shared);
+                                continue;
       }
 
       /*
@@ -1101,28 +1256,16 @@ static bool licm_hoist_one(nyr_func_t *f, bool *changed) {
       }
       if (move_count == 0) {
         free(moves);
-        free(stored_local);
-        free(addr_taken_local);
-        free(loop_defined);
-        free(scheduled);
-        free(selected_inst);
-        free(facts);
-        free(defs);
-        continue;
+        licm_scratch_reset(f, &cfg, in_loop, &shared);
+                        continue;
       }
 
       if (!licm_order_moves(moves, move_count)) {
         free(moves);
-        free(stored_local);
-        free(addr_taken_local);
-        free(loop_defined);
-        free(scheduled);
-        free(selected_inst);
-        free(facts);
-        free(defs);
-        nyr_use_def_free(&uses);
-        free(in_loop);
-        nyr_cfg_free(&cfg);
+        licm_scratch_reset(f, &cfg, in_loop, &shared);
+                                free(in_loop);
+        licm_shared_free(&shared);
+  nyr_cfg_free(&cfg);
         nyr_scev_free(&scev);
         return false;
       }
@@ -1136,32 +1279,20 @@ static bool licm_hoist_one(nyr_func_t *f, bool *changed) {
             move_count, header, preheader, at);
       if (move_count > SIZE_MAX - f->len) {
         free(moves);
-        free(stored_local);
-        free(addr_taken_local);
-        free(loop_defined);
-        free(scheduled);
-        free(selected_inst);
-        free(facts);
-        free(defs);
-        nyr_use_def_free(&uses);
-        free(in_loop);
-        nyr_cfg_free(&cfg);
+        licm_scratch_reset(f, &cfg, in_loop, &shared);
+                                free(in_loop);
+        licm_shared_free(&shared);
+  nyr_cfg_free(&cfg);
         nyr_scev_free(&scev);
         return false;
       }
       size_t need = f->len + move_count;
       if (!nir_ensure_inst_space(f, move_count)) {
         free(moves);
-        free(stored_local);
-        free(addr_taken_local);
-        free(loop_defined);
-        free(scheduled);
-        free(selected_inst);
-        free(facts);
-        free(defs);
-        nyr_use_def_free(&uses);
-        free(in_loop);
-        nyr_cfg_free(&cfg);
+        licm_scratch_reset(f, &cfg, in_loop, &shared);
+                                free(in_loop);
+        licm_shared_free(&shared);
+  nyr_cfg_free(&cfg);
         nyr_scev_free(&scev);
         return false;
       }
@@ -1205,16 +1336,10 @@ static bool licm_hoist_one(nyr_func_t *f, bool *changed) {
       f->len = need;
 
       free(moves);
-      free(stored_local);
-      free(addr_taken_local);
-      free(loop_defined);
-      free(scheduled);
-      free(selected_inst);
-      free(facts);
-      free(defs);
-      nyr_use_def_free(&uses);
-      free(in_loop);
-      nyr_cfg_free(&cfg);
+      licm_scratch_reset(f, &cfg, in_loop, &shared);
+                        free(in_loop);
+      licm_shared_free(&shared);
+  nyr_cfg_free(&cfg);
       nyr_scev_free(&scev);
       if (changed)
         *changed = true;
@@ -1223,6 +1348,7 @@ static bool licm_hoist_one(nyr_func_t *f, bool *changed) {
   }
 
   free(in_loop);
+  licm_shared_free(&shared);
   nyr_cfg_free(&cfg);
   nyr_scev_free(&scev);
   return true;

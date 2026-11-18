@@ -143,6 +143,16 @@ const char *nyr_strtab_intern(const char *s, size_t len, char *name_out,
   return e->name;
 }
 
+size_t nyr_strtab_count(void) { return ny_strtab_len; }
+
+bool nyr_strtab_entry(size_t i, const char **bytes, size_t *len) {
+  if (i >= ny_strtab_len)
+    return false;
+  *bytes = ny_strtab[i].bytes;
+  *len = ny_strtab[i].len;
+  return true;
+}
+
 const char *nyr_strtab_get(const char *name, size_t *len_out) {
   if (!name || !name[0])
     return NULL;
@@ -198,6 +208,133 @@ bool nyr_strtab_append_defs(nyr_obj_buf_t *code, nyr_x64_obj_symbol_def_t *defs,
 }
 
 /*
+ * Name indexes for the global and constant tables. Lowering asks them for
+ * every global reference (nyr_globaltab_name was a linear strcmp scan, 2-3%
+ * of a large serial compile). Slots hold entry index + 1; `chain` links
+ * entries with the same key in insertion order for the suffix lookups.
+ */
+typedef struct {
+  uint32_t *slots;
+  size_t cap;
+  int32_t *chain;
+  size_t chain_cap;
+} ny_tab_index_t;
+
+static uint32_t ny_tab_hash(const char *s, size_t n) {
+  uint32_t h = 2166136261u;
+  for (size_t i = 0; i < n; ++i)
+    h = (h ^ (unsigned char)s[i]) * 16777619u;
+  return h;
+}
+
+static void ny_tab_index_free(ny_tab_index_t *ix) {
+  free(ix->slots);
+  free(ix->chain);
+  *ix = (ny_tab_index_t){0};
+}
+
+/*
+ * key(i) gives entry i's key; for chained (multi) keys the head slot holds
+ * the first entry and chain[i] the next entry with the same key.
+ */
+typedef const char *(*ny_tab_key_fn)(size_t i, size_t *len);
+
+static bool ny_tab_index_insert(ny_tab_index_t *ix, size_t i, const char *key,
+                                size_t key_len, ny_tab_key_fn key_of,
+                                bool multi);
+
+static bool ny_tab_index_grow(ny_tab_index_t *ix, size_t len,
+                              ny_tab_key_fn key_of, bool multi) {
+  size_t cap = ix->cap ? ix->cap : 256;
+  while (cap < (len + 1) * 2)
+    cap *= 2;
+  if (cap != ix->cap) {
+    uint32_t *slots = calloc(cap, sizeof(*slots));
+    if (!slots)
+      return false;
+    free(ix->slots);
+    ix->slots = slots;
+    ix->cap = cap;
+    for (size_t i = 0; i < len; ++i)
+      if (ix->chain && i < ix->chain_cap)
+        ix->chain[i] = -1;
+    for (size_t i = 0; i < len; ++i) {
+      size_t kl = 0;
+      const char *k = key_of(i, &kl);
+      if (!ny_tab_index_insert(ix, i, k, kl, key_of, multi))
+        return false;
+    }
+  }
+  if (multi && len + 1 > ix->chain_cap) {
+    size_t cc = ix->chain_cap ? ix->chain_cap * 2 : 256;
+    while (cc < len + 1)
+      cc *= 2;
+    int32_t *chain = realloc(ix->chain, cc * sizeof(*chain));
+    if (!chain)
+      return false;
+    for (size_t i = ix->chain_cap; i < cc; ++i)
+      chain[i] = -1;
+    ix->chain = chain;
+    ix->chain_cap = cc;
+  }
+  return true;
+}
+
+static bool ny_tab_index_insert(ny_tab_index_t *ix, size_t i, const char *key,
+                                size_t key_len, ny_tab_key_fn key_of,
+                                bool multi) {
+  size_t mask = ix->cap - 1;
+  for (size_t at = ny_tab_hash(key, key_len) & mask;; at = (at + 1) & mask) {
+    uint32_t e = ix->slots[at];
+    if (!e) {
+      ix->slots[at] = (uint32_t)(i + 1);
+      if (multi && i < ix->chain_cap)
+        ix->chain[i] = -1;
+      return true;
+    }
+    size_t kl = 0;
+    const char *k = key_of(e - 1, &kl);
+    if (kl == key_len && memcmp(k, key, kl) == 0) {
+      if (!multi)
+        return true;
+      /*
+       * append to the end of the chain to keep insertion order
+       */
+      size_t last = e - 1;
+      while (ix->chain[last] >= 0)
+        last = (size_t)ix->chain[last];
+      ix->chain[last] = (int32_t)i;
+      ix->chain[i] = -1;
+      return true;
+    }
+  }
+}
+
+/*
+ * First entry whose key equals `key`, or SIZE_MAX.
+ */
+static size_t ny_tab_index_find(const ny_tab_index_t *ix, const char *key,
+                                size_t key_len, ny_tab_key_fn key_of) {
+  if (!ix->cap)
+    return SIZE_MAX;
+  size_t mask = ix->cap - 1;
+  for (size_t at = ny_tab_hash(key, key_len) & mask;; at = (at + 1) & mask) {
+    uint32_t e = ix->slots[at];
+    if (!e)
+      return SIZE_MAX;
+    size_t kl = 0;
+    const char *k = key_of(e - 1, &kl);
+    if (kl == key_len && memcmp(k, key, kl) == 0)
+      return e - 1;
+  }
+}
+
+static const char *ny_name_tail_of(const char *name) {
+  const char *dot = strrchr(name, '.');
+  return dot ? dot + 1 : name;
+}
+
+/*
  * Session-local pool of foldable top-level `def` constants referenced as
  * object symbols. The table grows geometrically; the name width remains a
  * symbol-format sanity bound.
@@ -212,6 +349,17 @@ typedef struct {
 static ny_consttab_ent_t *ny_consttab;
 static size_t ny_consttab_len;
 static size_t ny_consttab_cap;
+static ny_tab_index_t ny_consttab_exact, ny_consttab_tail;
+
+static const char *ny_consttab_key(size_t i, size_t *len) {
+  *len = strlen(ny_consttab[i].name);
+  return ny_consttab[i].name;
+}
+static const char *ny_consttab_tail_key(size_t i, size_t *len) {
+  const char *t = ny_name_tail_of(ny_consttab[i].name);
+  *len = strlen(t);
+  return t;
+}
 
 static bool ny_consttab_reserve(size_t want) {
   if (want <= ny_consttab_cap)
@@ -232,6 +380,8 @@ static bool ny_consttab_reserve(size_t want) {
 }
 
 void nyr_consttab_clear(void) {
+  ny_tab_index_free(&ny_consttab_exact);
+  ny_tab_index_free(&ny_consttab_tail);
   free(ny_consttab);
   ny_consttab = NULL;
   ny_consttab_len = 0;
@@ -246,37 +396,41 @@ bool nyr_consttab_add(const char *name, int64_t value) {
             NY_CONSTTAB_NAME - 1u, name);
     return false;
   }
-  for (size_t i = 0; i < ny_consttab_len; ++i) {
-    if (strcmp(ny_consttab[i].name, name) == 0)
-      return true; /* already registered — keep first value */
-  }
-  if (!ny_consttab_reserve(ny_consttab_len + 1u))
+  if (nyr_consttab_has(name))
+    return true; /* already registered — keep first value */
+  if (!ny_consttab_reserve(ny_consttab_len + 1u) ||
+      !ny_tab_index_grow(&ny_consttab_exact, ny_consttab_len, ny_consttab_key,
+                         false) ||
+      !ny_tab_index_grow(&ny_consttab_tail, ny_consttab_len,
+                         ny_consttab_tail_key, true))
     return false;
   snprintf(ny_consttab[ny_consttab_len].name,
            sizeof(ny_consttab[ny_consttab_len].name), "%s", name);
   ny_consttab[ny_consttab_len].value = value;
-  ny_consttab_len++;
+  size_t i = ny_consttab_len++;
+  size_t kl = 0;
+  const char *k = ny_consttab_key(i, &kl);
+  ny_tab_index_insert(&ny_consttab_exact, i, k, kl, ny_consttab_key, false);
+  k = ny_consttab_tail_key(i, &kl);
+  ny_tab_index_insert(&ny_consttab_tail, i, k, kl, ny_consttab_tail_key, true);
   return true;
 }
 
 bool nyr_consttab_has(const char *name) {
   if (!name)
     return false;
-  for (size_t i = 0; i < ny_consttab_len; ++i)
-    if (strcmp(ny_consttab[i].name, name) == 0)
-      return true;
-  return false;
+  return ny_tab_index_find(&ny_consttab_exact, name, strlen(name),
+                           ny_consttab_key) != SIZE_MAX;
 }
 bool nyr_consttab_get(const char *name, int64_t *value) {
   if (!name || !value)
     return false;
-  for (size_t i = 0; i < ny_consttab_len; ++i) {
-    if (strcmp(ny_consttab[i].name, name) == 0) {
-      *value = ny_consttab[i].value;
-      return true;
-    }
-  }
-  return false;
+  size_t i = ny_tab_index_find(&ny_consttab_exact, name, strlen(name),
+                               ny_consttab_key);
+  if (i == SIZE_MAX)
+    return false;
+  *value = ny_consttab[i].value;
+  return true;
 }
 
 bool nyr_consttab_get_tail(const char *name, int64_t *value) {
@@ -284,7 +438,15 @@ bool nyr_consttab_get_tail(const char *name, int64_t *value) {
     return false;
   const ny_consttab_ent_t *match = NULL;
   size_t name_len = strlen(name);
-  for (size_t i = 0; i < ny_consttab_len; ++i) {
+  /*
+   * A dot-bounded suffix of `name` ends in name's last segment.
+   */
+  const char *tail = ny_name_tail_of(name);
+  size_t first = ny_tab_index_find(&ny_consttab_tail, tail, strlen(tail),
+                                   ny_consttab_tail_key);
+  for (size_t i = first; i != SIZE_MAX;
+       i = ny_consttab_tail.chain[i] < 0 ? SIZE_MAX
+                                         : (size_t)ny_consttab_tail.chain[i]) {
     const char *candidate = ny_consttab[i].name;
     size_t candidate_len = strlen(candidate);
     if (candidate_len < name_len ||
@@ -350,8 +512,21 @@ typedef struct {
 static ny_globaltab_ent_t *ny_globaltab;
 static size_t ny_globaltab_len;
 static size_t ny_globaltab_cap;
+static ny_tab_index_t ny_globaltab_exact, ny_globaltab_tail;
+
+static const char *ny_globaltab_key(size_t i, size_t *len) {
+  *len = strlen(ny_globaltab[i].name);
+  return ny_globaltab[i].name;
+}
+static const char *ny_globaltab_tail_key(size_t i, size_t *len) {
+  const char *t = ny_name_tail_of(ny_globaltab[i].name);
+  *len = strlen(t);
+  return t;
+}
 
 void nyr_globaltab_clear(void) {
+  ny_tab_index_free(&ny_globaltab_exact);
+  ny_tab_index_free(&ny_globaltab_tail);
   free(ny_globaltab);
   ny_globaltab = NULL;
   ny_globaltab_len = 0;
@@ -361,9 +536,13 @@ void nyr_globaltab_clear(void) {
 bool nyr_globaltab_add(const char *name) {
   if (!name || !name[0] || strlen(name) >= NY_CONSTTAB_NAME)
     return false;
-  for (size_t i = 0; i < ny_globaltab_len; ++i)
-    if (strcmp(ny_globaltab[i].name, name) == 0)
-      return true;
+  if (nyr_globaltab_name(name))
+    return true;
+  if (!ny_tab_index_grow(&ny_globaltab_exact, ny_globaltab_len,
+                         ny_globaltab_key, false) ||
+      !ny_tab_index_grow(&ny_globaltab_tail, ny_globaltab_len,
+                         ny_globaltab_tail_key, true))
+    return false;
   if (ny_globaltab_len == ny_globaltab_cap) {
     size_t cap = ny_globaltab_cap ? ny_globaltab_cap * 2u : 64u;
     if (cap < ny_globaltab_cap)
@@ -377,32 +556,33 @@ bool nyr_globaltab_add(const char *name) {
   }
   snprintf(ny_globaltab[ny_globaltab_len].name,
            sizeof(ny_globaltab[ny_globaltab_len].name), "%s", name);
-  ++ny_globaltab_len;
+  size_t i = ny_globaltab_len++;
+  size_t kl = 0;
+  const char *k = ny_globaltab_key(i, &kl);
+  ny_tab_index_insert(&ny_globaltab_exact, i, k, kl, ny_globaltab_key, false);
+  k = ny_globaltab_tail_key(i, &kl);
+  ny_tab_index_insert(&ny_globaltab_tail, i, k, kl, ny_globaltab_tail_key,
+                      true);
   return true;
 }
 
 const char *nyr_globaltab_name(const char *name) {
   if (!name)
     return NULL;
-  for (size_t i = 0; i < ny_globaltab_len; ++i)
-    if (strcmp(ny_globaltab[i].name, name) == 0)
-      return ny_globaltab[i].name;
-  return NULL;
+  size_t i = ny_tab_index_find(&ny_globaltab_exact, name, strlen(name),
+                               ny_globaltab_key);
+  return i == SIZE_MAX ? NULL : ny_globaltab[i].name;
 }
 const char *nyr_globaltab_name_tail(const char *name) {
   if (!name || !*name)
     return NULL;
-  const char *match = NULL;
-  for (size_t i = 0; i < ny_globaltab_len; ++i) {
-    const char *dot = strrchr(ny_globaltab[i].name, '.');
-    const char *tail = dot ? dot + 1 : ny_globaltab[i].name;
-    if (strcmp(tail, name) != 0)
-      continue;
-    if (match)
-      return NULL;
-    match = ny_globaltab[i].name;
-  }
-  return match;
+  size_t i = ny_tab_index_find(&ny_globaltab_tail, name, strlen(name),
+                               ny_globaltab_tail_key);
+  if (i == SIZE_MAX)
+    return NULL;
+  if (ny_globaltab_tail.chain[i] >= 0)
+    return NULL; /* ambiguous */
+  return ny_globaltab[i].name;
 }
 
 bool nyr_globaltab_has(const char *name) {

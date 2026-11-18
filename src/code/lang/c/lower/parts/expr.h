@@ -118,10 +118,19 @@ static bool lower_member_rvalue(c_parser_t *p, c_value_t base, c_value_t *out) {
     if (address < 0)
       return false;
     if (field->kind == C_AGG_FIELD_AGG) {
+      /*
+       * A field declared against a forward-declared tag keeps that
+       * incomplete object; resolve it to the completed definition before
+       * the aggregate is used in an initializer or assignment.
+       */
+      c_agg_type_t *field_agg =
+          complete_tag(p, (c_agg_type_t *)field->agg);
+      if (!field_agg)
+        field_agg = (c_agg_type_t *)field->agg;
       if (!record_lvalue(p, address, address, C_AGG, field->is_volatile))
         return false;
-      p->lvalues[p->lvalue_count - 1].agg = field->agg;
-      value = (c_value_t){address, C_AGG, field->agg};
+      p->lvalues[p->lvalue_count - 1].agg = field_agg;
+      value = (c_value_t){address, C_AGG, field_agg};
       continue;
     }
     if (field->kind == C_AGG_FIELD_ARRAY) {
@@ -454,6 +463,32 @@ static bool lower_member_rvalue(c_parser_t *p, c_value_t base, c_value_t *out) {
                                                           .dst = -1,
                                                           .a = loaded,
                                                           .b = offset});
+        /*
+         * Indexing a pointer-to-array member yields the row, which decays to
+         * a pointer to its first element; it must not load a scalar from the
+         * row. Record the row shape so a second subscript still works.
+         */
+        if (field->pointer_to_array && address >= 0) {
+          c_type_t element_type = (c_type_t)field->pointer_element_type;
+          size_t element_size = c_type_size(p->abi, element_type);
+          if (!element_size) {
+            fail(p, "pointer-to-array field has an incomplete element type");
+            return false;
+          }
+          c_array_shape_t shape = {.rank = 1,
+                                   .element_size = element_size,
+                                   .element_type = element_type,
+                                   .pointer_to_array = true};
+          shape.extent[0] = field->elem_size / element_size;
+          if (!shape.extent[0] || !remember_array_shape(p, address, shape))
+            return false;
+          c_type_t row_type = c_add_pointer_levels(element_type, 1);
+          if (row_type == C_BAD ||
+              !record_lvalue(p, address, address, row_type, field->is_volatile))
+            return false;
+          value = (c_value_t){address, row_type, field->agg};
+          continue;
+        }
         int element =
             address < 0 ? -1
             : stride == 2
@@ -550,6 +585,37 @@ static bool lower_member_rvalue(c_parser_t *p, c_value_t base, c_value_t *out) {
         return false;
       p->lvalues[p->lvalue_count - 1].bitfield = field;
       *out = (c_value_t){loaded, type, NULL};
+      return true;
+    }
+    if (field->kind == C_AGG_FIELD_C64 || field->kind == C_AGG_FIELD_C128) {
+      /*
+       * A complex member rvalue is its address tagged with a synthetic
+       * two-field aggregate: the existing aggregate copy path moves both
+       * halves, arithmetic keeps rejecting C_AGG instead of using the
+       * address, and component access recognizes the SIZE_MAX marker.
+       */
+      static const c_agg_type_t complex_f32_agg = {
+          .scope_id = SIZE_MAX,
+          .complete = true,
+          .size = 8,
+          .align = 4,
+          .field_count = 2,
+          .fields = {{.kind = C_AGG_FIELD_F32, .offset = 0, .size = 4, .align = 4},
+                     {.kind = C_AGG_FIELD_F32, .offset = 4, .size = 4, .align = 4}}};
+      static const c_agg_type_t complex_f64_agg = {
+          .scope_id = SIZE_MAX,
+          .complete = true,
+          .size = 16,
+          .align = 8,
+          .field_count = 2,
+          .fields = {{.kind = C_AGG_FIELD_F64, .offset = 0, .size = 8, .align = 8},
+                     {.kind = C_AGG_FIELD_F64, .offset = 8, .size = 8, .align = 8}}};
+      const c_agg_type_t *complex_agg =
+          field->kind == C_AGG_FIELD_C64 ? &complex_f32_agg : &complex_f64_agg;
+      if (!record_lvalue(p, address, address, C_AGG, field->is_volatile))
+        return false;
+      p->lvalues[p->lvalue_count - 1].agg = complex_agg;
+      *out = (c_value_t){address, C_AGG, complex_agg};
       return true;
     }
     bool is_f32 = field->kind == C_AGG_FIELD_F32;
@@ -1371,12 +1437,22 @@ static c_value_t lower_aggregate_call_result(c_parser_t *p, int result,
         return (c_value_t){-1, C_BAD, NULL};
     }
     if (class1 == NYIR_ARG_CLASS_INTEGER || class1 == NYIR_ARG_CLASS_SSE) {
+      /*
+       * SSE eightbytes fill the return-register sequence in order: an
+       * INTEGER/SSE pair returns its floating half in xmm0, while SSE/SSE
+       * uses xmm0 then xmm1. Capturing xmm1 unconditionally read a stale
+       * register for the floating half of mixed-class results.
+       */
+      unsigned selector =
+          class1 == NYIR_ARG_CLASS_INTEGER
+              ? 0u
+              : (class0 == NYIR_ARG_CLASS_SSE ? 3u : 2u);
       returned[1] = emit_value(
           p, (nyr_inst_t){.op = NYIR_CAPTURE_RET,
                           .dst = -1,
                           .a = -1,
                           .b = -1,
-                          .imm = class1 == NYIR_ARG_CLASS_INTEGER ? 0 : 3});
+                          .imm = (int64_t)selector});
       if (returned[1] < 0)
         return (c_value_t){-1, C_BAD, NULL};
     }
@@ -2229,6 +2305,14 @@ static c_value_t parse_call(c_parser_t *p, ny_ctok_t name) {
                p->last_value_null_pointer_constant) ||
               (value.type == C_AGG_ARRAY_PTR && param->type == C_AGG_PTR &&
                value.agg == param->agg) ||
+              /*
+               * A rank-one array lvalue decays to a pointer to its first
+               * element when passed to an adjusted array parameter.  Kernel
+               * code such as `cpumask_var_t *pmasks[]` relies on this when
+               * the parameter is defined as `cpumask_var_t mask[1]`.
+               */
+              (value.type == C_AGG && param->type == C_AGG_PTR &&
+               value.agg == param->agg) ||
               (getenv("NYC_KERNEL_COMPAT") &&
                ((c_type_is_pointer(value.type) &&
                  c_type_is_pointer(param->type)) ||
@@ -2259,6 +2343,9 @@ static c_value_t parse_call(c_parser_t *p, ny_ctok_t name) {
           goto call_error;
         }
         if (value.type == C_AGG_ARRAY_PTR && param->type == C_AGG_PTR &&
+            value.agg == param->agg)
+          value.type = param->type;
+        if (value.type == C_AGG && param->type == C_AGG_PTR &&
             value.agg == param->agg)
           value.type = param->type;
         if (param->is_bool && c_type_is_pointer(value.type)) {
@@ -2561,7 +2648,10 @@ static c_value_t lower_address_aggregate_members(c_parser_t *p,
     if (address < 0)
       return (c_value_t){-1, C_BAD, NULL};
     if (field->kind == C_AGG_FIELD_AGG) {
-      base = (c_value_t){address, C_AGG_PTR, field->agg};
+      c_agg_type_t *field_agg =
+          complete_tag(p, (c_agg_type_t *)field->agg);
+      base = (c_value_t){address, C_AGG_PTR,
+                         field_agg ? field_agg : field->agg};
       continue;
     }
     if (field->kind == C_AGG_FIELD_PTR && accept(p, "[")) {
@@ -2900,17 +2990,20 @@ static c_value_t lower_pointer_index_rvalue(c_parser_t *p, c_value_t value) {
       value = (c_value_t){address, C_AGG, value.agg};
       continue;
     }
-    unsigned flags = element_type == C_U8 || element_type == C_CHAR
-                         ? NYIR_INST_F_MEM_BYTE
-                     : element_type == C_I32 || element_type == C_U32 ||
-                             element_type == C_F32
-                         ? NYIR_INST_F_MEM_I32
-                         : 0;
+    unsigned flags =
+        (element_type == C_U8 || element_type == C_CHAR
+             ? NYIR_INST_F_MEM_BYTE
+         : element_type == C_I32 || element_type == C_U32 ||
+                   element_type == C_F32
+             ? NYIR_INST_F_MEM_I32
+             : 0) |
+        c_value_seg_flags(value);
     int loaded =
         address < 0 ? -1
         : element_type == C_I16 || element_type == C_U16
-            ? lower_load_u16_field(p, address, element_type,
-                                   c_value_pointee_volatile(value))
+            ? lower_load_u16_field_seg(p, address, element_type,
+                                       c_value_pointee_volatile(value),
+                                       c_value_seg_flags(value))
             : emit_value(
                   p, (nyr_inst_t){.op = NYIR_LOAD_I64,
                                   .dst = -1,
@@ -2930,11 +3023,13 @@ static c_value_t lower_pointer_index_rvalue(c_parser_t *p, c_value_t value) {
     if (loaded < 0 || !record_lvalue(p, loaded, address, element_type,
                                      c_value_pointee_volatile(value)))
       return (c_value_t){-1, C_BAD, NULL};
-    value = (c_value_t){loaded, element_type,
-                        c_type_is_pointer(element_type) && value.agg ? value.agg
-                        : c_value_pointee_volatile(value)
-                            ? &c_volatile_pointee_marker
-                            : NULL};
+    value = (c_value_t){
+        loaded, element_type,
+        c_type_is_pointer(element_type) && value.agg
+            ? value.agg
+            : c_pointee_marker(c_value_pointee_const(value),
+                               c_value_pointee_volatile(value),
+                               c_marker_seg(value.agg))};
   }
   return value;
 }
@@ -3653,6 +3748,123 @@ static c_value_t parse_primary(c_parser_t *p) {
   p->has_indirect_result_signature = false;
   p->indirect_result_agg = NULL;
   ny_ctok_t tok = *current(p);
+  if (tok_is(p, p->pos, "__real__") || tok_is(p, p->pos, "__imag__")) {
+    bool imag_part = tok_is(p, p->pos, "__imag__");
+    ++p->pos;
+    if (accept(p, "*")) {
+      c_value_t pointer = parse_unary(p);
+      if (pointer.value < 0 ||
+          (pointer.type != C_C64_PTR && pointer.type != C_C128_PTR)) {
+        fail(p, "__real__/__imag__ requires a pointer to a double or float "
+                "complex object");
+        return (c_value_t){-1, C_BAD, NULL};
+      }
+      c_type_t pointed = pointer.type == C_C64_PTR ? C_C64 : C_C128;
+      int base_address = pointer.value;
+      if (accept(p, "[")) {
+        c_value_t index = parse_expr(p, 1);
+        if (index.value < 0 || !c_type_is_integer(index.type) ||
+            !expect(p, "]")) {
+          fail(p, "complex subscript requires an integer index");
+          return (c_value_t){-1, C_BAD, NULL};
+        }
+        base_address = lower_pointer_index_address(p, pointer.type,
+                                                   pointer.value, index.value);
+        if (base_address < 0)
+          return (c_value_t){-1, C_BAD, NULL};
+      }
+      int address = imag_part
+                        ? lower_add_const(p, base_address,
+                                          pointed == C_C64 ? 4 : 8)
+                        : base_address;
+      if (address < 0)
+        return (c_value_t){-1, C_BAD, NULL};
+      int loaded = pointed == C_C64
+                       ? lower_load_f32_field(p, address, false)
+                       : lower_load_field(p, address, true, false);
+      c_type_t half_type = pointed == C_C64 ? C_F32 : C_F64;
+      if (loaded < 0 || !record_lvalue(p, loaded, address, half_type, false))
+        return (c_value_t){-1, C_BAD, NULL};
+      return (c_value_t){loaded, half_type, NULL};
+    }
+    ny_ctok_t object = *current(p);
+    c_local_t *part_local = find_local(p, object);
+    c_global_t *part_global = part_local ? NULL : find_global(p, object);
+    c_type_t part_type = part_local   ? part_local->type
+                         : part_global ? part_global->type
+                                       : C_BAD;
+    if (!c_type_is_complex(part_type)) {
+      /*
+       * Not a plain complex object: parse a member or index operand through
+       * the normal postfix lowering. Complex member rvalues arrive as an
+       * address tagged with a synthetic aggregate whose scope_id is SIZE_MAX.
+       */
+      c_value_t whole = parse_unary(p);
+      if (whole.value < 0 || whole.type != C_AGG || !whole.agg ||
+          whole.agg->scope_id != SIZE_MAX) {
+        fail(p, "__real__/__imag__ requires a double or float complex object");
+        return (c_value_t){-1, C_BAD, NULL};
+      }
+      c_type_t whole_type = whole.agg->size == 8 ? C_C64 : C_C128;
+      int whole_address = imag_part
+                              ? lower_add_const(p, whole.value,
+                                                whole_type == C_C64 ? 4 : 8)
+                              : whole.value;
+      if (whole_address < 0)
+        return (c_value_t){-1, C_BAD, NULL};
+      int whole_loaded = whole_type == C_C64
+                             ? lower_load_f32_field(p, whole_address, false)
+                             : lower_load_field(p, whole_address, true, false);
+      c_type_t whole_half = whole_type == C_C64 ? C_F32 : C_F64;
+      if (whole_loaded < 0 ||
+          !record_lvalue(p, whole_loaded, whole_address, whole_half, false))
+        return (c_value_t){-1, C_BAD, NULL};
+      return (c_value_t){whole_loaded, whole_half, NULL};
+    }
+    if (part_type == C_C_LDOUBLE) {
+      fail(p, "__real__/__imag__ requires a double or float complex object");
+      return (c_value_t){-1, C_BAD, NULL};
+    }
+    ++p->pos;
+    int base;
+    if (part_local) {
+      base = emit_value(p, (nyr_inst_t){.op = NYIR_ADDR_LOCAL,
+                                        .dst = -1,
+                                        .imm = (int64_t)part_local->slot,
+                                        .scalar_class = NYIR_SCALAR_I64_RAW});
+    } else {
+      const char *prefix = (part_global->is_external || part_global->is_weak)
+                               ? "__nyc_extern_"
+                               : "__nyc_data_";
+      size_t prefix_len = strlen(prefix), name_len = part_global->name.len;
+      char *symbol = malloc(prefix_len + name_len + 1);
+      if (!symbol) {
+        fail(p, "out of memory lowering __real__/__imag__");
+        return (c_value_t){-1, C_BAD, NULL};
+      }
+      memcpy(symbol, prefix, prefix_len);
+      memcpy(symbol + prefix_len, part_global->name.start, name_len);
+      symbol[prefix_len + name_len] = '\0';
+      base = emit_value(p, (nyr_inst_t){.op = NYIR_ADDR_SYMBOL,
+                                        .dst = -1,
+                                        .symbol = symbol,
+                                        .scalar_class = NYIR_SCALAR_I64_RAW});
+      free(symbol);
+    }
+    if (base < 0)
+      return (c_value_t){-1, C_BAD, NULL};
+    int address = imag_part ? lower_add_const(p, base, part_type == C_C64 ? 4 : 8)
+                            : base;
+    if (address < 0)
+      return (c_value_t){-1, C_BAD, NULL};
+    int loaded = part_type == C_C64
+                     ? lower_load_f32_field(p, address, false)
+                     : lower_load_field(p, address, true, false);
+    c_type_t half_type = part_type == C_C64 ? C_F32 : C_F64;
+    if (loaded < 0 || !record_lvalue(p, loaded, address, half_type, false))
+      return (c_value_t){-1, C_BAD, NULL};
+    return (c_value_t){loaded, half_type, NULL};
+  }
   if (tok_is(p, p->pos, "__builtin_choose_expr"))
     return parse_builtin_choose_expr(p);
   if (tok_is(p, p->pos, "__builtin_types_compatible_p"))
@@ -3810,6 +4022,7 @@ static c_value_t parse_primary(c_parser_t *p) {
       c_agg_type_t *cast_agg = complete_tag(p, type_probe.last_type_agg);
       bool cast_pointee_const = type_probe.last_type_const;
       bool cast_pointee_volatile = type_probe.last_type_volatile;
+      unsigned char cast_pointee_seg = type_probe.last_type_seg;
       bool cast_pointer_const = type_probe.last_type_const_pointer;
       c_array_shape_t cast_pointee_array = type_probe.last_type_pointee_array;
       p->pos = type_probe.pos + 1;
@@ -3844,15 +4057,126 @@ static c_value_t parse_primary(c_parser_t *p) {
         size_t width = array_element_type == C_AGG && cast_agg
                            ? cast_agg->size
                            : c_type_size(p->abi, array_element_type);
-        size_t element_count =
-            array_compound_has_extent ? (size_t)array_compound_extent : count;
+        c_value_t *values = NULL;
+        size_t *indices = NULL;
+        size_t parsed = 0;
+        size_t element_count = array_compound_has_extent
+                                   ? (size_t)array_compound_extent
+                                   : count;
         if (!width || (!count && !array_compound_has_extent) ||
-            count > element_count || element_count > 65536 ||
-            element_count > SIZE_MAX / width ||
-            element_count * width > INT64_MAX || scan >= p->token_count ||
-            !tok_is(p, scan, "}")) {
+            scan >= p->token_count || !tok_is(p, scan, "}")) {
           fail(p, "invalid array compound literal");
           return (c_value_t){-1, C_BAD, NULL};
+        }
+        if (array_element_type == C_AGG) {
+          if (count > element_count || element_count > 65536 ||
+              element_count > SIZE_MAX / width ||
+              element_count * width > INT64_MAX) {
+            fail(p, "invalid array compound literal");
+            return (c_value_t){-1, C_BAD, NULL};
+          }
+        } else {
+          /*
+           * GNU designated initializers supply explicit indices, so the
+           * extent of an unsized compound literal is only known after
+           * reading the list. `_PICK()` in the i915 register headers is this
+           * exact shape.
+           */
+          values = count ? calloc(count, sizeof(*values)) : NULL;
+          indices = count ? calloc(count, sizeof(*indices)) : NULL;
+        if (count && (!values || !indices)) {
+          free(values);
+          free(indices);
+          fail(p, "out of memory parsing array compound literal");
+          return (c_value_t){-1, C_BAD, NULL};
+        }
+        parsed = 0;
+        size_t next_index = 0;
+        size_t highest = 0;
+        bool have_designator = false;
+        bool first_element = true;
+        while (!tok_is(p, p->pos, "}")) {
+          if (!first_element && !expect(p, ",")) {
+            free(values);
+            free(indices);
+            return (c_value_t){-1, C_BAD, NULL};
+          }
+          if (tok_is(p, p->pos, "}"))
+            break;
+          size_t item_index = next_index;
+          if (accept(p, "[")) {
+            int64_t designator = -1;
+            if (!parse_global_const_expr(p, &p->pos, &designator) ||
+                designator < 0 || tok_is(p, p->pos, "...") ||
+                !expect(p, "]") || !expect(p, "=")) {
+              free(values);
+              free(indices);
+              fail(p, "invalid array compound literal designator");
+              return (c_value_t){-1, C_BAD, NULL};
+            }
+            item_index = (size_t)designator;
+            have_designator = true;
+            if (item_index > highest)
+              highest = item_index;
+          }
+          if (array_compound_has_extent &&
+              item_index >= (size_t)array_compound_extent) {
+            free(values);
+            free(indices);
+            fail(p, "array compound literal designator is out of range");
+            return (c_value_t){-1, C_BAD, NULL};
+          }
+          c_value_t element = parse_expr(p, 1);
+          bool compatible =
+              element.type == array_element_type ||
+              (c_type_is_integer(element.type) &&
+               c_type_is_integer(array_element_type)) ||
+              c_pointer_compatible(element.type, array_element_type);
+          if (element.value < 0 || !compatible) {
+            free(values);
+            free(indices);
+            if (element.value >= 0)
+              fail(p,
+                   "scalar array compound literal has incompatible element");
+            return (c_value_t){-1, C_BAD, NULL};
+          }
+          if (c_type_is_integer(array_element_type)) {
+            element.value =
+                normalize_integer(p, array_element_type, element.value);
+            if (element.value < 0) {
+              free(values);
+              free(indices);
+              return (c_value_t){-1, C_BAD, NULL};
+            }
+          }
+          values[parsed] = element;
+          indices[parsed] = item_index;
+          ++parsed;
+          next_index = item_index + 1;
+          first_element = false;
+        }
+        if (accept(p, ",") && !tok_is(p, p->pos, "}")) {
+          free(values);
+          free(indices);
+          fail(p, "expected '}' after scalar array compound literal");
+          return (c_value_t){-1, C_BAD, NULL};
+        }
+        if (!expect(p, "}")) {
+          free(values);
+          free(indices);
+          return (c_value_t){-1, C_BAD, NULL};
+        }
+          element_count = array_compound_has_extent
+                              ? (size_t)array_compound_extent
+                              : have_designator ? highest + 1 : parsed;
+          if (!element_count || element_count > 65536 ||
+              element_count > SIZE_MAX / width ||
+              element_count * width > INT64_MAX) {
+            free(values);
+            free(indices);
+            fail(p, "invalid array compound literal extent");
+            return (c_value_t){-1, C_BAD, NULL};
+          }
         }
         if (array_element_type == C_AGG) {
           if (!cast_agg || !cast_agg->complete) {
@@ -3893,50 +4217,44 @@ static c_value_t parse_primary(c_parser_t *p) {
             : array_element_type == C_I32 || array_element_type == C_U32
                 ? NYIR_INST_F_MEM_I32
                 : 0;
+        /*
+         * Omitted and designated gaps are zero-initialized, so clear the
+         * whole literal before storing the explicitly initialized elements.
+         */
         for (size_t i = 0; i < element_count; ++i) {
-          c_value_t element;
-          if (i < count) {
-            element = parse_expr(p, 1);
-          } else {
-            nyr_op_t zero_op = array_element_type == C_F32   ? NYIR_CONST_F32
-                               : array_element_type == C_F64 ? NYIR_CONST_F64
-                                                             : NYIR_CONST_I64;
-            element.value = emit_value(
-                p,
-                (nyr_inst_t){.op = zero_op,
-                             .dst = -1,
-                             .imm = 0,
-                             .scalar_class =
-                                 c_type_is_float(array_element_type)
-                                     ? c_float_scalar_class(array_element_type)
-                                     : NYIR_SCALAR_I64_RAW});
-            element.type = array_element_type;
-            element.agg = NULL;
-          }
-          bool compatible =
-              element.type == array_element_type ||
-              (c_type_is_integer(element.type) &&
-               c_type_is_integer(array_element_type)) ||
-              c_pointer_compatible(element.type, array_element_type);
-          if (element.value < 0 || !compatible) {
-            if (element.value >= 0)
-              fail(p, "scalar array compound literal has incompatible element");
+          int zero = emit_value(
+              p, (nyr_inst_t){.op = NYIR_CONST_I64,
+                              .dst = -1,
+                              .imm = 0,
+                              .scalar_class = NYIR_SCALAR_I64_RAW});
+          int address =
+              zero < 0 ? -1 : lower_add_const(p, base, (int64_t)(i * width));
+          if (address < 0 ||
+              !emit(p,
+                    (nyr_inst_t){.op = NYIR_STORE_I64,
+                                 .dst = -1,
+                                 .a = address,
+                                 .c = zero,
+                                 .effects = NYIR_EFFECT_WRITE_MEMORY |
+                                            NYIR_EFFECT_MAY_TRAP,
+                                 .flags = flags,
+                                 .scalar_class = NYIR_SCALAR_I64_RAW},
+                    NULL)) {
+            free(values);
+            free(indices);
             return (c_value_t){-1, C_BAD, NULL};
           }
-          if (c_type_is_integer(array_element_type)) {
-            element.value =
-                normalize_integer(p, array_element_type, element.value);
-            if (element.value < 0)
-              return (c_value_t){-1, C_BAD, NULL};
-          }
-          int address = lower_add_const(p, base, (int64_t)(i * width));
+        }
+        for (size_t i = 0; i < parsed; ++i) {
+          int address =
+              lower_add_const(p, base, (int64_t)(indices[i] * width));
           if (address < 0 ||
               !emit(p,
                     (nyr_inst_t){
                         .op = NYIR_STORE_I64,
                         .dst = -1,
                         .a = address,
-                        .c = element.value,
+                        .c = values[i].value,
                         .effects =
                             NYIR_EFFECT_WRITE_MEMORY | NYIR_EFFECT_MAY_TRAP,
                         .flags = flags,
@@ -3944,17 +4262,14 @@ static c_value_t parse_primary(c_parser_t *p) {
                             c_type_is_float(array_element_type)
                                 ? c_float_scalar_class(array_element_type)
                                 : NYIR_SCALAR_I64_RAW},
-                    NULL))
+                    NULL)) {
+            free(values);
+            free(indices);
             return (c_value_t){-1, C_BAD, NULL};
-          if (i + 1 < count && !expect(p, ","))
-            return (c_value_t){-1, C_BAD, NULL};
+          }
         }
-        if (accept(p, ",") && !tok_is(p, p->pos, "}")) {
-          fail(p, "expected '}' after scalar array compound literal");
-          return (c_value_t){-1, C_BAD, NULL};
-        }
-        if (!expect(p, "}"))
-          return (c_value_t){-1, C_BAD, NULL};
+        free(values);
+        free(indices);
         return (c_value_t){base, cast_type, NULL};
       }
       if (cast_type == C_AGG && tok_is(p, p->pos, "{")) {
@@ -4188,12 +4503,9 @@ static c_value_t parse_primary(c_parser_t *p) {
       if (cast_type == C_CHAR_PTR && c_type_is_pointer(operand.type)) {
         p->last_value_const = cast_pointer_const;
         p->last_value_pointee_const = cast_pointee_const;
-        const c_agg_type_t *pointee_marker =
-            cast_pointee_const      ? cast_pointee_volatile
-                                          ? &c_const_volatile_pointee_marker
-                                          : &c_const_pointee_marker
-            : cast_pointee_volatile ? &c_volatile_pointee_marker
-                                    : NULL;
+        p->last_value_pointee_seg = cast_pointee_seg;
+        const c_agg_type_t *pointee_marker = c_pointee_marker(
+            cast_pointee_const, cast_pointee_volatile, cast_pointee_seg);
         return (c_value_t){operand.value, C_CHAR_PTR, pointee_marker};
       }
       if (c_type_is_pointer(cast_type) && c_type_is_pointer(operand.type)) {
@@ -4205,6 +4517,7 @@ static c_value_t parse_primary(c_parser_t *p) {
         }
         p->last_value_const = cast_pointer_const;
         p->last_value_pointee_const = cast_pointee_const;
+        p->last_value_pointee_seg = cast_pointee_seg;
         const c_agg_type_t *result_agg = cast_agg ? cast_agg : operand.agg;
         if (result_agg == &c_const_pointee_marker ||
             result_agg == &c_volatile_pointee_marker ||
@@ -4213,22 +4526,21 @@ static c_value_t parse_primary(c_parser_t *p) {
         if (!result_agg && cast_type != C_FUNC_PTR &&
             cast_type != C_FUNC_PTR_PTR && cast_type != C_AGG_PTR &&
             cast_type != C_AGG_PTR_PTR)
-          result_agg = cast_pointee_const
-                           ? cast_pointee_volatile
-                                 ? &c_const_volatile_pointee_marker
-                                 : &c_const_pointee_marker
-                       : cast_pointee_volatile ? &c_volatile_pointee_marker
-                                               : NULL;
+          result_agg = c_pointee_marker(cast_pointee_const,
+                                        cast_pointee_volatile,
+                                        cast_pointee_seg);
         return (c_value_t){operand.value, cast_type, result_agg};
       }
       if (c_type_is_pointer(cast_type) && operand.type == C_AGG) {
         p->last_value_const = cast_pointer_const;
         p->last_value_pointee_const = cast_pointee_const;
+        p->last_value_pointee_seg = cast_pointee_seg;
         return (c_value_t){operand.value, cast_type, cast_agg};
       }
       if (cast_type == C_AGG && cast_agg && c_type_is_integer(operand.type)) {
         p->last_value_const = cast_pointer_const;
         p->last_value_pointee_const = cast_pointee_const;
+        p->last_value_pointee_seg = cast_pointee_seg;
         return (c_value_t){operand.value, C_AGG_PTR, cast_agg};
       }
       if (c_type_is_pointer(cast_type) && c_type_is_integer(operand.type)) {
@@ -4244,17 +4556,15 @@ static c_value_t parse_primary(c_parser_t *p) {
             constant_end == p->pos && integer_constant == 0;
         p->last_value_const = cast_pointer_const;
         p->last_value_pointee_const = cast_pointee_const;
+        p->last_value_pointee_seg = cast_pointee_seg;
         const c_agg_type_t *result_agg = cast_agg;
         if (!result_agg && c_type_is_pointer(cast_type) &&
             cast_type != C_FUNC_PTR && cast_type != C_FUNC_PTR_PTR &&
             cast_type != C_AGG_PTR && cast_type != C_AGG_PTR_PTR &&
             cast_type != C_AGG_ARRAY_PTR)
-          result_agg = cast_pointee_const
-                           ? cast_pointee_volatile
-                                 ? &c_const_volatile_pointee_marker
-                                 : &c_const_pointee_marker
-                       : cast_pointee_volatile ? &c_volatile_pointee_marker
-                                               : NULL;
+          result_agg = c_pointee_marker(cast_pointee_const,
+                                        cast_pointee_volatile,
+                                        cast_pointee_seg);
         return (c_value_t){operand.value, cast_type, result_agg};
       }
       if (c_type_is_pointer(cast_type) && p->last_value_null_pointer_constant)
@@ -4296,6 +4606,9 @@ static c_value_t parse_primary(c_parser_t *p) {
         if (address < 0)
           return (c_value_t){-1, C_BAD, NULL};
         if (aggregate_element) {
+          if (!record_lvalue(p, address, address, C_AGG, false))
+            return (c_value_t){-1, C_BAD, NULL};
+          p->lvalues[p->lvalue_count - 1].agg = value.agg;
           value = (c_value_t){address, C_AGG, value.agg};
           break;
         }
@@ -4372,18 +4685,36 @@ static c_value_t parse_primary(c_parser_t *p) {
     }
     memcpy(buffer, tok.start, tok.len);
     buffer[tok.len] = '\0';
+    size_t length = tok.len;
+    bool imaginary_literal = false;
+    if (length > 1 &&
+        (buffer[length - 1] == 'i' || buffer[length - 1] == 'I')) {
+      imaginary_literal = true;
+      buffer[--length] = '\0';
+    } else if (length > 2 &&
+               (buffer[length - 2] == 'i' || buffer[length - 2] == 'I') &&
+               (buffer[length - 1] == 'f' || buffer[length - 1] == 'F' ||
+                buffer[length - 1] == 'l' || buffer[length - 1] == 'L')) {
+      /*
+       * System complex.h spells _Complex_I as `1.0iF`: the imaginary marker
+       * precedes the precision suffix.
+       */
+      imaginary_literal = true;
+      buffer[length - 2] = buffer[length - 1];
+      buffer[--length] = '\0';
+    }
     bool hexadecimal =
         buffer[0] == '0' && (buffer[1] == 'x' || buffer[1] == 'X');
     bool floating = strchr(buffer, '.') != NULL ||
                     (hexadecimal ? strpbrk(buffer, "pP") != NULL
                                  : strpbrk(buffer, "eE") != NULL);
     bool f32_literal =
-        (buffer[tok.len - 1] == 'f' || buffer[tok.len - 1] == 'F') &&
+        (buffer[length - 1] == 'f' || buffer[length - 1] == 'F') &&
         (!hexadecimal || strpbrk(buffer, "pP") != NULL);
     bool long_double_literal =
-        floating && (buffer[tok.len - 1] == 'l' || buffer[tok.len - 1] == 'L');
+        floating && (buffer[length - 1] == 'l' || buffer[length - 1] == 'L');
     if (f32_literal || long_double_literal)
-      buffer[tok.len - 1] = '\0';
+      buffer[length - 1] = '\0';
     if (floating) {
       char *end = NULL;
       double number =
@@ -4391,6 +4722,72 @@ static c_value_t parse_primary(c_parser_t *p) {
       if (!end || end == buffer || *end) {
         fail(p, "invalid double literal");
         return (c_value_t){-1, C_BAD, NULL};
+      }
+      if (imaginary_literal) {
+        static c_agg_type_t imaginary_f32 = {
+            .scope_id = SIZE_MAX,
+            .complete = true,
+            .size = 8,
+            .align = 4,
+            .field_count = 2,
+            .fields = {{
+                           .kind = C_AGG_FIELD_F32, .offset = 0, .size = 4, .align = 4},
+                       {.kind = C_AGG_FIELD_F32,
+                        .offset = 4,
+                        .size = 4,
+                        .align = 4}}};
+        static c_agg_type_t imaginary_f64 = {
+            .scope_id = SIZE_MAX,
+            .complete = true,
+            .size = 16,
+            .align = 8,
+            .field_count = 2,
+            .fields = {{
+                           .kind = C_AGG_FIELD_F64, .offset = 0, .size = 8, .align = 8},
+                       {.kind = C_AGG_FIELD_F64,
+                        .offset = 8,
+                        .size = 8,
+                        .align = 8}}};
+        size_t offset = 0;
+        if (!agg_area_alloc(p, f32_literal ? 8 : 16, &offset)) {
+          fail(p, "imaginary literal storage allocation failed");
+          return (c_value_t){-1, C_BAD, NULL};
+        }
+        int base = p->agg_base;
+        int zero = emit_value(
+            p, (nyr_inst_t){.op = f32_literal ? NYIR_CONST_F32 : NYIR_CONST_F64,
+                            .dst = -1,
+                            .imm = 0,
+                            .scalar_class = f32_literal ? NYIR_SCALAR_F32
+                                                        : NYIR_SCALAR_F64});
+        int component;
+        if (f32_literal) {
+          float narrowed = (float)number;
+          uint32_t bits = 0;
+          memcpy(&bits, &narrowed, sizeof(bits));
+          component = emit_value(p, (nyr_inst_t){.op = NYIR_CONST_F32,
+                                                 .dst = -1,
+                                                 .imm = (int64_t)bits,
+                                                 .scalar_class = NYIR_SCALAR_F32});
+        } else {
+          int64_t bits = 0;
+          memcpy(&bits, &number, sizeof(bits));
+          component = emit_value(p, (nyr_inst_t){.op = NYIR_CONST_F64,
+                                                 .dst = -1,
+                                                 .imm = bits,
+                                                 .scalar_class = NYIR_SCALAR_F64});
+        }
+        int high = lower_add_const(p, base, f32_literal ? 4 : 8);
+        bool stored =
+            zero >= 0 && component >= 0 && high >= 0 &&
+            (f32_literal ? lower_store_f32_field(p, base, zero, false) &&
+                               lower_store_f32_field(p, high, component, false)
+                         : lower_store_field(p, base, zero, true, false) &&
+                               lower_store_field(p, high, component, true, false));
+        if (!stored)
+          return (c_value_t){-1, C_BAD, NULL};
+        return (c_value_t){base, C_AGG,
+                           f32_literal ? &imaginary_f32 : &imaginary_f64};
       }
       if (f32_literal) {
         float narrowed = (float)number;
@@ -4412,7 +4809,7 @@ static c_value_t parse_primary(c_parser_t *p) {
                                      .scalar_class = NYIR_SCALAR_F64}),
           C_F64, NULL};
     }
-    size_t end = tok.len;
+    size_t end = length;
     bool unsigned_suffix = false;
     unsigned long_suffixes = 0;
     for (size_t i = end; i > 0; --i) {
@@ -4689,6 +5086,80 @@ static c_value_t parse_primary(c_parser_t *p) {
       }
       return call_result;
     }
+    if (tok_is(p, p->pos, "__real__") || tok_is(p, p->pos, "__imag__")) {
+      bool imaginary = tok_is(p, p->pos, "__imag__");
+      ++p->pos;
+      ny_ctok_t object = *current(p);
+      c_local_t *object_local = find_local(p, object);
+      c_global_t *object_global =
+          object_local ? NULL : find_global(p, object);
+      if ((!object_local && !object_global) ||
+          !c_type_is_complex(object_local ? object_local->type
+                                          : object_global->type)) {
+        fail(p, "__real__/__imag__ requires a complex object");
+        return (c_value_t){-1, C_BAD, NULL};
+      }
+      c_type_t object_type =
+          object_local ? object_local->type : object_global->type;
+      if (object_type == C_C_LDOUBLE) {
+        fail(p, "__real__/__imag__ of long double _Complex is not "
+                "supported yet");
+        return (c_value_t){-1, C_BAD, NULL};
+      }
+      ++p->pos;
+      size_t half = object_type == C_C64 ? 4 : 8;
+      int base_address;
+      if (object_local) {
+        if (c_type_is_complex(object_local->type) && object_local->array_rank) {
+          fail(p, "__real__/__imag__ of a complex array is not supported yet");
+          return (c_value_t){-1, C_BAD, NULL};
+        }
+        base_address = emit_value(
+            p, (nyr_inst_t){.op = NYIR_ADDR_LOCAL,
+                            .dst = -1,
+                            .imm = (int64_t)object_local->slot,
+                            .scalar_class = NYIR_SCALAR_I64_RAW});
+      } else {
+        static const char data_prefix[] = "__nyc_data_";
+        static const char extern_prefix[] = "__nyc_extern_";
+        const char *prefix = object_global->is_external ||
+                                     object_global->is_weak
+                                 ? extern_prefix
+                                 : data_prefix;
+        size_t prefix_len = strlen(prefix);
+        size_t symbol_len = prefix_len + object_global->name.len;
+        char *symbol = malloc(symbol_len + 1);
+        if (!symbol) {
+          fail(p, "out of memory lowering __real__/__imag__");
+          return (c_value_t){-1, C_BAD, NULL};
+        }
+        memcpy(symbol, prefix, prefix_len);
+        memcpy(symbol + prefix_len, object_global->name.start,
+               object_global->name.len);
+        symbol[symbol_len] = '\0';
+        base_address = emit_value(
+            p, (nyr_inst_t){.op = NYIR_ADDR_SYMBOL,
+                            .dst = -1,
+                            .symbol = symbol,
+                            .scalar_class = NYIR_SCALAR_I64_RAW});
+        free(symbol);
+      }
+      int address = !imaginary
+                        ? base_address
+                        : (base_address < 0
+                               ? -1
+                               : lower_add_const(p, base_address,
+                                                 (int64_t)half));
+      if (address < 0)
+        return (c_value_t){-1, C_BAD, NULL};
+      int loaded = object_type == C_C64
+                       ? lower_load_f32_field(p, address, false)
+                       : lower_load_field(p, address, true, false);
+      c_type_t half_type = object_type == C_C64 ? C_F32 : C_F64;
+      if (loaded < 0 || !record_lvalue(p, loaded, address, half_type, false))
+        return (c_value_t){-1, C_BAD, NULL};
+      return (c_value_t){loaded, half_type, NULL};
+    }
     c_local_t *local = find_local(p, tok);
     if (local)
       p->last_type_long_long = local->is_long_long;
@@ -4696,6 +5167,10 @@ static c_value_t parse_primary(c_parser_t *p) {
       c_global_t *global = find_global(p, tok);
       if (global && !global->function_symbol) {
         p->last_type_long_long = global->is_long_long;
+        if (c_type_is_complex(global->type)) {
+          fail(p, "complex values are not supported yet");
+          return (c_value_t){-1, C_BAD, NULL};
+        }
         if (global->has_asm_register) {
           if (!global_register_is_x86_stack_pointer(p->abi, global) ||
               (!c_type_is_integer(global->type) &&
@@ -4884,6 +5359,24 @@ static c_value_t parse_primary(c_parser_t *p) {
                                          ? C_AGG_PTR
                                          : c_array_pointer_type(global->type),
                                      global->agg};
+          }
+          /*
+           * A one-dimensional array of structs selects an element in place;
+           * returning a row pointer would lose the aggregate lvalue that
+           * parenthesized assignments and `swap()` need.
+           */
+          if (!global->is_pointer_array && global->type == C_AGG &&
+              global->agg && global->array_rank <= 1 &&
+              global->array_shape.rank <= 1) {
+            int element_address =
+                lower_pointer_offset_sized(p, (int64_t)global->agg->size,
+                                           address, index.value, false);
+            if (element_address < 0 ||
+                !record_lvalue(p, element_address, element_address, C_AGG,
+                               global->is_volatile))
+              return (c_value_t){-1, C_BAD, NULL};
+            p->lvalues[p->lvalue_count - 1].agg = global->agg;
+            return (c_value_t){element_address, C_AGG, global->agg};
           }
           if (!global->is_pointer_array &&
               (global->array_rank > 1 || global->array_shape.rank > 1 ||
@@ -5119,7 +5612,11 @@ static c_value_t parse_primary(c_parser_t *p) {
              value_type == C_FUNC_PTR_PTR || value_type == C_AGG_PTR_PTR) &&
             tok_is(p, p->pos, "["))
           return lower_pointer_index_rvalue(
-              p, (c_value_t){value, value_type, global->agg});
+              p, (c_value_t){value, value_type,
+                             global->agg ? global->agg
+                                         : c_pointee_marker(
+                                               false, global->is_volatile,
+                                               global->pointee_seg)});
         if (c_type_is_arithmetic_pointer(value_type) && accept(p, "[")) {
           c_value_t index = parse_expr(p, 1);
           if (index.value < 0 || !c_type_is_integer(index.type) ||
@@ -5139,11 +5636,13 @@ static c_value_t parse_primary(c_parser_t *p) {
                                   : value_type == C_U32_PTR ? C_U32
                                   : value_type == C_F64_PTR ? C_F64
                                                             : C_I64;
-          uint8_t flags = value_type == C_CHAR_PTR || value_type == C_I8_PTR
-                              ? NYIR_INST_F_MEM_BYTE
-                          : value_type == C_I32_PTR || value_type == C_U32_PTR
-                              ? NYIR_INST_F_MEM_I32
-                              : 0;
+          unsigned flags =
+              (value_type == C_CHAR_PTR || value_type == C_I8_PTR
+                   ? NYIR_INST_F_MEM_BYTE
+                   : value_type == C_I32_PTR || value_type == C_U32_PTR
+                       ? NYIR_INST_F_MEM_I32
+                       : 0) |
+              c_seg_flags(global->pointee_seg);
           int element = emit_value(
               p, (nyr_inst_t){.op = NYIR_LOAD_I64,
                               .dst = -1,
@@ -5156,6 +5655,10 @@ static c_value_t parse_primary(c_parser_t *p) {
                                                   : NYIR_SCALAR_I64_RAW});
           if (element >= 0 && c_type_is_integer(element_type))
             element = normalize_integer(p, element_type, element);
+          if (element < 0 ||
+              !record_lvalue(p, element, element_address, element_type,
+                             global->is_volatile))
+            return (c_value_t){-1, C_BAD, NULL};
           return (c_value_t){element, element_type, NULL};
         }
         p->last_value_const = global->is_const;
@@ -5166,7 +5669,11 @@ static c_value_t parse_primary(c_parser_t *p) {
         }
         if (!record_lvalue(p, value, address, value_type, global->is_volatile))
           return (c_value_t){-1, C_BAD, NULL};
-        return (c_value_t){value, value_type, global->agg};
+        return (c_value_t){
+            value, value_type,
+            global->agg ? global->agg
+                        : c_pointee_marker(false, global->is_volatile,
+                                           global->pointee_seg)};
       }
       c_function_t *function = find_function(p, tok);
       if (function) {
@@ -5278,6 +5785,20 @@ static c_value_t parse_primary(c_parser_t *p) {
       if (loaded < 0 ||
           !record_lvalue(p, loaded, address, local->type, local->is_volatile))
         return (c_value_t){-1, C_BAD, NULL};
+      /*
+       * An element of a function-pointer array is still a function pointer;
+       * carry its result signature so a following call does not fall back to
+       * an implicit int result.
+       */
+      if (local->type == C_FUNC_PTR) {
+        p->indirect_result_type = local->function_result_type;
+        p->indirect_result_agg = local->agg;
+        p->has_indirect_result_signature =
+            local->function_result_type != C_BAD;
+        p->last_type_function_result_type = local->function_result_type;
+        p->last_type_function_result_agg = local->agg;
+        p->last_type_function_type = true;
+      }
       if (local->type == C_AGG_PTR && local->agg &&
           (tok_is(p, p->pos, "->") || tok_is(p, p->pos, "."))) {
         c_value_t member;
@@ -5326,6 +5847,13 @@ static c_value_t parse_primary(c_parser_t *p) {
       if (address < 0)
         return (c_value_t){-1, C_BAD, NULL};
       p->last_value_const = local->is_const && !c_type_is_pointer(local->type);
+      /*
+       * The element is addressed in place; record it so a following
+       * assignment or member store can use it as a modifiable lvalue.
+       */
+      if (!record_lvalue(p, address, address, C_AGG, local->is_volatile))
+        return (c_value_t){-1, C_BAD, NULL};
+      p->lvalues[p->lvalue_count - 1].agg = local->agg;
       c_value_t element = {address, C_AGG, local->agg};
       c_value_t member;
       if (!lower_member_rvalue(p, element, &member))
@@ -5361,6 +5889,13 @@ static c_value_t parse_primary(c_parser_t *p) {
           (nyr_inst_t){.op = NYIR_ADD_I64, .dst = -1, .a = value, .b = offset});
       if (address < 0)
         return (c_value_t){-1, C_BAD, NULL};
+      /*
+       * The selected struct element lives in place; record it so a
+       * parenthesized assignment such as the `swap()` macro can modify it.
+       */
+      if (!record_lvalue(p, address, address, C_AGG, local->is_volatile))
+        return (c_value_t){-1, C_BAD, NULL};
+      p->lvalues[p->lvalue_count - 1].agg = local->agg;
       c_value_t element = {address, C_AGG, local->agg};
       c_value_t member;
       if (!lower_member_rvalue(p, element, &member))
@@ -5556,17 +6091,20 @@ static c_value_t parse_primary(c_parser_t *p) {
                               : local->type == C_F32_PTR ? C_F32
                               : local->type == C_F64_PTR ? C_F64
                                                          : C_I64;
-      uint8_t memory_flags =
-          local->type == C_CHAR_PTR || local->type == C_I8_PTR
-              ? NYIR_INST_F_MEM_BYTE
-              : (local->type == C_I32_PTR || local->type == C_U32_PTR ||
-                         local->type == C_F32_PTR
-                     ? NYIR_INST_F_MEM_I32
-                     : 0);
+      unsigned memory_flags =
+          ((local->type == C_CHAR_PTR || local->type == C_I8_PTR
+                         ? NYIR_INST_F_MEM_BYTE
+                         : (local->type == C_I32_PTR ||
+                                    local->type == C_U32_PTR ||
+                                    local->type == C_F32_PTR
+                                ? NYIR_INST_F_MEM_I32
+                                : 0)) |
+                    c_seg_flags(local->pointee_seg));
       int loaded =
           local->type == C_I16_PTR || local->type == C_U16_PTR
-              ? lower_load_u16_field(p, address, element_type,
-                                     local->pointee_volatile)
+              ? lower_load_u16_field_seg(p, address, element_type,
+                                         local->pointee_volatile,
+                                         c_seg_flags(local->pointee_seg))
               : emit_value(
                     p, (nyr_inst_t){.op = NYIR_LOAD_I64,
                                     .dst = -1,
@@ -5669,10 +6207,12 @@ static c_value_t parse_primary(c_parser_t *p) {
       p->last_type_function_result_agg = local->agg;
       p->last_type_function_type = true;
     }
-    return (c_value_t){value, local->type,
-                       local->agg                ? local->agg
-                       : local->pointee_volatile ? &c_volatile_pointee_marker
-                                                 : NULL};
+    return (c_value_t){
+        value, local->type,
+        local->agg ? local->agg
+                   : c_pointee_marker(local->pointee_const,
+                                      local->pointee_volatile,
+                                      local->pointee_seg)};
   }
   /* NYC kernel compat: skip C99 designated initializers when encountered in
    * expression context */
@@ -5727,7 +6267,8 @@ static c_value_t parse_postfix(c_parser_t *p) {
                                          value.value);
       if (result < 0)
         return (c_value_t){-1, C_BAD, NULL};
-      value = (c_value_t){result, lvalue->type, local ? local->agg : NULL};
+      value = (c_value_t){result, lvalue->type,
+                          local ? local->agg : value.agg};
     } else if (value.type == C_FUNC_PTR && accept(p, "(")) {
       value = parse_indirect_call(p, value);
     } else if (tok_is(p, p->pos, "(")) {
@@ -5755,6 +6296,12 @@ static c_value_t parse_postfix(c_parser_t *p) {
 }
 
 static c_value_t parse_unary(c_parser_t *p) {
+  /*
+   * System complex.h expands I to `(__extension__ 1.0iF)`, so the GNU
+   * extension marker may lead an expression.
+   */
+  if (accept(p, "__extension__"))
+    return parse_unary(p);
   if (accept(p, "_Alignof") || accept(p, "__alignof__") ||
       accept(p, "__alignof")) {
     c_parser_t probe = *p;
@@ -5910,7 +6457,7 @@ static c_value_t parse_unary(c_parser_t *p) {
       else if (type == C_I32 || type == C_U32 || type == C_F32)
         size = 4;
       else if (type == C_I64 || type == C_U64 || type == C_F64 ||
-               c_type_is_pointer(type))
+               c_type_is_complex(type) || c_type_is_pointer(type))
         size = c_type_size(p->abi, type);
     }
     if (!size && parenthesized && tok_ident(*current(p))) {
@@ -6102,6 +6649,8 @@ static c_value_t parse_unary(c_parser_t *p) {
                  : object_type == C_I64 || object_type == C_U64 ||
                          object_type == C_F64
                      ? 8
+                 : c_type_is_complex(object_type)
+                     ? c_type_size(p->abi, object_type)
                  : c_type_is_pointer(object_type)
                      ? c_type_size(p->abi, object_type)
                      : 0;
@@ -6133,6 +6682,10 @@ static c_value_t parse_unary(c_parser_t *p) {
                : object_type == C_I64_PTR || object_type == C_U64_PTR ||
                        object_type == C_F64_PTR
                    ? 8
+               : object_type == C_C64_PTR
+                   ? 8
+               : object_type == C_C128_PTR
+                   ? 16
                : c_type_is_pointer(object_type) && object_type != C_AGG_PTR
                    ? c_type_size(p->abi, object_type)
                    : 0;
@@ -6584,10 +7137,12 @@ static c_value_t parse_unary(c_parser_t *p) {
       p->last_value_null_pointer_constant = false;
       p->last_value_pointee_const = p->last_value_const;
       p->last_value_const = false;
-      return (c_value_t){lvalue->address, pointer_type,
-                         lvalue->agg                   ? lvalue->agg
-                         : p->last_value_pointee_const ? &c_const_pointee_marker
-                                                       : NULL};
+      return (c_value_t){
+          lvalue->address, pointer_type,
+          lvalue->agg
+              ? lvalue->agg
+              : c_pointee_marker(p->last_value_pointee_const, false,
+                                 p->last_value_pointee_seg)};
     }
     if (tok_is(p, p->pos, "_Generic")) {
       c_value_t operand = parse_postfix(p);
@@ -6747,10 +7302,15 @@ static c_value_t parse_unary(c_parser_t *p) {
         (void)accept(p, ")");
         return address;
       }
-      if (p->last_value_array)
-        return (c_value_t){base.value, C_OPAQUE_PTR, base.agg};
+      /*
+       * An aggregate operand is addressed in place; a stale array flag
+       * from the object it was derived from must not turn this into an
+       * opaque pointer to the element.
+       */
       if (base.type == C_AGG)
         return (c_value_t){base.value, C_AGG_PTR, base.agg};
+      if (p->last_value_array)
+        return (c_value_t){base.value, C_OPAQUE_PTR, base.agg};
       const c_lvalue_t *lvalue = find_lvalue(p, base.value);
       if (c_type_is_pointer(base.type) && address_start + 4 < p->token_count &&
           (tok_is(p, p->pos, ")") || tok_is(p, p->pos - 1, ")")) &&
@@ -7497,6 +8057,10 @@ static c_value_t parse_unary(c_parser_t *p) {
                             : local->type == C_F32  ? C_F32_PTR
                             : local->type == C_F64  ? C_F64_PTR
                                                     : C_BAD;
+    if (pointer_type == C_BAD && local->type == C_C64)
+      pointer_type = C_C64_PTR;
+    else if (pointer_type == C_BAD && local->type == C_C128)
+      pointer_type = C_C128_PTR;
     if (address < 0 || pointer_type == C_BAD) {
       if (!p->err[0])
         fail(p, "address-of this local type is unsupported");
@@ -7525,7 +8089,12 @@ static c_value_t parse_unary(c_parser_t *p) {
     p->last_value_const = pointer_local ? pointer_local->pointee_const : false;
     const c_array_shape_t *array_shape =
         array_shape_for_value(p, address.value);
-    if (array_shape) {
+    /*
+     * A plain aggregate pointer may carry a stale element shape from the
+     * object it was derived from; `*p` still names the pointee struct.
+     */
+    if (array_shape &&
+        !(address.type == C_AGG_PTR && !array_shape->pointer_to_array)) {
       if (array_shape->pointer_to_array) {
         c_array_shape_t dereferenced_shape = *array_shape;
         dereferenced_shape.pointer_to_array = false;
@@ -7653,6 +8222,43 @@ static c_value_t parse_unary(c_parser_t *p) {
         return (c_value_t){-1, C_BAD, NULL};
       return member;
     }
+    if (address.type == C_C64_PTR || address.type == C_C128_PTR ||
+        address.type == C_C_LDOUBLE_PTR) {
+      static c_agg_type_t complex_ptr_f32 = {
+          .scope_id = SIZE_MAX,
+          .complete = true,
+          .size = 8,
+          .align = 4,
+          .field_count = 2,
+          .fields = {{.kind = C_AGG_FIELD_F32, .offset = 0, .size = 4, .align = 4},
+                     {.kind = C_AGG_FIELD_F32, .offset = 4, .size = 4, .align = 4}}};
+      static c_agg_type_t complex_ptr_f64 = {
+          .scope_id = SIZE_MAX,
+          .complete = true,
+          .size = 16,
+          .align = 8,
+          .field_count = 2,
+          .fields = {{.kind = C_AGG_FIELD_F64, .offset = 0, .size = 8, .align = 8},
+                     {.kind = C_AGG_FIELD_F64, .offset = 8, .size = 8, .align = 8}}};
+      static c_agg_type_t complex_ptr_ldouble = {
+          .scope_id = SIZE_MAX,
+          .complete = true,
+          .size = 16,
+          .align = 8,
+          .field_count = 2,
+          .fields = {{.kind = C_AGG_FIELD_F64, .offset = 0, .size = 8, .align = 8},
+                     {.kind = C_AGG_FIELD_F64, .offset = 8, .size = 8, .align = 8}}};
+      c_agg_type_t *pointee_agg = address.type == C_C64_PTR
+                                      ? &complex_ptr_f32
+                                      : address.type == C_C128_PTR
+                                            ? &complex_ptr_f64
+                                            : &complex_ptr_ldouble;
+      if (!record_lvalue(p, address.value, address.value, C_AGG,
+                         c_value_pointee_volatile(address)))
+        return (c_value_t){-1, C_BAD, NULL};
+      p->lvalues[p->lvalue_count - 1].agg = pointee_agg;
+      return (c_value_t){address.value, C_AGG, pointee_agg};
+    }
     if (address.type != C_CHAR_PTR && address.type != C_I8_PTR &&
         address.type != C_I16_PTR && address.type != C_U16_PTR &&
         address.type != C_I32_PTR && address.type != C_U32_PTR &&
@@ -7676,20 +8282,22 @@ static c_value_t parse_unary(c_parser_t *p) {
                             : address.type == C_F64_PTR ? C_F64
                                                         : C_I64;
     if (element_type == C_I16 || element_type == C_U16) {
-      int value = lower_load_u16_field(p, address.value, element_type,
-                                       c_value_pointee_volatile(address));
+      int value = lower_load_u16_field_seg(
+          p, address.value, element_type, c_value_pointee_volatile(address),
+          c_value_seg_flags(address));
       if (value < 0 || !record_lvalue(p, value, address.value, element_type,
                                       c_value_pointee_volatile(address)))
         return (c_value_t){-1, C_BAD, NULL};
       return (c_value_t){value, element_type, NULL};
     }
-    uint8_t memory_flags =
-        address.type == C_CHAR_PTR || address.type == C_I8_PTR
-            ? NYIR_INST_F_MEM_BYTE
-            : (address.type == C_I32_PTR || address.type == C_U32_PTR ||
-                       address.type == C_F32_PTR
-                   ? NYIR_INST_F_MEM_I32
-                   : 0);
+    unsigned memory_flags =
+        (address.type == C_CHAR_PTR || address.type == C_I8_PTR
+             ? NYIR_INST_F_MEM_BYTE
+             : (address.type == C_I32_PTR || address.type == C_U32_PTR ||
+                        address.type == C_F32_PTR
+                    ? NYIR_INST_F_MEM_I32
+                    : 0)) |
+        c_value_seg_flags(address);
     int value = emit_value(
         p,
         (nyr_inst_t){
@@ -7718,6 +8326,60 @@ static c_value_t parse_unary(c_parser_t *p) {
     c_value_t value = parse_unary(p);
     if (value.value < 0)
       return value;
+    if (ny_ctok_eq(op, "-") && value.type == C_AGG && value.agg &&
+        value.agg->scope_id == SIZE_MAX && value.agg->size != 32) {
+      bool neg_single = value.agg->size == 8;
+      size_t neg_lane = neg_single ? 4 : 8;
+      int real = neg_single ? lower_load_f32_field(p, value.value, false)
+                            : lower_load_field(p, value.value, true, false);
+      int imag_addr = lower_add_const(p, value.value, neg_lane);
+      int imag = imag_addr < 0
+                     ? -1
+                     : neg_single ? lower_load_f32_field(p, imag_addr, false)
+                                  : lower_load_field(p, imag_addr, true, false);
+      int zero = emit_value(
+          p, (nyr_inst_t){.op = neg_single ? NYIR_CONST_F32 : NYIR_CONST_F64,
+                          .dst = -1,
+                          .imm = 0,
+                          .scalar_class = neg_single ? NYIR_SCALAR_F32
+                                                     : NYIR_SCALAR_F64});
+      int neg_real = real < 0 ? -1
+                              : emit_value(p, (nyr_inst_t){
+                                                   .op = neg_single ? NYIR_SUB_F32
+                                                                    : NYIR_SUB_F64,
+                                                   .dst = -1,
+                                                   .a = zero,
+                                                   .b = real,
+                                                   .scalar_class = neg_single
+                                                                       ? NYIR_SCALAR_F32
+                                                                       : NYIR_SCALAR_F64});
+      int neg_imag = imag < 0 ? -1
+                              : emit_value(p, (nyr_inst_t){
+                                                   .op = neg_single ? NYIR_SUB_F32
+                                                                    : NYIR_SUB_F64,
+                                                   .dst = -1,
+                                                   .a = zero,
+                                                   .b = imag,
+                                                   .scalar_class = neg_single
+                                                                       ? NYIR_SCALAR_F32
+                                                                       : NYIR_SCALAR_F64});
+      size_t offset = 0;
+      if (zero < 0 || neg_real < 0 || neg_imag < 0 ||
+          !agg_area_alloc(p, value.agg->size, &offset))
+        return (c_value_t){-1, C_BAD, NULL};
+      int base = p->agg_base;
+      int imag_target = lower_add_const(p, base, neg_lane);
+      bool stored =
+          imag_target >= 0 &&
+          (neg_single ? lower_store_f32_field(p, base, neg_real, false) &&
+                            lower_store_f32_field(p, imag_target, neg_imag, false)
+                      : lower_store_field(p, base, neg_real, true, false) &&
+                            lower_store_field(p, imag_target, neg_imag, true,
+                                              false));
+      if (!stored)
+        return (c_value_t){-1, C_BAD, NULL};
+      return (c_value_t){base, C_AGG, value.agg};
+    }
     if (ny_ctok_eq(op, "!")) {
       bool is_float = c_type_is_float(value.type);
       c_type_t float_type = is_float ? value.type : C_F64;
@@ -7797,6 +8459,12 @@ static c_value_t parse_unary(c_parser_t *p) {
 static c_value_t convert_numeric_float(c_parser_t *p, c_value_t value,
                                        c_type_t target) {
   if (value.type == target)
+    return value;
+  /*
+   * Complex operands are handled by the aggregate arithmetic path; leave them
+   * untouched so the binary operator can promote the real side instead.
+   */
+  if (value.type == C_AGG)
     return value;
   if (c_type_is_integer(value.type)) {
     if (value.type == C_U64) {
@@ -8851,7 +9519,11 @@ static c_value_t parse_expr(c_parser_t *p, int min_precedence) {
         return left;
       continue;
     }
-    if (c_type_is_float(left.type) || c_type_is_float(right.type)) {
+    bool any_complex_operand =
+        (left.type == C_AGG && left.agg && left.agg->scope_id == SIZE_MAX) ||
+        (right.type == C_AGG && right.agg && right.agg->scope_id == SIZE_MAX);
+    if (!any_complex_operand &&
+        (c_type_is_float(left.type) || c_type_is_float(right.type))) {
       c_type_t common_type =
           left.type == C_F64 || right.type == C_F64 ? C_F64 : C_F32;
       left = convert_numeric_float(p, left, common_type);
@@ -8859,7 +9531,7 @@ static c_value_t parse_expr(c_parser_t *p, int min_precedence) {
       if (left.value < 0 || right.value < 0)
         return (c_value_t){-1, C_BAD, NULL};
     }
-    if (left.type != right.type &&
+    if (!any_complex_operand && left.type != right.type &&
         !(c_type_is_integer(left.type) && c_type_is_integer(right.type))) {
       fail(p, "mixed integer/double arithmetic is unsupported");
       return (c_value_t){-1, C_BAD, NULL};
@@ -8946,6 +9618,267 @@ static c_value_t parse_expr(c_parser_t *p, int min_precedence) {
     if (unsigned_operation && (ny_ctok_eq(op, "/=") || ny_ctok_eq(op, "%="))) {
       fail(p, "unsigned division, remainder, and right shift are unsupported");
       return (c_value_t){-1, C_BAD, NULL};
+    }
+    bool left_complex =
+        left.type == C_AGG && left.agg && left.agg->scope_id == SIZE_MAX;
+    bool right_complex =
+        right.type == C_AGG && right.agg && right.agg->scope_id == SIZE_MAX;
+    if (left_complex || right_complex) {
+      bool add = ny_ctok_eq(op, "+");
+      bool subtract = ny_ctok_eq(op, "-");
+      bool multiply = ny_ctok_eq(op, "*");
+      bool divide = ny_ctok_eq(op, "/");
+      bool equality = ny_ctok_eq(op, "==") || ny_ctok_eq(op, "!=");
+      if (!add && !subtract && !multiply && !divide && !equality) {
+        fail(p, "unsupported complex binary operator");
+        return (c_value_t){-1, C_BAD, NULL};
+      }
+      bool widen = (left_complex && left.agg->size == 16) ||
+                   (right_complex && right.agg->size == 16) ||
+                   (!left_complex && left.type == C_F64) ||
+                   (!right_complex && right.type == C_F64);
+      if (!left_complex) {
+        left = lower_scalar_to_complex(p, left, !widen);
+        if (left.value < 0)
+          return (c_value_t){-1, C_BAD, NULL};
+        left_complex = true;
+      }
+      if (!right_complex) {
+        right = lower_scalar_to_complex(p, right, !widen);
+        if (right.value < 0)
+          return (c_value_t){-1, C_BAD, NULL};
+        right_complex = true;
+      }
+      if (left.agg->size != right.agg->size) {
+        /*
+         * Usual arithmetic conversions: promote the narrower complex operand
+         * to the wider precision so a mixed `float _Complex`/`double _Complex`
+         * expression keeps the wider result type.
+         */
+        bool left_narrow = left.agg->size < right.agg->size;
+        c_value_t narrow = left_narrow ? left : right;
+        bool source_single = narrow.agg->size == 8;
+        bool target_single = !source_single;
+        size_t narrow_lane = source_single ? 4 : 8;
+        int real_source = source_single
+                              ? lower_load_f32_field(p, narrow.value, false)
+                              : lower_load_field(p, narrow.value, true, false);
+        int imag_source_addr = lower_add_const(p, narrow.value, narrow_lane);
+        int imag_source =
+            imag_source_addr < 0
+                ? -1
+                : source_single
+                      ? lower_load_f32_field(p, imag_source_addr, false)
+                      : lower_load_field(p, imag_source_addr, true, false);
+        int real_value =
+            real_source < 0
+                ? -1
+                : emit_value(p, (nyr_inst_t){
+                                     .op = source_single ? NYIR_F32_TO_F64
+                                                         : NYIR_F64_TO_F32,
+                                     .dst = -1,
+                                     .a = real_source,
+                                     .scalar_class = target_single
+                                                         ? NYIR_SCALAR_F32
+                                                         : NYIR_SCALAR_F64});
+        int imag_value =
+            imag_source < 0
+                ? -1
+                : emit_value(p, (nyr_inst_t){
+                                     .op = source_single ? NYIR_F32_TO_F64
+                                                         : NYIR_F64_TO_F32,
+                                     .dst = -1,
+                                     .a = imag_source,
+                                     .scalar_class = target_single
+                                                         ? NYIR_SCALAR_F32
+                                                         : NYIR_SCALAR_F64});
+        size_t promote_offset = 0;
+        if (real_value < 0 || imag_value < 0 ||
+            !agg_area_alloc(p, target_single ? 8 : 16, &promote_offset))
+          return (c_value_t){-1, C_BAD, NULL};
+        int promote_base = p->agg_base;
+        int imag_target =
+            lower_add_const(p, promote_base, target_single ? 4 : 8);
+        bool promoted =
+            imag_target >= 0 &&
+            (target_single
+                 ? lower_store_f32_field(p, promote_base, real_value, false) &&
+                       lower_store_f32_field(p, imag_target, imag_value, false)
+                 : lower_store_field(p, promote_base, real_value, true, false) &&
+                       lower_store_field(p, imag_target, imag_value, true,
+                                         false));
+        if (!promoted)
+          return (c_value_t){-1, C_BAD, NULL};
+        c_value_t promoted_value = {
+            promote_base, C_AGG,
+            target_single ? &lower_complex_value_f32
+                          : &lower_complex_value_f64};
+        if (left_narrow)
+          left = promoted_value;
+        else
+          right = promoted_value;
+      }
+      if (left.agg->size == 32) {
+        fail(p, "long double _Complex arithmetic is not supported yet");
+        return (c_value_t){-1, C_BAD, NULL};
+      }
+      if (equality) {
+        bool single_eq = left.agg->size == 8;
+        size_t eq_lane = single_eq ? 4 : 8;
+        int left_real = single_eq ? lower_load_f32_field(p, left.value, false)
+                                  : lower_load_field(p, left.value, true, false);
+        int right_real = single_eq ? lower_load_f32_field(p, right.value, false)
+                                   : lower_load_field(p, right.value, true, false);
+        int left_imag_addr = lower_add_const(p, left.value, eq_lane);
+        int right_imag_addr = lower_add_const(p, right.value, eq_lane);
+        int left_imag =
+            left_imag_addr < 0
+                ? -1
+                : single_eq ? lower_load_f32_field(p, left_imag_addr, false)
+                            : lower_load_field(p, left_imag_addr, true, false);
+        int right_imag =
+            right_imag_addr < 0
+                ? -1
+                : single_eq ? lower_load_f32_field(p, right_imag_addr, false)
+                            : lower_load_field(p, right_imag_addr, true, false);
+        if (left_real < 0 || left_imag < 0 || right_real < 0 ||
+            right_imag < 0)
+          return (c_value_t){-1, C_BAD, NULL};
+        bool equal_op = ny_ctok_eq(op, "==");
+        nyr_op_t float_cmp = single_eq ? NYIR_CMP_F32 : NYIR_CMP_F64;
+        int real_cmp = emit_value(
+            p, (nyr_inst_t){.op = float_cmp,
+                            .dst = -1,
+                            .a = left_real,
+                            .b = right_real,
+                            .cmp = equal_op ? NYIR_CMP_EQ : NYIR_CMP_NE,
+                            .scalar_class = NYIR_SCALAR_I64_RAW});
+        int imag_cmp = emit_value(
+            p, (nyr_inst_t){.op = float_cmp,
+                            .dst = -1,
+                            .a = left_imag,
+                            .b = right_imag,
+                            .cmp = equal_op ? NYIR_CMP_EQ : NYIR_CMP_NE,
+                            .scalar_class = NYIR_SCALAR_I64_RAW});
+        int combined =
+            real_cmp < 0 || imag_cmp < 0
+                ? -1
+                : emit_value(p, (nyr_inst_t){
+                                     .op = equal_op ? NYIR_AND_I64
+                                                    : NYIR_OR_I64,
+                                     .dst = -1,
+                                     .a = real_cmp,
+                                     .b = imag_cmp});
+        return (c_value_t){combined, C_I64, NULL};
+      }
+      if ((multiply || divide) && left.agg->size == 32) {
+        fail(p, "long double _Complex multiplication and division are not "
+                "supported yet");
+        return (c_value_t){-1, C_BAD, NULL};
+      }
+      if (multiply || divide) {
+        bool single_call = left.agg->size == 8;
+        size_t lane_offset = single_call ? 4 : 8;
+        int left_real = single_call ? lower_load_f32_field(p, left.value, false)
+                                    : lower_load_field(p, left.value, true, false);
+        int left_imag =
+            single_call
+                ? lower_load_f32_field(
+                      p, lower_add_const(p, left.value, lane_offset), false)
+                : lower_load_field(p,
+                                   lower_add_const(p, left.value, lane_offset),
+                                   true, false);
+        int right_real =
+            single_call ? lower_load_f32_field(p, right.value, false)
+                        : lower_load_field(p, right.value, true, false);
+        int right_imag =
+            single_call
+                ? lower_load_f32_field(
+                      p, lower_add_const(p, right.value, lane_offset), false)
+                : lower_load_field(p,
+                                   lower_add_const(p, right.value, lane_offset),
+                                   true, false);
+        if (left_real < 0 || left_imag < 0 || right_real < 0 ||
+            right_imag < 0)
+          return (c_value_t){-1, C_BAD, NULL};
+        nyr_inst_t call = {
+            .op = NYIR_CALL,
+            .dst = -1,
+            .a = left_real,
+            .b = left_imag,
+            .c = right_real,
+            .d = right_imag,
+            .e = -1,
+            .f = -1,
+            .imm = 4,
+            .flags = NYIR_INST_F_EXTERN,
+            .effects = NYIR_EFFECT_CALL,
+            .symbol = single_call ? (multiply ? "__mulsc3" : "__divsc3")
+                                  : (multiply ? "__muldc3" : "__divdc3"),
+            .scalar_class =
+                single_call ? NYIR_SCALAR_F32 : NYIR_SCALAR_F64,
+            .ret_aggregate_size = single_call ? 8 : 16};
+        call.ret_aggregate_classes[0] = NYIR_ARG_CLASS_SSE;
+        call.ret_aggregate_classes[1] =
+            single_call ? 0 : NYIR_ARG_CLASS_SSE;
+        for (int argument = 0; argument < 4; ++argument)
+          nyr_call_arg_class_set(call.arg_scalar_classes, argument,
+                                 single_call ? NYIR_SCALAR_F32
+                                             : NYIR_SCALAR_F64);
+        int call_result = emit_value(p, call);
+        if (call_result < 0) {
+          fail(p, "complex arithmetic helper call failed");
+          return (c_value_t){-1, C_BAD, NULL};
+        }
+        uint32_t packed = 0;
+        if (!nyc_classify_aggregate(left.agg, p->abi, 0, &packed)) {
+          fail(p, "complex aggregate is not classifiable by the C ABI");
+          return (c_value_t){-1, C_BAD, NULL};
+        }
+        return lower_aggregate_call_result(p, call_result, left.agg, packed);
+      }
+      size_t offset = 0;
+      if (!agg_area_alloc(p, left.agg->size, &offset)) {
+        fail(p, "complex arithmetic storage allocation failed");
+        return (c_value_t){-1, C_BAD, NULL};
+      }
+      int result = p->agg_base;
+      bool single_precision = left.agg->size == 8;
+      size_t half = left.agg->size / 2;
+      for (size_t part = 0; part < 2; ++part) {
+        int left_address = lower_add_const(p, left.value, part * half);
+        int right_address = lower_add_const(p, right.value, part * half);
+        int result_address = lower_add_const(p, result, part * half);
+        int left_part = single_precision
+                            ? lower_load_f32_field(p, left_address, false)
+                            : lower_load_field(p, left_address, true, false);
+        int right_part = single_precision
+                             ? lower_load_f32_field(p, right_address, false)
+                             : lower_load_field(p, right_address, true, false);
+        if (left_address < 0 || right_address < 0 || result_address < 0 ||
+            left_part < 0 || right_part < 0)
+          return (c_value_t){-1, C_BAD, NULL};
+        int part_value = emit_value(
+            p, (nyr_inst_t){.op = single_precision
+                                     ? (add ? NYIR_ADD_F32 : NYIR_SUB_F32)
+                                     : (add ? NYIR_ADD_F64 : NYIR_SUB_F64),
+                            .dst = -1,
+                            .a = left_part,
+                            .b = right_part,
+                            .scalar_class = single_precision ? NYIR_SCALAR_F32
+                                                             : NYIR_SCALAR_F64});
+        if (part_value < 0)
+          return (c_value_t){-1, C_BAD, NULL};
+        bool stored = single_precision
+                          ? lower_store_f32_field(p, result_address, part_value,
+                                                  false)
+                          : lower_store_field(p, result_address, part_value,
+                                              true, false);
+        if (!stored)
+          return (c_value_t){-1, C_BAD, NULL};
+      }
+      left = (c_value_t){result, C_AGG, left.agg};
+      continue;
     }
     bool cmp = ny_ctok_eq(op, "==") || ny_ctok_eq(op, "!=") ||
                ny_ctok_eq(op, "<") || ny_ctok_eq(op, "<=") ||

@@ -236,6 +236,7 @@ mut _skybox_pitch_deg = 0.0
 mut _skybox_fov_deg = 60.0
 mut _backend = 2
 mut _cpu_buf = 0
+
 ;; Porter-Duff operator of later 2D draws (0 = source-over, straight alpha).
 mut int _blend_op = 0
 mut _cpu_w = 0
@@ -1166,17 +1167,17 @@ fn _blend_factor_value(int code, f64 sa, f64 da, f64 sc=0.0, f64 dc=0.0) f64 {
    0.0
 }
 
-fn blend_mode() int { "Returns the Porter-Duff operator in effect (0 = source-over)." _blend_op }
+fn blend_mode() int { "Returns the Porter-Duff operator in effect(0 = source-over)." _blend_op }
 
 fn set_blend_mode(int op) bool {
-   "Selects the Porter-Duff operator for later 2D vertex draws (core.os.ui.render.vg's operator numbering; 0 restores straight-alpha source-over). Operators 1..10 expect premultiplied vertex colors. Returns false for an unknown operator."
+   "Selects the Porter-Duff operator for later 2D vertex draws(core.os.ui.render.vg's operator numbering; 0 restores straight-alpha source-over). Operators 1..10 expect premultiplied vertex colors. Returns false for an unknown operator."
    if op < 0 || op > 10 { return false }
    if op == _blend_op { return true }
    return _apply_blend_op(op)
 }
 
 fn set_blend_factors(int fsrc, int fdst) bool {
-   "Blends later 2D vertex draws as source * fsrc + destination * fdst, with premultiplied vertex colors and the factor codes of blend_factors (0..9). The destination alpha is kept. Multiply is (6, 0), screen (1, 9), invert-against-white (7, 0). set_blend_mode(0) restores the UI blend. Returns false for an unknown code."
+   "Blends later 2D vertex draws as source * fsrc + destination * fdst, with premultiplied vertex colors and the factor codes of blend_factors(0..9). The destination alpha is kept. Multiply is(6, 0), screen(1, 9), invert-against-white(7, 0). set_blend_mode(0) restores the UI blend. Returns false for an unknown code."
    if fsrc < 0 || fsrc > 9 || fdst < 0 || fdst > 9 { return false }
    if _blend_op == BLEND_CUSTOM && fsrc == _blend_custom_src && fdst == _blend_custom_dst { return true }
    _blend_custom_src = fsrc
@@ -3954,8 +3955,8 @@ fn window_error() str {
 
 fn _window_fail(str what) bool {
    _window_error = what + " (requested " + _requested_backend_name() + " backend, WAYLAND_DISPLAY=" +
-      (ui_profile.env_present_cached("WAYLAND_DISPLAY") ? "set" : "unset") + ", DISPLAY=" +
-      (ui_profile.env_present_cached("DISPLAY") ? "set" : "unset") + ")"
+   (ui_profile.env_present_cached("WAYLAND_DISPLAY") ? "set" : "unset") + ", DISPLAY=" +
+   (ui_profile.env_present_cached("DISPLAY") ? "set" : "unset") + ")"
    false
 }
 
@@ -5460,7 +5461,7 @@ fn pixel_world_size(f64 x, f64 y, f64 z) f64 {
 }
 
 fn draw_line_px(list start, list finish, any color, f64 px=1.5) bool {
-   "Draws a 3D segment whose on-screen width stays `px` pixels at every distance from the camera (gizmos, axes, selection outlines). Without an active 3D camera it falls back to draw_line."
+   "Draws a 3D segment whose on-screen width stays `px` pixels at every distance from the camera(gizmos, axes, selection outlines). Without an active 3D camera it falls back to draw_line."
    if !_mat4_valid(_mvp_matrix) && !_mat4_valid(_line_view_proj) { return _draw_line_impl(start, finish, color, 0.02) }
    def f64 ax, ay = float(start.get(0, 0.0)), float(start.get(1, 0.0))
    def f64 az = float(start.get(2, 0.0))
@@ -6815,7 +6816,7 @@ fn log(any msg) bool {
 }
 
 fn _snapshot_flatten_straight(any data, int w, int h) bool {
-   "Composites a straight-alpha RGBA buffer (the mock renderer's) over black and makes it opaque, so a snapshot shows what the GPU backends store: premultiplied bytes."
+   "Composites a straight-alpha RGBA buffer(the mock renderer's) over black and makes it opaque, so a snapshot shows what the GPU backends store: premultiplied bytes."
    if !data || w <= 0 || h <= 0 { return false }
    mut int i = 0
    def int end = w * h * 4

@@ -483,3 +483,273 @@ fn f(int x, str s) int { x + _ }
 print(f(1, "a"))
 NY
 }
+
+shape binder_type_argument_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "binders"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "type parameter 'A' instantiated inconsistently"
+  source ny <<'NY'
+use core
+;; An explicit binder fixes the parameters after it.
+fn id(Type A, A x) A { x }
+print(id(int, "s"))
+NY
+}
+
+shape generic_nested_instance_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "binders"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "expected str, got int"
+  source ny <<'NY'
+use core
+;; The instance is checked statically: first of a list of ints is an int.
+fn first<A>(list<A> xs) A { xs[0] }
+def str s = first([1, 2])
+NY
+}
+
+shape implicit_binder_unsolved_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "binders"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "cannot infer implicit binder 'n'"
+  source ny <<'NY'
+use core
+;; An implicit binder needs an argument type that fixes it.
+fn bound{int n}(Fin<n> i) int { n }
+fn g(int k) int { bound(k) }
+print(1)
+NY
+}
+
+shape hole_unsolved_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "binders"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "unsolved hole '_'"
+  source ny <<'NY'
+use core
+;; A hole no argument determines is an error.
+fn pick(Type A, int x) int { x }
+print(pick(_, 3))
+NY
+}
+
+shape universe_binder_level_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "binders"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "universe level too low"
+  source ny <<'NY'
+use core
+;; A type argument must live in the binder's universe.
+fn small(Type 0 A) str { A }
+print(small(Type 0))
+NY
+}
+
+shape universe_level_undeclared_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "binders"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "undeclared universe level"
+  source ny <<'NY'
+use core
+;; A level variable must be declared.
+fn bad(Type w A) str { A }
+NY
+}
+
+shape binder_type_argument_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "binders"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "type parameter 'A' instantiated inconsistently"
+  source ny <<'NY'
+use core
+;; An explicit binder fixes the parameters after it.
+fn id(Type A, A x) A { x }
+print(id(int, "s"))
+NY
+}
+
+shape generic_nested_instance_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "binders"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "expected str, got int"
+  source ny <<'NY'
+use core
+;; The instance is checked statically: first of a list of ints is an int.
+fn first<A>(list<A> xs) A { xs[0] }
+def str s = first([1, 2])
+NY
+}
+
+shape implicit_binder_unsolved_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "binders"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "cannot infer implicit binder 'n'"
+  source ny <<'NY'
+use core
+;; An implicit binder needs an argument type that fixes it.
+fn bound{int n}(Fin<n> i) int { n }
+fn g(int k) int { bound(k) }
+print(1)
+NY
+}
+
+shape hole_unsolved_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "binders"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "unsolved hole '_'"
+  source ny <<'NY'
+use core
+;; A hole no argument determines is an error.
+fn pick(Type A, int x) int { x }
+print(pick(_, 3))
+NY
+}
+
+shape universe_binder_level_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "binders"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "universe level too low"
+  source ny <<'NY'
+use core
+;; A type argument must live in the binder's universe.
+fn small(Type 0 A) str { A }
+print(small(Type 0))
+NY
+}
+
+shape universe_level_undeclared_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "binders"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "undeclared universe level"
+  source ny <<'NY'
+use core
+;; A level variable must be declared.
+fn bad(Type w A) str { A }
+NY
+}
+
+shape binder_type_argument_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "binders"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "type parameter 'A' instantiated inconsistently"
+  source ny <<'NY'
+use core
+;; An explicit binder fixes the parameters after it.
+fn id(Type A, A x) A { x }
+print(id(int, "s"))
+NY
+}
+
+shape generic_nested_instance_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "binders"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "expected str, got int"
+  source ny <<'NY'
+use core
+;; The instance is checked statically: first of a list of ints is an int.
+fn first<A>(list<A> xs) A { xs[0] }
+def str s = first([1, 2])
+NY
+}
+
+shape implicit_binder_unsolved_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "binders"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "cannot infer implicit binder 'n'"
+  source ny <<'NY'
+use core
+;; An implicit binder needs an argument type that fixes it.
+fn bound{int n}(Fin<n> i) int { n }
+fn g(int k) int { bound(k) }
+print(1)
+NY
+}
+
+shape hole_unsolved_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "binders"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "unsolved hole '_'"
+  source ny <<'NY'
+use core
+;; A hole no argument determines is an error.
+fn pick(Type A, int x) int { x }
+print(pick(_, 3))
+NY
+}
+
+shape universe_binder_level_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "binders"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "universe level too low"
+  source ny <<'NY'
+use core
+;; A type argument must live in the binder's universe.
+fn small(Type 0 A) str { A }
+print(small(Type 0))
+NY
+}
+
+shape universe_level_undeclared_negative {
+  family "compiler-errors/type"
+  generator "error"
+  features ["error", "type", "binders"]
+  template ny-compile-fail
+  expect compile_fail
+  expect_message "undeclared universe level"
+  source ny <<'NY'
+use core
+;; A level variable must be declared.
+fn bad(Type w A) str { A }
+NY
+}

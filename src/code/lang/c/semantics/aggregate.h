@@ -41,6 +41,10 @@ typedef enum {
   C_AGG_FIELD_AGG,   /* nested struct/union value; agg names the type */
   C_AGG_FIELD_ARRAY, /* elem_count elements; element type is agg for
                         aggregate arrays, otherwise an 8-byte scalar */
+  /* Appended to keep the existing kind numbers stable. */
+  C_AGG_FIELD_C64,  /* _Complex float: two SSE halves in one eightbyte */
+  C_AGG_FIELD_C128, /* _Complex double: two SSE eightbytes */
+  C_AGG_FIELD_C_LDOUBLE, /* _Complex long double: 32 bytes, memory class */
 } c_agg_field_kind_t;
 
 #define C_AGG_MAX_ARRAY_RANK 32

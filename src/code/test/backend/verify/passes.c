@@ -47,7 +47,9 @@ typedef struct {
   pass_metric_t metric;
 } pass_case_t;
 
-/* All constants: constant folding must leave no ADD_I64 behind. */
+/*
+ * All constants: constant folding must leave no ADD_I64 behind.
+ */
 static void build_fold_constants(nyr_func_t *f) {
   nyr_opt_begin(f);
   int inner = nyr_opt_binop(f, NYIR_ADD_I64, nyr_opt_const(f, 2),
@@ -56,21 +58,27 @@ static void build_fold_constants(nyr_func_t *f) {
   nyr_opt_ret(f, outer);
 }
 
-/* x + 0: peephole removes the addition. */
+/*
+ * x + 0: peephole removes the addition.
+ */
 static void build_add_zero(nyr_func_t *f) {
   nyr_opt_begin(f);
   int x = nyr_opt_emit_imm(f, NYIR_LOAD_LOCAL, 0);
   nyr_opt_ret(f, nyr_opt_binop(f, NYIR_ADD_I64, x, nyr_opt_const(f, 0)));
 }
 
-/* x * 8: the e-graph rewrites the multiply into a shift. */
+/*
+ * x * 8: the e-graph rewrites the multiply into a shift.
+ */
 static void build_mul_pow2(nyr_func_t *f) {
   nyr_opt_begin(f);
   int x = nyr_opt_emit_imm(f, NYIR_LOAD_LOCAL, 0);
   nyr_opt_ret(f, nyr_opt_binop(f, NYIR_MUL_I64, x, nyr_opt_const(f, 8)));
 }
 
-/* Two identical additions: CSE keeps one of them. */
+/*
+ * Two identical additions: CSE keeps one of them.
+ */
 static void build_redundant_adds(nyr_func_t *f) {
   nyr_opt_begin(f);
   int x = nyr_opt_emit_imm(f, NYIR_LOAD_LOCAL, 0);
@@ -80,7 +88,9 @@ static void build_redundant_adds(nyr_func_t *f) {
   nyr_opt_ret(f, nyr_opt_binop(f, NYIR_ADD_I64, first, second));
 }
 
-/* t = copy(x); t + 1: copy propagation removes the COPY. */
+/*
+ * t = copy(x); t + 1: copy propagation removes the COPY.
+ */
 static void build_copy(nyr_func_t *f) {
   nyr_opt_begin(f);
   int x = nyr_opt_emit_imm(f, NYIR_LOAD_LOCAL, 0);

@@ -1,8 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
-  <title id="title1">Quad Mesh</title>
-  <desc id="desc1">Quad Mesh editor icon. Original asset id: quadmesh.</desc>
-  <defs id="defs1" />
-  <g transform="translate(2.0000 2.0000) scale(1.25000)" id="g1">
-    <path d="M 1,1 V 15 H 15 V 1 Z M 4.4140625,3 H 13 v 8.585938 z M 3,4.4140625 11.585938,13 H 3 Z" id="path1" fill="#c6c6ca" />
-  </g>
-</svg>

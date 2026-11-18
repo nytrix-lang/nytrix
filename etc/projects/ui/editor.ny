@@ -4504,10 +4504,10 @@ fn _move_cursor_ext(str dir, bool jump, bool extend=false) int {
    if dir == "left" {
       mut steps = jump ? 4 : 1
       while steps > 0 {
-         if col > 0 { col -= 1 }
+         if col > 0 { col = ed.char_prev(to_str(lines.get(row, "")), col) }
          elif row > 0 {
             row -= 1
-            col = to_str(lines.get(row, "")).len
+            col = str.utf8_len(to_str(lines.get(row, "")))
          }
          steps -= 1
       }
@@ -4517,7 +4517,7 @@ fn _move_cursor_ext(str dir, bool jump, bool extend=false) int {
       mut steps2 = jump ? 4 : 1
       while steps2 > 0 {
          def line = to_str(lines.get(row, ""))
-         if col < line.len { col += 1 }
+         if col < str.utf8_len(line) { col = ed.char_next(line, col) }
          elif row + 1 < lines.len {
             row += 1
             col = 0

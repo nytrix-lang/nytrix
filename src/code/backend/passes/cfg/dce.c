@@ -13,8 +13,10 @@
 static unsigned dce_observable_effects(const nyr_func_t *f,
                                         const nyr_inst_t *in) {
   unsigned effects = nyr_effective_effects(in);
-  /* C mode can discard an unused nonvolatile read. Keep MAY_TRAP on the
-   * instruction itself: motion/speculation passes still need that fact. */
+  /*
+   * C mode can discard an unused nonvolatile read. Keep MAY_TRAP on the
+   * instruction itself: motion/speculation passes still need that fact.
+   */
   if (f->untagged_values && in->op == NYIR_LOAD_I64 &&
       !(in->flags & NYIR_INST_F_MEM_VOLATILE) &&
       !(effects & (NYIR_EFFECT_VOLATILE | NYIR_EFFECT_IO)))

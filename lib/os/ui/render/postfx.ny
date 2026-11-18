@@ -22,7 +22,6 @@
 ;;
 ;; Every effect is off until enabled and has one `amount` (set_amount); tint,
 ;; glow and fade also take a color (set_effect_color).
-
 module core.os.ui.render.postfx(
    EFFECTS, effect_index, enable, toggle, enabled, enabled_mask, set_mask, disable_all,
    set_amount, amount, set_effect_color, effect_color, apply, last_passes
@@ -87,7 +86,7 @@ fn enable(str name, bool on=true) bool {
 }
 
 fn toggle(str name) bool {
-   "Flips an effect and returns its new state (false for an unknown name)."
+   "Flips an effect and returns its new state(false for an unknown name)."
    def int i = effect_index(name)
    if i < 0 { return false }
    enable(name, !enabled(name))
@@ -112,7 +111,7 @@ fn set_mask(int m) any {
 fn disable_all() any { "Turns every effect off." _mask = 0 0 }
 
 fn set_amount(str name, f64 v) bool {
-   "Sets an effect's strength: tint and invert mix 0..1 (1 = full effect), glow/fade/grain/scanlines/vignette opacity 0..1, letterbox the target aspect ratio (2.35 = cinemascope)."
+   "Sets an effect's strength: tint and invert mix 0..1(1 = full effect), glow/fade/grain/scanlines/vignette opacity 0..1, letterbox the target aspect ratio(2.35 = cinemascope)."
    def int i = effect_index(name)
    if i < 0 || !_init() { return false }
    store64_f64(_amounts, v, i * 8)
@@ -120,7 +119,7 @@ fn set_amount(str name, f64 v) bool {
 }
 
 fn amount(str name) f64 {
-   "Returns an effect's strength (0 for an unknown name)."
+   "Returns an effect's strength(0 for an unknown name)."
    def int i = effect_index(name)
    if i < 0 || !_init() { return 0.0 }
    def f64 v = load64_f64(_amounts, i * 8)
@@ -150,7 +149,6 @@ fn effect_color(str name) list {
 fn last_passes() int { "Returns how many draw passes the last apply issued." _passes }
 
 ;; ---- vertex stream ------------------------------------------------------------
-
 fn _reserve(int extra) bool {
    def int need = _vb_n + extra
    if need <= _vb_cap { return true }
@@ -202,8 +200,8 @@ fn _flush() bool {
 fn _pack(f64 r, f64 g, f64 b, f64 a) int { gfx.color_pack(r, g, b, a) }
 
 ;; ---- effects -------------------------------------------------------------------
-
 fn _amt(int i) f64 { load64_f64(_amounts, i * 8) }
+
 fn _col(int i, int c) f64 { load64_f64(_colors, (i * 3 + c) * 8) }
 
 fn _full(f64 w, f64 h, int col) any { _quad(0.0, 0.0, w, h, col, col, col, col) }
@@ -328,7 +326,7 @@ fn _letterbox(f64 w, f64 h) any {
 }
 
 fn apply(f64 w, f64 h, f64 t=0.0) int {
-   "Draws the enabled effects over the current frame (w by h, Y-down) and returns the number of passes drawn. Leaves the UI blend mode in effect."
+   "Draws the enabled effects over the current frame(w by h, Y-down) and returns the number of passes drawn. Leaves the UI blend mode in effect."
    _passes = 0
    if _mask == 0 || w <= 0.0 || h <= 0.0 || !_init() { return 0 }
    if (_mask & 1) != 0 { _tint(w, h) }

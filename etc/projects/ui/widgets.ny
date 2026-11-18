@@ -46,8 +46,8 @@ mut win = render.init_window(START_W, START_H, "Nytrix Widgets", consts.WINDOW_C
 if !win { panic("window init failed") }
 window.set_exit_key(win, consts.KEY_NULL)
 
-mut ui_scale = 1.0
-def env_scale = str.atof(common.env_trim("NY_WIDGETS_SCALE"))
+mut f64 ui_scale = 1.0
+def f64 env_scale = float(str.atof(common.env_trim("NY_WIDGETS_SCALE")))
 if env_scale >= 0.5 { ui_scale = env_scale }
 
 ;; Fonts are rasterised at the size they appear on screen (the UI scale times
@@ -383,14 +383,14 @@ fn default_layout() any {
 mut frame = 0
 while !render.window_should_close(win) {
    mut e = window.check_event(win)
-   while e != 0 {
+   while !is_nil(e) && !(is_int(e) && int(e) == 0) {
       def typ = window.event_type(e)
       def data = window.event_data(e)
       if typ == EVENT_KEY_PRESSED {
          def k = int(data.get("key", 0))
          if k == KEY_F2 { gui.set_theme(gui.theme() == "light" ? "dark" : "light") }
-         elif k == KEY_F3 { ui_scale = max(0.75, ui_scale - 0.25) }
-         elif k == KEY_F4 { ui_scale = min(3.0, ui_scale + 0.25) }
+         elif k == KEY_F3 { ui_scale = float(max(0.75, ui_scale - 0.25)) }
+         elif k == KEY_F4 { ui_scale = float(min(3.0, ui_scale + 0.25)) }
       }
       if !script_has_pos || (typ != EVENT_MOUSE_POS_CHANGED && typ != EVENT_MOUSE_BUTTON_PRESSED && typ != EVENT_MOUSE_BUTTON_RELEASED) {
          gui.feed_event(typ, data)
@@ -399,7 +399,8 @@ while !render.window_should_close(win) {
    }
    run_script(frame)
    def fb = render.framebuffer_size_f64(START_W, START_H)
-   def sw, sh = max(1.0, float(fb.get(0, START_W))), max(1.0, float(fb.get(1, START_H)))
+   def f64 sw = max(1.0, float(fb.get(0, START_W)))
+   def f64 sh = max(1.0, float(fb.get(1, START_H)))
    gui.set_headless_input(script_has_pos)
    gui.set_enabled(true)
    ;; Framebuffer pixels per window unit; layout is in framebuffer pixels.

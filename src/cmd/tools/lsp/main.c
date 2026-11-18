@@ -1306,11 +1306,12 @@ static void publish_diagnostics(const char *uri, const lsp_diag_vec_t *diags) {
   free(body.data);
 }
 
-
 #ifndef _WIN32
 #include <sys/wait.h>
 
-/* Reads `"key":"value"` or `"key":number` from a JSON object slice. */
+/*
+ * Reads `"key":"value"` or `"key":number` from a JSON object slice.
+ */
 static bool goal_json_field(const char *obj, const char *end, const char *key,
                             char *out, size_t cap) {
   char pat[64];

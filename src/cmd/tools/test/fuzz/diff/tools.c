@@ -1184,17 +1184,6 @@ typedef struct {
   double case_timeout_s;
 } compiler_active_finding_t;
 
-static bool compiler_selector_matches(const char *selector, const char *id) {
-  if (!selector || !*selector || strcmp(selector, "all") == 0)
-    return true;
-  if (!id || !*id)
-    return false;
-  if (strcmp(selector, id) == 0)
-    return true;
-  size_t n = strlen(selector);
-  return strncmp(selector, id, n) == 0 && id[n] == '-';
-}
-
 static int compiler_known_bugs_add_case(
     const char *root, const char *ny_bin, const compiler_known_bug_t *spec,
     const char *selector, const char *out_root, double timeout_s,
@@ -1370,112 +1359,6 @@ static int compiler_known_bugs_add_case(
     unlink(materialized_source);
     free(materialized_source);
   }
-  return 1;
-}
-
-static int compiler_findings_add_case(const char *root, const char *ny_bin,
-                                      const compiler_active_finding_t *spec,
-                                      const char *selector, double timeout_s,
-                                      string_list_t *rows,
-                                      string_list_t *failures, int *live_count,
-                                      int *cleared_count, int *missing_count) {
-  if (!spec || !spec->id || !*spec->id)
-    return 0;
-  if (!compiler_selector_matches(selector, spec->id))
-    return 0;
-
-  char source_path[4096];
-  bool source_ok =
-      path_join(source_path, sizeof(source_path), root, spec->source_rel) &&
-      path_exists_file(source_path);
-  char target_path[4096] = "";
-  bool needs_target = spec->target_rel && *spec->target_rel;
-  bool target_ok = !needs_target || (path_join(target_path, sizeof(target_path),
-                                               root, spec->target_rel) &&
-                                     path_exists_file(target_path));
-  if (!source_ok || !target_ok) {
-    if (missing_count)
-      ++*missing_count;
-    (void)string_list_push_take(
-        failures, make_worker_failure_row(spec->id, "compiler-findings", 1, "",
-                                          source_ok ? "target missing"
-                                                    : "source missing"));
-    str_buf_t row = {0};
-    (void)sb_append(&row, "{\"name\":");
-    (void)sb_append_json_str(&row, spec->id);
-    (void)sb_append(&row, ",\"kind\":\"compiler-finding\",\"ok\":false");
-    (void)sb_append(&row, ",\"status\":\"missing\",\"title\":");
-    (void)sb_append_json_str(&row, spec->title ? spec->title : "");
-    (void)sb_append(&row, ",\"source\":");
-    append_rel_json_str(&row, root, source_ok ? source_path : spec->source_rel);
-    (void)sb_append(&row, ",\"target\":");
-    append_rel_json_str(&row, root, target_ok ? target_path : spec->target_rel);
-    (void)sb_append(&row, ",\"engine\":\"nytrix_core\"}");
-    (void)string_list_push_take(rows, sb_take(&row));
-    return 1;
-  }
-
-  double case_timeout_s = timeout_s;
-  if (spec->case_timeout_s > 0.0 &&
-      (case_timeout_s <= 0.0 || spec->case_timeout_s < case_timeout_s))
-    case_timeout_s = spec->case_timeout_s;
-  proc_result_t pr = {0};
-  if (strcmp(spec->mode ? spec->mode : "", "syntax-target") == 0) {
-    char *argv[] = {(char *)ny_bin, target_path, source_path, NULL};
-    pr = run_proc(argv, root, case_timeout_s);
-  } else {
-    char *argv[] = {(char *)ny_bin, "--compiler-asserts", "-emit-only",
-                    source_path, NULL};
-    pr = run_proc(argv, root, case_timeout_s);
-  }
-
-  bool expect_timeout =
-      spec->expected_signal && strcmp(spec->expected_signal, "timeout") == 0;
-  bool expect_crash =
-      spec->expected_signal && strcmp(spec->expected_signal, "crash") == 0;
-  bool live = (expect_timeout && pr.timed_out) ||
-              (expect_crash && proc_result_crashed(&pr));
-  const char *status = live ? "live" : "cleared";
-  bool ok = !live;
-  if (live) {
-    if (live_count)
-      ++*live_count;
-    (void)string_list_push_take(
-        failures, make_worker_failure_row(
-                      spec->id, "compiler-findings", pr.rc ? pr.rc : 1,
-                      pr.out ? pr.out : "", "active finding reproduced"));
-  } else if (cleared_count) {
-    ++*cleared_count;
-  }
-
-  str_buf_t row = {0};
-  (void)sb_append(&row, "{\"name\":");
-  (void)sb_append_json_str(&row, spec->id);
-  (void)sb_append(&row, ",\"kind\":\"compiler-finding\",\"ok\":");
-  (void)sb_append(&row, ok ? "true" : "false");
-  (void)sb_append(&row, ",\"status\":");
-  (void)sb_append_json_str(&row, status);
-  (void)sb_append(&row, ",\"title\":");
-  (void)sb_append_json_str(&row, spec->title ? spec->title : "");
-  (void)sb_append(&row, ",\"mode\":");
-  (void)sb_append_json_str(&row, spec->mode ? spec->mode : "");
-  (void)sb_append(&row, ",\"expected_signal\":");
-  (void)sb_append_json_str(&row,
-                           spec->expected_signal ? spec->expected_signal : "");
-  (void)sb_append(&row, ",\"source\":");
-  append_rel_json_str(&row, root, source_path);
-  (void)sb_append(&row, ",\"target\":");
-  append_rel_json_str(&row, root, needs_target ? target_path : "");
-  (void)sb_appendf(&row,
-                   ",\"rc\":%d,\"timed_out\":%s,\"crashed\":%s,"
-                   "\"elapsed_ms\":%.2f,\"timeout_s\":%.2f",
-                   pr.rc, pr.timed_out ? "true" : "false",
-                   proc_result_crashed(&pr) ? "true" : "false", pr.elapsed_ms,
-                   case_timeout_s);
-  append_proc_tail_fields(&row, &pr);
-  (void)sb_append(&row, ",\"engine\":\"nytrix_core\"}");
-  (void)string_list_push_take(rows, sb_take(&row));
-  proc_result_free(&pr);
   return 1;
 }
 
@@ -3473,11 +3356,11 @@ static void append_creal_failure_json(str_buf_t *b,
                                       const char *reject_reason,
                                       const char *expected) {
   bool first = true;
-#define CREAL_SEP()                                                            \
-  do {                                                                         \
-    if (!first)                                                                \
-      (void)sb_append_c(b, ',');                                               \
-    first = false;                                                             \
+#define CREAL_SEP()              \
+  do {                           \
+    if (!first)                  \
+      (void)sb_append_c(b, ','); \
+    first = false;               \
   } while (0)
   if (reject_reason && *reject_reason) {
     CREAL_SEP();
@@ -5057,8 +4940,8 @@ static int cmd_public_bench_repl_jit(int argc, char **argv) {
   const char *cases[] = {"repl_expr", "repl_loop", "repl_fn"};
   const char *sources[] = {
       "use core\nprint(21 + 21)\n",
-      "use core\nmut acc = 0\nmut i = 0\nwhile(i < 12){\n   acc += i\n   i += "
-      "1\n}\nprint(acc)\n",
+      ("use core\nmut acc = 0\nmut i = 0\nwhile(i < 12){\n   acc += i\n   i += "
+       "1\n}\nprint(acc)\n"),
       "use core\nfn mix(x){\n   x * x + 3\n}\nprint(mix(9))\n"};
   int case_count = has_flag_after(argc, argv, 3, "--fast") ? 2 : 3;
   string_list_t rows = {0}, failures = {0};

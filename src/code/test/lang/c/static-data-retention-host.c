@@ -1,3 +1,6 @@
+/*
+ * Host-side C counterpart for the static data retention test.
+ */
 struct operations {
   int (*callback)(int);
 };

@@ -1,3 +1,6 @@
+/*
+ * C front-end regression test: weak callback.
+ */
 extern int (*nyc_weak_callback)(int);
 int __attribute__((weak)) (*nyc_weak_callback)(int);
 int (*nyc_weak_callback)(int);

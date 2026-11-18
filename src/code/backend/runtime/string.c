@@ -8,6 +8,9 @@
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
+#ifndef _WIN32
+#include <sys/mman.h>
+#endif
 
 /*
  * Native typed-buffer check for the generic value formatter.
@@ -830,7 +833,43 @@ typedef struct {
   uint64_t hash;
 } rt_str_hash_cache_t;
 
-static _Thread_local rt_str_hash_cache_t g_str_hash_cache[RT_STR_HASH_CACHE];
+/*
+ * The table is 1 MiB per thread.  As a static TLS array the loader zero-filled
+ * it for the main thread on every start (~256 page faults, most of a trivial
+ * program's runtime); map it on the first cacheable hash instead, so untouched
+ * pages are never faulted in.  rt_str_intern_clear releases it.
+ */
+#define RT_STR_HASH_CACHE_BYTES (RT_STR_HASH_CACHE * sizeof(rt_str_hash_cache_t))
+static _Thread_local rt_str_hash_cache_t *g_str_hash_cache;
+
+static rt_str_hash_cache_t *rt_str_hash_cache_table(void) {
+  if (__builtin_expect(g_str_hash_cache != NULL, 1))
+    return g_str_hash_cache;
+#ifndef _WIN32
+  void *table = mmap(NULL, RT_STR_HASH_CACHE_BYTES, PROT_READ | PROT_WRITE,
+                     MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  if (table == MAP_FAILED)
+    return NULL;
+#else
+  void *table = calloc(RT_STR_HASH_CACHE, sizeof(rt_str_hash_cache_t));
+  if (!table)
+    return NULL;
+#endif
+  g_str_hash_cache = (rt_str_hash_cache_t *)table;
+  return g_str_hash_cache;
+}
+
+static void rt_str_hash_cache_release(void) {
+  rt_str_hash_cache_t *table = g_str_hash_cache;
+  g_str_hash_cache = NULL;
+  if (!table)
+    return;
+#ifndef _WIN32
+  munmap(table, RT_STR_HASH_CACHE_BYTES);
+#else
+  free(table);
+#endif
+}
 
 /*
  * Called before storage is released to evict hash-cache and intern-table
@@ -838,8 +877,10 @@ static _Thread_local rt_str_hash_cache_t g_str_hash_cache[RT_STR_HASH_CACHE];
  */
 void rt_str_forget_pointer(int64_t v);
 
-/* The intern table of the calling thread: an index of strings by content,
- * not a reference to them (rt_free removes a freed string's entry). */
+/*
+ * The intern table of the calling thread: an index of strings by content,
+ * not a reference to them (rt_free removes a freed string's entry).
+ */
 void rt_fc_intern_table(uintptr_t *start, uintptr_t *end) {
   *start = (uintptr_t)g_intern;
   *end = *start + g_intern_cap * sizeof(*g_intern);
@@ -847,9 +888,8 @@ void rt_fc_intern_table(uintptr_t *start, uintptr_t *end) {
 
 void rt_fc_str_hash_cache(uintptr_t *start, uintptr_t *end) {
   *start = (uintptr_t)g_str_hash_cache;
-  *end = *start + sizeof(g_str_hash_cache);
+  *end = g_str_hash_cache ? *start + RT_STR_HASH_CACHE_BYTES : *start;
 }
-
 
 _Atomic uint64_t g_rt_str_forget_gen = 1;
 _Atomic uint64_t g_rt_literal_str_bits[1024];
@@ -861,11 +901,13 @@ void rt_str_intern_clear(void) {
   g_intern_cap = 0;
   g_intern_count = 0;
   g_intern_tombstones = 0;
-  memset(g_str_hash_cache, 0, sizeof(g_str_hash_cache));
+  rt_str_hash_cache_release();
 }
 
-/* The decimal-string cache indexes strings by value; like the intern table
- * it is told when one of them goes away. */
+/*
+ * The decimal-string cache indexes strings by value; like the intern table
+ * it is told when one of them goes away.
+ */
 static void rt_int_str_cache_forget(int64_t v) {
   const unsigned char *text = (const unsigned char *)(uintptr_t)v;
   int64_t value = 0;
@@ -888,7 +930,7 @@ void rt_fc_int_str_cache(uintptr_t *start, uintptr_t *end) {
 
 void rt_str_forget_pointer(int64_t v) {
   uint64_t idx = ((uint64_t)(uintptr_t)v >> 4) & (RT_STR_HASH_CACHE - 1);
-  if (g_str_hash_cache[idx].ptr == v)
+  if (g_str_hash_cache && g_str_hash_cache[idx].ptr == v)
     g_str_hash_cache[idx].ptr = 0;
 
   /*
@@ -912,9 +954,11 @@ void rt_str_forget_pointer(int64_t v) {
       slot->ptr = RT_INTERN_TOMBSTONE;
       --g_intern_count;
       ++g_intern_tombstones;
-      /* Literal caches (rt_cstr_to_str) hold interned results only; they
+      /*
+       * Literal caches (rt_cstr_to_str) hold interned results only; they
        * stop trusting their entries once one of theirs leaves an intern
-       * table. (They keep what they hold reachable, so that is rare.) */
+       * table. (They keep what they hold reachable, so that is rare.)
+       */
       unsigned bit = rt_literal_str_bit(v);
       if (atomic_load_explicit(&g_rt_literal_str_bits[bit >> 6],
                                memory_order_acquire) &
@@ -938,16 +982,17 @@ int64_t rt_str_hash(int64_t v) {
   bool cacheable = rt_try_read_i64((uintptr_t)v - 32, &magic) &&
                    (uint64_t)magic == NY_SSO_STRING_MAGIC;
   uint64_t idx = ((uint64_t)(uintptr_t)v >> 4) & (RT_STR_HASH_CACHE - 1);
-  if (cacheable && g_str_hash_cache[idx].ptr == v)
-    return rt_tag_v((int64_t)g_str_hash_cache[idx].hash);
+  rt_str_hash_cache_t *cache = cacheable ? rt_str_hash_cache_table() : NULL;
+  if (cache && cache[idx].ptr == v)
+    return rt_tag_v((int64_t)cache[idx].hash);
   size_t n = rt_tagged_str_len(v);
   const unsigned char *s = (const unsigned char *)(uintptr_t)v;
   uint64_t h = 2166136261u;
   for (size_t i = 0; i < n; i++)
     h = ((h ^ (uint64_t)s[i]) * 16777619u) & 2147483647u;
-  if (cacheable) {
-    g_str_hash_cache[idx].ptr = v;
-    g_str_hash_cache[idx].hash = h;
+  if (cache) {
+    cache[idx].ptr = v;
+    cache[idx].hash = h;
   }
   return rt_tag_v((int64_t)h);
 }

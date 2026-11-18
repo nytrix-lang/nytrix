@@ -18,6 +18,7 @@ use core.cache as cache
 mut bool _enabled = true
 mut f64 _scale = 1.0
 mut any _win = nil
+
 ;; Separate typed globals: as one multi-assigned declaration the font ids
 ;; were read back tagged in compiled executables (font 3 became 7, an
 ;; unknown font, so text fell back to the bitmap font).
@@ -33,6 +34,7 @@ mut int _mouse_press_seq = 0
 mut _mouse_scroll_dx, _mouse_scroll_dy = 0.0, 0.0
 mut _last_scroll_x, _last_scroll_y = 0.0, 0.0
 mut _event_mouse_has_pos, _event_mouse_down0_known = false, false
+
 ;; A press and its release fed before one prepare_input (a fast click inside
 ;; one compositor frame) would cancel out; the release is held for a frame.
 mut bool _defer_release0 = false
@@ -45,6 +47,7 @@ mut _key_events = []
 mut _key_mask_0, _key_mask_1, _key_mask_2, _key_mask_3 = 0, 0, 0, 0
 mut _key_mask_4, _key_mask_5, _key_mask_6, _key_mask_7 = 0, 0, 0, 0
 mut _text_events = ""
+
 ;; Input-method composition for the focused text field (EVENT_TEXT_PREEDIT /
 ;; EVENT_TEXT_DELETE_SURROUNDING from the window backend). The preedit is
 ;; shown at the caret but is not part of the value until it is committed.
@@ -91,6 +94,7 @@ mut _active_rect = [0.0, 0.0, 0.0, 0.0]
 mut _iw_visible, _iw_hovered, _iw_held, _iw_clicked, _iw_released = false, false, false, false, false
 mut _same_line_next, _same_line_gap = false, 0.0
 mut _scroll_area_active, _scroll_area_id = false, ""
+
 ;; Declared `any` on its own: as an untyped slot of a multi-assignment the saved
 ;; parent no longer tested as a dict when the area ended, so every widget after
 ;; a scroll area was laid out at a zero rectangle and end_window was skipped.
@@ -118,6 +122,7 @@ mut _menu_measure_w = 0.0
 mut _menubar_active, _menubar_open = false, ""
 mut _menubar_x, _menubar_y, _menubar_h = 0.0, 0.0, 0.0
 mut _headless_input = false
+
 ;; Button state as last reported by fed events. Once an event has reported the
 ;; primary button it is authoritative until focus is lost: polling the window
 ;; between a fed press and its release dropped scripted drags on real
@@ -152,6 +157,7 @@ mut _text_caches_ready = false
 mut _gui_frame_id = 0
 mut _font_metric_frame = -1
 mut _cached_body_h, _cached_title_h, _cached_small_h = 0.0, 0.0, 0.0
+
 ;; Queued text, already in the layout draw_text_runs_flat_colors takes:
 ;; `_text_run_queue` holds the runs (text, x, y, color) of the latest font,
 ;; `_text_run_font`; runs of earlier fonts wait in `_text_run_segments`
@@ -889,7 +895,7 @@ fn _text_h() f64 { _font_h_for(_font_body()) }
 
 fn _text_fit_cache_key(int font_id, any txt, f64 max_w) str {
    def s = _ui_text(txt)
-   (str.len(s) <= 256 && float(max_w) > 0.0) ? (to_str(font_id) + ":" + to_str(int(float(max_w) + 0.5)) + ":" + s) : ""
+   (str.len(s) <= 256 && float(max_w) > 0.0) ? (to_str(font_id) + ":" + to_str(int(float(max_w))) + ":" + s) : ""
 }
 
 fn _text_fit_cache_put(str key, str value) str {
@@ -908,10 +914,13 @@ fn _text_fit_width(int font_id, str s) f64 {
 }
 
 fn _text_likely_fits_ascii(int font_id, str s, f64 max_w) bool {
+   ;; A shortcut must never claim a fit the glyphs do not have: 0.64 of the
+   ;; line height let wide strings ("WWWW") overflow unclipped. ASCII advances
+   ;; stay under one line height, so only clearly short text skips measuring.
    def n = str.len(s)
    if float(max_w) <= 0.0 || n <= 0 || n > 64 { return false }
    if !str.ascii_only(s) { return false }
-   float(n) * _font_h_for(font_id) * 0.64 <= float(max_w)
+   float(n) * _font_h_for(font_id) <= float(max_w)
 }
 
 fn _text_fit(int font_id, any txt, f64 max_w=0.0) str {
@@ -919,6 +928,11 @@ fn _text_fit(int font_id, any txt, f64 max_w=0.0) str {
    def s = _ui_text(txt)
    if float(max_w) <= 0.0 { return s }
    def fid = (font_id > 0) ? font_id : _font_body()
+   ;; Fit against whole pixels: the cache key is the floored width, so every
+   ;; caller sharing a key gets a result computed for that exact width, which
+   ;; never exceeds its real space (rounding reused a 100.4px fit at 99.6px).
+   def whole_w = float(int(float(max_w)))
+   if whole_w != float(max_w) { return whole_w > 0.0 ? _text_fit(fid, s, whole_w) : "" }
    if _text_likely_fits_ascii(fid, s, max_w) { return s }
    def n = str.len(s)
    if n <= 48 && _text_fit_width(fid, s) <= float(max_w) { return s }
@@ -2353,13 +2367,13 @@ fn spacing(any amount=1.0) any {
 }
 
 fn paint_rect(f64 x, f64 y, f64 w, f64 h, any color) bool {
-   "Fills a rectangle in the current window's draw order (a packed RGBA int or an [r, g, b, a] list); for custom views such as byte grids."
+   "Fills a rectangle in the current window's draw order(a packed RGBA int or an [r, g, b, a] list); for custom views such as byte grids."
    if !_enabled || w <= 0.0 || h <= 0.0 { return false }
    _gui_rect_fast(x, y, w, h, _text_color_u32(color))
 }
 
 fn paint_text(f64 x, f64 y, any txt, any color=0, bool small=false) any {
-   "Draws text at (x, y) in the current window's draw order, in the body or small font."
+   "Draws text at(x, y) in the current window's draw order, in the body or small font."
    if !_enabled { return 0 }
    def col = is_int(color) && int(color) == 0 ? _text_u32 : _text_color_u32(color)
    _queue_text_ui(small ? _font_small_id() : _font_body(), txt, _snap(x), _snap(y), col)
@@ -2864,7 +2878,6 @@ fn _text_edit_apply_input(any full_id, str value, int cursor) list {
    _text_set_selected_all(full_id, selected_all)
    [out, cur]
 }
-
 
 ;; Removes UTF-8 bytes around the caret for an IME delete-surrounding request.
 fn _ime_apply_delete(str value, int cursor) list {
@@ -5134,7 +5147,7 @@ fn _panel_state_text(int fid, str txt, f64 x, f64 y, f64 w, any color, list clip
 }
 
 fn panel_state(str kind, any title, any detail="", f64 h=0.0) list {
-   "Fills the rest of a panel (or `h` pixels) with a centred state message and returns its rectangle. `kind` is \"empty\", \"loading\", or \"error\": empty is quiet, loading shows a moving bar, error uses the danger token. A detail wider than the panel continues on a second line."
+   "Fills the rest of a panel(or `h` pixels) with a centred state message and returns its rectangle. `kind` is \"empty\", \"loading\", or \"error\": empty is quiet, loading shows a moving bar, error uses the danger token. A detail wider than the panel continues on a second line."
    def small_id = _font_small_id()
    def line = _text_h()
    def small = _font_h_for(small_id)
@@ -6032,7 +6045,6 @@ fn drag_active(any kind="") bool {
 ;;
 ;; dock_layout_save / dock_layout_load turn the tree and the floating window
 ;; rectangles into one line of text, so an app can restore its layout.
-
 fn _dk_is_leaf(any n) bool {
    if !is_list(n) { return false }
    to_str(n.get(0, "")) == "L"
@@ -6112,7 +6124,7 @@ fn _dk_wrap(any n, str win, str side) any {
 }
 
 fn _dk_insert(any n, str target, str win, str side) any {
-   "Returns the tree with `win` docked beside (or tabbed into) the leaf that holds `target`."
+   "Returns the tree with `win` docked beside(or tabbed into) the leaf that holds `target`."
    if _dk_is_leaf(n) {
       if !_dk_contains(n, target) { return n }
       if side == "center" {
@@ -6161,7 +6173,7 @@ fn _dk_set_ratio(any n, str path, int depth, f64 ratio) any {
 fn _dk_is_spacer_id(str id) bool { str.startswith(id, "@") }
 
 fn _dk_filter(any n, str path) any {
-   "Returns the part of the tree that is on screen: closed windows are left out (they keep their place in the stored tree and return to it when shown again), and each split remembers its path in the stored tree."
+   "Returns the part of the tree that is on screen: closed windows are left out(they keep their place in the stored tree and return to it when shown again), and each split remembers its path in the stored tree."
    if _dk_is_leaf(n) {
       def any ids = n.get(2, 0)
       def int cnt = is_list(ids) ? ids.len : 0
@@ -6199,7 +6211,7 @@ mut _dk_leaves = []
 mut _dk_splits = []
 
 fn _dk_layout(any n, f64 x, f64 y, f64 w, f64 h, str path) any {
-   "Collects leaf rectangles (x, y, w, h, node, path) and splitter rectangles (x, y, w, h, dir, path, parent x, y, w, h)."
+   "Collects leaf rectangles(x, y, w, h, node, path) and splitter rectangles(x, y, w, h, dir, path, parent x, y, w, h)."
    if _dk_is_leaf(n) {
       _dk_leaves = _dk_leaves.append(x)
       _dk_leaves = _dk_leaves.append(y)
@@ -6304,7 +6316,7 @@ fn window_docked(any id) bool {
 }
 
 fn dock_window(any space, any id, any target="", str side="center") bool {
-   "Docks window `id` into dockspace `space`: as a tab of the panel holding `target` (side \"center\"), split off one of its edges (\"left\", \"right\", \"top\", \"bottom\"), or, with an empty target, against the whole dockspace. Returns false for an unknown side or target."
+   "Docks window `id` into dockspace `space`: as a tab of the panel holding `target` (side \"center\"), split off one of its edges(\"left\", \"right\", \"top\", \"bottom\"), or, with an empty target, against the whole dockspace. Returns false for an unknown side or target."
    def key, win = to_str(space), to_str(id)
    def tgt = to_str(target)
    if win.len == 0 { return false }
@@ -6699,7 +6711,6 @@ fn dock_spacer_rect(any space, any name) list {
 }
 
 ;; ---- layout persistence ---------------------------------------------------
-
 fn _dk_save(any n) str {
    if _dk_is_leaf(n) {
       def any ids = n.get(2, 0)

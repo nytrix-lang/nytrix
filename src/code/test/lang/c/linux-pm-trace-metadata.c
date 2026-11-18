@@ -1,3 +1,6 @@
+/*
+ * C front-end regression test: linux pm trace metadata.
+ */
 typedef unsigned long long trace_address_t;
 
 static const void *pm_trace_metadata(void) {

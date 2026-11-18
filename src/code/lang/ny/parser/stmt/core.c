@@ -1432,8 +1432,10 @@ static bool type_src_ident_char(char c) {
   return isalnum((unsigned char)c) || c == '_' || c == '.';
 }
 
-/* Appends `src` to `out`, replacing each name of a type-level definition by
- * its source body (parameters substituted by the written arguments). */
+/*
+ * Appends `src` to `out`, replacing each name of a type-level definition by
+ * its source body (parameters substituted by the written arguments).
+ */
 static bool type_src_expand(parser_t *p, const char *src, size_t len,
                             char *out, size_t cap, size_t *used,
                             unsigned depth) {
@@ -1463,7 +1465,9 @@ static bool type_src_expand(parser_t *p, const char *src, size_t len,
       *used += nlen;
       continue;
     }
-    /* Arguments `<...>` of an applied definition. */
+    /*
+     * Arguments `<...>` of an applied definition.
+     */
     const char *args[16];
     size_t arg_len[16];
     size_t argc = 0;
@@ -1495,7 +1499,9 @@ static bool type_src_expand(parser_t *p, const char *src, size_t len,
       }
       i = j;
     }
-    /* Substitute parameters, then expand the body in turn. */
+    /*
+     * Substitute parameters, then expand the body in turn.
+     */
     char body[1024];
     size_t bused = 0;
     const char *b = a->src_body;
@@ -1535,8 +1541,10 @@ static bool type_src_expand(parser_t *p, const char *src, size_t len,
   return true;
 }
 
-/* Source text of a type between two source positions, whitespace collapsed
- * and type-level definitions expanded. */
+/*
+ * Source text of a type between two source positions, whitespace collapsed
+ * and type-level definitions expanded.
+ */
 const char *parser_type_src_text(parser_t *p, const char *start,
                                  const char *end) {
   if (!p || !start || !end || end <= start || end - start > 2048)
@@ -1600,8 +1608,10 @@ static const char *parse_fn_type_text_in(parser_t *p, bool nested) {
     used += (size_t)snprintf(buf + used, sizeof(buf) - used, ")");
   if (p->cur.kind == NY_T_FN || p->cur.kind == NY_T_IDENT ||
       p->cur.kind == NY_T_QUESTION || p->cur.kind == NY_T_STAR) {
-    /* A trailing identifier may be the parameter/field name: only treat it
-     * as the result type when another identifier follows it. */
+    /*
+     * A trailing identifier may be the parameter/field name: only treat it
+     * as the result type when another identifier follows it.
+     */
     bool has_result = nested || p->cur.kind != NY_T_IDENT;
     if (!has_result) {
       token_t next = parser_peek(p);
@@ -1663,13 +1673,12 @@ static const char *parse_type_ref(parser_t *p, const char *err_msg) {
   /*
    * Universe levels: `Type 2` canonicalizes to "Type 2" so the level is
    * carried in one place. A bare `Type` stays the base universe (level 0).
-   */
-  /*
+   *
    * Level constraint over literals: `Type max(3, 5)` folds to the least upper
    * bound, `Type 5`, so a constraint over closed levels needs no solver. A
    * malformed constraint is an error rather than a silent level 0.
+   * `Type w A` where `w` was never declared as a level.
    */
-  /* `Type w A` where `w` was never declared as a level. */
   if (parser_type_ref_is_type_universe(base) && p->cur.kind == NY_T_IDENT &&
       parser_peek(p).kind == NY_T_IDENT) {
     bool known = false;
@@ -1683,7 +1692,9 @@ static const char *parse_type_ref(parser_t *p, const char *err_msg) {
       return NULL;
     }
   }
-  /* `Type u` for a level variable in scope; `Type max(u, 3)`. */
+  /*
+   * `Type u` for a level variable in scope; `Type max(u, 3)`.
+   */
   if (parser_type_ref_is_type_universe(base) && p->cur.kind == NY_T_IDENT &&
       p->level_scope_len > 0) {
     for (size_t i = 0; i < p->level_scope_len; ++i) {
@@ -1749,7 +1760,9 @@ static const char *parse_type_ref(parser_t *p, const char *err_msg) {
         free(base);
         return NULL;
       }
-      /* max(u, u) is u; otherwise the constraint stays symbolic. */
+      /*
+       * max(u, u) is u; otherwise the constraint stays symbolic.
+       */
       size_t total = strlen(base) + 140;
       char *canon = arena_alloc(p->arena, total);
       if (!canon) {
@@ -1970,7 +1983,9 @@ static const char *parse_type_ref(parser_t *p, const char *err_msg) {
       } else {
         arg = parse_type_ref(p, "expected generic type argument");
       }
-      /* A value index may be linear arithmetic: `Vec<A, n + 1>`. */
+      /*
+       * A value index may be linear arithmetic: `Vec<A, n + 1>`.
+       */
       if (arg)
         arg = parse_index_tail(p, arg);
       if (!arg)
@@ -2109,8 +2124,10 @@ static stmt_t *parse_type_level_stmt(parser_t *p) {
     return NULL;
   }
   const char *body_start = p->cur.lexeme;
-  /* A function type here always has its result: nothing follows the body
-   * that could be a binder name (`type F = fn(int) int`). */
+  /*
+   * A function type here always has its result: nothing follows the body
+   * that could be a binder name (`type F = fn(int) int`).
+   */
   const char *body =
       p->cur.kind == NY_T_FN
           ? (parse_fn_type_text_in(p, true) ? "fnptr" : NULL)
@@ -2388,8 +2405,10 @@ static size_t parse_align_attr(parser_t *p, const char *kind) {
 }
 
 static const char *parse_func_return_type(parser_t *p) {
-  /* `fn f(...) _ { ... }`: a hole for the result type, which inference
-   * fills exactly as for an unannotated result. */
+  /*
+   * `fn f(...) _ { ... }`: a hole for the result type, which inference
+   * fills exactly as for an unannotated result.
+   */
   if (p->cur.kind == NY_T_IDENT && p->cur.len == 1 && p->cur.lexeme[0] == '_' &&
       parser_peek(p).kind == NY_T_LBRACE) {
     parser_advance(p);
@@ -2480,7 +2499,9 @@ static bool type_ref_is_universe(const char *t) {
     return true;
   if (t[4] != ' ' || !t[5])
     return false;
-  /* `Type 3`, `Type u`, `Type max(u,3)`. */
+  /*
+   * `Type 3`, `Type u`, `Type max(u,3)`.
+   */
   for (const char *d = t + 5; *d; ++d)
     if (!(isalnum((unsigned char)*d) || *d == '_' || *d == '(' || *d == ')' ||
           *d == ','))
@@ -2491,8 +2512,10 @@ static bool type_ref_is_universe(const char *t) {
 static void fn_erase_type_param_annotations(parser_t *p, stmt_t *s) {
   if (!s || s->kind != NY_S_FUNC)
     return;
-  /* An implicit value binder must be fixed by some parameter's type, or no
-   * call could ever solve it. */
+  /*
+   * An implicit value binder must be fixed by some parameter's type, or no
+   * call could ever solve it.
+   */
   if (s->as.fn.erased_param_types.len == 0)
     for (size_t i = 0; i < s->as.fn.params.len; ++i) {
       const param_t *binder = &s->as.fn.params.data[i];
@@ -2538,8 +2561,10 @@ static void fn_erase_type_param_annotations(parser_t *p, stmt_t *s) {
   for (size_t i = 0; i < s->as.fn.params.len; ++i) {
     if (fn_type_names_param(&s->as.fn, s->as.fn.params.data[i].type))
       s->as.fn.params.data[i].type = NULL;
-    /* An explicit binder's argument is the erased type value, a `str`; the
-     * universe annotation stays in erased_param_types for checking. */
+    /*
+     * An explicit binder's argument is the erased type value, a `str`; the
+     * universe annotation stays in erased_param_types for checking.
+     */
     else if (type_ref_is_universe(s->as.fn.params.data[i].type))
       s->as.fn.params.data[i].type = "str";
   }
@@ -2552,7 +2577,9 @@ static void fn_erase_type_param_annotations(parser_t *p, stmt_t *s) {
 
 static stmt_t *parse_func_impl(parser_t *p, ny_attribute_list attrs);
 
-/* Level variables are scoped to the function that declares them. */
+/*
+ * Level variables are scoped to the function that declares them.
+ */
 static stmt_t *parse_func(parser_t *p, ny_attribute_list attrs) {
   size_t saved = p->level_scope_len;
   p->level_scope_len = 0;
@@ -2628,13 +2655,17 @@ static stmt_t *parse_func_impl(parser_t *p, ny_attribute_list attrs) {
         parser_advance(p);
       else if (p->cur.kind == NY_T_IDENT &&
                (parser_peek(p).kind == NY_T_IDENT)) {
-        /* `{int n}`: an implicit value binder, solved at each call from
-         * the argument types (`Fin<5>` gives n = 5). */
+        /*
+         * `{int n}`: an implicit value binder, solved at each call from
+         * the argument types (`Fin<5>` gives n = 5).
+         */
         param_t binder = {0};
         binder.type = parser_intern(p, p->cur.lexeme, p->cur.len);
         parser_advance(p);
         if (strcmp(binder.type, "level") == 0) {
-          /* `{level u}`: a universe level variable, a static index only. */
+          /*
+           * `{level u}`: a universe level variable, a static index only.
+           */
           const char *level = parser_intern(p, p->cur.lexeme, p->cur.len);
           vec_push_arena(p->arena, &fn_stmt->as.fn.level_params, level);
           if (p->level_scope_len < 8)
@@ -4460,8 +4491,10 @@ static stmt_t *parse_enum(parser_t *p) {
                        "write 'Variant(...) where t is int'");
         } else {
           parser_advance(p);
-          /* A type (`where t is int`) or a value index (`where n is 0`,
-           * `where n is k + 1`). */
+          /*
+           * A type (`where t is int`) or a value index (`where n is 0`,
+           * `where n is k + 1`).
+           */
           const char *index;
           if (p->cur.kind == NY_T_NUMBER) {
             index = arena_strndup(p->arena, p->cur.lexeme, p->cur.len);

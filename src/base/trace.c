@@ -188,7 +188,59 @@ static bool ny_trace_default_heuristic(const char *env) {
   return false;
 }
 
+extern char **environ;
+
+static bool ny_trace_enabled_uncached(const char *env);
+
+/*
+ * Trace switches are asked on every pass, expression and branch; each answer
+ * cost two to four linear scans of the environment (2% of a large compile).
+ * Remember answers per thread until the environment changes.
+ */
+typedef struct ny_trace_memo_t {
+  char name[64];
+  unsigned long generation;
+  char **environment;
+  bool value;
+  bool valid;
+} ny_trace_memo_t;
+/*
+ * Allocated on first use: a large thread-local array is copied into every
+ * new thread's TLS block at creation.
+ */
+static _Thread_local ny_trace_memo_t *g_trace_memo;
+
 bool ny_trace_enabled(const char *env) {
+  if (!env)
+    return false;
+#if defined(_WIN32)
+  return ny_trace_enabled_uncached(env);
+#endif
+  size_t len = strlen(env);
+  if (len >= sizeof(g_trace_memo[0].name))
+    return ny_trace_enabled_uncached(env);
+  uint32_t h = 2166136261u;
+  for (size_t i = 0; i < len; ++i)
+    h = (h ^ (unsigned char)env[i]) * 16777619u;
+  if (!g_trace_memo) {
+    g_trace_memo = calloc(256, sizeof(*g_trace_memo));
+    if (!g_trace_memo)
+      return ny_trace_enabled_uncached(env);
+  }
+  ny_trace_memo_t *m = &g_trace_memo[h & 255u];
+  if (m->valid && m->generation == ny_env_generation &&
+      m->environment == environ && memcmp(m->name, env, len + 1) == 0)
+    return m->value;
+  bool value = ny_trace_enabled_uncached(env);
+  memcpy(m->name, env, len + 1);
+  m->generation = ny_env_generation;
+  m->environment = environ;
+  m->value = value;
+  m->valid = true;
+  return value;
+}
+
+static bool ny_trace_enabled_uncached(const char *env) {
   const char *v = getenv(env);
   bool all = ny_trace_all_enabled();
   if (!summary_emitted && (all || ny_dbg_is_enabled(NY_DBG_HEURISTIC))) {

@@ -1,7 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
   <title>Window</title>
-  <desc>Window icon.</desc>
-  <g transform="translate(2.0000 2.0000) scale(1.25000)">
-<path fill="#c6c6ca" d="m3 1c-1.1046 0-2 .8954-2 2v1h14v-1c0-1.1046-.89543-2-2-2zm9 1h1v1h-1zm-11 3v8c0 1.1046.89543 2 2 2h10c1.1046 0 2-.8954 2-2v-8z"/>
-  </g>
+  <desc>Window and user interface icon.</desc>
+  <path fill="#818cf8" fill-rule="evenodd" d="M4.5 3.2H19.5A2.4 2.4 0 0 1 21.9 5.6V18.4A2.4 2.4 0 0 1 19.5 20.8H4.5A2.4 2.4 0 0 1 2.1 18.4V5.6A2.4 2.4 0 0 1 4.5 3.2ZM4.2 8.3V17.9A1.2 1.2 0 0 0 5.4 19.1H18.6A1.2 1.2 0 0 0 19.8 17.9V8.3Z"/>
+  <circle fill="#818cf8" cx="5.3" cy="5.75" r="0.85"/>
+  <circle fill="#818cf8" cx="8" cy="5.75" r="0.85"/>
+  <circle fill="#818cf8" cx="10.7" cy="5.75" r="0.85"/>
 </svg>

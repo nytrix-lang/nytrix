@@ -726,8 +726,8 @@ static const char *ny_native_runtime_symbol_impl(const char *name) {
       lo = mid + 1;
   }
 
-#define RT_DEF(n, implementation, args, sig, doc)                              \
-  if (strcmp(name, n) == 0)                                                    \
+#define RT_DEF(n, implementation, args, sig, doc) \
+  if (strcmp(name, n) == 0)                       \
     return #implementation;
 #define RT_GV(n, implementation, type, doc)
 #include "code/backend/runtime/defs.h"
@@ -746,9 +746,9 @@ static const char *ny_native_runtime_symbol_impl(const char *name) {
  * src/code/backend/runtime/defs.h; this table is hand-maintained.
  */
 #define NY_NATIVE_ENTRY(name, flags, call_abi) {name, flags, call_abi, {0}}
-#define NY_NATIVE_ENTRY_FN(name, flags, call_abi, call_member, fn)             \
-  {                                                                            \
-    name, flags, call_abi, { .call_member = fn }                               \
+#define NY_NATIVE_ENTRY_FN(name, flags, call_abi, call_member, fn) \
+  {                                                                \
+    name, flags, call_abi, { .call_member = fn }                   \
   }
 
 const ny_native_runtime_abi_decl_t ny_native_runtime_abi_decls[] = {
@@ -2283,13 +2283,13 @@ const size_t ny_native_runtime_value_abi_decl_count =
     sizeof(ny_native_runtime_value_abi_decls) /
     sizeof(ny_native_runtime_value_abi_decls[0]);
 
-#define NY_NATIVE_CALLBACK_CALLABLE_REPRS                                      \
-  (NY_NATIVE_ABI_VALUE_RAW_I64 | NY_NATIVE_ABI_VALUE_TAGGED |                  \
+#define NY_NATIVE_CALLBACK_CALLABLE_REPRS                                   \
+  (NY_NATIVE_ABI_VALUE_RAW_I64 | NY_NATIVE_ABI_VALUE_TAGGED |               \
    NY_NATIVE_ABI_VALUE_OBJECT_HANDLE | NY_NATIVE_ABI_VALUE_CALLBACK_MARKED)
-#define NY_NATIVE_CALLBACK_VALUE_REPRS                                         \
-  (NY_NATIVE_ABI_VALUE_RAW_I64 | NY_NATIVE_ABI_VALUE_TAGGED |                  \
+#define NY_NATIVE_CALLBACK_VALUE_REPRS                               \
+  (NY_NATIVE_ABI_VALUE_RAW_I64 | NY_NATIVE_ABI_VALUE_TAGGED |        \
    NY_NATIVE_ABI_VALUE_OBJECT_HANDLE | NY_NATIVE_ABI_VALUE_RAW_CSTR)
-#define NY_NATIVE_CALLBACK_DISPATCH_REPRS                                      \
+#define NY_NATIVE_CALLBACK_DISPATCH_REPRS                                \
   (NY_NATIVE_CALLBACK_VALUE_REPRS | NY_NATIVE_ABI_VALUE_CALLBACK_MARKED)
 const ny_native_runtime_callback_abi_decl_t
     ny_native_runtime_callback_abi_decls[] = {
@@ -3045,18 +3045,22 @@ static const char *ny_native_runtime_symbol_for_expr(const char *name,
     const char *decl_sym = decl_name ? nyr_runtime_symbol(decl_name) : NULL;
     if (decl_sym)
       return decl_sym;
-    /* The leaf alone names an intrinsic only for the root stdlib files (or
+    /*
+     * The leaf alone names an intrinsic only for the root stdlib files (or
      * an unqualified declaration). A nested stdlib module's function that
      * shares a leaf with one (`core.os.ui.render.postfx.color` and the
      * terminal `color`) is its own function; intrinsic wrappers in nested
-     * modules have qualified entries in the table. */
+     * modules have qualified entries in the table.
+     */
     const char *decl_leaf = ny_name_leaf(decl_name);
     bool root_decl = decl_name && decl_leaf &&
                      (decl_leaf == decl_name ||
                       (strncmp(decl_name, "core.", 5) == 0 &&
                        decl_leaf == decl_name + 5));
-    /* Root stdlib files (lib/<name>.ny: core.str, core.dict_mod, core.term,
-     * ...) are the intrinsic facades; modules in subdirectories are not. */
+    /*
+     * Root stdlib files (lib/<name>.ny: core.str, core.dict_mod, core.term,
+     * ...) are the intrinsic facades; modules in subdirectories are not.
+     */
     if (!root_decl && decl_leaf) {
       const char *file = e->semantic.canonical_callee_stmt->tok.filename;
       const char *lib = file ? strstr(file, "/lib/") : NULL;
@@ -4481,6 +4485,7 @@ struct nyr_builder_impl_t {
   size_t operator_pair_cache_count;
   size_t operator_pair_cache_cap;
   struct nyr_builder_impl_t *cache_owner;
+  struct ny_fold_memo_entry *fold_memo; /* cache owner only; see fold memo */
   ny_native_scalar_probe_cache_entry_t
       scalar_probe_cache[NY_SCALAR_PROBE_CACHE_SIZE];
   uint32_t scalar_probe_generation;
@@ -4996,6 +5001,8 @@ static void ny_native_fn_index_free(ny_native_fn_index_t *index);
 static void nyr_builder_dispose(nyr_builder_impl_t *b) {
   if (!b)
     return;
+  free(b->fold_memo);
+  b->fold_memo = NULL;
   if (b->resolve_alias_stats_enabled && b->cache_owner == b)
     ny_trace_line(
         "IMPORT_PROFILE",
@@ -7416,6 +7423,23 @@ static bool nyr_emit_ret(nyr_builder_impl_t *b, int value) {
       value = bits < 0 ? -1
                        : nyr_emit_runtime_call(b, "rt_flt_box_val", bits, -1,
                                                -1, 1, NYIR_SCALAR_I64_TAGGED);
+      if (value < 0)
+        return false;
+    }
+  }
+  if (!b->return_any && value >= 0 && b->return_type &&
+      strcmp(b->return_type, "int") == 0 &&
+      nyr_value_scalar_class(b, value) == NYIR_SCALAR_I64_TAGGED) {
+    const nyr_inst_t *def = NULL;
+    for (size_t ni = b->nyir.len; ni > 0; --ni)
+      if (b->nyir.data[ni - 1].dst == value) {
+        def = &b->nyir.data[ni - 1];
+        break;
+      }
+    if (def && def->op == NYIR_CALL && def->symbol &&
+        strcmp(def->symbol, "rt_value_index_read_raw") == 0) {
+      value = nyr_emit_runtime_call(b, "rt_any_to_i64", value, -1, -1, 1,
+                                    NYIR_SCALAR_I64_RAW);
       if (value < 0)
         return false;
     }
@@ -12218,7 +12242,7 @@ static bool ny_native_name_matches(const char *fn_name, const char *lookup) {
 #define NY_MODULE_BUCKET_SIZE 1024
 #define NY_MODULE_MEMBER_CACHE_SIZE 65536
 #define NY_MODULE_MEMBER_CACHE_WAYS 4u
-#define NY_MODULE_MEMBER_CACHE_SETS                                            \
+#define NY_MODULE_MEMBER_CACHE_SETS                           \
   (NY_MODULE_MEMBER_CACHE_SIZE / NY_MODULE_MEMBER_CACHE_WAYS)
 #define NY_TREEFALL_CACHE_SIZE 16384
 
@@ -12536,6 +12560,18 @@ enum { NY_MODULE_USES_CACHE_SIZE = 2048 };
 
 struct ny_native_fn_index_t {
   ny_native_treefall_entry_t *treefall;
+  /*
+   * Every function name of the expanded program, both branches of every
+   * guard, chained by leaf. The whole-tree resolution walks can only return
+   * a function whose leaf equals the lookup's leaf, so an empty chain proves
+   * they would find nothing.
+   */
+  const char **any_fn_names;
+  int32_t *any_fn_next;
+  size_t any_fn_count, any_fn_cap;
+  int32_t *any_fn_heads;
+  const program_t *any_fn_prog;
+  bool any_fn_failed;
   ny_native_exact_fn_entry_t *exact_fns;
   ny_native_exact_fn_entry_t *target_fns;
   ny_native_module_root_entry_t *module_roots;
@@ -12647,6 +12683,9 @@ static void ny_native_fn_index_free(ny_native_fn_index_t *index) {
   free(index->module_leaf_next);
   free(index->seen_functions);
   free(index->treefall);
+  free(index->any_fn_names);
+  free(index->any_fn_next);
+  free(index->any_fn_heads);
   free(index->exact_fns);
   free(index->target_fns);
   free(index->module_roots);
@@ -13606,6 +13645,112 @@ nyr_find_package_surface(const nyr_builder_impl_t *b, const char *prefix,
   return is_ambiguous ? NULL : unique;
 }
 
+static void ny_native_any_fn_add(ny_native_fn_index_t *index,
+                                 const char *name) {
+  if (index->any_fn_count == index->any_fn_cap) {
+    size_t next = index->any_fn_cap ? index->any_fn_cap * 2 : 1024;
+    const char **names =
+        realloc(index->any_fn_names, next * sizeof(*index->any_fn_names));
+    if (!names) {
+      index->any_fn_failed = true;
+      return;
+    }
+    index->any_fn_names = names;
+    int32_t *chain =
+        realloc(index->any_fn_next, next * sizeof(*index->any_fn_next));
+    if (!chain || next > INT32_MAX) {
+      if (chain)
+        index->any_fn_next = chain;
+      index->any_fn_failed = true;
+      return;
+    }
+    index->any_fn_next = chain;
+    index->any_fn_cap = next;
+  }
+  size_t idx = index->any_fn_count++;
+  uint32_t slot = ny_fn_name_hash(ny_name_leaf(name)) & (NY_FN_BUCKET_SIZE - 1);
+  index->any_fn_names[idx] = name;
+  index->any_fn_next[idx] = index->any_fn_heads[slot];
+  index->any_fn_heads[slot] = (int32_t)idx;
+}
+
+/*
+ * A superset of what the three whole-tree walks visit (no guard selection).
+ */
+static void ny_native_any_fn_collect(ny_native_fn_index_t *index,
+                                     const stmt_t *s, unsigned depth) {
+  if (!s || depth > 64 || index->any_fn_failed)
+    return;
+  switch (s->kind) {
+  case NY_S_FUNC:
+    if (s->as.fn.name)
+      ny_native_any_fn_add(index, s->as.fn.name);
+    return;
+  case NY_S_MODULE:
+    for (size_t i = 0; i < s->as.module.body.len; ++i)
+      ny_native_any_fn_collect(index, s->as.module.body.data[i], depth + 1);
+    return;
+  case NY_S_IMPL:
+    for (size_t i = 0; i < s->as.impl.methods.len; ++i)
+      ny_native_any_fn_collect(index, s->as.impl.methods.data[i], depth + 1);
+    return;
+  case NY_S_BLOCK:
+    for (size_t i = 0; i < s->as.block.body.len; ++i)
+      ny_native_any_fn_collect(index, s->as.block.body.data[i], depth + 1);
+    return;
+  case NY_S_IF:
+    ny_native_any_fn_collect(index, s->as.iff.conseq, depth + 1);
+    ny_native_any_fn_collect(index, s->as.iff.alt, depth + 1);
+    return;
+  case NY_S_WHILE:
+    ny_native_any_fn_collect(index, s->as.whl.body, depth + 1);
+    return;
+  case NY_S_FOR:
+    ny_native_any_fn_collect(index, s->as.fr.body, depth + 1);
+    return;
+  case NY_S_MATCH:
+    for (size_t i = 0; i < s->as.match.arms.len; ++i)
+      ny_native_any_fn_collect(index, s->as.match.arms.data[i].conseq,
+                               depth + 1);
+    ny_native_any_fn_collect(index, s->as.match.default_conseq, depth + 1);
+    return;
+  default:
+    return;
+  }
+}
+
+/*
+ * False only when no function anywhere in the program could satisfy
+ * ny_native_name_matches for `lookup` (every match shares its leaf).
+ */
+static bool ny_native_any_fn_may_match(ny_native_fn_index_t *index,
+                                       const program_t *prog,
+                                       const char *lookup) {
+  if (!index || !prog || !lookup)
+    return true;
+  if (index->any_fn_prog != prog) {
+    index->any_fn_count = 0;
+    index->any_fn_failed = false;
+    if (!index->any_fn_heads)
+      index->any_fn_heads = malloc(NY_FN_BUCKET_SIZE * sizeof(int32_t));
+    if (!index->any_fn_heads)
+      return true;
+    memset(index->any_fn_heads, 0xff, NY_FN_BUCKET_SIZE * sizeof(int32_t));
+    for (size_t i = 0; i < prog->body.len && !index->any_fn_failed; ++i)
+      ny_native_any_fn_collect(index, prog->body.data[i], 0);
+    index->any_fn_prog = prog;
+  }
+  if (index->any_fn_failed)
+    return true;
+  uint32_t slot =
+      ny_fn_name_hash(ny_name_leaf(lookup)) & (NY_FN_BUCKET_SIZE - 1);
+  for (int32_t i = index->any_fn_heads[slot]; i >= 0;
+       i = index->any_fn_next[i])
+    if (ny_native_name_matches(index->any_fn_names[i], lookup))
+      return true;
+  return false;
+}
+
 static const char *ny_native_fn_module(ny_native_fn_index_t *index,
                                        const program_t *prog, const stmt_t *fn);
 static bool nyr_path_ends_with(const char *filename, const char *want);
@@ -13893,17 +14038,27 @@ static const stmt_t *nyr_find_user_function(const nyr_builder_impl_t *b,
      * inactive extern declaration first.
      */
     const stmt_t *treefall_found = NULL;
-    for (size_t i = 0; i < b->prog->body.len && !treefall_found; ++i) {
+    /*
+     * Most names reaching this point are members of locals (`s.len`,
+     * `win.get`): no function can match them, and each one used to cost
+     * three whole-program walks (6 s of a 60 s editor compile).
+     */
+    bool any_candidate =
+        ny_native_any_fn_may_match(treefall_index, b->prog, lookup_name);
+    for (size_t i = 0;
+         any_candidate && i < b->prog->body.len && !treefall_found; ++i) {
       treefall_found = nyr_find_user_function_exact(
           b->prog->body.data[i], lookup_name, b->options,
           resolve_index, 0);
     }
-    for (size_t i = 0; i < b->prog->body.len && !treefall_found; ++i) {
+    for (size_t i = 0;
+         any_candidate && i < b->prog->body.len && !treefall_found; ++i) {
       treefall_found = nyr_find_user_function_target(
           resolve_index, b->prog->body.data[i], lookup_name,
           b->options, 0);
     }
-    for (size_t i = 0; i < b->prog->body.len && !treefall_found; ++i) {
+    for (size_t i = 0;
+         any_candidate && i < b->prog->body.len && !treefall_found; ++i) {
       treefall_found = nyr_find_user_function_in_stmt_cached(
           b, b->prog->body.data[i], lookup_name);
     }
@@ -13968,9 +14123,33 @@ static const stmt_t *nyr_find_user_function(const nyr_builder_impl_t *b,
     int sn = snprintf(suffix, sizeof(suffix), ".%s", lookup_name);
     if (sn > 0 && (size_t)sn < sizeof(suffix)) {
       const stmt_t *unique = NULL;
+      /*
+       * A name ending in `.lookup` has lookup's leaf: walk that leaf chain
+       * instead of every indexed function, when the chains cover the index.
+       */
+      bool by_leaf = resolve_index && resolve_index->fn_leaf_next &&
+                     resolve_index->fn_chain_cap >=
+                         resolve_index->functions.count;
+      uint32_t leaf_slot = ny_fn_name_hash(ny_name_leaf(lookup_name)) &
+                           (NY_FN_BUCKET_SIZE - 1);
+      int32_t chain[2] = {
+          by_leaf ? resolve_index->fn_leaf_user_buckets[leaf_slot] : -1,
+          by_leaf ? resolve_index->fn_leaf_stdlib_buckets[leaf_slot] : -1};
+      size_t chain_at = 0;
       for (size_t i = 0;
-           resolve_index && i < resolve_index->functions.count; ++i) {
-        const stmt_t *candidate = resolve_index->functions.funcs[i];
+           resolve_index && (by_leaf ? chain_at < 2
+                                     : i < resolve_index->functions.count);
+           ++i) {
+        size_t at = i;
+        if (by_leaf) {
+          if (chain[chain_at] < 0) {
+            chain_at++;
+            continue;
+          }
+          at = (size_t)chain[chain_at];
+          chain[chain_at] = resolve_index->fn_leaf_next[at];
+        }
+        const stmt_t *candidate = resolve_index->functions.funcs[at];
         const char *candidate_name =
             candidate && candidate->as.fn.name ? candidate->as.fn.name : NULL;
         if (!candidate_name)
@@ -15263,9 +15442,9 @@ static int nyr_load_global_scalar(nyr_builder_impl_t *b, int address,
    * so even when HM types a use as `any`; stamping them tagged made a
    * dynamic consumer decode the raw word, so odd values halved and even
    * ones read as false (GL bound texture 3 for a scene's texture 7).
+   * A qualified read (`owner.cell`) names the same cell through a member
+   * expression; its leaf stands in for the identifier.
    */
-  /* A qualified read (`owner.cell`) names the same cell through a member
-   * expression; its leaf stands in for the identifier. */
   const char *ref_leaf =
       !reference ? NULL
       : reference->kind == NY_E_IDENT ? reference->as.ident.name
@@ -15290,7 +15469,9 @@ static int nyr_load_global_scalar(nyr_builder_impl_t *b, int address,
       init = nyr_find_imported_value(b, bare);
     if (!init && !imported_cell)
       init = nyr_find_top_level_value(b, bare);
-    /* `mut x = -1` is a unary minus over the literal. */
+    /*
+     * `mut x = -1` is a unary minus over the literal.
+     */
     while (init && init->kind == NY_E_UNARY && init->as.unary.op &&
            (strcmp(init->as.unary.op, "-") == 0 ||
             strcmp(init->as.unary.op, "+") == 0 ||
@@ -15307,10 +15488,10 @@ static int nyr_load_global_scalar(nyr_builder_impl_t *b, int address,
        * `alpha * 1000` dispatched to sequence repeat (the Vulkan renderer
        * read its blend mode back as 0 and drew text gamma-encoded). Hand
        * those consumers the canonical tagged word they expect.
-       */
-      /* Only an untyped cell: a typed one (`mut ?handle p = 0`, `mut int n
+       * Only an untyped cell: a typed one (`mut ?handle p = 0`, `mut int n
        * = 0`) gives its consumers the declared type, and tagging a handle
-       * corrupted it (the Vulkan pipeline handle on the executable route). */
+       * corrupted it (the Vulkan pipeline handle on the executable route).
+       */
       if (imported_cell && nyr_expr_is_any(b, reference) &&
           !nyr_global_declared_type(b, name))
         return nyr_emit_runtime_call(b, "rt_tag", value, -1, -1, 1,
@@ -16850,15 +17031,19 @@ static const char *nyr_imported_global_symbol(const nyr_builder_impl_t *b,
   if (!b || !b->prog || !name || !*name || strchr(name, '.') ||
       !b->module_name || !b->module_name[0])
     return NULL;
-  /* Most identifiers name no top-level variable anywhere; skip the walk. */
+  /*
+   * Most identifiers name no top-level variable anywhere; skip the walk.
+   */
   if (!ny_import_value_name_possible(b, name))
     return NULL;
   const stmt_t *mod = nyr_find_module_in_prog(ny_native_fn_index_for(b),
                                               b->prog, b->module_name);
   if (!mod || mod->kind != NY_S_MODULE)
     return NULL;
-  /* The module's own declaration of the name (a folded `def` has no cell)
-   * shadows anything it imports. */
+  /*
+   * The module's own declaration of the name (a folded `def` has no cell)
+   * shadows anything it imports.
+   */
   if (nyr_find_module_member_in(b, mod, name, 0))
     return NULL;
   for (size_t i = 0; i < mod->as.module.body.len; ++i) {
@@ -16875,9 +17060,11 @@ static const char *nyr_imported_global_symbol(const nyr_builder_impl_t *b,
       if (visible && item->name && strcmp(visible, name) == 0)
         member = item->name;
     }
-    /* A whole-module import names the owner even under an alias: bare
+    /*
+     * A whole-module import names the owner even under an alias: bare
      * leaves already resolve into any loaded module when they are unique,
-     * and existing modules rely on that (`use ...vk.state as vk_state`). */
+     * and existing modules rely on that (`use ...vk.state as vk_state`).
+     */
     if (!member && (use->as.use.import_all || use->as.use.imports.len == 0))
       member = name;
     if (!member)
@@ -16893,8 +17080,10 @@ static const char *nyr_imported_global_symbol(const nyr_builder_impl_t *b,
   return NULL;
 }
 
-/* A leaf-name lookup that falls back to the import list when the leaf is
- * owned by more than one module. */
+/*
+ * A leaf-name lookup that falls back to the import list when the leaf is
+ * owned by more than one module.
+ */
 static const char *nyr_global_tail_symbol(const nyr_builder_impl_t *b,
                                           const char *name) {
   const char *symbol = nyr_globaltab_name_tail(name);
@@ -18066,9 +18255,69 @@ static bool nyr_expr_is_raw_int(const expr_t *e) {
  * binary ops).  Used to register the def's value in the consttab so object
  * emission writes an 8-byte .data definition for the symbol.
  */
+/*
+ * Fold memo. Lowering asks for the folded value of every arithmetic node, and
+ * the type predicates ask again from inside their own recursion, so a flat
+ * `1 + 1 + ...` chain refolded its subtrees until compile time grew
+ * quadratically (2000 terms: 9 s, 4000: 35 s). Results that touched no
+ * identifier or comptime body are scope-independent and are kept per
+ * expression on the cache owner for one program construction. A success
+ * holds from any start depth; a failure only for an equal or deeper start.
+ */
+#define NY_FOLD_MEMO_SIZE 4096u
+typedef struct ny_fold_memo_entry {
+  const expr_t *expr;
+  int64_t value;
+  uint8_t ok;
+  uint8_t depth;
+} ny_fold_memo_entry_t;
+static _Thread_local unsigned ny_fold_scope_reads;
+
+static bool nyr_fold_top_level_int_impl(const nyr_builder_impl_t *b,
+                                        const program_t *prog,
+                                        const expr_t *e, int64_t *out,
+                                        unsigned depth);
+
 static bool nyr_fold_top_level_int(const nyr_builder_impl_t *b,
                                    const program_t *prog, const expr_t *e,
                                    int64_t *out, unsigned depth) {
+  if (!e || !out || depth > 64)
+    return false;
+  nyr_builder_impl_t *owner =
+      b ? (b->cache_owner ? b->cache_owner : (nyr_builder_impl_t *)b) : NULL;
+  bool memo_kind = e->kind == NY_E_BINARY || e->kind == NY_E_UNARY;
+  ny_fold_memo_entry_t *slot = NULL;
+  if (owner && memo_kind && (!prog || prog == owner->prog)) {
+    if (!owner->fold_memo)
+      owner->fold_memo = calloc(NY_FOLD_MEMO_SIZE, sizeof(*owner->fold_memo));
+    if (owner->fold_memo) {
+      size_t h = (size_t)(((uintptr_t)e >> 4) * UINT64_C(11400714819323198485));
+      slot = &owner->fold_memo[h & (NY_FOLD_MEMO_SIZE - 1u)];
+      if (slot->expr == e) {
+        if (slot->ok) {
+          *out = slot->value;
+          return true;
+        }
+        if (depth >= slot->depth)
+          return false;
+      }
+    }
+  }
+  unsigned reads = ny_fold_scope_reads;
+  int64_t value = 0;
+  bool ok = nyr_fold_top_level_int_impl(b, prog, e, &value, depth);
+  if (ok)
+    *out = value;
+  if (slot && reads == ny_fold_scope_reads)
+    *slot = (ny_fold_memo_entry_t){
+        .expr = e, .value = value, .ok = ok, .depth = (uint8_t)depth};
+  return ok;
+}
+
+static bool nyr_fold_top_level_int_impl(const nyr_builder_impl_t *b,
+                                        const program_t *prog,
+                                        const expr_t *e, int64_t *out,
+                                        unsigned depth) {
   if (!e || !out || depth > 64)
     return false;
   if (!prog)
@@ -18083,6 +18332,8 @@ static bool nyr_fold_top_level_int(const nyr_builder_impl_t *b,
     return result;
   }
   prog = b->prog;
+  if (e->kind == NY_E_IDENT || e->kind == NY_E_COMPTIME)
+    ny_fold_scope_reads++;
   switch (e->kind) {
   case NY_E_LITERAL:
     if (e->as.literal.kind == NY_LIT_BOOL) {
@@ -23588,7 +23839,7 @@ static const stmt_t *nyr_find_attached_method(const nyr_builder_impl_t *b,
  */
 static nyr_scalar_class_t
 nyr_value_scalar_class_impl(const nyr_builder_impl_t *b,
-                            const nyr_type_map_t *types, int value,
+                            const nyr_type_roots_t *types, int value,
                             unsigned depth) {
   if (!b || value < 0 || depth > 32)
     return NYIR_SCALAR_UNKNOWN;
@@ -23697,8 +23948,9 @@ nyr_value_scalar_class_impl(const nyr_builder_impl_t *b,
    */
   nyr_scalar_class_t result = NYIR_SCALAR_UNKNOWN;
   if (types && (size_t)value < types->value_count) {
-    bool f32 = types->value_f32[value];
-    bool f64 = types->value_f64[value];
+    unsigned bits = nyr_type_roots_value_bits(types, value);
+    bool f32 = (bits & 2u) != 0;
+    bool f64 = (bits & 1u) != 0;
     if (f32 != f64)
       result = f64 ? NYIR_SCALAR_F64 : NYIR_SCALAR_F32;
   }
@@ -23718,14 +23970,20 @@ static nyr_scalar_class_t nyr_value_scalar_class(const nyr_builder_impl_t *b,
   nyr_scalar_class_t result = nyr_value_scalar_class_impl(b, NULL, value, 0);
   if (result != NYIR_SCALAR_UNKNOWN)
     return result;
-  nyr_type_map_t types = {0};
+  /*
+   * Below about 4k instructions a full rebuild is cheaper than validating
+   * the incremental state; rt_main and other huge bodies gain (3.4 -> 1.6 s).
+   */
+  if (b->nyir.len >= 4096 && !getenv("NYTRIX_NO_TYPE_INC")) {
+    nyr_type_roots_t incremental = {.value_count = (size_t)b->nyir.next_value,
+                                    .incremental = &b->nyir};
+    return nyr_value_scalar_class_impl(b, &incremental, value, 0);
+  }
+  nyr_type_roots_t types = {0};
   bool have_types =
-      nyr_type_map_init(&types, &b->nyir, nyr_max_local(&b->nyir));
-  result = have_types ? nyr_value_scalar_class_impl(b, &types, value, 0)
-                      : NYIR_SCALAR_UNKNOWN;
-  if (have_types)
-    nyr_type_map_free(&types);
-  return result;
+      nyr_type_roots_init(&types, &b->nyir, nyr_max_local(&b->nyir));
+  return have_types ? nyr_value_scalar_class_impl(b, &types, value, 0)
+                    : NYIR_SCALAR_UNKNOWN;
 }
 
 static bool nyr_value_is_f64(const nyr_builder_impl_t *b, int value,

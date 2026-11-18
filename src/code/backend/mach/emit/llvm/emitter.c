@@ -265,7 +265,8 @@ static LLVMTypeRef ny_llvm_vector_type(ny_llvm_context_t *cg, nyr_op_t op) {
   if (op == NYIR_VEC8_LOAD_I64 || op == NYIR_VEC8_STORE_I64 ||
       op == NYIR_VEC8_ADD_I64 || op == NYIR_VEC8_SUB_I64 ||
       op == NYIR_VEC8_AND_I64 || op == NYIR_VEC8_OR_I64 ||
-      op == NYIR_VEC8_XOR_I64 || op == NYIR_VEC8_REDUCE_ADD_I64 ||
+      op == NYIR_VEC8_XOR_I64 || op == NYIR_VEC8_MUL_I64 ||
+      op == NYIR_VEC8_REDUCE_ADD_I64 ||
       op == NYIR_VEC8_SET1_I64 || op == NYIR_VEC8_SAR_I64 ||
       op == NYIR_VEC8_SHR_I64)
     return LLVMVectorType(cg->type_i64, 4);
@@ -1475,6 +1476,13 @@ bool ny_llvm_emit_nyir_func(ny_llvm_context_t *cg, nyr_func_t *f,
       break;
 
     case NYIR_LOAD_I64:
+      if (in->flags & (NYIR_INST_F_MEM_SEG_FS | NYIR_INST_F_MEM_SEG_GS)) {
+        if (err && err_len > 0)
+          snprintf(err, err_len,
+                   "LLVM NYIR emission: segment-relative load is unsupported");
+        unsupported = true;
+        break;
+      }
       if (in->dst >= 0 && (size_t)in->dst < val_count) {
         LLVMValueRef va =
             (in->a >= 0 && (size_t)in->a < val_count) ? vals[in->a] : NULL;
@@ -1532,6 +1540,13 @@ bool ny_llvm_emit_nyir_func(ny_llvm_context_t *cg, nyr_func_t *f,
       break;
 
     case NYIR_STORE_I64: {
+      if (in->flags & (NYIR_INST_F_MEM_SEG_FS | NYIR_INST_F_MEM_SEG_GS)) {
+        if (err && err_len > 0)
+          snprintf(err, err_len,
+                   "LLVM NYIR emission: segment-relative store is unsupported");
+        unsupported = true;
+        break;
+      }
       LLVMValueRef va =
           (in->a >= 0 && (size_t)in->a < val_count) ? vals[in->a] : NULL;
       LLVMValueRef vb =
@@ -1634,6 +1649,7 @@ bool ny_llvm_emit_nyir_func(ny_llvm_context_t *cg, nyr_func_t *f,
     case NYIR_VEC8_AND_I64:
     case NYIR_VEC8_OR_I64:
     case NYIR_VEC8_XOR_I64:
+    case NYIR_VEC8_MUL_I64:
     case NYIR_VEC8_SAR_I64:
     case NYIR_VEC8_SHR_I64:
     case NYIR_VEC8_SET1_I64:
@@ -1771,6 +1787,9 @@ bool ny_llvm_emit_nyir_func(ny_llvm_context_t *cg, nyr_func_t *f,
       case NYIR_VEC8_XOR_I64:
         result = LLVMBuildXor(cg->builder, lhs, rhs, "");
         break;
+      case NYIR_VEC8_MUL_I64:
+        result = LLVMBuildMul(cg->builder, lhs, rhs, "");
+        break;
       case NYIR_VEC4_SHL_I64:
         result = LLVMBuildShl(cg->builder, lhs, rhs, "");
         break;
@@ -1846,9 +1865,9 @@ bool ny_llvm_emit_nyir_func(ny_llvm_context_t *cg, nyr_func_t *f,
          * the Wayland bindings). Looking the cell up by its bare name then
          * returned the function, and the first store wrote into libc text.
          * Cells are private, so give them a reserved symbol of their own.
+         * Only unqualified root cells can collide with C symbols; module
+         * cells (`core.x.y`) keep their shared symbol across split modules.
          */
-        /* Only unqualified root cells can collide with C symbols; module
-         * cells (`core.x.y`) keep their shared symbol across split modules. */
         if (!strchr(addr_name, '.') && nyr_globaltab_has(addr_name)) {
           char cell_name[512];
           int cell_len = snprintf(cell_name, sizeof(cell_name), "nyg.%s",
@@ -1885,8 +1904,7 @@ bool ny_llvm_emit_nyir_func(ny_llvm_context_t *cg, nyr_func_t *f,
          * caller before the collector reaches the callee body.  Never create
          * the fallback data global for those names: it permanently prevents
          * LLVM from installing the real function with the same symbol.
-         */
-        /*
+         *
          * The same holds for a runtime or C function used as a value
          * (`zeroed ? zalloc : malloc`): a zero-filled cell named
          * `rt_zalloc_raw` handed the caller the address of data, and every

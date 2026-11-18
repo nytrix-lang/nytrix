@@ -1,3 +1,6 @@
+/*
+ * C front-end regression test: asm repeat copy tail.
+ */
 typedef __SIZE_TYPE__ usize;
 #define WORD_BYTES __SIZEOF_POINTER__
 

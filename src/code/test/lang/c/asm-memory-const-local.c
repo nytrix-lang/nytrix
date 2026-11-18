@@ -1,3 +1,6 @@
+/*
+ * C front-end regression test: asm memory const local.
+ */
 __attribute__((noinline)) unsigned long read_const_input(unsigned long input) {
   const unsigned long value = input ^ 0xa5a55a5ac3c33c3cul;
   unsigned long observed = 0;

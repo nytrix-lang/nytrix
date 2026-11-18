@@ -31,6 +31,7 @@ module core.os.ui.render.fontstash(
    current_font, vert_metrics, text_width, text_bounds, draw_text, reset, blur_taps,
    ALIGN_LEFT, ALIGN_CENTER, ALIGN_RIGHT, ALIGN_TOP, ALIGN_MIDDLE, ALIGN_BOTTOM, ALIGN_BASELINE
 )
+
 use core
 use core.str as str
 use core.os (file_exists)
@@ -48,6 +49,7 @@ def ALIGN_BASELINE = 64
 
 ;; One record per font: [name, renderer font id, parsed face, fallbacks].
 mut any _fonts = nil
+
 ;; Current state: font, align, spacing, outline px, blur px, then the fill
 ;; and outline RGBA. Kept as floats so the stack is plain lists of numbers.
 mut _st_font, _st_align = 0.0, 9.0
@@ -55,6 +57,7 @@ mut _st_spacing, _st_outline, _st_blur = 0.0, 0.0, 0.0
 mut any _st_color = nil
 mut any _st_outline_color = nil
 mut any _stack = nil
+
 ;; Gaussian halo taps for the last blur radius: flat [dx, dy, weight, ...].
 mut any _blur_taps = nil
 mut _blur_taps_px = -1.0
@@ -169,7 +172,7 @@ fn _resolve_depth(int font, int cp, int depth) int {
 }
 
 fn resolve(int font, int cp) int {
-   "Returns the font that draws `cp` when asked through `font`: the font itself, or the first one in its fallback chain (searched depth first) that covers the code point. Falls back to `font` when none does."
+   "Returns the font that draws `cp` when asked through `font`: the font itself, or the first one in its fallback chain(searched depth first) that covers the code point. Falls back to `font` when none does."
    def int hit = _resolve_depth(font, cp, 0)
    hit >= 0 ? hit : font
 }
@@ -242,7 +245,6 @@ fn prepare(int font, any text) int {
 }
 
 ;; ---- state ----------------------------------------------------------------
-
 fn clear_state() any {
    "Resets the current state: first font, top-left alignment, white, no spacing, outline, or blur."
    _init()
@@ -292,7 +294,7 @@ fn set_color(list rgba) any { "Sets the fill color." if rgba.len >= 3 { _st_colo
 
 fn set_align(int flags) any { "Sets alignment from the ALIGN_ flags: one horizontal and one vertical." _st_align = float(flags) }
 
-fn set_spacing(f64 px) any { "Adds `px` pixels after every glyph (negative tightens)." _st_spacing = px }
+fn set_spacing(f64 px) any { "Adds `px` pixels after every glyph(negative tightens)." _st_spacing = px }
 
 fn set_outline(f64 px, any rgba=0) any {
    "Draws an outline `px` pixels wide behind the text, in `rgba` (black by default). Zero turns it off."
@@ -303,7 +305,6 @@ fn set_outline(f64 px, any rgba=0) any {
 fn set_blur(f64 px) any { "Draws a Gaussian halo of radius `px` (sigma px/2) in the outline color behind the text. Zero turns it off." _st_blur = px < 0.0 ? 0.0 : px }
 
 ;; ---- metrics --------------------------------------------------------------
-
 fn vert_metrics() list {
    "Returns [ascent, descent, line height] of the selected font in pixels; descent is negative."
    def int rid = _rid(int(_st_font))
@@ -366,9 +367,8 @@ fn text_bounds(f64 x, f64 y, any text) list {
 }
 
 ;; ---- drawing --------------------------------------------------------------
-
 fn _draw_runs(any rs, f64 x, f64 y, any rgba, f64 alpha) f64 {
-   "Draws resolved runs left to right from (x, y) and returns the pen x after the last one."
+   "Draws resolved runs left to right from(x, y) and returns the pen x after the last one."
    def col = gfx.color_pack(float(rgba.get(0, 1.0)), float(rgba.get(1, 1.0)), float(rgba.get(2, 1.0)), float(rgba.get(3, 1.0)) * alpha)
    mut f64 pen = x
    mut int i = 0
@@ -444,7 +444,7 @@ fn blur_taps(f64 px) list {
 }
 
 fn draw_text(f64 x, f64 y, any text) f64 {
-   "Draws `text` at (x, y) in the current state and returns the x where it ends."
+   "Draws `text` at(x, y) in the current state and returns the x where it ends."
    _init()
    def s = to_str(text)
    if s.len <= 0 || _rid(int(_st_font)) <= 0 { return x }

@@ -3500,7 +3500,9 @@ static bool ny_cleanup_ptr_value_ok(const expr_t *e, const char *name) {
   }
 }
 
-/* A boolean condition may test the owner for nil; anything else escapes. */
+/*
+ * A boolean condition may test the owner for nil; anything else escapes.
+ */
 static bool ny_cleanup_bool_ok(expr_t *e, const char *name) {
   if (!e)
     return true;
@@ -3544,7 +3546,9 @@ static bool ny_cleanup_expr_ok(expr_t *e, const char *name) {
         e->as.call.args.len >= 1)
       return ny_cleanup_ptr_value_ok(e->as.call.args.data[0].val, name) &&
              !ny_cleanup_args_mention(&e->as.call.args, 1, name);
-    /* Passing the owner to any other callee may retain or store it. */
+    /*
+     * Passing the owner to any other callee may retain or store it.
+     */
     return false;
   case NY_E_INDEX:
     return (ny_cleanup_name_in_expr(e->as.index.target, name)
@@ -3575,14 +3579,18 @@ static bool ny_cleanup_expr_ok(expr_t *e, const char *name) {
   case NY_E_TRY:
     return ny_cleanup_expr_ok(e->as.try_expr.target, name);
   default:
-    /* A bare identifier, container/string storage, a lambda capture, or an
+    /*
+     * A bare identifier, container/string storage, a lambda capture, or an
      * unrecognized shape hands the pointer to something the pass cannot
-     * bound. */
+     * bound.
+     */
     return false;
   }
 }
 
-/* Every occurrence of `name` in `s` is an allowed raw-access position. */
+/*
+ * Every occurrence of `name` in `s` is an allowed raw-access position.
+ */
 static bool ny_cleanup_stmt_ok(stmt_t *s, const char *name) {
   if (!s)
     return true;
@@ -3639,7 +3647,9 @@ static bool ny_cleanup_stmt_ok(stmt_t *s, const char *name) {
     return ny_cleanup_stmt_ok(s->as.tr.body, name) &&
            ny_cleanup_stmt_ok(s->as.tr.handler, name);
   default:
-    /* Returned, stored, deferred, address-taken, or any unrecognized use. */
+    /*
+     * Returned, stored, deferred, address-taken, or any unrecognized use.
+     */
     return false;
   }
 }
@@ -3670,7 +3680,9 @@ static bool ny_cleanup_decl_eligible(stmt_t *s, const char *user_filename,
   return true;
 }
 
-/* Arena-backed vector growth: AST storage outlives any realloc-based vec. */
+/*
+ * Arena-backed vector growth: AST storage outlives any realloc-based vec.
+ */
 static bool ny_cleanup_push(arena_t *arena, void **data, size_t *len,
                             size_t *cap, size_t elem_size, const void *value) {
   if (*len == *cap) {
@@ -3709,7 +3721,9 @@ static stmt_t *ny_cleanup_make_defer(arena_t *arena, token_t tok,
   call_arg_t arg = {0};
   if (!defer || !guard || !conseq || !call_stmt || !call || !test || !zero)
     return NULL;
-  /* `if name != 0 { free(name) }` */
+  /*
+   * `if name != 0 { free(name) }`
+   */
   test->as.binary.op = "!=";
   test->as.binary.left = ny_cleanup_ident(arena, tok, name);
   zero->as.literal.kind = NY_LIT_INT;

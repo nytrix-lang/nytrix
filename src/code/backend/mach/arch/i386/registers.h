@@ -149,7 +149,8 @@ static size_t sm_i386_reg_instruction(sm_i386_regs_t *r, size_t i) {
     return sm_i386_reg_input(r, in->a) && sm_i386_reg_input(r, in->b);
   }
   case NYIR_LOAD_I64:
-    return (in->flags & (NYIR_INST_F_MEM_BYTE | NYIR_INST_F_MEM_U16 |
+    return !(in->flags & (NYIR_INST_F_MEM_SEG_FS | NYIR_INST_F_MEM_SEG_GS)) &&
+           (in->flags & (NYIR_INST_F_MEM_BYTE | NYIR_INST_F_MEM_U16 |
                          NYIR_INST_F_MEM_I32)) &&
            sm_i386_reg_input(r, in->a);
   case NYIR_STORE_LOCAL:
@@ -157,7 +158,8 @@ static size_t sm_i386_reg_instruction(sm_i386_regs_t *r, size_t i) {
            (!sm_i386_local_high_word_used_wide(r->c, (int)in->imm) ||
             sm_i386_reg_representation(r, in->a) < 4);
   case NYIR_STORE_I64:
-    return (in->flags & (NYIR_INST_F_MEM_BYTE | NYIR_INST_F_MEM_U16 |
+    return !(in->flags & (NYIR_INST_F_MEM_SEG_FS | NYIR_INST_F_MEM_SEG_GS)) &&
+           (in->flags & (NYIR_INST_F_MEM_BYTE | NYIR_INST_F_MEM_U16 |
                          NYIR_INST_F_MEM_I32)) &&
            sm_i386_reg_input(r, in->a) && sm_i386_reg_input(r, in->c);
   default:

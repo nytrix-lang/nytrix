@@ -2051,6 +2051,15 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
               element->semantic.rep == NY_SEM_REP_AGGREGATE ||
               element->semantic.rep == NY_SEM_REP_TYPED_BUFFER)))
           all_raw_i64 = false;
+        /* A call result needs positive proof of a raw integer. The checks
+         * above only find evidence against it, and their type lookups can
+         * miss a qualified call (`[ed.buffer(...)]` stored a dict pointer as
+         * a raw int once another function built the same shape). */
+        if ((element->kind == NY_E_CALL || element->kind == NY_E_MEMCALL) &&
+            !(element->semantic.resolved &&
+              element->semantic.rep == NY_SEM_REP_RAW_INT) &&
+            !nyr_expr_is_raw_int(element))
+          all_raw_i64 = false;
         /* Comparison results lower as raw 0/1.  Stored raw, a boxed read
          * classifies `true` as tagged integer 0 (it printed 0 and was falsy
          * after leaving the list), so bool elements need the descriptor
@@ -2138,6 +2147,13 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
             if (boxes && !nyr_expr_is_f64(b, eli) && !nyr_expr_is_cstr(b, eli))
               value = nyr_emit_runtime_call(b, "rt_any_to_i64", value, -1, -1,
                                             1, 0);
+          } else if (value >= 0 &&
+                     nyr_value_scalar_class(b, value) ==
+                         NYIR_SCALAR_I64_TAGGED) {
+            /* Any other producer of a tagged word (a ternary over a dynamic
+             * read) also needs its raw payload in an elem-8 slot. */
+            value = nyr_emit_runtime_call(b, "rt_any_to_i64", value, -1, -1, 1,
+                                          0);
           }
           int off = nyr_emit_const(b, (int64_t)(i * 8));
           int slot = value < 0 || off < 0 ? -1 : nyr_emit_add_i64(b, base, off);
@@ -2324,6 +2340,14 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
                           (value_local && (value_local->is_any ||
                                            value_local->dyn_tag_slot >= 0));
         }
+        /* The producer's class outranks the expression's inferred type: a
+         * ternary joining `list.get(i)` with `0` yields a tagged word even
+         * when inference calls the result an int. Labelled raw, the slot
+         * re-tagged it on read ([ag, n > 0 ? ag.get(0) : 0] read 2 as 5;
+         * every terminal CSI parameter was misread this way). */
+        if (value_class == NYIR_SCALAR_I64_TAGGED && !is_f64 && !is_string &&
+            !enum_object_value)
+          dynamic_value = true;
         if (is_f64 && value_class == NYIR_SCALAR_F64)
           dynamic_value = false;
         /* Preserve the source value's runtime tag when crossing from a
@@ -2358,7 +2382,8 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
           tag = nyr_emit_const(b, 100);
         else if (nyr_expr_is_bool(b, el))
           tag = nyr_emit_const(b, NY_TBUF_TAG_BOOL);
-        else if (raw_integer_expr && !is_string && !is_f64 && !dynamic_value)
+        else if (raw_integer_expr && !is_string && !is_f64 && !dynamic_value &&
+                 value_class != NYIR_SCALAR_I64_TAGGED)
           tag = nyr_emit_const(b, 3);
         else if (count == 1 && !is_string && !is_f64 && !dynamic_value &&
                  el->kind == NY_E_IDENT) {
@@ -2886,7 +2911,7 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
                                      2, 0);
       if (local && local->is_any)
         return nyr_emit_runtime_call(b, "rt_value_index_read_raw", base, idx, 0,
-                                     3, 0);
+                                     3, NYIR_SCALAR_I64_TAGGED);
     }
     /* A mutable inferred global integer list is stored in raw elem-8 slots.
      * Its dynamic carrier annotation must not send an ordinary integer
@@ -2993,7 +3018,7 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
     if (dynamic_ident_local && !dynamic_ident_local->type_name &&
         !dynamic_ident_local->is_list && !e->as.index.stop && !e->as.index.step)
       return nyr_emit_runtime_call(b, "rt_value_index_read_raw", base, idx, 0,
-                                   3, 0);
+                                   3, NYIR_SCALAR_I64_TAGGED);
     bool explicit_scalar_index_target = false;
     if (e->as.index.target && e->as.index.target->kind == NY_E_IDENT &&
         e->as.index.target->as.ident.name) {
@@ -3230,7 +3255,7 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
          */
         if (target_l && target_l->is_any && !target_l->is_list) {
           return nyr_emit_runtime_call(b, "rt_value_index_read_raw", base, idx,
-                                       0, 3, 0);
+                                       0, 3, NYIR_SCALAR_I64_TAGGED);
         }
         if (target_l && target_l->is_any && !target_l->is_list &&
             target_l->type_name &&
@@ -3508,7 +3533,7 @@ static int nyr_lower_expr_impl(nyr_builder_t *b, const expr_t *e) {
                                  strcmp(local->type_name, "seq") == 0)));
       if (dynamic_receiver)
         return nyr_emit_runtime_call(b, "rt_value_index_read_raw", base, idx, 0,
-                                     3, 0);
+                                     3, NYIR_SCALAR_I64_TAGGED);
     }
     if (is_negative || unknown_target) {
       return nyr_emit_runtime_call(b, "rt_tbuf_index_read_raw", base, idx, -1,

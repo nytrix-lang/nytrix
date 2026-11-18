@@ -1,3 +1,6 @@
+/*
+ * C front-end regression test: asm repeat cmpsb.
+ */
 typedef __SIZE_TYPE__ usize;
 
 __attribute__((noinline)) int compare_bytes(unsigned char **left,

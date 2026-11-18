@@ -240,6 +240,14 @@ static bool nyr_ident_global_is_raw_int(nyr_builder_t *b, const expr_t *e) {
    * initialized by a literal owns the raw cell. */
   if (nyr_global_declared_any(b, e->as.ident.name))
     return false;
+  /* `mut any N = 5` stores the tagged word; only an untyped or int global
+   * initialized by a literal owns the raw cell. */
+  if (nyr_global_declared_any(b, e->as.ident.name))
+    return false;
+  /* `mut any N = 5` stores the tagged word; only an untyped or int global
+   * initialized by a literal owns the raw cell. */
+  if (nyr_global_declared_any(b, e->as.ident.name))
+    return false;
   const expr_t *init = nyr_find_top_level_value(b, e->as.ident.name);
   return init && init->kind == NY_E_LITERAL &&
          init->as.literal.kind == NY_LIT_INT && init->tok.kind != NY_T_NIL;

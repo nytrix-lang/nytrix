@@ -1,7 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
   <title>Search</title>
   <desc>Search icon.</desc>
-  <g transform="translate(2.0000 2.0000) scale(1.25000)">
-<path fill="#c6c6ca" d="M10.168 8.754a5 5 0 1 0-1.414 1.414l4.316 4.316 1.414-1.414zM6 3a3 3 0 0 1 0 6 3 3 0 0 1 0-6z"/>
-  </g>
+  <path fill="#a78bfa" fill-rule="evenodd" d="M10.5 2.5A7.2 7.2 0 1 1 10.5 16.9A7.2 7.2 0 0 1 10.5 2.5ZM10.5 5.3A4.4 4.4 0 1 0 10.5 14.1A4.4 4.4 0 0 0 10.5 5.3Z"/>
+  <rect fill="#a78bfa" x="14.2" y="16.6" width="7" height="2.4" rx="1.2" transform="rotate(45 14.2 16.6)"/>
 </svg>

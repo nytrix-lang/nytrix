@@ -1,7 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
-  <title>Quaternion</title>
-  <desc>Quaternion icon.</desc>
-  <g transform="translate(2.0000 4.5000) scale(1.25000)">
-<path fill="#c6c6ca" d="M3 3a3 3 0 0 0 0 6v2h2V8.236A3 3 0 0 0 7 9h2v-.764A3 3 0 0 0 11 9h2V6a3 3 0 0 0 3 3V7a1 1 0 0 1-1-1V5h1V3h-1V1h-2v2h-2a3 3 0 0 0-2 .764V3H7v4a1 1 0 0 1-1-1V3zm0 4a1 1 0 0 1 0-2zm8 0a1 1 0 0 1 0-2z"/><path fill="#c6c6ca" fill-opacity=".4" d="M4 3v3a3 3 0 0 0 3 3h2V3H7v4a1 1 0 0 1-1-1V3z"/>
-  </g>
-</svg>

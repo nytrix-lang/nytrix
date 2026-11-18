@@ -227,7 +227,8 @@ static bool nir_flags_valid(const nyr_inst_t *in) {
   case NYIR_LOAD_I64:
   case NYIR_STORE_I64:
     allowed = NYIR_INST_F_MEM_BYTE | NYIR_INST_F_MEM_U16 | NYIR_INST_F_MEM_I32 |
-              NYIR_INST_F_MEM_VOLATILE;
+              NYIR_INST_F_MEM_VOLATILE | NYIR_INST_F_MEM_SEG_FS |
+              NYIR_INST_F_MEM_SEG_GS;
     break;
   case NYIR_ADD_I64:
     allowed = NYIR_INST_F_NARROW32 | NYIR_INST_F_NO_OVERFLOW |
@@ -243,7 +244,9 @@ static bool nir_flags_valid(const nyr_inst_t *in) {
     allowed = NYIR_INST_F_NARROW32;
     break;
   case NYIR_CMP_I64:
-    /* The flag is the assume marker; the compare still computes its value. */
+    /*
+     * The flag is the assume marker; the compare still computes its value.
+     */
     allowed = NYIR_INST_F_ASSUME;
     break;
   case NYIR_SUB_I64:
@@ -428,8 +431,10 @@ static bool nir_select_condition_is_boolean(const nyr_func_t *f, int value,
   return false;
 }
 
-/* A verification invocation observes one immutable function. Share its lazy
- * type map across the scalar checks; never cache it across IR mutations. */
+/*
+ * A verification invocation observes one immutable function. Share its lazy
+ * type map across the scalar checks; never cache it across IR mutations.
+ */
 typedef struct {
   nyr_type_map_t types;
   bool ready;
@@ -1279,11 +1284,11 @@ static bool nir_verify_dominance(const nyr_func_t *f, char *err,
     return nyr_err(err, err_len, "native NYIR verify: out of memory");
   }
 
-#define CHECK_DOMINATES(value)                                                 \
-  do {                                                                         \
-    if (!nir_value_dominates_use(f, &cfg, definitions, (value), i, err,        \
-                                 err_len, in))                                 \
-      goto fail;                                                               \
+#define CHECK_DOMINATES(value)                                          \
+  do {                                                                  \
+    if (!nir_value_dominates_use(f, &cfg, definitions, (value), i, err, \
+                                 err_len, in))                          \
+      goto fail;                                                        \
   } while (0)
 
   for (size_t i = 0; i < f->len; ++i) {

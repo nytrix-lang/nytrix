@@ -88,14 +88,14 @@ extern char **environ;
 #define NY_NATIVE_TAG UINT64_C(2)
 #define NY_NATIVE_SHIFT 2
 #define NY_NATIVE_MARK (UINT64_C(1) << 63)
-#define NY_NATIVE_IS(v)                                                        \
-  (((((uint64_t)(v) & NY_NATIVE_MARK) != 0ULL) &&                              \
+#define NY_NATIVE_IS(v)                                       \
+  (((((uint64_t)(v) & NY_NATIVE_MARK) != 0ULL) &&             \
     (((uint64_t)(v) & NY_NATIVE_TAG_MASK) == NY_NATIVE_TAG)))
 #else
 #define NY_NATIVE_TAG_MASK NY_VALUE_PTR_TAG_MASK
 #define NY_NATIVE_TAG UINT64_C(6)
 #define NY_NATIVE_SHIFT 3
-#define NY_NATIVE_IS(v)                                                        \
+#define NY_NATIVE_IS(v)                                     \
   ((((uint64_t)(v)) & NY_NATIVE_TAG_MASK) == NY_NATIVE_TAG)
 #endif
 
@@ -105,14 +105,14 @@ extern char **environ;
 #define NY_DYNAMIC_CALLABLE_TAG_MASK NY_VALUE_PTR_TAG_MASK
 #define NY_DYNAMIC_CALLABLE_TAG UINT64_C(4)
 #define NY_DYNAMIC_CALLABLE_MARK (UINT64_C(1) << 63)
-#define NY_DYNAMIC_CALLABLE_IS(v)                                              \
-  (((((uint64_t)(v)) & NY_DYNAMIC_CALLABLE_MARK) != 0ULL) &&                   \
-   (((uint64_t)(v) & NY_DYNAMIC_CALLABLE_TAG_MASK) ==                          \
+#define NY_DYNAMIC_CALLABLE_IS(v)                            \
+  (((((uint64_t)(v)) & NY_DYNAMIC_CALLABLE_MARK) != 0ULL) && \
+   (((uint64_t)(v) & NY_DYNAMIC_CALLABLE_TAG_MASK) ==        \
     NY_DYNAMIC_CALLABLE_TAG))
 int64_t rt_dynamic_callable_encode(void *fn, uint64_t flags);
 void *rt_dynamic_callable_decode(int64_t callable);
 #define NY_DYNAMIC_CALLABLE_ENCODE(p) rt_dynamic_callable_encode((void *)(p), 0)
-#define NY_DYNAMIC_CALLABLE_BOOL_ENCODE(p)                                     \
+#define NY_DYNAMIC_CALLABLE_BOOL_ENCODE(p)                               \
   rt_dynamic_callable_encode((void *)(p), NY_DYNAMIC_CALLABLE_BOOL_MARK)
 #define NY_DYNAMIC_CALLABLE_DECODE(v) rt_dynamic_callable_decode((int64_t)(v))
 
@@ -132,37 +132,37 @@ void *rt_dynamic_callable_decode(int64_t callable);
 #define NY_DYNAMIC_CALLABLE_RAW_RESULT_MARK (UINT64_C(1) << 60)
 #define NY_DYNAMIC_CALLABLE_WORD_ARGS_MARK (UINT64_C(1) << 59)
 #define NY_DYNAMIC_CALLABLE_F64_RESULT_MARK (UINT64_C(1) << 58)
-#define NY_DYNAMIC_CALLABLE_MARKS                                              \
-  (NY_DYNAMIC_CALLABLE_MARK | NY_DYNAMIC_CALLABLE_BOOL_MARK |                  \
-   NY_DYNAMIC_CALLABLE_TAGGED_ARGS_MARK |                                      \
-   NY_DYNAMIC_CALLABLE_RAW_RESULT_MARK | NY_DYNAMIC_CALLABLE_WORD_ARGS_MARK |  \
+#define NY_DYNAMIC_CALLABLE_MARKS                                             \
+  (NY_DYNAMIC_CALLABLE_MARK | NY_DYNAMIC_CALLABLE_BOOL_MARK |                 \
+   NY_DYNAMIC_CALLABLE_TAGGED_ARGS_MARK |                                     \
+   NY_DYNAMIC_CALLABLE_RAW_RESULT_MARK | NY_DYNAMIC_CALLABLE_WORD_ARGS_MARK | \
    NY_DYNAMIC_CALLABLE_F64_RESULT_MARK)
-#define NY_DYNAMIC_CALLABLE_BOOL_IS(v)                                         \
-  (NY_DYNAMIC_CALLABLE_IS(v) &&                                                \
+#define NY_DYNAMIC_CALLABLE_BOOL_IS(v)                     \
+  (NY_DYNAMIC_CALLABLE_IS(v) &&                            \
    (((uint64_t)(v) & NY_DYNAMIC_CALLABLE_BOOL_MARK) != 0))
-#define NY_DYNAMIC_CALLABLE_TAGGED_ARGS_IS(v)                                  \
-  (NY_DYNAMIC_CALLABLE_IS(v) &&                                                \
+#define NY_DYNAMIC_CALLABLE_TAGGED_ARGS_IS(v)                     \
+  (NY_DYNAMIC_CALLABLE_IS(v) &&                                   \
    (((uint64_t)(v) & NY_DYNAMIC_CALLABLE_TAGGED_ARGS_MARK) != 0))
-#define NY_DYNAMIC_CALLABLE_RAW_RESULT_IS(v)                                   \
-  (NY_DYNAMIC_CALLABLE_IS(v) &&                                                \
+#define NY_DYNAMIC_CALLABLE_RAW_RESULT_IS(v)                     \
+  (NY_DYNAMIC_CALLABLE_IS(v) &&                                  \
    (((uint64_t)(v) & NY_DYNAMIC_CALLABLE_RAW_RESULT_MARK) != 0))
-#define NY_DYNAMIC_CALLABLE_WORD_ARGS_IS(v)                                    \
-  (NY_DYNAMIC_CALLABLE_IS(v) &&                                                \
+#define NY_DYNAMIC_CALLABLE_WORD_ARGS_IS(v)                     \
+  (NY_DYNAMIC_CALLABLE_IS(v) &&                                 \
    (((uint64_t)(v) & NY_DYNAMIC_CALLABLE_WORD_ARGS_MARK) != 0))
 
 #define is_int(v) ((((uint64_t)(v)) & NY_VALUE_INT_TAG_BIT) != 0)
-#define is_ptr(v)                                                              \
-  (!NY_DYNAMIC_CALLABLE_IS(v) &&                                               \
-   ((((uint64_t)(v)) & NY_VALUE_INT_TAG_BIT) == 0) &&                          \
+#define is_ptr(v)                                     \
+  (!NY_DYNAMIC_CALLABLE_IS(v) &&                      \
+   ((((uint64_t)(v)) & NY_VALUE_INT_TAG_BIT) == 0) && \
    (uintptr_t)(v) > NY_VALUE_PTR_MIN_ADDR)
 
-#define memset_manual(p, v, n)                                                 \
-  do {                                                                         \
-    unsigned char *_p = (unsigned char *)(p);                                  \
-    unsigned char _v = (unsigned char)(v);                                     \
-    size_t _n = (n);                                                           \
-    while (_n-- > 0)                                                           \
-      *_p++ = _v;                                                              \
+#define memset_manual(p, v, n)                \
+  do {                                        \
+    unsigned char *_p = (unsigned char *)(p); \
+    unsigned char _v = (unsigned char)(v);    \
+    size_t _n = (n);                          \
+    while (_n-- > 0)                          \
+      *_p++ = _v;                             \
   } while (0)
 
 static inline bool rt_env_is_truthy(const char *v) {
@@ -491,6 +491,22 @@ static inline int rt_addr_probe_os(uintptr_t p, size_t n);
  * (works for device mappings that process_vm_readv refuses). Linux only. */
 int rt_addr_probe_copy(uintptr_t p);
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 static inline int rt_addr_mapped(uintptr_t p, size_t n) {
   if (p < 0x1000 || n == 0)
     return 0;
@@ -510,6 +526,14 @@ static inline int rt_addr_mapped(uintptr_t p, size_t n) {
   rt_probe_cache_store(p, n);
   return 1;
 }
+
+
+
+
+
+
+
+
 
 static inline int rt_addr_probe_os(uintptr_t p, size_t n) {
 #ifdef _WIN32
@@ -669,8 +693,12 @@ rt_tbuf_error_t rt_tbuf_check(int64_t value, const int64_t **header_out);
  * -1=registered but static, 0=not registered. */
 int rt_tbuf_release_handle(int64_t value);
 int64_t rt_tbuf_register_static_handle(int64_t value);
-static __thread uintptr_t rt_const_str_cache_keys[RT_CONST_STR_CACHE_SIZE];
-static __thread uintptr_t rt_non_str_cache_keys[RT_NON_STR_CACHE_SIZE];
+/* One runtime-wide copy per thread, like the float caches below.  As
+ * `static` arrays every translation unit including this header carried its
+ * own 64 KiB pair: nine copies the loader zero-filled at every start, and a
+ * string recorded by one unit stayed unknown (or stale) to the others. */
+extern __thread uintptr_t rt_const_str_cache_keys[RT_CONST_STR_CACHE_SIZE];
+extern __thread uintptr_t rt_non_str_cache_keys[RT_NON_STR_CACHE_SIZE];
 /* Float values are boxed in math.c but classified from several runtime
  * translation units.  These caches are runtime-wide per-thread state; making
  * them `static` here gave each object file a private cache and made a boxed
@@ -679,27 +707,6 @@ extern __thread uintptr_t rt_float_cache_keys[RT_FLOAT_CACHE_SIZE];
 extern __thread uintptr_t rt_non_float_cache_keys[RT_FLOAT_CACHE_SIZE];
 bool rt_float_registry_has(uintptr_t value);
 
-/*
- * The caches above exist once per translation unit and per thread, and they
- * hold object addresses without owning them. Each unit tells the heap
- * collector where its copies are so they are not mistaken for references.
- */
-#if defined(__linux__) && defined(__GNUC__)
-/* Weak: tools that link single runtime units have no collector. */
-__attribute__((weak)) void
-rt_fc_register_cache_reporter(void (*report)(void (*add)(uintptr_t,
-                                                         uintptr_t)));
-static void rt_fc_report_unit_caches(void (*add)(uintptr_t, uintptr_t)) {
-  add((uintptr_t)rt_const_str_cache_keys,
-      (uintptr_t)rt_const_str_cache_keys + sizeof(rt_const_str_cache_keys));
-  add((uintptr_t)rt_non_str_cache_keys,
-      (uintptr_t)rt_non_str_cache_keys + sizeof(rt_non_str_cache_keys));
-}
-__attribute__((constructor)) static void rt_fc_register_unit_caches(void) {
-  if (rt_fc_register_cache_reporter)
-    rt_fc_register_cache_reporter(rt_fc_report_unit_caches);
-}
-#endif
 
 static inline uintptr_t rt_const_str_cache_slot(uintptr_t p) {
   return ((p >> 4) ^ (p >> 12) ^ (p >> 21)) & RT_CONST_STR_CACHE_MASK;
@@ -862,8 +869,8 @@ static inline bool is_valid_heap_ptr(int64_t v) {
 }
 
 #define is_heap_ptr(v) is_valid_heap_ptr(v)
-#define is_any_ptr(v)                                                          \
-  (((v) != 0 && ((((uint64_t)(v)) & NY_VALUE_INT_TAG_BIT) == 0) &&             \
+#define is_any_ptr(v)                                              \
+  (((v) != 0 && ((((uint64_t)(v)) & NY_VALUE_INT_TAG_BIT) == 0) && \
     (uintptr_t)(v) > NY_VALUE_PTR_MIN_ADDR))
 
 #define NY_IMM_NIL ((int64_t)0)
@@ -909,16 +916,16 @@ static inline int64_t rt_mask_ptr(int64_t v) { return (int64_t)(v & ~2ULL); }
 #define NY_NATIVE_ENCODE(p)                                                    \
   ((int64_t)(NY_NATIVE_MARK | (((uint64_t)(uintptr_t)(p) << NY_NATIVE_SHIFT) | \
                                (uint64_t)NY_NATIVE_TAG)))
-#define NY_NATIVE_DECODE(v)                                                    \
+#define NY_NATIVE_DECODE(v)                                                     \
   ((void *)(uintptr_t)((((uint64_t)(v)) & ~NY_NATIVE_MARK) >> NY_NATIVE_SHIFT))
 #else
 static inline int64_t rt_mask_ptr(int64_t v) {
   return (int64_t)((uint64_t)v & ~NY_VALUE_PTR_TAG_MASK);
 }
-#define NY_NATIVE_ENCODE(p)                                                    \
-  ((int64_t)(((uint64_t)(uintptr_t)(p) << NY_NATIVE_SHIFT) |                   \
+#define NY_NATIVE_ENCODE(p)                                  \
+  ((int64_t)(((uint64_t)(uintptr_t)(p) << NY_NATIVE_SHIFT) | \
              (uint64_t)NY_NATIVE_TAG))
-#define NY_NATIVE_DECODE(v)                                                    \
+#define NY_NATIVE_DECODE(v)                                 \
   ((void *)(uintptr_t)(((uint64_t)(v)) >> NY_NATIVE_SHIFT))
 #endif
 

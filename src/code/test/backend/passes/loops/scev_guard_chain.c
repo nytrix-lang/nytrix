@@ -25,8 +25,10 @@ static int call(nyr_func_t *f, const char *symbol, int a) {
 }
 
 typedef struct {
-  /* 0: n <= cap, 1: cap <= n (wrong direction), 2: n < cap, 3: no guard,
-     4: n <= m then m <= cap (transitive), 5: guard in a sibling arm. */
+  /*
+   * 0: n <= cap, 1: cap <= n (wrong direction), 2: n < cap, 3: no guard,
+   * 4: n <= m then m <= cap (transitive), 5: guard in a sibling arm.
+   */
   int mode;
 } chain_case_t;
 
@@ -50,7 +52,9 @@ static void build_case(nyr_func_t *f, const chain_case_t *c) {
 
   int preheader = 6;
   if (c->mode == 5) {
-    /* Guard lives in an arm that does not dominate the loop. */
+    /*
+     * Guard lives in an arm that does not dominate the loop.
+     */
     int probe = nyr_opt_cmp(f, n, cap, NYIR_CMP_LT);
     nyr_opt_br_if(f, probe, 6);
     nyr_opt_br(f, 7);

@@ -31,6 +31,8 @@
 
 __thread uintptr_t rt_float_cache_keys[RT_FLOAT_CACHE_SIZE] = {0};
 __thread uintptr_t rt_non_float_cache_keys[RT_FLOAT_CACHE_SIZE] = {0};
+__thread uintptr_t rt_const_str_cache_keys[RT_CONST_STR_CACHE_SIZE];
+__thread uintptr_t rt_non_str_cache_keys[RT_NON_STR_CACHE_SIZE];
 
 extern int64_t rt_lt(int64_t a, int64_t b);
 extern int64_t rt_bigint_add(int64_t a, int64_t b);
@@ -157,10 +159,14 @@ static bool rt_map_parse_readable_line(const char *line,
   return true;
 }
 
-/* Whether a /proc/self/maps line names a mapping that is never unmapped
- * while the process runs: a file mapping, the main stack or the vDSO. */
+/*
+ * Whether a /proc/self/maps line names a mapping that is never unmapped
+ * while the process runs: a file mapping, the main stack or the vDSO.
+ */
 static bool rt_map_line_stable(const char *line) {
-  /* Fields: range perms offset dev inode [path]. */
+  /*
+   * Fields: range perms offset dev inode [path].
+   */
   const char *p = line;
   for (int field = 0; field < 5; ++field) {
     while (*p && *p != ' ' && *p != '\t')
@@ -212,8 +218,10 @@ void rt_map_oracle_init(void) {
       g_rt_oracle_snapshot[j] = t;
       g_rt_oracle_snapshot_stable[j] = t_stable;
     }
-    /* Merge touching ranges of the same kind only, so a stable range never
-     * absorbs anonymous memory next to it. */
+    /*
+     * Merge touching ranges of the same kind only, so a stable range never
+     * absorbs anonymous memory next to it.
+     */
     uint32_t m = 0;
     for (uint32_t i = 0; i < n; ++i) {
       if (m > 0 &&
@@ -269,7 +277,9 @@ __thread uint32_t g_rt_probe_cache_next;
 
 _Atomic(_Atomic(uint64_t) *) g_rt_oracle_pages[1u << RT_ORACLE_PAGE_ROOT_BITS];
 
-/* Set the bit of every page in [s, e); both are page aligned. */
+/*
+ * Set the bit of every page in [s, e); both are page aligned.
+ */
 static __thread uintptr_t rt_oracle_mark_last_s = 0, rt_oracle_mark_last_e = 0;
 #define last_s rt_oracle_mark_last_s
 #define last_e rt_oracle_mark_last_e
@@ -319,6 +329,30 @@ static void rt_map_oracle_mark_pages(uintptr_t s, uintptr_t e) {
 static __thread uintptr_t rt_oracle_dedup_s[RT_ORACLE_DEDUP];
 static __thread uintptr_t rt_oracle_dedup_e[RT_ORACLE_DEDUP];
 static __thread uint32_t rt_oracle_dedup_idx;
+
+__thread rt_probe_cache_entry_t g_rt_probe_cache[RT_PROBE_CACHE_WAYS];
+__thread uint32_t g_rt_probe_cache_next;
+
+__thread rt_probe_cache_entry_t g_rt_probe_cache[RT_PROBE_CACHE_WAYS];
+__thread uint32_t g_rt_probe_cache_next;
+
+__thread rt_probe_cache_entry_t g_rt_probe_cache[RT_PROBE_CACHE_WAYS];
+__thread uint32_t g_rt_probe_cache_next;
+
+__thread rt_probe_cache_entry_t g_rt_probe_cache[RT_PROBE_CACHE_WAYS];
+__thread uint32_t g_rt_probe_cache_next;
+
+__thread rt_probe_cache_entry_t g_rt_probe_cache[RT_PROBE_CACHE_WAYS];
+__thread uint32_t g_rt_probe_cache_next;
+
+__thread rt_probe_cache_entry_t g_rt_probe_cache[RT_PROBE_CACHE_WAYS];
+__thread uint32_t g_rt_probe_cache_next;
+
+__thread rt_probe_cache_entry_t g_rt_probe_cache[RT_PROBE_CACHE_WAYS];
+__thread uint32_t g_rt_probe_cache_next;
+
+__thread rt_probe_cache_entry_t g_rt_probe_cache[RT_PROBE_CACHE_WAYS];
+__thread uint32_t g_rt_probe_cache_next;
 
 void rt_map_oracle_add(uintptr_t start, size_t size) {
   if (!start || (uintptr_t)size > UINTPTR_MAX - start)
@@ -417,8 +451,10 @@ void rt_map_oracle_forget(uintptr_t start, size_t size) {
     return;
   uintptr_t s = start & ~(uintptr_t)4095u;
   uintptr_t e = (start + (uintptr_t)size + 4095u) & ~(uintptr_t)4095u;
-  /* Pages shared with a live neighbour lose their bit too; probes of those
-   * then take the exact path, which is slower but correct. */
+  /*
+   * Pages shared with a live neighbour lose their bit too; probes of those
+   * then take the exact path, which is slower but correct.
+   */
   for (uintptr_t page = s >> 12; page < (e >> 12);) {
     uintptr_t root = page >> RT_ORACLE_PAGE_LEAF_BITS;
     uintptr_t leaf_end = (root + 1u) << RT_ORACLE_PAGE_LEAF_BITS;
@@ -442,14 +478,18 @@ void rt_map_oracle_forget(uintptr_t start, size_t size) {
       page += take;
     }
   }
-  /* This thread's memos would skip re-registering the range. */
+  /*
+   * This thread's memos would skip re-registering the range.
+   */
   if (rt_oracle_mark_last_e > s && rt_oracle_mark_last_s < e)
     rt_oracle_mark_last_s = rt_oracle_mark_last_e = 0;
   for (uint32_t i = 0; i < RT_ORACLE_DEDUP; ++i)
     if (rt_oracle_dedup_e[i] > s && rt_oracle_dedup_s[i] < e)
       rt_oracle_dedup_s[i] = rt_oracle_dedup_e[i] = 0;
-  /* Ranges inside the block stop matching: an empty end never contains a
-   * span. Readers load start, then end, so a single store suffices. */
+  /*
+   * Ranges inside the block stop matching: an empty end never contains a
+   * span. Readers load start, then end, so a single store suffices.
+   */
   while (atomic_flag_test_and_set_explicit(&g_rt_oracle_extra_lock,
                                            memory_order_acquire)) {
   }
@@ -529,8 +569,10 @@ static void rt_tbuf_cache_handle(uintptr_t data) {
   rt_tbuf_handle_cache[slot] = data;
 }
 
-/* Whether `data` is in this thread's cache and has not been released since
- * it was put there. */
+/*
+ * Whether `data` is in this thread's cache and has not been released since
+ * it was put there.
+ */
 static inline bool rt_tbuf_cache_hit(uintptr_t data) {
   size_t slot = rt_tbuf_handle_cache_slot(data);
   return rt_tbuf_handle_cache[slot] == data &&
@@ -645,8 +687,10 @@ static void rt_tbuf_mark_page(uintptr_t data) {
                            memory_order_release);
 }
 
-/* False when no typed buffer was ever registered on `data`'s page. Addresses
- * outside the bitmap's range answer true so the registry decides. */
+/*
+ * False when no typed buffer was ever registered on `data`'s page. Addresses
+ * outside the bitmap's range answer true so the registry decides.
+ */
 static inline bool rt_tbuf_page_possible(uintptr_t data) {
   uintptr_t page = data >> 12;
   uintptr_t root = page >> RT_TBUF_PAGE_LEAF_BITS;
@@ -798,8 +842,10 @@ int rt_tbuf_release_handle(int64_t value) {
       atomic_store_explicit(&seg[i], RT_TBUF_HANDLE_TOMBSTONE,
                             memory_order_release);
     } else {
-      /* Nothing probes past an empty slot: this one, and any run of
-       * tombstones before it, can be empty again. */
+      /*
+       * Nothing probes past an empty slot: this one, and any run of
+       * tombstones before it, can be empty again.
+       */
       uint32_t cleared = 1;
       atomic_store_explicit(&seg[i], 0, memory_order_release);
       size_t prev = (i - 1) & mask;
@@ -1411,9 +1457,11 @@ int64_t rt_tbuf_append_i64_raw(int64_t buffer, int64_t value) {
    * heterogeneous value requires that representation.
    */
   if (count == 0 && elem_size == 24) {
-    /* Keep the block's byte size: the same storage holds three times as
+    /*
+     * Keep the block's byte size: the same storage holds three times as
      * many scalar elements, and whoever releases it derives the size it was
-     * allocated with from these two words. */
+     * allocated with from these two words.
+     */
     base[2] = elem_size = 8;
     capacity *= 3;
     base[3] = (base[3] & RT_TBUF_TUPLE_FLAG) | capacity;
@@ -2597,8 +2645,10 @@ int64_t rt_tbuf_set_tagged(int64_t buffer, int64_t index, int64_t value) {
   int64_t result = rt_tbuf_set_i64_raw(buffer, raw_index, value);
   return result ? result : rt_tag_v(0);
 }
-/* rt_tbuf_get for a buffer rt_tbuf_check accepted: `buffer` is the payload
- * of `hdr`. */
+/*
+ * rt_tbuf_get for a buffer rt_tbuf_check accepted: `buffer` is the payload
+ * of `hdr`.
+ */
 static int64_t rt_tbuf_get_checked(int64_t buffer, const int64_t *hdr,
                                    int64_t index, int64_t fallback) {
   int64_t count = hdr[1], elem_size = hdr[2];
@@ -5308,7 +5358,9 @@ static bool rt_tbuf_try_read_f64(int64_t buffer, int64_t index, double *out) {
   return true;
 }
 
-/* Fused `float(x.get(key, fallback))`: same contract, no float box. */
+/*
+ * Fused `float(x.get(key, fallback))`: same contract, no float box.
+ */
 double rt_value_get_f64(int64_t value, int64_t key, int64_t fallback) {
   if (is_int(key) && !rt_is_bool_imm(key)) {
     double out = 0.0;
@@ -5319,7 +5371,9 @@ double rt_value_get_f64(int64_t value, int64_t key, int64_t fallback) {
       value, key, fallback, (uintptr_t)__builtin_return_address(0)));
 }
 
-/* Fused `float(x[index])` for a dynamic receiver and raw index. */
+/*
+ * Fused `float(x[index])` for a dynamic receiver and raw index.
+ */
 double rt_tbuf_index_any_f64(int64_t buffer, int64_t index) {
   double out = 0.0;
   if (rt_tbuf_try_read_f64(buffer, index, &out))
@@ -6535,9 +6589,9 @@ int64_t rt_len(int64_t value) {
    * Small tagged strings also satisfy rt_native_is_str().  Their address is
    * the inline byte payload, not a raw C-string pointer with an allocator
    * header, so read their encoded length before the native-string fallback.
+   * (rt_native_is_str(value) implies is_v_str(value), so a value that is not
+   * a string here is not one for the native predicate either.)
    */
-  /* (rt_native_is_str(value) implies is_v_str(value), so a value that is not
-   * a string here is not one for the native predicate either.) */
   int64_t str_len = rt_tagged_str_len_known(value, managed);
   if (str_len >= 0)
     return str_len;
@@ -7151,8 +7205,10 @@ typedef struct rt_sso_block {
 } rt_sso_block_t;
 
 static NY_TLS rt_sso_block_t *g_sso_strings = NULL;
-/* Slots the heap collector released, linked through fake_size (stored
- * complemented so a free slot never looks like a reference). */
+/*
+ * Slots the heap collector released, linked through fake_size (stored
+ * complemented so a free slot never looks like a reference).
+ */
 static NY_TLS rt_sso_slot_t *g_sso_free = NULL;
 _Atomic uint64_t g_rt_sso_generation = 1;
 RT_TLS rt_sso_probe_cache_entry_t g_rt_sso_probe_cache[RT_SSO_PROBE_CACHE_SIZE];
@@ -7166,9 +7222,11 @@ int64_t rt_alloc_small_string_len(const char *s, size_t len) {
     goto fill;
   }
   if (!g_sso_strings || g_sso_strings->used >= RT_SSO_SLOTS_PER_BLOCK) {
-    /* From the collector heap when it runs: in a non-PIE executable the C
+    /*
+     * From the collector heap when it runs: in a non-PIE executable the C
      * heap sits below 4 GiB, where ordinary integers look like addresses of
-     * these slots and would keep them alive. */
+     * these slots and would keep them alive.
+     */
     rt_sso_block_t *block = (rt_sso_block_t *)rt_fc_block_alloc(sizeof(*block));
     if (!block)
       block = (rt_sso_block_t *)calloc(1, sizeof(*block));
@@ -7227,7 +7285,9 @@ static bool rt_sso_in_thread_storage(int64_t v) {
   return false;
 }
 
-/* Heap-backed string with no small-string arena involvement. */
+/*
+ * Heap-backed string with no small-string arena involvement.
+ */
 static int64_t rt_alloc_heap_string_len(const char *s, size_t len) {
   if (!s || len > (SIZE_MAX >> 2))
     return 0;
@@ -7781,7 +7841,9 @@ static int rt_image_seg_phdr(struct dl_phdr_info *info, size_t size,
                             void *data) {
   (void)size;
   (void)data;
-  /* The first object is the executable itself. */
+  /*
+   * The first object is the executable itself.
+   */
   for (int i = 0; i < info->dlpi_phnum && rt_image_seg_n < RT_IMAGE_SEG_MAX;
        ++i) {
     const ElfW(Phdr) *ph = &info->dlpi_phdr[i];
@@ -7828,15 +7890,19 @@ int64_t rt_cstr_to_str(int64_t p_v) {
       ((const char *)raw)[e->len] == '\0')
     return e->str;
   int64_t out = rt_cstr_to_str_uncached(p_v);
-  /* Only a literal whose result is its interned copy: then every call would
-   * have returned this same string until it leaves the intern table. */
+  /*
+   * Only a literal whose result is its interned copy: then every call would
+   * have returned this same string until it leaves the intern table.
+   */
   if (out && out != p_v && !NY_NATIVE_IS(p_v) && rt_image_seg_contains(raw)) {
     size_t n = rt_tagged_str_len(out);
     if (n <= RT_INTERN_MAX_LEN &&
         memcmp((const void *)raw, (const void *)(uintptr_t)out, n) == 0 &&
         ((const char *)raw)[n] == '\0') {
-      /* Mark before checking that `out` is still interned: a removal after
-       * this point advances the generation this entry is stored under. */
+      /*
+       * Mark before checking that `out` is still interned: a removal after
+       * this point advances the generation this entry is stored under.
+       */
       unsigned bit = rt_literal_str_bit(out);
       atomic_fetch_or_explicit(&g_rt_literal_str_bits[bit >> 6],
                                UINT64_C(1) << (bit & 63),
@@ -9573,7 +9639,9 @@ int64_t rt_native_is_int(int64_t v) {
     return 0;
   if (rt_native_is_str(v))
     return 0;
-  /* A block from the raw allocator (zalloc/malloc) is a pointer. */
+  /*
+   * A block from the raw allocator (zalloc/malloc) is a pointer.
+   */
   if (rt_raw_ptr_registered(v))
     return 0;
   return 1;
@@ -9682,7 +9750,9 @@ int64_t rt_has_tag(int64_t v, int64_t tag_v) {
    * before classifying immediates or managed heap tags.
    */
   int64_t want = is_int(tag_v) ? (tag_v >> 1) : tag_v;
-  /* One check resolves, decodes and validates a typed buffer. */
+  /*
+   * One check resolves, decodes and validates a typed buffer.
+   */
   const int64_t *tbuf_hdr = NULL;
   if (rt_tbuf_check(v, &tbuf_hdr) == RT_TBUF_OK) {
     v = (int64_t)((uintptr_t)tbuf_hdr + RT_NATIVE_TBUF_HEADER);
@@ -9833,7 +9903,9 @@ int64_t rt_value_tag(int64_t v) {
     return rt_tbuf_word_is_tuple(tbuf_header[3]) ? TAG_TUPLE : TAG_LIST;
   if (rt_has_tag(v, rt_tag_v(TAG_LIST)) == NY_IMM_TRUE)
     return TAG_LIST;
-  /* rt_is_str(v) already returned TAG_STR above. */
+  /*
+   * rt_is_str(v) already returned TAG_STR above.
+   */
   if (is_v_flt(v))
     return TAG_FLOAT;
   if ((heap_v == v && (v & 15) == 0) || rt_value_is_ptr(v))
@@ -9964,8 +10036,10 @@ int64_t rt_is_str(int64_t v) {
     return 0;
   if (is_v_flt(v))
     return 0;
-  /* is_v_str reads the runtime tag of allocator-owned objects itself; raw
-   * pointers require an explicit conversion at a typed FFI/string edge. */
+  /*
+   * is_v_str reads the runtime tag of allocator-owned objects itself; raw
+   * pointers require an explicit conversion at a typed FFI/string edge.
+   */
   return is_v_str(v) ? 1 : 0;
 }
 
@@ -11680,8 +11754,10 @@ int64_t rt_breakpoint(void) {
  */
 int rt_fc_list_range(uintptr_t data, uintptr_t *start, uintptr_t *end,
                      int check_registry) {
-  /* A list recorded since the last collection is still registered: only the
-   * collector releases lists. Older records are checked. */
+  /*
+   * A list recorded since the last collection is still registered: only the
+   * collector releases lists. Older records are checked.
+   */
   if (check_registry && !rt_tbuf_registered_handle(data))
     return 0;
   const int64_t *hdr = (const int64_t *)(data - RT_NATIVE_TBUF_HEADER);
@@ -11748,7 +11824,9 @@ void rt_fc_dict_free(uintptr_t payload) {
   rt_fc_block_free(dict, sizeof(*dict));
 }
 
-/* Runtime tables that index objects by address; they are not references. */
+/*
+ * Runtime tables that index objects by address; they are not references.
+ */
 size_t rt_fc_core_excludes(uintptr_t (*out)[2], size_t cap) {
   size_t n = 0;
   if (n < cap) {
@@ -11799,7 +11877,9 @@ uintptr_t rt_fc_list_forward_target(uintptr_t data) {
   return 0;
 }
 
-/* Small strings: one fixed slot each in the calling thread's arena. */
+/*
+ * Small strings: one fixed slot each in the calling thread's arena.
+ */
 int rt_fc_sso_range(uintptr_t bytes, uintptr_t *start, uintptr_t *end) {
   const rt_sso_slot_t *slot =
       (const rt_sso_slot_t *)(bytes - offsetof(rt_sso_slot_t, bytes));
@@ -11815,7 +11895,9 @@ void rt_fc_sso_free(uintptr_t bytes) {
       (rt_sso_slot_t *)(bytes - offsetof(rt_sso_slot_t, bytes));
   if (slot->fake_magic != NY_SSO_STRING_MAGIC || slot->tag != TAG_STR)
     return;
-  /* Drop the intern and hash-cache entries while the bytes are still there. */
+  /*
+   * Drop the intern and hash-cache entries while the bytes are still there.
+   */
   rt_str_forget_pointer((int64_t)bytes);
   memset(slot, 0, sizeof(*slot));
   slot->fake_size = ~(uint64_t)(uintptr_t)g_sso_free;

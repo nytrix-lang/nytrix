@@ -1259,9 +1259,11 @@ static void rt_tty_atexit_restore(void);
 int64_t rt_exit(int64_t code) {
   RT_UNTAG_INT(code);
   rt_print_flush();
-  /* _exit skips atexit handlers, so a program that calls exit() while its
+  /*
+   * _exit skips atexit handlers, so a program that calls exit() while its
    * terminal is raw would leave it raw, on the alternate screen, with no
-   * cursor. */
+   * cursor.
+   */
   rt_tty_atexit_restore();
 #ifdef _WIN32
   ExitProcess((unsigned int)code);

@@ -149,6 +149,12 @@ static bool c_abi_field_profile(const c_agg_field_t *field, unsigned depth,
            ? field->size != 4 || field->offset % 4 != 0
        : field->kind == C_AGG_FIELD_F32
            ? field->size != 4 || field->offset % 4 != 0
+       : field->kind == C_AGG_FIELD_C64
+           ? field->size != 8 || field->offset % 4 != 0
+       : field->kind == C_AGG_FIELD_C128
+           ? field->size != 16 || field->offset % 8 != 0
+       : field->kind == C_AGG_FIELD_C_LDOUBLE
+           ? field->size != 32 || field->offset % 16 != 0
        : field->kind == C_AGG_FIELD_AGG
            ? !field->agg || !field->agg->complete || field->agg->align == 0 ||
                  field->size != field->agg->size ||
@@ -171,9 +177,21 @@ static bool c_abi_field_profile(const c_agg_field_t *field, unsigned depth,
     return true;
   case C_AGG_FIELD_F32:
   case C_AGG_FIELD_F64:
+  case C_AGG_FIELD_C64:
     classes[0] = NYIR_ARG_CLASS_SSE;
     *classes_len = 1;
     return true;
+  case C_AGG_FIELD_C128:
+    classes[0] = NYIR_ARG_CLASS_SSE;
+    classes[1] = NYIR_ARG_CLASS_SSE;
+    *classes_len = 2;
+    return true;
+  case C_AGG_FIELD_C_LDOUBLE:
+    /*
+     * 32 bytes always makes the enclosing aggregate MEMORY, so the per-field
+     * profile is never consulted for this kind.
+     */
+    return false;
   case C_AGG_FIELD_AGG: {
     uint32_t packed = 0;
     if (!nyc_sysv_classify_aggregate(field->agg, depth + 1, &packed))

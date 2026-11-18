@@ -46,8 +46,10 @@ typedef struct {
 typedef struct {
   erase_fn_t fns[ERASE_MAX_FNS];
   size_t fn_count;
-  /* Identifiers in an allowed position: a direct callee, or an argument in
-   * an erased slot. Rebuilt on every checking round. */
+  /*
+   * Identifiers in an allowed position: a direct callee, or an argument in
+   * an erased slot. Rebuilt on every checking round.
+   */
   const expr_t **allowed;
   size_t allowed_len, allowed_cap;
   erase_fn_t *current[64];
@@ -56,10 +58,14 @@ typedef struct {
   bool rewrite;
   bool changed;
   arena_t *arena;
-  /* Other files cannot name main-file functions; their identifiers are
-   * unrelated locals. */
+  /*
+   * Other files cannot name main-file functions; their identifiers are
+   * unrelated locals.
+   */
   const char *main_file;
-  /* Witnesses to hoist before the statement being rewritten. */
+  /*
+   * Witnesses to hoist before the statement being rewritten.
+   */
   expr_t **hoist;
   size_t hoist_len, hoist_cap;
 } erase_ctx_t;
@@ -127,8 +133,10 @@ static bool erase_has_call_pre(ny_visitor_t *v, expr_t *e) {
   return true;
 }
 
-/* A `prove(...)` witness whose condition calls nothing: hoisting it cannot
- * move a call to an erased function out of the rewrite. */
+/*
+ * A `prove(...)` witness whose condition calls nothing: hoisting it cannot
+ * move a call to an erased function out of the rewrite.
+ */
 static bool erase_prove_is_simple(const expr_t *e) {
   if (!erase_is_prove_call(e))
     return false;
@@ -179,7 +187,9 @@ static void erase_call(erase_ctx_t *c, expr_t *e) {
     }
     if (erase_prove_is_simple(arg) && c->unsafe == 0)
       continue;
-    /* Anything else might compute: keep this slot. */
+    /*
+     * Anything else might compute: keep this slot.
+     */
     f->erase[i] = false;
     c->changed = true;
   }
@@ -294,8 +304,10 @@ static bool erase_stmt_pre(ny_visitor_t *v, stmt_t *s) {
         c->current[c->current_depth]->fn != s)
       c->current[c->current_depth] = NULL;
     c->current_depth++;
-    /* Signature contracts are not rewritten; their expressions are
-     * ordinary uses. */
+    /*
+     * Signature contracts are not rewritten; their expressions are
+     * ordinary uses.
+     */
     c->unsafe++;
     break;
   case NY_S_MATCH:
@@ -343,7 +355,9 @@ static void erase_list(erase_ctx_t *c, ny_stmt_list *list) {
     stmt_t *s = list->data[i];
     size_t mark = c->hoist_len;
     if (s && s->kind == NY_S_FUNC) {
-      /* A function body opens a new hoisting scope at its block. */
+      /*
+       * A function body opens a new hoisting scope at its block.
+       */
       int saved = c->unsafe;
       c->unsafe = 0;
       ny_visit_stmt(&v, s);
@@ -415,8 +429,10 @@ size_t ny_erase_proof_params(program_t *prog, arena_t *arena,
     for (size_t k = 0; k < s->as.fn.params.len; ++k)
       f->erase[k] = erase_is_proof_type(s->as.fn.params.data[k].type);
   }
-  /* Any function sharing a name with a candidate anywhere else (modules,
-   * nested definitions) makes calls ambiguous: keep it whole. */
+  /*
+   * Any function sharing a name with a candidate anywhere else (modules,
+   * nested definitions) makes calls ambiguous: keep it whole.
+   */
   size_t erased = 0;
   if (c->fn_count) {
     for (int round = 0; round < 64; ++round) {

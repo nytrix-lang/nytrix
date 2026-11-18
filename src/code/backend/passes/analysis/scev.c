@@ -18,8 +18,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* `lo <= hi` (or `lo < hi` when `strict`) established on every path to a
- * query point. */
+/*
+ * `lo <= hi` (or `lo < hi` when `strict`) established on every path to a
+ * query point.
+ */
 typedef struct {
   int lo;
   int hi;
@@ -219,15 +221,19 @@ static void compute_range_bounds(const nyr_func_t *f,
     lr_ok = scev_call_nonnegative_range(f, defs, l->limit_value, &lr);
   if (!ir_ok || !lr_ok)
     return;
-  /* A call result is only known non-negative: its INT64_MAX end gives no
+  /*
+   * A call result is only known non-negative: its INT64_MAX end gives no
    * usable interval, and recording [0, INT64_MAX) bounds would displace a
    * tighter fact a consumer has elsewhere (a tbuf length set to a constant
-   * before the loop). Such a range still serves the entry test below. */
+   * before the loop). Such a range still serves the entry test below.
+   */
   if ((ir.has_max && ir.max == INT64_MAX) || (lr.has_max && lr.max == INT64_MAX))
     return;
   __int128 body_lo, body_hi, exit_edge, iv_lo, iv_hi, span;
   if (up) {
-    /* `lr.max - 1` must stay representable before it is used. */
+    /*
+     * `lr.max - 1` must stay representable before it is used.
+     */
     if (lr.max <= INT64_MIN)
       return;
     body_lo = ir.min;
@@ -260,7 +266,9 @@ static void compute_range_bounds(const nyr_func_t *f,
     l->iv_min = (int64_t)iv_lo;
     l->iv_max = (int64_t)iv_hi;
   }
-  /* The same interval bounds the iteration count from above. */
+  /*
+   * The same interval bounds the iteration count from above.
+   */
   __int128 mag = up ? (__int128)l->step : -(__int128)l->step;
   if (span > 0) {
     __int128 bound = (span + mag - 1) / mag;
@@ -284,11 +292,13 @@ static uint64_t scev_gcd_u64(uint64_t a, uint64_t b) {
   return a;
 }
 
-/* The value's definition is outside the natural loop and dominates its
+/*
+ * The value's definition is outside the natural loop and dominates its
  * header, so the value is loop invariant. A local load defined inside the loop
  * is also accepted when the slot is never stored to, its address is never
  * taken, and no instruction in the loop body may write memory or have unknown
- * side effects, so every iteration observes the same value. */
+ * side effects, so every iteration observes the same value.
+ */
 static bool scev_value_invariant_in_loop(const nyr_func_t *f,
                                          const nyr_cfg_t *cfg,
                                          const bool *in_loop, const int *defs,
@@ -1285,7 +1295,6 @@ static bool scev_tbuf_payload(const nyr_func_t *f, const int *defs, int value,
   return ok;
 }
 
-
 static nyr_cmp_t scev_cmp_invert(nyr_cmp_t cmp) {
   switch (cmp) {
   case NYIR_CMP_LT:
@@ -1304,7 +1313,9 @@ static nyr_cmp_t scev_cmp_invert(nyr_cmp_t cmp) {
   return NYIR_CMP_NE;
 }
 
-/* Append the ordering facts implied by one comparison predicate. */
+/*
+ * Append the ordering facts implied by one comparison predicate.
+ */
 static bool scev_push_order_facts(int x, int y, nyr_cmp_t pred,
                                   scev_le_fact_t *facts, size_t *count,
                                   size_t cap) {
@@ -1356,7 +1367,9 @@ static bool scev_collect_le_facts(const nyr_func_t *f, const int *defs,
   if (at_block >= cfg->block_count)
     return false;
   for (size_t b = 0; b < cfg->block_count; ++b) {
-    /* The guard must be on the way to the query, not the query's own block. */
+    /*
+     * The guard must be on the way to the query, not the query's own block.
+     */
     if (b == at_block || !nyr_cfg_dominates(cfg, b, at_block))
       continue;
     size_t end = nyr_block_last_non_nop(f, cfg, b);
@@ -1424,9 +1437,11 @@ static bool scev_collect_le_facts(const nyr_func_t *f, const int *defs,
   return *count > 0;
 }
 
-/* Transitive closure of the collected `<=` facts, bounded by the fact count. */
-/* Transitive closure that reports whether some `from <= to` chain contains a
- * strict edge, i.e. proves `from < to`. */
+/*
+ * Transitive closure of the collected `<=` facts, bounded by the fact count.
+ * Transitive closure that reports whether some `from <= to` chain contains a
+ * strict edge, i.e. proves `from < to`.
+ */
 static bool scev_lt_reaches(int from, int to, const scev_le_fact_t *facts,
                             size_t count) {
   if (from == to || !facts || !count)
@@ -1563,7 +1578,9 @@ static bool scev_guard_proves_offset(const nyr_func_t *f,
                                           loop->limit_value, 0);
   bool ordered = length_root == limit_root;
   if (!ordered) {
-    /* Predicated guard: the limit is at most the check's length here. */
+    /*
+     * Predicated guard: the limit is at most the check's length here.
+     */
     scev_le_fact_t facts[64];
     size_t fact_count = 0;
     ordered = scev_collect_le_facts(f, defs, cfg, at, facts, &fact_count, 64) &&
@@ -1778,7 +1795,9 @@ bool nyr_scev_tbuf_bounds_check_safe_cfg(const nyr_func_t *f,
   free(active);
   if (!payload)
     return false;
-  /* Constant proof: the offset's proven interval stays inside the length. */
+  /*
+   * Constant proof: the offset's proven interval stays inside the length.
+   */
   nyr_scev_affine_t offset = {0};
   if (nyr_scev_affine_at_cfg(f, info, defs, cfg, check->b, at, &offset) &&
       offset.range.has_min && offset.range.has_max && offset.range.min >= 0) {
@@ -1795,10 +1814,14 @@ bool nyr_scev_tbuf_bounds_check_safe_cfg(const nyr_func_t *f,
     if (have_length && length_min > 0 && offset.range.max < length_min)
       return true;
   }
-  /* Symbolic proof from the loop's own exit test, inside the body. */
+  /*
+   * Symbolic proof from the loop's own exit test, inside the body.
+   */
   if (check->c >= 0 && scev_guard_proves_offset(f, info, defs, cfg, at, check))
     return true;
-  /* Symbolic proof from the value the exit block observes. */
+  /*
+   * Symbolic proof from the value the exit block observes.
+   */
   return scev_exit_proves_check(f, info, defs, cfg, at, check);
 }
 

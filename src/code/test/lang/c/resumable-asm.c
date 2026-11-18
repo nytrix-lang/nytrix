@@ -1,3 +1,6 @@
+/*
+ * C front-end regression test: resumable asm.
+ */
 extern volatile int trap_visits;
 
 int resume_plain_trap(int value) {

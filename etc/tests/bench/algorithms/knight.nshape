@@ -27,6 +27,8 @@ use core
 use core.os.time
 ;; 400 repetitions keep the workload in the multi-millisecond range so the
 ;; measurement is stable (a single call takes about 20 microseconds). The start
+;; column depends on the running result so the pure call cannot be hoisted. The start
+;; column depends on the running result so the pure call cannot be hoisted. The start
 ;; column depends on the running result so the pure call cannot be hoisted.
 def int t0 = ticks()
 mut int result = 0

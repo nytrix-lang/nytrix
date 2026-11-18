@@ -1,3 +1,6 @@
+/*
+ * Host-side C counterpart for the weak callback test.
+ */
 #ifndef NYC_CALLBACK_OVERRIDE
 #define NYC_CALLBACK_OVERRIDE 0
 #endif

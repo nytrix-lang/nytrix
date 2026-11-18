@@ -505,6 +505,14 @@ if (NYTRIX_USE_ASAN)
   endif()
 endif()
 
+# Host-tool hardening: full RELRO (GOT read-only after load). Programs that
+# Nytrix compiles are linked by its own linker and are unaffected.
+option(NYTRIX_HARDEN "Full RELRO and _FORTIFY_SOURCE for the compiler tools" ON)
+if (NYTRIX_HARDEN AND UNIX AND NOT APPLE AND NOT NYTRIX_USE_ASAN AND
+    CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
+  add_link_options(-Wl,-z,relro,-z,now)
+endif()
+
 if (NYTRIX_USE_GPROF)
   if (NOT MSVC)
     add_compile_options(-pg)
@@ -1534,6 +1542,12 @@ if (NYTRIX_USE_LLVM)
     if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
       target_compile_options(nytrix_compiler PRIVATE -fno-semantic-interposition -fno-plt)
     endif()
+    # Checked libc string/memory calls in the compiler. The runtime linked
+    # into user programs is excluded: it is benchmark-critical.
+    if (NYTRIX_HARDEN AND NOT NYTRIX_USE_ASAN AND
+        NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
+      target_compile_options(nytrix_compiler PRIVATE -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=2)
+    endif()
   elseif (MSVC)
     target_compile_options(nytrix_compiler PRIVATE ${NYTRIX_WARNING_FLAGS})
   endif()
@@ -2146,7 +2160,13 @@ function(nytrix_add_tool tool_target tool_name)
   elseif (CMAKE_C_COMPILER_ID MATCHES "Clang|GNU")
     target_compile_options(${tool_target} PRIVATE -Wall -Wextra -Wunused -Wmissing-prototypes)
     if (NYTRIX_STRICT_WARNINGS)
-      target_compile_options(${tool_target} PRIVATE -Wpedantic)
+      # Tool help texts are single long literals and src/base/time.h wraps the
+      # system header with include_next; both are deliberate.
+      target_compile_options(${tool_target} PRIVATE -Wpedantic
+        -Wno-overlength-strings)
+      if (CMAKE_C_COMPILER_ID MATCHES "Clang")
+        target_compile_options(${tool_target} PRIVATE -Wno-gnu-include-next)
+      endif()
     endif()
   endif()
   if (NYTRIX_TOOLS_O3 AND NOT MSVC)
@@ -2494,18 +2514,18 @@ else()
     # this process. glibc binds STB_GNU_UNIQUE symbols by name across versions,
     # so the other LLVM ran this one's template statics and crashed. ny-full
     # loads a copy of its LLVM with those symbols rebound as weak (versioned
-    # lookup then keeps the two apart); see src/cmd/tools/elfuniq/main.c.
+    # lookup then keeps the two apart); see src/cmd/tools/elf/main.c.
     if (UNIX AND NOT APPLE AND NYTRIX_LLVM_LIBDIR)
       file(GLOB _nytrix_llvm_shared "${NYTRIX_LLVM_LIBDIR}/libLLVM.so.*")
       list(SORT _nytrix_llvm_shared)
       if (_nytrix_llvm_shared)
         list(GET _nytrix_llvm_shared 0 _nytrix_llvm_shared_lib)
         set(_nytrix_llvm_local "${CMAKE_BINARY_DIR}/llvm-local")
-        add_executable(ny-elf-unique "${NYTRIX_ROOT}/src/cmd/tools/elfuniq/main.c")
-        add_dependencies(ny-full ny-elf-unique)
+        add_executable(ny-elf "${NYTRIX_ROOT}/src/cmd/tools/elf/main.c")
+        add_dependencies(ny-full ny-elf)
         add_custom_command(TARGET ny-full POST_BUILD
           COMMAND ${CMAKE_COMMAND} -E make_directory "${_nytrix_llvm_local}"
-          COMMAND $<TARGET_FILE:ny-elf-unique> "${_nytrix_llvm_shared_lib}" "${_nytrix_llvm_local}"
+          COMMAND $<TARGET_FILE:ny-elf> "${_nytrix_llvm_shared_lib}" "${_nytrix_llvm_local}"
           VERBATIM)
         get_target_property(_nytrix_full_rpath ny-full BUILD_RPATH)
         if (_nytrix_full_rpath)

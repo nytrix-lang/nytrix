@@ -36,13 +36,16 @@ fn line_insert(str line, int col, str text) str {
    ;; Clamp into a fresh local: reassigning the `int` parameter from a
    ;; `number`-typed `min`/`max` result halves it (see docs/learn/quirks.md, open representation defects), which
    ;; inserted text at the wrong column.
-   def at = int(min(max(col, 0), line.len))
+   def at = int(min(max(col, 0), str.utf8_len(line)))
    str.str_slice(line, 0, at) + text + str.str_slice(line, at, line.len)
 }
 
 ;; Returns the result of the `line_delete_before` operation.
 fn line_delete_before(str line, int col) str {
-   col <= 0 ? line : str.str_slice(line, 0, min(col - 1, line.len)) + str.str_slice(line, min(col, line.len), line.len)
+   "Deletes the whole character before byte column `col`."
+   if col <= 0 { return line }
+   def int end = char_snap(line, col)
+   str.str_slice(line, 0, char_prev(line, end)) + str.str_slice(line, end, line.len)
 }
 
 fn insert_text(dict st, str text) dict {
@@ -56,7 +59,7 @@ fn insert_text(dict st, str text) dict {
    def parts = split_lines(text)
    if parts.len <= 1 {
       lines[row] = line_insert(line, col, text)
-      st["cursor_col"] = __box_i64(col + text.len)
+      st["cursor_col"] = __box_i64(col + str.utf8_len(text))
       return set_lines(st, lines)
    }
    def before = str.str_slice(line, 0, col)
@@ -72,7 +75,7 @@ fn insert_text(dict st, str text) dict {
    out = out.append(tail + after)
    out = _append_lines(out, lines, row + 1, lines.len)
    st["cursor_line"] = __box_i64(row + parts.len - 1)
-   st["cursor_col"] = __box_i64(tail.len)
+   st["cursor_col"] = __box_i64(str.utf8_len(tail))
    set_lines(st, out)
 }
 
@@ -99,8 +102,10 @@ fn backspace(dict st) dict {
    def row = int(st.get("cursor_line", 0))
    def col = int(st.get("cursor_col", 0))
    if col > 0 {
-      lines[row] = line_delete_before(to_str(lines.get(row, "")), col)
-      st["cursor_col"] = __box_i64(col - 1)
+      def line = _line_at(lines, row)
+      def int at = char_prev(line, col)
+      lines[row] = str.str_slice(line, 0, at) + str.str_slice(line, col, line.len)
+      st["cursor_col"] = __box_i64(at)
       return set_lines(st, lines)
    }
    if row <= 0 { return st }
@@ -110,7 +115,7 @@ fn backspace(dict st) dict {
    out = out.append(prev + cur)
    out = _append_lines(out, lines, row + 1, lines.len)
    st["cursor_line"] = __box_i64(row - 1)
-   st["cursor_col"] = __box_i64(prev.len)
+   st["cursor_col"] = __box_i64(str.utf8_len(prev))
    set_lines(st, out)
 }
 
@@ -121,8 +126,8 @@ fn delete_char(dict st) dict {
    def row = int(st.get("cursor_line", 0))
    def col = int(st.get("cursor_col", 0))
    def line = _line_at(lines, row)
-   if col < line.len {
-      lines[row] = str.str_slice(line, 0, col) + str.str_slice(line, col + 1, line.len)
+   if col < str.utf8_len(line) {
+      lines[row] = str.str_slice(line, 0, col) + str.str_slice(line, char_next(line, col), line.len)
       return set_lines(st, lines)
    }
    if row + 1 >= lines.len { return st }

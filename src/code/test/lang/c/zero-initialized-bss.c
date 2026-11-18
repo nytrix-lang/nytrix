@@ -1,4 +1,6 @@
-/* Exercise zero-fill storage, explicit placement and relocations. */
+/*
+ * Exercise zero-fill storage, explicit placement and relocations.
+ */
 volatile unsigned char zero_bytes[65536];
 volatile unsigned long zero_words[64] = {0};
 volatile int explicit_zero __attribute__((section(".keepzero"))) = 0;

@@ -154,10 +154,21 @@ static inline void *ny_realloc_array(void *ptr, size_t count, size_t size) {
 
 typedef uint64_t ny_tick_t;
 
+/* Bumped by every environment change made through these wrappers; caches
+ * of environment-derived flags (ny_trace_enabled) compare against it. Weak:
+ * every binary that includes this header shares one counter without needing
+ * a defining object. */
+#if !defined(_WIN32)
+__attribute__((weak)) unsigned long ny_env_generation;
+#else
+static unsigned long ny_env_generation;
+#endif
+
 static inline int ny_setenv(const char *name, const char *value,
                             int overwrite) {
   if (!name || !*name)
     return -1;
+  ny_env_generation++;
 #ifdef _WIN32
   if (!overwrite && getenv(name))
     return 0;
@@ -170,6 +181,7 @@ static inline int ny_setenv(const char *name, const char *value,
 static inline int ny_unsetenv(const char *name) {
   if (!name || !*name)
     return -1;
+  ny_env_generation++;
 #ifdef _WIN32
   return _putenv_s(name, "");
 #else

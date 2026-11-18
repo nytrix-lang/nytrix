@@ -205,6 +205,10 @@ static bool lower_store_u16_field(c_parser_t *p, int address, int value,
                                   c_type_t type, bool is_volatile);
 
 static int lower_local_load(c_parser_t *p, const c_local_t *local) {
+  if (c_type_is_complex(local->type)) {
+    fail(p, "complex values are not supported yet");
+    return -1;
+  }
   if (local->static_name.len) {
     int address = lower_static_local_address(p, local);
     if (address < 0 || local->array_count || local->type == C_AGG)
@@ -558,6 +562,72 @@ static bool lower_store_f32_field(c_parser_t *p, int address, int value,
       NULL);
 }
 
+static c_agg_type_t lower_complex_value_f32 = {
+    .scope_id = SIZE_MAX,
+    .complete = true,
+    .size = 8,
+    .align = 4,
+    .field_count = 2,
+    .fields = {{.kind = C_AGG_FIELD_F32, .offset = 0, .size = 4, .align = 4},
+               {.kind = C_AGG_FIELD_F32, .offset = 4, .size = 4, .align = 4}}};
+static c_agg_type_t lower_complex_value_f64 = {
+    .scope_id = SIZE_MAX,
+    .complete = true,
+    .size = 16,
+    .align = 8,
+    .field_count = 2,
+    .fields = {{.kind = C_AGG_FIELD_F64, .offset = 0, .size = 8, .align = 8},
+               {.kind = C_AGG_FIELD_F64, .offset = 8, .size = 8, .align = 8}}};
+
+/*
+ * Promote a real operand of a mixed arithmetic expression to the complex shape
+ * the other operand requires: real lane gets the value, imaginary lane zero.
+ */
+static c_value_t lower_scalar_to_complex(c_parser_t *p, c_value_t value,
+                                         bool single) {
+  size_t offset = 0;
+  if (!agg_area_alloc(p, single ? 8 : 16, &offset))
+    return (c_value_t){-1, C_BAD, NULL};
+  int base = p->agg_base;
+  int real = value.value;
+  if (single && value.type == C_F64)
+    real = emit_value(p, (nyr_inst_t){.op = NYIR_F64_TO_F32,
+                                      .dst = -1,
+                                      .a = value.value,
+                                      .scalar_class = NYIR_SCALAR_F32});
+  else if (!single && value.type == C_F32)
+    real = emit_value(p, (nyr_inst_t){.op = NYIR_F32_TO_F64,
+                                      .dst = -1,
+                                      .a = value.value,
+                                      .scalar_class = NYIR_SCALAR_F64});
+  else if (c_type_is_integer(value.type))
+    real = emit_value(
+        p, (nyr_inst_t){.op = single ? NYIR_I64_TO_F32 : NYIR_I64_TO_F64,
+                        .dst = -1,
+                        .a = value.value,
+                        .scalar_class = single ? NYIR_SCALAR_F32
+                                               : NYIR_SCALAR_F64});
+  int zero = emit_value(
+      p, (nyr_inst_t){.op = single ? NYIR_CONST_F32 : NYIR_CONST_F64,
+                      .dst = -1,
+                      .imm = 0,
+                      .scalar_class = single ? NYIR_SCALAR_F32
+                                             : NYIR_SCALAR_F64});
+  int imag = lower_add_const(p, base, single ? 4 : 8);
+  if (real < 0 || zero < 0 || imag < 0)
+    return (c_value_t){-1, C_BAD, NULL};
+  bool stored =
+      single ? lower_store_f32_field(p, base, real, false) &&
+                   lower_store_f32_field(p, imag, zero, false)
+             : lower_store_field(p, base, real, true, false) &&
+                   lower_store_field(p, imag, zero, true, false);
+  if (!stored)
+    return (c_value_t){-1, C_BAD, NULL};
+  return (c_value_t){base, C_AGG,
+                     single ? &lower_complex_value_f32
+                            : &lower_complex_value_f64};
+}
+
 static int lower_load_i32_field(c_parser_t *p, int address, bool is_volatile) {
   int loaded = emit_value(
       p,
@@ -572,7 +642,8 @@ static int lower_load_i32_field(c_parser_t *p, int address, bool is_volatile) {
   return loaded < 0 ? -1 : normalize_i32(p, loaded);
 }
 
-static int lower_load_u8_field(c_parser_t *p, int address, bool is_volatile) {
+static int lower_load_u8_field_seg(c_parser_t *p, int address,
+                                   bool is_volatile, unsigned seg_flags) {
   return emit_value(
       p,
       (nyr_inst_t){.op = NYIR_LOAD_I64,
@@ -580,13 +651,17 @@ static int lower_load_u8_field(c_parser_t *p, int address, bool is_volatile) {
                    .a = address,
                    .effects = NYIR_EFFECT_READ_MEMORY | NYIR_EFFECT_MAY_TRAP |
                               (is_volatile ? NYIR_EFFECT_VOLATILE : 0),
-                   .flags = NYIR_INST_F_MEM_BYTE |
+                   .flags = NYIR_INST_F_MEM_BYTE | seg_flags |
                             (is_volatile ? NYIR_INST_F_MEM_VOLATILE : 0),
                    .scalar_class = NYIR_SCALAR_I64_RAW});
 }
 
-static int lower_load_u16_field(c_parser_t *p, int address, c_type_t type,
-                                bool is_volatile) {
+static int lower_load_u8_field(c_parser_t *p, int address, bool is_volatile) {
+  return lower_load_u8_field_seg(p, address, is_volatile, 0);
+}
+
+static int lower_load_u16_field_seg(c_parser_t *p, int address, c_type_t type,
+                                    bool is_volatile, unsigned seg_flags) {
   if (p->abi == NYC_ABI_I386) {
     int loaded = emit_value(
         p,
@@ -595,7 +670,7 @@ static int lower_load_u16_field(c_parser_t *p, int address, c_type_t type,
                      .a = address,
                      .effects = NYIR_EFFECT_READ_MEMORY | NYIR_EFFECT_MAY_TRAP |
                                 (is_volatile ? NYIR_EFFECT_VOLATILE : 0),
-                     .flags = NYIR_INST_F_MEM_U16 |
+                     .flags = NYIR_INST_F_MEM_U16 | seg_flags |
                               (is_volatile ? NYIR_INST_F_MEM_VOLATILE : 0),
                      .scalar_class = NYIR_SCALAR_I64_RAW});
     return loaded < 0      ? -1
@@ -603,9 +678,11 @@ static int lower_load_u16_field(c_parser_t *p, int address, c_type_t type,
                            : normalize_u16(p, loaded);
   }
   int high_address = lower_add_const(p, address, 1);
-  int low = lower_load_u8_field(p, address, is_volatile);
-  int high =
-      high_address < 0 ? -1 : lower_load_u8_field(p, high_address, is_volatile);
+  int low = lower_load_u8_field_seg(p, address, is_volatile, seg_flags);
+  int high = high_address < 0
+                 ? -1
+                 : lower_load_u8_field_seg(p, high_address, is_volatile,
+                                           seg_flags);
   int shift = high < 0 ? -1 : emit_i64_constant(p, 8);
   int upper = shift < 0 ? -1 : emit_i64_binary(p, NYIR_SHL_I64, high, shift);
   int joined =
@@ -613,6 +690,11 @@ static int lower_load_u16_field(c_parser_t *p, int address, c_type_t type,
   return joined < 0      ? -1
          : type == C_I16 ? normalize_i16(p, joined)
                          : normalize_u16(p, joined);
+}
+
+static int lower_load_u16_field(c_parser_t *p, int address, c_type_t type,
+                                bool is_volatile) {
+  return lower_load_u16_field_seg(p, address, type, is_volatile, 0);
 }
 
 static int lower_load_atomic_u16(c_parser_t *p, int address) {
@@ -642,8 +724,8 @@ static bool lower_store_i32_field(c_parser_t *p, int address, int value,
       NULL);
 }
 
-static bool lower_store_u8_field(c_parser_t *p, int address, int value,
-                                 bool is_volatile) {
+static bool lower_store_u8_field_seg(c_parser_t *p, int address, int value,
+                                     bool is_volatile, unsigned seg_flags) {
   value = normalize_integer(p, C_U8, value);
   if (value < 0)
     return false;
@@ -655,14 +737,20 @@ static bool lower_store_u8_field(c_parser_t *p, int address, int value,
                    .c = value,
                    .effects = NYIR_EFFECT_WRITE_MEMORY | NYIR_EFFECT_MAY_TRAP |
                               (is_volatile ? NYIR_EFFECT_VOLATILE : 0),
-                   .flags = NYIR_INST_F_MEM_BYTE |
+                   .flags = NYIR_INST_F_MEM_BYTE | seg_flags |
                             (is_volatile ? NYIR_INST_F_MEM_VOLATILE : 0),
                    .scalar_class = NYIR_SCALAR_I64_RAW},
       NULL);
 }
 
-static bool lower_store_u16_field(c_parser_t *p, int address, int value,
-                                  c_type_t type, bool is_volatile) {
+static bool lower_store_u8_field(c_parser_t *p, int address, int value,
+                                 bool is_volatile) {
+  return lower_store_u8_field_seg(p, address, value, is_volatile, 0);
+}
+
+static bool lower_store_u16_field_seg(c_parser_t *p, int address, int value,
+                                      c_type_t type, bool is_volatile,
+                                      unsigned seg_flags) {
   value = normalize_u16(p, value);
   if (type == C_I16)
     value = normalize_i16(p, value);
@@ -677,7 +765,7 @@ static bool lower_store_u16_field(c_parser_t *p, int address, int value,
                     .c = value,
                     .effects = NYIR_EFFECT_WRITE_MEMORY | NYIR_EFFECT_MAY_TRAP |
                                (is_volatile ? NYIR_EFFECT_VOLATILE : 0),
-                    .flags = NYIR_INST_F_MEM_U16,
+                    .flags = NYIR_INST_F_MEM_U16 | seg_flags,
                     .scalar_class = NYIR_SCALAR_I64_RAW},
                 NULL);
   }
@@ -693,8 +781,14 @@ static bool lower_store_u16_field(c_parser_t *p, int address, int value,
                                        .scalar_class = NYIR_SCALAR_I64_RAW});
   if (value < 0 || high < 0 || high_address < 0)
     return false;
-  return lower_store_u8_field(p, address, value, is_volatile) &&
-         lower_store_u8_field(p, high_address, high, is_volatile);
+  return lower_store_u8_field_seg(p, address, value, is_volatile, seg_flags) &&
+         lower_store_u8_field_seg(p, high_address, high, is_volatile,
+                                  seg_flags);
+}
+
+static bool lower_store_u16_field(c_parser_t *p, int address, int value,
+                                  c_type_t type, bool is_volatile) {
+  return lower_store_u16_field_seg(p, address, value, type, is_volatile, 0);
 }
 
 static int lower_bitfield_binary(c_parser_t *p, nyr_op_t op, int value,

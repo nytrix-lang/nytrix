@@ -1,5 +1,7 @@
-/* Discarding an unused C read must preserve volatile reads, live reads and
- * the trapping semantics of the native language. Speculation facts survive. */
+/*
+ * Discarding an unused C read must preserve volatile reads, live reads and
+ * the trapping semantics of the native language. Speculation facts survive.
+ */
 #include "nyr/nyr.h"
 #include "opt.h"
 

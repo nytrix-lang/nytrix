@@ -1,3 +1,6 @@
+/*
+ * C front-end regression test: asm segment memory host32.
+ */
 typedef unsigned int u32;
 typedef unsigned short u16;
 

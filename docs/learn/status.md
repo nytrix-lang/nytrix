@@ -43,6 +43,7 @@ interactive execution, and [Browser](browser.md) for browser capabilities.
 | Area | Current boundary | Reference |
 | --- | --- | --- |
 | Memory safety checks | `--heap=safe` and `--mode=safe` enable guard pages and quarantine for user allocations. LLVM AddressSanitizer, MemorySanitizer, and ThreadSanitizer instrument emitted code and its runtime. UBSan checks emitted signed 64-bit arithmetic and null accesses; ownership analysis stays opt-in and bounded. | [Safety](safety.md), [Ownership](ownership.md) |
+| Memory safety checks | `--heap=safe` traps use-after-free, out-of-bounds, and double free on the program's own `malloc`/`zalloc`/raw-heap blocks (guard pages, quarantine) and reports leaks. There is no static use-after-free analysis and no user-program ASan/UBSan/MSan/TSan lane yet; ownership analysis stays opt-in and local. | [Safety](safety.md), [Ownership](ownership.md) |
 | Types, traits, and overloads | Shared semantic checks precede backend selection; lowering still has target- and shape-specific limits. | [Types](../spec/types.md), [Traits](../spec/traits.md) |
 | Refinements and proofs | A bounded calculus; false and unknown proof obligations are not evidence. | [Types](../spec/types.md#proof-and-refinement-types), [Proofs](proofs.md) |
 | Preconditions and termination | `requires`, `decreases`, and `@total` have distinct checks; a measure alone is not a termination proof. | [Function contracts](../spec/functions.md#preconditions-and-termination-measures) |
@@ -77,7 +78,7 @@ slots, panic unwinding, null callbacks, and registration-time snapshots across
 native JIT, native-only, LLVM MCJIT/ORC, and the diagnostic VM.
 
 These are historical observations, not current route limitations. See the
-[changelog](../CHANGELOG.md#compiler-gates-and-optimization-evidence) for the
+[changelog](../CHANGELOG.md#compiler-and-backends) for the
 defer fix and its focused test command.
 
 Next:

@@ -51,6 +51,7 @@ NY_BUILTIN_PURE("core.list.get")
 NY_BUILTIN_PURE("core.list.len")
 NY_BUILTIN_EFFECT("list", NY_FX_ALLOC)
 NY_BUILTIN_PURE("core.math.float.int")
+NY_BUILTIN_PURE("core.pow")
 NY_BUILTIN_PURE("core.dict.get")
 /*
  * CPS constructors create closures now and carry callback effects as latent

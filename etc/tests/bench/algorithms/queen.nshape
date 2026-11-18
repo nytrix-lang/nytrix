@@ -23,6 +23,8 @@ use core.os.time
 ;; 200 repetitions keep the workload in the multi-millisecond range so the
 ;; measurement is stable (one 8-queens search takes about 50 microseconds).
 ;; The pre-blocked column depends on the running result so the pure call cannot be hoisted.
+;; The pre-blocked column depends on the running result so the pure call cannot be hoisted.
+;; The pre-blocked column depends on the running result so the pure call cannot be hoisted.
 def int t0 = ticks()
 mut int result = 0
 mut int rep = 0

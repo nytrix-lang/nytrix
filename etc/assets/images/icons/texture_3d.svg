@@ -1,7 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
-  <title>Texture 3D</title>
-  <desc>Texture 3D icon.</desc>
-  <g transform="translate(2.0000 2.0000) scale(1.25000)">
-<g fill="#c6c6ca"><path d="M1 14a1 1 0 0 0 1 1h9.5a1 1 0 0 0 .707-.293l2.5-2.5A1 1 0 0 0 15 11.5V2a1 1 0 0 0-1-1H4.5a1 1 0 0 0-.707.293l-2.5 2.5A1 1 0 0 0 1 4.5zm1.25-9H11v7H2.25zm10 6.25v-6.5L14 3v6.5zm-1-7.5H3L4.75 2H13z"/><path fill-opacity=".2" d="M2.75 5.5h7.75v6H2.75"/></g>
-  </g>
-</svg>

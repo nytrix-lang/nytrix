@@ -126,7 +126,7 @@ fn _snd_decode(str filepath) any {
          if debug { print("RES: Sndfile opened " + filepath + " frames=" + to_str(frames) + " rate=" + to_str(rate) + " channels=" + to_str(channels)) }
          free(info_ptr)
          if frames <= 0 || channels <= 0 || channels > 32 ||
-            frames > 9223372036854775807 / channels / 2 {
+         frames > 9223372036854775807 / channels / 2 {
             ffi.any1(_snd_fn_close, sf)
             return 0
          }
@@ -196,7 +196,7 @@ fn _decode_sf(str filepath) any {
       if debug { print("RES: Sndfile opened " + filepath + " frames=" + to_str(frames) + " rate=" + to_str(rate) + " channels=" + to_str(channels)) }
       free(info_ptr)
       if frames <= 0 || channels <= 0 || channels > 32 ||
-         frames > 9223372036854775807 / channels / 2 {
+      frames > 9223372036854775807 / channels / 2 {
          ffi.any1(_snd_fn_close, sf)
          return 0
       }

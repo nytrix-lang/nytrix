@@ -1,7 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
-  <title>Zoom More</title>
-  <desc>Zoom More icon.</desc>
-  <g transform="translate(2.0000 2.0000) scale(1.25000)">
-<g stroke-linecap="round" stroke-linejoin="round" stroke-width="2"><circle cx="8" cy="8" r="8" fill-opacity=".4"/><path fill="#c6c6ca" d="M8 1a7 7 0 0 0 0 14A7 7 0 0 0 8 1zM7 4h2v3h3v2H9v3H7V9H4V7h3z"/></g>
-  </g>
-</svg>

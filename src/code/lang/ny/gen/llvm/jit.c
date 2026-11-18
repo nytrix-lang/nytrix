@@ -143,8 +143,12 @@ static uint8_t *ny_apple_jit_alloc_section(void *opaque, uintptr_t size,
   if (align & (align - 1u))
     align = 16u;
   size_t alloc_size = ny_jit_round_page((size_t)size + (size_t)align);
-  int flags = MAP_PRIVATE | MAP_ANON | MAP_JIT;
-  int prot = PROT_READ | PROT_WRITE | PROT_EXEC;
+  /*
+   * Only code needs MAP_JIT's RWX mapping. Data sections are ordinary RW
+   * pages, finalized to read-only or read-write and never executable.
+   */
+  int flags = MAP_PRIVATE | MAP_ANON | (code ? MAP_JIT : 0);
+  int prot = PROT_READ | PROT_WRITE | (code ? PROT_EXEC : 0);
   ny_apple_jit_write_protect(0);
   void *base = mmap(NULL, alloc_size, prot, flags, -1, 0);
   if (base == MAP_FAILED) {
@@ -196,7 +200,6 @@ static LLVMBool ny_apple_jit_finalize(void *opaque, char **err_msg) {
     } else if (!a->read_only) {
       prot |= PROT_WRITE;
     }
-    prot |= PROT_EXEC;
     if (mprotect(a->base, a->size, prot) != 0) {
       if (err_msg)
         *err_msg = LLVMCreateMessage(
@@ -882,19 +885,19 @@ void ny_jit_add_runtime_symbols(void) {
   if (registered)
     return;
   registered = true;
-#define RT_DEF(name, p, args, sig, doc)                                        \
-  do {                                                                         \
-    (void)(args);                                                              \
-    (void)(sig);                                                               \
-    (void)(doc);                                                               \
-    LLVMAddSymbol(name, (void *)(uintptr_t)p);                                 \
-    if (strcmp(name, #p) != 0)                                                 \
-      LLVMAddSymbol(#p, (void *)(uintptr_t)p);                                 \
+#define RT_DEF(name, p, args, sig, doc)        \
+  do {                                         \
+    (void)(args);                              \
+    (void)(sig);                               \
+    (void)(doc);                               \
+    LLVMAddSymbol(name, (void *)(uintptr_t)p); \
+    if (strcmp(name, #p) != 0)                 \
+      LLVMAddSymbol(#p, (void *)(uintptr_t)p); \
   } while (0);
-#define RT_GV(name, p, t, doc)                                                 \
-  do {                                                                         \
-    (void)(doc);                                                               \
-    LLVMAddSymbol(name, (void *)&p);                                           \
+#define RT_GV(name, p, t, doc)       \
+  do {                               \
+    (void)(doc);                     \
+    LLVMAddSymbol(name, (void *)&p); \
   } while (0);
 #include "code/backend/runtime/defs.h"
 #undef RT_DEF
@@ -1296,20 +1299,20 @@ void ny_jit_define_runtime_trampolines(LLVMModuleRef mod) {
   if (bytes_get && LLVMIsDeclaration(bytes_get))
     ny_jit_define_runtime_trampoline(mod, "ny_fn_core.bytes_get",
                                      (void *)(uintptr_t)ny_jit_core_bytes_get);
-#define RT_DEF(name, p, args, sig, doc)                                        \
-  do {                                                                         \
-    (void)(args);                                                              \
-    (void)(sig);                                                               \
-    (void)(doc);                                                               \
-    ny_jit_define_runtime_trampoline(mod, name, (void *)(uintptr_t)p);         \
-    if (strcmp(name, #p) != 0)                                                 \
-      ny_jit_define_runtime_trampoline(mod, #p, (void *)(uintptr_t)p);         \
+#define RT_DEF(name, p, args, sig, doc)                                \
+  do {                                                                 \
+    (void)(args);                                                      \
+    (void)(sig);                                                       \
+    (void)(doc);                                                       \
+    ny_jit_define_runtime_trampoline(mod, name, (void *)(uintptr_t)p); \
+    if (strcmp(name, #p) != 0)                                         \
+      ny_jit_define_runtime_trampoline(mod, #p, (void *)(uintptr_t)p); \
   } while (0);
-#define RT_GV(name, p, t, doc)                                                 \
-  do {                                                                         \
-    (void)(name);                                                              \
-    (void)(p);                                                                 \
-    (void)(doc);                                                               \
+#define RT_GV(name, p, t, doc) \
+  do {                         \
+    (void)(name);              \
+    (void)(p);                 \
+    (void)(doc);               \
   } while (0);
 #include "code/backend/runtime/defs.h"
 #undef RT_DEF
@@ -1925,42 +1928,42 @@ void register_jit_symbols(LLVMExecutionEngineRef ee, LLVMModuleRef mod,
     register_jit_sigs(ee, mod, cg);
     goto apply_runtime_attrs;
   }
-#define MAP_FULL(name, fn_ptr, args)                                           \
-  do {                                                                         \
-    LLVMValueRef val = LLVMGetNamedFunction(mod, name);                        \
-    if (!val && auto_declare_runtime) {                                        \
-      LLVMTypeRef param_types[16];                                             \
-      int n_params = (args < 0) ? 0 : (args > 16 ? 16 : args);                 \
-      for (int i = 0; i < n_params; i++)                                       \
-        param_types[i] = cg->type_i64;                                         \
-      LLVMTypeRef ftype =                                                      \
-          LLVMFunctionType(cg->type_i64, param_types, n_params, args < 0);     \
-      val = LLVMAddFunction(mod, name, ftype);                                 \
-      if (verbose_enabled >= 4)                                                \
-        NY_LOG_V3("JIT: auto-declared runtime symbol %s\n", name);             \
-    }                                                                          \
-    if (val) {                                                                 \
-      LLVMAddGlobalMapping(ee, val, (void *)(uintptr_t)fn_ptr);                \
-      if (verbose_enabled >= 4)                                                \
-        NY_LOG_V3("JIT: mapped runtime symbol %s\n", name);                    \
-    }                                                                          \
+#define MAP_FULL(name, fn_ptr, args)                                       \
+  do {                                                                     \
+    LLVMValueRef val = LLVMGetNamedFunction(mod, name);                    \
+    if (!val && auto_declare_runtime) {                                    \
+      LLVMTypeRef param_types[16];                                         \
+      int n_params = (args < 0) ? 0 : (args > 16 ? 16 : args);             \
+      for (int i = 0; i < n_params; i++)                                   \
+        param_types[i] = cg->type_i64;                                     \
+      LLVMTypeRef ftype =                                                  \
+          LLVMFunctionType(cg->type_i64, param_types, n_params, args < 0); \
+      val = LLVMAddFunction(mod, name, ftype);                             \
+      if (verbose_enabled >= 4)                                            \
+        NY_LOG_V3("JIT: auto-declared runtime symbol %s\n", name);         \
+    }                                                                      \
+    if (val) {                                                             \
+      LLVMAddGlobalMapping(ee, val, (void *)(uintptr_t)fn_ptr);            \
+      if (verbose_enabled >= 4)                                            \
+        NY_LOG_V3("JIT: mapped runtime symbol %s\n", name);                \
+    }                                                                      \
   } while (0)
 
-#define MAP_GV(name, ptr)                                                      \
-  do {                                                                         \
-    LLVMValueRef val = LLVMGetNamedGlobal(mod, name);                          \
-    if (val) {                                                                 \
-      LLVMAddGlobalMapping(ee, val, (void *)ptr);                              \
-      if (verbose_enabled >= 3)                                                \
-        NY_LOG_V3("JIT: mapped runtime global %s\n", name);                    \
-    }                                                                          \
+#define MAP_GV(name, ptr)                                   \
+  do {                                                      \
+    LLVMValueRef val = LLVMGetNamedGlobal(mod, name);       \
+    if (val) {                                              \
+      LLVMAddGlobalMapping(ee, val, (void *)ptr);           \
+      if (verbose_enabled >= 3)                             \
+        NY_LOG_V3("JIT: mapped runtime global %s\n", name); \
+    }                                                       \
   } while (0)
 
-#define RT_DEF(name, p, args, sig, doc)                                        \
-  do {                                                                         \
-    MAP_FULL(name, p, args);                                                   \
-    if (strcmp(name, #p) != 0)                                                 \
-      MAP_FULL(#p, p, args);                                                   \
+#define RT_DEF(name, p, args, sig, doc) \
+  do {                                  \
+    MAP_FULL(name, p, args);            \
+    if (strcmp(name, #p) != 0)          \
+      MAP_FULL(#p, p, args);            \
   } while (0);
 #define RT_GV(name, p, t, doc) MAP_GV(name, &p);
 #include "code/backend/runtime/defs.h"

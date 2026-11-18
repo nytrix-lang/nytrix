@@ -4089,7 +4089,10 @@ static void append_doc_link_metadata(sb_t *out, const char *site,
   for (size_t i = 0; i < docs->len; i++) {
     const char *route = docs->data[i].route;
     const char *title = docs->data[i].title;
-    if (!route || !*route || !title || !*title)
+    /*
+     * info/ manuals have no static page; their links go to the source.
+     */
+    if (!route || !*route || !title || !*title || !strncmp(route, "info/", 5))
       continue;
     const char *rel =
         strncmp(route, "learn/", 6) == 0 || strncmp(route, "spec/", 5) == 0
@@ -4174,9 +4177,13 @@ static void append_site_ld_json(sb_t *out, const char *site,
          "\"compiler\", \"compile-time execution\", \"native FFI\", \"C ABI\", "
          "\"standard library\", \"networking\", \"native FFI\", \"parsing\"],\n"
          "                    \"hasPart\": [");
+  bool first_part = true;
   for (size_t i = 0; i < docs->len; i++) {
-    if (i)
+    if (docs->data[i].route && !strncmp(docs->data[i].route, "info/", 5))
+      continue;
+    if (!first_part)
       sb_add(out, ",");
+    first_part = false;
     sb_add(out, "\n                        {\"@type\":\"WebPage\",\"name\":");
     sb_add_json_str(out, docs->data[i].title ? docs->data[i].title : "");
     sb_add(out, ",\"url\":");
@@ -5090,6 +5097,7 @@ static int write_static_doc_page(const char *out_dir, const char *site,
   sb_add(
       &html,
       "<style>:root{color-scheme:light dark;--c1:#b6a0ff;--c2:#8ccfff;"
+      "--c3:#ffc27a;--ok:#7ee0a1;--warn:#ffc27a;--bad:#ff8a8a;"
       "--border:#292832;--muted:#c6c6ca}body{margin:0;background:#000;color:#"
       "f5f5f6;font:15px/1.62 "
       "system-ui,-apple-system,Segoe "
@@ -5141,7 +5149,8 @@ static int write_static_doc_page(const char *out_dir, const char *site,
       "p,li,td{color:#303038}code{background:#f4f4f6;border-color:#d5d5dc;"
       "color:#202027}pre,table{background:#fafafd;border-color:#d5d5dc}"
       "td{border-color:#d5d5dc}tr:first-child td{color:#17171b}"
-      ":root{--c1:#5b3fa0;--c2:#155d83;--border:#d5d5dc;--muted:#555560}"
+      ":root{--c1:#5b3fa0;--c2:#155d83;--c3:#9a5b00;--ok:#1d7a45;"
+      "--warn:#9a5b00;--bad:#b42323;--border:#d5d5dc;--muted:#555560}"
       "article svg{border-color:#d5d5dc;background:linear-gradient(135deg,"
       "rgba(91,63,160,.065),rgba(21,93,131,.035))}article "
       "details{background:#fafafd;border-color:#d5d5dc}article "

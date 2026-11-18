@@ -10,7 +10,9 @@ stmt_t *p_parse_match(parser_t *p) {
   stmt_t *s = stmt_new(p->arena, NY_S_MATCH, tok);
   s->as.match.test = p_parse_expr(p, 0);
   if (parser_match(p, NY_T_AS)) {
-    /* Explicit motive: `as T` or `as (v) -> T`. */
+    /*
+     * Explicit motive: `as T` or `as (v) -> T`.
+     */
     if (parser_match(p, NY_T_LPAREN)) {
       if (p->cur.kind != NY_T_IDENT) {
         parser_error(p, p->cur, "expected motive binder name",

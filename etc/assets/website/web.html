@@ -36,22 +36,29 @@ SEO_PLACEHOLDER
     <link
         href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap"
         rel="stylesheet" />
-    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/highlight.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/dompurify/dist/purify.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script>
+        // Must exist before MathJax loads: a cached async MathJax could
+        // otherwise start with its defaults and ignore $...$ math.
         window.MathJax = {
+            loader: { load: ['[tex]/ams', '[tex]/mathtools', '[tex]/bussproofs'] },
             tex: {
+                packages: { '[+]': ['ams', 'mathtools', 'bussproofs'] },
                 inlineMath: [['$', '$'], ['\\(', '\\)']],
                 displayMath: [['$$', '$$'], ['\\[', '\\]']],
+                processEscapes: true,
+                processEnvironments: true,
+                tags: 'ams'
             },
             options: {
-                skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre'],
+                skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'],
                 enableMenu: false
             }
         };
     </script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/highlight.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify/dist/purify.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 
     <style>
         CSS_PLACEHOLDER

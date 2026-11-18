@@ -94,7 +94,7 @@ static bool run_case(const char *what, const guard_case_t *c, bool want_removed)
   size_t checks = 0;
   for (size_t i = 0; i < f.len; ++i)
     checks += f.data[i].op == NYIR_BOUNDS_CHECK;
-  bool want = want_removed ? 0u : 1u;
+  size_t want = want_removed ? 0u : 1u;
   if (!ok || checks != want) {
     fprintf(stderr, "[scev-guard] %s: checks=%zu want=%zu\n", what, checks,
             want);
@@ -106,23 +106,35 @@ static bool run_case(const char *what, const guard_case_t *c, bool want_removed)
 }
 
 int main(void) {
-  /* Element-indexed check: the exit test proves it directly. */
+  /*
+   * Element-indexed check: the exit test proves it directly.
+   */
   run_case("lt-unscaled", &(guard_case_t){.scaled = false}, true);
-  /* `i - 1` below the IV is still inside the guard, and stays non-negative. */
+  /*
+   * `i - 1` below the IV is still inside the guard, and stays non-negative.
+   */
   run_case("lt-offset-minus-one",
            &(guard_case_t){.delta = -1, .init = 4}, true);
-  /* `<=` allows the body at `i == n`, so only a strictly smaller offset. */
+  /*
+   * `<=` allows the body at `i == n`, so only a strictly smaller offset.
+   */
   run_case("le-offset-minus-one",
            &(guard_case_t){.use_le = true, .delta = -1, .init = 4}, true);
-  /* Byte-scaled check against the byte-scaled length. */
+  /*
+   * Byte-scaled check against the byte-scaled length.
+   */
   run_case("lt-scaled", &(guard_case_t){.scaled = true}, true);
 
-  /* Rejected shapes. */
+  /*
+   * Rejected shapes.
+   */
   run_case("le-offset-zero", &(guard_case_t){.use_le = true}, false);
   run_case("offset-plus-one", &(guard_case_t){.delta = 1}, false);
   run_case("other-length", &(guard_case_t){.other_length = true}, false);
   run_case("negative-lowest", &(guard_case_t){.delta = -1, .init = -4}, false);
-  /* `i - 1` starting at 0 really can be -1, so the check must stay. */
+  /*
+   * `i - 1` starting at 0 really can be -1, so the check must stay.
+   */
   run_case("negative-lowest-at-zero",
            &(guard_case_t){.use_le = true, .delta = -1}, false);
   run_case("descending", &(guard_case_t){.descending = true}, false);
