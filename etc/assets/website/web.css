@@ -212,8 +212,8 @@ input {
 }
 
 .ico {
-    width: 17px;
-    height: 17px;
+    width: 19px;
+    height: 19px;
     display: inline-block;
     flex: 0 0 auto;
     color: currentColor;
@@ -233,20 +233,20 @@ input {
 }
 
 .ico-xs {
-    width: 18px;
-    height: 18px;
+    width: 19px;
+    height: 19px;
 }
 
 .ico-lg {
-    width: 20px;
-    height: 20px;
+    width: 22px;
+    height: 22px;
 }
 
 .nav-ico {
     color: var(--dim);
     opacity: 0.86;
-    width: 18px;
-    height: 18px;
+    width: 20px;
+    height: 20px;
 }
 
 .ico-home,
@@ -716,8 +716,8 @@ aside.active {
 
 #nav > .gtitle .nav-ico,
 #nav > .item .nav-ico {
-    width: 14px;
-    height: 14px;
+    width: 16px;
+    height: 16px;
 }
 
 .collapsible-content.active {
@@ -1332,8 +1332,8 @@ main.aside-active {
 }
 
 .card-icon .ico {
-    width: 18px;
-    height: 18px;
+    width: 20px;
+    height: 20px;
     opacity: 1;
 }
 

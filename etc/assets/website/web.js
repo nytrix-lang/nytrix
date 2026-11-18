@@ -524,7 +524,7 @@ function moduleIconName(route) {
   const r = String(route || "");
   if (r === "Home") return "home";
   if (r === "Tags" || r === "tag") return "tag";
-  if (r === "core") return "nytrix";
+  if (r === "core") return "folder";
   const segs = r.split(".");
   // A module's own icon first (core.str, core.math, core.os.io), then the
   // subsystem heuristics below for deeper families without one.
@@ -1870,7 +1870,7 @@ function renderNav() {
       const active =
         current &&
         (current === groupPath || current.startsWith(groupPath + "/"));
-      html += `<button type="button" class="gtitle is-folder collapsible ${active ? "active" : ""}" style="--nav-depth: ${depth};" aria-controls="${groupId}" aria-expanded="${Boolean(active)}" onclick="toggleNavCategory('${groupId}')"><span class="nav-label">${icon("hierarchy", "ico nav-ico")}<span>${docSegmentNavTitle(entry.key)}</span></span>${collapseIcon()}</button>`;
+      html += `<button type="button" class="gtitle is-folder collapsible ${active ? "active" : ""}" style="--nav-depth: ${depth};" aria-controls="${groupId}" aria-expanded="${Boolean(active)}" onclick="toggleNavCategory('${groupId}')"><span class="nav-label">${icon("folder", "ico nav-ico")}<span>${docSegmentNavTitle(entry.key)}</span></span>${collapseIcon()}</button>`;
       html += `<div id="${groupId}" class="collapsible-content ${active ? "active" : ""}" style="--nav-depth: ${depth};">`;
       html += renderMarkdownDocTree(entry.node, depth + 1);
       html += `</div>`;
