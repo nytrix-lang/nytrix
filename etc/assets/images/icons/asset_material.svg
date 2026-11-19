@@ -1,1 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><title>Asset Material</title><path fill="#c084fc" d="M12 2.5L21.5 7.4L12 12.5L2.5 7.4Z" /><path fill="#c084fc" d="M2.5 9.1L10.8 13.5L10.8 21.3L2.5 16.8Z" /><path fill="#c084fc" d="M21.5 9.1L13.2 13.5L13.2 21.3L21.5 16.8Z" /></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+  <title>Asset Material</title>
+  <path fill="#c084fc" fill-rule="evenodd" d="M5 2.5H19A2.5 2.5 0 0 1 21.5 5V19A2.5 2.5 0 0 1 19 21.5H5A2.5 2.5 0 0 1 2.5 19V5A2.5 2.5 0 0 1 5 2.5ZM5.2 5.2V18.8H18.8V5.2Z"/>
+  <path fill="#c084fc" d="M11.9 7A5 5 0 1 0 12 17A5 5 0 1 0 11.9 7ZM9.8 8.7Q8.1 9.7 8.2 11.1Q8.3 12 9.2 11.6Q10.2 9.8 12.5 9.1Q13.2 8.4 12.3 8.1Q11.3 7.8 9.8 8.7Z"/>
+</svg>

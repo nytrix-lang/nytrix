@@ -1,5 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
-  <path fill="#c084fc" d="M6 4.5H18L20.5 7L18 9.5H6L3.5 7Z"/>
-  <path fill="#c084fc" d="M6 10.2H18L20.5 12.7L18 15.2H6L3.5 12.7Z"/>
-  <path fill="#c084fc" d="M6 15.9H18L20.5 18.4L18 20.9H6L3.5 18.4Z"/>
+  <title>Cache</title>
+  <desc>Layered cache</desc>
+  <path fill="#c084fc" d="M11.2 2.6Q12 2.2 12.8 2.6L21 6.6Q22.2 7.3 21 8L12.8 12Q12 12.4 11.2 12L3 8Q1.8 7.3 3 6.6Z"/>
+  <path fill="#c084fc" d="M3 10.8 12 15.2 21 10.8V13.5L12.8 17.5Q12 17.9 11.2 17.5L3 13.5Z"/>
+  <path fill="#c084fc" d="M3 16.3 12 20.7 21 16.3V19L12.8 23Q12 23.4 11.2 23L3 19Z"/>
 </svg>

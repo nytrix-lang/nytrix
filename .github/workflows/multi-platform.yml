@@ -112,12 +112,15 @@ jobs:
           echo "LLVM_CONFIG=$llvm_prefix/bin/llvm-config" >> "$GITHUB_ENV"
           echo "NYTRIX_LLVM_INCLUDE=$llvm_prefix/include" >> "$GITHUB_ENV"
 
-      # Default gate: build, hygiene, formatting, parser checks, and audit.
-      - name: Build native compiler and check sources
+      # Default gate: build, hygiene, formatting, parser checks, audit, and the
+      # full cold fixture suite with stdlib, replay and benchmarks. CI must not
+      # pass --no-test-suite: a build-only gate reports green without running a
+      # single fixture.
+      - name: Build native compiler and run the full check gate
         id: checks
         run: |
           mkdir -p build/ci
-          ./make check --no-test-suite 2>&1 | tee build/ci/checks.log
+          ./make check 2>&1 | tee build/ci/checks.log
 
       - name: Run test suite on pull requests
         id: pr_tests

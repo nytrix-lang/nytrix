@@ -1,5 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
-  <title>Cps</title>
-  <path fill="#818cf8" d="M5 8A4 4 0 1 0 5 16A4 4 0 1 0 5 8Z"/>
-  <path fill="#818cf8" d="M9.8 10.5H16V7.2L22 12 16 16.8V13.5H9.8Z"/>
+  <title>CPS</title>
+  <desc>Lambda continuation</desc>
+  <path fill="#818cf8" d="M3.6 3.5H6.6L13 20.5H10L8.1 15.1L5.8 20.5H2.8L6.7 11.2Z"/>
+  <path fill="#818cf8" d="M12.8 10.5H17V7L22.5 12 17 17V13.5H12.8Z"/>
 </svg>

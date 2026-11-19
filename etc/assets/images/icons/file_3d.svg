@@ -1,1 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><title>File 3D</title><path fill="#fb923c" d="M5.5 2.5H18.5Q21 2.5 21 5V19Q21 21.5 18.5 21.5H5.5Q3 21.5 3 19V5Q3 2.5 5.5 2.5ZM6.4 5.2H17.6Q18.3 5.2 18.3 5.9V18.1Q18.3 18.8 17.6 18.8H6.4Q5.7 18.8 5.7 18.1V5.9Q5.7 5.2 6.4 5.2Z" fill-rule="evenodd" /><path fill="#fb923c" d="M12 8.2L17.1 10.9L12 13.5L6.9 10.9Z" /><path fill="#fb923c" d="M6.9 12.5L10.9 14.7L10.9 18L6.9 15.9Z" /><path fill="#fb923c" d="M17.1 12.5L13.1 14.7L13.1 18L17.1 15.9Z" /></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+  <title>File 3D</title>
+  <path fill="#fb923c" fill-rule="evenodd" d="M5.5 2.5H14L20.5 9V19A2.5 2.5 0 0 1 18 21.5H5.5A2.5 2.5 0 0 1 3 19V5A2.5 2.5 0 0 1 5.5 2.5ZM6 10V19H17.5V10Z"/>
+  <path fill="#fb923c" d="M14 2.5V7.1Q14 9 15.9 9H20.5Z"/>
+  <path fill="#fb923c" d="M11.8 10.8 17 13.5 11.8 16.2 6.6 13.5Z"/>
+  <path fill="#fb923c" d="M6.6 14.9 10.7 17.1V19.2L6.6 17Z"/>
+  <path fill="#fb923c" d="M17 14.9 12.9 17.1V19.2L17 17Z"/>
+</svg>

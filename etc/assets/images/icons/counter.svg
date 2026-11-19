@@ -1,5 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
   <title>Counter</title>
-  <path fill="#eab308" fill-rule="evenodd" d="M5 2.5H19A2.5 2.5 0 0 1 21.5 5V19A2.5 2.5 0 0 1 19 21.5H5A2.5 2.5 0 0 1 2.5 19V5A2.5 2.5 0 0 1 5 2.5ZM5.5 5.5V12.5H18.5V5.5ZM7.2 15.5V17H5.7V18.5H7.2V20H8.7V18.5H10.2V17H8.7V15.5ZM14 17V18.5H18V17Z"/>
-  <path fill="#eab308" d="M7 7H9.5V11H7ZM10.8 7H13.2V11H10.8ZM14.5 7H17V11H14.5Z"/>
+  <desc>Numeric display with controls</desc>
+  <path fill="#eab308" fill-rule="evenodd" d="M5 3H19A2.5 2.5 0 0 1 21.5 5.5V11.5A2.5 2.5 0 0 1 19 14H5A2.5 2.5 0 0 1 2.5 11.5V5.5A2.5 2.5 0 0 1 5 3ZM5.5 5.5V11.5H18.5V5.5Z"/>
+  <path fill="#eab308" d="M8 7H10.8V10H8ZM13.2 7H16V10H13.2Z"/>
+  <path fill="#eab308" d="M7.2 15.6H9.8V17.1H11.3V19.7H9.8V21.2H7.2V19.7H5.7V17.1H7.2Z"/>
+  <path fill="#eab308" d="M14 17.1H19.5V19.7H14Z"/>
 </svg>

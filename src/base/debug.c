@@ -76,9 +76,15 @@ typedef struct {
   char reason[128];
   unsigned count;
 } dbg_regalloc_entry_t;
-static dbg_regalloc_entry_t *dbg_regalloc_entries;
-static size_t dbg_regalloc_count;
-static size_t dbg_regalloc_capacity;
+/*
+ * A regalloc batch belongs to one function's encoding, and functions are
+ * encoded on parallel worker threads. Sharing this buffer across threads let
+ * two encoders realloc and write the same array, which corrupted the heap and
+ * aborted the compiler with a glibc malloc message under -vvvvvv.
+ */
+static _Thread_local dbg_regalloc_entry_t *dbg_regalloc_entries;
+static _Thread_local size_t dbg_regalloc_count;
+static _Thread_local size_t dbg_regalloc_capacity;
 static char dbg_filter_value[512];
 static bool dbg_filter_active = false;
 static bool dbg_delta_only = false;

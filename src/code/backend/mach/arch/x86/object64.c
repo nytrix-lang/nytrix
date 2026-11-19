@@ -846,7 +846,14 @@ static inline mach_set_t mach_set_prefix(size_t n) {
   return s;
 }
 
-static bool mach_loop_gpr_color_available(const mach_loop_gpr_ranges_t *ranges,
+/*
+ * A candidate's colour is rejected by interference with an already coloured
+ * range. Report which vreg owns it so the deep trace can show whether a hot
+ * value lost its colour to a colder one; SIZE_MAX means free and
+ * MACH_LOOP_GPR_NO_INTERVAL means the value has no live range at all.
+ */
+#define MACH_LOOP_GPR_NO_INTERVAL (SIZE_MAX - 1)
+static size_t mach_loop_gpr_color_blocker(const mach_loop_gpr_ranges_t *ranges,
                                           const size_t *color_heads,
                                           const size_t *next_colored,
                                           const mach_set_t *present,
@@ -859,7 +866,7 @@ static bool mach_loop_gpr_color_available(const mach_loop_gpr_ranges_t *ranges,
       has_interval |=
           ranges->starts[(size_t)vreg * ranges->block_len + b] != SIZE_MAX;
   if (!has_interval)
-    return false;
+    return MACH_LOOP_GPR_NO_INTERVAL;
   for (size_t other = color_heads[color]; other != SIZE_MAX;
        other = next_colored[other]) {
     if (present) {
@@ -870,7 +877,7 @@ static bool mach_loop_gpr_color_available(const mach_loop_gpr_ranges_t *ranges,
         size_t c = other * ranges->block_len + b;
         if (ranges->starts[a] <= ranges->ends[c] &&
             ranges->starts[c] <= ranges->ends[a])
-          return false;
+          return other;
         common = mach_set_clear_first(common);
       }
     } else {
@@ -880,11 +887,20 @@ static bool mach_loop_gpr_color_available(const mach_loop_gpr_ranges_t *ranges,
         if (ranges->starts[a] != SIZE_MAX && ranges->starts[c] != SIZE_MAX &&
             ranges->starts[a] <= ranges->ends[c] &&
             ranges->starts[c] <= ranges->ends[a])
-          return false;
+          return other;
       }
     }
   }
-  return true;
+  return SIZE_MAX;
+}
+
+static bool mach_loop_gpr_color_available(const mach_loop_gpr_ranges_t *ranges,
+                                          const size_t *color_heads,
+                                          const size_t *next_colored,
+                                          const mach_set_t *present,
+                                          uint32_t vreg, int color) {
+  return mach_loop_gpr_color_blocker(ranges, color_heads, next_colored,
+                                     present, vreg, color) == SIZE_MAX;
 }
 static bool mach_loop_gpr_call_safe(const nyr_mach_func_t *m,
                                     const mach_loop_gpr_ranges_t *ranges,
@@ -1711,22 +1727,28 @@ static void mach_allocate_loop_gprs(nyr_x64_mach_enc_t *e, const char *name,
                                                     color, fixed_safe_cache)) ||
                             data_caller_saved;
           bool is_unfolded = !folded_known[v];
-          bool color_available = mach_loop_gpr_color_available(
+          size_t color_blocker = mach_loop_gpr_color_blocker(
               &ranges, color_heads, next_colored, present, (uint32_t)v, color);
+          bool color_available = color_blocker == SIZE_MAX;
           ny_dbg_enter_context(name);
           ny_dbg_heuristic_event(
               "X64_LOOP_HOME",
               "candidate v%zu preg=%d score=%zu carried=%d eligible=%d "
               "defs=%d "
               "simple=%d unassigned=%d unfolded=%d call-safe=%d fixed-safe=%d "
-              "vector-safe=%d store-safe=%d available=%d",
+              "vector-safe=%d store-safe=%d available=%d blocker=%ld",
               v, mach_color_preg[color], score[v], (int)loop_carried[v],
               (int)(simple_defs && unassigned && score_ok && call_safe &&
                     fixed_safe && vector_ok && is_unfolded && safe_stores &&
                     color_available),
               1, (int)simple_defs, (int)unassigned, (int)is_unfolded,
               (int)call_safe, (int)fixed_safe, (int)vector_ok, (int)safe_stores,
-              (int)color_available);
+              (int)color_available,
+              color_blocker == SIZE_MAX
+                  ? -1L
+                  : (color_blocker == MACH_LOOP_GPR_NO_INTERVAL
+                         ? -2L
+                         : (long)color_blocker));
           ny_dbg_exit_context(name);
         }
         bool fixed_safe = callee_saved ||

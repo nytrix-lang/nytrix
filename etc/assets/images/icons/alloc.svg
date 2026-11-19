@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
   <title>Alloc</title>
-  <desc>Memory block allocation.</desc>
-  <path fill="#c084fc" fill-rule="evenodd" d="M5 2.5H19A2.5 2.5 0 0 1 21.5 5V19A2.5 2.5 0 0 1 19 21.5H5A2.5 2.5 0 0 1 2.5 19V5A2.5 2.5 0 0 1 5 2.5ZM6 5.5A.5.5 0 0 0 5.5 6V18A.5.5 0 0 0 6 18.5H18A.5.5 0 0 0 18.5 18V6A.5.5 0 0 0 18 5.5Z"/>
-  <path fill="#c084fc" d="M10.5 7.5H13.5V10.5H16.5V13.5H13.5V16.5H10.5V13.5H7.5V10.5H10.5Z"/>
+  <path fill="#c084fc" d="M4.6 4H9.9A2 2 0 0 1 11.9 6V10.5A2 2 0 0 1 9.9 12.5H4.6A2 2 0 0 1 2.6 10.5V6A2 2 0 0 1 4.6 4Z"/>
+  <path fill="#c084fc" d="M4.6 14H9.9A2 2 0 0 1 11.9 16V20.5A2 2 0 0 1 9.9 22.5H4.6A2 2 0 0 1 2.6 20.5V16A2 2 0 0 1 4.6 14Z"/>
+  <path fill="#c084fc" d="M16.4 6H19V10H22.5V12.6H19V16.6H16.4V12.6H12.9V10H16.4Z"/>
 </svg>

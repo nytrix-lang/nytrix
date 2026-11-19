@@ -1,6 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
-  <title>Unicode</title>
-  <desc>Unicode character and code point icon.</desc>
-  <path fill="#3b82f6" d="M2.5 4H5.5V13.3C5.5 16.5 6.5 17.8 8.5 17.8S11.5 16.5 11.5 13.3V4H14.5V13.3C14.5 18.4 12.4 21 8.5 21S2.5 18.4 2.5 13.3Z"/>
-  <path fill="#3b82f6" d="M18 8H20.5V11.2H23V13.7H20.5V16.9H18V13.7H15.5V11.2H18Z"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><title>Unicode</title><path fill="#3b82f6" d="M3 3.5H6V13.2C6 16.4 6.9 17.8 9.2 17.8S12.4 16.4 12.4 13.2V3.5H15.4V13.4C15.4 18.5 13.3 21 9.2 21S3 18.5 3 13.4Z"/><path fill="#3b82f6" d="M18.6 7H21V10.1H23V12.5H21V15.6H18.6V12.5H16.6V10.1H18.6Z"/></svg>

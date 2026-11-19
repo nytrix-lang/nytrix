@@ -296,6 +296,10 @@ static bool mach_vreg_home_spill_interval(const nyr_x64_mach_enc_t *e,
   size_t last = e->regalloc.vreg_offsets[vreg + 1];
   if (last <= first || last > e->regalloc.segment_len)
     return false;
+  const char *no_seg_share = getenv("NYTRIX_NO_MULTISEG_HOME_SHARE");
+  const bool resident_share =
+      !(no_seg_share && strcmp(no_seg_share, "0") != 0 &&
+        strcmp(no_seg_share, "off") != 0);
   size_t lo = SIZE_MAX, hi = 0;
   bool uses_home = false;
   for (size_t i = first; i < last; ++i) {
@@ -307,15 +311,42 @@ static bool mach_vreg_home_spill_interval(const nyr_x64_mach_enc_t *e,
     if (!b->inst_count || s->start < b->first_inst ||
         s->end >= b->first_inst + b->inst_count)
       return false;
-    /*
-     * A value that is register-resident anywhere can be defined in its
-     * register without writing the home.  The encoder's sticky-RAX tag is
-     * keyed by home offset and assumes the slot still names the live value,
-     * so such a value must keep a private slot: sharing it let a later read
-     * reuse a dead neighbour left in %rax (x64_loop_recolor, plain/8 homes).
-     */
-    if (s->color >= 0)
-      return false;
+    if (!resident_share) {
+      /*
+       * Opt-out path keeps the historical rule exactly: any register-resident
+       * segment keeps a private slot.
+       */
+      if (s->color >= 0)
+        return false;
+    } else if (s->reload || s->color < 0) {
+      /*
+       * A register-resident segment never touches the home, but a reload or an
+       * uncolored range reads it. Pooling hands the whole interval to one
+       * value, so such a read is safe only when this block writes the slot
+       * first: the first mention of the vreg in the segment must be its own
+       * definition. A live-in read (reload, or a use reached through
+       * predecessors) keeps a private slot.
+       */
+      bool wrote = false;
+      for (size_t pc = s->start; pc <= s->end; ++pc) {
+        const nyr_mach_inst_t *in = &e->mach->insts[pc];
+        bool def =
+            in->dst.kind == NYR_MACH_OPERAND_VREG && in->dst.as.reg == vreg;
+        bool use =
+            (in->src0.kind == NYR_MACH_OPERAND_VREG &&
+             in->src0.as.reg == vreg) ||
+            (in->src1.kind == NYR_MACH_OPERAND_VREG &&
+             in->src1.as.reg == vreg) ||
+            (in->src2.kind == NYR_MACH_OPERAND_VREG && in->src2.as.reg == vreg);
+        for (size_t ai = 0; in->args && ai < in->args_len && !use; ++ai)
+          use = in->args[ai].kind == NYR_MACH_OPERAND_VREG &&
+                in->args[ai].as.reg == vreg;
+        if (def)
+          wrote = true;
+        if (use && !wrote)
+          return false;
+      }
+    }
     if (s->spill || s->reload || s->color < 0)
       uses_home = true;
     if (s->start < lo)

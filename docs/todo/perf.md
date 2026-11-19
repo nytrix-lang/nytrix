@@ -29,12 +29,52 @@ judge changes by instruction counts.
   rows by instructions executed relative to C (whole process, 2026-11-18):
   - `radix-tree` (10.7×, was 24.5×): the 20-step bit loop now unrolls
     (descending loops, up to 32 trips) and folds `node * 2 + bit` into one
-    `lea`. Remaining: `(x >> k) & 1` still costs a copy because the AND does
-    not reuse its dying source's register; C collapses the whole loop.
+    `lea`. Focused run on 2026-11-19: NYR 11.6 ms, 4.72× vs LLVM. The `-vvvvvv`
+    candidate trace (readable after the per-thread regalloc batch fix) rules out
+    the two earlier explanations for `rt_main`'s 3,434 loop-carried candidate
+    evaluations: `store-safe` and `vector-safe` never fail, and the AND already
+    uses the commutative two-address form. The 456 top-score (152-167) entries
+    are all `unfolded=0` — loop-carried constants whose immediate fold is
+    load-bearing (relaxing it measured 21.1 → 26.5 ms). `node`/`depth` live in
+    the 16-23 score band, where 320 of 456 evaluations fail colour availability
+    and 118 are already coloured, so the remaining work is colour ownership and
+    selection order, not another peephole. The trace now names the owner: v397
+    (score 168, `carried=0`) blocks the carried walk value v390 1,362 times.
+    Restricting dedicated homes to loop-carried values was measured the same
+    day — reloads 146 → 107, frame homes 2,984 → 2,680 bytes, wall time inside
+    noise (24.16 → 24.05 ms median) — and reverted.
+
+    Home accounting for `rt_main` (2026-11-19): `home-layout vregs=545
+    single-block=189 unique=17 reused=172 bytes=2984`. Seventeen slots serve
+    the 189 same-block residents (172 reused); the other 356 values take
+    private 8-byte slots and account for 2,848 of the 2,984 bytes.
+    `NYTRIX_HOME_RANGE_SCAN=1` produces a byte-identical layout, and
+    `NYTRIX_NO_SPILL_HOME_COLOR=1` gives 3,064 bytes, so slot sharing works but
+    cannot reach multi-segment values: `mach_vreg_home_spill_interval` refuses
+    to pool any value that is register-resident in any segment because the
+    encoder's sticky-RAX tag is keyed by home offset. Shrinking the frame needs
+    that guard replaced with a home-read-after-write proof, not more colours.
+
+    That proof now exists: a register-resident value may pool its slot when
+    every home-reading segment writes the slot before its first read (a live-in
+    read keeps a private slot, `NYTRIX_NO_MULTISEG_HOME_SHARE=1` restores the old
+    rule). Frame homes on 2026-11-19: `rt_main` 2,984 → 2,704 bytes, viterbi
+    2,584 → 2,472, `cd` 2,672. Checksums unchanged (`62531`, `3270530`, `387`)
+    and radix-tree wall time inside noise (22.7-25.4 ms vs 23.9-24.5 ms), so
+    this is a frame-size reduction, not a measured speedup.
   - `cd` (8.5×): per-iteration reloads of `px[i]`/`py[i]` (needs load
-    hoisting with a no-store proof) and C's vectorized pair loop.
+    hoisting with a no-store proof) and C's vectorized pair loop. Deep trace
+    (2026-11-19, 18,086 candidate evaluations): carried rejections are
+    dominated by `unfolded=0` (6,762) and `available=0` (6,022); store safety
+    and vector safety never fail, the same residency picture as `radix-tree`.
   - `viterbi` (5.9×, was 6.6×): the running max is now a select; `rt_main`
-    register pressure still spills the loaded value across the modulo.
+    register pressure still spills the loaded value across the modulo. Deep
+    trace: `unfolded=0` 2,706, `available=0` 2,514 and `vector-safe=0` 462 —
+    the only one of these three rows where vector safety rejects carried
+    values. Those 462 are all on caller-saved scratch colours (preg 8, 9, 1,
+    2 = r8, r9, rcx, rdx); the accepted homes are callee-saved r12-r15, which
+    the eligibility rule already exempts, so vector safety costs this row no
+    viable colour and needs no fix.
   - `stream` (4.3×): the triad is scalar. Vectorizing needs a 4-lane i64
     multiply; AVX2 has none, and the `vpmuludq` emulation needs two scratch
     ymm registers beyond the reserved ymm14/ymm15.
