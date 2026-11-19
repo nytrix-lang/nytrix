@@ -2,9 +2,9 @@
 #ifndef NY_NATIVE_INTERNAL_H
 #define NY_NATIVE_INTERNAL_H
 
+#include "code/backend/core/target.h"
 #include "code/backend/lower/machine.h"
 #include "code/backend/lower/native.h"
-#include "code/backend/core/target.h"
 #include <nyr/ir.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -231,14 +231,11 @@ bool nyr_arm_emit_ir(nyr_writer_t *w, const ny_native_target_info_t *target,
 bool nyr_i386_emit_ir(nyr_writer_t *w, const ny_native_target_info_t *target,
                       const nyr_func_t *nyir, const char *func_name,
                       bool tag_return, char *err, size_t err_len);
-bool nyr_i386_emit_ir_with_linkage(nyr_writer_t *w,
-                                   const ny_native_target_info_t *target,
-                                   const nyr_func_t *nyir,
-                                   const char *func_name, bool tag_return,
-                                   bool is_local, bool position_independent,
-                                   unsigned stack_alignment,
-                                   bool code16_low_stack,
-                                   char *err, size_t err_len);
+bool nyr_i386_emit_ir_with_linkage(
+    nyr_writer_t *w, const ny_native_target_info_t *target,
+    const nyr_func_t *nyir, const char *func_name, bool tag_return,
+    bool is_local, bool position_independent, unsigned stack_alignment,
+    bool code16_low_stack, char *err, size_t err_len);
 
 bool nyr_native_emit_elf64_object_from_nirs(
     const nyr_func_t *rt_main, const nyr_func_t *funcs,
@@ -279,12 +276,12 @@ typedef struct {
 bool nyr_native_emit_elf64_c_object_from_nirs_with_data(
     const nyr_func_t *funcs, const char *const *func_names, size_t func_count,
     const char *const *function_sections, const bool *function_local,
-    bool omit_frame_pointer, bool position_independent,
-    bool retpoline_indirect_calls, bool retpoline_inline_calls,
-    bool function_return_thunk_extern, bool cf_protection_branch,
-    const nyr_c_object_data_t *data, size_t data_count,
-    const ny_native_target_info_t *target, const char *path, char *err,
-    size_t err_len);
+    const bool *function_weak, bool omit_frame_pointer,
+    bool position_independent, bool retpoline_indirect_calls,
+    bool retpoline_inline_calls, bool function_return_thunk_extern,
+    bool cf_protection_branch, const nyr_c_object_data_t *data,
+    size_t data_count, const ny_native_target_info_t *target, const char *path,
+    char *err, size_t err_len);
 bool nyr_native_emit_elf64_aarch64_object_from_nirs(
     const nyr_func_t *rt_main, const nyr_func_t *funcs,
     const char *const *func_names, size_t func_count,

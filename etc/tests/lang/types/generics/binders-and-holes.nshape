@@ -1,7 +1,7 @@
 shape binders_and_holes {
   family "runtime/compiler"
   generator "embedded"
-  features ["ny", "generics", "binders", "holes", "dependent"]
+  features ["ny", "dependent", "binders", "generics", "holes"]
   template ny-test-case
   flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=orc; --wasm"
   expect compile_and_run

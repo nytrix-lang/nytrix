@@ -1,7 +1,7 @@
 shape z3_proof_backend {
   family "runtime/proofs"
   generator "program"
-  features ["proof", "solver", "z3", "type-solver"]
+  features ["proof", "solver", "type-solver", "z3"]
   template ny-test-case
   flags "--type-solver=z3 --proof-solver=z3 --color=never"
   expect compile_and_run

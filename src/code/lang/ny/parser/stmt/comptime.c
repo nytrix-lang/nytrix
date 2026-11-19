@@ -3342,6 +3342,12 @@ static void impl_rewrite_stmt_owner(parser_t *p, stmt_t *s,
   }
 }
 
+stmt_t *ny_ast_clone_stmt(parser_t *p, stmt_t *s) {
+  if (!p || !s)
+    return NULL;
+  return ct_clone_stmt(p, s, NULL);
+}
+
 static stmt_t *impl_clone_for_owner(parser_t *p, stmt_t *base,
                                     const char *from_owner,
                                     const char *to_owner) {

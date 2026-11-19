@@ -1,7 +1,7 @@
 shape dynamic_get_custom_callback_fallback_fails_closed {
   family "typing/effects"
   generator "regression"
-  features ["ny", "test", "typing", "effects", "callback", "dynamic-index", "capability", "fallback"]
+  features ["typing", "ny", "test", "callback", "capability", "dynamic-index", "effects", "fallback"]
   template ny-test-case
   flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
   expect compile_fail

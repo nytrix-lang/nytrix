@@ -491,22 +491,6 @@ static inline int rt_addr_probe_os(uintptr_t p, size_t n);
  * (works for device mappings that process_vm_readv refuses). Linux only. */
 int rt_addr_probe_copy(uintptr_t p);
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 static inline int rt_addr_mapped(uintptr_t p, size_t n) {
   if (p < 0x1000 || n == 0)
     return 0;
@@ -526,14 +510,6 @@ static inline int rt_addr_mapped(uintptr_t p, size_t n) {
   rt_probe_cache_store(p, n);
   return 1;
 }
-
-
-
-
-
-
-
-
 
 static inline int rt_addr_probe_os(uintptr_t p, size_t n) {
 #ifdef _WIN32
@@ -706,7 +682,6 @@ extern __thread uintptr_t rt_non_str_cache_keys[RT_NON_STR_CACHE_SIZE];
 extern __thread uintptr_t rt_float_cache_keys[RT_FLOAT_CACHE_SIZE];
 extern __thread uintptr_t rt_non_float_cache_keys[RT_FLOAT_CACHE_SIZE];
 bool rt_float_registry_has(uintptr_t value);
-
 
 static inline uintptr_t rt_const_str_cache_slot(uintptr_t p) {
   return ((p >> 4) ^ (p >> 12) ^ (p >> 21)) & RT_CONST_STR_CACHE_MASK;

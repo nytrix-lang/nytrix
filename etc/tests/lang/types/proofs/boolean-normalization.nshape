@@ -1,7 +1,7 @@
 shape proof_boolean_normalization {
   family "runtime/proofs"
   generator "program"
-  features ["proofs", "normalization", "boolean"]
+  features ["boolean", "normalization", "proofs"]
   template ny-test-case
   flags "--color=never"
   expect compile_and_run

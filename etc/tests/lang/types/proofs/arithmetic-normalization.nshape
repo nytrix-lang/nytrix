@@ -1,7 +1,7 @@
 shape proof_arithmetic_normalization {
   family "runtime/proofs"
   generator "program"
-  features ["proofs", "normalization", "arithmetic"]
+  features ["arithmetic", "normalization", "proofs"]
   template ny-test-case
   flags "--color=never"
   expect compile_and_run

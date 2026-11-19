@@ -1,7 +1,7 @@
 shape proof_mutation_invalidates_refinement {
   family "typing/dependent"
   generator "error"
-  features [error typing dependent proof negative]
+  features ["error", "typing", "dependent", "negative", "proof"]
   template ny-compile-fail
   flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
   expect compile_fail

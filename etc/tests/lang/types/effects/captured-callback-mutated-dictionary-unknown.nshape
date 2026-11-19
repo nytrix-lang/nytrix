@@ -1,7 +1,7 @@
 shape mutated_dictionary_callback_rows_fail_closed {
   family "typing/effects"
   generator "regression"
-  features ["ny", "test", "typing", "effects", "callback", "capture", "container", "negative"]
+  features ["typing", "ny", "test", "negative", "callback", "capture", "container", "effects"]
   template ny-test-case
   flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
   expect compile_fail

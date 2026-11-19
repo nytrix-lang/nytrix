@@ -5348,33 +5348,85 @@ int64_t rt_call4_f32_void(int64_t f, int64_t a, int64_t b, int64_t c,
 
 #include <zlib.h>
 
+/*
+ * A direct call here is a strong undefined reference, and --as-needed keeps a
+ * library that answers one even when --gc-sections drops the call site later.
+ * That put libz.so.1 in DT_NEEDED for every AOT binary, so programs that never
+ * compress paid a DSO load and its relocations at startup. Bind lazily
+ * instead: the dependency follows first use, and a host without libz gets a
+ * zlib error from the wrappers rather than a load-time one.
+ */
+typedef int (*rt_zlib_uncompress_fn)(Bytef *, uLongf *, const Bytef *, uLong);
+typedef int (*rt_zlib_compress2_fn)(Bytef *, uLongf *, const Bytef *, uLong,
+                                    int);
+typedef uLong (*rt_zlib_bound_fn)(uLong);
+
+static struct {
+  rt_zlib_uncompress_fn uncompress;
+  rt_zlib_compress2_fn compress2;
+  rt_zlib_bound_fn compress_bound;
+  int tried;
+} g_rt_zlib;
+
+static void rt_zlib_resolve(void) {
+  if (g_rt_zlib.tried)
+    return;
+  g_rt_zlib.tried = 1;
+#if defined(_WIN32)
+  return;
+#else
+  void *h = dlopen("libz.so.1", RTLD_NOW | RTLD_LOCAL);
+  if (!h)
+    h = dlopen("libz.so", RTLD_NOW | RTLD_LOCAL);
+#ifdef __APPLE__
+  if (!h)
+    h = dlopen("libz.dylib", RTLD_NOW | RTLD_LOCAL);
+#endif
+  if (!h)
+    return;
+  *(void **)&g_rt_zlib.uncompress = dlsym(h, "uncompress");
+  *(void **)&g_rt_zlib.compress2 = dlsym(h, "compress2");
+  *(void **)&g_rt_zlib.compress_bound = dlsym(h, "compressBound");
+#endif
+}
+
 int64_t rt_zlib_uncompress(int64_t dest, int64_t destLen_p, int64_t src,
                            int64_t srcLen) {
+  rt_zlib_resolve();
+  if (!g_rt_zlib.uncompress)
+    return rt_tag_v((int64_t)Z_STREAM_ERROR);
   uLongf *dlen = (uLongf *)(uintptr_t)rt_untag_v(destLen_p);
-  int res = uncompress((Bytef *)(uintptr_t)rt_untag_v(dest), dlen,
-                       (const Bytef *)(uintptr_t)rt_untag_v(src),
-                       (uLong)rt_untag_v(srcLen));
+  int res = g_rt_zlib.uncompress((Bytef *)(uintptr_t)rt_untag_v(dest), dlen,
+                                 (const Bytef *)(uintptr_t)rt_untag_v(src),
+                                 (uLong)rt_untag_v(srcLen));
   return rt_tag_v((int64_t)res);
 }
 
 int64_t rt_zlib_compress(int64_t dest, int64_t destLen_p, int64_t src,
                          int64_t srcLen, int64_t level) {
+  rt_zlib_resolve();
+  if (!g_rt_zlib.compress2)
+    return rt_tag_v((int64_t)Z_STREAM_ERROR);
   uLongf *dlen = (uLongf *)(uintptr_t)rt_untag_v(destLen_p);
-  int res = compress2((Bytef *)(uintptr_t)rt_untag_v(dest), dlen,
-                      (const Bytef *)(uintptr_t)rt_untag_v(src),
-                      (uLong)rt_untag_v(srcLen), (int)rt_untag_v(level));
+  int res = g_rt_zlib.compress2((Bytef *)(uintptr_t)rt_untag_v(dest), dlen,
+                                (const Bytef *)(uintptr_t)rt_untag_v(src),
+                                (uLong)rt_untag_v(srcLen),
+                                (int)rt_untag_v(level));
   return rt_tag_v((int64_t)res);
 }
 
 int64_t rt_zlib_compress_str(int64_t src, int64_t srcLen, int64_t level) {
+  rt_zlib_resolve();
+  if (!g_rt_zlib.compress_bound || !g_rt_zlib.compress2)
+    return 0;
   const Bytef *src_p = (const Bytef *)(uintptr_t)rt_untag_v(src);
   uLong src_len = (uLong)rt_untag_v(srcLen);
-  uLongf out_len = compressBound(src_len);
+  uLongf out_len = g_rt_zlib.compress_bound(src_len);
   int64_t out = rt_malloc((int64_t)(((uint64_t)out_len + 1u) << 1) | 1);
   if (!out)
     return 0;
-  int res = compress2((Bytef *)(uintptr_t)out, &out_len, src_p, src_len,
-                      (int)rt_untag_v(level));
+  int res = g_rt_zlib.compress2((Bytef *)(uintptr_t)out, &out_len, src_p,
+                                src_len, (int)rt_untag_v(level));
   if (res != Z_OK) {
     rt_free(out);
     return 0;
@@ -5386,5 +5438,8 @@ int64_t rt_zlib_compress_str(int64_t src, int64_t srcLen, int64_t level) {
 }
 
 int64_t rt_zlib_bound(int64_t n) {
-  return rt_tag_v((int64_t)compressBound((uLong)rt_untag_v(n)));
+  rt_zlib_resolve();
+  if (!g_rt_zlib.compress_bound)
+    return 0;
+  return rt_tag_v((int64_t)g_rt_zlib.compress_bound((uLong)rt_untag_v(n)));
 }

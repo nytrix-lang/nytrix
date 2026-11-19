@@ -39,7 +39,9 @@ static int md_strip(const nyr_func_t *f, const int *defs, int v) {
   return v;
 }
 
-/* Allocation root of an address, or -1 when unknown. */
+/*
+ * Allocation root of an address, or -1 when unknown.
+ */
 static int md_root(const nyr_func_t *f, const int *defs, int v) {
   for (int depth = 0; depth < 64; ++depth) {
     v = md_strip(f, defs, v);

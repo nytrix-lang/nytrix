@@ -1,7 +1,7 @@
 shape generated_mutable_refinement_flow_differential {
   family "language/types/refinements"
   generator "embedded"
-  features ["refinement", "mutable-aggregate", "alias-flow", "closure-provenance", "mutation", "generated", "differential"]
+  features ["alias-flow", "closure-provenance", "differential", "generated", "mutable-aggregate", "mutation", "refinement"]
   timeout 180
   template ny-test-case
   expect compile_and_run

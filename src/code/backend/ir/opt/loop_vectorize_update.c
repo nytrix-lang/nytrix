@@ -55,12 +55,12 @@ typedef struct {
 
 static bool fu_trace(void) { return getenv("NYTRIX_TRACE_F64_UPDATE_VEC"); }
 
-#define FU_REJECT(why)                                                         \
-  do {                                                                         \
-    if (fu_trace())                                                            \
-      fprintf(stderr, "f64-update-vectorize: reject header=b%zu: %s\n",        \
-              c->header, why);                                                 \
-    return false;                                                              \
+#define FU_REJECT(why)                                                  \
+  do {                                                                  \
+    if (fu_trace())                                                     \
+      fprintf(stderr, "f64-update-vectorize: reject header=b%zu: %s\n", \
+              c->header, why);                                          \
+    return false;                                                       \
   } while (0)
 
 static const nyr_inst_t *fu_def(const fu_ctx_t *c, int v) {
@@ -76,7 +76,9 @@ static bool fu_in_loop(const fu_ctx_t *c, int v) {
   return b == c->header || b == c->latch;
 }
 
-/* Follow transparent register copies. */
+/*
+ * Follow transparent register copies.
+ */
 static int fu_resolve(const fu_ctx_t *c, int v) {
   for (int depth = 0; depth < 16; ++depth) {
     const nyr_inst_t *d = fu_def(c, v);
@@ -95,7 +97,9 @@ static bool fu_const(const fu_ctx_t *c, int v, int64_t *out) {
   return true;
 }
 
-/* v == i * 8, as shl(i, 3) or mul(i, 8). */
+/*
+ * v == i * 8, as shl(i, 3) or mul(i, 8).
+ */
 static bool fu_is_iv_bytes(const fu_ctx_t *c, int v) {
   const nyr_inst_t *d = fu_def(c, fu_resolve(c, v));
   int64_t k = 0;
@@ -109,7 +113,9 @@ static bool fu_is_iv_bytes(const fu_ctx_t *c, int v) {
   return false;
 }
 
-/* v == base + i * 8 with an invariant base; returns the base. */
+/*
+ * v == base + i * 8 with an invariant base; returns the base.
+ */
 static int fu_address_base(const fu_ctx_t *c, int v) {
   const nyr_inst_t *d = fu_def(c, fu_resolve(c, v));
   if (!d || d->op != NYIR_ADD_I64)
@@ -141,7 +147,9 @@ static bool fu_is_op_value(const fu_ctx_t *c, int v) {
   return false;
 }
 
-/* An f64 operand the vector body can provide. */
+/*
+ * An f64 operand the vector body can provide.
+ */
 static bool fu_operand_ok(fu_ctx_t *c, int v) {
   v = fu_resolve(c, v);
   if (fu_load_index(c, v) >= 0 || fu_is_op_value(c, v))
@@ -149,7 +157,9 @@ static bool fu_operand_ok(fu_ctx_t *c, int v) {
   if (fu_in_loop(c, v))
     return false;
   const nyr_inst_t *d = fu_def(c, v);
-  /* Invariant f64 values defined by an f64-class instruction or constant. */
+  /*
+   * Invariant f64 values defined by an f64-class instruction or constant.
+   */
   if (d && d->scalar_class != NYIR_SCALAR_F64 && d->op != NYIR_CONST_F64)
     return false;
   if (!d)
@@ -173,7 +183,9 @@ static bool fu_analyse(fu_ctx_t *c, size_t latch, size_t header) {
   c->store_at = SIZE_MAX;
   if (latch == header)
     FU_REJECT("single-block loop");
-  /* Exactly two blocks: header -> latch -> header, header exits. */
+  /*
+   * Exactly two blocks: header -> latch -> header, header exits.
+   */
   if (cfg->succ_offsets[latch + 1] - cfg->succ_offsets[latch] != 1 ||
       cfg->succ_blocks[cfg->succ_offsets[latch]] != header)
     FU_REJECT("latch is not a single backedge block");
@@ -195,7 +207,9 @@ static bool fu_analyse(fu_ctx_t *c, size_t latch, size_t header) {
     FU_REJECT("unlabeled preheader/header/latch");
   c->preheader = preheader;
 
-  /* Header: one +1 induction PHI, its compare, the conditional branch. */
+  /*
+   * Header: one +1 induction PHI, its compare, the conditional branch.
+   */
   c->iv = -1;
   int cond = -1;
   bool branch_to_latch = false;
@@ -256,7 +270,9 @@ static bool fu_analyse(fu_ctx_t *c, size_t latch, size_t header) {
       step != 1)
     FU_REJECT("induction step is not +1");
 
-  /* Latch body. */
+  /*
+   * Latch body.
+   */
   for (size_t i = cfg->block_start[latch]; i < cfg->block_end[latch]; ++i) {
     const nyr_inst_t *in = &f->data[i];
     switch (in->op) {
@@ -267,7 +283,9 @@ static bool fu_analyse(fu_ctx_t *c, size_t latch, size_t header) {
     case NYIR_COPY:
     case NYIR_SHL_I64:
     case NYIR_MUL_I64:
-      /* Induction copies and byte offsets; checked through their uses. */
+      /*
+       * Induction copies and byte offsets; checked through their uses.
+       */
       if (in->op == NYIR_COPY && fu_resolve(c, in->a) != c->iv)
         FU_REJECT("latch copy of a non-induction value");
       if (in->op != NYIR_COPY && !fu_is_iv_bytes(c, in->dst))
@@ -314,7 +332,9 @@ static bool fu_analyse(fu_ctx_t *c, size_t latch, size_t header) {
   }
   if (c->store_at == SIZE_MAX || c->load_count == 0)
     FU_REJECT("no load/store stream");
-  /* In-loop values must not escape: only header values can, by dominance. */
+  /*
+   * In-loop values must not escape: only header values can, by dominance.
+   */
   for (size_t i = 0; i < f->len; ++i) {
     size_t b = cfg->inst_block[i];
     if (b == c->latch)
@@ -400,7 +420,9 @@ static bool fu_transform(fu_ctx_t *c) {
     vmap[v] = -1;
   bool ok = true;
 
-  /* Vector preheader: trip, end, dependence guard, broadcasts. */
+  /*
+   * Vector preheader: trip, end, dependence guard, broadcasts.
+   */
   ok = fu_ctl(f, NYIR_LABEL, -1, vp);
   int n = fu_i64(f, NYIR_SUB_I64, c->hi, c->lo, NYIR_CMP_EQ);
   int guard = fu_i64(f, NYIR_CMP_I64, n, fu_const_value(f, 3), NYIR_CMP_GT);
@@ -435,7 +457,9 @@ static bool fu_transform(fu_ctx_t *c) {
   ok = ok && fu_ctl(f, NYIR_BR_IF, guard, vh) && fu_ctl(f, NYIR_BR, -1, vps);
   ok = ok && fu_ctl(f, NYIR_LABEL, -1, vps) && fu_ctl(f, NYIR_BR, -1, vx);
 
-  /* Vector header. */
+  /*
+   * Vector header.
+   */
   ok = ok && fu_ctl(f, NYIR_LABEL, -1, vh);
   size_t viv_at = SIZE_MAX;
   int viv = ok ? fu_phi(f, vp, c->lo, vb, -1, &viv_at) : -1;
@@ -444,7 +468,9 @@ static bool fu_transform(fu_ctx_t *c) {
        fu_ctl(f, NYIR_BR, -1, vhx);
   ok = ok && fu_ctl(f, NYIR_LABEL, -1, vhx) && fu_ctl(f, NYIR_BR, -1, vx);
 
-  /* Vector body: loads, packed ops, the store. */
+  /*
+   * Vector body: loads, packed ops, the store.
+   */
   ok = ok && fu_ctl(f, NYIR_LABEL, -1, vb);
   int bytes = fu_i64(f, NYIR_SHL_I64, viv, fu_const_value(f, 3), NYIR_CMP_EQ);
   for (size_t k = 0; ok && k < c->load_count; ++k) {
@@ -485,7 +511,9 @@ static bool fu_transform(fu_ctx_t *c) {
   if (ok)
     f->data[viv_at].phi_incoming[1].value = viv_next;
 
-  /* Vector exit: resume the scalar loop where the vector loop stopped. */
+  /*
+   * Vector exit: resume the scalar loop where the vector loop stopped.
+   */
   ok = ok && fu_ctl(f, NYIR_LABEL, -1, vx);
   int resume = ok ? fu_phi(f, vps, c->lo, vhx, viv, NULL) : -1;
   ok = ok && resume >= 0 && fu_ctl(f, NYIR_BR, -1, header_label);
@@ -493,7 +521,9 @@ static bool fu_transform(fu_ctx_t *c) {
   if (!ok)
     return false;
 
-  /* The scalar header now enters from the vector exit. */
+  /*
+   * The scalar header now enters from the vector exit.
+   */
   for (size_t i = cfg->block_start[c->header]; i < cfg->block_end[c->header];
        ++i) {
     nyr_inst_t *in = &f->data[i];
@@ -505,7 +535,9 @@ static bool fu_transform(fu_ctx_t *c) {
         in->phi_incoming[k].value = resume;
       }
   }
-  /* Retarget the preheader edge into the vector preheader. */
+  /*
+   * Retarget the preheader edge into the vector preheader.
+   */
   bool retargeted = false, explicit_branch = false;
   for (size_t i = cfg->block_start[c->preheader];
        i < cfg->block_end[c->preheader]; ++i) {
@@ -519,7 +551,9 @@ static bool fu_transform(fu_ctx_t *c) {
       explicit_branch = true;
   }
   if (!explicit_branch) {
-    /* Fallthrough into the header: add an explicit branch. */
+    /*
+     * Fallthrough into the header: add an explicit branch.
+     */
     size_t at = cfg->block_end[c->preheader];
     if (!nir_ensure_inst_space(f, 1))
       return false;
@@ -533,7 +567,9 @@ static bool fu_transform(fu_ctx_t *c) {
   return retargeted;
 }
 
-/* 1: transformed one loop, 0: none, -1: error. */
+/*
+ * 1: transformed one loop, 0: none, -1: error.
+ */
 static int fu_try(nyr_func_t *f) {
   fu_ctx_t c = {.f = f};
   if (f->next_value <= 0 || !nyr_cfg_build(f, &c.cfg))

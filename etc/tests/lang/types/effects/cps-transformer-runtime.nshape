@@ -1,7 +1,7 @@
 shape cps_transformer_factories_invoke_returned_callbacks {
   family "typing/effects"
   generator "regression"
-  features ["ny", "test", "typing", "effects", "higher-order", "callback", "cps", "return"]
+  features ["typing", "ny", "test", "callback", "cps", "effects", "higher-order", "return"]
   flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
   expect compile_and_run
   source ny <<'NY'

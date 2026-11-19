@@ -3696,7 +3696,9 @@ static bool nyr_known_callable_const(const nyr_func_t *f, const int *defs,
   return true;
 }
 
-/* Raw integer behind a provably tagged-integer argument. */
+/*
+ * Raw integer behind a provably tagged-integer argument.
+ */
 static bool nyr_known_callable_untag(const nyr_func_t *f, const int *defs,
                                      int value, bool *is_const, int64_t *raw,
                                      int *raw_value) {
@@ -3731,7 +3733,9 @@ static bool nyr_known_callable_untag(const nyr_func_t *f, const int *defs,
   return true;
 }
 
-/* F's every returned value is a raw integer. */
+/*
+ * F's every returned value is a raw integer.
+ */
 static bool nyr_known_callable_returns_raw_i64(const nyr_func_t *callee) {
   int *defs = nyr_build_defs(callee);
   if (!defs)
@@ -3755,7 +3759,9 @@ static bool nyr_known_callable_returns_raw_i64(const nyr_func_t *callee) {
   return saw && ok;
 }
 
-/* No live consumer: every use is a COPY whose result is itself dead. */
+/*
+ * No live consumer: every use is a COPY whose result is itself dead.
+ */
 static bool nyr_known_callable_value_dead(const nyr_func_t *f,
                                           const nyr_use_def_t *uses,
                                           int value, int depth) {
@@ -3817,7 +3823,9 @@ static bool nyr_devirt_known_callables(nyr_func_t *f) {
         call->imm != 2 || strcmp(call->symbol, "rt_call_any1") != 0 ||
         call->extra_args_len)
       continue;
-    /* r must feed exactly one rt_any_to_i64. */
+    /*
+     * r must feed exactly one rt_any_to_i64.
+     */
     size_t ub = uses.offsets[call->dst], ue = uses.offsets[call->dst + 1];
     if (ue - ub != 1)
       continue;
@@ -3856,7 +3864,9 @@ static bool nyr_devirt_known_callables(nyr_func_t *f) {
     if (ny_trace_enabled("NY_TRACE_DEVIRT"))
       ny_trace_line("DEVIRT", "devirt: known callable %s @%zu", sym->symbol,
                     i);
-    /* r := untagged argument; v := call F(r). */
+    /*
+     * r := untagged argument; v := call F(r).
+     */
     nyr_debug_loc_t debug = call->debug;
     int r = call->dst;
     nyr_inst_t direct = *call;
@@ -3902,7 +3912,9 @@ static bool nyr_devirt_known_callables(nyr_func_t *f) {
     changed = true;
   }
   if (changed && marker_count) {
-    /* Drop markers whose only consumers were the rewritten calls. */
+    /*
+     * Drop markers whose only consumers were the rewritten calls.
+     */
     nyr_use_def_free(&uses);
     if (nyr_build_use_def(f, &uses)) {
       for (size_t m = 0; m < marker_count; ++m) {

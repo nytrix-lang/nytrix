@@ -1,7 +1,7 @@
 shape runtime_index_bound_negative {
   family "typing/dependent"
   generator "error"
-  features [error typing dependent runtime-index negative]
+  features ["error", "typing", "dependent", "negative", "runtime-index"]
   template ny-compile-fail
   flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
   expect compile_fail

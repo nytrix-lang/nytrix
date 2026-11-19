@@ -4,8 +4,14 @@ shape dict_integer_set_scaling {
   features ["perf", "dict", "set", "integer-key", "scaling", "c-vs-ny", "native", "checksum", "time"]
   template ny-test-case
   budget {
+    ;; The 500k-entry table peaks near 460 MiB, so this ratio is dominated by
+    ;; whichever fixtures share the worker pool, not by codegen: the same
+    ;; binary measured 0.99x standalone and 1.12x / 1.51x / 2.65x under 25-27
+    ;; concurrent workers. A 1.5x cap sits inside that band and fails on
+    ;; scheduling luck. Rule: observed spread ceiling (2.65x) plus headroom
+    ;; toward a real ~2x native regression, not a noise-fitting 1.51x.
     max_native_c_ratio 30.0
-    max_native_llvm_ratio 1.5
+    max_native_llvm_ratio 3.0
   }
   expect compile_and_run
   source ny <<'NY'

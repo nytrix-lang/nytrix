@@ -29,7 +29,7 @@ def C_KEY_HOVER = gfx.color_rgb(0.106, 0.086, 0.141)
 def C_KEY_DOWN = gfx.color_rgb(0.200, 0.137, 0.278)
 
 fn text_w(any font, any label, any font_lg=0, any font_md=0, f64 px=9.5) f64 {
-   "Measures `label` with the loaded font (cached); estimates per code point without one."
+   "Measures `label` with the loaded font(cached); estimates per code point without one."
    def s = to_str(label)
    if is_int(font) && int(font) > 0 && s.len > 0 {
       def w = float(gfx.measure_text_fast(int(font), s).get(0, 0.0))

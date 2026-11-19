@@ -1,7 +1,7 @@
 shape mutable_list_slot_replacement_tracks_callback_effects {
   family "typing/effects"
   generator "regression"
-  features [ny test typing effects callback capture mutable list exact indexed replacement positive]
+  features ["typing", "ny", "test", "callback", "capture", "effects", "exact", "indexed", "list", "mutable", "positive", "replacement"]
   template ny-test-case
   flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
   expect compile_and_run
@@ -32,7 +32,7 @@ NY
 shape mutable_list_slot_replacement_rejects_underdeclared_effects {
   family "typing/effects"
   generator "regression"
-  features [error typing effects callback capture mutable list exact indexed replacement negative]
+  features ["error", "typing", "negative", "callback", "capture", "effects", "exact", "indexed", "list", "mutable", "replacement"]
   template ny-compile-fail
   flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
   expect compile_fail
@@ -63,7 +63,7 @@ NY
 shape mutable_dictionary_slot_replacement_tracks_callback_effects {
   family "typing/effects"
   generator "regression"
-  features [ny test typing effects callback capture mutable dictionary exact indexed replacement positive]
+  features ["typing", "ny", "test", "callback", "capture", "dictionary", "effects", "exact", "indexed", "mutable", "positive", "replacement"]
   template ny-test-case
   flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
   expect compile_and_run
@@ -94,7 +94,7 @@ NY
 shape mutable_dictionary_slot_replacement_rejects_underdeclared_effects {
   family "typing/effects"
   generator "regression"
-  features [error typing effects callback capture mutable dictionary exact indexed replacement negative]
+  features ["error", "typing", "negative", "callback", "capture", "dictionary", "effects", "exact", "indexed", "mutable", "replacement"]
   template ny-compile-fail
   flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
   expect compile_fail
@@ -125,7 +125,7 @@ NY
 shape mutating_dictionary_preserves_disjoint_list_callback_summary {
   family "typing/effects"
   generator "regression"
-  features [ny test typing effects callback container-kind isolation positive]
+  features ["typing", "ny", "test", "callback", "container-kind", "effects", "isolation", "positive"]
   template ny-test-case
   flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
   expect compile_and_run
@@ -157,7 +157,7 @@ NY
 shape mutable_callback_alias_join_survives_exact_container_store {
   family "typing/effects"
   generator "regression"
-  features [ny test typing effects callback mutation branch join exact container store positive]
+  features ["typing", "ny", "test", "branch", "callback", "container", "effects", "exact", "join", "mutation", "positive", "store"]
   template ny-test-case
   flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
   expect compile_and_run
@@ -194,7 +194,7 @@ NY
 shape mutable_callback_alias_join_rejects_underdeclared_container_store {
   family "typing/effects"
   generator "regression"
-  features [error typing effects callback mutation branch join exact container store negative]
+  features ["error", "typing", "negative", "branch", "callback", "container", "effects", "exact", "join", "mutation", "store"]
   template ny-compile-fail
   flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
   expect compile_fail
@@ -231,7 +231,7 @@ NY
 shape mutable_list_cow_alias_slot_effects_are_isolated {
   family "typing/effects"
   generator "regression"
-  features [ny test typing effects callback mutable list copy-on-write alias exact slot positive]
+  features ["typing", "ny", "test", "alias", "callback", "copy-on-write", "effects", "exact", "list", "mutable", "positive", "slot"]
   template ny-test-case
   flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
   expect compile_and_run
@@ -265,7 +265,7 @@ NY
 shape mutable_list_cow_alias_preserves_source_callback_effect {
   family "typing/effects"
   generator "regression"
-  features [ny test typing effects callback mutable list copy-on-write alias source fact positive]
+  features ["typing", "ny", "test", "alias", "callback", "copy-on-write", "effects", "fact", "list", "mutable", "positive", "source"]
   template ny-test-case
   flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
   expect compile_and_run
@@ -297,7 +297,7 @@ NY
 shape mutable_list_cow_alias_rejects_underdeclared_replacement_callback {
   family "typing/effects"
   generator "regression"
-  features [error typing effects callback mutable list copy-on-write alias underdeclared negative]
+  features ["error", "typing", "negative", "alias", "callback", "copy-on-write", "effects", "list", "mutable", "underdeclared"]
   template ny-compile-fail
   flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
   expect compile_fail
@@ -329,7 +329,7 @@ NY
 shape assigned_list_append_tracks_added_callback_effects {
   family "typing/effects"
   generator "regression"
-  features [ny test typing effects callback mutable list append assignment summary positive]
+  features ["typing", "ny", "test", "append", "assignment", "callback", "effects", "list", "mutable", "positive", "summary"]
   template ny-test-case
   flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
   expect compile_and_run
@@ -362,7 +362,7 @@ NY
 shape assigned_list_append_rejects_underdeclared_callback_effects {
   family "typing/effects"
   generator "error"
-  features [error typing effects callback mutable list append assignment negative]
+  features ["error", "typing", "negative", "append", "assignment", "callback", "effects", "list", "mutable"]
   template ny-compile-fail
   flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
   expect compile_fail
@@ -393,7 +393,7 @@ NY
 shape assigned_list_append_rejects_missing_custom_callback_row {
   family "typing/effects"
   generator "error"
-  features [error typing effects callback mutable list append assignment custom-row negative]
+  features ["error", "typing", "negative", "append", "assignment", "callback", "custom-row", "effects", "list", "mutable"]
   template ny-compile-fail
   flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
   expect compile_fail

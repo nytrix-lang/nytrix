@@ -483,7 +483,9 @@ static bool licm_load_in_bounds(const nyr_func_t *f, const int *defs,
     nyr_range_t r = facts[off].range;
     nyr_scev_affine_t affine;
     if (scev && nyr_scev_affine_at(f, scev, defs, off, at, &affine)) {
-      /* Value facts can be loose across loop PHIs; SCEV is exact here. */
+      /*
+       * Value facts can be loose across loop PHIs; SCEV is exact here.
+       */
       const nyr_range_t *ar = &affine.range;
       if (ar->has_min && (!r.has_min || ar->min > r.min)) {
         r.has_min = true;
@@ -1127,6 +1129,38 @@ static bool licm_hoist_one(nyr_func_t *f, bool *changed) {
                   loop_writes_memory ? "yes" : "no",
                   stable_managed_read ? "yes" : "no",
                   trap_equivalent_read ? "yes" : "no");
+            /*
+             * Rejections are silent today, which made it impossible to tell a
+             * refused candidate from one LICM never reached. Name the first
+             * operand that is loop-defined or fails to dominate the
+             * preheader; when every operand is invariant the rejection came
+             * from an effect, trap or address-shape rule above.
+             */
+            if (!candidate && !selected_inst[i] && nyr_licm_trace_enabled()) {
+              const int ops[6] = {in->a, in->b, in->c,
+                                  in->d, in->e, in->f};
+              int bad_operand = -1;
+              for (size_t k = 0; k < 6; ++k)
+                if (!licm_operand_invariant(f, &cfg, defs, preheader,
+                                            preheader_insert_at, ops[k],
+                                            f->next_value, loop_defined,
+                                            scheduled)) {
+                  bad_operand = ops[k];
+                  break;
+                }
+              if (bad_operand >= 0)
+                ny_dbg_heuristic_event(
+                    "LICM",
+                    "reject invariant @%zu op=%d dst=v%d from b%zu: operand "
+                    "v%d is loop-defined or does not dominate the preheader",
+                    i, (int)in->op, in->dst, block, bad_operand);
+              else
+                ny_dbg_heuristic_event(
+                    "LICM",
+                    "reject invariant @%zu op=%d dst=v%d from b%zu: effect, "
+                    "trap or address-shape rule refused it",
+                    i, (int)in->op, in->dst, block);
+            }
             if (selected_inst[i] || !candidate)
               continue;
             bool guard_already_queued = false;

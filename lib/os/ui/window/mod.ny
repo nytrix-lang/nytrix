@@ -3207,7 +3207,7 @@ fn inject_platform_input(any win, str kind, int a=0, int b=0, str path="") bool 
 }
 
 fn inject_platform_input(any win, str kind, int a=0, int b=0, str path="") bool {
-   "Test hook: feeds a compositor input event through the platform backend's listeners (Wayland), the path real pointer and keyboard events take. Returns false where unsupported."
+   "Test hook: feeds a compositor input event through the platform backend's listeners(Wayland), the path real pointer and keyboard events take. Returns false where unsupported."
    def h = _get_handle(win)
    if !h { return false }
    ui_backend.inject_input(h, kind, a, b, path)

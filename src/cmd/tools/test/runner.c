@@ -11954,6 +11954,8 @@ static void bench_clip(const char *s, int width, char *out, size_t cap) {
 static void bench_ms_text(double value, int valid, char *out, size_t cap);
 
 static int bench_signal(double value);
+static int bench_ratio_signal(double value);
+static int bench_ratio_signal(double value);
 
 static int bench_live_pair_comparable(const bench_stats_t *a,
                                       const bench_stats_t *b) {
@@ -12072,7 +12074,14 @@ static void bench_live_fixture_result(const char *name,
       timer_control ? bench_live_floor_pair : bench_live_pair_comparable;
   int nc_ok = pair_ok(&result->ny, &result->c);
   int lc_ok = pair_ok(&result->llvm, &result->c);
-  int nl_ok = pair_ok(&result->ny, &result->llvm);
+  /*
+   * The live row has to agree with the report it becomes: a NYR/LLVM ratio
+   * needs both routes clear of the clock-quantised 500ns floor, except on the
+   * startup control whose mutual ratios are the measurement.
+   */
+  int nl_ok = pair_ok(&result->ny, &result->llvm) &&
+              (timer_control || (bench_ratio_signal(result->ny.median) &&
+                                 bench_ratio_signal(result->llvm.median)));
   int cn_ok = pair_ok(&result->c, &result->nyc);
   bench_live_ratio(native_c, sizeof(native_c), result->ny.median,
                    result->c.median, nc_ok);
@@ -12566,6 +12575,21 @@ static int bench_signal(double value) {
   return value >= 0.0001;
 }
 
+/*
+ * Margin for a *ratio*, as opposed to a sample that merely has signal.
+ * The clock quantises at ~10ns, so a 100-200ns sample reports 20-30%
+ * dispersion and a ratio built on it is noise: currying's LLVM route runs at
+ * ~140ns because LLVM folds all three loops into closed form, and dividing
+ * 4.4us of real work by it produced a headline "31.85x NYR/LLVM gap" that
+ * measured the elision, not the code generator.  Requiring both sides of a
+ * ratio to clear 500ns (5x the display gate) keeps genuine gaps and drops the
+ * sub-microsecond rows; the startup control fixture has its own predicate and
+ * is unaffected.
+ */
+static int bench_ratio_signal(double value) {
+  return value >= 0.0005;
+}
+
 static int bench_row_low_signal(const BenchRow *r) {
   return r && ((r->ny_runs > 0 && !bench_signal(r->ny_ms)) ||
                (r->llvm_runs > 0 && !bench_signal(r->llvm_ms)) ||
@@ -12610,7 +12634,7 @@ static int bench_native_c_comparable(const BenchRow *r) {
          r->ny_checksum[0] && r->c_checksum[0] &&
          strcmp(r->ny_checksum, r->c_checksum) == 0 &&
          bench_candidate_signal_for_startup(r, r->ny_ms) &&
-         bench_signal(r->c_ms);
+         bench_ratio_signal(r->c_ms);
 }
 
 static int bench_llvm_c_comparable(const BenchRow *r) {
@@ -12620,7 +12644,7 @@ static int bench_llvm_c_comparable(const BenchRow *r) {
          !r->c_unstable && r->llvm_checksum[0] && r->c_checksum[0] &&
          strcmp(r->llvm_checksum, r->c_checksum) == 0 &&
          bench_candidate_signal_for_startup(r, r->llvm_ms) &&
-         bench_signal(r->c_ms);
+         bench_ratio_signal(r->c_ms);
 }
 
 static int bench_native_llvm_comparable(const BenchRow *r) {
@@ -12630,7 +12654,7 @@ static int bench_native_llvm_comparable(const BenchRow *r) {
          !r->llvm_timer_fallback && !r->ny_unstable && !r->llvm_unstable &&
          r->ny_checksum[0] && r->llvm_checksum[0] &&
          strcmp(r->ny_checksum, r->llvm_checksum) == 0 &&
-         bench_signal(r->ny_ms) && bench_signal(r->llvm_ms);
+         bench_ratio_signal(r->ny_ms) && bench_ratio_signal(r->llvm_ms);
 }
 
 static int bench_nyc_c_comparable(const BenchRow *r) {
@@ -12832,8 +12856,10 @@ static void bench_print_row(const BenchRow *r, int show_c, int show_llvm) {
       show_c && (bench_native_c_comparable(r) || (floor_row && r->c_ms > 0));
   int llvm_ratio_valid =
       show_llvm && (bench_llvm_c_comparable(r) || (floor_row && r->c_ms > 0));
-  int native_llvm_ratio_valid = show_llvm && (bench_native_llvm_comparable(r) ||
-                                              (floor_row && r->llvm_ms > 0));
+  int native_llvm_ratio_valid =
+      show_llvm && (bench_native_llvm_comparable(r) ||
+                    (floor_row && bench_ratio_signal(r->llvm_ms) &&
+                     bench_ratio_signal(r->ny_ms)));
   int nyc_c_ratio_valid = show_c && bench_nyc_c_comparable(r);
   double nyc_c_ratio = nyc_c_ratio_valid ? r->nyc_ms / r->c_ms : 0.0;
   double native_ratio = native_ratio_valid ? r->ny_ms / r->c_ms : 0.0;
@@ -12963,6 +12989,7 @@ static void bench_print_hotspots(const BenchTable *t) {
   const BenchRow *runtime = NULL;
   const BenchRow *ratio = NULL;
   const BenchRow *llvm_gap = NULL;
+  const BenchRow *nyc_gap = NULL;
   for (size_t i = 0; i < t->len; i++) {
     const BenchRow *r = &t->items[i];
     if (bench_signal(r->ny_compile_ms) &&
@@ -12977,6 +13004,9 @@ static void bench_print_hotspots(const BenchTable *t) {
         (!llvm_gap ||
          r->ny_ms / r->llvm_ms > llvm_gap->ny_ms / llvm_gap->llvm_ms))
       llvm_gap = r;
+    if (bench_nyc_c_comparable(r) &&
+        (!nyc_gap || r->nyc_ms / r->c_ms > nyc_gap->nyc_ms / nyc_gap->c_ms))
+      nyc_gap = r;
   }
   nyt_subheading("Hotspots");
   nyt_kv("slowest", "compile %s · runtime %s", compile ? compile->name : "—",
@@ -12995,6 +13025,13 @@ static void bench_print_hotspots(const BenchTable *t) {
     nyt_kv("NYR/LLVM gap", "%s (%s)", llvm_gap->name, text);
   } else
     nyt_kv("NYR/LLVM gap", "— (no comparable samples)");
+  if (nyc_gap) {
+    double gap = nyc_gap->nyc_ms / nyc_gap->c_ms;
+    char text[32];
+    bench_ratio_text(text, sizeof(text), gap);
+    nyt_kv("NYC/C gap", "%s (%s)", nyc_gap->name, text);
+  } else
+    nyt_kv("NYC/C gap", "— (no comparable samples)");
 }
 
 static void bench_print_singular_stats(const BenchRow *r,
@@ -15081,7 +15118,13 @@ run_benchmarks(const char *bin, const char *std_path, const char *std_bc,
     double budget = bench_shape_budget(job->shape, "max_native_llvm_ratio");
     double limit = budget > 0.0 ? budget : BENCH_MAX_NATIVE_LLVM_RATIO;
     double ny = job->result.ny.median, llvm = job->result.llvm.median;
-    if (ny <= 0.0 || llvm <= 0.0 || ny / llvm <= limit)
+    /*
+     * Only ratios the report can actually carry are worth a second run: a
+     * sub-500ns route is clock-quantised, so its multiple says nothing and the
+     * row shows the ratio as unavailable instead.
+     */
+    if (ny <= 0.0 || llvm <= 0.0 || ny / llvm <= limit ||
+        !bench_ratio_signal(ny) || !bench_ratio_signal(llvm))
       continue;
     printf("[bench] confirming %s: NYR/LLVM %.2fx exceeds %.2fx\n", job->name,
            ny / llvm, limit);

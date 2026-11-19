@@ -1,7 +1,7 @@
 shape enum_method_abi {
   family "runtime/language"
   generator "embedded"
-  features [enum adt abi native jit]
+  features ["abi", "adt", "enum", "jit", "native"]
   template ny-test-case
   flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only --native-backend=x86_64"
   expect compile_and_run

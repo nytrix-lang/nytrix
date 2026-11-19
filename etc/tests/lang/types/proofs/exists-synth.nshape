@@ -1,7 +1,7 @@
 shape exists_synth {
   family "runtime/proofs"
   generator "program"
-  features ["proofs", "exists", "synth", "nonlinear", "requires"]
+  features ["exists", "nonlinear", "proofs", "requires", "synth"]
   template ny-test-case
   timeout 120
   flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"

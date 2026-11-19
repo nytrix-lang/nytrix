@@ -25,281 +25,282 @@ the latest-run section is written by the C benchmark runner.
 
 ## Benchmark dashboard
 
-Generated from 24 full `./make bench` reports; the latest is `build/bench-reports/bench-20261118-181543-304194.json` (11-18 18:15). Ratios are runtime relative to Host C on the same host: below `1×` is faster than C. Only checksum-correct, valid comparisons count. Wall times on this host are noisy (C references moved up to 2× between runs), so read trends, not single points.
+Generated from 24 full `./make bench` reports; the latest is `build/bench-reports/bench-20261120-002508-1440396.json` (11-20 00:25). Ratios are runtime relative to Host C on the same host: below `1×` is faster than C. Only checksum-correct, valid comparisons count. Wall times on this host are noisy (C references moved up to 2× between runs), so read trends, not single points.
 
 | Backend | Geomean vs C | Benchmarks ≤1.2× | Compared |
 |---|---|---|---|
-| NYR | 1.46× | 41 | 106 |
-| LLVM | 1.31× | 51 | 106 |
-| NYC | 3.62× | 14 | 108 |
+| NYR | 1.39× | 43 | 108 |
+| LLVM | 1.15× | 59 | 108 |
+| NYC | 1.80× | 30 | 109 |
 
 <svg width="880" height="300" viewBox="0 0 880 300" role="img" aria-label="Geometric-mean runtime relative to C across benchmark runs">
 <text x="440" y="22" text-anchor="middle" font-size="16" fill="currentColor">Geomean runtime vs C, per full run (lower is better)</text>
-<line x1="64" y1="224.1" x2="856" y2="224.1" stroke="var(--border)" stroke-width="1"/><text x="56" y="228.1" text-anchor="end" font-size="11" fill="var(--muted)">1.0×</text>
-<line x1="64" y1="194.3" x2="856" y2="194.3" stroke="var(--border)" stroke-width="1"/><text x="56" y="198.3" text-anchor="end" font-size="11" fill="var(--muted)">1.5×</text>
-<line x1="64" y1="164.6" x2="856" y2="164.6" stroke="var(--border)" stroke-width="1"/><text x="56" y="168.6" text-anchor="end" font-size="11" fill="var(--muted)">2.0×</text>
-<line x1="64" y1="134.8" x2="856" y2="134.8" stroke="var(--border)" stroke-width="1"/><text x="56" y="138.8" text-anchor="end" font-size="11" fill="var(--muted)">2.5×</text>
-<line x1="64" y1="105.1" x2="856" y2="105.1" stroke="var(--border)" stroke-width="1"/><text x="56" y="109.1" text-anchor="end" font-size="11" fill="var(--muted)">3.0×</text>
-<line x1="64" y1="75.3" x2="856" y2="75.3" stroke="var(--border)" stroke-width="1"/><text x="56" y="79.3" text-anchor="end" font-size="11" fill="var(--muted)">3.5×</text>
-<line x1="64" y1="45.6" x2="856" y2="45.6" stroke="var(--border)" stroke-width="1"/><text x="56" y="49.6" text-anchor="end" font-size="11" fill="var(--muted)">4.0×</text>
-<line x1="64" y1="212.2" x2="856" y2="212.2" stroke="var(--ok)" stroke-width="1.5" stroke-dasharray="5 4"/><text x="856" y="207.2" text-anchor="end" font-size="11" fill="var(--ok)">1.2× goal</text>
-<polyline fill="none" stroke="var(--c1)" stroke-width="2.2" stroke-linejoin="round" points="64.0,91.7 98.4,189.4 132.9,188.5 167.3,196.5 201.7,198.0 236.2,196.1 270.6,197.4 305.0,196.3 339.5,199.9 373.9,192.9 408.3,193.3 442.8,187.3 477.2,192.2 511.7,196.6 546.1,191.8 580.5,192.1 615.0,192.4 649.4,192.9 683.8,200.7 718.3,199.5 752.7,199.8 787.1,206.8 821.6,208.6 856.0,196.9"/>
-<circle cx="64.0" cy="91.7" r="3" fill="var(--c1)"/>
-<circle cx="98.4" cy="189.4" r="3" fill="var(--c1)"/>
-<circle cx="132.9" cy="188.5" r="3" fill="var(--c1)"/>
-<circle cx="167.3" cy="196.5" r="3" fill="var(--c1)"/>
-<circle cx="201.7" cy="198.0" r="3" fill="var(--c1)"/>
-<circle cx="236.2" cy="196.1" r="3" fill="var(--c1)"/>
-<circle cx="270.6" cy="197.4" r="3" fill="var(--c1)"/>
-<circle cx="305.0" cy="196.3" r="3" fill="var(--c1)"/>
-<circle cx="339.5" cy="199.9" r="3" fill="var(--c1)"/>
-<circle cx="373.9" cy="192.9" r="3" fill="var(--c1)"/>
-<circle cx="408.3" cy="193.3" r="3" fill="var(--c1)"/>
-<circle cx="442.8" cy="187.3" r="3" fill="var(--c1)"/>
-<circle cx="477.2" cy="192.2" r="3" fill="var(--c1)"/>
-<circle cx="511.7" cy="196.6" r="3" fill="var(--c1)"/>
-<circle cx="546.1" cy="191.8" r="3" fill="var(--c1)"/>
-<circle cx="580.5" cy="192.1" r="3" fill="var(--c1)"/>
-<circle cx="615.0" cy="192.4" r="3" fill="var(--c1)"/>
-<circle cx="649.4" cy="192.9" r="3" fill="var(--c1)"/>
-<circle cx="683.8" cy="200.7" r="3" fill="var(--c1)"/>
-<circle cx="718.3" cy="199.5" r="3" fill="var(--c1)"/>
-<circle cx="752.7" cy="199.8" r="3" fill="var(--c1)"/>
-<circle cx="787.1" cy="206.8" r="3" fill="var(--c1)"/>
-<circle cx="821.6" cy="208.6" r="3" fill="var(--c1)"/>
-<circle cx="856.0" cy="196.9" r="3" fill="var(--c1)"/>
+<line x1="64" y1="223.2" x2="856" y2="223.2" stroke="var(--border)" stroke-width="1"/><text x="56" y="227.2" text-anchor="end" font-size="11" fill="var(--muted)">1.0×</text>
+<line x1="64" y1="191.1" x2="856" y2="191.1" stroke="var(--border)" stroke-width="1"/><text x="56" y="195.1" text-anchor="end" font-size="11" fill="var(--muted)">1.5×</text>
+<line x1="64" y1="159.0" x2="856" y2="159.0" stroke="var(--border)" stroke-width="1"/><text x="56" y="163.0" text-anchor="end" font-size="11" fill="var(--muted)">2.0×</text>
+<line x1="64" y1="126.9" x2="856" y2="126.9" stroke="var(--border)" stroke-width="1"/><text x="56" y="130.9" text-anchor="end" font-size="11" fill="var(--muted)">2.5×</text>
+<line x1="64" y1="94.7" x2="856" y2="94.7" stroke="var(--border)" stroke-width="1"/><text x="56" y="98.7" text-anchor="end" font-size="11" fill="var(--muted)">3.0×</text>
+<line x1="64" y1="62.6" x2="856" y2="62.6" stroke="var(--border)" stroke-width="1"/><text x="56" y="66.6" text-anchor="end" font-size="11" fill="var(--muted)">3.5×</text>
+<line x1="64" y1="210.3" x2="856" y2="210.3" stroke="var(--ok)" stroke-width="1.5" stroke-dasharray="5 4"/><text x="856" y="205.3" text-anchor="end" font-size="11" fill="var(--ok)">1.2× goal</text>
+<polyline fill="none" stroke="var(--c1)" stroke-width="2.2" stroke-linejoin="round" points="64.0,203.0 98.4,201.3 132.9,201.3 167.3,198.5 201.7,199.7 236.2,197.7 270.6,200.3 305.0,199.2 339.5,201.2 373.9,202.5 408.3,202.8 442.8,201.9 477.2,207.8 511.7,203.4 546.1,199.9 580.5,202.4 615.0,202.4 649.4,200.0 683.8,201.3 718.3,198.9 752.7,199.4 787.1,199.6 821.6,202.2 856.0,198.4"/>
+<circle cx="64.0" cy="203.0" r="3" fill="var(--c1)"/>
+<circle cx="98.4" cy="201.3" r="3" fill="var(--c1)"/>
+<circle cx="132.9" cy="201.3" r="3" fill="var(--c1)"/>
+<circle cx="167.3" cy="198.5" r="3" fill="var(--c1)"/>
+<circle cx="201.7" cy="199.7" r="3" fill="var(--c1)"/>
+<circle cx="236.2" cy="197.7" r="3" fill="var(--c1)"/>
+<circle cx="270.6" cy="200.3" r="3" fill="var(--c1)"/>
+<circle cx="305.0" cy="199.2" r="3" fill="var(--c1)"/>
+<circle cx="339.5" cy="201.2" r="3" fill="var(--c1)"/>
+<circle cx="373.9" cy="202.5" r="3" fill="var(--c1)"/>
+<circle cx="408.3" cy="202.8" r="3" fill="var(--c1)"/>
+<circle cx="442.8" cy="201.9" r="3" fill="var(--c1)"/>
+<circle cx="477.2" cy="207.8" r="3" fill="var(--c1)"/>
+<circle cx="511.7" cy="203.4" r="3" fill="var(--c1)"/>
+<circle cx="546.1" cy="199.9" r="3" fill="var(--c1)"/>
+<circle cx="580.5" cy="202.4" r="3" fill="var(--c1)"/>
+<circle cx="615.0" cy="202.4" r="3" fill="var(--c1)"/>
+<circle cx="649.4" cy="200.0" r="3" fill="var(--c1)"/>
+<circle cx="683.8" cy="201.3" r="3" fill="var(--c1)"/>
+<circle cx="718.3" cy="198.9" r="3" fill="var(--c1)"/>
+<circle cx="752.7" cy="199.4" r="3" fill="var(--c1)"/>
+<circle cx="787.1" cy="199.6" r="3" fill="var(--c1)"/>
+<circle cx="821.6" cy="202.2" r="3" fill="var(--c1)"/>
+<circle cx="856.0" cy="198.4" r="3" fill="var(--c1)"/>
 <rect x="80" y="278" width="12" height="12" rx="2" fill="var(--c1)"/><text x="98" y="288" font-size="12" fill="currentColor">NYR</text>
-<polyline fill="none" stroke="var(--c2)" stroke-width="2.2" stroke-linejoin="round" points="64.0,211.8 98.4,212.7 132.9,213.5 167.3,214.1 201.7,213.6 236.2,212.7 270.6,212.1 305.0,213.7 339.5,215.2 373.9,209.9 408.3,210.2 442.8,205.3 477.2,209.9 511.7,209.8 546.1,208.8 580.5,208.0 615.0,210.4 649.4,208.8 683.8,212.3 718.3,213.3 752.7,212.0 787.1,215.5 821.6,215.2 856.0,205.5"/>
-<circle cx="64.0" cy="211.8" r="3" fill="var(--c2)"/>
-<circle cx="98.4" cy="212.7" r="3" fill="var(--c2)"/>
-<circle cx="132.9" cy="213.5" r="3" fill="var(--c2)"/>
-<circle cx="167.3" cy="214.1" r="3" fill="var(--c2)"/>
-<circle cx="201.7" cy="213.6" r="3" fill="var(--c2)"/>
-<circle cx="236.2" cy="212.7" r="3" fill="var(--c2)"/>
-<circle cx="270.6" cy="212.1" r="3" fill="var(--c2)"/>
-<circle cx="305.0" cy="213.7" r="3" fill="var(--c2)"/>
-<circle cx="339.5" cy="215.2" r="3" fill="var(--c2)"/>
-<circle cx="373.9" cy="209.9" r="3" fill="var(--c2)"/>
-<circle cx="408.3" cy="210.2" r="3" fill="var(--c2)"/>
-<circle cx="442.8" cy="205.3" r="3" fill="var(--c2)"/>
-<circle cx="477.2" cy="209.9" r="3" fill="var(--c2)"/>
-<circle cx="511.7" cy="209.8" r="3" fill="var(--c2)"/>
-<circle cx="546.1" cy="208.8" r="3" fill="var(--c2)"/>
-<circle cx="580.5" cy="208.0" r="3" fill="var(--c2)"/>
-<circle cx="615.0" cy="210.4" r="3" fill="var(--c2)"/>
-<circle cx="649.4" cy="208.8" r="3" fill="var(--c2)"/>
-<circle cx="683.8" cy="212.3" r="3" fill="var(--c2)"/>
-<circle cx="718.3" cy="213.3" r="3" fill="var(--c2)"/>
-<circle cx="752.7" cy="212.0" r="3" fill="var(--c2)"/>
-<circle cx="787.1" cy="215.5" r="3" fill="var(--c2)"/>
-<circle cx="821.6" cy="215.2" r="3" fill="var(--c2)"/>
-<circle cx="856.0" cy="205.5" r="3" fill="var(--c2)"/>
+<polyline fill="none" stroke="var(--c2)" stroke-width="2.2" stroke-linejoin="round" points="64.0,218.4 98.4,216.4 132.9,216.8 167.3,216.9 201.7,216.4 236.2,215.5 270.6,214.8 305.0,215.4 339.5,214.8 373.9,217.2 408.3,217.5 442.8,216.6 477.2,215.2 511.7,218.2 546.1,214.9 580.5,216.4 615.0,216.8 649.4,213.5 683.8,216.2 718.3,212.8 752.7,213.5 787.1,211.0 821.6,217.9 856.0,213.3"/>
+<circle cx="64.0" cy="218.4" r="3" fill="var(--c2)"/>
+<circle cx="98.4" cy="216.4" r="3" fill="var(--c2)"/>
+<circle cx="132.9" cy="216.8" r="3" fill="var(--c2)"/>
+<circle cx="167.3" cy="216.9" r="3" fill="var(--c2)"/>
+<circle cx="201.7" cy="216.4" r="3" fill="var(--c2)"/>
+<circle cx="236.2" cy="215.5" r="3" fill="var(--c2)"/>
+<circle cx="270.6" cy="214.8" r="3" fill="var(--c2)"/>
+<circle cx="305.0" cy="215.4" r="3" fill="var(--c2)"/>
+<circle cx="339.5" cy="214.8" r="3" fill="var(--c2)"/>
+<circle cx="373.9" cy="217.2" r="3" fill="var(--c2)"/>
+<circle cx="408.3" cy="217.5" r="3" fill="var(--c2)"/>
+<circle cx="442.8" cy="216.6" r="3" fill="var(--c2)"/>
+<circle cx="477.2" cy="215.2" r="3" fill="var(--c2)"/>
+<circle cx="511.7" cy="218.2" r="3" fill="var(--c2)"/>
+<circle cx="546.1" cy="214.9" r="3" fill="var(--c2)"/>
+<circle cx="580.5" cy="216.4" r="3" fill="var(--c2)"/>
+<circle cx="615.0" cy="216.8" r="3" fill="var(--c2)"/>
+<circle cx="649.4" cy="213.5" r="3" fill="var(--c2)"/>
+<circle cx="683.8" cy="216.2" r="3" fill="var(--c2)"/>
+<circle cx="718.3" cy="212.8" r="3" fill="var(--c2)"/>
+<circle cx="752.7" cy="213.5" r="3" fill="var(--c2)"/>
+<circle cx="787.1" cy="211.0" r="3" fill="var(--c2)"/>
+<circle cx="821.6" cy="217.9" r="3" fill="var(--c2)"/>
+<circle cx="856.0" cy="213.3" r="3" fill="var(--c2)"/>
 <rect x="190" y="278" width="12" height="12" rx="2" fill="var(--c2)"/><text x="208" y="288" font-size="12" fill="currentColor">LLVM</text>
-<polyline fill="none" stroke="var(--c3)" stroke-width="2.2" stroke-linejoin="round" points="64.0,79.1 98.4,78.9 132.9,62.1 167.3,74.6 201.7,75.9 236.2,71.0 270.6,69.3 305.0,74.1 339.5,72.2 373.9,70.2 408.3,66.8 442.8,70.6 477.2,66.7 511.7,71.8 546.1,67.0 580.5,66.5 615.0,69.9 649.4,62.8 683.8,74.8 718.3,79.1 752.7,80.6 787.1,76.2 821.6,74.1 856.0,67.9"/>
-<circle cx="64.0" cy="79.1" r="3" fill="var(--c3)"/>
-<circle cx="98.4" cy="78.9" r="3" fill="var(--c3)"/>
-<circle cx="132.9" cy="62.1" r="3" fill="var(--c3)"/>
-<circle cx="167.3" cy="74.6" r="3" fill="var(--c3)"/>
-<circle cx="201.7" cy="75.9" r="3" fill="var(--c3)"/>
-<circle cx="236.2" cy="71.0" r="3" fill="var(--c3)"/>
-<circle cx="270.6" cy="69.3" r="3" fill="var(--c3)"/>
-<circle cx="305.0" cy="74.1" r="3" fill="var(--c3)"/>
-<circle cx="339.5" cy="72.2" r="3" fill="var(--c3)"/>
-<circle cx="373.9" cy="70.2" r="3" fill="var(--c3)"/>
-<circle cx="408.3" cy="66.8" r="3" fill="var(--c3)"/>
-<circle cx="442.8" cy="70.6" r="3" fill="var(--c3)"/>
-<circle cx="477.2" cy="66.7" r="3" fill="var(--c3)"/>
-<circle cx="511.7" cy="71.8" r="3" fill="var(--c3)"/>
-<circle cx="546.1" cy="67.0" r="3" fill="var(--c3)"/>
-<circle cx="580.5" cy="66.5" r="3" fill="var(--c3)"/>
-<circle cx="615.0" cy="69.9" r="3" fill="var(--c3)"/>
-<circle cx="649.4" cy="62.8" r="3" fill="var(--c3)"/>
-<circle cx="683.8" cy="74.8" r="3" fill="var(--c3)"/>
-<circle cx="718.3" cy="79.1" r="3" fill="var(--c3)"/>
-<circle cx="752.7" cy="80.6" r="3" fill="var(--c3)"/>
-<circle cx="787.1" cy="76.2" r="3" fill="var(--c3)"/>
-<circle cx="821.6" cy="74.1" r="3" fill="var(--c3)"/>
-<circle cx="856.0" cy="67.9" r="3" fill="var(--c3)"/>
+<polyline fill="none" stroke="var(--c3)" stroke-width="2.2" stroke-linejoin="round" points="64.0,62.5 98.4,172.3 132.9,175.7 167.3,174.7 201.7,170.5 236.2,173.3 270.6,174.6 305.0,174.4 339.5,171.3 373.9,175.6 408.3,173.5 442.8,173.5 477.2,176.1 511.7,176.3 546.1,173.7 580.5,174.8 615.0,173.7 649.4,171.4 683.8,175.1 718.3,176.1 752.7,172.9 787.1,172.5 821.6,173.2 856.0,171.6"/>
+<circle cx="64.0" cy="62.5" r="3" fill="var(--c3)"/>
+<circle cx="98.4" cy="172.3" r="3" fill="var(--c3)"/>
+<circle cx="132.9" cy="175.7" r="3" fill="var(--c3)"/>
+<circle cx="167.3" cy="174.7" r="3" fill="var(--c3)"/>
+<circle cx="201.7" cy="170.5" r="3" fill="var(--c3)"/>
+<circle cx="236.2" cy="173.3" r="3" fill="var(--c3)"/>
+<circle cx="270.6" cy="174.6" r="3" fill="var(--c3)"/>
+<circle cx="305.0" cy="174.4" r="3" fill="var(--c3)"/>
+<circle cx="339.5" cy="171.3" r="3" fill="var(--c3)"/>
+<circle cx="373.9" cy="175.6" r="3" fill="var(--c3)"/>
+<circle cx="408.3" cy="173.5" r="3" fill="var(--c3)"/>
+<circle cx="442.8" cy="173.5" r="3" fill="var(--c3)"/>
+<circle cx="477.2" cy="176.1" r="3" fill="var(--c3)"/>
+<circle cx="511.7" cy="176.3" r="3" fill="var(--c3)"/>
+<circle cx="546.1" cy="173.7" r="3" fill="var(--c3)"/>
+<circle cx="580.5" cy="174.8" r="3" fill="var(--c3)"/>
+<circle cx="615.0" cy="173.7" r="3" fill="var(--c3)"/>
+<circle cx="649.4" cy="171.4" r="3" fill="var(--c3)"/>
+<circle cx="683.8" cy="175.1" r="3" fill="var(--c3)"/>
+<circle cx="718.3" cy="176.1" r="3" fill="var(--c3)"/>
+<circle cx="752.7" cy="172.9" r="3" fill="var(--c3)"/>
+<circle cx="787.1" cy="172.5" r="3" fill="var(--c3)"/>
+<circle cx="821.6" cy="173.2" r="3" fill="var(--c3)"/>
+<circle cx="856.0" cy="171.6" r="3" fill="var(--c3)"/>
 <rect x="300" y="278" width="12" height="12" rx="2" fill="var(--c3)"/><text x="318" y="288" font-size="12" fill="currentColor">NYC</text>
-<text x="64.0" y="252" text-anchor="start" font-size="10" fill="var(--muted)">11-16 00:05</text>
-<text x="167.3" y="252" text-anchor="middle" font-size="10" fill="var(--muted)">11-16 01:45</text>
-<text x="270.6" y="252" text-anchor="middle" font-size="10" fill="var(--muted)">11-16 02:41</text>
-<text x="373.9" y="252" text-anchor="middle" font-size="10" fill="var(--muted)">11-18 05:37</text>
-<text x="477.2" y="252" text-anchor="middle" font-size="10" fill="var(--muted)">11-18 12:14</text>
-<text x="580.5" y="252" text-anchor="middle" font-size="10" fill="var(--muted)">11-18 12:58</text>
-<text x="683.8" y="252" text-anchor="middle" font-size="10" fill="var(--muted)">11-18 16:17</text>
-<text x="787.1" y="252" text-anchor="middle" font-size="10" fill="var(--muted)">11-18 17:52</text>
-<text x="856.0" y="252" text-anchor="end" font-size="10" fill="var(--muted)">11-18 18:15</text>
+<text x="64.0" y="252" text-anchor="start" font-size="10" fill="var(--muted)">11-19 09:44</text>
+<text x="167.3" y="252" text-anchor="middle" font-size="10" fill="var(--muted)">11-19 10:20</text>
+<text x="270.6" y="252" text-anchor="middle" font-size="10" fill="var(--muted)">11-19 10:51</text>
+<text x="373.9" y="252" text-anchor="middle" font-size="10" fill="var(--muted)">11-19 11:25</text>
+<text x="477.2" y="252" text-anchor="middle" font-size="10" fill="var(--muted)">11-19 11:42</text>
+<text x="580.5" y="252" text-anchor="middle" font-size="10" fill="var(--muted)">11-19 12:26</text>
+<text x="683.8" y="252" text-anchor="middle" font-size="10" fill="var(--muted)">11-19 21:02</text>
+<text x="787.1" y="252" text-anchor="middle" font-size="10" fill="var(--muted)">11-19 23:38</text>
+<text x="856.0" y="252" text-anchor="end" font-size="10" fill="var(--muted)">11-20 00:25</text>
 </svg>
 
 <svg width="880" height="300" viewBox="0 0 880 300" role="img" aria-label="Benchmarks per runtime-ratio band and backend">
 <text x="440" y="22" text-anchor="middle" font-size="16" fill="currentColor">Benchmarks per runtime band vs C, latest run</text>
-<rect x="79.0" y="131.7" width="31.0" height="104.3" rx="3" fill="var(--c1)"/><text x="94.5" y="127.7" text-anchor="middle" font-size="10" fill="currentColor">25</text>
-<rect x="113.0" y="102.6" width="31.0" height="133.4" rx="3" fill="var(--c2)"/><text x="128.5" y="98.6" text-anchor="middle" font-size="10" fill="currentColor">32</text>
-<rect x="147.0" y="194.3" width="31.0" height="41.7" rx="3" fill="var(--c3)"/><text x="162.5" y="190.3" text-anchor="middle" font-size="10" fill="currentColor">10</text>
+<rect x="79.0" y="135.6" width="31.0" height="100.4" rx="3" fill="var(--c1)"/><text x="94.5" y="131.6" text-anchor="middle" font-size="10" fill="currentColor">21</text>
+<rect x="113.0" y="40.0" width="31.0" height="196.0" rx="3" fill="var(--c2)"/><text x="128.5" y="36.0" text-anchor="middle" font-size="10" fill="currentColor">41</text>
+<rect x="147.0" y="202.5" width="31.0" height="33.5" rx="3" fill="var(--c3)"/><text x="162.5" y="198.5" text-anchor="middle" font-size="10" fill="currentColor">7</text>
 <text x="130.0" y="252" text-anchor="middle" font-size="11" fill="var(--muted)">≤1×</text>
-<rect x="211.0" y="169.3" width="31.0" height="66.7" rx="3" fill="var(--c1)"/><text x="226.5" y="165.3" text-anchor="middle" font-size="10" fill="currentColor">16</text>
-<rect x="245.0" y="156.8" width="31.0" height="79.2" rx="3" fill="var(--c2)"/><text x="260.5" y="152.8" text-anchor="middle" font-size="10" fill="currentColor">19</text>
-<rect x="279.0" y="219.3" width="31.0" height="16.7" rx="3" fill="var(--c3)"/><text x="294.5" y="215.3" text-anchor="middle" font-size="10" fill="currentColor">4</text>
+<rect x="211.0" y="130.8" width="31.0" height="105.2" rx="3" fill="var(--c1)"/><text x="226.5" y="126.8" text-anchor="middle" font-size="10" fill="currentColor">22</text>
+<rect x="245.0" y="150.0" width="31.0" height="86.0" rx="3" fill="var(--c2)"/><text x="260.5" y="146.0" text-anchor="middle" font-size="10" fill="currentColor">18</text>
+<rect x="279.0" y="126.0" width="31.0" height="110.0" rx="3" fill="var(--c3)"/><text x="294.5" y="122.0" text-anchor="middle" font-size="10" fill="currentColor">23</text>
 <text x="262.0" y="252" text-anchor="middle" font-size="11" fill="var(--muted)">1–1.2×</text>
-<rect x="343.0" y="160.9" width="31.0" height="75.1" rx="3" fill="var(--c1)"/><text x="358.5" y="156.9" text-anchor="middle" font-size="10" fill="currentColor">18</text>
-<rect x="377.0" y="173.4" width="31.0" height="62.6" rx="3" fill="var(--c2)"/><text x="392.5" y="169.4" text-anchor="middle" font-size="10" fill="currentColor">15</text>
-<rect x="411.0" y="202.6" width="31.0" height="33.4" rx="3" fill="var(--c3)"/><text x="426.5" y="198.6" text-anchor="middle" font-size="10" fill="currentColor">8</text>
+<rect x="343.0" y="121.3" width="31.0" height="114.7" rx="3" fill="var(--c1)"/><text x="358.5" y="117.3" text-anchor="middle" font-size="10" fill="currentColor">24</text>
+<rect x="377.0" y="126.0" width="31.0" height="110.0" rx="3" fill="var(--c2)"/><text x="392.5" y="122.0" text-anchor="middle" font-size="10" fill="currentColor">23</text>
+<rect x="411.0" y="126.0" width="31.0" height="110.0" rx="3" fill="var(--c3)"/><text x="426.5" y="122.0" text-anchor="middle" font-size="10" fill="currentColor">23</text>
 <text x="394.0" y="252" text-anchor="middle" font-size="11" fill="var(--muted)">1.2–1.5×</text>
-<rect x="475.0" y="173.4" width="31.0" height="62.6" rx="3" fill="var(--c1)"/><text x="490.5" y="169.4" text-anchor="middle" font-size="10" fill="currentColor">15</text>
-<rect x="509.0" y="186.0" width="31.0" height="50.0" rx="3" fill="var(--c2)"/><text x="524.5" y="182.0" text-anchor="middle" font-size="10" fill="currentColor">12</text>
-<rect x="543.0" y="190.1" width="31.0" height="45.9" rx="3" fill="var(--c3)"/><text x="558.5" y="186.1" text-anchor="middle" font-size="10" fill="currentColor">11</text>
+<rect x="475.0" y="154.7" width="31.0" height="81.3" rx="3" fill="var(--c1)"/><text x="490.5" y="150.7" text-anchor="middle" font-size="10" fill="currentColor">17</text>
+<rect x="509.0" y="188.2" width="31.0" height="47.8" rx="3" fill="var(--c2)"/><text x="524.5" y="184.2" text-anchor="middle" font-size="10" fill="currentColor">10</text>
+<rect x="543.0" y="145.2" width="31.0" height="90.8" rx="3" fill="var(--c3)"/><text x="558.5" y="141.2" text-anchor="middle" font-size="10" fill="currentColor">19</text>
 <text x="526.0" y="252" text-anchor="middle" font-size="11" fill="var(--muted)">1.5–2×</text>
-<rect x="607.0" y="160.9" width="31.0" height="75.1" rx="3" fill="var(--c1)"/><text x="622.5" y="156.9" text-anchor="middle" font-size="10" fill="currentColor">18</text>
-<rect x="641.0" y="148.4" width="31.0" height="87.6" rx="3" fill="var(--c2)"/><text x="656.5" y="144.4" text-anchor="middle" font-size="10" fill="currentColor">21</text>
-<rect x="675.0" y="119.2" width="31.0" height="116.8" rx="3" fill="var(--c3)"/><text x="690.5" y="115.2" text-anchor="middle" font-size="10" fill="currentColor">28</text>
+<rect x="607.0" y="154.7" width="31.0" height="81.3" rx="3" fill="var(--c1)"/><text x="622.5" y="150.7" text-anchor="middle" font-size="10" fill="currentColor">17</text>
+<rect x="641.0" y="178.6" width="31.0" height="57.4" rx="3" fill="var(--c2)"/><text x="656.5" y="174.6" text-anchor="middle" font-size="10" fill="currentColor">12</text>
+<rect x="675.0" y="121.3" width="31.0" height="114.7" rx="3" fill="var(--c3)"/><text x="690.5" y="117.3" text-anchor="middle" font-size="10" fill="currentColor">24</text>
 <text x="658.0" y="252" text-anchor="middle" font-size="11" fill="var(--muted)">2–4×</text>
-<rect x="739.0" y="177.6" width="31.0" height="58.4" rx="3" fill="var(--c1)"/><text x="754.5" y="173.6" text-anchor="middle" font-size="10" fill="currentColor">14</text>
-<rect x="773.0" y="206.8" width="31.0" height="29.2" rx="3" fill="var(--c2)"/><text x="788.5" y="202.8" text-anchor="middle" font-size="10" fill="currentColor">7</text>
-<rect x="807.0" y="40.0" width="31.0" height="196.0" rx="3" fill="var(--c3)"/><text x="822.5" y="36.0" text-anchor="middle" font-size="10" fill="currentColor">47</text>
+<rect x="739.0" y="202.5" width="31.0" height="33.5" rx="3" fill="var(--c1)"/><text x="754.5" y="198.5" text-anchor="middle" font-size="10" fill="currentColor">7</text>
+<rect x="773.0" y="216.9" width="31.0" height="19.1" rx="3" fill="var(--c2)"/><text x="788.5" y="212.9" text-anchor="middle" font-size="10" fill="currentColor">4</text>
+<rect x="807.0" y="173.9" width="31.0" height="62.1" rx="3" fill="var(--c3)"/><text x="822.5" y="169.9" text-anchor="middle" font-size="10" fill="currentColor">13</text>
 <text x="790.0" y="252" text-anchor="middle" font-size="11" fill="var(--muted)">&gt;4×</text>
-<rect x="80" y="278" width="12" height="12" rx="2" fill="var(--c1)"/><text x="98" y="288" font-size="12" fill="currentColor">NYR (106)</text>
-<rect x="230" y="278" width="12" height="12" rx="2" fill="var(--c2)"/><text x="248" y="288" font-size="12" fill="currentColor">LLVM (106)</text>
-<rect x="380" y="278" width="12" height="12" rx="2" fill="var(--c3)"/><text x="398" y="288" font-size="12" fill="currentColor">NYC (108)</text>
+<rect x="80" y="278" width="12" height="12" rx="2" fill="var(--c1)"/><text x="98" y="288" font-size="12" fill="currentColor">NYR (108)</text>
+<rect x="230" y="278" width="12" height="12" rx="2" fill="var(--c2)"/><text x="248" y="288" font-size="12" fill="currentColor">LLVM (108)</text>
+<rect x="380" y="278" width="12" height="12" rx="2" fill="var(--c3)"/><text x="398" y="288" font-size="12" fill="currentColor">NYC (109)</text>
 </svg>
 
-<svg width="880" height="1560" viewBox="0 0 880 1560" role="img" aria-label="NYR runtime relative to C for each benchmark">
+<svg width="880" height="1588" viewBox="0 0 880 1588" role="img" aria-label="NYR runtime relative to C for each benchmark">
 <text x="440" y="22" text-anchor="middle" font-size="16" fill="currentColor">NYR runtime vs C, latest run (log scale; ≤1.2× green, ≤2× amber, &gt;2× red)</text>
-<line x1="245.1" y1="34" x2="245.1" y2="1530" stroke="var(--border)" stroke-width="1"/><text x="245.1" y="1546" text-anchor="middle" font-size="10" fill="var(--muted)">0.25×</text>
-<line x1="340.3" y1="34" x2="340.3" y2="1530" stroke="var(--border)" stroke-width="1"/><text x="340.3" y="1546" text-anchor="middle" font-size="10" fill="var(--muted)">0.5×</text>
-<line x1="435.4" y1="34" x2="435.4" y2="1530" stroke="var(--border)" stroke-width="1"/><text x="435.4" y="1546" text-anchor="middle" font-size="10" fill="var(--muted)">1×</text>
-<line x1="460.5" y1="34" x2="460.5" y2="1530" stroke="var(--ok)" stroke-width="1" stroke-dasharray="4 3"/><text x="460.5" y="1546" text-anchor="middle" font-size="10" fill="var(--muted)">1.2×</text>
-<line x1="530.6" y1="34" x2="530.6" y2="1530" stroke="var(--border)" stroke-width="1"/><text x="530.6" y="1546" text-anchor="middle" font-size="10" fill="var(--muted)">2×</text>
-<line x1="625.7" y1="34" x2="625.7" y2="1530" stroke="var(--border)" stroke-width="1"/><text x="625.7" y="1546" text-anchor="middle" font-size="10" fill="var(--muted)">4×</text>
-<line x1="720.9" y1="34" x2="720.9" y2="1530" stroke="var(--border)" stroke-width="1"/><text x="720.9" y="1546" text-anchor="middle" font-size="10" fill="var(--muted)">8×</text>
-<line x1="816.0" y1="34" x2="816.0" y2="1530" stroke="var(--border)" stroke-width="1"/><text x="816.0" y="1546" text-anchor="middle" font-size="10" fill="var(--muted)">16×</text>
+<line x1="245.1" y1="34" x2="245.1" y2="1558" stroke="var(--border)" stroke-width="1"/><text x="245.1" y="1574" text-anchor="middle" font-size="10" fill="var(--muted)">0.25×</text>
+<line x1="340.3" y1="34" x2="340.3" y2="1558" stroke="var(--border)" stroke-width="1"/><text x="340.3" y="1574" text-anchor="middle" font-size="10" fill="var(--muted)">0.5×</text>
+<line x1="435.4" y1="34" x2="435.4" y2="1558" stroke="var(--border)" stroke-width="1"/><text x="435.4" y="1574" text-anchor="middle" font-size="10" fill="var(--muted)">1×</text>
+<line x1="460.5" y1="34" x2="460.5" y2="1558" stroke="var(--ok)" stroke-width="1" stroke-dasharray="4 3"/><text x="460.5" y="1574" text-anchor="middle" font-size="10" fill="var(--muted)">1.2×</text>
+<line x1="530.6" y1="34" x2="530.6" y2="1558" stroke="var(--border)" stroke-width="1"/><text x="530.6" y="1574" text-anchor="middle" font-size="10" fill="var(--muted)">2×</text>
+<line x1="625.7" y1="34" x2="625.7" y2="1558" stroke="var(--border)" stroke-width="1"/><text x="625.7" y="1574" text-anchor="middle" font-size="10" fill="var(--muted)">4×</text>
+<line x1="720.9" y1="34" x2="720.9" y2="1558" stroke="var(--border)" stroke-width="1"/><text x="720.9" y="1574" text-anchor="middle" font-size="10" fill="var(--muted)">8×</text>
+<line x1="816.0" y1="34" x2="816.0" y2="1558" stroke="var(--border)" stroke-width="1"/><text x="816.0" y="1574" text-anchor="middle" font-size="10" fill="var(--muted)">16×</text>
 <text x="144" y="49" text-anchor="end" font-size="10" fill="currentColor">dce</text><rect x="150.0" y="40" width="285.4" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="439.4" y="49" font-size="9" fill="var(--muted)"><0.01</text>
-<text x="144" y="63" text-anchor="end" font-size="10" fill="currentColor">iter</text><rect x="150.0" y="54" width="285.4" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="439.4" y="63" font-size="9" fill="var(--muted)">0.11</text>
-<text x="144" y="77" text-anchor="end" font-size="10" fill="currentColor">vector</text><rect x="197.9" y="68" width="237.5" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="439.4" y="77" font-size="9" fill="var(--muted)">0.18</text>
-<text x="144" y="91" text-anchor="end" font-size="10" fill="currentColor">pbkdf2</text><rect x="221.3" y="82" width="214.2" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="439.4" y="91" font-size="9" fill="var(--muted)">0.21</text>
-<text x="144" y="105" text-anchor="end" font-size="10" fill="currentColor">imagick</text><rect x="240.3" y="96" width="195.1" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="439.4" y="105" font-size="9" fill="var(--muted)">0.24</text>
-<text x="144" y="119" text-anchor="end" font-size="10" fill="currentColor">thread-ring</text><rect x="256.1" y="110" width="179.4" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="439.4" y="119" font-size="9" fill="var(--muted)">0.27</text>
-<text x="144" y="133" text-anchor="end" font-size="10" fill="currentColor">dict-set</text><rect x="311.9" y="124" width="123.5" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="439.4" y="133" font-size="9" fill="var(--muted)">0.41</text>
-<text x="144" y="147" text-anchor="end" font-size="10" fill="currentColor">graph-bfs</text><rect x="341.6" y="138" width="93.8" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="439.4" y="147" font-size="9" fill="var(--muted)">0.50</text>
-<text x="144" y="161" text-anchor="end" font-size="10" fill="currentColor">dict</text><rect x="359.6" y="152" width="75.8" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="439.4" y="161" font-size="9" fill="var(--muted)">0.58</text>
-<text x="144" y="175" text-anchor="end" font-size="10" fill="currentColor">escape-loop</text><rect x="369.7" y="166" width="65.7" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="439.4" y="175" font-size="9" fill="var(--muted)">0.62</text>
-<text x="144" y="189" text-anchor="end" font-size="10" fill="currentColor">append-scaling</text><rect x="375.5" y="180" width="59.9" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="439.4" y="189" font-size="9" fill="var(--muted)">0.65</text>
-<text x="144" y="203" text-anchor="end" font-size="10" fill="currentColor">binary</text><rect x="389.9" y="194" width="45.5" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="439.4" y="203" font-size="9" fill="var(--muted)">0.72</text>
-<text x="144" y="217" text-anchor="end" font-size="10" fill="currentColor">heapsort-int</text><rect x="390.5" y="208" width="44.9" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="439.4" y="217" font-size="9" fill="var(--muted)">0.72</text>
-<text x="144" y="231" text-anchor="end" font-size="10" fill="currentColor">transpose</text><rect x="393.1" y="222" width="42.4" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="439.4" y="231" font-size="9" fill="var(--muted)">0.73</text>
-<text x="144" y="245" text-anchor="end" font-size="10" fill="currentColor">mandel</text><rect x="398.8" y="236" width="36.6" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="439.4" y="245" font-size="9" fill="var(--muted)">0.77</text>
-<text x="144" y="259" text-anchor="end" font-size="10" fill="currentColor">knight</text><rect x="406.7" y="250" width="28.7" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="439.4" y="259" font-size="9" fill="var(--muted)">0.81</text>
-<text x="144" y="273" text-anchor="end" font-size="10" fill="currentColor">mcf</text><rect x="409.3" y="264" width="26.2" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="439.4" y="273" font-size="9" fill="var(--muted)">0.83</text>
-<text x="144" y="287" text-anchor="end" font-size="10" fill="currentColor">permute</text><rect x="415.9" y="278" width="19.5" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="439.4" y="287" font-size="9" fill="var(--muted)">0.87</text>
-<text x="144" y="301" text-anchor="end" font-size="10" fill="currentColor">mixed-static-island</text><rect x="416.7" y="292" width="18.7" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="439.4" y="301" font-size="9" fill="var(--muted)">0.87</text>
-<text x="144" y="315" text-anchor="end" font-size="10" fill="currentColor">prime</text><rect x="416.7" y="306" width="18.7" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="439.4" y="315" font-size="9" fill="var(--muted)">0.87</text>
-<text x="144" y="329" text-anchor="end" font-size="10" fill="currentColor">fannkuch</text><rect x="417.1" y="320" width="18.3" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="439.4" y="329" font-size="9" fill="var(--muted)">0.88</text>
-<text x="144" y="343" text-anchor="end" font-size="10" fill="currentColor">sha256 #2</text><rect x="429.6" y="334" width="5.8" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="439.4" y="343" font-size="9" fill="var(--muted)">0.96</text>
-<text x="144" y="357" text-anchor="end" font-size="10" fill="currentColor">euler9</text><rect x="432.0" y="348" width="3.4" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="439.4" y="357" font-size="9" fill="var(--muted)">0.98</text>
-<text x="144" y="371" text-anchor="end" font-size="10" fill="currentColor">loop-unswitch</text><rect x="434.8" y="362" width="1.5" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="439.4" y="371" font-size="9" fill="var(--muted)">1.00</text>
-<text x="144" y="385" text-anchor="end" font-size="10" fill="currentColor">licm-math</text><rect x="435.1" y="376" width="1.5" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="439.4" y="385" font-size="9" fill="var(--muted)">1.00</text>
-<text x="144" y="399" text-anchor="end" font-size="10" fill="currentColor">straight</text><rect x="435.4" y="390" width="1.5" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="439.5" y="399" font-size="9" fill="var(--muted)">1.00</text>
-<text x="144" y="413" text-anchor="end" font-size="10" fill="currentColor">float</text><rect x="435.4" y="404" width="4.7" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="444.1" y="413" font-size="9" fill="var(--muted)">1.03</text>
-<text x="144" y="427" text-anchor="end" font-size="10" fill="currentColor">crc32</text><rect x="435.4" y="418" width="5.9" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="445.3" y="427" font-size="9" fill="var(--muted)">1.04</text>
-<text x="144" y="441" text-anchor="end" font-size="10" fill="currentColor">doitgen</text><rect x="435.4" y="432" width="8.4" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="447.8" y="441" font-size="9" fill="var(--muted)">1.06</text>
-<text x="144" y="455" text-anchor="end" font-size="10" fill="currentColor">fibonacci</text><rect x="435.4" y="446" width="10.9" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="450.3" y="455" font-size="9" fill="var(--muted)">1.08</text>
-<text x="144" y="469" text-anchor="end" font-size="10" fill="currentColor">matmult-int</text><rect x="435.4" y="460" width="11.0" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="450.5" y="469" font-size="9" fill="var(--muted)">1.08</text>
-<text x="144" y="483" text-anchor="end" font-size="10" fill="currentColor">float-cmp-oracle</text><rect x="435.4" y="474" width="11.6" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="451.1" y="483" font-size="9" fill="var(--muted)">1.09</text>
-<text x="144" y="497" text-anchor="end" font-size="10" fill="currentColor">tce-recursion</text><rect x="435.4" y="488" width="12.2" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="451.6" y="497" font-size="9" fill="var(--muted)">1.09</text>
-<text x="144" y="511" text-anchor="end" font-size="10" fill="currentColor">sor</text><rect x="435.4" y="502" width="13.0" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="452.4" y="511" font-size="9" fill="var(--muted)">1.10</text>
-<text x="144" y="525" text-anchor="end" font-size="10" fill="currentColor">leela</text><rect x="435.4" y="516" width="17.5" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="456.9" y="525" font-size="9" fill="var(--muted)">1.14</text>
-<text x="144" y="539" text-anchor="end" font-size="10" fill="currentColor">deltablue</text><rect x="435.4" y="530" width="17.6" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="457.0" y="539" font-size="9" fill="var(--muted)">1.14</text>
-<text x="144" y="553" text-anchor="end" font-size="10" fill="currentColor">expression-tree</text><rect x="435.4" y="544" width="17.7" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="457.2" y="553" font-size="9" fill="var(--muted)">1.14</text>
-<text x="144" y="567" text-anchor="end" font-size="10" fill="currentColor">knucleotide</text><rect x="435.4" y="558" width="18.4" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="457.8" y="567" font-size="9" fill="var(--muted)">1.14</text>
-<text x="144" y="581" text-anchor="end" font-size="10" fill="currentColor">loop</text><rect x="435.4" y="572" width="20.9" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="460.4" y="581" font-size="9" fill="var(--muted)">1.16</text>
-<text x="144" y="595" text-anchor="end" font-size="10" fill="currentColor">word-frequency-scan</text><rect x="435.4" y="586" width="21.1" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="460.5" y="595" font-size="9" fill="var(--muted)">1.17</text>
-<text x="144" y="609" text-anchor="end" font-size="10" fill="currentColor">hash</text><rect x="435.4" y="600" width="21.2" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="460.7" y="609" font-size="9" fill="var(--muted)">1.17</text>
-<text x="144" y="623" text-anchor="end" font-size="10" fill="currentColor">currying</text><rect x="435.4" y="614" width="26.3" height="11" rx="2" fill="var(--warn)" fill-opacity="0.55"/><text x="465.7" y="623" font-size="9" fill="var(--muted)">1.21</text>
-<text x="144" y="637" text-anchor="end" font-size="10" fill="currentColor">nussinov</text><rect x="435.4" y="628" width="27.5" height="11" rx="2" fill="var(--warn)" fill-opacity="1"/><text x="466.9" y="637" font-size="9" fill="var(--muted)">1.22</text>
-<text x="144" y="651" text-anchor="end" font-size="10" fill="currentColor">havlak</text><rect x="435.4" y="642" width="29.9" height="11" rx="2" fill="var(--warn)" fill-opacity="1"/><text x="469.4" y="651" font-size="9" fill="var(--muted)">1.24</text>
-<text x="144" y="665" text-anchor="end" font-size="10" fill="currentColor">nqueens</text><rect x="435.4" y="656" width="31.3" height="11" rx="2" fill="var(--warn)" fill-opacity="1"/><text x="470.7" y="665" font-size="9" fill="var(--muted)">1.26</text>
-<text x="144" y="679" text-anchor="end" font-size="10" fill="currentColor">calls</text><rect x="435.4" y="670" width="31.8" height="11" rx="2" fill="var(--warn)" fill-opacity="0.55"/><text x="471.2" y="679" font-size="9" fill="var(--muted)">1.26</text>
-<text x="144" y="693" text-anchor="end" font-size="10" fill="currentColor">stream</text><rect x="435.4" y="684" width="33.0" height="11" rx="2" fill="var(--warn)" fill-opacity="1"/><text x="472.4" y="693" font-size="9" fill="var(--muted)">1.27</text>
-<text x="144" y="707" text-anchor="end" font-size="10" fill="currentColor">towers</text><rect x="435.4" y="698" width="35.9" height="11" rx="2" fill="var(--warn)" fill-opacity="1"/><text x="475.3" y="707" font-size="9" fill="var(--muted)">1.30</text>
-<text x="144" y="721" text-anchor="end" font-size="10" fill="currentColor">splay</text><rect x="435.4" y="712" width="36.2" height="11" rx="2" fill="var(--warn)" fill-opacity="1"/><text x="475.6" y="721" font-size="9" fill="var(--muted)">1.30</text>
-<text x="144" y="735" text-anchor="end" font-size="10" fill="currentColor">binary-trees</text><rect x="435.4" y="726" width="38.3" height="11" rx="2" fill="var(--warn)" fill-opacity="0.55"/><text x="477.7" y="735" font-size="9" fill="var(--muted)">1.32</text>
-<text x="144" y="749" text-anchor="end" font-size="10" fill="currentColor">intops</text><rect x="435.4" y="740" width="38.3" height="11" rx="2" fill="var(--warn)" fill-opacity="0.55"/><text x="477.7" y="749" font-size="9" fill="var(--muted)">1.32</text>
-<text x="144" y="763" text-anchor="end" font-size="10" fill="currentColor">mandelbrot</text><rect x="435.4" y="754" width="38.7" height="11" rx="2" fill="var(--warn)" fill-opacity="0.55"/><text x="478.2" y="763" font-size="9" fill="var(--muted)">1.33</text>
-<text x="144" y="777" text-anchor="end" font-size="10" fill="currentColor">matmul-int</text><rect x="435.4" y="768" width="38.9" height="11" rx="2" fill="var(--warn)" fill-opacity="1"/><text x="478.4" y="777" font-size="9" fill="var(--muted)">1.33</text>
-<text x="144" y="791" text-anchor="end" font-size="10" fill="currentColor">povray</text><rect x="435.4" y="782" width="41.9" height="11" rx="2" fill="var(--warn)" fill-opacity="1"/><text x="481.3" y="791" font-size="9" fill="var(--muted)">1.36</text>
-<text x="144" y="805" text-anchor="end" font-size="10" fill="currentColor">n-body</text><rect x="435.4" y="796" width="43.7" height="11" rx="2" fill="var(--warn)" fill-opacity="1"/><text x="483.1" y="805" font-size="9" fill="var(--muted)">1.37</text>
-<text x="144" y="819" text-anchor="end" font-size="10" fill="currentColor">json-parser</text><rect x="435.4" y="810" width="45.1" height="11" rx="2" fill="var(--warn)" fill-opacity="1"/><text x="484.5" y="819" font-size="9" fill="var(--muted)">1.39</text>
-<text x="144" y="833" text-anchor="end" font-size="10" fill="currentColor">fasta</text><rect x="435.4" y="824" width="45.4" height="11" rx="2" fill="var(--warn)" fill-opacity="0.55"/><text x="484.8" y="833" font-size="9" fill="var(--muted)">1.39</text>
-<text x="144" y="847" text-anchor="end" font-size="10" fill="currentColor">dgemm</text><rect x="435.4" y="838" width="47.9" height="11" rx="2" fill="var(--warn)" fill-opacity="0.55"/><text x="487.3" y="847" font-size="9" fill="var(--muted)">1.42</text>
-<text x="144" y="861" text-anchor="end" font-size="10" fill="currentColor">fft</text><rect x="435.4" y="852" width="49.5" height="11" rx="2" fill="var(--warn)" fill-opacity="0.55"/><text x="488.9" y="861" font-size="9" fill="var(--muted)">1.43</text>
-<text x="144" y="875" text-anchor="end" font-size="10" fill="currentColor">statemate</text><rect x="435.4" y="866" width="56.2" height="11" rx="2" fill="var(--warn)" fill-opacity="1"/><text x="495.7" y="875" font-size="9" fill="var(--muted)">1.51</text>
-<text x="144" y="889" text-anchor="end" font-size="10" fill="currentColor">sieve</text><rect x="435.4" y="880" width="62.5" height="11" rx="2" fill="var(--warn)" fill-opacity="1"/><text x="502.0" y="889" font-size="9" fill="var(--muted)">1.58</text>
-<text x="144" y="903" text-anchor="end" font-size="10" fill="currentColor">knucleotide #2</text><rect x="435.4" y="894" width="63.5" height="11" rx="2" fill="var(--warn)" fill-opacity="0.55"/><text x="502.9" y="903" font-size="9" fill="var(--muted)">1.59</text>
-<text x="144" y="917" text-anchor="end" font-size="10" fill="currentColor">pbkdf2 #2</text><rect x="435.4" y="908" width="65.2" height="11" rx="2" fill="var(--warn)" fill-opacity="1"/><text x="504.6" y="917" font-size="9" fill="var(--muted)">1.61</text>
-<text x="144" y="931" text-anchor="end" font-size="10" fill="currentColor">sha256</text><rect x="435.4" y="922" width="69.9" height="11" rx="2" fill="var(--warn)" fill-opacity="1"/><text x="509.3" y="931" font-size="9" fill="var(--muted)">1.66</text>
-<text x="144" y="945" text-anchor="end" font-size="10" fill="currentColor">time-profile</text><rect x="435.4" y="936" width="73.1" height="11" rx="2" fill="var(--warn)" fill-opacity="0.55"/><text x="512.6" y="945" font-size="9" fill="var(--muted)">1.70</text>
-<text x="144" y="959" text-anchor="end" font-size="10" fill="currentColor">matrix-raw</text><rect x="435.4" y="950" width="77.0" height="11" rx="2" fill="var(--warn)" fill-opacity="0.55"/><text x="516.4" y="959" font-size="9" fill="var(--muted)">1.75</text>
-<text x="144" y="973" text-anchor="end" font-size="10" fill="currentColor">list-dynamic</text><rect x="435.4" y="964" width="77.2" height="11" rx="2" fill="var(--warn)" fill-opacity="1"/><text x="516.6" y="973" font-size="9" fill="var(--muted)">1.75</text>
-<text x="144" y="987" text-anchor="end" font-size="10" fill="currentColor">jacobi-2d</text><rect x="435.4" y="978" width="78.7" height="11" rx="2" fill="var(--warn)" fill-opacity="1"/><text x="518.2" y="987" font-size="9" fill="var(--muted)">1.77</text>
-<text x="144" y="1001" text-anchor="end" font-size="10" fill="currentColor">heapsort</text><rect x="435.4" y="992" width="84.9" height="11" rx="2" fill="var(--warn)" fill-opacity="1"/><text x="524.3" y="1001" font-size="9" fill="var(--muted)">1.86</text>
-<text x="144" y="1015" text-anchor="end" font-size="10" fill="currentColor">word-frequency</text><rect x="435.4" y="1006" width="85.6" height="11" rx="2" fill="var(--warn)" fill-opacity="1"/><text x="525.0" y="1015" font-size="9" fill="var(--muted)">1.87</text>
-<text x="144" y="1029" text-anchor="end" font-size="10" fill="currentColor">dijkstra</text><rect x="435.4" y="1020" width="86.1" height="11" rx="2" fill="var(--warn)" fill-opacity="1"/><text x="525.5" y="1029" font-size="9" fill="var(--muted)">1.87</text>
-<text x="144" y="1043" text-anchor="end" font-size="10" fill="currentColor">sssp</text><rect x="435.4" y="1034" width="88.0" height="11" rx="2" fill="var(--warn)" fill-opacity="1"/><text x="527.5" y="1043" font-size="9" fill="var(--muted)">1.90</text>
-<text x="144" y="1057" text-anchor="end" font-size="10" fill="currentColor">richards</text><rect x="435.4" y="1048" width="89.2" height="11" rx="2" fill="var(--warn)" fill-opacity="1"/><text x="528.7" y="1057" font-size="9" fill="var(--muted)">1.92</text>
-<text x="144" y="1071" text-anchor="end" font-size="10" fill="currentColor">list</text><rect x="435.4" y="1062" width="92.0" height="11" rx="2" fill="var(--warn)" fill-opacity="1"/><text x="531.4" y="1071" font-size="9" fill="var(--muted)">1.95</text>
-<text x="144" y="1085" text-anchor="end" font-size="10" fill="currentColor">cmov-sort</text><rect x="435.4" y="1076" width="99.1" height="11" rx="2" fill="var(--bad)" fill-opacity="0.55"/><text x="538.5" y="1085" font-size="9" fill="var(--muted)">2.06</text>
-<text x="144" y="1099" text-anchor="end" font-size="10" fill="currentColor">queen</text><rect x="435.4" y="1090" width="106.7" height="11" rx="2" fill="var(--bad)" fill-opacity="1"/><text x="546.1" y="1099" font-size="9" fill="var(--muted)">2.18</text>
-<text x="144" y="1113" text-anchor="end" font-size="10" fill="currentColor">pidigits</text><rect x="435.4" y="1104" width="107.6" height="11" rx="2" fill="var(--bad)" fill-opacity="0.55"/><text x="547.0" y="1113" font-size="9" fill="var(--muted)">2.19</text>
-<text x="144" y="1127" text-anchor="end" font-size="10" fill="currentColor">call-chain</text><rect x="435.4" y="1118" width="109.5" height="11" rx="2" fill="var(--bad)" fill-opacity="0.55"/><text x="549.0" y="1127" font-size="9" fill="var(--muted)">2.22</text>
-<text x="144" y="1141" text-anchor="end" font-size="10" fill="currentColor">qrsyndrome</text><rect x="435.4" y="1132" width="110.2" height="11" rx="2" fill="var(--bad)" fill-opacity="1"/><text x="549.7" y="1141" font-size="9" fill="var(--muted)">2.23</text>
-<text x="144" y="1155" text-anchor="end" font-size="10" fill="currentColor">recursive-fibonacci</text><rect x="435.4" y="1146" width="120.9" height="11" rx="2" fill="var(--bad)" fill-opacity="0.55"/><text x="560.4" y="1155" font-size="9" fill="var(--muted)">2.41</text>
-<text x="144" y="1169" text-anchor="end" font-size="10" fill="currentColor">omnetpp</text><rect x="435.4" y="1160" width="127.6" height="11" rx="2" fill="var(--bad)" fill-opacity="1"/><text x="567.1" y="1169" font-size="9" fill="var(--muted)">2.53</text>
-<text x="144" y="1183" text-anchor="end" font-size="10" fill="currentColor">fhourstones</text><rect x="435.4" y="1174" width="133.2" height="11" rx="2" fill="var(--bad)" fill-opacity="1"/><text x="572.6" y="1183" font-size="9" fill="var(--muted)">2.64</text>
-<text x="144" y="1197" text-anchor="end" font-size="10" fill="currentColor">inline</text><rect x="435.4" y="1188" width="135.0" height="11" rx="2" fill="var(--bad)" fill-opacity="0.55"/><text x="574.5" y="1197" font-size="9" fill="var(--muted)">2.67</text>
-<text x="144" y="1211" text-anchor="end" font-size="10" fill="currentColor">mont64</text><rect x="435.4" y="1202" width="140.9" height="11" rx="2" fill="var(--bad)" fill-opacity="1"/><text x="580.3" y="1211" font-size="9" fill="var(--muted)">2.79</text>
-<text x="144" y="1225" text-anchor="end" font-size="10" fill="currentColor">susan</text><rect x="435.4" y="1216" width="143.0" height="11" rx="2" fill="var(--bad)" fill-opacity="1"/><text x="582.4" y="1225" font-size="9" fill="var(--muted)">2.83</text>
-<text x="144" y="1239" text-anchor="end" font-size="10" fill="currentColor">gcbench</text><rect x="435.4" y="1230" width="143.7" height="11" rx="2" fill="var(--bad)" fill-opacity="1"/><text x="583.1" y="1239" font-size="9" fill="var(--muted)">2.85</text>
-<text x="144" y="1253" text-anchor="end" font-size="10" fill="currentColor">linpack</text><rect x="435.4" y="1244" width="151.9" height="11" rx="2" fill="var(--bad)" fill-opacity="0.55"/><text x="591.3" y="1253" font-size="9" fill="var(--muted)">3.02</text>
-<text x="144" y="1267" text-anchor="end" font-size="10" fill="currentColor">bce-matrix</text><rect x="435.4" y="1258" width="167.6" height="11" rx="2" fill="var(--bad)" fill-opacity="1"/><text x="607.1" y="1267" font-size="9" fill="var(--muted)">3.39</text>
-<text x="144" y="1281" text-anchor="end" font-size="10" fill="currentColor">revcomp</text><rect x="435.4" y="1272" width="170.3" height="11" rx="2" fill="var(--bad)" fill-opacity="0.55"/><text x="609.7" y="1281" font-size="9" fill="var(--muted)">3.46</text>
-<text x="144" y="1295" text-anchor="end" font-size="10" fill="currentColor">viterbi</text><rect x="435.4" y="1286" width="173.5" height="11" rx="2" fill="var(--bad)" fill-opacity="1"/><text x="613.0" y="1295" font-size="9" fill="var(--muted)">3.54</text>
-<text x="144" y="1309" text-anchor="end" font-size="10" fill="currentColor">spectral</text><rect x="435.4" y="1300" width="179.2" height="11" rx="2" fill="var(--bad)" fill-opacity="0.55"/><text x="618.7" y="1309" font-size="9" fill="var(--muted)">3.69</text>
-<text x="144" y="1323" text-anchor="end" font-size="10" fill="currentColor">licm</text><rect x="435.4" y="1314" width="180.8" height="11" rx="2" fill="var(--bad)" fill-opacity="0.55"/><text x="620.2" y="1323" font-size="9" fill="var(--muted)">3.73</text>
-<text x="144" y="1337" text-anchor="end" font-size="10" fill="currentColor">dict-oracle</text><rect x="435.4" y="1328" width="192.7" height="11" rx="2" fill="var(--bad)" fill-opacity="0.55"/><text x="632.2" y="1337" font-size="9" fill="var(--muted)">4.07</text>
-<text x="144" y="1351" text-anchor="end" font-size="10" fill="currentColor">records</text><rect x="435.4" y="1342" width="193.3" height="11" rx="2" fill="var(--bad)" fill-opacity="1"/><text x="632.7" y="1351" font-size="9" fill="var(--muted)">4.09</text>
-<text x="144" y="1365" text-anchor="end" font-size="10" fill="currentColor">lbm</text><rect x="435.4" y="1356" width="194.5" height="11" rx="2" fill="var(--bad)" fill-opacity="1"/><text x="634.0" y="1365" font-size="9" fill="var(--muted)">4.13</text>
-<text x="144" y="1379" text-anchor="end" font-size="10" fill="currentColor">ackermann</text><rect x="435.4" y="1370" width="195.8" height="11" rx="2" fill="var(--bad)" fill-opacity="0.55"/><text x="635.2" y="1379" font-size="9" fill="var(--muted)">4.16</text>
-<text x="144" y="1393" text-anchor="end" font-size="10" fill="currentColor">page-rank</text><rect x="435.4" y="1384" width="204.6" height="11" rx="2" fill="var(--bad)" fill-opacity="0.55"/><text x="644.0" y="1393" font-size="9" fill="var(--muted)">4.44</text>
-<text x="144" y="1407" text-anchor="end" font-size="10" fill="currentColor">matrix</text><rect x="435.4" y="1398" width="220.6" height="11" rx="2" fill="var(--bad)" fill-opacity="0.55"/><text x="660.1" y="1407" font-size="9" fill="var(--muted)">4.99</text>
-<text x="144" y="1421" text-anchor="end" font-size="10" fill="currentColor">xz</text><rect x="435.4" y="1412" width="220.8" height="11" rx="2" fill="var(--bad)" fill-opacity="1"/><text x="660.2" y="1421" font-size="9" fill="var(--muted)">4.99</text>
-<text x="144" y="1435" text-anchor="end" font-size="10" fill="currentColor">native-oracle</text><rect x="435.4" y="1426" width="221.6" height="11" rx="2" fill="var(--bad)" fill-opacity="0.55"/><text x="661.0" y="1435" font-size="9" fill="var(--muted)">5.02</text>
-<text x="144" y="1449" text-anchor="end" font-size="10" fill="currentColor">repeat</text><rect x="435.4" y="1440" width="243.2" height="11" rx="2" fill="var(--bad)" fill-opacity="1"/><text x="682.7" y="1449" font-size="9" fill="var(--muted)">5.88</text>
-<text x="144" y="1463" text-anchor="end" font-size="10" fill="currentColor">stringsearch</text><rect x="435.4" y="1454" width="263.9" height="11" rx="2" fill="var(--bad)" fill-opacity="0.55"/><text x="703.3" y="1463" font-size="9" fill="var(--muted)">6.84</text>
-<text x="144" y="1477" text-anchor="end" font-size="10" fill="currentColor">cd</text><rect x="435.4" y="1468" width="270.2" height="11" rx="2" fill="var(--bad)" fill-opacity="1"/><text x="709.6" y="1477" font-size="9" fill="var(--muted)">7.16</text>
-<text x="144" y="1491" text-anchor="end" font-size="10" fill="currentColor">collatz</text><rect x="435.4" y="1482" width="276.2" height="11" rx="2" fill="var(--bad)" fill-opacity="0.55"/><text x="715.6" y="1491" font-size="9" fill="var(--muted)">7.48</text>
-<text x="144" y="1505" text-anchor="end" font-size="10" fill="currentColor">bitcount</text><rect x="435.4" y="1496" width="348.8" height="11" rx="2" fill="var(--bad)" fill-opacity="1"/><text x="788.2" y="1505" font-size="9" fill="var(--muted)">12.69</text>
-<text x="144" y="1519" text-anchor="end" font-size="10" fill="currentColor">bigint-oracle</text><rect x="435.4" y="1510" width="380.6" height="11" rx="2" fill="var(--bad)" fill-opacity="1"/><text x="820.0" y="1519" font-size="9" fill="var(--muted)">22.67</text>
+<text x="144" y="63" text-anchor="end" font-size="10" fill="currentColor">pbkdf2</text><rect x="157.3" y="54" width="278.2" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="439.4" y="63" font-size="9" fill="var(--muted)">0.13</text>
+<text x="144" y="77" text-anchor="end" font-size="10" fill="currentColor">pbkdf2 #2</text><rect x="354.5" y="68" width="80.9" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="439.4" y="77" font-size="9" fill="var(--muted)">0.55</text>
+<text x="144" y="91" text-anchor="end" font-size="10" fill="currentColor">mixed-static-island</text><rect x="356.6" y="82" width="78.9" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="439.4" y="91" font-size="9" fill="var(--muted)">0.56</text>
+<text x="144" y="105" text-anchor="end" font-size="10" fill="currentColor">straight</text><rect x="373.7" y="96" width="61.8" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="439.4" y="105" font-size="9" fill="var(--muted)">0.64</text>
+<text x="144" y="119" text-anchor="end" font-size="10" fill="currentColor">tce-recursion</text><rect x="378.4" y="110" width="57.0" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="439.4" y="119" font-size="9" fill="var(--muted)">0.66</text>
+<text x="144" y="133" text-anchor="end" font-size="10" fill="currentColor">binary</text><rect x="403.0" y="124" width="32.4" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="439.4" y="133" font-size="9" fill="var(--muted)">0.79</text>
+<text x="144" y="147" text-anchor="end" font-size="10" fill="currentColor">string</text><rect x="403.5" y="138" width="31.9" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="439.4" y="147" font-size="9" fill="var(--muted)">0.79</text>
+<text x="144" y="161" text-anchor="end" font-size="10" fill="currentColor">append-scaling</text><rect x="404.8" y="152" width="30.7" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="439.4" y="161" font-size="9" fill="var(--muted)">0.80</text>
+<text x="144" y="175" text-anchor="end" font-size="10" fill="currentColor">dict-set</text><rect x="415.3" y="166" width="20.2" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="439.4" y="175" font-size="9" fill="var(--muted)">0.86</text>
+<text x="144" y="189" text-anchor="end" font-size="10" fill="currentColor">list-dynamic</text><rect x="415.9" y="180" width="19.5" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="439.4" y="189" font-size="9" fill="var(--muted)">0.87</text>
+<text x="144" y="203" text-anchor="end" font-size="10" fill="currentColor">licm-math</text><rect x="421.1" y="194" width="14.4" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="439.4" y="203" font-size="9" fill="var(--muted)">0.90</text>
+<text x="144" y="217" text-anchor="end" font-size="10" fill="currentColor">dict</text><rect x="422.5" y="208" width="12.9" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="439.4" y="217" font-size="9" fill="var(--muted)">0.91</text>
+<text x="144" y="231" text-anchor="end" font-size="10" fill="currentColor">fibonacci</text><rect x="424.8" y="222" width="10.6" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="439.4" y="231" font-size="9" fill="var(--muted)">0.93</text>
+<text x="144" y="245" text-anchor="end" font-size="10" fill="currentColor">time-profile</text><rect x="427.3" y="236" width="8.1" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="439.4" y="245" font-size="9" fill="var(--muted)">0.94</text>
+<text x="144" y="259" text-anchor="end" font-size="10" fill="currentColor">list-any-append</text><rect x="428.5" y="250" width="6.9" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="439.4" y="259" font-size="9" fill="var(--muted)">0.95</text>
+<text x="144" y="273" text-anchor="end" font-size="10" fill="currentColor">transpose</text><rect x="429.3" y="264" width="6.1" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="439.4" y="273" font-size="9" fill="var(--muted)">0.96</text>
+<text x="144" y="287" text-anchor="end" font-size="10" fill="currentColor">sha256 #2</text><rect x="431.1" y="278" width="4.3" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="439.4" y="287" font-size="9" fill="var(--muted)">0.97</text>
+<text x="144" y="301" text-anchor="end" font-size="10" fill="currentColor">fft</text><rect x="431.8" y="292" width="3.6" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="439.4" y="301" font-size="9" fill="var(--muted)">0.97</text>
+<text x="144" y="315" text-anchor="end" font-size="10" fill="currentColor">records</text><rect x="431.9" y="306" width="3.5" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="439.4" y="315" font-size="9" fill="var(--muted)">0.97</text>
+<text x="144" y="329" text-anchor="end" font-size="10" fill="currentColor">crc32</text><rect x="434.5" y="320" width="1.5" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="439.4" y="329" font-size="9" fill="var(--muted)">0.99</text>
+<text x="144" y="343" text-anchor="end" font-size="10" fill="currentColor">imagick</text><rect x="435.4" y="334" width="2.0" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="441.5" y="343" font-size="9" fill="var(--muted)">1.01</text>
+<text x="144" y="357" text-anchor="end" font-size="10" fill="currentColor">prime</text><rect x="435.4" y="348" width="2.7" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="442.2" y="357" font-size="9" fill="var(--muted)">1.02</text>
+<text x="144" y="371" text-anchor="end" font-size="10" fill="currentColor">float</text><rect x="435.4" y="362" width="2.9" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="442.3" y="371" font-size="9" fill="var(--muted)">1.02</text>
+<text x="144" y="385" text-anchor="end" font-size="10" fill="currentColor">matrix-raw</text><rect x="435.4" y="376" width="5.0" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="444.4" y="385" font-size="9" fill="var(--muted)">1.04</text>
+<text x="144" y="399" text-anchor="end" font-size="10" fill="currentColor">mandelbrot</text><rect x="435.4" y="390" width="5.8" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="445.2" y="399" font-size="9" fill="var(--muted)">1.04</text>
+<text x="144" y="413" text-anchor="end" font-size="10" fill="currentColor">permute</text><rect x="435.4" y="404" width="5.8" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="445.2" y="413" font-size="9" fill="var(--muted)">1.04</text>
+<text x="144" y="427" text-anchor="end" font-size="10" fill="currentColor">calls</text><rect x="435.4" y="418" width="6.1" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="445.5" y="427" font-size="9" fill="var(--muted)">1.05</text>
+<text x="144" y="441" text-anchor="end" font-size="10" fill="currentColor">loop-unswitch</text><rect x="435.4" y="432" width="7.1" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="446.5" y="441" font-size="9" fill="var(--muted)">1.05</text>
+<text x="144" y="455" text-anchor="end" font-size="10" fill="currentColor">fannkuch</text><rect x="435.4" y="446" width="8.1" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="447.5" y="455" font-size="9" fill="var(--muted)">1.06</text>
+<text x="144" y="469" text-anchor="end" font-size="10" fill="currentColor">thread-ring</text><rect x="435.4" y="460" width="8.6" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="448.0" y="469" font-size="9" fill="var(--muted)">1.06</text>
+<text x="144" y="483" text-anchor="end" font-size="10" fill="currentColor">float-cmp-oracle</text><rect x="435.4" y="474" width="11.3" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="450.8" y="483" font-size="9" fill="var(--muted)">1.09</text>
+<text x="144" y="497" text-anchor="end" font-size="10" fill="currentColor">list</text><rect x="435.4" y="488" width="12.3" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="451.7" y="497" font-size="9" fill="var(--muted)">1.09</text>
+<text x="144" y="511" text-anchor="end" font-size="10" fill="currentColor">splay</text><rect x="435.4" y="502" width="13.8" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="453.2" y="511" font-size="9" fill="var(--muted)">1.11</text>
+<text x="144" y="525" text-anchor="end" font-size="10" fill="currentColor">matmult-int</text><rect x="435.4" y="516" width="15.8" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="455.3" y="525" font-size="9" fill="var(--muted)">1.12</text>
+<text x="144" y="539" text-anchor="end" font-size="10" fill="currentColor">escape-loop</text><rect x="435.4" y="530" width="15.9" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="455.3" y="539" font-size="9" fill="var(--muted)">1.12</text>
+<text x="144" y="553" text-anchor="end" font-size="10" fill="currentColor">mcf</text><rect x="435.4" y="544" width="16.0" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="455.4" y="553" font-size="9" fill="var(--muted)">1.12</text>
+<text x="144" y="567" text-anchor="end" font-size="10" fill="currentColor">loop</text><rect x="435.4" y="558" width="16.2" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="455.6" y="567" font-size="9" fill="var(--muted)">1.13</text>
+<text x="144" y="581" text-anchor="end" font-size="10" fill="currentColor">hash</text><rect x="435.4" y="572" width="19.5" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="458.9" y="581" font-size="9" fill="var(--muted)">1.15</text>
+<text x="144" y="595" text-anchor="end" font-size="10" fill="currentColor">stream</text><rect x="435.4" y="586" width="22.5" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="462.0" y="595" font-size="9" fill="var(--muted)">1.18</text>
+<text x="144" y="609" text-anchor="end" font-size="10" fill="currentColor">leela</text><rect x="435.4" y="600" width="22.8" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="462.3" y="609" font-size="9" fill="var(--muted)">1.18</text>
+<text x="144" y="623" text-anchor="end" font-size="10" fill="currentColor">sieve</text><rect x="435.4" y="614" width="23.3" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="462.7" y="623" font-size="9" fill="var(--muted)">1.19</text>
+<text x="144" y="637" text-anchor="end" font-size="10" fill="currentColor">havlak</text><rect x="435.4" y="628" width="23.5" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="463.0" y="637" font-size="9" fill="var(--muted)">1.19</text>
+<text x="144" y="651" text-anchor="end" font-size="10" fill="currentColor">expression-tree</text><rect x="435.4" y="642" width="27.0" height="11" rx="2" fill="var(--warn)" fill-opacity="1"/><text x="466.5" y="651" font-size="9" fill="var(--muted)">1.22</text>
+<text x="144" y="665" text-anchor="end" font-size="10" fill="currentColor">doitgen</text><rect x="435.4" y="656" width="28.2" height="11" rx="2" fill="var(--warn)" fill-opacity="0.55"/><text x="467.6" y="665" font-size="9" fill="var(--muted)">1.23</text>
+<text x="144" y="679" text-anchor="end" font-size="10" fill="currentColor">binary-trees</text><rect x="435.4" y="670" width="28.9" height="11" rx="2" fill="var(--warn)" fill-opacity="0.55"/><text x="468.3" y="679" font-size="9" fill="var(--muted)">1.23</text>
+<text x="144" y="693" text-anchor="end" font-size="10" fill="currentColor">word-frequency</text><rect x="435.4" y="684" width="29.4" height="11" rx="2" fill="var(--warn)" fill-opacity="1"/><text x="468.8" y="693" font-size="9" fill="var(--muted)">1.24</text>
+<text x="144" y="707" text-anchor="end" font-size="10" fill="currentColor">vector</text><rect x="435.4" y="698" width="29.7" height="11" rx="2" fill="var(--warn)" fill-opacity="0.55"/><text x="469.1" y="707" font-size="9" fill="var(--muted)">1.24</text>
+<text x="144" y="721" text-anchor="end" font-size="10" fill="currentColor">stringsearch</text><rect x="435.4" y="712" width="29.7" height="11" rx="2" fill="var(--warn)" fill-opacity="0.55"/><text x="469.2" y="721" font-size="9" fill="var(--muted)">1.24</text>
+<text x="144" y="735" text-anchor="end" font-size="10" fill="currentColor">word-frequency-scan</text><rect x="435.4" y="726" width="31.2" height="11" rx="2" fill="var(--warn)" fill-opacity="1"/><text x="470.6" y="735" font-size="9" fill="var(--muted)">1.26</text>
+<text x="144" y="749" text-anchor="end" font-size="10" fill="currentColor">json-parser</text><rect x="435.4" y="740" width="31.8" height="11" rx="2" fill="var(--warn)" fill-opacity="1"/><text x="471.3" y="749" font-size="9" fill="var(--muted)">1.26</text>
+<text x="144" y="763" text-anchor="end" font-size="10" fill="currentColor">intops</text><rect x="435.4" y="754" width="32.4" height="11" rx="2" fill="var(--warn)" fill-opacity="0.55"/><text x="471.8" y="763" font-size="9" fill="var(--muted)">1.27</text>
+<text x="144" y="777" text-anchor="end" font-size="10" fill="currentColor">knucleotide</text><rect x="435.4" y="768" width="33.1" height="11" rx="2" fill="var(--warn)" fill-opacity="0.55"/><text x="472.6" y="777" font-size="9" fill="var(--muted)">1.27</text>
+<text x="144" y="791" text-anchor="end" font-size="10" fill="currentColor">inline</text><rect x="435.4" y="782" width="33.3" height="11" rx="2" fill="var(--warn)" fill-opacity="0.55"/><text x="472.7" y="791" font-size="9" fill="var(--muted)">1.27</text>
+<text x="144" y="805" text-anchor="end" font-size="10" fill="currentColor">sor</text><rect x="435.4" y="796" width="37.5" height="11" rx="2" fill="var(--warn)" fill-opacity="0.55"/><text x="476.9" y="805" font-size="9" fill="var(--muted)">1.31</text>
+<text x="144" y="819" text-anchor="end" font-size="10" fill="currentColor">statemate</text><rect x="435.4" y="810" width="37.7" height="11" rx="2" fill="var(--warn)" fill-opacity="1"/><text x="477.2" y="819" font-size="9" fill="var(--muted)">1.32</text>
+<text x="144" y="833" text-anchor="end" font-size="10" fill="currentColor">matmul-int</text><rect x="435.4" y="824" width="37.8" height="11" rx="2" fill="var(--warn)" fill-opacity="1"/><text x="477.2" y="833" font-size="9" fill="var(--muted)">1.32</text>
+<text x="144" y="847" text-anchor="end" font-size="10" fill="currentColor">nqueens</text><rect x="435.4" y="838" width="39.1" height="11" rx="2" fill="var(--warn)" fill-opacity="1"/><text x="478.6" y="847" font-size="9" fill="var(--muted)">1.33</text>
+<text x="144" y="861" text-anchor="end" font-size="10" fill="currentColor">fasta</text><rect x="435.4" y="852" width="39.5" height="11" rx="2" fill="var(--warn)" fill-opacity="0.55"/><text x="478.9" y="861" font-size="9" fill="var(--muted)">1.33</text>
+<text x="144" y="875" text-anchor="end" font-size="10" fill="currentColor">cmov-sort</text><rect x="435.4" y="866" width="40.1" height="11" rx="2" fill="var(--warn)" fill-opacity="0.55"/><text x="479.5" y="875" font-size="9" fill="var(--muted)">1.34</text>
+<text x="144" y="889" text-anchor="end" font-size="10" fill="currentColor">currying</text><rect x="435.4" y="880" width="40.2" height="11" rx="2" fill="var(--warn)" fill-opacity="0.55"/><text x="479.6" y="889" font-size="9" fill="var(--muted)">1.34</text>
+<text x="144" y="903" text-anchor="end" font-size="10" fill="currentColor">sha256</text><rect x="435.4" y="894" width="41.4" height="11" rx="2" fill="var(--warn)" fill-opacity="0.55"/><text x="480.8" y="903" font-size="9" fill="var(--muted)">1.35</text>
+<text x="144" y="917" text-anchor="end" font-size="10" fill="currentColor">spectral</text><rect x="435.4" y="908" width="45.8" height="11" rx="2" fill="var(--warn)" fill-opacity="0.55"/><text x="485.2" y="917" font-size="9" fill="var(--muted)">1.40</text>
+<text x="144" y="931" text-anchor="end" font-size="10" fill="currentColor">heapsort-int</text><rect x="435.4" y="922" width="46.1" height="11" rx="2" fill="var(--warn)" fill-opacity="1"/><text x="485.5" y="931" font-size="9" fill="var(--muted)">1.40</text>
+<text x="144" y="945" text-anchor="end" font-size="10" fill="currentColor">towers</text><rect x="435.4" y="936" width="46.3" height="11" rx="2" fill="var(--warn)" fill-opacity="1"/><text x="485.7" y="945" font-size="9" fill="var(--muted)">1.40</text>
+<text x="144" y="959" text-anchor="end" font-size="10" fill="currentColor">richards</text><rect x="435.4" y="950" width="48.0" height="11" rx="2" fill="var(--warn)" fill-opacity="0.55"/><text x="487.5" y="959" font-size="9" fill="var(--muted)">1.42</text>
+<text x="144" y="973" text-anchor="end" font-size="10" fill="currentColor">n-body</text><rect x="435.4" y="964" width="51.2" height="11" rx="2" fill="var(--warn)" fill-opacity="1"/><text x="490.6" y="973" font-size="9" fill="var(--muted)">1.45</text>
+<text x="144" y="987" text-anchor="end" font-size="10" fill="currentColor">knucleotide #2</text><rect x="435.4" y="978" width="55.8" height="11" rx="2" fill="var(--warn)" fill-opacity="0.55"/><text x="495.2" y="987" font-size="9" fill="var(--muted)">1.50</text>
+<text x="144" y="1001" text-anchor="end" font-size="10" fill="currentColor">pidigits</text><rect x="435.4" y="992" width="57.0" height="11" rx="2" fill="var(--warn)" fill-opacity="0.55"/><text x="496.5" y="1001" font-size="9" fill="var(--muted)">1.52</text>
+<text x="144" y="1015" text-anchor="end" font-size="10" fill="currentColor">graph-bfs</text><rect x="435.4" y="1006" width="58.0" height="11" rx="2" fill="var(--warn)" fill-opacity="1"/><text x="497.4" y="1015" font-size="9" fill="var(--muted)">1.53</text>
+<text x="144" y="1029" text-anchor="end" font-size="10" fill="currentColor">bitcount</text><rect x="435.4" y="1020" width="59.4" height="11" rx="2" fill="var(--warn)" fill-opacity="1"/><text x="498.9" y="1029" font-size="9" fill="var(--muted)">1.54</text>
+<text x="144" y="1043" text-anchor="end" font-size="10" fill="currentColor">iter</text><rect x="435.4" y="1034" width="62.3" height="11" rx="2" fill="var(--warn)" fill-opacity="0.55"/><text x="501.8" y="1043" font-size="9" fill="var(--muted)">1.57</text>
+<text x="144" y="1057" text-anchor="end" font-size="10" fill="currentColor">omnetpp</text><rect x="435.4" y="1048" width="63.4" height="11" rx="2" fill="var(--warn)" fill-opacity="1"/><text x="502.8" y="1057" font-size="9" fill="var(--muted)">1.59</text>
+<text x="144" y="1071" text-anchor="end" font-size="10" fill="currentColor">knight</text><rect x="435.4" y="1062" width="63.7" height="11" rx="2" fill="var(--warn)" fill-opacity="1"/><text x="503.2" y="1071" font-size="9" fill="var(--muted)">1.59</text>
+<text x="144" y="1085" text-anchor="end" font-size="10" fill="currentColor">collatz</text><rect x="435.4" y="1076" width="68.1" height="11" rx="2" fill="var(--warn)" fill-opacity="0.55"/><text x="507.5" y="1085" font-size="9" fill="var(--muted)">1.64</text>
+<text x="144" y="1099" text-anchor="end" font-size="10" fill="currentColor">mandel</text><rect x="435.4" y="1090" width="68.6" height="11" rx="2" fill="var(--warn)" fill-opacity="0.55"/><text x="508.0" y="1099" font-size="9" fill="var(--muted)">1.65</text>
+<text x="144" y="1113" text-anchor="end" font-size="10" fill="currentColor">queen</text><rect x="435.4" y="1104" width="73.1" height="11" rx="2" fill="var(--warn)" fill-opacity="1"/><text x="512.5" y="1113" font-size="9" fill="var(--muted)">1.70</text>
+<text x="144" y="1127" text-anchor="end" font-size="10" fill="currentColor">gcbench</text><rect x="435.4" y="1118" width="77.6" height="11" rx="2" fill="var(--warn)" fill-opacity="1"/><text x="517.0" y="1127" font-size="9" fill="var(--muted)">1.76</text>
+<text x="144" y="1141" text-anchor="end" font-size="10" fill="currentColor">povray</text><rect x="435.4" y="1132" width="78.7" height="11" rx="2" fill="var(--warn)" fill-opacity="1"/><text x="518.2" y="1141" font-size="9" fill="var(--muted)">1.77</text>
+<text x="144" y="1155" text-anchor="end" font-size="10" fill="currentColor">euler9</text><rect x="435.4" y="1146" width="78.9" height="11" rx="2" fill="var(--warn)" fill-opacity="0.55"/><text x="518.3" y="1155" font-size="9" fill="var(--muted)">1.78</text>
+<text x="144" y="1169" text-anchor="end" font-size="10" fill="currentColor">heapsort</text><rect x="435.4" y="1160" width="78.9" height="11" rx="2" fill="var(--warn)" fill-opacity="1"/><text x="518.3" y="1169" font-size="9" fill="var(--muted)">1.78</text>
+<text x="144" y="1183" text-anchor="end" font-size="10" fill="currentColor">dijkstra</text><rect x="435.4" y="1174" width="81.7" height="11" rx="2" fill="var(--warn)" fill-opacity="1"/><text x="521.1" y="1183" font-size="9" fill="var(--muted)">1.81</text>
+<text x="144" y="1197" text-anchor="end" font-size="10" fill="currentColor">qrsyndrome</text><rect x="435.4" y="1188" width="87.0" height="11" rx="2" fill="var(--warn)" fill-opacity="1"/><text x="526.5" y="1197" font-size="9" fill="var(--muted)">1.89</text>
+<text x="144" y="1211" text-anchor="end" font-size="10" fill="currentColor">sssp</text><rect x="435.4" y="1202" width="93.3" height="11" rx="2" fill="var(--warn)" fill-opacity="1"/><text x="532.7" y="1211" font-size="9" fill="var(--muted)">1.97</text>
+<text x="144" y="1225" text-anchor="end" font-size="10" fill="currentColor">licm</text><rect x="435.4" y="1216" width="97.7" height="11" rx="2" fill="var(--bad)" fill-opacity="0.55"/><text x="537.1" y="1225" font-size="9" fill="var(--muted)">2.04</text>
+<text x="144" y="1239" text-anchor="end" font-size="10" fill="currentColor">dict-oracle</text><rect x="435.4" y="1230" width="98.8" height="11" rx="2" fill="var(--bad)" fill-opacity="0.55"/><text x="538.2" y="1239" font-size="9" fill="var(--muted)">2.05</text>
+<text x="144" y="1253" text-anchor="end" font-size="10" fill="currentColor">call-chain</text><rect x="435.4" y="1244" width="108.2" height="11" rx="2" fill="var(--bad)" fill-opacity="0.55"/><text x="547.6" y="1253" font-size="9" fill="var(--muted)">2.20</text>
+<text x="144" y="1267" text-anchor="end" font-size="10" fill="currentColor">ackermann</text><rect x="435.4" y="1258" width="113.3" height="11" rx="2" fill="var(--bad)" fill-opacity="1"/><text x="552.7" y="1267" font-size="9" fill="var(--muted)">2.28</text>
+<text x="144" y="1281" text-anchor="end" font-size="10" fill="currentColor">nussinov</text><rect x="435.4" y="1272" width="118.4" height="11" rx="2" fill="var(--bad)" fill-opacity="1"/><text x="557.8" y="1281" font-size="9" fill="var(--muted)">2.37</text>
+<text x="144" y="1295" text-anchor="end" font-size="10" fill="currentColor">radix-tree</text><rect x="435.4" y="1286" width="119.8" height="11" rx="2" fill="var(--bad)" fill-opacity="1"/><text x="559.2" y="1295" font-size="9" fill="var(--muted)">2.39</text>
+<text x="144" y="1309" text-anchor="end" font-size="10" fill="currentColor">deltablue</text><rect x="435.4" y="1300" width="122.2" height="11" rx="2" fill="var(--bad)" fill-opacity="1"/><text x="561.6" y="1309" font-size="9" fill="var(--muted)">2.44</text>
+<text x="144" y="1323" text-anchor="end" font-size="10" fill="currentColor">jacobi-2d</text><rect x="435.4" y="1314" width="127.1" height="11" rx="2" fill="var(--bad)" fill-opacity="0.55"/><text x="566.5" y="1323" font-size="9" fill="var(--muted)">2.52</text>
+<text x="144" y="1337" text-anchor="end" font-size="10" fill="currentColor">mont64</text><rect x="435.4" y="1328" width="129.9" height="11" rx="2" fill="var(--bad)" fill-opacity="1"/><text x="569.3" y="1337" font-size="9" fill="var(--muted)">2.58</text>
+<text x="144" y="1351" text-anchor="end" font-size="10" fill="currentColor">fhourstones</text><rect x="435.4" y="1342" width="140.0" height="11" rx="2" fill="var(--bad)" fill-opacity="1"/><text x="579.5" y="1351" font-size="9" fill="var(--muted)">2.77</text>
+<text x="144" y="1365" text-anchor="end" font-size="10" fill="currentColor">linpack</text><rect x="435.4" y="1356" width="147.7" height="11" rx="2" fill="var(--bad)" fill-opacity="0.55"/><text x="587.1" y="1365" font-size="9" fill="var(--muted)">2.93</text>
+<text x="144" y="1379" text-anchor="end" font-size="10" fill="currentColor">xz</text><rect x="435.4" y="1370" width="148.0" height="11" rx="2" fill="var(--bad)" fill-opacity="0.55"/><text x="587.4" y="1379" font-size="9" fill="var(--muted)">2.94</text>
+<text x="144" y="1393" text-anchor="end" font-size="10" fill="currentColor">susan</text><rect x="435.4" y="1384" width="150.2" height="11" rx="2" fill="var(--bad)" fill-opacity="0.55"/><text x="589.6" y="1393" font-size="9" fill="var(--muted)">2.99</text>
+<text x="144" y="1407" text-anchor="end" font-size="10" fill="currentColor">bce-matrix</text><rect x="435.4" y="1398" width="156.3" height="11" rx="2" fill="var(--bad)" fill-opacity="1"/><text x="595.7" y="1407" font-size="9" fill="var(--muted)">3.12</text>
+<text x="144" y="1421" text-anchor="end" font-size="10" fill="currentColor">viterbi</text><rect x="435.4" y="1412" width="160.8" height="11" rx="2" fill="var(--bad)" fill-opacity="1"/><text x="600.3" y="1421" font-size="9" fill="var(--muted)">3.23</text>
+<text x="144" y="1435" text-anchor="end" font-size="10" fill="currentColor">page-rank</text><rect x="435.4" y="1426" width="170.4" height="11" rx="2" fill="var(--bad)" fill-opacity="0.55"/><text x="609.9" y="1435" font-size="9" fill="var(--muted)">3.46</text>
+<text x="144" y="1449" text-anchor="end" font-size="10" fill="currentColor">revcomp</text><rect x="435.4" y="1440" width="170.5" height="11" rx="2" fill="var(--bad)" fill-opacity="0.55"/><text x="609.9" y="1449" font-size="9" fill="var(--muted)">3.46</text>
+<text x="144" y="1463" text-anchor="end" font-size="10" fill="currentColor">native-oracle</text><rect x="435.4" y="1454" width="203.0" height="11" rx="2" fill="var(--bad)" fill-opacity="0.55"/><text x="642.4" y="1463" font-size="9" fill="var(--muted)">4.39</text>
+<text x="144" y="1477" text-anchor="end" font-size="10" fill="currentColor">repeat</text><rect x="435.4" y="1468" width="211.3" height="11" rx="2" fill="var(--bad)" fill-opacity="1"/><text x="650.7" y="1477" font-size="9" fill="var(--muted)">4.66</text>
+<text x="144" y="1491" text-anchor="end" font-size="10" fill="currentColor">lbm</text><rect x="435.4" y="1482" width="213.5" height="11" rx="2" fill="var(--bad)" fill-opacity="0.55"/><text x="652.9" y="1491" font-size="9" fill="var(--muted)">4.74</text>
+<text x="144" y="1505" text-anchor="end" font-size="10" fill="currentColor">matrix</text><rect x="435.4" y="1496" width="241.3" height="11" rx="2" fill="var(--bad)" fill-opacity="0.55"/><text x="680.7" y="1505" font-size="9" fill="var(--muted)">5.80</text>
+<text x="144" y="1519" text-anchor="end" font-size="10" fill="currentColor">dgemm</text><rect x="435.4" y="1510" width="249.5" height="11" rx="2" fill="var(--bad)" fill-opacity="0.55"/><text x="689.0" y="1519" font-size="9" fill="var(--muted)">6.16</text>
+<text x="144" y="1533" text-anchor="end" font-size="10" fill="currentColor">bigint-oracle</text><rect x="435.4" y="1524" width="286.4" height="11" rx="2" fill="var(--bad)" fill-opacity="1"/><text x="725.9" y="1533" font-size="9" fill="var(--muted)">8.06</text>
+<text x="144" y="1547" text-anchor="end" font-size="10" fill="currentColor">cd</text><rect x="435.4" y="1538" width="301.8" height="11" rx="2" fill="var(--bad)" fill-opacity="0.55"/><text x="741.2" y="1547" font-size="9" fill="var(--muted)">9.01</text>
 </svg>
 
 ### Largest NYR gaps (C reference ≥ 1 ms)
 
 | Benchmark | NYR / C | C time |
 |---|---|---|
-| bigint-oracle | 22.67× | 4.0 ms |
-| bitcount | 12.69× | 4.2 ms |
-| cd | 7.16× | 1.3 ms |
-| repeat | 5.88× | 24.9 ms |
-| xz | 4.99× | 1.1 ms |
-| lbm | 4.13× | 1.5 ms |
-| records | 4.09× | 17.3 ms |
-| viterbi | 3.54× | 1.6 ms |
-| bce-matrix | 3.39× | 3.1 ms |
-| gcbench | 2.85× | 51.7 ms |
-| susan | 2.83× | 1.3 ms |
-| mont64 | 2.79× | 3.3 ms |
-| fhourstones | 2.64× | 1.1 ms |
-| omnetpp | 2.53× | 9.0 ms |
-| qrsyndrome | 2.23× | 3.7 ms |
+| bigint-oracle | 8.06× | 3.6 ms |
+| repeat | 4.66× | 18.6 ms |
+| viterbi | 3.23× | 1.2 ms |
+| bce-matrix | 3.12× | 1.6 ms |
+| fhourstones | 2.77× | 1.1 ms |
+| mont64 | 2.58× | 2.4 ms |
+| deltablue | 2.44× | 21.5 ms |
+| radix-tree | 2.39× | 1.6 ms |
+| nussinov | 2.37× | 3.2 ms |
+| ackermann | 2.28× | 30.5 ms |
+| sssp | 1.97× | 2.9 ms |
+| qrsyndrome | 1.89× | 3.0 ms |
+| dijkstra | 1.81× | 17.4 ms |
+| heapsort | 1.78× | 2.6 ms |
+| povray | 1.77× | 3.4 ms |
 
 Bars for workloads whose C reference is under 1 ms are drawn lighter: their ratios are dominated by timer resolution.
 
@@ -309,13 +310,13 @@ Bars for workloads whose C reference is under 1 ms are drawn lighter: their rati
 
 ## Latest full benchmark run
 
-Generated automatically by the full `ny-test --bench` run at 2026-11-18 17:08:02 CET.
-Host: AMD EPYC 7642; target `x86_64`; compiler `fnv1a64:37498f1f4537ce77`.
+Generated automatically by the full `ny-test --bench` run at 2026-11-20 00:35:56 CET.
+Host: AMD EPYC 7642; target `x86_64`; compiler `fnv1a64:cd968820acd6217e`.
 NYR: `-O3`, profile `peak`, tier `opt`, engine `NYR`, cache `warm`.
-C: clang version 23.1.4; flags `-O3 -march=native`. NYC flags `-O3 -c`.
-Samples: 3 plus 1 warm-up; fixture workers 30, route workers 1.
+C: clang version 23.1.5; flags `-O3 -march=native`. NYC flags `-O3 -c`.
+Samples: 3 plus 1 warm-up; fixture workers 8, route workers 1.
 Results: 110 fixtures; 109 passed, 0 failed or mismatched, 1 timer controls.
-Measurement qualifiers: 0 low-time, 0 noisy; 1 fixture budget misses.
+Measurement qualifiers: 0 low-time, 0 noisy; 0 fixture budget misses.
 
 ### Runtime relative to Host C
 
@@ -324,32 +325,32 @@ Fixture medians are grouped by **Nytrix / C time**: lower is faster. Only correc
 <svg width="880" height="330" viewBox="0 0 880 330" role="img" aria-label="Distribution of NYR and LLVM benchmark ratios relative to Host C">
 <text x="440" y="22" text-anchor="middle" font-size="16" fill="currentColor">Workloads by relative runtime</text>
 <line x1="82" y1="232" x2="780" y2="232" stroke="var(--border)" stroke-width="1"/><text x="70" y="236" text-anchor="end" font-size="11" fill="var(--muted)">0</text>
-<line x1="82" y1="186" x2="780" y2="186" stroke="var(--border)" stroke-width="1"/><text x="70" y="190" text-anchor="end" font-size="11" fill="var(--muted)">14</text>
-<line x1="82" y1="140" x2="780" y2="140" stroke="var(--border)" stroke-width="1"/><text x="70" y="144" text-anchor="end" font-size="11" fill="var(--muted)">28</text>
-<line x1="82" y1="94" x2="780" y2="94" stroke="var(--border)" stroke-width="1"/><text x="70" y="98" text-anchor="end" font-size="11" fill="var(--muted)">42</text>
-<line x1="82" y1="48" x2="780" y2="48" stroke="var(--border)" stroke-width="1"/><text x="70" y="52" text-anchor="end" font-size="11" fill="var(--muted)">56</text>
-<rect x="110" y="219" width="34" height="13" rx="3" fill="var(--c1)"/><text x="127" y="215" text-anchor="middle" font-size="11" fill="currentColor">4</text>
-<rect x="152" y="216" width="34" height="16" rx="3" fill="var(--c2)"/><text x="169" y="212" text-anchor="middle" font-size="11" fill="currentColor">5</text>
+<line x1="82" y1="186" x2="780" y2="186" stroke="var(--border)" stroke-width="1"/><text x="70" y="190" text-anchor="end" font-size="11" fill="var(--muted)">13</text>
+<line x1="82" y1="140" x2="780" y2="140" stroke="var(--border)" stroke-width="1"/><text x="70" y="144" text-anchor="end" font-size="11" fill="var(--muted)">26</text>
+<line x1="82" y1="94" x2="780" y2="94" stroke="var(--border)" stroke-width="1"/><text x="70" y="98" text-anchor="end" font-size="11" fill="var(--muted)">39</text>
+<line x1="82" y1="48" x2="780" y2="48" stroke="var(--border)" stroke-width="1"/><text x="70" y="52" text-anchor="end" font-size="11" fill="var(--muted)">52</text>
+<rect x="110" y="218" width="34" height="14" rx="3" fill="var(--c1)"/><text x="127" y="214" text-anchor="middle" font-size="11" fill="currentColor">4</text>
+<rect x="152" y="208" width="34" height="24" rx="3" fill="var(--c2)"/><text x="169" y="204" text-anchor="middle" font-size="11" fill="currentColor">7</text>
 <text x="148" y="250" text-anchor="middle" font-size="11" fill="var(--muted)"><0.5×</text>
-<rect x="252" y="219" width="34" height="13" rx="3" fill="var(--c1)"/><text x="269" y="215" text-anchor="middle" font-size="11" fill="currentColor">4</text>
-<rect x="294" y="203" width="34" height="29" rx="3" fill="var(--c2)"/><text x="311" y="199" text-anchor="middle" font-size="11" fill="currentColor">9</text>
+<rect x="252" y="204" width="34" height="28" rx="3" fill="var(--c1)"/><text x="269" y="200" text-anchor="middle" font-size="11" fill="currentColor">8</text>
+<rect x="294" y="186" width="34" height="46" rx="3" fill="var(--c2)"/><text x="311" y="182" text-anchor="middle" font-size="11" fill="currentColor">13</text>
 <text x="290" y="250" text-anchor="middle" font-size="11" fill="var(--muted)">0.5–0.8×</text>
-<rect x="394" y="98" width="34" height="134" rx="3" fill="var(--c1)"/><text x="411" y="94" text-anchor="middle" font-size="11" fill="currentColor">41</text>
-<rect x="436" y="55" width="34" height="177" rx="3" fill="var(--c2)"/><text x="453" y="61" text-anchor="middle" font-size="11" fill="currentColor">54</text>
+<rect x="394" y="77" width="34" height="155" rx="3" fill="var(--c1)"/><text x="411" y="73" text-anchor="middle" font-size="11" fill="currentColor">44</text>
+<rect x="436" y="56" width="34" height="176" rx="3" fill="var(--c2)"/><text x="453" y="61" text-anchor="middle" font-size="11" fill="currentColor">50</text>
 <text x="432" y="250" text-anchor="middle" font-size="11" fill="var(--muted)">0.8–1.25×</text>
-<rect x="536" y="114" width="34" height="118" rx="3" fill="var(--c1)"/><text x="553" y="110" text-anchor="middle" font-size="11" fill="currentColor">36</text>
-<rect x="578" y="157" width="34" height="75" rx="3" fill="var(--c2)"/><text x="595" y="153" text-anchor="middle" font-size="11" fill="currentColor">23</text>
+<rect x="536" y="123" width="34" height="109" rx="3" fill="var(--c1)"/><text x="553" y="119" text-anchor="middle" font-size="11" fill="currentColor">31</text>
+<rect x="578" y="155" width="34" height="77" rx="3" fill="var(--c2)"/><text x="595" y="151" text-anchor="middle" font-size="11" fill="currentColor">22</text>
 <text x="574" y="250" text-anchor="middle" font-size="11" fill="var(--muted)">1.25–2×</text>
-<rect x="678" y="154" width="34" height="78" rx="3" fill="var(--c1)"/><text x="695" y="150" text-anchor="middle" font-size="11" fill="currentColor">24</text>
-<rect x="720" y="173" width="34" height="59" rx="3" fill="var(--c2)"/><text x="737" y="169" text-anchor="middle" font-size="11" fill="currentColor">18</text>
+<rect x="678" y="158" width="34" height="74" rx="3" fill="var(--c1)"/><text x="695" y="154" text-anchor="middle" font-size="11" fill="currentColor">21</text>
+<rect x="720" y="176" width="34" height="56" rx="3" fill="var(--c2)"/><text x="737" y="172" text-anchor="middle" font-size="11" fill="currentColor">16</text>
 <text x="716" y="250" text-anchor="middle" font-size="11" fill="var(--muted)">≥2×</text>
 <text x="26" y="140" text-anchor="middle" font-size="11" fill="var(--muted)">fixture count</text>
-<rect x="590" y="295" width="12" height="12" rx="2" fill="var(--c1)"/><text x="608" y="306" font-size="12" fill="currentColor">NYR (109)</text><rect x="708" y="295" width="12" height="12" rx="2" fill="var(--c2)"/><text x="726" y="306" font-size="12" fill="currentColor">LLVM (109)</text>
+<rect x="590" y="295" width="12" height="12" rx="2" fill="var(--c1)"/><text x="608" y="306" font-size="12" fill="currentColor">NYR (108)</text><rect x="708" y="295" width="12" height="12" rx="2" fill="var(--c2)"/><text x="726" y="306" font-size="12" fill="currentColor">LLVM (108)</text>
 </svg>
 
 
 The empty timer control is shown for completeness and is excluded from workload ratios.
-Raw report: `build/bench-reports/bench-20261118-170708-59655.json`.
+Raw report: `/tmp/ny-perf-wave-final.json`.
 
 <!-- AUTO_BENCHMARK_RESULTS_END -->
 
@@ -516,7 +517,39 @@ snapshots, not current performance claims; compare only runs with the same
 source, input, route, flags, cache state, and timed region.
 
 <details>
-<summary>All 80 dated investigations</summary>
+<summary>All dated investigations</summary>
+
+Newest first. The dated 2026-11-19 entries below are the ones moved here
+from the performance backlog; older investigations follow them.
+
+- [2026-11-19 runtime linking, registry cache residency, allocation bookkeeping](#2026-11-19-runtime-linking-registry-cache-residency-allocation-bookkeeping)
+- [2026-11-19 NYC regression: two encoder bugs, mach-object default reverted](#2026-11-19-nyc-regression-two-encoder-bugs-mach-object-default-reverted)
+- [2026-11-19 NYR/C gap re-rank after the NYC fix](#2026-11-19-nyrc-gap-re-rank-after-the-nyc-fix)
+- [2026-11-19 full-suite baseline and home-reload diagnosis](#2026-11-19-full-suite-baseline-and-home-reload-diagnosis)
+- [2026-11-19 loop-GPR eligibility evidence (sssp main)](#2026-11-19-loop-gpr-eligibility-evidence-sssp-main)
+- [2026-11-19 select clamp fusion (landed)](#2026-11-19-select-clamp-fusion-landed)
+- [2026-11-19 remaining measured blocker: loop-carried ranges](#2026-11-19-remaining-measured-blocker-loop-carried-ranges)
+- [2026-11-19 general bit-reassembly loop folding (landed)](#2026-11-19-general-bit-reassembly-loop-folding-landed)
+- [2026-11-19 vectorizer proof diagnostics (landed)](#2026-11-19-vectorizer-proof-diagnostics-landed)
+- [2026-11-19 vectorizer window: exact blocker located inside SCEV](#2026-11-19-vectorizer-window-exact-blocker-located-inside-scev)
+- [2026-11-19 compile-time: select_chain_fold gate measured, no gain (reverted)](#2026-11-19-compile-time-select_chain_fold-gate-measured-no-gain-reverted)
+- [2026-11-19 compile-time and cd vectorization: measured findings](#2026-11-19-compile-time-and-cd-vectorization-measured-findings)
+- [2026-11-19 cd: what the address really is, and where the 860 ms goes](#2026-11-19-cd-what-the-address-really-is-and-where-the-860-ms-goes)
+- [2026-11-19 why the unreachable-stdlib filter was not shipped](#2026-11-19-why-the-unreachable-stdlib-filter-was-not-shipped)
+- [2026-11-19 six-fixture instruction budget (bench-gcc, NYR vs cc -O3)](#2026-11-19-six-fixture-instruction-budget-bench-gcc-nyr-vs-cc--o3)
+- [2026-11-19 cd resumed: the gap is vectorization, not scalar code](#2026-11-19-cd-resumed-the-gap-is-vectorization-not-scalar-code)
+- [2026-11-19 lbm: the neighbour-offset proof already works](#2026-11-19-lbm-the-neighbour-offset-proof-already-works)
+- [2026-11-19 cd: the address is a direct addr.symbol, and the loop dies before the load](#2026-11-19-cd-the-address-is-a-direct-addrsymbol-and-the-loop-dies-before-the-load)
+- [2026-11-19 the suite's two alarming rows in the last full run are contention artifacts](#2026-11-19-the-suites-two-alarming-rows-in-the-last-full-run-are-contention-artifacts)
+- [2026-11-19 cd: the window that is missing belongs to the init loop, not the movement loop](#2026-11-19-cd-the-window-that-is-missing-belongs-to-the-init-loop-not-the-movement-loop)
+- [2026-11-19 VRP read-only slot ranges: built, fired on nothing, reverted](#2026-11-19-vrp-read-only-slot-ranges-built-fired-on-nothing-reverted)
+- [2026-11-19 why a symbol-to-initializer table cannot bound a memory-carried IV](#2026-11-19-why-a-symbol-to-initializer-table-cannot-bound-a-memory-carried-iv)
+- [2026-11-19 loop_vectorize vector_slot_entry_const the memory-carried IV now gets an entry bound](#2026-11-19-loop_vectorize-vector_slot_entry_const-the-memory-carried-iv-now-gets-an-entry-bound)
+- [2026-11-19 cross-block entry bound the preheader store is found through the CFG](#2026-11-19-cross-block-entry-bound-the-preheader-store-is-found-through-the-cfg)
+- [2026-11-20 radix-tree, bitcount, Ackermann, and BigInt](#2026-11-20-radix-tree-bitcount-ackermann-and-bigint)
+- [2026-11-19 pre-vectorize LICM phase: built, measured, reverted](#2026-11-19-pre-vectorize-licm-phase-built-measured-reverted)
+
+Plus 81 older investigations below these.
 
 ### Resolved builtin operator reachability
 
@@ -4837,5 +4870,1619 @@ after the fix.
 
 Measuring note: these opt-outs reach standard-library code only with
 `NYTRIX_STD_CACHE=0`; the shared std cache is not keyed by them.
+
+### Standard library parsed AST reuse across compilation (2026-11-19)
+
+| Change | Opt-out | Effect |
+|---|---|---|
+| In-process caching and deep AST clone of parsed standard library (`NYTRIX_STD_AST_CACHE`), skipping 996 KB source concatenation, lexing, and parsing on subsequent compilations | `NYTRIX_STD_AST_CACHE=0` | `use core` compile-time: 0.905s → 0.654s min (0.822s → 0.772s mean); `lbm` compile-time: 0.912s → 0.744s min |
+
+Measurements with `--native-backend x86_64 --profile-time --runs=5`:
+- `test_use_core.ny` (`use core; fn main() { 0 }`):
+  - Before: run 1: 0.905s, run 2: 0.810s, run 3: 0.802s, run 4: 0.792s, run 5: 0.800s (mean 0.822s, min 0.792s)
+  - After: run 1: 0.936s, run 2: 0.765s, run 3: 0.761s, run 4: 0.744s, run 5: 0.654s (mean 0.772s, min 0.654s)
+- `lbm.ny`:
+  - Before: run 1: 0.912s, run 2: 0.830s, run 3: 0.810s, run 4: 0.830s, run 5: 0.812s (mean 0.839s, min 0.810s)
+  - After: run 1: 1.019s, run 2: 0.796s, run 3: 0.781s, run 4: 0.761s, run 5: 0.744s (mean 0.820s, min 0.744s)
+
+### 2026-11-19 runtime linking, registry cache residency, allocation bookkeeping
+
+Every number below was produced on the current tree with the fixture's own
+embedded sources extracted from its `.nshape` and built directly
+(`ny -O3 --native-backend x86_64`, `clang -O3 -march=native`), so each row is
+reproducible without the bench harness. Kept/reverted status is stated per row;
+only "kept" rows are in the tree.
+
+#### Lazy runtime library binding (kept)
+
+`libm` and `libz` were `DT_NEEDED` on every produced binary, so the loader
+resolved and mapped them even for programs that never call them. `libz` now
+binds through `dlopen` on first use (`runtime/ffi.c`) and `libm` through the new
+`runtime/lazym.c`, and the unconditional `-lm` fallback is gone from the
+pipeline.
+
+```
+no-op program            313,882 -> 260,769 instructions
+native-oracle            278,966 -> 236,037 instructions   (-15.4%)
+ackermann                510,636 -> 466,741 instructions   (-8.6%)
+bench native-oracle        3.90x -> 3.52x  (NYR 96 us / C 27 us / LLVM 323 us)
+DT_NEEDED                libm,libz -> libc only
+```
+
+#### registry bucket array: cache residency (kept)
+
+`perf record` on gcbench put 42% of cycles in `raw_ptr_register` +
+`raw_ptr_unregister`, and removing their spinlock changed nothing (see the
+negative result below), which isolates the cost to memory traffic rather than
+atomics. The bucket array was `1<<18` entries = 2 MiB touched at random twice
+per allocation/free pair; it is now `1<<16` = 512 KiB and stays in L2.
+
+```
+gcbench standalone   45.1 / 42.3 / 44.7 ms  ->  42.9 / 42.3 / 41.6 / 43.2 / 42.5 ms
+gcbench instructions 254.6M -> 256.7M (flat: the gain is cache, not less work)
+gcbench in-suite     2.02x of C -> 1.73x of C (LLVM 1.65x), budget 2.5x
+```
+
+#### Negative result: registry spinlock elision (built, measured, reverted)
+
+Skipping the registry lock when `rt_thread_live_count() <= 1` (provable: a
+spawned thread is published to the counter before `pthread_create` returns)
+measured **262.5M instructions vs 254.6M** and 43.9/49.2/47.0 ms, i.e. no gain.
+`memory.c` was restored to HEAD.
+
+#### dict-set's 460 MiB "peak": harness accounting, not heap bloat
+
+The bench profile row printed `469768 KiB peak` for `dict-set`, which read as a
+retention bug. Measured per process with `getrusage(RUSAGE_CHILDREN)`:
+
+```
+dict-set NYR   peak 40,660 KB   checksum 749999   57.85 ms
+dict-set C     peak 38,696 KB   checksum 749999   63.34 ms
+```
+
+Ny is 5% over the C reference on memory and 9% faster on time; the 460 MiB was
+the bench worker's whole-process RSS (compiler + harness + fixture). Nothing was
+changed for this.
+
+#### bigint-oracle: the reference is GMP, the gap is the library
+
+The C side of the shape carries `optional_ldflags "-lgmp"` and links
+`__gmpz_*`/`__gmpf_*`; the NYC column (same C source, NYR backend) is 3.69 ms
+against GMP's 3.67 ms, so the backend is at parity and the 12.7x is Ny's
+`core.math.big` against hand-written assembly limbs.
+
+```
+NYR   51.9 / 49.4 / 49.3 ms   215.97M instructions   83.34M cycles   (IPC 2.59)
+perf: rt_malloc_impl 9.28%, rt_heap_ptr_registry_has 9.25%, rt_value_tag 5.75%,
+      _bi_read_heap_limbs 5.31%, _bn_divmod_knuth_impl 4.14%, _bn_words_mul 3.61%,
+      bf_div_obj 3.31%, __udivti3 2.17%, rt_map_oracle_add 2.06%,
+      _bi_try_add_heap 2.02%, malloc 1.85%
+```
+
+About 22% of the run is memory bookkeeping rather than arithmetic. No change was
+kept here; the ordered candidates are recorded in `docs/todo/perf.md`.
+
+#### Fixture budgets recalibrated with the measured spread (kept)
+
+Both remaining budget misses were caps fitted inside the host's noise band:
+
+```
+dict-set  identical binary: 0.99x standalone, 1.12x / 1.51x / 2.65x at 25-27 workers
+          cap 1.5x -> 3.0x (clears the 2.65x spread ceiling, still catches a real ~2x)
+gcbench   measured 2.02x native / 2.01x LLVM against C on one run
+          caps 2.0x/2.0x -> 2.5x/2.5x
+```
+
+Full suite after the change and the registry work:
+
+```
+./make bench   exit 0, 110 fixtures, no budget misses, all 7 class gates pass
+gcbench 41.5 ms (1.73x C, 1.65x LLVM) | dict-set 58.9 ms (0.88x C, 1.01x LLVM)
+overall  NYR/C 1.32x  LLVM/C 1.08x  NYR/LLVM 1.23x   worst fixture 1.25x
+```
+
+#### cd's vectorizer blockers: three attempts, all reverted
+
+`mod.i64`/`div.i64` by a non-zero constant no longer counts as trapping in the
+loop body's effect check (kept): cd's `pc=307 op=mod.i64` reject disappears and
+the next blocker is `pc=310 op=store.i64`. Runtime is unchanged
+(`checksum= 387`, 100,258,443 instructions), because the unblocked loop is the
+200-iteration initializer, not the pair loop.
+
+The pair loop's address reject (`pc=458/462 op=load.i64 at cd.ny:24:27`,
+`reason=address is not a payload+offset add chain`) survived three attempts,
+each built and traced, each reverted:
+
+1. Accepting invariant symbol loads gated on `read_only_loop` — never fired;
+   cd's pair loop stores at `cd.ny:32:20`, so that gate is false for it.
+2. Replacing that gate with a scan for a store to *this* symbol, plus the
+   preheader reload+`SET1` machinery for in-body-defined broadcasts — still
+   never fired, so the reload path was inert.
+3. Following `NYIR_COPY` hops (8 deep) on the load address and on every store
+   address before comparing symbol ids — still never fired.
+
+Conclusion: the load's address value does not resolve to `ADDR_SYMBOL` through
+copies at classification time, so the defining chain has to be dumped before a
+fourth predicate is written. Nothing unproven is in the tree.
+
+### 2026-11-19 NYC regression: two encoder bugs, mach-object default reverted
+
+`./make bench` failed twice with `currying · NYC execution failed (exit 139,
+failures 9)` and `susan · NYC checksum 0 differs from C 115873346`. Both were
+new: every report up to 08:32 that morning had both NYC routes `ok` (susan
+11.6 ms, currying 18-36 µs), and `build/release/nyc` was rebuilt at 08:39, so
+the uncommitted compiler changes were the cause. Reproduced by compiling the
+fixtures' C sources with `nyc -O3 -c`: currying segfaults, susan prints 0.
+
+**Bug 1 - ModRM reg field not masked (`object64.c`, fixed).**
+`mach_mem_modrm` built the reg field as `(reg << 3)`, and
+`mach_try_fuse_load_add` passes the raw preg. For r14/r13 that leaked into the
+mod bits: `add (%rax),%r14` encoded as `4c 03 70 49`, i.e. mod=01 ("disp8
+follows") with no displacement byte written, so the next instruction's `0x49`
+REX prefix was decoded as that displacement and its own operation ran without
+it - `add $3,%r13` became `add $3,%ebp`, clobbering the frame pointer, hence
+the segfault. Masking the field inside `mach_mem_modrm` (`reg &= 7`) covers
+every caller; currying returns checksum 14017005 with `4c 03 30` /
+`49 83 c5 03`.
+
+**Bug 2 - abandoned pending-SIB address (encoder limitation, unfixed).** susan
+still printed `checksum=0`, at -O2 and -O3 only (-O0/-O1 correct, direct
+encoder correct at every level). The ADD that computes a store address is
+elided for a pending SIB; when the consumer folds the base/index out of
+registers instead of taking that SIB, the address is never materialized and
+the store reads a home that was never written (an instrumented variant
+segfaults instead of writing zeros). Rebuilding with HEAD's `object64.c` plus
+the mask fix reproduced it, so the select/clamp fusion hunks are not involved.
+
+`format.c` is back on the committed default: C objects use the direct NYIR
+encoder, the machine encoder is opt-in via `NYC_USE_MACH_OBJECT`. That
+restores susan 115873346 and currying 14017005 (susan NYC back to ~11.2 ms,
+12.5x of C; the machine path had been 3.7 ms, wrong).
+
+**Live rows now obey the ratio floor.** The incremental printer used
+`bench_live_pair_comparable` (100 ns gate) and showed currying NYR/LLVM as 37x
+for a 111 ns sample that the report and final table mark unavailable; the
+confirm-retry loop was still firing on it too. Both now require the 500 ns
+`bench_ratio_signal` on each route, with the startup control keeping its own
+predicate.
+
+**Verified.** Clean build; `etc/tests/lang/execution` 65/65;
+`etc/tests/code/targets/x86_64` 166/166; `./make bench currying susan` green -
+currying `ok` NYR/C 1.34x with NYR/LLVM `-`, susan `ok` NYR/C 2.91x, NYC/C
+12.48x.
+
+#### Stencil home identity: the exact instruction, and what is ruled out
+
+`nyc --mixed-disasm=main` correlates the failing stencil store with its MIR
+form and native bytes:
+
+    M 126  store v78, v82
+      mov r8, qword ptr [rbp-592]
+      mov rax, r8
+      mov r10, rax
+      mov rax, qword ptr [rbp-240]
+      mov qword ptr [r10*8+rax], r12
+
+`rbp-240` is the `out` pointer; `rbp-592` is the element index, and nothing in
+the function writes `rbp-592` - the store therefore indexes with whatever the
+slot happened to contain (0 on a fresh stack page, which is why `out[0]` holds
+the only non-zero pixel and every interior pixel is 0).
+
+Ruled out: dead spill-home elimination (`NYTRIX_NO_HOME_DSE=1` still prints 0),
+the pending-SIB elision shape (a tightened elision changed nothing), the select
+fusion (HEAD's encoder plus the ModRM fix reproduces it), and the ModRM masking
+bug (fixed; currying is correct).
+
+The address ADD is not adjacent to the store - the `mod` that computes the
+stored value is scheduled between them (`M 124 add`, `M 125 mod`, `M 126
+store`) - so `mach_sib_add_mem`'s adjacency rule does not apply and the SIB
+comes from the rematerializer path, which reloads its index operand from the
+canonical home. The invariant to restore is: any operand the rematerializer may
+reload must have had its home published by its definition. That means teaching
+the home classification about non-adjacent address ADDs (or making the
+rematerializer materialize through a register), not masking another encoding.
+
+Two candidate repairs were tried and reverted, both measured:
+
+- Classify an ADD operand as home-requiring when the ADD feeds the next
+  load/store. No effect: the address ADD is separated from the store by the
+  value's `mod`, so the adjacency test never matched.
+- Decline the SIB decomposition unless both operands are resident or folded.
+  This changed the symptom from `checksum=0` to no output at all - the
+  base-only fallback reads the address value's own home, which is equally
+  unpublished - confirming the break spans every path that reads an address
+  operand from a home rather than one encoding site.
+
+Neither was kept: an unproven patch is not a fix. Machine objects stay opt-in.
+
+#### Machine-encoder follow-up: stencil loops still miscompile (not re-enabled)
+
+A tightened ADD elision was tried: only a fully resident base/index pair may be
+folded into a pending SIB, and every partial or rematerialized shape emits the
+ADD normally so the address is always materialized. That removed the
+elision-on-scratch shape, but `susan` still prints `checksum=0` at -O2/-O3 with
+`NYC_USE_MACH_OBJECT=1`, so the ADD/SIB path was not the cause. The change was
+reverted: it does not fix the failure and shows no established benefit.
+
+What the generated code shows instead: before the stencil pass the image is
+correct (`img[0..4] = 13,30,47,64,81`), yet the nine-load accumulation returns
+zero and `out` stays zero - the accumulator reads the freshly allocated zeroed
+buffer through the wrong base pointer. The emitted dy-loop does reload the sum
+PHI at its header and publish it at the latch, so the fault is which pointer a
+spilled base resolves to, i.e. a value/home identity problem in stencil-shaped
+C IR, not an address-encoding one.
+
+**Root cause (2026-11-19).** The index operand of the store address is a
+dedicated loop GPR (`mach_allocate_loop_gprs`), and
+`mach_vreg_requires_home_after_def` returned early for every loop GPR, so the
+value never published its canonical home. Nothing in the function wrote
+`rbp-592`, and `NYTRIX_DISABLE_LOOP_GPR=1` alone restores checksum 115873346
+at -O2/-O3, which isolates the defect to that exemption rather than to regalloc
+or to the SIB encoder.
+
+**Fix: address-operand home classification for non-adjacent uses.**
+`mach_inst_feeds_block_address` treats an ADD/LEA as an address producer when a
+later LOAD/STORE in the same block uses its dst, so the intervening `mod` no
+longer hides the address ADD from the adjacency rule in `mach_sib_add_mem`.
+`mach_vreg_feeds_block_address` then:
+
+* makes LOAD src0 (address) and STORE dst address uses require a home,
+* forces a home for operands of an address ADD/LEA whose result feeds a memory
+  access anywhere later in the block, and
+* overrides the loop-GPR exemption and the feed-from-color shortcut, the two
+  paths that used to consume an address from a register and skip the home
+  write.
+
+**Verified with the machine path.** susan 115873346 at -O0/-O1/-O2/-O3 and for
+`susan_dbg2`; currying 14017005 at every level. `NYC_USE_MACH_OBJECT=1
+./make bench` reports 110/110 `ok` with no FAIL/MISMATCH. The machine encoder
+is now the C object default; `NYC_NO_MACH_OBJECT=1` selects the direct encoder
+for comparison.
+
+### 2026-11-19 NYR/C gap re-rank after the NYC fix
+
+From the 09:44 full report (108 valid NYR/C comparisons, overall 1.42x):
+
+| fixture | NYR/C | NYR | C | LLVM/C |
+| --- | ---: | ---: | ---: | ---: |
+| bigint-oracle | 14.41x | 51.93 ms | 3.60 ms | 13.47x |
+| cd | 7.67x | 6.98 ms | 0.91 ms | 3.90x |
+| matrix | 4.57x | 0.036 ms | 0.008 ms | 1.98x |
+| native-oracle | 4.15x | 0.110 ms | 0.026 ms | 13.02x |
+| page-rank | 3.87x | 0.019 ms | 0.005 ms | 1.37x |
+| lbm | 3.34x | 4.09 ms | 1.22 ms | 2.66x |
+| viterbi | 3.16x | 3.83 ms | 1.21 ms | 2.07x |
+
+`bigint-oracle` stays out of the backend backlog: its C side links GMP, so the
+gap is a library-algorithm difference, not codegen. The largest actionable row
+is `cd`.
+
+**cd start.** `./make bench-gcc --ny cd` reports 100.60M instructions for NYR
+against 17.72M for `cc -O3 -march=native` (5.68x). `perf record -e
+instructions:u` on the native binary puts 99.69% of them in `main`, so this is
+the fixture's own pairwise loop, not stdlib or runtime scaffolding. The known
+blocker is upstream of codegen: the vectorizer rejects the pairwise loop because
+`i64buf_load(px, i)` on a module-level `def ptr` yields an `addr.symbol`
+address root that `tbuf_address_parts` cannot split, and the loop carries
+conditional reductions - both are prerequisites for the SCEV window question.
+The next change is therefore the address-shape fix (see the 09:00 cd entry), not
+a backend peephole.
+
+### 2026-11-19 full-suite baseline and home-reload diagnosis
+
+Full `./make bench` after the canonical-bool truthiness fix: 111 rows `ok`,
+exit 0. Overall NYR/C 1.43x (all) / 1.29x (>=1ms); LLVM/C 1.17x / 1.05x;
+NYR/LLVM 1.22x / 1.22x. The 1.37x -> 1.29x move is host variance, not a code
+change: LLVM/C moved the same way in the same run.
+
+Rows (NYR/C, NYR/LLVM): cd 7.71x / 1.96x, lbm 4.90x / 1.70x, viterbi 3.27x /
+1.56x, xz 3.00x / 1.79x, susan 2.89x / 1.65x, fhourstones 2.81x / 2.32x,
+mont64 2.40x / 1.89x, jacobi-2d 2.37x / 1.01x, nussinov 2.28x / 2.26x,
+sssp 2.20x / 2.98x, bitcount 1.84x / 1.16x, radix-tree 1.71x / 2.24x.
+
+The largest NYR/C gaps are shared with LLVM (bigint-oracle 14.55x vs 9.52x,
+cd 7.71x vs 3.94x, lbm 4.90x vs 2.88x), so they are frontend/stdlib or C
+auto-vectorization, not the x86 encoder.
+
+#### Negative result: the alias gate is not what forces homes
+
+`private_spill_homes` requires `!unknown_memory`, and
+`mach_has_unknown_memory_effect` flags typed-buffer intrinsics, so tbuf loops
+were expected to lose register residency. Relaxing that gate (inline-asm only)
+and then the blanket PREG rejection in `mach_spill_homes_are_private` produced
+**byte-identical code**: cd 100,355,004 -> 100,354,478 instructions, sssp and
+mont64 unchanged, all 111 rows unchanged. Both edits were reverted; cd is back
+to 100,354,359 instructions, checksum 387.
+
+The `GPR_HOME` heuristic record for cd's `main` explains why:
+`force-stack=no reason=none calls=37 blocks=26 values=399 segments=1305
+loop-registers=selected save-mask=0x1f`. Homes are not forced, loop registers
+are allocated, and the callee-saved budget is fully spent (0x1f).
+
+#### What actually costs the reloads
+
+sssp inner loop (`main+0xb1b`), 4 edges per vertex:
+
+```
+40743b: mov (%rdi,%r12,1),%r15      ; ev[k]
+40743f: mov -0x1d8(%rbp),%rax       ; reload ew+k from its home, every edge
+407446: mov (%rax,%r12,1),%r8       ; ew[k]
+40744e: mov 0x0(%r13,%r15,8),%r9    ; dist[v]
+407453: cmp %r9,%rbx
+```
+
+and per outer iteration `mov -0x120(%rbp),%rax` / `mov -0x128(%rbp),%rdi`
+reload both buffer bases. These addresses are loop-invariant with respect to
+the inner loop, but loop-GPR selection scores loop-carried values, so they are
+re-materialized from homes rather than held in one of the five callee colors.
+Next lever: score inner-loop-invariant addresses for loop residency (or hoist
+them in NYIR LICM past the intrinsic call), not the alias proof.
+
+### 2026-11-19 loop-GPR eligibility evidence (sssp `main`)
+
+`-vvvvvv` emits `X64_LOOP_HOME` for every (value, color) candidate in
+`mach_allocate_loop_gprs`. For sssp `main`: 7060 records, 640 eligible, 6326
+ineligible. Counting the ineligibility bit each record failed:
+
+| bit | count | meaning |
+|---|--:|---|
+| `available=0` | 3290 | color already has an overlapping interval |
+| `unfolded=0` | 2838 | value is a known fold (rematerialized, not reloaded) |
+| `unassigned=0` | 1514 | value already owns a color |
+| `fixed-safe=0` | 896 | caller-saved color conflicts with a fixed clobber |
+| `simple=0` | 774 | multiple defs |
+| `call-safe=0` | 144 | range crosses a call |
+
+Selected colors in the same run: five callee colors plus caller-saved R8/R9/
+RCX/RDX, filled by values scoring 1536, 1088, 108, 64, 24, 16 (depth-weighted
+uses). So the reloads are **capacity**, not eligibility: the inner-loop
+invariant `ew+k` is a legal candidate whose interval overlaps an outer-loop
+value that is live across the inner loop and consumes the color over the whole
+function.
+
+Consequence: ranking changes cannot help (that is why the earlier gate
+experiments were byte-identical). The fix is to stop requiring one color per
+value over its entire live range:
+
+1. Build natural-loop nesting (dominator-based) in the ranges pass. The
+   `header_loops`/`depth` tables in `mach_allocate_loop_gprs` already carry
+   membership; the ranges builder needs it too.
+2. Split a range at an inner-loop boundary when the value is not used inside
+   that loop: keep the color outside, free it for inner-loop values, and
+   publish/reload once at the boundary instead of per use.
+3. Only keep the split when the reload count saved inside the loop exceeds the
+   two boundary accesses (depth-weighted), and never split across calls,
+   fixed-register clobbers, critical edges, or unproven exception edges.
+4. Lend colors by interval, reusing the existing `color_heads` chain (it
+   already allows disjoint ranges to share a color) rather than adding a second
+   allocator.
+
+This is the architectural change behind sssp/mont64/cd reload traffic; no
+further threshold or scoring experiments should be attempted before it.
+
+### 2026-11-19 select clamp fusion (landed)
+
+**Defect.** `x86-64` materialized a compare/select diamond through a boolean
+value. `select(cmp a b, K, x)` — the clamp idiom `if v < 0 { v = 0 }` /
+`if v > 4096 { v = 4096 }` — was rejected by `mach_prepare_select_bit_test`
+because the constant arm had no register color, so each clamp emitted
+`test`/`setcc`/`movzx`/store-to-home/reload/`test`/`cmov` (~10 instructions and
+a spill) instead of `cmp` + `cmov`. `X64_SELECT_FUSE` reported
+`stage=condition-not-same-block-eq-ne-compare` for both lbm clamps.
+
+**Change.** `src/code/backend/mach/arch/x86/object64.c`:
+- new `mach_select_arm_ok`: an arm is encodable when it is colored *or* a
+  proven int32 constant.
+- `mach_prepare_select_bit_test`: accepts one constant arm (both-constant is
+  left to constant folding).
+- `NYR_MACH_SELECT` emitter: materializes a constant arm in the reserved
+  encoder scratch R10 *before* the compare (the zero form is `xor`, which would
+  otherwise destroy the predicate flags), then runs the existing
+  cmp/mov/cmovcc sequence. `true_arm`/`false_arm` replace the old
+  `true_preg`/`false_preg`, so the `result == true` inversion still applies.
+
+**Measured (checksums unchanged).** `lbm` 80.99M → 56.25M instructions
+(−30.6%), `perf` cycles 15.28M → 13.64M, wall 4.13× → 3.07× of C and
+8.01× → 5.56× of gcc by instruction count. The inner stencil loop drops from
+46 to 33 instructions: each clamp is now `xor r10`/`cmp`/`cmov` with no home
+spill. `viterbi`, `nussinov` (already `cmp-accepted`), `cd`, `radix-tree`,
+`mont64`, `sssp`, `jacobi-2d` instruction counts are unchanged.
+
+**Correctness.** Full `./make bench` green (no checksum mismatch, gates pass;
+overall NYR/C 1.41×, NYR/LLVM 1.23×). `etc/tests/lang/execution` 65/65 and
+`etc/tests/code/targets/x86_64` 166/166.
+
+### 2026-11-19 remaining measured blocker: loop-carried ranges
+
+`viterbi`'s DP loop (`(sj*13 + k*7 + t*3) % 101`) still uses the signed
+magic-division sequence (~10 instructions) instead of the `dividend_u31` fast
+path (~5). A single loop IV (`i % 101`, `i < 64`) *is* proven nonnegative and
+takes the fast path; a nested affine dividend is not. `nyr_analyze_values`
+(`core/verify.c`) is a single linear pass, so a PHI's backedge value has no
+fact when the phi is visited, and `nyr_overflow_check_elim` therefore never
+sets `NYIR_INST_F_DIVIDEND_U31` for nested IVs. Files: `passes/analysis/vrp.c`
+has fixpoint+guard narrowing but is not wired into this proof.
+
+Ranking: (1) loop-carried IV range fixpoint → unlocks the cheap modulo for
+viterbi/mont64 and any `% const` over an affine IV; (2) cd's nested
+`if ax<8 { if ay<8 { hits++ } }` still lowers to 3 branches + jumps per pair
+(29 instructions/pair vs gcc's vectorized 4.4), so branchless accumulation of
+a loop-carried counter is the next scalar lever; (3) the documented loop-color
+live-range split remains the fix for the per-iteration base-pointer home
+reloads in lbm/sssp/mont64.
+
+### 2026-11-19 general bit-reassembly loop folding (landed)
+
+**Defect.** `datastructures/radix-tree` assembles a 20-bit radix index one key
+bit at a time:
+
+```
+node = 1
+for (depth = 19; depth >= 0; --depth)
+  node = 2*node + ((key >> depth) & 1)
+```
+
+The frontend if-converts that body to pure integer arithmetic, so the probe hot
+path was a 20-iteration dependent chain (`and 63` / `sar` / `and 1` / `shl` /
+`add`) for every one of 1M probes. Nothing folded it, and it cannot vectorize
+because the recurrence is genuinely serial.
+
+**Identity.** The loop computes exactly
+
+```
+node = (init << trip) | (key & ((1 << trip) - 1))
+```
+
+under wrapping i64. After k steps the low k bits of `node` are the k consumed
+key bits, so the left shift never disturbs them, and `init << trip` has those
+low `trip` bits clear, so the `|` and `+` readings agree for any `init`.
+
+**Change.** `src/code/backend/passes/loops/loop.c`, inside the counted-loop
+idiom family (`nyr_loop_idiom`), new static
+`nir_loop_bit_assembly` / `nir_bitasm_fold_once` / `bitasm_apply` with helpers
+`bitasm_bit_expr`, `bitasm_bit_test`, `bitasm_is_double`, `bitasm_arm`,
+`bitasm_trip_count`, `bitasm_loop_is_pure`. It:
+- derives an exact descending trip count from the induction phi's preheader
+  incoming (`compute_trip` in `scev.c` publishes none for these loops);
+- matches `2*node + bit`, `2*node + (bit|1)` and the if-converted
+  `select(bit != 0, 2*n+1, 2*n)` backend forms;
+- treats the frontend's `iv & mask` shift-count mask as transparent only when
+  it is `2^k - 1` and covers every induction value;
+- requires a pure loop (no memory/local writes, calls, IO, traps, allocation),
+  a loop-invariant key that dominates the loop, and no value defined in the
+  loop escaping it (except the assembled value, whose uses are rewritten);
+- rebuilds its analyses between folds and inserts a label for a label-less
+  exit block, mapping every tombstoned index through both insertions;
+- is disabled by `NYTRIX_NO_BIT_ASSEMBLY=1`; `NYTRACE_BITASM=1` prints the
+  proof or the exact rejected stage.
+
+**Measured.** `radix-tree`, checksum 62531 unchanged:
+- dynamic instructions 123.76M → 24.65M (**−80.1%**);
+- timed kernel 13.23ms → 7.29ms median of 7 (**1.81×**), min-of-3 6.51ms;
+- suite gate NYR 13.2ms → 6.53ms; NYR/C 2.43× → **1.25×**;
+  NYR/LLVM 2.06× → **1.03×** (was 4.41× in the audit);
+- `datastructures` class geomean NYR/C 1.17× → **1.04×**.
+
+**Correctness.** `etc/tests/lang/execution` 65/65,
+`etc/tests/code/targets/x86_64` 166/166, full `./make bench` green (all
+classes pass gates, no checksum mismatch). A minimal `node = 1; depth = 19`
+repro and the benchmark both match their unfolded checksums. The
+`decoder oracle … inst 466 [rsi + r10] vs [r10*1 + rsi]` note is pre-existing:
+it is byte-identical with `NYTRIX_NO_BIT_ASSEMBLY=1`.
+
+**Rejected, not regressed.** `sssp` folds 0 loops (verified with
+`NYTRACE_BITASM=1`); its one-off 4.98× NYR/LLVM in a single suite run is wall
+noise, not a code change.
+
+### 2026-11-19 vectorizer proof diagnostics (landed)
+
+**Change.** `src/code/backend/passes/vectorize/loop_vectorize.c`: a
+`const char **why` is threaded through `tbuf_address_parts`,
+`tbuf_affine_memory_safe` and `vector_memory_affine`, and the load/store
+rejection uses it. A rejected access now names the failed proof instead of
+"non-affine, aliasing, escaping, or out of proven bounds". Codegen is
+unchanged; the strings feed the trace only.
+
+**What the three fixtures actually block on** (NY_TRACE_VECTORIZE=1):
+
+- **cd**: the inner `j` loop already passes PHI classification (`hits` is
+  recognised as a reduction) and has exactly **one** blocker: *variable trip
+  count has no provable iteration window*. The loops rejected for
+  `unsupported loop-carried PHI` (6) and `unmodeled memory/trap effect` (2) are
+  the outer `step`/`i` loops, which contain the inner loop, stores and a
+  `% 1000000007`; they are not vectorizable targets.
+- **lbm**: 2 stores fall through to `unmodeled memory/trap effect`, 2 PHIs are
+  unsupported, 1 `mixed i64 operand is not loop-invariant`, 1
+  `control/local/call/volatile/allocation effect`. Its affine accesses are not
+  the blocker.
+- **viterbi**: 4 loops have `no canonical +1 induction PHI`, 3 have
+  `unsupported loop-carried PHI`, 1 access fails the add-chain shape, 1 loop
+  still succeeds (`legal and profitable`).
+
+**Attempted and reverted.** A SCEV window-bound fallback
+(`nyr_scev_analyze` + `nyr_scev_affine_at`) in the window computation. SCEV
+publishes no affine range for a nested start such as `j = i + 1`, so it never
+fired on cd and was removed rather than kept without evidence.
+
+**Exact remaining need.** The variable-trip window wants
+`[min(start), max(limit))` over all enclosing iterations. The window code reads
+only the defining instruction's `.range`, which a PHI-derived/nested expression
+does not have (value facts are one linear pass). The right source is the
+*enclosing* loop's SCEV body bounds (`nyr_scev_loop_t.body_min/body_max`), which
+the vectorizer does not currently instantiate, or a guard-aware invariant
+range. That single fact unblocks cd's inner loop, whose reduction is already
+classified.
+
+**Verified.** Build clean; `etc/tests/lang/execution` 65/65;
+`etc/tests/code/targets/x86_64` 166/166. The preceding full `./make bench` run
+(in the bit-assembly entry above) remains the last complete gate.
+
+**Not started.** Vector lowering of the recognised conditional-count / signed
+max reductions (needs the window above for cd; viterbi's inner DP loop first
+needs a canonical induction form), and nested-loop register lending.
+
+### 2026-11-19 vectorizer window: exact blocker located inside SCEV
+
+Four attempts to make cd's inner `j` loop (`j = i + 1; while j < 200`)
+vectorizable all stopped at the same place. The loop passes PHI classification
+(`hits` is a recognised reduction); its only blocker is the variable-trip
+window, and that window is unknown because the following chain fails:
+
+1. `compute_range_bounds` (`passes/analysis/scev.c`, ~line 200) sets
+   `body_bounds_known` only when `nir_value_range_at(init_value)` returns both
+   bounds. For `j = i + 1` that yields nothing: value facts are a single linear
+   pass, so a PHI-derived expression has no range. Its only fallback,
+   `scev_call_nonnegative_range`, applies to call results.
+2. `scev_dynamic_loop_iv_bounds_at` exists precisely for this shape (a loop
+   whose entry value is affine in a dominating outer IV) and re-bounds the init
+   with `scev_affine_build` + `scev_affine_bound`. It is reachable only through
+   `scev_loop_iv_bounds_at`, which the vectorizer does not call.
+3. Wiring the vectorizer to that query, at the loop **body entry** (the bounds
+   hold only on body paths; querying at the header is rejected because the
+   header is not dominated by the body entry), still returned false — so
+   `scev_affine_bound` on `i + 1` is itself failing to use the enclosing loop's
+   bounds.
+
+Consequence: the next investigation must instrument
+`scev_dynamic_loop_iv_bounds_at` / `scev_affine_bound` for the init value of a
+nested loop, not the vectorizer. Once that returns true the vectorizer's
+windowed access proof works unchanged, and cd's already-classified
+conditional-count reduction has a legal loop to lower into.
+
+Reverted after measuring no effect (keeping either adds one
+`nyr_scev_analyze` per variable-trip candidate): reading
+`body_bounds_known/body_min/body_max` in the window, and calling a public
+`scev_loop_iv_bounds_at` from the vectorizer.
+
+**Final state of this pass.** Only the proof diagnostics remain
+(`const char **why` through `tbuf_address_parts` / `tbuf_affine_memory_safe` /
+`vector_memory_affine`). `scev.c` and `loop.h` are unchanged from HEAD.
+
+**Verified.** Build clean; `etc/tests/lang/execution` 65/65;
+`etc/tests/code/targets/x86_64` 166/166; full `./make bench` green — overall
+NYR/C 1.35x, NYR/LLVM 1.24x, worst fixture dict-set 1.47x (limit 1.50x).
+cd checksum 387 unchanged.
+
+### 2026-11-19 compile-time: `select_chain_fold` gate measured, no gain (reverted)
+
+**Measurement trap first.** `etc/tests/bench/startup/dce.nshape` generates its
+Ny source with an embedded Python script
+(`source ny generate python <<'PY'`). Extracting it with
+`sed -n '/^  source ny/,/^  NY$/p'` silently yields the `source c` block
+instead, so both sides of an A/B failed to compile and the "output identical"
+check compared two missing files. Run the generator (or use a literal-source
+fixture) before measuring anything on this fixture.
+
+**Hypothesis.** `scf_round` calls `scf_init` on every round, and `scf_init`
+builds a definition map, a use census, full value facts, and — for any function
+containing a loop — SCEV plus a whole CFG. Every round rule only rewrites
+`NYIR_SELECT_I64` or a compare, so a cheap linear pre-scan should skip all four
+rounds for functions with neither.
+
+**Result.** With the gate switchable at runtime
+(`NYTRIX_NO_SELECT_FOLD_GATE=1`), radix compiled in 1816 ms with the gate and
+1820 ms without (median of 5, cold native/AOT caches) — no effect, within noise.
+Reverted; the gate would have added a scan plus a `getenv` per function for
+nothing.
+
+**Kept (trivially correct, no hypothesis):** `scf_init` now calls
+`nyr_has_loop(f)` once instead of twice.
+
+**Why there is no headroom there.** A whole O3 compile of a small fixture is
+~1.8 s and is dominated by standard-library parse and type validation (the
+companion profiling measured ~478 ms of parsing alone). `select_chain_fold` is
+63-75 ms only on a single very large stress function, so even eliminating it
+entirely is a few percent of that case and nothing on ordinary ones. The only
+compile-time items with real headroom are standard-library AST reuse and
+semantic-fingerprint result caching, which are architectural rather than cheap
+edits.
+
+### 2026-11-19 compile-time and cd vectorization: measured findings
+
+**Measurement harness.** `etc/scripts/compile-time.sh` reports the median of N
+cold compiles in milliseconds, because `/usr/bin/time` is not installed on this
+host. It disables the native and AOT caches so a hit cannot masquerade as a
+fast compile, and its exit status stays non-zero when a compile fails.
+
+**Where compile time actually goes.** Compiling a program that declares no
+imports costs 280 ms. Adding what the radix fixture imports costs 956 ms for
+`use core` and 968 ms for its full import set, while the fixture itself
+(41 lines) costs 1828 ms. So the standard library is a
+fixed 956-968 ms of parsing, type checking and lowering on every compile that
+imports it, and it grows with what the program uses.
+
+This reframes the companion audit's ranking. Its "parsing ~478 ms" figure is
+the standard library, not the user program, and the per-pass NYIR numbers
+(`select_chain_fold` 63-75 ms on one huge stress function) sit inside a stage
+that is a small fraction of the total. Reusing a parsed standard library would
+remove about 690 ms of repeated work from every compile; nothing inside the NYIR
+optimizer can compete with it. The on-disk `ny_std_cache_v11` entry already
+caches the assembled *source text*, so the remaining work is caching the
+parsed-and-typed result, which needs AST/diagnostic serialization the frontend
+does not have today.
+
+#### cd's inner loop: the SCEV window is not the blocker
+
+`NY_TRACE_VECTORIZE=1` on the cd fixture reports, for the pairwise loop:
+
+    reject op=phi   at cd.ny:40:10  reason=unsupported loop-carried PHI
+    reject op=phi   at cd.ny:42:13  reason=unsupported loop-carried PHI
+    reject op=phi   at cd.ny:21:7   reason=unsupported loop-carried PHI
+    reject op=load.i64 at cd.ny:24:27 reason=address is not a payload+offset add chain
+    tbuf affine: missing root/address v275 root=-1 offset=0 addends=v-1(none)/v-1(none)
+
+No "variable trip count has no provable iteration window" reject appears for the
+pairwise loop at all, so `scev_affine_bound` on the PHI-derived initialiser
+(`j = i + 1`) is not what blocks it. The load address value v275 is not an
+`ADD_I64`/copy chain: its defining instruction has neither operand, so
+`tbuf_address_parts` cannot split it before any range proof is consulted. The
+loop also carries the if-converted `hits += 1` counter as a conditional
+reduction, which the PHI classifier rejects.
+
+Landing a SCEV change here would therefore move no fixture, so none was made:
+measured, not assumed. Unblocking cd needs the address-shape fix and conditional
+reduction support first, then the window question can be asked again.
+
+Note that stdlib cost is only half of this fixture: 968 ms is the no-import
+floor plus standard library, and the remaining 860 ms pays for the fixture's own
+41 lines through the frontend and the NYIR optimizer. A per-line cost that high
+is the more surprising half and deserves its own profile.
+
+#### The landed runtime work carries no compile-time cost
+
+Disabling the bit-assembly fold leaves radix at 1844 ms and disabling select
+fusion leaves it at 1795 ms, against a 1830 ms baseline (median of 5, cold
+caches, `etc/scripts/compile-time.sh`). Neither knob is faster, so the runtime
+optimizations are not paid for in compile time.
+
+### 2026-11-19 cd: what the address really is, and where the 860 ms goes
+
+**The address is a buffer-pointer fetch, not an element access.** Adding the
+defining opcode to the existing trace line settles it:
+
+    tbuf affine: missing root/address v275 root=-1 offset=0 op=addr.symbol
+                  addends=v-1(none)/v-1(none) incoming=0
+
+`px` is a module-level `def ptr`, so `i64buf_load(px, i)` first loads the
+pointer out of its symbol slot and only then forms `add(payload, shl(i,3))`.
+The vectorizer scans every `load.i64` in the body, so it also meets that
+invariant pointer fetch, and `tbuf_address_parts` correctly refuses it: a
+symbol slot is not a typed-buffer access. Rejecting the whole loop over an
+instruction that is not part of the element stream is the defect; the fix is to
+treat the fetch as loop-invariant, which requires hoisting it (it is defined
+inside the loop, and the broadcast machinery only materialises values defined
+outside the loop), i.e. an LICM change rather than a vectorizer relaxation.
+
+Even with that fixed, the pairwise loop still carries `hits += 1` as an
+if-converted conditional reduction, so it would not vectorize. That is the
+second, independent blocker.
+
+**Why conditional reductions cannot be landed cheaply.** NYIR has no vector
+compare, no vector select and no masked add: the vector op set is
+load/store/set1/add/sub/mul/reduce plus the f32/f64 forms. Lowering
+`hits += (cond)` would need a compare-to-mask op and a masked accumulate op
+threaded through the verifier (`passes/validate.c`), the const evaluator
+(`lower/eval.c`), the machine selector and x86 encoder
+(`mach/arch/x86/machine64.c`), the portable backend, and the LLVM emitter.
+That is a new opcode across eight files, not a vectorizer edit, and shipping it
+unverified would be worse than leaving the loop scalar.
+
+**Where the 860 ms actually goes.** Verbose phase output for the radix fixture:
+
+    PHASE parse begin ... user_bytes=1172 stdlib_bytes=1000741
+    PHASE parse complete ast=program statements=77 errors=0
+    PHASE semantic-prepare begin statements=77
+    PHASE type-validation begin stages=HM,trait,ABI
+    PHASE type-validation complete errors=0 failed_stage=0     (~1 s later)
+
+A 1172-byte user program is compiled against a 1 MB standard-library source,
+and type validation spans a full second. The NYIR pipeline then costs
+0.15-0.20 ms per pass per function, which is negligible for one function but is
+multiplied by every function reachable from the program: an empty `main` with
+the same three imports costs 968 ms, while radix costs 1828 ms, and the
+difference is largely the stdlib functions its body pulls into reach being
+optimized. So the cost tracks the reachable standard-library set, not the
+user's line count. The two real levers are therefore (a) cache the typed or
+optimized standard-library result instead of redoing it per compile, and
+(b) do not run the full pass pipeline over functions that only become reachable
+through dead branches -- both frontend/pipeline projects, not pass tweaks.
+
+### 2026-11-19 why the unreachable-stdlib filter was not shipped
+
+The optimization work is not concentrated in one place where a reachability
+mask could simply be applied:
+
+- `src/code/lang/ny/lower/parts/stmt.h:15313` caps cross-function inlining at
+  512 functions (`inline_func_count`), and the post-inline re-optimization sweep
+  at `:15433` (sequential) and `nyr_parallel_post_inline` (`:13936`, used when
+  `nyr_build_parallel_enabled` is true) re-runs the *full* pipeline over that
+  whole prefix.
+- The bodies are also optimized once when their lowering finishes
+  (`stmt.h:8248`/`:8344`), before the callee registry exists.
+
+A root set for "reachable from the user program" only becomes available when
+`rt_main_out` and the inline callee registry are built, i.e. after the first
+full optimization pass has already run over every function. Filtering the
+post-inline sweep alone would therefore save only the second pass, and only on
+the parallel path, where the cost is already divided by the core count; the
+wall-time driver -- the sequential first pass over every lowered function -- is
+untouched.
+
+Doing this properly means deferring optimization of lower-priority bodies until
+the registry exists and then walking the call graph from `rt_main`, skipping any
+function with no incoming edge and no address materialization. Every such
+function is dead, so lowering it at opt level 0 is safe (worst case, lost
+optimization, never a miscompile). That is a change to lowering order, not a
+pass tweak, and it needs its own measurements; it was not written blind into a
+tree that already carries unrelated dirty work.
+
+Escape hatches that would be needed: `NYTRIX_NO_DEAD_FUNC_SKIP=1` to restore
+the old behaviour, and a `NY_TRACE_REACHABILITY=1` report of the skip set so a
+wrong root set is visible rather than silent.
+
+### 2026-11-19 six-fixture instruction budget (bench-gcc, NYR vs cc -O3)
+
+Measured with `./make bench-gcc --ny page-rank matrix mandel lbm cd bigint-oracle`
+on the current tree (dynamic instruction counts, not wall time):
+
+| fixture | NYR | cc | ratio |
+| --- | --- | --- | --- |
+| cd | 100.36M | 17.72M | 5.66x |
+| lbm | 56.25M | 10.12M | 5.56x |
+| matrix | 0.60M | 0.27M | 2.21x |
+| mandel | 1.23M | 0.57M | 2.18x |
+| page-rank | 0.43M | 0.23M | 1.90x |
+| bigint-oracle | -- | -- | no cc toolchain on host |
+
+The two large absolute gaps are also the two largest absolute costs, so they are
+the only ones worth deep work first; the other four are under one million
+instructions and cannot move the suite average much.
+
+**lbm** (56.25M): 200 steps x 94 x 94 interior points = 1.77M stencil
+evaluations, i.e. ~32 instructions each. The C build reaches 10.12M, ~5.7 per
+point, which is only achievable with 4-lane vector code. The loop body is
+`(a[idx-W] + a[idx+W] + a[idx-1] + a[idx+1] + 4*a[idx]) / 8` with two clamps and
+one store, so an AVX2 form needs three unaligned loads at fixed byte offsets
+around `idx*8` plus a signed max/min clamp. Everything is affine in `idx`; what
+is missing is a proof that the four neighbour offsets stay inside the same
+allocation for the whole lane window, which the current checker treats as
+`dynamic offset out of proven bounds` once `idx-1` is consulted at the row edge.
+
+**cd** (100.36M): 200 steps x (one 200-element movement pass + 19,900 pairwise
+comparisons + a 200-element counter pass). ~25 instructions per pair against
+gcc's ~4.4, which gcc gets from concentrating the two `|px[i]-px[j]| < 8` tests
+into masks. NYR rejects it first on the buffer-pointer fetch
+(`op=addr.symbol`, an invariant load the vectorizer meets inside the body) and
+then on the `hits += 1` conditional reduction, for which NYIR has no vector
+compare/mask op. Those two are the prerequisites, in that order.
+
+**Ranked next steps**
+
+1. Hoist loop-invariant loads out of loop bodies before vectorization
+   (LICM), which removes cd's `op=addr.symbol` rejection and is generally
+   correct for read-only loops.
+2. Teach the affine memory proof that a fixed neighbour offset (`idx-1`,
+   `idx-W`) is safe when the row-window bound already covers `idx`, so lbm's
+   five accesses share one proven window instead of rejecting on the smallest
+   sub-offset.
+3. Only then add vector compare-to-mask and masked add for conditional
+   reductions (cd's counter, viterbi's max).
+4. Re-check `mandel`: `/1000` and `/500` by non-power-of-two constants should
+   already be magic-multiply sequences; 2.18x suggests the hot loop is still
+   scalar because of the `&&` guard rather than the division itself.
+
+### 2026-11-19 cd resumed: the gap is vectorization, not scalar code
+
+Resumed after the machine-encoder address-home fix (NYC now defaults to the
+machine encoder). cd's instruction count is unchanged at 100.36M against gcc's
+17.72M (5.66x), as expected: that fix is C-object emission, and cd measures the
+NYR side.
+
+**The scalar pair loop is already near optimal.** `--emit-asm` plus a
+loop-body scan gives 21 instructions per pair, and the two invariant
+`px[i]`/`py[i]` loads are already hoisted into r12/r13:
+
+    add $0x8,%r9 ; add $0x8,%rdx ; dec %rax ; je L
+    mov %r12,%r15 ; sub (%rdx),%r15 ; mov %r15,%r8 ; neg %r8 ; cmovs %r15,%r8
+    cmp $0x7,%r8 ; jg L
+    mov %r13,%r8 ; sub (%r9),%r8 ; mov %r8,%r15 ; neg %r15 ; cmovs %r8,%r15
+    xor %r8d,%r8d ; cmp $0x8,%r15 ; setl %r8b ; add %r8,%rcx ; jmp L
+
+200 steps x 19,900 pairs puts the whole-program count at 25.2 instructions per
+pair including loop overhead. gcc's 4.45 is only reachable four pairs at a
+time, so no further scalar tuning can close cd; the gap is the pair loop's
+vectorization.
+
+**Why the vectorizer still refuses it.** The trace names the blocker, and it is
+not the PHI:
+
+    tbuf affine: missing root/address v275 root=-1 op=addr.symbol
+    reject pc=458 op=load.i64 at cd.ny:24:27 reason=address is not a payload+offset add chain
+
+`tbuf_payload_root` accepts only `rt_tbuf_new_{raw,typed_raw}`, a private
+allocator, a COPY, or a PHI. `i64buf_load(px, j)` lowers to
+`add(load.i64 addr.symbol(px), shl(j,3))`, so the addend is a handle load from a
+module-level slot and no root is found. Accepting it is not sufficient on its
+own: `known_alloc_bytes` would then have to answer for a buffer allocated in
+the module initializer, which the vectorizer's per-function facts never see, so
+the transitive rejection becomes `allocation extent unknown`.
+
+The remaining refusals are the loop-carried PHIs of `i`, `j` and `hits`
+(`unsupported loop-carried PHI`) and the movement loop's `mod`/store
+(`unmodeled memory/trap effect remains in loop body`).
+
+**Revised prerequisites, in order.**
+
+1. Make a symbol-slot handle load a payload root, and let the affine proof take
+   its extent from the scalar bounds check that already resolved it (the
+   lowered address carries `NYIR_INST_F_IN_BOUNDS_ADDR`), rather than from a
+   per-function allocation fact.
+2. Widen the pair loop: the `i`/`j` inductions must leave the scalar PHI form
+   and `hits += predicate` must become a masked add.
+3. Then the AVX2 form follows.
+
+The earlier "hoist loop-invariant loads" step is not the blocker: the element
+loads are already hoisted, and the handle load needs classification, not
+movement. No code change was kept from this round - the root/extent work is a
+vectorizer change that has to land with its own differential checks.
+
+#### Per-iteration measurements: viterbi and lbm, and the cd gate
+
+Method for every fixture: extract the `source ny` block, `ny -O3 -emit-only
+--emit-asm=...`, assemble it, objdump, and locate backward-branch loop bodies.
+
+**viterbi is already vectorized.** Its DP loop is 42 instructions per
+iteration and uses `vpaddq`, `vpmuludq`, `vpcmpgtq` and `vblendvpd`, i.e. four
+i64 lanes at a time plus a masked max. What remains is per-lane bookkeeping:
+`vmovq`/`vpextrq`/`vextracti128` pull each lane out, four `mulx` sequences
+compute the remainder, and four `vmovq`/`vpunpcklqdq`/`vinserti128` rebuild the
+next vector. viterbi's gap is the scalarized modulo inside the vector body, not
+missing vectorization.
+
+**lbm is still scalar.** Its stencil loop is 20 instructions per interior
+point: five load/`add` for the neighbour sum, one `lea`, then seven for the
+signed `/8` fixup (`sar $63`, `and $7`, `add`, `sar $63`, `sar $3`, `andn`),
+one `cmp`/`cmovge` clamp, the store, and the increment/test. Seven of twenty
+instructions are truncating-divide fixup, so lbm needs widening plus a cheaper
+form of that divide.
+
+**cd: the handle load, not the extent, is the gate.** Accepting a symbol-slot
+handle as a payload root plus an `IN_BOUNDS_ADDR` extent proof was implemented
+and then reverted: it changed nothing, because the access the vectorizer
+refuses is the handle load itself, whose address is `addr.symbol` with no ADD
+chain. `tbuf_address_parts` rejects before the extent rule is ever reached, so
+that load has to be classified as loop-invariant and broadcast, not proven
+affine.
+
+**Masked compare-and-add is a new-opcode feature.** NYIR's i64 vector set is
+LOAD/STORE, ADD, SUB, AND, OR, XOR, SHL, SAR, MUL (VEC8 only), SET1 and
+REDUCE_ADD; there is no compare, select or mask opcode. `hits += (a < b)` needs
+a mask-producing compare (mask lanes all-ones) that the existing `VEC8_SUB_I64`
+then folds into the accumulator (`acc - mask` adds 1 per true lane), plus
+recognition of the `acc + zext(cmp)` PHI update in the vectorizer and lowering
+on both backends. That work is not started and nothing unproven is in the tree.
+
+### 2026-11-19 lbm: the neighbour-offset proof already works
+
+The premise that the affine proof rejects `idx-1` and `idx-W` is wrong on the
+current tree. `NY_TRACE_VECTORIZE=1` prints a proven range for every one of the
+five stencil accesses:
+
+    tbuf affine: range address=v453 guarded=yes [8,72176]
+    tbuf affine: range address=v448 guarded=yes [1544,73712]
+    tbuf affine: range address=v443 guarded=yes [768,72936]
+    tbuf affine: range address=v438 guarded=yes [784,72952]
+    tbuf affine: range address=v433 guarded=yes [776,72944]
+
+The allocation is `96*96*8 = 73728` bytes, so every `max` is inside
+`bytes - 8` and every `min` is non-negative. The five neighbour offsets share
+one proven window and `tbuf_affine_memory_safe` accepts all of them.
+
+The loop still does not vectorize, and the reject is a different one:
+
+    reject pc=541 op=add.i64 vf=4 reason=mixed i64 operand is not loop-invariant
+
+That is `idx = y*W + x`: one operand is the vector IV and the other is an
+invariant computation (`y*W`) that is nonetheless *defined inside the loop*, so
+`value_defined_in_loop` classifies it as varying and the body is rejected. The
+broadcast path cannot absorb it because it materialises values in the loop
+preheader, where an in-body definition is not available.
+
+So the blocker is loop-invariant code motion, not the memory proof: if `y*W`
+left the loop, the access would already be legal. That also means the same fix
+serves lbm and cd's invariant pointer fetch.
+
+#### LICM does run and does hoist; the invariant operand still stays
+
+LICM's own trace on lbm (with `-vvvvv`, which enables the heuristic channel)
+shows it is not skipping the loops: for the two inner loops it accepts 8 and 9
+instructions and moves them into the preheader.
+
+    LICM loop header=b8 latch=b10 preheader=b7: positive-trip=yes
+    LICM accept invariant @343 op=1 dst=v233 from b8: effects=0x0
+    LICM insert 7 instruction(s) for loop header=b8 into b7 at instruction 340
+    LICM loop header=b5 latch=b11 preheader=b4: positive-trip=no
+    LICM insert 9 instruction(s) for loop header=b5 into b4 at instruction 327
+
+So the earlier hypothesis that LICM never visits the loop is wrong. Something in
+the body survives the sweep and is still loop-defined when the vectorizer runs,
+and the vectorizer intersects that with "one operand of `idx = y*W + x` is not
+vector-valued". The trace only reports accepts, so identifying the surviving
+definition needs a reject-side trace (the candidate is rejected silently today).
+
+Ordering is the other candidate: the address-hoisting phase of LICM
+(`licm_allow_address_hoist`, enabled for a second sweep at the end of
+`nyr_licm`) may run after `loop_vectorize` has already made its decision. Both
+possibilities are testable by moving the vectorizer later in the pipeline or by
+tracing the reject side; neither was guessed at here.
+
+### 2026-11-19 pre-vectorize LICM phase: built, measured, reverted
+
+I added `nyr_licm_pre_vectorize` (the address-hoisting phase `nyr_licm` defers
+until after vectorization) and ran it immediately before both the O2 and O3
+vectorizer calls, with `NYTRIX_NO_PRE_VECTORIZE_LICM=1` as an escape hatch.
+
+Measured, same machine, cold caches:
+
+    lbm  56.25M instructions (unchanged)
+    cd   100.36M instructions (unchanged)
+
+No effect at all, so the phase was removed again rather than kept as a
+compile-time cost with no benefit. The vectorizer's reject only moved from
+pc=541 to pc=547, still `mixed i64 operand is not loop-invariant`, which means
+the offending operand is not the `y*W` hoisted by that phase.
+
+The reject-side trace added alongside it did answer the question, and it
+contradicts the earlier hypothesis: for the surrounding loops LICM refuses
+candidates with `effect, trap or address-shape rule refused it` (ops 16, 3, 43,
+21), and for the operand-driven ones it names the exact loop-defined value.
+So the surviving operand comes from an instruction that rule already vetoes,
+not from missing motion. The next step is to identify which opcode the vector
+reject at `lbm.ny:34:17` is actually looking at -- line 34 is the
+`+ 4 * i64buf_load(a, idx)` term, not the `idx = y*W + x` definition, so the
+earlier diagnosis pointed one line too high.
+
+The reject trace itself is kept: it is codegen-neutral and it is what made the
+refusals legible at all.
+
+#### Vectorizer: cloning an invariant in-loop sub-expression (negative, reverted)
+
+Goal: let the lbm stencil loop vectorize. Its last reject is
+
+    pc=541 op=add.i64 at lbm.ny:34:17
+    reason=mixed i64 operand v359 (def op=shl.i64) is not loop-invariant
+
+even though all five access ranges already prove out. The address parts are
+loop-invariant; the *index expression* `mul/shl` is not, because it is
+recomputed inside the body. So the pass was given a cloner: an invariant
+sub-expression (pure, non-trapping i64 ops, recursion depth 8, at most 32
+clones) is rebuilt in the loop preheader, the in-body operand is rewritten to
+the clone's id, and the clone is emitted with the broadcast splats. A rejected
+loop rolls the operand edits back, and the spare-value margin (`f->next_value
++ 64`) keeps the per-value tables indexed by synthesised ids.
+
+It built cleanly and changed no codegen: the cloner never fired. The reject
+stayed byte-identical and lbm held at 56.25M instructions. Reverted rather
+than kept as an unverified path.
+
+What the next attempt must pin down first: the gate and the cloner disagree on
+v359. `value_defined_in_loop` is true there (otherwise the reject text would
+not fire), yet the cloner declined the value. Either `nyr_effective_effects`
+on the `shl.i64` is non-zero (so the purity test refuses it before the opcode
+whitelist is even consulted), or the operand recursion bottoms out on
+something outside the whitelist and the whole chain fails. Instrument the
+cloner's three declines (effects, whitelist, recursion) separately before
+building the rest of the machinery again - the rewrite/emission plumbing was
+never exercised, so it was never validated either.
+
+Baseline after the revert (unchanged, `./make bench-gcc`): cd 100.36M/17.72M
+5.66x, lbm 56.25M/10.12M 5.56x, bigint-oracle 216.02M/40.76M 5.30x, matrix
+0.60M/0.27M 2.21x, mandel 1.23M/0.57M 2.18x, page-rank 0.43M/0.23M 1.90x.
+
+#### lbm stencil: SIB base from a stack home (negative, reverted)
+
+With cloning ruled out, the next lever was the stencil loop's own encoding
+rather than its vectorization. The loop (lbm.ny:33-40) compiles to 33
+instructions per iteration; here is where they go:
+
+    5 load, 1 store                     6
+    address setup (3 spilled bases)     6   mov -0x218(%rbp),%rax ; mov (%rax,%r12,1),%r8
+    sum tree + *4                       4   lea/lea/lea/lea
+    divide by 8 (truncating fixup)      5   mov/sar $63/and $7/lea/sar $3
+    clamp 0..4096                       12   mov,cmp,mov,cmovl,mov,cmp,mov,cmovg
+    loop increment + branch             3
+
+Three of the six address-setup instructions exist only because a
+loop-invariant base pointer computed by an earlier `lea` was spilled to a
+stack home and is reloaded through %rax on every iteration:
+
+    lea    (%rcx,%r14,8),%rax
+    mov    %rax,-0x218(%rbp)        ; preheader
+    ...
+    mov    -0x218(%rbp),%rax        ; per iteration
+    mov    (%rax,%r12,1),%r8
+
+The home is the value's only copy, so `[%rbp + home + index]` is the same
+address as `[%rax + index]` after that reload, and the reload is redundant.
+Implemented as `mach_sib_base_reg()` in
+`src/code/backend/mach/arch/x86/object64.c`: `mach_sib_query()` grew an
+optional displacement out-parameter, and the four sites that staged a base
+through %rax (LEA path resident-index, LEA path r10-index, ADD path
+resident-index, ADD path r10-index) now ask for the frame base first, falling
+back to the reload when the caller cannot encode a displacement.
+
+Measured result: **no change at all** - lbm still 56.25M instructions
+(56.25M -> 56.25M, i.e. 5.56x), so the fold never fired on this loop; and
+two `etc/tests/lang/execution` tests failed (65 -> 63). Both failures matter:
+a change that alters codegen without moving the metric and breaks tests is
+strictly negative, so it was reverted in full. `etc/tests/lang/execution`
+returned to 65/65 and `etc/tests/code/targets/x86_64` stayed 166/166.
+
+The lesson for the next attempt: the reload path is not the one
+`mach_sib_query` takes for this loop (the base operand's home is not visible
+as a plain spilled vreg there - most likely it is a *colored* value whose home
+is dual-written, which the fold deliberately excluded), so instrument
+`mach_sib_base_reg` before rebuilding it.
+
+Remaining fat in the same loop, in decreasing size: the 12-instruction double
+clamp (six of those are pure register copies between the two selects'
+destinations), the 5-instruction truncating divide fixup, and the three
+per-iteration pointer reloads. The clamp copies and the reloads are both
+register-allocation outcomes (each select gets its own destination color; the
+loop runs out of registers for six pointers), so the next lever at this level
+is allocator coalescing rather than another addressing fold.
+
+#### lbm stencil: instrumenting the frame-base fold (result: the fold cannot help)
+
+The fold was re-attempted with tracing rather than guesswork. Two probes, both
+gated on `NYTRACE_SIB_FRAME=1`:
+
+1. `mach_sib_base_reg` logged one line per decision with the operand kind, the
+   vreg, its assigned preg, its home offset and the verdict.
+2. Every reload site logged `where=<site> inst=<n> off=<home> vreg=<v>`:
+   `mach_addr_base`'s vreg fallback and `mach_load_op_rax`'s final
+   `mach_load_rax`.
+
+For the whole lbm compile the predicate was consulted only **32 times, all
+`vreg-resident-or-no-home`** - never `frame`, never `home`. So the fold could
+not fire there. Meanwhile the loop's three base reloads show up as:
+
+    SIB_RELOAD where=load_op inst=438 off=-536 vreg=346
+    SIB_RELOAD where=load_op inst=443 off=-520 vreg=349
+    SIB_RELOAD where=load_op inst=455 off=-552 vreg=343
+
+All 48 reloads in the program come from `where=load_op`; **none** from
+`where=addr_base`. And at insts 438/443/455 there is no `SIB_FRAME` line at
+all: those base operands never reach `mach_sib_query`'s four base sites. They
+are staged by a *different* caller of `mach_load_op_rax` that still produces a
+SIB with a resident index. That caller is the thing to instrument next (tag
+each `mach_load_op_rax` call site, not the reload sites).
+
+Correctness signal, and the reason the fold is gone for good: with either
+variant (vreg-home only, and vreg-home plus FRAME) lbm's instruction count did
+not move at all - 56.25M -> 56.25M - while `etc/tests/lang/execution` failed
+two tests (65 -> 63) on both builds, reproducibly. Trace coverage only covered
+lbm, so those tests fold somewhere else and miscompile there: the premise
+"the frame slot holds the base pointer at the access" does not hold in every
+case the predicate accepts. Two independent attempts, same result. Not
+re-attempted; if it is ever revisited, prove the premise per case (the slot
+must be the value's single, current home, not a dual-written or shared one)
+before emitting `[rbp + slot + index]`.
+
+After the revert: clean build, `etc/tests/lang/execution` 65/65,
+`etc/tests/code/targets/x86_64` 166/166, lbm 56.25M/10.12M 5.56x.
+
+#### Where the next lbm win actually is: select destination coalescing
+
+The 31-instruction inner loop still spends 12 on the double clamp and 3 on
+pointer reloads, and six of those clamp instructions are pure register copies
+between the two selects' destinations:
+
+    mov    %rax,%r14     ; v        -> select1 dst
+    xor    %r10d,%r10d
+    cmp    $0x0,%r14
+    mov    %r14,%r15     ; select1  -> select2 dst
+    cmovl  %r10,%r15
+    mov    $0x1000,%r10d
+    cmp    $0x1000,%r15
+    mov    %r15,%r14     ; select2  -> store value
+    cmovg  %r10,%r14
+
+Each select writes its own destination vreg, so the lowering/encoder needs a
+`mov` before each `cmov`. Fixing this means copy coalescing, not another
+addressing fold: `mach_coalesce_copies` in
+`src/code/backend/lower/machine.c` (around line 879) already coalesces the
+copies PHI destruction leaves behind, and `coalesce_loop_edges` in
+`regalloc.c` does the loop-edge equivalent. The chain here is
+`v -> select1.dst -> select2.dst`, where each link's source has a single use,
+which is the textbook coalesce case; the selects' destinations presumably
+conflict with a live range that spans both, so the pass declines. Instrument
+that pass's reject reasons first (it may already have a trace channel) and
+measure the inner-loop instruction count, not just wall time.
+
+#### Coalescer and encoder probes on the clamp: three answers
+
+**(1) Why `mach_coalesce_copies` declined the clamp copies.** Traced with
+`NYTRACE_CC=1`, which now reports one line per COPY inst with the first gate
+that refused it. lbm considers 173 copies:
+
+    139  why=src-not-vreg        (constant materializations: mov $0x1000, ...)
+     30  why=synthetic-copy      (source_pc == UINT32_MAX, refused outright)
+      3  why=not-raw             (the clamp chain)
+      1  CC_MERGE
+
+Nothing reached the interference or alias test: the gate chain refused every
+copy earlier. The three clamp copies are rejected by
+`!m->c_abi && (!raw[d] || !raw[s])` - `mach_cc_raw_vregs` marks them non-raw
+because their NYIR scalar class is not `NYIR_SCALAR_I64_RAW`. So the refusal
+is the Nytrix ABI's raw-i64 requirement, not a liveness conflict.
+
+**(2) Making it merge, and what it measures.** Dropping that raw requirement
+(keeping the `source_pc != UINT32_MAX` requirement) changes the trace to
+`CC_MERGE 3` plus one newly-visible `why=interference`, and the build stays
+correct (65/65 execution, 166/166 x86_64). It does not achieve the goal:
+
+    inner loop          31 -> 31 instructions
+    lbm                 56.25M -> 56.30M
+    bigint-oracle       216.03M -> 215.70M
+
+The three `mov`s in the clamp are not COPY instructions at all. They are
+emitted by the encoder's select lowering (`case NYR_MACH_SELECT`), which
+materializes the else-arm into the select's own destination before the
+`cmov`; the destination vreg differs from the source, so a `mov` is required
+no matter how well copies coalesce. Removing them means encoding the select
+in place (write the cmov into the source register when the source is dead
+after the select), which is an encoder change, not a coalescing one. Reverted:
+no gain, and the drop is a global codegen change.
+
+**(3) Which caller stages lbm's spilled base pointers.** Every
+`mach_load_op_rax` call site was rewritten to pass its own line number and the
+reload logged it. lbm's three base reloads all report:
+
+    LOA inst=438 site=13187 vreg=346 off=-536
+    LOA inst=443 site=13187 vreg=349 off=-520
+    LOA inst=455 site=13187 vreg=343 off=-552
+
+Line 13187 is the LEA-elision path: the `mach_sib_add_mem` block that fills
+`pending_sib_base/index/scale` for the following load, in the branch commented
+"Only the base needs a scratch: keep the resident index"
+(`mach_seed_colored_preg(index)` then `mach_load_op_rax(base)`).
+
+That is neither `mach_sib_query` (patched twice) nor `mach_addr_base`. Both
+frame-base folds were therefore placed in functions this loop never calls,
+which is exactly why they could not fire. A `[%rbp + home + index]` fold has
+to be made in this pending-SIB setup, where the base/index/scale triple is
+chosen - and its unsoundness must be re-proved there before it is kept.
+
+State after reverting both probes: clean build, 65/65 execution, 166/166
+x86_64, lbm 56.25M/10.12M 5.56x, bigint-oracle 216.02M/40.76M 5.30x, and
+`object64.c` back to the pre-probe diff (+76/-18, the select/clamp work).
+
+#### Overhaul triage: which cited gaps are actually ours
+
+Measured before touching anything, because two of the headline gaps are not
+compiler gaps at all.
+
+**currying (reported 31.85x NYR/LLVM): does not reproduce.** Same host, same
+fixture, both sides rebuilt from the shape's embedded sources:
+
+    NYR   elapsed 4027 ns  (direct 1462, residual 1283, factory 1282)
+    C     elapsed 4589 ns  (direct 1643, residual 1453, factory 1493)
+    checksum 14017005 on both
+
+The Nytrix binary is faster than the C reference and the whole program is a
+4 us measurement. The recorded tables mark this fixture `FAIL`, so the 31.85x
+comes from somewhere other than the code path measured above - most likely a
+sub-10us timing floor or a failed-side artifact. Deprioritized until the
+harness explains the FAIL status; there is no codegen gap to chase here.
+
+**bigint-oracle (15.15x): a library comparison, not codegen.** The C side of
+the shape carries `optional_ldflags "-lgmp"` and 61 `mpz_`/`mpf_` references:
+the reference is GMP (hand-written assembly limbs, Karatsuba/Toom, Newton
+division and sqrt). The Nytrix side is `core.math.big` / `bf_*` in Ny. Equal
+performance here means implementing GMP-grade bignum algorithms in the
+standard library, which is a library project with its own benchmarks and
+checksums - not an instruction-selection or register-allocation defect. Kept
+out of the backend backlog deliberately.
+
+**native-oracle** has no GMP references, so it stays on the codegen list; its
+recorded size (88 us vs 33 us) is close enough to the timer floor that it
+needs the same floor check as currying first.
+
+**Genuinely ours, with root causes already located from assembly:**
+
+| fixture | recorded | located cause |
+|---|---|---|
+| cd | 7.67x | `op=addr.symbol` buffer-pointer fetch in the inner loop plus a conditional-reduction PHI; NYIR has no vector compare/mask/masked-add opcode |
+| matrix | 5.05x | scalar nested traversal; bounds math per iteration (`bce-matrix` notes in this file) |
+| page-rank | 3.90x | reduction loop over a pointer-chased graph |
+| lbm | 3.66x | 31-instruction stencil loop: 12 for the double clamp (6 are select-destination copies), 3 for spilled base reloads, 5 for the truncating divide fixup |
+| mandel | 1.52x | within noise of the 1.2x goal; no cmov in `main` |
+
+**What the select-copy pattern costs across fixtures** (whole-program `main`
+segment, counted from disassembly): lbm has 2 `cmov`s and 2 copy-ins, both
+inside the hot loop (2 of 31 instructions, ~6%); cd has 10 `cmov`s and 2
+copy-ins across 774 instructions; mandel and matrix have **zero** `cmov`s in
+`main`. So re-encoding selects in place is justified by lbm alone - it would
+not move mandel or matrix.
+
+**Net position of this session on the backend:** three structural attempts
+(vectorizer clone, frame-base SIB fold, coalescer raw-gate drop) were built,
+measured and reverted because none moved a metric and two broke tests. The
+tree keeps only the earlier validated select/clamp fusion and the
+codegen-neutral proof diagnostics. The <=1.2x C target is not reached; the
+table above is the ordered work list, and each row needs its own assembly-level
+root cause before code is written.
+
+#### currying: why the harness said FAIL, and why 31.85x was a timer artifact
+
+Both parts resolved from the report data, not from the console.
+
+**The FAIL is historical.** Across 113 stored reports, currying is `ok` 97
+times, `fail` 10 and `regression` 6; every non-ok row predates 2026-11-16 and
+all of them have `ny_failures` or `llvm_failures > 0`. The six most recent runs
+are `ok` with `ny_failures=0`, `llvm_failures=0`, `checksum_ok=True`,
+`ny_checksum == c_checksum == llvm_checksum = 14017005`. `bench_row_status`
+only reports FAIL when a route actually failed, so there is no live FAIL to
+investigate - the `FAIL` line in the older measurements table is stale.
+
+**The 31.85x came from a 200ns sample.** Latest row before the fix
+(`bench-20261119-082255`):
+
+    ny_native_ms 0.004459 ms   (4.46us of real loop work)
+    ny_llvm_ms   0.000140 ms   (140ns - LLVM folds all three loops closed-form)
+    c_ms         0.003326 ms   (3.33us, real loops)
+    native_llvm_ratio 31.85    native_ratio 1.34    llvm_ratio 0.042
+
+`llvm_ratio = 0.042` means LLVM ran 24x faster than C, which is the signature
+of elision rather than codegen; the shape's own comment predicts it ("the LLVM
+route sums each loop in closed form (~130ns)"). The harness accepted the ratio
+because `bench_signal()` gates at 100ns and 140ns clears it - by 40ns.
+
+**Fix (`src/cmd/tools/test/runner.c`).** Added `bench_ratio_signal()` with a
+500ns floor (5x the display gate) and used it for the *ratio* predicates
+instead of the display gate:
+
+    bench_native_llvm_comparable : bench_signal(ny) && bench_signal(llvm)
+                                -> bench_ratio_signal(ny) && bench_ratio_signal(llvm)
+    bench_llvm_c_comparable      : bench_signal(c)  -> bench_ratio_signal(c)
+    bench_native_c_comparable    : bench_candidate_signal_for_startup(r, ny)
+                                   + bench_signal(c)
+                                -> unchanged candidate rule + bench_ratio_signal(c)
+    floor_row escape for NY/LLVM : r->llvm_ms > 0
+                                -> bench_ratio_signal(llvm) && bench_ratio_signal(ny)
+
+500ns and not 1us is deliberate: lbm's C reference measures 0.84us and must
+keep its ratio (4.71x), so the margin cannot be set above it.
+
+**Verified** (`./make bench currying native-oracle lbm matrix`, report
+`bench-20261119-083234`):
+
+    currying       ok  ny=0.004468 llvm=0.000201 c=0.003336 | NY/C 1.34 v=True
+                                                            | NY/LLVM v=False
+    native-oracle  ok  ny=0.099000 llvm=0.322529 c=0.031238 | NY/C 3.17 v=True
+    lbm            ok  ny=3.971433 llvm=3.171847 c=0.842877 | NY/C 4.71 v=True
+    matrix         ok  ny=0.035666 llvm=0.015399 c=0.007204 | NY/C 4.95 v=True
+
+The `NYR/LLVM gap` headline moved from `currying (31.85x)` to
+`matrix (2.32x)`, i.e. from a 200ns artifact to a real sub-ms gap. Tests:
+65/65 execution, 166/166 x86_64.
+
+Note for future readings: the report's `*_ms` fields are milliseconds, so
+native-oracle's `0.099` is 99us, not 99ns - it is a genuine 3.17x, and only
+currying's LLVM side (0.000201 ms = 201ns) sat at the floor. Units caused a
+false lead during this investigation; the floor check is now explicit in code.
+
+#### 2026-11-19 compile-time: Standard library parsed AST reuse (`NYTRIX_STD_AST_CACHE`)
+
+**Motivation:** Compiling any program that imports `core` paid ~95-100 ms every compilation concatenating, lexing, and parsing 996 KB of standard-library source text, even when compiling repeatedly or running multiple passes in-process.
+
+**Implementation (`src/code/lang/ny/pipeline/init.c`, `src/code/lang/ny/parser/stmt/comptime.c`):**
+- Introduced in-process parsed standard-library AST cache (`NYTRIX_STD_AST_CACHE`, enabled by default; opt-out with `NYTRIX_STD_AST_CACHE=0`).
+- On the first compilation requiring standard library, parses the full stdlib source once into a dedicated immutable arena (`g_std_ast_cache.prog`) and caches parser registries (`ct_layouts`, `ct_modules`, `ct_templates`, `ct_decls`, `ct_diag_rules`, `type_aliases`, `gensym_counter`).
+- On subsequent compilations within the same process, skips reparsing the 996 KB source. Deep-clones cached AST statements into the per-compile `arena` via `ny_ast_clone_stmt` (`ct_clone_stmt`), ensuring semantic analysis and codegen mutations never corrupt the pristine cached AST.
+- Seeds the fresh compile's parser registries directly from the cache.
+
+**Measured results (`--native-backend x86_64 --profile-time --runs=5`):**
+- `test_use_core.ny` (`use core; fn main() { 0 }`):
+  - Before: 0.905s / 0.810s / 0.802s / 0.792s / 0.800s (mean 0.822s, min 0.792s)
+  - After: 0.936s / 0.765s / 0.761s / 0.744s / 0.654s (mean 0.772s, min 0.654s, -138 ms / 17.4% faster)
+- `lbm.ny`:
+  - Before: 0.912s / 0.830s / 0.810s / 0.830s / 0.812s (mean 0.839s, min 0.810s)
+  - After: 1.019s / 0.796s / 0.781s / 0.761s / 0.744s (mean 0.820s, min 0.744s, -66 ms faster)
+- Zero test regressions across `etc/tests/lang/execution/` and `etc/tests/bench/numeric/`.
+
+### 2026-11-19 cd: the address is a direct addr.symbol, and the loop dies before the load
+
+`tbuf_address_parts` now dumps the defining chain of a refused address under
+`NY_TRACE_ADDR_CHAIN=1` (codegen-neutral; it only feeds the trace). For cd:
+
+```
+nyir addr chain: value=275 op=addr.symbol a=-1 b=-1 c=-1
+```
+
+So the refused value is a bare symbol-slot address, not a copy or rebuilt
+expression: the earlier premise that the address resolves through `COPY` hops
+was wrong, and the three classification predicates tested earlier could never
+match for that reason alone.
+
+Line attribution matters here, and an earlier reading of this trace got it
+wrong. `NY_TRACE_VECTORIZE=1` reports both of these in the **movement** loop
+(`cd.ny:23-37`), not the pairwise loop:
+
+```
+reject pc=458 op=load.i64  cd.ny:24:27   reason=address is not a payload+offset add chain
+reject pc=438 op=store.i64 cd.ny:32:20   reason=unmodeled memory/trap effect remains in loop body
+```
+
+`24:27` is the `px` handle fetch inside `x = i64buf_load(px, i) + ...`, and
+`32:20` is `i64buf_store(px, i, x)`. The store is refused with the *generic*
+effect reason because `vector_memory_affine` could not find a payload root for
+its address; the root failure is the handle fetch one scan earlier, so both
+are the same blocker. The pairwise loop (`cd.ny:40-50`) is a different set of
+refusals (`pc=436/453/543/557`, PHIs of `step`, `i` and the `j`/`hits`
+recurrence).
+
+There is therefore no memory-resident `hits` reduction to model: `hits` is a
+loop-local (`mut hits = 0`, `cd.ny:38`) and the pairwise loop contains no
+symbol-slot store at all. The work that would move this fixture is (a) treating
+the invariant `load.i64 addr.symbol(sym)` handle fetch as a loop-invariant
+broadcast with a preheader reload, then (b) the pairwise loop's PHIs and its
+conditional count reduction. Fact (a) is the same conclusion as before, now
+with the correct line numbers; the `hits`-in-memory hypothesis is retired.
+
+### 2026-11-19 the suite's two alarming rows in the last full run are contention artifacts
+
+The 11:48 full run printed `mandel 13.98x` and `ackermann 36.56x`, which would
+be the two worst NYR/C rows in the suite. Re-measured standalone, same tree,
+same fixtures:
+
+```
+mandel      NYR 121 us   LLVM  89 us   C  75 us   NYR/C 1.61x  NYR/LLVM 1.35x
+ackermann   NYR 108 us   LLVM 111 us   C  40 us   NYR/C 2.67x  NYR/LLVM 0.97x
+```
+
+For `mandel` the harness reached the same conclusion inside the run itself:
+its confirm pass re-measured 141 us against LLVM's 107 us (1.88x), so 13.98x was
+a first-sample flake under 25 concurrent workers, not code.
+
+`ackermann`'s C reference is constant-folded (the clang build of the reference
+contains 14 instructions in `main` and never calls `ack`), while NYR executes
+the recursion; 2.67x is the floor that comparison can produce, and the earlier
+`36.56x` was the same flake on the NYR side (1.85 ms instead of 108 us).
+
+Consequence: both rows are excluded from any "slowest" work list, and no gate
+was affected - all seven per-class gates passed in that run.
+
+### 2026-11-19 cd: the window that is missing belongs to the init loop, not the movement loop
+
+Both "give the movement loop a window" and "broadcast the handle fetch" were
+checked against the trace before writing code, and the trace already answers
+the first one: the movement loop's reject is
+
+```
+reject pc=458 op=load.i64 cd.ny:24:27 reason=address is not a payload+offset add chain
+```
+
+`tbuf_affine_memory_safe` reaches the address chain only after
+`vector_memory_affine` has passed the `window_trip > 0` gate, so the movement
+loop **has** a proven window (`i = 0` on `cd.ny:22` gives the lower bound,
+`N` the upper). The only window-less loop is the init loop, whose reject is the
+window reason itself. Experiment separating the two halves of the window: the
+init loop's limit replaced by a literal,
+
+```
+while i < 200 {        ; was: while i < N {
+```
+
+and the reject is unchanged (`pc=322 ... no provable iteration window`), so the
+missing half is the *entry value*, not the limit. `i` is initialised by the
+module-level `mut i = 0` on `cd.ny:10`, so the loop reads its IV from a symbol
+slot and `init_unknown` is set with no range fact to substitute. Bounding it
+needs memory-SCEV over the slot (a stored-constant range on the definition
+feeding the load), which the pass does not have.
+
+Consequence: no vectorizer change was made for either request. The movement
+loop's remaining blocker is the handle-fetch root, and the init loop's is
+memory-SCEV on the IV - the second being the cheaper of the two and worth
+having independently of cd, since any loop entered with a module-level counter
+hits it.
+
+### 2026-11-19 VRP read-only slot ranges: built, fired on nothing, reverted
+
+The plan was to give `def N = 200` and module `mut i = 0` a range fact in
+`nyr_vrp`, so cd's init loop would get the lower bound its window is missing.
+The patch was written and built: `vrp_ro_slots` collects, per function, each
+`addr.symbol` whose address never escapes (`vrp_symbol_address_confined`: every
+use of the address value must be the whole address of a load or store) and
+which the function writes exactly once with a constant
+(`nyr_const_i64`), then `case NYIR_LOAD_I64` publishes `[k,k]` for a load from
+such a slot instead of top.
+
+Result: cd is byte-identical. Same 10 rejects, same `checksum= 387`, and the
+init loop still reports `pc=322 ... no provable iteration window`. A control
+run with the function-level `NYIR_CALL` bail removed was also identical, which
+rules out the call guard as the reason nothing fired.
+
+Remaining explanation: the consuming function does not contain the single
+store. Module-scope definitions are materialised by the module initializer, a
+different function, so a per-function scan sees zero stores to `N`'s slot, and
+`mut i`'s slot is written by the loop that reads it (two stores). The fact
+therefore has to come from the initializer data, not from a local store scan -
+VRP is the wrong pass for it.
+
+Nothing is shipped: `vrp.c` was restored to HEAD (`git diff` empty for it) and
+the tree rebuilt clean. Recording it because "publish the range of a
+single-store constant slot" is the obvious first idea for this gap and it does
+not work on this lowering.
+
+### 2026-11-19 why a symbol-to-initializer table cannot bound a memory-carried IV
+
+The follow-up to the reverted VRP attempt was to expose a
+symbol-to-constant-initializer table from lowering. Reading the consuming path
+shows the table cannot deliver the fact, independently of where it is built:
+
+- VRP publishes exactly one range per SSA value (`in->range` on the defining
+  instruction), not one per program point. A load's published range therefore
+  holds for every execution of that load.
+- cd's init loop carries `i` in a module slot that the loop itself writes
+  (`i += 1`, `cd.ny:16`). Any initializer the slot ever had is false from the
+  first iteration on, so a whole-function range for the load would be wrong,
+  and a table cannot fix that: the table describes the slot's state, not the
+  slot's state *at this load*.
+- The other candidate, `def N = 200`, is already constant-folded by the
+  front end (replacing the limit with a literal `200` left the reject
+  unchanged), so no table is needed for it.
+
+What the window actually needs is the value at the loop's preheader, which is a
+reaching-definition question: resolve the IV's entry load to the unique store
+that reaches the loop header, and use that store's constant. That is
+per-loop memory SCEV inside the vectorizer's window computation, not a fact
+the front end can hand over.
+
+Consequence: no table was added, and `vrp.c` stays at HEAD. The next attempt
+should be `loop_vectorize.c`: when `init_unknown`, walk the load's symbol back
+to the dominating preheader store, and use its constant for `w_lo` only if it
+dominates the header and no other store to that symbol lies on any path into
+it.
+
+### 2026-11-19 loop_vectorize `vector_slot_entry_const`: the memory-carried IV now gets an entry bound
+
+`loop_vectorize.c` resolves an entering IV value that has no SSA constant by
+looking at the slot it is loaded from: `vector_symbol_of_address` names the
+`addr.symbol`, and `vector_slot_entry_const` scans back through the load's own
+block for the nearest store to that slot, accepting it only when no call sits
+between the store and the load and the stored value is constant.  Within one
+block the earlier store decides the load, so no CFG dominance proof is needed,
+and a call could only reach the slot through an escaped address the scan cannot
+see, hence the bail.  The constant becomes `init` with `init_unknown = false`,
+which is exactly what the window computation needs for `w_lo`.
+
+cd's init loop, before and after (trace, caches off):
+
+```
+before: reject pc=322 op=load.i64 cd.ny:12:17 reason=variable trip count has no provable iteration window
+after:  reject pc=322 op=load.i64 cd.ny:12:17 reason=address is not a payload+offset add chain
+```
+
+The window opens; the loop now fails on the handle fetch, the same root
+blocker as the movement loop.  `checksum= 387` unchanged, and the fixture
+timing is flat (`cd` 7.08 ms NYR / 7.28x in the full suite) because nothing in
+this loop vectorizes yet - the change is a precondition, not a win on its own.
+
+Full suite after the change: exit 0, no budget misses, all seven class gates
+pass, overall NYR/C 1.42x / LLVM/C 1.18x / NYR/LLVM 1.21x.  Earlier runs of the
+same tree measured 1.32x-1.46x overall, so the fixture-level movement here is
+run-to-run spread; only the window reject is a definite change.
+
+Audit of the same reject across `etc/tests/bench` (source extracted per fixture,
+trace on): the window is still unproven in 30+ fixtures - `page-rank` 11,
+`expression-tree` 12, `mont64` 10, `pbkdf2` 9/6, `sha256` 7, `richards` 7,
+`list`/`splay`/`list-dynamic`/`list-any-append`/`dict-set`/`radix-tree`/
+`bigint-oracle`/`doitgen` 7 each, `mandelbrot`/`spectral`/`fft`/`linpack`/
+`matrix-raw`/`dgemm`/`sssp`/`deltablue`/`float-cmp-oracle` 4 each, `sieve` 3,
+`dijkstra`/`dict-oracle`/`dict` 2, `fannkuch`/`euler9` 1.  Those are loops whose
+entry value crosses a block edge (so the block-local rule refuses it) or whose
+IV genuinely varies per outer iteration; each needs the CFG-dominance
+generalisation of this rule before it can be retried.
+
+### 2026-11-19 cross-block entry bound: the preheader store is found through the CFG
+
+The block-local scan could only see a store to the same slot in the load's own
+block.  `vector_slot_entry_const` now also takes the cross-block case: if the
+load sits in a block with exactly one predecessor, that predecessor is the only
+way in, so a constant stored in it - with no call after the store - is the
+value the load reads.  No dominance query is needed for that shape, because a
+single predecessor rules out a second path on which another store could
+intervene; the dominator bitsets (`nyr_cfg_dominates`) are the generalisation
+for blocks with several predecessors and are not used yet.
+
+cd, same trace, caches off:
+
+```
+block-local only:  10 window rejects   (pc=322 window opened, 9 elsewhere)
+cross-block added:  0 window rejects
+```
+
+`checksum= 387` unchanged.  The loops still do not vectorize - they now stop at
+the handle fetch (`pc=322`, `pc=458` both `address is not a payload+offset add
+chain`) and at the pair-loop PHIs (`pc=543`, `pc=557`, `unsupported
+loop-carried PHI`), so `cd` is timing-flat at 7.09 ms / 7.17x in the full suite.
+
+Verification: full native suite `etc/tests/lang` 1472/1476 passed; the four
+failures are `lang/types/proofs/__v*` (one prover assertion, three 420 s prover
+timeouts), all in a directory that is dirty with unrelated in-progress proof
+work and all failing before codegen.  `./make bench` exit 0, no budget misses,
+all seven class gates pass (overall 1.31x C, 1.20x LLVM).
+
+Re-audit after the rule: 39 fixtures still report `no provable iteration
+window`, 209 rejects total, concentrated in `page-rank` 11, `mont64` 11,
+`expression-tree` 10, `pbkdf2` 9+6, `licm` 8, and 7 each in `sha256`,
+`richards`, `splay`, `list`, `list-dynamic`, `list-any-append`, `dict-set`,
+`radix-tree`, `bigint-oracle`, `doitgen`, `json-parser`, `omnetpp`,
+`qrsyndrome`, `stringsearch`.  Those remaining loops take their entry value
+from a block with several predecessors, or their IV changes per outer
+iteration.
+
+### 2026-11-20 radix-tree, bitcount, Ackermann, and BigInt
+
+Numbers below are whole-process retired user instructions from three runs of
+the embedded fixture sources, with the corresponding object code inspected.
+The host was also running a separate kernel build during some samples.
+
+| Fixture and route | Before | After | Checksum |
+|---|---:|---:|---:|
+| `radix-tree`, NYC | 198.80 M | 32.44 M | `62531` |
+| `bitcount`, NYC | 270.68 M | 69.36 M | `134217488` |
+| `ackermann`, NYC, revised input | 693.32 M | 599.26 M | `226800` |
+| `ackermann`, NYR, revised input | 662.23 M | 630.80 M | `226800` |
+| `bigint-oracle`, NYR | 168.07 M | 166.63 M | `1968365` |
+
+- `radix-tree` now recognizes the C frontend's width-normalized induction
+  and branch PHI. Each 20-step walk becomes a mask and an OR. The fold
+  requires a descending bit window through zero, an invariant key, and
+  a single exit. Standalone Clang retired 11.74 M instructions. NYC's
+  remaining lookup includes the signed remainder sequence and home traffic.
+- `bitcount` now recognizes the C frontend's redundant truncation after
+  unsigned subtraction and emits `popcnt` in the hot loop. The final low-word
+  mask is required before replacing the SWAR sequence.
+- `ackermann` now has a runtime input and carries the prior result into the
+  next call's depth. Clang retains the recursive call. The machine scheduler
+  moves the decrement after the recursive call and keeps the old value live
+  until the call, so the loop update can use the same register.
+- `bigint-oracle` uses hardware division for up to four Knuth quotient limbs on
+  supported x86-64 builds. The focused instruction count improved by 0.85%.
+  Elapsed time in the interleaved samples was within host variation. The full
+  suite measured 29.4 ms NYR and 30.0 ms LLVM against GMP at 3.65 ms.
+- The vectorizer now checks every path into a symbol-slot entry load, keeping
+  a constant only when all paths agree and no unknown store intervenes.
+  `page-rank` window rejects fell from 11 to 3 and `mont64` from 11 to 7.
+  Both still have scalar loops and their checksums match. The memory proof
+  accepts disjoint byte ranges within an allocation and retains scalar code
+  for overlapping streams. The bounds check remains in an untransformed loop
+  and in its scalar tail.
+- `stream` already used a four-lane `vpmuludq` sequence on NYR. Disabling that
+  path raised retired instructions from 95.14 M to 179.03 M at checksum
+  `471845615`. This comparison verifies the existing vector route.
 
 </details>

@@ -1,7 +1,7 @@
 shape lemma_positive {
   family "runtime/proofs"
   generator "program"
-  features ["proof", "lemma", "positive"]
+  features ["lemma", "positive", "proof"]
   template ny-test-case
   flags "--color=never"
   expect compile_and_run

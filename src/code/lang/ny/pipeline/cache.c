@@ -366,6 +366,7 @@ static time_t ny_runtime_latest_mtime(const char *root) {
       "src/code/backend/runtime/init.c",
       "src/code/backend/runtime/ast.c",
       "src/code/backend/runtime/bigint.c",
+      "src/code/backend/runtime/lazym.c",
       "src/code/backend/runtime/core.c",
       "src/code/backend/runtime/ffi.c",
       "src/code/backend/runtime/ffigates.c",

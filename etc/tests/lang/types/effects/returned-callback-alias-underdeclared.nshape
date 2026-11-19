@@ -1,7 +1,7 @@
 shape returned_callback_alias_cannot_escape_narrow_effect_row {
   family "typing/effects"
   generator "regression"
-  features [ny test typing effects callback return alias negative]
+  features ["typing", "ny", "test", "negative", "alias", "callback", "effects", "return"]
   flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
   expect compile_fail
   expect_message "effect contract violation"

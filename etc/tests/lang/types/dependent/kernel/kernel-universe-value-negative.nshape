@@ -1,7 +1,7 @@
 shape kernel_universe_value_negative {
   family "typing/dependent"
   generator "error"
-  features [error typing dependent negative]
+  features ["error", "typing", "dependent", "negative"]
   template ny-compile-fail
   flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
   expect compile_fail

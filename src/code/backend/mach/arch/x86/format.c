@@ -899,19 +899,19 @@ static bool ny_native_emit_elf64_x64_object_bundle_code(
   const char *stage = "input setup";
   bool profile = getenv("NYTRIX_AOT_OBJECT_PROFILE") != NULL;
   clock_t stage_started = profile ? clock() : 0;
-#define NY_X64_ELF_PROFILE_STAGE(next_stage)                                 \
-  do {                                                                       \
-    if (profile) {                                                           \
-      clock_t stage_ended = clock();                                         \
-      fprintf(stderr,                                                        \
-              "[aot-object] phase=elf64-writer stage=%s elapsed=%.6fs "      \
-              "defs=%zu relocs=%zu\n",                                       \
-              stage, (double)(stage_ended - stage_started) / CLOCKS_PER_SEC, \
-              def_count, reloc_count);                                       \
-    }                                                                        \
-    stage = (next_stage);                                                    \
-    if (profile)                                                             \
-      stage_started = clock();                                               \
+#define NY_X64_ELF_PROFILE_STAGE(next_stage)                                   \
+  do {                                                                         \
+    if (profile) {                                                             \
+      clock_t stage_ended = clock();                                           \
+      fprintf(stderr,                                                          \
+              "[aot-object] phase=elf64-writer stage=%s elapsed=%.6fs "        \
+              "defs=%zu relocs=%zu\n",                                         \
+              stage, (double)(stage_ended - stage_started) / CLOCKS_PER_SEC,   \
+              def_count, reloc_count);                                         \
+    }                                                                          \
+    stage = (next_stage);                                                      \
+    if (profile)                                                               \
+      stage_started = clock();                                                 \
   } while (0)
   char (*reloc_symbols)[256] =
       calloc(NY_X64_OBJ_MAX_RELOCS, sizeof(*reloc_symbols));
@@ -1234,7 +1234,8 @@ static bool ny_native_emit_elf64_x64_object_bundle_code(
       for (size_t r = 0; r < reloc_count; ++r)
         if (relocs[r].disp_off >= named[n].start &&
             relocs[r].disp_off < named[n].end) {
-          nyr_set_error(err, err_len, "relocation in BSS section %s", named[n].name);
+          nyr_set_error(err, err_len, "relocation in BSS section %s",
+                        named[n].name);
           goto done;
         }
       continue;
@@ -1555,8 +1556,9 @@ static bool ny_native_emit_elf64_x64_object_bundle_code(
                          rela_data_size, symtab_idx, sec_data, 8, 24))
     goto done;
   for (size_t n = 0; n < named_count; ++n) {
-    uint32_t type = ny_c_bss_section(named[n].name) ? 8
-                    : strncmp(named[n].name, ".note.", 6) == 0 ? 7 : 1;
+    uint32_t type = ny_c_bss_section(named[n].name)            ? 8
+                    : strncmp(named[n].name, ".note.", 6) == 0 ? 7
+                                                               : 1;
     if (!ny_elf64_write_sh(&file, named[n].name_off, type, named[n].flags,
                            named[n].data_off, named[n].end - named[n].start, 0,
                            0, named[n].alignment, named[n].entsize))
@@ -2259,12 +2261,12 @@ static bool nyr_x64_c_bundle_append_float_helpers(
 static bool nyr_x64_obj_build_c_bundle(
     const nyr_func_t *funcs, const char *const *func_names, size_t func_count,
     const char *const *function_sections, const bool *function_local,
-    bool omit_frame_pointer, bool position_independent,
-    bool retpoline_indirect_calls, bool retpoline_inline_calls,
-    bool function_return_thunk_extern, bool cf_protection_branch,
-    const nyr_c_object_data_t *data, size_t data_count,
-    const ny_native_target_info_t *target, nyr_obj_buf_t *code,
-    nyr_x64_obj_symbol_def_t *defs, size_t *def_count,
+    const bool *function_weak, bool omit_frame_pointer,
+    bool position_independent, bool retpoline_indirect_calls,
+    bool retpoline_inline_calls, bool function_return_thunk_extern,
+    bool cf_protection_branch, const nyr_c_object_data_t *data,
+    size_t data_count, const ny_native_target_info_t *target,
+    nyr_obj_buf_t *code, nyr_x64_obj_symbol_def_t *defs, size_t *def_count,
     nyr_x64_obj_reloc_t *relocs, size_t *reloc_count, char *err,
     size_t err_len) {
   if ((func_count && (!funcs || !func_names)) || (data_count && !data) ||
@@ -2325,6 +2327,16 @@ static bool nyr_x64_obj_build_c_bundle(
        * uses.  Options it does not model (kernel-style frames, retpolines,
        * named sections, PIC) stay on the direct NYIR encoder, as does anything
        * machine lowering rejects.
+       *
+       * The machine encoder is the default. It used to be opt-in because
+       * stencil-shaped C IR read a store address from a canonical home that was
+       * never written: the element index was a dedicated loop GPR, and the
+       * loop-GPR exemption skipped the home write even though the SIB
+       * rematerializer and the base-only fallback load every non-resident
+       * address operand from that home (susan wrote every interior pixel as 0).
+       * object64.c's address-operand classification now covers those
+       * non-adjacent uses (mach_vreg_feeds_block_address), so both paths always
+       * find a current home. NYC_NO_MACH_OBJECT=1 selects the direct encoder.
        */
       bool machine = false;
       static int mach_objects = -1;
@@ -2336,7 +2348,7 @@ static bool nyr_x64_obj_build_c_bundle(
         else if (force && force[0] && force[0] != '0')
           mach_objects = 1;
         else
-          mach_objects = 2; /* try direct encoder first for correctness */
+          mach_objects = 1; /* register-allocating encoder by default */
       }
       if (mach_objects == 1 && !omit_frame_pointer && !position_independent &&
           !retpoline_indirect_calls && !retpoline_inline_calls && !section &&
@@ -2346,6 +2358,8 @@ static bool nyr_x64_obj_build_c_bundle(
         if (nyr_mach_lower_nir(&funcs[i], &mach, target->caps, reason,
                                sizeof(reason))) {
           mach.c_abi = true;
+          mach.x64_endbr = cf_protection_branch;
+          mach.x64_return_thunk = function_return_thunk_extern;
           for (size_t ii = 0; ii < mach.inst_len; ++ii)
             if (mach.insts[ii].opcode == NYR_MACH_CALL)
               mach.insts[ii].call_is_extern = true;
@@ -2407,6 +2421,8 @@ static bool nyr_x64_obj_build_c_bundle(
           if (nyr_mach_lower_nir(&funcs[i], &mach, target->caps, reason,
                                  sizeof(reason))) {
             mach.c_abi = true;
+            mach.x64_endbr = cf_protection_branch;
+            mach.x64_return_thunk = function_return_thunk_extern;
             for (size_t ii = 0; ii < mach.inst_len; ++ii)
               if (mach.insts[ii].opcode == NYR_MACH_CALL)
                 mach.insts[ii].call_is_extern = true;
@@ -2442,6 +2458,7 @@ static bool nyr_x64_obj_build_c_bundle(
         }
       }
       defs[function_def].is_local = function_local && function_local[i];
+      defs[function_def].is_weak = function_weak && function_weak[i];
       defs[function_def].section = section;
     }
   }
@@ -2454,7 +2471,7 @@ static bool nyr_x64_obj_build_c_bundle(
    * that satisfies their strictest member, whatever length the code had.
    */
   if (!nyr_x64_c_bundle_pad_code_start(code, data, data_count, 16, err,
-                                      err_len))
+                                       err_len))
     return false;
   if (!nyr_strtab_append_defs(code, defs, def_count, err, err_len)) {
     if (err && err_len && !err[0])
@@ -2506,15 +2523,26 @@ static bool nyr_x64_obj_build_c_bundle(
   for (size_t i = 0; i < data_count; ++i) {
     if (!data[i].alias_target)
       continue;
+    bool function_alias = data[i].function_symbol;
     int target_index =
         nyr_x64_obj_def_index(defs, *def_count, data[i].alias_target);
     if (!data[i].name || !data[i].name[0] || target_index < 0 ||
-        !defs[target_index].is_data ||
+        defs[target_index].is_data == function_alias ||
         strlen(data[i].name) >= sizeof(defs[0].name) ||
-        *def_count > NY_NATIVE_MAX_DEFS - 2 ||
+        *def_count > NY_NATIVE_MAX_DEFS - (function_alias ? 1 : 2) ||
         nyr_x64_obj_def_index(defs, *def_count, data[i].name) >= 0) {
-      nyr_set_error(err, err_len, "invalid C object data alias");
+      nyr_set_error(err, err_len, "invalid C object %s alias '%s' to '%s'",
+                    function_alias ? "function" : "data",
+                    data[i].name ? data[i].name : "", data[i].alias_target);
       return false;
+    }
+    if (function_alias) {
+      nyr_x64_obj_symbol_def_t *alias = &defs[(*def_count)++];
+      *alias = defs[target_index];
+      snprintf(alias->name, sizeof(alias->name), "%s", data[i].name);
+      alias->is_local = data[i].is_local;
+      alias->is_weak = data[i].is_weak;
+      continue;
     }
     char reference_name[sizeof(defs[0].name)];
     int length = snprintf(reference_name, sizeof(reference_name),
@@ -2564,12 +2592,12 @@ static int nyr_c_symbol_binding_order(const void *left, const void *right) {
 bool nyr_native_emit_elf64_c_object_from_nirs_with_data(
     const nyr_func_t *funcs, const char *const *func_names, size_t func_count,
     const char *const *function_sections, const bool *function_local,
-    bool omit_frame_pointer, bool position_independent,
-    bool retpoline_indirect_calls, bool retpoline_inline_calls,
-    bool function_return_thunk_extern, bool cf_protection_branch,
-    const nyr_c_object_data_t *data, size_t data_count,
-    const ny_native_target_info_t *target, const char *path, char *err,
-    size_t err_len) {
+    const bool *function_weak, bool omit_frame_pointer,
+    bool position_independent, bool retpoline_indirect_calls,
+    bool retpoline_inline_calls, bool function_return_thunk_extern,
+    bool cf_protection_branch, const nyr_c_object_data_t *data,
+    size_t data_count, const ny_native_target_info_t *target, const char *path,
+    char *err, size_t err_len) {
   if (!path || !target || target->target != NY_NATIVE_TARGET_X86_64 ||
       !(target->caps & NY_NATIVE_CAP_ELF_OBJECT)) {
     nyr_set_error(err, err_len,
@@ -2586,10 +2614,10 @@ bool nyr_native_emit_elf64_c_object_from_nirs_with_data(
   if (ok)
     ok = nyr_x64_obj_build_c_bundle(
         funcs, func_names, func_count, function_sections, function_local,
-        omit_frame_pointer, position_independent, retpoline_indirect_calls,
-        retpoline_inline_calls, function_return_thunk_extern,
-        cf_protection_branch, data, data_count, target, &code, defs,
-        &def_count, relocs, &reloc_count, err, err_len);
+        function_weak, omit_frame_pointer, position_independent,
+        retpoline_indirect_calls, retpoline_inline_calls,
+        function_return_thunk_extern, cf_protection_branch, data, data_count,
+        target, &code, defs, &def_count, relocs, &reloc_count, err, err_len);
   if (ok)
     qsort(defs, def_count, sizeof(*defs), nyr_c_symbol_binding_order);
   if (ok)
@@ -2613,8 +2641,8 @@ bool nyr_native_emit_elf64_c_object_from_nirs(
     const ny_native_target_info_t *target, const char *path, char *err,
     size_t err_len) {
   return nyr_native_emit_elf64_c_object_from_nirs_with_data(
-      funcs, func_names, func_count, NULL, NULL, false, false, false, false,
-      false, false, NULL, 0, target, path, err, err_len);
+      funcs, func_names, func_count, NULL, NULL, NULL, false, false, false,
+      false, false, false, NULL, 0, target, path, err, err_len);
 }
 
 /*

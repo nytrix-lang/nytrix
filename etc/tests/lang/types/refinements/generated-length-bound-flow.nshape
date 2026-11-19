@@ -1,7 +1,7 @@
 shape generated_list_length_bound_flow_differential {
   family "language/types/refinements"
   generator "embedded"
-  features [ny test typing refinement mutable aggregate length lower bound generated differential]
+  features ["typing", "ny", "test", "aggregate", "bound", "differential", "generated", "length", "lower", "mutable", "refinement"]
   timeout 180
   template ny-test-case
   expect compile_and_run

@@ -1,7 +1,7 @@
 shape universe_values_as_expressions {
   family "runtime/language"
   generator "embedded"
-  features [ny dependent universe value]
+  features ["ny", "dependent", "universe", "value"]
   template ny-test-case
   flags_matrix "--native-only -O0"
   expect compile_and_run

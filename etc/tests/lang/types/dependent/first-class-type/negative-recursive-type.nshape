@@ -1,7 +1,7 @@
 shape first_class_type_recursive_negative {
   family "typing/dependent"
   generator "error"
-  features [error typing dependent type-level negative]
+  features ["error", "typing", "dependent", "negative", "type-level"]
   template ny-compile-fail
   flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
   expect compile_fail

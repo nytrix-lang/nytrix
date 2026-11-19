@@ -869,6 +869,57 @@ static bool check_boolean_guard_vectorizes(void) {
   return ok;
 }
 
+static bool check_disjoint_memory_streams(void) {
+  for (int disjoint = 0; disjoint <= 1; ++disjoint) {
+    nyr_func_t f;
+    nyr_opt_begin(&f);
+    int base = emit_alloca(&f, 128);
+    int zero = nyr_opt_const(&f, 0);
+    int one = nyr_opt_const(&f, 1);
+    int eight = nyr_opt_const(&f, 8);
+    int gap = nyr_opt_const(&f, disjoint ? 64 : 8);
+    for (int i = 0; i < 8; ++i) {
+      int offset = nyr_opt_const(&f, i * 8);
+      int address = nyr_opt_binop(&f, NYIR_ADD_I64, base, offset);
+      int value = nyr_opt_const(&f, i + 1);
+      nyr_opt_emit_abc(&f, NYIR_STORE_I64, address, -1, value);
+    }
+    nyr_opt_label(&f, 1);
+    nyr_opt_br(&f, 2);
+    nyr_opt_label(&f, 2);
+    size_t phi = f.len;
+    int iv = f.next_value;
+    nyr_opt_phi(&f, 1, zero, 3, zero);
+    nyr_opt_br_if(&f, nyr_opt_cmp(&f, iv, eight, NYIR_CMP_LT), 3);
+    nyr_opt_br(&f, 4);
+    nyr_opt_label(&f, 3);
+    int offset = nyr_opt_binop(&f, NYIR_MUL_I64, iv, eight);
+    int input = nyr_opt_binop(&f, NYIR_ADD_I64, base, offset);
+    int output = nyr_opt_binop(&f, NYIR_ADD_I64, input, gap);
+    int loaded = nyr_opt_emit_abc(&f, NYIR_LOAD_I64, input, -1, -1);
+    nyr_opt_emit_abc(&f, NYIR_STORE_I64, output, -1, loaded);
+    f.data[phi].phi_incoming[1].value = nyr_opt_binop(&f, NYIR_ADD_I64, iv, one);
+    nyr_opt_br(&f, 2);
+    nyr_opt_label(&f, 4);
+    int last = nyr_opt_const(&f, disjoint ? 120 : 64);
+    int result = nyr_opt_binop(&f, NYIR_ADD_I64, base, last);
+    nyr_opt_ret(&f, nyr_opt_emit_abc(&f, NYIR_LOAD_I64, result, -1, -1));
+    int64_t expected = disjoint ? 8 : 1;
+    bool ok = nyr_opt_verify(&f, "memory-streams-before") &&
+              nyr_opt_eval(&f, "memory-streams-before") == expected &&
+              nyr_loop_vectorize(&f) &&
+              nyr_opt_verify(&f, "memory-streams-after") &&
+              nyr_opt_eval(&f, "memory-streams-after") == expected &&
+              (f.vectorized_loops != 0) == (disjoint != 0);
+    if (!ok)
+      nyr_dump(stderr, &f, "memory-streams-failed");
+    nyr_ir_func_free(&f);
+    if (!ok)
+      return false;
+  }
+  return true;
+}
+
 static bool check_reduction_order_and_exit(void) {
   for (int shape = 3; shape <= 4; ++shape) {
     nyr_func_t f;
@@ -908,6 +959,8 @@ static bool check_reduction_order_and_exit(void) {
 }
 
 int main(void) {
+  if (!check_disjoint_memory_streams())
+    return 1;
   if (!check_reduction_order_and_exit())
     return 1;
   if (!check_vec8_set1_i64_semantics())

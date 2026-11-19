@@ -161,5 +161,6 @@ void parser_init_with_arena_quiet(parser_t *p, const char *src,
 void parser_init_quiet(parser_t *p, const char *src, const char *filename);
 void parser_global_cleanup(void);
 program_t parse_program(parser_t *p);
+stmt_t *ny_ast_clone_stmt(parser_t *p, stmt_t *s);
 
 #endif

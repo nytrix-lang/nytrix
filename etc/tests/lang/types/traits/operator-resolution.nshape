@@ -1,7 +1,7 @@
 shape operator_resolution_uses_type_identity {
   family "runtime/types"
   generator "runtime"
-  features ["operator", "impl", "identity", "backend-parity"]
+  features ["backend-parity", "identity", "impl", "operator"]
   template ny-test-case
   flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
   source ny <<'NY'

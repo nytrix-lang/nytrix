@@ -41,8 +41,11 @@ fn current_lines(dict st) list { editor_core.current_lines(st) }
 fn set_lines(dict st, list lines) dict { editor_core.set_lines(st, lines) }
 
 fn clamp_cursor(dict st) dict { editor_core.clamp_cursor(st) }
+
 fn char_prev(str line, int col) int { editor_core.char_prev(line, col) }
+
 fn char_next(str line, int col) int { editor_core.char_next(line, col) }
+
 fn char_snap(str line, int col) int { editor_core.char_snap(line, col) }
 
 fn line_insert(str line, int col, str text) str { edit.line_insert(line, col, text) }

@@ -501,6 +501,30 @@ foreach(probe IN ITEMS prefix-section-placement post-inline-short-circuit
   endif()
 endforeach()
 # Stack protection: execute actual corruption through both native routes.
+foreach(route IN ITEMS -c -S)
+  set(stem "${BINARY_DIR}/bitfield-select${route}")
+  set(suffix o)
+  if(route STREQUAL "-S")
+    set(suffix s)
+  endif()
+  nyc_execute_ok(
+    [=[bitfield select did not compile (${route})]=]
+    COMMAND "${NYC}" -O1 "${route}" "${NY_C_CORPUS_bitfield-select.c}"
+            -o "${stem}.${suffix}"
+  )
+  if(stderr MATCHES "verification failed|continuing unoptimized")
+    message(FATAL_ERROR "optimized bitfield select failed verification\n${stderr}")
+  endif()
+  nyc_execute_ok(
+    [=[bitfield select did not link (${route})]=]
+    COMMAND "${CC}" "${stem}.${suffix}" -o "${stem}"
+  )
+  nyc_execute_ok(
+    [=[bitfield select returned the wrong result (${route})]=]
+    COMMAND "${stem}"
+  )
+endforeach()
+
 if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux")
   foreach(guard IN ITEMS global global-symbol fs fs-symbol gs-offset gs-symbol disabled)
     set(guard_flags -fno-stack-protector -fstack-protector-strong)
@@ -580,6 +604,20 @@ if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux")
         execute_process(COMMAND "${stem}" scalar RESULT_VARIABLE status)
         if(NOT status EQUAL 93)
           message(FATAL_ERROR "stack-protector-all missed scalar return: ${status}")
+        endif()
+      endif()
+      if(guard STREQUAL "global")
+        nyc_execute_ok(
+          [=[returning stack-protector hook test did not link]=]
+          COMMAND "${CC}" -fno-stack-protector -no-pie -DGUARD_MODE=0
+                          -DGUARD_HOOK_RETURNS
+                          "${NY_C_CORPUS_stack-protector-host.c}" "${input}"
+                          -o "${stem}-returning-hook"
+        )
+        execute_process(COMMAND "${stem}-returning-hook" scalar
+          RESULT_VARIABLE status)
+        if(NOT status STREQUAL "94")
+          message(FATAL_ERROR "returning stack-protector hook did not trap: ${status}")
         endif()
       endif()
     endforeach()
@@ -1408,8 +1446,14 @@ if(status EQUAL 0 OR NOT stderr MATCHES "must be declared")
   message(FATAL_ERROR
     "nyc -fno-builtin did not disable implicit builtin lookup\n${stdout}${stderr}")
 endif()
-nyc_compile_asm_run(gnu-extern-inline "${NY_C_CORPUS_gnu-extern-inline.c}"
-  NYC_FLAGS -O3 HOST_SOURCES "${NY_C_CORPUS_gnu-extern-inline-definition.c}")
+foreach(inline_opt IN ITEMS -O0 -O3)
+  nyc_compile_asm_run("gnu-extern-inline-asm${inline_opt}"
+    "${NY_C_CORPUS_gnu-extern-inline.c}" NYC_FLAGS "${inline_opt}"
+    HOST_SOURCES "${NY_C_CORPUS_gnu-extern-inline-definition.c}")
+  nyc_compile_obj_run("gnu-extern-inline-obj${inline_opt}"
+    "${NY_C_CORPUS_gnu-extern-inline.c}" NYC_FLAGS "${inline_opt}"
+    HOST_SOURCES "${NY_C_CORPUS_gnu-extern-inline-definition.c}")
+endforeach()
 set(static_assert_source "${NY_C_CORPUS_static-assert.c}")
 set(static_assert_false_source "${NY_C_CORPUS_static-assert-false.c}")
 
@@ -2243,20 +2287,28 @@ if(NOT status EQUAL 0 OR NOT stdout STREQUAL "243 15 30 250 5\n")
 endif()
 set(rethunk_source "${NY_C_CORPUS_cf-protection-branch.c}")
 file(WRITE "${BINARY_DIR}/return-thunk-target.c" [=[
-int rethunk_target(void) { volatile int v = 7; return v; }
+int rethunk_target(int selector) {
+  if (selector == 0) return 3;
+  volatile int v = 7;
+  return v;
+}
 ]=])
 file(WRITE "${BINARY_DIR}/return-thunk-stub.s" [=[
 	.text
 	.globl __x86_return_thunk
 	.type __x86_return_thunk,@function
 __x86_return_thunk:
+	addl $1, %eax
 	ret
 	.size __x86_return_thunk, .-__x86_return_thunk
 ]=])
 file(WRITE "${BINARY_DIR}/return-thunk-main.c" [=[
 #include <stdio.h>
-int rethunk_target(void);
-int main(void) { printf("%d\n", rethunk_target()); return 0; }
+int rethunk_target(int);
+int main(void) {
+  printf("%d %d\n", rethunk_target(0), rethunk_target(1));
+  return 0;
+}
 ]=])
 nyc_execute_ok(
   [=[return-thunk object compilation failed\n${stdout}${stderr}]=]
@@ -2283,7 +2335,7 @@ nyc_execute_ok(
 execute_process(
   COMMAND "${BINARY_DIR}/return-thunk"
   RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
-if(NOT status EQUAL 0 OR NOT stdout STREQUAL "7\n")
+if(NOT status EQUAL 0 OR NOT stdout STREQUAL "4 8\n")
   message(FATAL_ERROR
     "return-thunk object runtime failed: ${stdout}${stderr}")
 endif()
@@ -2397,6 +2449,35 @@ if(NYC_AS_EXECUTABLE)
       "nyc assembler version query did not report the host assembler result\n"
       "as: ${as_status}\n${as_stdout}${as_stderr}"
       "nyc: ${status}\n${stdout}${stderr}")
+  endif()
+  file(WRITE "${BINARY_DIR}/as-probe-input" [=[
+#define LANDING endbr64
+LANDING
+]=])
+  nyc_execute_ok(
+    [=[assembler-with-cpp stdin probe failed]=]
+    COMMAND "${NYC}" -Wa,--fatal-warnings -c -x assembler-with-cpp
+            -o "${BINARY_DIR}/as-probe.o" -
+    INPUT_FILE "${BINARY_DIR}/as-probe-input"
+  )
+  if(OBJDUMP)
+    nyc_execute_ok(
+      [=[assembler-with-cpp probe did not produce an object]=]
+      COMMAND "${OBJDUMP}" -d "${BINARY_DIR}/as-probe.o"
+    )
+    if(NOT stdout MATCHES "endbr64")
+      message(FATAL_ERROR "preprocessed probe did not assemble endbr64\n${stdout}")
+    endif()
+  endif()
+  file(WRITE "${BINARY_DIR}/as-warning-input" ".warning \"expected probe diagnostic\"\n")
+  execute_process(
+    COMMAND "${NYC}" -Wa,--fatal-warnings -c -x assembler
+            -o "${BINARY_DIR}/as-warning.o" -
+    INPUT_FILE "${BINARY_DIR}/as-warning-input"
+    RESULT_VARIABLE status ERROR_VARIABLE stderr
+  )
+  if(NOT status STREQUAL "1" OR NOT stderr MATCHES "expected probe diagnostic")
+    message(FATAL_ERROR "assembler warning was not fatal: ${status}\n${stderr}")
   endif()
 endif()
 # Driver flags, preprocessing, and target option behavior.
@@ -2561,41 +2642,49 @@ if(NOT status EQUAL 0 OR NOT stdout MATCHES "#define __x86_64__ 1" OR
     "nyc x86-64 target predefined types changed unexpectedly\n${stdout}${stderr}")
 endif()
 set(no_sse_source "${NY_C_CORPUS_no-sse-integer.c}")
-
-nyc_execute_ok(
-  [=[nyc scalar integer compilation with no-SSE flags failed\n${stdout}${stderr}]=]
-  COMMAND "${NYC}" -c -std=gnu11 -O2 -mno-sse -mno-sse2 -mno-mmx
-            -mno-3dnow -mno-avx -mno-sse4a -mno-80387
-            -mno-fp-ret-in-387 -march=x86-64 -mtune=generic -mno-red-zone
-            -mpreferred-stack-boundary=3
-            -mcmodel=kernel -mcmodel=small -fno-stack-check -fno-strict-overflow
-            -falign-functions=16 -mskip-rax-setup
-            "${no_sse_source}" -o "${BINARY_DIR}/no-sse-integer.o"
-)
-if(OBJDUMP)
-  execute_process(
-    COMMAND "${OBJDUMP}" -d "${BINARY_DIR}/no-sse-integer.o"
-    RESULT_VARIABLE status
-    OUTPUT_VARIABLE stdout
-    ERROR_VARIABLE stderr
-  )
-  if(NOT status EQUAL 0 OR
-     stdout MATCHES "%(xmm|ymm|zmm|mm[0-7])")
-    message(FATAL_ERROR
-      "NYC emitted SIMD registers under no-SSE flags\n${stdout}${stderr}")
-  endif()
-endif()
 set(no_sse_harness "${NY_C_CORPUS_no-sse-main.c}")
 
-nyc_execute_ok(
-  [=[could not link no-SSE NYC behavior test\n${stdout}${stderr}]=]
-  COMMAND "${CC}" "${no_sse_harness}" "${BINARY_DIR}/no-sse-integer.o"
-            -o "${BINARY_DIR}/no-sse-test"
-)
-nyc_execute_ok(
-  [=[no-SSE NYC integer function returned a wrong result\n${stdout}${stderr}]=]
-  COMMAND "${BINARY_DIR}/no-sse-test"
-)
+foreach(route IN ITEMS -c -S)
+  set(stem "${BINARY_DIR}/no-sse-integer${route}")
+  set(output "${stem}.o")
+  if(route STREQUAL "-S")
+    set(output "${stem}.s")
+  endif()
+  nyc_execute_ok(
+    [=[nyc scalar integer compilation with no-SSE flags failed (${route})]=]
+    COMMAND "${NYC}" "${route}" -std=gnu11 -O2 -mno-sse -mno-sse2 -mno-mmx
+              -mno-3dnow -mno-avx -mno-sse4a -mno-80387
+              -mno-fp-ret-in-387 -march=x86-64 -mtune=generic -mno-red-zone
+              -mpreferred-stack-boundary=3
+              -mcmodel=kernel -mcmodel=small -fno-stack-check -fno-strict-overflow
+              -falign-functions=16 -mskip-rax-setup
+              "${no_sse_source}" -o "${output}"
+  )
+  if(route STREQUAL "-S")
+    nyc_execute_ok(
+      [=[could not assemble no-SSE NYC test output]=]
+      COMMAND "${CC}" -c "${output}" -o "${stem}.o"
+    )
+  endif()
+  if(OBJDUMP)
+    nyc_execute_ok(
+      [=[could not disassemble no-SSE NYC object (${route})]=]
+      COMMAND "${OBJDUMP}" -d "${stem}.o"
+    )
+    if(stdout MATCHES "%(xmm|ymm|zmm|mm[0-7])")
+      message(FATAL_ERROR
+        "NYC emitted SIMD registers under no-SSE flags (${route})\n${stdout}")
+    endif()
+  endif()
+  nyc_execute_ok(
+    [=[could not link no-SSE NYC behavior test (${route})]=]
+    COMMAND "${CC}" "${no_sse_harness}" "${stem}.o" -o "${stem}"
+  )
+  nyc_execute_ok(
+    [=[no-SSE NYC integer function returned a wrong result (${route})]=]
+    COMMAND "${stem}"
+  )
+endforeach()
 set(no_sse_float_source "${NY_C_CORPUS_no-sse-float.c}")
 
 execute_process(
@@ -2821,6 +2910,8 @@ foreach(probe IN ITEMS variadic-comma-elision wide-variadic)
 endforeach()
 
 set(expanded_header_source "${NY_C_CORPUS_expanded-header-path.c}")
+configure_file("${NY_C_CORPUS_variadic.h}"
+               "${BINARY_DIR}/trace/events/variadic.h" COPYONLY)
 
 execute_process(
   COMMAND "${NYC}" -E -P "-I${BINARY_DIR}" "${expanded_header_source}"
@@ -3357,38 +3448,45 @@ endif()
 
 set(weak_function_source "${NY_C_CORPUS_weak-function.c}")
 set(strong_function_source "${NY_C_CORPUS_strong-function.c}")
-nyc_execute_ok(
-  [=[NYC weak function compilation failed\n${stdout}${stderr}]=]
-  COMMAND "${NYC}" -S "${weak_function_source}"
-            -o "${BINARY_DIR}/weak-function.s"
-)
-nyc_execute_ok(
-  [=[NYC strong function compilation failed\n${stdout}${stderr}]=]
-  COMMAND "${NYC}" -S "${strong_function_source}"
-            -o "${BINARY_DIR}/strong-function.s"
-)
-nyc_execute_ok(
-  [=[host compiler could not link strong-over-weak NYC symbols\n${stdout}${stderr}]=]
-  COMMAND "${CC}" -std=c11 -Wall -Wextra -Werror
-            -o "${BINARY_DIR}/weak-function-override"
-            "${NY_C_CORPUS_weak-function-main.c}"
-            "${BINARY_DIR}/weak-function.s" "${BINARY_DIR}/strong-function.s"
-)
-nyc_execute_ok(
-  [=[strong definitions did not override NYC weak function/data symbols\n${stdout}${stderr}]=]
-  COMMAND "${BINARY_DIR}/weak-function-override"
-)
-nyc_execute_ok(
-  [=[host compiler could not link NYC weak alias target\n${stdout}${stderr}]=]
-  COMMAND "${CC}" -std=c11 -Wall -Wextra -Werror
-            -o "${BINARY_DIR}/weak-function-alias"
-            "${NY_C_CORPUS_weak-function-alias-main.c}"
-            "${BINARY_DIR}/weak-function.s"
-)
-nyc_execute_ok(
-  [=[NYC weak alias did not bind to its target\n${stdout}${stderr}]=]
-  COMMAND "${BINARY_DIR}/weak-function-alias"
-)
+foreach(suffix IN ITEMS s o)
+  set(route -c)
+  if(suffix STREQUAL "s")
+    set(route -S)
+  endif()
+  nyc_execute_ok(
+    [=[NYC weak function compilation failed (${route})]=]
+    COMMAND "${NYC}" "${route}" -O3 "${weak_function_source}"
+              -o "${BINARY_DIR}/weak-function.${suffix}"
+  )
+  nyc_execute_ok(
+    [=[NYC strong function compilation failed (${route})]=]
+    COMMAND "${NYC}" "${route}" -O3 "${strong_function_source}"
+              -o "${BINARY_DIR}/strong-function.${suffix}"
+  )
+  nyc_execute_ok(
+    [=[host compiler could not link strong-over-weak NYC symbols (${route})]=]
+    COMMAND "${CC}" -std=c11 -Wall -Wextra -Werror
+              -o "${BINARY_DIR}/weak-function-override-${suffix}"
+              "${NY_C_CORPUS_weak-function-main.c}"
+              "${BINARY_DIR}/weak-function.${suffix}"
+              "${BINARY_DIR}/strong-function.${suffix}"
+  )
+  nyc_execute_ok(
+    [=[strong definitions did not override NYC weak symbols (${route})]=]
+    COMMAND "${BINARY_DIR}/weak-function-override-${suffix}"
+  )
+  nyc_execute_ok(
+    [=[host compiler could not link NYC weak alias target (${route})]=]
+    COMMAND "${CC}" -std=c11 -Wall -Wextra -Werror
+              -o "${BINARY_DIR}/weak-function-alias-${suffix}"
+              "${NY_C_CORPUS_weak-function-alias-main.c}"
+              "${BINARY_DIR}/weak-function.${suffix}"
+  )
+  nyc_execute_ok(
+    [=[NYC weak alias did not bind to its target (${route})]=]
+    COMMAND "${BINARY_DIR}/weak-function-alias-${suffix}"
+  )
+endforeach()
 
 foreach(source compound-array-a compound-array-b)
   nyc_execute_ok(
@@ -6170,8 +6268,13 @@ nyc_execute_ok(
   COMMAND "${BINARY_DIR}/typedef-scope-index"
 )
 
+nyc_compile_obj_run(signed-pow2-31 "${NY_C_CORPUS_signed-pow2-31.c}"
+  NYC_FLAGS -O3 HOST_SOURCES "${NY_C_CORPUS_signed-pow2-31-host.c}")
+
 nyc_compile_obj_run(machine-regressions "${NY_C_CORPUS_machine-regressions.c}"
   NYC_FLAGS -O3)
+nyc_compile_asm_run(machine-regressions-asm
+  "${NY_C_CORPUS_machine-regressions.c}" NYC_FLAGS -O3)
 
 nyc_compile_obj_run(machine-float-reduce
   "${NY_C_CORPUS_machine-float-reduce.c}" NYC_FLAGS -O3 TIMEOUT 30

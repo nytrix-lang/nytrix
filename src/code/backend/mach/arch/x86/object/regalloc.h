@@ -799,14 +799,22 @@ static bool mach_build_vreg_homes(nyr_x64_mach_enc_t *e,
       }
   }
   /*
-   * Spill-slot reuse is opt-out so both layouts can be measured from a single
-   * binary: NYTRIX_NO_SPILL_HOME_COLOR=1 restores one slot per value.
+   * Pooling a slot between two spilled values proves their live ranges are
+   * disjoint, but not that the encoder's sticky-register tags can tell the
+   * owners apart: the sticky-RAX tag names a home offset only, so a shared
+   * slot can forward a neighbour's value. fhourstones crashed and statemate
+   * and pidigits drifted at -O0 through -O3 when this was the default. Keep
+   * the experiment opt-in until the tag carries value identity; one slot per
+   * value is the safe default.
    */
-  bool spill_color = true;
+  bool spill_color = false;
   {
+    const char *on_env = getenv("NYTRIX_SPILL_HOME_COLOR");
+    if (on_env && strcmp(on_env, "0") != 0 && strcmp(on_env, "off") != 0)
+      spill_color = true;
     const char *off_env = getenv("NYTRIX_NO_SPILL_HOME_COLOR");
-    spill_color = !(off_env && strcmp(off_env, "0") != 0 &&
-                    strcmp(off_env, "off") != 0);
+    if (off_env && strcmp(off_env, "0") != 0 && strcmp(off_env, "off") != 0)
+      spill_color = false;
   }
   size_t interval_len = 0;
   mach_home_ranges_t ranges_storage;

@@ -1,7 +1,7 @@
 shape captured_callback_rows_survive_immutable_tuple_capture {
   family "typing/effects"
   generator "regression"
-  features ["ny", "test", "typing", "effects", "callback", "capture", "tuple"]
+  features ["typing", "ny", "test", "callback", "capture", "effects", "tuple"]
   template ny-test-case
   flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
   expect compile_fail

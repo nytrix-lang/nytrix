@@ -4969,11 +4969,11 @@ static bool mach_nir_match_swar_popcount(const nyr_func_t *f,
   int64_t mask = 0;
   int v = fin->a;
   int pc = mach_swar_def(f, definitions, v, NYIR_AND_I64);
-  if (pc >= 0 && mach_nir_const_i64(f, definitions, f->data[pc].b, &mask) &&
-      mask == INT64_C(0xffffffff)) {
-    skipped[n++] = (size_t)pc;
-    v = f->data[pc].a;
-  }
+  if (pc < 0 || !mach_nir_const_i64(f, definitions, f->data[pc].b, &mask) ||
+      mask != INT64_C(0xffffffff))
+    return false;
+  skipped[n++] = (size_t)pc;
+  v = f->data[pc].a;
   pc = mach_swar_def(f, definitions, v, NYIR_MUL_I64);
   if (pc < 0)
     return false;
@@ -5060,6 +5060,16 @@ static bool mach_nir_match_swar_popcount(const nyr_func_t *f,
     v = subv;
   }
   skipped[n++] = (size_t)pc;
+  /* The C frontend may explicitly truncate the unsigned subtraction.
+   * Its right operand is at most v >> 1, so the subtraction already fits
+   * in 32 bits once the input mask has been verified below.
+   */
+  pc = mach_swar_def(f, definitions, v, NYIR_AND_I64);
+  if (pc >= 0 && mach_nir_const_i64(f, definitions, f->data[pc].b, &mask) &&
+      mask == INT64_C(0xffffffff)) {
+    skipped[n++] = (size_t)pc;
+    v = f->data[pc].a;
+  }
   pc = mach_swar_def(f, definitions, v, NYIR_SUB_I64);
   if (pc < 0)
     return false;
@@ -6534,9 +6544,9 @@ static size_t mach_schedule_operand_uses(const nyr_mach_inst_t *inst,
 }
 
 /*
- * Delay single-use register additions until their PHI-edge copy. In
- * particular, computing an induction update after the old IV's final use
- * permits the encoder to coalesce the update with its loop-home register.
+ * Delay single-use register additions and subtractions until their PHI-edge
+ * copy. Computing an induction update after the old value's final use permits
+ * the encoder to coalesce the update with its loop-home register.
  * Machine registers may have multiple definitions, so check every crossed
  * instruction for input redefinitions as well as effects and control flow.
  */
@@ -6568,7 +6578,8 @@ static bool mach_sink_edge_adds(nyr_mach_func_t *m) {
     for (size_t pc = end; pc > block->first_inst;) {
       --pc;
       nyr_mach_inst_t add = m->insts[pc];
-      if (add.opcode != NYR_MACH_ADD || add.narrow32 ||
+      if ((add.opcode != NYR_MACH_ADD && add.opcode != NYR_MACH_SUB) ||
+          add.narrow32 ||
           !mach_schedule_inst_safe(m, &add) ||
           add.dst.kind != NYR_MACH_OPERAND_VREG ||
           add.dst.reg_class != NYR_MACH_REGCLASS_GPR ||
@@ -6581,6 +6592,7 @@ static bool mach_sink_edge_adds(nyr_mach_func_t *m) {
        * Together with the linear use census, this avoids quadratic work
        * in large generated blocks.
        */
+      bool crossed_call = false;
       for (size_t next = pc + 1; next < end && next - pc <= 64; ++next) {
         const nyr_mach_inst_t *in = &m->insts[next];
         if (in->opcode == NYR_MACH_COPY && in->source_pc == UINT32_MAX &&
@@ -6592,12 +6604,41 @@ static bool mach_sink_edge_adds(nyr_mach_func_t *m) {
           }
           break;
         }
-        if (!mach_schedule_inst_safe(m, in) ||
+        bool crosses_call = !crossed_call && in->opcode == NYR_MACH_CALL &&
+                            add.src0.kind == NYR_MACH_OPERAND_VREG &&
+                            mach_schedule_inst_reads(in, &add.src0);
+        if (crosses_call && add.src1.kind != NYR_MACH_OPERAND_IMM) {
+          /* Only move a second operand that the encoder can rematerialize. */
+          crosses_call = false;
+          for (size_t def = pc; def > block->first_inst && pc - def < 64;) {
+            const nyr_mach_inst_t *prior = &m->insts[--def];
+            if (!mach_schedule_inst_writes(prior, &add.src1))
+              continue;
+            if (prior->opcode == NYR_MACH_COPY &&
+                prior->src0.kind == NYR_MACH_OPERAND_IMM &&
+                prior->src0.relocation == NYR_MACH_RELOC_NONE) {
+              crosses_call = true;
+            }
+            break;
+          }
+        }
+        /* This move preserves the order of the edge copies themselves. It
+         * can cross a sibling copy provided neither input is overwritten.
+         */
+        bool crosses_edge_copy =
+            in->opcode == NYR_MACH_COPY && in->source_pc == UINT32_MAX &&
+            in->effects == NYR_MACH_EFFECT_NONE &&
+            in->dst.kind == NYR_MACH_OPERAND_VREG &&
+            (in->src0.kind == NYR_MACH_OPERAND_VREG ||
+             in->src0.kind == NYR_MACH_OPERAND_IMM);
+        if ((!crosses_call && !crosses_edge_copy &&
+             !mach_schedule_inst_safe(m, in)) ||
             mach_schedule_inst_reads(in, &add.dst) ||
             mach_schedule_inst_writes(in, &add.src0) ||
             mach_schedule_inst_writes(in, &add.src1) ||
             mach_schedule_inst_writes(in, &add.src2))
           break;
+        crossed_call |= crosses_call;
       }
     }
   }
@@ -7227,6 +7268,61 @@ bool nyr_mach_sink_edge_adds_selftest(void) {
     ok = ok && m.insts[0].source_pc == (test == 0 ? 2 : 1) &&
          m.insts[1].source_pc == (test == 0 ? 1 : 2) &&
          m.insts[2].source_pc == copy.source_pc;
+    nyr_mach_func_free(&m);
+    if (!ok)
+      return false;
+  }
+  for (unsigned test = 0; test < 2; ++test) {
+    nyr_mach_func_t m = {0};
+    nyr_mach_reg_t regs[5] = {0};
+    bool ok = true;
+    for (size_t v = 0; v < 5 && ok; ++v)
+      ok = nyr_mach_alloc_typed_vreg(&m, NYR_MACH_TYPE_I64, &regs[v]);
+    uint32_t block = 0;
+    ok = ok && nyr_mach_begin_block(&m, 0, &block);
+    nyr_mach_operand_t arg = mach_schedule_selftest_vreg(regs[0]);
+    nyr_mach_operand_t literal = mach_schedule_selftest_vreg(regs[1]);
+    nyr_mach_operand_t update = mach_schedule_selftest_vreg(regs[2]);
+    nyr_mach_operand_t call_result = mach_schedule_selftest_vreg(regs[3]);
+    nyr_mach_inst_t constant = {.opcode = NYR_MACH_COPY,
+                                .source_pc = 1,
+                                .dst = literal,
+                                .src0 = {.kind = NYR_MACH_OPERAND_IMM,
+                                         .as.imm = 1}};
+    nyr_mach_inst_t sub = {.opcode = NYR_MACH_SUB,
+                           .source_pc = 2,
+                           .dst = update,
+                           .src0 = arg,
+                           .src1 = literal};
+    nyr_mach_inst_t call = {.opcode = NYR_MACH_CALL,
+                            .source_pc = 3,
+                            .dst = call_result,
+                            .src0 = {.kind = NYR_MACH_OPERAND_SYMBOL,
+                                     .as.symbol = "callee"},
+                            .effects = NYR_MACH_EFFECT_CALL};
+    call.args = malloc(sizeof(*call.args));
+    if (ok && call.args) {
+      call.args[0] = arg;
+      call.args_len = 1;
+      ok = nyr_mach_emit(&m, constant) && nyr_mach_emit(&m, sub) &&
+           nyr_mach_emit(&m, call);
+    } else {
+      ok = false;
+    }
+    if (!ok)
+      free(call.args);
+    nyr_mach_inst_t sibling = {
+        .opcode = NYR_MACH_COPY,
+        .source_pc = UINT32_MAX,
+        .dst = test == 0 ? mach_schedule_selftest_vreg(regs[4]) : arg,
+        .src0 = call_result};
+    nyr_mach_inst_t edge = {.opcode = NYR_MACH_COPY,
+                            .source_pc = UINT32_MAX,
+                            .dst = arg,
+                            .src0 = update};
+    ok = ok && nyr_mach_emit(&m, sibling) && nyr_mach_emit(&m, edge) &&
+         mach_sink_edge_adds(&m) &&
+         m.insts[test == 0 ? 3 : 1].opcode == NYR_MACH_SUB;
     nyr_mach_func_free(&m);
     if (!ok)
       return false;

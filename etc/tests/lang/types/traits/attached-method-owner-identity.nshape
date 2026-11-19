@@ -1,7 +1,7 @@
 shape attached_method_identity_keeps_the_typed_owner {
   family "runtime/types"
   generator "runtime"
-  features ["method", "identity", "backend-parity"]
+  features ["backend-parity", "identity", "method"]
   template ny-test-case
   flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
   source ny <<'NY'

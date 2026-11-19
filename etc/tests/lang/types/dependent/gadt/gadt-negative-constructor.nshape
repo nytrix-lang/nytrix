@@ -1,7 +1,7 @@
 shape gadt_negative_constructor_index {
   family "typing/dependent"
   generator "error"
-  features [error typing dependent gadt negative]
+  features ["error", "typing", "dependent", "negative", "gadt"]
   template ny-compile-fail
   flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
   expect compile_fail

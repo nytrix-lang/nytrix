@@ -1,7 +1,7 @@
 shape matching_capability_rows_are_accepted {
   family "typing/effects"
   generator "regression"
-  features ["ny", "test", "typing", "effects", "capability", "row"]
+  features ["typing", "ny", "test", "capability", "effects", "row"]
   template ny-test-case
   flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
   expect compile_and_run
@@ -25,7 +25,7 @@ NY
 shape maximum_capability_effect_name_is_accepted {
   family "typing/effects"
   generator "regression"
-  features ["ny", "test", "typing", "effects", "capability", "row", "boundary"]
+  features ["typing", "ny", "test", "boundary", "capability", "effects", "row"]
   template ny-test-case
   flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
   expect compile_and_run
@@ -49,7 +49,7 @@ NY
 shape mismatched_capability_rows_are_rejected {
   family "typing/effects"
   generator "regression"
-  features ["ny", "test", "typing", "effects", "capability", "row", "negative"]
+  features ["typing", "ny", "test", "negative", "capability", "effects", "row"]
   template ny-test-case
   flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
   expect compile_fail
@@ -74,7 +74,7 @@ NY
 shape qualified_module_effect_rows_require_their_module_owner {
   family "typing/effects"
   generator "regression"
-  features ["ny", "test", "typing", "effects", "capability", "modules", "negative"]
+  features ["typing", "ny", "test", "negative", "capability", "effects", "modules"]
   template ny-test-case
   flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
   expect compile_fail
@@ -99,7 +99,7 @@ NY
 shape module_owned_capability_rows_match_qualified_contracts {
   family "typing/effects"
   generator "regression"
-  features ["ny", "test", "typing", "effects", "capability", "modules"]
+  features ["typing", "ny", "test", "capability", "effects", "modules"]
   template ny-test-case
   flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
   expect compile_and_run
@@ -125,7 +125,7 @@ NY
 shape module_owned_capability_rows_survive_callback_aliases {
   family "typing/effects"
   generator "regression"
-  features ["ny", "test", "typing", "effects", "capability", "modules", "callback", "alias"]
+  features ["typing", "ny", "test", "alias", "callback", "capability", "effects", "modules"]
   template ny-test-case
   flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
   expect compile_and_run
@@ -152,7 +152,7 @@ NY
 shape nested_module_function_effect_rows_use_lexical_call_names {
   family "typing/effects"
   generator "regression"
-  features ["ny", "test", "typing", "effects", "capability", "modules", "nested"]
+  features ["typing", "ny", "test", "capability", "effects", "modules", "nested"]
   template ny-test-case
   flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
   expect compile_and_run
@@ -187,7 +187,7 @@ NY
 shape nested_module_function_cannot_underdeclare_sibling_effects {
   family "typing/effects"
   generator "regression"
-  features ["ny", "test", "typing", "effects", "capability", "modules", "nested", "negative"]
+  features ["typing", "ny", "test", "negative", "capability", "effects", "modules", "nested"]
   template ny-test-case
   flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
   expect compile_fail
@@ -221,7 +221,7 @@ NY
 shape custom_effects_do_not_disappear_through_inferred_helpers {
   family "typing/effects"
   generator "regression"
-  features ["ny", "test", "typing", "effects", "capability", "row", "negative", "transitive"]
+  features ["typing", "ny", "test", "negative", "capability", "effects", "row", "transitive"]
   template ny-test-case
   flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
   expect compile_fail
@@ -250,7 +250,7 @@ NY
 shape custom_effect_rows_substitute_through_callback_parameters {
   family "typing/effects"
   generator "regression"
-  features ["ny", "test", "typing", "effects", "capability", "row", "callback"]
+  features ["typing", "ny", "test", "callback", "capability", "effects", "row"]
   template ny-test-case
   flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
   expect compile_and_run
@@ -280,7 +280,7 @@ NY
 shape custom_callback_rows_cannot_escape_narrow_contracts {
   family "typing/effects"
   generator "regression"
-  features ["ny", "test", "typing", "effects", "capability", "row", "callback", "negative"]
+  features ["typing", "ny", "test", "negative", "callback", "capability", "effects", "row"]
   template ny-test-case
   flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
   expect compile_fail
@@ -311,7 +311,7 @@ NY
 shape custom_callback_aliases_cannot_escape_narrow_contracts {
   family "typing/effects"
   generator "regression"
-  features ["ny", "test", "typing", "effects", "capability", "row", "alias", "negative"]
+  features ["typing", "ny", "test", "negative", "alias", "capability", "effects", "row"]
   template ny-test-case
   flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
   expect compile_fail
@@ -337,7 +337,7 @@ NY
 shape divergent_custom_callback_alias_rows_fail_closed {
   family "typing/effects"
   generator "regression"
-  features ["ny", "test", "typing", "effects", "capability", "row", "callback", "control-flow", "negative"]
+  features ["typing", "ny", "test", "negative", "callback", "capability", "control-flow", "effects", "row"]
   template ny-test-case
   flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
   expect compile_fail
@@ -376,7 +376,7 @@ NY
 shape nested_custom_effect_calls_respect_the_caller_row {
   family "typing/effects"
   generator "regression"
-  features ["ny", "test", "typing", "effects", "capability", "row", "nested", "negative"]
+  features ["typing", "ny", "test", "negative", "capability", "effects", "nested", "row"]
   template ny-test-case
   flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
   expect compile_fail
@@ -400,7 +400,7 @@ NY
 shape same_custom_callback_rows_survive_control_flow_joins {
   family "typing/effects"
   generator "regression"
-  features ["ny", "test", "typing", "effects", "capability", "row", "callback", "control-flow"]
+  features ["typing", "ny", "test", "callback", "capability", "control-flow", "effects", "row"]
   template ny-test-case
   flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
   expect compile_and_run
@@ -435,7 +435,7 @@ NY
 shape underdeclared_custom_callback_row_survives_branch_join {
   family "typing/effects"
   generator "regression"
-  features ["ny", "test", "typing", "effects", "capability", "row", "callback", "control-flow", "negative"]
+  features ["typing", "ny", "test", "negative", "callback", "capability", "control-flow", "effects", "row"]
   template ny-test-case
   flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
   expect compile_fail
@@ -469,7 +469,7 @@ NY
 shape divergent_custom_callback_rows_union_at_if_join {
   family "typing/effects"
   generator "regression"
-  features ["ny", "test", "typing", "effects", "capability", "row", "callback", "control-flow"]
+  features ["typing", "ny", "test", "callback", "capability", "control-flow", "effects", "row"]
   template ny-test-case
   flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
   expect compile_and_run
@@ -507,7 +507,7 @@ NY
 shape divergent_custom_callback_rows_union_at_loop_and_match_joins {
   family "typing/effects"
   generator "regression"
-  features ["ny", "test", "typing", "effects", "capability", "row", "callback", "control-flow"]
+  features ["typing", "ny", "test", "callback", "capability", "control-flow", "effects", "row"]
   template ny-test-case
   flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
   expect compile_and_run
@@ -555,7 +555,7 @@ NY
 shape nested_custom_effect_contract_is_accepted_by_matching_caller {
   family "typing/effects"
   generator "regression"
-  features ["ny", "test", "typing", "effects", "capability", "row", "nested"]
+  features ["typing", "ny", "test", "capability", "effects", "nested", "row"]
   flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
   expect compile_and_run
   source ny <<'NY'
@@ -577,7 +577,7 @@ NY
 shape nested_custom_effect_row_survives_local_callable_alias {
   family "typing/effects"
   generator "regression"
-  features ["ny", "test", "typing", "effects", "capability", "row", "nested", "callback", "alias"]
+  features ["typing", "ny", "test", "alias", "callback", "capability", "effects", "nested", "row"]
   flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
   expect compile_and_run
   source ny <<'NY'
@@ -600,7 +600,7 @@ NY
 shape nested_custom_effect_row_cannot_escape_through_local_alias {
   family "typing/effects"
   generator "regression"
-  features ["ny", "test", "typing", "effects", "capability", "row", "nested", "callback", "alias", "negative"]
+  features ["typing", "ny", "test", "negative", "alias", "callback", "capability", "effects", "nested", "row"]
   flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
   expect compile_fail
   expect_message "effect contract violation"
@@ -624,7 +624,7 @@ NY
 shape nested_open_effect_variable_remains_fail_closed {
   family "typing/effects"
   generator "regression"
-  features ["ny", "test", "typing", "effects", "row", "nested", "negative"]
+  features ["typing", "ny", "test", "negative", "effects", "nested", "row"]
   flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
   expect compile_fail
   expect_message "effect contract violation"
@@ -647,7 +647,7 @@ NY
 shape returned_callback_containers_union_branch_effect_rows {
   family "typing/effects"
   generator "regression"
-  features ["ny", "test", "typing", "effects", "capability", "row", "callback", "container", "control-flow"]
+  features ["typing", "ny", "test", "callback", "capability", "container", "control-flow", "effects", "row"]
   flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
   expect compile_and_run
   source ny <<'NY'
@@ -688,7 +688,7 @@ NY
 shape returned_callback_container_cannot_escape_narrow_effect_row {
   family "typing/effects"
   generator "regression"
-  features ["ny", "test", "typing", "effects", "capability", "row", "callback", "container", "control-flow", "negative"]
+  features ["typing", "ny", "test", "negative", "callback", "capability", "container", "control-flow", "effects", "row"]
   flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
   expect compile_fail
   expect_message "effect contract violation"
@@ -730,7 +730,7 @@ NY
 shape ternary_callback_closure_rows_are_joined {
   family "typing/effects"
   generator "regression"
-  features ["ny", "test", "typing", "effects", "capability", "row", "callback", "closure", "control-flow"]
+  features ["typing", "ny", "test", "callback", "capability", "closure", "control-flow", "effects", "row"]
   flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
   expect compile_and_run
   source ny <<'NY'
@@ -770,7 +770,7 @@ NY
 shape ternary_callback_closure_underdeclared_row_is_rejected {
   family "typing/effects"
   generator "regression"
-  features ["ny", "test", "typing", "effects", "capability", "row", "callback", "closure", "negative"]
+  features ["typing", "ny", "test", "negative", "callback", "capability", "closure", "effects", "row"]
   flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
   expect compile_fail
   expect_message "effect contract violation"

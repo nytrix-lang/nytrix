@@ -1,7 +1,7 @@
 shape relational_refinement_implication {
   family "runtime/language"
   generator "embedded"
-  features ["ny", "test", "typing", "refinement", "proof", "relational"]
+  features ["typing", "ny", "test", "proof", "refinement", "relational"]
   template ny-test-case
   flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
   expect compile_and_run

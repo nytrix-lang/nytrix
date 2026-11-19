@@ -43,7 +43,9 @@ static bool check(int64_t mid, int64_t join) {
 }
 
 int main(void) {
-  /* Small ids use DCE's label table; large ids take the fallback query. */
+  /*
+   * Small ids use DCE's label table; large ids take the fallback query.
+   */
   bool ok = check(1, 2) && check(1500, 2000);
   if (ok)
     puts("[dce-phi-label] PHI-only predecessor labels survive DCE");

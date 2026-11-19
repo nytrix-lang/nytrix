@@ -276,7 +276,9 @@ static void ny_x64_nir_compute_frame(ny_x64_nir_ctx_t *c) {
          in->op == NYIR_VEC8_REDUCE_ADD_I64) &&
         in->b >= 0 && in->b < NY_X64_NIR_MAX_SLOTS)
       c->value_i64v2[in->b] = true;
-    /* A vector store reads a full vector operand. */
+    /*
+     * A vector store reads a full vector operand.
+     */
     if ((in->op == NYIR_VEC4_STORE_I64 || in->op == NYIR_VEC8_STORE_I64) &&
         in->b >= 0 && in->b < NY_X64_NIR_MAX_SLOTS)
       c->value_i64v2[in->b] = true;
@@ -3141,7 +3143,9 @@ static bool ny_x64_nir_emit_inst_raw(ny_x64_nir_ctx_t *c, const nyr_inst_t *in,
     return true;
   }
   case NYIR_VEC8_MUL_I64: {
-    /* No packed i64 multiply below AVX-512: one imul per lane. */
+    /*
+     * No packed i64 multiply below AVX-512: one imul per lane.
+     */
     int a = ny_x64_nir_slot(c, in->a);
     int b = ny_x64_nir_slot(c, in->b);
     int dst = ny_x64_nir_slot(c, in->dst);

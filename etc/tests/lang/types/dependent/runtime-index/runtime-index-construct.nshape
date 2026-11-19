@@ -1,7 +1,7 @@
 shape runtime_index_construct {
   family "typing/dependent"
   generator "embedded"
-  features [typing dependent runtime-index positive]
+  features ["typing", "dependent", "positive", "runtime-index"]
   template ny-test-case
   flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
   expect compile_and_run

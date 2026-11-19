@@ -1,7 +1,7 @@
 shape generated_mutable_list_callback_replacement_differential {
   family "language/types/effects"
   generator "embedded"
-  features [typing effects callback mutable list alias invalidation generated differential]
+  features ["typing", "alias", "callback", "differential", "effects", "generated", "invalidation", "list", "mutable"]
   timeout 120
   template ny-test-case
   expect compile_and_run

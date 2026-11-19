@@ -1,7 +1,7 @@
 shape generated_returned_callback_alias_effect_differential {
   family "typing/effects"
   generator "embedded"
-  features [typing effects callback returned-alias generated differential]
+  features ["typing", "callback", "differential", "effects", "generated", "returned-alias"]
   estimate_ms 27000
   timeout 180
   expect compile_and_run

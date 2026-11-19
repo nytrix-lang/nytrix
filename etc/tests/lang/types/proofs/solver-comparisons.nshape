@@ -1,7 +1,7 @@
 shape proof_solver_comparisons {
   family "runtime/proofs"
   generator "program"
-  features ["proof", "solver", "comparison", "soundness"]
+  features ["comparison", "proof", "solver", "soundness"]
   template ny-test-case
   flags "--proof-solver=presburger --color=never"
   expect compile_and_run

@@ -1,7 +1,7 @@
 shape generated_string_content_refinement_differential {
   family "language/types/refinements"
   generator "embedded"
-  features ["refinement", "mutable-aggregate", "string-content", "store", "generated", "differential"]
+  features ["differential", "generated", "mutable-aggregate", "refinement", "store", "string-content"]
   template ny-test-case
   expect compile_and_run
   source ny <<'NY'

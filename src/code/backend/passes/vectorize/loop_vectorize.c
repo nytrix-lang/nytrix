@@ -178,6 +178,9 @@ typedef struct {
   int64_t stride;
   bool has_dynamic_key;
   int dynamic_key;
+  bool has_byte_range;
+  int64_t byte_begin;
+  int64_t byte_end;
 } affine_t;
 
 static bool op_is_vec_i64_bin(nyr_op_t op) {
@@ -720,17 +723,45 @@ static bool tbuf_address_parts(const nyr_func_t *f, const int *defs,
                                const nyr_cfg_t *cfg, const bool *in_loop,
                                int address, int iv, int64_t init, int64_t trip,
                                size_t use_pc, unsigned depth, int *root_out,
-                               tbuf_offset_t *offset_out) {
+                               tbuf_offset_t *offset_out, const char **why) {
   if (!f || !defs || !cfg || !in_loop || !root_out || !offset_out ||
       address < 0 || address >= f->next_value || depth > 16 ||
-      defs[address] < 0)
+      defs[address] < 0) {
+    if (why)
+      *why = "access address has no definition";
     return false;
+  }
   const nyr_inst_t *in = &f->data[(size_t)defs[address]];
   if (in->op == NYIR_COPY)
     return tbuf_address_parts(f, defs, cfg, in_loop, in->a, iv, init, trip,
-                              use_pc, depth + 1, root_out, offset_out);
-  if (in->op != NYIR_ADD_I64)
+                              use_pc, depth + 1, root_out, offset_out, why);
+  if (in->op != NYIR_ADD_I64) {
+    if (why)
+      *why = "address is not a payload+offset add chain";
+    /*
+     * `NY_TRACE_ADDR_CHAIN=1` names the whole defining chain of a refused
+     * address. The one-line reject only says the resolved instruction is not
+     * an ADD, which cannot distinguish a symbol-slot handle load from a copy
+     * of one or from an address assembled some other way.
+     */
+    if (ny_trace_enabled("NY_TRACE_ADDR_CHAIN")) {
+      fprintf(stderr, "nyir addr chain: value=%d op=%s a=%d b=%d c=%d\n",
+              address, nyr_op_name(in->op), in->a, in->b, in->c);
+      int walk = in->a;
+      for (int hop = 1; hop <= 8; ++hop) {
+        if (walk < 0 || walk >= f->next_value || defs[walk] < 0)
+          break;
+        const nyr_inst_t *d = &f->data[(size_t)defs[walk]];
+        fprintf(stderr, "  [%d] v=%d op=%s a=%d b=%d c=%d\n", hop, walk,
+                nyr_op_name(d->op), d->a, d->b, d->c);
+        int next = d->a;
+        if (d->op != NYIR_COPY && d->op != NYIR_ADD_I64)
+          break;
+        walk = next;
+      }
+    }
     return false;
+  }
 
   int direct_root[2] = {tbuf_payload_root(f, defs, in->a, depth + 1),
                         tbuf_payload_root(f, defs, in->b, depth + 1)};
@@ -740,7 +771,7 @@ static bool tbuf_address_parts(const nyr_func_t *f, const int *defs,
     tbuf_offset_t base = {.ok = true, .has_range = true};
     if (root < 0 &&
         !tbuf_address_parts(f, defs, cfg, in_loop, values[side], iv, init, trip,
-                            use_pc, depth + 1, &root, &base))
+                            use_pc, depth + 1, &root, &base, why))
       continue;
     int other = values[1u - side];
     tbuf_offset_t term =
@@ -775,6 +806,8 @@ static bool tbuf_address_parts(const nyr_func_t *f, const int *defs,
         offset > INT64_MAX || stride < INT64_MIN || stride > INT64_MAX ||
         !base.has_range || !term.has_range || min < INT64_MIN ||
         max > INT64_MAX) {
+      if (why)
+        *why = "affine offset has no proven range or overflows i64";
       continue;
     }
     *root_out = root;
@@ -789,7 +822,30 @@ static bool tbuf_address_parts(const nyr_func_t *f, const int *defs,
                                   .max = (int64_t)max};
     return true;
   }
+  if (why && !*why)
+    *why = "no private typed-buffer root on either addend";
   return false;
+}
+
+static _Thread_local char vector_mixed_operand_buf[192];
+
+/*
+ * Name the operand the mixed-width check refused, together with the opcode of
+ * its definition. Without this the reject only says "not loop-invariant",
+ * which cannot distinguish an address computation that LICM should have
+ * hoisted from a load or call the loop genuinely varies.
+ */
+static const char *vector_mixed_operand_reason(const nyr_func_t *f,
+                                               const int *defs, int value,
+                                               const char *kind) {
+  const nyr_inst_t *d = NULL;
+  if (f && defs && value >= 0 && value < f->next_value && defs[value] >= 0 &&
+      (size_t)defs[value] < f->len)
+    d = &f->data[(size_t)defs[value]];
+  snprintf(vector_mixed_operand_buf, sizeof(vector_mixed_operand_buf),
+           "mixed %s operand v%d (def op=%s) is not loop-invariant", kind,
+           value, d ? nyr_op_name(d->op) : "none");
+  return vector_mixed_operand_buf;
 }
 
 static bool block_for_label(const nyr_cfg_t *cfg, int64_t label, size_t *out);
@@ -798,15 +854,20 @@ static bool tbuf_affine_memory_safe(const nyr_func_t *f, const int *defs,
                                     const nyr_cfg_t *cfg, const bool *in_loop,
                                     int address, int iv, int64_t init,
                                     int64_t trip, size_t use_pc, affine_t *out,
-                                    bool *dynamic_offset) {
+                                    bool *dynamic_offset, const char **why) {
   if (!f || !defs || !cfg || !in_loop || !out || !dynamic_offset || trip <= 0 ||
-      address < 0 || address >= f->next_value || defs[address] < 0)
+      address < 0 || address >= f->next_value || defs[address] < 0) {
+    if (why)
+      *why = "iteration window is unknown or empty";
     return false;
+  }
   int root = -1;
   tbuf_offset_t access = {0};
   bool address_ok = tbuf_address_parts(f, defs, cfg, in_loop, address, iv, init,
-                                       trip, use_pc, 0, &root, &access);
-  if (!address_ok || root < 0 || !access.ok || access.stride != 8) {
+                                       trip, use_pc, 0, &root, &access, why);
+  if (!address_ok || root < 0 || !access.ok) {
+    if (why && !*why)
+      *why = "not a proven typed-buffer access";
     if (nyr_vector_trace_enabled()) {
       const nyr_inst_t *addr = &f->data[(size_t)defs[address]];
       const nyr_inst_t *a = addr->op == NYIR_ADD_I64 && addr->a >= 0 &&
@@ -821,11 +882,17 @@ static bool tbuf_affine_memory_safe(const nyr_func_t *f, const int *defs,
                                 : NULL;
       ny_trace_line("VECTORIZE",
                     "tbuf affine: missing root/address v%d root=%d offset=%lld "
-                    "addends=v%d(%s)/v%d(%s)",
-                    address, root, (long long)access.offset, addr->a,
+                    "op=%s addends=v%d(%s)/v%d(%s) incoming=%zu",
+                    address, root, (long long)access.offset,
+                    nyr_op_name(addr->op), addr->a,
                     a ? nyr_op_name(a->op) : "none", addr->b,
-                    b ? nyr_op_name(b->op) : "none");
+                    b ? nyr_op_name(b->op) : "none", addr->phi_incoming_len);
     }
+    return false;
+  }
+  if (access.stride != 8) {
+    if (why)
+      *why = "access stride is not 8 bytes per lane";
     return false;
   }
   /*
@@ -834,18 +901,18 @@ static bool tbuf_affine_memory_safe(const nyr_func_t *f, const int *defs,
    * dynamic base is identical for every lane of one widened access because
    * the lane address is (dynamic base) + (induction + lane) * stride, and
    * dependence between distinct accesses stays governed by
-   * track_root_access: a dynamic write rejects every other access on its
-   * root, and cross-root independence still requires the swap-pair proof.
+   * track_root_access: distinct streams sharing one root must have disjoint
+   * byte ranges, and cross-root independence still requires a PHI proof.
    * Widening may therefore keep these row/column accesses vector when the
    * bounds proof covers the full lane window; treating the accesses as
    * offset-independent without that proof previously lost native SOR
    * updates, so the stride-8 lane extension below is the only shape allowed
    * past the flat dynamic rule.
    */
-  if (access.dynamic && access.stride != 0 && access.stride != 8)
-    return false;
   int64_t bytes = 0;
   if (!known_alloc_bytes(f, defs, root, &bytes)) {
+    if (why)
+      *why = "allocation extent unknown";
     if (nyr_vector_trace_enabled())
       ny_trace_line("VECTORIZE",
                     "tbuf affine: unknown allocation bytes root=v%d", root);
@@ -856,60 +923,47 @@ static bool tbuf_affine_memory_safe(const nyr_func_t *f, const int *defs,
    * body runs lane-0 addresses only up to vec_end - VF and a scalar tail
    * covers the remainder, so every lane address (cc_vec + lane) is an
    * address the scalar loop itself could take.  The single-element bound
-   * below is therefore exact for stride 0 and stride 8 alike.
+   * below covers every access in the original iteration window.
    */
-  if (access.dynamic) {
-    nyr_range_t range = {.has_min = access.has_range,
-                         .has_max = access.has_range,
-                         .min = access.min,
-                         .max = access.max};
-    bool guarded_range = access.has_range;
+  if (!access.has_range || access.min < 0 || access.max < access.min ||
+      access.max > bytes - 8) {
+    if (why)
+      *why = "affine byte range exceeds the allocation";
     if (nyr_vector_trace_enabled())
       ny_trace_line("VECTORIZE",
-                    "tbuf affine: range address=v%d guarded=%s [%lld,%lld]",
-                    address, guarded_range ? "yes" : "no", (long long)range.min,
-                    (long long)range.max);
-    if (!range.has_min || !range.has_max || range.min < 0 ||
-        range.max > bytes - 8) {
-      if (nyr_vector_trace_enabled())
-        ny_trace_line("VECTORIZE",
-                      "tbuf affine: unsafe dynamic offset v%d "
-                      "range={%s%lld,%s%lld} bytes=%lld",
-                      address, range.has_min ? "" : "?", (long long)range.min,
-                      range.has_max ? "" : "?", (long long)range.max,
-                      (long long)bytes);
-      return false;
-    }
-  } else {
-    __int128 last =
-        (__int128)access.offset + (__int128)access.stride * (trip - 1);
-    if (last < 0 || last + 8 > bytes)
-      return false;
+                    "tbuf affine: address=v%d offsets=[%lld,%lld] bytes=%lld",
+                    address, (long long)access.min, (long long)access.max,
+                    (long long)bytes);
+    return false;
   }
   *out = (affine_t){.ok = true,
                     .root = root,
                     .offset = access.offset,
                     .stride = access.stride,
                     .has_dynamic_key = access.has_dynamic_key,
-                    .dynamic_key = access.dynamic_key};
+                    .dynamic_key = access.dynamic_key,
+                    .has_byte_range = true,
+                    .byte_begin = access.min,
+                    .byte_end = access.max + 8};
   *dynamic_offset = access.dynamic;
   return true;
 }
 
-static bool affine_memory_safe(const nyr_func_t *f, const int *defs,
-                               const nyr_cfg_t *cfg, const bool *in_loop,
-                               int address, int iv, int64_t trip) {
+static bool affine_memory_range(const nyr_func_t *f, const int *defs,
+                                 affine_t *access, int64_t init, int64_t trip) {
   if (trip <= 0)
     return false;
-  affine_t access = affine_value(f, defs, cfg, in_loop, address, iv, 0);
-  if (!access.ok || access.root < 0 || access.offset < 0 || access.stride < 0)
-    return false;
   int64_t bytes = 0;
-  if (!known_alloc_bytes(f, defs, access.root, &bytes))
+  if (!known_alloc_bytes(f, defs, access->root, &bytes))
     return false;
-  __int128 last =
-      (__int128)access.offset + (__int128)access.stride * (trip - 1);
-  return last >= 0 && last + 8 <= bytes;
+  __int128 first = (__int128)access->offset + (__int128)access->stride * init;
+  __int128 end = first + (__int128)access->stride * (trip - 1) + 8;
+  if (first < 0 || end > bytes)
+    return false;
+  access->has_byte_range = true;
+  access->byte_begin = (int64_t)first;
+  access->byte_end = (int64_t)end;
+  return true;
 }
 
 static bool vector_memory_affine(const nyr_func_t *f, const int *defs,
@@ -918,28 +972,37 @@ static bool vector_memory_affine(const nyr_func_t *f, const int *defs,
                                  bool variable_trip, int64_t trip,
                                  int64_t window_init, int64_t window_trip,
                                  size_t use_pc, affine_t *out,
-                                 bool *dynamic_offset) {
+                                 bool *dynamic_offset, const char **why) {
   affine_t access = affine_value(f, defs, cfg, in_loop, address, iv, 0);
   *dynamic_offset = false;
+  if (why)
+    *why = NULL;
   if (access.ok && access.stride == 8 &&
-      root_is_private_memory(f, defs, access.root) &&
-      (variable_trip ||
-       affine_memory_safe(f, defs, cfg, in_loop, address, iv, trip))) {
-    *out = access;
-    return true;
+      root_is_private_memory(f, defs, access.root)) {
+    bool proven = affine_memory_range(f, defs, &access,
+                                      variable_trip ? window_init : init,
+                                      variable_trip ? window_trip : trip);
+    if (proven || variable_trip) {
+      *out = access;
+      return true;
+    }
   }
   if (!variable_trip)
     return tbuf_affine_memory_safe(f, defs, cfg, in_loop, address, iv, init,
-                                   trip, use_pc, out, dynamic_offset);
+                                   trip, use_pc, out, dynamic_offset, why);
   /*
    * Variable-trip loop: every vector lane is a scalar iteration, so bounding
    * the whole iteration window [window_init, window_init + window_trip) with
    * range facts on the start and limit covers all lanes and the tail.
    */
-  return window_trip > 0 &&
-         tbuf_affine_memory_safe(f, defs, cfg, in_loop, address, iv,
+  if (window_trip <= 0) {
+    if (why)
+      *why = "variable trip count has no provable iteration window";
+    return false;
+  }
+  return tbuf_affine_memory_safe(f, defs, cfg, in_loop, address, iv,
                                  window_init, window_trip, use_pc, out,
-                                 dynamic_offset);
+                                 dynamic_offset, why);
 }
 
 /*
@@ -1061,184 +1124,179 @@ static bool guarded_induction_range(const nyr_func_t *f, const int *defs,
       value >= f->next_value || defs[value] < 0)
     return false;
   size_t use_block = cfg->inst_block[use_pc];
-  for (size_t h = 0; h < cfg->block_count; ++h) {
-    for (size_t p = cfg->block_start[h]; p < cfg->block_end[h]; ++p) {
-      const nyr_inst_t *phi = &f->data[p];
-      if (phi->op != NYIR_PHI || phi->dst != value ||
-          phi->phi_incoming_len < 2 ||
-          phi->phi_incoming_len !=
-              cfg->pred_offsets[h + 1] - cfg->pred_offsets[h])
-        continue;
-      int pre = -1;
-      int64_t step = 0;
-      size_t pre_block = SIZE_MAX;
-      size_t latch_count = 0;
-      bool valid = true;
-      for (size_t k = 0; k < phi->phi_incoming_len && valid; ++k) {
-        size_t pred = SIZE_MAX;
-        if (!block_for_label(cfg, phi->phi_incoming[k].predecessor_label,
-                             &pred)) {
-          valid = false;
-          break;
-        }
-        for (size_t j = 0; j < k; ++j) {
-          size_t prior = SIZE_MAX;
-          if (!block_for_label(cfg, phi->phi_incoming[j].predecessor_label,
-                               &prior) ||
-              prior == pred) {
-            valid = false;
-            break;
-          }
-        }
-        if (!valid)
-          break;
-        if (!nyr_cfg_is_backedge(cfg, pred, h)) {
-          if (pre_block != SIZE_MAX) {
-            valid = false;
-            break;
-          }
-          pre_block = pred;
-          pre =
-              nyr_vectorize_resolve_value(f, defs, phi->phi_incoming[k].value);
-          if (pre < 0)
-            valid = false;
-          continue;
-        }
+  size_t p = (size_t)defs[value];
+  const nyr_inst_t *phi = &f->data[p];
+  size_t h = cfg->inst_block[p];
+  if (phi->op != NYIR_PHI || phi->phi_incoming_len < 2 ||
+      phi->phi_incoming_len != cfg->pred_offsets[h + 1] - cfg->pred_offsets[h])
+    return false;
+  int pre = -1;
+  int64_t step = 0;
+  size_t pre_block = SIZE_MAX;
+  size_t latch_count = 0;
+  bool valid = true;
+  for (size_t k = 0; k < phi->phi_incoming_len && valid; ++k) {
+    size_t pred = SIZE_MAX;
+    if (!block_for_label(cfg, phi->phi_incoming[k].predecessor_label,
+                         &pred)) {
+      valid = false;
+      break;
+    }
+    for (size_t j = 0; j < k; ++j) {
+      size_t prior = SIZE_MAX;
+      if (!block_for_label(cfg, phi->phi_incoming[j].predecessor_label,
+                           &prior) ||
+          prior == pred) {
+        valid = false;
+        break;
+      }
+    }
+    if (!valid)
+      break;
+    if (!nyr_cfg_is_backedge(cfg, pred, h)) {
+      if (pre_block != SIZE_MAX) {
+        valid = false;
+        break;
+      }
+      pre_block = pred;
+      pre =
+          nyr_vectorize_resolve_value(f, defs, phi->phi_incoming[k].value);
+      if (pre < 0)
+        valid = false;
+      continue;
+    }
 
-        int back =
-            nyr_vectorize_resolve_value(f, defs, phi->phi_incoming[k].value);
-        if (back < 0 || back >= f->next_value || defs[back] < 0) {
-          valid = false;
-          break;
-        }
-        const nyr_inst_t *update = &f->data[(size_t)defs[back]];
-        size_t update_block = cfg->inst_block[(size_t)defs[back]];
-        if (update->op != NYIR_ADD_I64 ||
-            !nyr_cfg_dominates(cfg, h, update_block) ||
-            !nyr_cfg_dominates(cfg, update_block, pred)) {
-          valid = false;
-          break;
-        }
-        int step_v = -1;
-        if (nyr_vectorize_resolve_value(f, defs, update->a) == value)
-          step_v = update->b;
-        else if (nyr_vectorize_resolve_value(f, defs, update->b) == value)
-          step_v = update->a;
-        int64_t latch_step = 0;
-        if (step_v < 0 || !nyr_const_i64(f, defs, step_v, &latch_step) ||
-            latch_step <= 0 || (latch_count && latch_step != step)) {
-          valid = false;
-          break;
-        }
-        step = latch_step;
-        ++latch_count;
-      }
-      /*
-       * Every incoming edge must name one distinct CFG predecessor. Accept
-       * multiple backedges only when each carries the same positive update;
-       * an ambiguous edge or recurrence cannot borrow the simple range.
-       */
-      if (!valid || pre < 0 || pre_block == SIZE_MAX || latch_count == 0)
-        continue;
-      bool preds_match = true;
-      for (size_t e = cfg->pred_offsets[h]; e < cfg->pred_offsets[h + 1]; ++e) {
-        size_t pred = cfg->pred_blocks[e];
-        size_t occurrences = 0;
-        size_t matches = 0;
-        for (size_t prior = cfg->pred_offsets[h];
-             prior < cfg->pred_offsets[h + 1]; ++prior)
-          occurrences += cfg->pred_blocks[prior] == pred;
-        for (size_t k = 0; k < phi->phi_incoming_len; ++k) {
-          size_t incoming = SIZE_MAX;
-          if (block_for_label(cfg, phi->phi_incoming[k].predecessor_label,
-                              &incoming) &&
-              incoming == pred)
-            ++matches;
-        }
-        if (occurrences != 1 || matches != 1) {
-          preds_match = false;
-          break;
-        }
-      }
-      if (!preds_match || defs[pre] < 0)
-        continue;
-      int64_t init = 0;
-      /*
-       * A runtime start (for example `c = k + 1` under an outer guarded `k`)
-       * contributes its own lower bound; the body-edge guard still caps the
-       * value below the limit.
-       */
-      bool init_is_bound = false;
-      if (!nyr_const_i64(f, defs, pre, &init)) {
-        static _Thread_local unsigned start_depth;
-        nyr_range_t start_range = {0};
-        if (start_depth >= 6)
-          continue;
-        ++start_depth;
-        bool have = value_range_under_guards(f, defs, cfg, use_pc, pre, -1, 0,
-                                             0, 0, &start_range);
-        --start_depth;
-        if (!have || !start_range.has_min)
-          continue;
-        init = start_range.min;
-        init_is_bound = true;
-      }
-      size_t branch = SIZE_MAX;
-      for (size_t i = cfg->block_end[h]; i > cfg->block_start[h]; --i)
-        if (f->data[i - 1].op == NYIR_BR_IF) {
-          branch = i - 1;
-          break;
-        }
-      if (branch == SIZE_MAX)
-        continue;
-      const nyr_inst_t *br = &f->data[branch];
-      size_t body = SIZE_MAX;
-      if (!block_for_label(cfg, br->imm, &body) ||
-          !nyr_cfg_dominates(cfg, body, use_block) ||
-          cfg->pred_offsets[body + 1] - cfg->pred_offsets[body] != 1 ||
-          cfg->pred_blocks[cfg->pred_offsets[body]] != h || br->a < 0 ||
-          br->a >= f->next_value || defs[br->a] < 0)
-        continue;
-      int cmp_v = nyr_vectorize_resolve_value(f, defs, br->a);
-      const nyr_inst_t *cmp = &f->data[(size_t)defs[cmp_v]];
-      /*
-       * Loop headers often test a materialized boolean, `(k < n) != 0`;
-       * look through the zero test to the compare that bounds `k`.
-       */
-      int64_t zero = -1;
-      if (cmp->op == NYIR_CMP_I64 && cmp->cmp == NYIR_CMP_NE &&
-          nyr_const_i64(f, defs, cmp->b, &zero) && zero == 0) {
-        int inner = nyr_vectorize_resolve_value(f, defs, cmp->a);
-        if (inner >= 0 && inner < f->next_value && defs[inner] >= 0 &&
-            f->data[(size_t)defs[inner]].op == NYIR_CMP_I64)
-          cmp = &f->data[(size_t)defs[inner]];
-      }
-      int64_t limit = 0;
-      bool inclusive = cmp->cmp == NYIR_CMP_LE;
-      if (cmp->op != NYIR_CMP_I64 || (cmp->cmp != NYIR_CMP_LT && !inclusive) ||
-          nyr_vectorize_resolve_value(f, defs, cmp->a) != value ||
-          !nyr_const_i64(f, defs, cmp->b, &limit) ||
-          (inclusive ? init > limit : init >= limit))
-        continue;
-      __int128 distance = (__int128)limit - init - (inclusive ? 0 : 1);
-      if (distance < 0)
-        continue;
-      __int128 n = distance / step;
-      __int128 max = (__int128)init + n * step;
-      if (init_is_bound) {
-        /*
-         * Unknown exact start: only the guard bounds the value.
-         */
-        max = (__int128)limit - (inclusive ? 0 : 1);
-      }
-      if (max < INT64_MIN || max > INT64_MAX || max + step > INT64_MAX)
-        continue;
-      *out = (nyr_range_t){
-          .has_min = true, .has_max = true, .min = init, .max = (int64_t)max};
-      return true;
+    int back =
+        nyr_vectorize_resolve_value(f, defs, phi->phi_incoming[k].value);
+    if (back < 0 || back >= f->next_value || defs[back] < 0) {
+      valid = false;
+      break;
+    }
+    const nyr_inst_t *update = &f->data[(size_t)defs[back]];
+    size_t update_block = cfg->inst_block[(size_t)defs[back]];
+    if (update->op != NYIR_ADD_I64 ||
+        !nyr_cfg_dominates(cfg, h, update_block) ||
+        !nyr_cfg_dominates(cfg, update_block, pred)) {
+      valid = false;
+      break;
+    }
+    int step_v = -1;
+    if (nyr_vectorize_resolve_value(f, defs, update->a) == value)
+      step_v = update->b;
+    else if (nyr_vectorize_resolve_value(f, defs, update->b) == value)
+      step_v = update->a;
+    int64_t latch_step = 0;
+    if (step_v < 0 || !nyr_const_i64(f, defs, step_v, &latch_step) ||
+        latch_step <= 0 || (latch_count && latch_step != step)) {
+      valid = false;
+      break;
+    }
+    step = latch_step;
+    ++latch_count;
+  }
+  /*
+   * Every incoming edge must name one distinct CFG predecessor. Accept
+   * multiple backedges only when each carries the same positive update;
+   * an ambiguous edge or recurrence cannot borrow the simple range.
+   */
+  if (!valid || pre < 0 || pre_block == SIZE_MAX || latch_count == 0)
+    return false;
+  bool preds_match = true;
+  for (size_t e = cfg->pred_offsets[h]; e < cfg->pred_offsets[h + 1]; ++e) {
+    size_t pred = cfg->pred_blocks[e];
+    size_t occurrences = 0;
+    size_t matches = 0;
+    for (size_t prior = cfg->pred_offsets[h];
+         prior < cfg->pred_offsets[h + 1]; ++prior)
+      occurrences += cfg->pred_blocks[prior] == pred;
+    for (size_t k = 0; k < phi->phi_incoming_len; ++k) {
+      size_t incoming = SIZE_MAX;
+      if (block_for_label(cfg, phi->phi_incoming[k].predecessor_label,
+                          &incoming) &&
+          incoming == pred)
+        ++matches;
+    }
+    if (occurrences != 1 || matches != 1) {
+      preds_match = false;
+      break;
     }
   }
-  return false;
+  if (!preds_match || defs[pre] < 0)
+    return false;
+  int64_t init = 0;
+  /*
+   * A runtime start (for example `c = k + 1` under an outer guarded `k`)
+   * contributes its own lower bound; the body-edge guard still caps the
+   * value below the limit.
+   */
+  bool init_is_bound = false;
+  if (!nyr_const_i64(f, defs, pre, &init)) {
+    static _Thread_local unsigned start_depth;
+    nyr_range_t start_range = {0};
+    if (start_depth >= 6)
+      return false;
+    ++start_depth;
+    bool have = value_range_under_guards(f, defs, cfg, use_pc, pre, -1, 0,
+                                         0, 0, &start_range);
+    --start_depth;
+    if (!have || !start_range.has_min)
+      return false;
+    init = start_range.min;
+    init_is_bound = true;
+  }
+  size_t branch = SIZE_MAX;
+  for (size_t i = cfg->block_end[h]; i > cfg->block_start[h]; --i)
+    if (f->data[i - 1].op == NYIR_BR_IF) {
+      branch = i - 1;
+      break;
+    }
+  if (branch == SIZE_MAX)
+    return false;
+  const nyr_inst_t *br = &f->data[branch];
+  size_t body = SIZE_MAX;
+  if (!block_for_label(cfg, br->imm, &body) ||
+      !nyr_cfg_dominates(cfg, body, use_block) ||
+      cfg->pred_offsets[body + 1] - cfg->pred_offsets[body] != 1 ||
+      cfg->pred_blocks[cfg->pred_offsets[body]] != h || br->a < 0 ||
+      br->a >= f->next_value || defs[br->a] < 0)
+    return false;
+  int cmp_v = nyr_vectorize_resolve_value(f, defs, br->a);
+  const nyr_inst_t *cmp = &f->data[(size_t)defs[cmp_v]];
+  /*
+   * Loop headers often test a materialized boolean, `(k < n) != 0`;
+   * look through the zero test to the compare that bounds `k`.
+   */
+  int64_t zero = -1;
+  if (cmp->op == NYIR_CMP_I64 && cmp->cmp == NYIR_CMP_NE &&
+      nyr_const_i64(f, defs, cmp->b, &zero) && zero == 0) {
+    int inner = nyr_vectorize_resolve_value(f, defs, cmp->a);
+    if (inner >= 0 && inner < f->next_value && defs[inner] >= 0 &&
+        f->data[(size_t)defs[inner]].op == NYIR_CMP_I64)
+      cmp = &f->data[(size_t)defs[inner]];
+  }
+  int64_t limit = 0;
+  bool inclusive = cmp->cmp == NYIR_CMP_LE;
+  if (cmp->op != NYIR_CMP_I64 || (cmp->cmp != NYIR_CMP_LT && !inclusive) ||
+      nyr_vectorize_resolve_value(f, defs, cmp->a) != value ||
+      !nyr_const_i64(f, defs, cmp->b, &limit) ||
+      (inclusive ? init > limit : init >= limit))
+    return false;
+  __int128 distance = (__int128)limit - init - (inclusive ? 0 : 1);
+  if (distance < 0)
+    return false;
+  __int128 n = distance / step;
+  __int128 max = (__int128)init + n * step;
+  if (init_is_bound) {
+    /*
+     * Unknown exact start: only the guard bounds the value.
+     */
+    max = (__int128)limit - (inclusive ? 0 : 1);
+  }
+  if (max < INT64_MIN || max > INT64_MAX || max + step > INT64_MAX)
+    return false;
+  *out = (nyr_range_t){
+      .has_min = true, .has_max = true, .min = init, .max = (int64_t)max};
+  return true;
 }
 
 /*
@@ -2377,14 +2435,15 @@ static bool vectorization_profitable(size_t loads, size_t stores,
  * reads, not just the first access seen for its allocation.
  */
 typedef struct {
-  int root;
-  int64_t offset;
-  int64_t stride;
+  affine_t access;
   bool dynamic_offset;
-  bool has_dynamic_key;
-  int dynamic_key;
   bool written;
 } root_access_t;
+
+/* The vector memory operations here have 64-bit lanes and use flat addresses. */
+static const unsigned vector_unsupported_mem_flags =
+    NYIR_INST_F_MEM_BYTE | NYIR_INST_F_MEM_U16 | NYIR_INST_F_MEM_I32 |
+    NYIR_INST_F_MEM_VOLATILE | NYIR_INST_F_MEM_SEG_FS | NYIR_INST_F_MEM_SEG_GS;
 
 /*
  * Two SSA values denote the same runtime value when they are the same value,
@@ -2429,15 +2488,15 @@ static bool values_structurally_equal(const nyr_func_t *f, const int *defs,
 
 static bool track_root_access(const nyr_func_t *f, const int *defs,
                               root_access_t *seen, size_t *seen_count,
-                              size_t seen_cap, int root, int64_t offset,
-                              int64_t stride, bool dynamic_offset,
-                              bool has_dynamic_key, int dynamic_key,
+                              size_t seen_cap, affine_t access, bool dynamic_offset,
                               bool is_store) {
   for (size_t r = 0; r < *seen_count; ++r) {
-    if (seen[r].root != root) {
+    affine_t prior_access = seen[r].access;
+    int root = access.root;
+    if (prior_access.root != root) {
       bool root_is_phi = root >= 0 && root < f->next_value && defs[root] >= 0 &&
                          f->data[(size_t)defs[root]].op == NYIR_PHI;
-      int prior = seen[r].root;
+      int prior = prior_access.root;
       bool prior_is_phi = prior >= 0 && prior < f->next_value &&
                           defs[prior] >= 0 &&
                           f->data[(size_t)defs[prior]].op == NYIR_PHI;
@@ -2449,26 +2508,26 @@ static bool track_root_access(const nyr_func_t *f, const int *defs,
     }
     if (!seen[r].written && !is_store)
       continue;
-    bool same_stream = seen[r].offset == offset && seen[r].stride == stride;
+    if (prior_access.has_byte_range && access.has_byte_range &&
+        (prior_access.byte_end <= access.byte_begin ||
+         access.byte_end <= prior_access.byte_begin))
+      continue;
+    bool same_stream = prior_access.offset == access.offset &&
+                       prior_access.stride == access.stride;
     if (seen[r].dynamic_offset || dynamic_offset)
       same_stream = same_stream && seen[r].dynamic_offset && dynamic_offset &&
-                    seen[r].has_dynamic_key && has_dynamic_key &&
-                    values_structurally_equal(f, defs, seen[r].dynamic_key,
-                                              dynamic_key, 0) &&
-                    stride == 8;
+                    prior_access.has_dynamic_key && access.has_dynamic_key &&
+                    values_structurally_equal(f, defs, prior_access.dynamic_key,
+                                              access.dynamic_key, 0) &&
+                    access.stride == 8;
     if (!same_stream)
       return false;
   }
   if (*seen_count >= seen_cap)
     return false;
-  seen[*seen_count].root = root;
-  seen[*seen_count].offset = offset;
-  seen[*seen_count].stride = stride;
-  seen[*seen_count].dynamic_offset = dynamic_offset;
-  seen[*seen_count].has_dynamic_key = has_dynamic_key;
-  seen[*seen_count].dynamic_key = dynamic_key;
-  seen[*seen_count].written = is_store;
-  (*seen_count)++;
+  seen[(*seen_count)++] = (root_access_t){.access = access,
+                                         .dynamic_offset = dynamic_offset,
+                                         .written = is_store};
   return true;
 }
 
@@ -2524,6 +2583,102 @@ static bool vectorize_reassociate_reduction(nyr_func_t *f, const int *defs,
     return true;
   }
   return false;
+}
+
+/*
+ * Strip COPYs from an address value and name its ADDR_SYMBOL, or NULL when the
+ * address is anything else.
+ */
+static const char *vector_symbol_of_address(const nyr_func_t *f,
+                                            const int *defs, int value) {
+  for (unsigned depth = 0; value >= 0 && value < f->next_value && depth < 8;
+       ++depth) {
+    if (defs[value] < 0)
+      return NULL;
+    const nyr_inst_t *d = &f->data[(size_t)defs[value]];
+    if (d->op == NYIR_ADDR_SYMBOL)
+      return d->symbol;
+    if (d->op != NYIR_COPY)
+      return NULL;
+    value = d->a;
+  }
+  return NULL;
+}
+
+/* Find the last full-width store on every path into the entry load. A join
+ * may have one dominating store or different stores of the same constant.
+ * A backedge can reach the load block again, in which case the whole block
+ * must be scanned as a predecessor, separately from the prefix before load.
+ */
+static bool vector_slot_entry_const(const nyr_func_t *f, const int *defs,
+                                    const nyr_cfg_t *cfg, int load_pc,
+                                    int64_t *out) {
+  if (!f || !defs || !cfg || !out || load_pc < 0 ||
+      (size_t)load_pc >= f->len)
+    return false;
+  const nyr_inst_t *load = &f->data[(size_t)load_pc];
+  if (load->op != NYIR_LOAD_I64 || (load->flags & vector_unsupported_mem_flags) ||
+      !cfg->reachable[cfg->inst_block[load_pc]])
+    return false;
+  const char *symbol = vector_symbol_of_address(f, defs, load->a);
+  if (!symbol)
+    return false;
+  /* Bound the amount of CFG work per candidate, without allocating scratch
+   * space for the common same-block case. Entry zero is always a path root.
+   */
+  size_t blocks[64] = {cfg->inst_block[load_pc]};
+  size_t count = 1;
+  bool found = false;
+  int64_t value = 0;
+  for (size_t b = 0; b < count; ++b) {
+    size_t block = blocks[b];
+    size_t end = b == 0 ? (size_t)load_pc : cfg->block_end[block];
+    bool has_store = false;
+    for (size_t i = end; i > cfg->block_start[block]; --i) {
+      const nyr_inst_t *in = &f->data[i - 1];
+      unsigned effects = in->effects | nyr_inst_effects(in);
+      if (effects & (NYIR_EFFECT_CALL | NYIR_EFFECT_UNKNOWN_SIDE_EFFECT |
+                     NYIR_EFFECT_VOLATILE))
+        return false;
+      if (!(effects & NYIR_EFFECT_WRITE_MEMORY))
+        continue;
+      if (in->op != NYIR_STORE_I64)
+        return false;
+      const char *dst = vector_symbol_of_address(f, defs, in->a);
+      if (!dst)
+        return false;
+      if (strcmp(dst, symbol) != 0)
+        continue;
+      int64_t stored;
+      if ((in->flags & vector_unsupported_mem_flags) ||
+          !nyr_const_i64(f, defs, in->c, &stored) || (found && value != stored))
+        return false;
+      value = stored;
+      found = has_store = true;
+      break;
+    }
+    if (has_store)
+      continue;
+    if (block == 0)
+      return false;
+    for (size_t e = cfg->pred_offsets[block]; e < cfg->pred_offsets[block + 1];
+         ++e) {
+      size_t pred = cfg->pred_blocks[e];
+      if (!cfg->reachable[pred])
+        continue;
+      size_t j = 1;
+      while (j < count && blocks[j] != pred)
+        ++j;
+      if (j < count)
+        continue;
+      if (count == sizeof(blocks) / sizeof(*blocks))
+        return false;
+      blocks[count++] = pred;
+    }
+  }
+  if (found)
+    *out = value;
+  return found;
 }
 
 static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
@@ -2643,7 +2798,19 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
         free(in_loop);
         continue;
       }
-      init = INT64_MIN;
+      /*
+       * A memory-carried IV still has a known entry value when its slot is
+       * stored a constant in the loop's entry block, which is the shape
+       * `i = 0` immediately above the loop lowers to.
+       */
+      int64_t entry = 0;
+      if (defs[init_v] >= 0 &&
+          vector_slot_entry_const(f, defs, &cfg, defs[init_v], &entry)) {
+        init = entry;
+        init_unknown = false;
+      } else {
+        init = INT64_MIN;
+      }
     }
 
     /*
@@ -2747,9 +2914,15 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
         w_lo = init;
         have_lo = true;
       } else if (init_v >= 0 && init_v < f->next_value && defs[init_v] >= 0) {
-        const nyr_range_t *r = &f->data[(size_t)defs[init_v]].range;
-        if (r->has_min) {
-          w_lo = r->min;
+        nyr_range_t range = f->data[(size_t)defs[init_v]].range;
+        /* The entering value can be affine in an enclosing induction.
+         * Reuse the address proof's guard analysis at the body edge.
+         */
+        if (range.has_min ||
+            (value_range_under_guards(f, defs, &cfg, cfg.block_start[body_target],
+                                      init_v, -1, 0, 0, 0, &range) &&
+             range.has_min)) {
+          w_lo = range.min;
           have_lo = true;
         }
       }
@@ -2759,9 +2932,12 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
         have_hi = true;
       } else if (limit_v >= 0 && limit_v < f->next_value &&
                  defs[limit_v] >= 0) {
-        const nyr_range_t *r = &f->data[(size_t)defs[limit_v]].range;
-        if (r->has_max) {
-          w_hi = r->max;
+        nyr_range_t range = f->data[(size_t)defs[limit_v]].range;
+        if (range.has_max ||
+            (value_range_under_guards(f, defs, &cfg, cfg.block_start[body_target],
+                                      limit_v, -1, 0, 0, 0, &range) &&
+             range.has_max)) {
+          w_hi = range.max;
           have_hi = true;
         }
       }
@@ -2966,7 +3142,7 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
     size_t reject_pc = head_idx;
     /*
      * Track affine accesses per private root.  Reads at distinct offsets are
-     * safe; a write pins its offset and rejects any other offset.
+     * safe; streams involving a write must match or be disjoint.
      */
     root_access_t seen_roots[64];
     size_t seen_count = 0;
@@ -3025,7 +3201,7 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
          * The legality proof covers every vector lane and the scalar tail, so
          * retaining a per-chunk scalar check only adds hot-loop overhead.
          */
-        nyr_inst_discard(in);
+        rewrite[i] = true;
         continue;
       }
       if (in->op == NYIR_PHI || in->op == NYIR_BR_IF || in->op == NYIR_RET ||
@@ -3039,25 +3215,36 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
         reject_pc = i;
         break;
       }
+      if ((in->op == NYIR_LOAD_I64 || in->op == NYIR_STORE_I64) &&
+          (in->flags & vector_unsupported_mem_flags)) {
+        bad = true;
+        reject_reason = "memory access is not a flat 64-bit lane";
+        reject_pc = i;
+        break;
+      }
       if (in->op == NYIR_LOAD_I64 && in->dst >= 0) {
         bool mem_f64 = in->scalar_class == NYIR_SCALAR_F64;
         affine_t a = {0};
         bool dynamic_offset = false;
+        const char *mem_why = NULL;
         bool access_ok = vector_memory_affine(f, defs, &cfg, in_loop, in->a, iv,
                                               init, is_var_trip, fixed_trip,
                                               window_init, window_trip, i, &a,
-                                              &dynamic_offset);
+                                              &dynamic_offset, &mem_why);
         if (!access_ok && read_only_loop)
           access_ok =
               vector_checked_read_affine(f, defs, &cfg, in_loop, in->a, iv, &a);
-        if (!access_ok ||
-            (!read_only_loop &&
-             !track_root_access(f, defs, seen_roots, &seen_count, 64, a.root,
-                                a.offset, a.stride, dynamic_offset,
-                                a.has_dynamic_key, a.dynamic_key, false))) {
+        if (access_ok && !read_only_loop &&
+            !track_root_access(f, defs, seen_roots, &seen_count, 64, a,
+                               dynamic_offset, false)) {
+          access_ok = false;
+          mem_why = "load has an unproven dependence on another stream";
+        }
+        if (!access_ok) {
           bad = true;
-          reject_reason = "load address is non-affine, aliasing, escaping, or "
-                          "out of proven bounds";
+          reject_reason = mem_why ? mem_why
+                                  : "load address is non-affine, aliasing, "
+                                    "escaping, or out of proven bounds";
           reject_pc = i;
           break;
         }
@@ -3094,20 +3281,28 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
             break;
           }
           if (!va) {
+            bool in_loop_a =
+                value_defined_in_loop(f, defs, &cfg, in_loop, in->a);
             if (in->a < 0 || (size_t)in->a >= scalar_value_count ||
-                value_defined_in_loop(f, defs, &cfg, in_loop, in->a)) {
+                (in_loop_a && affine_value(f, defs, &cfg, in_loop, in->a, iv,
+                                           0).stride != 0)) {
               bad = true;
-              reject_reason = "mixed i64 operand is not loop-invariant";
+              reject_reason =
+                  vector_mixed_operand_reason(f, defs, in->a, "i64");
               reject_pc = i;
               break;
             }
             broadcast_value[in->a] = true;
           }
           if (!vb) {
+            bool in_loop_b =
+                value_defined_in_loop(f, defs, &cfg, in_loop, in->b);
             if (in->b < 0 || (size_t)in->b >= scalar_value_count ||
-                value_defined_in_loop(f, defs, &cfg, in_loop, in->b)) {
+                (in_loop_b && affine_value(f, defs, &cfg, in_loop, in->b, iv,
+                                           0).stride != 0)) {
               bad = true;
-              reject_reason = "mixed i64 operand is not loop-invariant";
+              reject_reason =
+                  vector_mixed_operand_reason(f, defs, in->b, "i64");
               reject_pc = i;
               break;
             }
@@ -3133,8 +3328,11 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
             in->b >= 0 && (size_t)in->b < scalar_value_count && vec[in->b];
         if (va || vb) {
           if (!va) {
+            bool in_loop_a =
+                value_defined_in_loop(f, defs, &cfg, in_loop, in->a);
             if (in->a < 0 || (size_t)in->a >= scalar_value_count ||
-                value_defined_in_loop(f, defs, &cfg, in_loop, in->a)) {
+                (in_loop_a && affine_value(f, defs, &cfg, in_loop, in->a, iv,
+                                           0).stride != 0)) {
               bad = true;
               reject_reason = "mixed f64 operand is not loop-invariant";
               reject_pc = i;
@@ -3143,8 +3341,11 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
             broadcast_value[in->a] = true;
           }
           if (!vb) {
+            bool in_loop_b =
+                value_defined_in_loop(f, defs, &cfg, in_loop, in->b);
             if (in->b < 0 || (size_t)in->b >= scalar_value_count ||
-                value_defined_in_loop(f, defs, &cfg, in_loop, in->b)) {
+                (in_loop_b && affine_value(f, defs, &cfg, in_loop, in->b, iv,
+                                           0).stride != 0)) {
               bad = true;
               reject_reason = "mixed f64 operand is not loop-invariant";
               reject_pc = i;
@@ -3163,15 +3364,21 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
         bool mem_f64 = in->scalar_class == NYIR_SCALAR_F64;
         affine_t a = {0};
         bool dynamic_offset = false;
-        if (!vector_memory_affine(f, defs, &cfg, in_loop, in->a, iv, init,
-                                  is_var_trip, fixed_trip, window_init,
-                                  window_trip, i, &a, &dynamic_offset) ||
-            !track_root_access(f, defs, seen_roots, &seen_count, 64, a.root,
-                               a.offset, a.stride, dynamic_offset,
-                               a.has_dynamic_key, a.dynamic_key, true)) {
+        const char *mem_why = NULL;
+        bool access_ok = vector_memory_affine(
+            f, defs, &cfg, in_loop, in->a, iv, init, is_var_trip, fixed_trip,
+            window_init, window_trip, i, &a, &dynamic_offset, &mem_why);
+        if (access_ok &&
+            !track_root_access(f, defs, seen_roots, &seen_count, 64, a,
+                               dynamic_offset, true)) {
+          access_ok = false;
+          mem_why = "store has an unproven dependence on another stream";
+        }
+        if (!access_ok) {
           bad = true;
-          reject_reason = "store address is non-affine, aliasing, escaping, or "
-                          "out of proven bounds";
+          reject_reason = mem_why ? mem_why
+                                  : "store address is non-affine, aliasing, "
+                                    "escaping, or out of proven bounds";
           reject_pc = i;
           break;
         }
@@ -3183,9 +3390,27 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
         vec_stores++;
         continue;
       }
+      /*
+       * A division or remainder whose divisor is a non-zero constant cannot
+       * trap, so the generic MAY_TRAP label on the div/mod opcode is only a
+       * conservative summary here. Excluding the loop for it refused bodies
+       * whose only "unsafe" operation was `x % 1024`. Only the trap bit is
+       * cleared: the op must still be vectorized by another rule, so this
+       * cannot widen a division the loop does not represent.
+       */
+      bool trap_ruled_out = false;
+      if ((in->op == NYIR_MOD_I64 || in->op == NYIR_DIV_I64) && in->b >= 0 &&
+          in->b < f->next_value && defs[in->b] >= 0) {
+        const nyr_inst_t *divisor = &f->data[(size_t)defs[in->b]];
+        trap_ruled_out = divisor->op == NYIR_CONST_I64 && divisor->imm != 0;
+      }
+      unsigned blocking_effects =
+          trap_ruled_out ? (effects & ~(unsigned)NYIR_EFFECT_MAY_TRAP)
+                         : effects;
       if (in->op == NYIR_STORE_I64 ||
-          (effects & (NYIR_EFFECT_READ_MEMORY | NYIR_EFFECT_WRITE_MEMORY |
-                      NYIR_EFFECT_MAY_TRAP))) {
+          (blocking_effects &
+           (NYIR_EFFECT_READ_MEMORY | NYIR_EFFECT_WRITE_MEMORY |
+            NYIR_EFFECT_MAY_TRAP))) {
         bad = true;
         reject_reason = "unmodeled memory/trap effect remains in loop body";
         reject_pc = i;
@@ -3516,6 +3741,19 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
                                    : 0));
     }
     nyr_vector_trace(f, head_idx, "accept", "legal and profitable", vf);
+    size_t broadcast_preheader = SIZE_MAX;
+    size_t broadcast_count = 0;
+    for (size_t v = 0; v < scalar_value_count; ++v)
+      broadcast_count += broadcast_value[v];
+    if (broadcast_count &&
+        !unique_loop_preheader(&cfg, in_loop, header, &broadcast_preheader)) {
+      free(vec);
+      free(rewrite);
+      free(broadcast_value);
+      free(broadcast_map);
+      free(in_loop);
+      continue;
+    }
     /*
      * Save the scalar body before widening it when a runtime tail is needed.
      * Fixed-trip tails are admitted only after the selected VF is known.
@@ -3626,6 +3864,15 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
             exit_label = f->data[start].imm;
         }
       }
+      if (exit_label < 0) {
+        free(saved_body);
+        free(vec);
+        free(rewrite);
+        free(broadcast_value);
+        free(broadcast_map);
+        free(in_loop);
+        continue;
+      }
       if (reduction_phi_dst >= 0) {
         /*
          * The tail accumulator directly dominates the original exit only when
@@ -3651,23 +3898,12 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
         replace_uses_outside_loop(f, &cfg, in_loop, reduction_phi_dst,
                                   tail_acc_v);
       }
-      if (exit_label < 0) {
-        free(saved_body);
-        free(vec);
-        free(rewrite);
-        free(broadcast_value);
-        free(broadcast_map);
-        free(in_loop);
-        continue;
-      }
     }
 
-    size_t broadcast_count = 0;
     for (size_t v = 0; v < scalar_value_count; ++v) {
       if (!broadcast_value[v])
         continue;
       broadcast_map[v] = f->next_value++;
-      ++broadcast_count;
     }
 
     for (size_t i = head_idx + 1; i < back; ++i) {
@@ -3699,9 +3935,10 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
       }
       if (!rewrite[i])
         continue;
-      if (in->op == NYIR_LOAD_I64) {
+      if (in->op == NYIR_BOUNDS_CHECK) {
+        nyr_inst_discard(in);
+      } else if (in->op == NYIR_LOAD_I64) {
         in->op = vload_op;
-        in->flags &= ~NYIR_INST_F_MEM_BYTE;
         in->effects = nyr_inst_effects(in);
         nyr_clear_derived_facts(in);
       } else if (in->op == NYIR_COPY) {
@@ -3714,7 +3951,6 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
         in->op = vstore_op;
         in->b = in->c;
         in->c = -1;
-        in->flags &= ~NYIR_INST_F_MEM_BYTE;
         in->effects = nyr_inst_effects(in);
         nyr_clear_derived_facts(in);
       } else {
@@ -3738,17 +3974,7 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
      * Materialize loop-invariant scalar splats once in the preheader.
      */
     if (broadcast_count > 0) {
-      size_t preheader = SIZE_MAX;
-      if (!unique_loop_preheader(&cfg, in_loop, header, &preheader)) {
-        free(saved_body);
-        free(vec);
-        free(rewrite);
-        free(broadcast_value);
-        free(broadcast_map);
-        free(in_loop);
-        continue;
-      }
-      size_t at = block_insert_before_terminator(f, &cfg, preheader);
+      size_t at = block_insert_before_terminator(f, &cfg, broadcast_preheader);
       if (!nir_ensure_inst_space(f, broadcast_count)) {
         free(saved_body);
         free(vec);

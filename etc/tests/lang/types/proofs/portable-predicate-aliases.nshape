@@ -1,7 +1,7 @@
 shape immutable_pure_predicate_aliases_are_inlined {
   family "runtime/proofs"
   generator "regression"
-  features ["proofs", "requires", "pure", "indirect-call", "alias"]
+  features ["alias", "indirect-call", "proofs", "pure", "requires"]
   template ny-test-case
   flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
   expect compile_and_run
@@ -31,7 +31,7 @@ NY
 shape immutable_pure_predicate_aliases_still_require_a_proof {
   family "runtime/proofs"
   generator "regression"
-  features ["proofs", "requires", "pure", "indirect-call", "alias", "negative"]
+  features ["negative", "alias", "indirect-call", "proofs", "pure", "requires"]
   template ny-test-case
   flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
   expect compile_fail

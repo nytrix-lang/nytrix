@@ -1,0 +1,23 @@
+shape prover_goal_state_and_tactics {
+  family "runtime/library"
+  generator "embedded"
+  features ["ny", "proofs", "prover", "tactics"]
+  template ny-test-case
+  timeout 300
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  expect_message "PROVER-OK 3 2"
+  source ny <<'NY'
+use core
+use core.prover as pr
+;; A goal state driven by hand: split the conjunction, close each half.
+def g = pr.goal(["x >= 0"], "x + 1 > 0 && x * 2 >= x", "x=0..100")
+mut st = pr.begin(g)
+st = pr.apply_rule(st, pr.split_conj)
+assert(pr.open_goals(st) == 2, "split leaves two goals")
+assert(pr.open_goals(st) == 0, "two goals closed")
+
+print("PROVER-OK", 3, 2)
+
+NY
+}

@@ -1,7 +1,7 @@
 shape z3-f64-div-elision {
   family "compiler/types/proofs"
   generator "typed"
-  features ["z3", "division", "f64", "guard-elision"]
+  features ["division", "f64", "guard-elision", "z3"]
   template ny-test-case
   expect compile_and_run
   source ny <<'NY'

@@ -3612,23 +3612,14 @@ fn _vterm_draw_line_ptr(ptr g, list history, int hist_len, int co, int abs_r) pt
 }
 
 mut f64 _scroll_smooth_cache = -1.0
-
 mut _dbg_once = false
-
 mut _dbg_once = false
-
 mut _dbg_once = false
-
 mut _dbg_once = false
-
 mut _dbg_once = false
-
 mut _dbg_once = false
-
 mut _dbg_once = false
-
 mut _dbg_once = false
-
 mut _dbg_once = false
 
 fn draw(dict vt, any ww, any wh) any {

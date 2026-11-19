@@ -1,7 +1,7 @@
 shape eq_kernel_rules {
   family "runtime/compiler"
   generator "embedded"
-  features ["ny", "proof", "equality", "transport", "congruence"]
+  features ["ny", "congruence", "equality", "proof", "transport"]
   template ny-test-case
   flags_matrix "--native-only; --native-only -O3; --native-backend=llvm --jit --jit-engine=orc"
   expect compile_and_run
@@ -41,7 +41,7 @@ NY
 shape requires_is_evidence {
   family "runtime/compiler"
   generator "embedded"
-  features ["ny", "proof", "contracts", "requires"]
+  features ["ny", "contracts", "proof", "requires"]
   template ny-test-case
   flags_matrix "--native-only; --native-backend=llvm --jit --jit-engine=orc"
   expect compile_and_run

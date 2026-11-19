@@ -63,7 +63,9 @@ static bool scf_const(const scf_t *s, int v, int64_t *out) {
   return true;
 }
 
-/* v = base + off through a chain of add-constant instructions. */
+/*
+ * v = base + off through a chain of add-constant instructions.
+ */
 static int scf_base_offset(const scf_t *s, int v, int64_t *off) {
   *off = 0;
   v = scf_strip(s, v);
@@ -122,7 +124,9 @@ static bool scf_iv_min(scf_t *s, int v, int64_t *min) {
         (scf_strip(s, inc->b) == v && scf_const(s, inc->a, &step))) ||
       step != 1)
     return false;
-  /* Header guard: br.if (iv < limit) -> body, with the other edge exiting. */
+  /*
+   * Header guard: br.if (iv < limit) -> body, with the other edge exiting.
+   */
   size_t end = nyr_block_last_non_nop(s->f, cfg, h);
   if (end <= cfg->block_start[h])
     return false;
@@ -154,7 +158,9 @@ static bool scf_iv_min(scf_t *s, int v, int64_t *min) {
   return ok;
 }
 
-/* Intersect a bound from one source into the running range. */
+/*
+ * Intersect a bound from one source into the running range.
+ */
 static void scf_meet(nyr_range_t *r, const nyr_range_t *add) {
   if (add->has_min && (!r->has_min || add->min > r->min)) {
     r->has_min = true;
@@ -166,8 +172,10 @@ static void scf_meet(nyr_range_t *r, const nyr_range_t *add) {
   }
 }
 
-/* Combine value facts, SCEV, and the induction lower bound; each source is
- * sound on its own, so their intersection is too. */
+/*
+ * Combine value facts, SCEV, and the induction lower bound; each source is
+ * sound on its own, so their intersection is too.
+ */
 static bool scf_range(scf_t *s, int v, size_t at, nyr_range_t *r) {
   *r = (nyr_range_t){0};
   nyr_range_t part = {0};
@@ -184,7 +192,9 @@ static bool scf_range(scf_t *s, int v, size_t at, nyr_range_t *r) {
   return r->has_min || r->has_max;
 }
 
-/* 1 = arm equals k, 0 = arm differs from k, -1 = unknown. */
+/*
+ * 1 = arm equals k, 0 = arm differs from k, -1 = unknown.
+ */
 static int scf_arm_eq(scf_t *s, int arm, int64_t k, size_t at) {
   int64_t c = 0;
   if (scf_const(s, arm, &c))
@@ -271,7 +281,9 @@ static bool scf_single_add_use(const scf_t *s, int v) {
   return d && d->op == NYIR_ADD_I64 && s->uses[v] == 1;
 }
 
-/* Replace an add's x operand (x = the select being bypassed). */
+/*
+ * Replace an add's x operand (x = the select being bypassed).
+ */
 static bool scf_retarget_add(scf_t *s, int add, int x, int arm) {
   nyr_inst_t *d = &s->f->data[s->defs[add]];
   int64_t c = 0;
@@ -298,7 +310,9 @@ static bool scf_round(nyr_func_t *f, bool *changed) {
     if (in->op == NYIR_SELECT_I64) {
       int v = -1;
       int64_t k = 0;
-      /* R1 */
+      /*
+       * R1
+       */
       if (scf_is_eq_const(&s, in->a, &v, &k) && scf_single_add_use(&s, in->b)) {
         nyr_inst_t *t = &f->data[s.defs[in->b]];
         int64_t c = 0;
@@ -308,7 +322,9 @@ static bool scf_round(nyr_func_t *f, bool *changed) {
           *changed = true;
         }
       }
-      /* R3: each arm independently reads the matching arm of x. */
+      /*
+       * R3: each arm independently reads the matching arm of x.
+       */
       int cond = scf_strip(&s, in->a);
       for (int arm = 0; arm < 2; ++arm) {
         int av = arm ? in->c : in->b;
@@ -329,7 +345,9 @@ static bool scf_round(nyr_func_t *f, bool *changed) {
       }
       continue;
     }
-    /* R2 */
+    /*
+     * R2
+     */
     if (in->op == NYIR_CMP_I64 && in->cmp == NYIR_CMP_EQ && in->dst >= 0) {
       int sel = -1;
       int64_t k2 = 0;
@@ -348,7 +366,9 @@ static bool scf_round(nyr_func_t *f, bool *changed) {
         nir_make_const(in, ra);
         *changed = true;
       } else if (ra == 1) {
-        /* A boolean compare result is 0/1, like the select condition. */
+        /*
+         * A boolean compare result is 0/1, like the select condition.
+         */
         const nyr_inst_t *cd = scf_def(&s, scf_strip(&s, sd->a));
         if (cd && cd->op == NYIR_CMP_I64) {
           nir_make_copy(in, scf_strip(&s, sd->a));

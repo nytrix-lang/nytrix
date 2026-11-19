@@ -6,8 +6,8 @@
 
 #include "base/ascii.h"
 #include "base/version.h"
-#include "code/lang/c/semantics/aggregate.h"
 #include "code/lang/c/parser/c.h"
+#include "code/lang/c/semantics/aggregate.h"
 
 #include <ctype.h>
 #ifdef __linux__
@@ -3503,8 +3503,7 @@ static bool static_typeof_expr_type_impl(c_parser_t *p, c_type_t *type,
       ++designator_at;
       ++designator_parens;
     }
-    if (designator_at < p->token_count &&
-        tok_ident(p->tokens[designator_at]) &&
+    if (designator_at < p->token_count && tok_ident(p->tokens[designator_at]) &&
         /*
          * Only a bare designator denotes the function type.  A call such as
          * `*task_pid_ptr(task, type)` dereferences the call result; treating
@@ -4581,8 +4580,8 @@ static bool parse_type_pointers(c_parser_t *p, unsigned *levels,
 static bool parse_type(c_parser_t *p, c_type_t *type, bool allow_void) {
   bool is_unsigned = false, is_signed = false, is_float = false,
        is_double = false, is_long = false, is_long_long = false, is_int = false,
-       is_void = false, is_char = false, is_short = false,
-       is_complex = false, is_long_double = false;
+       is_void = false, is_char = false, is_short = false, is_complex = false,
+       is_long_double = false;
   bool typeof_resolved = false;
   p->last_type_const = false;
   p->last_type_const_pointer = false;
@@ -4614,8 +4613,7 @@ static bool parse_type(c_parser_t *p, c_type_t *type, bool allow_void) {
   /*
    * `_Complex` may start the specifier list: `_Complex double`.
    */
-  while (tok_is(p, p->pos, "_Complex") ||
-         tok_is(p, p->pos, "__complex__")) {
+  while (tok_is(p, p->pos, "_Complex") || tok_is(p, p->pos, "__complex__")) {
     is_complex = true;
     ++p->pos;
   }
@@ -4673,8 +4671,7 @@ static bool parse_type(c_parser_t *p, c_type_t *type, bool allow_void) {
     /*
      * `_Complex` may precede the base type: `_Complex double`.
      */
-    if (tok_is(p, p->pos, "_Complex") ||
-        tok_is(p, p->pos, "__complex__")) {
+    if (tok_is(p, p->pos, "_Complex") || tok_is(p, p->pos, "__complex__")) {
       is_complex = true;
       ++p->pos;
       continue;
@@ -4685,8 +4682,7 @@ static bool parse_type(c_parser_t *p, c_type_t *type, bool allow_void) {
      * pointer lowerer emit the matching segment prefix on every access.
      */
     if (tok_is(p, p->pos, "__seg_gs") || tok_is(p, p->pos, "__seg_fs")) {
-      p->last_type_seg =
-          tok_is(p, p->pos, "__seg_gs") ? C_SEG_GS : C_SEG_FS;
+      p->last_type_seg = tok_is(p, p->pos, "__seg_gs") ? C_SEG_GS : C_SEG_FS;
       ++p->pos;
       continue;
     }
@@ -4790,10 +4786,8 @@ static bool parse_type(c_parser_t *p, c_type_t *type, bool allow_void) {
         p->last_type_const = true;
       else if (accept(p, "volatile"))
         p->last_type_volatile = true;
-      else if (tok_is(p, p->pos, "__seg_gs") ||
-               tok_is(p, p->pos, "__seg_fs")) {
-        p->last_type_seg =
-            tok_is(p, p->pos, "__seg_gs") ? C_SEG_GS : C_SEG_FS;
+      else if (tok_is(p, p->pos, "__seg_gs") || tok_is(p, p->pos, "__seg_fs")) {
+        p->last_type_seg = tok_is(p, p->pos, "__seg_gs") ? C_SEG_GS : C_SEG_FS;
         ++p->pos;
       } else
         ++p->pos;
@@ -5106,8 +5100,7 @@ static bool parse_type(c_parser_t *p, c_type_t *type, bool allow_void) {
   /*
    * `_Complex` may follow the base type: `double _Complex`.
    */
-  while (tok_is(p, p->pos, "_Complex") ||
-         tok_is(p, p->pos, "__complex__")) {
+  while (tok_is(p, p->pos, "_Complex") || tok_is(p, p->pos, "__complex__")) {
     is_complex = true;
     ++p->pos;
   }
@@ -5131,10 +5124,8 @@ static bool parse_type(c_parser_t *p, c_type_t *type, bool allow_void) {
       p->last_type_const = true;
     else if (accept(p, "volatile")) {
       p->last_type_volatile = true;
-    } else if (tok_is(p, p->pos, "__seg_gs") ||
-               tok_is(p, p->pos, "__seg_fs")) {
-      p->last_type_seg =
-          tok_is(p, p->pos, "__seg_gs") ? C_SEG_GS : C_SEG_FS;
+    } else if (tok_is(p, p->pos, "__seg_gs") || tok_is(p, p->pos, "__seg_fs")) {
+      p->last_type_seg = tok_is(p, p->pos, "__seg_gs") ? C_SEG_GS : C_SEG_FS;
       ++p->pos;
     } else if (!parse_function_type_attributes(p))
       return false;
@@ -10663,16 +10654,14 @@ static bool parse_global_const_expr(c_parser_t *p, size_t *at, int64_t *value) {
   if (tok_is(p, *at, "(")) {
     size_t probe = *at + 1;
     bool have_string = false;
-    while (probe < p->token_count &&
-           p->tokens[probe].kind == NY_CTOK_STRING) {
+    while (probe < p->token_count && p->tokens[probe].kind == NY_CTOK_STRING) {
       have_string = true;
       ++probe;
     }
     if (have_string && tok_is(p, probe, ")") && tok_is(p, probe + 1, "?")) {
       *at = probe + 2;
       int64_t selected = 1;
-      if (!tok_is(p, *at, ":") &&
-          !parse_global_const_expr(p, at, &selected))
+      if (!tok_is(p, *at, ":") && !parse_global_const_expr(p, at, &selected))
         return false;
       if (!tok_is(p, *at, ":"))
         return false;
@@ -11403,10 +11392,8 @@ static bool initialize_data_integer_address(c_parser_t *p, c_global_t *data,
     size_t colon = SIZE_MAX;
     int grouping = 0;
     int nested_questions = 0;
-    for (size_t at = p->pos + 1; at < close && close <= p->token_count;
-         ++at) {
-      if (tok_is(p, at, "(") || tok_is(p, at, "[") ||
-          tok_is(p, at, "{")) {
+    for (size_t at = p->pos + 1; at < close && close <= p->token_count; ++at) {
+      if (tok_is(p, at, "(") || tok_is(p, at, "[") || tok_is(p, at, "{")) {
         ++grouping;
       } else if (tok_is(p, at, ")") || tok_is(p, at, "]") ||
                  tok_is(p, at, "}")) {
@@ -16267,7 +16254,8 @@ static bool parse_signature(c_parser_t *p, c_function_t *fn) {
             .is_bool = is_bool_param,
             .pointee_const = c_type_is_pointer(type) && p->last_type_const,
             .is_volatile = is_volatile,
-            .pointee_volatile = pointee_volatile, .pointee_seg = pointee_seg,
+            .pointee_volatile = pointee_volatile,
+            .pointee_seg = pointee_seg,
             .pointee_array_size = pointee_array_size,
             .pointee_array = p->last_type_pointee_array};
         if (accept(p, ")"))
@@ -16897,9 +16885,7 @@ static bool collect_functions(c_parser_t *p) {
       if (conflict) {
         free(candidate.params);
         char message[192];
-        int name_len = candidate.name.len > 120
-                           ? 120
-                           : (int)candidate.name.len;
+        int name_len = candidate.name.len > 120 ? 120 : (int)candidate.name.len;
         snprintf(message, sizeof(message),
                  "conflicting function declarations for '%.*s'", name_len,
                  candidate.name.start);
@@ -16991,9 +16977,8 @@ static bool collect_functions(c_parser_t *p) {
       fn->noinline |= tok_is(p, j, "noinline") || tok_is(p, j, "__noinline__");
       fn->no_stack_protector |= tok_is(p, j, "no_stack_protector") ||
                                 tok_is(p, j, "__no_stack_protector__");
-      fn->no_instrument_function |=
-          tok_is(p, j, "no_instrument_function") ||
-          tok_is(p, j, "__no_instrument_function__");
+      fn->no_instrument_function |= tok_is(p, j, "no_instrument_function") ||
+                                    tok_is(p, j, "__no_instrument_function__");
       fn->is_weak |= tok_is(p, j, "weak") || tok_is(p, j, "__weak") ||
                      tok_is(p, j, "__weak__");
       fn->is_inline |= fn->always_inline;
@@ -17058,7 +17043,6 @@ static bool collect_functions(c_parser_t *p) {
   return true;
 }
 
-#include "code/lang/c/lower/lower.h"
 #include "code/lang/c/lower/lower.c"
 static void parser_destroy(c_parser_t *p) {
   if (!p)
@@ -20501,10 +20485,9 @@ int nyc_frontend_preprocess(const nyc_source_t *source, nyc_abi_t abi,
       file = parser.source_runs[run++].file;
     if (line_markers &&
         (file != previous_file || token.line < line || token.line - line > 8)) {
-      if ((!start_of_line &&
-           ((source->assembly_input && token.continued &&
-             fputc('\\', output) == EOF) ||
-            fputc('\n', output) == EOF)) ||
+      if ((!start_of_line && ((source->assembly_input && token.continued &&
+                               fputc('\\', output) == EOF) ||
+                              fputc('\n', output) == EOF)) ||
           !write_line_marker(output, token.line, parser.files[file].path))
         goto write_failed;
       start_of_line = true;
@@ -20552,8 +20535,7 @@ int nyc_frontend_preprocess(const nyc_source_t *source, nyc_abi_t abi,
          * `.section`, `.Llabel`).
          */
         bool attaches = previous.len == 1 &&
-                        (previous.start[0] == '%' ||
-                         previous.start[0] == '$' ||
+                        (previous.start[0] == '%' || previous.start[0] == '$' ||
                          previous.start[0] == '.');
         if (!attaches) {
           separator = " ";
@@ -21306,6 +21288,14 @@ static bool prune_unreferenced_static_functions(c_parser_t *parser,
                                 !fn->is_used && !fn->has_asm_alias &&
                                 (!fn->section || fn->is_inline)
                           : unit->function_discardable[i];
+    /*
+     * A GNU extern-inline body is available to the inliner, but references
+     * that survive inlining bind to an external definition, not this body.
+     */
+    if (!parser && unit->function_no_emit[i]) {
+      candidate[i] = false;
+      continue;
+    }
     referenced[i] = !candidate[i];
     if (referenced[i])
       worklist[worklist_len++] = i;
@@ -21321,7 +21311,7 @@ static bool prune_unreferenced_static_functions(c_parser_t *parser,
   }
   for (size_t alias = 0; alias < unit->alias_count; ++alias)
     for (size_t fn = 0; fn < count; ++fn)
-      if (!referenced[fn] &&
+      if (candidate[fn] && !referenced[fn] &&
           unit_symbol_matches_function(parser, unit, fn,
                                        unit->aliases[alias].target, &fnidx)) {
         referenced[fn] = true;
@@ -21382,7 +21372,9 @@ static bool prune_unreferenced_static_functions(c_parser_t *parser,
   size_t data_output = 0;
   for (size_t i = 0; i < unit->data_count; ++i) {
     size_t owner = unit_data_owner_index(unit, &unit->data[i], count);
-    if (owner != SIZE_MAX && candidate[owner] && !referenced[owner] &&
+    if (owner != SIZE_MAX &&
+        ((!parser && unit->function_no_emit[owner]) ||
+         (candidate[owner] && !referenced[owner])) &&
         !data_referenced[i]) {
       free_exported_data(&unit->data[i]);
       continue;
@@ -21400,7 +21392,8 @@ static bool prune_unreferenced_static_functions(c_parser_t *parser,
 
   size_t output = 0;
   for (size_t i = 0; i < count; ++i) {
-    if (candidate[i] && !referenced[i]) {
+    if ((!parser && unit->function_no_emit[i]) ||
+        (candidate[i] && !referenced[i])) {
       nyr_func_destroy(&unit->funcs[i]);
       free(unit->names[i]);
       free(unit->function_sections[i]);

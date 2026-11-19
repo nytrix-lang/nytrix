@@ -1,7 +1,7 @@
 shape callback_list_alias_mutation_preserves_unrelated_facts {
   family "typing/effects"
   generator "regression"
-  features [typing effects callback list alias mutation positive]
+  features ["typing", "alias", "callback", "effects", "list", "mutation", "positive"]
   template ny-test-case
   flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
   expect compile_and_run

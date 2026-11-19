@@ -22,6 +22,7 @@
 
 #include "bigfloat.c"
 #include "bigint.c"
+#include "lazym.c"
 #include "core.c"
 #include "disasm.c"
 #include "ffi.c"

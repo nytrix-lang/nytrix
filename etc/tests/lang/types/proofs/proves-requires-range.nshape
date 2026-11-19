@@ -1,7 +1,7 @@
 shape proves_requires_range {
   family "runtime/compiler"
   generator "embedded"
-  features ["ny", "proof", "postcondition", "contracts"]
+  features ["ny", "contracts", "postcondition", "proof"]
   template ny-test-case
   flags_matrix "--native-only; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
   expect compile_and_run

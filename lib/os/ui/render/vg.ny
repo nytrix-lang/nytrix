@@ -106,6 +106,9 @@ mut _alpha = 1.0
 ;; Porter-Duff operator for fills and strokes (SOURCE_OVER .. XOR).
 mut int _comp = 0
 mut _aa = true
+
+;; Diagnostic toggle for texture bakes; off unless a caller sets it.
+mut _debug_tex = false
 mut _sc_on = false
 mut _sc_x, _sc_y, _sc_w, _sc_h = 0.0, 0.0, 0.0, 0.0
 mut int _font = 0

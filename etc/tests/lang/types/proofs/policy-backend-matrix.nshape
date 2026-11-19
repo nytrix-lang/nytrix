@@ -1,7 +1,7 @@
 shape proof_policy_backend_matrix {
   family "runtime/proofs"
   generator "program"
-  features ["proofs", "policy", "backend-matrix", "tri-state"]
+  features ["backend-matrix", "policy", "proofs", "tri-state"]
   estimate_ms 21000
   template ny-test-case
   flags_matrix "--proof-solver=auto; --proof-solver=presburger; --proof-solver=z3; --proof-solver=none"

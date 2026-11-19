@@ -7312,9 +7312,41 @@ static bool nyr_value_is_dynamic(const nyr_builder_impl_t *b, int value) {
 static nyr_scalar_class_t nyr_value_scalar_class(const nyr_builder_impl_t *b,
                                                  int value);
 
+/*
+ * A value carried in the canonical tagged boolean form: NY_IMM_FALSE for
+ * false, NY_IMM_TRUE for true. Source `bool` returns cross a function
+ * boundary in that form, and the boxed-boolean shape nyr_box_bool emits
+ * produces it directly. Such a value is never the tagged-integer zero (1),
+ * so truthiness is exactly `value != NY_IMM_FALSE`; the generic dynamic test
+ * would also compare against 0 and 1 and materialize three predicates.
+ */
+static bool nyr_value_is_canonical_bool(const nyr_builder_impl_t *b,
+                                        int value) {
+  const nyr_inst_t *def = NULL;
+  if (!nyr_def_of(b, value, &def))
+    return false;
+  if (def->op == NYIR_CONST_I64)
+    return def->imm == NY_IMM_FALSE || def->imm == NY_IMM_TRUE;
+  if (def->op == NYIR_COPY)
+    return nyr_value_is_canonical_bool(b, def->a);
+  if (nyr_is_boxed_bool_value(b, value))
+    return true;
+  if (def->op != NYIR_CALL || !def->symbol ||
+      def->scalar_class != NYIR_SCALAR_I64_TAGGED)
+    return false;
+  const stmt_t *callee = nyr_find_user_function(b, def->symbol);
+  return callee && callee->kind == NY_S_FUNC && callee->as.fn.return_type &&
+         ny_type_name_is_bool(callee->as.fn.return_type);
+}
+
 static int nyr_emit_truthy(nyr_builder_impl_t *b, int value) {
   if (value < 0)
     return -1;
+  if (nyr_value_is_canonical_bool(b, value)) {
+    int false_imm = nyr_emit_const(b, NY_IMM_FALSE);
+    return false_imm < 0 ? -1
+                         : nyr_emit_cmp_i64(b, NYIR_CMP_NE, value, false_imm);
+  }
   nyr_scalar_class_t scalar_class = nyr_value_scalar_class(b, value);
   bool dynamic = nyr_value_is_dynamic(b, value);
   bool language_bool = false;
@@ -18254,8 +18286,7 @@ static bool nyr_expr_is_raw_int(const expr_t *e) {
  * constant (literals, references to other top-level defs, integer unary and
  * binary ops).  Used to register the def's value in the consttab so object
  * emission writes an 8-byte .data definition for the symbol.
- */
-/*
+ *
  * Fold memo. Lowering asks for the folded value of every arithmetic node, and
  * the type predicates ask again from inside their own recursion, so a flat
  * `1 + 1 + ...` chain refolded its subtrees until compile time grew

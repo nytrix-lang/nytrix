@@ -14,6 +14,26 @@
 #include <string.h>
 
 /*
+ * Lazy libm bindings (libm_lazy.c). Calling these symbols directly puts
+ * libm.so.6 in DT_NEEDED of every AOT binary, including integer-only ones
+ * that never evaluate an f64 expression.
+ */
+double rt_libm_sqrt(double x);
+double rt_libm_pow(double a, double b);
+double rt_libm_exp(double x);
+double rt_libm_log(double x);
+double rt_libm_log2(double x);
+double rt_libm_log10(double x);
+double rt_libm_floor(double x);
+double rt_libm_ceil(double x);
+double rt_libm_fmod(double a, double b);
+double rt_libm_atan2(double a, double b);
+double rt_libm_sin(double x);
+double rt_libm_cos(double x);
+double rt_libm_tan(double x);
+long long rt_libm_llround(double x);
+
+/*
  * Emitted signed-scalar operations call these only in the UBSan lane. The
  * runtime is compiled with -fsanitize=undefined, so its C frontend supplies
  * the real overflow/division handlers and platform sanitizer ABI.
@@ -818,13 +838,13 @@ int64_t rt_flt_hash(int64_t v) {
 }
 
 int64_t rt_flt_sin(int64_t v) {
-  return rt_flt_box_double(sin(rt_flt_unbox_double(v)));
+  return rt_flt_box_double(rt_libm_sin(rt_flt_unbox_double(v)));
 }
 int64_t rt_flt_cos(int64_t v) {
-  return rt_flt_box_double(cos(rt_flt_unbox_double(v)));
+  return rt_flt_box_double(rt_libm_cos(rt_flt_unbox_double(v)));
 }
 int64_t rt_flt_tan(int64_t v) {
-  return rt_flt_box_double(tan(rt_flt_unbox_double(v)));
+  return rt_flt_box_double(rt_libm_tan(rt_flt_unbox_double(v)));
 }
 int64_t rt_flt_asin(int64_t v) {
   return rt_flt_box_double(asin(rt_flt_unbox_double(v)));
@@ -837,48 +857,50 @@ int64_t rt_flt_atan(int64_t v) {
 }
 int64_t rt_flt_atan2(int64_t y, int64_t x) {
   return rt_flt_box_double(
-      atan2(rt_flt_unbox_double(y), rt_flt_unbox_double(x)));
+      rt_libm_atan2(rt_flt_unbox_double(y), rt_flt_unbox_double(x)));
 }
 int64_t rt_flt_sqrt(int64_t v) {
-  return rt_flt_box_double(sqrt(rt_flt_unbox_double(v)));
+  return rt_flt_box_double(rt_libm_sqrt(rt_flt_unbox_double(v)));
 }
 
-double rt_sqrt_f64(double value) { return sqrt(value); }
-double rt_sin_f64(double value) { return sin(value); }
-double rt_cos_f64(double value) { return cos(value); }
+double rt_sqrt_f64(double value) { return rt_libm_sqrt(value); }
+double rt_sin_f64(double value) { return rt_libm_sin(value); }
+double rt_cos_f64(double value) { return rt_libm_cos(value); }
 /*
  * Raw-double forms: the boxed rt_flt_exp/rt_flt_log allocate a float box
  * for the argument and another for the result on every call.
  */
-double rt_exp_f64(double value) { return exp(value); }
-double rt_log_f64(double value) { return log(value); }
-double rt_f64_round(double value) { return (double)llround(value); }
-double rt_f64_pow(double base, double exponent) { return pow(base, exponent); }
-double rt_f64_floor(double value) { return floor(value); }
-double rt_f64_ceil(double value) { return ceil(value); }
+double rt_exp_f64(double value) { return rt_libm_exp(value); }
+double rt_log_f64(double value) { return rt_libm_log(value); }
+double rt_f64_round(double value) { return (double)rt_libm_llround(value); }
+double rt_f64_pow(double base, double exponent) {
+  return rt_libm_pow(base, exponent);
+}
+double rt_f64_floor(double value) { return rt_libm_floor(value); }
+double rt_f64_ceil(double value) { return rt_libm_ceil(value); }
 __attribute__((noinline)) double rt_fmod_f64(double left, double right) {
-  return fmod(left, right);
+  return rt_libm_fmod(left, right);
 }
 int64_t rt_flt_exp(int64_t v) {
-  return rt_flt_box_double(exp(rt_flt_unbox_double(v)));
+  return rt_flt_box_double(rt_libm_exp(rt_flt_unbox_double(v)));
 }
 int64_t rt_flt_log(int64_t v) {
-  return rt_flt_box_double(log(rt_flt_unbox_double(v)));
+  return rt_flt_box_double(rt_libm_log(rt_flt_unbox_double(v)));
 }
 int64_t rt_flt_log2(int64_t v) {
-  return rt_flt_box_double(log2(rt_flt_unbox_double(v)));
+  return rt_flt_box_double(rt_libm_log2(rt_flt_unbox_double(v)));
 }
 int64_t rt_flt_log10(int64_t v) {
-  return rt_flt_box_double(log10(rt_flt_unbox_double(v)));
+  return rt_flt_box_double(rt_libm_log10(rt_flt_unbox_double(v)));
 }
 int64_t rt_flt_floor(int64_t v) {
-  return rt_tag_v((int64_t)floor(rt_flt_unbox_double(v)));
+  return rt_tag_v((int64_t)rt_libm_floor(rt_flt_unbox_double(v)));
 }
 int64_t rt_flt_ceil(int64_t v) {
-  return rt_tag_v((int64_t)ceil(rt_flt_unbox_double(v)));
+  return rt_tag_v((int64_t)rt_libm_ceil(rt_flt_unbox_double(v)));
 }
 int64_t rt_flt_round(int64_t v) {
-  return rt_tag_v((int64_t)llround(rt_flt_unbox_double(v)));
+  return rt_tag_v((int64_t)rt_libm_llround(rt_flt_unbox_double(v)));
 }
 int64_t rt_flt_fmod(int64_t a, int64_t b) {
   /*
@@ -889,7 +911,8 @@ int64_t rt_flt_fmod(int64_t a, int64_t b) {
       rt_fmod_f64(rt_flt_unbox_double(a), rt_flt_unbox_double(b)));
 }
 int64_t rt_flt_pow(int64_t a, int64_t b) {
-  return rt_flt_box_double(pow(rt_flt_unbox_double(a), rt_flt_unbox_double(b)));
+  return rt_flt_box_double(
+      rt_libm_pow(rt_flt_unbox_double(a), rt_flt_unbox_double(b)));
 }
 void rt_trap(void) {
 #if defined(__x86_64__) || defined(_M_X64)

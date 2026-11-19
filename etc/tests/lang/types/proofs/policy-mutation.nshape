@@ -1,7 +1,7 @@
 shape proof_policy_mutation {
   family "runtime/proofs"
   generator "program"
-  features ["proofs", "policy", "mutation", "digest-binding"]
+  features ["digest-binding", "mutation", "policy", "proofs"]
   template ny-test-case
   expect compile_and_run
   source ny <<'NY'

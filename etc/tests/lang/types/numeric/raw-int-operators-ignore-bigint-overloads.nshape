@@ -1,7 +1,7 @@
 shape raw_integer_operators_keep_the_int_overload {
   family "typing/operators"
   generator "regression"
-  features ["ny", "test", "types", "operators", "integer", "bigint"]
+  features ["ny", "test", "bigint", "integer", "operators", "types"]
   template ny-test-case
   flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
   expect compile_and_run

@@ -1,7 +1,7 @@
 shape total_guarded_integer_countdown {
   family "runtime/proofs"
   generator "program"
-  features ["proof", "termination", "total", "backend-parity"]
+  features ["backend-parity", "proof", "termination", "total"]
   template ny-test-case
   flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
   expect compile_and_run
@@ -358,7 +358,7 @@ NY
 shape total_mutual_cycle_requires_every_edge {
   family "runtime/proofs"
   generator "error"
-  features ["proof", "termination", "total", "mutual-recursion", "soundness"]
+  features ["mutual-recursion", "proof", "soundness", "termination", "total"]
   template ny-compile-fail
   flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
   expect compile_fail
@@ -384,7 +384,7 @@ NY
 shape total_recursive_call_cannot_change_measure_identity {
   family "runtime/proofs"
   generator "error"
-  features ["proof", "termination", "total", "measure-identity", "soundness"]
+  features ["measure-identity", "proof", "soundness", "termination", "total"]
   template ny-compile-fail
   flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
   expect compile_fail
@@ -405,7 +405,7 @@ NY
 shape total_fin_measure_requires_descent {
   family "runtime/proofs"
   generator "error"
-  features ["proof", "termination", "total", "Fin", "soundness"]
+  features ["Fin", "proof", "soundness", "termination", "total"]
   template ny-compile-fail
   flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
   expect compile_fail
@@ -424,7 +424,7 @@ NY
 shape total_lexicographic_measure_rejects_increase {
   family "runtime/proofs"
   generator "error"
-  features ["proof", "termination", "total", "lexicographic", "soundness"]
+  features ["lexicographic", "proof", "soundness", "termination", "total"]
   template ny-compile-fail
   flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
   expect compile_fail
@@ -446,7 +446,7 @@ NY
 shape total_boolean_measure_rejects_non_descent {
   family "runtime/proofs"
   generator "error"
-  features ["proof", "termination", "total", "boolean-measure", "soundness"]
+  features ["boolean-measure", "proof", "soundness", "termination", "total"]
   template ny-compile-fail
   flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
   expect compile_fail
@@ -469,7 +469,7 @@ NY
 shape total_unbounded_nonlinear_measure_fails_closed {
   family "runtime/proofs"
   generator "error"
-  features ["proof", "termination", "total", "nonlinear-measure", "soundness"]
+  features ["nonlinear-measure", "proof", "soundness", "termination", "total"]
   template ny-compile-fail
   flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
   expect compile_fail
@@ -492,7 +492,7 @@ NY
 shape total_boolean_measure_rejects_increase {
   family "runtime/proofs"
   generator "error"
-  features ["proof", "termination", "total", "boolean-measure", "soundness"]
+  features ["boolean-measure", "proof", "soundness", "termination", "total"]
   template ny-compile-fail
   flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
   expect compile_fail
@@ -515,7 +515,7 @@ NY
 shape total_mixed_boolean_integer_measure_rejects_increase {
   family "runtime/proofs"
   generator "error"
-  features ["proof", "termination", "total", "lexicographic", "soundness"]
+  features ["lexicographic", "proof", "soundness", "termination", "total"]
   template ny-compile-fail
   flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
   expect compile_fail
@@ -543,7 +543,7 @@ NY
 shape total_boolean_prefix_integer_measure_rejects_increase {
   family "runtime/proofs"
   generator "error"
-  features ["proof", "termination", "total", "lexicographic", "soundness"]
+  features ["lexicographic", "proof", "soundness", "termination", "total"]
   template ny-compile-fail
   flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
   expect compile_fail
@@ -571,7 +571,7 @@ NY
 shape total_nonlinear_measure_requires_strict_descent {
   family "runtime/proofs"
   generator "error"
-  features ["proof", "termination", "total", "nonlinear-measure", "soundness"]
+  features ["nonlinear-measure", "proof", "soundness", "termination", "total"]
   template ny-compile-fail
   flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
   expect compile_fail
@@ -594,7 +594,7 @@ NY
 shape total_quadratic_measure_requires_strict_descent {
   family "runtime/proofs"
   generator "error"
-  features ["proof", "termination", "total", "nonlinear-measure", "soundness"]
+  features ["nonlinear-measure", "proof", "soundness", "termination", "total"]
   template ny-compile-fail
   flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
   expect compile_fail
@@ -617,7 +617,7 @@ NY
 shape total_complement_measure_rejects_increase {
   family "runtime/proofs"
   generator "error"
-  features ["proof", "termination", "total", "nonlinear-measure", "soundness"]
+  features ["nonlinear-measure", "proof", "soundness", "termination", "total"]
   template ny-compile-fail
   flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
   expect compile_fail
@@ -640,7 +640,7 @@ NY
 shape total_nonlinear_measure_rejects_custom_operator {
   family "runtime/proofs"
   generator "error"
-  features ["proof", "termination", "total", "operator", "soundness"]
+  features ["operator", "proof", "soundness", "termination", "total"]
   template ny-compile-fail
   flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
   expect compile_fail
@@ -668,7 +668,7 @@ NY
 shape bool_requires_rejects_false_actual {
   family "runtime/proofs"
   generator "error"
-  features ["proof", "requires", "boolean", "soundness"]
+  features ["boolean", "proof", "requires", "soundness"]
   template ny-compile-fail
   flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
   expect compile_fail

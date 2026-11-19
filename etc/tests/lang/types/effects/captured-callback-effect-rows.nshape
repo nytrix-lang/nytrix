@@ -1,7 +1,7 @@
 shape captured_callback_rows_flow_through_closures {
   family "typing/effects"
   generator "regression"
-  features ["ny", "test", "typing", "effects", "callback", "closure", "capture"]
+  features ["typing", "ny", "test", "callback", "capture", "closure", "effects"]
   template ny-test-case
   flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
   expect compile_and_run
@@ -31,7 +31,7 @@ NY
 shape captured_callback_rows_cannot_exceed_the_owner_contract {
   family "typing/effects"
   generator "regression"
-  features ["ny", "test", "typing", "effects", "callback", "closure", "capture", "negative"]
+  features ["typing", "ny", "test", "negative", "callback", "capture", "closure", "effects"]
   template ny-test-case
   flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
   expect compile_fail

@@ -1,7 +1,7 @@
 shape typed_list_and_dict_operations_have_effect_contracts {
   family "typing/effects"
   generator "regression"
-  features ["ny" "test" "typing" "effects" "containers" "list" "dict"]
+  features ["typing", "ny", "test", "containers", "dict", "effects", "list"]
   flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
   expect compile_and_run
   timeout 180

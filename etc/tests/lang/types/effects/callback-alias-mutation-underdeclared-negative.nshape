@@ -1,7 +1,7 @@
 shape callback_alias_mutation_keeps_underdeclared_effect_rejected {
   family "typing/effects"
   generator "error"
-  features [typing effects callback dictionary alias mutation underdeclared negative]
+  features ["typing", "negative", "alias", "callback", "dictionary", "effects", "mutation", "underdeclared"]
   template ny-compile-fail
   flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
   expect compile_fail

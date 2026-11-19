@@ -2697,6 +2697,10 @@ def bench_gcc_compare(build_root: Path, kind: str, extra: list[str]) -> int:
     shapes = sorted((ROOT / "etc" / "tests" / "bench").rglob("*.nshape"))
     source_re = lambda lang: re.compile(
         rf"source {lang} <<'(\w+)'\n(.*?)\n\1\n", re.S)
+    # Shapes may need a library the plain reference link line does not carry
+    # (bigint-oracle links GMP). Ignoring this made those fixtures report
+    # no-gcc even though the toolchain was present.
+    ldflags_re = re.compile(r'optional_ldflags\s+"([^"]*)"')
     env = dict(os.environ, NYTRIX_NATIVE_CACHE="0", NYTRIX_AOT_CACHE="0",
                NYTRIX_JIT_CACHE="0")
 
@@ -2722,12 +2726,14 @@ def bench_gcc_compare(build_root: Path, kind: str, extra: list[str]) -> int:
         if not c or not ours:
             return None
         base = Path(work) / name
+        found_ldflags = ldflags_re.search(text)
+        ldflags = found_ldflags.group(1).split() if found_ldflags else []
         c_src = base.with_suffix(".c")
         c_src.write_text(c.group(2) + "\n", encoding="utf-8")
         gcc_exe, our_exe = f"{base}.gcc", f"{base}.ours"
         try:
             if run(["cc", "-O3", "-march=native", "-w", str(c_src), "-o", gcc_exe,
-                    "-lm", "-lpthread"]).returncode:
+                    "-lm", "-lpthread", *ldflags]).returncode:
                 return name, "no-gcc", 0, 0
             if route == "ny":
                 ny_src = base.with_suffix(".ny")
@@ -2738,7 +2744,8 @@ def bench_gcc_compare(build_root: Path, kind: str, extra: list[str]) -> int:
                 obj = f"{base}.o"
                 built = run([str(nyc), "-O3", "-c", str(c_src), "-o", obj])
                 if built.returncode == 0:
-                    built = run(["cc", obj, "-o", our_exe, "-lm", "-lpthread"])
+                    built = run(["cc", obj, "-o", our_exe, "-lm", "-lpthread",
+                                 *ldflags])
             if built.returncode:
                 return name, "build-failed", 0, 0
             same = checksum(our_exe) == checksum(gcc_exe)

@@ -91,7 +91,9 @@ static bool ilp_const(const nyr_func_t *f, const int *defs, int value,
   return true;
 }
 
-/* Approximate x86-64/AArch64 result latency in cycles. */
+/*
+ * Approximate x86-64/AArch64 result latency in cycles.
+ */
 static int ilp_latency(const nyr_func_t *f, const int *defs,
                        const nyr_inst_t *in) {
   int64_t k = 0;
@@ -102,8 +104,10 @@ static int ilp_latency(const nyr_func_t *f, const int *defs,
   case NYIR_COPY:
     return 0;
   case NYIR_MUL_I64:
-    /* Small multipliers lower to one shift or scaled LEA (2 cycles on
-     * Zen and on the slow-LEA Intel cores). */
+    /*
+     * Small multipliers lower to one shift or scaled LEA (2 cycles on
+     * Zen and on the slow-LEA Intel cores).
+     */
     if ((ilp_const(f, defs, in->b, &k) || ilp_const(f, defs, in->a, &k)) &&
         (k == 2 || k == 4 || k == 8))
       return 1;
@@ -169,7 +173,9 @@ static void ilp_simulate(ilp_state_t *s, const nyr_func_t *f, size_t header,
   }
 }
 
-/* A pure, unflagged wrapping i64 ADD/SUB whose operands are both values. */
+/*
+ * A pure, unflagged wrapping i64 ADD/SUB whose operands are both values.
+ */
 static bool ilp_plain_addsub(const nyr_inst_t *in) {
   return (in->op == NYIR_ADD_I64 || in->op == NYIR_SUB_I64) && in->dst >= 0 && in->a >= 0 && in->b >= 0 &&
          in->flags == 0 && in->extra_args_len == 0 &&
@@ -204,7 +210,9 @@ static nyr_inst_t ilp_make_add(int dst, int a, int b,
                       .debug = debug};
 }
 
-/* select(c, a, b) + k -> select(c, a + k, b + k). */
+/*
+ * select(c, a, b) + k -> select(c, a + k, b + k).
+ */
 static int ilp_try_select_add(ilp_state_t *s, nyr_func_t *f, size_t at) {
   const nyr_inst_t *w = &f->data[at];
   if (w->op != NYIR_ADD_I64 || !ilp_plain_addsub(w))
@@ -231,7 +239,9 @@ static int ilp_try_select_add(ilp_state_t *s, nyr_func_t *f, size_t at) {
       continue;
     if (f->next_value > INT32_MAX - 2 || !nir_ensure_inst_space(f, 2))
       return -1;
-    /* nir_ensure_inst_space may move f->data. */
+    /*
+     * nir_ensure_inst_space may move f->data.
+     */
     w = &f->data[at];
     sel = &f->data[sel_at];
     const int cond = sel->a, yes = sel->b, no = sel->c, dst = w->dst;
@@ -247,7 +257,9 @@ static int ilp_try_select_add(ilp_state_t *s, nyr_func_t *f, size_t at) {
     const int no_sum = f->next_value++;
     new_sel.b = yes_sum;
     new_sel.c = no_sum;
-    /* The SELECT's only user is w, so it can be dropped outright. */
+    /*
+     * The SELECT's only user is w, so it can be dropped outright.
+     */
     f->data[sel_at] = (nyr_inst_t){.op = NYIR_NOP,
                                    .dst = -1,
                                    .a = -1,
@@ -282,7 +294,9 @@ static int ilp_try_add_chain(ilp_state_t *s, nyr_func_t *f, size_t at) {
     return 0;
   size_t block = s->cfg.inst_block[at];
   for (int side = 0; side < 2; ++side) {
-    /* SUB is only reassociable through its left operand. */
+    /*
+     * SUB is only reassociable through its left operand.
+     */
     if (side == 1 && u->op == NYIR_SUB_I64)
       break;
     int t_value = side ? u->b : u->a;
@@ -305,8 +319,10 @@ static int ilp_try_add_chain(ilp_state_t *s, nyr_func_t *f, size_t at) {
     int new_time = ilp_max(ilp_max(tl[e0], tl[e1]) + 1, tl[late]) + 1;
     if (new_time >= old_time)
       continue;
-    /* Inner node: +a+b -> add, +a-b -> sub(a,b), -a-b -> add with the
-     * negation folded into the root (then the late leaf must be +). */
+    /*
+     * Inner node: +a+b -> add, +a-b -> sub(a,b), -a-b -> add with the
+     * negation folded into the root (then the late leaf must be +).
+     */
     nyr_op_t inner_op;
     int ia, ib, inner_sign;
     if (sign[e0] > 0 && sign[e1] > 0) {
@@ -358,8 +374,10 @@ static int ilp_try_add_chain(ilp_state_t *s, nyr_func_t *f, size_t at) {
   return 0;
 }
 
-/* Run one rewrite on an innermost loop. Returns 1 on change, 0 if none,
- * -1 on allocation failure. */
+/*
+ * Run one rewrite on an innermost loop. Returns 1 on change, 0 if none,
+ * -1 on allocation failure.
+ */
 static int ilp_rewrite_once(nyr_func_t *f) {
   ilp_state_t s;
   if (!ilp_state_init(&s, f)) {
@@ -377,7 +395,9 @@ static int ilp_rewrite_once(nyr_func_t *f) {
       if (!nyr_cfg_natural_loop_blocks(cfg, latch, header, s.member,
                                        cfg->block_count))
         continue;
-      /* Innermost only: no other backedge targets a member block. */
+      /*
+       * Innermost only: no other backedge targets a member block.
+       */
       bool innermost = true;
       size_t insts = 0;
       for (size_t b = 0; b < cfg->block_count && innermost; ++b) {

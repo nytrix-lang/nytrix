@@ -1,7 +1,7 @@
 shape portable_proof_contracts {
   family "runtime/proofs"
   generator "program"
-  features ["proofs", "requires", "division", "fin", "index", "loop-flow", "backend-parity"]
+  features ["backend-parity", "division", "fin", "index", "loop-flow", "proofs", "requires"]
   timeout 180
   template ny-test-case
   expect compile_and_run
@@ -1057,7 +1057,7 @@ NY
 shape portable_indirect_pure_predicate_proof {
   family "runtime/proofs"
   generator "program"
-  features ["proofs", "requires", "indirect-call", "effect-row", "backend-parity"]
+  features ["backend-parity", "effect-row", "indirect-call", "proofs", "requires"]
   template ny-test-case
   expect compile_and_run
   flags_matrix "--native --run --no-strict-types; --native-backend=llvm --jit --jit-engine=mcjit --no-strict-types; --native-backend=llvm --jit --jit-engine=orc --no-strict-types; --native-only --no-strict-types"
@@ -1089,7 +1089,7 @@ NY
 shape portable_structural_measure_non_descending_rejected {
   family "runtime/proofs"
   generator "error"
-  features ["proofs", "decreases", "structural-measure", "backend-parity"]
+  features ["backend-parity", "decreases", "proofs", "structural-measure"]
   template ny-compile-fail
   expect compile_fail
   expect_message "recursive termination is not certified"
@@ -1112,7 +1112,7 @@ NY
 shape portable_structural_measure_rebound_payload_rejected {
   family "runtime/proofs"
   generator "error"
-  features ["proofs", "decreases", "structural-measure", "backend-parity"]
+  features ["backend-parity", "decreases", "proofs", "structural-measure"]
   template ny-compile-fail
   expect compile_fail
   expect_message "recursive termination is not certified"
@@ -1138,7 +1138,7 @@ NY
 shape portable_structural_measure_mutable_alias_rejected {
   family "runtime/proofs"
   generator "error"
-  features ["proofs", "decreases", "structural-measure", "mutable-alias", "backend-parity"]
+  features ["backend-parity", "decreases", "mutable-alias", "proofs", "structural-measure"]
   template ny-compile-fail
   expect compile_fail
   expect_message "recursive termination is not certified"
@@ -1165,7 +1165,7 @@ NY
 shape portable_structural_measure_shadowed_alias_rejected {
   family "runtime/proofs"
   generator "error"
-  features ["proofs", "decreases", "structural-measure", "shadowing", "backend-parity"]
+  features ["backend-parity", "decreases", "proofs", "shadowing", "structural-measure"]
   template ny-compile-fail
   expect compile_fail
   expect_message "recursive termination is not certified"
@@ -1195,7 +1195,7 @@ NY
 shape portable_structural_measure_shadowed_sibling_rejected {
   family "runtime/proofs"
   generator "error"
-  features ["proofs", "decreases", "structural-measure", "shadowing", "backend-parity"]
+  features ["backend-parity", "decreases", "proofs", "shadowing", "structural-measure"]
   template ny-compile-fail
   expect compile_fail
   expect_message "recursive termination is not certified"
@@ -1221,7 +1221,7 @@ NY
 shape portable_tuple_structural_measure_non_descending_rejected {
   family "runtime/proofs"
   generator "error"
-  features ["proofs", "decreases", "structural-measure", "lexicographic", "backend-parity"]
+  features ["backend-parity", "decreases", "lexicographic", "proofs", "structural-measure"]
   template ny-compile-fail
   expect compile_fail
   expect_message "recursive termination is not certified"
@@ -1245,7 +1245,7 @@ NY
 shape portable_tuple_structural_measure_prefix_change_rejected {
   family "runtime/proofs"
   generator "error"
-  features ["proofs", "decreases", "structural-measure", "lexicographic", "backend-parity"]
+  features ["backend-parity", "decreases", "lexicographic", "proofs", "structural-measure"]
   template ny-compile-fail
   expect compile_fail
   expect_message "recursive termination is not certified"
@@ -1271,7 +1271,7 @@ NY
 shape portable_structural_measure_iterator_shadow_rejected {
   family "runtime/proofs"
   generator "error"
-  features ["proofs", "decreases", "structural-measure", "loop-shadowing", "backend-parity"]
+  features ["backend-parity", "decreases", "loop-shadowing", "proofs", "structural-measure"]
   template ny-compile-fail
   expect compile_fail
   expect_message "recursive termination is not certified"
@@ -1300,7 +1300,7 @@ NY
 shape portable_nested_structural_measure_non_descending_rejected {
   family "runtime/proofs"
   generator "error"
-  features ["proofs", "decreases", "structural-measure", "backend-parity"]
+  features ["backend-parity", "decreases", "proofs", "structural-measure"]
   template ny-compile-fail
   expect compile_fail
   expect_message "recursive termination is not certified"
@@ -1329,7 +1329,7 @@ NY
 shape portable_contract_wide_guard_rejected {
   family "runtime/proofs"
   generator "error"
-  features ["proofs", "requires", "integer-boundary", "backend-parity"]
+  features ["backend-parity", "integer-boundary", "proofs", "requires"]
   template ny-compile-fail
   expect compile_fail
   expect_message "precondition"
@@ -1355,7 +1355,7 @@ NY
 shape portable_contract_overflowing_relation_remains_unknown {
   family "runtime/proofs"
   generator "error"
-  features ["proofs", "requires", "nonlinear", "overflow", "backend-parity"]
+  features ["backend-parity", "nonlinear", "overflow", "proofs", "requires"]
   template ny-compile-fail
   expect compile_fail
   expect_message "precondition"
@@ -1380,7 +1380,7 @@ NY
 shape portable_contract_division_outside_range_rejected {
   family "runtime/proofs"
   generator "error"
-  features ["proofs", "requires", "division", "backend-parity"]
+  features ["backend-parity", "division", "proofs", "requires"]
   template ny-compile-fail
   expect compile_fail
   expect_message "precondition"
@@ -1404,7 +1404,7 @@ NY
 shape portable_wide_constant_is_not_saturated_proof {
   family "runtime/proofs"
   generator "error"
-  features ["proofs", "integer-boundary", "backend-parity"]
+  features ["backend-parity", "integer-boundary", "proofs"]
   template ny-compile-fail
   expect compile_fail
   expect_message "outside the signed-i64 proof fragment"
@@ -1418,7 +1418,7 @@ NY
 shape portable_range_match_pure_predicate {
   family "runtime/proofs"
   generator "program"
-  features ["proofs", "requires", "match", "range-pattern", "backend-parity"]
+  features ["backend-parity", "match", "proofs", "range-pattern", "requires"]
   template ny-test-case
   expect compile_and_run
   flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
@@ -1448,7 +1448,7 @@ NY
 shape portable_finite_match_exhaustiveness {
   family "runtime/proofs"
   generator "program"
-  features ["proofs", "requires", "match", "finite-range", "backend-parity"]
+  features ["backend-parity", "finite-range", "match", "proofs", "requires"]
   template ny-test-case
   expect compile_and_run
   flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
@@ -1478,7 +1478,7 @@ NY
 shape portable_pure_predicate_if_initializer {
   family "runtime/proofs"
   generator "program"
-  features ["proofs", "requires", "pure-predicate", "if-initializer", "backend-parity"]
+  features ["backend-parity", "if-initializer", "proofs", "pure-predicate", "requires"]
   template ny-test-case
   expect compile_and_run
   flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
@@ -1528,7 +1528,7 @@ NY
 shape portable_nested_expression_match_predicate {
   family "runtime/proofs"
   generator "program"
-  features ["proofs", "requires", "pure-predicate", "match", "expression", "backend-parity"]
+  features ["backend-parity", "expression", "match", "proofs", "pure-predicate", "requires"]
   template ny-test-case
   expect compile_and_run
   flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
@@ -1579,7 +1579,7 @@ NY
 shape portable_statement_range_match_predicate {
   family "runtime/proofs"
   generator "program"
-  features ["proofs", "requires", "pure-predicate", "match", "range-pattern", "statement-match", "backend-parity"]
+  features ["backend-parity", "match", "proofs", "pure-predicate", "range-pattern", "requires", "statement-match"]
   template ny-test-case
   expect compile_and_run
   flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"

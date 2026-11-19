@@ -8147,13 +8147,11 @@ ordinary_call:
     if (value < 0)
       return -1;
     /* BigInt handles can lose generic `any` provenance after loop/call joins,
-     * but their concrete runtime object tag is stable.  The old has-tag fast
-     * path rejected such handles before it reached the heap tag check. */
-    int actual = nyr_emit_runtime_call(b, "rt_value_tag", value, -1, -1, 1, 0);
-    int want = nyr_emit_const(b, TAG_BIGINT);
-    return actual < 0 || want < 0
-               ? -1
-               : nyr_emit_cmp_i64(b, NYIR_CMP_EQ, actual, want);
+     * but their concrete runtime object tag is stable.  `rt_is_bigint_raw`
+     * reads that tag after its allocator-provenance check; it is the same
+     * predicate as `rt_value_tag(v) == TAG_BIGINT` without the async-handle
+     * and foreign-container classification probes on every operand. */
+    return nyr_emit_runtime_call(b, "rt_is_bigint_raw", value, -1, -1, 1, 0);
   }
   if (leaf_kind == NY_NATIVE_LEAF_IS_BOOL && !nyr_user_defined_fn(b, name)) {
     if (e->as.call.args.len != 1 || e->as.call.args.data[0].name) {

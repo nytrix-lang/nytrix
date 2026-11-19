@@ -1,7 +1,7 @@
 shape raw_memory_bridges_have_precise_effect_rows {
   family "typing/effects"
   generator "regression"
-  features ["ny", "test", "typing", "effects", "runtime", "memory"]
+  features ["typing", "ny", "test", "effects", "memory", "runtime"]
   template ny-test-case
   flags_matrix "--effect-require-known --native --run; --effect-require-known --native-only"
   expect compile_and_run

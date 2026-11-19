@@ -2,6 +2,9 @@
  * Host-side C counterpart for the stack protector test.
  */
 #include <stdint.h>
+#ifdef GUARD_HOOK_RETURNS
+#include <signal.h>
+#endif
 #include <string.h>
 #include <sys/syscall.h>
 #include <unistd.h>
@@ -19,7 +22,12 @@ static uintptr_t gs_storage[16];
  */
 __asm__(".globl __nyc_guard_offset\n.set __nyc_guard_offset,40");
 
+#ifdef GUARD_HOOK_RETURNS
+void __stack_chk_fail(void) {}
+static void guard_trap(int signum) { _exit(signum == SIGILL ? 94 : 95); }
+#else
 __attribute__((noreturn)) void __stack_chk_fail(void) { _exit(93); }
+#endif
 void change_guard(void) {
 #if GUARD_MODE == 3
   custom_guard ^= UINT64_C(0x100);
@@ -55,6 +63,10 @@ void consume(char *buffer, int corrupt) {
 }
 
 int main(int argc, char **argv) {
+#ifdef GUARD_HOOK_RETURNS
+  if (signal(SIGILL, guard_trap) == SIG_ERR)
+    return 4;
+#endif
   volatile unsigned char mapped_stack[2048];
   for (unsigned i = 0; i < sizeof(mapped_stack); ++i)
     mapped_stack[i] = 0;

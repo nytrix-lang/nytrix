@@ -651,7 +651,6 @@ fn raw_receive(any handle, int timeout_ms=0) list {
 
 ;; ---------------------------------------------------------------------------
 ;; Portable stream API
-
 ;; One shared sequencer client per process on Linux; every stream is a port.
 ;; Untyped dict globals: `mut any x = dict(8)` currently never holds the
 ;; dict (see docs/todo/ui.md compiler defects), and an int-initialised slot
@@ -677,8 +676,8 @@ fn _alsa_client() any {
 
 fn list_devices() list {
    "Lists MIDI devices on every OS as dicts {id, name, input, output,
-    backend}. `input` devices can be opened with `open_input` (keyboards,
-    controllers); `output` devices with `open_output` (synths, interfaces)."
+   backend}. `input` devices can be opened with `open_input` (keyboards,
+   controllers) ; `output` devices with `open_output` (synths, interfaces)."
    def b = backend_name()
    if b == "winmm" { return mm_winmm.devices() }
    if b == "coremidi" { return mm_coremidi.devices() }
@@ -694,14 +693,14 @@ fn list_devices() list {
       ;; Skip the kernel System client (timer/announce) and our own ports.
       if c != 0 && c != own && (bool(d.get("input", false)) || bool(d.get("output", false))) {
          out = out.append({
-            "id": "alsa:" + to_str(c) + ":" + to_str(d.get("port", 0)),
-            "name": to_str(d.get("client_name", "")) + ": " + to_str(d.get("name", "")),
-            "input": bool(d.get("input", false)),
-            "output": bool(d.get("output", false)),
-            "backend": "alsa",
-            "client": c,
-            "port": int(d.get("port", 0))
-         })
+               "id": "alsa:" + to_str(c) + ":" + to_str(d.get("port", 0)),
+               "name": to_str(d.get("client_name", "")) + ": " + to_str(d.get("name", "")),
+               "input": bool(d.get("input", false)),
+               "output": bool(d.get("output", false)),
+               "backend": "alsa",
+               "client": c,
+               "port": int(d.get("port", 0))
+            })
       }
       i += 1
    }
@@ -710,7 +709,7 @@ fn list_devices() list {
 
 fn find_device(str query, bool input=true) any {
    "Returns the first device whose id or name contains `query` (case
-    insensitive) and supports the direction, or 0."
+   insensitive) and supports the direction, or 0."
    def q = str.lower(query)
    def devs = list_devices()
    mut i = 0
@@ -734,8 +733,8 @@ fn _stream(str backend, str kind, any dev, any handle) dict {
 }
 
 fn open_input(any dev) any {
-   "Opens an input device (dict from list_devices, or an id/name query).
-    Returns a stream or 0."
+   "Opens an input device(dict from list_devices, or an id/name query).
+   Returns a stream or 0."
    def d = _resolve(dev, true)
    if !is_dict(d) { return 0 }
    def b = to_str(d.get("backend", ""))
@@ -783,8 +782,8 @@ fn open_output(any dev) any {
 }
 
 fn open_virtual_input(str name) any {
-   "Creates an input other programs can send to (ALSA port, CoreMIDI
-    destination). WinMM has no virtual ports and returns 0."
+   "Creates an input other programs can send to(ALSA port, CoreMIDI
+   destination). WinMM has no virtual ports and returns 0."
    def b = backend_name()
    if b == "coremidi" {
       def h = mm_coremidi.open_virtual_input(name)
@@ -823,7 +822,7 @@ fn _stamp(list msgs, str device) list {
 
 fn read_messages(any stream, int timeout_ms=0, any filter=0) list {
    "Returns the messages received on an input stream, waiting up to
-    `timeout_ms` (0 polls, negative waits). `filter` drops listed types."
+   `timeout_ms` (0 polls, negative waits). `filter` drops listed types."
    if !is_dict(stream) || !bool(stream.get("open", false)) || to_str(stream.get("kind", "")) != "in" { return [] }
    def b = to_str(stream.get("backend", ""))
    def dev = to_str(stream.get("device", ""))
@@ -868,7 +867,7 @@ fn write_message(any stream, dict msg) bool {
    if b == "winmm" { return mm_winmm.write_bytes(stream.get("handle", 0), encode(msg)) }
    if b == "coremidi" { return mm_coremidi.write_bytes(stream.get("handle", 0), encode(msg)) }
    if b != "alsa" { return false }
-   send(_alsa_client(), int(stream.get("handle", {}).get("port", -1)), msg)
+   seq.send(_alsa_client(), int(stream.get("handle", {}).get("port", -1)), msg)
 }
 
 fn close_stream(any stream) bool {
@@ -895,7 +894,6 @@ fn close_stream(any stream) bool {
 
 ;; ---------------------------------------------------------------------------
 ;; Portable stream API
-
 ;; One shared sequencer client per process on Linux; every stream is a port.
 ;; Untyped dict globals: `mut any x = dict(8)` currently never holds the
 ;; dict (see docs/todo/ui.md compiler defects), and an int-initialised slot
@@ -921,8 +919,8 @@ fn _alsa_client() any {
 
 fn list_devices() list {
    "Lists MIDI devices on every OS as dicts {id, name, input, output,
-    backend}. `input` devices can be opened with `open_input` (keyboards,
-    controllers); `output` devices with `open_output` (synths, interfaces)."
+   backend}. `input` devices can be opened with `open_input` (keyboards,
+   controllers) ; `output` devices with `open_output` (synths, interfaces)."
    def b = backend_name()
    if b == "winmm" { return mm_winmm.devices() }
    if b == "coremidi" { return mm_coremidi.devices() }
@@ -938,14 +936,14 @@ fn list_devices() list {
       ;; Skip the kernel System client (timer/announce) and our own ports.
       if c != 0 && c != own && (bool(d.get("input", false)) || bool(d.get("output", false))) {
          out = out.append({
-            "id": "alsa:" + to_str(c) + ":" + to_str(d.get("port", 0)),
-            "name": to_str(d.get("client_name", "")) + ": " + to_str(d.get("name", "")),
-            "input": bool(d.get("input", false)),
-            "output": bool(d.get("output", false)),
-            "backend": "alsa",
-            "client": c,
-            "port": int(d.get("port", 0))
-         })
+               "id": "alsa:" + to_str(c) + ":" + to_str(d.get("port", 0)),
+               "name": to_str(d.get("client_name", "")) + ": " + to_str(d.get("name", "")),
+               "input": bool(d.get("input", false)),
+               "output": bool(d.get("output", false)),
+               "backend": "alsa",
+               "client": c,
+               "port": int(d.get("port", 0))
+            })
       }
       i += 1
    }
@@ -954,7 +952,7 @@ fn list_devices() list {
 
 fn find_device(str query, bool input=true) any {
    "Returns the first device whose id or name contains `query` (case
-    insensitive) and supports the direction, or 0."
+   insensitive) and supports the direction, or 0."
    def q = str.lower(query)
    def devs = list_devices()
    mut i = 0
@@ -978,8 +976,8 @@ fn _stream(str backend, str kind, any dev, any handle) dict {
 }
 
 fn open_input(any dev) any {
-   "Opens an input device (dict from list_devices, or an id/name query).
-    Returns a stream or 0."
+   "Opens an input device(dict from list_devices, or an id/name query).
+   Returns a stream or 0."
    def d = _resolve(dev, true)
    if !is_dict(d) { return 0 }
    def b = to_str(d.get("backend", ""))
@@ -1027,8 +1025,8 @@ fn open_output(any dev) any {
 }
 
 fn open_virtual_input(str name) any {
-   "Creates an input other programs can send to (ALSA port, CoreMIDI
-    destination). WinMM has no virtual ports and returns 0."
+   "Creates an input other programs can send to(ALSA port, CoreMIDI
+   destination). WinMM has no virtual ports and returns 0."
    def b = backend_name()
    if b == "coremidi" {
       def h = mm_coremidi.open_virtual_input(name)
@@ -1067,7 +1065,7 @@ fn _stamp(list msgs, str device) list {
 
 fn read_messages(any stream, int timeout_ms=0, any filter=0) list {
    "Returns the messages received on an input stream, waiting up to
-    `timeout_ms` (0 polls, negative waits). `filter` drops listed types."
+   `timeout_ms` (0 polls, negative waits). `filter` drops listed types."
    if !is_dict(stream) || !bool(stream.get("open", false)) || to_str(stream.get("kind", "")) != "in" { return [] }
    def b = to_str(stream.get("backend", ""))
    def dev = to_str(stream.get("device", ""))
@@ -1112,7 +1110,7 @@ fn write_message(any stream, dict msg) bool {
    if b == "winmm" { return mm_winmm.write_bytes(stream.get("handle", 0), encode(msg)) }
    if b == "coremidi" { return mm_coremidi.write_bytes(stream.get("handle", 0), encode(msg)) }
    if b != "alsa" { return false }
-   send(_alsa_client(), int(stream.get("handle", {}).get("port", -1)), msg)
+   seq.send(_alsa_client(), int(stream.get("handle", {}).get("port", -1)), msg)
 }
 
 fn close_stream(any stream) bool {
@@ -1139,7 +1137,6 @@ fn close_stream(any stream) bool {
 
 ;; ---------------------------------------------------------------------------
 ;; Portable stream API
-
 ;; One shared sequencer client per process on Linux; every stream is a port.
 ;; Untyped dict globals: `mut any x = dict(8)` currently never holds the
 ;; dict (see docs/todo/ui.md compiler defects), and an int-initialised slot
@@ -1165,8 +1162,8 @@ fn _alsa_client() any {
 
 fn list_devices() list {
    "Lists MIDI devices on every OS as dicts {id, name, input, output,
-    backend}. `input` devices can be opened with `open_input` (keyboards,
-    controllers); `output` devices with `open_output` (synths, interfaces)."
+   backend}. `input` devices can be opened with `open_input` (keyboards,
+   controllers) ; `output` devices with `open_output` (synths, interfaces)."
    def b = backend_name()
    if b == "winmm" { return mm_winmm.devices() }
    if b == "coremidi" { return mm_coremidi.devices() }
@@ -1182,14 +1179,14 @@ fn list_devices() list {
       ;; Skip the kernel System client (timer/announce) and our own ports.
       if c != 0 && c != own && (bool(d.get("input", false)) || bool(d.get("output", false))) {
          out = out.append({
-            "id": "alsa:" + to_str(c) + ":" + to_str(d.get("port", 0)),
-            "name": to_str(d.get("client_name", "")) + ": " + to_str(d.get("name", "")),
-            "input": bool(d.get("input", false)),
-            "output": bool(d.get("output", false)),
-            "backend": "alsa",
-            "client": c,
-            "port": int(d.get("port", 0))
-         })
+               "id": "alsa:" + to_str(c) + ":" + to_str(d.get("port", 0)),
+               "name": to_str(d.get("client_name", "")) + ": " + to_str(d.get("name", "")),
+               "input": bool(d.get("input", false)),
+               "output": bool(d.get("output", false)),
+               "backend": "alsa",
+               "client": c,
+               "port": int(d.get("port", 0))
+            })
       }
       i += 1
    }
@@ -1198,7 +1195,7 @@ fn list_devices() list {
 
 fn find_device(str query, bool input=true) any {
    "Returns the first device whose id or name contains `query` (case
-    insensitive) and supports the direction, or 0."
+   insensitive) and supports the direction, or 0."
    def q = str.lower(query)
    def devs = list_devices()
    mut i = 0
@@ -1222,8 +1219,8 @@ fn _stream(str backend, str kind, any dev, any handle) dict {
 }
 
 fn open_input(any dev) any {
-   "Opens an input device (dict from list_devices, or an id/name query).
-    Returns a stream or 0."
+   "Opens an input device(dict from list_devices, or an id/name query).
+   Returns a stream or 0."
    def d = _resolve(dev, true)
    if !is_dict(d) { return 0 }
    def b = to_str(d.get("backend", ""))
@@ -1271,8 +1268,8 @@ fn open_output(any dev) any {
 }
 
 fn open_virtual_input(str name) any {
-   "Creates an input other programs can send to (ALSA port, CoreMIDI
-    destination). WinMM has no virtual ports and returns 0."
+   "Creates an input other programs can send to(ALSA port, CoreMIDI
+   destination). WinMM has no virtual ports and returns 0."
    def b = backend_name()
    if b == "coremidi" {
       def h = mm_coremidi.open_virtual_input(name)
@@ -1311,7 +1308,7 @@ fn _stamp(list msgs, str device) list {
 
 fn read_messages(any stream, int timeout_ms=0, any filter=0) list {
    "Returns the messages received on an input stream, waiting up to
-    `timeout_ms` (0 polls, negative waits). `filter` drops listed types."
+   `timeout_ms` (0 polls, negative waits). `filter` drops listed types."
    if !is_dict(stream) || !bool(stream.get("open", false)) || to_str(stream.get("kind", "")) != "in" { return [] }
    def b = to_str(stream.get("backend", ""))
    def dev = to_str(stream.get("device", ""))
@@ -1356,7 +1353,7 @@ fn write_message(any stream, dict msg) bool {
    if b == "winmm" { return mm_winmm.write_bytes(stream.get("handle", 0), encode(msg)) }
    if b == "coremidi" { return mm_coremidi.write_bytes(stream.get("handle", 0), encode(msg)) }
    if b != "alsa" { return false }
-   send(_alsa_client(), int(stream.get("handle", {}).get("port", -1)), msg)
+   seq.send(_alsa_client(), int(stream.get("handle", {}).get("port", -1)), msg)
 }
 
 fn close_stream(any stream) bool {

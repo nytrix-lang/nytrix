@@ -207,7 +207,7 @@ use core
 fn pick(int n, Fin<n> i, list<int> xs) int { xs[i] }
 
 fn at(int n, int raw, list<int> xs) int {
-   def i Fin<n> = checked_fin(raw, n)
+   def Fin<n> i = checked_fin(raw, n)
    xs[i]
 }
 ```

@@ -43,6 +43,845 @@ typedef struct {
 } nir_loop_idiom_mul_t;
 
 /*
+ * Bit-reassembly loop folding
+ * A descending bit-extraction loop that assembles an index one key bit at a
+ * time from the most significant bit down
+ *
+ *   node = init
+ *   for (depth = trip - 1; depth >= 0; --depth)
+ *     node = 2 * node + ((key >> depth) & 1)
+ *
+ * computes exactly
+ *
+ *   node = (init << trip) | (key & ((1 << trip) - 1))
+ *
+ * under NyIR's wrapping i64 semantics. After k steps the low k bits of `node`
+ * hold the k consumed key bits in order, so shifting left by one never
+ * disturbs them; `init << trip` has its low `trip` bits clear, so the `|` and
+ * `+` readings agree. The dependent chain disappears when nothing the loop
+ * computes escapes and the loop is pure, which makes the whole loop dead.
+ *
+ * Recognition is proof-driven: the trip count must be an exact constant, the
+ * key must be loop-invariant, the shift must index the loop induction
+ * variable, the bit must be masked to 0/1, and every value defined in the
+ * loop must be used only inside it. NYTRACE_BITASM=1 prints the proof.
+ */
+
+typedef struct {
+  size_t at;
+  bool explicit_br;
+  /*
+   * Where to insert a label for a label-less exit block, or SIZE_MAX when the
+   * exit already carries one.
+   */
+  size_t exit_label_pos;
+  int node_phi;
+  int key;
+  int64_t init;
+  uint64_t trip;
+  int64_t exit_label;
+} nir_bitasm_cand_t;
+
+static bool nir_bitasm_trace(void) {
+  static int on = -1;
+  if (on < 0)
+    on = getenv("NYTRACE_BITASM") != NULL ? 1 : 0;
+  return on != 0;
+}
+
+static void bitasm_dump_block(const nyr_func_t *f, const nyr_cfg_t *cfg,
+                              size_t block, const char *tag) {
+  if (!nir_bitasm_trace() || block >= cfg->block_count)
+    return;
+  fprintf(stderr, "[bitasm] %s block=%zu label=%lld [%zu,%zu)\n", tag, block,
+          (long long)cfg->block_label[block], cfg->block_start[block],
+          cfg->block_end[block]);
+  for (size_t i = cfg->block_start[block]; i < cfg->block_end[block]; ++i) {
+    const nyr_inst_t *in = &f->data[i];
+    fprintf(stderr, "[bitasm]   %zu op=%d dst=%d a=%d b=%d c=%d imm=%lld\n", i,
+            (int)in->op, in->dst, in->a, in->b, in->c, (long long)in->imm);
+  }
+}
+
+static const nyr_inst_t *bitasm_def(const nyr_func_t *f, const int *defs,
+                                    int value) {
+  value = idiom_root_copy(f, defs, value);
+  if (value < 0 || value >= f->next_value)
+    return NULL;
+  int di = defs[value];
+  if (di < 0 || (size_t)di >= f->len)
+    return NULL;
+  return &f->data[(size_t)di];
+}
+
+/*
+ * True when `value` computes exactly `2 * node`.
+ */
+static bool bitasm_is_double(const nyr_func_t *f, const int *defs, int value,
+                             int node) {
+  const nyr_inst_t *in = bitasm_def(f, defs, value);
+  if (!in)
+    return false;
+  int64_t c = 0;
+  switch (in->op) {
+  case NYIR_ADD_I64:
+    return idiom_root_copy(f, defs, in->a) == node &&
+           idiom_root_copy(f, defs, in->b) == node;
+  case NYIR_MUL_I64:
+    if (idiom_root_copy(f, defs, in->a) == node &&
+        const_i64_val(f, defs, in->b, &c))
+      return c == 2;
+    if (idiom_root_copy(f, defs, in->b) == node &&
+        const_i64_val(f, defs, in->a, &c))
+      return c == 2;
+    return false;
+  case NYIR_SHL_I64:
+    return idiom_root_copy(f, defs, in->a) == node &&
+           const_i64_val(f, defs, in->b, &c) && c == 1;
+  default:
+    return false;
+  }
+}
+
+/*
+ * True when `value` is `2*node` or `2*node + 1`.
+ */
+static bool bitasm_arm(const nyr_func_t *f, const int *defs, int value,
+                       int node, bool *incremented) {
+  int root = idiom_root_copy(f, defs, value);
+  const nyr_inst_t *in = bitasm_def(f, defs, root);
+  if (!in)
+    return false;
+  if (in->op == NYIR_ADD_I64 || in->op == NYIR_OR_I64) {
+    int64_t c = 0;
+    int a = idiom_root_copy(f, defs, in->a);
+    int b = idiom_root_copy(f, defs, in->b);
+    if (const_i64_val(f, defs, b, &c) && c == 1 &&
+        bitasm_is_double(f, defs, a, node)) {
+      *incremented = true;
+      return true;
+    }
+    if (const_i64_val(f, defs, a, &c) && c == 1 &&
+        bitasm_is_double(f, defs, b, node)) {
+      *incremented = true;
+      return true;
+    }
+  }
+  if (bitasm_is_double(f, defs, root, node)) {
+    *incremented = false;
+    return true;
+  }
+  return false;
+}
+
+/*
+ * Match `((key >> (iv & mask)) & 1)`, where the shift-count mask is optional.
+ * The frontend masks a variable shift count with a low-bits mask; that mask is
+ * transparent when every induction value is representable inside it.
+ */
+static bool bitasm_bit_expr(const nyr_func_t *f, const int *defs, int value,
+                            int iv, int64_t iv_min, int64_t iv_max,
+                            int *key_out) {
+  const nyr_inst_t *land = bitasm_def(f, defs, value);
+  if (!land || land->op != NYIR_AND_I64)
+    return false;
+  int64_t one = 0;
+  int shifted = -1;
+  if (const_i64_val(f, defs, land->b, &one) && one == 1)
+    shifted = land->a;
+  else if (const_i64_val(f, defs, land->a, &one) && one == 1)
+    shifted = land->b;
+  if (shifted < 0)
+    return false;
+  const nyr_inst_t *sar = bitasm_def(f, defs, shifted);
+  if (!sar || sar->op != NYIR_SAR_I64)
+    return false;
+  int amount = idiom_root_copy(f, defs, sar->b);
+  if (amount != iv) {
+    const nyr_inst_t *mask = bitasm_def(f, defs, amount);
+    int64_t m = 0;
+    int base = -1;
+    if (!mask || mask->op != NYIR_AND_I64)
+      return false;
+    if (const_i64_val(f, defs, mask->b, &m))
+      base = mask->a;
+    else if (const_i64_val(f, defs, mask->a, &m))
+      base = mask->b;
+    if (base < 0 || idiom_root_copy(f, defs, base) != iv)
+      return false;
+    /*
+     * The mask must be 2^k - 1 and must not truncate any induction value.
+     */
+    if (m < 0 || ((uint64_t)m & ((uint64_t)m + 1)) != 0 || iv_min < 0 ||
+        iv_max > m)
+      return false;
+  }
+  if (sar->a < 0 || sar->a >= f->next_value)
+    return false;
+  *key_out = sar->a;
+  return true;
+}
+
+/*
+ * Match `(key >> iv) & 1` compared against zero. `bit_true` reports whether
+ * the compared condition holds for a set key bit (NE) or a clear one (EQ).
+ */
+static bool bitasm_bit_test(const nyr_func_t *f, const int *defs, int cond,
+                            int iv, int64_t iv_min, int64_t iv_max,
+                            bool *bit_true, int *key_out) {
+  if (bitasm_bit_expr(f, defs, cond, iv, iv_min, iv_max, key_out)) {
+    *bit_true = true;
+    return true;
+  }
+  const nyr_inst_t *cmp = bitasm_def(f, defs, cond);
+  if (!cmp || cmp->op != NYIR_CMP_I64)
+    return false;
+  if (cmp->cmp != NYIR_CMP_NE && cmp->cmp != NYIR_CMP_EQ)
+    return false;
+  int64_t z = 0;
+  int tested = -1;
+  if (const_i64_val(f, defs, cmp->b, &z) && z == 0)
+    tested = cmp->a;
+  else if (const_i64_val(f, defs, cmp->a, &z) && z == 0)
+    tested = cmp->b;
+  if (tested < 0)
+    return false;
+  if (!bitasm_bit_expr(f, defs, tested, iv, iv_min, iv_max, key_out))
+    return false;
+  *bit_true = cmp->cmp == NYIR_CMP_NE;
+  return true;
+}
+
+/* C may leave the two bit choices as a control-flow diamond. */
+static bool bitasm_phi_choice(const nyr_func_t *f, const int *defs,
+                              const nyr_cfg_t *cfg, const nyr_inst_t *phi,
+                              size_t latch, int node, int iv, int64_t min,
+                              int64_t max, int *key_out) {
+  if (!phi || phi->op != NYIR_PHI || phi->phi_incoming_len != 2 ||
+      cfg->inst_block[phi - f->data] != latch || cfg->idom[latch] < 0)
+    return false;
+  size_t split = (size_t)cfg->idom[latch];
+  size_t term = nyr_block_last_non_nop(f, cfg, split);
+  if (term <= cfg->block_start[split] || f->data[term - 1].op != NYIR_BR_IF ||
+      cfg->succ_offsets[split + 1] - cfg->succ_offsets[split] != 2)
+    return false;
+  const nyr_inst_t *br = &f->data[term - 1];
+  size_t taken = SIZE_MAX;
+  if (!nyr_cfg_block_for_label(cfg, br->imm, &taken))
+    return false;
+  size_t other = cfg->succ_blocks[cfg->succ_offsets[split]];
+  if (other == taken)
+    other = cfg->succ_blocks[cfg->succ_offsets[split] + 1];
+  if (other == taken ||
+      cfg->pred_offsets[taken + 1] - cfg->pred_offsets[taken] != 1 ||
+      cfg->pred_offsets[other + 1] - cfg->pred_offsets[other] != 1)
+    return false;
+  bool bit_true = false;
+  if (!bitasm_bit_test(f, defs, br->a, iv, min, max, &bit_true, key_out))
+    return false;
+  bool saw_taken = false, saw_other = false;
+  for (size_t i = 0; i < 2; ++i) {
+    size_t arm = SIZE_MAX;
+    bool increments = false;
+    if (!nyr_cfg_block_for_label(cfg, phi->phi_incoming[i].predecessor_label,
+                                 &arm) ||
+        !bitasm_arm(f, defs, phi->phi_incoming[i].value, node, &increments))
+      return false;
+    if (nyr_cfg_dominates(cfg, taken, arm) && increments == bit_true)
+      saw_taken = true;
+    else if (nyr_cfg_dominates(cfg, other, arm) && increments != bit_true)
+      saw_other = true;
+    else
+      return false;
+  }
+  return saw_taken && saw_other;
+}
+
+/*
+ * The removed loop must not write memory, touch locals, call or trap.
+ */
+static bool bitasm_loop_is_pure(const nyr_func_t *f, const nyr_cfg_t *cfg,
+                                const bool *in_loop) {
+  for (size_t b = 0; b < cfg->block_count; ++b) {
+    if (!in_loop[b])
+      continue;
+    for (size_t i = cfg->block_start[b]; i < cfg->block_end[b]; ++i) {
+      const nyr_inst_t *in = &f->data[i];
+      switch (in->op) {
+      case NYIR_NOP:
+      case NYIR_LABEL:
+      case NYIR_BR:
+      case NYIR_BR_IF:
+      case NYIR_PHI:
+      case NYIR_CONST_I64:
+      case NYIR_COPY:
+      case NYIR_ADD_I64:
+      case NYIR_SUB_I64:
+      case NYIR_MUL_I64:
+      case NYIR_AND_I64:
+      case NYIR_OR_I64:
+      case NYIR_XOR_I64:
+      case NYIR_SHL_I64:
+      case NYIR_SAR_I64:
+      case NYIR_CMP_I64:
+      case NYIR_SELECT_I64:
+        break;
+      default:
+        if (nir_bitasm_trace())
+          fprintf(stderr, "[bitasm] impure op=%d at %zu (block %zu)\n",
+                  (int)in->op, i, b);
+        return false;
+      }
+      unsigned bad = (in->effects | nyr_inst_effects(in)) &
+                     (NYIR_EFFECT_WRITE_MEMORY | NYIR_EFFECT_WRITE_LOCAL |
+                      NYIR_EFFECT_CALL | NYIR_EFFECT_IO |
+                      NYIR_EFFECT_THREAD | NYIR_EFFECT_FFI |
+                      NYIR_EFFECT_VOLATILE |
+                      NYIR_EFFECT_UNKNOWN_SIDE_EFFECT |
+                      NYIR_EFFECT_MAY_TRAP | NYIR_EFFECT_ALLOCATION);
+      if (bad) {
+        if (nir_bitasm_trace())
+          fprintf(stderr, "[bitasm] impure effects=%#x op=%d at %zu\n", bad,
+                  (int)in->op, i);
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+static bool bitasm_apply(nyr_func_t *f, const nyr_cfg_t *cfg,
+                         const bool *in_loop, const nir_bitasm_cand_t *cand) {
+  size_t payload = 4;
+  size_t count = payload + (cand->explicit_br ? 0 : 1);
+  size_t extra = cand->exit_label_pos == SIZE_MAX ? 0 : 1;
+  if (f->next_value > INT_MAX - 4 || !nir_ensure_inst_space(f, count + extra))
+    return false;
+  int mask_v = f->next_value++;
+  int and_v = f->next_value++;
+  int shift_v = f->next_value++;
+  int or_v = f->next_value++;
+  int64_t mask = (int64_t)((UINT64_C(1) << cand->trip) - 1);
+  int64_t shifted = (int64_t)((uint64_t)cand->init << cand->trip);
+
+  /*
+   * Retarget every surviving use of the assembled value. The loop is gone,
+   * so all remaining uses are reached through its exit and are dominated by
+   * the preheader insertion below.
+   */
+  for (size_t i = 0; i < f->len; ++i) {
+    nyr_inst_t *in = &f->data[i];
+    size_t b = cfg->inst_block[i];
+    if (b < cfg->block_count && in_loop[b])
+      continue;
+    if (in->a == cand->node_phi)
+      in->a = or_v;
+    if (in->b == cand->node_phi)
+      in->b = or_v;
+    if (in->c == cand->node_phi)
+      in->c = or_v;
+    if (in->d == cand->node_phi)
+      in->d = or_v;
+    if (in->e == cand->node_phi)
+      in->e = or_v;
+    if (in->f == cand->node_phi)
+      in->f = or_v;
+    for (size_t k = 0; k < in->extra_args_len; ++k)
+      if (in->extra_args[k] == cand->node_phi)
+        in->extra_args[k] = or_v;
+    for (size_t k = 0; k < in->phi_incoming_len; ++k)
+      if (in->phi_incoming[k].value == cand->node_phi)
+        in->phi_incoming[k].value = or_v;
+  }
+
+  /*
+   * A loop exit reached by fallthrough has no label of its own. It needs one
+   * before the preheader can branch there; the insertion point is after every
+   * removed block, so the tombstone offsets below stay valid.
+   */
+  if (cand->exit_label_pos != SIZE_MAX) {
+    size_t s = cand->exit_label_pos;
+    memmove(&f->data[s + 1], &f->data[s], (f->len - s) * sizeof(*f->data));
+    f->len += 1;
+    f->data[s] = (nyr_inst_t){.op = NYIR_LABEL,
+                              .dst = -1,
+                              .a = -1,
+                              .b = -1,
+                              .c = -1,
+                              .d = -1,
+                              .e = -1,
+                              .f = -1,
+                              .imm = cand->exit_label};
+    f->data[s].effects = nyr_inst_effects(&f->data[s]);
+  }
+  size_t at = cand->at;
+  memmove(&f->data[at + count], &f->data[at],
+          (f->len - at) * sizeof(*f->data));
+  f->len += count;
+  size_t w = at;
+  f->data[w++] = (nyr_inst_t){.op = NYIR_CONST_I64,
+                              .dst = mask_v,
+                              .a = -1,
+                              .b = -1,
+                              .c = -1,
+                              .d = -1,
+                              .e = -1,
+                              .f = -1,
+                              .imm = mask};
+  f->data[w++] = (nyr_inst_t){.op = NYIR_AND_I64,
+                              .dst = and_v,
+                              .a = cand->key,
+                              .b = mask_v,
+                              .c = -1,
+                              .d = -1,
+                              .e = -1,
+                              .f = -1};
+  f->data[w++] = (nyr_inst_t){.op = NYIR_CONST_I64,
+                              .dst = shift_v,
+                              .a = -1,
+                              .b = -1,
+                              .c = -1,
+                              .d = -1,
+                              .e = -1,
+                              .f = -1,
+                              .imm = shifted};
+  f->data[w++] = (nyr_inst_t){.op = NYIR_OR_I64,
+                              .dst = or_v,
+                              .a = and_v,
+                              .b = shift_v,
+                              .c = -1,
+                              .d = -1,
+                              .e = -1,
+                              .f = -1};
+  if (cand->explicit_br) {
+    f->data[at + count].imm = cand->exit_label;
+  } else {
+    f->data[w++] = (nyr_inst_t){.op = NYIR_BR,
+                                .dst = -1,
+                                .a = -1,
+                                .b = -1,
+                                .c = -1,
+                                .d = -1,
+                                .e = -1,
+                                .f = -1,
+                                .imm = cand->exit_label,
+                                .effects = NYIR_EFFECT_CONTROL};
+  }
+  for (size_t k = at; k < at + count; ++k)
+    f->data[k].effects = nyr_inst_effects(&f->data[k]);
+
+  /*
+   * Tombstone the loop; later compaction reclaims the NOPs. Nothing in the
+   * removed blocks is referenced from outside (checked by the caller).
+   *
+   * An exit label may sit inside the removed region's instruction span (the
+   * exit is often the header's fallthrough), so map each original index
+   * through both insertions instead of assuming a single offset.
+   */
+  size_t label_at = cand->exit_label_pos;
+  for (size_t b = 0; b < cfg->block_count; ++b) {
+    if (!in_loop[b])
+      continue;
+    for (size_t i = cfg->block_start[b]; i < cfg->block_end[b]; ++i) {
+      size_t shift = label_at != SIZE_MAX && i >= label_at ? 1 : 0;
+      (void)nyr_erase_instruction(f, i + count + shift);
+    }
+  }
+  return true;
+}
+
+/*
+ * Exact trip count for a descending induction variable that lands on its
+ * limit. This mirrors compute_trip() in scev.c, but takes the start value
+ * from the induction phi's preheader incoming because SCEV only publishes
+ * `init` when it proved the constant on its own path.
+ */
+static bool bitasm_trip_count(const nyr_func_t *f, const int *defs,
+                              const nyr_scev_loop_t *loop,
+                              const nyr_inst_t *iv_phi, int64_t pre_label,
+                              uint64_t *out, int64_t *start_out) {
+  if (!loop->limit_is_const || loop->step >= 0 || !iv_phi ||
+      iv_phi->phi_incoming_len != 2)
+    return false;
+  int64_t start = 0;
+  bool found = false;
+  for (size_t k = 0; k < iv_phi->phi_incoming_len; ++k)
+    if (iv_phi->phi_incoming[k].predecessor_label == pre_label) {
+      if (!const_i64_val(f, defs, iv_phi->phi_incoming[k].value, &start))
+        return false;
+      found = true;
+    }
+  if (!found)
+    return false;
+  __int128 mag = -(__int128)loop->step;
+  __int128 limit = loop->limit;
+  __int128 n = 0;
+  if (loop->predicate == NYIR_CMP_GE) {
+    if (start < limit)
+      return false;
+    n = (start - limit) / mag + 1;
+  } else if (loop->predicate == NYIR_CMP_GT) {
+    if (start <= limit)
+      return false;
+    n = (start - limit + mag - 1) / mag;
+  } else {
+    return false;
+  }
+  if (n < 1 || n > 62)
+    return false;
+  __int128 exit_value = (__int128)start + n * loop->step;
+  if (exit_value < INT64_MIN || exit_value > INT64_MAX)
+    return false;
+  *out = (uint64_t)n;
+  if (start_out)
+    *start_out = start;
+  return true;
+}
+
+/*
+ * Fold one bit-reassembly loop. Returns true when a loop was removed; the
+ * caller then rebuilds its analyses because instruction indices moved.
+ */
+#define BITASM_REJECT(why)                                \
+  do {                                                    \
+    if (nir_bitasm_trace())                               \
+      fprintf(stderr, "[bitasm] reject label=%lld: %s\n", \
+              (long long)cfg.block_label[header], why);   \
+    goto bitasm_next_loop;                                \
+  } while (0)
+
+static bool nir_bitasm_fold_once(nyr_func_t *f) {
+  nyr_cfg_t cfg = {0};
+  nyr_scev_info_t info = {0};
+  nyr_use_def_t uses = {0};
+  int *defs = nyr_build_defs(f);
+  if (!defs || !nyr_cfg_build(f, &cfg) || !nyr_scev_analyze(f, &info) ||
+      !nyr_build_use_def(f, &uses)) {
+    free(defs);
+    nyr_cfg_free(&cfg);
+    nyr_scev_free(&info);
+    nyr_use_def_free(&uses);
+    return false;
+  }
+  if (nir_bitasm_trace())
+    fprintf(stderr, "[bitasm] enter len=%zu loops=%zu\n", f->len, info.count);
+  bool *in_loop = calloc(cfg.block_count, sizeof(*in_loop));
+  bool applied = false;
+  if (in_loop) {
+    for (size_t li = 0; li < info.count && !applied; ++li) {
+      const nyr_scev_loop_t *loop = &info.loops[li];
+      if (nir_bitasm_trace() && loop->step == -1)
+        fprintf(stderr,
+                "[bitasm] desc label=%lld limit=%lld const=%d tripk=%d "
+                "trip=%llu step=%lld\n",
+                (long long)cfg.block_label[loop->header_block],
+                (long long)loop->limit, loop->limit_is_const ? 1 : 0,
+                loop->trip_count_known ? 1 : 0,
+                (unsigned long long)loop->trip_count, (long long)loop->step);
+      if (loop->step != -1 || !loop->limit_is_const || loop->iv < 0)
+        continue;
+      if (loop->header_block >= cfg.block_count ||
+          loop->preheader_block >= cfg.block_count)
+        continue;
+      memset(in_loop, 0, cfg.block_count * sizeof(*in_loop));
+      if (nir_bitasm_trace())
+        bitasm_dump_block(f, &cfg, loop->header_block, "header");
+      if (!nyr_cfg_natural_loop_blocks(&cfg, loop->latch_block,
+                                       loop->header_block, in_loop,
+                                       cfg.block_count))
+        continue;
+      size_t pre = loop->preheader_block;
+      size_t header = loop->header_block;
+      /*
+       * The preheader is the only entry and the loop has one exit.
+       */
+      if (cfg.succ_offsets[pre + 1] - cfg.succ_offsets[pre] != 1 ||
+          cfg.succ_blocks[cfg.succ_offsets[pre]] != header)
+        continue;
+      size_t exit_block = SIZE_MAX;
+      bool multi_exit = false;
+      for (size_t pi = cfg.succ_offsets[header];
+           pi < cfg.succ_offsets[header + 1]; ++pi) {
+        size_t s = cfg.succ_blocks[pi];
+        if (in_loop[s])
+          continue;
+        if (exit_block != SIZE_MAX)
+          multi_exit = true;
+        exit_block = s;
+      }
+      if (multi_exit || exit_block == SIZE_MAX || exit_block >= cfg.block_count)
+        continue;
+      for (size_t b = 0; b < cfg.block_count && !multi_exit; ++b) {
+        if (!in_loop[b] || b == header)
+          continue;
+        for (size_t e = cfg.succ_offsets[b]; e < cfg.succ_offsets[b + 1]; ++e) {
+          size_t succ = cfg.succ_blocks[e];
+          if (!in_loop[succ] || (succ <= b &&
+                                (b != loop->latch_block || succ != header))) {
+            multi_exit = true;
+            break;
+          }
+        }
+      }
+      if (multi_exit)
+        continue;
+      /*
+       * Adding the preheader as a new predecessor of the exit must not
+       * invalidate an existing PHI, so require a PHI-free exit.
+       */
+      bool exit_has_phi = false;
+      for (size_t i = cfg.block_start[exit_block];
+           i < cfg.block_end[exit_block]; ++i)
+        if (f->data[i].op == NYIR_PHI)
+          exit_has_phi = true;
+      if (exit_has_phi)
+        continue;
+      bool pure = bitasm_loop_is_pure(f, &cfg, in_loop);
+      if (pure && nir_bitasm_trace())
+        fprintf(stderr, "[bitasm] pure label=%lld\n",
+                (long long)cfg.block_label[header]);
+      if (!pure) {
+        if (nir_bitasm_trace())
+          fprintf(stderr, "[bitasm] reject label=%lld: impure loop\n",
+                  (long long)cfg.block_label[header]);
+        continue;
+      }
+      /*
+       * Exactly one non-induction header PHI holds the assembled value.
+       */
+      int node_phi = -1;
+      int other_phis = 0;
+      const nyr_inst_t *iv_phi = NULL;
+      for (size_t i = cfg.block_start[header]; i < cfg.block_end[header];
+           ++i) {
+        const nyr_inst_t *in = &f->data[i];
+        if (in->op != NYIR_PHI)
+          continue;
+        if (in->dst == loop->iv) {
+          iv_phi = in;
+          continue;
+        }
+        node_phi = (int)i;
+        other_phis++;
+      }
+      if (!iv_phi)
+        BITASM_REJECT("no induction phi");
+      if (node_phi < 0 || other_phis != 1)
+        BITASM_REJECT("header phi count");
+      /*
+       * Exact trip count for the descending recurrence, taken from the
+       * induction phi when SCEV did not publish one.
+       */
+      uint64_t trip = 0;
+      int64_t iv_start = 0;
+      if (!bitasm_trip_count(f, defs, loop, iv_phi, cfg.block_label[pre],
+                             &trip, &iv_start) || iv_start != (int64_t)trip - 1)
+        BITASM_REJECT("bit window is not a descending sequence through zero");
+      const nyr_inst_t *phi = &f->data[(size_t)node_phi];
+      if (phi->phi_incoming_len != 2)
+        BITASM_REJECT("state phi arity");
+      int64_t pre_label = cfg.block_label[pre];
+      int init_v = -1;
+      int back_v = -1;
+      for (size_t k = 0; k < 2; ++k) {
+        if (phi->phi_incoming[k].predecessor_label == pre_label)
+          init_v = phi->phi_incoming[k].value;
+        else
+          back_v = phi->phi_incoming[k].value;
+      }
+      if (init_v < 0 || back_v < 0)
+        BITASM_REJECT("preheader incoming");
+      int64_t init = 0;
+      if (!const_i64_val(f, defs, init_v, &init))
+        BITASM_REJECT("init not constant");
+      /*
+       * Two equivalent backedge forms are accepted:
+       *   arithmetic: node_next = 2*node + ((key >> iv) & 1)
+       *   if-converted: node_next = select(bit != 0, 2*node + 1, 2*node)
+       * The frontend uses the arithmetic form once the diamond is folded.
+       */
+      const nyr_inst_t *back = bitasm_def(f, defs, back_v);
+      /* Signed 32-bit storage is transparent when even the maximum possible
+       * final assembly fits in a nonnegative int32_t.
+       */
+      int64_t right_shift = 0, left_shift = 0;
+      if (back && back->op == NYIR_SAR_I64 && init >= 0 &&
+          (((__int128)init + 1) << trip) - 1 <= INT32_MAX &&
+          const_i64_val(f, defs, back->b, &right_shift) && right_shift == 32) {
+        const nyr_inst_t *left = bitasm_def(f, defs, back->a);
+        if (left && left->op == NYIR_SHL_I64 &&
+            const_i64_val(f, defs, left->b, &left_shift) && left_shift == 32)
+          back = bitasm_def(f, defs, left->a);
+      }
+      int key = -1;
+      bool matched = false;
+      if (back && (back->op == NYIR_ADD_I64 || back->op == NYIR_OR_I64)) {
+        int a = idiom_root_copy(f, defs, back->a);
+        int b = idiom_root_copy(f, defs, back->b);
+        if (bitasm_is_double(f, defs, a, phi->dst) &&
+            bitasm_bit_expr(f, defs, b, loop->iv, 0, iv_start, &key))
+          matched = true;
+        else if (bitasm_is_double(f, defs, b, phi->dst) &&
+                 bitasm_bit_expr(f, defs, a, loop->iv, 0, iv_start, &key))
+          matched = true;
+      }
+      if (!matched && back && back->op == NYIR_SELECT_I64) {
+        bool inc_true = false;
+        bool inc_false = false;
+        bool bit_true = false;
+        if (bitasm_arm(f, defs, back->b, phi->dst, &inc_true) &&
+            bitasm_arm(f, defs, back->c, phi->dst, &inc_false) &&
+            inc_true != inc_false &&
+            bitasm_bit_test(f, defs, back->a, loop->iv, 0, iv_start,
+                            &bit_true, &key) &&
+            inc_true == bit_true)
+          matched = true;
+      }
+      if (!matched)
+        matched = bitasm_phi_choice(f, defs, &cfg, back, loop->latch_block,
+                                    phi->dst, loop->iv, 0, iv_start, &key);
+      if (!matched) {
+        if (nir_bitasm_trace()) {
+          int root = idiom_root_copy(f, defs, back_v);
+          fprintf(stderr, "[bitasm] backedge v=%d root=%d defop=%d ivphi=%d "
+                          "nodephi=%d\n",
+                  back_v, root, back ? (int)back->op : -1, loop->iv,
+                  phi->dst);
+          fprintf(stderr, "[bitasm] --body--\n");
+          for (size_t bb = 0; bb < cfg.block_count; ++bb)
+            if (in_loop[bb])
+              bitasm_dump_block(f, &cfg, bb, "body");
+        }
+        BITASM_REJECT("backedge is not a bit assembly");
+      }
+      /*
+       * The key must be invariant: defined outside and dominating the loop.
+       */
+      int key_di = defs[key];
+      if (key_di < 0 || (size_t)key_di >= f->len)
+        BITASM_REJECT("key has no definition");
+      size_t key_block = cfg.inst_block[key_di];
+      if (in_loop[key_block] || !nyr_cfg_dominates(&cfg, key_block, header))
+        BITASM_REJECT("key is not loop invariant");
+      /*
+       * Nothing computed in the loop may be observed after it. The assembled
+       * value is rewritten, so it is the one permitted escape.
+       */
+      bool escapes = false;
+      for (int v = 0; v < f->next_value && !escapes; ++v) {
+        if (v == phi->dst)
+          continue;
+        int di = defs[v];
+        if (di < 0 || (size_t)di >= f->len)
+          continue;
+        if (!in_loop[cfg.inst_block[di]])
+          continue;
+        if ((size_t)v >= uses.value_count)
+          continue;
+        for (size_t u = uses.offsets[v]; u < uses.offsets[v + 1]; ++u) {
+          size_t user = uses.users[u];
+          if (user >= f->len)
+            continue;
+          if (!in_loop[cfg.inst_block[user]]) {
+            escapes = true;
+            break;
+          }
+        }
+      }
+      if (escapes)
+        BITASM_REJECT("loop value escapes");
+      /*
+       * Locate the insertion point: the preheader terminator when it branches
+       * to the header, otherwise one past the preheader's last instruction.
+       */
+      size_t term = nyr_block_last_non_nop(f, &cfg, pre);
+      int64_t exit_label = cfg.block_label[exit_block];
+      size_t exit_label_pos = SIZE_MAX;
+      if (exit_label < 0) {
+        exit_label = nyr_fresh_label(f);
+        exit_label_pos = cfg.block_start[exit_block];
+      }
+      nir_bitasm_cand_t cand = {.node_phi = phi->dst,
+                                .key = key,
+                                .init = init,
+                                .trip = trip,
+                                .exit_label_pos = exit_label_pos,
+                                .exit_label = exit_label};
+      if (term > cfg.block_start[pre] &&
+          f->data[term - 1].op == NYIR_BR &&
+          f->data[term - 1].imm == cfg.block_label[header]) {
+        cand.explicit_br = true;
+        cand.at = term - 1;
+      } else {
+        cand.explicit_br = false;
+        cand.at = cfg.block_end[pre];
+      }
+      /*
+       * The insertion must precede every removed instruction so the fixed
+       * tombstone offset stays correct.
+       */
+      bool at_ok = true;
+      for (size_t b = 0; b < cfg.block_count; ++b)
+        if (in_loop[b] && cfg.block_start[b] < cand.at)
+          at_ok = false;
+      if (!at_ok)
+        BITASM_REJECT("loop precedes preheader in layout");
+      if (bitasm_apply(f, &cfg, in_loop, &cand)) {
+        applied = true;
+        if (nir_bitasm_trace())
+          fprintf(stderr,
+                  "[bitasm] fold trip=%llu init=%lld key=v%d exit=%lld\n",
+                  (unsigned long long)cand.trip, (long long)cand.init, key,
+                  (long long)cand.exit_label);
+      }
+    bitasm_next_loop:;
+    }
+    free(in_loop);
+  }
+  free(defs);
+  nyr_cfg_free(&cfg);
+  nyr_scev_free(&info);
+  nyr_use_def_free(&uses);
+  return applied;
+}
+
+static bool nir_loop_bit_assembly(nyr_func_t *f) {
+  if (!f || f->next_value <= 0 || f->len < 8)
+    return true;
+  /* Skip CFG/SCEV construction when the bit extraction is absent. The
+   * native C frontend can still have width-normalizing shifts on its IV.
+   */
+  int *defs = nyr_build_defs(f);
+  if (!defs)
+    return true;
+  bool has_bit = false;
+  for (size_t i = 0; i < f->len && !has_bit; ++i) {
+    const nyr_inst_t *in = &f->data[i];
+    if (in->op != NYIR_AND_I64)
+      continue;
+    for (int side = 0; side < 2 && !has_bit; ++side) {
+      const nyr_inst_t *shift = bitasm_def(f, defs, side ? in->a : in->b);
+      int64_t mask = 0;
+      has_bit = shift && shift->op == NYIR_SAR_I64 &&
+                const_i64_val(f, defs, side ? in->b : in->a, &mask) && mask == 1 &&
+                !const_i64_val(f, defs, shift->b, NULL);
+    }
+  }
+  free(defs);
+  if (!has_bit)
+    return true;
+  if (f->untagged_values)
+    nyr_bits_simplify(f);
+  /*
+   * Each fold moves instruction indices, so rebuild before the next candidate.
+   */
+  for (size_t round = 0; round < 8; ++round)
+    if (!nir_bitasm_fold_once(f))
+      break;
+  return true;
+}
+
+/*
  * Canonicalize `iv * C` (C a power of 2 >= 2) to `iv << log2(C)` inside
  * a counted positive-step natural loop.  Exact under Nytrix's wrapping i64
  * multiply for any shift in [1, 63): (iv * 2^s) mod 2^64 == (iv << s).
@@ -193,6 +1032,8 @@ bool nyr_loop_idiom(nyr_func_t *f) {
    * local pattern shape. Applied to an arbitrary loaded value it
    * changed results outright.
    */
+  if (getenv("NYTRIX_NO_BIT_ASSEMBLY") == NULL)
+    (void)nir_loop_bit_assembly(f);
   return true;
 }
 
@@ -5242,7 +6083,9 @@ bool nyr_loop_unroll_ssa(nyr_func_t *f) {
       bool unsafe_division = false;
       for (size_t k = loop_begin; k <= loop_end; ++k) {
         const nyr_inst_t *in = &f->data[k];
-        /* Remainder by a proven-positive divisor cannot trap either. */
+        /*
+         * Remainder by a proven-positive divisor cannot trap either.
+         */
         if (in->op == NYIR_MOD_I64 && getenv("NYTRIX_NO_UNROLL_MOD")) {
           unsafe_division = true;
           break;

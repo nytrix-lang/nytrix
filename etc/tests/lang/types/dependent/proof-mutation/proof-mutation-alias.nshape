@@ -1,7 +1,7 @@
 shape proof_mutation_non_aliasing {
   family "runtime/language"
   generator "embedded"
-  features ["ny", "test", "proof", "dependent"]
+  features ["ny", "test", "dependent", "proof"]
   template ny-test-case
   flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
   expect compile_and_run

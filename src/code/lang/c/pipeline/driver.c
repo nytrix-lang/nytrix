@@ -5,8 +5,8 @@
 #include "code/lang/c/parser/parse.h"
 
 #include "base/version.h"
-#include "code/backend/core/internal.h"
 #include "code/backend/core/api.h"
+#include "code/backend/core/internal.h"
 #include "code/backend/core/nyr.h"
 #include "code/backend/lower/machine.h"
 #include "code/backend/mach/object.h"
@@ -327,8 +327,8 @@ typedef struct {
   bool function_return_thunk_extern;
   bool indirect_branch_cs_prefix;
   bool cf_protection_branch;
-  bool profile_functions; /* -pg: call the profiling entry hook. */
-  bool fentry_calls;      /* -mfentry: use __fentry__ instead of mcount. */
+  bool profile_functions;   /* -pg: call the profiling entry hook. */
+  bool fentry_calls;        /* -mfentry: use __fentry__ instead of mcount. */
   unsigned stack_protector; /* 0: off, 1: frame objects, 2: strong, 3: all. */
   bool stack_guard_global;
   bool stack_guard_gs;
@@ -336,6 +336,7 @@ typedef struct {
   const char *stack_guard_symbol;
   bool dump_macros;
   bool print_file_name_plugin;
+  bool assembler_fatal_warnings;
 } nyc_driver_t;
 
 static nyr_inst_t nyc_guard_inst(nyr_op_t op) {
@@ -408,15 +409,15 @@ static bool nyc_protect_stack(nyr_func_t *func, const nyc_driver_t *driver,
       }
     }
   }
-  if (returns > (SIZE_MAX - 5) / 5 || func->len > SIZE_MAX - 5 - returns * 5 ||
-      func->len + 5 + returns * 5 > SIZE_MAX / sizeof(*func->data) ||
+  if (returns > (SIZE_MAX - 6) / 5 || func->len > SIZE_MAX - 6 - returns * 5 ||
+      func->len + 6 + returns * 5 > SIZE_MAX / sizeof(*func->data) ||
       func->next_value > INT_MAX - 2 ||
       returns > (size_t)(INT_MAX - func->next_value - 2) / 4 ||
       label == INT64_MAX) {
     snprintf(err, err_len, "stack protector exceeds native IR limits");
     return false;
   }
-  size_t capacity = func->len + 5 + returns * 5, len = 0;
+  size_t capacity = func->len + 6 + returns * 5, len = 0;
   nyr_inst_t *data = malloc(capacity * sizeof(*data));
   if (!data) {
     snprintf(err, err_len, "out of memory adding stack protection");
@@ -457,6 +458,11 @@ static bool nyc_protect_stack(nyr_func_t *func, const nyc_driver_t *driver,
   failure = nyc_guard_inst(NYIR_CALL);
   failure.symbol = "__stack_chk_fail";
   failure.flags = NYIR_INST_F_EXTERN;
+  data[len++] = failure;
+  /* A returning failure hook must not fall through to a normal epilogue. */
+  failure = nyc_guard_inst(NYIR_INLINE_ASM);
+  failure.symbol = "ud2";
+  failure.effects = NYIR_EFFECT_CONTROL | NYIR_EFFECT_MAY_TRAP;
   data[len++] = failure;
   free(func->data);
   func->data = data;
@@ -524,8 +530,7 @@ static bool nyc_setup_macro_enabled(const nyc_driver_t *driver) {
   for (size_t i = 0; i < driver->macro_count; ++i) {
     const nyc_macro_option_t *option = &driver->macros[i];
     const char *text = option->text;
-    if (strncmp(text, "_SETUP", 6) != 0 ||
-        (text[6] != '\0' && text[6] != '='))
+    if (strncmp(text, "_SETUP", 6) != 0 || (text[6] != '\0' && text[6] != '='))
       continue;
     enabled = !option->undefine;
   }
@@ -541,7 +546,7 @@ static void usage(FILE *file) {
 static bool nyc_assemble_source(const char *source, const char *output,
                                 const char *target,
                                 const char *const *include_dirs,
-                                size_t include_count) {
+                                size_t include_count, bool fatal_warnings) {
 #if defined(__unix__) || defined(__APPLE__)
   nyr_target_t host = {0};
   char target_err[256] = {0};
@@ -558,11 +563,11 @@ static bool nyc_assemble_source(const char *source, const char *output,
     fprintf(stderr, "nyc: assembly input currently requires x86 ELF\n");
     return false;
   }
-  if (include_count > (SIZE_MAX - 5) / 2) {
+  if (include_count > (SIZE_MAX - 7) / 2) {
     fputs("nyc: too many assembler include directories\n", stderr);
     return false;
   }
-  size_t arg_count = 5 + include_count * 2;
+  size_t arg_count = 5 + fatal_warnings + include_count * 2;
   char **args = calloc(arg_count + 1, sizeof(*args));
   if (!args) {
     fputs("nyc: out of memory preparing assembler command\n", stderr);
@@ -571,6 +576,8 @@ static bool nyc_assemble_source(const char *source, const char *output,
   size_t at = 0;
   args[at++] = "as";
   args[at++] = abi == NYC_ABI_I386 ? "--32" : "--64";
+  if (fatal_warnings)
+    args[at++] = "--fatal-warnings";
   for (size_t i = 0; i < include_count; ++i) {
     args[at++] = "-I";
     args[at++] = (char *)include_dirs[i];
@@ -608,6 +615,7 @@ static bool nyc_assemble_source(const char *source, const char *output,
   (void)target;
   (void)include_dirs;
   (void)include_count;
+  (void)fatal_warnings;
   fputs("nyc: assembly input is unsupported on this platform\n", stderr);
   return false;
 #endif
@@ -624,8 +632,7 @@ static bool nyc_preprocess_assembly(const char *source, const char *output,
                                     const nyc_driver_t *driver,
                                     const char *dependency_target) {
 #if defined(__unix__) || defined(__APPLE__)
-  size_t capacity = 16 + (driver->include_count +
-                          driver->forced_include_count +
+  size_t capacity = 16 + (driver->include_count + driver->forced_include_count +
                           driver->macro_count) *
                              2;
   char **args = calloc(capacity + 1, sizeof(*args));
@@ -637,6 +644,12 @@ static bool nyc_preprocess_assembly(const char *source, const char *output,
   args[at++] = "cpp";
   args[at++] = "-x";
   args[at++] = "assembler-with-cpp";
+  if (driver->code16)
+    args[at++] = "-m16";
+  else if (driver->target && nyc_abi_for_target(driver->target) == NYC_ABI_I386)
+    args[at++] = "-m32";
+  else if (driver->require_x86_64)
+    args[at++] = "-m64";
   if (output) {
     args[at++] = "-o";
     args[at++] = (char *)output;
@@ -1412,11 +1425,12 @@ write_c_function_assembly(nyr_writer_t *assembly, const char *function_assembly,
 static bool write_c_unit_assembly(
     const nyc_unit_t *unit, const ny_native_target_info_t *target,
     const char *path, bool verbose, bool code16, bool code16_low_stack,
-    bool position_independent,
-    unsigned i386_stack_alignment,
-    bool retpoline_indirect_calls,
-    bool retpoline_inline_calls, bool function_return_thunk_extern,
-    bool cf_protection_branch, char *err, size_t err_len) {
+    bool position_independent, unsigned i386_stack_alignment,
+    bool retpoline_indirect_calls, bool retpoline_inline_calls,
+    bool function_return_thunk_extern, bool cf_protection_branch, char *err,
+    size_t err_len) {
+  static const char *const float_helpers[] = {"__floatundidf", "__floatundisf"};
+  unsigned float_helper_refs = 0, float_helper_defs = 0;
   nyr_writer_t assembly = {0};
   bool ok = !code16 || nyr_put(&assembly, "\t.code16gcc\n");
   if (ok && unit->raw_file_scope_asm)
@@ -1425,8 +1439,6 @@ static bool write_c_unit_assembly(
     ok = write_assembly_data(&assembly, &unit->data[i], target, err, err_len);
   }
   for (size_t i = 0; ok && i < unit->count; ++i) {
-    if (unit->function_no_emit && unit->function_no_emit[i])
-      continue;
     bool is_local = unit->function_local && unit->function_local[i];
     bool is_inline = unit->function_inline && unit->function_inline[i];
     if (is_local) {
@@ -1479,13 +1491,22 @@ static bool write_c_unit_assembly(
       if (target->target == NY_NATIVE_TARGET_X86_64) {
         bool emitted_machine = false;
         bool has_memory_access = false;
-        for (size_t inst = 0; inst < unit->funcs[i].len; ++inst)
+        for (size_t h = 0; h < sizeof(float_helpers) / sizeof(*float_helpers);
+             ++h)
+          if (strcmp(unit->names[i], float_helpers[h]) == 0)
+            float_helper_defs |= 1u << h;
+        for (size_t inst = 0; inst < unit->funcs[i].len; ++inst) {
+          const nyr_inst_t *in = &unit->funcs[i].data[inst];
           has_memory_access |=
-              unit->funcs[i].data[inst].op == NYIR_ADDR_LOCAL ||
-              unit->funcs[i].data[inst].op == NYIR_LOAD_I64 ||
-              unit->funcs[i].data[inst].op == NYIR_STORE_I64 ||
-              unit->funcs[i].data[inst].op == NYIR_ALLOCA ||
-              unit->funcs[i].data[inst].op == NYIR_COPY_STRUCT;
+              in->op == NYIR_ADDR_LOCAL || in->op == NYIR_LOAD_I64 ||
+              in->op == NYIR_STORE_I64 || in->op == NYIR_ALLOCA ||
+              in->op == NYIR_COPY_STRUCT;
+          if (in->op == NYIR_CALL && in->symbol)
+            for (size_t h = 0;
+                 h < sizeof(float_helpers) / sizeof(*float_helpers); ++h)
+              if (strcmp(in->symbol, float_helpers[h]) == 0)
+                float_helper_refs |= 1u << h;
+        }
         if (strcmp(target->object_format, "elf") == 0 &&
             target->abi == NY_NATIVE_ABI_SYSV &&
             (!has_memory_access || !getenv("NYC_DISABLE_MACH_MEM_ASM")) &&
@@ -1551,12 +1572,10 @@ static bool write_c_unit_assembly(
                    unit->names[i]);
       } else {
         nyr_writer_t function_assembly = {0};
-        ok = nyr_i386_emit_ir_with_linkage(&function_assembly, target,
-                                           &unit->funcs[i], unit->names[i],
-                                           false, is_local, position_independent,
-                                           i386_stack_alignment,
-                                           code16_low_stack,
-                                           err, err_len);
+        ok = nyr_i386_emit_ir_with_linkage(
+            &function_assembly, target, &unit->funcs[i], unit->names[i], false,
+            is_local, position_independent, i386_stack_alignment,
+            code16_low_stack, err, err_len);
         if (ok)
           ok = write_c_function_assembly(
               &assembly, function_assembly.data ? function_assembly.data : "",
@@ -1572,29 +1591,26 @@ static bool write_c_unit_assembly(
       ok = nyr_printf(&assembly, "\t.weak %s%s\n", target->symbol_prefix,
                       unit->names[i]);
   }
-  if (ok && target->target == NY_NATIVE_TARGET_X86_64) {
-    const char *r = function_return_thunk_extern ? "\tjmp\t__x86_return_thunk\n"
-                                                 : "\tret\n";
-    const char *endbr = cf_protection_branch ? "\tendbr64\n" : "";
-    char helpers[1024];
-    snprintf(helpers, sizeof(helpers),
-             "\t.text\n"
-             "\t.weak __floatundidf\n\t.type "
-             "__floatundidf,@function\n__floatundidf:\n%s"
-             "\ttestq %%rdi, %%rdi\n\tjs 1f\n\tcvtsi2sdq %%rdi, %%xmm0\n%s"
-             "1:\n\tmovq %%rdi, %%rax\n\tmovq %%rdi, %%rcx\n\tandq $1, "
-             "%%rcx\n\tshrq $1, %%rax\n\torq %%rcx, %%rax\n\tcvtsi2sdq %%rax, "
-             "%%xmm0\n\taddsd %%xmm0, %%xmm0\n%s"
-             "\t.size __floatundidf, .-__floatundidf\n"
-             "\t.weak __floatundisf\n\t.type "
-             "__floatundisf,@function\n__floatundisf:\n%s"
-             "\ttestq %%rdi, %%rdi\n\tjs 2f\n\tcvtsi2ssq %%rdi, %%xmm0\n%s"
-             "2:\n\tmovq %%rdi, %%rax\n\tmovq %%rdi, %%rcx\n\tandq $1, "
-             "%%rcx\n\tshrq $1, %%rax\n\torq %%rcx, %%rax\n\tcvtsi2ssq %%rax, "
-             "%%xmm0\n\taddss %%xmm0, %%xmm0\n%s"
-             "\t.size __floatundisf, .-__floatundisf\n",
-             endbr, r, r, endbr, r, r);
-    ok = nyr_put(&assembly, helpers);
+  /* Do not inject SSE into integer-only translation units. */
+  unsigned missing_float_helpers = float_helper_refs & ~float_helper_defs;
+  for (size_t h = 0; ok && missing_float_helpers;
+       ++h, missing_float_helpers >>= 1) {
+    if (!(missing_float_helpers & 1u))
+      continue;
+    const char *name = float_helpers[h];
+    const char *width = h == 0 ? "sd" : "ss";
+    const char *ret = function_return_thunk_extern
+                          ? "\tjmp\t__x86_return_thunk\n"
+                          : "\tret\n";
+    ok = nyr_printf(
+        &assembly,
+        "\t.text\n\t.weak %s\n\t.type %s,@function\n%s:\n%s"
+        "\ttestq %%rdi, %%rdi\n\tjs 1f\n\tcvtsi2%sq %%rdi, %%xmm0\n%s"
+        "1:\n\tmovq %%rdi, %%rax\n\tmovq %%rdi, %%rcx\n\tandq $1, %%rcx\n"
+        "\tshrq $1, %%rax\n\torq %%rcx, %%rax\n\tcvtsi2%sq %%rax, %%xmm0\n"
+        "\tadd%s %%xmm0, %%xmm0\n%s\t.size %s, .-%s\n",
+        name, name, name, cf_protection_branch ? "\tendbr64\n" : "", width, ret,
+        width, width, ret, name, name);
   }
   for (size_t i = 0; ok && i < unit->alias_count; ++i) {
     const nyc_function_alias_t *alias = &unit->aliases[i];
@@ -1845,8 +1861,7 @@ static int compile_source(int argc, char **argv, int source_arg,
      * through GNU as (see the object-mode branch below), so it is a valid
      * whole-unit target whether the user asked for -S or -c.
      */
-    bool assembly_target =
-        abi == NYC_ABI_SYSV_X86_64 || abi == NYC_ABI_I386;
+    bool assembly_target = abi == NYC_ABI_SYSV_X86_64 || abi == NYC_ABI_I386;
     if (ok &&
         (!assembly_target ||
          !nyr_target_info_for_triple(triple, &target_info, err, sizeof(err)))) {
@@ -1883,7 +1898,8 @@ static int compile_source(int argc, char **argv, int source_arg,
           if (unit.function_noinline[i] ||
               nyc_func_uses_va_list(&unit.funcs[i]) ||
               (driver->optimize_size && !has_static_feature_asm &&
-               !(unit.function_always_inline && unit.function_always_inline[i])) ||
+               !(unit.function_always_inline &&
+                 unit.function_always_inline[i])) ||
               (!unit.function_inline[i] && !has_static_feature_asm &&
                !auto_inline))
             continue;
@@ -1909,7 +1925,8 @@ static int compile_source(int argc, char **argv, int source_arg,
         snprintf(err, sizeof(err), "cannot prepare size optimization controls");
         ok = false;
       } else {
-        snprintf(size_disabled_passes, bytes, "%s,%s", disabled, user ? user : "");
+        snprintf(size_disabled_passes, bytes, "%s,%s", disabled,
+                 user ? user : "");
         nyr_set_pass_controls(size_disabled_passes, NULL);
       }
     }
@@ -2095,10 +2112,10 @@ static int compile_source(int argc, char **argv, int source_arg,
       size_t original_count = inline_callee_count;
       for (size_t i = 0; i < unit.count; ++i) {
         const nyr_func_t *callee = &unit.funcs[i];
-        bool eligible = !unit.function_noinline[i] &&
-                        !nyc_func_uses_va_list(callee) &&
-                        (unit.function_local[i] ||
-                         (!driver->position_independent && !unit.function_weak[i]));
+        bool eligible =
+            !unit.function_noinline[i] && !nyc_func_uses_va_list(callee) &&
+            (unit.function_local[i] ||
+             (!driver->position_independent && !unit.function_weak[i]));
         size_t work = 0;
         for (size_t k = 0; eligible && k < callee->len; ++k) {
           const nyr_inst_t *in = &callee->data[k];
@@ -2107,7 +2124,8 @@ static int compile_source(int argc, char **argv, int source_arg,
             eligible &= in->imm > 0;
             work += 2;
             break;
-          case NYIR_BR: case NYIR_BR_IF: {
+          case NYIR_BR:
+          case NYIR_BR_IF: {
             bool internal = false;
             for (size_t target = 0; target < callee->len; ++target)
               internal |= callee->data[target].op == NYIR_LABEL &&
@@ -2116,7 +2134,9 @@ static int compile_source(int argc, char **argv, int source_arg,
             work += in->op == NYIR_BR_IF;
             break;
           }
-          case NYIR_LABEL: case NYIR_NOP: case NYIR_RET:
+          case NYIR_LABEL:
+          case NYIR_NOP:
+          case NYIR_RET:
           case NYIR_LOAD_LOCAL:
             break;
           default:
@@ -2134,10 +2154,11 @@ static int compile_source(int argc, char **argv, int source_arg,
           }
         eligible &= call_sites == 1;
         for (size_t c = 0; c < inline_callee_count; ++c)
-          if (inline_callees[c].func == callee) eligible = false;
+          if (inline_callees[c].func == callee)
+            eligible = false;
         if (eligible && work <= 112 && callee->len <= 224)
-          inline_callees[inline_callee_count++] = (nyr_inline_callee_t){
-              .name = unit.names[i], .func = callee};
+          inline_callees[inline_callee_count++] =
+              (nyr_inline_callee_t){.name = unit.names[i], .func = callee};
       }
       if (inline_callee_count > original_count) {
         nyr_inline_set_c_unit_abi(true);
@@ -2148,8 +2169,10 @@ static int compile_source(int argc, char **argv, int source_arg,
             continue;
           ok = nyr_inline_general(func) &&
                nyr_optimize_with_options(func, driver->optimization,
-                   driver->disable_vectorization ? NYR_OPT_DISABLE_VECTORIZATION : 0,
-                   err, sizeof(err));
+                                         driver->disable_vectorization
+                                             ? NYR_OPT_DISABLE_VECTORIZATION
+                                             : 0,
+                                         err, sizeof(err));
         }
         if (!ok && !err[0])
           snprintf(err, sizeof(err), "size-oriented C helper inlining failed");
@@ -2232,10 +2255,9 @@ static int compile_source(int argc, char **argv, int source_arg,
     }
     for (size_t i = 0; ok && driver->profile_functions && i < unit.count; ++i)
       if (!unit.function_no_instrument_function[i])
-        ok = nyc_instrument_entry(&unit.funcs[i],
-                                  driver->fentry_calls ? "__fentry__"
-                                                       : "mcount",
-                                  err, sizeof(err));
+        ok = nyc_instrument_entry(
+            &unit.funcs[i], driver->fentry_calls ? "__fentry__" : "mcount", err,
+            sizeof(err));
     for (size_t i = 0; ok && driver->stack_protector && i < unit.count; ++i)
       if (!unit.function_no_stack_protector[i])
         ok = nyc_protect_stack(&unit.funcs[i], driver, err, sizeof(err));
@@ -2243,10 +2265,10 @@ static int compile_source(int argc, char **argv, int source_arg,
       ok = write_c_unit_assembly(
           &unit, &target_info, output_path, driver->verbose_assembly,
           driver->code16, driver->code16 && nyc_setup_macro_enabled(driver),
-          driver->position_independent,
-          driver->i386_stack_alignment, driver->retpoline_indirect_calls,
-          driver->retpoline_inline_calls, driver->function_return_thunk_extern,
-          driver->cf_protection_branch, err, sizeof(err));
+          driver->position_independent, driver->i386_stack_alignment,
+          driver->retpoline_indirect_calls, driver->retpoline_inline_calls,
+          driver->function_return_thunk_extern, driver->cf_protection_branch,
+          err, sizeof(err));
     if (ok && !driver->assembly_output && abi == NYC_ABI_I386) {
       /*
        * i386 has a complete GNU assembly emitter but no direct i386 ELF
@@ -2264,19 +2286,20 @@ static int compile_source(int argc, char **argv, int source_arg,
             &unit, &target_info, i386_path, driver->verbose_assembly,
             driver->code16, driver->code16 && nyc_setup_macro_enabled(driver),
             driver->position_independent, driver->i386_stack_alignment,
-            driver->retpoline_indirect_calls,
-            driver->retpoline_inline_calls,
-            driver->function_return_thunk_extern,
-            driver->cf_protection_branch, err, sizeof(err));
+            driver->retpoline_indirect_calls, driver->retpoline_inline_calls,
+            driver->function_return_thunk_extern, driver->cf_protection_branch,
+            err, sizeof(err));
         if (ok)
           ok = nyc_assemble_source(i386_path, output_path, target,
-                                   driver->include_dirs, driver->include_count);
+                                   driver->include_dirs, driver->include_count,
+                                   driver->assembler_fatal_warnings);
         if (!ok && !err[0])
           snprintf(err, sizeof(err), "i386 assembly emission failed");
         unlink(i386_path);
       }
     } else if (ok && !driver->assembly_output) {
-      size_t data_count = unit.data_count + unit.variable_alias_count;
+      size_t function_alias_base = unit.data_count + unit.variable_alias_count;
+      size_t data_count = function_alias_base + unit.alias_count;
       nyr_c_object_data_t *data =
           data_count ? calloc(data_count, sizeof(*data)) : NULL;
       nyr_c_object_data_reloc_t **data_relocs =
@@ -2332,12 +2355,19 @@ static int compile_source(int argc, char **argv, int source_arg,
             .name = unit.variable_aliases[i].name,
             .alias_target = unit.variable_aliases[i].target,
             .is_local = unit.variable_aliases[i].is_local};
+      for (size_t i = 0; ok && i < unit.alias_count; ++i)
+        data[function_alias_base + i] =
+            (nyr_c_object_data_t){.name = unit.aliases[i].name,
+                                  .alias_target = unit.aliases[i].target,
+                                  .function_symbol = true,
+                                  .is_weak = unit.aliases[i].is_weak};
       if (ok)
         ok = nyr_native_emit_elf64_c_object_from_nirs_with_data(
             unit.funcs, (const char *const *)unit.names, unit.count,
             (const char *const *)unit.function_sections, unit.function_local,
-            driver->omit_frame_pointer, driver->position_independent,
-            driver->retpoline_indirect_calls, driver->retpoline_inline_calls,
+            unit.function_weak, driver->omit_frame_pointer,
+            driver->position_independent, driver->retpoline_indirect_calls,
+            driver->retpoline_inline_calls,
             driver->function_return_thunk_extern, driver->cf_protection_branch,
             data, data_count, &target_info, output_path, err, sizeof(err));
       bool asm_form =
@@ -2359,11 +2389,10 @@ static int compile_source(int argc, char **argv, int source_arg,
       for (size_t f = 0; f < unit.count && !section_bearing; ++f)
         for (size_t k = 0; k < unit.funcs[f].len && !section_bearing; ++k) {
           const nyr_inst_t *ins = &unit.funcs[f].data[k];
-          section_bearing =
-              ins->op == NYIR_INLINE_ASM && ins->symbol &&
-              (strstr(ins->symbol, "pushsection") != NULL ||
-               strstr(ins->symbol, ".section") != NULL ||
-               strstr(ins->symbol, "__bug_table") != NULL);
+          section_bearing = ins->op == NYIR_INLINE_ASM && ins->symbol &&
+                            (strstr(ins->symbol, "pushsection") != NULL ||
+                             strstr(ins->symbol, ".section") != NULL ||
+                             strstr(ins->symbol, "__bug_table") != NULL);
         }
       if (!ok && asm_form && (driver->kernel_model || !section_bearing)) {
         /*
@@ -2377,8 +2406,7 @@ static int compile_source(int argc, char **argv, int source_arg,
         char asm_err[512] = {0};
         int fd = mkstemp(asm_path);
         if (fd < 0) {
-          snprintf(err, sizeof(err),
-                   "cannot create temporary assembly file");
+          snprintf(err, sizeof(err), "cannot create temporary assembly file");
         } else {
           close(fd);
           bool asm_ok = true;
@@ -2388,20 +2416,22 @@ static int compile_source(int argc, char **argv, int source_arg,
             snprintf(err, sizeof(err),
                      "phi elimination failed for text assembly");
           } else if (!write_c_unit_assembly(
-                  &unit, &target_info, asm_path, driver->verbose_assembly,
-                  driver->code16,
-                  driver->code16 && nyc_setup_macro_enabled(driver),
-                  driver->position_independent, driver->i386_stack_alignment,
-                  driver->retpoline_indirect_calls,
-                  driver->retpoline_inline_calls,
-                  driver->function_return_thunk_extern,
-                  driver->cf_protection_branch, asm_err, sizeof(asm_err))) {
-            snprintf(err, sizeof(err),
-                     "text assembly emission failed: %s",
+                         &unit, &target_info, asm_path,
+                         driver->verbose_assembly, driver->code16,
+                         driver->code16 && nyc_setup_macro_enabled(driver),
+                         driver->position_independent,
+                         driver->i386_stack_alignment,
+                         driver->retpoline_indirect_calls,
+                         driver->retpoline_inline_calls,
+                         driver->function_return_thunk_extern,
+                         driver->cf_protection_branch, asm_err,
+                         sizeof(asm_err))) {
+            snprintf(err, sizeof(err), "text assembly emission failed: %s",
                      asm_err[0] ? asm_err : "unknown error");
           } else if (!nyc_assemble_source(asm_path, output_path, target,
                                           driver->include_dirs,
-                                          driver->include_count)) {
+                                          driver->include_count,
+                                          driver->assembler_fatal_warnings)) {
             snprintf(err, sizeof(err),
                      "assembling emitted text assembly failed");
           } else {
@@ -2483,8 +2513,8 @@ static int compile_source(int argc, char **argv, int source_arg,
     ok = write_dependency_file(&input, abi,
                                driver->dependency_target
                                    ? driver->dependency_target
-                                   : output_path ? output_path
-                                                 : argv[source_arg],
+                               : output_path ? output_path
+                                             : argv[source_arg],
                                driver->dependency_file, err, sizeof(err));
   if (!ok && err[0])
     fprintf(stderr, "%s: %s\n", argv[source_arg], err);
@@ -2509,6 +2539,12 @@ int main(int argc, char **argv) {
   int operand_count = 1;
   bool end_options = false;
   bool object_mode = false;
+  enum {
+    NYC_LANG_AUTO,
+    NYC_LANG_C,
+    NYC_LANG_ASM,
+    NYC_LANG_ASM_CPP
+  } language = NYC_LANG_AUTO;
   for (int argument = 1; argument < argc; ++argument) {
     const char *option = argv[argument];
     if (end_options || option[0] != '-' || !option[1]) {
@@ -2563,6 +2599,10 @@ int main(int argc, char **argv) {
     }
     if (strcmp(option, "-c") == 0) {
       object_mode = driver.compile_unit = true;
+      continue;
+    }
+    if (strcmp(option, "-Wa,--fatal-warnings") == 0) {
+      driver.assembler_fatal_warnings = true;
       continue;
     }
     if (strcmp(option, "-S") == 0) {
@@ -2670,7 +2710,15 @@ int main(int argc, char **argv) {
           result = 1;
           goto done;
         }
-      } else if (strcmp(argv[argument], "c") != 0) {
+      } else if (strcmp(argv[argument], "c") == 0) {
+        language = NYC_LANG_C;
+      } else if (strcmp(argv[argument], "assembler") == 0) {
+        language = NYC_LANG_ASM;
+      } else if (strcmp(argv[argument], "assembler-with-cpp") == 0) {
+        language = NYC_LANG_ASM_CPP;
+      } else if (strcmp(argv[argument], "none") == 0) {
+        language = NYC_LANG_AUTO;
+      } else {
         fprintf(stderr, "nyc: unsupported input language '%s'\n",
                 argv[argument]);
         goto done;
@@ -3038,29 +3086,31 @@ int main(int argc, char **argv) {
           stderr);
     goto done;
   }
-  if (driver.preprocess && operand_count == 2) {
+  if (operand_count == 2) {
     const char *input = operands[1];
     size_t input_len = strlen(input);
-    if (input_len >= 2 && input[input_len - 2] == '.' &&
-        input[input_len - 1] == 'S') {
-      result = nyc_preprocess_assembly(
-                   input, driver.output, &driver,
-                   driver.output ? driver.output : input)
-                   ? 0
-                   : 1;
-      goto done;
+    if (language == NYC_LANG_AUTO && input_len >= 2 &&
+        input[input_len - 2] == '.') {
+      if (input[input_len - 1] == 's')
+        language = NYC_LANG_ASM;
+      else if (input[input_len - 1] == 'S')
+        language = NYC_LANG_ASM_CPP;
     }
-  }
-  if (driver.compile_unit && !driver.preprocess && driver.output &&
-      operand_count == 2) {
-    const char *input = operands[1];
-    size_t input_len = strlen(input);
-    bool plain_assembly = input_len >= 2 && input[input_len - 2] == '.' &&
-                          input[input_len - 1] == 's';
-    bool preprocessed_assembly =
-        input_len >= 2 && input[input_len - 2] == '.' &&
-        input[input_len - 1] == 'S';
+    bool plain_assembly = language == NYC_LANG_ASM;
+    bool preprocessed_assembly = language == NYC_LANG_ASM_CPP;
     if (plain_assembly || preprocessed_assembly) {
+      if (driver.preprocess && preprocessed_assembly) {
+        result = nyc_preprocess_assembly(input, driver.output, &driver,
+                                         driver.output ? driver.output : input)
+                     ? 0
+                     : 1;
+        goto done;
+      }
+      if (!object_mode || driver.preprocess) {
+        fputs("nyc: assembler input requires -c, or -E with preprocessing\n",
+              stderr);
+        goto done;
+      }
       const char *assembly_input = input;
       char temp_path[] = "/tmp/nyc-assembly-XXXXXX";
       bool have_temp = false;
@@ -3081,9 +3131,9 @@ int main(int argc, char **argv) {
         }
         assembly_input = temp_path;
       }
-      result = nyc_assemble_source(assembly_input, driver.output,
-                                   driver.target, driver.include_dirs,
-                                   driver.include_count)
+      result = nyc_assemble_source(assembly_input, driver.output, driver.target,
+                                   driver.include_dirs, driver.include_count,
+                                   driver.assembler_fatal_warnings)
                    ? 0
                    : 1;
       if (have_temp)

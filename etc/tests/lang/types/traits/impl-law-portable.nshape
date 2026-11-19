@@ -1,7 +1,7 @@
 shape impl_law_verification_is_backend_independent {
   family "runtime/language"
   generator "embedded"
-  features ["ny", "test", "trait", "law", "backend-parity"]
+  features ["ny", "test", "backend-parity", "law", "trait"]
   template ny-test-case
   expect compile_and_run
   flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"

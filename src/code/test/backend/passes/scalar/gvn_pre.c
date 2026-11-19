@@ -1146,6 +1146,52 @@ static bool run_scalar_class_key_case(void) {
   return ok;
 }
 
+static bool run_dominated_loop_arith_case(nyr_op_t op, const char *name,
+                                          long long expected) {
+  nyr_func_t f;
+  nyr_opt_begin(&f);
+  int counter_addr = nyr_opt_const(&f, (int64_t)(intptr_t)&gvn_pre_counter);
+  int x = nyr_opt_const(&f, 17);
+  int one = nyr_opt_const(&f, 1);
+  int zero = nyr_opt_const(&f, 0);
+  emit_store(&f, counter_addr, one);
+  nyr_opt_br(&f, 10);
+  nyr_opt_label(&f, 10);
+  int first = nyr_opt_binop(&f, op, x, x);
+  int counter = emit_load(&f, counter_addr);
+  int more = nyr_opt_cmp(&f, counter, zero, NYIR_CMP_GT);
+  nyr_opt_br_if(&f, more, 20);
+  nyr_opt_label(&f, 30);
+  nyr_opt_ret(&f, first);
+  nyr_opt_label(&f, 20);
+  int copy = nyr_opt_emit_abc(&f, NYIR_COPY, x, -1, -1);
+  int second = nyr_opt_binop(&f, op, copy, x);
+  int next = nyr_opt_binop(&f, NYIR_SUB_I64, counter, one);
+  emit_store(&f, counter_addr, next);
+  nyr_opt_br(&f, 10);
+  bool ok = first >= 0 && second >= 0 &&
+            nyr_opt_verify(&f, name);
+  long long before = ok ? nyr_opt_eval(&f, name) : 0;
+  ok = ok && nyr_gvn_pre(&f) && nyr_opt_verify(&f, name);
+  long long after = ok ? nyr_opt_eval(&f, name) : 0;
+  size_t count = 0;
+  bool reused = false;
+  for (size_t i = 0; i < f.len; ++i) {
+    count += f.data[i].op == op;
+    if (f.data[i].dst == second)
+      reused = f.data[i].op == NYIR_COPY && f.data[i].a == first;
+  }
+  ok = ok && reused && count == (op == NYIR_SUB_I64 ? 2u : 1u) &&
+       before == expected && after == before;
+  if (!ok) {
+    fprintf(stderr, "[%s] ops=%zu before=%lld after=%lld\n", name, count,
+            before, after);
+    nyr_dump(stderr, &f, name);
+  }
+  nyr_ir_func_free(&f);
+  return ok;
+}
+
 int main(void) {
   return run_case("gvn-pre-load-diamond", false, false, 2, 1) &&
                  run_case("gvn-pre-load-store", true, false, 3, 0) &&
@@ -1155,6 +1201,9 @@ int main(void) {
                  run_address_taken_local_case() &&
                  run_forwarded_pointer_provenance_case() &&
                  run_loop_local_load_case() &&
+                 run_dominated_loop_arith_case(NYIR_MUL_I64, "gvn-loop-mul", 289) &&
+                 run_dominated_loop_arith_case(NYIR_ADD_I64, "gvn-loop-add", 34) &&
+                 run_dominated_loop_arith_case(NYIR_SUB_I64, "gvn-loop-sub", 0) &&
                  run_loop_reexecuted_load_case() &&
                  run_loop_header_write_before_reentry_case() &&
                  run_disjoint_global_store_case() &&

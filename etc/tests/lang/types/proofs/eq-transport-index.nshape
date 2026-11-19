@@ -1,7 +1,7 @@
 shape eq_transport_index {
   family "runtime/compiler"
   generator "embedded"
-  features ["ny", "proof", "equality", "transport", "dependent"]
+  features ["ny", "dependent", "equality", "proof", "transport"]
   template ny-test-case
   flags_matrix "--native-only; --native-only -O3; --native-backend=llvm --jit --jit-engine=orc; --wasm"
   expect compile_and_run

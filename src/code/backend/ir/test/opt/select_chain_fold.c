@@ -64,7 +64,9 @@ static bool check(bool bounded) {
             nyr_opt_verify(&f, "select-chain-after") &&
             run(&f, bounded, "after");
   size_t selects = ok ? count_selects(&f) : 0;
-  /* Bounded: one live select remains. Unbounded: the chain must stay. */
+  /*
+   * Bounded: one live select remains. Unbounded: the chain must stay.
+   */
   ok = ok && (bounded ? selects == 1 : selects == STEPS);
   if (!ok) {
     fprintf(stderr, "[select-chain-fold] %s chain kept %zu selects\n",

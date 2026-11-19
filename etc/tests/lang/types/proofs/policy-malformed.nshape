@@ -1,7 +1,7 @@
 shape proof_policy_malformed {
   family "runtime/proofs"
   generator "program"
-  features ["proofs", "policy", "malformed", "fail-closed"]
+  features ["fail-closed", "malformed", "policy", "proofs"]
   template ny-test-case
   expect compile_and_run
   source ny <<'NY'
@@ -79,7 +79,7 @@ NY
 shape proof_policy_malformed_strategy {
   family "runtime/proofs"
   generator "program"
-  features ["proofs", "policy", "malformed", "fail-closed"]
+  features ["fail-closed", "malformed", "policy", "proofs"]
   template ny-test-case
   expect compile_fail
   expect_message "malformed proof strategy"

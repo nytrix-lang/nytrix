@@ -29,12 +29,12 @@
 #include <stdio.h>
 #include <string.h>
 
-#define OV_REJECT(why)                                                         \
-  do {                                                                         \
-    if (getenv("NYTRIX_TRACE_OUTER_VEC"))                                      \
+#define OV_REJECT(why)                                                          \
+  do {                                                                          \
+    if (getenv("NYTRIX_TRACE_OUTER_VEC"))                                       \
       fprintf(stderr, "outer-vectorize: reject %s (line %d) len=%zu hdr=%zu\n", \
-              why, __LINE__, c->f->len, c->header);                          \
-    return false;                                                              \
+              why, __LINE__, c->f->len, c->header);                             \
+    return false;                                                               \
   } while (0)
 
 enum {
@@ -131,12 +131,16 @@ static const nyr_inst_t *ov_terminator(const ov_ctx_t *c, size_t b,
   return NULL;
 }
 
-/* Operands read by an instruction (excluding PHI incomings). */
+/*
+ * Operands read by an instruction (excluding PHI incomings).
+ */
 static int ov_operands(const nyr_inst_t *in, int out[6]) {
   int n = 0;
   const int ops[] = {in->a, in->b, in->c, in->d, in->e, in->f};
   size_t count = sizeof(ops) / sizeof(ops[0]);
-  /* CONST/LABEL/BR keep immediates in imm; ALLOCA/ADDR_* have no inputs. */
+  /*
+   * CONST/LABEL/BR keep immediates in imm; ALLOCA/ADDR_* have no inputs.
+   */
   switch (in->op) {
   case NYIR_CONST_I64:
   case NYIR_LABEL:
@@ -191,7 +195,9 @@ static bool ov_scalar_op_ok(const nyr_inst_t *in) {
   }
 }
 
-/* Analyse loop (latch -> header). Returns true when it is a candidate. */
+/*
+ * Analyse loop (latch -> header). Returns true when it is a candidate.
+ */
 static bool ov_analyse(ov_ctx_t *c, size_t latch, size_t header) {
   nyr_func_t *f = c->f;
   const nyr_cfg_t *cfg = &c->cfg;
@@ -203,7 +209,9 @@ static bool ov_analyse(ov_ctx_t *c, size_t latch, size_t header) {
   c->header = header;
   c->latch = latch;
   c->header = header;
-  /* One latch, one labeled outside predecessor. */
+  /*
+   * One latch, one labeled outside predecessor.
+   */
   size_t preheader = SIZE_MAX;
   for (size_t e = cfg->pred_offsets[header]; e < cfg->pred_offsets[header + 1];
        ++e) {
@@ -220,20 +228,26 @@ static bool ov_analyse(ov_ctx_t *c, size_t latch, size_t header) {
   if (preheader == SIZE_MAX || cfg->block_label[preheader] < 0)
     OV_REJECT("ov_analyse");
   c->preheader = preheader;
-  /* A preheader holding the horizontal reductions marks the scalar
-   * remainder loop of an earlier widening; never widen it again. */
+  /*
+   * A preheader holding the horizontal reductions marks the scalar
+   * remainder loop of an earlier widening; never widen it again.
+   */
   for (size_t i = cfg->block_start[preheader]; i < cfg->block_end[preheader];
        ++i)
     if (f->data[i].op == NYIR_VEC8_REDUCE_ADD_I64)
       OV_REJECT("ov_analyse");
   size_t insts = 0;
-  /* Every member block labeled; exactly one exit edge. */
+  /*
+   * Every member block labeled; exactly one exit edge.
+   */
   c->exit_block = c->cond_block = SIZE_MAX;
   for (size_t b = 0; b < cfg->block_count; ++b) {
     if (!c->member[b])
       continue;
-    /* Unlabeled blocks are fallthrough-only; clones get labels and
-     * explicit branches. */
+    /*
+     * Unlabeled blocks are fallthrough-only; clones get labels and
+     * explicit branches.
+     */
     insts += cfg->block_end[b] - cfg->block_start[b];
     for (size_t e = cfg->succ_offsets[b]; e < cfg->succ_offsets[b + 1]; ++e) {
       size_t s = cfg->succ_blocks[e];
@@ -276,7 +290,9 @@ static bool ov_analyse(ov_ctx_t *c, size_t latch, size_t header) {
   const nyr_inst_t *cmp = ov_def(c, ov_root(c, brif->a));
   if (!cmp || cmp->op != NYIR_CMP_I64 || cmp->cmp != NYIR_CMP_LT)
     OV_REJECT("ov_analyse");
-  /* Header PHIs: one +1 IV and add reductions. */
+  /*
+   * Header PHIs: one +1 IV and add reductions.
+   */
   c->iv = -1;
   c->red_len = 0;
   int64_t pre_label = cfg->block_label[preheader];
@@ -308,7 +324,9 @@ static bool ov_analyse(ov_ctx_t *c, size_t latch, size_t header) {
       c->iv_next = ov_root(c, next);
       continue;
     }
-    /* Reduction: next = phi + v, phi used only by that add (via copies). */
+    /*
+     * Reduction: next = phi + v, phi used only by that add (via copies).
+     */
     int other = ov_root(c, nd->a) == in->dst   ? nd->b
                 : ov_root(c, nd->b) == in->dst ? nd->a
                                                : -1;
@@ -349,7 +367,9 @@ static bool ov_is_red_next(const ov_ctx_t *c, int v, size_t *k) {
   return false;
 }
 
-/* Is a mask-producing compare: (x & 1) ==/!= 0. */
+/*
+ * Is a mask-producing compare: (x & 1) ==/!= 0.
+ */
 static bool ov_parity_mask(const ov_ctx_t *c, const nyr_inst_t *in, int *bit,
                            bool *eq) {
   if (in->op != NYIR_CMP_I64 ||
@@ -410,7 +430,9 @@ static bool ov_classify(ov_ctx_t *c) {
       }
     }
   }
-  /* Legality over every instruction of M. */
+  /*
+   * Legality over every instruction of M.
+   */
   for (size_t b = 0; b < cfg->block_count; ++b) {
     if (!c->member[b])
       continue;
@@ -528,7 +550,9 @@ static bool ov_classify(ov_ctx_t *c) {
       if (root == c->iv_next &&
           !(in->op == NYIR_PHI || in->op == NYIR_COPY))
         OV_REJECT("ov_classify");
-      /* Reduction PHIs feed only their own next add (and copies). */
+      /*
+       * Reduction PHIs feed only their own next add (and copies).
+       */
       size_t rk = 0;
       if (ov_is_red_phi(c, root, &rk) && in->op != NYIR_COPY &&
           !(in->dst >= 0 && ov_root(c, in->dst) == c->red_next[rk]))
@@ -538,7 +562,9 @@ static bool ov_classify(ov_ctx_t *c) {
   return true;
 }
 
-/* ---------------------------------------------------------------- emit -- */
+/*
+ * emit
+ */
 
 static int ov_emit(nyr_func_t *f, nyr_op_t op, int a, int b, int c2,
                    int64_t imm, nyr_cmp_t cmp) {
@@ -587,7 +613,9 @@ static nyr_op_t ov_vec_op(nyr_op_t op) {
   }
 }
 
-/* Scalar clone of a value: mapped if defined in M, else itself. */
+/*
+ * Scalar clone of a value: mapped if defined in M, else itself.
+ */
 static int ov_s(const ov_ctx_t *c, int v) {
   if (v < 0)
     return v;
@@ -596,14 +624,18 @@ static int ov_s(const ov_ctx_t *c, int v) {
   return v;
 }
 
-/* Vector form of operand v inside the clone. */
+/*
+ * Vector form of operand v inside the clone.
+ */
 static int ov_vec(ov_ctx_t *c, int v) {
   nyr_func_t *f = c->f;
   if (v < 0)
     return -1;
   if (v < c->value_cap && c->cls[v] == OV_V)
     return c->vmap[v];
-  /* Uniform: shadow, hoisted broadcast, or a broadcast at the use. */
+  /*
+   * Uniform: shadow, hoisted broadcast, or a broadcast at the use.
+   */
   if (v < c->value_cap && c->uvmap && c->uvmap[v] >= 0)
     return c->uvmap[v];
   if (!ov_in_loop(c, v) && v < c->value_cap && c->bcast[v] >= 0)
@@ -611,7 +643,9 @@ static int ov_vec(ov_ctx_t *c, int v) {
   return ov_set1(f, ov_s(c, v));
 }
 
-/* x * k with packed adds (k >= 0, small). */
+/*
+ * x * k with packed adds (k >= 0, small).
+ */
 static int ov_vmul_const(ov_ctx_t *c, int x, int64_t k) {
   nyr_func_t *f = c->f;
   if (k == 0)
@@ -639,7 +673,9 @@ typedef struct {
   bool shadow;  /* vector shadow of a uniform phi */
 } ov_phi_fix_t;
 
-/* Uniform ops that have an exact packed form for a vector shadow. */
+/*
+ * Uniform ops that have an exact packed form for a vector shadow.
+ */
 static bool ov_shadow_op(const ov_ctx_t *c, const nyr_inst_t *in) {
   int64_t k = 0;
   switch (in->op) {
@@ -777,7 +813,9 @@ static bool ov_transform(ov_ctx_t *c) {
   int vzero = f->next_value++;
   free(need_bcast);
 
-  /* Vector preheader: lane indices, zero, hoisted broadcasts. */
+  /*
+   * Vector preheader: lane indices, zero, hoisted broadcasts.
+   */
   bool vp_ok = ov_emit_ctl(f, NYIR_LABEL, -1, c->vp_label);
   if (vp_ok) {
     bool ok = true;
@@ -819,7 +857,9 @@ static bool ov_transform(ov_ctx_t *c) {
     return false;
   }
 
-  /* Clone M's blocks in array order. */
+  /*
+   * Clone M's blocks in array order.
+   */
   int ivs = -1, ivv = -1;
   size_t ivs_phi_at = 0, *red_phi_at = calloc(c->red_len + 1, sizeof(size_t));
   if (!red_phi_at) {
@@ -839,7 +879,9 @@ static bool ov_transform(ov_ctx_t *c) {
         continue;
       if (b == c->header && !after_phis && in.op != NYIR_PHI) {
         after_phis = true;
-        /* ivv = {ivs, ivs+1, ivs+2, ivs+3} */
+        /*
+         * ivv = {ivs, ivs+1, ivs+2, ivs+3}
+         */
         ivv = ov_vbin(f, NYIR_VEC8_ADD_I64, ov_set1(f, ivs), lanes);
         c->vmap[c->iv] = ivv;
         c->smap[c->iv] = ivs;
@@ -923,7 +965,9 @@ static bool ov_transform(ov_ctx_t *c) {
         continue;
       }
       int root = in.dst >= 0 ? ov_root(c, in.dst) : -1;
-      /* Loop control rebuilt on the scalar base IV. */
+      /*
+       * Loop control rebuilt on the scalar base IV.
+       */
       if (in.dst >= 0 && root == ov_root(c, c->cond_value) &&
           in.op == NYIR_CMP_I64) {
         int bound = ov_s(c, c->bound);
@@ -1018,7 +1062,9 @@ static bool ov_transform(ov_ctx_t *c) {
         }
         continue;
       }
-      /* Varying arithmetic. */
+      /*
+       * Varying arithmetic.
+       */
       int out = -1;
       switch (in.op) {
       case NYIR_ADD_I64:
@@ -1079,7 +1125,9 @@ static bool ov_transform(ov_ctx_t *c) {
       else
         c->vmap[in.dst] = out;
     }
-    /* Make fallthrough explicit: the clone order is not the original. */
+    /*
+     * Make fallthrough explicit: the clone order is not the original.
+     */
     if (ok && !terminated) {
       size_t last = 0;
       const nyr_inst_t *t = ov_terminator(c, b, &last);
@@ -1098,7 +1146,9 @@ static bool ov_transform(ov_ctx_t *c) {
       }
     }
   }
-  /* Patch cloned PHI incomings. */
+  /*
+   * Patch cloned PHI incomings.
+   */
   for (size_t k = 0; ok && k < nfix; ++k) {
     nyr_inst_t *phi = &f->data[fixes[k].inst];
     const nyr_inst_t *orig = &f->data[c->defs[fixes[k].value]];
@@ -1144,7 +1194,9 @@ static bool ov_transform(ov_ctx_t *c) {
   free(fixes);
   if (!ok)
     return false;
-  /* Vector exit: horizontal reductions, then the scalar remainder loop. */
+  /*
+   * Vector exit: horizontal reductions, then the scalar remainder loop.
+   */
   int *finals = calloc(c->red_len + 1, sizeof(int));
   if (!finals)
     return false;
@@ -1153,7 +1205,9 @@ static bool ov_transform(ov_ctx_t *c) {
     finals[k] = ov_emit(f, NYIR_VEC8_REDUCE_ADD_I64, c->red_init[k],
                         c->vmap[c->red_phi[k]], -1, 0, NYIR_CMP_EQ);
   ok = ok && ov_emit_ctl(f, NYIR_BR, -1, cfg->block_label[c->header]);
-  /* Scalar loop now starts where the vector loop stopped. */
+  /*
+   * Scalar loop now starts where the vector loop stopped.
+   */
   for (size_t i = cfg->block_start[c->header];
        ok && i < cfg->block_end[c->header]; ++i) {
     nyr_inst_t *in = &f->data[i];
@@ -1176,7 +1230,9 @@ static bool ov_transform(ov_ctx_t *c) {
   free(finals);
   if (!ok)
     return false;
-  /* Retarget the preheader edge into the vector preheader. */
+  /*
+   * Retarget the preheader edge into the vector preheader.
+   */
   size_t term_at = 0;
   const nyr_inst_t *pt = ov_terminator(c, c->preheader, &term_at);
   int64_t hl = cfg->block_label[c->header];
@@ -1190,7 +1246,9 @@ static bool ov_transform(ov_ctx_t *c) {
     }
   }
   if (!pt || pt->op != NYIR_BR) {
-    /* Fallthrough into the header: insert an explicit branch. */
+    /*
+     * Fallthrough into the header: insert an explicit branch.
+     */
     size_t at = cfg->block_end[c->preheader];
     if (!nir_ensure_inst_space(f, 1))
       return false;

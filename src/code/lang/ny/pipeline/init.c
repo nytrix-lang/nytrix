@@ -2055,6 +2055,35 @@ static void ny_pipeline_scan_std_imports(char **uses, size_t use_count,
   }
 }
 
+typedef struct ny_std_ast_cache {
+  bool valid;
+  uint64_t key;
+  char *src;
+  arena_t *arena;
+  program_t prog;
+  parser_type_alias *type_aliases;
+  parser_ct_layout_meta_list ct_layouts;
+  parser_ct_module_meta_list ct_modules;
+  parser_ct_template_meta_list ct_templates;
+  parser_ct_decl_meta_list ct_decls;
+  ny_diag_rule_list ct_diag_rules;
+  uint32_t gensym_counter;
+} ny_std_ast_cache;
+
+static ny_std_ast_cache g_std_ast_cache = {0};
+
+static void ny_std_ast_cache_clear(void) {
+  if (!g_std_ast_cache.valid)
+    return;
+  if (g_std_ast_cache.arena) {
+    arena_free(g_std_ast_cache.arena);
+    free(g_std_ast_cache.arena);
+  }
+  if (g_std_ast_cache.src)
+    free(g_std_ast_cache.src);
+  memset(&g_std_ast_cache, 0, sizeof(g_std_ast_cache));
+}
+
 static bool ny_pipeline_load_stdlib(ny_options *opt, char **uses,
                                     size_t use_count, char *std_cache_path,
                                     size_t std_cache_path_len,
@@ -2938,18 +2967,7 @@ int ny_pipeline_run(ny_options *opt) {
     goto exit_success;
   }
   memset(arena, 0, sizeof(arena_t));
-  parser_init_with_arena(&parser, source, std_src ? "<stdlib>" : parse_name,
-                         arena);
-  if (std_src)
-    parser_add_module_features(&parser, NY_MODULE_FEATURE_STDLIB);
-  if (opt->max_errors >= 0)
-    parser.error_limit = opt->max_errors;
-  if (std_src) {
-    parser.lex.split_pos = split_pos;
-    ny_sym_id split_file_id = ny_intern_cstr(parse_name);
-    parser.lex.split_filename =
-        split_file_id ? ny_intern_get(split_file_id) : parse_name;
-  }
+
   size_t parser_bytes = strlen(source);
   size_t stdlib_bytes = std_src ? strlen(std_src) : 0;
   const char *action = opt->emit_only ? "emit"
@@ -2972,9 +2990,113 @@ int ny_pipeline_run(ny_options *opt) {
          "parser_bytes=%zu",
          parse_name ? parse_name : "<input>", ulen, stdlib_bytes, parser_bytes);
   ny_pipe_trace_phase_memory("parse.begin");
-  progress_node = ny_progress_task_begin("parse", 1);
-  prog = parse_program(&parser);
-  ny_progress_task_end(progress_node);
+
+  bool can_reuse_std_ast =
+      std_src && !opt->no_std && std_mode != STD_MODE_NONE &&
+      ny_env_enabled_default_on("NYTRIX_STD_AST_CACHE");
+
+  if (can_reuse_std_ast) {
+    uint64_t std_key = ny_hash64(std_src, stdlib_bytes);
+    if (!g_std_ast_cache.valid || g_std_ast_cache.key != std_key) {
+      ny_std_ast_cache_clear();
+      g_std_ast_cache.arena = (arena_t *)malloc(sizeof(arena_t));
+      if (g_std_ast_cache.arena) {
+        memset(g_std_ast_cache.arena, 0, sizeof(arena_t));
+        g_std_ast_cache.src = ny_strdup(std_src);
+        parser_t std_parser;
+        parser_init_with_arena(&std_parser, g_std_ast_cache.src, "<stdlib>",
+                               g_std_ast_cache.arena);
+        parser_add_module_features(&std_parser, NY_MODULE_FEATURE_STDLIB);
+        g_std_ast_cache.prog = parse_program(&std_parser);
+        if (!std_parser.had_error) {
+          g_std_ast_cache.key = std_key;
+          g_std_ast_cache.type_aliases = std_parser.type_aliases;
+          g_std_ast_cache.gensym_counter = std_parser.gensym_counter;
+#define STD_AST_CACHE_REG(dst, src)                                        \
+          do {                                                             \
+            if ((src).len) {                                               \
+              vec_reserve_arena(g_std_ast_cache.arena, &(dst), (src).len); \
+              memcpy((dst).data, (src).data,                               \
+                     (src).len * sizeof(*(src).data));                     \
+              (dst).len = (src).len;                                       \
+            }                                                              \
+          } while (0)
+          STD_AST_CACHE_REG(g_std_ast_cache.ct_layouts, std_parser.ct_layouts);
+          STD_AST_CACHE_REG(g_std_ast_cache.ct_modules, std_parser.ct_modules);
+          STD_AST_CACHE_REG(g_std_ast_cache.ct_templates,
+                            std_parser.ct_templates);
+          STD_AST_CACHE_REG(g_std_ast_cache.ct_decls, std_parser.ct_decls);
+          STD_AST_CACHE_REG(g_std_ast_cache.ct_diag_rules,
+                            std_parser.ct_diag_rules);
+#undef STD_AST_CACHE_REG
+          g_std_ast_cache.valid = true;
+        } else {
+          ny_std_ast_cache_clear();
+        }
+      }
+    }
+  }
+
+  if (can_reuse_std_ast && g_std_ast_cache.valid) {
+    parser_init_with_arena(&parser, user_src, parse_name, arena);
+    if (opt->max_errors >= 0)
+      parser.error_limit = opt->max_errors;
+    parser.type_aliases = g_std_ast_cache.type_aliases;
+    parser.gensym_counter = g_std_ast_cache.gensym_counter;
+#define USER_AST_CACHE_REG(dst, src)                                     \
+    do {                                                                 \
+      if ((src).len) {                                                   \
+        vec_reserve_arena(arena, &(dst), (src).len);                     \
+        memcpy((dst).data, (src).data, (src).len * sizeof(*(src).data)); \
+        (dst).len = (src).len;                                           \
+      }                                                                  \
+    } while (0)
+    USER_AST_CACHE_REG(parser.ct_layouts, g_std_ast_cache.ct_layouts);
+    USER_AST_CACHE_REG(parser.ct_modules, g_std_ast_cache.ct_modules);
+    USER_AST_CACHE_REG(parser.ct_templates, g_std_ast_cache.ct_templates);
+    USER_AST_CACHE_REG(parser.ct_decls, g_std_ast_cache.ct_decls);
+    USER_AST_CACHE_REG(parser.ct_diag_rules, g_std_ast_cache.ct_diag_rules);
+#undef USER_AST_CACHE_REG
+
+    progress_node = ny_progress_task_begin("parse", 1);
+    program_t user_prog = parse_program(&parser);
+    ny_progress_task_end(progress_node);
+
+    if (!parser.had_error) {
+      prog = (program_t){0};
+      size_t std_len = g_std_ast_cache.prog.body.len;
+      size_t user_len = user_prog.body.len;
+      vec_reserve_arena(arena, &prog.body, std_len + user_len);
+      for (size_t i = 0; i < std_len; i++) {
+        stmt_t *s = g_std_ast_cache.prog.body.data[i];
+        stmt_t *cloned = ny_ast_clone_stmt(&parser, s);
+        vec_push_arena(arena, &prog.body, cloned ? cloned : s);
+      }
+      for (size_t i = 0; i < user_len; i++) {
+        vec_push_arena(arena, &prog.body, user_prog.body.data[i]);
+      }
+      prog.diagnostic_rules = user_prog.diagnostic_rules;
+      prog.doc = user_prog.doc;
+      prog.raw_src = source;
+      prog.raw_src_len = strlen(source);
+    }
+  } else {
+    parser_init_with_arena(&parser, source, std_src ? "<stdlib>" : parse_name,
+                           arena);
+    if (std_src)
+      parser_add_module_features(&parser, NY_MODULE_FEATURE_STDLIB);
+    if (opt->max_errors >= 0)
+      parser.error_limit = opt->max_errors;
+    if (std_src) {
+      parser.lex.split_pos = split_pos;
+      ny_sym_id split_file_id = ny_intern_cstr(parse_name);
+      parser.lex.split_filename =
+          split_file_id ? ny_intern_get(split_file_id) : parse_name;
+    }
+    progress_node = ny_progress_task_begin("parse", 1);
+    prog = parse_program(&parser);
+    ny_progress_task_end(progress_node);
+  }
   NY_DBG(NY_DBG_PASS,
          "PHASE parse complete ast=program statements=%zu errors=%d",
          prog.body.len, parser.error_count);

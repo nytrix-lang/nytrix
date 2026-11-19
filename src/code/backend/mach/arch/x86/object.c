@@ -8,9 +8,9 @@
  *  PE/COFF Specification (Microsoft): COFF and PE32+ object formats.
  *  OS X ABI Mach-O Reference (Apple): Mach-O object format.
  */
+#include "code/backend/mach/object.h"
 #include "base/trace.h"
 #include "code/backend/core/abi.h"
-#include "code/backend/mach/object.h"
 
 #include <limits.h>
 #include <stdint.h>
@@ -116,21 +116,21 @@ static bool ny_i386_obj_narrow_disp(int off) {
   static int enabled = -1;
   if (enabled < 0) {
     const char *off_env = getenv("NYTRIX_NO_I386_DISP8");
-    enabled = !(off_env && strcmp(off_env, "0") != 0 &&
-                strcmp(off_env, "off") != 0);
+    enabled =
+        !(off_env && strcmp(off_env, "0") != 0 && strcmp(off_env, "off") != 0);
   }
   return enabled && off >= -128 && off <= 127;
 }
 
-#define NY_I386_EBP_OP(name, opc, reg)                                   \
-  static bool name(nyr_i386_obj_ctx_t *c, int off) {                     \
-    bool narrow = ny_i386_obj_narrow_disp(off);                          \
-    unsigned char op[] = {(unsigned char)(opc),                          \
-                          (unsigned char)((narrow ? 0x40u : 0x80u) |     \
-                                          ((unsigned)(reg) << 3) | 5u)}; \
-    return ny_i386_obj_bytes(c, op, sizeof(op)) &&                       \
-           (narrow ? ny_i386_obj_u8(c, (unsigned)off)                    \
-                   : ny_i386_obj_i32(c, off));                           \
+#define NY_I386_EBP_OP(name, opc, reg)                                         \
+  static bool name(nyr_i386_obj_ctx_t *c, int off) {                           \
+    bool narrow = ny_i386_obj_narrow_disp(off);                                \
+    unsigned char op[] = {(unsigned char)(opc),                                \
+                          (unsigned char)((narrow ? 0x40u : 0x80u) |           \
+                                          ((unsigned)(reg) << 3) | 5u)};       \
+    return ny_i386_obj_bytes(c, op, sizeof(op)) &&                             \
+           (narrow ? ny_i386_obj_u8(c, (unsigned)off)                          \
+                   : ny_i386_obj_i32(c, off));                                 \
   }
 NY_I386_EBP_OP(ny_i386_obj_lea_eax, 0x8d, 0)
 NY_I386_EBP_OP(ny_i386_obj_load_eax, 0x8b, 0)
@@ -150,7 +150,8 @@ static bool ny_i386_obj_mov_imm32(nyr_i386_obj_ctx_t *c, int off,
   bool narrow = ny_i386_obj_narrow_disp(off);
   unsigned char op[] = {0xc7, (unsigned char)(narrow ? 0x45 : 0x85)};
   return ny_i386_obj_bytes(c, op, sizeof(op)) &&
-         (narrow ? ny_i386_obj_u8(c, (unsigned)off) : ny_i386_obj_i32(c, off)) &&
+         (narrow ? ny_i386_obj_u8(c, (unsigned)off)
+                 : ny_i386_obj_i32(c, off)) &&
          ny_i386_obj_i32(c, (int32_t)imm);
 }
 
@@ -1446,15 +1447,15 @@ static bool ny_x64_obj_frame_disp(nyr_x64_obj_ctx_t *c, int off) {
   return ny_x64_obj_i32(c, (int32_t)disp);
 }
 
-#define NY_X64_EBP_OP(name, ...)                                 \
-  static bool name(nyr_x64_obj_ctx_t *c, int off) {              \
-    unsigned char op[] = {__VA_ARGS__};                          \
-    if (c->omit_frame_pointer)                                   \
-      op[sizeof(op) - 1] =                                       \
-          (unsigned char)((op[sizeof(op) - 1] & 0xf8) | 0x04);   \
-    return ny_x64_obj_bytes(c, op, sizeof(op)) &&                \
-           (!c->omit_frame_pointer || ny_x64_obj_u8(c, 0x24)) && \
-           ny_x64_obj_frame_disp(c, off);                        \
+#define NY_X64_EBP_OP(name, ...)                                               \
+  static bool name(nyr_x64_obj_ctx_t *c, int off) {                            \
+    unsigned char op[] = {__VA_ARGS__};                                        \
+    if (c->omit_frame_pointer)                                                 \
+      op[sizeof(op) - 1] =                                                     \
+          (unsigned char)((op[sizeof(op) - 1] & 0xf8) | 0x04);                 \
+    return ny_x64_obj_bytes(c, op, sizeof(op)) &&                              \
+           (!c->omit_frame_pointer || ny_x64_obj_u8(c, 0x24)) &&               \
+           ny_x64_obj_frame_disp(c, off);                                      \
   }
 NY_X64_EBP_OP(ny_x64_obj_load_rax, 0x48, 0x8b, 0x85)
 NY_X64_EBP_OP(ny_x64_obj_lea_rax, 0x48, 0x8d, 0x85)
@@ -2253,8 +2254,7 @@ static bool ny_x64_obj_emit_return_instruction(nyr_x64_obj_ctx_t *c) {
     return false;
   size_t disp = c->code.len;
   char symbol[256];
-  const char *prefix =
-      c->target->symbol_prefix ? c->target->symbol_prefix : "";
+  const char *prefix = c->target->symbol_prefix ? c->target->symbol_prefix : "";
   int n = snprintf(symbol, sizeof(symbol), "%s__x86_return_thunk", prefix);
   if (n < 0 || (size_t)n >= sizeof(symbol)) {
     nyr_set_error(c->err, c->err_len,
@@ -2440,8 +2440,7 @@ bool nyr_x64_obj_append_function_debug(
   return nyr_x64_obj_append_function_debug_options(
       code, defs, def_count, relocs, reloc_count, nyir, target, symbol_name,
       tag_return, false, false, false, false, false, false, bare_syscalls,
-      source,
-      debug_lines, debug_line_count, debug_line_cap, err, err_len,
+      source, debug_lines, debug_line_count, debug_line_cap, err, err_len,
       inst_offsets_out, inst_offsets_count);
 }
 
@@ -2456,8 +2455,9 @@ bool nyr_x64_obj_append_function_with_frame(
   return nyr_x64_obj_append_function_debug_options(
       code, defs, def_count, relocs, reloc_count, nyir, target, symbol_name,
       false, omit_frame_pointer, position_independent, retpoline_indirect_calls,
-      retpoline_inline_calls, function_return_thunk_extern, cf_protection_branch,
-      false, NULL, NULL, NULL, NULL, err, err_len, NULL, NULL);
+      retpoline_inline_calls, function_return_thunk_extern,
+      cf_protection_branch, false, NULL, NULL, NULL, NULL, err, err_len, NULL,
+      NULL);
 }
 
 bool nyr_x64_obj_append_function(nyr_obj_buf_t *code,
@@ -2863,11 +2863,11 @@ static bool ny_x64_obj_i64_vector_memory(nyr_x64_obj_ctx_t *c,
 }
 
 static bool ny_x64_obj_i64_vec_binop(nyr_x64_obj_ctx_t *c, const nyr_inst_t *in,
-                                     unsigned lanes, const unsigned char *op_bytes,
+                                     unsigned lanes,
+                                     const unsigned char *op_bytes,
                                      size_t op_len) {
-  if (!c || !in || in->dst < 0 || in->dst >= c->value_slots ||
-      in->a < 0 || in->a >= c->value_slots ||
-      in->b < 0 || in->b >= c->value_slots)
+  if (!c || !in || in->dst < 0 || in->dst >= c->value_slots || in->a < 0 ||
+      in->a >= c->value_slots || in->b < 0 || in->b >= c->value_slots)
     return false;
   for (unsigned lane = 0; lane < lanes; ++lane) {
     int da = ny_x64_obj_value_off(c, in->a) - (int)(lane * 8u);
@@ -2883,8 +2883,8 @@ static bool ny_x64_obj_i64_vec_binop(nyr_x64_obj_ctx_t *c, const nyr_inst_t *in,
 static bool ny_x64_obj_i64_vec_shift_imm(nyr_x64_obj_ctx_t *c,
                                          const nyr_inst_t *in, unsigned lanes,
                                          bool arithmetic) {
-  if (!c || !in || in->dst < 0 || in->dst >= c->value_slots ||
-      in->a < 0 || in->a >= c->value_slots)
+  if (!c || !in || in->dst < 0 || in->dst >= c->value_slots || in->a < 0 ||
+      in->a >= c->value_slots)
     return false;
   unsigned shift = (unsigned)(in->imm & 63);
   for (unsigned lane = 0; lane < lanes; ++lane) {
@@ -2902,9 +2902,8 @@ static bool ny_x64_obj_i64_vec_shift_imm(nyr_x64_obj_ctx_t *c,
 static bool ny_x64_obj_i64_vec_reduce_add(nyr_x64_obj_ctx_t *c,
                                           const nyr_inst_t *in,
                                           unsigned lanes) {
-  if (!c || !in || in->dst < 0 || in->dst >= c->value_slots ||
-      in->a < 0 || in->a >= c->value_slots ||
-      in->b < 0 || in->b >= c->value_slots)
+  if (!c || !in || in->dst < 0 || in->dst >= c->value_slots || in->a < 0 ||
+      in->a >= c->value_slots || in->b < 0 || in->b >= c->value_slots)
     return false;
   if (!ny_x64_obj_load_value_rax(c, in->a))
     return false;
@@ -3875,39 +3874,41 @@ static bool ny_x64_obj_emit_inst(nyr_x64_obj_ctx_t *c, const nyr_inst_t *in) {
     return true;
   }
   case NYIR_VEC4_ADD_I64:
-    return ny_x64_obj_i64_vec_binop(c, in, 2u,
-                                    (const unsigned char[]){0x4c, 0x01, 0xd0}, 3);
+    return ny_x64_obj_i64_vec_binop(
+        c, in, 2u, (const unsigned char[]){0x4c, 0x01, 0xd0}, 3);
   case NYIR_VEC4_SUB_I64:
-    return ny_x64_obj_i64_vec_binop(c, in, 2u,
-                                    (const unsigned char[]){0x4c, 0x29, 0xd0}, 3);
+    return ny_x64_obj_i64_vec_binop(
+        c, in, 2u, (const unsigned char[]){0x4c, 0x29, 0xd0}, 3);
   case NYIR_VEC4_AND_I64:
-    return ny_x64_obj_i64_vec_binop(c, in, 2u,
-                                    (const unsigned char[]){0x4c, 0x21, 0xd0}, 3);
+    return ny_x64_obj_i64_vec_binop(
+        c, in, 2u, (const unsigned char[]){0x4c, 0x21, 0xd0}, 3);
   case NYIR_VEC4_OR_I64:
-    return ny_x64_obj_i64_vec_binop(c, in, 2u,
-                                    (const unsigned char[]){0x4c, 0x09, 0xd0}, 3);
+    return ny_x64_obj_i64_vec_binop(
+        c, in, 2u, (const unsigned char[]){0x4c, 0x09, 0xd0}, 3);
   case NYIR_VEC4_XOR_I64:
-    return ny_x64_obj_i64_vec_binop(c, in, 2u,
-                                    (const unsigned char[]){0x4c, 0x31, 0xd0}, 3);
+    return ny_x64_obj_i64_vec_binop(
+        c, in, 2u, (const unsigned char[]){0x4c, 0x31, 0xd0}, 3);
   case NYIR_VEC8_ADD_I64:
-    return ny_x64_obj_i64_vec_binop(c, in, 4u,
-                                    (const unsigned char[]){0x4c, 0x01, 0xd0}, 3);
+    return ny_x64_obj_i64_vec_binop(
+        c, in, 4u, (const unsigned char[]){0x4c, 0x01, 0xd0}, 3);
   case NYIR_VEC8_SUB_I64:
-    return ny_x64_obj_i64_vec_binop(c, in, 4u,
-                                    (const unsigned char[]){0x4c, 0x29, 0xd0}, 3);
+    return ny_x64_obj_i64_vec_binop(
+        c, in, 4u, (const unsigned char[]){0x4c, 0x29, 0xd0}, 3);
   case NYIR_VEC8_AND_I64:
-    return ny_x64_obj_i64_vec_binop(c, in, 4u,
-                                    (const unsigned char[]){0x4c, 0x21, 0xd0}, 3);
+    return ny_x64_obj_i64_vec_binop(
+        c, in, 4u, (const unsigned char[]){0x4c, 0x21, 0xd0}, 3);
   case NYIR_VEC8_OR_I64:
-    return ny_x64_obj_i64_vec_binop(c, in, 4u,
-                                    (const unsigned char[]){0x4c, 0x09, 0xd0}, 3);
+    return ny_x64_obj_i64_vec_binop(
+        c, in, 4u, (const unsigned char[]){0x4c, 0x09, 0xd0}, 3);
   case NYIR_VEC8_XOR_I64:
-    return ny_x64_obj_i64_vec_binop(c, in, 4u,
-                                    (const unsigned char[]){0x4c, 0x31, 0xd0}, 3);
+    return ny_x64_obj_i64_vec_binop(
+        c, in, 4u, (const unsigned char[]){0x4c, 0x31, 0xd0}, 3);
   case NYIR_VEC8_MUL_I64:
-    /* imul rax, r10 per lane: no packed i64 multiply below AVX-512. */
-    return ny_x64_obj_i64_vec_binop(c, in, 4u,
-                                    (const unsigned char[]){0x49, 0x0f, 0xaf, 0xc2}, 4);
+    /*
+     * imul rax, r10 per lane: no packed i64 multiply below AVX-512.
+     */
+    return ny_x64_obj_i64_vec_binop(
+        c, in, 4u, (const unsigned char[]){0x49, 0x0f, 0xaf, 0xc2}, 4);
   case NYIR_VEC4_REDUCE_ADD_I64:
     return ny_x64_obj_i64_vec_reduce_add(c, in, 2u);
   case NYIR_VEC8_REDUCE_ADD_I64:
@@ -3917,7 +3918,8 @@ static bool ny_x64_obj_emit_inst(nyr_x64_obj_ctx_t *c, const nyr_inst_t *in) {
   case NYIR_VEC8_SHR_I64: {
     unsigned lanes = in->op == NYIR_VEC4_SHL_I64 ? 2u : 4u;
     /*
-     * shl rax, imm8: 48 c1 e0 imm (op!=arithmetic uses e0 but shl is e0/e4; easier special case)
+     * shl rax, imm8: 48 c1 e0 imm (op!=arithmetic uses e0 but shl is e0/e4;
+     * easier special case)
      */
     if (in->op == NYIR_VEC4_SHL_I64) {
       unsigned shift = (unsigned)(in->imm & 63);
@@ -3925,7 +3927,8 @@ static bool ny_x64_obj_emit_inst(nyr_x64_obj_ctx_t *c, const nyr_inst_t *in) {
         int da = ny_x64_obj_value_off(c, in->a) - (int)(lane * 8u);
         int dd = ny_x64_obj_value_off(c, in->dst) - (int)(lane * 8u);
         if (!ny_x64_obj_load_rax(c, da) ||
-            !ny_x64_obj_bytes(c, (const unsigned char[]){0x48, 0xc1, 0xe0}, 3) ||
+            !ny_x64_obj_bytes(c, (const unsigned char[]){0x48, 0xc1, 0xe0},
+                              3) ||
             !ny_x64_obj_u8(c, shift) || !ny_x64_obj_store_rax(c, dd))
           return false;
       }
@@ -3951,8 +3954,8 @@ static bool ny_x64_obj_emit_inst(nyr_x64_obj_ctx_t *c, const nyr_inst_t *in) {
   case NYIR_VEC4_STORE_F64:
     return ny_x64_obj_i64_vector_memory(c, in, 4, true);
   case NYIR_VEC4_SET1_F64: {
-    if (in->dst < 0 || in->dst >= c->value_slots || !c->value_i64_vector_lanes ||
-        c->value_i64_vector_lanes[in->dst] < 4u ||
+    if (in->dst < 0 || in->dst >= c->value_slots ||
+        !c->value_i64_vector_lanes || c->value_i64_vector_lanes[in->dst] < 4u ||
         !ny_x64_obj_load_value_xmm(c, in->a, 0))
       return false;
     for (unsigned lane = 0; lane < 4u; ++lane) {
@@ -3966,7 +3969,7 @@ static bool ny_x64_obj_emit_inst(nyr_x64_obj_ctx_t *c, const nyr_inst_t *in) {
   case NYIR_VEC4_SUB_F64:
   case NYIR_VEC4_MUL_F64:
   case NYIR_VEC4_DIV_F64: {
-    unsigned char opc = in->op == NYIR_VEC4_ADD_F64 ? 0x58
+    unsigned char opc = in->op == NYIR_VEC4_ADD_F64   ? 0x58
                         : in->op == NYIR_VEC4_SUB_F64 ? 0x5c
                         : in->op == NYIR_VEC4_MUL_F64 ? 0x59
                                                       : 0x5e;
@@ -3977,7 +3980,8 @@ static bool ny_x64_obj_emit_inst(nyr_x64_obj_ctx_t *c, const nyr_inst_t *in) {
       int db = ny_x64_obj_value_off(c, in->b) - (int)(lane * 8u);
       int dd = ny_x64_obj_value_off(c, in->dst) - (int)(lane * 8u);
       if (!ny_x64_obj_load_xmm(c, da, 0) || !ny_x64_obj_load_xmm(c, db, 1) ||
-          !ny_x64_obj_bytes(c, (const unsigned char[]){0xf2, 0x0f, opc, 0xc1}, 4) ||
+          !ny_x64_obj_bytes(c, (const unsigned char[]){0xf2, 0x0f, opc, 0xc1},
+                            4) ||
           !ny_x64_obj_store_xmm(c, dd, 0))
         return false;
     }
@@ -3987,7 +3991,8 @@ static bool ny_x64_obj_emit_inst(nyr_x64_obj_ctx_t *c, const nyr_inst_t *in) {
     /*
      * dst = a*b + c per lane
      */
-    if (in->dst < 0 || in->dst >= c->value_slots || in->a < 0 || in->b < 0 || in->c < 0)
+    if (in->dst < 0 || in->dst >= c->value_slots || in->a < 0 || in->b < 0 ||
+        in->c < 0)
       return false;
     for (unsigned lane = 0; lane < 4u; ++lane) {
       int da = ny_x64_obj_value_off(c, in->a) - (int)(lane * 8u);
@@ -3999,8 +4004,10 @@ static bool ny_x64_obj_emit_inst(nyr_x64_obj_ctx_t *c, const nyr_inst_t *in) {
        */
       if (!ny_x64_obj_load_xmm(c, da, 0) || !ny_x64_obj_load_xmm(c, db, 1) ||
           !ny_x64_obj_load_xmm(c, dc, 2) ||
-          !ny_x64_obj_bytes(c, (const unsigned char[]){0xf2, 0x0f, 0x59, 0xc1}, 4) ||
-          !ny_x64_obj_bytes(c, (const unsigned char[]){0xf2, 0x0f, 0x58, 0xc2}, 4) ||
+          !ny_x64_obj_bytes(c, (const unsigned char[]){0xf2, 0x0f, 0x59, 0xc1},
+                            4) ||
+          !ny_x64_obj_bytes(c, (const unsigned char[]){0xf2, 0x0f, 0x58, 0xc2},
+                            4) ||
           !ny_x64_obj_store_xmm(c, dd, 0))
         return false;
     }
@@ -4016,7 +4023,8 @@ static bool ny_x64_obj_emit_inst(nyr_x64_obj_ctx_t *c, const nyr_inst_t *in) {
     for (unsigned lane = 0; lane < 4u; ++lane) {
       int db = ny_x64_obj_value_off(c, in->b) - (int)(lane * 8u);
       if (!ny_x64_obj_load_xmm(c, db, 1) ||
-          !ny_x64_obj_bytes(c, (const unsigned char[]){0xf2, 0x0f, 0x58, 0xc1}, 4))
+          !ny_x64_obj_bytes(c, (const unsigned char[]){0xf2, 0x0f, 0x58, 0xc1},
+                            4))
         return false;
     }
     return ny_x64_obj_store_value_xmm(c, in->dst, 0);
@@ -5006,27 +5014,37 @@ static bool ny_x64_obj_classify_values(nyr_x64_obj_ctx_t *c,
     case NYIR_VEC8_REDUCE_ADD_I64:
       need_b = 4;
       break;
-    case NYIR_VEC4_ADD_I64: case NYIR_VEC4_SUB_I64:
-    case NYIR_VEC4_AND_I64: case NYIR_VEC4_OR_I64: case NYIR_VEC4_XOR_I64:
+    case NYIR_VEC4_ADD_I64:
+    case NYIR_VEC4_SUB_I64:
+    case NYIR_VEC4_AND_I64:
+    case NYIR_VEC4_OR_I64:
+    case NYIR_VEC4_XOR_I64:
       need_a = need_b = 2;
       break;
-    case NYIR_VEC4_SHL_I64: case NYIR_VEC4_SAR_I64:
+    case NYIR_VEC4_SHL_I64:
+    case NYIR_VEC4_SAR_I64:
       need_a = 2;
       break;
-    case NYIR_VEC8_ADD_I64: case NYIR_VEC8_SUB_I64:
-    case NYIR_VEC8_AND_I64: case NYIR_VEC8_OR_I64: case NYIR_VEC8_XOR_I64:
+    case NYIR_VEC8_ADD_I64:
+    case NYIR_VEC8_SUB_I64:
+    case NYIR_VEC8_AND_I64:
+    case NYIR_VEC8_OR_I64:
+    case NYIR_VEC8_XOR_I64:
     case NYIR_VEC8_MUL_I64:
       need_a = need_b = 4;
       break;
-    case NYIR_VEC8_SAR_I64: case NYIR_VEC8_SHR_I64:
+    case NYIR_VEC8_SAR_I64:
+    case NYIR_VEC8_SHR_I64:
       need_a = 4;
       break;
     case NYIR_VEC4_STORE_F64:
     case NYIR_VEC4_REDUCE_ADD_F64:
       need_b = 4;
       break;
-    case NYIR_VEC4_ADD_F64: case NYIR_VEC4_SUB_F64:
-    case NYIR_VEC4_MUL_F64: case NYIR_VEC4_DIV_F64:
+    case NYIR_VEC4_ADD_F64:
+    case NYIR_VEC4_SUB_F64:
+    case NYIR_VEC4_MUL_F64:
+    case NYIR_VEC4_DIV_F64:
       need_a = need_b = 4;
       break;
     case NYIR_VEC4_FMA_F64:
@@ -6081,8 +6099,7 @@ bool nyr_x64_obj_emit_code(nyr_x64_obj_ctx_t *c, const nyr_func_t *nyir,
    * IBT landing pad for indirect branch targets; precedes the prologue.
    */
   if (c->cf_protection_branch &&
-      !ny_x64_obj_bytes(c,
-                        (const unsigned char[]){0xf3, 0x0f, 0x1e, 0xfa}, 4))
+      !ny_x64_obj_bytes(c, (const unsigned char[]){0xf3, 0x0f, 0x1e, 0xfa}, 4))
     return false;
   ny_x64_obj_valmap_init(&c->valmap, nyir);
   ny_x64_obj_scan_frame(c, nyir);
@@ -6192,7 +6209,12 @@ bool nyr_x64_obj_emit_code(nyr_x64_obj_ctx_t *c, const nyr_func_t *nyir,
       return false;
     }
   }
-  if (nyir && (nyir->len == 0 || nyir->data[nyir->len - 1].op != NYIR_RET)) {
+  const nyr_inst_t *last =
+      nyir && nyir->len ? &nyir->data[nyir->len - 1] : NULL;
+  bool terminal_trap = last && last->op == NYIR_INLINE_ASM &&
+                       (last->effects & NYIR_EFFECT_CONTROL) && last->symbol &&
+                       strcmp(last->symbol, "ud2") == 0;
+  if (nyir && (!last || (last->op != NYIR_RET && !terminal_trap))) {
     if (!ny_x64_obj_mov_rax_imm(c, 0) || !ny_x64_obj_emit_epilogue(c))
       return false;
   }

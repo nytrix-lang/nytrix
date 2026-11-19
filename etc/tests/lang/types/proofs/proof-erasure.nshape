@@ -1,7 +1,7 @@
 shape proof_erasure_routes {
   family "runtime/compiler"
   generator "embedded"
-  features ["ny", "proofs", "erasure"]
+  features ["ny", "erasure", "proofs"]
   template ny-test-case
   flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=orc; --wasm"
   expect compile_and_run
@@ -27,7 +27,7 @@ NY
 shape proof_erasure_abi {
   family "runtime/compiler"
   generator "embedded"
-  features ["ny", "proofs", "erasure", "abi"]
+  features ["ny", "abi", "erasure", "proofs"]
   template ny-test-case
   flags "--native-only -O0 --nyr-dump"
   expect compile_and_run

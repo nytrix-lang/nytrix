@@ -1,7 +1,7 @@
 shape proof_policy_certificates {
   family "runtime/proofs"
   generator "program"
-  features ["proofs", "policy", "certificates", "tri-state"]
+  features ["certificates", "policy", "proofs", "tri-state"]
   template ny-test-case
   expect compile_and_run
   source ny <<'NY'

@@ -2,7 +2,7 @@ shape checked_integer_arithmetic
 {
   family "runtime/types"
   generator "runtime"
-  features ["integer", "checked", "overflow", "saturating"]
+  features ["checked", "integer", "overflow", "saturating"]
   template ny-test-case
   flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
   source ny <<'NY'

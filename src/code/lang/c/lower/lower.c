@@ -6,6 +6,8 @@
  * the C lowering fragments a single entry point while preserving their
  * existing private access to parser state and static helpers.
  */
+#include "code/lang/c/lower/lower.h"
+
 #include "code/lang/c/lower/parts/asm.h"
 #include "code/lang/c/lower/parts/emit.h"
 #include "code/lang/c/lower/parts/expr.h"

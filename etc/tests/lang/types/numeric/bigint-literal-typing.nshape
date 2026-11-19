@@ -1,7 +1,7 @@
 shape bigint_literal_typing {
   family "runtime/language"
   generator "embedded"
-  features ["ny", "test", "bigint", "typing"]
+  features ["typing", "ny", "test", "bigint"]
   template ny-test-case
   expect compile_and_run
   source ny <<'NY'

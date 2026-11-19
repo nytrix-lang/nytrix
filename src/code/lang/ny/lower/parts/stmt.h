@@ -11752,7 +11752,13 @@ static void ny_native_scan_expr_for_calls(const expr_t *e,
    * whole-program work for every expression
    * and can dominate compilation for
    * ordinary function bodies. */
-  if ((col->is_precompile && e->kind != NY_E_IDENT) ||
+  /* Lambdas keep the full path even in a precompile: their hidden
+   * environment is populated here, when the enclosing function's scope is
+   * known. The syntax-only fast path created the lambda function but never
+   * recorded its captures, so module emission compiled every closure body
+   * with unresolved outer names. */
+  if ((col->is_precompile && e->kind != NY_E_IDENT &&
+       e->kind != NY_E_LAMBDA && e->kind != NY_E_FN) ||
       col->is_dynlist_prewarm) {
     switch (e->kind) {
     case NY_E_CALL:

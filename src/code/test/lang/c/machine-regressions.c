@@ -75,6 +75,37 @@ static uint32_t schedule(const uint8_t *buf) {
   return sum;
 }
 
+/* Descending bit assembly and cases that must keep their original meaning. */
+static __attribute__((noinline)) int low_bits(int64_t key) {
+  int node = 1;
+  for (int depth = 19; depth >= 0; --depth)
+    node = ((key >> depth) & 1) ? node * 2 + 1 : node * 2;
+  return node;
+}
+
+static __attribute__((noinline)) int high_bits(int64_t key) {
+  int node = 1;
+  for (int depth = 19; depth >= 2; --depth)
+    node = ((key >> depth) & 1) ? node * 2 + 1 : node * 2;
+  return node;
+}
+
+static __attribute__((noinline)) int stopped_walk(int64_t key, int stop) {
+  int node = 1;
+  for (int depth = 19; depth >= 0; --depth) {
+    if (depth == stop)
+      break;
+    node = ((key >> depth) & 1) ? node * 2 + 1 : node * 2;
+  }
+  return node;
+}
+
+static __attribute__((noinline)) int changing_key(int node) {
+  for (int depth = 7; depth >= 0; --depth)
+    node = ((node >> depth) & 1) ? node * 2 + 1 : node * 2;
+  return node;
+}
+
 int main(int argc, char **argv) {
   (void)argv;
   CHECK(1, argc == 1);
@@ -117,5 +148,10 @@ int main(int argc, char **argv) {
   CHECK(16, (double)opaque(UINT64_C(0x8000000000000401)) == 9223372036854777856.0);
   CHECK(17, (double)opaque(5) == 5.0);
   CHECK(18, (float)opaque(UINT64_C(0xffffffffffffffff)) == 18446744073709551616.0f);
+  int64_t key = opaque(UINT64_C(0x123456789));
+  CHECK(19, low_bits(key) == (1 << 20) + (key & 0xfffff));
+  CHECK(20, high_bits(key) == (1 << 18) + ((key >> 2) & 0x3ffff));
+  CHECK(21, stopped_walk(key, 15) == 16 + ((key >> 16) & 15));
+  CHECK(22, changing_key(7) == 1808);
   return 0;
 }

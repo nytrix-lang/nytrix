@@ -15,6 +15,13 @@
 #include <stdlib.h>
 #include <string.h>
 
+/*
+ * Lazy libm bindings (libm_lazy.c): a direct ldexp/frexp call pins libm.so.6
+ * into every AOT binary that links this member.
+ */
+double rt_big_ldexp(double x, int e);
+double rt_big_frexp(double x, int *e);
+
 typedef struct {
   int64_t sign;
   int64_t exp2;
@@ -776,8 +783,8 @@ static int64_t bf_from_value_raw(int64_t v, uint32_t precision) {
     if (!isfinite(d) || d == 0.0)
       return bf_from_u64_raw(0, 0, 0, precision);
     int e = 0;
-    double f = frexp(fabs(d), &e);
-    uint64_t mant = (uint64_t)ldexp(f, 53);
+    double f = rt_big_frexp(fabs(d), &e);
+    uint64_t mant = (uint64_t)rt_big_ldexp(f, 53);
     return bf_from_u64_raw(mant, signbit(d) ? -1 : 1, e - 53, precision);
   }
   if (is_ptr(v) && is_heap_ptr(v) &&
@@ -1160,7 +1167,7 @@ int64_t rt_bigfloat_to_f64(int64_t av) {
       else if (e < INT_MIN)
         d = 0.0;
       else
-        d = ldexp((double)top, (int)e);
+        d = rt_big_ldexp((double)top, (int)e);
       if (a->sign < 0)
         d = -d;
     }

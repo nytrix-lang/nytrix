@@ -327,6 +327,7 @@ static time_t ny_runtime_latest_dep_mtime(const char *root) {
       "src/code/backend/runtime/init.c",
       "src/code/backend/runtime/ast.c",
       "src/code/backend/runtime/bigint.c",
+      "src/code/backend/runtime/lazym.c",
       "src/code/backend/runtime/core.c",
       "src/code/backend/runtime/ffi.c",
       "src/code/backend/runtime/ffigates.c",
@@ -928,6 +929,7 @@ static bool ny_builder_compile_runtime_archive(
     const char *sanitize_kind, bool has_ccache) {
   static const char *const units[] = {
       "ast",           "bigint",       "core",        "simmd",
+      "lazym",
       "ffi",           "ffigates",     "gc",          "math",
       "bigfloat",      "memory",       "os",          "proof",
       "string",        "parse_ast",    "parse_lexer", "parse_shared",
@@ -1758,8 +1760,12 @@ bool ny_builder_link(const char *cc, const char *obj_path,
   } else {
     if (!has_z && idx + 1 < NY_MAX_LINK_ARGS)
       argv[idx++] = "-lz";
-    if (!has_m && idx + 1 < NY_MAX_LINK_ARGS)
-      argv[idx++] = "-lm";
+    /*
+     * No -lm fallback: the runtime binds libm on first use (lazym.c), so an
+     * integer-only program has nothing left to resolve against it. A program
+     * or module that asks for libm still reaches has_m above. Passing -lm here
+     * put libm.so.6 in DT_NEEDED of every AOT binary.
+     */
 #if !defined(__APPLE__)
     if (!has_dl && idx + 1 < NY_MAX_LINK_ARGS)
       argv[idx++] = "-ldl";

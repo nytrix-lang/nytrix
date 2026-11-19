@@ -17,6 +17,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+/*
+ * Lazy libm bindings (libm_lazy.c): a direct ldexp/frexp call pins libm.so.6
+ * into every AOT binary that links this member.
+ */
+double rt_big_ldexp(double x, int e);
+double rt_big_frexp(double x, int *e);
 #if defined(__x86_64__) && !defined(_WIN32) &&                                 \
     (defined(__GNUC__) || defined(__clang__))
 #include <cpuid.h>
@@ -47,6 +53,31 @@ static inline int64_t _bi_i64_from_u64_bits(uint64_t bits) {
   int64_t out = 0;
   memcpy(&out, &bits, sizeof(out));
   return out;
+}
+
+/*
+ * Divide a two-word value by one word. The long-division callers maintain
+ * high < denominator, so the quotient always fits in 64 bits and DIVQ can do
+ * the step directly instead of calling the compiler's __udivti3 helper.
+ */
+static inline uint64_t _bi_div_u128_u64(uint64_t high, uint64_t low,
+                                        uint64_t denominator,
+                                        uint64_t *remainder) {
+#if defined(__x86_64__) && !defined(_WIN32) &&                                 \
+    (defined(__GNUC__) || defined(__clang__))
+  uint64_t quotient = low;
+  uint64_t rem = high;
+  __asm__ volatile("divq %[denominator]"
+                   : "+&a"(quotient), "+&d"(rem)
+                   : [denominator] "r"(denominator)
+                   : "cc");
+  *remainder = rem;
+  return quotient;
+#else
+  __uint128_t current = ((__uint128_t)high << 64) | low;
+  *remainder = (uint64_t)(current % denominator);
+  return (uint64_t)(current / denominator);
+#endif
 }
 
 static inline bool _bi_tag_size(size_t n, int64_t *tagged) {
@@ -732,9 +763,9 @@ static void _bn_divmod_knuth_impl(_bn_t *q, _bn_t *r, const _bn_t *a,
       return;
     }
     for (size_t i = a->count; i-- > 0;) {
-      __uint128_t cur = ((__uint128_t)rem << 64) | a->d[i];
-      q->d[i] = (uint64_t)(cur / divisor);
-      rem = (uint64_t)(cur % divisor);
+      uint64_t q_digit =
+          _bi_div_u128_u64(rem, a->d[i], divisor, &rem);
+      q->d[i] = q_digit;
     }
     q->count = a->count;
     q->sign = 1;
@@ -798,11 +829,17 @@ static void _bn_divmod_knuth_impl(_bn_t *q, _bn_t *r, const _bn_t *a,
   }
 
   uint64_t divisor = vn[n - 1];
-  uint64_t inverse = (uint64_t)((~(__uint128_t)0) / divisor);
+  /* A short quotient does not amortize the general 128-bit reciprocal
+   * calculation. Use the same one-word quotient step as single-limb division
+   * on targets that can compute it directly.
+   */
+  bool direct_division = false;
 #if defined(__x86_64__) && !defined(_WIN32) &&                                 \
     (defined(__GNUC__) || defined(__clang__))
+  direct_division = m < 4;
   bool use_adx = _bn_has_adx();
 #endif
+  uint64_t inverse = direct_division ? 0 : (uint64_t)((~(__uint128_t)0) / divisor);
   for (size_t jj = m + 1; jj-- > 0;) {
     size_t j = jj;
     uint64_t qhat, rhat;
@@ -817,6 +854,11 @@ static void _bn_divmod_knuth_impl(_bn_t *q, _bn_t *r, const _bn_t *a,
        * against the wrapped rhat would wrongly decrement qhat.
        */
       rhat_carried = rhat < vn[n - 1];
+    } else if (direct_division) {
+      /* Knuth's normalized remainder has high <= divisor. The equality
+       * case above saturates the estimate before reaching hardware division.
+       */
+      qhat = _bi_div_u128_u64(un[j + n], un[j + n - 1], divisor, &rhat);
     } else {
       uint64_t high = un[j + n], low = un[j + n - 1];
       /*
@@ -1525,9 +1567,8 @@ static uint32_t _bn_divmod_u32_inplace(_bn_t *a, uint32_t divisor) {
     return 0;
   uint64_t rem = 0;
   for (size_t i = a->count; i-- > 0;) {
-    __uint128_t cur = ((__uint128_t)rem << 64) | a->d[i];
-    a->d[i] = (uint64_t)(cur / divisor);
-    rem = (uint64_t)(cur % divisor);
+    uint64_t q_digit = _bi_div_u128_u64(rem, a->d[i], divisor, &rem);
+    a->d[i] = q_digit;
   }
   _bn_trim(a);
   if (!_bn_is_zero(a))
@@ -3357,23 +3398,6 @@ static inline uint32_t _bi_div_u64_u32(uint64_t numerator, uint32_t denominator,
   return quotient;
 }
 
-/*
- * For a full-width divisor, the long-division invariant high < denominator
- * guarantees the quotient fits in 64 bits, so DIVQ handles the 128/64 step
- * directly without a compiler runtime helper.
- */
-static inline uint64_t _bi_div_u128_u64(uint64_t high, uint64_t low,
-                                        uint64_t denominator,
-                                        uint64_t *remainder) {
-  uint64_t quotient = low;
-  uint64_t rem = high;
-  __asm__ volatile("divq %[denominator]"
-                   : "+&a"(quotient), "+&d"(rem)
-                   : [denominator] "r"(denominator)
-                   : "cc");
-  *remainder = rem;
-  return quotient;
-}
 #endif
 
 static uint64_t _bi_div_limbs_small(uint64_t *quotient, const uint64_t *limbs,
@@ -3397,14 +3421,8 @@ static uint64_t _bi_div_limbs_small(uint64_t *quotient, const uint64_t *limbs,
   }
 #endif
   for (size_t i = words; i > 0; --i) {
-#if defined(__x86_64__) && !defined(_WIN32) &&                                 \
-    (defined(__GNUC__) || defined(__clang__))
-    uint64_t q = _bi_div_u128_u64(remainder, limbs[i - 1], divisor, &remainder);
-#else
-    __uint128_t current = ((__uint128_t)remainder << 64) | limbs[i - 1];
-    uint64_t q = (uint64_t)(current / divisor);
-    remainder = (uint64_t)(current % divisor);
-#endif
+    uint64_t q =
+        _bi_div_u128_u64(remainder, limbs[i - 1], divisor, &remainder);
     if (quotient)
       quotient[i - 1] = q;
   }
@@ -4425,7 +4443,7 @@ static double _bi_to_double_fast(int64_t a) {
   if (guard && (sticky || (q & 1u) != 0))
     q++;
 
-  double d = ldexp((double)q, (int)shift);
+  double d = rt_big_ldexp((double)q, (int)shift);
   return sign < 0 ? -d : d;
 }
 

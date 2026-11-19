@@ -6541,25 +6541,10 @@ int64_t rt_len(int64_t value) {
   if (!value)
     return 0;
   /*
-   * Tbuf capacity shares this word position with heap string tags. A buffer
-   * whose capacity equals TAG_STR or TAG_STR_CONST must be recognized from
-   * its registered handle before the generic tagged-string predicate.
-   */
-  if (rt_tbuf_cached_handle((uintptr_t)value)) {
-    const int64_t *header = NULL;
-    if (rt_tbuf_check(value, &header) == RT_TBUF_OK)
-      return header[1];
-  }
-  /*
-   * The native dictionary registry is filled only by the dictionary
-   * constructor, so a hit is authoritative. Checking it first spares a
-   * dictionary the string, typed-buffer, set and vector probes below.
-   */
-  if (ny_native_dict_registry_find((uintptr_t)value))
-    return rt_len_native_dict(value);
-  /*
-   * Managed sequences have an authoritative tag and count. Do not probe
-   * foreign buffer/vector layouts for an allocator-owned list or dict.
+   * Managed sequences have an authoritative tag and count. Check allocator
+   * provenance first: numeric values are the common case at dynamic call
+   * boundaries, and they must not pay the typed-buffer cache and dictionary
+   * registry probes only to be classified as non-sequences afterwards.
    */
   int64_t managed = rt_heap_object_ptr(value);
   if (managed) {
@@ -6584,6 +6569,24 @@ int64_t rt_len(int64_t value) {
        */
       return 0;
     }
+  } else {
+    /*
+     * Tbuf capacity shares this word position with heap string tags. A buffer
+     * whose capacity equals TAG_STR or TAG_STR_CONST must be recognized from
+     * its registered handle before the generic tagged-string predicate.
+     */
+    if (rt_tbuf_cached_handle((uintptr_t)value)) {
+      const int64_t *header = NULL;
+      if (rt_tbuf_check(value, &header) == RT_TBUF_OK)
+        return header[1];
+    }
+    /*
+     * The native dictionary registry is filled only by the dictionary
+     * constructor, so a hit is authoritative. Checking it here spares a
+     * dictionary the string, typed-buffer, set and vector probes below.
+     */
+    if (ny_native_dict_registry_find((uintptr_t)value))
+      return rt_len_native_dict(value);
   }
   /*
    * Small tagged strings also satisfy rt_native_is_str().  Their address is
@@ -6629,7 +6632,7 @@ int64_t rt_len(int64_t value) {
   int64_t dict_len = rt_dict_len_raw(value);
   if (dict_len > 0)
     return dict_len;
-  int64_t heap_v = rt_heap_object_ptr(value);
+  int64_t heap_v = managed;
   if (heap_v) {
     int64_t tag = *(int64_t *)((char *)(uintptr_t)heap_v - 8);
     if (tag == TAG_BYTES) {
@@ -9851,14 +9854,10 @@ int64_t rt_value_tag(int64_t v) {
   if (NY_DYNAMIC_CALLABLE_IS(v))
     return TAG_CLOSURE;
   /*
-   * Async tasks are opaque runtime handles, not strings or scalar immediates.
-   * Their addresses can satisfy both heuristic predicates.
-   */
-  if (rt_async_is_handle(v))
-    return TAG_CLOSURE;
-  /*
    * Live managed-object provenance is stronger than the foreign header
-   * probes used for native buffers, dictionaries, and static strings.
+   * probes used for native buffers, dictionaries, and static strings. It is
+   * also the common case for runtime values, and the async-handle lookup
+   * below walks a hash table, so resolve the managed tag first.
    */
   int64_t heap_v = rt_heap_object_ptr(v);
   if (heap_v) {
@@ -9866,6 +9865,12 @@ int64_t rt_value_tag(int64_t v) {
     if (tag >= 100 && tag <= 255)
       return tag == TAG_STR_CONST ? TAG_STR : tag;
   }
+  /*
+   * Async tasks are opaque runtime handles, not strings or scalar immediates.
+   * Their addresses can satisfy both heuristic predicates.
+   */
+  if (rt_async_is_handle(v))
+    return TAG_CLOSURE;
   /*
    * Raw native handles may be odd and therefore satisfy the scalar low-bit
    * test.  Resolve authoritative native representations before classifying

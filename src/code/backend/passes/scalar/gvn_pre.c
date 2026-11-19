@@ -1004,9 +1004,9 @@ static void gvn_canonicalize_operands(nyr_inst_t *key, const int *copy_of,
                                       size_t value_count,
                                       const nyr_cfg_t *cfg, const int *val_def,
                                       size_t inst_count, size_t at) {
-#define GVN_CANONICALIZE_OPERAND(field)                                    \
-  key->field = gvn_canonical_operand(key->field, copy_of, constant_of,     \
-                                     value_count, cfg, val_def,           \
+#define GVN_CANONICALIZE_OPERAND(field)                                \
+  key->field = gvn_canonical_operand(key->field, copy_of, constant_of, \
+                                     value_count, cfg, val_def,        \
                                      inst_count, at)
   GVN_CANONICALIZE_OPERAND(a);
   GVN_CANONICALIZE_OPERAND(b);
@@ -1015,6 +1015,37 @@ static void gvn_canonicalize_operands(nyr_inst_t *key, const int *copy_of,
   GVN_CANONICALIZE_OPERAND(e);
   GVN_CANONICALIZE_OPERAND(f);
 #undef GVN_CANONICALIZE_OPERAND
+}
+
+static int gvn_unique_copy_root(const nyr_func_t *f, const int *defs,
+                                const unsigned char *unique, int value) {
+  for (unsigned depth = 0; depth < 32; ++depth) {
+    if (value < 0 || value >= f->next_value || unique[value] != 1)
+      return -1;
+    int at = defs[value];
+    if (at < 0 || (size_t)at >= f->len || f->data[at].dst != value)
+      return -1;
+    if (f->data[at].op != NYIR_COPY)
+      return value;
+    value = f->data[at].a;
+  }
+  return -1;
+}
+
+static bool gvn_same_integer_operands(const nyr_func_t *f, const int *defs,
+                                      const unsigned char *unique,
+                                      const nyr_inst_t *a, const nyr_inst_t *b) {
+  if (a->op != b->op ||
+      (a->op != NYIR_MUL_I64 && a->op != NYIR_ADD_I64 &&
+       a->op != NYIR_SUB_I64))
+    return false;
+  int a0 = gvn_unique_copy_root(f, defs, unique, a->a);
+  int a1 = gvn_unique_copy_root(f, defs, unique, a->b);
+  int b0 = gvn_unique_copy_root(f, defs, unique, b->a);
+  int b1 = gvn_unique_copy_root(f, defs, unique, b->b);
+  return a0 >= 0 && a1 >= 0 && b0 >= 0 && b1 >= 0 &&
+         ((a0 == b0 && a1 == b1) ||
+          (a->op != NYIR_SUB_I64 && a0 == b1 && a1 == b0));
 }
 
 static bool gvn_pass(nyr_func_t *f, int *vn_of_val, nyr_cfg_t *cfg) {
@@ -1044,6 +1075,15 @@ static bool gvn_pass(nyr_func_t *f, int *vn_of_val, nyr_cfg_t *cfg) {
   int *val_def = nyr_build_defs(f);
   if (!val_def)
     return true;
+  unsigned char *unique = calloc((size_t)f->next_value, 1);
+  if (!unique) {
+    free(val_def);
+    return true;
+  }
+  for (size_t n = 0; n < f->len; ++n)
+    if (f->data[n].dst >= 0 && f->data[n].dst < f->next_value &&
+        unique[f->data[n].dst] < 2)
+      ++unique[f->data[n].dst];
   int *vn_dst = malloc(((size_t)f->len + 1) * sizeof(*vn_dst));
   int *copy_of = malloc((size_t)f->next_value * sizeof(*copy_of));
   int *constant_of = malloc((size_t)f->next_value * sizeof(*constant_of));
@@ -1052,6 +1092,7 @@ static bool gvn_pass(nyr_func_t *f, int *vn_of_val, nyr_cfg_t *cfg) {
     free(copy_of);
     free(constant_of);
     free(val_def);
+    free(unique);
     return true;
   }
   for (size_t j = 0; j < (size_t)f->len + 1; ++j)
@@ -1170,7 +1211,8 @@ static bool gvn_pass(nyr_func_t *f, int *vn_of_val, nyr_cfg_t *cfg) {
     size_t block = cfg->inst_block[i];
     if (loop_analysis_failed || !loop_blocks ||
         (block < cfg->block_count && loop_blocks[block] &&
-         in->op != NYIR_LOAD_I64)) {
+         in->op != NYIR_LOAD_I64 && in->op != NYIR_MUL_I64 &&
+         in->op != NYIR_ADD_I64 && in->op != NYIR_SUB_I64)) {
       if (trace)
         excluded_loop++;
       continue;
@@ -1284,7 +1326,11 @@ static bool gvn_pass(nyr_func_t *f, int *vn_of_val, nyr_cfg_t *cfg) {
           bool block_local_expression =
               expression_key && in->op != NYIR_LOAD_I64 &&
               in->op != NYIR_LOAD_LOCAL;
-          if (dom && (!block_local_expression || def_block == use_block)) {
+          bool safe_arithmetic =
+              dom && block_local_expression && def_block != use_block &&
+              gvn_same_integer_operands(f, val_def, unique, &f->data[def], in);
+          if (dom && (!block_local_expression || def_block == use_block ||
+                      safe_arithmetic)) {
             bool reads_memory =
                 (nyr_effective_effects(in) & NYIR_EFFECT_READ_MEMORY) != 0;
             bool local_read = in->op == NYIR_LOAD_LOCAL;
@@ -1410,6 +1456,7 @@ static bool gvn_pass(nyr_func_t *f, int *vn_of_val, nyr_cfg_t *cfg) {
   free(copy_of);
   free(constant_of);
   free(val_def);
+  free(unique);
   free(loop_blocks);
   return true;
 }

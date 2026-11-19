@@ -1,7 +1,7 @@
 shape os_walk_calls_include_callback_effects {
   family "typing/effects"
   generator "regression"
-  features ["ny", "test", "typing", "effects", "higher-order", "callback", "filesystem"]
+  features ["typing", "ny", "test", "callback", "effects", "filesystem", "higher-order"]
   template ny-test-case
   flags_matrix "--effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
   expect compile_and_run

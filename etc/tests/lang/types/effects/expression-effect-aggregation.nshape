@@ -1,7 +1,7 @@
 shape expression_effect_aggregation {
   family "runtime/language/types"
   generator "embedded"
-  features ["ny", "effects", "expression", "match", "ternary", "sizeof"]
+  features ["ny", "effects", "expression", "match", "sizeof", "ternary"]
   template ny-test-case
   flags_matrix "--native --run; --native-only; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
   expect compile_and_run

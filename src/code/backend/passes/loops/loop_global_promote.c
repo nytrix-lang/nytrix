@@ -273,18 +273,35 @@ static bool lgp_private_heap_addr(const nyr_func_t *f, const int *defs,
   const nyr_inst_t *def = &f->data[defs[value]];
   if (def->op == NYIR_COPY)
     return lgp_private_heap_addr(f, defs, def->a, depth + 1);
+  if (def->op == NYIR_PHI) {
+    if (def->phi_incoming_len == 0)
+      return false;
+    for (size_t p = 0; p < def->phi_incoming_len; ++p) {
+      if (!lgp_private_heap_addr(f, defs, def->phi_incoming[p].value, depth + 1))
+        return false;
+    }
+    return true;
+  }
   if (def->op == NYIR_ADD_I64) {
-    /*
-     * Only +0 preserves the exact allocator result. Any nonzero displacement
-     * can wrap or cross into unrelated storage in untyped i64 address math.
-     */
-    if (lgp_is_const_i64(f, defs, def->b) &&
-        f->data[defs[def->b]].imm == 0)
-      return lgp_private_heap_addr(f, defs, def->a, depth + 1);
-    if (lgp_is_const_i64(f, defs, def->a) &&
-        f->data[defs[def->a]].imm == 0)
-      return lgp_private_heap_addr(f, defs, def->b, depth + 1);
-    return false;
+    return lgp_private_heap_addr(f, defs, def->a, depth + 1) ||
+           lgp_private_heap_addr(f, defs, def->b, depth + 1);
+  }
+  if (def->op == NYIR_LOAD_LOCAL) {
+    int loc = (int)def->imm;
+    if (loc < 0)
+      return false;
+    bool has_store = false;
+    for (size_t i = 0; i < f->len; ++i) {
+      const nyr_inst_t *st = &f->data[i];
+      if (st->op == NYIR_ADDR_LOCAL && st->imm == loc)
+        return false;
+      if (st->op == NYIR_STORE_LOCAL && st->imm == loc) {
+        has_store = true;
+        if (!lgp_private_heap_addr(f, defs, st->a, depth + 1))
+          return false;
+      }
+    }
+    return has_store;
   }
   if (def->op != NYIR_CALL || !def->symbol)
     return false;
@@ -392,6 +409,17 @@ static int lgp_try_loop_inner(nyr_func_t *f, const nyr_cfg_t *cfg,
       int64_t offset = 0;
       const char *sym = NULL;
       bool is_loc = false;
+      bool is_vec_mem =
+          in->op == NYIR_VEC4_LOAD_I64 || in->op == NYIR_VEC8_LOAD_I64 ||
+          in->op == NYIR_VEC4_LOAD_F64 || in->op == NYIR_VEC8_LOAD_F32 ||
+          in->op == NYIR_VEC4_STORE_I64 || in->op == NYIR_VEC8_STORE_I64 ||
+          in->op == NYIR_VEC4_STORE_F64 || in->op == NYIR_VEC8_STORE_F32;
+      if (is_vec_mem) {
+        if (lgp_private_heap_addr(f, defs, in->a, 0))
+          continue;
+        aborted = true;
+        goto bail;
+      }
       if (in->op == NYIR_LOAD_I64 || in->op == NYIR_STORE_I64) {
         is_loc = lgp_location_of(f, defs, pm, in->a, &sym, &offset);
         if (!is_loc) {
@@ -447,8 +475,9 @@ static int lgp_try_loop_inner(nyr_func_t *f, const nyr_cfg_t *cfg,
           if (direct_store_len <
               sizeof(direct_stores) / sizeof(direct_stores[0]))
             direct_stores[direct_store_len++] = sym;
-          else
+          else {
             aborted = true;
+          }
         }
         if (in->op == NYIR_LOAD_I64 && !slots[k].has_load) {
           slots[k].load_tmpl = *in;

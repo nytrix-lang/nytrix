@@ -1,7 +1,7 @@
 shape eq_refl_symbolic {
   family "runtime/compiler"
   generator "embedded"
-  features ["ny", "proof", "equality", "refl"]
+  features ["ny", "equality", "proof", "refl"]
   template ny-test-case
   flags_matrix "--native-only; --native-only -O3; --native-backend=llvm --jit --jit-engine=orc"
   expect compile_and_run
@@ -25,7 +25,7 @@ NY
 shape proof_param_literal_instantiation {
   family "runtime/compiler"
   generator "embedded"
-  features ["ny", "proof", "dependent", "pi"]
+  features ["ny", "dependent", "pi", "proof"]
   template ny-test-case
   flags_matrix "--native-only; --native-backend=llvm --jit --jit-engine=orc"
   expect compile_and_run

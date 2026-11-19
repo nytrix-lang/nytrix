@@ -1,7 +1,7 @@
 shape raw_dictionary_runtime_effects_are_precise {
   family "typing/effects"
   generator "regression"
-  features ["ny" "test" "typing" "effects" "dict" "runtime-contracts"]
+  features ["typing", "ny", "test", "dict", "effects", "runtime-contracts"]
   template ny-test-case
   flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
   expect compile_and_run

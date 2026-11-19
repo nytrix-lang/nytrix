@@ -1,7 +1,7 @@
 shape stored_query_predicates_preserve_effect_rows {
   family "typing/effects"
   generator "regression"
-  features ["ny", "test", "typing", "effects", "higher-order", "callback", "query", "stored"]
+  features ["typing", "ny", "test", "callback", "effects", "higher-order", "query", "stored"]
   flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
   expect compile_and_run
   source ny <<'NY'

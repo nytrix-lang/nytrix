@@ -29,13 +29,17 @@ enum { LGP_MAX_ROUNDS = 8, LGP_MAX_SLOTS = 16, LGP_MAX_EXITS = 8 };
 typedef struct {
   const char *symbol;
   int local;
-  /* Original instructions whose metadata (scalar class, memory flags, alias
-   * class, debug location) the inserted seed and write-back copy. */
+  /*
+   * Original instructions whose metadata (scalar class, memory flags, alias
+   * class, debug location) the inserted seed and write-back copy.
+   */
   nyr_inst_t addr_tmpl, load_tmpl, store_tmpl;
   bool has_load, has_store;
 } lgp_slot_t;
 
-/* Copy metadata only; the clone owns no out-of-line arrays. */
+/*
+ * Copy metadata only; the clone owns no out-of-line arrays.
+ */
 static nyr_inst_t lgp_clone(const nyr_inst_t *tmpl, nyr_op_t op, int dst,
                             int a, int c, int64_t imm) {
   nyr_inst_t in = *tmpl;
@@ -85,8 +89,10 @@ static size_t lgp_next_local(const nyr_func_t *f) {
   return n;
 }
 
-/* Index at which code ending a block may be inserted: before its terminator
- * when it has one, otherwise at the block end (fallthrough). */
+/*
+ * Index at which code ending a block may be inserted: before its terminator
+ * when it has one, otherwise at the block end (fallthrough).
+ */
 static size_t lgp_block_tail(const nyr_func_t *f, const nyr_cfg_t *cfg,
                              size_t block) {
   size_t end = nyr_block_last_non_nop(f, cfg, block);
@@ -98,7 +104,9 @@ static size_t lgp_block_tail(const nyr_func_t *f, const nyr_cfg_t *cfg,
   return end;
 }
 
-/* First index after the block's label and PHIs. */
+/*
+ * First index after the block's label and PHIs.
+ */
 static size_t lgp_block_head(const nyr_func_t *f, const nyr_cfg_t *cfg,
                              size_t block) {
   size_t at = cfg->block_start[block];
@@ -164,7 +172,9 @@ static int lgp_try_loop(nyr_func_t *f, const nyr_cfg_t *cfg, const int *defs,
   for (size_t k = 0; k < slot_len; ++k) {
     lgp_slot_t *sl = &slots[k];
     if (!sl->has_load) {
-      /* Store-only slot: the loaded word has the stored value's class. */
+      /*
+       * Store-only slot: the loaded word has the stored value's class.
+       */
       sl->load_tmpl = sl->store_tmpl;
       sl->load_tmpl.op = NYIR_LOAD_I64;
     }
@@ -174,7 +184,9 @@ static int lgp_try_loop(nyr_func_t *f, const nyr_cfg_t *cfg, const int *defs,
     }
   }
 
-  /* Dedicated preheader. */
+  /*
+   * Dedicated preheader.
+   */
   size_t preheader = SIZE_MAX;
   for (size_t k = cfg->pred_offsets[header]; k < cfg->pred_offsets[header + 1];
        ++k) {
@@ -189,7 +201,9 @@ static int lgp_try_loop(nyr_func_t *f, const nyr_cfg_t *cfg, const int *defs,
       cfg->succ_offsets[preheader + 1] - cfg->succ_offsets[preheader] != 1)
     return 0;
 
-  /* Dedicated exits. */
+  /*
+   * Dedicated exits.
+   */
   size_t exits[LGP_MAX_EXITS];
   size_t exit_len = 0;
   for (size_t b = 0; b < nb; ++b) {
@@ -223,7 +237,9 @@ static int lgp_try_loop(nyr_func_t *f, const nyr_cfg_t *cfg, const int *defs,
     slots[k].local = (int)next_local++;
   }
 
-  /* Rewrite in-loop accesses in place. */
+  /*
+   * Rewrite in-loop accesses in place.
+   */
   for (size_t b = 0; b < nb; ++b) {
     if (!member[b])
       continue;
@@ -249,7 +265,9 @@ static int lgp_try_loop(nyr_func_t *f, const nyr_cfg_t *cfg, const int *defs,
     }
   }
 
-  /* Preheader seeds and exit write-backs, inserted from the back. */
+  /*
+   * Preheader seeds and exit write-backs, inserted from the back.
+   */
   size_t cap = slot_len * 3 * (1 + exit_len);
   lgp_insert_t *ins = calloc(cap, sizeof(*ins));
   if (!ins)

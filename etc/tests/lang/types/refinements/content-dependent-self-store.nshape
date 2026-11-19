@@ -1,7 +1,7 @@
 shape mutable_aggregate_content_predicate_survives_exact_self_store {
   family "runtime/language"
   generator "regression"
-  features [ny test typing refinement mutable aggregate content-dependent self-store positive]
+  features ["typing", "ny", "test", "aggregate", "content-dependent", "mutable", "positive", "refinement", "self-store"]
   template ny-test-case
   flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
   expect compile_and_run

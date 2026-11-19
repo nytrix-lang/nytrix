@@ -1792,6 +1792,13 @@ if (NYTRIX_BUILD_SHARED AND UNIX AND NOT APPLE AND NYTRIX_USE_LLVM AND
 endif()
 
 if (BUILD_TESTING)
+  add_executable(nyr-jit-layout-test
+    "${NYTRIX_ROOT}/etc/tests/native/jit_layout_test.c")
+  target_include_directories(nyr-jit-layout-test PRIVATE "${NYTRIX_ROOT}/src")
+  add_test(NAME nyr-jit-layout COMMAND nyr-jit-layout-test)
+endif()
+
+if (BUILD_TESTING)
   function(nytrix_add_nshape_test test_name fixture)
     set(test_timeout 120)
     if(ARGC GREATER 2)

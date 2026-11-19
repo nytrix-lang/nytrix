@@ -1,0 +1,19 @@
+shape prover_goal_state_and_tactics {
+  family "runtime/library"
+  generator "embedded"
+  features ["ny", "proofs", "prover", "tactics"]
+  template ny-test-case
+  timeout 300
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=orc"
+  expect compile_and_run
+  expect_message "PROVER-OK 3 2"
+  source ny <<'NY'
+use core
+use core.prover as pr
+def bad_st = pr.auto(pr.begin(pr.goal([], "x * x > x", "x=-5..5")))
+print("auto_err=", bad_st.get("error"))
+
+print("PROVER-OK", 3, 2)
+
+NY
+}

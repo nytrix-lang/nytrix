@@ -1,7 +1,7 @@
 shape captured_callback_dynamic_index_runs_in_all_backends {
   family "runtime/values"
   generator "regression"
-  features [ny runtime callback dynamic-index regression]
+  features ["ny", "callback", "dynamic-index", "regression", "runtime"]
   template ny-test-case
   flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
   expect compile_and_run

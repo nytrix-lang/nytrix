@@ -1,7 +1,7 @@
 shape match_explicit_motive {
   family "runtime/compiler"
   generator "embedded"
-  features ["ny", "match", "motive", "dependent"]
+  features ["ny", "dependent", "match", "motive"]
   template ny-test-case
   flags_matrix "--native-only; --native-backend=llvm --jit --jit-engine=orc; --wasm"
   expect compile_and_run

@@ -1,7 +1,7 @@
 shape async_effect_calls_create_awaitable_tasks {
   family "typing/effects"
   generator "regression"
-  features ["ny", "test", "typing", "effects", "async", "lowering"]
+  features ["typing", "ny", "test", "async", "effects", "lowering"]
   template ny-test-case
   flags_matrix "--effect-require-known --nyr-verify --native --run; --effect-require-known --nyr-verify --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --nyr-verify --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --nyr-verify --native-only"
   expect compile_and_run

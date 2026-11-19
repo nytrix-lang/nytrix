@@ -723,9 +723,11 @@ static bool ifc_rewrite_store_only(nyr_func_t *f, size_t branch,
  */
 static bool ifc_value_raw(const nyr_func_t *f, const int *defs, int v,
                           int root, unsigned depth) {
-  /* Only a cycle reached through another PHI may close on the root; an arm
+  /*
+   * Only a cycle reached through another PHI may close on the root; an arm
    * value that is the join PHI itself would make the SELECT read its own
-   * result. */
+   * result.
+   */
   if (v == root)
     return depth > 0;
   if (!f || !defs || v < 0 || v >= f->next_value || defs[v] < 0 ||
@@ -737,7 +739,9 @@ static bool ifc_value_raw(const nyr_func_t *f, const int *defs, int v,
   if (def->scalar_class != NYIR_SCALAR_UNKNOWN ||
       getenv("NYTRIX_NO_IFCONV_PHI_RAW"))
     return false;
-  /* An unclassified i64 immediate is a raw integer constant. */
+  /*
+   * An unclassified i64 immediate is a raw integer constant.
+   */
   if (def->op == NYIR_CONST_I64 && !getenv("NYTRIX_NO_IFCONV_PHI_RAW"))
     return true;
   if (def->op == NYIR_COPY)

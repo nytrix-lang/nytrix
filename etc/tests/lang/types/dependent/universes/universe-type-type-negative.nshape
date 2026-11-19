@@ -1,7 +1,7 @@
 shape universe_type_type_negative {
   family "typing/dependent"
   generator "error"
-  features [error typing dependent negative universe]
+  features ["error", "typing", "dependent", "negative", "universe"]
   template ny-compile-fail
   flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
   expect compile_fail

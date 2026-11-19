@@ -1,7 +1,7 @@
 shape fn_type_param_dynamic_instantiation {
   family "runtime/language"
   generator "embedded"
-  features [ny generics]
+  features ["ny", "generics"]
   template ny-test-case
   flags_matrix "--native-only -O0"
   expect compile_and_run
@@ -23,7 +23,7 @@ NY
 shape fn_type_param_multiple {
   family "runtime/language"
   generator "embedded"
-  features [ny generics]
+  features ["ny", "generics"]
   template ny-test-case
   flags_matrix "--native-only -O0"
   expect compile_and_run
@@ -42,7 +42,7 @@ NY
 shape fn_type_param_empty_list_negative {
   family "compiler-errors/frontend"
   generator "error"
-  features [ny generics parse negative]
+  features ["ny", "negative", "generics", "parse"]
   template ny-compile-fail
   expect compile_fail
   expect_message "empty function type parameter list"
@@ -54,7 +54,7 @@ NY
 shape fn_type_param_unterminated_negative {
   family "compiler-errors/frontend"
   generator "error"
-  features [ny generics parse negative]
+  features ["ny", "negative", "generics", "parse"]
   template ny-compile-fail
   expect compile_fail
   expect_message "expected '>' after function type parameters"
@@ -66,7 +66,7 @@ NY
 shape fn_implicit_type_binder {
   family "runtime/compiler"
   generator "embedded"
-  features [ny generics implicit binders]
+  features ["ny", "binders", "generics", "implicit"]
   template ny-test-case
   flags_matrix "--native-only; --native-backend=llvm --jit --jit-engine=orc"
   expect compile_and_run
@@ -87,7 +87,7 @@ NY
 shape fn_implicit_type_binder_inconsistent_negative {
   family "compiler-errors/type"
   generator "error"
-  features [ny generics implicit binders negative]
+  features ["ny", "negative", "binders", "generics", "implicit"]
   template ny-compile-fail
   expect compile_fail
   expect_message "instantiated inconsistently"
@@ -101,7 +101,7 @@ NY
 shape fn_implicit_value_binder_negative {
   family "compiler-errors/frontend"
   generator "error"
-  features [ny generics implicit binders parse negative]
+  features ["ny", "negative", "binders", "generics", "implicit", "parse"]
   template ny-compile-fail
   expect compile_fail
   expect_message "implicit binder is not determined by any parameter type"
@@ -113,7 +113,7 @@ NY
 shape fn_implicit_empty_binder_negative {
   family "compiler-errors/frontend"
   generator "error"
-  features [ny generics implicit binders parse negative]
+  features ["ny", "negative", "binders", "generics", "implicit", "parse"]
   template ny-compile-fail
   expect compile_fail
   expect_message "empty implicit binder list"

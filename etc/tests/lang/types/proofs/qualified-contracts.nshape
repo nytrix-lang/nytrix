@@ -1,7 +1,7 @@
 shape qualified_contract_proofs {
   family "runtime/proofs"
   generator "program"
-  features ["proofs", "requires", "module-qualified", "backend-parity"]
+  features ["backend-parity", "module-qualified", "proofs", "requires"]
   template ny-test-case
   expect compile_and_run
   flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"

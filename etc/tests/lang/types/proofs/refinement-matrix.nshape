@@ -1,7 +1,7 @@
 shape refinement_matrix {
   family "runtime/proofs"
   generator "program"
-  features ["proofs", "fin", "range", "index", "safe-mode", "refined-v1"]
+  features ["fin", "index", "proofs", "range", "refined-v1", "safe-mode"]
   template ny-test-case
   flags "--no-strict-types --color=never"
   expect compile_and_run
@@ -31,7 +31,7 @@ NY
 shape refinement_matrix_safe_mode {
   family "runtime/proofs"
   generator "program"
-  features ["proofs", "safe-mode", "raw-bounds"]
+  features ["proofs", "raw-bounds", "safe-mode"]
   template ny-test-case
   flags "--safe-mode --color=never"
   expect compile_and_run

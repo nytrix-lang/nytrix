@@ -402,6 +402,37 @@ static bool nir_value_dominates_use(const nyr_func_t *f, const nyr_cfg_t *cfg,
                              "value definition does not dominate its use");
 }
 
+/* A zero-extending load shifted by at least width-1 produces only 0 or 1. */
+static bool nir_select_shift_is_boolean(const nyr_func_t *f,
+                                        const nyr_inst_t *shift,
+                                        size_t before) {
+  int input = shift->a, count = shift->b;
+  unsigned width = 0;
+  int64_t amount = -1;
+  for (size_t i = before; i-- > 0 && (!width || amount < 0);) {
+    const nyr_inst_t *def = &f->data[i];
+    if (!width && def->dst == input) {
+      if (def->op == NYIR_COPY)
+        input = def->a;
+      else if (def->op == NYIR_LOAD_I64 && (def->flags & NYIR_INST_F_MEM_BYTE))
+        width = 8;
+      else if (def->op == NYIR_LOAD_I64 && (def->flags & NYIR_INST_F_MEM_U16))
+        width = 16;
+      else
+        return false;
+    }
+    if (amount < 0 && def->dst == count) {
+      if (def->op == NYIR_COPY)
+        count = def->a;
+      else if (def->op == NYIR_CONST_I64 && def->imm >= 0 && def->imm < 64)
+        amount = def->imm;
+      else
+        return false;
+    }
+  }
+  return width && amount >= (int64_t)width - 1;
+}
+
 static bool nir_select_condition_is_boolean(const nyr_func_t *f, int value,
                                             size_t before, unsigned depth) {
   if (!f || value < 0 || value >= f->next_value || depth > 16)
@@ -415,6 +446,8 @@ static bool nir_select_condition_is_boolean(const nyr_func_t *f, int value,
       return true;
     if (def->op == NYIR_CONST_I64)
       return def->imm == 0 || def->imm == 1;
+    if (def->op == NYIR_SAR_I64)
+      return nir_select_shift_is_boolean(f, def, i);
     /*
      * Bool normalization (`and 1, cmp`): an AND with one 0/1 operand is
      * 0/1, as is OR/XOR of two 0/1 values.
@@ -1284,11 +1317,11 @@ static bool nir_verify_dominance(const nyr_func_t *f, char *err,
     return nyr_err(err, err_len, "native NYIR verify: out of memory");
   }
 
-#define CHECK_DOMINATES(value)                                          \
-  do {                                                                  \
-    if (!nir_value_dominates_use(f, &cfg, definitions, (value), i, err, \
-                                 err_len, in))                          \
-      goto fail;                                                        \
+#define CHECK_DOMINATES(value)                                                 \
+  do {                                                                         \
+    if (!nir_value_dominates_use(f, &cfg, definitions, (value), i, err,        \
+                                 err_len, in))                                 \
+      goto fail;                                                               \
   } while (0)
 
   for (size_t i = 0; i < f->len; ++i) {

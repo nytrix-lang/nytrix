@@ -1,7 +1,7 @@
 shape proof_policy_enum_reflexive {
   family "runtime/proofs"
   generator "program"
-  features ["proofs", "policy", "enum", "reflexivity"]
+  features ["enum", "policy", "proofs", "reflexivity"]
   template ny-test-case
   expect compile_and_run
   source ny <<'NY'
@@ -20,7 +20,7 @@ NY
 shape proof_policy_enum_distinct_negative {
   family "runtime/proofs"
   generator "program"
-  features ["proofs", "policy", "enum", "fail-closed"]
+  features ["enum", "fail-closed", "policy", "proofs"]
   template ny-test-case
   expect compile_fail
   source ny <<'NY'

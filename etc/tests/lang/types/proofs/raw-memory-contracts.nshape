@@ -1,7 +1,7 @@
 shape raw_memory_requires_proves_byte_range {
   family "runtime/proofs"
   generator "regression"
-  features ["proofs", "requires", "raw-memory", "range", "safe-heap"]
+  features ["proofs", "range", "raw-memory", "requires", "safe-heap"]
   template ny-test-case
   flags "--heap=safe"
   expect compile_and_run
@@ -27,7 +27,7 @@ NY
 shape raw_memory_requires_rejects_an_unproved_byte_index {
   family "compiler-errors/proofs"
   generator "regression"
-  features ["proofs", "requires", "raw-memory", "range", "negative"]
+  features ["negative", "proofs", "range", "raw-memory", "requires"]
   template ny-test-case
   flags_matrix "--native-only; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc"
   expect compile_fail

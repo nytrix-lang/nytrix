@@ -1,7 +1,7 @@
 shape mutable_aggregate_reversed_length_bound_survives_store_and_append {
   family "runtime/language"
   generator "regression"
-  features [ny test typing refinement mutable aggregate reversed length lower bound positive]
+  features ["typing", "ny", "test", "aggregate", "bound", "length", "lower", "mutable", "positive", "refinement", "reversed"]
   template ny-test-case
   timeout 120
   flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
@@ -30,7 +30,7 @@ NY
 shape mutable_aggregate_reversed_length_bound_expires_after_shrink {
   family "compiler-errors/types"
   generator "error"
-  features [error typing refinement mutable aggregate reversed length lower bound invalidation negative]
+  features ["error", "typing", "negative", "aggregate", "bound", "invalidation", "length", "lower", "mutable", "refinement", "reversed"]
   template ny-compile-fail
   flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
   expect compile_fail

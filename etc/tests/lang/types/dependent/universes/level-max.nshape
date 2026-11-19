@@ -1,7 +1,7 @@
 shape level_max_literal_normalization {
   family "runtime/language"
   generator "embedded"
-  features [ny dependent universe level]
+  features ["ny", "dependent", "level", "universe"]
   template ny-test-case
   flags_matrix "--native-only -O0"
   expect compile_and_run
@@ -22,7 +22,7 @@ NY
 shape level_max_cumulativity {
   family "runtime/language"
   generator "embedded"
-  features [ny dependent universe level cumulativity]
+  features ["ny", "dependent", "cumulativity", "level", "universe"]
   template ny-test-case
   flags_matrix "--native-only -O0"
   expect compile_and_run
@@ -39,7 +39,7 @@ NY
 shape level_max_too_low_negative {
   family "compiler-errors/type"
   generator "error"
-  features [ny dependent universe level negative]
+  features ["ny", "dependent", "negative", "level", "universe"]
   template ny-compile-fail
   expect compile_fail
   source ny <<'NY'

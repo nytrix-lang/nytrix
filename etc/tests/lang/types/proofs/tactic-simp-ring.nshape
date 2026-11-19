@@ -1,7 +1,7 @@
 shape tactic_simp_ring {
   family "runtime/proofs"
   generator "program"
-  features ["proofs", "tactics", "simp", "ring", "logic"]
+  features ["logic", "proofs", "ring", "simp", "tactics"]
   template ny-test-case
   flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
   expect compile_and_run

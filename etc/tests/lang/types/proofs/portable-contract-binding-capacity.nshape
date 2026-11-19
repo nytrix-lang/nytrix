@@ -1,7 +1,7 @@
 shape portable_contract_more_than_eight_variables_proved {
   family "runtime/proofs"
   generator "program"
-  features ["proofs", "requires", "bounded-variable-capacity", "backend-parity"]
+  features ["backend-parity", "bounded-variable-capacity", "proofs", "requires"]
   template ny-test-case
   expect compile_and_run
   flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
@@ -52,7 +52,7 @@ NY
 shape portable_contract_missing_ninth_variable_rejected {
   family "runtime/proofs"
   generator "error"
-  features ["proofs", "requires", "bounded-variable-capacity", "backend-parity"]
+  features ["backend-parity", "bounded-variable-capacity", "proofs", "requires"]
   template ny-compile-fail
   expect compile_fail
   expect_message "precondition"
@@ -81,7 +81,7 @@ NY
 shape portable_contract_above_variable_budget_fails_closed {
   family "runtime/proofs"
   generator "error"
-  features ["proofs", "requires", "bounded-variable-capacity", "fail-closed"]
+  features ["bounded-variable-capacity", "fail-closed", "proofs", "requires"]
   template ny-compile-fail
   expect compile_fail
   expect_message "precondition"

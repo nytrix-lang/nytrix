@@ -18,8 +18,10 @@ static int64_t reference(int64_t depth, int64_t seed) {
   return (int64_t)acc;
 }
 
-/* The binary benchmark recurrence after if-conversion and select factoring:
- * acc' = select(even, acc*3 + i, acc*5 - i) + depth. */
+/*
+ * The binary benchmark recurrence after if-conversion and select factoring:
+ * acc' = select(even, acc*3 + i, acc*5 - i) + depth.
+ */
 static bool build(nyr_func_t *f, int *acc_next_out) {
   nyr_opt_begin(f);
   nyr_opt_label(f, 1);
@@ -106,8 +108,10 @@ static bool check_loop(void) {
             nyr_ilp_reassociate(&f) &&
             nyr_opt_verify(&f, "ilp-reassociate-after") &&
             run_values(&f, "after");
-  /* The loop-carried accumulator is now produced by the SELECT itself, and
-   * each arm carries the invariant addend. */
+  /*
+   * The loop-carried accumulator is now produced by the SELECT itself, and
+   * each arm carries the invariant addend.
+   */
   const nyr_inst_t *acc_def = ok ? def_of(&f, acc_next) : NULL;
   const nyr_inst_t *yes = acc_def ? def_of(&f, acc_def->b) : NULL;
   const nyr_inst_t *no = acc_def ? def_of(&f, acc_def->c) : NULL;
@@ -122,7 +126,9 @@ static bool check_loop(void) {
   return ok;
 }
 
-/* Without a loop nothing is on a recurrence; the pass must not grow code. */
+/*
+ * Without a loop nothing is on a recurrence; the pass must not grow code.
+ */
 static bool check_straight_line(void) {
   nyr_func_t f;
   nyr_opt_begin(&f);

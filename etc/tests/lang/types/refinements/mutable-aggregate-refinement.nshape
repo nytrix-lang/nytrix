@@ -1,7 +1,7 @@
 shape mutable_aggregate_monotone_content_length_survives_append {
   family "runtime/language"
   generator "regression"
-  features [ny test typing refinement mutable aggregate content append positive]
+  features ["typing", "ny", "test", "aggregate", "append", "content", "mutable", "positive", "refinement"]
   template ny-test-case
   flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
   expect compile_and_run
@@ -28,7 +28,7 @@ NY
 shape mutable_fresh_aggregate_refinement_is_preserved_in_readonly_region {
   family "runtime/language"
   generator "regression"
-  features [ny test typing refinement mutable aggregate alias-flow positive]
+  features ["typing", "ny", "test", "aggregate", "alias-flow", "mutable", "positive", "refinement"]
   template ny-test-case
   timeout 120
   flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
@@ -54,7 +54,7 @@ NY
 shape mutable_aggregate_nonempty_constant_bound_survives_store_and_append {
   family "runtime/language"
   generator "regression"
-  features [ny test typing refinement mutable aggregate length constant expression positive]
+  features ["typing", "ny", "test", "aggregate", "constant", "expression", "length", "mutable", "positive", "refinement"]
   template ny-test-case
   flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
   expect compile_and_run
@@ -82,7 +82,7 @@ NY
 shape mutable_aggregate_refinement_expires_before_mutation {
   family "compiler-errors/types"
   generator "error"
-  features [error typing refinement mutable aggregate invalidation negative]
+  features ["error", "typing", "negative", "aggregate", "invalidation", "mutable", "refinement"]
   template ny-compile-fail
   flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
   expect compile_fail
@@ -108,7 +108,7 @@ NY
 shape mutable_aggregate_indexed_refinement_survives_proven_store {
   family "runtime/language"
   generator "regression"
-  features [ny test typing refinement mutable aggregate indexed predicate transport positive]
+  features ["typing", "ny", "test", "aggregate", "indexed", "mutable", "positive", "predicate", "refinement", "transport"]
   template ny-test-case
   timeout 120
   flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
@@ -138,7 +138,7 @@ NY
 shape mutable_aggregate_constant_expression_refinement_survives_store {
   family "runtime/language"
   generator "regression"
-  features [ny test typing refinement mutable aggregate constant expression positive]
+  features ["typing", "ny", "test", "aggregate", "constant", "expression", "mutable", "positive", "refinement"]
   template ny-test-case
   timeout 120
   flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
@@ -166,7 +166,7 @@ NY
 shape mutable_aggregate_constant_expression_violation_expires {
   family "compiler-errors/types"
   generator "error"
-  features [error typing refinement mutable aggregate constant expression violation negative]
+  features ["error", "typing", "negative", "aggregate", "constant", "expression", "mutable", "refinement", "violation"]
   template ny-compile-fail
   flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
   expect compile_fail
@@ -193,7 +193,7 @@ NY
 shape mutable_aggregate_overflowing_constant_refinement_fails_closed {
   family "compiler-errors/types"
   generator "error"
-  features [error typing refinement mutable aggregate constant overflow negative]
+  features ["error", "typing", "negative", "aggregate", "constant", "mutable", "overflow", "refinement"]
   template ny-compile-fail
   flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
   expect compile_fail
@@ -222,7 +222,7 @@ NY
 shape mutable_aggregate_negative_index_exact_store_preserves_refinement {
   family "runtime/language"
   generator "regression"
-  features [ny test typing refinement mutable aggregate negative index exact store positive]
+  features ["typing", "ny", "test", "negative", "aggregate", "exact", "index", "mutable", "positive", "refinement", "store"]
   template ny-test-case
   flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
   expect compile_and_run
@@ -249,7 +249,7 @@ NY
 shape mutable_aggregate_content_predicate_survives_disjoint_negative_store {
   family "runtime/language"
   generator "regression"
-  features [ny test typing refinement mutable aggregate negative index content positive]
+  features ["typing", "ny", "test", "negative", "aggregate", "content", "index", "mutable", "positive", "refinement"]
   template ny-test-case
   flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
   expect compile_and_run
@@ -276,7 +276,7 @@ NY
 shape mutable_aggregate_content_predicate_survives_disjoint_positive_store {
   family "runtime/language"
   generator "regression"
-  features [ny test typing refinement mutable aggregate content positive index positive]
+  features ["typing", "ny", "test", "aggregate", "content", "index", "mutable", "positive", "refinement"]
   template ny-test-case
   flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
   expect compile_and_run
@@ -303,7 +303,7 @@ NY
 shape mutable_aggregate_content_predicate_expires_after_mixed_sign_store {
   family "compiler-errors/types"
   generator "error"
-  features [error typing refinement mutable aggregate mixed sign alias negative]
+  features ["error", "typing", "negative", "aggregate", "alias", "mixed", "mutable", "refinement", "sign"]
   template ny-compile-fail
   flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
   expect compile_fail
@@ -330,7 +330,7 @@ NY
 shape mutable_aggregate_negative_index_alias_store_expires_refinement {
   family "compiler-errors/types"
   generator "error"
-  features [error typing refinement mutable aggregate negative index alias invalidation negative]
+  features ["error", "typing", "negative", "aggregate", "alias", "index", "invalidation", "mutable", "refinement"]
   template ny-compile-fail
   flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
   expect compile_fail
@@ -357,7 +357,7 @@ NY
 shape mutable_aggregate_negative_index_append_expires_refinement {
   family "compiler-errors/types"
   generator "error"
-  features [error typing refinement mutable aggregate negative index append invalidation negative]
+  features ["error", "typing", "negative", "aggregate", "append", "index", "invalidation", "mutable", "refinement"]
   template ny-compile-fail
   flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
   expect compile_fail
@@ -384,7 +384,7 @@ NY
 shape mutable_aggregate_nested_guard_assignment_expires_outer_refinement {
   family "compiler-errors/types"
   generator "error"
-  features [error typing refinement mutable aggregate nested guard invalidation negative]
+  features ["error", "typing", "negative", "aggregate", "guard", "invalidation", "mutable", "nested", "refinement"]
   template ny-compile-fail
   flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
   expect compile_fail
@@ -415,7 +415,7 @@ NY
 shape mutable_aggregate_symbolic_integer_bound_transport {
   family "runtime/language"
   generator "regression"
-  features [ny test typing refinement mutable aggregate symbolic integer bound store append positive]
+  features ["typing", "ny", "test", "aggregate", "append", "bound", "integer", "mutable", "positive", "refinement", "store", "symbolic"]
   template ny-test-case
   flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
   expect compile_and_run
@@ -466,7 +466,7 @@ NY
 shape mutable_aggregate_relation_preserved_by_reconstructing_stored_value {
   family "runtime/language"
   generator "regression"
-  features [ny test typing refinement mutable aggregate content relation reconstruct store positive]
+  features ["typing", "ny", "test", "aggregate", "content", "mutable", "positive", "reconstruct", "refinement", "relation", "store"]
   template ny-test-case
   flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
   expect compile_and_run
@@ -544,7 +544,7 @@ NY
 shape mutable_aggregate_symbolic_last_bound_survives_exact_append {
   family "runtime/language"
   generator "regression"
-  features [ny test typing refinement mutable aggregate symbolic last-bound append positive]
+  features ["typing", "ny", "test", "aggregate", "append", "last-bound", "mutable", "positive", "refinement", "symbolic"]
   template ny-test-case
   flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
   expect compile_and_run
@@ -576,7 +576,7 @@ NY
 shape mutable_aggregate_symbolic_last_bound_expires_after_other_append {
   family "compiler-errors/types"
   generator "error"
-  features [error typing refinement mutable aggregate symbolic last-bound append invalidation negative]
+  features ["error", "typing", "negative", "aggregate", "append", "invalidation", "last-bound", "mutable", "refinement", "symbolic"]
   template ny-compile-fail
   flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
   expect compile_fail
@@ -607,7 +607,7 @@ NY
 shape mutable_aggregate_symbolic_bound_survives_disjoint_store {
   family "runtime/language"
   generator "regression"
-  features [ny test typing refinement mutable aggregate immutable bound transport positive]
+  features ["typing", "ny", "test", "aggregate", "bound", "immutable", "mutable", "positive", "refinement", "transport"]
   template ny-test-case
   flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
   expect compile_and_run
@@ -635,7 +635,7 @@ NY
 shape mutable_aggregate_symbolic_bound_violation_expires {
   family "compiler-errors/types"
   generator "error"
-  features [error typing refinement mutable aggregate symbolic bound invalidation negative]
+  features ["error", "typing", "negative", "aggregate", "bound", "invalidation", "mutable", "refinement", "symbolic"]
   template ny-compile-fail
   flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
   expect compile_fail
@@ -663,7 +663,7 @@ NY
 shape mutable_aggregate_length_or_content_disjunction_survives_append {
   family "runtime/language"
   generator "regression"
-  features [ny test typing refinement mutable aggregate disjunction length content append positive]
+  features ["typing", "ny", "test", "aggregate", "append", "content", "disjunction", "length", "mutable", "positive", "refinement"]
   template ny-test-case
   flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
   expect compile_and_run
@@ -693,7 +693,7 @@ NY
 shape mutable_aggregate_length_or_content_disjunction_expires_after_store {
   family "compiler-errors/types"
   generator "error"
-  features [error typing refinement mutable aggregate disjunction content violation negative]
+  features ["error", "typing", "negative", "aggregate", "content", "disjunction", "mutable", "refinement", "violation"]
   template ny-compile-fail
   flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
   expect compile_fail
@@ -721,7 +721,7 @@ NY
 shape mutable_aggregate_conjunctive_refinement_transport {
   family "runtime/language"
   generator "regression"
-  features [ny test typing refinement mutable aggregate conjunction transport positive]
+  features ["typing", "ny", "test", "aggregate", "conjunction", "mutable", "positive", "refinement", "transport"]
   template ny-test-case
   timeout 120
   flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
@@ -751,7 +751,7 @@ NY
 shape mutable_aggregate_disjunctive_indexed_refinement_transport {
   family "runtime/language"
   generator "regression"
-  features [ny test typing refinement mutable aggregate indexed disjunction transport positive]
+  features ["typing", "ny", "test", "aggregate", "disjunction", "indexed", "mutable", "positive", "refinement", "transport"]
   template ny-test-case
   timeout 120
   flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
@@ -782,7 +782,7 @@ NY
 shape mutable_aggregate_disjunctive_indexed_refinement_violation_expires {
   family "compiler-errors/types"
   generator "error"
-  features [error typing refinement mutable aggregate indexed disjunction invalidation negative]
+  features ["error", "typing", "negative", "aggregate", "disjunction", "indexed", "invalidation", "mutable", "refinement"]
   template ny-compile-fail
   flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
   expect compile_fail
@@ -811,7 +811,7 @@ NY
 shape mutable_aggregate_conjunctive_refinement_violation_expires {
   family "compiler-errors/types"
   generator "error"
-  features [error typing refinement mutable aggregate conjunction invalidation negative]
+  features ["error", "typing", "negative", "aggregate", "conjunction", "invalidation", "mutable", "refinement"]
   template ny-compile-fail
   flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
   expect compile_fail
@@ -839,7 +839,7 @@ NY
 shape mutable_aggregate_local_write_precedes_refinement_guard {
   family "runtime/language"
   generator "regression"
-  features [ny test typing refinement mutable aggregate mutation guard positive]
+  features ["typing", "ny", "test", "aggregate", "guard", "mutable", "mutation", "positive", "refinement"]
   template ny-test-case
   timeout 120
   flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
@@ -866,7 +866,7 @@ NY
 shape mutable_aggregate_element_store_preserves_nonempty_fact {
   family "runtime/language"
   generator "regression"
-  features [ny test typing refinement mutable aggregate mutation transport positive]
+  features ["typing", "ny", "test", "aggregate", "mutable", "mutation", "positive", "refinement", "transport"]
   template ny-test-case
   flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
   expect compile_and_run
@@ -895,7 +895,7 @@ NY
 shape mutable_aggregate_append_preserves_nonempty_fact {
   family "runtime/language"
   generator "regression"
-  features [ny test typing refinement mutable aggregate mutation transport positive]
+  features ["typing", "ny", "test", "aggregate", "mutable", "mutation", "positive", "refinement", "transport"]
   template ny-test-case
   flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
   expect compile_and_run
@@ -924,7 +924,7 @@ NY
 shape mutable_aggregate_mutating_call_expires_nonempty_fact {
   family "compiler-errors/types"
   generator "error"
-  features [error typing refinement mutable aggregate mutation call invalidation negative]
+  features ["error", "typing", "negative", "aggregate", "call", "invalidation", "mutable", "mutation", "refinement"]
   template ny-compile-fail
   flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
   expect compile_fail
@@ -955,7 +955,7 @@ NY
 shape mutable_aggregate_rebinding_expires_nonempty_fact {
   family "compiler-errors/types"
   generator "error"
-  features [error typing refinement mutable aggregate rebind invalidation negative]
+  features ["error", "typing", "negative", "aggregate", "invalidation", "mutable", "rebind", "refinement"]
   template ny-compile-fail
   flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
   expect compile_fail
@@ -983,7 +983,7 @@ NY
 shape mutable_aggregate_unknown_call_before_refinement_fails_closed {
   family "compiler-errors/types"
   generator "error"
-  features [error typing refinement mutable aggregate alias escape negative]
+  features ["error", "typing", "negative", "aggregate", "alias", "escape", "mutable", "refinement"]
   template ny-compile-fail
   flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
   expect compile_fail
@@ -1012,7 +1012,7 @@ NY
 shape mutable_aggregate_closure_capture_before_refinement_fails_closed {
   family "compiler-errors/types"
   generator "error"
-  features [error typing refinement mutable aggregate closure provenance negative]
+  features ["error", "typing", "negative", "aggregate", "closure", "mutable", "provenance", "refinement"]
   template ny-compile-fail
   flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
   expect compile_fail
@@ -1040,7 +1040,7 @@ NY
 shape mutable_refinement_rejects_overloaded_operator_guard {
   family "compiler-errors/types"
   generator "error"
-  features [error typing refinement mutable operator soundness negative]
+  features ["error", "typing", "negative", "mutable", "operator", "refinement", "soundness"]
   template ny-compile-fail
   flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
   expect compile_fail
@@ -1070,7 +1070,7 @@ NY
 shape mutable_aggregate_negative_last_append_preserves_proven_value {
   family "runtime/language"
   generator "regression"
-  features [ny test typing refinement mutable aggregate negative append value positive]
+  features ["typing", "ny", "test", "negative", "aggregate", "append", "mutable", "positive", "refinement", "value"]
   template ny-test-case
   flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
   expect compile_and_run
@@ -1099,7 +1099,7 @@ NY
 shape mutable_aggregate_earlier_negative_index_append_expires {
   family "compiler-errors/types"
   generator "error"
-  features [error typing refinement mutable aggregate negative index append shifted negative]
+  features ["error", "typing", "negative", "aggregate", "append", "index", "mutable", "refinement", "shifted"]
   template ny-compile-fail
   flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
   expect compile_fail
@@ -1128,7 +1128,7 @@ NY
 shape mutable_aggregate_general_length_bound_survives_store_and_append {
   family "runtime/language"
   generator "regression"
-  features [ny test typing refinement mutable aggregate arbitrary nonnegative length lower bound positive]
+  features ["typing", "ny", "test", "aggregate", "arbitrary", "bound", "length", "lower", "mutable", "nonnegative", "positive", "refinement"]
   template ny-test-case
   flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
   expect compile_and_run
@@ -1156,7 +1156,7 @@ NY
 shape mutable_aggregate_general_length_bound_expires_after_shrink {
   family "compiler-errors/types"
   generator "error"
-  features [error typing refinement mutable aggregate length lower bound invalidation negative]
+  features ["error", "typing", "negative", "aggregate", "bound", "invalidation", "length", "lower", "mutable", "refinement"]
   template ny-compile-fail
   flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
   expect compile_fail
@@ -1182,7 +1182,7 @@ NY
 shape mutable_aggregate_indexed_refinement_survives_literal_concatenation {
   family "runtime/language"
   generator "regression"
-  features [ny test typing refinement mutable aggregate list concatenation positive]
+  features ["typing", "ny", "test", "aggregate", "concatenation", "list", "mutable", "positive", "refinement"]
   template ny-test-case
   flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
   expect compile_and_run
@@ -1213,7 +1213,7 @@ NY
 shape mutable_aggregate_negative_index_expires_after_literal_concatenation {
   family "compiler-errors/types"
   generator "error"
-  features [error typing refinement mutable aggregate list concatenation negative]
+  features ["error", "typing", "negative", "aggregate", "concatenation", "list", "mutable", "refinement"]
   template ny-compile-fail
   flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
   expect compile_fail
@@ -1241,7 +1241,7 @@ NY
 shape mutable_aggregate_indexed_refinement_survives_known_list_suffix {
   family "runtime/language"
   generator "regression"
-  features [ny test typing refinement mutable aggregate list concatenation variable suffix positive]
+  features ["typing", "ny", "test", "aggregate", "concatenation", "list", "mutable", "positive", "refinement", "suffix", "variable"]
   template ny-test-case
   timeout 120
   flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
@@ -1273,7 +1273,7 @@ NY
 shape mutable_aggregate_negative_index_expires_after_known_list_suffix {
   family "compiler-errors/types"
   generator "error"
-  features [error typing refinement mutable aggregate list concatenation variable suffix negative]
+  features ["error", "typing", "negative", "aggregate", "concatenation", "list", "mutable", "refinement", "suffix", "variable"]
   template ny-compile-fail
   flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
   expect compile_fail
@@ -1302,7 +1302,7 @@ NY
 shape mutable_aggregate_length_refinement_survives_literal_prefix {
   family "runtime/language"
   generator "regression"
-  features [ny test typing refinement mutable aggregate list prefix positive]
+  features ["typing", "ny", "test", "aggregate", "list", "mutable", "positive", "prefix", "refinement"]
   template ny-test-case
   flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
   expect compile_and_run
@@ -1331,7 +1331,7 @@ NY
 shape mutable_aggregate_indexed_refinement_expires_after_literal_prefix {
   family "compiler-errors/types"
   generator "error"
-  features [error typing refinement mutable aggregate list prefix negative]
+  features ["error", "typing", "negative", "aggregate", "list", "mutable", "prefix", "refinement"]
   template ny-compile-fail
   flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
   expect compile_fail
@@ -1359,7 +1359,7 @@ NY
 shape mutable_aggregate_length_and_content_conjunction_survives_append {
   family "runtime/language"
   generator "regression"
-  features [ny test typing refinement mutable aggregate length content conjunction append positive]
+  features ["typing", "ny", "test", "aggregate", "append", "conjunction", "content", "length", "mutable", "positive", "refinement"]
   template ny-test-case
   flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
   expect compile_and_run
@@ -1392,7 +1392,7 @@ NY
 shape mutable_aggregate_exact_length_and_content_conjunction_expires_after_append {
   family "compiler-errors/types"
   generator "error"
-  features [error typing refinement mutable aggregate exact length append invalidation negative]
+  features ["error", "typing", "negative", "aggregate", "append", "exact", "invalidation", "length", "mutable", "refinement"]
   template ny-compile-fail
   flags_matrix "--strict-types --native --run; --strict-types --native-backend=llvm --jit --jit-engine=mcjit; --strict-types --native-backend=llvm --jit --jit-engine=orc; --strict-types --native-only"
   expect compile_fail

@@ -1,7 +1,7 @@
 shape enum_strict_positivity {
   family "runtime/compiler"
   generator "embedded"
-  features ["ny", "enum", "positivity", "inductive"]
+  features ["ny", "dependent", "enum", "inductive", "positivity"]
   template ny-test-case
   flags_matrix "--native-only; --native-backend=llvm --jit --jit-engine=orc"
   expect compile_and_run

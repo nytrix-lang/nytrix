@@ -1,7 +1,7 @@
 shape proof_policy_recursion {
   family "runtime/proofs"
   generator "program"
-  features ["proofs", "policy", "recursion", "bounds", "parser"]
+  features ["bounds", "parser", "policy", "proofs", "recursion"]
   template ny-test-case
   expect compile_and_run
   source ny <<'NY'
@@ -63,7 +63,7 @@ NY
 shape proof_policy_recursion_negative {
   family "runtime/proofs"
   generator "program"
-  features ["proofs", "policy", "recursion", "totality"]
+  features ["policy", "proofs", "recursion", "totality"]
   template ny-test-case
   expect compile_fail
   expect_message "recursive termination is not certified"

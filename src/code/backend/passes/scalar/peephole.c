@@ -1078,8 +1078,7 @@ bool nyr_peephole(nyr_func_t *f) {
        * value it accepts: svg-icon-pixels decoded every pixel as transparent
        * at native -O3 when this fold ran. Positive-polarity comparisons of
        * an exact `x & 1` value are still simplified by the CMP case below.
-       */
-      /*
+       *
        * A 32-bit rotate is sound only when both the input and complete result
        * are explicitly governed by the low-32 mask.  The count is either a
        * proven in-range constant or normalized with & 31; any partial or

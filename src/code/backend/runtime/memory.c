@@ -851,6 +851,79 @@ static int64_t sh_traced_alloc(size_t body_in) {
 }
 
 /*
+ * Segregated free lists recycle blocks that a program releases, but a
+ * workload that keeps every result live (builders, benchmark loops) would
+ * otherwise enter the general-purpose allocator once per object. Carve such
+ * blocks from per-thread 1 MiB chunks instead. Chunk ranges are registered so
+ * pool teardown never hands an interior pointer to free(); each chunk is
+ * registered with the map oracle once, covering every block it contains.
+ */
+#define RT_BLOCK_CHUNK_BYTES ((size_t)1 << 20)
+#define RT_BLOCK_CHUNK_MAX 2048u
+typedef struct rt_block_chunk {
+  uintptr_t start;
+  uintptr_t end;
+} rt_block_chunk_t;
+static rt_block_chunk_t g_rt_block_chunks[RT_BLOCK_CHUNK_MAX];
+static _Atomic size_t g_rt_block_chunk_n;
+static atomic_flag g_rt_block_chunk_lock = ATOMIC_FLAG_INIT;
+static _Thread_local unsigned char *g_rt_block_bump;
+static _Thread_local size_t g_rt_block_left;
+
+static bool rt_block_chunk_register(uintptr_t start, size_t bytes) {
+  bool ok = false;
+  while (atomic_flag_test_and_set_explicit(&g_rt_block_chunk_lock,
+                                           memory_order_acquire)) {
+  }
+  size_t n = atomic_load_explicit(&g_rt_block_chunk_n, memory_order_relaxed);
+  if (n < RT_BLOCK_CHUNK_MAX) {
+    g_rt_block_chunks[n].start = start;
+    g_rt_block_chunks[n].end = start + bytes;
+    atomic_store_explicit(&g_rt_block_chunk_n, n + 1, memory_order_release);
+    ok = true;
+  }
+  atomic_flag_clear_explicit(&g_rt_block_chunk_lock, memory_order_release);
+  return ok;
+}
+
+static bool rt_block_chunk_owns(uintptr_t p) {
+  size_t n = atomic_load_explicit(&g_rt_block_chunk_n, memory_order_acquire);
+  for (size_t i = 0; i < n; ++i)
+    if (p >= g_rt_block_chunks[i].start && p < g_rt_block_chunks[i].end)
+      return true;
+  return false;
+}
+
+static void *rt_block_bump_alloc(size_t bytes) {
+  bytes = (bytes + 15u) & ~(size_t)15u;
+  if (bytes == 0)
+    return NULL;
+  if (g_rt_block_left < bytes) {
+    size_t chunk = RT_BLOCK_CHUNK_BYTES;
+    if (chunk < bytes) {
+      if (bytes > SIZE_MAX - (RT_BLOCK_CHUNK_BYTES - 1))
+        return NULL;
+      chunk =
+          (bytes + RT_BLOCK_CHUNK_BYTES - 1) & ~(RT_BLOCK_CHUNK_BYTES - 1);
+    }
+    unsigned char *fresh = (unsigned char *)ny_aligned_alloc(16, chunk);
+    if (!fresh)
+      return NULL;
+    if (!rt_block_chunk_register((uintptr_t)fresh, chunk)) {
+      ny_aligned_free(fresh);
+      return NULL;
+    }
+    rt_map_oracle_add((uintptr_t)fresh, chunk);
+    g_rt_block_bump = fresh;
+    g_rt_block_left = chunk;
+  }
+  unsigned char *p = g_rt_block_bump;
+  g_rt_block_bump += bytes;
+  g_rt_block_left -= bytes;
+  return p;
+}
+
+/*
  * Two independent heap systems, NOT interconvertible:
  *
  *   GC-traced heap: rt_malloc / rt_malloc_uninit / rt_free / rt_realloc.
@@ -876,20 +949,25 @@ static int64_t rt_malloc_impl(int64_t size, int zero_fill) {
   size_t total = body + 32;
 
   int slot = ny_mem_pool_slot(total);
+  size_t fill_size = (slot >= 0) ? g_pool_sizes[slot] : total;
   void *p = NULL;
+  bool bump = false;
   if (slot >= 0 && g_mem_pools[slot]) {
     p = g_mem_pools[slot];
     g_mem_pools[slot] = g_mem_pools[slot]->next;
   } else {
-    p = slot >= 0 ? rt_fc_block_alloc(g_pool_sizes[slot]) : NULL;
+    p = slot >= 0 ? rt_fc_block_alloc(fill_size) : NULL;
+    if (!p && slot >= 0) {
+      p = rt_block_bump_alloc(fill_size);
+      bump = p != NULL;
+    }
     if (!p)
-      p = ny_aligned_alloc(16, (slot >= 0) ? g_pool_sizes[slot] : total);
+      p = ny_aligned_alloc(16, fill_size);
   }
 
   if (__builtin_expect(!p, 0))
     return 0;
 
-  size_t fill_size = (slot >= 0) ? g_pool_sizes[slot] : total;
   if (zero_fill && rt_zero_init_enabled())
     memset(p, 0, fill_size);
 
@@ -905,7 +983,8 @@ static int64_t rt_malloc_impl(int64_t size, int zero_fill) {
 
   int64_t res = (int64_t)(uintptr_t)((char *)p + 32);
   atomic_fetch_add_explicit(&g_ny_alloc_count, 1, memory_order_relaxed);
-  rt_map_oracle_add((uintptr_t)p, (size_t)total);
+  if (!bump)
+    rt_map_oracle_add((uintptr_t)p, (size_t)total);
   rt_managed_ptr_register((uintptr_t)res);
   rt_rc_adopt_new(res);
   rt_fc_track((uintptr_t)res, RT_FC_KIND_MANAGED, total);
@@ -932,20 +1011,25 @@ int64_t rt_malloc_i64(int64_t size) {
   size_t total = body + 32;
 
   int slot = ny_mem_pool_slot(total);
+  size_t fill_size = (slot >= 0) ? g_pool_sizes[slot] : total;
   void *p = NULL;
+  bool bump = false;
   if (slot >= 0 && g_mem_pools[slot]) {
     p = g_mem_pools[slot];
     g_mem_pools[slot] = g_mem_pools[slot]->next;
   } else {
-    p = slot >= 0 ? rt_fc_block_alloc(g_pool_sizes[slot]) : NULL;
+    p = slot >= 0 ? rt_fc_block_alloc(fill_size) : NULL;
+    if (!p && slot >= 0) {
+      p = rt_block_bump_alloc(fill_size);
+      bump = p != NULL;
+    }
     if (!p)
-      p = ny_aligned_alloc(16, (slot >= 0) ? g_pool_sizes[slot] : total);
+      p = ny_aligned_alloc(16, fill_size);
   }
 
   if (__builtin_expect(!p, 0))
     return 0;
 
-  size_t fill_size = (slot >= 0) ? g_pool_sizes[slot] : total;
   if (rt_zero_init_enabled())
     memset(p, 0, fill_size);
 
@@ -961,7 +1045,8 @@ int64_t rt_malloc_i64(int64_t size) {
 
   int64_t res = (int64_t)(uintptr_t)((char *)p + 32);
   atomic_fetch_add_explicit(&g_ny_alloc_count, 1, memory_order_relaxed);
-  rt_map_oracle_add((uintptr_t)p, (size_t)total);
+  if (!bump)
+    rt_map_oracle_add((uintptr_t)p, (size_t)total);
   rt_managed_ptr_register((uintptr_t)res);
   rt_rc_adopt_new(res);
   if (mem_trace_enabled() && total > 1024 * 1024) {
@@ -999,9 +1084,14 @@ typedef struct raw_ptr_node {
 } raw_ptr_node_t;
 
 /*
- * Keep lookup chains short for the several-hundred-thousand live raw blocks.
+ * Keep lookup chains short for the several-hundred-thousand live raw blocks,
+ * but keep the table itself cache-resident: at 1<<18 the bucket array spans
+ * 2 MiB and every register/unregister pair missed the whole cache hierarchy,
+ * which dominated allocation-heavy programs (gcbench spent 42% of its cycles
+ * there). 1<<16 spans 512 KiB, stays in L2, and still averages about one node
+ * per bucket for a few hundred thousand live blocks.
  */
-#define RAW_PTR_HASH_BUCKETS (1u << 18)
+#define RAW_PTR_HASH_BUCKETS (1u << 16)
 #define RAW_PTR_SLAB_CAPACITY 256u
 struct raw_ptr_node_slab {
   raw_ptr_node_slab_t *free_prev;
@@ -1572,7 +1662,9 @@ int64_t rt_pool_release(void) {
     g_mem_pools[i] = NULL;
     while (node) {
       mem_pool_node_t *next = node->next;
-      if (rt_fc_pool_owns(node))
+      if (rt_block_chunk_owns((uintptr_t)node))
+        ; /* carved from a bump chunk; released with the chunk */
+      else if (rt_fc_pool_owns(node))
         rt_fc_block_free(node, g_pool_sizes[i]);
       else
         ny_aligned_free(node);

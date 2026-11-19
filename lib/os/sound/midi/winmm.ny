@@ -70,7 +70,6 @@ use core.str as str
    fn MsgWaitForMultipleObjects(any _c, any _h, any _w, any _ms, any _mask) int { 0 }
    fn Sleep(any _ms) any { 0 }
 } #endif
-
 def _MMSYSERR_NOERROR = 0
 def _CALLBACK_NULL = 0
 def _CALLBACK_THREAD = 0x20000
@@ -85,6 +84,7 @@ def _MSG_SIZE = 48
 def _MSG_MESSAGE = 8
 def _MSG_WPARAM = 16
 def _MSG_LPARAM = 24
+
 ;; MIDIHDR on LP64 Windows: lpData(8) len(4) recorded(4) user(8) flags(4)
 ;; pad(4) lpNext(8) reserved(8) offset(4) pad(4) dwReserved[8](64) = 120.
 def _HDR_SIZE = 120
@@ -181,7 +181,7 @@ fn open_output(int index) any {
 
 fn read_bytes(any stream, int timeout_ms=0) list {
    "Drains posted input messages and returns [bytes, ...] chunks in arrival
-    order (short messages expanded to their status/data bytes)."
+   order(short messages expanded to their status/data bytes)."
    if !is_dict(stream) || !bool(stream.get("open", false)) { return [] }
    def msg = stream.get("msg", 0)
    def h = stream.get("handle", 0)
@@ -227,7 +227,7 @@ fn read_bytes(any stream, int timeout_ms=0) list {
 
 fn write_bytes(any stream, list bytes) bool {
    "Sends one complete message: short messages through midiOutShortMsg,
-    sysex through a prepared long-message buffer."
+   sysex through a prepared long-message buffer."
    if !is_dict(stream) || !bool(stream.get("open", false)) || bytes.len == 0 { return false }
    def h = stream.get("handle", 0)
    def status = int(bytes.get(0, 0)) & 255

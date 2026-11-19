@@ -299,8 +299,9 @@ static bool scf_init(scf_t *s, nyr_func_t *f) {
       if (ops[k] >= 0 && ops[k] < f->next_value && s->uses[ops[k]])
         s->uses[ops[k]]--;
   }
-  s->scev_ok =nyr_has_loop(f) && nyr_scev_analyze(f, &s->scev);
-  s->cfg_ok = nyr_has_loop(f) && nyr_cfg_build(f, &s->cfg);
+  bool has_loop = nyr_has_loop(f);
+  s->scev_ok = has_loop && nyr_scev_analyze(f, &s->scev);
+  s->cfg_ok = has_loop && nyr_cfg_build(f, &s->cfg);
   return true;
 }
 
@@ -552,10 +553,10 @@ static bool scf_boolean_value(const scf_t *s, int v) {
   return d->op == NYIR_CONST_I64 && (d->imm == 0 || d->imm == 1);
 }
 
-#define SCF_TRACE(...)                                                         \
-  do {                                                                         \
-    if (ny_trace_enabled("NY_TRACE_SCF"))                                      \
-      ny_trace_line("SCF", __VA_ARGS__);                                       \
+#define SCF_TRACE(...)                    \
+  do {                                    \
+    if (ny_trace_enabled("NY_TRACE_SCF")) \
+      ny_trace_line("SCF", __VA_ARGS__);  \
   } while (0)
 
 static bool scf_round(nyr_func_t *f, bool *changed) {
@@ -581,11 +582,13 @@ static bool scf_round(nyr_func_t *f, bool *changed) {
         int dead = cond_value != 0 ? in->c : in->b;
         SCF_TRACE("R0 @%zu v%d = select const %lld -> v%d", i, in->dst,
                   (long long)cond_value, taken);
-        /* Save the condition first: nir_make_copy overwrites `a` with the
+        /*
+         * Save the condition first: nir_make_copy overwrites `a` with the
          * taken arm, and dropping `in->a` afterwards released the taken
          * arm's use instead. Its count then reached zero while still live,
          * R4 treated shared constants as single-use and rewrote them in
-         * place (a swap loop folded to 82 instead of 45). */
+         * place (a swap loop folded to 82 instead of 45).
+         */
         int cond_use = in->a;
         nir_make_copy(in, taken);
         scf_drop_use(&s, cond_use);

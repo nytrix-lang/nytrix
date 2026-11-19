@@ -1,7 +1,7 @@
 shape proof_cross_function {
   family "runtime/proofs"
   generator "program"
-  features ["proofs", "call-site", "postcondition", "pure", "range"]
+  features ["call-site", "postcondition", "proofs", "pure", "range"]
   template ny-test-case
   flags "--color=never"
   expect compile_and_run

@@ -1,7 +1,7 @@
 shape assigned_list_append_preserves_fixed_callback_facts {
   family "typing/effects"
   generator "regression"
-  features [ny test typing effects callback list append assigned result fixed index]
+  features ["typing", "ny", "test", "append", "assigned", "callback", "effects", "fixed", "index", "list", "result"]
   template ny-test-case
   flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
   expect compile_and_run
@@ -32,7 +32,7 @@ NY
 shape assigned_list_append_rejects_underdeclared_fixed_callback {
   family "typing/effects"
   generator "regression"
-  features [error typing effects callback list append assigned result underdeclared]
+  features ["error", "typing", "append", "assigned", "callback", "effects", "list", "result", "underdeclared"]
   template ny-compile-fail
   flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
   expect compile_fail
@@ -63,7 +63,7 @@ NY
 shape assigned_list_append_joins_dynamic_callback_effects {
   family "typing/effects"
   generator "regression"
-  features [ny test typing effects callback list append dynamic index summary]
+  features ["typing", "ny", "test", "append", "callback", "dynamic", "effects", "index", "list", "summary"]
   template ny-test-case
   flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
   expect compile_and_run

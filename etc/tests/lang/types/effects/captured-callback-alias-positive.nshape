@@ -1,7 +1,7 @@
 shape captured_callback_alias_is_accepted_with_its_effect_row {
   family "typing/effects"
   generator "regression"
-  features ["ny", "test", "typing", "effects", "callback", "alias", "capture"]
+  features ["typing", "ny", "test", "alias", "callback", "capture", "effects"]
   template ny-test-case
   flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
   expect compile_and_run
@@ -61,7 +61,7 @@ NY
 shape nested_captured_callback_requires_its_full_effect_row {
   family "typing/effects"
   generator "regression"
-  features ["ny", "test", "typing", "effects", "callback", "alias", "capture", "negative"]
+  features ["typing", "ny", "test", "negative", "alias", "callback", "capture", "effects"]
   template ny-test-case
   flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
   expect compile_fail

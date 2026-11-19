@@ -66,8 +66,8 @@ use core.str as str
    fn CFRelease(any _o) any { 0 }
    fn usleep(any _us) int { 0 }
 } #endif
-
 def _UTF8 = 0x08000100
+
 ;; Ring layout: [head u64][tail u64][dropped u64][pad] then slots.
 def _RING_HEAD = 0
 def _RING_TAIL = 8
@@ -81,7 +81,6 @@ def _SLOT_SRC = 4
 def _SLOT_BYTES = 8
 def _PKT_DATA = 10
 def _PKT_LEN = 8
-
 mut _client = 0
 mut _ring = 0
 mut _pending = dict(8)
@@ -122,7 +121,7 @@ fn _ensure_client() bool {
 }
 
 fn devices() list {
-   "Lists CoreMIDI sources (inputs) and destinations (outputs)."
+   "Lists CoreMIDI sources(inputs) and destinations(outputs)."
    mut out = []
    def ns = int(MIDIGetNumberOfSources())
    mut i = 0

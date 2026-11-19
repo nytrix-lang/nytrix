@@ -7,6 +7,7 @@
 #include "base/util.h"
 #include "code/backend/core/abi.h"
 #include "code/backend/lower/machine.h"
+#include "code/backend/lower/jit_layout.h"
 #include "code/backend/core/module.h"
 #include "code/backend/lower/native.h"
 #include "code/backend/mach/object.h"
@@ -39,10 +40,6 @@
 #include <mach/mach_vm.h>
 #include <mach/vm_region.h>
 #endif
-
-static size_t nyr_native_jit_align(size_t value, size_t align) {
-  return align > 1 ? (value + align - 1) & ~(align - 1) : value;
-}
 
 /*
  * Linux perf's JIT map format lets perf attribute anonymous executable pages
@@ -145,9 +142,12 @@ static void *nyr_native_jit_alloc(size_t size) {
   int flags = MAP_PRIVATE | MAP_ANONYMOUS;
 #if defined(__APPLE__) && defined(__aarch64__)
   flags |= MAP_JIT;
-  pthread_jit_write_protect_np(0);
 #endif
   void *p = mmap(NULL, size, PROT_READ | PROT_WRITE, flags, -1, 0);
+#if defined(__APPLE__) && defined(__aarch64__)
+  if (p != MAP_FAILED)
+    pthread_jit_write_protect_np(0);
+#endif
   return p == MAP_FAILED ? NULL : p;
 #endif
 }
@@ -272,9 +272,12 @@ void nyr_jit_image_free(nyr_jit_image_t *image) {
   if (image->data_memory && image->data_size && !shared_mapping) {
     nyr_native_jit_release(image->data_memory, image->data_size);
   }
-  if (!image->memory)
-    return;
-  nyr_native_jit_release(image->memory, image->size);
+  if (image->memory)
+    nyr_native_jit_release(image->memory, image->size);
+#if defined(__APPLE__) && defined(__aarch64__)
+  pthread_jit_write_protect_np(1);
+#endif
+  *image = (nyr_jit_image_t){0};
 }
 
 static void *nyr_native_jit_symbol(unsigned char *base,
@@ -396,6 +399,14 @@ static bool nyr_native_jit_compile_aarch64_bundle(
   size_t data_start = code.len, data_end = code.len;
   bool have_data = false;
   for (size_t i = 0; i < def_count; ++i) {
+    if (!memchr(defs[i].name, 0, sizeof(defs[i].name)) ||
+        !nyr_jit_range(code.len, defs[i].off, defs[i].size)) {
+      nyr_set_error(err, err_len, "native AArch64 JIT: invalid symbol range");
+      nyr_obj_free(&code);
+      free(defs);
+      free(relocs);
+      return false;
+    }
     if (!nyr_native_jit_def_is_data(defs[i].name))
       continue;
     if (!have_data || defs[i].off < data_start)
@@ -406,11 +417,31 @@ static bool nyr_native_jit_compile_aarch64_bundle(
     have_data = true;
   }
   size_t text_len = have_data ? data_start : code.len;
-  size_t data_len =
-      have_data ? nyr_native_jit_align(data_end - data_start, 16) : 0;
-  size_t used = nyr_native_jit_align(text_len, 16);
-  size_t alloc_size =
-      nyr_native_jit_align(used + reloc_count * stub_size, 4096);
+  nyr_jit_layout_t layout;
+  if (!nyr_jit_layout_init(text_len, reloc_count, stub_size,
+                           have_data ? data_end - data_start : 0, false,
+                           &layout)) {
+    nyr_set_error(err, err_len, "native AArch64 JIT: image size overflow");
+    nyr_obj_free(&code);
+    free(defs);
+    free(relocs);
+    return false;
+  }
+  for (size_t i = 0; i < reloc_count; ++i) {
+    if (!memchr(relocs[i].symbol, 0, sizeof(relocs[i].symbol)) ||
+        relocs[i].type != NY_RELOC_AARCH64_CALL26 ||
+        !nyr_jit_range(text_len, relocs[i].disp_off, 4) ||
+        (relocs[i].disp_off & 3)) {
+      nyr_set_error(err, err_len, "native AArch64 JIT: invalid relocation");
+      nyr_obj_free(&code);
+      free(defs);
+      free(relocs);
+      return false;
+    }
+  }
+  size_t used = layout.stub_offset;
+  size_t data_len = layout.data_size;
+  size_t alloc_size = layout.code_size;
   unsigned char *memory = (unsigned char *)nyr_native_jit_alloc(alloc_size);
   if (!memory) {
     nyr_set_error(err, err_len,
@@ -451,11 +482,14 @@ static bool nyr_native_jit_compile_aarch64_bundle(
     void *resolved;
     int index = nyr_x64_obj_def_index(defs, def_count, relocs[i].symbol);
     if (data_memory && nyr_native_jit_def_is_data(relocs[i].symbol)) {
-      resolved = index >= 0 ? data_memory + (defs[index].off - data_start)
-                            : (services && services->resolve_symbol
-                                   ? services->resolve_symbol(
-                                         services->userdata, relocs[i].symbol)
-                                   : NULL);
+      resolved = index >= 0 && defs[index].off >= data_start &&
+                         defs[index].off < data_end
+                     ? data_memory + (defs[index].off - data_start)
+                     : index >= 0 ? NULL
+                     : (services && services->resolve_symbol
+                            ? services->resolve_symbol(services->userdata,
+                                                       relocs[i].symbol)
+                            : NULL);
     } else {
       resolved = nyr_native_jit_symbol(memory, defs, def_count, index,
                                        relocs[i].symbol, services);
@@ -472,8 +506,22 @@ static bool nyr_native_jit_compile_aarch64_bundle(
       return false;
     }
     unsigned char *branch_target = (unsigned char *)resolved;
-    if (index < 0) {
-      unsigned char *stub = memory + used;
+    unsigned char *patch = memory + relocs[i].disp_off;
+    uint32_t imm;
+    if (index < 0 &&
+        !nyr_jit_call26((uintptr_t)resolved, (uintptr_t)patch, &imm)) {
+      size_t offset;
+      if (!nyr_jit_take_stub(&layout, &used, &offset)) {
+        nyr_set_error(err, err_len, "native AArch64 JIT: stub capacity exceeded");
+        image->memory = memory;
+        image->size = alloc_size;
+        nyr_jit_image_free(image);
+        *image = (nyr_jit_image_t){0};
+        free(defs);
+        free(relocs);
+        return false;
+      }
+      unsigned char *stub = memory + offset;
       const uint32_t load_x16 = 0x58000050u;
       const uint32_t branch_x16 = 0xd61f0200u;
       uint64_t absolute = (uint64_t)(uintptr_t)resolved;
@@ -481,11 +529,8 @@ static bool nyr_native_jit_compile_aarch64_bundle(
       memcpy(stub + 4, &branch_x16, sizeof(branch_x16));
       memcpy(stub + 8, &absolute, sizeof(absolute));
       branch_target = stub;
-      used += stub_size;
     }
-    unsigned char *patch = memory + relocs[i].disp_off;
-    intptr_t delta = branch_target - patch;
-    if ((delta & 3) != 0 || delta / 4 < -(1 << 25) || delta / 4 >= (1 << 25)) {
+    if (!nyr_jit_call26((uintptr_t)branch_target, (uintptr_t)patch, &imm)) {
       nyr_set_error(
           err, err_len,
           "native AArch64 JIT: CALL26 relocation for '%s' is out of range",
@@ -500,12 +545,13 @@ static bool nyr_native_jit_compile_aarch64_bundle(
     }
     uint32_t insn = 0;
     memcpy(&insn, patch, sizeof(insn));
-    insn = (insn & 0xfc000000u) | ((uint32_t)(delta / 4) & 0x03ffffffu);
+    insn = (insn & 0xfc000000u) | imm;
     memcpy(patch, &insn, sizeof(insn));
   }
   int entry_index = nyr_x64_obj_def_index(
       defs, def_count, target->symbol_prefix[0] ? "_rt_main" : "rt_main");
-  if (entry_index < 0 || !nyr_native_jit_seal(memory, alloc_size)) {
+  if (entry_index < 0 || defs[entry_index].off >= text_len ||
+      !nyr_native_jit_seal(memory, alloc_size)) {
     nyr_set_error(err, err_len,
                   "native AArch64 JIT: executable finalization failed");
     image->memory = memory;
@@ -613,18 +659,14 @@ static bool nyr_native_jit_materialize_x64(
     const nyr_runtime_services_t *runtime_services, nyr_jit_image_t *image,
     char *err, size_t err_len) {
   const size_t stub_size = 16;
-  size_t used = nyr_native_jit_align(code.len, 16);
-  size_t alloc_size =
-      nyr_native_jit_align(used + reloc_count * stub_size, 4096);
-
-  /*
-   * The array pool (.Lnyarr.*) rides at the tail of the code bundle.  List
-   * literals are mutable storage, so those bytes must live in a separate
-   * region that stays RW after the code region is sealed RX.
-   */
   size_t data_start = code.len, data_end = code.len;
   bool have_data = false;
   for (size_t i = 0; i < def_count; ++i) {
+    if (!memchr(defs[i].name, 0, sizeof(defs[i].name)) ||
+        !nyr_jit_range(code.len, defs[i].off, defs[i].size)) {
+      nyr_set_error(err, err_len, "native JIT: invalid symbol range");
+      goto fail_nir;
+    }
     if (!defs[i].is_data)
       continue;
     if (!have_data || defs[i].off < data_start)
@@ -635,18 +677,25 @@ static bool nyr_native_jit_materialize_x64(
     have_data = true;
   }
   size_t text_len = have_data ? data_start : code.len;
-  size_t data_len =
-      have_data ? nyr_native_jit_align(data_end - data_start, 16) : 0;
-
-  /*
-   * PC32 data references require the pool to stay within 2 GiB of text.
-   * Reserve both regions together, then seal only the code pages RX.
-   */
-  if (alloc_size > INT32_MAX || data_len > (size_t)INT32_MAX - alloc_size) {
-    nyr_set_error(err, err_len, "native JIT: code and data exceed PC32 range");
+  nyr_jit_layout_t layout;
+  if (!nyr_jit_layout_init(text_len, reloc_count, stub_size,
+                           have_data ? data_end - data_start : 0, true,
+                           &layout)) {
+    nyr_set_error(err, err_len, "native JIT: image size overflow/PC32 range");
     goto fail_nir;
   }
-  size_t mapping_size = alloc_size + data_len;
+  for (size_t i = 0; i < reloc_count; ++i) {
+    if (!memchr(relocs[i].symbol, 0, sizeof(relocs[i].symbol)) ||
+        (relocs[i].type != NY_RELOC_PC32 && relocs[i].type != NY_RELOC_PLT32) ||
+        !nyr_jit_range(text_len, relocs[i].disp_off, 4)) {
+      nyr_set_error(err, err_len, "native JIT: invalid relocation");
+      goto fail_nir;
+    }
+  }
+  size_t used = layout.stub_offset;
+  size_t alloc_size = layout.code_size;
+  size_t data_len = layout.data_size;
+  size_t mapping_size = layout.mapping_size;
   unsigned char *memory = (unsigned char *)nyr_native_jit_alloc(mapping_size);
   if (!memory) {
     nyr_set_error(err, err_len, "native JIT: executable allocation failed");
@@ -688,10 +737,11 @@ static bool nyr_native_jit_materialize_x64(
      * the symbol; resolve the call to the external function, not the cell.
      */
     if (def_index >= 0 && defs[def_index].is_data &&
-        relocs[i].type == NY_RELOC_PLT32 && runtime_services &&
-        runtime_services->resolve_symbol) {
-      target_ptr = runtime_services->resolve_symbol(runtime_services->userdata,
-                                                    relocs[i].symbol);
+        relocs[i].type == NY_RELOC_PLT32) {
+      target_ptr = runtime_services && runtime_services->resolve_symbol
+                       ? runtime_services->resolve_symbol(runtime_services->userdata,
+                                                          relocs[i].symbol)
+                       : NULL;
     } else if (data_memory && def_index >= 0 && defs[def_index].is_data) {
       target_ptr = data_memory + (defs[def_index].off - data_start);
     } else {
@@ -707,85 +757,44 @@ static bool nyr_native_jit_materialize_x64(
       goto fail_nir;
     }
     unsigned char *patch_at = memory + relocs[i].disp_off;
-    unsigned char *after = patch_at + 4;
-    if (relocs[i].type == NY_RELOC_PC32) {
-      /*
-       * Data address: leaq sym(%rip), reg — patch direct RIP-relative disp.
-       */
-      intptr_t delta = (unsigned char *)target_ptr - after;
-      if (delta < INT32_MIN || delta > INT32_MAX) {
-        /*
-         * A runtime function can also be materialized as a first-class value
-         * (`let f = zalloc`).  Its LEA uses PC32, but the process image may be
-         * more than 2 GiB from this JIT mapping.  Give any external function a
-         * nearby callable thunk, just as PLT32 calls do, then materialize the
-         * thunk address.  Data symbols must remain directly addressable and
-         * still report an out-of-range relocation.
-         */
-        if (!nyr_native_jit_target_is_code(target_ptr) || used > alloc_size ||
-            stub_size > alloc_size - used) {
-          nyr_set_error(err, err_len,
-                        "native JIT: PC32 relocation for '%s' is out of range",
-                        relocs[i].symbol);
-          image->memory = memory;
-          image->size = mapping_size;
-          nyr_jit_image_free(image);
-          goto fail_nir;
-        }
-        unsigned char *stub = memory + used;
-        stub[0] = 0x48;
-        stub[1] = 0xb8;
-        uint64_t absolute = (uint64_t)(uintptr_t)target_ptr;
-        memcpy(stub + 2, &absolute, sizeof(absolute));
-        stub[10] = 0xff;
-        stub[11] = 0xe0;
-        used += stub_size;
-        delta = stub - after;
-        if (delta < INT32_MIN || delta > INT32_MAX) {
-          nyr_set_error(err, err_len,
-                        "native JIT: PC32 relocation for '%s' is out of range",
-                        relocs[i].symbol);
-          image->memory = memory;
-          image->size = mapping_size;
-          nyr_jit_image_free(image);
-          goto fail_nir;
-        }
-      }
-      int32_t disp = (int32_t)delta;
-      memcpy(patch_at, &disp, sizeof(disp));
-    } else {
-      /*
-       * Call address: use stub for external symbols that may be far away.
-       */
-      unsigned char *branch_target = (unsigned char *)target_ptr;
-      if (def_index < 0) {
-        unsigned char *stub = memory + used;
-        stub[0] = 0x48;
-        stub[1] = 0xb8;
-        uint64_t absolute = (uint64_t)(uintptr_t)target_ptr;
-        memcpy(stub + 2, &absolute, sizeof(absolute));
-        stub[10] = 0xff;
-        stub[11] = 0xe0;
-        branch_target = stub;
-        used += stub_size;
-      }
-      intptr_t delta = branch_target - after;
-      if (delta < INT32_MIN || delta > INT32_MAX) {
+    uintptr_t after = (uintptr_t)(patch_at + 4);
+    int32_t disp;
+    if (!nyr_jit_rel32((uintptr_t)target_ptr, after, &disp)) {
+      if (relocs[i].type == NY_RELOC_PC32 &&
+          !nyr_native_jit_target_is_code(target_ptr)) {
         nyr_set_error(err, err_len,
-                      "native JIT: relocation for '%s' is out of range",
+                      "native JIT: PC32 data relocation '%s' out of range",
                       relocs[i].symbol);
         image->memory = memory;
         image->size = mapping_size;
         nyr_jit_image_free(image);
         goto fail_nir;
       }
-      int32_t disp = (int32_t)delta;
-      memcpy(patch_at, &disp, sizeof(disp));
+      size_t offset;
+      if (!nyr_jit_take_stub(&layout, &used, &offset) ||
+          !nyr_jit_rel32((uintptr_t)(memory + offset), after, &disp)) {
+        nyr_set_error(err, err_len,
+                      "native JIT: relocation '%s' out of range",
+                      relocs[i].symbol);
+        image->memory = memory;
+        image->size = mapping_size;
+        nyr_jit_image_free(image);
+        goto fail_nir;
+      }
+      unsigned char *stub = memory + offset;
+      stub[0] = 0x48;
+      stub[1] = 0xb8;
+      uint64_t absolute = (uint64_t)(uintptr_t)target_ptr;
+      memcpy(stub + 2, &absolute, sizeof(absolute));
+      stub[10] = 0xff;
+      stub[11] = 0xe0;
     }
+    memcpy(patch_at, &disp, sizeof(disp));
   }
 
   int entry_index = nyr_x64_obj_def_index(defs, def_count, "rt_main");
-  if (entry_index < 0 || !nyr_native_jit_seal(memory, alloc_size)) {
+  if (entry_index < 0 || defs[entry_index].off >= text_len ||
+      !nyr_native_jit_seal(memory, alloc_size)) {
     nyr_set_error(err, err_len, "native JIT: executable finalization failed");
     image->memory = memory;
     image->size = mapping_size;
@@ -1182,8 +1191,10 @@ static void *nyr_api_jit_resolve_symbol(void *userdata, const char *symbol) {
   HMODULE process = GetModuleHandleA(NULL);
   return process && symbol ? (void *)GetProcAddress(process, symbol) : NULL;
 #else
-  /* JIT code is the user's own program; it may call any process export, as
-   * the AOT-linked program could (Brainfuck's generated code calls calloc). */
+  /*
+   * JIT code is the user's own program; it may call any process export, as
+   * the AOT-linked program could (Brainfuck's generated code calls calloc).
+   */
   return symbol ? dlsym(RTLD_DEFAULT, symbol) : NULL;
 #endif
 }

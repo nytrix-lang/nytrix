@@ -1,7 +1,7 @@
 shape fn_type_param_consistency_positive {
   family "runtime/language"
   generator "embedded"
-  features [ny generics]
+  features ["ny", "generics"]
   template ny-test-case
   flags_matrix "--native-only -O0"
   expect compile_and_run
@@ -20,7 +20,7 @@ NY
 shape fn_type_param_consistency_negative {
   family "typing/generics"
   generator "error"
-  features [ny generics typing negative]
+  features ["typing", "ny", "negative", "generics"]
   template ny-compile-fail
   flags_matrix "--native-only -O0"
   expect compile_fail

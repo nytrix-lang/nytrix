@@ -1,7 +1,7 @@
 shape first_class_type_level_function {
   family "typing/dependent"
   generator "embedded"
-  features [typing dependent type-level positive]
+  features ["typing", "dependent", "positive", "type-level"]
   template ny-test-case
   flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
   expect compile_and_run

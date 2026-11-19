@@ -1,7 +1,7 @@
 shape pi_return_dependent_return_type {
   family "runtime/language"
   generator "embedded"
-  features ["ny", "test"]
+  features ["ny", "test", "dependent"]
   template ny-test-case
   flags_matrix "--native --run; --native-backend=llvm --jit --jit-engine=mcjit; --native-backend=llvm --jit --jit-engine=orc; --native-only"
   expect compile_and_run

@@ -1,7 +1,7 @@
 shape total_structural_recursion {
   family "runtime/compiler"
   generator "embedded"
-  features ["ny", "total", "decreases", "inductive", "recursor"]
+  features ["ny", "decreases", "inductive", "recursor", "total"]
   template ny-test-case
   flags_matrix "--native-only; --native-only -O3; --native-backend=llvm --jit --jit-engine=orc"
   expect compile_and_run
@@ -34,7 +34,7 @@ NY
 shape total_derived_recursor {
   family "runtime/compiler"
   generator "embedded"
-  features ["ny", "total", "decreases", "inductive", "recursor", "effects"]
+  features ["ny", "decreases", "effects", "inductive", "recursor", "total"]
   template ny-test-case
   flags_matrix "--native-only; --native-only -O3; --native-backend=llvm --jit --jit-engine=orc"
   expect compile_and_run

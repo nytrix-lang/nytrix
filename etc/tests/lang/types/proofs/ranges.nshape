@@ -1,7 +1,7 @@
 shape proof_arithmetic_ranges {
   family "runtime/proofs"
   generator "program"
-  features ["proof", "range", "arithmetic"]
+  features ["arithmetic", "proof", "range"]
   template ny-test-case
   flags_matrix "--native --run --color=never; --native-backend=llvm --jit --jit-engine=mcjit --color=never; --native-backend=llvm --jit --jit-engine=orc --color=never; --native-only --color=never"
   expect compile_and_run
@@ -23,7 +23,7 @@ NY
 shape proof_bitwise_range {
   family "runtime/proofs"
   generator "program"
-  features ["proofs", "range", "bitwise"]
+  features ["bitwise", "proofs", "range"]
   template ny-test-case
   flags_matrix "--native --run --color=never; --native-backend=llvm --jit --jit-engine=mcjit --color=never; --native-backend=llvm --jit --jit-engine=orc --color=never; --native-only --color=never"
   expect compile_and_run
@@ -62,7 +62,7 @@ NY
 shape proof_range {
   family "runtime/proofs"
   generator "program"
-  features ["proofs", "range", "loop"]
+  features ["loop", "proofs", "range"]
   template ny-test-case
   flags_matrix "--native --run --color=never; --native-backend=llvm --jit --jit-engine=mcjit --color=never; --native-backend=llvm --jit --jit-engine=orc --color=never; --native-only --color=never"
   expect compile_and_run
@@ -114,7 +114,7 @@ NY
 shape proof_descending_loop_range {
   family "runtime/proofs"
   generator "program"
-  features ["proofs", "range", "loop", "descending"]
+  features ["descending", "loop", "proofs", "range"]
   template ny-test-case
   flags_matrix "--native --run --color=never; --native-backend=llvm --jit --jit-engine=mcjit --color=never; --native-backend=llvm --jit --jit-engine=orc --color=never; --native-only --color=never"
   expect compile_and_run

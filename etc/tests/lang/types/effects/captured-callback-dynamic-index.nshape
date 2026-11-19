@@ -1,7 +1,7 @@
 shape captured_callback_rows_union_for_dynamic_indices {
   family "typing/effects"
   generator "regression"
-  features ["ny", "test", "typing", "effects", "callback", "capture", "dynamic-index"]
+  features ["typing", "ny", "test", "callback", "capture", "dynamic-index", "effects"]
   template ny-test-case
   flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
   expect compile_fail
@@ -31,7 +31,7 @@ NY
 shape captured_tuple_callback_rows_union_for_dynamic_get {
   family "typing/effects"
   generator "regression"
-  features ["ny", "test", "typing", "effects", "callback", "capture", "dynamic-index", "tuple"]
+  features ["typing", "ny", "test", "callback", "capture", "dynamic-index", "effects", "tuple"]
   template ny-test-case
   flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
   expect compile_fail
@@ -61,7 +61,7 @@ NY
 shape dynamic_get_callback_fallback_effects_are_included {
   family "typing/effects"
   generator "regression"
-  features ["ny", "test", "typing", "effects", "callback", "dynamic-index", "fallback"]
+  features ["typing", "ny", "test", "callback", "dynamic-index", "effects", "fallback"]
   template ny-test-case
   flags_matrix "--effect-require-known --native --run; --effect-require-known --native-backend=llvm --jit --jit-engine=mcjit; --effect-require-known --native-backend=llvm --jit --jit-engine=orc; --effect-require-known --native-only"
   expect compile_fail
