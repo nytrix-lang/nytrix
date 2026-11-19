@@ -1,7 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
-  <title>Text Buffer</title>
-  <desc>Editable text buffer with block cursor.</desc>
-  <path fill="#c084fc" fill-rule="evenodd" d="M5 3H19A2.5 2.5 0 0 1 21.5 5.5V18.5A2.5 2.5 0 0 1 19 21H5A2.5 2.5 0 0 1 2.5 18.5V5.5A2.5 2.5 0 0 1 5 3ZM5.5 5.5A.5.5 0 0 0 5 6V18A.5.5 0 0 0 5.5 18.5H18.5A.5.5 0 0 0 19 18V6A.5.5 0 0 0 18.5 5.5Z"/>
-  <path fill="#c084fc" d="M7 8H17V10H7ZM7 11.5H14.5V13.5H7ZM7 15H12V17H7Z"/>
-  <path fill="#c084fc" d="M14 14.5H17V17.5H14Z"/>
+  <title>Tbuf</title>
+  <path fill="#c084fc" fill-rule="evenodd" d="M5 2.5H19A2.5 2.5 0 0 1 21.5 5V19A2.5 2.5 0 0 1 19 21.5H5A2.5 2.5 0 0 1 2.5 19V5A2.5 2.5 0 0 1 5 2.5ZM5.5 5V19H18.5V5Z"/>
+  <path fill="#c084fc" d="M7.5 7.5H16.5V10H7.5Z M7.5 12H13V14.5H7.5Z M7.5 16.5H11V18.3H7.5Z"/>
+  <path fill="#c084fc" d="M14 12H17V18.3H14Z"/>
 </svg>

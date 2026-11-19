@@ -545,7 +545,11 @@ and Windows. They do not install emulators or run cross-target fixture suites.
 Use **Actions → Native CI → Run workflow** for deeper checks:
 
 macOS source checks use Apple silicon. Execution modes use Intel macOS hosts
-so the x86-64 NYR routes run natively rather than through emulation.
+so the x86-64 NYR routes run natively rather than through emulation. No lane
+executes the LLVM JIT data-section mapping on Apple arm64 yet: in
+`src/code/lang/ny/gen/llvm/jit.c`, `ny_apple_jit_alloc_section` and its
+`finalize` counterpart map data as plain RW pages and reserve `MAP_JIT` for
+code only, and that path has not been built or run on macOS.
 
 | Control | Behavior |
 | --- | --- |

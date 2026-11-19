@@ -12192,6 +12192,26 @@ static void ny_native_scan_expr_for_calls(const expr_t *e,
         }
         if (callee_name) {
           ny_native_add_reachable_fn(col, callee_name);
+          /*
+           * A bundled stdlib body can call a private helper whose leaf name
+           * also exists in the user program. The semantic resolver may bind
+           * that leaf to the user function while lowering and emission scope
+           * the symbol to the caller's module, so the module-qualified body
+           * must be collected too; otherwise the emitted call target is only
+           * a declaration and the JIT resolves it to a null address.
+           */
+          if (col->scope_fn && !strchr(callee_name, '.')) {
+            const char *module =
+                ny_native_fn_module(ny_native_fn_index_for(col->shared_cache),
+                                    col->prog, col->scope_fn);
+            if (module && *module) {
+              char scoped[512];
+              int sn = snprintf(scoped, sizeof(scoped), "%s.%s", module,
+                                callee_name);
+              if (sn > 0 && (size_t)sn < sizeof(scoped))
+                ny_native_add_reachable_fn(col, scoped);
+            }
+          }
           const char *dot = strrchr(callee_name, '.');
           if (dot && dot > callee_name) {
             char candidate[256];
