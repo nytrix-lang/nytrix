@@ -1,4 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
-  <path d="M4.2 2.5 H14.5 Q16.5 2.5 16.5 4.5 V14.8 Q16.5 16.8 14.5 16.8 H4.2 Q2.2 16.8 2.2 14.8 V4.5 Q2.2 2.5 4.2 2.5 Z M6.1 6.4 V12.9 H12.6 V6.4 Z" fill="#c084fc" fill-rule="evenodd"/>
-  <path d="M9.5 18 H18 V9.5 H20 Q21.8 9.5 21.8 11.3 V19.5 Q21.8 21.5 19.8 21.5 H11.5 Q9.5 21.5 9.5 19.5 Z" fill="#c084fc"/>
+  <title>Alloc</title>
+  <desc>Memory block allocation.</desc>
+  <path fill="#c084fc" fill-rule="evenodd" d="M5 2.5H19A2.5 2.5 0 0 1 21.5 5V19A2.5 2.5 0 0 1 19 21.5H5A2.5 2.5 0 0 1 2.5 19V5A2.5 2.5 0 0 1 5 2.5ZM6 5.5A.5.5 0 0 0 5.5 6V18A.5.5 0 0 0 6 18.5H18A.5.5 0 0 0 18.5 18V6A.5.5 0 0 0 18 5.5Z"/>
+  <path fill="#c084fc" d="M10.5 7.5H13.5V10.5H16.5V13.5H13.5V16.5H10.5V13.5H7.5V10.5H10.5Z"/>
 </svg>

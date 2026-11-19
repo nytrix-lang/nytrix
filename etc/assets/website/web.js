@@ -514,9 +514,9 @@ const MODULE_ICONS = new Set([
   "alloc", "cache", "collections", "common", "compiler", "comptime", "config",
   "counter", "cps", "debug", "dependent", "dict", "effect", "error", "format",
   "functional", "general", "indexed", "io", "iter", "kernel", "math", "mem",
-  "mod", "native", "nytrix", "os", "primitives", "progress", "proof",
-  "prover", "query", "reflect", "regex", "runtime", "set", "str", "tactic",
-  "tbuf", "test", "tuple", "unicode", "glob", "inspect", "parser", "report",
+  "mod", "nytrix", "os", "primitives", "progress", "proof",
+  "prover", "reflect", "regex", "runtime", "set", "str", "tactic",
+  "tbuf", "test", "tuple", "unicode", "glob", "parser", "report",
   "term",
 ]);
 
@@ -530,6 +530,11 @@ function moduleIconName(route) {
   // subsystem heuristics below for deeper families without one.
   if (segs[0] === "core") {
     const leaf = segs[segs.length - 1];
+    // `core.query` and `core.inspect` use the search glyph; the pack keeps no
+    // separate icon for either.
+    if (leaf === "query" || leaf === "inspect") return "search";
+    // `core.native` uses the CPU glyph (the native artwork is named cpu.svg).
+    if (leaf === "native") return "cpu";
     if (MODULE_ICONS.has(leaf)) return leaf;
     if (segs.length === 2 && leaf === "set_mod") return "set";
     if (segs.length === 2 && leaf === "dict_mod") return "dict";

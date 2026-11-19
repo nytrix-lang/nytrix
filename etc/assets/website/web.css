@@ -283,7 +283,6 @@ input {
 }
 
 .ico-terminal,
-.ico-cpu,
 .ico-timer,
 .ico-wrench,
 .ico-zap {
@@ -305,19 +304,19 @@ input {
 }
 
 .ico-collections, .ico-dict, .ico-set, .ico-tuple, .ico-indexed, .ico-iter,
-.ico-tbuf, .ico-query, .ico-primitives, .ico-str, .ico-unicode, .ico-regex,
+.ico-tbuf, .ico-primitives, .ico-str, .ico-unicode, .ico-regex,
 .ico-format, .ico-glob, .ico-parser {
     color: var(--ico-data);
 }
 
-.ico-io, .ico-os, .ico-runtime, .ico-native, .ico-compiler, .ico-mem,
+.ico-io, .ico-os, .ico-runtime, .ico-cpu, .ico-compiler, .ico-mem,
 .ico-alloc, .ico-cache, .ico-progress, .ico-config, .ico-general,
 .ico-common, .ico-term, .ico-report {
     color: var(--ico-net);
 }
 
 .ico-functional, .ico-cps, .ico-effect, .ico-comptime, .ico-reflect,
-.ico-counter, .ico-callable, .ico-hash, .ico-inspect {
+.ico-counter, .ico-callable, .ico-hash {
     color: var(--ico-math);
 }
 
