@@ -6630,6 +6630,12 @@ def run_optcheck(build_root: Path, kind: str, args: list[str]) -> int:
 
 MEASUREMENT_CHARTS_BEGIN = "<!-- AUTO_MEASUREMENT_CHARTS_BEGIN -->"
 MEASUREMENT_CHARTS_END = "<!-- AUTO_MEASUREMENT_CHARTS_END -->"
+BENCH_RUNTIME_CEILING = 2.0
+MEASUREMENT_SERIES = (
+    ("NYR", "var(--c1)", "native_ratio", "native_ratio_valid"),
+    ("LLVM", "var(--c2)", "llvm_ratio", "llvm_ratio_valid"),
+    ("NYC", "var(--c3)", "nyc_c_ratio", "nyc_c_comparable"),
+)
 
 
 def _bench_report_rows(path: Path) -> tuple[str, list[dict]]:
@@ -6652,6 +6658,8 @@ def _ratio_ok(row: dict, key: str, valid_key: str) -> float | None:
     if not isinstance(v, (int, float)) or v <= 0:
         return None
     if row.get(valid_key) is False or row.get("checksum_ok") is False:
+        return None
+    if key == "nyc_c_ratio" and row.get("nyc_unstable"):
         return None
     return float(v)
 
@@ -6696,10 +6704,6 @@ def _chart_trend(points: list[tuple[str, float | None, float | None, float | Non
                    f'<text x="{left - 8}" y="{y(t) + 4:.1f}" text-anchor="end" font-size="11" '
                    f'fill="var(--muted)">{t:.1f}×</text>')
         t += step
-    out.append(f'<line x1="{left}" y1="{y(1.2):.1f}" x2="{w - right}" y2="{y(1.2):.1f}" '
-               'stroke="var(--ok)" stroke-width="1.5" stroke-dasharray="5 4"/>'
-               f'<text x="{w - right}" y="{y(1.2) - 5:.1f}" text-anchor="end" font-size="11" '
-               'fill="var(--ok)">1.2× goal</text>')
     for k, (name, color) in enumerate((("NYR", "var(--c1)"), ("LLVM", "var(--c2)"), ("NYC", "var(--c3)"))):
         pts = [(x(i), y(p[k + 1])) for i, p in enumerate(points) if p[k + 1]]
         if len(pts) > 1:
@@ -6737,17 +6741,18 @@ def _chart_bars(rows: list[tuple[str, float, float]]) -> str:
     out = [f'<svg width="{w}" height="{h}" viewBox="0 0 {w} {h}" role="img" '
            'aria-label="NYR runtime relative to C for each benchmark">',
            f'<text x="{w // 2}" y="22" text-anchor="middle" font-size="16" fill="currentColor">'
-           'NYR runtime vs C, latest run (log scale; ≤1.2× green, ≤2× amber, &gt;2× red)</text>']
-    for t in (0.25, 0.5, 1.0, 1.2, 2.0, 4.0, 8.0, 16.0):
-        stroke = "var(--ok)" if t == 1.2 else "var(--border)"
-        dash = ' stroke-dasharray="4 3"' if t == 1.2 else ""
+           f'NYR runtime vs C (log scale; ≤{BENCH_RUNTIME_CEILING:g}× green, '
+           f'&gt;{BENCH_RUNTIME_CEILING:g}× red)</text>']
+    for t in (0.25, 0.5, 1.0, BENCH_RUNTIME_CEILING, 4.0, 8.0, 16.0):
+        stroke = "var(--ok)" if t == BENCH_RUNTIME_CEILING else "var(--border)"
+        dash = ' stroke-dasharray="4 3"' if t == BENCH_RUNTIME_CEILING else ""
         out.append(f'<line x1="{x(t):.1f}" y1="{top - 6}" x2="{x(t):.1f}" y2="{h - 30}" '
                    f'stroke="{stroke}" stroke-width="1"{dash}/>'
                    f'<text x="{x(t):.1f}" y="{h - 14}" text-anchor="middle" font-size="10" '
                    f'fill="var(--muted)">{t:g}×</text>')
     for i, (name, ratio, c_ms) in enumerate(rows):
         yy = top + i * (bar + gap)
-        color = "var(--ok)" if ratio <= 1.2 else "var(--warn)" if ratio <= 2.0 else "var(--bad)"
+        color = "var(--ok)" if ratio <= BENCH_RUNTIME_CEILING else "var(--bad)"
         opacity = "0.55" if c_ms < 1.0 else "1"
         x0, x1 = x(1.0), x(ratio)
         a, b = (x0, x1) if x1 >= x0 else (x1, x0)
@@ -6763,8 +6768,10 @@ def _chart_bars(rows: list[tuple[str, float, float]]) -> str:
 
 def _chart_bands(series: list[tuple[str, str, list[float]]]) -> str:
     """Benchmarks per ratio band, one bar group per band and backend."""
-    bands = [("≤1×", 0, 1.0), ("1–1.2×", 1.0, 1.2), ("1.2–1.5×", 1.2, 1.5),
-             ("1.5–2×", 1.5, 2.0), ("2–4×", 2.0, 4.0), ("&gt;4×", 4.0, 1e18)]
+    limit = BENCH_RUNTIME_CEILING
+    bands = [("≤1×", 0, 1.0), ("1–1.5×", 1.0, 1.5),
+             (f"1.5–{limit:g}×", 1.5, limit), (f"{limit:g}–4×", limit, 4.0),
+             ("&gt;4×", 4.0, float("inf"))]
     counts = [[sum(1 for v in vals if lo < v <= hi or (lo == 0 and v <= hi)) for _, lo, hi in bands]
               for _, _, vals in series]
     peak = max([max(c) for c in counts] + [1])
@@ -6808,10 +6815,8 @@ def render_measurement_charts(build_root: Path, quiet: bool = False) -> bool:
         full = [r for r in rows if isinstance(r, dict)]
         if len(full) < 60:  # targeted runs are not comparable overviews
             continue
-        g = [_geomean([v for v in (_ratio_ok(r, k, kv) for r in full) if v])
-             for k, kv in (("native_ratio", "native_ratio_valid"),
-                           ("llvm_ratio", "llvm_ratio_valid"),
-                           ("nyc_c_ratio", "nyc_c_comparable"))]
+        g = [_geomean([v for v in (_ratio_ok(r, key, kv) for r in full) if v])
+             for _, _, key, kv in MEASUREMENT_SERIES]
         runs.append((path, label, full, g))
     if not runs:
         if not quiet:
@@ -6835,12 +6840,19 @@ def render_measurement_charts(build_root: Path, quiet: bool = False) -> bool:
             bars[i] = (f"{name} #{seen[name]}", v, c)
     bars.sort(key=lambda t: t[1])
     series = []
-    for name, color, key, kv in (("NYR", "var(--c1)", "native_ratio", "native_ratio_valid"),
-                                 ("LLVM", "var(--c2)", "llvm_ratio", "llvm_ratio_valid"),
-                                 ("NYC", "var(--c3)", "nyc_c_ratio", "nyc_c_comparable")):
-        vals = [v for v in (_ratio_ok(r, key, kv) for r in latest_rows) if v]
+    gaps = []
+    for name, color, key, kv in MEASUREMENT_SERIES:
+        vals = []
+        for row in latest_rows:
+            ratio = _ratio_ok(row, key, kv)
+            if ratio is None:
+                continue
+            vals.append(ratio)
+            c_ms = float(row.get("c_ms") or 0.0)
+            if ratio > BENCH_RUNTIME_CEILING and c_ms >= 1.0:
+                gaps.append((str(row.get("name", "?")), name, ratio, c_ms))
         series.append((name, color, vals))
-    gaps = sorted((b for b in bars if b[2] >= 1.0 and b[1] > 1.2), key=lambda t: -t[1])[:15]
+    gaps.sort(key=lambda t: -t[2])
     fmt = lambda v: f"{v:.2f}×" if v else "–"
     lines = [MEASUREMENT_CHARTS_BEGIN, "",
              "## Benchmark dashboard", "",
@@ -6850,16 +6862,16 @@ def render_measurement_charts(build_root: Path, quiet: bool = False) -> bool:
              "below `1×` is faster than C. Only checksum-correct, valid comparisons count. "
              "Wall times on this host are noisy (C references moved up to 2× between runs), "
              "so read trends, not single points.", "",
-             "| Backend | Geomean vs C | Benchmarks ≤1.2× | Compared |",
-             "|---|---|---|---|"]
+             f"| Backend | Geomean vs C | Benchmarks ≤{BENCH_RUNTIME_CEILING:g}× | Above | Compared |",
+             "|---|---|---|---|---|"]
     for (name, _, vals), g in zip(series, latest_g):
-        within = sum(1 for v in vals if v <= 1.2)
-        lines.append(f"| {name} | {fmt(g)} | {within} | {len(vals)} |")
+        within = sum(1 for v in vals if v <= BENCH_RUNTIME_CEILING)
+        lines.append(f"| {name} | {fmt(g)} | {within} | {len(vals) - within} | {len(vals)} |")
     lines += ["", _chart_trend([(lab, *g) for _, lab, _, g in runs]), "",
               _chart_bands(series), "", _chart_bars(bars), "",
-              "### Largest NYR gaps (C reference ≥ 1 ms)", "",
-              "| Benchmark | NYR / C | C time |", "|---|---|---|"]
-    lines += [f"| {n} | {r:.2f}× | {c:.1f} ms |" for n, r, c in gaps]
+              f"### Largest gaps above {BENCH_RUNTIME_CEILING:g}× (C reference ≥ 1 ms)", "",
+              "| Benchmark | Backend | Runtime / C | C time |", "|---|---|---|---|"]
+    lines += [f"| {n} | {backend} | {r:.2f}× | {c:.1f} ms |" for n, backend, r, c in gaps[:15]]
     lines += ["", "Bars for workloads whose C reference is under 1 ms are drawn lighter: "
               "their ratios are dominated by timer resolution.", "", MEASUREMENT_CHARTS_END]
     block = "\n".join(lines)

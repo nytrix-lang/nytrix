@@ -27,11 +27,11 @@ the latest-run section is written by the C benchmark runner.
 
 Generated from 24 full `./make bench` reports; the latest is `build/bench-reports/bench-20261120-002508-1440396.json` (11-20 00:25). Ratios are runtime relative to Host C on the same host: below `1×` is faster than C. Only checksum-correct, valid comparisons count. Wall times on this host are noisy (C references moved up to 2× between runs), so read trends, not single points.
 
-| Backend | Geomean vs C | Benchmarks ≤1.2× | Compared |
-|---|---|---|---|
-| NYR | 1.39× | 43 | 108 |
-| LLVM | 1.15× | 59 | 108 |
-| NYC | 1.80× | 30 | 109 |
+| Backend | Geomean vs C | Benchmarks ≤2× | Above | Compared |
+|---|---|---|---|---|
+| NYR | 1.39× | 84 | 24 | 108 |
+| LLVM | 1.15× | 92 | 16 | 108 |
+| NYC | 1.80× | 72 | 37 | 109 |
 
 <svg width="880" height="300" viewBox="0 0 880 300" role="img" aria-label="Geometric-mean runtime relative to C across benchmark runs">
 <text x="440" y="22" text-anchor="middle" font-size="16" fill="currentColor">Geomean runtime vs C, per full run (lower is better)</text>
@@ -41,7 +41,6 @@ Generated from 24 full `./make bench` reports; the latest is `build/bench-report
 <line x1="64" y1="126.9" x2="856" y2="126.9" stroke="var(--border)" stroke-width="1"/><text x="56" y="130.9" text-anchor="end" font-size="11" fill="var(--muted)">2.5×</text>
 <line x1="64" y1="94.7" x2="856" y2="94.7" stroke="var(--border)" stroke-width="1"/><text x="56" y="98.7" text-anchor="end" font-size="11" fill="var(--muted)">3.0×</text>
 <line x1="64" y1="62.6" x2="856" y2="62.6" stroke="var(--border)" stroke-width="1"/><text x="56" y="66.6" text-anchor="end" font-size="11" fill="var(--muted)">3.5×</text>
-<line x1="64" y1="210.3" x2="856" y2="210.3" stroke="var(--ok)" stroke-width="1.5" stroke-dasharray="5 4"/><text x="856" y="205.3" text-anchor="end" font-size="11" fill="var(--ok)">1.2× goal</text>
 <polyline fill="none" stroke="var(--c1)" stroke-width="2.2" stroke-linejoin="round" points="64.0,203.0 98.4,201.3 132.9,201.3 167.3,198.5 201.7,199.7 236.2,197.7 270.6,200.3 305.0,199.2 339.5,201.2 373.9,202.5 408.3,202.8 442.8,201.9 477.2,207.8 511.7,203.4 546.1,199.9 580.5,202.4 615.0,202.4 649.4,200.0 683.8,201.3 718.3,198.9 752.7,199.4 787.1,199.6 821.6,202.2 856.0,198.4"/>
 <circle cx="64.0" cy="203.0" r="3" fill="var(--c1)"/>
 <circle cx="98.4" cy="201.3" r="3" fill="var(--c1)"/>
@@ -133,42 +132,37 @@ Generated from 24 full `./make bench` reports; the latest is `build/bench-report
 
 <svg width="880" height="300" viewBox="0 0 880 300" role="img" aria-label="Benchmarks per runtime-ratio band and backend">
 <text x="440" y="22" text-anchor="middle" font-size="16" fill="currentColor">Benchmarks per runtime band vs C, latest run</text>
-<rect x="79.0" y="135.6" width="31.0" height="100.4" rx="3" fill="var(--c1)"/><text x="94.5" y="131.6" text-anchor="middle" font-size="10" fill="currentColor">21</text>
-<rect x="113.0" y="40.0" width="31.0" height="196.0" rx="3" fill="var(--c2)"/><text x="128.5" y="36.0" text-anchor="middle" font-size="10" fill="currentColor">41</text>
-<rect x="147.0" y="202.5" width="31.0" height="33.5" rx="3" fill="var(--c3)"/><text x="162.5" y="198.5" text-anchor="middle" font-size="10" fill="currentColor">7</text>
-<text x="130.0" y="252" text-anchor="middle" font-size="11" fill="var(--muted)">≤1×</text>
-<rect x="211.0" y="130.8" width="31.0" height="105.2" rx="3" fill="var(--c1)"/><text x="226.5" y="126.8" text-anchor="middle" font-size="10" fill="currentColor">22</text>
-<rect x="245.0" y="150.0" width="31.0" height="86.0" rx="3" fill="var(--c2)"/><text x="260.5" y="146.0" text-anchor="middle" font-size="10" fill="currentColor">18</text>
-<rect x="279.0" y="126.0" width="31.0" height="110.0" rx="3" fill="var(--c3)"/><text x="294.5" y="122.0" text-anchor="middle" font-size="10" fill="currentColor">23</text>
-<text x="262.0" y="252" text-anchor="middle" font-size="11" fill="var(--muted)">1–1.2×</text>
-<rect x="343.0" y="121.3" width="31.0" height="114.7" rx="3" fill="var(--c1)"/><text x="358.5" y="117.3" text-anchor="middle" font-size="10" fill="currentColor">24</text>
-<rect x="377.0" y="126.0" width="31.0" height="110.0" rx="3" fill="var(--c2)"/><text x="392.5" y="122.0" text-anchor="middle" font-size="10" fill="currentColor">23</text>
-<rect x="411.0" y="126.0" width="31.0" height="110.0" rx="3" fill="var(--c3)"/><text x="426.5" y="122.0" text-anchor="middle" font-size="10" fill="currentColor">23</text>
-<text x="394.0" y="252" text-anchor="middle" font-size="11" fill="var(--muted)">1.2–1.5×</text>
-<rect x="475.0" y="154.7" width="31.0" height="81.3" rx="3" fill="var(--c1)"/><text x="490.5" y="150.7" text-anchor="middle" font-size="10" fill="currentColor">17</text>
-<rect x="509.0" y="188.2" width="31.0" height="47.8" rx="3" fill="var(--c2)"/><text x="524.5" y="184.2" text-anchor="middle" font-size="10" fill="currentColor">10</text>
-<rect x="543.0" y="145.2" width="31.0" height="90.8" rx="3" fill="var(--c3)"/><text x="558.5" y="141.2" text-anchor="middle" font-size="10" fill="currentColor">19</text>
-<text x="526.0" y="252" text-anchor="middle" font-size="11" fill="var(--muted)">1.5–2×</text>
-<rect x="607.0" y="154.7" width="31.0" height="81.3" rx="3" fill="var(--c1)"/><text x="622.5" y="150.7" text-anchor="middle" font-size="10" fill="currentColor">17</text>
-<rect x="641.0" y="178.6" width="31.0" height="57.4" rx="3" fill="var(--c2)"/><text x="656.5" y="174.6" text-anchor="middle" font-size="10" fill="currentColor">12</text>
-<rect x="675.0" y="121.3" width="31.0" height="114.7" rx="3" fill="var(--c3)"/><text x="690.5" y="117.3" text-anchor="middle" font-size="10" fill="currentColor">24</text>
-<text x="658.0" y="252" text-anchor="middle" font-size="11" fill="var(--muted)">2–4×</text>
-<rect x="739.0" y="202.5" width="31.0" height="33.5" rx="3" fill="var(--c1)"/><text x="754.5" y="198.5" text-anchor="middle" font-size="10" fill="currentColor">7</text>
-<rect x="773.0" y="216.9" width="31.0" height="19.1" rx="3" fill="var(--c2)"/><text x="788.5" y="212.9" text-anchor="middle" font-size="10" fill="currentColor">4</text>
-<rect x="807.0" y="173.9" width="31.0" height="62.1" rx="3" fill="var(--c3)"/><text x="822.5" y="169.9" text-anchor="middle" font-size="10" fill="currentColor">13</text>
-<text x="790.0" y="252" text-anchor="middle" font-size="11" fill="var(--muted)">&gt;4×</text>
+<rect x="92.2" y="146.5" width="31.0" height="89.5" rx="3" fill="var(--c1)"/><text x="107.7" y="142.5" text-anchor="middle" font-size="10" fill="currentColor">21</text>
+<rect x="126.2" y="61.3" width="31.0" height="174.7" rx="3" fill="var(--c2)"/><text x="141.7" y="57.3" text-anchor="middle" font-size="10" fill="currentColor">41</text>
+<rect x="160.2" y="206.2" width="31.0" height="29.8" rx="3" fill="var(--c3)"/><text x="175.7" y="202.2" text-anchor="middle" font-size="10" fill="currentColor">7</text>
+<text x="143.2" y="252" text-anchor="middle" font-size="11" fill="var(--muted)">≤1×</text>
+<rect x="250.6" y="40.0" width="31.0" height="196.0" rx="3" fill="var(--c1)"/><text x="266.1" y="36.0" text-anchor="middle" font-size="10" fill="currentColor">46</text>
+<rect x="284.6" y="61.3" width="31.0" height="174.7" rx="3" fill="var(--c2)"/><text x="300.1" y="57.3" text-anchor="middle" font-size="10" fill="currentColor">41</text>
+<rect x="318.6" y="40.0" width="31.0" height="196.0" rx="3" fill="var(--c3)"/><text x="334.1" y="36.0" text-anchor="middle" font-size="10" fill="currentColor">46</text>
+<text x="301.6" y="252" text-anchor="middle" font-size="11" fill="var(--muted)">1–1.5×</text>
+<rect x="409.0" y="163.6" width="31.0" height="72.4" rx="3" fill="var(--c1)"/><text x="424.5" y="159.6" text-anchor="middle" font-size="10" fill="currentColor">17</text>
+<rect x="443.0" y="193.4" width="31.0" height="42.6" rx="3" fill="var(--c2)"/><text x="458.5" y="189.4" text-anchor="middle" font-size="10" fill="currentColor">10</text>
+<rect x="477.0" y="155.0" width="31.0" height="81.0" rx="3" fill="var(--c3)"/><text x="492.5" y="151.0" text-anchor="middle" font-size="10" fill="currentColor">19</text>
+<text x="460.0" y="252" text-anchor="middle" font-size="11" fill="var(--muted)">1.5–2×</text>
+<rect x="567.4" y="163.6" width="31.0" height="72.4" rx="3" fill="var(--c1)"/><text x="582.9" y="159.6" text-anchor="middle" font-size="10" fill="currentColor">17</text>
+<rect x="601.4" y="184.9" width="31.0" height="51.1" rx="3" fill="var(--c2)"/><text x="616.9" y="180.9" text-anchor="middle" font-size="10" fill="currentColor">12</text>
+<rect x="635.4" y="133.7" width="31.0" height="102.3" rx="3" fill="var(--c3)"/><text x="650.9" y="129.7" text-anchor="middle" font-size="10" fill="currentColor">24</text>
+<text x="618.4" y="252" text-anchor="middle" font-size="11" fill="var(--muted)">2–4×</text>
+<rect x="725.8" y="206.2" width="31.0" height="29.8" rx="3" fill="var(--c1)"/><text x="741.3" y="202.2" text-anchor="middle" font-size="10" fill="currentColor">7</text>
+<rect x="759.8" y="219.0" width="31.0" height="17.0" rx="3" fill="var(--c2)"/><text x="775.3" y="215.0" text-anchor="middle" font-size="10" fill="currentColor">4</text>
+<rect x="793.8" y="180.6" width="31.0" height="55.4" rx="3" fill="var(--c3)"/><text x="809.3" y="176.6" text-anchor="middle" font-size="10" fill="currentColor">13</text>
+<text x="776.8" y="252" text-anchor="middle" font-size="11" fill="var(--muted)">&gt;4×</text>
 <rect x="80" y="278" width="12" height="12" rx="2" fill="var(--c1)"/><text x="98" y="288" font-size="12" fill="currentColor">NYR (108)</text>
 <rect x="230" y="278" width="12" height="12" rx="2" fill="var(--c2)"/><text x="248" y="288" font-size="12" fill="currentColor">LLVM (108)</text>
 <rect x="380" y="278" width="12" height="12" rx="2" fill="var(--c3)"/><text x="398" y="288" font-size="12" fill="currentColor">NYC (109)</text>
 </svg>
 
 <svg width="880" height="1588" viewBox="0 0 880 1588" role="img" aria-label="NYR runtime relative to C for each benchmark">
-<text x="440" y="22" text-anchor="middle" font-size="16" fill="currentColor">NYR runtime vs C, latest run (log scale; ≤1.2× green, ≤2× amber, &gt;2× red)</text>
+<text x="440" y="22" text-anchor="middle" font-size="16" fill="currentColor">NYR runtime vs C (log scale; ≤2× green, &gt;2× red)</text>
 <line x1="245.1" y1="34" x2="245.1" y2="1558" stroke="var(--border)" stroke-width="1"/><text x="245.1" y="1574" text-anchor="middle" font-size="10" fill="var(--muted)">0.25×</text>
 <line x1="340.3" y1="34" x2="340.3" y2="1558" stroke="var(--border)" stroke-width="1"/><text x="340.3" y="1574" text-anchor="middle" font-size="10" fill="var(--muted)">0.5×</text>
 <line x1="435.4" y1="34" x2="435.4" y2="1558" stroke="var(--border)" stroke-width="1"/><text x="435.4" y="1574" text-anchor="middle" font-size="10" fill="var(--muted)">1×</text>
-<line x1="460.5" y1="34" x2="460.5" y2="1558" stroke="var(--ok)" stroke-width="1" stroke-dasharray="4 3"/><text x="460.5" y="1574" text-anchor="middle" font-size="10" fill="var(--muted)">1.2×</text>
-<line x1="530.6" y1="34" x2="530.6" y2="1558" stroke="var(--border)" stroke-width="1"/><text x="530.6" y="1574" text-anchor="middle" font-size="10" fill="var(--muted)">2×</text>
+<line x1="530.6" y1="34" x2="530.6" y2="1558" stroke="var(--ok)" stroke-width="1" stroke-dasharray="4 3"/><text x="530.6" y="1574" text-anchor="middle" font-size="10" fill="var(--muted)">2×</text>
 <line x1="625.7" y1="34" x2="625.7" y2="1558" stroke="var(--border)" stroke-width="1"/><text x="625.7" y="1574" text-anchor="middle" font-size="10" fill="var(--muted)">4×</text>
 <line x1="720.9" y1="34" x2="720.9" y2="1558" stroke="var(--border)" stroke-width="1"/><text x="720.9" y="1574" text-anchor="middle" font-size="10" fill="var(--muted)">8×</text>
 <line x1="816.0" y1="34" x2="816.0" y2="1558" stroke="var(--border)" stroke-width="1"/><text x="816.0" y="1574" text-anchor="middle" font-size="10" fill="var(--muted)">16×</text>
@@ -215,47 +209,47 @@ Generated from 24 full `./make bench` reports; the latest is `build/bench-report
 <text x="144" y="609" text-anchor="end" font-size="10" fill="currentColor">leela</text><rect x="435.4" y="600" width="22.8" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="462.3" y="609" font-size="9" fill="var(--muted)">1.18</text>
 <text x="144" y="623" text-anchor="end" font-size="10" fill="currentColor">sieve</text><rect x="435.4" y="614" width="23.3" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="462.7" y="623" font-size="9" fill="var(--muted)">1.19</text>
 <text x="144" y="637" text-anchor="end" font-size="10" fill="currentColor">havlak</text><rect x="435.4" y="628" width="23.5" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="463.0" y="637" font-size="9" fill="var(--muted)">1.19</text>
-<text x="144" y="651" text-anchor="end" font-size="10" fill="currentColor">expression-tree</text><rect x="435.4" y="642" width="27.0" height="11" rx="2" fill="var(--warn)" fill-opacity="1"/><text x="466.5" y="651" font-size="9" fill="var(--muted)">1.22</text>
-<text x="144" y="665" text-anchor="end" font-size="10" fill="currentColor">doitgen</text><rect x="435.4" y="656" width="28.2" height="11" rx="2" fill="var(--warn)" fill-opacity="0.55"/><text x="467.6" y="665" font-size="9" fill="var(--muted)">1.23</text>
-<text x="144" y="679" text-anchor="end" font-size="10" fill="currentColor">binary-trees</text><rect x="435.4" y="670" width="28.9" height="11" rx="2" fill="var(--warn)" fill-opacity="0.55"/><text x="468.3" y="679" font-size="9" fill="var(--muted)">1.23</text>
-<text x="144" y="693" text-anchor="end" font-size="10" fill="currentColor">word-frequency</text><rect x="435.4" y="684" width="29.4" height="11" rx="2" fill="var(--warn)" fill-opacity="1"/><text x="468.8" y="693" font-size="9" fill="var(--muted)">1.24</text>
-<text x="144" y="707" text-anchor="end" font-size="10" fill="currentColor">vector</text><rect x="435.4" y="698" width="29.7" height="11" rx="2" fill="var(--warn)" fill-opacity="0.55"/><text x="469.1" y="707" font-size="9" fill="var(--muted)">1.24</text>
-<text x="144" y="721" text-anchor="end" font-size="10" fill="currentColor">stringsearch</text><rect x="435.4" y="712" width="29.7" height="11" rx="2" fill="var(--warn)" fill-opacity="0.55"/><text x="469.2" y="721" font-size="9" fill="var(--muted)">1.24</text>
-<text x="144" y="735" text-anchor="end" font-size="10" fill="currentColor">word-frequency-scan</text><rect x="435.4" y="726" width="31.2" height="11" rx="2" fill="var(--warn)" fill-opacity="1"/><text x="470.6" y="735" font-size="9" fill="var(--muted)">1.26</text>
-<text x="144" y="749" text-anchor="end" font-size="10" fill="currentColor">json-parser</text><rect x="435.4" y="740" width="31.8" height="11" rx="2" fill="var(--warn)" fill-opacity="1"/><text x="471.3" y="749" font-size="9" fill="var(--muted)">1.26</text>
-<text x="144" y="763" text-anchor="end" font-size="10" fill="currentColor">intops</text><rect x="435.4" y="754" width="32.4" height="11" rx="2" fill="var(--warn)" fill-opacity="0.55"/><text x="471.8" y="763" font-size="9" fill="var(--muted)">1.27</text>
-<text x="144" y="777" text-anchor="end" font-size="10" fill="currentColor">knucleotide</text><rect x="435.4" y="768" width="33.1" height="11" rx="2" fill="var(--warn)" fill-opacity="0.55"/><text x="472.6" y="777" font-size="9" fill="var(--muted)">1.27</text>
-<text x="144" y="791" text-anchor="end" font-size="10" fill="currentColor">inline</text><rect x="435.4" y="782" width="33.3" height="11" rx="2" fill="var(--warn)" fill-opacity="0.55"/><text x="472.7" y="791" font-size="9" fill="var(--muted)">1.27</text>
-<text x="144" y="805" text-anchor="end" font-size="10" fill="currentColor">sor</text><rect x="435.4" y="796" width="37.5" height="11" rx="2" fill="var(--warn)" fill-opacity="0.55"/><text x="476.9" y="805" font-size="9" fill="var(--muted)">1.31</text>
-<text x="144" y="819" text-anchor="end" font-size="10" fill="currentColor">statemate</text><rect x="435.4" y="810" width="37.7" height="11" rx="2" fill="var(--warn)" fill-opacity="1"/><text x="477.2" y="819" font-size="9" fill="var(--muted)">1.32</text>
-<text x="144" y="833" text-anchor="end" font-size="10" fill="currentColor">matmul-int</text><rect x="435.4" y="824" width="37.8" height="11" rx="2" fill="var(--warn)" fill-opacity="1"/><text x="477.2" y="833" font-size="9" fill="var(--muted)">1.32</text>
-<text x="144" y="847" text-anchor="end" font-size="10" fill="currentColor">nqueens</text><rect x="435.4" y="838" width="39.1" height="11" rx="2" fill="var(--warn)" fill-opacity="1"/><text x="478.6" y="847" font-size="9" fill="var(--muted)">1.33</text>
-<text x="144" y="861" text-anchor="end" font-size="10" fill="currentColor">fasta</text><rect x="435.4" y="852" width="39.5" height="11" rx="2" fill="var(--warn)" fill-opacity="0.55"/><text x="478.9" y="861" font-size="9" fill="var(--muted)">1.33</text>
-<text x="144" y="875" text-anchor="end" font-size="10" fill="currentColor">cmov-sort</text><rect x="435.4" y="866" width="40.1" height="11" rx="2" fill="var(--warn)" fill-opacity="0.55"/><text x="479.5" y="875" font-size="9" fill="var(--muted)">1.34</text>
-<text x="144" y="889" text-anchor="end" font-size="10" fill="currentColor">currying</text><rect x="435.4" y="880" width="40.2" height="11" rx="2" fill="var(--warn)" fill-opacity="0.55"/><text x="479.6" y="889" font-size="9" fill="var(--muted)">1.34</text>
-<text x="144" y="903" text-anchor="end" font-size="10" fill="currentColor">sha256</text><rect x="435.4" y="894" width="41.4" height="11" rx="2" fill="var(--warn)" fill-opacity="0.55"/><text x="480.8" y="903" font-size="9" fill="var(--muted)">1.35</text>
-<text x="144" y="917" text-anchor="end" font-size="10" fill="currentColor">spectral</text><rect x="435.4" y="908" width="45.8" height="11" rx="2" fill="var(--warn)" fill-opacity="0.55"/><text x="485.2" y="917" font-size="9" fill="var(--muted)">1.40</text>
-<text x="144" y="931" text-anchor="end" font-size="10" fill="currentColor">heapsort-int</text><rect x="435.4" y="922" width="46.1" height="11" rx="2" fill="var(--warn)" fill-opacity="1"/><text x="485.5" y="931" font-size="9" fill="var(--muted)">1.40</text>
-<text x="144" y="945" text-anchor="end" font-size="10" fill="currentColor">towers</text><rect x="435.4" y="936" width="46.3" height="11" rx="2" fill="var(--warn)" fill-opacity="1"/><text x="485.7" y="945" font-size="9" fill="var(--muted)">1.40</text>
-<text x="144" y="959" text-anchor="end" font-size="10" fill="currentColor">richards</text><rect x="435.4" y="950" width="48.0" height="11" rx="2" fill="var(--warn)" fill-opacity="0.55"/><text x="487.5" y="959" font-size="9" fill="var(--muted)">1.42</text>
-<text x="144" y="973" text-anchor="end" font-size="10" fill="currentColor">n-body</text><rect x="435.4" y="964" width="51.2" height="11" rx="2" fill="var(--warn)" fill-opacity="1"/><text x="490.6" y="973" font-size="9" fill="var(--muted)">1.45</text>
-<text x="144" y="987" text-anchor="end" font-size="10" fill="currentColor">knucleotide #2</text><rect x="435.4" y="978" width="55.8" height="11" rx="2" fill="var(--warn)" fill-opacity="0.55"/><text x="495.2" y="987" font-size="9" fill="var(--muted)">1.50</text>
-<text x="144" y="1001" text-anchor="end" font-size="10" fill="currentColor">pidigits</text><rect x="435.4" y="992" width="57.0" height="11" rx="2" fill="var(--warn)" fill-opacity="0.55"/><text x="496.5" y="1001" font-size="9" fill="var(--muted)">1.52</text>
-<text x="144" y="1015" text-anchor="end" font-size="10" fill="currentColor">graph-bfs</text><rect x="435.4" y="1006" width="58.0" height="11" rx="2" fill="var(--warn)" fill-opacity="1"/><text x="497.4" y="1015" font-size="9" fill="var(--muted)">1.53</text>
-<text x="144" y="1029" text-anchor="end" font-size="10" fill="currentColor">bitcount</text><rect x="435.4" y="1020" width="59.4" height="11" rx="2" fill="var(--warn)" fill-opacity="1"/><text x="498.9" y="1029" font-size="9" fill="var(--muted)">1.54</text>
-<text x="144" y="1043" text-anchor="end" font-size="10" fill="currentColor">iter</text><rect x="435.4" y="1034" width="62.3" height="11" rx="2" fill="var(--warn)" fill-opacity="0.55"/><text x="501.8" y="1043" font-size="9" fill="var(--muted)">1.57</text>
-<text x="144" y="1057" text-anchor="end" font-size="10" fill="currentColor">omnetpp</text><rect x="435.4" y="1048" width="63.4" height="11" rx="2" fill="var(--warn)" fill-opacity="1"/><text x="502.8" y="1057" font-size="9" fill="var(--muted)">1.59</text>
-<text x="144" y="1071" text-anchor="end" font-size="10" fill="currentColor">knight</text><rect x="435.4" y="1062" width="63.7" height="11" rx="2" fill="var(--warn)" fill-opacity="1"/><text x="503.2" y="1071" font-size="9" fill="var(--muted)">1.59</text>
-<text x="144" y="1085" text-anchor="end" font-size="10" fill="currentColor">collatz</text><rect x="435.4" y="1076" width="68.1" height="11" rx="2" fill="var(--warn)" fill-opacity="0.55"/><text x="507.5" y="1085" font-size="9" fill="var(--muted)">1.64</text>
-<text x="144" y="1099" text-anchor="end" font-size="10" fill="currentColor">mandel</text><rect x="435.4" y="1090" width="68.6" height="11" rx="2" fill="var(--warn)" fill-opacity="0.55"/><text x="508.0" y="1099" font-size="9" fill="var(--muted)">1.65</text>
-<text x="144" y="1113" text-anchor="end" font-size="10" fill="currentColor">queen</text><rect x="435.4" y="1104" width="73.1" height="11" rx="2" fill="var(--warn)" fill-opacity="1"/><text x="512.5" y="1113" font-size="9" fill="var(--muted)">1.70</text>
-<text x="144" y="1127" text-anchor="end" font-size="10" fill="currentColor">gcbench</text><rect x="435.4" y="1118" width="77.6" height="11" rx="2" fill="var(--warn)" fill-opacity="1"/><text x="517.0" y="1127" font-size="9" fill="var(--muted)">1.76</text>
-<text x="144" y="1141" text-anchor="end" font-size="10" fill="currentColor">povray</text><rect x="435.4" y="1132" width="78.7" height="11" rx="2" fill="var(--warn)" fill-opacity="1"/><text x="518.2" y="1141" font-size="9" fill="var(--muted)">1.77</text>
-<text x="144" y="1155" text-anchor="end" font-size="10" fill="currentColor">euler9</text><rect x="435.4" y="1146" width="78.9" height="11" rx="2" fill="var(--warn)" fill-opacity="0.55"/><text x="518.3" y="1155" font-size="9" fill="var(--muted)">1.78</text>
-<text x="144" y="1169" text-anchor="end" font-size="10" fill="currentColor">heapsort</text><rect x="435.4" y="1160" width="78.9" height="11" rx="2" fill="var(--warn)" fill-opacity="1"/><text x="518.3" y="1169" font-size="9" fill="var(--muted)">1.78</text>
-<text x="144" y="1183" text-anchor="end" font-size="10" fill="currentColor">dijkstra</text><rect x="435.4" y="1174" width="81.7" height="11" rx="2" fill="var(--warn)" fill-opacity="1"/><text x="521.1" y="1183" font-size="9" fill="var(--muted)">1.81</text>
-<text x="144" y="1197" text-anchor="end" font-size="10" fill="currentColor">qrsyndrome</text><rect x="435.4" y="1188" width="87.0" height="11" rx="2" fill="var(--warn)" fill-opacity="1"/><text x="526.5" y="1197" font-size="9" fill="var(--muted)">1.89</text>
-<text x="144" y="1211" text-anchor="end" font-size="10" fill="currentColor">sssp</text><rect x="435.4" y="1202" width="93.3" height="11" rx="2" fill="var(--warn)" fill-opacity="1"/><text x="532.7" y="1211" font-size="9" fill="var(--muted)">1.97</text>
+<text x="144" y="651" text-anchor="end" font-size="10" fill="currentColor">expression-tree</text><rect x="435.4" y="642" width="27.0" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="466.5" y="651" font-size="9" fill="var(--muted)">1.22</text>
+<text x="144" y="665" text-anchor="end" font-size="10" fill="currentColor">doitgen</text><rect x="435.4" y="656" width="28.2" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="467.6" y="665" font-size="9" fill="var(--muted)">1.23</text>
+<text x="144" y="679" text-anchor="end" font-size="10" fill="currentColor">binary-trees</text><rect x="435.4" y="670" width="28.9" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="468.3" y="679" font-size="9" fill="var(--muted)">1.23</text>
+<text x="144" y="693" text-anchor="end" font-size="10" fill="currentColor">word-frequency</text><rect x="435.4" y="684" width="29.4" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="468.8" y="693" font-size="9" fill="var(--muted)">1.24</text>
+<text x="144" y="707" text-anchor="end" font-size="10" fill="currentColor">vector</text><rect x="435.4" y="698" width="29.7" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="469.1" y="707" font-size="9" fill="var(--muted)">1.24</text>
+<text x="144" y="721" text-anchor="end" font-size="10" fill="currentColor">stringsearch</text><rect x="435.4" y="712" width="29.7" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="469.2" y="721" font-size="9" fill="var(--muted)">1.24</text>
+<text x="144" y="735" text-anchor="end" font-size="10" fill="currentColor">word-frequency-scan</text><rect x="435.4" y="726" width="31.2" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="470.6" y="735" font-size="9" fill="var(--muted)">1.26</text>
+<text x="144" y="749" text-anchor="end" font-size="10" fill="currentColor">json-parser</text><rect x="435.4" y="740" width="31.8" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="471.3" y="749" font-size="9" fill="var(--muted)">1.26</text>
+<text x="144" y="763" text-anchor="end" font-size="10" fill="currentColor">intops</text><rect x="435.4" y="754" width="32.4" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="471.8" y="763" font-size="9" fill="var(--muted)">1.27</text>
+<text x="144" y="777" text-anchor="end" font-size="10" fill="currentColor">knucleotide</text><rect x="435.4" y="768" width="33.1" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="472.6" y="777" font-size="9" fill="var(--muted)">1.27</text>
+<text x="144" y="791" text-anchor="end" font-size="10" fill="currentColor">inline</text><rect x="435.4" y="782" width="33.3" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="472.7" y="791" font-size="9" fill="var(--muted)">1.27</text>
+<text x="144" y="805" text-anchor="end" font-size="10" fill="currentColor">sor</text><rect x="435.4" y="796" width="37.5" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="476.9" y="805" font-size="9" fill="var(--muted)">1.31</text>
+<text x="144" y="819" text-anchor="end" font-size="10" fill="currentColor">statemate</text><rect x="435.4" y="810" width="37.7" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="477.2" y="819" font-size="9" fill="var(--muted)">1.32</text>
+<text x="144" y="833" text-anchor="end" font-size="10" fill="currentColor">matmul-int</text><rect x="435.4" y="824" width="37.8" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="477.2" y="833" font-size="9" fill="var(--muted)">1.32</text>
+<text x="144" y="847" text-anchor="end" font-size="10" fill="currentColor">nqueens</text><rect x="435.4" y="838" width="39.1" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="478.6" y="847" font-size="9" fill="var(--muted)">1.33</text>
+<text x="144" y="861" text-anchor="end" font-size="10" fill="currentColor">fasta</text><rect x="435.4" y="852" width="39.5" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="478.9" y="861" font-size="9" fill="var(--muted)">1.33</text>
+<text x="144" y="875" text-anchor="end" font-size="10" fill="currentColor">cmov-sort</text><rect x="435.4" y="866" width="40.1" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="479.5" y="875" font-size="9" fill="var(--muted)">1.34</text>
+<text x="144" y="889" text-anchor="end" font-size="10" fill="currentColor">currying</text><rect x="435.4" y="880" width="40.2" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="479.6" y="889" font-size="9" fill="var(--muted)">1.34</text>
+<text x="144" y="903" text-anchor="end" font-size="10" fill="currentColor">sha256</text><rect x="435.4" y="894" width="41.4" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="480.8" y="903" font-size="9" fill="var(--muted)">1.35</text>
+<text x="144" y="917" text-anchor="end" font-size="10" fill="currentColor">spectral</text><rect x="435.4" y="908" width="45.8" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="485.2" y="917" font-size="9" fill="var(--muted)">1.40</text>
+<text x="144" y="931" text-anchor="end" font-size="10" fill="currentColor">heapsort-int</text><rect x="435.4" y="922" width="46.1" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="485.5" y="931" font-size="9" fill="var(--muted)">1.40</text>
+<text x="144" y="945" text-anchor="end" font-size="10" fill="currentColor">towers</text><rect x="435.4" y="936" width="46.3" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="485.7" y="945" font-size="9" fill="var(--muted)">1.40</text>
+<text x="144" y="959" text-anchor="end" font-size="10" fill="currentColor">richards</text><rect x="435.4" y="950" width="48.0" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="487.5" y="959" font-size="9" fill="var(--muted)">1.42</text>
+<text x="144" y="973" text-anchor="end" font-size="10" fill="currentColor">n-body</text><rect x="435.4" y="964" width="51.2" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="490.6" y="973" font-size="9" fill="var(--muted)">1.45</text>
+<text x="144" y="987" text-anchor="end" font-size="10" fill="currentColor">knucleotide #2</text><rect x="435.4" y="978" width="55.8" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="495.2" y="987" font-size="9" fill="var(--muted)">1.50</text>
+<text x="144" y="1001" text-anchor="end" font-size="10" fill="currentColor">pidigits</text><rect x="435.4" y="992" width="57.0" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="496.5" y="1001" font-size="9" fill="var(--muted)">1.52</text>
+<text x="144" y="1015" text-anchor="end" font-size="10" fill="currentColor">graph-bfs</text><rect x="435.4" y="1006" width="58.0" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="497.4" y="1015" font-size="9" fill="var(--muted)">1.53</text>
+<text x="144" y="1029" text-anchor="end" font-size="10" fill="currentColor">bitcount</text><rect x="435.4" y="1020" width="59.4" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="498.9" y="1029" font-size="9" fill="var(--muted)">1.54</text>
+<text x="144" y="1043" text-anchor="end" font-size="10" fill="currentColor">iter</text><rect x="435.4" y="1034" width="62.3" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="501.8" y="1043" font-size="9" fill="var(--muted)">1.57</text>
+<text x="144" y="1057" text-anchor="end" font-size="10" fill="currentColor">omnetpp</text><rect x="435.4" y="1048" width="63.4" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="502.8" y="1057" font-size="9" fill="var(--muted)">1.59</text>
+<text x="144" y="1071" text-anchor="end" font-size="10" fill="currentColor">knight</text><rect x="435.4" y="1062" width="63.7" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="503.2" y="1071" font-size="9" fill="var(--muted)">1.59</text>
+<text x="144" y="1085" text-anchor="end" font-size="10" fill="currentColor">collatz</text><rect x="435.4" y="1076" width="68.1" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="507.5" y="1085" font-size="9" fill="var(--muted)">1.64</text>
+<text x="144" y="1099" text-anchor="end" font-size="10" fill="currentColor">mandel</text><rect x="435.4" y="1090" width="68.6" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="508.0" y="1099" font-size="9" fill="var(--muted)">1.65</text>
+<text x="144" y="1113" text-anchor="end" font-size="10" fill="currentColor">queen</text><rect x="435.4" y="1104" width="73.1" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="512.5" y="1113" font-size="9" fill="var(--muted)">1.70</text>
+<text x="144" y="1127" text-anchor="end" font-size="10" fill="currentColor">gcbench</text><rect x="435.4" y="1118" width="77.6" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="517.0" y="1127" font-size="9" fill="var(--muted)">1.76</text>
+<text x="144" y="1141" text-anchor="end" font-size="10" fill="currentColor">povray</text><rect x="435.4" y="1132" width="78.7" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="518.2" y="1141" font-size="9" fill="var(--muted)">1.77</text>
+<text x="144" y="1155" text-anchor="end" font-size="10" fill="currentColor">euler9</text><rect x="435.4" y="1146" width="78.9" height="11" rx="2" fill="var(--ok)" fill-opacity="0.55"/><text x="518.3" y="1155" font-size="9" fill="var(--muted)">1.78</text>
+<text x="144" y="1169" text-anchor="end" font-size="10" fill="currentColor">heapsort</text><rect x="435.4" y="1160" width="78.9" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="518.3" y="1169" font-size="9" fill="var(--muted)">1.78</text>
+<text x="144" y="1183" text-anchor="end" font-size="10" fill="currentColor">dijkstra</text><rect x="435.4" y="1174" width="81.7" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="521.1" y="1183" font-size="9" fill="var(--muted)">1.81</text>
+<text x="144" y="1197" text-anchor="end" font-size="10" fill="currentColor">qrsyndrome</text><rect x="435.4" y="1188" width="87.0" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="526.5" y="1197" font-size="9" fill="var(--muted)">1.89</text>
+<text x="144" y="1211" text-anchor="end" font-size="10" fill="currentColor">sssp</text><rect x="435.4" y="1202" width="93.3" height="11" rx="2" fill="var(--ok)" fill-opacity="1"/><text x="532.7" y="1211" font-size="9" fill="var(--muted)">1.97</text>
 <text x="144" y="1225" text-anchor="end" font-size="10" fill="currentColor">licm</text><rect x="435.4" y="1216" width="97.7" height="11" rx="2" fill="var(--bad)" fill-opacity="0.55"/><text x="537.1" y="1225" font-size="9" fill="var(--muted)">2.04</text>
 <text x="144" y="1239" text-anchor="end" font-size="10" fill="currentColor">dict-oracle</text><rect x="435.4" y="1230" width="98.8" height="11" rx="2" fill="var(--bad)" fill-opacity="0.55"/><text x="538.2" y="1239" font-size="9" fill="var(--muted)">2.05</text>
 <text x="144" y="1253" text-anchor="end" font-size="10" fill="currentColor">call-chain</text><rect x="435.4" y="1244" width="108.2" height="11" rx="2" fill="var(--bad)" fill-opacity="0.55"/><text x="547.6" y="1253" font-size="9" fill="var(--muted)">2.20</text>
@@ -282,25 +276,25 @@ Generated from 24 full `./make bench` reports; the latest is `build/bench-report
 <text x="144" y="1547" text-anchor="end" font-size="10" fill="currentColor">cd</text><rect x="435.4" y="1538" width="301.8" height="11" rx="2" fill="var(--bad)" fill-opacity="0.55"/><text x="741.2" y="1547" font-size="9" fill="var(--muted)">9.01</text>
 </svg>
 
-### Largest NYR gaps (C reference ≥ 1 ms)
+### Largest gaps above 2× (C reference ≥ 1 ms)
 
-| Benchmark | NYR / C | C time |
-|---|---|---|
-| bigint-oracle | 8.06× | 3.6 ms |
-| repeat | 4.66× | 18.6 ms |
-| viterbi | 3.23× | 1.2 ms |
-| bce-matrix | 3.12× | 1.6 ms |
-| fhourstones | 2.77× | 1.1 ms |
-| mont64 | 2.58× | 2.4 ms |
-| deltablue | 2.44× | 21.5 ms |
-| radix-tree | 2.39× | 1.6 ms |
-| nussinov | 2.37× | 3.2 ms |
-| ackermann | 2.28× | 30.5 ms |
-| sssp | 1.97× | 2.9 ms |
-| qrsyndrome | 1.89× | 3.0 ms |
-| dijkstra | 1.81× | 17.4 ms |
-| heapsort | 1.78× | 2.6 ms |
-| povray | 1.77× | 3.4 ms |
+| Benchmark | Backend | Runtime / C | C time |
+|---|---|---|---|
+| radix-tree | NYC | 40.29× | 1.6 ms |
+| pbkdf2 | NYC | 8.65× | 1.2 ms |
+| bigint-oracle | LLVM | 8.24× | 3.6 ms |
+| pbkdf2 | NYC | 8.19× | 1.2 ms |
+| bigint-oracle | NYR | 8.06× | 3.6 ms |
+| bce-matrix | NYC | 7.98× | 1.6 ms |
+| binary | NYC | 6.89× | 1.2 ms |
+| qrsyndrome | NYC | 4.78× | 3.0 ms |
+| repeat | NYR | 4.66× | 18.6 ms |
+| fhourstones | NYC | 4.57× | 1.1 ms |
+| bce-matrix | LLVM | 3.99× | 1.6 ms |
+| viterbi | NYC | 3.49× | 1.2 ms |
+| viterbi | NYR | 3.23× | 1.2 ms |
+| bce-matrix | NYR | 3.12× | 1.6 ms |
+| append-scaling | NYC | 2.81× | 4.4 ms |
 
 Bars for workloads whose C reference is under 1 ms are drawn lighter: their ratios are dominated by timer resolution.
 
@@ -548,6 +542,7 @@ from the performance backlog; older investigations follow them.
 - [2026-11-19 cross-block entry bound the preheader store is found through the CFG](#2026-11-19-cross-block-entry-bound-the-preheader-store-is-found-through-the-cfg)
 - [2026-11-20 radix-tree, bitcount, Ackermann, and BigInt](#2026-11-20-radix-tree-bitcount-ackermann-and-bigint)
 - [2026-11-20 single-limb BigInt division](#2026-11-20-single-limb-bigint-division)
+- [2026-11-20 native optimization notes](#2026-11-20-native-optimization-notes)
 - [2026-11-19 pre-vectorize LICM phase: built, measured, reverted](#2026-11-19-pre-vectorize-licm-phase-built-measured-reverted)
 
 Plus 81 older investigations below these.
@@ -6502,5 +6497,63 @@ instructions fell from 166.67 M to 166.35 M (0.19%). Cycles fell from
 overlapped. Every run returned checksum `1968365`. The native AOT
 `bigint-short-arithmetic` oracle passed, including signed quotient and
 remainder, limb-boundary cases, and fused in-place division.
+
+### 2026-11-20 native optimization notes
+
+Historical measurements below describe the compiler at the time of each
+investigation. To close a current gap, reproduce a focused fixture, compare
+retired instructions and the timed object code at the same checksum, then
+check the complete benchmark report. Allocation-heavy wall times on this
+host can be bimodal. The November 20 full run passed all seven configured
+gates without execution or checksum failures; those gates do not establish
+the per-fixture ceiling.
+
+- `cd`: 100.4 M NYR instructions versus 12.7 M C, checksum `387`.
+  The scalar pair loop already hoists `px[i]` and `py[i]`; it runs about
+  25 instructions per pair versus C's vectorized 3.2. The remaining
+  vectorizer rejects are the typed-buffer handle load (not a
+  payload-plus-offset address) and the conditional `hits` recurrence.
+- `viterbi`: 53.9 M versus 9.1 M instructions, checksum `3270530`.
+  Another loop already vectorizes, but the DP loop has carried PHIs and
+  an unproven affine load. The running max is a select. Of the carried
+  rejections, 2,706 were immediate folds, 2,514 unavailable colors and
+  462 vector-unsafe colors. All vector-unsafe colors were caller-saved
+  scratch registers (`r8`, `r9`, `rcx`, `rdx`); this did not remove
+  any otherwise viable home. The signed `% 101` correction persists
+  because the local value analysis does not track the recurrence's range.
+- `mont64`: 74.8 M versus 22.4 M instructions, checksum `114319663`.
+  The fixed-trip limb loop already unrolls and uses two-address arithmetic.
+  Its typed-buffer stores still force pointer home reloads and spill the
+  limb accumulator. Scalar replacement and alias-aware residency remain
+  better targets than another unroll.
+- `fhourstones`: 25.16 M versus 7.40 M instructions, checksum `6010`.
+  Samples split 67% `search` / 28% `won`. Increasing the pressure-CFG
+  ceiling let `won` inline (155 instructions) but retired instructions
+  only fell to 24.46 M, so the change was reverted. Single scalar board-scan
+  comparisons account for 31% and 47% of samples within those functions.
+- `bitcount`: the original scalar SWAR loop took 74.8 M versus 31.5 M
+  instructions at checksum `134217488`. Both native front ends now emit
+  scalar `popcnt`; C still uses vector lanes and a four-byte layout versus
+  Ny's eight-byte layout. The pre-POPCNT loop rejected on its induction,
+  load proof, and non-invariant mixed operand.
+- `nussinov`: a declared `bool` returns a canonical tagged value. Using
+  `!= NY_IMM_FALSE` instead of generic truthiness dropped instructions
+  120.7 M → 98.4 M and cycles 33.65 M → 26.75 M, checksum `100`.
+  Focused wall time moved from 3.13× to 2.29× C. `lang/execution` passed
+  65/65; the full language run passed 1472/1476, with four proof timeouts.
+- `stream`: NYR already emits a four-lane integer multiply. `ackermann`
+  now feeds a runtime-dependent argument into the recursion on both
+  sides, and the native scheduler sinks its loop decrement past the call.
+  `towers` benefited from shrink-wrapping and reusing parameter slots;
+  five callee-save pushes remained per non-base call in the sampled route.
+- `bce-matrix`, `dijkstra`, `sssp`, `qrsyndrome`, `permute`, `nqueens` and
+  `gcbench` showed loop-home traffic or allocation cost. The observed
+  `permute` inner loop was still rolled at 10 trips. `currying` allocated a
+  closure and called indirectly for each partial application.
+- `bigint-oracle`: `optional_ldflags` links the C reference to GMP. The
+  cost is in the arbitrary-precision library, not NYC compiling the GMP
+  driver. Registry lookups, repeated classification, and allocation-side
+  mapping registration are leads, not permission to bypass pointer
+  validation or stop registering ranges needed by the decoder.
 
 </details>
