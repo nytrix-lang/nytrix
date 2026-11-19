@@ -75,6 +75,21 @@ static bool gvn_can_number(const nyr_inst_t *in) {
       in->scalar_class == NYIR_SCALAR_UNKNOWN)
     return false;
   if (in->op == NYIR_CALL) {
+    /*
+     * A call that returns a fresh mutable container (dict, list, typed
+     * buffer, aggregate) has observable identity: callers mutate the result
+     * in place, so two equal-looking calls must stay two distinct objects.
+     * Sharing one result makes a later mutation visible through an earlier
+     * call's value; this broke editor backspace at -O3, where the third
+     * bs()/at_end() call aliased a previous state dict.
+     */
+    if (in->scalar_class == NYIR_SCALAR_OBJECT ||
+        in->scalar_class == NYIR_SCALAR_AGGREGATE ||
+        in->scalar_class == NYIR_SCALAR_TYPED_BUFFER ||
+        in->semantic_mutable ||
+        in->semantic_ownership == NY_SEM_OWN_OWNED ||
+        in->semantic_ownership == NY_SEM_OWN_SHARED)
+      return false;
     unsigned effects = nyr_effective_effects(in);
     const unsigned blockers =
         NYIR_EFFECT_WRITE_LOCAL | NYIR_EFFECT_WRITE_MEMORY |
@@ -93,7 +108,12 @@ static bool gvn_can_number(const nyr_inst_t *in) {
     return in->a >= 0 && !(in->flags & NYIR_INST_F_MEM_VOLATILE);
   if (in->op == NYIR_LOAD_LOCAL)
     return in->imm >= 0;
-  return nyr_inst_effects(in) == NYIR_EFFECT_NONE;
+  /*
+   * Betting on raw instruction effects would admit assume-marked compares
+   * (their fact holds only at the defining point); the effective-effects
+   * query includes that trap fact.
+   */
+  return nyr_effective_effects(in) == NYIR_EFFECT_NONE;
 }
 
 static bool gvn_invalidates_read_memory(const nyr_inst_t *in) {
@@ -925,28 +945,69 @@ static void vn_insert(vn_entry_t *table, const nyr_inst_t *in, int vn,
   }
 }
 
+/*
+ * A canonical operand producer may only stand in for a value when it is
+ * available at this instruction. Copy/constant propagation records its
+ * canonical source in program order, which is not the same as dominance: a
+ * copy in one arm of a branch must not key a computation in a sibling arm.
+ * Same-block producers must be earlier; otherwise the source block has to
+ * dominate the use. Without this check two different runtime values can share
+ * a value number and a pure `sub` is folded to the wrong operand, which broke
+ * editor backspace at -O3.
+ */
+static bool gvn_value_available_at(const nyr_cfg_t *cfg, const int *val_def,
+                                   size_t inst_count, int value, size_t at) {
+  if (!cfg || !val_def || value < 0)
+    return false;
+  int def = val_def[value];
+  if (def < 0 || (size_t)def >= inst_count)
+    return false;
+  size_t def_block = cfg->inst_block[def];
+  size_t use_block = cfg->inst_block[at];
+  if (def_block >= cfg->block_count || use_block >= cfg->block_count)
+    return false;
+  if (def_block == use_block)
+    return (size_t)def < at;
+  return nyr_cfg_dominates(cfg, def_block, use_block);
+}
+
 static int gvn_canonical_value(int value, const int *copy_of,
-                               size_t value_count) {
+                               size_t value_count, const nyr_cfg_t *cfg,
+                               const int *val_def, size_t inst_count,
+                               size_t at) {
   if (value < 0 || (size_t)value >= value_count)
     return value;
-  return copy_of[value] >= 0 ? copy_of[value] : value;
+  int canonical = copy_of[value];
+  if (canonical >= 0 && canonical != value &&
+      gvn_value_available_at(cfg, val_def, inst_count, canonical, at))
+    return canonical;
+  return value;
 }
 
 static int gvn_canonical_operand(int value, const int *copy_of,
-                                 const int *constant_of, size_t value_count) {
-  value = gvn_canonical_value(value, copy_of, value_count);
+                                 const int *constant_of, size_t value_count,
+                                 const nyr_cfg_t *cfg, const int *val_def,
+                                 size_t inst_count, size_t at) {
+  value = gvn_canonical_value(value, copy_of, value_count, cfg, val_def,
+                              inst_count, at);
   if (value < 0 || (size_t)value >= value_count)
     return value;
   int canonical = constant_of[value];
-  return canonical >= 0 ? canonical : value;
+  if (canonical >= 0 &&
+      gvn_value_available_at(cfg, val_def, inst_count, canonical, at))
+    return canonical;
+  return value;
 }
 
 static void gvn_canonicalize_operands(nyr_inst_t *key, const int *copy_of,
                                       const int *constant_of,
-                                      size_t value_count) {
+                                      size_t value_count,
+                                      const nyr_cfg_t *cfg, const int *val_def,
+                                      size_t inst_count, size_t at) {
 #define GVN_CANONICALIZE_OPERAND(field)                                    \
-  key->field =                                                             \
-      gvn_canonical_operand(key->field, copy_of, constant_of, value_count)
+  key->field = gvn_canonical_operand(key->field, copy_of, constant_of,     \
+                                     value_count, cfg, val_def,           \
+                                     inst_count, at)
   GVN_CANONICALIZE_OPERAND(a);
   GVN_CANONICALIZE_OPERAND(b);
   GVN_CANONICALIZE_OPERAND(c);
@@ -1076,8 +1137,8 @@ static bool gvn_pass(nyr_func_t *f, int *vn_of_val, nyr_cfg_t *cfg) {
      * Copies preserve value identity, including copies of non-numbered PHIs.
      */
     if (in->op == NYIR_COPY && in->a >= 0 && in->a < f->next_value) {
-      copy_of[in->dst] =
-          gvn_canonical_value(in->a, copy_of, (size_t)f->next_value);
+      copy_of[in->dst] = gvn_canonical_value(
+          in->a, copy_of, (size_t)f->next_value, cfg, val_def, f->len, i);
       if (vn_of_val[in->a] >= 0)
         vn_of_val[in->dst] = vn_of_val[in->a];
       continue;
@@ -1128,7 +1189,7 @@ static bool gvn_pass(nyr_func_t *f, int *vn_of_val, nyr_cfg_t *cfg) {
 
     nyr_inst_t key = *in;
     gvn_canonicalize_operands(&key, copy_of, constant_of,
-                              (size_t)f->next_value);
+                              (size_t)f->next_value, cfg, val_def, f->len, i);
     if (trace_misses && in->op == NYIR_LOAD_I64) {
       int address_def =
           in->a >= 0 && in->a < f->next_value ? val_def[in->a] : -1;
@@ -1211,7 +1272,19 @@ static bool gvn_pass(nyr_func_t *f, int *vn_of_val, nyr_cfg_t *cfg) {
           bool dom = (def_block == use_block && def < i) ||
                      (def_block != use_block &&
                       nyr_cfg_dominates(cfg, def_block, use_block));
-          if (dom) {
+          /*
+           * Pure expression CSE stays block-local. Dominance proves the
+           * candidate's definition executes before this use, but not that an
+           * operand copy carries the same runtime value on every path to the
+           * use. Folding `_bprev`'s arithmetic across branches produced a
+           * stale byte offset at -O3 (the third inlined editor backspace then
+           * left its buffer unchanged). Calls and memory loads keep their
+           * effect/memory proofs and may still CSE across blocks.
+           */
+          bool block_local_expression =
+              expression_key && in->op != NYIR_LOAD_I64 &&
+              in->op != NYIR_LOAD_LOCAL;
+          if (dom && (!block_local_expression || def_block == use_block)) {
             bool reads_memory =
                 (nyr_effective_effects(in) & NYIR_EFFECT_READ_MEMORY) != 0;
             bool local_read = in->op == NYIR_LOAD_LOCAL;
@@ -1232,9 +1305,11 @@ static bool gvn_pass(nyr_func_t *f, int *vn_of_val, nyr_cfg_t *cfg) {
                 ny_dbg_heuristic_event(
                     "GVN_HIT",
                     "%s value=v%d replaced-with=v%d def=i%zu use=i%zu "
-                    "blocks=B%zu→B%zu memory=%s",
+                    "blocks=B%zu→B%zu memory=%s callee=%s file=%s line=%u",
                     nyr_op_name(in->op), in->dst, cand, def, i, def_block,
-                    use_block, reads_memory ? "stable" : "pure");
+                    use_block, reads_memory ? "stable" : "pure",
+                    in->symbol ? in->symbol : "-",
+                    in->debug.file ? in->debug.file : "-", in->debug.line);
               uint32_t value_alias = f->data[def].alias_class;
               nyr_range_t value_range = in->range;
               nir_make_copy(in, cand);
@@ -1249,8 +1324,8 @@ static bool gvn_pass(nyr_func_t *f, int *vn_of_val, nyr_cfg_t *cfg) {
                * canonicalize through it in this same pass (for example,
                * identical address arithmetic feeding a load).
                */
-              copy_of[in->dst] =
-                  gvn_canonical_value(cand, copy_of, (size_t)f->next_value);
+              copy_of[in->dst] = gvn_canonical_value(
+                  cand, copy_of, (size_t)f->next_value, cfg, val_def, f->len, i);
               if (vn_of_val[cand] >= 0)
                 vn_of_val[in->dst] = vn_of_val[cand];
               /*

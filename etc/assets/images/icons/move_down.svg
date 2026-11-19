@@ -1,8 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
-  <title id="title1">Moved Own</title>
-  <desc id="desc1">Moved Own editor icon. Original asset id: movedown.</desc>
-  <defs id="defs1" />
-  <g transform="translate(2.0000 2.0000) scale(1.25000)" id="g1">
-    <path d="M 6,1 A 1,1 0 0 0 5,2 1,1 0 0 0 6,3 h 4 A 1,1 0 0 0 11,2 1,1 0 0 0 10,1 Z M 8,5 A 1,1 0 0 0 7,6 v 5.148438 L 4.78125,8.375 A 1,1 0 0 0 3.375,8.21875 1,1 0 0 0 3.21875,9.625 l 4,5 A 1.0001,1.0001 0 0 0 8,15 1.0001,1.0001 0 0 0 8.78125,14.625 l 4,-5 A 1,1 0 0 0 12.625,8.21875 1,1 0 0 0 11.21875,8.375 L 9,11.148438 V 6 A 1,1 0 0 0 8,5 Z" id="path1" fill="#c6c6ca" />
-  </g>
-</svg>

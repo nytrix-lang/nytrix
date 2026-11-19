@@ -1,8 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
-  <title id="title1">Arrow Down</title>
-  <desc id="desc1">Arrow Down editor icon. Original asset id: arrowdown.</desc>
-  <defs id="defs1" />
-  <g transform="translate(2.0000 2.0000) scale(1.25000)" id="g1">
-    <path d="M 8,4 A 1,1 0 0 0 7,5 V 9.5859375 L 4.7070312,7.2929687 a 1,1 0 0 0 -1.4140624,0 1,1 0 0 0 0,1.4140626 l 3.9999999,3.9999997 a 1,1 0 0 0 0.2480469,0.103516 1.0001,1.0001 0 0 0 0.2109375,0.08594 1,1 0 0 0 0.9550782,-0.189453 L 12.707031,8.7070313 a 1,1 0 0 0 0,-1.4140626 1,1 0 0 0 -1.414062,0 L 9,9.5859375 V 5 A 1,1 0 0 0 8,4 Z" id="path1" fill="#c6c6ca" />
-  </g>
-</svg>

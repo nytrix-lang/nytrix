@@ -1,6 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
-  <path d="M4.5 2.5H19.5A2.5 2.5 0 0 1 22 5V19A2.5 2.5 0 0 1 19.5 21.5H4.5A2.5 2.5 0 0 1 2 19V5A2.5 2.5 0 0 1 4.5 2.5ZM5 5.5V12.2H19V5.5ZM5 14.7V18.5H10.5V14.7ZM13.5 14.7V18.5H19V14.7Z" fill="#eab308" fill-rule="evenodd"/>
-  <path d="M7.1 7H9.3V10.8H7.1Z M11 7H13.2V10.8H11Z M14.9 7H17.1V10.8H14.9Z" fill="#eab308"/>
-  <path d="M7.1 15.1H8.7V16H9.6V17.2H8.7V18.1H7.1V17.2H6.2V16H7.1Z" fill="#eab308"/>
-  <path d="M14.4 16.2H18.1V17H14.4Z" fill="#eab308"/>
+  <title>Counter</title>
+  <path fill="#eab308" fill-rule="evenodd" d="M5 2.5H19A2.5 2.5 0 0 1 21.5 5V19A2.5 2.5 0 0 1 19 21.5H5A2.5 2.5 0 0 1 2.5 19V5A2.5 2.5 0 0 1 5 2.5ZM5.5 5.5V12.5H18.5V5.5ZM7.2 15.5V17H5.7V18.5H7.2V20H8.7V18.5H10.2V17H8.7V15.5ZM14 17V18.5H18V17Z"/>
+  <path fill="#eab308" d="M7 7H9.5V11H7ZM10.8 7H13.2V11H10.8ZM14.5 7H17V11H14.5Z"/>
 </svg>

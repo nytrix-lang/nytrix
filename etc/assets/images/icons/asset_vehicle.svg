@@ -1,8 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
-  <title id="title1">Asset Vehicle</title>
-  <desc id="desc1">Asset Vehicle editor icon. Original asset id: asset_vehicle.</desc>
-  <defs id="defs1" />
-  <g transform="translate(2.0000 2.0000) scale(1.25000)" id="g1">
-    <path d="m 8,0.8828125 -7,3.5 v 7.2343755 l 7,3.5 7,-3.5 V 4.3828125 Z M 8,3.1171875 11.765625,5 8,6.8828125 4.2363281,5 Z m -5,3.5 4,2 v 3.7656255 l -4,-2 z m 10,0 v 3.7656255 l -4,2 V 8.6171875 Z" id="path1" fill="#c6c6ca" />
-  </g>
-</svg>

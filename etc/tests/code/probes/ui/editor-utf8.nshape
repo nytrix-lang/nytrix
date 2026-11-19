@@ -7,9 +7,7 @@ shape editor-utf8 {
   ;; flag pairs as one character and never split UTF-8.
   template ny-test-case
   expect compile_and_run
-  ;; -O3 is excluded until docs/todo/bugs.md "Native -O3 drops an editor
-  ;; backspace" is fixed.
-  flags_matrix "--native-only -O0; --native-backend=llvm --jit --jit-engine=mcjit"
+  flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=mcjit"
   expect_stdout "EDITOR-UTF8-OK"
   source ny <<'NY'
 use core

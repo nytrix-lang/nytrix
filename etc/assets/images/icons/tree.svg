@@ -1,14 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
   <title>Tree</title>
-  <desc>Hierarchy tree icon.</desc>
-  <g fill="#38bdf8">
-    <rect x="2.6" y="3" width="6.4" height="4.4" rx="1.4"/>
-    <rect x="14.6" y="2.2" width="6.8" height="4.4" rx="1.4"/>
-    <rect x="14.6" y="9.8" width="6.8" height="4.4" rx="1.4"/>
-    <rect x="14.6" y="17.4" width="6.8" height="4.4" rx="1.4"/>
-    <rect x="10.4" y="4.4" width="5" height="1.6"/>
-    <rect x="9.4" y="4.4" width="1.6" height="17.4"/>
-    <rect x="9.4" y="11.2" width="6" height="1.6"/>
-    <rect x="9.4" y="18.8" width="6" height="1.6"/>
-  </g>
+  <desc>Hierarchy tree with three connected branches.</desc>
+  <path fill="#38bdf8" d="M8 11.2H11V5H15.5V6.6H12.6V11.2H15.5V12.8H12.6V18.2H15.5V19.8H11V12.8H8Z"/>
+  <rect x="2.2" y="9.8" width="6.4" height="4.4" rx="1.4" fill="#38bdf8"/>
+  <rect x="15" y="2.8" width="6.8" height="4.4" rx="1.4" fill="#38bdf8"/>
+  <rect x="15" y="9.8" width="6.8" height="4.4" rx="1.4" fill="#38bdf8"/>
+  <rect x="15" y="16.8" width="6.8" height="4.4" rx="1.4" fill="#38bdf8"/>
 </svg>

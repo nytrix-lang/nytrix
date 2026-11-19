@@ -1,8 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
-  <title id="title1">Arrow Right</title>
-  <desc id="desc1">Arrow Right editor icon. Original asset id: arrowright.</desc>
-  <defs id="defs1" />
-  <g transform="translate(2.0000 2.0000) scale(1.25000)" id="g1">
-    <path d="m 8,3 a 1,1 0 0 0 -0.7070313,0.2929688 1,1 0 0 0 0,1.4140624 L 9.5859375,7 H 5 A 1,1 0 0 0 4,8 1,1 0 0 0 5,9 h 4.5859375 l -2.2929688,2.292969 a 1,1 0 0 0 0,1.414062 1,1 0 0 0 1.4140626,0 L 12.707031,8.7070313 A 1,1 0 0 0 12.810547,8.4589844 1.0001,1.0001 0 0 0 12.896484,8.2480469 1,1 0 0 0 12.707031,7.2929687 L 8.7070313,3.2929688 A 1,1 0 0 0 8,3 Z" id="path1" fill="#c6c6ca" />
-  </g>
-</svg>

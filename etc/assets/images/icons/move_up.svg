@@ -1,8 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
-  <title id="title1">Move Up</title>
-  <desc id="desc1">Move Up editor icon. Original asset id: moveup.</desc>
-  <defs id="defs1" />
-  <g transform="translate(2.0000 2.0000) scale(1.25000)" id="g1">
-    <path d="M 8,1 A 1.0001,1.0001 0 0 0 7.21875,1.375 l -4,5 A 1,1 0 0 0 3.375,7.78125 1,1 0 0 0 4.78125,7.625 L 7,4.8515625 V 10 a 1,1 0 0 0 1,1 1,1 0 0 0 1,-1 V 4.8515625 L 11.21875,7.625 A 1,1 0 0 0 12.625,7.78125 1,1 0 0 0 12.78125,6.375 l -4,-5 A 1.0001,1.0001 0 0 0 8,1 Z M 6,13 a 1,1 0 0 0 -1,1 1,1 0 0 0 1,1 h 4 a 1,1 0 0 0 1,-1 1,1 0 0 0 -1,-1 z" id="path1" fill="#c6c6ca" />
-  </g>
-</svg>
