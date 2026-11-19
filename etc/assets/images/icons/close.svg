@@ -1,8 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
-  <title id="title1">Close</title>
-  <desc id="desc1">Close editor icon. Original asset id: close.</desc>
-  <defs id="defs1" />
-  <g transform="translate(2.0000 2.0000) scale(1.25000)" id="g1">
-    <path d="M 3.7070313,2.2929688 2.2929688,3.7070313 6.5859375,8 2.2929688,12.292969 3.7070313,13.707031 8,9.4140625 12.292969,13.707031 13.707031,12.292969 9.4140625,8 13.707031,3.7070313 12.292969,2.2929688 8,6.5859375 Z" id="path1" fill="#c6c6ca" />
-  </g>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><title>Close</title><path fill="#f87171" d="M4.227 6.773L17.227 19.773A1.8 1.8 0 0 1 19.773 17.227L6.773 4.227A1.8 1.8 0 0 1 4.227 6.773Z" /><path fill="#f87171" d="M17.227 4.227L4.227 17.227A1.8 1.8 0 0 1 6.773 19.773L19.773 6.773A1.8 1.8 0 0 1 17.227 4.227Z" /></svg>

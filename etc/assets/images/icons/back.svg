@@ -1,8 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
-  <title id="title1">Back</title>
-  <desc id="desc1">Back editor icon. Original asset id: back.</desc>
-  <defs id="defs1" />
-  <g transform="translate(7.0000 2.0000) scale(1.25000)" id="g1">
-    <path d="M 5.8046875,1.0195312 A 1,1 0 0 0 5.1679687,1.4453125 l -4,6 a 1.0001,1.0001 0 0 0 0,1.109375 l 4,6.0000005 a 1,1 0 0 0 1.3867188,0.277343 1,1 0 0 0 0.2773437,-1.386718 L 3.2011719,8 6.8320312,2.5546875 a 1,1 0 0 0 -0.2773437,-1.3867188 1,1 0 0 0 -0.75,-0.1484375 z" id="path1" fill="#c6c6ca" />
-  </g>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><title>Back</title><path fill="#94a3b8" d="M17.7 10.4L6.5 10.4A1.6 1.6 0 0 1 6.5 13.6L17.7 13.6A1.6 1.6 0 0 1 17.7 10.4Z" /><path fill="#94a3b8" d="M10.441 4.597L4.441 10.897A1.6 1.6 0 0 1 6.759 13.103L12.759 6.803A1.6 1.6 0 0 1 10.441 4.597Z" /><path fill="#94a3b8" d="M4.441 13.103L10.441 19.403A1.6 1.6 0 0 1 12.759 17.197L6.759 10.897A1.6 1.6 0 0 1 4.441 13.103Z" /></svg>

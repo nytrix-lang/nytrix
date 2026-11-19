@@ -1,8 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
-  <title id="title1">Forward</title>
-  <desc id="desc1">Forward editor icon. Original asset id: forward.</desc>
-  <defs id="defs1" />
-  <g transform="translate(7.0000 2.0000) scale(1.25000)" id="g1">
-    <path d="M 1.4453125,1.1679687 A 1,1 0 0 0 1.1679687,2.5546875 L 4.7988281,8 1.1679687,13.445313 a 1,1 0 0 0 0.2773438,1.386718 1,1 0 0 0 1.3867188,-0.277343 L 6.8320312,8.5546875 a 1.0001,1.0001 0 0 0 0,-1.109375 l -3.9999999,-6 A 1,1 0 0 0 1.4453125,1.1679687 Z" id="path1" fill="#c6c6ca" />
-  </g>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><title>Forward</title><path fill="#94a3b8" d="M6.3 13.6L17.5 13.6A1.6 1.6 0 0 1 17.5 10.4L6.3 10.4A1.6 1.6 0 0 1 6.3 13.6Z" /><path fill="#94a3b8" d="M11.241 6.803L17.241 13.103A1.6 1.6 0 0 1 19.559 10.897L13.559 4.597A1.6 1.6 0 0 1 11.241 6.803Z" /><path fill="#94a3b8" d="M17.241 10.897L11.241 17.197A1.6 1.6 0 0 1 13.559 19.403L19.559 13.103A1.6 1.6 0 0 1 17.241 10.897Z" /></svg>

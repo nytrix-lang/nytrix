@@ -1,5 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
-  <path d="M5.5 2 H16 Q18 2 18 4 V18 Q18 20 16 20 H5.5 Q3.5 20 3.5 18 V4 Q3.5 2 5.5 2 Z M7 4.8 Q6.2 4.8 6.2 5.6 V16.4 Q6.2 17.2 7 17.2 H14.5 Q15.3 17.2 15.3 16.4 V5.6 Q15.3 4.8 14.5 4.8 Z" fill="#c084fc" fill-rule="evenodd"/>
-  <path d="M9.3 7 10.1 9.3 12.4 10.1 10.1 10.9 9.3 13.2 8.5 10.9 6.2 10.1 8.5 9.3 Z" fill="#c084fc"/>
-  <path d="M9.4 19.4 H12.3 V21 H17 Q18 21 18 22 V22.5 H4 V22 Q4 21 5 21 H9.4 Z" fill="#c084fc"/>
+  <title>Reflect</title>
+  <desc>Runtime reflection and introspection.</desc>
+  <path fill="#c084fc" fill-rule="evenodd" d="M12 5C16.5 5 20 8 22 12C20 16 16.5 19 12 19S4 16 2 12C4 8 7.5 5 12 5ZM12 7.5A4.5 4.5 0 1 0 12 16.5A4.5 4.5 0 1 0 12 7.5Z"/>
+  <path fill="#c084fc" d="M12 9.5A2.5 2.5 0 1 1 12 14.5A2.5 2.5 0 0 1 12 9.5Z"/>
 </svg>

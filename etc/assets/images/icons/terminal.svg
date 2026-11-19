@@ -1,8 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#c6c6ca">
-  <title id="title1">Terminal</title>
-  <desc id="desc1">Terminal icon.</desc>
-  <defs id="defs1" />
-  <g transform="translate(2.0000 2.0000) scale(1.25000)" id="g1">
-    <path d="m 1.2929687,2.2929688 a 1,1 0 0 0 0,1.4140625 L 5.5859375,8 1.2929687,12.292969 a 1,1 0 0 0 0,1.414062 1,1 0 0 0 1.4140626,0 L 7.7070312,8.7070313 a 1.0001,1.0001 0 0 0 0,-1.4140626 L 2.7070313,2.2929688 a 1,1 0 0 0 -1.4140626,0 z M 9,12 a 1,1 0 0 0 -1,1 1,1 0 0 0 1,1 h 5 a 1,1 0 0 0 1,-1 1,1 0 0 0 -1,-1 z" id="path1" fill="#c6c6ca" />
-  </g>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><title>Terminal</title><path fill="#22d3ee" d="M5 3H19Q21.5 3 21.5 5.5V18.5Q21.5 21 19 21H5Q2.5 21 2.5 18.5V5.5Q2.5 3 5 3ZM5.7 7.7H18.3Q19 7.7 19 8.4V17.8Q19 18.5 18.3 18.5H5.7Q5 18.5 5 17.8V8.4Q5 7.7 5.7 7.7Z" fill-rule="evenodd" /><path fill="#22d3ee" d="M6.6 10.4L8.1 8.9L11.6 12.2L8.1 15.5L6.6 14L8.5 12.2Z" /><path fill="#22d3ee" d="M12.9 14.1H16.3Q17.2 14.1 17.2 15V15.4Q17.2 16.3 16.3 16.3H12.9Q12 16.3 12 15.4V15Q12 14.1 12.9 14.1Z" /></svg>

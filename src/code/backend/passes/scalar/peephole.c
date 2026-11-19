@@ -1069,14 +1069,16 @@ bool nyr_peephole(nyr_func_t *f) {
       break;
     }
     case NYIR_AND_I64:
-      if (defs && bk && bv == 1 && nir_boolean_value(f, defs, in->a, 0)) {
-        nir_make_copy(in, in->a);
-        break;
-      }
-      if (defs && ak && av == 1 && nir_boolean_value(f, defs, in->b, 0)) {
-        nir_make_copy(in, in->b);
-        break;
-      }
+      /*
+       * `x & 1` is deliberately kept. It is the canonical low-bit test that
+       * the x86-64 emitter fuses into `testq $1`, and replacing it with `x`
+       * turns that bit test into a whole-word nonzero test. The boolean
+       * proof used here is a property of the definition chain, not of the
+       * runtime word, so the two forms are not interchangeable for every
+       * value it accepts: svg-icon-pixels decoded every pixel as transparent
+       * at native -O3 when this fold ran. Positive-polarity comparisons of
+       * an exact `x & 1` value are still simplified by the CMP case below.
+       */
       /*
        * A 32-bit rotate is sound only when both the input and complete result
        * are explicitly governed by the low-32 mask.  The count is either a
