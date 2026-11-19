@@ -702,8 +702,7 @@ static bool ny_parse_heap_policy(const char *raw, ny_heap_policy_t *out) {
      * runtime, and its own allocations must stay on the normal heap. The
      * lowered program arms the safe heap in its entry prologue instead.
      */
-    ny_env_generation++;
-    setenv("NYTRIX_SAFE_HEAP_BUILD", "1", 1);
+    ny_setenv("NYTRIX_SAFE_HEAP_BUILD", "1", 1);
     return true;
   }
   return false;
@@ -1486,10 +1485,10 @@ invalid:
   exit(2);
 }
 
-#define NY_TRACE_LIST_VALUES                                  \
+#define NY_TRACE_LIST_VALUES                                                   \
   "tokens|parse|scope|hm|unify|trait|llvm|regalloc|exec|meta"
-#define NY_DUMP_LIST_VALUES                                      \
-  "ast|tokens|llvm|llvm-passes|nyr|vm|funcs|escapes|proofs|obj|" \
+#define NY_DUMP_LIST_VALUES                                                    \
+  "ast|tokens|llvm|llvm-passes|nyr|vm|funcs|escapes|proofs|obj|"               \
   "callgraph|abi|stack|regalloc|elf|expand"
 
 static void ny_options_apply_trace_list(ny_options *opt, const char *items) {
@@ -1535,11 +1534,11 @@ invalid:
 
 static bool ny_options_apply_dump_item(ny_options *opt, const char *item,
                                        size_t length) {
-#define NY_DUMP_ITEM(name, body)                   \
-  if (length == sizeof(name) - 1 &&                \
-      memcmp(item, name, sizeof(name) - 1) == 0) { \
-    body;                                          \
-    return true;                                   \
+#define NY_DUMP_ITEM(name, body)                                               \
+  if (length == sizeof(name) - 1 &&                                            \
+      memcmp(item, name, sizeof(name) - 1) == 0) {                             \
+    body;                                                                      \
+    return true;                                                               \
   }
   NY_DUMP_ITEM("ast", opt->dump_ast = true)
   NY_DUMP_ITEM("tokens", opt->dump_tokens = true)
@@ -2071,7 +2070,7 @@ static const char ny_emit_default_path_marker[] = "\x1fny-default";
 
 static bool ny_emit_assign(ny_options *opt, const char *kind, size_t kind_len,
                            const char *path, size_t path_len) {
-#define NY_EMIT_KIND(name)                                                    \
+#define NY_EMIT_KIND(name)                                                     \
   (kind_len == sizeof(name) - 1 && memcmp(kind, name, sizeof(name) - 1) == 0)
   bool known =
       NY_EMIT_KIND("asm") || NY_EMIT_KIND("ir") || NY_EMIT_KIND("bc") ||
@@ -2522,9 +2521,9 @@ static bool ny_options_apply_common_codegen_option(ny_options *opt,
         name += 3;
         length -= 3;
       }
-#define NY_OPT_ITEM(spelling, field)                                      \
-  (length == sizeof(spelling) - 1 && strncmp(name, spelling, length) == 0 \
-       ? (opt->field = enabled, true)                                     \
+#define NY_OPT_ITEM(spelling, field)                                           \
+  (length == sizeof(spelling) - 1 && strncmp(name, spelling, length) == 0      \
+       ? (opt->field = enabled, true)                                          \
        : false)
       bool matched =
           NY_OPT_ITEM("dce", opt_dce) || NY_OPT_ITEM("loops", opt_loops) ||
@@ -2567,9 +2566,9 @@ static bool ny_options_apply_common_codegen_option(ny_options *opt,
         name += 3;
         length -= 3;
       }
-#define NY_CHECK_ITEM(spelling, field)                                    \
-  (length == sizeof(spelling) - 1 && strncmp(name, spelling, length) == 0 \
-       ? (opt->field = enabled, true)                                     \
+#define NY_CHECK_ITEM(spelling, field)                                         \
+  (length == sizeof(spelling) - 1 && strncmp(name, spelling, length) == 0      \
+       ? (opt->field = enabled, true)                                          \
        : false)
       bool matched = NY_CHECK_ITEM("types", strict_types) ||
                      NY_CHECK_ITEM("effects", effect_require_known) ||
@@ -3471,66 +3470,66 @@ typedef struct {
   const char *scope;
 } ny_option_registry_entry_t;
 
-#define NY_REG_BOOL_OPTION(option_name, option_group, option_summary)     \
-  {option_name, {NULL}, NY_REG_BOOL, NULL,  option_group, option_summary, \
-   "advanced",  NULL,   NULL,        NULL,  NULL,         NULL,           \
+#define NY_REG_BOOL_OPTION(option_name, option_group, option_summary)          \
+  {option_name, {NULL}, NY_REG_BOOL, NULL,  option_group, option_summary,      \
+   "advanced",  NULL,   NULL,        NULL,  NULL,         NULL,                \
    0,           false,  NULL,        false, "global"}
-#define NY_REG_PATH_OPTION(option_name, option_group, option_summary)     \
-  {option_name, {NULL}, NY_REG_PATH, NULL,  option_group, option_summary, \
-   "advanced",  NULL,   NULL,        NULL,  NULL,         NULL,           \
+#define NY_REG_PATH_OPTION(option_name, option_group, option_summary)          \
+  {option_name, {NULL}, NY_REG_PATH, NULL,  option_group, option_summary,      \
+   "advanced",  NULL,   NULL,        NULL,  NULL,         NULL,                \
    0,           true,   NULL,        false, "global"}
-#define NY_REG_TRUSTED_PATH_OPTION(option_name, option_group, option_summary) \
-  {option_name, {NULL}, NY_REG_PATH, NULL, option_group, option_summary,      \
-   "advanced",  NULL,   NULL,        NULL, NULL,         NULL,                \
+#define NY_REG_TRUSTED_PATH_OPTION(option_name, option_group, option_summary)  \
+  {option_name, {NULL}, NY_REG_PATH, NULL, option_group, option_summary,       \
+   "advanced",  NULL,   NULL,        NULL, NULL,         NULL,                 \
    0,           true,   NULL,        true, "global"}
-#define NY_REG_TRUSTED_VALUE_OPTION(option_name, option_kind, values,      \
-                                    option_group, option_summary)          \
-  {option_name, {NULL}, option_kind, values, option_group, option_summary, \
-   "advanced",  NULL,   NULL,        NULL,   NULL,         NULL,           \
+#define NY_REG_TRUSTED_VALUE_OPTION(option_name, option_kind, values,          \
+                                    option_group, option_summary)              \
+  {option_name, {NULL}, option_kind, values, option_group, option_summary,     \
+   "advanced",  NULL,   NULL,        NULL,   NULL,         NULL,               \
    0,           true,   NULL,        true,   "global"}
 #define NY_REG_OPTIONAL_PATH_OPTION(option_name, option_group, option_summary) \
   {option_name, {NULL}, NY_REG_PATH, NULL,  option_group, option_summary,      \
    "advanced",  NULL,   NULL,        NULL,  NULL,         NULL,                \
    0,           false,  NULL,        false, "global"}
-#define NY_REG_TRUSTED_OPTIONAL_PATH_OPTION(option_name, option_group,   \
-                                            option_summary)              \
-  {option_name, {NULL}, NY_REG_PATH, NULL, option_group, option_summary, \
-   "advanced",  NULL,   NULL,        NULL, NULL,         NULL,           \
+#define NY_REG_TRUSTED_OPTIONAL_PATH_OPTION(option_name, option_group,         \
+                                            option_summary)                    \
+  {option_name, {NULL}, NY_REG_PATH, NULL, option_group, option_summary,       \
+   "advanced",  NULL,   NULL,        NULL, NULL,         NULL,                 \
    0,           false,  NULL,        true, "global"}
-#define NY_REG_VALUE_OPTION(option_name, option_kind, values, option_group, \
-                            option_summary)                                 \
-  {option_name, {NULL}, option_kind, values, option_group, option_summary,  \
-   "advanced",  NULL,   NULL,        NULL,   NULL,         NULL,            \
+#define NY_REG_VALUE_OPTION(option_name, option_kind, values, option_group,    \
+                            option_summary)                                    \
+  {option_name, {NULL}, option_kind, values, option_group, option_summary,     \
+   "advanced",  NULL,   NULL,        NULL,   NULL,         NULL,               \
    0,           true,   NULL,        false,  "global"}
-#define NY_REG_FAMILY_VALUE_OPTION(option_name, option_kind, values,         \
-                                   option_group, option_summary, short_name, \
-                                   family_spec)                              \
-  {option_name, {NULL}, option_kind, values, option_group, option_summary,   \
-   "advanced",  NULL,   NULL,        NULL,   short_name,   family_spec,      \
+#define NY_REG_FAMILY_VALUE_OPTION(option_name, option_kind, values,           \
+                                   option_group, option_summary, short_name,   \
+                                   family_spec)                                \
+  {option_name, {NULL}, option_kind, values, option_group, option_summary,     \
+   "advanced",  NULL,   NULL,        NULL,   short_name,   family_spec,        \
    0,           true,   NULL,        false,  "global"}
-#define NY_REG_FAMILY_TRUSTED_VALUE_OPTION(option_name, option_kind, values, \
-                                           option_group, option_summary,     \
-                                           short_name, family_spec)          \
-  {option_name, {NULL}, option_kind, values, option_group, option_summary,   \
-   "advanced",  NULL,   NULL,        NULL,   short_name,   family_spec,      \
+#define NY_REG_FAMILY_TRUSTED_VALUE_OPTION(option_name, option_kind, values,   \
+                                           option_group, option_summary,       \
+                                           short_name, family_spec)            \
+  {option_name, {NULL}, option_kind, values, option_group, option_summary,     \
+   "advanced",  NULL,   NULL,        NULL,   short_name,   family_spec,        \
    0,           true,   NULL,        true,   "global"}
-#define NY_REG_DEPRECATED_BOOL_OPTION(option_name, option_group,   \
-                                      option_summary, replacement) \
-  {option_name,    {NULL},       NY_REG_BOOL, NULL,  option_group, \
-   option_summary, "deprecated", replacement, NULL,  NULL,         \
-   NULL,           NULL,         0,           false, NULL,         \
+#define NY_REG_DEPRECATED_BOOL_OPTION(option_name, option_group,               \
+                                      option_summary, replacement)             \
+  {option_name,    {NULL},       NY_REG_BOOL, NULL,  option_group,             \
+   option_summary, "deprecated", replacement, NULL,  NULL,                     \
+   NULL,           NULL,         0,           false, NULL,                     \
    false,          "global"}
-#define NY_REG_DEPRECATED_VALUE_OPTION(option_name, option_group,   \
-                                       option_summary, replacement) \
-  {option_name,    {NULL},       NY_REG_PATH, NULL, option_group,   \
-   option_summary, "deprecated", replacement, NULL, NULL,           \
-   NULL,           NULL,         0,           true, NULL,           \
+#define NY_REG_DEPRECATED_VALUE_OPTION(option_name, option_group,              \
+                                       option_summary, replacement)            \
+  {option_name,    {NULL},       NY_REG_PATH, NULL, option_group,              \
+   option_summary, "deprecated", replacement, NULL, NULL,                      \
+   NULL,           NULL,         0,           true, NULL,                      \
    true,           "global"}
-#define NY_REG_DEPRECATED_OPTIONAL_PATH_OPTION(option_name, option_group,   \
-                                               option_summary, replacement) \
-  {option_name,    {NULL},       NY_REG_PATH, NULL,  option_group,          \
-   option_summary, "deprecated", replacement, NULL,  NULL,                  \
-   NULL,           NULL,         0,           false, NULL,                  \
+#define NY_REG_DEPRECATED_OPTIONAL_PATH_OPTION(option_name, option_group,      \
+                                               option_summary, replacement)    \
+  {option_name,    {NULL},       NY_REG_PATH, NULL,  option_group,             \
+   option_summary, "deprecated", replacement, NULL,  NULL,                     \
+   NULL,           NULL,         0,           false, NULL,                     \
    true,           "global"}
 
 static const struct {
@@ -6609,10 +6608,10 @@ static const char *ny_options_derive_emit_path(ny_options *opt,
 }
 
 static void ny_options_resolve_emit_paths(ny_options *opt) {
-#define NY_RESOLVE_EMIT_PATH(field, extension)                  \
-  do {                                                          \
-    if (opt->field == ny_emit_default_path_marker)              \
-      opt->field = ny_options_derive_emit_path(opt, extension); \
+#define NY_RESOLVE_EMIT_PATH(field, extension)                                 \
+  do {                                                                         \
+    if (opt->field == ny_emit_default_path_marker)                             \
+      opt->field = ny_options_derive_emit_path(opt, extension);                \
   } while (0)
   NY_RESOLVE_EMIT_PATH(emit_asm_path, ".s");
   NY_RESOLVE_EMIT_PATH(emit_ir_path, ".ll");
@@ -8974,8 +8973,7 @@ static void ny_options_parse_expanded(ny_options *opt, int argc, char **argv) {
      * Guard user allocations without changing RC/RAII reclamation policy.
      * The compiler shares this runtime; only the emitted entry point arms it.
      */
-    ny_env_generation++;
-    setenv("NYTRIX_SAFE_HEAP_BUILD", "1", 1);
+    ny_setenv("NYTRIX_SAFE_HEAP_BUILD", "1", 1);
     if (opt->gc_flag_seen || opt->heap_policy == NY_HEAP_GC) {
       fprintf(stderr, "--safe-mode cannot be combined with -gc or --heap=gc\n");
       fprintf(stderr,

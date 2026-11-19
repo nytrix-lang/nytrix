@@ -1,3 +1,5 @@
+/* Exercise an indexed bit-field and a shared exit after control-flow folding.
+ */
 struct slot {
   unsigned char low : 7;
   unsigned char present : 1;

@@ -1593,7 +1593,7 @@ static bool ny_native_emit_loaded_nirs(nyr_func_t *entry, nyr_func_t *funcs,
   nyr_set_verify_each_pass(opt->nyr_ir_verify);
   nyr_set_tv_seed(opt->native_tv_seed_trials);
   char object_path[4096] = {0}, runtime_path[4096] = {0};
-  char object_name[96], runtime_name[96], err_local[512] = {0};
+  char object_name[96], runtime_name[96], emit_err[512] = {0};
   unsigned long long nonce = (unsigned long long)ny_ticks_now();
   snprintf(object_name, sizeof(object_name), "ny_nyr_%llu.o", nonce);
   snprintf(runtime_name, sizeof(runtime_name), "ny_nyr_rt_%llu.o", nonce);
@@ -1606,27 +1606,27 @@ static bool ny_native_emit_loaded_nirs(nyr_func_t *entry, nyr_func_t *funcs,
     if (target.target == NY_NATIVE_TARGET_X86)
       ok = nyr_native_emit_elf32_i386_object_from_nirs(
           entry, funcs, names, count, &target, object_path, "main", false,
-          err_local, sizeof(err_local));
+          emit_err, sizeof(emit_err));
     else if (target.target == NY_NATIVE_TARGET_AARCH64)
       ok = nyr_native_emit_elf64_aarch64_object_from_nirs(
           entry, funcs, names, count, &target, object_path, "main", false,
-          err_local, sizeof(err_local));
+          emit_err, sizeof(emit_err));
     else
       ok = nyr_native_emit_elf64_object_from_nirs(
           entry, funcs, names, count, &target, object_path, "main", false,
-          false, err_local, sizeof(err_local));
+          false, emit_err, sizeof(emit_err));
   } else if (target.caps & NY_NATIVE_CAP_COFF_OBJECT) {
     ok = nyr_native_emit_coff_x64_object_from_nirs(
         entry, funcs, names, count, &target, object_path, "main", false,
-        err_local, sizeof(err_local));
+        emit_err, sizeof(emit_err));
   } else if (target.caps & NY_NATIVE_CAP_MACHO_OBJECT) {
     ok = nyr_native_emit_macho_x64_object_from_nirs(
         entry, funcs, names, count, &target, object_path, "main", false,
-        err_local, sizeof(err_local));
+        emit_err, sizeof(emit_err));
   }
   if (!ok) {
     nyr_set_error(err, err_len, "%s",
-                  err_local[0] ? err_local : "native object emission failed");
+                  emit_err[0] ? emit_err : "native object emission failed");
     remove(object_path);
     return false;
   }
