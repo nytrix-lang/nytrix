@@ -3497,8 +3497,7 @@ fn _draw_asset_mode_bar(str idp, bool compact=false) int {
    mut tab = (int(_gui_browser_tab) == 1) ? 1 : 0
    gui.text_colored("Assets", gui.theme_color("text_dim"))
    if _icon_mode_button(idp + "_mode_catalog", "asset_grid", tab == 0) { tab = 0 }
-   gui.same_line()
-   if _icon_mode_button(idp + "_mode_hierarchy", "hierarchy", tab == 1) { tab = 1 }
+   gui.same_line()    if _icon_mode_button(idp + "_mode_hierarchy", "tree", tab == 1) { tab = 1 }
    gui.same_line()
    gui.text_colored(tab == 1 ? "Hierarchy" : "Catalog", compact ? gui.theme_color_alpha("text_dim", 0.92) : gui.theme_color_alpha("text_dim", 0.94))
    _gui_browser_tab = tab
@@ -4921,7 +4920,7 @@ fn _warm_gui_editor_resources() bool {
       return false
    }
    def icon_names = [
-      "scene_data", "preferences", "console", "info", "hierarchy", "asset_camera",
+      "scene_data", "preferences", "console", "info", "tree", "asset_camera",
       "asset_grid", "asset_fit", "asset_unload", "asset_loaded", "asset_model", "asset_texture"
    ]
    viewer_icons.warm_sprites(icon_names) >= 0

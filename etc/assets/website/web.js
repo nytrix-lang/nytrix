@@ -486,7 +486,7 @@ const collapseIcon = () =>
 const DOC_ICONS = {
   readme: "book", overview: "book", index: "book", cookbook: "book", ny: "book",
   todo: "checklist", contribute: "git_branch", changelog: "history",
-  architecture: "hierarchy", browser: "globe", build: "wrench",
+  architecture: "tree", browser: "globe", build: "wrench",
   comptime: "comptime", concurrency: "timer", currying: "functional",
   debugging: "debug", effect: "effect", examples: "script",
   library: "library", measurements: "history", native: "native",
