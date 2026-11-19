@@ -6,6 +6,8 @@ shape euler9 {
   expect compile_and_run
   source ny <<'NY'
 ;; inspired from QBE: minic/test/euler9.c.
+use core
+use core.os.time
 @inline fn gcd(int a, int b) int {
    while b != 0 {
       def int r = a % b
@@ -14,6 +16,7 @@ shape euler9 {
    }
    a
 }
+def int t0 = ticks()
 mut int result = 0
 mut int m = 2
 while 2 * m * (m + 1) <= 1000 {
@@ -31,10 +34,20 @@ while 2 * m * (m + 1) <= 1000 {
    }
    m += 1
 }
+def int t1 = ticks()
 print("checksum=", result)
+print("elapsed_ns=", t1 - t0)
 NY
   source c <<'C'
+#include <stdint.h>
 #include <stdio.h>
+#include <time.h>
+
+static int64_t now_ns(void) {
+  struct timespec ts;
+  if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0;
+  return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+}
 
 static int gcd(int a, int b) {
   while (b != 0) {
@@ -46,6 +59,7 @@ static int gcd(int a, int b) {
 }
 
 int main(void) {
+  int64_t start = now_ns();
   int result = 0;
   for (int m = 2; 2 * m * (m + 1) <= 1000; ++m) {
     for (int n = 1; n < m; ++n) {
@@ -59,7 +73,10 @@ int main(void) {
       }
     }
   }
+  int64_t end = now_ns();
   printf("checksum=%d\n", result);
+  if (end <= start) end = start + 1;
+  printf("elapsed_ns=%lld\n", (long long)(end - start));
 }
 C
 }

@@ -6,7 +6,10 @@ shape collatz {
   expect compile_and_run
   source ny <<'NY'
 ;; inspired from QBE: minic/test/collatz.c.
+use core
+use core.os.time
 def steps = i64buf_new(1000)
+def int t0 = ticks()
 mut best = 0
 mut nv = 1
 while nv < 1000 {
@@ -24,12 +27,23 @@ while nv < 1000 {
    if c > best { best = c }
    nv += 1
 }
+def int t1 = ticks()
 print("checksum=", best)
+print("elapsed_ns=", t1 - t0)
 NY
   source c <<'C'
+#include <stdint.h>
 #include <stdio.h>
+#include <time.h>
+
+static int64_t now_ns(void) {
+  struct timespec ts;
+  if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return 0;
+  return (int64_t)ts.tv_sec * 1000000000LL + ts.tv_nsec;
+}
 
 int main(void) {
+  int64_t start = now_ns();
   int steps[1000] = {0};
   int best = 0;
   for (int value = 1; value < 1000; ++value) {
@@ -46,7 +60,10 @@ int main(void) {
     steps[value] = count;
     if (count > best) best = count;
   }
+  int64_t end = now_ns();
   printf("checksum=%d\n", best);
+  if (end <= start) end = start + 1;
+  printf("elapsed_ns=%lld\n", (long long)(end - start));
 }
 C
 }
