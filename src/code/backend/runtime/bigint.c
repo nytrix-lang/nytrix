@@ -763,8 +763,7 @@ static void _bn_divmod_knuth_impl(_bn_t *q, _bn_t *r, const _bn_t *a,
       return;
     }
     for (size_t i = a->count; i-- > 0;) {
-      uint64_t q_digit =
-          _bi_div_u128_u64(rem, a->d[i], divisor, &rem);
+      uint64_t q_digit = _bi_div_u128_u64(rem, a->d[i], divisor, &rem);
       q->d[i] = q_digit;
     }
     q->count = a->count;
@@ -839,7 +838,8 @@ static void _bn_divmod_knuth_impl(_bn_t *q, _bn_t *r, const _bn_t *a,
   direct_division = m < 4;
   bool use_adx = _bn_has_adx();
 #endif
-  uint64_t inverse = direct_division ? 0 : (uint64_t)((~(__uint128_t)0) / divisor);
+  uint64_t inverse =
+      direct_division ? 0 : (uint64_t)((~(__uint128_t)0) / divisor);
   for (size_t jj = m + 1; jj-- > 0;) {
     size_t j = jj;
     uint64_t qhat, rhat;
@@ -3400,14 +3400,32 @@ static inline uint32_t _bi_div_u64_u32(uint64_t numerator, uint32_t denominator,
 
 #endif
 
+/* Divide nonempty limbs with an incoming remainder smaller than divisor. */
 static uint64_t _bi_div_limbs_small(uint64_t *quotient, const uint64_t *limbs,
-                                    size_t words, uint64_t divisor) {
-  uint64_t remainder = 0;
+                                    size_t words, uint64_t divisor,
+                                    uint64_t remainder) {
+  if ((divisor & (divisor - 1)) == 0) {
+    if (divisor == 1) {
+      if (quotient && quotient != limbs)
+        memcpy(quotient, limbs, words * sizeof(*limbs));
+      return 0;
+    }
+    uint64_t low = limbs[0] & (divisor - 1);
+    if (quotient) {
+      unsigned shift = (unsigned)__builtin_ctzll(divisor);
+      /* Read each higher limb before it can be overwritten in place. */
+      for (size_t i = 0; i + 1 < words; ++i)
+        quotient[i] = (limbs[i] >> shift) | (limbs[i + 1] << (64u - shift));
+      quotient[words - 1] =
+          (limbs[words - 1] >> shift) | (remainder << (64u - shift));
+    }
+    return low;
+  }
 #if defined(__x86_64__) && !defined(_WIN32) &&                                 \
     (defined(__GNUC__) || defined(__clang__))
   if (divisor <= UINT32_MAX) {
     uint32_t small_divisor = (uint32_t)divisor;
-    uint32_t rem = 0;
+    uint32_t rem = (uint32_t)remainder;
     for (size_t i = words; i > 0; --i) {
       uint64_t word = limbs[i - 1];
       uint32_t high = _bi_div_u64_u32(((uint64_t)rem << 32) | (word >> 32),
@@ -3421,8 +3439,7 @@ static uint64_t _bi_div_limbs_small(uint64_t *quotient, const uint64_t *limbs,
   }
 #endif
   for (size_t i = words; i > 0; --i) {
-    uint64_t q =
-        _bi_div_u128_u64(remainder, limbs[i - 1], divisor, &remainder);
+    uint64_t q = _bi_div_u128_u64(remainder, limbs[i - 1], divisor, &remainder);
     if (quotient)
       quotient[i - 1] = q;
   }
@@ -3450,7 +3467,7 @@ static inline bool _bi_try_div_small_limbs(int64_t a, int bs,
     if (aw == 1) {
       rem = al[0] % d;
     } else {
-      rem = _bi_div_limbs_small(NULL, al, aw, d);
+      rem = _bi_div_limbs_small(NULL, al, aw, d, 0);
     }
     uint64_t floor_rem = rem;
     int rem_sign = 0;
@@ -3462,23 +3479,25 @@ static inline bool _bi_try_div_small_limbs(int64_t a, int bs,
     *out = _bi_from_limbs(rem_sign, &floor_rem, floor_rem != 0 ? 1u : 0u);
     return *out != 0;
   }
-  if (aw > SIZE_MAX / sizeof(uint64_t))
+  /*
+   * If the high limb produces zero, seed the remainder instead of
+   * allocating that quotient limb. Any next quotient limb is nonzero.
+   */
+  if (al[aw - 1] < d)
+    rem = al[--aw];
+  int64_t result = _bi_alloc(aw);
+  if (!result)
     return false;
-  uint64_t stack_q[8];
-  uint64_t *q = aw <= (sizeof(stack_q) / sizeof(stack_q[0]))
-                    ? stack_q
-                    : (uint64_t *)malloc(aw * sizeof(uint64_t));
-  if (!q)
-    return false;
+  uint64_t *q = (uint64_t *)(uintptr_t)(result + 16);
   if (aw == 1) {
-    q[0] = al[0] / d;
-  } else {
-    (void)_bi_div_limbs_small(q, al, aw, d);
+    q[0] = rem ? _bi_div_u128_u64(rem, al[0], d, &rem) : al[0] / d;
+  } else if (aw > 1) {
+    (void)_bi_div_limbs_small(q, al, aw, d, rem);
   }
-  *out = _bi_from_limbs(as == 0 ? 0 : (as == bs ? 1 : -1), q, aw);
-  if (q != stack_q)
-    free(q);
-  return *out != 0;
+  int sign = aw == 0 || as == 0 ? 0 : (as == bs ? 1 : -1);
+  *(int64_t *)(uintptr_t)result = rt_tag_v(sign);
+  *out = result;
+  return true;
 }
 
 static inline bool _bi_try_div_small_heap(int64_t a, int64_t b,
@@ -4027,7 +4046,7 @@ int64_t rt_bigint_mul_div_small(int64_t a, int64_t multiplier,
   if (carry != 0)
     product[product_words++] = carry;
 
-  (void)_bi_div_limbs_small(product, product, product_words, div_mag);
+  (void)_bi_div_limbs_small(product, product, product_words, div_mag, 0);
   int result_sign = sign * (mul < 0 ? -1 : 1) * (div < 0 ? -1 : 1);
   int64_t result = _bi_from_limbs(result_sign, product, product_words);
   if (product != stack_product)

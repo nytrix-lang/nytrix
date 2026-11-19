@@ -547,6 +547,7 @@ from the performance backlog; older investigations follow them.
 - [2026-11-19 loop_vectorize vector_slot_entry_const the memory-carried IV now gets an entry bound](#2026-11-19-loop_vectorize-vector_slot_entry_const-the-memory-carried-iv-now-gets-an-entry-bound)
 - [2026-11-19 cross-block entry bound the preheader store is found through the CFG](#2026-11-19-cross-block-entry-bound-the-preheader-store-is-found-through-the-cfg)
 - [2026-11-20 radix-tree, bitcount, Ackermann, and BigInt](#2026-11-20-radix-tree-bitcount-ackermann-and-bigint)
+- [2026-11-20 single-limb BigInt division](#2026-11-20-single-limb-bigint-division)
 - [2026-11-19 pre-vectorize LICM phase: built, measured, reverted](#2026-11-19-pre-vectorize-licm-phase-built-measured-reverted)
 
 Plus 81 older investigations below these.
@@ -6484,5 +6485,22 @@ The host was also running a separate kernel build during some samples.
 - `stream` already used a four-lane `vpmuludq` sequence on NYR. Disabling that
   path raised retired instructions from 95.14 M to 179.03 M at checksum
   `471845615`. This comparison verifies the existing vector route.
+
+### 2026-11-20 single-limb BigInt division
+
+Single-limb division now writes the quotient directly into its managed
+result. When the high limb would produce zero, it becomes the initial
+remainder instead; the result needs one fewer limb. For power-of-two
+divisors the limb loop uses shifts and a mask, including when fused
+multiply/divide overwrites its input buffer. Other divisors keep the existing
+hardware or portable division path.
+
+On `bigint-oracle`, interleaving two sets of three native AOT runs per
+variant, with the same compiler, source, and other runtime inputs, retired
+instructions fell from 166.67 M to 166.35 M (0.19%). Cycles fell from
+62.26–62.32 M to 59.94–60.15 M across the two sets; elapsed samples
+overlapped. Every run returned checksum `1968365`. The native AOT
+`bigint-short-arithmetic` oracle passed, including signed quotient and
+remainder, limb-boundary cases, and fused in-place division.
 
 </details>
