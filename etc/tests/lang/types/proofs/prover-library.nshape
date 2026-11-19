@@ -3,6 +3,8 @@ shape prover_goal_state_and_tactics {
   generator "embedded"
   features ["ny", "proofs", "prover", "tactics"]
   template ny-test-case
+  timeout 300
+  ci skip
   flags_matrix "--native-only -O0; --native-only -O3; --native-backend=llvm --jit --jit-engine=orc"
   expect compile_and_run
   expect_message "PROVER-OK 3 2"

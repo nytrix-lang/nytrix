@@ -118,6 +118,10 @@ jobs:
       # single fixture.
       - name: Build native compiler and run the full check gate
         id: checks
+        env:
+          # Each fixture child runs under this address-space cap so one runaway
+          # compile cannot exhaust a 16 GiB runner.
+          NYTRIX_TEST_MEM_LIMIT_GIB: "10"
         run: |
           mkdir -p build/ci
           ./make check 2>&1 | tee build/ci/checks.log
