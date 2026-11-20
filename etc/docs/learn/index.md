@@ -48,7 +48,7 @@ Next:
 - [REPL](repl.md) for interactive use; [packages](packages.md) for dependency
   workflows.
 - [Browser and WebAssembly](browser.md) for the browser target and its host
-  boundary; [examples](examples.md) for runnable projects.
+  boundary; [programs](programs.md#runnable-projects) for runnable projects.
 - [Performance](performance.md) for timing, profiles, and contention;
   [compiler debugging](debugging.md) for diagnostics and pass isolation.
 - [Recorded measurements](../spec/stats.md) for historical experiments, not

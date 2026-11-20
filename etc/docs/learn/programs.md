@@ -1,4 +1,4 @@
-<!-- nytrix-doc: {"audience":"user","featured":false,"group":"learn","order":150,"summary":"Choose script or module form and keep public exports separate from startup code."} -->
+<!-- nytrix-doc: {"audience":"user","featured":false,"group":"learn","order":150,"summary":"Build scripts and modules, then find runnable projects and focused checks."} -->
 # Programs
 
 A source file can be a script, a module, or both: use a script for a standalone
@@ -77,11 +77,59 @@ interfaces. `module name { export profile(...) }` can publish a named profile
 when the same module needs multiple public surfaces.
 
 Examples under [`etc/labs/`](../../../etc/labs/) are complete programs.
-[Examples](examples.md) links selected files; [Packages](packages.md) covers
-external source dependencies.
+
+## Runnable projects
+
+The checkout keeps runnable examples under `etc/labs/` and focused runtime
+checks under `etc/tests/`.
+
+| Area | Projects |
+| --- | --- |
+| Terminal | [conway.ny](../../../etc/labs/conway.ny), [matrix.ny](../../../etc/labs/matrix.ny), [ant.ny](../../../etc/labs/ant.ny) |
+| OS | [args.ny](../../../etc/labs/args.ny), [server.ny](../../../etc/labs/server.ny), [ffi.ny](../../../etc/labs/ffi.ny), [sound.ny](../../../etc/labs/sound.ny) |
+| UI | [term.ny](../../../etc/labs/term.ny), [input.ny](../../../etc/labs/input.ny), [monitor.ny](../../../etc/labs/monitor.ny), [engine.ny](../../../etc/labs/engine.ny), [editor.ny](../../../etc/labs/editor.ny) |
+
+Run a project directly, build it as a native executable, or build the browser
+demo runner:
+
+```bash
+ny etc/labs/conway.ny
+ny --output=build/conway etc/labs/conway.ny
+./make web-demos
+```
+
+The generated `build/web/demos/index.html` is a compact WebGL-backed Wasm
+runner. Load a `.wasm` file from the page, or add browser-ready entries to
+`etc/assets/website/wasm/demos.json`.
+
+## Focused checks
+
+Fixtures under `etc/tests/` exercise one language surface or runtime boundary:
+
+| Topic | Fixtures |
+| --- | --- |
+| ADTs and matching | [adt.nshape](../../../etc/tests/lang/types/aggregates/adt.nshape), [match.nshape](../../../etc/tests/lang/patterns/match.nshape) |
+| Concurrency and threads | [concurrency.nshape](../../../etc/tests/lang/concurrency/concurrency.nshape), [thread.nshape](../../../etc/tests/lang/concurrency/thread.nshape) |
+| Comptime | [comptime.nshape](../../../etc/tests/lang/comptime/comptime.nshape), [table.nshape](../../../etc/tests/lang/values/table.nshape) |
+| Native boundary | [ffi.nshape](../../../etc/tests/lang/interop/ny/ffi.nshape), [extern.nshape](../../../etc/tests/lang/interop/ny/extern.nshape), [asm.nshape](../../../etc/tests/lang/interop/ny/asm.nshape) |
+| Ownership and safety | [ownership.nshape](../../../etc/tests/lang/memory/ownership.nshape), [safe.nshape](../../../etc/tests/lang/memory/safe.nshape), [memory.nshape](../../../etc/tests/lang/memory/memory.nshape) |
+
+Run a focused test by pattern:
+
+```bash
+ny test --pattern comptime
+ny test --pattern ownership
+```
+
+Bench fixtures live under `etc/tests/bench/`; run them through `ny perf` or
+`ny test --pattern sieve`. A single fixture run checks correctness, while
+comparative measurements require the flags and checksums in the
+[performance guide](performance.md).
+
+[Packages](packages.md) covers external source dependencies.
 
 Next:
 
 - [Units](../spec/units.md) — exact import, export, and entry-point rules.
 - [Packages](packages.md) — external source dependencies.
-- [Examples](examples.md) — runnable projects in this checkout.
+- [Start](start.md) — create and run a first file.

@@ -177,7 +177,6 @@ const MARKDOWN_DOC_PRIORITY = [
   "learn/status",
   "learn/programs",
   "learn/repl",
-  "learn/examples",
   "learn/ui",
   "learn/tooling",
   "learn/networking",
@@ -217,7 +216,6 @@ const OVERVIEW_DOC_ROUTES = {
   learn: new Set([
     "learn/start",
     "learn/status",
-    "learn/examples",
     "learn/ui",
     "learn/native",
   ]),
@@ -240,7 +238,6 @@ const DOC_CARD_SUMMARIES = new Map(
     "learn/status": "Experimental status, execution routes, and feature limits.",
     "learn/programs": "Scripts, modules, imports, entrypoints.",
     "learn/repl": "Interactive probes and completions.",
-    "learn/examples": "Small runnable Nytrix programs.",
     "learn/ui": "Windows, input, rendering, text, assets.",
     "learn/tooling": "Format, test, docs, packages, builds.",
     "learn/networking": "HTTP, sockets, servers, TLS, processes.",
