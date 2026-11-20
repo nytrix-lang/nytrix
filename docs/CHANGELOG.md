@@ -5,7 +5,23 @@ Each release starts with a short summary, followed by details when useful.
 Entries describe notable changes in that release; measurements and local
 artifacts, where mentioned, are not a fresh test of the current checkout.
 
-## Unreleased
+## [0.10] - 2026-10-13
+
+- **Native backend**: improved x86-64 code generation, register allocation,
+  ABI handling, and runtime lowering across compiled programs and benchmarks.
+- **Language and compiler**: expanded semantic checks, diagnostics, effects,
+  templates, reflection, and compile-time capabilities with targeted correctness
+  fixes.
+- **Runtime and standard library**: reliability fixes across strings, lists,
+  buffers, I/O, crypto, networking, audio, terminal UI, and platform bridges.
+- **Cross-target support**: continued work on LLVM, NYR, NYC, and
+  architecture-specific backends, with fail-closed behavior where a target does
+  not support an operation.
+- **Tooling and docs**: benchmark/reporting improvements, clearer contributor
+  guides, and consolidated documentation.
+
+<details>
+<summary>Details</summary>
 
 ### NYC C compiler
 
@@ -65,24 +81,6 @@ artifacts, where mentioned, are not a fresh test of the current checkout.
 
 See the [NYC compiler guide](spec/nyc.md#verification-evidence) for the
 build and runtime evidence and its limits.
-
-## [0.10] - 2026-10-13
-
-- **Native backend**: improved x86-64 code generation, register allocation,
-  ABI handling, and runtime lowering across compiled programs and benchmarks.
-- **Language and compiler**: expanded semantic checks, diagnostics, effects,
-  templates, reflection, and compile-time capabilities with targeted correctness
-  fixes.
-- **Runtime and standard library**: reliability fixes across strings, lists,
-  buffers, I/O, crypto, networking, audio, terminal UI, and platform bridges.
-- **Cross-target support**: continued work on LLVM, NYR, NYC, and
-  architecture-specific backends, with fail-closed behavior where a target does
-  not support an operation.
-- **Tooling and docs**: benchmark/reporting improvements, clearer contributor
-  guides, and consolidated documentation.
-
-<details>
-<summary>Details</summary>
 
 ### Compiler and backends
 
