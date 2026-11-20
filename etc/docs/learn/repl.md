@@ -55,7 +55,7 @@ for supported commands. `:help keywords` lists language forms and types;
 `F1` and `:help <name>` use the same indexed documentation for language forms,
 loaded module symbols, and runtime builtins. `:help internals` lists internal
 runtime/compiler entries registered by the runtime. Language topics link to
-their specifications under `docs/spec/`.
+their specifications under `etc/docs/spec/`.
 
 ## Snapshots
 

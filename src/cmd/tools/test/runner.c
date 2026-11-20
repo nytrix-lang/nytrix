@@ -14395,7 +14395,7 @@ static bool bench_update_measurements(const char *root, const BenchTable *table,
     return false;
 
   char doc_path[PATH_MAX], temporary[PATH_MAX];
-  if (snprintf(doc_path, sizeof(doc_path), "%s/docs/learn/measurements.md",
+  if (snprintf(doc_path, sizeof(doc_path), "%s/etc/docs/learn/measurements.md",
                root) >= (int)sizeof(doc_path) ||
       snprintf(temporary, sizeof(temporary), "%s.tmp", doc_path) >=
           (int)sizeof(temporary))
@@ -14420,24 +14420,15 @@ static bool bench_update_measurements(const char *root, const BenchTable *table,
   bool ok = ny_strbuf_append_n(&output, old, (size_t)(begin - old)) &&
             ny_strbuf_append(&output, begin_marker) &&
             ny_strbuf_append(&output, "\n\n## Latest full benchmark run\n\n");
-  time_t now = time(NULL);
-  struct tm local = {0};
-#ifdef _WIN32
-  localtime_s(&local, &now);
-#else
-  localtime_r(&now, &local);
-#endif
-  char timestamp[64] = "unknown time";
-  (void)strftime(timestamp, sizeof(timestamp), "%Y-%m-%d %H:%M:%S %Z", &local);
   if (ok)
     ok = ny_strbuf_appendf(
         &output,
-        "Generated automatically by the full `ny-test --bench` run at %s.\n"
+        "Generated automatically by the full `ny-test --bench` run.\n"
         "Host: %s; target `%s`; compiler `%s`.\n"
         "NYR: `-%s`, profile `%s`, tier `%s`, engine `%s`, cache `%s`.\n"
         "C: %s; flags `%s`. NYC flags `%s`.\n"
         "Samples: %d plus %d warm-up; fixture workers %d, route workers %d.\n",
-        timestamp, env->cpu_model, env->target, env->compiler_binary_fnv64,
+        env->cpu_model, env->target, env->compiler_binary_fnv64,
         env->opt_level, env->profile, env->tier,
         bench_engine_label(env->engine), env->cache, env->c_compiler_version,
         env->c_flags, env->nyc_flags, env->samples, env->warmups,
@@ -14546,7 +14537,7 @@ static bool bench_update_measurements(const char *root, const BenchTable *table,
     fprintf(stderr, "measurements: could not replace %s\n", doc_path);
   else
     printf("Updated latest full benchmark results in "
-           "docs/learn/measurements.md\n");
+           "etc/docs/learn/measurements.md\n");
   return write_ok;
 }
 
@@ -14558,7 +14549,7 @@ static int run_bench_report_selftest(void) {
   if (!mkdtemp(root))
     return 1;
   char path[PATH_MAX];
-  snprintf(path, sizeof(path), "%s/docs/learn/measurements.md", root);
+  snprintf(path, sizeof(path), "%s/etc/docs/learn/measurements.md", root);
   BenchRow *rows = calloc(4, sizeof(*rows));
   bool ok =
       rows && shape_write_tree_file(
@@ -14610,7 +14601,7 @@ static int run_bench_report_selftest(void) {
   free(report);
   free(rows);
   unlink(path);
-  snprintf(path, sizeof(path), "%s/docs/learn", root);
+  snprintf(path, sizeof(path), "%s/etc/docs/learn", root);
   rmdir(path);
   snprintf(path, sizeof(path), "%s/docs", root);
   rmdir(path);

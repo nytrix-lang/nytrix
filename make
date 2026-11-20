@@ -6180,7 +6180,7 @@ def _run_test_impl(build_root: Path, kind: str, jobs: int, extra: list[str]) -> 
         log(
             "TEST",
             f"no benchmark results from this run ({bench_stale_note}); "
-            "docs/learn/measurements.md still shows the previous full run",
+            "etc/docs/learn/measurements.md still shows the previous full run",
         )
     try:
         suite_full_bin.unlink()
@@ -6346,8 +6346,8 @@ def _stats_display_path(path: str) -> str:
 def _backlog_stats() -> dict[str, object] | None:
     """Summarize the public contributor work queue."""
     todos = [
-        ROOT / "docs" / "todo" / "ui.md",
-        ROOT / "docs" / "todo" / "nyc.md",
+        ROOT / "etc" / "docs" / "todo" / "ui.md",
+        ROOT / "etc" / "docs" / "todo" / "nyc.md",
     ]
     sections: list[dict[str, object]] = []
     for todo in todos:
@@ -6379,7 +6379,7 @@ def _backlog_stats() -> dict[str, object] | None:
     if not sections:
         return None
     return {
-        "path": "docs/todo/*.md",
+        "path": "etc/docs/todo/*.md",
         "sections": sections,
         "open": sum(int(s["open"]) for s in sections),
         "done": sum(int(s["done"]) for s in sections),
@@ -6543,7 +6543,7 @@ def print_repo_stats(report: dict[str, object], include_cloc: bool) -> None:
     backlog = report.get("backlog")
     if isinstance(backlog, dict):
         UI.section("Backlog")
-        UI.kv(str(backlog.get("path", "docs/todo/*.md")),
+        UI.kv(str(backlog.get("path", "etc/docs/todo/*.md")),
               f"{backlog['open']} open {dot} {backlog['done']} done")
         for entry in backlog["sections"]:
             opens = int(entry["open"])
@@ -6804,9 +6804,9 @@ def _chart_bands(series: list[tuple[str, str, list[float]]]) -> str:
 
 
 def render_measurement_charts(build_root: Path, quiet: bool = False) -> bool:
-    """Regenerate the chart overview in docs/learn/measurements.md from every
+    """Regenerate the chart overview in etc/docs/learn/measurements.md from every
     saved bench report (build/bench-reports/bench-*.json)."""
-    doc = ROOT / "docs" / "learn" / "measurements.md"
+    doc = ROOT / "etc" / "docs" / "learn" / "measurements.md"
     reports = sorted((build_root / "bench-reports").glob("bench-*.json"))
     runs = []
     for path in reports:
@@ -8831,7 +8831,7 @@ def run_make_tar(build_root: Path, kind: str, jobs: int, args: list[str]) -> int
 
     # Source tree. Do not package .git history; it is large and not needed to build.
     # Hardlink staging avoids copying hundreds of megabytes before tar reads it.
-    for name in ("src", "core", "etc", "docs", ".github", ".githooks"):
+    for name in ("src", "core", "etc", ".github", ".githooks"):
         _copytree_hardlink_replace(ROOT / name, package_dir / name, ignore=_tar_source_ignore)
     for name in (
         "make", "CMakeLists.txt", ".clangd", "README.md", "LICENSE", ".editorconfig"
@@ -9354,9 +9354,9 @@ def main() -> int:
                 errors="replace",
             )
             log("SERVE", f"docs server on http://127.0.0.1:{port}/ (Ctrl+C to stop)")
-            # Watch docs/, etc/assets/website/, src/cmd/tools/web/ for changes
+            # Watch etc/docs/, etc/assets/website/, src/cmd/tools/web/ for changes
             watch_dirs = [
-                ROOT / "docs",
+                ROOT / "etc" / "docs",
                 ROOT / "core",
                 ROOT / "etc" / "assets" / "website",
                 ROOT / "etc" / "assets" / "images" / "icons",

@@ -313,7 +313,7 @@ fn rank(list entries, str query) list {
       {"kind":"function", "name":"parse", "full_name":"core.math.parse",
          "signature":"parse source", "keywords":"parser syntax", "path":"core/math/parse.ny"},
       {"kind":"doc", "name":"Compiler", "full_name":"Compiler",
-         "keywords":"compiler parser", "path":"docs/compiler.md"}
+         "keywords":"compiler parser", "path":"etc/docs/compiler.md"}
    ]
    assert(fuzzy_score("core.math.parse", "parse") > 10000,
       "substring scoring rewards leaf matches")

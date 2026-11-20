@@ -536,7 +536,7 @@ build and runtime evidence and its limits.
 - Consolidated contributor guides, measurements, and implementation notes;
   removed obsolete scratch/TODO material from active docs.
 - Editor compile-time investigation is closed. The validated 2026-10-22 editor
-  compile comparison remains in `docs/learn/measurements.md`. Future editor
+  compile comparison remains in `etc/docs/learn/measurements.md`. Future editor
   compile-time regressions should be reported with a fresh reduced reproducer
   and validated baseline/candidate evidence (same source graph, build, target,
   flags, cache state, hashes/BuildID, inline-decision evidence, and validated

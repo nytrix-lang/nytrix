@@ -1,5 +1,5 @@
 ;; Omitting arguments is partial application, not an arity error
-;; (docs/spec/functions.md §Partial application). Supplying more arguments than
+;; (etc/docs/spec/functions.md §Partial application). Supplying more arguments than
 ;; the declaration accepts is the arity violation.
 shape invariant-excess-call-arity {
   family "compiler-errors/type"

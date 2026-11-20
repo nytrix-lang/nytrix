@@ -306,7 +306,7 @@ Bars for workloads whose C reference is under 1 ms are drawn lighter: their rati
 
 ## Latest full benchmark run
 
-Generated automatically by the full `ny-test --bench` run at 2026-11-20 06:23:38 CET.
+Generated automatically by the full `ny-test --bench` run.
 Host: AMD EPYC 7642; target `x86_64`; compiler `fnv1a64:415f4239906aed14`.
 NYR: `-O3`, profile `peak`, tier `opt`, engine `NYR`, cache `warm`.
 C: clang version 23.1.5; flags `-O3 -march=native`. NYC flags `-O3 -c`.
@@ -758,7 +758,7 @@ objects, and `comparison.json` are retained under `build/compile-overhaul/`, out
 source control.
 
 Verification used explicit frozen compiler binaries and
-`--std=/home/e/nytrix/build/release/core.ny`: the full module-use selection passed
+`--std=build/release/core.ny`: the full module-use selection passed
 45/45 on both control and candidate. The existing named-reexport fixture now also
 checks chained constant aliases, negative constants, unrelated declarations
 surrounding imports, and identical member spellings in separate providers across its
@@ -2286,178 +2286,6 @@ negative inputs, integer extremes, both mask operand orders, and comparisons aga
 -1/0/1/2. Native `collatz` assembly uses LEA and omits the previous materialized
 equality comparison; its checksum remains `178`.
 
-### Collatz mask-test fusion (2026-11-13)
-
-The collatz inner loop lowers `if (n & 1) == 1 { n = 3*n+1 } else { n >>= 1 }` to a
-SELECT whose condition is the mask `n & 1` itself (not a `==`/`!=` compare against
-it). The x86-64 NIR emitter in `src/code/backend/mach/arch/x86/machine.c` now
-recognizes a SELECT whose condition is directly `AND(x, 1)` and emits `testq $1,
-%rax` + `cmovne`, dropping the `and` instruction and the redundant register copies
-entirely. The AND's stack home is elided, and the source value stays live through
-the SELECT for register coloring.
-
-Before: `mov n,%rax; and $1,%rax; mov n,%r9; sar $1,%r9; ...; test %rax,%rax;
-cmovne`. After: `sar $1,%r9; lea (%r9,%r9,2),%r9; add $1,%r9; test $1,%rax; cmovne`.
-
-Checksum `178` matches C/LLVM/NYC. Focused timing shows the Ny kernel at ~12µs vs C
-~8.5µs (~1.4x; the reported 2.9x was a `ny--time` JIT-run overhead artifact, not a
-kernel gap). Whole-program Ny time improved from ~15ms to ~12ms, still dominated by
-runtime and page-fault cost rather than the kernel.
-
-A matching object-encoder pass was prototyped in
-`src/code/backend/mach/arch/x86/object.c` but produced a checksum mismatch (`9` vs
-`178`) and was reverted; the NIR emitter path is sufficient and correct.
-
-A cold GCC rerun exposed an independent reference-wrapper defect: macro-renaming C
-`main` removes its implicit successful return. The timer wrapper now inserts an
-explicit final zero return into that body, preserving explicit early failure
-returns. Its body scan skips comments and quoted braces. The wrapper regression
-executes fallthrough, explicit failure, nested-block, quoted-brace, and argc/argv
-cases through the selected host compiler.
-
-Before runtime work was prioritized, a current-tree editor object compile with six
-caches disabled took 99.24 s wall and 2,772,484 KiB peak RSS. Reported phases were
-10.36 s type validation, 12.37 s code generation, and 85.69 s object emission; phase
-timings may be nested and must not be summed. A 10-second CPU sample put 19.28% of
-samples in `nyr_find_module_in_root_cached`. That helper now rejects statement kinds
-that cannot contain modules before hashing/caching guaranteed misses. Four existing
-alias/reexport/module fixtures passed cold. No isolated compile-time speedup or
-15-second acceptance result is claimed.
-
-#### Compiler build-time fixes (2026-11-12)
-
-Machine: AMD EPYC 7642, 96 threads, 62 GB, shared with other agents. Cold means the
-native, AOT, JIT, stencil, and stdlib caches disabled with a private build of the
-current tree. These are single-session measurements taken at load 8–20, not gate
-evidence. Twelve of the thirteen root projects meet 15 s; no UI project does, so the
-all-project target stays open.
-
-| Project (`-o`, cold) | wall | dominant phase |
-| --- | --- | --- |
-| herodoc | 0.36 s | parse/codegen |
-| ffi | 1.15 s | codegen |
-| args, 110, hexdump, matrix, conway | 2.6–3.5 s | codegen, emit |
-| ant, brainfuck, donut, server | 3.8–4.3 s | emit |
-| sound | 8.7 s | emit |
-| animation | 26.6 s | emit 19.5 s |
-| pong | 36.5 s | emit 28.0 s |
-| term | 51.8 s | emit 36.1 s |
-| monitor | 54.7 s | emit 43.1 s |
-| synth | 60.6 s | emit 49.1 s |
-| input | 95.1 s | emit 78.2 s |
-| engine | 87.0 s | emit 72.9 s |
-| editor | 73.2 s | emit 60.6 s |
-| xtool | 6.8 s | emit 5.1 s |
-
-Emit object is the dominant phase in every UI project. Per-project fixes in this
-batch removed the HM blockers in the UI library (Wayland clipboard wrappers, asset
-font/catalog defaults, engineering batch helpers, camera `scale`). The remaining
-inference fixes made heterogeneous list literals `list<any>` and bare
-`list`/`set`/`tuple`/`dict` annotations use `any` elements; the `gf` scalar
-overloads were rewritten from a comptime template into three explicit functions,
-which removed `editor`'s nested-dict error and `xtool`'s `expected gf, got int`
-error. A per-vreg first/last live-range pre-check in `nyr_mach_regalloc_segment_at`
-measured no gain (animation emit 25.4 s vs 24.6 s, input 75.5 s vs 73.2 s) and was
-reverted.
-
-The inliner was the other dominant cost. `nyr_inline_general` rebuilt the caller CFG
-topology, loop depths, and type map after every committed splice, so a
-63k-instruction driver with thousands of tiny calls became quadratic. It now stops
-after 128 splices per function (`NYTRIX_INLINE_MAX_SPLICES`) and skips bodies above
-100k instructions (`NYTRIX_INLINE_BODY_CAP`). Functions with fewer than 128
-inlinable calls are unchanged. This took `editor` from 270.7 s (at a 512-splice cap)
-to 205.8 s and `engine` from 122.9 s to 93.4 s. Indexing float and vector segments
-by the instruction where they start or end (the scalar allocator already did this)
-then took `engine` to 87.0 s. Finally, the loop-edge coalescer's per-candidate
-`segment_in_block_vreg` scan was replaced with a per-vreg index, and then with a
-one-time `(vreg, block) -> unique segment` hash table; a block can hold thousands of
-segments and a long-lived value can have thousands of its own, so both scans were
-quadratic. That took `editor` from 205.8 s to 73.2 s (emit 189.5 s to 60.6 s). The
-`engine` and `animation` objects are byte-identical before and after the index
-changes (SHA-256 prefixes `f1a8e01a67f1f0a5` and `14a899e7b7b03d59`); engine re-runs
-ranged 85.8–93.3 s (emit 72.2–79.2 s) at load ~20. The focused benchmark fixtures
-still pass, but a full runtime benchmark comparison at this cap is still owed.
-
-NYIR type-map initialization now allocates flag regions after type propagation: one
-region per class observed in the function, plus one zeroed region shared by absent
-classes. Typed functions no longer allocate and clear fourteen full-size value/local
-arrays when fewer than seven classes are present. The earlier profile attributed
-1.85% self time to type-map initialization; this allocation change has no matched
-before/after compile-time measurement, so no speedup is claimed and the build-time
-acceptance items remain open.
-
-Run route `--run=native` with the mock replay environment: pong 36–41 s, input 109
-s, engine 142 s (349 s before this batch's fixes). The default LLVM run route takes
-pong 56 s and input 102 s, and engine segfaults in LLVM SimplifyCFG after about 115
-s on a malformed PHI (the unmodified release compiler does the same, so it is
-separate from the native route).
-
-Remaining engine native time (87.0 s): encode 72.9 s. In the profile taken before
-the segment index, `nyr_mach_regalloc_segment_at` was 12.3 % self,
-`coalesce_loop_edges` 8.2 %, `mach_float_begin_segments` 6.6 %, and
-`mach_float_end_segments` 2.4 %. The float and vector begin/end scans now use
-per-instruction start/end indexes, like the scalar scans;
-`mach_flush_float_to_home_mode` still scans every vreg once per block. A persistent
-per-function object cache is the larger lever for iteration time. `editor` still
-spends 60.6 s in emit on its giant function, so it remains far from the 15 s target
-even though it now compiles.
-
-#### Rejected NYIR CFG-boundary scan experiment (2026-11-12)
-
-On the same AMD EPYC 7642 host, a focused `sound.ny` native compile sampled
-`nyr_cfg_build_impl` at 4.04% of 520 CPU-clock samples. The experiment removed its
-temporary boundary bitmap and one full scan, calculating block starts directly in
-two passes. It passed the CFG regression and x86-64 target suites; the emitted
-object stayed byte-identical
-(`7df680223713507fe982ffb1cec8cb25bbb8412b96990520812393dc5dc2f917`).
-
-The A/B used `build/ny-full-before-cfg` (BuildID
-`994641023b6455a692f0dd04ff5036a9e0809a2f`) and the candidate `ny-full` (BuildID
-`3f061e09c999dd80dc81a1a54bd67ecd807bbaab`) with:
-
-```bash
-NYTRIX_STD_CACHE=0 NYTRIX_STD_BC_CACHE_AUTO=0 \
-  perf stat -r 5 -e task-clock,cycles,instructions -- \
-  build/release/ny-full --no-progress --native-only --opt-level=3 \
-  --run=none --output=build/perf-sound-time.o etc/projects/sound.ny
-```
-
-The same command was run against each compiler twice, in baseline/candidate then
-candidate/baseline order. `nice -n 19` was applied to all runs. The host was shared
-with the NYC Linux build. The user later clarified that it was run with `-j32`, not
-`-j16` as initially recorded; the observed load averages were 16–20. The OS page
-cache was not cleared. These timings were taken under substantial contention; retain
-them only as a rejected exploratory run, not evidence of a real speedup or
-regression:
-
-| Order | Baseline elapsed | Candidate elapsed |
-| --- | ---: | ---: |
-| First pair | 7.990 s ± 0.22% | 8.168 s ± 0.43% |
-| Reverse pair | 8.067 s ± 0.18% | 8.104 s ± 0.15% |
-| Mean of pair means | 8.028 s | 8.136 s |
-
-Candidate task-clock and instruction counts were also slightly higher. Its single
-CPU-clock profile sampled `nyr_cfg_build_impl` at 2.91% of 516 samples, but that
-small sample-count shift did not correspond to an end-to-end gain. The candidate was
-reverted; no speedup is claimed. The baseline compiler passed `cfg_simplify`, the
-candidate passed `cfg_simplify` and all 166 x86-64 target tests, and both compilers
-emitted the identical object above. This experiment did not change the open
-compile-time acceptance items.
-
-#### Native JIT relocation lookup
-
-The loader repeatedly searched for the same definition while deciding data routing,
-symbol resolution, and external call stubs. Reusing one exact-name lookup preserved
-alias and relocation rules; AArch64 also reused its stub selection lookup.
-
-An alternating warm-process comparison discarded two warm-up pairs and kept ten
-samples per arm. Baseline median was 207.69 ms (200.95–209.61 ms); candidate median
-was 149.78 ms (145.07–155.94 ms), 27.9% lower. Every run returned checksum
-`1968365`. Another editor compile overlapped the comparison, so this is a local
-startup observation, not an arithmetic-speedup claim. Four focused
-module/cache/closure fixtures passed; AArch64 execution was not available on the
-x86-64 host.
-
 ### Binary: scalar recurrence and register homes
 
 The canonical workload's checksum was `3360874588549334`. Its linked native caller
@@ -2879,6 +2707,16 @@ shapes. Varying vocabulary cardinality/token length, separating
 build/query/teardown, and comparing aliased/non-aliased kernels would answer
 additional questions; a list of benchmark names alone would not.
 
+### Rejected constant-division scheduling trial
+
+A scheduler latency estimate that treated positive power-of-two signed divisors as
+short operations was built and screened against the single `binary` fixture. The
+11-sample partial run reported 2.00 ms NYR, 322 us LLVM, and 6.20x NYR/LLVM; the
+fixture completed successfully. This was not a matched before/after comparison, used
+GCC for the host-C route, and did not pass the unchanged 5.00x gate. The source
+change was reverted; retain the result as a rejected, inconclusive experiment. Raw
+report: `/tmp/ny-binary-divlatency.json`.
+
 ### Binary runtime diagnosis (2026-11-03)
 
 #### Timed-object inspection
@@ -2944,16 +2782,6 @@ A follow-up four-route AOT run used x86-64, `-O3`, peak profile, warm cache, CPU
 This passes the unchanged per-fixture NYR/LLVM ceiling of 5.00x. It is one fixture
 result; the 72-fixture rerun is still required before closing the cross-fixture
 item. Raw report: `/tmp/ny-bce-carry-check.json`.
-
-### Rejected constant-division scheduling trial
-
-A scheduler latency estimate that treated positive power-of-two signed divisors as
-short operations was built and screened against the single `binary` fixture. The
-11-sample partial run reported 2.00 ms NYR, 322 us LLVM, and 6.20x NYR/LLVM; the
-fixture completed successfully. This was not a matched before/after comparison, used
-GCC for the host-C route, and did not pass the unchanged 5.00x gate. The source
-change was reverted; retain the result as a rejected, inconclusive experiment. Raw
-report: `/tmp/ny-binary-divlatency.json`.
 
 ### Rejected loop-PHI latch reuse trial (2026-11-03)
 
@@ -3546,6 +3374,178 @@ Next:
 
 [Performance](performance.md) — measurement method and profile validation.
 [Changelog](../CHANGELOG.md) — verified release records.
+
+### Collatz mask-test fusion (2026-11-13)
+
+The collatz inner loop lowers `if (n & 1) == 1 { n = 3*n+1 } else { n >>= 1 }` to a
+SELECT whose condition is the mask `n & 1` itself (not a `==`/`!=` compare against
+it). The x86-64 NIR emitter in `src/code/backend/mach/arch/x86/machine.c` now
+recognizes a SELECT whose condition is directly `AND(x, 1)` and emits `testq $1,
+%rax` + `cmovne`, dropping the `and` instruction and the redundant register copies
+entirely. The AND's stack home is elided, and the source value stays live through
+the SELECT for register coloring.
+
+Before: `mov n,%rax; and $1,%rax; mov n,%r9; sar $1,%r9; ...; test %rax,%rax;
+cmovne`. After: `sar $1,%r9; lea (%r9,%r9,2),%r9; add $1,%r9; test $1,%rax; cmovne`.
+
+Checksum `178` matches C/LLVM/NYC. Focused timing shows the Ny kernel at ~12µs vs C
+~8.5µs (~1.4x; the reported 2.9x was a `ny--time` JIT-run overhead artifact, not a
+kernel gap). Whole-program Ny time improved from ~15ms to ~12ms, still dominated by
+runtime and page-fault cost rather than the kernel.
+
+A matching object-encoder pass was prototyped in
+`src/code/backend/mach/arch/x86/object.c` but produced a checksum mismatch (`9` vs
+`178`) and was reverted; the NIR emitter path is sufficient and correct.
+
+A cold GCC rerun exposed an independent reference-wrapper defect: macro-renaming C
+`main` removes its implicit successful return. The timer wrapper now inserts an
+explicit final zero return into that body, preserving explicit early failure
+returns. Its body scan skips comments and quoted braces. The wrapper regression
+executes fallthrough, explicit failure, nested-block, quoted-brace, and argc/argv
+cases through the selected host compiler.
+
+Before runtime work was prioritized, a current-tree editor object compile with six
+caches disabled took 99.24 s wall and 2,772,484 KiB peak RSS. Reported phases were
+10.36 s type validation, 12.37 s code generation, and 85.69 s object emission; phase
+timings may be nested and must not be summed. A 10-second CPU sample put 19.28% of
+samples in `nyr_find_module_in_root_cached`. That helper now rejects statement kinds
+that cannot contain modules before hashing/caching guaranteed misses. Four existing
+alias/reexport/module fixtures passed cold. No isolated compile-time speedup or
+15-second acceptance result is claimed.
+
+#### Compiler build-time fixes (2026-11-12)
+
+Machine: AMD EPYC 7642, 96 threads, 62 GB, shared with other agents. Cold means the
+native, AOT, JIT, stencil, and stdlib caches disabled with a private build of the
+current tree. These are single-session measurements taken at load 8–20, not gate
+evidence. Twelve of the thirteen root projects meet 15 s; no UI project does, so the
+all-project target stays open.
+
+| Project (`-o`, cold) | wall | dominant phase |
+| --- | --- | --- |
+| herodoc | 0.36 s | parse/codegen |
+| ffi | 1.15 s | codegen |
+| args, 110, hexdump, matrix, conway | 2.6–3.5 s | codegen, emit |
+| ant, brainfuck, donut, server | 3.8–4.3 s | emit |
+| sound | 8.7 s | emit |
+| animation | 26.6 s | emit 19.5 s |
+| pong | 36.5 s | emit 28.0 s |
+| term | 51.8 s | emit 36.1 s |
+| monitor | 54.7 s | emit 43.1 s |
+| synth | 60.6 s | emit 49.1 s |
+| input | 95.1 s | emit 78.2 s |
+| engine | 87.0 s | emit 72.9 s |
+| editor | 73.2 s | emit 60.6 s |
+| xtool | 6.8 s | emit 5.1 s |
+
+Emit object is the dominant phase in every UI project. Per-project fixes in this
+batch removed the HM blockers in the UI library (Wayland clipboard wrappers, asset
+font/catalog defaults, engineering batch helpers, camera `scale`). The remaining
+inference fixes made heterogeneous list literals `list<any>` and bare
+`list`/`set`/`tuple`/`dict` annotations use `any` elements; the `gf` scalar
+overloads were rewritten from a comptime template into three explicit functions,
+which removed `editor`'s nested-dict error and `xtool`'s `expected gf, got int`
+error. A per-vreg first/last live-range pre-check in `nyr_mach_regalloc_segment_at`
+measured no gain (animation emit 25.4 s vs 24.6 s, input 75.5 s vs 73.2 s) and was
+reverted.
+
+The inliner was the other dominant cost. `nyr_inline_general` rebuilt the caller CFG
+topology, loop depths, and type map after every committed splice, so a
+63k-instruction driver with thousands of tiny calls became quadratic. It now stops
+after 128 splices per function (`NYTRIX_INLINE_MAX_SPLICES`) and skips bodies above
+100k instructions (`NYTRIX_INLINE_BODY_CAP`). Functions with fewer than 128
+inlinable calls are unchanged. This took `editor` from 270.7 s (at a 512-splice cap)
+to 205.8 s and `engine` from 122.9 s to 93.4 s. Indexing float and vector segments
+by the instruction where they start or end (the scalar allocator already did this)
+then took `engine` to 87.0 s. Finally, the loop-edge coalescer's per-candidate
+`segment_in_block_vreg` scan was replaced with a per-vreg index, and then with a
+one-time `(vreg, block) -> unique segment` hash table; a block can hold thousands of
+segments and a long-lived value can have thousands of its own, so both scans were
+quadratic. That took `editor` from 205.8 s to 73.2 s (emit 189.5 s to 60.6 s). The
+`engine` and `animation` objects are byte-identical before and after the index
+changes (SHA-256 prefixes `f1a8e01a67f1f0a5` and `14a899e7b7b03d59`); engine re-runs
+ranged 85.8–93.3 s (emit 72.2–79.2 s) at load ~20. The focused benchmark fixtures
+still pass, but a full runtime benchmark comparison at this cap is still owed.
+
+NYIR type-map initialization now allocates flag regions after type propagation: one
+region per class observed in the function, plus one zeroed region shared by absent
+classes. Typed functions no longer allocate and clear fourteen full-size value/local
+arrays when fewer than seven classes are present. The earlier profile attributed
+1.85% self time to type-map initialization; this allocation change has no matched
+before/after compile-time measurement, so no speedup is claimed and the build-time
+acceptance items remain open.
+
+Run route `--run=native` with the mock replay environment: pong 36–41 s, input 109
+s, engine 142 s (349 s before this batch's fixes). The default LLVM run route takes
+pong 56 s and input 102 s, and engine segfaults in LLVM SimplifyCFG after about 115
+s on a malformed PHI (the unmodified release compiler does the same, so it is
+separate from the native route).
+
+Remaining engine native time (87.0 s): encode 72.9 s. In the profile taken before
+the segment index, `nyr_mach_regalloc_segment_at` was 12.3 % self,
+`coalesce_loop_edges` 8.2 %, `mach_float_begin_segments` 6.6 %, and
+`mach_float_end_segments` 2.4 %. The float and vector begin/end scans now use
+per-instruction start/end indexes, like the scalar scans;
+`mach_flush_float_to_home_mode` still scans every vreg once per block. A persistent
+per-function object cache is the larger lever for iteration time. `editor` still
+spends 60.6 s in emit on its giant function, so it remains far from the 15 s target
+even though it now compiles.
+
+#### Rejected NYIR CFG-boundary scan experiment (2026-11-12)
+
+On the same AMD EPYC 7642 host, a focused `sound.ny` native compile sampled
+`nyr_cfg_build_impl` at 4.04% of 520 CPU-clock samples. The experiment removed its
+temporary boundary bitmap and one full scan, calculating block starts directly in
+two passes. It passed the CFG regression and x86-64 target suites; the emitted
+object stayed byte-identical
+(`7df680223713507fe982ffb1cec8cb25bbb8412b96990520812393dc5dc2f917`).
+
+The A/B used `build/ny-full-before-cfg` (BuildID
+`994641023b6455a692f0dd04ff5036a9e0809a2f`) and the candidate `ny-full` (BuildID
+`3f061e09c999dd80dc81a1a54bd67ecd807bbaab`) with:
+
+```bash
+NYTRIX_STD_CACHE=0 NYTRIX_STD_BC_CACHE_AUTO=0 \
+  perf stat -r 5 -e task-clock,cycles,instructions -- \
+  build/release/ny-full --no-progress --native-only --opt-level=3 \
+  --run=none --output=build/perf-sound-time.o etc/projects/sound.ny
+```
+
+The same command was run against each compiler twice, in baseline/candidate then
+candidate/baseline order. `nice -n 19` was applied to all runs. The host was shared
+with the NYC Linux build. The user later clarified that it was run with `-j32`, not
+`-j16` as initially recorded; the observed load averages were 16–20. The OS page
+cache was not cleared. These timings were taken under substantial contention; retain
+them only as a rejected exploratory run, not evidence of a real speedup or
+regression:
+
+| Order | Baseline elapsed | Candidate elapsed |
+| --- | ---: | ---: |
+| First pair | 7.990 s ± 0.22% | 8.168 s ± 0.43% |
+| Reverse pair | 8.067 s ± 0.18% | 8.104 s ± 0.15% |
+| Mean of pair means | 8.028 s | 8.136 s |
+
+Candidate task-clock and instruction counts were also slightly higher. Its single
+CPU-clock profile sampled `nyr_cfg_build_impl` at 2.91% of 516 samples, but that
+small sample-count shift did not correspond to an end-to-end gain. The candidate was
+reverted; no speedup is claimed. The baseline compiler passed `cfg_simplify`, the
+candidate passed `cfg_simplify` and all 166 x86-64 target tests, and both compilers
+emitted the identical object above. This experiment did not change the open
+compile-time acceptance items.
+
+#### Native JIT relocation lookup
+
+The loader repeatedly searched for the same definition while deciding data routing,
+symbol resolution, and external call stubs. Reusing one exact-name lookup preserved
+alias and relocation rules; AArch64 also reused its stub selection lookup.
+
+An alternating warm-process comparison discarded two warm-up pairs and kept ten
+samples per arm. Baseline median was 207.69 ms (200.95–209.61 ms); candidate median
+was 149.78 ms (145.07–155.94 ms), 27.9% lower. Every run returned checksum
+`1968365`. Another editor compile overlapped the comparison, so this is a local
+startup observation, not an arithmetic-speedup claim. Four focused
+module/cache/closure fixtures passed; AArch64 execution was not available on the
+x86-64 host.
 
 ### i386 object writer compact encoding (kept 2026-11-15)
 

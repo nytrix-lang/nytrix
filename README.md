@@ -5,11 +5,11 @@
 
 # Nytrix
 
-[![Version](https://img.shields.io/badge/version-0.11.0-2f6fed)](docs/CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.11.0-2f6fed)](etc/docs/CHANGELOG.md)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Platforms](https://img.shields.io/badge/Linux%20%7C%20macOS%20%7C%20Windows-x86__64%20%7C%20arm64-lightgrey)](#install)
 
-[Website](https://nytrix.x3ric.com/) · [Changelog](docs/CHANGELOG.md)
+[Website](https://nytrix.x3ric.com/) · [Changelog](etc/docs/CHANGELOG.md)
 
 </div>
 
@@ -142,7 +142,7 @@ assert(cos(0.0) == 1.0, "cos")
 Layouts use `Type name` fields. A colon may still parse as an implicit
 separator where the grammar is otherwise unambiguous.
 
-Compiler contributors can start with the [contribution guide](docs/CONTRIBUTE.md).
+Compiler contributors can start with the [contribution guide](etc/docs/CONTRIBUTE.md).
 
 ## Project layout
 
@@ -152,13 +152,13 @@ Compiler contributors can start with the [contribution guide](docs/CONTRIBUTE.md
 | `core/`         | Standard library                                     |
 | `etc/tests/`    | Tests, fixtures, and benchmarks                      |
 | `etc/projects/` | Examples and larger projects                         |
-| `docs/`         | Manual, guides, specification, and API documentation |
+| `etc/docs/`         | Manual, guides, specification, and API documentation |
 
 ## Status
 
-Nytrix is actively evolving. Check the [status and execution routes](docs/learn/status.md) and [language quick reference](docs/learn/quirks.md) for current backend support and capabilities.
+Nytrix is actively evolving. Check the [status and execution routes](etc/docs/learn/status.md) and [language quick reference](etc/docs/learn/quirks.md) for current backend support and capabilities.
 
-Pin a commit for reproducible builds and check the [Changelog](docs/CHANGELOG.md) before upgrading.
+Pin a commit for reproducible builds and check the [Changelog](etc/docs/CHANGELOG.md) before upgrading.
 
 ## Community
 

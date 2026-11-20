@@ -27,12 +27,12 @@ MIT License
 @top Nytrix
 
 Nytrix uses explicit imports, native output, compile-time source generation,
-and direct C ABI interop. See @file{docs/spec/} for the language reference.
+and direct C ABI interop. See @file{etc/docs/spec/} for the language reference.
 
 Feature support varies across LLVM, the Nytrix-owned native
 backend, and WebAssembly. Read
-@file{docs/learn/status.md} and
-@file{docs/learn/quirks.md} before choosing a backend or relying on a
+@file{etc/docs/learn/status.md} and
+@file{etc/docs/learn/quirks.md} before choosing a backend or relying on a
 partial contract.
 
 @menu
@@ -228,14 +228,14 @@ language rules.
 
 @itemize @bullet
 @item @file{README.md}
-@item @file{docs/spec/units.md}
-@item @file{docs/spec/syntax.md}
-@item @file{docs/spec/native.md}
-@item @file{docs/spec/runtime.md}
-@item @file{docs/learn/start.md}
-@item @file{docs/learn/status.md}
-@item @file{docs/learn/quirks.md}
-@item @file{docs/learn/tooling.md}
+@item @file{etc/docs/spec/units.md}
+@item @file{etc/docs/spec/syntax.md}
+@item @file{etc/docs/spec/native.md}
+@item @file{etc/docs/spec/runtime.md}
+@item @file{etc/docs/learn/start.md}
+@item @file{etc/docs/learn/status.md}
+@item @file{etc/docs/learn/quirks.md}
+@item @file{etc/docs/learn/tooling.md}
 @end itemize
 
 @bye

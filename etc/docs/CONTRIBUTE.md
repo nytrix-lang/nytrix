@@ -13,7 +13,7 @@ compiler subsystems.
 | Dependent types and GADTs | [Feature contract](spec/dependent.md) |
 | UI, engine, and editor work | [UI guide](learn/ui.md#verification) |
 | Compiler performance gaps and target | [Benchmark dashboard](learn/measurements.md#benchmark-dashboard) and [how to read the results](learn/measurements.md#reading-the-results) |
-| NYC C compiler | [Compiler and verification evidence](spec/nyc.md), [kernel acceptance checklist](todo/nyc.md) |
+| NYC C compiler | [Compiler and verification evidence](spec/nyc.md) |
 | Source ownership | [Compiler architecture](learn/architecture.md) |
 | Commands, traces, pass isolation, and runtime failures | [Compiler debugging](learn/debugging.md) |
 | Benchmarking, profiles, sample validation, and editor compilation | [Performance](learn/performance.md) |

@@ -358,7 +358,7 @@ fn _filtered(any filter, str kind) bool {
 ;; Portable stream API
 ;; One shared sequencer client per process on Linux; every stream is a port.
 ;; Untyped dict globals: `mut any x = dict(8)` currently never holds the
-;; dict (see docs/learn/quirks.md, open representation defects), and an int-initialised slot
+;; dict (see etc/docs/learn/quirks.md, open representation defects), and an int-initialised slot
 ;; mis-types a later dict, so both start as real dicts.
 mut _alsa = dict(4)
 mut _alsa_pending = dict(8)

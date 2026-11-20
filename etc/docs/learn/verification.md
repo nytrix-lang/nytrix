@@ -165,8 +165,7 @@ wrong.
 - Instruction selection and machine-code emission. Nothing here checks that the
   emitted bytes refine the IR operation.
 - The parser and source text; see the conformance work in
-  [the NYC verification programme](../todo/nyc.md#correctness-verification-programme)
-  and [executed C verification](../spec/nyc.md#verification-evidence).
+  [executed C verification](../spec/nyc.md#verification-evidence).
 - Any transformation not listed in `rules.c`. A pass that is not in the table
   above has no validation evidence, whatever its regression tests show.
 

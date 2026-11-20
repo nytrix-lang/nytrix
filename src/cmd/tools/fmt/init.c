@@ -3488,7 +3488,7 @@ static int fmt_collect_selftest(void) {
     return 1;
   }
   sv_free(&files);
-  const char *fmt_roots[] = {"docs/CONTRIBUTE.md"};
+  const char *fmt_roots[] = {"etc/docs/CONTRIBUTE.md"};
   if (!fmt_collect_via_library(fmt_roots, 1, "fmt", &files) || files.len != 1 ||
       strcmp(files.items[0], fmt_roots[0]) != 0) {
     fprintf(stderr, "ny-fmt selftest: formatter file collection failed\n");

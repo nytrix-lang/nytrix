@@ -6,7 +6,7 @@
  * program, so every witness has already been checked against its
  * proposition. The pass then removes what is computationally irrelevant:
  * an erased parameter takes no ABI slot and an erased argument is never
- * passed. Representation rules (docs/spec/kernel.md, "Erasure and the ABI
+ * passed. Representation rules (etc/docs/spec/kernel.md, "Erasure and the ABI
  * model"):
  *
  *  - Only `proof<...>` parameters erase. Erasing never reorders or coalesces

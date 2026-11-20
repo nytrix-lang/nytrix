@@ -279,7 +279,7 @@ Those runs did not produce a bootable `bzImage`. The latest setup replay
 meets the 64-sector limit but fails the separate 32 KiB setup memory limit.
 QEMU's direct PVH ELF boot is useful for diagnosing startup, but it is not
 a `bzImage` or userspace boot test. See the
-[acceptance checklist](../todo/nyc.md) for the remaining gates and the
+[verification evidence](#verification-evidence) for the remaining gates and the
 [changelog](../CHANGELOG.md) for user-visible changes.
 
 ## Verification evidence
@@ -825,7 +825,8 @@ model, so it is a 16-byte SSE/SSE object; mixed scalar/complex arithmetic
 (`2.0 * I`, `I * I`), complex comparisons, and unary negation are also
 covered. The complex checklist item is removed.
 
-Unmodified source: `/home/e/nytrix-work/nyc/upstream/linux-7.3`.
+Unmodified source: an upstream Linux 7.3 tree checked out outside the
+repository.
 
 A fresh output tree at `/tmp/nyc-kernel-final-20261113` was configured from the
 previous run's `.config` with `olddefconfig`, then built with the current NYC

@@ -1747,7 +1747,7 @@ static int append_markdown_doc_json_item(sb_t *json, const char *base_dir,
   if (!name)
     return 0;
   /*
-   * The root README owns the website overview. A docs/README.md, when one
+   * The root README owns the website overview. A etc/docs/README.md, when one
    * exists, takes the overview slot instead and the root copy keeps its own
    * route, so the two files never collide.
    */
@@ -1855,7 +1855,7 @@ static void append_markdown_docs_from_dir(sb_t *json, const char *base_dir,
 static void append_markdown_docs_json(sb_t *json, const char *root) {
   char docs_dir[PATH_MAX], env_dir[PATH_MAX], root_readme[PATH_MAX],
       docs_readme[PATH_MAX];
-  if (!join_path(docs_dir, sizeof(docs_dir), root, "docs"))
+  if (!join_path(docs_dir, sizeof(docs_dir), root, "etc/docs"))
     docs_dir[0] = '\0';
   if (!join_path(root_readme, sizeof(root_readme), root, "README.md"))
     root_readme[0] = '\0';
@@ -2981,7 +2981,7 @@ static void add_plain_doc_entry(doc_search_index_t *idx, const char *root,
 
 static bool collect_all_docs(doc_search_index_t *idx, const char *root) {
   char docs_dir[PATH_MAX], status_dir[PATH_MAX];
-  if (!join_path(docs_dir, sizeof(docs_dir), root, "docs") ||
+  if (!join_path(docs_dir, sizeof(docs_dir), root, "etc/docs") ||
       !join_path(status_dir, sizeof(status_dir), root, "status") ||
       !collect_doc_files_from_ny(idx, root, docs_dir))
     return false;
@@ -4007,7 +4007,7 @@ static bool ny_doc_meta_collect_from_ny(const char *root,
   if (!root || !list)
     return false;
   char docs_dir[PATH_MAX];
-  if (!join_path(docs_dir, sizeof(docs_dir), root, "docs"))
+  if (!join_path(docs_dir, sizeof(docs_dir), root, "etc/docs"))
     return false;
   char *json = ny_web_doc_collect_paths(docs_dir);
   if (!json)
@@ -4512,7 +4512,7 @@ static char *doc_route_from_href_static(const char *base_route,
     path_start += 2;
   while (path_start[0] == '/')
     path_start++;
-  if (strncmp(path_start, "docs/", 5) == 0)
+  if (strncmp(path_start, "etc/docs/", 5) == 0)
     path_start += 5;
   char *dot = strrchr(path_start, '.');
   int source_markdown = dot && !strcmp(dot, ".md");
@@ -4527,7 +4527,7 @@ static char *doc_route_from_href_static(const char *base_route,
   combined[0] = '\0';
   int root_doc_path =
       !strncmp(path_start, "learn/", 6) || !strncmp(path_start, "spec/", 5);
-  if (href[0] != '/' && strncmp(href, "docs/", 5) != 0 && !root_doc_path &&
+  if (href[0] != '/' && strncmp(href, "etc/docs/", 5) != 0 && !root_doc_path &&
       base_route && *base_route) {
     snprintf(combined, sizeof(combined), "%s", base_route);
     char *slash = strrchr(combined, '/');
@@ -4581,7 +4581,7 @@ static char *static_href_for_doc_route(const char *from_route,
                         ? "https://github.com/nytrix-lang/nytrix/blob/main/"
                         : "https://github.com/nytrix-lang/nytrix/tree/main/");
     if (!strncmp(to_route, "info/", 5))
-      sb_add(&source, "docs/");
+      sb_add(&source, "etc/docs/");
     sb_add(&source, to_route);
     if (anchor && *anchor) {
       sb_add(&source, "#");
@@ -5763,7 +5763,7 @@ static bool write_seo_artifacts(const char *out_dir, const char *root,
 
   char docs_dir[PATH_MAX];
   int doc_count = 0;
-  if (!join_path(docs_dir, sizeof(docs_dir), root, "docs") ||
+  if (!join_path(docs_dir, sizeof(docs_dir), root, "etc/docs") ||
       !generate_static_docs_from_ny(out_dir, root, docs_dir, docs_dir, site,
                                     has_site ? &sitemap : NULL, &plain, &full,
                                     &doc_count)) {

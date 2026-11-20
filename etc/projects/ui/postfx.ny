@@ -58,7 +58,7 @@ fn panel(f64 w, f64 h) any {
    gui.text_colored("1-8 toggle  0 off  Tab hide", "text_dim")
    gui.separator()
    ;; Bound to a typed local: `.len` read straight off the imported list
-   ;; global is wrong on --native-only (docs/learn/quirks.md, open representation defects).
+   ;; global is wrong on --native-only (etc/docs/learn/quirks.md, open representation defects).
    def list effects = fx.EFFECTS
    mut int i = 0
    while i < effects.len {

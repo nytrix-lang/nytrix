@@ -10,7 +10,7 @@
 ;; ints: a dynamic element type does not keep its payload tags through the
 ;; module boundary yet.
 ;; References:
-;; - docs/spec/kernel.md (value-indexed families, implicit binders)
+;; - etc/docs/spec/kernel.md (value-indexed families, implicit binders)
 module core.indexed(Vec, vnil, vcons, vlength, vhead, vtail, vto_list, vsum,
    fin_bound, fin_value)
 use core

@@ -60,14 +60,14 @@ fn _route_for(str base, str href) dict {
    path = str.str_replace(path, "\\", "/")
    while str.startswith(path, "./") { path = str._substr(path, 2, path.len) }
    while str.startswith(path, "/") { path = str._substr(path, 1, path.len) }
-   if str.startswith(path, "docs/") { path = str._substr(path, 5, path.len) }
+   if str.startswith(path, "etc/docs/") { path = str._substr(path, 10, path.len) }
    def bool source_markdown = str.endswith(path, ".md")
    if str.endswith(path, ".md") { path = str._substr(path, 0, path.len - 3) }
    elif str.endswith(path, ".html") { path = str._substr(path, 0, path.len - 5) }
    elif str.endswith(path, ".htm") { path = str._substr(path, 0, path.len - 4) }
    if !source_markdown && str.endswith(path, "/index") { path = str._substr(path, 0, path.len - 6) }
    def bool rooted = href.len > 0 && load8(href, 0) == 47 ||
-   str.startswith(href, "docs/") || str.startswith(path, "learn/") ||
+   str.startswith(href, "etc/docs/") || str.startswith(path, "learn/") ||
    str.startswith(path, "spec/")
    mut str combined = path
    if !rooted && base.len > 0 {
@@ -108,7 +108,7 @@ fn _href(str from, str to, str anchor) str {
       if str.find(name, ".") >= 0 { kind = "blob" }
       elif name == "LICENSE" { kind = "blob" }
       return "https://github.com/nytrix-lang/nytrix/" + kind + "/main/" +
-      (str.startswith(to, "info/") ? "docs/" : "") + to +
+      (str.startswith(to, "info/") ? "etc/docs/" : "") + to +
       (anchor.len > 0 ? "#" + anchor : "")
    }
    if from == to { return "#" + anchor }

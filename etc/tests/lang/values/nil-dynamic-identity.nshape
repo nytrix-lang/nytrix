@@ -5,7 +5,7 @@ shape nil_dynamic_identity {
   template ny-test-case
   expect compile_and_run
   source ny <<'NY'
-;; Spec contract: docs/spec/values.md "nil and other scalar types".
+;; Spec contract: etc/docs/spec/values.md "nil and other scalar types".
 ;; nil is a distinct value, not integer zero. The first block is the
 ;; value-level contract; the second is the dynamic-transport contract
 ;; (any locals, dictionary keys, chained API results).

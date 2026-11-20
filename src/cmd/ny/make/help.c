@@ -132,7 +132,7 @@ static const MakeHelp commands[] = {
         "--bench-show-asm|Print compiler outputs.\n--no-build|Use current "
         "benchmark binaries.\n--bench-out-csv PATH|Write CSV "
         "results.\n--bench-out-json PATH|Write JSON results.\n"
-        "Full suite|Refresh docs/learn/measurements.md automatically.\n"
+        "Full suite|Refresh etc/docs/learn/measurements.md automatically.\n"
         "[Example]\n./make bench|Run public benchmark shapes."),
     HELP("fuzz", "./make fuzz [subcommand] [args]",
          "Validate shapes or run smoke fuzzing.",

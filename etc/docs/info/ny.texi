@@ -30,8 +30,8 @@ MIT License
 the built-in project tools.
 
 Feature support varies across LLVM, the Nytrix-owned native backend, and
-WebAssembly. See @file{docs/learn/status.md} and
-@file{docs/learn/quirks.md} before relying on a backend or partial
+WebAssembly. See @file{etc/docs/learn/status.md} and
+@file{etc/docs/learn/quirks.md} before relying on a backend or partial
 contract.
 
 @menu
@@ -366,13 +366,13 @@ Canonical repository docs:
 
 @itemize @bullet
 @item @file{README.md}
-@item @file{docs/learn/tooling.md}
-@item @file{docs/learn/status.md}
-@item @file{docs/learn/quirks.md}
-@item @file{docs/learn/performance.md}
-@item @file{docs/spec/units.md}
-@item @file{docs/spec/syntax.md}
-@item @file{docs/spec/runtime.md}
+@item @file{etc/docs/learn/tooling.md}
+@item @file{etc/docs/learn/status.md}
+@item @file{etc/docs/learn/quirks.md}
+@item @file{etc/docs/learn/performance.md}
+@item @file{etc/docs/spec/units.md}
+@item @file{etc/docs/spec/syntax.md}
+@item @file{etc/docs/spec/runtime.md}
 @end itemize
 
 @bye

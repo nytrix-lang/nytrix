@@ -1,4 +1,4 @@
-;; Omitted trailing arguments are partial application (docs/spec/functions.md),
+;; Omitted trailing arguments are partial application (etc/docs/spec/functions.md),
 ;; so call arity violations are the excess side; the diagnostic reports both the
 ;; declared limit and the supplied count.
 shape desugar-excess-arg-multi {

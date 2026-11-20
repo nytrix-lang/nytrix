@@ -1477,7 +1477,7 @@ function docRouteFromHref(rawHref, baseRoute) {
     /* keep original spelling */
   }
 
-  cleanPath = cleanPath.replace(/^\/+/, "").replace(/^docs\//, "");
+  cleanPath = cleanPath.replace(/^\/+/, "").replace(/^(?:etc\/)?docs\//, "");
   cleanPath = cleanPath.replace(/\/index(?:\.html?)?$/i, "");
   cleanPath = cleanPath.replace(/\.(?:md|html?)$/i, "");
   if (!cleanPath) return { route: baseRoute || "Overview", anchor };
@@ -1486,12 +1486,14 @@ function docRouteFromHref(rawHref, baseRoute) {
    * the generated manual is a single-page app. Keep the two README spellings
    * on the landing route so old badges and manual links cannot escape the
    * site or open the duplicate root README page. */
-  if (cleanPath === "README" || cleanPath === "docs/README")
+  if (cleanPath === "README" || cleanPath === "docs/README" ||
+      cleanPath === "etc/docs/README")
     return { route: "Overview", anchor };
 
   const rootDocPath = /^(?:learn|spec)\//.test(cleanPath);
   const absolute =
-    path.startsWith("/") || path.startsWith("docs/") || rootDocPath;
+    path.startsWith("/") || path.startsWith("docs/") ||
+    path.startsWith("etc/docs/") || rootDocPath;
   const baseParts = absolute
     ? []
     : String(baseRoute || "")
@@ -1506,7 +1508,7 @@ function docRouteFromHref(rawHref, baseRoute) {
   });
 
   let route = parts.join("/");
-  route = route.replace(/^docs\//, "");
+  route = route.replace(/^(?:etc\/)?docs\//, "");
   if (markdownDocByName.has(route)) return { route, anchor };
   if (moduleByName.has(route) || categorySet.has(route))
     return { route, anchor };
@@ -1546,7 +1548,7 @@ function rewriteMarkdownDocLinks() {
         link.setAttribute("target", "_blank");
         link.setAttribute("rel", "noopener noreferrer");
       } else {
-        const source = new URL(rawHref, `https://repo.invalid/docs/${baseRoute}.md`);
+        const source = new URL(rawHref, `https://repo.invalid/etc/docs/${baseRoute}.md`);
         if (/^\/(?:src|lib|etc|docs\/info)\//.test(source.pathname)) {
           const kind = source.pathname.endsWith("/") ? "tree" : "blob";
           link.setAttribute(

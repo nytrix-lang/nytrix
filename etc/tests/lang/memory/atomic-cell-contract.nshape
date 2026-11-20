@@ -5,7 +5,7 @@ shape atomic_cell_contract {
   template ny-test-case
   expect compile_and_run
   source ny <<'NY'
-;; Spec contract: docs/spec/runtime.md "Atomic operations".
+;; Spec contract: etc/docs/spec/runtime.md "Atomic operations".
 ;; atomic_i64 creates a cell that holds a tagged language word: every
 ;; operation preserves the tag, so loads read back the stored value.
 use core

@@ -23,7 +23,7 @@ def comptime_search = run_capture(
 assert(comptime_search.get("code", 127) == 0,
        "Ny-backed documentation command succeeds: " +
        comptime_search.get("stdout", ""))
-assert(str.find(comptime_search.get("stdout", ""), "docs/learn/comptime.md") >= 0,
+assert(str.find(comptime_search.get("stdout", ""), "etc/docs/learn/comptime.md") >= 0,
        "Ny-backed documentation search discovers comptime documentation")
 
 def ranked = run_capture(
@@ -40,9 +40,9 @@ assert(rank_output == embedded_output,
        "standalone and embedded ranking output are identical")
 
 def expected = [
-   "docs/spec/syntax.md#Syntax",
-   "docs/spec/errors.md#Related",
-   "docs/CHANGELOG.md#Added",
+   "etc/docs/spec/syntax.md#Syntax",
+   "etc/docs/spec/errors.md#Related",
+   "etc/docs/CHANGELOG.md#Added",
 ]
 mut previous = -1
 for expected_entry in expected {
@@ -57,7 +57,7 @@ def fallback = run_capture(
    [cmake, "-E", "env", "NYTRIX_NY_FULL_BIN=" + missing_ny,
     doc, "search", "--docs", "comptime"], [], nil, false)
 assert(fallback.get("code", 127) == 0 &&
-       str.find(fallback.get("stdout", ""), "docs/learn/comptime.md") >= 0,
+       str.find(fallback.get("stdout", ""), "etc/docs/learn/comptime.md") >= 0,
        "standalone C search remains available without the Ny collector")
 print("NY_DOC_SEARCH_DISCOVERY_OK")
 NY

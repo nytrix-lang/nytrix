@@ -14,7 +14,7 @@ def entries = [
     "signature":"parse source", "keywords":"parser syntax",
     "path":"core/math/parse.ny", "doc":"bounded parser", "code":""},
    {"kind":"doc", "name":"Compiler", "full_name":"Compiler",
-    "keywords":"compiler parser", "path":"docs/compiler.md",
+    "keywords":"compiler parser", "path":"etc/docs/compiler.md",
     "doc":"", "code":""},
    {"kind":"function", "name":"_parse_internal",
     "full_name":"core.math._parse_internal", "signature":"internal",
