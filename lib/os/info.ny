@@ -4,7 +4,7 @@
 ;; - core.os
 module core.os.info(cpu_name, ram_short, gpu_name, hostname, cpu_logical_count, cpu_features_raw, cpu_features, cpu_feature_map, has_cpu_feature, has_opencl, system_info)
 use core
-use core.dict_mod
+use core.dict
 use core.str
 use core.os
 use core.os.fs

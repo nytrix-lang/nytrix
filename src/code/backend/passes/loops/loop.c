@@ -334,11 +334,10 @@ static bool bitasm_loop_is_pure(const nyr_func_t *f, const nyr_cfg_t *cfg,
       }
       unsigned bad = (in->effects | nyr_inst_effects(in)) &
                      (NYIR_EFFECT_WRITE_MEMORY | NYIR_EFFECT_WRITE_LOCAL |
-                      NYIR_EFFECT_CALL | NYIR_EFFECT_IO |
-                      NYIR_EFFECT_THREAD | NYIR_EFFECT_FFI |
-                      NYIR_EFFECT_VOLATILE |
-                      NYIR_EFFECT_UNKNOWN_SIDE_EFFECT |
-                      NYIR_EFFECT_MAY_TRAP | NYIR_EFFECT_ALLOCATION);
+                      NYIR_EFFECT_CALL | NYIR_EFFECT_IO | NYIR_EFFECT_THREAD |
+                      NYIR_EFFECT_FFI | NYIR_EFFECT_VOLATILE |
+                      NYIR_EFFECT_UNKNOWN_SIDE_EFFECT | NYIR_EFFECT_MAY_TRAP |
+                      NYIR_EFFECT_ALLOCATION);
       if (bad) {
         if (nir_bitasm_trace())
           fprintf(stderr, "[bitasm] impure effects=%#x op=%d at %zu\n", bad,
@@ -415,8 +414,7 @@ static bool bitasm_apply(nyr_func_t *f, const nyr_cfg_t *cfg,
     f->data[s].effects = nyr_inst_effects(&f->data[s]);
   }
   size_t at = cand->at;
-  memmove(&f->data[at + count], &f->data[at],
-          (f->len - at) * sizeof(*f->data));
+  memmove(&f->data[at + count], &f->data[at], (f->len - at) * sizeof(*f->data));
   f->len += count;
   size_t w = at;
   f->data[w++] = (nyr_inst_t){.op = NYIR_CONST_I64,
@@ -542,12 +540,12 @@ static bool bitasm_trip_count(const nyr_func_t *f, const int *defs,
  * Fold one bit-reassembly loop. Returns true when a loop was removed; the
  * caller then rebuilds its analyses because instruction indices moved.
  */
-#define BITASM_REJECT(why)                                \
-  do {                                                    \
-    if (nir_bitasm_trace())                               \
-      fprintf(stderr, "[bitasm] reject label=%lld: %s\n", \
-              (long long)cfg.block_label[header], why);   \
-    goto bitasm_next_loop;                                \
+#define BITASM_REJECT(why)                                                     \
+  do {                                                                         \
+    if (nir_bitasm_trace())                                                    \
+      fprintf(stderr, "[bitasm] reject label=%lld: %s\n",                      \
+              (long long)cfg.block_label[header], why);                        \
+    goto bitasm_next_loop;                                                     \
   } while (0)
 
 static bool nir_bitasm_fold_once(nyr_func_t *f) {
@@ -616,8 +614,8 @@ static bool nir_bitasm_fold_once(nyr_func_t *f) {
           continue;
         for (size_t e = cfg.succ_offsets[b]; e < cfg.succ_offsets[b + 1]; ++e) {
           size_t succ = cfg.succ_blocks[e];
-          if (!in_loop[succ] || (succ <= b &&
-                                (b != loop->latch_block || succ != header))) {
+          if (!in_loop[succ] ||
+              (succ <= b && (b != loop->latch_block || succ != header))) {
             multi_exit = true;
             break;
           }
@@ -652,8 +650,7 @@ static bool nir_bitasm_fold_once(nyr_func_t *f) {
       int node_phi = -1;
       int other_phis = 0;
       const nyr_inst_t *iv_phi = NULL;
-      for (size_t i = cfg.block_start[header]; i < cfg.block_end[header];
-           ++i) {
+      for (size_t i = cfg.block_start[header]; i < cfg.block_end[header]; ++i) {
         const nyr_inst_t *in = &f->data[i];
         if (in->op != NYIR_PHI)
           continue;
@@ -674,8 +671,9 @@ static bool nir_bitasm_fold_once(nyr_func_t *f) {
        */
       uint64_t trip = 0;
       int64_t iv_start = 0;
-      if (!bitasm_trip_count(f, defs, loop, iv_phi, cfg.block_label[pre],
-                             &trip, &iv_start) || iv_start != (int64_t)trip - 1)
+      if (!bitasm_trip_count(f, defs, loop, iv_phi, cfg.block_label[pre], &trip,
+                             &iv_start) ||
+          iv_start != (int64_t)trip - 1)
         BITASM_REJECT("bit window is not a descending sequence through zero");
       const nyr_inst_t *phi = &f->data[(size_t)node_phi];
       if (phi->phi_incoming_len != 2)
@@ -732,8 +730,8 @@ static bool nir_bitasm_fold_once(nyr_func_t *f) {
         if (bitasm_arm(f, defs, back->b, phi->dst, &inc_true) &&
             bitasm_arm(f, defs, back->c, phi->dst, &inc_false) &&
             inc_true != inc_false &&
-            bitasm_bit_test(f, defs, back->a, loop->iv, 0, iv_start,
-                            &bit_true, &key) &&
+            bitasm_bit_test(f, defs, back->a, loop->iv, 0, iv_start, &bit_true,
+                            &key) &&
             inc_true == bit_true)
           matched = true;
       }
@@ -743,10 +741,10 @@ static bool nir_bitasm_fold_once(nyr_func_t *f) {
       if (!matched) {
         if (nir_bitasm_trace()) {
           int root = idiom_root_copy(f, defs, back_v);
-          fprintf(stderr, "[bitasm] backedge v=%d root=%d defop=%d ivphi=%d "
-                          "nodephi=%d\n",
-                  back_v, root, back ? (int)back->op : -1, loop->iv,
-                  phi->dst);
+          fprintf(stderr,
+                  "[bitasm] backedge v=%d root=%d defop=%d ivphi=%d "
+                  "nodephi=%d\n",
+                  back_v, root, back ? (int)back->op : -1, loop->iv, phi->dst);
           fprintf(stderr, "[bitasm] --body--\n");
           for (size_t bb = 0; bb < cfg.block_count; ++bb)
             if (in_loop[bb])
@@ -807,8 +805,7 @@ static bool nir_bitasm_fold_once(nyr_func_t *f) {
                                 .trip = trip,
                                 .exit_label_pos = exit_label_pos,
                                 .exit_label = exit_label};
-      if (term > cfg.block_start[pre] &&
-          f->data[term - 1].op == NYIR_BR &&
+      if (term > cfg.block_start[pre] && f->data[term - 1].op == NYIR_BR &&
           f->data[term - 1].imm == cfg.block_label[header]) {
         cand.explicit_br = true;
         cand.at = term - 1;
@@ -863,8 +860,8 @@ static bool nir_loop_bit_assembly(nyr_func_t *f) {
       const nyr_inst_t *shift = bitasm_def(f, defs, side ? in->a : in->b);
       int64_t mask = 0;
       has_bit = shift && shift->op == NYIR_SAR_I64 &&
-                const_i64_val(f, defs, side ? in->b : in->a, &mask) && mask == 1 &&
-                !const_i64_val(f, defs, shift->b, NULL);
+                const_i64_val(f, defs, side ? in->b : in->a, &mask) &&
+                mask == 1 && !const_i64_val(f, defs, shift->b, NULL);
     }
   }
   free(defs);
@@ -3032,12 +3029,12 @@ static bool last_overwrite_try_loop(nyr_func_t *f, const nyr_cfg_t *cfg,
                                     const int *defs,
                                     const nyr_scev_loop_t *loop,
                                     bool *in_loop) {
-#define LAST_OVERWRITE_REJECT(reason)                                \
-  do {                                                               \
-    ny_dbg_heuristic_event("LOOP_LAST_OVERWRITE",                    \
-                           "decision=reject header=L%lld reason=%s", \
-                           (long long)loop->header_label, reason);   \
-    return false;                                                    \
+#define LAST_OVERWRITE_REJECT(reason)                                          \
+  do {                                                                         \
+    ny_dbg_heuristic_event("LOOP_LAST_OVERWRITE",                              \
+                           "decision=reject header=L%lld reason=%s",           \
+                           (long long)loop->header_label, reason);             \
+    return false;                                                              \
   } while (0)
   ny_dbg_heuristic_event(
       "LOOP_LAST_OVERWRITE",
@@ -4820,9 +4817,8 @@ static bool lu_clone_ordered_division(const nyr_inst_t *in) {
   return in &&
          (in->op == NYIR_DIV_I64 ||
           (in->op == NYIR_MOD_I64 && !getenv("NYTRIX_NO_UNROLL_MOD"))) &&
-         !in->symbol && !in->extra_args &&
-         !in->arg_sizes && !in->phi_incoming &&
-         nyr_effective_effects(in) == NYIR_EFFECT_MAY_TRAP;
+         !in->symbol && !in->extra_args && !in->arg_sizes &&
+         !in->phi_incoming && nyr_effective_effects(in) == NYIR_EFFECT_MAY_TRAP;
 }
 
 /*
@@ -4837,9 +4833,9 @@ static bool lu_clone_memory_read(const nyr_inst_t *in) {
       in->arg_sizes || in->phi_incoming)
     return false;
   unsigned effects = nyr_effective_effects(in);
-  return (effects & (NYIR_EFFECT_WRITE_MEMORY | NYIR_EFFECT_CALL |
-                     NYIR_EFFECT_CONTROL | NYIR_EFFECT_WRITE_LOCAL |
-                     NYIR_EFFECT_READ_LOCAL)) == 0;
+  return (effects &
+          (NYIR_EFFECT_WRITE_MEMORY | NYIR_EFFECT_CALL | NYIR_EFFECT_CONTROL |
+           NYIR_EFFECT_WRITE_LOCAL | NYIR_EFFECT_READ_LOCAL)) == 0;
 }
 
 /*
@@ -5739,9 +5735,8 @@ static bool lu_try_one(nyr_func_t *work, const nyr_scev_loop_t *loop) {
    * explicit branch. The retained header label keeps that edge valid after
    * the body is replaced by clones.
    */
-  bool preheader_ok =
-      preheader_term != SIZE_MAX ||
-      (cfg.block_end[p] == hs && cfg.block_start[h] == hs);
+  bool preheader_ok = preheader_term != SIZE_MAX ||
+                      (cfg.block_end[p] == hs && cfg.block_start[h] == hs);
   if (guard == SIZE_MAX || !preheader_ok || latch_term == SIZE_MAX ||
       !phi_count || !body_count || body_count > 128 ||
       body_count * (size_t)loop->trip_count > 1024)
@@ -6061,12 +6056,12 @@ bool nyr_loop_unroll_ssa(nyr_func_t *f) {
        * Bit-at-a-time loops run up to 32 trips; the body-size budget below
        * still bounds the expansion.
        */
-      bool ascending = (loop->predicate == NYIR_CMP_LT ||
-                        loop->predicate == NYIR_CMP_LE) &&
-                       loop->step > 0;
-      bool descending = (loop->predicate == NYIR_CMP_GT ||
-                         loop->predicate == NYIR_CMP_GE) &&
-                        loop->step < 0 && !getenv("NYTRIX_NO_UNROLL_DOWN");
+      bool ascending =
+          (loop->predicate == NYIR_CMP_LT || loop->predicate == NYIR_CMP_LE) &&
+          loop->step > 0;
+      bool descending =
+          (loop->predicate == NYIR_CMP_GT || loop->predicate == NYIR_CMP_GE) &&
+          loop->step < 0 && !getenv("NYTRIX_NO_UNROLL_DOWN");
       if (!loop->trip_count_known || loop->trip_count < 2 ||
           loop->trip_count > 32 || !(ascending || descending))
         continue;

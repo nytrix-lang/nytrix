@@ -5,10 +5,17 @@
 #include "i386-register-runs.c"
 extern u32 nyc_register_run(u32 *, u32 *, u32);
 extern u32 nyc_stack_run(u32);
+extern u32 nyc_inlined_asm_output(u32, u32, u32);
 
 u32 register_run_callback(u32 a, u32 b, u32 c) {
   return (a * 65537u) ^ (b + 0x80000001u) ^ (c * 19u);
 }
+
+u32 register_run_four(u32 a, u32 b, u32 c, u32 d) {
+  return (a * 31u + b * 101u) ^ (c + d * 257u);
+}
+
+u32 (*register_run_indirect)(u32, u32, u32, u32) = register_run_four;
 
 u32 register_run_stack_callback(u32 *local, u32 *values, u32 seed) {
   *local ^= values[3] + seed;
@@ -18,7 +25,11 @@ u32 register_run_stack_callback(u32 *local, u32 *values, u32 seed) {
 
 static int check_register_runs(void) {
   for (u32 seed = 0; seed < 40; ++seed) {
-    if (nyc_stack_run(seed) != reference_stack_run(seed)) return 3;
+    if (nyc_stack_run(seed) != reference_stack_run(seed))
+      return 3;
+    if (nyc_inlined_asm_output(seed, seed * 7919u, ~seed) !=
+        reference_inlined_asm_output(seed, seed * 7919u, ~seed))
+      return 4;
     for (u32 offset = 0; offset < 6; ++offset) {
       u32 actual[24], expected[24];
       for (u32 i = 0; i < 24; ++i)

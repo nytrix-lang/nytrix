@@ -11,6 +11,7 @@
 #include "code/backend/mach/object.h"
 #include "base/trace.h"
 #include "code/backend/core/abi.h"
+#include "code/backend/mach/arch/x86/retpoline.h"
 
 #include <limits.h>
 #include <stdint.h>
@@ -3374,10 +3375,8 @@ static bool ny_x64_obj_emit_inst(nyr_x64_obj_ctx_t *c, const nyr_inst_t *in) {
                    fn->return_aggregate_classes[0] != NYIR_ARG_CLASS_NONE;
     if (agg_ret) {
       /*
-       * Callee side of the SysV two-eightbyte return: eightbyte 0 goes to
-       * rax (INTEGER) or xmm0 (SSE), eightbyte 1 to rdx (INTEGER) or xmm1
-       * (SSE). The pieces are loaded before the epilogue, which only
-       * restores callee-saved registers and never touches rax/rdx/xmm0/xmm1.
+       * SysV allocates INTEGER and SSE return registers independently:
+       * RAX/RDX and XMM0/XMM1. A mixed pair uses RAX and XMM0.
        */
       unsigned class0 = fn->return_aggregate_classes[0];
       unsigned class1 = fn->return_aggregate_classes[1];
@@ -3395,11 +3394,16 @@ static bool ny_x64_obj_emit_inst(nyr_x64_obj_ctx_t *c, const nyr_inst_t *in) {
           return false;
         }
         if (class1 == NYIR_ARG_CLASS_INTEGER) {
-          if (!ny_x64_obj_load_value_r10(c, in->b) ||
-              !ny_x64_obj_bytes(c, (const unsigned char[]){0x4c, 0x89, 0xd2},
-                                3))
+          if (class0 == NYIR_ARG_CLASS_SSE) {
+            if (!ny_x64_obj_load_value_rax(c, in->b))
+              return false;
+          } else if (!ny_x64_obj_load_value_r10(c, in->b) ||
+                     !ny_x64_obj_bytes(
+                         c, (const unsigned char[]){0x4c, 0x89, 0xd2}, 3)) {
             return false;
-        } else if (!ny_x64_obj_load_value_xmm(c, in->b, 1)) {
+          }
+        } else if (!ny_x64_obj_load_value_xmm(c, in->b,
+                                              class0 == NYIR_ARG_CLASS_SSE)) {
           return false;
         }
       }
@@ -3670,7 +3674,12 @@ static bool ny_x64_obj_emit_inst(nyr_x64_obj_ctx_t *c, const nyr_inst_t *in) {
     }
     if (!ny_x64_obj_sub_rsp(c, c->target->shadow_space_bytes))
       return false;
-    if ((in->flags & (NYIR_INST_F_VARIADIC | NYIR_INST_F_EXTERN)) && !is_win) {
+    if (indirect && (!ny_x64_obj_load_value_rax(c, indirect_target) ||
+                     !ny_x64_obj_mov_reg_reg(c, 0, 11)))
+      return false;
+    if ((indirect ||
+         (in->flags & (NYIR_INST_F_VARIADIC | NYIR_INST_F_EXTERN))) &&
+        !is_win) {
       if (sse < 0 || sse > 8 ||
           !ny_x64_obj_bytes(c, (const unsigned char[]){0xb0, (uint8_t)sse},
                             2)) {
@@ -3727,21 +3736,9 @@ static bool ny_x64_obj_emit_inst(nyr_x64_obj_ctx_t *c, const nyr_inst_t *in) {
       return ny_x64_obj_inline_bare_print(c, in, argc);
     if (indirect &&
         (c->retpoline_indirect_calls || c->retpoline_inline_calls)) {
-      if (!ny_x64_obj_load_value_rax(c, indirect_target) ||
-          !ny_x64_obj_mov_reg_reg(c, 0, 11))
-        return false;
       if (c->retpoline_inline_calls) {
-        static const unsigned char inline_thunk[] = {
-            0xe8, 0x05, 0x00, 0x00, 0x00, /* call dispatch */
-            0xe9, 0x14, 0x00, 0x00, 0x00, /* return: jmp after thunk */
-            0xe8, 0x0a, 0x00, 0x00, 0x00, /* dispatch: call capture */
-            0xf3, 0x90,                   /* speculation trap: pause */
-            0x0f, 0xae, 0xe8,             /* lfence */
-            0xe9, 0xf6, 0xff, 0xff, 0xff, /* jmp speculation trap */
-            0x4c, 0x89, 0x1c, 0x24,       /* capture: mov r11,(rsp) */
-            0xc3,                         /* ret to target */
-            0x90};                        /* after-thunk landing */
-        if (!ny_x64_obj_bytes(c, inline_thunk, sizeof(inline_thunk)))
+        if (!ny_x64_obj_bytes(c, nyr_x64_inline_retpoline,
+                              sizeof(nyr_x64_inline_retpoline)))
           return false;
       } else {
         if (!ny_x64_obj_u8(c, 0xe8))
@@ -3758,8 +3755,7 @@ static bool ny_x64_obj_emit_inst(nyr_x64_obj_ctx_t *c, const nyr_inst_t *in) {
           return false;
       }
     } else if (indirect) {
-      if (!ny_x64_obj_load_value_rax(c, indirect_target) ||
-          !ny_x64_obj_bytes(c, (const unsigned char[]){0xff, 0xd0}, 2))
+      if (!ny_x64_obj_bytes(c, (const unsigned char[]){0x41, 0xff, 0xd3}, 3))
         return false;
     } else {
       if (!ny_x64_obj_u8(c, 0xe8))
@@ -4100,7 +4096,8 @@ static bool ny_x64_obj_emit_inst(nyr_x64_obj_ctx_t *c, const nyr_inst_t *in) {
     return ny_x64_obj_store_value_rax(c, in->dst);
   case NYIR_VA_SAVE: {
     static const unsigned gp_reg[] = {7, 6, 2, 1, 8, 9};
-    if (in->dst < 0 || in->imm != 176 || !ny_x64_obj_sub_rsp(c, 176))
+    if (in->dst < 0 || (in->imm != 48 && in->imm != 176) ||
+        !ny_x64_obj_sub_rsp(c, (int)in->imm))
       return false;
     for (unsigned i = 0; i < sizeof(gp_reg) / sizeof(gp_reg[0]); ++i) {
       unsigned reg = gp_reg[i];
@@ -4111,7 +4108,7 @@ static bool ny_x64_obj_emit_inst(nyr_x64_obj_ctx_t *c, const nyr_inst_t *in) {
           !ny_x64_obj_i32(c, (int32_t)(i * 8)))
         return false;
     }
-    for (unsigned i = 0; i < 8; ++i) {
+    for (unsigned i = 0; in->imm == 176 && i < 8; ++i) {
       unsigned char modrm = (unsigned char)(0x84 | (i << 3));
       if (!ny_x64_obj_bytes(c, (const unsigned char[]){0x0f, 0x11}, 2) ||
           !ny_x64_obj_u8(c, modrm) || !ny_x64_obj_u8(c, 0x24) ||
@@ -4244,6 +4241,18 @@ static bool ny_x64_obj_emit_inst(nyr_x64_obj_ctx_t *c, const nyr_inst_t *in) {
     return ny_x64_obj_bytes(c, (const unsigned char[]){0x48, 0x89, 0xe0}, 3) &&
            ny_x64_obj_store_value_rax(c, in->dst);
   case NYIR_INLINE_ASM:
+    if (in->imm == -196) {
+      char symbol[256];
+      if (in->a != -1 || in->dst < 0 || !in->symbol ||
+          !ny_x86_obj_reloc_symbol(symbol, sizeof(symbol), c->target,
+                                   in->symbol) ||
+          !ny_x64_obj_bytes(c, (const unsigned char[]){0x48, 0x8d, 0x05}, 3))
+        return false;
+      size_t disp = c->code.len;
+      return ny_x64_obj_i32(c, -4) &&
+             ny_x64_obj_add_reloc(c, symbol, disp, NY_RELOC_PC32) &&
+             ny_x64_obj_store_value_rax(c, in->dst);
+    }
     if (in->imm == -79 || in->imm == -80) {
       static const char *const names[] = {"es", "cs", "ss", "ds", "fs", "gs"};
       unsigned segment = 0;

@@ -11,7 +11,7 @@ module core.os.ui.render.shader(
 )
 
 use core
-use core.dict_mod
+use core.dict
 use core.str
 use core.os (file_read, ticks)
 use core.os.path as ospath

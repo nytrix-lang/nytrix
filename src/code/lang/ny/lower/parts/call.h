@@ -1933,7 +1933,7 @@ static int nyr_lower_call(nyr_builder_t *b, const expr_t *e) {
          .val = e->as.call.args.len == 2 ? e->as.call.args.data[1].val : NULL},
     };
     expr_t direct_callee = {.kind = NY_E_IDENT, .tok = e->tok};
-    direct_callee.as.ident.name = "core.dict_mod.dict_get";
+    direct_callee.as.ident.name = "core.dict.dict_get";
     expr_t direct = *e;
     direct.semantic.member_call_kind = NY_SEM_CALL_NONE;
     direct.semantic.canonical_callee = NULL;
@@ -2103,7 +2103,7 @@ static int nyr_lower_call(nyr_builder_t *b, const expr_t *e) {
                                  0);
   }
   /* Some alias-qualified module calls arrive here as unresolved surface
-   * members (`set_mod.add`) even though semantic analysis has proved the
+   * members (`set.add`) even though semantic analysis has proved the
    * receiver is the set module. Preserve the set handle's native pointer ABI
    * across this call instead of routing it through the stdlib `any` wrapper,
    * which tags the pointer and makes `_set_add` reject it as a non-set. */
@@ -2117,8 +2117,7 @@ static int nyr_lower_call(nyr_builder_t *b, const expr_t *e) {
       nyr_expr_is_set(b, e->as.call.args.data[0].val)) {
     const char *module = nyr_resolve_use_alias(
         b, e->as.call.callee->as.member.target->as.ident.name);
-    if (module && (strcmp(module, "core.set_mod") == 0 ||
-                   strcmp(module, "core.set") == 0)) {
+    if (module && strcmp(module, "core.set") == 0) {
       int set_value = nyr_lower_expr(b, e->as.call.args.data[0].val);
       int key =
           set_value < 0 ? -1 : nyr_lower_expr(b, e->as.call.args.data[1].val);
@@ -2172,9 +2171,7 @@ static int nyr_lower_call(nyr_builder_t *b, const expr_t *e) {
       memcpy(alias, spelling, alias_len);
       alias[alias_len] = '\0';
       const char *module = nyr_resolve_use_alias(b, alias);
-      if ((module && (strcmp(module, "core.set_mod") == 0 ||
-                      strcmp(module, "core.set") == 0)) ||
-          strcmp(alias, "core.set_mod") == 0 ||
+      if ((module && strcmp(module, "core.set") == 0) ||
           strcmp(alias, "core.set") == 0) {
         int set_value = nyr_lower_expr(b, e->as.call.args.data[0].val);
         int key =
@@ -6838,7 +6835,7 @@ ordinary_call:
                  e->as.call.args.len == 2 ? e->as.call.args.data[1].val : NULL},
         };
         expr_t direct_callee = {.kind = NY_E_IDENT, .tok = e->tok};
-        direct_callee.as.ident.name = "core.dict_mod.dict_get";
+        direct_callee.as.ident.name = "core.dict.dict_get";
         expr_t direct = *e;
         direct.semantic.member_call_kind = NY_SEM_CALL_NONE;
         direct.semantic.canonical_callee = NULL;
@@ -7015,7 +7012,7 @@ ordinary_call:
          .val = e->as.call.args.len == 2 ? e->as.call.args.data[1].val : NULL},
     };
     expr_t direct_callee = {.kind = NY_E_IDENT, .tok = e->tok};
-    direct_callee.as.ident.name = "core.dict_mod.dict_get";
+    direct_callee.as.ident.name = "core.dict.dict_get";
     expr_t direct = *e;
     direct.semantic.member_call_kind = NY_SEM_CALL_NONE;
     direct.semantic.canonical_callee = NULL;
@@ -13894,7 +13891,7 @@ ordinary_call:
           length = nyr_emit_runtime_call(b, "rt_cstr_len", arg, -1, -1, 1, 0);
         else if (nyr_expr_is_list(b, arg_expr) &&
                  !(name && (strcmp(name, "set.sub") == 0 ||
-                            strcmp(name, "core.set_mod.sub") == 0)))
+                            strcmp(name, "core.set.sub") == 0)))
           length =
               nyr_emit_runtime_call(b, "rt_tbuf_len_raw", arg, -1, -1, 1, 0);
         else if ((nyr_expr_is_any(b, arg_expr) || arg_local_canonical) &&

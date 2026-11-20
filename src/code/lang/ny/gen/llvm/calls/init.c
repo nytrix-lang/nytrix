@@ -23,9 +23,9 @@
  */
 #include "base/loader.h"
 #include "base/util.h"
+#include "code/lang/ny/gen/internal.h"
 #include "code/lang/ny/parser/json.h"
 #include "code/lang/ny/parser/proof.h"
-#include "code/lang/ny/gen/internal.h"
 #ifndef _WIN32
 #include <alloca.h>
 #else
@@ -54,8 +54,7 @@
 static const char *ny_llvm_runtime_wrapper_alias(const char *name) {
   if (!name)
     return NULL;
-  if (strcmp(name, "core.list") == 0 ||
-      strcmp(name, "core.dict_mod.list") == 0)
+  if (strcmp(name, "core.list") == 0 || strcmp(name, "core.dict.list") == 0)
     return "rt_list_new_raw";
   if (strcmp(name, "core.reflect.globals") == 0)
     return "rt_globals_get";
@@ -150,19 +149,19 @@ static fun_sig *ny_gencall_lookup_helper(codegen_t *cg, fun_sig **cache_slot,
   return NULL;
 }
 
-#define NY_DEFINE_GENCALL_LOOKUP_WRAPPER(fn_name, cache_field, ...)        \
-  static fun_sig *fn_name(codegen_t *cg) {                                 \
-    static const char *const k_names[] = {__VA_ARGS__};                    \
-    return ny_gencall_lookup_helper(cg, &cg->cache_field, k_names,         \
-                                    sizeof(k_names) / sizeof(k_names[0])); \
+#define NY_DEFINE_GENCALL_LOOKUP_WRAPPER(fn_name, cache_field, ...)            \
+  static fun_sig *fn_name(codegen_t *cg) {                                     \
+    static const char *const k_names[] = {__VA_ARGS__};                        \
+    return ny_gencall_lookup_helper(cg, &cg->cache_field, k_names,             \
+                                    sizeof(k_names) / sizeof(k_names[0]));     \
   }
 
 NY_DEFINE_GENCALL_LOOKUP_WRAPPER(ny_gencall_flt_unbox, cached_fn_flt_unbox,
                                  "__flt_unbox_val")
 NY_DEFINE_GENCALL_LOOKUP_WRAPPER(ny_gencall_flt_box, cached_fn_flt_box,
                                  "__flt_box_val")
-NY_DEFINE_GENCALL_LOOKUP_WRAPPER(ny_gencall_getter, cached_fn_get,
-                                 "core.get", "core.reflect.get", "get")
+NY_DEFINE_GENCALL_LOOKUP_WRAPPER(ny_gencall_getter, cached_fn_get, "core.get",
+                                 "core.reflect.get", "get")
 NY_DEFINE_GENCALL_LOOKUP_WRAPPER(ny_gencall_globals, cached_fn_globals,
                                  "__globals")
 NY_DEFINE_GENCALL_LOOKUP_WRAPPER(ny_gencall_kwarg, cached_fn_kwarg, "__kwarg",
@@ -1225,7 +1224,7 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
         (get_target_is_direct_dict ||
          ny_expr_has_known_dict_type(cg, scopes, depth, c->args.data[0].val));
     if (get_target_is_known_dict) {
-      fun_sig *dict_get_sig = lookup_fun(cg, "core.dict_mod.dict_get", 0);
+      fun_sig *dict_get_sig = lookup_fun(cg, "core.dict.dict_get", 0);
       if (dict_get_sig) {
         if (ny_gencall_expr_is_int_index(cg, scopes, depth,
                                          c->args.data[1].val) &&
@@ -1344,16 +1343,15 @@ LLVMValueRef gen_call_expr(codegen_t *cg, scope *scopes, size_t depth,
       const char *base_set_name = want_builtin_set_idx ? "set_idx" : "set";
       const char *core_set_name =
           want_builtin_set_idx ? "core.set_idx" : "core.set";
-      const char *reflect_set_name = want_builtin_set_idx
-                                         ? "core.reflect.set_idx"
-                                         : "core.reflect.set";
+      const char *reflect_set_name =
+          want_builtin_set_idx ? "core.reflect.set_idx" : "core.reflect.set";
       if (ny_expr_has_known_dict_type(cg, scopes, depth, c->args.data[0].val)) {
         fun_sig *dict_set_sig = NULL;
         if (ny_env_enabled_default_on("NYTRIX_FAST_DICT_WRITE") &&
             !ny_env_enabled("NYTRIX_DISABLE_FAST_DICT_WRITE"))
-          dict_set_sig = lookup_fun(cg, "core.dict_mod.dict_set", 0);
+          dict_set_sig = lookup_fun(cg, "core.dict.dict_set", 0);
         if (!dict_set_sig)
-          dict_set_sig = lookup_fun(cg, "core.dict_mod.dict_set", 0);
+          dict_set_sig = lookup_fun(cg, "core.dict.dict_set", 0);
         if (dict_set_sig) {
           LLVMValueRef args[3];
           for (size_t i = 0; i < 3; ++i) {

@@ -18,8 +18,7 @@ boundaries.
 type annotation precedes the binding name. `del` clears a mutable binding; it
 does not free an object.
 
-> **Note:** Names, parameters, and bodies are placeholders; this is not a
-> standalone program.
+Declaration forms:
 
 ```ny
 def name = expression

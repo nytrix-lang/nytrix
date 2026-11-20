@@ -954,6 +954,12 @@ static const nyr_pass_control_t nyr_pass_controls[] = {
     {nyr_peephole, "peephole"},
     {nyr_copy_prop, "copy_prop"},
     {nyr_cse, "cse"},
+    /*
+     * Keep the four-pass tail as measured. Extending the zero-clamp fold to
+     * the branch form produced 35-insn loops and 63.20 M retired against
+     * 31 insns / 56.15 M (+12.6%), so the relaxed shape was reverted:
+     * see the perf-audit fault notes (N3).
+     */
     {nyr_strength_reduce, "strength_reduce"},
     {nyr_cfg_simplify, "cfg_simplify"},
     {nyr_phiopt, "phiopt"},
@@ -2204,8 +2210,9 @@ static bool nyr_optimize_pipeline(nyr_func_t *f, nyr_opt_stats_t *stats,
      * Loop-only O3 passes: skip entirely for straight-line functions
      * (e.g. the 500-diamond DCE bench). Each still pays CFG/SCEV rebuilds
      * and bails with no change. Mirrors the O2 has_loop guard.
+     * A loop with no SSA values has no induction or memory access to optimize.
      */
-    if (ok && !nyr_pass_stopped && nyr_has_loop(f)) {
+    if (ok && !nyr_pass_stopped && f->next_value > 0 && nyr_has_loop(f)) {
       static bool (*const loop_analysis[])(nyr_func_t *) = {
           nyr_loop_rotate,
           nyr_scev_lite,
@@ -2335,8 +2342,9 @@ static bool nyr_optimize_pipeline(nyr_func_t *f, nyr_opt_stats_t *stats,
       nyr_run_pass(f, nyr_invert_fallthrough_branches, stats, dump, &ok);
     if (ok) {
       static bool (*const cfg[])(nyr_func_t *) = {
-          nyr_cfg_simplify,        nyr_phiopt,    nyr_if_convert,
-          nyr_select_chain_fold,   nyr_peephole,  nyr_copy_prop,
+          nyr_cfg_simplify, nyr_phiopt,
+          nyr_if_convert,   nyr_select_chain_fold,
+          nyr_peephole,     nyr_copy_prop,
           nyr_dce};
       nyr_run_seq(f, cfg, 7, stats, dump, &ok);
     }

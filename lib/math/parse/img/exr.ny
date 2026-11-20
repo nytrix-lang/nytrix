@@ -5,7 +5,7 @@
 ;; - core.math.parse
 module core.math.parse.img.exr(decode, decode_bytes, load_path, available, last_error, backend_name)
 use core
-use core.dict_mod
+use core.dict
 use core.math
 use core.os
 use core.os.path as ospath

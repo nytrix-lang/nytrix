@@ -5,7 +5,7 @@
 ;; - core.math.parse
 module core.math.parse.data.sql(tokenize, parse, try_parse, parse_all, normalize, statement_kind)
 use core
-use core.dict_mod as _d
+use core.dict as _d
 use core.str
 
 fn _tok(str kind, any value, int pos) dict {

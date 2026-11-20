@@ -12,8 +12,7 @@ coalescing, indexing, calls, and member access.
 
 ## Arithmetic
 
-> **Note:** The operands below are placeholders. This lists operator spellings,
-> not a standalone program.
+Operator spellings:
 
 ```ny
 a + b

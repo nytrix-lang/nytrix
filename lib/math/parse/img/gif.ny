@@ -7,7 +7,7 @@
 ;; - core.math.parse
 module core.math.parse.img.gif(decode, decode_frames, encode)
 use core
-use core.dict_mod
+use core.dict
 use core.math.bin as pbin
 
 fn _g_sb(any data, int p) dict {

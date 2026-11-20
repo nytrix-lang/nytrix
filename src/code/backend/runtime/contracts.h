@@ -151,7 +151,7 @@ NY_BUILTIN_EFFECT("core.store64_f64", NY_FX_WRITE_MEMORY)
 /*
  * Core container allocation/mutation contracts used by effect inference.
  */
-NY_BUILTIN_EFFECT("core.dict_mod.dict", NY_FX_ALLOC)
+NY_BUILTIN_EFFECT("core.dict.dict", NY_FX_ALLOC)
 NY_BUILTIN_EFFECT("core.dict.set", NY_FX_WRITE_MEMORY | NY_FX_ALLOC)
 NY_BUILTIN_EFFECT("core.dict.put", NY_FX_WRITE_MEMORY | NY_FX_ALLOC)
 NY_BUILTIN_EFFECT("core.list.set", NY_FX_WRITE_MEMORY | NY_FX_ALLOC)
@@ -395,18 +395,18 @@ NY_BUILTIN_EFFECT("core.dict.values", NY_FX_READ_MEMORY | NY_FX_ALLOC)
 NY_BUILTIN_EFFECT("core.dict.items", NY_FX_READ_MEMORY | NY_FX_ALLOC)
 NY_BUILTIN_EFFECT("core.dict.clone", NY_FX_READ_MEMORY | NY_FX_ALLOC)
 NY_BUILTIN_EFFECT("core.dict.merge", NY_FX_READ_MEMORY | NY_FX_ALLOC)
-NY_BUILTIN_EFFECT("core.dict_mod.dict_get", NY_FX_READ_MEMORY)
-NY_BUILTIN_EFFECT("core.dict_mod.dict_exists", NY_FX_READ_MEMORY)
-NY_BUILTIN_EFFECT("core.dict_mod.dict_set", NY_FX_WRITE_MEMORY | NY_FX_ALLOC)
-NY_BUILTIN_EFFECT("core.dict_mod.dict_remove", NY_FX_WRITE_MEMORY)
-NY_BUILTIN_EFFECT("core.dict_mod.dict_clear", NY_FX_WRITE_MEMORY)
-NY_BUILTIN_EFFECT("core.dict_mod.dict_keys", NY_FX_READ_MEMORY | NY_FX_ALLOC)
-NY_BUILTIN_EFFECT("core.dict_mod.dict_values", NY_FX_READ_MEMORY | NY_FX_ALLOC)
-NY_BUILTIN_EFFECT("core.dict_mod.dict_items", NY_FX_READ_MEMORY | NY_FX_ALLOC)
+NY_BUILTIN_EFFECT("core.dict.dict_get", NY_FX_READ_MEMORY)
+NY_BUILTIN_EFFECT("core.dict.dict_exists", NY_FX_READ_MEMORY)
+NY_BUILTIN_EFFECT("core.dict.dict_set", NY_FX_WRITE_MEMORY | NY_FX_ALLOC)
+NY_BUILTIN_EFFECT("core.dict.dict_remove", NY_FX_WRITE_MEMORY)
+NY_BUILTIN_EFFECT("core.dict.dict_clear", NY_FX_WRITE_MEMORY)
+NY_BUILTIN_EFFECT("core.dict.dict_keys", NY_FX_READ_MEMORY | NY_FX_ALLOC)
+NY_BUILTIN_EFFECT("core.dict.dict_values", NY_FX_READ_MEMORY | NY_FX_ALLOC)
+NY_BUILTIN_EFFECT("core.dict.dict_items", NY_FX_READ_MEMORY | NY_FX_ALLOC)
 
 /*
  * Set methods read and mutate their backing table; growth and values()
- * allocate. Keep the receiver methods and set_mod module exports aligned.
+ * allocate. Keep the receiver methods and sets module exports aligned.
  */
 NY_BUILTIN_EFFECT("core.set.add",
                   NY_FX_READ_MEMORY | NY_FX_WRITE_MEMORY | NY_FX_ALLOC)
@@ -418,15 +418,7 @@ NY_BUILTIN_EFFECT("core.set.len", NY_FX_READ_MEMORY)
 NY_BUILTIN_EFFECT("core.set.is_empty", NY_FX_READ_MEMORY)
 NY_BUILTIN_EFFECT("core.set.clear", NY_FX_READ_MEMORY | NY_FX_WRITE_MEMORY)
 NY_BUILTIN_EFFECT("core.set.values", NY_FX_READ_MEMORY | NY_FX_ALLOC)
-NY_BUILTIN_EFFECT("core.set_mod.set", NY_FX_ALLOC)
-NY_BUILTIN_EFFECT("core.set_mod.add",
-                  NY_FX_READ_MEMORY | NY_FX_WRITE_MEMORY | NY_FX_ALLOC)
-NY_BUILTIN_EFFECT("core.set_mod.sub", NY_FX_READ_MEMORY | NY_FX_WRITE_MEMORY)
-NY_BUILTIN_EFFECT("core.set_mod.contains", NY_FX_READ_MEMORY)
-NY_BUILTIN_EFFECT("core.set_mod.len", NY_FX_READ_MEMORY)
-NY_BUILTIN_EFFECT("core.set_mod.is_empty", NY_FX_READ_MEMORY)
-NY_BUILTIN_EFFECT("core.set_mod.clear", NY_FX_READ_MEMORY | NY_FX_WRITE_MEMORY)
-NY_BUILTIN_EFFECT("core.set_mod.values", NY_FX_READ_MEMORY | NY_FX_ALLOC)
+NY_BUILTIN_EFFECT("core.set.set", NY_FX_ALLOC)
 
 /*
  * Effectful builtin contracts.  Unlisted or unknown entries stay maximally

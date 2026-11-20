@@ -2,7 +2,7 @@
 ;; Dictionary operations for lookup, mutation, deletion, merging, and compatibility calls.
 ;; References:
 ;; - core
-module core.dict_mod(dict, dict_len, dict_get, dict_exists, dict_set, dict_remove, dict_has, dict_del, dict_pop, dict_popitem, dict_clone, dict_merge, dict_items, dict_keys, dict_values, dict_setdefault, dict_clear)
+module core.dict(dict, dict_len, dict_get, dict_exists, dict_set, dict_remove, dict_has, dict_del, dict_pop, dict_popitem, dict_clone, dict_merge, dict_items, dict_keys, dict_values, dict_setdefault, dict_clear)
 use core.primitives
 use core.error
 
@@ -525,5 +525,5 @@ fn dict_values(dict d) list {
    def half_a, half_b = 0.5, 0.25 + 0.25
    fd[half_a] = "half"
    _dict_check(dict_get(fd, half_b, "") == "half", "dict float keys")
-   print("✓ core.dict_mod self-test passed")
+   print("✓ core.dict self-test passed")
 }

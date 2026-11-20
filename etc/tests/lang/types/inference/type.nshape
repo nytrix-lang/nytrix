@@ -9,7 +9,7 @@ shape test_type {
 ;; Runtime type surface: typed bindings, language type groups, impl self,
 ;; operators, and layouts.
 use core
-use core.set_mod as set_mod
+use core.set as sets
 use core.compiler.syntax.type as ty
 use core.math.vector as vec
 use core.math.bin
@@ -366,8 +366,8 @@ fn test_typed_collections() {
    assert(typed_list_size([1, 2, 3]) == 3, "typed list param failed")
    assert(typed_dict_size(set(dict(4), "a", 1)) == 1, "typed dict param failed")
    assert(typed_tuple_size((1, 2, 3)) == 3, "typed tuple param failed")
-   mut set s = set_mod.set()
-   s = set_mod.add(s, "x")
+   mut set s = sets.set()
+   s = sets.add(s, "x")
    assert(typed_set_has_x(s), "typed set param failed")
    assert(s.len == 1, "set len property failed")
    assert(typed_bytes_size(bytes(4)) == 4, "typed bytes param failed")
@@ -394,7 +394,7 @@ fn test_runtime_type_shape() {
    assert(assert_shape(rows, "list<list<int>>")[0][1] == 2, "assert_shape returns checked value")
    assert(rows.is_shape("list<list<int>>"), "impl any is_shape method")
    assert(eq(rows.require_shape("list<list<int>>").type_shape, "list<list<int>>"), "impl any require_shape method")
-   mut set s = set_mod.set()
+   mut set s = sets.set()
    s = add(s, "x")
    s = add(s, "y")
    assert(eq(type_shape(s), "set<str>"), "type_shape set element")

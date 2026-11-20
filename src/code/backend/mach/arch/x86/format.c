@@ -1402,7 +1402,10 @@ static bool ny_native_emit_elf64_x64_object_bundle_code(
       goto done;
   }
   for (size_t i = 0; i < reloc_symbol_count; ++i) {
-    if (!nyr_obj_elf64_write_sym(&file, reloc_name_offs[i], 0x12, 0, 0, 0))
+    /* The relocation names a symbol, not necessarily a function. Leave
+     * undefined references untyped so they do not retype assembly labels
+     * or data when a relocatable link resolves them. */
+    if (!nyr_obj_elf64_write_sym(&file, reloc_name_offs[i], 0x10, 0, 0, 0))
       goto done;
   }
   size_t symtab_size = file.len - symtab_off;
@@ -2027,20 +2030,27 @@ static bool nyr_x64_c_bundle_append_data_group(
                     data[i].section ? data[i].section : "(null)");
       return false;
     }
+    /* modpost finds the assembler record label at the export relocation
+     * offset. A second, compiler-private symbol obscures that label. */
+    bool reference_alias =
+        !want || strncmp(want, ".export_symbol", sizeof(".export_symbol") - 1);
     char reference_name[256];
-    int alias_len = snprintf(reference_name, sizeof(reference_name),
-                             "__nyc_data_%s", data[i].name);
+    int alias_len = reference_alias
+                        ? snprintf(reference_name, sizeof(reference_name),
+                                   "__nyc_data_%s", data[i].name)
+                        : 0;
     if (alias_len < 0 || (size_t)alias_len >= sizeof(reference_name)) {
       nyr_set_error(err, err_len,
                     "C object global data name exceeds symbol limit");
       return false;
     }
     if (nyr_x64_obj_def_index(defs, *def_count, data[i].name) >= 0 ||
-        nyr_x64_obj_def_index(defs, *def_count, reference_name) >= 0) {
+        (reference_alias &&
+         nyr_x64_obj_def_index(defs, *def_count, reference_name) >= 0)) {
       nyr_set_error(err, err_len, "duplicate C object symbol %s", data[i].name);
       return false;
     }
-    if (*def_count > NY_NATIVE_MAX_DEFS - 2 ||
+    if (*def_count > NY_NATIVE_MAX_DEFS - (reference_alias ? 2 : 1) ||
         strlen(data[i].name) >= sizeof(defs[0].name)) {
       nyr_set_error(err, err_len, "C object global data table is full");
       return false;
@@ -2073,17 +2083,13 @@ static bool nyr_x64_c_bundle_append_data_group(
     def->function_symbol = data[i].function_symbol;
     def->is_local = data[i].is_local;
     def->is_weak = data[i].is_weak;
-    nyr_x64_obj_symbol_def_t *reference = &defs[(*def_count)++];
-    snprintf(reference->name, sizeof(reference->name), "%s", reference_name);
-    reference->off = def->off;
-    reference->size = def->size;
-    reference->is_data = true;
-    reference->section = data[i].section;
-    reference->section_flags = def->section_flags;
-    reference->alignment = alignment;
-    reference->section_entsize = def->section_entsize;
-    reference->function_symbol = def->function_symbol;
-    reference->is_local = true;
+    if (reference_alias) {
+      nyr_x64_obj_symbol_def_t *reference = &defs[(*def_count)++];
+      *reference = *def;
+      snprintf(reference->name, sizeof(reference->name), "%s", reference_name);
+      reference->is_local = true;
+      reference->is_weak = false;
+    }
     if (!nyr_obj_emit(code, data[i].bytes, data[i].len))
       return false;
     for (size_t r = 0; r < data[i].reloc_count; ++r) {
@@ -2278,6 +2284,8 @@ static bool nyr_x64_obj_build_c_bundle(
   *reloc_count = 0;
   const char *function_section_names[NY_C_DATA_MAX_NAMED_SECTIONS];
   size_t function_section_count = 0;
+  const char *off = getenv("NYC_NO_MACH_OBJECT");
+  bool use_machine = !off || !off[0] || off[0] == '0';
   for (size_t i = 0; i < func_count; ++i) {
     const char *section = function_sections ? function_sections[i] : NULL;
     if (!section)
@@ -2324,9 +2332,9 @@ static bool nyr_x64_obj_build_c_bundle(
       char function_err[256] = {0};
       /*
        * The register-allocating machine encoder is the same one the language
-       * uses.  Options it does not model (kernel-style frames, retpolines,
-       * named sections, PIC) stay on the direct NYIR encoder, as does anything
-       * machine lowering rejects.
+       * uses. Functions that ask for frame-pointer omission, use named
+       * sections or PIC, or cannot lower to machine form use the direct
+       * NYIR encoder.
        *
        * The machine encoder is the default. It used to be opt-in because
        * stencil-shaped C IR read a store address from a canonical home that was
@@ -2339,20 +2347,8 @@ static bool nyr_x64_obj_build_c_bundle(
        * find a current home. NYC_NO_MACH_OBJECT=1 selects the direct encoder.
        */
       bool machine = false;
-      static int mach_objects = -1;
-      if (mach_objects < 0) {
-        const char *force = getenv("NYC_USE_MACH_OBJECT");
-        const char *off = getenv("NYC_NO_MACH_OBJECT");
-        if (off && off[0] && off[0] != '0')
-          mach_objects = 0;
-        else if (force && force[0] && force[0] != '0')
-          mach_objects = 1;
-        else
-          mach_objects = 1; /* register-allocating encoder by default */
-      }
-      if (mach_objects == 1 && !omit_frame_pointer && !position_independent &&
-          !retpoline_indirect_calls && !retpoline_inline_calls && !section &&
-          !nyr_x64_c_func_needs_direct_encoder(&funcs[i])) {
+      if (use_machine && !omit_frame_pointer && !position_independent &&
+          !section && !nyr_x64_c_func_needs_direct_encoder(&funcs[i])) {
         nyr_mach_func_t mach = {0};
         char reason[256] = {0};
         if (nyr_mach_lower_nir(&funcs[i], &mach, target->caps, reason,
@@ -2360,6 +2356,8 @@ static bool nyr_x64_obj_build_c_bundle(
           mach.c_abi = true;
           mach.x64_endbr = cf_protection_branch;
           mach.x64_return_thunk = function_return_thunk_extern;
+          mach.x64_indirect_thunk = retpoline_indirect_calls;
+          mach.x64_inline_thunk = retpoline_inline_calls;
           for (size_t ii = 0; ii < mach.inst_len; ++ii)
             if (mach.insts[ii].opcode == NYR_MACH_CALL)
               mach.insts[ii].call_is_extern = true;
@@ -2395,62 +2393,14 @@ static bool nyr_x64_obj_build_c_bundle(
         if (!machine && getenv("NYC_TRACE_MACHINE_FALLBACK"))
           fprintf(stderr, "NYC object fallback: %s: %s\n", name, reason);
       }
-      if (!machine)
-        nyr_phi_elim((nyr_func_t *)&funcs[i]);
-      bool emitted_direct = false;
       if (!machine) {
-        if (nyr_x64_obj_append_function_with_frame(
+        nyr_phi_elim((nyr_func_t *)&funcs[i]);
+        if (!nyr_x64_obj_append_function_with_frame(
                 code, defs, def_count, relocs, reloc_count, &funcs[i], target,
                 symbol, omit_frame_pointer, position_independent,
                 retpoline_indirect_calls, retpoline_inline_calls,
                 function_return_thunk_extern, cf_protection_branch,
                 function_err, sizeof(function_err))) {
-          emitted_direct = true;
-        } else if (mach_objects == 2 && !omit_frame_pointer &&
-                   !position_independent && !retpoline_indirect_calls &&
-                   !retpoline_inline_calls && !section &&
-                   !nyr_x64_c_func_needs_direct_encoder(&funcs[i])) {
-          /*
-           * Direct encoder does not support this function; try machine encoder.
-           */
-          size_t saved_def = *def_count, saved_reloc = *reloc_count;
-          size_t saved_len = code->len;
-          char reason[256] = {0};
-          nyr_mach_func_t mach = {0};
-          bool mach_ok = false;
-          if (nyr_mach_lower_nir(&funcs[i], &mach, target->caps, reason,
-                                 sizeof(reason))) {
-            mach.c_abi = true;
-            mach.x64_endbr = cf_protection_branch;
-            mach.x64_return_thunk = function_return_thunk_extern;
-            for (size_t ii = 0; ii < mach.inst_len; ++ii)
-              if (mach.insts[ii].opcode == NYR_MACH_CALL)
-                mach.insts[ii].call_is_extern = true;
-            size_t *inst_offsets = NULL;
-            size_t inst_offsets_len = 0;
-            mach_ok = nyr_x64_mach_append_function_debug(
-                code, defs, def_count, relocs, reloc_count, &mach, target,
-                symbol, false, false, NULL, NULL, NULL, NULL, reason,
-                sizeof(reason), &inst_offsets, &inst_offsets_len);
-            int emitted =
-                mach_ok ? nyr_x64_obj_def_index(defs, *def_count, symbol) : -1;
-            if (emitted >= 0)
-              nyr_mach_dump_mixed(&funcs[i], &mach,
-                                  code->data + defs[emitted].off,
-                                  defs[emitted].size, inst_offsets,
-                                  inst_offsets_len, name, stderr);
-            free(inst_offsets);
-          }
-          nyr_mach_func_free(&mach);
-          if (mach_ok) {
-            emitted_direct = true;
-          } else {
-            *def_count = saved_def;
-            *reloc_count = saved_reloc;
-            code->len = saved_len;
-          }
-        }
-        if (!emitted_direct) {
           nyr_set_error(err, err_len,
                         "C object writer failed while emitting function %s: %s",
                         name, function_err[0] ? function_err : "unknown error");
@@ -2618,8 +2568,11 @@ bool nyr_native_emit_elf64_c_object_from_nirs_with_data(
         retpoline_indirect_calls, retpoline_inline_calls,
         function_return_thunk_extern, cf_protection_branch, data, data_count,
         target, &code, defs, &def_count, relocs, &reloc_count, err, err_len);
-  if (ok)
+  if (ok) {
     qsort(defs, def_count, sizeof(*defs), nyr_c_symbol_binding_order);
+    /* Sorting changes definition indices even when the last name stays put. */
+    (void)nyr_x64_obj_def_index(NULL, 0, NULL);
+  }
   if (ok)
     ok = ny_native_emit_elf64_x64_object_bundle_code(
         code.data, code.len, relocs, reloc_count, defs, def_count, path, NULL,

@@ -1,10 +1,12 @@
 /* Local allocation for straight-line i386 integer runs. The surrounding
  * emitter owns frame layout and ABI lowering; every live-out has its normal
- * home at a run boundary. Nonvolatile registers are saved around each run. */
+ * home at a run boundary. The function prologue saves any nonvolatile
+ * registers available to the allocator, including on taken branches. */
 typedef struct {
   int reg;
   unsigned definitions;
-  unsigned representation; /* 0 unknown, 1 low word, 2 signed32, 3 unsigned32, 4 wide */
+  unsigned representation; /* 0 unknown, 1 low word, 2 signed32, 3 unsigned32, 4
+                              wide */
   size_t last;
   bool outside;
   bool dirty;
@@ -15,9 +17,7 @@ typedef struct {
   sm_i386_reg_value_t *values;
   int registers[6];
   unsigned pinned;
-  unsigned used;
   size_t at;
-  char stack_bias[224];
   const unsigned char *targeted; /* branch-targeted NYIR labels, or NULL */
   size_t label_max;
 } sm_i386_regs_t;
@@ -30,11 +30,9 @@ static bool sm_i386_reg_label_targeted(const sm_i386_regs_t *r, int64_t label) {
   return r->targeted[label] != 0;
 }
 
-static const char *const sm_i386_gpr[] = {
-    "%eax", "%ecx", "%edx", "%ebx", "%esi", "%edi"};
 static const char *const sm_i386_gpr8[] = {"%al", "%cl", "%dl", "%bl"};
-static const char *const sm_i386_gpr16[] = {
-    "%ax", "%cx", "%dx", "%bx", "%si", "%di"};
+static const char *const sm_i386_gpr16[] = {"%ax", "%cx", "%dx",
+                                            "%bx", "%si", "%di"};
 
 static bool sm_i386_reg_input(const sm_i386_regs_t *r, int value) {
   return value >= 0 && value < r->c->nyir->next_value;
@@ -72,14 +70,14 @@ static size_t sm_i386_reg_instruction(sm_i386_regs_t *r, size_t i) {
       i + 2 < r->c->nyir->len) {
     const nyr_inst_t *left = &r->c->nyir->data[i + 1];
     const nyr_inst_t *right = &r->c->nyir->data[i + 2];
-    if (sm_i386_match_sign_extend(r->c, i + 1, &bits) &&
-        left->a == in->dst &&
+    if (sm_i386_match_sign_extend(r->c, i + 1, &bits) && left->a == in->dst &&
         bits == ((in->flags & NYIR_INST_F_MEM_BYTE) ? 8u : 16u) &&
-        r->values[in->dst].definitions == 1 &&
-        right->dst >= 0 && right->dst < r->c->nyir->next_value &&
+        r->values[in->dst].definitions == 1 && right->dst >= 0 &&
+        right->dst < r->c->nyir->next_value &&
         r->values[right->dst].definitions == 1 &&
         r->c->i386_uses->offsets[in->dst + 1] -
-                r->c->i386_uses->offsets[in->dst] == 1 &&
+                r->c->i386_uses->offsets[in->dst] ==
+            1 &&
         r->c->i386_uses->users[r->c->i386_uses->offsets[in->dst]] == i + 1 &&
         sm_i386_reg_input(r, in->a) &&
         sm_i386_reg_representation(r, right->dst) < 4)
@@ -97,9 +95,8 @@ static size_t sm_i386_reg_instruction(sm_i386_regs_t *r, size_t i) {
     if (only_pair)
       return 2;
   }
-  if (in->dst >= 0 &&
-      (r->values[in->dst].definitions != 1 ||
-       sm_i386_reg_representation(r, in->dst) == 4))
+  if (in->dst >= 0 && (r->values[in->dst].definitions != 1 ||
+                       sm_i386_reg_representation(r, in->dst) == 4))
     return 0;
   switch (in->op) {
   case NYIR_LABEL:
@@ -121,13 +118,27 @@ static size_t sm_i386_reg_instruction(sm_i386_regs_t *r, size_t i) {
   case NYIR_BR_IF:
     return sm_i386_reg_input(r, in->a) &&
            !sm_i386_truth_needs_high(r->c, in->a);
+  case NYIR_RET:
+    return in->a < 0 || (sm_i386_reg_input(r, in->a) &&
+                         in->scalar_class != NYIR_SCALAR_F32 &&
+                         in->scalar_class != NYIR_SCALAR_F64 &&
+                         (in->scalar_class != NYIR_SCALAR_I64_RAW ||
+                          (in->flags & NYIR_INST_F_I386_RET32)));
+  case NYIR_CALL:
+    return !(in->flags & NYIR_INST_F_SRET) &&
+           ((in->flags & NYIR_INST_F_INDIRECT)
+                ? r->c->frame_align == 4
+                : in->symbol && strncmp(in->symbol, "rt_", 3)) &&
+           in->scalar_class != NYIR_SCALAR_F32 &&
+           in->scalar_class != NYIR_SCALAR_F64;
   case NYIR_SHL_I64:
   case NYIR_SAR_I64: {
     int64_t shift = 0;
     if (!sm_i386_reg_input(r, in->a) ||
         !sm_i386_const_value(r->c, in->b, &shift) || shift < 0 || shift >= 64)
       return 0;
-    if (in->op == NYIR_SHL_I64) return 1;
+    if (in->op == NYIR_SHL_I64)
+      return 1;
     nyr_range_t range = {0};
     return sm_i386_range_for_value(r->c, in->a, &range) &&
            range.min >= INT32_MIN && range.max <= UINT32_MAX &&
@@ -140,8 +151,12 @@ static size_t sm_i386_reg_instruction(sm_i386_regs_t *r, size_t i) {
   }
   case NYIR_BSWAP32_I64:
     return sm_i386_reg_input(r, in->a);
-  case NYIR_ADD_I64: case NYIR_SUB_I64: case NYIR_MUL_I64:
-  case NYIR_AND_I64: case NYIR_OR_I64: case NYIR_XOR_I64:
+  case NYIR_ADD_I64:
+  case NYIR_SUB_I64:
+  case NYIR_MUL_I64:
+  case NYIR_AND_I64:
+  case NYIR_OR_I64:
+  case NYIR_XOR_I64:
   case NYIR_CMP_I64: {
     bool is_unsigned = false;
     if (in->op == NYIR_CMP_I64 && !sm_i386_cmp32_mode(r->c, in, &is_unsigned))
@@ -168,7 +183,7 @@ static size_t sm_i386_reg_instruction(sm_i386_regs_t *r, size_t i) {
 }
 
 static bool sm_i386_reg_high(sm_i386_regs_t *r, int reg, int offset,
-                              unsigned representation) {
+                             unsigned representation) {
   if (representation == 3)
     return sm_i386_store_u32(r->c, offset, 0);
   if (representation != 2)
@@ -191,8 +206,61 @@ static bool sm_i386_reg_home(sm_i386_regs_t *r, int value) {
   return true;
 }
 
+/* Keep live values in ABI-preserved registers. With the four-byte stack ABI,
+ * scalar arguments can use their assigned registers; an indirect call
+ * still needs its target address in a frame home. */
+static bool sm_i386_reg_call(sm_i386_regs_t *r, const nyr_inst_t *in) {
+  int args[NYIR_CALL_MAX_ARGS], count = 0;
+  if (!nyr_call_args(in, r->c->nyir->next_value, args, NYIR_CALL_MAX_ARGS,
+                     &count, NULL, 0))
+    return false;
+  bool register_args = r->c->frame_align == 4 && !in->i386_wide_args &&
+                       (in->flags & NYIR_INST_F_I386_C_ABI);
+  for (int a = 0; register_args && a < count; ++a) {
+    nyr_scalar_class_t cls = nyr_call_arg_class_get(in, (size_t)a);
+    register_args = cls != NYIR_SCALAR_AGGREGATE && cls != NYIR_SCALAR_F32 &&
+                    cls != NYIR_SCALAR_F64;
+  }
+  bool indirect = (in->flags & NYIR_INST_F_INDIRECT) != 0;
+  int cached[NYIR_CALL_MAX_ARGS];
+  for (int a = 0; a < count; ++a) {
+    if (register_args && (!indirect || a != 0))
+      cached[a] = r->values[args[a]].reg;
+    else {
+      if (!sm_i386_reg_home(r, args[a]))
+        return false;
+      if (register_args)
+        cached[a] = -1;
+    }
+  }
+  for (int reg = 0; reg < 3; ++reg) {
+    int value = r->registers[reg];
+    if (value < 0)
+      continue;
+    if ((r->values[value].last > r->at || r->values[value].outside) &&
+        !sm_i386_reg_home(r, value))
+      return false;
+    r->values[value].reg = -1;
+    r->registers[reg] = -1;
+  }
+  /* EAX carries a low-word result until a spill or run exit needs its home.
+   * A wide result may additionally need EDX, so materialize it at the call. */
+  int dst = in->dst;
+  bool dirty = dst >= 0 && r->values[dst].representation == 1;
+  if (!sm_call(r->c, in, register_args ? cached : NULL, dirty))
+    return false;
+  if (dst >= 0) {
+    r->values[dst].reg = 0;
+    r->values[dst].dirty = dirty;
+    r->registers[0] = dst;
+  }
+  return true;
+}
+
 static int sm_i386_reg_allocate(sm_i386_regs_t *r, bool byte) {
-  int limit = byte ? 4 : r->c->i386_register_limit;
+  int limit = r->c->i386_register_limit;
+  if (byte && limit > 4)
+    limit = 4;
   int chosen = -1;
   for (int reg = 0; reg < limit; ++reg) {
     if (r->pinned & (1u << reg))
@@ -206,8 +274,8 @@ static int sm_i386_reg_allocate(sm_i386_regs_t *r, bool byte) {
       chosen = reg;
       break;
     }
-    if (chosen < 0 || r->values[value].last >
-                        r->values[r->registers[chosen]].last)
+    if (chosen < 0 ||
+        r->values[value].last > r->values[r->registers[chosen]].last)
       chosen = reg;
   }
   if (chosen < 0)
@@ -220,7 +288,6 @@ static int sm_i386_reg_allocate(sm_i386_regs_t *r, bool byte) {
     r->values[old].reg = -1;
   }
   r->registers[chosen] = -1;
-  r->used |= 1u << chosen;
   return chosen;
 }
 
@@ -236,32 +303,31 @@ static int sm_i386_reg_load(sm_i386_regs_t *r, int value, bool byte) {
     return -1;
   int64_t constant = 0;
   bool is_constant = reg < 0 && sm_i386_const_value(r->c, value, &constant);
-  bool ok = reg >= 0
-      ? nyr_printf(r->c->w, "\tmovl\t%s, %s\n", sm_i386_gpr[reg], sm_i386_gpr[target])
+  bool ok =
+      reg >= 0 ? nyr_printf(r->c->w, "\tmovl\t%s, %s\n", sm_i386_gpr[reg],
+                            sm_i386_gpr[target])
       /* Compare and branch paths materialize EFLAGS after loading operands. */
       : is_constant && (uint32_t)constant == 0
-          ? nyr_printf(r->c->w, "\txorl\t%s, %s\n",
-                       sm_i386_gpr[target], sm_i386_gpr[target])
-          : is_constant && ((uint32_t)constant == 1 ||
-                            (uint32_t)constant == UINT32_MAX)
-              ? nyr_printf(r->c->w, "\txorl\t%s, %s\n\t%s\t%s\n",
-                           sm_i386_gpr[target], sm_i386_gpr[target],
-                           (uint32_t)constant == 1 ? "incl" : "decl",
-                           sm_i386_gpr[target])
-          : is_constant && (int32_t)(uint32_t)constant >= INT8_MIN &&
-                (int32_t)(uint32_t)constant <= INT8_MAX
-              ? nyr_printf(r->c->w, "\tpushl\t$%" PRId32 "\n\tpopl\t%s\n",
-                           (int32_t)(uint32_t)constant, sm_i386_gpr[target])
-          : is_constant && target < 4 &&
-                (uint32_t)constant >= 128 && (uint32_t)constant <= 255
-              ? nyr_printf(r->c->w, "\txorl\t%s, %s\n\tmovb\t$%u, %s\n",
-                           sm_i386_gpr[target], sm_i386_gpr[target],
-                           (unsigned)(uint32_t)constant,
-                           sm_i386_gpr8[target])
-          : is_constant
-              ? nyr_printf(r->c->w, "\tmovl\t$0x%08" PRIx32 ", %s\n",
-                           (uint32_t)constant, sm_i386_gpr[target])
-              : sm_ld(r->c, sm_i386_gpr[target], sm_voff(r->c, value));
+          ? nyr_printf(r->c->w, "\txorl\t%s, %s\n", sm_i386_gpr[target],
+                       sm_i386_gpr[target])
+      : is_constant &&
+              ((uint32_t)constant == 1 || (uint32_t)constant == UINT32_MAX)
+          ? nyr_printf(r->c->w, "\txorl\t%s, %s\n\t%s\t%s\n",
+                       sm_i386_gpr[target], sm_i386_gpr[target],
+                       (uint32_t)constant == 1 ? "incl" : "decl",
+                       sm_i386_gpr[target])
+      : is_constant && (int32_t)(uint32_t)constant >= INT8_MIN &&
+              (int32_t)(uint32_t)constant <= INT8_MAX
+          ? nyr_printf(r->c->w, "\tpushl\t$%" PRId32 "\n\tpopl\t%s\n",
+                       (int32_t)(uint32_t)constant, sm_i386_gpr[target])
+      : is_constant && target < 4 && (uint32_t)constant >= 128 &&
+              (uint32_t)constant <= 255
+          ? nyr_printf(r->c->w, "\txorl\t%s, %s\n\tmovb\t$%u, %s\n",
+                       sm_i386_gpr[target], sm_i386_gpr[target],
+                       (unsigned)(uint32_t)constant, sm_i386_gpr8[target])
+      : is_constant ? nyr_printf(r->c->w, "\tmovl\t$0x%08" PRIx32 ", %s\n",
+                                 (uint32_t)constant, sm_i386_gpr[target])
+                    : sm_ld(r->c, sm_i386_gpr[target], sm_voff(r->c, value));
   if (!ok)
     return -1;
   if (reg >= 0)
@@ -276,15 +342,15 @@ static int sm_i386_reg_load(sm_i386_regs_t *r, int value, bool byte) {
  * result of the instruction at r->at: the value is resident, dead after this
  * instruction, and not needed beyond the run boundary. */
 static bool sm_i386_reg_reusable(const sm_i386_regs_t *r, int value) {
-  if (value < 0 || value >= r->c->nyir->next_value) return false;
+  if (value < 0 || value >= r->c->nyir->next_value)
+    return false;
   return r->values[value].reg >= 0 && r->values[value].last <= r->at;
 }
 
-static int sm_i386_reg_result(sm_i386_regs_t *r, int dst, int source,
-                               bool byte, bool copy_source) {
+static int sm_i386_reg_result(sm_i386_regs_t *r, int dst, int source, bool byte,
+                              bool copy_source) {
   int reg = source >= 0 ? r->values[source].reg : -1;
-  if (reg >= 0 && (!byte || reg < 4) &&
-      r->values[source].last <= r->at) {
+  if (reg >= 0 && (!byte || reg < 4) && r->values[source].last <= r->at) {
     if (r->values[source].outside && !sm_i386_reg_home(r, source))
       return -1;
     r->values[source].reg = -1;
@@ -307,10 +373,12 @@ static int sm_i386_reg_result(sm_i386_regs_t *r, int dst, int source,
 
 /* Sole-use lookup through the use-def map: exactly one instruction reads
  * the value. */
-static bool sm_i386_sole_user(const sm_i386_regs_t *r, int value, size_t *user) {
+static bool sm_i386_sole_user(const sm_i386_regs_t *r, int value,
+                              size_t *user) {
   if (!sm_i386_reg_input(r, value))
     return false;
-  if (r->c->i386_uses->offsets[value + 1] - r->c->i386_uses->offsets[value] != 1)
+  if (r->c->i386_uses->offsets[value + 1] - r->c->i386_uses->offsets[value] !=
+      1)
     return false;
   *user = r->c->i386_uses->users[r->c->i386_uses->offsets[value]];
   return true;
@@ -350,8 +418,8 @@ static size_t sm_i386_resolve_fold(sm_i386_regs_t *r, size_t at, size_t end,
     const nyr_inst_t *use = &c->nyir->data[user];
     if (use->op == NYIR_LOAD_I64 || use->op == NYIR_STORE_I64) {
       if (use->a != dst ||
-          !(use->flags & (NYIR_INST_F_MEM_BYTE | NYIR_INST_F_MEM_U16 |
-                          NYIR_INST_F_MEM_I32)))
+          !(use->flags &
+            (NYIR_INST_F_MEM_BYTE | NYIR_INST_F_MEM_U16 | NYIR_INST_F_MEM_I32)))
         return 0;
       links[count++] = dst;
       for (size_t n = 0; n < count; ++n) {
@@ -362,8 +430,8 @@ static size_t sm_i386_resolve_fold(sm_i386_regs_t *r, size_t at, size_t end,
         r->values[base].last = user;
       return user;
     }
-    if ((use->op != NYIR_ADD_I64 && use->op != NYIR_SUB_I64) ||
-        use->a != dst || !sm_i386_reg_input(r, use->dst) ||
+    if ((use->op != NYIR_ADD_I64 && use->op != NYIR_SUB_I64) || use->a != dst ||
+        !sm_i386_reg_input(r, use->dst) ||
         r->values[use->dst].definitions != 1 ||
         !sm_i386_const_value(c, use->b, &immediate))
       return 0;
@@ -378,7 +446,7 @@ static size_t sm_i386_resolve_fold(sm_i386_regs_t *r, size_t at, size_t end,
 /* 0: leave this instruction to the general emitter; -1: allocation/output
  * failure; 1: emitted a complete run and advanced *next. */
 static int sm_i386_emit_register_run(ny_sm_ctx_t *c, size_t start, size_t *next,
-                                      int incoming_eax, bool unhomed) {
+                                     int incoming_eax, bool unhomed) {
   size_t count = (size_t)c->nyir->next_value;
   sm_i386_regs_t r = {.c = c};
   r.values = calloc(count, sizeof(*r.values));
@@ -430,14 +498,14 @@ static int sm_i386_emit_register_run(ny_sm_ctx_t *c, size_t start, size_t *next,
   r.targeted = targeted;
   r.label_max = targeted ? label_max - 1 : 0;
   size_t end = start, step = 0;
-  bool has_alloca = false;
   while (end < c->nyir->len && (step = sm_i386_reg_instruction(&r, end))) {
-    has_alloca |= c->nyir->data[end].op == NYIR_ALLOCA;
     end += step;
+    if (c->nyir->data[end - 1].op == NYIR_RET)
+      break;
   }
   /* Even single instructions can benefit when the result has no stack home
    * users beyond this run. */
-  if (end - start < 1) {
+  if (end == start) {
     free(targeted);
     free(fold_base);
     free(fold_disp);
@@ -445,7 +513,8 @@ static int sm_i386_emit_register_run(ny_sm_ctx_t *c, size_t start, size_t *next,
     return 0;
   }
   for (size_t v = 0; v < count; ++v) {
-    for (size_t u = c->i386_uses->offsets[v]; u < c->i386_uses->offsets[v + 1]; ++u) {
+    for (size_t u = c->i386_uses->offsets[v]; u < c->i386_uses->offsets[v + 1];
+         ++u) {
       size_t at = c->i386_uses->users[u];
       if (at < start || at >= end)
         r.values[v].outside = true;
@@ -459,9 +528,6 @@ static int sm_i386_emit_register_run(ny_sm_ctx_t *c, size_t start, size_t *next,
     r.values[incoming_eax].dirty = unhomed;
     sm_i386_reg_representation(&r, incoming_eax);
   }
-  if (has_alloca)
-    snprintf(r.stack_bias, sizeof(r.stack_bias), "%s_register_stack_%zu",
-              c->epilogue, c->copy_serial++);
   nyr_writer_t body = {0};
   nyr_writer_t *output = c->w;
   c->w = &body;
@@ -483,7 +549,16 @@ static int sm_i386_emit_register_run(ny_sm_ctx_t *c, size_t start, size_t *next,
       ++i;
       continue;
     }
-    if (in->op == NYIR_BR_IF) {
+    if (in->op == NYIR_RET) {
+      if (in->a >= 0) {
+        a = sm_i386_reg_load(&r, in->a, false);
+        ok = a >= 0 && (a == 0 || nyr_printf(c->w, "\tmovl\t%s, %%eax\n",
+                                             sm_i386_gpr[a]));
+      }
+      break;
+    } else if (in->op == NYIR_CALL) {
+      ok = sm_i386_reg_call(&r, in);
+    } else if (in->op == NYIR_BR_IF) {
       /* Make homes valid for the taken edge, then keep the register mapping
        * for the linear fallthrough path in this run. */
       for (int reg = 0; ok && reg < 6; ++reg) {
@@ -501,20 +576,21 @@ static int sm_i386_emit_register_run(ny_sm_ctx_t *c, size_t start, size_t *next,
                                 sm_i386_gpr[compare_a], sm_i386_gpr[compare_a]);
         else
           ok = ok && (compare_has_immediate
-              ? nyr_printf(c->w, "\tcmpl\t$0x%08" PRIx32 ", %s\n",
-                           (uint32_t)compare_immediate,
-                           sm_i386_gpr[compare_a])
-              : nyr_printf(c->w, "\tcmpl\t%s, %s\n",
-                           sm_i386_gpr[compare_b], sm_i386_gpr[compare_a]));
+                          ? nyr_printf(c->w, "\tcmpl\t$0x%08" PRIx32 ", %s\n",
+                                       (uint32_t)compare_immediate,
+                                       sm_i386_gpr[compare_a])
+                          : nyr_printf(c->w, "\tcmpl\t%s, %s\n",
+                                       sm_i386_gpr[compare_b],
+                                       sm_i386_gpr[compare_a]));
         comparison = NULL;
       } else if (ok) {
         int branch_reg = sm_i386_reg_load(&r, in->a, false);
         ok = branch_reg >= 0 &&
-             nyr_printf(c->w, "\ttestl\t%s, %s\n",
-                        sm_i386_gpr[branch_reg], sm_i386_gpr[branch_reg]);
+             nyr_printf(c->w, "\ttestl\t%s, %s\n", sm_i386_gpr[branch_reg],
+                        sm_i386_gpr[branch_reg]);
       }
-      ok = ok && nyr_printf(c->w, "\tj%s\t%s_nyir_L%" PRId64 "\n",
-                            condition, c->epilogue, in->imm);
+      ok = ok && nyr_printf(c->w, "\tj%s\t%s_nyir_L%" PRId64 "\n", condition,
+                            c->epilogue, in->imm);
       i += length;
       continue;
     } else if (length == 3) {
@@ -523,19 +599,19 @@ static int sm_i386_emit_register_run(ny_sm_ctx_t *c, size_t start, size_t *next,
       sm_i386_match_sign_extend(c, i + 1, &bits);
       bool fold_load = load->a >= 0 && fold_base[load->a] >= 0;
       a = sm_i386_reg_load(&r, fold_load ? fold_base[load->a] : load->a, false);
-      result = a < 0 ? -1 : sm_i386_reg_result(&r, extend->dst,
-                                               fold_load ? fold_base[load->a]
-                                                         : load->a,
-                                               false, false);
+      result =
+          a < 0 ? -1
+                : sm_i386_reg_result(&r, extend->dst,
+                                     fold_load ? fold_base[load->a] : load->a,
+                                     false, false);
       ok = result >= 0;
       if (ok && fold_load)
-        ok = nyr_printf(c->w, "\tmovs%sl\t%d(%s), %s\n",
-                        bits == 8 ? "b" : "w", fold_disp[load->a],
-                        sm_i386_gpr[a], sm_i386_gpr[result]);
+        ok =
+            nyr_printf(c->w, "\tmovs%sl\t%d(%s), %s\n", bits == 8 ? "b" : "w",
+                       fold_disp[load->a], sm_i386_gpr[a], sm_i386_gpr[result]);
       else if (ok)
-        ok = nyr_printf(c->w, "\tmovs%sl\t(%s), %s\n",
-                        bits == 8 ? "b" : "w", sm_i386_gpr[a],
-                        sm_i386_gpr[result]);
+        ok = nyr_printf(c->w, "\tmovs%sl\t(%s), %s\n", bits == 8 ? "b" : "w",
+                        sm_i386_gpr[a], sm_i386_gpr[result]);
     } else if (length == 2) {
       sm_i386_match_sign_extend(c, i, &bits);
       dst = c->nyir->data[i + 1].dst;
@@ -544,8 +620,8 @@ static int sm_i386_emit_register_run(ny_sm_ctx_t *c, size_t start, size_t *next,
       ok = result >= 0;
       if (ok && bits < 32)
         ok = nyr_printf(c->w, "\tmovs%sl\t%s, %s\n", bits == 8 ? "b" : "w",
-                         bits == 8 ? sm_i386_gpr8[a] : sm_i386_gpr16[a],
-                         sm_i386_gpr[result]);
+                        bits == 8 ? sm_i386_gpr8[a] : sm_i386_gpr16[a],
+                        sm_i386_gpr[result]);
     } else if (in->op == NYIR_SHL_I64 || in->op == NYIR_SAR_I64 ||
                in->op == NYIR_ROR32_I64) {
       int64_t shift = 0;
@@ -565,12 +641,15 @@ static int sm_i386_emit_register_run(ny_sm_ctx_t *c, size_t start, size_t *next,
         }
       }
       if (ok && zero)
-        ok = nyr_printf(c->w, "\txorl\t%s, %s\n", sm_i386_gpr[result], sm_i386_gpr[result]);
+        ok = nyr_printf(c->w, "\txorl\t%s, %s\n", sm_i386_gpr[result],
+                        sm_i386_gpr[result]);
       else if (ok && shift)
         ok = nyr_printf(c->w, "\t%sl\t$%u, %s\n",
-            in->op == NYIR_ROR32_I64 ? "ror" :
-            in->op == NYIR_SHL_I64 ? "shl" : logical ? "shr" : "sar",
-            (unsigned)shift, sm_i386_gpr[result]);
+                        in->op == NYIR_ROR32_I64 ? "ror"
+                        : in->op == NYIR_SHL_I64 ? "shl"
+                        : logical                ? "shr"
+                                                 : "sar",
+                        (unsigned)shift, sm_i386_gpr[result]);
     } else if (in->op == NYIR_BSWAP32_I64) {
       a = sm_i386_reg_load(&r, in->a, false);
       result = a < 0 ? -1 : sm_i386_reg_result(&r, dst, in->a, false, true);
@@ -584,9 +663,11 @@ static int sm_i386_emit_register_run(ny_sm_ctx_t *c, size_t start, size_t *next,
       ok = result >= 0;
       if (ok)
         ok = c->i386_position_independent
-            ? nyr_printf(c->w, "\tcall\t1f\n1:\n\tpopl\t%s\n\taddl\t$%s-1b, %s\n",
-                          sm_i386_gpr[result], symbol, sm_i386_gpr[result])
-            : nyr_printf(c->w, "\tmovl\t$%s, %s\n", symbol, sm_i386_gpr[result]);
+                 ? nyr_printf(
+                       c->w, "\tcall\t1f\n1:\n\tpopl\t%s\n\taddl\t$%s-1b, %s\n",
+                       sm_i386_gpr[result], symbol, sm_i386_gpr[result])
+                 : nyr_printf(c->w, "\tmovl\t$%s, %s\n", symbol,
+                              sm_i386_gpr[result]);
     } else if (in->op == NYIR_ADDR_LOCAL || in->op == NYIR_ALLOCA) {
       int offset = 0;
       if (in->op == NYIR_ADDR_LOCAL) {
@@ -595,11 +676,12 @@ static int sm_i386_emit_register_run(ny_sm_ctx_t *c, size_t start, size_t *next,
         ok = sm_i386_alloca_offset(c, in, &offset);
       }
       result = ok ? sm_i386_reg_result(&r, dst, -1, false, false) : -1;
-      ok = result >= 0 && (in->op == NYIR_ADDR_LOCAL
-          ? nyr_printf(c->w, "\tleal\t%d(%s), %s\n", offset,
-                       sm_i386_frame_reg(c), sm_i386_gpr[result])
-          : nyr_printf(c->w, "\tleal\t%d+%s(%%esp), %s\n", offset,
-                         r.stack_bias, sm_i386_gpr[result]));
+      ok = result >= 0 &&
+           (in->op == NYIR_ADDR_LOCAL
+                ? nyr_printf(c->w, "\tleal\t%d(%s), %s\n", offset,
+                             sm_i386_frame_reg(c), sm_i386_gpr[result])
+                : nyr_printf(c->w, "\tleal\t%d(%%esp), %s\n", offset,
+                             sm_i386_gpr[result]));
     } else if (in->op == NYIR_CONST_I64) {
       /* Every low-word consumer rematerializes constants. Only an external
        * wide consumer needs the canonical high word written here. */
@@ -616,25 +698,28 @@ static int sm_i386_emit_register_run(ny_sm_ctx_t *c, size_t start, size_t *next,
       b = a < 0 ? -1 : sm_i386_reg_load(&r, in->b, false);
       int other = b < 0 ? -1 : sm_i386_reg_load(&r, in->c, false);
       result = other < 0 ? -1 : sm_i386_reg_result(&r, dst, in->c, false, true);
-      ok = result >= 0 && nyr_printf(c->w, "\ttestl\t%s, %s\n\tcmovnel\t%s, %s\n",
-          sm_i386_gpr[a], sm_i386_gpr[a], sm_i386_gpr[b], sm_i386_gpr[result]);
+      ok = result >= 0 &&
+           nyr_printf(c->w, "\ttestl\t%s, %s\n\tcmovnel\t%s, %s\n",
+                      sm_i386_gpr[a], sm_i386_gpr[a], sm_i386_gpr[b],
+                      sm_i386_gpr[result]);
     } else if (in->op == NYIR_STORE_I64) {
       bool fold_store = in->a >= 0 && fold_base[in->a] >= 0;
       a = sm_i386_reg_load(&r, fold_store ? fold_base[in->a] : in->a, false);
-      b = a < 0 ? -1 : sm_i386_reg_load(&r, in->c,
-                                        (in->flags & NYIR_INST_F_MEM_BYTE) != 0);
+      b = a < 0 ? -1
+                : sm_i386_reg_load(&r, in->c,
+                                   (in->flags & NYIR_INST_F_MEM_BYTE) != 0);
       ok = a >= 0 && b >= 0;
       if (ok) {
-        const char *move = in->flags & NYIR_INST_F_MEM_BYTE ? "b" :
-                           in->flags & NYIR_INST_F_MEM_U16 ? "w" : "l";
-        const char *data = in->flags & NYIR_INST_F_MEM_BYTE ? sm_i386_gpr8[b] :
-                           in->flags & NYIR_INST_F_MEM_U16 ? sm_i386_gpr16[b] :
-                           sm_i386_gpr[b];
-        ok = fold_store
-            ? nyr_printf(c->w, "\tmov%s\t%s, %d(%s)\n", move, data,
-                         fold_disp[in->a], sm_i386_gpr[a])
-            : nyr_printf(c->w, "\tmov%s\t%s, (%s)\n", move, data,
-                         sm_i386_gpr[a]);
+        const char *move = in->flags & NYIR_INST_F_MEM_BYTE  ? "b"
+                           : in->flags & NYIR_INST_F_MEM_U16 ? "w"
+                                                             : "l";
+        const char *data = in->flags & NYIR_INST_F_MEM_BYTE  ? sm_i386_gpr8[b]
+                           : in->flags & NYIR_INST_F_MEM_U16 ? sm_i386_gpr16[b]
+                                                             : sm_i386_gpr[b];
+        ok = fold_store ? nyr_printf(c->w, "\tmov%s\t%s, %d(%s)\n", move, data,
+                                     fold_disp[in->a], sm_i386_gpr[a])
+                        : nyr_printf(c->w, "\tmov%s\t%s, (%s)\n", move, data,
+                                     sm_i386_gpr[a]);
       }
     } else if (in->op == NYIR_STORE_LOCAL) {
       a = sm_i386_reg_load(&r, in->a, false);
@@ -646,10 +731,10 @@ static int sm_i386_emit_register_run(ny_sm_ctx_t *c, size_t start, size_t *next,
       int64_t immediate = 0;
       bool has_immediate = in->op != NYIR_COPY && in->op != NYIR_LOAD_I64 &&
                            sm_i386_const_value(c, in->b, &immediate);
-      bool fold_load = in->op == NYIR_LOAD_I64 && in->a >= 0 &&
-                       fold_base[in->a] >= 0;
-      if (!fold_load &&
-          (in->op == NYIR_ADD_I64 || in->op == NYIR_SUB_I64) && in->dst >= 0) {
+      bool fold_load =
+          in->op == NYIR_LOAD_I64 && in->a >= 0 && fold_base[in->a] >= 0;
+      if (!fold_load && (in->op == NYIR_ADD_I64 || in->op == NYIR_SUB_I64) &&
+          in->dst >= 0) {
         bool folded = fold_base[in->dst] >= 0;
         if (!folded && has_immediate)
           folded = sm_i386_resolve_fold(&r, i, end, fold_base, fold_disp) != 0;
@@ -660,14 +745,18 @@ static int sm_i386_emit_register_run(ny_sm_ctx_t *c, size_t start, size_t *next,
         }
       }
       a = sm_i386_reg_load(&r, fold_load ? fold_base[in->a] : in->a, false);
-      if (a >= 0 && !has_immediate && in->op != NYIR_COPY && in->op != NYIR_LOAD_I64)
+      if (a >= 0 && !has_immediate && in->op != NYIR_COPY &&
+          in->op != NYIR_LOAD_I64)
         b = sm_i386_reg_load(&r, in->b, false);
       bool compare = in->op == NYIR_CMP_I64;
-      if (compare && a >= 0 && (has_immediate || b >= 0) &&
-          i + 1 < end && c->nyir->data[i + 1].op == NYIR_BR_IF &&
+      if (compare && a >= 0 && (has_immediate || b >= 0) && i + 1 < end &&
+          c->nyir->data[i + 1].op == NYIR_BR_IF &&
           c->nyir->data[i + 1].a == dst && c->i386_single_use[dst]) {
-        comparison = in; compare_a = a; compare_b = b;
-        compare_has_immediate = has_immediate; compare_immediate = immediate;
+        comparison = in;
+        compare_a = a;
+        compare_b = b;
+        compare_has_immediate = has_immediate;
+        compare_immediate = immediate;
         i += length;
         continue;
       }
@@ -686,43 +775,54 @@ static int sm_i386_emit_register_run(ny_sm_ctx_t *c, size_t start, size_t *next,
         src_value = in->b;
         other_reg = a;
       }
-      result = a < 0 ? -1 : sm_i386_reg_result(&r, dst, src_value, compare,
-                                               !compare && in->op != NYIR_LOAD_I64);
+      bool extend_byte = a >= 0 && a < 4 && has_immediate &&
+                         in->op == NYIR_AND_I64 && immediate == UINT8_MAX;
+      bool extend_word =
+          has_immediate && in->op == NYIR_AND_I64 && immediate == UINT16_MAX;
+      result = a < 0 ? -1
+                     : sm_i386_reg_result(&r, dst, src_value, compare,
+                                          !compare && in->op != NYIR_LOAD_I64 &&
+                                              !extend_byte && !extend_word);
       ok = result >= 0;
       if (ok && in->op == NYIR_LOAD_I64)
-        ok = fold_load
-            ? nyr_printf(c->w, "\t%s\t%d(%s), %s\n",
-                in->flags & NYIR_INST_F_MEM_BYTE ? "movzbl" :
-                in->flags & NYIR_INST_F_MEM_U16 ? "movzwl" : "movl",
-                fold_disp[in->a], sm_i386_gpr[a], sm_i386_gpr[result])
-            : nyr_printf(c->w, "\t%s\t(%s), %s\n",
-                in->flags & NYIR_INST_F_MEM_BYTE ? "movzbl" :
-                in->flags & NYIR_INST_F_MEM_U16 ? "movzwl" : "movl",
-                sm_i386_gpr[a], sm_i386_gpr[result]);
+        ok = fold_load ? nyr_printf(c->w, "\t%s\t%d(%s), %s\n",
+                                    in->flags & NYIR_INST_F_MEM_BYTE  ? "movzbl"
+                                    : in->flags & NYIR_INST_F_MEM_U16 ? "movzwl"
+                                                                      : "movl",
+                                    fold_disp[in->a], sm_i386_gpr[a],
+                                    sm_i386_gpr[result])
+                       : nyr_printf(c->w, "\t%s\t(%s), %s\n",
+                                    in->flags & NYIR_INST_F_MEM_BYTE  ? "movzbl"
+                                    : in->flags & NYIR_INST_F_MEM_U16 ? "movzwl"
+                                                                      : "movl",
+                                    sm_i386_gpr[a], sm_i386_gpr[result]);
       else if (ok && compare) {
         bool is_unsigned = false;
         ok = sm_i386_cmp32_mode(c, in, &is_unsigned);
         if (ok)
           ok = has_immediate
-              ? nyr_printf(c->w, "\tcmpl\t$0x%08" PRIx32 ", %s\n",
-                            (uint32_t)immediate, sm_i386_gpr[a])
-              : b >= 0 && nyr_printf(c->w, "\tcmpl\t%s, %s\n",
-                                      sm_i386_gpr[b], sm_i386_gpr[a]);
+                   ? nyr_printf(c->w, "\tcmpl\t$0x%08" PRIx32 ", %s\n",
+                                (uint32_t)immediate, sm_i386_gpr[a])
+                   : b >= 0 && nyr_printf(c->w, "\tcmpl\t%s, %s\n",
+                                          sm_i386_gpr[b], sm_i386_gpr[a]);
         ok = ok && nyr_printf(c->w, "\tset%s\t%s\n\tmovzbl\t%s, %s\n",
-                 sm_i386_cmp_condition(in->cmp, is_unsigned), sm_i386_gpr8[result],
-                 sm_i386_gpr8[result], sm_i386_gpr[result]);
+                              sm_i386_cmp_condition(in->cmp, is_unsigned),
+                              sm_i386_gpr8[result], sm_i386_gpr8[result],
+                              sm_i386_gpr[result]);
       } else if (ok && in->op != NYIR_COPY) {
-        const char *op = in->op == NYIR_ADD_I64 ? "add" :
-                         in->op == NYIR_SUB_I64 ? "sub" :
-                         in->op == NYIR_MUL_I64 ? "imul" :
-                         in->op == NYIR_AND_I64 ? "and" :
-                         in->op == NYIR_OR_I64 ? "or" : "xor";
+        const char *op = in->op == NYIR_ADD_I64   ? "add"
+                         : in->op == NYIR_SUB_I64 ? "sub"
+                         : in->op == NYIR_MUL_I64 ? "imul"
+                         : in->op == NYIR_AND_I64 ? "and"
+                         : in->op == NYIR_OR_I64  ? "or"
+                                                  : "xor";
         if (has_immediate) {
-          bool identity = ((in->op == NYIR_ADD_I64 || in->op == NYIR_SUB_I64 ||
-                            in->op == NYIR_OR_I64 || in->op == NYIR_XOR_I64) &&
-                           (uint32_t)immediate == 0) ||
-                          (in->op == NYIR_AND_I64 && (uint32_t)immediate == UINT32_MAX) ||
-                          (in->op == NYIR_MUL_I64 && (uint32_t)immediate == 1);
+          bool identity =
+              ((in->op == NYIR_ADD_I64 || in->op == NYIR_SUB_I64 ||
+                in->op == NYIR_OR_I64 || in->op == NYIR_XOR_I64) &&
+               (uint32_t)immediate == 0) ||
+              (in->op == NYIR_AND_I64 && (uint32_t)immediate == UINT32_MAX) ||
+              (in->op == NYIR_MUL_I64 && (uint32_t)immediate == 1);
           bool addsub = in->op == NYIR_ADD_I64 || in->op == NYIR_SUB_I64;
           bool one = (uint32_t)immediate == 1;
           bool minus_one = (uint32_t)immediate == UINT32_MAX;
@@ -731,23 +831,28 @@ static int sm_i386_emit_register_run(ny_sm_ctx_t *c, size_t start, size_t *next,
           bool decrement = (in->op == NYIR_SUB_I64 && one) ||
                            (in->op == NYIR_ADD_I64 && minus_one);
           ok = identity ||
-               (addsub && increment
+               (extend_byte || extend_word
+                    ? nyr_printf(
+                          c->w, "\tmovz%sl\t%s, %s\n", extend_byte ? "b" : "w",
+                          extend_byte ? sm_i386_gpr8[a] : sm_i386_gpr16[a],
+                          sm_i386_gpr[result])
+                : addsub && increment
                     ? nyr_printf(c->w, "\tincl\t%s\n", sm_i386_gpr[result])
-                    : addsub && decrement
-                          ? nyr_printf(c->w, "\tdecl\t%s\n", sm_i386_gpr[result])
-                          : nyr_printf(c->w, "\t%sl\t$0x%08" PRIx32 ", %s\n",
-                                       op, (uint32_t)immediate,
-                                       sm_i386_gpr[result]));
+                : addsub && decrement
+                    ? nyr_printf(c->w, "\tdecl\t%s\n", sm_i386_gpr[result])
+                    : nyr_printf(c->w, "\t%sl\t$0x%08" PRIx32 ", %s\n", op,
+                                 (uint32_t)immediate, sm_i386_gpr[result]));
         } else {
-          ok = other_reg >= 0 && nyr_printf(c->w, "\t%sl\t%s, %s\n", op,
-                                            sm_i386_gpr[other_reg],
-                                            sm_i386_gpr[result]);
+          ok = other_reg >= 0 &&
+               nyr_printf(c->w, "\t%sl\t%s, %s\n", op, sm_i386_gpr[other_reg],
+                          sm_i386_gpr[result]);
         }
       }
     }
     i += length;
   }
-  for (int reg = 0; ok && reg < 6; ++reg) {
+  const nyr_inst_t *last = &c->nyir->data[end - 1];
+  for (int reg = 0; ok && last->op != NYIR_RET && reg < 6; ++reg) {
     int v = r.registers[reg];
     if (v >= 0 && r.values[v].outside)
       ok = sm_i386_reg_home(&r, v);
@@ -755,19 +860,12 @@ static int sm_i386_emit_register_run(ny_sm_ctx_t *c, size_t start, size_t *next,
   if (comparison)
     ok = false;
   c->w = output;
-  if (has_alloca) {
-    int saved = 0;
-    for (int reg = 3; reg < 6; ++reg)
-      if (!c->i386_global_registers && (r.used & (1u << reg))) saved += 4;
-    ok = ok && nyr_printf(output, "\t.set %s, %d\n", r.stack_bias, saved);
-  }
-  for (int reg = 3; ok && reg < 6; ++reg)
-    if (!c->i386_global_registers && (r.used & (1u << reg)))
-      ok = nyr_printf(output, "\tpushl\t%s\n", sm_i386_gpr[reg]);
   ok = ok && nyr_put(output, body.data ? body.data : "");
-  for (int reg = 5; ok && reg >= 3; --reg)
-    if (!c->i386_global_registers && (r.used & (1u << reg)))
-      ok = nyr_printf(output, "\tpopl\t%s\n", sm_i386_gpr[reg]);
+  if (ok && last->op == NYIR_RET) {
+    c->i386_sret_caller_pop |=
+        (last->flags & NYIR_INST_F_I386_SRET_CALLER_POP) != 0;
+    ok = nyr_printf(output, "\tjmp\t%s\n", c->epilogue);
+  }
   free(body.data);
   free(targeted);
   free(fold_base);

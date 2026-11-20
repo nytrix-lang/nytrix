@@ -1195,7 +1195,7 @@ static bool lower_inline_asm_statement(c_parser_t *p) {
     static const char *const input_constraints[] = {"a", "b", "c",
                                                     "d", "S", "D"};
     int values[6] = {-1, -1, -1, -1, -1, -1};
-    int slots[6] = {-1, -1, -1, -1, -1, -1};
+    int outputs[6];
     char lowered[160];
     bool vmware_port = strcmp(vmware_call, "vmware_port") == 0;
     int64_t port_number = 0;
@@ -1221,7 +1221,15 @@ static bool lower_inline_asm_statement(c_parser_t *p) {
         free(assembly);
         return false;
       }
-      slots[i] = (int)output->slot;
+      outputs[i] =
+          emit_value(p, (nyr_inst_t){.op = NYIR_ADDR_LOCAL,
+                                     .dst = -1,
+                                     .imm = (int64_t)output->slot,
+                                     .scalar_class = NYIR_SCALAR_I64_RAW});
+      if (outputs[i] < 0) {
+        free(assembly);
+        return false;
+      }
     }
     if (vmware_port) {
       ny_ctok_t port_name;
@@ -1273,17 +1281,10 @@ static bool lower_inline_asm_statement(c_parser_t *p) {
     }
     int symbol_len =
         vmware_port
-            ? snprintf(
-                  lowered, sizeof(lowered),
-                  vmware_port_alternative
-                      ? "vmware_port;nyc_slots=%d,%d,%d,%d,%d,%d;port=%lld;alt="
-                        "274"
-                      : "vmware_port;nyc_slots=%d,%d,%d,%d,%d,%d;port=%lld",
-                  slots[0], slots[1], slots[2], slots[3], slots[4], slots[5],
-                  (long long)port_number)
-            : snprintf(lowered, sizeof(lowered),
-                       "%s;nyc_slots=%d,%d,%d,%d,%d,%d", vmware_call, slots[0],
-                       slots[1], slots[2], slots[3], slots[4], slots[5]);
+            ? snprintf(lowered, sizeof(lowered), "vmware_port;port=%lld%s",
+                       (long long)port_number,
+                       vmware_port_alternative ? ";alt=274" : "")
+            : snprintf(lowered, sizeof(lowered), "%s", vmware_call);
     const char *symbol = symbol_len < 0 || (size_t)symbol_len >= sizeof(lowered)
                              ? NULL
                              : nyr_func_own_symbol_copy(p->out, lowered);
@@ -1300,6 +1301,8 @@ static bool lower_inline_asm_statement(c_parser_t *p) {
                      .d = values[3],
                      .e = values[4],
                      .f = values[5],
+                     .extra_args = outputs,
+                     .extra_args_len = 6,
                      .imm = vmware_port ? -141 : -140,
                      .symbol = symbol,
                      .effects = NYIR_EFFECT_CALL | NYIR_EFFECT_READ_MEMORY |
@@ -1482,7 +1485,10 @@ static bool lower_inline_asm_statement(c_parser_t *p) {
         return false;
       }
     }
-    const c_lvalue_t *lvalue = find_asm_memory_lvalue(p, operand.value);
+    /* Aggregate expressions already carry their storage address. In *p
+     * that value can also identify the pointer variable's own lvalue. */
+    const c_lvalue_t *lvalue =
+        operand.type == C_AGG ? NULL : find_asm_memory_lvalue(p, operand.value);
     if (lvalue && lvalue->is_local) {
       c_local_t *local = find_local_slot(p, lvalue->local_slot);
       if (!local || (descriptor_table_asm[i].output && local->is_const)) {
@@ -5846,12 +5852,17 @@ static bool lower_inline_asm_statement(c_parser_t *p) {
       c_label_t *target = find_label_at(p, target_name, p->pos);
       if (!target || accept(p, ",") || !expect(p, ")") || !expect(p, ";"))
         return defer_unsupported_asm(p, open, assembly);
+      int edge = lower_cleanup_edge(p, target);
+      if (edge < 0) {
+        free(assembly);
+        return false;
+      }
       int loaded = emit_value(
           p, (nyr_inst_t){
                  .op = NYIR_INLINE_ASM,
                  .dst = -1,
                  .a = memory_address,
-                 .c = (int)target->id,
+                 .c = edge,
                  .imm = -83,
                  .effects = NYIR_EFFECT_READ_MEMORY | NYIR_EFFECT_MAY_TRAP |
                             NYIR_EFFECT_CONTROL | NYIR_EFFECT_VOLATILE,
@@ -5983,20 +5994,22 @@ static bool lower_inline_asm_statement(c_parser_t *p) {
       if (!target || accept(p, ",") || !expect(p, ")") || !expect(p, ";"))
         return defer_unsupported_asm(p, open, assembly);
       free(assembly);
-      return emit(
-          p,
-          (nyr_inst_t){.op = NYIR_INLINE_ASM,
-                       .dst = -1,
-                       .a = source,
-                       .b = memory_address,
-                       .c = (int)target->id,
-                       .imm = -82,
-                       .effects = NYIR_EFFECT_READ_MEMORY |
-                                  NYIR_EFFECT_WRITE_MEMORY |
-                                  NYIR_EFFECT_MAY_TRAP | NYIR_EFFECT_CONTROL |
-                                  NYIR_EFFECT_VOLATILE,
-                       .symbol = faultable_stores[faultable_store_width].kind},
-          NULL);
+      int edge = lower_cleanup_edge(p, target);
+      return edge >= 0 &&
+             emit(p,
+                  (nyr_inst_t){
+                      .op = NYIR_INLINE_ASM,
+                      .dst = -1,
+                      .a = source,
+                      .b = memory_address,
+                      .c = edge,
+                      .imm = -82,
+                      .effects = NYIR_EFFECT_READ_MEMORY |
+                                 NYIR_EFFECT_WRITE_MEMORY |
+                                 NYIR_EFFECT_MAY_TRAP | NYIR_EFFECT_CONTROL |
+                                 NYIR_EFFECT_VOLATILE,
+                      .symbol = faultable_stores[faultable_store_width].kind},
+                  NULL);
     }
     static const char *const static_cpu_has_needles[] = {
         "# ALT: oldinstr", "testb %[bitnum], %a[cap_byte]", "jnz %l[t_yes]",
@@ -6082,8 +6095,9 @@ static bool lower_inline_asm_statement(c_parser_t *p) {
       int zero = masked < 0 ? masked : emit_i64_constant(p, 0);
       int present =
           zero < 0 ? zero : emit_i64_compare(p, masked, zero, NYIR_CMP_NE);
-      if (present < 0 || !emit_branch_if(p, present, (int64_t)targets[0]->id) ||
-          !emit_branch(p, (int64_t)targets[1]->id))
+      int yes = present >= 0 ? lower_cleanup_edge(p, targets[0]) : -1;
+      int no = yes >= 0 ? lower_cleanup_edge(p, targets[1]) : -1;
+      if (no < 0 || !emit_branch_if(p, present, yes) || !emit_branch(p, no))
         return false;
       return true;
     }
@@ -6128,6 +6142,11 @@ static bool lower_inline_asm_statement(c_parser_t *p) {
     c_label_t *target = find_label_at(p, target_name, p->pos);
     if (!target || accept(p, ",") || !expect(p, ")") || !expect(p, ";"))
       return defer_unsupported_asm(p, open, assembly);
+    int edge = lower_cleanup_edge(p, target);
+    if (edge < 0) {
+      free(assembly);
+      return false;
+    }
     if (!append_asm_bytes(&assembly, &assembly_len, &assembly_cap, "\0", 1)) {
       free(assembly);
       return false;
@@ -6137,7 +6156,7 @@ static bool lower_inline_asm_statement(c_parser_t *p) {
                                 .dst = -1,
                                 .a = inputs[0],
                                 .b = inputs[1],
-                                .c = (int)target->id,
+                                .c = edge,
                                 .imm = -14,
                                 .symbol = (const char *)assembly},
                    NULL);
@@ -8320,7 +8339,6 @@ static bool lower_inline_asm_statement(c_parser_t *p) {
   inline_asm_named_value_t asm_named_inputs[16];
   size_t asm_named_input_count = 0;
   size_t memory_operand_index = SIZE_MAX;
-  int64_t inline_asm_local_output = 0;
   int asm_memory_input_value = -1;
   int asm_memory_output_value = -1;
   int asm_memory_register_input_value = -1;
@@ -8506,11 +8524,10 @@ static bool lower_inline_asm_statement(c_parser_t *p) {
   }
   if (register_load_template) {
     ny_ctok_t output_name;
-    if (!expect(p, ":") ||
-        !inline_asm_string_sequence_is(p, "=a", &p->pos) ||
+    if (!expect(p, ":") || !inline_asm_string_sequence_is(p, "=a", &p->pos) ||
         !expect(p, "(") || !parse_name(p, &output_name) || !expect(p, ")") ||
-        !expect(p, ":") ||
-        !inline_asm_string_sequence_is(p, "r", &p->pos) || !expect(p, "("))
+        !expect(p, ":") || !inline_asm_string_sequence_is(p, "r", &p->pos) ||
+        !expect(p, "("))
       return defer_unsupported_asm(p, open, assembly);
     c_value_t pointer = parse_expr(p, 1);
     if (!expect(p, ")"))
@@ -8629,8 +8646,7 @@ static bool lower_inline_asm_statement(c_parser_t *p) {
   }
   if (register_store_template) {
     if (!expect(p, ":") || !expect(p, ":") ||
-        !inline_asm_string_sequence_is(p, "a", &p->pos) ||
-        !expect(p, "("))
+        !inline_asm_string_sequence_is(p, "a", &p->pos) || !expect(p, "("))
       return defer_unsupported_asm(p, open, assembly);
     c_value_t value = parse_expr(p, 1);
     if (value.value < 0 || value.type != register_store_type ||
@@ -10343,6 +10359,7 @@ static bool lower_inline_asm_statement(c_parser_t *p) {
         ny_ctok_t new_name;
         ny_ctok_t old_local_name;
         c_type_t memory_type;
+        unsigned memory_segment;
         int memory_address;
         if (!expect(p, "(") || !parse_name(p, &condition_name) ||
             !expect(p, ")") || !expect(p, ",") ||
@@ -10385,7 +10402,10 @@ static bool lower_inline_asm_statement(c_parser_t *p) {
             memory_lvalue->address < 0 || !expect(p, ")"))
           return defer_unsupported_asm(p, open, assembly);
         memory_type = memory_lvalue->type;
+        memory_segment = memory_lvalue->segment_flags;
         memory_address = memory_lvalue->address;
+        if (!discard_lvalue_read(p, memory_lvalue))
+          return defer_unsupported_asm(p, open, assembly);
         if (memory_first) {
           if (!expect(p, ",") || !parse_named_inline_asm_operand(p, &old_name))
             return defer_unsupported_asm(p, open, assembly);
@@ -10462,7 +10482,10 @@ static bool lower_inline_asm_statement(c_parser_t *p) {
         asm_cmpxchg_new_value = new_value.value;
         if (asm_memory_register_input_value < 0 ||
             !substitute_inline_asm_named_operands(
-                &assembly, &assembly_len, &assembly_cap, memory_name, "(%rcx)",
+                &assembly, &assembly_len, &assembly_cap, memory_name,
+                memory_segment & NYIR_INST_F_MEM_SEG_GS   ? "%gs:(%rcx)"
+                : memory_segment & NYIR_INST_F_MEM_SEG_FS ? "%fs:(%rcx)"
+                                                          : "(%rcx)",
                 (inline_asm_named_value_t[]){
                     {.name = new_name,
                      .replacement = lower_cmpxchg64   ? "%rdx"
@@ -10744,6 +10767,7 @@ static bool lower_inline_asm_statement(c_parser_t *p) {
                                          : NULL;
             if (!recorded || !expect(p, ")"))
               return defer_unsupported_asm(p, open, assembly);
+            unsigned segment = recorded->segment_flags;
             asm_memory_output_value =
                 lower_asm_memory_output_address(p, recorded);
             if (asm_memory_output_value < 0)
@@ -10858,8 +10882,11 @@ static bool lower_inline_asm_statement(c_parser_t *p) {
             }
             if (!substitute_inline_asm_named_operands(
                     &assembly, &assembly_len, &assembly_cap,
-                    memory_constraint_name, "(%rax)", named_inputs,
-                    named_input_count))
+                    memory_constraint_name,
+                    segment & NYIR_INST_F_MEM_SEG_GS   ? "%gs:(%rax)"
+                    : segment & NYIR_INST_F_MEM_SEG_FS ? "%fs:(%rax)"
+                                                       : "(%rax)",
+                    named_inputs, named_input_count))
               return defer_unsupported_asm(p, open, assembly);
             lower_named_memory_output = true;
           } else if (unnamed_memory_output) {
@@ -11485,25 +11512,37 @@ static bool lower_inline_asm_statement(c_parser_t *p) {
                     ++i;
                   }
                   if (accept(p, ":")) {
-                    if (!accept(p, ":")) {
+                    if (!accept(p, ":"))
                       return defer_unsupported_asm(p, open, assembly);
-                    }
                     size_t clobber_end = p->pos;
-                    if (inline_asm_clobber_list_is(p, &clobber_end)) {
-                      p->pos = clobber_end;
-                    }
+                    if (!tok_is(p, p->pos, ")") &&
+                        !inline_asm_clobber_list_matches(p, &clobber_end, true))
+                      return defer_unsupported_asm(p, open, assembly);
+                    p->pos = clobber_end;
                   }
                   if (!local || local->array_rank || local->is_const ||
                       (!(local->type == C_I64 || local->type == C_U64 ||
                          (p->abi == NYC_ABI_I386 &&
                           (local->type == C_I32 || local->type == C_U32))) &&
                        !c_type_is_pointer(local->type)) ||
-                      !valid_template || placeholder_count != 1 ||
-                      local->slot >= (size_t)INT64_MAX) {
+                      !valid_template || placeholder_count != 1) {
                     return defer_unsupported_asm(p, open, assembly);
                   }
+                  local->has_integer_constant = false;
                   local->address_taken = true;
-                  inline_asm_local_output = (int64_t)local->slot + 1;
+                  asm_memory_output_value = emit_value(
+                      p, (nyr_inst_t){.op = NYIR_ADDR_LOCAL,
+                                      .dst = -1,
+                                      .imm = (int64_t)local->slot,
+                                      .scalar_class = NYIR_SCALAR_I64_RAW});
+                  immediate_values[0] =
+                      p->abi == NYC_ABI_I386 ? "(%eax)" : "(%rax)";
+                  if (asm_memory_output_value < 0 ||
+                      !substitute_inline_asm_immediate(
+                          &assembly, &assembly_len, &assembly_cap,
+                          immediate_values, 1, SIZE_MAX))
+                    return defer_unsupported_asm(p, open, assembly);
+                  lower_named_memory_output = true;
                 } else {
                   p->pos = output_start;
                   output_constraint_end = p->pos;
@@ -11852,7 +11891,15 @@ finish_inline_asm_operands:
   }
   if (lower_rip_relative_pointer) {
     int input_value = lower_local_load(p, asm_input);
-    bool ok = input_value >= 0 && lower_local_store(p, asm_output, input_value);
+    int result =
+        input_value < 0
+            ? -1
+            : emit_value(p, (nyr_inst_t){.op = NYIR_INLINE_ASM,
+                                         .dst = -1,
+                                         .a = input_value,
+                                         .imm = -196,
+                                         .scalar_class = NYIR_SCALAR_I64_RAW});
+    bool ok = result >= 0 && lower_local_store(p, asm_output, result);
     free(assembly);
     return ok;
   }
@@ -11865,9 +11912,6 @@ finish_inline_asm_operands:
                      .a = asm_memory_input_value,
                      .d = -1,
                      .symbol = (const char *)assembly};
-  inst.imm = inline_asm_local_output;
-  if (inline_asm_local_output > 0)
-    inst.effects = NYIR_EFFECT_WRITE_MEMORY | NYIR_EFFECT_VOLATILE;
   if (lower_named_memory_output) {
     inst.a = asm_memory_output_value;
     inst.b = asm_memory_register_input_value;

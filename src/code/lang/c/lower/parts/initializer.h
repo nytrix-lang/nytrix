@@ -117,9 +117,9 @@ static c_agg_type_t c_complex_local_ldouble = {
                {.kind = C_AGG_FIELD_F64, .offset = 8, .size = 8, .align = 8}}};
 
 static c_agg_type_t *c_complex_aggregate(c_type_t type) {
-  return type == C_C64     ? &c_complex_local_f32
-         : type == C_C128  ? &c_complex_local_f64
-                           : &c_complex_local_ldouble;
+  return type == C_C64    ? &c_complex_local_f32
+         : type == C_C128 ? &c_complex_local_f64
+                          : &c_complex_local_ldouble;
 }
 
 /*
@@ -128,8 +128,7 @@ static c_agg_type_t *c_complex_aggregate(c_type_t type) {
  * real lane with the imaginary lane zeroed.
  */
 static bool lower_complex_initialize(c_parser_t *p, int base,
-                                     const c_agg_type_t *agg,
-                                     c_value_t value) {
+                                     const c_agg_type_t *agg, c_value_t value) {
   if (!agg || agg->scope_id != SIZE_MAX || base < 0 || value.value < 0)
     return false;
   if (agg->size != 8 && agg->size != 16) {
@@ -141,43 +140,41 @@ static bool lower_complex_initialize(c_parser_t *p, int base,
       value.type == C_AGG && value.agg && value.agg->scope_id == SIZE_MAX;
   if (value_complex && value.agg->size == agg->size)
     return lower_copy_struct(p, base, value.value, agg->size);
-  if (value_complex &&
-      (value.agg->size == 8 || value.agg->size == 16)) {
+  if (value_complex && (value.agg->size == 8 || value.agg->size == 16)) {
     int real_source = single ? lower_load_field(p, value.value, true, false)
                              : lower_load_f32_field(p, value.value, false);
     int imag_address = lower_add_const(p, value.value, single ? 8 : 4);
-    int imag_source =
-        imag_address < 0 ? -1
-                         : single ? lower_load_field(p, imag_address, true, false)
-                                  : lower_load_f32_field(p, imag_address, false);
+    int imag_source = imag_address < 0 ? -1
+                      : single ? lower_load_field(p, imag_address, true, false)
+                               : lower_load_f32_field(p, imag_address, false);
     int real_value =
         real_source < 0
             ? -1
-            : emit_value(p, (nyr_inst_t){
-                                 .op = single ? NYIR_F64_TO_F32
-                                              : NYIR_F32_TO_F64,
-                                 .dst = -1,
-                                 .a = real_source,
-                                 .scalar_class = single ? NYIR_SCALAR_F32
-                                                        : NYIR_SCALAR_F64});
+            : emit_value(
+                  p,
+                  (nyr_inst_t){.op = single ? NYIR_F64_TO_F32 : NYIR_F32_TO_F64,
+                               .dst = -1,
+                               .a = real_source,
+                               .scalar_class =
+                                   single ? NYIR_SCALAR_F32 : NYIR_SCALAR_F64});
     int imag_value =
         imag_source < 0
             ? -1
-            : emit_value(p, (nyr_inst_t){
-                                 .op = single ? NYIR_F64_TO_F32
-                                              : NYIR_F32_TO_F64,
-                                 .dst = -1,
-                                 .a = imag_source,
-                                 .scalar_class = single ? NYIR_SCALAR_F32
-                                                        : NYIR_SCALAR_F64});
+            : emit_value(
+                  p,
+                  (nyr_inst_t){.op = single ? NYIR_F64_TO_F32 : NYIR_F32_TO_F64,
+                               .dst = -1,
+                               .a = imag_source,
+                               .scalar_class =
+                                   single ? NYIR_SCALAR_F32 : NYIR_SCALAR_F64});
     int imag_target = lower_add_const(p, base, single ? 4 : 8);
     if (real_value < 0 || imag_value < 0 || imag_target < 0)
       return false;
-    return single ? lower_store_f32_field(p, base, real_value, false) &&
-                        lower_store_f32_field(p, imag_target, imag_value, false)
-                  : lower_store_field(p, base, real_value, true, false) &&
-                        lower_store_field(p, imag_target, imag_value, true,
-                                          false);
+    return single
+               ? lower_store_f32_field(p, base, real_value, false) &&
+                     lower_store_f32_field(p, imag_target, imag_value, false)
+               : lower_store_field(p, base, real_value, true, false) &&
+                     lower_store_field(p, imag_target, imag_value, true, false);
   }
   if (value.type != C_F32 && value.type != C_F64 &&
       !c_type_is_integer(value.type)) {
@@ -200,14 +197,14 @@ static bool lower_complex_initialize(c_parser_t *p, int base,
         p, (nyr_inst_t){.op = single ? NYIR_I64_TO_F32 : NYIR_I64_TO_F64,
                         .dst = -1,
                         .a = value.value,
-                        .scalar_class = single ? NYIR_SCALAR_F32
-                                               : NYIR_SCALAR_F64});
-  int zero = emit_value(
-      p, (nyr_inst_t){.op = single ? NYIR_CONST_F32 : NYIR_CONST_F64,
-                      .dst = -1,
-                      .imm = 0,
-                      .scalar_class = single ? NYIR_SCALAR_F32
-                                             : NYIR_SCALAR_F64});
+                        .scalar_class =
+                            single ? NYIR_SCALAR_F32 : NYIR_SCALAR_F64});
+  int zero =
+      emit_value(p, (nyr_inst_t){.op = single ? NYIR_CONST_F32 : NYIR_CONST_F64,
+                                 .dst = -1,
+                                 .imm = 0,
+                                 .scalar_class = single ? NYIR_SCALAR_F32
+                                                        : NYIR_SCALAR_F64});
   int imag_target = lower_add_const(p, base, single ? 4 : 8);
   if (converted < 0 || zero < 0 || imag_target < 0)
     return false;
@@ -285,6 +282,7 @@ static bool add_local(c_parser_t *p, ny_ctok_t name, c_type_t type, int value,
     return false;
   p->locals[p->local_count++] =
       (c_local_t){.name = name,
+                  .declaration_pos = p->pos,
                   .type = type,
                   .is_long_long = p->last_type_long_long,
                   .slot = slot,
@@ -1400,6 +1398,7 @@ static bool lower_aggregate_declaration(c_parser_t *p, bool semicolon) {
       }
     }
     first_declarator = false;
+    size_t declaration_pos = p->pos;
     ny_ctok_t name;
     if (!parse_name(p, &name)) {
       ok = false;
@@ -1617,6 +1616,7 @@ static bool lower_aggregate_declaration(c_parser_t *p, bool semicolon) {
           (c_local_t){.name = name,
                       .static_name = p->globals[static_global_index].name,
                       .cleanup = local_cleanup,
+                      .declaration_pos = declaration_pos,
                       .type = C_AGG,
                       .agg = decl_agg,
                       .slot = slot,
@@ -1632,11 +1632,13 @@ static bool lower_aggregate_declaration(c_parser_t *p, bool semicolon) {
           p->local_count < p->local_capacity && p->next_local != SIZE_MAX) {
         initializer_local = p->local_count++;
         size_t initializer_slot = p->next_local++;
-        p->locals[initializer_local] = (c_local_t){.name = name,
-                                                   .cleanup = local_cleanup,
-                                                   .type = type,
-                                                   .agg = decl_agg,
-                                                   .slot = initializer_slot};
+        p->locals[initializer_local] =
+            (c_local_t){.name = name,
+                        .cleanup = local_cleanup,
+                        .declaration_pos = declaration_pos,
+                        .type = type,
+                        .agg = decl_agg,
+                        .slot = initializer_slot};
       }
       if (is_array && type != C_AGG) {
         if (!count && has_initializer && tok_is(p, p->pos, "{"))
@@ -1663,6 +1665,7 @@ static bool lower_aggregate_declaration(c_parser_t *p, bool semicolon) {
                           : p->locals[initializer_local].slot;
         c_local_t declared = {.name = name,
                               .cleanup = local_cleanup,
+                              .declaration_pos = declaration_pos,
                               .type = type,
                               .agg = decl_agg,
                               .slot = slot,
@@ -1774,6 +1777,7 @@ static bool lower_aggregate_declaration(c_parser_t *p, bool semicolon) {
           p->locals[initializer_local] =
               (c_local_t){.name = name,
                           .cleanup = local_cleanup,
+                          .declaration_pos = declaration_pos,
                           .type = C_AGG,
                           .agg = decl_agg,
                           .slot = slot,
@@ -2046,7 +2050,8 @@ static bool lower_aggregate_declaration(c_parser_t *p, bool semicolon) {
      * stay deterministic there. At -O1 and above C leaves them undefined,
      * and filling them costs every address-taken struct its size in stores
      * that kernel-style code rewrites with memset anyway. */
-    if (type == C_AGG && p->optimization == 0 && !lower_zero_fill(p, base, bytes)) {
+    if (type == C_AGG && p->optimization == 0 &&
+        !lower_zero_fill(p, base, bytes)) {
       ok = false;
       break;
     }
@@ -2096,6 +2101,7 @@ static bool lower_aggregate_declaration(c_parser_t *p, bool semicolon) {
     }
     c_local_t declared = {.name = name,
                           .cleanup = local_cleanup,
+                          .declaration_pos = declaration_pos,
                           .type = type,
                           .pointer_base_type = declarator_base_type,
                           .pointer_depth = type == C_AGG ? 0 : declared_stars,
@@ -2116,7 +2122,8 @@ static bool lower_aggregate_declaration(c_parser_t *p, bool semicolon) {
 }
 
 static bool lower_pointer_store(c_parser_t *p, c_value_t address,
-                                bool read_only, bool wrapped);
+                                bool read_only, bool wrapped,
+                                unsigned segment_flags);
 
 static bool lower_scalar_assignment(c_parser_t *p, bool semicolon) {
   size_t statement_start = p->pos;
@@ -2196,14 +2203,15 @@ static bool lower_scalar_assignment(c_parser_t *p, bool semicolon) {
         return false;
       return lower_pointer_store(
           p, (c_value_t){lvalue->address, pointer_type, lvalue->agg},
-          local->is_const || local->pointee_const, false);
+          local->is_const || local->pointee_const, false,
+          lvalue->segment_flags);
     }
     c_type_t pointer_type = c_add_pointer_levels(local->type, 1);
     if (pointer_type == C_BAD)
       return false;
-    return lower_pointer_store(p,
-                               (c_value_t){address, pointer_type, local->agg},
-                               local->is_const || local->pointee_const, false);
+    return lower_pointer_store(
+        p, (c_value_t){address, pointer_type, local->agg},
+        local->is_const || local->pointee_const, false, 0);
   }
   /*
    * Aggregate targets: `s = other;` copies through NYIR_COPY_STRUCT, and a
@@ -2224,6 +2232,31 @@ static bool lower_scalar_assignment(c_parser_t *p, bool semicolon) {
     target_array_count = 0;
   }
   int aggregate_pointer_override = -1;
+  if (local && local->pointee_array.pointer_to_array &&
+      tok_is(p, p->pos, "[")) {
+    c_array_shape_t shape = local->pointee_array;
+    int address = lower_local_load(p, local);
+    while (address >= 0 && shape.rank && tok_is(p, p->pos, "["))
+      address = lower_array_shape_address(p, address, &shape);
+    if (address < 0)
+      return false;
+    target_const = local->pointee_const;
+    if (shape.element_type == C_AGG &&
+        (!shape.rank || (shape.rank == 1 && tok_is(p, p->pos, "->")))) {
+      aggregate_pointer_override = address;
+      target_type = shape.rank ? C_AGG_PTR : C_AGG;
+      target_array_count = 0;
+    } else if (!shape.rank) {
+      c_type_t pointer = c_array_pointer_type(shape.element_type);
+      return pointer != C_BAD &&
+             lower_pointer_store(p, (c_value_t){address, pointer, NULL},
+                                 target_const, false,
+                                 c_seg_flags(local->pointee_seg));
+    } else {
+      fail(p, "cannot assign to an array row");
+      return false;
+    }
+  }
   if (local &&
       ((target_type == C_OPAQUE_PTR && local->pointer_depth > 1) ||
        target_type == C_CHAR_PTR_PTR || target_type == C_I8_PTR_PTR ||
@@ -2273,7 +2306,7 @@ static bool lower_scalar_assignment(c_parser_t *p, bool semicolon) {
         }
         return lower_pointer_store(
             p, (c_value_t){address, address_type, local->agg},
-            local->is_const || local->pointee_const, false);
+            local->is_const || local->pointee_const, false, 0);
       }
       if (remaining <= 1) {
         fail(p, "pointer assignment index exceeds declared pointer depth");
@@ -3146,36 +3179,33 @@ static bool lower_scalar_assignment(c_parser_t *p, bool semicolon) {
       int real_source = target_single
                             ? lower_load_field(p, value.value, true, false)
                             : lower_load_f32_field(p, value.value, false);
-      int imag_address =
-          lower_add_const(p, value.value, target_single ? 8 : 4);
-      int imag_source =
-          imag_address < 0
-              ? -1
-              : target_single
-                    ? lower_load_field(p, imag_address, true, false)
-                    : lower_load_f32_field(p, imag_address, false);
+      int imag_address = lower_add_const(p, value.value, target_single ? 8 : 4);
+      int imag_source = imag_address < 0 ? -1
+                        : target_single
+                            ? lower_load_field(p, imag_address, true, false)
+                            : lower_load_f32_field(p, imag_address, false);
       int real_value =
           real_source < 0
               ? -1
-              : emit_value(p, (nyr_inst_t){
-                                   .op = target_single ? NYIR_F64_TO_F32
-                                                       : NYIR_F32_TO_F64,
-                                   .dst = -1,
-                                   .a = real_source,
-                                   .scalar_class = target_single
-                                                       ? NYIR_SCALAR_F32
-                                                       : NYIR_SCALAR_F64});
+              : emit_value(p,
+                           (nyr_inst_t){.op = target_single ? NYIR_F64_TO_F32
+                                                            : NYIR_F32_TO_F64,
+                                        .dst = -1,
+                                        .a = real_source,
+                                        .scalar_class = target_single
+                                                            ? NYIR_SCALAR_F32
+                                                            : NYIR_SCALAR_F64});
       int imag_value =
           imag_source < 0
               ? -1
-              : emit_value(p, (nyr_inst_t){
-                                   .op = target_single ? NYIR_F64_TO_F32
-                                                       : NYIR_F32_TO_F64,
-                                   .dst = -1,
-                                   .a = imag_source,
-                                   .scalar_class = target_single
-                                                       ? NYIR_SCALAR_F32
-                                                       : NYIR_SCALAR_F64});
+              : emit_value(p,
+                           (nyr_inst_t){.op = target_single ? NYIR_F64_TO_F32
+                                                            : NYIR_F32_TO_F64,
+                                        .dst = -1,
+                                        .a = imag_source,
+                                        .scalar_class = target_single
+                                                            ? NYIR_SCALAR_F32
+                                                            : NYIR_SCALAR_F64});
       int imag_target = lower_add_const(p, base, target_single ? 4 : 8);
       bool stored =
           real_value >= 0 && imag_value >= 0 && imag_target >= 0 &&
@@ -3183,7 +3213,8 @@ static bool lower_scalar_assignment(c_parser_t *p, bool semicolon) {
                ? lower_store_f32_field(p, base, real_value, false) &&
                      lower_store_f32_field(p, imag_target, imag_value, false)
                : lower_store_field(p, base, real_value, true, false) &&
-                     lower_store_field(p, imag_target, imag_value, true, false));
+                     lower_store_field(p, imag_target, imag_value, true,
+                                       false));
       if (!stored)
         return false;
       if (semicolon && !expect(p, ";"))
@@ -3192,8 +3223,7 @@ static bool lower_scalar_assignment(c_parser_t *p, bool semicolon) {
     }
     bool same_complex_shape =
         target_agg && value.agg && target_agg->scope_id == SIZE_MAX &&
-        value.agg->scope_id == SIZE_MAX &&
-        target_agg->size == value.agg->size;
+        value.agg->scope_id == SIZE_MAX && target_agg->size == value.agg->size;
     if (same_complex_shape && value.value >= 0) {
       if (semicolon && !expect(p, ";"))
         return false;
@@ -3205,28 +3235,30 @@ static bool lower_scalar_assignment(c_parser_t *p, bool semicolon) {
       bool single = target_agg->size == 8;
       int converted = value.value;
       if (single && value.type == C_F64)
-        converted = emit_value(p, (nyr_inst_t){.op = NYIR_F64_TO_F32,
-                                               .dst = -1,
-                                               .a = value.value,
-                                               .scalar_class = NYIR_SCALAR_F32});
+        converted =
+            emit_value(p, (nyr_inst_t){.op = NYIR_F64_TO_F32,
+                                       .dst = -1,
+                                       .a = value.value,
+                                       .scalar_class = NYIR_SCALAR_F32});
       else if (!single && value.type == C_F32)
-        converted = emit_value(p, (nyr_inst_t){.op = NYIR_F32_TO_F64,
-                                               .dst = -1,
-                                               .a = value.value,
-                                               .scalar_class = NYIR_SCALAR_F64});
+        converted =
+            emit_value(p, (nyr_inst_t){.op = NYIR_F32_TO_F64,
+                                       .dst = -1,
+                                       .a = value.value,
+                                       .scalar_class = NYIR_SCALAR_F64});
       else if (c_type_is_integer(value.type))
         converted = emit_value(
             p, (nyr_inst_t){.op = single ? NYIR_I64_TO_F32 : NYIR_I64_TO_F64,
                             .dst = -1,
                             .a = value.value,
-                            .scalar_class = single ? NYIR_SCALAR_F32
-                                                   : NYIR_SCALAR_F64});
+                            .scalar_class =
+                                single ? NYIR_SCALAR_F32 : NYIR_SCALAR_F64});
       int zero = emit_value(
           p, (nyr_inst_t){.op = single ? NYIR_CONST_F32 : NYIR_CONST_F64,
                           .dst = -1,
                           .imm = 0,
-                          .scalar_class = single ? NYIR_SCALAR_F32
-                                                 : NYIR_SCALAR_F64});
+                          .scalar_class =
+                              single ? NYIR_SCALAR_F32 : NYIR_SCALAR_F64});
       int high = lower_add_const(p, base, single ? 4 : 8);
       bool stored =
           converted >= 0 && zero >= 0 && high >= 0 &&
@@ -3386,7 +3418,8 @@ static bool lower_scalar_assignment(c_parser_t *p, bool semicolon) {
 }
 
 static bool lower_pointer_store(c_parser_t *p, c_value_t address,
-                                bool read_only, bool wrapped) {
+                                bool read_only, bool wrapped,
+                                unsigned segment_flags) {
   /*
    * `(*ptr) op= value`: the address parse stops inside the grouping; skip
    * to the closing paren so the assignment operator follows naturally.
@@ -3466,12 +3499,11 @@ static bool lower_pointer_store(c_parser_t *p, c_value_t address,
     c_value_t value = parse_expr(p, 1);
     if (value.value < 0)
       return false;
-    c_type_t complex_type = address.type == C_C64_PTR     ? C_C64
+    c_type_t complex_type = address.type == C_C64_PTR    ? C_C64
                             : address.type == C_C128_PTR ? C_C128
                                                          : C_C_LDOUBLE;
     c_agg_type_t *complex_agg = c_complex_aggregate(complex_type);
-    if (value.type != C_AGG || !value.agg ||
-        value.agg->scope_id != SIZE_MAX ||
+    if (value.type != C_AGG || !value.agg || value.agg->scope_id != SIZE_MAX ||
         value.agg->size != complex_agg->size) {
       fail(p, "complex pointer assignment requires a matching complex value");
       return false;
@@ -3608,10 +3640,9 @@ static bool lower_pointer_store(c_parser_t *p, c_value_t address,
   if (!simple) {
     int old_value =
         address.type == C_I16_PTR || address.type == C_U16_PTR
-            ? lower_load_u16_field_seg(
-                  p, address.value, element_type,
-                  c_value_pointee_volatile(address),
-                  c_value_seg_flags(address))
+            ? lower_load_u16_field_seg(p, address.value, element_type,
+                                       c_value_pointee_volatile(address),
+                                       segment_flags)
             : emit_value(
                   p,
                   (nyr_inst_t){
@@ -3632,13 +3663,15 @@ static bool lower_pointer_store(c_parser_t *p, c_value_t address,
                                          address.type == C_U16_PTR)
                                           ? 0
                                           : (address.type == C_I32_PTR ||
-                                                     address.type == C_U32_PTR ||
-                                                     address.type == C_F32_PTR ||
+                                                     address.type ==
+                                                         C_U32_PTR ||
+                                                     address.type ==
+                                                         C_F32_PTR ||
                                                      (p->abi == NYC_ABI_I386 &&
                                                       pointer_slot)
                                                  ? NYIR_INST_F_MEM_I32
                                                  : 0)) |
-                                     c_value_seg_flags(address)),
+                                     segment_flags),
                       .scalar_class = c_type_is_float(element_type)
                                           ? c_float_scalar_class(element_type)
                                           : NYIR_SCALAR_I64_RAW});
@@ -3702,10 +3735,9 @@ static bool lower_pointer_store(c_parser_t *p, c_value_t address,
   if (!expect(p, ";"))
     return false;
   if (address.type == C_I16_PTR || address.type == C_U16_PTR)
-    return lower_store_u16_field_seg(p, address.value, value.value,
-                                     element_type,
-                                     c_value_pointee_volatile(address),
-                                     c_value_seg_flags(address));
+    return lower_store_u16_field_seg(
+        p, address.value, value.value, element_type,
+        c_value_pointee_volatile(address), segment_flags);
   return emit(
       p,
       (nyr_inst_t){
@@ -3718,11 +3750,10 @@ static bool lower_pointer_store(c_parser_t *p, c_value_t address,
               NYIR_EFFECT_WRITE_MEMORY | NYIR_EFFECT_MAY_TRAP |
               (c_value_pointee_volatile(address) ? NYIR_EFFECT_VOLATILE : 0),
           .flags =
-              (unsigned)((address.type == C_CHAR_PTR ||
-                                  address.type == C_I8_PTR
+              (unsigned)((address.type == C_CHAR_PTR || address.type == C_I8_PTR
                               ? NYIR_INST_F_MEM_BYTE
                           : address.type == C_I16_PTR ||
-                                    address.type == C_U16_PTR
+                                  address.type == C_U16_PTR
                               ? 0
                               : (address.type == C_I32_PTR ||
                                          address.type == C_U32_PTR ||
@@ -3731,11 +3762,28 @@ static bool lower_pointer_store(c_parser_t *p, c_value_t address,
                                           pointer_slot)
                                      ? NYIR_INST_F_MEM_I32
                                      : 0)) |
-                         c_value_seg_flags(address)),
+                         segment_flags),
           .scalar_class = c_type_is_float(element_type)
                               ? c_float_scalar_class(element_type)
                               : NYIR_SCALAR_I64_RAW},
       NULL);
+}
+
+static c_value_t parse_pointer_store_address(c_parser_t *p,
+                                             unsigned *segment_flags) {
+  p->last_value_pointee_seg = UCHAR_MAX;
+  c_value_t address = parse_unary(p);
+  unsigned char segment = p->last_value_pointee_seg;
+  p->last_value_pointee_seg = C_SEG_NONE;
+  if (segment == UCHAR_MAX) {
+    const c_lvalue_t *lvalue = find_lvalue(p, address.value);
+    c_local_t *local = lvalue && lvalue->is_local
+                           ? find_local_slot(p, (size_t)lvalue->local_slot)
+                           : NULL;
+    segment = local ? local->pointee_seg : c_marker_seg(address.agg);
+  }
+  *segment_flags = c_seg_flags(segment);
+  return address;
 }
 
 static bool lower_global_assignment(c_parser_t *p, c_global_t *global,
@@ -3805,13 +3853,16 @@ static bool lower_global_assignment(c_parser_t *p, c_global_t *global,
                                       : 0);
     if (address >= 0)
       old_value =
-          emit_value(p, (nyr_inst_t){.op = NYIR_LOAD_I64,
-                                     .dst = -1,
-                                     .a = address,
-                                     .effects = NYIR_EFFECT_READ_MEMORY |
-                                                NYIR_EFFECT_MAY_TRAP,
-                                     .flags = memory_flags,
-                                     .scalar_class = NYIR_SCALAR_I64_RAW});
+          global->object_seg
+              ? lower_load_segmented_global(p, global, address)
+              : emit_value(p,
+                           (nyr_inst_t){.op = NYIR_LOAD_I64,
+                                        .dst = -1,
+                                        .a = address,
+                                        .effects = NYIR_EFFECT_READ_MEMORY |
+                                                   NYIR_EFFECT_MAY_TRAP,
+                                        .flags = memory_flags,
+                                        .scalar_class = NYIR_SCALAR_I64_RAW});
     if (old_value < 0)
       return false;
     old_value = normalize_integer(p, global->type, old_value);
@@ -3938,6 +3989,12 @@ static bool lower_global_assignment(c_parser_t *p, c_global_t *global,
   }
   if (address < 0)
     return false;
+  if (global->object_seg) {
+    c_lvalue_t target = {.address = address,
+                         .is_volatile = global->is_volatile,
+                         .segment_flags = c_seg_flags(global->object_seg)};
+    return lower_store_scalar_lvalue(p, &target, global->type, value.value);
+  }
   uint8_t flags = global->type == C_I32 || global->type == C_U32
                       ? NYIR_INST_F_MEM_I32
                       : (global->type == C_U8 ? NYIR_INST_F_MEM_BYTE : 0);

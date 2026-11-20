@@ -666,16 +666,15 @@ bool nyr_sccp(nyr_func_t *f) {
   nyr_cfg_t cfg = {0};
   if (!nyr_cfg_build_topology(f, &cfg))
     return false;
+  enum { UNSEEN, INTEGER, F64, F32, VARYING };
   size_t values = (size_t)f->next_value;
-  bool *known = calloc(values, sizeof(*known));
   int64_t *constant = calloc(values, sizeof(*constant));
   unsigned char *constant_kind = calloc(values, sizeof(*constant_kind));
   bool *executable = calloc(cfg.block_count, sizeof(*executable));
   size_t edge_count = cfg.succ_offsets[cfg.block_count];
   bool *executable_edge = calloc(edge_count, sizeof(*executable_edge));
-  if (!known || !constant || !constant_kind || !executable ||
+  if (!constant || !constant_kind || !executable ||
       (edge_count && !executable_edge)) {
-    free(known);
     free(constant);
     free(constant_kind);
     free(executable);
@@ -694,46 +693,20 @@ bool nyr_sccp(nyr_func_t *f) {
         const nyr_inst_t *in = &f->data[i];
         if (in->dst < 0 || (size_t)in->dst >= values)
           continue;
-        bool have = false;
         int64_t value = 0;
-        unsigned char kind = 0;
+        unsigned char kind = VARYING;
         if (in->op == NYIR_CONST_I64) {
-          have = true;
           value = in->imm;
-          kind = 1;
+          kind = INTEGER;
         } else if (in->op == NYIR_CONST_F64 || in->op == NYIR_CONST_F32) {
-          have = true;
           value = in->imm;
-          kind = in->op == NYIR_CONST_F64 ? 2 : 3;
+          kind = in->op == NYIR_CONST_F64 ? F64 : F32;
         } else if (in->op == NYIR_COPY && in->a >= 0 &&
-                   (size_t)in->a < values && known[in->a]) {
-          have = true;
+                   (size_t)in->a < values) {
           value = constant[in->a];
           kind = constant_kind[in->a];
         } else if (in->op == NYIR_PHI) {
-          bool loop_phi_ready = true;
-          for (size_t pe = cfg.pred_offsets[block];
-               pe < cfg.pred_offsets[block + 1]; ++pe) {
-            size_t pred = cfg.pred_blocks[pe];
-            if (pred < block)
-              continue;
-            bool live = false;
-            for (size_t se = cfg.succ_offsets[pred];
-                 se < cfg.succ_offsets[pred + 1]; ++se) {
-              if (cfg.succ_blocks[se] == block && executable_edge[se]) {
-                live = true;
-                break;
-              }
-            }
-            if (!live) {
-              loop_phi_ready = false;
-              break;
-            }
-          }
-          bool first = true;
-          bool overdefined = false;
-          if (!loop_phi_ready)
-            continue;
+          kind = UNSEEN;
           for (size_t k = 0; k < in->phi_incoming_len; ++k) {
             size_t pred = cfg.block_count;
             for (size_t edge = cfg.pred_offsets[block];
@@ -756,56 +729,50 @@ bool nyr_sccp(nyr_func_t *f) {
                 }
             if (!edge_live)
               continue;
-            if (source < 0 || (size_t)source >= values || !known[source]) {
-              overdefined = true;
-              have = false;
+            unsigned char incoming = source >= 0 && (size_t)source < values
+                                         ? constant_kind[source]
+                                         : VARYING;
+            if (incoming == UNSEEN)
+              continue;
+            if (incoming == VARYING ||
+                (kind != UNSEEN &&
+                 (kind != incoming || value != constant[source]))) {
+              kind = VARYING;
               break;
             }
-            if (first) {
-              value = constant[source];
-              kind = constant_kind[source];
-              first = false;
-              have = true;
-            } else if (value != constant[source] ||
-                       kind != constant_kind[source]) {
-              overdefined = true;
-              have = false;
-              break;
-            }
-          }
-          if (overdefined && known[in->dst]) {
-            known[in->dst] = false;
-            changed = true;
+            value = constant[source];
+            kind = incoming;
           }
         } else if (in->a >= 0 && in->b >= 0 && (size_t)in->a < values &&
-                   (size_t)in->b < values && known[in->a] && known[in->b] &&
-                   constant_kind[in->a] == 1 && constant_kind[in->b] == 1) {
-          have = nir_constfold_binary(in, constant[in->a], constant[in->b],
-                                      &value) ||
-                 (in->op == NYIR_CMP_I64 &&
-                  nyr_analyze_cmp_fold(in->cmp, constant[in->a],
-                                       constant[in->b], &value));
-          kind = 1;
-        } else if (in->a >= 0 && in->b >= 0 && (size_t)in->a < values &&
-                   (size_t)in->b < values && known[in->a] && known[in->b] &&
-                   constant_kind[in->a] != 1 &&
-                   constant_kind[in->a] == constant_kind[in->b]) {
-          unsigned char fkind = 0;
-          if (nyr_sccp_fold_float(in->op, constant[in->a], constant[in->b],
-                                  constant_kind[in->a], constant_kind[in->b],
-                                  &value, &fkind)) {
-            have = true;
-            kind = fkind;
-          } else if (nyr_sccp_fold_float_cmp(
-                         in->op, in->cmp, constant[in->a], constant[in->b],
-                         constant_kind[in->a], constant_kind[in->b], &value)) {
-            have = true;
-            kind = 1;
+                   (size_t)in->b < values) {
+          unsigned char a = constant_kind[in->a], b = constant_kind[in->b];
+          if (a == UNSEEN || b == UNSEEN) {
+            kind = UNSEEN;
+          } else if (a == INTEGER && b == INTEGER) {
+            if (nir_constfold_binary(in, constant[in->a], constant[in->b],
+                                     &value) ||
+                (in->op == NYIR_CMP_I64 &&
+                 nyr_analyze_cmp_fold(in->cmp, constant[in->a], constant[in->b],
+                                      &value)))
+              kind = INTEGER;
+          } else if (a == b && (a == F32 || a == F64)) {
+            if (nyr_sccp_fold_float(in->op, constant[in->a], constant[in->b], a,
+                                    b, &value, &kind)) {
+              /* kind is set by the fold. */
+            } else if (nyr_sccp_fold_float_cmp(in->op, in->cmp, constant[in->a],
+                                               constant[in->b], a, b, &value))
+              kind = INTEGER;
           }
         }
-        if (have && (!known[in->dst] || constant[in->dst] != value ||
-                     constant_kind[in->dst] != kind)) {
-          known[in->dst] = true;
+        /* An executable predecessor may be discovered after a PHI and its
+         * consumers were visited. Merge facts monotonically so those
+         * consumers also become varying instead of retaining stale values. */
+        unsigned char old = constant_kind[in->dst];
+        if (old == VARYING || kind == UNSEEN)
+          continue;
+        if (old != UNSEEN && (old != kind || constant[in->dst] != value))
+          kind = VARYING;
+        if (old != kind) {
           constant[in->dst] = value;
           constant_kind[in->dst] = kind;
           changed = true;
@@ -819,8 +786,7 @@ bool nyr_sccp(nyr_func_t *f) {
         size_t target = cfg.succ_blocks[edge];
         bool take = true;
         if (term && term->op == NYIR_BR_IF && term->a >= 0 &&
-            (size_t)term->a < values && known[term->a] &&
-            constant_kind[term->a] == 1 &&
+            (size_t)term->a < values && constant_kind[term->a] == INTEGER &&
             cfg.succ_offsets[block + 1] - cfg.succ_offsets[block] > 1)
           take = target == cfg.succ_blocks[cfg.succ_offsets[block]]
                      ? constant[term->a] != 0
@@ -838,7 +804,8 @@ bool nyr_sccp(nyr_func_t *f) {
   } while (changed);
   for (size_t i = 0; i < f->len; ++i) {
     nyr_inst_t *in = &f->data[i];
-    if (in->dst >= 0 && (size_t)in->dst < values && known[in->dst] &&
+    if (in->dst >= 0 && (size_t)in->dst < values &&
+        constant_kind[in->dst] > UNSEEN && constant_kind[in->dst] < VARYING &&
         (in->op == NYIR_COPY || in->op == NYIR_ADD_I64 ||
          in->op == NYIR_SUB_I64 || in->op == NYIR_MUL_I64 ||
          in->op == NYIR_DIV_I64 || in->op == NYIR_MOD_I64 ||
@@ -850,15 +817,14 @@ bool nyr_sccp(nyr_func_t *f) {
          in->op == NYIR_ADD_F32 || in->op == NYIR_SUB_F32 ||
          in->op == NYIR_MUL_F32 || in->op == NYIR_DIV_F32 ||
          in->op == NYIR_CMP_F64 || in->op == NYIR_CMP_F32)) {
-      if (constant_kind[in->dst] == 2)
+      if (constant_kind[in->dst] == F64)
         nir_make_f64_const(in, constant[in->dst]);
-      else if (constant_kind[in->dst] == 3)
+      else if (constant_kind[in->dst] == F32)
         nir_make_f32_const(in, constant[in->dst]);
       else
         nir_make_const(in, constant[in->dst]);
     }
   }
-  free(known);
   free(constant);
   free(constant_kind);
   free(executable);

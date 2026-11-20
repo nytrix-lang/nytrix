@@ -2539,6 +2539,20 @@ pre code {
     max-width: min(100%, 1100px);
 }
 
+.md-section[data-doc-route$="measurements"] .markdown-content img,
+.md-section[data-doc-route$="measurements"] .markdown-content svg,
+.md-section[data-doc-route$="measurements"] .html-content img,
+.md-section[data-doc-route$="measurements"] .html-content svg {
+    width: 100%;
+    max-width: 100%;
+}
+
+.markdown-content svg,
+.html-content svg {
+    width: calc(100% + 2px);
+    max-width: calc(100% + 2px);
+}
+
 .doc-outline {
     display: grid;
     gap: 3px;

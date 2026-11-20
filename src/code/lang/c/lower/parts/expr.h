@@ -123,8 +123,7 @@ static bool lower_member_rvalue(c_parser_t *p, c_value_t base, c_value_t *out) {
        * incomplete object; resolve it to the completed definition before
        * the aggregate is used in an initializer or assignment.
        */
-      c_agg_type_t *field_agg =
-          complete_tag(p, (c_agg_type_t *)field->agg);
+      c_agg_type_t *field_agg = complete_tag(p, (c_agg_type_t *)field->agg);
       if (!field_agg)
         field_agg = (c_agg_type_t *)field->agg;
       if (!record_lvalue(p, address, address, C_AGG, field->is_volatile))
@@ -219,20 +218,20 @@ static bool lower_member_rvalue(c_parser_t *p, c_value_t base, c_value_t *out) {
                                        .imm = (int64_t)element_stride});
         if (stride < 0)
           return false;
-        offset = emit_value(p, (nyr_inst_t){.op = NYIR_MUL_I64,
-                                            .dst = -1,
-                                            .a = index.value,
-                                             .b = stride,
-                                             .flags = c_pointer_offset_flags(p)});
+        offset =
+            emit_value(p, (nyr_inst_t){.op = NYIR_MUL_I64,
+                                       .dst = -1,
+                                       .a = index.value,
+                                       .b = stride,
+                                       .flags = c_pointer_offset_flags(p)});
         if (offset < 0)
           return false;
       }
-      address = emit_value(
-          p, (nyr_inst_t){.op = NYIR_ADD_I64,
-                          .dst = -1,
-                          .a = address,
-                          .b = offset,
-                          .flags = c_pointer_offset_flags(p)});
+      address = emit_value(p, (nyr_inst_t){.op = NYIR_ADD_I64,
+                                           .dst = -1,
+                                           .a = address,
+                                           .b = offset,
+                                           .flags = c_pointer_offset_flags(p)});
       if (address < 0)
         return false;
       if (field->array_rank > 1) {
@@ -368,18 +367,24 @@ static bool lower_member_rvalue(c_parser_t *p, c_value_t base, c_value_t *out) {
             emit_value(p, (nyr_inst_t){.op = NYIR_CONST_I64,
                                        .dst = -1,
                                        .imm = (int64_t)field->elem_size});
-        int offset = stride < 0 ? -1
-                                : emit_value(p, (nyr_inst_t){.op = NYIR_MUL_I64,
-                                                             .dst = -1,
-                                                             .a = index.value,
-                                                             .b = stride,
-                                                             .flags = c_pointer_offset_flags(p)});
-        address = offset < 0 ? -1
-                             : emit_value(p, (nyr_inst_t){.op = NYIR_ADD_I64,
-                                                          .dst = -1,
-                                                          .a = loaded,
-                                                          .b = offset,
-                                                          .flags = c_pointer_offset_flags(p)});
+        int offset =
+            stride < 0
+                ? -1
+                : emit_value(p,
+                             (nyr_inst_t){.op = NYIR_MUL_I64,
+                                          .dst = -1,
+                                          .a = index.value,
+                                          .b = stride,
+                                          .flags = c_pointer_offset_flags(p)});
+        address =
+            offset < 0
+                ? -1
+                : emit_value(p,
+                             (nyr_inst_t){.op = NYIR_ADD_I64,
+                                          .dst = -1,
+                                          .a = loaded,
+                                          .b = offset,
+                                          .flags = c_pointer_offset_flags(p)});
         if (address < 0 ||
             !record_lvalue(p, address, address, C_AGG_PTR, field->is_volatile))
           return false;
@@ -404,18 +409,24 @@ static bool lower_member_rvalue(c_parser_t *p, c_value_t base, c_value_t *out) {
                          .imm = pointer_element
                                     ? (int64_t)c_type_size(p->abi, C_VOID_PTR)
                                     : (int64_t)field->agg->size});
-        int offset = stride < 0 ? -1
-                                : emit_value(p, (nyr_inst_t){.op = NYIR_MUL_I64,
-                                                             .dst = -1,
-                                                             .a = index.value,
-                                                             .b = stride,
-                                                             .flags = c_pointer_offset_flags(p)});
-        address = offset < 0 ? -1
-                             : emit_value(p, (nyr_inst_t){.op = NYIR_ADD_I64,
-                                                          .dst = -1,
-                                                          .a = loaded,
-                                                          .b = offset,
-                                                          .flags = c_pointer_offset_flags(p)});
+        int offset =
+            stride < 0
+                ? -1
+                : emit_value(p,
+                             (nyr_inst_t){.op = NYIR_MUL_I64,
+                                          .dst = -1,
+                                          .a = index.value,
+                                          .b = stride,
+                                          .flags = c_pointer_offset_flags(p)});
+        address =
+            offset < 0
+                ? -1
+                : emit_value(p,
+                             (nyr_inst_t){.op = NYIR_ADD_I64,
+                                          .dst = -1,
+                                          .a = loaded,
+                                          .b = offset,
+                                          .flags = c_pointer_offset_flags(p)});
         if (address < 0)
           return false;
         if (pointer_element) {
@@ -451,12 +462,14 @@ static bool lower_member_rvalue(c_parser_t *p, c_value_t base, c_value_t *out) {
           int scale = emit_value(p, (nyr_inst_t){.op = NYIR_CONST_I64,
                                                  .dst = -1,
                                                  .imm = (int64_t)stride});
-          offset = scale < 0 ? -1
-                             : emit_value(p, (nyr_inst_t){.op = NYIR_MUL_I64,
-                                                          .dst = -1,
-                                                          .a = index.value,
-                                                     .b = scale,
-                                                     .flags = c_pointer_offset_flags(p)});
+          offset = scale < 0
+                       ? -1
+                       : emit_value(p, (nyr_inst_t){
+                                           .op = NYIR_MUL_I64,
+                                           .dst = -1,
+                                           .a = index.value,
+                                           .b = scale,
+                                           .flags = c_pointer_offset_flags(p)});
         }
         address = offset < 0 ? -1
                              : emit_value(p, (nyr_inst_t){.op = NYIR_ADD_I64,
@@ -600,16 +613,18 @@ static bool lower_member_rvalue(c_parser_t *p, c_value_t base, c_value_t *out) {
           .size = 8,
           .align = 4,
           .field_count = 2,
-          .fields = {{.kind = C_AGG_FIELD_F32, .offset = 0, .size = 4, .align = 4},
-                     {.kind = C_AGG_FIELD_F32, .offset = 4, .size = 4, .align = 4}}};
+          .fields = {
+              {.kind = C_AGG_FIELD_F32, .offset = 0, .size = 4, .align = 4},
+              {.kind = C_AGG_FIELD_F32, .offset = 4, .size = 4, .align = 4}}};
       static const c_agg_type_t complex_f64_agg = {
           .scope_id = SIZE_MAX,
           .complete = true,
           .size = 16,
           .align = 8,
           .field_count = 2,
-          .fields = {{.kind = C_AGG_FIELD_F64, .offset = 0, .size = 8, .align = 8},
-                     {.kind = C_AGG_FIELD_F64, .offset = 8, .size = 8, .align = 8}}};
+          .fields = {
+              {.kind = C_AGG_FIELD_F64, .offset = 0, .size = 8, .align = 8},
+              {.kind = C_AGG_FIELD_F64, .offset = 8, .size = 8, .align = 8}}};
       const c_agg_type_t *complex_agg =
           field->kind == C_AGG_FIELD_C64 ? &complex_f32_agg : &complex_f64_agg;
       if (!record_lvalue(p, address, address, C_AGG, field->is_volatile))
@@ -1428,6 +1443,16 @@ static c_value_t lower_aggregate_call_result(c_parser_t *p, int result,
         return (c_value_t){-1, C_BAD, NULL};
     }
   } else {
+    if (class0 == NYIR_ARG_CLASS_SSE && class1 == NYIR_ARG_CLASS_INTEGER) {
+      /* RAX holds the first INTEGER eightbyte. Capture it before reading
+       * XMM0, whose bitwise capture may itself use RAX as scratch. */
+      returned[1] = emit_value(
+          p,
+          (nyr_inst_t){
+              .op = NYIR_CAPTURE_RET, .dst = -1, .a = -1, .b = -1, .imm = 1});
+      if (returned[1] < 0)
+        return (c_value_t){-1, C_BAD, NULL};
+    }
     if (class0 == NYIR_ARG_CLASS_SSE) {
       returned[0] = emit_value(
           p,
@@ -1436,23 +1461,22 @@ static c_value_t lower_aggregate_call_result(c_parser_t *p, int result,
       if (returned[0] < 0)
         return (c_value_t){-1, C_BAD, NULL};
     }
-    if (class1 == NYIR_ARG_CLASS_INTEGER || class1 == NYIR_ARG_CLASS_SSE) {
+    if (returned[1] < 0 &&
+        (class1 == NYIR_ARG_CLASS_INTEGER || class1 == NYIR_ARG_CLASS_SSE)) {
       /*
        * SSE eightbytes fill the return-register sequence in order: an
        * INTEGER/SSE pair returns its floating half in xmm0, while SSE/SSE
        * uses xmm0 then xmm1. Capturing xmm1 unconditionally read a stale
        * register for the floating half of mixed-class results.
        */
-      unsigned selector =
-          class1 == NYIR_ARG_CLASS_INTEGER
-              ? 0u
-              : (class0 == NYIR_ARG_CLASS_SSE ? 3u : 2u);
-      returned[1] = emit_value(
-          p, (nyr_inst_t){.op = NYIR_CAPTURE_RET,
-                          .dst = -1,
-                          .a = -1,
-                          .b = -1,
-                          .imm = (int64_t)selector});
+      unsigned selector = class1 == NYIR_ARG_CLASS_INTEGER
+                              ? 0u
+                              : (class0 == NYIR_ARG_CLASS_SSE ? 3u : 2u);
+      returned[1] = emit_value(p, (nyr_inst_t){.op = NYIR_CAPTURE_RET,
+                                               .dst = -1,
+                                               .a = -1,
+                                               .b = -1,
+                                               .imm = (int64_t)selector});
       if (returned[1] < 0)
         return (c_value_t){-1, C_BAD, NULL};
     }
@@ -1572,6 +1596,137 @@ static bool c_store_i386_va_list(c_parser_t *p, const c_lvalue_t *list,
                                NYIR_EFFECT_WRITE_MEMORY | NYIR_EFFECT_MAY_TRAP |
                                (list->is_volatile ? NYIR_EFFECT_VOLATILE : 0)},
               NULL);
+}
+
+static int lower_sysv_va_align_16(c_parser_t *p, int address) {
+  int biased = lower_add_const(p, address, 8);
+  int mask = emit_i64_constant(p, -16);
+  return biased < 0 || mask < 0
+             ? -1
+             : emit_i64_binary(p, NYIR_AND_I64, biased, mask);
+}
+
+static int lower_sysv_va_overflow(c_parser_t *p, int list,
+                                  const c_agg_type_t *type) {
+  int field = lower_add_const(p, list, 8);
+  int address = field < 0 ? -1 : lower_load_field(p, field, false, false);
+  if (address >= 0 && type->align == 16)
+    address = lower_sysv_va_align_16(p, address);
+  int next =
+      address < 0 ? -1 : lower_add_const(p, address, align_up(type->size, 8));
+  return next >= 0 && lower_store_field(p, field, next, false, false) ? address
+                                                                      : -1;
+}
+
+static int lower_sysv_va_aggregate(c_parser_t *p, int list,
+                                   const c_agg_type_t *type) {
+  uint32_t packed;
+  if (p->abi != NYC_ABI_SYSV_X86_64 || !type || !type->size ||
+      type->align > 16 || type->size > NYIR_ARG_AGG_SIZE_MASK ||
+      !nyc_classify_argument(type, p->abi, 0, &packed)) {
+    fail(p, "va_arg aggregate has an unsupported ABI layout");
+    return -1;
+  }
+  unsigned cls[2] = {NYIR_ARG_AGG_CLASS(packed, 0),
+                     NYIR_ARG_AGG_CLASS(packed, 1)};
+  if (cls[0] == NYIR_ARG_CLASS_MEMORY)
+    return lower_sysv_va_overflow(p, list, type);
+
+  const unsigned step[2] = {8, 16};
+  const unsigned end[2] = {48, 176};
+  unsigned pieces = type->size > 8 ? 2 : 1;
+  unsigned count[2] = {0, 0};
+  for (unsigned i = 0; i < pieces; ++i)
+    ++count[cls[i] == NYIR_ARG_CLASS_SSE];
+  if (count[1] && p->disable_sse) {
+    fail(p, "va_arg aggregate requires SSE argument registers");
+    return -1;
+  }
+  if (p->next_label > INT_MAX - 2 || p->next_local == SIZE_MAX)
+    return -1;
+  int64_t overflow = p->next_label++;
+  int64_t done = p->next_label++;
+  size_t slot = p->next_local++;
+  int field[2], offset[2], next[2];
+  for (unsigned bank = 0; bank < 2; ++bank) {
+    if (!count[bank])
+      continue;
+    field[bank] = lower_add_const(p, list, 4 * bank);
+    if (field[bank] < 0)
+      return -1;
+    offset[bank] =
+        emit_value(p, (nyr_inst_t){.op = NYIR_LOAD_I64,
+                                   .dst = -1,
+                                   .a = field[bank],
+                                   .flags = NYIR_INST_F_MEM_I32,
+                                   .scalar_class = NYIR_SCALAR_I64_RAW,
+                                   .effects = NYIR_EFFECT_READ_MEMORY |
+                                              NYIR_EFFECT_MAY_TRAP});
+    unsigned needed = step[bank] * count[bank];
+    int limit = emit_i64_constant(p, end[bank] - needed);
+    if (offset[bank] < 0 || limit < 0)
+      return -1;
+    int exhausted = emit_i64_compare(p, offset[bank], limit, NYIR_CMP_GT);
+    if (exhausted < 0 || !emit_branch_if(p, exhausted, overflow))
+      return -1;
+    next[bank] = lower_add_const(p, offset[bank], needed);
+    if (next[bank] < 0)
+      return -1;
+  }
+
+  // A register aggregate is all-or-nothing: do not advance either bank
+  // until both have room. SSE slots are 16 bytes apart in the save area.
+  int save_field = lower_add_const(p, list, 16);
+  int save =
+      save_field < 0 ? -1 : lower_load_field(p, save_field, false, false);
+  if (save < 0)
+    return -1;
+  int address[2];
+  for (unsigned bank = 0; bank < 2; ++bank) {
+    if (!count[bank])
+      continue;
+    address[bank] = emit_i64_binary(p, NYIR_ADD_I64, save, offset[bank]);
+    if (address[bank] < 0 ||
+        !lower_store_i32_field(p, field[bank], next[bank], false))
+      return -1;
+  }
+  unsigned first = cls[0] == NYIR_ARG_CLASS_SSE;
+  int result = address[first];
+  bool realign = type->align == 16;
+  if (realign || (pieces == 2 && count[1])) {
+    result = emit_value(p, (nyr_inst_t){.op = NYIR_ALLOCA,
+                                        .dst = -1,
+                                        .imm = 8 * (pieces + realign),
+                                        .scalar_class = NYIR_SCALAR_I64_RAW});
+    if (result >= 0 && realign)
+      result = lower_sysv_va_align_16(p, result);
+    if (result < 0)
+      return -1;
+    for (unsigned i = 0; i < pieces; ++i) {
+      unsigned bank = cls[i] == NYIR_ARG_CLASS_SSE;
+      int src = lower_add_const(p, address[bank],
+                                i && bank == first ? step[bank] : 0);
+      int dst = lower_add_const(p, result, 8 * i);
+      int bits = src < 0 ? -1 : lower_load_field(p, src, false, false);
+      if (dst < 0 || bits < 0 || !lower_store_field(p, dst, bits, false, false))
+        return -1;
+    }
+  }
+  nyr_inst_t merge = {.op = NYIR_STORE_LOCAL,
+                      .dst = -1,
+                      .a = result,
+                      .imm = (int64_t)slot,
+                      .scalar_class = NYIR_SCALAR_I64_RAW};
+  if (!emit(p, merge, NULL) || !emit_branch(p, done) ||
+      !emit_label(p, overflow))
+    return -1;
+  merge.a = lower_sysv_va_overflow(p, list, type);
+  if (merge.a < 0 || !emit(p, merge, NULL) || !emit_label(p, done))
+    return -1;
+  return emit_value(p, (nyr_inst_t){.op = NYIR_LOAD_LOCAL,
+                                    .dst = -1,
+                                    .imm = (int64_t)slot,
+                                    .scalar_class = NYIR_SCALAR_I64_RAW});
 }
 
 static c_value_t parse_call(c_parser_t *p, ny_ctok_t name) {
@@ -2648,10 +2803,9 @@ static c_value_t lower_address_aggregate_members(c_parser_t *p,
     if (address < 0)
       return (c_value_t){-1, C_BAD, NULL};
     if (field->kind == C_AGG_FIELD_AGG) {
-      c_agg_type_t *field_agg =
-          complete_tag(p, (c_agg_type_t *)field->agg);
-      base = (c_value_t){address, C_AGG_PTR,
-                         field_agg ? field_agg : field->agg};
+      c_agg_type_t *field_agg = complete_tag(p, (c_agg_type_t *)field->agg);
+      base =
+          (c_value_t){address, C_AGG_PTR, field_agg ? field_agg : field->agg};
       continue;
     }
     if (field->kind == C_AGG_FIELD_PTR && accept(p, "[")) {
@@ -2669,18 +2823,24 @@ static c_value_t lower_address_aggregate_members(c_parser_t *p,
             emit_value(p, (nyr_inst_t){.op = NYIR_CONST_I64,
                                        .dst = -1,
                                        .imm = (int64_t)field->elem_size});
-        int offset = stride < 0 ? -1
-                                : emit_value(p, (nyr_inst_t){.op = NYIR_MUL_I64,
-                                                             .dst = -1,
-                                                             .a = index.value,
-                                                             .b = stride,
-                                                             .flags = c_pointer_offset_flags(p)});
-        address = offset < 0 ? -1
-                             : emit_value(p, (nyr_inst_t){.op = NYIR_ADD_I64,
-                                                          .dst = -1,
-                                                          .a = pointer,
-                                                          .b = offset,
-                                                          .flags = c_pointer_offset_flags(p)});
+        int offset =
+            stride < 0
+                ? -1
+                : emit_value(p,
+                             (nyr_inst_t){.op = NYIR_MUL_I64,
+                                          .dst = -1,
+                                          .a = index.value,
+                                          .b = stride,
+                                          .flags = c_pointer_offset_flags(p)});
+        address =
+            offset < 0
+                ? -1
+                : emit_value(p,
+                             (nyr_inst_t){.op = NYIR_ADD_I64,
+                                          .dst = -1,
+                                          .a = pointer,
+                                          .b = offset,
+                                          .flags = c_pointer_offset_flags(p)});
         return address < 0 ? (c_value_t){-1, C_BAD, NULL}
                            : (c_value_t){address, C_AGG_ARRAY_PTR, field->agg};
       }
@@ -2798,18 +2958,22 @@ static c_value_t lower_address_aggregate_members(c_parser_t *p,
       int stride = emit_value(p, (nyr_inst_t){.op = NYIR_CONST_I64,
                                               .dst = -1,
                                               .imm = (int64_t)element_stride});
-      int offset = stride < 0 ? -1
-                              : emit_value(p, (nyr_inst_t){.op = NYIR_MUL_I64,
-                                                           .dst = -1,
-                                                           .a = index.value,
-                                                           .b = stride,
-                                                           .flags = c_pointer_offset_flags(p)});
-      int element = offset < 0 ? -1
-                               : emit_value(p, (nyr_inst_t){.op = NYIR_ADD_I64,
-                                                            .dst = -1,
-                                                            .a = address,
-                                                        .b = offset,
-                                                        .flags = c_pointer_offset_flags(p)});
+      int offset =
+          stride < 0
+              ? -1
+              : emit_value(p, (nyr_inst_t){.op = NYIR_MUL_I64,
+                                           .dst = -1,
+                                           .a = index.value,
+                                           .b = stride,
+                                           .flags = c_pointer_offset_flags(p)});
+      int element =
+          offset < 0
+              ? -1
+              : emit_value(p, (nyr_inst_t){.op = NYIR_ADD_I64,
+                                           .dst = -1,
+                                           .a = address,
+                                           .b = offset,
+                                           .flags = c_pointer_offset_flags(p)});
       if (element < 0)
         return (c_value_t){-1, C_BAD, NULL};
       if (field->elem_pointer && tok_is(p, p->pos, "->")) {
@@ -2846,18 +3010,22 @@ static c_value_t lower_address_aggregate_members(c_parser_t *p,
       int stride = emit_value(p, (nyr_inst_t){.op = NYIR_CONST_I64,
                                               .dst = -1,
                                               .imm = (int64_t)element_stride});
-      int offset = stride < 0 ? -1
-                              : emit_value(p, (nyr_inst_t){.op = NYIR_MUL_I64,
-                                                           .dst = -1,
-                                                           .a = index.value,
-                                                           .b = stride,
-                                                           .flags = c_pointer_offset_flags(p)});
-      address = offset < 0 ? -1
-                           : emit_value(p, (nyr_inst_t){.op = NYIR_ADD_I64,
-                                                        .dst = -1,
-                                                        .a = address,
-                                                        .b = offset,
-                                                        .flags = c_pointer_offset_flags(p)});
+      int offset =
+          stride < 0
+              ? -1
+              : emit_value(p, (nyr_inst_t){.op = NYIR_MUL_I64,
+                                           .dst = -1,
+                                           .a = index.value,
+                                           .b = stride,
+                                           .flags = c_pointer_offset_flags(p)});
+      address =
+          offset < 0
+              ? -1
+              : emit_value(p, (nyr_inst_t){.op = NYIR_ADD_I64,
+                                           .dst = -1,
+                                           .a = address,
+                                           .b = offset,
+                                           .flags = c_pointer_offset_flags(p)});
       if (address < 0)
         return (c_value_t){-1, C_BAD, NULL};
       if (field->elem_pointer) {
@@ -2991,10 +3159,9 @@ static c_value_t lower_pointer_index_rvalue(c_parser_t *p, c_value_t value) {
       continue;
     }
     unsigned flags =
-        (element_type == C_U8 || element_type == C_CHAR
-             ? NYIR_INST_F_MEM_BYTE
+        (element_type == C_U8 || element_type == C_CHAR ? NYIR_INST_F_MEM_BYTE
          : element_type == C_I32 || element_type == C_U32 ||
-                   element_type == C_F32
+                 element_type == C_F32
              ? NYIR_INST_F_MEM_I32
              : 0) |
         c_value_seg_flags(value);
@@ -3023,66 +3190,65 @@ static c_value_t lower_pointer_index_rvalue(c_parser_t *p, c_value_t value) {
     if (loaded < 0 || !record_lvalue(p, loaded, address, element_type,
                                      c_value_pointee_volatile(value)))
       return (c_value_t){-1, C_BAD, NULL};
-    value = (c_value_t){
-        loaded, element_type,
-        c_type_is_pointer(element_type) && value.agg
-            ? value.agg
-            : c_pointee_marker(c_value_pointee_const(value),
-                               c_value_pointee_volatile(value),
-                               c_marker_seg(value.agg))};
+    value = (c_value_t){loaded, element_type,
+                        c_type_is_pointer(element_type) && value.agg
+                            ? value.agg
+                            : c_pointee_marker(c_value_pointee_const(value),
+                                               c_value_pointee_volatile(value),
+                                               c_marker_seg(value.agg))};
   }
   return value;
 }
 
-static c_value_t lower_array_shape_index(c_parser_t *p, c_value_t value) {
-  const c_array_shape_t *stored = array_shape_for_value(p, value.value);
-  if (!stored || !accept(p, "["))
-    return value;
-  c_array_shape_t shape = *stored;
+static int lower_array_shape_address(c_parser_t *p, int base,
+                                     c_array_shape_t *shape) {
+  if (!expect(p, "["))
+    return -1;
   c_value_t index = parse_expr(p, 1);
   if (index.value < 0 || !c_type_is_integer(index.type) || !expect(p, "]") ||
-      !shape.rank || !shape.element_size) {
+      !shape->rank || !shape->element_size) {
     if (!p->err[0])
       fail(p, "multidimensional array index requires an integer");
-    return (c_value_t){-1, C_BAD, NULL};
+    return -1;
   }
-  size_t stride = shape.element_size;
-  if (shape.pointer_to_array) {
-    stride = c_array_shape_size(&shape);
+  size_t stride = shape->element_size;
+  if (shape->pointer_to_array) {
+    stride = c_array_shape_size(shape);
     if (!stride) {
       fail(p, "pointer-to-array stride overflows or has an incomplete extent");
-      return (c_value_t){-1, C_BAD, NULL};
+      return -1;
     }
+    shape->pointer_to_array = false;
   } else {
-    for (unsigned dimension = 1; dimension < shape.rank; ++dimension) {
-      if (shape.extent[dimension] &&
-          stride > SIZE_MAX / shape.extent[dimension]) {
+    for (unsigned dimension = 1; dimension < shape->rank; ++dimension) {
+      if (shape->extent[dimension] &&
+          stride > SIZE_MAX / shape->extent[dimension]) {
         fail(p, "multidimensional array row stride overflows");
-        return (c_value_t){-1, C_BAD, NULL};
+        return -1;
       }
-      stride *= shape.extent[dimension];
+      stride *= shape->extent[dimension];
+      shape->extent[dimension - 1] = shape->extent[dimension];
     }
+    --shape->rank;
   }
   if (stride > INT64_MAX) {
     fail(p, "multidimensional array row stride exceeds the supported range");
-    return (c_value_t){-1, C_BAD, NULL};
+    return -1;
   }
-  int scale = emit_value(
-      p, (nyr_inst_t){.op = NYIR_CONST_I64, .dst = -1, .imm = (int64_t)stride});
-  int offset = scale < 0 ? -1
-                         : emit_value(p, (nyr_inst_t){.op = NYIR_MUL_I64,
-                                                      .dst = -1,
-                                                      .a = index.value,
-                                                      .b = scale});
-  int address = offset < 0 ? -1
-                           : emit_value(p, (nyr_inst_t){.op = NYIR_ADD_I64,
-                                                        .dst = -1,
-                                                        .a = value.value,
-                                                        .b = offset});
+  return lower_pointer_offset_sized(p, (int64_t)stride, base, index.value,
+                                    false);
+}
+
+static c_value_t lower_array_shape_index(c_parser_t *p, c_value_t value) {
+  const c_array_shape_t *stored = array_shape_for_value(p, value.value);
+  if (!stored || !tok_is(p, p->pos, "["))
+    return value;
+  c_array_shape_t shape = *stored;
+  bool pointer_to_array = shape.pointer_to_array;
+  int address = lower_array_shape_address(p, value.value, &shape);
   if (address < 0)
     return (c_value_t){-1, C_BAD, NULL};
-  if (shape.pointer_to_array) {
-    shape.pointer_to_array = false;
+  if (pointer_to_array) {
     if (!remember_array_shape(p, address, shape))
       return (c_value_t){-1, C_BAD, NULL};
     c_type_t pointer_type = c_array_pointer_type(shape.element_type);
@@ -3092,9 +3258,6 @@ static c_value_t lower_array_shape_index(c_parser_t *p, c_value_t value) {
     }
     return (c_value_t){address, pointer_type, (c_agg_type_t *)shape.agg};
   }
-  for (unsigned dimension = 1; dimension < shape.rank; ++dimension)
-    shape.extent[dimension - 1] = shape.extent[dimension];
-  --shape.rank;
   if (shape.rank) {
     if (!remember_array_shape(p, address, shape))
       return (c_value_t){-1, C_BAD, NULL};
@@ -3220,13 +3383,8 @@ static int lower_local_function_pointer_array(c_parser_t *p) {
 static bool lower_statement_range(c_parser_t *p, size_t start, size_t end,
                                   bool *returned);
 
-static c_value_t parse_statement_expression(c_parser_t *p) {
-  size_t open = p->pos;
-  size_t after = skip_balanced(p, open, "{", "}");
-  if (after <= open + 1 || after >= p->token_count || !tok_is(p, after, ")")) {
-    fail(p, "malformed GNU statement expression");
-    return (c_value_t){-1, C_BAD, NULL};
-  }
+static c_value_t parse_statement_expression_in_scope(c_parser_t *p, size_t open,
+                                                     size_t after) {
   if (after == open + 2) {
     p->pos = after + 1;
     return (c_value_t){-1, C_BAD, NULL};
@@ -3403,6 +3561,20 @@ static c_value_t parse_statement_expression(c_parser_t *p) {
   typedef_index_invalidate(p);
   p->local_count = saved_local_count;
   p->scope_start = saved_scope_start;
+  return result;
+}
+
+static c_value_t parse_statement_expression(c_parser_t *p) {
+  size_t open = p->pos;
+  size_t after = skip_balanced(p, open, "{", "}");
+  if (after <= open + 1 || after >= p->token_count || !tok_is(p, after, ")")) {
+    fail(p, "malformed GNU statement expression");
+    return (c_value_t){-1, C_BAD, NULL};
+  }
+  c_cleanup_scope_t scope;
+  enter_cleanup_scope(p, &scope, after - 1);
+  c_value_t result = parse_statement_expression_in_scope(p, open, after);
+  p->cleanup_scope = scope.parent;
   return result;
 }
 
@@ -3773,15 +3945,13 @@ static c_value_t parse_primary(c_parser_t *p) {
         if (base_address < 0)
           return (c_value_t){-1, C_BAD, NULL};
       }
-      int address = imag_part
-                        ? lower_add_const(p, base_address,
-                                          pointed == C_C64 ? 4 : 8)
-                        : base_address;
+      int address =
+          imag_part ? lower_add_const(p, base_address, pointed == C_C64 ? 4 : 8)
+                    : base_address;
       if (address < 0)
         return (c_value_t){-1, C_BAD, NULL};
-      int loaded = pointed == C_C64
-                       ? lower_load_f32_field(p, address, false)
-                       : lower_load_field(p, address, true, false);
+      int loaded = pointed == C_C64 ? lower_load_f32_field(p, address, false)
+                                    : lower_load_field(p, address, true, false);
       c_type_t half_type = pointed == C_C64 ? C_F32 : C_F64;
       if (loaded < 0 || !record_lvalue(p, loaded, address, half_type, false))
         return (c_value_t){-1, C_BAD, NULL};
@@ -3790,7 +3960,7 @@ static c_value_t parse_primary(c_parser_t *p) {
     ny_ctok_t object = *current(p);
     c_local_t *part_local = find_local(p, object);
     c_global_t *part_global = part_local ? NULL : find_global(p, object);
-    c_type_t part_type = part_local   ? part_local->type
+    c_type_t part_type = part_local    ? part_local->type
                          : part_global ? part_global->type
                                        : C_BAD;
     if (!c_type_is_complex(part_type)) {
@@ -3806,10 +3976,10 @@ static c_value_t parse_primary(c_parser_t *p) {
         return (c_value_t){-1, C_BAD, NULL};
       }
       c_type_t whole_type = whole.agg->size == 8 ? C_C64 : C_C128;
-      int whole_address = imag_part
-                              ? lower_add_const(p, whole.value,
-                                                whole_type == C_C64 ? 4 : 8)
-                              : whole.value;
+      int whole_address =
+          imag_part
+              ? lower_add_const(p, whole.value, whole_type == C_C64 ? 4 : 8)
+              : whole.value;
       if (whole_address < 0)
         return (c_value_t){-1, C_BAD, NULL};
       int whole_loaded = whole_type == C_C64
@@ -3853,13 +4023,12 @@ static c_value_t parse_primary(c_parser_t *p) {
     }
     if (base < 0)
       return (c_value_t){-1, C_BAD, NULL};
-    int address = imag_part ? lower_add_const(p, base, part_type == C_C64 ? 4 : 8)
-                            : base;
+    int address =
+        imag_part ? lower_add_const(p, base, part_type == C_C64 ? 4 : 8) : base;
     if (address < 0)
       return (c_value_t){-1, C_BAD, NULL};
-    int loaded = part_type == C_C64
-                     ? lower_load_f32_field(p, address, false)
-                     : lower_load_field(p, address, true, false);
+    int loaded = part_type == C_C64 ? lower_load_f32_field(p, address, false)
+                                    : lower_load_field(p, address, true, false);
     c_type_t half_type = part_type == C_C64 ? C_F32 : C_F64;
     if (loaded < 0 || !record_lvalue(p, loaded, address, half_type, false))
       return (c_value_t){-1, C_BAD, NULL};
@@ -4020,6 +4189,7 @@ static c_value_t parse_primary(c_parser_t *p) {
         function_pointer_result_agg = type_probe.last_type_function_result_agg;
       }
       c_agg_type_t *cast_agg = complete_tag(p, type_probe.last_type_agg);
+      bool cast_bool = cast_type == C_U8 && type_probe.last_type_bool;
       bool cast_pointee_const = type_probe.last_type_const;
       bool cast_pointee_volatile = type_probe.last_type_volatile;
       unsigned char cast_pointee_seg = type_probe.last_type_seg;
@@ -4060,9 +4230,8 @@ static c_value_t parse_primary(c_parser_t *p) {
         c_value_t *values = NULL;
         size_t *indices = NULL;
         size_t parsed = 0;
-        size_t element_count = array_compound_has_extent
-                                   ? (size_t)array_compound_extent
-                                   : count;
+        size_t element_count =
+            array_compound_has_extent ? (size_t)array_compound_extent : count;
         if (!width || (!count && !array_compound_has_extent) ||
             scan >= p->token_count || !tok_is(p, scan, "}")) {
           fail(p, "invalid array compound literal");
@@ -4084,91 +4253,92 @@ static c_value_t parse_primary(c_parser_t *p) {
            */
           values = count ? calloc(count, sizeof(*values)) : NULL;
           indices = count ? calloc(count, sizeof(*indices)) : NULL;
-        if (count && (!values || !indices)) {
-          free(values);
-          free(indices);
-          fail(p, "out of memory parsing array compound literal");
-          return (c_value_t){-1, C_BAD, NULL};
-        }
-        parsed = 0;
-        size_t next_index = 0;
-        size_t highest = 0;
-        bool have_designator = false;
-        bool first_element = true;
-        while (!tok_is(p, p->pos, "}")) {
-          if (!first_element && !expect(p, ",")) {
+          if (count && (!values || !indices)) {
             free(values);
             free(indices);
+            fail(p, "out of memory parsing array compound literal");
             return (c_value_t){-1, C_BAD, NULL};
           }
-          if (tok_is(p, p->pos, "}"))
-            break;
-          size_t item_index = next_index;
-          if (accept(p, "[")) {
-            int64_t designator = -1;
-            if (!parse_global_const_expr(p, &p->pos, &designator) ||
-                designator < 0 || tok_is(p, p->pos, "...") ||
-                !expect(p, "]") || !expect(p, "=")) {
-              free(values);
-              free(indices);
-              fail(p, "invalid array compound literal designator");
-              return (c_value_t){-1, C_BAD, NULL};
-            }
-            item_index = (size_t)designator;
-            have_designator = true;
-            if (item_index > highest)
-              highest = item_index;
-          }
-          if (array_compound_has_extent &&
-              item_index >= (size_t)array_compound_extent) {
-            free(values);
-            free(indices);
-            fail(p, "array compound literal designator is out of range");
-            return (c_value_t){-1, C_BAD, NULL};
-          }
-          c_value_t element = parse_expr(p, 1);
-          bool compatible =
-              element.type == array_element_type ||
-              (c_type_is_integer(element.type) &&
-               c_type_is_integer(array_element_type)) ||
-              c_pointer_compatible(element.type, array_element_type);
-          if (element.value < 0 || !compatible) {
-            free(values);
-            free(indices);
-            if (element.value >= 0)
-              fail(p,
-                   "scalar array compound literal has incompatible element");
-            return (c_value_t){-1, C_BAD, NULL};
-          }
-          if (c_type_is_integer(array_element_type)) {
-            element.value =
-                normalize_integer(p, array_element_type, element.value);
-            if (element.value < 0) {
+          parsed = 0;
+          size_t next_index = 0;
+          size_t highest = 0;
+          bool have_designator = false;
+          bool first_element = true;
+          while (!tok_is(p, p->pos, "}")) {
+            if (!first_element && !expect(p, ",")) {
               free(values);
               free(indices);
               return (c_value_t){-1, C_BAD, NULL};
             }
+            if (tok_is(p, p->pos, "}"))
+              break;
+            size_t item_index = next_index;
+            if (accept(p, "[")) {
+              int64_t designator = -1;
+              if (!parse_global_const_expr(p, &p->pos, &designator) ||
+                  designator < 0 || tok_is(p, p->pos, "...") ||
+                  !expect(p, "]") || !expect(p, "=")) {
+                free(values);
+                free(indices);
+                fail(p, "invalid array compound literal designator");
+                return (c_value_t){-1, C_BAD, NULL};
+              }
+              item_index = (size_t)designator;
+              have_designator = true;
+              if (item_index > highest)
+                highest = item_index;
+            }
+            if (array_compound_has_extent &&
+                item_index >= (size_t)array_compound_extent) {
+              free(values);
+              free(indices);
+              fail(p, "array compound literal designator is out of range");
+              return (c_value_t){-1, C_BAD, NULL};
+            }
+            c_value_t element = parse_expr(p, 1);
+            bool compatible =
+                element.type == array_element_type ||
+                (c_type_is_integer(element.type) &&
+                 c_type_is_integer(array_element_type)) ||
+                c_pointer_compatible(element.type, array_element_type);
+            if (element.value < 0 || !compatible) {
+              free(values);
+              free(indices);
+              if (element.value >= 0)
+                fail(p,
+                     "scalar array compound literal has incompatible element");
+              return (c_value_t){-1, C_BAD, NULL};
+            }
+            if (c_type_is_integer(array_element_type)) {
+              element.value =
+                  normalize_integer(p, array_element_type, element.value);
+              if (element.value < 0) {
+                free(values);
+                free(indices);
+                return (c_value_t){-1, C_BAD, NULL};
+              }
+            }
+            values[parsed] = element;
+            indices[parsed] = item_index;
+            ++parsed;
+            next_index = item_index + 1;
+            first_element = false;
           }
-          values[parsed] = element;
-          indices[parsed] = item_index;
-          ++parsed;
-          next_index = item_index + 1;
-          first_element = false;
-        }
-        if (accept(p, ",") && !tok_is(p, p->pos, "}")) {
-          free(values);
-          free(indices);
-          fail(p, "expected '}' after scalar array compound literal");
-          return (c_value_t){-1, C_BAD, NULL};
-        }
-        if (!expect(p, "}")) {
-          free(values);
-          free(indices);
-          return (c_value_t){-1, C_BAD, NULL};
-        }
+          if (accept(p, ",") && !tok_is(p, p->pos, "}")) {
+            free(values);
+            free(indices);
+            fail(p, "expected '}' after scalar array compound literal");
+            return (c_value_t){-1, C_BAD, NULL};
+          }
+          if (!expect(p, "}")) {
+            free(values);
+            free(indices);
+            return (c_value_t){-1, C_BAD, NULL};
+          }
           element_count = array_compound_has_extent
                               ? (size_t)array_compound_extent
-                              : have_designator ? highest + 1 : parsed;
+                          : have_designator ? highest + 1
+                                            : parsed;
           if (!element_count || element_count > 65536 ||
               element_count > SIZE_MAX / width ||
               element_count * width > INT64_MAX) {
@@ -4191,18 +4361,18 @@ static c_value_t parse_primary(c_parser_t *p) {
           size_t offset = 0;
           if (!agg_area_alloc(p, element_count * width, &offset))
             return (c_value_t){-1, C_BAD, NULL};
+          int base = lower_add_const(p, p->agg_base, offset);
+          if (base < 0 || !lower_zero_fill(p, base, element_count * width))
+            return (c_value_t){-1, C_BAD, NULL};
           for (size_t i = 0; i < element_count; ++i) {
-            if (!init_aggregate(p, NULL, cast_agg, NULL, offset + i * width, 0,
-                                p->agg_base))
+            if (!init_aggregate(p, NULL, cast_agg, NULL, i * width, 0, base))
               return (c_value_t){-1, C_BAD, NULL};
             if (i + 1 < element_count && !expect(p, ","))
               return (c_value_t){-1, C_BAD, NULL};
           }
           if ((accept(p, ",") && !tok_is(p, p->pos, "}")) || !expect(p, "}"))
             return (c_value_t){-1, C_BAD, NULL};
-          int array_base = lower_add_const(p, p->agg_base, (int64_t)offset);
-          return array_base < 0 ? (c_value_t){-1, C_BAD, NULL}
-                                : (c_value_t){array_base, cast_type, cast_agg};
+          return (c_value_t){base, cast_type, cast_agg};
         }
         int base =
             emit_value(p, (nyr_inst_t){.op = NYIR_ALLOCA,
@@ -4222,11 +4392,11 @@ static c_value_t parse_primary(c_parser_t *p) {
          * whole literal before storing the explicitly initialized elements.
          */
         for (size_t i = 0; i < element_count; ++i) {
-          int zero = emit_value(
-              p, (nyr_inst_t){.op = NYIR_CONST_I64,
-                              .dst = -1,
-                              .imm = 0,
-                              .scalar_class = NYIR_SCALAR_I64_RAW});
+          int zero =
+              emit_value(p, (nyr_inst_t){.op = NYIR_CONST_I64,
+                                         .dst = -1,
+                                         .imm = 0,
+                                         .scalar_class = NYIR_SCALAR_I64_RAW});
           int address =
               zero < 0 ? -1 : lower_add_const(p, base, (int64_t)(i * width));
           if (address < 0 ||
@@ -4246,8 +4416,7 @@ static c_value_t parse_primary(c_parser_t *p) {
           }
         }
         for (size_t i = 0; i < parsed; ++i) {
-          int address =
-              lower_add_const(p, base, (int64_t)(indices[i] * width));
+          int address = lower_add_const(p, base, (int64_t)(indices[i] * width));
           if (address < 0 ||
               !emit(p,
                     (nyr_inst_t){
@@ -4280,9 +4449,9 @@ static c_value_t parse_primary(c_parser_t *p) {
             fail(p, "aggregate compound literal requires a complete type");
           return (c_value_t){-1, C_BAD, NULL};
         }
-        int address = p->agg_base;
-        if (address < 0 ||
-            !init_aggregate(p, NULL, cast_agg, NULL, offset, 0, address))
+        int address = lower_add_const(p, p->agg_base, offset);
+        if (address < 0 || !lower_zero_fill(p, address, cast_agg->size) ||
+            !init_aggregate(p, NULL, cast_agg, NULL, 0, 0, address))
           return (c_value_t){-1, C_BAD, NULL};
         return (c_value_t){address, C_AGG, cast_agg};
       }
@@ -4290,6 +4459,13 @@ static c_value_t parse_primary(c_parser_t *p) {
       c_value_t operand = parse_unary(p);
       if (operand.value < 0)
         return operand;
+      if (cast_bool &&
+          (c_type_is_integer(operand.type) || c_type_is_pointer(operand.type) ||
+           c_type_is_float(operand.type))) {
+        int converted = lower_boolean_value(p, operand);
+        return converted < 0 ? (c_value_t){-1, C_BAD, NULL}
+                             : (c_value_t){converted, C_U8, NULL};
+      }
       if (cast_pointee_array.rank && c_type_is_pointer(cast_type) &&
           !remember_array_shape(p, operand.value, cast_pointee_array))
         return (c_value_t){-1, C_BAD, NULL};
@@ -4526,9 +4702,8 @@ static c_value_t parse_primary(c_parser_t *p) {
         if (!result_agg && cast_type != C_FUNC_PTR &&
             cast_type != C_FUNC_PTR_PTR && cast_type != C_AGG_PTR &&
             cast_type != C_AGG_PTR_PTR)
-          result_agg = c_pointee_marker(cast_pointee_const,
-                                        cast_pointee_volatile,
-                                        cast_pointee_seg);
+          result_agg = c_pointee_marker(
+              cast_pointee_const, cast_pointee_volatile, cast_pointee_seg);
         return (c_value_t){operand.value, cast_type, result_agg};
       }
       if (c_type_is_pointer(cast_type) && operand.type == C_AGG) {
@@ -4562,9 +4737,8 @@ static c_value_t parse_primary(c_parser_t *p) {
             cast_type != C_FUNC_PTR && cast_type != C_FUNC_PTR_PTR &&
             cast_type != C_AGG_PTR && cast_type != C_AGG_PTR_PTR &&
             cast_type != C_AGG_ARRAY_PTR)
-          result_agg = c_pointee_marker(cast_pointee_const,
-                                        cast_pointee_volatile,
-                                        cast_pointee_seg);
+          result_agg = c_pointee_marker(
+              cast_pointee_const, cast_pointee_volatile, cast_pointee_seg);
         return (c_value_t){operand.value, cast_type, result_agg};
       }
       if (c_type_is_pointer(cast_type) && p->last_value_null_pointer_constant)
@@ -4730,24 +4904,18 @@ static c_value_t parse_primary(c_parser_t *p) {
             .size = 8,
             .align = 4,
             .field_count = 2,
-            .fields = {{
-                           .kind = C_AGG_FIELD_F32, .offset = 0, .size = 4, .align = 4},
-                       {.kind = C_AGG_FIELD_F32,
-                        .offset = 4,
-                        .size = 4,
-                        .align = 4}}};
+            .fields = {
+                {.kind = C_AGG_FIELD_F32, .offset = 0, .size = 4, .align = 4},
+                {.kind = C_AGG_FIELD_F32, .offset = 4, .size = 4, .align = 4}}};
         static c_agg_type_t imaginary_f64 = {
             .scope_id = SIZE_MAX,
             .complete = true,
             .size = 16,
             .align = 8,
             .field_count = 2,
-            .fields = {{
-                           .kind = C_AGG_FIELD_F64, .offset = 0, .size = 8, .align = 8},
-                       {.kind = C_AGG_FIELD_F64,
-                        .offset = 8,
-                        .size = 8,
-                        .align = 8}}};
+            .fields = {
+                {.kind = C_AGG_FIELD_F64, .offset = 0, .size = 8, .align = 8},
+                {.kind = C_AGG_FIELD_F64, .offset = 8, .size = 8, .align = 8}}};
         size_t offset = 0;
         if (!agg_area_alloc(p, f32_literal ? 8 : 16, &offset)) {
           fail(p, "imaginary literal storage allocation failed");
@@ -4765,25 +4933,28 @@ static c_value_t parse_primary(c_parser_t *p) {
           float narrowed = (float)number;
           uint32_t bits = 0;
           memcpy(&bits, &narrowed, sizeof(bits));
-          component = emit_value(p, (nyr_inst_t){.op = NYIR_CONST_F32,
-                                                 .dst = -1,
-                                                 .imm = (int64_t)bits,
-                                                 .scalar_class = NYIR_SCALAR_F32});
+          component =
+              emit_value(p, (nyr_inst_t){.op = NYIR_CONST_F32,
+                                         .dst = -1,
+                                         .imm = (int64_t)bits,
+                                         .scalar_class = NYIR_SCALAR_F32});
         } else {
           int64_t bits = 0;
           memcpy(&bits, &number, sizeof(bits));
-          component = emit_value(p, (nyr_inst_t){.op = NYIR_CONST_F64,
-                                                 .dst = -1,
-                                                 .imm = bits,
-                                                 .scalar_class = NYIR_SCALAR_F64});
+          component =
+              emit_value(p, (nyr_inst_t){.op = NYIR_CONST_F64,
+                                         .dst = -1,
+                                         .imm = bits,
+                                         .scalar_class = NYIR_SCALAR_F64});
         }
         int high = lower_add_const(p, base, f32_literal ? 4 : 8);
         bool stored =
             zero >= 0 && component >= 0 && high >= 0 &&
-            (f32_literal ? lower_store_f32_field(p, base, zero, false) &&
-                               lower_store_f32_field(p, high, component, false)
-                         : lower_store_field(p, base, zero, true, false) &&
-                               lower_store_field(p, high, component, true, false));
+            (f32_literal
+                 ? lower_store_f32_field(p, base, zero, false) &&
+                       lower_store_f32_field(p, high, component, false)
+                 : lower_store_field(p, base, zero, true, false) &&
+                       lower_store_field(p, high, component, true, false));
         if (!stored)
           return (c_value_t){-1, C_BAD, NULL};
         return (c_value_t){base, C_AGG,
@@ -5004,40 +5175,13 @@ static c_value_t parse_primary(c_parser_t *p) {
           return (c_value_t){value, type, type_agg};
         }
         if (type == C_AGG) {
-          uint32_t packed = 0;
-          if (!type_agg || !type_agg->complete || type_agg->size > 8 ||
-              !nyc_classify_argument(type_agg, p->abi, 0, &packed) ||
-              NYIR_ARG_AGG_CLASS(packed, 0) != NYIR_ARG_CLASS_INTEGER ||
-              NYIR_ARG_AGG_CLASS(packed, 1) != NYIR_ARG_CLASS_NONE) {
-            fail(p, "va_arg aggregate must fit one integer register");
+          int address = lower_sysv_va_aggregate(p, list.value, type_agg);
+          c_value_t result;
+          if (address < 0 ||
+              !lower_member_rvalue(p, (c_value_t){address, C_AGG, type_agg},
+                                   &result))
             return (c_value_t){-1, C_BAD, NULL};
-          }
-          int storage =
-              emit_value(p, (nyr_inst_t){.op = NYIR_ALLOCA,
-                                         .dst = -1,
-                                         .imm = 8,
-                                         .scalar_class = NYIR_SCALAR_I64_RAW});
-          int bits =
-              emit_value(p, (nyr_inst_t){.op = NYIR_VA_ARG,
-                                         .dst = -1,
-                                         .a = list.value,
-                                         .imm = 0,
-                                         .scalar_class = NYIR_SCALAR_I64_RAW,
-                                         .effects = NYIR_EFFECT_READ_MEMORY |
-                                                    NYIR_EFFECT_WRITE_MEMORY |
-                                                    NYIR_EFFECT_MAY_TRAP});
-          if (storage < 0 || bits < 0 ||
-              !emit(p,
-                    (nyr_inst_t){.op = NYIR_STORE_I64,
-                                 .dst = -1,
-                                 .a = storage,
-                                 .c = bits,
-                                 .scalar_class = NYIR_SCALAR_I64_RAW,
-                                 .effects = NYIR_EFFECT_WRITE_MEMORY |
-                                            NYIR_EFFECT_MAY_TRAP},
-                    NULL))
-            return (c_value_t){-1, C_BAD, NULL};
-          return (c_value_t){storage, C_AGG, type_agg};
+          return result;
         }
         if (!c_type_is_integer(type) && !c_type_is_float(type) &&
             !c_type_is_pointer(type) && type != C_FUNC_PTR) {
@@ -5091,8 +5235,7 @@ static c_value_t parse_primary(c_parser_t *p) {
       ++p->pos;
       ny_ctok_t object = *current(p);
       c_local_t *object_local = find_local(p, object);
-      c_global_t *object_global =
-          object_local ? NULL : find_global(p, object);
+      c_global_t *object_global = object_local ? NULL : find_global(p, object);
       if ((!object_local && !object_global) ||
           !c_type_is_complex(object_local ? object_local->type
                                           : object_global->type)) {
@@ -5114,18 +5257,17 @@ static c_value_t parse_primary(c_parser_t *p) {
           fail(p, "__real__/__imag__ of a complex array is not supported yet");
           return (c_value_t){-1, C_BAD, NULL};
         }
-        base_address = emit_value(
-            p, (nyr_inst_t){.op = NYIR_ADDR_LOCAL,
-                            .dst = -1,
-                            .imm = (int64_t)object_local->slot,
-                            .scalar_class = NYIR_SCALAR_I64_RAW});
+        base_address =
+            emit_value(p, (nyr_inst_t){.op = NYIR_ADDR_LOCAL,
+                                       .dst = -1,
+                                       .imm = (int64_t)object_local->slot,
+                                       .scalar_class = NYIR_SCALAR_I64_RAW});
       } else {
         static const char data_prefix[] = "__nyc_data_";
         static const char extern_prefix[] = "__nyc_extern_";
-        const char *prefix = object_global->is_external ||
-                                     object_global->is_weak
-                                 ? extern_prefix
-                                 : data_prefix;
+        const char *prefix =
+            object_global->is_external || object_global->is_weak ? extern_prefix
+                                                                 : data_prefix;
         size_t prefix_len = strlen(prefix);
         size_t symbol_len = prefix_len + object_global->name.len;
         char *symbol = malloc(symbol_len + 1);
@@ -5137,19 +5279,18 @@ static c_value_t parse_primary(c_parser_t *p) {
         memcpy(symbol + prefix_len, object_global->name.start,
                object_global->name.len);
         symbol[symbol_len] = '\0';
-        base_address = emit_value(
-            p, (nyr_inst_t){.op = NYIR_ADDR_SYMBOL,
-                            .dst = -1,
-                            .symbol = symbol,
-                            .scalar_class = NYIR_SCALAR_I64_RAW});
+        base_address =
+            emit_value(p, (nyr_inst_t){.op = NYIR_ADDR_SYMBOL,
+                                       .dst = -1,
+                                       .symbol = symbol,
+                                       .scalar_class = NYIR_SCALAR_I64_RAW});
         free(symbol);
       }
-      int address = !imaginary
-                        ? base_address
-                        : (base_address < 0
-                               ? -1
-                               : lower_add_const(p, base_address,
-                                                 (int64_t)half));
+      int address =
+          !imaginary ? base_address
+                     : (base_address < 0
+                            ? -1
+                            : lower_add_const(p, base_address, (int64_t)half));
       if (address < 0)
         return (c_value_t){-1, C_BAD, NULL};
       int loaded = object_type == C_C64
@@ -5284,13 +5425,15 @@ static c_value_t parse_primary(c_parser_t *p) {
                                                           .dst = -1,
                                                           .a = index.value,
                                                           .b = scale});
-            int row = offset < 0
-                          ? -1
-                          : emit_value(p, (nyr_inst_t){.op = NYIR_ADD_I64,
-                                                       .dst = -1,
-                                                       .a = address,
-                                                        .b = offset,
-                                                        .flags = c_pointer_offset_flags(p)});
+            int row =
+                offset < 0
+                    ? -1
+                    : emit_value(
+                          p, (nyr_inst_t){.op = NYIR_ADD_I64,
+                                          .dst = -1,
+                                          .a = address,
+                                          .b = offset,
+                                          .flags = c_pointer_offset_flags(p)});
             return row < 0 ? (c_value_t){-1, C_BAD, NULL}
                            : (c_value_t){row, C_AGG_PTR, global->agg};
           }
@@ -5300,11 +5443,12 @@ static c_value_t parse_primary(c_parser_t *p) {
                                          .imm = (int64_t)global->agg->size});
           if (scale < 0)
             return (c_value_t){-1, C_BAD, NULL};
-          int offset = emit_value(p, (nyr_inst_t){.op = NYIR_MUL_I64,
-                                                  .dst = -1,
-                                                  .a = index.value,
-                                                      .b = scale,
-                                                      .flags = c_pointer_offset_flags(p)});
+          int offset =
+              emit_value(p, (nyr_inst_t){.op = NYIR_MUL_I64,
+                                         .dst = -1,
+                                         .a = index.value,
+                                         .b = scale,
+                                         .flags = c_pointer_offset_flags(p)});
           if (offset < 0)
             return (c_value_t){-1, C_BAD, NULL};
           int element = emit_value(
@@ -5344,13 +5488,15 @@ static c_value_t parse_primary(c_parser_t *p) {
                                                           .dst = -1,
                                                           .a = index.value,
                                                           .b = stride});
-            int row = offset < 0
-                          ? -1
-                          : emit_value(p, (nyr_inst_t){.op = NYIR_ADD_I64,
-                                                       .dst = -1,
-                                                       .a = address,
-                                                     .b = offset,
-                                                     .flags = c_pointer_offset_flags(p)});
+            int row =
+                offset < 0
+                    ? -1
+                    : emit_value(
+                          p, (nyr_inst_t){.op = NYIR_ADD_I64,
+                                          .dst = -1,
+                                          .a = address,
+                                          .b = offset,
+                                          .flags = c_pointer_offset_flags(p)});
             return row < 0
                        ? (c_value_t){-1, C_BAD, NULL}
                        : (c_value_t){row,
@@ -5368,9 +5514,8 @@ static c_value_t parse_primary(c_parser_t *p) {
           if (!global->is_pointer_array && global->type == C_AGG &&
               global->agg && global->array_rank <= 1 &&
               global->array_shape.rank <= 1) {
-            int element_address =
-                lower_pointer_offset_sized(p, (int64_t)global->agg->size,
-                                           address, index.value, false);
+            int element_address = lower_pointer_offset_sized(
+                p, (int64_t)global->agg->size, address, index.value, false);
             if (element_address < 0 ||
                 !record_lvalue(p, element_address, element_address, C_AGG,
                                global->is_volatile))
@@ -5587,16 +5732,19 @@ static c_value_t parse_primary(c_parser_t *p) {
                 : (global->type == C_U8 || global->type == C_CHAR
                        ? NYIR_INST_F_MEM_BYTE
                        : 0);
-        int value = emit_value(
-            p, (nyr_inst_t){.op = NYIR_LOAD_I64,
-                            .dst = -1,
-                            .a = address,
-                            .effects =
-                                NYIR_EFFECT_READ_MEMORY | NYIR_EFFECT_MAY_TRAP,
-                            .flags = memory_flags,
-                            .scalar_class = global->type == C_F64
-                                                ? NYIR_SCALAR_F64
-                                                : NYIR_SCALAR_I64_RAW});
+        int value =
+            global->object_seg
+                ? lower_load_segmented_global(p, global, address)
+                : emit_value(p, (nyr_inst_t){
+                                    .op = NYIR_LOAD_I64,
+                                    .dst = -1,
+                                    .a = address,
+                                    .effects = NYIR_EFFECT_READ_MEMORY |
+                                               NYIR_EFFECT_MAY_TRAP,
+                                    .flags = memory_flags,
+                                    .scalar_class = global->type == C_F64
+                                                        ? NYIR_SCALAR_F64
+                                                        : NYIR_SCALAR_I64_RAW});
         if (c_type_is_integer(global->type) && value >= 0)
           value = normalize_integer(p, global->type, value);
         if (value < 0)
@@ -5613,10 +5761,10 @@ static c_value_t parse_primary(c_parser_t *p) {
             tok_is(p, p->pos, "["))
           return lower_pointer_index_rvalue(
               p, (c_value_t){value, value_type,
-                             global->agg ? global->agg
-                                         : c_pointee_marker(
-                                               false, global->is_volatile,
-                                               global->pointee_seg)});
+                             global->agg
+                                 ? global->agg
+                                 : c_pointee_marker(false, global->is_volatile,
+                                                    global->pointee_seg)});
         if (c_type_is_arithmetic_pointer(value_type) && accept(p, "[")) {
           c_value_t index = parse_expr(p, 1);
           if (index.value < 0 || !c_type_is_integer(index.type) ||
@@ -5636,13 +5784,12 @@ static c_value_t parse_primary(c_parser_t *p) {
                                   : value_type == C_U32_PTR ? C_U32
                                   : value_type == C_F64_PTR ? C_F64
                                                             : C_I64;
-          unsigned flags =
-              (value_type == C_CHAR_PTR || value_type == C_I8_PTR
-                   ? NYIR_INST_F_MEM_BYTE
-                   : value_type == C_I32_PTR || value_type == C_U32_PTR
-                       ? NYIR_INST_F_MEM_I32
-                       : 0) |
-              c_seg_flags(global->pointee_seg);
+          unsigned flags = (value_type == C_CHAR_PTR || value_type == C_I8_PTR
+                                ? NYIR_INST_F_MEM_BYTE
+                            : value_type == C_I32_PTR || value_type == C_U32_PTR
+                                ? NYIR_INST_F_MEM_I32
+                                : 0) |
+                           c_seg_flags(global->pointee_seg);
           int element = emit_value(
               p, (nyr_inst_t){.op = NYIR_LOAD_I64,
                               .dst = -1,
@@ -5655,9 +5802,8 @@ static c_value_t parse_primary(c_parser_t *p) {
                                                   : NYIR_SCALAR_I64_RAW});
           if (element >= 0 && c_type_is_integer(element_type))
             element = normalize_integer(p, element_type, element);
-          if (element < 0 ||
-              !record_lvalue(p, element, element_address, element_type,
-                             global->is_volatile))
+          if (element < 0 || !record_lvalue(p, element, element_address,
+                                            element_type, global->is_volatile))
             return (c_value_t){-1, C_BAD, NULL};
           return (c_value_t){element, element_type, NULL};
         }
@@ -5669,11 +5815,13 @@ static c_value_t parse_primary(c_parser_t *p) {
         }
         if (!record_lvalue(p, value, address, value_type, global->is_volatile))
           return (c_value_t){-1, C_BAD, NULL};
-        return (c_value_t){
-            value, value_type,
-            global->agg ? global->agg
-                        : c_pointee_marker(false, global->is_volatile,
-                                           global->pointee_seg)};
+        p->lvalues[p->lvalue_count - 1].segment_flags =
+            c_seg_flags(global->object_seg);
+        return (c_value_t){value, value_type,
+                           global->agg
+                               ? global->agg
+                               : c_pointee_marker(false, global->is_volatile,
+                                                  global->pointee_seg)};
       }
       c_function_t *function = find_function(p, tok);
       if (function) {
@@ -5793,8 +5941,7 @@ static c_value_t parse_primary(c_parser_t *p) {
       if (local->type == C_FUNC_PTR) {
         p->indirect_result_type = local->function_result_type;
         p->indirect_result_agg = local->agg;
-        p->has_indirect_result_signature =
-            local->function_result_type != C_BAD;
+        p->has_indirect_result_signature = local->function_result_type != C_BAD;
         p->last_type_function_result_type = local->function_result_type;
         p->last_type_function_result_agg = local->agg;
         p->last_type_function_type = true;
@@ -6093,13 +6240,12 @@ static c_value_t parse_primary(c_parser_t *p) {
                                                          : C_I64;
       unsigned memory_flags =
           ((local->type == C_CHAR_PTR || local->type == C_I8_PTR
-                         ? NYIR_INST_F_MEM_BYTE
-                         : (local->type == C_I32_PTR ||
-                                    local->type == C_U32_PTR ||
-                                    local->type == C_F32_PTR
-                                ? NYIR_INST_F_MEM_I32
-                                : 0)) |
-                    c_seg_flags(local->pointee_seg));
+                ? NYIR_INST_F_MEM_BYTE
+                : (local->type == C_I32_PTR || local->type == C_U32_PTR ||
+                           local->type == C_F32_PTR
+                       ? NYIR_INST_F_MEM_I32
+                       : 0)) |
+           c_seg_flags(local->pointee_seg));
       int loaded =
           local->type == C_I16_PTR || local->type == C_U16_PTR
               ? lower_load_u16_field_seg(p, address, element_type,
@@ -6207,12 +6353,11 @@ static c_value_t parse_primary(c_parser_t *p) {
       p->last_type_function_result_agg = local->agg;
       p->last_type_function_type = true;
     }
-    return (c_value_t){
-        value, local->type,
-        local->agg ? local->agg
-                   : c_pointee_marker(local->pointee_const,
-                                      local->pointee_volatile,
-                                      local->pointee_seg)};
+    return (c_value_t){value, local->type,
+                       local->agg ? local->agg
+                                  : c_pointee_marker(local->pointee_const,
+                                                     local->pointee_volatile,
+                                                     local->pointee_seg)};
   }
   /* NYC kernel compat: skip C99 designated initializers when encountered in
    * expression context */
@@ -6267,8 +6412,7 @@ static c_value_t parse_postfix(c_parser_t *p) {
                                          value.value);
       if (result < 0)
         return (c_value_t){-1, C_BAD, NULL};
-      value = (c_value_t){result, lvalue->type,
-                          local ? local->agg : value.agg};
+      value = (c_value_t){result, lvalue->type, local ? local->agg : value.agg};
     } else if (value.type == C_FUNC_PTR && accept(p, "(")) {
       value = parse_indirect_call(p, value);
     } else if (tok_is(p, p->pos, "(")) {
@@ -6682,10 +6826,8 @@ static c_value_t parse_unary(c_parser_t *p) {
                : object_type == C_I64_PTR || object_type == C_U64_PTR ||
                        object_type == C_F64_PTR
                    ? 8
-               : object_type == C_C64_PTR
-                   ? 8
-               : object_type == C_C128_PTR
-                   ? 16
+               : object_type == C_C64_PTR  ? 8
+               : object_type == C_C128_PTR ? 16
                : c_type_is_pointer(object_type) && object_type != C_AGG_PTR
                    ? c_type_size(p->abi, object_type)
                    : 0;
@@ -7139,10 +7281,9 @@ static c_value_t parse_unary(c_parser_t *p) {
       p->last_value_const = false;
       return (c_value_t){
           lvalue->address, pointer_type,
-          lvalue->agg
-              ? lvalue->agg
-              : c_pointee_marker(p->last_value_pointee_const, false,
-                                 p->last_value_pointee_seg)};
+          lvalue->agg ? lvalue->agg
+                      : c_pointee_marker(p->last_value_pointee_const, false,
+                                         p->last_value_pointee_seg)};
     }
     if (tok_is(p, p->pos, "_Generic")) {
       c_value_t operand = parse_postfix(p);
@@ -7579,8 +7720,8 @@ static c_value_t parse_unary(c_parser_t *p) {
             fail(p, "address-of pointer subscript requires an integer index");
             return (c_value_t){-1, C_BAD, NULL};
           }
-          int element = lower_pointer_index_address(p, pointer_type, pointer,
-                                                    index.value);
+          int element = lower_pointer_index_address_for(
+              p, pointer_type, global->agg, pointer, index.value);
           if (element < 0)
             return (c_value_t){-1, C_BAD, NULL};
           if (!tok_is(p, p->pos, "[")) {
@@ -7606,6 +7747,24 @@ static c_value_t parse_unary(c_parser_t *p) {
           if (pointer < 0)
             return (c_value_t){-1, C_BAD, NULL};
         }
+      }
+      if (global->is_array && global->type != C_AGG &&
+          global->array_shape.rank > 1 && tok_is(p, p->pos, "[")) {
+        c_array_shape_t shape = global->array_shape;
+        while (address >= 0 && shape.rank && tok_is(p, p->pos, "["))
+          address = lower_array_shape_address(p, address, &shape);
+        if (address < 0)
+          return (c_value_t){-1, C_BAD, NULL};
+        for (size_t i = 0; i < parenthesized_name_closes; ++i)
+          if (!expect(p, ")"))
+            return (c_value_t){-1, C_BAD, NULL};
+        if (shape.rank) {
+          shape.pointer_to_array = true;
+          if (!remember_array_shape(p, address, shape))
+            return (c_value_t){-1, C_BAD, NULL};
+        }
+        return (c_value_t){address, c_array_pointer_type(shape.element_type),
+                           shape.agg};
       }
       if (global->is_array && global->is_pointer_array && accept(p, "[")) {
         c_value_t index = parse_expr(p, 1);
@@ -7725,6 +7884,16 @@ static c_value_t parse_unary(c_parser_t *p) {
           (tok_is(p, p->pos, ".") || tok_is(p, p->pos, "->")))
         return lower_address_aggregate_members(
             p, (c_value_t){address, C_AGG_PTR, global->agg});
+      if (global->object_seg) {
+        c_type_t pointer_type = c_add_pointer_levels(global->type, 1);
+        if (address < 0 || pointer_type == C_BAD)
+          return (c_value_t){-1, C_BAD, NULL};
+        p->last_value_pointee_seg = global->object_seg;
+        return (c_value_t){address, pointer_type,
+                           c_pointee_marker(global->is_const,
+                                            global->is_volatile,
+                                            global->object_seg)};
+      }
       c_type_t pointer_type =
           global->is_array && !global->is_pointer_array && global->type == C_AGG
               ? C_AGG_ARRAY_PTR
@@ -7741,6 +7910,30 @@ static c_value_t parse_unary(c_parser_t *p) {
         return (c_value_t){-1, C_BAD, NULL};
       return address < 0 ? (c_value_t){-1, C_BAD, NULL}
                          : (c_value_t){address, pointer_type, global->agg};
+    }
+    if (local->pointee_array.pointer_to_array && tok_is(p, p->pos, "[")) {
+      c_array_shape_t shape = local->pointee_array;
+      int address = lower_local_load(p, local);
+      while (address >= 0 && shape.rank && tok_is(p, p->pos, "["))
+        address = lower_array_shape_address(p, address, &shape);
+      if (address < 0)
+        return (c_value_t){-1, C_BAD, NULL};
+      for (size_t i = 0; i < parenthesized_name_closes; ++i)
+        if (!expect(p, ")"))
+          return (c_value_t){-1, C_BAD, NULL};
+      if (shape.element_type == C_AGG &&
+          ((shape.rank == 1 && tok_is(p, p->pos, "->")) ||
+           (!shape.rank && tok_is(p, p->pos, "."))))
+        return lower_address_aggregate_members(
+            p, (c_value_t){address, shape.rank ? C_AGG_PTR : C_AGG, shape.agg});
+      c_type_t pointer = c_array_pointer_type(shape.element_type);
+      if (shape.rank) {
+        shape.pointer_to_array = true;
+        if (!remember_array_shape(p, address, shape))
+          return (c_value_t){-1, C_BAD, NULL};
+      }
+      return pointer == C_BAD ? (c_value_t){-1, C_BAD, NULL}
+                              : (c_value_t){address, pointer, shape.agg};
     }
     if (accept(p, "[")) {
       c_value_t index = parse_expr(p, 1);
@@ -7953,16 +8146,20 @@ static c_value_t parse_unary(c_parser_t *p) {
                                        .effects = NYIR_EFFECT_READ_MEMORY |
                                                   NYIR_EFFECT_MAY_TRAP,
                                        .scalar_class = NYIR_SCALAR_I64_RAW});
-        address = pointer < 0 || indexed_type == C_BAD
-                      ? -1
-                      : lower_pointer_index_address(p, indexed_type, pointer,
-                                                    nested_index.value);
+        address =
+            pointer < 0 || indexed_type == C_BAD
+                ? -1
+                : lower_pointer_index_address_for(p, indexed_type, local->agg,
+                                                  pointer, nested_index.value);
         if (address < 0)
           return (c_value_t){-1, C_BAD, NULL};
       }
       for (size_t pnc = 0; pnc < parenthesized_name_closes; ++pnc)
         if (!expect(p, ")"))
           return (c_value_t){-1, C_BAD, NULL};
+      if (indexed_type == C_AGG_PTR && tok_is(p, p->pos, "."))
+        return lower_address_aggregate_members(
+            p, (c_value_t){address, C_AGG, local->agg});
       return (c_value_t){address, indexed_type, local->agg};
     }
     if (local->array_rank) {
@@ -8079,7 +8276,11 @@ static c_value_t parse_unary(c_parser_t *p) {
         return (c_value_t){-1, C_BAD, NULL};
       return object;
     }
+    /* Distinguish no cast from a cast explicitly clearing the address space. */
+    p->last_value_pointee_seg = UCHAR_MAX;
     c_value_t address = parse_unary(p);
+    unsigned char address_segment = p->last_value_pointee_seg;
+    p->last_value_pointee_seg = C_SEG_NONE;
     const c_lvalue_t *pointer_lvalue =
         address.value >= 0 ? find_lvalue(p, address.value) : NULL;
     c_local_t *pointer_local =
@@ -8138,17 +8339,25 @@ static c_value_t parse_unary(c_parser_t *p) {
       return (c_value_t){value, C_I8_PTR, NULL};
     }
     if (address.type == C_AGG_PTR_PTR) {
+      /* Aggregate pointers keep their layout in address.agg rather than
+       * storing a qualifier marker there. The qualifier applies to this
+       * load, not to the ordinary aggregate pointer returned by it. */
+      unsigned char segment = address_segment != UCHAR_MAX ? address_segment
+                              : pointer_local ? pointer_local->pointee_seg
+                                              : C_SEG_NONE;
       int value =
           emit_value(p, (nyr_inst_t){.op = NYIR_LOAD_I64,
                                      .dst = -1,
                                      .a = address.value,
                                      .effects = NYIR_EFFECT_READ_MEMORY |
                                                 NYIR_EFFECT_MAY_TRAP,
+                                     .flags = c_seg_flags(segment),
                                      .scalar_class = NYIR_SCALAR_I64_RAW});
       if (value < 0 || !record_lvalue(p, value, address.value, C_AGG_PTR,
                                       c_value_pointee_volatile(address)))
         return (c_value_t){-1, C_BAD, NULL};
       p->lvalues[p->lvalue_count - 1].agg = address.agg;
+      p->lvalues[p->lvalue_count - 1].segment_flags = c_seg_flags(segment);
       return (c_value_t){value, C_AGG_PTR, address.agg};
     }
     if (address.type == C_AGG_ARRAY_PTR)
@@ -8230,29 +8439,31 @@ static c_value_t parse_unary(c_parser_t *p) {
           .size = 8,
           .align = 4,
           .field_count = 2,
-          .fields = {{.kind = C_AGG_FIELD_F32, .offset = 0, .size = 4, .align = 4},
-                     {.kind = C_AGG_FIELD_F32, .offset = 4, .size = 4, .align = 4}}};
+          .fields = {
+              {.kind = C_AGG_FIELD_F32, .offset = 0, .size = 4, .align = 4},
+              {.kind = C_AGG_FIELD_F32, .offset = 4, .size = 4, .align = 4}}};
       static c_agg_type_t complex_ptr_f64 = {
           .scope_id = SIZE_MAX,
           .complete = true,
           .size = 16,
           .align = 8,
           .field_count = 2,
-          .fields = {{.kind = C_AGG_FIELD_F64, .offset = 0, .size = 8, .align = 8},
-                     {.kind = C_AGG_FIELD_F64, .offset = 8, .size = 8, .align = 8}}};
+          .fields = {
+              {.kind = C_AGG_FIELD_F64, .offset = 0, .size = 8, .align = 8},
+              {.kind = C_AGG_FIELD_F64, .offset = 8, .size = 8, .align = 8}}};
       static c_agg_type_t complex_ptr_ldouble = {
           .scope_id = SIZE_MAX,
           .complete = true,
           .size = 16,
           .align = 8,
           .field_count = 2,
-          .fields = {{.kind = C_AGG_FIELD_F64, .offset = 0, .size = 8, .align = 8},
-                     {.kind = C_AGG_FIELD_F64, .offset = 8, .size = 8, .align = 8}}};
-      c_agg_type_t *pointee_agg = address.type == C_C64_PTR
-                                      ? &complex_ptr_f32
-                                      : address.type == C_C128_PTR
-                                            ? &complex_ptr_f64
-                                            : &complex_ptr_ldouble;
+          .fields = {
+              {.kind = C_AGG_FIELD_F64, .offset = 0, .size = 8, .align = 8},
+              {.kind = C_AGG_FIELD_F64, .offset = 8, .size = 8, .align = 8}}};
+      c_agg_type_t *pointee_agg = address.type == C_C64_PTR ? &complex_ptr_f32
+                                  : address.type == C_C128_PTR
+                                      ? &complex_ptr_f64
+                                      : &complex_ptr_ldouble;
       if (!record_lvalue(p, address.value, address.value, C_AGG,
                          c_value_pointee_volatile(address)))
         return (c_value_t){-1, C_BAD, NULL};
@@ -8282,12 +8493,14 @@ static c_value_t parse_unary(c_parser_t *p) {
                             : address.type == C_F64_PTR ? C_F64
                                                         : C_I64;
     if (element_type == C_I16 || element_type == C_U16) {
-      int value = lower_load_u16_field_seg(
-          p, address.value, element_type, c_value_pointee_volatile(address),
-          c_value_seg_flags(address));
+      int value = lower_load_u16_field_seg(p, address.value, element_type,
+                                           c_value_pointee_volatile(address),
+                                           c_value_seg_flags(address));
       if (value < 0 || !record_lvalue(p, value, address.value, element_type,
                                       c_value_pointee_volatile(address)))
         return (c_value_t){-1, C_BAD, NULL};
+      p->lvalues[p->lvalue_count - 1].segment_flags =
+          c_value_seg_flags(address);
       return (c_value_t){value, element_type, NULL};
     }
     unsigned memory_flags =
@@ -8314,9 +8527,13 @@ static c_value_t parse_unary(c_parser_t *p) {
                                 : NYIR_SCALAR_I64_RAW});
     if (value >= 0 && (element_type == C_CHAR || element_type == C_I32))
       value = normalize_integer(p, element_type, value);
-    if (value >= 0 && !record_lvalue(p, value, address.value, element_type,
-                                     c_value_pointee_volatile(address)))
-      return (c_value_t){-1, C_BAD, NULL};
+    if (value >= 0) {
+      if (!record_lvalue(p, value, address.value, element_type,
+                         c_value_pointee_volatile(address)))
+        return (c_value_t){-1, C_BAD, NULL};
+      p->lvalues[p->lvalue_count - 1].segment_flags =
+          c_value_seg_flags(address);
+    }
     return (c_value_t){.value = value, .type = element_type};
   }
   if (accept(p, "+"))
@@ -8333,36 +8550,37 @@ static c_value_t parse_unary(c_parser_t *p) {
       int real = neg_single ? lower_load_f32_field(p, value.value, false)
                             : lower_load_field(p, value.value, true, false);
       int imag_addr = lower_add_const(p, value.value, neg_lane);
-      int imag = imag_addr < 0
-                     ? -1
-                     : neg_single ? lower_load_f32_field(p, imag_addr, false)
-                                  : lower_load_field(p, imag_addr, true, false);
+      int imag = imag_addr < 0 ? -1
+                 : neg_single  ? lower_load_f32_field(p, imag_addr, false)
+                               : lower_load_field(p, imag_addr, true, false);
       int zero = emit_value(
           p, (nyr_inst_t){.op = neg_single ? NYIR_CONST_F32 : NYIR_CONST_F64,
                           .dst = -1,
                           .imm = 0,
-                          .scalar_class = neg_single ? NYIR_SCALAR_F32
-                                                     : NYIR_SCALAR_F64});
-      int neg_real = real < 0 ? -1
-                              : emit_value(p, (nyr_inst_t){
-                                                   .op = neg_single ? NYIR_SUB_F32
-                                                                    : NYIR_SUB_F64,
-                                                   .dst = -1,
-                                                   .a = zero,
-                                                   .b = real,
-                                                   .scalar_class = neg_single
-                                                                       ? NYIR_SCALAR_F32
-                                                                       : NYIR_SCALAR_F64});
-      int neg_imag = imag < 0 ? -1
-                              : emit_value(p, (nyr_inst_t){
-                                                   .op = neg_single ? NYIR_SUB_F32
-                                                                    : NYIR_SUB_F64,
-                                                   .dst = -1,
-                                                   .a = zero,
-                                                   .b = imag,
-                                                   .scalar_class = neg_single
-                                                                       ? NYIR_SCALAR_F32
-                                                                       : NYIR_SCALAR_F64});
+                          .scalar_class =
+                              neg_single ? NYIR_SCALAR_F32 : NYIR_SCALAR_F64});
+      int neg_real =
+          real < 0
+              ? -1
+              : emit_value(
+                    p,
+                    (nyr_inst_t){.op = neg_single ? NYIR_SUB_F32 : NYIR_SUB_F64,
+                                 .dst = -1,
+                                 .a = zero,
+                                 .b = real,
+                                 .scalar_class = neg_single ? NYIR_SCALAR_F32
+                                                            : NYIR_SCALAR_F64});
+      int neg_imag =
+          imag < 0
+              ? -1
+              : emit_value(
+                    p,
+                    (nyr_inst_t){.op = neg_single ? NYIR_SUB_F32 : NYIR_SUB_F64,
+                                 .dst = -1,
+                                 .a = zero,
+                                 .b = imag,
+                                 .scalar_class = neg_single ? NYIR_SCALAR_F32
+                                                            : NYIR_SCALAR_F64});
       size_t offset = 0;
       if (zero < 0 || neg_real < 0 || neg_imag < 0 ||
           !agg_area_alloc(p, value.agg->size, &offset))
@@ -8371,11 +8589,11 @@ static c_value_t parse_unary(c_parser_t *p) {
       int imag_target = lower_add_const(p, base, neg_lane);
       bool stored =
           imag_target >= 0 &&
-          (neg_single ? lower_store_f32_field(p, base, neg_real, false) &&
-                            lower_store_f32_field(p, imag_target, neg_imag, false)
-                      : lower_store_field(p, base, neg_real, true, false) &&
-                            lower_store_field(p, imag_target, neg_imag, true,
-                                              false));
+          (neg_single
+               ? lower_store_f32_field(p, base, neg_real, false) &&
+                     lower_store_f32_field(p, imag_target, neg_imag, false)
+               : lower_store_field(p, base, neg_real, true, false) &&
+                     lower_store_field(p, imag_target, neg_imag, true, false));
       if (!stored)
         return (c_value_t){-1, C_BAD, NULL};
       return (c_value_t){base, C_AGG, value.agg};
@@ -8880,6 +9098,37 @@ static c_value_t lower_int128_shift_right(c_parser_t *p, c_value_t value,
   return (c_value_t){result, C_AGG, value.agg};
 }
 
+static unsigned c_scalar_lvalue_flags(c_parser_t *p, const c_lvalue_t *lvalue,
+                                      c_type_t type) {
+  unsigned width = type == C_U8 || type == C_CHAR ? NYIR_INST_F_MEM_BYTE
+                   : type == C_I32 || type == C_U32 || type == C_F32 ||
+                           (p->abi == NYC_ABI_I386 && c_type_is_pointer(type))
+                       ? NYIR_INST_F_MEM_I32
+                       : 0;
+  return width | lvalue->segment_flags;
+}
+
+static bool lower_store_scalar_lvalue(c_parser_t *p, const c_lvalue_t *lvalue,
+                                      c_type_t type, int value) {
+  if (type == C_I16 || type == C_U16)
+    return lower_store_u16_field_seg(p, lvalue->address, value, type,
+                                     lvalue->is_volatile,
+                                     lvalue->segment_flags);
+  return emit(
+      p,
+      (nyr_inst_t){.op = NYIR_STORE_I64,
+                   .dst = -1,
+                   .a = lvalue->address,
+                   .c = value,
+                   .effects = NYIR_EFFECT_WRITE_MEMORY | NYIR_EFFECT_MAY_TRAP |
+                              (lvalue->is_volatile ? NYIR_EFFECT_VOLATILE : 0),
+                   .flags = c_scalar_lvalue_flags(p, lvalue, type),
+                   .scalar_class = c_type_is_float(type)
+                                       ? c_float_scalar_class(type)
+                                       : NYIR_SCALAR_I64_RAW},
+      NULL);
+}
+
 static c_value_t parse_expr(c_parser_t *p, int min_precedence) {
   c_value_t left = parse_unary(p);
   if (left.value < 0 && !(min_precedence == 0 && tok_is(p, p->pos, ",") &&
@@ -8946,12 +9195,7 @@ static c_value_t parse_expr(c_parser_t *p, int min_precedence) {
         fail(p, "assignment value is incompatible with its C lvalue");
         return (c_value_t){-1, C_BAD, NULL};
       }
-      uint8_t memory_flags =
-          left.type == C_U8 || left.type == C_CHAR ? NYIR_INST_F_MEM_BYTE
-          : left.type == C_I32 || left.type == C_U32 || left.type == C_F32 ||
-                  (p->abi == NYC_ABI_I386 && c_type_is_pointer(left.type))
-              ? NYIR_INST_F_MEM_I32
-              : 0;
+      unsigned memory_flags = c_scalar_lvalue_flags(p, target, left.type);
       if (!simple) {
         if (pointer_compound) {
           int previous =
@@ -8987,8 +9231,9 @@ static c_value_t parse_expr(c_parser_t *p, int min_precedence) {
                   ? lower_load_bitfield(p, target->address, target->bitfield)
               : target_local ? lower_local_load(p, target_local)
               : left.type == C_I16 || left.type == C_U16
-                  ? lower_load_u16_field(p, target->address, left.type,
-                                         target->is_volatile)
+                  ? lower_load_u16_field_seg(p, target->address, left.type,
+                                             target->is_volatile,
+                                             target->segment_flags)
                   : emit_value(p, (nyr_inst_t){
                                       .op = NYIR_LOAD_I64,
                                       .dst = -1,
@@ -9014,8 +9259,7 @@ static c_value_t parse_expr(c_parser_t *p, int min_precedence) {
                            .dst = -1,
                            .a = previous,
                            .b = right.value,
-                           .flags = c_i386_narrow32_operation(
-                                        p, left.type, op)
+                           .flags = c_i386_narrow32_operation(p, left.type, op)
                                         ? NYIR_INST_F_NARROW32
                                         : 0,
                            .scalar_class = c_type_is_float(left.type)
@@ -9048,24 +9292,9 @@ static c_value_t parse_expr(c_parser_t *p, int min_precedence) {
       bool stored =
           target->bitfield ? lower_store_bitfield(p, target->address,
                                                   target->bitfield, right.value)
-          : target_local   ? lower_local_store(p, target_local, right.value)
-          : left.type == C_I16 || left.type == C_U16
-              ? lower_store_u16_field(p, target->address, right.value,
-                                      left.type, target->is_volatile)
-              : emit(p,
-                     (nyr_inst_t){
-                         .op = NYIR_STORE_I64,
-                         .dst = -1,
-                         .a = target->address,
-                         .c = right.value,
-                         .effects =
-                             NYIR_EFFECT_WRITE_MEMORY | NYIR_EFFECT_MAY_TRAP |
-                             (target->is_volatile ? NYIR_EFFECT_VOLATILE : 0),
-                         .flags = memory_flags,
-                         .scalar_class = c_type_is_float(left.type)
-                                             ? c_float_scalar_class(left.type)
-                                             : NYIR_SCALAR_I64_RAW},
-                     NULL);
+          : target_local
+              ? lower_local_store(p, target_local, right.value)
+              : lower_store_scalar_lvalue(p, target, left.type, right.value);
       if (!stored)
         return (c_value_t){-1, C_BAD, NULL};
       left = (c_value_t){right.value, left.type, left.agg};
@@ -9343,6 +9572,24 @@ static c_value_t parse_expr(c_parser_t *p, int min_precedence) {
       int64_t scale = c_pointer_scale_for(p->abi, left.type, left.agg);
       if (difference < 0)
         return (c_value_t){-1, C_BAD, NULL};
+      /* Array decay keeps the original rank; a pointer-to-array value
+       * carries only its pointee shape. Either operand of a valid pointer
+       * difference can supply the complete common element type. */
+      const c_array_shape_t *shape = array_shape_for_value(p, left.value);
+      if (!shape || (!shape->pointer_to_array && shape->rank < 2))
+        shape = array_shape_for_value(p, right.value);
+      if (shape && (shape->pointer_to_array || shape->rank > 1)) {
+        size_t stride = shape->element_size;
+        for (unsigned dim = shape->pointer_to_array ? 0 : 1; dim < shape->rank;
+             ++dim) {
+          if (!shape->extent[dim] || stride > INT64_MAX / shape->extent[dim]) {
+            fail(p, "pointer difference requires a complete array row");
+            return (c_value_t){-1, C_BAD, NULL};
+          }
+          stride *= shape->extent[dim];
+        }
+        scale = (int64_t)stride;
+      }
       if (scale > 1) {
         int divisor = emit_value(
             p, (nyr_inst_t){.op = NYIR_CONST_I64, .dst = -1, .imm = scale});
@@ -9549,7 +9796,8 @@ static c_value_t parse_expr(c_parser_t *p, int min_precedence) {
         right.type = C_I32;
     }
     bool shift_operation = ny_ctok_eq(op, "<<") || ny_ctok_eq(op, ">>");
-    if (!shift_operation && c_type_is_integer(left.type) && c_type_is_integer(right.type) &&
+    if (!shift_operation && c_type_is_integer(left.type) &&
+        c_type_is_integer(right.type) &&
         (left.type == C_U32 || right.type == C_U32) && left.type != C_I64 &&
         right.type != C_I64 && left.type != C_U64 && right.type != C_U64) {
       left.value = normalize_u32(p, left.value);
@@ -9560,11 +9808,11 @@ static c_value_t parse_expr(c_parser_t *p, int min_precedence) {
     }
     /* A signed 64-bit operand represents every unsigned 32-bit value.
      * Shifts apply integer promotions independently and keep the left type. */
-    bool unsigned_operation = shift_operation
-        ? left.type == C_U64 || left.type == C_U32
-        : left.type == C_U64 || right.type == C_U64 ||
-          ((left.type == C_U32 || right.type == C_U32) &&
-           left.type != C_I64 && right.type != C_I64);
+    bool unsigned_operation =
+        shift_operation ? left.type == C_U64 || left.type == C_U32
+                        : left.type == C_U64 || right.type == C_U64 ||
+                              ((left.type == C_U32 || right.type == C_U32) &&
+                               left.type != C_I64 && right.type != C_I64);
     bool signed_safe_unsigned_division = false;
     if (unsigned_operation && (ny_ctok_eq(op, "/") || ny_ctok_eq(op, "%"))) {
       int64_t left_constant = 0, right_constant = 0;
@@ -9665,33 +9913,32 @@ static c_value_t parse_expr(c_parser_t *p, int min_precedence) {
                               : lower_load_field(p, narrow.value, true, false);
         int imag_source_addr = lower_add_const(p, narrow.value, narrow_lane);
         int imag_source =
-            imag_source_addr < 0
-                ? -1
-                : source_single
-                      ? lower_load_f32_field(p, imag_source_addr, false)
-                      : lower_load_field(p, imag_source_addr, true, false);
+            imag_source_addr < 0 ? -1
+            : source_single
+                ? lower_load_f32_field(p, imag_source_addr, false)
+                : lower_load_field(p, imag_source_addr, true, false);
         int real_value =
             real_source < 0
                 ? -1
-                : emit_value(p, (nyr_inst_t){
-                                     .op = source_single ? NYIR_F32_TO_F64
-                                                         : NYIR_F64_TO_F32,
-                                     .dst = -1,
-                                     .a = real_source,
-                                     .scalar_class = target_single
-                                                         ? NYIR_SCALAR_F32
-                                                         : NYIR_SCALAR_F64});
+                : emit_value(p,
+                             (nyr_inst_t){.op = source_single ? NYIR_F32_TO_F64
+                                                              : NYIR_F64_TO_F32,
+                                          .dst = -1,
+                                          .a = real_source,
+                                          .scalar_class =
+                                              target_single ? NYIR_SCALAR_F32
+                                                            : NYIR_SCALAR_F64});
         int imag_value =
             imag_source < 0
                 ? -1
-                : emit_value(p, (nyr_inst_t){
-                                     .op = source_single ? NYIR_F32_TO_F64
-                                                         : NYIR_F64_TO_F32,
-                                     .dst = -1,
-                                     .a = imag_source,
-                                     .scalar_class = target_single
-                                                         ? NYIR_SCALAR_F32
-                                                         : NYIR_SCALAR_F64});
+                : emit_value(p,
+                             (nyr_inst_t){.op = source_single ? NYIR_F32_TO_F64
+                                                              : NYIR_F64_TO_F32,
+                                          .dst = -1,
+                                          .a = imag_source,
+                                          .scalar_class =
+                                              target_single ? NYIR_SCALAR_F32
+                                                            : NYIR_SCALAR_F64});
         size_t promote_offset = 0;
         if (real_value < 0 || imag_value < 0 ||
             !agg_area_alloc(p, target_single ? 8 : 16, &promote_offset))
@@ -9704,15 +9951,15 @@ static c_value_t parse_expr(c_parser_t *p, int min_precedence) {
             (target_single
                  ? lower_store_f32_field(p, promote_base, real_value, false) &&
                        lower_store_f32_field(p, imag_target, imag_value, false)
-                 : lower_store_field(p, promote_base, real_value, true, false) &&
+                 : lower_store_field(p, promote_base, real_value, true,
+                                     false) &&
                        lower_store_field(p, imag_target, imag_value, true,
                                          false));
         if (!promoted)
           return (c_value_t){-1, C_BAD, NULL};
-        c_value_t promoted_value = {
-            promote_base, C_AGG,
-            target_single ? &lower_complex_value_f32
-                          : &lower_complex_value_f64};
+        c_value_t promoted_value = {promote_base, C_AGG,
+                                    target_single ? &lower_complex_value_f32
+                                                  : &lower_complex_value_f64};
         if (left_narrow)
           left = promoted_value;
         else
@@ -9725,24 +9972,23 @@ static c_value_t parse_expr(c_parser_t *p, int min_precedence) {
       if (equality) {
         bool single_eq = left.agg->size == 8;
         size_t eq_lane = single_eq ? 4 : 8;
-        int left_real = single_eq ? lower_load_f32_field(p, left.value, false)
-                                  : lower_load_field(p, left.value, true, false);
-        int right_real = single_eq ? lower_load_f32_field(p, right.value, false)
-                                   : lower_load_field(p, right.value, true, false);
+        int left_real = single_eq
+                            ? lower_load_f32_field(p, left.value, false)
+                            : lower_load_field(p, left.value, true, false);
+        int right_real = single_eq
+                             ? lower_load_f32_field(p, right.value, false)
+                             : lower_load_field(p, right.value, true, false);
         int left_imag_addr = lower_add_const(p, left.value, eq_lane);
         int right_imag_addr = lower_add_const(p, right.value, eq_lane);
-        int left_imag =
-            left_imag_addr < 0
-                ? -1
-                : single_eq ? lower_load_f32_field(p, left_imag_addr, false)
+        int left_imag = left_imag_addr < 0 ? -1
+                        : single_eq
+                            ? lower_load_f32_field(p, left_imag_addr, false)
                             : lower_load_field(p, left_imag_addr, true, false);
         int right_imag =
-            right_imag_addr < 0
-                ? -1
-                : single_eq ? lower_load_f32_field(p, right_imag_addr, false)
-                            : lower_load_field(p, right_imag_addr, true, false);
-        if (left_real < 0 || left_imag < 0 || right_real < 0 ||
-            right_imag < 0)
+            right_imag_addr < 0 ? -1
+            : single_eq ? lower_load_f32_field(p, right_imag_addr, false)
+                        : lower_load_field(p, right_imag_addr, true, false);
+        if (left_real < 0 || left_imag < 0 || right_real < 0 || right_imag < 0)
           return (c_value_t){-1, C_BAD, NULL};
         bool equal_op = ny_ctok_eq(op, "==");
         nyr_op_t float_cmp = single_eq ? NYIR_CMP_F32 : NYIR_CMP_F64;
@@ -9763,12 +10009,11 @@ static c_value_t parse_expr(c_parser_t *p, int min_precedence) {
         int combined =
             real_cmp < 0 || imag_cmp < 0
                 ? -1
-                : emit_value(p, (nyr_inst_t){
-                                     .op = equal_op ? NYIR_AND_I64
-                                                    : NYIR_OR_I64,
-                                     .dst = -1,
-                                     .a = real_cmp,
-                                     .b = imag_cmp});
+                : emit_value(p, (nyr_inst_t){.op = equal_op ? NYIR_AND_I64
+                                                            : NYIR_OR_I64,
+                                             .dst = -1,
+                                             .a = real_cmp,
+                                             .b = imag_cmp});
         return (c_value_t){combined, C_I64, NULL};
       }
       if ((multiply || divide) && left.agg->size == 32) {
@@ -9779,8 +10024,9 @@ static c_value_t parse_expr(c_parser_t *p, int min_precedence) {
       if (multiply || divide) {
         bool single_call = left.agg->size == 8;
         size_t lane_offset = single_call ? 4 : 8;
-        int left_real = single_call ? lower_load_f32_field(p, left.value, false)
-                                    : lower_load_field(p, left.value, true, false);
+        int left_real = single_call
+                            ? lower_load_f32_field(p, left.value, false)
+                            : lower_load_field(p, left.value, true, false);
         int left_imag =
             single_call
                 ? lower_load_f32_field(
@@ -9788,9 +10034,9 @@ static c_value_t parse_expr(c_parser_t *p, int min_precedence) {
                 : lower_load_field(p,
                                    lower_add_const(p, left.value, lane_offset),
                                    true, false);
-        int right_real =
-            single_call ? lower_load_f32_field(p, right.value, false)
-                        : lower_load_field(p, right.value, true, false);
+        int right_real = single_call
+                             ? lower_load_f32_field(p, right.value, false)
+                             : lower_load_field(p, right.value, true, false);
         int right_imag =
             single_call
                 ? lower_load_f32_field(
@@ -9798,8 +10044,7 @@ static c_value_t parse_expr(c_parser_t *p, int min_precedence) {
                 : lower_load_field(p,
                                    lower_add_const(p, right.value, lane_offset),
                                    true, false);
-        if (left_real < 0 || left_imag < 0 || right_real < 0 ||
-            right_imag < 0)
+        if (left_real < 0 || left_imag < 0 || right_real < 0 || right_imag < 0)
           return (c_value_t){-1, C_BAD, NULL};
         nyr_inst_t call = {
             .op = NYIR_CALL,
@@ -9815,12 +10060,10 @@ static c_value_t parse_expr(c_parser_t *p, int min_precedence) {
             .effects = NYIR_EFFECT_CALL,
             .symbol = single_call ? (multiply ? "__mulsc3" : "__divsc3")
                                   : (multiply ? "__muldc3" : "__divdc3"),
-            .scalar_class =
-                single_call ? NYIR_SCALAR_F32 : NYIR_SCALAR_F64,
+            .scalar_class = single_call ? NYIR_SCALAR_F32 : NYIR_SCALAR_F64,
             .ret_aggregate_size = single_call ? 8 : 16};
         call.ret_aggregate_classes[0] = NYIR_ARG_CLASS_SSE;
-        call.ret_aggregate_classes[1] =
-            single_call ? 0 : NYIR_ARG_CLASS_SSE;
+        call.ret_aggregate_classes[1] = single_call ? 0 : NYIR_ARG_CLASS_SSE;
         for (int argument = 0; argument < 4; ++argument)
           nyr_call_arg_class_set(call.arg_scalar_classes, argument,
                                  single_call ? NYIR_SCALAR_F32
@@ -9859,21 +10102,20 @@ static c_value_t parse_expr(c_parser_t *p, int min_precedence) {
             left_part < 0 || right_part < 0)
           return (c_value_t){-1, C_BAD, NULL};
         int part_value = emit_value(
-            p, (nyr_inst_t){.op = single_precision
-                                     ? (add ? NYIR_ADD_F32 : NYIR_SUB_F32)
-                                     : (add ? NYIR_ADD_F64 : NYIR_SUB_F64),
-                            .dst = -1,
-                            .a = left_part,
-                            .b = right_part,
-                            .scalar_class = single_precision ? NYIR_SCALAR_F32
-                                                             : NYIR_SCALAR_F64});
+            p, (nyr_inst_t){
+                   .op = single_precision ? (add ? NYIR_ADD_F32 : NYIR_SUB_F32)
+                                          : (add ? NYIR_ADD_F64 : NYIR_SUB_F64),
+                   .dst = -1,
+                   .a = left_part,
+                   .b = right_part,
+                   .scalar_class =
+                       single_precision ? NYIR_SCALAR_F32 : NYIR_SCALAR_F64});
         if (part_value < 0)
           return (c_value_t){-1, C_BAD, NULL};
-        bool stored = single_precision
-                          ? lower_store_f32_field(p, result_address, part_value,
-                                                  false)
-                          : lower_store_field(p, result_address, part_value,
-                                              true, false);
+        bool stored =
+            single_precision
+                ? lower_store_f32_field(p, result_address, part_value, false)
+                : lower_store_field(p, result_address, part_value, true, false);
         if (!stored)
           return (c_value_t){-1, C_BAD, NULL};
       }
@@ -10071,16 +10313,7 @@ static int lower_increment_lvalue(c_parser_t *p, const c_lvalue_t *lvalue,
                       .b = one_float,
                       .scalar_class = c_float_scalar_class(lvalue->type)});
     if (updated < 0 ||
-        !emit(p,
-              (nyr_inst_t){.op = NYIR_STORE_I64,
-                           .dst = -1,
-                           .a = lvalue->address,
-                           .c = updated,
-                           .effects =
-                               NYIR_EFFECT_WRITE_MEMORY | NYIR_EFFECT_MAY_TRAP |
-                               (lvalue->is_volatile ? NYIR_EFFECT_VOLATILE : 0),
-                           .scalar_class = c_float_scalar_class(lvalue->type)},
-              NULL))
+        !lower_store_scalar_lvalue(p, lvalue, lvalue->type, updated))
       return -1;
     return prefix ? updated : previous_value;
   }
@@ -10091,8 +10324,7 @@ static int lower_increment_lvalue(c_parser_t *p, const c_lvalue_t *lvalue,
   if (c_type_is_arithmetic_pointer(lvalue->type)) {
     updated = lower_pointer_offset_for(p, lvalue->type, lvalue->agg,
                                        previous_value, one, decrement);
-    if (updated < 0 ||
-        !lower_store_field(p, lvalue->address, updated, false, false))
+    if (updated < 0)
       return -1;
   } else {
     if (!c_type_is_integer(lvalue->type)) {
@@ -10118,22 +10350,8 @@ static int lower_increment_lvalue(c_parser_t *p, const c_lvalue_t *lvalue,
         return -1;
       return prefix ? updated : previous_value;
     }
-    bool stored = lvalue->type == C_I32 || lvalue->type == C_U32
-                      ? lower_store_i32_field(p, lvalue->address, updated,
-                                              lvalue->is_volatile)
-                  : lvalue->type == C_U8 || lvalue->type == C_CHAR
-                      ? lower_store_u8_field(p, lvalue->address, updated,
-                                             lvalue->is_volatile)
-                  : lvalue->type == C_I16 || lvalue->type == C_U16
-                      ? lower_store_u16_field(p, lvalue->address, updated,
-                                              lvalue->type, lvalue->is_volatile)
-                  : c_type_is_pointer(lvalue->type)
-                      ? lower_store_pointer_field(p, lvalue->address, updated,
-                                                  lvalue->is_volatile)
-                      : lower_store_field(p, lvalue->address, updated, false,
-                                          lvalue->is_volatile);
-    if (!stored)
-      return -1;
   }
+  if (!lower_store_scalar_lvalue(p, lvalue, lvalue->type, updated))
+    return -1;
   return prefix ? updated : previous_value;
 }

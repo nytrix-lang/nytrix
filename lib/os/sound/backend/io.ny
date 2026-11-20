@@ -5,7 +5,7 @@
 ;; - core.os
 module core.os.sound.backend.io(create, connect, connect_backend, disconnect, get_output_device_count, get_output_device, get_default_output_device_index, outstream_create, outstream_open, outstream_start, outstream_stop, outstream_write, outstream_write_frames, outstream_destroy, get_backend_name, FORMAT_S16LE, FORMAT_FLOAT32LE)
 use core
-use core.dict_mod
+use core.dict
 use core.os
 use core.common as common
 use core.os.sound.diag as sound_debug

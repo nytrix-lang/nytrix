@@ -220,3 +220,24 @@ long long rt_libm_llround(double x) {
     *(void **)&fn = RT_LM_RESOLVE(llround, void *);
   return fn(x);
 }
+
+double rt_libm_asin(double x) {
+  static double (*fn)(double);
+  if (!fn)
+    *(void **)&fn = RT_LM_RESOLVE(asin, void *);
+  return fn(x);
+}
+
+double rt_libm_acos(double x) {
+  static double (*fn)(double);
+  if (!fn)
+    *(void **)&fn = RT_LM_RESOLVE(acos, void *);
+  return fn(x);
+}
+
+double rt_libm_atan(double x) {
+  static double (*fn)(double);
+  if (!fn)
+    *(void **)&fn = RT_LM_RESOLVE(atan, void *);
+  return fn(x);
+}

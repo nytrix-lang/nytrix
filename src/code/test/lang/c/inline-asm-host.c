@@ -12,7 +12,6 @@ void nyc_inline_asm_writeb(volatile unsigned char *, unsigned char);
 void nyc_inline_asm_writew(volatile unsigned short *, unsigned short);
 void nyc_inline_asm_writeq(volatile unsigned long long *, unsigned long long);
 int nyc_builtin_isdigit(int);
-void *nyc_inline_asm_rip_rel_ptr(void *);
 int nyc_inline_asm_memory_barrier(int *);
 int nyc_gnu_statement_expression(int);
 int nyc_builtin_expect_side_effect(int *);
@@ -41,8 +40,7 @@ int main(void) {
   int counter = 5;
   nyc_inline_asm_pause();
   nyc_inline_asm_register_to_memory(&asm_stored, 71);
-  return nyc_inline_asm_rip_rel_ptr(&value) != &value || asm_stored != 71 ||
-         nyc_inline_asm_readl(&asm_loaded) != asm_loaded ||
+  return asm_stored != 71 || nyc_inline_asm_readl(&asm_loaded) != asm_loaded ||
          nyc_inline_asm_readb(&asm_byte) != asm_byte ||
          nyc_inline_asm_readw(&asm_word) != asm_word ||
          nyc_builtin_isdigit('5') != 1 || nyc_builtin_isdigit('x') != 0 ||

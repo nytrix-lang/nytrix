@@ -800,13 +800,13 @@ static bool mach_build_vreg_homes(nyr_x64_mach_enc_t *e,
   }
   /*
    * Pooling a slot between two spilled values proves their live ranges are
-   * disjoint, but not that the encoder's sticky-register tags can tell the
-   * owners apart: the sticky-RAX tag names a home offset only, so a shared
-   * slot can forward a neighbour's value. mach_home_off_shared and
-   * mach_vreg_home_shared close every consume site, so the flag is safe now,
-   * but it stays opt-in: pooling also defeats home-store elision, and
-   * `binary` `main` grew 33 -> 124 home stores and 729 -> 822 instructions
-   * (measured 2026-11-20, docs/learn/measurements.md).
+   * disjoint. The encoder's sticky-RAX tag names a home offset only, so a
+   * shared slot can forward a neighbour's value; mach_home_off_shared and
+   * mach_vreg_home_shared close every consume site, so the flag is safe (it
+   * used to crash `fhourstones` and drift `statemate`/`pidigits`). It stays
+   * opt-in because pooling also defeats home-store elision: `binary` `main`
+   * went 33 -> 124 home stores, 729 -> 822 instructions (measured
+   * 2026-11-20). NYTRIX_SPILL_HOME_COLOR=1 enables it.
    */
   bool spill_color = false;
   {

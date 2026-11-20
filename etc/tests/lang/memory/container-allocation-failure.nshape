@@ -16,7 +16,7 @@ def stem = temp_dir() + "/ny-container-oom-" + to_str(pid())
 fn check(str kind, str body, str route) int {
    def path = stem + "-" + kind + "-" + to_str(route.len) + ".ny"
    def executable = path + ".exe"
-   assert(is_ok(file_write(path, "use core\nuse core.set_mod\nfn grow() int {\n   defer { print(\"oom-cleanup-ran\") }\n   with ptr scratch = malloc(16) {\n      store8(scratch, 73, 0)\n" + body + "\n      assert(load8(scratch, 0) == 73, \"scoped allocation stays live\")\n      print(\"grew-all\")\n   }\n   0\n}\ngrow()\n")), "write growth probe")
+   assert(is_ok(file_write(path, "use core\nuse core.set\nfn grow() int {\n   defer { print(\"oom-cleanup-ran\") }\n   with ptr scratch = malloc(16) {\n      store8(scratch, 73, 0)\n" + body + "\n      assert(load8(scratch, 0) == 73, \"scoped allocation stays live\")\n      print(\"grew-all\")\n   }\n   0\n}\ngrow()\n")), "write growth probe")
    defer { file_remove(path) file_remove(executable) }
    def compiled = run_capture([ny, route, "--heap=safe", "--output=" + executable, path], [], nil, false)
    assert(compiled.get("code", 127) == 0, "compile " + kind + " growth probe: " + to_str(compiled.get("stdout", "")))

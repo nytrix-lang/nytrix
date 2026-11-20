@@ -228,6 +228,12 @@ bool nyr_alias_analysis(nyr_func_t *f) {
         if (in->b >= 0 && in->b < nvals)
           escape_values[in->b] = true;
       }
+      if (in->op == NYIR_INLINE_ASM && (in->imm == -140 || in->imm == -141))
+        for (size_t k = 0; k < in->extra_args_len; ++k) {
+          int arg = in->extra_args[k];
+          if (arg >= 0 && arg < nvals)
+            escape_values[arg] = true;
+        }
       if (nyr_op_writes_through_first_operand(in->op) && in->a >= 0 &&
           in->a < nvals)
         escape_values[in->a] = true;

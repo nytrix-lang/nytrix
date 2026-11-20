@@ -175,7 +175,7 @@ WLR_BACKENDS=headless WLR_LIBINPUT_NO_DEVICES=1 sway -c /tmp/sway.cfg &
 ny-test --bin build/release/ny etc/tests/code/probes/ui/wayland-compositor-input.nshape
 ```
 
-`tmp/ui/wayland/wl_seat_driver.py` (a private helper outside git) is the seat: a dependency-free Wayland client that
+a private seat driver kept outside the repository is the seat: a dependency-free Wayland client that
 binds `zwp_virtual_keyboard_v1`, `zwlr_virtual_pointer_v1`, and
 `zwp_input_method_v2`, and replays a step script.
 

@@ -7,7 +7,7 @@ module core.compiler.syntax.syntax(new_registry, clear_registry, clone_registry,
 use core
 use core (is_str as core_is_str)
 use core.str as core_str
-use core.dict_mod
+use core.dict
 use core.reflect as core_ref
 
 fn _ensure_registry(dict reg) dict {

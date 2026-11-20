@@ -12,7 +12,7 @@
  * Mnemonic and operand buffers are fixed arrays in the decoder frames.
  */
 #define DIS_SET(buf, text) snprintf((buf), sizeof(buf), "%s", (text))
-#define DIS_APPEND(buf, text)                                            \
+#define DIS_APPEND(buf, text)                                                  \
   snprintf((buf) + strlen(buf), sizeof(buf) - strlen(buf), "%s", (text))
 
 const char *nyr_internal_aarch64_disasm(const unsigned char *b, int64_t n,
@@ -184,8 +184,8 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
     unsigned rex = 0, op16 = 0, rep = 0, lockp = 0;
     const char *seg = NULL;
     while (op == 0x66 || op == 0x67 || op == 0xf0 || op == 0xf3 || op == 0xf2 ||
-           op == 0x26 || op == 0x2e || op == 0x36 || op == 0x3e ||
-           op == 0x64 || op == 0x65 || (op >= 0x40 && op <= 0x4f)) {
+           op == 0x26 || op == 0x2e || op == 0x36 || op == 0x3e || op == 0x64 ||
+           op == 0x65 || (op >= 0x40 && op <= 0x4f)) {
       if (op == 0x66)
         op16 = 1;
       else if (op == 0x67) {
@@ -214,7 +214,7 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
     dis_x64_seg = seg;
     unsigned rb = (rex & 1) ? 8 : 0;
     char m[32] = "", args[512] = "";
-    int reg = 0, rmreg = 0, mod = 0;
+    int reg = 0;
     int64_t rel = 0;
     unsigned imm = 0;
     unsigned w = (rex & 8) ? 8 : (op16 ? 2 : 4);
@@ -251,7 +251,8 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
     else if (op == 0xd7)
       DIS_SET(m, "xlatb");
     else if (op == 0xcd) {
-      if (i >= n) goto unsupported;
+      if (i >= n)
+        goto unsupported;
       DIS_SET(m, "int");
       snprintf(args, sizeof(args), "0x%x", b[i++]);
     } else if (op == 0xce)
@@ -264,41 +265,95 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
        */
       unsigned addr_sz = 8; /* simplified: 64-bit mode default */
       imm = addr_sz;
-      if (i + imm > n) goto unsupported;
+      if (i + imm > n)
+        goto unsupported;
       uint64_t addr = rd(b + i, imm);
       i += imm;
       unsigned width = (op & 1) ? w : 1;
       DIS_SET(m, "mov");
       if (op == 0xa0 || op == 0xa1)
         snprintf(args, sizeof(args), "%s, %s ptr [0x%" PRIx64 "]",
-                 nyr_x64_reg(0, width, rex), width == 8 ? "qword" : width == 2 ? "word" : width == 1 ? "byte" : "dword", addr);
+                 nyr_x64_reg(0, width, rex),
+                 width == 8   ? "qword"
+                 : width == 2 ? "word"
+                 : width == 1 ? "byte"
+                              : "dword",
+                 addr);
       else
         snprintf(args, sizeof(args), "%s ptr [0x%" PRIx64 "], %s",
-                 width == 8 ? "qword" : width == 2 ? "word" : width == 1 ? "byte" : "dword", addr, nyr_x64_reg(0, width, rex));
-    }
-    else if ((op >= 0xa4 && op <= 0xa7) || (op >= 0xaa && op <= 0xaf) ||
+                 width == 8   ? "qword"
+                 : width == 2 ? "word"
+                 : width == 1 ? "byte"
+                              : "dword",
+                 addr, nyr_x64_reg(0, width, rex));
+    } else if ((op >= 0xa4 && op <= 0xa7) || (op >= 0xaa && op <= 0xaf) ||
                (op >= 0x6c && op <= 0x6f)) {
       const char *string_op = NULL;
       const char *pfx = "";
       switch (op) {
-      case 0xa4: string_op = "movsb"; pfx = rep == 0xf3 ? "rep " : ""; break;
-      case 0xa5: string_op = (rex & 8) ? "movsq" : op16 ? "movsw" : "movsd"; pfx = rep == 0xf3 ? "rep " : ""; break;
-      case 0xa6: string_op = "cmpsb"; pfx = rep == 0xf3 ? "repe " : rep == 0xf2 ? "repne " : ""; break;
-      case 0xa7: string_op = (rex & 8) ? "cmpsq" : op16 ? "cmpsw" : "cmpsd"; pfx = rep == 0xf3 ? "repe " : rep == 0xf2 ? "repne " : ""; break;
-      case 0xaa: string_op = "stosb"; pfx = rep == 0xf3 ? "rep " : ""; break;
-      case 0xab: string_op = (rex & 8) ? "stosq" : op16 ? "stosw" : "stosd"; pfx = rep == 0xf3 ? "rep " : ""; break;
-      case 0xac: string_op = "lodsb"; pfx = rep == 0xf3 ? "rep " : ""; break;
-      case 0xad: string_op = (rex & 8) ? "lodsq" : op16 ? "lodsw" : "lodsd"; pfx = rep == 0xf3 ? "rep " : ""; break;
-      case 0xae: string_op = "scasb"; pfx = rep == 0xf3 ? "repe " : rep == 0xf2 ? "repne " : ""; break;
-      case 0xaf: string_op = (rex & 8) ? "scasq" : op16 ? "scasw" : "scasd"; pfx = rep == 0xf3 ? "repe " : rep == 0xf2 ? "repne " : ""; break;
-      case 0x6c: string_op = "insb"; pfx = rep == 0xf3 ? "rep " : ""; break;
-      case 0x6d: string_op = (rex & 8) ? "insq" : op16 ? "insw" : "insd"; pfx = rep == 0xf3 ? "rep " : ""; break;
-      case 0x6e: string_op = "outsb"; pfx = rep == 0xf3 ? "rep " : ""; break;
-      case 0x6f: string_op = (rex & 8) ? "outsq" : op16 ? "outsw" : "outsd"; pfx = rep == 0xf3 ? "rep " : ""; break;
-      default: break;
+      case 0xa4:
+        string_op = "movsb";
+        pfx = rep == 0xf3 ? "rep " : "";
+        break;
+      case 0xa5:
+        string_op = (rex & 8) ? "movsq" : op16 ? "movsw" : "movsd";
+        pfx = rep == 0xf3 ? "rep " : "";
+        break;
+      case 0xa6:
+        string_op = "cmpsb";
+        pfx = rep == 0xf3 ? "repe " : rep == 0xf2 ? "repne " : "";
+        break;
+      case 0xa7:
+        string_op = (rex & 8) ? "cmpsq" : op16 ? "cmpsw" : "cmpsd";
+        pfx = rep == 0xf3 ? "repe " : rep == 0xf2 ? "repne " : "";
+        break;
+      case 0xaa:
+        string_op = "stosb";
+        pfx = rep == 0xf3 ? "rep " : "";
+        break;
+      case 0xab:
+        string_op = (rex & 8) ? "stosq" : op16 ? "stosw" : "stosd";
+        pfx = rep == 0xf3 ? "rep " : "";
+        break;
+      case 0xac:
+        string_op = "lodsb";
+        pfx = rep == 0xf3 ? "rep " : "";
+        break;
+      case 0xad:
+        string_op = (rex & 8) ? "lodsq" : op16 ? "lodsw" : "lodsd";
+        pfx = rep == 0xf3 ? "rep " : "";
+        break;
+      case 0xae:
+        string_op = "scasb";
+        pfx = rep == 0xf3 ? "repe " : rep == 0xf2 ? "repne " : "";
+        break;
+      case 0xaf:
+        string_op = (rex & 8) ? "scasq" : op16 ? "scasw" : "scasd";
+        pfx = rep == 0xf3 ? "repe " : rep == 0xf2 ? "repne " : "";
+        break;
+      case 0x6c:
+        string_op = "insb";
+        pfx = rep == 0xf3 ? "rep " : "";
+        break;
+      case 0x6d:
+        string_op = (rex & 8) ? "insq" : op16 ? "insw" : "insd";
+        pfx = rep == 0xf3 ? "rep " : "";
+        break;
+      case 0x6e:
+        string_op = "outsb";
+        pfx = rep == 0xf3 ? "rep " : "";
+        break;
+      case 0x6f:
+        string_op = (rex & 8) ? "outsq" : op16 ? "outsw" : "outsd";
+        pfx = rep == 0xf3 ? "rep " : "";
+        break;
+      default:
+        break;
       }
-      if (string_op) snprintf(m, sizeof(m), "%s%s", pfx, string_op);
-      else goto unsupported;
+      if (string_op)
+        snprintf(m, sizeof(m), "%s%s", pfx, string_op);
+      else
+        goto unsupported;
     } else if (op == 0xd9 && i < n && (b[i] == 0xfe || b[i] == 0xff)) {
       DIS_SET(m, b[i++] == 0xfe ? "fsin" : "fcos");
     } else if (op == 0xdd && i < n) {
@@ -313,7 +368,8 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
     } else if (op == 0xc3)
       DIS_SET(m, "ret");
     else if (op == 0xc2) {
-      if (i + 2 > n) goto unsupported;
+      if (i + 2 > n)
+        goto unsupported;
       unsigned imm16 = b[i] | ((unsigned)b[i + 1] << 8);
       i += 2;
       DIS_SET(m, "ret");
@@ -321,7 +377,8 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
     } else if (op == 0xcb)
       DIS_SET(m, "retf");
     else if (op == 0xca) {
-      if (i + 2 > n) goto unsupported;
+      if (i + 2 > n)
+        goto unsupported;
       unsigned imm16 = b[i] | ((unsigned)b[i + 1] << 8);
       i += 2;
       DIS_SET(m, "retf");
@@ -330,14 +387,14 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
       /*
        * enter imm16, imm8
        */
-      if (i + 3 > n) goto unsupported;
+      if (i + 3 > n)
+        goto unsupported;
       unsigned imm16 = b[i] | ((unsigned)b[i + 1] << 8);
       unsigned imm8 = b[i + 2];
       i += 3;
       DIS_SET(m, "enter");
       snprintf(args, sizeof(args), "0x%x, 0x%x", imm16, imm8);
-    }
-    else if (op == 0xc9)
+    } else if (op == 0xc9)
       DIS_SET(m, "leave");
     else if (op == 0xcc)
       DIS_SET(m, "int3");
@@ -649,7 +706,8 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
           goto unsupported;
         DIS_SET(m, lockp ? "lock cmpxchg" : "cmpxchg");
         lockp = 0;
-        snprintf(args, sizeof(args), "%s, %s", rmop, nyr_x64_reg(reg, width, rex));
+        snprintf(args, sizeof(args), "%s, %s", rmop,
+                 nyr_x64_reg(reg, width, rex));
       } else if ((op2 == 0xc0 || op2 == 0xc1) && i < n) {
         unsigned char mr = b[i++];
         reg = ((mr >> 3) & 7) + ((rex & 4) ? 8 : 0);
@@ -659,17 +717,26 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
           goto unsupported;
         DIS_SET(m, lockp ? "lock xadd" : "xadd");
         lockp = 0;
-        snprintf(args, sizeof(args), "%s, %s", rmop, nyr_x64_reg(reg, width, rex));
-      } else if ((op2 == 0xb8 || op2 == 0xbc || op2 == 0xbd) && i < n && (rep == 0xf3 || op2 != 0xb8)) {
+        snprintf(args, sizeof(args), "%s, %s", rmop,
+                 nyr_x64_reg(reg, width, rex));
+      } else if ((op2 == 0xb8 || op2 == 0xbc || op2 == 0xbd) && i < n &&
+                 (rep == 0xf3 || op2 != 0xb8)) {
         unsigned char mr = b[i++];
         reg = ((mr >> 3) & 7) + ((rex & 4) ? 8 : 0);
         char src[128];
         if (!nyr_x64_rm(b, n, &i, mr, rex, w, src, sizeof(src)))
           goto unsupported;
-        if (rep == 0xf3 && op2 == 0xb8) { DIS_SET(m, "popcnt"); rep = 0; }
-        else if (rep == 0xf3) { DIS_SET(m, op2 == 0xbc ? "tzcnt" : "lzcnt"); rep = 0; }
-        else if (op16 && op2 == 0xbd) { DIS_SET(m, "lzcnt"); }
-        else { DIS_SET(m, op2 == 0xbc ? "bsf" : op2 == 0xbd ? "bsr" : "popcnt"); }
+        if (rep == 0xf3 && op2 == 0xb8) {
+          DIS_SET(m, "popcnt");
+          rep = 0;
+        } else if (rep == 0xf3) {
+          DIS_SET(m, op2 == 0xbc ? "tzcnt" : "lzcnt");
+          rep = 0;
+        } else if (op16 && op2 == 0xbd) {
+          DIS_SET(m, "lzcnt");
+        } else {
+          DIS_SET(m, op2 == 0xbc ? "bsf" : op2 == 0xbd ? "bsr" : "popcnt");
+        }
         snprintf(args, sizeof(args), "%s, %s", nyr_x64_reg(reg, w, rex), src);
       } else if (op2 == 0xa3 && i < n) {
         unsigned char mr = b[i++];
@@ -709,32 +776,51 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
         char rmop[128];
         if (!nyr_x64_rm(b, n, &i, mr, rex, w, rmop, sizeof(rmop)) || i >= n)
           goto unsupported;
-        const char *nm = grp == 4 ? "bt" : grp == 5 ? "bts" : grp == 6 ? "btr" : grp == 7 ? "btc" : NULL;
-        if (!nm) goto unsupported;
+        const char *nm = grp == 4   ? "bt"
+                         : grp == 5 ? "bts"
+                         : grp == 6 ? "btr"
+                         : grp == 7 ? "btc"
+                                    : NULL;
+        if (!nm)
+          goto unsupported;
         DIS_SET(m, nm);
         snprintf(args, sizeof(args), "%s, 0x%x", rmop, b[i++]);
       } else if (op2 == 0x01 && i < n) {
         unsigned char mr = b[i++];
         unsigned grp = (mr >> 3) & 7;
-        if ((mr >> 6) == 3 && mr == 0xf9) { DIS_SET(m, "rdtscp"); }
-        else if ((mr >> 6) == 3 && mr == 0xf8) { DIS_SET(m, "swapgs"); }
-        else if (grp == 2) { DIS_SET(m, "lgdt"); }
-        else if (grp == 3) { DIS_SET(m, "lidt"); }
-        else if (grp == 7) { DIS_SET(m, "invlpg"); }
-        else { goto unsupported; }
+        if ((mr >> 6) == 3 && mr == 0xf9) {
+          DIS_SET(m, "rdtscp");
+        } else if ((mr >> 6) == 3 && mr == 0xf8) {
+          DIS_SET(m, "swapgs");
+        } else if (grp == 2) {
+          DIS_SET(m, "lgdt");
+        } else if (grp == 3) {
+          DIS_SET(m, "lidt");
+        } else if (grp == 7) {
+          DIS_SET(m, "invlpg");
+        } else {
+          goto unsupported;
+        }
       } else if (op2 == 0xae && i < n) {
         unsigned char mr = b[i++];
         unsigned grp = (mr >> 3) & 7;
         if ((mr >> 6) == 3) {
-          if (grp == 5) DIS_SET(m, "lfence");
-          else if (grp == 6) DIS_SET(m, "mfence");
-          else if (grp == 7) DIS_SET(m, "sfence");
-          else goto unsupported;
+          if (grp == 5)
+            DIS_SET(m, "lfence");
+          else if (grp == 6)
+            DIS_SET(m, "mfence");
+          else if (grp == 7)
+            DIS_SET(m, "sfence");
+          else
+            goto unsupported;
         } else {
           char rmop[128];
-          if (!nyr_x64_rm(b, n, &i, mr, rex, 0, rmop, sizeof(rmop))) goto unsupported;
-          if (grp == 7) DIS_SET(m, "clflush");
-          else goto unsupported;
+          if (!nyr_x64_rm(b, n, &i, mr, rex, 0, rmop, sizeof(rmop)))
+            goto unsupported;
+          if (grp == 7)
+            DIS_SET(m, "clflush");
+          else
+            goto unsupported;
           snprintf(args, sizeof(args), "%s", rmop);
         }
       } else if ((op2 == 0xc7) && i < n) {
@@ -742,10 +828,12 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
         unsigned grp = (mr >> 3) & 7;
         if (grp == 1) {
           char rmop[128];
-          if (!nyr_x64_rm(b, n, &i, mr, rex, 0, rmop, sizeof(rmop))) goto unsupported;
+          if (!nyr_x64_rm(b, n, &i, mr, rex, 0, rmop, sizeof(rmop)))
+            goto unsupported;
           DIS_SET(m, (rex & 8) ? "cmpxchg16b" : "cmpxchg8b");
           snprintf(args, sizeof(args), "%s", rmop);
-        } else goto unsupported;
+        } else
+          goto unsupported;
       } else {
         goto unsupported;
       }
@@ -1223,9 +1311,7 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
         if (i >= n)
           goto unsupported;
         unsigned char mr = b[i++];
-        mod = mr >> 6;
         reg = ((mr >> 3) & 7) + ((rex & 4) ? 8 : 0);
-        rmreg = (mr & 7) + ((rex & 1) ? 8 : 0);
         char lhs[128], rhs[128];
         unsigned width = op == 0x84 || op == 0x88 || op == 0x8a ? 1 : w;
         if (!nyr_x64_rm(b, n, &i, mr, rex, op == 0x8d ? 0 : width, lhs,
@@ -1258,7 +1344,6 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
         if (i >= n)
           goto unsupported;
         unsigned char mr = b[i++];
-        mod = mr >> 6;
         reg = ((mr >> 3) & 7) + ((rex & 4) ? 8 : 0);
         unsigned dst_width = (rex & 8) ? 8 : (op16 ? 2 : 4);
         char src[128];
@@ -1272,7 +1357,6 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
         if (i >= n)
           goto unsupported;
         unsigned char mr = b[i++];
-        mod = mr >> 6;
         reg = (mr >> 3) & 7;
         unsigned width = op == 0xc0 || op == 0xd0 || op == 0xd2 ? 1 : w;
         char dst[128];
@@ -1301,9 +1385,7 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
         if (i >= n)
           goto unsupported;
         unsigned char mr = b[i++];
-        mod = mr >> 6;
         reg = (mr >> 3) & 7;
-        rmreg = (mr & 7) + rb;
         char dst[128];
         unsigned width = op == 0x80 || op == 0xc6 ? 1 : w;
         if (!nyr_x64_rm(b, n, &i, mr, rex, width, dst, sizeof(dst)))
@@ -1340,18 +1422,21 @@ const char *nyr_internal_x64_disasm(const unsigned char *b, int64_t n,
         if (i >= n)
           goto unsupported;
         unsigned char mr = b[i++];
-        mod = mr >> 6;
         reg = (mr >> 3) & 7;
-        rmreg = (mr & 7) + rb;
-        if (mod != 3)
+        const char *name = reg == 0   ? "inc"
+                           : reg == 1 ? "dec"
+                           : reg == 2 ? "call"
+                           : reg == 4 ? "jmp"
+                           : reg == 6 ? "push"
+                                      : NULL;
+        if (!name)
           goto unsupported;
-        DIS_SET(m, reg == 2   ? "call"
-                   : reg == 4 ? "jmp"
-                   : reg == 6 ? "push"
-                              : "");
-        if (!m[0])
+        unsigned width = reg == 0 || reg == 1 ? w : 8;
+        char operand[160];
+        if (!nyr_x64_rm(b, n, &i, mr, rex, width, operand, sizeof(operand)))
           goto unsupported;
-        snprintf(args, sizeof(args), "%s", regs64[rmreg]);
+        DIS_SET(m, name);
+        snprintf(args, sizeof(args), "%s", operand);
       } else if (op == 0xf6 || op == 0xf7) {
         if (i >= n)
           goto unsupported;

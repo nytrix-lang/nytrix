@@ -2,7 +2,7 @@
 ;; WebP decoder: optional libwebp via dlopen, with an ffmpeg VP8L fallback.
 module core.math.parse.img.webp(decode)
 use core
-use core.dict_mod
+use core.dict
 use core.os (file_read, file_write, file_remove, temp_dir, ticks, pid)
 use core.os.process as process
 use core.os.path as path

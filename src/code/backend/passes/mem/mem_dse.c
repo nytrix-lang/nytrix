@@ -102,13 +102,13 @@ static bool md_is_load(nyr_op_t op) {
          op == NYIR_VEC8_LOAD_I64;
 }
 
-static const unsigned MD_BARRIER =
-    NYIR_EFFECT_CALL | NYIR_EFFECT_VOLATILE | NYIR_EFFECT_IO |
-    NYIR_EFFECT_THREAD | NYIR_EFFECT_UNKNOWN_SIDE_EFFECT |
-    NYIR_EFFECT_ALLOCATION;
+static const unsigned MD_BARRIER = NYIR_EFFECT_CALL | NYIR_EFFECT_VOLATILE |
+                                   NYIR_EFFECT_IO | NYIR_EFFECT_THREAD |
+                                   NYIR_EFFECT_UNKNOWN_SIDE_EFFECT |
+                                   NYIR_EFFECT_ALLOCATION;
 
 bool nyr_mem_dse(nyr_func_t *f) {
-  if (!f || !f->len || getenv("NYTRIX_NO_MEM_DSE"))
+  if (!f || f->next_value == 0 || !f->len || getenv("NYTRIX_NO_MEM_DSE"))
     return true;
   int *defs = nyr_build_defs(f);
   if (!defs)

@@ -166,8 +166,8 @@ static bool ifc_exclusive_bridge(const nyr_func_t *f, const nyr_cfg_t *cfg,
                                  size_t *arm_block) {
   size_t predecessor = header;
   size_t last = SIZE_MAX;
-  for (size_t hops = 0;
-       hops < cfg->block_count && entry < cfg->block_count; ++hops) {
+  for (size_t hops = 0; hops < cfg->block_count && entry < cfg->block_count;
+       ++hops) {
     if (entry == join) {
       if (arm_block)
         *arm_block = last;
@@ -417,8 +417,8 @@ static bool ifc_arm_value_ok(const nyr_func_t *f, const nyr_cfg_t *cfg,
  * A join may merge several values; convert them all so the arm blocks can be
  * removed without leaving PHIs that name dead predecessors.
  */
-static bool ifc_join_phis(const nyr_func_t *f, const nyr_cfg_t *cfg, size_t join,
-                          const ifc_arm_t *false_arm,
+static bool ifc_join_phis(const nyr_func_t *f, const nyr_cfg_t *cfg,
+                          size_t join, const ifc_arm_t *false_arm,
                           const ifc_arm_t *true_arm, ifc_phi_pair_t *pairs,
                           size_t *pair_count) {
   if (!f || !cfg || !false_arm || !true_arm || !pairs || !pair_count ||
@@ -612,8 +612,7 @@ static bool ifc_rewrite_store_only(nyr_func_t *f, size_t branch,
                                    const ifc_arm_t *false_arm,
                                    const ifc_arm_t *true_arm,
                                    const ifc_store_pair_t *store_pairs,
-                                   size_t store_pair_count,
-                                   int64_t join_label,
+                                   size_t store_pair_count, int64_t join_label,
                                    bool normalize_condition) {
   if (!f || !false_arm || !true_arm || !store_pair_count)
     return false;
@@ -624,8 +623,8 @@ static bool ifc_rewrite_store_only(nyr_func_t *f, size_t branch,
     moved_count += f->data[true_arm->insts[i]].op != NYIR_STORE_LOCAL;
   if (moved_count > 32)
     return false;
-  size_t inserted = moved_count + 2 * store_pair_count + 1 +
-                    (normalize_condition ? 2 : 0);
+  size_t inserted =
+      moved_count + 2 * store_pair_count + 1 + (normalize_condition ? 2 : 0);
   size_t delta = inserted - 1;
   nyr_inst_t moved[32];
   size_t n = 0;
@@ -721,8 +720,8 @@ static bool ifc_rewrite_store_only(nyr_func_t *f, size_t branch,
  * is a copy/PHI (a running max carried by the loop header PHI) whose every
  * source is raw. A cycle back to the PHI being converted is consistent.
  */
-static bool ifc_value_raw(const nyr_func_t *f, const int *defs, int v,
-                          int root, unsigned depth) {
+static bool ifc_value_raw(const nyr_func_t *f, const int *defs, int v, int root,
+                          unsigned depth) {
   /*
    * Only a cycle reached through another PHI may close on the root; an arm
    * value that is the join PHI itself would make the SELECT read its own
@@ -730,8 +729,7 @@ static bool ifc_value_raw(const nyr_func_t *f, const int *defs, int v,
    */
   if (v == root)
     return depth > 0;
-  if (!f || !defs || v < 0 || v >= f->next_value || defs[v] < 0 ||
-      depth > 6)
+  if (!f || !defs || v < 0 || v >= f->next_value || defs[v] < 0 || depth > 6)
     return false;
   const nyr_inst_t *def = &f->data[(size_t)defs[v]];
   if (def->scalar_class == NYIR_SCALAR_I64_RAW)
@@ -820,10 +818,9 @@ bool nyr_if_convert(nyr_func_t *f) {
                         false_entry != SIZE_MAX && true_entry != SIZE_MAX &&
                         true_entry != false_entry &&
                         !getenv("NYTRIX_NO_IFCONV_BOTH_EMPTY");
-      if (!both_empty &&
-          (false_block >= cfg.block_count || true_block == SIZE_MAX ||
-           true_block == false_block || true_block <= header ||
-           false_entry == SIZE_MAX))
+      if (!both_empty && (false_block >= cfg.block_count ||
+                          true_block == SIZE_MAX || true_block == false_block ||
+                          true_block <= header || false_entry == SIZE_MAX))
         continue;
       size_t false_count =
           cfg.succ_offsets[false_block + 1] - cfg.succ_offsets[false_block];
@@ -843,7 +840,7 @@ bool nyr_if_convert(nyr_func_t *f) {
         join = true_block;
         false_empty = true_empty = true;
       } else if (true_count == 1 &&
-          cfg.succ_blocks[cfg.succ_offsets[true_block]] == false_block) {
+                 cfg.succ_blocks[cfg.succ_offsets[true_block]] == false_block) {
         join = false_block;
         false_empty = true;
       } else if (false_count == 1 &&
@@ -863,7 +860,8 @@ bool nyr_if_convert(nyr_func_t *f) {
         if (!ifc_exclusive_bridge(f, &cfg, header, false_entry, join,
                                   &false_arm_block))
           continue;
-      } else if (!ifc_exclusive_edge(f, &cfg, header, false_entry, false_block)) {
+      } else if (!ifc_exclusive_edge(f, &cfg, header, false_entry,
+                                     false_block)) {
         continue;
       }
       if (true_empty) {
@@ -876,8 +874,8 @@ bool nyr_if_convert(nyr_func_t *f) {
       if (false_arm_block == join || true_arm_block == join)
         continue;
       int64_t join_label = cfg.block_label[join];
-      if (join_label < 0 || !ifc_two_predecessors(&cfg, join, false_arm_block,
-                                                  true_arm_block))
+      if (join_label < 0 ||
+          !ifc_two_predecessors(&cfg, join, false_arm_block, true_arm_block))
         continue;
       ifc_arm_t false_arm, true_arm;
       ifc_store_pair_t store_pairs[8];
@@ -893,8 +891,8 @@ bool nyr_if_convert(nyr_func_t *f) {
           !ifc_arms_have_stable_local_loads(f, &cfg, header, branch, &false_arm,
                                             &true_arm))
         continue;
-      bool have_phi = ifc_join_phis(f, &cfg, join, &false_arm, &true_arm, phis,
-                                    &phi_count);
+      bool have_phi =
+          ifc_join_phis(f, &cfg, join, &false_arm, &true_arm, phis, &phi_count);
       for (size_t i = 0; have_phi && i < phi_count; ++i) {
         if (!ifc_arm_value_ok(f, &cfg, defs, &false_arm, header, branch,
                               phis[i].false_value) ||
@@ -932,8 +930,8 @@ bool nyr_if_convert(nyr_func_t *f) {
             types.value_f32[phis[i].true_value])
           have_phi = false;
       }
-      bool store_only =
-          !have_phi && store_pair_count > 0 && !ifc_block_has_phi(f, &cfg, join);
+      bool store_only = !have_phi && store_pair_count > 0 &&
+                        !ifc_block_has_phi(f, &cfg, join);
       if (!have_phi && !store_only)
         continue;
       size_t cost = ifc_arm_cost(f, &false_arm) + ifc_arm_cost(f, &true_arm);
@@ -950,9 +948,9 @@ bool nyr_if_convert(nyr_func_t *f) {
                                 phi_count, store_pairs, store_pair_count,
                                 join_label, !condition_is_boolean);
       } else {
-        rewritten = ifc_rewrite_store_only(
-            f, branch, &false_arm, &true_arm, store_pairs, store_pair_count,
-            join_label, !condition_is_boolean);
+        rewritten = ifc_rewrite_store_only(f, branch, &false_arm, &true_arm,
+                                           store_pairs, store_pair_count,
+                                           join_label, !condition_is_boolean);
       }
       if (!rewritten) {
         free(defs);

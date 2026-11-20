@@ -15,8 +15,7 @@ For pattern matching and failure handling, see [Patterns](patterns.md) and
 
 ## Conditionals
 
-> **Note:** These grammar shapes use placeholder names; they are not standalone
-> programs.
+Grammar forms:
 
 ```ny
 if(cond){ a } else { b }
@@ -70,8 +69,7 @@ comparison in code that should stay readable under `--check=types`.
 
 ## Loops
 
-> **Note:** These lines show loop grammar with placeholder names; use the
-> complete examples below for compilable programs.
+Grammar forms:
 
 ```ny
 while(cond){ body }
@@ -269,9 +267,6 @@ loops make the control path harder to see. Prefer `while`, `for`, `break`, and
 `continue` for ordinary iteration.
 
 ## With
-
-> **Note:** `Type`, `name`, `value`, and `body` are placeholders for the
-> resource grammar.
 
 ```ny
 with Type name = value { body }

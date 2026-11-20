@@ -82,14 +82,13 @@ int main(void) {
     return 1;
   }
   static const unsigned char sign_extend_forms[] = {
-      0x48, 0x63, 0xc2,                         /* movsxd rax, edx */
+      0x48, 0x63, 0xc2, /* movsxd rax, edx */
       0x4d, 0x63, 0xac, 0xad, 0xa0, 0xfd, 0xff, 0xff,
   };
   listing = nyr_internal_x64_disasm(sign_extend_forms,
                                     (int64_t)sizeof(sign_extend_forms), 0x6800);
   if (!strstr(listing, "26624\tmovsxd\trax, edx\t3\t") ||
-      !strstr(listing,
-              "26627\tmovsxd\tr13, dword ptr [rbp*4+r13-608]\t8\t") ||
+      !strstr(listing, "26627\tmovsxd\tr13, dword ptr [rbp*4+r13-608]\t8\t") ||
       strstr(listing, "\tunsupported\t")) {
     fprintf(stderr, "[x64-disasm-scalar] MOVSXD form mismatch:\n%s", listing);
     return 1;
@@ -311,6 +310,22 @@ int main(void) {
     fprintf(stderr,
             "[x64-disasm-scalar] emitted scalar/vector form rejected:\n%s",
             listing);
+    return 1;
+  }
+  static const unsigned char inc_dec_group_forms[] = {
+      0x49, 0xff, 0xc6, /* inc r14 */
+      0x49, 0xff, 0xce, /* dec r14 */
+      0xff, 0x07,       /* inc dword ptr [rdi] */
+      0xff, 0x0f,       /* dec dword ptr [rdi] */
+  };
+  listing = nyr_internal_x64_disasm(
+      inc_dec_group_forms, (int64_t)sizeof(inc_dec_group_forms), 0xf000);
+  if (!strstr(listing, "61440\tinc\tr14\t3\t") ||
+      !strstr(listing, "61443\tdec\tr14\t3\t") ||
+      !strstr(listing, "61446\tinc\tdword ptr [rdi]\t2\t") ||
+      !strstr(listing, "61448\tdec\tdword ptr [rdi]\t2\t") ||
+      strstr(listing, "\tunsupported\t")) {
+    fprintf(stderr, "[x64-disasm-scalar] INC/DEC group mismatch:\n%s", listing);
     return 1;
   }
   puts("[x64-disasm-scalar] scalar C-function forms decode exactly");

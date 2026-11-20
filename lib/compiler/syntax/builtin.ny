@@ -6,7 +6,7 @@
 module core.compiler.syntax.builtin(register_defaults, attr_extern, attr_naked, attr_jit, attr_thread, attr_pure, attr_cache, attr_effects, attr_backend)
 use core
 use core (is_str as core_is_str)
-use core.dict_mod
+use core.dict
 use core.reflect as core_ref
 use core.compiler.syntax.syntax as syntax_impl
 

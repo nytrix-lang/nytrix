@@ -1,0 +1,78 @@
+shape rev-decompiler-bare-elf {
+  suite "native"
+  family "reverse-engineering"
+  generator "deterministic"
+  features [bare_elf executable_segments x86_inc_dec]
+  timeout 60
+  template ny-test-case
+  expect compile_and_run
+  source ny <<'NY'
+use core
+use core.os.disasm as dasm
+use core.os.dis.decomp as decomp
+
+def code = dasm.unhex("5549ffc649ffce5dc30000")
+def bare_bin = {
+   "ok": true,
+   "header": {"machine": "x86_64", "bits": 64, "entry": 0x401000},
+   "data": code,
+   "sections": [],
+   "segments": [{
+      "index": 0, "type": 1, "flags": 5, "offset": 0,
+      "vaddr": 0x401000, "filesz": code.len, "memsz": code.len, "load": true
+   }],
+   "functions": [{"name": "bare_hello", "value": 0x401000, "size": code.len}]
+}
+
+def executable = decomp.executable_sections(bare_bin)
+assert(executable.len == 1, "sectionless ELF executable PT_LOAD is exposed")
+assert(executable[0].get("addr", 0) == 0x401000, "segment virtual address becomes executable range start")
+
+def result = decomp.decompile(bare_bin, 0x401000)
+assert(result.get("ok", false), "unsupported bytes after a terminal return do not fail decompilation: " + str(result))
+assert(str.find(result.get("text", ""), "r14 = r14 + 1") >= 0, "INC effect is rendered as text")
+assert(str.find(result.get("text", ""), "r14 = r14 - 1") >= 0, "DEC effect is rendered as text")
+assert(str.find(result.get("text", ""), "return") >= 0, "terminal return is retained")
+assert(str.find(result.get("text", ""), "; 0x") < 0, "default output contains no disassembly comments")
+assert(str.find(result.get("text", ""), "instruction(") < 0, "default output contains no raw instruction fallback")
+def direct_pseudo = decomp.ny_pseudocode(bare_bin, 0x401000)
+assert(str.find(direct_pseudo, "; 0x") < 0, "ny_pseudocode defaults to source-style output")
+assert(str.find(direct_pseudo, "r14 = r14 + 1") >= 0, "ny_pseudocode shares lifted semantics")
+def annotated = decomp.decompile(bare_bin, 0x401000, {"clean": false})
+assert(str.find(annotated.get("text", ""), "push(rbp)") >= 0, "annotated stack push effect remains readable")
+assert(str.find(annotated.get("text", ""), "rbp = pop()") >= 0, "annotated stack pop effect remains readable")
+
+def copy_code = dasm.unhex("f3a4c3")
+def copy_bin = {
+   "ok": true,
+   "header": {"machine": "x86_64", "bits": 64, "entry": 0x402000},
+   "data": copy_code,
+   "sections": [],
+   "segments": [{
+      "index": 0, "type": 1, "flags": 5, "offset": 0,
+      "vaddr": 0x402000, "filesz": copy_code.len, "memsz": copy_code.len, "load": true
+   }],
+   "functions": [{"name": "copy_bytes_test", "value": 0x402000, "size": copy_code.len}]
+}
+def copy_result = decomp.decompile(copy_bin, 0x402000)
+assert(copy_result.get("ok", false), "REP MOVSB receives a semantic lift")
+assert(str.find(copy_result.get("text", ""), "copy_bytes(rdi, rsi, rcx)") >= 0,
+   "REP MOVSB renders its memory-copy semantics, not assembly")
+
+def branched_code = dasm.unhex("eb01c306")
+def branched_bin = {
+   "ok": true,
+   "header": {"machine": "x86_64", "bits": 64, "entry": 0x401000},
+   "data": branched_code,
+   "sections": [],
+   "segments": [{
+      "index": 0, "type": 1, "flags": 5, "offset": 0,
+      "vaddr": 0x401000, "filesz": branched_code.len, "memsz": branched_code.len, "load": true
+   }],
+   "functions": [{"name": "branched", "value": 0x401000, "size": branched_code.len}]
+}
+def branched_result = decomp.decompile(branched_bin, 0x401000)
+assert(!branched_result.get("ok", false), "branch into post-return bytes must retain unsupported-instruction error")
+print("✓ sectionless ELF and trailing return padding regression passed")
+NY
+}

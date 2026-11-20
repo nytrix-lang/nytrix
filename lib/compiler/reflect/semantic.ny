@@ -37,7 +37,7 @@ module core.compiler.reflect.semantic(semantic_snapshot, semantic_get, semantic_
    semantic_signature_effects)
 use core
 use core.primitives as core_prim
-use core.dict_mod
+use core.dict
 use core.math.parse.data.json as json
 
 fn _semantic_tuple(list values) tuple {

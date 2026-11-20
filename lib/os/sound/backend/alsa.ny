@@ -6,7 +6,7 @@
 module core.os.sound.backend.alsa(is_available, init, shutdown, stream_open, stream_start, stream_stop, write)
 use core
 use core.mem (cstr)
-use core.dict_mod
+use core.dict
 use core.common as common
 use core.os.sound.diag as sound_debug
 use core.os.sound.backend.shared as backend_shared

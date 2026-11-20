@@ -2675,7 +2675,8 @@ static bool mach_verify_opcode_shape(const nyr_mach_func_t *func,
     return inst->effects == NYR_MACH_EFFECT_WRITE_MEMORY &&
            mach_is_value(&inst->dst) &&
            inst->src0.kind == NYR_MACH_OPERAND_FRAME &&
-           mach_is_none(&inst->src1) && mach_is_none(&inst->src2);
+           mach_is_none(&inst->src1) && mach_is_none(&inst->src2) &&
+           (inst->immediate == 48 || inst->immediate == 176);
   case NYR_MACH_VA_START:
     return inst->effects ==
                (NYR_MACH_EFFECT_READ_MEMORY | NYR_MACH_EFFECT_WRITE_MEMORY) &&
@@ -5589,21 +5590,23 @@ bool nyr_mach_lower_nir(const nyr_func_t *nyir, nyr_mach_func_t *out,
       inst.dst = mach_vreg(&lowered, values[in->dst]);
       inst.src0 = mach_frame(last);
     } else if (in->op == NYIR_VA_SAVE) {
+      if (in->dst < 0 || (in->imm != 48 && in->imm != 176)) {
+        nyr_err(err, err_len, "machine lower: invalid va.save area");
+        goto done;
+      }
       uint32_t last = 0;
-      for (size_t slot_index = 0; slot_index < 22; ++slot_index) {
+      for (size_t slot_index = 0; slot_index < (size_t)in->imm / 8;
+           ++slot_index) {
         uint32_t slot = 0;
         if (!nyr_mach_alloc_typed_frame_slot(&lowered, 8, 8, NYR_MACH_TYPE_I64,
                                              true, &slot))
           goto oom;
         last = slot;
       }
-      if (in->dst < 0) {
-        nyr_err(err, err_len, "machine lower: va.save has no destination");
-        goto done;
-      }
       inst.opcode = NYR_MACH_VA_SAVE;
       inst.dst = mach_vreg(&lowered, values[in->dst]);
       inst.src0 = mach_frame(last);
+      inst.immediate = in->imm;
       inst.effects = NYR_MACH_EFFECT_WRITE_MEMORY;
     } else if (in->op == NYIR_VA_START) {
       inst.opcode = NYR_MACH_VA_START;
@@ -6559,6 +6562,7 @@ static size_t mach_schedule_operand_uses(const nyr_mach_inst_t *inst,
  * instruction for input redefinitions as well as effects and control flow.
  */
 static bool mach_sink_edge_adds(nyr_mach_func_t *m) {
+  size_t sunk = 0, sunk_across_call = 0;
   size_t *defs = calloc(m->vreg_len, sizeof(*defs));
   size_t *uses = calloc(m->vreg_len, sizeof(*uses));
   if (m->vreg_len && (!defs || !uses)) {
@@ -6608,6 +6612,8 @@ static bool mach_sink_edge_adds(nyr_mach_func_t *m) {
             memmove(&m->insts[pc], &m->insts[pc + 1],
                     (next - pc - 1) * sizeof(*m->insts));
             m->insts[next - 1] = add;
+            ++sunk;
+            sunk_across_call += crossed_call;
           }
           break;
         }
@@ -6649,6 +6655,10 @@ static bool mach_sink_edge_adds(nyr_mach_func_t *m) {
       }
     }
   }
+  if (sunk && ny_dbg_is_enabled(NY_DBG_HEURISTIC))
+    ny_dbg_heuristic_event("MACHINE_EDGE_ADD_SINK",
+                           "moved=%zu across_call=%zu", sunk,
+                           sunk_across_call);
   free(defs);
   free(uses);
   return true;

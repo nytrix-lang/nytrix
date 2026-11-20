@@ -1,31 +1,653 @@
-<!-- nytrix-doc: {"audience":"contributor","featured":false,"group":"project","order":7,"summary":"Full Linux-kernel build acceptance for the NYC compiler."} -->
-# NYC Linux kernel acceptance
+<!-- nytrix-doc: {"audience":"user","featured":false,"group":"spec","order":41,"summary":"NYC's C compiler driver, targets, ABI behavior, and verification evidence."} -->
+# NYC C compiler
 
-## Required acceptance
+`nyc` compiles C translation units through the [NYIR](ir.md) optimizer and
+native encoders. It implements a subset of GNU C; choosing a GNU dialect
+does not imply GCC compatibility for every source construct or flag.
 
-- [ ] Produce a **clean Linux 7.3 x86-64 `bzImage` and modules** build from
-  unmodified sources, compiling every target C translation unit with NYC and
-  assembling with GNU `as`. Host tools may use the host compiler. No target-C
-  fallback, GCC dependency-generation workaround, stale output reuse, or
-  modified kernel sources may count as acceptance.
-- [ ] Review the complete compiler, linker, modpost, and `objtool` diagnostics.
-  Fix unsafe output and optimizer verifier fallbacks; do not suppress warnings
-  or remove configured protections to obtain artifacts.
-- [ ] Establish assembly/direct-object/physical-machine parity over the native
-  benchmark set, including unsigned and 16/32-bit forms. Support PIC,
-  retpolines, named sections, stack guards, and frame-pointer omission **without
-  the stack encoder**, then remove the obsolete fallback.
+## Compile and link
 
-Remove this file only after these requirements pass. No kernel image, complete
-module set, configured-target percentage, or final warning acceptance is proven.
+```sh
+nyc -std=gnu11 -O2 -Iinclude -c main.c -o main.o
+cc main.o -o app
+```
 
-## Current build evidence
+`nyc` compiles; the platform link driver links executables and libraries. A
+build that uses `CC` for linking must keep its link command separate. Use
+`nyc -E main.c` to inspect preprocessed input and `nyc -S main.c -o main.s`
+to inspect GNU assembly. `--all SOURCE.c OUTPUT.o` is an alternative whole-unit
+object command; legacy `SOURCE.c OUTPUT.o SYMBOL` emits one named function.
+On supported Linux x86-64 builds, `ny nyc OPTIONS...` dispatches to the
+standalone executable. `nyc --help` and `./make nyc -h` list driver options,
+including which are compatibility-only. [Native](native.md) covers C header
+imports and foreign calls from Nytrix source, not standalone C compilation.
 
-The SysV aggregate/variadic boundary audit is complete and removed from the
-checklist: `sysv-boundary` matches GCC output, and `abi-cross-*` links NYC- and
-host-compiled counterparts in both directions for INTEGER/SSE, SSE/SSE, and
-MEMORY-class returns. That cross-check fixed acall-result capture that read `xmm1` for a mixed INTEGER/SSE return instead of
-`xmm0`.Code-generation semantics are verified with NYC itself in both `-c` and `-S`:
+## Preprocessing and headers
+
+```sh
+nyc -E -P -I include -D FEATURE=1 -U DEBUG -o main.i main.c
+nyc -x c -E -
+```
+
+Without `-P`, output retains source filenames and line markers. Explicit
+`-D`/`-U` apply in argument order. `-pthread` defines `_REENTRANT=1` before
+explicit macros regardless of option order; pass `-pthread` to the link
+driver separately. `-fmacro-prefix-map=OLD=NEW` remaps `__FILE__` and
+`__BASE_FILE__`, using the last matching prefix.
+
+Quoted includes first search the containing file's directory. Explicit
+`-I` paths precede modeled headers and native system-header fallback. On
+Linux, fallback for the default native target searches `/usr/local/include`,
+the host multiarch include directory, and `/usr/include`. `-nostdinc`
+disables fallback; explicit targets and embedded frontend use do not enable
+it implicitly. Nested includes share macro state; include guards and
+`#pragma once` apply across equivalent paths. Missing headers, active
+`#error`, and unbalanced file-local conditionals are errors.
+
+Object and function macros expand in declarations, function bodies, and
+conditional expressions. Arguments expand before substitution except
+operands of `#` and `##`, which keep their unexpanded tokens. Continued
+replacement lists preserve comments as whitespace, and `__LINE__` keeps its
+source location. `defined` does not expand its operand. Integer and character
+conditionals support arithmetic, shifts, bitwise and relational operators,
+and short-circuit `&&`/`||`; inactive branches and later `#elif` expressions
+after a match are skipped. Do not infer GCC or Clang feature support from
+a `__has_*` probe.
+
+`-include HEADER` is repeatable. Kbuild's `-Wp,-MMD,FILE` and `-Wp,-MD,FILE`
+produce dependencies on the source and filesystem headers loaded during
+preprocessing, including forced headers that emit no tokens. The main source
+is the first prerequisite, as required by Linux `fixdep`. Options may appear
+before or after the source; `--` ends option parsing.
+
+Modeled standard headers expose only selected declarations and layouts.
+`<stdio.h>` supplies variadic `printf`; `<stdbool.h>` models `bool` as
+`unsigned char`, which is not the same as the `_Bool` type.
+`<assert.h>` checks `NDEBUG` on each inclusion: a disabled assertion does
+not evaluate its argument; an enabled assertion evaluates once and aborts
+on failure. Common `<ctype.h>`, `<string.h>`, `<stdlib.h>`, and `<sys/stat.h>`
+declarations are modeled, with Linux x86-64 coverage for `passwd`, `dirent`,
+`utimbuf`, and `rusage`. Finding a system header does not establish support for
+all its declarations or for another libc ABI.
+
+`__NYC__`, `__NYC_MAJOR__`, `__NYC_MINOR__`, and `__NYC_PATCHLEVEL__`
+identify the frontend. `nyc --version` reports the build identity. The
+frontend defines `__STDC__` and advertises GNU compatibility integers
+`12.0.0`; it does not define `__clang__`. These are preprocessor contracts,
+not full GCC or Clang compatibility.
+
+## C language subset
+
+### Scalars, pointers, and arrays
+
+- Supported scalars include signed and unsigned integers through 64 bits,
+  `float` and `double`. Narrow parameters, returns, assignments and memory
+  operations preserve their declared width. Explicit signed and unsigned
+  byte and halfword loads sign-extend or zero-extend respectively. Bare
+  `char` is signed by default on x86-64, but some bare-`char` loads still
+  zero-extend; use explicit `signed char` where high-bit interpretation
+  matters. `-funsigned-char` selects unsigned plain `char`.
+- Unsigned 32- and 64-bit operations preserve wrapping, comparisons,
+  division, remainder, and logical right shifts. Suffixed 64-bit constants
+  keep their unsigned bit pattern. The tested GNU integer builtins include
+  unsigned overflow arithmetic, `__builtin_clz[l]`, and `__builtin_ctzl`.
+- Typed pointers support arithmetic, dereference, indexed loads and stores.
+  Object-pointer relational comparisons use unsigned address ordering.
+  GNU `void *` arithmetic uses byte scaling. `_Bool *` remains a pointer
+  through assignment, parameter passing and return.
+- A pointer to a row such as `struct entry (*rows)[512]` advances by the
+  entire row, including when a subobject address is taken.
+  `&table[i][j]` on `struct entry **table` uses pointer size for the first
+  subscript and record size for the second. Array parameters decay to
+  pointers; i386 aggregate-pointer tables use four-byte elements.
+- Address-taken floating locals retain stack-backed reads after the address
+  escapes. A cast to `void` preserves side effects without producing a value;
+  nonvolatile discarded lvalues do not force a memory read.
+
+### Declarations, layout, and initialization
+
+- Tagged and anonymous aggregates support nested records and arrays, pointer
+  tables, bitfields, and promoted anonymous members. Bitfield updates keep
+  neighboring bits; signed fields sign-extend, and unnamed fields retain
+  padding and offsets. Taking a member's address does not read it.
+- File-scope enums support tags, typedefs, explicit integer expressions, and
+  implicit successors. Enumerators can appear in array extents, initializers,
+  parameters and results. Constants must fit `int`; duplicate and empty
+  enumerations are rejected. Only supported block-scope enum shapes work.
+- Typedefs include supported scalar, pointer, aggregate, and function-pointer
+  types, with chains and `const` qualifiers. Function pointers and
+  pointers-to-pointers can be stored, passed, returned, or used through
+  supported indirect calls. GNU `asm` labels on external declarations are
+  parsed; using those aliases as call targets, data addresses, or initializer
+  values remains limited by the applicable symbol path.
+- `sizeof`, alignment queries and `__builtin_offsetof` use resolved layouts
+  and the target's unsigned `size_t` width. File-scope `_Static_assert`,
+  GNU `typeof`, scalar/pointer `__auto_type` and C23 `auto` initializers,
+  `__builtin_choose_expr`, `__builtin_types_compatible_p`, GNU scalar statement
+  expressions, and switch case ranges have targeted coverage.
+- File-scope scalar, pointer, and aggregate objects support the implemented
+  constant initializers, including string data, local-static function and
+  pointer relocations, and selected self-referential aggregate members.
+  Integer and pointer globals support updates; a pointer to `const` is not
+  necessarily a const pointer. Static objects and functions retain local
+  binding across translation units. Static locals retain storage and
+  addresses across calls; block-scope `extern` resolves to the C symbol.
+- Fixed arrays retain their declared size; missing elements zero-initialize.
+  Character arrays accept concatenated strings, zero padding, and exact-width
+  strings without a terminator. Supported incomplete pointer and character
+  arrays can be completed by compatible definitions. GNU zero-size outer
+  bounds and empty initializers retain size zero. Not all nonzero global
+  aggregate-pointer array initializers are supported.
+- Supported runtime aggregate initialization includes nested brace lists,
+  bitfields, arrays, and aggregate compound literals. Omitted fields and
+  elements zero-initialize on each evaluation. Automatic fixed-size storage
+  is reserved once per invocation, but initialization still runs at the point
+  of evaluation, including within loops.
+- Natural object alignment and accepted GNU `aligned` and `section`
+  attributes affect emitted storage, including prefix attributes before
+  `__typeof__` and trailing or inherited record alignment. On ELF, const data
+  uses `.rodata` where no dynamic data relocations are required, and
+  `.data.rel.ro` for relocatable const data unless PIC/PIE was explicitly
+  disabled. An explicit section takes precedence.
+
+GNU `nothrow`, `leaf`, `cold`, `hot`, `malloc` (including the deallocator
+form), and `access` attributes are accepted but do not imply GCC-equivalent
+optimization or analysis. Explicit aliases, bitfields, and unnamed or nested
+aggregate declarators each have shape-specific limits.
+
+## Targets and output routes
+
+| Route | Output and boundaries |
+| --- | --- |
+| x86-64 ELF | `-c` emits objects; `-S` emits GNU assembly. Object output can use the register-allocated machine encoder, a direct NYIR encoder, or GNU `as` for supported assembly forms the object writer cannot encode. |
+| i386 ELF | `-m32` selects 32-bit code. NYC can emit assembly or assemble it with GNU `as` for `-c`. `-mregparm=0` through `3` selects the integer argument register convention; match it on both sides of a call. |
+| x86 real mode | `-m16` emits `.code16gcc` assembly or an ELF32 relocatable object. It keeps the 32-bit C ABI; it does not produce a boot image or switch the processor into real mode. |
+| Other targets | Support is shape- and mode-dependent; see [Native object support](native.md#nyir-artifacts-and-native-objects) and the detailed records below. |
+
+### Aggregate and variadic ABI
+
+| Target ABI | Supported classes and boundary |
+| --- | --- |
+| SysV x86-64 | INTEGER/SSE combinations through two eightbytes; larger values use memory classification. Mixed returns use RAX and XMM0 in either class order. Unsupported layouts/class shapes are rejected. |
+| AAPCS64 ELF | Homogeneous aggregates of one to four `f64` fields and integer aggregates through 16 bytes, including 16-byte alignment; larger values use memory classification. AArch64 Windows is unsupported. |
+| Win64 x86-64 | One-eightbyte INTEGER aggregates are direct; larger by-value arguments and returns use the indirect ABI. The direct field model is limited to supported eight-byte shapes. |
+| SysV i386 | Stack aggregate arguments and hidden result pointers, including register-placement variations from `-mregparm=N`. |
+
+The acceptance matrix tests cross-compiler aggregate calls, including
+AAPCS64 under QEMU and Win64 under Wine when available. This C matrix is
+separate from checks for Nytrix `layout` values and the NYIR JIT.
+
+On x86-64, scalar varargs obey default promotions. Variadic definitions
+use the SysV register-save and overflow areas; `-mno-sse` preserves integer
+varargs without touching vector registers and rejects floating-point or
+SIMD operations requiring them. SysV `va_arg` accepts supported INTEGER,
+SSE, mixed two-eightbyte, and MEMORY aggregates with alignment up to
+16 bytes. If either register bank lacks space, extraction uses the overflow
+area without advancing either bank. Aggregate layouts outside the
+classifier's supported subset remain unsupported.
+
+On i386, `-mregparm=0` through `3` and the GNU `regparm(N)` attribute select
+integer argument registers, including supported small aggregates and 64-bit
+register pairs. Floating scalars and single-real-member aggregates stay on
+the stack. An aggregate too large for the remaining bank also sends later
+integer arguments to the stack. A register-passed hidden result pointer is
+not callee-popped. Variadic arguments stay on the stack, with pointer-shaped
+`va_list`, `va_copy`, and mixed-width extraction. With nonzero regparm,
+variadic aggregate return uses GCC's caller-pop convention rather than
+Clang's default. i386 x87 conversion retains the full integer width and
+restores the caller's control word after truncation.
+
+## Code generation flags
+
+`-O0` through `-O3` select the NYR level (default `-O2`). `-Os` uses a
+size-oriented `-O2` configuration that disables costly growth passes;
+`-fconserve-stack` caps the optimization level at `-O1`. At `-O1` and above,
+eligible locally bound definitions can inline even if their out-of-line
+symbols are retained. Interposable PIC globals, weak definitions,
+`noinline`, variadic-list operations, and assembly definitions that would
+duplicate global symbols constrain inlining.
+
+Whole-unit x86-64 `-fPIC`/`-fPIE` use GOT-relative data addressing and PLT
+call relocations where required. `-fomit-frame-pointer` supports RSP-relative
+object frames for leaf and calling functions with spills, callee saves,
+and incoming stack arguments. Dynamic `alloca` and variadic-list operations
+can retain a frame pointer. The single-function route rejects omission;
+physical assembly and direct-object parity without the stack encoder
+remains unfinished.
+
+`-m64`, `-march=x86-64`, and `-mcmodel=kernel` select or require x86-64.
+`-mcmodel=small` accepts the default model. The linker checks the range of
+RIP-relative relocations. `-falign-functions=16` selects the supported object
+entry alignment. `-fshort-wchar` controls `wchar_t` and the corresponding
+predefines; the normal Linux x86-64 wide character types use 32-bit ABI
+widths. `-fno-strict-aliasing` matches the frontend's conservative aliasing.
+Accepted warning, unwind, or recognized compatibility flags do not provide
+GCC-equivalent diagnostics or metadata. A supported stack-boundary option
+is target-specific; do not infer i386 frame rules from the x86-64 settings.
+
+### Stack protection and indirect calls
+
+Whole-unit SysV x86-64 supports `-fstack-protector`,
+`-fstack-protector-strong`, `-fstack-protector-all`, and `-fno-stack-protector`.
+Last option wins; `no_stack_protector` opts a function out. Basic protection
+covers qualifying frame objects; strong includes address-taken locals, and
+all includes scalar functions. Normal returns check a fixed frame word and
+call `__stack_chk_fail` on mismatch. Other target ABIs and single-function
+compilation reject enabled stack protection.
+
+The default guard uses `%fs` offset 40. `-mstack-protector-guard=tls|global`,
+`-mstack-protector-guard-reg=fs|gs`, `-mstack-protector-guard-offset=NUMBER`,
+and `-mstack-protector-guard-symbol=IDENTIFIER` select the guard source. A
+TLS symbol overrides the numeric offset. `__SSP__`, `__SSP_STRONG__`, or
+`__SSP_ALL__` is defined before explicit macro overrides. Guard support is
+not general FS/GS address-space support.
+
+`-mindirect-branch=thunk-extern` requires the linked indirect-call thunk
+`__x86_indirect_thunk_r11`; `thunk-inline` emits a local retpoline. The
+single-function route rejects these options. For other implemented x86-64
+protection and instrumentation modes, see the evidence below; `-pg` and
+`-mfentry` are distinct from unsupported kernel tracing options.
+
+## GNU assembly
+
+`-x assembler` and `-x assembler-with-cpp` accept files or standard input.
+GNU `as` assembles objects; `-Wa,--version` queries it and
+`-Wa,--fatal-warnings` forwards fatal-warning behavior. File-scope assembly
+supports common section changes, alignment, data directives, local labels,
+and cross-section PC-relative relocations. Supported operand-bearing inline
+assembly is template- and target-dependent; an arbitrary GCC operand or
+constraint combination is not guaranteed to work.
+
+The x86-64 GNU C template `leaq %c1(%%rip), %0` with an `"i"` symbol operand
+emits a direct PC-relative address even under `-fPIC`. If an inline helper
+passes the operand, it must resolve to a link-time symbol after inlining.
+Ordinary interposable PIC references can still use the GOT. Supported forms
+also include `pause`, `nop`, empty templates with a memory clobber or a
+matching input/output tie, selected `=rm` forms such as `pushf; pop %0`,
+input-only `"i"` expressions, target-specific string operations, and
+supported asm-goto constraints. Volatile reads of a global `rsp` register
+binding are supported; taking its address and writing it are not. The
+read-write constraint used for call clobbers is limited to a single direct
+call. See the evidence below for tested operand shapes and register,
+segment, annotation, and encoding limits.
+
+## Linux kernel status
+
+Protected Linux 7.3.5 builds have linked `vmlinux`, the compressed kernel,
+and configured modules using NYC for target C and GNU `as` for assembly.
+Those runs did not produce a bootable `bzImage`. The latest setup replay
+meets the 64-sector limit but fails the separate 32 KiB setup memory limit.
+QEMU's direct PVH ELF boot is useful for diagnosing startup, but it is not
+a `bzImage` or userspace boot test. See the
+[acceptance checklist](../todo/nyc.md) for the remaining gates and the
+[changelog](../CHANGELOG.md) for user-visible changes.
+
+## Verification evidence
+
+<details>
+<summary>Build, boot, ABI, diagnostic, and code-generation investigations</summary>
+
+The records below describe specific runs and compiler snapshots. Later
+results supersede older failures only for the cases they actually exercise.
+Paths under `/tmp` identify local run artifacts, not files shipped with NYC.
+
+### C frontend harness: artifact freshness
+
+The common executable regressions in `src/code/test/lang/run.cmake` remove
+the previous output before each compile and link, then require a nonempty
+artifact after a successful command. Previously, a compiler or linker that
+exited zero without writing anything could pass by reusing the last run's
+output.
+
+Fault injection with known-good preexisting artifacts rejected missing and
+empty compiler and linker outputs on both the assembly and object routes.
+The assembly route also rejected a nonzero compiler exit, a nonzero linker
+exit, a wrong program exit, a signal, and a timeout. This evidence applies to
+the common executable helpers, not to every differential or benchmark lane.
+
+### Current build evidence
+
+Fresh Linux 7.3.5 runs used the upstream tarball (SHA-256
+`8f293f83d54f0b7b9be56863ebc5e4ea79d73e530b4ae55c572be97ef39f0990`),
+a new `O=` directory per run, NYC as `CC`, GCC as `HOSTCC`, and GNU `as`.
+The protected configuration selects IBT, retpolines, return thunks, strong
+stack protection, objtool, ORC, and modules. Earlier runs stopped on duplicate
+GNU `extern inline` and weak functions, vDSO relocation failures, modpost
+export records, and generated `__ksymtab` assembly. The fresh
+`final-out.MgJ5r6` build linked `vmlinux`, `arch/x86/boot/compressed/vmlinux`,
+and every `.ko` in its 12-entry `modules.order`. Its log records 3,001 distinct
+NYC target C object outputs, 66 objtool warnings, and 40 modpost warnings.
+The 3,001 output paths matched Kbuild's saved C object recipes exactly:
+every listed object existed and every recipe named the frozen NYC executable.
+The 19 GCC C object recipes were host tools under `scripts/` and
+`arch/x86/tools/`. This audits the completed build stages, not an image.
+Constant control-flow cleanup removed unreachable per-CPU size fallbacks
+and disabled AMD memory-encryption references without changing the config.
+
+The later protected `latest-clean-bzimage.UYrbzx` build linked `vmlinux`,
+the compressed kernel, and 12 configured modules. Its log records
+61 objtool warnings and 18 modpost warnings. GNU ld
+again rejected `setup.elf` at the memory assertion; there is no `bzImage`.
+The object audit matched 3,001 recorded NYC target-C recipes to their
+outputs and compiler messages, including one message interleaved with
+another compiler's output. Four other messages were C-to-assembly
+generators, not additional `.o` files. All 19 GCC C recipes were host
+objects under `scripts/` or `arch/x86/tools/`; all 12 `.ko` files exist.
+
+The only failed build target was the real-mode setup link. An exact replay
+of the upstream linker script using the fresh build's setup objects still
+gave 72 sectors (limit 64), `.text32` ending at `0x7cf8`, and `_end=0x98d0`
+(limit `0x8000`). The image was not produced. The frozen compiler SHA-256
+was `e32d914c8dcce5123303c2d698d6b140804f6ec5f757bcaf7312fda4b05a7547`;
+the configuration SHA-256 was
+`45506b09f39d30174e26d5ad5d13bd2cfff195302229a2c116f2a640f772f963`.
+Allowing register runs to return directly and saving allocatable nonvolatile
+registers once in the function frame reduced the same 20 setup C objects from
+31,792 to 31,625 bytes by GNU `size`. The frontend suite and 24 forced i386
+register-variant executions passed. The clean confirmation build
+`notype-out.pKABGi` again linked `vmlinux` and all 12 modules; it reported
+64 objtool and 24 modpost warnings. It stopped at the same setup link.
+
+Direct pushes for scalar stack arguments, CFG-aware coalescing of private
+homes, and preserving live nonvolatile registers across calls cut the 20
+setup C objects to 29,429 bytes. Zero-extending byte/word masks, omitting
+unneeded frames, and passing already-allocated scalar call arguments without
+spilling cut that to 28,743 bytes. Emitting indirect calls and pushes from
+their existing frame homes, retaining private local homes at `-Os` when
+promotion would introduce edge copies, and using memory operands in wide
+comparisons and multiplication reduced that to 27,191 bytes. An exact
+replay of the 20 Kbuild C recipes now meets the upstream 64-sector limit,
+but the separate setup memory limit still fails: `.text32` occupies
+`0x6ae1..0x6aff`, `.pecompat` aligns to `0x7000`, and `_end=0x88e0`
+exceeds `0x8000`. Before alignment, `.text32` must end at or below `0x6000`.
+This replay honors the declared 16-byte alignment of `boot_params`; before
+that fix `_end` was `0x88d0`. Omitting unused integer call-result stores
+and retaining low-word results in EAX then shrank the linked `.text` by
+417 bytes; `.text32` now ends at `0x695e` and `_end` is unchanged. All 32
+i386 GCC cross-links passed across four `regparm` settings and four
+emitter variants. A separate real-mode QEMU fixture passed
+with both NYC and GCC: it checks a loop carrying distinct
+values over branch joins and a 64-bit argument between two 32-bit arguments.
+The four-byte stack calling convention also passed 16 GCC cross-links with
+`regparm` 0–3 and tied or permuted register arguments. These are not kernel
+boots.
+
+For `-m16 -D_SETUP`, fixed frames without intervening register saves now
+use `enterl` when the frame size fits its immediate. The existing real-mode
+fixture executed those prologues successfully in QEMU for both `-c` and
+`-S`. In the 20-object Kbuild replay, linked `.text` shrank by another
+260 bytes. `.text32` ends at `0x685a`, 2,138 bytes past the `0x6000`
+alignment boundary. The replay still uses 64 sectors and
+GNU ld still rejects `_end=0x88e0`.
+
+Folding adjacent absolute symbol loads and stores shortened the linked
+`.text` by 60 bytes in an A/B replay of the same 20 setup recipes using
+one frozen compiler (`NYC_DISABLE_I386_ABSOLUTE_MEMORY_FOLD=1` for the
+baseline). The fold uses an explicit address-size prefix and preserves
+`R_386_32` relocations; it does not assume a 16-bit symbol address.
+The QEMU real-mode probe passed with GCC and NYC `-S` and `-c`, checking
+volatile byte and word access, sign extension, and dword updates.
+The linked `.text32` now ends at `0x681e`, 2,078 bytes beyond `0x6000`.
+The same A/B reports 64 sectors and `_end=0x88d0` in both runs; the
+upstream setup memory assertion still fails. Allowing spill-home coloring
+to use nonvolatiles already saved but unused by the function body did not
+change setup size in a separate trial; that change was not retained.
+
+A focused `arch/x86/kernel/cpu/vmware.o` replay removed the objtool
+`return with modified stack frame` warning. The compiler now saves RBX
+around the fixed-register VMware calls and represents the six output
+addresses in IR, so optimized code consumes the returned values instead of
+the locals' initial zeroes. The replay checked the generated stores and
+unwind diagnostic; it did not execute a hypercall.
+
+A separate clean `CONFIG_PVH=y` diagnostic build (all listed protections
+retained) reaches the kernel's 64-bit startup through QEMU's direct ELF boot.
+The first run triple-faulted while loading segment registers. NYC now passes
+the packed descriptor's address to `lgdt`/`lidt` and emits a direct PC-relative
+relocation for explicit `leaq %c1(%%rip), %0` asm even under `-fPIC`. The
+next fresh PVH build passed the GDT/IDT setup and faulted after the initial
+page-table switch. The PUD and PMD were sharing one page: NYC emitted an
+8-byte subscript stride for a pointer to a 4,096-byte row. The row-stride fix
+passed the C regression at `-O0` and `-O2`; a focused relink also crossed the
+page-table switch in QEMU. Recompiling the final early-IDT load then let
+the guest handle its initial page faults. It stopped on a generated SSE
+register save in `_printk` while SSE was disabled, before `/init`.
+The integer-only SysV variadic save now emits no SSE instructions in
+`_printk` or `early_printk`. Register and overflow-stack arguments passed
+under all three x86-64 encoders. The physical encoder also now advances the
+`va_arg` cursor before assigning its result to a register, which prevented
+the cursor from being overwritten by a result allocated to R11.
+The next clean PVH `vmlinux modules` build linked all 12 modules and entered
+`start_kernel` in QEMU with serial console output. It reported 62 objtool
+and 24 modpost warnings. In that run, taking `&sections[root][slot]` used
+an 8-byte stride instead of the 16-byte record size, so sparsemem initialized
+only even-numbered sections and then dereferenced an uninitialized usage
+pointer. Replaying the two affected Kbuild recipes with the stride fix let
+QEMU pass sparsemem and reach per-CPU setup. The C frontend was dropping
+the section attribute before `__typeof__(type)`, so the original linked
+per-CPU section was empty. A fresh protected PVH build with the attribute
+fix linked 187,056 bytes of per-CPU data and booted through per-CPU setup.
+It stopped in slab initialization: an omitted pointer field in
+`&(struct kmem_cache_args){.align = ...}` contained stale stack data.
+Automatic record and record-array compound literals now zero omitted
+fields on each evaluation. A focused `mm/vmalloc.o` replay moved QEMU
+through slab initialization and into scheduler startup. A later focused link
+with the workqueue, scheduler, and radix-tree objects rebuilt reached early
+trace-event registration, then stopped on another slab constructor call.
+Other objects in that link predate the literal fix. A clean PVH rebuild
+stopped earlier on six C translation units: per-pass NYIR verification
+isolated `inline_small` leaving a return capture without its call.
+Keeping those call/capture chains intact fixed all six saved Kbuild recipes.
+A standalone GNU C repro executes at `-O1` and `-O2`; the previous compiler
+rejected it at both levels. At `-O3`, GVN also had to stop treating captures
+from separate calls as equal values. A fresh protected PVH build after the
+inliner fix linked `vmlinux` and all 12 configured modules and reached IRQ
+initialization. The QEMU run reported early page-attribute and IRQ warnings
+and did not reach `/init` before its timeout. This diagnostic does not
+produce or substitute for `bzImage`.
+
+The x86-64 text emitter was reusing the source's frame slot before a fused
+bit test consumed it. Recompiling the three trace-event objects retained the
+input until `TEST`. A focused PVH relink with those objects and rebuilt SMP
+and IRQ objects removed the `top_trace_array` and
+`smp_call_function_many_cond` warnings. `__irq_startup` still warned, and
+the guest did not progress past early SRCU initialization before timeout.
+Attaching GDB to that guest located the stall in
+`set_normalized_timespec64`: the peephole range query walked a loop backedge
+through the implicit function-entry edge and folded the loop's exit away.
+The range query now stops at entry and ignores a condition when both branch
+outcomes lead to the same block. The real `kernel/time/time.o` replay has
+both guarded loops and both result stores. A standalone regression covering
+positive, negative, and already-normal nanoseconds matched GCC and passed
+NYC assembly and object emission at `-O0` through `-O3`.
+With the repaired time object, the focused QEMU link passed timekeeper
+initialization and registered the jiffies clocksource. It then faulted on
+a null store in `numa_policy_init`, before `/init`. A block-local aggregate
+declared with `typeof(value)` had followed scalar lowering and obtained a
+null value instead of record storage. The standalone nodemask-shaped
+regression now matches GCC at `-O0` through `-O3` for assembly and object
+emission. The real `mm/mempolicy.o` recipe also recompiles.
+
+The focused NUMA relink passed `numa_policy_init` and reached APIC timer
+setup, then faulted switching to the interrupt stack. `common_interrupt`
+loaded the per-CPU stack pointer without the GS prefix because its C
+address was a pointer to an aggregate pointer. The corrected IRQ object
+loads through `%gs`; the resulting aggregate pointer remains an ordinary
+pointer. A Linux GS-base probe with distinct pointer slots and record values
+passed in assembly and object mode at `-O0` and `-O2`; the prior compiler
+selected the wrong slot in all four cases. Replaying the nine IRQ-stack
+objects let the PVH guest take its timer interrupt, calibrate the TSC, and
+enter CPU finalization. It then warned in `patch_retpoline` and hit the
+`cpa_flush` assertion at `arch/x86/mm/pat/set_memory.c:472`.
+
+The next replay restored array-typedef dimensions and signed row-distance
+scaling for the retpoline thunk array. A standalone regression checked
+both subtraction directions and both row and element addresses. Another
+fix made x86 `=rm` inline asm outputs explicit memory writes, so the
+real `cpa_flush` object reads the saved flags and tests IF instead of
+using a constant. The array probe matched GCC at `-O0` through `-O3`;
+the x86-64 and i386 asm probes matched GCC through those levels and at
+`-Os`. Both `-S` and `-c` were exercised. A focused protected PVH replay
+no longer warned in `patch_retpoline`, but `__irq_startup` still warned and
+the corrected `cpa_flush` assertion still fired. Replaying the console
+objects repaired one IRQ-state loss: GDB saw `nbcon_atomic_flush_pending`
+restore IF and `arch_cpu_finalize_init` enter with IF set. A separate replay of
+`arch/x86/kernel/cpu/mce/core.o` restored the IRQ state across `cr4_set_bits`;
+GDB then found IF lost across `fpu__init_system` and, after replaying the
+FPU objects, across `int3_selftest`. Replaying the notifier, trap, entry,
+and RCU objects got past `cpa_flush` and into VFS initialization, where
+the mixed-snapshot guest timed out after netlink and kobject warnings.
+
+The fresh `pvh-irq-clean.fSBNfa` diagnostic build retained PVH, IBT,
+retpolines, return thunks, strong stack protection, ORC, and modules.
+`vmlinux` and all 12 modules linked in 607 seconds; the log contains
+61 objtool warnings and 18 modpost warnings. All 2,971 saved NYC C-object
+recipes matched existing objects and build output, including four
+interleaved messages. All 50 GCC C recipes were host tools under
+`scripts/`, `arch/x86/tools/`, or `tools/objtool/`. With all inputs
+rebuilt, the first timer IRQ exposed a
+different defect: `set_irq_regs` read the old pointer through GS but
+stored the new pointer without GS, so `tick_periodic` dereferenced a
+null `get_irq_regs()` result. Both the standalone statement store and
+assignment-expression store now preserve the segment. The Linux GS-base
+probe matched GCC for `-S` and `-c` at `-O0` through `-O3`, and the
+C frontend regression lane passed. Replaying `arch/x86/kernel/irq.o`
+confirmed a GS-prefixed load and store. The focused PVH relink passed
+the first timer IRQ and got to SELinux initialization, where it still
+faulted in `static_call_key`. No `/init` execution was observed.
+
+At the SELinux fault, a GDB watchpoint showed `lsm_order_append` writing
+an LSM identity into the adjacent static-call key. The earlier incomplete
+`extern` declaration of `lsm_idlist` was merged with its tentative
+definition without updating its size or shape. NYC now completes the
+pointer array and emits its zero-initialized storage. `security/security.o`
+changed from a zero-byte `lsm_idlist` to a 16-byte object in `.bss`.
+The regression matched GCC in both output modes at `-O0` through `-O3`.
+The resulting PVH relink passed SELinux initialization and timed out
+in VFS setup after netlink and kobject warnings.
+
+GDB then showed `slab_want_init_on_alloc` returning zero for flags
+`0xdc0`, even though `__GFP_ZERO` (`0x100`) was set. The compiler had
+truncated the integer mask to eight bits rather than converting it to
+`_Bool`. Scalar returns from `_Bool` functions now use a truth comparison.
+The GCC differential probe covered a high-bit mask, an unsigned-byte input
+already the width of `_Bool`, a nonzero floating-point input, and signed
+zero, using both NYC output modes at `-O0` through `-O3`.
+Replaying the slab, kobject, netlink, and IRQ chip objects removed the
+earlier IRQ-startup, netlink, and kobject warnings in that run. The guest
+mounted rootfs and reached `rest_init`, then tried to call a null
+`cgroup_can_fork` hook. `cgroup_init_subsys` was truncating the function
+pointer for `(bool)ss->can_fork` instead of setting exactly one mask bit
+when the pointer was nonnull. Explicit scalar `_Bool` casts now use the
+same truth conversion as returns. Integer, floating-point, and function
+pointer cases passed the GCC differential probe in both output modes.
+
+Replaying the cgroup and task-creation objects passed the null callback
+and reached the first scheduler context switch. It then faulted on the
+local APIC timer path, which also inlines `set_irq_regs`. Replaying the
+configured IRQ-register writers with the GS store fix let the guest start
+`kthreadd`. The guest still warned about a corrupted preemption count
+(`0x6aa9` in the APIC replay, `0x6b41` in the preceding run) and stopped
+at `BUG_ON(pi && in_interrupt())` in
+`__sched_setscheduler`. Disassembly showed a preemption-count `orq` and
+`decq` without the GS prefix. Named `+m` asm operands now retain the
+segment recorded on their C lvalue, including with a flag output. The
+runtime GS-base probe matched GCC through `-S` and `-c` at `-O0` through
+`-O3`; it checks that the operation updates the CPU-local slot, not the
+unsegmented decoy. NYC still routes these asm forms through GNU `as` in
+`-c` mode. The first kernel replay confirmed the GS-prefixed instructions
+but still hit the scheduler assertion. Disassembly also found a plain
+`cmpxchgq` in the preemption-count reset; named compare-exchange now
+preserves the segment too. The GCC differential checks both success and
+failure, including the returned expected value on failure, in the same
+eight NYC modes. The strict C frontend lane passed. A second PVH replay
+confirmed `cmpxchgq` through GS in `finish_task_switch`; neither its
+preemption-count warning nor the `__sched_setscheduler` assertion recurred.
+`kthreadd` started, but the guest hit RCU and idle-scheduler warnings and
+timed out before `/init`. This is not a clean PVH or `bzImage` boot.
+
+Replaying the architecture context-switch object restored the GS store
+to `current_task` in `__switch_to`. A focused relink with that object and
+the RCU and scheduler objects no longer showed the preceding RCU and idle
+warnings. It reached a worker thread and stopped at a divide exception in
+`avg_vruntime`, after the `set_next_entity` warning. GDB observed a saved
+runqueue weight of `-0x100000`; adding the current entity's `0x100000`
+weight made the divisor zero. `/init` did not run.
+
+The clean `pvh-seg-fresh.fuYNGn` rebuild reproduced that worker-thread
+failure without the earlier SMP, RCU, or idle-scheduler warnings. The
+frozen NYC SHA-256 was
+`18729b65db2c7af7e96ad4727f52b47ffd6d7c551bc9e0cdb099cea4a632d6a0`
+and the protected PVH config SHA-256 was
+`bf21689337389b522d3f0e33edbe22c1a450d5781349fb0a13358ae3fcf7dfb3`.
+Kbuild used `NYC_KERNEL_COMPAT=1`, `ARCH=x86_64`, the frozen NYC as
+`CC`, `HOSTCC=gcc`, `AS=as`, and `LD=ld`, first running `olddefconfig`
+and then `-j20 V=1 vmlinux modules`. All 2,971 NYC target C recipes
+matched both the compiler messages and their object files. `vmlinux`
+and the 12 configured modules linked, with 61 objtool and 18 modpost
+warnings. QEMU still timed out before `/init`.
+
+A GDB watchpoint traced the negative runqueue weight to a second
+`sched_change_end` call for the same guard in `__sched_setscheduler`.
+The frontend compared the backing addresses of the local and label
+spellings instead of their order after macro expansion, treating a goto
+within the Linux `scoped_guard` as an exit. Cleanup edges now use token
+positions. The protected `kernel/sched/build_policy.o` replay went from
+two destructor call sites to one, and the strict C frontend lane passed.
+A backward jump to a macro-expanded label before a cleanup declaration
+also exercises the opposite case: the old compiler failed on `-S` and
+`-c`, and the corrected compiler matched GCC in both modes.
+With the scheduler objects relinked, QEMU no longer reported the fair
+scheduler warning or divide exception. It unpacked the initramfs, freed
+its 12 KiB input, and reached NFS driver initialization. GDB found PID 1
+blocked later in `serial8250_init` → `probe_irq_on` → `msleep`, with the
+boot CPU idle. The guest timed out without executing `/init`.
+
+The fresh protected rebuild `pvh-cleanup-fresh.sxjZ8F` also linked
+`vmlinux` and modules, using the same configuration and frozen NYC
+SHA-256 `d630eed91fa72079716bafaff8bb67c8f51bb03a6bef6825a8cae655209b7e81`.
+The QEMU run with `initcall_debug` timed out without the userspace marker.
+Its last serial message announced `init_sunrpc`, but serial output alone
+does not identify where PID 1 blocked. In the separate focused relink,
+GDB saw the serial-probe sleep timer still queued after its expiry:
+jiffies advanced, the timer softirq pending bit remained set, and the
+timer wheel did not advance in two snapshots. APIC timer entry and earlier
+timer callbacks were observed. The dispatch failure was not isolated to a
+specific compiler defect.
+
+Two Kbuild object replays now place the const `init_funcs` and
+`memmap_ktype` tables in `.rodata`. Eight ELF compile-link-run checks across
+assembly and object output verified const table placement, mutable
+pointer-to-const storage, functioning callback relocations, and dynamic
+relocation without text relocations. The focused Kbuild replays establish
+section placement, not a clean modpost result.
+
+The vDSO failure was an ELF symbol-index cache that survived sorting the
+definition table. The same saved Kbuild C command, rerun with the cache fix,
+produced an object which linked with the upstream vDSO linker script and
+`ld --no-undefined`. That is a focused link, not a complete clean build.
+The C retpoline fixture also passed all six combinations of external or
+inline thunks with assembly, direct-object, and physical-machine emission;
+each executable called both an integer target and a variadic floating-point
+target. The frontend suite passed with hard optimizer rejection and with the
+SCCP fix for stale facts after an inlined asm-goto edge. Scoped cleanups now
+run on C and asm-goto exit edges; a focused `fs/readdir.o` replay eliminated
+five objtool `return with UACCESS enabled` warnings, with redundant-disable
+warnings still open. Mandatory static-branch inlining now precedes optional
+stackless inlining so Intel PMU `asm goto` immediate operands are specialized
+even in large files. Real replays of `lib/strnlen_user.c` and
+`lib/strncpy_from_user.c` produced no objtool warnings.
+
+`sysv-boundary` matches GCC output. `abi-cross-*` links NYC- and
+host-compiled counterparts in both directions for INTEGER/INTEGER, both
+mixed INTEGER/SSE orders, SSE/SSE, and MEMORY-class returns, including
+`-S -fconserve-stack`. Returns allocate GP and SSE registers independently.
+The fixes also let `vsprintf` keep its format pointer during the PVH boot.
+The next early console fault was passing a `_Bool *` as scalar `_Bool`;
+runtime tests now check pointer identity, writes, and conversion of a pointer
+to a separate scalar `_Bool` parameter.
+
+Code-generation semantics are verified with NYC itself in both `-c` and `-S`:
 `-fstack-protector`, `-fstack-protector-strong`, and `-fstack-protector-all`
 emit canaries (and nothing is emitted without the flag);
 `-mindirect-branch=thunk-extern` emits `__x86_indirect_thunk_*` and
@@ -80,7 +702,42 @@ suite is green with the machine path active.
 under PIC because they address symbols directly. `pic-asm` pins GOTPCREL
 presence with `-fPIC` and its absence without, and the PIE link still runs.
 
-## Linux 7.3 kernel build attempt (2026-11-18)
+### SQLite 3.46.0
+
+The unmodified amalgamation compiled in whole-unit mode. With a GCC shell
+and the NYC-compiled library, SQL output matched GCC across transactions,
+joins, indexes, window functions, recursive queries, JSON and blobs, plus a
+1,000-row on-disk database with updates, rollback, `VACUUM`, integrity
+checks, and reopening. An NYC-compiled shell and core also printed the
+version, created a table, inserted `42`, and read it back. Those are
+functional checks, not a performance measurement or suite pass.
+
+A prior `SQLITE_TEST` run passed `expert1.test` 89/89 and `intck1.test` 70/70,
+then failed `alter-3.1.1` because casted aggregate indexing used an 8-byte
+stride instead of the record size. With that fixed, the test-enabled core
+linked to the upstream runner with compiler-rt and non-PIE flags and passed
+`alter.test` 120/120 and `ext/intck/intck1.test` 70/70. Correct aggregate
+local lowering for mixed pointer/record declarations fixed `autoindex1-900`;
+`autoindex1.test` passed 37/37. A broader `extraquick.test` run still aborted
+at `json101-4.2`, with Valgrind identifying an invalid free in
+`jsonCacheInsert`; disabling register allocation reproduced it. The system
+header Makefile route stopped on glibc `_Float32`; an earlier
+`-U__GNUC__` attempt instead stopped on a mismatched `__isnanf` argument.
+Full upstream SQLite acceptance is not established.
+
+### Early Kbuild preparation
+
+Earlier Linux 7.3 runs generated device-table offsets and time constants
+with a host `bc`, passed preparation's modpost step, and preprocessed
+`init/main.i` with dependency output. The isolated `fixdep.c` executable
+matched GCC. Historical failures involved incomplete `sizeof` types in
+`find.h`, `__u128_halves` initializers in `cmpxchg_64.h`, and inline-asm
+operands in `bug.h`, `preempt.h`, and per-CPU code. Linux 6.9 preparation
+also passed early inline-asm and array-declarator blockers before stopping
+on `__builtin_object_size`. These are old preparation snapshots; the clean
+build and artifact records above supersede them for Linux 7.3.5.
+
+### Linux 7.3 kernel build attempt (2026-11-18)
 
 Downloaded `linux-7.3.5.tar.xz`, ran `make x86_64_defconfig`, then
 `make -j96 -k CC=build/release/nyc HOSTCC=gcc bzImage`. The build produced 204
@@ -95,13 +752,11 @@ diagnostics can be reviewed end to end, the object encoder has to stop emitting
 instruction bytes objtool cannot decode and the remaining inline-asm templates
 need support.
 
-Three fallbacks remain before the NYIR assembly emitter can be deleted:
-stack-guarded functions (machine lowering rejects `NYIR_STACK_GUARD_LOAD` and
-`NYIR_STACK_GUARD_STORE`), retpoline options (the driver skips the machine
-block for `-mindirect-branch=*` rather than reporting a fallback, so those
-functions still use the NYIR emitter), and non-leaf frame omission (the machine
-prologue always establishes `%rbp`). Stack guards and retpolines are the
-kernel-relevant ones. Compiling all 523 corpus C
+At that attempt, three fallbacks remained: stack guards, retpolines, and
+non-leaf frame omission. Retpolines now have the focused parity evidence
+above; stack-guarded functions still reject `NYIR_STACK_GUARD_LOAD` and
+`NYIR_STACK_GUARD_STORE` in machine lowering, and non-leaf frame omission
+still needs a physical-machine prologue without `%rbp`. Compiling all 523 corpus C
 sources in `src/code/test/lang/c` with the trace enabled produced 396
 successful objects and **zero** `NYC object fallback` events; the 127
 non-compiling entries are host-side or fixture files that need their owning
@@ -397,7 +1052,7 @@ Earlier clean diagnostics in `/tmp/nyc-clean-kernel.wHQhQ50y` and
 forced-O0, mixed-GCC-wrapper, or incremental links cannot establish current
 coverage. Previous object-count percentages are not acceptance evidence.
 
-### Code-generation semantics probe (2026-11-17)
+#### Code-generation semantics probe (2026-11-17)
 
 Every probe below used `build/release/nyc -S` on a one-function translation
 unit, and the standard-input route was checked directly
@@ -477,7 +1132,7 @@ The layout helper (`ny_ctype_layout`, `2 * sizeof(T)` with element alignment)
 and the FFI mapping (c64/c128) exist, but nothing reaches them from a parsed C
 translation unit, so `complex.h` still cannot be compiled.
 
-### SysV aggregate/variadic audit (2026-11-17)
+#### SysV aggregate/variadic audit (2026-11-17)
 
 A differential probe compiled by NYC and by GCC `-O2` (one source, one runtime)
 produced identical output for:
@@ -493,17 +1148,23 @@ produced identical output for:
 - `va_start` after an aggregate named argument, and scalar `va_arg` reads after
   partially consumed integer and SSE banks.
 
-Remaining defect: `va_arg` of an aggregate is rejected unless it occupies
-exactly one INTEGER eightbyte and no further class. `va_arg(ap, struct { long;
-  double; })` fails at `src/code/lang/c/lower/parts/expr.h:4616` with "va_arg
-aggregate must fit one integer register", so two-register aggregate varargs
-(mixed or same-class) are unsupported. `NYIR_VA_ARG` consumes a single class,
-so supporting them needs a register-bank-aware variant that either takes all
-required classes or falls back to the overflow area as a unit. The boundary item
-stays open for that case. The passing cases are pinned by the
-`sysv-boundary` regression in `src/code/test/lang/run.cmake`.
+The passing call and scalar-`va_arg` cases are pinned by `sysv-boundary`.
+The same audit found that aggregate `va_arg` only accepted one INTEGER
+eightbyte. The frontend now checks both register banks before advancing
+either cursor, reconstructs noncontiguous register eightbytes in object
+order, and aligns overflow addresses before consuming the whole argument.
+Scalar `NYIR_VA_ARG` is unchanged.
 
-## Verified continuation fixes
+The `aggregate-variadic-va-arg` regression links a host caller against NYC
+assembly and object output. It covers INTEGER/INTEGER, SSE/SSE, both mixed
+orders, single-eightbyte records, register rollback in both banks, a
+forwarded `va_list`, and 8- and 16-byte-aligned overflow arguments with
+following scalar reads. GCC and Clang callers passed both output modes at
+`-O0` through `-O3`, `-Os`, and `-Oz`; the previous NYC rejected the SSE
+record. The same fixture is rejected under `-mno-sse` at the SSE aggregate
+extraction.
+
+### Verified continuation fixes
 
 - Prefix and exact-name ELF sections, read-only flags, ELF note types, scalar
   and aggregate aliases, static device-table aliases, local file-assembly
@@ -544,7 +1205,7 @@ stays open for that case. The passing cases are pinned by the
   hidden sret pointers, mixed register classes, and stack rollback, but do not
   replace the remaining boundary audit.
 
-## Remaining diagnostic families
+### Diagnostic history and unresolved families
 
 `complex.h` still fails because the C frontend has no complex type (see the
 2026-11-17 probe record). Physical machine lowering still falls back to stack
@@ -556,7 +1217,7 @@ compiler and fresh output tree after these blockers are addressed.
 Historical logs contained unreachable-instruction, missing-`noreturn`,
 UACCESS-state, section-mismatch, and other `objtool` diagnostics. Classify the
 complete current log and fix each unsafe family; earlier partial warning counts
-are not a final review. See [Native code generation](../spec/native.md) for
+are not a final review. See [Native code generation](native.md) for
 supported behavior and current implementation limits.
 
 Fresh strict retry (2026-11-14): `/tmp/nyc-recovered-setup-20261114` was
@@ -1460,208 +2121,7 @@ no bootable `bzImage` yet, so the only available evidence would be static
 is a helper that composes the memory flags once, used by every deref site, so
 the flag cannot be dropped by omission.
 
-## Correctness verification programme
-
-Merged from `docs/todo/kcc.md` (2026-11-15). The artifact requirements in
-[Required acceptance](#required-acceptance) above remain canonical; this section
-adds the correctness, verification and reproducibility work needed to back those
-claims with evidence.
-
-Reference: <https://github.com/LiterateDrivenDevelopment/kcc>. Extract only
-useful testing, reproducibility and semantic-verification ideas. Do not copy
-KCC's architecture, literate programming, backend, bootstrap or test harness.
-Nytrix already has its own compiler architecture, a native NYR backend, an LLVM
-backend, a C frontend, native object generation and the Linux kernel build work
-recorded above.
-
-Mission: turn NYC into a compiler whose correctness claims are backed by
-reproducible, adversarial, independent tests. Audit before editing. Prefer
-removing duplication and fixing real weaknesses over adding new systems, flags,
-frameworks or abstractions.
-
-### P0 — Make the test harness trustworthy
-
-Audit `./make check`, the C frontend tests, backend tests, benchmarks and the
-existing differential test infrastructure. Find:
-
-- False positives and silently ignored failures.
-- Tests that compare only truncated exit codes.
-- Compilation failures misclassified as success.
-- Tests accepting matching linker/runtime failures.
-- Stale outputs accidentally passing.
-- Unsupported cases excluded without accounting.
-- Fragile expected-failure rules.
-- Duplicate or obsolete test implementations.
-
-Build a strict common result model: `PASS`, `MISCOMPILE`, `COMPILE_FAIL`,
-`LINK_FAIL`, `RUNTIME_FAIL`, `TIMEOUT`, `UNSUPPORTED`, `INVALID_TEST`. Every real
-regression must produce a nonzero test status.
-
-Introduce deliberate fault-injection tests proving the harness detects wrong
-output, bad assembly, crashes, link failures, timeouts and stale binaries. A
-harness that fails to catch injected bugs is defective.
-
-### P1 — Differential compiler validation
-
-Compare NYC → NYR, NYC → LLVM, Clang and GCC on well-defined C programs with
-deterministic inputs. Compare actual behavior: full output, exit status and
-signal, binary files and observable memory results, exact integer values,
-appropriate floating-point semantics, ABI-visible results and external effects.
-
-Never assume GCC/Clang agreement proves correctness; use standard-defined
-semantics to adjudicate disputes, and filter undefined and unspecified behavior
-appropriately. Run each case across supported optimization levels. Separate
-compiler acceptance coverage from execution correctness, and report both
-denominators honestly.
-
-### P2 — Automated bug discovery
-
-Integrate existing fuzzing infrastructure or lightweight adapters to
-established generators where useful: Csmith, YARPGen, compiler torture tests and
-AST fuzzing. Target NYC's real failure-prone areas:
-
-- Integer promotions and arithmetic conversions.
-- Pointer provenance, aliasing and casts.
-- Struct/union layout, bitfields and alignment.
-- Variadic calls, ABI lowering and return values.
-- GNU C attributes and inline assembly.
-- Atomics, volatile and memory barriers.
-- SSA dominance, phi nodes and CFG rewrites.
-- Constant folding, CSE and loop optimizations.
-- Register allocation, spills and stack layout.
-- ELF relocations, symbols and linker compatibility.
-
-For every mismatch: reproduce it with a stable seed; determine whether the
-source is well-defined; identify the earliest divergent compiler stage; minimize
-with C-Reduce or IR reduction; fix the underlying compiler defect; preserve a
-permanent regression test. Group repeated failures by root cause, not by
-superficial error-message similarity.
-
-### P3 — Compiler invariant checking
-
-Audit existing checks before introducing new ones. Strengthen invariant
-validation at major boundaries: AST → typed IR → SSA → optimized IR → MACH →
-ELF. Check:
-
-- Type and operand consistency.
-- Def-use validity and dominance.
-- CFG edges and phi predecessor mappings.
-- Register allocation and liveness consistency.
-- Spill/reload and stack-frame correctness.
-- ABI operand constraints.
-- Symbol, section and relocation integrity.
-
-Make invalid states fail close to their origin with actionable diagnostics
-rather than becoming machine-code miscompilations later. Keep expensive
-verification optional for normal builds, but enabled in tests and debug
-configurations.
-
-### P4 — Semantic conformance
-
-Build on NYC's existing C17/GNU C feature coverage. Create focused positive and
-negative test pairs for the important C constructs NYC actually supports:
-positive tests must compile and behave correctly, negative tests must be
-rejected for the right reason. Prioritize features required by the Linux kernel,
-SQLite, system headers and other existing workloads. Use fast
-syntax/semantic-only checks if already present; add them only if missing and
-independently useful. Do not inflate conformance numbers with untested features.
-
-### P5 — Kernel acceptance as hard evidence
-
-Preserve the existing Linux 7.3 x86-64 goal and do not restart or duplicate
-kernel work already completed. Treat these as separate milestones, not one
-boolean:
-
-- Unmodified Linux sources.
-- Reproducible configuration and toolchain manifest.
-- Every configured C translation unit compiled by NYC.
-- GNU `as` permitted for assembly.
-- Zero hidden C fallback to Clang/GCC.
-- Valid `vmlinux`, `bzImage` and configured modules.
-- Verified build-object provenance.
-- Reviewed `objtool`/linker/assembler diagnostics.
-- Successful QEMU boot and initramfs smoke tests.
-
-Count actual configured C translation units and successful NYC compilations, not
-estimated Kbuild progress. Track failures, unsupported features and workarounds.
-Preserve the kernel build as a permanent regression suite when acceptance is
-achieved. The artifact rules in [Required acceptance](#required-acceptance)
-still govern what may count as acceptance.
-
-### P6 — Reproducibility and bootstrap
-
-Improve reproducible build records: compiler revision, flags, dependencies,
-target, checksums, seeds, object provenance and exact reproduction commands.
-Consider self-hosting only where NYC's current build architecture makes it
-practical. Do not add a bootstrap project purely to imitate KCC, and do not
-mistake identical binaries for semantic proof.
-
-### P7 — Performance without testing bloat
-
-Keep the verification infrastructure small and maintainable, using the existing
-build/test conventions (`./make check`, `./make bench`). Add a consolidated
-verification entry point only if it genuinely simplifies existing workflows.
-
-Separate three tiers: `FAST` (deterministic checks after every code change),
-`DEEP` (differential fuzzing, sanitizers, stress tests) and `SYSTEM` (full
-kernel build, modules and QEMU boot). Cache reproducible inputs and compiler
-outputs safely, parallelize independent tests, retain failing artifacts and
-discard unnecessary success logs. Do not slow down ordinary production
-compilation.
-
-### Implementation rules
-
-- Inspect the current repository first.
-- Respect the existing Nytrix architecture.
-- Reuse existing test fixtures and helpers.
-- Prefer compact C implementations.
-- Do not add Python or shell wrappers unnecessarily.
-- No massive documentation framework.
-- No new backend or register allocator.
-- No unrelated refactoring.
-- No speculative rewrites.
-- No cosmetic changes presented as improvements.
-- No suppressed compiler warnings to fake success.
-- No hardcoded passing metrics.
-- No invented benchmark results.
-- No tests marked PASS without execution.
-
-For every change, explain EXISTING DEFECT → FIX → REGRESSION → EVIDENCE. Use
-small reversible patches with a stable baseline.
-
-### Execution priorities
-
-1. Find and eliminate false-positive tests.
-2. Build a strict NYR/LLVM/GCC/Clang differential oracle.
-3. Find and minimize genuine NYC miscompilations.
-4. Strengthen IR and machine-code invariants.
-5. Close conformance gaps revealed by real programs.
-6. Complete and independently validate kernel acceptance.
-7. Simplify the resulting code and remove redundant tools.
-
-Do not stop after writing a plan: implement, execute tests, fix defects, rerun
-and measure.
-
-### Final delivery
-
-Provide the actual patches/source changes, before/after correctness results, new
-bugs discovered and minimized, tests proving each fix, fuzzing coverage and
-limitations, current kernel build/boot status, compilation time and memory
-regression measurements, and remaining unsupported features and known failures.
-
-### Success criteria
-
-A genuinely stronger compiler, not a larger repository. NYC must reject invalid
-input reliably, correctly compile more well-defined C programs, detect
-intentionally injected miscompilations, produce reproducible native machine
-code, pass strict independent differential tests, maintain or improve compiler
-performance, and demonstrate kernel acceptance with actual artifacts.
-
-The objective is not to imitate KCC. It is to take the useful engineering
-lessons, improve them, and produce verifiable evidence that Nytrix's existing
-compiler is more correct, capable and reliable.
-
-## FS/GS address spaces: implementation record
+### FS/GS address spaces: implementation record
 
 EXISTING DEFECT. `__seg_gs`/`__seg_fs` were accepted syntactically and then
 discarded. Four separate drops were proven with emitted assembly, not inferred:
@@ -1713,9 +2173,29 @@ plain-assignment stores are covered too: `lower_load_u16_field_seg` and
 `lower_store_u16_field_seg` carry the flag, giving `movzwl %gs:(%eax), %ecx` on
 i386 and two prefixed byte accesses on x86-64.
 
-BOUNDARIES (not claimed as done). Segment-qualified non-pointer objects
-(`extern __seg_gs int x;`) are still not lowered with a segment base, and
-compound-assignment stores to a segmented `i16`/`u16` lvalue still call the
-unsegmented helper. Runtime proof remains impossible in this environment: i386
-user mode cannot set FS/GS bases and no bootable `bzImage` exists (`.text32`
-END `0x7c13` versus the `0x6000` window).
+Scalar increment and decrement now use the same segment-aware memory store
+as assignment expressions. The x86-64 assembly emitter also keeps the
+segment prefix on `movss` loads and stores instead of silently reading and
+writing the default segment. The Linux `segment-aggregate-pointer-load`
+runtime regression now checks unsigned halfword postfix decrement and float
+prefix increment with a nonzero GS base, a decoy slot, and adjacent
+sentinels. The previous compiler failed both checks. Results matched GCC at
+`-O0` through `-O3` for `-S` and `-c`; this `-c` case uses GNU `as`.
+
+Named file-scope integer scalars now retain the object segment separately
+from a pointer's pointee segment. Direct loads, assignments, and
+read/modify/write operations use that segment; `&name` keeps the offset and
+carries the qualifier into a subsequent dereference. This works for
+comma-separated external declarations, and incompatible scalar segment
+redeclarations are rejected.
+
+The Linux GS regression covers two comma-declared unsigned objects and a
+halfword object. The old compiler touched the unsegmented decoys. The
+corrected result matched GCC from `-O0` through `-O3` with `-fPIC` for
+both `-S` and `-c`. A separate freestanding i386 execution check set FS
+with `set_thread_area` and checked a named load, compound store and
+address-of dereference against GCC. These tests do not establish support
+for all segment-qualified declarators, native encoder parity, or kernel
+boot.
+
+</details>

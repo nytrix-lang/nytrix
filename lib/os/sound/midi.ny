@@ -653,7 +653,7 @@ fn raw_receive(any handle, int timeout_ms=0) list {
 ;; Portable stream API
 ;; One shared sequencer client per process on Linux; every stream is a port.
 ;; Untyped dict globals: `mut any x = dict(8)` currently never holds the
-;; dict (see docs/todo/ui.md compiler defects), and an int-initialised slot
+;; dict (see the compiler defect notes), and an int-initialised slot
 ;; mis-types a later dict, so both start as real dicts.
 mut _alsa = dict(4)
 mut _alsa_pending = dict(8)
@@ -896,7 +896,7 @@ fn close_stream(any stream) bool {
 ;; Portable stream API
 ;; One shared sequencer client per process on Linux; every stream is a port.
 ;; Untyped dict globals: `mut any x = dict(8)` currently never holds the
-;; dict (see docs/todo/ui.md compiler defects), and an int-initialised slot
+;; dict (see the compiler defect notes), and an int-initialised slot
 ;; mis-types a later dict, so both start as real dicts.
 mut _alsa = dict(4)
 mut _alsa_pending = dict(8)
@@ -1139,7 +1139,7 @@ fn close_stream(any stream) bool {
 ;; Portable stream API
 ;; One shared sequencer client per process on Linux; every stream is a port.
 ;; Untyped dict globals: `mut any x = dict(8)` currently never holds the
-;; dict (see docs/todo/ui.md compiler defects), and an int-initialised slot
+;; dict (see the compiler defect notes), and an int-initialised slot
 ;; mis-types a later dict, so both start as real dicts.
 mut _alsa = dict(4)
 mut _alsa_pending = dict(8)

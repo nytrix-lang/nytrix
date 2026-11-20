@@ -8,7 +8,7 @@
 module core.os.net.http(_http_parse_url, http_request_raw, http_request, http_request_url, http_request_url_parsed, http_get, http_post, http_put, http_delete, http_get_parsed, http_post_parsed, http_put_parsed, http_delete_parsed, http_get_url, http_get_url_parsed, http_parse_url, http_parse_url_ex, http_parse_query, http_parse_response)
 use core.os.net.socket
 use core
-use core.dict_mod as _d
+use core.dict as _d
 use core.str
 use core.common as common
 

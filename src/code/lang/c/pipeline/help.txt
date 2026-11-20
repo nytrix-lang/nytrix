@@ -10,9 +10,10 @@ nyc [OPTIONS] SOURCE.c OUTPUT.o SYMBOL|Legacy single-function object mode.
 -E|Preprocess only; write stdout unless -o is supplied.
 --all|Whole-unit object mode with a positional output.
 -o FILE|Set the output path (separate argument).
--x c|Select C input; other languages are unsupported.
+-x c, -x assembler, -x assembler-with-cpp, -x none|Select the input language or return to filename-based detection.
+-Wa,--fatal-warnings|Forward fatal assembler warnings to GNU as.
 --|Treat subsequent arguments as positional operands.
--|Read the C source from standard input.
+-|Read the source from standard input.
 SOURCE.c OUTPUT.o SYMBOL|Legacy mode: emit only the named C function.
 [PREPROCESSOR AND DEPENDENCIES]
 -I DIR, -IDIR|Add an include directory; repeatable.
@@ -36,6 +37,7 @@ SOURCE.c OUTPUT.o SYMBOL|Legacy mode: emit only the named C function.
 -O0, -O1, -O2, -O3|Select the NYR optimization level; default -O2.
 -Os|Use the conservative -O2 pipeline, not a distinct size-optimization pipeline.
 -fconserve-stack|Cap optimization at -O1, even with -O2/-O3.
+--stats|Show total translation-unit compile time on stderr.
 -fverbose-asm|Annotate -S output with C function names.
 -fomit-frame-pointer|Use RSP-relative x86-64 whole-unit object frames.
 -falign-functions=16|Accept the backend's 16-byte object alignment.

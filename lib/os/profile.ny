@@ -4,7 +4,7 @@
 ;; - core.os
 module core.os.profile(reset, snapshot, calls, inclusive_ns, exclusive_ns, allocations, cpu_ns, exclusive_cpu_ns, sampled_rss_delta_bytes, sampled_rss_peak_bytes, runtime_stats, bytes_by_tag, request_native_oracle, request_tv_checks)
 use core
-use core.dict_mod
+use core.dict
 
 fn reset() int {
    "Clear recorded function calls and profiling counters."

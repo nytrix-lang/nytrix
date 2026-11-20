@@ -72,8 +72,7 @@ def list UI_FONT_CANDIDATES = [
 
 ;; Repository-managed asset cache. Environment roots take precedence.
 def list GLTF_ASSET_DEFAULT_ROOTS = [
-   "build/cache/assets/models",
-   "tmp/assets/models"
+   "build/cache/assets/models"
 ]
 
 fn mono_font(int size, any candidates=0, int font_filter=-1) int {

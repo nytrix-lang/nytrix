@@ -5,7 +5,7 @@
 ;; - core.os
 module core.os.sound.source(make_memory_source, read, seek, tell, length, format, sample_format, source_channels, source_rate, source_bits, source_length, sound_info, wav_bytes, write_wav, SAMPLE_FMT_S16, SAMPLE_FMT_U8, SAMPLE_FMT_S24, SAMPLE_FMT_S32, SAMPLE_FMT_F32)
 use core
-use core.dict_mod
+use core.dict
 use core.os (file_write)
 use core.os.sound.source.memory as memory
 

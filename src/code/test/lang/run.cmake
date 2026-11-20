@@ -212,6 +212,23 @@ function(nyc_execute_ok error_context)
   endif()
 endfunction()
 
+# A successful status is not evidence that a compiler or linker wrote output.
+# Never let a previous run's artifact stand in for the command under test.
+function(nyc_execute_output error_context path)
+  file(REMOVE "${path}")
+  if(EXISTS "${path}" OR IS_SYMLINK "${path}")
+    message(FATAL_ERROR "could not remove stale test artifact: ${path}")
+  endif()
+  nyc_execute_ok("${error_context}" ${ARGN})
+  if(NOT EXISTS "${path}" OR IS_DIRECTORY "${path}")
+    message(FATAL_ERROR "${error_context}: no output produced at ${path}")
+  endif()
+  file(SIZE "${path}" size)
+  if(size EQUAL 0)
+    message(FATAL_ERROR "${error_context}: empty output at ${path}")
+  endif()
+endfunction()
+
 # Common executable route: compile one corpus case to assembly, link it with
 # optional host-side oracle sources, then check its exit status. Keep tests
 # that inspect assembly/object metadata explicit at the call site.
@@ -228,20 +245,11 @@ function(nyc_compile_asm_run name source)
   set(_assembly "${BINARY_DIR}/${name}.s")
   set(_program "${BINARY_DIR}/${name}")
 
-  execute_process(
-    COMMAND "${NYC}" ${CASE_NYC_FLAGS} -S "${source}" -o "${_assembly}"
-    RESULT_VARIABLE _result OUTPUT_VARIABLE _stdout ERROR_VARIABLE _stderr)
-  if(NOT "${_result}" STREQUAL "0")
-    message(FATAL_ERROR "nyc ${name} compilation failed\n${_stdout}${_stderr}")
-  endif()
-
-  execute_process(
+  nyc_execute_output("nyc ${name} compilation failed" "${_assembly}"
+    COMMAND "${NYC}" ${CASE_NYC_FLAGS} -S "${source}" -o "${_assembly}")
+  nyc_execute_output("${name} link failed" "${_program}"
     COMMAND "${CC}" ${CASE_LINK_FLAGS} "${_assembly}" ${CASE_HOST_SOURCES}
-      -o "${_program}"
-    RESULT_VARIABLE _result OUTPUT_VARIABLE _stdout ERROR_VARIABLE _stderr)
-  if(NOT "${_result}" STREQUAL "0")
-    message(FATAL_ERROR "${name} link failed\n${_stdout}${_stderr}")
-  endif()
+      -o "${_program}")
 
   execute_process(
     COMMAND "${_program}" ${_timeout_option}
@@ -267,17 +275,11 @@ function(nyc_compile_obj_run name source)
   set(_object "${BINARY_DIR}/${name}.o")
   set(_program "${BINARY_DIR}/${name}")
 
-  execute_process(COMMAND "${NYC}" ${CASE_NYC_FLAGS} -c "${source}" -o "${_object}"
-    RESULT_VARIABLE _result OUTPUT_VARIABLE _stdout ERROR_VARIABLE _stderr)
-  if(NOT "${_result}" STREQUAL "0")
-    message(FATAL_ERROR "nyc ${name} object compilation failed\n${_stdout}${_stderr}")
-  endif()
-  execute_process(COMMAND "${CC}" ${CASE_LINK_FLAGS} ${CASE_HOST_SOURCES}
-      "${_object}" -o "${_program}"
-    RESULT_VARIABLE _result OUTPUT_VARIABLE _stdout ERROR_VARIABLE _stderr)
-  if(NOT "${_result}" STREQUAL "0")
-    message(FATAL_ERROR "${name} link failed\n${_stdout}${_stderr}")
-  endif()
+  nyc_execute_output("nyc ${name} object compilation failed" "${_object}"
+    COMMAND "${NYC}" ${CASE_NYC_FLAGS} -c "${source}" -o "${_object}")
+  nyc_execute_output("${name} link failed" "${_program}"
+    COMMAND "${CC}" ${CASE_LINK_FLAGS} ${CASE_HOST_SOURCES} "${_object}"
+      -o "${_program}")
   execute_process(COMMAND "${_program}" ${_timeout_option}
     RESULT_VARIABLE _result OUTPUT_VARIABLE _stdout ERROR_VARIABLE _stderr)
   if(NOT "${_result}" STREQUAL "${CASE_EXPECTED_EXIT}")
@@ -288,6 +290,13 @@ function(nyc_compile_obj_run name source)
     message(FATAL_ERROR "${name} output mismatch\n${_stdout}${_stderr}")
   endif()
 endfunction()
+
+# Function entry is also an incoming edge when the first block is a loop
+# header. Bound execution so a folded-away exit fails instead of hanging CI.
+nyc_compile_asm_run(loop-entry-range-asm "${NY_C_CORPUS_loop-entry-range.c}"
+  TIMEOUT 5 NYC_FLAGS -O1)
+nyc_compile_obj_run(loop-entry-range-obj "${NY_C_CORPUS_loop-entry-range.c}"
+  TIMEOUT 5 NYC_FLAGS -O2)
 
 # Frontend semantics, declarations, and aggregate layout.
 foreach(probe IN ITEMS small-copy-loop-residency declared-copy-definition
@@ -300,6 +309,7 @@ foreach(probe IN ITEMS small-copy-loop-residency declared-copy-definition
                        asm-mwaitx asm-mulq-positional asm-usercopy-movnti
                        global-incomplete-char-array-rows
                        global-incomplete-integer-array-rows
+                       typedef-row-pointer-difference
                        typeof-cast-array-member asm-memory-address
                        asm-memory-output asm-bit-string-rmw asm-fninit-status
                        asm-cmpxchg16b asm-single-movs asm-repeat-cmpsb
@@ -316,6 +326,8 @@ foreach(probe IN ITEMS small-copy-loop-residency declared-copy-definition
                        character-array-alias
                        address-of-choose-expr-member
                        typeof-pointer-qualifier-dereference
+                       typeof-prefixed-section
+                       typeof-aggregate-local
                        automatic-array-designator-extent
                        sizeof-empty-global-array
                        function-pointer-byte-arithmetic
@@ -348,6 +360,12 @@ foreach(probe IN ITEMS small-copy-loop-residency declared-copy-definition
                        static-pointer-array-range-designator
                        local-aggregate-array-range
                        aggregate-scalar-pointer-to-array
+                       local-pointer-to-array-stride
+                       aggregate-double-pointer-address
+                       compound-literal-zero-fields
+                       inline-aggregate-return-capture
+                       bool-pointer-call
+                       bool-scalar-return
                        atomic-type-specifier
                        static-local-label-address-range
                        inline-asm-unlocked-add-condition
@@ -361,6 +379,7 @@ foreach(probe IN ITEMS small-copy-loop-residency declared-copy-definition
                        aggregate-array-compound-elements
                        function-call-pointer-array-address
                        function-pointer-array-forward-declaration
+                       tentative-pointer-array
                        nested-const-function-pointer-parameter
                        transparent-union-pointer-argument
                        parenthesized-global-address-store
@@ -500,7 +519,6 @@ foreach(probe IN ITEMS prefix-section-placement post-inline-short-circuit
     endforeach()
   endif()
 endforeach()
-# Stack protection: execute actual corruption through both native routes.
 foreach(route IN ITEMS -c -S)
   set(stem "${BINARY_DIR}/bitfield-select${route}")
   set(suffix o)
@@ -525,6 +543,7 @@ foreach(route IN ITEMS -c -S)
   )
 endforeach()
 
+# Stack protection: execute actual corruption through both native routes.
 if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux")
   foreach(guard IN ITEMS global global-symbol fs fs-symbol gs-offset gs-symbol disabled)
     set(guard_flags -fno-stack-protector -fstack-protector-strong)
@@ -1222,35 +1241,45 @@ if(status EQUAL 0 OR
 endif()
 
 # Cross-compiler ABI: NYC-compiled and host-compiled counterparts must
-# interoperate in both directions for mixed INTEGER/SSE, SSE/SSE, and
+# interoperate in both directions for INTEGER/INTEGER, mixed classes, SSE/SSE, and
 # MEMORY-class (sret) aggregate returns. Compiling both sides with NYC hides
 # a wrong but self-consistent convention, so the host compiler is the oracle.
 file(WRITE "${BINARY_DIR}/abi-cross-defs.c" [=[
+struct II { const char *p; unsigned long n; };
 struct MI { long i; double d; };
+struct IM { double d; long i; };
 struct MM { double a, b; };
 struct BIG { long a, b, c; double d; };
+struct II f_ii(struct II v) { v.p += 1; v.n *= 3; return v; }
 struct MI f_mi(struct MI v) { v.i += 1; v.d *= 2; return v; }
+struct IM f_im(struct IM v) { v.d *= 2; v.i -= 1; return v; }
 struct MM f_mm(struct MM v) { v.a += v.b; v.b -= 1; return v; }
 struct BIG f_big(struct BIG v) { v.a += 1; v.d += 2; return v; }
 ]=])
 file(WRITE "${BINARY_DIR}/abi-cross-main.c" [=[
 #include <stdio.h>
+struct II { const char *p; unsigned long n; };
 struct MI { long i; double d; };
+struct IM { double d; long i; };
 struct MM { double a, b; };
 struct BIG { long a, b, c; double d; };
+struct II f_ii(struct II v);
 struct MI f_mi(struct MI v);
+struct IM f_im(struct IM v);
 struct MM f_mm(struct MM v);
 struct BIG f_big(struct BIG v);
 int main(void) {
+  struct II z = f_ii((struct II){"abc", 257});
   struct MI a = f_mi((struct MI){3, 1.5});
+  struct IM m = f_im((struct IM){2.25, 9});
   struct MM b = f_mm((struct MM){2.5, 4.0});
   struct BIG c = f_big((struct BIG){1, 2, 3, 4.5});
-  printf("%ld %g | %g %g | %ld %ld %ld %g\n",
-         a.i, a.d, b.a, b.b, c.a, c.b, c.c, c.d);
+  printf("%s %lu | %ld %g | %g %ld | %g %g | %ld %ld %ld %g\n",
+         z.p, z.n, a.i, a.d, m.d, m.i, b.a, b.b, c.a, c.b, c.c, c.d);
   return 0;
 }
 ]=])
-set(abi_cross_expected "4 3 | 6.5 3 | 2 2 3 6.5\n")
+set(abi_cross_expected "bc 771 | 4 3 | 4.5 8 | 6.5 3 | 2 2 3 6.5\n")
 nyc_execute_ok(
   [=[cross ABI: NYC callees compilation failed\n${stdout}${stderr}]=]
   COMMAND "${NYC}" -O2 -c "${BINARY_DIR}/abi-cross-defs.c"
@@ -1301,6 +1330,29 @@ if(NOT abi_caller_status EQUAL 0 OR
   message(FATAL_ERROR
     "cross ABI: NYC caller\nexpected: ${abi_cross_expected}actual:\n${abi_caller_stdout}${abi_caller_stderr}")
 endif()
+foreach(side IN ITEMS defs main)
+  if(side STREQUAL "defs")
+    set(host_side main)
+  else()
+    set(host_side defs)
+  endif()
+  nyc_execute_ok(
+    [=[cross ABI: NYC assembly emission failed\n${stdout}${stderr}]=]
+    COMMAND "${NYC}" -O2 -fconserve-stack -S "${BINARY_DIR}/abi-cross-${side}.c"
+            -o "${BINARY_DIR}/abi-cross-${side}.s")
+  nyc_execute_ok(
+    [=[cross ABI: NYC assembly link failed\n${stdout}${stderr}]=]
+    COMMAND "${CC}" "${BINARY_DIR}/abi-cross-${side}.s"
+            "${BINARY_DIR}/abi-cross-${host_side}-cc.o"
+            -o "${BINARY_DIR}/abi-cross-${side}-asm")
+  execute_process(
+    COMMAND "${BINARY_DIR}/abi-cross-${side}-asm"
+    RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+  if(NOT status EQUAL 0 OR NOT stdout STREQUAL abi_cross_expected)
+    message(FATAL_ERROR
+      "cross ABI: NYC assembly (${side})\nexpected: ${abi_cross_expected}actual:\n${stdout}${stderr}")
+  endif()
+endforeach()
 
 # SysV aggregate/variadic boundary audit: mixed integer/SSE classes, hidden
 # sret, stack aggregates, register-bank rollback, and fixed aggregate named
@@ -1454,6 +1506,73 @@ foreach(inline_opt IN ITEMS -O0 -O3)
     "${NY_C_CORPUS_gnu-extern-inline.c}" NYC_FLAGS "${inline_opt}"
     HOST_SOURCES "${NY_C_CORPUS_gnu-extern-inline-definition.c}")
 endforeach()
+nyc_compile_obj_run(elf-local-function-order
+  "${NY_C_CORPUS_elf-local-function-order.c}" NYC_FLAGS -O2 -fPIC)
+nyc_compile_obj_run(asm-rip-relative-object
+  "${NY_C_CORPUS_asm-rip-relative.c}" NYC_FLAGS -O2 -fPIC
+  HOST_SOURCES "${NY_C_CORPUS_asm-rip-relative-host.c}")
+nyc_compile_asm_run(asm-rip-relative-text
+  "${NY_C_CORPUS_asm-rip-relative.c}" NYC_FLAGS -O2 -fPIC
+  HOST_SOURCES "${NY_C_CORPUS_asm-rip-relative-host.c}")
+execute_process(
+  COMMAND "${NYC}" -O2 -fPIC -c "${NY_C_CORPUS_asm-rip-relative-invalid.c}"
+          -o "${BINARY_DIR}/asm-rip-relative-invalid.o"
+  RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+if(status EQUAL 0 OR NOT stderr MATCHES "requires a link-time symbol address")
+  message(FATAL_ERROR
+    "RIP-relative asm must reject a run-time immediate\n${stdout}${stderr}")
+endif()
+if(READELF)
+  nyc_execute_ok(
+    [=[could not assemble the RIP-relative fixture\n${stdout}${stderr}]=]
+    COMMAND "${CC}" -c "${BINARY_DIR}/asm-rip-relative-text.s"
+            -o "${BINARY_DIR}/asm-rip-relative-text.o")
+  foreach(route IN ITEMS object text)
+    execute_process(
+      COMMAND "${READELF}" -rW "${BINARY_DIR}/asm-rip-relative-${route}.o"
+      RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+    if(NOT status EQUAL 0 OR
+       NOT stdout MATCHES "R_X86_64_PC32[^\n]*image_anchor" OR
+       stdout MATCHES "GOTPCREL[^\n]*image_anchor")
+      message(FATAL_ERROR
+        "${route} RIP-relative asm must not use the GOT\n${stdout}${stderr}")
+    endif()
+  endforeach()
+endif()
+nyc_compile_asm_run(cleanup-jumps-asm
+  "${NY_C_CORPUS_cleanup-jumps.c}" NYC_FLAGS -O2)
+nyc_compile_obj_run(cleanup-jumps-object
+  "${NY_C_CORPUS_cleanup-jumps.c}" NYC_FLAGS -O2 -mcmodel=kernel)
+nyc_compile_obj_run(elf-mergeable-file-asm
+  "${NY_C_CORPUS_elf-mergeable-file-asm.c}" NYC_FLAGS -mcmodel=kernel)
+nyc_compile_obj_run(size-disabled-paths
+  "${NY_C_CORPUS_size-disabled-paths.c}" NYC_FLAGS -Os)
+if(READELF)
+  nyc_compile_obj_run(elf-callback-table-section
+    "${NY_C_CORPUS_elf-callback-table-section.c}" NYC_FLAGS -O0)
+  execute_process(
+    COMMAND "${READELF}" -rW "${BINARY_DIR}/elf-callback-table-section.o"
+    RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+  if(NOT status EQUAL 0 OR NOT stdout MATCHES "\\.rela\\.init\\.data")
+    message(FATAL_ERROR
+      "function-pointer table lost its section or initializer\n${stdout}${stderr}")
+  endif()
+  nyc_execute_ok(
+    [=[could not produce a kernel export record\n${stdout}${stderr}]=]
+    COMMAND "${NYC}" -c "${NY_C_CORPUS_elf-export-record.c}"
+            -o "${BINARY_DIR}/elf-export-record.o"
+  )
+  execute_process(
+    COMMAND "${READELF}" -sWr "${BINARY_DIR}/elf-export-record.o"
+    RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+  if(NOT status EQUAL 0 OR NOT stdout MATCHES "\\.rela\\.export_symbol" OR
+      NOT stdout MATCHES "R_X86_64_64[^\n]+ example_export \\+" OR
+      NOT stdout MATCHES "[ \t]__export_symbol_example_export" OR
+      stdout MATCHES "__nyc_data___export_symbol_example_export")
+    message(FATAL_ERROR
+      "kernel export relocation did not identify one assembler record\n${stdout}${stderr}")
+  endif()
+endif()
 set(static_assert_source "${NY_C_CORPUS_static-assert.c}")
 set(static_assert_false_source "${NY_C_CORPUS_static-assert-false.c}")
 
@@ -1550,7 +1669,12 @@ nyc_compile_asm_run(aggregate-variadic-call "${aggregate_variadic_source}"
   HOST_SOURCES "${NY_C_CORPUS_aggregate-variadic-host.c}")
 set(aggregate_va_arg_source
     "${NY_C_CORPUS_aggregate-variadic-va-arg.c}")
-nyc_compile_asm_run(aggregate-variadic-va-arg "${aggregate_va_arg_source}")
+set(aggregate_va_arg_host
+    "${NY_C_CORPUS_aggregate-variadic-va-arg-host.c}")
+nyc_compile_asm_run(aggregate-variadic-va-arg-asm "${aggregate_va_arg_source}"
+  HOST_SOURCES "${aggregate_va_arg_host}")
+nyc_compile_obj_run(aggregate-variadic-va-arg-obj "${aggregate_va_arg_source}"
+  HOST_SOURCES "${aggregate_va_arg_host}")
 set(va_start_aggregate_source
     "${NY_C_CORPUS_va-start-fixed-aggregate.c}")
 nyc_compile_asm_run(va-start-fixed-aggregate "${va_start_aggregate_source}"
@@ -1854,6 +1978,26 @@ if(READELF)
   endif()
 endif()
 set(retpoline_thunk "${NY_C_CORPUS_retpoline-indirect-thunk.S}")
+if(LD AND READELF)
+  nyc_execute_ok(
+    [=[host could not assemble the untyped retpoline label\n${stdout}${stderr}]=]
+    COMMAND "${CC}" -c "${retpoline_thunk}" -o "${BINARY_DIR}/retpoline-thunk.o"
+  )
+  nyc_execute_ok(
+    [=[relocatable link of retpoline target failed\n${stdout}${stderr}]=]
+    COMMAND "${LD}" -r "${BINARY_DIR}/retpoline-indirect-call.o"
+            "${BINARY_DIR}/retpoline-thunk.o"
+            -o "${BINARY_DIR}/retpoline-relocatable.o"
+  )
+  execute_process(
+    COMMAND "${READELF}" -sW "${BINARY_DIR}/retpoline-relocatable.o"
+    RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+  if(NOT status EQUAL 0 OR NOT stdout MATCHES
+      "NOTYPE +GLOBAL +DEFAULT +[0-9]+ +__x86_indirect_thunk_r11")
+    message(FATAL_ERROR
+      "NYC call relocations changed the linked thunk label type\n${stdout}${stderr}")
+  endif()
+endif()
 
 set(retpoline_harness "${NY_C_CORPUS_retpoline-indirect-call-host.c}")
 
@@ -1883,6 +2027,32 @@ nyc_execute_ok(
   [=[inline-retpoline indirect-call regression failed\n${stdout}${stderr}]=]
   COMMAND "${BINARY_DIR}/retpoline-inline-call-host"
 )
+foreach(thunk IN ITEMS extern inline)
+  set(thunk_source)
+  if(thunk STREQUAL "extern")
+    set(thunk_source "${retpoline_thunk}")
+  endif()
+  nyc_execute_ok(
+    [=[machine retpoline compilation failed (${thunk})]=]
+    COMMAND "${CMAKE_COMMAND}" -E env NYC_USE_MACH_OBJECT=1
+            NYC_TRACE_MACHINE_FALLBACK=1 "${NYC}" -O2 -c
+            "-mindirect-branch=thunk-${thunk}" "${retpoline_source}"
+            -o "${BINARY_DIR}/retpoline-machine-${thunk}.o"
+  )
+  if(stderr MATCHES "NYC object fallback")
+    message(FATAL_ERROR "machine retpoline fell back (${thunk})\n${stderr}")
+  endif()
+  nyc_execute_ok(
+    [=[machine retpoline did not link (${thunk})]=]
+    COMMAND "${CC}" -no-pie "${retpoline_harness}" ${thunk_source}
+            "${BINARY_DIR}/retpoline-machine-${thunk}.o"
+            -o "${BINARY_DIR}/retpoline-machine-${thunk}"
+  )
+  nyc_execute_ok(
+    [=[machine retpoline changed call behavior (${thunk})]=]
+    COMMAND "${BINARY_DIR}/retpoline-machine-${thunk}"
+  )
+endforeach()
 nyc_execute_ok(
   [=[nyc failed to emit assembly with external retpoline calls\n${stdout}${stderr}]=]
   COMMAND "${NYC}" -S -mindirect-branch=thunk-extern
@@ -2587,6 +2757,26 @@ if(NYC_AS_EXECUTABLE)
         endforeach()
       endforeach()
     endforeach()
+    if(NYC_GNU_CC)
+      set(i386_short_stack "${BINARY_DIR}/i386-register-runs-short-stack")
+      nyc_execute_ok(
+        [=[i386 four-byte-stack compilation failed\n${stdout}${stderr}]=]
+        COMMAND "${NYC}" -m32 -mregparm=3 -mpreferred-stack-boundary=2 -Os -S
+                "${NY_C_CORPUS_i386-register-runs.c}"
+                -o "${i386_short_stack}.s"
+      )
+      nyc_execute_ok(
+        [=[i386 four-byte-stack link failed\n${stdout}${stderr}]=]
+        COMMAND "${NYC_GNU_CC}" -m32 -mregparm=3 -mpreferred-stack-boundary=2
+                -Os -ffreestanding -fno-stack-protector -fno-pie -nostdlib
+                -no-pie -Wl,-e,_start "${NY_C_CORPUS_i386-register-runs-host.c}"
+                "${i386_short_stack}.s" -o "${i386_short_stack}"
+      )
+      nyc_execute_ok(
+        [=[i386 four-byte-stack register permutation failed: ${status}\n${stdout}${stderr}]=]
+        COMMAND "${i386_short_stack}"
+      )
+    endif()
     set(far_call_source "${NY_C_CORPUS_asm-far-call.c}")
     set(far_call_assembly "${BINARY_DIR}/asm-far-call.s")
     nyc_execute_ok(
@@ -3651,7 +3841,7 @@ if(OBJDUMP)
      NOT stdout MATCHES
        "\\.discard\\.addressable[ \t]+[0-9]+[ \t]+addressable_anchor" OR
      NOT stdout MATCHES
-       "\\.data[ \t]+[0-9]+[ \t]+section_following_array")
+       "\\.rodata[ \t]+[0-9]+[ \t]+section_following_array")
     message(FATAL_ERROR
       "section attribute leaked to a later global array\n${stdout}${stderr}")
   endif()
@@ -5181,31 +5371,32 @@ if(NM_TOOL)
   )
   set(asm_memory_output_source
     "${NY_C_CORPUS_inline-asm-memory-output.c}")
-
-  nyc_execute_ok(
-    [=[nyc rejected an x86 memory-capable asm output\n${stdout}${stderr}]=]
-    COMMAND "${NYC}" -S "${asm_memory_output_source}"
-                -o "${BINARY_DIR}/inline-asm-memory-output.s"
-  )
-  nyc_execute_ok(
-    [=[assembler rejected NYC's memory asm output\n${stdout}${stderr}]=]
-    COMMAND "${CC}" -c "${BINARY_DIR}/inline-asm-memory-output.s"
-                -o "${BINARY_DIR}/inline-asm-memory-output.o"
-  )
   set(asm_memory_output_host
     "${NY_C_CORPUS_inline-asm-memory-output-host.c}")
 
-  nyc_execute_ok(
-    [=[host compiler could not link the memory asm output regression\n${stdout}${stderr}]=]
-    COMMAND "${CC}" -std=gnu11 -Wall -Wextra -Werror
-                -o "${BINARY_DIR}/inline-asm-memory-output-host"
-                "${asm_memory_output_host}"
-                "${BINARY_DIR}/inline-asm-memory-output.o"
-  )
-  nyc_execute_ok(
-    [=[memory asm output regression failed at runtime\n${stdout}${stderr}]=]
-    COMMAND "${BINARY_DIR}/inline-asm-memory-output-host"
-  )
+  foreach(route IN ITEMS S c)
+    if(route STREQUAL "S")
+      set(asm_output_artifact "${BINARY_DIR}/inline-asm-memory-output.s")
+    else()
+      set(asm_output_artifact "${BINARY_DIR}/inline-asm-memory-output.o")
+    endif()
+    set(asm_output_exe "${BINARY_DIR}/inline-asm-memory-output-${route}")
+    nyc_execute_ok(
+      [=[nyc rejected an inlined x86 memory-capable asm output\n${stdout}${stderr}]=]
+      COMMAND "${NYC}" -O2 "-${route}" "${asm_memory_output_source}"
+                  -o "${asm_output_artifact}"
+    )
+    nyc_execute_ok(
+      [=[host compiler could not link the memory asm output regression\n${stdout}${stderr}]=]
+      COMMAND "${CC}" -std=gnu11 -Wall -Wextra -Werror
+                  "${asm_memory_output_host}" "${asm_output_artifact}"
+                  -o "${asm_output_exe}"
+    )
+    nyc_execute_ok(
+      [=[inlined memory asm output regression failed at runtime\n${stdout}${stderr}]=]
+      COMMAND "${asm_output_exe}"
+    )
+  endforeach()
   set(asm_tzcnt_source "${NY_C_CORPUS_inline-asm-tzcnt.c}")
 
   nyc_execute_ok(
@@ -6170,7 +6361,8 @@ nyc_execute_ok(
 )
 endforeach()
 if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux")
-  foreach(probe IN ITEMS asm-fixed-r9 asm-segment-memory)
+  foreach(probe IN ITEMS asm-fixed-r9 asm-segment-memory
+                         segment-aggregate-pointer-load)
     foreach(route IN ITEMS S c)
       if(route STREQUAL "S")
         set(asm_artifact "${BINARY_DIR}/${probe}.s")

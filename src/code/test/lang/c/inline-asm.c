@@ -7,14 +7,6 @@ void nyc_inline_asm_register_to_memory(int *address, int value) {
   __asm__ __volatile__("movl %0,%1" : : "r"(value), "m"(*address) : "memory");
 }
 
-void *nyc_inline_asm_rip_rel_ptr(void *pointer) {
-  __asm__("leaq %c1(%%rip), %0"
-          : [value] "="
-                    "r"(pointer)
-          : [source] "i"(pointer));
-  return pointer;
-}
-
 int nyc_builtin_isdigit(int value) { return __builtin_isdigit(value); }
 
 int nyc_inline_asm_outb_compile_only(unsigned char value, unsigned short port) {

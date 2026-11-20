@@ -23,6 +23,7 @@ def SHT_RELA = 4
 def SHT_REL = 9
 def SHT_DYNSYM = 11
 def PT_LOAD = 1
+def PF_X = 1
 def SHF_ALLOC = 2
 def SHF_EXECINSTR = 4
 mut _smt_archetype_proof_cache = dict()
@@ -404,6 +405,20 @@ fn executable_sections(any source) list {
          out = out.append(s)
       }
       i += 1
+   }
+   if out.len == 0 {
+      def segs = is_dict(source) && source.contains("segments") ? source.get("segments", []) : segments(source)
+      mut i = 0
+      while i < segs.len {
+         def s = segs[i]
+         if s.get("load", false) && (int(s.get("flags", 0)) & PF_X) != 0 && int(s.get("filesz", 0)) > 0 {
+            out = out.append(s.set("addr", s.get("vaddr", 0))
+                              .set("size", s.get("filesz", 0))
+                              .set("exec", true)
+                              .set("name", "load_" + str(s.get("index", i))))
+         }
+         i += 1
+      }
    }
    out
 }

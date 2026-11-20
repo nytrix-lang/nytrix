@@ -93,46 +93,82 @@ static unsigned c_function_regparm(const c_parser_t *p,
              : 0;
 }
 
+static bool lower_cleanup_local(c_parser_t *p, const c_local_t *local) {
+  int address =
+      local->type == C_AGG
+          ? emit_value(p, (nyr_inst_t){.op = NYIR_LOAD_LOCAL,
+                                       .dst = -1,
+                                       .imm = (int64_t)local->slot,
+                                       .scalar_class = NYIR_SCALAR_I64_RAW})
+          : emit_value(p, (nyr_inst_t){.op = NYIR_ADDR_LOCAL,
+                                       .dst = -1,
+                                       .imm = (int64_t)local->slot,
+                                       .scalar_class = NYIR_SCALAR_I64_RAW});
+  if (address < 0)
+    return false;
+  nyr_inst_t call = {.op = NYIR_CALL,
+                     .dst = -1,
+                     .a = address,
+                     .imm = 1,
+                     .flags = NYIR_INST_F_EXTERN,
+                     .effects = NYIR_EFFECT_CALL,
+                     .symbol =
+                         strndup(local->cleanup.start, local->cleanup.len)};
+  if (!call.symbol) {
+    fail(p, "out of memory creating cleanup call");
+    return false;
+  }
+  nyr_call_arg_class_set(call.arg_scalar_classes, 0, NYIR_SCALAR_I64_RAW);
+  call.flags |= c_function_regparm(p, find_function(p, local->cleanup))
+                << NYIR_INST_F_I386_REGPARM_SHIFT;
+  if (p->abi == NYC_ABI_I386)
+    call.flags |= NYIR_INST_F_I386_C_ABI;
+  bool emitted = emit(p, call, NULL);
+  free((void *)call.symbol);
+  return emitted;
+}
+
 static bool lower_cleanup_range(c_parser_t *p, size_t first, size_t last) {
   while (last > first) {
-    c_local_t *local = &p->locals[--last];
-    if (!local->cleanup.len)
-      continue;
-    int address =
-        local->type == C_AGG
-            ? emit_value(p, (nyr_inst_t){.op = NYIR_LOAD_LOCAL,
-                                         .dst = -1,
-                                         .imm = (int64_t)local->slot,
-                                         .scalar_class = NYIR_SCALAR_I64_RAW})
-            : emit_value(p, (nyr_inst_t){.op = NYIR_ADDR_LOCAL,
-                                         .dst = -1,
-                                         .imm = (int64_t)local->slot,
-                                         .scalar_class = NYIR_SCALAR_I64_RAW});
-    if (address < 0)
-      return false;
-    nyr_inst_t call = {.op = NYIR_CALL,
-                       .dst = -1,
-                       .a = address,
-                       .imm = 1,
-                       .flags = NYIR_INST_F_EXTERN,
-                       .effects = NYIR_EFFECT_CALL,
-                       .symbol =
-                           strndup(local->cleanup.start, local->cleanup.len)};
-    if (!call.symbol) {
-      fail(p, "out of memory creating cleanup call");
-      return false;
-    }
-    nyr_call_arg_class_set(call.arg_scalar_classes, 0, NYIR_SCALAR_I64_RAW);
-    call.flags |= c_function_regparm(p, find_function(p, local->cleanup))
-                  << NYIR_INST_F_I386_REGPARM_SHIFT;
-    if (p->abi == NYC_ABI_I386)
-      call.flags |= NYIR_INST_F_I386_C_ABI;
-    bool emitted = emit(p, call, NULL);
-    free((void *)call.symbol);
-    if (!emitted)
+    const c_local_t *local = &p->locals[--last];
+    if (local->cleanup.len && !lower_cleanup_local(p, local))
       return false;
   }
   return true;
+}
+
+/* Route only the taken edge through the cleanups. Compare expansion order;
+ * macro-generated spellings can come from different backing buffers. */
+static int lower_cleanup_edge(c_parser_t *p, const c_label_t *target) {
+  const c_cleanup_scope_t *scope = p->cleanup_scope;
+  int trampoline = -1, resume = -1;
+  for (size_t i = p->local_count; i-- > p->param_count;) {
+    const c_local_t *local = &p->locals[i];
+    if (!local->cleanup.len)
+      continue;
+    while (scope && i < scope->first_local)
+      scope = scope->parent;
+    if ((!scope || target->token_pos < scope->end) &&
+        target->token_pos >= local->declaration_pos)
+      continue;
+    if (trampoline < 0) {
+      if (p->next_label > INT_MAX - 2) {
+        fail(p, "C function has too many cleanup edges");
+        return -1;
+      }
+      trampoline = p->next_label++;
+      resume = p->next_label++;
+      if (!emit_branch(p, resume) || !emit_label(p, trampoline))
+        return -1;
+    }
+    if (!lower_cleanup_local(p, local))
+      return -1;
+  }
+  if (trampoline < 0)
+    return (int)target->id;
+  if (!emit_branch(p, (int64_t)target->id) || !emit_label(p, resume))
+    return -1;
+  return trampoline;
 }
 
 /*
@@ -381,13 +417,11 @@ static int lower_pointer_offset_for(c_parser_t *p, c_type_t pointer_type,
 }
 
 static bool c_i386_narrow32_operation(const c_parser_t *p, c_type_t type,
-                                     nyr_op_t op) {
-  if (!p || p->abi != NYC_ABI_I386 ||
-      (type != C_I32 && type != C_U32))
+                                      nyr_op_t op) {
+  if (!p || p->abi != NYC_ABI_I386 || (type != C_I32 && type != C_U32))
     return false;
-  return op == NYIR_ADD_I64 || op == NYIR_SUB_I64 ||
-         op == NYIR_MUL_I64 || op == NYIR_AND_I64 ||
-         op == NYIR_OR_I64 || op == NYIR_XOR_I64 ||
+  return op == NYIR_ADD_I64 || op == NYIR_SUB_I64 || op == NYIR_MUL_I64 ||
+         op == NYIR_AND_I64 || op == NYIR_OR_I64 || op == NYIR_XOR_I64 ||
          op == NYIR_DIV_I64 || op == NYIR_MOD_I64 ||
          (type == C_I32 && (op == NYIR_SHL_I64 || op == NYIR_SAR_I64));
 }
@@ -462,12 +496,11 @@ static int lower_add_const(c_parser_t *p, int base, size_t offset) {
       p, (nyr_inst_t){.op = NYIR_CONST_I64, .dst = -1, .imm = (int64_t)offset});
   if (constant < 0)
     return -1;
-  return emit_value(
-      p, (nyr_inst_t){.op = NYIR_ADD_I64,
-                      .dst = -1,
-                      .a = base,
-                      .b = constant,
-                      .flags = c_pointer_offset_flags(p)});
+  return emit_value(p, (nyr_inst_t){.op = NYIR_ADD_I64,
+                                    .dst = -1,
+                                    .a = base,
+                                    .b = constant,
+                                    .flags = c_pointer_offset_flags(p)});
 }
 
 static int lower_load_field(c_parser_t *p, int address, bool is_f64,
@@ -605,22 +638,21 @@ static c_value_t lower_scalar_to_complex(c_parser_t *p, c_value_t value,
         p, (nyr_inst_t){.op = single ? NYIR_I64_TO_F32 : NYIR_I64_TO_F64,
                         .dst = -1,
                         .a = value.value,
-                        .scalar_class = single ? NYIR_SCALAR_F32
-                                               : NYIR_SCALAR_F64});
-  int zero = emit_value(
-      p, (nyr_inst_t){.op = single ? NYIR_CONST_F32 : NYIR_CONST_F64,
-                      .dst = -1,
-                      .imm = 0,
-                      .scalar_class = single ? NYIR_SCALAR_F32
-                                             : NYIR_SCALAR_F64});
+                        .scalar_class =
+                            single ? NYIR_SCALAR_F32 : NYIR_SCALAR_F64});
+  int zero =
+      emit_value(p, (nyr_inst_t){.op = single ? NYIR_CONST_F32 : NYIR_CONST_F64,
+                                 .dst = -1,
+                                 .imm = 0,
+                                 .scalar_class = single ? NYIR_SCALAR_F32
+                                                        : NYIR_SCALAR_F64});
   int imag = lower_add_const(p, base, single ? 4 : 8);
   if (real < 0 || zero < 0 || imag < 0)
     return (c_value_t){-1, C_BAD, NULL};
-  bool stored =
-      single ? lower_store_f32_field(p, base, real, false) &&
-                   lower_store_f32_field(p, imag, zero, false)
-             : lower_store_field(p, base, real, true, false) &&
-                   lower_store_field(p, imag, zero, true, false);
+  bool stored = single ? lower_store_f32_field(p, base, real, false) &&
+                             lower_store_f32_field(p, imag, zero, false)
+                       : lower_store_field(p, base, real, true, false) &&
+                             lower_store_field(p, imag, zero, true, false);
   if (!stored)
     return (c_value_t){-1, C_BAD, NULL};
   return (c_value_t){base, C_AGG,
@@ -642,8 +674,8 @@ static int lower_load_i32_field(c_parser_t *p, int address, bool is_volatile) {
   return loaded < 0 ? -1 : normalize_i32(p, loaded);
 }
 
-static int lower_load_u8_field_seg(c_parser_t *p, int address,
-                                   bool is_volatile, unsigned seg_flags) {
+static int lower_load_u8_field_seg(c_parser_t *p, int address, bool is_volatile,
+                                   unsigned seg_flags) {
   return emit_value(
       p,
       (nyr_inst_t){.op = NYIR_LOAD_I64,
@@ -679,10 +711,9 @@ static int lower_load_u16_field_seg(c_parser_t *p, int address, c_type_t type,
   }
   int high_address = lower_add_const(p, address, 1);
   int low = lower_load_u8_field_seg(p, address, is_volatile, seg_flags);
-  int high = high_address < 0
-                 ? -1
-                 : lower_load_u8_field_seg(p, high_address, is_volatile,
-                                           seg_flags);
+  int high = high_address < 0 ? -1
+                              : lower_load_u8_field_seg(p, high_address,
+                                                        is_volatile, seg_flags);
   int shift = high < 0 ? -1 : emit_i64_constant(p, 8);
   int upper = shift < 0 ? -1 : emit_i64_binary(p, NYIR_SHL_I64, high, shift);
   int joined =
@@ -864,6 +895,29 @@ static bool lower_store_bitfield(c_parser_t *p, int address,
               ? lower_store_i32_field(p, address, merged, field->is_volatile)
               : lower_store_field(p, address, merged, false,
                                   field->is_volatile));
+}
+
+static int lower_load_segmented_global(c_parser_t *p, const c_global_t *global,
+                                       int address) {
+  c_type_t type = global->type;
+  unsigned flags = c_seg_flags(global->object_seg);
+  if (type == C_I16 || type == C_U16)
+    return lower_load_u16_field_seg(p, address, type, global->is_volatile,
+                                    flags);
+  if (type == C_I32 || type == C_U32)
+    flags |= NYIR_INST_F_MEM_I32;
+  else if (type == C_U8 || type == C_CHAR)
+    flags |= NYIR_INST_F_MEM_BYTE;
+  return emit_value(
+      p, (nyr_inst_t){
+             .op = NYIR_LOAD_I64,
+             .dst = -1,
+             .a = address,
+             .effects = NYIR_EFFECT_READ_MEMORY | NYIR_EFFECT_MAY_TRAP |
+                        (global->is_volatile ? NYIR_EFFECT_VOLATILE : 0),
+             .flags = flags,
+             .scalar_class = c_type_is_float(type) ? c_float_scalar_class(type)
+                                                   : NYIR_SCALAR_I64_RAW});
 }
 
 static bool lower_copy_struct(c_parser_t *p, int dst, int src, size_t size) {

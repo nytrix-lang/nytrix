@@ -5,7 +5,7 @@
 ;; - core.os
 module core.os.sound.backend.pulse(is_available, init, shutdown, stream_open, stream_start, stream_stop, write)
 use core
-use core.dict_mod
+use core.dict
 use core.mem
 use core.str
 use core.common as common

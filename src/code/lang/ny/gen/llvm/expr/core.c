@@ -2083,8 +2083,7 @@ static LLVMValueRef expr_try_fast_index_read(codegen_t *cg, scope *scopes,
 }
 
 static fun_sig *ny_helper_dict(codegen_t *cg) {
-  static const char *const k_names[] = {"dict", "core.dict",
-                                        "core.dict_mod.dict"};
+  static const char *const k_names[] = {"dict", "core.dict", "core.dict.dict"};
   return ny_helper_lookup(cg, &cg->cached_fn_dict, k_names,
                           sizeof(k_names) / sizeof(k_names[0]));
 }

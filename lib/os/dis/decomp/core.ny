@@ -1519,22 +1519,22 @@ fn _lift_row(dict bin, list r) dict {
       }
    } elif op == "arith" || m == "bswap" || m == "cdqe" || m == "cwde" || m == "cbw" || _x86_vector_zeroing_idiom(a, m, ops) {
       if dasm.is_zeroing_idiom(a, m, ops) || _x86_vector_zeroing_idiom(a, m, ops) {
-         row = row.set("op", "arith").set("operator", "=").set("kind", "zeroing_idiom").set("effect", _ny_operand_ref_bin(bin, row.get("dst", ""), ref) + " = 0")
+         row = row.set("op", "arith").set("operator", "=").set("kind", "zeroing_idiom").set("effect", str(_ny_operand_ref_bin(bin, row.get("dst", ""), ref) + " = 0"))
       } elif fam == "riscv" && (m == "addi" || m == "addiw") && parts.len > 2 && dasm.is_zero_register(a, parts[1]) {
-         row = row.set("operator", "=").set("kind", "imm_load").set("effect", _ny_operand_ref_bin(bin, row.get("dst", ""), ref) + " = " + _ny_operand_bin(bin, parts[2]))
+         row = row.set("operator", "=").set("kind", "imm_load").set("effect", str(_ny_operand_ref_bin(bin, row.get("dst", ""), ref) + " = " + _ny_operand_bin(bin, parts[2])))
       } elif str.startswith(m, "inc") {
-         row = row.set("operator", "+").set("effect", _ny_operand_ref_bin(bin, row.get("dst", ""), ref) + " = " + _ny_operand_ref_bin(bin, row.get("dst", ""), ref) + " + 1")
+         row = row.set("operator", "+").set("effect", str(_ny_operand_ref_bin(bin, row.get("dst", ""), ref) + " = " + _ny_operand_ref_bin(bin, row.get("dst", ""), ref) + " + 1"))
       } elif str.startswith(m, "dec") {
-         row = row.set("operator", "-").set("effect", _ny_operand_ref_bin(bin, row.get("dst", ""), ref) + " = " + _ny_operand_ref_bin(bin, row.get("dst", ""), ref) + " - 1")
+         row = row.set("operator", "-").set("effect", str(_ny_operand_ref_bin(bin, row.get("dst", ""), ref) + " = " + _ny_operand_ref_bin(bin, row.get("dst", ""), ref) + " - 1"))
       } elif str.startswith(m, "neg") {
-         row = row.set("operator", "neg").set("kind", "unary").set("effect", _ny_operand_ref_bin(bin, row.get("dst", ""), ref) + " = -" + _ny_operand_ref_bin(bin, row.get("dst", ""), ref))
+         row = row.set("operator", "neg").set("kind", "unary").set("effect", str(_ny_operand_ref_bin(bin, row.get("dst", ""), ref) + " = -" + _ny_operand_ref_bin(bin, row.get("dst", ""), ref)))
       } elif m == "not" {
-         row = row.set("operator", "~").set("kind", "unary").set("effect", _ny_operand_ref_bin(bin, row.get("dst", ""), ref) + " = ~" + _ny_operand_ref_bin(bin, row.get("dst", ""), ref))
+         row = row.set("operator", "~").set("kind", "unary").set("effect", str(_ny_operand_ref_bin(bin, row.get("dst", ""), ref) + " = ~" + _ny_operand_ref_bin(bin, row.get("dst", ""), ref)))
       } elif m == "cdq" {
          row = row.set("operator", "sign_extend").set("kind", "sign_extend_dividend").set("dst", "edx").set("src", "eax").set("effect", "edx = signbit(eax) ? -1 : 0")
       } elif m == "cqo" {
          row = row.set("operator", "sign_extend").set("kind", "sign_extend_dividend").set("dst", "rdx").set("src", "rax").set("effect", "rdx = signbit(rax) ? -1 : 0")
-      } elif m == "cdqe" {
+   } elif m == "cdqe" {
          row = row.set("op", "arith").set("operator", "sign_extend").set("kind", "sign_extend_acc").set("dst", "rax").set("src", "eax")
          .set("dst_kind", "reg").set("src_kind", "reg").set("effect", "rax = sext(eax)")
       } elif m == "cwde" {
@@ -1546,7 +1546,7 @@ fn _lift_row(dict bin, list r) dict {
       } elif fam == "x86" && (m == "idiv" || m == "div") {
          def rhs = _ny_operand_ref_bin(bin, row.get("dst", ""), ref)
          row = row.set("operator", "/").set("kind", m == "idiv" ? "signed_div" : "unsigned_div").set("src", row.get("dst", "")).set("src_kind", row.get("dst_kind", "")).set("dst", "eax").set("dst_kind", "reg")
-         .set("effect", "eax, edx = divmod(eax, " + rhs + ")")
+         .set("effect", str("eax, edx = divmod(eax, " + rhs + ")"))
       } elif m == "bswap" {
          def dst = _ny_operand_ref_bin(bin, row.get("dst", ""), ref)
          def bits = _clean_operand_bits(row.get("dst", ""))
@@ -1567,18 +1567,18 @@ fn _lift_row(dict bin, list r) dict {
       } elif (m == "imul" || m == "mul") && parts.len > 2 {
          row = row.set("operator", "*").set("kind", "mul3").set("src", parts[1]).set("src2", parts[2])
          .set("src_kind", _operand_kind(parts[1])).set("src2_kind", _operand_kind(parts[2]))
-         .set("effect", _ny_operand_ref_bin(bin, row.get("dst", ""), ref) + " = " + _ny_operand_ref_bin(bin, parts[1], ref) + " * " + _ny_operand_ref_bin(bin, parts[2], ref))
+         .set("effect", str(_ny_operand_ref_bin(bin, row.get("dst", ""), ref) + " = " + _ny_operand_ref_bin(bin, parts[1], ref) + " * " + _ny_operand_ref_bin(bin, parts[2], ref)))
       } elif _arch_three_operand_arith(fam, m, parts) {
          def rhs = parts.len > 3 ? _arch_shifted_operand_expr(bin, parts[2], parts[3], ref) : _ny_operand_ref_bin(bin, parts[2], ref)
          def sym = _arith_symbol(m)
          row = row.set("operator", sym).set("kind", "arith3").set("src", parts[1]).set("src2", parts[2])
          .set("src_kind", _operand_kind(parts[1])).set("src2_kind", _operand_kind(parts[2]))
-         .set("effect", _ny_operand_ref_bin(bin, row.get("dst", ""), ref) + " = " + _ny_operand_ref_bin(bin, parts[1], ref) + " " + _ny_infix_operator(sym) + " " + rhs)
+         .set("effect", str(_ny_operand_ref_bin(bin, row.get("dst", ""), ref) + " = " + _ny_operand_ref_bin(bin, parts[1], ref) + " " + _ny_infix_operator(sym) + " " + rhs))
          if parts.len > 3 { row = row.set("src2_modifier", parts[3]) }
       } elif (str.startswith(m, "rol") || str.startswith(m, "ror")) && parts.len > 1 {
          def rot = _arith_symbol(m)
          row = row.set("operator", rot).set("kind", "rotate")
-         .set("effect", _ny_operand_ref_bin(bin, row.get("dst", ""), ref) + " = " + rot + "(" + _ny_operand_ref_bin(bin, row.get("dst", ""), ref) + ", " + _ny_operand_ref_bin(bin, row.get("src", ""), ref) + ")")
+         .set("effect", str(_ny_operand_ref_bin(bin, row.get("dst", ""), ref) + " = " + rot + "(" + _ny_operand_ref_bin(bin, row.get("dst", ""), ref) + ", " + _ny_operand_ref_bin(bin, row.get("src", ""), ref) + ")"))
       } else {
          def sym = _arith_symbol(m)
          row = row.set("operator", sym).set("effect", str(_ny_operand_ref_bin(bin, row.get("dst", ""), ref) + " = " + _ny_operand_ref_bin(bin, row.get("dst", ""), ref) + " " + _ny_infix_operator(sym) + " " + _ny_operand_ref_bin(bin, row.get("src", ""), ref)))
@@ -1591,8 +1591,8 @@ fn _lift_row(dict bin, list r) dict {
    } elif op == "return" {
       row = row.set("effect", "return")
    } elif op == "stack" {
-      if m == "push" { row = row.set("effect", "push(" + _ny_operand_bin(bin, row.get("dst", "")) + ")") }
-      elif m == "pop" { row = row.set("effect", _ny_operand_bin(bin, row.get("dst", "")) + " = pop()") }
+      if m == "push" { row = row.set("effect", str("push(" + _ny_operand_bin(bin, row.get("dst", "")) + ")")) }
+      elif m == "pop" { row = row.set("effect", str(_ny_operand_bin(bin, row.get("dst", "")) + " = pop()")) }
       elif m == "leave" { row = row.set("effect", "leave_frame()") }
    }
    if fam == "x86" && str.startswith(_normalized_token(m), "lea") && parts.len > 1 {
@@ -1607,6 +1607,13 @@ fn _lift_row(dict bin, list r) dict {
       }
       row = row.set("op", "assign").set("kind", "lea").set("effect", effect)
       .set("dst", dst).set("src", src)
+   }
+   if fam == "x86" && m == "endbr64" {
+      row = row.set("op", "nop").set("kind", "landing_pad").set("effect", "")
+   } elif fam == "x86" && (m == "rep movsb" || m == "movsb") {
+      row = row.set("op", "assign").set("kind", "memory_copy")
+         .set("dst", "rdi").set("src", "rsi")
+         .set("effect", "copy_bytes(rdi, rsi, rcx)")
    }
    row
 }
@@ -25848,6 +25855,7 @@ fn _pseudo_body(dict bin, list rows, int indent, any opts=dict()) str {
    mut b = str.Builder(max(128, rows.len * 40))
    def pad = str.repeat(" ", indent)
    def clean = _clean_enabled(opts)
+   def show_disassembly = opts.get("show_disassembly", false)
    def lm = _labels_for_rows(rows, arch(bin))
    mut lifted = []
    if is_dict(opts) && is_list(opts.get("lifted", [])) && opts.get("lifted", []).len == rows.len {
@@ -25886,8 +25894,10 @@ fn _pseudo_body(dict bin, list rows, int indent, any opts=dict()) str {
       loop_info = cfg_loops(bin, opts.get("target", 0), int(opts.get("max_bytes", 512)))
    }
    def loop_maps = _cfg_loop_maps(lifted, loop_info)
-   def loop_headers = loop_maps.get("headers", dict())
-   def loop_latches = loop_maps.get("latches", dict())
+   mut loop_headers = loop_maps.get("headers", dict())
+   mut loop_latches = loop_maps.get("latches", dict())
+   if !is_dict(loop_headers) { loop_headers = _loop_header_map(lifted) }
+   if !is_dict(loop_latches) { loop_latches = _loop_latch_map(lifted) }
    mut structured_targets = _structured_if_targets(lifted)
    mut forced_labels = dict()
    def frame = _frame_model(lifted)
@@ -25939,7 +25949,7 @@ fn _pseudo_body(dict bin, list rows, int indent, any opts=dict()) str {
          i += 1
          continue
       }
-      def starts_loop = loop_headers.contains(to_str(ir.get("addr", 0)))
+      def starts_loop = is_dict(loop_headers) && loop_headers.get(to_str(ir.get("addr", 0)), nil) != nil
       if starts_loop {
          b = str.builder_append(b, _loop_render_pad(pad, loop_stack.len) + "while true{\n")
          loop_stack = loop_stack.append(int(ir.get("addr", 0)))
@@ -25953,7 +25963,7 @@ fn _pseudo_body(dict bin, list rows, int indent, any opts=dict()) str {
          i += 1
          continue
       }
-      if !clean {
+      if !clean && show_disassembly {
          b = str.builder_append(b, curpad + "; " + _hex(ir.get("addr", 0)) + "  " + m + (ops.len > 0 ? (" " + ops) : "") + "\n")
          b = str.builder_append(b, _du_row_comment(dataflow, i, curpad))
       }
@@ -26036,7 +26046,7 @@ fn _pseudo_body(dict bin, list rows, int indent, any opts=dict()) str {
                def expr = _pseudo_branch_condition(bin, sig, lifted, i, cond, clean)
                b = str.builder_append(b, curpad + "if " + expr + "{ " + jtext + " }\n")
             }
-         } elif loop_stack.len > 0 && loop_latches.contains(to_str(ir.get("addr", 0))) && int(loop_latches.get(to_str(ir.get("addr", 0)), 0)) == top_loop {
+         } elif loop_stack.len > 0 && is_dict(loop_latches) && int(loop_latches.get(to_str(ir.get("addr", 0)), 0)) == top_loop {
             if cond == "always" {
                loop_stack = _drop_last(loop_stack)
                b = str.builder_append(b, _loop_render_pad(pad, loop_stack.len) + "}\n")
@@ -26115,13 +26125,11 @@ fn _pseudo_body(dict bin, list rows, int indent, any opts=dict()) str {
 }
 
 fn ny_pseudocode(any source, any target=0, any opts=dict()) str {
-   "Render compact Nytrix analyst pseudocode for a section/function/address.
-   This keeps disassembly comments beside recovered intent so private reversing
-   work can be polished directly in Nytrix."
+   "Render recovered Nytrix-style pseudocode for a section/function/address. Set `show_disassembly` to include instruction comments."
    mut bin = _has_decomp_header(source) ? source : load(to_str(source))
    if opts.contains("renames") { bin = with_renames(bin, opts.get("renames", dict())) }
    mut rows = []
-   mut name = "entry_" + str.to_hex(entry(bin), 0)
+   mut name = is_int(target) && int(target) > 0 ? "sub_" + str.to_hex(int(target), 0) : "entry_" + str.to_hex(entry(bin), 0)
    if is_dict(opts) && is_list(opts.get("rows", [])) && opts.get("rows", []).len > 0 {
       rows = opts.get("rows", [])
       if is_dict(target) { name = target.get("name", name) }
@@ -26148,6 +26156,10 @@ fn ny_pseudocode(any source, any target=0, any opts=dict()) str {
          li += 1
       }
       lifted = _attach_compare_context(bin, lifted)
+   }
+   if !_clean_enabled(opts) {
+      return _decompile_fast_text(bin, target, rows, lifted, _labels_for_rows(rows, arch(bin)),
+         opts.get("show_disassembly", false))
    }
    mut sig = dict()
    if is_dict(opts) && is_dict(opts.get("signature", dict())) && opts.get("signature", dict()).len > 0 {
@@ -26242,7 +26254,7 @@ fn _decompile_structured_rows(dict bin, any target, list raw, list lifted, dict 
 }
 
 @returns_owned
-fn _decompile_fast_text(dict bin, any target, list raw, list lifted, dict labels) str {
+fn _decompile_fast_text(dict bin, any target, list raw, list lifted, dict labels, bool show_disassembly=false) str {
    def addr = raw.len > 0 ? int(raw[0][0]) : 0
    def default_name = "sub_" + str.to_hex(addr, 0)
    def base_name = is_str(target) ? target :
@@ -26257,18 +26269,21 @@ fn _decompile_fast_text(dict bin, any target, list raw, list lifted, dict labels
       def row = lifted[i]
       def mnemonic = row.get("mnemonic", "")
       def operands = row.get("operands", "")
+      def effect = str(row.get("effect", ""))
       def row_addr = int(row.get("addr", 0))
       def label = labels.get(to_str(row_addr), "")
       if label.len > 0 { b = str.builder_append(b, "  " + label + ":\n") }
-      b = str.builder_append(b, "  ; " + _hex(row_addr) + "  " + mnemonic +
-         (operands.len > 0 ? (" " + operands) : "") + "\n")
+      if show_disassembly {
+         b = str.builder_append(b, "  ; " + _hex(row_addr) + "  " + mnemonic +
+            (operands.len > 0 ? (" " + operands) : "") + "\n")
+      }
       def op = str(row.get("op", "insn"))
       if op == "assign" || op == "arith" || op == "compare" || op == "stack" {
-         b = str.builder_append(b, "  " + row.get("effect", "") + "\n")
+         b = str.builder_append(b, "  " + effect + "\n")
       } elif op == "call" {
          b = str.builder_append(b, "  call " + row.get("target_name", "call_target") + "\n")
       } elif op == "syscall" {
-         b = str.builder_append(b, "  " + row.get("effect", "syscall") + "\n")
+         b = str.builder_append(b, "  " + (effect.len > 0 ? effect : "syscall") + "\n")
       } elif op == "branch" {
          def to = int(row.get("target", 0))
          def condition = str(row.get("condition", ""))
@@ -26282,9 +26297,8 @@ fn _decompile_fast_text(dict bin, any target, list raw, list lifted, dict labels
          }
       } elif op == "return" {
          b = str.builder_append(b, "  return\n")
-      } else {
-         b = str.builder_append(b, "  instruction(\"" + mnemonic +
-            (operands.len > 0 ? (" " + operands) : "") + "\")\n")
+      } elif op == "nop" {
+         ;; Architecture landing pads and no-op instructions have no source-level effect.
       }
       i += 1
    }
@@ -26293,29 +26307,72 @@ fn _decompile_fast_text(dict bin, any target, list raw, list lifted, dict labels
    out
 }
 
+fn _decompile_trailing_after_ret(list rows, int unsupported_index, str arch_name) int {
+   if unsupported_index < 1 { return -1 }
+   def ret = rows[unsupported_index - 1]
+   if str(ret[1]) != "ret" { return -1 }
+   def ret_end = int(ret[0]) + int(ret[3])
+   def unsupported_addr = int(rows[unsupported_index][0])
+   mut i = 0
+   while i < unsupported_index - 1 {
+      def row = rows[i]
+      if dasm.instruction_kind(arch_name, str(row[1])) == "branch" {
+         def target = _row_target(arch_name, int(row[0]), str(row[2]))
+         if target == 0 || (target >= ret_end && target <= unsupported_addr) { return -1 }
+      }
+      i += 1
+   }
+   unsupported_index - 1
+}
+
 fn decompile(any source, any target=0, any opts=dict()) dict {
-   "Return quick lifted pseudocode and CFG rows. Use `function_model` for full SSA/VSA/SMT and type analysis."
+   "Return source-style Ny pseudocode and lifted CFG rows. Set `show_disassembly` to include instruction comments or `clean` to enable aggressive cleanup."
    def loaded_bin = _has_decomp_header(source) ? source : load(to_str(source))
    def bin = opts.contains("renames") ? with_renames(loaded_bin, opts.get("renames", dict())) : loaded_bin
    if !bin.get("ok", false) { return {"ok": false, "text": "", "analysis": bin} }
+   def render_opts = opts.contains("clean") ? opts : opts.set("clean", false)
+   if !render_opts.contains("show_disassembly") {
+      render_opts = render_opts.set("show_disassembly", false)
+   }
    def maxb = int(opts.get("max_bytes", 512))
    def decoded_rows = disassemble(bin, target, maxb)
    mut ri = 0
    while ri < decoded_rows.len {
       if str(decoded_rows[ri][1]) == "unsupported" {
+         def terminal = _decompile_trailing_after_ret(decoded_rows, ri, arch(bin))
+         if terminal >= 0 {
+            decoded_rows = slice(decoded_rows, 0, terminal + 1, 1)
+            break
+         }
          return {"ok": false, "language": "ny", "text": "", "diagnostic": "unsupported instruction in " + to_str(target) + " at " + to_str(decoded_rows[ri][0]) + ": " + to_str(decoded_rows[ri][2]), "analysis": bin}
       }
       ri += 1
    }
    def lifted = _lift_rows(bin, decoded_rows)
+   mut li = 0
+   while li < lifted.len {
+      def row = lifted[li]
+      def op = str(row.get("op", ""))
+      def renderable = op == "assign" || op == "arith" || op == "compare" ||
+         op == "stack" || op == "call" || op == "syscall" || op == "branch" ||
+         op == "return" || op == "nop"
+      if !renderable {
+         return {"ok": false, "language": "ny", "text": "",
+            "diagnostic": "no Ny semantic lift for " + str(row.get("mnemonic", "instruction")) +
+               " at " + to_str(row.get("addr", 0)), "analysis": bin}
+      }
+      li += 1
+   }
    def local_labels = _decompile_local_labels(bin, decoded_rows, lifted)
-   if _clean_enabled(opts) {
-      def render_opts = opts.set("rows", decoded_rows).set("lifted", lifted)
+   if _clean_enabled(render_opts) {
+      def clean_opts = render_opts.set("rows", decoded_rows).set("lifted", lifted)
       return {"ok": true, "language": "ny",
-         "text": ny_pseudocode(bin, target, render_opts),
+         "text": ny_pseudocode(bin, target, clean_opts),
          "structured": structured(bin, target, maxb), "analysis": bin}
    }
-   {"ok": true, "language": "ny", "text": _decompile_fast_text(bin, target, decoded_rows, lifted, local_labels),
+   {"ok": true, "language": "ny",
+      "text": _decompile_fast_text(bin, target, decoded_rows, lifted, local_labels,
+         render_opts.get("show_disassembly", false)),
       "structured": _decompile_structured_rows(bin, target, decoded_rows, lifted, local_labels), "analysis": bin}
 }
 

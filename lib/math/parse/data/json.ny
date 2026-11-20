@@ -9,7 +9,7 @@ module core.math.parse.data.json(json_decode, json_try_decode,
    json_try_decode_bounded, json_last_error,
    json_encode)
 use core
-use core.dict_mod
+use core.dict
 use core.str as str
 use core.common as common
 use core.math.float as f

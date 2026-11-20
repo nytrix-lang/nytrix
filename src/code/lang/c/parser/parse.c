@@ -79,6 +79,7 @@ typedef struct {
   ny_ctok_t name;
   ny_ctok_t static_name;
   ny_ctok_t cleanup;
+  size_t declaration_pos;
   c_type_t type;
   c_type_t pointer_base_type;
   unsigned pointer_depth;
@@ -200,6 +201,7 @@ typedef struct {
    * C_SEG_* qualifier on the object a global pointer addresses.
    */
   unsigned char pointee_seg;
+  unsigned char object_seg;
 } c_global_t;
 
 typedef struct {
@@ -219,6 +221,12 @@ typedef struct {
   bool address_taken;
 } c_label_t;
 
+typedef struct c_cleanup_scope {
+  const struct c_cleanup_scope *parent;
+  size_t first_local;
+  size_t end;
+} c_cleanup_scope_t;
+
 typedef struct {
   size_t token_pos;
   size_t token_after;
@@ -236,6 +244,7 @@ typedef struct {
   bool is_volatile;
   bool is_local;
   int local_slot;
+  unsigned segment_flags;
   const c_agg_type_t *agg;
   const c_agg_field_t *bitfield;
   size_t read_start;
@@ -272,6 +281,7 @@ typedef struct {
   size_t path_map_count;
   bool unsigned_char;
   bool no_builtin;
+  bool disable_sse;
   unsigned i386_regparm;
   bool ms_extensions;
   bool plan9_extensions;
@@ -307,6 +317,7 @@ typedef struct {
   char *raw_file_scope_asm;
   size_t raw_file_scope_asm_len;
   size_t raw_file_scope_asm_capacity;
+  bool allow_raw_file_assembly;
   c_pp_constant_t *pp_constants;
   size_t pp_constant_count;
   size_t pp_constant_capacity;
@@ -321,6 +332,7 @@ typedef struct {
   size_t local_count;
   size_t local_capacity;
   size_t scope_start;
+  const c_cleanup_scope_t *cleanup_scope;
   size_t param_count;
   size_t *break_target;
   size_t *continue_target;
@@ -970,7 +982,15 @@ static bool tag_scope_is_visible(const c_parser_t *p, size_t scope_id) {
   return false;
 }
 
-static bool push_tag_scope(c_parser_t *p) {
+static void enter_cleanup_scope(c_parser_t *p, c_cleanup_scope_t *scope,
+                                size_t end) {
+  *scope = (c_cleanup_scope_t){
+      .parent = p->cleanup_scope, .first_local = p->local_count, .end = end};
+  p->cleanup_scope = scope;
+}
+
+static bool push_tag_scope(c_parser_t *p, c_cleanup_scope_t *scope,
+                           size_t end) {
   if (p->tag_scope_depth >= NY_C_MAX_RECURSION_DEPTH ||
       p->next_tag_scope_id == SIZE_MAX) {
     fail(p, "C aggregate tag scope nesting exceeds the frontend limit");
@@ -978,10 +998,12 @@ static bool push_tag_scope(c_parser_t *p) {
   }
   p->tag_scope_id = ++p->next_tag_scope_id;
   p->tag_scope_stack[p->tag_scope_depth++] = p->tag_scope_id;
+  enter_cleanup_scope(p, scope, end);
   return true;
 }
 
 static void pop_tag_scope(c_parser_t *p) {
+  p->cleanup_scope = p->cleanup_scope->parent;
   if (p->tag_scope_depth)
     --p->tag_scope_depth;
   p->tag_scope_id =
@@ -1117,6 +1139,7 @@ static bool parse_name(c_parser_t *p, ny_ctok_t *name);
 static bool parse_function_pointer_declarator(c_parser_t *p, ny_ctok_t *name);
 static bool parse_type(c_parser_t *p, c_type_t *type, bool allow_void);
 static c_value_t parse_statement_expression(c_parser_t *p);
+static int lower_cleanup_edge(c_parser_t *p, const c_label_t *target);
 static c_local_t *find_local(c_parser_t *p, ny_ctok_t name);
 static c_global_t *find_global(c_parser_t *p, ny_ctok_t name);
 static c_function_t *find_function(c_parser_t *p, ny_ctok_t name);
@@ -4826,8 +4849,25 @@ static bool parse_type(c_parser_t *p, c_type_t *type, bool allow_void) {
       tok_is(p, p->pos, "__typeof") || tok_is(p, p->pos, "__typeof_unqual__")) {
     bool leading_const = p->last_type_const;
     bool leading_volatile = p->last_type_volatile;
+    unsigned char leading_seg = p->last_type_seg;
+    size_t leading_alignment = p->last_type_alignment;
+    ny_ctok_t leading_section = p->last_type_section;
+    ny_ctok_t leading_cleanup = p->last_type_cleanup;
+    ny_ctok_t leading_mode = p->last_type_mode;
     if (!parse_typeof_type(p, type))
       return false;
+    /* A recursively parsed type name owns its type metadata, not the
+     * attributes already collected for the enclosing declaration. */
+    if (leading_section.len)
+      p->last_type_section = leading_section;
+    if (leading_cleanup.len)
+      p->last_type_cleanup = leading_cleanup;
+    if (leading_mode.len)
+      p->last_type_mode = leading_mode;
+    if (leading_seg != C_SEG_NONE)
+      p->last_type_seg = leading_seg;
+    if (leading_alignment > p->last_type_alignment)
+      p->last_type_alignment = leading_alignment;
     p->last_type_const |= leading_const;
     p->last_type_volatile |= leading_volatile;
     typeof_resolved = true;
@@ -6595,6 +6635,21 @@ static bool lower_store_u16_field(c_parser_t *p, int address, int value,
 
 #include "code/lang/c/parser/parts/asm.h"
 
+static bool retain_file_scope_assembly(c_parser_t *p,
+                                       const unsigned char *assembly,
+                                       size_t length) {
+  unsigned char *raw = (unsigned char *)p->raw_file_scope_asm;
+  bool ok = append_asm_bytes(&raw, &p->raw_file_scope_asm_len,
+                             &p->raw_file_scope_asm_capacity, assembly, length);
+  if (ok && length && assembly[length - 1] != '\n')
+    ok = append_asm_bytes(&raw, &p->raw_file_scope_asm_len,
+                          &p->raw_file_scope_asm_capacity, "\n", 1);
+  p->raw_file_scope_asm = (char *)raw;
+  if (!ok)
+    fail(p, "out of memory retaining file-scope assembly");
+  return ok;
+}
+
 static bool collect_file_scope_asm(c_parser_t *p) {
   size_t asm_token = p->pos++;
   while (tok_is(p, p->pos, "volatile") || tok_is(p, p->pos, "__volatile__") ||
@@ -6632,6 +6687,11 @@ static bool collect_file_scope_asm(c_parser_t *p) {
   if (assembly_len == 1) {
     free(assembly);
     return true;
+  }
+  if (p->allow_raw_file_assembly && p->raw_file_scope_asm) {
+    bool ok = retain_file_scope_assembly(p, assembly, assembly_len - 1);
+    free(assembly);
+    return ok;
   }
   char *assembly_work = strdup((char *)assembly);
   if (!assembly_work) {
@@ -7214,38 +7274,14 @@ static bool collect_file_scope_asm(c_parser_t *p) {
   }
   if (stack_count || !ok || p->global_count > p->global_capacity ||
       output_count > p->global_capacity - p->global_count) {
-    if ((!ok || stack_count) && getenv("NYC_KERNEL_COMPAT") && assembly &&
-        assembly_len > 1) {
-      size_t text_len = assembly_len - 1;
-      bool need_nl = text_len && ((char *)assembly)[text_len - 1] != '\n';
-      size_t add = text_len + (need_nl ? 1 : 0);
-      if (p->raw_file_scope_asm_len + add + 1 >
-          p->raw_file_scope_asm_capacity) {
-        size_t cap = p->raw_file_scope_asm_capacity
-                         ? p->raw_file_scope_asm_capacity * 2
-                         : 256;
-        while (cap < p->raw_file_scope_asm_len + add + 1)
-          cap *= 2;
-        char *grown = realloc(p->raw_file_scope_asm, cap);
-        if (grown) {
-          p->raw_file_scope_asm = grown;
-          p->raw_file_scope_asm_capacity = cap;
-        }
-      }
-      if (p->raw_file_scope_asm && p->raw_file_scope_asm_len + add + 1 <=
-                                       p->raw_file_scope_asm_capacity) {
-        memcpy(p->raw_file_scope_asm + p->raw_file_scope_asm_len, assembly,
-               text_len);
-        p->raw_file_scope_asm_len += text_len;
-        if (need_nl)
-          p->raw_file_scope_asm[p->raw_file_scope_asm_len++] = '\n';
-        p->raw_file_scope_asm[p->raw_file_scope_asm_len] = '\0';
-        for (size_t i = 0; i < section_count; ++i)
-          asm_section_dispose(&sections[i]);
-        free(sections);
-        free(assembly);
-        return true;
-      }
+    if ((!ok || stack_count) &&
+        (p->allow_raw_file_assembly || getenv("NYC_KERNEL_COMPAT"))) {
+      bool retained = retain_file_scope_assembly(p, assembly, assembly_len - 1);
+      for (size_t i = 0; i < section_count; ++i)
+        asm_section_dispose(&sections[i]);
+      free(sections);
+      free(assembly);
+      return retained;
     }
     char message[160];
     if (rejected_directive[0])
@@ -8778,6 +8814,9 @@ static bool try_collect_integer_arrays(c_parser_t *p, bool *matched) {
   }
   element_size = p->last_type_array_size ? p->last_type_array_size
                                          : c_type_size(p->abi, element_type);
+  c_array_shape_t typedef_shape =
+      typedef_array_element ? p->last_type_array : (c_array_shape_t){0};
+  size_t scalar_size = c_type_size(p->abi, element_type);
   for (;;) {
     p->last_type_alignment = declaration_alignment;
     c_array_declarator_t current_declarator = {0};
@@ -8787,6 +8826,16 @@ static bool try_collect_integer_arrays(c_parser_t *p, bool *matched) {
             SIZE_MAX / current_declarator.element_stride) {
       fail(p, "external integer array requires a valid extent");
       return false;
+    }
+    if (typedef_shape.rank) {
+      unsigned rank = current_declarator.array_rank;
+      if (typedef_shape.rank > C_MAX_ARRAY_RANK - rank) {
+        fail(p, "external integer array exceeds the frontend rank limit");
+        return false;
+      }
+      memcpy(current_declarator.array_extent + rank, typedef_shape.extent,
+             typedef_shape.rank * sizeof(typedef_shape.extent[0]));
+      current_declarator.array_rank += typedef_shape.rank;
     }
     ny_ctok_t section = declaration_section;
     if (!parse_trailing_file_scope_attributes(p, &section))
@@ -8886,7 +8935,7 @@ static bool try_collect_integer_arrays(c_parser_t *p, bool *matched) {
       global->array_stride = current_declarator.element_stride;
       global->array_shape.rank = current_declarator.array_rank;
       global->array_shape.element_type = element_type;
-      global->array_shape.element_size = element_size;
+      global->array_shape.element_size = scalar_size;
       memcpy(global->array_shape.extent, current_declarator.array_extent,
              current_declarator.array_rank * sizeof(size_t));
       if (!accept(p, ","))
@@ -8945,7 +8994,7 @@ static bool try_collect_integer_arrays(c_parser_t *p, bool *matched) {
     }
     global->array_shape.rank = current_declarator.array_rank;
     global->array_shape.element_type = element_type;
-    global->array_shape.element_size = element_size;
+    global->array_shape.element_size = scalar_size;
     memcpy(global->array_shape.extent, current_declarator.array_extent,
            current_declarator.array_rank * sizeof(size_t));
     if (has_initializer) {
@@ -12064,11 +12113,29 @@ static bool try_collect_function_pointer_array(c_parser_t *p, bool *matched) {
           return false;
         }
         if (existing->is_external || existing->is_tentative) {
-          if (!is_external && existing->is_external) {
+          bool completes_array = existing->array_incomplete;
+          if (!is_external && (existing->is_external || completes_array)) {
+            free(existing->bytes);
             existing->bytes = global.bytes;
             global.bytes = NULL;
             existing->is_external = false;
             existing->is_tentative = true;
+          } else if (completes_array && existing->is_tentative &&
+                     existing->len != global.len) {
+            unsigned char *resized = calloc(global.len ? global.len : 1, 1);
+            if (!resized) {
+              free(global.section);
+              fail(p, "out of memory completing tentative pointer array");
+              return false;
+            }
+            free(existing->bytes);
+            existing->bytes = resized;
+          }
+          if (completes_array) {
+            existing->len = global.len;
+            existing->array_rank = global.array_rank;
+            existing->array_shape = global.array_shape;
+            existing->array_incomplete = false;
           }
           if (section.len) {
             free(existing->section);
@@ -12106,7 +12173,8 @@ static bool try_collect_function_pointer_array(c_parser_t *p, bool *matched) {
   if (!parse_type(&probe, &result_type, true) ||
       !tok_is(&probe, probe.pos, "(") || !tok_is(&probe, probe.pos + 1, "*"))
     return true;
-  size_t name_pos = probe.pos + 2;
+  size_t pointer_qualifiers = probe.pos + 2;
+  size_t name_pos = pointer_qualifiers;
   while (tok_is(&probe, name_pos, "const") ||
          tok_is(&probe, name_pos, "volatile"))
     ++name_pos;
@@ -12120,23 +12188,30 @@ static bool try_collect_function_pointer_array(c_parser_t *p, bool *matched) {
       !tok_is(&probe, array_close + 2, "("))
     return true;
   size_t params_end = skip_balanced(&probe, array_close + 2, "(", ")");
-  size_t initializer_pos = params_end;
-  if (params_end >= probe.token_count ||
-      !skip_file_scope_attributes(&probe, &initializer_pos) ||
-      !tok_is(&probe, initializer_pos, "=") ||
-      !tok_is(&probe, initializer_pos + 1, "{"))
+  if (params_end >= probe.token_count)
+    return true;
+  probe.pos = params_end;
+  ny_ctok_t section = probe.last_type_section;
+  if (!parse_trailing_file_scope_attributes(&probe, &section) ||
+      !tok_is(&probe, probe.pos, "=") || !tok_is(&probe, probe.pos + 1, "{"))
     return true;
 
   *matched = true;
   ny_ctok_t name = probe.tokens[name_pos];
-  size_t at = initializer_pos + 2;
+  size_t at = probe.pos + 2;
+  bool is_static = false, is_const = false;
+  for (size_t token = p->pos; token < type_pos; ++token)
+    is_static |= tok_is(p, token, "static");
+  for (size_t token = pointer_qualifiers; token < name_pos; ++token)
+    is_const |= tok_is(p, token, "const");
   unsigned char *bytes = NULL;
   c_global_t global = {.name = name,
                        .type = C_FUNC_PTR,
                        .is_array = true,
                        .is_pointer_array = true,
                        .is_function_pointer_array = true,
-                       .is_const = true};
+                       .is_local = is_static,
+                       .is_const = is_const};
   size_t count = 0;
   size_t next_index = 0;
   while (!tok_is(p, at, "}")) {
@@ -12228,9 +12303,24 @@ static bool try_collect_function_pointer_array(c_parser_t *p, bool *matched) {
   }
   global.bytes = bytes;
   global.reloc_capacity = global.reloc_count;
+  if (section.len) {
+    char section_name[128];
+    if (!copy_quoted_token(p, section, section_name, sizeof(section_name)) ||
+        !(global.section = strdup(section_name))) {
+      free(global.bytes);
+      free(global.relocs);
+      if (!p->err || !p->err_len || !p->err[0])
+        fail(p, "out of memory storing function-pointer array section");
+      return false;
+    }
+  }
   if (existing) {
     global.is_const = existing->is_const;
     global.function_result_type = existing->function_result_type;
+    if (!global.section)
+      global.section = existing->section;
+    else
+      free(existing->section);
     free(existing->bytes);
     free(existing->relocs);
     *existing = global;
@@ -13441,6 +13531,8 @@ static bool try_collect_aggregate_global(c_parser_t *p, bool *matched) {
     if (matching_redeclaration && !replacing_incomplete_array) {
       if (!expect(p, ";"))
         return false;
+      if (p->last_type_alignment > existing->alignment)
+        existing->alignment = p->last_type_alignment;
       if (alias_target.len)
         existing->alias_target = alias_target;
       return true;
@@ -13498,6 +13590,7 @@ static bool try_collect_aggregate_global(c_parser_t *p, bool *matched) {
           global.len = agg->size * array_count;
         global.is_const = is_const;
         global.is_external = true;
+        global.alignment = p->last_type_alignment;
         global.alias_target = alias_target;
         p->globals[p->global_count++] = global;
       }
@@ -13519,6 +13612,7 @@ static bool try_collect_aggregate_global(c_parser_t *p, bool *matched) {
               &incomplete_array))
         return false;
       trailing_section = (ny_ctok_t){0};
+      p->last_type_alignment = type_alignment;
       if (!parse_trailing_file_scope_attributes(p, &trailing_section))
         return false;
       has_initializer = accept(p, "=");
@@ -13540,6 +13634,7 @@ static bool try_collect_aggregate_global(c_parser_t *p, bool *matched) {
                          .array_rank = array_rank,
                          .array_stride = array_stride,
                          .is_const = is_const,
+                         .alignment = p->last_type_alignment,
                          .is_tentative = true};
     if (!expect(p, ";"))
       return false;
@@ -13547,6 +13642,8 @@ static bool try_collect_aggregate_global(c_parser_t *p, bool *matched) {
       if (replacing_incomplete_array) {
         free(existing->bytes);
         free(existing->relocs);
+        if (existing->alignment > global.alignment)
+          global.alignment = existing->alignment;
         *existing = global;
       }
     } else {
@@ -13571,6 +13668,8 @@ static bool try_collect_aggregate_global(c_parser_t *p, bool *matched) {
           fail(p, "incompatible repeated file-scope aggregate declaration");
           return false;
         }
+        if (p->last_type_alignment > previous->alignment)
+          previous->alignment = p->last_type_alignment;
       } else {
         if (p->global_count >= p->global_capacity) {
           fail(p, "C frontend global-variable storage capacity exceeded");
@@ -13591,6 +13690,7 @@ static bool try_collect_aggregate_global(c_parser_t *p, bool *matched) {
                          .array_rank = array_rank,
                          .array_stride = array_stride,
                          .is_const = is_const,
+                         .alignment = p->last_type_alignment,
                          .is_tentative = true};
       }
       if (!accept(p, ","))
@@ -13656,6 +13756,7 @@ static bool try_collect_aggregate_global(c_parser_t *p, bool *matched) {
               &array_rank, &array_stride, array_extents, &incomplete_array))
         return false;
       trailing_section = (ny_ctok_t){0};
+      p->last_type_alignment = type_alignment;
       if (!parse_trailing_file_scope_attributes(p, &trailing_section) ||
           trailing_section.len) {
         fail(p, "placement attributes on repeated aggregate declarators are "
@@ -13715,7 +13816,7 @@ static bool try_collect_aggregate_global(c_parser_t *p, bool *matched) {
                        .array_rank = array_rank,
                        .array_stride = array_stride,
                        .is_const = is_const,
-                       .alignment = type_alignment};
+                       .alignment = p->last_type_alignment};
   if (type_section.len && trailing_section.len &&
       !tok_same(type_section, trailing_section)) {
     free(bytes);
@@ -13967,6 +14068,8 @@ static bool try_collect_aggregate_global(c_parser_t *p, bool *matched) {
            array_rank * sizeof(*array_extents));
   }
   if (existing) {
+    if (existing->alignment > global.alignment)
+      global.alignment = existing->alignment;
     free(existing->bytes);
     free(existing->relocs);
     free(existing->section);
@@ -14940,14 +15043,28 @@ static bool try_collect_function_pointer_global(c_parser_t *p, bool *matched) {
                       .section = section_name});
 }
 
+static bool valid_named_object_segment(c_parser_t *p, unsigned char segment,
+                                       c_type_t type, bool array) {
+  if (!segment || (!array && (c_type_is_integer(type) || type == C_F64) &&
+                   (p->abi == NYC_ABI_SYSV_X86_64 || p->abi == NYC_ABI_I386)))
+    return true;
+  fail(p, "segment-qualified named C object requires a supported x86 scalar");
+  return false;
+}
+
 static bool
 record_uninitialized_scalar_global(c_parser_t *p, ny_ctok_t name, c_type_t type,
                                    size_t size, bool is_external, bool is_const,
                                    c_type_t function_result_type,
                                    c_agg_type_t *function_result_agg) {
+  bool pointer = c_type_is_pointer(type);
+  unsigned char object_seg = pointer ? C_SEG_NONE : p->last_type_seg;
+  if (!valid_named_object_segment(p, object_seg, type, p->last_type_is_array))
+    return false;
   c_global_t *previous = find_global(p, name);
   if (previous) {
     if (previous->type != type || previous->is_const != is_const ||
+        previous->object_seg != object_seg ||
         (type == C_FUNC_PTR &&
          previous->function_result_type != function_result_type)) {
       fail(p, "incompatible repeated file-scope scalar declaration");
@@ -14982,6 +15099,10 @@ record_uninitialized_scalar_global(c_parser_t *p, ny_ctok_t name, c_type_t type,
                    .bytes = bytes,
                    .len = is_external ? 0 : size,
                    .type = type,
+                   .object_seg = object_seg,
+                   .pointee_seg = pointer ? p->last_type_seg : C_SEG_NONE,
+                   .is_volatile = p->last_type_volatile &&
+                                  !c_type_is_arithmetic_pointer(type),
                    .is_const = is_const,
                    .function_result_type = function_result_type,
                    .agg = function_result_agg,
@@ -15162,6 +15283,7 @@ static bool try_collect_initialized_scalar_global_list(c_parser_t *p,
   c_type_t function_result_type = p->last_type_function_result_type;
   bool base_const = p->last_type_const;
   bool base_volatile = p->last_type_volatile;
+  unsigned char base_seg = p->last_type_seg;
   bool is_long_long = p->last_type_long_long;
   unsigned pointer_depth = p->last_type_pointer_count;
   type = parsed_type;
@@ -15178,6 +15300,10 @@ static bool try_collect_initialized_scalar_global_list(c_parser_t *p,
       is_const = c_type_is_pointer(type) ? pointer_const : base_const;
     }
     first = false;
+    bool pointer = c_type_is_pointer(type);
+    unsigned char object_seg = pointer ? C_SEG_NONE : base_seg;
+    if (!valid_named_object_segment(p, object_seg, type, p->last_type_is_array))
+      return false;
     size_t size = c_type_size(p->abi, type);
     if (!size || size > sizeof(uint64_t)) {
       fail(p, "initialized scalar declaration list has unsupported type");
@@ -15198,6 +15324,10 @@ static bool try_collect_initialized_scalar_global_list(c_parser_t *p,
     }
     bool has_initializer = accept(p, "=");
     c_global_t *previous = find_global(p, name);
+    if (previous && previous->object_seg != object_seg) {
+      fail(p, "incompatible segment qualifier on C object redeclaration");
+      return false;
+    }
     if (previous && !has_initializer && !previous->is_external) {
       if (previous->type != type || previous->agg != agg ||
           previous->is_const != is_const) {
@@ -15287,6 +15417,8 @@ static bool try_collect_initialized_scalar_global_list(c_parser_t *p,
           .reloc_count = initializer.reloc_count,
           .reloc_capacity = initializer.reloc_capacity,
           .type = type,
+          .object_seg = object_seg,
+          .pointee_seg = pointer ? base_seg : C_SEG_NONE,
           .pointer_base_type = base_type,
           .pointer_depth = pointer_depth,
           .function_result_type = function_result_type,
@@ -15373,6 +15505,12 @@ static bool try_collect_scalar_global(c_parser_t *p, bool *matched) {
   bool is_long_long = p->last_type_long_long;
   bool global_is_volatile = p->last_type_volatile;
   bool typedef_array = p->last_type_is_array;
+  unsigned char pointee_seg =
+      c_type_is_pointer(type) ? p->last_type_seg : C_SEG_NONE;
+  unsigned char object_seg =
+      c_type_is_pointer(type) ? C_SEG_NONE : p->last_type_seg;
+  if (!valid_named_object_segment(p, object_seg, type, typedef_array))
+    return false;
   size_t typedef_array_size = p->last_type_array_size;
   c_array_shape_t typedef_array_shape = p->last_type_array;
   bool is_const =
@@ -15391,6 +15529,7 @@ static bool try_collect_scalar_global(c_parser_t *p, bool *matched) {
   ny_ctok_t section_token = p->last_type_section.len ? p->last_type_section
                             : pre_name_section.len   ? pre_name_section
                                                      : trailing_section;
+  size_t alignment = p->last_type_alignment;
   char section_copy[64] = {0};
   if (section_token.len &&
       !copy_quoted_token(p, section_token, section_copy, sizeof(section_copy)))
@@ -15429,7 +15568,8 @@ static bool try_collect_scalar_global(c_parser_t *p, bool *matched) {
       c_global_t *previous = find_global(p, name);
       if (previous) {
         if (previous->type != type || previous->agg != type_agg ||
-            !previous->is_external || previous->is_const != is_const) {
+            !previous->is_external || previous->is_const != is_const ||
+            previous->object_seg != object_seg) {
           fail(p, "incompatible declaration of external C symbol");
           return false;
         }
@@ -15441,6 +15581,10 @@ static bool try_collect_scalar_global(c_parser_t *p, bool *matched) {
         p->globals[p->global_count++] = (c_global_t){
             .name = name,
             .type = type,
+            .object_seg = object_seg,
+            .pointee_seg = pointee_seg,
+            .is_volatile =
+                global_is_volatile && !c_type_is_arithmetic_pointer(type),
             .agg = type_agg,
             .is_array = typedef_array,
             .array_rank = typedef_array ? typedef_array_shape.rank : 0,
@@ -15574,6 +15718,8 @@ static bool try_collect_scalar_global(c_parser_t *p, bool *matched) {
     return false;
   }
   c_global_t *previous = find_global(p, name);
+  if (previous && previous->alignment < alignment)
+    previous->alignment = alignment;
   if (is_global_register || (previous && previous->has_asm_register)) {
     /*
      * Global register bindings must be declared identically everywhere
@@ -15625,6 +15771,12 @@ static bool try_collect_scalar_global(c_parser_t *p, bool *matched) {
       fail(p, "conflicting section attributes on a file-scope C object");
       return false;
     }
+  }
+  if (previous && previous->object_seg != object_seg) {
+    free(bytes);
+    free(relocs);
+    fail(p, "incompatible segment qualifier on C object redeclaration");
+    return false;
   }
   if (previous && is_external && !previous->is_external &&
       !previous->is_tentative) {
@@ -15722,8 +15874,7 @@ static bool try_collect_scalar_global(c_parser_t *p, bool *matched) {
       previous->relocs = relocs;
       previous->reloc_count = reloc_count;
       previous->type = type;
-      previous->pointee_seg =
-          c_type_is_pointer(type) ? p->last_type_seg : C_SEG_NONE;
+      previous->pointee_seg = pointee_seg;
       previous->agg = type_agg;
       previous->function_result_type = function_result_type;
       previous->is_long_long = is_long_long;
@@ -15758,7 +15909,8 @@ static bool try_collect_scalar_global(c_parser_t *p, bool *matched) {
       .relocs = relocs,
       .reloc_count = reloc_count,
       .type = type,
-      .pointee_seg = c_type_is_pointer(type) ? p->last_type_seg : C_SEG_NONE,
+      .pointee_seg = pointee_seg,
+      .object_seg = object_seg,
       .pointer_base_type = pointer_base_type,
       .pointer_depth = pointer_depth,
       .is_long_long = is_long_long,
@@ -15772,6 +15924,7 @@ static bool try_collect_scalar_global(c_parser_t *p, bool *matched) {
       .is_const = is_const,
       .is_external = is_external,
       .is_tentative = !is_external && !has_initializer,
+      .alignment = alignment,
       .alias_target = alias_target};
   registered->section = section_copy[0] ? strdup(section_copy) : NULL;
   if (section_copy[0] && !registered->section) {
@@ -15939,7 +16092,7 @@ static bool parse_signature(c_parser_t *p, c_function_t *fn) {
    * declaration's section until the enclosing function parser consumes it.
    */
   ny_ctok_t function_section = p->last_type_section;
-  bool result_is_bool = p->last_type_bool;
+  bool result_is_bool = p->last_type_bool && !c_type_is_pointer(result);
   c_agg_type_t *result_agg =
       result == C_AGG || result == C_AGG_PTR || result == C_AGG_PTR_PTR
           ? p->last_type_agg
@@ -15959,6 +16112,7 @@ static bool parse_signature(c_parser_t *p, c_function_t *fn) {
     ++p->pos;
     result = C_FUNC_PTR;
     result_agg = NULL;
+    result_is_bool = false;
   } else if (function_type_declarator) {
     ++p->pos;
     name = *current(p);
@@ -16251,7 +16405,7 @@ static bool parse_signature(c_parser_t *p, c_function_t *fn) {
                 type == C_FUNC_PTR ? callback_result_type : C_BAD,
             .agg = param_agg,
             .is_const = is_const,
-            .is_bool = is_bool_param,
+            .is_bool = is_bool_param && !c_type_is_pointer(type),
             .pointee_const = c_type_is_pointer(type) && p->last_type_const,
             .is_volatile = is_volatile,
             .pointee_volatile = pointee_volatile,
@@ -19665,6 +19819,7 @@ static bool parser_preprocess(c_parser_t *p, const nyc_source_t *source,
   p->path_map_count = source->path_map_count;
   p->unsigned_char = source->unsigned_char;
   p->no_builtin = source->no_builtin;
+  p->disable_sse = source->disable_sse;
   p->i386_regparm = source->i386_regparm;
   p->optimization = source->optimization;
   p->ms_extensions = source->ms_extensions;
@@ -20368,6 +20523,7 @@ static bool parser_prepare(c_parser_t *p, const nyc_source_t *source,
   p->function_capacity = p->token_count;
   p->typedef_capacity = p->token_count;
   p->global_capacity = p->token_count;
+  p->allow_raw_file_assembly = source->allow_raw_file_assembly;
   if (collect_functions(p))
     return true;
   if (!err[0])

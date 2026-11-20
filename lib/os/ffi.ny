@@ -19,7 +19,7 @@ module core.os.ffi(generate, gen_file, RTLD_LAZY, RTLD_NOW, RTLD_GLOBAL, RTLD_LO
    pointer4uint32uint64pointerint32, pointer4uint64pointerpointerint32, pointer3uint64pointerint32,
    pointer5pointerpointeruint64int32int32)
 use core
-use core.dict_mod as _d
+use core.dict as _d
 use core.os.prim
 use core.os.path as ospath
 use core.str as str

@@ -1,6 +1,5 @@
 .text
 .globl __x86_indirect_thunk_r11
-.type __x86_indirect_thunk_r11,@function
 __x86_indirect_thunk_r11:
  call .Lspeculation_trap
 .Lspeculation_loop:
@@ -10,4 +9,3 @@ __x86_indirect_thunk_r11:
 .Lspeculation_trap:
  mov %r11,(%rsp)
  ret
-.size __x86_indirect_thunk_r11, .-__x86_indirect_thunk_r11

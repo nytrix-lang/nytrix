@@ -5,7 +5,7 @@
 ;; - core.math.parse
 module core.math.parse.img.svg(decode, load_path, available, last_error, backend_name)
 use core
-use core.dict_mod as dict_mod
+use core.dict as dict_api
 use core.str as str
 use core.math as math
 use core.os as os
@@ -554,7 +554,7 @@ fn _state_root(list transform) dict {
 }
 
 fn _state_child(dict parent, any attrs) dict {
-   mut s = dict_mod.dict_clone(parent)
+   mut s = dict_api.dict_clone(parent)
    def op = _opacity(_style_attr(attrs, "opacity", 1.0), 1.0)
    s["opacity"] = float(parent.get("opacity", 1.0)) * op
    def color_raw = _style_attr(attrs, "color", 0)
@@ -573,13 +573,13 @@ fn _state_child(dict parent, any attrs) dict {
    }
    def fill_op = _style_attr(attrs, "fill-opacity", 0)
    if fill_op && is_dict(s["fill"]) {
-      def fc = dict_mod.dict_clone(s["fill"])
+      def fc = dict_api.dict_clone(s["fill"])
       fc["a"] = _clamp01(float(fc.get("a", 1.0)) * _opacity(fill_op, 1.0))
       s["fill"] = fc
    }
    def stroke_op = _style_attr(attrs, "stroke-opacity", 0)
    if stroke_op && is_dict(s["stroke"]) {
-      def sc = dict_mod.dict_clone(s["stroke"])
+      def sc = dict_api.dict_clone(s["stroke"])
       sc["a"] = _clamp01(float(sc.get("a", 1.0)) * _opacity(stroke_op, 1.0))
       s["stroke"] = sc
    }
@@ -1247,7 +1247,7 @@ fn _draw_node(any out, int w, int h, any node, dict state, dict defs, int depth=
    def class_str = to_str(attrs_raw.get("class", ""))
    mut attrs = attrs_raw
    if class_str.len > 0 && defs.contains("__css__") {
-      attrs = is_dict(attrs_raw) ? dict_mod.dict_clone(attrs_raw) : dict()
+      attrs = is_dict(attrs_raw) ? dict_api.dict_clone(attrs_raw) : dict()
       def css = defs["__css__"]
       def classes = str.split(class_str, " ")
       mut ci = 0
@@ -1273,7 +1273,7 @@ fn _draw_node(any out, int w, int h, any node, dict state, dict defs, int depth=
       mut href = to_str(attrs.get("xlink:href", attrs.get("href", "")))
       if str.startswith(href, "#") { href = str.str_slice(href, 1, href.len) }
       if defs.contains(href) {
-         mut use_state = dict_mod.dict_clone(st)
+         mut use_state = dict_api.dict_clone(st)
          def tx = _num(attrs.get("x", 0.0), 0.0)
          def ty = _num(attrs.get("y", 0.0), 0.0)
          if tx != 0.0 || ty != 0.0 { use_state["transform"] = _mat_mul(use_state.get("transform", _mat_identity()), _mat_translate(tx, ty)) }

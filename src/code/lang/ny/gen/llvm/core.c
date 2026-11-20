@@ -389,9 +389,14 @@ bool ny_emit_module_match(codegen_t *cg, const char *cur_mod) {
    */
   {
     char buf[512];
-    int len = snprintf(buf, sizeof(buf), "[DEBUG] ny_emit_module_match: cg=%p, emit_module='%s', cur_mod='%s'\n",
-             (void*)cg, cg ? cg->emit_module_name : "NULL", cur_mod);
-    write(2, buf, len);
+    int len = snprintf(buf, sizeof(buf),
+                       "[DEBUG] ny_emit_module_match: cg=%p, emit_module='%s', cur_mod='%s'\n",
+                       (void *)cg, cg ? cg->emit_module_name : "NULL",
+                       cur_mod);
+    if (len > 0)
+      (void)fwrite(buf, 1, (size_t)len < sizeof(buf) ? (size_t)len
+                                                    : sizeof(buf) - 1,
+                   stderr);
   }
   if (!cg || !cg->emit_module_name)
     return true;
@@ -417,9 +422,13 @@ bool ny_emit_module_match(codegen_t *cg, const char *cur_mod) {
     return true;
   {
     char buf[512];
-    int len = snprintf(buf, sizeof(buf), "[DEBUG] ny_emit_module_match: emit_module='%s', cur_mod='%s', returning false\n",
-             cg->emit_module_name, cur_mod);
-    write(2, buf, len);
+    int len = snprintf(buf, sizeof(buf),
+                       "[DEBUG] ny_emit_module_match: emit_module='%s', cur_mod='%s', returning false\n",
+                       cg->emit_module_name, cur_mod);
+    if (len > 0)
+      (void)fwrite(buf, 1, (size_t)len < sizeof(buf) ? (size_t)len
+                                                    : sizeof(buf) - 1,
+                   stderr);
   }
   return false;
 }

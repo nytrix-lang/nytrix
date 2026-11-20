@@ -30,7 +30,7 @@ use core.os.sys
 use core.io
 use core.os.path as ospath
 use core.os.net (requests_get_parsed)
-use core.dict_mod
+use core.dict
 use core.os.prim as osprim
 use core.os.gpu as osg
 use core.os.parallel as ospar

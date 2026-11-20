@@ -111,9 +111,11 @@ typedef struct {
   bool short_wchar;
   bool unsigned_char;
   bool no_builtin;
+  bool disable_sse;
   bool ms_extensions;
   bool plan9_extensions;
   bool system_includes;
+  bool allow_raw_file_assembly;
   /* Preprocessing assembly (.S) keeps horizontal whitespace significant. */
   bool assembly_input;
   unsigned i386_regparm;

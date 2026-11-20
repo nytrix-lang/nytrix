@@ -10,8 +10,6 @@ selected by a literal value, literal set, range, wildcard, or value shape.
 - [Arm order and exhaustiveness](#arm-order)
 - [Diagnostics](#diagnostics)
 
-> **Note:** The names below are grammar placeholders, not a standalone program.
-
 ```ny
 case value { 1 -> "one" }
 match value { Option.Some(item) -> item }

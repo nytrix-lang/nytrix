@@ -7,7 +7,7 @@ shape test_dict_native_len {
   expect compile_and_run
   source ny <<'NY'
 use core (dict_get, dict_set)
-use core.dict_mod (dict_len)
+use core.dict (dict_len)
 
 fn typed_len(dict d) int { d.len }
 

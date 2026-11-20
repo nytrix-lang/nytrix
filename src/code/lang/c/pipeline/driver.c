@@ -1,6 +1,7 @@
 /*
  * Command-line driver and option dispatch for the standalone C compiler.
  */
+#include "base/compat.h"
 #include "base/debug.h"
 #include "code/lang/c/parser/parse.h"
 
@@ -190,6 +191,64 @@ static bool nyc_func_uses_va_list(const nyr_func_t *func) {
   return false;
 }
 
+/* Keep the SysV va_list layout, but expose no vector argument slots when the
+ * target disables SSE. Early kernel callers can execute with CR4.OSFXSR=0. */
+static void nyc_use_integer_varargs(nyr_func_t *func) {
+  for (size_t i = 0; i < func->len; ++i) {
+    nyr_inst_t *in = &func->data[i];
+    if (in->op == NYIR_VA_SAVE)
+      in->imm = 48;
+    else if (in->op == NYIR_VA_START)
+      in->imm = (in->imm & ~INT64_C(0xffff0000)) | (INT64_C(176) << 16);
+  }
+}
+
+/* -fconserve-stack must not disable inlining of small leaves without
+ * addressable frame objects or outgoing calls. */
+static bool nyc_stackless_inline_candidate(const nyr_func_t *func) {
+  if (func->len > 24 || func->return_aggregate_size || func->param_count > 6)
+    return false;
+  size_t returns = 0;
+  for (size_t i = 0; i < func->len; ++i) {
+    const nyr_inst_t *in = &func->data[i];
+    switch (in->op) {
+    case NYIR_LOAD_LOCAL:
+    case NYIR_STORE_LOCAL:
+      if (in->imm < 0 || (uint64_t)in->imm >= func->param_count)
+        return false;
+      break;
+    case NYIR_INLINE_ASM:
+      /* This private NYIR form is the logical shift operator, not user asm. */
+      if (in->imm != -23 || !in->symbol ||
+          strcmp(in->symbol, "unsigned-shift-right") != 0)
+        return false;
+      break;
+    case NYIR_RET:
+      ++returns;
+      break;
+    case NYIR_NOP:
+    case NYIR_LABEL:
+    case NYIR_COPY:
+    case NYIR_CONST_I64:
+    case NYIR_LOAD_I64:
+    case NYIR_STORE_I64:
+    case NYIR_ADD_I64:
+    case NYIR_SUB_I64:
+    case NYIR_AND_I64:
+    case NYIR_OR_I64:
+    case NYIR_XOR_I64:
+    case NYIR_SHL_I64:
+    case NYIR_SAR_I64:
+    case NYIR_CMP_I64:
+    case NYIR_SELECT_I64:
+      break;
+    default:
+      return false;
+    }
+  }
+  return returns == 1;
+}
+
 /*
  * VA_START owns the ABI-specific initialization sequence and VA_SAVE may
  * expose the register-save area. Keep those functions out of the generic
@@ -319,9 +378,11 @@ typedef struct {
   bool no_std_includes;
   bool threaded;
   bool disable_vectorization;
+  bool disable_sse;
   bool conserve_stack;
   bool omit_frame_pointer;
   bool position_independent;
+  bool position_independent_disabled;
   bool retpoline_indirect_calls;
   bool retpoline_inline_calls;
   bool function_return_thunk_extern;
@@ -337,6 +398,7 @@ typedef struct {
   bool dump_macros;
   bool print_file_name_plugin;
   bool assembler_fatal_warnings;
+  bool stats;
 } nyc_driver_t;
 
 static nyr_inst_t nyc_guard_inst(nyr_op_t op) {
@@ -1509,8 +1571,7 @@ static bool write_c_unit_assembly(
         }
         if (strcmp(target->object_format, "elf") == 0 &&
             target->abi == NY_NATIVE_ABI_SYSV &&
-            (!has_memory_access || !getenv("NYC_DISABLE_MACH_MEM_ASM")) &&
-            !retpoline_indirect_calls && !retpoline_inline_calls) {
+            (!has_memory_access || !getenv("NYC_DISABLE_MACH_MEM_ASM"))) {
           nyr_mach_func_t machine = {0};
           nyr_writer_t native = {0};
           char machine_err[256] = {0};
@@ -1527,6 +1588,8 @@ static bool write_c_unit_assembly(
              * C ABI: plain entry, no language runtime startup.
              */
             machine.c_abi = true;
+            machine.x64_indirect_thunk = retpoline_indirect_calls;
+            machine.x64_inline_thunk = retpoline_inline_calls;
             for (size_t ii = 0; ii < machine.inst_len; ++ii)
               if (machine.insts[ii].opcode == NYR_MACH_CALL)
                 machine.insts[ii].call_is_extern = true;
@@ -1811,9 +1874,11 @@ static int compile_source(int argc, char **argv, int source_arg,
       .short_wchar = driver->short_wchar,
       .unsigned_char = driver->unsigned_char,
       .no_builtin = driver->no_builtin,
+      .disable_sse = driver->disable_sse,
       .i386_regparm = driver->i386_regparm,
       .ms_extensions = driver->ms_extensions,
       .plan9_extensions = driver->plan9_extensions,
+      .allow_raw_file_assembly = driver->kernel_model,
       .system_includes = !driver->no_std_includes && !driver->target};
   input.optimization = (unsigned)driver->optimization;
   const char *output_path = driver->output       ? driver->output
@@ -1918,15 +1983,19 @@ static int compile_source(int argc, char **argv, int source_arg,
       static const char disabled[] =
           "loop_unroll,unroll_jam,loop_peel,loop_unswitch,loop_versioning,"
           "loop_predication,softpipe_rewrite,loop_vectorize,slp_vectorize";
+      /* The i386 encoder keeps frame homes across branches. Promoting
+       * source locals here adds PHI edge copies without freeing those homes. */
+      const char *target_disabled = abi == NYC_ABI_I386 ? ",mem2reg" : "";
       const char *user = getenv("NYC_DISABLE_PASS");
-      size_t bytes = sizeof(disabled) + (user ? strlen(user) : 0) + 1;
+      size_t bytes = sizeof(disabled) + strlen(target_disabled) +
+                     (user ? strlen(user) : 0) + 1;
       size_disabled_passes = malloc(bytes);
       if (!size_disabled_passes) {
         snprintf(err, sizeof(err), "cannot prepare size optimization controls");
         ok = false;
       } else {
-        snprintf(size_disabled_passes, bytes, "%s,%s", disabled,
-                 user ? user : "");
+        snprintf(size_disabled_passes, bytes, "%s%s,%s", disabled,
+                 target_disabled, user ? user : "");
         nyr_set_pass_controls(size_disabled_passes, NULL);
       }
     }
@@ -1939,6 +2008,8 @@ static int compile_source(int argc, char **argv, int source_arg,
     nyr_set_preserve_phis(true);
     for (size_t i = 0; ok && i < unit.count; i++) {
       const char *stage = "before optimization";
+      if (abi != NYC_ABI_I386 && driver->disable_sse)
+        nyc_use_integer_varargs(&unit.funcs[i]);
       ok = nyr_verify(&unit.funcs[i], err, sizeof(err));
       if (ok && driver->disable_vectorization &&
           nyc_func_uses_fp_or_simd(&unit.funcs[i])) {
@@ -1956,21 +2027,21 @@ static int compile_source(int argc, char **argv, int source_arg,
         stage = "during tail-call optimization";
         ok = nyr_tail_call(&unit.funcs[i], unit.names[i]);
       }
-      if (ok && !nyc_func_initializes_va_list(&unit.funcs[i])) {
+      if (ok && nyc_func_initializes_va_list(&unit.funcs[i])) {
+        /* Fold constant dispatch before it can leave unreachable references
+         * in ELF, without running passes that model va_list storage. */
+        stage = "during variadic control-flow cleanup";
+        ok = nyr_const_fold(&unit.funcs[i]) &&
+             nyr_cfg_simplify(&unit.funcs[i]) && nyr_dce(&unit.funcs[i]) &&
+             nyr_compact(&unit.funcs[i]);
+        if (ok)
+          nyr_refresh_metadata(&unit.funcs[i]);
+      } else if (ok) {
         stage = "during optimization";
-        if (!nyr_optimize_with_options(&unit.funcs[i], driver->optimization,
-                                       driver->disable_vectorization
-                                           ? NYR_OPT_DISABLE_VECTORIZATION
-                                           : 0,
-                                       err, sizeof(err))) {
-          fprintf(
-              stderr,
-              "NYC: warning: %s for function %s: %s (continuing unoptimized)\n",
-              stage, unit.names[i], err[0] ? err : "optimization failed");
-          err[0] = '\0';
-          ok = true;
-          stage = "after optimization fallback";
-        }
+        ok = nyr_optimize_with_options(
+            &unit.funcs[i], driver->optimization,
+            driver->disable_vectorization ? NYR_OPT_DISABLE_VECTORIZATION : 0,
+            err, sizeof(err));
       }
       /*
        * Keep NYC's whole-unit pipeline aligned with the native language
@@ -1984,17 +2055,10 @@ static int compile_source(int argc, char **argv, int source_arg,
         if (ok && unit.funcs[i].len != before_tail_call) {
           stage = "during recursive-add cleanup";
           unit.funcs[i].untagged_values = true;
-          if (!nyr_optimize_with_options(&unit.funcs[i], driver->optimization,
-                                         driver->disable_vectorization
-                                             ? NYR_OPT_DISABLE_VECTORIZATION
-                                             : 0,
-                                         err, sizeof(err))) {
-            fprintf(stderr,
-                    "NYC: warning: %s for function %s: %s (continuing "
-                    "unoptimized)\n",
-                    stage, unit.names[i], err[0] ? err : "optimization failed");
-            err[0] = '\0';
-          }
+          ok = nyr_optimize_with_options(
+              &unit.funcs[i], driver->optimization,
+              driver->disable_vectorization ? NYR_OPT_DISABLE_VECTORIZATION : 0,
+              err, sizeof(err));
         }
       }
       if (ok && driver->disable_vectorization &&
@@ -2018,59 +2082,52 @@ static int compile_source(int argc, char **argv, int source_arg,
       }
     }
     /*
-     * C's always_inline contract applies at every optimization level. Static
-     * alternative helpers also need their feature arguments specialized before
-     * their inline assembly is emitted. Run the cloner only on those required
-     * callees; ordinary inline candidates keep the selected optimization
-     * level's policy.
+     * Resolve always_inline and constant-dependent assembly before optional
+     * stackless inlining can spend the per-function splice budget.
      */
-    nyr_inline_callee_t *static_feature_callees = NULL;
-    size_t static_feature_callee_count = 0;
-    if (ok && inline_callee_count) {
-      static_feature_callees =
-          calloc(inline_callee_count, sizeof(*static_feature_callees));
-      if (!static_feature_callees) {
-        snprintf(err, sizeof(err),
-                 "out of memory preparing static-feature inline helpers");
-        ok = false;
-      } else {
+    nyr_inline_callee_t *targeted_callees =
+        ok && inline_callee_count
+            ? ny_malloc_array(inline_callee_count, sizeof(*targeted_callees))
+            : NULL;
+    if (ok && inline_callee_count && !targeted_callees) {
+      snprintf(err, sizeof(err),
+               "out of memory preparing targeted C inline helpers");
+      ok = false;
+    }
+    if (targeted_callees) {
+      unsigned passes =
+          driver->conserve_stack && driver->optimization >= 1 ? 2u : 1u;
+      for (unsigned pass = 0; ok && pass < passes; ++pass) {
+        size_t targeted_callee_count = 0;
         for (size_t c = 0; c < inline_callee_count; ++c) {
-          bool required = false;
-          for (size_t f = 0; f < unit.count; ++f)
-            required |= inline_callees[c].func == &unit.funcs[f] &&
-                        unit.function_always_inline[f];
-          if (required) {
-            static_feature_callees[static_feature_callee_count++] =
-                inline_callees[c];
-            continue;
-          }
-          for (size_t inst = 0; inst < inline_callees[c].func->len; ++inst)
-            if (inline_callees[c].func->data[inst].op == NYIR_INLINE_ASM &&
-                inline_callees[c].func->data[inst].imm == -100) {
-              static_feature_callees[static_feature_callee_count++] =
-                  inline_callees[c];
-              break;
-            }
+          const nyr_func_t *callee = inline_callees[c].func;
+          size_t fn = (size_t)(callee - unit.funcs);
+          bool required = unit.function_always_inline[fn];
+          for (size_t inst = 0; !required && inst < callee->len; ++inst)
+            required = callee->data[inst].op == NYIR_INLINE_ASM &&
+                       callee->data[inst].imm == -100;
+          if (pass == 0 ? required
+                        : !required && unit.function_local[fn] &&
+                              unit.function_inline[fn] &&
+                              nyc_stackless_inline_candidate(callee))
+            targeted_callees[targeted_callee_count++] = inline_callees[c];
         }
-      }
-      if (ok && static_feature_callee_count) {
-        nyr_set_inline_callees(static_feature_callees,
-                               static_feature_callee_count);
+        if (!targeted_callee_count)
+          continue;
+        nyr_set_inline_callees(targeted_callees, targeted_callee_count);
         for (size_t i = 0; ok && i < unit.count; ++i) {
-          bool has_static_feature_call = false;
+          bool targeted = false;
           for (size_t inst = 0; inst < unit.funcs[i].len; ++inst) {
             const nyr_inst_t *call = &unit.funcs[i].data[inst];
             if (call->op != NYIR_CALL || !call->symbol)
               continue;
-            for (size_t c = 0; c < static_feature_callee_count; ++c)
-              has_static_feature_call |=
-                  strcmp(call->symbol, static_feature_callees[c].name) == 0;
+            for (size_t c = 0; c < targeted_callee_count; ++c)
+              targeted |= strcmp(call->symbol, targeted_callees[c].name) == 0;
           }
-          if (!has_static_feature_call)
+          if (!targeted)
             continue;
           if (!nyr_inline_general(&unit.funcs[i])) {
-            snprintf(err, sizeof(err),
-                     "failed to specialize static-feature calls in %s",
+            snprintf(err, sizeof(err), "failed targeted C inlining in %s",
                      unit.names[i]);
             ok = false;
             break;
@@ -2080,33 +2137,28 @@ static int compile_source(int argc, char **argv, int source_arg,
                                          driver->disable_vectorization
                                              ? NYR_OPT_DISABLE_VECTORIZATION
                                              : 0,
-                                         err, sizeof(err))) {
-            fprintf(stderr,
-                    "NYC: warning: NYIR cleanup after static-feature inlining "
-                    "for %s: %s (continuing unoptimized)\n",
-                    unit.names[i], err[0] ? err : "optimization failed");
-            err[0] = '\0';
-          }
-          if (!nyr_verify(&unit.funcs[i], err, sizeof(err))) {
+                                         err, sizeof(err)) ||
+              !nyr_verify(&unit.funcs[i], err, sizeof(err))) {
             char detail[sizeof(err)];
             memcpy(detail, err, sizeof(detail));
             detail[sizeof(detail) - 1] = '\0';
             snprintf(err, sizeof(err),
-                     "NYIR verify after static-feature inlining for %s: "
+                     "NYIR cleanup after targeted C inlining for %s: "
                      "%.360s",
-                     unit.names[i], detail);
+                     unit.names[i], detail[0] ? detail : "optimization failed");
             ok = false;
           }
         }
-        nyr_set_inline_callees(inline_callees, inline_callee_count);
       }
+      nyr_set_inline_callees(inline_callees, inline_callee_count);
     }
-    free(static_feature_callees);
+    free(targeted_callees);
     /*
      * Size builds can shrink a one-use helper by removing its call boundary,
      * including helpers with bounded control flow and fixed-size stack
-     * objects. Reject dynamic-size allocation and external branch targets;
-     * keep the body budget small and decide after the earlier optimization.
+     * objects. Tiny bodies also pay back their call boundary when used more
+     * than once. Decide after optimization, so disabled-feature stubs that
+     * return a single constant can eliminate their callers' dead paths.
      */
     if (ok && driver->optimize_size && !getenv("NYC_DISABLE_SIZE_INLINE")) {
       size_t original_count = inline_callee_count;
@@ -2152,7 +2204,8 @@ static int compile_source(int argc, char **argv, int source_arg,
                 strcmp(call->symbol, unit.names[i]) == 0)
               ++call_sites;
           }
-        eligible &= call_sites == 1;
+        eligible &= call_sites == 1 ||
+                    (call_sites > 1 && work <= 1 && callee->len <= 8);
         for (size_t c = 0; c < inline_callee_count; ++c)
           if (inline_callees[c].func == callee)
             eligible = false;
@@ -2225,20 +2278,74 @@ static int compile_source(int argc, char **argv, int source_arg,
     }
     if (ok)
       ok = nyc_unit_prune_static(&unit, err, sizeof(err));
-    if (ok && !driver->no_zero_initialized_in_bss &&
-        strcmp(target_info.object_format, "elf") == 0) {
+    for (size_t f = 0; ok && f < unit.count; ++f) {
+      nyr_func_t *func = &unit.funcs[f];
+      const nyr_inst_t **defs = NULL;
+      for (size_t i = 0; ok && i < func->len; ++i) {
+        nyr_inst_t *in = &func->data[i];
+        if (in->op != NYIR_INLINE_ASM || in->imm != -196)
+          continue;
+        if (!defs) {
+          defs = calloc((size_t)func->next_value, sizeof(*defs));
+          if (!defs) {
+            snprintf(err, sizeof(err),
+                     "cannot resolve RIP-relative operands in %s",
+                     unit.names[f]);
+            ok = false;
+            break;
+          }
+          for (size_t d = 0; d < func->len; ++d)
+            if (func->data[d].dst >= 0)
+              defs[func->data[d].dst] = &func->data[d];
+        }
+        const nyr_inst_t *def = in->a < 0 ? NULL : defs[in->a];
+        while (def && def->op == NYIR_COPY)
+          def = def->a < 0 ? NULL : defs[def->a];
+        if (!def || def->op != NYIR_ADDR_SYMBOL || !def->symbol) {
+          snprintf(err, sizeof(err),
+                   "RIP-relative inline assembly in %s requires a link-time "
+                   "symbol address after inlining",
+                   unit.names[f]);
+          ok = false;
+          break;
+        }
+        in->a = -1;
+        in->symbol = def->symbol;
+      }
+      if (defs && ok)
+        ok = nyr_dce(func) && nyr_compact(func) &&
+             nyr_verify(func, err, sizeof(err));
+      free(defs);
+    }
+    if (ok && strcmp(target_info.object_format, "elf") == 0) {
       for (size_t i = 0; ok && i < unit.data_count; ++i) {
         nyc_data_t *data = &unit.data[i];
-        if (data->section || data->reloc_count || data->function_symbol ||
-            !data->len || (data->section_flags && !(data->section_flags & 1)))
+        if (data->section || data->function_symbol || !data->len)
           continue;
-        bool zero = true;
-        for (size_t b = 0; zero && b < data->len; ++b)
-          zero = data->bytes[b] == 0;
-        if (zero) {
-          data->section = strdup(".bss");
+        const char *section = NULL;
+        if (data->section_flags == 2) {
+          /* The default link driver may produce PIE even without -fPIC.
+           * Leave relocated const data writable until the loader applies its
+           * relocations, unless the user explicitly disabled PIC and PIE. */
+          if (data->reloc_count && !driver->position_independent_disabled) {
+            section = ".data.rel.ro";
+            data->section_flags = 3;
+          } else {
+            section = ".rodata";
+          }
+        } else if (!driver->no_zero_initialized_in_bss && !data->reloc_count &&
+                   (!data->section_flags || (data->section_flags & 1))) {
+          bool zero = true;
+          for (size_t b = 0; zero && b < data->len; ++b)
+            zero = data->bytes[b] == 0;
+          if (zero)
+            section = ".bss";
+        }
+        if (section) {
+          data->section = strdup(section);
           if (!data->section) {
-            snprintf(err, sizeof(err), "out of memory selecting C BSS data");
+            snprintf(err, sizeof(err),
+                     "out of memory selecting C data section");
             ok = false;
           }
         }
@@ -2298,23 +2405,26 @@ static int compile_source(int argc, char **argv, int source_arg,
         unlink(i386_path);
       }
     } else if (ok && !driver->assembly_output) {
+      bool raw_file_asm = unit.raw_file_scope_asm != NULL;
       size_t function_alias_base = unit.data_count + unit.variable_alias_count;
       size_t data_count = function_alias_base + unit.alias_count;
-      nyr_c_object_data_t *data =
-          data_count ? calloc(data_count, sizeof(*data)) : NULL;
+      nyr_c_object_data_t *data = !raw_file_asm && data_count
+                                      ? calloc(data_count, sizeof(*data))
+                                      : NULL;
       nyr_c_object_data_reloc_t **data_relocs =
-          ok && unit.data_count ? calloc(unit.data_count, sizeof(*data_relocs))
-                                : NULL;
-      if (ok && data_count && !data) {
+          !raw_file_asm && unit.data_count
+              ? calloc(unit.data_count, sizeof(*data_relocs))
+              : NULL;
+      if (!raw_file_asm && data_count && !data) {
         snprintf(err, sizeof(err), "out of memory preparing C global data");
         ok = false;
       }
-      if (ok && unit.data_count && !data_relocs) {
+      if (ok && !raw_file_asm && unit.data_count && !data_relocs) {
         snprintf(err, sizeof(err),
                  "out of memory preparing C data relocations");
         ok = false;
       }
-      for (size_t i = 0; ok && i < unit.data_count; ++i) {
+      for (size_t i = 0; ok && !raw_file_asm && i < unit.data_count; ++i) {
         if (unit.data[i].reloc_count) {
           data_relocs[i] =
               calloc(unit.data[i].reloc_count, sizeof(*data_relocs[i]));
@@ -2350,18 +2460,19 @@ static int compile_source(int argc, char **argv, int source_arg,
             .relocs = data_relocs[i],
             .reloc_count = unit.data[i].reloc_count};
       }
-      for (size_t i = 0; ok && i < unit.variable_alias_count; ++i)
+      for (size_t i = 0; ok && !raw_file_asm && i < unit.variable_alias_count;
+           ++i)
         data[unit.data_count + i] = (nyr_c_object_data_t){
             .name = unit.variable_aliases[i].name,
             .alias_target = unit.variable_aliases[i].target,
             .is_local = unit.variable_aliases[i].is_local};
-      for (size_t i = 0; ok && i < unit.alias_count; ++i)
+      for (size_t i = 0; ok && !raw_file_asm && i < unit.alias_count; ++i)
         data[function_alias_base + i] =
             (nyr_c_object_data_t){.name = unit.aliases[i].name,
                                   .alias_target = unit.aliases[i].target,
                                   .function_symbol = true,
                                   .is_weak = unit.aliases[i].is_weak};
-      if (ok)
+      if (ok && !raw_file_asm)
         ok = nyr_native_emit_elf64_c_object_from_nirs_with_data(
             unit.funcs, (const char *const *)unit.names, unit.count,
             (const char *const *)unit.function_sections, unit.function_local,
@@ -2386,7 +2497,9 @@ static int compile_source(int argc, char **argv, int source_arg,
        * `inline.asm` failure, so inspect the IR rather than only the error.
        */
       bool section_bearing = false;
-      for (size_t f = 0; f < unit.count && !section_bearing; ++f)
+      for (size_t f = 0; asm_form && !driver->kernel_model && f < unit.count &&
+                         !section_bearing;
+           ++f)
         for (size_t k = 0; k < unit.funcs[f].len && !section_bearing; ++k) {
           const nyr_inst_t *ins = &unit.funcs[f].data[k];
           section_bearing = ins->op == NYIR_INLINE_ASM && ins->symbol &&
@@ -2394,7 +2507,8 @@ static int compile_source(int argc, char **argv, int source_arg,
                              strstr(ins->symbol, ".section") != NULL ||
                              strstr(ins->symbol, "__bug_table") != NULL);
         }
-      if (!ok && asm_form && (driver->kernel_model || !section_bearing)) {
+      if (raw_file_asm ||
+          (!ok && asm_form && (driver->kernel_model || !section_bearing))) {
         /*
          * The object writer encodes a fixed set of inline-asm forms. Kernel
          * asm macros (alternatives, bug tables, atomics) are open-ended, so
@@ -2402,6 +2516,7 @@ static int compile_source(int argc, char **argv, int source_arg,
          * the object. This is loud and per-unit, never silent, and it keeps
          * the requested protections because the IR is already transformed.
          */
+        ok = false;
         char asm_path[] = "/tmp/nyc-text-XXXXXX";
         char asm_err[512] = {0};
         int fd = mkstemp(asm_path);
@@ -2437,8 +2552,10 @@ static int compile_source(int argc, char **argv, int source_arg,
           } else {
             fprintf(stderr,
                     "nyc: note: %s: emitted through GNU as (object writer "
-                    "has no encoding for an inline-asm form)\n",
-                    argv[source_arg]);
+                    "has no encoding for %s)\n",
+                    argv[source_arg],
+                    raw_file_asm ? "file-scope assembly"
+                                 : "an inline-asm form");
             ok = true;
             err[0] = '\0';
           }
@@ -2471,6 +2588,8 @@ static int compile_source(int argc, char **argv, int source_arg,
                                 sizeof(err)) &&
            nyr_verify(&ir, err, sizeof(err));
     }
+    if (ok && abi != NYC_ABI_I386 && driver->disable_sse)
+      nyc_use_integer_varargs(&ir);
     if (ok && driver->disable_vectorization && nyc_func_uses_fp_or_simd(&ir)) {
       snprintf(err, sizeof(err),
                "floating-point or SIMD code is incompatible with "
@@ -2479,17 +2598,11 @@ static int compile_source(int argc, char **argv, int source_arg,
     }
     if (ok && getenv("NYC_DISABLE_PASS"))
       nyr_set_pass_controls(getenv("NYC_DISABLE_PASS"), NULL);
-    if (ok && !nyc_func_uses_va_list(&ir) &&
-        !nyr_optimize_with_options(
-            &ir, driver->optimization,
-            driver->disable_vectorization ? NYR_OPT_DISABLE_VECTORIZATION : 0,
-            err, sizeof(err))) {
-      fprintf(stderr,
-              "NYC: warning: optimization failed for %s: %s (continuing "
-              "unoptimized)\n",
-              argv[argc - 1], err[0] ? err : "optimization failed");
-      err[0] = '\0';
-    }
+    if (ok && !nyc_func_uses_va_list(&ir))
+      ok = nyr_optimize_with_options(
+          &ir, driver->optimization,
+          driver->disable_vectorization ? NYR_OPT_DISABLE_VECTORIZATION : 0,
+          err, sizeof(err));
     if (ok && driver->disable_vectorization && nyc_func_uses_fp_or_simd(&ir)) {
       snprintf(err, sizeof(err),
                "optimizer introduced floating-point or SIMD code under "
@@ -2580,6 +2693,10 @@ int main(int argc, char **argv) {
       printf("NYC (Nytrix C frontend, NYR backend) %s\n", ny_version_id());
       result = 0;
       goto done;
+    }
+    if (strcmp(option, "--stats") == 0) {
+      driver.stats = true;
+      continue;
     }
     if (strcmp(option, "-E") == 0) {
       driver.preprocess = true;
@@ -2887,11 +3004,13 @@ int main(int argc, char **argv) {
     if (strcmp(option, "-fPIC") == 0 || strcmp(option, "-fpic") == 0 ||
         strcmp(option, "-fPIE") == 0) {
       driver.position_independent = true;
+      driver.position_independent_disabled = false;
       continue;
     }
     if (strcmp(option, "-fno-pic") == 0 || strcmp(option, "-fno-PIC") == 0 ||
         strcmp(option, "-fno-pie") == 0 || strcmp(option, "-fno-PIE") == 0) {
       driver.position_independent = false;
+      driver.position_independent_disabled = true;
       continue;
     }
     if (strcmp(option, "-mindirect-branch=thunk-extern") == 0) {
@@ -2967,6 +3086,7 @@ int main(int argc, char **argv) {
         strcmp(option, "-mno-fp-ret-in-387") == 0) {
       driver.require_x86 = true;
       driver.disable_vectorization = true;
+      driver.disable_sse |= strcmp(option, "-mno-sse") == 0;
       continue;
     }
     if (strcmp(option, "-march=x86-64") == 0) {
@@ -3141,7 +3261,11 @@ int main(int argc, char **argv) {
       goto done;
     }
   }
+  ny_tick_t stats_started = driver.stats ? ny_ticks_now() : 0;
   result = compile_source(operand_count, operands, 1, &driver);
+  if (driver.stats)
+    fprintf(stderr, "nyc stats: compile_total_ms=%.3f\n",
+            ny_ticks_delta_ms(stats_started, ny_ticks_now()));
 done:
   free(driver.include_dirs);
   free(driver.forced_includes);

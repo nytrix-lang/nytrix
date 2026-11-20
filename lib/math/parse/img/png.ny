@@ -5,7 +5,7 @@
 ;; - core.math.parse
 module core.math.parse.img.png(decode, encode)
 use core
-use core.dict_mod
+use core.dict
 use core.mem as core_mem
 use core.os
 use core.os.ffi as ffi

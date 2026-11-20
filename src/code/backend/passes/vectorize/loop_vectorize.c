@@ -33,6 +33,58 @@ static bool nyr_vector_trace_enabled(void) {
          ny_trace_enabled("NY_TRACE_VECTORIZE");
 }
 
+typedef struct {
+  char reason[256];
+  size_t count;
+  const char *source;
+} nyr_vector_reject_count_t;
+
+typedef struct {
+  nyr_vector_reject_count_t entries[64];
+  size_t len;
+  size_t omitted;
+} nyr_vector_reject_counts_t;
+
+static _Thread_local nyr_vector_reject_counts_t *nyr_active_reject_counts;
+
+static void nyr_vector_count_reject(const char *reason, const char *source) {
+  nyr_vector_reject_counts_t *counts = nyr_active_reject_counts;
+  if (!counts || !reason)
+    return;
+  for (size_t i = 0; i < counts->len; ++i) {
+    const char *entry_source = counts->entries[i].source;
+    if (strcmp(counts->entries[i].reason, reason) == 0 &&
+        ((!entry_source && !source) ||
+         (entry_source && source && strcmp(entry_source, source) == 0))) {
+      ++counts->entries[i].count;
+      return;
+    }
+  }
+  if (counts->len == sizeof(counts->entries) / sizeof(counts->entries[0])) {
+    ++counts->omitted;
+    return;
+  }
+  nyr_vector_reject_count_t *entry = &counts->entries[counts->len++];
+  snprintf(entry->reason, sizeof(entry->reason), "%s", reason);
+  entry->count = 1;
+  entry->source = source;
+}
+
+static void nyr_vector_report_reject_counts(
+    const nyr_vector_reject_counts_t *counts) {
+  if (!counts || !nyr_vector_trace_enabled())
+    return;
+  for (size_t i = 0; i < counts->len; ++i)
+    ny_trace_line("VECTORIZE",
+                  "nyir vectorize: reject-count source=%s count=%zu reason=%s",
+                  counts->entries[i].source ? counts->entries[i].source
+                                            : "<unknown>",
+                  counts->entries[i].count, counts->entries[i].reason);
+  if (counts->omitted)
+    ny_trace_line("VECTORIZE", "nyir vectorize: reject-count omitted=%zu",
+                  counts->omitted);
+}
+
 static void nyr_vector_trace(const nyr_func_t *f, size_t pc, const char *status,
                              const char *reason, int vf) {
   const nyr_inst_t *in = f && pc < f->len ? &f->data[pc] : NULL;
@@ -45,6 +97,9 @@ static void nyr_vector_trace(const nyr_func_t *f, size_t pc, const char *status,
       }
     }
   }
+  if (status && strcmp(status, "reject") == 0 && nyr_vector_trace_enabled())
+    nyr_vector_count_reject(reason ? reason : "none",
+                            site ? site->debug.file : NULL);
   if (ny_dbg_is_enabled(NY_DBG_HEURISTIC))
     ny_dbg_heuristic_event(
         "LOOP_VECTORIZE", "%s pc=%zu op=%s vf=%d at %s:%u:%u reason=%s",
@@ -3232,10 +3287,14 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
          * fallback until LLVM retains the same provenance through vector IR.
          */
         if (nyr_vectorize_is_typed_buffer(f, defs, in->a)) {
-          bad = true;
-          reject_reason = "managed typed-buffer bounds guard is not portable";
-          reject_pc = i;
-          break;
+          /*
+           * Managed typed buffers used to reject the loop wholesale. Count
+           * the shape and let the bounds proof below decide instead; the
+           * the per-fixture checksum sweep gates the change.
+           */
+          if (nyr_vector_trace_enabled())
+            ny_trace_line("VECTORIZE",
+                          "typed-buffer bounds guard: deferred to proof pc=%zu", i);
         }
         bool safe =
             is_var_trip
@@ -4390,10 +4449,15 @@ static bool nyr_loop_vectorize_impl(nyr_func_t *f,
   nyr_func_t work = {0};
   if (!nyr_ir_func_clone(f, &work))
     return false;
+  nyr_vector_reject_counts_t reject_counts = {0};
+  nyr_vector_reject_counts_t *previous_reject_counts =
+      nyr_active_reject_counts;
+  nyr_active_reject_counts = &reject_counts;
   bool changed = false;
   for (unsigned round = 0; round < 32; ++round) {
     int rc = vectorize_once(&work, supports_vec8_i64_broadcast);
     if (rc < 0) {
+      nyr_active_reject_counts = previous_reject_counts;
       nyr_ir_func_free(&work);
       return false;
     }
@@ -4401,6 +4465,8 @@ static bool nyr_loop_vectorize_impl(nyr_func_t *f,
       break;
     changed = true;
   }
+  nyr_active_reject_counts = previous_reject_counts;
+  nyr_vector_report_reject_counts(&reject_counts);
   if (!changed) {
     f->vectorize_attempted_loops = work.vectorize_attempted_loops;
     f->vectorize_rejected_loops = work.vectorize_rejected_loops;

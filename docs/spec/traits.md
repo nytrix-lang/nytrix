@@ -15,9 +15,6 @@ such as `xs.append(...)` are documented module APIs; see
 - [Laws and operator declarations](#law-blocks)
 - [Capabilities and diagnostics](#static-capability-parameters-not-traits)
 
-> **Note:** Type names, target names, and function bodies below are grammar
-> placeholders.
-
 ```ny
 trait Drawable { fn draw(Shape value) str }
 impl Drawable for Circle { fn draw(Circle value) str { "circle" } }
@@ -184,7 +181,7 @@ Operators never change precedence. They only pick a **target function** for a
 
 Left type is the impl owner. Omit the left operand type:
 
-> **Note:** The target functions are placeholders and are defined elsewhere.
+The target functions must be declared in the surrounding program.
 
 ```ny
 impl Meter {
@@ -198,7 +195,7 @@ impl Meter {
 
 ### Top level
 
-> **Note:** `vec3` and `v_add` are declarations from the surrounding program.
+Declare `vec3` and `v_add` in the surrounding program.
 
 ```ny
 operator vec3 + vec3: vec3 = v_add

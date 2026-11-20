@@ -37,6 +37,7 @@ their full contracts.
 | [Memory](memory.md) | Runtime representation and storage boundaries |
 | [Runtime](runtime.md) | Execution, cleanup, concurrency, and effects |
 | [Native](native.md) | FFI, ABI, targets, and unsupported interfaces |
+| [NYC](nyc.md) | C compiler driver, targets, and verification evidence |
 | [Nyr](nyr.md) | Public low-level IR and object API |
 | [Linking](linker.md) | Object and symbol resolution support |
 | [Embedding](nytrix.md) | C embedding and VM APIs |

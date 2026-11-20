@@ -242,11 +242,14 @@ bool nyr_emit(nyr_func_t *func, nyr_inst_t inst, int *value_id, char *err,
   int *extra_args = NULL;
   uint32_t *arg_sizes = NULL;
   nyr_phi_incoming_t *phi_incoming = NULL;
+  bool asm_outputs =
+      inst.op == NYIR_INLINE_ASM && (inst.imm == -140 || inst.imm == -141);
   if ((inst.extra_args_len && !inst.extra_args) ||
       (inst.phi_incoming_len && !inst.phi_incoming) ||
       (inst.arg_sizes && (inst.op != NYIR_CALL || inst.imm < 0 ||
                           inst.imm > NYIR_CALL_MAX_ARGS)) ||
-      (inst.extra_args_len && inst.op != NYIR_CALL) ||
+      (asm_outputs ? inst.extra_args_len != 6
+                   : inst.extra_args_len && inst.op != NYIR_CALL) ||
       (inst.phi_incoming_len && inst.op != NYIR_PHI) ||
       (inst.op == NYIR_CALL &&
        (inst.imm < 0 || inst.imm > NYIR_CALL_MAX_ARGS ||

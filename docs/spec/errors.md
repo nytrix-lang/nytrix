@@ -10,9 +10,6 @@ diagnostics.
 - [Recoverable results](#recoverable-results)
 - [Compiler diagnostics](#diagnostics)
 
-> **Note:** These are grammar shapes; `condition`, `err`, and handler functions
-> are placeholders.
-
 ```ny
 assert(condition, "message")
 panic("failure")

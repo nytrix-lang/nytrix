@@ -7,7 +7,7 @@
 ;; - core.math.parse
 module core.math.parse.img.tga(decode, encode, save)
 use core
-use core.dict_mod
+use core.dict
 use core.math.bin as pbin
 
 fn decode(str data) any {

@@ -224,6 +224,8 @@ typedef struct {
   bool c_abi;
   bool x64_endbr;
   bool x64_return_thunk;
+  bool x64_indirect_thunk;
+  bool x64_inline_thunk;
   /* Largest block label so far; labels above it need no duplicate scan. */
   uint32_t max_block_label;
 } nyr_mach_func_t;

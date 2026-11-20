@@ -22,7 +22,7 @@ extern "turbojpeg" {
 }
 
 use core
-use core.dict_mod
+use core.dict
 use core.math
 use core.math.bin as pbin
 use core.str as str

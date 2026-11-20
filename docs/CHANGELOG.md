@@ -5,6 +5,67 @@ Each release starts with a short summary, followed by details when useful.
 Entries describe notable changes in that release; measurements and local
 artifacts, where mentioned, are not a fresh test of the current checkout.
 
+## Unreleased
+
+### NYC C compiler
+
+- SysV x86-64 `va_arg` now reads supported two-eightbyte and memory-class
+  aggregates. An aggregate that does not fit in the remaining registers
+  comes entirely from the stack, leaving both register cursors unchanged.
+- Corrected `_Bool *` arguments, assignments, and returns so they retain the
+  pointer rather than being converted to a boolean. Scalar returns from
+  `_Bool` functions and explicit casts to `_Bool` now normalize nonzero
+  values to one instead of truncating to a byte.
+- Multidimensional array and aggregate pointer indexing uses the pointee
+  stride when taking a subobject's address. File-scope integer arrays retain
+  dimensions from array typedefs, and subtraction counts complete rows rather
+  than bytes.
+- Completed file-scope pointer arrays retain their bound and reserve
+  zero-initialized storage after an earlier incomplete declaration.
+- Preserved GNU section and alignment attributes before `__typeof__` and
+  trailing or inherited alignment on file-scope records. Automatic record
+  and record-array compound literals zero omitted fields and elements on each
+  evaluation. Block-local aggregates declared with `typeof` now receive
+  record storage, including inside GNU statement expressions.
+- Fixed SysV x86-64 returns that mix INTEGER and SSE eightbytes, in both
+  class orders. Integer-only `-mno-sse` variadic functions preserve the
+  `va_list` calling convention without touching SSE registers. Scalar
+  inlining and value numbering preserve calls that feed aggregate return
+  registers and keep results from separate calls distinct.
+- Fixed x86-64 GNU assembly for narrow memory accesses, unsigned division and
+  shifts, and GOT-relative `-fPIC` data references. Fused bit tests now keep
+  their input live until it is read. ELF relocations use the correct symbol
+  index after sorting definitions, including in vDSO objects.
+- Fixed peephole range inference at function-entry loops: facts from a
+  loop backedge no longer erase its exit guard on the initial iteration.
+- Preserved the segment override when loading or storing an aggregate pointer
+  through a GNU FS/GS-qualified address. Linux now accesses both the per-CPU
+  IRQ stack pointer and saved register pointer in the correct segment.
+- Preserved FS/GS on scalar increment and decrement stores and on x86-64
+  single-precision memory moves. The read and write now use the same segment.
+- Named FS/GS scalar objects retain their segment on reads, writes, and
+  address-of dereferences.
+- Preserved FS/GS on named GNU inline-assembly memory outputs, including
+  bitwise updates, decrement-and-test, and compare-exchange.
+- Placed const ELF objects in read-only storage, using relocatable read-only
+  sections for pointer-containing data in PIE and shared links.
+- Fixed packed descriptor operands for `lgdt` and `lidt`, and preserved
+  explicit RIP-relative inline assembly operands under PIC. Inlined x86
+  memory-capable asm outputs keep their destination and cannot return a stale
+  C value, including when the output overwrites a formal parameter. Required
+  static-branch inlining now runs before optional stackless inlining; scoped
+  cleanups run on C and asm-goto exits without running a guard's destructor
+  on a jump to a macro-generated label inside that same guard.
+- Reduced i386 real-mode code size by emitting fewer frame loads, stores,
+  and copies, including for four-byte stack calls and wide integer arithmetic.
+  Low-stack real-mode code uses shorter fixed-frame prologues and folds
+  one-use symbol addresses into loads and stores with 32-bit relocations. These
+  changes bring the Linux setup replay within its sector limit. The separate
+  setup memory limit still prevents a `bzImage`.
+
+See the [NYC compiler guide](spec/nyc.md#verification-evidence) for the
+build and runtime evidence and its limits.
+
 ## [0.10] - 2026-10-13
 
 - **Native backend**: improved x86-64 code generation, register allocation,
@@ -456,6 +517,10 @@ artifacts, where mentioned, are not a fresh test of the current checkout.
 
 ### Projects, benchmarks, and tooling
 
+- Decompiler output now defaults to Ny-style lifted statements without
+  disassembly comments or raw-instruction fallbacks. Sectionless bare ELF
+  executable segments, common x86 `INC`/`DEC` and `REP MOVSB` forms, and
+  trailing return padding are handled; unknown semantic lifts fail explicitly.
 - Added an original Breakout game with capped consecutive-clear scoring,
   animated wall and serve entrances, ball trails, floating score popups, impact
   sparks, fading win/loss states, pause/restart, and a keyboard playthrough

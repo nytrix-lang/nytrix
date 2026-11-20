@@ -5,7 +5,7 @@
 ;; - core.os
 module core.os.sound.diag(enabled, probe, probe_text, print_probe)
 use core
-use core.dict_mod
+use core.dict
 use core.common as common
 use core.os
 use core.os.sound.backend as audio_backend

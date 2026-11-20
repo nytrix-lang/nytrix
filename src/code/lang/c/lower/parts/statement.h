@@ -62,7 +62,8 @@ static size_t statement_end(c_parser_t *p, size_t at) {
 static bool c_switch_case_value(c_parser_t *p, size_t start, size_t end,
                                 int64_t *out);
 
-static bool lower_switch_in_scope(c_parser_t *p, size_t limit, bool *returned) {
+static bool lower_switch_in_scope(c_parser_t *p, c_cleanup_scope_t *scope,
+                                  size_t limit, bool *returned) {
   ++p->pos;
   if (!expect(p, "("))
     return false;
@@ -83,6 +84,7 @@ static bool lower_switch_in_scope(c_parser_t *p, size_t limit, bool *returned) {
     return false;
   }
   size_t body_end = body_after - 1;
+  scope->end = body_end;
   c_switch_case_t *cases = calloc(body_end - body_start, sizeof(*cases));
   if (!cases) {
     fail(p, "out of memory collecting switch labels");
@@ -359,9 +361,10 @@ static bool lower_switch_in_scope(c_parser_t *p, size_t limit, bool *returned) {
 }
 
 static bool lower_switch(c_parser_t *p, size_t limit, bool *returned) {
-  if (!push_tag_scope(p))
+  c_cleanup_scope_t scope;
+  if (!push_tag_scope(p, &scope, limit))
     return false;
-  bool ok = lower_switch_in_scope(p, limit, returned);
+  bool ok = lower_switch_in_scope(p, &scope, limit, returned);
   pop_tag_scope(p);
   return ok;
 }
@@ -420,7 +423,9 @@ static bool lower_return(c_parser_t *p, bool *returned) {
   if (value.value < 0 || !expect(p, ";"))
     return false;
   c_type_t expected = p->function->result;
-  if (p->function->result_is_bool && c_type_is_pointer(value.type)) {
+  if (p->function->result_is_bool &&
+      (c_type_is_integer(value.type) || c_type_is_pointer(value.type) ||
+       c_type_is_float(value.type))) {
     value.value = lower_boolean_value(p, value);
     if (value.value < 0)
       return false;
@@ -543,9 +548,10 @@ static bool lower_if_arm(c_parser_t *p, size_t body_start, size_t body_end,
   size_t scope_start = p->scope_start;
   size_t enum_constant_count = p->enum_constant_count;
   size_t enum_tag_count = p->enum_tag_count;
+  c_cleanup_scope_t scope;
   if (is_block) {
     p->scope_start = p->local_count;
-    if (!push_tag_scope(p)) {
+    if (!push_tag_scope(p, &scope, body_end)) {
       p->scope_start = scope_start;
       return false;
     }
@@ -688,9 +694,10 @@ static bool lower_if(c_parser_t *p, size_t limit, bool *returned) {
   size_t true_scope_start = p->scope_start;
   size_t true_enum_constant_count = p->enum_constant_count;
   size_t true_enum_tag_count = p->enum_tag_count;
+  c_cleanup_scope_t true_scope;
   if (true_is_block) {
     p->scope_start = p->local_count;
-    if (!push_tag_scope(p)) {
+    if (!push_tag_scope(p, &true_scope, true_end)) {
       p->scope_start = true_scope_start;
       return false;
     }
@@ -734,9 +741,10 @@ static bool lower_if(c_parser_t *p, size_t limit, bool *returned) {
   size_t false_scope_start = p->scope_start;
   size_t false_enum_constant_count = p->enum_constant_count;
   size_t false_enum_tag_count = p->enum_tag_count;
+  c_cleanup_scope_t false_scope;
   if (false_is_block) {
     p->scope_start = p->local_count;
-    if (!push_tag_scope(p)) {
+    if (!push_tag_scope(p, &false_scope, false_end)) {
       p->scope_start = false_scope_start;
       return false;
     }
@@ -806,9 +814,10 @@ static bool lower_while(c_parser_t *p, size_t limit, bool *returned) {
     return false;
   size_t saved_local_count = p->local_count;
   size_t saved_scope_start = p->scope_start;
+  c_cleanup_scope_t body_scope;
   if (body_is_block) {
     p->scope_start = p->local_count;
-    if (!push_tag_scope(p)) {
+    if (!push_tag_scope(p, &body_scope, body_end)) {
       p->scope_start = saved_scope_start;
       return false;
     }
@@ -882,9 +891,10 @@ static bool lower_do_while(c_parser_t *p, size_t limit, bool *returned) {
   size_t saved_local_count = p->local_count;
   size_t saved_scope_start = p->scope_start;
   size_t body_ir_start = p->out->len;
+  c_cleanup_scope_t body_scope;
   if (body_is_block) {
     p->scope_start = p->local_count;
-    if (!push_tag_scope(p)) {
+    if (!push_tag_scope(p, &body_scope, body_end)) {
       p->scope_start = saved_scope_start;
       return false;
     }
@@ -994,10 +1004,8 @@ static bool lower_do_while(c_parser_t *p, size_t limit, bool *returned) {
   return true;
 }
 
-static bool lower_for(c_parser_t *p, size_t limit, bool *returned) {
-  ++p->pos;
-  if (!expect(p, "("))
-    return false;
+static bool lower_for_in_scope(c_parser_t *p, size_t body_start,
+                               size_t after_body, bool *returned) {
   size_t saved_local_count = p->local_count;
   size_t saved_scope_start = p->scope_start;
   p->scope_start = saved_local_count;
@@ -1135,33 +1143,12 @@ static bool lower_for(c_parser_t *p, size_t limit, bool *returned) {
   int truth = lower_truth_value(p, condition);
 
   size_t step_start = p->pos;
-  size_t depth = 0;
-  bool found_close = false;
-  while (p->pos < p->token_count) {
-    if (tok_is(p, p->pos, "(")) {
-      ++depth;
-    } else if (tok_is(p, p->pos, ")")) {
-      if (depth == 0) {
-        found_close = true;
-        break;
-      }
-      --depth;
-    }
-    ++p->pos;
-  }
-  if (!found_close) {
-    fail(p, "unterminated for-loop header");
+  size_t step_end = body_start - 1;
+  if (step_start > step_end) {
+    fail(p, "malformed for-loop header");
     return false;
   }
-  size_t step_end = p->pos;
-  if (!expect(p, ")"))
-    return false;
-  size_t body_start = p->pos;
-  size_t after_body = statement_end(p, body_start);
-  if (after_body > limit || after_body <= body_start) {
-    fail(p, "malformed for-loop body");
-    return false;
-  }
+  p->pos = body_start;
   size_t body_end = after_body;
   bool body_is_block = tok_is(p, body_start, "{");
   if (body_is_block) {
@@ -1174,9 +1161,10 @@ static bool lower_for(c_parser_t *p, size_t limit, bool *returned) {
     return false;
   size_t body_local_count = p->local_count;
   size_t body_scope_start = p->scope_start;
+  c_cleanup_scope_t body_scope;
   if (body_is_block) {
     p->scope_start = p->local_count;
-    if (!push_tag_scope(p)) {
+    if (!push_tag_scope(p, &body_scope, body_end)) {
       p->scope_start = body_scope_start;
       return false;
     }
@@ -1248,6 +1236,27 @@ static bool lower_for(c_parser_t *p, size_t limit, bool *returned) {
   p->pos = after_body;
   *returned = false;
   return true;
+}
+
+static bool lower_for(c_parser_t *p, size_t limit, bool *returned) {
+  size_t header = ++p->pos;
+  if (!expect(p, "("))
+    return false;
+  size_t body = skip_balanced(p, header, "(", ")");
+  if (body <= header + 1 || body >= limit) {
+    fail(p, "unterminated for-loop header or missing body");
+    return false;
+  }
+  size_t after_body = statement_end(p, body);
+  if (after_body > limit || after_body <= body) {
+    fail(p, "malformed for-loop body");
+    return false;
+  }
+  c_cleanup_scope_t scope;
+  enter_cleanup_scope(p, &scope, after_body);
+  bool ok = lower_for_in_scope(p, body, after_body, returned);
+  p->cleanup_scope = scope.parent;
+  return ok;
 }
 
 static bool lower_statement_range(c_parser_t *p, size_t start, size_t end,
@@ -1427,7 +1436,8 @@ static bool lower_statement_range(c_parser_t *p, size_t start, size_t end,
       p->scope_start = p->local_count;
       size_t saved_typedef_count = p->typedef_count;
       bool block_returns = false;
-      if (!push_tag_scope(p)) {
+      c_cleanup_scope_t scope;
+      if (!push_tag_scope(p, &scope, block_after - 1)) {
         p->scope_start = saved_scope_start;
         break;
       }
@@ -1560,7 +1570,8 @@ static bool lower_statement_range(c_parser_t *p, size_t start, size_t end,
           int matches = address < 0 ? -1
                                     : emit_i64_compare(p, target.value, address,
                                                        NYIR_CMP_EQ);
-          ok = matches >= 0 && emit_branch_if(p, matches, (int64_t)label->id);
+          int edge = matches >= 0 ? lower_cleanup_edge(p, label) : -1;
+          ok = edge >= 0 && emit_branch_if(p, matches, edge);
         }
         if (!ok)
           break;
@@ -1586,7 +1597,8 @@ static bool lower_statement_range(c_parser_t *p, size_t start, size_t end,
         fail(p, "goto target is not defined in this function");
         break;
       }
-      if (!emit_branch(p, (int64_t)label->id))
+      int edge = lower_cleanup_edge(p, label);
+      if (edge < 0 || !emit_branch(p, edge))
         break;
       /*
        * Keep following source statements in a separate, unreachable block.
@@ -1917,6 +1929,10 @@ static bool lower_statement_range(c_parser_t *p, size_t start, size_t end,
     bool aggregate_declaration =
         starts_aggregate_type(p) || tok_is(p, qualified_type_pos, "struct") ||
         tok_is(p, qualified_type_pos, "union") ||
+        tok_is(p, qualified_type_pos, "typeof") ||
+        tok_is(p, qualified_type_pos, "__typeof__") ||
+        tok_is(p, qualified_type_pos, "__typeof") ||
+        tok_is(p, qualified_type_pos, "__typeof_unqual__") ||
         (qualified_aggregate_alias &&
          qualified_aggregate_alias->type == C_AGG) ||
         (aggregate_alias && aggregate_alias->type == C_AGG) ||
@@ -2028,8 +2044,7 @@ static bool lower_statement_range(c_parser_t *p, size_t start, size_t end,
        * call keeps the real return type.
        */
       if (decl_function_result_type == C_BAD) {
-        const c_typedef_t *base_alias =
-            find_typedef(p, p->tokens[type_start]);
+        const c_typedef_t *base_alias = find_typedef(p, p->tokens[type_start]);
         if (base_alias && base_alias->function_result_type != C_BAD) {
           decl_function_result_type = base_alias->function_result_type;
           decl_function_result_agg = base_alias->function_result_agg;
@@ -2227,6 +2242,7 @@ static bool lower_statement_range(c_parser_t *p, size_t start, size_t end,
           declarator_is_volatile = is_volatile && !pointee_volatile;
         ny_ctok_t name;
         size_t local_pointee_array_size = 0;
+        c_array_shape_t local_pointee_array = decl_pointee_array;
         if (accept(p, "(")) {
           unsigned pointer_levels = 0;
           while (accept(p, "*"))
@@ -2243,6 +2259,13 @@ static bool lower_statement_range(c_parser_t *p, size_t start, size_t end,
           size_t element_size = base_type == C_AGG && decl_agg
                                     ? decl_agg->size
                                     : c_type_size(p->abi, base_type);
+          local_pointer_depth += pointer_levels;
+          local_pointee_array = (c_array_shape_t){
+              .element_size = element_size,
+              .element_type = base_type,
+              .agg = decl_agg,
+              .pointer_to_array = true,
+          };
           while (accept(p, "[")) {
             uint64_t extent = 0;
             if (++array_rank > C_MAX_ARRAY_RANK || !element_size ||
@@ -2253,6 +2276,7 @@ static bool lower_statement_range(c_parser_t *p, size_t start, size_t end,
               declaration_ok = false;
               break;
             }
+            local_pointee_array.extent[array_rank - 1] = (size_t)extent;
             array_elements *= (size_t)extent;
           }
           if (!declaration_ok)
@@ -2263,6 +2287,7 @@ static bool lower_statement_range(c_parser_t *p, size_t start, size_t end,
             declaration_ok = false;
             break;
           }
+          local_pointee_array.rank = array_rank;
           local_pointee_array_size = array_elements * element_size;
         } else if (!parse_name(p, &name)) {
           declaration_ok = false;
@@ -2334,8 +2359,8 @@ static bool lower_statement_range(c_parser_t *p, size_t start, size_t end,
             p->last_type_alignment == local_alignment ||
             p->last_type_alignment <= natural_alignment ||
             (p->last_type_is_array && p->last_type_alignment <= 16);
-        if ((local_section.len && !is_static_scalar) ||
-            !alignment_satisfied || !tok_same(p->last_type_mode, local_mode)) {
+        if ((local_section.len && !is_static_scalar) || !alignment_satisfied ||
+            !tok_same(p->last_type_mode, local_mode)) {
           if (!getenv("NYC_KERNEL_COMPAT")) {
             char message[192];
             snprintf(message, sizeof(message),
@@ -2360,10 +2385,9 @@ static bool lower_statement_range(c_parser_t *p, size_t start, size_t end,
             declaration_ok = false;
             break;
           }
-          if (!lower_static_scalar_declaration(p, type, name,
-                                               declarator_is_const,
-                                               declarator_is_volatile, decl_agg,
-                                               local_section)) {
+          if (!lower_static_scalar_declaration(
+                  p, type, name, declarator_is_const, declarator_is_volatile,
+                  decl_agg, local_section)) {
             declaration_ok = false;
             break;
           }
@@ -2589,8 +2613,7 @@ static bool lower_statement_range(c_parser_t *p, size_t start, size_t end,
           }
           size_t array_bytes = count * width;
           if (array_alignment > 16) {
-            if (array_bytes >
-                (size_t)INT32_MAX - (array_alignment - 1)) {
+            if (array_bytes > (size_t)INT32_MAX - (array_alignment - 1)) {
               fail(p, "aligned automatic array exceeds frontend capacity");
               free(string_initializer);
               declaration_ok = false;
@@ -2604,16 +2627,14 @@ static bool lower_statement_range(c_parser_t *p, size_t start, size_t end,
                                          .imm = (int64_t)array_bytes,
                                          .scalar_class = NYIR_SCALAR_I64_RAW});
           if (base >= 0 && array_alignment > 16) {
-            int bias =
-                emit_i64_constant(p, (int64_t)(array_alignment - 1));
+            int bias = emit_i64_constant(p, (int64_t)(array_alignment - 1));
             int added = bias < 0
                             ? -1
                             : emit_value(p, (nyr_inst_t){.op = NYIR_ADD_I64,
                                                          .dst = -1,
                                                          .a = base,
                                                          .b = bias});
-            int mask = emit_i64_constant(
-                p, ~(int64_t)(array_alignment - 1));
+            int mask = emit_i64_constant(p, ~(int64_t)(array_alignment - 1));
             base = added < 0 || mask < 0
                        ? -1
                        : emit_value(p, (nyr_inst_t){.op = NYIR_AND_I64,
@@ -2849,8 +2870,7 @@ static bool lower_statement_range(c_parser_t *p, size_t start, size_t end,
         bool initialized = accept(p, "=");
         if (initialized) {
           if (c_type_is_complex(type)) {
-            size_t complex_bytes =
-                type == C_C64 ? 8 : type == C_C128 ? 16 : 32;
+            size_t complex_bytes = type == C_C64 ? 8 : type == C_C128 ? 16 : 32;
             size_t complex_offset = 0;
             if (!agg_area_alloc(p, complex_bytes, &complex_offset) ||
                 !add_local(p, name, C_AGG, p->agg_base, declarator_is_const,
@@ -2888,7 +2908,7 @@ static bool lower_statement_range(c_parser_t *p, size_t start, size_t end,
               (type == C_AGG_PTR || type == C_AGG_PTR_PTR))
             local->agg = decl_agg;
           local->function_result_type = decl_function_result_type;
-          local->is_bool = decl_is_bool;
+          local->is_bool = decl_is_bool && !c_type_is_pointer(type);
           if (decl_function_result_agg)
             local->agg = decl_function_result_agg;
           local->pointee_const = c_type_is_pointer(type) && p->last_type_const;
@@ -2897,7 +2917,7 @@ static bool lower_statement_range(c_parser_t *p, size_t start, size_t end,
           local->pointee_array_size = local_pointee_array_size
                                           ? local_pointee_array_size
                                           : decl_pointee_array_size;
-          local->pointee_array = decl_pointee_array;
+          local->pointee_array = local_pointee_array;
           size_t initializer_start = p->pos;
           c_value_t initial = parse_expr(p, 1);
           bool int128_scalar_zero = false;
@@ -2912,7 +2932,7 @@ static bool lower_statement_range(c_parser_t *p, size_t start, size_t end,
                 constant_pos == p->pos && constant_value == 0;
           }
           bool pointer_to_bool =
-              decl_is_bool && c_type_is_pointer(initial.type);
+              local->is_bool && c_type_is_pointer(initial.type);
           if (initial.value < 0 ||
               !(initial.type == type ||
                 c_pointer_compatible(initial.type, type) ||
@@ -3022,8 +3042,8 @@ static bool lower_statement_range(c_parser_t *p, size_t start, size_t end,
             local_type = C_AGG;
             local_initial = p->agg_base;
           }
-          if (!add_local(p, name, local_type, local_initial, declarator_is_const,
-                         declarator_is_volatile)) {
+          if (!add_local(p, name, local_type, local_initial,
+                         declarator_is_const, declarator_is_volatile)) {
             declaration_ok = false;
             break;
           }
@@ -3040,7 +3060,7 @@ static bool lower_statement_range(c_parser_t *p, size_t start, size_t end,
               (type == C_AGG_PTR || type == C_AGG_PTR_PTR))
             local->agg = decl_agg;
           local->function_result_type = decl_function_result_type;
-          local->is_bool = decl_is_bool;
+          local->is_bool = decl_is_bool && !c_type_is_pointer(type);
           if (decl_function_result_agg)
             local->agg = decl_function_result_agg;
           local->pointee_const = c_type_is_pointer(type) && p->last_type_const;
@@ -3050,7 +3070,7 @@ static bool lower_statement_range(c_parser_t *p, size_t start, size_t end,
           local->pointee_array_size = local_pointee_array_size
                                           ? local_pointee_array_size
                                           : decl_pointee_array_size;
-          local->pointee_array = decl_pointee_array;
+          local->pointee_array = local_pointee_array;
           if (c_type_is_complex(type))
             local->agg = c_complex_aggregate(type);
         }
@@ -3115,10 +3135,11 @@ static bool lower_statement_range(c_parser_t *p, size_t start, size_t end,
       }
     }
     if (pointer_store_statement && accept(p, "*")) {
-      c_value_t address = parse_unary(p);
+      unsigned segment_flags;
+      c_value_t address = parse_pointer_store_address(p, &segment_flags);
       bool read_only =
           p->last_value_pointee_const || c_value_pointee_const(address);
-      if (!lower_pointer_store(p, address, read_only, false)) {
+      if (!lower_pointer_store(p, address, read_only, false, segment_flags)) {
         if (!p->err[0]) {
           char message[128];
           snprintf(message, sizeof(message),
@@ -3320,7 +3341,8 @@ static bool lower_statement_range(c_parser_t *p, size_t start, size_t end,
           break;
         c_value_t element = {element_address,
                              c_array_pointer_type(indexed_global->type), NULL};
-        if (!lower_pointer_store(p, element, indexed_global->is_const, false))
+        if (!lower_pointer_store(p, element, indexed_global->is_const, false,
+                                 0))
           break;
         continue;
       }
@@ -3364,11 +3386,13 @@ static bool lower_statement_range(c_parser_t *p, size_t start, size_t end,
                            indexed_global && indexed_global->type == C_AGG_PTR
                                ? indexed_global->agg
                                : NULL};
-      if (!lower_pointer_store(p, pointer,
-                               local ? ((local->is_const && !pointer_local) ||
-                                        local->pointee_const)
-                                     : indexed_global->is_const,
-                               false))
+      if (!lower_pointer_store(
+              p, pointer,
+              local ? ((local->is_const && !pointer_local) ||
+                       local->pointee_const)
+                    : indexed_global->is_const,
+              false,
+              local && pointer_local ? c_seg_flags(local->pointee_seg) : 0))
         break;
       continue;
     }
@@ -3436,12 +3460,13 @@ static bool lower_statement_range(c_parser_t *p, size_t start, size_t end,
         tok_is(p, p->pos + 1, "*") &&
         is_assignment_operator(p, parenthesized_deref_after)) {
       p->pos += 2;
-      c_value_t address = parse_unary(p);
+      unsigned segment_flags;
+      c_value_t address = parse_pointer_store_address(p, &segment_flags);
       if (address.value < 0 ||
           !lower_pointer_store(p, address,
                                p->last_value_pointee_const ||
                                    c_value_pointee_const(address),
-                               true))
+                               true, segment_flags))
         break;
       continue;
     }

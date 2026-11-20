@@ -204,12 +204,12 @@ link through the default driver while still selecting the native backend:
 
 ```bash
 awk "/source ny <<'NY'/{f=1;next} /^NY$/{f=0} f" \
-  etc/tests/bench/algorithms/binary.nshape > tmp/probes/binary.ny
+  etc/tests/bench/algorithms/binary.nshape > /tmp/nytrix-probes/binary.ny
 build/release/ny -O3 --native-backend x86_64 --run=none \
-  --output=tmp/probes/binary tmp/probes/binary.ny
-tmp/probes/binary                          # checksum and elapsed_ns
-perf stat -r 5 -e cycles:u,instructions:u,branch-misses:u tmp/probes/binary
-objdump -d -M intel --no-show-raw-insn --disassemble=main tmp/probes/binary
+  --output=/tmp/nytrix-probes/binary /tmp/nytrix-probes/binary.ny
+/tmp/nytrix-probes/binary                          # checksum and elapsed_ns
+perf stat -r 5 -e cycles:u,instructions:u,branch-misses:u /tmp/nytrix-probes/binary
+objdump -d -M intel --no-show-raw-insn --disassemble=main /tmp/nytrix-probes/binary
 ```
 
 Startup is a fixed cost in whole-process counters. To get per-iteration

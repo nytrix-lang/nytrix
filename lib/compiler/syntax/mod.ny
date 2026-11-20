@@ -8,7 +8,7 @@ use core
 use core (is_str as core_is_str)
 use core.compiler.syntax.syntax as syntax_impl
 use core.reflect
-use core.dict_mod (dict_set)
+use core.dict (dict_set)
 
 fn _attr_ensure_exact(str name, list args, int want) int {
    if args.len != want { panic("@" + name + " expects " + to_str(want) + " argument(s)") }

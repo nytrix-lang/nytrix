@@ -8,7 +8,7 @@
 ;; - core.math.parse
 module core.math.parse.img.bmp(decode, encode)
 use core
-use core.dict_mod
+use core.dict
 use core.math.simmd as simmd
 use core.os.path as ospath
 

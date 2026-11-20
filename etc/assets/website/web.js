@@ -536,8 +536,6 @@ function moduleIconName(route) {
     // `core.native` uses the CPU glyph (the native artwork is named cpu.svg).
     if (leaf === "native") return "cpu";
     if (MODULE_ICONS.has(leaf)) return leaf;
-    if (segs.length === 2 && leaf === "set_mod") return "set";
-    if (segs.length === 2 && leaf === "dict_mod") return "dict";
   }
   if (r.includes(".net.server") || r.includes(".http")) return "server";
   if (

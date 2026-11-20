@@ -3,13 +3,17 @@
  */
 typedef unsigned int u32;
 extern u32 register_run_callback(u32, u32, u32);
+extern u32 register_run_four(u32, u32, u32, u32);
+extern u32 (*register_run_indirect)(u32, u32, u32, u32);
 extern u32 register_run_stack_callback(u32 *, u32 *, u32);
 #ifdef NYC_REFERENCE
 #define RUN_FUNCTION reference_register_run
 #define STACK_FUNCTION reference_stack_run
+#define ASM_OUTPUT_FUNCTION reference_inlined_asm_output
 #else
 #define RUN_FUNCTION nyc_register_run
 #define STACK_FUNCTION nyc_stack_run
+#define ASM_OUTPUT_FUNCTION nyc_inlined_asm_output
 #endif
 
 u32 RUN_FUNCTION(u32 *a, u32 *b, u32 seed) {
@@ -26,6 +30,9 @@ u32 RUN_FUNCTION(u32 *a, u32 *b, u32 seed) {
     total += register_run_callback(x8, x9, x10);
   else
     total ^= register_run_callback(x11, x0, x6);
+  u32 first = total + x4, second = first ^ x1, third = second - x5;
+  total += register_run_four(third, first, second, first);
+  total ^= register_run_indirect(second, third, first, third);
   for (u32 i = 0; i < (seed & 7u); ++i) {
     u32 old = a[i];
     b[i] = (old ^ total) + i;
@@ -40,9 +47,21 @@ u32 RUN_FUNCTION(u32 *a, u32 *b, u32 seed) {
 u32 STACK_FUNCTION(u32 seed) {
   u32 values[16];
   u32 local = seed * 37u;
-  for (u32 i = 0; i < 16; ++i) values[i] = (seed ^ i) * 7919u;
+  for (u32 i = 0; i < 16; ++i)
+    values[i] = (seed ^ i) * 7919u;
   u32 result = register_run_stack_callback(&local, values, seed);
-  for (u32 i = 0; i < 16; ++i) result = (result * 33u) ^ values[i];
+  for (u32 i = 0; i < 16; ++i)
+    result = (result * 33u) ^ values[i];
   return result + local;
 }
 #undef STACK_FUNCTION
+
+static __attribute__((always_inline)) inline u32 overwrite_formal(u32 value) {
+  asm volatile("movl $37,%0" : "=rm"(value) : : "memory");
+  return value;
+}
+
+u32 ASM_OUTPUT_FUNCTION(u32 a, u32 b, u32 c) {
+  return a + b + c + overwrite_formal(b);
+}
+#undef ASM_OUTPUT_FUNCTION

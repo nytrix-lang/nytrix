@@ -2362,7 +2362,7 @@
           .catch(() => canvas.setAttribute("data-audio-decode", "0"));
         return NY_TRUE;
       },
-      "core.dict_mod.dict": () => 0n,
+      "core.dict.dict": () => 0n,
       "core.os.args.args": () => {
         const argv = refreshRunArgv(meta);
         const lst = ny.list(memoryRef, argv.length);

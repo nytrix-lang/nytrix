@@ -62,8 +62,9 @@ typedef struct {
  * keyed by callee symbol as well as all in-register arguments; calls with
  * out-of-line arguments stay conservative.
  */
-static bool gvn_can_number(const nyr_inst_t *in) {
-  if (!in || in->dst < 0 || in->op == NYIR_PHI)
+static bool gvn_can_number(const nyr_inst_t *in, bool feeds_return_capture) {
+  if (!in || in->dst < 0 || in->op == NYIR_PHI || in->op == NYIR_CAPTURE_RET ||
+      feeds_return_capture)
     return false;
   /*
    * An unclassified immediate can acquire its representation only from its
@@ -85,8 +86,7 @@ static bool gvn_can_number(const nyr_inst_t *in) {
      */
     if (in->scalar_class == NYIR_SCALAR_OBJECT ||
         in->scalar_class == NYIR_SCALAR_AGGREGATE ||
-        in->scalar_class == NYIR_SCALAR_TYPED_BUFFER ||
-        in->semantic_mutable ||
+        in->scalar_class == NYIR_SCALAR_TYPED_BUFFER || in->semantic_mutable ||
         in->semantic_ownership == NY_SEM_OWN_OWNED ||
         in->semantic_ownership == NY_SEM_OWN_SHARED)
       return false;
@@ -819,10 +819,10 @@ static void vn_table_init(vn_entry_t *table) {
  */
 static size_t vn_hash(const nyr_inst_t *in) {
   uint64_t h = (uint64_t)in->op + UINT64_C(0x9e3779b97f4a7c15);
-#define VN_MIX(v)                                                       \
-  do {                                                                  \
-    h ^= (uint64_t)(uint32_t)((v) + 1) + UINT64_C(0x9e3779b97f4a7c15) + \
-         (h << 6) + (h >> 2);                                           \
+#define VN_MIX(v)                                                              \
+  do {                                                                         \
+    h ^= (uint64_t)(uint32_t)((v) + 1) + UINT64_C(0x9e3779b97f4a7c15) +        \
+         (h << 6) + (h >> 2);                                                  \
   } while (0)
   VN_MIX(in->a);
   VN_MIX(in->b);
@@ -1001,13 +1001,13 @@ static int gvn_canonical_operand(int value, const int *copy_of,
 
 static void gvn_canonicalize_operands(nyr_inst_t *key, const int *copy_of,
                                       const int *constant_of,
-                                      size_t value_count,
-                                      const nyr_cfg_t *cfg, const int *val_def,
-                                      size_t inst_count, size_t at) {
-#define GVN_CANONICALIZE_OPERAND(field)                                \
-  key->field = gvn_canonical_operand(key->field, copy_of, constant_of, \
-                                     value_count, cfg, val_def,        \
-                                     inst_count, at)
+                                      size_t value_count, const nyr_cfg_t *cfg,
+                                      const int *val_def, size_t inst_count,
+                                      size_t at) {
+#define GVN_CANONICALIZE_OPERAND(field)                                        \
+  key->field =                                                                 \
+      gvn_canonical_operand(key->field, copy_of, constant_of, value_count,     \
+                            cfg, val_def, inst_count, at)
   GVN_CANONICALIZE_OPERAND(a);
   GVN_CANONICALIZE_OPERAND(b);
   GVN_CANONICALIZE_OPERAND(c);
@@ -1034,10 +1034,10 @@ static int gvn_unique_copy_root(const nyr_func_t *f, const int *defs,
 
 static bool gvn_same_integer_operands(const nyr_func_t *f, const int *defs,
                                       const unsigned char *unique,
-                                      const nyr_inst_t *a, const nyr_inst_t *b) {
+                                      const nyr_inst_t *a,
+                                      const nyr_inst_t *b) {
   if (a->op != b->op ||
-      (a->op != NYIR_MUL_I64 && a->op != NYIR_ADD_I64 &&
-       a->op != NYIR_SUB_I64))
+      (a->op != NYIR_MUL_I64 && a->op != NYIR_ADD_I64 && a->op != NYIR_SUB_I64))
     return false;
   int a0 = gvn_unique_copy_root(f, defs, unique, a->a);
   int a1 = gvn_unique_copy_root(f, defs, unique, a->b);
@@ -1217,7 +1217,11 @@ static bool gvn_pass(nyr_func_t *f, int *vn_of_val, nyr_cfg_t *cfg) {
         excluded_loop++;
       continue;
     }
-    if (!gvn_can_number(in)) {
+    /* An ABI capture reads the most recent call, not an SSA operand. Neither
+     * the capture nor its call can be merged with a different chain. */
+    bool feeds_return_capture = in->op == NYIR_CALL && i + 1 < f->len &&
+                                f->data[i + 1].op == NYIR_CAPTURE_RET;
+    if (!gvn_can_number(in, feeds_return_capture)) {
       if (trace) {
         if (in->op == NYIR_CALL)
           excluded_calls++;
@@ -1230,8 +1234,8 @@ static bool gvn_pass(nyr_func_t *f, int *vn_of_val, nyr_cfg_t *cfg) {
       numbered++;
 
     nyr_inst_t key = *in;
-    gvn_canonicalize_operands(&key, copy_of, constant_of,
-                              (size_t)f->next_value, cfg, val_def, f->len, i);
+    gvn_canonicalize_operands(&key, copy_of, constant_of, (size_t)f->next_value,
+                              cfg, val_def, f->len, i);
     if (trace_misses && in->op == NYIR_LOAD_I64) {
       int address_def =
           in->a >= 0 && in->a < f->next_value ? val_def[in->a] : -1;
@@ -1323,9 +1327,9 @@ static bool gvn_pass(nyr_func_t *f, int *vn_of_val, nyr_cfg_t *cfg) {
            * left its buffer unchanged). Calls and memory loads keep their
            * effect/memory proofs and may still CSE across blocks.
            */
-          bool block_local_expression =
-              expression_key && in->op != NYIR_LOAD_I64 &&
-              in->op != NYIR_LOAD_LOCAL;
+          bool block_local_expression = expression_key &&
+                                        in->op != NYIR_LOAD_I64 &&
+                                        in->op != NYIR_LOAD_LOCAL;
           bool safe_arithmetic =
               dom && block_local_expression && def_block != use_block &&
               gvn_same_integer_operands(f, val_def, unique, &f->data[def], in);
@@ -1370,8 +1374,9 @@ static bool gvn_pass(nyr_func_t *f, int *vn_of_val, nyr_cfg_t *cfg) {
                * canonicalize through it in this same pass (for example,
                * identical address arithmetic feeding a load).
                */
-              copy_of[in->dst] = gvn_canonical_value(
-                  cand, copy_of, (size_t)f->next_value, cfg, val_def, f->len, i);
+              copy_of[in->dst] =
+                  gvn_canonical_value(cand, copy_of, (size_t)f->next_value, cfg,
+                                      val_def, f->len, i);
               if (vn_of_val[cand] >= 0)
                 vn_of_val[in->dst] = vn_of_val[cand];
               /*

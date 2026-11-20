@@ -3481,7 +3481,8 @@ bool nyr_ipa_constprop(nyr_func_t *f) {
   for (size_t i = 0; i < f->len; ++i) {
     nyr_inst_t *in = &f->data[i];
     if (in->op != NYIR_CALL || in->dst < 0 || !in->symbol ||
-        (in->flags & (NYIR_INST_F_EXTERN | NYIR_INST_F_SRET)))
+        (in->flags & (NYIR_INST_F_EXTERN | NYIR_INST_F_SRET)) ||
+        (i + 1 < f->len && f->data[i + 1].op == NYIR_CAPTURE_RET))
       continue;
     const nyr_func_t *callee = nyr_find_inline_callee(in->symbol);
     if (!callee || callee == f || in->imm < 0 ||
@@ -3493,8 +3494,7 @@ bool nyr_ipa_constprop(nyr_func_t *f) {
     if ((!pure_body && !formal_store_body) ||
         (pure_body && nyr_effective_effects(in) != NYIR_EFFECT_CALL) ||
         (formal_store_body &&
-         (!nyr_ipa_effectful_result_summary_matches(in, callee) ||
-          (i + 1 < f->len && f->data[i + 1].op == NYIR_CAPTURE_RET))))
+         !nyr_ipa_effectful_result_summary_matches(in, callee)))
       continue;
     int args[NYIR_CALL_MAX_ARGS];
     int argc = 0;
@@ -3943,6 +3943,11 @@ bool nyr_inline_small(nyr_func_t *f) {
   for (size_t i = 0; i < f->len; ++i) {
     nyr_inst_t *in = &f->data[i];
     if (in->op != NYIR_CALL || !in->symbol)
+      continue;
+    /* Scalar rewrites cannot replace a call that feeds ABI return registers.
+     * Even inserting a constant after the call would break the capture chain.
+     */
+    if (i + 1 < f->len && f->data[i + 1].op == NYIR_CAPTURE_RET)
       continue;
     /*
      * Outside a C translation unit, an extern may share its spelling with a

@@ -1716,7 +1716,6 @@ bool ny_builder_link(const char *cc, const char *obj_path,
   }
 #if !defined(_WIN32)
   bool has_z = false;
-  bool has_m = false;
 #if !defined(__APPLE__)
   bool has_dl = false;
 #endif
@@ -1731,9 +1730,6 @@ bool ny_builder_link(const char *cc, const char *obj_path,
     if (strcmp(lib, "-lz") == 0 || strcmp(lib, "z") == 0 ||
         strstr(lib, "/libz.") != NULL)
       has_z = true;
-    else if (strcmp(lib, "-lm") == 0 || strcmp(lib, "m") == 0 ||
-             strstr(lib, "/libm.") != NULL)
-      has_m = true;
     else if (strcmp(lib, "-ldl") == 0 || strcmp(lib, "dl") == 0 ||
              strstr(lib, "/libdl.") != NULL) {
 #if !defined(__APPLE__)
@@ -1767,9 +1763,9 @@ bool ny_builder_link(const char *cc, const char *obj_path,
       argv[idx++] = "-lz";
     /*
      * No -lm fallback: the runtime binds libm on first use (lazym.c), so an
-     * integer-only program has nothing left to resolve against it. A program
-     * or module that asks for libm still reaches has_m above. Passing -lm here
-     * put libm.so.6 in DT_NEEDED of every AOT binary.
+     * integer-only program has nothing left to resolve against it. Explicit
+     * libm requests were already preserved in link_libs. Passing -lm here put
+     * libm.so.6 in DT_NEEDED of every AOT binary.
      */
 #if !defined(__APPLE__)
     if (!has_dl && idx + 1 < NY_MAX_LINK_ARGS)

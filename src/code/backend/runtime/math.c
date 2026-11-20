@@ -28,6 +28,9 @@ double rt_libm_floor(double x);
 double rt_libm_ceil(double x);
 double rt_libm_fmod(double a, double b);
 double rt_libm_atan2(double a, double b);
+double rt_libm_asin(double x);
+double rt_libm_acos(double x);
+double rt_libm_atan(double x);
 double rt_libm_sin(double x);
 double rt_libm_cos(double x);
 double rt_libm_tan(double x);
@@ -847,13 +850,13 @@ int64_t rt_flt_tan(int64_t v) {
   return rt_flt_box_double(rt_libm_tan(rt_flt_unbox_double(v)));
 }
 int64_t rt_flt_asin(int64_t v) {
-  return rt_flt_box_double(asin(rt_flt_unbox_double(v)));
+  return rt_flt_box_double(rt_libm_asin(rt_flt_unbox_double(v)));
 }
 int64_t rt_flt_acos(int64_t v) {
-  return rt_flt_box_double(acos(rt_flt_unbox_double(v)));
+  return rt_flt_box_double(rt_libm_acos(rt_flt_unbox_double(v)));
 }
 int64_t rt_flt_atan(int64_t v) {
-  return rt_flt_box_double(atan(rt_flt_unbox_double(v)));
+  return rt_flt_box_double(rt_libm_atan(rt_flt_unbox_double(v)));
 }
 int64_t rt_flt_atan2(int64_t y, int64_t x) {
   return rt_flt_box_double(

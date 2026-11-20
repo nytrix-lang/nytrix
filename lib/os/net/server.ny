@@ -11,7 +11,7 @@ module core.os.net.server(
 )
 
 use core
-use core.dict_mod as _d
+use core.dict as _d
 use core.str
 use core.os.args as process_args
 use core.common as common

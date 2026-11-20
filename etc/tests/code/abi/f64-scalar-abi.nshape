@@ -7,7 +7,7 @@ shape f64_scalar_abi_followup {
   expect compile_and_run
   source ny <<'NY'
 use core
-use core.set_mod as set_mod
+use core.set as sets
 use core.math.vector as vec
 
 fn typed_list_size(list xs) int { xs.len }
@@ -25,8 +25,8 @@ fn test_typed_collections() {
    assert(typed_list_size([1, 2, 3]) == 3, "typed list")
    assert(typed_dict_size(set(dict(4), "a", 1)) == 1, "typed dict")
    assert(typed_tuple_size((1, 2, 3)) == 3, "typed tuple")
-   mut set s = set_mod.set()
-   s = set_mod.add(s, "x")
+   mut set s = sets.set()
+   s = sets.add(s, "x")
    assert(typed_set_has_x(s), "typed set")
    assert(s.len == 1, "set len")
    assert(typed_bytes_size(bytes(4)) == 4, "typed bytes")

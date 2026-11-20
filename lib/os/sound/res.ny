@@ -8,7 +8,7 @@
 module core.os.sound.res(init, shutdown, load, get_sound_info, get_image_info, clear_cache, is_cached)
 use core
 use core.error
-use core.dict_mod
+use core.dict
 use core.mem (cstr)
 use core.os (file_read, mutex_free, mutex_lock, mutex_new, mutex_unlock)
 use core.os.path as path

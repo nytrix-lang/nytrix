@@ -148,6 +148,7 @@ static bool compile_function(c_parser_t *parser, c_function_t *fn,
    * for every function.
    */
   parser->function = fn;
+  parser->cleanup_scope = NULL;
   parser->tag_scope_id = fn->body_start + 1;
   parser->tag_scope_stack[0] = parser->tag_scope_id;
   parser->tag_scope_depth = 1;

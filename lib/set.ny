@@ -2,7 +2,7 @@
 ;; Set construction, membership, mutation, and set algebra operations.
 ;; References:
 ;; - core
-module core.set_mod(set, _set_new, add, sub, contains, len, clear, values, is_empty, _set_add, _set_remove, _set_contains, _set_len, _set_values, _set_clear)
+module core.set(set, _set_new, add, sub, contains, len, clear, values, is_empty, _set_add, _set_remove, _set_contains, _set_len, _set_values, _set_clear)
 use core
 use core.reflect as core_ref
 

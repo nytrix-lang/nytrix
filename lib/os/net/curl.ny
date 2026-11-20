@@ -7,7 +7,7 @@
 module core.os.net.curl(curl_available, curl_request, curl_request_raw, curl_get, curl_fetch)
 use core
 use core.error
-use core.dict_mod as _d
+use core.dict as _d
 use core.str
 use core.os (temp_dir, file_read, file_remove, file_write)
 use core.os.clock (ticks)

@@ -187,12 +187,9 @@ static bool ny_x64_nir_inst_uses_value(const nyr_inst_t *in, int value_id) {
     if (args[i] == value_id)
       return true;
   }
-  if (in->op == NYIR_CALL) {
-    for (size_t i = 0; i < in->extra_args_len; ++i) {
-      if (in->extra_args[i] == value_id)
-        return true;
-    }
-  }
+  for (size_t i = 0; i < in->extra_args_len; ++i)
+    if (in->extra_args[i] == value_id)
+      return true;
   return false;
 }
 
@@ -268,8 +265,9 @@ static void ny_x64_nir_compute_frame(ny_x64_nir_ctx_t *c) {
         in->op == NYIR_VEC4_AND_I64 || in->op == NYIR_VEC8_AND_I64 ||
         in->op == NYIR_VEC4_OR_I64 || in->op == NYIR_VEC8_OR_I64 ||
         in->op == NYIR_VEC4_XOR_I64 || in->op == NYIR_VEC8_XOR_I64 ||
-        in->op == NYIR_VEC8_MUL_I64 || in->op == NYIR_VEC4_SHL_I64 || in->op == NYIR_VEC4_SAR_I64 ||
-        in->op == NYIR_VEC8_SAR_I64 || in->op == NYIR_VEC8_SHR_I64;
+        in->op == NYIR_VEC8_MUL_I64 || in->op == NYIR_VEC4_SHL_I64 ||
+        in->op == NYIR_VEC4_SAR_I64 || in->op == NYIR_VEC8_SAR_I64 ||
+        in->op == NYIR_VEC8_SHR_I64;
     if (i64_vector_result && in->dst >= 0 && in->dst < NY_X64_NIR_MAX_SLOTS)
       c->value_i64v2[in->dst] = true;
     if ((in->op == NYIR_VEC4_REDUCE_ADD_I64 ||
@@ -299,23 +297,6 @@ static void ny_x64_nir_compute_frame(ny_x64_nir_ctx_t *c) {
         if (value_slot > max_local)
           max_local = value_slot;
       }
-    }
-    if (in->op == NYIR_INLINE_ASM && (in->imm == NY_X64_ASM_VMCALL_SLOTS ||
-                                      in->imm == NY_X64_ASM_VMWARE_PORT)) {
-      int slots[6] = {-1, -1, -1, -1, -1, -1};
-      int parsed =
-          in->imm == NY_X64_ASM_VMWARE_PORT
-              ? sscanf(in->symbol ? in->symbol : "",
-                       "vmware_port;nyc_slots=%d,%d,%d,%d,%d,%d;port=%*u",
-                       &slots[0], &slots[1], &slots[2], &slots[3], &slots[4],
-                       &slots[5])
-              : sscanf(in->symbol ? in->symbol : "",
-                       "%*[^;];nyc_slots=%d,%d,%d,%d,%d,%d", &slots[0],
-                       &slots[1], &slots[2], &slots[3], &slots[4], &slots[5]);
-      if (parsed == 6)
-        for (size_t s = 0; s < 6; ++s)
-          if (slots[s] > max_local)
-            max_local = slots[s];
     }
     if (in->op == NYIR_INLINE_ASM && in->imm == NY_X64_ASM_KVM_VMMCALL) {
       int slot = -1;
@@ -349,13 +330,11 @@ static void ny_x64_nir_compute_frame(ny_x64_nir_ctx_t *c) {
         c->use_count[args[j]]++;
       }
     }
-    if (in->op == NYIR_CALL && in->extra_args && in->extra_args_len > 0) {
-      for (size_t j = 0; j < in->extra_args_len; ++j) {
-        int a = in->extra_args[j];
-        if (a >= 0 && a < NY_X64_NIR_MAX_SLOTS) {
-          c->single_user_inst[a] = (int)i;
-          c->use_count[a]++;
-        }
+    for (size_t j = 0; j < in->extra_args_len; ++j) {
+      int a = in->extra_args[j];
+      if (a >= 0 && a < NY_X64_NIR_MAX_SLOTS) {
+        c->single_user_inst[a] = (int)i;
+        c->use_count[a]++;
       }
     }
     for (size_t j = 0; j < in->phi_incoming_len; ++j) {
@@ -488,8 +467,7 @@ static void ny_x64_nir_compute_frame(ny_x64_nir_ctx_t *c) {
       continue;
     int def = c->def_index[cond];
     if (def < 0 || (size_t)def >= i || (size_t)def >= c->nyir->len ||
-        c->nyir->data[def].op != NYIR_CMP_I64 ||
-        c->nyir->data[def].dst != cond)
+        c->nyir->data[def].op != NYIR_CMP_I64 || c->nyir->data[def].dst != cond)
       continue;
     if ((size_t)def + 1 != i)
       continue;
@@ -608,6 +586,7 @@ static void ny_x64_nir_compute_frame(ny_x64_nir_ctx_t *c) {
     if (source < 0 || source >= NY_X64_NIR_MAX_SLOTS || c->phi_used[masked])
       continue;
     c->elided_mask_test[masked] = true;
+    c->fused_mask_test_src[cmp->dst] = source;
   }
   /*
    * Fold a unique, adjacent address chain into x86's scaled-index memory
@@ -807,14 +786,20 @@ static void ny_x64_nir_compute_frame(ny_x64_nir_ctx_t *c) {
         }
       }
       /*
-       * Mask-test fusion hides the original source from the SELECT's IR
-       * operands. Keep it live through that SELECT so stack-home coloring
-       * cannot reuse its slot for either arm before emission reloads it.
+       * Mask-test fusion reloads the AND input at the comparison or select.
+       * Keep it live through that actual use, not just through the AND.
        */
+      int mask_cond = -1;
       if (in->op == NYIR_SELECT_I64 && in->a >= 0 &&
-          in->a < NY_X64_NIR_MAX_SLOTS && c->fused_mask_test_src[in->a] >= 0) {
-        int value = c->fused_mask_test_src[in->a];
-        if (value < tracked_val_count) {
+          in->a < NY_X64_NIR_MAX_SLOTS &&
+          (c->elided_mask_test[in->a] || c->fused_select_cmp[in->a]))
+        mask_cond = in->a;
+      else if (in->op == NYIR_CMP_I64 && in->dst >= 0 &&
+               in->dst < NY_X64_NIR_MAX_SLOTS && !c->fused_select_cmp[in->dst])
+        mask_cond = in->dst;
+      if (mask_cond >= 0 && mask_cond < NY_X64_NIR_MAX_SLOTS) {
+        int value = c->fused_mask_test_src[mask_cond];
+        if (value >= 0 && value < tracked_val_count) {
           size_t v = (size_t)value;
           if (i > home_last_use[v])
             home_last_use[v] = i;
@@ -852,20 +837,18 @@ static void ny_x64_nir_compute_frame(ny_x64_nir_ctx_t *c) {
           }
         }
       }
-      if (in->op == NYIR_CALL && in->extra_args) {
-        for (size_t a = 0; a < in->extra_args_len; ++a) {
-          int arg = in->extra_args[a];
-          if (arg >= 0 && arg < tracked_val_count) {
-            size_t v = (size_t)arg;
-            if (i < home_first_use[v])
-              home_first_use[v] = i;
-            if (i > home_last_use[v])
-              home_last_use[v] = i;
-            if (home_block[v] == SIZE_MAX)
-              home_block[v] = current_block;
-            else if (home_block[v] != current_block)
-              home_block[v] = SIZE_MAX - 1;
-          }
+      for (size_t a = 0; a < in->extra_args_len; ++a) {
+        int arg = in->extra_args[a];
+        if (arg >= 0 && arg < tracked_val_count) {
+          size_t v = (size_t)arg;
+          if (i < home_first_use[v])
+            home_first_use[v] = i;
+          if (i > home_last_use[v])
+            home_last_use[v] = i;
+          if (home_block[v] == SIZE_MAX)
+            home_block[v] = current_block;
+          else if (home_block[v] != current_block)
+            home_block[v] = SIZE_MAX - 1;
         }
       }
       for (size_t a = 0; a < in->phi_incoming_len; ++a) {
@@ -1008,12 +991,12 @@ static void ny_x64_nir_compute_frame(ny_x64_nir_ctx_t *c) {
         op == NYIR_VEC8_SET1_I64 || op == NYIR_VEC8_ADD_I64 ||
         op == NYIR_VEC8_SUB_I64 || op == NYIR_VEC8_AND_I64 ||
         op == NYIR_VEC8_OR_I64 || op == NYIR_VEC8_XOR_I64 ||
-        op == NYIR_VEC8_MUL_I64 || op == NYIR_VEC8_SAR_I64 || op == NYIR_VEC8_SHR_I64 ||
-        op == NYIR_VEC8_REDUCE_ADD_I64 || op == NYIR_VEC8_LOAD_F32 ||
-        op == NYIR_VEC8_STORE_F32 || op == NYIR_VEC8_ADD_F32 ||
-        op == NYIR_VEC8_SUB_F32 || op == NYIR_VEC8_MUL_F32 ||
-        op == NYIR_VEC8_DIV_F32 || op == NYIR_VEC8_FMA_F32 ||
-        op == NYIR_VEC8_SET1_F32) {
+        op == NYIR_VEC8_MUL_I64 || op == NYIR_VEC8_SAR_I64 ||
+        op == NYIR_VEC8_SHR_I64 || op == NYIR_VEC8_REDUCE_ADD_I64 ||
+        op == NYIR_VEC8_LOAD_F32 || op == NYIR_VEC8_STORE_F32 ||
+        op == NYIR_VEC8_ADD_F32 || op == NYIR_VEC8_SUB_F32 ||
+        op == NYIR_VEC8_MUL_F32 || op == NYIR_VEC8_DIV_F32 ||
+        op == NYIR_VEC8_FMA_F32 || op == NYIR_VEC8_SET1_F32) {
       c->is_leaf = false;
       break;
     }
@@ -1129,9 +1112,7 @@ static void ny_x64_nir_assign_loop_regs(ny_x64_nir_ctx_t *c) {
     if (in->op == NYIR_ADDR_LOCAL && in->imm >= 0 &&
         in->imm < c->max_local_slot)
       address_taken[in->imm] = true;
-    if (in->op == NYIR_INLINE_ASM && (in->imm == NY_X64_ASM_VMCALL_SLOTS ||
-                                      in->imm == NY_X64_ASM_VMWARE_PORT ||
-                                      in->imm == NY_X64_ASM_KVM_VMMCALL)) {
+    if (in->op == NYIR_INLINE_ASM && in->imm == NY_X64_ASM_KVM_VMMCALL) {
       /*
        * Fixed-register hypercalls write C locals outside normal stores.
        */
@@ -2752,13 +2733,14 @@ static bool ny_x64_nir_emit_inst_raw(ny_x64_nir_ctx_t *c, const nyr_inst_t *in,
   case NYIR_VA_SAVE: {
     static const char *const gp_regs[] = {"%rdi", "%rsi", "%rdx",
                                           "%rcx", "%r8",  "%r9"};
-    if (in->dst < 0 || in->imm != 176 || !nyr_put(c->w, "\tsubq\t$176, %rsp\n"))
+    if (in->dst < 0 || (in->imm != 48 && in->imm != 176) ||
+        !nyr_printf(c->w, "\tsubq\t$%" PRId64 ", %%rsp\n", in->imm))
       return false;
     for (size_t i = 0; i < sizeof(gp_regs) / sizeof(gp_regs[0]); ++i) {
       if (!nyr_printf(c->w, "\tmovq\t%s, %zu(%%rsp)\n", gp_regs[i], i * 8))
         return false;
     }
-    for (size_t i = 0; i < 8; ++i) {
+    for (size_t i = 0; in->imm == 176 && i < 8; ++i) {
       if (!nyr_printf(c->w, "\tmovdqu\t%%xmm%zu, %zu(%%rsp)\n", i, 48 + i * 16))
         return false;
     }
@@ -3361,7 +3343,8 @@ static bool ny_x64_nir_emit_inst_raw(ny_x64_nir_ctx_t *c, const nyr_inst_t *in,
         (c->value_f32[in->dst] || in->scalar_class == NYIR_SCALAR_F32) &&
         (in->flags & NYIR_INST_F_MEM_I32))
       return ny_x64_nir_load_value(c, in->a) &&
-             nyr_put(c->w, "\tmovss\t(%rax), %xmm0\n") &&
+             nyr_printf(c->w, "\tmovss\t%s(%%rax), %%xmm0\n",
+                        ny_x64_nir_seg_prefix(in->flags)) &&
              ny_x64_nir_store_xmm_f32(c, ny_x64_nir_slot(c, in->dst), 0);
     if (in->a >= 0 && in->a < NY_X64_NIR_MAX_SLOTS &&
         c->indexed_base[in->a] >= 0 && c->indexed_index[in->a] >= 0) {
@@ -3380,13 +3363,14 @@ static bool ny_x64_nir_emit_inst_raw(ny_x64_nir_ctx_t *c, const nyr_inst_t *in,
         (in->flags & NYIR_INST_F_MEM_I32))
       return ny_x64_nir_load_xmm_f32(c, ny_x64_nir_slot(c, in->c), 0) &&
              ny_x64_nir_load_value(c, in->a) &&
-             nyr_put(c->w, "\tmovss\t%xmm0, (%rax)\n");
+             nyr_printf(c->w, "\tmovss\t%%xmm0, %s(%%rax)\n",
+                        ny_x64_nir_seg_prefix(in->flags));
     if (in->a >= 0 && in->a < NY_X64_NIR_MAX_SLOTS &&
         c->indexed_base[in->a] >= 0 && c->indexed_index[in->a] >= 0) {
       const char *reg = (in->flags & NYIR_INST_F_MEM_BYTE)  ? "%r11b"
                         : (in->flags & NYIR_INST_F_MEM_U16) ? "%r11w"
                         : (in->flags & NYIR_INST_F_MEM_I32) ? "%r11d"
-                                                           : "%r11";
+                                                            : "%r11";
       return ny_x64_nir_load_value(c, in->c) &&
              nyr_put(c->w, "\tmovq\t%rax, %r11\n") &&
              ny_x64_nir_load_value(c, c->indexed_base[in->a]) &&
@@ -3397,7 +3381,7 @@ static bool ny_x64_nir_emit_inst_raw(ny_x64_nir_ctx_t *c, const nyr_inst_t *in,
     const char *reg = (in->flags & NYIR_INST_F_MEM_BYTE)  ? "%r10b"
                       : (in->flags & NYIR_INST_F_MEM_U16) ? "%r10w"
                       : (in->flags & NYIR_INST_F_MEM_I32) ? "%r10d"
-                                                         : "%r10";
+                                                          : "%r10";
     return ny_x64_nir_load_value(c, in->c) &&
            nyr_put(c->w, "\tmovq\t%rax, %r10\n") &&
            ny_x64_nir_load_value(c, in->a) &&
@@ -3747,46 +3731,13 @@ static bool ny_x64_nir_emit_inst_raw(ny_x64_nir_ctx_t *c, const nyr_inst_t *in,
      * (x & 1) ==/!= 0: emit TEST directly.  Keep the compare result form
      * (0/1 in rax) for cases where the boolean is materialized.
      */
-    if ((in->cmp == NYIR_CMP_EQ || in->cmp == NYIR_CMP_NE) && in->dst >= 0 &&
-        in->dst < NY_X64_NIR_MAX_SLOTS) {
-      int masked = -1;
-      int64_t zero = 1, mask = 0;
-      if (ny_x64_nir_try_const_i32(c, in->b, idx, &zero) && zero == 0)
-        masked = in->a;
-      else if (ny_x64_nir_try_const_i32(c, in->a, idx, &zero) && zero == 0)
-        masked = in->b;
-      if (masked >= 0 && masked < NY_X64_NIR_MAX_SLOTS &&
-          c->def_count[masked] == 1 && c->use_count[masked] == 1) {
-        int and_idx = c->def_index[masked];
-        if (and_idx >= 0 && (size_t)and_idx < idx) {
-          const nyr_inst_t *and = &c->nyir->data[and_idx];
-          int source = -1;
-          if (and->op == NYIR_AND_I64 && and->dst == masked) {
-            if (ny_x64_nir_try_const_i32(c, and->b, (size_t)and_idx, &mask) &&
-                mask == 1)
-              source = and->a;
-            else if (ny_x64_nir_try_const_i32(c, and->a, (size_t)and_idx,
-                                              &mask) &&
-                     mask == 1)
-              source = and->b;
-          }
-          if (source >= 0 && source < NY_X64_NIR_MAX_SLOTS &&
-              !c->phi_used[masked]) {
-            /*
-             * If AND was elided by select fusion state, it has no home;
-             * use the original source.  If not, still prefer the source
-             * (AND is redundant work for a flag-only test).
-             */
-            const char *setcc = in->cmp == NYIR_CMP_EQ ? "sete" : "setne";
-            c->elided_mask_test[masked] = true;
-            return ny_x64_nir_load_value(c, source) &&
-                   nyr_put(c->w, "\ttestq\t$1, %rax\n") &&
-                   nyr_printf(c->w, "\t%s\t%%al\n\tmovzbq\t%%al, %%rax\n",
-                              setcc) &&
-                   ny_x64_nir_store(c, ny_x64_nir_slot(c, in->dst));
-          }
-        }
-      }
+    int mask_source = c->fused_mask_test_src[in->dst];
+    if (mask_source >= 0) {
+      const char *setcc = in->cmp == NYIR_CMP_EQ ? "sete" : "setne";
+      return ny_x64_nir_load_value(c, mask_source) &&
+             nyr_put(c->w, "\ttestq\t$1, %rax\n") &&
+             nyr_printf(c->w, "\t%s\t%%al\n\tmovzbq\t%%al, %%rax\n", setcc) &&
+             ny_x64_nir_store(c, ny_x64_nir_slot(c, in->dst));
     }
     int64_t imm = 0;
     /*
@@ -3861,6 +3812,7 @@ static bool ny_x64_nir_emit_inst_raw(ny_x64_nir_ctx_t *c, const nyr_inst_t *in,
     ny_x64_nir_slot_str(c, ny_x64_nir_slot(c, in->b), true_addr,
                         sizeof(true_addr));
     if (in->a >= 0 && in->a < NY_X64_NIR_MAX_SLOTS &&
+        (c->elided_mask_test[in->a] || c->fused_select_cmp[in->a]) &&
         c->fused_mask_test_src[in->a] >= 0) {
       int source = c->fused_mask_test_src[in->a];
       const char *cc = "cmovne";
@@ -3986,9 +3938,28 @@ static bool ny_x64_nir_emit_inst_raw(ny_x64_nir_ctx_t *c, const nyr_inst_t *in,
                       in->imm);
   }
   case NYIR_RET: {
-    /*
-     * Load return value into %rax (skip if -1 = void return).
-     */
+    unsigned class0 = c->nyir->return_aggregate_classes[0];
+    if (c->nyir->return_aggregate_size && class0 != NYIR_ARG_CLASS_MEMORY) {
+      unsigned class1 = c->nyir->return_aggregate_classes[1];
+      if (class1 == NYIR_ARG_CLASS_INTEGER) {
+        /* The generic value loader uses RAX. Stage the second INTEGER
+         * eightbyte first so loading it cannot overwrite the first one. */
+        if (in->b < 0 || !ny_x64_nir_load_value(c, in->b) ||
+            (class0 == NYIR_ARG_CLASS_INTEGER &&
+             !nyr_put(c->w, "\tmovq\t%rax, %rdx\n")))
+          return false;
+      } else if (class1 == NYIR_ARG_CLASS_SSE) {
+        if (in->b < 0)
+          return false;
+        int xmm = class0 == NYIR_ARG_CLASS_SSE;
+        if (in->b < NY_X64_NIR_MAX_SLOTS && c->value_f32[in->b]) {
+          if (!ny_x64_nir_load_xmm_f32(c, ny_x64_nir_slot(c, in->b), xmm))
+            return false;
+        } else if (!ny_x64_nir_load_xmm(c, ny_x64_nir_slot(c, in->b), xmm)) {
+          return false;
+        }
+      }
+    }
     if (in->a >= 0) {
       if (in->a < NY_X64_NIR_MAX_SLOTS && c->value_f64[in->a]) {
         if (!ny_x64_nir_load_xmm(c, ny_x64_nir_slot(c, in->a), 0))
@@ -4002,24 +3973,6 @@ static bool ny_x64_nir_emit_inst_raw(ny_x64_nir_ctx_t *c, const nyr_inst_t *in,
     } else {
       if (!nyr_put(c->w, "\txorq\t%rax, %rax\n"))
         return false;
-    }
-    if (c->nyir->return_aggregate_size &&
-        c->nyir->return_aggregate_classes[0] != NYIR_ARG_CLASS_MEMORY) {
-      unsigned class1 = c->nyir->return_aggregate_classes[1];
-      if (class1 == NYIR_ARG_CLASS_INTEGER) {
-        if (in->b < 0 || !ny_x64_nir_load_value(c, in->b) ||
-            !nyr_put(c->w, "\tmovq\t%rax, %rdx\n"))
-          return false;
-      } else if (class1 == NYIR_ARG_CLASS_SSE) {
-        if (in->b < 0)
-          return false;
-        if (in->b < NY_X64_NIR_MAX_SLOTS && c->value_f32[in->b]) {
-          if (!ny_x64_nir_load_xmm_f32(c, ny_x64_nir_slot(c, in->b), 1))
-            return false;
-        } else if (!ny_x64_nir_load_xmm(c, ny_x64_nir_slot(c, in->b), 1)) {
-          return false;
-        }
-      }
     }
     return (!c->use_avx_vector || nyr_put(c->w, "\tvzeroupper\n")) &&
            nyr_printf(c->w, "\tjmp\t%s\n", c->epilogue_label);
@@ -4243,11 +4196,14 @@ static bool ny_x64_nir_emit_inst_raw(ny_x64_nir_ctx_t *c, const nyr_inst_t *in,
                     c->target->shadow_space_bytes))
       return false;
     if (indirect) {
-      if (!ny_x64_nir_load_value(c, arg_vals[0]))
+      if (!ny_x64_nir_load_value(c, arg_vals[0]) ||
+          !nyr_put(c->w, "\tmovq\t%rax, %r11\n"))
+        return false;
+      /* C function pointers currently carry no variadic prototype bit. */
+      if (c->target->abi == NY_NATIVE_ABI_SYSV &&
+          !nyr_printf(c->w, "\tmovb\t$%d, %%al\n", sse))
         return false;
       if (c->retpoline_indirect_calls || c->retpoline_inline_calls) {
-        if (!nyr_put(c->w, "\tmovq\t%rax, %r11\n"))
-          return false;
         if (c->retpoline_inline_calls) {
           if (!nyr_printf(c->w,
                           "\tcall\t.Lnyir_%s_retpoline_dispatch_%zu\n"
@@ -4272,7 +4228,7 @@ static bool ny_x64_nir_emit_inst_raw(ny_x64_nir_ctx_t *c, const nyr_inst_t *in,
         } else if (!nyr_put(c->w, "\tcall\t__x86_indirect_thunk_r11\n")) {
           return false;
         }
-      } else if (!nyr_put(c->w, "\tcall\t*%rax\n")) {
+      } else if (!nyr_put(c->w, "\tcall\t*%r11\n")) {
         return false;
       }
     } else {
@@ -5186,50 +5142,44 @@ static bool ny_x64_nir_emit_inst_raw(ny_x64_nir_ctx_t *c, const nyr_inst_t *in,
       c->rax_cached_slot = -1;
       return nyr_printf(c->w, "\tmovq\t%%rax, %s\n", address);
     }
-    if (in->imm == NY_X64_ASM_VMWARE_PORT) {
-      int slots[6] = {-1, -1, -1, -1, -1, -1};
+    if (in->imm == NY_X64_ASM_VMWARE_PORT ||
+        in->imm == NY_X64_ASM_VMCALL_SLOTS) {
+      bool io_port = in->imm == NY_X64_ASM_VMWARE_PORT;
       int consumed = -1;
       unsigned port = 0;
-      char addresses[6][64] = {{0}};
       bool alternative = false;
       if (in->dst != -1 || in->a < 0 || in->b < 0 || in->c < 0 || in->d < 0 ||
-          in->e < 0 || in->f < 0 || in->extra_args_len != 0 || !in->symbol ||
-          sscanf(in->symbol,
-                 "vmware_port;nyc_slots=%d,%d,%d,%d,%d,%d;port=%u%n", &slots[0],
-                 &slots[1], &slots[2], &slots[3], &slots[4], &slots[5], &port,
-                 &consumed) != 7 ||
-          consumed < 0 || port > UINT16_MAX)
+          in->e < 0 || in->f < 0 || in->extra_args_len != 6 || !in->symbol)
         return false;
-      if (strcmp(in->symbol + consumed, "") != 0 &&
-          strcmp(in->symbol + consumed, ";alt=274") != 0)
+      if (io_port) {
+        if (sscanf(in->symbol, "vmware_port;port=%u%n", &port, &consumed) !=
+                1 ||
+            consumed < 0 || port > UINT16_MAX)
+          return false;
+        alternative = strcmp(in->symbol + consumed, ";alt=274") == 0;
+        if (in->symbol[consumed] && !alternative)
+          return false;
+      } else if (strcmp(in->symbol, "vmcall") &&
+                 strcmp(in->symbol, "vmmcall")) {
         return false;
-      alternative = strcmp(in->symbol + consumed, ";alt=274") == 0;
-      const int inputs[] = {in->a, in->b, in->c, in->d, in->e, in->f};
-      for (size_t i = 0; i < 6; ++i) {
-        if (slots[i] < 0 || slots[i] >= c->max_local_slot) {
-          nyr_set_error(c->err, c->err_len,
-                        "nyir x86-64: invalid VMware output slot %d/%d",
-                        slots[i], c->max_local_slot);
-          return false;
-        }
-        ny_x64_nir_slot_str(c, slots[i], addresses[i], sizeof(addresses[i]));
-        if (!addresses[i][0] || addresses[i][0] == '%') {
-          nyr_set_error(c->err, c->err_len,
-                        "nyir x86-64: VMware output slot %d has address %s",
-                        slots[i], addresses[i]);
-          return false;
-        }
       }
-      static const char *const input_regs[] = {"%r10", "%rbx", "%rcx",
+      const int inputs[] = {in->a, in->b, in->c, in->d, in->e, in->f};
+      static const char *const input_regs[] = {"%r10", "%r11", "%rcx",
                                                "%rdx", "%rsi", "%rdi"};
       c->rax_cached_slot = -1;
       for (size_t i = 0; i < 6; ++i)
         if (!ny_x64_nir_load_value(c, inputs[i]) ||
             !nyr_printf(c->w, "\tmovq\t%%rax, %s\n", input_regs[i]))
           return false;
-      if (!nyr_put(c->w, "\tmovq\t%r10, %rax\n") ||
+      /* Stage every input before clobbering the caller's callee-saved RBX.
+       * Keep pushes outside the instruction-alternative span. */
+      if (!nyr_put(c->w, "\tmovq\t%r10, %rax\n\tpushq\t%rbx\n"
+                         "\tmovq\t%r11, %rbx\n") ||
           (alternative && !nyr_put(c->w, "771:\n")) ||
-          !nyr_printf(c->w, "\tmovw\t$%u, %%dx\n\tinl\t(%%dx), %%eax\n", port))
+          !(io_port
+                ? nyr_printf(c->w, "\tmovw\t$%u, %%dx\n\tinl\t(%%dx), %%eax\n",
+                             port)
+                : nyr_printf(c->w, "\t%s\n", in->symbol)))
         return false;
       if (alternative &&
           !nyr_put(c->w,
@@ -5251,61 +5201,15 @@ static bool ny_x64_nir_emit_inst_raw(ny_x64_nir_ctx_t *c, const nyr_inst_t *in,
                    "\t.popsection\n"
                    "774:\n775:\n\t.popsection\n"))
         return false;
-      static const char *const output_regs[] = {"%rax", "%rbx", "%rcx",
-                                                "%rdx", "%rsi", "%rdi"};
-      for (size_t i = 0; i < 6; ++i)
-        if (!nyr_printf(c->w, "\tmovq\t%s, %s\n", output_regs[i], addresses[i]))
-          return false;
-      c->rax_cached_slot = -1;
-      return true;
-    }
-    if (in->imm == NY_X64_ASM_VMCALL_SLOTS) {
-      int slots[6] = {-1, -1, -1, -1, -1, -1};
-      int consumed = -1;
-      char mnemonic[8] = {0};
-      char addresses[6][64] = {{0}};
-      if (in->dst != -1 || in->a < 0 || in->b < 0 || in->c < 0 || in->d < 0 ||
-          in->e < 0 || in->f < 0 || in->extra_args_len != 0 || !in->symbol ||
-          sscanf(in->symbol, "%7[^;];nyc_slots=%d,%d,%d,%d,%d,%d%n", mnemonic,
-                 &slots[0], &slots[1], &slots[2], &slots[3], &slots[4],
-                 &slots[5], &consumed) != 7 ||
-          consumed < 0 || in->symbol[consumed] != '\0' ||
-          (strcmp(mnemonic, "vmcall") != 0 && strcmp(mnemonic, "vmmcall") != 0))
+      if (!nyr_put(c->w, "\tmovq\t%rax, %r8\n\tmovq\t%rbx, %r11\n"
+                         "\tpopq\t%rbx\n"))
         return false;
-      const int inputs[] = {in->a, in->b, in->c, in->d, in->e, in->f};
-      for (size_t i = 0; i < 6; ++i) {
-        if (slots[i] < 0 || slots[i] >= c->max_local_slot) {
-          nyr_set_error(c->err, c->err_len,
-                        "nyir x86-64: invalid VMware output slot %d/%d",
-                        slots[i], c->max_local_slot);
-          return false;
-        }
-        ny_x64_nir_slot_str(c, slots[i], addresses[i], sizeof(addresses[i]));
-        if (!addresses[i][0] || addresses[i][0] == '%') {
-          nyr_set_error(c->err, c->err_len,
-                        "nyir x86-64: VMware output slot %d has address %s",
-                        slots[i], addresses[i]);
-          return false;
-        }
-      }
-      static const char *const input_regs[] = {"%r10", "%rbx", "%rcx",
-                                               "%rdx", "%rsi", "%rdi"};
-      c->rax_cached_slot = -1;
-      for (size_t i = 0; i < 6; ++i) {
-        if (!ny_x64_nir_load_value(c, inputs[i]) ||
-            !nyr_printf(c->w, "\tmovq\t%%rax, %s\n", input_regs[i])) {
-          nyr_set_error(c->err, c->err_len,
-                        "nyir x86-64: VMware input %zu could not be loaded", i);
-          return false;
-        }
-      }
-      if (!nyr_put(c->w, "\tmovq\t%r10, %rax\n") ||
-          !nyr_printf(c->w, "\t%s\n", mnemonic))
-        return false;
-      static const char *const output_regs[] = {"%rax", "%rbx", "%rcx",
+      static const char *const output_regs[] = {"%r8",  "%r11", "%rcx",
                                                 "%rdx", "%rsi", "%rdi"};
+      c->rax_cached_slot = -1;
       for (size_t i = 0; i < 6; ++i)
-        if (!nyr_printf(c->w, "\tmovq\t%s, %s\n", output_regs[i], addresses[i]))
+        if (!ny_x64_nir_load_value(c, in->extra_args[i]) ||
+            !nyr_printf(c->w, "\tmovq\t%s, (%%rax)\n", output_regs[i]))
           return false;
       c->rax_cached_slot = -1;
       return true;
@@ -7058,6 +6962,11 @@ static bool ny_x64_nir_emit_inst_raw(ny_x64_nir_ctx_t *c, const nyr_inst_t *in,
       c->rax_cached_slot = -1;
       return true;
     }
+    if (in->imm == -196)
+      return in->a == -1 && in->dst >= 0 && in->symbol &&
+             nyr_printf(c->w, "\tleaq\t%s(%%rip), %%rax\n",
+                        ny_x64_nir_link_symbol(in->symbol)) &&
+             ny_x64_nir_store(c, ny_x64_nir_slot(c, in->dst));
     if (in->imm >= -74 && in->imm <= -71) {
       static const char *const names[] = {"sgdt %0", "sidt %0", "lgdt %0",
                                           "lidt %0"};
@@ -7249,7 +7158,7 @@ static bool ny_x64_nir_emit_inst_raw(ny_x64_nir_ctx_t *c, const nyr_inst_t *in,
 }
 
 static const char *ny_x64_nir_seg_prefix(unsigned flags) {
-  return (flags & NYIR_INST_F_MEM_SEG_GS) ? "%gs:"
+  return (flags & NYIR_INST_F_MEM_SEG_GS)   ? "%gs:"
          : (flags & NYIR_INST_F_MEM_SEG_FS) ? "%fs:"
                                             : "";
 }
@@ -9453,8 +9362,7 @@ static bool nyr_x86_64_emit_mach_scalar_impl(
     nyr_writer_t *w, const ny_native_target_info_t *target,
     const nyr_mach_func_t *mach, const char *func_name, bool tag_return,
     bool function_return_thunk_extern, bool position_independent, char *err,
-    size_t err_len, const nyr_x64_mach_use_t *uses,
-    const size_t *definitions) {
+    size_t err_len, const nyr_x64_mach_use_t *uses, const size_t *definitions) {
   const char *name = func_name && func_name[0] ? func_name : "rt_main";
   if (!w || !target)
     return false;
@@ -9476,7 +9384,7 @@ static bool nyr_x86_64_emit_mach_scalar_impl(
    * The specialized leaf emitters address symbols directly; PIC needs the
    * general path so every symbol reference can use the GOT.
    */
-  if (!position_independent) {
+  if (!position_independent && !mach->return_aggregate_size) {
     int leaf_return = nyr_x64_mach_emit_leaf_return(
         w, target, mach, name, tag_return, function_return_thunk_extern);
     if (leaf_return != 0)
@@ -9820,8 +9728,7 @@ static bool nyr_x86_64_emit_mach_scalar_impl(
                             ny_x64_nir_link_symbol(in->src0.as.symbol)))
               return false;
           } else if (!nyr_printf(w, "\tleaq\t%s(%%rip), %%rax\n",
-                                 ny_x64_nir_link_symbol(
-                                     in->src0.as.symbol))) {
+                                 ny_x64_nir_link_symbol(in->src0.as.symbol))) {
             return false;
           }
         } else if (in->src1.kind == NYR_MACH_OPERAND_VREG &&
@@ -9914,7 +9821,8 @@ static bool nyr_x86_64_emit_mach_scalar_impl(
       }
       case NYR_MACH_VA_SAVE: {
         if (target->abi != NY_NATIVE_ABI_SYSV ||
-            in->src0.kind != NYR_MACH_OPERAND_FRAME || a < 176)
+            in->src0.kind != NYR_MACH_OPERAND_FRAME ||
+            (in->immediate != 48 && in->immediate != 176) || a < in->immediate)
           return false;
         static const char *const gp_regs[] = {"%rdi", "%rsi", "%rdx",
                                               "%rcx", "%r8",  "%r9"};
@@ -9922,7 +9830,7 @@ static bool nyr_x86_64_emit_mach_scalar_impl(
           if (!nyr_printf(w, "\tmovq\t%s, -%d(%%rbp)\n", gp_regs[reg],
                           a - (int)(reg * 8)))
             return false;
-        for (size_t reg = 0; reg < 8; ++reg)
+        for (size_t reg = 0; in->immediate == 176 && reg < 8; ++reg)
           if (!nyr_printf(w, "\tmovups\t%%xmm%zu, -%d(%%rbp)\n", reg,
                           a - 48 - (int)(reg * 16)))
             return false;
@@ -10102,8 +10010,7 @@ static bool nyr_x86_64_emit_mach_scalar_impl(
           const char *mnemonic = NULL, *dst_reg = NULL;
           ny_x64_mach_width_load_op(in, &mnemonic, &dst_reg);
           if (in->src0.kind == NYR_MACH_OPERAND_FRAME) {
-            if (!nyr_printf(w, "\t%s\t-%d(%%rbp), %s\n", mnemonic, a,
-                            dst_reg))
+            if (!nyr_printf(w, "\t%s\t-%d(%%rbp), %s\n", mnemonic, a, dst_reg))
               return false;
             rax_cached_off = -1;
           } else {
@@ -10526,9 +10433,9 @@ static bool nyr_x86_64_emit_mach_scalar_impl(
         if (in->opcode == NYR_MACH_SAR && in->sext32) {
           if (!ny_x64_scalar_emit_rax_load(w, &in->src0, a, rax_cached_off) ||
               !nyr_put(w, "\tmovslq\t%eax, %rax\n") ||
-              !nyr_x64_mach_emit_rax_result(
-                  w, mach, uses, b->first_inst + n,
-                  b->first_inst + b->inst_count, in, dst, &rax_cached_off))
+              !nyr_x64_mach_emit_rax_result(w, mach, uses, b->first_inst + n,
+                                            b->first_inst + b->inst_count, in,
+                                            dst, &rax_cached_off))
             return false;
           rax_cached_off = in->dst.kind == NYR_MACH_OPERAND_VREG ? dst : -1;
           break;
@@ -11069,7 +10976,8 @@ static bool nyr_x86_64_emit_mach_scalar_impl(
           rax_cached_off = -1;
           break;
         }
-        if (in->call_is_variadic &&
+        if ((in->call_is_variadic ||
+             (mach->c_abi && in->src0.kind != NYR_MACH_OPERAND_SYMBOL)) &&
             !nyr_printf(w, "\tmovb\t$%zu, %%al\n", fp_register_args))
           return false;
         if (in->src0.kind == NYR_MACH_OPERAND_SYMBOL) {
@@ -11081,9 +10989,28 @@ static bool nyr_x86_64_emit_mach_scalar_impl(
                               : "",
                           in->src0.as.symbol))
             return false;
-        } else if (!nyr_printf(w, "\tcall\t*-%d(%%rbp)\n",
-                               nyr_x64_mach_offset(mach, &in->src0))) {
-          return false;
+        } else {
+          int target_off = nyr_x64_mach_offset(mach, &in->src0);
+          if (mach->x64_inline_thunk) {
+            /*
+             * GNU as numeric labels are local to each inline sequence.
+             * The speculative return path spins; the architectural return
+             * consumes the target written in place of its return address.
+             */
+            if (!nyr_printf(w, "\tmovq\t-%d(%%rbp), %%r11\n", target_off) ||
+                !nyr_put(w, "\tcall\t1f\n\tjmp\t4f\n"
+                            "1:\tcall\t3f\n"
+                            "2:\tpause\n\tlfence\n\tjmp\t2b\n"
+                            "3:\tmovq\t%r11, (%rsp)\n\tret\n"
+                            "4:\n"))
+              return false;
+          } else if (mach->x64_indirect_thunk) {
+            if (!nyr_printf(w, "\tmovq\t-%d(%%rbp), %%r11\n", target_off) ||
+                !nyr_put(w, "\tcall\t__x86_indirect_thunk_r11\n"))
+              return false;
+          } else if (!nyr_printf(w, "\tcall\t*-%d(%%rbp)\n", target_off)) {
+            return false;
+          }
         }
         if (stack_bytes && !nyr_printf(w, "\taddq\t$%zu, %%rsp\n", stack_bytes))
           return false;
@@ -11102,8 +11029,28 @@ static bool nyr_x86_64_emit_mach_scalar_impl(
                              ? dst
                              : -1;
         break;
-      case NYR_MACH_RET:
-        if (nyr_x64_mach_is_float(mach, &in->src0)) {
+      case NYR_MACH_RET: {
+        unsigned class0 = mach->return_aggregate_classes[0];
+        if (in->src1.kind != NYR_MACH_OPERAND_NONE) {
+          unsigned class1 = mach->return_aggregate_classes[1];
+          if (class1 == NYIR_ARG_CLASS_INTEGER) {
+            if (class0 == NYIR_ARG_CLASS_INTEGER) {
+              if (!nyr_printf(w, "\tmovq\t-%d(%%rbp), %%rdx\n", b_off))
+                return false;
+            } else if (!ny_x64_scalar_emit_rax_load(w, &in->src1, b_off,
+                                                    rax_cached_off)) {
+              return false;
+            }
+          } else if (class1 != NYIR_ARG_CLASS_SSE ||
+                     !nyr_printf(w, "\tmovq\t-%d(%%rbp), %%xmm%d\n", b_off,
+                                 class0 == NYIR_ARG_CLASS_SSE)) {
+            return false;
+          }
+        }
+        if (mach->return_aggregate_size && class0 == NYIR_ARG_CLASS_SSE) {
+          if (!nyr_printf(w, "\tmovq\t-%d(%%rbp), %%xmm0\n", a))
+            return false;
+        } else if (nyr_x64_mach_is_float(mach, &in->src0)) {
           if (nyr_x64_mach_is_f32(mach, &in->src0)) {
             if (!nyr_printf(
                     w, "\tmovss\t-%d(%%rbp), %%xmm0\n\tmovd\t%%xmm0, %%eax\n",
@@ -11122,6 +11069,7 @@ static bool nyr_x86_64_emit_mach_scalar_impl(
           return false;
         rax_cached_off = -1;
         break;
+      }
       default:
         return false;
       }

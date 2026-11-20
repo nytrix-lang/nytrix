@@ -11,21 +11,21 @@
 #include "base/debug.h"
 #include "base/intern.h"
 #include "base/loader.h"
+#include "base/parallel.h"
 #include "base/time.h"
 #include "base/trace.h"
-#include "base/parallel.h"
 #include "base/util.h"
 #include "code/backend/core/abi.h"
-#include "code/backend/mach/fallback.h"
 #include "code/backend/core/internal.h"
 #include "code/backend/core/nyr.h"
+#include "code/backend/mach/fallback.h"
 #include "code/backend/runtime/aliases.h"
 #include "code/backend/runtime/shared.h"
 #include "code/lang/c/parser/c.h"
-#include "code/lang/ny/parser/visitor.h"
-#include "code/lang/ny/parser/proof.h"
-#include "code/lang/ny/pipeline/native.h"
 #include "code/lang/ny/gen/internal.h"
+#include "code/lang/ny/parser/proof.h"
+#include "code/lang/ny/parser/visitor.h"
+#include "code/lang/ny/pipeline/native.h"
 #include "code/lang/ny/semantics/pipeline.h"
 #include "code/lang/ny/semantics/policy.h"
 
@@ -527,8 +527,8 @@ const nyr_runtime_alias_t nyr_runtime_aliases[] = {
     {"core.compiler.syntax.type.is_float", "rt_is_float_obj"},
     {"core.compiler.syntax.type.is_str", "rt_is_str_obj"},
     {"core.contains", "rt_contains_raw"},
-    {"core.dict_mod.dict_len", "rt_dict_len_raw"},
-    {"core.dict_mod.list", "rt_list_new_raw"},
+    {"core.dict.dict_len", "rt_dict_len_raw"},
+    {"core.dict.list", "rt_list_new_raw"},
     {"core.is_ptr", "rt_value_is_ptr"},
     {"core.len", "rt_len"},
     {"core.list", "rt_list_new_raw"},
@@ -568,7 +568,7 @@ const nyr_runtime_alias_t nyr_runtime_aliases[] = {
     {"core.primitives.set_globals", "rt_globals_set"},
     {"core.reflect.__value_get_index_raw", "rt_value_get_index_raw"},
     {"core.reflect.globals", "rt_globals_get"},
-    {"core.set_mod.len", "rt_set_len_raw"},
+    {"core.set.len", "rt_set_len_raw"},
     {"core.str.chr", "rt_str_chr_raw"},
     {"core.str.long", "rt_long"},
     /*
@@ -726,8 +726,8 @@ static const char *ny_native_runtime_symbol_impl(const char *name) {
       lo = mid + 1;
   }
 
-#define RT_DEF(n, implementation, args, sig, doc) \
-  if (strcmp(name, n) == 0)                       \
+#define RT_DEF(n, implementation, args, sig, doc)                              \
+  if (strcmp(name, n) == 0)                                                    \
     return #implementation;
 #define RT_GV(n, implementation, type, doc)
 #include "code/backend/runtime/defs.h"
@@ -746,9 +746,9 @@ static const char *ny_native_runtime_symbol_impl(const char *name) {
  * src/code/backend/runtime/defs.h; this table is hand-maintained.
  */
 #define NY_NATIVE_ENTRY(name, flags, call_abi) {name, flags, call_abi, {0}}
-#define NY_NATIVE_ENTRY_FN(name, flags, call_abi, call_member, fn) \
-  {                                                                \
-    name, flags, call_abi, { .call_member = fn }                   \
+#define NY_NATIVE_ENTRY_FN(name, flags, call_abi, call_member, fn)             \
+  {                                                                            \
+    name, flags, call_abi, { .call_member = fn }                               \
   }
 
 const ny_native_runtime_abi_decl_t ny_native_runtime_abi_decls[] = {
@@ -1950,10 +1950,9 @@ const ny_native_runtime_abi_decl_t ny_native_runtime_abi_decls[] = {
                        i64_ternary_i64, rt_tbuf_get_any),
     NY_NATIVE_ENTRY_FN("rt_tbuf_index_any", 0, NY_NATIVE_VM_I64_BINARY_TO_I64,
                        i64_binary_i64, rt_tbuf_index_any),
-    NY_NATIVE_ENTRY_FN("rt_tbuf_index_any_f64",
-                       NY_NATIVE_RUNTIME_ABI_RESULT_F64,
-                       NY_NATIVE_VM_I64_BINARY_TO_F64, i64_binary_f64,
-                       rt_tbuf_index_any_f64),
+    NY_NATIVE_ENTRY_FN(
+        "rt_tbuf_index_any_f64", NY_NATIVE_RUNTIME_ABI_RESULT_F64,
+        NY_NATIVE_VM_I64_BINARY_TO_F64, i64_binary_f64, rt_tbuf_index_any_f64),
     NY_NATIVE_ENTRY_FN("rt_tbuf_index_any_raw",
                        NY_NATIVE_RUNTIME_ABI_NO_DYNAMIC_BOXING |
                            NY_NATIVE_RUNTIME_ABI_RESULT_TAGGED_VALUE,
@@ -2283,13 +2282,13 @@ const size_t ny_native_runtime_value_abi_decl_count =
     sizeof(ny_native_runtime_value_abi_decls) /
     sizeof(ny_native_runtime_value_abi_decls[0]);
 
-#define NY_NATIVE_CALLBACK_CALLABLE_REPRS                                   \
-  (NY_NATIVE_ABI_VALUE_RAW_I64 | NY_NATIVE_ABI_VALUE_TAGGED |               \
+#define NY_NATIVE_CALLBACK_CALLABLE_REPRS                                      \
+  (NY_NATIVE_ABI_VALUE_RAW_I64 | NY_NATIVE_ABI_VALUE_TAGGED |                  \
    NY_NATIVE_ABI_VALUE_OBJECT_HANDLE | NY_NATIVE_ABI_VALUE_CALLBACK_MARKED)
-#define NY_NATIVE_CALLBACK_VALUE_REPRS                               \
-  (NY_NATIVE_ABI_VALUE_RAW_I64 | NY_NATIVE_ABI_VALUE_TAGGED |        \
+#define NY_NATIVE_CALLBACK_VALUE_REPRS                                         \
+  (NY_NATIVE_ABI_VALUE_RAW_I64 | NY_NATIVE_ABI_VALUE_TAGGED |                  \
    NY_NATIVE_ABI_VALUE_OBJECT_HANDLE | NY_NATIVE_ABI_VALUE_RAW_CSTR)
-#define NY_NATIVE_CALLBACK_DISPATCH_REPRS                                \
+#define NY_NATIVE_CALLBACK_DISPATCH_REPRS                                      \
   (NY_NATIVE_CALLBACK_VALUE_REPRS | NY_NATIVE_ABI_VALUE_CALLBACK_MARKED)
 const ny_native_runtime_callback_abi_decl_t
     ny_native_runtime_callback_abi_decls[] = {
@@ -3053,12 +3052,12 @@ static const char *ny_native_runtime_symbol_for_expr(const char *name,
      * modules have qualified entries in the table.
      */
     const char *decl_leaf = ny_name_leaf(decl_name);
-    bool root_decl = decl_name && decl_leaf &&
-                     (decl_leaf == decl_name ||
-                      (strncmp(decl_name, "core.", 5) == 0 &&
-                       decl_leaf == decl_name + 5));
+    bool root_decl =
+        decl_name && decl_leaf &&
+        (decl_leaf == decl_name ||
+         (strncmp(decl_name, "core.", 5) == 0 && decl_leaf == decl_name + 5));
     /*
-     * Root stdlib files (lib/<name>.ny: core.str, core.dict_mod, core.term,
+     * Root stdlib files (lib/<name>.ny: core.str, core.dict, core.term,
      * ...) are the intrinsic facades; modules in subdirectories are not.
      */
     if (!root_decl && decl_leaf) {
@@ -7642,8 +7641,7 @@ static int64_t nyr_static_dyn_tag(const expr_t *e) {
   return -1;
 }
 static bool nyr_global_declared_any(nyr_builder_t *b, const char *name);
-static const char *nyr_global_declared_type(nyr_builder_t *b,
-                                            const char *name);
+static const char *nyr_global_declared_type(nyr_builder_t *b, const char *name);
 static void nyr_record_global_dyn_tag(nyr_builder_impl_t *b, const char *name,
                                       int value) {
   if (!b || !name || value < 0)
@@ -12274,7 +12272,7 @@ static bool ny_native_name_matches(const char *fn_name, const char *lookup) {
 #define NY_MODULE_BUCKET_SIZE 1024
 #define NY_MODULE_MEMBER_CACHE_SIZE 65536
 #define NY_MODULE_MEMBER_CACHE_WAYS 4u
-#define NY_MODULE_MEMBER_CACHE_SETS                           \
+#define NY_MODULE_MEMBER_CACHE_SETS                                            \
   (NY_MODULE_MEMBER_CACHE_SIZE / NY_MODULE_MEMBER_CACHE_WAYS)
 #define NY_TREEFALL_CACHE_SIZE 16384
 
@@ -13776,8 +13774,7 @@ static bool ny_native_any_fn_may_match(ny_native_fn_index_t *index,
     return true;
   uint32_t slot =
       ny_fn_name_hash(ny_name_leaf(lookup)) & (NY_FN_BUCKET_SIZE - 1);
-  for (int32_t i = index->any_fn_heads[slot]; i >= 0;
-       i = index->any_fn_next[i])
+  for (int32_t i = index->any_fn_heads[slot]; i >= 0; i = index->any_fn_next[i])
     if (ny_native_name_matches(index->any_fn_names[i], lookup))
       return true;
   return false;
@@ -13908,9 +13905,8 @@ static const stmt_t *nyr_find_user_function(const nyr_builder_impl_t *b,
   if ((!resolve_index || resolve_index->functions.prog != b->prog) &&
       !strchr(name, '.')) {
     for (size_t i = 0; i < b->prog->body.len; ++i) {
-      const stmt_t *found =
-          nyr_find_user_function_exact(b->prog->body.data[i], name, b->options,
-                                       resolve_index, 0);
+      const stmt_t *found = nyr_find_user_function_exact(
+          b->prog->body.data[i], name, b->options, resolve_index, 0);
       if (found && !ny_is_stdlib_tok(found->tok)) {
         ny_native_fn_resolve_cache_put(b, name, b->source_file, found);
         return found;
@@ -13960,8 +13956,8 @@ static const stmt_t *nyr_find_user_function(const nyr_builder_impl_t *b,
    * or data identifier rather than a function.  Avoid the expensive fallback
    * AST walk; qualified/ambiguous names continue through target resolution.
    */
-  if (!strchr(name, '.') &&
-      resolve_index && resolve_index->functions.prog == b->prog) {
+  if (!strchr(name, '.') && resolve_index &&
+      resolve_index->functions.prog == b->prog) {
     bool ambiguous = false;
     const stmt_t *unique =
         ny_native_fn_cache_find_unique_leaf(resolve_index, name, &ambiguous);
@@ -13981,8 +13977,7 @@ static const stmt_t *nyr_find_user_function(const nyr_builder_impl_t *b,
       return cached_resolved;
   }
   if (resolve_index && resolve_index->functions.prog == b->prog) {
-    const stmt_t *found =
-        ny_native_fn_cache_lookup(resolve_index, lookup_name);
+    const stmt_t *found = ny_native_fn_cache_lookup(resolve_index, lookup_name);
     if (found) {
       return ny_native_fn_resolve_cache_put_both(b, name, lookup_name, found);
     }
@@ -14080,14 +14075,12 @@ static const stmt_t *nyr_find_user_function(const nyr_builder_impl_t *b,
     for (size_t i = 0;
          any_candidate && i < b->prog->body.len && !treefall_found; ++i) {
       treefall_found = nyr_find_user_function_exact(
-          b->prog->body.data[i], lookup_name, b->options,
-          resolve_index, 0);
+          b->prog->body.data[i], lookup_name, b->options, resolve_index, 0);
     }
     for (size_t i = 0;
          any_candidate && i < b->prog->body.len && !treefall_found; ++i) {
       treefall_found = nyr_find_user_function_target(
-          resolve_index, b->prog->body.data[i], lookup_name,
-          b->options, 0);
+          resolve_index, b->prog->body.data[i], lookup_name, b->options, 0);
     }
     for (size_t i = 0;
          any_candidate && i < b->prog->body.len && !treefall_found; ++i) {
@@ -14135,8 +14128,8 @@ static const stmt_t *nyr_find_user_function(const nyr_builder_impl_t *b,
   if (strchr(lookup_name, '.')) {
     const char *leaf = strrchr(lookup_name, '.') + 1;
     bool ambiguous = false;
-    const stmt_t *unique = ny_native_fn_cache_find_unique_exact(
-        resolve_index, leaf, &ambiguous);
+    const stmt_t *unique =
+        ny_native_fn_cache_find_unique_exact(resolve_index, leaf, &ambiguous);
     if (ambiguous)
       return NULL;
     if (unique) {
@@ -14159,18 +14152,18 @@ static const stmt_t *nyr_find_user_function(const nyr_builder_impl_t *b,
        * A name ending in `.lookup` has lookup's leaf: walk that leaf chain
        * instead of every indexed function, when the chains cover the index.
        */
-      bool by_leaf = resolve_index && resolve_index->fn_leaf_next &&
-                     resolve_index->fn_chain_cap >=
-                         resolve_index->functions.count;
-      uint32_t leaf_slot = ny_fn_name_hash(ny_name_leaf(lookup_name)) &
-                           (NY_FN_BUCKET_SIZE - 1);
+      bool by_leaf =
+          resolve_index && resolve_index->fn_leaf_next &&
+          resolve_index->fn_chain_cap >= resolve_index->functions.count;
+      uint32_t leaf_slot =
+          ny_fn_name_hash(ny_name_leaf(lookup_name)) & (NY_FN_BUCKET_SIZE - 1);
       int32_t chain[2] = {
           by_leaf ? resolve_index->fn_leaf_user_buckets[leaf_slot] : -1,
           by_leaf ? resolve_index->fn_leaf_stdlib_buckets[leaf_slot] : -1};
       size_t chain_at = 0;
       for (size_t i = 0;
-           resolve_index && (by_leaf ? chain_at < 2
-                                     : i < resolve_index->functions.count);
+           resolve_index &&
+           (by_leaf ? chain_at < 2 : i < resolve_index->functions.count);
            ++i) {
         size_t at = i;
         if (by_leaf) {
@@ -15036,8 +15029,7 @@ static bool nyr_user_defined_fn_uncached(nyr_builder_impl_t *b,
     if (indexed && !indexed->as.fn.is_extern && !indexed->as.fn.link_name &&
         (!ny_is_stdlib_tok(indexed->tok) ||
          nyr_same_source_file(indexed->tok.filename, b->source_file) ||
-         (b->module_name &&
-          ny_native_fn_module(index, b->prog, indexed) &&
+         (b->module_name && ny_native_fn_module(index, b->prog, indexed) &&
           strcmp(ny_native_fn_module(index, b->prog, indexed),
                  b->module_name) == 0))) {
       return true;
@@ -15053,8 +15045,7 @@ static bool nyr_user_defined_fn_uncached(nyr_builder_impl_t *b,
   if (fn && !fn->as.fn.is_extern && !fn->as.fn.link_name &&
       (!ny_is_stdlib_tok(fn->tok) ||
        nyr_same_source_file(fn->tok.filename, b->source_file) ||
-       (b->module_name && index &&
-        ny_native_fn_module(index, b->prog, fn) &&
+       (b->module_name && index && ny_native_fn_module(index, b->prog, fn) &&
         strcmp(ny_native_fn_module(index, b->prog, fn), b->module_name) == 0) ||
        ny_native_runtime_stub_yields_to_source(nyr_runtime_symbol(name))))
     return true;
@@ -15478,7 +15469,7 @@ static int nyr_load_global_scalar(nyr_builder_impl_t *b, int address,
    * expression; its leaf stands in for the identifier.
    */
   const char *ref_leaf =
-      !reference ? NULL
+      !reference                      ? NULL
       : reference->kind == NY_E_IDENT ? reference->as.ident.name
       : (reference->kind == NY_E_MEMBER && name && strchr(name, '.'))
           ? strrchr(name, '.') + 1
@@ -15494,8 +15485,9 @@ static int nyr_load_global_scalar(nyr_builder_impl_t *b, int address,
     const char *bare = ref_leaf;
     const char *owner_dot = name ? strrchr(name, '.') : NULL;
     const char *here = b->module_name ? b->module_name : "";
-    bool imported_cell = owner_dot && (strlen(here) != (size_t)(owner_dot - name) ||
-                                       strncmp(here, name, (size_t)(owner_dot - name)) != 0);
+    bool imported_cell =
+        owner_dot && (strlen(here) != (size_t)(owner_dot - name) ||
+                      strncmp(here, name, (size_t)(owner_dot - name)) != 0);
     const expr_t *init = name ? nyr_find_top_level_value(b, name) : NULL;
     if (!init && imported_cell)
       init = nyr_find_imported_value(b, bare);
@@ -18305,9 +18297,8 @@ typedef struct ny_fold_memo_entry {
 static _Thread_local unsigned ny_fold_scope_reads;
 
 static bool nyr_fold_top_level_int_impl(const nyr_builder_impl_t *b,
-                                        const program_t *prog,
-                                        const expr_t *e, int64_t *out,
-                                        unsigned depth);
+                                        const program_t *prog, const expr_t *e,
+                                        int64_t *out, unsigned depth);
 
 static bool nyr_fold_top_level_int(const nyr_builder_impl_t *b,
                                    const program_t *prog, const expr_t *e,
@@ -18346,9 +18337,8 @@ static bool nyr_fold_top_level_int(const nyr_builder_impl_t *b,
 }
 
 static bool nyr_fold_top_level_int_impl(const nyr_builder_impl_t *b,
-                                        const program_t *prog,
-                                        const expr_t *e, int64_t *out,
-                                        unsigned depth) {
+                                        const program_t *prog, const expr_t *e,
+                                        int64_t *out, unsigned depth) {
   if (!e || !out || depth > 64)
     return false;
   if (!prog)
@@ -20307,7 +20297,7 @@ static int nyr_load_local_value(nyr_builder_impl_t *b, int slot) {
        * A concrete local declaration is the slot ABI across control-flow
        * joins.  The generic value map can infer a floating class for a load
        * that follows a loop/branch label even when every int-typed write is
-       * raw (core.dict_mod._pow2's `mut v = 1; while ... v = v << 1`).
+       * raw (core.dict._pow2's `mut v = 1; while ... v = v << 1`).
        * Let the typed binding win over that merged fallback; otherwise the
        * int return path inserts rt_f64_to_i64 on raw bits and fails verify.
        */

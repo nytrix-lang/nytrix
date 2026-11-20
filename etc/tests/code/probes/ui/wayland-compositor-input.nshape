@@ -13,7 +13,7 @@ shape wayland-compositor-input-vk {
 ;; an input method (zwp_input_method_v2) composes, commits, cancels and
 ;; deletes surrounding text over zwp_text_input_v3, and the clipboard goes
 ;; both ways through wl_data_device. The seat is driven by
-;; tmp/ui/wayland/wl_seat_driver.py (private helper, outside git), which
+;; an external helper named in NY_WAYLAND_SEAT_DRIVER, which
 ;; needs a compositor exposing those
 ;; protocols (sway does; headless Weston does not, and the probe then reports
 ;; a skip). Run under a private headless sway at several output scales.
@@ -80,7 +80,7 @@ fn centre(list r) list {
    [int((float(r.get(0, 0.0)) + float(r.get(2, 0.0)) * 0.5) / s), int((float(r.get(1, 0.0)) + float(r.get(3, 0.0)) * 0.5) / s)]
 }
 
-def str driver = "tmp/ui/wayland/wl_seat_driver.py"
+def str driver = common.env_trim("NY_WAYLAND_SEAT_DRIVER")
 mut bool usable = common.env_trim("WAYLAND_DISPLAY").len > 0
 if usable && !file_exists(driver) {
    print("skip: seat driver " + driver + " is not available")
@@ -220,7 +220,7 @@ shape wayland-compositor-input-gl {
 ;; an input method (zwp_input_method_v2) composes, commits, cancels and
 ;; deletes surrounding text over zwp_text_input_v3, and the clipboard goes
 ;; both ways through wl_data_device. The seat is driven by
-;; tmp/ui/wayland/wl_seat_driver.py (private helper, outside git), which
+;; an external helper named in NY_WAYLAND_SEAT_DRIVER, which
 ;; needs a compositor exposing those
 ;; protocols (sway does; headless Weston does not, and the probe then reports
 ;; a skip). Run under a private headless sway at several output scales.
@@ -287,7 +287,7 @@ fn centre(list r) list {
    [int((float(r.get(0, 0.0)) + float(r.get(2, 0.0)) * 0.5) / s), int((float(r.get(1, 0.0)) + float(r.get(3, 0.0)) * 0.5) / s)]
 }
 
-def str driver = "tmp/ui/wayland/wl_seat_driver.py"
+def str driver = common.env_trim("NY_WAYLAND_SEAT_DRIVER")
 mut bool usable = common.env_trim("WAYLAND_DISPLAY").len > 0
 if usable && !file_exists(driver) {
    print("skip: seat driver " + driver + " is not available")

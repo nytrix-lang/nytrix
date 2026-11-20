@@ -5,7 +5,7 @@
 ;; - core.os
 module core.os.sound.backend.shared(append_output_device, init_output_device, probe_linux_library, probe_linux_library_once)
 use core
-use core.dict_mod
+use core.dict
 use core.os.ffi as ffi
 
 fn append_output_device(any ctx, str name, str id) any {

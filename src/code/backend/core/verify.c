@@ -1791,6 +1791,18 @@ static bool nir_verify_impl(const nyr_func_t *f, char *err, size_t err_len) {
     case NYIR_BOUNDS_CHECK:
       break;
     case NYIR_INLINE_ASM: {
+      if (in->imm == -196) {
+        bool address =
+            in->a == -1 ? in->symbol && in->symbol[0]
+                        : !in->symbol && nir_value_defined(f, defined, in->a);
+        if (in->dst < 0 || !address || in->b != -1 || in->c != -1 ||
+            in->d != -1 || in->e != -1 || in->f != -1 || in->extra_args_len) {
+          free(defined);
+          return nir_verify_inst_err(f, err, err_len, in, i,
+                                     "invalid RIP-relative asm operand");
+        }
+        break;
+      }
       if (in->imm == -195) {
         bool valid = in->dst == -1 && in->symbol && !in->extra_args_len &&
                      strcmp(in->symbol, "es_stosw_stosl") == 0;
@@ -1930,39 +1942,22 @@ static bool nir_verify_impl(const nyr_func_t *f, char *err, size_t err_len) {
         break;
       }
       if (in->imm == -140 || in->imm == -141) {
-        int slots[6] = {-1, -1, -1, -1, -1, -1};
         int consumed = -1;
-        char mnemonic[16] = {0};
         unsigned port = 0;
-        int fields =
-            in->imm == -141
-                ? sscanf(in->symbol ? in->symbol : "",
-                         "%15[^;];nyc_slots=%d,%d,%d,%d,%d,%d;port=%u%n",
-                         mnemonic, &slots[0], &slots[1], &slots[2], &slots[3],
-                         &slots[4], &slots[5], &port, &consumed)
-                : sscanf(in->symbol ? in->symbol : "",
-                         "%15[^;];nyc_slots=%d,%d,%d,%d,%d,%d%n", mnemonic,
-                         &slots[0], &slots[1], &slots[2], &slots[3], &slots[4],
-                         &slots[5], &consumed);
-        bool valid = in->dst == -1 && in->a >= 0 && in->b >= 0 && in->c >= 0 &&
-                     in->d >= 0 && in->e >= 0 && in->f >= 0 &&
-                     in->extra_args_len == 0 && in->symbol &&
-                     fields == (in->imm == -141 ? 8 : 7) && consumed >= 0 &&
+        bool valid = in->dst == -1 && in->extra_args_len == 6 &&
+                     in->extra_args && in->symbol &&
                      (in->imm == -141
-                          ? (strcmp(mnemonic, "vmware_port") == 0 &&
-                             port <= UINT16_MAX &&
-                             (strcmp(in->symbol + consumed, "") == 0 ||
+                          ? (sscanf(in->symbol, "vmware_port;port=%u%n", &port,
+                                    &consumed) == 1 &&
+                             consumed >= 0 && port <= UINT16_MAX &&
+                             (in->symbol[consumed] == '\0' ||
                               strcmp(in->symbol + consumed, ";alt=274") == 0))
-                          : (in->symbol[consumed] == '\0' &&
-                             (strcmp(mnemonic, "vmcall") == 0 ||
-                              strcmp(mnemonic, "vmmcall") == 0)));
+                          : (strcmp(in->symbol, "vmcall") == 0 ||
+                             strcmp(in->symbol, "vmmcall") == 0));
         const int inputs[] = {in->a, in->b, in->c, in->d, in->e, in->f};
-        for (size_t arg = 0; arg < 6; ++arg) {
-          valid = valid && inputs[arg] < f->next_value &&
-                  defined[inputs[arg]] && slots[arg] >= 0;
-          for (size_t prior = 0; prior < arg; ++prior)
-            valid = valid && slots[arg] != slots[prior];
-        }
+        for (size_t arg = 0; valid && arg < 6; ++arg)
+          valid = nir_value_defined(f, defined, inputs[arg]) &&
+                  nir_value_defined(f, defined, in->extra_args[arg]);
         if (!valid) {
           free(defined);
           return nir_verify_inst_err(f, err, err_len, in, i,
@@ -3072,11 +3067,11 @@ static bool nir_verify_impl(const nyr_func_t *f, char *err, size_t err_len) {
       }
       break;
     case NYIR_VA_SAVE:
-      if (in->dst < 0 || in->imm != 176) {
+      if (in->dst < 0 || (in->imm != 48 && in->imm != 176)) {
         free(defined);
-        return nir_verify_inst_err(
-            f, err, err_len, in, i,
-            "va.save requires a destination and 176-byte SysV register area");
+        return nir_verify_inst_err(f, err, err_len, in, i,
+                                   "va.save requires a destination and 48- or "
+                                   "176-byte SysV register area");
       }
       break;
     case NYIR_VA_START:

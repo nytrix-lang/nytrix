@@ -42,8 +42,8 @@ use core.str
 use core.str as core_str
 use core.primitives
 use core.primitives as core_prim
-use core.dict_mod
-use core.set_mod as core_set
+use core.dict
+use core.set as core_set
 use core.compiler.syntax.type
 use core.compiler.reflect.semantic as semantic_facts
 

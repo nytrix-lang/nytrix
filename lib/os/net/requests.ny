@@ -15,7 +15,7 @@ use core.os.net.http
 use core.os.net.curl as curl
 use core.os.net.context as netctx
 use core
-use core.dict_mod as _d
+use core.dict as _d
 use core.str
 use core.math.parse.data.json as jsonlib
 

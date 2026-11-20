@@ -4,7 +4,7 @@
 ;; - core.math.parse
 module core.math.parse.img(decode, get_info, load, save, encode, free)
 use core
-use core.dict_mod
+use core.dict
 use core.os
 use core.os.thread
 use core.os.path as ospath

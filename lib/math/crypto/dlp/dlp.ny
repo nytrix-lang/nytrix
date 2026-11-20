@@ -10,7 +10,7 @@
 ;; - core.math.crypto
 module core.math.crypto.dlp.dlp(multiplicative_order_from_factors, multiplicative_order_factorization, baby_step_giant_step, pohlig_hellman, pohlig_hellman_bounded, ph_prime_power, ph_recombine, pohlig_hellman_prime_power, pohlig_hellman_recombine, pollard_rho_dlp, dlp_brute_force, solve_dlp)
 use core
-use core.dict_mod
+use core.dict
 use core.math.nt
 
 fn baby_step_giant_step(any g, any h, any p, any order=nil) any {

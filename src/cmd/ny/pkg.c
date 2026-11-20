@@ -1285,7 +1285,7 @@ static int ny_pkg_install_archive(const char *source, const char *dest,
         cp_argv[3] = dest;
         rc = ny_pkg_run_argv(cp_argv, verbose);
       } else {
-        const char *cp_argv[] = {"cp", "-R", /* tmp/., dst */ NULL, NULL, NULL};
+        const char *cp_argv[] = {"cp", "-R", /* staging, dst */ NULL, NULL, NULL};
         char src_dot[4096];
         snprintf(src_dot, sizeof(src_dot), "%s/.", tmp_dir);
         cp_argv[2] = src_dot;
@@ -1293,7 +1293,7 @@ static int ny_pkg_install_archive(const char *source, const char *dest,
         rc = ny_pkg_run_argv(cp_argv, verbose);
       }
     } else {
-      const char *cp_argv[] = {"cp", "-R", /* tmp/., dst */ NULL, NULL, NULL};
+      const char *cp_argv[] = {"cp", "-R", /* staging, dst */ NULL, NULL, NULL};
       char src_dot[4096];
       snprintf(src_dot, sizeof(src_dot), "%s/.", tmp_dir);
       cp_argv[2] = src_dot;

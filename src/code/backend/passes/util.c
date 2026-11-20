@@ -685,7 +685,10 @@ static void nir_refine_range_from_edges(const nyr_func_t *f,
   const int *defs = cache->defs;
   int root_value = nir_strip_copy_value(f, defs, value);
   size_t child = cfg->inst_block[at];
-  for (unsigned depth = 0; depth < 8 && child < cfg->block_count; ++depth) {
+  /* Block zero has an implicit incoming edge from function entry. Its
+   * only explicit predecessor may be a backedge, not an entry guard. */
+  for (unsigned depth = 0; depth < 8 && child && child < cfg->block_count;
+       ++depth) {
     size_t pb = cfg->pred_offsets[child], pe = cfg->pred_offsets[child + 1];
     if (pe - pb != 1)
       break;
@@ -693,47 +696,15 @@ static void nir_refine_range_from_edges(const nyr_func_t *f,
     if (pred >= cfg->block_count || pred == child)
       break;
     size_t start = cfg->block_start[pred];
-    size_t end = cfg->block_end[pred];
-    if (end <= start) {
-      child = pred;
-      continue;
-    }
-    /*
-     * Canonical NYIR commonly encodes an if/loop guard as BR_IF followed by
-     * an explicit fallback BR.  Looking only at block_end-1 sees the fallback
-     * and loses the path predicate.  Find the last conditional terminator and
-     * separately resolve its false destination from the trailing BR or
-     * fallthrough edge.
-     */
-    const nyr_inst_t *cond = NULL;
-    const nyr_inst_t *fallback = NULL;
-    for (size_t k = end; k > start; --k) {
-      const nyr_inst_t *term = &f->data[k - 1];
-      if (term->op == NYIR_NOP)
-        continue;
-      if (!fallback && term->op == NYIR_BR) {
-        fallback = term;
-        continue;
-      }
-      if (term->op == NYIR_BR_IF) {
-        cond = term;
-        break;
-      }
-      if (term->op != NYIR_LABEL)
-        break;
-    }
-    if (cond && cond->a >= 0 && cond->a < f->next_value && defs[cond->a] >= 0) {
+    size_t end = nyr_block_last_non_nop(f, cfg, pred);
+    const nyr_inst_t *cond = end > start ? &f->data[end - 1] : NULL;
+    if (cond && cond->op == NYIR_BR_IF && cond->a >= 0 &&
+        cond->a < f->next_value && defs[cond->a] >= 0) {
       int cdef = defs[cond->a];
       const nyr_inst_t *cmp = &f->data[(size_t)cdef];
       if (cmp->op == NYIR_CMP_I64) {
         bool true_edge = cfg->block_label[child] == cond->imm;
-        bool false_edge = false;
-        if (!true_edge) {
-          if (fallback)
-            false_edge = cfg->block_label[child] == fallback->imm;
-          else
-            false_edge = pred + 1 == child;
-        }
+        bool false_edge = pred + 1 == child;
         /*
          * When BOTH arms of the guard land in the same block (the CFG
          * builder dedups the identical edge, leaving a single
@@ -741,7 +712,7 @@ static void nir_refine_range_from_edges(const nyr_func_t *f,
          * not a block-wide fact -- refining here would delete guards
          * that fail on the other path.
          */
-        if (!(true_edge && false_edge) && (true_edge || false_edge)) {
+        if (true_edge != false_edge) {
           int lhs = nir_strip_copy_value(f, defs, cmp->a);
           int rhs = nir_strip_copy_value(f, defs, cmp->b);
           nyr_cmp_t relation = cmp->cmp;
@@ -1125,10 +1096,10 @@ uint64_t nyr_debug_fingerprint(const nyr_func_t *f) {
   uint64_t hash = UINT64_C(1469598103934665603);
   if (!f)
     return hash;
-#define NIR_HASH(v)                  \
-  do {                               \
-    hash ^= (uint64_t)(v);           \
-    hash *= UINT64_C(1099511628211); \
+#define NIR_HASH(v)                                                            \
+  do {                                                                         \
+    hash ^= (uint64_t)(v);                                                     \
+    hash *= UINT64_C(1099511628211);                                           \
   } while (0)
   NIR_HASH(f->len);
   NIR_HASH(f->next_value);
