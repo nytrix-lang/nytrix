@@ -20,7 +20,7 @@ its workload and checksum intact.
 | Vectorize conditional counts and signed max reductions, with scalar tails and a cost check | `cd`, `viterbi` |
 | Keep live ranges from occupying registers across inner loops where they are unused; eliminate home round trips | `sssp`, `mont64`, graph/DP, recursion |
 | Scalar-replace fixed typed-buffer limbs after unrolling | `mont64`, small-array loops |
-| Track available loads by root, byte range, and memory version | `bce-matrix`, memory-heavy loops |
+| Track available loads by root, byte range, and memory version; remove redundant 128-bit vector homes | NYC `bce-matrix`, memory-heavy loops |
 | Narrow integer lanes and vectorize reductions when bit ranges permit | `bitcount`, `intops`, crypto |
 | Reduce managed allocation and operand validation without weakening pointer checks | `bigint-oracle` (library vs GMP), allocation-heavy workloads |
 | Separate startup cost from kernel cost; fix real startup overhead | `native-oracle`, short workloads |

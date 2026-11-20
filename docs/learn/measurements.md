@@ -544,6 +544,7 @@ from the performance backlog; older investigations follow them.
 - [2026-11-20 single-limb BigInt division](#2026-11-20-single-limb-bigint-division)
 - [2026-11-20 native optimization notes](#2026-11-20-native-optimization-notes)
 - [2026-11-20 vector accumulator unrolling](#2026-11-20-vector-accumulator-unrolling)
+- [2026-11-20 BigFloat division sticky bit](#2026-11-20-bigfloat-division-sticky-bit)
 - [2026-11-19 pre-vectorize LICM phase: built, measured, reverted](#2026-11-19-pre-vectorize-licm-phase-built-measured-reverted)
 
 Plus 81 older investigations below these.
@@ -4764,8 +4765,8 @@ fixture, so the deep `X64_LOOP_HOME` records never reach the terminal.
 ### x86-64 encoder correctness and instruction counts (2026-11-16)
 
 This pass closed the "x86-64 codegen quality" roadmap item in
-[Performance work](../todo/perf.md); its two remaining measured leads moved to
-the "Reduce >1.2x runtime gaps" item there.
+[Performance work](../todo/perf.md); its two remaining measured leads moved
+to the runtime-gap backlog.
 
 Three encoder changes, measured by **user-space instructions retired**
 (`perf stat -e instructions:u`) on the 110-fixture bench corpus, old compiler
@@ -6581,5 +6582,20 @@ Outlining BigInt operand coercion in Ny was tried separately and reverted.
 `bigint-oracle` retired 166.36 M → 168.31 M instructions at checksum
 `1968365`, with no consistent elapsed improvement. The compiler still
 emitted the cold coercion inline in the arithmetic wrappers.
+
+### 2026-11-20 BigFloat division sticky bit
+
+BigFloat rounding needs to know whether the division remainder is nonzero,
+not its magnitude. The runtime now tests the normalized remainder in place,
+borrows the immutable denominator, and packs quotient words without a
+zero-and-OR pass. This removes the scratch remainder object, including its
+heap allocation at higher precision.
+
+Using the same compiler and runtime inputs except for `bigfloat.c`, with a
+fresh temporary runtime cache, `bigint-oracle` retired 166.36 M → 165.34 M
+instructions (−0.61%) in interleaved native AOT runs. All runs returned
+`1968365`; wall times varied under concurrent load. The native AOT
+`bigfloat-padding` and `bigfloat-differential` oracles passed, including
+unequal-precision inputs and rounding.
 
 </details>

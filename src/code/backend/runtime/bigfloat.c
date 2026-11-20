@@ -429,13 +429,15 @@ static unsigned bf_clz32(uint32_t x) {
 #endif
 }
 
-static bool mag_div(bf_mag_t *q, bf_mag_t *r, const bf_mag_t *u,
+/* Rounding needs only whether the exact quotient had a remainder. */
+static bool mag_div(bf_mag_t *q, bool *inexact, const bf_mag_t *u,
                     const bf_mag_t *v) {
   if (!v->n)
     return false;
   if (mag_cmp(u, v) < 0) {
     q->n = 0;
-    return r ? mag_copy(r, u->d, u->n) : true;
+    *inexact = u->n != 0;
+    return true;
   }
 #if defined(__SIZEOF_INT128__)
   if (v->n == 1) {
@@ -450,12 +452,7 @@ static bool mag_div(bf_mag_t *q, bf_mag_t *r, const bf_mag_t *u,
     }
     q->n = u->n;
     mag_trim(q);
-    if (r) {
-      if (!mag_reserve(r, 1))
-        return false;
-      r->d[0] = rem;
-      r->n = rem != 0;
-    }
+    *inexact = rem != 0;
     return true;
   }
 #endif
@@ -520,13 +517,10 @@ static bool mag_div(bf_mag_t *q, bf_mag_t *r, const bf_mag_t *u,
     qq = qq_local;
     vnorm = vnorm_local;
     unorm = unorm_local;
-    memset(qq, 0, (qn + 1) * sizeof(*qq));
-    memset(vnorm, 0, vn * sizeof(*vnorm));
-    memset(unorm, 0, (un + 1) * sizeof(*unorm));
   } else {
-    qq = calloc(qn + 1, sizeof(*qq));
-    vnorm = calloc(vn, sizeof(*vnorm));
-    unorm = calloc(un + 1, sizeof(*unorm));
+    qq = malloc(qn * sizeof(*qq));
+    vnorm = malloc(vn * sizeof(*vnorm));
+    unorm = malloc((un + 1) * sizeof(*unorm));
   }
   if (!qq || !vnorm || !unorm) {
     goto div_allocation_failed;
@@ -594,45 +588,17 @@ static bool mag_div(bf_mag_t *q, bf_mag_t *r, const bf_mag_t *u,
   if (!mag_reserve(q, qwords + 1)) {
     goto div_allocation_failed;
   }
-  memset(q->d, 0, (qwords + 1) * sizeof(*q->d));
-  for (size_t i = 0; i < qn; ++i)
-    q->d[i / 2] |= (uint64_t)qq[i] << ((i & 1) * 32);
+  for (size_t i = 0; i < qn / 2; ++i)
+    q->d[i] = qq[2 * i] | ((uint64_t)qq[2 * i + 1] << 32);
+  if (qn & 1)
+    q->d[qwords - 1] = qq[qn - 1];
   q->n = qwords;
   mag_trim(q);
-  if (r) {
-    size_t rn = vn;
-    uint32_t rr_local[BF_DIV_LOCAL_WORDS];
-    uint32_t *rr = rr_local;
-    if (rn == SIZE_MAX || rn + 1 > SIZE_MAX / sizeof(*rr))
-      goto div_allocation_failed;
-    bool rr_heap = rn + 1 > BF_DIV_LOCAL_WORDS;
-    if (rr_heap)
-      rr = calloc(rn + 1, sizeof(*rr));
-    else
-      memset(rr, 0, (rn + 1) * sizeof(*rr));
-    if (!rr || !mag_reserve(r, (rn + 1) / 2 + 1)) {
-      if (rr_heap)
-        free(rr);
-      goto div_allocation_failed;
-    }
-    if (!s) {
-      memcpy(rr, unorm, rn * sizeof(*rr));
-    } else {
-      uint32_t c = 0;
-      for (size_t i = rn; i-- > 0;) {
-        uint32_t x = unorm[i];
-        rr[i] = (x >> s) | c;
-        c = x << (32 - s);
-      }
-    }
-    memset(r->d, 0, r->cap * sizeof(*r->d));
-    for (size_t i = 0; i < rn; ++i)
-      r->d[i / 2] |= (uint64_t)rr[i] << ((i & 1) * 32);
-    r->n = (rn + 1) / 2;
-    mag_trim(r);
-    if (rr_heap)
-      free(rr);
-  }
+  /* Normalizing multiplies the remainder by 2^s; zero is unchanged. */
+  uint32_t sticky = 0;
+  for (size_t i = 0; i < vn; ++i)
+    sticky |= unorm[i];
+  *inexact = sticky != 0;
   if (!local_workspace) {
     free(uu);
     free(vv);
@@ -995,7 +961,7 @@ static int64_t bf_div_obj(const ny_bigfloat_t *a, const ny_bigfloat_t *b) {
     return bf_from_u64_raw(0, 0, 0, p);
   if (!a->sign)
     return bf_from_u64_raw(0, 0, 0, p);
-  bf_mag_t num = {0}, den = {0}, quo = {0}, rem = {0};
+  bf_mag_t num = {0}, quo = {0};
   uint32_t extra = p + 10;
   size_t az = 0, bz = 0;
   while (az < a->words && a->limb[az] == 0)
@@ -1009,18 +975,17 @@ static int64_t bf_div_obj(const ny_bigfloat_t *a, const ny_bigfloat_t *b) {
    */
   int64_t removed_exp = ((int64_t)az - (int64_t)bz) * 64;
   extra = (uint32_t)((int64_t)extra + removed_exp);
-  if (!mag_copy(&num, a->limb + az, a->words - az) ||
-      !mag_copy(&den, b->limb + bz, b->words - bz) || !mag_shl(&num, extra) ||
-      !mag_div(&quo, &rem, &num, &den)) {
+  bf_mag_t den = {.d = (uint64_t *)(b->limb + bz), .n = b->words - bz};
+  bool inexact = false;
+  if (!mag_copy(&num, a->limb + az, a->words - az) || !mag_shl(&num, extra) ||
+      !mag_div(&quo, &inexact, &num, &den) ||
+      (inexact && !quo.n && !mag_reserve(&quo, 1))) {
     mag_free(&num);
-    mag_free(&den);
     mag_free(&quo);
-    mag_free(&rem);
     return 0;
   }
-  if (rem.n) {
+  if (inexact) {
     if (!quo.n) {
-      mag_reserve(&quo, 1);
       quo.n = 1;
       quo.d[0] = 1;
     } else {
@@ -1031,9 +996,7 @@ static int64_t bf_div_obj(const ny_bigfloat_t *a, const ny_bigfloat_t *b) {
   int64_t result =
       bf_alloc_from_mag((int)(a->sign * b->sign), exponent, &quo, p);
   mag_free(&num);
-  mag_free(&den);
   mag_free(&quo);
-  mag_free(&rem);
   return result;
 }
 
