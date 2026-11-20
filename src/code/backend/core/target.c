@@ -340,7 +340,8 @@ bool nyr_target_info_init(ny_native_target_info_t *info,
     info->red_zone = false;
     info->pointer_bits = 64;
     info->caps = NY_NATIVE_CAP_NIR_ASM | NY_NATIVE_CAP_NIR_VM |
-                 NY_NATIVE_CAP_LIVE_JIT | NY_NATIVE_CAP_MACH_TRAP;
+                 NY_NATIVE_CAP_LIVE_JIT | NY_NATIVE_CAP_MACH_TRAP |
+                 NY_NATIVE_CAP_MACH_BYTE;
     if (strcmp(info->object_format, "elf") == 0)
       info->caps |= NY_NATIVE_CAP_ASM_OBJECT | NY_NATIVE_CAP_ELF_OBJECT;
   } else if (info->target == NY_NATIVE_TARGET_X86) {

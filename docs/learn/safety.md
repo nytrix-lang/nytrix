@@ -10,7 +10,8 @@ Prerequisites: [Tour](tour.md) for functions and bindings.
 ## The safe heap
 
 `--heap=safe` puts the allocations your program makes itself (`malloc`,
-`zalloc`, `realloc`, and the raw heap) on guard pages:
+`zalloc`, `realloc`, and the raw heap) on guard pages. It uses virtual-memory
+protection on both POSIX and Windows:
 
 - Each block is rounded to 16-byte alignment and ends at an inaccessible
   page. An access beyond that rounded payload traps.

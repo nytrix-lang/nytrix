@@ -3,7 +3,7 @@
 #define NY_BACKEND_BUILDER_H
 
 #include "base/compat.h"
-#include "base/process.h"
+#include "base/subprocess.h"
 #include <stdbool.h>
 #include <stddef.h>
 

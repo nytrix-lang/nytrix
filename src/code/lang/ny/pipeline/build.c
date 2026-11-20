@@ -5,7 +5,7 @@
 #include "code/lang/ny/pipeline/build.h"
 #include "base/common.h"
 #include "base/parallel.h"
-#include "base/process.h"
+#include "base/subprocess.h"
 #include "base/util.h"
 #include <ctype.h>
 #include <errno.h>
@@ -701,9 +701,10 @@ static int spawn_with_host_flags(const char *const base[], const char *env,
  * time.  In particular, the build's ASan host flags must not be combined with
  * a fixture's explicit MSan or TSan mode.
  */
-static int spawn_with_host_flags_for_sanitizer(
-    const char *const base[], const char *env, const char *sanitize_kind,
-    char *pool[], size_t *pool_len) {
+static int spawn_with_host_flags_for_sanitizer(const char *const base[],
+                                               const char *env,
+                                               const char *sanitize_kind,
+                                               char *pool[], size_t *pool_len) {
   if (!sanitize_kind || !*sanitize_kind || !env || !*env)
     return spawn_with_host_flags(base, env, pool, pool_len);
 
@@ -928,14 +929,13 @@ static bool ny_builder_compile_runtime_archive(
     bool profile, int speed_level, bool native_tune, bool target_windows,
     const char *sanitize_kind, bool has_ccache) {
   static const char *const units[] = {
-      "ast",           "bigint",       "core",        "simmd",
-      "lazym",
-      "ffi",           "ffigates",     "gc",          "math",
-      "bigfloat",      "memory",       "os",          "proof",
-      "string",        "parse_ast",    "parse_lexer", "parse_shared",
-      "base_util",     "base_debug",   "base_intern", "base_loader",
-      "base_progress", "base_options", "type_proof",  "type_policy",
-      "policy_check",
+      "ast",          "bigint",        "core",         "simmd",
+      "lazym",        "ffi",           "ffigates",     "gc",
+      "math",         "bigfloat",      "memory",       "os",
+      "proof",        "string",        "parse_ast",    "parse_lexer",
+      "parse_shared", "base_util",     "base_debug",   "base_intern",
+      "base_loader",  "base_progress", "base_options", "type_proof",
+      "type_policy",  "policy_check",
   };
   char dir[PATH_MAX];
   snprintf(dir, sizeof(dir), "%s/ny_rt_units_%ld", ny_get_temp_dir(),
@@ -948,11 +948,14 @@ static bool ny_builder_compile_runtime_archive(
   for (size_t u = 0; u < sizeof(units) / sizeof(units[0]); ++u) {
     const char *unit_path = units[u];
     if (strcmp(unit_path, "parse_ast") == 0)
-      snprintf(src[u], sizeof(src[u]), "%s/src/code/lang/ny/parser/ast.c", root);
+      snprintf(src[u], sizeof(src[u]), "%s/src/code/lang/ny/parser/ast.c",
+               root);
     else if (strcmp(unit_path, "parse_lexer") == 0)
-      snprintf(src[u], sizeof(src[u]), "%s/src/code/lang/ny/parser/lexer.c", root);
+      snprintf(src[u], sizeof(src[u]), "%s/src/code/lang/ny/parser/lexer.c",
+               root);
     else if (strcmp(unit_path, "parse_shared") == 0)
-      snprintf(src[u], sizeof(src[u]), "%s/src/code/lang/ny/parser/amalgam.c", root);
+      snprintf(src[u], sizeof(src[u]), "%s/src/code/lang/ny/parser/amalgam.c",
+               root);
     else if (strcmp(unit_path, "base_util") == 0)
       snprintf(src[u], sizeof(src[u]), "%s/src/base/util.c", root);
     else if (strcmp(unit_path, "base_debug") == 0)
@@ -966,12 +969,14 @@ static bool ny_builder_compile_runtime_archive(
     else if (strcmp(unit_path, "base_options") == 0)
       snprintf(src[u], sizeof(src[u]), "%s/src/base/options.c", root);
     else if (strcmp(unit_path, "type_proof") == 0)
-      snprintf(src[u], sizeof(src[u]), "%s/src/code/lang/ny/semantics/proof.c", root);
-    else if (strcmp(unit_path, "type_policy") == 0)
-      snprintf(src[u], sizeof(src[u]), "%s/src/code/lang/ny/semantics/policy.c", root);
-    else if (strcmp(unit_path, "policy_check") == 0)
-      snprintf(src[u], sizeof(src[u]), "%s/src/code/lang/ny/semantics/policy/check.c",
+      snprintf(src[u], sizeof(src[u]), "%s/src/code/lang/ny/semantics/proof.c",
                root);
+    else if (strcmp(unit_path, "type_policy") == 0)
+      snprintf(src[u], sizeof(src[u]), "%s/src/code/lang/ny/semantics/policy.c",
+               root);
+    else if (strcmp(unit_path, "policy_check") == 0)
+      snprintf(src[u], sizeof(src[u]),
+               "%s/src/code/lang/ny/semantics/policy/check.c", root);
     else
       snprintf(src[u], sizeof(src[u]), "%s/src/code/backend/runtime/%s.c", root,
                unit_path);
@@ -1822,8 +1827,7 @@ bool ny_builder_link(const char *cc, const char *obj_path,
   char *host_pool[16];
   size_t pool_len = 0;
   int rc = spawn_with_host_flags_for_sanitizer(
-      argv, getenv("NYTRIX_HOST_LDFLAGS"), sanitize_kind, host_pool,
-      &pool_len);
+      argv, getenv("NYTRIX_HOST_LDFLAGS"), sanitize_kind, host_pool, &pool_len);
   ny_free_host_pool(host_pool, pool_len);
   for (size_t i = 0; i < shared_lib_copy_count; i++)
     free(shared_lib_copies[i]);

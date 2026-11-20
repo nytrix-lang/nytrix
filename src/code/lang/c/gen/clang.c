@@ -5,7 +5,7 @@
 #include "code/lang/c/gen/clang.h"
 #include "base/debug.h"
 #include "base/dirent.h"
-#include "base/process.h"
+#include "base/subprocess.h"
 #include "base/trace.h"
 #include "base/util.h"
 #include "code/lang/c/parser/c.h"

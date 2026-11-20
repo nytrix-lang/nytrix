@@ -784,7 +784,7 @@ int main(void) {
                                                                },
                                                                value) &&
                  nyr_unit_opaque_pointer_address() == 1 &&
-                 nyr_unit_const_aggregate_pointer() == 0 &&
+                 nyr_unit_const_aggregate_pointer() == 47 &&
                  nyr_unit_aggregate_array_element_address() == 42 &&
                  nyr_unit_conditional_aggregate_pointer(
                      1, &conditional_left, &conditional_right) == 31 &&

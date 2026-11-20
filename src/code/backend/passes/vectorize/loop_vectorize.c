@@ -1566,7 +1566,8 @@ static void replace_uses_outside_loop(nyr_func_t *f, const nyr_cfg_t *cfg,
 static bool emit_i64_vector_accumulator(
     nyr_func_t *f, int vf, const bool *in_loop, int scalar_phi, int scalar_init,
     int vector_phi, int vector_update, int scalar_result,
-    int64_t preheader_label, int64_t header_label, int64_t latch_label) {
+    int64_t preheader_label, int64_t header_label, int64_t latch_label,
+    int invariant_term, int64_t trip) {
   nyr_cfg_t cfg = {0};
   if (!nyr_cfg_build(f, &cfg))
     return false;
@@ -1668,12 +1669,51 @@ static bool emit_i64_vector_accumulator(
          (f->data[result_at].op == NYIR_LABEL ||
           f->data[result_at].op == NYIR_PHI))
     ++result_at;
-  if (!nir_ensure_inst_space(f, 1)) {
+  const size_t result_len = invariant_term >= 0 ? 4 : 1;
+  if (!nir_ensure_inst_space(f, result_len)) {
     nyr_cfg_free(&cfg);
     return false;
   }
-  memmove(&f->data[result_at + 1], &f->data[result_at],
+  memmove(&f->data[result_at + result_len], &f->data[result_at],
           (f->len - result_at) * sizeof(*f->data));
+  f->len += result_len;
+  if (invariant_term >= 0) {
+    int count = f->next_value++, total = f->next_value++;
+    int seed = f->next_value++;
+    nyr_inst_t adjustment[] = {
+        {.op = NYIR_CONST_I64,
+         .dst = count,
+         .imm = trip,
+         .a = -1,
+         .b = -1,
+         .c = -1,
+         .d = -1,
+         .e = -1,
+         .f = -1},
+        {.op = NYIR_MUL_I64,
+         .dst = total,
+         .a = invariant_term,
+         .b = count,
+         .c = -1,
+         .d = -1,
+         .e = -1,
+         .f = -1},
+        {.op = NYIR_ADD_I64,
+         .dst = seed,
+         .a = scalar_init,
+         .b = total,
+         .c = -1,
+         .d = -1,
+         .e = -1,
+         .f = -1},
+    };
+    for (size_t i = 0; i < 3; ++i) {
+      adjustment[i].scalar_class = NYIR_SCALAR_I64_RAW;
+      adjustment[i].effects = nyr_inst_effects(&adjustment[i]);
+      f->data[result_at++] = adjustment[i];
+    }
+    scalar_init = seed;
+  }
   f->data[result_at] = (nyr_inst_t){.op = vf == 4 ? NYIR_VEC8_REDUCE_ADD_I64
                                                   : NYIR_VEC4_REDUCE_ADD_I64,
                                     .dst = scalar_result,
@@ -1684,7 +1724,6 @@ static bool emit_i64_vector_accumulator(
                                     .e = -1,
                                     .f = -1};
   f->data[result_at].effects = nyr_inst_effects(&f->data[result_at]);
-  ++f->len;
   nyr_cfg_free(&cfg);
   return true;
 }
@@ -3676,6 +3715,40 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
         }
       }
     }
+    int invariant_reduction_term = -1;
+    size_t drop_reduction_add = SIZE_MAX;
+    if (!bad && vector_accumulator_safe && fixed_trip % vf == 0 &&
+        reduction_term >= 0 && defs[reduction_term] >= 0 &&
+        uses.offsets[reduction_term + 1] == uses.offsets[reduction_term] + 1 &&
+        uses.users[uses.offsets[reduction_term]] == reduction_update_idx) {
+      size_t pc = (size_t)defs[reduction_term];
+      const nyr_inst_t *add = &f->data[pc];
+      const nyr_inst_t *sum = &f->data[reduction_update_idx];
+      /*
+       * In a tail-free wrapping sum, (value + invariant) contributes the
+       * invariant exactly trip times. Remove only a private, widened add.
+       */
+      if (rewrite[pc] && add->op == NYIR_ADD_I64 &&
+          add->scalar_class == NYIR_SCALAR_I64_RAW &&
+          sum->scalar_class == NYIR_SCALAR_I64_RAW &&
+          !((add->flags | sum->flags) & NYIR_INST_F_NARROW32) && add->a >= 0 &&
+          (size_t)add->a < scalar_value_count && add->b >= 0 &&
+          (size_t)add->b < scalar_value_count && vec[add->a] != vec[add->b]) {
+        int varying = vec[add->a] ? add->a : add->b;
+        int invariant = vec[add->a] ? add->b : add->a;
+        if (defs[invariant] >= 0) {
+          size_t def_block = cfg.inst_block[(size_t)defs[invariant]];
+          if (!in_loop[def_block] &&
+              nyr_cfg_dominates(&cfg, def_block, header)) {
+            invariant_reduction_term = invariant;
+            reduction_term = varying;
+            drop_reduction_add = pc;
+            if (uses.offsets[invariant + 1] == uses.offsets[invariant] + 1)
+              broadcast_value[invariant] = false;
+          }
+        }
+      }
+    }
     nyr_use_def_free(&uses);
     if (bad || (vec_stores == 0 && vec_loads == 0) ||
         !vectorization_profitable(vec_loads, vec_stores, vec_ops, vf,
@@ -3946,6 +4019,10 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
       }
       if (!rewrite[i])
         continue;
+      if (i == drop_reduction_add) {
+        nyr_inst_discard(in);
+        continue;
+      }
       if (in->op == NYIR_BOUNDS_CHECK) {
         nyr_inst_discard(in);
       } else if (in->op == NYIR_LOAD_I64) {
@@ -4243,7 +4320,8 @@ static int vectorize_once(nyr_func_t *f, bool supports_vec8_i64_broadcast) {
         !emit_i64_vector_accumulator(
             f, vf, in_loop, reduction_phi_dst, reduction_phi_init,
             vector_acc_phi, vector_acc_update, vector_acc_result,
-            reduction_preheader_label, cfg.block_label[header], latch_label)) {
+            reduction_preheader_label, cfg.block_label[header], latch_label,
+            invariant_reduction_term, fixed_trip)) {
       free(saved_body);
       free(vec);
       free(rewrite);

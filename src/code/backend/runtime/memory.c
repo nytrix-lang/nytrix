@@ -136,12 +136,14 @@ static inline size_t rt_managed_ptr_cache_slot(uintptr_t value) {
 }
 
 /*
- * Called by writers (under the lock) after the table changed for `value`.
+ * The writer lock serializes generation updates. Publish the table change
+ * with release semantics without a second locked read-modify-write.
  */
 static inline void rt_managed_ptr_cache_invalidate(uintptr_t value) {
-  atomic_fetch_add_explicit(
-      &rt_managed_ptr_cache_gen[rt_managed_ptr_cache_slot(value)], 1,
-      memory_order_acq_rel);
+  _Atomic(uint32_t) *gen =
+      &rt_managed_ptr_cache_gen[rt_managed_ptr_cache_slot(value)];
+  uint32_t next = atomic_load_explicit(gen, memory_order_relaxed) + 1u;
+  atomic_store_explicit(gen, next, memory_order_release);
 }
 
 static size_t rt_managed_ptr_slot(uintptr_t value) {
@@ -426,9 +428,11 @@ static inline int ny_mem_pool_slot(size_t total) {
  */
 #include <errno.h>
 #include <pthread.h>
+#ifndef _WIN32
 #include <signal.h>
 #include <sys/mman.h>
 #include <unistd.h>
+#endif
 #if defined(__linux__) && defined(__x86_64__)
 #include <dlfcn.h>
 #include <ucontext.h>
@@ -455,7 +459,11 @@ static uintptr_t g_sh_quarantine[SH_QUARANTINE_MAX];
 static size_t g_sh_q_head, g_sh_q_len, g_sh_q_bytes;
 static size_t g_sh_live, g_sh_live_bytes;
 static _Atomic int g_sh_state = -1; /* -1 unknown, 0 off, 1 on */
+#ifdef _WIN32
+static PVOID g_sh_handler;
+#else
 static int g_sh_handlers;
+#endif
 
 static bool sh_enabled(void) {
   int st = atomic_load_explicit(&g_sh_state, memory_order_relaxed);
@@ -590,6 +598,28 @@ static void sh_message(const char *kind, uintptr_t addr, const sh_entry_t *e) {
   }
 }
 
+static bool sh_report_fault(uintptr_t addr) {
+  const sh_entry_t *hit = sh_find_address(addr);
+  if (!hit)
+    return false;
+  if (hit->freed)
+    sh_message("use-after-free", addr, hit);
+  else if (addr >= hit->user + hit->size)
+    sh_message("heap-buffer-overflow", addr, hit);
+  else
+    sh_message("invalid access", addr, hit);
+  _exit(134);
+}
+
+#ifdef _WIN32
+static LONG CALLBACK sh_fault(EXCEPTION_POINTERS *exception) {
+  const EXCEPTION_RECORD *record = exception->ExceptionRecord;
+  if (record->ExceptionCode == EXCEPTION_ACCESS_VIOLATION &&
+      record->NumberParameters >= 2)
+    sh_report_fault((uintptr_t)record->ExceptionInformation[1]);
+  return EXCEPTION_CONTINUE_SEARCH;
+}
+#else
 static void sh_fault(int sig, siginfo_t *info, void *ctx) {
 #if defined(__linux__) && defined(__x86_64__)
   if (getenv("NYTRIX_SAFE_HEAP_TRACE")) {
@@ -605,25 +635,19 @@ static void sh_fault(int sig, siginfo_t *info, void *ctx) {
 #else
   (void)ctx;
 #endif
-  uintptr_t addr = (uintptr_t)info->si_addr;
-  const sh_entry_t *hit = sh_find_address(addr);
-  if (!hit) {
+  if (!sh_report_fault((uintptr_t)info->si_addr))
     signal(sig, SIG_DFL);
-    return; /* not ours: re-fault into the default action */
-  }
-  if (hit->freed)
-    sh_message("use-after-free", addr, hit);
-  else if (addr >= hit->user + hit->size)
-    sh_message("heap-buffer-overflow", addr, hit);
-  else
-    sh_message("invalid access", addr, hit);
-  _exit(134);
 }
+#endif
 
-static void sh_install(void) {
+static bool sh_install(void) {
+#ifdef _WIN32
+  if (!g_sh_handler)
+    g_sh_handler = AddVectoredExceptionHandler(1, sh_fault);
+  return g_sh_handler != NULL;
+#else
   if (g_sh_handlers)
-    return;
-  g_sh_handlers = 1;
+    return true;
   static char altstack[64 * 1024];
   stack_t ss = {.ss_sp = altstack, .ss_size = sizeof(altstack), .ss_flags = 0};
   sigaltstack(&ss, NULL);
@@ -634,9 +658,43 @@ static void sh_install(void) {
   sigemptyset(&sa.sa_mask);
   sigaction(SIGSEGV, &sa, NULL);
   sigaction(SIGBUS, &sa, NULL);
+  g_sh_handlers = 1;
+  return true;
+#endif
+}
+
+static void *sh_map(size_t size) {
+#ifdef _WIN32
+  return VirtualAlloc(NULL, size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+#else
+  void *m = mmap(NULL, size, PROT_READ | PROT_WRITE,
+                 MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  return m == MAP_FAILED ? NULL : m;
+#endif
+}
+
+static bool sh_protect(void *m, size_t size) {
+#ifdef _WIN32
+  DWORD old_protection;
+  return VirtualProtect(m, size, PAGE_NOACCESS, &old_protection) != 0;
+#else
+  return mprotect(m, size, PROT_NONE) == 0;
+#endif
+}
+
+static void sh_unmap(void *m, size_t size) {
+#ifdef _WIN32
+  (void)size;
+  VirtualFree(m, 0, MEM_RELEASE);
+#else
+  munmap(m, size);
+#endif
 }
 
 static void sh_leak_report(void) {
+#ifdef _WIN32
+  RemoveVectoredExceptionHandler(g_sh_handler);
+#endif
   size_t blocks = 0, bytes = 0;
   pthread_mutex_lock(&g_sh_lock);
   for (size_t i = 0; i < g_sh_cap; ++i) {
@@ -668,7 +726,7 @@ static void sh_evict_one(void) {
   if (!e)
     return;
   g_sh_q_bytes -= e->map_len;
-  munmap((void *)e->map, e->map_len);
+  sh_unmap((void *)e->map, e->map_len);
   e->user = 1; /* tombstone */
 }
 
@@ -678,13 +736,16 @@ static void sh_evict_one(void) {
  */
 static void *sh_alloc(size_t size, size_t lead, bool user_block) {
   pthread_mutex_lock(&g_sh_lock);
-  sh_install();
+  if (!sh_install()) {
+    pthread_mutex_unlock(&g_sh_lock);
+    return NULL;
+  }
   static bool leak_hook;
   if (!leak_hook) {
     leak_hook = true;
     atexit(sh_leak_report);
   }
-  size_t page = (size_t)sysconf(_SC_PAGESIZE);
+  size_t page = (size_t)ny_page_size();
   size_t body = (size + 15) & ~(size_t)15;
   size_t data = lead + body;
   size_t data_pages = (data + page - 1) / page;
@@ -696,18 +757,21 @@ static void *sh_alloc(size_t size, size_t lead, bool user_block) {
    */
   size_t prot_len = (data_pages + 1) * page;
   size_t map_len = prot_len + page;
-  void *m = mmap(NULL, map_len, PROT_READ | PROT_WRITE,
-                 MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-  if (m == MAP_FAILED) {
+  void *m = sh_map(map_len);
+  if (!m) {
     pthread_mutex_unlock(&g_sh_lock);
     return NULL;
   }
   uintptr_t guard = (uintptr_t)m + data_pages * page;
-  mprotect((void *)guard, page, PROT_NONE);
+  if (!sh_protect((void *)guard, page)) {
+    sh_unmap(m, map_len);
+    pthread_mutex_unlock(&g_sh_lock);
+    return NULL;
+  }
   uintptr_t user = guard - body;
   sh_entry_t *e = sh_insert(user);
   if (!e) {
-    munmap(m, map_len);
+    sh_unmap(m, map_len);
     pthread_mutex_unlock(&g_sh_lock);
     return NULL;
   }
@@ -799,7 +863,11 @@ static int sh_release(uintptr_t user) {
     pthread_mutex_unlock(&g_sh_lock);
     _exit(134);
   }
-  mprotect((void *)e->map, e->prot_len, PROT_NONE);
+  if (!sh_protect((void *)e->map, e->prot_len)) {
+    sh_message("could not protect freed block", user, e);
+    pthread_mutex_unlock(&g_sh_lock);
+    _exit(134);
+  }
   e->freed = 1;
   --g_sh_live;
   g_sh_live_bytes -= e->size;

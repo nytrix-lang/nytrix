@@ -1819,18 +1819,21 @@ if (BUILD_TESTING)
 endif()
 
 if (BUILD_TESTING AND NYTRIX_USE_LLVM)
-  add_test(
-    NAME ny-native-from-nyr
-    COMMAND "${CMAKE_COMMAND}"
-      "-DNY_FULL=$<TARGET_FILE:ny-full>"
-      "-DWORK_DIR=${CMAKE_BINARY_DIR}/native-from-nyr-test"
-      "-DEXE_SUFFIX=${CMAKE_EXECUTABLE_SUFFIX}"
-      -P "${NYTRIX_ROOT}/etc/tests/code/intermediate/ny/native-from-nyr.cmake"
-  )
-  set_tests_properties(ny-native-from-nyr PROPERTIES
-    WORKING_DIRECTORY "${NYTRIX_ROOT}"
-    TIMEOUT 300
-  )
+  # --native-precompile and native-bundle linking require an x86-64 host.
+  if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64|amd64)$")
+    add_test(
+      NAME ny-native-from-nyr
+      COMMAND "${CMAKE_COMMAND}"
+        "-DNY_FULL=$<TARGET_FILE:ny-full>"
+        "-DWORK_DIR=${CMAKE_BINARY_DIR}/native-from-nyr-test"
+        "-DEXE_SUFFIX=${CMAKE_EXECUTABLE_SUFFIX}"
+        -P "${NYTRIX_ROOT}/etc/tests/code/intermediate/ny/native-from-nyr.cmake"
+    )
+    set_tests_properties(ny-native-from-nyr PROPERTIES
+      WORKING_DIRECTORY "${NYTRIX_ROOT}"
+      TIMEOUT 300
+    )
+  endif()
   nytrix_add_nshape_test(
     repl-cold-stdlib-imports
     etc/tests/code/probes/repl/repl-cold-imports.nshape

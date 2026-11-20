@@ -6578,6 +6578,25 @@ The focused five-sample runner measured 1.11× NYR, 1.67× LLVM, and
 uses 128-bit packs and stores short-lived loads to frame homes; the
 instruction win is not parity. The vector metadata backend test passed.
 
+For a tail-free wrapping reduction of `value + invariant`, the vectorizer
+now adds `trip_count * invariant` once at the exit rather than once per
+element. The original add must have no other consumer; variable-trip loops
+and loops needing scalar tails retain their existing behavior. On `bce-matrix`,
+retired instructions fell further to 17.02 M NYR and 64.32 M NYC.
+A separate seven-sample run against Clang measured 1.37× NYR, 1.98× LLVM,
+and 3.50× NYC, with the same checksum. Do not compare those ratios
+directly to the earlier run: the host reference and sample timings
+differed.
+
+The serial GCC-reference run after accumulator unrolling and before the
+invariant fold completed 109 fixtures without execution or checksum
+failures and passed all seven existing gates. The optional `thread-ring`
+fixture was run separately against Clang: 1.11× NYR, 1.11× LLVM, 0.89× NYC;
+checksum `1000` on all routes. Among valid comparisons in the GCC run,
+26 NYR, 19 LLVM, and 37 NYC results were still above 2×. The largest
+sustained gaps included `cd`, `bigint-oracle`, `lbm`, and `matmul-int`;
+short-reference outliers included NYC `dce` and all routes on `knight`.
+
 Outlining BigInt operand coercion in Ny was tried separately and reverted.
 `bigint-oracle` retired 166.36 M → 168.31 M instructions at checksum
 `1968365`, with no consistent elapsed improvement. The compiler still
@@ -6597,5 +6616,15 @@ instructions (−0.61%) in interleaved native AOT runs. All runs returned
 `1968365`; wall times varied under concurrent load. The native AOT
 `bigfloat-padding` and `bigfloat-differential` oracles passed, including
 unequal-precision inputs and rounding.
+
+### 2026-11-20 managed-pointer cache generation
+
+The heap registry's writer lock already serializes generation changes.
+Publishing with a release store removes a second locked update without
+changing pointer membership or the reader's acquire check. A four-reader
+stress run verified 768,000 cross-thread cache transitions per polarity.
+Four interleaved AOT samples of `bigint-oracle` matched checksum `1968365`;
+retired instructions stayed at 165.34 M, and median cycles went from
+60.50 M to 60.22 M. The wall-time change was within sample variation.
 
 </details>

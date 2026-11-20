@@ -573,7 +573,7 @@ static inline void mach_cc_rename(nyr_mach_operand_t *op, uint32_t from,
     op->as.reg = to;
 }
 
-#define MACH_CC_BIT(set, block, v)                         \
+#define MACH_CC_BIT(set, block, v)                                             \
   (((set)[(block) * words + (v) / 64] >> ((v) % 64)) & 1u)
 
 /*
@@ -666,11 +666,11 @@ static void mach_fuse_int_widening(nyr_mach_func_t *m) {
         uses[op->as.reg]++;
     }
   }
-#define MACH_CONST_OP(op, value)                                    \
-  ((op).kind == NYR_MACH_OPERAND_IMM                                \
-       ? (op).as.imm == (value)                                     \
-       : ((op).kind == NYR_MACH_OPERAND_VREG && (op).as.reg < nv && \
-          known[(op).as.reg] && defs[(op).as.reg] == 1 &&           \
+#define MACH_CONST_OP(op, value)                                               \
+  ((op).kind == NYR_MACH_OPERAND_IMM                                           \
+       ? (op).as.imm == (value)                                                \
+       : ((op).kind == NYR_MACH_OPERAND_VREG && (op).as.reg < nv &&            \
+          known[(op).as.reg] && defs[(op).as.reg] == 1 &&                      \
           constant[(op).as.reg] == (value)))
   bool changed = false;
   for (size_t b = 0; b < m->block_len; ++b) {
@@ -3015,10 +3015,10 @@ static void mach_mixed_inst_text(const nyr_mach_inst_t *in, char *buf,
   size_t off =
       (size_t)snprintf(buf, n, "%s%s", nyr_mach_opcode_name(in->opcode),
                        mach_cond_name(in->condition));
-#define MIXED_APP(...)                                            \
-  do {                                                            \
-    if (off < n)                                                  \
-      off += (size_t)snprintf(buf + off, n - off, ##__VA_ARGS__); \
+#define MIXED_APP(...)                                                         \
+  do {                                                                         \
+    if (off < n)                                                               \
+      off += (size_t)snprintf(buf + off, n - off, ##__VA_ARGS__);              \
   } while (0)
   char obuf[160];
   if (mach_is_value(&in->dst))
@@ -3515,7 +3515,8 @@ void nyr_mach_dump_mixed(const nyr_func_t *nyir, const nyr_mach_func_t *mach,
           nat_i++;
       }
       if (total > shown)
-        fprintf(out, col ? "      ... +%zu prelude\n" : "    ... +%zu prelude\n",
+        fprintf(out,
+                col ? "      ... +%zu prelude\n" : "    ... +%zu prelude\n",
                 total - shown);
     }
   }
@@ -3529,15 +3530,15 @@ void nyr_mach_dump_mixed(const nyr_func_t *nyir, const nyr_mach_func_t *mach,
 /*
  * Prints one NAT row in aligned sub-columns: address, bytes, mnemonic.
  */
-#define MIXED_NAT_ROW(r)                                                    \
-  do {                                                                      \
-    const nyr_mixed_nat_t *_r = (r);                                        \
-    fputs(col ? "      " : "    ", out);                                    \
-    mixed_c(out, col, MCLR_DIM);                                            \
-    fprintf(out, "%04llx %-16s ", (unsigned long long)_r->addr, _r->bytes); \
-    mixed_c(out, col, MCLR_RESET);                                          \
-    mixed_body(out, col, _r->text);                                         \
-    fputc('\n', out);                                                       \
+#define MIXED_NAT_ROW(r)                                                       \
+  do {                                                                         \
+    const nyr_mixed_nat_t *_r = (r);                                           \
+    fputs(col ? "      " : "    ", out);                                       \
+    mixed_c(out, col, MCLR_DIM);                                               \
+    fprintf(out, "%04llx %-16s ", (unsigned long long)_r->addr, _r->bytes);    \
+    mixed_c(out, col, MCLR_RESET);                                             \
+    mixed_body(out, col, _r->text);                                            \
+    fputc('\n', out);                                                          \
   } while (0)
 
   if (mach) {
@@ -5009,9 +5010,8 @@ static bool mach_nir_match_swar_popcount(const nyr_func_t *f,
       int other = side == 0 ? add2->b : add2->a;
       int spc = mach_swar_def(f, definitions, s, NYIR_SAR_I64);
       int64_t sh = 0;
-      if (spc >= 0 &&
-          mach_nir_const_i64(f, definitions, f->data[spc].b, &sh) && sh == 4 &&
-          f->data[spc].a == other) {
+      if (spc >= 0 && mach_nir_const_i64(f, definitions, f->data[spc].b, &sh) &&
+          sh == 4 && f->data[spc].a == other) {
         base = other;
         skipped[n++] = (size_t)spc;
         break;
@@ -5045,9 +5045,8 @@ static bool mach_nir_match_swar_popcount(const nyr_func_t *f,
           kb != INT64_C(0x33333333))
         continue;
       bsh = mach_swar_def(f, definitions, f->data[bpc].a, NYIR_SAR_I64);
-      if (bsh < 0 ||
-          !mach_nir_const_i64(f, definitions, f->data[bsh].b, &sh) || sh != 2 ||
-          f->data[bsh].a != f->data[apc].a)
+      if (bsh < 0 || !mach_nir_const_i64(f, definitions, f->data[bsh].b, &sh) ||
+          sh != 2 || f->data[bsh].a != f->data[apc].a)
         continue;
       subv = f->data[apc].a;
       skipped[n++] = (size_t)apc;
@@ -5318,8 +5317,8 @@ bool nyr_mach_lower_nir(const nyr_func_t *nyir, nyr_mach_func_t *out,
       int input = -1;
       size_t skipped[16];
       size_t skipped_len = 0;
-      if (mach_nir_match_swar_popcount(nyir, definitions, NULL, &cfg, i,
-                                       &input, skipped, &skipped_len)) {
+      if (mach_nir_match_swar_popcount(nyir, definitions, NULL, &cfg, i, &input,
+                                       skipped, &skipped_len)) {
         candidate = true;
         break;
       }
@@ -5530,8 +5529,11 @@ bool nyr_mach_lower_nir(const nyr_func_t *nyir, nyr_mach_func_t *out,
       ny_dbg_lower_instruction(i, nyr_op_name(in->op), in->dst, in->a, in->b,
                                in->c, in->imm, in->symbol);
     if ((in->op == NYIR_LOAD_I64 || in->op == NYIR_STORE_I64) &&
-        (in->flags & NYIR_INST_F_MEM_BYTE) && !(caps & NY_NATIVE_CAP_MACH_BYTE))
+        (in->flags & NYIR_INST_F_MEM_BYTE) &&
+        !(caps & NY_NATIVE_CAP_MACH_BYTE)) {
+      nyr_err(err, err_len, "machine lower: target has no machine byte access");
       goto done;
+    }
     nyr_mach_inst_t inst = {0};
     int64_t copy_size = 0;
     inst.source_pc = (uint32_t)i;
@@ -5779,15 +5781,14 @@ bool nyr_mach_lower_nir(const nyr_func_t *nyir, nyr_mach_func_t *out,
           strcmp(in->symbol, "rt_f64_to_i64") == 0) {
         int conv_args[NYIR_CALL_MAX_ARGS] = {0};
         int conv_argc = 0;
-        if (nyr_call_args(in, nyir->next_value, conv_args,
-                          NYIR_CALL_MAX_ARGS, &conv_argc, NULL, 0) &&
+        if (nyr_call_args(in, nyir->next_value, conv_args, NYIR_CALL_MAX_ARGS,
+                          &conv_argc, NULL, 0) &&
             conv_argc == 1 && conv_args[0] >= 0 &&
             nyr_call_arg_class_get(in, 0) == NYIR_SCALAR_F64) {
           nyr_mach_operand_t conv_src =
               mach_vreg(&lowered, values[conv_args[0]]);
           nyr_mach_operand_t conv_dst = mach_vreg(&lowered, values[in->dst]);
-          nyr_mach_type_t conv_dst_type =
-              mach_value_type(&lowered, &conv_dst);
+          nyr_mach_type_t conv_dst_type = mach_value_type(&lowered, &conv_dst);
           if (mach_value_type(&lowered, &conv_src) == NYR_MACH_TYPE_F64 &&
               (conv_dst_type == NYR_MACH_TYPE_I64 ||
                conv_dst_type == NYR_MACH_TYPE_PTR)) {
@@ -6579,8 +6580,7 @@ static bool mach_sink_edge_adds(nyr_mach_func_t *m) {
       --pc;
       nyr_mach_inst_t add = m->insts[pc];
       if ((add.opcode != NYR_MACH_ADD && add.opcode != NYR_MACH_SUB) ||
-          add.narrow32 ||
-          !mach_schedule_inst_safe(m, &add) ||
+          add.narrow32 || !mach_schedule_inst_safe(m, &add) ||
           add.dst.kind != NYR_MACH_OPERAND_VREG ||
           add.dst.reg_class != NYR_MACH_REGCLASS_GPR ||
           mach_value_type(m, &add.dst) != NYR_MACH_TYPE_I64 ||
@@ -6625,12 +6625,12 @@ static bool mach_sink_edge_adds(nyr_mach_func_t *m) {
         /* This move preserves the order of the edge copies themselves. It
          * can cross a sibling copy provided neither input is overwritten.
          */
-        bool crosses_edge_copy =
-            in->opcode == NYR_MACH_COPY && in->source_pc == UINT32_MAX &&
-            in->effects == NYR_MACH_EFFECT_NONE &&
-            in->dst.kind == NYR_MACH_OPERAND_VREG &&
-            (in->src0.kind == NYR_MACH_OPERAND_VREG ||
-             in->src0.kind == NYR_MACH_OPERAND_IMM);
+        bool crosses_edge_copy = in->opcode == NYR_MACH_COPY &&
+                                 in->source_pc == UINT32_MAX &&
+                                 in->effects == NYR_MACH_EFFECT_NONE &&
+                                 in->dst.kind == NYR_MACH_OPERAND_VREG &&
+                                 (in->src0.kind == NYR_MACH_OPERAND_VREG ||
+                                  in->src0.kind == NYR_MACH_OPERAND_IMM);
         if ((!crosses_call && !crosses_edge_copy &&
              !mach_schedule_inst_safe(m, in)) ||
             mach_schedule_inst_reads(in, &add.dst) ||
@@ -7284,22 +7284,22 @@ bool nyr_mach_sink_edge_adds_selftest(void) {
     nyr_mach_operand_t literal = mach_schedule_selftest_vreg(regs[1]);
     nyr_mach_operand_t update = mach_schedule_selftest_vreg(regs[2]);
     nyr_mach_operand_t call_result = mach_schedule_selftest_vreg(regs[3]);
-    nyr_mach_inst_t constant = {.opcode = NYR_MACH_COPY,
-                                .source_pc = 1,
-                                .dst = literal,
-                                .src0 = {.kind = NYR_MACH_OPERAND_IMM,
-                                         .as.imm = 1}};
+    nyr_mach_inst_t constant = {
+        .opcode = NYR_MACH_COPY,
+        .source_pc = 1,
+        .dst = literal,
+        .src0 = {.kind = NYR_MACH_OPERAND_IMM, .as.imm = 1}};
     nyr_mach_inst_t sub = {.opcode = NYR_MACH_SUB,
                            .source_pc = 2,
                            .dst = update,
                            .src0 = arg,
                            .src1 = literal};
-    nyr_mach_inst_t call = {.opcode = NYR_MACH_CALL,
-                            .source_pc = 3,
-                            .dst = call_result,
-                            .src0 = {.kind = NYR_MACH_OPERAND_SYMBOL,
-                                     .as.symbol = "callee"},
-                            .effects = NYR_MACH_EFFECT_CALL};
+    nyr_mach_inst_t call = {
+        .opcode = NYR_MACH_CALL,
+        .source_pc = 3,
+        .dst = call_result,
+        .src0 = {.kind = NYR_MACH_OPERAND_SYMBOL, .as.symbol = "callee"},
+        .effects = NYR_MACH_EFFECT_CALL};
     call.args = malloc(sizeof(*call.args));
     if (ok && call.args) {
       call.args[0] = arg;

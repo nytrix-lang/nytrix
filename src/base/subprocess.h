@@ -1,6 +1,6 @@
 /* Cross-platform process spawning and captured-output interfaces. */
-#ifndef NY_PROCESS_H
-#define NY_PROCESS_H
+#ifndef NY_SUBPROCESS_H
+#define NY_SUBPROCESS_H
 
 #include <stdbool.h>
 

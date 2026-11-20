@@ -19,8 +19,8 @@
  * The caller (ny_try_static_assert_builtin) invokes them after the
  */
 #include "code/lang/ny/parser/proof.h"
-#include "code/lang/ny/parser/visitor.h"
 #include "code/lang/ny/gen/internal.h"
+#include "code/lang/ny/parser/visitor.h"
 
 #ifdef NYTRIX_HAS_Z3
 #include <z3.h>
@@ -152,8 +152,9 @@ static bool ny_smt_mul_i64(int64_t a, int64_t b, int64_t *out) {
   return true;
 }
 
-static bool ny_smt_const_i64_expr(const expr_t *expr, int64_t *out) {
-  if (!expr || !out)
+static bool ny_smt_const_i64_expr(const expr_t *expr, int64_t *out,
+                                  unsigned depth) {
+  if (!expr || !out || depth > NY_SMT_MAX_DEPTH)
     return false;
   if (expr->kind == NY_E_LITERAL && expr->as.literal.kind == NY_LIT_INT) {
     if (expr->tok.kind == NY_T_NIL ||
@@ -165,7 +166,7 @@ static bool ny_smt_const_i64_expr(const expr_t *expr, int64_t *out) {
   if (expr->kind == NY_E_UNARY && expr->as.unary.op &&
       strcmp(expr->as.unary.op, "-") == 0) {
     int64_t operand;
-    if (!ny_smt_const_i64_expr(expr->as.unary.right, &operand) ||
+    if (!ny_smt_const_i64_expr(expr->as.unary.right, &operand, depth + 1) ||
         operand == INT64_MIN)
       return false;
     *out = -operand;
@@ -174,8 +175,8 @@ static bool ny_smt_const_i64_expr(const expr_t *expr, int64_t *out) {
   if (expr->kind != NY_E_BINARY || !expr->as.binary.op)
     return false;
   int64_t left, right;
-  if (!ny_smt_const_i64_expr(expr->as.binary.left, &left) ||
-      !ny_smt_const_i64_expr(expr->as.binary.right, &right))
+  if (!ny_smt_const_i64_expr(expr->as.binary.left, &left, depth + 1) ||
+      !ny_smt_const_i64_expr(expr->as.binary.right, &right, depth + 1))
     return false;
   __int128 result;
   if (strcmp(expr->as.binary.op, "+") == 0)
@@ -259,7 +260,7 @@ static bool ny_smt_contract_safe(codegen_t *cg, scope *scopes, size_t depth,
       return false;
   }
   int64_t ignored;
-  if (ny_smt_const_i64_expr(expr, &ignored))
+  if (ny_smt_const_i64_expr(expr, &ignored, rec))
     return true;
   if (strcmp(op, "/") == 0 || strcmp(op, "%") == 0) {
     /*
@@ -271,7 +272,8 @@ static bool ny_smt_contract_safe(codegen_t *cg, scope *scopes, size_t depth,
      */
     int64_t constant_divisor;
     if (expr->as.binary.right &&
-        ny_smt_const_i64_expr(expr->as.binary.right, &constant_divisor)) {
+        ny_smt_const_i64_expr(expr->as.binary.right, &constant_divisor,
+                              rec + 1)) {
       if (constant_divisor == 0)
         return false;
       if (constant_divisor != -1)
@@ -426,6 +428,13 @@ static bool ny_smt_lin_build(codegen_t *cg, scope *scopes, size_t depth,
   if (e->kind == NY_E_BINARY && e->as.binary.op && e->as.binary.left &&
       e->as.binary.right) {
     const char *op = e->as.binary.op;
+    if (strcmp(op, "/") == 0 || strcmp(op, "%") == 0) {
+      int64_t value;
+      if (!ny_smt_const_i64_expr(e, &value, rec))
+        return (out->ok = false);
+      out->cconst = value;
+      return true;
+    }
     if (strcmp(op, "+") == 0 || strcmp(op, "-") == 0) {
       ny_smt_lin_t l, r;
       if (!ny_smt_lin_build(cg, scopes, depth, env, e->as.binary.left, &l,
@@ -721,16 +730,16 @@ static int ny_smt_cmp_branches(codegen_t *cg, scope *scopes, size_t depth,
    * parameters are named `coeffs` and `rhs_val` (not `coeff`/`rhs`) so they
    * cannot collide with the ny_smt_cons_t members during substitution.
    */
-#define NY_SMT_PUSH_CONS(branch, coeffs, rhs_val)          \
-  do {                                                     \
-    if ((branch)->ncons >= NY_SMT_MAX_CONS)                \
-      return 0;                                            \
-    ny_smt_cons_t *c = &(branch)->cons[(branch)->ncons++]; \
-    memset(c, 0, sizeof(*c));                              \
-    c->nvars = env->nvars;                                 \
-    for (int i = 0; i < env->nvars; ++i)                   \
-      c->coeff[i] = (coeffs)[i];                           \
-    c->rhs = (rhs_val);                                    \
+#define NY_SMT_PUSH_CONS(branch, coeffs, rhs_val)                              \
+  do {                                                                         \
+    if ((branch)->ncons >= NY_SMT_MAX_CONS)                                    \
+      return 0;                                                                \
+    ny_smt_cons_t *c = &(branch)->cons[(branch)->ncons++];                     \
+    memset(c, 0, sizeof(*c));                                                  \
+    c->nvars = env->nvars;                                                     \
+    for (int i = 0; i < env->nvars; ++i)                                       \
+      c->coeff[i] = (coeffs)[i];                                               \
+    c->rhs = (rhs_val);                                                        \
   } while (0)
 
   int nbr = 0;

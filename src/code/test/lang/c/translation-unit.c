@@ -60,8 +60,8 @@ char *nyr_unit_array_decay_assign(struct nyr_unit_array_decay_holder *holder,
   return holder->entries->name;
 }
 static void nyr_unit_void_macro_sink(int *value, int delta) { *value += delta; }
-#define NYC_VOID_CALL_IF(condition, call) \
-  if (condition)                          \
+#define NYC_VOID_CALL_IF(condition, call)                                      \
+  if (condition)                                                               \
   (call)
 int nyr_unit_parenthesized_void_macro(void) {
   int value = 0;
@@ -479,7 +479,7 @@ struct nyr_unit_const_pointee {
 };
 
 int nyr_unit_const_aggregate_pointer(void) {
-  struct nyr_unit_const_pointee object;
+  struct nyr_unit_const_pointee object = {47};
   const struct nyr_unit_const_pointee *view;
   view = &object;
   return view->value;

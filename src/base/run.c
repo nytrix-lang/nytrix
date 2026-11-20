@@ -10,7 +10,7 @@
 #endif
 
 #include "base/options.h"
-#include "base/process.h"
+#include "base/subprocess.h"
 #include "base/util.h"
 #include <errno.h>
 #include <stdio.h>
@@ -677,12 +677,12 @@ static int ny_safe_run_supervise(pid_t pid, int out_fd, int err_fd,
                   output_delta * 1000u * 2u >= sr->max_output_bytes * elapsed
               ? output_streak + 1
               : 0;
-#define NY_SAFE_WARN(streak, warned, ...)       \
-  do {                                          \
-    if (!(warned) && (streak) >= warn_window) { \
-      fprintf(stderr, __VA_ARGS__);             \
-      (warned) = true;                          \
-    }                                           \
+#define NY_SAFE_WARN(streak, warned, ...)                                      \
+  do {                                                                         \
+    if (!(warned) && (streak) >= warn_window) {                                \
+      fprintf(stderr, __VA_ARGS__);                                            \
+      (warned) = true;                                                         \
+    }                                                                          \
   } while (0)
       NY_SAFE_WARN(rss_streak, rss_warned,
                    "safe-run: warning: sustained RSS is near its limit "

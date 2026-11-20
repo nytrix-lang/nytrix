@@ -10,10 +10,10 @@
 
 #include "pkg.h"
 #include "base/args.h"
-#include "base/process.h"
 #include "base/sha256.h"
-#include "base/util.h"
+#include "base/subprocess.h"
 #include "base/ui.h"
+#include "base/util.h"
 #include "code/lang/ny/pipeline/build.h"
 
 #include <ctype.h>

@@ -2,9 +2,9 @@
  * Subprocess runner: spawn, capture stdout/stderr, and wait with timeout
  * for compiler self-tests, fuzzer workers, and native executable probes.
  */
-#include "base/process.h"
 #include "base/compat.h"
 #include "base/options.h"
+#include "base/subprocess.h"
 #include "base/util.h"
 
 #include <ctype.h>

@@ -9,13 +9,13 @@
 #define _DEFAULT_SOURCE 1
 #endif
 
-#include "base/repo.h"
 #include "base/args.h"
 #include "base/compat.h"
-#include "base/process.h"
+#include "base/repo.h"
+#include "base/subprocess.h"
+#include "base/ui.h"
 #include "base/util.h"
 #include "fmt.h"
-#include "base/ui.h"
 #include <errno.h>
 #include <limits.h>
 #include <stdarg.h>
@@ -768,19 +768,17 @@ static int parse_args_c(int argc, char **argv, FmtOpts *o) {
   }
   if (o->dupes) {
     if (!o->dupes_lang ||
-        (strcmp(o->dupes_lang, "all") != 0 &&
-         strcmp(o->dupes_lang, "c") != 0 &&
+        (strcmp(o->dupes_lang, "all") != 0 && strcmp(o->dupes_lang, "c") != 0 &&
          strcmp(o->dupes_lang, "ny") != 0)) {
       nyt_err("ny-fmt", "--dupes-lang must be all, c, or ny");
       return 0;
     }
-    if (!o->dupes_match ||
-        (strcmp(o->dupes_match, "exact") != 0 &&
-         strcmp(o->dupes_match, "renamed") != 0 &&
-         strcmp(o->dupes_match, "literal") != 0 &&
-         strcmp(o->dupes_match, "near") != 0 &&
-         strcmp(o->dupes_match, "structural") != 0 &&
-         strcmp(o->dupes_match, "all") != 0)) {
+    if (!o->dupes_match || (strcmp(o->dupes_match, "exact") != 0 &&
+                            strcmp(o->dupes_match, "renamed") != 0 &&
+                            strcmp(o->dupes_match, "literal") != 0 &&
+                            strcmp(o->dupes_match, "near") != 0 &&
+                            strcmp(o->dupes_match, "structural") != 0 &&
+                            strcmp(o->dupes_match, "all") != 0)) {
       nyt_err("ny-fmt", "--dupes-match must be exact, renamed, literal, "
                         "near, structural, or all");
       return 0;
@@ -957,9 +955,8 @@ static int fmt_collect_skip_dir(const char *name, const char *mode) {
       if (strcmp(name, code_skip[i]) == 0)
         return 1;
   } else if (strcmp(mode, "dupes") == 0) {
-    static const char *const dupes_skip[] = {"tmp",      "build",
-                                             "node_modules", "__pycache__",
-                                             "dist",     "out"};
+    static const char *const dupes_skip[] = {
+        "tmp", "build", "node_modules", "__pycache__", "dist", "out"};
     for (size_t i = 0; i < sizeof(dupes_skip) / sizeof(dupes_skip[0]); ++i)
       if (strcmp(name, dupes_skip[i]) == 0)
         return 1;

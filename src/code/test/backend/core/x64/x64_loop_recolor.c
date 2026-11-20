@@ -1,15 +1,25 @@
 /*
  * Execute latch recoloring under pressure, fixed scratch and PHI snapshots.
  */
+#include "base/compat.h"
 #include "code/backend/mach/object.h"
 #include "opt.h"
 
 enum recolor_mode {
-  PLAIN, EXTRA_USE, OVERLAP, CALL, SHIFT, DIVIDE, POW2_DIV, POW2_MOD, STORE, CYCLE
+  PLAIN,
+  EXTRA_USE,
+  OVERLAP,
+  CALL,
+  SHIFT,
+  DIVIDE,
+  POW2_DIV,
+  POW2_MOD,
+  STORE,
+  CYCLE
 };
 static const char *const mode_names[] = {
-    "plain", "extra-use", "overlap", "call", "shift", "divide",
-    "pow2-div", "pow2-mod", "store", "cycle"};
+    "plain",  "extra-use", "overlap",  "call",  "shift",
+    "divide", "pow2-div",  "pow2-mod", "store", "cycle"};
 static struct {
   int64_t count, shift, divisor;
   uint64_t seed[12], stored;
@@ -67,24 +77,38 @@ static void build(nyr_func_t *ir, enum recolor_mode mode, int homes) {
     noise = nyr_opt_binop(ir, NYIR_SHL_I64, iv, shift);
   }
   if (mode == DIVIDE || mode == POW2_DIV || mode == POW2_MOD) {
-    int divisor = mode == DIVIDE ? load_at(ir, &input.divisor)
-                                : nyr_opt_const(ir, 8);
+    int divisor =
+        mode == DIVIDE ? load_at(ir, &input.divisor) : nyr_opt_const(ir, 8);
     noise = nyr_opt_binop(ir, mode == POW2_MOD ? NYIR_MOD_I64 : NYIR_DIV_I64,
-                         read[homes - 1], divisor);
+                          read[homes - 1], divisor);
   }
   if (mode == CALL) {
-    noise = nyr_ir_emit(ir, (nyr_inst_t){
-        .op = NYIR_CALL, .dst = -1, .a = -1, .b = -1, .c = -1,
-        .d = -1, .e = -1, .f = -1, .imm = 0,
-        .symbol = nyr_func_own_symbol_copy(ir, "recolor_clobber"),
-        .flags = NYIR_INST_F_EFFECTS_KNOWN,
-        .effects = NYIR_EFFECT_CALL | NYIR_EFFECT_UNKNOWN_SIDE_EFFECT});
+    noise = nyr_ir_emit(
+        ir, (nyr_inst_t){
+                .op = NYIR_CALL,
+                .dst = -1,
+                .a = -1,
+                .b = -1,
+                .c = -1,
+                .d = -1,
+                .e = -1,
+                .f = -1,
+                .imm = 0,
+                .symbol = nyr_func_own_symbol_copy(ir, "recolor_clobber"),
+                .flags = NYIR_INST_F_EFFECTS_KNOWN,
+                .effects = NYIR_EFFECT_CALL | NYIR_EFFECT_UNKNOWN_SIDE_EFFECT});
     ir->has_symbol_calls = true;
   }
   if (mode == STORE) {
     int address = nyr_opt_const(ir, (int64_t)(uintptr_t)&input.stored);
-    nyr_ir_emit(ir, (nyr_inst_t){.op = NYIR_STORE_I64, .dst = -1,
-        .a = address, .b = -1, .c = result, .d = -1, .e = -1, .f = -1});
+    nyr_ir_emit(ir, (nyr_inst_t){.op = NYIR_STORE_I64,
+                                 .dst = -1,
+                                 .a = address,
+                                 .b = -1,
+                                 .c = result,
+                                 .d = -1,
+                                 .e = -1,
+                                 .f = -1});
   }
   if (mode == CYCLE) {
     next[0] = state[1];
@@ -115,19 +139,36 @@ static uint64_t reference(enum recolor_mode mode, int homes) {
       return result;
     uint64_t noise = 0;
     switch (mode) {
-    case EXTRA_USE: noise = next[0] ^ (uint64_t)i; break;
-    case OVERLAP: noise = state[0] + (uint64_t)i; break;
-    case CALL: noise = 17; break;
-    case SHIFT: noise = (uint64_t)i << input.shift; break;
-    case DIVIDE: noise = (uint64_t)((int64_t)read[homes - 1] / input.divisor); break;
-    case POW2_DIV: noise = (uint64_t)((int64_t)read[homes - 1] / 8); break;
-    case POW2_MOD: noise = (uint64_t)((int64_t)read[homes - 1] % 8); break;
-    case STORE: input.stored = result; break;
+    case EXTRA_USE:
+      noise = next[0] ^ (uint64_t)i;
+      break;
+    case OVERLAP:
+      noise = state[0] + (uint64_t)i;
+      break;
+    case CALL:
+      noise = 17;
+      break;
+    case SHIFT:
+      noise = (uint64_t)i << input.shift;
+      break;
+    case DIVIDE:
+      noise = (uint64_t)((int64_t)read[homes - 1] / input.divisor);
+      break;
+    case POW2_DIV:
+      noise = (uint64_t)((int64_t)read[homes - 1] / 8);
+      break;
+    case POW2_MOD:
+      noise = (uint64_t)((int64_t)read[homes - 1] % 8);
+      break;
+    case STORE:
+      input.stored = result;
+      break;
     case CYCLE:
       next[0] = state[1];
       next[1] = state[0] + state[1];
       break;
-    default: break;
+    default:
+      break;
     }
     if (mode != PLAIN && mode != STORE && mode != CYCLE)
       next[homes - 1] ^= noise;
@@ -165,14 +206,15 @@ static int check(enum recolor_mode mode, int homes) {
    * Keep it in the mapping so its PC-relative relocation is always in range.
    */
   static const unsigned char clobber[] = {
-      0x31,0xc9, 0x31,0xd2, 0x31,0xf6, 0x31,0xff,
-      0x45,0x31,0xc0, 0x45,0x31,0xc9, 0x45,0x31,0xd2, 0x45,0x31,0xdb,
-      0xb8,17,0,0,0, 0xc3};
+      0x31, 0xc9, 0x31, 0xd2, 0x31, 0xf6, 0x31, 0xff, 0x45,
+      0x31, 0xc0, 0x45, 0x31, 0xc9, 0x45, 0x31, 0xd2, 0x45,
+      0x31, 0xdb, 0xb8, 17,   0,    0,    0,    0xc3};
   size_t stub = code.len;
   if (ok && mode == CALL)
     ok = nyr_obj_emit(&code, clobber, sizeof(clobber));
   for (size_t i = 0; ok && i < reloc_count; ++i) {
-    ok = mode == CALL && strcmp(relocs[i].symbol, "ny_fn_recolor_clobber") == 0 &&
+    ok = mode == CALL &&
+         strcmp(relocs[i].symbol, "ny_fn_recolor_clobber") == 0 &&
          relocs[i].type == NY_RELOC_PLT32 && relocs[i].disp_off + 4 <= stub;
     if (ok) {
       int32_t delta = (int32_t)(stub - (relocs[i].disp_off + 4));
@@ -188,7 +230,8 @@ static int check(enum recolor_mode mode, int homes) {
   }
   if (ok && getenv("NYTRIX_TEST_DUMP_CODE")) {
     char dump_path[512];
-    snprintf(dump_path, sizeof(dump_path), "%s%s", getenv("NYTRIX_TEST_DUMP_CODE"),
+    snprintf(dump_path, sizeof(dump_path), "%s%s",
+             getenv("NYTRIX_TEST_DUMP_CODE"),
              getenv("NYTRIX_DISABLE_LOOP_GPR") ? ".noloop" : "");
     FILE *dump = fopen(dump_path, "wb");
     if (dump) {
@@ -197,7 +240,7 @@ static int check(enum recolor_mode mode, int homes) {
     }
   }
   if (ok) {
-    typedef uint64_t (__attribute__((sysv_abi)) *kernel_t)(void);
+    typedef uint64_t(__attribute__((sysv_abi)) * kernel_t)(void);
     kernel_t fn = (kernel_t)((unsigned char *)mapping + defs[0].off);
     uint64_t random = UINT64_C(0x123456789abcdef0);
     for (int trial = 0; ok && trial < 32; ++trial) {
@@ -214,13 +257,14 @@ static int check(enum recolor_mode mode, int homes) {
         uint64_t actual = fn();
         ok = actual == expected && input.stored == stored;
         if (!ok) {
-          fprintf(stderr, "recolor mode=%s homes=%d trial=%d count=%lld "
+          fprintf(stderr,
+                  "recolor mode=%s homes=%d trial=%d count=%lld "
                   "shift=%lld divisor=%lld expected=%llu actual=%llu "
-                  "store=%llu/%llu seeds=", mode_names[mode], homes, trial,
-                  (long long)input.count, (long long)input.shift,
-                  (long long)input.divisor, (unsigned long long)expected,
-                  (unsigned long long)actual, (unsigned long long)stored,
-                  (unsigned long long)input.stored);
+                  "store=%llu/%llu seeds=",
+                  mode_names[mode], homes, trial, (long long)input.count,
+                  (long long)input.shift, (long long)input.divisor,
+                  (unsigned long long)expected, (unsigned long long)actual,
+                  (unsigned long long)stored, (unsigned long long)input.stored);
           for (int j = 0; j < homes; ++j)
             fprintf(stderr, " %llu", (unsigned long long)input.seed[j]);
           fputc('\n', stderr);
@@ -229,8 +273,8 @@ static int check(enum recolor_mode mode, int homes) {
     }
   }
   if (!ok)
-    fprintf(stderr, "x64 loop recolor mode=%s homes=%d: %s\n",
-            mode_names[mode], homes, err);
+    fprintf(stderr, "x64 loop recolor mode=%s homes=%d: %s\n", mode_names[mode],
+            homes, err);
   nyr_opt_execmem_free(mapping, code.len);
   nyr_mach_func_free(&mach);
   nyr_obj_free(&code);
@@ -250,11 +294,11 @@ int main(void) {
   char *saved_copy = saved ? strdup(saved) : NULL;
   for (int disable = 0; disable < 2; ++disable) {
     if (disable)
-      setenv("NYTRIX_DISABLE_LOOP_GPR", "1", 1);
+      ny_setenv("NYTRIX_DISABLE_LOOP_GPR", "1", 1);
     else if (saved_copy)
-      setenv("NYTRIX_DISABLE_LOOP_GPR", saved_copy, 1);
+      ny_setenv("NYTRIX_DISABLE_LOOP_GPR", saved_copy, 1);
     else
-      unsetenv("NYTRIX_DISABLE_LOOP_GPR");
+      ny_unsetenv("NYTRIX_DISABLE_LOOP_GPR");
     for (int mode = PLAIN; mode <= CYCLE; ++mode) {
       if (getenv("NYTRIX_TEST_CASE") &&
           mode != atoi(getenv("NYTRIX_TEST_CASE")))
@@ -272,10 +316,10 @@ int main(void) {
     }
   }
   if (saved_copy) {
-    setenv("NYTRIX_DISABLE_LOOP_GPR", saved_copy, 1);
+    ny_setenv("NYTRIX_DISABLE_LOOP_GPR", saved_copy, 1);
     free(saved_copy);
   } else {
-    unsetenv("NYTRIX_DISABLE_LOOP_GPR");
+    ny_unsetenv("NYTRIX_DISABLE_LOOP_GPR");
   }
   return failed;
 }
