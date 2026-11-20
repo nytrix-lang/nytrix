@@ -53,6 +53,12 @@ typedef struct {
   int last_rax_off;
   bool last_rax_valid;
   /*
+   * Vreg the sticky tag describes, -1 when the producer knew only an offset.
+   * A pooled home slot needs this: the offset alone cannot say whose bits RAX
+   * holds, so a shared slot only reuses the tag for the same vreg.
+   */
+  int last_rax_vreg;
+  /*
    * Last complete stack-home store. Byte adjacency proves that its source
    * register and destination memory are unchanged before a repeated access.
    */
@@ -61,6 +67,7 @@ typedef struct {
   int last_home_store_preg;
   int pending_rax_off;
   bool pending_rax_valid;
+  int pending_rax_vreg;
   uint32_t r10_index_vreg;
   bool r10_index_valid;
   uint32_t pending_sib_vreg;
@@ -222,6 +229,13 @@ typedef struct {
   int *vreg_home_offs;
   unsigned char *vreg_home_shared; /* set when a home slot is shared */
   /*
+   * Offsets owned by more than one vreg, sorted for bsearch. The
+   * sticky-RAX tag names an offset, so a shared slot cannot use it;
+   * see mach_home_off_shared.
+   */
+  int *shared_home_offs;
+  size_t shared_home_off_len;
+  /*
    * Literals uncolored by mach_decolor_literals (uses rematerialize the
    * immediate); see the single-consumer publish skip in the COPY encoder.
    */
@@ -307,6 +321,7 @@ typedef struct {
 static void mach_rax_invalidate(nyr_x64_mach_enc_t *e) {
   e->last_rax_valid = false;
   e->last_rax_off = 0;
+  e->last_rax_vreg = -1;
 }
 
 static void mach_r10_index_invalidate(nyr_x64_mach_enc_t *e) {
@@ -2105,37 +2120,70 @@ static int mach_home_off_cmp(const void *lhs, const void *rhs) {
  * register-resident vreg can be defined without touching its home, leaving
  * the tag describing a dead neighbour.
  */
+static void mach_build_home_shared_map(nyr_x64_mach_enc_t *e) {
+  if (e->vreg_home_shared || !e->mach || !e->vreg_home_offs)
+    return;
+  size_t n = e->mach->vreg_len;
+  unsigned char *shared = calloc(n ? n : 1, 1);
+  int *sorted = malloc((n ? n : 1) * sizeof(*sorted));
+  if (!shared || !sorted) {
+    free(shared);
+    free(sorted);
+    return; /* unknown: callers answer conservatively */
+  }
+  size_t m = 0;
+  for (size_t v = 0; v < n; ++v)
+    if (e->vreg_home_offs[v])
+      sorted[m++] = e->vreg_home_offs[v];
+  qsort(sorted, m, sizeof(*sorted), mach_home_off_cmp);
+  free(e->shared_home_offs);
+  e->shared_home_offs = malloc((m ? m : 1) * sizeof(*e->shared_home_offs));
+  e->shared_home_off_len = 0;
+  for (size_t v = 0; v < n; ++v) {
+    int off = e->vreg_home_offs[v];
+    shared[v] = 2;
+    if (!off)
+      continue;
+    int *hit = bsearch(&off, sorted, m, sizeof(*sorted), mach_home_off_cmp);
+    if (hit && ((hit > sorted && hit[-1] == off) ||
+                (hit + 1 < sorted + m && hit[1] == off))) {
+      shared[v] = 1;
+      if (e->shared_home_offs &&
+          (e->shared_home_off_len == 0 ||
+           e->shared_home_offs[e->shared_home_off_len - 1] != off))
+        e->shared_home_offs[e->shared_home_off_len++] = off;
+    }
+  }
+  free(sorted);
+  e->vreg_home_shared = shared;
+}
+
 static bool mach_vreg_home_shared(nyr_x64_mach_enc_t *e, uint32_t vreg) {
   if (!e || !e->mach || !e->vreg_home_offs || vreg >= e->mach->vreg_len)
     return false;
-  size_t n = e->mach->vreg_len;
-  if (!e->vreg_home_shared) {
-    unsigned char *shared = calloc(n ? n : 1, 1);
-    int *sorted = malloc((n ? n : 1) * sizeof(*sorted));
-    if (!shared || !sorted) {
-      free(shared);
-      free(sorted);
-      return true; /* unknown: be conservative */
-    }
-    size_t m = 0;
-    for (size_t v = 0; v < n; ++v)
-      if (e->vreg_home_offs[v])
-        sorted[m++] = e->vreg_home_offs[v];
-    qsort(sorted, m, sizeof(*sorted), mach_home_off_cmp);
-    for (size_t v = 0; v < n; ++v) {
-      int off = e->vreg_home_offs[v];
-      shared[v] = 2;
-      if (!off)
-        continue;
-      int *hit = bsearch(&off, sorted, m, sizeof(*sorted), mach_home_off_cmp);
-      if (hit && ((hit > sorted && hit[-1] == off) ||
-                  (hit + 1 < sorted + m && hit[1] == off)))
-        shared[v] = 1;
-    }
-    free(sorted);
-    e->vreg_home_shared = shared;
-  }
+  mach_build_home_shared_map(e);
+  if (!e->vreg_home_shared)
+    return true; /* unknown: be conservative */
   return e->vreg_home_shared[vreg] == 1;
+}
+
+/*
+ * Whether a home offset belongs to more than one vreg. Site-local sticky
+ * checks that see only an offset (load/store elision, call-argument staging)
+ * cannot prove which owner's bits RAX holds, so a shared slot never uses the
+ * tag. The vreg-keyed checks above stay as they are; this closes the
+ * offset-only hole that made spill-slot reuse unsafe to enable by default.
+ */
+static bool mach_home_off_shared(nyr_x64_mach_enc_t *e, int off) {
+  if (!e || !e->mach || !off)
+    return false;
+  mach_build_home_shared_map(e);
+  if (!e->vreg_home_shared)
+    return true; /* unknown: be conservative */
+  if (!e->shared_home_offs || !e->shared_home_off_len)
+    return false;
+  return bsearch(&off, e->shared_home_offs, e->shared_home_off_len,
+                 sizeof(*e->shared_home_offs), mach_home_off_cmp) != NULL;
 }
 
 static int mach_slot_off(const nyr_x64_mach_enc_t *e,
@@ -2187,6 +2235,10 @@ static bool mach_load_call_arg_preg(nyr_x64_mach_enc_t *e,
                                     const nyr_mach_operand_t *arg,
                                     unsigned preg, int resident_preg);
 static bool mach_load_rax(nyr_x64_mach_enc_t *e, int off);
+static bool mach_load_rax_slot(nyr_x64_mach_enc_t *e, int off, int vreg);
+static bool mach_store_rax_slot(nyr_x64_mach_enc_t *e, int off, int vreg);
+static bool mach_rax_tag_hit(nyr_x64_mach_enc_t *e, int off, int vreg);
+static bool mach_pending_rax_hit(nyr_x64_mach_enc_t *e, int off, int vreg);
 static bool mach_load_rax_rsp(nyr_x64_mach_enc_t *e, int off);
 static bool mach_load_op_rax(nyr_x64_mach_enc_t *e,
                              const nyr_mach_operand_t *op);
@@ -3416,6 +3468,7 @@ static bool mach_commit_vreg(nyr_x64_mach_enc_t *e,
       mach_vreg_can_forward_to_next_rax(e, dst->as.reg)) {
     e->pending_rax_off = off;
     e->pending_rax_valid = true;
+    e->pending_rax_vreg = dst ? (int)dst->as.reg : -1;
     return true;
   }
   return mach_store_rax(e, off);
@@ -3586,8 +3639,8 @@ static bool mach_load_src_preg(nyr_x64_mach_enc_t *e,
         e->addr_fold_known[op->as.reg])
       return mach_remat_addr_preg(e, (int)preg, &e->addr_fold[op->as.reg]);
     int off = mach_slot_off(e, op);
-    if (!e->no_sticky && e->last_rax_valid && e->last_rax_off == off &&
-        !mach_vreg_home_shared(e, op->as.reg))
+    if (mach_rax_tag_hit(e, off, (int)op->as.reg) ||
+        mach_pending_rax_hit(e, off, (int)op->as.reg))
       return mach_mov_preg_preg(e, (int)preg, 0);
     if (!mach_seed_colored_preg(e, op->as.reg))
       return false;
@@ -3670,30 +3723,75 @@ static bool mach_mov_rax_imm(nyr_x64_mach_enc_t *e, int64_t v) {
   return true;
 }
 
+/*
+ * Does the sticky tag prove that RAX holds the value at `off`? The tag names
+ * an offset, which is proof only while one value owns the slot; a pooled slot
+ * reuses it only when the tag names the same vreg. `vreg` < 0 means the site
+ * knows no vreg and must require an unshared slot.
+ */
+static bool mach_rax_tag_hit(nyr_x64_mach_enc_t *e, int off, int vreg) {
+  if (e->no_sticky || !e->last_rax_valid || e->last_rax_off != off)
+    return false;
+  if (vreg >= 0 && e->last_rax_vreg == vreg)
+    return true;
+  return !mach_home_off_shared(e, off);
+}
+
+static bool mach_pending_rax_hit(nyr_x64_mach_enc_t *e, int off, int vreg) {
+  if (!e->pending_rax_valid || e->pending_rax_off != off)
+    return false;
+  if (vreg >= 0 && e->pending_rax_vreg == vreg)
+    return true;
+  return vreg < 0 && e->pending_rax_vreg < 0 &&
+         !mach_home_off_shared(e, off);
+}
+
 static bool mach_load_rax(nyr_x64_mach_enc_t *e, int off) {
   /*
    * Skip reload when %rax already holds this slot (QBE-style copy elision).
    */
-  if (!e->no_sticky && e->last_rax_valid && e->last_rax_off == off)
+  if (mach_rax_tag_hit(e, off, -1) || mach_pending_rax_hit(e, off, -1))
     return true;
   if (!(mach_rex(e, true, false, false, false) && mach_u8(e, 0x8b) &&
         mach_rbp_disp(e, 0, off)))
     return false;
   e->last_rax_valid = true;
   e->last_rax_off = off;
+  e->last_rax_vreg = -1;
+  e->last_rax_sync_end = e->code.len;
+  return true;
+}
+
+/*
+ * Load a vreg's home through RAX. The vreg lets a pooled slot reuse the tag
+ * for the same owner instead of reloading on every use.
+ */
+static bool mach_load_rax_slot(nyr_x64_mach_enc_t *e, int off, int vreg) {
+  if (mach_rax_tag_hit(e, off, vreg) || mach_pending_rax_hit(e, off, vreg))
+    return true;
+  if (!(mach_rex(e, true, false, false, false) && mach_u8(e, 0x8b) &&
+        mach_rbp_disp(e, 0, off)))
+    return false;
+  e->last_rax_valid = true;
+  e->last_rax_off = off;
+  e->last_rax_vreg = vreg;
   e->last_rax_sync_end = e->code.len;
   return true;
 }
 
 static bool mach_store_rax(nyr_x64_mach_enc_t *e, int off) {
+  return mach_store_rax_slot(e, off, -1);
+}
+
+static bool mach_store_rax_slot(nyr_x64_mach_enc_t *e, int off, int vreg) {
   /*
    * A matching sticky-home tag means RAX still contains the value currently
    * stored at this exact stack slot.  Re-publishing it is a redundant
    * load/store pair; retain the tag and omit the store. An instruction whose
    * destination is also its input has changed RAX since the tag was set.
    */
-  if (!e->no_sticky && e->last_rax_valid && e->last_rax_off == off &&
-      off != e->aliased_dst_home && e->last_rax_sync_end == e->code.len)
+  if (off != e->aliased_dst_home && e->last_rax_sync_end == e->code.len &&
+      (mach_rax_tag_hit(e, off, vreg) || mach_pending_rax_hit(e, off, vreg)))
     return true;
   if (!mach_home_store_skip(e, off) &&
       (!mach_rex(e, true, false, false, false) || !mach_u8(e, 0x89) ||
@@ -3701,6 +3799,7 @@ static bool mach_store_rax(nyr_x64_mach_enc_t *e, int off) {
     return false;
   e->last_rax_valid = true;
   e->last_rax_off = off;
+  e->last_rax_vreg = vreg;
   e->last_rax_sync_end = e->code.len;
   return true;
 }
@@ -3744,8 +3843,8 @@ static bool mach_load_op_rax(nyr_x64_mach_enc_t *e,
        * move is redundant.
        */
       int off = mach_slot_off(e, op);
-      if (!e->no_sticky && e->last_rax_valid && e->last_rax_off == off &&
-          !mach_vreg_home_shared(e, op->as.reg))
+      if (mach_rax_tag_hit(e, off, (int)op->as.reg) ||
+          mach_pending_rax_hit(e, off, (int)op->as.reg))
         return true;
       if (!mach_mov_rax_reg(e, preg))
         return false;
@@ -3754,10 +3853,14 @@ static bool mach_load_op_rax(nyr_x64_mach_enc_t *e,
        */
       e->last_rax_valid = true;
       e->last_rax_off = off;
+      e->last_rax_vreg = (int)op->as.reg;
       return true;
     }
   }
-  return mach_load_rax(e, mach_slot_off(e, op));
+  return mach_load_rax_slot(e, mach_slot_off(e, op),
+                            op->kind == NYR_MACH_OPERAND_VREG
+                                ? (int)op->as.reg
+                                : -1);
 }
 
 static bool mach_patch_rel8(nyr_x64_mach_enc_t *e, size_t disp_off,
@@ -5162,10 +5265,11 @@ static bool mach_addr_base(nyr_x64_mach_enc_t *e, const nyr_mach_operand_t *op,
     return true;
   }
   int off = mach_slot_off(e, op);
-  if (!mach_load_rax(e, off))
+  if (!mach_load_rax_slot(e, off, (int)op->as.reg))
     return false;
   e->last_rax_valid = true;
   e->last_rax_off = off;
+  e->last_rax_vreg = (int)op->as.reg;
   *base = 0;
   return true;
 }
@@ -11463,6 +11567,7 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
   bool vector_fast_eligible = mach_configure_function_features(e);
   e->last_rax_valid = false;
   e->last_rax_off = 0;
+  e->last_rax_vreg = -1;
   unsigned save_mask = 0;
   bool unknown_memory = mach_has_unknown_memory_effect(mach);
   bool private_spill_homes = !unknown_memory && e->target &&
@@ -12465,6 +12570,7 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
             !in->narrow32) {
           bool saved_rax_valid = e->last_rax_valid;
           int saved_rax_off = e->last_rax_off;
+          int saved_rax_vreg = e->last_rax_vreg;
           if (!mach_seed_colored_preg(e, in->src0.as.reg))
             return false;
           int sp = mach_vreg_preg(e, in->src0.as.reg);
@@ -12507,6 +12613,7 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
                 saved_rax_off != mach_vreg_home_off(e, in->dst.as.reg)) {
               e->last_rax_valid = true;
               e->last_rax_off = saved_rax_off;
+              e->last_rax_vreg = saved_rax_vreg;
             } else {
               mach_rax_invalidate(e);
             }
@@ -13879,8 +13986,10 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
                 if (!mach_mov_preg_preg(e, dp, ap))
                   return false;
                 int rhs_home = mach_slot_off(e, &in->src1);
-                if (!e->no_sticky && dp != 0 && e->last_rax_valid &&
-                    e->last_rax_off == rhs_home) {
+                if (dp != 0 &&
+                    (mach_rax_tag_hit(e, rhs_home, (int)in->src1.as.reg) ||
+                     mach_pending_rax_hit(e, rhs_home,
+                                          (int)in->src1.as.reg))) {
                   if (!mach_alu_preg_preg(e, in->opcode, dp, 0))
                     return false;
                 } else if (!mach_alu_preg_home(e, in->opcode, dp, rhs_home)) {
@@ -15801,10 +15910,8 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
              */
             int sp = mach_vreg_preg(e, arg->as.reg);
             int off = mach_vreg_home_off(e, arg->as.reg);
-            bool sticky_rax =
-                (!e->no_sticky && e->last_rax_valid &&
-                 e->last_rax_off == off) ||
-                (e->pending_rax_valid && e->pending_rax_off == off);
+            bool sticky_rax = mach_rax_tag_hit(e, off, (int)arg->as.reg) ||
+                              mach_pending_rax_hit(e, off, (int)arg->as.reg);
             /*
              * A resident callee-saved color is independent of RAX's sticky
              * stack-home cache. Its valid preg was captured before the call
@@ -16514,6 +16621,7 @@ static bool mach_encode_function(nyr_x64_mach_enc_t *e, const char *name,
       if (e->pending_rax_valid) {
         e->last_rax_valid = true;
         e->last_rax_off = e->pending_rax_off;
+        e->last_rax_vreg = e->pending_rax_vreg;
       }
     }
     if (!mach_save_float_live_out(e, bi))

@@ -6806,6 +6806,42 @@ retired instructions. Both NYC fixtures still returned `2991` and
 remain above 7× Clang. The collision workloads and benchmark limits
 were not changed.
 
+### 2026-11-20 spill-slot coloring: value-identity tags, default stays off
+
+`NYTRIX_SPILL_HOME_COLOR` folds the live ranges of spilled values onto shared
+home slots, which shrank frames but crashed `fhourstones` and drifted
+`statemate`/`pidigits` when it was the default. The cause was the sticky-RAX
+tag: it named a home offset, so a pooled slot could forward a neighbour's
+value.
+
+The tag now carries a vreg (`mach_rax_tag_hit`, `mach_pending_rax_hit`). A
+shared slot reuses the tag only for the same vreg, and offset-only sites call
+`mach_home_off_shared` and require an unshared slot. `mach_load_rax_slot` and
+`mach_store_rax_slot` pass the vreg where the caller knows it.
+
+Measured with `build/release/ny-full`, `-O3 --native-backend x86_64`,
+`NYTRIX_AOT_CACHE=0`, `main` from `objdump -d --no-show-raw-insn`.
+
+| fixture | instructions off → on | home stores off → on | frame off → on | checksum |
+| --- | --- | --- | --- | --- |
+| `binary` | 729 → 822 | 33 → 124 | 0xdd8 → 0x948 | `3360874588549334` |
+| `fhourstones` | 634 → 635 | 8 → 8 | 0xa68 → 0x9c8 | `6010` |
+| `lbm-relax` | 793 → 795 | 58 → 58 | 0xc28 → 0xb08 | `152700` |
+| `viterbi` | 694 → 696 | 23 → 24 | 0xaa8 → 0x9e8 | `3270530` |
+| `binary-trees` | 685 → 687 | 2 → 3 | 0xb38 → 0xa38 | `64912` |
+
+Frames shrink 6–33%, but pooling defeats the home-store elision on a hot
+loop: `binary` goes 33 → 124 stores and 729 → 822 instructions. Smaller
+frames are not a win on their own, so the default stays one slot per value
+and the flag stays opt-in.
+
+Correctness with the flag on: `ny-test` 3/3 on the former regressions
+(`fhourstones`, `statemate`, `pidigits`), `--pattern regalloc --pattern
+codegen` 26/26, `--pattern x86` 223/223.
+
+The identity tag is neutral to slightly positive with the flag off: `binary`
+730 → 729 and `fhourstones` 635 → 634 instructions, checksums unchanged.
+
 ### Remaining investigation leads
 
 Re-rank using the dashboard, then confirm a miss in isolation before changing
