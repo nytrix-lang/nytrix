@@ -1412,8 +1412,8 @@ static int docs_origin_is_lib(const char *root, const char *orig) {
   }
   while (rel[0] == '.' && rel[1] == '/')
     rel += 2;
-  if (strncmp(rel, "etc/projects/", 13) == 0 ||
-      strncmp(rel, "etc/tests/", 10) == 0 || strstr(rel, "/etc/projects/") ||
+  if (strncmp(rel, "etc/labs/", 13) == 0 ||
+      strncmp(rel, "etc/tests/", 10) == 0 || strstr(rel, "/etc/labs/") ||
       strstr(rel, "/etc/tests/"))
     return 0;
   char core_dir[PATH_MAX];
@@ -1544,7 +1544,7 @@ static char *github_source_href_for_markdown(const char *href, size_t href_n) {
   for (char *p = path; *p; p++)
     if (*p == '\\')
       *p = '/';
-  const char *rel = strstr(path, "etc/projects/");
+  const char *rel = strstr(path, "etc/labs/");
   if (!rel || strstr(rel, ".."))
     return NULL;
   sb_t out = {0};
@@ -1895,7 +1895,7 @@ static int read_file_bytes(const char *path, char **out, size_t *out_n);
 
 static void append_project_examples_json(sb_t *json, const char *root) {
   char dir_path[PATH_MAX];
-  if (!join_path(dir_path, sizeof(dir_path), root, "etc/projects/os")) {
+  if (!join_path(dir_path, sizeof(dir_path), root, "etc/labs/os")) {
     sb_add(json, "[]");
     return;
   }
@@ -1941,7 +1941,7 @@ static void append_project_examples_json(sb_t *json, const char *root) {
     sb_add_json_str(json, names[i]);
     sb_add(json, ",\"path\":");
     char rel[PATH_MAX];
-    snprintf(rel, sizeof(rel), "etc/projects/%s", names[i]);
+    snprintf(rel, sizeof(rel), "etc/labs/%s", names[i]);
     sb_add_json_str(json, rel);
     sb_add(json, ",\"source\":");
     sb_add_json_strn(json, source, source_n);
@@ -1957,7 +1957,7 @@ static void append_hero_data_json(sb_t *json, const char *root) {
   char path[PATH_MAX], *source = NULL;
   size_t source_n = 0;
   sb_add(json, ",\"hero_source\":");
-  if (join_path(path, sizeof(path), root, "etc/projects/herodoc.ny") &&
+  if (join_path(path, sizeof(path), root, "etc/labs/herodoc.ny") &&
       read_file_bytes(path, &source, &source_n)) {
     sb_add_json_strn(json, source, source_n);
     free(source);

@@ -1,7 +1,7 @@
 <!-- nytrix-doc: {"audience":"user","featured":true,"group":"learn","order":20,"summary":"Practical Nytrix examples covering expressions, modules, native builds, and everyday patterns."} -->
 # Examples
 
-The checkout keeps runnable examples under `etc/projects/` and focused runtime
+The checkout keeps runnable examples under `etc/labs/` and focused runtime
 checks under `etc/tests/`.
 
 Prerequisites: an installed Nytrix compiler; repository checks require the
@@ -11,20 +11,20 @@ checkout and build tools.
 
 | Area | Files |
 | --- | --- |
-| Terminal | [conway.ny](../../etc/projects/conway.ny), [matrix.ny](../../etc/projects/matrix.ny), [ant.ny](../../etc/projects/ant.ny) |
-| OS | [args.ny](../../etc/projects/args.ny), [server.ny](../../etc/projects/server.ny), [ffi.ny](../../etc/projects/ffi.ny), [sound.ny](../../etc/projects/sound.ny) |
-| UI | [term.ny](../../etc/projects/ui/term.ny), [input.ny](../../etc/projects/ui/input.ny), [monitor.ny](../../etc/projects/ui/monitor.ny), [engine.ny](../../etc/projects/ui/engine.ny), [editor.ny](../../etc/projects/ui/editor.ny) |
+| Terminal | [conway.ny](../../etc/labs/conway.ny), [matrix.ny](../../etc/labs/matrix.ny), [ant.ny](../../etc/labs/ant.ny) |
+| OS | [args.ny](../../etc/labs/args.ny), [server.ny](../../etc/labs/server.ny), [ffi.ny](../../etc/labs/ffi.ny), [sound.ny](../../etc/labs/sound.ny) |
+| UI | [term.ny](../../etc/labs/term.ny), [input.ny](../../etc/labs/input.ny), [monitor.ny](../../etc/labs/monitor.ny), [engine.ny](../../etc/labs/engine.ny), [editor.ny](../../etc/labs/editor.ny) |
 
 Run one directly:
 
 ```bash
-ny etc/projects/conway.ny
+ny etc/labs/conway.ny
 ```
 
 Build a native executable:
 
 ```bash
-ny --output=build/conway etc/projects/conway.ny
+ny --output=build/conway etc/labs/conway.ny
 ```
 
 Build the browser Wasm runner:

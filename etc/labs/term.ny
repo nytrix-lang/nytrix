@@ -359,7 +359,7 @@ fn _term_print_help() any {
    print(_term_color("90", "GPU terminal emulator / shell runner"))
    print("")
    print(_term_color("1;33", "Usage"))
-   print("  ./make ny etc/projects/ui/term.ny " + _term_color("36", "[options]") + " " + _term_color("90", "[shell command]") )
+   print("  ./make ny etc/labs/term.ny " + _term_color("36", "[options]") + " " + _term_color("90", "[shell command]") )
    print("")
    print(_term_color("1;33", "Renderer"))
    _term_help_line("-gl, --gl", "use OpenGL")
@@ -386,10 +386,10 @@ fn _term_print_help() any {
    _term_help_line("NY_VK_TEXTURE_TEXT=1", "debug Vulkan texture-atlas TTF path")
    print("")
    print(_term_color("1;33", "Examples"))
-   print("  ./make ny etc/projects/ui/term.ny -v -gl")
-   print("  ./make ny etc/projects/ui/term.ny -vk htop")
-   print("  ./make ny etc/projects/ui/term.ny id")
-   print("  ./make ny etc/projects/ui/term.ny --window id")
+   print("  ./make ny etc/labs/term.ny -v -gl")
+   print("  ./make ny etc/labs/term.ny -vk htop")
+   print("  ./make ny etc/labs/term.ny id")
+   print("  ./make ny etc/labs/term.ny --window id")
    0
 }
 

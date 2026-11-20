@@ -152,7 +152,7 @@ def ensure_project_scripts_executable() -> None:
                 chmod_executable(path)
         except OSError:
             continue
-    projects = ROOT / "etc" / "projects"
+    projects = ROOT / "etc" / "labs"
     if projects.is_dir():
         for path in projects.rglob("*.ny"):
             if path.is_file():
@@ -3464,7 +3464,7 @@ def _parse_web_check_args(args: list[str], build_root: Path) -> dict[str, object
 def _demo_id_from_source(source: str) -> str:
     path = Path(source)
     parts = list(path.parts)
-    if len(parts) >= 3 and parts[0] == "etc" and parts[1] == "projects":
+    if len(parts) >= 3 and parts[0] == "etc" and parts[1] == "labs":
         parts = parts[2:]
     if parts and parts[-1].endswith(".ny"):
         parts[-1] = parts[-1][:-3]
@@ -3492,9 +3492,9 @@ def _demo_title_from_source(source: str) -> str:
 def _demo_area_from_source(source: str) -> str:
     path = Path(source)
     parts = list(path.parts)
-    if len(parts) >= 4 and parts[0] == "etc" and parts[1] == "projects":
+    if len(parts) >= 4 and parts[0] == "etc" and parts[1] == "labs":
         return parts[2].upper()
-    return "projects"
+    return "labs"
 
 def _ny_doc_meta(source: str) -> dict[str, object]:
     """Read source metadata through ny-doc rather than a second parser."""
@@ -4215,7 +4215,7 @@ def run_web_test(build_root: Path, kind: str, args: list[str]) -> int:
     else:
         raise SystemExit("web-test: native process fixture unexpectedly passed browser portability analysis")
     app_dir = build_root / "web" / "app"
-    if run_web(build_root, kind, ["etc/projects/ui/pong.ny", "--out", str(app_dir),
+    if run_web(build_root, kind, ["etc/labs/pong.ny", "--out", str(app_dir),
                                   "--assets", "etc/assets/fonts", "--preload-all"]) != 0:
         return 1
     try:
@@ -6905,8 +6905,8 @@ def parse(argv: list[str]) -> tuple[list[str], list[str], int, bool, bool, bool,
 
     def implicit_ny_invocation(raw: list[str]) -> bool:
         # Allow fast direct usage:
-        #   ./make etc/projects/ui/term.ny -h
-        #   ./make -trace etc/projects/ui/term.ny -vk
+        #   ./make etc/labs/term.ny -h
+        #   ./make -trace etc/labs/term.ny -vk
         # without treating -h as make's own help or rejecting the source path as
         # an unknown make target. Stop as soon as an explicit make command appears.
         for item in raw:

@@ -40,10 +40,10 @@ assert(length > 4.999 && length < 5.001, "C sqrt")
 The full project adds a descriptive helper and output:
 
 ```bash
-ny etc/projects/ffi.ny
+ny etc/labs/ffi.ny
 ```
 
-The [complete `ffi.ny` example](../../etc/projects/ffi.ny) checks that the
+The [complete `ffi.ny` example](../../etc/labs/ffi.ny) checks that the
 computed value crosses the C floating-point argument ABI and that
 `sqrt` returns the expected result. The `test_ffi` fixture in
 [`etc/tests/lang/interop/ny/ffi.nshape`](../../etc/tests/lang/interop/ny/ffi.nshape)

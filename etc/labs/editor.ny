@@ -60,7 +60,7 @@ fn _editor_print_help() any {
    print(_editor_color("90", "UI/editor testbed with buffers, panes, terminal, LSP hooks, and renderer diagnostics"))
    print("")
    print(_editor_color("1;33", "Usage"))
-   print("  ./make ny etc/projects/ui/editor.ny " + _editor_color("36", "[options]") + " " + _editor_color("90", "[file-or-folder]") )
+   print("  ./make ny etc/labs/editor.ny " + _editor_color("36", "[options]") + " " + _editor_color("90", "[file-or-folder]") )
    print("")
    print(_editor_color("1;33", "Renderer"))
    _editor_help_line("-gl, --gl", "use OpenGL")
@@ -89,8 +89,8 @@ fn _editor_print_help() any {
    _editor_help_line("NY_VK_TEXTURE_TEXT=1", "debug Vulkan texture-atlas TTF path")
    print("")
    print(_editor_color("1;33", "Examples"))
-   print("  ./make ny etc/projects/ui/editor.ny -v -gl src/main.ny")
-   print("  ./make ny etc/projects/ui/editor.ny -vv -vk")
+   print("  ./make ny etc/labs/editor.ny -v -gl src/main.ny")
+   print("  ./make ny etc/labs/editor.ny -vv -vk")
    0
 }
 

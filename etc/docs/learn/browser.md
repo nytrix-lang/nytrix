@@ -11,8 +11,8 @@ Prerequisites: a compiler checkout with browser tooling and a WebAssembly-capabl
 ## Build and test
 
 ```bash
-./make web etc/projects/ui/pong.ny --out build/web/pong
-./make web-check etc/projects/ui/pong.ny
+./make web etc/labs/pong.ny --out build/web/pong
+./make web-check etc/labs/pong.ny
 ./make web-test
 ./make wasm path/to/program.ny --out build/program.wasm
 ./make web-demos

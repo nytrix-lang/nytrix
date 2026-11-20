@@ -162,7 +162,7 @@ static void make_prepare_project_scripts(const char *root) {
     closedir(d);
   }
   char projects[PATH_MAX];
-  if (snprintf(projects, sizeof(projects), "%s/etc/projects", root) <
+  if (snprintf(projects, sizeof(projects), "%s/etc/labs", root) <
       (int)sizeof(projects))
     make_enable_project_ny_scripts(projects);
 }

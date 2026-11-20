@@ -4,8 +4,8 @@
 ;; smem: process memory scanner and visualizer for Linux /proc, a port of
 ;; x3ric/smem. The scanner is core.os.memscan; this file is the UI.
 ;;
-;;   ny etc/projects/ui/smem.ny [pid]
-;;   ny etc/projects/ui/smem.ny <command> ...   (headless, no window)
+;;   ny etc/labs/smem.ny [pid]
+;;   ny etc/labs/smem.ny <command> ...   (headless, no window)
 ;;
 ;; Commands (candidate files hold one "0xADDR TYPE VALUE" line per result):
 ;;   regions <pid> [--writable] [--shared]      list the scannable mappings

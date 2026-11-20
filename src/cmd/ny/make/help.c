@@ -181,7 +181,7 @@ static const MakeHelp commands[] = {
          "[Options]\n--out PATH|Select the deployment directory.\n--renderer "
          "NAME|Choose a supported renderer.\n--assets DIR|Add an asset "
          "directory.\n--target TARGET|Select a web target.\n"
-         "[Example]\n./make web etc/projects/ui/pong.ny|Build the Pong browser "
+         "[Example]\n./make web etc/labs/pong.ny|Build the Pong browser "
          "app."),
     HELP("web-demos", "./make web-demos [options]",
          "Build the browser WebGL/Wasm demo portal.",

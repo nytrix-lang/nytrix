@@ -730,7 +730,7 @@ fn _ui_print_help() any {
    print(_ui_cli_color("90", "Renderer, model viewer, GUI/editor shell, diagnostics, and benchmark harness"))
    print("")
    print(_ui_cli_color("1;33", "Usage"))
-   print("  ./make ny etc/projects/ui/engine.ny " + _ui_cli_color("36", "[options]") + " " + _ui_cli_color("90", "[load MODEL | commands]") )
+   print("  ./make ny etc/labs/engine.ny " + _ui_cli_color("36", "[options]") + " " + _ui_cli_color("90", "[load MODEL | commands]") )
    print("")
    print(_ui_cli_color("1;33", "Renderer"))
    _ui_help_line("-gl, --gl", "use OpenGL")
@@ -758,8 +758,8 @@ fn _ui_print_help() any {
    _ui_help_line("--render-trace", "print render frame trace")
    print("")
    print(_ui_cli_color("1;33", "Examples"))
-   print("  ./make ny etc/projects/ui/engine.ny -v -vk load BoxAnimated")
-   print("  ./make ny etc/projects/ui/engine.ny --headless --inspect load Avocado")
+   print("  ./make ny etc/labs/engine.ny -v -vk load BoxAnimated")
+   print("  ./make ny etc/labs/engine.ny --headless --inspect load Avocado")
    0
 }
 

@@ -9,7 +9,7 @@ Prerequisites: a supported display or browser host for the UI path being used.
 
 ## Start from a working project
 
-The repository has focused programs under [`etc/projects/ui/`](../../etc/projects/ui/):
+The repository has focused programs under [`etc/labs/`](../../etc/labs/):
 
 - `engine.ny` exercises the renderer and asset viewer.
 - `input.ny` displays keyboard and gamepad input.
@@ -74,8 +74,8 @@ The `input.ny` project reads `NY_UI_RENDER_BACKEND` through
 `render.apply_backend_env()`:
 
 ```bash
-NY_UI_RENDER_BACKEND=gl build/release/ny-full --no-progress etc/projects/ui/input.ny
-NY_UI_RENDER_BACKEND=vk build/release/ny-full --no-progress etc/projects/ui/input.ny
+NY_UI_RENDER_BACKEND=gl build/release/ny-full --no-progress etc/labs/input.ny
+NY_UI_RENDER_BACKEND=vk build/release/ny-full --no-progress etc/labs/input.ny
 ```
 
 These commands open interactive windows and require a usable display plus the

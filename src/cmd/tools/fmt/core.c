@@ -9635,7 +9635,7 @@ static int run_audit_simple(StrVec *paths, const char *mode, int json_mode,
   StrVec scan = {0};
 
   if (paths->len == 0) {
-    const char *roots[] = {"core", "src", "etc/projects", "etc/tests"};
+    const char *roots[] = {"core", "src", "etc/labs", "etc/tests"};
     if (!fmt_collect_via_library(roots, sizeof(roots) / sizeof(roots[0]),
                                  "code", &scan)) {
       nyt_err("ny-fmt", "Ny source collection failed; audit aborted");
@@ -10127,7 +10127,7 @@ static int cloc_bucket_from_path(const char *path) {
   while (p[0] == '.' && p[1] == '/')
     p += 2;
 
-  if (strncmp(p, "etc/projects/", 13) == 0 || strstr(p, "/etc/projects/"))
+  if (strncmp(p, "etc/labs/", 13) == 0 || strstr(p, "/etc/labs/"))
     return CLOC_BUCKET_PROJECTS;
   if (strncmp(p, "src/", 4) == 0 || strstr(p, "/src/"))
     return CLOC_BUCKET_SRC;
@@ -10385,7 +10385,7 @@ static void cloc_attach_git_diff(const char *repo_root, ClocStats *stats,
   const char *argv[] = {
       "git",          "-C",        repo_root, "diff", "--numstat",
       "--no-renames", "HEAD",      "--",      "src",  "core",
-      "etc/projects", "etc/tests", NULL};
+      "etc/labs", "etc/tests", NULL};
   char *out = NULL;
   if (ny_process_capture(argv, &out, false) != 0 || !out) {
     free(out);
@@ -10471,7 +10471,7 @@ static void print_cloc_json(const ClocStats *s, const ClocRow *rows,
   printf("}\n");
 }
 static int run_cloc_mode(const FmtOpts *o) {
-  static const char *default_roots[] = {"src", "core", "etc/projects",
+  static const char *default_roots[] = {"src", "core", "etc/labs",
                                         "etc/tests", NULL};
   StrVec files = {0};
   ClocStats stats = {0};

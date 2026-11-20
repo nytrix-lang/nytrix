@@ -13,7 +13,7 @@ shape main_block_locals_stay_local {
 ;; checker inferred that block in the module environment, so the dict type
 ;; became a global `c` and a loop counter `c` declared inside a nested loop
 ;; failed with "function argument: expected int, got dict<any, any>"
-;; (etc/projects/ui/breakout.ny did not compile). Only whole-program
+;; (etc/labs/breakout.ny did not compile). Only whole-program
 ;; executable builds (`--run=aot`) type-check the imported self-tests.
 fn h(int a, int b) int { a + b }
 ;; The literal bound matters: the guard `h(c, r) > 15` was inferred before

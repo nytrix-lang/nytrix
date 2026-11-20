@@ -173,7 +173,7 @@ static void replay_env(const char *app, int width, int height) {
 static pid_t child_start(const char *compiler, const char *app,
                          const char *route, const char *log_path) {
   char project[PATH_MAX];
-  snprintf(project, sizeof(project), "%s/etc/projects/ui/%s.ny", root, app);
+  snprintf(project, sizeof(project), "%s/etc/labs/%s.ny", root, app);
   int width = (!strcmp(app, "engine") || !strcmp(app, "synth")) ? 32
               : (!strcmp(app, "editor") || !strcmp(app, "input") ||
                  !strcmp(app, "monitor"))

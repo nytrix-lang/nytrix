@@ -69,7 +69,7 @@ Or build a native executable:
 Source can also be run directly from a URL:
 
 ```bash
-./make ny https://raw.githubusercontent.com/nytrix-lang/nytrix/refs/heads/main/etc/projects/xtool.ny
+./make ny https://raw.githubusercontent.com/nytrix-lang/nytrix/refs/heads/main/etc/labs/xtool.ny
 ```
 
 ## Install
@@ -151,7 +151,7 @@ Compiler contributors can start with the [contribution guide](etc/docs/CONTRIBUT
 | `src/`          | Compiler, runtime, native backend, and tools         |
 | `core/`         | Standard library                                     |
 | `etc/tests/`    | Tests, fixtures, and benchmarks                      |
-| `etc/projects/` | Examples and larger projects                         |
+| `etc/labs/` | Examples and larger projects                         |
 | `etc/docs/`         | Manual, guides, specification, and API documentation |
 
 ## Status

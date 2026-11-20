@@ -353,7 +353,7 @@ Raw report: `build/bench-reports/bench-20261120-062227-3652437.json`.
 ## Compile-time baseline and serial fixes (2026-11-17)
 
 Host AMD EPYC 7642 (48 cores, 96 threads, 62 GiB), other sessions active.
-the local compile-time baseline script compiles every `etc/projects` target to a native
+the local compile-time baseline script compiles every `etc/labs` target to a native
 `-O2` executable (`--native-only --run=none`). Cold: fresh cache directory,
 `NYTRIX_STD_CACHE=0 NYTRIX_AOT_CACHE=0`, runtime object prebuilt. Warm and no-op
 reruns hit the AOT cache. The standard-library source cache does not shorten an
@@ -723,7 +723,7 @@ The retained changes are confined to two compiler translation units:
 An isolated control was relinked with only those two pre-change translation units,
 using the candidate's remaining compiler objects and dependencies. Frozen
 executables prevented concurrent workspace rebuilds from changing the comparison.
-Both compiled the same `etc/projects/ui/pong.ny` through native x86-64 at `-O2
+Both compiled the same `etc/labs/pong.ny` through native x86-64 at `-O2
 --threads=4 --run=none`; standard-source, automatic bitcode, native, AOT, and JIT
 caches were disabled, with `CCACHE_DISABLE=1`. This is source-cache-disabled
 compilation, not an OS-page-cache drop.
@@ -919,7 +919,7 @@ was not reported above the 0.8% cutoff, while module statement lookup remained a
 18.072 s historical baseline; they do not include link, launch, or first frame.
 
 The earlier uninstrumented cache-disabled baseline `build/release/ny-full
---native-only -O2 --run=none etc/projects/ui/pong.ny` run completed in 18.072 s
+--native-only -O2 --run=none etc/labs/pong.ny` run completed in 18.072 s
 (17.05 s user, 0.89 s system). It is compile-only: no link, app launch, or first
 frame. This does not meet the 3 s cold compile/link/first-window requirement. The
 profile runs used 64 standard-loader and compiler workers with minimum parallel work
@@ -1004,7 +1004,7 @@ constraint.
 
 After the change, `NYTRIX_TEST_EXEC_CACHE=0 build/release/ny-test --cold --pattern
 native` passed 68/68. `build/release/ny-full -vvvv --stop-after=hm
-etc/projects/ui/pong.ny` exited 0 and emitted both `HM_CONSTRAINT` and `HM_SUBST`
+etc/labs/pong.ny` exited 0 and emitted both `HM_CONSTRAINT` and `HM_SUBST`
 records. A cache-disabled four-thread Pong `--run=none` compile took 40.153 s and
 emitted the same ELF hash as the 1280×720 AOT artifact; this single timing is not a
 controlled speedup.
@@ -2168,13 +2168,13 @@ NYTRIX_STD_CACHE=0 NYTRIX_STD_BC_CACHE_AUTO=0 NY_TRACE_INLINE=1 \
   perf record -m 1 -e cpu-clock:u -F 99 \
   -o "$profile_dir/baseline.data" -- "$profile_dir/ny-baseline" \
   --no-progress --native-only --opt-level=3 --run=none \
-  --output="$profile_dir/editor.o" etc/projects/ui/editor.ny \
+  --output="$profile_dir/editor.o" etc/labs/editor.ny \
   > "$profile_dir/baseline.log" 2>&1
 NYTRIX_STD_CACHE=0 NYTRIX_STD_BC_CACHE_AUTO=0 NY_TRACE_INLINE=1 \
   perf record -m 1 -e cpu-clock:u -F 99 \
   -o "$profile_dir/cached-candidate.data" -- "$profile_dir/ny-cached-candidate" \
   --no-progress --native-only --opt-level=3 --run=none \
-  --output="$profile_dir/editor-cached-candidate.o" etc/projects/ui/editor.ny \
+  --output="$profile_dir/editor-cached-candidate.o" etc/labs/editor.ny \
   > "$profile_dir/cached-candidate.log" 2>&1
 ```
 
@@ -3508,7 +3508,7 @@ The A/B used `build/ny-full-before-cfg` (BuildID
 NYTRIX_STD_CACHE=0 NYTRIX_STD_BC_CACHE_AUTO=0 \
   perf stat -r 5 -e task-clock,cycles,instructions -- \
   build/release/ny-full --no-progress --native-only --opt-level=3 \
-  --run=none --output=build/perf-sound-time.o etc/projects/sound.ny
+  --run=none --output=build/perf-sound-time.o etc/labs/sound.ny
 ```
 
 The same command was run against each compiler twice, in baseline/candidate then
@@ -6770,7 +6770,7 @@ are superseded.
 ### 2026-11-20 Pong phase timing and spill-slot reuse
 
 With the AOT cache disabled, one native x86-64 `-O3 --stats` build of
-`etc/projects/ui/pong.ny` completed in 13.790 s. The phase report showed
+`etc/labs/pong.ny` completed in 13.790 s. The phase report showed
 0.613 s parsing, 1.365 s codegen preparation, 3.498 s type validation,
 4.877 s codegen, and 7.721 s object emission. Some timers are nested, so
 these numbers cannot be summed. This resolves the missing timing measurement.

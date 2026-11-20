@@ -76,7 +76,7 @@ Keep reusable code in modules and application startup in one entry point. Use
 interfaces. `module name { export profile(...) }` can publish a named profile
 when the same module needs multiple public surfaces.
 
-Examples under [`etc/projects/`](../../etc/projects/) are complete programs.
+Examples under [`etc/labs/`](../../etc/labs/) are complete programs.
 [Examples](examples.md) links selected files; [Packages](packages.md) covers
 external source dependencies.
 

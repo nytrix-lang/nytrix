@@ -17,7 +17,7 @@ def HTML = "<!doctype html><html lang=en>
 <h1>It works.</h1>
 </header>
 <section>
-<p>Served by <code>etc/projects/server.ny</code></p>
+<p>Served by <code>etc/labs/server.ny</code></p>
 <nav>
 <a href=/health>health</a>
 <a href=/plain>plain</a>

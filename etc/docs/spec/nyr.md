@@ -76,7 +76,7 @@ compiler driver's application build or supply a target runtime automatically.
 
 ## Brainfuck frontend
 
-The complete frontend below is also maintained at `etc/projects/brainfuck.ny`.
+The complete frontend below is also maintained at `etc/labs/brainfuck.ny`.
 It includes `<nyr/nyr.h>`, builds NYIR directly with Nyr's constructors,
 verifies and optimizes it, emits native assembly, then runs the function in
 Nyr's in-process native JIT. Assembly is emitted to standard output before
@@ -92,8 +92,8 @@ path and `build/release/libnytrixrt.so` link path used by the example resolve:
 ```sh
 cmake --build build/release --target nyr-backend-ir-acceptance-test nytrixrt ny
 printf '++++++++[>++++++++<-]>+.' > /tmp/hello.bf
-build/release/ny etc/projects/brainfuck.ny /tmp/hello.bf
-build/release/ny etc/projects/brainfuck.ny -c '++++++++[>++++++++<-]>+.'
+build/release/ny etc/labs/brainfuck.ny /tmp/hello.bf
+build/release/ny etc/labs/brainfuck.ny -c '++++++++[>++++++++<-]>+.'
 ```
 
 Both commands print the assembly listing first and then write `A`. `-c` takes
@@ -104,10 +104,10 @@ before and pipe input separately:
 
 ```sh
 printf ',.' > /tmp/echo.bf
-printf 'Z' | build/release/ny etc/projects/brainfuck.ny /tmp/echo.bf
+printf 'Z' | build/release/ny etc/labs/brainfuck.ny /tmp/echo.bf
 ```
 
-<!-- ny-doc-include-code: ny etc/projects/brainfuck.ny -->
+<!-- ny-doc-include-code: ny etc/labs/brainfuck.ny -->
 
 ## Ownership and errors
 

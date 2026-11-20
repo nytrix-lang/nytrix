@@ -1,7 +1,7 @@
 ;; Keywords: memory scanner process proc mem value search cheat debug linux
 ;; Process memory scanner for Linux /proc/<pid>/mem: typed value parsing,
 ;; first/next scans with comparison modes, scan history, writes and value
-;; locks. Used by etc/projects/ui/smem.ny (a port of x3ric/smem).
+;; locks. Used by etc/labs/smem.ny (a port of x3ric/smem).
 ;;
 ;; One process is attached at a time. Results live in raw memory (address,
 ;; type and previous value per entry) so a scan over hundreds of megabytes

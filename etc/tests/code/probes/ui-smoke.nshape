@@ -11,7 +11,7 @@ shape ui_native_animation {
   estimate_ms 103000
   timeout 180
   flags "--native-only --native-backend=x86_64 --native-tier=baseline -emit-only -o /tmp/nytrix-ui-animation.o --no-progress --color=never"
-  source ny file "etc/projects/ui/animation.ny"
+  source ny file "etc/labs/animation.ny"
 }
 
 shape ui_native_editor {
@@ -19,7 +19,7 @@ shape ui_native_editor {
   estimate_ms 112000
   timeout 300
   flags "--native-only --native-backend=x86_64 --native-tier=baseline -emit-only -o /tmp/nytrix-ui-editor.o --no-progress --color=never"
-  source ny file "etc/projects/ui/editor.ny"
+  source ny file "etc/labs/editor.ny"
 }
 
 shape ui_native_engine {
@@ -27,7 +27,7 @@ shape ui_native_engine {
   estimate_ms 117000
   timeout 300
   flags "--native-only --native-backend=x86_64 --native-tier=baseline -emit-only -o /tmp/nytrix-ui-engine.o --no-progress --color=never"
-  source ny file "etc/projects/ui/engine.ny"
+  source ny file "etc/labs/engine.ny"
 }
 
 shape ui_native_input {
@@ -35,7 +35,7 @@ shape ui_native_input {
   estimate_ms 41000
   timeout 180
   flags "--native-only --native-backend=x86_64 --native-tier=baseline -emit-only -o /tmp/nytrix-ui-input.o --no-progress --color=never"
-  source ny file "etc/projects/ui/input.ny"
+  source ny file "etc/labs/input.ny"
 }
 
 shape ui_native_monitor {
@@ -43,7 +43,7 @@ shape ui_native_monitor {
   estimate_ms 36000
   timeout 180
   flags "--native-only --native-backend=x86_64 --native-tier=baseline -emit-only -o /tmp/nytrix-ui-monitor.o --no-progress --color=never"
-  source ny file "etc/projects/ui/monitor.ny"
+  source ny file "etc/labs/monitor.ny"
 }
 
 shape ui_native_pong {
@@ -51,7 +51,7 @@ shape ui_native_pong {
   timeout 180
   estimate_ms 29000
   flags "--native-only --native-backend=x86_64 --native-tier=baseline -emit-only -o /tmp/nytrix-ui-pong.o --no-progress --color=never"
-  source ny file "etc/projects/ui/pong.ny"
+  source ny file "etc/labs/pong.ny"
 }
 
 shape ui_native_synth {
@@ -59,7 +59,7 @@ shape ui_native_synth {
   timeout 180
   estimate_ms 47000
   flags "--native-only --native-backend=x86_64 --native-tier=baseline -emit-only -o /tmp/nytrix-ui-synth.o --no-progress --color=never"
-  source ny file "etc/projects/ui/synth.ny"
+  source ny file "etc/labs/synth.ny"
 }
 
 shape ui_native_term {
@@ -67,5 +67,5 @@ shape ui_native_term {
   estimate_ms 65000
   timeout 180
   flags "--native-only --native-backend=x86_64 --native-tier=baseline -emit-only -o /tmp/nytrix-ui-term.o --no-progress --color=never"
-  source ny file "etc/projects/ui/term.ny"
+  source ny file "etc/labs/term.ny"
 }

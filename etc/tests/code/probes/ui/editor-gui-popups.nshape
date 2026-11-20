@@ -20,7 +20,7 @@ def compiler = env("NYTRIX_NY_FULL_BIN")
 assert(is_str(compiler) && compiler.len > 0, "runner provides compiler")
 def result = run_capture(["env", "NY_UI_HEADLESS=1", "NY_EDITOR_PROBE_POPUPS=1", "NYTRIX_UI_REPLAY=1",
    "NYTRIX_UI_REPLAY_HASH=0", "NY_EDITOR_FRAME_HASH_FRAME=1000", "NYTRIX_FIXTURE_FRAMES=60",
-   compiler, "--native-only", "-O0", "etc/projects/ui/editor.ny"], [], nil, false)
+   compiler, "--native-only", "-O0", "etc/labs/editor.ny"], [], nil, false)
 def out = to_str(result.get("stdout", ""))
 assert(int(result.get("code", 127)) == 0, "editor popup probe exits cleanly: " + out)
 assert(out.contains("EDITOR-GUI-POPUPS-OK"), "editor popup probe reached the end")

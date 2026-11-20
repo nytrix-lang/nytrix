@@ -67,7 +67,7 @@ assert(load_bindings_file("/nonexistent/keys") == -1, "missing file reported")
 ;; Buffer switcher: the palette over an item list (C-x b).
 use core.os.ui.render.viewer.editor.palette as pal
 def buf_rows = [["README.md", "buffer:0", "current", "etc/docs/README.md", "buffer"],
-                ["engine.ny", "buffer:1", "", "etc/projects/ui/engine.ny", "buffer"],
+                ["engine.ny", "buffer:1", "", "etc/labs/engine.ny", "buffer"],
                 ["* scratch", "buffer:2", "", "scratch", "buffer"]]
 mut ps = pal.open_items(pal.state(), buf_rows, "buffers")
 assert(pal.is_open(ps) && pal.items_mode(ps) == "buffers", "item palette opens in buffers mode")

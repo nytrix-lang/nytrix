@@ -4,7 +4,7 @@
 ;; Screen effects demo for core.os.ui.render.postfx: a test scene with the
 ;; effects drawn over it and a panel to switch and tune them at run time.
 ;;
-;;   ny etc/projects/ui/postfx.ny            (NY_UI_RENDER=vk|gl picks the backend)
+;;   ny etc/labs/postfx.ny            (NY_UI_RENDER=vk|gl picks the backend)
 ;;
 ;; Keys: 1..8 toggle tint, glow, invert, fade, grain, scanlines, vignette,
 ;; letterbox; 0 turns all off; Tab hides the panel. NY_POSTFX_MASK=<bits>
